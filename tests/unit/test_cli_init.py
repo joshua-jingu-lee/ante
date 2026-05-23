@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 import sqlite3
 import stat
 from pathlib import Path
@@ -461,7 +462,12 @@ class TestInitIdempotency:
     """시나리오 3 & 4: 멱등성 — 부분 누락 시 보완 (state 2/3/4/5)."""
 
     def test_init_skips_db_when_only_config_files_exist(self, runner, tmp_path):
-        """보완 케이스: secrets.env만 존재 → 나머지 생성 (state 5 경로)."""
+        """보완 케이스: secrets.env만 존재 → 나머지 생성 (state 5 경로).
+
+        이슈 #1721 이후: 기존 secrets.env에 ANTE_DB_ENCRYPTION_KEY 라인이 없으면
+        init이 신규 키 라인을 append한다(기존 콘텐츠는 보존). 따라서 기존 콘텐츠가
+        prefix로 보존되는지를 검증한다(전체 동일성이 아닌 prefix 보존).
+        """
         target = tmp_path / "config"
         target.mkdir()
         (target / "secrets.env").write_text("existing")
@@ -477,11 +483,19 @@ class TestInitIdempotency:
 
         assert result.exit_code == 0, result.output
         assert (target / "system.toml").exists()
-        # secrets.env 기존 내용 보존
-        assert (target / "secrets.env").read_text() == "existing"
+        # 기존 콘텐츠 보존 + 키 라인 추가
+        new_text = (target / "secrets.env").read_text()
+        assert new_text.startswith("existing"), (
+            f"기존 콘텐츠 'existing' prefix가 사라짐: {new_text!r}"
+        )
+        assert "ANTE_DB_ENCRYPTION_KEY=" in new_text
 
     def test_init_preserves_existing_config_files(self, runner, tmp_path):
-        """system.toml + secrets.env 있고 DB 없음 → DB 재생성, 설정 파일 보존."""
+        """system.toml + secrets.env 있고 DB 없음 → DB 재생성, 설정 파일 보존.
+
+        이슈 #1721 이후: secrets.env는 기존 콘텐츠를 보존하면서 부족한
+        ANTE_DB_ENCRYPTION_KEY 라인만 append한다.
+        """
         target = tmp_path / "config"
         target.mkdir()
         (target / "system.toml").write_text("# custom config\n")
@@ -497,9 +511,12 @@ class TestInitIdempotency:
                 p.stop()
 
         assert result.exit_code == 0, result.output
-        # 기존 설정 파일 보존
+        # 기존 설정 파일 보존 (system.toml은 _ensure_file 가드라 그대로)
         assert (target / "system.toml").read_text() == "# custom config\n"
-        assert (target / "secrets.env").read_text() == "CUSTOM=1\n"
+        # secrets.env는 기존 CUSTOM=1 라인 보존 + 키 라인 append
+        new_text = (target / "secrets.env").read_text()
+        assert "CUSTOM=1" in new_text
+        assert "ANTE_DB_ENCRYPTION_KEY=" in new_text
         # DB 재발급에 따른 토큰·recovery key 출력
         assert _MOCK_TOKEN in result.output
         assert _MOCK_RECOVERY_KEY in result.output
@@ -1270,3 +1287,339 @@ class TestInitSystemTomlRuntimeSection:
 
         assert config.runtime_pid_path() == tmp_path / "run" / "ante.pid"
         assert config.runtime_socket_path() == tmp_path / "run" / "ante.sock"
+
+
+# ── Issue #1721: ANTE_DB_ENCRYPTION_KEY 자동 생성/동기화 회귀 ───────────────
+
+
+_KEY_LINE_REGEX = r"^ANTE_DB_ENCRYPTION_KEY=[A-Za-z0-9_-]{43}=$"
+
+
+def _read_key_line(secrets_env_path: Path) -> str | None:
+    """secrets.env에서 ANTE_DB_ENCRYPTION_KEY 라인의 값만 추출."""
+    if not secrets_env_path.exists():
+        return None
+    last: str | None = None
+    for raw in secrets_env_path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        if key.strip() != "ANTE_DB_ENCRYPTION_KEY":
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        last = value
+    return last
+
+
+class TestInitDbEncryptionKeyAutoCreate:
+    """이슈 #1721 — ``ante init``이 ANTE_DB_ENCRYPTION_KEY를 생성·persist한다."""
+
+    def test_r1_fresh_init_creates_fernet_line(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R1: 신규 init이 secrets.env에 Fernet 형식 키 라인을 생성한다.
+
+        라인 형식 정규식 ``^ANTE_DB_ENCRYPTION_KEY=[A-Za-z0-9_-]{43}=$`` 매치.
+        """
+        import re
+
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "fresh"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        secrets_env = target / "secrets.env"
+        text = secrets_env.read_text()
+        matches = [
+            line
+            for line in text.splitlines()
+            if re.match(_KEY_LINE_REGEX, line.strip())
+        ]
+        assert matches, f"Fernet 키 라인 없음:\n{text}"
+
+    def test_r2a_file_missing_no_env_generates_new(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2a: secrets.env 파일 없음 + env 없음 → 신규 키 생성."""
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "no-file"
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+
+    def test_r2b_file_exists_no_key_line_appends_line(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2b: secrets.env는 있으나 키 라인이 없음 → 라인 append."""
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "file-no-line"
+        target.mkdir()
+        (target / "secrets.env").write_text("# user comment\nFOO=bar\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        text = (target / "secrets.env").read_text()
+        # 기존 내용 보존
+        assert "# user comment" in text
+        assert "FOO=bar" in text
+        # 키 라인 추가
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+
+    def test_r2c_file_has_empty_value_replaces(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2c: 키 라인이 빈 값 → 신규 키로 교체 (빈 값은 backup 대상 아님)."""
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "empty-value"
+        target.mkdir()
+        (target / "secrets.env").write_text("ANTE_DB_ENCRYPTION_KEY=\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+        # 빈 값은 backup 대상이 아님
+        backups = list(target.glob("secrets.env.bak.*"))
+        assert not backups, f"빈 값에 대해 backup이 생성됨: {backups}"
+
+    def test_r2d_file_has_invalid_value_backs_up_and_replaces(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2d: 키 라인 값이 non-empty invalid → backup 후 신규 키 교체."""
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "invalid-value"
+        target.mkdir()
+        (target / "secrets.env").write_text(
+            "ANTE_DB_ENCRYPTION_KEY=garbage-not-fernet-key\n"
+        )
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+        # backup 생성 확인
+        backups = list(target.glob("secrets.env.bak.*"))
+        assert len(backups) == 1, f"backup이 정확히 1개 생성돼야 함: {backups}"
+        # backup 내용에 invalid 값이 보존되어야 함
+        assert "garbage-not-fernet-key" in backups[0].read_text()
+        # backup 권한 0600
+        assert stat.S_IMODE(backups[0].stat().st_mode) == 0o600
+
+    def test_r2e_file_has_valid_value_no_env_is_idempotent(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R2e: 키 라인이 valid + env 없음 → file 보존, idempotent."""
+        from cryptography.fernet import Fernet
+
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        target = tmp_path / "valid-file"
+        target.mkdir()
+        good = Fernet.generate_key().decode()
+        (target / "secrets.env").write_text(f"ANTE_DB_ENCRYPTION_KEY={good}\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value == good
+        # backup 없음
+        assert not list(target.glob("secrets.env.bak.*"))
+
+    def test_r3_valid_env_no_file_syncs_to_file(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R3: non-empty valid env + secrets.env 라인 없음 → env value로 동기화."""
+        from cryptography.fernet import Fernet
+
+        env_key = Fernet.generate_key().decode()
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", env_key)
+        target = tmp_path / "env-sync"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value == env_key
+
+    def test_r4_valid_env_invalid_file_replaces_with_backup(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R4: valid env + invalid file → env value 기입 + invalid backup."""
+        from cryptography.fernet import Fernet
+
+        env_key = Fernet.generate_key().decode()
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", env_key)
+        target = tmp_path / "env-replace"
+        target.mkdir()
+        (target / "secrets.env").write_text("ANTE_DB_ENCRYPTION_KEY=bad-bad-bad\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value == env_key
+        # invalid backup 1개 생성, 내용 보존
+        backups = list(target.glob("secrets.env.bak.*"))
+        assert len(backups) == 1
+        assert "bad-bad-bad" in backups[0].read_text()
+
+    def test_r5_empty_env_creates_new_key(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R5: 빈 env (``ANTE_DB_ENCRYPTION_KEY=``) → exit 0 + 신규 라인 생성."""
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "")
+        target = tmp_path / "empty-env"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+
+    def test_r6_e2e_subprocess_no_leak_stdout_or_stderr(self, tmp_path: Path) -> None:
+        """R6: 실제 subprocess로 e2e 실행 + stdout/stderr 분리 capture 후 키 leak 검사.
+
+        Codex v3 new-must-fix 3 / v4 narrow-to 2: 병합 캡처 금지.
+        """
+        import subprocess
+        import sys
+
+        target = tmp_path / "e2e-config"
+        env = {
+            "PATH": os.environ["PATH"],
+            "HOME": os.environ.get("HOME", str(tmp_path)),
+            "ANTE_CONFIG_DIR": str(target),
+            # member_token 미설정으로 stale 토큰 검증 우회
+        }
+        # PYTHONPATH 전파: src 트리에서 import 가능하게
+        repo_root = Path(__file__).resolve().parents[2]
+        env["PYTHONPATH"] = str(repo_root / "src")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "ante", "--format", "json", "init", "--name", "E2E"],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+
+        assert result.returncode == 0, (
+            f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
+        )
+        # secrets.env 라인 존재
+        value = _read_key_line(target / "secrets.env")
+        assert value is not None and len(value) == 44 and value.endswith("=")
+        # stdout/stderr 모두에서 키 부재 (분리 capture, 병합 금지)
+        assert value not in result.stdout, "stdout에 키 leak"
+        assert value not in result.stderr, "stderr에 키 leak"
+
+    def test_r7_invalid_env_preserves_valid_file(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R7 (Codex v3 new-must-fix 4): non-empty invalid env + valid file.
+
+        - env가 invalid이면 무시한다.
+        - file의 valid value를 effective key로 채택한다.
+        - file은 그대로 보존(env value가 file을 wipe하지 않음).
+        - invalid env value는 절대 file에 기록되지 않는다.
+        - backup 없음(file은 valid 상태로 유지).
+        """
+        from cryptography.fernet import Fernet
+
+        good = Fernet.generate_key().decode()
+        invalid_env = "garbage-not-fernet"
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", invalid_env)
+
+        target = tmp_path / "invalid-env-valid-file"
+        target.mkdir()
+        (target / "secrets.env").write_text(f"ANTE_DB_ENCRYPTION_KEY={good}\n")
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        value = _read_key_line(target / "secrets.env")
+        assert value == good, "valid file이 invalid env에 의해 덮어쓰여짐"
+        # invalid env value는 file 어디에도 기록되지 않음
+        text = (target / "secrets.env").read_text()
+        assert invalid_env not in text
+        # backup 없음
+        assert not list(target.glob("secrets.env.bak.*"))

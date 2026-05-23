@@ -106,10 +106,38 @@ class Config:
         config_dir이 None이면 resolve_config_dir()로 자동 탐색.
         해석된 디렉토리는 인스턴스에 보존되어 path-like 설정의
         ``resolve_path()`` 정규화 기준으로 사용된다.
+
+        부수효과: ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY`` 값이
+        Fernet canonical 형식을 만족하고, 현재 ``os.environ``에는 valid한
+        ``ANTE_DB_ENCRYPTION_KEY`` 가 없으면(빈 문자열/invalid 포함),
+        파일 값을 ``os.environ`` 으로 export한다. ``src/ante/account/crypto.py``
+        가 ``os.environ`` 만 읽는 현재 contract를 깨지 않으면서 init이 만든
+        키가 후속 CLI/서비스에 자동 전파되도록 한다.
+
+        Spec: ``docs/specs/account/06-database-schema.md`` (마스터 키는
+        ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY`` 에서 로드).
         """
+        # 지연 import: crypto 모듈은 cryptography에 의존하므로 import 순환을
+        # 회피하기 위해 함수 내부에서 가져온다.
+        from ante.account.crypto import _validate_fernet_key
+
         resolved = resolve_config_dir(config_dir)
         static = _load_toml(resolved / "system.toml")
         secrets = _load_dotenv(resolved / "secrets.env")
+
+        # ANTE_DB_ENCRYPTION_KEY 단일 키 export 패스.
+        # - valid env가 이미 있으면 export 비대상(env-wins, override 안 함).
+        # - file_key가 Fernet canonical 검증을 통과할 때만 export 대상.
+        #   (invalid file이 valid env를 덮어쓰지 않도록 게이트.)
+        file_key = secrets.get("ANTE_DB_ENCRYPTION_KEY")
+        existing = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
+        if (
+            file_key
+            and _validate_fernet_key(file_key)
+            and not _validate_fernet_key(existing or "")
+        ):
+            os.environ["ANTE_DB_ENCRYPTION_KEY"] = file_key
+
         return cls(static=static, secrets=secrets, config_dir=resolved)
 
     def get(self, key: str, default: Any = None) -> Any:

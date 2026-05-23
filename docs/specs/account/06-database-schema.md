@@ -62,3 +62,5 @@ backfill 한다. NULL/unknown broker_type 도 보수적으로 default 0.005 를
 ### credentials 암호화
 
 credentials는 APP KEY, APP SECRET 등 민감 정보를 포함한다. DB에는 암호화된 JSON 문자열로 저장하며, 복호화는 런타임에만 수행한다. Fernet 대칭 암호화를 사용하고, 마스터 키는 `secrets.env`의 `ANTE_DB_ENCRYPTION_KEY`에서 로드한다.
+
+`ante init`이 `ANTE_DB_ENCRYPTION_KEY`를 `secrets.env`에 생성·기입(또는 valid 환경변수 값으로 동기화)한다. 환경변수가 valid Fernet 키이면 그 값을 그대로 사용하고 동일 값을 file에도 기입하며, 환경변수가 비어있거나 invalid이면 `secrets.env`의 valid 라인을 우선 사용한다. 둘 다 invalid/없음이면 init이 새 Fernet 키를 생성한다. invalid 라인 교체 시에는 `secrets.env.bak.<UTC iso>` 백업을 0600 권한으로 원자적으로 만든다.

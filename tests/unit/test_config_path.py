@@ -1,5 +1,6 @@
 """Config 경로 탐색 및 ante init 테스트."""
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -191,3 +192,112 @@ class TestInitCommand:
                 p.stop()
         assert result.exit_code == 0, result.output
         assert (tmp_path / ".config" / "ante" / "system.toml").exists()
+
+
+# ── Issue #1721: Config.load의 ANTE_DB_ENCRYPTION_KEY export 패스 ───────────
+
+
+class TestConfigLoadExportsEncryptionKey:
+    """``Config.load`` 부수효과 — ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY``
+    를 ``os.environ`` 에 export하는 단일 키 패스 회귀.
+
+    이슈 #1721 행렬 (Config.load 행):
+
+    - valid env + (무관)              → export 비대상.
+    - invalid/없음 env + valid file   → file value를 ``os.environ`` 에 set.
+    - invalid/없음 env + invalid/없음 file → export 비대상.
+    """
+
+    def test_r8_only_encryption_key_is_exported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R8: ANTE_DB_ENCRYPTION_KEY만 export하고 다른 secret은 건드리지 않는다."""
+        from cryptography.fernet import Fernet
+
+        from ante.config import Config
+
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        monkeypatch.delenv("FOO_OTHER_SECRET", raising=False)
+        good = Fernet.generate_key().decode()
+        (tmp_path / "secrets.env").write_text(
+            f"ANTE_DB_ENCRYPTION_KEY={good}\nFOO_OTHER_SECRET=baz\n"
+        )
+
+        Config.load(config_dir=tmp_path)
+
+        assert os.environ.get("ANTE_DB_ENCRYPTION_KEY") == good
+        assert os.environ.get("FOO_OTHER_SECRET") is None
+
+    def test_r9_existing_valid_env_is_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R9: 사전 set된 valid env는 보존되며 file value로 override되지 않는다."""
+        from cryptography.fernet import Fernet
+
+        from ante.config import Config
+
+        env_key = Fernet.generate_key().decode()
+        file_key = Fernet.generate_key().decode()
+        assert env_key != file_key
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", env_key)
+        (tmp_path / "secrets.env").write_text(f"ANTE_DB_ENCRYPTION_KEY={file_key}\n")
+
+        Config.load(config_dir=tmp_path)
+
+        assert os.environ["ANTE_DB_ENCRYPTION_KEY"] == env_key
+
+    def test_r10_empty_env_overridden_by_valid_file(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R10: 빈 env (또는 invalid env)는 file의 valid value로 override."""
+        from cryptography.fernet import Fernet
+
+        from ante.config import Config
+
+        file_key = Fernet.generate_key().decode()
+        (tmp_path / "secrets.env").write_text(f"ANTE_DB_ENCRYPTION_KEY={file_key}\n")
+
+        # 빈 env
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "")
+        Config.load(config_dir=tmp_path)
+        assert os.environ["ANTE_DB_ENCRYPTION_KEY"] == file_key
+
+        # invalid env (non-empty이지만 Fernet 아님)
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "garbage-not-fernet")
+        Config.load(config_dir=tmp_path)
+        assert os.environ["ANTE_DB_ENCRYPTION_KEY"] == file_key
+
+    def test_r11_invalid_or_empty_file_not_exported(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R11: file value가 빈 또는 invalid Fernet이면 export 비대상."""
+        from ante.config import Config
+
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+
+        # 빈 file 값
+        (tmp_path / "secrets.env").write_text("ANTE_DB_ENCRYPTION_KEY=\n")
+        Config.load(config_dir=tmp_path)
+        assert "ANTE_DB_ENCRYPTION_KEY" not in os.environ
+
+        # invalid file 값 — 다른 디렉토리에서 별도 테스트
+        target2 = tmp_path / "second"
+        target2.mkdir()
+        (target2 / "secrets.env").write_text(
+            "ANTE_DB_ENCRYPTION_KEY=garbage-not-fernet\n"
+        )
+        Config.load(config_dir=target2)
+        assert "ANTE_DB_ENCRYPTION_KEY" not in os.environ
+
+    def test_r12_missing_secrets_env_is_noop(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R12: secrets.env 파일 자체가 없으면 export 비대상 (no-op)."""
+        from ante.config import Config
+
+        monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
+        # secrets.env 없음
+        assert not (tmp_path / "secrets.env").exists()
+
+        Config.load(config_dir=tmp_path)
+        assert "ANTE_DB_ENCRYPTION_KEY" not in os.environ
