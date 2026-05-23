@@ -548,7 +548,9 @@ tests/
 │   ├── test_cli_bot_lifecycle.py
 │   ├── test_ipc_bot_lifecycle.py
 │   ├── test_cli_init_secret_leak.py
-│   └── test_cli_account_crypto_error.py
+│   ├── test_cli_account_crypto_error.py
+│   ├── test_cli_account_reserve_buffer_validation.py
+│   └── test_cli_validators.py
 └── __init__.py
 ```
 

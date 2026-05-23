@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import math
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 
@@ -13,6 +12,7 @@ from ante.cli._validators import (
     reject_invalid_account_id,
     reject_inverted_date_range,
     validate_iso_date,
+    validate_nonnegative_finite_amount,
     validate_positive_finite_amount,
 )
 from ante.cli.formatter import format_option
@@ -28,29 +28,6 @@ def treasury() -> None:
 
 def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
-
-
-def validate_nonnegative_finite_amount(
-    ctx: click.Context | None,
-    param: click.Parameter | None,
-    value: float | None,
-) -> float | None:
-    """Click callback: finite amount >= 0."""
-    if value is None:
-        return None
-    if math.isnan(value) or math.isinf(value):
-        raise click.BadParameter(
-            f"{value!r}은(는) finite number여야 합니다 (NaN/Infinity 거부).",
-            ctx=ctx,
-            param=param,
-        )
-    if value < 0:
-        raise click.BadParameter(
-            f"{value!r}은(는) 0 이상이어야 합니다.",
-            ctx=ctx,
-            param=param,
-        )
-    return value
 
 
 async def _create_treasury(account_id: str | None = None):  # noqa: ANN202

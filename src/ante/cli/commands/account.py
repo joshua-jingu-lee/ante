@@ -24,7 +24,10 @@ from typing import TYPE_CHECKING, Any, NoReturn
 import click
 
 from ante.account.models import AccountStatus
-from ante.cli._validators import reject_invalid_account_id
+from ante.cli._validators import (
+    reject_invalid_account_id,
+    validate_nonnegative_finite_amount,
+)
 from ante.cli.cold_path import (
     ACCOUNT_COLD_PATH_BLOCKED_CODE,
     assert_no_active_runtime,
@@ -464,9 +467,11 @@ def _validate_broker_type(fmt: OutputFormatter, broker_type: str) -> None:
     "market_order_reserve_buffer_rate_opt",
     type=float,
     default=None,
+    callback=validate_nonnegative_finite_amount,
     help=(
         "시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). "
-        "omit 시 BrokerPreset 기본값을 사용한다 (#1333)."
+        "omit 시 BrokerPreset 기본값을 사용한다 (#1333). "
+        "NaN/Infinity/음수는 거부된다 (#1723)."
     ),
 )
 @format_option
