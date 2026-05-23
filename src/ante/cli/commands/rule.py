@@ -44,6 +44,15 @@ async def _create_rule_engine(account_id: str):  # noqa: ANN202
     하면 획득 자원이 0이라 정리 대상도 0 — 누수 구조 자체를 제거한다.
     ``RuleEngine.__init__`` 내부 ``require_account_id``(``engine.py:270``)는
     defense-in-depth로 그대로 유지한다(무변경).
+
+    valid-format이지만 DB에 없는 ``account_id`` (예: ``acc-9999``)는
+    ``RuleEngine`` 생성 **이전**에 lightweight ``SELECT 1`` 로 존재를
+    검증해 ``AccountNotFoundError`` 로 분기한다(#1726, ``rule list`` 의
+    기존 inline 블록을 SSOT consolidation으로 helper로 이동). 이 검증을
+    helper에 두면 ``rule list`` 외에도 ``info`` 등 다른 rule 명령에
+    동일하게 적용되며, rule lookup 보다 account existence가 먼저 보고된다.
+    실패 시 ``except BaseException`` 블록으로 ``db.close()`` 를 보장한다
+    (``_create_treasury`` (#1722) 동형 cleanup).
     """
     from ante.account.scoping import require_account_id
     from ante.cli.main import get_db_path
@@ -55,8 +64,55 @@ async def _create_rule_engine(account_id: str):  # noqa: ANN202
 
     db = Database(get_db_path())
     await db.connect()
-    eventbus = EventBus()
-    engine = RuleEngine(eventbus=eventbus, account_id=validated_account_id)
+    try:
+        # account existence pre-check. ``rule_list`` 의 기존 inline 블록을
+        # 그대로 옮긴 형태이며, ``_create_treasury`` 동형 (#1725).
+        #
+        # ``AccountService.initialize()`` 는 모든 non-deleted account row를
+        # materialize하며 credentials를 복호화하므로, 조회 대상과 무관한
+        # 다른 계좌의 credentials 복호화 실패가 rule 명령을 깨뜨릴 수 있다
+        # (정상 사용 회귀). 따라서 credentials 복호화 없이 이미 열린 db
+        # 핸들로 lightweight 단건 존재 쿼리만 수행한다. 쿼리 의미는
+        # ``AccountService.get`` (account_id 단건, status 필터 없음)과
+        # 일치하며 미존재 시 동일한 ``AccountNotFoundError`` 메시지로
+        # 분기한다 — 동일 ACCOUNT_NOT_FOUND envelope/message 보존.
+        #
+        # ``accounts`` 테이블은 ``AccountService.initialize()`` 의
+        # ``_CREATE_TABLE_SQL`` 에서만 생성된다. 이 경로는 raw ``Database``
+        # 핸들만 쓰고 ``AccountService`` 를 초기화하지 않으므로, 부분
+        # 초기화/legacy DB(예: ``ante init`` 직후)에서는 테이블 자체가 없어
+        # ``sqlite3.OperationalError: no such table: accounts`` 가
+        # 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을 우회할 수 있다
+        # (#1559). 정의상 accounts 테이블 부재는 해당 account 미존재와
+        # 동치이므로 동일한 ``AccountNotFoundError`` 로 정규화한다. 단,
+        # malformed db 같은 다른 ``OperationalError`` 까지 삼키지 않도록
+        # "no such table" 메시지일 때로만 좁힌다 (#1558 검증 패턴).
+        try:
+            account_row = await db.fetch_one(
+                "SELECT 1 FROM accounts WHERE account_id = ?",
+                (validated_account_id,),
+            )
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e).lower():
+                raise AccountNotFoundError(
+                    f"계좌 '{validated_account_id}'를 찾을 수 없습니다."
+                ) from e
+            raise
+        if account_row is None:
+            raise AccountNotFoundError(
+                f"계좌 '{validated_account_id}'를 찾을 수 없습니다."
+            )
+        eventbus = EventBus()
+        engine = RuleEngine(eventbus=eventbus, account_id=validated_account_id)
+    except BaseException:
+        try:
+            await db.close()
+        except Exception:
+            logger.debug(
+                "db.close() after rule engine init failure raised — ignored",
+                exc_info=True,
+            )
+        raise
     return engine, db
 
 
@@ -131,47 +187,12 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_list() -> list[dict]:
+        # account existence는 ``_create_rule_engine`` 이 ``SELECT 1`` 로 선
+        # 검증한다(#1726 SSOT consolidation — 기존 여기 inline 블록을 helper
+        # 로 이동). 미존재 account는 ``AccountNotFoundError`` 로 raise되며
+        # 아래 호출 표면의 ``except AccountNotFoundError`` 분기가 받는다.
         engine, db = await _create_rule_engine(account_id)
         try:
-            # rule 수집과 독립적으로 account 존재를 검증한다.
-            # 미존재 account는 "실재 account의 0 rules"와 구분되어야 하며
-            # (#1559) AccountNotFoundError로 분기해 exit 1로 종료한다.
-            #
-            # AccountService.initialize()는 모든 non-deleted account row를
-            # materialize하며 credentials를 복호화하므로, 조회 대상과 무관한
-            # 다른 계좌의 credentials 복호화 실패가 rule list를 깨뜨릴 수
-            # 있다(정상 사용 회귀). 따라서 credentials 복호화 없이 이미 열린
-            # db 핸들로 lightweight 단건 존재 쿼리만 수행한다. 쿼리 의미는
-            # AccountService.get(account_id 단건, status 필터 없음)과 일치하며
-            # 미존재 시 동일한 AccountNotFoundError 메시지로 분기한다 — 동일
-            # ACCOUNT_NOT_FOUND envelope/message 보존. db.close()는 아래
-            # finally가 단독 소유한다(lifecycle 불변).
-            #
-            # ``accounts`` 테이블은 ``AccountService.initialize()`` 의
-            # ``_CREATE_TABLE_SQL`` 에서만 생성된다. 이 경로는 raw
-            # ``Database`` 핸들만 쓰고 ``AccountService`` 를 초기화하지
-            # 않으므로, 부분 초기화/legacy DB(예: ``ante init`` 직후)에서는
-            # 테이블 자체가 없어 ``sqlite3.OperationalError: no such table:
-            # accounts`` 가 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을
-            # 우회할 수 있다(#1559). 정의상 accounts 테이블 부재는 해당
-            # account 미존재와 동치이므로 동일한 AccountNotFoundError 로
-            # 정규화한다. 단, malformed db 같은 다른 ``OperationalError``
-            # 까지 삼키지 않도록 "no such table" 메시지일 때로만 좁힌다
-            # (#1558 에서 검증된 패턴).
-            try:
-                account_row = await db.fetch_one(
-                    "SELECT 1 FROM accounts WHERE account_id = ?",
-                    (account_id,),
-                )
-            except sqlite3.OperationalError as e:
-                if "no such table" in str(e).lower():
-                    raise AccountNotFoundError(
-                        f"계좌 '{account_id}'를 찾을 수 없습니다."
-                    ) from e
-                raise
-            if account_row is None:
-                raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
-
             try:
                 _load_rules_from_config(engine)
             except Exception as e:
@@ -220,12 +241,13 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format만 여기서
-    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료한다. `rule_info`는
-    # `rule_list`와 달리 account 존재 SELECT/`AccountNotFoundError` catch가
-    # 없으며, valid-but-absent account_id의 기존 동작은 #1635 범위 밖이라
-    # 불변으로 보존한다(account-existence parity는 후속 후보로 분리,
-    # ACCOUNT_NOT_FOUND 강제 금지).
+    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format은 여기서
+    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료한다. valid-but-absent
+    # account_id(예: ``acc-9999``)는 ``_create_rule_engine`` 이 ``SELECT 1``
+    # 로 검증해 ``AccountNotFoundError`` 를 raise하며, 아래 호출 표면의
+    # ``except AccountNotFoundError`` 분기가 ``ACCOUNT_NOT_FOUND`` 로
+    # 매핑한다(#1726 — prior #1635 명시 punt "ACCOUNT_NOT_FOUND 강제
+    # 금지"의 후속, ``rule_list`` line 196-198 패턴 1:1 동형).
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_info() -> dict | None:
@@ -240,7 +262,11 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
         finally:
             await db.close()
 
-    result = _run(_run_info())
+    try:
+        result = _run(_run_info())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
 
     if not result:
         fmt.error(f"룰을 찾을 수 없습니다: {rule_id}")

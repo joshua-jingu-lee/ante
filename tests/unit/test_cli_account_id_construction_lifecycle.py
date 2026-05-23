@@ -403,10 +403,20 @@ class TestValidButAbsentNotMisclassified:
 
         narrow scope: rule_list의 기존 ``AccountNotFoundError`` →
         ``ACCOUNT_NOT_FOUND`` 분기 보존(무변경, VALIDATION_ERROR 오분류 아님).
+
+        #1726 SSOT consolidation 후: account 존재 SELECT/raise는
+        ``_create_rule_engine`` 내부에서 일어난다. mock helper가
+        ``AccountNotFoundError`` 를 raise해 호출 표면의 ``except`` 매핑이
+        ``ACCOUNT_NOT_FOUND`` 로 분기함을 보존한다.
         """
-        ctx_patch, _engine, mock_db, _calls = _make_mock_rule_engine()
-        # account 존재 SELECT가 미존재(None)를 반환 → AccountNotFoundError.
-        mock_db.fetch_one = AsyncMock(return_value=None)
+        from ante.account.errors import AccountNotFoundError
+
+        ctx_patch = patch(
+            "ante.cli.commands.rule._create_rule_engine",
+            side_effect=AccountNotFoundError(
+                f"계좌 '{_VALID_ABSENT}'를 찾을 수 없습니다."
+            ),
+        )
         with ctx_patch:
             result = runner.invoke(
                 cli,

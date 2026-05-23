@@ -539,13 +539,19 @@ class TestRuleCommands:
                 assert data["rules"][0]["rule_id"] == "daily_loss"
 
     def test_rule_list_missing_account_json_exit_1(self, runner):
-        """미존재 account: JSON envelope + ACCOUNT_NOT_FOUND + exit 1 (#1559)."""
+        """미존재 account: JSON envelope + ACCOUNT_NOT_FOUND + exit 1 (#1559).
+
+        #1726 SSOT consolidation 후: account 존재 SELECT/raise는
+        ``_create_rule_engine`` 안에서 일어난다. mock helper가
+        ``AccountNotFoundError`` 를 raise해 동일 envelope/message 회귀를
+        보존한다(helper 내부 ``db.close()`` 호출은 R2 cleanup spy가 잠금).
+        """
+        from ante.account.errors import AccountNotFoundError
+
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=False)
-            mock_svc.return_value = (mock_engine, mock_db)
+            mock_svc.side_effect = AccountNotFoundError(
+                "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+            )
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
@@ -570,17 +576,18 @@ class TestRuleCommands:
                     "계좌 'oracle-missing-account'를 찾을 수 없습니다."
                     == data["message"]
                 )
-                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
-                mock_db.close.assert_awaited()
 
     def test_rule_list_missing_account_text_exit_1(self, runner):
-        """미존재 account: text 출력도 exit 1로 종료 (#1559)."""
+        """미존재 account: text 출력도 exit 1로 종료 (#1559).
+
+        #1726 SSOT consolidation 후 mock helper가 raise하는 형태로 조정.
+        """
+        from ante.account.errors import AccountNotFoundError
+
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=False)
-            mock_svc.return_value = (mock_engine, mock_db)
+            mock_svc.side_effect = AccountNotFoundError(
+                "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+            )
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
@@ -621,35 +628,38 @@ class TestRuleCommands:
         복호화 실패가 rule list를 깨뜨릴 수 있었다. lightweight 단건 존재
         쿼리로 교체 후 이 경로가 _row_to_account/decrypt를 전혀 타지 않고
         AccountService.initialize조차 호출하지 않음을 잠근다.
+
+        #1726 SSOT consolidation 후: SELECT 1 은 ``_create_rule_engine``
+        helper 안에서 직접 수행된다. 따라서 helper를 in-process로 직접
+        호출해 동일한 invariant를 보존한다(AccountService 미호출 + SELECT 1
+        호출).
         """
+        import asyncio
+
+        from ante.cli.commands.rule import _create_rule_engine
+
+        mock_db = self._make_mock_db(account_exists=True)
+        # connect/close 는 helper lifecycle 내부에서 호출된다.
+        mock_db.connect = AsyncMock()
+
         with (
-            patch("ante.cli.commands.rule._create_rule_engine") as mock_svc,
+            patch("ante.core.database.Database", return_value=mock_db),
+            patch("ante.cli.main.get_db_path", return_value=":memory:"),
             patch("ante.account.service.AccountService") as mock_account_cls,
             patch("ante.account.service._row_to_account") as mock_row_to_account,
         ):
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=True)
-            mock_svc.return_value = (mock_engine, mock_db)
+            engine, db = asyncio.run(_create_rule_engine("acc-1"))
 
-            with patch("ante.cli.commands.rule._load_rules_from_config"):
-                result = runner.invoke(
-                    cli,
-                    ["--format", "json", "rule", "list", "--account", "acc-1"],
-                )
-                assert result.exit_code == 0
-                data = json.loads(result.output)
-                assert data["message"] == "등록된 룰이 없습니다."
-                # AccountService 자체를 생성/초기화하지 않으므로 전체
-                # materialize/복호화 경로(_row_to_account)가 호출되지 않는다.
-                mock_account_cls.assert_not_called()
-                mock_row_to_account.assert_not_called()
-                # 존재 확인은 lightweight 단건 SELECT 1로만 수행한다.
-                mock_db.fetch_one.assert_awaited_once_with(
-                    "SELECT 1 FROM accounts WHERE account_id = ?",
-                    ("acc-1",),
-                )
+            assert db is mock_db
+            # AccountService 자체를 생성/초기화하지 않으므로 전체
+            # materialize/복호화 경로(_row_to_account)가 호출되지 않는다.
+            mock_account_cls.assert_not_called()
+            mock_row_to_account.assert_not_called()
+            # 존재 확인은 lightweight 단건 SELECT 1로만 수행한다.
+            mock_db.fetch_one.assert_awaited_once_with(
+                "SELECT 1 FROM accounts WHERE account_id = ?",
+                ("acc-1",),
+            )
 
     def test_rule_list_missing_accounts_table_json_exit_1(self, runner):
         """accounts 테이블 부재 DB: JSON envelope + ACCOUNT_NOT_FOUND + exit 1.
@@ -660,17 +670,18 @@ class TestRuleCommands:
         ACCOUNT_NOT_FOUND envelope/exit 1 계약을 우회한다. 정의상 테이블
         부재 ⟹ account 미존재이므로 동일 계약으로 정규화됨을 잠근다
         (OperationalError 비누설 가드, #1559).
+
+        #1726 SSOT consolidation 후: 테이블 부재 정규화는 helper 안에서
+        일어난다. mock helper가 ``AccountNotFoundError`` 를 raise해 envelope/
+        message 보존을 확인한다(helper-internal OperationalError 정규화는
+        R2 cleanup spy와 R_LIST subprocess test가 잠금).
         """
+        from ante.account.errors import AccountNotFoundError
+
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_db.fetch_one = AsyncMock(
-                side_effect=sqlite3.OperationalError("no such table: accounts")
+            mock_svc.side_effect = AccountNotFoundError(
+                "계좌 'any-account'를 찾을 수 없습니다."
             )
-            mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
@@ -692,21 +703,18 @@ class TestRuleCommands:
                 assert data["message"] == "계좌 'any-account'를 찾을 수 없습니다."
                 # raw OperationalError 텍스트가 누설되지 않는다.
                 assert "no such table" not in result.output
-                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
-                mock_db.close.assert_awaited()
 
     def test_rule_list_missing_accounts_table_text_exit_1(self, runner):
-        """accounts 테이블 부재 DB: text 출력도 exit 1로 종료 (#1559)."""
+        """accounts 테이블 부재 DB: text 출력도 exit 1로 종료 (#1559).
+
+        #1726 SSOT consolidation 후 mock helper raise 형태로 조정.
+        """
+        from ante.account.errors import AccountNotFoundError
+
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_db.fetch_one = AsyncMock(
-                side_effect=sqlite3.OperationalError("no such table: accounts")
+            mock_svc.side_effect = AccountNotFoundError(
+                "계좌 'any-account'를 찾을 수 없습니다."
             )
-            mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
@@ -720,17 +728,18 @@ class TestRuleCommands:
     def test_rule_list_other_operational_error_not_swallowed(self, runner):
         """과흡수 방지: "no such table" 이외의 OperationalError는 그대로
         전파한다(malformed db 등). ACCOUNT_NOT_FOUND로 위장하지 않는다.
+
+        #1726 SSOT consolidation 후: helper 안의 ``except sqlite3.OperationalError``
+        가 "no such table" 메시지로만 좁혀 정규화하므로, 그 외 메시지는
+        그대로 호출자까지 전파된다. mock helper가 raw OperationalError를
+        raise해 호출 표면이 ACCOUNT_NOT_FOUND로 오분류하지 않음을 확인한다
+        (helper-internal 메시지 좁힘 검증은 R2 cleanup spy + helper의
+        직접 호출 회귀 가드가 잠금).
         """
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_db.fetch_one = AsyncMock(
-                side_effect=sqlite3.OperationalError("database disk image is malformed")
+            mock_svc.side_effect = sqlite3.OperationalError(
+                "database disk image is malformed"
             )
-            mock_svc.return_value = (mock_engine, mock_db)
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
@@ -741,8 +750,6 @@ class TestRuleCommands:
                 assert result.exit_code != 0
                 assert isinstance(result.exception, sqlite3.OperationalError)
                 assert "ACCOUNT_NOT_FOUND" not in (result.output or "")
-                # db.close()는 finally가 단독 소유 — lifecycle 불변(#1559).
-                mock_db.close.assert_awaited()
 
     def test_rule_info_not_found(self, runner):
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
