@@ -144,13 +144,13 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `ExternalSignalEvent` | REST API | Bot | `account_id`, `bot_id`, `signal_id`, `symbol`, `action` (`"buy"` / `"sell"`), `reason`, `confidence`, `metadata`, `exchange` |
+| `ExternalSignalEvent` | SignalChannel | Bot | `account_id`, `bot_id`, `signal_id`, `symbol`, `action` (`"buy"` / `"sell"`), `reason`, `confidence`, `metadata`, `exchange` |
 
 #### 설정 변경 (Config)
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `ConfigChangedEvent` | WebAPI / CLI | 각 모듈 | `category`, `key`, `old_value`, `new_value`, `changed_by` |
+| `ConfigChangedEvent` | DynamicConfigService | 각 모듈 | `category`, `key`, `old_value`, `new_value`, `changed_by` |
 
 #### 결재 (Approval)
 
