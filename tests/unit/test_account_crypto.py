@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-from ante.account.crypto import decrypt_credentials, encrypt_credentials
+from ante.account.crypto import (
+    EncryptionKeyError,
+    EncryptionKeyInvalidError,
+    EncryptionKeyMissingError,
+    decrypt_credentials,
+    encrypt_credentials,
+)
 
 
 class TestEncryptDecryptRoundtrip:
@@ -59,42 +65,84 @@ class TestEncryptOutput:
 
 
 class TestMissingKey:
-    """환경변수 미설정 시 에러 검증."""
+    """환경변수 미설정 시 에러 검증.
 
-    def test_encrypt_missing_key_raises(self, monkeypatch):
-        """ANTE_DB_ENCRYPTION_KEY 미설정 시 RuntimeError."""
+    ``EncryptionKeyMissingError`` 가 raise되고, behavior preserving을 위해
+    ``RuntimeError`` 서브클래스이며 안정 ``code`` 속성을 갖는다.
+    """
+
+    def test_encrypt_missing_key_raises_typed(self, monkeypatch):
+        """ANTE_DB_ENCRYPTION_KEY 미설정 시 EncryptionKeyMissingError."""
         monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
-        with pytest.raises(RuntimeError, match="ANTE_DB_ENCRYPTION_KEY"):
+        with pytest.raises(EncryptionKeyMissingError) as excinfo:
             encrypt_credentials({"key": "value"})
+        assert isinstance(excinfo.value, RuntimeError)  # behavior preserving
+        assert isinstance(excinfo.value, EncryptionKeyError)
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_MISSING"
+        assert "ANTE_DB_ENCRYPTION_KEY" in str(excinfo.value)
 
-    def test_decrypt_missing_key_raises(self, monkeypatch):
-        """ANTE_DB_ENCRYPTION_KEY 미설정 시 RuntimeError."""
+    def test_decrypt_missing_key_raises_typed(self, monkeypatch):
+        """ANTE_DB_ENCRYPTION_KEY 미설정 시 EncryptionKeyMissingError."""
         monkeypatch.delenv("ANTE_DB_ENCRYPTION_KEY", raising=False)
-        with pytest.raises(RuntimeError, match="ANTE_DB_ENCRYPTION_KEY"):
+        with pytest.raises(EncryptionKeyMissingError) as excinfo:
+            decrypt_credentials("some-encrypted-string")
+        assert isinstance(excinfo.value, RuntimeError)
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_MISSING"
+
+    def test_empty_key_raises_typed(self, monkeypatch):
+        """빈 문자열 키도 EncryptionKeyMissingError."""
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "")
+        with pytest.raises(EncryptionKeyMissingError) as excinfo:
+            encrypt_credentials({"key": "value"})
+        assert isinstance(excinfo.value, RuntimeError)
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_MISSING"
+
+
+class TestInvalidKeyFormat:
+    """Fernet 형식 위반 키는 EncryptionKeyInvalidError."""
+
+    def test_garbage_value_raises_invalid(self, monkeypatch):
+        """알 수 없는 garbage 문자열은 형식 위반으로 INVALID."""
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "not-valid-base64")
+        with pytest.raises(EncryptionKeyInvalidError) as excinfo:
+            encrypt_credentials({"key": "value"})
+        assert isinstance(excinfo.value, RuntimeError)
+        assert isinstance(excinfo.value, EncryptionKeyError)
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_INVALID"
+        assert "ANTE_DB_ENCRYPTION_KEY" in str(excinfo.value)
+
+    def test_wrong_length_raises_invalid(self, monkeypatch):
+        """길이가 44가 아닌 값은 INVALID (44는 Fernet canonical key 길이)."""
+        # 길이 43 (44 - 1)이지만 ``=``로 끝나는 값.
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "A" * 42 + "==")
+        with pytest.raises(EncryptionKeyInvalidError) as excinfo:
+            encrypt_credentials({"key": "value"})
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_INVALID"
+
+    def test_decrypt_invalid_format_raises_invalid(self, monkeypatch):
+        """decrypt 경로에서도 형식 위반은 INVALID."""
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "not-valid-base64")
+        with pytest.raises(EncryptionKeyInvalidError):
             decrypt_credentials("some-encrypted-string")
 
 
-class TestWrongKey:
-    """다른 키로 복호화 시 에러 검증."""
+class TestWrongKeyDecrypt:
+    """valid 형식이지만 다른 키로 복호화 시 EncryptionKeyInvalidError."""
 
-    def test_wrong_key_raises(self, monkeypatch):
-        """암호화 시 사용한 키와 다른 키로 복호화하면 InvalidToken."""
+    def test_wrong_key_raises_invalid_chained(self, monkeypatch):
+        """암호화 시 사용한 키와 다른 valid Fernet 키로 복호화하면
+        EncryptionKeyInvalidError가 InvalidToken을 체이닝해 raise된다."""
         original = {"app_key": "my-key"}
         encrypted = encrypt_credentials(original)
 
-        # 다른 키로 변경
+        # 다른 valid key로 변경.
         new_key = Fernet.generate_key().decode()
         monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", new_key)
 
-        with pytest.raises(InvalidToken):
+        with pytest.raises(EncryptionKeyInvalidError) as excinfo:
             decrypt_credentials(encrypted)
-
-
-class TestEmptyKey:
-    """빈 키 처리."""
-
-    def test_empty_key_raises(self, monkeypatch):
-        """빈 문자열 키는 RuntimeError."""
-        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "")
-        with pytest.raises(RuntimeError, match="ANTE_DB_ENCRYPTION_KEY"):
-            encrypt_credentials({"key": "value"})
+        assert isinstance(excinfo.value, RuntimeError)
+        assert isinstance(excinfo.value, EncryptionKeyError)
+        assert excinfo.value.code == "DB_ENCRYPTION_KEY_INVALID"
+        # 원본 InvalidToken은 __cause__로 보존된다.
+        assert isinstance(excinfo.value.__cause__, InvalidToken)
