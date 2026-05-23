@@ -32,11 +32,6 @@ directory = "logs"
 [parquet]
 compression = "snappy"
 
-[web]
-host = "0.0.0.0"
-port = 3982
-cors_origins = ["http://localhost:3000"]
-
 # [broker] 섹션의 계좌성 값은 Account 모델로 이관됨.
 # broker.type → Account.broker_type
 # broker.commission_rate → Account.buy_commission_rate

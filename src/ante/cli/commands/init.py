@@ -50,10 +50,6 @@ path = "{db_path}"
 # docs/specs/config/03-design-decisions.md 200-202).
 pid_path = "run/ante.pid"
 socket_path = "run/ante.sock"
-
-[web]
-host = "0.0.0.0"
-port = 3982
 """
 
 _ENCRYPTION_KEY_NAME = "ANTE_DB_ENCRYPTION_KEY"
