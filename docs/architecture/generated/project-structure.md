@@ -553,7 +553,8 @@ tests/
 │   ├── test_cli_validators.py
 │   ├── test_cli_account_invalid_id_ingress.py
 │   ├── test_cli_treasury_account_not_found.py
-│   └── test_cli_rule_account_not_found.py
+│   ├── test_cli_rule_account_not_found.py
+│   └── test_cli_broker_account_not_found.py
 └── __init__.py
 ```
 

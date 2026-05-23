@@ -204,6 +204,9 @@ def balance(ctx: click.Context, account_id: str) -> None:
 
         try:
             result = _run(_run_balance())
+        except AccountNotFoundError as e:
+            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+            raise SystemExit(1) from e
         except Exception as e:
             fmt.error(str(e))
             raise SystemExit(1) from e
@@ -256,6 +259,9 @@ def positions(ctx: click.Context, account_id: str) -> None:
         try:
             pos_list = _run(_run_positions())
             result = {"positions": pos_list}
+        except AccountNotFoundError as e:
+            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+            raise SystemExit(1) from e
         except Exception as e:
             fmt.error(str(e))
             raise SystemExit(1) from e
