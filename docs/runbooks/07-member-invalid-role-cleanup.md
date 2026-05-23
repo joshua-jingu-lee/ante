@@ -60,7 +60,7 @@ JSON 출력 스키마:
 - `actionable`: `role` 이 invalid 이고 `status != revoked` 인 row. 운영자 cleanup 대상.
   `revoke_command` 는 즉시 실행 가능한 형태(`--yes` 포함, `member_id` 는
   `shlex.quote` 로 셸 안전 인용, 옵션/포지셔널 경계는 `--` separator 로 명시)로
-  노출된다. 또한 `ante list-invalid-roles` 호출에 `--config-dir <path>` 가
+  노출된다. 또한 `ante member list-invalid-roles` 호출에 `--config-dir <path>` 가
   지정되었다면 동일한 값을 `ante --config-dir <quoted-path> member revoke ...`
   형태로 **그대로 보존**해 운영자가 payload 를 복사·실행해도 같은 인스턴스(DB)
   대상으로 동작하도록 보장한다. default config_dir 일 때는 `--config-dir` 인자가
