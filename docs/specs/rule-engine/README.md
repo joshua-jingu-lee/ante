@@ -23,6 +23,5 @@
 | [08-notification-events.md](08-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
 | [09-rule-management.md](09-rule-management.md) | 룰 정의 및 관리 |
 | [10-rule-engine-manager.md](10-rule-engine-manager.md) | RuleEngineManager |
-| [11-rest-api.md](11-rest-api.md) | REST API |
 | [12-cli.md](12-cli.md) | CLI 인터페이스 |
 | [14-cross-module-notes.md](14-cross-module-notes.md) | 타 모듈 설계 시 참고 |
