@@ -766,11 +766,20 @@ class MemberService:
             )
 
     async def _get_or_raise(self, member_id: str) -> Member:
-        """멤버 조회. 없으면 ValueError."""
+        """멤버 조회. 없으면 ``MemberNotFoundError`` (#1805).
+
+        이전에는 ``ValueError("존재하지 않는 멤버: ...")`` 를 raise 했으나,
+        CLI/IPC envelope 이 안정 코드 ``"MEMBER_NOT_FOUND"`` 를 surface
+        하도록 typed exception (``MemberError`` 서브) 으로 변경한다. 메시지
+        시그니처와 회귀 케이스(``test_member.py:582`` 등) 호환을 위해
+        문자열은 동일하게 유지한다. ``ApprovalNotFoundError`` (#1798) 와
+        동형 패턴.
+        """
+        from ante.member.errors import MemberNotFoundError
+
         member = await self.get(member_id)
         if not member:
-            msg = f"존재하지 않는 멤버: {member_id}"
-            raise ValueError(msg)
+            raise MemberNotFoundError(member_id)
         return member
 
     @staticmethod

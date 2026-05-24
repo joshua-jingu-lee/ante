@@ -516,7 +516,15 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         raise SystemExit(1)
 
     if result.get("signal_key") is None:
-        fmt.error(f"시그널 키가 없습니다: {bot_id}")
+        # #1808: 시그널 키 미발급은 안정 코드 ``SIGNAL_KEY_NOT_SET`` 로
+        # surface 한다. 미존재 bot (``BOT_NOT_FOUND``) 분기보다 뒤에 둬서
+        # 두 의미를 envelope 코드로 분리한다. typed exception 신설 대신
+        # None gate + code 라벨로 단순화한다 (BOT_NOT_FOUND 동형 — 본
+        # surface 는 service exception 을 거치지 않는다).
+        fmt.error(
+            f"signal key가 설정되지 않았습니다: {bot_id}",
+            code="SIGNAL_KEY_NOT_SET",
+        )
         ctx.exit(1)
 
     if result.get("rotated"):
@@ -594,9 +602,11 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
     result = _run(_run_positions())
 
     if result is None:
-        # 미존재 bot: 형제 명령(`bot info`/`bot remove`)과 동일하게
-        # code 없는 에러 메시지 + exit 1 (#1558).
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        # #1810: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와
+        # 동형, ``bot info`` line 162 / ``bot remove`` line 814 형제 패턴
+        # 1:1 미러).
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 
     if not result:

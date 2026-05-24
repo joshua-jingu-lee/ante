@@ -34,10 +34,10 @@ Coverage map:
     0 포지션은 기존 계약(exit 0 + "보유 포지션 없음")을 그대로 유지**함을
     회귀 보장한다 (contract-drift 가드).
 
-Coverage map (#1558):
+Coverage map (#1558 → #1810 typed code sweep):
     - 미존재 bot ``bot positions oracle-missing-bot``
-      - JSON 모드: stdout ``{"status":"error","code":"","message":
-        "봇을 찾을 수 없습니다: oracle-missing-bot"}`` + exit 1.
+      - JSON 모드: stdout ``{"status":"error","code":"BOT_NOT_FOUND",
+        "message":"봇을 찾을 수 없습니다: oracle-missing-bot"}`` + exit 1.
       - text 모드: stderr ``Error: 봇을 찾을 수 없습니다: ...`` + exit 1.
     - 실재 bot, 0 포지션: exit 0 + ``{"message":"보유 포지션 없음",
       "positions":[]}`` 유지 (regression guard).
@@ -391,8 +391,11 @@ class TestBotPositionsMissingBotExitCode:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        # CLI 형제 명령 일관: 미존재 bot 에 code 미부여.
-        assert payload["code"] == "", payload
+        # #1810: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 한다
+        # (이전 #1558 의 "code 없음" 계약은 자동화 분류 불가 결함으로
+        # 보고되어 본 sweep 에서 폐기, ``bot info``/``bot remove`` 형제
+        # 패턴과 정렬).
+        assert payload["code"] == "BOT_NOT_FOUND", payload
         assert _BOT_NOT_FOUND_MESSAGE in str(payload["message"]), payload
         # 결함 시점의 success envelope 가 더는 새지 않아야 한다.
         assert "보유 포지션 없음" not in result.stdout, result.stdout
@@ -498,7 +501,9 @@ class TestBotPositionsNoBotsTableNormalized:
         assert "no such table" not in result.stdout, result.stdout
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        assert payload["code"] == "", payload
+        # #1810: 미존재 bot (bots 테이블 부재 정규화 포함) 은 안정 코드
+        # ``BOT_NOT_FOUND`` 로 surface 한다.
+        assert payload["code"] == "BOT_NOT_FOUND", payload
         assert _BOT_NOT_FOUND_MESSAGE in str(payload["message"]), payload
 
     def test_no_bots_table_text_mode_emits_stderr_and_exits_1(

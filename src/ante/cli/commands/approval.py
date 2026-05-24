@@ -8,6 +8,7 @@ import logging
 
 import click
 
+from ante.approval.errors import ApprovalNotFoundError
 from ante.approval.models import ApprovalStatus, ApprovalType
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
@@ -278,6 +279,11 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
     try:
         result = asyncio.run(_info())
         fmt.output(result)
+    except ApprovalNotFoundError as e:
+        # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
+        # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형).
+        fmt.error(str(e), code="APPROVAL_NOT_FOUND")
+        raise SystemExit(1) from e
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -356,6 +362,12 @@ def review(
     try:
         result = asyncio.run(_review())
         fmt.success(f"검토 의견 추가: {reviewer} → {review_result}", result)
+    except ApprovalNotFoundError as e:
+        # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
+        # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형,
+        # ``approval info`` 형제 패턴 미러).
+        fmt.error(str(e), code="APPROVAL_NOT_FOUND")
+        raise SystemExit(1) from e
     except Exception as e:
         fmt.error(str(e), code="APPROVAL_ERROR")
         raise SystemExit(1) from e
@@ -652,7 +664,16 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
 
 
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
-    """ID 전체 또는 prefix로 결재 요청 검색."""
+    """ID 전체 또는 prefix로 결재 요청 검색.
+
+    not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval info``
+    / ``approval review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로
+    surface 할 수 있도록 한다 (#1811). multi-match 는 ``ValueError`` 로
+    유지 — 별도 의미(``"여러 건이 일치"``)이며 기존 generic 핸들러가
+    ``APPROVAL_ERROR`` 로 surface 한다.
+    """
+    from ante.approval.errors import ApprovalNotFoundError
+
     req = await service.get(id)
     if req:
         return req
@@ -667,8 +688,7 @@ async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
         msg = f"여러 건이 일치합니다: {ids}"
         raise ValueError(msg)
 
-    msg = f"결재 요청을 찾을 수 없음: {id}"
-    raise ValueError(msg)
+    raise ApprovalNotFoundError(id)
 
 
 def _parse_expires_in(expires_in: str) -> str:
