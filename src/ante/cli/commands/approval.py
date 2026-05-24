@@ -409,7 +409,12 @@ def reopen(
     async def _reopen() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        args: dict = {"approval_id": id}
+        # IPC handler ``_handle_approval_reopen`` 가 ``args["id"]`` 를 기대한다
+        # (src/ante/ipc/registry.py). 과거 ``"approval_id"`` 키는 handler 미스매치
+        # 로 ``KeyError`` 를 일으켰다 — Web API/IPC 계약과 동일한 ``"id"`` 로 정렬
+        # (#1794). ``approval.cancel_invalid`` 만 별도 계약으로 ``approval_id``
+        # 사용을 유지한다.
+        args: dict = {"id": id}
         if body is not None:
             args["body"] = body
         if params is not None:
@@ -570,7 +575,10 @@ def cancel(ctx: click.Context, id: str) -> None:
     async def _cancel() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        return await ipc_send("approval.cancel", {"approval_id": id}, actor=requester)
+        # IPC handler ``_handle_approval_cancel`` 가 ``args["id"]`` 를 기대한다
+        # (#1794, registry.py:533 참조). cancel-invalid 와 키 계약이 다르므로
+        # 혼동에 주의.
+        return await ipc_send("approval.cancel", {"id": id}, actor=requester)
 
     try:
         result = asyncio.run(_cancel())
@@ -596,7 +604,9 @@ def approve(ctx: click.Context, id: str) -> None:
     async def _approve() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        return await ipc_send("approval.approve", {"approval_id": id}, actor=actor)
+        # IPC handler ``_handle_approval_approve`` 가 ``args["id"]`` 를 기대한다
+        # (#1794, registry.py:515 참조).
+        return await ipc_send("approval.approve", {"id": id}, actor=actor)
 
     try:
         result = asyncio.run(_approve())
@@ -623,9 +633,11 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
     async def _reject() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
+        # IPC handler ``_handle_approval_reject`` 가 ``args["id"]`` 를 기대한다
+        # (#1794, registry.py:523 참조).
         return await ipc_send(
             "approval.reject",
-            {"approval_id": id, "reason": reason},
+            {"id": id, "reason": reason},
             actor=actor,
         )
 
