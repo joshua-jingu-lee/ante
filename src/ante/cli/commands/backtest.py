@@ -180,7 +180,11 @@ def run(
             "Final Balance: {final_balance:,.0f}",
         )
 
-        if metrics:
+        if metrics and not fmt.is_json:
+            # JSON 모드에서는 위 fmt.output(result_dict)의 result_dict["metrics"]에
+            # 이미 동일 지표가 포함되어 있으므로 별도 metric 테이블을 추가 출력하면
+            # stdout에 두 번째 JSON document(배열)가 붙어 single-document parser가
+            # `Extra data`로 실패한다. text 모드에서만 사람용 테이블을 추가 출력한다.
             metric_rows = _format_metrics(metrics)
             fmt.table(metric_rows, ["지표", "값"])
 
