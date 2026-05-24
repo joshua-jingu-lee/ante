@@ -12,6 +12,8 @@ BOT_NOT_FOUND_CODE = "BOT_NOT_FOUND"
 BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE = "BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED"
 BOT_STATE_CONFLICT_CODE = "BOT_STATE_CONFLICT"
 BOT_NOT_ACCEPTING_SIGNALS_CODE = "BOT_NOT_ACCEPTING_SIGNALS"
+BOT_ALREADY_EXISTS_CODE = "BOT_ALREADY_EXISTS"
+BOT_STRATEGY_ALREADY_RUNNING_CODE = "BOT_STRATEGY_ALREADY_RUNNING"
 
 
 class BotError(Exception):
@@ -64,3 +66,26 @@ class BotNotAcceptingSignals(BotError):  # noqa: N818
     """
 
     code: str = BOT_NOT_ACCEPTING_SIGNALS_CODE
+
+
+class BotAlreadyExistsError(BotError):
+    """동일 ``bot_id`` 가 이미 존재함 (#1800).
+
+    ``BotManager.create_bot`` 가 동일 bot_id 중복 등록을 거부할 때 raise
+    한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` envelope 이
+    ``BOT_ALREADY_EXISTS`` 로 변환한다. CLI ``bot create`` 는 동 코드를
+    surface 해 자동화가 중복 회피 처리할 수 있게 한다.
+    """
+
+    code: str = BOT_ALREADY_EXISTS_CODE
+
+
+class BotStrategyAlreadyRunningError(BotError):
+    """동일 ``strategy_id`` 가 이미 실행 중인 다른 봇에 의해 사용 중 (#1800).
+
+    "1전략 1봇" 정책에 따른 거부. IPC envelope 이
+    ``BOT_STRATEGY_ALREADY_RUNNING`` 으로 변환되어 자동화/사용자가 동일
+    전략의 다중 실행 시도를 명확히 식별할 수 있다.
+    """
+
+    code: str = BOT_STRATEGY_ALREADY_RUNNING_CODE

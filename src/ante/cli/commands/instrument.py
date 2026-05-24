@@ -345,7 +345,10 @@ def instrument_import(
             with open(path, encoding="utf-8") as f:
                 records = json.load(f)
     except Exception as e:
-        fmt.error(f"파일 읽기 실패: {e}")
+        # #1784: 파일 읽기 I/O 실패(directory-with-csv-suffix, 권한 등)는
+        # 안정 코드 ``INSTRUMENT_IO_ERROR`` 로 surface 한다. 자동화/오라클이
+        # 메시지 텍스트 파싱 없이 I/O 실패를 분류할 수 있게 한다.
+        fmt.error(f"파일 읽기 실패: {e}", code="INSTRUMENT_IO_ERROR")
         ctx.exit(1)
 
     if ext == ".json" and not isinstance(records, list):
@@ -362,7 +365,14 @@ def instrument_import(
     # 필수 컬럼 확인
     first = records[0]
     if "symbol" not in first or "exchange" not in first:
-        fmt.error("필수 컬럼 누락: symbol, exchange가 필요합니다.")
+        # #1784: 필수 컬럼 누락은 안정 코드
+        # ``INSTRUMENT_MISSING_COLUMNS`` 로 surface 한다. 형제 코드
+        # ``INSTRUMENT_INVALID_JSON_SHAPE`` / ``INSTRUMENT_EMPTY_FILE`` /
+        # ``INSTRUMENT_INVALID_FILE_FORMAT`` 와 동형 envelope 일관성.
+        fmt.error(
+            "필수 컬럼 누락: symbol, exchange가 필요합니다.",
+            code="INSTRUMENT_MISSING_COLUMNS",
+        )
         ctx.exit(1)
 
     # Axis 2 — import 행별 검증: dry-run preview/실저장 전, 각 행

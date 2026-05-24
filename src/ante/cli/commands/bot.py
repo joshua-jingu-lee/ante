@@ -156,7 +156,10 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
     result = _run(_run_info())
 
     if not result:
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        # #1784: missing bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 해
+        # 자동화가 메시지 파싱 없이 분류할 수 있도록 한다 (CLI/IPC
+        # 일관성: ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와 동형).
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 
     if fmt.is_json:
@@ -255,7 +258,10 @@ def bot_create(
             key, value = _parse_param(p)
             param_dict[key] = value
         except click.BadParameter as e:
-            fmt.error(str(e))
+            # #1784: invalid --param 입력은 안정 코드
+            # ``BOT_INVALID_PARAM`` 으로 surface 한다. 자동화/오라클이
+            # 메시지 텍스트 파싱 없이 invalid-input 분류를 할 수 있게 한다.
+            fmt.error(str(e), code="BOT_INVALID_PARAM")
             raise SystemExit(1) from e
 
     # #1656 E bucket defense-in-depth: provided invalid account_id
@@ -305,7 +311,10 @@ def bot_create(
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
+        # #1800: typed exception 의 class-level ``code`` 속성을 우선 surface
+        # 한다 (예: ``BotAlreadyExistsError.code = "BOT_ALREADY_EXISTS"``).
+        # 속성이 없는 일반 ``BotError`` 는 빈 code 로 종전 동작을 보존한다.
+        fmt.error(str(e), code=getattr(e, "code", ""))
         raise SystemExit(1) from e
 
     fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
@@ -478,11 +487,11 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         raise SystemExit(1) from e
 
     if result.get("missing"):
-        # 미존재 bot: 형제 명령(`bot info`/`bot remove`/`bot positions`)과
-        # 동일하게 code 없는 에러 메시지 + exit 1 (#1596). signal_key None
-        # 분기보다 먼저 처리하여 미존재 bot 이 "키 없음" 으로 잘못 빠지지
-        # 않도록 한다.
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        # #1784: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와
+        # 동형). signal_key None 분기보다 먼저 처리하여 미존재 bot 이 "키
+        # 없음" 으로 잘못 빠지지 않도록 한다.
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 
     if result.get("external_signals_disabled"):

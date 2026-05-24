@@ -162,7 +162,10 @@ class TestBotCreateBadParamExitCode:
         )
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
-        assert payload["code"] == "", payload
+        # #1784 Group A sweep: invalid --param 입력은 안정 코드
+        # ``BOT_INVALID_PARAM`` 으로 surface 한다 (이전: empty ``code``).
+        # 자동화/오라클이 메시지 텍스트 파싱 없이 invalid-input 분류 가능.
+        assert payload["code"] == "BOT_INVALID_PARAM", payload
         assert "잘못된 파라미터 형식" in str(payload["message"]), payload
         # text 메시지가 stderr 로 동시에 새지 않아야 한다.
         assert "잘못된 파라미터 형식" not in result.stderr, result.stderr

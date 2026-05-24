@@ -133,10 +133,15 @@ def submit(ctx: click.Context, path: str) -> None:
 
     if not validation.valid:
         if fmt.is_json:
+            # #1789: 기존 ad-hoc envelope (``submitted``/``stage``/``errors``)
+            # 은 자동화 의존성 보호를 위해 유지하되, 안정 ``code`` 필드를
+            # 추가해 표준 JSON 에러 envelope 의 분류 의미를 보존한다 (현존
+            # ``meta_validation`` 분기와 동형).
             fmt.output(
                 {
                     "submitted": False,
                     "stage": "validate",
+                    "code": "STRATEGY_VALIDATION_ERROR",
                     "errors": validation.errors,
                 }
             )
@@ -155,10 +160,12 @@ def submit(ctx: click.Context, path: str) -> None:
         strategy_cls = StrategyLoader.load(filepath)
     except StrategyLoadError as e:
         if fmt.is_json:
+            # #1789: load 실패에도 안정 ``code`` 를 envelope 에 포함한다.
             fmt.output(
                 {
                     "submitted": False,
                     "stage": "load",
+                    "code": "STRATEGY_LOAD_ERROR",
                     "error": str(e),
                 }
             )
@@ -235,10 +242,15 @@ def submit(ctx: click.Context, path: str) -> None:
         result = _run(_register())
     except StrategyError as e:
         if fmt.is_json:
+            # #1789: register 실패 (duplicate id 등) envelope 에 typed
+            # ``code`` 를 포함한다. 예외 인스턴스가 class-level ``code`` 를
+            # 가지면 우선 사용하고, 없으면 generic ``STRATEGY_ERROR``
+            # fallback 으로 envelope 일관성을 유지한다.
             fmt.output(
                 {
                     "submitted": False,
                     "stage": "register",
+                    "code": getattr(e, "code", "STRATEGY_ERROR"),
                     "error": str(e),
                 }
             )
@@ -388,7 +400,11 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
         fmt.error(str(e), code="STRATEGY_INVALID_STATUS_TRANSITION")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code="STRATEGY_ERROR")
+        # #1796: typed exception 의 class-level ``code`` 속성을 우선 surface
+        # 한다 (예: ``StrategyNotFoundError.code = "STRATEGY_NOT_FOUND"``).
+        # 속성이 없는 일반 ``StrategyError`` 는 기존 ``STRATEGY_ERROR``
+        # fallback 으로 유지된다 (회귀 없음).
+        fmt.error(str(e), code=getattr(e, "code", "STRATEGY_ERROR"))
         raise SystemExit(1) from e
 
     if fmt.is_json:

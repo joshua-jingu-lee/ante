@@ -532,9 +532,11 @@ class TestBotSignalKeyMissingBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
-        # code 없는 형제 계약(#1558): error envelope 의 code 는 빈 문자열
-        # (신규 에러코드 신설 금지 — Non-Goal).
-        assert payload["code"] == ""
+        # #1784 Group A sweep: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로
+        # surface 한다 (CLI/IPC 일관성: ``BotNotFoundError.code`` 와 동형).
+        # 이전 #1558 의 "code 없음" 계약은 #1784 oracle A7 evidence 에서
+        # 자동화 분류 불가 결함으로 보고되어 본 sweep 에서 폐기.
+        assert payload["code"] == "BOT_NOT_FOUND"
         # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
         mock_skm.rotate.assert_not_awaited()
         mock_skm.get_key.assert_not_awaited()
@@ -594,7 +596,8 @@ class TestBotSignalKeyMissingBotExit:
         assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
         # 미존재 bot 이 "시그널 키가 없습니다" 로 잘못 빠지지 않아야 한다.
         assert "시그널 키가 없습니다" not in payload["message"]
-        assert payload["code"] == ""
+        # #1784 Group A sweep: 안정 코드 ``BOT_NOT_FOUND`` 로 surface.
+        assert payload["code"] == "BOT_NOT_FOUND"
         mock_skm.get_key.assert_not_awaited()
 
     def test_missing_bot_lookup_exits_nonzero_text(self, runner: CliRunner) -> None:
@@ -867,8 +870,9 @@ class TestBotSignalKeySoftDeletedBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다: soft-deleted-bot" in payload["message"]
-        # 미존재 bot 과 동일 형제 계약(#1558): code 없음 (Non-Goal).
-        assert payload["code"] == ""
+        # #1784 Group A sweep: 미존재 bot 과 동일 형제 계약 — 안정 코드
+        # ``BOT_NOT_FOUND`` 로 surface (이전 #1558 의 "code 없음" 폐기).
+        assert payload["code"] == "BOT_NOT_FOUND"
         # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
         mock_skm.rotate.assert_not_awaited()
         mock_skm.get_key.assert_not_awaited()
@@ -928,7 +932,8 @@ class TestBotSignalKeySoftDeletedBotExit:
         assert "봇을 찾을 수 없습니다: soft-deleted-bot" in payload["message"]
         # soft-deleted bot 이 "시그널 키가 없습니다" 로 잘못 빠지지 않아야 한다.
         assert "시그널 키가 없습니다" not in payload["message"]
-        assert payload["code"] == ""
+        # #1784 Group A sweep: 안정 코드 ``BOT_NOT_FOUND`` 로 surface.
+        assert payload["code"] == "BOT_NOT_FOUND"
         mock_skm.get_key.assert_not_awaited()
 
     def test_soft_deleted_bot_lookup_exits_nonzero_text(
