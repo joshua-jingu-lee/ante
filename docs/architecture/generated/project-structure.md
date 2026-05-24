@@ -557,7 +557,8 @@ tests/
 │   ├── test_cli_broker_account_not_found.py
 │   ├── test_cli_init_no_web_section.py
 │   ├── test_cli_backtest_run_json_single_document.py
-│   └── test_cli_fresh_init_read_contract.py
+│   ├── test_cli_fresh_init_read_contract.py
+│   └── test_cli_ipc_click_exception_json_envelope.py
 └── __init__.py
 ```
 

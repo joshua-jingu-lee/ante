@@ -71,11 +71,23 @@ async def ipc_send(
         client = IPCClient(socket_path=get_socket_path(config_dir=config_dir))
         response = await client.send(command, args, actor)
     except ServerNotRunningError:
-        raise click.ClickException(
+        # #1754: middleware ClickException fallback 이 IPC 미기동/타임아웃
+        # 케이스를 stable code 로 매핑할 수 있도록 ``ipc_error_code`` /
+        # ``ipc_error_message`` 속성을 부착한다. ``raise`` 시그니처와 메시지
+        # 본문은 기존 호출자(__str__ 가 그대로 사용자 메시지를 반환)와의
+        # 호환을 위해 변경하지 않는다 (서버 error envelope 경로의 attrs
+        # 부착 #1673 과 동형 패턴).
+        exc = click.ClickException(
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
         )
+        exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+        exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
+        raise exc
     except IPCTimeoutError:
-        raise click.ClickException("서버 응답 시간 초과")
+        exc = click.ClickException("서버 응답 시간 초과")
+        exc.ipc_error_code = "IPC_TIMEOUT"  # type: ignore[attr-defined]
+        exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
+        raise exc
 
     # 서버 응답에서 에러 상태 처리
     if response.get("status") == "error":
