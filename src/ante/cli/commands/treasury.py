@@ -299,7 +299,20 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         finally:
             await db.close()
 
-    result = _run(_run_budgets())
+    # valid-but-missing account_id(예: `acc-9999`)는 `_create_treasury` 내부의
+    # `account_service.get`에서 `AccountNotFoundError`로 raise된다. Click 기본
+    # 핸들러가 typed exception을 모르고 traceback/빈 stdout으로 새던
+    # contract-drift를 본 매핑이 닫는다 (#1758, status/snapshot #1725 동형).
+    # 에러코드는 `ACCOUNT_NOT_FOUND` SSOT.
+    try:
+        result = _run(_run_budgets())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
+
     if fmt.is_json:
         fmt.output(result)
     else:
@@ -345,12 +358,17 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
         finally:
             await db.close()
 
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
+    # (#1758, #1725). Click/Exception fallback은 기존(#1722 IPC 분기)을 보존한다.
     try:
         result = _run(_run_set_balance())
     except click.ClickException as e:
         code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
         message = getattr(e, "ipc_error_message", None) or e.message
         fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
         fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
@@ -657,7 +675,18 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         finally:
             await db.close()
 
-    result = _run(_run_value())
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
+    # (#1758, #1725). outer try는 `_create_treasury`(line ~612)와
+    # `_create_treasury_manager`(line ~615) 두 경로의 raise를 모두 cover한다.
+    try:
+        result = _run(_run_value())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
+
     if fmt.is_json:
         fmt.output(result)
     else:
@@ -734,7 +763,18 @@ def portfolio_history(
         finally:
             await db.close()
 
-    result = _run(_run_history())
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
+    # (#1758, #1725). outer try는 `_create_treasury`(line ~699)와
+    # `_create_treasury_manager`(line ~702) 두 경로의 raise를 모두 cover한다.
+    try:
+        result = _run(_run_history())
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
+
     if fmt.is_json:
         fmt.output(result)
     else:
