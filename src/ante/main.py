@@ -406,6 +406,7 @@ async def _init_trading(s: Services) -> None:
     # BotManager
     from ante.bot import BotManager  # noqa: F401
     from ante.bot.providers.virtual import VirtualExecutor
+    from ante.bot.signal_key import SignalKeyManager
     from ante.strategy.snapshot import StrategySnapshot
 
     s.virtual_executor = VirtualExecutor(
@@ -421,6 +422,17 @@ async def _init_trading(s: Services) -> None:
     strategies_dir = Path(s.config.get("strategy.dir", "strategies"))
     s.strategy_snapshot = StrategySnapshot(strategies_dir)
 
+    # Refs #1760: server-side BotManager 가 accepts_external_signals 전략의 bot
+    # 생성 시 시그널 키를 자동 발급하도록 SignalKeyManager 를 주입한다. 미주입
+    # 시 ``BotManager._signal_key_manager`` 가 None 으로 남아 자동 발급 분기
+    # (``manager.py:427-431``)가 항상 skip 되어 외부 시그널 전략의 ``bot
+    # signal-key`` 조회가 "시그널 키가 없습니다" 로 실패한다.
+    # ``SignalKeyManager.initialize()`` 는 ``CREATE TABLE IF NOT EXISTS`` 라
+    # idempotent — cold-path CLI ``bot signal-key`` 의 자체 인스턴스
+    # (``cli/commands/bot.py:379``) 와 공존해도 안전하다.
+    signal_key_manager = SignalKeyManager(db=s.db)
+    await signal_key_manager.initialize()
+
     s.bot_manager = BotManager(
         eventbus=s.eventbus,
         db=s.db,
@@ -429,6 +441,7 @@ async def _init_trading(s: Services) -> None:
         account_service=s.account_service,
         treasury_manager=s.treasury_manager,
         trade_service=s.trade_service,
+        signal_key_manager=signal_key_manager,
     )
     await s.bot_manager.initialize()
 
