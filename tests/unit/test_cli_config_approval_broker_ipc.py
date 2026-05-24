@@ -220,8 +220,10 @@ class TestApprovalApproveIPC:
 
         assert result.exit_code == 0, result.output
         assert "결재 승인" in result.output
+        # #1794: IPC handler ``_handle_approval_approve`` (registry.py:515) 가
+        # ``args["id"]`` 를 기대 — CLI 가 동일 키로 정렬.
         mock_client.send.assert_called_once_with(
-            "approval.approve", {"approval_id": "apr-abc"}, "test-master"
+            "approval.approve", {"id": "apr-abc"}, "test-master"
         )
 
 
@@ -243,9 +245,11 @@ class TestApprovalRejectIPC:
 
         assert result.exit_code == 0, result.output
         assert "결재 거절" in result.output
+        # #1794: handler ``_handle_approval_reject`` (registry.py:523) 가
+        # ``args["id"]`` 를 기대.
         mock_client.send.assert_called_once_with(
             "approval.reject",
-            {"approval_id": "apr-abc", "reason": "부적절"},
+            {"id": "apr-abc", "reason": "부적절"},
             "test-master",
         )
 
@@ -265,8 +269,10 @@ class TestApprovalCancelIPC:
 
         assert result.exit_code == 0, result.output
         assert "결재 철회" in result.output
+        # #1794: handler ``_handle_approval_cancel`` (registry.py:533) 가
+        # ``args["id"]`` 를 기대. ``cancel-invalid`` 만 별도 계약(approval_id).
         mock_client.send.assert_called_once_with(
-            "approval.cancel", {"approval_id": "apr-abc"}, "test-master"
+            "approval.cancel", {"id": "apr-abc"}, "test-master"
         )
 
 
@@ -290,8 +296,10 @@ class TestApprovalReopenIPC:
 
         assert result.exit_code == 0, result.output
         assert "결재 재상신" in result.output
+        # #1794: handler ``_handle_approval_reopen`` (registry.py:569) 가
+        # ``args["id"]`` 를 기대 (body/params optional).
         mock_client.send.assert_called_once_with(
-            "approval.reopen", {"approval_id": "apr-abc"}, "test-master"
+            "approval.reopen", {"id": "apr-abc"}, "test-master"
         )
 
 
