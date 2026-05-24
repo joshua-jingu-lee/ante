@@ -349,6 +349,7 @@ async def _handle_treasury_allocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
     from ante.account.scoping import require_account_id
+    from ante.bot.exceptions import BotNotFoundError
 
     # #1656 E bucket / #1633 finding: ``require_account_id``를 함수 **첫
     # 문장**으로(``args["bot_id"]``/``args["amount"]`` 이전) 둔다. raw
@@ -364,6 +365,15 @@ async def _handle_treasury_allocate(
     )
     bot_id = args["bot_id"]
     amount = args["amount"]
+    # #1792: missing bot id 로 호출해도 ``Treasury.allocate`` 가 cash 만 검증하고
+    # bot 존재 여부를 검사하지 않아 exit 0 + status=ok 가 반환되던 회귀를 차단.
+    # ``bot.start``/``bot.stop``/``bot.status``/``bot.update`` (registry.py:212/
+    # 256/297/326) 와 동일한 ``svc.bot_manager.get_bot`` + ``BotNotFoundError``
+    # (code="BOT_NOT_FOUND") 패턴을 사용한다. ``Treasury`` 서비스 자체는 단일
+    # 책임(현금/예산)을 유지하고 IPC handler 가 cross-module 존재 검증을 한다.
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
     treasury = svc.treasury_manager.get(account_id)
     result = await treasury.allocate(bot_id, amount)
     return {"account_id": account_id, "bot_id": bot_id, "success": result}
@@ -373,6 +383,7 @@ async def _handle_treasury_deallocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
     from ante.account.scoping import require_account_id
+    from ante.bot.exceptions import BotNotFoundError
 
     # #1656 E bucket / #1633 finding: ``_handle_treasury_allocate``와 동형 —
     # ``require_account_id``를 첫 문장으로(``args["bot_id"]``/``args["amount"]``
@@ -383,6 +394,12 @@ async def _handle_treasury_deallocate(
     )
     bot_id = args["bot_id"]
     amount = args["amount"]
+    # #1792: allocate 와 동형 — bot 존재 검증을 ``Treasury.deallocate`` 호출
+    # 이전에 둔다. ``BotNotFoundError`` (code="BOT_NOT_FOUND") 가 raise 되며
+    # IPC server.py 의 ``getattr(e, "code", ...)`` envelope 으로 surface 된다.
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
     treasury = svc.treasury_manager.get(account_id)
     result = await treasury.deallocate(bot_id, amount)
     return {"account_id": account_id, "bot_id": bot_id, "success": result}
