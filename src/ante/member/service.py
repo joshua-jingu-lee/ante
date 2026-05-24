@@ -398,8 +398,13 @@ class MemberService:
 
         existing = await self.get(member_id)
         if existing:
-            msg = f"이미 존재하는 member_id: {member_id}"
-            raise ValueError(msg)
+            # #1807 (Group R sweep): duplicate member_id 는 typed
+            # ``MemberAlreadyExistsError`` (.code=MEMBER_ALREADY_EXISTS) 로
+            # raise 해 CLI envelope 에 안정 코드 surface. ValueError 다중상속
+            # 으로 기존 ``except (ValueError, PermissionError)`` 회귀 없음.
+            from ante.member.errors import MemberAlreadyExistsError
+
+            raise MemberAlreadyExistsError(member_id)
 
         if emoji is None:
             emoji = await self._auto_assign_emoji()

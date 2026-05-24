@@ -56,15 +56,24 @@ class RecoveryKeyManager:
     async def reset_password(
         self, member: Member, recovery_key: str, new_password: str
     ) -> None:
-        """recovery key로 패스워드 리셋 (human만)."""
+        """recovery key로 패스워드 리셋 (human만).
+
+        잘못된 recovery key 는 #1806 (Group R sweep) 에 따라
+        ``MemberInvalidRecoveryCredentialError`` (.code=
+        ``MEMBER_INVALID_RECOVERY_CREDENTIAL``, ``ValueError`` 다중상속)
+        로 raise 한다. 이전에는 ``PermissionError`` 였으나 typed 로 좁혀
+        CLI envelope 안정 코드 surface 한다. ``ValueError`` 다중상속이라
+        기존 ``except (ValueError, PermissionError)`` fallback 회귀 없음.
+        """
         self._assert_human(member, "reset_password")
 
         if not member.recovery_key_hash or not verify_recovery_key(
             recovery_key, member.recovery_key_hash
         ):
             await self._publish_auth_failed(member.member_id, "recovery key 불일치")
-            msg = "유효하지 않은 recovery key"
-            raise PermissionError(msg)
+            from ante.member.errors import MemberInvalidRecoveryCredentialError
+
+            raise MemberInvalidRecoveryCredentialError("유효하지 않은 recovery key")
 
         await self._db.execute(
             "UPDATE members SET password_hash = ? WHERE member_id = ?",
@@ -75,15 +84,27 @@ class RecoveryKeyManager:
         logger.info("패스워드 리셋 완료 (recovery key): %s", member.member_id)
 
     async def regenerate_recovery_key(self, member: Member, password: str) -> str:
-        """복구 키 재발급. 현재 패스워드 확인 필수."""
+        """복구 키 재발급. 현재 패스워드 확인 필수.
+
+        잘못된 현재 패스워드는 #1806 (Group R sweep) 에 따라
+        ``MemberInvalidRecoveryCredentialError`` (.code=
+        ``MEMBER_INVALID_RECOVERY_CREDENTIAL``, ``ValueError`` 다중상속)
+        로 raise 한다. 이전에는 ``PermissionError`` 였으나 typed 로 좁혀
+        CLI envelope 안정 코드 surface 한다. ``change_password`` 의
+        동일 메시지 ``PermissionError`` 는 본 PR scope 밖이다 (이슈 #1806
+        본문은 ``reset-password`` / ``regenerate-recovery-key`` 두 표면만 명시).
+        """
         self._assert_human(member, "regenerate_recovery_key")
         self._assert_active(member, "regenerate_recovery_key")
 
         if not member.password_hash or not verify_password(
             password, member.password_hash
         ):
-            msg = "현재 패스워드가 일치하지 않습니다"
-            raise PermissionError(msg)
+            from ante.member.errors import MemberInvalidRecoveryCredentialError
+
+            raise MemberInvalidRecoveryCredentialError(
+                "현재 패스워드가 일치하지 않습니다"
+            )
 
         recovery_key = generate_recovery_key()
         await self._db.execute(
