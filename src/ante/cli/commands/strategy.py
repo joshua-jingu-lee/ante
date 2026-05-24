@@ -119,6 +119,7 @@ def validate(ctx: click.Context, path: str) -> None:
 @require_scope("strategy:write")
 def submit(ctx: click.Context, path: str) -> None:
     """전략 제출 (검증 -> 로드 테스트 -> Registry 등록)."""
+    from ante.strategy.base import StrategyMeta
     from ante.strategy.exceptions import StrategyError, StrategyLoadError
     from ante.strategy.loader import StrategyLoader
     from ante.strategy.validator import StrategyValidator
@@ -166,6 +167,32 @@ def submit(ctx: click.Context, path: str) -> None:
         raise SystemExit(1)
 
     meta = strategy_cls.meta
+
+    # meta shape 검증: StrategyMeta 인스턴스가 아니면 사용자 manifest 오류로
+    # validation error 처리 (dict 등 invalid shape의 AttributeError 누출 차단).
+    # registry.register(meta.name, meta.version, ...) 호출 전에 ingress에서
+    # 차단해야 StrategyMeta가 아닌 객체가 attribute access 단계에서
+    # AttributeError traceback으로 stderr에 새는 #1756 회귀를 막는다.
+    if not isinstance(meta, StrategyMeta):
+        error_message = (
+            f"meta는 StrategyMeta 인스턴스여야 합니다 "
+            f"(받은 타입: {type(meta).__name__})"
+        )
+        if fmt.is_json:
+            fmt.output(
+                {
+                    "submitted": False,
+                    "stage": "meta_validation",
+                    "code": "STRATEGY_VALIDATION_ERROR",
+                    "error": error_message,
+                }
+            )
+        else:
+            fmt.error(
+                f"Invalid meta shape: expected StrategyMeta, got {type(meta).__name__}",
+                code="STRATEGY_VALIDATION_ERROR",
+            )
+        raise SystemExit(1)
 
     # 3. 전략 인스턴스에서 rationale/risks 추출
     rationale = ""
