@@ -18,10 +18,12 @@ from ante.bot.config import (
     validate_runtime_controls,
 )
 from ante.bot.exceptions import (
+    BotAlreadyExistsError,
     BotError,
     BotNotAcceptingSignals,
     BotNotFoundError,
     BotStateConflict,
+    BotStrategyAlreadyRunningError,
 )
 
 if TYPE_CHECKING:
@@ -347,7 +349,10 @@ class BotManager:
         )
 
         if config.bot_id in self._bots:
-            raise BotError(f"Bot already exists: {config.bot_id}")
+            # #1800: 동일 bot_id 중복 등록은 ``BotAlreadyExistsError``
+            # (code=``"BOT_ALREADY_EXISTS"``) 로 typed raise — IPC envelope
+            # 이 일반 ``EXECUTION_ERROR`` 가 아닌 안정 코드를 surface 한다.
+            raise BotAlreadyExistsError(f"Bot already exists: {config.bot_id}")
 
         # 1전략 1봇 정책: 실행 중인 봇이 사용 중인 전략 중복 차단
         active_statuses = {BotStatus.RUNNING, BotStatus.STOPPING}
@@ -356,7 +361,10 @@ class BotManager:
                 existing_bot.config.strategy_id == config.strategy_id
                 and existing_bot.status in active_statuses
             ):
-                raise BotError(
+                # #1800: 1전략 1봇 정책 위반은
+                # ``BotStrategyAlreadyRunningError`` (code=
+                # ``"BOT_STRATEGY_ALREADY_RUNNING"``) 로 typed raise.
+                raise BotStrategyAlreadyRunningError(
                     f"전략 '{config.strategy_id}'은(는) 이미 봇 "
                     f"'{existing_bot.bot_id}'에서 사용 중입니다. "
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."

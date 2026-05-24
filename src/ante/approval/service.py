@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from ante.account.scoping import require_account_id
 from ante.approval.auto_approve import AutoApproveEvaluator
+from ante.approval.errors import ApprovalNotFoundError
 from ante.approval.models import (
     ApprovalRequest,
     ApprovalStatus,
@@ -789,8 +790,13 @@ class ApprovalService:
         """
         request = await self.get(id)
         if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
+            # #1798: missing approval 은 typed ``ApprovalNotFoundError`` 로
+            # raise 해 IPC envelope 이 ``APPROVAL_NOT_FOUND`` typed code 를
+            # 보존하게 한다. 기존 ``except ValueError`` 핸들러가 있던 호출자
+            # (``cancel_invalid`` CLI 등) 는 ``ApprovalNotFoundError`` 가
+            # ``ApprovalError`` 의 sub 이지만 ``Exception`` 으로도 잡히므로
+            # 메시지 시그니처와 exit code 는 동일하게 유지된다.
+            raise ApprovalNotFoundError(id)
 
         if request.type in _VALID_APPROVAL_TYPES:
             msg = (

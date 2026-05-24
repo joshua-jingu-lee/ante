@@ -292,11 +292,20 @@ class TestCancelInvalidTypeRequestRejection:
         self,
         service: ApprovalService,
     ) -> None:
-        """미존재 id 는 ``ValueError``."""
-        with pytest.raises(ValueError, match="찾을 수 없음"):
+        """미존재 id 는 ``ApprovalNotFoundError`` (code=APPROVAL_NOT_FOUND).
+
+        #1798 Group A sweep: 이전 ``ValueError`` 에서 typed
+        ``ApprovalNotFoundError`` 로 전환되어 IPC envelope 이 안정
+        코드 ``APPROVAL_NOT_FOUND`` 를 surface 한다. type/status 검증의
+        ``ValueError`` 는 그대로 유지된다 (sibling tests 회귀 없음).
+        """
+        from ante.approval.errors import ApprovalNotFoundError
+
+        with pytest.raises(ApprovalNotFoundError, match="찾을 수 없음") as excinfo:
             await service.cancel_invalid_type_request(
                 "no-such-id", resolved_by="admin-1"
             )
+        assert getattr(excinfo.value, "code", None) == "APPROVAL_NOT_FOUND"
 
 
 # ── cancel_invalid_type_request 성공 케이스 ───────────────────────

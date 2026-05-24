@@ -69,7 +69,8 @@ src/ante/
 │   ├── models.py                     # ApprovalRequest, ApprovalStatus, ApprovalType
 │   ├── service.py                    # ApprovalService — 결재 요청 관리 + 자동 실행
 │   ├── __init__.py
-│   └── auto_approve.py
+│   ├── auto_approve.py
+│   └── errors.py
 ├── instrument/
 │   ├── models.py                     # Instrument — 종목 메타데이터 (frozen dataclass)
 │   ├── service.py                    # InstrumentService — 전체 메모리 캐시 + SQLite
@@ -566,7 +567,8 @@ tests/
 │   ├── test_bot_lifecycle_state_conflict.py
 │   ├── test_bot_create_signal_key_auto.py
 │   ├── test_cli_bot_signal_key_rotate_external_gate.py
-│   └── test_cli_error_code_naming_sweep.py
+│   ├── test_cli_error_code_naming_sweep.py
+│   └── test_cli_envelope_typed_codes_group_a_sweep.py
 └── __init__.py
 ```
 

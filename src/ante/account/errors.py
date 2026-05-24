@@ -8,9 +8,17 @@ class AccountError(Exception):
 
 
 class AccountNotFoundError(AccountError):
-    """계좌를 찾을 수 없음."""
+    """계좌를 찾을 수 없음.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_NOT_FOUND"``를 노출하도록 한다 (#1795). CLI
+    ``account suspend``/``account activate`` 등이 IPC error envelope 의
+    typed code 를 그대로 surface 해 not-found 의미가 일반
+    ``EXECUTION_ERROR`` 로 분실되지 않게 한다.
+    """
+
+    code: str = "ACCOUNT_NOT_FOUND"
 
 
 class AccountAlreadyExistsError(AccountError):

@@ -102,7 +102,15 @@ class InvalidScopeError(ValueError):
     ``ValueError`` 의 서브클래스로 두어 기존 ``except ValueError`` 핸들러가
     그대로 동작하지만, 호출자가 vocabulary 위반과 다른 도메인 오류
     (예: 존재하지 않는 멤버) 를 구분하려면 본 클래스로 좁혀 catch 한다.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"MEMBER_INVALID_SCOPE"`` 를 노출하도록 한다 (#1797). CLI 표면은 이미
+    ``code="MEMBER_INVALID_SCOPE"`` 로 명시 매핑하고 있어 envelope 일관성
+    회귀가 없다.
     """
+
+    code: str = "MEMBER_INVALID_SCOPE"
 
     def __init__(self, scope: str) -> None:
         self.scope = scope

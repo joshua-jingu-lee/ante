@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ante.strategy.base import StrategyMeta
-from ante.strategy.exceptions import StrategyError
+from ante.strategy.exceptions import StrategyError, StrategyNotFoundError
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -213,10 +213,15 @@ class StrategyRegistry:
         strategy_id: str,
         status: StrategyStatus,
     ) -> None:
-        """전략 상태 변경. 허용된 전환만 수행한다."""
+        """전략 상태 변경. 허용된 전환만 수행한다.
+
+        Missing strategy 는 ``StrategyNotFoundError`` (code=
+        ``"STRATEGY_NOT_FOUND"``) 로 raise 해 CLI/IPC 표면이 typed code 를
+        보존하게 한다 (#1796).
+        """
         record = await self.get(strategy_id)
         if record is None:
-            raise StrategyError(f"Strategy not found: {strategy_id}")
+            raise StrategyNotFoundError(f"Strategy not found: {strategy_id}")
 
         allowed = _ALLOWED_TRANSITIONS.get(record.status, set())
         if status not in allowed:
