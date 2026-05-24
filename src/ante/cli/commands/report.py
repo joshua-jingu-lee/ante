@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import click
 from pydantic import ValidationError
@@ -20,6 +21,8 @@ from ante.report.validation import ReportSubmitRequest
 # 대신 모듈 상단 import을 사용한다. `ante.report.models`는 dataclass + StrEnum
 # + math 만 노출하는 light 모듈이라 `tests/unit/test_cli_dependency_isolation.py`
 # 가 회귀를 차단한다.
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -213,21 +216,40 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
     async def _list() -> list[dict]:
         from ante.core.database import Database
 
+        # ``db.connect()`` 이후의 모든 라이프사이클(``ReportStore.initialize``,
+        # ``list_reports`` 호출 포함)을 ``except BaseException`` 블록으로 감싸
+        # 실패 시 ``db.close()``를 보장한다. ``initialize``/``list_reports`` 가
+        # raise되면 aiosqlite 연결이 leak되어 asyncio 종료 시 worker thread가
+        # 정리되며 stderr에 traceback이 노출되는 회귀를 차단한다 (#1755;
+        # ``_create_account_service`` (#1722) cleanup 패턴 1:1 미러).
         db = Database(resolved_db_path)
-        await db.connect()
-        store = ReportStore(db=db)
-        await store.initialize()
-        report_status = ReportStatus(status) if status else None
-        reports = await store.list_reports(status=report_status)
-        return [
-            {
-                "report_id": r.report_id,
-                "strategy": r.strategy_name,
-                "status": r.status.value,
-                "submitted_at": str(r.submitted_at),
-            }
-            for r in reports
-        ]
+        try:
+            await db.connect()
+            store = ReportStore(db=db)
+            await store.initialize()
+            report_status = ReportStatus(status) if status else None
+            reports = await store.list_reports(status=report_status)
+            rows = [
+                {
+                    "report_id": r.report_id,
+                    "strategy": r.strategy_name,
+                    "status": r.status.value,
+                    "submitted_at": str(r.submitted_at),
+                }
+                for r in reports
+            ]
+        except BaseException:
+            try:
+                await db.close()
+            except Exception:
+                # close 실패는 원본 예외를 가리지 않고 무시한다 — 호출자가
+                # 안정적인 ``code`` 로 종료할 수 있어야 한다.
+                logger.debug(
+                    "db.close() after list failure raised — ignored", exc_info=True
+                )
+            raise
+        await db.close()
+        return rows
 
     try:
         rows = asyncio.run(_list())

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 
 import click
 
@@ -17,6 +18,8 @@ from ante.cli.middleware import get_member_id, require_auth, require_scope
 # 이를 위해 함수 내부 import 대신 모듈 상단 import을 사용한다.
 # `ante.approval.models`은 dataclass + StrEnum 만 노출하는 light 모듈이라
 # `tests/unit/test_cli_dependency_isolation.py`가 회귀를 차단한다.
+
+logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -168,25 +171,41 @@ def approval_list(
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
+        # ``db.connect()`` 이후의 모든 라이프사이클(``ApprovalService.initialize``,
+        # ``list_approvals`` 호출 포함)을 ``except BaseException`` 블록으로 감싸
+        # 실패 시 ``db.close()``를 보장한다 (#1755; ``_create_account_service``
+        # (#1722) cleanup 패턴 1:1 미러). 이전 구현은 ``list_approvals`` 가
+        # raise되면 ``await db.close()`` 미도달이라 aiosqlite worker thread가
+        # leak되어 stderr traceback이 노출됐다.
         db = Database(resolved_db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
+        try:
+            await db.connect()
+            eventbus = EventBus()
+            service = ApprovalService(db=db, eventbus=eventbus)
+            await service.initialize()
 
-        requests = await service.list_approvals(status=status, type=approval_type)
+            requests = await service.list_approvals(status=status, type=approval_type)
+            rows = [
+                {
+                    "id": r.id[:8],
+                    "type": r.type,
+                    "status": r.status,
+                    "requester": r.requester,
+                    "title": r.title,
+                    "created_at": r.created_at,
+                }
+                for r in requests
+            ]
+        except BaseException:
+            try:
+                await db.close()
+            except Exception:
+                logger.debug(
+                    "db.close() after list failure raised — ignored", exc_info=True
+                )
+            raise
         await db.close()
-        return [
-            {
-                "id": r.id[:8],
-                "type": r.type,
-                "status": r.status,
-                "requester": r.requester,
-                "title": r.title,
-                "created_at": r.created_at,
-            }
-            for r in requests
-        ]
+        return rows
 
     try:
         rows = asyncio.run(_list())
@@ -215,31 +234,46 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
+        # ``_find_request`` 가 not-found/multi-match 시 ``ValueError`` 를 raise
+        # 하면 이전 구현은 ``await db.close()`` 미도달 → aiosqlite leak → asyncio
+        # 종료 시 worker thread 8s busy_timeout 대기로 probe timeout exit 124
+        # 회귀 (#1755). ``_create_account_service`` (#1722) cleanup 패턴 1:1 미러
+        # 로 ``except BaseException`` 블록에서 ``db.close()`` 를 보장한다.
         db = Database(resolved_db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
+        try:
+            await db.connect()
+            eventbus = EventBus()
+            service = ApprovalService(db=db, eventbus=eventbus)
+            await service.initialize()
 
-        req = await _find_request(service, id)
+            req = await _find_request(service, id)
+            result = {
+                "id": req.id,
+                "type": req.type,
+                "status": req.status,
+                "requester": req.requester,
+                "title": req.title,
+                "body": req.body,
+                "params": req.params,
+                "reviews": req.reviews,
+                "history": req.history,
+                "reference_id": req.reference_id,
+                "expires_at": req.expires_at,
+                "created_at": req.created_at,
+                "resolved_at": req.resolved_at,
+                "resolved_by": req.resolved_by,
+                "reject_reason": req.reject_reason,
+            }
+        except BaseException:
+            try:
+                await db.close()
+            except Exception:
+                logger.debug(
+                    "db.close() after info failure raised — ignored", exc_info=True
+                )
+            raise
         await db.close()
-        return {
-            "id": req.id,
-            "type": req.type,
-            "status": req.status,
-            "requester": req.requester,
-            "title": req.title,
-            "body": req.body,
-            "params": req.params,
-            "reviews": req.reviews,
-            "history": req.history,
-            "reference_id": req.reference_id,
-            "expires_at": req.expires_at,
-            "created_at": req.created_at,
-            "resolved_at": req.resolved_at,
-            "resolved_by": req.resolved_by,
-            "reject_reason": req.reject_reason,
-        }
+        return result
 
     try:
         result = asyncio.run(_info())
@@ -283,25 +317,41 @@ def review(
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
+        # ``service.add_review`` 가 not-found/invalid-id 시 raise하면 이전 구현은
+        # ``await db.close()`` 미도달 → aiosqlite leak → probe timeout exit 124
+        # 회귀 (#1755; ``approval info`` 와 동형). ``_create_account_service``
+        # (#1722) cleanup 패턴 1:1 미러로 ``except BaseException`` 블록에서
+        # ``db.close()`` 를 보장한다.
         db = Database(resolved_db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
+        try:
+            await db.connect()
+            eventbus = EventBus()
+            service = ApprovalService(db=db, eventbus=eventbus)
+            await service.initialize()
 
-        req = await service.add_review(
-            id=id,
-            reviewer=reviewer,
-            result=review_result,
-            detail=detail,
-        )
+            req = await service.add_review(
+                id=id,
+                reviewer=reviewer,
+                result=review_result,
+                detail=detail,
+            )
+            result = {
+                "id": req.id,
+                "reviewer": reviewer,
+                "result": review_result,
+                "reviews_count": len(req.reviews),
+            }
+        except BaseException:
+            try:
+                await db.close()
+            except Exception:
+                logger.debug(
+                    "db.close() after review failure raised — ignored",
+                    exc_info=True,
+                )
+            raise
         await db.close()
-        return {
-            "id": req.id,
-            "reviewer": reviewer,
-            "result": review_result,
-            "reviews_count": len(req.reviews),
-        }
+        return result
 
     try:
         result = asyncio.run(_review())
@@ -417,26 +467,40 @@ def audit_types(
         from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
+        # 기존 try/finally 는 ``service.list_invalid_type_requests`` 호출만 감쌌
+        # 으므로 ``ApprovalService(...)`` 생성자/``service.initialize()`` 가 raise
+        # 되면 ``db.close()`` 미도달이라 aiosqlite leak이 발생한다. 동일 모듈의
+        # 다른 명령과 같은 cleanup 패턴(``except BaseException`` + close) 으로
+        # 통일한다 (#1755; ``_create_account_service`` (#1722) 미러).
         db = Database(resolved_db_path)
-        await db.connect()
-        eventbus = EventBus()
-        service = ApprovalService(db=db, eventbus=eventbus)
-        await service.initialize()
         try:
+            await db.connect()
+            eventbus = EventBus()
+            service = ApprovalService(db=db, eventbus=eventbus)
+            await service.initialize()
             requests = await service.list_invalid_type_requests(status=status)
-        finally:
-            await db.close()
-        return [
-            {
-                "id": r.id,
-                "type": r.type,
-                "status": r.status,
-                "requester": r.requester,
-                "created_at": r.created_at,
-                "expires_at": r.expires_at,
-            }
-            for r in requests
-        ]
+            rows = [
+                {
+                    "id": r.id,
+                    "type": r.type,
+                    "status": r.status,
+                    "requester": r.requester,
+                    "created_at": r.created_at,
+                    "expires_at": r.expires_at,
+                }
+                for r in requests
+            ]
+        except BaseException:
+            try:
+                await db.close()
+            except Exception:
+                logger.debug(
+                    "db.close() after audit-types failure raised — ignored",
+                    exc_info=True,
+                )
+            raise
+        await db.close()
+        return rows
 
     try:
         rows = asyncio.run(_list())
