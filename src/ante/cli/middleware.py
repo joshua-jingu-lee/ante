@@ -582,6 +582,35 @@ class AuthenticatedGroup(_LeafPathMixin):
             import sys as _sys
 
             _sys.exit(1)
+        except click.ClickException as e:
+            # #1754: IPC 미기동/타임아웃 등 비-``UsageError`` ``ClickException``
+            # 도 JSON 모드 구조화 에러 계약 (``{status, code, message}``
+            # envelope + exit non-zero, ``docs/specs/cli/02-design-decisions.md
+            # :78-81``) 을 만족해야 한다.
+            #
+            # ``UsageError`` 가 ``ClickException`` 의 subclass 이므로 Python
+            # ``except`` 순서 매칭상 본 분기는 ``UsageError`` 가 아닌 일반
+            # ``ClickException`` (예: ``ipc_send`` 가 raise 하는
+            # ``ServerNotRunningError`` / ``IPCTimeoutError`` 변환 + 서버 error
+            # envelope) 만 처리한다.
+            #
+            # ``ipc_send`` (``ante.cli.commands.ipc_helpers``) 는
+            # ``ClickException`` 인스턴스에 ``ipc_error_code`` /
+            # ``ipc_error_message`` 속성을 부착하므로 그 stable code 를 우선
+            # 사용하고, 없으면 ``IPC_ERROR`` fallback 으로 envelope 을 출력한다
+            # (``commands/bot.py``, ``commands/treasury.py``, ``commands/
+            # strategy.py``, ``commands/rule.py``, ``commands/member.py`` 의 호출
+            # 표면 try/except 매핑과 동형 fallback code).
+            from ante.cli.formatter import OutputFormatter
+
+            fmt = OutputFormatter("json")
+            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+            message = getattr(e, "ipc_error_message", None) or e.message
+            fmt.error(message, code=code)
+            import sys as _sys
+
+            exit_code = e.exit_code if isinstance(e.exit_code, int) else 1
+            _sys.exit(exit_code if exit_code != 0 else 1)
         except click.exceptions.Abort:
             # ``standalone_mode=True`` 호출자 호환을 위해 click 기본 Abort 동작
             # (``Aborted!`` stderr + exit 1) 을 그대로 보존한다.
