@@ -158,9 +158,9 @@ class TestAccountBalance:
 
 class TestAllocation:
     async def test_allocate(self, treasury):
-        """예산 할당."""
+        """예산 할당. #1809: 정상 시 None 반환 (raise 패턴)."""
         result = await treasury.allocate("bot1", 1_000_000.0)
-        assert result is True
+        assert result is None
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 1_000_000.0
@@ -174,46 +174,63 @@ class TestAllocation:
         assert budget.account_id == ACCOUNT_ID
 
     async def test_allocate_insufficient(self, treasury):
-        """미할당 자금 부족 시 실패."""
-        result = await treasury.allocate("bot1", 20_000_000.0)
-        assert result is False
+        """#1809: 미할당 자금 부족 시 TreasuryInsufficientUnallocatedError."""
+        from ante.treasury.exceptions import TreasuryInsufficientUnallocatedError
+
+        with pytest.raises(TreasuryInsufficientUnallocatedError) as exc_info:
+            await treasury.allocate("bot1", 20_000_000.0)
+        assert exc_info.value.code == "TREASURY_INSUFFICIENT_BALANCE"
+        assert exc_info.value.bot_id == "bot1"
+        assert exc_info.value.amount == 20_000_000.0
 
     async def test_allocate_zero(self, treasury):
-        """0 이하 할당 실패."""
-        assert await treasury.allocate("bot1", 0) is False
-        assert await treasury.allocate("bot1", -100) is False
+        """#1809: 0 이하 할당 시 TreasuryInvalidAmountError."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
+        with pytest.raises(TreasuryInvalidAmountError) as exc_zero:
+            await treasury.allocate("bot1", 0)
+        assert exc_zero.value.code == "TREASURY_INVALID_AMOUNT"
+        with pytest.raises(TreasuryInvalidAmountError) as exc_neg:
+            await treasury.allocate("bot1", -100)
+        assert exc_neg.value.code == "TREASURY_INVALID_AMOUNT"
 
     async def test_allocate_rejects_nan(self, treasury):
-        """NaN 할당 거부. budget state 미오염 확인 (#1411).
+        """#1809+#1411: NaN 할당 거부 + budget state 미오염.
 
         ``NaN`` 비교 연산은 모두 False이므로 기존 ``amount <= 0`` 가드를
-        우회한다. ``math.isfinite`` 가드가 입구에서 거부해야 한다.
+        우회한다. ``math.isfinite`` 가드가 입구에서 typed exception을 raise.
         """
-        result = await treasury.allocate("bot1", float("nan"))
-        assert result is False
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.allocate("bot1", float("nan"))
         # state 오염 없음 — _unallocated/budget 둘 다 변경 X
         assert treasury.unallocated == 10_000_000.0
         assert treasury.get_budget("bot1") is None
 
     async def test_allocate_rejects_positive_inf(self, treasury):
-        """+Inf 할당 거부. budget state 미오염 확인 (#1411)."""
-        result = await treasury.allocate("bot1", float("inf"))
-        assert result is False
+        """#1809+#1411: +Inf 할당 거부 + budget state 미오염."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.allocate("bot1", float("inf"))
         assert treasury.unallocated == 10_000_000.0
         assert treasury.get_budget("bot1") is None
 
     async def test_allocate_rejects_negative_inf(self, treasury):
-        """-Inf 할당 거부 (#1411)."""
-        result = await treasury.allocate("bot1", -float("inf"))
-        assert result is False
+        """#1809+#1411: -Inf 할당 거부."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.allocate("bot1", -float("inf"))
         assert treasury.unallocated == 10_000_000.0
         assert treasury.get_budget("bot1") is None
 
     async def test_deallocate(self, treasury):
-        """예산 회수."""
+        """예산 회수. #1809: 정상 시 None 반환 (raise 패턴)."""
         await treasury.allocate("bot1", 1_000_000.0)
         result = await treasury.deallocate("bot1", 500_000.0)
-        assert result is True
+        assert result is None
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 500_000.0
@@ -221,22 +238,35 @@ class TestAllocation:
         assert treasury.unallocated == 9_500_000.0
 
     async def test_deallocate_exceeds_available(self, treasury):
-        """가용 예산 초과 회수 실패."""
+        """#1809: 가용 예산 초과 회수 시 TreasuryDeallocateExceedsAvailableError."""
+        from ante.treasury.exceptions import (
+            TreasuryDeallocateExceedsAvailableError,
+        )
+
         await treasury.allocate("bot1", 1_000_000.0)
         await treasury.reserve_for_order("bot1", "ord1", 800_000.0)
-        result = await treasury.deallocate("bot1", 500_000.0)
-        assert result is False
+        with pytest.raises(TreasuryDeallocateExceedsAvailableError) as exc_info:
+            await treasury.deallocate("bot1", 500_000.0)
+        assert exc_info.value.code == "TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE"
+        assert exc_info.value.bot_id == "bot1"
+        assert exc_info.value.amount == 500_000.0
 
     async def test_deallocate_nonexistent(self, treasury):
-        """존재하지 않는 봇 회수 실패."""
-        result = await treasury.deallocate("nonexistent", 100.0)
-        assert result is False
+        """#1809: 존재하지 않는 봇 회수 시 TreasuryBudgetNotFoundError."""
+        from ante.treasury.exceptions import TreasuryBudgetNotFoundError
+
+        with pytest.raises(TreasuryBudgetNotFoundError) as exc_info:
+            await treasury.deallocate("nonexistent", 100.0)
+        assert exc_info.value.code == "TREASURY_BUDGET_NOT_FOUND"
+        assert exc_info.value.bot_id == "nonexistent"
 
     async def test_deallocate_rejects_nan(self, treasury):
-        """NaN 회수 거부. 이미 할당된 봇의 budget이 오염되지 않아야 한다 (#1411)."""
+        """#1809+#1411: NaN 회수 거부 + 이미 할당된 봇의 budget 미오염."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
         await treasury.allocate("bot1", 1_000_000.0)
-        result = await treasury.deallocate("bot1", float("nan"))
-        assert result is False
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.deallocate("bot1", float("nan"))
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 1_000_000.0
@@ -244,19 +274,23 @@ class TestAllocation:
         assert treasury.unallocated == 9_000_000.0
 
     async def test_deallocate_rejects_positive_inf(self, treasury):
-        """+Inf 회수 거부 (#1411)."""
+        """#1809+#1411: +Inf 회수 거부."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
         await treasury.allocate("bot1", 1_000_000.0)
-        result = await treasury.deallocate("bot1", float("inf"))
-        assert result is False
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.deallocate("bot1", float("inf"))
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 1_000_000.0
 
     async def test_deallocate_rejects_negative_inf(self, treasury):
-        """-Inf 회수 거부 (#1411)."""
+        """#1809+#1411: -Inf 회수 거부."""
+        from ante.treasury.exceptions import TreasuryInvalidAmountError
+
         await treasury.allocate("bot1", 1_000_000.0)
-        result = await treasury.deallocate("bot1", -float("inf"))
-        assert result is False
+        with pytest.raises(TreasuryInvalidAmountError):
+            await treasury.deallocate("bot1", -float("inf"))
         budget = treasury.get_budget("bot1")
         assert budget is not None
         assert budget.allocated == 1_000_000.0
@@ -292,25 +326,25 @@ class TestBotStatusCheck:
         return t, bot_statuses
 
     async def test_allocate_stopped_bot(self, treasury_with_checker):
-        """중지된 봇에 예산 할당 성공."""
+        """중지된 봇에 예산 할당 성공. #1809: 정상 시 None 반환."""
         t, statuses = treasury_with_checker
         statuses["bot1"] = "stopped"
         result = await t.allocate("bot1", 1_000_000.0)
-        assert result is True
+        assert result is None
 
     async def test_allocate_created_bot(self, treasury_with_checker):
-        """생성 직후 봇에 예산 할당 성공."""
+        """생성 직후 봇에 예산 할당 성공. #1809: 정상 시 None 반환."""
         t, statuses = treasury_with_checker
         statuses["bot1"] = "created"
         result = await t.allocate("bot1", 1_000_000.0)
-        assert result is True
+        assert result is None
 
     async def test_allocate_error_bot(self, treasury_with_checker):
-        """에러 상태 봇에 예산 할당 성공."""
+        """에러 상태 봇에 예산 할당 성공. #1809: 정상 시 None 반환."""
         t, statuses = treasury_with_checker
         statuses["bot1"] = "error"
         result = await t.allocate("bot1", 1_000_000.0)
-        assert result is True
+        assert result is None
 
     async def test_allocate_running_bot_raises(self, treasury_with_checker):
         """운용 중인 봇에 예산 할당 시 BotNotStoppedError."""
@@ -342,23 +376,23 @@ class TestBotStatusCheck:
             await t.deallocate("bot1", 500_000.0)
 
     async def test_deallocate_stopped_bot(self, treasury_with_checker):
-        """중지된 봇에서 예산 회수 성공."""
+        """중지된 봇에서 예산 회수 성공. #1809: 정상 시 None 반환."""
         t, statuses = treasury_with_checker
         statuses["bot1"] = "stopped"
         await t.allocate("bot1", 1_000_000.0)
         result = await t.deallocate("bot1", 500_000.0)
-        assert result is True
+        assert result is None
 
     async def test_allocate_unknown_bot_no_checker(self, treasury):
-        """checker 미설정 시 기존 동작 유지 (에러 없음)."""
+        """checker 미설정 시 기존 동작 유지 (에러 없음). #1809: None 반환."""
         result = await treasury.allocate("bot1", 1_000_000.0)
-        assert result is True
+        assert result is None
 
     async def test_allocate_new_bot_no_status(self, treasury_with_checker):
-        """봇 상태가 없는 경우 (BotManager에 미등록) 할당 허용."""
+        """봇 상태가 없는 경우 (BotManager에 미등록) 할당 허용. #1809: None 반환."""
         t, statuses = treasury_with_checker
         result = await t.allocate("new_bot", 1_000_000.0)
-        assert result is True
+        assert result is None
 
 
 # -- 주문 자금 예약/해제 -------------------------------------

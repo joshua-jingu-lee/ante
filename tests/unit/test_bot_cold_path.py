@@ -60,8 +60,7 @@ async def test_cold_path_remove_cleans_persisted_state(
     treasury = Treasury(db=db, eventbus=EventBus(), account_id="test")
     await treasury.initialize()
     await treasury.set_account_balance(1_000_000)
-    assert await treasury.allocate("bot-1", 250_000)
-
+    await treasury.allocate("bot-1", 250_000)
     result = await cold_path_remove_bot(db, "bot-1", strategies_dir=strategies_dir)
 
     assert result["removed"] is True
@@ -100,8 +99,7 @@ async def test_cold_path_remove_releases_cross_account_budget(
     treasury = Treasury(db=db, eventbus=EventBus(), account_id="budget-account")
     await treasury.initialize()
     await treasury.set_account_balance(500_000)
-    assert await treasury.allocate("bot-1", 100_000)
-
+    await treasury.allocate("bot-1", 100_000)
     result = await cold_path_remove_bot(
         db,
         "bot-1",
@@ -128,7 +126,7 @@ async def test_cold_path_remove_releases_legacy_empty_account_budget(
     treasury = Treasury(db=db, eventbus=EventBus(), account_id="bot-account")
     await treasury.initialize()
     await treasury.set_account_balance(500_000)
-    assert await treasury.allocate("bot-1", 120_000)
+    await treasury.allocate("bot-1", 120_000)
     await db.execute(
         "UPDATE bot_budgets SET account_id = '' WHERE bot_id = ?",
         ("bot-1",),

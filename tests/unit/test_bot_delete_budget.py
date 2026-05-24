@@ -143,9 +143,9 @@ class TestDeleteBotBudgetRelease:
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="test")
         await manager.create_bot(config, SimpleStrategy, ctx)
 
-        # 예산 할당
+        # 예산 할당. #1809: 정상 시 None 반환 (raise on reject).
         result = await treasury.allocate("bot1", 200_000)
-        assert result is True
+        assert result is None
         assert treasury.get_budget("bot1") is not None
         assert treasury.get_budget("bot1").allocated == 200_000
         assert treasury.unallocated == 800_000

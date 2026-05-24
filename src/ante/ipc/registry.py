@@ -375,8 +375,15 @@ async def _handle_treasury_allocate(
     if bot is None:
         raise BotNotFoundError(bot_id)
     treasury = svc.treasury_manager.get(account_id)
-    result = await treasury.allocate(bot_id, amount)
-    return {"account_id": account_id, "bot_id": bot_id, "success": result}
+    # #1809 (oracle A7 @ a5d8edf): ``Treasury.allocate`` 가 reject 시
+    # ``bool=False`` 대신 reject reason 별 typed exception 을 raise 한다
+    # (``TreasuryInvalidAmountError`` / ``TreasuryInsufficientUnallocatedError``).
+    # IPC server.py:322 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 가 stable
+    # ``SCREAMING_SNAKE_CASE`` envelope ``code`` 로 자동 surface 시키므로
+    # 명시 try/except 가 불필요하다 (handler 는 정상 경로만 성공 응답으로
+    # 마무리). 결과는 항상 성공 (``success=True``) — reject 는 예외 경로.
+    await treasury.allocate(bot_id, amount)
+    return {"account_id": account_id, "bot_id": bot_id, "success": True}
 
 
 async def _handle_treasury_deallocate(
@@ -401,8 +408,12 @@ async def _handle_treasury_deallocate(
     if bot is None:
         raise BotNotFoundError(bot_id)
     treasury = svc.treasury_manager.get(account_id)
-    result = await treasury.deallocate(bot_id, amount)
-    return {"account_id": account_id, "bot_id": bot_id, "success": result}
+    # #1809 (oracle A7 @ a5d8edf): allocate 와 동형 — typed exception
+    # (``TreasuryInvalidAmountError`` / ``TreasuryBudgetNotFoundError`` /
+    # ``TreasuryDeallocateExceedsAvailableError``) 을 server.py:322 envelope
+    # 매핑으로 surface. 정상 경로는 항상 ``success=True``.
+    await treasury.deallocate(bot_id, amount)
+    return {"account_id": account_id, "bot_id": bot_id, "success": True}
 
 
 async def _handle_treasury_set_balance(

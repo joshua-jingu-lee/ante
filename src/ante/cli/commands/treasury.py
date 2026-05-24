@@ -411,14 +411,32 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
             actor=actor,
         )
 
+    # #1809 (oracle A7 @ a5d8edf): ``Treasury.allocate`` 가 reject 시 typed
+    # exception 을 raise 하고 IPC server 가 stable ``code``
+    # (``TREASURY_INSUFFICIENT_BALANCE`` / ``TREASURY_INVALID_AMOUNT``) 로
+    # envelope ``error`` 를 만들어 보낸다. ``ipc_send`` 는 그 envelope 을
+    # ``ClickException.ipc_error_code`` / ``ipc_error_message`` 로 부착하여
+    # raise 한다. 이전 ``except ClickException: raise`` 흐름은 middleware
+    # fallback 에서 ``IPC_ERROR`` 로 표준화되어 stable code 가 surface 되지
+    # 않았다. ``set_balance``/``snapshot``/``status`` (#1758/#1725) 와 동형
+    # ``ipc_error_code`` 직접 매핑 패턴으로 일치시킨다.
     try:
         result = _run(_run_allocate())
-    except click.ClickException:
-        raise
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e))
-        ctx.exit(1)
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
 
+    # #1809: ``_handle_treasury_allocate`` 가 reject 시 typed exception 으로
+    # raise 하므로 정상 응답은 항상 ``success=True``. 잔존 false 경로는
+    # 방어적 invariant 로 유지하되 stable ``code`` 를 부착한다.
     if result.get("success"):
         fmt.success(
             f"예산 할당 완료: {bot_id} <- {amount:,.0f}원",
@@ -426,9 +444,10 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         )
     else:
         fmt.error(
-            f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)"
+            f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)",
+            code="TREASURY_ALLOCATE_FAILED",
         )
-        ctx.exit(1)
+        raise SystemExit(1)
 
 
 @treasury.command()
@@ -459,13 +478,22 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
             actor=actor,
         )
 
+    # #1809: allocate 와 동형 — typed exception envelope ``code``
+    # (``TREASURY_INVALID_AMOUNT`` / ``TREASURY_BUDGET_NOT_FOUND`` /
+    # ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE``) 를 surface 한다.
     try:
         result = _run(_run_deallocate())
-    except click.ClickException:
-        raise
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
+    except AccountNotFoundError as e:
+        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
+        raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e))
-        ctx.exit(1)
+        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
+        raise SystemExit(1) from e
 
     if result.get("success"):
         fmt.success(
@@ -473,8 +501,11 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
             {"bot_id": bot_id, "amount": amount, "account_id": account_id},
         )
     else:
-        fmt.error(f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)")
-        ctx.exit(1)
+        fmt.error(
+            f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)",
+            code="TREASURY_DEALLOCATE_FAILED",
+        )
+        raise SystemExit(1)
 
 
 @treasury.command()
