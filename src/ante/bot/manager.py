@@ -17,7 +17,7 @@ from ante.bot.config import (
     validate_interval,
     validate_runtime_controls,
 )
-from ante.bot.exceptions import BotError, BotNotFoundError
+from ante.bot.exceptions import BotError, BotNotFoundError, BotStateConflict
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -718,8 +718,20 @@ class BotManager:
         logger.info("봇 재개: %s", bot_id)
 
     async def start_bot(self, bot_id: str) -> None:
-        """봇 시작. 전략별 룰이 설정되어 있으면 RuleEngine에 로드."""
+        """봇 시작. 전략별 룰이 설정되어 있으면 RuleEngine에 로드.
+
+        Refs #1759: 이미 ``RUNNING`` 상태인 봇에 대한 중복 호출은
+        ``BotStateConflict`` 로 거부한다 (IPC envelope:
+        ``BOT_STATE_CONFLICT``). ``resume_bot`` 의 status 체크 + raise
+        패턴과 동형이며, ``BotStateConflict`` 는 ``BotError`` 서브클래스
+        이므로 기존 ``except BotError`` 호출자 (IPC handler) 는 자연스럽게
+        ``BOT_STATE_CONFLICT`` envelope 으로 매핑된다.
+        """
         bot = self._get_bot(bot_id)
+        if bot.status == BotStatus.RUNNING:
+            raise BotStateConflict(
+                f"이미 실행 중인 봇입니다: {bot_id} (상태: {bot.status.value})"
+            )
         self._load_strategy_rules(bot.config.strategy_id)
         await bot.start()
 
@@ -730,8 +742,19 @@ class BotManager:
 
         suppress_notification이 True이면 BotStoppedEvent에 의한
         NotificationEvent 발행을 1회 억제한다.
+
+        Refs #1759: ``RUNNING`` / ``ERROR`` 가 아닌 상태에서의 중복 호출은
+        ``BotStateConflict`` 로 거부한다. 허용 범위는 ``Bot.stop()`` 이
+        실제로 처리하는 상태 집합 (``RUNNING``/``ERROR``) 과 정합시킨다.
+        ``BotStateConflict`` 는 ``BotError`` 서브클래스이므로 기존
+        ``except BotError`` 호출자 (IPC handler) 는 자연스럽게
+        ``BOT_STATE_CONFLICT`` envelope 으로 매핑된다.
         """
         bot = self._get_bot(bot_id)
+        if bot.status not in (BotStatus.RUNNING, BotStatus.ERROR):
+            raise BotStateConflict(
+                f"중지할 수 없는 상태입니다: {bot_id} (현재: {bot.status.value})"
+            )
         if suppress_notification:
             self._suppress_notification_bot_ids.add(bot_id)
         await bot.stop()
@@ -940,13 +963,23 @@ class BotManager:
     # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_bot_stop_request(self, event: object) -> None:
-        """BotStopEvent 수신 시 해당 봇 중지."""
+        """BotStopEvent 수신 시 해당 봇 중지.
+
+        Refs #1759: ``BotManager.stop_bot`` 이 strict state machine 으로
+        전환된 이후에도 EventBus 경로의 ``BotStopEvent`` 핸들러는
+        idempotent 의미를 보존한다 (rule engine 이 한도 위반으로 발행한
+        이벤트가 중복 수신되거나 봇이 이미 중지되어 있을 수 있음).
+        state machine 거부는 silent ignore 한다.
+        """
         from ante.eventbus.events import BotStopEvent
 
         if not isinstance(event, BotStopEvent):
             return
         if event.bot_id in self._bots:
-            await self.stop_bot(event.bot_id)
+            try:
+                await self.stop_bot(event.bot_id)
+            except BotStateConflict:
+                return
 
     async def _on_account_suspended(self, event: object) -> None:
         """계좌 정지 시 해당 계좌의 봇만 중지."""
