@@ -559,7 +559,8 @@ tests/
 │   ├── test_cli_backtest_run_json_single_document.py
 │   ├── test_cli_fresh_init_read_contract.py
 │   ├── test_cli_ipc_click_exception_json_envelope.py
-│   └── test_cli_report_approval_db_cleanup.py
+│   ├── test_cli_report_approval_db_cleanup.py
+│   └── test_cli_strategy_submit_meta_shape.py
 └── __init__.py
 ```
 
