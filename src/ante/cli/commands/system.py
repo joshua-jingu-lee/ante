@@ -94,7 +94,18 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
     fmt.success("시스템 시작 중...")
 
     try:
-        proc = subprocess.run(cmd, env=env)
+        if fmt.is_json:
+            # #1757: JSON 모드 — 부모 stdout 에는 ``fmt.success`` 가 출력한
+            # 단일 JSON document 하나만 남아야 한다. 자식 프로세스
+            # (``python -m ante.main``) 의 runtime logger 가 inherit 된 stdout
+            # 으로 흘러 들면 자동화 호출자(ante-oracle host probe 등)가
+            # ``json.loads`` 로 응답을 파싱하지 못한다 (A7
+            # ``cli_system_start_json_stdout_contract`` probe). 자식 stdout/
+            # stderr 를 부모 stderr 로 redirect 해 stdout 격리를 보존한다.
+            proc = subprocess.run(cmd, env=env, stdout=sys.stderr, stderr=sys.stderr)
+        else:
+            # text 모드: 자식 stdout/stderr inherit (기존 동작 보존).
+            proc = subprocess.run(cmd, env=env)
         raise SystemExit(proc.returncode)
     except KeyboardInterrupt:
         raise SystemExit(0)
