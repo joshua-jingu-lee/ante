@@ -282,9 +282,22 @@ def bot_create(
     if account_id is None:
         from ante.account.models import AccountStatus
 
+        # #1799: ``_create_services()`` 가 연 aiosqlite db 연결을 명시적으로
+        # close 하지 않아 ``_resolve_account_non_interactive`` 가 SystemExit 을
+        # raise 한 뒤 (active account 0 / 2+) leaked connection 이 asyncio
+        # event loop 를 dangling 상태로 만들어 CLI 프로세스가 종료되지 않고
+        # 외부 timeout (probe exit 124) 으로만 죽던 hang 회귀를 차단한다.
+        # ``bot_list`` (L107-122) / ``bot_info`` (L149-154) 와 동형의 try/
+        # finally + ``db.close()`` cleanup 을 적용한다. resolver 의 SystemExit
+        # 은 ``_run(_list_accounts())`` 완료 후 (close 이후) 발생하므로 close
+        # 가 항상 보장된다. JSON envelope code (``BOT_MISSING_REQUIRED_ACCOUNT``)
+        # 는 종전 동작 그대로다 (이슈 본질은 process termination 보장).
         async def _list_accounts() -> list:
-            _, _, _, account_service = await _create_services()
-            return await account_service.list(status=AccountStatus.ACTIVE)
+            db, _, _, account_service = await _create_services()
+            try:
+                return await account_service.list(status=AccountStatus.ACTIVE)
+            finally:
+                await db.close()
 
         accounts = _run(_list_accounts())
         account_id = _resolve_account_non_interactive(accounts, fmt)
