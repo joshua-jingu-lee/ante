@@ -28,6 +28,8 @@ from ante.cli.middleware import (
     require_scope,
 )
 from ante.member.errors import (
+    MemberAlreadyExistsError,
+    MemberInvalidRecoveryCredentialError,
     MemberNotFoundError,
     MemberStateConflictError,
     PermissionDeniedError,
@@ -511,6 +513,13 @@ def member_register(
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
         raise SystemExit(1) from None
+    except MemberAlreadyExistsError as e:
+        # #1807 (Group R sweep): duplicate member_id 는 안정 코드
+        # ``MEMBER_ALREADY_EXISTS`` 로 surface (typed.code 직접 사용).
+        # ValueError 다중상속이라 generic 분기보다 먼저 둬야 typed 분기를
+        # 우선 매칭한다 (Python except 순서 의존).
+        fmt.error(str(e), code=MemberAlreadyExistsError.code)
+        raise SystemExit(1) from None
     except InvalidScopeError as e:
         # SCOPE_VOCABULARY (#1439) 위반은 ``ValueError`` 서브클래스이지만
         # CLI direct path 회귀를 위해 비-0 exit code 로 명시 종료한다.
@@ -859,6 +868,12 @@ def member_reset_password(
 
     try:
         _run(_run_reset())
+    except MemberInvalidRecoveryCredentialError as e:
+        # #1806 (Group R sweep): invalid recovery key 는 안정 코드
+        # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
+        # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
+        fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -916,6 +931,12 @@ def member_regenerate_recovery_key(
 
     try:
         new_key = _run(_run_regen())
+    except MemberInvalidRecoveryCredentialError as e:
+        # #1806 (Group R sweep): invalid 현재 패스워드는 안정 코드
+        # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
+        # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
+        fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
