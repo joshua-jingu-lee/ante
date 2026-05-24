@@ -401,8 +401,13 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             # 한다 (malformed db 같은 다른 ``OperationalError`` 까지
             # 삼키지 않도록 메시지로 좁힌다, #1558 동형).
             try:
+                # Refs #1761: ``--rotate`` 게이트가 ``strategy_id`` 를
+                # 필요로 하므로 존재 확인 쿼리에서 함께 SELECT 한다.
+                # row 의 truthiness 는 보존되어 기존 미존재/소프트삭제
+                # 거부 회귀(#1596)와 동일하게 동작한다.
                 bot_row = await db.fetch_one(
-                    "SELECT 1 FROM bots WHERE bot_id = ? AND status != 'deleted'",
+                    "SELECT strategy_id FROM bots "
+                    "WHERE bot_id = ? AND status != 'deleted'",
                     (bot_id,),
                 )
             except sqlite3.OperationalError as e:
@@ -414,6 +419,42 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 return {"bot_id": bot_id, "missing": True}
 
             if rotate:
+                # accepts_external_signals 게이트 (#1761).
+                # ``BotManager.rotate_signal_key`` 가 적용하는 동일 invariant
+                # 를 CLI cold-path 에도 적용해 defense-in-depth 를 유지한다
+                # (CLI 는 BotManager 를 우회해 ``SignalKeyManager`` 를 직접
+                # 호출하므로 manager 게이트가 cover 하지 않는다).
+                from ante.bot.exceptions import BOT_NOT_ACCEPTING_SIGNALS_CODE
+                from ante.strategy.loader import StrategyLoader
+                from ante.strategy.registry import StrategyRegistry
+
+                strategy_id = bot_row["strategy_id"]
+                registry = StrategyRegistry(db)
+                await registry.initialize()
+                record = await registry.get(strategy_id)
+                if record is None:
+                    return {
+                        "bot_id": bot_id,
+                        "error": f"전략 미발견: {strategy_id}",
+                        "code": "STRATEGY_NOT_FOUND",
+                        "external_signals_disabled": True,
+                    }
+                strategy_cls = StrategyLoader.load(Path(record.filepath))
+                if not getattr(
+                    getattr(strategy_cls, "meta", None),
+                    "accepts_external_signals",
+                    False,
+                ):
+                    return {
+                        "bot_id": bot_id,
+                        "error": (
+                            "이 봇의 전략은 외부 시그널을 받지 않습니다: "
+                            f"bot_id={bot_id}, strategy_id={strategy_id}"
+                        ),
+                        "code": BOT_NOT_ACCEPTING_SIGNALS_CODE,
+                        "external_signals_disabled": True,
+                    }
+
                 new_key = await skm.rotate(bot_id)
                 return {"bot_id": bot_id, "signal_key": new_key, "rotated": True}
 
@@ -443,6 +484,14 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         # 않도록 한다.
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
         ctx.exit(1)
+
+    if result.get("external_signals_disabled"):
+        # Refs #1761: ``accepts_external_signals=False`` 전략 봇에 rotate
+        # 가 새 키를 발급해 orphan credential 이 생기던 회귀를 막는다.
+        # ``signal connect`` 의 동형 거부(``ante/cli/commands/signal.py:70-75``)
+        # 와 동일한 ``BOT_NOT_ACCEPTING_SIGNALS`` 코드를 stable 하게 노출한다.
+        fmt.error(result["error"], code=result.get("code", ""))
+        raise SystemExit(1)
 
     if result.get("signal_key") is None:
         fmt.error(f"시그널 키가 없습니다: {bot_id}")

@@ -11,6 +11,7 @@ Refs #1712: ``bot.start``/``bot.stop`` IPC handler 가 stable coded exception을
 BOT_NOT_FOUND_CODE = "BOT_NOT_FOUND"
 BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE = "BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED"
 BOT_STATE_CONFLICT_CODE = "BOT_STATE_CONFLICT"
+BOT_NOT_ACCEPTING_SIGNALS_CODE = "BOT_NOT_ACCEPTING_SIGNALS"
 
 
 class BotError(Exception):
@@ -50,3 +51,16 @@ class BotStateConflict(BotError):  # noqa: N818
     """
 
     code: str = BOT_STATE_CONFLICT_CODE
+
+
+class BotNotAcceptingSignals(BotError):  # noqa: N818
+    """봇의 전략이 외부 시그널을 받지 않음 (``accepts_external_signals=False``).
+
+    Refs #1761: ``bot signal-key --rotate`` 가 ``accepts_external_signals=False``
+    전략에도 키를 발급해 orphan credential 이 생기던 회귀를 막는다.
+    ``signal connect`` 가 동일 조건을 이미 ``BOT_NOT_ACCEPTING_SIGNALS`` 로
+    거부(``ante/cli/commands/signal.py:70-75``)하고 있어 같은 코드를 재사용해
+    IPC/CLI 표면 간 envelope 코드 일관성을 유지한다.
+    """
+
+    code: str = BOT_NOT_ACCEPTING_SIGNALS_CODE

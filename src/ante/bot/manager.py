@@ -17,7 +17,12 @@ from ante.bot.config import (
     validate_interval,
     validate_runtime_controls,
 )
-from ante.bot.exceptions import BotError, BotNotFoundError, BotStateConflict
+from ante.bot.exceptions import (
+    BotError,
+    BotNotAcceptingSignals,
+    BotNotFoundError,
+    BotStateConflict,
+)
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -1182,10 +1187,48 @@ class BotManager:
         return await self._signal_key_manager.get_key(bot_id)
 
     async def rotate_signal_key(self, bot_id: str) -> str:
-        """시그널 키 재발급."""
+        """시그널 키 재발급.
+
+        Refs #1761: ``accepts_external_signals=False`` 전략의 봇에 rotate 가
+        새 키를 발급해 orphan credential 이 생기던 회귀를 막는다.
+        ``create_bot`` 의 자동 발급 분기 (``manager.py`` 의
+        ``getattr(strategy_cls.meta, "accepts_external_signals", False)``)와
+        동일한 조건을 사용해 일관성을 유지한다.
+        """
         if not self._signal_key_manager:
             raise BotError("SignalKeyManager가 설정되지 않았습니다")
-        self._get_bot(bot_id)  # 존재 확인
+        bot = self._get_bot(bot_id)  # 존재 확인
+
+        # accepts_external_signals 게이트 (#1761).
+        # ``Bot.__init__`` 가 ``_strategy_cls`` 를 보관하므로 ``start()``
+        # 이전(``bot.strategy is None``)에도 메타를 조회할 수 있다. fallback
+        # 으로는 registry+loader 를 사용해 cold-path 호출자에서도 동작한다.
+        meta = None
+        strategy = getattr(bot, "strategy", None)
+        if strategy is not None:
+            meta = getattr(strategy, "meta", None)
+        if meta is None:
+            strategy_cls = getattr(bot, "_strategy_cls", None)
+            if strategy_cls is not None:
+                meta = getattr(strategy_cls, "meta", None)
+        if meta is None:
+            from ante.strategy.loader import StrategyLoader
+            from ante.strategy.registry import StrategyRegistry
+
+            registry = StrategyRegistry(self._db)
+            await registry.initialize()
+            record = await registry.get(bot.config.strategy_id)
+            if record is None:
+                raise BotError(f"전략 미발견: {bot.config.strategy_id}")
+            loaded_cls = StrategyLoader.load(Path(record.filepath))
+            meta = getattr(loaded_cls, "meta", None)
+
+        if not getattr(meta, "accepts_external_signals", False):
+            raise BotNotAcceptingSignals(
+                f"이 봇의 전략은 외부 시그널을 받지 않습니다: "
+                f"bot_id={bot_id}, strategy_id={bot.config.strategy_id}"
+            )
+
         return await self._signal_key_manager.rotate(bot_id)
 
     def get_restart_count(self, bot_id: str) -> int:
