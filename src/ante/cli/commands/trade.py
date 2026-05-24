@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from datetime import datetime
 
 import click
@@ -155,18 +156,35 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
         db = Database(get_db_path())
         await db.connect()
         try:
-            row = await db.fetch_one(
-                "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
-            )
+            # fresh DB 에서는 `trades` 테이블이 아직 생성되지 않은 상태일 수
+            # 있다. (`_create_trade_service` 경로와 달리 `trade info` 는
+            # raw db 핸들만 쓰고 `TradeRecorder.initialize` 를 거치지 않는다.)
+            # 정의상 테이블 부재는 해당 trade 미존재와 동치이므로 not-found 로
+            # 정규화한다. malformed DB 같은 다른 OperationalError 까지
+            # 삼키지 않도록 "no such table" 메시지로만 좁힌다 (#1753).
+            try:
+                row = await db.fetch_one(
+                    "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
+                )
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    return None
+                raise
             return dict(row) if row else None
         finally:
             await db.close()
 
-    result = _run(_run_info())
+    # 호출 표면 try/except: 위 _run_info 에서 흡수하지 못한 비정상 예외는
+    # TRADE_ERROR 로 분류해 raw traceback 노출을 차단한다 (#1753).
+    try:
+        result = _run(_run_info())
+    except Exception as e:
+        fmt.error(str(e), code="TRADE_ERROR")
+        raise SystemExit(1) from e
 
     if not result:
-        fmt.error(f"거래를 찾을 수 없습니다: {trade_id}")
-        ctx.exit(1)
+        fmt.error(f"거래를 찾을 수 없습니다: {trade_id}", code="TRADE_NOT_FOUND")
+        raise SystemExit(1)
 
     if fmt.is_json:
         fmt.output(result)

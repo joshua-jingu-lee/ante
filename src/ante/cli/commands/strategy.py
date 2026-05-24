@@ -39,6 +39,11 @@ async def _create_registry():  # noqa: ANN202
     db = Database(get_db_path())
     await db.connect()
     registry = StrategyRegistry(db)
+    # fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서
+    # 보장한다. `register/get_by_name/list_strategies` 등 모든 caller에
+    # 자동 적용되며, idempotent하므로 기존의 명시 `await registry.initialize()`
+    # 호출은 회귀 안전을 위해 보존한다 (#1753).
+    await registry.initialize()
     return registry, db
 
 
@@ -269,10 +274,22 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     # account.py:683-687 패턴: click.ClickException은 그대로 전파해 click의
     # 표준 출력 경로를 보존하고, 나머지 일반 Exception은 STRATEGY_ERROR로
     # 분류해 구조화된 에러로 종료한다(traceback 노출 차단).
+    #
+    # 추가로 fresh DB에서 strategies 테이블 부재로 발생하는
+    # `sqlite3.OperationalError: no such table: strategies` 는 빈 결과로
+    # 정규화한다. `_create_registry()` 가 `await registry.initialize()` 를
+    # 보장하므로 정상 경로에서는 발생하지 않지만, race/regress 시에도
+    # 사용자에게 내부 schema 명을 노출하지 않도록 방어한다 (#1753).
     try:
         rows = _run(_list())
     except click.ClickException:
         raise
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            rows = []
+        else:
+            fmt.error(str(e), code="STRATEGY_ERROR")
+            raise SystemExit(1) from e
     except Exception as e:
         fmt.error(str(e), code="STRATEGY_ERROR")
         raise SystemExit(1) from e
@@ -411,10 +428,27 @@ def strategy_info(ctx: click.Context, name: str) -> None:
         finally:
             await db.close()
 
-    result = _run(_info())
+    # 호출 표면 try/except: fresh DB 또는 race 상황의
+    # `sqlite3.OperationalError: no such table: strategies` 는 not-found 로
+    # 정규화한다. 다른 OperationalError(예: malformed DB)는 STRATEGY_ERROR 로
+    # 분류하여 내부 traceback 노출을 차단한다 (strategy_summary line 560-564
+    # 동형 SSOT, #1753).
+    try:
+        result = _run(_info())
+    except sqlite3.OperationalError as e:
+        if "no such table" in str(e).lower():
+            result = None
+        else:
+            fmt.error(str(e), code="STRATEGY_ERROR")
+            raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code="STRATEGY_ERROR")
+        raise SystemExit(1) from e
 
     if result is None:
-        fmt.error(f"전략을 찾을 수 없습니다: {name}")
+        # `strategy_summary` line 566-568 / spec line 567 STRATEGY_NOT_FOUND
+        # SSOT 재사용 (#1753).
+        fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
         raise SystemExit(1)
 
     if fmt.is_json:
@@ -628,6 +662,10 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
         await db.connect()
         try:
             registry = StrategyRegistry(db)
+            # fresh DB에서도 strategies 테이블이 존재하도록 정규화한다
+            # (#1753 Codex Plan v2 must-fix 1: `_create_registry` 경로와
+            # 동형 처리).
+            await registry.initialize()
             records = await registry.get_by_name(name)
             if not records:
                 return None
@@ -687,9 +725,23 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
+    except sqlite3.OperationalError as e:
+        # fresh DB / race 상황의 `no such table: strategies` 는 not-found 로
+        # 정규화한다 (#1753 Codex Plan v2 must-fix 1, strategy_info 동형
+        # 패턴). 다른 OperationalError 는 STRATEGY_ERROR 로 분류한다.
+        if "no such table" in str(e).lower():
+            result = None
+        else:
+            fmt.error(str(e), code="STRATEGY_ERROR")
+            raise SystemExit(1) from e
+    except Exception as e:
+        fmt.error(str(e), code="STRATEGY_ERROR")
+        raise SystemExit(1) from e
 
     if result is None:
-        fmt.error(f"전략을 찾을 수 없습니다: {name}")
+        # strategy_summary line 567 / strategy_info STRATEGY_NOT_FOUND SSOT
+        # 재사용 (#1753).
+        fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
         raise SystemExit(1)
 
     metrics = result["metrics"]

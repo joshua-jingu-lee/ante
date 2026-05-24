@@ -483,6 +483,9 @@ class TestStrategyPerformance:
             db.fetch_one = AsyncMock(return_value=account_row)
 
         registry = MagicMock()
+        # #1753: `_perf()` 내부에서 `await registry.initialize()` 를 호출하므로
+        # fresh DB 정합 회귀 후로는 AsyncMock 으로 await 가능하게 잠근다.
+        registry.initialize = AsyncMock()
         registry.get_by_name = AsyncMock(return_value=records)
 
         tracker = MagicMock()
