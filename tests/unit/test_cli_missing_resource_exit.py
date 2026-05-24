@@ -407,13 +407,35 @@ class TestBotSignalKeyMissingExit:
         assert payload["signal_key"] == "sk_test123"
 
     def test_valid_rotate_exits_zero(self, runner: CliRunner) -> None:
-        """실재 bot --rotate 재발급은 exit 0 + rotated 회귀 보존."""
+        """실재 bot --rotate 재발급은 exit 0 + rotated 회귀 보존.
+
+        Refs #1761: rotate 분기가 ``strategy_id`` 를 함께 SELECT 하고
+        ``accepts_external_signals`` 게이트를 통과해야 ``skm.rotate`` 가
+        호출된다. ``StrategyRegistry``/``StrategyLoader`` 를 patch 해
+        external signals=True 전략을 시뮬레이션한다.
+        """
+        from ante.strategy.base import StrategyMeta
+
         mock_db = AsyncMock()
         mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value={"1": 1})
+        mock_db.fetch_one = AsyncMock(return_value={"strategy_id": "s-1"})
         mock_skm = AsyncMock()
         mock_skm.initialize = AsyncMock()
         mock_skm.rotate = AsyncMock(return_value="sk_rotated999")
+
+        mock_record = MagicMock()
+        mock_record.filepath = "/fake/path.py"
+        mock_registry = AsyncMock()
+        mock_registry.initialize = AsyncMock()
+        mock_registry.get = AsyncMock(return_value=mock_record)
+
+        mock_strategy_cls = MagicMock()
+        mock_strategy_cls.meta = StrategyMeta(
+            name="ext",
+            version="1.0.0",
+            description="external",
+            accepts_external_signals=True,
+        )
 
         with (
             patch(
@@ -424,6 +446,14 @@ class TestBotSignalKeyMissingExit:
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
+            ),
+            patch(
+                "ante.strategy.registry.StrategyRegistry",
+                return_value=mock_registry,
+            ),
+            patch(
+                "ante.strategy.loader.StrategyLoader.load",
+                return_value=mock_strategy_cls,
             ),
         ):
             result = runner.invoke(
