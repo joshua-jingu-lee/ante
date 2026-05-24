@@ -3,7 +3,12 @@
 from ante.treasury.exceptions import (
     BotNotStoppedError,
     InsufficientFundsError,
+    TreasuryBudgetNotFoundError,
+    TreasuryDeallocateExceedsAvailableError,
     TreasuryError,
+    TreasuryInsufficientUnallocatedError,
+    TreasuryInvalidAmountError,
+    TreasuryNotConfiguredError,
 )
 from ante.treasury.manager import TreasuryManager
 from ante.treasury.models import BotBudget
@@ -14,6 +19,11 @@ __all__ = [
     "BotNotStoppedError",
     "InsufficientFundsError",
     "Treasury",
+    "TreasuryBudgetNotFoundError",
+    "TreasuryDeallocateExceedsAvailableError",
     "TreasuryError",
+    "TreasuryInsufficientUnallocatedError",
+    "TreasuryInvalidAmountError",
     "TreasuryManager",
+    "TreasuryNotConfiguredError",
 ]

@@ -396,17 +396,36 @@ class Treasury:
                 f"예산 변경은 봇 중지 후 가능합니다."
             )
 
-    async def allocate(self, bot_id: str, amount: float) -> bool:
+    async def allocate(self, bot_id: str, amount: float) -> None:
         """봇에 예산 할당. 미할당 자금에서 차감.
 
         ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
         한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
         ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
         (#1411).
+
+        Refs #1809 (oracle A7 @ a5d8edf): 직전에는 reject 시 ``bool=False`` 를
+        반환했으나, CLI/IPC envelope ``code`` 가 빈 문자열로 surface 되는
+        회귀(spec ``docs/specs/cli/02-design-decisions.md:83-89`` 위반)를 차단
+        하기 위해 reject reason 별 typed exception 으로 변경되었다.
+
+        Raises:
+            TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
+            TreasuryInsufficientUnallocatedError: 미할당 잔액 부족.
+            BotNotStoppedError: 봇이 운용 중.
         """
+        from ante.treasury.exceptions import (
+            TreasuryInsufficientUnallocatedError,
+            TreasuryInvalidAmountError,
+        )
+
         self._check_bot_stopped(bot_id)
-        if not math.isfinite(amount) or amount <= 0 or self._unallocated < amount:
-            return False
+        if not math.isfinite(amount) or amount <= 0:
+            raise TreasuryInvalidAmountError(amount, operation="allocate")
+        if self._unallocated < amount:
+            raise TreasuryInsufficientUnallocatedError(
+                bot_id, amount, self._unallocated
+            )
 
         if bot_id not in self._budgets:
             self._budgets[bot_id] = BotBudget(
@@ -425,25 +444,40 @@ class Treasury:
         logger.info(
             "예산 할당: %s -> %s (account=%s)", bot_id, amount, self._account_id
         )
-        return True
 
-    async def deallocate(self, bot_id: str, amount: float) -> bool:
+    async def deallocate(self, bot_id: str, amount: float) -> None:
         """봇에서 예산 회수. 가용 예산 범위 내에서만 가능.
 
         ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
         한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
         ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
         (#1411).
+
+        Refs #1809 (oracle A7 @ a5d8edf): allocate 와 동형으로 reject 시
+        typed exception. (``bool=False`` → typed raise contract 변경.)
+
+        Raises:
+            TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
+            TreasuryBudgetNotFoundError: ``bot_id`` budget record 부재.
+            TreasuryDeallocateExceedsAvailableError: 가용 예산 초과.
+            BotNotStoppedError: 봇이 운용 중.
         """
+        from ante.treasury.exceptions import (
+            TreasuryBudgetNotFoundError,
+            TreasuryDeallocateExceedsAvailableError,
+            TreasuryInvalidAmountError,
+        )
+
         self._check_bot_stopped(bot_id)
+        if not math.isfinite(amount) or amount <= 0:
+            raise TreasuryInvalidAmountError(amount, operation="deallocate")
         budget = self._budgets.get(bot_id)
-        if (
-            not budget
-            or not math.isfinite(amount)
-            or amount <= 0
-            or budget.available < amount
-        ):
-            return False
+        if budget is None:
+            raise TreasuryBudgetNotFoundError(bot_id)
+        if budget.available < amount:
+            raise TreasuryDeallocateExceedsAvailableError(
+                bot_id, amount, budget.available
+            )
 
         budget.allocated -= amount
         budget.available -= amount
@@ -456,7 +490,6 @@ class Treasury:
         logger.info(
             "예산 회수: %s <- %s (account=%s)", bot_id, amount, self._account_id
         )
-        return True
 
     async def release_budget(self, bot_id: str) -> float:
         """봇의 할당액 전액을 미할당으로 환수하고 budget 레코드를 삭제한다.
@@ -537,7 +570,10 @@ class Treasury:
             BotNotStoppedError: 봇이 운용 중인 경우.
             ValueError: 목표 금액이 음수인 경우.
         """
-        from ante.treasury.exceptions import InsufficientFundsError
+        from ante.treasury.exceptions import (
+            InsufficientFundsError,
+            TreasuryError,
+        )
 
         if target_amount < 0:
             raise ValueError(f"목표 금액은 0 이상이어야 합니다: {target_amount}")
@@ -555,21 +591,30 @@ class Treasury:
                 raise InsufficientFundsError(
                     f"미할당 잔액 부족: 필요 {diff:,.0f}, 가용 {self._unallocated:,.0f}"
                 )
-            result = await self.allocate(bot_id, diff)
-            if not result:
+            # #1809: ``Treasury.allocate`` 가 reject 시 typed exception 을
+            # raise 하도록 변경되었다(``bool=False`` → typed raise). 기존
+            # ``update_budget`` 호출자 (예: ``BotManager.update_budget`` /
+            # CLI ``bot update`` budget 변경) 가 의존하는 ``InsufficientFunds
+            # Error`` 메시지/타입 계약은 그대로 유지하기 위해 typed reject
+            # exception 을 catch 해서 동일 ``InsufficientFundsError`` 로 변환
+            # 한다 (behavior-preserving — 외부 caller invariant 보존).
+            try:
+                await self.allocate(bot_id, diff)
+            except TreasuryError as exc:
                 raise InsufficientFundsError(
-                    f"예산 할당 실패: bot_id={bot_id}, amount={diff}"
-                )
+                    f"예산 할당 실패: bot_id={bot_id}, amount={diff} ({exc})"
+                ) from exc
         else:
             # 감액
             decrease = abs(diff)
-            result = await self.deallocate(bot_id, decrease)
-            if not result:
+            try:
+                await self.deallocate(bot_id, decrease)
+            except TreasuryError as exc:
                 available = budget.available if budget else 0.0
                 raise InsufficientFundsError(
                     f"예산 회수 실패: 회수 요청 {decrease:,.0f}, "
-                    f"가용 예산 {available:,.0f}"
-                )
+                    f"가용 예산 {available:,.0f} ({exc})"
+                ) from exc
 
         logger.info(
             "예산 변경: %s -- %s -> %s (차이: %s%s)",
