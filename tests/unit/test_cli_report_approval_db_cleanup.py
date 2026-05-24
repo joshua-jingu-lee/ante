@@ -194,7 +194,10 @@ class TestApprovalInfoMissingNoHang:
         payload = _parse_json_payload(result.stdout)
         assert isinstance(payload, dict)
         assert payload.get("status") == "error"
-        assert payload.get("code") == "APPROVAL_ERROR"
+        # #1811: missing approval 은 typed code ``APPROVAL_NOT_FOUND`` 로
+        # surface 한다 (이전: generic ``APPROVAL_ERROR``). cleanup invariant
+        # (db.close + no Traceback) 는 본 테스트가 그대로 보장한다.
+        assert payload.get("code") == "APPROVAL_NOT_FOUND"
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -236,7 +239,10 @@ class TestApprovalReviewMissingNoHang:
         payload = _parse_json_payload(result.stdout)
         assert isinstance(payload, dict)
         assert payload.get("status") == "error"
-        assert payload.get("code") == "APPROVAL_ERROR"
+        # #1811: missing approval 은 typed code ``APPROVAL_NOT_FOUND`` 로
+        # surface 한다 (이전: generic ``APPROVAL_ERROR``). cleanup invariant
+        # (db.close + no Traceback) 는 본 테스트가 그대로 보장한다.
+        assert payload.get("code") == "APPROVAL_NOT_FOUND"
 
 
 # ────────────────────────────────────────────────────────────────────

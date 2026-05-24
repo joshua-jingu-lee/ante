@@ -573,11 +573,16 @@ class ApprovalService:
         result: str,
         detail: str = "",
     ) -> ApprovalRequest:
-        """검토 의견 추가."""
+        """검토 의견 추가.
+
+        not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval
+        review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로 surface
+        할 수 있도록 한다 (#1811 — Group A ``cancel_invalid_type_request``
+        #1798 동형 패턴).
+        """
         request = await self.get(id)
         if not request:
-            msg = f"결재 요청을 찾을 수 없음: {id}"
-            raise ValueError(msg)
+            raise ApprovalNotFoundError(id)
 
         now = datetime.now(UTC).isoformat()
 

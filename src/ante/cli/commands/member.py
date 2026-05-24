@@ -27,7 +27,7 @@ from ante.cli.middleware import (
     require_master,
     require_scope,
 )
-from ante.member.errors import PermissionDeniedError
+from ante.member.errors import MemberNotFoundError, PermissionDeniedError
 from ante.member.models import MemberRole
 from ante.member.scopes import InvalidScopeError
 
@@ -547,6 +547,12 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
 
     try:
         result = _run(_run_set_emoji())
+    except MemberNotFoundError:
+        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
+        # 한다 (CLI/IPC 일관성: ``MemberNotFoundError.code`` 와 동형, ``member
+        # info`` line 231 형제 패턴 1:1 미러).
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
+        raise SystemExit(1) from None
     except ValueError as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -643,6 +649,11 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
         raise SystemExit(1) from None
+    except MemberNotFoundError:
+        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
+        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -672,6 +683,11 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
         result = _run(_run_reactivate())
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
+    except MemberNotFoundError:
+        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
+        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
@@ -721,6 +737,11 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
         raise SystemExit(1) from None
+    except MemberNotFoundError:
+        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
+        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
+        raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -750,6 +771,11 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
         result, token = _run(_run_rotate())
     except PermissionDeniedError:
         fmt.error(_MASTER_REQUIRED_MESSAGE)
+        raise SystemExit(1) from None
+    except MemberNotFoundError:
+        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
+        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))

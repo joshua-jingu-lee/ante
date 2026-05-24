@@ -350,8 +350,12 @@ class TestBotSignalKeyMissingExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "bot-without-key" in payload["message"]
-        # 실재 bot 의 키 없음 → "시그널 키가 없습니다" (불변, #1596 비대상).
-        assert "시그널 키가 없습니다" in payload["message"]
+        # #1808: 실재 bot 의 키 없음 → typed code ``SIGNAL_KEY_NOT_SET`` +
+        # "signal key가 설정되지 않았습니다" (이전 "시그널 키가 없습니다").
+        # 미존재 bot 거부(#1596 → BOT_NOT_FOUND)와 envelope code 로 의미
+        # 구분된다.
+        assert "signal key가 설정되지 않았습니다" in payload["message"]
+        assert payload.get("code") == "SIGNAL_KEY_NOT_SET"
 
     def test_missing_key_exits_nonzero_text(self, runner: CliRunner) -> None:
         mock_db = AsyncMock()
@@ -376,7 +380,8 @@ class TestBotSignalKeyMissingExit:
 
         assert result.exit_code == 1
         assert "Error:" in result.stderr
-        assert "시그널 키가 없습니다" in result.stderr
+        # #1808: text 모드는 envelope code 없이 메시지만 — 새 wording 정렬.
+        assert "signal key가 설정되지 않았습니다" in result.stderr
 
     def test_valid_exits_zero(self, runner: CliRunner) -> None:
         """signal_key 존재 시 exit 0 회귀 보존."""

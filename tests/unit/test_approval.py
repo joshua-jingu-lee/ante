@@ -540,9 +540,13 @@ class TestReview:
         assert len(reviewed.reviews) == 2
 
     async def test_review_nonexistent_fails(self, service):
-        """존재하지 않는 요청에 검토 시 에러."""
-        with pytest.raises(ValueError, match="결재 요청을 찾을 수 없음"):
+        """존재하지 않는 요청에 검토 시 ``ApprovalNotFoundError`` (#1811)."""
+        from ante.approval.errors import ApprovalNotFoundError
+
+        with pytest.raises(ApprovalNotFoundError) as excinfo:
             await service.add_review("nonexistent", "treasury", "pass")
+        assert getattr(excinfo.value, "code", None) == "APPROVAL_NOT_FOUND"
+        assert "결재 요청을 찾을 수 없음" in str(excinfo.value)
 
 
 # ── 감사 이력 (US-5) ────────────────────────────────
