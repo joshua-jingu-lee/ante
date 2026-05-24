@@ -119,12 +119,17 @@ async def test_ipc_server_falls_back_to_execution_error_when_no_code(
 
 
 @pytest.mark.asyncio
-async def test_ipc_server_falls_back_for_account_error_without_code(
+async def test_ipc_server_surfaces_typed_code_for_account_already_suspended(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
-    """기존 AccountError 계층(``AccountAlreadySuspendedError`` 등)은 ``code`` 속성이
-    없으므로 ``EXECUTION_ERROR``로 폴백 — ``account.suspend`` 등 IPC 핸들러
-    응답 코드가 변경되지 않음을 보장 (회귀 보호).
+    """``AccountAlreadySuspendedError`` 는 typed ``code`` 속성을 보유하므로
+    IPC envelope 이 ``"ACCOUNT_ALREADY_SUSPENDED"`` 안정 코드를 surface 한다
+    (#1812 Group Q state-conflict typed code sweep).
+
+    이전 (#1812 이전): ``code`` 속성 부재 → ``EXECUTION_ERROR`` 폴백. 본 테스트
+    의 이전 단언은 회귀 보호용으로 폴백 동작을 lock 했으나, Group Q sweep 이
+    state-conflict 표면에 typed code 를 도입하면서 envelope 코드가 정정되었다.
+    typed code 회귀 (속성 누락 → ``EXECUTION_ERROR`` 폴백 재발) 차단 lock.
     """
     from ante.account.errors import AccountAlreadySuspendedError
 
@@ -145,8 +150,9 @@ async def test_ipc_server_falls_back_for_account_error_without_code(
         client = IPCClient(socket_path, timeout=5.0)
         response = await client.send("test.already_suspended", {})
         assert response["status"] == "error"
-        # 기존 동작 그대로
-        assert response["error"]["code"] == "EXECUTION_ERROR"
+        # #1812 Group Q: typed code 가 envelope 에 surface 된다
+        # (이전 ``EXECUTION_ERROR`` 폴백을 typed 코드로 정정).
+        assert response["error"]["code"] == "ACCOUNT_ALREADY_SUSPENDED"
         assert "이미 정지됨" in response["error"]["message"]
     finally:
         await server.stop()

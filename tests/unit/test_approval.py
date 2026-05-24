@@ -339,10 +339,22 @@ class TestResolve:
         )
         await service.approve(req.id)
 
-        with pytest.raises(
-            ValueError, match="pending/execution_failed 상태에서만 승인 가능"
-        ):
+        # #1813 Group Q sweep: status flow 위반은 typed
+        # ``ApprovalStatusConflictError`` (``ApprovalError`` + ``ValueError``
+        # 다중상속) 로 raise 된다. 이전 동작은 일반 ``ValueError`` 였다 —
+        # state 위반 의미가 generic validation 과 모호하게 섞여 있어 typed
+        # 로 좁힘. ``ValueError`` 다중상속이라 기존 ``except ValueError``
+        # caller (CLI generic fallback) 회귀는 없다.
+        from ante.approval.errors import ApprovalStatusConflictError
+
+        with pytest.raises(ApprovalStatusConflictError) as excinfo:
             await service.approve(req.id)
+        assert excinfo.value.code == "APPROVAL_STATUS_CONFLICT"
+        assert excinfo.value.approval_id == req.id
+        assert excinfo.value.requested_action == "approve"
+        # ``ValueError`` 회귀 보호: 다중상속이 유지되어 기존 caller 가
+        # ``except ValueError`` 로도 잡을 수 있어야 한다.
+        assert isinstance(excinfo.value, ValueError)
 
     async def test_reject(self, service):
         """결재 거절."""
@@ -368,10 +380,17 @@ class TestResolve:
         )
         await service.reject(req.id)
 
-        with pytest.raises(
-            ValueError, match="pending/execution_failed 상태에서만 거절 가능"
-        ):
+        # #1813 Group Q sweep: status flow 위반은 typed
+        # ``ApprovalStatusConflictError`` 로 raise (위 ``approve`` 분기 1:1
+        # 미러). ``ValueError`` 다중상속이라 기존 caller 회귀 없음.
+        from ante.approval.errors import ApprovalStatusConflictError
+
+        with pytest.raises(ApprovalStatusConflictError) as excinfo:
             await service.reject(req.id)
+        assert excinfo.value.code == "APPROVAL_STATUS_CONFLICT"
+        assert excinfo.value.approval_id == req.id
+        assert excinfo.value.requested_action == "reject"
+        assert isinstance(excinfo.value, ValueError)
 
     async def test_hold_and_resume(self, service):
         """보류 및 재개."""

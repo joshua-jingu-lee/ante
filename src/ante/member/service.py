@@ -585,11 +585,25 @@ class MemberService:
         ``suspended_by``는 master 권한 caller여야 한다(#1351 — 보안 회귀
         잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
         거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
+
+        state 위반 (이미 SUSPENDED 등) 은 #1814 Group Q sweep 에 따라
+        typed ``MemberStateConflictError`` 로 raise 한다 (이전 ``PermissionError``
+        의미를 좁힘). ``ValueError`` 다중상속이므로 기존 ``except (ValueError,
+        PermissionError)`` caller (CLI member suspend line 657 generic
+        fallback) 가 회귀 없이 동일하게 잡힌다. ``revoke`` 는 plan scope 외
+        라 기존 ``_assert_status`` ``PermissionError`` 경로를 유지한다.
         """
+        from ante.member.errors import MemberStateConflictError
+
         await self._assert_master(suspended_by, "suspend")
         member = await self._get_or_raise(member_id)
         self._assert_not_master(member, "suspend")
-        self._assert_status(member, MemberStatus.ACTIVE, "suspend")
+        if member.status != MemberStatus.ACTIVE:
+            raise MemberStateConflictError(
+                member_id,
+                current_status=str(member.status),
+                requested_action="suspend",
+            )
 
         now = _now()
         await self._db.execute(
@@ -615,10 +629,20 @@ class MemberService:
         """멤버 재활성화.
 
         ``reactivated_by``는 master 권한 caller여야 한다(#1351).
+
+        state 위반 (이미 ACTIVE 등) 은 #1814 Group Q sweep 에 따라 typed
+        ``MemberStateConflictError`` 로 raise 한다 (``suspend`` 1:1 미러).
         """
+        from ante.member.errors import MemberStateConflictError
+
         await self._assert_master(reactivated_by, "reactivate")
         member = await self._get_or_raise(member_id)
-        self._assert_status(member, MemberStatus.SUSPENDED, "reactivate")
+        if member.status != MemberStatus.SUSPENDED:
+            raise MemberStateConflictError(
+                member_id,
+                current_status=str(member.status),
+                requested_action="reactivate",
+            )
 
         await self._db.execute(
             "UPDATE members SET status = ? WHERE member_id = ?",

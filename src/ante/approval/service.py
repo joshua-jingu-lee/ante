@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from ante.account.scoping import require_account_id
 from ante.approval.auto_approve import AutoApproveEvaluator
-from ante.approval.errors import ApprovalNotFoundError
+from ante.approval.errors import ApprovalNotFoundError, ApprovalStatusConflictError
 from ante.approval.models import (
     ApprovalRequest,
     ApprovalStatus,
@@ -222,11 +222,16 @@ class ApprovalService:
 
         approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
         if request.status not in approvable:
-            msg = (
-                "pending/execution_failed 상태에서만 승인 가능"
-                f" (현재: {request.status})"
+            # #1813 Group Q sweep: status flow 위반은 typed
+            # ``ApprovalStatusConflictError`` 로 raise 해 IPC envelope 이
+            # ``APPROVAL_STATUS_CONFLICT`` 안정 코드를 surface 한다.
+            # ``ValueError`` 다중상속이라 기존 ``except ValueError`` caller
+            # (CLI ``approval approve`` line 629 generic fallback) 회귀 없음.
+            raise ApprovalStatusConflictError(
+                id,
+                current_status=str(request.status),
+                requested_action="approve",
             )
-            raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
         request.history.append(
@@ -275,11 +280,16 @@ class ApprovalService:
 
         rejectable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
         if request.status not in rejectable:
-            msg = (
-                "pending/execution_failed 상태에서만 거절 가능"
-                f" (현재: {request.status})"
+            # #1813 Group Q sweep: status flow 위반은 typed
+            # ``ApprovalStatusConflictError`` 로 raise 해 IPC envelope 이
+            # ``APPROVAL_STATUS_CONFLICT`` 안정 코드를 surface 한다.
+            # ``ValueError`` 다중상속이라 기존 ``except ValueError`` caller
+            # (CLI ``approval reject`` line 662 generic fallback) 회귀 없음.
+            raise ApprovalStatusConflictError(
+                id,
+                current_status=str(request.status),
+                requested_action="reject",
             )
-            raise ValueError(msg)
 
         now = datetime.now(UTC).isoformat()
         request.history.append(
