@@ -22,15 +22,26 @@ class AccountNotFoundError(AccountError):
 
 
 class AccountAlreadyExistsError(AccountError):
-    """동일 account_id가 이미 존재."""
+    """동일 account_id가 이미 존재.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_ALREADY_EXISTS"``를 노출하도록 한다 (#1812 Group Q sweep —
+    state-conflict / duplicate-resource typed code 정합).
+    """
+
+    code: str = "ACCOUNT_ALREADY_EXISTS"
 
 
 class InvalidBrokerTypeError(AccountError):
-    """등록되지 않은 broker_type."""
+    """등록되지 않은 broker_type.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_INVALID_BROKER_TYPE"``를 노출하도록 한다 (#1812 Group Q sweep).
+    """
+
+    code: str = "ACCOUNT_INVALID_BROKER_TYPE"
 
 
 class InvalidExchangeError(AccountError):
@@ -50,27 +61,56 @@ class InvalidExchangeError(AccountError):
 
 
 class MissingCredentialsError(AccountError):
-    """필수 credentials 키 누락."""
+    """필수 credentials 키 누락.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_MISSING_CREDENTIALS"``를 노출하도록 한다 (#1812 Group Q sweep).
+    """
+
+    code: str = "ACCOUNT_MISSING_CREDENTIALS"
 
 
 class AccountAlreadySuspendedError(AccountError):
-    """이미 정지 상태인 계좌에 대한 재정지 시도."""
+    """이미 정지 상태인 계좌에 대한 재정지 시도.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_ALREADY_SUSPENDED"``를 노출하도록 한다 (#1812 Group Q sweep —
+    state-conflict typed code 정합. CLI ``account suspend`` 가 IPC envelope
+    의 typed code 를 middleware ``ClickException`` fallback 으로 그대로
+    surface 한다).
+    """
+
+    code: str = "ACCOUNT_ALREADY_SUSPENDED"
 
 
 class AccountDeletedError(AccountError):
-    """DELETED 상태 계좌에 대한 수정/활성화 시도."""
+    """DELETED 상태 계좌에 대한 수정/활성화 시도.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_DELETED"``를 노출하도록 한다 (#1812 Group Q sweep —
+    state-conflict typed code 정합).
+
+    NOTE: CLI ``account delete`` 의 ``except AccountDeletedError`` 분기는
+    명시적으로 ``code="ACCOUNT_ALREADY_DELETED"`` 를 출력해 already-deleted
+    UX 의미를 보존한다 (CLI surface override). 본 클래스 레벨 ``code`` 는
+    IPC envelope 의 fallback 코드 (직접 catch 가 없는 표면)를 의미한다.
+    """
+
+    code: str = "ACCOUNT_DELETED"
 
 
 class AccountSuspendedError(AccountError):
-    """정지(SUSPENDED) 상태 계좌에 대한 작업 시도."""
+    """정지(SUSPENDED) 상태 계좌에 대한 작업 시도.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_SUSPENDED"``를 노출하도록 한다 (#1812 Group Q sweep).
+    """
+
+    code: str = "ACCOUNT_SUSPENDED"
 
 
 class InvalidAccountIdError(AccountError):
@@ -86,9 +126,14 @@ class InvalidAccountIdError(AccountError):
 
 
 class AccountImmutableFieldError(AccountError):
-    """불변 필드 수정 시도."""
+    """불변 필드 수정 시도.
 
-    pass
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_IMMUTABLE_FIELD"``를 노출하도록 한다 (#1812 Group Q sweep).
+    """
+
+    code: str = "ACCOUNT_IMMUTABLE_FIELD"
 
 
 class BrokerReconnectFailedError(AccountError):
@@ -96,9 +141,13 @@ class BrokerReconnectFailedError(AccountError):
 
     update() 자체는 DB에 반영되지만, 새 자격증명/설정으로 broker connect()가
     실패했을 때 발생한다. 운영자는 설정을 교정한 뒤 재시도해야 한다.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"BROKER_RECONNECT_FAILED"``를 노출하도록 한다 (#1812 Group Q sweep).
     """
 
-    pass
+    code: str = "BROKER_RECONNECT_FAILED"
 
 
 class AccountStructuralChangeRequiresStoppedServerError(AccountError):
@@ -134,7 +183,15 @@ class AccountHasActiveBotsError(AccountError):
     봇은 ``ante bot remove``로 먼저 제거해야 한다. ``bot remove``는 서버 실행
     중에는 IPC, 서버 정지 상태에서는 cold-path cleanup으로 동작하므로 계좌
     삭제 복구 흐름에서 별도의 server start/stop 왕복이 필요하지 않다.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버가
+    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``"ACCOUNT_HAS_ACTIVE_BOTS"``를 노출하도록 한다 (#1812 Group Q sweep).
+    CLI ``account delete`` 의 명시적 ``except AccountHasActiveBotsError``
+    분기도 동일 코드를 surface 한다 (commands/account.py:874).
     """
+
+    code: str = "ACCOUNT_HAS_ACTIVE_BOTS"
 
     def __init__(self, account_id: str, bot_count: int) -> None:
         self.account_id = account_id

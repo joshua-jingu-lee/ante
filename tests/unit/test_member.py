@@ -318,10 +318,24 @@ class TestSuspendReactivateRevoke:
             await service.revoke("owner", revoked_by="owner")
 
     async def test_reactivate_active_fails(self, service):
+        # #1814 Group Q sweep: state-conflict 는 ``MemberStateConflictError``
+        # (``MemberError`` + ``ValueError`` 다중상속) 로 raise 된다. 이전
+        # 동작은 ``PermissionError, match="suspended 상태에서만"`` 였다 —
+        # state 위반 의미가 권한 부족과 모호하게 섞여 있어 typed 로 좁힘.
+        # ``ValueError`` 다중상속이라 기존 ``except (ValueError, PermissionError)``
+        # caller (CLI generic fallback) 회귀는 없다.
+        from ante.member.errors import MemberStateConflictError
+
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
-        with pytest.raises(PermissionError, match="suspended 상태에서만"):
+        with pytest.raises(MemberStateConflictError) as excinfo:
             await service.reactivate("agent-01", reactivated_by="owner")
+        assert excinfo.value.code == "MEMBER_STATE_CONFLICT"
+        assert excinfo.value.member_id == "agent-01"
+        assert excinfo.value.requested_action == "reactivate"
+        # ``ValueError`` 회귀 보호: 다중상속이 유지되어 기존 caller 가
+        # ``except ValueError`` 로도 잡을 수 있어야 한다.
+        assert isinstance(excinfo.value, ValueError)
 
     async def test_suspend_publishes_event(self, service, eventbus):
         events = []

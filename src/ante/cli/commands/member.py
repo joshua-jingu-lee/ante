@@ -27,7 +27,11 @@ from ante.cli.middleware import (
     require_master,
     require_scope,
 )
-from ante.member.errors import MemberNotFoundError, PermissionDeniedError
+from ante.member.errors import (
+    MemberNotFoundError,
+    MemberStateConflictError,
+    PermissionDeniedError,
+)
 from ante.member.models import MemberRole
 from ante.member.scopes import InvalidScopeError
 
@@ -654,6 +658,13 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
         # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
+    except MemberStateConflictError as e:
+        # #1814 Group Q sweep: state-conflict (이미 SUSPENDED 등) 는 안정 코드
+        # ``MEMBER_STATE_CONFLICT`` 로 surface 한다. ``ValueError`` 다중상속
+        # 이라 아래 ``except (ValueError, PermissionError)`` generic fallback
+        # 보다 typed 분기를 먼저 매칭한다 (Python MRO 보장).
+        fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
+        raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
@@ -689,6 +700,13 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
         # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
+    except MemberStateConflictError as e:
+        # #1814 Group Q sweep: state-conflict (이미 ACTIVE 등) 는 안정 코드
+        # ``MEMBER_STATE_CONFLICT`` 로 surface 한다 (``member suspend`` 1:1
+        # 미러). ``ValueError`` 다중상속이라 아래 generic fallback 보다
+        # typed 분기를 먼저 매칭한다.
+        fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
+        raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
         fmt.error(str(e))
         raise SystemExit(1) from e
