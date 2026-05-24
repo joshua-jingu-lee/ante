@@ -10,17 +10,22 @@ Refs #1759: ante-oracle A7 ``cli_bot_lifecycle_state_conflict_contract`` 가
 
 - R1: ``start_bot`` 두 번 → 두 번째 ``BotStateConflict`` raise + code.
 - R2: ``stop_bot`` 두 번 → 두 번째 ``BotStateConflict`` raise + code.
+- R3: ``ante bot start <id>`` CLI 가 IPC server 의 ``BOT_STATE_CONFLICT``
+  응답을 JSON envelope (``{status: "error", code, message}``) 로 그대로
+  매핑하고 exit 1.
+- R4: ``ante bot stop <id>`` CLI 가 동일하게 ``BOT_STATE_CONFLICT`` envelope
+  + exit 1 을 보존한다.
 - R5 (caller silent-ignore 회귀 보존):
   - EventBus 경로 ``_on_bot_stop_request`` 가 비실행 봇에서도 raise 하지
     않는다 (rule engine 의 중복 발행 / cold path 호환).
   - approval ``bot_stop`` executor (``main.py`` lambda 대체) 가 비실행
     봇에서도 raise 하지 않는다 (BotStoppedEvent 재처리 호환).
 
-R3/R4 (CLI/IPC envelope: BOT_STATE_CONFLICT) 는 기존
-``tests/unit/test_cli_bot_lifecycle.py`` / ``tests/unit/test_ipc_bot_lifecycle.py``
-가 envelope passthrough 를 잠그고 있다 (BotStateConflict 가 BotError
-서브클래스이므로 ipc handler 의 ``except BotError`` → ``BotStateConflict``
-매핑이 동일하게 동작).
+R3/R4 는 ``tests/unit/test_cli_bot_lifecycle.py`` 의 동형 envelope 테스트
+(``test_bot_start_state_conflict_envelope`` /
+``test_bot_stop_state_conflict_envelope``) 와 중복 잠금이지만 #1759 의
+silent-success → strict state machine 전환 회귀를 한 파일에서 self-contained
+하게 추적할 수 있도록 명시 포함한다 (Codex branch review 1 blocking).
 """
 
 from __future__ import annotations
@@ -260,3 +265,107 @@ async def test_start_then_stop_remains_legal(
     assert bot.status == BotStatus.RUNNING
     await manager.stop_bot(bot.bot_id)
     assert bot.status == BotStatus.STOPPED
+
+
+# ── R3/R4: CLI envelope passthrough (BOT_STATE_CONFLICT) ──────────────
+#
+# IPC server.py 의 ``except BotError`` 분기가 ``BotStateConflict.code`` 를
+# 그대로 응답 envelope 에 실어주고, CLI(``ante bot start``/``ante bot stop``)
+# 의 ipc_helpers 가 ``{status, code, message}`` JSON 으로 통과시키는지 잠근다.
+# ``test_cli_bot_lifecycle.py`` 와 동형이지만 #1759 회귀 파일에 명시 포함하여
+# silent-success → strict state machine 전환을 한 자리에서 추적한다.
+
+
+def _make_member_mock():
+    from unittest.mock import MagicMock
+
+    from ante.member.models import MemberType
+
+    member = MagicMock()
+    member.member_id = "test-user-1759"
+    member.type = MemberType.HUMAN
+    return member
+
+
+def _invoke_cli_with_mock_ipc(args: list[str], ipc_response: dict):
+    """``ante bot ...`` CLI 호출 + IPC 응답 mock (인증 우회).
+
+    ``test_cli_bot_lifecycle.py`` 의 ``_invoke_cli`` 와 동형 패턴.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from click.testing import CliRunner
+
+    from ante.cli.main import cli
+
+    def _mock_auth(ctx):
+        ctx.obj["member"] = _make_member_mock()
+
+    runner = CliRunner()
+    with (
+        patch("ante.cli.main.authenticate_member", side_effect=_mock_auth),
+        patch(
+            "ante.cli.commands.ipc_helpers.get_socket_path",
+            return_value="/tmp/test-1759.sock",
+        ),
+        patch("ante.cli.commands.ipc_helpers.IPCClient") as mock_ipc_cls,
+    ):
+        mock_client = AsyncMock()
+        mock_client.send.return_value = ipc_response
+        mock_ipc_cls.return_value = mock_client
+        result = runner.invoke(
+            cli,
+            args,
+            obj={"member": _make_member_mock()},
+            env={"ANTE_MEMBER_TOKEN": ""},
+            catch_exceptions=False,
+        )
+    return result
+
+
+def test_cli_bot_start_state_conflict_envelope_passthrough() -> None:
+    """R3: ``ante --format json bot start <id>`` 가 IPC 의 BOT_STATE_CONFLICT 를
+    JSON envelope 으로 그대로 통과시키고 exit 1."""
+    import json
+
+    ipc_response = {
+        "id": "req-1759-r3",
+        "status": "error",
+        "error": {
+            "code": BOT_STATE_CONFLICT_CODE,
+            "message": "이미 실행 중인 봇입니다: bot-1759",
+        },
+    }
+    result = _invoke_cli_with_mock_ipc(
+        ["--format", "json", "bot", "start", "bot-1759"], ipc_response
+    )
+
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["status"] == "error"
+    assert data["code"] == BOT_STATE_CONFLICT_CODE
+    assert "이미 실행 중인" in data["message"]
+
+
+def test_cli_bot_stop_state_conflict_envelope_passthrough() -> None:
+    """R4: ``ante --format json bot stop <id>`` 가 IPC 의 BOT_STATE_CONFLICT 를
+    JSON envelope 으로 그대로 통과시키고 exit 1."""
+    import json
+
+    ipc_response = {
+        "id": "req-1759-r4",
+        "status": "error",
+        "error": {
+            "code": BOT_STATE_CONFLICT_CODE,
+            "message": "정지할 수 없는 상태입니다: bot-1759 (stopped)",
+        },
+    }
+    result = _invoke_cli_with_mock_ipc(
+        ["--format", "json", "bot", "stop", "bot-1759"], ipc_response
+    )
+
+    assert result.exit_code == 1
+    data = json.loads(result.output)
+    assert data["status"] == "error"
+    assert data["code"] == BOT_STATE_CONFLICT_CODE
+    assert "정지할 수 없는" in data["message"]
