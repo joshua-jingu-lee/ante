@@ -565,7 +565,8 @@ tests/
 │   ├── test_cli_treasury_read_account_not_found.py
 │   ├── test_bot_lifecycle_state_conflict.py
 │   ├── test_bot_create_signal_key_auto.py
-│   └── test_cli_bot_signal_key_rotate_external_gate.py
+│   ├── test_cli_bot_signal_key_rotate_external_gate.py
+│   └── test_cli_error_code_naming_sweep.py
 └── __init__.py
 ```
 

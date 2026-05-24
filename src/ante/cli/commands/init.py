@@ -578,7 +578,7 @@ def init(
             fmt,
             f"init이 이미 완료된 상태입니다: {config_path}\n"
             "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요.",
-            code="already_initialized",
+            code="CLI_ALREADY_INITIALIZED",
         )
 
     # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)

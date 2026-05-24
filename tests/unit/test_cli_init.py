@@ -778,7 +778,7 @@ class TestInitJsonErrorContract:
         data = self._parse_error_json(result.output)
         assert data["status"] == "error"
         assert "init이 이미 완료된 상태입니다" in data["message"]
-        assert data.get("code") == "already_initialized"
+        assert data.get("code") == "CLI_ALREADY_INITIALIZED"
 
     def test_init_bootstrap_failure_json_output(self, runner, tmp_path):
         """_bootstrap_master가 ValueError를 던지면 JSON 에러 + exit 1."""

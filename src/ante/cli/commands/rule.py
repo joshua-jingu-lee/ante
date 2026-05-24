@@ -269,7 +269,7 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
         raise SystemExit(1) from e
 
     if not result:
-        fmt.error(f"룰을 찾을 수 없습니다: {rule_id}")
+        fmt.error(f"룰을 찾을 수 없습니다: {rule_id}", code="RULE_NOT_FOUND")
         raise SystemExit(1)
 
     if fmt.is_json:
