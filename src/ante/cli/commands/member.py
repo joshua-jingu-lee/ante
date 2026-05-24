@@ -228,7 +228,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 
     result = _run(_run_info())
     if not result:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}")
+        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         ctx.exit(1)
 
     if fmt.is_json:

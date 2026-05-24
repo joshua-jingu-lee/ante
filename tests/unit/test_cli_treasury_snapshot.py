@@ -346,7 +346,7 @@ class TestSnapshotJson:
         assert result.exit_code == 1
         payload = json.loads(result.output)
         assert payload["status"] == "error"
-        assert payload["code"] == "snapshot_not_found"
+        assert payload["code"] == "SNAPSHOT_NOT_FOUND"
         assert "2026-01-01" in payload["message"]
 
 

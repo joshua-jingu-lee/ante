@@ -789,7 +789,7 @@ def bot_logs(
 
     result = _run(_run_logs())
     if result.get("missing"):
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         raise SystemExit(1)
     if fmt.is_json:
         fmt.output(result)

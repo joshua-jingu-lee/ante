@@ -327,7 +327,10 @@ def instrument_import(
     # 파일 형식 확인 (try 블록 밖에서 분기 — ctx.exit(1)이 같은 try의
     # except Exception에 잡혀 swallow되는 것을 방지)
     if ext not in (".csv", ".json"):
-        fmt.error(f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)")
+        fmt.error(
+            f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)",
+            code="INSTRUMENT_INVALID_FILE_FORMAT",
+        )
         ctx.exit(1)
 
     # 파일 읽기
@@ -346,11 +349,14 @@ def instrument_import(
         ctx.exit(1)
 
     if ext == ".json" and not isinstance(records, list):
-        fmt.error("JSON 파일은 배열 형태여야 합니다.")
+        fmt.error(
+            "JSON 파일은 배열 형태여야 합니다.",
+            code="INSTRUMENT_INVALID_JSON_SHAPE",
+        )
         ctx.exit(1)
 
     if not records:
-        fmt.error("파일에 데이터가 없습니다.")
+        fmt.error("파일에 데이터가 없습니다.", code="INSTRUMENT_EMPTY_FILE")
         ctx.exit(1)
 
     # 필수 컬럼 확인

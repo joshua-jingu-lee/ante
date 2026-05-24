@@ -231,7 +231,7 @@ class TestReportViewCLI:
             assert result.exit_code == 1
             payload = json.loads(result.output)
             assert payload["status"] == "error"
-            assert payload["code"] == "report_not_found"
+            assert payload["code"] == "REPORT_NOT_FOUND"
             assert "찾을 수 없습니다" in payload["message"]
 
     def test_view_json_format(self, runner):

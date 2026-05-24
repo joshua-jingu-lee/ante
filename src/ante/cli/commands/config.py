@@ -120,7 +120,10 @@ def config_get(ctx: click.Context, key: str | None) -> None:
 
     if isinstance(result, dict):
         if result["source"] == "not_found":
-            fmt.error(f"설정을 찾을 수 없습니다: {result['key']}")
+            fmt.error(
+                f"설정을 찾을 수 없습니다: {result['key']}",
+                code="CONFIG_KEY_NOT_FOUND",
+            )
             ctx.exit(1)
         _render_single(result, fmt)
     else:
