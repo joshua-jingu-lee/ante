@@ -562,7 +562,8 @@ tests/
 │   ├── test_cli_report_approval_db_cleanup.py
 │   ├── test_cli_strategy_submit_meta_shape.py
 │   ├── test_cli_system_start_json_stdout.py
-│   └── test_cli_treasury_read_account_not_found.py
+│   ├── test_cli_treasury_read_account_not_found.py
+│   └── test_bot_lifecycle_state_conflict.py
 └── __init__.py
 ```
 

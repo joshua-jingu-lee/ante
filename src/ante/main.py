@@ -1135,6 +1135,22 @@ async def _init_approval(s: Services) -> None:
             source_path=Path(record.filepath),
         )
 
+    async def _exec_bot_stop_idempotent(params: dict) -> None:
+        """approval ``bot_stop`` executor.
+
+        Refs #1759: ``BotManager.stop_bot`` 이 strict state machine 으로
+        전환된 이후에도 approval workflow 의 ``bot_stop`` action 은
+        idempotent 의미를 보존한다 (이미 중지된 봇에 대해 BotStoppedEvent
+        가 재처리되는 cold path 회귀 보호). state machine 거부는 silent
+        ignore 하고, 그 외 ``BotError`` 는 그대로 전파한다.
+        """
+        from ante.bot.exceptions import BotStateConflict
+
+        try:
+            await s.bot_manager.stop_bot(params["bot_id"])
+        except BotStateConflict:
+            return
+
     approval_executors: dict = {
         # 전략 관련
         "strategy_adopt": _exec_strategy_adopt,
@@ -1147,7 +1163,7 @@ async def _init_approval(s: Services) -> None:
         "bot_change_strategy": lambda params: s.bot_manager.change_strategy(
             params["bot_id"], params["strategy_id"]
         ),
-        "bot_stop": lambda params: s.bot_manager.stop_bot(params["bot_id"]),
+        "bot_stop": _exec_bot_stop_idempotent,
         "bot_resume": lambda params: s.bot_manager.resume_bot(params["bot_id"]),
         "bot_delete": lambda params: s.bot_manager.delete_bot(params["bot_id"]),
         # 자금·규칙
