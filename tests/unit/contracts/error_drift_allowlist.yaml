@@ -30,14 +30,8 @@
 intended_no_code: []
 
 known_drift_fmt_error_no_code:
-  - path: src/ante/cli/commands/account.py
-    line: 762
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/account.py
-    line: 804
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
+  # #1842: account.py line 762/804 entries 제거 — emit_cli_error 정렬 완료
+  # (CLI direct path 가 IPC envelope 와 동일 public code surface).
   - path: src/ante/cli/commands/bot.py
     line: 384
     snippet_sha1: "826b5811c10c"

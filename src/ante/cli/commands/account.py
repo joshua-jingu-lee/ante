@@ -36,6 +36,7 @@ from ante.cli.cold_path import (
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts import emit_cli_error
 
 # `AccountStatus` enum이 `--status` 필터의 SSOT다. `account list`는 DB 진입 전
 # preflight에서 invalid 값을 차단해야 하며 (#1462), 이를 위해 함수 내부 import
@@ -605,8 +606,10 @@ def account_create(
     try:
         created = _run(_do_create())
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 가 registry-first → ``.code`` fallback →
+        # EXECUTION_ERROR 순서로 ErrorSpec 을 resolve해 IPC envelope 와 동일한
+        # public code 를 surface 한다.
+        emit_cli_error(fmt, e)
 
     fmt.success(
         f'계좌 "{created.account_id}" 생성 완료 '
@@ -663,8 +666,8 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     try:
         rows = _run(_do_list())
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if not rows:
         fmt.output({"message": "등록된 계좌가 없습니다.", "accounts": []})
@@ -713,8 +716,9 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     try:
         detail = _run(_do_info())
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — AccountNotFoundError 등 typed exception
+        # 의 IPC envelope code (ACCOUNT_NOT_FOUND) 와 동일하게 surface.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(detail)
@@ -759,8 +763,10 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — code-less fmt.error 를 taxonomy 정렬된
+        # public code (IPC envelope 와 동일) 으로 surface 한다. baseline
+        # allowlist entry 제거 대상.
+        emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 정지 완료')
 
@@ -801,8 +807,10 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — code-less fmt.error 를 taxonomy 정렬된
+        # public code (IPC envelope 와 동일) 으로 surface 한다. baseline
+        # allowlist entry 제거 대상.
+        emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 활성화 완료')
 
@@ -877,13 +885,17 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except AccountDeletedError as e:
+        # CLI surface override (보존): registry default ACCOUNT_DELETED 대신
+        # account delete UX 의 already-deleted 의미 (ACCOUNT_ALREADY_DELETED)
+        # 를 surface 한다 (#1812 / errors.py:96-100 NOTE / #1842 plan v2).
         fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
         raise SystemExit(1) from e
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — generic fallback 도 registry-first 로
+        # IPC envelope 와 동일 public code 를 surface.
+        emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 삭제 완료')
 
@@ -919,8 +931,8 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     try:
         masked = _run(_do_credentials())
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if not masked:
         fmt.output({"message": "등록된 인증 정보가 없습니다.", "credentials": {}})
@@ -1051,8 +1063,11 @@ def account_set_credentials(
     except SystemExit:
         raise
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — MissingCredentialsError /
+        # BrokerReconnectFailedError 등 typed exception 도 registry-first 로
+        # 정확한 public code (ACCOUNT_MISSING_CREDENTIALS / BROKER_RECONNECT_FAILED)
+        # 를 surface 한다.
+        emit_cli_error(fmt, e)
 
 
 # ── repair-timezone ──────────────────────────────────────
@@ -1136,13 +1151,16 @@ def account_repair_timezone(
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except AccountDeletedError as e:
+        # CLI surface override (보존): registry default ACCOUNT_DELETED 대신
+        # repair-timezone 표면에서 already-deleted 의미 (ACCOUNT_ALREADY_DELETED)
+        # 를 surface 한다 (account_delete 와 동일 정책, #1842 plan v2).
         fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
         raise SystemExit(1) from e
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "EXECUTION_ERROR"))
-        raise SystemExit(1) from e
+        # #1842: emit_cli_error 정렬 — registry-first 로 IPC envelope 와 동일.
+        emit_cli_error(fmt, e)
 
     fmt.success(
         f'계좌 "{repaired.account_id}" timezone 복구 완료 ({repaired.timezone})',
