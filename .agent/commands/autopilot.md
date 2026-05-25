@@ -6,7 +6,7 @@
 
 $ARGUMENTS — 옵션 (생략 가능)
 - 없음: 기본 autopilot 큐 (`--limit 10`)
-- `--limit {N}`: 이번 배치에서 처리할 최대 이슈 수 (기본 10, 최대 10)
+- `--limit {N}`: 이번 배치에서 처리할 최대 이슈 수 (기본 10, 최대 25)
 - `--time-budget {예: 4h, 90m}`: 시간 예산이 소진되면 다음 이슈로 넘어가지 않고 종료
 - `--label {라벨}`: 특정 라벨만 대상으로 제한
 - `--handoff-only`: 예외적으로 PR 생성 후 기존 게이트 인계까지만 처리하고 merge/post-merge 확인은 생략
@@ -137,7 +137,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 - 기본 처리 한도는 `10`개다.
 - `--limit`이 생략되면 `10`으로 간주한다.
-- `--limit`에 `10`보다 큰 값이 들어오면 `10`으로 고정하고, 그 사실을 리포트에 기록한다.
+- `--limit`에 `25`보다 큰 값이 들어오면 `25`로 고정하고, 그 사실을 리포트에 기록한다.
 - 현재 활성 이슈가 merge/post-merge까지 정리되지 않으면, 남은 한도와 무관하게 다음 이슈로 넘어가지 않는다.
 
 ## Plan Preflight 규칙
@@ -195,7 +195,7 @@ done
 - `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
 - snapshot은 100건 단일 조회가 아니라 **pagination으로 끝까지 수집한 전체 open issue 후보 집합**으로 고정한다.
 - 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다.
-- snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 10)`건으로 자른다.
+- snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
 - `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
 
