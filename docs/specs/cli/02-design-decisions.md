@@ -90,6 +90,12 @@ SSOT는 [contracts/envelopes.md](../contracts/envelopes.md#cli-error-envelope)�
 명확하면 도메인 prefix를 사용하고(`ACCOUNT_*`, `MEMBER_*`, `BOT_*`, `UPDATE_*`),
 도메인이 없으면 `CLI_*` prefix를 사용한다.
 
+`code` 값의 vocabulary와 분류(category, `EXECUTION_ERROR` 허용 범위, auth lowercase
+legacy alias, `SERVICE_NOT_CONFIGURED` 등 공통 코드)는 본 절이 아닌
+[`docs/specs/contracts/error-taxonomy.md`](../contracts/error-taxonomy.md) SSOT가
+lock 한다. 본 절 아래 표는 입력 계약 위반에 한정된 CLI 표면의 적용 예시이며, 새
+공통 vocabulary나 category 추가는 본 표가 아닌 error-taxonomy.md를 우선 갱신한다.
+
 > **명명 규칙 예외 (legacy/common date-range 코드)**: 위 규칙은 domainless
 > 입력 계약 위반에 `CLI_*` prefix를 요구하지만, `INVALID_DATE_RANGE`(시작일 >
 > 종료일)와 `INVALID_DATE`(달력 날짜 형식 오류)는 기존 `backtest run` CLI가
@@ -191,6 +197,16 @@ CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 | `get_member_id(ctx)` | 인증된 멤버 ID 반환. 미인증 시 `"unknown"` |
 
 **인증 면제 커맨드 경로**: `ante init`, `ante member reset-password`, `ante member regenerate-recovery-key` (토큰 없이 실행 가능)
+
+**Auth error envelope code 정책 (SSOT reference)**:
+
+`authenticate_member`/`@require_auth`/`@require_scope`가 노출하는 CLI error
+envelope의 `code` 값은 본 1.0 시점에서 lowercase legacy alias
+(`auth_required`/`auth_failed`/`permission_denied`)를 사용한다. 이 alias는
+[`docs/specs/contracts/error-taxonomy.md` — Auth Middleware Code 정책](../contracts/error-taxonomy.md#auth-middleware-code-정책-normative)에서
+`AUTH_REQUIRED`/`AUTH_FAILED`/`PERMISSION_DENIED` SCREAMING_SNAKE normative code의
+legacy alias로 정렬된다. SCREAMING_SNAKE migration timing은 #1815 auth registry
+책임이며 본 절은 그 SSOT를 reference한다.
 
 매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py:29-33)를 비교한다.
 
