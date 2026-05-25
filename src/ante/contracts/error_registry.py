@@ -58,6 +58,22 @@ Non-Goals).
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 1 Non-Goals).
 
+#1843 sub-PR 2 (approval sweep) 가 추가한 approval domain 2 sub-class lock
+(실측 ``.code`` mirror, ``ApprovalNotFoundError`` 는 #1840 lock 그대로 보존):
+
+- ``ApprovalStatusConflictError`` → ``APPROVAL_STATUS_CONFLICT`` /
+  ``state_conflict`` (#1813 Group Q sweep; ``approve``/``reject`` 표면의
+  status flow 위반)
+- ``ApprovalValidationError`` → ``APPROVAL_VALIDATION_ERROR`` /
+  ``validation`` (``ApprovalService.create`` 사전검증 ``fail`` grade 거부;
+  CLI ``approval request`` 의 ``--params`` / ``--type`` / ``--expires-in``
+  ingress validation 과 동일한 안정 코드 surface — 본 PR 에서 class-level
+  ``.code`` 신규 부여)
+
+``ApprovalError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+``AccountError`` 와 동일 패턴, #1843 sub-PR 2 Non-Goals).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -88,7 +104,8 @@ from ante.account.errors import (
     InvalidExchangeError,
     MissingCredentialsError,
 )
-from ante.approval.errors import ApprovalNotFoundError
+from ante.approval.errors import ApprovalNotFoundError, ApprovalStatusConflictError
+from ante.approval.models import ApprovalValidationError
 from ante.bot.exceptions import BotNotFoundError
 from ante.contracts.errors import ErrorSpec
 from ante.member.errors import (
@@ -234,6 +251,28 @@ _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── approval 2 sub-class lock (#1843 sub-PR 2, 실측 .code mirror) ────────────
+
+# ``approve``/``reject`` 표면의 status flow 위반 (rejected → 재reject,
+# approved → 재approve 등). class-level ``.code = "APPROVAL_STATUS_CONFLICT"``
+# (#1813 Group Q sweep) 와 정렬 — IPC server.py:322 ``getattr(e, "code", ...)``
+# 와 helper registry-first 가 동일 코드를 surface 한다.
+_APPROVAL_STATUS_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="APPROVAL_STATUS_CONFLICT",
+    category="state_conflict",
+)
+
+# ``ApprovalService.create`` 사전검증 ``fail`` grade 거부. CLI ``approval
+# request`` 의 ingress validation (``--params`` JSON object 가드, ``--type``
+# enum 검증, ``--expires-in`` 파싱) 과 동일한 안정 코드 ``APPROVAL_VALIDATION_ERROR``
+# 를 service-side typed exception 도 surface 한다. 본 PR 에서 class-level
+# ``.code`` 신규 부여 (``ante.approval.models.ApprovalValidationError``).
+_APPROVAL_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="APPROVAL_VALIDATION_ERROR",
+    category="validation",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -289,6 +328,9 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,
     MemberAlreadyExistsError: _MEMBER_ALREADY_EXISTS_SPEC,
     MemberInvalidRecoveryCredentialError: _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC,
+    # ── #1843 sub-PR 2 approval 2 sub-class (실측 .code mirror) ───────────
+    ApprovalStatusConflictError: _APPROVAL_STATUS_CONFLICT_SPEC,
+    ApprovalValidationError: _APPROVAL_VALIDATION_ERROR_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 

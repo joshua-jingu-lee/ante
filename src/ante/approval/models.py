@@ -70,7 +70,17 @@ class ValidationResult:
 
 
 class ApprovalValidationError(Exception):
-    """사전 검증 실패 — 요청 생성 차단."""
+    """사전 검증 실패 — 요청 생성 차단.
+
+    클래스 레벨 ``code`` 속성은 IPC 서버 envelope 이 안정 코드
+    ``"APPROVAL_VALIDATION_ERROR"`` 로 surface 하도록 한다 (#1843 sub-PR 2;
+    CLI ``approval request`` 의 ``--params`` / ``--type`` / ``--expires-in``
+    ingress validation 과 동일한 안정 코드). helper
+    (``error_spec_for_exception``) 의 registry MRO lookup 도 동일 코드로
+    resolve 한다.
+    """
+
+    code: str = "APPROVAL_VALIDATION_ERROR"
 
     def __init__(self, detail: str) -> None:
         self.detail = detail

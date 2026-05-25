@@ -108,9 +108,11 @@ pending_migration:
   - module: ante.approval.errors
     class_anchor: ApprovalError
     reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.approval.models
-    class_anchor: ApprovalValidationError
-    reason: "baseline (#1841); register in #1842/#1843"
+  # #1843 sub-PR 2: ApprovalValidationError 제거 — class-level
+  # ``code="APPROVAL_VALIDATION_ERROR"`` 부여 + EXCEPTION_TO_SPEC 등록 완료.
+  # ApprovalStatusConflictError 는 이미 class-level ``.code`` (#1813 Group Q)
+  # 를 보유해 본 allowlist 에 등록되어 있지 않았다 — 본 PR 의 registry 등록
+  # 만으로 helper 가 typed code 를 resolve 한다.
   - module: ante.backtest.exceptions
     class_anchor: BacktestConfigError
     reason: "baseline (#1841); register in #1842/#1843"

@@ -591,7 +591,8 @@ tests/
 │   │   ├── test_auth_middleware_code_policy.py
 │   │   └── test_error_drift.py
 │   ├── test_account_cli_ipc_error_equivalence.py
-│   └── test_member_cli_ipc_error_equivalence.py
+│   ├── test_member_cli_ipc_error_equivalence.py
+│   └── test_approval_cli_ipc_error_equivalence.py
 └── __init__.py
 ```
 
