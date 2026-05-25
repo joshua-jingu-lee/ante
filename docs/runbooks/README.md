@@ -25,6 +25,6 @@
 |--------|------|
 | `/plan-preflight` | `superpowers:writing-plans` 원칙으로 이슈 본문 구현계획 작성/정비, Codex Plan Review, `plan-preflight:done` 라벨 확정 |
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) |
-| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 Plan Preflight 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`) |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (필요 시 Plan Preflight 후 `/implement-issue`와 merge/post-merge까지 순차 모니터링, 기본 `limit=10`, 최대 `limit=25`) |
 | `/release` | prepare로 release PR 생성, publish로 GitHub Release/PyPI/Docker image 배포 |
 | `/api-docs` | OpenAPI 스키마 조회 |

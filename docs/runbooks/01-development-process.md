@@ -121,7 +121,7 @@ Claude 오케스트레이터
 |--------|------|------|
 | `/plan-preflight` | GitHub 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정 | `.agent/commands/plan-preflight.md` |
 | `/implement-issue` | 이슈 구현 전체 흐름 (분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성) | `.agent/commands/implement-issue.md` |
-| `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → Plan Preflight → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`) | `.agent/commands/autopilot.md` |
+| `/autopilot` | 오픈 이슈 큐 순차 처리 (선별 → Plan Preflight → `/implement-issue` → merge/post-merge 모니터링, 기본 `limit=10`, 최대 `limit=25`) | `.agent/commands/autopilot.md` |
 | `/release` | prepare: release PR 생성 / publish: GitHub Release + PyPI + Docker image 배포 | `.agent/commands/release.md` |
 | `/api-docs` | OpenAPI 스키마 조회 | `.agent/commands/api-docs.md` |
 
