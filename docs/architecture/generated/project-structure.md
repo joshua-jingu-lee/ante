@@ -286,7 +286,10 @@ src/ante/
 ├── __init__.py
 └── contracts/
     ├── __init__.py
-    └── vocab.py
+    ├── vocab.py
+    ├── error_registry.py
+    ├── errors.py
+    └── helpers.py
 ```
 
 ## tests/ — 테스트
@@ -582,7 +585,8 @@ tests/
 │   └── contracts/
 │       ├── __init__.py
 │       ├── helpers.py
-│       └── test_helpers.py
+│       ├── test_helpers.py
+│       └── test_error_helpers.py
 └── __init__.py
 ```
 
