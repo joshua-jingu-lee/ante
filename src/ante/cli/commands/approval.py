@@ -13,6 +13,7 @@ from ante.approval.models import ApprovalStatus, ApprovalType
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts import emit_cli_error
 
 # `ApprovalStatus`/`ApprovalType` enum이 `--status`/`--type` 필터의 SSOT다.
 # `approval list`는 DB 진입 전 preflight에서 invalid 값을 차단해야 하며 (#1462),
@@ -122,8 +123,12 @@ def request(
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: typed exception (.code) 또는 registry MRO lookup 으로
+        # IPC envelope 과 동일한 public code (APPROVAL_VALIDATION_ERROR /
+        # APPROVAL_STATUS_CONFLICT 등) 를 surface 한다. registry miss 시
+        # EXECUTION_ERROR fallback (기존 ad-hoc "APPROVAL_ERROR" 와 별개의
+        # taxonomy lock 코드).
+        emit_cli_error(fmt, e)
 
 
 @approval.command("list")
@@ -212,8 +217,9 @@ def approval_list(
         rows = asyncio.run(_list())
         fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command()
@@ -282,11 +288,15 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
     except ApprovalNotFoundError as e:
         # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
         # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형).
+        # #1843 sub-PR 2: typed except 보존 — registry 등록된 동일 코드와
+        # surface 일치하지만, ``info``/``review`` 양쪽이 _find_request 의
+        # ValueError(multi-match) 분기와도 구분되어야 하므로 명시 매핑 유지.
         fmt.error(str(e), code="APPROVAL_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command()
@@ -365,12 +375,13 @@ def review(
     except ApprovalNotFoundError as e:
         # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
         # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형,
-        # ``approval info`` 형제 패턴 미러).
+        # ``approval info`` 형제 패턴 미러). #1843 sub-PR 2: typed except 보존.
         fmt.error(str(e), code="APPROVAL_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command("reopen")
@@ -439,8 +450,9 @@ def reopen(
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command("audit-types")
@@ -526,8 +538,9 @@ def audit_types(
             ["id", "type", "status", "requester", "created_at", "expires_at"],
         )
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command("cancel-invalid")
@@ -569,8 +582,9 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command("cancel")
@@ -598,8 +612,9 @@ def cancel(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        emit_cli_error(fmt, e)
 
 
 @approval.command("approve")
@@ -626,8 +641,10 @@ def approve(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
+        # (ApprovalStatusConflictError → APPROVAL_STATUS_CONFLICT 등).
+        emit_cli_error(fmt, e)
 
 
 @approval.command("reject")
@@ -659,8 +676,10 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code="APPROVAL_ERROR")
-        raise SystemExit(1) from e
+        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
+        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
+        # (ApprovalStatusConflictError → APPROVAL_STATUS_CONFLICT 등).
+        emit_cli_error(fmt, e)
 
 
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
@@ -669,8 +688,9 @@ async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
     not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval info``
     / ``approval review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로
     surface 할 수 있도록 한다 (#1811). multi-match 는 ``ValueError`` 로
-    유지 — 별도 의미(``"여러 건이 일치"``)이며 기존 generic 핸들러가
-    ``APPROVAL_ERROR`` 로 surface 한다.
+    유지 — 별도 의미(``"여러 건이 일치"``)이며 #1843 sub-PR 2 정렬 이후
+    generic ``emit_cli_error(fmt, e)`` 핸들러가 helper resolver 의 fallback
+    ``EXECUTION_ERROR`` 코드로 surface 한다 (registry 미등록 / ``.code`` 부재).
     """
     from ante.approval.errors import ApprovalNotFoundError
 
