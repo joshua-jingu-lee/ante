@@ -211,14 +211,5 @@ pending_migration:
     class_anchor: StrategyValidationError
     reason: "baseline (#1841); register in #1842/#1843"
   - module: ante.treasury.exceptions
-    class_anchor: BotNotStoppedError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.treasury.exceptions
-    class_anchor: InsufficientFundsError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.treasury.exceptions
     class_anchor: TreasuryError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.treasury.exceptions
-    class_anchor: TreasuryNotConfiguredError
-    reason: "baseline (#1841); register in #1842/#1843"
+    reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
