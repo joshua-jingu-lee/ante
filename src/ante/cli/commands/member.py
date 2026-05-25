@@ -27,6 +27,7 @@ from ante.cli.middleware import (
     require_master,
     require_scope,
 )
+from ante.contracts import emit_cli_error
 from ante.member.errors import (
     MemberAlreadyExistsError,
     MemberInvalidRecoveryCredentialError,
@@ -511,7 +512,10 @@ def member_register(
     try:
         result, token = _run(_run_register())
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 — master 검증 위반의
+        # 안정 코드. CLI surface override 보존: 사용자 친화 한국어 문구
+        # (``_MASTER_REQUIRED_MESSAGE``) 를 envelope message 로 surface 한다.
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberAlreadyExistsError as e:
         # #1807 (Group R sweep): duplicate member_id 는 안정 코드
@@ -528,8 +532,8 @@ def member_register(
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -567,8 +571,8 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except ValueError as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
 
@@ -624,14 +628,16 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 — master 검증 위반.
+        # CLI surface override 보존 (한국어 친화 문구).
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except InvalidScopeError as e:
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
@@ -660,7 +666,8 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     try:
         result = _run(_run_suspend())
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
         # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
@@ -675,8 +682,8 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 정지 완료: {member_id}", result)
 
@@ -702,7 +709,8 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     try:
         result = _run(_run_reactivate())
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
         # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
@@ -717,8 +725,8 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 재활성화 완료: {member_id}", result)
 
@@ -762,7 +770,8 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     try:
         result = _run(_run_revoke())
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
         # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
@@ -770,8 +779,8 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
 
@@ -797,7 +806,8 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     try:
         result, token = _run(_run_rotate())
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE)
+        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
         # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
@@ -805,8 +815,8 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -875,8 +885,8 @@ def member_reset_password(
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     fmt.success("패스워드가 변경되었습니다.")
 
@@ -938,8 +948,8 @@ def member_regenerate_recovery_key(
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output({"recovery_key": new_key})

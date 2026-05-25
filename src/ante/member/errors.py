@@ -29,7 +29,21 @@ class MemberError(Exception):
 
 
 class PermissionDeniedError(MemberError):
-    """권한 부족 — master만 수행 가능한 작업을 비-master가 시도."""
+    """권한 부족 — master만 수행 가능한 작업을 비-master가 시도.
+
+    클래스 레벨 ``code`` 속성은 CLI/IPC envelope 이 안정 코드
+    ``"PERMISSION_DENIED"`` 로 surface 하도록 한다 (#1843 member sweep).
+
+    CLI direct path 의 ``except PermissionDeniedError:
+    fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")`` 명시
+    typed except 는 보존된다 — master 검증 위반의 사용자 친화 한국어 문구
+    (``_MASTER_REQUIRED_MESSAGE``) 가 envelope message 로 surface 되도록
+    명시 메시지 override 가 필요하다. IPC envelope (server.py:322) 는
+    ``getattr(e, "code", "EXECUTION_ERROR")`` 패스로 동일 ``PERMISSION_DENIED``
+    코드를 surface 한다 (CLI/IPC 동등성, #1842 plan v2 #6 패턴).
+    """
+
+    code: str = "PERMISSION_DENIED"
 
 
 class MemberNotFoundError(MemberError, ValueError):
