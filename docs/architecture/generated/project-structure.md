@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-24 (KST)
+> 마지막 생성 시점: 2026-05-25 (KST)
 
 ## 최상위 구조
 
@@ -283,7 +283,10 @@ src/ante/
 │   ├── __init__.py
 │   ├── checker.py
 │   └── executor.py
-└── __init__.py
+├── __init__.py
+└── contracts/
+    ├── __init__.py
+    └── vocab.py
 ```
 
 ## tests/ — 테스트
@@ -568,7 +571,14 @@ tests/
 │   ├── test_bot_create_signal_key_auto.py
 │   ├── test_cli_bot_signal_key_rotate_external_gate.py
 │   ├── test_cli_error_code_naming_sweep.py
-│   └── test_cli_envelope_typed_codes_group_a_sweep.py
+│   ├── test_cli_envelope_typed_codes_group_a_sweep.py
+│   ├── test_cli_approval_args_key_alignment.py
+│   ├── test_cli_bot_create_active_account_cleanup.py
+│   ├── test_cli_group_p_missing_resource_sweep.py
+│   ├── test_cli_group_q_state_conflict_sweep.py
+│   ├── test_cli_group_r_member_duplicate_validation_sweep.py
+│   ├── test_cli_group_s_treasury_typed_reject.py
+│   └── test_ipc_treasury_allocate_missing_bot.py
 └── __init__.py
 ```
 
