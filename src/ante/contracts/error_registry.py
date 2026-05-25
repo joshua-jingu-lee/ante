@@ -74,6 +74,27 @@ Non-Goals).
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 2 Non-Goals).
 
+#1843 sub-PR 3 (bot sweep) 가 추가한 bot domain 5 sub-class lock (실측 ``.code``
+mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
+
+- ``BotAccountCredentialsNotConfigured`` →
+  ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` / ``validation`` (#1712; ``bot
+  start`` 표면 ``app_key`` preflight 거부 — 입력 계약/필수 정보 누락은
+  taxonomy ``validation`` 카테고리)
+- ``BotStateConflict`` → ``BOT_STATE_CONFLICT`` / ``state_conflict`` (#1712;
+  ``start_bot``/``stop_bot`` 상태머신 거부)
+- ``BotNotAcceptingSignals`` → ``BOT_NOT_ACCEPTING_SIGNALS`` /
+  ``state_conflict`` (#1761; ``accepts_external_signals=False`` 전략이 외부
+  시그널 발급 요청을 거부 — 운영 상태가 해당 전이를 허용하지 않음)
+- ``BotAlreadyExistsError`` → ``BOT_ALREADY_EXISTS`` / ``state_conflict``
+  (#1800; ``bot create`` 시 동일 ``bot_id`` 중복)
+- ``BotStrategyAlreadyRunningError`` → ``BOT_STRATEGY_ALREADY_RUNNING`` /
+  ``state_conflict`` (#1800; "1전략 1봇" 정책 거부)
+
+``BotError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+``AccountError`` 와 동일 패턴, #1843 sub-PR 3 Non-Goals).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -106,7 +127,14 @@ from ante.account.errors import (
 )
 from ante.approval.errors import ApprovalNotFoundError, ApprovalStatusConflictError
 from ante.approval.models import ApprovalValidationError
-from ante.bot.exceptions import BotNotFoundError
+from ante.bot.exceptions import (
+    BotAccountCredentialsNotConfigured,
+    BotAlreadyExistsError,
+    BotNotAcceptingSignals,
+    BotNotFoundError,
+    BotStateConflict,
+    BotStrategyAlreadyRunningError,
+)
 from ante.contracts.errors import ErrorSpec
 from ante.member.errors import (
     MemberAlreadyExistsError,
@@ -273,6 +301,53 @@ _APPROVAL_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── bot 5 sub-class lock (#1843 sub-PR 3, 실측 .code mirror) ─────────────────
+#
+# ``BotNotFoundError`` 는 #1840 lock (`_BOT_NOT_FOUND_SPEC`) 을 그대로 보존
+# 한다 — 본 PR 은 신규 5건만 추가한다 (account/member/approval sweep 1:1 동형).
+
+# ``bot start`` 표면의 ``app_key`` preflight 거부. 입력 계약/필수 정보
+# 누락이므로 taxonomy ``validation`` 카테고리. IPC server.py:322
+# ``getattr(e, "code", ...)`` 와 helper registry-first 가 동일
+# ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` 코드를 surface 한다.
+_BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED",
+    category="validation",
+)
+
+# ``start_bot``/``stop_bot`` 상태머신 거부 (running ↔ stopped 전이 위반).
+# IPC ``bot.start``/``bot.stop`` 표면이 ``BotError`` → ``BotStateConflict``
+# 로 감싸 raise 하며, 본 ErrorSpec 이 동일 코드를 envelope surface 한다.
+_BOT_STATE_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_STATE_CONFLICT",
+    category="state_conflict",
+)
+
+# ``accepts_external_signals=False`` 전략이 외부 시그널 발급 요청을 거부.
+# 운영 상태가 해당 전이를 허용하지 않으므로 ``state_conflict``. CLI
+# ``signal connect``/``bot signal-key --rotate`` 양쪽 표면이 동일 코드를
+# surface 한다.
+_BOT_NOT_ACCEPTING_SIGNALS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_NOT_ACCEPTING_SIGNALS",
+    category="state_conflict",
+)
+
+# ``bot create`` 표면의 동일 ``bot_id`` 중복 등록 거부. resource 존재
+# 충돌이므로 ``state_conflict`` (account ``ACCOUNT_ALREADY_EXISTS`` 동형).
+_BOT_ALREADY_EXISTS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_ALREADY_EXISTS",
+    category="state_conflict",
+)
+
+# "1전략 1봇" 정책 거부 (동일 ``strategy_id`` 가 이미 실행 중인 다른 봇이
+# 보유). 운영 상태(running) 가 해당 전이를 허용하지 않으므로
+# ``state_conflict``.
+_BOT_STRATEGY_ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_STRATEGY_ALREADY_RUNNING",
+    category="state_conflict",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -331,6 +406,12 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     # ── #1843 sub-PR 2 approval 2 sub-class (실측 .code mirror) ───────────
     ApprovalStatusConflictError: _APPROVAL_STATUS_CONFLICT_SPEC,
     ApprovalValidationError: _APPROVAL_VALIDATION_ERROR_SPEC,
+    # ── #1843 sub-PR 3 bot 5 sub-class (실측 .code mirror) ────────────────
+    BotAccountCredentialsNotConfigured: _BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_SPEC,
+    BotStateConflict: _BOT_STATE_CONFLICT_SPEC,
+    BotNotAcceptingSignals: _BOT_NOT_ACCEPTING_SIGNALS_SPEC,
+    BotAlreadyExistsError: _BOT_ALREADY_EXISTS_SPEC,
+    BotStrategyAlreadyRunningError: _BOT_STRATEGY_ALREADY_RUNNING_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 

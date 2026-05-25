@@ -32,26 +32,31 @@ intended_no_code: []
 known_drift_fmt_error_no_code:
   # #1842: account.py line 762/804 entries 제거 — emit_cli_error 정렬 완료
   # (CLI direct path 가 IPC envelope 와 동일 public code surface).
+  #
+  # #1843 sub-PR 3: bot.py line 384/499 entries 제거 — line 384 ("봇을 찾을
+  # 수 없습니다" sentinel) 는 ``code="BOT_NOT_FOUND"`` 명시 부여로 정렬,
+  # line 499 (non-table-missing OperationalError fallback) 는 emit_cli_error
+  # 로 ``EXECUTION_ERROR`` (registry miss fallback) surface 로 정렬.
+  #
+  # bot.py line 882/918/952 (구 872/908/942) 는 ``ipc_send`` ClickException
+  # text-mode 분기의 ``text = f"{code}: {message}"`` 패턴 — config.py 와
+  # 동형의 #1673 ``config set`` 선례 deferred 유지. 회귀 lock
+  # ``test_bot_start_error_text_mode_carries_code_prefix`` 가 text 모드의
+  # ``code: message`` prefix 톤을 명시 요구하므로 단순
+  # ``fmt.error(message, code=code)`` 정렬이 UX 회귀가 된다. config.py 의
+  # 동형 deferred 정리와 함께 별도 follow-up 에서 책임진다.
   - path: src/ante/cli/commands/bot.py
-    line: 384
-    snippet_sha1: "826b5811c10c"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/bot.py
-    line: 499
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/bot.py
-    line: 872
+    line: 882
     snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); migrate in #1843"
+    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock"
   - path: src/ante/cli/commands/bot.py
-    line: 908
+    line: 918
     snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); migrate in #1843"
+    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock"
   - path: src/ante/cli/commands/bot.py
-    line: 942
+    line: 952
     snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); migrate in #1843"
+    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock"
   - path: src/ante/cli/commands/broker.py
     line: 211
     snippet_sha1: "f65e1080d3f2"

@@ -18,6 +18,7 @@ from ante.cli.cold_path import is_active_runtime
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts import emit_cli_error
 
 logger = logging.getLogger(__name__)
 
@@ -324,11 +325,13 @@ def bot_create(
     except click.ClickException:
         raise
     except Exception as e:
-        # #1800: typed exception 의 class-level ``code`` 속성을 우선 surface
-        # 한다 (예: ``BotAlreadyExistsError.code = "BOT_ALREADY_EXISTS"``).
-        # 속성이 없는 일반 ``BotError`` 는 빈 code 로 종전 동작을 보존한다.
-        fmt.error(str(e), code=getattr(e, "code", ""))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 3: emit_cli_error 가 registry-first (#1843 sub-PR 3 등록한
+        # BotAlreadyExistsError / BotStrategyAlreadyRunningError 등) → ``.code``
+        # fallback → ``EXECUTION_ERROR`` 순서로 public code 를 resolve 한다.
+        # IPC envelope (server.py:322 ``getattr(e, "code", ...)``) 와 동일 코드
+        # surface — #1800 ``BotAlreadyExistsError.code = "BOT_ALREADY_EXISTS"``
+        # 등 typed 동작은 그대로 유지된다.
+        emit_cli_error(fmt, e)
 
     fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
 
@@ -374,14 +377,19 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", ""))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 3: emit_cli_error 가 ``BotNotFoundError`` (cold-path
+        # 미존재 봇 거부) 의 등록 spec ``BOT_NOT_FOUND`` 를 우선 surface 한다.
+        # registry miss + ``.code`` 부재 시 ``EXECUTION_ERROR`` fallback.
+        emit_cli_error(fmt, e)
 
     if result.get("removed"):
         suffix = "(cold-path)" if result.get("cold_path") else ""
         fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
     else:
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}")
+        # #1843 sub-PR 3: removed=False sentinel 도 미존재 봇 의미이므로
+        # ``BOT_NOT_FOUND`` 안정 코드를 명시 부여한다 (``bot info`` 형제
+        # 패턴 미러, IPC envelope 와 동일 public code surface).
+        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         raise SystemExit(1)
 
 
@@ -494,10 +502,12 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         # (malformed/locked DB 등)가 재던져지면 여기로 떨어진다. JSON error를
         # 출력하면서도 exit 0 으로 끝나면 자동화 호출자가 실패를 감지하지
         # 못하므로, 형제 ``bot remove`` (raise SystemExit(1) from e)와 동일하게
-        # non-zero exit 로 종료한다 (#1596). 메시지 톤은 기존 bot_signal_key
-        # 그대로 유지한다 (code 미부착 — Non-Goal: 신규 에러코드 신설 금지).
-        fmt.error(str(e))
-        raise SystemExit(1) from e
+        # non-zero exit 로 종료한다 (#1596).
+        # #1843 sub-PR 3: emit_cli_error 가 ``EXECUTION_ERROR`` 안정 코드를
+        # surface (registry miss + ``.code`` 부재 fallback). 신규 도메인
+        # 에러코드 신설 없이 taxonomy 기본 fallback 으로 정렬 — Non-Goal
+        # (신규 에러코드 신설 금지) 보존.
+        emit_cli_error(fmt, e)
 
     if result.get("missing"):
         # #1784: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 한다
