@@ -878,16 +878,18 @@ docs/
 │   │   ├── 08-daily-asset-snapshots.md
 │   │   ├── 09-virtual-asset-sync.md
 │   │   └── 11-cross-module-notes.md
-│   └── logging/
-│       ├── 01-overview.md
-│       ├── 02-design-decisions.md
-│       ├── 03-json-schema.md
-│       ├── 04-fingerprint.md
-│       ├── 05-handlers-and-rotation.md
-│       ├── 06-context-fields.md
-│       ├── 07-implementation.md
-│       ├── logging.md
-│       └── README.md
+│   ├── logging/
+│   │   ├── 01-overview.md
+│   │   ├── 02-design-decisions.md
+│   │   ├── 03-json-schema.md
+│   │   ├── 04-fingerprint.md
+│   │   ├── 05-handlers-and-rotation.md
+│   │   ├── 06-context-fields.md
+│   │   ├── 07-implementation.md
+│   │   ├── logging.md
+│   │   └── README.md
+│   └── contracts/
+│       └── envelopes.md
 ├── temp/                             # 임시 작업 문서
 │   └── 05-issue-processing-process-map.md
 └── superpowers/
