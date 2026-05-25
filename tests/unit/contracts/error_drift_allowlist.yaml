@@ -57,18 +57,10 @@ known_drift_fmt_error_no_code:
     line: 952
     snippet_sha1: "3dc4008c3fb0"
     reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock"
-  - path: src/ante/cli/commands/broker.py
-    line: 211
-    snippet_sha1: "f65e1080d3f2"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/broker.py
-    line: 266
-    snippet_sha1: "f65e1080d3f2"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/broker.py
-    line: 318
-    snippet_sha1: "f65e1080d3f2"
-    reason: "baseline (#1841); migrate in #1843"
+  # #1843 sub-PR 5: broker.py line 211/266/318 entries 제거 — emit_cli_error
+  # 정렬 완료 (broker typed exception 5 sub-class 가 ``BROKER_*`` 안정 코드를
+  # registry MRO lookup 으로 surface, 미분류 fault 는 ``EXECUTION_ERROR``
+  # fallback).
   - path: src/ante/cli/commands/config.py
     line: 176
     snippet_sha1: "3dc4008c3fb0"
@@ -130,27 +122,14 @@ pending_migration:
   - module: ante.bot.exceptions
     class_anchor: BotError
     reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.exceptions
-    class_anchor: APIError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.exceptions
-    class_anchor: AuthenticationError
-    reason: "baseline (#1841); register in #1842/#1843"
+  # #1843 sub-PR 5: broker 5 sub-class (APIError/AuthenticationError/
+  # CircuitOpenError/OrderNotFoundError/RateLimitError) + registry
+  # InvalidBrokerTypeError 제거 — class-level ``.code`` 부여 +
+  # EXCEPTION_TO_SPEC 등록 완료. ``BrokerError`` base 는 사용 사례가
+  # 없어 baseline 보존 (#1842 ``AccountError`` 동형).
   - module: ante.broker.exceptions
     class_anchor: BrokerError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.exceptions
-    class_anchor: CircuitOpenError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.exceptions
-    class_anchor: OrderNotFoundError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.exceptions
-    class_anchor: RateLimitError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.broker.registry
-    class_anchor: InvalidBrokerTypeError
-    reason: "baseline (#1841); register in #1842/#1843"
+    reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
   - module: ante.config.exceptions
     class_anchor: ConfigError
     reason: "baseline (#1841); register in #1842/#1843"
