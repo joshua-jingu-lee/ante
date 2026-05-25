@@ -292,6 +292,11 @@ CWD나 `db.path` parent에서 socket 위치를 파생하지 않는다.
 
 JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 
+IPC 응답 envelope(`status:"ok"` + `result` / `status:"error"` + `error`) 형태의
+normative SSOT는 [contracts/envelopes.md](../contracts/envelopes.md)다. 본 절은
+요청 envelope 형태와 응답 envelope 의 IPC 측 적용 예시만 기술한다. 새 필드
+추가/변경은 본 절이 아닌 SSOT 문서를 우선 갱신한다.
+
 **요청**:
 ```json
 {
@@ -311,7 +316,9 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 | `args` | `dict` | 커맨드 파라미터 |
 | `actor` | `string` | CLI에서 인증된 멤버 ID (감사 추적용). 인증 면제 recovery 커맨드는 `"unknown"` 또는 recovery 대상 member_id |
 
-**응답 (성공)**:
+**응답 (성공)** — IPC success envelope의 적용 예시. envelope 형태 SSOT는
+[contracts/envelopes.md — IPC success envelope](../contracts/envelopes.md#ipc-success-envelope):
+
 ```json
 {
   "id": "uuid-v4",
@@ -322,7 +329,12 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 }
 ```
 
-**응답 (실패)**:
+`result` payload(`{"suspended_count": N}`, `{"bot": ...}` 등)는 도메인 IPC
+커맨드별 계약이며 envelope 형태가 아니다.
+
+**응답 (실패)** — IPC error envelope의 적용 예시. envelope 형태 SSOT는
+[contracts/envelopes.md — IPC error envelope](../contracts/envelopes.md#ipc-error-envelope):
+
 ```json
 {
   "id": "uuid-v4",
@@ -334,13 +346,9 @@ JSON 기반, 길이 접두사(length-prefixed) 프레이밍.
 }
 ```
 
-| 필드 | 타입 | 설명 |
-|------|------|------|
-| `id` | `string` | 요청 `id`와 동일 |
-| `status` | `"ok" \| "error"` | 성공/실패 |
-| `result` | `dict` | 성공 시 반환 데이터 |
-| `error.code` | `string` | 에러 코드 (서비스 예외 클래스명 등) |
-| `error.message` | `string` | 에러 메시지 |
+`error.code` 값의 vocabulary(taxonomy, 도메인 prefix 규칙, 공통 코드 SSOT)는
+#1816의 책임이며 본 스펙 범위 밖이다. 현재 사용되는 공통 코드 일부는 아래
+[에러 처리](#에러-처리) 표에 예시로 기록한다.
 
 ### 프레이밍
 
