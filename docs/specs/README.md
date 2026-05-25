@@ -20,6 +20,7 @@
 | `broker-adapter` | [README.md](broker-adapter/README.md) | 브로커 어댑터 인터페이스, KIS/Test Broker |
 | `cli` | [README.md](cli/README.md) | CLI 명령 체계와 서비스 진입점 |
 | `config` | [README.md](config/README.md) | 설정 계층, 동적 설정 관리 |
+| `contracts` | [contracts/envelopes.md](contracts/envelopes.md) | CLI/IPC envelope 형태 등 외부 표면 계약 SSOT (전체 인덱스는 #1824에서 추가) |
 | `core` | [core/core.md](core/core.md) | 공통 인프라와 Database 래퍼 |
 | `data-feed` | [README.md](data-feed/README.md) | 배치 데이터 수집과 공급 인터페이스 |
 | `data-pipeline` | [README.md](data-pipeline/README.md) | 저장소, 스키마, ETL 파이프라인 |

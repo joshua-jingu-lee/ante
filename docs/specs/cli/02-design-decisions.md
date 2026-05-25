@@ -80,7 +80,9 @@ CLI 코드에서 다음 API 사용을 금지한다.
 **누락 입력 처리**:
 
 필수 옵션·인자가 누락되면 prompt하지 않고 구조화된 에러로 즉시 종료한다(exit code 1).
-JSON 모드(`--format json`)에서는 `{status: "error", code: "...", message: "..."}` 형식으로 출력한다.
+JSON 모드(`--format json`)에서는 CLI error envelope
+`{status:"error", code, message}`으로 출력한다. envelope 형태의 normative
+SSOT는 [contracts/envelopes.md](../contracts/envelopes.md#cli-error-envelope)다.
 
 **에러 코드 명명 규칙 (SSOT)**:
 
@@ -158,13 +160,17 @@ secret을 기록하기 위한 입력 경로로 1.0 시점에 남아 있다. CLI 
 
 text/json 모드를 지원하는 CLI 출력 포맷터.
 
+JSON 모드의 envelope 형태(`success`/`error`)는 상위 SSOT
+[contracts/envelopes.md](../contracts/envelopes.md)가 lock 한다. 본 절은 해당
+SSOT의 CLI success/error envelope을 적용하는 표면 메서드 시그니처만 기술한다.
+
 | 프로퍼티/메서드 | 파라미터 | 반환값 | 설명 |
 |----------------|----------|--------|------|
 | `is_json` (property) | — | bool | JSON 모드 여부 |
-| `output` | data: dict \| list, text_template: str = "" | None | 데이터 출력 (json 모드: JSON dump, text 모드: 템플릿 포맷) |
+| `output` | data: dict \| list, text_template: str = "" | None | 데이터 출력 (json 모드: JSON dump, text 모드: 템플릿 포맷). raw payload 출력이며 standard envelope wrapping은 하지 않는다. |
 | `table` | rows: list[dict], columns: list[str] | None | 테이블 형태 출력 |
-| `error` | message: str, code: str = "" | None | 에러 출력 |
-| `success` | message: str, data: dict \| None = None | None | 성공 메시지 출력 (json 모드: `{status: "ok", message, data}`) |
+| `error` | message: str, code: str = "" | None | CLI error envelope `{status:"error", code, message}` 출력 (SSOT: [envelopes.md](../contracts/envelopes.md#cli-error-envelope)) |
+| `success` | message: str, data: dict \| None = None | None | CLI success envelope `{status:"ok", message, data}` 출력 (SSOT: [envelopes.md](../contracts/envelopes.md#cli-success-envelope)) |
 
 소스: `src/ante/cli/formatter.py`
 
