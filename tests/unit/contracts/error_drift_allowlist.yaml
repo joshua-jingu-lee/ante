@@ -72,66 +72,10 @@ known_drift_fmt_error_no_code:
     line: 179
     snippet_sha1: "1b05e8ebf6bd"
     reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 514
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 531
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 570
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 627
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 633
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 663
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 678
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 705
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 720
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 765
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 773
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 800
-    snippet_sha1: "5d87cae098dd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 808
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 878
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/member.py
-    line: 941
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
+  # #1843 sub-PR 1: member.py entries 15건 제거 — emit_cli_error 정렬 완료
+  # (CLI direct path 가 IPC envelope 와 동일 public code surface).
+  # _MASTER_REQUIRED_MESSAGE override 보존하는 typed except 는 code 인자
+  # 명시 (``code="PERMISSION_DENIED"``) 로 정렬했다.
   - path: src/ante/cli/commands/strategy.py
     line: 149
     snippet_sha1: "439fab766435"
@@ -236,9 +180,8 @@ pending_migration:
   - module: ante.member.errors
     class_anchor: MemberError
     reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.member.errors
-    class_anchor: PermissionDeniedError
-    reason: "baseline (#1841); register in #1842/#1843"
+  # #1843 sub-PR 1: PermissionDeniedError 제거 — class-level
+  # ``code="PERMISSION_DENIED"`` 부여 + EXCEPTION_TO_SPEC 등록 완료.
   - module: ante.rule.exceptions
     class_anchor: RuleConfigError
     reason: "baseline (#1841); register in #1842/#1843"

@@ -41,6 +41,23 @@ category 정확화):
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 Non-Goals).
 
+#1843 sub-PR 1 (member sweep) 가 추가한 member domain 5 sub-class lock
+(실측 ``.code`` mirror, ``InvalidScopeError`` 는 #1840 lock 그대로 보존):
+
+- ``PermissionDeniedError`` → ``PERMISSION_DENIED`` / ``permission`` (본
+  PR 에서 ``.code`` 신규 부여 — master 검증 위반 fault 의 안정 코드)
+- ``MemberNotFoundError`` → ``MEMBER_NOT_FOUND`` / ``not_found`` (#1817)
+- ``MemberStateConflictError`` → ``MEMBER_STATE_CONFLICT`` /
+  ``state_conflict`` (#1825)
+- ``MemberAlreadyExistsError`` → ``MEMBER_ALREADY_EXISTS`` /
+  ``state_conflict`` (#1826)
+- ``MemberInvalidRecoveryCredentialError`` →
+  ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth`` (#1826)
+
+``MemberError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+``AccountError`` 와 동일 패턴, #1843 sub-PR 1 Non-Goals).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -74,6 +91,13 @@ from ante.account.errors import (
 from ante.approval.errors import ApprovalNotFoundError
 from ante.bot.exceptions import BotNotFoundError
 from ante.contracts.errors import ErrorSpec
+from ante.member.errors import (
+    MemberAlreadyExistsError,
+    MemberInvalidRecoveryCredentialError,
+    MemberNotFoundError,
+    MemberStateConflictError,
+    PermissionDeniedError,
+)
 from ante.member.scopes import InvalidScopeError
 
 __all__ = [
@@ -176,6 +200,40 @@ _ACCOUNT_HAS_ACTIVE_BOTS_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── member 5 sub-class lock (#1843 sub-PR 1, 실측 .code mirror) ──────────────
+
+# master 검증 위반의 안정 코드. 본 PR 에서 class-level ``.code`` 신규 부여
+# (errors.py:31 PermissionDeniedError) 와 동시에 registry 도 정렬한다 — IPC
+# server.py:322 ``getattr(e, "code", ...)`` 와 helper registry-first 가 동일
+# ``PERMISSION_DENIED`` 코드를 surface 한다.
+_MEMBER_PERMISSION_DENIED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="PERMISSION_DENIED",
+    category="permission",
+)
+
+_MEMBER_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_NOT_FOUND",
+    category="not_found",
+)
+
+_MEMBER_STATE_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_STATE_CONFLICT",
+    category="state_conflict",
+)
+
+_MEMBER_ALREADY_EXISTS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_ALREADY_EXISTS",
+    category="state_conflict",
+)
+
+# recovery credential validation 거부는 의미상 인증(auth) 카테고리.
+# CLI 표면은 사용자 패스워드 / recovery key 미일치 (인증 실패) 를 의미한다.
+_MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_INVALID_RECOVERY_CREDENTIAL",
+    category="auth",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -225,6 +283,12 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BrokerReconnectFailedError: _BROKER_RECONNECT_FAILED_SPEC,
     AccountStructuralChangeRequiresStoppedServerError: _ACCOUNT_STRUCTURAL_CHANGE_SPEC,
     AccountHasActiveBotsError: _ACCOUNT_HAS_ACTIVE_BOTS_SPEC,
+    # ── #1843 sub-PR 1 member 5 sub-class (실측 .code mirror) ─────────────
+    PermissionDeniedError: _MEMBER_PERMISSION_DENIED_SPEC,
+    MemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
+    MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,
+    MemberAlreadyExistsError: _MEMBER_ALREADY_EXISTS_SPEC,
+    MemberInvalidRecoveryCredentialError: _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 
