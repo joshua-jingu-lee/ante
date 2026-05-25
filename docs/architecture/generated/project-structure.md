@@ -592,7 +592,8 @@ tests/
 │   │   └── test_error_drift.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
-│   └── test_approval_cli_ipc_error_equivalence.py
+│   ├── test_approval_cli_ipc_error_equivalence.py
+│   └── test_bot_cli_ipc_error_equivalence.py
 └── __init__.py
 ```
 
