@@ -102,6 +102,20 @@ def test_fmt_error_callsites_have_code_or_are_allowlisted() -> None:
 # ── Family B — domain exception EXECUTION_ERROR 접힘 drift ──────────────────
 
 
+def _registry_module_names() -> set[tuple[str, str]]:
+    """``EXCEPTION_TO_SPEC`` 의 ``(module, class_name)`` 짝 집합.
+
+    #1842 가 ``ante.account.errors.InvalidBrokerTypeError`` 를 registry 에
+    등록하면서, 동명의 별개 class 인 ``ante.broker.registry.InvalidBrokerTypeError``
+    가 이름만 비교하던 이전 staleness scanner 에서 stale 판정을 받는 회귀가
+    발견되었다. helper 의 MRO lookup 은 type 기반이라 두 class 를 정확히
+    분리하므로, drift test 도 ``(module, class_name)`` 2중 anchor 로 정렬해
+    동명 별개 class 가 서로의 보호 면적을 침범하지 않도록 한다.
+    """
+
+    return {(cls.__module__, cls.__name__) for cls in EXCEPTION_TO_SPEC.keys()}
+
+
 def test_exception_classes_have_code_or_registry_or_allowlisted() -> None:
     """모든 ``*Error`` class 는 다음 중 하나여야 한다.
 
@@ -112,8 +126,11 @@ def test_exception_classes_have_code_or_registry_or_allowlisted() -> None:
 
     셋 모두에 해당하지 않는 class 는 ``EXECUTION_ERROR`` 로 fallback 되어
     taxonomy drift 가 발생한다.
+
+    #1842: 동명 별개 class 를 정확히 분리하기 위해 registry membership 판정
+    을 ``(module, name)`` 2중 anchor 로 한다 (allowlist entry shape 와 정렬).
     """
-    registry_names = {cls.__name__ for cls in EXCEPTION_TO_SPEC.keys()}
+    registry_module_names = _registry_module_names()
     allowlist = load_drift_allowlist()
     allowed: set[tuple[str, str]] = {
         (entry.module, entry.class_anchor) for entry in allowlist.pending_migration
@@ -123,9 +140,9 @@ def test_exception_classes_have_code_or_registry_or_allowlisted() -> None:
     for exc in iter_exception_classes(_SRC_ROOT):
         if exc.has_code:
             continue
-        if exc.name in registry_names:
-            continue
         module = _module_dotted(exc.path)
+        if (module, exc.name) in registry_module_names:
+            continue
         if (module, exc.name) in allowed:
             continue
         drift.append(f"{module}::{exc.name} (L{exc.lineno})")
@@ -154,15 +171,22 @@ def _scan_fmt_anchors() -> set[tuple[str, int, str]]:
 
 
 def _scan_exception_anchors() -> set[tuple[str, str]]:
-    """현재 source 에서 검출되는 모든 code-less, registry-미등록 ``*Error`` anchor."""
-    registry_names = {cls.__name__ for cls in EXCEPTION_TO_SPEC.keys()}
+    """현재 source 에서 검출되는 모든 code-less, registry-미등록 ``*Error`` anchor.
+
+    #1842: registry membership 판정을 ``(module, name)`` 2중 anchor 로 한다 —
+    동명 별개 class (예: ``account.errors.InvalidBrokerTypeError`` vs
+    ``broker.registry.InvalidBrokerTypeError``)가 서로의 staleness 보호 면적을
+    침범하지 않게 한다.
+    """
+    registry_module_names = _registry_module_names()
     anchors: set[tuple[str, str]] = set()
     for exc in iter_exception_classes(_SRC_ROOT):
         if exc.has_code:
             continue
-        if exc.name in registry_names:
+        module = _module_dotted(exc.path)
+        if (module, exc.name) in registry_module_names:
             continue
-        anchors.add((_module_dotted(exc.path), exc.name))
+        anchors.add((module, exc.name))
     return anchors
 
 
