@@ -27,6 +27,7 @@ socket)이 사용자/Agent에게 노출하는 **wire-level 계약의 SSOT**를 �
 | Envelope shape | [docs/specs/contracts/envelopes.md](envelopes.md) | #1821 | CLI success/error, IPC success/error 4형태 lock |
 | Vocabulary code | [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) | #1822 | `ContractKind`, `EnvelopeForm`, `AuthMode` Literal SSOT |
 | Drift helper skeleton | [tests/unit/contracts/helpers.py](../../../tests/unit/contracts/helpers.py) | #1823 | Click/IPC iterator, `*Error` class / `fmt.error` callsite helper |
+| Error taxonomy | [docs/specs/contracts/error-taxonomy.md](error-taxonomy.md) | #1816 / #1839 | `code` vocabulary + 8 category + auth legacy alias + 대표 fault lock |
 | Migration domain order | 본 문서 [Migration Domain Order](#migration-domain-order) | #1820 | `account → member → approval → bot → treasury → broker → strategy → 기타` |
 
 ### Envelope shape (#1821)
@@ -93,6 +94,27 @@ Helper 분류:
 
 helper 자체 unit test는 [`tests/unit/contracts/test_helpers.py`](../../../tests/unit/contracts/test_helpers.py)에
 있다.
+
+### Error taxonomy (#1816 / #1839)
+
+[`docs/specs/contracts/error-taxonomy.md`](error-taxonomy.md)가 CLI/IPC envelope
+`code`/`error.code` 슬롯의 안정 vocabulary와 분류 규칙의 단일 SSOT다. 본 인덱스는
+그 본문을 재정의하지 않으며 후속 에픽이 새 code/카테고리를 추가하려면
+error-taxonomy.md 자체를 갱신한다.
+
+핵심 lock:
+
+- `ErrorSpec(code, category, exit_code=1, retryable=False reserved)` shape
+- 8 category Literal: `validation | auth | permission | not_found | state_conflict | service_unavailable | external | internal`
+- `EXECUTION_ERROR` 허용 범위(코드 버그/외부 미분류) + domain exception drift 금지
+- auth middleware lowercase code(`auth_required`/`auth_failed`/`permission_denied`)
+  는 `AUTH_REQUIRED`/`AUTH_FAILED`/`PERMISSION_DENIED`의 legacy alias로 정렬 (#1815 migration 책임)
+- `SERVICE_NOT_CONFIGURED`를 `service_unavailable` category 안정 코드로 등록 (#1819 소비)
+- 대표 fault lock: `InvalidAccountIdError → VALIDATION_ERROR`, `BotNotFoundError → BOT_NOT_FOUND`,
+  `ApprovalNotFoundError → APPROVAL_NOT_FOUND`, `MemberInvalidScopeError → MEMBER_INVALID_SCOPE`
+- broker 원천 code는 envelope 최상위 `code` 슬롯에 노출 금지 (ante public taxonomy만 노출)
+- `details` 필드는 reserved (envelope shape 변경은 envelopes.md SSOT 선행)
+- redaction: envelope `message`에 token/password/recovery_key 등 민감정보 포함 금지
 
 ### Migration domain order
 

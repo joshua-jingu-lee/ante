@@ -347,8 +347,11 @@ normative SSOT는 [contracts/envelopes.md](../contracts/envelopes.md)다. 본 �
 ```
 
 `error.code` 값의 vocabulary(taxonomy, 도메인 prefix 규칙, 공통 코드 SSOT)는
-#1816의 책임이며 본 스펙 범위 밖이다. 현재 사용되는 공통 코드 일부는 아래
-[에러 처리](#에러-처리) 표에 예시로 기록한다.
+[`docs/specs/contracts/error-taxonomy.md`](../contracts/error-taxonomy.md) SSOT에
+lock 되어 있다. 본 절은 envelope 형태만 다루며 vocabulary는 재정의하지 않는다.
+현재 사용되는 공통 코드(`UNKNOWN_COMMAND`, `SERVICE_UNAVAILABLE`,
+`SERVICE_NOT_CONFIGURED`, `EXECUTION_ERROR`) 의 의미는 위 SSOT를 따른다. 현재
+사용되는 공통 코드 일부는 아래 [에러 처리](#에러-처리) 표에 예시로 기록한다.
 
 ### 프레이밍
 
@@ -439,6 +442,15 @@ class ServiceRegistry:
 때는 service 의 `history` append 가 fallback 추적 경로다.
 
 ## 에러 처리
+
+`error.code` 값의 vocabulary와 분류(category, `EXECUTION_ERROR` 허용 범위,
+`SERVICE_NOT_CONFIGURED` 의미, broker external code 분리, redaction)는
+[`docs/specs/contracts/error-taxonomy.md`](../contracts/error-taxonomy.md) SSOT가
+lock 한다. 본 절은 IPC server lifecycle/디스패치에서의 적용 예시만 기술한다.
+특히 `_dispatch`의 `getattr(e, "code", "EXECUTION_ERROR")` fallback은 SSOT의
+[`EXECUTION_ERROR` 허용 범위](../contracts/error-taxonomy.md#execution_error-허용-범위)를
+따른다 — domain exception이 `code` 미부여로 `EXECUTION_ERROR`로 접히는 것은
+drift다.
 
 | 상황 | 동작 |
 |------|------|
