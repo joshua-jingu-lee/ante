@@ -582,14 +582,15 @@ tests/
 │   ├── test_cli_group_r_member_duplicate_validation_sweep.py
 │   ├── test_cli_group_s_treasury_typed_reject.py
 │   ├── test_ipc_treasury_allocate_missing_bot.py
-│   └── contracts/
-│       ├── __init__.py
-│       ├── helpers.py
-│       ├── test_helpers.py
-│       ├── test_error_helpers.py
-│       ├── error_drift_allowlist.yaml
-│       ├── test_auth_middleware_code_policy.py
-│       └── test_error_drift.py
+│   ├── contracts/
+│   │   ├── __init__.py
+│   │   ├── helpers.py
+│   │   ├── test_helpers.py
+│   │   ├── test_error_helpers.py
+│   │   ├── error_drift_allowlist.yaml
+│   │   ├── test_auth_middleware_code_policy.py
+│   │   └── test_error_drift.py
+│   └── test_account_cli_ipc_error_equivalence.py
 └── __init__.py
 ```
 
