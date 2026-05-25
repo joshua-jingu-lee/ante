@@ -25,6 +25,13 @@ Helper 분류 (Refs #1820 결정 / #1823 plan):
     ``fmt.error(...)`` callsite 와 code argument classification 정보를
     yield 한다.
 
+* **YAML 기반** — error taxonomy drift allowlist (#1841) 는 baseline
+  callsite/class 를 구조화 보관한다.
+
+  - :func:`load_drift_allowlist` — ``error_drift_allowlist.yaml`` 을
+    파싱해 3 section (`intended_no_code`, `known_drift_fmt_error_no_code`,
+    `pending_migration`) 의 :class:`DriftAllowlist` 를 반환한다.
+
 본 helper 는 default repository root 를 알지 못한다. 호출자가 :class:`Path`
 를 명시한다 (default 는 cwd 기준 ``Path("src/ante")``). 후속 enforcement
 test 가 repository root 를 고정하는 책임을 진다.
@@ -34,11 +41,12 @@ from __future__ import annotations
 
 import ast
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+import yaml
 
 if TYPE_CHECKING:
     from ante.ipc.registry import CommandRegistry, CommandSpec
@@ -434,15 +442,124 @@ def iter_fmt_error_calls(
             )
 
 
+# ── YAML allowlist loader (#1841) ─────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class FmtErrorAllowlistEntry:
+    """``fmt.error`` code 누락 callsite allowlist entry.
+
+    Attributes:
+        path: callsite 파일 경로 (repo root 기준 상대 경로 문자열).
+        line: callsite 줄 (1-based).
+        snippet_sha1: ``FmtErrorCallsite.snippet`` 의 SHA-1 12-char prefix.
+        reason: baseline 등록 사유.
+    """
+
+    path: str
+    line: int
+    snippet_sha1: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class ExceptionAllowlistEntry:
+    """``*Error`` class code/registry 미부여 allowlist entry.
+
+    Attributes:
+        module: dotted module path (예: ``ante.account.errors``).
+        class_anchor: class 이름 (예: ``AccountError``).
+        reason: baseline 등록 사유.
+    """
+
+    module: str
+    class_anchor: str
+    reason: str
+
+
+@dataclass(frozen=True)
+class DriftAllowlist:
+    """3 section 으로 분리된 error taxonomy drift allowlist.
+
+    Attributes:
+        intended_no_code: code 인자를 영구적으로 갖지 않는 의도된 callsite.
+        known_drift_fmt_error_no_code: baseline 시점에 code 가 부여되지
+            않은 fmt.error callsite. #1843 이 단계적으로 제거.
+        pending_migration: baseline 시점에 class-level code 도 없고
+            ``EXCEPTION_TO_SPEC`` 등록도 안 된 ``*Error`` class.
+            #1842/#1843 이 단계적으로 등록.
+    """
+
+    intended_no_code: tuple[FmtErrorAllowlistEntry, ...] = field(default_factory=tuple)
+    known_drift_fmt_error_no_code: tuple[FmtErrorAllowlistEntry, ...] = field(
+        default_factory=tuple
+    )
+    pending_migration: tuple[ExceptionAllowlistEntry, ...] = field(
+        default_factory=tuple,
+    )
+
+
+def _default_allowlist_path() -> Path:
+    """default YAML 위치 (본 helper 와 동일 디렉토리)."""
+    return Path(__file__).parent / "error_drift_allowlist.yaml"
+
+
+def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
+    """``error_drift_allowlist.yaml`` 을 파싱해 :class:`DriftAllowlist` 반환.
+
+    Args:
+        path: 로드할 YAML 경로. ``None`` 이면 helper 와 동일 디렉토리의
+            ``error_drift_allowlist.yaml`` 사용. 후속 enforcement test 가
+            fixture YAML 을 주입할 수 있다.
+
+    Returns:
+        :class:`DriftAllowlist`: 3 section 의 frozen dataclass tuple.
+    """
+    yaml_path = path if path is not None else _default_allowlist_path()
+    data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+
+    def _fmt_entries(key: str) -> tuple[FmtErrorAllowlistEntry, ...]:
+        raw = data.get(key) or []
+        return tuple(
+            FmtErrorAllowlistEntry(
+                path=str(item["path"]),
+                line=int(item["line"]),
+                snippet_sha1=str(item["snippet_sha1"]),
+                reason=str(item.get("reason", "")),
+            )
+            for item in raw
+        )
+
+    raw_exc = data.get("pending_migration") or []
+    exc_entries = tuple(
+        ExceptionAllowlistEntry(
+            module=str(item["module"]),
+            class_anchor=str(item["class_anchor"]),
+            reason=str(item.get("reason", "")),
+        )
+        for item in raw_exc
+    )
+
+    return DriftAllowlist(
+        intended_no_code=_fmt_entries("intended_no_code"),
+        known_drift_fmt_error_no_code=_fmt_entries("known_drift_fmt_error_no_code"),
+        pending_migration=exc_entries,
+    )
+
+
 # ── public surface ────────────────────────────────────────────────────────
 
 
 __all__ = [
     "CliLeafCommand",
+    "DriftAllowlist",
+    "ExceptionAllowlistEntry",
     "ExceptionClassInfo",
+    "FmtErrorAllowlistEntry",
     "FmtErrorCallsite",
     "iter_click_leaf_commands",
     "iter_exception_classes",
     "iter_fmt_error_calls",
     "iter_ipc_command_specs",
+    "load_drift_allowlist",
 ]

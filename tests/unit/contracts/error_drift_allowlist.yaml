@@ -1,0 +1,280 @@
+# Error taxonomy drift allowlist (#1841)
+#
+# 본 파일은 fmt.error code 누락 callsite (Family A) 와 ErrorSpec 등록되지
+# 않은 domain exception class (Family B) 의 baseline 을 구조화 보관한다.
+# 신규/수정 drift 는 enforcement test (`test_error_drift.py`) 가 차단하며,
+# 본 파일에 entry 가 등록된 callsite/class 만 baseline 으로 면제된다.
+#
+# 3 section:
+#
+#   intended_no_code
+#     code 인자를 영구적으로 갖지 않는 의도된 callsite.
+#     예: click usage exit 처럼 envelope 변환 책임이 다른 layer 에 있음.
+#
+#   known_drift_fmt_error_no_code
+#     baseline 시점에 code 가 부여되지 않은 fmt.error callsite.
+#     #1843 이 단계적으로 제거한다.
+#
+#   pending_migration
+#     baseline 시점에 class-level code 도 없고 EXCEPTION_TO_SPEC 등록도
+#     안 된 *Error class. #1842/#1843 이 단계적으로 등록한다.
+#
+# Anchor 정책 (#1841 plan):
+#   - fmt entry: (path, line, snippet_sha1) 3중 anchor.
+#       snippet_sha1 = SHA-1(snippet)[:12]. snippet 가 바뀌면 anchor 갱신
+#       필요. line 만 재사용되는 false negative 차단.
+#   - exception entry: (module, class_anchor) 2중 anchor.
+#       module = dotted module path (예: ante.account.errors).
+#       class_anchor = class 이름.
+
+intended_no_code: []
+
+known_drift_fmt_error_no_code:
+  - path: src/ante/cli/commands/account.py
+    line: 762
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/account.py
+    line: 804
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/bot.py
+    line: 384
+    snippet_sha1: "826b5811c10c"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/bot.py
+    line: 499
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/bot.py
+    line: 872
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/bot.py
+    line: 908
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/bot.py
+    line: 942
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/broker.py
+    line: 211
+    snippet_sha1: "f65e1080d3f2"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/broker.py
+    line: 266
+    snippet_sha1: "f65e1080d3f2"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/broker.py
+    line: 318
+    snippet_sha1: "f65e1080d3f2"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/config.py
+    line: 176
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/config.py
+    line: 179
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 514
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 531
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 570
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 627
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 633
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 663
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 678
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 705
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 720
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 765
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 773
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 800
+    snippet_sha1: "5d87cae098dd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 808
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 878
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/member.py
+    line: 941
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/strategy.py
+    line: 149
+    snippet_sha1: "439fab766435"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/strategy.py
+    line: 173
+    snippet_sha1: "653a1306dd44"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/strategy.py
+    line: 258
+    snippet_sha1: "f65e1080d3f2"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/update.py
+    line: 135
+    snippet_sha1: "988007ecd452"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/update.py
+    line: 196
+    snippet_sha1: "e6c835b3f5c4"
+    reason: "baseline (#1841); migrate in #1843"
+  - path: src/ante/cli/commands/update.py
+    line: 256
+    snippet_sha1: "0aa58cc91ade"
+    reason: "baseline (#1841); migrate in #1843"
+
+pending_migration:
+  - module: ante.account.errors
+    class_anchor: AccountError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.approval.errors
+    class_anchor: ApprovalError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.approval.models
+    class_anchor: ApprovalValidationError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.backtest.exceptions
+    class_anchor: BacktestConfigError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.backtest.exceptions
+    class_anchor: BacktestDataError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.backtest.exceptions
+    class_anchor: BacktestError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.bot.exceptions
+    class_anchor: BotError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: APIError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: AuthenticationError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: BrokerError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: CircuitOpenError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: OrderNotFoundError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.exceptions
+    class_anchor: RateLimitError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.broker.registry
+    class_anchor: InvalidBrokerTypeError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.config.exceptions
+    class_anchor: ConfigError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.dart
+    class_anchor: CriticalApiError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.dart
+    class_anchor: DARTError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.dart
+    class_anchor: DailyLimitExceededError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.data_go_kr
+    class_anchor: CriticalApiError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.data_go_kr
+    class_anchor: DailyLimitExceededError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.feed.sources.data_go_kr
+    class_anchor: DataGoKrError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.ipc.exceptions
+    class_anchor: IPCError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.ipc.exceptions
+    class_anchor: IPCTimeoutError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.ipc.exceptions
+    class_anchor: MessageTooLargeError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.ipc.exceptions
+    class_anchor: ServerNotRunningError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.member.errors
+    class_anchor: MemberError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.member.errors
+    class_anchor: PermissionDeniedError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.rule.exceptions
+    class_anchor: RuleConfigError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.rule.exceptions
+    class_anchor: RuleError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.strategy.exceptions
+    class_anchor: IncompatibleExchangeError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.strategy.exceptions
+    class_anchor: StrategyError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.strategy.exceptions
+    class_anchor: StrategyFileAccessError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.strategy.exceptions
+    class_anchor: StrategyLoadError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.strategy.exceptions
+    class_anchor: StrategyValidationError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.treasury.exceptions
+    class_anchor: BotNotStoppedError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.treasury.exceptions
+    class_anchor: InsufficientFundsError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.treasury.exceptions
+    class_anchor: TreasuryError
+    reason: "baseline (#1841); register in #1842/#1843"
+  - module: ante.treasury.exceptions
+    class_anchor: TreasuryNotConfiguredError
+    reason: "baseline (#1841); register in #1842/#1843"
