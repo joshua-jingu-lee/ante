@@ -95,6 +95,31 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 3 Non-Goals).
 
+#1843 sub-PR 4 (treasury sweep) 가 추가한 treasury domain 7 sub-class lock
+(실측 ``.code`` mirror; #1809 가 도입한 4건 + 본 PR 신규 부여 3건):
+
+- ``TreasuryInvalidAmountError`` → ``TREASURY_INVALID_AMOUNT`` / ``validation``
+  (#1809; ``allocate``/``deallocate`` 의 finite-positive 가드 위반)
+- ``TreasuryInsufficientUnallocatedError`` → ``TREASURY_INSUFFICIENT_BALANCE``
+  / ``validation`` (#1809; ``allocate`` 시 ``self._unallocated < amount``)
+- ``TreasuryBudgetNotFoundError`` → ``TREASURY_BUDGET_NOT_FOUND`` /
+  ``not_found`` (#1809; ``deallocate`` 시 budget record 부재)
+- ``TreasuryDeallocateExceedsAvailableError`` →
+  ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE`` / ``validation`` (#1809;
+  over-deallocate)
+- ``InsufficientFundsError`` → ``TREASURY_INSUFFICIENT_FUNDS`` / ``validation``
+  (본 PR 신규 부여; ``update_budget`` caller-facing wrap fault —
+  ``TREASURY_INSUFFICIENT_BALANCE`` 와 의미 분리)
+- ``BotNotStoppedError`` → ``TREASURY_BOT_NOT_STOPPED`` / ``state_conflict``
+  (본 PR 신규 부여; running 상태 봇의 예산 변경 거부)
+- ``TreasuryNotConfiguredError`` → ``TREASURY_NOT_CONFIGURED`` /
+  ``service_unavailable`` (본 PR 신규 부여; #1335 ``TreasuryManager`` 미주입
+  / 등록된 Treasury 부재)
+
+``TreasuryError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3 Non-Goals 동형).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -144,6 +169,15 @@ from ante.member.errors import (
     PermissionDeniedError,
 )
 from ante.member.scopes import InvalidScopeError
+from ante.treasury.exceptions import (
+    BotNotStoppedError,
+    InsufficientFundsError,
+    TreasuryBudgetNotFoundError,
+    TreasuryDeallocateExceedsAvailableError,
+    TreasuryInsufficientUnallocatedError,
+    TreasuryInvalidAmountError,
+    TreasuryNotConfiguredError,
+)
 
 __all__ = [
     "EXCEPTION_TO_SPEC",
@@ -348,6 +382,70 @@ _BOT_STRATEGY_ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── treasury 7 sub-class lock (#1843 sub-PR 4, 실측 .code mirror) ────────────
+#
+# ``TreasuryError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+# ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+# ``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3 Non-Goals 동형).
+
+# ``allocate``/``deallocate`` amount 가 finite-positive 가 아닐 때
+# (NaN/±Inf/<=0). #1411 finite-positive 가드 위반. CLI ingress
+# (``validate_positive_finite_amount``) 가 1차 거부하지만 service layer 가
+# 2차 invariant 로 raise — IPC envelope 도 동일 코드 surface.
+_TREASURY_INVALID_AMOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_INVALID_AMOUNT",
+    category="validation",
+)
+
+# ``allocate`` 시 미할당 잔액 부족 (``self._unallocated < amount``).
+# class-level ``.code = "TREASURY_INSUFFICIENT_BALANCE"`` (#1809) 와 정렬.
+_TREASURY_INSUFFICIENT_BALANCE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_INSUFFICIENT_BALANCE",
+    category="validation",
+)
+
+# ``deallocate`` 시 budget record 부재. ``self._budgets`` 에 해당 ``bot_id``
+# budget 이 없을 때 raise. IPC handler 가 ``BotNotFoundError`` 로 cross-module
+# 검증을 선행하므로 budget record 만 없는 드문 경로이지만 invariant 명시.
+_TREASURY_BUDGET_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_BUDGET_NOT_FOUND",
+    category="not_found",
+)
+
+# ``deallocate`` 시 요청 amount 가 budget.available 초과 (over-deallocate).
+_TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE",
+    category="validation",
+)
+
+# ``update_budget`` 의 caller-facing wrap fault. ``allocate``/``deallocate``
+# 가 reject 한 typed reason 을 caller invariant 보존을 위해 동일
+# ``InsufficientFundsError`` 로 변환하는 경로 (treasury.py:599-606) 에서
+# raise 된다. 본 PR 에서 class-level ``.code`` 신규 부여
+# ``TREASURY_INSUFFICIENT_FUNDS`` — ``TREASURY_INSUFFICIENT_BALANCE``
+# (allocate-side raw reject) 와 의미 분리 (semantic distinction 보존).
+_TREASURY_INSUFFICIENT_FUNDS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_INSUFFICIENT_FUNDS",
+    category="validation",
+)
+
+# running 상태 봇의 예산 변경 거부 (운영 상태 머신 위반). 본 PR 에서
+# class-level ``.code`` 신규 부여 ``TREASURY_BOT_NOT_STOPPED``.
+_TREASURY_BOT_NOT_STOPPED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_BOT_NOT_STOPPED",
+    category="state_conflict",
+)
+
+# ``TreasuryManager`` 미주입 / ``account_id`` 에 등록된 Treasury 부재로 인한
+# budget 작업 거부 (#1335). 본 PR 에서 class-level ``.code`` 신규 부여
+# ``TREASURY_NOT_CONFIGURED`` (service 인프라 부재 — ``service_unavailable``
+# 카테고리).
+_TREASURY_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_NOT_CONFIGURED",
+    category="service_unavailable",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -412,6 +510,16 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BotNotAcceptingSignals: _BOT_NOT_ACCEPTING_SIGNALS_SPEC,
     BotAlreadyExistsError: _BOT_ALREADY_EXISTS_SPEC,
     BotStrategyAlreadyRunningError: _BOT_STRATEGY_ALREADY_RUNNING_SPEC,
+    # ── #1843 sub-PR 4 treasury 7 sub-class (실측 .code mirror) ───────────
+    TreasuryInvalidAmountError: _TREASURY_INVALID_AMOUNT_SPEC,
+    TreasuryInsufficientUnallocatedError: _TREASURY_INSUFFICIENT_BALANCE_SPEC,
+    TreasuryBudgetNotFoundError: _TREASURY_BUDGET_NOT_FOUND_SPEC,
+    TreasuryDeallocateExceedsAvailableError: (
+        _TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE_SPEC
+    ),
+    InsufficientFundsError: _TREASURY_INSUFFICIENT_FUNDS_SPEC,
+    BotNotStoppedError: _TREASURY_BOT_NOT_STOPPED_SPEC,
+    TreasuryNotConfiguredError: _TREASURY_NOT_CONFIGURED_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 
