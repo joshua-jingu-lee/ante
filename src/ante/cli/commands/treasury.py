@@ -21,6 +21,7 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts import emit_cli_error
 
 logger = logging.getLogger(__name__)
 
@@ -310,8 +311,12 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
@@ -371,8 +376,12 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
@@ -431,8 +440,12 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     # #1809: ``_handle_treasury_allocate`` 가 reject 시 typed exception 으로
     # raise 하므로 정상 응답은 항상 ``success=True``. 잔존 false 경로는
@@ -492,8 +505,12 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     if result.get("success"):
         fmt.success(
@@ -715,8 +732,12 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
@@ -803,8 +824,12 @@ def portfolio_history(
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "TREASURY_ERROR"))
-        raise SystemExit(1) from e
+        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # registry MRO lookup 으로 treasury typed exception 은 안정 코드
+        # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
+        # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
+        # click.exceptions.Exit(1) 로 동형 보존.
+        emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
