@@ -889,7 +889,8 @@ docs/
 │   │   ├── logging.md
 │   │   └── README.md
 │   └── contracts/
-│       └── envelopes.md
+│       ├── envelopes.md
+│       └── README.md
 ├── temp/                             # 임시 작업 문서
 │   └── 05-issue-processing-process-map.md
 └── superpowers/
