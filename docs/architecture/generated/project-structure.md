@@ -578,7 +578,11 @@ tests/
 │   ├── test_cli_group_q_state_conflict_sweep.py
 │   ├── test_cli_group_r_member_duplicate_validation_sweep.py
 │   ├── test_cli_group_s_treasury_typed_reject.py
-│   └── test_ipc_treasury_allocate_missing_bot.py
+│   ├── test_ipc_treasury_allocate_missing_bot.py
+│   └── contracts/
+│       ├── __init__.py
+│       ├── helpers.py
+│       └── test_helpers.py
 └── __init__.py
 ```
 
