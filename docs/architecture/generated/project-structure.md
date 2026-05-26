@@ -602,7 +602,10 @@ tests/
 │   │   ├── test_cli_registry_leaf_coverage.py
 │   │   ├── test_cli_registry_shell.py
 │   │   ├── test_cli_registry_auth_drift.py
-│   │   └── factory_drift_allowlist.yaml
+│   │   ├── factory_drift_allowlist.yaml
+│   │   ├── docs_drift_allowlist.yaml
+│   │   ├── test_cli_registry_docs_drift.py
+│   │   └── test_cli_registry_guide_sync.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
