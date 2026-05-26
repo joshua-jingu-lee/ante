@@ -289,7 +289,8 @@ src/ante/
     ├── vocab.py
     ├── error_registry.py
     ├── errors.py
-    └── helpers.py
+    ├── helpers.py
+    └── cli_registry.py
 ```
 
 ## tests/ — 테스트
@@ -589,7 +590,9 @@ tests/
 │   │   ├── test_error_helpers.py
 │   │   ├── error_drift_allowlist.yaml
 │   │   ├── test_auth_middleware_code_policy.py
-│   │   └── test_error_drift.py
+│   │   ├── test_error_drift.py
+│   │   ├── test_cli_registry_leaf_coverage.py
+│   │   └── test_cli_registry_shell.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
