@@ -34,16 +34,23 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 8).
 * :data:`RULE_CONTRACTS` — rule 도메인 3 leaf contract tuple
   (#1847 sub-PR 8).
+* :data:`TRADE_CONTRACTS` — trade 도메인 2 leaf contract tuple
+  (#1847 sub-PR 9 — final).
+* :data:`BACKTEST_CONTRACTS` — backtest 도메인 2 leaf contract tuple
+  (#1847 sub-PR 9 — final).
+* :data:`AUDIT_CONTRACTS` — audit 도메인 1 leaf contract tuple
+  (#1847 sub-PR 9 — final).
+* :data:`SIGNAL_CONTRACTS` — signal 도메인 1 leaf contract tuple
+  (#1847 sub-PR 9 — final).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
   PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
   + strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument 4
-  + config 3 + rule 3 = 88 entries 가 채워져 있다.
+  + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
+  entries 가 채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 9 이후 — trade / backtest /
-  audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
@@ -90,6 +97,8 @@ from ante.contracts.vocab import AuthMode, ContractKind, EnvelopeForm
 __all__ = [
     "ACCOUNT_CONTRACTS",
     "APPROVAL_CONTRACTS",
+    "AUDIT_CONTRACTS",
+    "BACKTEST_CONTRACTS",
     "BOT_CONTRACTS",
     "BROKER_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
@@ -99,8 +108,10 @@ __all__ = [
     "MEMBER_CONTRACTS",
     "REPORT_CONTRACTS",
     "RULE_CONTRACTS",
+    "SIGNAL_CONTRACTS",
     "STRATEGY_CONTRACTS",
     "SYSTEM_CONTRACTS",
+    "TRADE_CONTRACTS",
     "TREASURY_CONTRACTS",
     "AuthContract",
     "CliCommandContract",
@@ -1650,6 +1661,228 @@ RULE_CONTRACTS: tuple[CliCommandContract, ...] = (
 """
 
 
+# ── #1847 sub-PR 9 (final): trade domain OutputContract migration ───────
+#
+# trade 도메인 2 leaf 의 contract entry. ``src/ante/cli/commands/trade.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:383-394`` (trade 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (2 commands, 전체): ``list`` / ``info`` 모두 JSON 모드에서
+# ``fmt.output(dict)`` 또는 ``fmt.table(rows, columns)`` 평면 dict / row list
+# 를 그대로 dump 한다.
+# - ``list`` (trade.py:121/125/127): empty → ``fmt.output({"message": "거래
+#   내역 없음", "trades": []})`` 평면; non-empty JSON → ``fmt.output(
+#   {"trades": [...]})`` 평면; non-empty text → fmt.table.
+# - ``info`` (trade.py:190): JSON → ``fmt.output(result)`` 평면 detail dict
+#   (``{trade_id, bot_id, strategy_id, symbol, side, quantity, price, status,
+#   timestamp, ...}``). text 는 click.echo 다수 줄. not-found 분기는
+#   ``fmt.error("거래를 찾을 수 없습니다: ...", code="TRADE_NOT_FOUND")``
+#   이며 success-output drift scope 밖.
+#
+# scope 분류 (#1815 SSOT, trade.py @require_scope marker 와 1:1 정합):
+# - ``trade:read`` scope (2 개, 전체): ``list`` / ``info``.
+# - public allowlist: 없음 — trade 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:140`` SSOT — trade 는
+# offline 분류):
+# - ``offline`` (2 개, 전체): ``list`` / ``info``. 각 leaf 는 local
+#   ``Database`` 와 ``TradeService`` / ``PositionHistory`` / ``TradeRecorder``
+#   를 직접 생성한다. runtime IPC handler 없음.
+TRADE_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("trade", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"trade:read"})),
+        # JSON mode: empty → ``fmt.output({"message": "거래 내역 없음",
+        # "trades": []})`` 평면 (trade.py:121); non-empty JSON → ``fmt.output(
+        # {"trades": [...]})`` 평면 (trade.py:125); text → fmt.table
+        # (trade.py:127). inverted date range 분기는 ``fmt.error`` 이며
+        # success-output drift scope 밖.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("trade", "info"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"trade:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 detail dict (trade.py:190)
+        # — ``{trade_id, bot_id, strategy_id, symbol, side, quantity, price,
+        # status, timestamp, ...}``. text 는 click.echo. not-found / generic
+        # 오류 분기는 ``fmt.error`` 이며 success-output drift scope 밖.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+)
+"""Trade domain 2 leaf 의 contract tuple (#1847 sub-PR 9, final).
+
+순서는 ``docs/specs/cli/03-commands.md:383-394`` 의 trade 표
+(list → info) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
+# ── #1847 sub-PR 9 (final): backtest domain OutputContract migration ────
+#
+# backtest 도메인 2 leaf 의 contract entry. ``src/ante/cli/commands/
+# backtest.py`` 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:494-503`` (backtest 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (2 commands, 전체): ``run`` / ``history`` 모두 JSON 모드에서
+# ``fmt.output(result_dict)`` 또는 ``fmt.output(...)`` 평면 dict 를 그대로
+# dump 한다.
+# - ``run`` (backtest.py:173-181): ``fmt.output(result_dict, "Run ID:
+#   {run_id}\\n...")`` 평면. ``result_dict`` 는 backtest 결과의 평면 shape
+#   (``{strategy, period, total_return_pct, total_trades, final_balance,
+#   trades, metrics, run_id, ...}``) 으로 standard envelope 3 키 셋과 다름.
+#   text 모드는 template 으로 출력되고, JSON 모드는 평면 dict 그대로 dump.
+# - ``history`` (backtest.py:262/269/271): empty → ``fmt.output({"message":
+#   ..., "runs": []}, ...)`` 평면; non-empty JSON → ``fmt.output(
+#   {"strategy_name": strategy_name, "runs": rows})`` 평면; non-empty text →
+#   fmt.table. invalid date 분기는 ``fmt.error`` 이며 success-output drift
+#   scope 밖.
+#
+# scope 분류 (#1815 SSOT, backtest.py @require_scope marker 와 1:1 정합):
+# - ``backtest:run`` scope (2 개, 전체): ``run`` / ``history``.
+# - public allowlist: 없음 — backtest 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:149`` SSOT — backtest run
+# 은 long-running, history 는 offline):
+# - ``long_running`` (1 개): ``run``. 백테스트 실행은 progress bar 를 보여주는
+#   장시간 작업이다. spec 표는 ``long-running`` 표기이며 본 registry 의
+#   ExecutionClass vocab 매핑 (모듈 docstring normative 표) 에 따라
+#   ``"long_running"`` 으로 분류.
+# - ``offline`` (1 개): ``history``. local ``Database`` 와 ``BacktestRunStore``
+#   를 직접 생성해 persisted run history 를 조회한다.
+BACKTEST_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("backtest", "run"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"backtest:run"})),
+        # JSON mode: ``fmt.output(result_dict, "Run ID: {run_id}\\n...")``
+        # 평면 dict (backtest.py:173-181). ``result_dict`` 는 backtest 결과의
+        # 평면 shape (strategy / period / total_return_pct / total_trades /
+        # final_balance / trades / metrics / run_id) — standard envelope 3 키
+        # 셋과 다르므로 raw_legacy. invalid date/exchange/timeframe/symbol /
+        # generic error 분기는 ``fmt.error`` 이며 success-output drift scope
+        # 밖.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="long_running",
+    ),
+    CliCommandContract(
+        path=("backtest", "history"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"backtest:run"})),
+        # JSON mode: empty → ``fmt.output({"message": ..., "runs": []}, ...)``
+        # 평면 (backtest.py:262-265); non-empty JSON → ``fmt.output(
+        # {"strategy_name": strategy_name, "runs": rows})`` 평면 (backtest.py:
+        # 269); non-empty text → fmt.table (backtest.py:271). generic error
+        # 분기는 ``fmt.error`` 이며 success-output drift scope 밖.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+)
+"""Backtest domain 2 leaf 의 contract tuple (#1847 sub-PR 9, final).
+
+순서는 ``docs/specs/cli/03-commands.md:494-503`` 의 backtest 표
+(run → history) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
+# ── #1847 sub-PR 9 (final): audit domain OutputContract migration ───────
+#
+# audit 도메인 1 leaf 의 contract entry. ``src/ante/cli/commands/audit.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:710-720`` (audit 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (1 command, 전체): ``list`` 는 JSON 모드에서 ``fmt.output(
+# dict)`` 평면 dict 를 그대로 dump 한다.
+# - ``list`` (audit.py:89/93/95): empty → ``fmt.output({"message": "감사
+#   로그가 없습니다.", "logs": []})`` 평면; non-empty JSON → ``fmt.output(
+#   {"logs": [...]})`` 평면; non-empty text → fmt.table. inverted date
+#   range 분기는 ``fmt.error("INVALID_DATE_RANGE", ...)`` 이며 success-output
+#   drift scope 밖.
+#
+# scope 분류 (#1815 SSOT, audit.py @require_scope marker 와 1:1 정합):
+# - ``audit:read`` scope (1 개, 전체): ``list``.
+# - public allowlist: 없음 — audit 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md`` SSOT — audit list 는
+# offline 분류):
+# - ``offline`` (1 개, 전체): ``list``. local ``Database`` 와 ``AuditLogger``
+#   를 직접 생성해 persisted audit row 를 조회한다. runtime IPC handler 없음.
+AUDIT_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("audit", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"audit:read"})),
+        # JSON mode: empty → ``fmt.output({"message": "감사 로그가 없습니다.",
+        # "logs": []})`` 평면 (audit.py:89); non-empty JSON → ``fmt.output(
+        # {"logs": [...]})`` 평면 (audit.py:93); text → fmt.table
+        # (audit.py:95). inverted date range 분기는 ``fmt.error`` 이며
+        # success-output drift scope 밖.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+)
+"""Audit domain 1 leaf 의 contract tuple (#1847 sub-PR 9, final).
+
+순서는 ``docs/specs/cli/03-commands.md:710-720`` 의 audit 표 (list 단일) 와
+시각적으로 일치한다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
+등록된다.
+"""
+
+
+# ── #1847 sub-PR 9 (final): signal domain OutputContract migration ──────
+#
+# signal 도메인 1 leaf 의 contract entry. ``src/ante/cli/commands/signal.py``
+# 의 ``@require_auth`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:721-727`` (signal 표) 와 1:1 정합한다.
+#
+# stream 분류 (1 command, 전체): ``connect`` 는 bidirectional JSON Lines
+# 시그널 채널을 stdin/stdout 위로 수립한다 (long-running / streaming 실행).
+# 일반 ``fmt.success`` / ``fmt.output`` 단일 envelope dump 는 *발생하지
+# 않는다* — validation 실패 분기 (``_fail``) 만 JSON 모드에서 ``fmt.error(
+# msg, code=...)`` envelope 을 dump 하고 즉시 SystemExit 한다 (signal.py:93-
+# 104). 채널 수립 후에는 ``SignalChannel.run()`` 이 JSON Lines stream 을
+# 직접 stdin/stdout 으로 처리한다 — fmt 계열 호출 없음. envelope SSOT
+# (#1821) 의 ``ContractKind = "stream"`` 으로 분류한다.
+#
+# envelope 표기: 본 leaf 는 단일 envelope dump 가 없으므로 ``raw_legacy``
+# 로 표시한다 — 일반 success/data envelope 이 부재하다는 의미를 본 registry
+# 의 두 envelope 분류 (``standard`` / ``raw_legacy``) 안에서 표현하기 위한
+# 정책. drift test 는 success-output dump 가 없음을 sanity 차원에서만 lock
+# 한다 (registry envelope vocab 분류기 sanity 만 적용).
+#
+# auth 분류 (signal.py @require_auth marker — scope 없음):
+# - public allowlist 미적용 (signal.py:25 의 ``@require_auth`` 데코레이터는
+#   토큰 인증을 요구한다). scope 는 없으므로 ``authenticated`` 분류.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md`` SSOT — signal connect
+# 는 long-running / streaming 분류):
+# - ``long_running`` (1 개, 전체): ``connect``. ``asyncio.run(_run_connect)``
+#   로 ``SignalChannel.run()`` (stream loop) 을 실행. 본 registry 의
+#   ExecutionClass vocab 매핑 (모듈 docstring normative 표) 에 따라
+#   ``"long_running"`` 으로 분류 (streaming 도 흡수).
+SIGNAL_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("signal", "connect"),
+        # signal.py:25 의 ``@require_auth`` 만 적용 — scope 없음.
+        auth=AuthContract(mode="authenticated", scopes=frozenset()),
+        # stream 채널 leaf: 단일 success envelope dump 가 없으므로 raw_legacy
+        # 로 표시한다 (registry 의 두 envelope 분류 안에서 "envelope 부재"
+        # 를 표현하기 위한 정책). kind="stream" 으로 streaming nature 를
+        # 명시.
+        output=OutputContract(kind="stream", envelope="raw_legacy"),
+        execution="long_running",
+    ),
+)
+"""Signal domain 1 leaf 의 contract tuple (#1847 sub-PR 9, final).
+
+순서는 ``docs/specs/cli/03-commands.md:721-727`` 의 signal 표 (connect 단일)
+와 시각적으로 일치한다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
+등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     contract.path: contract
     for contract in (
@@ -1666,18 +1899,29 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
         *INSTRUMENT_CONTRACTS,
         *CONFIG_CONTRACTS,
         *RULE_CONTRACTS,
+        *TRADE_CONTRACTS,
+        *BACKTEST_CONTRACTS,
+        *AUDIT_CONTRACTS,
+        *SIGNAL_CONTRACTS,
     )
 }
 """Leaf command path → contract mapping.
 
 본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
 + strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument 4
-+ config 3 + rule 3 = 88 entries 가 등록되어 있다 (#1846 / #1847 sub-PR
-1 / #1847 sub-PR 2 / #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 /
-#1847 sub-PR 6 / #1847 sub-PR 7 / #1847 sub-PR 8). 나머지 도메인 (trade
-/ backtest / audit / signal) 의 entry 등록은 후속 PR (`#1847` sub-PR 9)
-의 책임이다. registry 미등록 leaf 가 FAIL 이어야 하는 drift guard 는
-`#1848` 가 활성화한다.
++ config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
+entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
+#1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 /
+#1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9). #1847 sweep 은 본
+PR 로 완료되며 (sub-PR 9 = final), registry 미등록 leaf 가 FAIL 이어야
+하는 drift guard 는 `#1848` 가 활성화한다.
+
+미등록 잔여 leaf (94 / 실측 Click leaf count 비교): ``ante`` root 의
+init / update / notification group 은 leaf 가 없거나 (notification은
+0 leaf — spec 707-708 narrative), update 단일 leaf 는 root-level command
+로 본 registry sweep 범위 밖이다. 정확한 잔여 leaf 식별은
+:func:`tests.unit.contracts.helpers.iter_click_leaf_commands` 의 실측을
+기준으로 한다 (leaf coverage report 참조).
 """
 
 
@@ -1698,8 +1942,9 @@ def all_contracts() -> Iterator[CliCommandContract]:
 
     본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury
     9 + strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument
-    4 + config 3 + rule 3 = 88 entries 가 등록되어 있다 (#1846 / #1847
-    sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR 3 / #1847 sub-PR 4 / #1847
-    sub-PR 5 / #1847 sub-PR 6 / #1847 sub-PR 7 / #1847 sub-PR 8).
+    4 + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
+    entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
+    #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 /
+    #1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9).
     """
     yield from CLI_COMMAND_REGISTRY.values()

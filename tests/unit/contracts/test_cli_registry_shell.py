@@ -180,17 +180,16 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (등록된 13 도메인 외).
+    """미등록 path 는 ``None`` 을 반환한다 (등록된 17 도메인 외).
 
     등록 도메인: account / member / bot / approval / treasury / strategy /
-    data / report / broker / system / instrument / config / rule.
+    data / report / broker / system / instrument / config / rule / trade /
+    backtest / audit / signal. #1847 sub-PR 9 (final) 로 sweep 완료.
     """
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # trade 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 9 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (instrument / config / rule
-    # domain 은 sub-PR 8 에서 등록되었다).
-    assert get_contract(("trade", "list")) is None
+    # 등록 도메인 외 임의 path 도 ``None``.
+    assert get_contract(("nonexistent", "subcmd")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
@@ -534,6 +533,84 @@ def test_rule_entries_registered_after_1847_sub_pr_8() -> None:
     assert expected_rule_paths.issubset(registered), (
         f"rule 3 entry 가 모두 등록되어야 한다 (#1847 sub-PR 8). "
         f"누락: {sorted(expected_rule_paths - registered)}"
+    )
+
+
+def test_trade_entries_registered_after_1847_sub_pr_9() -> None:
+    """#1847 sub-PR 9 (final) 가 trade 2 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 9 가 trade migration 을 완료한 시점부터
+    lock 된다. 2 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_trade_success_output_drift` 가
+    책임진다.
+    """
+    expected_trade_paths = {
+        ("trade", "list"),
+        ("trade", "info"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_trade_paths.issubset(registered), (
+        f"trade 2 entry 가 모두 등록되어야 한다 (#1847 sub-PR 9). "
+        f"누락: {sorted(expected_trade_paths - registered)}"
+    )
+
+
+def test_backtest_entries_registered_after_1847_sub_pr_9() -> None:
+    """#1847 sub-PR 9 (final) 가 backtest 2 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 9 가 backtest migration 을 완료한 시점부터
+    lock 된다. 2 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_backtest_success_output_drift` 가
+    책임진다.
+    """
+    expected_backtest_paths = {
+        ("backtest", "run"),
+        ("backtest", "history"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_backtest_paths.issubset(registered), (
+        f"backtest 2 entry 가 모두 등록되어야 한다 (#1847 sub-PR 9). "
+        f"누락: {sorted(expected_backtest_paths - registered)}"
+    )
+
+
+def test_audit_entries_registered_after_1847_sub_pr_9() -> None:
+    """#1847 sub-PR 9 (final) 가 audit 1 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 9 가 audit migration 을 완료한 시점부터
+    lock 된다. 1 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_audit_success_output_drift` 가
+    책임진다.
+    """
+    expected_audit_paths = {
+        ("audit", "list"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_audit_paths.issubset(registered), (
+        f"audit 1 entry 가 모두 등록되어야 한다 (#1847 sub-PR 9). "
+        f"누락: {sorted(expected_audit_paths - registered)}"
+    )
+
+
+def test_signal_entries_registered_after_1847_sub_pr_9() -> None:
+    """#1847 sub-PR 9 (final) 가 signal 1 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 9 가 signal migration 을 완료한 시점부터
+    lock 된다. 1 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_signal_success_output_drift` 가
+    책임진다.
+    """
+    expected_signal_paths = {
+        ("signal", "connect"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_signal_paths.issubset(registered), (
+        f"signal 1 entry 가 모두 등록되어야 한다 (#1847 sub-PR 9). "
+        f"누락: {sorted(expected_signal_paths - registered)}"
     )
 
 
