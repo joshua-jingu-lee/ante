@@ -180,15 +180,16 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (등록된 6 도메인 외).
+    """미등록 path 는 ``None`` 을 반환한다 (등록된 8 도메인 외).
 
-    등록 도메인: account / member / bot / approval / treasury / strategy.
+    등록 도메인: account / member / bot / approval / treasury / strategy /
+    data / report.
     """
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # broker 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 6 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (strategy domain 은 sub-PR 5
-    # 에서 등록되었다).
+    # broker 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 7 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (data / report domain 은
+    # sub-PR 6 에서 등록되었다).
     assert get_contract(("broker", "status")) is None
 
 
@@ -365,6 +366,60 @@ def test_strategy_entries_registered_after_1847_sub_pr_5() -> None:
     assert expected_strategy_paths.issubset(registered), (
         f"strategy 7 entry 가 모두 등록되어야 한다 (#1847 sub-PR 5). "
         f"누락: {sorted(expected_strategy_paths - registered)}"
+    )
+
+
+def test_data_entries_registered_after_1847_sub_pr_6() -> None:
+    """#1847 sub-PR 6 가 data 6 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 6 가 data migration 을 완료한 시점부터
+    lock 된다. 6 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_data_success_output_drift` 가
+    책임진다.
+
+    spec 표 (``docs/specs/cli/03-commands.md:487-492``) 는 4 leaf
+    (``list`` / ``schema`` / ``storage`` / ``validate``) 만 명시하지만
+    ``info`` / ``delete`` 는 실제 ``data.py`` 에 존재하는 leaf 로 Click
+    subgroup iteration 이 6 leaf 를 반환한다. registry 는 canonical Click
+    tree (leaf coverage helper SSOT) 기준이므로 6 entries 를 모두 등록한다
+    (treasury sub-PR 4 ``portfolio value/history`` 동형).
+    """
+    expected_data_paths = {
+        ("data", "list"),
+        ("data", "info"),
+        ("data", "delete"),
+        ("data", "schema"),
+        ("data", "storage"),
+        ("data", "validate"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_data_paths.issubset(registered), (
+        f"data 6 entry 가 모두 등록되어야 한다 (#1847 sub-PR 6). "
+        f"누락: {sorted(expected_data_paths - registered)}"
+    )
+
+
+def test_report_entries_registered_after_1847_sub_pr_6() -> None:
+    """#1847 sub-PR 6 가 report 5 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 6 가 report migration 을 완료한 시점부터
+    lock 된다. 5 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_report_success_output_drift` 가
+    책임진다.
+    """
+    expected_report_paths = {
+        ("report", "schema"),
+        ("report", "submit"),
+        ("report", "list"),
+        ("report", "performance"),
+        ("report", "view"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_report_paths.issubset(registered), (
+        f"report 5 entry 가 모두 등록되어야 한다 (#1847 sub-PR 6). "
+        f"누락: {sorted(expected_report_paths - registered)}"
     )
 
 
