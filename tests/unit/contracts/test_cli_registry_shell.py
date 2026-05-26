@@ -180,13 +180,16 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (account/member/bot/approval/treasury 외)."""
+    """미등록 path 는 ``None`` 을 반환한다 (등록된 6 도메인 외).
+
+    등록 도메인: account / member / bot / approval / treasury / strategy.
+    """
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # strategy 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 5 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (treasury domain 은 sub-PR 4
+    # broker 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 6 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (strategy domain 은 sub-PR 5
     # 에서 등록되었다).
-    assert get_contract(("strategy", "list")) is None
+    assert get_contract(("broker", "status")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
@@ -337,6 +340,31 @@ def test_treasury_entries_registered_after_1847_sub_pr_4() -> None:
     assert expected_treasury_paths.issubset(registered), (
         f"treasury 9 entry 가 모두 등록되어야 한다 (#1847 sub-PR 4). "
         f"누락: {sorted(expected_treasury_paths - registered)}"
+    )
+
+
+def test_strategy_entries_registered_after_1847_sub_pr_5() -> None:
+    """#1847 sub-PR 5 가 strategy 7 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 5 가 strategy migration 을 완료한 시점부터
+    lock 된다. 7 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_strategy_success_output_drift` 가
+    책임진다.
+    """
+    expected_strategy_paths = {
+        ("strategy", "validate"),
+        ("strategy", "submit"),
+        ("strategy", "list"),
+        ("strategy", "info"),
+        ("strategy", "performance"),
+        ("strategy", "set-status"),
+        ("strategy", "summary"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_strategy_paths.issubset(registered), (
+        f"strategy 7 entry 가 모두 등록되어야 한다 (#1847 sub-PR 5). "
+        f"누락: {sorted(expected_strategy_paths - registered)}"
     )
 
 
