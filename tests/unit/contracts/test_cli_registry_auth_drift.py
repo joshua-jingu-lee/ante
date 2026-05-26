@@ -219,22 +219,20 @@ def test_family_d_authenticated_fallback_drift() -> None:
             )
 
 
-# ── baseline coverage report (deferred lock 가시화) ───────────────────────
+# ── activation lock (#1846 — vacuous baseline 종료) ───────────────────────
 
 
-def test_registry_auth_drift_baseline_is_vacuous() -> None:
-    """본 PR (#1845) 시점 registry 가 빈 dict 인지 확인 (deferred lock baseline).
+def test_registry_auth_drift_is_active() -> None:
+    """#1846 가 account 9 entries 를 등록하면서 deferred lock 이 활성화되었다.
 
-    본 단언은 후속 `#1846` / `#1847` 가 entry 를 등록하기 시작하면 자연스럽게
-    제거된다. 4 drift test 는 registered entry > 0 인 시점부터 실제 검증을
-    시작한다.
-
-    cascade 동등 단언이 :mod:`test_cli_registry_shell` 와 ``test_cli_registry
-    _leaf_coverage`` 에도 있다 — `#1846` / `#1847` 가 한꺼번에 갱신한다.
+    #1845 시점에는 ``CLI_COMMAND_REGISTRY`` 가 빈 dict 라 4 drift test 가
+    모두 vacuous pass 였다 (``test_registry_auth_drift_baseline_is_vacuous``
+    가 빈 dict 를 단언). #1846 가 account entries 를 등록하면서 본 단언은
+    "registry 에 entry 가 1 개 이상 존재한다" 로 갱신되었다 — 4 drift test
+    가 이제 실제 검증을 수행한다. 미등록 leaf FAIL enforcement 는 `#1848`
+    의 책임이다.
     """
-    assert CLI_COMMAND_REGISTRY == {}, (
-        "본 PR (#1845) 시점 CLI_COMMAND_REGISTRY 는 빈 dict 여야 한다 "
-        "(deferred lock pattern). entry 등록은 #1846 / #1847 의 책임이며, "
-        "그 시점에 본 baseline 단언과 #1844 의 동등 단언을 함께 갱신한다. "
-        f"현재 등록: {sorted(CLI_COMMAND_REGISTRY)}"
+    assert len(CLI_COMMAND_REGISTRY) > 0, (
+        "본 PR (#1846) 시점 CLI_COMMAND_REGISTRY 는 account 9 entries 가 "
+        "등록되어 있어야 한다. account migration 회귀가 의심된다."
     )

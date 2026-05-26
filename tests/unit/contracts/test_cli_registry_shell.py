@@ -168,25 +168,54 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
     assert instance.envelope == "raw_legacy"
 
 
-# ── empty registry baseline ───────────────────────────────────────────────
-
-
-def test_registry_baseline_is_empty() -> None:
-    assert CLI_COMMAND_REGISTRY == {}
-
-
-def test_all_contracts_baseline_is_empty() -> None:
-    assert list(all_contracts()) == []
+# ── registry baseline (account migration, #1846) ──────────────────────────
+#
+# #1844 시점에는 ``CLI_COMMAND_REGISTRY`` 가 빈 dict 라는 baseline 단언이
+# 박혀 있었다 (``test_empty_registry_baseline`` / ``test_all_contracts_
+# baseline_is_empty``). #1846 가 account 9 entries 를 등록하면서 그
+# deferred lock 은 자연스럽게 종료되었다 — 본 PR 가 두 baseline 단언을
+# 제거했다. 이후의 invariant 는 "registry 가 plain mutable dict 이고
+# accessor 가 일관 동작한다" 만 lock 한다. 미등록 leaf FAIL 은 `#1848`
+# 의 책임이다.
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    assert get_contract(("account", "create")) is None
+    """미등록 path 는 ``None`` 을 반환한다 (account 9 entry 외)."""
+    # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
+    # bot 도메인 entry 등록은 #1847 의 책임이므로 본 PR 시점에는 ``None``.
+    assert get_contract(("bot", "start")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
-    """후속 PR (#1846/#1847) 가 in-place 등록할 수 있도록 plain dict 다."""
+    """후속 PR (`#1847`) 가 in-place 등록할 수 있도록 plain dict 다."""
     assert isinstance(CLI_COMMAND_REGISTRY, dict)
+
+
+def test_account_entries_registered_after_1846() -> None:
+    """#1846 가 account 9 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1846 가 account migration 을 완료한 시점부터 lock 된다.
+    9 entry 의 정확한 ``OutputContract`` / ``AuthContract`` 정합 검증은
+    :mod:`tests.unit.contracts.test_cli_registry_auth_drift` (Family B) 와
+    :mod:`tests.unit.test_account_success_output_drift` 가 책임진다.
+    """
+    expected_account_paths = {
+        ("account", "list"),
+        ("account", "info"),
+        ("account", "credentials"),
+        ("account", "create"),
+        ("account", "set-credentials"),
+        ("account", "delete"),
+        ("account", "repair-timezone"),
+        ("account", "suspend"),
+        ("account", "activate"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_account_paths.issubset(registered), (
+        f"account 9 entry 가 모두 등록되어야 한다 (#1846). "
+        f"누락: {sorted(expected_account_paths - registered)}"
+    )
 
 
 # ── alias re-export from package __init__ ─────────────────────────────────

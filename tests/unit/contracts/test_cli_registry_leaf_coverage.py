@@ -1,21 +1,21 @@
-"""CLI contract registry leaf coverage report (#1844).
+"""CLI contract registry leaf coverage report (#1844, #1846 update).
 
-본 test 는 **report-only** 다. 본 PR 시점에 :data:`CLI_COMMAND_REGISTRY`
-는 빈 dict 이므로 registered/total ratio 는 0 이며, 누락 leaf 가
-FAIL 을 만들지 않는다 — 그 enforcement 는 `#1845` (drift guard) /
-`#1848` (final coverage) 의 책임이다.
+본 test 는 **report-only** 다. #1846 가 account 9 entries 를 등록하면서
+``CLI_COMMAND_REGISTRY`` 가 더 이상 빈 dict 가 아니지만, 누락 leaf 가
+FAIL 을 만들지 않는다 — 그 enforcement 는 `#1848` (final coverage) 의
+책임이다. 본 PR 의 단언은 "등록 카운트 > 0" 으로 완화되었다.
 
 본 test 가 확인하는 것:
 
 * :func:`tests.unit.contracts.helpers.iter_click_leaf_commands` 가 적어도
   1 개 이상 leaf 를 yield 한다 (skeleton 동작 확인).
 * 누락 leaf 목록을 stdout 으로 print (``pytest -s`` 시 확인 가능) —
-  후속 PR 가 채울 작업 분량 가시화.
-* 등록 카운트 baseline (본 PR 시점 0) 을 print 한다.
+  후속 PR (`#1847`) 가 채울 작업 분량 가시화.
+* 등록 카운트가 > 0 임을 lock (account 9 entry 등록 후).
 
 본 test 가 *하지 않는 것*:
 
-* 누락 leaf 에 대한 FAIL — `#1845` / `#1848`.
+* 누락 leaf 에 대한 FAIL — `#1848`.
 * leaf path normalization 정책 lock — `#1845`.
 * helper hidden-subtree exclusion 검증 — :mod:`tests.unit.contracts.test_helpers`
   가 이미 lock 한다.
@@ -58,10 +58,10 @@ def test_cli_registry_leaf_coverage_report() -> None:
         "skeleton test 도 함께 확인하라."
     )
 
-    # baseline lock: 본 PR 시점 registry 는 빈 dict 다. 후속 PR 가 entry 를
-    # 추가하기 시작하면 이 단언은 자연스럽게 제거 / 완화된다.
-    assert registered == set(), (
-        "본 PR (#1844) 시점 CLI_COMMAND_REGISTRY 는 빈 dict 여야 한다. "
-        "entry 등록은 #1846 / #1847 의 책임이며, 그 시점에 본 baseline "
-        f"단언을 갱신한다. 현재 등록: {sorted(registered)}"
+    # baseline lock (#1846 완화): 본 PR (#1846) 부터 registry 에는 account 9
+    # entries 가 등록되어 있다. 미등록 leaf 가 FAIL 이어야 하는 enforcement
+    # 는 `#1848` 의 책임이며, 본 단언은 "등록 카운트 > 0" 만 lock 한다.
+    assert len(registered) > 0, (
+        "본 PR (#1846) 시점 CLI_COMMAND_REGISTRY 는 account 9 entries 가 "
+        "등록되어 있어야 한다. account migration 회귀가 의심된다."
     )
