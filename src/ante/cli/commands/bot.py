@@ -5,8 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -15,10 +18,17 @@ from ante.cli._validators import (
     validate_positive_finite_amount,
 )
 from ante.cli.cold_path import is_active_runtime
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
+
+if TYPE_CHECKING:
+    from ante.account.service import AccountService
+    from ante.bot.manager import BotManager
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -32,21 +42,60 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_services():  # noqa: ANN202
+@asynccontextmanager
+async def _create_services(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[Database, EventBus, BotManager, AccountService]]:
+    """CLI 에서 ``Database``/``EventBus``/``BotManager``/``AccountService`` 를
+    함께 구성하는 async context manager (#1857).
+
+    이전 시그니처(``async def`` → ``tuple[Database, EventBus, BotManager,
+    AccountService]``)에서 ``open_cli_db`` 기반 async context manager 로 전환
+    했다 (#1855 factory composition, #1856 account.py 패턴 1:1 미러). 호출
+    패턴:
+
+        async with _create_services(ctx=ctx) as (db, eventbus, mgr, account_service):
+            ...
+
+    ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
+    ``Database.close()`` 를 보장하므로 (#1722/#1755 cleanup invariant),
+    callsite 의 ``try/finally: await db.close()`` 패턴이 제거된다 (#1799
+    회귀 lock 재미러).
+
+    Args:
+        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context``
+            (silent=True) 로 fallback 해 ctx-less call sites 와의 하위 호환을
+            유지한다. 신규 호출은 항상 ctx 명시 전달이 권장된다
+            (offline-factory.md §3.1).
+
+    Yields:
+        ``initialize()`` 가 완료된 ``(db, eventbus, manager, account_service)``
+        4-tuple. ``BotManager``/``AccountService`` 의 ``initialize()`` 호출은
+        그대로 보존된다 (#1854 §4.2 명시 예외는 ``AuditLogger`` /
+        ``DynamicConfigService`` 만; 본 helper 는 read-only skip 적용 안 함).
+
+    Cleanup invariant:
+        - ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로 service
+          ``initialize()`` 가 raise 해도 ``Database.close()`` 가 1회 호출된다.
+    """
     from ante.account.service import AccountService
     from ante.bot.manager import BotManager
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    account_service = AccountService(db=db, eventbus=eventbus)
-    await account_service.initialize()
-    manager = BotManager(eventbus=eventbus, db=db)
-    await manager.initialize()
-    return db, eventbus, manager, account_service
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_services requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        eventbus = EventBus()
+        account_service = AccountService(db=db, eventbus=eventbus)
+        await account_service.initialize()
+        manager = BotManager(eventbus=eventbus, db=db)
+        await manager.initialize()
+        yield db, eventbus, manager, account_service
 
 
 async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
@@ -61,16 +110,26 @@ async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
         logger.warning("감사 로그 기록 실패: %s", e)
 
 
-async def _run_bot_remove_cold_path(bot_id: str) -> dict:
-    """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다."""
-    from ante.bot.cold_path import cold_path_remove_bot
-    from ante.cli.main import get_config_dir, get_db_path
-    from ante.config import Config
-    from ante.core.database import Database
+async def _run_bot_remove_cold_path(
+    bot_id: str, ctx: click.Context | None = None
+) -> dict:
+    """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다.
 
-    db = Database(get_db_path())
-    await db.connect()
-    try:
+    #1857: ``open_cli_db`` 기반 lifecycle 로 전환했다. ``ctx`` 가 ``None`` 이면
+    ``click.get_current_context`` 로 fallback 한다 (callsite 하위 호환).
+    """
+    from ante.bot.cold_path import cold_path_remove_bot
+    from ante.cli.main import get_config_dir
+    from ante.config import Config
+
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_run_bot_remove_cold_path requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
         config = Config.load(config_dir=get_config_dir())
         strategies_dir = Path(str(config.get("strategy.dir", "strategies")))
         return await cold_path_remove_bot(
@@ -78,8 +137,6 @@ async def _run_bot_remove_cold_path(bot_id: str) -> dict:
             bot_id,
             strategies_dir=strategies_dir,
         )
-    finally:
-        await db.close()
 
 
 @bot.command("list")
@@ -105,8 +162,10 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
         account_id = reject_invalid_account_id(account_id, fmt, context="cli.bot.list")
 
     async def _run_list() -> list[dict]:
-        db, _, _, _ = await _create_services()
-        try:
+        # #1857: ``_create_services`` 를 async context manager 로 변환했다.
+        # ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
+        # ``Database.close()`` 를 보장한다 (#1799 회귀 lock 재미러).
+        async with _create_services(ctx=ctx) as (db, _, _, _):
             if account_id is not None:
                 rows = await db.fetch_all(
                     "SELECT bot_id, name, strategy_id, account_id, status, created_at"
@@ -119,8 +178,6 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
                     " FROM bots WHERE status != 'deleted'"
                 )
             return [dict(r) for r in rows]
-        finally:
-            await db.close()
 
     result = _run(_run_list())
 
@@ -147,12 +204,10 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        db, _, _, _ = await _create_services()
-        try:
+        # #1857: ``_create_services`` async context manager 전환.
+        async with _create_services(ctx=ctx) as (db, _, _, _):
             row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = ?", (bot_id,))
             return dict(row) if row else None
-        finally:
-            await db.close()
 
     result = _run(_run_info())
 
@@ -294,11 +349,12 @@ def bot_create(
         # 가 항상 보장된다. JSON envelope code (``BOT_MISSING_REQUIRED_ACCOUNT``)
         # 는 종전 동작 그대로다 (이슈 본질은 process termination 보장).
         async def _list_accounts() -> list:
-            db, _, _, account_service = await _create_services()
-            try:
+            # #1857: ``_create_services`` async context manager 전환. #1799
+            # cleanup invariant (resolver SystemExit 이후에도 db 가 close 되어
+            # process termination 보장) 는 ``open_cli_db`` body close 가 그대로
+            # 유지한다.
+            async with _create_services(ctx=ctx) as (_, _, _, account_service):
                 return await account_service.list(status=AccountStatus.ACTIVE)
-            finally:
-                await db.close()
 
         accounts = _run(_list_accounts())
         account_id = _resolve_account_non_interactive(accounts, fmt)
@@ -370,7 +426,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
 
         if is_active_runtime():
             return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
-        return await _run_bot_remove_cold_path(bot_id)
+        return await _run_bot_remove_cold_path(bot_id, ctx=ctx)
 
     try:
         result = _run(_run_remove())
@@ -404,10 +460,10 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_signal_key() -> dict:
+        # #1857: ``_create_services`` async context manager 전환.
         from ante.bot.signal_key import SignalKeyManager
 
-        db, _, _, _ = await _create_services()
-        try:
+        async with _create_services(ctx=ctx) as (db, _, _, _):
             skm = SignalKeyManager(db)
             await skm.initialize()
 
@@ -492,8 +548,6 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             if not key:
                 return {"bot_id": bot_id, "signal_key": None}
             return {"bot_id": bot_id, "signal_key": key}
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_signal_key())
@@ -557,16 +611,17 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_positions() -> list[dict] | None:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
+        # #1857: ``open_cli_db`` 헬퍼가 service ``initialize()`` /
+        # ``get_positions()`` 예외 / cancellation 모든 경로에서
+        # ``Database.close()`` 1회 호출을 보장한다 (#1722/#1799 cleanup
+        # invariant). ``--db-path`` override 는 ctx 의 ``get_db_path(ctx)``
+        # resolution 으로 흡수된다.
         from ante.trade.performance import PerformanceTracker
         from ante.trade.position import PositionHistory
         from ante.trade.recorder import TradeRecorder
         from ante.trade.service import TradeService
 
-        db = Database(get_db_path())
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             # 미존재 bot 을 "실재 bot 의 0 포지션" 과 구분하기 위해 포지션 조회
             # 전에 bot 존재를 먼저 확인한다. 미존재면 sentinel ``None`` 을
             # 반환하고, 실재 bot 이면 (0개 포함) list 를 반환한다 (#1558).
@@ -606,8 +661,6 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
                 }
                 for p in positions
             ]
-        finally:
-            await db.close()
 
     result = _run(_run_positions())
 
@@ -779,13 +832,11 @@ def bot_logs(
         raise SystemExit(1)
 
     async def _run_logs() -> dict:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799). ``--config-dir``
+        # / ``ANTE_CONFIG_DIR`` 를 통한 ``get_db_path(ctx)`` resolution 동일.
         from ante.eventbus.history import EventHistoryStore
 
-        db = Database(get_db_path(ctx))
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             try:
                 bot_row = await db.fetch_one(
                     "SELECT 1 FROM bots WHERE bot_id = ? AND status != 'deleted'",
@@ -826,8 +877,6 @@ def bot_logs(
                 for row in rows
             ]
             return {"bot_id": bot_id, "logs": logs, "total": total}
-        finally:
-            await db.close()
 
     result = _run(_run_logs())
     if result.get("missing"):

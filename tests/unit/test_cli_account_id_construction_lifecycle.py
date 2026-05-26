@@ -78,6 +78,7 @@ import json
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -162,13 +163,17 @@ def _make_mock_treasury(summary=None, snapshot=None):
 
     create_calls: list[str] = []
 
-    async def _create(account_id=None):
+    # #1857: ``_create_treasury`` 는 async context manager 로 변환됨.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _create(account_id=None, *, ctx=None):
         create_calls.append(account_id)
-        return mock_t, mock_db
+        yield mock_t, mock_db
 
     ctx_patch = patch(
         "ante.cli.commands.treasury._create_treasury",
-        side_effect=_create,
+        new=_create,
     )
     return ctx_patch, mock_t, mock_db, create_calls
 
@@ -202,13 +207,17 @@ def _make_mock_rule_engine():
 
     create_calls: list[str] = []
 
-    async def _create(account_id):
+    # #1857: ``_create_rule_engine`` 는 async context manager 로 변환됨.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _create(account_id, *, ctx=None):
         create_calls.append(account_id)
-        return mock_engine, mock_db
+        yield mock_engine, mock_db
 
     ctx_patch = patch(
         "ante.cli.commands.rule._create_rule_engine",
-        side_effect=_create,
+        new=_create,
     )
     return ctx_patch, mock_engine, mock_db, create_calls
 
@@ -336,6 +345,9 @@ class TestCreateRuleEngineLifecycleRegression:
 
     @pytest.mark.parametrize("invalid", _INVALID_INPUTS)
     def test_invalid_raises_before_db_connect_no_resource(self, invalid: str) -> None:
+        # #1857: ``_create_rule_engine`` 는 async context manager 로 변환됨.
+        # invalid account_id 는 ``open_cli_db`` (==db.connect) 진입 이전에
+        # raise 한다. test 는 async with 진입 시점에 raise 함을 직접 검증.
         import asyncio
 
         from ante.account.errors import InvalidAccountIdError
@@ -345,6 +357,11 @@ class TestCreateRuleEngineLifecycleRegression:
         mock_db_instance.connect = AsyncMock()
         mock_db_instance.close = AsyncMock()
 
+        async def _enter():
+            ctx = click.Context(click.Command("dummy"))
+            async with _create_rule_engine(invalid, ctx=ctx):
+                pass
+
         with (
             patch(
                 "ante.core.database.Database",
@@ -353,7 +370,7 @@ class TestCreateRuleEngineLifecycleRegression:
             patch("ante.cli.main.get_db_path", return_value=":memory:"),
         ):
             with pytest.raises(InvalidAccountIdError) as exc_info:
-                asyncio.run(_create_rule_engine(invalid))
+                asyncio.run(_enter())
 
         # #1633 SSOT 코드 보존.
         assert exc_info.value.code == "VALIDATION_ERROR"
@@ -372,6 +389,12 @@ class TestCreateRuleEngineLifecycleRegression:
         mock_db_instance = AsyncMock()
         mock_db_instance.connect = AsyncMock()
         mock_db_instance.close = AsyncMock()
+        mock_db_instance.fetch_one = AsyncMock(return_value={"1": 1})
+
+        async def _enter():
+            ctx = click.Context(click.Command("dummy"))
+            async with _create_rule_engine(_VALID_PRESENT, ctx=ctx) as (engine, db):
+                return engine, db
 
         with (
             patch(
@@ -380,7 +403,7 @@ class TestCreateRuleEngineLifecycleRegression:
             ),
             patch("ante.cli.main.get_db_path", return_value=":memory:"),
         ):
-            engine, db = asyncio.run(_create_rule_engine(_VALID_PRESENT))
+            engine, db = asyncio.run(_enter())
 
         assert db is mock_db_instance
         mock_db_instance.connect.assert_awaited_once()
@@ -477,13 +500,18 @@ class TestValidButAbsentNotMisclassified:
 
         create_calls: list[str] = []
 
-        async def _create(account_id=None):
+        # #1857: ``_create_treasury`` async context manager 변환.
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _create(account_id=None, *, ctx=None):
             create_calls.append(account_id)
             raise AccountNotFoundError("계좌를 찾을 수 없습니다")
+            yield  # unreachable but required for asynccontextmanager  # noqa
 
         with patch(
             "ante.cli.commands.treasury._create_treasury",
-            side_effect=_create,
+            new=_create,
         ):
             result = runner.invoke(
                 cli,

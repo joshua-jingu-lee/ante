@@ -22,6 +22,10 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_account_service():  # noqa: ANN202
+    # #1857: broker live-state 경로 (adapter.connect 동반) 는 본 PR scope
+    # 외다. live broker state 와 ``Database`` lifecycle 이 같은 try/except 로
+    # 엮여 있어 단순 ``open_cli_db`` wrap 으로 동치 변환이 불가능하다.
+    # 별도 spec 정렬 PR (부모 epic #1818 follow-up) 에서 다룬다.
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
@@ -337,7 +341,10 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
 
             result = _run(_run_ipc_reconcile())
         except click.ClickException:
-            # 서버 미실행 — 기존 오프라인 방식 폴백
+            # 서버 미실행 — 기존 오프라인 방식 폴백.
+            # #1857: broker live-state (adapter + DB) 경로는 본 PR scope 외다
+            # — 별도 spec 정렬 PR (#1818 follow-up) 에서 ``open_cli_db`` 와
+            # adapter lifecycle 의 동치 변환 contract 를 정합한다.
             async def _run_reconcile() -> dict:
                 from ante.cli.main import get_db_path
                 from ante.core.database import Database

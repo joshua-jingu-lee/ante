@@ -229,12 +229,21 @@ class TestCreateTreasuryCleanup:
         # Database.close 를 AsyncMock으로 주입하고 await_count == 1로 검증한다.
         # cleanup 호출 사실만 검증하면 충분하므로 실제 close 본체는 위임하지
         # 않는다 (process 종료 시 임시 자원은 OS가 회수).
+        #
+        # #1857: ``_create_treasury`` 는 async context manager 로 변환됨.
+        # ``async with`` 진입 시점에 ``AccountService.get`` raise 가 발생해야
+        # ``open_cli_db`` 의 ``except BaseException`` cleanup 이 ``db.close()``
+        # 를 호출한다. ctx 없이 호출하기 위해 click context 를 만든다.
+        import click
+
         with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
             monkeypatch.setattr(AccountService, "initialize", passing_initialize)
             monkeypatch.setattr(AccountService, "get", raising_get)
 
             with pytest.raises(AccountNotFoundError):
-                await _create_treasury("acc-9999")
+                ctx = click.Context(click.Command("dummy"))
+                async with _create_treasury("acc-9999", ctx=ctx):
+                    pass
 
         assert close_mock.await_count == 1, (
             f"Database.close 가 정확히 1회 await되어야 한다 "

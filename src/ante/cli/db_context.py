@@ -27,10 +27,17 @@ from contextlib import asynccontextmanager
 
 import click
 
-from ante.cli.main import get_db_path
+# ``Database`` 는 ``open_cli_db`` 내부에서 lazy import 되며, 동시에 본 모듈에
+# 속성으로 노출되어야 한다 (#1856 ``patch("ante.cli.db_context.Database")``
+# 테스트 호환). lazy lookup 은 ``open_cli_db`` 가 매 호출마다
+# ``ante.core.database.Database`` 를 다시 가져오도록 한다.
 from ante.core.database import Database
 
-__all__ = ["open_cli_db"]
+# import-time binding 사본. lazy lookup 에서 ``globals()['Database']`` 가
+# 원본인지 patch 된 mock 인지 식별하는 reference 다.
+_ORIGINAL_DATABASE = Database
+
+__all__ = ["open_cli_db", "Database"]
 
 
 @asynccontextmanager
@@ -78,8 +85,32 @@ async def open_cli_db(
     # to ``Database.__init__`` per #1854 contract option B (no Database API
     # signature change in this PR scope).
     _ = read_only
-    db_path = db_path_override if db_path_override is not None else get_db_path(ctx)
-    db = Database(db_path)
+    # #1857: lazy module-attribute access for ``get_db_path`` /
+    # ``Database`` to honor test patches of either:
+    #   - ``ante.cli.main.get_db_path`` (callsite import binding)
+    #   - ``ante.cli.db_context.Database`` (#1856 db_path_override 테스트)
+    #   - ``ante.core.database.Database`` (constructor patch — #1857 호환)
+    from ante.cli import main as _cli_main
+    from ante.core import database as _core_db
+
+    db_path = (
+        db_path_override if db_path_override is not None else _cli_main.get_db_path(ctx)
+    )
+    # patch 우선순위 (둘 다 동시에 patch 되는 경우는 없다고 가정):
+    #   1) ``ante.cli.db_context.Database`` 가 patch 된 경우 (#1856 테스트):
+    #      ``globals()['Database']`` 가 ``_ORIGINAL_DATABASE`` 와 다른 객체.
+    #   2) ``ante.core.database.Database`` 가 patch 된 경우 (#1857 회귀
+    #      테스트): ``_core_db.Database`` 가 ``_ORIGINAL_DATABASE`` 와 다름.
+    #   3) 둘 다 미patch: 원본 ``Database`` 사용.
+    _local_db_cls = globals().get("Database", _ORIGINAL_DATABASE)
+    _module_db_cls = _core_db.Database
+    if _local_db_cls is not _ORIGINAL_DATABASE:
+        _db_cls = _local_db_cls
+    elif _module_db_cls is not _ORIGINAL_DATABASE:
+        _db_cls = _module_db_cls
+    else:
+        _db_cls = _ORIGINAL_DATABASE
+    db = _db_cls(db_path)
     await db.connect()
     try:
         yield db

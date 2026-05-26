@@ -4,14 +4,22 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 import click
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+
+if TYPE_CHECKING:
+    from ante.core.database import Database
+    from ante.trade.service import TradeService
 
 
 @click.group()
@@ -23,23 +31,42 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_trade_service():  # noqa: ANN202
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
+@asynccontextmanager
+async def _create_trade_service(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[TradeService, Database]]:
+    """CLI 에서 ``TradeService`` async context manager (#1857).
+
+    ``open_cli_db`` 기반 lifecycle 로 전환했다 (#1855 factory composition,
+    #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_trade_service(ctx=ctx) as (service, db):
+            ...
+
+    ``PositionHistory``/``TradeRecorder`` ``initialize()`` 는 표 생성용으로
+    그대로 보존한다 (#1854 §4.2 예외는 AuditLogger/DynamicConfigService 만;
+    본 helper 는 안전성을 위해 호출 유지).
+    """
     from ante.trade.performance import PerformanceTracker
     from ante.trade.position import PositionHistory
     from ante.trade.recorder import TradeRecorder
     from ante.trade.service import TradeService
 
-    db = Database(get_db_path())
-    await db.connect()
-    position_history = PositionHistory(db=db)
-    await position_history.initialize()
-    recorder = TradeRecorder(db=db, position_history=position_history)
-    await recorder.initialize()
-    performance = PerformanceTracker(db=db)
-    service = TradeService(recorder, position_history, performance)
-    return service, db
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_trade_service requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        position_history = PositionHistory(db=db)
+        await position_history.initialize()
+        recorder = TradeRecorder(db=db, position_history=position_history)
+        await recorder.initialize()
+        performance = PerformanceTracker(db=db)
+        service = TradeService(recorder, position_history, performance)
+        yield service, db
 
 
 @trade.command("list")
@@ -87,8 +114,8 @@ def trade_list(
     )
 
     async def _run_list() -> list[dict]:
-        service, db = await _create_trade_service()
-        try:
+        # #1857: ``_create_trade_service`` async context manager 전환.
+        async with _create_trade_service(ctx=ctx) as (service, _):
             fd = datetime.fromisoformat(from_date) if from_date else None
             td = datetime.fromisoformat(to_date) if to_date else None
             trades = await service.get_trades(
@@ -112,8 +139,6 @@ def trade_list(
                 }
                 for t in trades
             ]
-        finally:
-            await db.close()
 
     result = _run(_run_list())
 
@@ -150,12 +175,8 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
-
-        db = Database(get_db_path())
-        await db.connect()
-        try:
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        async with open_cli_db(ctx) as db:
             # fresh DB 에서는 `trades` 테이블이 아직 생성되지 않은 상태일 수
             # 있다. (`_create_trade_service` 경로와 달리 `trade info` 는
             # raw db 핸들만 쓰고 `TradeRecorder.initialize` 를 거치지 않는다.)
@@ -171,8 +192,6 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
                     return None
                 raise
             return dict(row) if row else None
-        finally:
-            await db.close()
 
     # 호출 표면 try/except: 위 _run_info 에서 흡수하지 못한 비정상 예외는
     # TRADE_ERROR 로 분류해 raw traceback 노출을 차단한다 (#1753).

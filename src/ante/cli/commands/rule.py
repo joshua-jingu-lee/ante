@@ -6,14 +6,22 @@ import asyncio
 import json
 import logging
 import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import click
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+if TYPE_CHECKING:
+    from ante.core.database import Database
+    from ante.rule.engine import RuleEngine
 
 logger = logging.getLogger(__name__)
 
@@ -27,44 +35,50 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_rule_engine(account_id: str):  # noqa: ANN202
-    """CLI용 RuleEngine 생성.
+@asynccontextmanager
+async def _create_rule_engine(
+    account_id: str, *, ctx: click.Context | None = None
+) -> AsyncIterator[tuple[RuleEngine, Database]]:
+    """CLI용 RuleEngine async context manager (#1857).
+
+    이전 시그니처(``async def`` → ``tuple[RuleEngine, Database]``)에서
+    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
+    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_rule_engine(account_id, ctx=ctx) as (engine, db):
+            ...
 
     호출자가 ``--account`` 옵션으로 검증된 ``account_id`` 를 반드시 전달
     해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다
     (#1217). ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로
     재검증한다.
 
-    invalid ``account_id`` 검증은 ``db.connect()`` **이전**에 수행한다
-    (#1635 Split B Layer 2 — ``treasury.py:37`` ``_create_treasury`` 패턴
-    1:1 미러). 기존 구조는 ``db.connect()`` 후 ``RuleEngine(account_id=...)``
-    내부 ``require_account_id`` 가 raise하여 ``(engine, db)`` 가 미반환 →
-    호출자 ``finally: db.close()`` 미도달 → aiosqlite connection 누수
-    (#1623 Codex finding, lifecycle). resource acquisition 이전에 검증·raise
-    하면 획득 자원이 0이라 정리 대상도 0 — 누수 구조 자체를 제거한다.
-    ``RuleEngine.__init__`` 내부 ``require_account_id``(``engine.py:270``)는
-    defense-in-depth로 그대로 유지한다(무변경).
+    invalid ``account_id`` 검증은 ``open_cli_db`` (==``db.connect()``)
+    **이전**에 수행한다(#1635 Split B Layer 2 — ``treasury.py:37``
+    ``_create_treasury`` 패턴 1:1 미러). resource acquisition 이전에
+    검증·raise 하면 획득 자원이 0이라 정리 대상도 0 — 누수 구조 자체를
+    제거한다 (#1623 lifecycle invariant). ``RuleEngine.__init__`` 내부
+    ``require_account_id`` 는 defense-in-depth 그대로 유지.
 
-    valid-format이지만 DB에 없는 ``account_id`` (예: ``acc-9999``)는
+    valid-format 이지만 DB에 없는 ``account_id`` (예: ``acc-9999``)는
     ``RuleEngine`` 생성 **이전**에 lightweight ``SELECT 1`` 로 존재를
-    검증해 ``AccountNotFoundError`` 로 분기한다(#1726, ``rule list`` 의
-    기존 inline 블록을 SSOT consolidation으로 helper로 이동). 이 검증을
-    helper에 두면 ``rule list`` 외에도 ``info`` 등 다른 rule 명령에
-    동일하게 적용되며, rule lookup 보다 account existence가 먼저 보고된다.
-    실패 시 ``except BaseException`` 블록으로 ``db.close()`` 를 보장한다
-    (``_create_treasury`` (#1722) 동형 cleanup).
+    검증해 ``AccountNotFoundError`` 로 분기한다(#1726). ``open_cli_db`` 가
+    ``BaseException`` 까지 catch 하므로 cleanup 보장된다 (#1722 동형).
     """
     from ante.account.scoping import require_account_id
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.rule.engine import RuleEngine
 
     validated_account_id = require_account_id(account_id, context="cli.rule")
 
-    db = Database(get_db_path())
-    try:
-        await db.connect()
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_rule_engine requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
         # account existence pre-check. ``rule_list`` 의 기존 inline 블록을
         # 그대로 옮긴 형태이며, ``_create_treasury`` 동형 (#1725).
         #
@@ -104,16 +118,7 @@ async def _create_rule_engine(account_id: str):  # noqa: ANN202
             )
         eventbus = EventBus()
         engine = RuleEngine(eventbus=eventbus, account_id=validated_account_id)
-    except BaseException:
-        try:
-            await db.close()
-        except Exception:
-            logger.debug(
-                "db.close() after rule engine init failure raised — ignored",
-                exc_info=True,
-            )
-        raise
-    return engine, db
+        yield engine, db
 
 
 def _load_rules_from_config(engine) -> None:  # noqa: ANN001
@@ -191,8 +196,8 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
         # 검증한다(#1726 SSOT consolidation — 기존 여기 inline 블록을 helper
         # 로 이동). 미존재 account는 ``AccountNotFoundError`` 로 raise되며
         # 아래 호출 표면의 ``except AccountNotFoundError`` 분기가 받는다.
-        engine, db = await _create_rule_engine(account_id)
-        try:
+        # #1857: ``_create_rule_engine`` async context manager 전환.
+        async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
             except Exception as e:
@@ -209,8 +214,6 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
                     )
                 ]
             return rules
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_list())
@@ -251,16 +254,14 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_info() -> dict | None:
-        engine, db = await _create_rule_engine(account_id)
-        try:
+        # #1857: ``_create_rule_engine`` async context manager 전환.
+        async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
             except Exception as e:
                 logger.warning("룰 설정 로드 실패: %s", e)
             rules = _collect_rules(engine)
             return next((r for r in rules if r["rule_id"] == rule_id), None)
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_info())
@@ -364,17 +365,19 @@ def rule_update(
                 actor=actor,
             )
 
+        # #1857: cold-path ``rule update`` lifecycle 을 ``open_cli_db`` 로
+        # 전환했다. ``AccountService``/``DynamicConfigService``/``AuditLogger``
+        # ``initialize()`` 호출은 그대로 유지된다 — #1854 §4.2 명시 예외는
+        # AuditLogger/DynamicConfigService만이고, 본 callsite 는 audit 기록을
+        # 동반하는 cold-path mutation 이라 안전성을 위해 모두 보존한다.
         from ante.account.service import AccountService
         from ante.audit import AuditLogger
-        from ante.cli.main import get_config_dir, get_db_path
+        from ante.cli.main import get_config_dir
         from ante.config import Config, DynamicConfigService
-        from ante.core.database import Database
         from ante.eventbus.bus import EventBus
         from ante.rule.config_update import update_account_rule_config
 
-        db = Database(get_db_path(ctx))
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             eventbus = EventBus()
             account_service = AccountService(db=db, eventbus=eventbus)
             await account_service.initialize()
@@ -394,8 +397,6 @@ def rule_update(
                 config=config,
                 audit_logger=audit_logger,
             )
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_update())

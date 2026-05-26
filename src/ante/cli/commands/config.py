@@ -4,12 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+if TYPE_CHECKING:
+    from ante.config.config import Config
+    from ante.config.dynamic import DynamicConfigService
+    from ante.core.database import Database
 
 
 @click.group()
@@ -21,20 +30,51 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_services():  # noqa: ANN202
-    from ante.cli.main import get_config_dir, get_db_path
+@asynccontextmanager
+async def _create_services(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[Config, DynamicConfigService, Database]]:
+    """CLI 에서 ``Config`` / ``DynamicConfigService`` / ``Database`` 를 함께
+    구성하는 async context manager (#1857).
+
+    이전 시그니처(``async def`` → ``tuple[Config, DynamicConfigService,
+    Database]``)에서 ``open_cli_db`` 기반 async context manager 로 전환했다
+    (#1855 factory composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_services(ctx=ctx) as (static_config, dynamic, db):
+            ...
+
+    Args:
+        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context``
+            (silent=True) 로 fallback. 신규 호출은 ctx 명시 전달 권장.
+
+    Yields:
+        ``DynamicConfigService.initialize()`` 가 완료된 3-tuple. #1854 §4.2
+        명시 예외에 따라 ``DynamicConfigService.initialize()`` 호출을 보존한다
+        (read-only operation 의 read-only 검증을 위한 schema bootstrap).
+
+    Cleanup invariant:
+        - ``open_cli_db`` 가 ``BaseException`` 까지 catch — service init 실패
+          시에도 ``Database.close()`` 보장 (#1722 회귀 lock).
+    """
+    from ante.cli.main import get_config_dir
     from ante.config.config import Config
     from ante.config.dynamic import DynamicConfigService
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    static_config = Config.load(config_dir=get_config_dir())
-    dynamic = DynamicConfigService(db, eventbus)
-    await dynamic.initialize()
-    return static_config, dynamic, db
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_services requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        eventbus = EventBus()
+        static_config = Config.load(config_dir=get_config_dir())
+        dynamic = DynamicConfigService(db, eventbus)
+        await dynamic.initialize()
+        yield static_config, dynamic, db
 
 
 async def _resolve_single(key, static_config, dynamic) -> dict:  # noqa: ANN001
@@ -108,13 +148,11 @@ def config_get(ctx: click.Context, key: str | None) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_get() -> dict | list[dict]:
-        static_config, dynamic, db = await _create_services()
-        try:
+        # #1857: ``_create_services`` async context manager 전환.
+        async with _create_services(ctx=ctx) as (static_config, dynamic, db):
             if key is not None:
                 return await _resolve_single(key, static_config, dynamic)
             return await _resolve_all(static_config, db)
-        finally:
-            await db.close()
 
     result = _run(_run_get())
 
@@ -207,11 +245,9 @@ def config_history(ctx: click.Context, key: str, limit: int) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_history() -> list[dict]:
-        _, dynamic, db = await _create_services()
-        try:
+        # #1857: ``_create_services`` async context manager 전환.
+        async with _create_services(ctx=ctx) as (_, dynamic, _):
             return await dynamic.get_history(key, limit=limit)
-        finally:
-            await db.close()
 
     rows = _run(_run_history())
 

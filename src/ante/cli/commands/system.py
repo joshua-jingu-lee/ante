@@ -8,12 +8,20 @@ import os
 import signal
 import subprocess
 import sys
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+
+if TYPE_CHECKING:
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
 
 logger = logging.getLogger(__name__)
 
@@ -152,16 +160,30 @@ def stop(ctx: click.Context) -> None:
     fmt.success("종료 시그널 전송 완료", {"pid": pid})
 
 
-async def _create_services():  # noqa: ANN202
-    """오프라인 커맨드용 DB/EventBus 생성 헬퍼."""
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
+@asynccontextmanager
+async def _create_services(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[Database, EventBus]]:
+    """오프라인/bootstrap 커맨드용 DB/EventBus async context manager (#1857).
+
+    ``open_cli_db`` 기반 lifecycle 로 전환했다 (#1855 factory composition,
+    #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_services(ctx=ctx) as (db, eventbus):
+            ...
+    """
     from ante.eventbus.bus import EventBus
 
-    db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    return db, eventbus
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_services requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        eventbus = EventBus()
+        yield db, eventbus
 
 
 @system.command()
@@ -174,10 +196,10 @@ def status(ctx: click.Context) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_status() -> dict:
+        # #1857: ``_create_services`` async context manager 전환.
         from ante.account.service import AccountService
 
-        db, eventbus = await _create_services()
-        try:
+        async with _create_services(ctx=ctx) as (db, eventbus):
             account_service = AccountService(db=db, eventbus=eventbus)
             await account_service.initialize()
 
@@ -194,8 +216,6 @@ def status(ctx: click.Context) -> None:
                 "trading_state": "suspended" if suspended else "active",
                 "bot_count": bot_count,
             }
-        finally:
-            await db.close()
 
     result = _run(_run_status())
 

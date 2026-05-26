@@ -118,8 +118,12 @@ def _patch_strategy_set_status_raises(exc: BaseException):  # noqa: ANN202
     mock_db = MagicMock()
     mock_db.close = AsyncMock(return_value=None)
 
-    async def _fake_create_registry():  # noqa: ANN202
-        return mock_registry, mock_db
+    # #1857: ``_create_registry`` 는 async context manager 로 변환됨.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _fake_create_registry(*args, **kwargs):  # noqa: ANN202
+        yield mock_registry, mock_db
 
     return (
         patch.object(strategy_cmd, "_create_registry", new=_fake_create_registry),

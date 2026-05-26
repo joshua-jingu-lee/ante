@@ -131,8 +131,12 @@ def _patch_account_service(svc: AsyncMock, db: AsyncMock):
 
 
 def _patch_bot_services(db: AsyncMock):
-    async def _create_services():
-        return db, MagicMock(), MagicMock(), AsyncMock()
+    """#1857: ``bot._create_services`` async context manager fake factory."""
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _create_services(*args, **kwargs):
+        yield db, MagicMock(), MagicMock(), AsyncMock()
 
     return patch(
         "ante.cli.commands.bot._create_services",

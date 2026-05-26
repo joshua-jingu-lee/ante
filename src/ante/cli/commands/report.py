@@ -10,6 +10,7 @@ import click
 from pydantic import ValidationError
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
@@ -345,13 +346,10 @@ def report_performance(
     )
 
     async def _run_performance() -> list[dict]:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
         from ante.trade.performance import PerformanceTracker
 
-        db = Database(get_db_path())
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             tracker = PerformanceTracker(db)
             if period == "daily":
                 daily_summaries = await tracker.get_daily_summary(
@@ -366,8 +364,6 @@ def report_performance(
                     year=year,
                 )
                 return [asdict(s) for s in monthly_summaries]
-        finally:
-            await db.close()
 
     result = asyncio.run(_run_performance())
 

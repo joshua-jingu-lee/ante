@@ -84,12 +84,24 @@ def _make_mock_treasury(get_daily_return=None, get_range_return=None):
     mock_db = AsyncMock()
     mock_db.close = AsyncMock()
 
-    async def _fake_create(account_id=None):
-        return mock_treasury, mock_db
+    # #1857: ``_create_treasury`` 는 async context manager 로 변환됨.
+    # MagicMock 으로 wrap 해 ``assert_called_with`` 검증 호환을 유지하면서,
+    # ``__call__`` 결과를 async context manager 가 반환하도록 한다.
+    from contextlib import asynccontextmanager
+    from unittest.mock import MagicMock
+
+    @asynccontextmanager
+    async def _yield_impl():
+        yield mock_treasury, mock_db
+
+    def _fake_create(account_id=None, *, ctx=None):
+        return _yield_impl()
+
+    spy = MagicMock(side_effect=_fake_create)
 
     return patch(
         "ante.cli.commands.treasury._create_treasury",
-        side_effect=_fake_create,
+        new=spy,
     ), mock_treasury
 
 
@@ -463,5 +475,7 @@ class TestSnapshotAccount:
             )
 
         assert result.exit_code == 0
-        # _create_treasury가 account_id="domestic"으로 호출되었는지 확인
-        p.assert_called_with("domestic")
+        # _create_treasury가 account_id="domestic"으로 호출되었는지 확인.
+        # #1857: 호출자가 ctx 도 keyword 인자로 전달한다.
+        assert p.call_args.args == ("domestic",), p.call_args
+        assert "ctx" in p.call_args.kwargs, p.call_args
