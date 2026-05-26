@@ -27,6 +27,21 @@ from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 
 
+def _acm_factory(value):  # noqa: ANN001, ANN202
+    """#1857: helper async context manager 전환에 맞춰 fake factory 를
+    생성한다. 기존 ``new_callable=AsyncMock, return_value=(...)`` 패턴을
+    ``new=_acm_factory((...))`` 로 대체해 ``async with helper(ctx) as
+    (...):`` 호출이 yield 한 값을 그대로 받도록 한다.
+    """
+    from contextlib import asynccontextmanager as _acm
+
+    @_acm
+    async def _fake_factory(*args, **kwargs):
+        yield value
+
+    return _fake_factory
+
+
 def _patch_account_factory(svc, db):  # noqa: ANN001, ANN202
     """#1856: ``_create_account_service`` 가 async context manager 로 전환된 후
     fake factory 가 ``ctx`` 인자를 받아 ``svc`` 만 yield 하도록 한다.
@@ -292,8 +307,7 @@ class TestTreasuryStatusFormatOption:
 
         with patch(
             "ante.cli.commands.treasury._create_treasury",
-            new_callable=AsyncMock,
-            return_value=(mock_treasury, db),
+            new=_acm_factory((mock_treasury, db)),
         ):
             result = runner.invoke(
                 cli,
@@ -325,8 +339,7 @@ class TestStrategyListFormatOption:
 
         with patch(
             "ante.cli.commands.strategy._create_registry",
-            new_callable=AsyncMock,
-            return_value=(registry, db),
+            new=_acm_factory((registry, db)),
         ):
             result = runner.invoke(cli, ["strategy", "list", "--format", "json"])
             assert result.exit_code == 0
@@ -364,8 +377,7 @@ class TestStrategyInfoFormatOption:
         with (
             patch(
                 "ante.cli.commands.strategy._create_registry",
-                new_callable=AsyncMock,
-                return_value=(registry, db),
+                new=_acm_factory((registry, db)),
             ),
             patch(
                 "ante.cli.commands.strategy._load_strategy_params",
@@ -396,8 +408,7 @@ class TestConfigGetFormatOption:
 
         with patch(
             "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+            new=_acm_factory((mock_config, mock_dynamic, mock_db)),
         ):
             result = runner.invoke(cli, ["config", "get", "--format", "json"])
             assert result.exit_code == 0
@@ -452,8 +463,7 @@ class TestConfigHistoryFormatOption:
 
         with patch(
             "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+            new=_acm_factory((mock_config, mock_dynamic, mock_db)),
         ):
             result = runner.invoke(
                 cli,
@@ -478,8 +488,7 @@ class TestTradeListFormatOption:
 
         with patch(
             "ante.cli.commands.trade._create_trade_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
+            new=_acm_factory((svc, db)),
         ):
             result = runner.invoke(cli, ["trade", "list", "--format", "json"])
             assert result.exit_code == 0
@@ -671,8 +680,7 @@ class TestBotListFormatOption1701:
 
         with patch(
             "ante.cli.commands.bot._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_db, None, None, None),
+            new=_acm_factory((mock_db, None, None, None)),
         ):
             result = runner.invoke(cli, ["bot", "list", "--format", "json"])
 

@@ -6,6 +6,7 @@ import asyncio
 
 import click
 
+from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
@@ -53,12 +54,9 @@ def instrument_list(
     db_path: str | None,
 ) -> None:
     """등록된 종목 목록 조회."""
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     # Axis 1 — ingress 옵션 검증: exchange 사용 전 canonical 검증.
     # `*` 도 비-canonical이라 거부됨 (StrategyMeta 전용 wildcard).
@@ -70,9 +68,10 @@ def instrument_list(
         ctx.exit(1)
 
     async def _run() -> list[dict]:
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``db_path_override`` 로 전달 — offline-factory.md §1.1 caller 산출
+        # 경로 패턴.
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
 
@@ -98,8 +97,6 @@ def instrument_list(
                 }
                 for r in rows
             ]
-        finally:
-            await db.close()
 
     results = asyncio.run(_run())
 
@@ -123,14 +120,12 @@ def sync(
 ) -> None:
     """KIS API에서 종목 마스터 데이터를 동기화."""
     from ante.broker.kis import KISAdapter
-    from ante.cli.main import get_config_dir, get_db_path
+    from ante.cli.main import get_config_dir
     from ante.config import Config
-    from ante.core.database import Database
     from ante.instrument.models import Instrument
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
     resolved_config_dir = get_config_dir(ctx)
 
     # Axis 1 — ingress 옵션 검증: 비-canonical exchange 거부 (KISAdapter
@@ -158,14 +153,14 @@ def sync(
         ctx.exit(1)
 
     async def _run() -> dict:
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``db_path_override`` 로 전달.
         config = Config.load(config_dir=resolved_config_dir)
         broker_config = config.get("broker", {})
         if not broker_config.get("app_key"):
             return {"error": "브로커 설정이 없습니다."}
 
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
 
@@ -221,8 +216,6 @@ def sync(
                 "updated": updated_count,
                 "delisted": len(delisted),
             }
-        finally:
-            await db.close()
 
     result = asyncio.run(_run())
 
@@ -259,17 +252,14 @@ def search(
     db_path: str | None,
 ) -> None:
     """키워드로 종목 검색 (종목코드, 한글명, 영문명)."""
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.instrument.service import InstrumentService
 
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _run() -> list[dict]:
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``db_path_override`` 로 전달.
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
             instruments = await svc.search(
@@ -287,8 +277,6 @@ def search(
                 }
                 for inst in instruments
             ]
-        finally:
-            await db.close()
 
     results = asyncio.run(_run())
 
@@ -316,13 +304,11 @@ def instrument_import(
     import json
     from pathlib import Path
 
-    from ante.cli.main import get_db_path
     from ante.instrument.models import Instrument
 
     fmt = get_formatter(ctx)
     path = Path(file_path)
     ext = path.suffix.lower()
-    resolved_db_path = db_path or get_db_path(ctx)
 
     # 파일 형식 확인 (try 블록 밖에서 분기 — ctx.exit(1)이 같은 try의
     # except Exception에 잡혀 swallow되는 것을 방지)
@@ -455,17 +441,14 @@ def instrument_import(
         return
 
     async def _import() -> int:
-        from ante.core.database import Database
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``db_path_override`` 로 전달.
         from ante.instrument.service import InstrumentService
 
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
             return await svc.bulk_upsert(instruments)
-        finally:
-            await db.close()
 
     count = asyncio.run(_import())
     fmt.success(

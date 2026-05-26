@@ -311,7 +311,12 @@ class TestBotRemoveIpc:
 
         assert result.exit_code == 0
         assert "봇 삭제 완료(cold-path)" in result.output
-        mock_cold_path.assert_awaited_once_with("bot-abc")
+        # #1857: ``_run_bot_remove_cold_path`` 는 ctx 인자를 받는다.
+        mock_cold_path.assert_awaited_once()
+        call_args = mock_cold_path.await_args
+        assert call_args.args == ("bot-abc",) or (
+            call_args.args and call_args.args[0] == "bot-abc"
+        )
 
     @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
     @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
@@ -335,6 +340,12 @@ class TestBotRemoveIpc:
         fake_config = MagicMock()
         fake_config.get.return_value = "strategies"
 
+        # #1857: ``_run_bot_remove_cold_path`` 는 ctx 를 받는 async 함수가
+        # 되었고, 내부 ``open_cli_db`` 가 ``Database`` lifecycle 을 소유한다.
+        # ``ante.cli.main.get_db_path`` / ``ante.core.database.Database`` 는
+        # ``open_cli_db`` 가 lazy import 하므로 그대로 patch 된다.
+        import click
+
         with (
             patch("ante.cli.main.get_db_path", return_value="/tmp/ante-test.db"),
             patch("ante.cli.main.get_config_dir", return_value=None),
@@ -345,8 +356,9 @@ class TestBotRemoveIpc:
                 side_effect=RuntimeError("boom"),
             ),
         ):
+            ctx = click.Context(click.Command("dummy"))
             with pytest.raises(RuntimeError, match="boom"):
-                await _run_bot_remove_cold_path("bot-abc")
+                await _run_bot_remove_cold_path("bot-abc", ctx=ctx)
 
         fake_db.connect.assert_awaited_once()
         fake_db.close.assert_awaited_once()

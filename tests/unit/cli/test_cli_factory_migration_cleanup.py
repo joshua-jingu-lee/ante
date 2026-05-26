@@ -483,3 +483,407 @@ class TestFactoryPathPreservesBusinessBehavior:
             f"factory 경로에서 AccountService.initialize 는 1회 호출되어야 한다 "
             f"(실제={len(init_calls)})"
         )
+
+
+# ════════════════════════════════════════════════════════════════════════
+# #1857 추가 — 9 domain × cleanup invariant + business behavior parity.
+#
+# 11~25) bot/config/strategy/system/rule/trade/treasury 7 domain helper +
+# audit/report inline 의 ``open_cli_db`` 기반 lifecycle 회귀 lock.
+# ════════════════════════════════════════════════════════════════════════
+
+
+class TestBotServicesFactoryClosesDb:
+    """11) ``bot._create_services`` 가 normal exit 에서 ``Database.close`` 호출."""
+
+    @pytest.mark.asyncio
+    async def test_bot_services_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.account.service import AccountService
+        from ante.bot.manager import BotManager
+        from ante.cli.commands.bot import _create_services
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(AccountService, "initialize", noop)
+        monkeypatch.setattr(BotManager, "initialize", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_services(ctx=ctx) as (db, eventbus, manager, svc):
+                assert isinstance(svc, AccountService)
+                assert isinstance(manager, BotManager)
+
+        assert close_mock.await_count == 1
+
+
+class TestBotServicesFactoryExceptionCloses:
+    """12) ``bot._create_services`` 가 service init 실패 시에도 close 호출."""
+
+    @pytest.mark.asyncio
+    async def test_bot_services_exception_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.account.service import AccountService
+        from ante.bot.manager import BotManager
+        from ante.cli.commands.bot import _create_services
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        async def raising_initialize(self: BotManager) -> None:
+            raise RuntimeError("bot init failed")
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(AccountService, "initialize", noop)
+        monkeypatch.setattr(BotManager, "initialize", raising_initialize)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            with pytest.raises(RuntimeError, match="bot init failed"):
+                async with _create_services(ctx=ctx):
+                    pass
+
+        assert close_mock.await_count == 1
+
+
+class TestConfigServicesFactoryClosesDb:
+    """13) ``config._create_services`` 가 normal exit 에서 ``Database.close`` 호출."""
+
+    @pytest.mark.asyncio
+    async def test_config_services_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.cli.commands.config import _create_services
+        from ante.config.dynamic import DynamicConfigService
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(DynamicConfigService, "initialize", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_services(ctx=ctx) as (static_cfg, dynamic, db):
+                assert isinstance(dynamic, DynamicConfigService)
+
+        assert close_mock.await_count == 1
+
+
+class TestStrategyRegistryFactoryClosesDb:
+    """14) ``strategy._create_registry`` 가 normal exit 에서 ``Database.close`` 호출."""
+
+    @pytest.mark.asyncio
+    async def test_strategy_registry_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.cli.commands.strategy import _create_registry
+        from ante.strategy.registry import StrategyRegistry
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(StrategyRegistry, "initialize", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_registry(ctx=ctx) as (registry, db):
+                assert isinstance(registry, StrategyRegistry)
+
+        assert close_mock.await_count == 1
+
+
+class TestSystemServicesFactoryClosesDb:
+    """15) ``system._create_services`` (bootstrap) 가 normal exit 에서 close."""
+
+    @pytest.mark.asyncio
+    async def test_system_services_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.cli.commands.system import _create_services
+
+        async def noop_connect(self: Database) -> None:
+            return None
+
+        monkeypatch.setattr(Database, "connect", noop_connect)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_services(ctx=ctx) as (db, eventbus):
+                assert db is not None
+
+        assert close_mock.await_count == 1
+
+
+class TestRuleEngineFactoryClosesDb:
+    """16) ``rule._create_rule_engine`` 가 normal exit 에서 ``Database.close`` 호출."""
+
+    @pytest.mark.asyncio
+    async def test_rule_engine_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.cli.commands.rule import _create_rule_engine
+        from ante.rule.engine import RuleEngine
+
+        async def noop_connect(self: Database) -> None:
+            return None
+
+        async def existing_account_row(self: Database, sql: str, params: tuple = ()):
+            return {"1": 1}
+
+        monkeypatch.setattr(Database, "connect", noop_connect)
+        monkeypatch.setattr(Database, "fetch_one", existing_account_row)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_rule_engine("acc-1", ctx=ctx) as (engine, db):
+                assert isinstance(engine, RuleEngine)
+
+        assert close_mock.await_count == 1
+
+
+class TestTradeServiceFactoryClosesDb:
+    """17) ``trade._create_trade_service`` 가 normal exit 에서 close."""
+
+    @pytest.mark.asyncio
+    async def test_trade_service_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.cli.commands.trade import _create_trade_service
+        from ante.trade.position import PositionHistory
+        from ante.trade.recorder import TradeRecorder
+        from ante.trade.service import TradeService
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(PositionHistory, "initialize", noop)
+        monkeypatch.setattr(TradeRecorder, "initialize", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_trade_service(ctx=ctx) as (svc, db):
+                assert isinstance(svc, TradeService)
+
+        assert close_mock.await_count == 1
+
+
+class TestTreasuryFactoryClosesDb:
+    """18) ``treasury._create_treasury`` 가 normal exit 에서 ``Database.close`` 호출."""
+
+    @pytest.mark.asyncio
+    async def test_treasury_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from unittest.mock import MagicMock
+
+        from ante.account.service import AccountService
+        from ante.cli.commands.treasury import _create_treasury
+        from ante.treasury.treasury import Treasury
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        async def passing_initialize(self: AccountService) -> None:
+            return None
+
+        async def returning_account(self: AccountService, account_id: str):
+            fake = MagicMock()
+            fake.account_id = account_id
+            fake.currency = "KRW"
+            from decimal import Decimal
+
+            fake.buy_commission_rate = Decimal("0.00015")
+            fake.sell_commission_rate = Decimal("0.00015")
+            return fake
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(AccountService, "initialize", passing_initialize)
+        monkeypatch.setattr(AccountService, "get", returning_account)
+        monkeypatch.setattr(Treasury, "initialize", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_treasury("acc-1", ctx=ctx) as (t, db):
+                assert isinstance(t, Treasury)
+
+        assert close_mock.await_count == 1
+
+
+class TestTreasuryManagerFactoryClosesDb:
+    """19) ``treasury._create_treasury_manager`` 가 normal exit 에서 close."""
+
+    @pytest.mark.asyncio
+    async def test_treasury_manager_normal_exit_closes_db(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.account.service import AccountService
+        from ante.cli.commands.treasury import _create_treasury_manager
+        from ante.treasury.manager import TreasuryManager
+
+        async def noop(*a, **k):  # noqa: ANN001, ANN202
+            return None
+
+        async def empty_accounts(self: AccountService, status=None):  # noqa: ANN001
+            return []
+
+        monkeypatch.setattr(Database, "connect", noop)
+        monkeypatch.setattr(AccountService, "initialize", noop)
+        monkeypatch.setattr(AccountService, "list", empty_accounts)
+        monkeypatch.setattr(TreasuryManager, "initialize_all", noop)
+
+        with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+            async with _create_treasury_manager(ctx=ctx) as (manager, db):
+                assert isinstance(manager, TreasuryManager)
+
+        assert close_mock.await_count == 1
+
+
+class TestOpenCliDbDbPathOverride:
+    """20) ``open_cli_db`` 가 ``db_path_override`` 를 ``Database`` 에 전달한다.
+
+    instrument list/sync/search/import 의 ``--db-path`` Click option 보존
+    (offline-factory.md §1.1).
+    """
+
+    @pytest.mark.asyncio
+    async def test_db_path_override_forwarded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ante.cli.db_context import open_cli_db
+
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        override_path = str(tmp_path / "override-instrument.db")
+
+        with patch("ante.cli.db_context.Database") as db_cls:
+            instance = db_cls.return_value
+            instance.connect = AsyncMock()
+            instance.close = AsyncMock()
+            async with open_cli_db(ctx, db_path_override=override_path):
+                pass
+
+        db_cls.assert_called_once_with(override_path)
+
+
+class TestOpenCliDbCtxResolution:
+    """21) ``open_cli_db`` 가 ``db_path_override=None`` 일 때 ctx-기반
+    ``get_db_path`` 로 resolution 한다 (기본 경로).
+    """
+
+    @pytest.mark.asyncio
+    async def test_db_path_default_uses_get_db_path(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ante.cli.db_context import open_cli_db
+
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        expected_default_db_path = str(config_dir / "db" / "ante.db")
+
+        with patch("ante.cli.db_context.Database") as db_cls:
+            instance = db_cls.return_value
+            instance.connect = AsyncMock()
+            instance.close = AsyncMock()
+            async with open_cli_db(ctx):
+                pass
+
+        db_cls.assert_called_once_with(expected_default_db_path)
+
+
+class TestBotServicesBusinessBehaviorParity:
+    """22) ``bot._create_services`` 변환 전후 동일 ``initialize()`` 호출 sequence
+    + 동일 service 인스턴스 yield (Codex v1 condition 5 business behavior
+    parity).
+    """
+
+    @pytest.mark.asyncio
+    async def test_bot_services_business_behavior_parity(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        from ante.account.service import AccountService
+        from ante.bot.manager import BotManager
+        from ante.cli.commands.bot import _create_services
+
+        async def noop_connect(self: Database) -> None:
+            return None
+
+        init_calls: list[str] = []
+
+        async def acc_init(self: AccountService) -> None:
+            init_calls.append("account")
+
+        async def mgr_init(self: BotManager) -> None:
+            init_calls.append("bot")
+
+        monkeypatch.setattr(Database, "connect", noop_connect)
+        monkeypatch.setattr(AccountService, "initialize", acc_init)
+        monkeypatch.setattr(BotManager, "initialize", mgr_init)
+
+        captured: tuple | None = None
+        with patch.object(Database, "close", new_callable=AsyncMock):
+            async with _create_services(ctx=ctx) as composed:
+                captured = composed
+
+        assert captured is not None
+        db, eventbus, manager, svc = captured
+        # 변환 전후 동일 호출 sequence (account 가 먼저 init, 그 다음 bot manager).
+        assert init_calls == ["account", "bot"], init_calls
+        assert isinstance(svc, AccountService)
+        assert isinstance(manager, BotManager)
+
+
+class TestTreasuryFactoryRejectsInvalidAccountId:
+    """23) ``treasury._create_treasury`` 가 ``invalid account_id`` 를
+    ``open_cli_db`` 진입 이전에 거부한다 (resource 미획득).
+    """
+
+    @pytest.mark.asyncio
+    async def test_invalid_account_id_no_resource(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ante.account.errors import InvalidAccountIdError
+        from ante.cli.commands.treasury import _create_treasury
+
+        config_dir = _bootstrap_config_dir(tmp_path, monkeypatch)
+        ctx = _make_ctx(config_dir)
+
+        with patch.object(Database, "connect", new_callable=AsyncMock) as connect_mock:
+            with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
+                with pytest.raises(InvalidAccountIdError):
+                    async with _create_treasury("default", ctx=ctx):
+                        pass
+
+        # invalid 거부 시점에 db.connect 자체가 호출되지 않는다.
+        connect_mock.assert_not_awaited()
+        close_mock.assert_not_awaited()

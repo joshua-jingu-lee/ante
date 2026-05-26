@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import sqlite3
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
 from ante.strategy.registry import StrategyStatus
+
+if TYPE_CHECKING:
+    from ante.core.database import Database
+    from ante.strategy.registry import StrategyRegistry
 
 # `StrategyStatus` enum이 단일 SSOT이며 (#1463에서 임시 frozenset 복사본 제거),
 # `ante.strategy.__init__`의 lazy ``__getattr__`` 정리로 본 import가 heavy
@@ -32,20 +40,38 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_registry():  # noqa: ANN202
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
+@asynccontextmanager
+async def _create_registry(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[StrategyRegistry, Database]]:
+    """CLI 에서 ``StrategyRegistry`` async context manager (#1857).
+
+    이전 시그니처(``async def`` → ``tuple[StrategyRegistry, Database]``)에서
+    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
+    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_registry(ctx=ctx) as (registry, db):
+            ...
+
+    fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서
+    보장한다. ``register/get_by_name/list_strategies`` 등 모든 caller 에
+    자동 적용되며, idempotent하므로 기존 명시 ``await registry.initialize()``
+    호출은 회귀 안전을 위해 보존한다 (#1753 — #1854 §4.2 도 read-only 명시
+    예외 대상이지만 본 helper 는 안전성을 위해 호출을 그대로 보존한다).
+    """
     from ante.strategy.registry import StrategyRegistry
 
-    db = Database(get_db_path())
-    await db.connect()
-    registry = StrategyRegistry(db)
-    # fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서
-    # 보장한다. `register/get_by_name/list_strategies` 등 모든 caller에
-    # 자동 적용되며, idempotent하므로 기존의 명시 `await registry.initialize()`
-    # 호출은 회귀 안전을 위해 보존한다 (#1753).
-    await registry.initialize()
-    return registry, db
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_registry requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        registry = StrategyRegistry(db)
+        await registry.initialize()
+        yield registry, db
 
 
 async def _find_bot_id_for_strategy(db, strategy_id: str) -> str | None:  # noqa: ANN001
@@ -223,8 +249,8 @@ def submit(ctx: click.Context, path: str) -> None:
 
     # 4. Registry 등록
     async def _register() -> dict:
-        registry, db = await _create_registry()
-        try:
+        # #1857: ``_create_registry`` async context manager 전환.
+        async with _create_registry(ctx=ctx) as (registry, _):
             await registry.initialize()
             record = await registry.register(
                 filepath=filepath,
@@ -245,8 +271,6 @@ def submit(ctx: click.Context, path: str) -> None:
                 "registered_at": record.registered_at.isoformat(),
                 "validation_warnings": record.validation_warnings,
             }
-        finally:
-            await db.close()
 
     try:
         result = _run(_register())
@@ -305,8 +329,8 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         raise SystemExit(1)
 
     async def _list() -> list[dict]:
-        registry, db = await _create_registry()
-        try:
+        # #1857: ``_create_registry`` async context manager 전환.
+        async with _create_registry(ctx=ctx) as (registry, _):
             filter_status = StrategyStatus(status) if status else None
             records = await registry.list_strategies(status=filter_status)
             return [
@@ -322,8 +346,6 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
                 }
                 for r in records
             ]
-        finally:
-            await db.close()
 
     # account.py:683-687 패턴: click.ClickException은 그대로 전파해 click의
     # 표준 출력 경로를 보존하고, 나머지 일반 Exception은 STRATEGY_ERROR로
@@ -390,8 +412,8 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
                 actor=actor,
             )
 
-        registry, db = await _create_registry()
-        try:
+        # #1857: ``_create_registry`` async context manager 전환.
+        async with _create_registry(ctx=ctx) as (registry, _):
             await registry.initialize()
             await registry.update_status(strategy_id, target_status)
             record = await registry.get(strategy_id)
@@ -401,8 +423,6 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
                 "name": record.name if record else "",
                 "version": record.version if record else "",
             }
-        finally:
-            await db.close()
 
     try:
         result = _run(_set_status())
@@ -439,8 +459,8 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _info() -> dict | None:
-        registry, db = await _create_registry()
-        try:
+        # #1857: ``_create_registry`` async context manager 전환.
+        async with _create_registry(ctx=ctx) as (registry, _):
             records = await registry.get_by_name(name)
             if not records:
                 return None
@@ -483,8 +503,6 @@ def strategy_info(ctx: click.Context, name: str) -> None:
                 ]
 
             return result
-        finally:
-            await db.close()
 
     # 호출 표면 try/except: fresh DB 또는 race 상황의
     # `sqlite3.OperationalError: no such table: strategies` 는 not-found 로
@@ -617,10 +635,10 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _summary() -> dict | None:
+        # #1857: ``_create_registry`` async context manager 전환.
         from ante.trade.performance import PerformanceTracker
 
-        registry, db = await _create_registry()
-        try:
+        async with _create_registry(ctx=ctx) as (registry, db):
             await registry.initialize()
             record = await registry.get(strategy_id)
             if record is None:
@@ -646,8 +664,6 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
                 "bot_id": bot_id,
                 "items": items,
             }
-        finally:
-            await db.close()
 
     try:
         result = _run(_summary())
@@ -711,14 +727,11 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     )
 
     async def _perf() -> dict | None:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
         from ante.strategy.registry import StrategyRegistry
         from ante.trade.performance import PerformanceTracker
 
-        db = Database(get_db_path())
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             registry = StrategyRegistry(db)
             # fresh DB에서도 strategies 테이블이 존재하도록 정규화한다
             # (#1753 Codex Plan v2 must-fix 1: `_create_registry` 경로와
@@ -775,8 +788,6 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
                 "strategy_id": record.strategy_id,
                 "metrics": asdict(metrics),
             }
-        finally:
-            await db.close()
 
     try:
         result = _run(_perf())

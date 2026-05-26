@@ -12,6 +12,22 @@ from ante.cli.formatter import OutputFormatter
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 
+
+def _acm_factory(value):  # noqa: ANN001, ANN202
+    """#1857: helper async context manager 전환에 맞춰 fake factory 를
+    생성한다. 기존 ``new_callable=AsyncMock, return_value=(...)`` 패턴을
+    ``new=_acm_factory((...))`` 로 대체해 ``async with helper(ctx) as
+    (...):`` 호출이 yield 한 값을 그대로 받도록 한다.
+    """
+    from contextlib import asynccontextmanager as _acm
+
+    @_acm
+    async def _fake_factory(*args, **kwargs):
+        yield value
+
+    return _fake_factory
+
+
 _MOCK_MASTER = Member(
     member_id="test-master",
     type=MemberType.HUMAN,
@@ -294,8 +310,7 @@ class TestStrategyCommands:
 
         with patch(
             "ante.cli.commands.strategy._create_registry",
-            new_callable=AsyncMock,
-            return_value=(registry, db),
+            new=_acm_factory((registry, db)),
         ):
             result = runner.invoke(cli, ["strategy", "list"])
             assert result.exit_code == 0

@@ -217,12 +217,17 @@ class TestCreateRuleEngineCleanup:
         ) -> object:
             raise AccountNotFoundError("계좌 'acc-9999'를 찾을 수 없습니다.")
 
+        # #1857: ``_create_rule_engine`` 는 async context manager 로 변환됨.
+        import click
+
         with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
             monkeypatch.setattr(Database, "connect", passing_connect)
             monkeypatch.setattr(Database, "fetch_one", raising_fetch_one)
 
             with pytest.raises(AccountNotFoundError):
-                await _create_rule_engine("acc-9999")
+                ctx = click.Context(click.Command("dummy"))
+                async with _create_rule_engine("acc-9999", ctx=ctx):
+                    pass
 
         assert close_mock.await_count == 1, (
             f"Database.close 가 정확히 1회 await되어야 한다 "

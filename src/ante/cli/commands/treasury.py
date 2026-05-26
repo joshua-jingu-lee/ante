@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import click
 
@@ -17,11 +20,17 @@ from ante.cli._validators import (
     validate_nonnegative_finite_amount,
     validate_positive_finite_amount,
 )
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts import emit_cli_error
+
+if TYPE_CHECKING:
+    from ante.core.database import Database
+    from ante.treasury.manager import TreasuryManager
+    from ante.treasury.treasury import Treasury
 
 logger = logging.getLogger(__name__)
 
@@ -35,30 +44,44 @@ def _run(coro):  # noqa: ANN001, ANN202
     return asyncio.run(coro)
 
 
-async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
-    """CLI에서 Treasury를 생성하는 헬퍼.
+@asynccontextmanager
+async def _create_treasury(
+    account_id: str | None = None,
+    *,
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[Treasury, Database]]:
+    """CLI 에서 ``Treasury`` async context manager (#1857).
 
-    ``db.connect()`` 이후의 모든 라이프사이클(``AccountService.initialize`` /
-    ``AccountService.get`` / ``Treasury.initialize`` 포함)을 ``except
-    BaseException`` 블록으로 감싸 실패 시 ``db.close()``를 보장한다.
-    valid-but-missing account_id(예: ``acc-9999``)가 들어오면
-    ``account_service.get``이 :class:`AccountNotFoundError`를 raise하는데,
-    이 때 aiosqlite 연결이 leak되어 asyncio 종료 시 busy_timeout 대기로 CLI
-    프로세스가 6초 이상 hang하는 회귀를 차단한다(#1725). 본 패턴은
-    ``_create_account_service`` (#1722) byte-for-byte 동형이다.
+    이전 시그니처(``async def`` → ``tuple[Treasury, Database]``)에서
+    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
+    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+
+        async with _create_treasury(account_id, ctx=ctx) as (t, db):
+            ...
+
+    ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로
+    ``AccountService.initialize`` / ``AccountService.get`` / ``Treasury.
+    initialize`` 라이프사이클 실패 시에도 ``db.close()`` 가 보장된다.
+    valid-but-missing account_id(예: ``acc-9999``) 가 들어오면
+    ``account_service.get`` 이 :class:`AccountNotFoundError` 를 raise 하는데,
+    이전 inline 패턴(#1725) 에서 aiosqlite 연결이 leak 되어 6초 hang 회귀가
+    있었고 본 helper 가 동일 cleanup 을 보장한다.
     """
     from ante.account.scoping import require_account_id
     from ante.account.service import AccountService
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.treasury.treasury import Treasury
 
     validated_account_id = require_account_id(account_id, context="cli.treasury")
 
-    db = Database(get_db_path())
-    try:
-        await db.connect()
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_treasury requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
         eventbus = EventBus()
         account_service = AccountService(db=db, eventbus=eventbus)
         await account_service.initialize()
@@ -72,48 +95,37 @@ async def _create_treasury(account_id: str | None = None):  # noqa: ANN202
             sell_commission_rate=float(account.sell_commission_rate),
         )
         await t.initialize()
-    except BaseException:
-        try:
-            await db.close()
-        except Exception:
-            logger.debug(
-                "db.close() after init failure raised — ignored", exc_info=True
-            )
-        raise
-    return t, db
+        yield t, db
 
 
-async def _create_treasury_manager():  # noqa: ANN202
-    """CLI에서 TreasuryManager를 생성하는 헬퍼.
+@asynccontextmanager
+async def _create_treasury_manager(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[tuple[TreasuryManager, Database]]:
+    """CLI 에서 ``TreasuryManager`` async context manager (#1857).
 
-    ``_create_treasury`` 동형 cleanup 패턴(#1722). 현재 사용처
-    (``budgets``/``portfolio value`` no-account 분기)는 valid-but-missing
-    account_id를 직접 처리하지 않지만, defense-in-depth로 ``initialize_all``
-    / ``account_service.list`` 등 lifecycle 실패 시에도 db.close를 보장한다.
+    ``_create_treasury`` 동형 패턴. ``open_cli_db`` 가 ``initialize_all`` /
+    ``account_service.list`` 등 lifecycle 실패 시에도 ``db.close()`` 를
+    보장한다.
     """
     from ante.account.service import AccountService
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.treasury.manager import TreasuryManager
 
-    db = Database(get_db_path())
-    try:
-        await db.connect()
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_treasury_manager requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
         eventbus = EventBus()
         account_service = AccountService(db=db, eventbus=eventbus)
         await account_service.initialize()
         manager = TreasuryManager(db=db, eventbus=eventbus)
         await manager.initialize_all(await account_service.list())
-    except BaseException:
-        try:
-            await db.close()
-        except Exception:
-            logger.debug(
-                "db.close() after init failure raised — ignored", exc_info=True
-            )
-        raise
-    return manager, db
+        yield manager, db
 
 
 @treasury.command()
@@ -135,11 +147,9 @@ def status(ctx: click.Context, account_id: str) -> None:
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     async def _run_status() -> dict:
-        t, db = await _create_treasury(account_id)
-        try:
+        # #1857: ``_create_treasury`` async context manager 전환.
+        async with _create_treasury(account_id, ctx=ctx) as (t, _):
             return t.get_summary()
-        finally:
-            await db.close()
 
     # valid-but-missing account_id(예: `acc-9999`)는 `account_service.get`에서
     # `AccountNotFoundError`로 raise된다. Click 기본 핸들러가 typed exception을
@@ -203,12 +213,8 @@ def transactions(
     reject_inverted_date_range(from_date, to_date, fmt)
 
     async def _run_transactions() -> dict:
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
-
-        db = Database(get_db_path(ctx))
-        await db.connect()
-        try:
+        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        async with open_cli_db(ctx) as db:
             where: list[str] = []
             params: list[str | int] = []
             if account_id:
@@ -254,8 +260,6 @@ def transactions(
                 for r in rows
             ]
             return {"items": items, "total": int(count_row["cnt"]) if count_row else 0}
-        finally:
-            await db.close()
 
     result = _run(_run_transactions())
     if fmt.is_json:
@@ -282,13 +286,10 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         )
 
     async def _run_budgets() -> dict:
-        if account_id is not None:
-            t, db = await _create_treasury(account_id)
-            treasuries = [t]
-        else:
-            manager, db = await _create_treasury_manager()
-            treasuries = manager.list_all()
-        try:
+        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
+        # context manager 전환. 두 분기 모두 ``open_cli_db`` 가 normal/
+        # exception/cancellation 모든 경로에서 ``db.close()`` 를 보장한다.
+        async def _collect_items(treasuries: list) -> dict:
             items = []
             for treasury_obj in treasuries:
                 for budget in treasury_obj.list_budgets():
@@ -297,8 +298,12 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
                         data["last_updated"] = budget.last_updated.isoformat()
                     items.append(data)
             return {"budgets": items}
-        finally:
-            await db.close()
+
+        if account_id is not None:
+            async with _create_treasury(account_id, ctx=ctx) as (t, _):
+                return await _collect_items([t])
+        async with _create_treasury_manager(ctx=ctx) as (manager, _):
+            return await _collect_items(manager.list_all())
 
     # valid-but-missing account_id(예: `acc-9999`)는 `_create_treasury` 내부의
     # `account_service.get`에서 `AccountNotFoundError`로 raise된다. Click 기본
@@ -352,16 +357,14 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
                 {"account_id": account_id, "balance": amount},
                 actor=actor,
             )
-        t, db = await _create_treasury(account_id)
-        try:
+        # #1857: ``_create_treasury`` async context manager 전환.
+        async with _create_treasury(account_id, ctx=ctx) as (t, _):
             await t.set_account_balance(amount)
             return {
                 "account_id": account_id,
                 "total_balance": t.account_balance,
                 "updated_at": datetime.now(UTC).isoformat(),
             }
-        finally:
-            await db.close()
 
     # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
     # (#1758, #1725). Click/Exception fallback은 기존(#1722 IPC 분기)을 보존한다.
@@ -590,8 +593,8 @@ def snapshot(
     )
 
     async def _run_snapshot() -> dict | list[dict] | None:
-        t, db = await _create_treasury(account_id)
-        try:
+        # #1857: ``_create_treasury`` async context manager 전환.
+        async with _create_treasury(account_id, ctx=ctx) as (t, _):
             if date_str:
                 return await t.get_daily_snapshot(date_str)
             if from_date or to_date:
@@ -602,8 +605,6 @@ def snapshot(
             # 기본: 오늘 스냅샷
             today = datetime.now(UTC).strftime("%Y-%m-%d")
             return await t.get_daily_snapshot(today)
-        finally:
-            await db.close()
 
     # valid-but-missing account_id 매핑은 status와 동형이다 (#1725).
     try:
@@ -674,13 +675,11 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         )
 
     async def _run_value() -> dict:
-        if account_id is not None:
-            t, db = await _create_treasury(account_id)
-            treasuries = [t]
-        else:
-            manager, db = await _create_treasury_manager()
-            treasuries = manager.list_all()
-        try:
+        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
+        # context manager 전환. 분기별로 별도 with 블록을 열어 두 분기 모두
+        # ``open_cli_db`` 가 normal/exception/cancellation 경로에서
+        # ``db.close()`` 를 보장한다.
+        async def _collect_values(treasuries: list) -> dict:
             values = []
             for treasury_obj in treasuries:
                 snapshot = await treasury_obj.get_latest_snapshot()
@@ -720,8 +719,12 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
                 "accounts": values,
                 "updated_at": datetime.now(UTC).isoformat(),
             }
-        finally:
-            await db.close()
+
+        if account_id is not None:
+            async with _create_treasury(account_id, ctx=ctx) as (t, _):
+                return await _collect_values([t])
+        async with _create_treasury_manager(ctx=ctx) as (manager, _):
+            return await _collect_values(manager.list_all())
 
     # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
     # (#1758, #1725). outer try는 `_create_treasury`(line ~612)와
@@ -776,13 +779,9 @@ def portfolio_history(
     )
 
     async def _run_history() -> dict:
-        if account_id is not None:
-            t, db = await _create_treasury(account_id)
-            treasuries = [t]
-        else:
-            manager, db = await _create_treasury_manager()
-            treasuries = manager.list_all()
-        try:
+        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
+        # context manager 전환. budgets/portfolio.value 와 동형 분기 패턴.
+        async def _collect_history(treasuries: list) -> dict:
             by_date: dict[str, dict[str, float | str]] = {}
             for treasury_obj in treasuries:
                 for snapshot in await treasury_obj.get_snapshots(start_date, end_date):
@@ -812,8 +811,12 @@ def portfolio_history(
                 row["daily_return"] = daily_pnl / total_asset if total_asset else 0.0
                 data.append(row)
             return {"data": data, "start_date": start_date, "end_date": end_date}
-        finally:
-            await db.close()
+
+        if account_id is not None:
+            async with _create_treasury(account_id, ctx=ctx) as (t, _):
+                return await _collect_history([t])
+        async with _create_treasury_manager(ctx=ctx) as (manager, _):
+            return await _collect_history(manager.list_all())
 
     # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
     # (#1758, #1725). outer try는 `_create_treasury`(line ~699)와

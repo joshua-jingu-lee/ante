@@ -61,6 +61,22 @@ from click.testing import CliRunner
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 
+
+def _acm_factory(value):  # noqa: ANN001, ANN202
+    """#1857: helper async context manager 전환에 맞춰 fake factory 를
+    생성한다. 기존 ``new_callable=AsyncMock, return_value=(...)`` 패턴을
+    ``new=_acm_factory((...))`` 로 대체해 ``async with helper(ctx) as
+    (...):`` 호출이 yield 한 값을 그대로 받도록 한다.
+    """
+    from contextlib import asynccontextmanager as _acm
+
+    @_acm
+    async def _fake_factory(*args, **kwargs):
+        yield value
+
+    return _fake_factory
+
+
 _MOCK_MASTER = Member(
     member_id="test-master",
     type=MemberType.HUMAN,
@@ -200,8 +216,7 @@ class TestConfigGetMissingExit:
 
         with patch(
             "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+            new=_acm_factory((mock_config, mock_dynamic, mock_db)),
         ):
             result = runner.invoke(
                 cli, ["config", "get", "nonexistent.key", "--format", "json"]
@@ -222,8 +237,7 @@ class TestConfigGetMissingExit:
 
         with patch(
             "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+            new=_acm_factory((mock_config, mock_dynamic, mock_db)),
         ):
             result = runner.invoke(cli, ["config", "get", "nonexistent.key"])
 
@@ -241,8 +255,7 @@ class TestConfigGetMissingExit:
 
         with patch(
             "ante.cli.commands.config._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_config, mock_dynamic, mock_db),
+            new=_acm_factory((mock_config, mock_dynamic, mock_db)),
         ):
             result = runner.invoke(
                 cli, ["config", "get", "some.key", "--format", "json"]
@@ -271,8 +284,7 @@ class TestBotInfoMissingExit:
 
         with patch(
             "ante.cli.commands.bot._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_db, None, None, None),
+            new=_acm_factory((mock_db, None, None, None)),
         ):
             result = runner.invoke(
                 cli, ["--format", "json", "bot", "info", "nonexistent-bot"]
@@ -290,8 +302,7 @@ class TestBotInfoMissingExit:
 
         with patch(
             "ante.cli.commands.bot._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_db, None, None, None),
+            new=_acm_factory((mock_db, None, None, None)),
         ):
             result = runner.invoke(cli, ["bot", "info", "nonexistent-bot"])
 
@@ -315,8 +326,7 @@ class TestBotInfoMissingExit:
 
         with patch(
             "ante.cli.commands.bot._create_services",
-            new_callable=AsyncMock,
-            return_value=(mock_db, None, None, None),
+            new=_acm_factory((mock_db, None, None, None)),
         ):
             result = runner.invoke(cli, ["bot", "info", "b-1"])
 
@@ -347,8 +357,7 @@ class TestBotSignalKeyMissingExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -382,8 +391,7 @@ class TestBotSignalKeyMissingExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -409,8 +417,7 @@ class TestBotSignalKeyMissingExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -459,8 +466,7 @@ class TestBotSignalKeyMissingExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -527,8 +533,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -569,8 +574,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -596,8 +600,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -628,8 +631,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -661,8 +663,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -702,8 +703,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -746,8 +746,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -783,8 +782,7 @@ class TestBotSignalKeyMissingBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -865,8 +863,7 @@ class TestBotSignalKeySoftDeletedBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -905,8 +902,7 @@ class TestBotSignalKeySoftDeletedBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -932,8 +928,7 @@ class TestBotSignalKeySoftDeletedBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
@@ -964,8 +959,7 @@ class TestBotSignalKeySoftDeletedBotExit:
         with (
             patch(
                 "ante.cli.commands.bot._create_services",
-                new_callable=AsyncMock,
-                return_value=(mock_db, None, None, None),
+                new=_acm_factory((mock_db, None, None, None)),
             ),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",

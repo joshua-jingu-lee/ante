@@ -75,8 +75,17 @@ def _build_create_services_mock(
     account_service = AsyncMock()
     account_service.list = AsyncMock(return_value=active_accounts)
 
-    async def _create_services_mock():
-        return db, MagicMock(), MagicMock(), account_service
+    # #1857: ``bot._create_services`` 는 async context manager 로 변환됨.
+    # fake factory 는 open_cli_db lifecycle 을 그대로 재현하기 위해 __aexit__
+    # 시 ``db.close()`` 를 호출한다 (#1799 회귀 lock invariant 보존).
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _create_services_mock(*args, **kwargs):
+        try:
+            yield db, MagicMock(), MagicMock(), account_service
+        finally:
+            await db.close()
 
     return _create_services_mock, db, account_service
 
@@ -224,8 +233,15 @@ class TestBotCreateAccountListRaisesCleanup:
         account_service = AsyncMock()
         account_service.list = AsyncMock(side_effect=RuntimeError("boom"))
 
-        async def _create_services_mock():
-            return db, MagicMock(), MagicMock(), account_service
+        # #1857: ``bot._create_services`` async context manager 전환.
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _create_services_mock(*args, **kwargs):
+            try:
+                yield db, MagicMock(), MagicMock(), account_service
+            finally:
+                await db.close()
 
         ipc_patch, ipc_spy = _patch_ipc_send()
         with (

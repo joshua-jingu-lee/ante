@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
+from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -63,13 +64,13 @@ def audit_list(
     )
 
     async def _run_list() -> list[dict]:
+        # #1857: ``open_cli_db`` 헬퍼가 ``AuditLogger.initialize()`` /
+        # ``query()`` 의 예외 / cancellation 까지 ``Database.close()`` 1회 호출을
+        # 보장한다 (#1722 cleanup invariant). ``AuditLogger.initialize()`` 는
+        # #1854 §4.2 명시 예외 (read-only) — 그대로 보존한다.
         from ante.audit import AuditLogger
-        from ante.cli.main import get_db_path
-        from ante.core.database import Database
 
-        db = Database(get_db_path())
-        await db.connect()
-        try:
+        async with open_cli_db(ctx) as db:
             audit_logger = AuditLogger(db)
             await audit_logger.initialize()
             return await audit_logger.query(
@@ -80,8 +81,6 @@ def audit_list(
                 limit=limit,
                 offset=offset,
             )
-        finally:
-            await db.close()
 
     result = _run(_run_list())
 

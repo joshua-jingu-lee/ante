@@ -243,20 +243,21 @@ def _make_mock_treasury(
 def mock_create_treasury():
     """``treasury._create_treasury`` 를 patch — ``(treasury_mock, db_mock)`` 반환.
 
-    treasury.py 의 ``status`` / ``set-balance`` (cold_path 분기) / ``snapshot``
-    / ``portfolio value`` (with --account) / ``portfolio history`` (with
-    --account) / ``budgets`` (with --account) 가 사용한다.
+    #1857: ``_create_treasury`` 는 async context manager 로 변환되었다.
     """
+    from contextlib import asynccontextmanager
+
     t = _make_mock_treasury()
     db = AsyncMock()
     db.close = AsyncMock()
 
-    async def _stub_create(account_id=None):  # noqa: ANN001, ANN202
-        return t, db
+    @asynccontextmanager
+    async def _stub_create(account_id=None, *, ctx=None):  # noqa: ANN001, ANN202
+        yield t, db
 
     with patch(
         "ante.cli.commands.treasury._create_treasury",
-        side_effect=_stub_create,
+        new=_stub_create,
     ):
         yield t, db
 
