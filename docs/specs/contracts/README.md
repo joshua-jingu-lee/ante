@@ -28,6 +28,7 @@ socket)이 사용자/Agent에게 노출하는 **wire-level 계약의 SSOT**를 �
 | Vocabulary code | [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) | #1822 | `ContractKind`, `EnvelopeForm`, `AuthMode` Literal SSOT |
 | Drift helper skeleton | [tests/unit/contracts/helpers.py](../../../tests/unit/contracts/helpers.py) | #1823 | Click/IPC iterator, `*Error` class / `fmt.error` callsite helper |
 | Error taxonomy | [docs/specs/contracts/error-taxonomy.md](error-taxonomy.md) | #1816 / #1839 | `code` vocabulary + 8 category + auth legacy alias + 대표 fault lock |
+| Offline service factory contract | [docs/specs/contracts/offline-factory.md](offline-factory.md) | #1818 / #1854 | CLI `offline`/`cold-path` factory 책임·비책임 + `read_only` skip 정책 + ctx path resolution + read-only 예외 |
 | Migration domain order | 본 문서 [Migration Domain Order](#migration-domain-order) | #1820 | `account → member → approval → bot → treasury → broker → strategy → 기타` |
 
 ### Envelope shape (#1821)
@@ -116,6 +117,35 @@ error-taxonomy.md 자체를 갱신한다.
 - `details` 필드는 reserved (envelope shape 변경은 envelopes.md SSOT 선행)
 - redaction: envelope `message`에 token/password/recovery_key 등 민감정보 포함 금지
 
+### Offline service factory contract (#1818 / #1854)
+
+[`docs/specs/contracts/offline-factory.md`](offline-factory.md)가 CLI
+`offline`/`cold-path` execution class가 사용하는 service composition factory의
+책임/비책임 경계, `read_only` 초기화 정책, ctx 기반 path resolution 정책의
+단일 SSOT다. 본 인덱스는 그 본문을 재정의하지 않는다.
+
+핵심 lock:
+
+- factory 책임: DB lifecycle (`Database(get_db_path(ctx))` + `connect()`/`close()`),
+  EventBus 생성, service lifecycle, `initialize()` 호출 정책, cleanup
+  (`except BaseException` + close 보장; #1722/#1755), config-dir/path resolution.
+- factory 비책임: IPC 호출, IPC fallback, runtime vs offline 분기, active
+  runtime guard 호출, audit logging, auth/scope 검증, envelope 직렬화, error
+  code 매핑.
+- `read_only` 정책: 옵션 B (factory-level skip) — `Database` API는 변경하지
+  않고, read-only 명령에서 factory가 `service.initialize()` 호출을 skip해 schema
+  /DDL trigger를 차단한다.
+- ctx 정책: 신규 factory 내부에서 `get_db_path(ctx)` 명시 전달이 권장. ctx 없는
+  암시 fallback은 deprecated.
+- read-only 예외: `AccountService`/`MemberService`/`ApprovalService`/
+  `AuditLogger`/`DynamicConfigService`의 `initialize()`는 schema/migration DDL을
+  발화하므로 read-only 명령에서도 호출된다. 본 예외 목록은 후속 #1855 schema
+  분리 결정에 따라 축소될 수 있다.
+
+본 SSOT는 [`envelopes.md`](envelopes.md), [`error-taxonomy.md`](error-taxonomy.md)
+본문을 재정의하지 않는다. migration order는 [Migration Domain Order](#migration-domain-order)
+SSOT를 reference만 한다.
+
 ### Migration domain order
 
 후속 4 에픽(#1815/#1816/#1818/#1819)의 **1차 migration 순서는 다음으로 고정**된다.
@@ -146,7 +176,7 @@ account → member → approval → bot → treasury → broker → strategy →
 |---|---|---|---|---|---|
 | #1815 CLI command contract | CLI success/error | `ContractKind`, `EnvelopeForm`, `AuthMode` | `iter_click_leaf_commands` | 1차: `account` | #1819 IPC registry (server-side SSOT 분리), #1816 error taxonomy |
 | #1816 Stable error contract | CLI error, IPC error | (선택) | `iter_exception_classes`, `iter_fmt_error_calls` | 1차: `account` | #1815 auth registry, #1819 `SERVICE_NOT_CONFIGURED` 소비 |
-| #1818 Offline service factory | (에러 발화 시) CLI error | (독립) | (해당 없음) | 1차: `account` + `member`/`approval` 예외 허용 | #1816 error taxonomy(에러 발화 시), generated artifact policy |
+| #1818 Offline service factory | (에러 발화 시) CLI error | (독립) | (해당 없음) | 1차: `account` + `member`/`approval` 예외 허용 | #1816 error taxonomy(에러 발화 시), [offline-factory.md](offline-factory.md) (#1854), generated artifact policy |
 | #1819 IPC CommandSpec metadata | IPC success/error | `ContractKind` | `iter_ipc_command_specs` | 1차: `account` | #1816 `SERVICE_NOT_CONFIGURED`, #1815 CLI ↔ IPC drift test |
 
 규칙:
