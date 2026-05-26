@@ -180,11 +180,12 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (account 9 + member 12 + bot 11 외)."""
+    """미등록 path 는 ``None`` 을 반환한다 (account/member/bot/approval 외)."""
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # treasury 도메인 entry 등록은 후속 #1847 sub-PR 의 책임이므로 본 PR 시점에는
-    # ``None`` 이다 (bot domain 은 sub-PR 2 에서 등록되었다).
+    # treasury 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 4 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (approval domain 은 sub-PR 3
+    # 에서 등록되었다).
     assert get_contract(("treasury", "transactions")) is None
 
 
@@ -275,6 +276,34 @@ def test_bot_entries_registered_after_1847_sub_pr_2() -> None:
     assert expected_bot_paths.issubset(registered), (
         f"bot 11 entry 가 모두 등록되어야 한다 (#1847 sub-PR 2). "
         f"누락: {sorted(expected_bot_paths - registered)}"
+    )
+
+
+def test_approval_entries_registered_after_1847_sub_pr_3() -> None:
+    """#1847 sub-PR 3 가 approval 10 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 3 가 approval migration 을 완료한 시점부터
+    lock 된다. 10 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_approval_success_output_drift` 가
+    책임진다.
+    """
+    expected_approval_paths = {
+        ("approval", "list"),
+        ("approval", "info"),
+        ("approval", "review"),
+        ("approval", "audit-types"),
+        ("approval", "request"),
+        ("approval", "reopen"),
+        ("approval", "cancel"),
+        ("approval", "approve"),
+        ("approval", "reject"),
+        ("approval", "cancel-invalid"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_approval_paths.issubset(registered), (
+        f"approval 10 entry 가 모두 등록되어야 한다 (#1847 sub-PR 3). "
+        f"누락: {sorted(expected_approval_paths - registered)}"
     )
 
 
