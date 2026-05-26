@@ -16,12 +16,16 @@ import pytest
 from tests.unit.contracts.helpers import (
     AuthMetadata,
     CliLeafCommand,
+    DatabaseConstructionSite,
     ExceptionClassInfo,
     FmtErrorCallsite,
+    GetDbPathCall,
     iter_click_leaf_commands,
     iter_command_auth_metadata,
+    iter_database_constructions,
     iter_exception_classes,
     iter_fmt_error_calls,
+    iter_get_db_path_calls,
     iter_ipc_command_specs,
 )
 
@@ -557,17 +561,140 @@ def test_public_surface_importable() -> None:
     expected = {
         "AuthMetadata",
         "CliLeafCommand",
+        "DatabaseConstructionSite",
         "ExceptionClassInfo",
         "FmtErrorCallsite",
+        "GetDbPathCall",
         "iter_click_leaf_commands",
         "iter_command_auth_metadata",
+        "iter_database_constructions",
         "iter_exception_classes",
         "iter_fmt_error_calls",
+        "iter_get_db_path_calls",
         "iter_ipc_command_specs",
     }
     assert expected.issubset(set(helpers.__all__))
     for name in expected:
         assert hasattr(helpers, name), name
+
+
+# ── iter_database_constructions (#1858) ───────────────────────────────────
+
+
+class TestIterDatabaseConstructions:
+    """``Database(...)`` 직접 생성 callsite iterator skeleton (#1858)."""
+
+    def test_detects_direct_database_call(self, tmp_path: Path) -> None:
+        """``Database(get_db_path())`` 패턴이 매치된다."""
+        source = textwrap.dedent(
+            """
+            from ante.core.database import Database
+            from ante.cli.main import get_db_path
+
+            def cmd() -> None:
+                db = Database(get_db_path())
+            """
+        ).strip()
+        (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+        results = list(iter_database_constructions(tmp_path))
+        assert len(results) == 1
+        site = results[0]
+        assert isinstance(site, DatabaseConstructionSite)
+        assert site.path == tmp_path / "mod.py"
+        assert site.lineno == 5
+        assert "Database(get_db_path())" in site.snippet
+
+    def test_ignores_isinstance_check(self, tmp_path: Path) -> None:
+        """``isinstance(x, Database)`` 같은 non-construction 참조는 skip."""
+        source = textwrap.dedent(
+            """
+            from ante.core.database import Database
+
+            def check(x) -> bool:
+                return isinstance(x, Database)
+            """
+        ).strip()
+        (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+        results = list(iter_database_constructions(tmp_path))
+        assert results == []
+
+    def test_skips_syntax_error_files(self, tmp_path: Path) -> None:
+        """SyntaxError 파일은 sweep 도중 skip 된다."""
+        (tmp_path / "broken.py").write_text("def :=:", encoding="utf-8")
+        results = list(iter_database_constructions(tmp_path))
+        assert results == []
+
+    def test_missing_root_returns_empty(self, tmp_path: Path) -> None:
+        """존재하지 않는 root 는 빈 iterator 를 반환한다."""
+        results = list(iter_database_constructions(tmp_path / "nonexistent"))
+        assert results == []
+
+
+# ── iter_get_db_path_calls (#1858) ────────────────────────────────────────
+
+
+class TestIterGetDbPathCalls:
+    """``get_db_path(...)`` 호출 iterator skeleton (#1858)."""
+
+    def test_detects_no_arg_legacy_call(self, tmp_path: Path) -> None:
+        """``get_db_path()`` (ctx 미전달) 패턴이 ``has_ctx_argument=False`` 로 매치."""
+        source = textwrap.dedent(
+            """
+            from ante.cli.main import get_db_path
+
+            def legacy() -> None:
+                p = get_db_path()
+            """
+        ).strip()
+        (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+        results = list(iter_get_db_path_calls(tmp_path))
+        assert len(results) == 1
+        call = results[0]
+        assert isinstance(call, GetDbPathCall)
+        assert call.has_ctx_argument is False
+
+    def test_detects_ctx_call(self, tmp_path: Path) -> None:
+        """``get_db_path(ctx)`` 패턴이 ``has_ctx_argument=True`` 로 매치."""
+        source = textwrap.dedent(
+            """
+            from ante.cli.main import get_db_path
+
+            def modern(ctx) -> None:
+                p = get_db_path(ctx)
+            """
+        ).strip()
+        (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+        results = list(iter_get_db_path_calls(tmp_path))
+        assert len(results) == 1
+        call = results[0]
+        assert call.has_ctx_argument is True
+
+    def test_ignores_attribute_call(self, tmp_path: Path) -> None:
+        """``mod.get_db_path()`` 같은 attribute call 은 매치하지 않는다.
+
+        본 helper 의 scope 는 callsite 안에서 직접 import 된 ``get_db_path``
+        만 다룬다.
+        """
+        source = textwrap.dedent(
+            """
+            import ante.cli.main as m
+
+            def cmd() -> None:
+                p = m.get_db_path()
+            """
+        ).strip()
+        (tmp_path / "mod.py").write_text(source, encoding="utf-8")
+
+        results = list(iter_get_db_path_calls(tmp_path))
+        assert results == []
+
+    def test_missing_root_returns_empty(self, tmp_path: Path) -> None:
+        results = list(iter_get_db_path_calls(tmp_path / "nonexistent"))
+        assert results == []
 
 
 # ── repository-wide sanity ────────────────────────────────────────────────

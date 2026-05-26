@@ -1,0 +1,83 @@
+# Factory drift baseline allowlist (#1858 Family A).
+#
+# `src/ante/cli/commands/*.py` 의 `Database(...)` 직접 생성 callsite 중 #1818
+# offline factory epic (#1856/#1857) 의 scope 밖이거나, lifecycle 이 long-running /
+# bootstrap / live-state 와 엮여 단순 `open_cli_db` async-context wrap 으로
+# 동치 변환이 불가능한 callsite 를 등록한다.
+#
+# 항목 추가/제거 규칙:
+# - 새 callsite 가 추가되면 본 YAML 은 변경 *없이* drift test 가 FAIL 한다.
+#   factory migration 으로 callsite 가 제거되면 본 YAML 에서도 함께 entry 를
+#   삭제한다 (drift test 가 baseline 외 잔여 entry 도 sanity 검출).
+# - reason 은 사람이 읽을 수 있는 자유 문자열 (drift test 는 본 필드를
+#   참조하지 않으나, 후속 PR 리뷰의 근거가 된다).
+#
+# path 는 repo root 기준 상대 경로 (POSIX 슬래시) 로 적는다.
+
+direct_database_construction:
+  # broker live state — runtime IPC fallback 의 cold_path 분기.
+  # spec primary 분류는 `runtime_ipc` 이지만 broker.py 가 IPC 실패 시 직접
+  # BrokerAdapter + Database 를 생성하는 cold_path fallback 분기를 보유한다.
+  # live broker state 와 Database lifecycle 이 같은 try/except 로 엮여 있어
+  # 단순 `open_cli_db` async-context wrap 으로 동치 변환이 불가능하다 — broker
+  # 모듈 본문 주석 (broker.py:24-29) 의 invariant 와 일치.
+  - path: src/ante/cli/commands/broker.py
+    line: 34
+    reason: "broker live state — _create_account_service factory body (runtime_ipc cold_path fallback)"
+  - path: src/ante/cli/commands/broker.py
+    line: 354
+    reason: "broker reconcile — adapter_db fallback (runtime_ipc cold_path branch)"
+
+  # signal connect — long_running / streaming external process.
+  # SignalChannel.run() 이 stdin/stdout JSON Lines stream loop 를 형성한다.
+  # Database lifecycle 이 external process runtime 과 엮여 있어 단순
+  # `open_cli_db` async-context wrap 으로 동치 변환이 불가능하다 (signal.py:35-38
+  # 주석 invariant).
+  - path: src/ante/cli/commands/signal.py
+    line: 48
+    reason: "signal connect — long_running stream channel (external process lifecycle)"
+
+  # report domain — offline execution 이지만 #1857 epic 의 broker/signal
+  # 제외 scope 결정에 따라 본 factory migration 사이클에서 별도 spec 정렬 PR
+  # 로 이연된 잔여. 후속 이슈에서 `open_cli_db` 로 마이그레이션할 후보.
+  - path: src/ante/cli/commands/report.py
+    line: 127
+    reason: "report list — offline (deferred migration, post-#1818 follow-up)"
+  - path: src/ante/cli/commands/report.py
+    line: 226
+    reason: "report view — offline (deferred migration, post-#1818 follow-up)"
+  - path: src/ante/cli/commands/report.py
+    line: 402
+    reason: "report performance — offline (deferred migration, post-#1818 follow-up)"
+
+  # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (progress
+  # bar 와 함께 장시간 작업) 이고, `backtest history` 는 `offline` 이지만
+  # #1857 잔여로 본 사이클에서 마이그레이션 보류.
+  - path: src/ante/cli/commands/backtest.py
+    line: 206
+    reason: "backtest run — long_running (progress-bar driven, deferred migration)"
+  - path: src/ante/cli/commands/backtest.py
+    line: 249
+    reason: "backtest history — offline (deferred migration, post-#1818 follow-up)"
+
+  # data domain — `data list` callsite. #1857 잔여로 본 사이클에서 보류.
+  - path: src/ante/cli/commands/data.py
+    line: 82
+    reason: "data list — offline (deferred migration, post-#1818 follow-up)"
+
+  # init — root-level `ante init` bootstrap command. CLI registry 의
+  # 94 entries 외 follow-up set (`("init",)`). bootstrap 단계에서 DB 자체를
+  # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
+  # 가 부적절하다.
+  - path: src/ante/cli/commands/init.py
+    line: 358
+    reason: "ante init — bootstrap, fresh DB creation lifecycle (out of registry scope)"
+  - path: src/ante/cli/commands/init.py
+    line: 395
+    reason: "ante init — bootstrap, encryption key init path"
+  - path: src/ante/cli/commands/init.py
+    line: 425
+    reason: "ante init — bootstrap, migration / schema apply path"
+  - path: src/ante/cli/commands/init.py
+    line: 456
+    reason: "ante init — bootstrap, post-init verification path"

@@ -542,6 +542,146 @@ def iter_fmt_error_calls(
 
 
 @dataclass(frozen=True)
+class DatabaseConstructionSite:
+    """``Database(...)`` 직접 생성 callsite (#1858 Family A).
+
+    ``src/ante/cli/commands/*.py`` 의 ``Database(get_db_path(...))`` 또는
+    ``Database(resolved_db_path)`` 같은 직접 생성 callsite 를 AST 로 수집한
+    결과. ``open_cli_db`` async-context 또는 ``_create_*_service`` 팩토리를
+    우회한 lifecycle 위반 후보를 식별하기 위한 baseline 비교용 데이터다.
+
+    Attributes:
+        path: callsite 파일 경로 (절대).
+        lineno: ``Database(`` 호출 줄 (1-based).
+        snippet: 원본 source 의 callsite 줄 raw 문자열 (디버깅용).
+    """
+
+    path: Path
+    lineno: int
+    snippet: str
+
+
+@dataclass(frozen=True)
+class GetDbPathCall:
+    """``get_db_path(...)`` 호출 callsite (#1858 Family B).
+
+    ``src/ante/cli/commands/*.py`` 의 ``get_db_path(ctx)`` (current) 와
+    ``get_db_path()`` (legacy, ctx 미전달) 양쪽을 모두 수집한다. Family B
+    는 ctx 없는 legacy 호출 위치를 report-only 로 집계한다.
+
+    Attributes:
+        path: callsite 파일 경로 (절대).
+        lineno: ``get_db_path(`` 호출 줄 (1-based).
+        has_ctx_argument: 첫 positional argument 가 존재하면 True
+            (``get_db_path(ctx)`` 패턴). False 면 ``get_db_path()`` 와 같이
+            인자 없는 legacy call.
+        snippet: 원본 source 의 callsite 줄 raw 문자열.
+    """
+
+    path: Path
+    lineno: int
+    has_ctx_argument: bool
+    snippet: str
+
+
+def _is_database_call(call: ast.Call) -> bool:
+    """``call.func`` 이 ``Database(...)`` 호출인지 (Name 식별만).
+
+    ``Database`` 이름을 가진 모든 호출을 매치한다. ``ante.core.database.
+    Database`` 의 직접 import 가정. 다른 alias (``DB`` 등) 는 매치하지 않는다.
+    """
+    func = call.func
+    return isinstance(func, ast.Name) and func.id == "Database"
+
+
+def _is_get_db_path_call(call: ast.Call) -> bool:
+    """``call.func`` 이 ``get_db_path(...)`` 호출인지."""
+    func = call.func
+    return isinstance(func, ast.Name) and func.id == "get_db_path"
+
+
+def iter_database_constructions(
+    root: Path,
+) -> Iterator[DatabaseConstructionSite]:
+    """``root`` 하위 ``.py`` 파일에서 ``Database(...)`` 직접 생성 callsite 를 yield.
+
+    AST 기반이라 module import 를 유발하지 않는다. ``Database`` 라는 이름의
+    모든 ``ast.Call`` 을 매치한다 — type annotation (``: Database``) 이나
+    isinstance check (``isinstance(x, Database)``) 같은 non-call 참조는
+    매치하지 않는다.
+
+    Args:
+        root: 검사할 루트 디렉토리 (예: ``src/ante/cli/commands``). 호출자가
+            scope 를 좁히는 책임을 진다.
+
+    Yields:
+        :class:`DatabaseConstructionSite`: callsite 별 절대 경로 + 줄번호
+        + raw snippet.
+    """
+    for path in _iter_python_files(root):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        try:
+            module = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+        source_lines = source.splitlines()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            if not _is_database_call(node):
+                continue
+            yield DatabaseConstructionSite(
+                path=path,
+                lineno=node.lineno,
+                snippet=_source_line(source_lines, node.lineno),
+            )
+
+
+def iter_get_db_path_calls(
+    root: Path,
+) -> Iterator[GetDbPathCall]:
+    """``root`` 하위 ``.py`` 파일에서 ``get_db_path(...)`` 호출 callsite 를 yield.
+
+    AST 기반이라 module import 를 유발하지 않는다. ``get_db_path`` 라는
+    이름의 모든 ``ast.Call`` 을 매치한다. attribute call
+    (``mod.get_db_path(...)``) 은 매치하지 않는다 — 본 helper 의 scope 는
+    callsite 안에서 직접 import 된 ``get_db_path`` 만 다룬다 (CLI commands
+    의 ``from ante.cli.main import get_db_path`` 패턴).
+
+    Args:
+        root: 검사할 루트 디렉토리.
+
+    Yields:
+        :class:`GetDbPathCall`: callsite 별 metadata.
+    """
+    for path in _iter_python_files(root):
+        try:
+            source = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        try:
+            module = ast.parse(source, filename=str(path))
+        except SyntaxError:
+            continue
+        source_lines = source.splitlines()
+        for node in ast.walk(module):
+            if not isinstance(node, ast.Call):
+                continue
+            if not _is_get_db_path_call(node):
+                continue
+            has_ctx = len(node.args) >= 1
+            yield GetDbPathCall(
+                path=path,
+                lineno=node.lineno,
+                has_ctx_argument=has_ctx,
+                snippet=_source_line(source_lines, node.lineno),
+            )
+
+
+@dataclass(frozen=True)
 class FmtErrorAllowlistEntry:
     """``fmt.error`` code 누락 callsite allowlist entry.
 
@@ -649,15 +789,19 @@ def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
 __all__ = [
     "AuthMetadata",
     "CliLeafCommand",
+    "DatabaseConstructionSite",
     "DriftAllowlist",
     "ExceptionAllowlistEntry",
     "ExceptionClassInfo",
     "FmtErrorAllowlistEntry",
     "FmtErrorCallsite",
+    "GetDbPathCall",
     "iter_click_leaf_commands",
     "iter_command_auth_metadata",
+    "iter_database_constructions",
     "iter_exception_classes",
     "iter_fmt_error_calls",
+    "iter_get_db_path_calls",
     "iter_ipc_command_specs",
     "load_drift_allowlist",
 ]
