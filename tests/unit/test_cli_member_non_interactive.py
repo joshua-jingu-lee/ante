@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,7 +63,14 @@ def _patch_create_service(
     reset_password_side_effect: object | None = None,
     regenerate_return: str | None = None,
 ):
-    """member._create_service를 mock하는 contextmanager."""
+    """member._create_service를 mock하는 contextmanager.
+
+    #1856: ``_create_service`` 는 ``open_cli_db`` 기반 async context manager
+    로 전환됐다 (``async with _create_service(ctx) as service:``). 따라서
+    patch 도 ``@asynccontextmanager`` 로 감싼 fake factory 를 제공해야
+    한다 — 기존 ``AsyncMock + return_value=(service, db)`` 패턴은 더 이상
+    호환되지 않는다.
+    """
     service = MagicMock()
     service.list_members = AsyncMock(return_value=list_members_return or [])
     service.revoke = AsyncMock(
@@ -81,12 +89,14 @@ def _patch_create_service(
     service.regenerate_recovery_key = AsyncMock(
         return_value=regenerate_return or "ANTE-RK-NEWNEW-1234"
     )
-    db = MagicMock()
-    db.close = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield service
+
     return patch(
         "ante.cli.commands.member._create_service",
-        new_callable=AsyncMock,
-        return_value=(service, db),
+        new=fake_factory,
     ), service
 
 
@@ -649,6 +659,8 @@ class TestNonMasterCliPermissionDenied:
     ):  # noqa: ANN202
         """``MemberService.<method_name>``이 ``PermissionDeniedError``를
         raise하도록 mock한 ``_create_service`` 패치 컨텍스트.
+
+        #1856: ``_create_service`` 가 async context manager 로 전환됐다.
         """
         from ante.member.errors import PermissionDeniedError
 
@@ -660,13 +672,15 @@ class TestNonMasterCliPermissionDenied:
             )
         )
         setattr(service, method_name, denied)
-        db = MagicMock()
-        db.close = AsyncMock(return_value=None)
+
+        @asynccontextmanager
+        async def fake_factory(ctx=None):  # noqa: ANN001, ANN202
+            yield service
+
         return (
             patch(
                 "ante.cli.commands.member._create_service",
-                new_callable=AsyncMock,
-                return_value=(service, db),
+                new=fake_factory,
             ),
             service,
             denied,
@@ -787,15 +801,21 @@ def _make_invalid_role_member(
 
 
 def _patch_create_service_with_scan(scan: InvalidRoleScan):  # noqa: ANN202
-    """``_create_service`` 가 invalid-role scan 만 mock 된 service 를 반환한다."""
+    """``_create_service`` 가 invalid-role scan 만 mock 된 service 를 반환한다.
+
+    #1856: async context manager 전환에 맞춰 ``@asynccontextmanager`` fake
+    factory 를 patch 한다.
+    """
     service = MagicMock()
     service.find_invalid_role_members = AsyncMock(return_value=scan)
-    db = MagicMock()
-    db.close = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield service
+
     return patch(
         "ante.cli.commands.member._create_service",
-        new_callable=AsyncMock,
-        return_value=(service, db),
+        new=fake_factory,
     ), service
 
 
@@ -1322,18 +1342,22 @@ def _patch_service_method_raises(
 
     reset-password / regenerate-recovery-key 는 핸들러가 먼저
     ``service.list_members`` 로 master 를 찾으므로 그 경로도 충족시킨다.
+
+    #1856: ``_create_service`` 가 async context manager 로 전환됐다.
     """
     service = MagicMock()
     service.list_members = AsyncMock(return_value=[_make_master()])
     mocked = AsyncMock(side_effect=exc)
     setattr(service, method_name, mocked)
-    db = MagicMock()
-    db.close = AsyncMock(return_value=None)
+
+    @asynccontextmanager
+    async def fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield service
+
     return (
         patch(
             "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(service, db),
+            new=fake_factory,
         ),
         service,
         mocked,
@@ -1542,12 +1566,15 @@ class TestMemberErrorCommandsExitNonZero:
         service = MagicMock()
         service.list_members = AsyncMock(return_value=[_make_master()])
         service.suspend = AsyncMock(return_value=active_member)
-        db = MagicMock()
-        db.close = AsyncMock(return_value=None)
+
+        # #1856: ``_create_service`` 는 async context manager 로 전환됐다.
+        @asynccontextmanager
+        async def fake_factory(ctx=None):  # noqa: ANN001, ANN202
+            yield service
+
         ctx = patch(
             "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(service, db),
+            new=fake_factory,
         )
         with ctx:
             result = _invoke_cli(

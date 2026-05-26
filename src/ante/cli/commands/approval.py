@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 
 import click
 
 from ante.approval.errors import ApprovalNotFoundError
 from ante.approval.models import ApprovalStatus, ApprovalType
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
@@ -20,8 +20,6 @@ from ante.contracts import emit_cli_error
 # 이를 위해 함수 내부 import 대신 모듈 상단 import을 사용한다.
 # `ante.approval.models`은 dataclass + StrEnum 만 노출하는 light 모듈이라
 # `tests/unit/test_cli_dependency_isolation.py`가 회귀를 차단한다.
-
-logger = logging.getLogger(__name__)
 
 
 @click.group()
@@ -146,10 +144,7 @@ def approval_list(
     db_path: str | None,
 ) -> None:
     """결재 목록 조회."""
-    from ante.cli.main import get_db_path
-
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     # Preflight: invalid `--status`/`--type`는 `Database` 생성 전에 차단한다.
     # `ApprovalStatus`/`ApprovalType` enum이 SSOT이며 (#1462) inline 비교한다.
@@ -174,24 +169,23 @@ def approval_list(
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService
-        from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        # ``db.connect()`` 이후의 모든 라이프사이클(``ApprovalService.initialize``,
-        # ``list_approvals`` 호출 포함)을 ``except BaseException`` 블록으로 감싸
-        # 실패 시 ``db.close()``를 보장한다 (#1755; ``_create_account_service``
-        # (#1722) cleanup 패턴 1:1 미러). 이전 구현은 ``list_approvals`` 가
-        # raise되면 ``await db.close()`` 미도달이라 aiosqlite worker thread가
-        # leak되어 stderr traceback이 노출됐다.
-        db = Database(resolved_db_path)
-        try:
-            await db.connect()
+        # #1856: ``open_cli_db`` 헬퍼가 ``Database`` 생성/connect/close lifecycle
+        # 을 캡슐화한다 (#1855). 이전 ``except BaseException`` cleanup 패턴
+        # (#1755) 은 헬퍼 내부의 ``BaseException`` catch + close 실패 swallow 로
+        # 흡수됐다. ``--db-path`` Click option 은 ``db_path_override`` 로 명시
+        # 전달해 ctx 의 기본 ``get_db_path(ctx)`` resolution 을 override 한다
+        # (offline-factory.md §1.1).
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
+            # #1854 §4.2 예외: ``ApprovalService.initialize`` 는 ``APPROVAL_SCHEMA``
+            # DDL 을 수반하므로 read-only ``list`` 경로에서도 호출이 필요하다.
             await service.initialize()
 
             requests = await service.list_approvals(status=status, type=approval_type)
-            rows = [
+            return [
                 {
                     "id": r.id[:8],
                     "type": r.type,
@@ -202,16 +196,6 @@ def approval_list(
                 }
                 for r in requests
             ]
-        except BaseException:
-            try:
-                await db.close()
-            except Exception:
-                logger.debug(
-                    "db.close() after list failure raised — ignored", exc_info=True
-                )
-            raise
-        await db.close()
-        return rows
 
     try:
         rows = asyncio.run(_list())
@@ -231,30 +215,24 @@ def approval_list(
 @require_scope("approval:read")
 def info(ctx: click.Context, id: str, db_path: str | None) -> None:
     """결재 상세 조회."""
-    from ante.cli.main import get_db_path
-
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _info() -> dict:
         from ante.approval import ApprovalService
-        from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        # ``_find_request`` 가 not-found/multi-match 시 ``ValueError`` 를 raise
-        # 하면 이전 구현은 ``await db.close()`` 미도달 → aiosqlite leak → asyncio
-        # 종료 시 worker thread 8s busy_timeout 대기로 probe timeout exit 124
-        # 회귀 (#1755). ``_create_account_service`` (#1722) cleanup 패턴 1:1 미러
-        # 로 ``except BaseException`` 블록에서 ``db.close()`` 를 보장한다.
-        db = Database(resolved_db_path)
-        try:
-            await db.connect()
+        # #1856: ``open_cli_db`` 헬퍼가 ``_find_request`` 의 ``ValueError`` /
+        # ``ApprovalNotFoundError`` raise 경로에서도 ``Database.close()`` 를
+        # 보장한다 (#1755 회귀 lock — 이전 구현은 close 미도달로 aiosqlite
+        # worker thread leak → 8s busy_timeout 대기로 probe timeout exit 124).
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
+            # #1854 §4.2 예외: schema DDL 수반 → read-only 경로에도 initialize 호출.
             await service.initialize()
 
             req = await _find_request(service, id)
-            result = {
+            return {
                 "id": req.id,
                 "type": req.type,
                 "status": req.status,
@@ -271,16 +249,6 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
                 "resolved_by": req.resolved_by,
                 "reject_reason": req.reject_reason,
             }
-        except BaseException:
-            try:
-                await db.close()
-            except Exception:
-                logger.debug(
-                    "db.close() after info failure raised — ignored", exc_info=True
-                )
-            raise
-        await db.close()
-        return result
 
     try:
         result = asyncio.run(_info())
@@ -322,25 +290,17 @@ def review(
     db_path: str | None,
 ) -> None:
     """검토 의견 추가."""
-    from ante.cli.main import get_db_path
-
     fmt = get_formatter(ctx)
     reviewer = get_member_id(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _review() -> dict:
         from ante.approval import ApprovalService
-        from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        # ``service.add_review`` 가 not-found/invalid-id 시 raise하면 이전 구현은
-        # ``await db.close()`` 미도달 → aiosqlite leak → probe timeout exit 124
-        # 회귀 (#1755; ``approval info`` 와 동형). ``_create_account_service``
-        # (#1722) cleanup 패턴 1:1 미러로 ``except BaseException`` 블록에서
-        # ``db.close()`` 를 보장한다.
-        db = Database(resolved_db_path)
-        try:
-            await db.connect()
+        # #1856: ``open_cli_db`` 헬퍼가 ``service.add_review`` 의 not-found /
+        # invalid-id raise 경로에서도 ``Database.close()`` 를 보장한다 (#1755
+        # 회귀 lock — ``approval info`` 와 동형).
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
             await service.initialize()
@@ -351,23 +311,12 @@ def review(
                 result=review_result,
                 detail=detail,
             )
-            result = {
+            return {
                 "id": req.id,
                 "reviewer": reviewer,
                 "result": review_result,
                 "reviews_count": len(req.reviews),
             }
-        except BaseException:
-            try:
-                await db.close()
-            except Exception:
-                logger.debug(
-                    "db.close() after review failure raised — ignored",
-                    exc_info=True,
-                )
-            raise
-        await db.close()
-        return result
 
     try:
         result = asyncio.run(_review())
@@ -475,10 +424,7 @@ def audit_types(
 
     출력 컬럼: id, type, status, requester, created_at, expires_at.
     """
-    from ante.cli.main import get_db_path
-
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     # status 는 enum 외의 invalid 값을 허용해야 하는가? 일반 운영자가 자유 입력
     # 으로 잘못된 status 필터를 지정하면 즉시 에러로 알리는 것이 안전하다.
@@ -493,22 +439,17 @@ def audit_types(
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService
-        from ante.core.database import Database
         from ante.eventbus.bus import EventBus
 
-        # 기존 try/finally 는 ``service.list_invalid_type_requests`` 호출만 감쌌
-        # 으므로 ``ApprovalService(...)`` 생성자/``service.initialize()`` 가 raise
-        # 되면 ``db.close()`` 미도달이라 aiosqlite leak이 발생한다. 동일 모듈의
-        # 다른 명령과 같은 cleanup 패턴(``except BaseException`` + close) 으로
-        # 통일한다 (#1755; ``_create_account_service`` (#1722) 미러).
-        db = Database(resolved_db_path)
-        try:
-            await db.connect()
+        # #1856: ``open_cli_db`` 헬퍼가 ``ApprovalService(...)`` /
+        # ``service.initialize()`` raise 경로에서도 ``Database.close()`` 를
+        # 보장한다 (#1755 회귀 lock; ``approval list`` 와 동형).
+        async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
             await service.initialize()
             requests = await service.list_invalid_type_requests(status=status)
-            rows = [
+            return [
                 {
                     "id": r.id,
                     "type": r.type,
@@ -519,17 +460,6 @@ def audit_types(
                 }
                 for r in requests
             ]
-        except BaseException:
-            try:
-                await db.close()
-            except Exception:
-                logger.debug(
-                    "db.close() after audit-types failure raised — ignored",
-                    exc_info=True,
-                )
-            raise
-        await db.close()
-        return rows
 
     try:
         rows = asyncio.run(_list())

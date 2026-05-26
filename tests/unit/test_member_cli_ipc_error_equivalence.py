@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -128,11 +129,11 @@ class TestMemberNotFoundEquivalence:
     def test_cli_direct_not_found_via_suspend(self, runner: CliRunner) -> None:
         exc = MemberNotFoundError("missing")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.suspend.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -170,11 +171,11 @@ class TestMemberStateConflictEquivalence:
             member_id="m-test", current_status="suspended", requested_action="suspend"
         )
         svc = AsyncMock()
-        db = AsyncMock()
         svc.suspend.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -195,11 +196,11 @@ class TestMemberStateConflictEquivalence:
             member_id="m-test", current_status="active", requested_action="reactivate"
         )
         svc = AsyncMock()
-        db = AsyncMock()
         svc.reactivate.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -235,11 +236,11 @@ class TestMemberAlreadyExistsEquivalence:
     def test_cli_direct_already_exists_via_register(self, runner: CliRunner) -> None:
         exc = MemberAlreadyExistsError("dup")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.register.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -288,7 +289,6 @@ class TestMemberInvalidRecoveryCredentialEquivalence:
     ) -> None:
         exc = MemberInvalidRecoveryCredentialError("잘못된 recovery key")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.list_members = AsyncMock(
             return_value=[
                 Member(
@@ -304,8 +304,9 @@ class TestMemberInvalidRecoveryCredentialEquivalence:
         )
         svc.reset_password = AsyncMock(side_effect=exc)
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         monkeypatch.setenv("ANTE_TEST_NEW_PASSWORD", "new-pw-12345")
 
@@ -353,11 +354,11 @@ class TestMemberInvalidScopeEquivalence:
     def test_cli_direct_invalid_scope_via_register(self, runner: CliRunner) -> None:
         exc = InvalidScopeError("oracle:invalid")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.register.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",
@@ -451,11 +452,11 @@ class TestMemberPermissionDeniedEquivalence:
     def test_cli_direct_permission_denied_via_suspend(self, runner: CliRunner) -> None:
         exc = PermissionDeniedError("master 권한이 필요합니다")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.suspend.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.member._create_service",

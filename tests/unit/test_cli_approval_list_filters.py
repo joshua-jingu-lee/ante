@@ -177,13 +177,18 @@ class TestApprovalListValidFilters:
     """`approval list` valid status/type은 회귀 없이 정상 동작 (#1462)."""
 
     def test_approval_list_valid_status_still_works(self, runner, tmp_path) -> None:
-        """valid `--status`는 preflight 통과 후 ApprovalService.list_approvals 호출."""
+        """valid `--status`는 preflight 통과 후 ApprovalService.list_approvals 호출.
+
+        #1856: ``approval list`` 가 ``open_cli_db`` factory 경로로 전환된 후,
+        ``Database`` 생성은 ``ante.cli.db_context`` 모듈의 binding 을 통해
+        일어난다. 따라서 patch 도 ``ante.cli.db_context.Database`` 로 정렬한다.
+        """
         db_cls, service_cls, service = _mock_service_layer([])
         db_path = str(tmp_path / "approval.db")
         with (
-            patch("ante.core.database.Database", db_cls),
+            patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.main.get_db_path", return_value=db_path),
+            patch("ante.cli.db_context.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,
@@ -205,9 +210,9 @@ class TestApprovalListValidFilters:
         db_cls, service_cls, service = _mock_service_layer([])
         db_path = str(tmp_path / "approval.db")
         with (
-            patch("ante.core.database.Database", db_cls),
+            patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.main.get_db_path", return_value=db_path),
+            patch("ante.cli.db_context.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,
@@ -230,9 +235,9 @@ class TestApprovalListValidFilters:
         db_cls, service_cls, service = _mock_service_layer([])
         db_path = str(tmp_path / "approval.db")
         with (
-            patch("ante.core.database.Database", db_cls),
+            patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.main.get_db_path", return_value=db_path),
+            patch("ante.cli.db_context.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,

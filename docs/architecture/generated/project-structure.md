@@ -396,7 +396,8 @@ tests/
 │   │   ├── test_broker_missing_account.py
 │   │   ├── test_usage_error_json.py
 │   │   ├── test_instrument_exchange_validation.py
-│   │   └── test_db_context_manager.py
+│   │   ├── test_db_context_manager.py
+│   │   └── test_cli_factory_migration_cleanup.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py

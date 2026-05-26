@@ -15,10 +15,14 @@ import asyncio
 import logging
 import os
 import shlex
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import (
@@ -27,6 +31,9 @@ from ante.cli.middleware import (
     require_master,
     require_scope,
 )
+
+if TYPE_CHECKING:
+    from ante.member.service import MemberService
 from ante.contracts import emit_cli_error
 from ante.member.errors import (
     MemberAlreadyExistsError,
@@ -125,19 +132,44 @@ def _resolve_secret_non_interactive(
     return value
 
 
-async def _create_service():  # noqa: ANN202
-    """CLI용 MemberService 인스턴스 생성."""
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
-    from ante.eventbus.bus import EventBus
-    from ante.member.service import MemberService
+@asynccontextmanager
+async def _create_service(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[MemberService]:
+    """CLI용 ``MemberService`` async context manager (#1856).
 
-    db = Database(get_db_path())
-    await db.connect()
-    eventbus = EventBus()
-    service = MemberService(db, eventbus)
-    await service.initialize()
-    return service, db
+    #1855 의 ``open_cli_db`` 헬퍼 기반으로 변환했다. callsite 패턴은
+    ``async with _create_service(ctx) as service:`` 이며, ``open_cli_db`` 가
+    normal/exception/cancellation 모든 경로에서 ``Database.close()`` 를
+    보장한다 (#1722/#1755 cleanup invariant).
+
+    Args:
+        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context(silent=True)``
+            로 현재 컨텍스트를 fallback 조회한다 (account 헬퍼와 동형 호환 path).
+
+    Yields:
+        ``initialize()`` 가 완료된 :class:`MemberService` 인스턴스.
+
+    #1854 §4.2 예외: ``MemberService.initialize`` 는 ``MEMBER_SCHEMA`` +
+    ``_EMOJI_MIGRATION`` + ``_TOKEN_EXPIRES_MIGRATION`` schema DDL 을
+    수반하므로 ``member list``/``info`` 같은 read-only 명령에서도
+    ``initialize()`` 를 계속 호출한다.
+    """
+    from ante.eventbus.bus import EventBus
+    from ante.member.service import MemberService as _MemberService
+
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        raise ValueError(
+            "_create_service requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
+        eventbus = EventBus()
+        service = _MemberService(db, eventbus)
+        await service.initialize()
+        yield service
 
 
 @member.command("list")
@@ -162,8 +194,7 @@ def member_list(
     fmt = get_formatter(ctx)
 
     async def _run_list() -> list[dict]:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             members = await service.list_members(
                 member_type=member_type, org=org, status=status
             )
@@ -181,8 +212,6 @@ def member_list(
                 }
                 for m in members
             ]
-        finally:
-            await db.close()
 
     result = _run(_run_list())
     if not result:
@@ -212,8 +241,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.get(member_id)
             if not m:
                 return None
@@ -230,8 +258,6 @@ def member_info(ctx: click.Context, member_id: str) -> None:
                 "created_by": m.created_by,
                 "last_active_at": m.last_active_at,
             }
-        finally:
-            await db.close()
 
     result = _run(_run_info())
     if not result:
@@ -394,8 +420,7 @@ def member_list_invalid_roles(
     config_dir_override = _explicit_config_dir(ctx)
 
     async def _run_scan() -> tuple[list[dict], list[dict]]:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             scan = await service.find_invalid_role_members()
             actionable = [
                 _invalid_role_row_dict(
@@ -410,8 +435,6 @@ def member_list_invalid_roles(
                 for m in scan.legacy_revoked
             ]
             return actionable, legacy
-        finally:
-            await db.close()
 
     actionable_rows, legacy_rows = _run(_run_scan())
 
@@ -489,8 +512,7 @@ def member_register(
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
 
     async def _run_register() -> tuple[dict, str]:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m, token = await service.register(
                 member_id=member_id,
                 member_type=member_type,
@@ -506,8 +528,6 @@ def member_register(
                 "org": m.org,
                 "name": m.name,
             }, token
-        finally:
-            await db.close()
 
     try:
         result, token = _run(_run_register())
@@ -555,12 +575,9 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_set_emoji() -> dict:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.update_emoji(member_id, emoji, updated_by=actor)
             return {"member_id": m.member_id, "emoji": m.emoji}
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_set_emoji())
@@ -605,8 +622,7 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
                 actor=actor,
             )
 
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.update_scopes(
                 member_id,
                 scope_list,
@@ -617,8 +633,6 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
                 "scopes": m.scopes,
                 "status": m.status,
             }
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_update_scopes())
@@ -656,12 +670,9 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_suspend() -> dict:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.suspend(member_id, suspended_by=actor)
             return {"member_id": m.member_id, "status": m.status}
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_suspend())
@@ -699,12 +710,9 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_reactivate() -> dict:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.reactivate(member_id, reactivated_by=actor)
             return {"member_id": m.member_id, "status": m.status}
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_reactivate())
@@ -760,12 +768,9 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
         raise SystemExit(1)
 
     async def _run_revoke() -> dict:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m = await service.revoke(member_id, revoked_by=actor)
             return {"member_id": m.member_id, "status": m.status}
-        finally:
-            await db.close()
 
     try:
         result = _run(_run_revoke())
@@ -796,12 +801,9 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_rotate() -> tuple[dict, str]:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             m, token = await service.rotate_token(member_id, rotated_by=actor)
             return {"member_id": m.member_id}, token
-        finally:
-            await db.close()
 
     try:
         result, token = _run(_run_rotate())
@@ -865,16 +867,13 @@ def member_reset_password(
     )
 
     async def _run_reset() -> None:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
             if not master:
                 msg = "master 멤버가 존재하지 않습니다"
                 raise ValueError(msg)
             await service.reset_password(master.member_id, recovery_key, new_password)
-        finally:
-            await db.close()
 
     try:
         _run(_run_reset())
@@ -928,16 +927,13 @@ def member_regenerate_recovery_key(
     )
 
     async def _run_regen() -> str:
-        service, db = await _create_service()
-        try:
+        async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
             if not master:
                 msg = "master 멤버가 존재하지 않습니다"
                 raise ValueError(msg)
             return await service.regenerate_recovery_key(master.member_id, password)
-        finally:
-            await db.close()
 
     try:
         new_key = _run(_run_regen())

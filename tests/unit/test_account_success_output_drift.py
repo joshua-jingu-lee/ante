@@ -43,6 +43,7 @@ callsite shape 와 일치함을 단순 lock 만 한다. 본 test 는 callsite �
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -145,10 +146,10 @@ def _mock_account(
 def mock_account_service():
     """AccountService mock fixture."""
     svc = AsyncMock()
-    db = AsyncMock()
 
-    async def _create_service():
-        return svc, db
+    @asynccontextmanager
+    async def _create_service(ctx=None):
+        yield svc
 
     with patch(
         "ante.cli.commands.account._create_account_service", new=_create_service

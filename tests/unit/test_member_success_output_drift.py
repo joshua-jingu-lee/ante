@@ -161,12 +161,17 @@ def _mock_member(
 
 @pytest.fixture
 def mock_member_service():
-    """``MemberService`` mock fixture (member.py ``_create_service`` 우회)."""
-    svc = AsyncMock()
-    db = AsyncMock()
+    """``MemberService`` mock fixture (member.py ``_create_service`` 우회).
 
-    async def _create_service():
-        return svc, db
+    #1856: ``_create_service`` 가 async context manager 로 전환됐다.
+    """
+    from contextlib import asynccontextmanager
+
+    svc = AsyncMock()
+
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
 
     with patch(
         "ante.cli.commands.member._create_service",

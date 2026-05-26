@@ -52,6 +52,7 @@ running / 시그널 미수용)는 모두 동일 invariant("signal connect 연결
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -93,6 +94,19 @@ def runner() -> CliRunner:
 
     r.invoke = _invoke_with_auth
     return r
+
+
+def _patch_member_factory(svc):  # noqa: ANN001, ANN202
+    """#1856: ``member._create_service`` async context manager fake factory."""
+
+    @asynccontextmanager
+    async def _fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
+
+    return patch(
+        "ante.cli.commands.member._create_service",
+        new=_fake_factory,
+    )
 
 
 def _mock_db() -> MagicMock:
@@ -975,13 +989,8 @@ class TestMemberInfoMissingExit:
     def test_missing_exits_nonzero_json(self, runner: CliRunner) -> None:
         svc = MagicMock()
         svc.get = AsyncMock(return_value=None)
-        db = _mock_db()
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc):
             result = runner.invoke(
                 cli,
                 ["--format", "json", "member", "info", "nonexistent-member"],
@@ -995,13 +1004,8 @@ class TestMemberInfoMissingExit:
     def test_missing_exits_nonzero_text(self, runner: CliRunner) -> None:
         svc = MagicMock()
         svc.get = AsyncMock(return_value=None)
-        db = _mock_db()
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc):
             result = runner.invoke(cli, ["member", "info", "nonexistent-member"])
 
         assert result.exit_code == 1
@@ -1020,13 +1024,8 @@ class TestMemberInfoMissingExit:
         )
         svc = MagicMock()
         svc.get = AsyncMock(return_value=existing)
-        db = _mock_db()
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc):
             result = runner.invoke(cli, ["--format", "json", "member", "info", "m-1"])
 
         assert result.exit_code == 0, result.stdout + result.stderr

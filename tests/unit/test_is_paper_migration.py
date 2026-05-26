@@ -182,11 +182,14 @@ class TestAccountCreateIsPaper:
 
     @pytest.fixture
     def mock_account_service(self):
-        svc = AsyncMock()
-        db = AsyncMock()
+        # #1856: async context manager 전환.
+        from contextlib import asynccontextmanager
 
-        async def _create_service():
-            return svc, db
+        svc = AsyncMock()
+
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.account._create_account_service", new=_create_service
