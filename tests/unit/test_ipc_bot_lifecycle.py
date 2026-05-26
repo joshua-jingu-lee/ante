@@ -7,10 +7,12 @@
   - ``BotAccountCredentialsNotConfigured``
     (code=BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED).
   - ``BotStateConflict`` (code=BOT_STATE_CONFLICT).
-- audit logger optional 처리:
-  - ``bot.start`` / ``bot.stop`` 성공 시 audit ``bot.start`` / ``bot.stop`` 기록.
-  - ``bot.status`` 는 read-only — audit 없음.
-  - ``audit_logger=None`` / 속성 부재 환경에서도 핸들러 정상 성공.
+- audit detail handover (#1851):
+  - ``bot.start`` / ``bot.stop`` 성공 시 handler 반환 dict 안의 reserved key
+    ``_audit_detail`` 에 ``resource=f"bot:{bot_id}"`` 가 채워져 있다 — 실제
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action`` 기반으로
+    수행한다.
+  - ``bot.status`` 는 read-only — ``_audit_detail`` 자체가 없다.
 - ``trade_service`` optional:
   - 주입 시 positions 보강.
   - 부재 시 ``positions`` 키 부재(회귀 lock, #1712 cold-path 호환).
@@ -111,22 +113,32 @@ class TestHandleBotStart:
     """``_handle_bot_start`` 정상 + 거부 경로."""
 
     async def test_success_returns_bot_envelope(self) -> None:
-        """성공 시 ``{"bot": info}`` envelope + audit ``bot.start`` 기록."""
+        """성공 시 ``{"bot": info, "_audit_detail": {...}}`` envelope.
+
+        Refs #1851: handler 본문은 더 이상 ``audit_logger.log`` 를 직접
+        호출하지 않는다 — ``_audit_detail`` reserved key 로 wrapper 에 audit
+        detail 만 넘긴다. 실제 audit 발화 + reserved key strip 은 ``_dispatch``
+        wrapper 가 envelope 생성 전에 수행한다(통합 검증은
+        ``test_dispatch_wrapper_audit.py``).
+        """
         bot = _make_bot(bot_id="bot-1", account_id="acc-1")
         account = SimpleNamespace(credentials={"app_key": "AK-XYZ"})
         svc, audit_log = _make_svc(bot=bot, account=account)
 
         result = await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
 
-        assert result == {"bot": {"bot_id": "bot-1", "status": "stopped"}}
+        assert result == {
+            "bot": {"bot_id": "bot-1", "status": "stopped"},
+            "_audit_detail": {
+                "resource": "bot:bot-1",
+                "detail": "",
+                "ip": "",
+            },
+        }
         svc.bot_manager.start_bot.assert_awaited_once_with("bot-1")
+        # handler 본문은 audit 호출을 더 이상 직접 수행하지 않는다(#1851).
         assert audit_log is not None
-        audit_log.assert_awaited_once_with(
-            member_id="admin-master",
-            action="bot.start",
-            resource="bot:bot-1",
-            ip="",
-        )
+        audit_log.assert_not_awaited()
 
     async def test_missing_bot_raises_bot_not_found(self) -> None:
         """봇 부재 → ``BotNotFoundError`` (code=BOT_NOT_FOUND)."""
@@ -173,14 +185,27 @@ class TestHandleBotStart:
         audit_log.assert_not_awaited()
 
     async def test_succeeds_when_audit_logger_is_none(self) -> None:
-        """``audit_logger=None`` 환경에서도 핸들러는 정상 성공."""
+        """``audit_logger=None`` 환경에서도 핸들러는 정상 성공.
+
+        Refs #1851: handler 가 audit 를 직접 호출하지 않으므로 ``audit_logger``
+        부재가 handler 정상 경로에 영향을 주지 않는다. ``_audit_detail`` 만
+        envelope 에 담겨 반환되며, wrapper 가 ``audit_logger`` 부재를 감지하면
+        skip 한다(``test_audit_action_without_audit_logger_no_crash``).
+        """
         bot = _make_bot()
         account = SimpleNamespace(credentials={"app_key": "AK"})
         svc, _ = _make_svc(bot=bot, account=account, with_audit_logger=False)
 
         result = await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
 
-        assert result == {"bot": {"bot_id": "bot-1", "status": "stopped"}}
+        assert result == {
+            "bot": {"bot_id": "bot-1", "status": "stopped"},
+            "_audit_detail": {
+                "resource": "bot:bot-1",
+                "detail": "",
+                "ip": "",
+            },
+        }
         svc.bot_manager.start_bot.assert_awaited_once_with("bot-1")
 
 
@@ -191,23 +216,30 @@ class TestHandleBotStop:
     """``_handle_bot_stop`` 정상 + 거부 경로."""
 
     async def test_success_returns_bot_envelope(self) -> None:
-        """성공 시 ``{"bot": info}`` envelope + audit ``bot.stop`` 기록."""
+        """성공 시 ``{"bot": info, "_audit_detail": {...}}`` envelope.
+
+        Refs #1851: ``bot.start`` 와 동형 — handler 는 ``_audit_detail`` 만
+        반환하고, 실제 audit 발화는 ``_dispatch`` wrapper 가 수행한다.
+        """
         bot = _make_bot(bot_id="bot-1")
         svc, audit_log = _make_svc(bot=bot)
 
         result = await _handle_bot_stop(svc, {"bot_id": "bot-1"}, "admin-master")
 
-        assert result == {"bot": {"bot_id": "bot-1", "status": "stopped"}}
+        assert result == {
+            "bot": {"bot_id": "bot-1", "status": "stopped"},
+            "_audit_detail": {
+                "resource": "bot:bot-1",
+                "detail": "",
+                "ip": "",
+            },
+        }
         svc.bot_manager.stop_bot.assert_awaited_once_with("bot-1")
         # ``bot.stop`` 은 app_key preflight 가 없다 — account_service.get 미호출.
         svc.account.get.assert_not_awaited()
+        # handler 본문에서 audit 직접 호출 제거(#1851).
         assert audit_log is not None
-        audit_log.assert_awaited_once_with(
-            member_id="admin-master",
-            action="bot.stop",
-            resource="bot:bot-1",
-            ip="",
-        )
+        audit_log.assert_not_awaited()
 
     async def test_missing_bot_raises_bot_not_found(self) -> None:
         """봇 부재 → ``BotNotFoundError`` (code=BOT_NOT_FOUND)."""
@@ -236,13 +268,20 @@ class TestHandleBotStop:
         audit_log.assert_not_awaited()
 
     async def test_succeeds_when_audit_logger_is_none(self) -> None:
-        """``audit_logger=None`` 환경에서도 핸들러는 정상 성공."""
+        """``audit_logger=None`` 환경에서도 핸들러는 정상 성공 (#1851)."""
         bot = _make_bot()
         svc, _ = _make_svc(bot=bot, with_audit_logger=False)
 
         result = await _handle_bot_stop(svc, {"bot_id": "bot-1"}, "admin-master")
 
-        assert result == {"bot": {"bot_id": "bot-1", "status": "stopped"}}
+        assert result == {
+            "bot": {"bot_id": "bot-1", "status": "stopped"},
+            "_audit_detail": {
+                "resource": "bot:bot-1",
+                "detail": "",
+                "ip": "",
+            },
+        }
         svc.bot_manager.stop_bot.assert_awaited_once_with("bot-1")
 
 

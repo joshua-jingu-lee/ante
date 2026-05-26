@@ -324,6 +324,17 @@ class IPCServer:
         lifecycle gate 가 preflight 보다 항상 먼저 — DRAINING/STOPPED 또는
         SHUTTING_DOWN+mutating 인 경우 preflight 에 도달하지 않는다(Codex v2
         condition 3).
+
+        Refs #1851 (#1819 부모 epic): handler 가 정상 종료된 후
+        ``CommandSpec.audit_action`` 이 ``None`` 이 아니면 ``audit_logger`` 를
+        통해 자동으로 audit 로그를 1회 남긴다. handler 는 반환 dict 안의
+        ``_audit_detail`` reserved key 로 ``{resource, detail, ip}`` 를 wrapper
+        에 전달할 수 있으며, public envelope 으로 새 나가지 않도록 wrapper 가
+        ``pop`` 으로 strip 한 뒤 envelope ``result`` 에 담는다. handler 가
+        예외로 종료되면 audit 호출은 일어나지 않는다(실패 시 audit invariant).
+        ``audit_action`` 이 부여된 7 commands 는 ``required_services`` 에
+        ``audit_logger`` 가 명시되어 있어 preflight 단계에서 부재가 차단된다
+        (#1849 등록 시 동형 lock).
         """
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
@@ -388,6 +399,29 @@ class IPCServer:
                     require_account_id(account_id_arg, context=f"ipc.{command}")
 
             result = await spec.handler(self._service_registry, args, actor)
+            # Refs #1851: handler 정상 종료 후 audit_action 자동 발화.
+            # ``_audit_detail`` reserved key 는 ``pop`` 으로 envelope 노출
+            # 전에 strip 된다 (public payload 누출 invariant).
+            # ``audit_action`` 부여 7 commands 는 ``required_services`` 에
+            # ``audit_logger`` 가 포함되어 있어 preflight 단계에서 부재가
+            # 이미 차단됨 — 여기서는 ``getattr`` safe-access 로 한 번 더
+            # 방어한다 (handler 가 dict 가 아닌 다른 shape 을 반환하는
+            # 경우에도 strip 시도가 실패하지 않도록 isinstance 가드).
+            audit_detail: dict | None = None
+            if isinstance(result, dict):
+                audit_detail = result.pop("_audit_detail", None)
+            if spec.audit_action is not None:
+                audit_logger = getattr(self._service_registry, "audit_logger", None)
+                if audit_logger is not None:
+                    if audit_detail is None:
+                        audit_detail = {}
+                    await audit_logger.log(
+                        member_id=actor,
+                        action=spec.audit_action,
+                        resource=audit_detail.get("resource") or "",
+                        detail=audit_detail.get("detail") or "",
+                        ip=audit_detail.get("ip") or "",
+                    )
             return {
                 "id": request_id,
                 "status": "ok",
