@@ -397,7 +397,8 @@ tests/
 │   │   ├── test_usage_error_json.py
 │   │   ├── test_instrument_exchange_validation.py
 │   │   ├── test_db_context_manager.py
-│   │   └── test_cli_factory_migration_cleanup.py
+│   │   ├── test_cli_factory_migration_cleanup.py
+│   │   └── test_factory_drift_check.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -600,7 +601,8 @@ tests/
 │   │   ├── test_error_drift.py
 │   │   ├── test_cli_registry_leaf_coverage.py
 │   │   ├── test_cli_registry_shell.py
-│   │   └── test_cli_registry_auth_drift.py
+│   │   ├── test_cli_registry_auth_drift.py
+│   │   └── factory_drift_allowlist.yaml
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
