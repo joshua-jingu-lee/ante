@@ -18,16 +18,17 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 3).
 * :data:`TREASURY_CONTRACTS` — treasury 도메인 9 leaf contract tuple
   (#1847 sub-PR 4).
+* :data:`STRATEGY_CONTRACTS` — strategy 도메인 7 leaf contract tuple
+  (#1847 sub-PR 5).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
   PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-  = 51 entries 가 채워져 있다.
+  + strategy 7 = 58 entries 가 채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 5 이후 — strategy / broker /
-  data / report / system / instrument / config / rule / trade / backtest /
-  audit / signal).
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 6 이후 — broker / data / report /
+  system / instrument / config / rule / trade / backtest / audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
@@ -77,6 +78,7 @@ __all__ = [
     "BOT_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
     "MEMBER_CONTRACTS",
+    "STRATEGY_CONTRACTS",
     "TREASURY_CONTRACTS",
     "AuthContract",
     "CliCommandContract",
@@ -852,6 +854,135 @@ snapshot → portfolio value/history) 와 시각적으로 일치하도록 정렬
 """
 
 
+# ── #1847 sub-PR 5: strategy domain OutputContract migration ────────────
+#
+# strategy 도메인 7 leaf 의 contract entry. ``src/ante/cli/commands/strategy.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:105-111`` (실행 분류) / ``395-403`` (커맨드
+# 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (6 commands): ``submit`` / ``list`` / ``set-status`` /
+# ``info`` / ``summary`` / ``performance`` 는 JSON 모드에서 ``fmt.output(
+# result)`` 평면 dict 를 그대로 dump 한다. ``submit`` 는 성공 시 ``{submitted:
+# True, strategy_id, ...}`` 평면 dict, ``list`` 는 ``{strategies: [...]}`` 또는
+# ``{message, strategies: []}`` 평면, ``set-status`` 는 IPC 또는 cold_path
+# 분기 결과 평면, ``info`` 는 metadata + params 평면 dict, ``summary`` 는
+# ``{strategy_id, period, bot_id, items}`` 평면, ``performance`` 는
+# ``{strategy_name, strategy_id, metrics}`` 평면. 도메인 envelope 형태이며
+# standard envelope ``{status, message, data}`` 3 키 셋과는 다르다.
+# ``OutputContract(kind="raw", envelope="raw_legacy")`` 조합으로 표현해 lock
+# 만 한다 — strategy.py 본문 변경 없음 (drift test 가 callsite 변경 시 FAIL).
+#
+# standard envelope (1 command): ``validate`` 는 단일 success 경로
+# ``fmt.success(f"Strategy validation passed: ...", data)`` 만 호출하며 표준
+# envelope (``{status, message, data}``) 을 dump 한다. invalid 분기는 별도
+# ``fmt.error`` 또는 ``fmt.output({"status": "error", ...})`` 이지만 본 drift
+# test 의 success-output scope 밖이다.
+#
+# scope 분류 (#1815 SSOT, strategy.py @require_scope marker 와 1:1 정합):
+# - ``strategy:read`` scope (4 개): ``list`` / ``info`` / ``summary`` /
+#   ``performance``.
+# - ``strategy:write`` scope (3 개): ``validate`` / ``submit`` / ``set-status``.
+# - public allowlist: 없음 — strategy 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:105-111`` SSOT):
+# - ``offline`` (6 개): ``validate`` / ``submit`` / ``list`` / ``info`` /
+#   ``summary`` / ``performance``. 각 leaf 는 ``Database`` 와
+#   ``StrategyRegistry`` / ``PerformanceTracker`` / ``StrategyValidator`` /
+#   ``StrategyLoader`` 를 직접 생성한다.
+# - ``runtime_ipc`` (1 개): ``set-status``. ``is_active_runtime()`` 분기로
+#   ``ipc_send("strategy.set_status", ...)`` 를 호출하고, runtime 비활성 시
+#   cold_path fallback 으로 ``StrategyRegistry`` 를 직접 사용한다. spec
+#   primary 분류는 runtime_ipc 다 (account ``suspend``/``activate`` /
+#   member ``update-scopes`` / treasury ``set-balance`` 동형 — fallback 분기가
+#   있어도 spec primary 분류만 lock).
+#
+# ``ipc_command`` 필드는 stub 값만 채운다 (``"strategy.set_status"``); 단순
+# 문자열 lock 이며 server-side IPC registry 와의 cross-ref drift test 는
+# #1819 의 책임이다 (account/member/bot/approval/treasury 동형 정책).
+# strategy.py 호출 사이트의 IPC command name 과 그대로 일치한다.
+STRATEGY_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("strategy", "validate"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:write"})),
+        # 단일 success 경로 ``fmt.success(f"Strategy validation passed: ...",
+        # data)`` → standard envelope. invalid 분기는 ``fmt.error`` / ``fmt.output(
+        # {"status": "error", ...})`` 이지만 success-output drift scope 밖.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("strategy", "submit"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:write"})),
+        # JSON mode 성공 경로: ``fmt.output(result)`` 평면 dict (``{submitted:
+        # True, strategy_id, name, version, ...}``). text 모드는 ``fmt.success``
+        # 분기. validation/load/meta_validation/register 실패 분기도 모두
+        # ``fmt.output({"submitted": False, "stage", "code", ...})`` 평면 dict
+        # 이지만 success-output drift scope 밖 (실패 분기는 별도).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("strategy", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:read"})),
+        # JSON mode: empty → ``fmt.output({"message": "등록된 전략 없음",
+        # "strategies": []})`` 평면, non-empty → ``fmt.output({"strategies":
+        # [...]})`` 평면. text 는 fmt.table.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("strategy", "info"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 metadata + params dict
+        # (``{strategy_id, name, version, status, description, author_name,
+        # author_id, filepath, registered_at, validation_warnings, params?,
+        # param_schema?, rationale?, risks?, other_versions?}``). text 는
+        # click.echo 8+ 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("strategy", "performance"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{strategy_name,
+        # strategy_id, metrics: {...}}``). text 는 click.echo 다수 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("strategy", "set-status"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:write"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict — IPC 분기와 cold_path
+        # 분기 모두 ``{strategy_id, status, name, version, ...}`` 평면 shape
+        # 를 그대로 dump 한다 (account ``set-credentials`` / treasury
+        # ``set-balance`` 동형 raw_legacy 정책). spec 은 ``runtime IPC`` 이며
+        # ``is_active_runtime()`` 분기로 cold_path fallback 을 보유하지만
+        # primary 분류만 lock.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="strategy.set_status",
+    ),
+    CliCommandContract(
+        path=("strategy", "summary"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"strategy:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{strategy_id, period,
+        # bot_id, items: [...]}``). text 는 fmt.table 또는 empty 분기에서
+        # ``fmt.output({"message": "성과 집계 없음", "items": []})``.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+)
+"""Strategy domain 7 leaf 의 contract tuple (#1847 sub-PR 5).
+
+순서는 ``docs/specs/cli/03-commands.md:105-111`` 의 strategy 실행 분류 표
+(validate → submit → list → info → performance → set-status → summary) 와
+시각적으로 일치하도록 정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import
+시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     contract.path: contract
     for contract in (
@@ -860,16 +991,18 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
         *BOT_CONTRACTS,
         *APPROVAL_CONTRACTS,
         *TREASURY_CONTRACTS,
+        *STRATEGY_CONTRACTS,
     )
 }
 """Leaf command path → contract mapping.
 
 본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-= 51 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
-#1847 sub-PR 3 / #1847 sub-PR 4). 나머지 도메인 (strategy / broker / data
-/ report / system / instrument / config / rule / trade / backtest / audit /
-signal) 의 entry 등록은 후속 PR (`#1847` sub-PR 5-9) 의 책임이다. registry
-미등록 leaf 가 FAIL 이어야 하는 drift guard 는 `#1848` 가 활성화한다.
++ strategy 7 = 58 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847
+sub-PR 2 / #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5). 나머지 도메인
+(broker / data / report / system / instrument / config / rule / trade /
+backtest / audit / signal) 의 entry 등록은 후속 PR (`#1847` sub-PR 6-9) 의
+책임이다. registry 미등록 leaf 가 FAIL 이어야 하는 drift guard 는 `#1848`
+가 활성화한다.
 """
 
 
@@ -889,7 +1022,7 @@ def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
     본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury
-    9 = 51 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR
-    2 / #1847 sub-PR 3 / #1847 sub-PR 4).
+    9 + strategy 7 = 58 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 /
+    #1847 sub-PR 2 / #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5).
     """
     yield from CLI_COMMAND_REGISTRY.values()
