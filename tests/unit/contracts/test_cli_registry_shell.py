@@ -180,17 +180,17 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (등록된 8 도메인 외).
+    """미등록 path 는 ``None`` 을 반환한다 (등록된 10 도메인 외).
 
     등록 도메인: account / member / bot / approval / treasury / strategy /
-    data / report.
+    data / report / broker / system.
     """
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # broker 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 7 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (data / report domain 은
-    # sub-PR 6 에서 등록되었다).
-    assert get_contract(("broker", "status")) is None
+    # instrument 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 8 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (broker / system domain 은
+    # sub-PR 7 에서 등록되었다).
+    assert get_contract(("instrument", "list")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
@@ -420,6 +420,56 @@ def test_report_entries_registered_after_1847_sub_pr_6() -> None:
     assert expected_report_paths.issubset(registered), (
         f"report 5 entry 가 모두 등록되어야 한다 (#1847 sub-PR 6). "
         f"누락: {sorted(expected_report_paths - registered)}"
+    )
+
+
+def test_broker_entries_registered_after_1847_sub_pr_7() -> None:
+    """#1847 sub-PR 7 가 broker 4 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 7 가 broker migration 을 완료한 시점부터
+    lock 된다. 4 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_broker_success_output_drift` 가
+    책임진다.
+    """
+    expected_broker_paths = {
+        ("broker", "status"),
+        ("broker", "balance"),
+        ("broker", "positions"),
+        ("broker", "reconcile"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_broker_paths.issubset(registered), (
+        f"broker 4 entry 가 모두 등록되어야 한다 (#1847 sub-PR 7). "
+        f"누락: {sorted(expected_broker_paths - registered)}"
+    )
+
+
+def test_system_entries_registered_after_1847_sub_pr_7() -> None:
+    """#1847 sub-PR 7 가 system 5 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 7 가 system migration 을 완료한 시점부터
+    lock 된다. 5 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_system_success_output_drift` 가
+    책임진다.
+
+    spec 표 (``docs/specs/cli/03-commands.md:77-78``) 는 ``start`` /
+    ``stop`` 을 ``external process`` 로 분류하지만 본 registry 의
+    ``ExecutionClass`` vocab 매핑 (모듈 docstring normative 표) 에 따라
+    ``"long_running"`` 에 흡수된다 (#1815 5 값 결정).
+    """
+    expected_system_paths = {
+        ("system", "start"),
+        ("system", "stop"),
+        ("system", "status"),
+        ("system", "halt"),
+        ("system", "clear-halt"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_system_paths.issubset(registered), (
+        f"system 5 entry 가 모두 등록되어야 한다 (#1847 sub-PR 7). "
+        f"누락: {sorted(expected_system_paths - registered)}"
     )
 
 

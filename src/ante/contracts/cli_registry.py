@@ -24,15 +24,20 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 6).
 * :data:`REPORT_CONTRACTS` — report 도메인 5 leaf contract tuple
   (#1847 sub-PR 6).
+* :data:`BROKER_CONTRACTS` — broker 도메인 4 leaf contract tuple
+  (#1847 sub-PR 7).
+* :data:`SYSTEM_CONTRACTS` — system 도메인 5 leaf contract tuple
+  (#1847 sub-PR 7).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
   PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-  + strategy 7 + data 6 + report 5 = 69 entries 가 채워져 있다.
+  + strategy 7 + data 6 + report 5 + broker 4 + system 5 = 78 entries 가
+  채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 7 이후 — broker / system /
-  instrument / config / rule / trade / backtest / audit / signal).
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 8 이후 — instrument / config /
+  rule / trade / backtest / audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
@@ -80,11 +85,13 @@ __all__ = [
     "ACCOUNT_CONTRACTS",
     "APPROVAL_CONTRACTS",
     "BOT_CONTRACTS",
+    "BROKER_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
     "DATA_CONTRACTS",
     "MEMBER_CONTRACTS",
     "REPORT_CONTRACTS",
     "STRATEGY_CONTRACTS",
+    "SYSTEM_CONTRACTS",
     "TREASURY_CONTRACTS",
     "AuthContract",
     "CliCommandContract",
@@ -1183,6 +1190,204 @@ submit → list → performance → view) 와 시각적으로 일치하도록 �
 """
 
 
+# ── #1847 sub-PR 7: broker domain OutputContract migration ──────────────
+#
+# broker 도메인 4 leaf 의 contract entry. ``src/ante/cli/commands/broker.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:123-126`` (실행 분류) / ``449-463`` (커맨드
+# 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (4 commands, 전체): ``status`` / ``balance`` / ``positions``
+# / ``reconcile`` 모두 JSON 모드에서 ``fmt.output(result)`` 또는 ``fmt.table(
+# pos_list, columns)`` 평면 dict / row list 를 그대로 dump 한다. 도메인
+# envelope (``{connected, healthy, exchange, ...}``, ``{현금/매수가능 평면}``,
+# ``{positions: [...]}``, ``{total_symbols, discrepancies, match, ...}``) 이며
+# standard envelope ``{status, message, data}`` 3 키 셋과는 다르다.
+# ``OutputContract(kind="raw", envelope="raw_legacy")`` 조합으로 표현해 lock
+# 만 한다 — broker.py 본문 변경 없음 (drift test 가 callsite 변경 시 FAIL).
+#
+# ``positions`` 는 분기 mixed: empty → ``fmt.output({"message": ...,
+# "positions": []})`` (broker.py:278), non-empty JSON → ``fmt.output({"positions":
+# [...]})`` (broker.py:282), non-empty text → ``fmt.table(...)`` (broker.py:285).
+# 모두 도메인 envelope 평면 — raw_legacy 정책 (account/treasury/strategy/data
+# 분기 mixed 동형).
+#
+# scope 분류 (#1815 SSOT, broker.py @require_scope marker 와 1:1 정합):
+# - ``broker:read`` scope (4 개, 전체): ``status`` / ``balance`` /
+#   ``positions`` / ``reconcile``. ``reconcile --fix`` 는 mutating 분기이지만
+#   marker 는 ``broker:read`` 로 유지된다 (#1843 sub-PR 5 audit_actor scope
+#   결정 — write scope 분리 없음).
+# - public allowlist: 없음 — broker 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:123-126`` SSOT):
+# - ``runtime_ipc`` (4 개, 전체): 모든 broker live 커맨드는 spec 상 서버가
+#   시작 시 생성한 BrokerAdapter 를 통해 실행하는 런타임 IPC 커맨드다 (spec
+#   458-463 narrative). broker.py 의 실제 callsite 는 ``ipc_send(...)`` 우선
+#   + ``click.ClickException`` 발생 시 cold_path fallback (직접 BrokerAdapter
+#   생성) 분기를 보유하지만 spec primary 분류는 runtime_ipc 다 (account
+#   ``suspend``/``activate`` / member ``update-scopes`` / treasury
+#   ``set-balance`` / strategy ``set-status`` 동형 — fallback 분기가 있어도
+#   spec primary 분류만 lock).
+#
+# ``ipc_command`` 필드는 stub 값만 채운다 (예: ``"broker.status"``); 단순
+# 문자열 lock 이며 server-side IPC registry 와의 cross-ref drift test 는
+# #1819 의 책임이다 (account/member/bot/approval/treasury/strategy 동형 정책).
+# broker.py 호출 사이트의 IPC command name 과 그대로 일치한다 (``broker.status``
+# / ``broker.balance`` / ``broker.positions`` / ``broker.reconcile``).
+BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("broker", "status"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{connected, healthy,
+        # exchange?, error?}``, broker.py:159). text 는 click.echo 다수 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="broker.status",
+    ),
+    CliCommandContract(
+        path=("broker", "balance"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 broker 잔고 dict
+        # (broker.py:220). 키 셋은 broker adapter 가 반환하는 그대로 (IPC
+        # 분기는 server BrokerAdapter response 의 평면 dict, fallback 분기는
+        # KIS/Mock adapter 의 ``get_account_balance()`` 반환값).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="broker.balance",
+    ),
+    CliCommandContract(
+        path=("broker", "positions"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
+        # 분기 mixed: empty → ``fmt.output({"message": "보유 종목 없음",
+        # "positions": []})`` (broker.py:278), non-empty JSON →
+        # ``fmt.output({"positions": [...]})`` (broker.py:282), non-empty text
+        # → ``fmt.table(pos_list, columns)`` (broker.py:285). 모두 도메인
+        # envelope 평면.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="broker.positions",
+    ),
+    CliCommandContract(
+        path=("broker", "reconcile"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{total_symbols,
+        # discrepancies, match, fix_applied, corrections}``, broker.py:406).
+        # text 는 click.echo + (불일치가 있으면) fmt.table. ``--fix`` 분기는
+        # IPC mutating 호출이지만 success envelope shape 는 동일.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="broker.reconcile",
+    ),
+)
+"""Broker domain 4 leaf 의 contract tuple (#1847 sub-PR 7).
+
+순서는 ``docs/specs/cli/03-commands.md:123-126`` 의 broker 실행 분류 표
+(status → balance → positions → reconcile) 와 시각적으로 일치하도록
+정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
+# ── #1847 sub-PR 7: system domain OutputContract migration ──────────────
+#
+# system 도메인 5 leaf 의 contract entry. ``src/ante/cli/commands/system.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:77-81`` (실행 분류) / ``156-164`` (커맨드
+# 표) 와 1:1 정합한다.
+#
+# standard envelope (4 commands): ``start`` / ``stop`` / ``halt`` /
+# ``clear-halt`` 는 단일 success 경로 ``fmt.success(message[, data])`` 만
+# 호출하며 표준 envelope (``{status, message, data}``) 을 dump 한다.
+# - ``start`` (system.py:94): ``fmt.success("시스템 시작 중...")`` — data
+#   인자 없음 (``OutputFormatter.success`` 가 ``None`` → ``{}`` 으로 normalize).
+#   JSON 모드에서 ``data: {}`` 평면 dict 슬롯이 있다.
+# - ``stop`` (system.py:152): ``fmt.success("종료 시그널 전송 완료", {"pid": pid})``.
+# - ``halt`` (system.py:224): ``fmt.success(f"시스템 HALTED — {count}개 ...", data)``.
+# - ``clear-halt`` (system.py:242): ``fmt.success(f"시스템 정지 해제 — ...", data)``.
+# JSON / text 분기 없음 (text 와 JSON 양쪽 모두 fmt.success).
+#
+# raw_legacy 분류 (1 command): ``status`` (system.py:202-206) 는 JSON 모드
+# 분기에서 ``fmt.output(result)`` 로 평면 dict (``{trading_state, bot_count}``)
+# 를 그대로 dump 한다. text 모드는 click.echo 2 줄. ``OutputContract(kind=
+# "raw", envelope="raw_legacy")`` 조합으로 표현해 lock 만 한다.
+#
+# scope 분류 (#1815 SSOT, system.py @require_scope marker 와 1:1 정합):
+# - ``system:read`` scope (1 개): ``status``.
+# - ``system:admin`` scope (4 개): ``start`` / ``stop`` / ``halt`` /
+#   ``clear-halt``.
+# - public allowlist: 없음 — system 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:77-81`` SSOT):
+# - ``long_running`` (2 개): ``start`` / ``stop``. spec 표는 ``external
+#   process`` 표기이며 본 registry 의 ExecutionClass vocab 매핑 (모듈 docstring
+#   normative 표) 에 따라 ``"long_running"`` 에 흡수된다.
+# - ``offline`` (1 개): ``status``. 로컬 DB / PID 상태 조회.
+# - ``runtime_ipc`` (2 개): ``halt`` / ``clear-halt``. ``ipc_send`` 로 IPC
+#   handler (``system.halt`` / ``system.clear_halt``) 를 호출.
+#
+# ``ipc_command`` 필드는 ``halt`` / ``clear-halt`` 의 IPC command name stub
+# 만 채운다 (``"system.halt"`` / ``"system.clear_halt"``); 단순 문자열 lock
+# 이며 server-side IPC registry 와의 cross-ref drift test 는 #1819 의 책임이다.
+# ``start`` / ``stop`` 은 IPC 가 아니라 OS process 제어 (``subprocess.run`` /
+# ``os.kill(SIGTERM)``) 이므로 ``ipc_command`` 는 ``None``.
+SYSTEM_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("system", "start"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"system:admin"})),
+        # 단일 success 경로 ``fmt.success("시스템 시작 중...")`` (system.py:94)
+        # — data 인자 없음. JSON 모드 dump 는 ``{status: "ok", message:
+        # "시스템 시작 중...", data: {}}`` standard envelope. 이후 subprocess
+        # 가 inherit 된 stderr 로 자식 로그를 흘려 ``json.loads`` 파싱이
+        # 단일 document 로 보장된다 (#1757 stdout 격리).
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="long_running",
+    ),
+    CliCommandContract(
+        path=("system", "stop"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"system:admin"})),
+        # 단일 success 경로 ``fmt.success("종료 시그널 전송 완료", {"pid": pid})``
+        # (system.py:152) → standard envelope (``data: {pid}``). error 분기는
+        # ``fmt.error`` 이며 본 drift test 의 success-output scope 밖.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="long_running",
+    ),
+    CliCommandContract(
+        path=("system", "status"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"system:read"})),
+        # JSON mode 분기: ``fmt.output(result)`` 평면 dict (``{trading_state,
+        # bot_count}``, system.py:203). text 는 click.echo 2 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("system", "halt"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"system:admin"})),
+        # 단일 success 경로 ``fmt.success(f"시스템 HALTED — {count}개 계좌
+        # 거래 중지", data)`` (system.py:224) → standard envelope. IPC response
+        # 의 ``data`` slot (``{accounts_changed, ...}``) 을 그대로 wrapping.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="system.halt",
+    ),
+    CliCommandContract(
+        path=("system", "clear-halt"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"system:admin"})),
+        # 단일 success 경로 ``fmt.success(f"시스템 정지 해제 — ...", data)``
+        # (system.py:242) → standard envelope. halt 동형 IPC wrapping.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="system.clear_halt",
+    ),
+)
+"""System domain 5 leaf 의 contract tuple (#1847 sub-PR 7).
+
+순서는 ``docs/specs/cli/03-commands.md:77-81`` 의 system 실행 분류 표
+(start → stop → status → halt → clear-halt) 와 시각적으로 일치하도록
+정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     contract.path: contract
     for contract in (
@@ -1194,17 +1399,20 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
         *STRATEGY_CONTRACTS,
         *DATA_CONTRACTS,
         *REPORT_CONTRACTS,
+        *BROKER_CONTRACTS,
+        *SYSTEM_CONTRACTS,
     )
 }
 """Leaf command path → contract mapping.
 
 본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-+ strategy 7 + data 6 + report 5 = 69 entries 가 등록되어 있다 (#1846 /
-#1847 sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR 3 / #1847 sub-PR 4 / #1847
-sub-PR 5 / #1847 sub-PR 6). 나머지 도메인 (broker / system / instrument /
-config / rule / trade / backtest / audit / signal) 의 entry 등록은 후속
-PR (`#1847` sub-PR 7-9) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야
-하는 drift guard 는 `#1848` 가 활성화한다.
++ strategy 7 + data 6 + report 5 + broker 4 + system 5 = 78 entries 가
+등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR 3
+/ #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 / #1847 sub-PR 7).
+나머지 도메인 (instrument / config / rule / trade / backtest / audit /
+signal) 의 entry 등록은 후속 PR (`#1847` sub-PR 8-9) 의 책임이다.
+registry 미등록 leaf 가 FAIL 이어야 하는 drift guard 는 `#1848` 가
+활성화한다.
 """
 
 
@@ -1224,8 +1432,9 @@ def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
     본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury
-    9 + strategy 7 + data 6 + report 5 = 69 entries 가 등록되어 있다
-    (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR 3 / #1847
-    sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6).
+    9 + strategy 7 + data 6 + report 5 + broker 4 + system 5 = 78 entries
+    가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 / #1847
+    sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 / #1847
+    sub-PR 7).
     """
     yield from CLI_COMMAND_REGISTRY.values()
