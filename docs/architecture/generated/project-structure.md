@@ -252,7 +252,8 @@ src/ante/
 │   │   └── update.py
 │   ├── __init__.py
 │   ├── cold_path.py
-│   └── _validators.py
+│   ├── _validators.py
+│   └── db_context.py
 ├── account/
 │   ├── __init__.py
 │   ├── crypto.py
@@ -394,7 +395,8 @@ tests/
 │   │   ├── test_bot_create_exit_code.py
 │   │   ├── test_broker_missing_account.py
 │   │   ├── test_usage_error_json.py
-│   │   └── test_instrument_exchange_validation.py
+│   │   ├── test_instrument_exchange_validation.py
+│   │   └── test_db_context_manager.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
