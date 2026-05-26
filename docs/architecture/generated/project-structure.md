@@ -607,7 +607,8 @@ tests/
 │   ├── test_account_success_output_drift.py
 │   ├── test_member_success_output_drift.py
 │   ├── test_bot_success_output_drift.py
-│   └── test_approval_success_output_drift.py
+│   ├── test_approval_success_output_drift.py
+│   └── test_treasury_success_output_drift.py
 └── __init__.py
 ```
 
