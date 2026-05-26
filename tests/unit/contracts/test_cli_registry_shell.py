@@ -180,13 +180,13 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (account/member/bot/approval 외)."""
+    """미등록 path 는 ``None`` 을 반환한다 (account/member/bot/approval/treasury 외)."""
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # treasury 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 4 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (approval domain 은 sub-PR 3
+    # strategy 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 5 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (treasury domain 은 sub-PR 4
     # 에서 등록되었다).
-    assert get_contract(("treasury", "transactions")) is None
+    assert get_contract(("strategy", "list")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
@@ -304,6 +304,39 @@ def test_approval_entries_registered_after_1847_sub_pr_3() -> None:
     assert expected_approval_paths.issubset(registered), (
         f"approval 10 entry 가 모두 등록되어야 한다 (#1847 sub-PR 3). "
         f"누락: {sorted(expected_approval_paths - registered)}"
+    )
+
+
+def test_treasury_entries_registered_after_1847_sub_pr_4() -> None:
+    """#1847 sub-PR 4 가 treasury 9 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 4 가 treasury migration 을 완료한 시점부터
+    lock 된다. 9 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_treasury_success_output_drift` 가
+    책임진다.
+
+    이슈 #1847 본문은 treasury "8 leaf" 로 추정했지만 실측 Click leaf
+    iterator 는 9 leaf 를 반환한다 (spec 표 408-427 가 ``portfolio
+    value/history`` 를 한 줄로 묶어 표현하지만 Click subgroup ``treasury
+    portfolio`` 아래 ``value`` / ``history`` 두 leaf 가 별도로 존재). 본
+    test 는 9 leaf 모두를 단언한다.
+    """
+    expected_treasury_paths = {
+        ("treasury", "status"),
+        ("treasury", "transactions"),
+        ("treasury", "budgets"),
+        ("treasury", "set-balance"),
+        ("treasury", "allocate"),
+        ("treasury", "deallocate"),
+        ("treasury", "snapshot"),
+        ("treasury", "portfolio", "value"),
+        ("treasury", "portfolio", "history"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_treasury_paths.issubset(registered), (
+        f"treasury 9 entry 가 모두 등록되어야 한다 (#1847 sub-PR 4). "
+        f"누락: {sorted(expected_treasury_paths - registered)}"
     )
 
 

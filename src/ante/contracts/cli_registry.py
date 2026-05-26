@@ -16,16 +16,18 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 2).
 * :data:`APPROVAL_CONTRACTS` — approval 도메인 10 leaf contract tuple
   (#1847 sub-PR 3).
+* :data:`TREASURY_CONTRACTS` — treasury 도메인 9 leaf contract tuple
+  (#1847 sub-PR 4).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
-  PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42 entries 가
-  채워져 있다.
+  PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
+  = 51 entries 가 채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 4 이후 — treasury / strategy /
-  broker / data / report / system / instrument / config / rule / trade /
-  backtest / audit / signal).
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 5 이후 — strategy / broker /
+  data / report / system / instrument / config / rule / trade / backtest /
+  audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
@@ -75,6 +77,7 @@ __all__ = [
     "BOT_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
     "MEMBER_CONTRACTS",
+    "TREASURY_CONTRACTS",
     "AuthContract",
     "CliCommandContract",
     "ExecutionClass",
@@ -698,6 +701,157 @@ write → admin) 와 시각적으로 일치하도록 정렬된다.
 """
 
 
+# ── #1847 sub-PR 4: treasury domain OutputContract migration ────────────
+#
+# treasury 도메인 9 leaf 의 contract entry. ``src/ante/cli/commands/treasury.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:112-119`` (실행 분류) / ``408-427`` (커맨드
+# 표) 와 1:1 정합한다.
+#
+# 이슈 #1847 본문은 treasury "8 leaf" 로 추정했지만 실측 Click leaf iterator
+# (:func:`tests.unit.contracts.helpers.iter_click_leaf_commands`) 는 9 leaf 를
+# 반환한다 — spec 표 (408-427) 가 ``portfolio value/history`` 를 한 줄로 묶어
+# 표현하지만 Click subgroup ``treasury portfolio`` 아래 ``value`` /
+# ``history`` 두 leaf 가 별도로 존재하기 때문이다. registry 는 canonical
+# Click tree 기준이므로 9 entries 를 모두 등록한다 (leaf coverage helper SSOT).
+#
+# raw_legacy 분류 (7 commands): ``status`` / ``transactions`` / ``budgets`` /
+# ``set-balance`` / ``snapshot`` / ``portfolio value`` / ``portfolio history``
+# 는 JSON 모드에서 ``fmt.output(result)`` 평면 dict 를 그대로 dump 한다
+# (``transactions`` / ``budgets`` / ``portfolio history`` 는 text 모드에서
+# ``fmt.table`` 사용; JSON 모드는 분기로 ``fmt.output`` 호출). 도메인 envelope
+# 형태 (``{account_balance, ...}``, ``{items, total}``, ``{budgets: [...]}``,
+# ``{total_value, ...}``, ``{data, start_date, end_date}``) 이며 standard
+# envelope ``{status, message, data}`` 3 키 셋과는 다르다. ``OutputContract(
+# kind="raw", envelope="raw_legacy")`` 조합으로 표현해 lock 만 한다 —
+# treasury.py 본문 변경 없음 (drift test 가 callsite 변경 시 FAIL).
+#
+# standard envelope (2 commands): ``allocate`` / ``deallocate`` 는
+# ``fmt.success(message, data)`` 만 호출하며 표준 envelope (``{status,
+# message, data}``) 을 dump 한다 (success 분기 — error 분기는 ``fmt.error``
+# 이므로 본 drift test 의 success-output scope 밖). JSON / text 분기 없음.
+#
+# scope 분류 (#1815 SSOT, treasury.py @require_scope marker 와 1:1 정합):
+# - ``treasury:read`` scope (6 개): ``status`` / ``transactions`` /
+#   ``budgets`` / ``snapshot`` / ``portfolio value`` / ``portfolio history``.
+# - ``treasury:admin`` scope (3 개): ``set-balance`` / ``allocate`` /
+#   ``deallocate``.
+# - public allowlist: 없음 — treasury 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:112-119`` SSOT):
+# - ``offline`` (6 개): ``status`` / ``transactions`` / ``budgets`` /
+#   ``snapshot`` / ``portfolio value`` / ``portfolio history``. 각 leaf 는
+#   ``Database`` 와 ``Treasury`` / ``TreasuryManager`` 를 직접 생성해
+#   persisted snapshot/budget/transaction 을 조회한다.
+# - ``runtime_ipc`` (3 개): ``allocate`` / ``deallocate`` / ``set-balance``.
+#   ``ipc_send`` 로 IPC handler (``treasury.allocate`` / ``treasury.deallocate``
+#   / ``treasury.set_balance``) 를 호출한다. ``set-balance`` 는
+#   ``is_active_runtime()`` 분기로 cold_path fallback 을 보유하지만 spec
+#   primary 분류는 runtime_ipc 다 (account ``suspend``/``activate`` /
+#   member ``update-scopes`` 동형 — fallback 분기가 있어도 spec primary
+#   분류만 lock).
+#
+# ``ipc_command`` 필드는 stub 값만 채운다 (예: ``"treasury.allocate"``);
+# 단순 문자열 lock 이며 server-side IPC registry 와의 cross-ref drift test 는
+# #1819 의 책임이다 (account/member/bot/approval 동형 정책). treasury.py
+# 호출 사이트의 IPC command name 과 그대로 일치한다 (``treasury.allocate`` /
+# ``treasury.deallocate`` / ``treasury.set_balance``).
+TREASURY_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("treasury", "status"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{account_balance,
+        # purchasable_amount, total_evaluation, total_profit_loss,
+        # total_allocated, total_reserved, unallocated, bot_count}``). text 는
+        # click.echo 8 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("treasury", "transactions"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{items: [...], total}``).
+        # text 는 fmt.table.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("treasury", "budgets"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{budgets: [...]}``).
+        # text 는 fmt.table.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("treasury", "set-balance"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:admin"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict — IPC 분기와 cold_path
+        # 분기 모두 ``{account_id, total_balance, updated_at, ...}`` 평면 shape
+        # 를 그대로 dump 한다 (account ``set-credentials`` 동형 raw_legacy
+        # 정책). spec 은 ``runtime IPC`` 이며 ``is_active_runtime()`` 분기로
+        # cold_path fallback 을 보유하지만 primary 분류만 lock.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="treasury.set_balance",
+    ),
+    CliCommandContract(
+        path=("treasury", "allocate"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:admin"})),
+        # 단일 success 경로 ``fmt.success(f"예산 할당 완료: ...", data)`` →
+        # standard envelope (#1809 typed reject 이후 success 분기는 항상
+        # ``success=True``). error 분기는 ``fmt.error`` 이므로 본 drift test
+        # 의 success-output scope 밖.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="treasury.allocate",
+    ),
+    CliCommandContract(
+        path=("treasury", "deallocate"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:admin"})),
+        # 단일 success 경로 ``fmt.success(f"예산 회수 완료: ...", data)`` →
+        # standard envelope (allocate 동형).
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="treasury.deallocate",
+    ),
+    CliCommandContract(
+        path=("treasury", "snapshot"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict 또는 list (단일 일자는
+        # snapshot dict, 기간 조회는 snapshot dict list). 어느 분기든 평면
+        # shape 그대로 dump.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("treasury", "portfolio", "value"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{total_value,
+        # daily_pnl, daily_return, unrealized_pnl, accounts: [...],
+        # updated_at}``). text 는 click.echo 4 줄.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("treasury", "portfolio", "history"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"treasury:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict (``{data: [...],
+        # start_date, end_date}``). text 는 fmt.table.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+)
+"""Treasury domain 9 leaf 의 contract tuple (#1847 sub-PR 4).
+
+순서는 ``docs/specs/cli/03-commands.md:112-119`` 의 treasury 실행 분류 표
+(status → transactions → budgets → set-balance → allocate → deallocate →
+snapshot → portfolio value/history) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     contract.path: contract
     for contract in (
@@ -705,16 +859,17 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
         *MEMBER_CONTRACTS,
         *BOT_CONTRACTS,
         *APPROVAL_CONTRACTS,
+        *TREASURY_CONTRACTS,
     )
 }
 """Leaf command path → contract mapping.
 
-본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42 entries
-가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR
-3). 나머지 도메인 (treasury / strategy / broker / data / report / system /
-instrument / config / rule / trade / backtest / audit / signal) 의 entry
-등록은 후속 PR (`#1847` sub-PR 4-9) 의 책임이다. registry 미등록 leaf 가
-FAIL 이어야 하는 drift guard 는 `#1848` 가 활성화한다.
+본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
+= 51 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
+#1847 sub-PR 3 / #1847 sub-PR 4). 나머지 도메인 (strategy / broker / data
+/ report / system / instrument / config / rule / trade / backtest / audit /
+signal) 의 entry 등록은 후속 PR (`#1847` sub-PR 5-9) 의 책임이다. registry
+미등록 leaf 가 FAIL 이어야 하는 drift guard 는 `#1848` 가 활성화한다.
 """
 
 
@@ -733,8 +888,8 @@ def get_contract(path: tuple[str, ...]) -> CliCommandContract | None:
 def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
-    본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42
-    entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
-    #1847 sub-PR 3).
+    본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury
+    9 = 51 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR
+    2 / #1847 sub-PR 3 / #1847 sub-PR 4).
     """
     yield from CLI_COMMAND_REGISTRY.values()
