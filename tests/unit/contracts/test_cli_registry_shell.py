@@ -218,6 +218,36 @@ def test_account_entries_registered_after_1846() -> None:
     )
 
 
+def test_member_entries_registered_after_1847_sub_pr_1() -> None:
+    """#1847 sub-PR 1 가 member 12 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 1 가 member migration 을 완료한 시점부터
+    lock 된다. 12 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family A/B/C) 와 :mod:`tests.unit.test_member_success_output_drift`
+    가 책임진다.
+    """
+    expected_member_paths = {
+        ("member", "list"),
+        ("member", "info"),
+        ("member", "list-invalid-roles"),
+        ("member", "register"),
+        ("member", "set-emoji"),
+        ("member", "update-scopes"),
+        ("member", "suspend"),
+        ("member", "reactivate"),
+        ("member", "revoke"),
+        ("member", "rotate-token"),
+        ("member", "reset-password"),
+        ("member", "regenerate-recovery-key"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_member_paths.issubset(registered), (
+        f"member 12 entry 가 모두 등록되어야 한다 (#1847 sub-PR 1). "
+        f"누락: {sorted(expected_member_paths - registered)}"
+    )
+
+
 # ── alias re-export from package __init__ ─────────────────────────────────
 
 

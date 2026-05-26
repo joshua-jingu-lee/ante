@@ -1,4 +1,4 @@
-"""CLI command contract registry (#1844 shell, #1846 account migration).
+"""CLI command contract registry (#1844 shell, #1846 account, #1847 sweep).
 
 `#1815` 부모 epic 의 코드 결과물. CLI command 별 auth / output /
 execution 계약을 한 곳에서 관리하는 registry 다.
@@ -10,17 +10,22 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 * :class:`CliCommandContract` — root-to-leaf command path + 3 sub-contract +
   execution class + (optional) IPC command name.
 * :data:`ACCOUNT_CONTRACTS` — account 도메인 9 leaf contract tuple (#1846).
+* :data:`MEMBER_CONTRACTS` — member 도메인 12 leaf contract tuple
+  (#1847 sub-PR 1).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
-  PR 시점에는 account 9 entries 가 채워져 있다.
+  PR 시점에는 account 9 + member 12 = 21 entries 가 채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 나머지 도메인 entry 등록 (`#1847`).
-* output payload migration (`#1846` 은 account 4 raw_legacy 를 *문서화*
-  만 하며 fmt callsite 를 바꾸지 않는다).
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 2 이후 — approval / bot / treasury /
+  strategy / broker / data / report / system / instrument / config / rule /
+  trade / backtest / audit / signal).
+* output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
+  만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
-* IPC server-side metadata (`#1819`).
+* IPC server-side metadata (`#1819`). ``ipc_command`` 필드는 stub 값만
+  채우며 cross-ref drift test 는 `#1819` 가 담당한다.
 * auth enforcement / error taxonomy 변경.
 
 `AuthMode` / `ContractKind` / `EnvelopeForm` vocabulary 는
@@ -62,6 +67,7 @@ from ante.contracts.vocab import AuthMode, ContractKind, EnvelopeForm
 __all__ = [
     "ACCOUNT_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
+    "MEMBER_CONTRACTS",
     "AuthContract",
     "CliCommandContract",
     "ExecutionClass",
@@ -248,14 +254,158 @@ ACCOUNT_CONTRACTS: tuple[CliCommandContract, ...] = (
 """
 
 
+# ── #1847 sub-PR 1: member domain OutputContract migration ───────────────
+#
+# member 도메인 12 leaf 의 contract entry. ``src/ante/cli/commands/member.py``
+# 의 ``@require_scope`` / ``@require_master`` marker 와 ``fmt.*`` 호출 패턴,
+# 그리고 ``docs/specs/cli/03-commands.md:647-690`` (member 표 + 실행 분류
+# 141-148) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (7 commands): ``list`` / ``info`` / ``list-invalid-roles`` /
+# ``register`` / ``update-scopes`` / ``rotate-token`` / ``regenerate-recovery
+# -key`` 는 JSON mode 에서 ``fmt.output(dict)`` 평면 dict 를 그대로 dump 한다
+# (token / scopes / detail 평면 표현). ``OutputContract(kind="raw", envelope=
+# "raw_legacy")`` 조합으로 표현해 lock 만 한다 — member.py 본문 변경 없음
+# (drift test 가 callsite 변경 시 FAIL).
+#
+# standard envelope (5 commands): ``set-emoji`` / ``suspend`` / ``reactivate``
+# / ``revoke`` / ``reset-password`` 는 단일 경로 ``fmt.success(message,
+# data?=...)`` 만 호출하며 표준 envelope (`{status, message, data}`) 을 dump
+# 한다. JSON mode 분기 없음 (text 와 JSON 양쪽 모두 fmt.success).
+#
+# scope/master 분류:
+# - ``member:read`` scope: ``list`` / ``info`` / ``list-invalid-roles`` (3 개)
+# - master decorator: ``register`` / ``set-emoji`` / ``update-scopes`` /
+#   ``suspend`` / ``reactivate`` / ``revoke`` / ``rotate-token`` (7 개)
+# - public allowlist (``_AUTH_EXEMPT_COMMAND_PATHS``): ``reset-password`` /
+#   ``regenerate-recovery-key`` (2 개) — recovery key / 현재 패스워드 자체가
+#   인증 수단이므로 토큰 인증 미요구.
+#
+# execution 분류는 ``docs/specs/cli/03-commands.md:141-148`` 의 spec SSOT 를
+# 따른다 — ``member list/info/list-invalid-roles`` 는 ``offline`` 이며 그
+# 외 9 commands 는 ``runtime IPC`` 다. ``ipc_command`` 필드는 stub 값만
+# 채운다 (예: ``"member.register"``); 단순 문자열 lock 이며 server-side IPC
+# registry 와의 cross-ref drift test 는 #1819 의 책임이다 (이슈 #1847 본문
+# v2 결정). 현재 member.py 에서 ``ipc_send`` 분기를 실제로 실행하는 것은
+# ``update-scopes`` 1 개 뿐이고 나머지 8 commands 는 cold_path 로 직접
+# ``MemberService`` 를 호출하지만, 본 PR 은 spec SSOT 분류만 등록한다 —
+# 실제 ``ipc_send`` 분기 추가는 #1819 또는 별도 후속 이슈가 책임진다
+# (callsite envelope shape 자체는 drift test 가 lock).
+MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("member", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("member", "info"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("member", "list-invalid-roles"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("member", "register"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        # JSON mode: ``fmt.output({**result, "token": token})`` 평면 dict.
+        # text mode 는 ``fmt.success`` + ``click.echo`` 로 token 을 별도
+        # 표시하지만 JSON mode shape 가 raw_legacy 우선 정책에 부합한다.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="member.register",
+    ),
+    CliCommandContract(
+        path=("member", "set-emoji"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        # 단일 경로 ``fmt.success(message, data)`` — JSON/text 모두 standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="member.set_emoji",
+    ),
+    CliCommandContract(
+        path=("member", "update-scopes"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        # JSON mode: ``fmt.output(result)`` 평면 dict; text 는 fmt.success.
+        # member.py 에서 실제로 ``ipc_send`` 분기를 실행하는 유일한 leaf 다
+        # (line 601-606). IPC handler 도 등록되어 있다
+        # (``src/ante/ipc/registry.py:727``).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="member.update_scopes",
+    ),
+    CliCommandContract(
+        path=("member", "suspend"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        # 단일 경로 ``fmt.success(f"멤버 정지 완료: ...", result)``.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="member.suspend",
+    ),
+    CliCommandContract(
+        path=("member", "reactivate"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="member.reactivate",
+    ),
+    CliCommandContract(
+        path=("member", "revoke"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="member.revoke",
+    ),
+    CliCommandContract(
+        path=("member", "rotate-token"),
+        auth=AuthContract(mode="master", scopes=frozenset()),
+        # JSON mode: ``fmt.output({**result, "token": token})`` 평면 dict.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="member.rotate_token",
+    ),
+    CliCommandContract(
+        path=("member", "reset-password"),
+        # ``_AUTH_EXEMPT_COMMAND_PATHS`` 등재 — recovery key 자체가 인증 수단.
+        auth=AuthContract(mode="public", scopes=frozenset()),
+        # 단일 경로 ``fmt.success("패스워드가 변경되었습니다.")`` — data 없음.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="member.reset_password",
+    ),
+    CliCommandContract(
+        path=("member", "regenerate-recovery-key"),
+        # ``_AUTH_EXEMPT_COMMAND_PATHS`` 등재 — 현재 패스워드 자체가 인증 수단.
+        auth=AuthContract(mode="public", scopes=frozenset()),
+        # JSON mode: ``fmt.output({"recovery_key": new_key})`` 평면 dict.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="member.regenerate_recovery_key",
+    ),
+)
+"""Member domain 12 leaf 의 contract tuple (#1847 sub-PR 1).
+
+순서는 ``docs/specs/cli/03-commands.md:647-690`` 의 member 표 (read →
+admin mutation → public allowlist) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
-    contract.path: contract for contract in ACCOUNT_CONTRACTS
+    contract.path: contract for contract in (*ACCOUNT_CONTRACTS, *MEMBER_CONTRACTS)
 }
 """Leaf command path → contract mapping.
 
-본 PR 시점에는 account 도메인 9 entries 가 등록되어 있다 (#1846). 나머지
-도메인 (member/approval/bot/treasury/broker/strategy/...) 의 entry 등록은
-후속 PR (`#1847`) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야 하는
+본 PR 시점에는 account 9 + member 12 = 21 entries 가 등록되어 있다
+(#1846 / #1847 sub-PR 1). 나머지 도메인 (approval / bot / treasury /
+strategy / broker / data / report / system / instrument / config / rule /
+trade / backtest / audit / signal) 의 entry 등록은 후속 PR (`#1847`
+sub-PR 2-9) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야 하는
 drift guard 는 `#1848` 가 활성화한다.
 """
 
@@ -275,6 +425,7 @@ def get_contract(path: tuple[str, ...]) -> CliCommandContract | None:
 def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
-    본 PR 시점에는 빈 iterator 다 — registry entry 가 0 이다.
+    본 PR 시점에는 account 9 + member 12 = 21 entries 가 등록되어 있다
+    (#1846 / #1847 sub-PR 1).
     """
     yield from CLI_COMMAND_REGISTRY.values()
