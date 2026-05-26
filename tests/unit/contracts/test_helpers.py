@@ -14,10 +14,12 @@ import click
 import pytest
 
 from tests.unit.contracts.helpers import (
+    AuthMetadata,
     CliLeafCommand,
     ExceptionClassInfo,
     FmtErrorCallsite,
     iter_click_leaf_commands,
+    iter_command_auth_metadata,
     iter_exception_classes,
     iter_fmt_error_calls,
     iter_ipc_command_specs,
@@ -116,6 +118,75 @@ class TestIterClickLeafCommands:
             assert isinstance(item.path, tuple)
             assert len(item.path) >= 1
             assert isinstance(item.command, click.Command)
+
+
+# ── iter_command_auth_metadata ────────────────────────────────────────────
+
+
+class TestIterCommandAuthMetadata:
+    """CLI leaf command 의 auth marker introspection (#1845)."""
+
+    def test_default_root_yields_metadata_for_every_leaf(self) -> None:
+        """root 미지정 시 ``ante.cli.main.cli`` 의 모든 leaf 에 1:1 매핑."""
+        leaves = {leaf.path for leaf in iter_click_leaf_commands()}
+        metadata = list(iter_command_auth_metadata())
+        meta_paths = {m.path for m in metadata}
+        assert meta_paths == leaves
+        for m in metadata:
+            assert isinstance(m, AuthMetadata)
+            assert isinstance(m.scopes, frozenset)
+
+    def test_public_allowlist_path_marked_public(self) -> None:
+        """``_AUTH_EXEMPT_COMMAND_PATHS`` 등재 path 는 ``is_public=True``."""
+        from ante.cli.middleware import _AUTH_EXEMPT_COMMAND_PATHS
+
+        meta_by_path = {m.path: m for m in iter_command_auth_metadata()}
+        for path in _AUTH_EXEMPT_COMMAND_PATHS:
+            meta = meta_by_path.get(path)
+            assert meta is not None, f"{path}: allowlist path 가 leaf 에 없다"
+            assert meta.is_public is True
+
+    def test_scope_decorator_extracts_marker_tuple(self) -> None:
+        """``@require_scope(*scopes)`` 부착 leaf 는 ``scopes`` 추출."""
+        meta_by_path = {m.path: m for m in iter_command_auth_metadata()}
+        # ``bot list`` 는 ``@require_scope("bot:read")`` 로 부착되어 있다
+        # (src/ante/cli/commands/bot.py:90).
+        meta = meta_by_path.get(("bot", "list"))
+        assert meta is not None
+        assert meta.scopes == frozenset({"bot:read"})
+        assert meta.is_master is False
+        assert meta.requires_auth is True
+
+    def test_master_decorator_marker_extracted(self) -> None:
+        """``@require_master`` 부착 leaf 는 ``is_master=True``."""
+        meta_by_path = {m.path: m for m in iter_command_auth_metadata()}
+        # ``member register`` 는 ``@require_master`` 로 부착되어 있다
+        # (src/ante/cli/commands/member.py:477).
+        meta = meta_by_path.get(("member", "register"))
+        assert meta is not None
+        assert meta.is_master is True
+        assert meta.requires_auth is True
+
+    def test_injected_root_isolates_subtree(self) -> None:
+        """주입된 root 에서도 marker 추출이 동작한다."""
+
+        @click.group()
+        def root() -> None:
+            pass
+
+        @root.command()
+        def plain() -> None:
+            """no decorator."""
+
+        results = list(iter_command_auth_metadata(root))
+        assert len(results) == 1
+        meta = results[0]
+        assert meta.path == ("plain",)
+        # plain leaf: allowlist 없음, marker 없음.
+        assert meta.is_public is False
+        assert meta.is_master is False
+        assert meta.scopes == frozenset()
+        assert meta.requires_auth is False
 
 
 # ── iter_ipc_command_specs ────────────────────────────────────────────────
@@ -484,10 +555,12 @@ def test_public_surface_importable() -> None:
     from tests.unit.contracts import helpers
 
     expected = {
+        "AuthMetadata",
         "CliLeafCommand",
         "ExceptionClassInfo",
         "FmtErrorCallsite",
         "iter_click_leaf_commands",
+        "iter_command_auth_metadata",
         "iter_exception_classes",
         "iter_fmt_error_calls",
         "iter_ipc_command_specs",
