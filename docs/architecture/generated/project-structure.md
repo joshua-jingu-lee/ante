@@ -609,7 +609,9 @@ tests/
 │   ├── test_bot_success_output_drift.py
 │   ├── test_approval_success_output_drift.py
 │   ├── test_treasury_success_output_drift.py
-│   └── test_strategy_success_output_drift.py
+│   ├── test_strategy_success_output_drift.py
+│   ├── test_data_success_output_drift.py
+│   └── test_report_success_output_drift.py
 └── __init__.py
 ```
 
