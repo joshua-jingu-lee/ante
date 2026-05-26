@@ -14,6 +14,7 @@ from ante.cli._validators import reject_invalid_account_id
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts import emit_cli_error
 from ante.strategy.registry import StrategyStatus
 
 # `StrategyStatus` enum이 단일 SSOT이며 (#1463에서 임시 frozenset 복사본 제거),
@@ -146,7 +147,12 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            fmt.error(f"Validation failed: {path}")
+            # #1843 sub-PR 6: text-mode 도 STRATEGY_VALIDATION_ERROR 안정
+            # 코드를 명시 부여한다 (JSON 분기의 ``code`` 필드와 동일 SSOT).
+            # ``OutputFormatter.error`` 가 text 모드에서 code 를 stdout 에
+            # 출력하지 않지만 (포맷 책임 분리), drift guard ``fmt.error``
+            # callsite invariant 를 충족하기 위한 명시 부여.
+            fmt.error(f"Validation failed: {path}", code="STRATEGY_VALIDATION_ERROR")
             for err in validation.errors:
                 click.echo(f"  - {err}", err=True)
         raise SystemExit(1)
@@ -170,7 +176,11 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            fmt.error(f"Load test failed: {e}")
+            # #1843 sub-PR 6: helper 가 ``StrategyLoadError`` →
+            # ``STRATEGY_LOAD_ERROR`` 안정 코드를 surface 한다 (JSON 분기의
+            # ``code`` 필드와 동일 SSOT). 도메인 문구 "Load test failed:" 는
+            # ``fallback_message`` 로 보존.
+            emit_cli_error(fmt, e, fallback_message=f"Load test failed: {e}")
         raise SystemExit(1)
 
     meta = strategy_cls.meta
@@ -255,7 +265,12 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            fmt.error(str(e))
+            # #1843 sub-PR 6: helper 가 ``StrategyError`` MRO lookup 으로
+            # subclass 별 typed 코드 (예: ``IncompatibleExchangeError`` →
+            # ``STRATEGY_INCOMPATIBLE_EXCHANGE``) 를 surface 한다. registry
+            # miss + ``.code`` 미부여 시 ``EXECUTION_ERROR`` fallback (구
+            # ``str(e)`` no-code 회귀 차단).
+            emit_cli_error(fmt, e)
         raise SystemExit(1)
 
     if fmt.is_json:

@@ -61,42 +61,35 @@ known_drift_fmt_error_no_code:
   # 정렬 완료 (broker typed exception 5 sub-class 가 ``BROKER_*`` 안정 코드를
   # registry MRO lookup 으로 surface, 미분류 fault 는 ``EXECUTION_ERROR``
   # fallback).
+  #
+  # #1843 sub-PR 6: strategy.py 149/173/258 + update.py 135/196/256 entries
+  # 제거 — strategy.py 149 는 ``code="STRATEGY_VALIDATION_ERROR"`` 명시
+  # 부여 (ValidationResult 객체이므로 typed exception 경로 아님), 173/258
+  # 은 ``emit_cli_error(fmt, e)`` 정렬 (StrategyLoadError/StrategyError
+  # MRO lookup 으로 typed 코드 surface). update.py 135/196 은
+  # ``code="UPDATE_CHECK_FAILED"`` 명시 부여, 256 은
+  # ``code="UPDATE_INSTALL_FAILED"`` 명시 부여 (typed exception 없는
+  # bool 반환 함수의 실패 surface).
+  #
+  # config.py 176/179 는 bot.py 882/918/952 와 동일 snippet_sha1
+  # (``3dc4008c3fb0``) 의 ``ipc_send`` ClickException text-mode
+  # ``text = f"{code}: {message}"`` prefix 패턴이다. helper
+  # ``emit_cli_error`` 는 ``OutputFormatter.error`` 가 text 모드에서 code
+  # 를 출력하지 않으므로 prefix 가 사라져 ``test_config_set_server_error``
+  # 의 ``"STATIC_CONFIG" in result.output`` 회귀 lock 이 깨진다.
+  # bot.py 882/918/952 와 묶어 별도 follow-up issue 가 책임진다.
   - path: src/ante/cli/commands/config.py
     line: 176
     snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); migrate in #1843"
+    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (bot.py 동형)"
   - path: src/ante/cli/commands/config.py
     line: 179
     snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); migrate in #1843"
+    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (bot.py 동형)"
   # #1843 sub-PR 1: member.py entries 15건 제거 — emit_cli_error 정렬 완료
   # (CLI direct path 가 IPC envelope 와 동일 public code surface).
   # _MASTER_REQUIRED_MESSAGE override 보존하는 typed except 는 code 인자
   # 명시 (``code="PERMISSION_DENIED"``) 로 정렬했다.
-  - path: src/ante/cli/commands/strategy.py
-    line: 149
-    snippet_sha1: "439fab766435"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/strategy.py
-    line: 173
-    snippet_sha1: "653a1306dd44"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/strategy.py
-    line: 258
-    snippet_sha1: "f65e1080d3f2"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/update.py
-    line: 135
-    snippet_sha1: "988007ecd452"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/update.py
-    line: 196
-    snippet_sha1: "e6c835b3f5c4"
-    reason: "baseline (#1841); migrate in #1843"
-  - path: src/ante/cli/commands/update.py
-    line: 256
-    snippet_sha1: "0aa58cc91ade"
-    reason: "baseline (#1841); migrate in #1843"
 
 pending_migration:
   - module: ante.account.errors
@@ -132,7 +125,7 @@ pending_migration:
     reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
   - module: ante.config.exceptions
     class_anchor: ConfigError
-    reason: "baseline (#1841); register in #1842/#1843"
+    reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
   - module: ante.feed.sources.dart
     class_anchor: CriticalApiError
     reason: "baseline (#1841); register in #1842/#1843"
@@ -168,27 +161,16 @@ pending_migration:
     reason: "baseline (#1841); register in #1842/#1843"
   # #1843 sub-PR 1: PermissionDeniedError 제거 — class-level
   # ``code="PERMISSION_DENIED"`` 부여 + EXCEPTION_TO_SPEC 등록 완료.
-  - module: ante.rule.exceptions
-    class_anchor: RuleConfigError
-    reason: "baseline (#1841); register in #1842/#1843"
+  #
+  # #1843 sub-PR 6: rule/strategy sub-class 5건 제거 — class-level ``.code``
+  # 부여 + EXCEPTION_TO_SPEC 등록 완료. ``RuleError`` / ``StrategyError``
+  # base 는 사용 사례 없음으로 baseline 보존 (#1842 ``AccountError`` 동형).
   - module: ante.rule.exceptions
     class_anchor: RuleError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.strategy.exceptions
-    class_anchor: IncompatibleExchangeError
-    reason: "baseline (#1841); register in #1842/#1843"
+    reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
   - module: ante.strategy.exceptions
     class_anchor: StrategyError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.strategy.exceptions
-    class_anchor: StrategyFileAccessError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.strategy.exceptions
-    class_anchor: StrategyLoadError
-    reason: "baseline (#1841); register in #1842/#1843"
-  - module: ante.strategy.exceptions
-    class_anchor: StrategyValidationError
-    reason: "baseline (#1841); register in #1842/#1843"
+    reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
   - module: ante.treasury.exceptions
     class_anchor: TreasuryError
     reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
