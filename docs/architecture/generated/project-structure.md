@@ -401,7 +401,8 @@ tests/
 │   │   ├── test_registry.py
 │   │   ├── test_server_client.py
 │   │   ├── test_service_registry.py
-│   │   └── test_dispatch_wrapper_preflight.py
+│   │   ├── test_dispatch_wrapper_preflight.py
+│   │   └── test_dispatch_wrapper_audit.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py

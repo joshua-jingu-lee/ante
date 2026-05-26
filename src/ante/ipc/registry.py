@@ -282,8 +282,10 @@ async def _handle_bot_start(
     이 ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
     ``BOT_STATE_CONFLICT`` 로 변환한다.
 
-    audit logger 가 주입된 환경에서는 ``approval.cancel_invalid`` 선례와 동형
-    으로 ``bot.start`` action 을 기록한다(``getattr`` safe-access).
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "bot.start"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
+    reserved key 로 ``resource`` 만 전달하며, wrapper 가 ``pop`` 으로
+    public envelope 진입 전에 strip 한다.
     """
     from ante.bot.exceptions import (
         BotAccountCredentialsNotConfigured,
@@ -309,16 +311,14 @@ async def _handle_bot_start(
     except BotError as e:
         raise BotStateConflict(str(e)) from e
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="bot.start",
-            resource=f"bot:{bot_id}",
-            ip="",
-        )
-
-    return {"bot": bot.get_info()}
+    return {
+        "bot": bot.get_info(),
+        "_audit_detail": {
+            "resource": f"bot:{bot_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_bot_stop(
@@ -327,8 +327,11 @@ async def _handle_bot_stop(
     """봇 중지 IPC handler.
 
     Refs #1712: bot 부재 / BotError를 stable coded exception으로 매핑한다.
-    ``app_key`` preflight 는 stop 경로에 없다. audit logger 가 주입된 환경에서는
-    ``bot.stop`` action 을 기록한다.
+    ``app_key`` preflight 는 stop 경로에 없다.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "bot.stop"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
+    reserved key 로 ``resource`` 만 전달한다.
     """
     from ante.bot.exceptions import (
         BotError,
@@ -346,16 +349,14 @@ async def _handle_bot_stop(
     except BotError as e:
         raise BotStateConflict(str(e)) from e
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="bot.stop",
-            resource=f"bot:{bot_id}",
-            ip="",
-        )
-
-    return {"bot": bot.get_info()}
+    return {
+        "bot": bot.get_info(),
+        "_audit_detail": {
+            "resource": f"bot:{bot_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_bot_status(
@@ -403,6 +404,12 @@ async def _handle_bot_status(
 async def _handle_bot_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """봇 업데이트 IPC handler.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "bot.update"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
+    reserved key 로 ``resource`` 와 ``detail`` (변경 필드 목록) 을 전달한다.
+    """
     from ante.bot.exceptions import BotError
 
     bot_id = args["bot_id"]
@@ -417,16 +424,14 @@ async def _handle_bot_update(
     except BotError:
         raise
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="bot.update",
-            resource=f"bot:{bot_id}",
-            detail=f"fields={list(updates.keys())}",
-            ip="",
-        )
-    return {"bot": bot.get_info()}
+    return {
+        "bot": bot.get_info(),
+        "_audit_detail": {
+            "resource": f"bot:{bot_id}",
+            "detail": f"fields={list(updates.keys())}",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_treasury_allocate(
@@ -503,6 +508,13 @@ async def _handle_treasury_deallocate(
 async def _handle_treasury_set_balance(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """Treasury balance 설정 IPC handler.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "treasury.set_balance"`` 기반으로 자동 발화한다. handler 는
+    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (설정된
+    balance) 을 전달한다.
+    """
     from datetime import UTC, datetime
 
     from ante.account.scoping import require_account_id
@@ -514,19 +526,15 @@ async def _handle_treasury_set_balance(
     treasury = svc.treasury_manager.get(account_id)
     await treasury.set_account_balance(balance)
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="treasury.set_balance",
-            resource=f"treasury:{account_id}",
-            detail=f"balance={balance:,.0f}",
-            ip="",
-        )
     return {
         "account_id": account_id,
         "total_balance": treasury.account_balance,
         "updated_at": datetime.now(UTC).isoformat(),
+        "_audit_detail": {
+            "resource": f"treasury:{account_id}",
+            "detail": f"balance={balance:,.0f}",
+            "ip": "",
+        },
     }
 
 
@@ -552,27 +560,40 @@ async def _handle_rule_update(
 async def _handle_strategy_set_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """전략 상태 변경 IPC handler.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "strategy.set_status"`` 기반으로 자동 발화한다. handler 는
+    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (status) 을
+    전달한다.
+    """
     from ante.strategy.registry import StrategyStatus
 
     strategy_id = args["strategy_id"]
     status = StrategyStatus(args["status"])
     await svc.strategy_registry.update_status(strategy_id, status)
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="strategy.set_status",
-            resource=f"strategy:{strategy_id}",
-            detail=f"status={status.value}",
-            ip="",
-        )
-    return {"strategy_id": strategy_id, "status": status.value}
+    return {
+        "strategy_id": strategy_id,
+        "status": status.value,
+        "_audit_detail": {
+            "resource": f"strategy:{strategy_id}",
+            "detail": f"status={status.value}",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_member_update_scopes(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """멤버 scope 업데이트 IPC handler.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "member.update_scopes"`` 기반으로 자동 발화한다. handler 는
+    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (scopes 목록) 을
+    전달한다.
+    """
     member_id = args["member_id"]
     scopes = list(args.get("scopes") or [])
     member_service = getattr(svc, "member_service", None)
@@ -580,19 +601,15 @@ async def _handle_member_update_scopes(
         raise RuntimeError("member service not configured")
     member = await member_service.update_scopes(member_id, scopes, updated_by=actor)
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="member.update_scopes",
-            resource=f"member:{member_id}",
-            detail=f"scopes={scopes}",
-            ip="",
-        )
     return {
         "member_id": member.member_id,
         "scopes": member.scopes,
         "status": member.status,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": f"scopes={scopes}",
+            "ip": "",
+        },
     }
 
 
@@ -652,10 +669,14 @@ async def _handle_approval_cancel_invalid(
     """Administrative cancellation of a legacy invalid-type approval.
 
     Refs #1418 → #1472 SPLIT-D. CLI ``approval:admin`` scope 를 보유한 운영자가
-    ``ante approval cancel-invalid <id>`` 로 호출한다. 성공 후 ``audit_logger``
-    가 주입된 환경(production)에서는 ``audit_log`` 테이블에 기록을 남긴다.
-    테스트/legacy 환경에서 ``audit_logger`` 가 ``None`` 이면 audit 호출을 건너
-    뛰며, 서비스의 ``history`` append 가 fallback 추적 경로다.
+    ``ante approval cancel-invalid <id>`` 로 호출한다. 성공 후 ``audit_log``
+    테이블에 기록을 남기며, 서비스의 ``history`` append 가 fallback 추적
+    경로다.
+
+    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    = "approval.cancel_invalid"`` 기반으로 자동 발화한다. handler 는
+    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (request.type)
+    을 전달한다.
     """
     approval_id = args["approval_id"]
     request = await svc.approval.cancel_invalid_type_request(
@@ -663,16 +684,16 @@ async def _handle_approval_cancel_invalid(
         resolved_by=actor,
     )
 
-    audit_logger = getattr(svc, "audit_logger", None)
-    if audit_logger is not None:
-        await audit_logger.log(
-            member_id=actor,
-            action="approval.cancel_invalid",
-            resource=f"approval:{approval_id}",
-            detail=request.type,
-        )
-
-    return {"id": request.id, "status": str(request.status), "type": request.type}
+    return {
+        "id": request.id,
+        "status": str(request.status),
+        "type": request.type,
+        "_audit_detail": {
+            "resource": f"approval:{approval_id}",
+            "detail": request.type,
+            "ip": "",
+        },
+    }
 
 
 async def _handle_approval_reopen(
