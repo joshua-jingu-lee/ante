@@ -205,18 +205,52 @@ async def _handle_system_clear_halt(
 async def _handle_account_suspend(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """계좌 정지 IPC handler.
+
+    Refs #1852 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
+    audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.suspend"``
+    기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
+    ``resource`` / ``detail`` 만 전달하고, wrapper 가 ``pop`` 으로 public
+    envelope 진입 전에 strip 한다.
+    """
     account_id = args["account_id"]
     reason = args.get("reason", "IPC suspend")
     await svc.account.suspend(account_id, reason=reason, suspended_by=actor)
-    return {"account_id": account_id, "status": "suspended"}
+    return {
+        "account_id": account_id,
+        "status": "suspended",
+        "_audit_detail": {
+            "resource": f"account:{account_id}",
+            "detail": f"reason={reason}",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_account_activate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """계좌 활성화 IPC handler.
+
+    Refs #1852 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
+    audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.activate"``
+    기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
+    ``resource`` 만 전달하고, wrapper 가 ``pop`` 으로 public envelope 진입
+    전에 strip 한다.
+    """
     account_id = args["account_id"]
     await svc.account.activate(account_id, activated_by=actor)
-    return {"account_id": account_id, "status": "active"}
+    return {
+        "account_id": account_id,
+        "status": "active",
+        "_audit_detail": {
+            "resource": f"account:{account_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_bot_create(
@@ -830,22 +864,28 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="operation",
         required_services=frozenset({"account"}),
     )
-    # account.* — account_id 인자는 require_account_id 미사용(args["account_id"]
-    # 직접 인덱싱)이라 policy는 ``none``으로 분류한다. 실제 검증 강제는 #1850
-    # 후속에서 정책 정렬 시 재평가한다.
+    # account.* — Refs #1852 (#1819 epic): account_id_policy="required" 로
+    # wrapper preflight 가 invalid/missing account_id 를 InvalidAccountIdError
+    # (VALIDATION_ERROR envelope) 로 거부한다. audit_action 부여 + handler 의
+    # ``_audit_detail`` 반환으로 wrapper 가 audit_logger.log 를 자동 발화한다.
+    # required_services 에 audit_logger 가 포함되어 부재 시 preflight 가 차단.
     registry.register(
         "account.suspend",
         _handle_account_suspend,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"account"}),
+        required_services=frozenset({"account", "audit_logger"}),
+        account_id_policy="required",
+        audit_action="account.suspend",
     )
     registry.register(
         "account.activate",
         _handle_account_activate,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"account"}),
+        required_services=frozenset({"account", "audit_logger"}),
+        account_id_policy="required",
+        audit_action="account.activate",
     )
     # bot.* — bot 객체 entity 반환, audit_action은 start/stop/update만.
     registry.register(
