@@ -13,15 +13,28 @@
   helper-internal — 외부 소비자는 ``error_spec_for_exception`` 을 호출한다.
 - ``ante.contracts.helpers`` — ``error_spec_for_exception`` / ``emit_cli_error`` /
   ``ipc_error_payload`` CLI·IPC error helper (#1840).
+- ``ante.contracts.cli_registry`` — CLI command contract registry shell
+  (#1844, `#1815` epic). ``AuthContract`` / ``OutputContract`` /
+  ``CliCommandContract`` dataclass + ``CLI_COMMAND_REGISTRY`` (빈 dict) +
+  ``get_contract`` / ``all_contracts`` accessor. 실제 entry 등록은 후속
+  PR (`#1846` / `#1847`) 의 책임.
 
-본 ``__init__`` 모듈은 ``error_*`` helper 의 alias re-export 만 수행한다
-(``ErrorSpec`` / ``ErrorCategory`` / 3 helper 함수). vocab module 은 의도적으로
+본 ``__init__`` 모듈은 ``error_*`` helper 와 ``cli_registry`` 의 dataclass /
+accessor / 빈 registry 만 alias re-export 한다. vocab module 은 의도적으로
 re-export 하지 않으며, vocabulary 위치가 단일 SSOT 로 고정되도록 ``from
 ante.contracts.vocab import ...`` 명시 import 형태를 유지한다.
 """
 
 from __future__ import annotations
 
+from ante.contracts.cli_registry import (
+    CLI_COMMAND_REGISTRY,
+    AuthContract,
+    CliCommandContract,
+    OutputContract,
+    all_contracts,
+    get_contract,
+)
 from ante.contracts.errors import ErrorCategory, ErrorSpec
 from ante.contracts.helpers import (
     emit_cli_error,
@@ -30,9 +43,15 @@ from ante.contracts.helpers import (
 )
 
 __all__ = [
+    "CLI_COMMAND_REGISTRY",
+    "AuthContract",
+    "CliCommandContract",
     "ErrorCategory",
     "ErrorSpec",
+    "OutputContract",
+    "all_contracts",
     "emit_cli_error",
     "error_spec_for_exception",
+    "get_contract",
     "ipc_error_payload",
 ]
