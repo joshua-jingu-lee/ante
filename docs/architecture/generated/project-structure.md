@@ -603,7 +603,8 @@ tests/
 │   ├── test_broker_external_code_separation.py
 │   ├── test_config_cli_ipc_error_equivalence.py
 │   ├── test_rule_cli_ipc_error_equivalence.py
-│   └── test_strategy_cli_ipc_error_equivalence.py
+│   ├── test_strategy_cli_ipc_error_equivalence.py
+│   └── test_account_success_output_drift.py
 └── __init__.py
 ```
 
