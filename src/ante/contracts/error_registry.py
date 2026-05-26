@@ -145,6 +145,32 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3/4 Non-Goals 동형).
 
+#1843 sub-PR 6 (strategy/config/rule sweep + final allowlist clear) 가
+추가한 도메인 sub-class lock (실측 ``.code`` mirror, 본 PR 에서 신규 부여):
+
+- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` / ``not_found`` (#1796
+  lock 그대로 보존)
+- ``StrategyLoadError`` → ``STRATEGY_LOAD_ERROR`` / ``validation`` (전략
+  파일 import/load 실패; CLI ``strategy submit`` 의 ``stage="load"`` envelope
+  와 동일 SSOT)
+- ``StrategyValidationError`` → ``STRATEGY_VALIDATION_ERROR`` / ``validation``
+  (전략 정적/manifest 검증 거부; CLI ``strategy submit``/``validate`` /
+  ``strategy list --status`` 의 동명 surface 와 동일 안정 코드)
+- ``StrategyFileAccessError`` → ``STRATEGY_FILE_ACCESS_ERROR`` / ``external``
+  (전략 파일 시스템 접근 실패 — 외부 의존성)
+- ``IncompatibleExchangeError`` → ``STRATEGY_INCOMPATIBLE_EXCHANGE`` /
+  ``validation`` (전략 ↔ 계좌 exchange 호환성 거부)
+- ``ConfigValidationError`` → ``CONFIG_VALIDATION_ERROR`` / ``validation``
+  (#1673 oracle A7; ``ValueError`` 다중상속을 보존하며 helper registry-first
+  lookup 이 동일 안정 코드를 surface)
+- ``RuleConfigError`` → ``RULE_CONFIG_ERROR`` / ``validation`` (룰 설정 입력
+  invariant 위반)
+
+``StrategyError`` / ``ConfigError`` / ``RuleError`` base 는 의도적으로
+등록하지 않는다 — 사용 사례가 없으며 ``pending_migration`` allowlist 에
+baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴,
+#1843 sub-PR 1/2/3/4/5 Non-Goals 동형).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -195,6 +221,7 @@ from ante.broker.exceptions import (
 from ante.broker.registry import (
     InvalidBrokerTypeError as BrokerRegistryInvalidBrokerTypeError,
 )
+from ante.config.exceptions import ConfigValidationError
 from ante.contracts.errors import ErrorSpec
 from ante.member.errors import (
     MemberAlreadyExistsError,
@@ -204,6 +231,14 @@ from ante.member.errors import (
     PermissionDeniedError,
 )
 from ante.member.scopes import InvalidScopeError
+from ante.rule.exceptions import RuleConfigError
+from ante.strategy.exceptions import (
+    IncompatibleExchangeError,
+    StrategyFileAccessError,
+    StrategyLoadError,
+    StrategyNotFoundError,
+    StrategyValidationError,
+)
 from ante.treasury.exceptions import (
     BotNotStoppedError,
     InsufficientFundsError,
@@ -539,6 +574,84 @@ _BROKER_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── strategy 5 sub-class lock (#1843 sub-PR 6, 실측 .code mirror) ────────────
+#
+# ``StrategyError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+# ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+# ``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3/4/5 Non-Goals 동형).
+
+# ``StrategyRegistry.update_status`` 가 missing strategy 에 대해 raise.
+# CLI ``strategy set-status`` 와 IPC ``strategy.set_status`` 가 동일 코드
+# surface (#1796 lock 그대로 보존).
+_STRATEGY_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_NOT_FOUND",
+    category="not_found",
+)
+
+# 전략 파일 import/load 실패. CLI ``strategy submit`` 의 ``stage="load"`` /
+# ``code="STRATEGY_LOAD_ERROR"`` envelope 와 동일 안정 코드 SSOT. 본 PR 에서
+# class-level ``.code`` 신규 부여.
+_STRATEGY_LOAD_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_LOAD_ERROR",
+    category="validation",
+)
+
+# 전략 정적/manifest 검증 거부. CLI ``strategy submit``/``validate`` /
+# ``strategy list --status`` invalid 표면이 동일 안정 코드를 surface 한다.
+# 본 PR 에서 class-level ``.code`` 신규 부여.
+_STRATEGY_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_VALIDATION_ERROR",
+    category="validation",
+)
+
+# 전략 파일 시스템 접근 실패 (예: 권한/IO 오류). taxonomy ``external``
+# 카테고리 — 파일 시스템은 외부 의존성. 본 PR 에서 class-level ``.code``
+# 신규 부여.
+_STRATEGY_FILE_ACCESS_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_FILE_ACCESS_ERROR",
+    category="external",
+)
+
+# 전략 ↔ 계좌 exchange 호환성 거부 (예: KOSPI 전략 ↔ 미국 거래 계좌).
+# 호환성 invariant 위반이므로 taxonomy ``validation`` 카테고리. 본 PR 에서
+# class-level ``.code`` 신규 부여.
+_STRATEGY_INCOMPATIBLE_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_INCOMPATIBLE_EXCHANGE",
+    category="validation",
+)
+
+
+# ── config 1 sub-class lock (#1843 sub-PR 6, 실측 .code mirror) ──────────────
+#
+# ``ConfigError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+# ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+# ``AccountError`` 와 동일 패턴).
+
+# 동적 설정 키-invariant 위반 (#1673 oracle A7). ``ValueError`` 다중상속을
+# 보존하므로 service-boundary 테스트는 영향 없으며, helper registry-first
+# lookup 이 동일 ``CONFIG_VALIDATION_ERROR`` 안정 코드를 surface 한다.
+# class-level ``.code`` 는 이미 ``ConfigValidationError`` 에 부여되어
+# 있다 — 본 PR 은 registry entry 추가만 한다.
+_CONFIG_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_VALIDATION_ERROR",
+    category="validation",
+)
+
+
+# ── rule 1 sub-class lock (#1843 sub-PR 6, 실측 .code mirror) ────────────────
+#
+# ``RuleError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+# ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+# ``AccountError`` 와 동일 패턴).
+
+# 룰 설정 입력 invariant 위반. taxonomy ``validation`` 카테고리. 본 PR 에서
+# class-level ``.code`` 신규 부여.
+_RULE_CONFIG_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="RULE_CONFIG_ERROR",
+    category="validation",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -620,6 +733,16 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RateLimitError: _BROKER_RATE_LIMITED_SPEC,
     CircuitOpenError: _BROKER_CIRCUIT_OPEN_SPEC,
     BrokerRegistryInvalidBrokerTypeError: _BROKER_INVALID_TYPE_SPEC,
+    # ── #1843 sub-PR 6 strategy 5 sub-class (실측 .code mirror) ───────────
+    StrategyNotFoundError: _STRATEGY_NOT_FOUND_SPEC,
+    StrategyLoadError: _STRATEGY_LOAD_ERROR_SPEC,
+    StrategyValidationError: _STRATEGY_VALIDATION_ERROR_SPEC,
+    StrategyFileAccessError: _STRATEGY_FILE_ACCESS_ERROR_SPEC,
+    IncompatibleExchangeError: _STRATEGY_INCOMPATIBLE_EXCHANGE_SPEC,
+    # ── #1843 sub-PR 6 config 1 sub-class (실측 .code mirror) ─────────────
+    ConfigValidationError: _CONFIG_VALIDATION_ERROR_SPEC,
+    # ── #1843 sub-PR 6 rule 1 sub-class (실측 .code mirror) ───────────────
+    RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 
