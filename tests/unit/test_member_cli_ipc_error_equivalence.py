@@ -408,6 +408,10 @@ class TestMemberInvalidScopeEquivalence:
             reconciler=MagicMock(),
             eventbus=MagicMock(),
             member_service=member_service,
+            # Refs #1850: ``member.update_scopes`` 는 ``required_services``
+            # 에 ``audit_logger`` 를 선언한다 — dispatch wrapper preflight 가
+            # 부재 시 SERVICE_NOT_CONFIGURED 로 차단하므로 mock 주입한다.
+            audit_logger=MagicMock(),
         )
         cmd_registry = CommandRegistry()
         register_all_handlers(cmd_registry)

@@ -400,7 +400,8 @@ tests/
 │   │   ├── test_protocol.py
 │   │   ├── test_registry.py
 │   │   ├── test_server_client.py
-│   │   └── test_service_registry.py
+│   │   ├── test_service_registry.py
+│   │   └── test_dispatch_wrapper_preflight.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py

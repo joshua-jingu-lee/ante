@@ -20,7 +20,14 @@ from ante.ipc.server import IPCServer
 
 
 def _make_service_registry() -> ServiceRegistry:
-    """테스트용 ServiceRegistry — 모든 서비스 mock."""
+    """테스트용 ServiceRegistry — 모든 서비스 mock.
+
+    Refs #1850: dispatch wrapper 가 ``required_services`` preflight 를
+    수행하므로 ``register_all_handlers`` 가 선언한 의존 service 가
+    ``None`` 이면 ``SERVICE_NOT_CONFIGURED`` 로 차단된다. 본 fixture 는
+    production-like 한 service set 을 갖춰 handler 실행 경로까지 도달
+    가능하도록 ``strategy_registry`` / ``audit_logger`` 도 명시 주입한다.
+    """
     return ServiceRegistry(
         account=MagicMock(),
         bot_manager=MagicMock(),
@@ -29,6 +36,8 @@ def _make_service_registry() -> ServiceRegistry:
         approval=MagicMock(),
         reconciler=MagicMock(),
         eventbus=MagicMock(),
+        strategy_registry=MagicMock(),
+        audit_logger=MagicMock(),
     )
 
 
