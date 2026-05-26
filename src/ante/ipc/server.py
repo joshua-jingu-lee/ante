@@ -261,6 +261,41 @@ class IPCServer:
             },
         }
 
+    @staticmethod
+    def _service_not_configured(request_id: str, service_name: str) -> dict:
+        """``SERVICE_NOT_CONFIGURED`` error 응답 dict 생성.
+
+        Refs #1850 / #1816: dispatch wrapper의 ``required_services`` preflight 가
+        ``ServiceRegistry`` 에 의존 service 가 부재한 경우 사용한다. taxonomy
+        SSOT(``docs/specs/contracts/error-taxonomy.md``) 의 ``service_unavailable``
+        category 안정 코드. ``SERVICE_UNAVAILABLE``(lifecycle 상태) 와는 의미가
+        분리된다 — 본 코드는 영구적 misconfiguration 을 가리킨다.
+        """
+        return {
+            "id": request_id,
+            "status": "error",
+            "error": {
+                "code": "SERVICE_NOT_CONFIGURED",
+                "message": (f"의존 서비스가 구성되지 않았습니다: {service_name}"),
+            },
+        }
+
+    def _missing_required_service(self, spec_required: frozenset[str]) -> str | None:
+        """``required_services`` preflight — 부재한 첫 service 이름 반환.
+
+        Refs #1850: ``CommandSpec.required_services`` 의 각 attribute 이름을
+        ``ServiceRegistry`` 에서 ``getattr(..., None)`` 으로 조회한다.
+        ``ServiceRegistry`` 는 dataclass 이고 optional service(예: ``audit_logger``,
+        ``member_service``, ``trade_service``, ``strategy_registry``)는 default
+        ``None`` 을 가지므로 ``None`` 도 부재로 판정한다. 모두 존재하면 ``None``
+        반환. 부재 발생 시 등록 순서가 frozenset 이라 비결정적이므로 단일 결정
+        결과(첫 발견)만 사용한다.
+        """
+        for service_name in spec_required:
+            if getattr(self._service_registry, service_name, None) is None:
+                return service_name
+        return None
+
     async def _dispatch(self, request: dict) -> dict:
         """요청을 적절한 핸들러로 라우팅.
 
@@ -272,6 +307,23 @@ class IPCServer:
         * ``SHUTTING_DOWN`` + mutating: ``SERVICE_UNAVAILABLE``.
         * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정).
         * ``RUNNING``: 정상 dispatch.
+
+        Refs #1850 (#1819 부모 epic): lifecycle gate 통과 후 handler 호출 전에
+        ``CommandSpec`` metadata 기반 preflight 두 단계를 수행한다.
+
+        1. ``required_services`` 부재 시 ``SERVICE_NOT_CONFIGURED`` envelope
+           으로 거부한다 — handler 가 ``svc.<name>`` 접근에서 ``None`` /
+           ``AttributeError`` 로 폭주하기 전에 차단한다.
+        2. ``account_id_policy`` 검증 — try 블록 내부에서
+           ``require_account_id`` 를 호출해 ``InvalidAccountIdError``
+           (``code="VALIDATION_ERROR"``) 를 raise 시키고, 기존 except 가
+           ``getattr(e, "code", ...)`` 로 ``VALIDATION_ERROR`` envelope 으로
+           변환하게 한다(handler 본문의 기존 ``require_account_id`` 호출과
+           1:1 동형 매핑).
+
+        lifecycle gate 가 preflight 보다 항상 먼저 — DRAINING/STOPPED 또는
+        SHUTTING_DOWN+mutating 인 경우 preflight 에 도달하지 않는다(Codex v2
+        condition 3).
         """
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
@@ -306,7 +358,35 @@ class IPCServer:
                 "서버가 종료 중입니다. 변경 명령을 받지 않습니다.",
             )
 
+        # Refs #1850: required_services preflight — handler 호출 전에 검증.
+        # ServiceRegistry 는 dataclass 이며 optional service 는 default=None
+        # 이므로 ``getattr(..., None) is None`` 이면 부재로 판정한다.
+        missing = self._missing_required_service(spec.required_services)
+        if missing is not None:
+            return self._service_not_configured(request_id, missing)
+
         try:
+            # Refs #1850: account_id_policy preflight — try 블록 내부에서
+            # ``require_account_id`` 를 호출해 ``InvalidAccountIdError``
+            # (``code="VALIDATION_ERROR"``) 가 아래 except 에서
+            # ``VALIDATION_ERROR`` envelope 으로 자동 변환되도록 한다.
+            # ``required``: account_id 가 반드시 존재해야 하므로 ``args.get``
+            # 결과(부재 시 ``None``) 를 그대로 require_account_id 에 넘긴다.
+            # ``optional_filter``: filter 인자로 사용되며 부재면 skip, 존재
+            # 하면 검증한다. ``none``: skip. handler 본문의 기존
+            # ``require_account_id`` 호출은 본 PR scope 외 — valid 값에서는
+            # 멱등하므로 중복 호출이어도 안전(#1852 후속에서 제거 가능).
+            if spec.account_id_policy == "required":
+                from ante.account.scoping import require_account_id
+
+                require_account_id(args.get("account_id"), context=f"ipc.{command}")
+            elif spec.account_id_policy == "optional_filter":
+                account_id_arg = args.get("account_id")
+                if account_id_arg is not None:
+                    from ante.account.scoping import require_account_id
+
+                    require_account_id(account_id_arg, context=f"ipc.{command}")
+
             result = await spec.handler(self._service_registry, args, actor)
             return {
                 "id": request_id,
@@ -318,7 +398,8 @@ class IPCServer:
             # 예외 인스턴스/클래스에 ``code`` 속성이 있으면 안정 코드로
             # 노출한다 (#1144 invariant S5). 기존 예외(account.suspend/activate
             # 등)는 ``code`` 속성이 없어 자동으로 ``EXECUTION_ERROR``로
-            # 폴백된다 — 회귀 없음.
+            # 폴백된다 — 회귀 없음. Refs #1850: ``InvalidAccountIdError``
+            # (``code="VALIDATION_ERROR"``) 도 본 경로로 envelope 변환된다.
             error_code = getattr(e, "code", "EXECUTION_ERROR")
             return {
                 "id": request_id,
