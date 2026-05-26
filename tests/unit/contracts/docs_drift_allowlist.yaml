@@ -1,0 +1,59 @@
+# CLI registry ↔ docs command table drift baseline allowlist (#1848 Family A).
+#
+# `src/ante/contracts/cli_registry.py` 의 ``CLI_COMMAND_REGISTRY`` (94 entries)
+# 와 ``docs/specs/cli/03-commands.md`` 의 ``| ante ... |`` 표 행에서 추출한
+# command path 집합의 차집합을 baseline 으로 등록한다.
+#
+# 본 baseline 의 의도는 다음과 같다 (#1815 epic / #1844 leaf coverage 결과):
+#
+# - registry 94 entries 는 docs 표에 모두 등장한다 (registry → docs drift 0).
+# - docs 표에는 registry 가 의도적으로 다루지 않는 group 또는 leaf path 가
+#   추가로 존재한다. 본 PR 시점에 식별된 잔여는 다음 3 카테고리.
+#
+#   (a) `feed` 도메인 — #1815 1차 PR scope 에서 제외 (registry 미등록 11
+#       leaves 중 9 leaves). docs 표는 일부 leaf 를 직접 행으로, 일부는
+#       group aggregated row (예: ``feed run ...``, ``feed config/...``) 로
+#       다룬다.
+#
+#   (b) `init` / `update` — bootstrap / external-process 단일 leaf. #1815
+#       epic 본문이 명시한 leaf coverage 잔여 11 leaves 중 2 leaves.
+#
+#   (c) `notification` — docs 표가 "public leaf command 없음" 으로 명시한
+#       group level 행. registry 에 leaf 가 없는 게 정상.
+#
+# 본 baseline 은 *drift 가 아니라 의도된 carry-over* 다. 새 leaf 가 docs 표에
+# 추가되었는데 registry 미등록이면 본 YAML 갱신 없이 drift test 가 FAIL 해야
+# 한다 (구조적 invariant).
+#
+# 항목 추가/제거 규칙:
+# - registry 등록이 완료된 path 는 본 YAML 에서 entry 를 삭제한다.
+# - docs 가 새로 다루는 path 가 baseline 이상으로 늘어나면 본 YAML 에 추가
+#   *전*에 #1815 epic 후속 이슈로 spec 정렬을 결정한다.
+# - reason 은 사람이 읽는 자유 문자열. drift test 는 path tuple 만 참조한다.
+
+# docs/specs/cli/03-commands.md 에 등장하지만 CLI_COMMAND_REGISTRY 에는 등록되지
+# 않은 path. tuple 은 root-to-leaf segment (예: ["feed", "init"]).
+docs_only_paths:
+  # (a) feed 도메인 — #1815 1차 PR scope 제외 (registry 미등록 leaves)
+  - path: ["feed", "init"]
+    reason: "#1844 leaf coverage 잔여 — feed domain bootstrap leaf (registry out-of-scope)"
+  - path: ["feed", "inject"]
+    reason: "#1844 leaf coverage 잔여 — feed domain manual injection leaf"
+  - path: ["feed", "start"]
+    reason: "#1844 leaf coverage 잔여 — feed scheduler external process leaf"
+  - path: ["feed", "status"]
+    reason: "#1844 leaf coverage 잔여 — feed domain status leaf"
+  - path: ["feed", "config"]
+    reason: "docs aggregated group row (config/check/list/set sub-leaves are documented at group level only)"
+  - path: ["feed", "run"]
+    reason: "docs aggregated group row (run/backfill/daily sub-leaves are documented at group level only)"
+
+  # (b) init / update — single-leaf bootstrap / external-process
+  - path: ["init"]
+    reason: "#1844 leaf coverage 잔여 — ante init bootstrap (auth-exempt, fresh DB creation)"
+  - path: ["update"]
+    reason: "#1844 leaf coverage 잔여 — ante update external process (pip self-upgrade)"
+
+  # (c) notification — group level row, no public leaf
+  - path: ["notification"]
+    reason: "docs explicitly records '— public leaf command 없음' (group has no leaves)"

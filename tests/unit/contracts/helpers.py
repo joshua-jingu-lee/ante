@@ -40,6 +40,7 @@ test 가 repository root 를 고정하는 책임을 진다.
 from __future__ import annotations
 
 import ast
+import re
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -783,6 +784,138 @@ def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
     )
 
 
+# ── docs/specs/cli/03-commands.md table parser (#1848) ────────────────────
+
+
+@dataclass(frozen=True)
+class DocsCommandRow:
+    """``docs/specs/cli/03-commands.md`` 의 ``| ante ... |`` 표 행 메타데이터.
+
+    Attributes:
+        lineno: 표 행이 등장한 줄 (1-based).
+        raw_first_cell: 표의 첫 cell 원문 ("ante" 접두 뒤의 raw 텍스트, 끝
+            backtick / 공백은 제거됨). 디버깅용.
+        paths: 본 행에서 추출된 root-to-leaf path tuple. 슬래시 alternation
+            (예: ``data list/schema/storage/...``) 은 카테시안 곱으로 확장된다.
+    """
+
+    lineno: int
+    raw_first_cell: str
+    paths: tuple[tuple[str, ...], ...]
+
+
+_DOCS_ROW_RE = re.compile(r"^\|\s*`?ante\s+([^|`]*)", re.MULTILINE)
+
+
+def _extract_docs_command_paths(first_cell: str) -> tuple[tuple[str, ...], ...]:
+    """표 행의 첫 cell 텍스트에서 command path 후보를 추출한다.
+
+    Heuristic:
+
+    * "ante" 접두는 정규식이 이미 제거. 남은 토큰을 공백 분리.
+    * 다음 중 하나로 시작하는 토큰을 만나면 끊는다 (option/argument 경계):
+
+      - ``-`` (e.g., ``--status``)
+      - ``<`` (e.g., ``<account_id>``)
+      - ``[`` / ``(`` (optional group / alternation in usage)
+      - ``...`` (variadic)
+
+    * 토큰 안의 ``/`` 는 alternative leaf alias 로 간주 (예:
+      ``list/schema/storage`` → ``list``, ``schema``, ``storage`` 각각 leaf).
+      여러 슬래시 토큰이 같은 행에 있으면 카테시안 곱으로 확장한다.
+
+    빈 결과 (``([],)``) 는 빈 tuple 로 변환해 ``return ()``.
+    """
+    raw = first_cell.strip().rstrip(" `")
+    tokens: list[str] = []
+    for tok in raw.split():
+        if not tok:
+            break
+        if tok.startswith("-") or tok.startswith("<") or tok.startswith("["):
+            break
+        if tok.startswith("("):
+            break
+        if tok == "...":
+            break
+        tok = tok.strip("`")
+        if not tok:
+            break
+        tokens.append(tok)
+    if not tokens:
+        return ()
+    paths: list[list[str]] = [[]]
+    for tok in tokens:
+        if "/" in tok:
+            alts = [a for a in tok.split("/") if a]
+            paths = [p + [a] for p in paths for a in alts]
+        else:
+            paths = [p + [tok] for p in paths]
+    return tuple(tuple(p) for p in paths if p)
+
+
+def iter_docs_command_rows(
+    path: Path | None = None,
+) -> Iterator[DocsCommandRow]:
+    """``docs/specs/cli/03-commands.md`` 의 ``| ante ... |`` 표 행을 yield.
+
+    AST 가 아니라 텍스트 정규식 기반이다. 문서 SSOT 구조가 markdown 표라는
+    invariant 를 그대로 따른다 — 표 구조가 깨지면 본 helper 도 함께 갱신
+    되어야 한다.
+
+    Args:
+        path: 로드할 markdown 경로. ``None`` 이면 repo 의
+            ``docs/specs/cli/03-commands.md`` 를 호출자 cwd 기준으로 읽는다.
+
+    Yields:
+        :class:`DocsCommandRow`: 각 표 행의 메타데이터. 슬래시 alternation 은
+        ``paths`` 에 카테시안 확장된 형태로 담긴다.
+
+    Note:
+        ``--version`` 만으로 끝나는 메타 경로 행은 ``paths`` 가
+        ``(("--version",),)`` 가 되는데, 본 helper 는 raw 추출만 책임지고
+        meta path 제외는 호출자가 결정한다 — 테스트가 명시적으로
+        ``--version`` 같은 dash 시작 segment 를 거른다.
+    """
+    if path is None:
+        path = Path("docs/specs/cli/03-commands.md")
+    text = path.read_text(encoding="utf-8")
+    for m in _DOCS_ROW_RE.finditer(text):
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        lineno = text.count("\n", 0, line_start) + 1
+        first_cell = m.group(1)
+        paths = _extract_docs_command_paths(first_cell)
+        yield DocsCommandRow(
+            lineno=lineno,
+            raw_first_cell=first_cell.strip().rstrip(" `"),
+            paths=paths,
+        )
+
+
+def collect_docs_command_paths(
+    path: Path | None = None,
+) -> frozenset[tuple[str, ...]]:
+    """``docs/specs/cli/03-commands.md`` 의 모든 명령 path 를 frozenset 으로.
+
+    :func:`iter_docs_command_rows` 의 각 row 의 paths 를 합친 결과. dash 로
+    시작하는 segment (``--version`` 같은 메타 옵션 행) 는 제외한다 — 본
+    helper 의 결과는 leaf 또는 그룹 command path 만 포함하는 invariant 를
+    유지한다.
+
+    Args:
+        path: :func:`iter_docs_command_rows` 와 동일.
+
+    Returns:
+        모든 명령 path tuple 의 frozenset (그룹 + leaf 혼합 가능).
+    """
+    result: set[tuple[str, ...]] = set()
+    for row in iter_docs_command_rows(path):
+        for p in row.paths:
+            if p and p[0].startswith("-"):
+                continue
+            result.add(p)
+    return frozenset(result)
+
+
 # ── public surface ────────────────────────────────────────────────────────
 
 
@@ -790,15 +923,18 @@ __all__ = [
     "AuthMetadata",
     "CliLeafCommand",
     "DatabaseConstructionSite",
+    "DocsCommandRow",
     "DriftAllowlist",
     "ExceptionAllowlistEntry",
     "ExceptionClassInfo",
     "FmtErrorAllowlistEntry",
     "FmtErrorCallsite",
     "GetDbPathCall",
+    "collect_docs_command_paths",
     "iter_click_leaf_commands",
     "iter_command_auth_metadata",
     "iter_database_constructions",
+    "iter_docs_command_rows",
     "iter_exception_classes",
     "iter_fmt_error_calls",
     "iter_get_db_path_calls",
