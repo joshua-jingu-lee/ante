@@ -180,17 +180,17 @@ def test_raw_legacy_is_envelope_form_not_contract_kind() -> None:
 
 
 def test_get_contract_returns_none_when_missing() -> None:
-    """미등록 path 는 ``None`` 을 반환한다 (등록된 10 도메인 외).
+    """미등록 path 는 ``None`` 을 반환한다 (등록된 13 도메인 외).
 
     등록 도메인: account / member / bot / approval / treasury / strategy /
-    data / report / broker / system.
+    data / report / broker / system / instrument / config / rule.
     """
     # nonexistent path 는 항상 ``None``.
     assert get_contract(("nonexistent",)) is None
-    # instrument 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 8 이후) 의
-    # 책임이므로 본 PR 시점에는 ``None`` 이다 (broker / system domain 은
-    # sub-PR 7 에서 등록되었다).
-    assert get_contract(("instrument", "list")) is None
+    # trade 도메인 entry 등록은 후속 #1847 sub-PR (sub-PR 9 이후) 의
+    # 책임이므로 본 PR 시점에는 ``None`` 이다 (instrument / config / rule
+    # domain 은 sub-PR 8 에서 등록되었다).
+    assert get_contract(("trade", "list")) is None
 
 
 def test_registry_is_mutable_dict() -> None:
@@ -470,6 +470,70 @@ def test_system_entries_registered_after_1847_sub_pr_7() -> None:
     assert expected_system_paths.issubset(registered), (
         f"system 5 entry 가 모두 등록되어야 한다 (#1847 sub-PR 7). "
         f"누락: {sorted(expected_system_paths - registered)}"
+    )
+
+
+def test_instrument_entries_registered_after_1847_sub_pr_8() -> None:
+    """#1847 sub-PR 8 가 instrument 4 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 8 가 instrument migration 을 완료한 시점부터
+    lock 된다. 4 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_instrument_success_output_drift`
+    가 책임진다.
+    """
+    expected_instrument_paths = {
+        ("instrument", "list"),
+        ("instrument", "sync"),
+        ("instrument", "search"),
+        ("instrument", "import"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_instrument_paths.issubset(registered), (
+        f"instrument 4 entry 가 모두 등록되어야 한다 (#1847 sub-PR 8). "
+        f"누락: {sorted(expected_instrument_paths - registered)}"
+    )
+
+
+def test_config_entries_registered_after_1847_sub_pr_8() -> None:
+    """#1847 sub-PR 8 가 config 3 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 8 가 config migration 을 완료한 시점부터
+    lock 된다. 3 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_config_success_output_drift` 가
+    책임진다.
+    """
+    expected_config_paths = {
+        ("config", "get"),
+        ("config", "set"),
+        ("config", "history"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_config_paths.issubset(registered), (
+        f"config 3 entry 가 모두 등록되어야 한다 (#1847 sub-PR 8). "
+        f"누락: {sorted(expected_config_paths - registered)}"
+    )
+
+
+def test_rule_entries_registered_after_1847_sub_pr_8() -> None:
+    """#1847 sub-PR 8 가 rule 3 leaf entry 를 등록했음을 lock 한다.
+
+    본 단언은 #1847 sub-PR 8 가 rule migration 을 완료한 시점부터
+    lock 된다. 3 entry 의 정확한 ``OutputContract`` / ``AuthContract``
+    정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
+    (Family B) 와 :mod:`tests.unit.test_rule_success_output_drift` 가
+    책임진다.
+    """
+    expected_rule_paths = {
+        ("rule", "list"),
+        ("rule", "info"),
+        ("rule", "update"),
+    }
+    registered = set(CLI_COMMAND_REGISTRY.keys())
+    assert expected_rule_paths.issubset(registered), (
+        f"rule 3 entry 가 모두 등록되어야 한다 (#1847 sub-PR 8). "
+        f"누락: {sorted(expected_rule_paths - registered)}"
     )
 
 
