@@ -17,12 +17,15 @@ from tests.unit.contracts.helpers import (
     AuthMetadata,
     CliLeafCommand,
     DatabaseConstructionSite,
+    DocsCommandRow,
     ExceptionClassInfo,
     FmtErrorCallsite,
     GetDbPathCall,
+    collect_docs_command_paths,
     iter_click_leaf_commands,
     iter_command_auth_metadata,
     iter_database_constructions,
+    iter_docs_command_rows,
     iter_exception_classes,
     iter_fmt_error_calls,
     iter_get_db_path_calls,
@@ -695,6 +698,153 @@ class TestIterGetDbPathCalls:
     def test_missing_root_returns_empty(self, tmp_path: Path) -> None:
         results = list(iter_get_db_path_calls(tmp_path / "nonexistent"))
         assert results == []
+
+
+# ── iter_docs_command_rows / collect_docs_command_paths (#1848) ───────────
+
+
+class TestIterDocsCommandRows:
+    """``docs/specs/cli/03-commands.md`` 표 행 파서 skeleton."""
+
+    def test_extracts_simple_leaf_row(self, tmp_path: Path) -> None:
+        """단일 leaf path 행을 그대로 추출한다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante account list` | offline | runtime-safe |\n",
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert len(rows) == 1
+        assert rows[0].paths == (("account", "list"),)
+
+    def test_extracts_row_with_argument_placeholder(self, tmp_path: Path) -> None:
+        """``<arg>`` 형태의 placeholder 토큰은 path 추출에서 끊긴다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante account info <account_id>` | offline | x |\n",
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert rows[0].paths == (("account", "info"),)
+
+    def test_extracts_row_with_option(self, tmp_path: Path) -> None:
+        """``--option`` 토큰은 path 추출에서 끊긴다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante account list [--status <status>]` | offline | x |\n",
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert rows[0].paths == (("account", "list"),)
+
+    def test_expands_slash_alternation(self, tmp_path: Path) -> None:
+        """슬래시로 구분된 토큰은 카테시안 곱으로 확장한다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante data list/schema/storage ...` | offline | x |\n",
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert set(rows[0].paths) == {
+            ("data", "list"),
+            ("data", "schema"),
+            ("data", "storage"),
+        }
+
+    def test_returns_typed_rows(self, tmp_path: Path) -> None:
+        """yield 되는 객체는 :class:`DocsCommandRow` 인스턴스다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante system status` | offline | x |\n",
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert isinstance(rows[0], DocsCommandRow)
+        assert rows[0].lineno == 1
+        assert "ante system status" in f"ante {rows[0].raw_first_cell}"
+
+    def test_ignores_non_ante_rows(self, tmp_path: Path) -> None:
+        """``| ante`` 로 시작하지 않는 행은 무시한다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            textwrap.dedent(
+                """\
+                | 분류 | 의미 |
+                |------|------|
+                | `offline` | x |
+                | `ante system status` | offline | x |
+                """,
+            ),
+            encoding="utf-8",
+        )
+        rows = list(iter_docs_command_rows(doc))
+        assert len(rows) == 1
+        assert rows[0].paths == (("system", "status"),)
+
+
+class TestCollectDocsCommandPaths:
+    """``collect_docs_command_paths`` aggregation 동작."""
+
+    def test_collects_distinct_paths(self, tmp_path: Path) -> None:
+        """여러 행에서 중복된 path 는 한 번만 등장한다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            textwrap.dedent(
+                """\
+                | `ante system status` | offline | x |
+                | `ante system status` | offline | duplicate row |
+                | `ante system halt` | runtime IPC | x |
+                """,
+            ),
+            encoding="utf-8",
+        )
+        paths = collect_docs_command_paths(doc)
+        assert paths == frozenset(
+            {
+                ("system", "status"),
+                ("system", "halt"),
+            },
+        )
+
+    def test_excludes_dash_meta_paths(self, tmp_path: Path) -> None:
+        """``--version`` 처럼 dash 로 시작하는 segment 는 결과에서 제외된다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante --version` | meta | meta row |\n"
+            "| `ante system status` | offline | x |\n",
+            encoding="utf-8",
+        )
+        paths = collect_docs_command_paths(doc)
+        # ``--version`` 토큰은 path extraction 단계에서 break 되어 paths=()
+        # 가 되지만, 만에 하나 row 가 ``--`` segment 로 추출되더라도 collect
+        # 단계가 dash-leading segment 를 거른다.
+        assert paths == frozenset({("system", "status")})
+
+    def test_returns_frozenset(self, tmp_path: Path) -> None:
+        """결과는 :class:`frozenset` 으로 immutable 하다."""
+        doc = tmp_path / "spec.md"
+        doc.write_text(
+            "| `ante system status` | offline | x |\n",
+            encoding="utf-8",
+        )
+        paths = collect_docs_command_paths(doc)
+        assert isinstance(paths, frozenset)
+
+    def test_runs_against_real_docs(self) -> None:
+        """실제 ``docs/specs/cli/03-commands.md`` 에 대해 파서가 깨지지 않는다.
+
+        본 테스트는 docs SSOT 변경 시 path extraction 이 zero-match 가 되거나
+        구조적 회귀가 생기는지를 sanity check 한다. 정확한 path set 동치는
+        :mod:`tests.unit.contracts.test_cli_registry_docs_drift` 의 책임.
+        """
+        repo_root = Path(__file__).resolve().parents[3]
+        spec_path = repo_root / "docs" / "specs" / "cli" / "03-commands.md"
+        if not spec_path.exists():
+            pytest.skip("docs/specs/cli/03-commands.md not present in this layout")
+        paths = collect_docs_command_paths(spec_path)
+        assert len(paths) >= 50, (
+            f"실제 docs 에서 추출된 path 수가 너무 적음 ({len(paths)} < 50)"
+        )
 
 
 # ── repository-wide sanity ────────────────────────────────────────────────
