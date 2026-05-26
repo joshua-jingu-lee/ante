@@ -115,8 +115,14 @@ def _make_mock_db(rows=None):
 
 
 def _patch_account_service(svc: AsyncMock, db: AsyncMock):
-    async def _create_service():
-        return svc, db
+    """#1856: ``_create_account_service`` 가 async context manager 로
+    전환됐다. fake factory 는 ``ctx`` 인자를 받아 ``svc`` 만 yield 한다.
+    """
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
 
     return patch(
         "ante.cli.commands.account._create_account_service",

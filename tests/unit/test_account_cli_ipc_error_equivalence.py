@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -105,13 +106,16 @@ def _ipc_envelope_code(exc: BaseException) -> str:
 def _cli_envelope_code(runner: CliRunner, args: list[str], exc: BaseException) -> str:
     """``_create_account_service`` 를 patch 해 주어진 exception 을 raise 시키고
     CLI ``--format json`` envelope 의 ``code`` 를 반환한다.
+
+    #1856: ``_create_account_service`` 가 async context manager 로 전환됐다.
     """
+    from contextlib import asynccontextmanager
 
     svc = AsyncMock()
-    db = AsyncMock()
 
-    async def _create_service():  # noqa: ANN202
-        return svc, db
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
 
     # account list/get/update 등 모든 service entry 가 exc 를 raise 하도록
     # 광범위 side_effect 를 설정한다 (대상 callsite 가 어느 메서드든 동일
@@ -157,11 +161,15 @@ class TestInvalidAccountIdEquivalence:
     ) -> None:
         # invalid account_id ("default") → CLI ingress 가 reject_invalid_account_id
         # 로 거부하며 service mock 까지 도달하지 않는다.
-        svc = AsyncMock()
-        db = AsyncMock()
+        #
+        # #1856: ``_create_account_service`` 가 async context manager 로 전환됐다.
+        from contextlib import asynccontextmanager
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        svc = AsyncMock()
+
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with patch(
             "ante.cli.commands.account._create_account_service",
@@ -247,11 +255,11 @@ class TestAccountAlreadyExistsEquivalence:
         # 제공해 service.create 호출까지 도달시킨다. cold-path runtime guard
         # 도 우회한다 (CLI defense-in-depth 는 본 lock 범위 밖).
         svc = AsyncMock()
-        db = AsyncMock()
         svc.create.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with (
             patch(
@@ -443,11 +451,11 @@ class TestAccountHasActiveBotsEquivalence:
         # account delete 표면 — typed except 명시 매핑이 ``ACCOUNT_HAS_ACTIVE_BOTS``
         # 코드를 명시 surface 한다 (보존).
         svc = AsyncMock()
-        db = AsyncMock()
         svc.delete.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with (
             patch(
@@ -490,7 +498,6 @@ class TestBrokerReconnectFailedEquivalence:
         # set-credentials 표면 — service.update 가 raise → generic except →
         # emit_cli_error 로 typed code surface.
         svc = AsyncMock()
-        db = AsyncMock()
 
         # _resolve_credentials 가 도달하기 전 svc.get 으로 broker_type 을 알아야
         # 한다 — preset 이 있는 broker_type 으로 mock account 를 반환한다.
@@ -514,8 +521,9 @@ class TestBrokerReconnectFailedEquivalence:
         )
         svc.update = AsyncMock(side_effect=exc)
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with (
             patch(
@@ -578,11 +586,11 @@ class TestAccountDeleteSurfaceOverride:
     ) -> None:
         exc = AccountDeletedError("deleted")
         svc = AsyncMock()
-        db = AsyncMock()
         svc.delete.side_effect = exc
 
-        async def _create_service():  # noqa: ANN202
-            return svc, db
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
 
         with (
             patch(

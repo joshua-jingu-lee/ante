@@ -17,6 +17,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn
@@ -33,6 +35,7 @@ from ante.cli.cold_path import (
     ACCOUNT_COLD_PATH_BLOCKED_CODE,
     assert_no_active_runtime,
 )
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
@@ -48,7 +51,6 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.cli.formatter import OutputFormatter
-    from ante.core.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -90,39 +92,61 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     )
 
 
-async def _create_account_service() -> tuple[AccountService, Database]:
-    """CLI에서 AccountService를 생성하는 헬퍼.
+@asynccontextmanager
+async def _create_account_service(
+    ctx: click.Context | None = None,
+) -> AsyncIterator[AccountService]:
+    """CLI에서 ``AccountService`` 를 생성하는 async context manager (#1856).
 
-    ``db.connect()`` 이후의 모든 라이프사이클(``AccountService.initialize`` 포함)을
-    ``except BaseException`` 블록으로 감싸 실패 시 ``db.close()``를 보장한다.
-    ``initialize`` 안에서 legacy row decrypt 실패 등으로 예외가 raise되면
-    aiosqlite 연결이 leak되어 asyncio 종료 시 busy_timeout 대기로 CLI 프로세스가
-    8초 가까이 hang하는 회귀를 차단한다(#1722). close 자체 실패는 inner
-    try/except로 흡수해 원본 예외를 가리지 않는다.
+    이전 시그니처(``async def`` → ``tuple[AccountService, Database]``)에서
+    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
+    composition). 호출 패턴:
+
+        async with _create_account_service(ctx) as svc:
+            await svc.create(...)
+
+    ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
+    ``Database.close()`` 를 보장하므로 (#1722/#1755 cleanup invariant 와 동형),
+    callsite 의 ``try/finally: await db.close()`` 패턴이 제거된다.
+
+    Args:
+        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context(silent=True)``
+            로 현재 컨텍스트를 fallback 조회한다 — 기존 ctx-less call sites
+            및 ``tests/unit/test_cli_account_crypto_error.py`` 의 R3
+            ``await _create_account_service()`` 회귀 인보케이션과의 하위
+            호환을 위해 유지한다. 신규 호출은 항상 ctx 명시 전달이 권장된다
+            (offline-factory.md §3.1).
+
+    Yields:
+        ``initialize()`` 가 완료된 :class:`AccountService` 인스턴스.
+
+    Cleanup invariant:
+        - ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로
+          ``AccountService.initialize()`` 가 ``EncryptionKeyMissingError`` 등을
+          raise 해도 ``Database.close()`` 가 1회 호출된다 (#1722 회귀 lock).
+        - ``close()`` 실패는 ``open_cli_db`` 내부 try/except 가 swallow 한다.
     """
     from ante.account.service import AccountService
-    from ante.cli.main import get_db_path
-    from ante.core.database import Database
     from ante.eventbus.bus import EventBus
 
-    db = Database(get_db_path())
-    try:
-        await db.connect()
+    # ctx fallback: 명시 전달이 없으면 현재 Click context 를 조회한다. 신규
+    # 호출은 항상 ctx 를 명시 전달해야 하지만, 회귀 테스트 R3 의 ctx-less
+    # ``await _create_account_service()`` invocation 과 다른 명령의 ``ctx``
+    # propagation 누락을 깨뜨리지 않도록 호환 path 를 둔다.
+    resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
+    if resolved_ctx is None:
+        # fallback 도 실패 — Click context 가 전혀 활성화되지 않은 경로.
+        # ``open_cli_db`` 의 ValueError 와 동일 의미로 surface.
+        raise ValueError(
+            "_create_account_service requires a Click context "
+            "(explicit ctx or active click.get_current_context)"
+        )
+
+    async with open_cli_db(resolved_ctx) as db:
         eventbus = EventBus()
         account_service = AccountService(db=db, eventbus=eventbus)
         await account_service.initialize()
-    except BaseException:
-        try:
-            await db.close()
-        except Exception:
-            # close 실패는 상위 예외를 가리지 않고 무시한다 — 원본 예외(예:
-            # EncryptionKeyMissingError)가 호출자에게 안정 ``code``를 전달해야
-            # CLI가 stable JSON error로 종료할 수 있다.
-            logger.debug(
-                "db.close() after init failure raised — ignored", exc_info=True
-            )
-        raise
-    return account_service, db
+        yield account_service
 
 
 def mask_value(key: str, value: str) -> str:
@@ -597,11 +621,8 @@ def account_create(
     )
 
     async def _do_create() -> Account:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             return await svc.create(new_account)
-        finally:
-            await db.close()
 
     try:
         created = _run(_do_create())
@@ -655,13 +676,10 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
         raise SystemExit(1)
 
     async def _do_list() -> list[dict]:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             status = AccountStatus(status_filter) if status_filter else None
             accounts = await svc.list(status=status)
             return [_account_to_row(a) for a in accounts]
-        finally:
-            await db.close()
 
     try:
         rows = _run(_do_list())
@@ -706,12 +724,9 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     )
 
     async def _do_info() -> dict:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             acct = await svc.get(validated_account_id)
             return _account_to_detail(acct)
-        finally:
-            await db.close()
 
     try:
         detail = _run(_do_info())
@@ -868,11 +883,8 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     )
 
     async def _do_delete() -> None:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             await svc.delete(validated_account_id, deleted_by=member_id)
-        finally:
-            await db.close()
 
     try:
         _run(_do_delete())
@@ -921,12 +933,9 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     )
 
     async def _do_credentials() -> dict[str, str]:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             acct = await svc.get(validated_account_id)
             return {k: mask_value(k, v) for k, v in acct.credentials.items()}
-        finally:
-            await db.close()
 
     try:
         masked = _run(_do_credentials())
@@ -1009,8 +1018,7 @@ def account_set_credentials(
     from ante.account.presets import BROKER_PRESETS
 
     async def _do_set_credentials() -> None:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             acct = await svc.get(validated_account_id)
             preset = BROKER_PRESETS.get(acct.broker_type)
             if not preset or not preset.required_credentials:
@@ -1055,8 +1063,6 @@ def account_set_credentials(
 
             await svc.update(validated_account_id, credentials=new_credentials)
             fmt.success(f'계좌 "{validated_account_id}" 인증 정보 재설정 완료')
-        finally:
-            await db.close()
 
     try:
         _run(_do_set_credentials())
@@ -1123,11 +1129,8 @@ def account_repair_timezone(
     )
 
     async def _do_repair() -> Account:
-        svc, db = await _create_account_service()
-        try:
+        async with _create_account_service(ctx) as svc:
             return await svc.repair_timezone(validated_account_id, new_timezone)
-        finally:
-            await db.close()
 
     try:
         repaired = _run(_do_repair())

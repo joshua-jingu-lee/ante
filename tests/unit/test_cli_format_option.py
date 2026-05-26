@@ -12,6 +12,7 @@ trailing 명령에도 ``@format_option`` 누락이 잔존해 ``Error: No such op
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import click
@@ -24,6 +25,41 @@ from ante.cli.commands.member import member_info
 from ante.cli.commands.report import schema as report_schema
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+
+
+def _patch_account_factory(svc, db):  # noqa: ANN001, ANN202
+    """#1856: ``_create_account_service`` 가 async context manager 로 전환된 후
+    fake factory 가 ``ctx`` 인자를 받아 ``svc`` 만 yield 하도록 한다.
+
+    ``db`` 인자는 backward-compat 시그니처로 유지되지만, 새 context manager 의
+    내부에서는 ``open_cli_db`` 헬퍼가 DB lifecycle 을 캡슐화하므로 fake 도 svc
+    만 yield 한다.
+    """
+    _ = db  # backward-compat — unused inside fake factory
+
+    @asynccontextmanager
+    async def _fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
+
+    return patch(
+        "ante.cli.commands.account._create_account_service",
+        new=_fake_factory,
+    )
+
+
+def _patch_member_factory(svc, db):  # noqa: ANN001, ANN202
+    """#1856: ``member._create_service`` async context manager fake factory."""
+    _ = db
+
+    @asynccontextmanager
+    async def _fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
+
+    return patch(
+        "ante.cli.commands.member._create_service",
+        new=_fake_factory,
+    )
+
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -75,11 +111,7 @@ class TestMemberListFormatOption:
         db = _mock_db()
         svc.list_members = AsyncMock(return_value=[])
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc, db):
             result = runner.invoke(cli, ["member", "list", "--format", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -91,11 +123,7 @@ class TestMemberListFormatOption:
         db = _mock_db()
         svc.list_members = AsyncMock(return_value=[])
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc, db):
             result = runner.invoke(cli, ["--format", "json", "member", "list"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -120,11 +148,7 @@ class TestMemberRegisterFormatOption:
         mock_member.name = "Agent"
         svc.register = AsyncMock(return_value=(mock_member, "token-123"))
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc, db):
             result = runner.invoke(
                 cli,
                 [
@@ -155,11 +179,7 @@ class TestAccountListFormatOption:
         db = _mock_db()
         svc.list.return_value = []
 
-        with patch(
-            "ante.cli.commands.account._create_account_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_account_factory(svc, db):
             result = runner.invoke(cli, ["account", "list", "--format", "json"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -192,11 +212,7 @@ class TestAccountInfoFormatOption:
             sell_commission_rate=Decimal("0.00195"),
         )
 
-        with patch(
-            "ante.cli.commands.account._create_account_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_account_factory(svc, db):
             result = runner.invoke(
                 cli, ["account", "info", "test-acct", "--format", "json"]
             )
@@ -217,11 +233,7 @@ class TestAccountDeleteYes:
         svc.delete.return_value = None
 
         with (
-            patch(
-                "ante.cli.commands.account._create_account_service",
-                new_callable=AsyncMock,
-                return_value=(svc, db),
-            ),
+            _patch_account_factory(svc, db),
             patch("ante.main.read_pid_file", return_value=None),
             patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
@@ -244,11 +256,7 @@ class TestAccountDeleteYes:
         svc.delete.return_value = None
 
         with (
-            patch(
-                "ante.cli.commands.account._create_account_service",
-                new_callable=AsyncMock,
-                return_value=(svc, db),
-            ),
+            _patch_account_factory(svc, db),
             patch("ante.main.read_pid_file", return_value=None),
             patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
@@ -537,11 +545,7 @@ class TestAccountSetCredentialsNonInteractive:
         )
 
         with (
-            patch(
-                "ante.cli.commands.account._create_account_service",
-                new_callable=AsyncMock,
-                return_value=(svc, db),
-            ),
+            _patch_account_factory(svc, db),
             patch("ante.main.read_pid_file", return_value=None),
             patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
@@ -700,11 +704,7 @@ class TestMemberInfoFormatOption1701:
         svc.get = AsyncMock(return_value=existing)
         db = _mock_db()
 
-        with patch(
-            "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(svc, db),
-        ):
+        with _patch_member_factory(svc, db):
             result = runner.invoke(
                 cli, ["member", "info", "m-1701", "--format", "json"]
             )

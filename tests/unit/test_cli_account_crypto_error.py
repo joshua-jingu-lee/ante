@@ -31,6 +31,7 @@ import sys
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
+import click
 import pytest
 from cryptography.fernet import Fernet
 
@@ -205,11 +206,20 @@ class TestCreateAccountServiceCleanup:
         # 주입하고 await_count == 1로 검증한다. cleanup 호출 사실만 검증하면
         # 충분하므로 실제 close 본체는 위임하지 않는다 (process 종료 시 임시
         # 자원은 OS가 회수).
+        #
+        # #1856: ``_create_account_service`` 는 ``open_cli_db`` 기반 async context
+        # manager 로 전환됐다. ctx 없는 호출은 ``click.get_current_context`` fallback
+        # 으로 해석되며, 이 테스트는 모듈 import 시점에 active context 가 없는
+        # 경로다. ``click.Context(cli)`` 로 명시 활성화한 뒤 호출한다.
+        from ante.cli.main import cli
+
         with patch.object(Database, "close", new_callable=AsyncMock) as close_mock:
             monkeypatch.setattr(AccountService, "initialize", raising_initialize)
 
             with pytest.raises(EncryptionKeyMissingError):
-                await _create_account_service()
+                with click.Context(cli) as ctx:
+                    async with _create_account_service(ctx) as _svc:
+                        pass  # pragma: no cover — initialize raises before reach
 
         assert close_mock.await_count == 1, (
             f"Database.close 가 정확히 1회 await되어야 한다 "

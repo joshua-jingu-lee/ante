@@ -136,13 +136,17 @@ def _patch_service(method_name: str):  # noqa: ANN202
             ),
             "ante_ak_test",
         )
-    db = MagicMock()
-    db.close = AsyncMock(return_value=None)
+    # #1856: ``_create_service`` 는 async context manager 로 전환됐다.
+    from contextlib import asynccontextmanager
+
+    @asynccontextmanager
+    async def _fake_factory(ctx=None):  # noqa: ANN001, ANN202
+        yield service
+
     return (
         patch(
             "ante.cli.commands.member._create_service",
-            new_callable=AsyncMock,
-            return_value=(service, db),
+            new=_fake_factory,
         ),
         method,
     )

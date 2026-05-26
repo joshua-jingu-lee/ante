@@ -38,6 +38,7 @@ async def open_cli_db(
     ctx: click.Context,
     *,
     read_only: bool = False,
+    db_path_override: str | None = None,
 ) -> AsyncIterator[Database]:
     """CLI offline command DB lifecycle context manager.
 
@@ -50,6 +51,13 @@ async def open_cli_db(
             현재는 메타데이터로만 유지된다 (#1854 contract 옵션 B). 후속
             이슈에서 read-only enforcement가 필요하면 이 플래그를 통해
             확장한다.
+        db_path_override: optional 명시 DB 경로. ``None`` 이면
+            ``get_db_path(ctx)`` 로 해석한다. ``approval list/info/review/
+            audit-types`` 등 ``--db-path`` Click option 을 지원하는 명령은
+            caller 가 본 인자에 명시 경로를 전달해 ctx 의 기본 resolution 을
+            override 한다 (offline-factory.md §1.1 — factory 는 Click option
+            parsing 을 직접 수행하지 않으며, caller 가 산출한 경로를 입력으로
+            받는다).
 
     Yields:
         ``connect()``가 완료된 :class:`Database` 인스턴스.
@@ -70,7 +78,7 @@ async def open_cli_db(
     # to ``Database.__init__`` per #1854 contract option B (no Database API
     # signature change in this PR scope).
     _ = read_only
-    db_path = get_db_path(ctx)
+    db_path = db_path_override if db_path_override is not None else get_db_path(ctx)
     db = Database(db_path)
     await db.connect()
     try:

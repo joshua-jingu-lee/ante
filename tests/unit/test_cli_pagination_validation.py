@@ -197,8 +197,8 @@ class TestTradeListLimitValid:
 
     def test_default_limit_passes_ingress(self, runner: CliRunner) -> None:
         svc = MagicMock()
-        db = _mock_db()
         svc.get_trades = AsyncMock(return_value=[])
+        db = _mock_db()
 
         with patch(
             "ante.cli.commands.trade._create_trade_service",

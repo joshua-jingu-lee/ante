@@ -100,12 +100,18 @@ def offline_runtime():
 
 @pytest.fixture
 def mock_account_service():
-    """``_create_account_service``를 mock해 DB 접근을 차단한다."""
-    svc = AsyncMock()
-    db = AsyncMock()
+    """``_create_account_service``를 mock해 DB 접근을 차단한다.
 
-    async def _create_service():
-        return svc, db
+    #1856: async context manager 전환 — fake factory 도 ``@asynccontextmanager``
+    로 yield 한다.
+    """
+    from contextlib import asynccontextmanager
+
+    svc = AsyncMock()
+
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
 
     with patch(
         "ante.cli.commands.account._create_account_service", new=_create_service

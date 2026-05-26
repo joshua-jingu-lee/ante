@@ -158,10 +158,20 @@ class TestAuthExemptAllowlist:
         async def _fake_run_reset() -> None:  # noqa: RUF029
             return None
 
-        # 실제 MemberService 호출은 mock — 인증 게이트 통과만 검증
+        # 실제 MemberService 호출은 mock — 인증 게이트 통과만 검증.
+        # #1856: ``_create_service`` 가 async context manager 로 전환된 후,
+        # ``AsyncMock(side_effect=...)`` 는 ``async with`` 프로토콜과 호환되지
+        # 않는다. raise 하는 ``@asynccontextmanager`` factory 로 대체한다.
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _raising_factory(ctx=None):  # noqa: ANN001, ANN202
+            raise RuntimeError("stop-here")
+            yield  # pragma: no cover — unreachable
+
         with patch(
             "ante.cli.commands.member._create_service",
-            new=AsyncMock(side_effect=RuntimeError("stop-here")),
+            new=_raising_factory,
         ):
             result = runner.invoke(
                 cli,
@@ -189,9 +199,17 @@ class TestAuthExemptAllowlist:
         """``ante member regenerate-recovery-key`` 면제 진입 확인."""
         monkeypatch.setenv("CURRENT_PW_ENV", "currentpass")
 
+        # #1856: async context manager 호환 fake factory (위 reset-password 와 동형).
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def _raising_factory(ctx=None):  # noqa: ANN001, ANN202
+            raise RuntimeError("stop-here")
+            yield  # pragma: no cover — unreachable
+
         with patch(
             "ante.cli.commands.member._create_service",
-            new=AsyncMock(side_effect=RuntimeError("stop-here")),
+            new=_raising_factory,
         ):
             result = runner.invoke(
                 cli,

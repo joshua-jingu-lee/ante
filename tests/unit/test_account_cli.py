@@ -89,12 +89,18 @@ def _mock_account(
 
 @pytest.fixture
 def mock_account_service():
-    """AccountService mock을 patch하는 fixture."""
-    svc = AsyncMock()
-    db = AsyncMock()
+    """AccountService mock을 patch하는 fixture.
 
-    async def _create_service():
-        return svc, db
+    #1856: ``_create_account_service`` 가 async context manager 로 전환됐다.
+    fake factory 도 ``@asynccontextmanager`` + ``ctx`` 인자로 정렬한다.
+    """
+    from contextlib import asynccontextmanager
+
+    svc = AsyncMock()
+
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        yield svc
 
     with patch(
         "ante.cli.commands.account._create_account_service", new=_create_service
