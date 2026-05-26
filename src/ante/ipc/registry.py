@@ -575,20 +575,38 @@ async def _handle_treasury_set_balance(
 async def _handle_rule_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    from ante.account.scoping import require_account_id
+    """계좌 룰 업데이트 IPC handler.
+
+    Refs #1853 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행한다. audit
+    호출은 wrapper 가 ``CommandSpec.audit_action="account.rule.update"`` 기반
+    으로 자동 발화하며, handler 는 helper 에 ``audit_logger=None`` 을 전달하여
+    helper 내부 audit 발화를 끈다(CLI offline path 는 ``audit_logger`` 를
+    그대로 전달하여 기존 동작 유지). handler 는 helper 결과에
+    ``_audit_detail`` reserved key 를 덧붙여 wrapper 가 ``pop`` 으로 strip
+    한다.
+    """
     from ante.rule.config_update import update_account_rule_config
 
-    account_id = require_account_id(args.get("account_id"), context="ipc.rule.update")
-    return await update_account_rule_config(
+    account_id = args["account_id"]
+    rule_type = args["rule_type"]
+    enabled = bool(args.get("enabled", True))
+    result = await update_account_rule_config(
         account_service=svc.account,
         dynamic_config=svc.dynamic_config,
         account_id=account_id,
-        rule_type=args["rule_type"],
-        enabled=bool(args.get("enabled", True)),
+        rule_type=rule_type,
+        enabled=enabled,
         params=dict(args.get("params") or {}),
         changed_by=actor,
-        audit_logger=getattr(svc, "audit_logger", None),
+        audit_logger=None,
     )
+    result["_audit_detail"] = {
+        "resource": f"account:{account_id}:rule:{rule_type}",
+        "detail": f"rule update: {rule_type} enabled={enabled}",
+        "ip": "",
+    }
+    return result
 
 
 async def _handle_strategy_set_status(
@@ -847,6 +865,15 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     실제 ``audit_logger.log`` 호출이 있는 명령만 값을 가진다(#1819 본문 /
     Codex v2 condition 3). ``cross_validators``/``shutdown_behavior``는 본
     이슈에서 default(빈 tuple / None=derive)로 유지한다.
+
+    Refs #1853 (#1819 epic 종결): ``rule.update`` 의 audit 호출을 wrapper 로
+    이전한다(helper 의 ``audit_logger`` 인자를 IPC handler 에서 ``None`` 으로
+    전달, wrapper 가 ``audit_action="account.rule.update"`` 자동 발화). 현재
+    ``audit_action`` 부여 commands 는 10개:
+    ``account.suspend`` / ``account.activate`` / ``bot.start`` /
+    ``bot.stop`` / ``bot.update`` / ``treasury.set_balance`` /
+    ``strategy.set_status`` / ``member.update_scopes`` /
+    ``approval.cancel_invalid`` / ``rule.update``.
     """
     # ── mutating (23개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
@@ -959,7 +986,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
     )
     # rule.update — update_account_rule_config helper 응답을 그대로 통과
-    # (envelope shape이 helper 내부 결정이므로 raw).
+    # (envelope shape이 helper 내부 결정이므로 raw). Refs #1853 (#1819 epic):
+    # audit 호출을 wrapper 로 이전. handler 가 helper 에 ``audit_logger=None``
+    # 을 전달해 helper 내부 audit 발화를 끄고, wrapper 가
+    # ``audit_action="account.rule.update"`` (helper 의 기존 action 이름과 동일)
+    # 으로 자동 발화한다. CLI offline path 는 helper 의 audit_logger 인자를
+    # 그대로 사용해 기존 동작 보존.
     registry.register(
         "rule.update",
         _handle_rule_update,
@@ -967,6 +999,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="raw",
         required_services=frozenset({"account", "dynamic_config", "audit_logger"}),
         account_id_policy="required",
+        audit_action="account.rule.update",
     )
     registry.register(
         "strategy.set_status",
