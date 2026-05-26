@@ -9,6 +9,7 @@ import click
 from ante.account.errors import AccountNotFoundError
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts import emit_cli_error
 
 
 @click.group()
@@ -208,8 +209,12 @@ def balance(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            fmt.error(str(e))
-            raise SystemExit(1) from e
+            # #1843 sub-PR 5: emit_cli_error 정렬 — CLI/IPC 동일 public code
+            # surface. broker typed exception (APIError / AuthenticationError /
+            # OrderNotFoundError / RateLimitError / CircuitOpenError) 은
+            # registry MRO lookup 으로 ``BROKER_*`` 안정 코드를 surface 하며,
+            # 미분류 fault 는 ``EXECUTION_ERROR`` fallback.
+            emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)
@@ -263,8 +268,9 @@ def positions(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            fmt.error(str(e))
-            raise SystemExit(1) from e
+            # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception 의
+            # 안정 코드 surface (positions 표면 동일 정책).
+            emit_cli_error(fmt, e)
 
     pos_list = result.get("positions", [])
 
@@ -315,8 +321,9 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
         except click.ClickException:
             raise
         except Exception as e:
-            fmt.error(str(e))
-            raise SystemExit(1) from e
+            # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception
+            # 의 안정 코드 surface (reconcile --fix mutating path).
+            emit_cli_error(fmt, e)
     else:
         # 읽기 전용: IPC 우선, 폴백으로 오프라인 방식
         try:
@@ -385,14 +392,15 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
 
             try:
                 result = _run(_run_reconcile())
-            except Exception as e:
-                fmt.error(
-                    str(e),
-                    code="ACCOUNT_NOT_FOUND"
-                    if isinstance(e, AccountNotFoundError)
-                    else "",
-                )
+            except AccountNotFoundError as e:
+                fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
                 raise SystemExit(1) from e
+            except Exception as e:
+                # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception
+                # (APIError 등) 도 안정 코드 surface. 기존 ``code=""`` fallback
+                # 은 sweep 정신과 어긋나므로 helper 의 registry MRO lookup +
+                # EXECUTION_ERROR fallback 으로 일관 정렬한다.
+                emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(result)

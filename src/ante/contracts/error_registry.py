@@ -120,6 +120,31 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3 Non-Goals 동형).
 
+#1843 sub-PR 5 (broker sweep) 가 추가한 broker domain 6 sub-class lock
+(실측 ``.code`` mirror, 본 PR 에서 신규 부여):
+
+- ``AuthenticationError`` → ``BROKER_AUTH_FAILED`` / ``auth`` (KIS OAuth
+  토큰 발급/갱신 실패; HTTP 401/403 또는 잘못된 app_key/secret)
+- ``APIError`` → ``BROKER_API_ERROR`` / ``external`` (KIS API business/HTTP
+  error; 원천 KIS ``msg_cd`` 는 ``APIError.error_code`` 필드에 log-only
+  보존되며 envelope 에는 안정 코드만 노출 — Codex Plan Review v1 condition)
+- ``OrderNotFoundError`` → ``BROKER_ORDER_NOT_FOUND`` / ``not_found``
+  (broker side 에서 조회/취소 대상 주문 부재)
+- ``RateLimitError`` → ``BROKER_RATE_LIMITED`` / ``external`` (KIS per-minute
+  rate limit 초과)
+- ``CircuitOpenError`` → ``BROKER_CIRCUIT_OPEN`` / ``service_unavailable``
+  (연속 실패 임계 도달로 circuit breaker OPEN — broker 가용성 임시 차단)
+- ``ante.broker.registry.InvalidBrokerTypeError`` → ``BROKER_INVALID_TYPE`` /
+  ``validation`` (registry 미등록 broker_type 요청). 동명 별개 class 인
+  ``ante.account.errors.InvalidBrokerTypeError`` 는 #1842 가 이미
+  ``ACCOUNT_INVALID_BROKER_TYPE`` 로 등록한 다른 entry 다 — helper 의
+  type-based MRO lookup 과 drift guard 의 ``(module, name)`` 2중 anchor 가
+  두 class 를 정확히 분리한다.
+
+``BrokerError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3/4 Non-Goals 동형).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -159,6 +184,16 @@ from ante.bot.exceptions import (
     BotNotFoundError,
     BotStateConflict,
     BotStrategyAlreadyRunningError,
+)
+from ante.broker.exceptions import (
+    APIError,
+    AuthenticationError,
+    CircuitOpenError,
+    OrderNotFoundError,
+    RateLimitError,
+)
+from ante.broker.registry import (
+    InvalidBrokerTypeError as BrokerRegistryInvalidBrokerTypeError,
 )
 from ante.contracts.errors import ErrorSpec
 from ante.member.errors import (
@@ -446,6 +481,64 @@ _TREASURY_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── broker 6 sub-class lock (#1843 sub-PR 5, 본 PR 신규 부여) ────────────────
+#
+# ``BrokerError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
+# ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
+# ``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3/4 Non-Goals 동형).
+
+# KIS OAuth 토큰 발급/갱신 실패 (HTTP 401/403, 잘못된 app_key/app_secret).
+# taxonomy ``auth`` 카테고리 — 인증 자격 거부.
+_BROKER_AUTH_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_AUTH_FAILED",
+    category="auth",
+)
+
+# KIS API 호출 시 broker side business / HTTP error. ``status_code`` 에 HTTP
+# status, ``error_code`` 에 원천 KIS ``msg_cd`` (예: ``APBK0501``) 가
+# log-only 채널로 보존된다. public envelope (CLI ``OutputFormatter.error`` /
+# IPC envelope) 에는 안정 코드 ``BROKER_API_ERROR`` 만 노출하며 원천
+# ``msg_cd`` 는 surface 하지 않는다 (#1843 sub-PR 5 Codex Plan Review v1
+# condition; envelope SSOT 갱신 필요한 ``details.broker_code`` 필드 도입은
+# 후속 spec PR 책임).
+_BROKER_API_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_API_ERROR",
+    category="external",
+)
+
+# broker side 에서 조회/취소 대상 주문이 존재하지 않을 때. taxonomy
+# ``not_found`` 카테고리.
+_BROKER_ORDER_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_ORDER_NOT_FOUND",
+    category="not_found",
+)
+
+# KIS API per-minute rate limit 초과. retryable backoff 정책의 신호로
+# 사용된다. taxonomy ``external`` 카테고리 (외부 시스템 throttling).
+_BROKER_RATE_LIMITED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_RATE_LIMITED",
+    category="external",
+)
+
+# 연속 실패 임계 도달 시 circuit breaker 가 OPEN 으로 전이해 API 호출을
+# 차단한다. taxonomy ``service_unavailable`` 카테고리 (broker 가용성
+# 임시 차단).
+_BROKER_CIRCUIT_OPEN_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_CIRCUIT_OPEN",
+    category="service_unavailable",
+)
+
+# ``ante.broker.registry`` 의 미등록 broker_type 요청 거부. 동명 별개 class
+# 인 ``ante.account.errors.InvalidBrokerTypeError`` (#1842,
+# ``ACCOUNT_INVALID_BROKER_TYPE``) 와는 별개의 module/code 다 — helper 의
+# type-based MRO lookup 과 drift guard 의 ``(module, name)`` 2중 anchor 가
+# 두 class 를 정확히 분리한다.
+_BROKER_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_INVALID_TYPE",
+    category="validation",
+)
+
+
 # ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
 #
 # ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
@@ -520,6 +613,13 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     InsufficientFundsError: _TREASURY_INSUFFICIENT_FUNDS_SPEC,
     BotNotStoppedError: _TREASURY_BOT_NOT_STOPPED_SPEC,
     TreasuryNotConfiguredError: _TREASURY_NOT_CONFIGURED_SPEC,
+    # ── #1843 sub-PR 5 broker 6 sub-class (실측 .code mirror) ─────────────
+    AuthenticationError: _BROKER_AUTH_FAILED_SPEC,
+    APIError: _BROKER_API_ERROR_SPEC,
+    OrderNotFoundError: _BROKER_ORDER_NOT_FOUND_SPEC,
+    RateLimitError: _BROKER_RATE_LIMITED_SPEC,
+    CircuitOpenError: _BROKER_CIRCUIT_OPEN_SPEC,
+    BrokerRegistryInvalidBrokerTypeError: _BROKER_INVALID_TYPE_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 
