@@ -14,15 +14,18 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 1).
 * :data:`BOT_CONTRACTS` — bot 도메인 11 leaf contract tuple
   (#1847 sub-PR 2).
+* :data:`APPROVAL_CONTRACTS` — approval 도메인 10 leaf contract tuple
+  (#1847 sub-PR 3).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
-  PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 채워져 있다.
+  PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42 entries 가
+  채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 3 이후 — approval / treasury /
-  strategy / broker / data / report / system / instrument / config / rule /
-  trade / backtest / audit / signal).
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 4 이후 — treasury / strategy /
+  broker / data / report / system / instrument / config / rule / trade /
+  backtest / audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
@@ -68,6 +71,7 @@ from ante.contracts.vocab import AuthMode, ContractKind, EnvelopeForm
 
 __all__ = [
     "ACCOUNT_CONTRACTS",
+    "APPROVAL_CONTRACTS",
     "BOT_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
     "MEMBER_CONTRACTS",
@@ -555,18 +559,162 @@ mutation → lifecycle) 와 시각적으로 일치하도록 정렬된다.
 """
 
 
+# ── #1847 sub-PR 3: approval domain OutputContract migration ────────────
+#
+# approval 도메인 10 leaf 의 contract entry. ``src/ante/cli/commands/approval.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:136-139`` (실행 분류) / ``572-585`` (커맨드
+# 표) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (3 commands): ``list`` / ``audit-types`` 는 ``fmt.table(rows,
+# columns)`` 로 JSON 모드에서 row list 를 그대로 dump 한다 (``[{id, type,
+# status, ...}, ...]`` 평면 list — standard envelope 의 ``{status, message,
+# data}`` 3 키 셋 부재). ``info`` 는 ``fmt.output(result)`` 로 평면 detail dict
+# 를 그대로 dump 한다. 세 leaf 모두 ``OutputContract(kind="raw", envelope=
+# "raw_legacy")`` 조합으로 lock — approval.py 본문 변경 없음 (drift test 가
+# callsite 변경 시 FAIL).
+#
+# standard envelope (7 commands): ``request`` / ``review`` / ``reopen`` /
+# ``cancel-invalid`` / ``cancel`` / ``approve`` / ``reject`` 는 단일 경로
+# ``fmt.success(message, data)`` 만 호출하며 표준 envelope (``{status,
+# message, data}``) 을 dump 한다. JSON mode 분기 없음 (text 와 JSON 양쪽
+# 모두 fmt.success).
+#
+# scope 분류 (#1815 SSOT, approval.py @require_scope marker 와 1:1 정합):
+# - ``approval:read`` scope (4 개): ``list`` / ``info`` / ``review`` /
+#   ``audit-types``. ``review`` 는 검토 의견 추가이지만 spec / marker SSOT 가
+#   ``approval:read`` 로 지정한다 (의견 기록은 결재 자체 mutation 이 아니라
+#   side-channel 메타데이터 추가라는 #1462 결정).
+# - ``approval:write`` scope (3 개): ``request`` / ``reopen`` / ``cancel``.
+#   ``cancel`` 은 requester ownership rule (본인만) 으로 보호되어 ``write`` 만
+#   요구. 다른 사람의 결재 cleanup 은 ``cancel-invalid`` (admin) 으로 분리.
+# - ``approval:admin`` scope (3 개): ``approve`` / ``reject`` / ``cancel-invalid``.
+# - public allowlist: 없음 — approval 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류 (``docs/specs/cli/03-commands.md:136-139`` SSOT):
+# - ``offline`` (4 개): ``list`` / ``info`` / ``review`` / ``audit-types``.
+#   각 leaf 내부에서 ``Database`` 를 직접 생성해 ``ApprovalService`` 를
+#   호출한다 (cold-path 동형이나 spec 분류는 ``offline``).
+# - ``runtime_ipc`` (6 개): ``request`` / ``reopen`` / ``cancel-invalid`` /
+#   ``cancel`` / ``approve`` / ``reject``. ``ipc_send`` 로 IPC handler 를 호출.
+#
+# ``ipc_command`` 필드는 stub 값만 채운다 (예: ``"approval.request"``); 단순
+# 문자열 lock 이며 server-side IPC registry 와의 cross-ref drift test 는
+# #1819 의 책임이다 (member/bot domain 동형 정책). approval.py 호출 사이트
+# 의 IPC command name 과 그대로 일치한다 (``approval.request`` /
+# ``approval.reopen`` / ``approval.cancel_invalid`` / ``approval.cancel`` /
+# ``approval.approve`` / ``approval.reject``).
+APPROVAL_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("approval", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
+        # JSON mode: ``fmt.table(rows, columns)`` → row list 를 그대로 dump.
+        # row dict shape: ``{id, type, status, requester, title, created_at}``.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("approval", "info"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
+        # JSON mode: ``fmt.output(result)`` → 평면 detail dict
+        # ({id, type, status, requester, title, body, params, reviews,
+        # history, reference_id, expires_at, created_at, resolved_at,
+        # resolved_by, reject_reason}).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("approval", "review"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
+        # 단일 경로 ``fmt.success(f"검토 의견 추가: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("approval", "audit-types"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
+        # JSON mode: ``fmt.table(rows, columns)`` → row list 를 그대로 dump.
+        # row dict shape: ``{id, type, status, requester, created_at,
+        # expires_at}`` (legacy invalid-type row 만 결과로 포함, #1472).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("approval", "request"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:write"})),
+        # 단일 경로 ``fmt.success(f"결재 요청 생성: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.request",
+    ),
+    CliCommandContract(
+        path=("approval", "reopen"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:write"})),
+        # 단일 경로 ``fmt.success(f"결재 재상신: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.reopen",
+    ),
+    CliCommandContract(
+        path=("approval", "cancel"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:write"})),
+        # 단일 경로 ``fmt.success(f"결재 철회: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.cancel",
+    ),
+    CliCommandContract(
+        path=("approval", "approve"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:admin"})),
+        # 단일 경로 ``fmt.success(f"결재 승인: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.approve",
+    ),
+    CliCommandContract(
+        path=("approval", "reject"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:admin"})),
+        # 단일 경로 ``fmt.success(f"결재 거절: ...", result)`` → standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.reject",
+    ),
+    CliCommandContract(
+        path=("approval", "cancel-invalid"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"approval:admin"})),
+        # 단일 경로 ``fmt.success(f"invalid-type 결재 cleanup: ...", result)`` →
+        # standard. legacy invalid-type row administrative cleanup (#1472).
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="approval.cancel_invalid",
+    ),
+)
+"""Approval domain 10 leaf 의 contract tuple (#1847 sub-PR 3).
+
+순서는 ``docs/specs/cli/03-commands.md:572-585`` 의 approval 표 (read →
+write → admin) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     contract.path: contract
-    for contract in (*ACCOUNT_CONTRACTS, *MEMBER_CONTRACTS, *BOT_CONTRACTS)
+    for contract in (
+        *ACCOUNT_CONTRACTS,
+        *MEMBER_CONTRACTS,
+        *BOT_CONTRACTS,
+        *APPROVAL_CONTRACTS,
+    )
 }
 """Leaf command path → contract mapping.
 
-본 PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 등록되어
-있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2). 나머지 도메인 (approval /
-treasury / strategy / broker / data / report / system / instrument /
-config / rule / trade / backtest / audit / signal) 의 entry 등록은 후속
-PR (`#1847` sub-PR 3-9) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야
-하는 drift guard 는 `#1848` 가 활성화한다.
+본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42 entries
+가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 / #1847 sub-PR
+3). 나머지 도메인 (treasury / strategy / broker / data / report / system /
+instrument / config / rule / trade / backtest / audit / signal) 의 entry
+등록은 후속 PR (`#1847` sub-PR 4-9) 의 책임이다. registry 미등록 leaf 가
+FAIL 이어야 하는 drift guard 는 `#1848` 가 활성화한다.
 """
 
 
@@ -585,7 +733,8 @@ def get_contract(path: tuple[str, ...]) -> CliCommandContract | None:
 def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
-    본 PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 등록되어
-    있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2).
+    본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 = 42
+    entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
+    #1847 sub-PR 3).
     """
     yield from CLI_COMMAND_REGISTRY.values()
