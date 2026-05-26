@@ -332,9 +332,9 @@ class IPCServer:
         에 전달할 수 있으며, public envelope 으로 새 나가지 않도록 wrapper 가
         ``pop`` 으로 strip 한 뒤 envelope ``result`` 에 담는다. handler 가
         예외로 종료되면 audit 호출은 일어나지 않는다(실패 시 audit invariant).
-        ``audit_action`` 이 부여된 7 commands 는 ``required_services`` 에
-        ``audit_logger`` 가 명시되어 있어 preflight 단계에서 부재가 차단된다
-        (#1849 등록 시 동형 lock).
+        ``audit_action`` 이 부여된 commands(현재 10개 — #1852 / #1853 포함)는
+        ``required_services`` 에 ``audit_logger`` 가 명시되어 있어 preflight
+        단계에서 부재가 차단된다 (#1849 등록 시 동형 lock).
         """
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
@@ -402,11 +402,12 @@ class IPCServer:
             # Refs #1851: handler 정상 종료 후 audit_action 자동 발화.
             # ``_audit_detail`` reserved key 는 ``pop`` 으로 envelope 노출
             # 전에 strip 된다 (public payload 누출 invariant).
-            # ``audit_action`` 부여 7 commands 는 ``required_services`` 에
-            # ``audit_logger`` 가 포함되어 있어 preflight 단계에서 부재가
-            # 이미 차단됨 — 여기서는 ``getattr`` safe-access 로 한 번 더
-            # 방어한다 (handler 가 dict 가 아닌 다른 shape 을 반환하는
-            # 경우에도 strip 시도가 실패하지 않도록 isinstance 가드).
+            # ``audit_action`` 부여 commands(현재 10개 — #1852 / #1853 포함)는
+            # ``required_services`` 에 ``audit_logger`` 가 포함되어 있어
+            # preflight 단계에서 부재가 이미 차단됨 — 여기서는 ``getattr``
+            # safe-access 로 한 번 더 방어한다 (handler 가 dict 가 아닌 다른
+            # shape 을 반환하는 경우에도 strip 시도가 실패하지 않도록
+            # isinstance 가드).
             audit_detail: dict | None = None
             if isinstance(result, dict):
                 audit_detail = result.pop("_audit_detail", None)

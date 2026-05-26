@@ -404,7 +404,9 @@ tests/
 │   │   ├── test_server_client.py
 │   │   ├── test_service_registry.py
 │   │   ├── test_dispatch_wrapper_preflight.py
-│   │   └── test_dispatch_wrapper_audit.py
+│   │   ├── test_dispatch_wrapper_audit.py
+│   │   ├── test_cli_registry_ipc_cross_ref.py
+│   │   └── test_docs_taxonomy_drift.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py

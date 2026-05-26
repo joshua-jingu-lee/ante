@@ -831,6 +831,10 @@ class TestRegisteredCommandsMetadataCompleteness:
 
         Refs #1852 (#1819 epic): account.suspend / account.activate 가 wrapper
         migration 으로 audit_action 부여(7→9 commands).
+
+        Refs #1853 (#1819 epic 종결): rule.update 의 audit 호출을 wrapper 로
+        이전(action="account.rule.update", helper 의 기존 action 이름 보존)
+        (9→10 commands).
         """
         expected_actions = {
             "account.suspend",
@@ -842,6 +846,7 @@ class TestRegisteredCommandsMetadataCompleteness:
             "strategy.set_status",
             "member.update_scopes",
             "approval.cancel_invalid",
+            "account.rule.update",
         }
         actual = {
             spec.audit_action
