@@ -354,6 +354,11 @@ class TestAccountAlreadySuspendedEquivalence:
         account_svc.suspend = AsyncMock(
             side_effect=AccountAlreadySuspendedError("이미 정지됨")
         )
+        # Refs #1852: account.suspend handler 가 required_services 에
+        # ``audit_logger`` 를 보유하므로 wrapper preflight (SERVICE_NOT_CONFIGURED)
+        # 를 피하려면 ServiceRegistry 에 ``audit_logger`` 를 주입해야 한다.
+        audit_logger = MagicMock()
+        audit_logger.log = AsyncMock(return_value=None)
         svc_registry = ServiceRegistry(
             account=account_svc,
             bot_manager=MagicMock(),
@@ -362,6 +367,7 @@ class TestAccountAlreadySuspendedEquivalence:
             approval=MagicMock(),
             reconciler=MagicMock(),
             eventbus=MagicMock(),
+            audit_logger=audit_logger,
         )
         cmd_registry = CommandRegistry()
         register_all_handlers(cmd_registry)

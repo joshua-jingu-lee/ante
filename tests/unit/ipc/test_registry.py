@@ -826,10 +826,15 @@ class TestRegisteredCommandsMetadataCompleteness:
         """``audit_action`` 값들이 실제 handler ``audit_logger.log(action=...)``
         호출과 정합한다(#1849 plan B step).
 
-        본 단언은 registry 내 audit_logger 호출 grep 결과(7개)와 1:1로 lock 한다.
+        본 단언은 registry 내 audit_logger 호출 grep 결과와 1:1로 lock 한다.
         호출 추가/삭제 시 양쪽을 동기화하지 않으면 본 테스트가 회귀를 잡는다.
+
+        Refs #1852 (#1819 epic): account.suspend / account.activate 가 wrapper
+        migration 으로 audit_action 부여(7→9 commands).
         """
         expected_actions = {
+            "account.suspend",
+            "account.activate",
             "bot.start",
             "bot.stop",
             "bot.update",

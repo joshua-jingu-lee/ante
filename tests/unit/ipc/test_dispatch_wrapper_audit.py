@@ -407,6 +407,220 @@ async def test_audit_detail_partial_fields_filled_with_defaults(
 # ── audit_action + audit_logger 부재 (lifecycle ordering 보조) ─────────────
 
 
+# ── account.suspend / account.activate wrapper migration (#1852) ──────────
+
+
+@pytest.mark.asyncio
+async def test_account_suspend_audit_action_fires(socket_path: str) -> None:
+    """Refs #1852: ``account.suspend`` 가 wrapper 자동 audit 발화한다.
+
+    register_all_handlers 가 ``audit_action="account.suspend"`` 를 부여하므로
+    handler 정상 종료 후 wrapper 가 ``audit_logger.log`` 를 1회 호출하고
+    ``_audit_detail`` 의 ``resource``/``detail`` 을 전달한다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.suspend = AsyncMock(return_value=None)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "account.suspend",
+                "args": {"account_id": "acc-1", "reason": "ops halt"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="account.suspend",
+            resource="account:acc-1",
+            detail="reason=ops halt",
+            ip="",
+        )
+        fake_account.suspend.assert_awaited_once_with(
+            "acc-1", reason="ops halt", suspended_by="alice"
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_account_activate_audit_action_fires(socket_path: str) -> None:
+    """Refs #1852: ``account.activate`` 가 wrapper 자동 audit 발화한다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.activate = AsyncMock(return_value=None)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "account.activate",
+                "args": {"account_id": "acc-1"},
+                "actor": "bob",
+            }
+        )
+        assert response["status"] == "ok"
+        audit_logger.log.assert_awaited_once_with(
+            member_id="bob",
+            action="account.activate",
+            resource="account:acc-1",
+            detail="",
+            ip="",
+        )
+        fake_account.activate.assert_awaited_once_with("acc-1", activated_by="bob")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_account_suspend_audit_detail_stripped_from_envelope(
+    socket_path: str,
+) -> None:
+    """Refs #1852: ``account.suspend`` public envelope 에 ``_audit_detail``
+    이 절대 노출되지 않는다 (reserved key strip invariant)."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.suspend = AsyncMock(return_value=None)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "account.suspend",
+                "args": {"account_id": "acc-1", "reason": "ops"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        assert response["result"] == {
+            "account_id": "acc-1",
+            "status": "suspended",
+        }
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_account_suspend_account_id_policy_required_preflight(
+    socket_path: str,
+) -> None:
+    """Refs #1852: ``account.suspend`` 는 ``account_id_policy="required"`` 로
+    invalid/missing ``account_id`` 를 ``VALIDATION_ERROR`` envelope 으로
+    handler 호출 전에 거부한다.
+
+    ``require_account_id`` 가 wrapper preflight 단계에서 raise 되면 dispatch
+    의 generic except 가 ``getattr(e, "code", ...)`` 로 ``VALIDATION_ERROR``
+    envelope 을 만들어 반환한다(#1850 동형). ``account.suspend`` 실제 서비스
+    호출은 절대 일어나지 않는다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.suspend = AsyncMock(return_value=None)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        # missing account_id
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "account.suspend",
+                "args": {"reason": "x"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR"
+
+        # empty string
+        response = await server._dispatch(
+            {
+                "id": "2",
+                "command": "account.suspend",
+                "args": {"account_id": ""},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR"
+
+        # reserved 'default'
+        response = await server._dispatch(
+            {
+                "id": "3",
+                "command": "account.suspend",
+                "args": {"account_id": "default"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR"
+
+        # pattern violation
+        response = await server._dispatch(
+            {
+                "id": "4",
+                "command": "account.suspend",
+                "args": {"account_id": "bad_id!"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "VALIDATION_ERROR"
+
+        # service 호출 / audit 발화는 0회 (preflight 차단)
+        fake_account.suspend.assert_not_awaited()
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
 @pytest.mark.asyncio
 async def test_audit_action_without_audit_logger_no_crash(socket_path: str) -> None:
     """방어 케이스 — audit_action 부여되었지만 audit_logger 가 None.
