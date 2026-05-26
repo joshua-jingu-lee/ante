@@ -12,13 +12,15 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 * :data:`ACCOUNT_CONTRACTS` — account 도메인 9 leaf contract tuple (#1846).
 * :data:`MEMBER_CONTRACTS` — member 도메인 12 leaf contract tuple
   (#1847 sub-PR 1).
+* :data:`BOT_CONTRACTS` — bot 도메인 11 leaf contract tuple
+  (#1847 sub-PR 2).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
-  PR 시점에는 account 9 + member 12 = 21 entries 가 채워져 있다.
+  PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 채워져 있다.
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
 
-* 잔여 도메인 entry 등록 (`#1847` sub-PR 2 이후 — approval / bot / treasury /
+* 잔여 도메인 entry 등록 (`#1847` sub-PR 3 이후 — approval / treasury /
   strategy / broker / data / report / system / instrument / config / rule /
   trade / backtest / audit / signal).
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
@@ -66,6 +68,7 @@ from ante.contracts.vocab import AuthMode, ContractKind, EnvelopeForm
 
 __all__ = [
     "ACCOUNT_CONTRACTS",
+    "BOT_CONTRACTS",
     "CLI_COMMAND_REGISTRY",
     "MEMBER_CONTRACTS",
     "AuthContract",
@@ -396,17 +399,174 @@ admin mutation → public allowlist) 와 시각적으로 일치하도록 정렬�
 """
 
 
+# ── #1847 sub-PR 2: bot domain OutputContract migration ─────────────────
+#
+# bot 도메인 11 leaf 의 contract entry. ``src/ante/cli/commands/bot.py``
+# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:91-102`` (bot 표) / ``329-372`` (생명주기
+# narrative) 와 1:1 정합한다.
+#
+# raw_legacy 분류 (8 commands): ``list`` / ``info`` / ``positions`` /
+# ``signal-key`` / ``logs`` / ``update`` / ``start`` / ``stop`` / ``status``
+# 는 JSON 모드에서 ``fmt.output(dict)`` 또는 ``fmt.output(result)`` 평면
+# dict 를 그대로 dump 한다. ``status`` / ``positions`` 등은 도메인
+# envelope (``{bot: ...}`` / ``{positions: [...]}``) 형태이며 standard
+# envelope (``{status, message, data}``) 3 키 셋과는 다르다 — ``fmt.success``
+# 로 wrapping 하지 않고 IPC payload 를 그대로 passthrough 하는 정책
+# (feedback_cli_json_envelope_passthrough 메모) 의 결과다.
+# ``OutputContract(kind="raw", envelope="raw_legacy")`` 조합으로 표현해 lock
+# 만 한다 — bot.py 본문 변경 없음 (drift test 가 callsite 변경 시 FAIL).
+#
+# standard envelope (2 commands): ``create`` / ``remove`` 는 단일 경로
+# ``fmt.success(message, data)`` 만 호출하며 표준 envelope
+# (``{status, message, data}``) 을 dump 한다. JSON mode 분기 없음 (text 와
+# JSON 양쪽 모두 fmt.success).
+#
+# ``signal-key`` 는 분기 mixed: ``--rotate`` 경로는 ``fmt.success`` (standard),
+# 그러나 단순 조회 경로는 JSON 에서 ``fmt.output(result)`` 평면 dict 를
+# dump 한다 (line 540-547). account ``set-credentials`` 와 동형 분기 mixed
+# 이며, plan 정책에 따라 raw 우선으로 표현한다. drift test 가 양쪽 경로를
+# 모두 단언한다.
+#
+# scope 분류:
+# - ``bot:read`` scope (5 개): ``list`` / ``info`` / ``positions`` /
+#   ``logs`` / ``status``
+# - ``bot:admin`` scope (6 개): ``create`` / ``remove`` / ``signal-key`` /
+#   ``update`` / ``start`` / ``stop``
+# - public allowlist: 없음 — bot 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
+#   에 등재된 leaf 가 0 개다.
+#
+# execution 분류는 ``docs/specs/cli/03-commands.md:91-102`` 의 spec SSOT 를
+# 따른다 — ``bot logs`` 는 ``offline`` 이며 그 외 10 commands 는 ``runtime
+# IPC`` (또는 ``runtime IPC + snapshot/cold-path fallback``) 다. spec 의
+# fallback 표기는 primary 분류 ``runtime_ipc`` 에 흡수된다 (account
+# ``suspend/activate`` / member ``update-scopes`` 와 동형 정책 — fallback
+# 분기가 있어도 spec primary 분류만 lock). ``ipc_command`` 필드는 stub
+# 값만 채운다 (예: ``"bot.start"``); 단순 문자열 lock 이며 server-side IPC
+# registry 와의 cross-ref drift test 는 #1819 의 책임이다.
+BOT_CONTRACTS: tuple[CliCommandContract, ...] = (
+    CliCommandContract(
+        path=("bot", "list"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:read"})),
+        # JSON mode: empty → ``fmt.output({"message": ..., "bots": []})`` 평면,
+        # non-empty → ``fmt.output({"bots": [...]})`` 평면. text 는 fmt.table.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.list",
+    ),
+    CliCommandContract(
+        path=("bot", "info"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 detail dict. text 는 click.echo.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.info",
+    ),
+    CliCommandContract(
+        path=("bot", "create"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # 단일 경로 ``fmt.success(f"봇 생성 완료: ...", result)`` — standard.
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="bot.create",
+    ),
+    CliCommandContract(
+        path=("bot", "remove"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # 단일 경로 ``fmt.success(f"봇 삭제 완료...", result)`` — standard.
+        # spec 은 ``runtime IPC + cold-path fallback`` 이지만 primary 분류만
+        # lock (account ``suspend/activate`` 동형 정책).
+        output=OutputContract(kind="operation", envelope="standard"),
+        execution="runtime_ipc",
+        ipc_command="bot.remove",
+    ),
+    CliCommandContract(
+        path=("bot", "signal-key"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # 분기 mixed: ``--rotate`` 경로는 ``fmt.success`` (standard), 단순
+        # 조회 경로는 JSON 모드에서 ``fmt.output(result)`` 평면 dict
+        # (bot.py line 540-547). plan v2 decision 에 따라 raw 우선으로
+        # 표현 (account ``set-credentials`` 동형 정책) — drift test 가 양쪽
+        # 분기를 모두 단언한다.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.signal_key",
+    ),
+    CliCommandContract(
+        path=("bot", "positions"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:read"})),
+        # JSON mode: empty → ``{"message": ..., "positions": []}``,
+        # non-empty → ``{"positions": [...]}`` 평면.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.positions",
+    ),
+    CliCommandContract(
+        path=("bot", "update"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # JSON mode: ``fmt.output(result)`` 평면 dict; text 는 click.echo.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.update",
+    ),
+    CliCommandContract(
+        path=("bot", "logs"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:read"})),
+        # JSON mode: ``fmt.output(result)`` 평면 ``{bot_id, logs, total}``
+        # dict; text 는 fmt.table 또는 "(logs 없음)".
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="offline",
+    ),
+    CliCommandContract(
+        path=("bot", "start"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # JSON mode: IPC ``{bot: ...}`` envelope passthrough via
+        # ``fmt.output(result)``; text 는 friendly message.
+        # (feedback_cli_json_envelope_passthrough 메모 정책 — IPC/Web API
+        # envelope 와 같은 shape 보존을 위해 ``fmt.success`` wrapping 하지
+        # 않음).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.start",
+    ),
+    CliCommandContract(
+        path=("bot", "stop"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:admin"})),
+        # JSON mode: IPC envelope passthrough via ``fmt.output(result)``.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.stop",
+    ),
+    CliCommandContract(
+        path=("bot", "status"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"bot:read"})),
+        # JSON mode: IPC ``{bot: ...}`` envelope passthrough via
+        # ``fmt.output(result)``; text 는 click.echo detail.
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="bot.status",
+    ),
+)
+"""Bot domain 11 leaf 의 contract tuple (#1847 sub-PR 2).
+
+순서는 ``docs/specs/cli/03-commands.md:91-102`` 의 bot 표 (read → admin
+mutation → lifecycle) 와 시각적으로 일치하도록 정렬된다.
+``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+"""
+
+
 CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
-    contract.path: contract for contract in (*ACCOUNT_CONTRACTS, *MEMBER_CONTRACTS)
+    contract.path: contract
+    for contract in (*ACCOUNT_CONTRACTS, *MEMBER_CONTRACTS, *BOT_CONTRACTS)
 }
 """Leaf command path → contract mapping.
 
-본 PR 시점에는 account 9 + member 12 = 21 entries 가 등록되어 있다
-(#1846 / #1847 sub-PR 1). 나머지 도메인 (approval / bot / treasury /
-strategy / broker / data / report / system / instrument / config / rule /
-trade / backtest / audit / signal) 의 entry 등록은 후속 PR (`#1847`
-sub-PR 2-9) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야 하는
-drift guard 는 `#1848` 가 활성화한다.
+본 PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 등록되어
+있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2). 나머지 도메인 (approval /
+treasury / strategy / broker / data / report / system / instrument /
+config / rule / trade / backtest / audit / signal) 의 entry 등록은 후속
+PR (`#1847` sub-PR 3-9) 의 책임이다. registry 미등록 leaf 가 FAIL 이어야
+하는 drift guard 는 `#1848` 가 활성화한다.
 """
 
 
@@ -425,7 +585,7 @@ def get_contract(path: tuple[str, ...]) -> CliCommandContract | None:
 def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
-    본 PR 시점에는 account 9 + member 12 = 21 entries 가 등록되어 있다
-    (#1846 / #1847 sub-PR 1).
+    본 PR 시점에는 account 9 + member 12 + bot 11 = 32 entries 가 등록되어
+    있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2).
     """
     yield from CLI_COMMAND_REGISTRY.values()
