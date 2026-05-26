@@ -133,6 +133,102 @@ def iter_click_leaf_commands(
     yield from _walk_click(root, ())
 
 
+@dataclass(frozen=True)
+class AuthMetadata:
+    """CLI leaf command 의 인증 marker 메타데이터 (#1845).
+
+    :mod:`ante.cli.middleware` 의 decorator marker / allowlist 를 runtime
+    introspection 으로 추출한다. 본 메타데이터는
+    :data:`ante.contracts.cli_registry.CLI_COMMAND_REGISTRY` 의
+    :class:`~ante.contracts.cli_registry.AuthContract` 와 drift 가 있는지
+    검증하기 위해 사용된다.
+
+    추출 규칙 (`src/ante/cli/middleware.py` 정의 기준):
+
+    - ``is_public``: ``path in _AUTH_EXEMPT_COMMAND_PATHS`` (line 29).
+      ``init`` / ``member reset-password`` / ``member regenerate-recovery-key``
+      3 path 가 등재되어 있다.
+    - ``is_master``: callback 의 ``_require_master_applied == True``
+      attribute (line 257, ``@require_master`` 가 부착).
+    - ``scopes``: callback 의 ``_required_scopes`` tuple
+      (line 300, ``@require_scope(*scopes)`` 가 부착). ``frozenset`` 으로
+      정규화한다. 없으면 빈 frozenset.
+    - ``requires_auth``: callback 이 ``_require_auth_applied == True``
+      (line 188) **또는** ``_wrapped_by_authenticated_group == True``
+      (line 866). 후자는 :class:`AuthenticatedGroup.add_command` 가 leaf
+      callback 을 자동 wrap 할 때 부착한다.
+
+    분류 우선순위 (Family A → D):
+
+    1. ``is_public`` (Family A) — allowlist 매치는 다른 marker 보다 우선.
+    2. ``is_master`` (Family C) — master decorator 가 scope decorator 보다
+       우선 (``@require_master`` 가 부착되면 ``_required_scopes`` 는 보통
+       비어 있다).
+    3. ``scopes`` non-empty (Family B) — scope decorator 가 부착된 경우.
+    4. ``requires_auth`` only (Family D) — public/master/scoped 가 아니지만
+       인증은 요구되는 fallback (``@require_auth`` 만 또는
+       ``AuthenticatedGroup`` 자동 wrap 만).
+
+    Attributes:
+        path: ``ante`` prefix 를 제외한 root-to-leaf segment 튜플
+            (예: ``("bot", "start")``). :class:`CliLeafCommand.path` 와 동일.
+        is_public: ``_AUTH_EXEMPT_COMMAND_PATHS`` 매치 여부.
+        is_master: ``_require_master_applied`` marker 존재.
+        scopes: ``_required_scopes`` (frozenset 정규화). 없으면 빈 frozenset.
+        requires_auth: ``_require_auth_applied`` 또는
+            ``_wrapped_by_authenticated_group`` marker 존재.
+    """
+
+    path: tuple[str, ...]
+    is_public: bool
+    is_master: bool
+    scopes: frozenset[str]
+    requires_auth: bool
+
+
+def iter_command_auth_metadata(
+    root: click.Group | None = None,
+) -> Iterator[AuthMetadata]:
+    """모든 Click leaf command 의 :class:`AuthMetadata` 를 yield (#1845).
+
+    :func:`iter_click_leaf_commands` 와 동일한 leaf 순회 순서를 따른다 —
+    hidden subtree 는 제외, 그룹은 yield 하지 않는다.
+
+    runtime introspection 만 사용하며, ``src/ante/cli/middleware.py`` 의
+    sentinel marker / allowlist 를 직접 읽는다 (AST parsing 없음). 본
+    helper 는 middleware 의 marker 정의가 바뀌면 같은 PR 에서 함께 갱신
+    되어야 한다 — :class:`AuthMetadata` docstring 의 marker 위치 정보를
+    참조한다.
+
+    Args:
+        root: 검사할 Click root. ``None`` 이면 ``ante.cli.main.cli`` 를
+            가져온다. :func:`iter_click_leaf_commands` 와 동일.
+
+    Yields:
+        :class:`AuthMetadata`: leaf 별 인증 marker 메타데이터.
+    """
+    from ante.cli.middleware import _AUTH_EXEMPT_COMMAND_PATHS
+
+    allowlist = set(_AUTH_EXEMPT_COMMAND_PATHS)
+    for leaf in iter_click_leaf_commands(root):
+        callback = leaf.command.callback
+        is_public = leaf.path in allowlist
+        is_master = bool(getattr(callback, "_require_master_applied", False))
+        raw_scopes = getattr(callback, "_required_scopes", None)
+        scopes: frozenset[str] = frozenset(raw_scopes) if raw_scopes else frozenset()
+        requires_auth = bool(
+            getattr(callback, "_require_auth_applied", False)
+            or getattr(callback, "_wrapped_by_authenticated_group", False)
+        )
+        yield AuthMetadata(
+            path=leaf.path,
+            is_public=is_public,
+            is_master=is_master,
+            scopes=scopes,
+            requires_auth=requires_auth,
+        )
+
+
 def iter_ipc_command_specs(
     registry: CommandRegistry | None = None,
 ) -> Iterator[CommandSpec]:
@@ -551,6 +647,7 @@ def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
 
 
 __all__ = [
+    "AuthMetadata",
     "CliLeafCommand",
     "DriftAllowlist",
     "ExceptionAllowlistEntry",
@@ -558,6 +655,7 @@ __all__ = [
     "FmtErrorAllowlistEntry",
     "FmtErrorCallsite",
     "iter_click_leaf_commands",
+    "iter_command_auth_metadata",
     "iter_exception_classes",
     "iter_fmt_error_calls",
     "iter_ipc_command_specs",
