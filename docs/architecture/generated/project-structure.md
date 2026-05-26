@@ -596,7 +596,10 @@ tests/
 │   ├── test_bot_cli_ipc_error_equivalence.py
 │   ├── test_treasury_cli_ipc_error_equivalence.py
 │   ├── test_broker_cli_ipc_error_equivalence.py
-│   └── test_broker_external_code_separation.py
+│   ├── test_broker_external_code_separation.py
+│   ├── test_config_cli_ipc_error_equivalence.py
+│   ├── test_rule_cli_ipc_error_equivalence.py
+│   └── test_strategy_cli_ipc_error_equivalence.py
 └── __init__.py
 ```
 
