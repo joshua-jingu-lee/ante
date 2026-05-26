@@ -27,7 +27,36 @@
 #       module = dotted module path (예: ante.account.errors).
 #       class_anchor = class 이름.
 
-intended_no_code: []
+# bot.py 931/967/1001 (구 882/918/952) 와 config.py 214/217 (구 176/179) 의
+# ``ipc_send`` ClickException text-mode 분기는 ``text = f"{code}: {message}"``
+# prefix 패턴이 의도된 영구 UX 계약이다. 회귀 lock
+# ``test_bot_start_error_text_mode_carries_code_prefix`` 와
+# ``test_config_set_server_error`` 의 ``"STATIC_CONFIG" in result.output`` 가
+# text 모드에서 ``code: message`` prefix 톤을 명시 요구하므로 단순
+# ``fmt.error(message, code=code)`` 정렬이 UX 회귀가 된다. 따라서
+# ``known_drift`` deferred 가 아닌 ``intended_no_code`` 영구 면제로 분류한다
+# (#1870 옵션 3).
+intended_no_code:
+  - path: src/ante/cli/commands/bot.py
+    line: 931
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
+  - path: src/ante/cli/commands/bot.py
+    line: 967
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
+  - path: src/ante/cli/commands/bot.py
+    line: 1001
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
+  - path: src/ante/cli/commands/config.py
+    line: 214
+    snippet_sha1: "3dc4008c3fb0"
+    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
+  - path: src/ante/cli/commands/config.py
+    line: 217
+    snippet_sha1: "1b05e8ebf6bd"
+    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
 
 known_drift_fmt_error_no_code:
   # #1842: account.py line 762/804 entries 제거 — emit_cli_error 정렬 완료
@@ -38,25 +67,10 @@ known_drift_fmt_error_no_code:
   # line 499 (non-table-missing OperationalError fallback) 는 emit_cli_error
   # 로 ``EXECUTION_ERROR`` (registry miss fallback) surface 로 정렬.
   #
-  # bot.py line 882/918/952 (구 872/908/942) 는 ``ipc_send`` ClickException
-  # text-mode 분기의 ``text = f"{code}: {message}"`` 패턴 — config.py 와
-  # 동형의 #1673 ``config set`` 선례 deferred 유지. 회귀 lock
-  # ``test_bot_start_error_text_mode_carries_code_prefix`` 가 text 모드의
-  # ``code: message`` prefix 톤을 명시 요구하므로 단순
-  # ``fmt.error(message, code=code)`` 정렬이 UX 회귀가 된다. config.py 의
-  # 동형 deferred 정리와 함께 별도 follow-up 에서 책임진다.
-  - path: src/ante/cli/commands/bot.py
-    line: 931
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (line shifted by #1857 _create_services factory migration)"
-  - path: src/ante/cli/commands/bot.py
-    line: 967
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (line shifted by #1857 _create_services factory migration)"
-  - path: src/ante/cli/commands/bot.py
-    line: 1001
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (line shifted by #1857 _create_services factory migration)"
+  # #1870 옵션 3: bot.py 931/967/1001 + config.py 214/217 entries 를
+  # ``intended_no_code`` 로 영구 이동 — text-mode ``{code}: {message}``
+  # prefix UX lock 은 의도된 계약이며 deferred 가 아니다.
+  #
   # #1843 sub-PR 5: broker.py line 211/266/318 entries 제거 — emit_cli_error
   # 정렬 완료 (broker typed exception 5 sub-class 가 ``BROKER_*`` 안정 코드를
   # registry MRO lookup 으로 surface, 미분류 fault 는 ``EXECUTION_ERROR``
@@ -71,25 +85,15 @@ known_drift_fmt_error_no_code:
   # ``code="UPDATE_INSTALL_FAILED"`` 명시 부여 (typed exception 없는
   # bool 반환 함수의 실패 surface).
   #
-  # config.py 176/179 는 bot.py 882/918/952 와 동일 snippet_sha1
-  # (``3dc4008c3fb0``) 의 ``ipc_send`` ClickException text-mode
-  # ``text = f"{code}: {message}"`` prefix 패턴이다. helper
-  # ``emit_cli_error`` 는 ``OutputFormatter.error`` 가 text 모드에서 code
-  # 를 출력하지 않으므로 prefix 가 사라져 ``test_config_set_server_error``
-  # 의 ``"STATIC_CONFIG" in result.output`` 회귀 lock 이 깨진다.
-  # bot.py 882/918/952 와 묶어 별도 follow-up issue 가 책임진다.
-  - path: src/ante/cli/commands/config.py
-    line: 214
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (bot.py 동형, line shifted by #1857 _create_services factory migration)"
-  - path: src/ante/cli/commands/config.py
-    line: 217
-    snippet_sha1: "1b05e8ebf6bd"
-    reason: "baseline (#1841); deferred — text-mode {code}: {message} prefix lock (bot.py 동형, line shifted by #1857 _create_services factory migration)"
   # #1843 sub-PR 1: member.py entries 15건 제거 — emit_cli_error 정렬 완료
   # (CLI direct path 가 IPC envelope 와 동일 public code surface).
   # _MASTER_REQUIRED_MESSAGE override 보존하는 typed except 는 code 인자
   # 명시 (``code="PERMISSION_DENIED"``) 로 정렬했다.
+  #
+  # 본 section 은 현재 비어 있다 — #1870 이 마지막 5건 (bot.py 931/967/1001
+  # + config.py 214/217) 을 ``intended_no_code`` 로 영구 이동하면서 baseline
+  # 잔여분이 모두 해소되었다. 향후 신규 deferred drift 가 등장하면 본 section
+  # 에 재등록한다.
 
 pending_migration:
   - module: ante.account.errors
