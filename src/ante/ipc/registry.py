@@ -6,19 +6,34 @@ Refs #1184: 각 등록 핸들러는 ``CommandSpec``으로 wrap되어 ``is_mutati
 taxonomy를 함께 보유한다. ``IPCServer._dispatch``는 lifecycle state가
 ``SHUTTING_DOWN``일 때 mutating 핸들러를 ``SERVICE_UNAVAILABLE``로 거부하기
 위해 이 정보를 사용한다.
+
+Refs #1849 (#1819 부모 epic): ``CommandSpec``에 contract metadata 7 필드를
+추가한다(``result_kind``, ``result_key``, ``required_services``,
+``audit_action``, ``account_id_policy``, ``cross_validators``,
+``shutdown_behavior``). dispatch wrapper 동작 변경은 본 이슈 범위가 아니다
+(#1850 / #1851 책임). default 값으로 backward compatibility를 보장한다.
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any, Literal
+
+from ante.contracts.vocab import ContractKind
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
 
 CommandHandler = Callable[["ServiceRegistry", dict, str], Awaitable[dict]]
+
+# Refs #1849 / Codex v2 condition 1: shutdown_behavior 한 타입 lock.
+# None인 경우 ``is_mutating``에서 derive(``block_on_mutating``).
+ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
+
+# Refs #1849: account_id 강제 정책 vocabulary.
+AccountIdPolicy = Literal["none", "required", "optional_filter"]
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +45,48 @@ class CommandSpec:
     Refs #1184: lifecycle state machine과 결합하여 shutdown 중
     mutating 명령을 거부하기 위한 taxonomy를 보유한다.
 
+    Refs #1849 (#1819 부모 epic): contract metadata 7 신규 필드를 보유한다.
+    dispatch wrapper의 실제 활용은 #1850(required_services 자동 검증) /
+    #1851(audit_action 자동 발화) 책임이며, 본 이슈에서는 metadata 자체와
+    27개 등록 명령의 필수값만 채운다.
+
     Attributes:
         name: 커맨드 식별자 (예: ``"system.halt"``).
         handler: 비동기 핸들러 콜러블.
         is_mutating: 핸들러가 서버 상태/DB를 변경하면 True. 단순 read-only
             (live 조회) 면 False.
+        result_kind: handler 반환 result의 shape 종류
+            (``entity``/``operation``/``collection``/``raw``/``stream``).
+            ``ContractKind`` vocabulary(#1822)를 그대로 사용한다.
+        result_key: handler 반환 dict의 주 키(예: ``"bot"``, ``"positions"``).
+            ``None``이면 result가 dict 그 자체이거나 주 키가 없음.
+        required_services: handler가 의존하는 ``ServiceRegistry`` attribute
+            이름의 frozenset. dispatch wrapper의 service preflight(#1850)에서
+            사용된다.
+        audit_action: ``audit_logger.log(action=...)`` 인자. 실제로 audit
+            기록을 남기는 명령만 값을 가지고, 그 외에는 ``None``.
+            mutating이라는 사실만으로 audit_action을 강제하지 않는다
+            (#1819 본문 / Codex v2 condition 3).
+        account_id_policy: account_id 검증 정책.
+            ``none``/``required``(handler가 ``require_account_id`` 호출)/
+            ``optional_filter`` 중 하나.
+        cross_validators: 추가 cross-field validator callables. 본 이슈에서는
+            skeleton만 도입한다(빈 tuple default).
+        shutdown_behavior: shutdown 단계 처리 override. ``None``이면
+            ``is_mutating``에서 derive — mutating은 ``block_on_mutating``,
+            read-only는 ``allow_all`` 효과(#1184 server.py 동작 보존).
     """
 
     name: str
     handler: CommandHandler
     is_mutating: bool
+    result_kind: ContractKind = "raw"
+    result_key: str | None = None
+    required_services: frozenset[str] = field(default_factory=frozenset)
+    audit_action: str | None = None
+    account_id_policy: AccountIdPolicy = "none"
+    cross_validators: tuple[Callable[..., Any], ...] = ()
+    shutdown_behavior: ShutdownBehavior | None = None
 
 
 class CommandRegistry:
@@ -48,6 +95,10 @@ class CommandRegistry:
     Refs #1184: 단순 dict[str, handler]에서 dict[str, CommandSpec]으로
     전환되었다. 외부 호출자는 ``register(name, handler, *, is_mutating=...)``
     keyword-only 인자를 명시해야 한다.
+
+    Refs #1849: ``register()``는 contract metadata 7 신규 필드를 kwargs로
+    추가 수용한다. 기존 ``register(name, handler, is_mutating=...)`` 호출은
+    default 값으로 그대로 작동(backward compat).
     """
 
     def __init__(self) -> None:
@@ -59,6 +110,13 @@ class CommandRegistry:
         handler: CommandHandler,
         *,
         is_mutating: bool,
+        result_kind: ContractKind = "raw",
+        result_key: str | None = None,
+        required_services: frozenset[str] | None = None,
+        audit_action: str | None = None,
+        account_id_policy: AccountIdPolicy = "none",
+        cross_validators: tuple[Callable[..., Any], ...] = (),
+        shutdown_behavior: ShutdownBehavior | None = None,
     ) -> None:
         """핸들러 등록.
 
@@ -66,14 +124,40 @@ class CommandRegistry:
             command: 커맨드 이름.
             handler: 비동기 핸들러.
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
+            result_kind: result shape 종류 (#1822 ``ContractKind``).
+            result_key: result dict의 주 키.
+            required_services: ``ServiceRegistry`` 의존 attribute 이름 집합.
+            audit_action: audit 기록 시 action 이름(없으면 ``None``).
+            account_id_policy: account_id 검증 정책.
+            cross_validators: 추가 validator callables.
+            shutdown_behavior: shutdown 처리 override(없으면 derive).
         """
         self._specs[command] = CommandSpec(
-            name=command, handler=handler, is_mutating=is_mutating
+            name=command,
+            handler=handler,
+            is_mutating=is_mutating,
+            result_kind=result_kind,
+            result_key=result_key,
+            required_services=(
+                required_services if required_services is not None else frozenset()
+            ),
+            audit_action=audit_action,
+            account_id_policy=account_id_policy,
+            cross_validators=cross_validators,
+            shutdown_behavior=shutdown_behavior,
         )
 
     def get(self, command: str) -> CommandSpec | None:
         """CommandSpec 조회. 미등록이면 None."""
         return self._specs.get(command)
+
+    def iter_specs(self) -> list[CommandSpec]:
+        """등록된 모든 ``CommandSpec`` 목록.
+
+        Refs #1849: registry metadata 완전성 단언/감사 시 사용. 반환 순서는
+        등록 순서를 따른다(Python 3.7+ dict insertion order).
+        """
+        return list(self._specs.values())
 
     @property
     def commands(self) -> list[str]:
@@ -687,7 +771,7 @@ async def _handle_broker_reconcile(
 def register_all_handlers(registry: CommandRegistry) -> None:
     """27개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(18개) 또는 read-only(4개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(23개) 또는 read-only(4개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -701,49 +785,243 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     (read-only) 추가. ``bot.start`` 는 ``app_key`` preflight + audit
     ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``, ``bot.status`` 는
     ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
+
+    Refs #1849 (#1819 부모 epic): 각 등록에 contract metadata 7 필드 중
+    필수값(``result_kind``, ``result_key``, ``required_services``,
+    ``audit_action``, ``account_id_policy``)을 명시한다. ``audit_action``은
+    실제 ``audit_logger.log`` 호출이 있는 명령만 값을 가진다(#1819 본문 /
+    Codex v2 condition 3). ``cross_validators``/``shutdown_behavior``는 본
+    이슈에서 default(빈 tuple / None=derive)로 유지한다.
     """
     # ── mutating (23개): 서버 상태/DB를 변경 ──────────
-    registry.register("system.halt", _handle_system_halt, is_mutating=True)
-    registry.register("system.clear_halt", _handle_system_clear_halt, is_mutating=True)
-    registry.register("account.suspend", _handle_account_suspend, is_mutating=True)
-    registry.register("account.activate", _handle_account_activate, is_mutating=True)
-    registry.register("bot.create", _handle_bot_create, is_mutating=True)
-    registry.register("bot.remove", _handle_bot_remove, is_mutating=True)
-    registry.register("bot.start", _handle_bot_start, is_mutating=True)
-    registry.register("bot.stop", _handle_bot_stop, is_mutating=True)
-    registry.register("bot.update", _handle_bot_update, is_mutating=True)
-    registry.register("treasury.allocate", _handle_treasury_allocate, is_mutating=True)
+    # system.* — account_service의 suspend_all/activate_all (collective ops).
     registry.register(
-        "treasury.deallocate", _handle_treasury_deallocate, is_mutating=True
+        "system.halt",
+        _handle_system_halt,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"account"}),
     )
     registry.register(
-        "treasury.set_balance", _handle_treasury_set_balance, is_mutating=True
+        "system.clear_halt",
+        _handle_system_clear_halt,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"account"}),
     )
-    registry.register("rule.update", _handle_rule_update, is_mutating=True)
+    # account.* — account_id 인자는 require_account_id 미사용(args["account_id"]
+    # 직접 인덱싱)이라 policy는 ``none``으로 분류한다. 실제 검증 강제는 #1850
+    # 후속에서 정책 정렬 시 재평가한다.
     registry.register(
-        "strategy.set_status", _handle_strategy_set_status, is_mutating=True
+        "account.suspend",
+        _handle_account_suspend,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"account"}),
     )
     registry.register(
-        "member.update_scopes", _handle_member_update_scopes, is_mutating=True
+        "account.activate",
+        _handle_account_activate,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"account"}),
     )
-    registry.register("config.set", _handle_config_set, is_mutating=True)
-    registry.register("approval.request", _handle_approval_request, is_mutating=True)
-    registry.register("approval.approve", _handle_approval_approve, is_mutating=True)
-    registry.register("approval.reject", _handle_approval_reject, is_mutating=True)
-    registry.register("approval.cancel", _handle_approval_cancel, is_mutating=True)
+    # bot.* — bot 객체 entity 반환, audit_action은 start/stop/update만.
+    registry.register(
+        "bot.create",
+        _handle_bot_create,
+        is_mutating=True,
+        result_kind="entity",
+        result_key="bot_id",
+        required_services=frozenset({"strategy_registry", "bot_manager"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "bot.remove",
+        _handle_bot_remove,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"bot_manager"}),
+    )
+    registry.register(
+        "bot.start",
+        _handle_bot_start,
+        is_mutating=True,
+        result_kind="entity",
+        result_key="bot",
+        required_services=frozenset({"bot_manager", "account", "audit_logger"}),
+        audit_action="bot.start",
+    )
+    registry.register(
+        "bot.stop",
+        _handle_bot_stop,
+        is_mutating=True,
+        result_kind="entity",
+        result_key="bot",
+        required_services=frozenset({"bot_manager", "audit_logger"}),
+        audit_action="bot.stop",
+    )
+    registry.register(
+        "bot.update",
+        _handle_bot_update,
+        is_mutating=True,
+        result_kind="entity",
+        result_key="bot",
+        required_services=frozenset({"bot_manager", "audit_logger"}),
+        audit_action="bot.update",
+    )
+    # treasury.* — allocate/deallocate는 success bool envelope(operation),
+    # set_balance는 entity(account_id+total_balance+updated_at).
+    registry.register(
+        "treasury.allocate",
+        _handle_treasury_allocate,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"bot_manager", "treasury_manager"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "treasury.deallocate",
+        _handle_treasury_deallocate,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"bot_manager", "treasury_manager"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "treasury.set_balance",
+        _handle_treasury_set_balance,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"treasury_manager", "audit_logger"}),
+        audit_action="treasury.set_balance",
+        account_id_policy="required",
+    )
+    # rule.update — update_account_rule_config helper 응답을 그대로 통과
+    # (envelope shape이 helper 내부 결정이므로 raw).
+    registry.register(
+        "rule.update",
+        _handle_rule_update,
+        is_mutating=True,
+        result_kind="raw",
+        required_services=frozenset({"account", "dynamic_config", "audit_logger"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "strategy.set_status",
+        _handle_strategy_set_status,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"strategy_registry", "audit_logger"}),
+        audit_action="strategy.set_status",
+    )
+    registry.register(
+        "member.update_scopes",
+        _handle_member_update_scopes,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.update_scopes",
+    )
+    registry.register(
+        "config.set",
+        _handle_config_set,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"dynamic_config"}),
+    )
+    # approval.* — request/approve/reject/cancel/reopen은 audit_logger 호출이
+    # 없고(서비스 내부 history append가 fallback), cancel_invalid만 명시
+    # ``approval.cancel_invalid`` audit를 남긴다(#1418 → #1472 SPLIT-D).
+    registry.register(
+        "approval.request",
+        _handle_approval_request,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval"}),
+    )
+    registry.register(
+        "approval.approve",
+        _handle_approval_approve,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval"}),
+    )
+    registry.register(
+        "approval.reject",
+        _handle_approval_reject,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval"}),
+    )
+    registry.register(
+        "approval.cancel",
+        _handle_approval_cancel,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval"}),
+    )
     registry.register(
         "approval.cancel_invalid",
         _handle_approval_cancel_invalid,
         is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval", "audit_logger"}),
+        audit_action="approval.cancel_invalid",
     )
-    registry.register("approval.reopen", _handle_approval_reopen, is_mutating=True)
+    registry.register(
+        "approval.reopen",
+        _handle_approval_reopen,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"approval"}),
+    )
     # broker.reconcile은 reconciler.reconcile()이 correct_position/이벤트
     # publish를 수행하므로 일괄 mutating으로 분류한다. CLI ``--fix=False``
     # dryrun 분리는 후속 이슈.
-    registry.register("broker.reconcile", _handle_broker_reconcile, is_mutating=True)
+    registry.register(
+        "broker.reconcile",
+        _handle_broker_reconcile,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"reconciler", "bot_manager"}),
+        account_id_policy="required",
+    )
 
     # ── read-only (4개): live 조회만 ──────────────────
-    registry.register("broker.status", _handle_broker_status, is_mutating=False)
-    registry.register("broker.balance", _handle_broker_balance, is_mutating=False)
-    registry.register("broker.positions", _handle_broker_positions, is_mutating=False)
-    registry.register("bot.status", _handle_bot_status, is_mutating=False)
+    # broker.* read-only — broker 객체 메서드 결과를 그대로 envelope에 surface.
+    # status는 connected/healthy/exchange dict(entity), balance는 broker
+    # response dict 그대로(raw passthrough), positions는 list collection.
+    registry.register(
+        "broker.status",
+        _handle_broker_status,
+        is_mutating=False,
+        result_kind="entity",
+        required_services=frozenset({"account"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "broker.balance",
+        _handle_broker_balance,
+        is_mutating=False,
+        result_kind="raw",
+        required_services=frozenset({"account"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "broker.positions",
+        _handle_broker_positions,
+        is_mutating=False,
+        result_kind="collection",
+        result_key="positions",
+        required_services=frozenset({"account"}),
+        account_id_policy="required",
+    )
+    registry.register(
+        "bot.status",
+        _handle_bot_status,
+        is_mutating=False,
+        result_kind="entity",
+        result_key="bot",
+        required_services=frozenset({"bot_manager"}),
+    )

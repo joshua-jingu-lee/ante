@@ -1,8 +1,17 @@
 """CommandRegistry 테스트."""
 
+import typing
+
 import pytest
 
-from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
+from ante.contracts.vocab import ContractKind
+from ante.ipc.registry import (
+    AccountIdPolicy,
+    CommandRegistry,
+    CommandSpec,
+    ShutdownBehavior,
+    register_all_handlers,
+)
 
 
 @pytest.fixture
@@ -11,7 +20,12 @@ def registry() -> CommandRegistry:
 
 
 def test_register_and_get(registry: CommandRegistry) -> None:
-    """핸들러 등록 후 조회."""
+    """핸들러 등록 후 조회.
+
+    Refs #1849: ``register()`` 3-인자 호출은 신규 7 필드의 default 값(``raw``
+    / ``None`` / 빈 frozenset / ``None`` / ``"none"`` / 빈 tuple / ``None``)
+    으로 채워진 ``CommandSpec``과 일치해야 한다(backward compat lock).
+    """
 
     async def dummy_handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {"ok": True}
@@ -23,6 +37,15 @@ def test_register_and_get(registry: CommandRegistry) -> None:
         handler=dummy_handler,
         is_mutating=True,
     )
+    # 신규 필드 default 값 명시 검증 (frozen dataclass eq에 포함).
+    assert spec is not None
+    assert spec.result_kind == "raw"
+    assert spec.result_key is None
+    assert spec.required_services == frozenset()
+    assert spec.audit_action is None
+    assert spec.account_id_policy == "none"
+    assert spec.cross_validators == ()
+    assert spec.shutdown_behavior is None
 
 
 def test_get_unregistered_returns_none(registry: CommandRegistry) -> None:
@@ -599,3 +622,257 @@ class TestHandleConfigSetValidation:
         )
         assert result == {"key": "system.log_level", "value": "DEBUG"}
         fake_dynamic.set.assert_awaited_once()
+
+
+# ── #1849 CommandSpec metadata 확장 / 27 commands 완전성 ─────────────
+
+
+class TestCommandSpecMetadataExtension:
+    """Refs #1849 (#1819 부모): CommandSpec contract metadata 7 필드 확장.
+
+    * dispatch wrapper 동작 변경은 본 이슈 범위가 아니다(#1850 / #1851).
+    * default 값으로 backward compat을 보장하고, 27 commands는 필수값을 가진다.
+    """
+
+    def test_command_spec_has_seven_metadata_fields(self) -> None:
+        """``CommandSpec``이 신규 7 필드를 dataclass field로 보유한다."""
+        from dataclasses import fields
+
+        names = {f.name for f in fields(CommandSpec)}
+        # 기존 3 + 신규 7 = 10 필드.
+        assert names == {
+            "name",
+            "handler",
+            "is_mutating",
+            "result_kind",
+            "result_key",
+            "required_services",
+            "audit_action",
+            "account_id_policy",
+            "cross_validators",
+            "shutdown_behavior",
+        }
+
+    def test_register_kwargs_backward_compat(self, registry: CommandRegistry) -> None:
+        """``register(name, handler, is_mutating=...)`` 3-인자 호출만으로
+        default가 적용된 ``CommandSpec``이 생성된다(기존 호출자 무변경).
+        """
+
+        async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
+            return {}
+
+        registry.register("legacy.cmd", handler, is_mutating=False)
+        spec = registry.get("legacy.cmd")
+        assert spec is not None
+        assert spec.result_kind == "raw"
+        assert spec.result_key is None
+        assert spec.required_services == frozenset()
+        assert spec.audit_action is None
+        assert spec.account_id_policy == "none"
+        assert spec.cross_validators == ()
+        assert spec.shutdown_behavior is None
+
+    def test_register_kwargs_full_metadata(self, registry: CommandRegistry) -> None:
+        """``register()``가 신규 kwargs를 모두 수용하고 ``CommandSpec``에
+        전파한다."""
+
+        async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
+            return {"bot": {}}
+
+        def _validator(_args: dict) -> None:
+            return None
+
+        registry.register(
+            "ext.cmd",
+            handler,
+            is_mutating=True,
+            result_kind="entity",
+            result_key="bot",
+            required_services=frozenset({"bot_manager", "audit_logger"}),
+            audit_action="ext.cmd",
+            account_id_policy="required",
+            cross_validators=(_validator,),
+            shutdown_behavior="block_all",
+        )
+        spec = registry.get("ext.cmd")
+        assert spec is not None
+        assert spec.result_kind == "entity"
+        assert spec.result_key == "bot"
+        assert spec.required_services == frozenset({"bot_manager", "audit_logger"})
+        assert spec.audit_action == "ext.cmd"
+        assert spec.account_id_policy == "required"
+        assert spec.cross_validators == (_validator,)
+        assert spec.shutdown_behavior == "block_all"
+
+    def test_command_spec_result_kind_uses_contract_kind_vocab(self) -> None:
+        """``CommandSpec.result_kind`` annotation이 ``ContractKind`` (#1822)
+        Literal alias를 그대로 사용한다(타입 SSOT lock).
+
+        ``CommandSpec``은 ``CommandHandler``를 통해 ``"ServiceRegistry"``
+        forward reference를 포함하므로 ``typing.get_type_hints``는 runtime에
+        실패할 수 있다. annotation 문자열과 default 값으로 lock 한다.
+        """
+        from dataclasses import fields
+
+        result_kind_field = next(
+            f for f in fields(CommandSpec) if f.name == "result_kind"
+        )
+        # annotation은 string 또는 typing alias 형태. ``ContractKind`` SSOT
+        # 와 정합한지 string 표현으로 확인.
+        annotation = result_kind_field.type
+        if isinstance(annotation, str):
+            assert annotation == "ContractKind", annotation
+        else:
+            assert annotation is ContractKind
+        # default 값은 ``"raw"``.
+        assert result_kind_field.default == "raw"
+        # ContractKind 값 집합과 default 정합.
+        assert result_kind_field.default in typing.get_args(ContractKind)
+
+    def test_shutdown_behavior_alias_values(self) -> None:
+        """``ShutdownBehavior`` Literal alias 값 집합 lock (Codex v2 c1)."""
+        assert set(typing.get_args(ShutdownBehavior)) == {
+            "block_on_mutating",
+            "block_all",
+            "allow_all",
+        }
+
+    def test_account_id_policy_alias_values(self) -> None:
+        """``AccountIdPolicy`` Literal alias 값 집합 lock."""
+        assert set(typing.get_args(AccountIdPolicy)) == {
+            "none",
+            "required",
+            "optional_filter",
+        }
+
+
+class TestRegisteredCommandsMetadataCompleteness:
+    """Refs #1849: ``register_all_handlers``로 등록되는 27 commands가 필수
+    metadata를 모두 가진다."""
+
+    @pytest.fixture
+    def loaded(self) -> CommandRegistry:
+        reg = CommandRegistry()
+        register_all_handlers(reg)
+        return reg
+
+    def test_all_commands_result_kind_is_contract_kind(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """27 commands 모두 ``result_kind``가 ``ContractKind`` vocabulary
+        (#1822) 값에 포함된다."""
+        allowed = set(typing.get_args(ContractKind))
+        assert allowed == {"entity", "operation", "collection", "raw", "stream"}
+        for spec in loaded.iter_specs():
+            assert spec.result_kind in allowed, (
+                f"{spec.name} result_kind={spec.result_kind!r} not in ContractKind"
+            )
+
+    def test_all_commands_required_services_non_empty(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """27 commands 모두 ``required_services``를 1개 이상 보유한다.
+
+        Ante 서버 IPC handler는 ``ServiceRegistry``에 의존하므로 빈
+        ``required_services``는 metadata 누락의 신호.
+        """
+        for spec in loaded.iter_specs():
+            assert spec.required_services, (
+                f"{spec.name} has no required_services declared"
+            )
+            assert isinstance(spec.required_services, frozenset)
+
+    def test_all_commands_required_services_are_strings(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """``required_services`` 항목은 ``ServiceRegistry`` attribute 이름
+        문자열이어야 한다."""
+        for spec in loaded.iter_specs():
+            for name in spec.required_services:
+                assert isinstance(name, str) and name, (
+                    f"{spec.name} required_services has non-string item {name!r}"
+                )
+
+    def test_all_commands_account_id_policy_valid(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """27 commands 모두 ``account_id_policy``가 정의된 Literal 값을
+        가진다."""
+        allowed = set(typing.get_args(AccountIdPolicy))
+        for spec in loaded.iter_specs():
+            assert spec.account_id_policy in allowed, (
+                f"{spec.name} account_id_policy={spec.account_id_policy!r}"
+            )
+
+    def test_audit_action_only_for_audit_logger_dependent_commands(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """``audit_action``이 설정된 명령은 ``required_services``에
+        ``audit_logger``를 보유해야 한다(metadata 자기일관성).
+
+        Refs #1819 본문 / Codex v2 condition 3: mutating이라는 사실만으로
+        audit_action을 강제하지 않는다. ``audit_action``이 ``None``이면
+        ``audit_logger``가 ``required_services``에 없어도 무방.
+        """
+        for spec in loaded.iter_specs():
+            if spec.audit_action is not None:
+                assert "audit_logger" in spec.required_services, (
+                    f"{spec.name} declares audit_action="
+                    f"{spec.audit_action!r} but audit_logger not in "
+                    f"required_services={sorted(spec.required_services)!r}"
+                )
+
+    def test_audit_actions_match_known_set(self, loaded: CommandRegistry) -> None:
+        """``audit_action`` 값들이 실제 handler ``audit_logger.log(action=...)``
+        호출과 정합한다(#1849 plan B step).
+
+        본 단언은 registry 내 audit_logger 호출 grep 결과(7개)와 1:1로 lock 한다.
+        호출 추가/삭제 시 양쪽을 동기화하지 않으면 본 테스트가 회귀를 잡는다.
+        """
+        expected_actions = {
+            "bot.start",
+            "bot.stop",
+            "bot.update",
+            "treasury.set_balance",
+            "strategy.set_status",
+            "member.update_scopes",
+            "approval.cancel_invalid",
+        }
+        actual = {
+            spec.audit_action
+            for spec in loaded.iter_specs()
+            if spec.audit_action is not None
+        }
+        assert actual == expected_actions
+
+    def test_shutdown_behavior_default_none_preserves_legacy_dispatch(
+        self, loaded: CommandRegistry
+    ) -> None:
+        """27 commands 모두 ``shutdown_behavior``를 ``None``으로 두어 기존
+        ``IPCServer._dispatch`` ``is_mutating`` 기반 분기(#1184)를 보존한다.
+
+        override 도입은 후속 이슈 책임이며, 본 이슈는 기본 derive 동작만
+        유지한다(shutdown 회귀 lock).
+        """
+        for spec in loaded.iter_specs():
+            assert spec.shutdown_behavior is None, (
+                f"{spec.name} shutdown_behavior={spec.shutdown_behavior!r} "
+                "override는 본 이슈 범위가 아님"
+            )
+
+    def test_cross_validators_default_empty(self, loaded: CommandRegistry) -> None:
+        """27 commands 모두 ``cross_validators``가 빈 tuple(default).
+
+        skeleton 도입만 본 이슈 범위. 실제 validator wiring은 후속 이슈에서.
+        """
+        for spec in loaded.iter_specs():
+            assert spec.cross_validators == (), spec.name
+
+    def test_iter_specs_returns_all_27_specs(self, loaded: CommandRegistry) -> None:
+        """``iter_specs``가 27 commands 모두를 ``CommandSpec`` 인스턴스로
+        반환한다."""
+        specs = loaded.iter_specs()
+        assert len(specs) == 27
+        assert all(isinstance(s, CommandSpec) for s in specs)
+        # 등록 순서 보존(dict insertion order).
+        assert [s.name for s in specs] == loaded.commands
