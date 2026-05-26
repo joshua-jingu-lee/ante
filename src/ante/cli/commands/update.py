@@ -132,7 +132,10 @@ def update(
             click.echo(f"현재 버전: {current}")
         latest = get_latest_version()
         if latest is None:
-            fmt.error("PyPI 버전 확인 실패")
+            # #1843 sub-PR 6: PyPI 조회 실패 (네트워크/HTTP 오류) 안정 코드.
+            # ``UPDATE_CHECK_FAILED`` 는 ``--check`` dry-run 경로의 외부
+            # 의존성 실패 surface (taxonomy ``external`` 카테고리 의미).
+            fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
             raise SystemExit(1)
         available = is_update_available(current, latest)
         if fmt.is_json:
@@ -193,7 +196,10 @@ def update(
     # 업데이트 실행 — `--yes` 게이트 통과 후에만 PyPI를 조회한다.
     latest = target_version or get_latest_version()
     if latest is None:
-        fmt.error("PyPI 버전 확인 실패")
+        # #1843 sub-PR 6: 실제 업데이트 경로 PyPI 조회 실패 동일 안정 코드.
+        # ``--check`` dry-run 경로 (line 135) 와 동일 ``UPDATE_CHECK_FAILED``
+        # SSOT — 두 경로의 외부 의존성 실패 surface 일치.
+        fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
         raise SystemExit(1)
 
     if not target_version and not is_update_available(current, latest):
@@ -253,7 +259,10 @@ def update(
     if not fmt.is_json:
         click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
-        fmt.error("업데이트 실패")
+        # #1843 sub-PR 6: pip install 실패의 안정 코드. ``UPDATE_INSTALL_FAILED``
+        # 는 pip subprocess 비정상 종료 surface (taxonomy ``external``
+        # 카테고리 의미 — pip/PyPI 인프라 의존성 실패).
+        fmt.error("업데이트 실패", code="UPDATE_INSTALL_FAILED")
         raise SystemExit(1)
 
     # Phase B: 마이그레이션 — executor 가 서브프로세스로 `python -m
