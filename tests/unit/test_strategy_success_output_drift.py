@@ -54,6 +54,7 @@ from ante.member.models import Member, MemberRole, MemberStatus, MemberType
 from ante.strategy.registry import StrategyRecord, StrategyStatus
 from ante.strategy.validator import ValidationResult
 from ante.trade.models import PerformanceMetrics
+from tests.unit.cli.conftest import mock_strategy_registry_factory
 
 # ── envelope shape predicates (envelopes.md SSOT, account/member/bot/approval 동형) ──
 
@@ -205,6 +206,12 @@ def mock_create_registry():
     ``summary`` / ``submit`` (register) 가 사용한다. ``performance`` 는 자체
     ``Database`` + ``StrategyRegistry`` 를 직접 생성하므로 별도 fixture 가
     필요하다.
+
+    #1900: production ``_create_registry`` 는 ``@asynccontextmanager`` 이며
+    ``async with _create_registry(ctx=ctx) as (registry, db):`` 형태로 호출된다.
+    ``async def _stub_create()`` 는 ``ctx=`` kwarg 도 받지 못하고 ``async with``
+    lifecycle 도 모사하지 못해 회귀(A 동형)가 발생했다. shared
+    ``mock_strategy_registry_factory`` helper 로 마이그레이션.
     """
     registry = AsyncMock()
     db = AsyncMock()
@@ -214,12 +221,9 @@ def mock_create_registry():
     db.fetch_all = AsyncMock(return_value=[])
     registry.initialize = AsyncMock()
 
-    async def _stub_create():
-        return registry, db
-
     with patch(
         "ante.cli.commands.strategy._create_registry",
-        side_effect=_stub_create,
+        new=mock_strategy_registry_factory(registry, db),
     ):
         yield registry, db
 

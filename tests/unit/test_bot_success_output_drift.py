@@ -51,6 +51,7 @@ from click.testing import CliRunner
 
 from ante.contracts.cli_registry import CLI_COMMAND_REGISTRY
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from tests.unit.cli.conftest import mock_bot_services_factory
 
 # ── envelope shape predicates (envelopes.md SSOT, account/member 동형) ────
 
@@ -186,18 +187,21 @@ def mock_create_services():
     반환값 ``(db, eventbus, manager, account_service)`` 의 4-tuple 을 그대로
     돌려준다. 각 테스트는 yield 받은 ``(db, manager, account_service)`` 의
     mock 메서드 응답을 자체적으로 customize 한다.
+
+    #1900: ``_create_services`` 는 ``@asynccontextmanager`` async ctxmgr 이고
+    production callsite 는 ``async with _create_services(ctx=ctx) as (...):``
+    형태로 호출한다. plain ``async def`` stub 은 ``ctx=`` kwarg 와 ``async
+    with`` lifecycle 둘 다 충족하지 못해 회귀가 발생했다. shared
+    ``mock_bot_services_factory`` 헬퍼로 마이그레이션한다.
     """
     db = _make_mock_db()
     eventbus = MagicMock()
     manager = AsyncMock()
     account_service = AsyncMock()
 
-    async def _stub_create_services():
-        return db, eventbus, manager, account_service
-
     with patch(
         "ante.cli.commands.bot._create_services",
-        new=_stub_create_services,
+        new=mock_bot_services_factory(db, eventbus, manager, account_service),
     ):
         yield db, eventbus, manager, account_service
 

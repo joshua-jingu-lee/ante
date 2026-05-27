@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -29,6 +29,7 @@ from ante.cli.middleware import (
     require_scope,
 )
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.cli.conftest import mock_bot_services_factory
 
 _MASTER = Member(
     member_id="cli-master",
@@ -452,7 +453,14 @@ class TestAuthenticatedFlow:
     def test_authenticated_master_runs_bot_list(
         self, runner: CliRunner, clean_env: None
     ) -> None:
-        """master 인증 통과 시 ``ante bot list``는 IPC 단계까지 진입."""
+        """master 인증 통과 시 ``ante bot list``는 cold-path leaf 까지 진입.
+
+        ``bot list`` 는 cold-path 명령으로 IPC 를 거치지 않고 직접
+        ``_create_services`` 로 DB 를 연다. 인증 게이트 통과만 검증하므로
+        ``_create_services`` 를 helper 로 mock 해 실제 DB 접근을 차단한다
+        (#1900 sweep — 이전 default-env credentials decrypt 실패가 가짜 fail
+        을 만들었다).
+        """
         # leaf wrapper가 ante.cli.main.authenticate_member를 호출하므로 거기서 mock.
         from ante.cli import main as _main
 
@@ -460,19 +468,18 @@ class TestAuthenticatedFlow:
             ctx.ensure_object(dict)
             ctx.obj["member"] = _MASTER
 
-        # ipc client도 mock으로 단순 응답
-        ok_response = {"status": "ok", "data": {"bots": []}}
+        mock_db = AsyncMock()
+        mock_db.fetch_all = AsyncMock(return_value=[])
+        mock_db.close = AsyncMock()
         with (
             patch.object(_main, "authenticate_member", side_effect=_set_master),
-            patch("ante.cli.commands.ipc_helpers.IPCClient", autospec=True) as mock_cls,
             patch(
-                "ante.cli.commands.ipc_helpers.get_socket_path",
-                return_value="/tmp/ante.sock",
+                "ante.cli.commands.bot._create_services",
+                new=mock_bot_services_factory(
+                    mock_db, MagicMock(), MagicMock(), MagicMock()
+                ),
             ),
         ):
-            mock_client = AsyncMock()
-            mock_client.send.return_value = ok_response
-            mock_cls.return_value = mock_client
             result = runner.invoke(cli, ["bot", "list"])
 
         assert result.exit_code == 0, result.output

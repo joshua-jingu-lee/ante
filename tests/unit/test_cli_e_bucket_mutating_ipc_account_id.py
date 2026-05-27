@@ -45,6 +45,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.cli.conftest import mock_bot_services_factory
 
 # 제공된 runtime-invalid account_id 입력 — 14-account-id-contract.md
 # "Runtime invalid (어떤 시점에도 거부)" + scoping.is_invalid_account_id
@@ -212,17 +213,23 @@ class TestBotCreateOmittedResolverPreserved:
     ) -> None:
         ipc_patch, spy = _patch_ipc_send()
 
-        async def _list_accounts():
-            db = AsyncMock()
-            account_service = AsyncMock()
-            account_service.list = AsyncMock(return_value=[])  # active 0개
-            return db, MagicMock(), MagicMock(), account_service
+        # #1900: production ``_create_services`` 는 ``@asynccontextmanager``
+        # async ctxmgr 이며 ``async with _create_services(ctx=ctx) as (...):``
+        # 형태로 호출된다. 이전 ``async def _list_accounts(): return tuple``
+        # stub 은 async ctxmgr 가 아니라 coroutine 만 돌려 ``async with`` 가
+        # JSON 출력 직전에 fail 했다(E 회귀: ``JSONDecodeError`` empty stdout).
+        # shared ``mock_bot_services_factory`` 헬퍼로 lifecycle 정확 모사.
+        db = AsyncMock()
+        account_service = AsyncMock()
+        account_service.list = AsyncMock(return_value=[])  # active 0개
 
         with (
             ipc_patch,
             patch(
                 "ante.cli.commands.bot._create_services",
-                new=_list_accounts,
+                new=mock_bot_services_factory(
+                    db, MagicMock(), MagicMock(), account_service
+                ),
             ),
         ):
             result = runner.invoke(
