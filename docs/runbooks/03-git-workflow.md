@@ -150,7 +150,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 
 ### 4.2 PR 머지 조건
 
-1. `ci` 성공
+1. required status checks(`ci`, `lint`, `test` — 집합은 [§5](#5-보호-규칙-권장값) 및 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) 모두 성공
 2. 충돌 없음
 3. 미해결 대화 없음
 4. auto-merge 활성화 가능 상태

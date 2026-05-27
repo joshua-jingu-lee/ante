@@ -1,6 +1,6 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 PR 전 브랜치 리뷰를 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 `ci` + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
+> Claude Code가 구현을 담당하고, Codex가 구현 전 계획 리뷰와 PR 전 브랜치 리뷰를 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
 
 ---
 
@@ -25,7 +25,7 @@
 - **Codex Plan Review 워커**: `/codex:adversarial-review`로 구현 전 계획의 가정, 위험, 대안을 외부 검증
 - **Claude 코드 리뷰어**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석 (수동/오케스트레이터 호출)
 - **Codex 브랜치 리뷰어**: `/codex:review --base <ref>`로 PR 전 브랜치 단위 코드 품질 게이트 수행
-- **GitHub merge gate**: `ci` 통과와 충돌 없음·대화 해결·auto-merge 활성화 가능 상태를 기준으로 auto-merge 집행
+- **GitHub merge gate**: required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) 통과와 충돌 없음·대화 해결·auto-merge 활성화 가능 상태를 기준으로 auto-merge 집행
 
 ## 3. 상호작용 흐름
 
@@ -78,8 +78,8 @@ Claude 오케스트레이터
   │     └── PR 생성 (`Closes #이슈`) + PR 생성 완료: 이슈 코멘트
   │
   ├──▶ PR 게이트 (GitHub Actions)
-  │     ├── CI (`ci`) — required, 머지 차단 게이트
-  │     ├── merge-gate — `ci` green + 충돌 없음 + 대화 해결 + auto-merge 활성화 가능 상태일 때 GitHub auto-merge 활성화
+  │     ├── CI (`ci`, `lint`, `test`) — required status checks, 머지 차단 게이트 (집합은 04-ci-cd.md §3.2 SSOT)
+  │     ├── merge-gate — required status checks green + 충돌 없음 + 대화 해결 + auto-merge 활성화 가능 상태일 때 GitHub auto-merge 활성화
   │     └── auto-merge 활성화 직전에 `post-merge.yml` workflow_dispatch로 호출
   │        └── `/autopilot` 실행 중이면 사이클 상태: 이슈 코멘트
   │
@@ -109,7 +109,7 @@ Claude 오케스트레이터
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
 - Codex의 첫 리뷰는 **구현 전 Codex Plan Review**이며, 첫 코드 리뷰는 **PR 전 Codex 브랜치 리뷰**다.
 - PR 전 Codex 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 `/codex:review --base <base>`로 반복하며, 이 단계가 코드 품질 게이트다.
-- PR 단계에서는 자동 AI 승인 워커가 동작하지 않는다. 머지 가능 여부는 `ci` + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다. 추가 AI 감사가 필요하면 별도 수동 절차로 분리한다.
+- PR 단계에서는 자동 AI 승인 워커가 동작하지 않는다. 머지 가능 여부는 required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다. 추가 AI 감사가 필요하면 별도 수동 절차로 분리한다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
 - 릴리스는 merge/post-merge와 분리된 수동 운영 lane이며, `/release prepare`가 release PR을 만들고 `/release publish`가 merge된 main에서 배포를 담당한다.
 
@@ -221,7 +221,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - **브랜치 리뷰 단계**: Codex만 수행한다. GitHub Actions가 아니라 `/codex:review --base <ref>` 내부 루프로 도는 PR 전 코드 품질 게이트다.
 - **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 같은 head SHA에서 `/codex:review --base <ref>`를 사람/오케스트레이터가 다시 호출해 검증한다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
-- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **`ci` status check + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
+- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/codex:review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
 - **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용

@@ -31,7 +31,7 @@ Claude 구현 (worktree 격리)
   │
   ├──▶ [Meta] code-reviewer ───────────── 고위험 변경 / 반복 risk class 시 원인 분석 (수동/오케스트레이터 호출)
   │
-  ├──▶ [Gate C] merge-gate ────────────── ci 통과 + 충돌 없음 + 대화 해결 시 auto-merge
+  ├──▶ [Gate C] merge-gate ────────────── required status checks(§3.2) 통과 + 충돌 없음 + 대화 해결 시 auto-merge
   │
   ▼
 post-merge automation
@@ -76,7 +76,7 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/codex
 **목적**: 정적 분석 + 자동 테스트
 
 - **트리거**: `pull_request`
-- **결과**: `ci`
+- **결과**: status checks `ci`, `lint`, `test` (집계 진입점은 `ci`, defense-in-depth 근거는 [§3.2.1](#321-rationale--머지-안전망-defense-in-depth))
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
 
 branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
@@ -114,7 +114,7 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 **목적**: 머지 가능성만 판단하는 정책 게이트
 
 입력:
-- `ci` (required)
+- required status checks 통과 — 권장 집합은 [§3.2 저장소 설정 권장값](#32-저장소-설정-권장값)이 SSOT다 (현재 권장: `ci`, `lint`, `test`)
 - 충돌 없음
 - 대화 해결 완료
 - auto-merge 활성화 가능 상태
@@ -241,7 +241,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 | 실패 게이트 | 성격 | 머지 차단 여부 | 주 원인 | 복구 담당 |
 |------------|-----|---------------|--------|----------|
 | `/codex:review` | PR 전 사전 게이트 | PR 생성 차단 (이슈 증적) | 설계/코드 품질 문제 | Claude 개발 에이전트 |
-| `ci` | required | 차단 | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
+| `ci` / `lint` / `test` | required status checks (집합은 [§3.2](#32-저장소-설정-권장값) SSOT) | 차단 | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
 | `merge-gate` | 정책 집행 | 차단 | 충돌, 대화 미해결, auto-merge 비활성화 상태 | Claude 오케스트레이터 또는 사람 |
 
 내부 `/codex:review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
@@ -250,7 +250,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 ### 5.1 머지 게이트 수동 복구 순서
 
-1. `ci`가 일시적 환경 문제로 실패한 것으로 보이면 `gh run rerun`을 우선한다.
+1. required status check(`ci` / `lint` / `test` 등 [§3.2](#32-저장소-설정-권장값) 권장 집합) 중 하나가 일시적 환경 문제로 실패한 것으로 보이면 `gh run rerun`을 우선한다.
 2. PR 코드 자체에 문제가 있으면 Claude 개발 에이전트가 같은 브랜치를 수정한 뒤 새 커밋을 push한다. push 전에는 `/codex:review --base <ref>`를 새 head SHA에서 다시 통과시킨다.
 3. `pull_request` 이벤트 누락으로 `merge-gate`가 다시 시작되지 않을 때만 PR `close → reopen`을 예외적으로 사용한다.
 4. 수동 복구를 실행한 경우 PR 코멘트에 복구 이유, 사용한 방식, 새 run 링크를 남긴다.
