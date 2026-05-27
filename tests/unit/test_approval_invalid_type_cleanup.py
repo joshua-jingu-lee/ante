@@ -108,7 +108,11 @@ async def _seed_row(
 async def db(tmp_path: Any) -> Database:
     database = Database(str(tmp_path / "approval-1472.db"))
     await database.connect()
-    return database
+    # Refs #1897: aiosqlite Connection 누수 차단.
+    try:
+        yield database
+    finally:
+        await database.close()
 
 
 @pytest.fixture

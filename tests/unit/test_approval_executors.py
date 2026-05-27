@@ -23,7 +23,11 @@ async def db(tmp_path):
     """테스트용 SQLite DB."""
     db = Database(str(tmp_path / "test.db"))
     await db.connect()
-    return db
+    # Refs #1897: aiosqlite Connection 누수 차단.
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 @pytest.fixture

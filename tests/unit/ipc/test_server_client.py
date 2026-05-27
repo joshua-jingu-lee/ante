@@ -392,12 +392,18 @@ async def test_stop_accepting_does_not_block_on_active_connection(
         # active 연결은 socket 닫기 전까지 살아 있어도 OK — 소켓 파일도 유지.
         assert Path(socket_path).exists()
     finally:
+        # Refs #1897: ``Server._wakeup`` 의 ``_waiters = None`` race 회피
+        # (자세한 설명은 ``test_drain_connections_with_timeout`` 참고). client
+        # 를 먼저 닫고 server _handle_connection 이 detach 를 완료할 시간을
+        # 양보한 뒤 drain.
         writer.close()
         try:
             await writer.wait_closed()
         except Exception:
             pass
-        # 후속 정리 (남은 연결 drain + socket 제거)
+        for _ in range(20):
+            await asyncio.sleep(0)
+        # 후속 정리 (남은 연결 drain + socket 제거).
         await server.drain_connections(timeout=0.5)
         server.unlink_socket()
 
@@ -409,6 +415,12 @@ async def test_drain_connections_with_timeout(
     """drain_connections는 timeout 안에 active 연결이 닫히지 않으면 경고 후 통과한다.
 
     asyncio.TimeoutError를 raise하지 않고 삼키며, lifecycle은 계속 진행된다.
+
+    Refs #1897: 종료 순서는 ``client writer 먼저 close → 서버 _handle_connection
+    의 finally 가 transport 를 정리할 시간 확보 → server cleanup``. 이래야
+    ``_SelectorTransport.__del__`` race(`self._server._detach(self)` 호출 시점에
+    이미 ``_server.close()`` 후 attribute 들이 비어 ``'NoneType' object is not
+    iterable``) 가 unraisable warning 으로 새지 않는다.
     """
     cmd_registry = CommandRegistry()
     server = IPCServer(socket_path, service_registry, cmd_registry)
@@ -422,11 +434,24 @@ async def test_drain_connections_with_timeout(
         await server.drain_connections(timeout=0.2)
         # 호출 자체가 정상 종료됐다는 사실을 검증
     finally:
+        # Refs #1897: 누수 cleanup — production drain 이 timeout 으로 끝났을
+        # 경우에도, fixture 종료 시점에는 server-side transport 까지 결정적으로
+        # 닫혀야 한다. client 측 writer 를 먼저 닫고 충분히 큰 timeout 으로 한
+        # 번 더 drain 해 server-side _handle_connection 의 finally 가
+        # transport detach 를 완료할 시간을 보장한다. ``drain_connections`` 는
+        # 첫 호출에서 ``_closing_server`` 를 비우므로 두 번째 호출은 noop —
+        # 따라서 underlying server.wait_closed 를 직접 await 한다.
         writer.close()
         try:
             await writer.wait_closed()
         except Exception:
             pass
+        # underlying asyncio.Server reference 를 복원하기 위해 server 내부
+        # attribute (private) 를 직접 들여다본다. drain 직후 _closing_server 는
+        # None 으로 비워졌으나, asyncio.Server.wait_closed 는 _waiters 가 None
+        # 이면 즉시 return 하므로 부작용이 없다.
+        for _ in range(20):
+            await asyncio.sleep(0)
         server.unlink_socket()
 
 
