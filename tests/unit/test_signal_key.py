@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,6 +13,21 @@ from ante.strategy.base import Signal, Strategy, StrategyMeta
 # ── SignalKeyManager 단독 테스트 ─────────────────────
 
 
+def _make_transaction_cm(db: MagicMock):  # noqa: ANN202
+    """Database.transaction() context manager mock factory.
+
+    #1901: rotate() 가 ``async with self._db.transaction():`` 로 DELETE+INSERT
+    를 묶기 시작했으므로 mock 도 동등한 async context manager 를 제공해야
+    한다. 컨텍스트는 db 자신을 yield 한다 (실제 구현과 동일 시맨틱).
+    """
+
+    @asynccontextmanager
+    async def _tx():  # noqa: ANN202
+        yield db
+
+    return _tx
+
+
 @pytest.fixture
 def db() -> MagicMock:
     """Database mock."""
@@ -20,6 +36,7 @@ def db() -> MagicMock:
     mock_db.execute_script = AsyncMock()
     mock_db.fetch_one = AsyncMock(return_value=None)
     mock_db.fetch_all = AsyncMock(return_value=[])
+    mock_db.transaction = MagicMock(side_effect=_make_transaction_cm(mock_db))
     return mock_db
 
 
