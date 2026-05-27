@@ -97,6 +97,20 @@ allowlist는 ``broker._create_account_service`` 만 explicit-deny (legacy
 plain await-tuple 패턴 — #1818 follow-up). 그 외 모든 CLI async ctxmgr
 factory를 자동 sweep 대상으로 한다.
 
+또한 각 production factory 의 시그니처(positional args + kwonly args)도
+함께 수집하여 ``new=<stub>`` / ``side_effect=<stub>`` 로 지정된 local stub 이
+production 호출 시그니처를 받지 못하면 위반으로 보고한다 (codex review
+attempt 5 finding 1). 예::
+
+    # production: async def _create_treasury(account_id, *, ctx=None)
+    async def _stub(ctx=None):                    # ← account_id positional 누락
+        ...
+    with patch("ante.cli.commands.treasury._create_treasury", new=_stub):
+        ...   # production 이 _stub(account_id, ctx=ctx) 호출 시 TypeError
+
+stub 이 ``*args`` / ``**kwargs`` 로 모든 인수를 swallow 하거나, production 의
+positional arg 이름을 정확히 포함하면 통과.
+
 Usage::
 
     python scripts/scan_create_services_anti_pattern.py tests/unit/
@@ -106,7 +120,7 @@ Usage::
 KNOWN-LIMITATION (정적 분석 범위 한계)
 ======================================
 
-본 scanner 는 정적 AST 분석으로 다음 anti-pattern 형태를 catch 한다:
+본 scanner 는 정적 AST 분석으로 다음 anti-pattern 형태를 catch 한다 (ON):
 
 * ``with patch(...) as alias: alias.return_value = tuple``
 * ``with patch(...)`` (1-positional + ``return_value=tuple`` kwarg)
@@ -118,6 +132,18 @@ KNOWN-LIMITATION (정적 분석 범위 한계)
   ``new``)
 * ``@patch(...)`` 데코레이터 (위 모든 형태 + decorated FunctionDef body 의
   ``mock_arg.return_value = tuple`` 할당)
+* **Target-specific stub call-signature validation (ON)** — codex review
+  attempt 5 finding 1: production factory 의 positional args 를 정확히 수집해
+  ``new=<stub>`` / ``side_effect=<stub>`` 가 같은 positional args 를 받을 수
+  있는지 검증. 예: ``treasury._create_treasury(account_id, *, ctx=None)``
+  의 stub 이 ``ctx=None`` 만 받으면 ``async-stub-positional-arity-mismatch``
+  위반.
+* **Class-level @patch decorator method body assignment (ON)** — codex review
+  attempt 5 finding 2: ``@patch(target)`` 이 클래스 데코레이터로 적용되면
+  클래스 내 **모든** test method 의 body 도 매핑 검사 대상. method args 는
+  ``self`` 다음에 method-level decorator slot (innermost-first) → class-level
+  decorator slot (innermost-first) 순으로 매핑한다 (Python
+  ``unittest.mock.patch`` 실제 주입 규칙).
 
 Decorator stack 의 mock arg slot 매핑은 Python ``unittest.mock.patch`` 실제
 주입 규칙과 정렬한다 (codex review attempt 4 finding 2):
@@ -135,7 +161,8 @@ Decorator stack 의 mock arg slot 매핑은 Python ``unittest.mock.patch`` 실�
 따라서 ``new=<stub>`` / ``side_effect=<stub>`` 의 stub 정의가 patch site 보다
 파일 아래쪽에 있어도 정확히 resolve 된다.
 
-다음은 본 scanner 범위 밖 (정적 분석으로는 catch 불가, follow-up 분리):
+다음은 본 scanner 범위 밖 (정적 분석으로는 catch 불가, follow-up 분리, **본
+PR scope 밖**):
 
 * ``@patch.object(Class, "attr", ...)`` — target 이 string 이 아닌 reference
 * ``patch.multiple``, ``patch.dict``, ``patch.stopall`` 등 부수 API
@@ -146,8 +173,8 @@ Decorator stack 의 mock arg slot 매핑은 Python ``unittest.mock.patch`` 실�
 
 이러한 형태가 실제로 anti-pattern 으로 사용되면 별도 이슈로 분리하여 추가
 보강한다 (#1900 follow-up). 본 scanner 의 sound 범위 (false-positive 0,
-allowlist 자동 수집) 와 known-incomplete 범위 (위 5개 형태) 를 normative 로
-선언한다.
+allowlist 자동 수집 + signature 정합) 와 known-incomplete 범위 (위 5개 형태)
+를 normative 로 선언한다.
 """
 
 from __future__ import annotations
@@ -184,16 +211,34 @@ class Violation:
         return f"{rel}:{self.lineno}: [{self.kind}] {self.target} — {self.detail}"
 
 
+@dataclass(frozen=True)
+class FactorySignature:
+    """production async ctxmgr factory 의 call-signature (codex review attempt
+    5 finding 1).
+
+    stub 호출 시 production 의 positional args 를 받지 못하면 ``TypeError`` 가
+    발생한다. scanner 는 ``new=<stub>`` / ``side_effect=<stub>`` 가 같은
+    positional/kwonly args 를 수용할 수 있는지 검증한다.
+    """
+
+    positional_args: tuple[str, ...]
+    kwonly_args: tuple[str, ...]
+
+
 # ── Step 1: production factory allowlist 자동 수집 ─────────────────────
 
 
-def discover_async_ctxmgr_factories() -> set[str]:
+def discover_async_ctxmgr_factories() -> dict[str, FactorySignature]:
     """``src/ante/cli/commands/*.py`` 에서 ``@asynccontextmanager`` 적용 async
-    함수의 fully-qualified target string set 을 반환한다.
+    함수의 fully-qualified target → ``FactorySignature`` mapping 을 반환한다.
 
-    예: ``ante.cli.commands.bot._create_services``.
+    예: ``ante.cli.commands.bot._create_services`` →
+    ``FactorySignature(positional_args=('ctx',), kwonly_args=())``.
+
+    하위 호환: ``dict in/keys()`` 로 ``set`` 처럼 사용 가능 (PatchVisitor 가
+    ``target in self.allowlist`` 로 멤버십만 검사).
     """
-    targets: set[str] = set()
+    targets: dict[str, FactorySignature] = {}
     for py_path in sorted(CLI_COMMANDS_DIR.glob("*.py")):
         if py_path.name.startswith("_") and py_path.name != "__init__.py":
             # private helper (e.g. _password.py) 도 stub 정의가 있으면 검사
@@ -213,7 +258,13 @@ def discover_async_ctxmgr_factories() -> set[str]:
             target = f"ante.cli.commands.{module_name}.{node.name}"
             if target in LEGACY_DENY:
                 continue
-            targets.add(target)
+            positional = tuple(
+                a.arg for a in (list(node.args.posonlyargs) + list(node.args.args))
+            )
+            kwonly = tuple(a.arg for a in node.args.kwonlyargs)
+            targets[target] = FactorySignature(
+                positional_args=positional, kwonly_args=kwonly
+            )
     return targets
 
 
@@ -234,10 +285,14 @@ def _has_async_ctxmgr_decorator(node: ast.AsyncFunctionDef) -> bool:
 class PatchVisitor(ast.NodeVisitor):
     """``patch("ante.cli.commands.<mod>.<fn>", ...)`` 호출을 분석."""
 
-    def __init__(self, path: Path, allowlist: set[str]) -> None:
+    def __init__(self, path: Path, allowlist: dict[str, FactorySignature]) -> None:
         self.path = path
         self.allowlist = allowlist
         self.violations: list[Violation] = []
+        # class decorator stack (innermost-first) — codex review attempt 5
+        # finding 2: class-level ``@patch(...)`` 가 모든 method 의 body 에
+        # mock arg 를 주입하므로 visit 진입 시 push, leave 시 pop.
+        self._class_decorator_stack: list[list[ast.Call]] = []
         # async ctxmgr stubs (name -> AsyncFunctionDef node).
         # 2-pass scan (codex review attempt 4 finding 3): ``scan_file`` 이
         # ``ast.walk`` 로 모든 ``AsyncFunctionDef`` 를 pre-collect 한 후
@@ -268,9 +323,32 @@ class PatchVisitor(ast.NodeVisitor):
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         # 클래스 데코레이터에서도 patch(...) 가 등장 가능 (e.g. @patch(... ) on class).
-        # ``ClassDef`` 은 mock 주입 함수 인자가 없으므로 alias-body 검사는 생략.
+        # ``ClassDef`` 자체에는 mock 주입 함수 인자가 없으므로 alias-body 검사를
+        # 직접 실행하진 않지만, **클래스 데코레이터는 클래스 내 모든 test method
+        # 의 body 에 mock arg 를 주입한다** (Python ``unittest.mock.patch`` 실제
+        # 동작). codex review attempt 5 finding 2 — class decorator stack 을
+        # push 해 method 방문 시 method-level decorator 와 함께 매핑한다.
         self._check_decorator_list(node.decorator_list, function_node=None)
-        self.generic_visit(node)
+        # ``new=`` 가 지정되지 않은 patch decorator 만 slot 을 소비한다 (Finding 1
+        # 정정 규칙과 동일). innermost-first 순으로 stack 에 push.
+        class_patch_decos_innermost_first: list[ast.Call] = []
+        for deco in reversed(node.decorator_list):
+            if not isinstance(deco, ast.Call):
+                continue
+            if not self._is_patch_call(deco):
+                continue
+            new_value, _new_callable_value, _, _ = self._extract_patch_kwargs(deco)
+            if new_value is not None:
+                # ``new=`` 지정 patch 는 mock arg 를 주입하지 않으므로 slot 자체에서
+                # 제외 — 본 stack 에 push 하지 않는다.
+                continue
+            class_patch_decos_innermost_first.append(deco)
+
+        self._class_decorator_stack.append(class_patch_decos_innermost_first)
+        try:
+            self.generic_visit(node)
+        finally:
+            self._class_decorator_stack.pop()
 
     def _check_decorator_list(
         self,
@@ -308,7 +386,7 @@ class PatchVisitor(ast.NodeVisitor):
     ) -> None:
         """decorator stack 의 ``@patch(target)`` 매핑된 mock 함수 인자가 body
         에서 ``<alias>.return_value = tuple/list`` 로 사용되는지 검사한다
-        (attempt 3 finding 1).
+        (attempt 3 finding 1 + attempt 5 finding 2).
 
         Python ``@patch`` 의 mock 주입 규칙:
 
@@ -327,6 +405,12 @@ class PatchVisitor(ast.NodeVisitor):
 
         ``new`` 또는 ``new_callable`` 이 지정된 ``@patch`` 는 mock 인자를 주입하지
         않으므로 매핑에서 제외한다 (Python 스펙).
+
+        Class-level ``@patch`` (codex review attempt 5 finding 2): test method
+        의 args slot 은 ``self`` 다음에 **method-level decorator slot (innermost-
+        first)** → **class-level decorator slot (innermost-first)** 순으로
+        매핑된다. ``self._class_decorator_stack[-1]`` 가 현재 enclosing class
+        decorator stack (이미 innermost-first 정렬, ``new=`` 제외).
         """
         # 1) 함수 positional args 에서 self/cls 제외한 리스트
         positional_args = list(function_node.args.posonlyargs) + list(
@@ -347,7 +431,7 @@ class PatchVisitor(ast.NodeVisitor):
         #
         # ``new=`` 가 지정된 decorator 는 slot 매핑에서 완전 제외한다 (skip).
         # 그 외 (no new / new_callable=) 는 매핑 대상으로 보존.
-        patch_decos_innermost_first: list[ast.Call] = []
+        method_patch_decos_innermost_first: list[ast.Call] = []
         for deco in reversed(decorators):
             if not isinstance(deco, ast.Call):
                 continue
@@ -358,13 +442,20 @@ class PatchVisitor(ast.NodeVisitor):
                 # ``new=`` 지정 patch 는 mock arg 를 주입하지 않으므로 slot 매핑
                 # 자체에서 제외한다. (Python 실제 주입 규칙)
                 continue
-            patch_decos_innermost_first.append(deco)
+            method_patch_decos_innermost_first.append(deco)
+
+        # 2b) class decorator stack (innermost-first, ``new=`` 제외) 을 method
+        # decorator slot 뒤에 append. enclosing class 가 있을 때만 적용 (attempt
+        # 5 finding 2).
+        all_patch_decos = list(method_patch_decos_innermost_first)
+        if self._class_decorator_stack:
+            all_patch_decos.extend(self._class_decorator_stack[-1])
 
         # 3) 각 decorator 를 positional_args 의 앞부터 매핑하면서 alias 검사.
         # 이 단계에 도달한 decorator 는 모두 mock arg slot 을 소비한다
         # (no new + with-or-without new_callable). allowlist 밖 target 도
         # slot 은 소비되지만 검사 대상이 아니라 alias 검증을 건너뛴다.
-        for idx, deco in enumerate(patch_decos_innermost_first):
+        for idx, deco in enumerate(all_patch_decos):
             if idx >= len(positional_args):
                 # 함수 시그니처에 mock arg 가 모자라면 매핑 불가 — 정적 매핑 한계.
                 break
@@ -767,6 +858,24 @@ class PatchVisitor(ast.NodeVisitor):
                         ),
                     )
                 )
+                return
+            # codex review attempt 5 finding 1: production positional args 를
+            # stub 이 받지 못하면 호출 시 TypeError.
+            signature = self.allowlist[target]
+            mismatch = self._stub_positional_arity_mismatch(stub, signature)
+            if mismatch is not None:
+                self.violations.append(
+                    Violation(
+                        path=self.path,
+                        lineno=call.lineno,
+                        kind="async-stub-positional-arity-mismatch",
+                        target=target,
+                        detail=(
+                            f"new={new_value.id} — {mismatch}. "
+                            "mock_*_factory 사용 권장."
+                        ),
+                    )
+                )
 
     @staticmethod
     def _stub_is_ctxmgr(stub: ast.AsyncFunctionDef) -> bool:
@@ -793,6 +902,78 @@ class PatchVisitor(ast.NodeVisitor):
                 return True
         return False
 
+    @staticmethod
+    def _stub_positional_arity_mismatch(
+        stub: ast.AsyncFunctionDef, signature: FactorySignature
+    ) -> str | None:
+        """stub 이 production 의 positional/kwonly args 를 받지 못하면 mismatch
+        사유 문자열을, 호환되면 ``None`` 을 반환한다 (codex review attempt 5
+        finding 1).
+
+        호환 조건:
+
+        * stub 이 ``*args`` 를 가지면 production positional 을 모두 swallow → OK.
+        * 그 외에는 stub 의 positional (posonly+args) 이름이 production positional
+          이름을 같은 순서로 prefix 로 포함해야 한다.
+          (production 은 stub 을 positional 로 그대로 forward 하므로 이름
+          매칭이 아닌 arity + 순서 매칭이 필요. 하지만 ``ctx`` 처럼 production
+          이 kwarg 로 부르는 경우는 별도 분기.)
+        * production 이 ``ctx`` 를 첫 posarg 로 정의하면 stub 도 ctx 만 받으면
+          호환 (이 경우 production 호출은 ``await factory(ctx=...)`` 또는
+          ``await factory(ctx)`` 둘 다 가능).
+        * production 의 kwonly args (예: ``ctx`` kwarg-only) 는 ``_stub_accepts_
+          ctx_kwarg`` 가 별도 검사하므로 본 함수에서는 positional 만 검증.
+
+        반환: ``None`` (호환) 또는 mismatch reason string.
+        """
+        # stub 이 *args 면 모든 positional swallow — OK.
+        if stub.args.vararg is not None:
+            return None
+
+        stub_positional = [a.arg for a in stub.args.posonlyargs] + [
+            a.arg for a in stub.args.args
+        ]
+        prod_positional = list(signature.positional_args)
+
+        # production 이 positional 0 (e.g. ``account._create_account_service()``
+        # ctx 없음 케이스는 없지만 일반화) 면 검사 불요.
+        if not prod_positional:
+            return None
+
+        # stub positional arity 가 부족하면 호출 시 TypeError.
+        # ``ctx`` 가 production 의 첫 positional 이면 stub 의 ``ctx=`` kwarg-only
+        # 도 호환으로 인정한다 (``_create_services(ctx=ctx)`` 호출이 가능).
+        # 따라서 다음 규칙:
+        #
+        #   * prod_positional 의 모든 이름이 stub_positional 의 동일 순서 prefix
+        #     로 등장하면 OK.
+        #   * 또는 prod_positional 이 정확히 ``['ctx']`` 인 경우, stub 이 ctx
+        #     를 (positional or kwonly) 받으면 OK (production 이 ``ctx=ctx`` 로
+        #     호출 가능).
+        if (
+            len(prod_positional) == 1
+            and prod_positional[0] == "ctx"
+            and PatchVisitor._stub_accepts_ctx_kwarg(stub)
+        ):
+            return None
+
+        # 일반 케이스: stub_positional prefix 가 prod_positional 과 일치해야 함.
+        if len(stub_positional) < len(prod_positional):
+            return (
+                f"production positional args {prod_positional} 중 "
+                f"{prod_positional[len(stub_positional) :]} 을(를) stub 이 받지 "
+                "못한다 (stub positional arity 부족)"
+            )
+        for i, prod_name in enumerate(prod_positional):
+            if stub_positional[i] != prod_name:
+                return (
+                    f"production positional args {prod_positional} 와 stub "
+                    f"positional {stub_positional[: len(prod_positional)]} "
+                    "이름이 일치하지 않는다 (호출 시 positional forward 가 "
+                    "기대 이름과 어긋남)"
+                )
+        return None
+
     def _check_side_effect_stub(
         self, side_effect_value: ast.expr, call: ast.Call, target: str
     ) -> None:
@@ -818,7 +999,8 @@ class PatchVisitor(ast.NodeVisitor):
                     ),
                 )
             )
-        elif not self._stub_is_ctxmgr(stub):
+            return
+        if not self._stub_is_ctxmgr(stub):
             # production 은 ``async with`` 진입이라 단순 coroutine 도 fail.
             self.violations.append(
                 Violation(
@@ -830,6 +1012,24 @@ class PatchVisitor(ast.NodeVisitor):
                         f"side_effect={side_effect_value.id} — async def stub 은 "
                         "async ctxmgr 가 아니라 coroutine 을 반환한다. "
                         "@asynccontextmanager 변환 또는 mock_*_factory 권장."
+                    ),
+                )
+            )
+            return
+        # codex review attempt 5 finding 1: production positional args 호환성도
+        # ``side_effect=`` stub 에 동일하게 적용.
+        signature = self.allowlist[target]
+        mismatch = self._stub_positional_arity_mismatch(stub, signature)
+        if mismatch is not None:
+            self.violations.append(
+                Violation(
+                    path=self.path,
+                    lineno=call.lineno,
+                    kind="async-stub-side-effect-positional-arity-mismatch",
+                    target=target,
+                    detail=(
+                        f"side_effect={side_effect_value.id} — {mismatch}. "
+                        "mock_*_factory 사용 권장."
                     ),
                 )
             )
@@ -887,7 +1087,7 @@ class PatchVisitor(ast.NodeVisitor):
                     )
 
 
-def scan_file(path: Path, allowlist: set[str]) -> list[Violation]:
+def scan_file(path: Path, allowlist: dict[str, FactorySignature]) -> list[Violation]:
     try:
         tree = ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
@@ -902,7 +1102,9 @@ def scan_file(path: Path, allowlist: set[str]) -> list[Violation]:
     return visitor.violations
 
 
-def scan_paths(paths: Iterable[Path], allowlist: set[str]) -> list[Violation]:
+def scan_paths(
+    paths: Iterable[Path], allowlist: dict[str, FactorySignature]
+) -> list[Violation]:
     violations: list[Violation] = []
     for root in paths:
         if root.is_file() and root.suffix == ".py":
@@ -931,7 +1133,11 @@ def main(argv: list[str] | None = None) -> int:
     allowlist = discover_async_ctxmgr_factories()
     if args.list_allowlist:
         for t in sorted(allowlist):
-            print(t)
+            sig = allowlist[t]
+            sig_repr = (
+                f"positional={list(sig.positional_args)} kwonly={list(sig.kwonly_args)}"
+            )
+            print(f"{t}  # {sig_repr}")
         print(f"# total: {len(allowlist)} (legacy denied: {sorted(LEGACY_DENY)})")
         return 0
 

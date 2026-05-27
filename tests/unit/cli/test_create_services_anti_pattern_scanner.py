@@ -35,6 +35,20 @@ Codex 브랜치 리뷰 attempt 4 finding 1/2/3 (last attempt fix):
 * Finding 3: ``_async_def_stubs`` 가 visitor 진행 중 수집되어, patch site 보다
   파일 아래쪽 stub 은 참조 불가. ``scan_file`` 이 2-pass 로 동작하도록 변경
   (pre-collect → visit).
+
+Codex 브랜치 리뷰 attempt 5 finding 1/2 (final fix):
+
+* Finding 1: target-specific stub call-signature validation. production
+  factory 의 positional/kwonly args 를 정확히 수집해 ``new=<stub>`` /
+  ``side_effect=<stub>`` 가 production positional args 를 받을 수 있는지
+  검증. 예: ``treasury._create_treasury(account_id, *, ctx=None)`` 의 stub 이
+  ``ctx=None`` 만 받으면 호출 시 TypeError → ``async-stub-positional-arity-
+  mismatch`` 위반.
+* Finding 2: class-level ``@patch(...)`` decorator 가 클래스 내 모든 test
+  method 의 body 에 mock arg 를 주입한다. method args 매핑은 ``self`` 다음
+  ``method-level decorator (innermost-first)`` → ``class-level decorator
+  (innermost-first)`` 순서. method body 의 ``mock_arg.return_value = tuple``
+  도 동일 검사 대상.
 """
 
 from __future__ import annotations
@@ -816,3 +830,281 @@ def test_patch_with_stub_defined_below_detected(
     assert len(vs) == 1, [v.format() for v in vs]
     assert vs[0].kind == "async-def-stub-not-ctxmgr"
     assert vs[0].target == TARGET
+
+
+# ── Attempt 5 Finding 1: target-specific stub call-signature validation ──────
+
+
+# treasury._create_treasury 는 ``account_id`` positional + ``*, ctx`` kwarg-only.
+# allowlist 에 들어있어 시그니처 매칭 테스트의 production 모사로 활용한다.
+TREASURY_TARGET = "ante.cli.commands.treasury._create_treasury"
+
+
+def test_stub_missing_production_positional_arg_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new=<stub>`` 의 stub 이 production 의 positional arg 를 받지 못하면
+    호출 시 ``TypeError`` 발생. scanner 가 ``async-stub-positional-arity-
+    mismatch`` 위반으로 잡아야 한다.
+
+    예: ``treasury._create_treasury(account_id, *, ctx)`` 의 stub 이 ``ctx=None``
+    만 받으면 production 이 ``stub("acc", ctx=ctx)`` 호출 시 fail.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(ctx=None):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "async-stub-positional-arity-mismatch"
+    assert vs[0].target == TREASURY_TARGET
+
+
+def test_stub_with_vararg_swallows_positional_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """stub 이 ``*args`` 를 가지면 production positional 을 모두 swallow.
+
+    이 경우 ``ctx`` 가 production 에서 kwarg-only 라도 stub 이 ``**kwargs`` /
+    ``ctx=`` kwarg 도 받으면 OK. 여기서는 ``*args, **kwargs`` 형태로 통과를
+    기대한다.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(*args, **kwargs):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_stub_with_exact_positional_match_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """stub 이 production positional args 를 같은 이름으로 정확히 받으면 통과.
+
+    treasury: ``account_id`` positional + ``ctx`` kwonly. stub 이 같은 시그니처
+    를 재현하면 호환.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(account_id, *, ctx=None):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_stub_with_ctx_only_for_ctx_first_target_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """production positional 이 단일 ``ctx`` 인 factory 의 stub 은 ``ctx=None``
+    만 받아도 OK (``await factory(ctx=ctx)`` 또는 ``factory(ctx)`` 둘 다 가능).
+
+    예: ``bot._create_services(ctx)`` 의 stub 이 ``ctx=None`` 만 받아도 호환.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(ctx=None):
+            yield (1, 2, 3, 4)
+
+        def test_x():
+            with patch("{TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_side_effect_stub_positional_arity_mismatch_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``side_effect=<stub>`` 에도 동일한 positional arity 검증 적용.
+
+    treasury 의 ``side_effect`` stub 이 ``ctx`` kwarg-only 만 받으면 ``account_id``
+    positional 누락으로 fail.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(*, ctx=None):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", side_effect=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "async-stub-side-effect-positional-arity-mismatch"
+    assert vs[0].target == TREASURY_TARGET
+
+
+# ── Attempt 5 Finding 2: class-level @patch decorator method body mapping ────
+
+
+def test_class_decorator_patch_method_body_assignment_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """class-level ``@patch("target")`` 데코레이터가 클래스 내 모든 test method
+    의 body 에 mock arg 를 주입한다 (codex review attempt 5 finding 2).
+
+    body 의 ``mock_arg.return_value = tuple`` 도 위반으로 잡아야 한다.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        class TestX:
+            def test_a(self, mock_services):
+                mock_services.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_class_decorator_stack_methods_mapped_correctly(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """다중 class-level ``@patch(...)`` decorator stack — innermost-first 매핑.
+
+    여러 method 가 같은 stack 을 공유하며, 각 method 의 self 다음 인자에
+    innermost-first 로 매핑된다.
+    """
+    other_target = next(t for t in allowlist if t.endswith(".system._create_services"))
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")              # outer
+        @patch("{other_target}")        # innermost (적용 먼저)
+        class TestX:
+            def test_a(self, mock_inner, mock_outer):
+                # innermost = other_target, outer = TARGET
+                mock_inner.return_value = (1, 2)
+                mock_outer.return_value = (1, 2, 3, 4)
+
+            def test_b(self, mock_inner, mock_outer):
+                # 별도 method 에서도 같은 매핑
+                mock_outer.return_value = (9, 9, 9, 9)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # test_a 에서 2건 + test_b 에서 1건 = 3건
+    assert len(vs) == 3, [v.format() for v in vs]
+    kinds = {v.kind for v in vs}
+    targets = {v.target for v in vs}
+    assert kinds == {"tuple-return-on-patch-decorator-alias"}
+    assert targets == {TARGET, other_target}
+
+
+def test_class_decorator_with_method_decorator_combined_mapping(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """method-level + class-level decorator 가 같이 있는 경우 매핑 순서.
+
+    method args = ``self`` + method-decorator slots (innermost-first) +
+    class-decorator slots (innermost-first).
+
+    여기서:
+
+    * method-level @patch("ipc_helpers.IPCClient") (innermost method) → mock_ipc
+    * class-level @patch("TARGET") (class decorator) → mock_services
+
+    method body 에서 ``mock_services.return_value = tuple`` 만 위반.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        class TestX:
+            @patch("ante.cli.commands.ipc_helpers.IPCClient")
+            def test_a(self, mock_ipc, mock_services):
+                mock_services.return_value = (1, 2, 3, 4)
+                mock_ipc.return_value = (9, 9)  # allowlist 밖 → 무시
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_class_decorator_with_new_kwarg_skips_slot(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """class-level ``@patch(target, new=X)`` 는 slot 자체 소비 안 함.
+
+    method args 매핑 시 class decorator slot 도 ``new=`` 면 skip 되어야 한다.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        def stub_obj():
+            ...
+
+        @patch("ante.cli.commands.unrelated.helper", new=stub_obj)  # no slot
+        @patch("{TARGET}")                                          # slot 0
+        class TestX:
+            def test_a(self, mock_services):
+                # mock_services 는 TARGET 에 매핑 (new= 가 slot 소비 안 함)
+                mock_services.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_class_decorator_non_allowlist_target_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """class decorator 가 allowlist 밖 target 이면 mock arg slot 은 소비되지만
+    위반 아님.
+    """
+    src = """
+        from unittest.mock import patch
+
+        @patch("ante.cli.commands.unrelated.helper")
+        class TestX:
+            def test_a(self, mock_helper):
+                mock_helper.return_value = (1, 2)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
