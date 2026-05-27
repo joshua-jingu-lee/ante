@@ -23,6 +23,18 @@ Codex 브랜치 리뷰 attempt 3 finding 1:
   ``mock_cs.return_value = tuple`` 로 사용되는 형태 누락. decorator stack 을
   역순으로 함수 인자에 매핑한 뒤 body 의 할당을 검사한다 (innermost decorator
   → 첫 mock arg 매핑 규칙).
+
+Codex 브랜치 리뷰 attempt 4 finding 1/2/3 (last attempt fix):
+
+* Finding 1: ``new_callable=MagicMock + return_value=tuple`` (그리고 generic
+  ``Mock``/custom callable) 누락. ``AsyncMock`` 외 callable 도 ``return_value=
+  tuple`` 이면 동일 anti-pattern 으로 catch.
+* Finding 2: decorator stack mock arg slot 매핑이 Python ``patch`` 실제 주입
+  규칙과 불일치. ``new=`` 는 slot 자체 소비 안 함 (skip). ``new_callable=`` 은
+  slot 소비 + alias 검사. ``no new/no new_callable`` 은 slot 소비 + alias 검사.
+* Finding 3: ``_async_def_stubs`` 가 visitor 진행 중 수집되어, patch site 보다
+  파일 아래쪽 stub 은 참조 불가. ``scan_file`` 이 2-pass 로 동작하도록 변경
+  (pre-collect → visit).
 """
 
 from __future__ import annotations
@@ -579,4 +591,228 @@ def test_decorator_patch_object_form_ignored(
     # patch.object 는 무시, string-target 만 1건 위반
     assert len(vs) == 1, [v.format() for v in vs]
     assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
+
+
+# ── Attempt 4 Finding 1: new_callable 비-AsyncMock variants ──────────────────
+
+
+def test_new_callable_magicmock_tuple_return_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new_callable=MagicMock + return_value=tuple`` 도 위반 — codex review
+    attempt 4 finding 1.
+
+    ``patch`` 는 ``new_callable()`` 결과에 ``return_value=tuple`` 을 설정하므로
+    callable 종류와 무관하게 동일 anti-pattern. ``AsyncMock`` 만 별도 카테고리,
+    나머지는 통합 ``tuple-return-on-patch`` 보고.
+    """
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        def test_x():
+            with patch(
+                "{TARGET}",
+                new_callable=MagicMock,
+                return_value=(1, 2, 3, 4),
+            ):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
+
+
+def test_new_callable_mock_tuple_return_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new_callable=Mock + return_value=tuple`` (generic ``Mock``) 도 위반.
+
+    Python ``unittest.mock`` 의 ``Mock`` 도 동일 메커니즘으로 ``return_value`` 가
+    호출 결과를 결정한다. scanner 는 callable identity 와 무관하게 ``return_value
+    =tuple`` 형태를 통합 catch.
+    """
+    src = f"""
+        from unittest.mock import Mock, patch
+
+        def test_x():
+            with patch(
+                "{TARGET}",
+                new_callable=Mock,
+                return_value=(1, 2, 3, 4),
+            ):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
+
+
+def test_new_callable_custom_factory_tuple_return_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new_callable=<custom_callable> + return_value=tuple`` 도 위반.
+
+    Custom factory 객체 (이름이 ``MagicMock``/``AsyncMock``/``Mock`` 아님) 에도
+    ``return_value=tuple`` 이 설정되면 동일 anti-pattern.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        class MyFactory:
+            pass
+
+        def test_x():
+            with patch(
+                "{TARGET}",
+                new_callable=MyFactory,
+                return_value=(1, 2, 3, 4),
+            ):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
+
+
+# ── Attempt 4 Finding 2: decorator slot mapping accuracy ────────────────────
+
+
+def test_decorator_with_new_kwarg_skips_slot(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch(target, new=X)`` 는 mock arg slot 자체를 소비하지 않는다.
+
+    codex review attempt 4 finding 2: ``new=`` 가 지정된 decorator 는 mock arg
+    를 주입하지 않으므로 후속 decorator 의 slot 매핑이 한 칸 앞당겨져야 한다.
+
+    예::
+
+        @patch("X.fn1", new=stub)        # no slot (new 지정)
+        @patch("Y.fn2")                  # slot 0 (innermost-first)
+        def test(self, mock_fn2): ...    # ← mock_fn2 가 fn2 에 매핑
+
+    여기서 ``fn2`` 가 allowlist 의 TARGET 이면 ``mock_fn2.return_value = tuple``
+    body 할당이 위반이어야 한다. 만약 scanner 가 ``new=`` slot 을 잘못 소비하면
+    mock_fn2 가 fn1 (new 지정) 에 매핑되어 위반을 놓친다.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        def stub():
+            ...
+
+        class TestX:
+            @patch("ante.cli.commands.unrelated.helper", new=stub)
+            @patch("{TARGET}")
+            def test_y(self, mock_target):
+                mock_target.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_decorator_with_new_callable_includes_slot_and_alias(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch(target, new_callable=MagicMock)`` 은 mock arg slot 소비 + alias
+    검사 대상.
+
+    codex review attempt 4 finding 2: ``new_callable=`` 은 ``new=`` 와 달리
+    mock arg 를 주입한다 (``new_callable()`` 결과). 따라서 slot 을 소비하고
+    body 의 ``alias.return_value = tuple`` 할당도 검사해야 한다.
+    """
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        class TestX:
+            @patch("{TARGET}", new_callable=MagicMock)
+            def test_y(self, mock_target):
+                mock_target.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_decorator_stack_mixed_new_and_new_callable_maps_correctly(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new=`` / ``new_callable=`` / no-new 혼합 stack 의 slot 매핑 정확성.
+
+    codex review attempt 4 finding 2 — 종합 케이스::
+
+        @patch("U.fn0", new=stub_obj)            # no slot
+        @patch("V.fn1", new_callable=MagicMock)  # slot 0
+        @patch("TARGET")                         # slot 1 (innermost-first)
+        def test(self, mock_target, mock_fn1): ...
+
+    ``mock_target`` → ``TARGET`` (innermost), ``mock_fn1`` → V.fn1.
+    body 에서 ``mock_target.return_value = tuple`` 이 위반.
+    """
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        def stub_obj():
+            ...
+
+        class TestX:
+            @patch("ante.cli.commands.unrelated.helper_a", new=stub_obj)
+            @patch("ante.cli.commands.unrelated.helper_b", new_callable=MagicMock)
+            @patch("{TARGET}")
+            def test_y(self, mock_target, mock_fn1):
+                mock_target.return_value = (1, 2, 3, 4)
+                mock_fn1.return_value = (9, 9)  # allowlist 밖 → 무시
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # 오직 TARGET 의 alias body 할당만 위반 (다른 두 patch 는 allowlist 밖)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+# ── Attempt 4 Finding 3: 2-pass stub collection (file order independence) ────
+
+
+def test_patch_with_stub_defined_below_detected(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new=<stub>`` 의 stub 정의가 patch site 보다 파일 아래에 있어도 검출.
+
+    codex review attempt 4 finding 3: scanner 가 ``visitor.visit(tree)`` 진행
+    중 stub 을 수집하면 patch site 검사 시점에 아직 등록되지 않아 위반을 놓친다.
+    ``scan_file`` 이 2-pass 로 동작하면 (pre-collect → visit) 파일 순서와
+    무관하게 stub 참조가 resolve 된다.
+
+    여기서는 ``_stub_below`` 가 ``@asynccontextmanager`` 도 아니고 ``ctx=`` kwarg
+    도 받지 않으므로 ``async-def-stub-not-ctxmgr`` 위반이어야 한다.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        def test_x():
+            with patch("{TARGET}", new=_stub_below):
+                pass
+
+        async def _stub_below():
+            # async ctxmgr 가 아니라 단순 coroutine.
+            return (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # _stub_below 가 ctxmgr 가 아니므로 위반 1건 검출.
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "async-def-stub-not-ctxmgr"
     assert vs[0].target == TARGET

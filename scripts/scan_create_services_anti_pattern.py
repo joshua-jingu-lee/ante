@@ -110,11 +110,30 @@ KNOWN-LIMITATION (정적 분석 범위 한계)
 
 * ``with patch(...) as alias: alias.return_value = tuple``
 * ``with patch(...)`` (1-positional + ``return_value=tuple`` kwarg)
-* ``with patch(..., new_callable=MagicMock/AsyncMock, return_value=tuple)``
+* ``with patch(..., new_callable=<callable>, return_value=tuple)``
+  (codex review attempt 4 finding 1: ``AsyncMock``/``MagicMock``/generic
+  ``Mock``/custom callable 모두 catch. ``AsyncMock`` 만 별도 카테고리,
+  나머지는 통합 ``tuple-return-on-patch`` 보고.)
 * ``with patch(target, MagicMock/AsyncMock(return_value=tuple))`` (2-positional
   ``new``)
 * ``@patch(...)`` 데코레이터 (위 모든 형태 + decorated FunctionDef body 의
   ``mock_arg.return_value = tuple`` 할당)
+
+Decorator stack 의 mock arg slot 매핑은 Python ``unittest.mock.patch`` 실제
+주입 규칙과 정렬한다 (codex review attempt 4 finding 2):
+
+* ``@patch(target)`` (no new/new_callable): mock arg 주입 → slot 소비 + alias 검사
+* ``@patch(target, new=X)``: mock arg 주입 안 됨 → slot 자체 소비 안 함 (skip)
+* ``@patch(target, new_callable=Cls)``: mock arg 주입 → slot 소비 + alias 검사
+
+또한 ``scan_file`` 은 2-pass 로 동작한다 (codex review attempt 4 finding 3):
+
+1. Pass 1 — ``ast.walk(tree)`` 로 모든 ``AsyncFunctionDef`` 를 pre-collect 하여
+   ``_async_def_stubs`` 에 등록한다.
+2. Pass 2 — ``visitor.visit(tree)`` 로 patch site 를 검사한다.
+
+따라서 ``new=<stub>`` / ``side_effect=<stub>`` 의 stub 정의가 patch site 보다
+파일 아래쪽에 있어도 정확히 resolve 된다.
 
 다음은 본 scanner 범위 밖 (정적 분석으로는 catch 불가, follow-up 분리):
 
@@ -219,11 +238,26 @@ class PatchVisitor(ast.NodeVisitor):
         self.path = path
         self.allowlist = allowlist
         self.violations: list[Violation] = []
-        # async ctxmgr stubs (name -> bool indicating ctx kwarg accepted)
-        # multi-pass: 1st pass collect stubs, 2nd pass analyze patch sites.
+        # async ctxmgr stubs (name -> AsyncFunctionDef node).
+        # 2-pass scan (codex review attempt 4 finding 3): ``scan_file`` 이
+        # ``ast.walk`` 로 모든 ``AsyncFunctionDef`` 를 pre-collect 한 후
+        # ``visitor.visit(tree)`` 로 patch site 검사를 수행한다. 이로써 파일 아래
+        # 쪽에 정의된 async def stub 도 위쪽 patch site 검사에서 보인다.
         self._async_def_stubs: dict[str, ast.AsyncFunctionDef] = {}
 
+    def prepare_async_def_stubs(self, tree: ast.AST) -> None:
+        """Pass 1 (pre-visit): 트리 전체에서 ``AsyncFunctionDef`` 를 수집한다.
+
+        ``scan_file`` 이 ``visitor.visit(tree)`` 호출 직전에 한 번 호출하여,
+        patch site 검사 시 파일 순서와 무관하게 stub 참조가 보이도록 한다.
+        """
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef):
+                self._async_def_stubs[node.name] = node
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        # pre-collect 단계에서 이미 등록되었으므로 중복 등록 불요.
+        # (defensive: 재진입에도 안전하도록 동일 키 덮어쓰기 허용)
         self._async_def_stubs[node.name] = node
         self._check_decorator_list(node.decorator_list, function_node=node)
         self.generic_visit(node)
@@ -302,36 +336,41 @@ class PatchVisitor(ast.NodeVisitor):
             positional_args = positional_args[1:]
 
         # 2) decorator_list 역순 → 매핑 대상 patch decorator 만 필터.
-        # ``new=`` 또는 ``new_callable=`` 이 지정된 patch 는 mock arg 주입 안함.
+        # Python ``unittest.mock.patch`` 의 mock arg 주입 규칙 (codex review
+        # attempt 4 finding 2 정정):
+        #
+        #   * ``@patch(target)`` (no new/new_callable): mock arg **주입**
+        #   * ``@patch(target, new=X)``: mock arg **주입 안 함** (X 그대로 사용)
+        #     → slot 자체를 소비 안 함
+        #   * ``@patch(target, new_callable=Cls)``: mock arg **주입** (Cls() 결과)
+        #     → slot 소비 + alias 매핑/검사 대상
+        #
+        # ``new=`` 가 지정된 decorator 는 slot 매핑에서 완전 제외한다 (skip).
+        # 그 외 (no new / new_callable=) 는 매핑 대상으로 보존.
         patch_decos_innermost_first: list[ast.Call] = []
         for deco in reversed(decorators):
             if not isinstance(deco, ast.Call):
                 continue
             if not self._is_patch_call(deco):
                 continue
-            target = self._extract_patch_target(deco)
-            if target is None or target not in self.allowlist:
-                # allowlist 밖이거나 ``patch.object`` 등은 스킵.
-                # 단, 매핑 슬롯은 소비한다 (Python 은 allowlist 와 무관하게
-                # 무조건 mock 을 inject 하기 때문). 다만 우리가 검사할 의미가
-                # 없으므로 alias 등록 없이 슬롯만 진행.
-                # → mock arg 슬롯은 소비되었지만 검사 대상이 아니므로 placeholder
-                # 매핑은 None 으로 둔다.
-                patch_decos_innermost_first.append(deco)
+            new_value, _new_callable_value, _, _ = self._extract_patch_kwargs(deco)
+            if new_value is not None:
+                # ``new=`` 지정 patch 는 mock arg 를 주입하지 않으므로 slot 매핑
+                # 자체에서 제외한다. (Python 실제 주입 규칙)
                 continue
             patch_decos_innermost_first.append(deco)
 
-        # 3) 각 decorator 를 positional_args 의 앞부터 매핑하면서 alias 검사
+        # 3) 각 decorator 를 positional_args 의 앞부터 매핑하면서 alias 검사.
+        # 이 단계에 도달한 decorator 는 모두 mock arg slot 을 소비한다
+        # (no new + with-or-without new_callable). allowlist 밖 target 도
+        # slot 은 소비되지만 검사 대상이 아니라 alias 검증을 건너뛴다.
         for idx, deco in enumerate(patch_decos_innermost_first):
             if idx >= len(positional_args):
                 # 함수 시그니처에 mock arg 가 모자라면 매핑 불가 — 정적 매핑 한계.
                 break
-            new_value, new_callable_value, _, _ = self._extract_patch_kwargs(deco)
-            # new / new_callable 이 지정되면 mock arg 주입 안 됨 → alias 없음
-            if new_value is not None or new_callable_value is not None:
-                continue
             target = self._extract_patch_target(deco)
             if target is None or target not in self.allowlist:
+                # slot 은 소비되었지만 검사 대상이 아님.
                 continue
             alias = positional_args[idx].arg
             self._check_function_body_alias_tuple_return(
@@ -438,11 +477,19 @@ class PatchVisitor(ast.NodeVisitor):
             side_effect_kwarg,
         ) = self._extract_patch_kwargs(call)
 
-        # Case A: new_callable=AsyncMock + return_value=tuple
-        if new_callable_value is not None and return_value_kwarg is not None:
-            if self._is_asyncmock(new_callable_value) and self._is_tuple_or_list(
-                return_value_kwarg
-            ):
+        # Case A: new_callable=<callable> + return_value=tuple
+        # codex review attempt 4 finding 1: ``new_callable`` 은 ``AsyncMock`` 만이
+        # 아니라 ``MagicMock``, generic ``Mock``, 그 외 callable factory 모두 가능.
+        # ``patch`` 는 ``new_callable()`` 결과에 ``return_value=tuple`` 을 설정
+        # 하므로 callable 종류에 무관하게 동일 anti-pattern 이다.
+        # ``AsyncMock`` 인 경우만 카테고리를 분리해 보고하고, 그 외는 통합
+        # ``tuple-return-on-patch`` 로 보고한다 (출력 카테고리 일관성).
+        if (
+            new_callable_value is not None
+            and return_value_kwarg is not None
+            and self._is_tuple_or_list(return_value_kwarg)
+        ):
+            if self._is_asyncmock(new_callable_value):
                 self.violations.append(
                     Violation(
                         path=self.path,
@@ -457,6 +504,21 @@ class PatchVisitor(ast.NodeVisitor):
                     )
                 )
                 return
+            # 그 외 callable (MagicMock / Mock / custom factory) — 통합 카테고리
+            self.violations.append(
+                Violation(
+                    path=self.path,
+                    lineno=call.lineno,
+                    kind="tuple-return-on-patch",
+                    target=target,
+                    detail=(
+                        "new_callable=<callable> + return_value=tuple — "
+                        "callable() 결과가 tuple 을 반환해 async with 가 동작 "
+                        "하지 않는다. mock_*_factory(...) 사용 권장."
+                    ),
+                )
+            )
+            return
 
         # Case A': default MagicMock + return_value=tuple (no new/new_callable)
         # ``patch(target, return_value=(db, ...))`` 형태. default MagicMock 이
@@ -831,6 +893,11 @@ def scan_file(path: Path, allowlist: set[str]) -> list[Violation]:
     except SyntaxError:
         return []
     visitor = PatchVisitor(path, allowlist)
+    # 2-pass scan (codex review attempt 4 finding 3): pre-collect async def
+    # stubs across the entire tree before traversing patch sites, so that
+    # ``new=<stub_name>`` / ``side_effect=<stub_name>`` references can resolve
+    # regardless of file order.
+    visitor.prepare_async_def_stubs(tree)
     visitor.visit(tree)
     return visitor.violations
 
