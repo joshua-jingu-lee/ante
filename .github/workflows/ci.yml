@@ -76,6 +76,10 @@ jobs:
       - lint
       - test
       - docker-build
+    if: always()
     steps:
-      - name: CI gate passed
-        run: echo "ci passed"
+      - name: CI gate
+        run: |
+          for r in "${{ needs.lint.result }}" "${{ needs.test.result }}" "${{ needs.docker-build.result }}"; do
+            [ "$r" = "success" ] || { echo "Upstream job failed: $r"; exit 1; }
+          done
