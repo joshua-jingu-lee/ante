@@ -12,6 +12,10 @@ from click.testing import CliRunner
 from ante.account.models import Account, AccountStatus, TradingMode
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.cli.conftest import (
+    mock_bot_services_factory,
+    mock_treasury_factory,
+)
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -146,13 +150,12 @@ class TestBotListAccountFilter:
         mock_db = _make_mock_db(bot_rows)
         mock_account_svc = _make_mock_account_service()
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                mock_db,
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), mock_account_svc
+            ),
+        ):
             result = runner.invoke(cli, ["bot", "list", "--account", "domestic"])
 
         assert result.exit_code == 0
@@ -165,13 +168,12 @@ class TestBotListAccountFilter:
         mock_db = _make_mock_db([])
         mock_account_svc = _make_mock_account_service()
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                mock_db,
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), mock_account_svc
+            ),
+        ):
             result = runner.invoke(cli, ["bot", "list"])
 
         assert result.exit_code == 0
@@ -194,13 +196,12 @@ class TestBotListAccountFilter:
         mock_db = _make_mock_db(bot_rows)
         mock_account_svc = _make_mock_account_service()
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                mock_db,
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), mock_account_svc
+            ),
+        ):
             result = runner.invoke(
                 cli, ["--format", "json", "bot", "list", "--account", "domestic"]
             )
@@ -262,19 +263,18 @@ class TestBotCreateAccountOption:
         }
 
         with (
-            patch("ante.cli.commands.bot._create_services") as mock_cs,
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new=mock_bot_services_factory(
+                    _make_mock_db(), MagicMock(), MagicMock(), mock_account_svc
+                ),
+            ),
             patch(
                 "ante.cli.commands.ipc_helpers.get_socket_path",
                 return_value="/tmp/test.sock",
             ),
             patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
-            mock_cs.return_value = (
-                _make_mock_db(),
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
             result = runner.invoke(
                 cli,
                 ["bot", "create", "--name", "테스트봇", "--strategy", "s1"],
@@ -294,13 +294,12 @@ class TestBotCreateAccountOption:
             [_MOCK_ACCOUNT_1, _MOCK_ACCOUNT_2]
         )
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                _make_mock_db(),
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                _make_mock_db(), MagicMock(), MagicMock(), mock_account_svc
+            ),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -324,13 +323,12 @@ class TestBotCreateAccountOption:
         """계좌 미지정 + 활성 계좌 0개 → BOT_MISSING_REQUIRED_ACCOUNT 에러."""
         mock_account_svc = _make_mock_account_service([])
 
-        with patch("ante.cli.commands.bot._create_services") as mock_cs:
-            mock_cs.return_value = (
-                _make_mock_db(),
-                MagicMock(),
-                MagicMock(),
-                mock_account_svc,
-            )
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                _make_mock_db(), MagicMock(), MagicMock(), mock_account_svc
+            ),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -433,14 +431,19 @@ class TestTreasuryStatusAccount:
         mock_treasury.initialize = AsyncMock()
         mock_db = _make_mock_db()
 
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_ct:
-            mock_ct.return_value = (mock_treasury, mock_db)
+        with patch(
+            "ante.cli.commands.treasury._create_treasury",
+            side_effect=mock_treasury_factory(mock_treasury, mock_db),
+        ) as mock_ct:
             result = runner.invoke(cli, ["treasury", "status", "--account", "domestic"])
 
         assert result.exit_code == 0
         assert "10,000,000" in result.output
-        # _create_treasury가 account_id와 함께 호출됨
-        mock_ct.assert_called_once_with("domestic")
+        # _create_treasury가 account_id와 함께 호출됨 (production: positional
+        # account_id + ctx kwarg).
+        mock_ct.assert_called_once()
+        call_args = mock_ct.call_args
+        assert call_args.args[:1] == ("domestic",)
 
     def test_treasury_status_without_account(self, runner):
         """--account 미지정 시 Click usage error (필수 옵션)."""
@@ -458,8 +461,10 @@ class TestTreasuryStatusAccount:
         mock_treasury.initialize = AsyncMock()
         mock_db = _make_mock_db()
 
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_ct:
-            mock_ct.return_value = (mock_treasury, mock_db)
+        with patch(
+            "ante.cli.commands.treasury._create_treasury",
+            side_effect=mock_treasury_factory(mock_treasury, mock_db),
+        ) as mock_ct:
             result = runner.invoke(cli, ["treasury", "status"])
 
         # #1217: --account가 required이므로 missing option은 usage error(2)
@@ -482,8 +487,10 @@ class TestTreasuryStatusAccount:
         mock_treasury.initialize = AsyncMock()
         mock_db = _make_mock_db()
 
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_ct:
-            mock_ct.return_value = (mock_treasury, mock_db)
+        with patch(
+            "ante.cli.commands.treasury._create_treasury",
+            side_effect=mock_treasury_factory(mock_treasury, mock_db),
+        ):
             result = runner.invoke(
                 cli,
                 ["--format", "json", "treasury", "status", "--account", "domestic"],

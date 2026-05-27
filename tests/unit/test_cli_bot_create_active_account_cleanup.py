@@ -234,10 +234,19 @@ class TestBotCreateAccountListRaisesCleanup:
         account_service.list = AsyncMock(side_effect=RuntimeError("boom"))
 
         # #1857: ``bot._create_services`` async context manager 전환.
+        # #1900: production 은 ``ctx=`` kwarg-only 로 호출하므로 stub 도 그
+        # 시그니처를 정확히 모사한다. 본 테스트는 #1799 cleanup invariant
+        # 검증 — production 의 ``open_cli_db`` 가 보장하는 db.close 호출을
+        # mock 레벨에서 재현하기 위해 inline stub 을 유지한다 (shared
+        # ``mock_bot_services_factory`` 는 db.close 를 호출하지 않으며,
+        # 이는 production cleanup 이 helper 가 아닌 ``open_cli_db`` 에서
+        # 일어나기 때문이다).
         from contextlib import asynccontextmanager
 
+        import click as _click
+
         @asynccontextmanager
-        async def _create_services_mock(*args, **kwargs):
+        async def _create_services_mock(*, ctx: _click.Context | None = None):
             try:
                 yield db, MagicMock(), MagicMock(), account_service
             finally:

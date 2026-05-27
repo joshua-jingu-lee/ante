@@ -11,6 +11,13 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.cli.conftest import (
+    mock_bot_services_factory,
+    mock_rule_engine_factory,
+    mock_system_services_factory,
+    mock_trade_service_factory,
+    mock_treasury_factory,
+)
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -86,12 +93,14 @@ class TestSystemCommands:
         return mock_svc
 
     def test_system_status(self, runner):
-        with patch("ante.cli.commands.system._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_one = AsyncMock(return_value={"cnt": 3})
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock())
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"cnt": 3})
+        mock_db.close = AsyncMock()
 
+        with patch(
+            "ante.cli.commands.system._create_services",
+            new=mock_system_services_factory(mock_db, MagicMock()),
+        ):
             with patch(
                 "ante.account.service.AccountService",
                 return_value=self._mock_account_service(suspended=False),
@@ -101,12 +110,14 @@ class TestSystemCommands:
                 assert "active" in result.output
 
     def test_system_status_json(self, runner):
-        with patch("ante.cli.commands.system._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_one = AsyncMock(return_value={"cnt": 2})
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock())
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value={"cnt": 2})
+        mock_db.close = AsyncMock()
 
+        with patch(
+            "ante.cli.commands.system._create_services",
+            new=mock_system_services_factory(mock_db, MagicMock()),
+        ):
             with patch(
                 "ante.account.service.AccountService",
                 return_value=self._mock_account_service(suspended=False),
@@ -175,33 +186,39 @@ class TestSystemCommands:
 
 class TestBotCommands:
     def test_bot_list_empty(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_all = AsyncMock(return_value=[])
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
-
+        mock_db = AsyncMock()
+        mock_db.fetch_all = AsyncMock(return_value=[])
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), MagicMock()
+            ),
+        ):
             result = runner.invoke(cli, ["bot", "list"])
             assert result.exit_code == 0
 
     def test_bot_list_with_data(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_all = AsyncMock(
-                return_value=[
-                    {
-                        "bot_id": "bot-1",
-                        "name": "테스트봇",
-                        "strategy_id": "stg-1",
-                        "account_id": "test",
-                        "status": "created",
-                        "created_at": "2026-01-01",
-                    }
-                ]
-            )
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
-
+        mock_db = AsyncMock()
+        mock_db.fetch_all = AsyncMock(
+            return_value=[
+                {
+                    "bot_id": "bot-1",
+                    "name": "테스트봇",
+                    "strategy_id": "stg-1",
+                    "account_id": "test",
+                    "status": "created",
+                    "created_at": "2026-01-01",
+                }
+            ]
+        )
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), MagicMock()
+            ),
+        ):
             result = runner.invoke(cli, ["--format", "json", "bot", "list"])
             assert result.exit_code == 0
             data = json.loads(result.output)
@@ -209,36 +226,42 @@ class TestBotCommands:
             assert data["bots"][0]["bot_id"] == "bot-1"
 
     def test_bot_info_not_found(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_one = AsyncMock(return_value=None)
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
-
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(return_value=None)
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), MagicMock()
+            ),
+        ):
             result = runner.invoke(cli, ["bot", "info", "nonexistent"])
             # #1515: missing-resource는 ctx.exit(1)로 non-zero exit
             assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
 
     def test_bot_info_found(self, runner):
-        with patch("ante.cli.commands.bot._create_services") as mock_svc:
-            mock_db = AsyncMock()
-            mock_db.fetch_one = AsyncMock(
-                return_value={
-                    "bot_id": "bot-1",
-                    "name": "테스트봇",
-                    "strategy_id": "stg-1",
-                    "account_id": "test",
-                    "status": "running",
-                    "created_at": "2026-01-01",
-                    "config_json": "{}",
-                    "auto_start": 0,
-                    "updated_at": "2026-01-01",
-                }
-            )
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_db, MagicMock(), MagicMock(), MagicMock())
-
+        mock_db = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            return_value={
+                "bot_id": "bot-1",
+                "name": "테스트봇",
+                "strategy_id": "stg-1",
+                "account_id": "test",
+                "status": "running",
+                "created_at": "2026-01-01",
+                "config_json": "{}",
+                "auto_start": 0,
+                "updated_at": "2026-01-01",
+            }
+        )
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.bot._create_services",
+            new=mock_bot_services_factory(
+                mock_db, MagicMock(), MagicMock(), MagicMock()
+            ),
+        ):
             result = runner.invoke(cli, ["bot", "info", "bot-1"])
             assert result.exit_code == 0
             assert "bot-1" in result.output
@@ -280,13 +303,14 @@ class TestBotCommands:
 
 class TestTradeCommands:
     def test_trade_list_empty(self, runner):
-        with patch("ante.cli.commands.trade._create_trade_service") as mock_svc:
-            mock_service = AsyncMock()
-            mock_service.get_trades = AsyncMock(return_value=[])
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_service, mock_db)
-
+        mock_service = AsyncMock()
+        mock_service.get_trades = AsyncMock(return_value=[])
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.trade._create_trade_service",
+            new=mock_trade_service_factory(mock_service, mock_db),
+        ):
             result = runner.invoke(cli, ["trade", "list"])
             assert result.exit_code == 0
 
@@ -295,10 +319,18 @@ class TestTradeCommands:
 
         이전 버전에서는 EventBus를 잘못된 인자로 전달하여 hang이 발생했다.
         Refs #642.
+
+        #1857 이후 ``_create_trade_service`` 는 ``@asynccontextmanager`` async
+        ctxmgr 이므로 ``async with`` 로 진입한다 (#1900 sweep — 이전 ``asyncio.run
+        (_create_trade_service())`` 호출은 ``_AsyncGeneratorContextManager`` 객체를
+        coroutine 으로 오인해 ValueError 로 fail 했다).
         """
         import asyncio
 
+        import click
+
         with (
+            patch("ante.cli.main.get_db_path", return_value=":memory:"),
             patch("ante.core.database.Database") as mock_db_cls,
             patch("ante.trade.position.PositionHistory") as mock_ph_cls,
             patch("ante.trade.recorder.TradeRecorder") as mock_rec_cls,
@@ -307,6 +339,7 @@ class TestTradeCommands:
         ):
             mock_db = AsyncMock()
             mock_db.connect = AsyncMock()
+            mock_db.close = AsyncMock()
             mock_db_cls.return_value = mock_db
 
             mock_ph = AsyncMock()
@@ -325,7 +358,14 @@ class TestTradeCommands:
 
             from ante.cli.commands.trade import _create_trade_service
 
-            service, db = asyncio.run(_create_trade_service())
+            async def _drive() -> None:
+                # ctx 을 만들어 ``open_cli_db`` 가 silent fallback 으로 raise
+                # 하지 않도록 한다.
+                ctx = click.Context(click.Command("test"))
+                async with _create_trade_service(ctx=ctx) as (_svc, db):
+                    assert db is mock_db
+
+            asyncio.run(_drive())
 
             # PositionHistory는 db만 받아야 한다
             mock_ph_cls.assert_called_once_with(db=mock_db)
@@ -353,43 +393,45 @@ class TestTradeCommands:
 
 class TestTreasuryCommands:
     def test_treasury_status(self, runner):
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_svc:
-            mock_treasury = MagicMock()
-            mock_treasury.get_summary.return_value = {
-                "account_balance": 10000000.0,
-                "purchasable_amount": 8000000.0,
-                "total_evaluation": 12000000.0,
-                "total_profit_loss": 200000.0,
-                "total_allocated": 5000000.0,
-                "total_reserved": 100000.0,
-                "unallocated": 5000000.0,
-                "bot_count": 2,
-            }
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_treasury, mock_db)
-
+        mock_treasury = MagicMock()
+        mock_treasury.get_summary.return_value = {
+            "account_balance": 10000000.0,
+            "purchasable_amount": 8000000.0,
+            "total_evaluation": 12000000.0,
+            "total_profit_loss": 200000.0,
+            "total_allocated": 5000000.0,
+            "total_reserved": 100000.0,
+            "unallocated": 5000000.0,
+            "bot_count": 2,
+        }
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.treasury._create_treasury",
+            new=mock_treasury_factory(mock_treasury, mock_db),
+        ):
             result = runner.invoke(cli, ["treasury", "status", "--account", "domestic"])
             assert result.exit_code == 0
             assert "10,000,000" in result.output
 
     def test_treasury_status_json(self, runner):
-        with patch("ante.cli.commands.treasury._create_treasury") as mock_svc:
-            mock_treasury = MagicMock()
-            mock_treasury.get_summary.return_value = {
-                "account_balance": 10000000.0,
-                "purchasable_amount": 8000000.0,
-                "total_evaluation": 12000000.0,
-                "total_profit_loss": 200000.0,
-                "total_allocated": 5000000.0,
-                "total_reserved": 100000.0,
-                "unallocated": 5000000.0,
-                "bot_count": 2,
-            }
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_treasury, mock_db)
-
+        mock_treasury = MagicMock()
+        mock_treasury.get_summary.return_value = {
+            "account_balance": 10000000.0,
+            "purchasable_amount": 8000000.0,
+            "total_evaluation": 12000000.0,
+            "total_profit_loss": 200000.0,
+            "total_allocated": 5000000.0,
+            "total_reserved": 100000.0,
+            "unallocated": 5000000.0,
+            "bot_count": 2,
+        }
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.treasury._create_treasury",
+            new=mock_treasury_factory(mock_treasury, mock_db),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -495,32 +537,34 @@ class TestRuleCommands:
         return mock_db
 
     def test_rule_list_empty(self, runner):
-        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=True)
-            mock_svc.return_value = (mock_engine, mock_db)
-
+        mock_engine = MagicMock()
+        mock_engine._global_rules = []
+        mock_engine._strategy_rules = {}
+        mock_db = self._make_mock_db(account_exists=True)
+        with patch(
+            "ante.cli.commands.rule._create_rule_engine",
+            new=mock_rule_engine_factory(mock_engine, mock_db),
+        ):
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(cli, ["rule", "list", "--account", "acc-1"])
                 assert result.exit_code == 0
 
     def test_rule_list_with_rules(self, runner):
-        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_rule = MagicMock()
-            mock_rule.rule_id = "daily_loss"
-            mock_rule.name = "Daily Loss Limit"
-            mock_rule.enabled = True
-            mock_rule.priority = 0
-            mock_rule.description = "Daily loss limit rule"
+        mock_rule = MagicMock()
+        mock_rule.rule_id = "daily_loss"
+        mock_rule.name = "Daily Loss Limit"
+        mock_rule.enabled = True
+        mock_rule.priority = 0
+        mock_rule.description = "Daily loss limit rule"
 
-            mock_engine = MagicMock()
-            mock_engine._global_rules = [mock_rule]
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=True)
-            mock_svc.return_value = (mock_engine, mock_db)
-
+        mock_engine = MagicMock()
+        mock_engine._global_rules = [mock_rule]
+        mock_engine._strategy_rules = {}
+        mock_db = self._make_mock_db(account_exists=True)
+        with patch(
+            "ante.cli.commands.rule._create_rule_engine",
+            new=mock_rule_engine_factory(mock_engine, mock_db),
+        ):
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
                     cli,
@@ -602,13 +646,14 @@ class TestRuleCommands:
 
         exit 0 + {"message":"등록된 룰이 없습니다.","rules":[]} 그대로.
         """
-        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = self._make_mock_db(account_exists=True)
-            mock_svc.return_value = (mock_engine, mock_db)
-
+        mock_engine = MagicMock()
+        mock_engine._global_rules = []
+        mock_engine._strategy_rules = {}
+        mock_db = self._make_mock_db(account_exists=True)
+        with patch(
+            "ante.cli.commands.rule._create_rule_engine",
+            new=mock_rule_engine_factory(mock_engine, mock_db),
+        ):
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
                     cli,
@@ -633,8 +678,14 @@ class TestRuleCommands:
         helper 안에서 직접 수행된다. 따라서 helper를 in-process로 직접
         호출해 동일한 invariant를 보존한다(AccountService 미호출 + SELECT 1
         호출).
+
+        #1900: ``_create_rule_engine`` 은 ``@asynccontextmanager`` 이므로
+        ``async with`` 로 진입한다 (이전 ``asyncio.run(...)`` 은 ctxmgr 객체를
+        coroutine 으로 오인해 ValueError 로 fail).
         """
         import asyncio
+
+        import click
 
         from ante.cli.commands.rule import _create_rule_engine
 
@@ -648,7 +699,13 @@ class TestRuleCommands:
             patch("ante.account.service.AccountService") as mock_account_cls,
             patch("ante.account.service._row_to_account") as mock_row_to_account,
         ):
-            engine, db = asyncio.run(_create_rule_engine("acc-1"))
+
+            async def _drive() -> tuple:
+                ctx = click.Context(click.Command("test"))
+                async with _create_rule_engine("acc-1", ctx=ctx) as (engine, db):
+                    return engine, db
+
+            engine, db = asyncio.run(_drive())
 
             assert db is mock_db
             # AccountService 자체를 생성/초기화하지 않으므로 전체
@@ -752,14 +809,15 @@ class TestRuleCommands:
                 assert "ACCOUNT_NOT_FOUND" not in (result.output or "")
 
     def test_rule_info_not_found(self, runner):
-        with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
-            mock_engine = MagicMock()
-            mock_engine._global_rules = []
-            mock_engine._strategy_rules = {}
-            mock_db = AsyncMock()
-            mock_db.close = AsyncMock()
-            mock_svc.return_value = (mock_engine, mock_db)
-
+        mock_engine = MagicMock()
+        mock_engine._global_rules = []
+        mock_engine._strategy_rules = {}
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        with patch(
+            "ante.cli.commands.rule._create_rule_engine",
+            new=mock_rule_engine_factory(mock_engine, mock_db),
+        ):
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
                     cli,

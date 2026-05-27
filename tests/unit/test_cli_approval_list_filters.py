@@ -188,7 +188,7 @@ class TestApprovalListValidFilters:
         with (
             patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.db_context.get_db_path", return_value=db_path),
+            patch("ante.cli.main.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,
@@ -212,7 +212,7 @@ class TestApprovalListValidFilters:
         with (
             patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.db_context.get_db_path", return_value=db_path),
+            patch("ante.cli.main.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,
@@ -237,7 +237,7 @@ class TestApprovalListValidFilters:
         with (
             patch("ante.cli.db_context.Database", db_cls),
             patch("ante.approval.ApprovalService", service_cls),
-            patch("ante.cli.db_context.get_db_path", return_value=db_path),
+            patch("ante.cli.main.get_db_path", return_value=db_path),
         ):
             result = runner.invoke(
                 cli,
