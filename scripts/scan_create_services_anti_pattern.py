@@ -9,6 +9,12 @@
        with patch("ante.cli.commands.bot._create_services") as mock_cs:
            mock_cs.return_value = (db, eb, mgr, svc)
 
+       # 또는 default MagicMock + return_value kwarg
+       with patch(
+           "ante.cli.commands.bot._create_services",
+           return_value=(db, eb, mgr, svc),
+       ):
+
    ``return_value`` 가 ``async with`` 호출 시 ``__aenter__`` 가 없는 tuple/
    MagicMock 으로 설정되면 production async ctxmgr lifecycle을 깨뜨린다.
 
@@ -30,7 +36,15 @@
            new=MagicMock(return_value=(...)),
        ):
 
-   ``async with`` 패턴을 모사하지 않는 ``new=`` substitute.
+       # ``new`` 는 두 번째 positional 인수로도 전달 가능 (signature:
+       # ``patch(target, new, spec, create, spec_set, autospec, new_callable)``)
+       with patch(
+           "ante.cli.commands.bot._create_services",
+           MagicMock(return_value=(...)),
+       ):
+
+   ``async with`` 패턴을 모사하지 않는 ``new=`` substitute. ``new`` 내부
+   ``return_value`` 가 tuple 이면 ``tuple-return-on-patch`` 로 보고된다.
 
 4. **async def stub without ctx kwarg**::
 
@@ -194,6 +208,30 @@ class PatchVisitor(ast.NodeVisitor):
                 )
                 return
 
+        # Case A': default MagicMock + return_value=tuple (no new/new_callable)
+        # ``patch(target, return_value=(db, ...))`` 형태. default MagicMock 이
+        # tuple 을 반환해 ``async with`` 진입 시 ``__aenter__`` 가 없다.
+        if (
+            new_value is None
+            and new_callable_value is None
+            and return_value_kwarg is not None
+            and self._is_tuple_or_list(return_value_kwarg)
+        ):
+            self.violations.append(
+                Violation(
+                    path=self.path,
+                    lineno=call.lineno,
+                    kind="tuple-return-on-patch",
+                    target=target,
+                    detail=(
+                        "patch(..., return_value=tuple) — default MagicMock 이 "
+                        "tuple 을 반환해 async with 가 동작하지 않는다. "
+                        "mock_*_factory(...) 사용 권장."
+                    ),
+                )
+            )
+            return
+
         # Case B: new=async_def_without_ctx OR new=MagicMock/non-ctxmgr
         if new_value is not None:
             self._check_new_substitute(new_value, call, target)
@@ -232,10 +270,47 @@ class PatchVisitor(ast.NodeVisitor):
     def _extract_patch_kwargs(
         call: ast.Call,
     ) -> tuple[ast.expr | None, ast.expr | None, ast.expr | None, ast.expr | None]:
+        """``unittest.mock.patch(target, new, spec, create, spec_set, autospec,
+        new_callable, *, **kwargs)`` 의 positional / keyword 인수를 모두 훑어
+        ``(new, new_callable, return_value, side_effect)`` 를 추출한다.
+
+        positional signature (Python stdlib):
+
+            patch(target, new=DEFAULT, spec=None, create=False,
+                  spec_set=None, autospec=None, new_callable=None,
+                  *, unsafe=False, **kwargs)
+
+        ``return_value`` / ``side_effect`` 는 ``**kwargs`` 패스스루로만 전달되어
+        positional 매핑이 불가능하다 (keyword 전용).
+        """
         new_value: ast.expr | None = None
         new_callable_value: ast.expr | None = None
         return_value_kwarg: ast.expr | None = None
         side_effect_kwarg: ast.expr | None = None
+
+        # positional mapping: index 0 = target (이미 _extract_patch_target),
+        # index 1 = new, index 6 = new_callable.
+        # 1..6: (new, spec, create, spec_set, autospec, new_callable)
+        positional_slots: list[str] = [
+            "target",
+            "new",
+            "spec",
+            "create",
+            "spec_set",
+            "autospec",
+            "new_callable",
+        ]
+        for idx, arg in enumerate(call.args):
+            if idx == 0:
+                continue
+            if idx >= len(positional_slots):
+                break
+            slot = positional_slots[idx]
+            if slot == "new":
+                new_value = arg
+            elif slot == "new_callable":
+                new_callable_value = arg
+
         for kw in call.keywords:
             if kw.arg == "new":
                 new_value = kw.value
@@ -267,16 +342,46 @@ class PatchVisitor(ast.NodeVisitor):
     def _is_tuple_or_list(node: ast.expr) -> bool:
         return isinstance(node, (ast.Tuple, ast.List))
 
+    @staticmethod
+    def _call_return_value_kwarg(call: ast.Call) -> ast.expr | None:
+        """``MagicMock(return_value=...)`` / ``AsyncMock(return_value=...)`` 등
+        Call 노드의 ``return_value=`` keyword 인수 값을 반환한다.
+        """
+        for kw in call.keywords:
+            if kw.arg == "return_value":
+                return kw.value
+        return None
+
     def _check_new_substitute(
         self, new_value: ast.expr, call: ast.Call, target: str
     ) -> None:
         # new=AsyncMock(...) or new=AsyncMock() ← non-ctxmgr factory
         if isinstance(new_value, ast.Call):
+            inner_return_value = self._call_return_value_kwarg(new_value)
+            inner_returns_tuple = (
+                inner_return_value is not None
+                and self._is_tuple_or_list(inner_return_value)
+            )
             if self._is_asyncmock(new_value.func):
                 # AsyncMock() is a coroutine, not async ctxmgr.
                 # If return_value kwarg/attr is tuple, this fails async with.
                 # Heuristic: any AsyncMock() substitute for these factories is suspect
                 # unless explicit MagicMock side_effect = async ctxmgr.
+                if inner_returns_tuple:
+                    self.violations.append(
+                        Violation(
+                            path=self.path,
+                            lineno=call.lineno,
+                            kind="tuple-return-on-patch",
+                            target=target,
+                            detail=(
+                                "new=AsyncMock(return_value=tuple) — "
+                                "async with 가 동작하지 않는다. "
+                                "mock_*_factory(...) 사용 권장."
+                            ),
+                        )
+                    )
+                    return
                 self.violations.append(
                     Violation(
                         path=self.path,
@@ -291,6 +396,21 @@ class PatchVisitor(ast.NodeVisitor):
                 )
                 return
             if self._is_magicmock(new_value.func):
+                if inner_returns_tuple:
+                    self.violations.append(
+                        Violation(
+                            path=self.path,
+                            lineno=call.lineno,
+                            kind="tuple-return-on-patch",
+                            target=target,
+                            detail=(
+                                "new=MagicMock(return_value=tuple) — "
+                                "async with 가 동작하지 않는다. "
+                                "mock_*_factory(...) 사용 권장."
+                            ),
+                        )
+                    )
+                    return
                 self.violations.append(
                     Violation(
                         path=self.path,
