@@ -55,6 +55,24 @@
 
    ``async with`` 호출이 fail하고, ``ctx=`` kwarg 전달 시 ``TypeError`` 발생.
 
+5. **decorator 형태 (``@patch(...)``)** — codex review attempt 2 finding 2.
+
+   위 1~4 패턴은 ``with patch(...)`` (With statement) 뿐 아니라 함수/메소드
+   데코레이터 형태로도 등장한다::
+
+       @patch("ante.cli.commands.bot._create_services", return_value=(...))
+       def test_x(...): ...
+
+       @patch(
+           "ante.cli.commands.bot._create_services",
+           new_callable=AsyncMock,
+           return_value=(...),
+       )
+       def test_x(self, mock_): ...
+
+   scanner 는 ``FunctionDef``/``AsyncFunctionDef`` 의 ``decorator_list`` 안의
+   ``patch(...)`` 호출도 with-statement 와 동일한 로직으로 검사한다.
+
 Helper(``mock_*_factory(...)``) 또는 ``@asynccontextmanager`` 로 직접 정의된
 async ctxmgr 만 정상으로 인정한다.
 
@@ -163,7 +181,33 @@ class PatchVisitor(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._async_def_stubs[node.name] = node
+        self._check_decorator_list(node.decorator_list)
         self.generic_visit(node)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._check_decorator_list(node.decorator_list)
+        self.generic_visit(node)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        # 클래스 데코레이터에서도 patch(...) 가 등장 가능 (e.g. @patch(... ) on class).
+        self._check_decorator_list(node.decorator_list)
+        self.generic_visit(node)
+
+    def _check_decorator_list(self, decorators: list[ast.expr]) -> None:
+        """``@patch(...)`` 형태의 데코레이터를 with-statement 와 동일한 anti-pattern
+        규칙으로 검사한다 (codex review attempt 2 finding 2).
+
+        ``@patch(target, ...)`` / ``@patch.object(...)`` 둘 다 ``Call`` 노드로
+        등장. ``patch.object`` 는 첫 번째 인수가 string target이 아니라 객체
+        참조이므로 ``_extract_patch_target`` 에서 ``None`` 이 반환되어 자연스럽게
+        스킵된다. ``patch(target, ...)`` 형태만 본격 분석한다.
+        """
+        for deco in decorators:
+            if not isinstance(deco, ast.Call):
+                continue
+            if not self._is_patch_call(deco):
+                continue
+            self._check_patch_call(deco, parent_with=None, alias=None)
 
     def visit_With(self, node: ast.With) -> None:
         for item in node.items:
@@ -176,6 +220,20 @@ class PatchVisitor(ast.NodeVisitor):
             return
         if not self._is_patch_call(call):
             return
+        alias: str | None = None
+        if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
+            alias = item.optional_vars.id
+        self._check_patch_call(call, parent_with=parent_with, alias=alias)
+
+    def _check_patch_call(
+        self,
+        call: ast.Call,
+        parent_with: ast.With | None,
+        alias: str | None,
+    ) -> None:
+        """``patch(target, ...)`` 호출(``with`` 문맥 또는 데코레이터)에 대한
+        공통 anti-pattern 검사 로직.
+        """
         target = self._extract_patch_target(call)
         if target is None or target not in self.allowlist:
             return
@@ -242,10 +300,9 @@ class PatchVisitor(ast.NodeVisitor):
             self._check_side_effect_stub(side_effect_kwarg, call, target)
 
         # Case C: with patch(...) as mock_cs: mock_cs.return_value = tuple
-        if item.optional_vars is not None and isinstance(item.optional_vars, ast.Name):
-            self._check_with_alias_tuple_return(
-                item.optional_vars.id, parent_with, call, target
-            )
+        # 데코레이터 형태(parent_with=None, alias=None) 는 alias 가 없으므로 skip.
+        if parent_with is not None and alias is not None:
+            self._check_with_alias_tuple_return(alias, parent_with, call, target)
 
     @staticmethod
     def _is_patch_call(call: ast.Call) -> bool:

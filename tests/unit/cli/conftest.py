@@ -25,17 +25,25 @@ Census (10 + 1 legacy 제외):
 Production factory                                  Helper
 ================================================== =======================
 ``account._create_account_service(ctx)``            ``mock_account_service_factory``
-``bot._create_services(ctx=ctx)``                   ``mock_bot_services_factory``
-``config._create_services(ctx=ctx)``                ``mock_config_services_factory``
+``bot._create_services(ctx)``                       ``mock_bot_services_factory``
+``config._create_services(ctx)``                    ``mock_config_services_factory``
 ``member._create_service(ctx)``                     ``mock_member_service_factory``
-``rule._create_rule_engine(acc, ctx=ctx)``          ``mock_rule_engine_factory``
-``strategy._create_registry(ctx=ctx)``              ``mock_strategy_registry_factory``
-``system._create_services(ctx=ctx)``                ``mock_system_services_factory``
-``trade._create_trade_service(ctx=ctx)``            ``mock_trade_service_factory``
-``treasury._create_treasury(acc, ctx=ctx)``         ``mock_treasury_factory``
-``treasury._create_treasury_manager(ctx=ctx)``      ``mock_treasury_manager_factory``
+``rule._create_rule_engine(acc, *, ctx)``           ``mock_rule_engine_factory``
+``strategy._create_registry(ctx)``                  ``mock_strategy_registry_factory``
+``system._create_services(ctx)``                    ``mock_system_services_factory``
+``trade._create_trade_service(ctx)``                ``mock_trade_service_factory``
+``treasury._create_treasury(acc, *, ctx)``          ``mock_treasury_factory``
+``treasury._create_treasury_manager(ctx)``          ``mock_treasury_manager_factory``
 ``broker._create_account_service()`` (legacy)       (excluded — #1818 follow-up)
 ================================================== =======================
+
+``ctx`` 파라미터의 호출 형태는 production 시그니처를 그대로 모사한다:
+
+* 대다수 factory (``account``/``bot``/``config``/``member``/``strategy``/
+  ``system``/``trade``/``treasury_manager``) 는 ``ctx: click.Context | None =
+  None`` 으로 정의되어 **positional + kwarg 양쪽** 모두 허용한다.
+* ``rule._create_rule_engine`` 과 ``treasury._create_treasury`` 만 ``*, ctx``
+  키워드 전용이다 (account_id 가 positional).
 
 본 헬퍼는 ``unittest.mock.patch(..., new=mock_..._factory(yield_value))`` 형태로
 factory 자체를 교체한다. 호출자(``async with _create_xxx(...) as value:``)는
@@ -84,12 +92,13 @@ def mock_bot_services_factory(db: Any, eventbus: Any, mgr: Any, account_service:
     """``bot._create_services`` 모사.
 
     yield: 4-tuple ``(db, eventbus, mgr, account_service)``.
-    production: ``async with _create_services(ctx=ctx) as (...)`` (kwarg only).
+    production 시그니처: ``_create_services(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any, Any, Any]]:
         yield db, eventbus, mgr, account_service
 
@@ -99,12 +108,13 @@ def mock_bot_services_factory(db: Any, eventbus: Any, mgr: Any, account_service:
 def mock_config_services_factory(static: Any, dynamic: Any, db: Any):
     """``config._create_services`` 모사. 3-tuple yield (static, dynamic, db).
 
-    production: ``async with _create_services(ctx=ctx) as (...)`` (kwarg only).
+    production 시그니처: ``_create_services(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any, Any]]:
         yield static, dynamic, db
 
@@ -145,13 +155,13 @@ def mock_rule_engine_factory(engine: Any, db: Any):
 def mock_strategy_registry_factory(registry: Any, db: Any):
     """``strategy._create_registry`` 모사. 2-tuple yield (registry, db).
 
-    production: ``async with _create_registry(ctx=ctx) as (registry, db):``
-    (kwarg only).
+    production 시그니처: ``_create_registry(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any]]:
         yield registry, db
 
@@ -161,13 +171,13 @@ def mock_strategy_registry_factory(registry: Any, db: Any):
 def mock_system_services_factory(db: Any, eventbus: Any):
     """``system._create_services`` 모사. 2-tuple yield (db, eventbus).
 
-    production: ``async with _create_services(ctx=ctx) as (db, eventbus):``
-    (kwarg only).
+    production 시그니처: ``_create_services(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any]]:
         yield db, eventbus
 
@@ -177,13 +187,14 @@ def mock_system_services_factory(db: Any, eventbus: Any):
 def mock_trade_service_factory(svc: Any, db: Any):
     """``trade._create_trade_service`` 모사. 2-tuple yield (service, db).
 
-    production: ``async with _create_trade_service(ctx=ctx) as (service, db):``
-    (kwarg only).
+    production 시그니처:
+    ``async def _create_trade_service(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any]]:
         yield svc, db
 
@@ -211,13 +222,14 @@ def mock_treasury_factory(treasury: Any, db: Any):
 def mock_treasury_manager_factory(mgr: Any, db: Any):
     """``treasury._create_treasury_manager`` 모사. 2-tuple yield (manager, db).
 
-    production: ``async with _create_treasury_manager(ctx=ctx) as (manager, db):``
-    (kwarg only).
+    production 시그니처:
+    ``async def _create_treasury_manager(ctx: click.Context | None = None)``
+    → positional + kwarg 둘 다 허용. helper 도 동일하게 모사한다.
     """
 
     @asynccontextmanager
     async def _factory(
-        *, ctx: click.Context | None = None
+        ctx: click.Context | None = None,
     ) -> AsyncIterator[tuple[Any, Any]]:
         yield mgr, db
 

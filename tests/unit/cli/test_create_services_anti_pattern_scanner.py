@@ -10,6 +10,12 @@ Codex 브랜치 리뷰 attempt 1 finding 2건:
   return_value) 가 누락되어 회귀 검출 실패
 * Finding 2: ``patch(target, MagicMock(return_value=(db, ...)))`` (2번째
   positional ``new``) 가 누락되어 회귀 검출 실패
+
+Codex 브랜치 리뷰 attempt 2 finding 2:
+
+* ``@patch(...)`` 데코레이터 형태가 누락되어 회귀 검출 실패. ``FunctionDef``/
+  ``AsyncFunctionDef``/``ClassDef`` decorator_list 안의 ``patch(...)`` 도
+  with-statement 와 동일 로직으로 검사한다.
 """
 
 from __future__ import annotations
@@ -277,3 +283,150 @@ def test_non_allowlist_target_ignored(tmp_path: Path, allowlist: set[str]) -> No
     p = _write(tmp_path, src)
     vs = scan_file(p, allowlist)
     assert vs == []
+
+
+# ── Attempt 2 Finding 2: decorator 형태 ─────────────────────────────────────
+
+
+def test_decorator_patch_with_tuple_return_value_kwarg_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch("target", return_value=tuple)`` 데코레이터 형태도 위반."""
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}", return_value=(1, 2, 3, 4))
+        def test_x(mock_):
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
+
+
+def test_decorator_patch_new_callable_asyncmock_tuple_return_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch("target", new_callable=AsyncMock, return_value=tuple)`` 위반."""
+    src = f"""
+        from unittest.mock import AsyncMock, patch
+
+        @patch(
+            "{TARGET}",
+            new_callable=AsyncMock,
+            return_value=(1, 2, 3, 4),
+        )
+        def test_x(self, mock_):
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "asyncmock-tuple-return"
+
+
+def test_decorator_patch_positional_new_magicmock_tuple_return_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch("target", MagicMock(return_value=tuple))`` 2-positional new."""
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        @patch("{TARGET}", MagicMock(return_value=(1, 2, 3, 4)))
+        def test_x(mock_):
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+
+
+def test_decorator_patch_keyword_new_magicmock_substitute_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch("target", new=MagicMock())`` 데코레이터 형태도 substitute 위반."""
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        @patch("{TARGET}", new=MagicMock())
+        def test_x():
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "magicmock-new-substitute"
+
+
+def test_decorator_stack_multiple_patches_all_reported(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """다중 ``@patch(...)`` decorator stack — 각각 위반으로 보고."""
+    other_target = next(t for t in allowlist if t.endswith(".system._create_services"))
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}", return_value=(1, 2, 3, 4))
+        @patch("{other_target}", return_value=(1, 2))
+        def test_x(mock_a, mock_b):
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 2, [v.format() for v in vs]
+    kinds = {v.kind for v in vs}
+    targets = {v.target for v in vs}
+    assert kinds == {"tuple-return-on-patch"}
+    assert targets == {TARGET, other_target}
+
+
+def test_decorator_patch_helper_factory_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch("target", new=mock_*_factory(...))`` 형태는 위반 아님."""
+    src = f"""
+        from unittest.mock import patch
+
+        def mock_bot_services_factory(*a, **k):
+            ...
+
+        @patch("{TARGET}", new=mock_bot_services_factory(1, 2, 3, 4))
+        def test_x():
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_decorator_patch_object_form_ignored(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch.object(...)`` 는 첫 인수가 string target 이 아니라 객체. 스킵.
+
+    (sweep 대상 contract는 ``patch("ante.cli.commands...")`` string target이며,
+    ``patch.object`` 는 별도 다른 target 카테고리. scanner 가 잘못 잡지 않음.)
+    """
+    src = f"""
+        from unittest.mock import AsyncMock, patch
+        from ante.cli.commands import bot
+
+        @patch.object(bot, "_create_services", new_callable=AsyncMock,
+                      return_value=(1, 2, 3, 4))
+        def test_x(mock_):
+            pass
+
+        # 동시에 string-target patch 도 정상 위반으로 보고되는지 확인
+        @patch("{TARGET}", return_value=(1, 2, 3, 4))
+        def test_y(mock_):
+            pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # patch.object 는 무시, string-target 만 1건 위반
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch"
+    assert vs[0].target == TARGET
