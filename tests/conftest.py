@@ -8,6 +8,7 @@ import importlib.util
 import os
 import sys
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -58,6 +59,14 @@ async def _cleanup_tasks():
     ``sqlite3.Connection`` 가 같은 테스트 경계 안에서 GC 되도록 한다. 다음
     테스트로 누수 attribution 이 전이되어 ``PytestUnraisableExceptionWarning``
     / ``ResourceWarning`` 이 무관 테스트에 표시되는 회귀를 방지한다.
+
+    Refs #1904 follow-up: 매 테스트 종료 직후 ``mock.patch.stopall()`` 을
+    호출해 ``patch.start()`` 후 ``stop()`` 누락(예: ``try`` 진입 전 예외)으로
+    인해 module attribute (``ante.cli.commands.*._create_*``,
+    ``ante.cli.main.authenticate_member`` 등) 가 mock 으로 영구 leak 되는
+    cross-test contamination 을 차단한다. xdist 환경에서 worker 별 random
+    fail (assert exit_code==0 인데 1, ``WARNING ante.config.config`` 가
+    captured log 에 잡히는 패턴) 의 baseline 누수원이다.
     """
     yield
     loop = asyncio.get_event_loop()
@@ -72,3 +81,7 @@ async def _cleanup_tasks():
         await asyncio.gather(*pending, return_exceptions=True)
     # Refs #1897: 남은 transport / DB Connection 객체를 결정적으로 정리한다.
     gc.collect()
+    # Refs #1904: stop-orphaned patch leak 방어. 정상 패스의 with-block /
+    # try-finally 는 already stop 했으므로 idempotent. start() 직후
+    # stop() 호출 전 예외가 발생한 leak 만 정리한다.
+    mock.patch.stopall()
