@@ -172,8 +172,33 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 - `Automatically delete head branches`: 활성화
 - branch protection required status checks:
   - `ci`
-- `main` 외에 `epic/**` 통합 브랜치도 같은 required status checks(`ci`)를 적용해 base가 epic이어도 ci 통과 없이는 머지되지 않도록 한다.
+  - `lint`
+  - `test`
+- `main` 외에 `epic/**` 통합 브랜치도 같은 required status checks(`ci`, `lint`, `test`)를 적용해 base가 epic이어도 세 게이트가 모두 통과하지 않으면 머지되지 않도록 한다.
 - `Require conversation resolution before merging`: 활성화 권장
+
+> 권장값은 SSOT다. [03-git-workflow.md §5](03-git-workflow.md#5-보호-규칙-권장값)와 본 절은 같은 required status checks 집합을 가리킨다.
+
+#### 3.2.1 Rationale — 머지 안전망 (defense-in-depth)
+
+`ci`는 `lint`/`test`/`docker-build` 결과를 fail-fast로 집계하는 단일 진입점이다 (`.github/workflows/ci.yml`의 `ci` job, #1896에서 fail-fast 강화 완료). 그럼에도 `lint`, `test`를 required status checks에 함께 등록하는 이유는 다음과 같다.
+
+- **단일 게이트 의존 위험**: required check가 `ci` 단일 컨텍스트일 때, `ci.yml`이 다른 이름으로 분기하거나 일시적으로 트리거되지 않으면(예: workflow 파일 리네이밍, path filter 변경) `ci` 컨텍스트가 보고되지 않아 머지 가능 상태로 인식될 수 있다. `lint`와 `test`를 별도 required로 두면 각 job 자체가 차단 게이트로 동작하므로 `ci` 게이트가 어떤 이유로 우회되어도 안전망이 보존된다.
+- **defense-in-depth**: `ci` job은 upstream(`lint`, `test`, `docker-build`) result 집계만 수행하므로, upstream job이 실행되지 않거나 skip 상태로 종료될 경우의 fallback이 필요하다. `lint`/`test`를 직접 required로 등록하면 upstream skip 자체를 차단한다.
+- **`docker-build`는 required에 추가하지 않는다**: 비-release PR에서 `docker-build`는 안내 메시지만 출력하고 빠르게 success로 종료된다(`.github/workflows/ci.yml` 참고). 의미적 차단 게이트가 아니므로 required로 둘 경우 release/* 외 PR에서 불필요한 강제력만 추가된다.
+
+#### 3.2.2 비채택 옵션 (ADR-style)
+
+본 권장값을 확정하면서 다음 두 옵션은 의도적으로 채택하지 않았다.
+
+- **옵션 A — `enforcement_level: everyone` (admin override 차단)**: branch protection enforcement를 `non_admins`에서 `everyone`으로 격상하면 admin도 fail 상태에서 머지할 수 없다. 그러나 Ante는 단독 admin 운영자(저장소 owner) 모델이므로, emergency hot-fix 시 우회 수단이 모두 사라진다. 운영 비용이 안전망 효과보다 크다고 판단해 비채택한다. 향후 운영자가 복수로 늘어나거나, off-hours hot-fix 사고가 누적되면 재검토한다.
+- **옵션 C — `pr-approvals.yml` auto-merge 라벨 트리거**: PR open 시점의 무조건 auto-merge enable을 특정 라벨(`ready-to-merge` 등) 기반으로 게이트하는 안. #1896으로 `ci` fail-fast가 차단된 상태에서 추가 효과(marginal benefit)는 작고, `/autopilot` throughput 저하 비용이 크다. 비채택한다.
+
+옵션 A/C가 필요해지는 시점(예: 운영자 증가, autopilot 사고 누적)이 오면 별도 이슈로 재개한다.
+
+#### 3.2.3 실제 적용
+
+본 절의 권장값을 운영 GitHub 저장소에 적용하려면 사용자가 GitHub UI(`Settings → Branches → Branch protection rules`)에서 `main`과 `epic/**`에 대해 required status checks 집합에 `ci`, `lint`, `test`를 등록해야 한다. 저장소 설정 변경은 본 런북의 비목표이며, 실제 적용 여부는 운영자가 결정한다.
 
 ### 3.3 검증 환경 체크리스트
 

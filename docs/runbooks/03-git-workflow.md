@@ -183,8 +183,12 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 
 - required status checks:
   - `ci`
+  - `lint`
+  - `test`
 - require conversation resolution
 - allow auto-merge
 - automatically delete head branches
 
 브랜치 보호 규칙의 source of truth는 사람 승인 수가 아니라 **status checks**다.
+
+`lint`와 `test`를 `ci`와 함께 required에 등록하는 근거(defense-in-depth)와 비채택 옵션(enforcement_level everyone, auto-merge 라벨 트리거)에 대한 ADR-style Rationale은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값)가 SSOT다. 본 절은 cross-link이며, 권장값 집합이 변경되면 양쪽을 함께 갱신한다.
