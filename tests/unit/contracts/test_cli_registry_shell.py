@@ -29,7 +29,11 @@ scope 외 (deliberately not asserted): 실제 command entry 등록 여부는
 from __future__ import annotations
 
 import dataclasses
+import os
+import pathlib
+import subprocess
 import sys
+import textwrap
 import typing
 
 import pytest
@@ -631,61 +635,68 @@ def test_package_reexports_registry_symbols() -> None:
 # ── import side effect lock ───────────────────────────────────────────────
 
 
+def _repo_root() -> pathlib.Path:
+    """현재 test 파일 기준 repo root (=src 부모)."""
+    # tests/unit/contracts/test_cli_registry_shell.py → parents[3] = repo root.
+    return pathlib.Path(__file__).resolve().parents[3]
+
+
+def _run_import_probe(target_import: str) -> subprocess.CompletedProcess[str]:
+    """별도 Python subprocess 에서 ``target_import`` 를 수행하고
+    ``ante.cli`` 트리 leak 여부를 검증하는 probe 를 실행한다.
+
+    Refs #1909: 본 probe 를 in-process 로 수행하면 ``del sys.modules[...]`` →
+    module re-import 가 Click callback 의 ``__globals__`` 와 ``sys.modules``
+    사이 inconsistency 를 만들어 같은 worker 의 후속 CLI test (``patch(...)``
+    target) 를 self-block 한다. process boundary 로 봉인하여 sys.modules
+    pollution 을 차단한다.
+    """
+    script = textwrap.dedent(f"""
+        import sys
+        import {target_import}  # noqa: F401  -- side effect probe
+
+        loaded = sorted(
+            n for n in sys.modules
+            if n == "ante.cli" or n.startswith("ante.cli.")
+        )
+        if loaded:
+            print("LEAKED:", loaded)
+            sys.exit(1)
+    """)
+    src_path = str(_repo_root() / "src")
+    env = {**os.environ, "PYTHONPATH": src_path}
+    return subprocess.run(
+        [sys.executable, "-c", script],
+        capture_output=True,
+        text=True,
+        env=env,
+        check=False,
+    )
+
+
 def test_cli_registry_import_does_not_load_cli_main() -> None:
     """registry import 만으로 ``ante.cli.main`` (Click root) 이 import 되지 않는다.
 
     Click root import 는 모든 command module 의 ``import`` 및 그에 따른 IO /
     env access / configuration 로딩을 트리거할 수 있다. registry shell 은
     순수 dataclass + 빈 dict 이므로 어떤 CLI 모듈도 끌어오면 안 된다.
+
+    Refs #1909: subprocess isolation 으로 sys.modules pollution 을 차단한다.
     """
-    # 본 test 실행 시점에 이전 test 가 ``ante.cli.main`` 을 import 했을 수
-    # 있으므로 sys.modules 를 정리한 뒤 isolated import 한다.
-    cli_modules = [
-        name
-        for name in list(sys.modules)
-        if name == "ante.cli" or name.startswith("ante.cli.")
-    ]
-    for name in cli_modules:
-        del sys.modules[name]
-    # cli_registry / contracts package 도 다시 import 해서 import 그래프를
-    # 재현한다.
-    for name in ("ante.contracts.cli_registry", "ante.contracts"):
-        if name in sys.modules:
-            del sys.modules[name]
-
-    import ante.contracts.cli_registry  # noqa: F401  -- side effect probe
-
-    loaded_cli = [
-        name
-        for name in sys.modules
-        if name == "ante.cli" or name.startswith("ante.cli.")
-    ]
-    assert loaded_cli == [], (
-        "ante.contracts.cli_registry import 가 ante.cli 트리를 끌어왔다: "
-        f"{sorted(loaded_cli)}"
+    result = _run_import_probe("ante.contracts.cli_registry")
+    assert result.returncode == 0, (
+        "ante.contracts.cli_registry import 가 ante.cli 트리를 끌어왔다.\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
     )
 
 
 def test_contracts_package_import_does_not_load_cli_main() -> None:
-    """``from ante import contracts`` 만으로 ``ante.cli.main`` 이 import 되지 않는다."""
-    cli_modules = [
-        name
-        for name in list(sys.modules)
-        if name == "ante.cli" or name.startswith("ante.cli.")
-    ]
-    for name in cli_modules:
-        del sys.modules[name]
-    for name in ("ante.contracts", "ante.contracts.cli_registry"):
-        if name in sys.modules:
-            del sys.modules[name]
+    """``from ante import contracts`` 만으로 ``ante.cli.main`` 이 import 되지 않는다.
 
-    import ante.contracts  # noqa: F401
-
-    loaded_cli = [
-        name
-        for name in sys.modules
-        if name == "ante.cli" or name.startswith("ante.cli.")
-    ]
-    assert loaded_cli == [], (
-        f"ante.contracts import 가 ante.cli 트리를 끌어왔다: {sorted(loaded_cli)}"
+    Refs #1909: subprocess isolation 으로 sys.modules pollution 을 차단한다.
+    """
+    result = _run_import_probe("ante.contracts")
+    assert result.returncode == 0, (
+        "ante.contracts import 가 ante.cli 트리를 끌어왔다.\n"
+        f"stdout={result.stdout}\nstderr={result.stderr}"
     )
