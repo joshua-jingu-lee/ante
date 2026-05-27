@@ -183,8 +183,8 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 
 `ci`는 `lint`/`test`/`docker-build` 결과를 fail-fast로 집계하는 단일 진입점이다 (`.github/workflows/ci.yml`의 `ci` job, #1896에서 fail-fast 강화 완료). 그럼에도 `lint`, `test`를 required status checks에 함께 등록하는 이유는 다음과 같다.
 
-- **단일 게이트 의존 위험**: required check가 `ci` 단일 컨텍스트일 때, `ci.yml`이 다른 이름으로 분기하거나 일시적으로 트리거되지 않으면(예: workflow 파일 리네이밍, path filter 변경) `ci` 컨텍스트가 보고되지 않아 머지 가능 상태로 인식될 수 있다. `lint`와 `test`를 별도 required로 두면 각 job 자체가 차단 게이트로 동작하므로 `ci` 게이트가 어떤 이유로 우회되어도 안전망이 보존된다.
-- **defense-in-depth**: `ci` job은 upstream(`lint`, `test`, `docker-build`) result 집계만 수행하므로, upstream job이 실행되지 않거나 skip 상태로 종료될 경우의 fallback이 필요하다. `lint`/`test`를 직접 required로 등록하면 upstream skip 자체를 차단한다.
+- **`ci` 게이트 자체 회귀 방어**: `ci` job은 `lint`/`test`/`docker-build` 결과를 집계하는 aggregator이므로, `ci.yml` 로직 변경(예: 새 `needs` 추가 시 검사 누락, 집계 조건 오작성)으로 인해 `ci` job이 의도와 다르게 success 또는 skipped로 종료되는 회귀가 발생할 수 있다. `lint`/`test`를 직접 required로 등록해 두면 aggregator 결함과 무관하게 각 job 결과가 차단 게이트로 직접 노출되어, #1896 fail-fast 강화의 미래 회귀에 대한 안전망이 된다.
+- **`needs` chain skip-as-success 회귀 방어**: GitHub Actions는 `needs` 의존성이 실패하면 dependent job을 자동으로 skip 처리하고, branch protection은 skipped required check를 success로 평가한다(#1896이 fix한 정확한 패턴). `ci` 단일 게이트만 required로 두면 이런 skip-as-success 우회가 다시 도입될 때 다시 차단력을 잃지만, `lint`/`test`를 직접 required로 등록하면 `lint`/`test` 결과 자체는 그대로 노출되어 aggregator 우회 경로로도 무결성이 유지된다.
 - **`docker-build`는 required에 추가하지 않는다**: 비-release PR에서 `docker-build`는 안내 메시지만 출력하고 빠르게 success로 종료된다(`.github/workflows/ci.yml` 참고). 의미적 차단 게이트가 아니므로 required로 둘 경우 release/* 외 PR에서 불필요한 강제력만 추가된다.
 
 #### 3.2.2 비채택 옵션 (ADR-style)
