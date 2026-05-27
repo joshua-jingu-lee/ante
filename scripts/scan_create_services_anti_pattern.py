@@ -73,6 +73,23 @@
    scanner 는 ``FunctionDef``/``AsyncFunctionDef`` 의 ``decorator_list`` 안의
    ``patch(...)`` 호출도 with-statement 와 동일한 로직으로 검사한다.
 
+6. **decorator-injected mock arg body assignment** — codex review attempt 3
+   finding 1.
+
+   ``@patch(target)`` 데코레이터는 함수 인자에 mock 객체를 주입한다. 함수
+   본문에서 주입된 mock arg 에 ``return_value = tuple`` 을 직접 할당하는 형태
+   도 동일 anti-pattern 이다::
+
+       @patch("ante.cli.commands.bot._create_services")
+       def test_foo(self, mock_cs):
+           mock_cs.return_value = (db, eb, mgr, svc)   # tuple-return 위반
+
+   Python ``@patch`` 의 mock 주입 규칙은 데코레이터 스택의 가장 안쪽(가장 아래)
+   부터 첫 mock arg 로 매핑된다 (bottom-up applied, but 함수 인자 매핑은
+   innermost-first). scanner 는 ``decorator_list`` 를 역순으로 함수 인자에
+   매핑한 뒤, 매핑된 alias 에 대해 body 의 ``<alias>.return_value = tuple/list``
+   할당을 ``tuple-return-on-patch-decorator-alias`` 카테고리로 보고한다.
+
 Helper(``mock_*_factory(...)``) 또는 ``@asynccontextmanager`` 로 직접 정의된
 async ctxmgr 만 정상으로 인정한다.
 
@@ -85,6 +102,33 @@ Usage::
     python scripts/scan_create_services_anti_pattern.py tests/unit/
 
 종료 코드 0 = 위반 0건, 1 = 위반 발견.
+
+KNOWN-LIMITATION (정적 분석 범위 한계)
+======================================
+
+본 scanner 는 정적 AST 분석으로 다음 anti-pattern 형태를 catch 한다:
+
+* ``with patch(...) as alias: alias.return_value = tuple``
+* ``with patch(...)`` (1-positional + ``return_value=tuple`` kwarg)
+* ``with patch(..., new_callable=MagicMock/AsyncMock, return_value=tuple)``
+* ``with patch(target, MagicMock/AsyncMock(return_value=tuple))`` (2-positional
+  ``new``)
+* ``@patch(...)`` 데코레이터 (위 모든 형태 + decorated FunctionDef body 의
+  ``mock_arg.return_value = tuple`` 할당)
+
+다음은 본 scanner 범위 밖 (정적 분석으로는 catch 불가, follow-up 분리):
+
+* ``@patch.object(Class, "attr", ...)`` — target 이 string 이 아닌 reference
+* ``patch.multiple``, ``patch.dict``, ``patch.stopall`` 등 부수 API
+* 동적 patch (런타임에 mock 객체를 다른 변수로 전달 후 ``alias.return_value`` 할당)
+* mock 객체를 매개변수로 받는 helper 함수 (간접 mock 조작)
+* ``side_effect`` 로 tuple 을 yield 하는 generator/iterator 형태
+  (의도적일 수 있음)
+
+이러한 형태가 실제로 anti-pattern 으로 사용되면 별도 이슈로 분리하여 추가
+보강한다 (#1900 follow-up). 본 scanner 의 sound 범위 (false-positive 0,
+allowlist 자동 수집) 와 known-incomplete 범위 (위 5개 형태) 를 normative 로
+선언한다.
 """
 
 from __future__ import annotations
@@ -181,33 +225,181 @@ class PatchVisitor(ast.NodeVisitor):
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         self._async_def_stubs[node.name] = node
-        self._check_decorator_list(node.decorator_list)
+        self._check_decorator_list(node.decorator_list, function_node=node)
         self.generic_visit(node)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
-        self._check_decorator_list(node.decorator_list)
+        self._check_decorator_list(node.decorator_list, function_node=node)
         self.generic_visit(node)
 
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         # 클래스 데코레이터에서도 patch(...) 가 등장 가능 (e.g. @patch(... ) on class).
-        self._check_decorator_list(node.decorator_list)
+        # ``ClassDef`` 은 mock 주입 함수 인자가 없으므로 alias-body 검사는 생략.
+        self._check_decorator_list(node.decorator_list, function_node=None)
         self.generic_visit(node)
 
-    def _check_decorator_list(self, decorators: list[ast.expr]) -> None:
+    def _check_decorator_list(
+        self,
+        decorators: list[ast.expr],
+        function_node: ast.FunctionDef | ast.AsyncFunctionDef | None,
+    ) -> None:
         """``@patch(...)`` 형태의 데코레이터를 with-statement 와 동일한 anti-pattern
-        규칙으로 검사한다 (codex review attempt 2 finding 2).
+        규칙으로 검사한다 (codex review attempt 2 finding 2 + attempt 3 finding 1).
 
         ``@patch(target, ...)`` / ``@patch.object(...)`` 둘 다 ``Call`` 노드로
         등장. ``patch.object`` 는 첫 번째 인수가 string target이 아니라 객체
         참조이므로 ``_extract_patch_target`` 에서 ``None`` 이 반환되어 자연스럽게
         스킵된다. ``patch(target, ...)`` 형태만 본격 분석한다.
+
+        ``function_node`` 가 주어지면 (FunctionDef/AsyncFunctionDef) decorator
+        stack 을 역순으로 함수 인자에 매핑하여 body 의 ``<alias>.return_value =
+        tuple`` 할당도 함께 검사한다 (attempt 3 finding 1).
         """
+        # 1차: 각 decorator 의 patch(...) call 자체에 대한 anti-pattern 검사
         for deco in decorators:
             if not isinstance(deco, ast.Call):
                 continue
             if not self._is_patch_call(deco):
                 continue
             self._check_patch_call(deco, parent_with=None, alias=None)
+
+        # 2차: decorator-injected mock arg 의 body assignment 검사
+        if function_node is not None:
+            self._check_decorator_mock_arg_body(decorators, function_node)
+
+    def _check_decorator_mock_arg_body(
+        self,
+        decorators: list[ast.expr],
+        function_node: ast.FunctionDef | ast.AsyncFunctionDef,
+    ) -> None:
+        """decorator stack 의 ``@patch(target)`` 매핑된 mock 함수 인자가 body
+        에서 ``<alias>.return_value = tuple/list`` 로 사용되는지 검사한다
+        (attempt 3 finding 1).
+
+        Python ``@patch`` 의 mock 주입 규칙:
+
+        ``decorator_list`` 는 source 순서대로 (위에서 아래) 저장. 적용은
+        bottom-up. 함수 인자 매핑은 **가장 안쪽 (가장 아래) decorator 가 첫 mock
+        arg**.
+
+        예::
+
+            @patch("A")     # 위 (outer)
+            @patch("B")     # 가장 안쪽 (innermost, applied first)
+            def test(self, mock_B, mock_A): ...
+
+        ``decorator_list = [Call("A"), Call("B")]`` → 역순 ``[Call("B"),
+        Call("A")]`` 을 함수 positional args (self/cls 제외) 에 순서대로 매핑.
+
+        ``new`` 또는 ``new_callable`` 이 지정된 ``@patch`` 는 mock 인자를 주입하지
+        않으므로 매핑에서 제외한다 (Python 스펙).
+        """
+        # 1) 함수 positional args 에서 self/cls 제외한 리스트
+        positional_args = list(function_node.args.posonlyargs) + list(
+            function_node.args.args
+        )
+        if positional_args and positional_args[0].arg in ("self", "cls"):
+            positional_args = positional_args[1:]
+
+        # 2) decorator_list 역순 → 매핑 대상 patch decorator 만 필터.
+        # ``new=`` 또는 ``new_callable=`` 이 지정된 patch 는 mock arg 주입 안함.
+        patch_decos_innermost_first: list[ast.Call] = []
+        for deco in reversed(decorators):
+            if not isinstance(deco, ast.Call):
+                continue
+            if not self._is_patch_call(deco):
+                continue
+            target = self._extract_patch_target(deco)
+            if target is None or target not in self.allowlist:
+                # allowlist 밖이거나 ``patch.object`` 등은 스킵.
+                # 단, 매핑 슬롯은 소비한다 (Python 은 allowlist 와 무관하게
+                # 무조건 mock 을 inject 하기 때문). 다만 우리가 검사할 의미가
+                # 없으므로 alias 등록 없이 슬롯만 진행.
+                # → mock arg 슬롯은 소비되었지만 검사 대상이 아니므로 placeholder
+                # 매핑은 None 으로 둔다.
+                patch_decos_innermost_first.append(deco)
+                continue
+            patch_decos_innermost_first.append(deco)
+
+        # 3) 각 decorator 를 positional_args 의 앞부터 매핑하면서 alias 검사
+        for idx, deco in enumerate(patch_decos_innermost_first):
+            if idx >= len(positional_args):
+                # 함수 시그니처에 mock arg 가 모자라면 매핑 불가 — 정적 매핑 한계.
+                break
+            new_value, new_callable_value, _, _ = self._extract_patch_kwargs(deco)
+            # new / new_callable 이 지정되면 mock arg 주입 안 됨 → alias 없음
+            if new_value is not None or new_callable_value is not None:
+                continue
+            target = self._extract_patch_target(deco)
+            if target is None or target not in self.allowlist:
+                continue
+            alias = positional_args[idx].arg
+            self._check_function_body_alias_tuple_return(
+                alias=alias,
+                function_node=function_node,
+                deco=deco,
+                target=target,
+            )
+
+    def _check_function_body_alias_tuple_return(
+        self,
+        alias: str,
+        function_node: ast.FunctionDef | ast.AsyncFunctionDef,
+        deco: ast.Call,
+        target: str,
+    ) -> None:
+        """함수 body 안에서 ``<alias>.return_value = tuple/list`` (또는
+        ``MagicMock/AsyncMock``) 할당을 찾아 위반으로 보고한다.
+
+        ``with patch(...) as alias:`` 의 ``_check_with_alias_tuple_return`` 과
+        동일한 의미. 다만 카테고리를 분리 (``tuple-return-on-patch-decorator-
+        alias``) 하여 출력 가독성을 보존한다.
+        """
+        for stmt in function_node.body:
+            for sub in ast.walk(stmt):
+                if not isinstance(sub, ast.Assign):
+                    continue
+                for tgt in sub.targets:
+                    if not isinstance(tgt, ast.Attribute):
+                        continue
+                    if tgt.attr != "return_value":
+                        continue
+                    base = tgt.value
+                    if not isinstance(base, ast.Name) or base.id != alias:
+                        continue
+                    value = sub.value
+                    if isinstance(value, (ast.Tuple, ast.List)):
+                        self.violations.append(
+                            Violation(
+                                path=self.path,
+                                lineno=sub.lineno,
+                                kind="tuple-return-on-patch-decorator-alias",
+                                target=target,
+                                detail=(
+                                    f"{alias}.return_value = tuple — "
+                                    "@patch decorator 로 주입된 mock 인자에 tuple "
+                                    "을 반환값으로 할당하면 async with 가 동작하지 "
+                                    "않는다. mock_*_factory 사용 권장."
+                                ),
+                            )
+                        )
+                    elif isinstance(value, ast.Call) and (
+                        self._is_magicmock(value.func) or self._is_asyncmock(value.func)
+                    ):
+                        self.violations.append(
+                            Violation(
+                                path=self.path,
+                                lineno=sub.lineno,
+                                kind="mock-return-on-patch-decorator-alias",
+                                target=target,
+                                detail=(
+                                    f"{alias}.return_value = MagicMock/AsyncMock — "
+                                    "@patch decorator 로 주입된 mock 인자에 "
+                                    "non-ctxmgr mock 을 할당. async with 가 동작 "
+                                    "안할 가능성. mock_*_factory 권장."
+                                ),
+                            )
+                        )
 
     def visit_With(self, node: ast.With) -> None:
         for item in node.items:

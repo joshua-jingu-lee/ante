@@ -16,6 +16,13 @@ Codex 브랜치 리뷰 attempt 2 finding 2:
 * ``@patch(...)`` 데코레이터 형태가 누락되어 회귀 검출 실패. ``FunctionDef``/
   ``AsyncFunctionDef``/``ClassDef`` decorator_list 안의 ``patch(...)`` 도
   with-statement 와 동일 로직으로 검사한다.
+
+Codex 브랜치 리뷰 attempt 3 finding 1:
+
+* ``@patch(target)`` 데코레이터로 주입된 mock 인자가 함수 본문에서
+  ``mock_cs.return_value = tuple`` 로 사용되는 형태 누락. decorator stack 을
+  역순으로 함수 인자에 매핑한 뒤 body 의 할당을 검사한다 (innermost decorator
+  → 첫 mock arg 매핑 규칙).
 """
 
 from __future__ import annotations
@@ -399,6 +406,149 @@ def test_decorator_patch_helper_factory_not_violation(
         """
     p = _write(tmp_path, src)
     vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_decorator_patch_arg_body_assignment_is_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``@patch(target)`` 으로 주입된 mock 인자가 body 에서 ``mock_cs.return_value =
+    tuple`` 로 사용되는 형태 (attempt 3 finding 1).
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        class TestX:
+            @patch("{TARGET}")
+            def test_x(self, mock_cs):
+                db, eb, mgr, svc = object(), object(), object(), object()
+                mock_cs.return_value = (db, eb, mgr, svc)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_decorator_patch_arg_body_assignment_list_form(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """list literal 도 동일 위반."""
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        def test_x(mock_cs):
+            mock_cs.return_value = [1, 2, 3, 4]
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+
+
+def test_decorator_patch_arg_body_mock_assignment_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``mock_cs.return_value = MagicMock(...)`` body 할당도 위반."""
+    src = f"""
+        from unittest.mock import MagicMock, patch
+
+        @patch("{TARGET}")
+        def test_x(mock_cs):
+            mock_cs.return_value = MagicMock()
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "mock-return-on-patch-decorator-alias"
+
+
+def test_decorator_stack_multiple_patches_body_assignment_mapped_correctly(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """다중 ``@patch(...)`` decorator stack — innermost-first 함수 인자 매핑.
+
+    test_cli_bot_treasury_ipc.py:168 의 실제 패턴을 재현::
+
+        @patch("ante.cli.commands.bot._create_services")     # 위 (outer)
+        @patch("ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp")
+        @patch("ante.cli.commands.ipc_helpers.IPCClient")    # 가장 안쪽 (innermost)
+        def test_y(self, mock_ipc_cls, mock_socket, mock_services): ...
+
+    가장 안쪽 (``IPCClient``) 부터 첫 mock arg (``mock_ipc_cls``) 에 매핑되고,
+    ``mock_services`` 가 가장 바깥쪽 (``_create_services``) 에 매핑된다.
+
+    여기서는 ``mock_services.return_value = tuple`` body 할당이 위반이어야 함.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        class TestX:
+            @patch("{TARGET}")
+            @patch("ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp")
+            @patch("ante.cli.commands.ipc_helpers.IPCClient")
+            def test_y(self, mock_ipc_cls, mock_socket, mock_services):
+                mock_services.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # 1건만 — TARGET 의 alias body 할당.
+    # 다른 두 decorator (ipc_helpers) 는 allowlist 밖이라 무시.
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_decorator_patch_arg_body_no_assignment_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """mock arg 가 함수 body 에서 사용되지 않으면 위반 아님 — false positive 방지.
+
+    실제 ``test_cli_bot_treasury_ipc.py:168`` 패턴: ``@patch(...)`` 으로 mock
+    을 주입했지만 body 에서 ``mock_services`` 를 참조하지 않는다 (mock 객체가
+    호출되지 않아 사실상 noop patch).
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        class TestX:
+            @patch("{TARGET}")
+            def test_z(self, mock_services):
+                # body 에서 mock_services 미사용
+                value = 1 + 2
+                assert value == 3
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_decorator_patch_with_new_kwarg_skips_alias_mapping(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``new=`` 지정 시 mock arg 주입 안됨 → alias 매핑 스킵.
+
+    Python ``@patch(target, new=X)`` 는 함수 인자에 mock 을 주입하지 않는다
+    (``new`` 가 이미 substitute object). 따라서 mock arg slot 도 소비되지 않는다.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        def helper(*a, **k):
+            ...
+
+        class TestX:
+            @patch("{TARGET}", new=helper)
+            def test_x(self):
+                # 함수 인자에 mock 주입 안 됨. body 검사 대상 없음.
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # ``new=`` 자체는 helper (factory 가 아닌 일반 함수) substitute 라서 별도 검사
+    # 분기가 없다. body 검사도 alias 없음으로 스킵. 결과: 0건.
     assert vs == [], [v.format() for v in vs]
 
 
