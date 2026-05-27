@@ -57,13 +57,24 @@ class SignalKeyManager:
         return row["key_id"] if row else None
 
     async def rotate(self, bot_id: str) -> str:
-        """기존 키 폐기 + 새 키 발급."""
-        await self.revoke(bot_id)
+        """기존 키 폐기 + 새 키 발급.
+
+        Refs #1901: DELETE 와 INSERT 를 단일 트랜잭션으로 묶어 부분 실패(예:
+        INSERT UNIQUE 위반, 연결 단절) 시 기존 키가 영구 폐기되어 자격 증명이
+        사라지는 상태(orphan revoke)를 차단한다. 트랜잭션 내부 예외는
+        ``Database.transaction()`` 컨텍스트 매니저가 자동 ROLLBACK 후 재전파
+        한다.
+        """
         new_key = _KEY_PREFIX + secrets.token_hex(_KEY_BYTES)
-        await self._db.execute(
-            "INSERT INTO signal_keys (key_id, bot_id) VALUES (?, ?)",
-            (new_key, bot_id),
-        )
+        async with self._db.transaction():
+            await self._db.execute(
+                "DELETE FROM signal_keys WHERE bot_id = ?",
+                (bot_id,),
+            )
+            await self._db.execute(
+                "INSERT INTO signal_keys (key_id, bot_id) VALUES (?, ?)",
+                (new_key, bot_id),
+            )
         logger.info("시그널 키 재발급: bot=%s", bot_id)
         return new_key
 
