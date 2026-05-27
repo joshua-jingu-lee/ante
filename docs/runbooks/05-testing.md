@@ -100,6 +100,27 @@ async def test_order_request_to_fill():
 - 헬퍼 `_run_isolated_import`는 메타-테스트
   `test_isolation_helper_detects_planted_heavy_import`로 자체 회귀를 검증한다.
 
+### 3.5 Test isolation invariants
+
+- 같은 pytest 프로세스 안에서 `del sys.modules[...]`를 **호출하지 않는다**.
+  module re-import는 closure-bound reference (예: Click callback의
+  `__globals__`)와 `sys.modules` 사이 inconsistency를 만들어, 같은 worker의
+  다른 test가 `patch("ante.cli.commands.member._create_service", ...)` 등
+  module-level attribute를 mock할 때 wrong module instance를 target하게
+  된다. 그러면 real factory가 실행되어 결정적 fail로 이어진다 (#1909).
+- import side-effect 자체를 검증해야 한다면 별도 Python subprocess
+  (`subprocess.run([sys.executable, "-c", ...], env={..., "PYTHONPATH": ...})`)
+  에서 실행한다. 본 패턴 예시는 §3.4의
+  `tests/unit/test_cli_dependency_isolation.py`와 `#1909` fix 후의
+  `tests/unit/contracts/test_cli_registry_shell.py::
+  test_cli_registry_import_does_not_load_cli_main`를 참고한다.
+- module-level monkey-patch (autouse fixture 외)는 금지. 필요 시 pytest
+  fixture로 감싸 시점·범위를 명시한다.
+- `mock.patch(...).start()` 호출은 반드시 동일 scope의 `stop()` 또는
+  `addCleanup` / `with` context로 동반한다. `tests/conftest.py`의
+  `mock.patch.stopall()` autouse cleanup은 안전망일 뿐 idiomatic 패턴이
+  아니다 — start/stop은 test 본문에서 짝을 맞춰 작성한다.
+
 ## 4. Fixture 전략
 
 ```python
