@@ -33,10 +33,13 @@ from ante.trade.service import TradeService
 
 @pytest.fixture
 async def db(tmp_path):
-    """테스트용 SQLite DB."""
+    """테스트용 SQLite DB (Refs #1897: 명시적 close 로 aiosqlite 누수 차단)."""
     db = Database(str(tmp_path / "test.db"))
     await db.connect()
-    return db
+    try:
+        yield db
+    finally:
+        await db.close()
 
 
 @pytest.fixture

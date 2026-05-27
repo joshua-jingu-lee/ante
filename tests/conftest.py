@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib.util
 import os
 import sys
@@ -51,6 +52,12 @@ async def _cleanup_tasks():
     pytest-asyncio가 function-scope event loop를 사용할 때,
     start된 봇의 background task가 남아있으면 다음 테스트에서
     event loop 생성이 블로킹될 수 있음 (Python 3.11 Ubuntu 환경).
+
+    Refs #1897: 각 async 테스트 종료 직후 ``gc.collect()`` 를 한 번 강제해
+    이전 테스트가 남긴 ``_SelectorTransport`` / ``aiosqlite.Connection`` /
+    ``sqlite3.Connection`` 가 같은 테스트 경계 안에서 GC 되도록 한다. 다음
+    테스트로 누수 attribution 이 전이되어 ``PytestUnraisableExceptionWarning``
+    / ``ResourceWarning`` 이 무관 테스트에 표시되는 회귀를 방지한다.
     """
     yield
     loop = asyncio.get_event_loop()
@@ -63,3 +70,5 @@ async def _cleanup_tasks():
         task.cancel()
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
+    # Refs #1897: 남은 transport / DB Connection 객체를 결정적으로 정리한다.
+    gc.collect()

@@ -51,7 +51,11 @@ class TestBotManagerNotifications:
 
         mgr = BotManager(eventbus=eventbus, db=db)
         await mgr.initialize()
-        return mgr
+        try:
+            yield mgr
+        finally:
+            # Refs #1897: aiosqlite/sqlite Connection 누수 차단.
+            await db.close()
 
     async def test_bot_started_notification(self, manager, eventbus, notifications):
         """봇 시작 시 NotificationEvent 발행."""
@@ -133,7 +137,11 @@ class TestTradeRecorderNotifications:
         rec = TradeRecorder(db=db, position_history=ph)
         await rec.initialize()
         rec.subscribe(eventbus)
-        return rec
+        try:
+            yield rec
+        finally:
+            # Refs #1897: aiosqlite/sqlite Connection 누수 차단.
+            await db.close()
 
     async def test_filled_buy_notification(self, recorder, eventbus, notifications):
         """매수 체결 시 NotificationEvent 발행."""
@@ -379,7 +387,11 @@ class TestApprovalNotifications:
         executors = {t.value: _noop_executor for t in ApprovalType}
         svc = ApprovalService(db=db, eventbus=eventbus, executors=executors)
         await svc.initialize()
-        return svc
+        try:
+            yield svc
+        finally:
+            # Refs #1897: aiosqlite/sqlite Connection 누수 차단.
+            await db.close()
 
     async def test_approval_created_notification(
         self, service, eventbus, notifications
@@ -450,7 +462,11 @@ class TestAuthServiceNotification:
             token_manager=token_mgr,
             get_member=AsyncMock(return_value=None),
         )
-        return auth
+        try:
+            yield auth
+        finally:
+            # Refs #1897: aiosqlite/sqlite Connection 누수 차단.
+            await db.close()
 
     async def test_auth_failed_notification(
         self, auth_service, eventbus, notifications
