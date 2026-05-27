@@ -70,7 +70,7 @@ Codex는 `.agent/` 내부 에이전트가 아니라 외부 Codex plugin 명령�
 | **Codex Plan Review 워커** | `plan-preflight:started` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
 | **Codex 브랜치 리뷰어** | `/implement-issue`의 PR 생성 전 내부 `/codex:review --base <ref>` 실행, 또는 PR 후 추가 변경에 대한 수동 재검증 | 코드 품질 게이트로서 blocking issue 식별, 이슈/PR 코멘트에 PASS/FAIL 기록 |
 
-PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-approve`, `claude-pr-fix`)는 운영하지 않는다. 머지 게이트는 `ci`와 `merge-gate`만 본다.
+PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-approve`, `claude-pr-fix`)는 운영하지 않는다. 머지 게이트는 required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT)와 `merge-gate`만 본다.
 
 ## 2. `.agent/` 및 `.claude/` 디렉토리 구조
 
@@ -171,7 +171,7 @@ Codex Plan Review는 `.agent/skills/`가 아니라 `openai/codex-plugin-cc`의 `
   - Codex Plan Review는 `/codex:adversarial-review`로 호출하는 외부 read-only 리뷰다.
 - PR 후 자동 AI 승인/감사 워커는 운영하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
 - `@code-reviewer`는 자동 PR 승인 워커가 아니라 반복 failure와 구조 리스크에 대한 메타 리뷰를 담당한다.
-- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **`ci` + `merge-gate`** 결과를 기준으로 한다.
+- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
 - 로컬 worktree 정리는 Codex가 아니라 Claude 측 구현 머신이 담당한다.
 - 고위험 변경에서는 diff만 읽고 끝내지 않는다.
   - 생성자, 팩토리, 캐시 저장소, 소비자, 생성 산출물까지 넓혀 본다.
