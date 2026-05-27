@@ -36,7 +36,7 @@ Codex 브랜치 리뷰 attempt 4 finding 1/2/3 (last attempt fix):
   파일 아래쪽 stub 은 참조 불가. ``scan_file`` 이 2-pass 로 동작하도록 변경
   (pre-collect → visit).
 
-Codex 브랜치 리뷰 attempt 5 finding 1/2 (final fix):
+Codex 브랜치 리뷰 attempt 5 finding 1/2:
 
 * Finding 1: target-specific stub call-signature validation. production
   factory 의 positional/kwonly args 를 정확히 수집해 ``new=<stub>`` /
@@ -49,6 +49,19 @@ Codex 브랜치 리뷰 attempt 5 finding 1/2 (final fix):
   ``method-level decorator (innermost-first)`` → ``class-level decorator
   (innermost-first)`` 순서. method body 의 ``mock_arg.return_value = tuple``
   도 동일 검사 대상.
+
+Codex 브랜치 리뷰 attempt 6 finding 1/2 (false-positive fix, advisory mode 격하):
+
+* Finding 1: ``_stub_positional_arity_mismatch`` 가 stub positional arg
+  **이름** 까지 prod 와 일치시킬 것을 요구해 false positive 가 발생. 실제
+  호출은 positional forward 이므로 arity 만 검증해야 함. 이름 비교 제거.
+* Finding 2: ``visit_ClassDef`` 의 class decorator stack 이 클래스 내 **모든**
+  ``FunctionDef`` 에 매핑되어 helper method (``_setup``, ``_helper`` 등) 도
+  false positive. ``unittest.mock.patch.TEST_PREFIX`` 규칙대로 ``test`` 로
+  시작하는 method 만 매핑.
+
+추가: scanner 가 **advisory mode** 로 격하 (#1900 attempt 7 final). 기본
+exit code 항상 0, ``--strict`` 플래그 opt-in 시 violation → exit 1.
 """
 
 from __future__ import annotations
@@ -843,19 +856,22 @@ TREASURY_TARGET = "ante.cli.commands.treasury._create_treasury"
 def test_stub_missing_production_positional_arg_is_violation(
     tmp_path: Path, allowlist: set[str]
 ) -> None:
-    """``new=<stub>`` 의 stub 이 production 의 positional arg 를 받지 못하면
+    """``new=<stub>`` 의 stub 이 production positional arity 보다 부족하게 받으면
     호출 시 ``TypeError`` 발생. scanner 가 ``async-stub-positional-arity-
     mismatch`` 위반으로 잡아야 한다.
 
-    예: ``treasury._create_treasury(account_id, *, ctx)`` 의 stub 이 ``ctx=None``
-    만 받으면 production 이 ``stub("acc", ctx=ctx)`` 호출 시 fail.
+    예: ``treasury._create_treasury(account_id, *, ctx)`` 의 stub 이 positional
+    을 0개 (kwonly 만) 받으면 호출 시 fail.
+
+    codex review attempt 6 finding 1 false-positive fix 이후 — 이름 비교는
+    제거되었으므로 stub positional 이름과 무관하게 **arity 만** 검증한다.
     """
     src = f"""
         from contextlib import asynccontextmanager
         from unittest.mock import patch
 
         @asynccontextmanager
-        async def _stub(ctx=None):
+        async def _stub(*, ctx=None):  # positional 0개 — account_id 받지 못함
             yield ("t", "db")
 
         def test_x():
@@ -898,10 +914,11 @@ def test_stub_with_vararg_swallows_positional_not_violation(
 def test_stub_with_exact_positional_match_not_violation(
     tmp_path: Path, allowlist: set[str]
 ) -> None:
-    """stub 이 production positional args 를 같은 이름으로 정확히 받으면 통과.
+    """stub 이 production positional args 와 동일한 arity 및 이름이면 통과.
 
-    treasury: ``account_id`` positional + ``ctx`` kwonly. stub 이 같은 시그니처
-    를 재현하면 호환.
+    treasury: ``account_id`` positional + ``ctx`` kwonly. 이름/arity 모두 일치.
+    (attempt 6 finding 1 false-positive fix 이후 이름은 비교하지 않지만, 일치
+    하는 경우도 동일하게 통과하는지 회귀 lock.)
     """
     src = f"""
         from contextlib import asynccontextmanager
@@ -1108,3 +1125,254 @@ def test_class_decorator_non_allowlist_target_not_violation(
     p = _write(tmp_path, src)
     vs = scan_file(p, allowlist)
     assert vs == [], [v.format() for v in vs]
+
+
+# ── Attempt 6 Finding 1: stub positional arg 이름 mismatch false positive ───
+
+
+def test_stub_positional_arg_name_mismatch_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """stub positional arg **이름** 이 production 이름과 달라도 위반 아님
+    (codex review attempt 6 finding 1 — false-positive fix).
+
+    실제 호출은 positional forward (``stub("acc-val", ctx=ctx)``) 이므로 stub
+    arg 이름이 prod 이름과 무관하다. arity 만 충족하면 호환.
+
+    예: ``treasury._create_treasury(account_id, *, ctx=None)`` 의 stub 이
+    ``acc`` 라는 이름의 positional 을 받아도 동작한다.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(acc, *, ctx=None):    # 이름 다름, arity OK
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_stub_positional_kwonly_form_not_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """stub 이 ``positional, *, ctx=None`` 형태로 prod 의 ``account_id, *, ctx``
+    와 같은 모양이지만 이름이 다른 경우도 통과.
+
+    Finding 1 false-positive fix 의 다른 형태 회귀 lock.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub(some_id, *, ctx=None):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_stub_positional_arity_below_prod_is_still_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """false-positive fix 후에도 arity 부족 자체는 여전히 위반 (회귀 lock).
+
+    treasury: ``account_id`` positional + ``*, ctx`` kwarg. stub 이 positional
+    0개 (kwarg-only) 만 받으면 ``account_id`` arity 부족 → 호출 시 TypeError.
+    위반 유지.
+    """
+    src = f"""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        @asynccontextmanager
+        async def _stub_kwonly(*, ctx=None):
+            yield ("t", "db")
+
+        def test_x():
+            with patch("{TREASURY_TARGET}", new=_stub_kwonly):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "async-stub-positional-arity-mismatch"
+    assert vs[0].target == TREASURY_TARGET
+
+
+# ── Attempt 6 Finding 2: class @patch + non-test method false positive ──────
+
+
+def test_class_decorator_helper_method_not_assigned_mock_args(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """class-level ``@patch(target)`` 는 ``test_`` 로 시작하는 method 에만 mock
+    을 주입한다 (codex review attempt 6 finding 2 — false-positive fix).
+
+    helper method (``_setup``, ``_helper`` 등) 는 class decorator 의 mock 주입
+    대상이 아니므로 body 의 ``mock_arg.return_value = tuple`` 가 있어도 위반
+    아니다 (mock_arg 는 그냥 helper 함수의 일반 인자).
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        class TestX:
+            def _helper(self, value):
+                # 일반 helper method — class decorator 의 mock 주입 대상 아님.
+                # value 가 mock 으로 매핑되는 false positive 가 발생하면 안 됨.
+                value.return_value = (1, 2, 3, 4)
+                return value
+
+            def setUp(self):
+                pass
+
+            def tearDown(self):
+                pass
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert vs == [], [v.format() for v in vs]
+
+
+def test_class_decorator_test_method_still_violation(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """false-positive fix 후에도 ``test_`` method 의 mock arg body 할당은 여전히
+    위반 (Finding 2 회귀 lock).
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        class TestX:
+            def _helper(self, mock_arg):
+                # helper — class decorator 대상 아님. mock_arg 는 평범한 인자.
+                mock_arg.return_value = (1, 2, 3, 4)
+
+            def test_method(self, mock_services):
+                # ``test_`` method — class decorator 의 mock 주입 대상.
+                mock_services.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    assert len(vs) == 1, [v.format() for v in vs]
+    assert vs[0].kind == "tuple-return-on-patch-decorator-alias"
+    assert vs[0].target == TARGET
+
+
+def test_class_decorator_method_with_test_prefix_variants(
+    tmp_path: Path, allowlist: set[str]
+) -> None:
+    """``test`` prefix 변형 — ``testThing``, ``test_x``, ``testify`` 모두 prefix
+    매칭 (Python ``unittest.mock.patch.TEST_PREFIX = "test"``).
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        @patch("{TARGET}")
+        class TestX:
+            def test_a(self, mock_services):
+                mock_services.return_value = (1, 2, 3, 4)
+
+            def testCamelCase(self, mock_services):
+                mock_services.return_value = (1, 2, 3, 4)
+
+            def _not_test(self, value):
+                # 위반 아님 — _not_test 는 test prefix 아님.
+                value.return_value = (1, 2, 3, 4)
+        """
+    p = _write(tmp_path, src)
+    vs = scan_file(p, allowlist)
+    # test_a + testCamelCase = 2건
+    assert len(vs) == 2, [v.format() for v in vs]
+    assert all(v.kind == "tuple-return-on-patch-decorator-alias" for v in vs)
+    assert all(v.target == TARGET for v in vs)
+
+
+# ── Attempt 7: advisory mode (default) + --strict opt-in ────────────────────
+
+
+def _run_main(argv: list[str]) -> tuple[int, str]:
+    """scanner ``main(argv)`` 를 호출하고 stdout 캡처."""
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        exit_code = _scanner.main(argv)
+    return exit_code, buf.getvalue()
+
+
+def test_main_default_mode_violation_exits_zero(tmp_path: Path) -> None:
+    """default (advisory) mode: violation 있어도 exit 0 (#1900 attempt 7 final).
+
+    Scanner 는 advisory tool — CI gate 아님. violation 은 reporting only.
+    """
+    src = f"""
+        from unittest.mock import patch
+
+        def test_x():
+            with patch("{TARGET}", return_value=(1, 2, 3, 4)):
+                pass
+        """
+    p = _write(tmp_path, src)
+    exit_code, out = _run_main([str(p)])
+    assert exit_code == 0
+    assert "ADVISORY" in out
+    assert "tuple-return-on-patch" in out
+
+
+def test_main_strict_mode_violation_exits_one(tmp_path: Path) -> None:
+    """``--strict`` 명시 시 violation 있으면 exit 1 (사용자 opt-in CI gate)."""
+    src = f"""
+        from unittest.mock import patch
+
+        def test_x():
+            with patch("{TARGET}", return_value=(1, 2, 3, 4)):
+                pass
+        """
+    p = _write(tmp_path, src)
+    exit_code, out = _run_main(["--strict", str(p)])
+    assert exit_code == 1
+    assert "FAIL" in out
+    assert "strict" in out
+
+
+def test_main_default_mode_no_violation_exits_zero(tmp_path: Path) -> None:
+    """default mode + violation 0건도 exit 0 (advisory label 출력)."""
+    src = """
+        # 비어있는 파일 — patch 호출 없음
+        def test_x():
+            pass
+        """
+    p = _write(tmp_path, src)
+    exit_code, out = _run_main([str(p)])
+    assert exit_code == 0
+    assert "OK" in out
+    assert "mode=advisory" in out
+
+
+def test_main_strict_mode_no_violation_exits_zero(tmp_path: Path) -> None:
+    """``--strict`` + violation 0건도 exit 0."""
+    src = """
+        def test_x():
+            pass
+        """
+    p = _write(tmp_path, src)
+    exit_code, out = _run_main(["--strict", str(p)])
+    assert exit_code == 0
+    assert "OK" in out
+    assert "mode=strict" in out
