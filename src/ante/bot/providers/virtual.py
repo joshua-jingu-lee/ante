@@ -171,7 +171,7 @@ class VirtualExecutor:
         if not isinstance(event, OrderApprovedEvent):
             return
 
-        # 등록 단계의 stop / stop_limit 주문은 가상 체결하지 않는다 (#1337).
+        # 등록 단계의 stop / stop_limit 주문은 가상 체결하지 않는다.
         # StopOrderManager가 trigger 시 변환된 OrderRequestEvent를 발행하면
         # 그 변환 주문이 일반 limit/market로 다시 RuleEngine → Treasury →
         # OrderApprovedEvent 경로를 타고 들어와 정상 체결된다.
@@ -194,8 +194,8 @@ class VirtualExecutor:
             fill_price = event.price
         else:
             # market 주문: 현재가 기반 + 슬리피지
-            # SPLIT-3 (#1242): APIGateway.get_current_price 가 account_id 를
-            # required 로 받으므로 OrderApprovedEvent.account_id 를 명시 전달.
+            # APIGateway.get_current_price 가 account_id 를 required 로 받으
+            # 므로 OrderApprovedEvent.account_id 를 명시 전달.
             if self._gateway:
                 try:
                     current_price = await self._gateway.get_current_price(

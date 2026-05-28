@@ -35,12 +35,12 @@ class StrategyContextFactory:
 
     main.py에서 생성되어 BotManager에 주입된다.
 
-    SPLIT-3 (#1242): live mode 에서는 봇별로 ``LiveDataProvider`` 인스턴스
-    를 새로 생성해 ``account_id`` 를 closure 방식으로 격리한다. strategy
-    인터페이스 (``StrategyContext.get_ohlcv``) 는 변경되지 않는다.
-    ``api_gateway`` / ``parquet_store`` 가 모두 주입되어 있을 때만 봇별
-    인스턴스를 만들고, 미주입이면 fallback ``data_provider`` 를 사용한다
-    (virtual-only 환경 호환).
+    live mode 에서는 봇별로 ``LiveDataProvider`` 인스턴스를 새로 생성해
+    ``account_id`` 를 closure 방식으로 격리한다. strategy 인터페이스
+    (``StrategyContext.get_ohlcv``) 는 변경되지 않는다. ``api_gateway`` /
+    ``parquet_store`` 가 모두 주입되어 있을 때만 봇별 인스턴스를 만들고,
+    미주입이면 fallback ``data_provider`` 를 사용한다 (virtual-only 환경
+    호환).
     """
 
     def __init__(
@@ -116,10 +116,9 @@ class StrategyContextFactory:
     def _create_live_context(self, config: BotConfig) -> StrategyContext:
         """Live 봇용 StrategyContext 생성.
 
-        SPLIT-3 (#1242): ``APIGateway`` 가 주입돼 있으면 봇별로 새
-        ``LiveDataProvider`` 인스턴스를 만들어 ``config.account_id`` 를
-        closure 로 binding 한다. 그 외 환경에서는 공유 ``self._data_provider``
-        를 그대로 사용한다.
+        ``APIGateway`` 가 주입돼 있으면 봇별로 새 ``LiveDataProvider``
+        인스턴스를 만들어 ``config.account_id`` 를 closure 로 binding 한다.
+        그 외 환경에서는 공유 ``self._data_provider`` 를 그대로 사용한다.
         """
         portfolio = self._get_live_portfolio(config)
 
@@ -150,8 +149,8 @@ class StrategyContextFactory:
     def _create_virtual_context(self, config: BotConfig) -> StrategyContext:
         """Virtual 계좌 봇용 StrategyContext 생성.
 
-        SPLIT-3 (#1242): virtual 계좌 봇이라도 OHLCV / price 조회는 봇의 account_id
-        로 APIGateway 를 호출해야 한다 (broker routing). live 와 동일하게
+        virtual 계좌 봇이라도 OHLCV / price 조회는 봇의 account_id 로
+        APIGateway 를 호출해야 한다 (broker routing). live 와 동일하게
         ``api_gateway`` 가 있으면 봇별 LiveDataProvider 를 생성한다.
         """
         initial_balance = self._resolve_virtual_balance(config)

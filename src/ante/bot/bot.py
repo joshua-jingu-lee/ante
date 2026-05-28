@@ -320,10 +320,10 @@ class Bot:
                 "reason": event.error_message,
             }
         elif isinstance(event, OrderModifyRejectedEvent):
-            # #1331: 정정 거부 (rule reject / rule exception / gateway
-            # not-implemented) 통보를 전략에 전달. status는 신규 키
-            # ``"modify_rejected"``로 분리하여 기존 ``"rejected"``(신규
-            # 주문 거부)와 충돌하지 않도록 한다.
+            # 정정 거부 (rule reject / rule exception / gateway
+            # not-implemented) 통보를 전략에 전달. status 는 신규 키
+            # ``"modify_rejected"`` 로 분리하여 기존 ``"rejected"`` (신규
+            # 주문 거부) 와 충돌하지 않도록 한다.
             update = {
                 "order_id": event.order_id,
                 "status": "modify_rejected",
@@ -332,8 +332,8 @@ class Bot:
                 "reason": event.reason,
             }
         elif isinstance(event, StopOrderRegisteredEvent):
-            # #1336: stop / stop_limit 주문 등록 통보. 기존 ``order_id``
-            # 키와의 호환을 위해 ``stop_order_id`` 를 그대로 ``order_id`` 에도
+            # stop / stop_limit 주문 등록 통보. 기존 ``order_id`` 키와의
+            # 호환을 위해 ``stop_order_id`` 를 그대로 ``order_id`` 에도
             # 채운다 (전략이 후속 ``cancel/modify`` 에 그대로 사용 가능).
             # ``stop_order_id`` 키는 명시 식별자로 별도 노출.
             update = {
@@ -347,7 +347,7 @@ class Bot:
                 "limit_price": event.limit_price,
             }
         elif isinstance(event, StopOrderTriggeredEvent):
-            # #1336: stop 트리거 통보. 변환된 일반 주문은 자체
+            # stop 트리거 통보. 변환된 일반 주문은 자체
             # ``OrderSubmittedEvent`` 로 별도 통보되며, 본 dict 는 stop
             # 식별 단위 (stop_order_id, trigger_price) 를 보존한다.
             update = {
@@ -361,10 +361,10 @@ class Bot:
                 "converted_order_type": event.converted_order_type,
             }
         elif isinstance(event, StopOrderExpiredEvent):
-            # #1336: stop 만료 통보. ``reason`` 은
-            # ``"session_ended"`` | ``"manager_stopped"``.
-            # ``StopOrderExpiredEvent`` 자체에 side/quantity/stop_price 가
-            # 없으므로 dict 도 누락한 채 노출한다.
+            # stop 만료 통보. ``reason`` 은 ``"session_ended"`` |
+            # ``"manager_stopped"``. ``StopOrderExpiredEvent`` 자체에
+            # side/quantity/stop_price 가 없으므로 dict 도 누락한 채
+            # 노출한다.
             update = {
                 "order_id": event.stop_order_id,
                 "stop_order_id": event.stop_order_id,
@@ -436,10 +436,10 @@ class Bot:
 
         for action in actions:
             if action.action == "cancel":
-                # #1331: ``strategy_id`` 보강. 기존에는 비워서 발행되어 룰
-                # 평가/리포팅/외부 채널이 strategy 단위로 식별하지 못했다.
-                # symbol/side는 ``OrderAction`` 입력에 없고 ``OrderView``가
-                # 보장하지 않으므로 본 PR 범위 밖.
+                # ``strategy_id`` 보강 — 룰 평가/리포팅/외부 채널이 strategy
+                # 단위로 식별할 수 있도록 한다. symbol/side 는 ``OrderAction``
+                # 입력에 없고 ``OrderView`` 가 보장하지 않으므로 본 이벤트에는
+                # 포함하지 않는다.
                 await self._eventbus.publish(
                     OrderCancelEvent(
                         bot_id=self.bot_id,
@@ -450,7 +450,7 @@ class Bot:
                     )
                 )
             elif action.action == "modify":
-                # #1331: ``strategy_id`` 보강. 동일 사유.
+                # ``strategy_id`` 보강. 동일 사유.
                 await self._eventbus.publish(
                     OrderModifyEvent(
                         bot_id=self.bot_id,
@@ -467,11 +467,11 @@ class Bot:
         """봇 상태 정보 반환.
 
         ``config`` nested object 는 ``BotConfig`` 의 runtime control 6 필드
-        (#1458 — runtime control 6필드 SSOT: ``src/ante/bot/config.py``) 를
-        상세 조회 prefill 용도로 노출한다. top-level ``interval_seconds``
-        는 backward compatibility 용으로 유지된다(기존 list/detail 호출자의
-        flat key 의존성). 다른 runtime control 필드는 top-level 에 추가하지
-        않는다 (계약 중복 방지, #1458 Stop Conditions).
+        (SSOT: ``src/ante/bot/config.py``) 를 상세 조회 prefill 용도로
+        노출한다. top-level ``interval_seconds`` 는 backward compatibility
+        용으로 유지된다 (기존 list/detail 호출자의 flat key 의존성). 다른
+        runtime control 필드는 top-level 에 추가하지 않는다 (계약 중복
+        방지).
         """
         return {
             "bot_id": self.bot_id,

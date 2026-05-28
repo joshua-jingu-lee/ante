@@ -30,7 +30,7 @@ async def _release_treasury_budget(
 
     Mirrors ``BotManager.delete_bot``: try the bot's account first, then scan
     all persisted budget account ids because legacy or cross-account rows may
-    not match ``bots.account_id`` (Refs #982/#1161).
+    not match ``bots.account_id``.
     """
     from ante.eventbus.bus import EventBus
     from ante.treasury.treasury import Treasury
@@ -104,9 +104,9 @@ async def cold_path_remove_bot(
     if row is None:
         raise BotNotFoundError(bot_id)
 
-    # Refs #1217 → #1241 SPLIT-2: account_id fallback (`or "test"`) 제거.
-    # invalid 값은 ``InvalidAccountIdError`` 로 즉시 거부되어 잘못된 account 의
-    # Treasury 환수 / 잘못된 계좌 cleanup 경로가 실행되지 않는다.
+    # account_id fallback (`or "test"`) 금지. invalid 값은
+    # ``InvalidAccountIdError`` 로 즉시 거부되어 잘못된 account 의 Treasury
+    # 환수 / 잘못된 계좌 cleanup 경로가 실행되지 않는다.
     account_id = require_account_id(
         row.get("account_id"), context="cold_path_remove_bot"
     )
