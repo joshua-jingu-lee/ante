@@ -29,7 +29,7 @@ ante --format json report submit report_draft.json
 # 5. (채택 후) 실전 성과 확인 — Agent 피드백 루프
 ante trade list --bot bot_001 --from 2026-03-01 --to 2026-03-31 --format json
 ante --format json bot positions bot_001
-ante --format json strategy performance my_strategy
+ante --format json strategy performance my_strategy --account-id domestic
 ```
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
