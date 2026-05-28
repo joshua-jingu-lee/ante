@@ -331,12 +331,14 @@ JSON 출력이 필요하면 root 전역 옵션을 사용한다:
 ```bash
 ante bot list [--account <account_id>]  # 봇 목록 (계좌별 필터링)
 ante bot create --name <name> --strategy <strategy_id> [--account <account_id>] [--id <bot_id>] [--interval <초>] [--param key=value ...]
+ante bot update <bot_id> [--name <name>] [--strategy <strategy_id>] [--interval 10-3600] [--budget <float>] [--auto-restart|--no-auto-restart] [--max-restart-attempts 1-10] [--restart-cooldown-seconds 10-600] [--step-timeout-seconds 5-120] [--max-signals-per-step 1-200]  # 중지 상태 봇 설정 수정
 ante bot start <bot_id>            # 봇 시작
 ante bot stop <bot_id>             # 봇 중지
 ante bot remove <bot_id> --yes     # 봇 삭제 (--yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante bot info <bot_id>             # 봇 상세 정보
 ante bot status <bot_id>           # 봇 실행 상태 live 조회
 ante bot positions <bot_id>        # 봇 현재 포지션
+ante bot logs <bot_id> [--limit 1-100] [--offset N] [--from <날짜/시각>] [--to <날짜/시각>]  # 봇 실행 로그 조회
 ante bot signal-key <bot_id> [--rotate]  # 외부 시그널 키 조회·갱신
 ```
 
@@ -399,7 +401,9 @@ ante strategy validate <path>      # 전략 파일 정적 검증 (AST)
 ante strategy submit <path>        # 검증 + 로드 테스트 + 전략 등록
 ante strategy list                 # 등록된 전략 목록
 ante strategy info <name>          # 전략 상세 (메타데이터, 파라미터)
+ante strategy set-status <strategy_id> --status adopted|archived  # 전략 상태 변경
 ante strategy performance <name> [--account-id <account_id>]  # 전략 전체 성과 (모든 봇 집계, Agent 피드백용)
+ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기간별 성과 집계
 ```
 
 `strategy submit`은 전략 파일을 `StrategyRegistry`에 등록하고 `strategy_id`를 생성한다.
@@ -411,6 +415,13 @@ ante strategy performance <name> [--account-id <account_id>]  # 전략 전체 �
 ante treasury status --account <account_id>      # 자금 현황 (계좌별 필터링)
 ante treasury allocate <bot_id> <금액> --account <account_id>    # 봇에 자금 할당
 ante treasury deallocate <bot_id> <금액> --account <account_id>  # 봇 자금 회수
+ante treasury set-balance <amount> --account <account_id>        # 계좌 총 잔고 수동 설정
+ante treasury budgets [--account <account_id>]                   # 봇별 예산 목록
+ante treasury transactions [--account <account_id>] [--type allocate|deallocate|release|fill|bot_stopped_release] [--bot <bot_id>] [--from <날짜>] [--to <날짜>] [--limit 1-100] [--offset N]  # 자금 변동 이력
+
+# 포트폴리오 가치·추이
+ante treasury portfolio value [--account <account_id>]                                    # 총 자산 가치
+ante treasury portfolio history [--account <account_id>] [--from <날짜>] [--to <날짜>]    # 기간별 자산 추이
 
 # 일별 자산 스냅샷 조회
 ante --format json treasury snapshot --account <account_id>                        # 최근 스냅샷
@@ -431,6 +442,7 @@ ante --format json treasury snapshot --date <날짜> --account <account_id>     
 ```bash
 ante rule list --account <account_id> [--scope global|strategy]  # 전역 + 전략별 룰 목록
 ante rule info <rule_id> --account <account_id>           # 룰 상세
+ante rule update <rule_type> --account <account_id> [--enabled|--disabled] [--param key=value ...] [--params-json '{...}']  # 룰 설정 수정
 ```
 
 `rule list`/`rule info` 는 `_create_rule_engine` → `RuleEngine.__init__`
@@ -486,9 +498,11 @@ account-scoped CLI 명령의 invalid `account_id`( `None`/빈 문자열/`default
 
 ```bash
 ante data list [--data-path <경로>] [--db-path <경로>]            # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동)
+ante data info <dataset_id> [--data-path <경로>] [--format text|json]  # 데이터셋 상세 조회
 ante data schema [--data-path <경로>]                             # OHLCV 데이터 스키마 조회
 ante data storage [--data-path <경로>]                            # 저장 용량 현황 (MB 단위, timeframe별)
 ante data validate [--symbol <종목>] [--timeframe <주기>] [--fix] [--data-path <경로>]  # Parquet 파일 무결성 검증
+ante data delete <dataset_id> --type ohlcv|fundamental --yes [--data-path <경로>] [--format text|json]  # 데이터셋 삭제 (위험 명령, --yes 필수)
 ```
 
 ### `ante backtest` — 백테스트
@@ -664,6 +678,7 @@ ante member reactivate <member_id>                      # 멤버 재활성화 (m
 ante member revoke <member_id> --yes                    # 멤버 권한 영구 해제 (master-only, --yes 누락 시 CLI_CONFIRMATION_REQUIRED)
 ante member rotate-token <member_id>                    # 인증 토큰 갱신 (master-only)
 ante member set-emoji <member_id> <emoji>               # 멤버 이모지 설정 (master-only)
+ante member update-scopes <member_id> --scopes <comma-separated scopes>  # 멤버 권한 범위 변경 (master-only)
 ante member reset-password --recovery-key <key> (--new-password-env ENV_NAME | --new-password-file PATH)  # 비밀번호 초기화 (공개 명령 allowlist — recovery key가 인증 수단)
 ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file PATH)  # 복구 키 재발급 (공개 명령 allowlist — 현재 패스워드가 인증 수단)
 ```
