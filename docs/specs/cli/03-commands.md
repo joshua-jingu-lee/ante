@@ -714,8 +714,8 @@ ante instrument import <filepath> [--dry-run] [--db-path <경로>]  # CSV/JSON �
 
 > canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
 > instrument는 canonical-only(`*` 거부) 주 신규 입력 표면이다. `list`/`sync`/`import`의
-> non-canonical `--exchange` / import payload는 non-zero exit + 구조화 error payload로 거부되어야
-> 한다(`ORACLE_INVALID_EXCHANGE` 출처). enforcement 정렬은 #1577에서 다룬다(현재 코드/스펙 drift).
+> non-canonical `--exchange` / import payload는 `INSTRUMENT_INVALID_EXCHANGE` 코드 + non-zero exit
+> + 구조화 error payload로 거부된다 (#1577 완료). `ORACLE_INVALID_EXCHANGE`는 oracle host probe 측 source label이고 구현 코드는 `INSTRUMENT_INVALID_EXCHANGE`다.
 
 ### `ante notification` — 알림 관리
 
