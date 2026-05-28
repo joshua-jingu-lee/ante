@@ -49,7 +49,9 @@ from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer
 from ante.member.errors import (
     MemberAlreadyExistsError,
+    MemberInvalidEmojiError,
     MemberInvalidRecoveryCredentialError,
+    MemberMasterProtectedError,
     MemberNotFoundError,
     MemberStateConflictError,
     PermissionDeniedError,
@@ -481,3 +483,131 @@ class TestMemberPermissionDeniedEquivalence:
         # server.py:322 ``getattr(e, "code", ...)`` 와 helper ``ipc_error_payload``
         # 가 동일 코드를 produce 함을 verify (CLI/IPC contract 동등성).
         assert _ipc_envelope_code(exc) == "PERMISSION_DENIED"
+
+
+# ── (7) MemberInvalidEmojiError ↔ MEMBER_INVALID_EMOJI (#1915 set-emoji) ────
+
+
+class TestMemberInvalidEmojiEquivalence:
+    """``MemberInvalidEmojiError`` 는 양쪽에서 ``MEMBER_INVALID_EMOJI``.
+
+    CLI direct path: ``member set-emoji`` 표면 — ``except ValueError as e:
+    emit_cli_error(fmt, e)`` generic fallback 이 ``error_spec_for_exception``
+    의 registry-first lookup 으로 typed code 를 surface 한다. typed exception
+    이 ``ValueError`` 다중상속이라 기존 caller (test_member.py:602/606 의
+    ``pytest.raises(ValueError, match=...)``) 도 회귀 없이 동일하게 잡힌다.
+
+    이전 (#1915 이전): ``_validate_emoji_format`` 이 단순 ``ValueError`` 를
+    raise → ``emit_cli_error`` 가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
+    로 fallback → envelope code 가 ``EXECUTION_ERROR`` 로 surface 되었다.
+    #1915 가 typed exception 도입으로 안정 코드를 surface 한다.
+    """
+
+    def test_cli_direct_invalid_emoji_via_set_emoji(self, runner: CliRunner) -> None:
+        exc = MemberInvalidEmojiError("emoji는 단일 이모지만 허용됩니다")
+        svc = AsyncMock()
+        svc.update_emoji.side_effect = exc
+
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
+
+        with patch(
+            "ante.cli.commands.member._create_service",
+            new=_create_service,
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "member", "set-emoji", "owner", "x"],
+            )
+
+        assert result.exit_code != 0, result.output
+        # traceback 누설 금지 — CLI exit 1 + JSON envelope 만 surface.
+        assert "Traceback" not in result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == "MEMBER_INVALID_EMOJI"
+
+    def test_ipc_envelope_invalid_emoji(self) -> None:
+        exc = MemberInvalidEmojiError("emoji는 단일 이모지만 허용됩니다")
+        assert _ipc_envelope_code(exc) == "MEMBER_INVALID_EMOJI"
+
+
+# ── (8) MemberMasterProtectedError ↔ MEMBER_MASTER_PROTECTED (#1915 suspend/revoke)
+
+
+class TestMemberMasterProtectedEquivalence:
+    """``MemberMasterProtectedError`` 는 양쪽에서 ``MEMBER_MASTER_PROTECTED``.
+
+    CLI direct path: ``member suspend`` / ``member revoke`` 표면 — ``except
+    (ValueError, PermissionError) as e: emit_cli_error(fmt, e)`` generic
+    fallback 이 ``error_spec_for_exception`` 의 registry-first lookup 으로
+    typed code 를 surface 한다. typed exception 이 ``PermissionError``
+    다중상속이라 기존 caller (test_member_service_master_guard.py:239/245
+    의 ``pytest.raises(PermissionError, match="master는 ...")``) 도 회귀
+    없이 동일하게 잡힌다.
+
+    ``PermissionDeniedError`` (#1843 sub-PR 1) 와 의미 분리:
+
+    - ``PermissionDeniedError`` (``PERMISSION_DENIED``): 비-master 호출자의
+      master-only operation 시도 (``@require_master`` decorator surface).
+    - ``MemberMasterProtectedError`` (``MEMBER_MASTER_PROTECTED``): master
+      본인을 대상으로 한 파괴적 operation (suspend / revoke) 거부 — 호출자
+      권한이 master 라도 거부된다.
+
+    이전 (#1915 이전): ``_assert_not_master`` 가 단순 ``PermissionError`` 를
+    raise → ``emit_cli_error`` 가 ``.code`` 속성 부재로 ``EXECUTION_ERROR``
+    fallback. #1915 가 typed exception 도입으로 안정 코드 surface.
+    """
+
+    def test_cli_direct_master_protected_via_suspend(self, runner: CliRunner) -> None:
+        exc = MemberMasterProtectedError("master는 suspend할 수 없습니다")
+        svc = AsyncMock()
+        svc.suspend.side_effect = exc
+
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
+
+        with patch(
+            "ante.cli.commands.member._create_service",
+            new=_create_service,
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "member", "suspend", "owner"],
+            )
+
+        assert result.exit_code != 0, result.output
+        assert "Traceback" not in result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == "MEMBER_MASTER_PROTECTED"
+
+    def test_cli_direct_master_protected_via_revoke(self, runner: CliRunner) -> None:
+        exc = MemberMasterProtectedError("master는 revoke할 수 없습니다")
+        svc = AsyncMock()
+        svc.revoke.side_effect = exc
+
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN202
+            yield svc
+
+        with patch(
+            "ante.cli.commands.member._create_service",
+            new=_create_service,
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "member", "revoke", "owner", "--yes"],
+            )
+
+        assert result.exit_code != 0, result.output
+        assert "Traceback" not in result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == "MEMBER_MASTER_PROTECTED"
+
+    def test_ipc_envelope_master_protected(self) -> None:
+        exc = MemberMasterProtectedError("master는 suspend할 수 없습니다")
+        assert _ipc_envelope_code(exc) == "MEMBER_MASTER_PROTECTED"
