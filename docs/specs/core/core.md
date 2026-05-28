@@ -67,7 +67,7 @@ canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기
 `exchange`는 instrument / account / data / strategy / backtest가 공유하는 식별 차원이다.
 1.0 시점에 각 표면이 서로 다른 허용값 집합과 검증 동작을 갖고 있어 SSOT가 부재했고, 본 절이
 그 단일 계약을 확정한다. **런타임 enforcement·코드 동작 변경은 본 절의 범위가 아니다**(후속 이슈
-#1576/#1577/#1578/#1579로 위임). 본 절은 "무엇이 canonical이고 어느 경계에서 어떻게 거부되어야
+#1576/#1577(완료)/#1578/#1579로 위임). 본 절은 "무엇이 canonical이고 어느 경계에서 어떻게 거부되어야
 하는지"의 계약만 정의한다.
 
 ### Canonical set
@@ -142,15 +142,15 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 
 **범위 불변식**: 본 절은 exchange-vocabulary 유효성 계약(canonical 5종 비거부 / `*` 규칙 /
 legacy read 호환 / 에러 계층 409·422·non-zero / 축 A·B)을 정의한다. surface별 source 지원·
-preset wiring·enforcement·구현 동작·정렬은 #1577/#1578에 위임되며 본 절에서 완전 명세하지
-않는다. #1577/#1578 구현자는 본 절의 vocabulary 계약을 상위 기준으로 삼고 surface 동작을 그
+preset wiring·enforcement·구현 동작·정렬은 #1577(완료)/#1578에 위임되며 본 절에서 완전 명세하지
+않는다. #1577(완료)/#1578 구현자는 본 절의 vocabulary 계약을 상위 기준으로 삼고 surface 동작을 그
 아래에서 정렬한다. 따라서 아래 표의 각 행은 vocabulary 계약과 에러 계층까지만 계약화하며,
 surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 표기한다.
 
 | 표면 | canonical | `*` | non-canonical 신규 입력 거부 계약 | 비고 |
 |------|-----------|-----|-----------------------------------|------|
 | Instrument CLI `list`/`import` | 허용 | 거부 | non-zero exit + 구조화 error payload (`{status:"error", code, message}`) | #1577 완료 (`INSTRUMENT_INVALID_EXCHANGE`). **주 신규 입력 표면** (oracle source label은 `ORACLE_INVALID_EXCHANGE`; 구현 코드는 `INSTRUMENT_INVALID_EXCHANGE`) |
-| Instrument CLI `sync` | 허용 (vocabulary 측면은 동일: canonical 5종만 유효, non-canonical 거부) | 거부 | non-zero exit + 구조화 error payload | **source-bound 표면.** `sync`는 KIS API(KRX 도메인)에서만 마스터를 가져와 전달 `exchange`를 저장 라벨로 쓴다(`src/ante/cli/commands/instrument.py`의 `sync`→`KISAdapter.get_instruments`, `docs/specs/instrument/` source 계약). 따라서 canonical이지만 source 미지원 exchange(`NYSE/NASDAQ/AMEX` 등 비-KRX)에 대한 sync 동작·에러 계약은 **source-supported-exchange 정렬 사안으로 #1577에 위임**(backtest `--exchange`처럼 spec-vs-implementation gap). 본 SSOT는 "sync는 source-bound이며 source 미지원 canonical 값 처리 계약은 #1577" 까지만 명시하고 완전 명세하지 않는다 |
+| Instrument CLI `sync` | 허용 (vocabulary 측면은 동일: canonical 5종만 유효, non-canonical 거부) | 거부 | non-zero exit + 구조화 error payload | **source-bound 표면.** `sync`는 KIS API(KRX 도메인)에서만 마스터를 가져와 전달 `exchange`를 저장 라벨로 쓴다(`src/ante/cli/commands/instrument.py`의 `sync`→`KISAdapter.get_instruments`, `docs/specs/instrument/` source 계약). 따라서 canonical이지만 source 미지원 exchange(`NYSE/NASDAQ/AMEX` 등 비-KRX)에 대한 sync 동작·에러 계약은 **source-supported-exchange 정렬 사안으로 #1577 외부의 별도 잔여 사안**(backtest `--exchange`처럼 spec-vs-implementation gap). 본 SSOT는 "sync는 source-bound이며 source 미지원 canonical 값 처리 계약은 #1577" 까지만 명시하고 완전 명세하지 않는다 |
 | Account CLI preset (`account create` 등) | canonical 5종은 invalid-exchange로 거부되지 않음 (축 A); preset 미제공 canonical 값은 축 B 제약 | 거부 | non-zero exit | 축 A: `*`/non-canonical은 거부. 축 B: canonical이지만 1.0 preset 미제공 값(`NYSE/NASDAQ/AMEX`)은 **preset/broker 가용성 제약**이지 invalid-exchange 거부가 아니다(별개 차원). 구체적 preset wiring(어떤 preset이 어떤 exchange를 자동 구성하는가)은 축 B canonical-known 표·축 B 정의를 상위 기준으로 삼아 **#1578에서 정렬**한다 — 본 행은 vocabulary 계약(축 A 비거부 / `*`·non-canonical 거부)만 명시한다 |
 | AccountService (생성/검증) | canonical 5종 허용 (축 A: non-canonical만 서비스 검증 에러) | 거부 | 서비스 검증 에러 | `exchange`는 identity 필드(`docs/specs/account/03-data-model.md:96`). canonical 5종은 서비스 exchange 검증에서 거부되지 않는다. 1.0 account preset이 `NYSE/NASDAQ/AMEX`를 미제공하는 것은 **축 B(preset/broker 가용성) 제약**이며 "invalid exchange 거부"가 아니다(별개 차원) |
 | Account CLI — `account create` (cold-path 계좌 생성) | — | — | **cold-path 차단 계층은 409** (계좌 생성은 cold-path 전용, `exchange` 포함 입력 무관) | 진입 가드의 구체 동작은 #1578에서 정렬한다 |
@@ -169,9 +169,9 @@ surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 �
   경로가 될 수 없고, 기존 경로 read 호환은 "Legacy out-of-vocabulary 호환 정책"이 규율한다.
 - 시나리오 2(`ORACLE_INVALID_EXCHANGE`가 신규 입력에서 거부되어야 하는가): Instrument CLI
   `list`/`import`(및 vocabulary 측면에서 동일한 `sync`) 행에 따라 non-canonical 신규 입력은
-  non-zero exit + 구조화 error payload로 거부되어야 한다(enforcement는 #1577). `sync`의
+  non-zero exit + 구조화 error payload로 거부되어야 한다(enforcement는 #1577 완료). `sync`의
   source 미지원 canonical 값(`NYSE/NASDAQ/AMEX` 등 비-KRX) 처리 계약은 source-bound 표면
-  사안으로 #1577에 위임된다 — 본 SSOT 단독으로는 vocabulary 거부(non-canonical)만 판정한다.
+  사안으로 #1577 외부의 별도 잔여 사안이다 — 본 SSOT 단독으로는 vocabulary 거부(non-canonical)만 판정한다.
 - 시나리오 3(`KOSPI`는 exchange인가): "exchange vs market vs source vs broker_type" 절에 따라
   `KOSPI`는 exchange가 아니라 KRX 내부 market/category다.
 
