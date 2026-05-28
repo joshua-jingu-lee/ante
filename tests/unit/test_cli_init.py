@@ -405,7 +405,7 @@ class TestInitFiveStateGuard:
         assert _MOCK_TOKEN in combined
         assert _MOCK_RECOVERY_KEY in combined
         assert "패스워드" in combined
-        # 에러 메시지에서 test_account_failed 코드 확인
+        # 에러 메시지에서 ACCOUNT_TEST_CREATE_FAILED 코드 확인
         assert "테스트 계좌 생성 실패" in combined
 
     def test_master_credentials_json_mode_stderr_event_on_test_account_failure(
@@ -812,7 +812,7 @@ class TestInitJsonErrorContract:
         data = self._parse_error_json(result.output)
         assert data["status"] == "error"
         assert "패스워드 정책 위반" in data["message"]
-        assert data.get("code") == "bootstrap_failed"
+        assert data.get("code") == "ACCOUNT_MASTER_BOOTSTRAP_FAILED"
 
     def test_init_test_account_failure_json_output(self, runner, tmp_path):
         """_create_test_account가 Exception을 던지면 JSON 에러 + exit 1."""
@@ -847,7 +847,7 @@ class TestInitJsonErrorContract:
         assert data["status"] == "error"
         assert "테스트 계좌 생성 실패" in data["message"]
         assert "DB lock" in data["message"]
-        assert data.get("code") == "test_account_failed"
+        assert data.get("code") == "ACCOUNT_TEST_CREATE_FAILED"
 
     def test_init_already_initialized_text_mode_preserves_message(
         self, runner, tmp_path
