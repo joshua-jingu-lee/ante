@@ -64,7 +64,7 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
 
     fmt = get_formatter(ctx)
 
-    # Refs #1157: PID 조회는 명시적 ``Config`` 인스턴스로 한다. ``--config-dir``
+    # PID 조회는 명시적 ``Config`` 인스턴스로 한다. ``--config-dir``
     # (서브커맨드 또는 루트 ``ctx.obj["config_dir"]``)이 가리키는 디렉토리의
     # canonical PID 파일만 본다. 0-arg ``read_pid_file()``은 ``ANTE_CONFIG_DIR``
     # env 또는 default 폴백을 보므로, 다른 ``config_dir``로 실행 중인 server를
@@ -103,13 +103,12 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
 
     try:
         if fmt.is_json:
-            # #1757: JSON 모드 — 부모 stdout 에는 ``fmt.success`` 가 출력한
-            # 단일 JSON document 하나만 남아야 한다. 자식 프로세스
+            # JSON 모드 — 부모 stdout 에는 ``fmt.success`` 가 출력한 단일
+            # JSON document 하나만 남아야 한다. 자식 프로세스
             # (``python -m ante.main``) 의 runtime logger 가 inherit 된 stdout
             # 으로 흘러 들면 자동화 호출자(ante-oracle host probe 등)가
-            # ``json.loads`` 로 응답을 파싱하지 못한다 (A7
-            # ``cli_system_start_json_stdout_contract`` probe). 자식 stdout/
-            # stderr 를 부모 stderr 로 redirect 해 stdout 격리를 보존한다.
+            # ``json.loads`` 로 응답을 파싱하지 못한다. 자식 stdout/stderr 를
+            # 부모 stderr 로 redirect 해 stdout 격리를 보존한다.
             proc = subprocess.run(cmd, env=env, stdout=sys.stderr, stderr=sys.stderr)
         else:
             # text 모드: 자식 stdout/stderr inherit (기존 동작 보존).
@@ -130,9 +129,9 @@ def stop(ctx: click.Context) -> None:
 
     fmt = get_formatter(ctx)
 
-    # Refs #1157: PID 경로는 `runtime.pid_path` resolver로 결정한다.
-    # 같은 `config_dir`을 쓰는 server runtime/IPC client/cold-path guard와
-    # 동일한 canonical 위치(`<config_dir>/run/ante.pid`)를 본다.
+    # PID 경로는 `runtime.pid_path` resolver로 결정한다. 같은 `config_dir`을
+    # 쓰는 server runtime/IPC client/cold-path guard와 동일한 canonical
+    # 위치(`<config_dir>/run/ante.pid`)를 본다.
     config_dir = ctx.obj.get("config_dir") if ctx.obj else None
     config = Config.load(config_dir=config_dir)
     pid_path = config.runtime_pid_path()
@@ -147,8 +146,8 @@ def stop(ctx: click.Context) -> None:
 
     if not _is_process_alive(pid):
         # 프로세스가 없으면 canonical + legacy ``db/ante.pid`` 양쪽 stale PID
-        # 정리 (Refs #1157). ``read_pid_file``은 canonical만 보지만, cleanup은
-        # transitional 환경의 legacy 잔여까지 best-effort로 unlink한다.
+        # 정리. ``read_pid_file``은 canonical만 보지만, cleanup은 transitional
+        # 환경의 legacy 잔여까지 best-effort로 unlink한다.
         _remove_pid_file(config)
         fmt.error(
             f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다.",
@@ -164,10 +163,10 @@ def stop(ctx: click.Context) -> None:
 async def _create_services(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Database, EventBus]]:
-    """오프라인/bootstrap 커맨드용 DB/EventBus async context manager (#1857).
+    """오프라인/bootstrap 커맨드용 DB/EventBus async context manager.
 
-    ``open_cli_db`` 기반 lifecycle 로 전환했다 (#1855 factory composition,
-    #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle 로 전환했다 (factory composition,
+    account.py 패턴 1:1 미러). 호출 패턴:
 
         async with _create_services(ctx=ctx) as (db, eventbus):
             ...
@@ -196,7 +195,7 @@ def status(ctx: click.Context) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_status() -> dict:
-        # #1857: ``_create_services`` async context manager 전환.
+        # ``_create_services`` async context manager lifecycle.
         from ante.account.service import AccountService
 
         async with _create_services(ctx=ctx) as (db, eventbus):

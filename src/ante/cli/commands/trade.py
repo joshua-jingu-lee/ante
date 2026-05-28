@@ -35,17 +35,17 @@ def _run(coro):  # noqa: ANN001, ANN202
 async def _create_trade_service(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[TradeService, Database]]:
-    """CLI 에서 ``TradeService`` async context manager (#1857).
+    """CLI 에서 ``TradeService`` async context manager.
 
-    ``open_cli_db`` 기반 lifecycle 로 전환했다 (#1855 factory composition,
-    #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
+    1:1 미러). 호출 패턴:
 
         async with _create_trade_service(ctx=ctx) as (service, db):
             ...
 
     ``PositionHistory``/``TradeRecorder`` ``initialize()`` 는 표 생성용으로
-    그대로 보존한다 (#1854 §4.2 예외는 AuditLogger/DynamicConfigService 만;
-    본 helper 는 안전성을 위해 호출 유지).
+    그대로 보존한다 (read-only 명시 예외는 AuditLogger/DynamicConfigService
+    만; 본 helper 는 안전성을 위해 호출 유지).
     """
     from ante.trade.performance import PerformanceTracker
     from ante.trade.position import PositionHistory
@@ -114,7 +114,7 @@ def trade_list(
     )
 
     async def _run_list() -> list[dict]:
-        # #1857: ``_create_trade_service`` async context manager 전환.
+        # ``_create_trade_service`` async context manager lifecycle.
         async with _create_trade_service(ctx=ctx) as (service, _):
             fd = datetime.fromisoformat(from_date) if from_date else None
             td = datetime.fromisoformat(to_date) if to_date else None
@@ -175,14 +175,15 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        # ``open_cli_db`` 헬퍼 lifecycle (cleanup invariant — 예외/cancellation
+        # 시에도 ``Database.close()`` 1회 보장).
         async with open_cli_db(ctx) as db:
             # fresh DB 에서는 `trades` 테이블이 아직 생성되지 않은 상태일 수
             # 있다. (`_create_trade_service` 경로와 달리 `trade info` 는
             # raw db 핸들만 쓰고 `TradeRecorder.initialize` 를 거치지 않는다.)
             # 정의상 테이블 부재는 해당 trade 미존재와 동치이므로 not-found 로
             # 정규화한다. malformed DB 같은 다른 OperationalError 까지
-            # 삼키지 않도록 "no such table" 메시지로만 좁힌다 (#1753).
+            # 삼키지 않도록 "no such table" 메시지로만 좁힌다.
             try:
                 row = await db.fetch_one(
                     "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
@@ -194,7 +195,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
             return dict(row) if row else None
 
     # 호출 표면 try/except: 위 _run_info 에서 흡수하지 못한 비정상 예외는
-    # TRADE_ERROR 로 분류해 raw traceback 노출을 차단한다 (#1753).
+    # TRADE_ERROR 로 분류해 raw traceback 노출을 차단한다.
     try:
         result = _run(_run_info())
     except Exception as e:

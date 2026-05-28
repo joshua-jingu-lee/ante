@@ -31,8 +31,8 @@ def signal_connect(ctx: click.Context, key: str) -> None:
 async def _run_connect(ctx: click.Context, key: str) -> None:
     """시그널 채널 연결 및 실행.
 
-    #1857: 본 명령은 ``SignalChannel`` 을 통해 외부 시그널 소스 (HTTP/WS 등)
-    와 long-lived loop 를 형성한다. ``Database`` lifecycle 이 external process
+    본 명령은 ``SignalChannel`` 을 통해 외부 시그널 소스 (HTTP/WS 등) 와
+    long-lived loop 를 형성한다. ``Database`` lifecycle 이 external process
     runtime 과 엮여 있어 단순 ``open_cli_db`` async-context wrap 으로 동치
     변환이 불가능하다 — 별도 spec 정렬 PR (#1818 follow-up) 에서 다룬다.
     """

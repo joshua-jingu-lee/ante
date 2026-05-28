@@ -22,10 +22,10 @@ def _run(coro):  # noqa: ANN001, ANN202
 
 
 async def _create_account_service():  # noqa: ANN202
-    # #1857: broker live-state 경로 (adapter.connect 동반) 는 본 PR scope
-    # 외다. live broker state 와 ``Database`` lifecycle 이 같은 try/except 로
-    # 엮여 있어 단순 ``open_cli_db`` wrap 으로 동치 변환이 불가능하다.
-    # 별도 spec 정렬 PR (부모 epic #1818 follow-up) 에서 다룬다.
+    # broker live-state 경로 (adapter.connect 동반) 는 별도 epic scope.
+    # live broker state 와 ``Database`` lifecycle 이 같은 try/except 로 엮여
+    # 있어 단순 ``open_cli_db`` wrap 으로 동치 변환이 불가능하다 — 별도 spec
+    # 정렬 PR (부모 epic #1818 follow-up) 에서 다룬다.
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
@@ -48,8 +48,8 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
     ``adapter.connect`` 가 raise 하면, 호출자에 ``db`` 핸들이 전달되지 않으므로
     여기서 ``db.close()`` 를 보장해야 한다. close 를 누락하면 aiosqlite
     백그라운드 스레드가 살아 있어 ``asyncio.run`` 종료 후에도 프로세스가
-    수 초간 hang 한다 (#1535). lifecycle 보장 — 정상 경로의 close 는
-    호출자(``_run_balance`` 등)가 계속 책임진다.
+    수 초간 hang 한다. lifecycle 보장 — 정상 경로의 close 는 호출자
+    (``_run_balance`` 등) 가 계속 책임진다.
     """
     if account_id:
         account_service, db = await _create_account_service()
@@ -92,8 +92,8 @@ async def _ipc_broker_command(command: str, account_id: str, actor: str) -> dict
     """IPC를 통해 서버 브로커 인스턴스에 위임한다.
 
     ``account_id``는 호출자(``--account`` required CLI 옵션 + helper 통과)
-    에서 이미 검증된 값이어야 한다. fallback 금지 정책(#1217 SPLIT-1)에 따라
-    빈 dict 를 IPC 로 보내지 않는다.
+    에서 이미 검증된 값이어야 한다. fallback 금지 정책에 따라 빈 dict 를
+    IPC 로 보내지 않는다.
 
     ServerNotRunningError, IPCTimeoutError 시 예외를 전파하여 호출자가 폴백 처리한다.
     """
@@ -116,7 +116,7 @@ def status(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    # (fallback 금지, helper 재사용).
     # ``InvalidAccountIdError``는 non-Click ``AccountError``라 기존
     # ``except click.ClickException`` fallback이 잡지 못해 traceback이 났다.
     # helper가 ``InvalidAccountIdError``→``fmt.error(code=VALIDATION_ERROR)``+
@@ -185,7 +185,7 @@ def balance(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.balance"
     )
@@ -213,8 +213,8 @@ def balance(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            # #1843 sub-PR 5: emit_cli_error 정렬 — CLI/IPC 동일 public code
-            # surface. broker typed exception (APIError / AuthenticationError /
+            # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
+            # broker typed exception (APIError / AuthenticationError /
             # OrderNotFoundError / RateLimitError / CircuitOpenError) 은
             # registry MRO lookup 으로 ``BROKER_*`` 안정 코드를 surface 하며,
             # 미분류 fault 는 ``EXECUTION_ERROR`` fallback.
@@ -243,7 +243,7 @@ def positions(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.positions"
     )
@@ -272,8 +272,8 @@ def positions(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception 의
-            # 안정 코드 surface (positions 표면 동일 정책).
+            # emit_cli_error 로 broker typed exception 안정 코드 surface
+            # (positions 표면 동일 정책).
             emit_cli_error(fmt, e)
 
     pos_list = result.get("positions", [])
@@ -305,7 +305,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
     fmt = get_formatter(ctx)
 
     # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, #1217 SPLIT-1 + #1623 Split C / #1634 helper 재사용).
+    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.reconcile"
     )
@@ -325,8 +325,8 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
         except click.ClickException:
             raise
         except Exception as e:
-            # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception
-            # 의 안정 코드 surface (reconcile --fix mutating path).
+            # emit_cli_error 로 broker typed exception 안정 코드 surface
+            # (reconcile --fix mutating path).
             emit_cli_error(fmt, e)
     else:
         # 읽기 전용: IPC 우선, 폴백으로 오프라인 방식
@@ -342,9 +342,9 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
             result = _run(_run_ipc_reconcile())
         except click.ClickException:
             # 서버 미실행 — 기존 오프라인 방식 폴백.
-            # #1857: broker live-state (adapter + DB) 경로는 본 PR scope 외다
-            # — 별도 spec 정렬 PR (#1818 follow-up) 에서 ``open_cli_db`` 와
-            # adapter lifecycle 의 동치 변환 contract 를 정합한다.
+            # broker live-state (adapter + DB) 경로는 별도 spec 정렬 PR
+            # (#1818 follow-up) 에서 ``open_cli_db`` 와 adapter lifecycle 의
+            # 동치 변환 contract 를 정합한다.
             async def _run_reconcile() -> dict:
                 from ante.cli.main import get_db_path
                 from ante.core.database import Database
@@ -359,9 +359,9 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                     await position_history.initialize()
 
                     broker_positions = await adapter.get_account_positions()
-                    # Refs #1240 review (P2-2): 단일 계좌 reconcile은 해당 계좌
-                    # 포지션끼리만 비교해야 한다. account_id 필터를 빼면 다른
-                    # 계좌의 positions 가 false discrepancy 로 잡힌다.
+                    # 단일 계좌 reconcile은 해당 계좌 포지션끼리만 비교한다.
+                    # account_id 필터를 빼면 다른 계좌의 positions 가 false
+                    # discrepancy 로 잡힌다.
                     internal_positions = await position_history.get_all_positions(
                         account_id=validated_account_id
                     )
@@ -403,9 +403,8 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                 fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
                 raise SystemExit(1) from e
             except Exception as e:
-                # #1843 sub-PR 5: emit_cli_error 정렬 — broker typed exception
-                # (APIError 등) 도 안정 코드 surface. 기존 ``code=""`` fallback
-                # 은 sweep 정신과 어긋나므로 helper 의 registry MRO lookup +
+                # emit_cli_error 로 broker typed exception (APIError 등)
+                # 안정 코드 surface. helper 의 registry MRO lookup +
                 # EXECUTION_ERROR fallback 으로 일관 정렬한다.
                 emit_cli_error(fmt, e)
 

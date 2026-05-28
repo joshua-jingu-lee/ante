@@ -64,10 +64,10 @@ def audit_list(
     )
 
     async def _run_list() -> list[dict]:
-        # #1857: ``open_cli_db`` 헬퍼가 ``AuditLogger.initialize()`` /
-        # ``query()`` 의 예외 / cancellation 까지 ``Database.close()`` 1회 호출을
-        # 보장한다 (#1722 cleanup invariant). ``AuditLogger.initialize()`` 는
-        # #1854 §4.2 명시 예외 (read-only) — 그대로 보존한다.
+        # ``open_cli_db`` 헬퍼가 ``AuditLogger.initialize()`` / ``query()`` 의
+        # 예외 / cancellation 까지 ``Database.close()`` 1회 호출을 보장한다
+        # (cleanup invariant). ``AuditLogger.initialize()`` 는 read-only 명시
+        # 예외(`docs/specs/audit/` §4.2) — 그대로 보존한다.
         from ante.audit import AuditLogger
 
         async with open_cli_db(ctx) as db:

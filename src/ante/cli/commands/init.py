@@ -46,8 +46,8 @@ timezone = "Asia/Seoul"
 path = "{db_path}"
 
 [runtime]
-# `config_dir` 기준 상대 경로. PID/IPC socket 위치 (Refs #1157,
-# docs/specs/config/03-design-decisions.md 200-202).
+# `config_dir` 기준 상대 경로. PID/IPC socket 위치
+# (docs/specs/config/03-design-decisions.md 200-202).
 pid_path = "run/ante.pid"
 socket_path = "run/ante.sock"
 """
@@ -85,7 +85,7 @@ def _resolve_effective_key(
 ) -> tuple[str, bool, bool]:
     """env/file의 키 분류 결과로부터 effective key와 파일 상태 플래그를 도출한다.
 
-    결정 행렬 (이슈 #1721 Implementation Plan v4):
+    결정 행렬:
 
     - valid env + valid file (동일 값): env 사용, file 보존, 백업 없음.
     - valid env + valid file (다른 값): env-wins. file을 env value로 교체하지만

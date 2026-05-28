@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 
 # CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
 # ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
-# 내장 ``PermissionError``와 별개 계열(``MemberError`` → ``Exception``)이라 기존
-# ``except (ValueError, PermissionError)``로는 잡히지 않고 traceback이 노출된다
-# (이슈 #1351 1차 Codex review FAIL — Finding 2). suspend / reactivate / revoke /
-# rotate-token 등 master 검증이 추가된 모든 CLI 핸들러에서 동일 메시지로 종료한다.
+# 내장 ``PermissionError``와 별개 계열(``MemberError`` → ``Exception``)이라
+# ``except (ValueError, PermissionError)``로는 잡히지 않고 traceback이 노출된다.
+# suspend / reactivate / revoke / rotate-token 등 master 검증이 추가된 모든 CLI
+# 핸들러에서 동일 메시지로 종료한다.
 _MASTER_REQUIRED_MESSAGE = "권한이 없습니다: master만 수행할 수 있습니다."
 
 
@@ -136,12 +136,12 @@ def _resolve_secret_non_interactive(
 async def _create_service(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[MemberService]:
-    """CLI용 ``MemberService`` async context manager (#1856).
+    """CLI용 ``MemberService`` async context manager.
 
-    #1855 의 ``open_cli_db`` 헬퍼 기반으로 변환했다. callsite 패턴은
+    ``open_cli_db`` 헬퍼 기반. callsite 패턴은
     ``async with _create_service(ctx) as service:`` 이며, ``open_cli_db`` 가
     normal/exception/cancellation 모든 경로에서 ``Database.close()`` 를
-    보장한다 (#1722/#1755 cleanup invariant).
+    보장한다 (cleanup invariant).
 
     Args:
         ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context(silent=True)``
@@ -150,7 +150,7 @@ async def _create_service(
     Yields:
         ``initialize()`` 가 완료된 :class:`MemberService` 인스턴스.
 
-    #1854 §4.2 예외: ``MemberService.initialize`` 는 ``MEMBER_SCHEMA`` +
+    read-only 명시 예외: ``MemberService.initialize`` 는 ``MEMBER_SCHEMA`` +
     ``_EMOJI_MIGRATION`` + ``_TOKEN_EXPIRES_MIGRATION`` schema DDL 을
     수반하므로 ``member list``/``info`` 같은 read-only 명령에서도
     ``initialize()`` 를 계속 호출한다.
@@ -290,10 +290,10 @@ def _explicit_config_dir(ctx: click.Context) -> str | None:
     의미하게 한다.
 
     이 값은 ``revoke_command`` 생성 시 운영자가 입력한 ``--config-dir`` 을
-    payload 에 보존하기 위해 사용된다 (#1468 Codex review attempt 3, P2):
-    운영자가 ``ante --config-dir /custom member list-invalid-roles`` 로 다른
-    인스턴스를 스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이
-    빠지면 default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
+    payload 에 보존하기 위해 사용된다: 운영자가
+    ``ante --config-dir /custom member list-invalid-roles`` 로 다른 인스턴스를
+    스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이 빠지면
+    default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
     있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
     보장한다.
 
@@ -313,7 +313,7 @@ def _explicit_config_dir(ctx: click.Context) -> str | None:
     if raw is None:
         return None
     # 절대 경로로 정규화 — payload 를 다른 CWD 에서 실행해도 같은 인스턴스를
-    # 가리키도록 한다 (#1468 Codex review attempt 4, P2).
+    # 가리키도록 한다.
     return str(Path(raw).expanduser().resolve())
 
 
@@ -321,12 +321,11 @@ def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
     """``ante member revoke`` payload 명령 문자열을 생성한다.
 
     - ``config_dir`` 이 주어지면 ``ante --config-dir <quoted>`` 를 앞에 붙여
-      동일 인스턴스(DB) 대상으로 명령이 실행되도록 보존한다 (#1468 attempt 3 P2).
-    - ``--yes`` 는 ``member revoke`` 비대화형 게이트를 통과하기 위해 항상 포함한다
-      (#1468 attempt 1 P2-B).
+      동일 인스턴스(DB) 대상으로 명령이 실행되도록 보존한다.
+    - ``--yes`` 는 ``member revoke`` 비대화형 게이트를 통과하기 위해 항상 포함한다.
     - ``--`` separator 와 ``shlex.quote`` 로 ``member_id`` 를 셸 안전 인용해
       빈 문자열·공백·셸 메타문자·``-``-prefix 가 포함된 id 도 인자 splitting /
-      옵션 파싱으로 오해석되지 않도록 한다 (#1468 attempt 2 P2-A).
+      옵션 파싱으로 오해석되지 않도록 한다.
     """
     parts = ["ante"]
     if config_dir is not None:
@@ -343,31 +342,28 @@ def _invalid_role_row_dict(
 ) -> dict:
     """``Member`` row 를 CLI 출력용 dict 로 변환.
 
-    ``token_hash`` 는 보안상 절대 노출하지 않는다 (#1468 secret-exposure). 토큰
-    존재 여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
+    ``token_hash`` 는 보안상 절대 노출하지 않는다 (secret-exposure). 토큰 존재
+    여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
     ``valid_roles`` 는 row-level 이 아니라 top-level scan summary 에만 노출한다.
 
     ``revoke_command`` 는 **actionable row 에서만** 노출한다. legacy_revoked row
     는 이미 ``status=revoked`` 상태이며 ``MemberService.revoke`` 가
     ``active``/``suspended`` 만 허용하므로 재실행 시 실패한다. 따라서 noop 명령을
-    payload 에 싣지 않고 키 자체를 누락해 "추가 조치 불요" 임을 명시한다
-    (#1468 Codex review attempt 2, P2-B).
+    payload 에 싣지 않고 키 자체를 누락해 "추가 조치 불요" 임을 명시한다.
 
     actionable row 의 ``revoke_command`` 는 ``shlex.quote`` 로 ``member_id`` 를
     셸 안전하게 인용하고, ``--`` separator 로 옵션/포지셔널 경계를 명시한다 — 빈
     문자열·공백·셸 메타문자·``-``-prefix 가 포함된 ``member_id`` 가 운영자 셸에서
-    인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다 (#1468 Codex
-    review attempt 2, P2-A).
+    인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다.
 
     ``config_dir`` 이 주어지면(루트 ``--config-dir`` 이 명시된 경우) 그 값을
     ``revoke_command`` 앞에 ``--config-dir <quoted>`` 로 보존해, 운영자가 payload
     를 그대로 복사 실행해도 같은 인스턴스(DB) 대상으로 동작하도록 보장한다
-    (#1468 attempt 3 P2 — config-dir 보존). default config_dir 일 때는 인자 자체
-    를 생략해 기존 표준 호출 형태를 유지한다. 값은
-    :func:`_explicit_config_dir` 에서 ``expanduser().resolve()`` 로 **절대 경로
-    화** 되어 들어오므로, 운영자가 상대 경로/``~`` 확장 형태로 호출했더라도
-    payload 는 다른 CWD 에서 실행해도 같은 인스턴스를 가리킨다 (#1468 attempt 4
-    P2).
+    (config-dir 보존). default config_dir 일 때는 인자 자체를 생략해 기존 표준
+    호출 형태를 유지한다. 값은 :func:`_explicit_config_dir` 에서
+    ``expanduser().resolve()`` 로 **절대 경로화** 되어 들어오므로, 운영자가
+    상대 경로/``~`` 확장 형태로 호출했더라도 payload 는 다른 CWD 에서 실행해도
+    같은 인스턴스를 가리킨다.
     """
     has_token = bool(m.token_hash)
     row: dict = {
@@ -395,7 +391,7 @@ def _invalid_role_row_dict(
 def member_list_invalid_roles(
     ctx: click.Context,
 ) -> None:
-    """``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468).
+    """``MemberRole`` enum 외 role 을 가진 legacy member row 식별.
 
     본 명령은 canonical config 의 ``db.path`` (``get_db_path()``) 단일 DB 에
     대해서만 invalid-role row 를 식별한다. 다른 DB 파일 대상 점검은 본 PR scope
@@ -415,8 +411,8 @@ def member_list_invalid_roles(
     fmt = get_formatter(ctx)
     valid_roles = [member.value for member in MemberRole]
     # 루트 ``--config-dir`` 이 명시되어 있으면 payload 의 revoke_command 에
-    # 동일 값을 보존한다 (#1468 attempt 3 P2). default 이면 None 이 돌아오고
-    # ``--config-dir`` 인자는 생략된다.
+    # 동일 값을 보존한다. default 이면 None 이 돌아오고 ``--config-dir`` 인자는
+    # 생략된다.
     config_dir_override = _explicit_config_dir(ctx)
 
     async def _run_scan() -> tuple[list[dict], list[dict]]:
@@ -532,27 +528,27 @@ def member_register(
     try:
         result, token = _run(_run_register())
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 — master 검증 위반의
-        # 안정 코드. CLI surface override 보존: 사용자 친화 한국어 문구
+        # PERMISSION_DENIED code 명시 — master 검증 위반의 안정 코드.
+        # CLI surface override 보존: 사용자 친화 한국어 문구
         # (``_MASTER_REQUIRED_MESSAGE``) 를 envelope message 로 surface 한다.
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberAlreadyExistsError as e:
-        # #1807 (Group R sweep): duplicate member_id 는 안정 코드
-        # ``MEMBER_ALREADY_EXISTS`` 로 surface (typed.code 직접 사용).
-        # ValueError 다중상속이라 generic 분기보다 먼저 둬야 typed 분기를
-        # 우선 매칭한다 (Python except 순서 의존).
+        # duplicate member_id 는 안정 코드 ``MEMBER_ALREADY_EXISTS`` 로
+        # surface (typed.code 직접 사용). ValueError 다중상속이라 generic
+        # 분기보다 먼저 둬야 typed 분기를 우선 매칭한다 (Python except 순서
+        # 의존).
         fmt.error(str(e), code=MemberAlreadyExistsError.code)
         raise SystemExit(1) from None
     except InvalidScopeError as e:
-        # SCOPE_VOCABULARY (#1439) 위반은 ``ValueError`` 서브클래스이지만
-        # CLI direct path 회귀를 위해 비-0 exit code 로 명시 종료한다.
+        # SCOPE_VOCABULARY 위반은 ``ValueError`` 서브클래스이지만 CLI direct
+        # path 회귀를 위해 비-0 exit code 로 명시 종료한다.
         # 다음 분기의 ``except (ValueError, ...)`` 가 먼저 매칭되면 ``return``
         # 으로 빠져 exit code 0 이 되므로 별도 분기로 둔다.
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -582,13 +578,13 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     try:
         result = _run(_run_set_emoji())
     except MemberNotFoundError:
-        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
-        # 한다 (CLI/IPC 일관성: ``MemberNotFoundError.code`` 와 동형, ``member
-        # info`` line 231 형제 패턴 1:1 미러).
+        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``MemberNotFoundError.code`` 와 동형, ``member
+        # info`` 형제 패턴 1:1 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except ValueError as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
@@ -642,7 +638,7 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 — master 검증 위반.
+        # PERMISSION_DENIED code 명시 — master 검증 위반.
         # CLI surface override 보존 (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
@@ -650,7 +646,7 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -677,23 +673,23 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     try:
         result = _run(_run_suspend())
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
-        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except MemberStateConflictError as e:
-        # #1814 Group Q sweep: state-conflict (이미 SUSPENDED 등) 는 안정 코드
+        # state-conflict (이미 SUSPENDED 등) 는 안정 코드
         # ``MEMBER_STATE_CONFLICT`` 로 surface 한다. ``ValueError`` 다중상속
         # 이라 아래 ``except (ValueError, PermissionError)`` generic fallback
         # 보다 typed 분기를 먼저 매칭한다 (Python MRO 보장).
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 정지 완료: {member_id}", result)
@@ -717,23 +713,23 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     try:
         result = _run(_run_reactivate())
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
-        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except MemberStateConflictError as e:
-        # #1814 Group Q sweep: state-conflict (이미 ACTIVE 등) 는 안정 코드
+        # state-conflict (이미 ACTIVE 등) 는 안정 코드
         # ``MEMBER_STATE_CONFLICT`` 로 surface 한다 (``member suspend`` 1:1
         # 미러). ``ValueError`` 다중상속이라 아래 generic fallback 보다
         # typed 분기를 먼저 매칭한다.
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 재활성화 완료: {member_id}", result)
@@ -775,16 +771,16 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     try:
         result = _run(_run_revoke())
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
-        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
@@ -808,16 +804,16 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     try:
         result, token = _run(_run_rotate())
     except PermissionDeniedError:
-        # #1843 sub-PR 1: PERMISSION_DENIED code 명시 + CLI surface override.
+        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # #1805: missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface
-        # 한다 (CLI/IPC 일관성: ``member info`` line 231 형제 패턴 미러).
+        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
+        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -878,13 +874,13 @@ def member_reset_password(
     try:
         _run(_run_reset())
     except MemberInvalidRecoveryCredentialError as e:
-        # #1806 (Group R sweep): invalid recovery key 는 안정 코드
+        # invalid recovery credential 은 안정 코드
         # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
         # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success("패스워드가 변경되었습니다.")
@@ -938,13 +934,13 @@ def member_regenerate_recovery_key(
     try:
         new_key = _run(_run_regen())
     except MemberInvalidRecoveryCredentialError as e:
-        # #1806 (Group R sweep): invalid 현재 패스워드는 안정 코드
+        # invalid 현재 패스워드는 안정 코드
         # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
         # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # #1843 sub-PR 1: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
