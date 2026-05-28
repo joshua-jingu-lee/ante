@@ -255,8 +255,16 @@ class MemberService:
         if not emoji:
             return
         if not _is_single_emoji(emoji):
+            # #1915: emoji 형식 거부는 typed ``MemberInvalidEmojiError``
+            # (.code=MEMBER_INVALID_EMOJI) 로 raise 해 CLI envelope 에 안정
+            # 코드 surface. ``ValueError`` 다중상속이라 기존 ``except
+            # ValueError`` (CLI ``set-emoji`` generic fallback, ``test_member.
+            # py:602/606`` 의 ``pytest.raises(ValueError, match=...)``) 가
+            # 회귀 없이 동일하게 잡힌다.
+            from ante.member.errors import MemberInvalidEmojiError
+
             msg = "emoji는 단일 이모지만 허용됩니다"
-            raise ValueError(msg)
+            raise MemberInvalidEmojiError(msg)
 
     async def update_emoji(
         self, member_id: str, emoji: str, updated_by: str = ""
@@ -876,8 +884,17 @@ class MemberService:
     def _assert_not_master(member: Member, action: str) -> None:
         """master 보호."""
         if member.role == MemberRole.MASTER:
+            # #1915: master 보호 위반은 typed ``MemberMasterProtectedError``
+            # (.code=MEMBER_MASTER_PROTECTED) 로 raise 해 CLI envelope 에
+            # 안정 코드 surface. ``PermissionError`` 다중상속이라 기존
+            # ``except PermissionError`` (CLI ``suspend``/``revoke`` generic
+            # fallback, ``test_member_service_master_guard.py:239/245`` 의
+            # ``pytest.raises(PermissionError, match="master는 ...")``) 가
+            # 회귀 없이 동일하게 잡힌다.
+            from ante.member.errors import MemberMasterProtectedError
+
             msg = f"master는 {action}할 수 없습니다"
-            raise PermissionError(msg)
+            raise MemberMasterProtectedError(msg)
 
     @staticmethod
     def _assert_active(member: Member, action: str) -> None:

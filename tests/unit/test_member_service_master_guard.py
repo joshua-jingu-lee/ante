@@ -15,7 +15,11 @@ import pytest
 
 from ante.core.database import Database
 from ante.eventbus import EventBus
-from ante.member.errors import PermissionDeniedError
+from ante.member.errors import (
+    MemberInvalidEmojiError,
+    MemberMasterProtectedError,
+    PermissionDeniedError,
+)
 from ante.member.models import MemberStatus, MemberType
 from ante.member.service import MemberService
 
@@ -244,3 +248,69 @@ class TestMasterCallerOnMasterTarget:
     ) -> None:
         with pytest.raises(PermissionError, match="master는 revoke"):
             await populated_service.revoke("owner", revoked_by="owner")
+
+
+# ── #1915 typed exception lock ────────────────────────────────────────────
+
+
+class TestMemberMasterProtectedTypedException:
+    """#1915: master 보호 위반은 typed ``MemberMasterProtectedError`` raise.
+
+    이전 (#1915 이전): ``_assert_not_master`` 가 단순 ``PermissionError`` 를
+    raise → CLI envelope 이 ``EXECUTION_ERROR`` 로 fallback.
+    #1915 가 typed exception 으로 좁혀 안정 코드
+    ``MEMBER_MASTER_PROTECTED`` 를 surface 한다.
+
+    ``PermissionError`` 다중상속이라 기존 ``pytest.raises(PermissionError)``
+    회귀 lock (상기 ``TestMasterCallerOnMasterTarget``) 은 그대로 통과한다.
+    """
+
+    async def test_suspend_master_raises_typed_exception(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(MemberMasterProtectedError, match="master는 suspend"):
+            await populated_service.suspend("owner", suspended_by="owner")
+
+    async def test_revoke_master_raises_typed_exception(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(MemberMasterProtectedError, match="master는 revoke"):
+            await populated_service.revoke("owner", revoked_by="owner")
+
+    async def test_typed_exception_has_stable_code(
+        self, populated_service: MemberService
+    ) -> None:
+        """typed exception 의 class-level ``.code`` 는 안정 코드 그대로."""
+        with pytest.raises(MemberMasterProtectedError) as excinfo:
+            await populated_service.suspend("owner", suspended_by="owner")
+        assert excinfo.value.code == "MEMBER_MASTER_PROTECTED"
+
+
+class TestMemberInvalidEmojiTypedException:
+    """#1915: emoji 형식 검증 거부는 typed ``MemberInvalidEmojiError`` raise.
+
+    이전 (#1915 이전): ``_validate_emoji_format`` 이 단순 ``ValueError`` 를
+    raise → CLI envelope 이 ``EXECUTION_ERROR`` fallback.
+    #1915 가 typed exception 으로 좁혀 안정 코드 ``MEMBER_INVALID_EMOJI``
+    를 surface 한다.
+
+    ``ValueError`` 다중상속이라 기존 ``pytest.raises(ValueError, match=...)``
+    회귀 lock (``test_member.py::TestEmojiValidation``) 은 그대로 통과한다.
+    """
+
+    async def test_update_emoji_invalid_format_raises_typed_exception(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(MemberInvalidEmojiError, match="단일 이모지만"):
+            await populated_service.update_emoji(
+                "agent-active", "abc", updated_by="owner"
+            )
+
+    async def test_typed_exception_has_stable_code(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(MemberInvalidEmojiError) as excinfo:
+            await populated_service.update_emoji(
+                "agent-active", "xyz", updated_by="owner"
+            )
+        assert excinfo.value.code == "MEMBER_INVALID_EMOJI"
