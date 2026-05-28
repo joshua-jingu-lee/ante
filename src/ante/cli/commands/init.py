@@ -569,7 +569,7 @@ def init(
             "default test account(account_id='test')가 비활성 상태입니다. "
             "`ante account activate test`로 활성화하거나 해당 row를 정리한 "
             "뒤 재시도하세요.",
-            code="test_account_inactive",
+            code="ACCOUNT_TEST_INACTIVE",
         )
 
     # state 1: 모든 상태 완료 → 거부
@@ -614,7 +614,7 @@ def init(
                 _bootstrap_master(str(db_path), member_id, name, password)
             )
         except ValueError as e:
-            _fail(fmt, str(e), code="bootstrap_failed")
+            _fail(fmt, str(e), code="ACCOUNT_MASTER_BOOTSTRAP_FAILED")
         # text 모드는 여기서 비밀값을 1회 노출 (completion 블록은 재출력 금지).
         # JSON 성공 경로는 stdout payload로 1회 노출되므로 여기서 stderr 이벤트를
         # 내보내지 않는다 (중복 노출 방지). JSON 실패 경로만 아래 except에서
@@ -640,10 +640,14 @@ def init(
                     f"테스트 계좌 생성 실패: {e}. "
                     "master는 위에 출력된 비밀값으로 접근 가능. "
                     "원인 해결 후 재실행 시 test account만 생성됨.",
-                    code="test_account_failed",
+                    code="ACCOUNT_TEST_CREATE_FAILED",
                 )
             else:
-                _fail(fmt, f"테스트 계좌 생성 실패: {e}", code="test_account_failed")
+                _fail(
+                    fmt,
+                    f"테스트 계좌 생성 실패: {e}",
+                    code="ACCOUNT_TEST_CREATE_FAILED",
+                )
 
     if fmt.is_json:
         payload: dict = {"config_dir": str(config_path)}

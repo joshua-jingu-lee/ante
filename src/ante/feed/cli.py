@@ -110,7 +110,7 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None
         supported = ", ".join(API_KEYS)
         fmt.error(
             f"지원하지 않는 키입니다: {key}\n지원 키: {supported}",
-            code="unsupported_key",
+            code="CONFIG_UNSUPPORTED_KEY",
         )
         raise SystemExit(1)
 

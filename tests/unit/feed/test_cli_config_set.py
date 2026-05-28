@@ -82,7 +82,7 @@ class TestFeedConfigSetUnsupportedKey:
         )
         payload = json.loads(result.stdout.strip())
         assert payload["status"] == "error"
-        assert payload["code"] == "unsupported_key"
+        assert payload["code"] == "CONFIG_UNSUPPORTED_KEY"
         assert payload["message"].startswith("지원하지 않는 키입니다: unsupported_key")
         assert "지원 키:" in payload["message"]
 

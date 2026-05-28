@@ -7,7 +7,7 @@
 4. stderr JSON mode recovery event
 5. caplog records (level=DEBUG, propagation 강제 on)
 6. Click ``result.exception`` chain message
-7. ``test_account_failed`` 실패 메시지 본문
+7. ``ACCOUNT_TEST_CREATE_FAILED`` 실패 메시지 본문
 
 성공 경로 + 실패 경로(``_create_test_account`` 가 raise) 둘 다 검증한다.
 
@@ -211,13 +211,13 @@ class TestInitR13EncryptionKeyNoLeak:
         exc_json = "" if result_json.exception is None else repr(result_json.exception)
         _assert_key_not_in(json_key, where="json exception", blob=exc_json)
 
-    def test_failure_path_no_leak_in_test_account_failed_message(
+    def test_failure_path_no_leak_in_account_test_create_failed_message(
         self,
         tmp_path: Path,
         caplog: pytest.LogCaptureFixture,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """실패 경로 — ``test_account_failed`` 에러 메시지 본문에 키 부재.
+        """실패 경로 — ``ACCOUNT_TEST_CREATE_FAILED`` 에러 메시지 본문에 키 부재.
 
         7번째 채널 (실패 메시지 본문) 검증. ``_create_test_account``가 raise한
         ``RuntimeError`` 메시지가 ``OutputFormatter.error``로 직렬화될 때 키가
@@ -246,12 +246,12 @@ class TestInitR13EncryptionKeyNoLeak:
         )
         stderr_blob = result_text.stderr if result_text.stderr_bytes else ""
         _assert_key_not_in(text_key, where="fail text stderr", blob=stderr_blob)
-        # test_account_failed 메시지 본문 검증 (stdout 또는 stderr 어느 한 쪽에 있음)
+        # ACCOUNT_TEST_CREATE_FAILED 본문 검증 (stdout 또는 stderr 어느 한 쪽)
         combined = (result_text.stdout or "") + stderr_blob
         assert "테스트 계좌 생성 실패" in combined
         _assert_key_not_in(
             text_key,
-            where="fail text test_account_failed message",
+            where="fail text ACCOUNT_TEST_CREATE_FAILED message",
             blob=combined,
         )
         log_blob = "\n".join(r.getMessage() for r in caplog.records)
