@@ -58,7 +58,7 @@ canonical-known vs 1.0 account-supported 구분, exchange vs market/source/broke
 | 소비자 / 작업 | 영향 | 후속 이슈 |
 |---------------|------|-----------|
 | 코드 레벨 SSOT(canonical 상수 단일화) | 표면별 상수 산재를 단일 SSOT로 정렬 | #1576 |
-| Instrument CLI `list`/`sync`/`import` | non-canonical 신규 입력 → non-zero exit + 구조화 error payload (주 신규 입력 표면) | #1577 |
+| Instrument CLI `list`/`sync`/`import` | non-canonical 신규 입력 → non-zero exit + 구조화 error payload (주 신규 입력 표면) | #1577 (완료, INSTRUMENT_INVALID_EXCHANGE) |
 | account/data/backtest/strategy 경계면 정렬 + backtest `--exchange` 옵션 신설 | 표면별 거부 계약 정렬, backtest override는 현재 spec-vs-impl gap | #1578 |
 | 회귀 테스트 고정 | 표면별 거부 동작 회귀 방지 | #1579 |
 | 에픽 | 결정 사항 링크 | #1561 |
