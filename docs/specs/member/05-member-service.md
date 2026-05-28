@@ -86,6 +86,8 @@ def _assert_invariants(self, member: Member, action: str) -> None:
   패스워드 자체이므로 master 토큰을 요구하지 않는 공개 명령 allowlist 경로다
   ([cli/03-commands.md — 공개 명령 allowlist](../cli/03-commands.md#공개-명령-allowlist--인증-면제) 참조).
 
-> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
-> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
-> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
+> #1542 (결정 SSOT) 기준의 CLI 표면 가드 master-only 정렬은 #1543 완료
+> (`require_master`가 `src/ante/cli/middleware.py`에 정의되고 member admin
+> mutation CLI에 적용). oracle host probe scope 기대값 정렬은 #1544(별도,
+> ante-oracle)에서 진행. 부모 #1511(oracle host probe scope drift)에서
+> 시작된 정합 작업이다.
