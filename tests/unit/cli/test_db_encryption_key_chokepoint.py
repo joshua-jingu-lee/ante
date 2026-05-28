@@ -209,6 +209,9 @@ class TestChokepointMissingKey:
         # ``error`` 단어를 포함할 가능성을 피하기 위해 payload 키만 검사한다.
         assert "exchange" not in payload, payload
         assert "error" not in payload, payload
+        # r2 보강: stdout 전체 grep — invalid 케이스와 동형으로 ``exchange``
+        # 단어가 message/추가 출력에 새지 않도록 검사한다.
+        assert "exchange" not in result.output, result.output
 
     def test_text_mode_missing_key_no_json_envelope(
         self, runner: CliRunner, isolated_env: Path
