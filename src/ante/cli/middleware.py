@@ -32,6 +32,30 @@ _AUTH_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
     ("member", "regenerate-recovery-key"),
 }
 
+# DB encryption key chokepoint 면제 커맨드 경로 목록 (#1913).
+#
+# auth exempt와 의미가 다르므로 별도 정의한다. 면제 4 경로는 각자
+# ``ANTE_DB_ENCRYPTION_KEY`` 를 요구하지 않는 cold path이다:
+#
+# - ``("init",)``: 키 생성/주입 자체가 책임 (``commands/init.py`` 의
+#   ``_ensure_encryption_key_in_secrets_env``).
+# - ``("member", "reset-password")``: recovery key 인증, account credential
+#   decrypt 경로 없음.
+# - ``("member", "regenerate-recovery-key")``: 현재 패스워드 인증, account
+#   credential decrypt 경로 없음.
+# - ``("feed", "init")``: ``FeedConfig.init()`` 만 호출, encryption 무관.
+#
+# 면제 정책 검증은 ``grep ANTE_DB_ENCRYPTION_KEY src/ante/cli/commands/{init,
+# member,feed}.py`` 로 chokepoint 변경 PR 안에서 재확인한다 (Bounded Scope
+# normative — `src/ante/main.py:292-295` 서버 init 경로 / `src/ante/ipc/registry.py
+# :768-770` IPC broker handler server-side 는 본 PR scope 외, follow-up 책임).
+_ENCRYPTION_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
+    ("init",),
+    ("member", "reset-password"),
+    ("member", "regenerate-recovery-key"),
+    ("feed", "init"),
+}
+
 
 def _resolve_token() -> str:
     """ANTE_MEMBER_TOKEN을 환경변수 또는 토큰 파일에서 확보한다.
@@ -427,12 +451,119 @@ class AuthenticatedGroup(_LeafPathMixin):
         #    반영해 두어야 ``authenticate_member`` 가 정확한 DB 경로를 본다.
         _mirror_root_globals_to_obj(ctx)
 
-        # 3. invoke 단계 인증 게이트 — super().invoke(ctx) 호출 전에 발화.
+        # 3. DB encryption key chokepoint (#1913).
+        #    invoke 단계 인증 게이트 직전에 ``ANTE_DB_ENCRYPTION_KEY`` 가 설정
+        #    되어 있고 Fernet canonical 형식을 만족하는지 단일 chokepoint에서
+        #    검증한다. 미설정/형식 위반 시 typed exception을 envelope error로
+        #    변환해 즉시 종료(traceback/timeout 방지). 면제 4 경로
+        #    (``_ENCRYPTION_EXEMPT_COMMAND_PATHS``) 는 우회한다.
+        #
+        #    ``Config.load`` 가 호출되는 시점은 leaf callback 진입 이후이지만,
+        #    본 chokepoint도 같은 fallback 정책을 그대로 적용한다: ``Config.
+        #    load(config_dir=get_config_dir(ctx))`` 를 먼저 호출해 ``secrets.env``
+        #    의 ``ANTE_DB_ENCRYPTION_KEY`` 행을 ``os.environ`` 으로 export시킨 뒤
+        #    검증한다. 환경변수 fallback이 정상 동작한 뒤에야 검증이 호출되는
+        #    invariant를 보장한다.
+        if self._should_enforce_encryption_gate(ctx, all_args, path):
+            self._enforce_db_encryption_key_gate(ctx)
+
+        # 4. invoke 단계 인증 게이트 — super().invoke(ctx) 호출 전에 발화.
         if self._should_invoke_auth_gate(ctx, all_args, path):
             self._enforce_invoke_auth_gate(ctx, path)
 
-        # 4. click의 정상 디스패치로 진행 (자식 make_context + invoke).
+        # 5. click의 정상 디스패치로 진행 (자식 make_context + invoke).
         return super(_LeafPathMixin, self).invoke(ctx)
+
+    def _should_enforce_encryption_gate(
+        self,
+        ctx: click.Context,
+        all_args: list[str],
+        path: tuple[str, ...],
+    ) -> bool:
+        """DB encryption key chokepoint 발화 여부 (#1913).
+
+        skip 조건은 auth 게이트와 동일한 메타 면제 정책을 공유한다:
+
+        - ``ctx.resilient_parsing`` (shell completion 등).
+        - ``--help`` / ``-h`` 메타 토큰이 ``--`` 앞에 있는 경우 — click이
+          callback에 도달하기 전에 ``ctx.exit()`` 하므로 가드 불필요.
+        - path가 비어 있거나 leaf까지 도달하지 못한 경우 — click이 도움말
+          처리 또는 ``Missing command`` 로 응답하므로 가드 불필요.
+        - path가 ``_ENCRYPTION_EXEMPT_COMMAND_PATHS`` allowlist에 포함되는
+          경우 (init / member reset-password / member regenerate-recovery-key
+          / feed init).
+        """
+        if ctx.resilient_parsing:
+            return False
+        if _has_meta_help_before_dashdash(all_args):
+            return False
+        if not path:
+            return False
+        if not self._path_resolves_to_leaf(ctx, path):
+            return False
+        if path in _ENCRYPTION_EXEMPT_COMMAND_PATHS:
+            return False
+        return True
+
+    def _enforce_db_encryption_key_gate(self, ctx: click.Context) -> None:
+        """DB encryption key chokepoint 본체 — 실패 시 envelope + SystemExit(1).
+
+        동작:
+
+        1. ``Config.load(config_dir=...)`` 를 호출해 ``secrets.env`` 의
+           ``ANTE_DB_ENCRYPTION_KEY`` 행을 ``os.environ`` 으로 export 시키는
+           기존 fallback (``ante.config.config:110-140``) 을 먼저 실행한다.
+           Config.load 실패는 본 chokepoint의 책임이 아니므로 broad except로
+           swallow하지 않고 그대로 전파한다 (TOML/.env 파싱 오류는 별도 가드).
+           단, 파일이 없는 정상 경로는 ``Config.load`` 내부에서 warning + 빈
+           dict로 흡수되므로 export 단계만 동작한다.
+        2. ``os.environ.get("ANTE_DB_ENCRYPTION_KEY")`` 를 검증한다:
+           - 미설정/빈 → :class:`EncryptionKeyMissingError` (``code=
+             "DB_ENCRYPTION_KEY_MISSING"``).
+           - 형식 위반 (Fernet canonical 44-byte URL-safe base64 미충족)
+             → :class:`EncryptionKeyInvalidError` (``code=
+             "DB_ENCRYPTION_KEY_INVALID"``).
+        3. raise된 typed exception은 본 메서드에서 catch해 ``OutputFormatter.
+           error`` 또는 텍스트 메시지로 envelope 출력 후 ``SystemExit(1)``.
+        4. 검증 성공 시 ``ctx.obj["_db_encryption_key_validated"] = True`` marker.
+        """
+        # 지연 import: crypto / config 모듈은 본 미들웨어가 import될 때마다
+        # eager로 끌어올리지 않는다. AuthenticatedGroup 자체는 cryptography
+        # 의존성과 무관해야 한다 (단위 테스트가 다른 경로로 import할 수 있음).
+        from ante.account.crypto import (
+            EncryptionKeyError,
+            EncryptionKeyInvalidError,
+            EncryptionKeyMissingError,
+            _validate_fernet_key,
+        )
+        from ante.cli.main import get_config_dir
+        from ante.config.config import Config
+
+        # secrets.env → os.environ export fallback (``ante.config.config:110-140``).
+        # config_dir 미설정 시 ``resolve_config_dir()`` 기본값을 따른다.
+        # Config.load 내부 결함(TOML/.env 파싱 등) 은 본 chokepoint의 책임이
+        # 아니므로 swallow하지 않고 그대로 전파한다 — 본 PR scope는
+        # ``DB_ENCRYPTION_KEY_*`` 두 코드만 envelope으로 라우팅하는 것이다.
+        Config.load(config_dir=get_config_dir(ctx))
+
+        try:
+            key = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
+            if not key:
+                raise EncryptionKeyMissingError(
+                    "ANTE_DB_ENCRYPTION_KEY 환경변수가 설정되지 않았습니다. "
+                    "`ante init` 또는 `secrets.env` 의 키 행을 확인하세요."
+                )
+            if not _validate_fernet_key(key):
+                raise EncryptionKeyInvalidError(
+                    "ANTE_DB_ENCRYPTION_KEY 형식이 유효하지 않습니다 "
+                    "(Fernet.generate_key() 출력 형식이어야 합니다)."
+                )
+        except EncryptionKeyError as e:
+            _emit_error_envelope(ctx, str(e), code=e.code)
+            raise SystemExit(1) from e
+
+        if isinstance(ctx.obj, dict):
+            ctx.obj["_db_encryption_key_validated"] = True
 
     def _should_invoke_auth_gate(
         self,
@@ -761,6 +892,28 @@ def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
 
     본 헬퍼는 출력만 책임지며 종료는 호출자가 ``raise SystemExit(1)`` 로
     수행한다 (필요 시 ``raise SystemExit(1) from e`` 형태로 cause 보존).
+    """
+    obj = getattr(ctx, "obj", None)
+    formatter = obj.get("formatter") if isinstance(obj, dict) else None
+    if formatter is not None and getattr(formatter, "is_json", False):
+        formatter.error(message, code=code)
+    else:
+        click.echo(message, err=True)
+
+
+def _emit_error_envelope(ctx: click.Context, message: str, *, code: str) -> None:
+    """generic stable-code error envelope 출력 (#1913).
+
+    인증 실패 외 typed exception (예: ``EncryptionKeyMissingError`` /
+    ``EncryptionKeyInvalidError``) 을 JSON envelope 또는 텍스트 메시지로
+    노출한다. 의미상 :func:`_emit_auth_error` 와 동일한 두 모드 분기를 따르지만
+    호출자 의도를 분명히 하기 위해 별도 이름으로 노출한다.
+
+    - JSON 모드 (``ctx.obj["formatter"]`` 의 ``is_json``): ``OutputFormatter.error``
+      → ``{"status":"error","code":<code>,"message":<message>}`` JSON stdout.
+    - 텍스트 모드 또는 ``formatter`` 미설정: ``click.echo(..., err=True)`` stderr.
+
+    종료는 호출자가 ``raise SystemExit(1) from e`` 로 수행한다.
     """
     obj = getattr(ctx, "obj", None)
     formatter = obj.get("formatter") if isinstance(obj, dict) else None
