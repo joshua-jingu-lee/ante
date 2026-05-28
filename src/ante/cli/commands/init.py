@@ -569,7 +569,7 @@ def init(
             "default test account(account_id='test')가 비활성 상태입니다. "
             "`ante account activate test`로 활성화하거나 해당 row를 정리한 "
             "뒤 재시도하세요.",
-            code="test_account_inactive",
+            code="ACCOUNT_TEST_INACTIVE",
         )
 
     # state 1: 모든 상태 완료 → 거부

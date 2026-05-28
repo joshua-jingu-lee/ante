@@ -1033,7 +1033,7 @@ class TestInitTestAccountDetectionNarrowed:
         했지만 `AccountService.create_default_test_account()`는 `account_id='test'`
         중복 검사에 걸려 예외를 던진다 → init 자체가 실패하면서 사용자에게는
         원인이 불명확하다. 이제는 3-state (active/inactive/missing) 판정으로
-        inactive를 만나면 `test_account_inactive` 에러 코드로 안내한다.
+        inactive를 만나면 `ACCOUNT_TEST_INACTIVE` 에러 코드로 안내한다.
         """
         target = tmp_path / "config"
         target.mkdir()
@@ -1084,6 +1084,50 @@ class TestInitTestAccountDetectionNarrowed:
 
         assert result.exit_code == 1, result.output
         assert "비활성 상태" in result.output
+        create_acc_mock.assert_not_called()
+        bootstrap_mock.assert_not_called()
+
+
+class TestInitTestAccountInactiveJsonEnvelope:
+    """#1911 — inactive test account 경로의 JSON envelope code SSOT 정합 회귀.
+
+    `docs/specs/contracts/error-taxonomy.md` §명명 규칙 1·2는 envelope `code`를
+    SCREAMING_SNAKE_CASE + 허용 prefix로 lock한다(legacy alias는 auth-3에 한정).
+    inactive test account 경로의 code는 `ACCOUNT_TEST_INACTIVE`여야 한다.
+    """
+
+    def test_json_mode_inactive_emits_uppercase_code(self, runner, tmp_path):
+        """--format json: stdout JSON envelope, status='error',
+        code='ACCOUNT_TEST_INACTIVE', exit 1.
+
+        기존 text 모드 회귀(`test_test_account_suspended_raises_clear_error`)와
+        동일 setup(suspended status)을 재사용하되 JSON 출력 envelope을 검증한다.
+        """
+        target = tmp_path / "config"
+        target.mkdir()
+        db_path = target / "db" / "ante.db"
+        _create_db_with_master_row(db_path)
+        _create_db_with_test_account_row(
+            db_path, account_id="test", broker_type="test", status="suspended"
+        )
+
+        bootstrap_mock = AsyncMock(side_effect=_mock_bootstrap)
+        create_acc_mock = AsyncMock(side_effect=_mock_create_test_account)
+
+        with (
+            patch("ante.cli.commands.init._bootstrap_master", new=bootstrap_mock),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout.strip())
+        assert payload["status"] == "error"
+        assert payload["code"] == "ACCOUNT_TEST_INACTIVE"
+        # 묵시적 재생성/bootstrap 시도 금지 (회귀 락)
         create_acc_mock.assert_not_called()
         bootstrap_mock.assert_not_called()
 
