@@ -3,7 +3,7 @@
 > Parent epic: [#1818 CLI offline service composition factory & runtime guard SSOT](https://github.com/joshua-jingu-lee/ante/issues/1818)
 > Owning issue: [#1854 CLI offline service factory 계약 및 read_only 초기화 정책 정리](https://github.com/joshua-jingu-lee/ante/issues/1854)
 > Status: 1.0 normative — CLI `offline` / `cold-path` execution class가 사용하는 service composition factory의 책임/비책임, read_only 초기화 정책, ctx 기반 path resolution 정책의 단일 SSOT.
-> Scope: 본 문서는 spec only. production factory 구현체는 #1855 이후 후속 PR이 담당한다.
+> Scope: 본 문서는 SSOT spec. production factory 구현(`open_cli_db`)은 [#1855](https://github.com/joshua-jingu-lee/ante/issues/1855)에서 도입되어 `src/ante/cli/db_context.py`에 존재한다.
 > Migration order: [docs/specs/contracts/README.md#migration-domain-order](README.md#migration-domain-order)와 [#1820](https://github.com/joshua-jingu-lee/ante/issues/1820)에서 SSOT로 결정된 `account → member → approval → bot → treasury → broker → strategy → 기타` 순서를 따른다. 본 문서는 본 순서를 **재선언하지 않는다**.
 
 ## 목적
@@ -22,8 +22,9 @@ CLI `offline` 및 `cold-path` execution class (cf.
    자동 발동되어 read-only 명령에서도 schema migration이 trigger되는 commands
 
 본 문서는 [#1818](https://github.com/joshua-jingu-lee/ante/issues/1818) Normative
-Decisions의 spec-only 응축이다. 후속 코드 이슈(#1855/#1856/#1857)는 본 문서를
-SSOT로 reference 한다.
+Decisions의 spec-only 응축이다. 코드 이슈(#1855/#1856/#1857)는 본 문서를
+SSOT로 reference하며, 도입된 helper는 `src/ante/cli/db_context.py`의
+`open_cli_db`다.
 
 ## 1. Factory 책임 / 비책임
 
@@ -129,9 +130,10 @@ Plan v1 Codex review 권고:
   contract를 변경하면 docs PR과 code PR이 충돌한다.
 - factory-level skip(옵션 B)은 `Database` API를 그대로 두고도 invariant
   ("read-only 명령은 schema/DDL trigger하지 않는다")를 만족한다.
-- 후속 #1855/#1856/#1857 구현이 `Database` API에 `read_only` mode를 추가하고자
-  결정하면, 그 결정은 본 spec과 충돌하지 않는다 — 본 spec은 "factory-level
-  skip을 normative로 채택한다"고만 lock 한다.
+- #1855/#1856/#1857 구현 시 `Database` API에 `read_only` mode 추가가
+  고려되었으나, 본 spec은 옵션 B(factory-level skip)를 normative로 채택한
+  결정만 lock하며 — 향후 `Database` API에 `read_only` mode를 추가하는 결정이
+  내려지더라도 본 spec과 충돌하지 않는다.
 
 ## 3. ctx 기반 path resolution 정책
 
@@ -156,11 +158,13 @@ Plan v1 Codex review 권고:
   `get_db_path(ctx)`를 기본으로 사용한다. ctx 없는 path resolution은
   legacy/deprecated path로 문서화한다."
 
-### 3.2 후속 책임
+### 3.2 후속 책임 (현재 진행 중 항목)
 
-- ctx 없는 `get_db_path()` 호출의 점진 제거는 #1855 이후 후속 PR이 담당한다.
+- ctx 없는 `get_db_path()` 호출의 점진 제거는 진행 중이다. 잔여 callsite:
+  `src/ante/cli/commands/signal.py:48`, `src/ante/cli/commands/broker.py:34,354`
+  — 이들은 #1855/#1856/#1857 후속 cleanup 대상이다.
 - 본 SSOT는 helper 자체의 deprecation timeline을 강제하지 않는다. fallback
-  helper signature 자체는 후속 #1855/#1856/#1857의 migration이 완료된 후 별도
+  helper signature 자체는 #1855/#1856/#1857 migration이 완료된 이후 별도
   이슈로 제거를 검토한다.
 
 ## 4. read-only 분류 예외 (initialize-fires-DDL)
@@ -195,8 +199,10 @@ service를 변경하면 본 표를 갱신한다.
 ### 4.3 후속 분리 가능성
 
 본 예외는 **service `initialize()` 내부에 read path와 schema 부트스트랩이
-얽혀 있기 때문**에 발생한다. 후속 #1855가 다음 중 하나를 채택하면 본 표는
-축소될 수 있다 — 본 SSOT는 어느 쪽도 강제하지 않는다.
+얽혀 있기 때문**에 발생한다. #1855는 factory 책임 경계(spec §2)를 lock하는
+방향으로 진행됐으며, `Database` API에 `read_only` mode를 도입하지 않는
+옵션 B 정책은 본 spec §2 결정에 따라 유지된다. 향후 다음 중 하나를 채택하면
+본 표는 축소될 수 있다 — 본 SSOT는 어느 쪽도 강제하지 않는다.
 
 - service에 `ensure_schema()` / `open_existing()` 등의 분리 entrypoint 도입 →
   read-only factory는 `ensure_schema()`만 호출, write path는 기존
@@ -211,14 +217,14 @@ service를 변경하면 본 표를 갱신한다.
 본 표에 없는 service (예: `TradeService`, `TreasuryService`,
 `BotManager`(offline read 경로 한정), `StrategyRegistry`(read 명령),
 `PositionHistoryService`, `BacktestRunStore`, `InstrumentService` 등)는
-read-only 명령에서 `initialize()` skip이 가능한 후보다. 단, **후속 #1855/#1856
-구현 PR**이 각 service의 `initialize()` 본문을 재확인해 skip 가능 여부를
+read-only 명령에서 `initialize()` skip이 가능한 후보다. 단, **#1855/#1856
+구현 시점에** 각 service의 `initialize()` 본문을 재확인해 skip 가능 여부를
 1:1 검증한다. 본 SSOT는 baseline만 lock하고, skip 가능 service를 enumerate하지
 않는다 (drift 위험을 피하기 위해).
 
 ## 5. Migration Order
 
-본 spec은 후속 #1855/#1856/#1857의 domain migration 순서를 **재선언하지
+본 spec은 #1855/#1856/#1857의 domain migration 순서를 **재선언하지
 않는다**. SSOT는 다음 두 곳이다.
 
 - [docs/specs/contracts/README.md#migration-domain-order](README.md#migration-domain-order)
@@ -226,7 +232,7 @@ read-only 명령에서 `initialize()` skip이 가능한 후보다. 단, **후속
 
 요지: `account → member → approval → bot → treasury → broker → strategy →
 기타`. 단, #1818 본문에 명시된 예외 — "cleanup 회귀 차단 가치 때문에
-account/member/approval을 같은 1차 PR(#1856)에 함께 다룰 수 있다" — 가
+account/member/approval을 같은 1차 PR(#1856)에 함께 다뤘다" — 가
 허용된다.
 
 본 절은 SSOT reference이며, 본 spec PR에서 순서를 재정의하면 drift다. drift
@@ -284,7 +290,7 @@ account/member/approval을 같은 1차 PR(#1856)에 함께 다룰 수 있다" �
 
 본 SSOT가 다루지 **않는** 항목.
 
-- factory production code 구현 — #1855/#1856/#1857의 책임이다.
+- factory production code 구현 — #1855/#1856/#1857에서 완료.
 - CLI command migration enumeration — 동일.
 - DI framework 도입.
 - IPC routing / IPC fallback 통합.
@@ -292,4 +298,5 @@ account/member/approval을 같은 1차 PR(#1856)에 함께 다룰 수 있다" �
   `Database` API 변경 없이 invariant를 만족하도록 lock 한다.
 - runtime `src/ante/main.py` composition root 변경.
 - envelope/error taxonomy 본문 변경.
-- service `initialize()` schema 분리 — 후속 #1855가 별도 결정.
+- service `initialize()` schema 분리 — 본 spec §2가 factory-level skip(옵션 B)로
+  lock; #1855/#1856/#1857 migration이 그 lock을 따른다.
