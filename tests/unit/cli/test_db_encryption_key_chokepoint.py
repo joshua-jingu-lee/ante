@@ -120,6 +120,12 @@ class TestChokepointMissingKey:
         """``ante --format json bot list`` → exit 1, code=DB_ENCRYPTION_KEY_MISSING.
 
         oracle 표면 1/3 (#1913 재현 case). 기존 회귀: traceback leak.
+
+        Invariant 4 (r1 보강): success shape 누설 차단. ``bot list`` 의 success
+        payload 는 ``list[dict[{bot_id, name, strategy_id, account_id, status,
+        created_at}]]`` 이므로, 해당 raw 키가 envelope 에 단 한 글자도 새지
+        않아야 한다. 또한 envelope 키 집합은 정확히 ``{status, code, message}``
+        3 개로 한정된다 (``OutputFormatter.error`` SSOT).
         """
         result = runner.invoke(cli, ["--format", "json", "bot", "list"])
         assert result.exit_code == 1, result.output
@@ -128,6 +134,14 @@ class TestChokepointMissingKey:
         assert payload.get("code") == "DB_ENCRYPTION_KEY_MISSING", payload
         # traceback 이 stdout/stderr 로 누출되지 않아야 한다.
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        # envelope 키 집합 강제: error shape 은 정확히 3 키.
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        # ``OutputFormatter.success`` 의 wrapping 키도 새지 않아야 한다.
+        assert "data" not in payload, payload
+        # ``bot list`` raw row 키 누설 차단 (stdout 전체 grep).
+        for leaked_key in ("bot_id", "strategy_id", "created_at"):
+            assert leaked_key not in result.output, (leaked_key, result.output)
 
     def test_treasury_status_json_missing_key(
         self, runner: CliRunner, isolated_env: Path
@@ -135,6 +149,11 @@ class TestChokepointMissingKey:
         """``ante --format json treasury status --account test`` → exit 1, MISSING.
 
         oracle 표면 2/3.
+
+        Invariant 4 (r1 보강): success shape 누설 차단. ``treasury status``
+        의 success payload 는 ``{account_balance, purchasable_amount,
+        total_evaluation, total_profit_loss, ...}`` dict 이므로 해당 키가
+        envelope 에 새지 않아야 한다.
         """
         result = runner.invoke(
             cli,
@@ -145,6 +164,16 @@ class TestChokepointMissingKey:
         assert payload.get("status") == "error", payload
         assert payload.get("code") == "DB_ENCRYPTION_KEY_MISSING", payload
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        assert "data" not in payload, payload
+        for leaked_key in (
+            "account_balance",
+            "purchasable_amount",
+            "total_evaluation",
+            "total_profit_loss",
+        ):
+            assert leaked_key not in result.output, (leaked_key, result.output)
 
     def test_broker_status_json_missing_key(
         self, runner: CliRunner, isolated_env: Path
@@ -154,6 +183,11 @@ class TestChokepointMissingKey:
         oracle 표면 3/3. 기존 회귀: exit 124 (timeout) + `{connected,error,healthy}`
         shape leak. chokepoint 통과 후에는 typed envelope 으로 정합되어 IPC 호출
         자체가 발생하지 않으므로 timeout 도 사라진다.
+
+        Invariant 4 (r1 보강): broker status success payload 는
+        ``{connected, healthy, exchange}`` 또는 폴백 시 ``{connected, healthy,
+        error}`` 형태이므로, ``healthy`` / ``exchange`` / ``error`` 키가 단 한
+        글자도 새지 않아야 한다. envelope 키 집합도 정확히 3 키로 한정한다.
         """
         result = runner.invoke(
             cli,
@@ -167,6 +201,14 @@ class TestChokepointMissingKey:
         assert "connected" not in result.output, result.output
         assert "healthy" not in result.output, result.output
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        assert "data" not in payload, payload
+        # ``{connected, healthy, exchange}`` / fallback ``{connected, healthy,
+        # error}`` 모두 차단. envelope error 의 ``message`` 가 ``"..."`` 영문
+        # ``error`` 단어를 포함할 가능성을 피하기 위해 payload 키만 검사한다.
+        assert "exchange" not in payload, payload
+        assert "error" not in payload, payload
 
     def test_text_mode_missing_key_no_json_envelope(
         self, runner: CliRunner, isolated_env: Path
@@ -198,13 +240,22 @@ class TestChokepointInvalidKey:
         isolated_env: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """garbage key → exit 1, code=DB_ENCRYPTION_KEY_INVALID."""
+        """garbage key → exit 1, code=DB_ENCRYPTION_KEY_INVALID.
+
+        Invariant 4 (r1 보강): success ``bot list`` payload 키 누설 차단.
+        """
         monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "not-a-valid-fernet-key")
         result = runner.invoke(cli, ["--format", "json", "bot", "list"])
         assert result.exit_code == 1, result.output
         payload = _parse_json_error_envelope(result.output)
+        assert payload.get("status") == "error", payload
         assert payload.get("code") == "DB_ENCRYPTION_KEY_INVALID", payload
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        assert "data" not in payload, payload
+        for leaked_key in ("bot_id", "strategy_id", "created_at"):
+            assert leaked_key not in result.output, (leaked_key, result.output)
 
     def test_treasury_status_json_invalid_key(
         self,
@@ -212,7 +263,11 @@ class TestChokepointInvalidKey:
         isolated_env: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """garbage key + treasury status → INVALID envelope."""
+        """garbage key + treasury status → INVALID envelope.
+
+        Invariant 4 (r1 보강): success ``treasury status`` payload 키 누설
+        차단.
+        """
         monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "garbage")
         result = runner.invoke(
             cli,
@@ -220,8 +275,19 @@ class TestChokepointInvalidKey:
         )
         assert result.exit_code == 1, result.output
         payload = _parse_json_error_envelope(result.output)
+        assert payload.get("status") == "error", payload
         assert payload.get("code") == "DB_ENCRYPTION_KEY_INVALID", payload
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        assert "data" not in payload, payload
+        for leaked_key in (
+            "account_balance",
+            "purchasable_amount",
+            "total_evaluation",
+            "total_profit_loss",
+        ):
+            assert leaked_key not in result.output, (leaked_key, result.output)
 
     def test_broker_status_json_invalid_key(
         self,
@@ -229,7 +295,13 @@ class TestChokepointInvalidKey:
         isolated_env: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """garbage key + broker status → INVALID envelope (timeout 회피)."""
+        """garbage key + broker status → INVALID envelope (timeout 회피).
+
+        Invariant 4 (r1 보강): ``broker status`` success payload 는
+        ``{connected, healthy, exchange}`` 또는 fallback ``{connected, healthy,
+        error}`` 이므로 ``healthy`` / ``exchange`` / ``error`` 키가 envelope 에
+        새지 않아야 한다.
+        """
         # 길이는 맞지만 invalid base64 padding/charset → Fernet 생성 실패.
         monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", "x" * 44)
         result = runner.invoke(
@@ -238,9 +310,20 @@ class TestChokepointInvalidKey:
         )
         assert result.exit_code == 1, result.output
         payload = _parse_json_error_envelope(result.output)
+        assert payload.get("status") == "error", payload
         assert payload.get("code") == "DB_ENCRYPTION_KEY_INVALID", payload
         assert "connected" not in result.output, result.output
         assert "Traceback" not in result.output, result.output
+        # ── Invariant 4 (r1 보강): success payload leak 차단 ────────────────
+        # envelope 키 집합 강제 + ``healthy`` / ``exchange`` / ``error`` 부재.
+        assert set(payload.keys()) == {"status", "code", "message"}, payload
+        assert "data" not in payload, payload
+        assert "healthy" not in payload, payload
+        assert "exchange" not in payload, payload
+        assert "error" not in payload, payload
+        # stdout 전체 grep — ``healthy`` 단어가 message 등에 새지 않도록 검사.
+        assert "healthy" not in result.output, result.output
+        assert "exchange" not in result.output, result.output
 
 
 # ── 면제 경로: chokepoint 우회 ───────────────────────────────────────────────
