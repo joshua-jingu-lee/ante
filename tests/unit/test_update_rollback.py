@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -255,3 +256,64 @@ class TestUpdateMigrationFailureRollback:
         assert result.exit_code == 0
         mock_rollback.assert_not_called()
         assert "업데이트 완료" in result.output
+
+    # ---------------------------------------------------------------------
+    # #1921: envelope code SCREAMING_SNAKE 회귀
+    #
+    # error-taxonomy.md §명명 규칙 1·2 는 안정 코드 모양을
+    # SCREAMING_SNAKE_CASE + 도메인 prefix(`UPDATE_*`)로 normative lock 한다.
+    # #1911(#1922 mirror) 패턴에 맞춰, migration 실패/롤백 실패 경로의 JSON
+    # envelope `code` 가 SCREAMING_SNAKE 정합값을 그대로 emit 하는지 검증한다.
+    # 회귀: 과거 lowercase `migration_failed` / `rollback_failed` 로 표출되어
+    # taxonomy 명명 규칙을 위반했다.
+    # ---------------------------------------------------------------------
+
+    def test_migration_failure_rollback_success_emits_update_migration_failed(
+        self, runner: CliRunner
+    ) -> None:
+        """#1921: 마이그레이션 실패 + 롤백 성공 → ``UPDATE_MIGRATION_FAILED``."""
+        patches = self._make_patches(migration_ok=False, rollback_ok=True)
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+            patches[8],
+            patches[9],
+            patches[10],
+            patches[11],
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update", "-y"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["code"] == "UPDATE_MIGRATION_FAILED"
+
+    def test_migration_failure_rollback_failure_emits_update_rollback_failed(
+        self, runner: CliRunner
+    ) -> None:
+        """#1921: 마이그레이션 실패 + 롤백 실패 → ``UPDATE_ROLLBACK_FAILED``."""
+        patches = self._make_patches(migration_ok=False, rollback_ok=False)
+        with (
+            patches[0],
+            patches[1],
+            patches[2],
+            patches[3],
+            patches[4],
+            patches[5],
+            patches[6],
+            patches[7],
+            patches[8],
+            patches[9],
+            patches[10],
+            patches[11],
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update", "-y"])
+
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["code"] == "UPDATE_ROLLBACK_FAILED"

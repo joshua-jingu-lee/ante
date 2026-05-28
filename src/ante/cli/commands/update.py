@@ -277,7 +277,9 @@ def update(
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
         if rollback_update(current, backup_path, str(db_path)):
             if fmt.is_json:
-                fmt.error("마이그레이션 실패. 롤백 완료.", code="migration_failed")
+                fmt.error(
+                    "마이그레이션 실패. 롤백 완료.", code="UPDATE_MIGRATION_FAILED"
+                )
             else:
                 click.echo(f"롤백 완료: {current}으로 복원됨")
                 if snapshot_path:
@@ -287,7 +289,9 @@ def update(
             if snapshot_path:
                 restore_hint += f"\n  pip install -r {snapshot_path}"
             if fmt.is_json:
-                fmt.error("마이그레이션 실패. 자동 롤백 실패.", code="rollback_failed")
+                fmt.error(
+                    "마이그레이션 실패. 자동 롤백 실패.", code="UPDATE_ROLLBACK_FAILED"
+                )
             else:
                 click.echo(
                     f"자동 롤백 실패. 수동 복구 필요:\n"
