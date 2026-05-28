@@ -274,6 +274,19 @@ AGENTS.md는 모든 세션에 주입되므로 핵심 규칙만 유지한다.
 - 모듈별 세부 설계는 `docs/specs/`에 분리
 - 상세 가이드는 `.agent/skills/`로 분리
 
+## 10. 코드 주석 정합 원칙
+
+코드 본문 주석은 과거 이슈 히스토리가 아니라 현재 invariant·계약·이유를 설명한다.
+
+- **유지**: 현재 invariant, 호출 계약, 보안/cleanup/cancellation/idempotency/account boundary 이유
+- **축약**: 이슈 번호와 리뷰 히스토리는 제거하고 현재 조건만 남김
+- **이동**: 긴 배경 설명은 issue/PR/spec/runbook으로 옮기고 코드에는 링크/요약만
+- 이슈 번호가 현재 추적에 반드시 필요한 경우(예: 진행 중 follow-up)에만 코드에 남기고 그 외에는 PR/issue 본문으로 옮긴다.
+- **적용 시점**: 파일을 수정하는 PR에서 해당 파일의 주석을 함께 정리한다. 저장소 전체 일괄 삭제는 금지.
+- **금지**: 주석 정리를 명분으로 로직/예외 타입/출력 문자열/테스트 기대값을 바꾸지 않는다. 실제 런타임 동작·public CLI/API/IPC contract·JSON envelope·로그 메시지·DB schema는 변경하지 않는다.
+
+본 원칙의 SSOT는 본 절이며, 별도 가이드 문서는 만들지 않는다. 이슈 [#1924](https://github.com/joshua-jingu-lee/ante/issues/1924)에서 합의된 결정이다.
+
 ## 관련 문서
 
 | 문서 | 내용 |
