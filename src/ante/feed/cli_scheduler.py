@@ -91,9 +91,13 @@ async def _run_daily_job(
     """Daily 수집 작업을 1회 실행한다."""
     logger.info("Daily 수집 시작 (%s)", current_date)
     try:
+        # #1943: 스케줄러 호출은 generate_daily_date() (어제) fallback 유지.
+        # ``target_date=None`` 을 명시해 의도를 문서화하고, 추후 시그니처
+        # 변경이 있어도 keyword 의미를 명확히 보존한다.
         result = await orchestrator.run_daily(
             data_path=Path(data_path),
             config=config,
+            target_date=None,
         )
         click.echo(
             f"[{current_date}] Daily 완료: "

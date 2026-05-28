@@ -56,9 +56,21 @@ class DailyRunner:
         feed_dir: Path,
         started_at: datetime,
         is_blocked: Any,
+        target_date: str | None = None,
     ) -> CollectionResult:
-        """Daily 내부 구현."""
-        target_date = generate_daily_date()
+        """Daily 내부 구현.
+
+        ``target_date`` 가 ``None`` 이면 ``generate_daily_date()`` (어제)로
+        fallback 한다. 명시 값(예: CLI ``--date`` 또는 스케줄러가 직접
+        지정한 날짜)을 받으면 그 값을 그대로 수집 대상일로 사용한다.
+        #1943: 기존에는 cli 에서 ``scheduler.generate_daily_date`` 모듈
+        속성을 monkey-patch 했으나, 이 모듈이 import 시점에
+        ``from ... import generate_daily_date`` 로 함수 객체를 local
+        namespace 에 바인딩하기 때문에 패치가 무효였다. 명시 파라미터
+        chain 으로 대체한다.
+        """
+        if target_date is None:
+            target_date = generate_daily_date()
 
         if is_blocked(config, target_date):
             logger.info("Daily: 방어 가드에 의해 스킵 (date=%s)", target_date)

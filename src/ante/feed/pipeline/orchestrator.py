@@ -123,8 +123,14 @@ class FeedOrchestrator:
         self,
         data_path: Path,
         config: dict[str, Any],
+        target_date: str | None = None,
     ) -> CollectionResult:
-        """일별 증분 수집 (daily 모드)."""
+        """일별 증분 수집 (daily 모드).
+
+        ``target_date`` 가 ``None`` 이면 ``DailyRunner.run`` 내부에서
+        ``generate_daily_date()`` (어제)로 fallback 한다. CLI ``--date``
+        같이 명시 지정된 값은 그대로 forward 된다. #1943.
+        """
         feed_dir = data_path / ".feed"
         started_at = datetime.now(tz=UTC)
 
@@ -142,6 +148,7 @@ class FeedOrchestrator:
                 feed_dir,
                 started_at,
                 self._is_blocked,
+                target_date=target_date,
             )
             self._save_report(data_path, feed_dir, result, "daily")
             return result
