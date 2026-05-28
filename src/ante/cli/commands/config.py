@@ -35,11 +35,10 @@ async def _create_services(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Config, DynamicConfigService, Database]]:
     """CLI 에서 ``Config`` / ``DynamicConfigService`` / ``Database`` 를 함께
-    구성하는 async context manager (#1857).
+    구성하는 async context manager.
 
-    이전 시그니처(``async def`` → ``tuple[Config, DynamicConfigService,
-    Database]``)에서 ``open_cli_db`` 기반 async context manager 로 전환했다
-    (#1855 factory composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
+    1:1 미러). 호출 패턴:
 
         async with _create_services(ctx=ctx) as (static_config, dynamic, db):
             ...
@@ -49,13 +48,13 @@ async def _create_services(
             (silent=True) 로 fallback. 신규 호출은 ctx 명시 전달 권장.
 
     Yields:
-        ``DynamicConfigService.initialize()`` 가 완료된 3-tuple. #1854 §4.2
-        명시 예외에 따라 ``DynamicConfigService.initialize()`` 호출을 보존한다
-        (read-only operation 의 read-only 검증을 위한 schema bootstrap).
+        ``DynamicConfigService.initialize()`` 가 완료된 3-tuple.
+        ``DynamicConfigService.initialize()`` 는 read-only 명시 예외(schema
+        bootstrap) 로 호출을 보존한다.
 
     Cleanup invariant:
         - ``open_cli_db`` 가 ``BaseException`` 까지 catch — service init 실패
-          시에도 ``Database.close()`` 보장 (#1722 회귀 lock).
+          시에도 ``Database.close()`` 보장.
     """
     from ante.cli.main import get_config_dir
     from ante.config.config import Config
@@ -115,7 +114,7 @@ def _render_single(result: dict, fmt) -> None:  # noqa: ANN001
     """단일 설정 결과 출력 (missing은 caller에서 처리).
 
     note: missing-resource (`source == "not_found"`) 분기는 caller(`config_get`)가
-    `ctx.exit(1)`로 처리한다. helper는 pure rendering만 담당한다 (#1515).
+    `ctx.exit(1)`로 처리한다. helper는 pure rendering만 담당한다.
     """
     if fmt.is_json:
         fmt.output(result)
@@ -148,7 +147,7 @@ def config_get(ctx: click.Context, key: str | None) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_get() -> dict | list[dict]:
-        # #1857: ``_create_services`` async context manager 전환.
+        # ``_create_services`` async context manager lifecycle.
         async with _create_services(ctx=ctx) as (static_config, dynamic, db):
             if key is not None:
                 return await _resolve_single(key, static_config, dynamic)
@@ -188,13 +187,12 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
     try:
         result = _run(_run_set())
     except click.ClickException as e:
-        # #1673 oracle A7: invalid log_level 같은 서비스 경계 입력 오류는
-        # ipc_send 가 error envelope를 ClickException 으로 변환한다. bare
-        # 재raise 하면 Click 기본 처리가 ``Error: ...`` 를 stderr 로 출력하고
-        # exit 1 로 종료해 JSON 모드 stdout 이 비어 envelope 계약이 깨진다
-        # (probe stdout_status=None). #1655-1657 envelope discipline 미러:
-        # ipc_send 가 부착한 원본 code/message 를 split 없이 복원해
-        # text/JSON 공용으로 구조화된 에러를 출력하고 SystemExit(1) 한다
+        # invalid log_level 같은 서비스 경계 입력 오류는 ipc_send 가 error
+        # envelope 를 ClickException 으로 변환한다. bare 재raise 하면 Click
+        # 기본 처리가 ``Error: ...`` 를 stderr 로 출력하고 exit 1 로 종료해
+        # JSON 모드 stdout 이 비어 envelope 계약이 깨진다. envelope discipline:
+        # ipc_send 가 부착한 원본 code/message 를 split 없이 복원해 text/JSON
+        # 공용으로 구조화된 에러를 출력하고 SystemExit(1) 한다
         # (_validators.reject_invalid_account_id 패턴).
         code = getattr(e, "ipc_error_code", "")
         message = getattr(e, "ipc_error_message", None)
@@ -245,7 +243,7 @@ def config_history(ctx: click.Context, key: str, limit: int) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_history() -> list[dict]:
-        # #1857: ``_create_services`` async context manager 전환.
+        # ``_create_services`` async context manager lifecycle.
         async with _create_services(ctx=ctx) as (_, dynamic, _):
             return await dynamic.get_history(key, limit=limit)
 

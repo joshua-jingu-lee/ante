@@ -39,31 +39,29 @@ def _run(coro):  # noqa: ANN001, ANN202
 async def _create_rule_engine(
     account_id: str, *, ctx: click.Context | None = None
 ) -> AsyncIterator[tuple[RuleEngine, Database]]:
-    """CLI용 RuleEngine async context manager (#1857).
+    """CLI용 RuleEngine async context manager.
 
-    이전 시그니처(``async def`` → ``tuple[RuleEngine, Database]``)에서
-    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
-    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
+    1:1 미러). 호출 패턴:
 
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, db):
             ...
 
     호출자가 ``--account`` 옵션으로 검증된 ``account_id`` 를 반드시 전달
-    해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다
-    (#1217). ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로
-    재검증한다.
+    해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다.
+    ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로 재검증한다.
 
     invalid ``account_id`` 검증은 ``open_cli_db`` (==``db.connect()``)
-    **이전**에 수행한다(#1635 Split B Layer 2 — ``treasury.py:37``
-    ``_create_treasury`` 패턴 1:1 미러). resource acquisition 이전에
-    검증·raise 하면 획득 자원이 0이라 정리 대상도 0 — 누수 구조 자체를
-    제거한다 (#1623 lifecycle invariant). ``RuleEngine.__init__`` 내부
-    ``require_account_id`` 는 defense-in-depth 그대로 유지.
+    **이전**에 수행한다 (``treasury.py`` ``_create_treasury`` 패턴 1:1
+    미러). resource acquisition 이전에 검증·raise 하면 획득 자원이 0이라
+    정리 대상도 0 — 누수 구조 자체를 제거한다 (lifecycle invariant).
+    ``RuleEngine.__init__`` 내부 ``require_account_id`` 는 defense-in-depth
+    그대로 유지.
 
     valid-format 이지만 DB에 없는 ``account_id`` (예: ``acc-9999``)는
     ``RuleEngine`` 생성 **이전**에 lightweight ``SELECT 1`` 로 존재를
-    검증해 ``AccountNotFoundError`` 로 분기한다(#1726). ``open_cli_db`` 가
-    ``BaseException`` 까지 catch 하므로 cleanup 보장된다 (#1722 동형).
+    검증해 ``AccountNotFoundError`` 로 분기한다. ``open_cli_db`` 가
+    ``BaseException`` 까지 catch 하므로 cleanup 보장된다.
     """
     from ante.account.scoping import require_account_id
     from ante.eventbus.bus import EventBus
@@ -80,7 +78,7 @@ async def _create_rule_engine(
 
     async with open_cli_db(resolved_ctx) as db:
         # account existence pre-check. ``rule_list`` 의 기존 inline 블록을
-        # 그대로 옮긴 형태이며, ``_create_treasury`` 동형 (#1725).
+        # 그대로 옮긴 형태이며, ``_create_treasury`` 동형.
         #
         # ``AccountService.initialize()`` 는 모든 non-deleted account row를
         # materialize하며 credentials를 복호화하므로, 조회 대상과 무관한
@@ -96,11 +94,11 @@ async def _create_rule_engine(
         # 핸들만 쓰고 ``AccountService`` 를 초기화하지 않으므로, 부분
         # 초기화/legacy DB(예: ``ante init`` 직후)에서는 테이블 자체가 없어
         # ``sqlite3.OperationalError: no such table: accounts`` 가
-        # 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을 우회할 수 있다
-        # (#1559). 정의상 accounts 테이블 부재는 해당 account 미존재와
-        # 동치이므로 동일한 ``AccountNotFoundError`` 로 정규화한다. 단,
-        # malformed db 같은 다른 ``OperationalError`` 까지 삼키지 않도록
-        # "no such table" 메시지일 때로만 좁힌다 (#1558 검증 패턴).
+        # 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을 우회할 수 있다.
+        # 정의상 accounts 테이블 부재는 해당 account 미존재와 동치이므로
+        # 동일한 ``AccountNotFoundError`` 로 정규화한다. 단, malformed db
+        # 같은 다른 ``OperationalError`` 까지 삼키지 않도록 "no such table"
+        # 메시지일 때로만 좁힌다.
         try:
             account_row = await db.fetch_one(
                 "SELECT 1 FROM accounts WHERE account_id = ?",
@@ -183,20 +181,18 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
     fmt = get_formatter(ctx)
 
     # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format은 여기서
-    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료된다. valid-but-absent
-    # account_id는 `require_account_id`가 거부하지 않으므로 기존 경로로
-    # 흘러 아래 `_run_list`의 account 존재 SELECT → `AccountNotFoundError`
-    # → `ACCOUNT_NOT_FOUND` 분기를 보존한다(invalid-format ↔ valid-absent
-    # 분리 불변, VALIDATION_ERROR 오분류 금지).
+    # 이전에 거부한다. invalid-format은 여기서 `VALIDATION_ERROR` + exit 1로
+    # 종료된다. valid-but-absent account_id는 `require_account_id`가 거부하지
+    # 않으므로 기존 경로로 흘러 아래 `_run_list`의 account 존재 SELECT →
+    # `AccountNotFoundError` → `ACCOUNT_NOT_FOUND` 분기를 보존한다
+    # (invalid-format ↔ valid-absent 분리 불변, VALIDATION_ERROR 오분류 금지).
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_list() -> list[dict]:
         # account existence는 ``_create_rule_engine`` 이 ``SELECT 1`` 로 선
-        # 검증한다(#1726 SSOT consolidation — 기존 여기 inline 블록을 helper
-        # 로 이동). 미존재 account는 ``AccountNotFoundError`` 로 raise되며
-        # 아래 호출 표면의 ``except AccountNotFoundError`` 분기가 받는다.
-        # #1857: ``_create_rule_engine`` async context manager 전환.
+        # 검증한다 (SSOT consolidation — helper 로 이동). 미존재 account는
+        # ``AccountNotFoundError`` 로 raise되며 아래 호출 표면의
+        # ``except AccountNotFoundError`` 분기가 받는다.
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
@@ -223,7 +219,7 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
 
     if not result:
         # 실재 account의 0 rules는 정상 계약: exit 0 + 빈 목록 응답을
-        # 그대로 유지한다. 미존재 account만 위에서 exit 1로 분기된다(#1559).
+        # 그대로 유지한다. 미존재 account만 위에서 exit 1로 분기된다.
         fmt.output({"message": "등록된 룰이 없습니다.", "rules": []})
         return
 
@@ -244,17 +240,15 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다(#1635 Split B Layer 1). invalid-format은 여기서
-    # `VALIDATION_ERROR`(#1633 SSOT) + exit 1로 종료한다. valid-but-absent
-    # account_id(예: ``acc-9999``)는 ``_create_rule_engine`` 이 ``SELECT 1``
-    # 로 검증해 ``AccountNotFoundError`` 를 raise하며, 아래 호출 표면의
+    # 이전에 거부한다. invalid-format은 여기서 `VALIDATION_ERROR` + exit 1로
+    # 종료한다. valid-but-absent account_id(예: ``acc-9999``)는
+    # ``_create_rule_engine`` 이 ``SELECT 1`` 로 검증해
+    # ``AccountNotFoundError`` 를 raise하며, 아래 호출 표면의
     # ``except AccountNotFoundError`` 분기가 ``ACCOUNT_NOT_FOUND`` 로
-    # 매핑한다(#1726 — prior #1635 명시 punt "ACCOUNT_NOT_FOUND 강제
-    # 금지"의 후속, ``rule_list`` line 196-198 패턴 1:1 동형).
+    # 매핑한다 (``rule_list`` 패턴 1:1 동형).
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_info() -> dict | None:
-        # #1857: ``_create_rule_engine`` async context manager 전환.
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
@@ -365,9 +359,9 @@ def rule_update(
                 actor=actor,
             )
 
-        # #1857: cold-path ``rule update`` lifecycle 을 ``open_cli_db`` 로
-        # 전환했다. ``AccountService``/``DynamicConfigService``/``AuditLogger``
-        # ``initialize()`` 호출은 그대로 유지된다 — #1854 §4.2 명시 예외는
+        # cold-path ``rule update`` lifecycle 은 ``open_cli_db`` 기반.
+        # ``AccountService``/``DynamicConfigService``/``AuditLogger``
+        # ``initialize()`` 호출은 그대로 유지된다 — read-only 명시 예외는
         # AuditLogger/DynamicConfigService만이고, 본 callsite 는 audit 기록을
         # 동반하는 cold-path mutation 이라 안전성을 위해 모두 보존한다.
         from ante.account.service import AccountService

@@ -18,8 +18,8 @@ from ante.report.models import ReportStatus
 from ante.report.validation import ReportSubmitRequest
 
 # `ReportStatus` enum이 `--status` 필터의 SSOT다. `report list`는 DB 진입 전
-# preflight에서 invalid 값을 차단해야 하며 (#1462), 이를 위해 함수 내부 import
-# 대신 모듈 상단 import을 사용한다. `ante.report.models`는 dataclass + StrEnum
+# preflight에서 invalid 값을 차단해야 하며, 이를 위해 함수 내부 import 대신
+# 모듈 상단 import을 사용한다. `ante.report.models`는 dataclass + StrEnum
 # + math 만 노출하는 light 모듈이라 `tests/unit/test_cli_dependency_isolation.py`
 # 가 회귀를 차단한다.
 
@@ -72,7 +72,7 @@ def submit(
             fmt.error(f"Invalid JSON: {exc}", code="REPORT_VALIDATION_ERROR")
             raise SystemExit(1) from exc
 
-    # ── #1415 codex r1 P3: non-object JSON 거부 ─────────────────────────
+    # ── non-object JSON 거부 ────────────────────────────────────────────
     # 파일이 JSON object가 아닌 array/string/number/bool/null이면 아래
     # ``report_data.pop(...)``/``report_data.get(...)`` 호출이 ``TypeError``/
     # ``AttributeError``로 raise되어 의도한 ``REPORT_VALIDATION_ERROR`` 구조화
@@ -90,7 +90,7 @@ def submit(
     if run_id:
         report_data["backtest_run_id"] = run_id
 
-    # ── #1415: ReportSubmitRequest 검증 ────────────────────────────────
+    # ── ReportSubmitRequest 검증 ───────────────────────────────────────
     # SSOT: ``src/ante/report/validation.py::ReportSubmitRequest``.
     #
     # CLI 입력은 제출 스키마 invariant를 통과해야 한다:
@@ -110,11 +110,11 @@ def submit(
     try:
         validated = ReportSubmitRequest.model_validate(report_data)
     except ValidationError as exc:
-        # 거부된 입력 값/ctx 반사 금지 (보안 invariant #1629 L1 패턴 1:1 미러;
-        # reports.py:194 web sweep 와 동일 sanitizer). 2b 가 sections 미지원
-        # 필드를 ValidationError(extra_forbidden) 경로로 보내므로 ``str(exc)``
-        # 의 ``input_value={...}`` (제출한 sections rationale/evidence) 가
-        # 터미널/CI 로그에 반사되지 않도록 loc/type/msg 만 출력한다 (#1632).
+        # 거부된 입력 값/ctx 반사 금지 (보안 invariant — reports.py web sweep
+        # 와 동일 sanitizer). sections 미지원 필드는 ValidationError
+        # (extra_forbidden) 경로로 들어오므로 ``str(exc)`` 의
+        # ``input_value={...}`` (제출한 sections rationale/evidence) 가
+        # 터미널/CI 로그에 반사되지 않도록 loc/type/msg 만 출력한다.
         fmt.error(
             str(exc.errors(include_context=False, include_input=False)),
             code="REPORT_VALIDATION_ERROR",
@@ -204,8 +204,8 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
     resolved_db_path = db_path or get_db_path(ctx)
 
     # Preflight: invalid `--status`는 `Database` 생성 전에 차단한다.
-    # `ReportStatus` enum이 SSOT이며 (#1462) inline 비교한다.
-    # strategy.py:204-210 패턴과 동형이다.
+    # `ReportStatus` enum이 SSOT이며 inline 비교한다.
+    # strategy.py 패턴과 동형이다.
     if status is not None and status not in {s.value for s in ReportStatus}:
         fmt.error(
             f"잘못된 status 값: {status!r}. "
@@ -221,8 +221,8 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
         # ``list_reports`` 호출 포함)을 ``except BaseException`` 블록으로 감싸
         # 실패 시 ``db.close()``를 보장한다. ``initialize``/``list_reports`` 가
         # raise되면 aiosqlite 연결이 leak되어 asyncio 종료 시 worker thread가
-        # 정리되며 stderr에 traceback이 노출되는 회귀를 차단한다 (#1755;
-        # ``_create_account_service`` (#1722) cleanup 패턴 1:1 미러).
+        # 정리되며 stderr에 traceback이 노출되는 회귀를 차단한다
+        # (``_create_account_service`` cleanup 패턴 1:1 미러).
         db = Database(resolved_db_path)
         try:
             await db.connect()
@@ -317,14 +317,13 @@ def report_performance(
         )
         raise SystemExit(1)
 
-    # monthly --year 비양수 거부 (#1599 oracle A7): #1593 period-exclusive
-    # 블록 직후, _run_performance/asyncio.run 이전에 차단한다. 캘린더 연도는
-    # 양수(>0)만 유효하므로 0/음수는 거부한다. daily+year는 위 #1593
+    # monthly --year 비양수 거부: period-exclusive 블록 직후,
+    # _run_performance/asyncio.run 이전에 차단한다. 캘린더 연도는 양수(>0)만
+    # 유효하므로 0/음수는 거부한다. daily+year는 위 period-exclusive
     # CLI_OPTION_CONFLICT가 먼저 잡으므로(이 블록은 그 after 배치) 여기 도달
     # 하는 year는 monthly 경로뿐이며 daily+year<=0도 CLI_OPTION_CONFLICT다.
     # 에러코드는 report 도메인의 기존 REPORT_VALIDATION_ERROR를 재사용한다
-    # (report submit 검증 report.py:66/77/107과 동일 코드). 상한/미래연도
-    # 검증은 범위 밖(>0만 검증).
+    # (report submit 검증과 동일 코드). 상한/미래연도 검증은 범위 밖(>0만 검증).
     if period == "monthly" and year is not None and year <= 0:
         fmt.error(
             "monthly --year는 양수 calendar year여야 합니다. (0 이하 거부)",
@@ -332,11 +331,11 @@ def report_performance(
         )
         raise SystemExit(1)
 
-    # inverted date range(시작일 > 종료일) 거부: #1593 period-exclusive 블록
-    # 직후, _run_performance/asyncio.run 이전에 차단한다 (backtest.py:72-77
-    # 동형, INVALID_DATE_RANGE + exit 1). #1593이 monthly+start/end는 이미
-    # CLI_OPTION_CONFLICT로 거부했으므로 여기 도달하는 start/end 조합은
-    # daily 경로뿐이다. #1593 순서/코드는 보존(이 블록은 after 배치).
+    # inverted date range(시작일 > 종료일) 거부: period-exclusive 블록 직후,
+    # _run_performance/asyncio.run 이전에 차단한다 (backtest.py 동형,
+    # INVALID_DATE_RANGE + exit 1). period-exclusive 게이트가 monthly+start/end
+    # 는 이미 CLI_OPTION_CONFLICT로 거부했으므로 여기 도달하는 start/end 조합은
+    # daily 경로뿐이다. 순서/코드는 보존(이 블록은 after 배치).
     reject_inverted_date_range(
         start,
         end,
@@ -346,7 +345,8 @@ def report_performance(
     )
 
     async def _run_performance() -> list[dict]:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        # ``open_cli_db`` 헬퍼 lifecycle (cleanup invariant — 예외/cancellation
+        # 시에도 ``Database.close()`` 1회 보장).
         from ante.trade.performance import PerformanceTracker
 
         async with open_cli_db(ctx) as db:

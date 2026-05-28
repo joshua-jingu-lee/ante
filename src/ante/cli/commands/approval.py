@@ -16,8 +16,8 @@ from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
 
 # `ApprovalStatus`/`ApprovalType` enum이 `--status`/`--type` 필터의 SSOT다.
-# `approval list`는 DB 진입 전 preflight에서 invalid 값을 차단해야 하며 (#1462),
-# 이를 위해 함수 내부 import 대신 모듈 상단 import을 사용한다.
+# `approval list`는 DB 진입 전 preflight에서 invalid 값을 차단해야 하며, 이를
+# 위해 함수 내부 import 대신 모듈 상단 import을 사용한다.
 # `ante.approval.models`은 dataclass + StrEnum 만 노출하는 light 모듈이라
 # `tests/unit/test_cli_dependency_isolation.py`가 회귀를 차단한다.
 
@@ -49,7 +49,7 @@ def request(
 ) -> None:
     """결재 요청 생성."""
     # ApprovalType SSOT 검증. `ante.approval.models`는 모듈 상단에서 import한다
-    # (#1462; #1469 lazy 패턴은 dependency-isolation smoke가 회귀 차단).
+    # (dependency-isolation smoke가 lazy 패턴 회귀를 차단).
 
     fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
@@ -63,8 +63,8 @@ def request(
     # ``--params`` 는 service ``params.get()`` 호출의 SSOT 입력이므로 JSON
     # object (dict) 만 허용한다. string/list/number/bool/null 같은 non-dict
     # JSON value 가 통과하면 service 단에서 ``AttributeError`` traceback 이
-    # 노출된다 (#1519). 같은 함수 line 57-58 / 62-66 패턴과 동형.
-    # service/IPC defense-in-depth 는 본 PR Non-Goals (follow-up).
+    # 노출된다. 같은 함수 다른 분기와 동형.
+    # service/IPC defense-in-depth 는 본 모듈 범위 밖.
     if not isinstance(params, dict):
         params_type = type(params).__name__
         fmt.error(
@@ -89,7 +89,7 @@ def request(
             # 너무 큰 숫자 + h/d 입력 시 ``timedelta`` 에서 ``OverflowError``
             # 를 raise 한다. 둘 다 ingress validation 실패이므로 동일하게
             # ``APPROVAL_VALIDATION_ERROR`` 구조화 에러로 종료시켜 Python
-            # traceback 노출을 차단한다 (#1518; line 57-58 / 92-94 패턴과 동형).
+            # traceback 노출을 차단한다 (다른 분기 패턴과 동형).
             fmt.error(
                 f"잘못된 expires-in: {e}",
                 code="APPROVAL_VALIDATION_ERROR",
@@ -121,11 +121,10 @@ def request(
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: typed exception (.code) 또는 registry MRO lookup 으로
-        # IPC envelope 과 동일한 public code (APPROVAL_VALIDATION_ERROR /
+        # typed exception (.code) 또는 registry MRO lookup 으로 IPC envelope
+        # 과 동일한 public code (APPROVAL_VALIDATION_ERROR /
         # APPROVAL_STATUS_CONFLICT 등) 를 surface 한다. registry miss 시
-        # EXECUTION_ERROR fallback (기존 ad-hoc "APPROVAL_ERROR" 와 별개의
-        # taxonomy lock 코드).
+        # EXECUTION_ERROR fallback (taxonomy lock 코드).
         emit_cli_error(fmt, e)
 
 
@@ -147,8 +146,8 @@ def approval_list(
     fmt = get_formatter(ctx)
 
     # Preflight: invalid `--status`/`--type`는 `Database` 생성 전에 차단한다.
-    # `ApprovalStatus`/`ApprovalType` enum이 SSOT이며 (#1462) inline 비교한다.
-    # strategy.py:204-210 패턴과 동형이다.
+    # `ApprovalStatus`/`ApprovalType` enum이 SSOT이며 inline 비교한다.
+    # strategy.py 패턴과 동형이다.
     if status is not None and status not in {s.value for s in ApprovalStatus}:
         fmt.error(
             f"잘못된 status 값: {status!r}. "
@@ -171,17 +170,17 @@ def approval_list(
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
-        # #1856: ``open_cli_db`` 헬퍼가 ``Database`` 생성/connect/close lifecycle
-        # 을 캡슐화한다 (#1855). 이전 ``except BaseException`` cleanup 패턴
-        # (#1755) 은 헬퍼 내부의 ``BaseException`` catch + close 실패 swallow 로
-        # 흡수됐다. ``--db-path`` Click option 은 ``db_path_override`` 로 명시
-        # 전달해 ctx 의 기본 ``get_db_path(ctx)`` resolution 을 override 한다
-        # (offline-factory.md §1.1).
+        # ``open_cli_db`` 헬퍼가 ``Database`` 생성/connect/close lifecycle 을
+        # 캡슐화한다. cleanup 패턴 (``BaseException`` catch + close 실패
+        # swallow) 도 헬퍼 내부에 흡수됐다. ``--db-path`` Click option 은
+        # ``db_path_override`` 로 명시 전달해 ctx 의 기본 ``get_db_path(ctx)``
+        # resolution 을 override 한다 (offline-factory.md §1.1).
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
-            # #1854 §4.2 예외: ``ApprovalService.initialize`` 는 ``APPROVAL_SCHEMA``
-            # DDL 을 수반하므로 read-only ``list`` 경로에서도 호출이 필요하다.
+            # ``ApprovalService.initialize`` 는 ``APPROVAL_SCHEMA`` DDL 을
+            # 수반하므로 read-only ``list`` 경로에서도 호출이 필요하다
+            # (read-only 명시 예외).
             await service.initialize()
 
             requests = await service.list_approvals(status=status, type=approval_type)
@@ -201,8 +200,8 @@ def approval_list(
         rows = asyncio.run(_list())
         fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -221,14 +220,15 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
-        # #1856: ``open_cli_db`` 헬퍼가 ``_find_request`` 의 ``ValueError`` /
+        # ``open_cli_db`` 헬퍼가 ``_find_request`` 의 ``ValueError`` /
         # ``ApprovalNotFoundError`` raise 경로에서도 ``Database.close()`` 를
-        # 보장한다 (#1755 회귀 lock — 이전 구현은 close 미도달로 aiosqlite
+        # 보장한다 (cleanup invariant — 이전 구현은 close 미도달로 aiosqlite
         # worker thread leak → 8s busy_timeout 대기로 probe timeout exit 124).
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
-            # #1854 §4.2 예외: schema DDL 수반 → read-only 경로에도 initialize 호출.
+            # schema DDL 수반 → read-only 경로에도 initialize 호출 (read-only
+            # 명시 예외).
             await service.initialize()
 
             req = await _find_request(service, id)
@@ -254,16 +254,15 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
         result = asyncio.run(_info())
         fmt.output(result)
     except ApprovalNotFoundError as e:
-        # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
-        # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형).
-        # #1843 sub-PR 2: typed except 보존 — registry 등록된 동일 코드와
-        # surface 일치하지만, ``info``/``review`` 양쪽이 _find_request 의
-        # ValueError(multi-match) 분기와도 구분되어야 하므로 명시 매핑 유지.
+        # missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로 surface
+        # 한다 (``ApprovalNotFoundError.code`` 와 동형). ``info``/``review``
+        # 양쪽이 _find_request 의 ValueError(multi-match) 분기와도 구분되어야
+        # 하므로 명시 매핑 유지.
         fmt.error(str(e), code="APPROVAL_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -297,9 +296,9 @@ def review(
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
-        # #1856: ``open_cli_db`` 헬퍼가 ``service.add_review`` 의 not-found /
-        # invalid-id raise 경로에서도 ``Database.close()`` 를 보장한다 (#1755
-        # 회귀 lock — ``approval info`` 와 동형).
+        # ``open_cli_db`` 헬퍼가 ``service.add_review`` 의 not-found /
+        # invalid-id raise 경로에서도 ``Database.close()`` 를 보장한다
+        # (cleanup invariant — ``approval info`` 와 동형).
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
@@ -322,14 +321,14 @@ def review(
         result = asyncio.run(_review())
         fmt.success(f"검토 의견 추가: {reviewer} → {review_result}", result)
     except ApprovalNotFoundError as e:
-        # #1811: missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로
-        # surface 한다 (Group A ``ApprovalNotFoundError.code`` 와 동형,
-        # ``approval info`` 형제 패턴 미러). #1843 sub-PR 2: typed except 보존.
+        # missing approval 은 안정 코드 ``APPROVAL_NOT_FOUND`` 로 surface
+        # 한다 (``ApprovalNotFoundError.code`` 와 동형, ``approval info``
+        # 형제 패턴 미러).
         fmt.error(str(e), code="APPROVAL_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -364,7 +363,7 @@ def reopen(
             fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
             raise SystemExit(1) from e
         # ``--params`` 는 service ``params.get()`` 의 SSOT 입력이므로 JSON
-        # object 만 허용한다 (#1519; ``request`` 사이트와 동형).
+        # object 만 허용한다 (``request`` 사이트와 동형).
         # ``--params`` 옵션 미지정 (``params_json is None``) 시에는 이 분기에
         # 진입하지 않아 ``params=None`` sentinel 이 보존되어 IPC payload 에
         # ``params`` 키가 빠지고 기존 값 유지 invariant 가 지켜진다.
@@ -383,8 +382,8 @@ def reopen(
 
         # IPC handler ``_handle_approval_reopen`` 가 ``args["id"]`` 를 기대한다
         # (src/ante/ipc/registry.py). 과거 ``"approval_id"`` 키는 handler 미스매치
-        # 로 ``KeyError`` 를 일으켰다 — Web API/IPC 계약과 동일한 ``"id"`` 로 정렬
-        # (#1794). ``approval.cancel_invalid`` 만 별도 계약으로 ``approval_id``
+        # 로 ``KeyError`` 를 일으켰다 — Web API/IPC 계약과 동일한 ``"id"`` 로
+        # 정렬. ``approval.cancel_invalid`` 만 별도 계약으로 ``approval_id``
         # 사용을 유지한다.
         args: dict = {"id": id}
         if body is not None:
@@ -399,8 +398,8 @@ def reopen(
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -416,7 +415,7 @@ def audit_types(
     status: str | None,
     db_path: str | None,
 ) -> None:
-    """``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별 (#1472).
+    """``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별.
 
     분류는 ``offline`` (DB 직접 조회) 이며 ``approval list`` 와 동일하게
     ``ApprovalService.initialize()`` 가 수반된다. 정상 type row 는 enum SSOT
@@ -441,9 +440,9 @@ def audit_types(
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
-        # #1856: ``open_cli_db`` 헬퍼가 ``ApprovalService(...)`` /
+        # ``open_cli_db`` 헬퍼가 ``ApprovalService(...)`` /
         # ``service.initialize()`` raise 경로에서도 ``Database.close()`` 를
-        # 보장한다 (#1755 회귀 lock; ``approval list`` 와 동형).
+        # 보장한다 (cleanup invariant; ``approval list`` 와 동형).
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             eventbus = EventBus()
             service = ApprovalService(db=db, eventbus=eventbus)
@@ -468,8 +467,8 @@ def audit_types(
             ["id", "type", "status", "requester", "created_at", "expires_at"],
         )
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -480,7 +479,7 @@ def audit_types(
 @require_auth
 @require_scope("approval:admin")
 def cancel_invalid(ctx: click.Context, id: str) -> None:
-    """legacy invalid-type approval row 의 administrative cancellation (#1472).
+    """legacy invalid-type approval row 의 administrative cancellation.
 
     일반 ``ante approval cancel`` 의 requester ownership rule 을 우회한다 —
     invalid-type row 의 requester 는 신뢰할 수 없거나 사라졌을 수 있다. 이
@@ -512,8 +511,8 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -532,8 +531,7 @@ def cancel(ctx: click.Context, id: str) -> None:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         # IPC handler ``_handle_approval_cancel`` 가 ``args["id"]`` 를 기대한다
-        # (#1794, registry.py:533 참조). cancel-invalid 와 키 계약이 다르므로
-        # 혼동에 주의.
+        # (registry.py 참조). cancel-invalid 와 키 계약이 다르므로 혼동에 주의.
         return await ipc_send("approval.cancel", {"id": id}, actor=requester)
 
     try:
@@ -542,8 +540,8 @@ def cancel(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface.
         emit_cli_error(fmt, e)
 
 
@@ -561,8 +559,8 @@ def approve(ctx: click.Context, id: str) -> None:
     async def _approve() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        # IPC handler ``_handle_approval_approve`` 가 ``args["id"]`` 를 기대한다
-        # (#1794, registry.py:515 참조).
+        # IPC handler ``_handle_approval_approve`` 가 ``args["id"]`` 를
+        # 기대한다 (registry.py 참조).
         return await ipc_send("approval.approve", {"id": id}, actor=actor)
 
     try:
@@ -571,8 +569,8 @@ def approve(ctx: click.Context, id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
         # (ApprovalStatusConflictError → APPROVAL_STATUS_CONFLICT 등).
         emit_cli_error(fmt, e)
 
@@ -593,7 +591,7 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         # IPC handler ``_handle_approval_reject`` 가 ``args["id"]`` 를 기대한다
-        # (#1794, registry.py:523 참조).
+        # (registry.py 참조).
         return await ipc_send(
             "approval.reject",
             {"id": id, "reason": reason},
@@ -606,8 +604,8 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # #1843 sub-PR 2: helper 가 typed exception (.code) → registry → fallback
-        # 순서로 public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
+        # helper 가 typed exception (.code) → registry → fallback 순서로
+        # public code 를 resolve 한다. IPC envelope 과 동일 코드 surface
         # (ApprovalStatusConflictError → APPROVAL_STATUS_CONFLICT 등).
         emit_cli_error(fmt, e)
 
@@ -617,10 +615,10 @@ async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
 
     not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval info``
     / ``approval review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로
-    surface 할 수 있도록 한다 (#1811). multi-match 는 ``ValueError`` 로
-    유지 — 별도 의미(``"여러 건이 일치"``)이며 #1843 sub-PR 2 정렬 이후
-    generic ``emit_cli_error(fmt, e)`` 핸들러가 helper resolver 의 fallback
-    ``EXECUTION_ERROR`` 코드로 surface 한다 (registry 미등록 / ``.code`` 부재).
+    surface 할 수 있도록 한다. multi-match 는 ``ValueError`` 로 유지 —
+    별도 의미(``"여러 건이 일치"``) 이며 generic ``emit_cli_error(fmt, e)``
+    핸들러가 helper resolver 의 fallback ``EXECUTION_ERROR`` 코드로 surface
+    한다 (registry 미등록 / ``.code`` 부재).
     """
     from ante.approval.errors import ApprovalNotFoundError
 

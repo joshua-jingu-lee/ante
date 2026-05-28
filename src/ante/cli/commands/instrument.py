@@ -68,7 +68,7 @@ def instrument_list(
         ctx.exit(1)
 
     async def _run() -> list[dict]:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
         # ``db_path_override`` 로 전달 — offline-factory.md §1.1 caller 산출
         # 경로 패턴.
         async with open_cli_db(ctx, db_path_override=db_path) as db:
@@ -153,7 +153,7 @@ def sync(
         ctx.exit(1)
 
     async def _run() -> dict:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
         # ``db_path_override`` 로 전달.
         config = Config.load(config_dir=resolved_config_dir)
         broker_config = config.get("broker", {})
@@ -257,7 +257,7 @@ def search(
     fmt = get_formatter(ctx)
 
     async def _run() -> list[dict]:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
         # ``db_path_override`` 로 전달.
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
@@ -331,9 +331,9 @@ def instrument_import(
             with open(path, encoding="utf-8") as f:
                 records = json.load(f)
     except Exception as e:
-        # #1784: 파일 읽기 I/O 실패(directory-with-csv-suffix, 권한 등)는
-        # 안정 코드 ``INSTRUMENT_IO_ERROR`` 로 surface 한다. 자동화/오라클이
-        # 메시지 텍스트 파싱 없이 I/O 실패를 분류할 수 있게 한다.
+        # 파일 읽기 I/O 실패(directory-with-csv-suffix, 권한 등)는 안정 코드
+        # ``INSTRUMENT_IO_ERROR`` 로 surface 한다. 자동화/오라클이 메시지
+        # 텍스트 파싱 없이 I/O 실패를 분류할 수 있게 한다.
         fmt.error(f"파일 읽기 실패: {e}", code="INSTRUMENT_IO_ERROR")
         ctx.exit(1)
 
@@ -351,10 +351,10 @@ def instrument_import(
     # 필수 컬럼 확인
     first = records[0]
     if "symbol" not in first or "exchange" not in first:
-        # #1784: 필수 컬럼 누락은 안정 코드
-        # ``INSTRUMENT_MISSING_COLUMNS`` 로 surface 한다. 형제 코드
-        # ``INSTRUMENT_INVALID_JSON_SHAPE`` / ``INSTRUMENT_EMPTY_FILE`` /
-        # ``INSTRUMENT_INVALID_FILE_FORMAT`` 와 동형 envelope 일관성.
+        # 필수 컬럼 누락은 안정 코드 ``INSTRUMENT_MISSING_COLUMNS`` 로
+        # surface 한다. 형제 코드 ``INSTRUMENT_INVALID_JSON_SHAPE`` /
+        # ``INSTRUMENT_EMPTY_FILE`` / ``INSTRUMENT_INVALID_FILE_FORMAT`` 와
+        # 동형 envelope 일관성.
         fmt.error(
             "필수 컬럼 누락: symbol, exchange가 필요합니다.",
             code="INSTRUMENT_MISSING_COLUMNS",
@@ -441,7 +441,7 @@ def instrument_import(
         return
 
     async def _import() -> int:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
+        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
         # ``db_path_override`` 로 전달.
         from ante.instrument.service import InstrumentService
 

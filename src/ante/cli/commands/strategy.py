@@ -25,9 +25,9 @@ if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.strategy.registry import StrategyRegistry
 
-# `StrategyStatus` enum이 단일 SSOT이며 (#1463에서 임시 frozenset 복사본 제거),
-# `ante.strategy.__init__`의 lazy ``__getattr__`` 정리로 본 import가 heavy
-# 분석 의존성을 끌지 않는다. CLI dispatch path가 light한지는
+# `StrategyStatus` enum이 단일 SSOT다. `ante.strategy.__init__`의 lazy
+# ``__getattr__`` 정리로 본 import가 heavy 분석 의존성을 끌지 않는다.
+# CLI dispatch path가 light한지는
 # ``tests/unit/test_cli_dependency_isolation.py``가 fresh subprocess로 차단한다.
 
 
@@ -44,20 +44,19 @@ def _run(coro):  # noqa: ANN001, ANN202
 async def _create_registry(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[StrategyRegistry, Database]]:
-    """CLI 에서 ``StrategyRegistry`` async context manager (#1857).
+    """CLI 에서 ``StrategyRegistry`` async context manager.
 
-    이전 시그니처(``async def`` → ``tuple[StrategyRegistry, Database]``)에서
-    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
-    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
+    1:1 미러). 호출 패턴:
 
         async with _create_registry(ctx=ctx) as (registry, db):
             ...
 
-    fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서
-    보장한다. ``register/get_by_name/list_strategies`` 등 모든 caller 에
-    자동 적용되며, idempotent하므로 기존 명시 ``await registry.initialize()``
-    호출은 회귀 안전을 위해 보존한다 (#1753 — #1854 §4.2 도 read-only 명시
-    예외 대상이지만 본 helper 는 안전성을 위해 호출을 그대로 보존한다).
+    fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서 보장한다.
+    ``register/get_by_name/list_strategies`` 등 모든 caller 에 자동 적용되며,
+    idempotent하므로 기존 명시 ``await registry.initialize()`` 호출은 회귀
+    안전을 위해 보존한다 (read-only 명시 예외 대상이지만 본 helper 는
+    안전성을 위해 호출을 그대로 보존한다).
     """
     from ante.strategy.registry import StrategyRegistry
 
@@ -160,8 +159,8 @@ def submit(ctx: click.Context, path: str) -> None:
 
     if not validation.valid:
         if fmt.is_json:
-            # #1789: 기존 ad-hoc envelope (``submitted``/``stage``/``errors``)
-            # 은 자동화 의존성 보호를 위해 유지하되, 안정 ``code`` 필드를
+            # 기존 ad-hoc envelope (``submitted``/``stage``/``errors``) 은
+            # 자동화 의존성 보호를 위해 유지하되, 안정 ``code`` 필드를
             # 추가해 표준 JSON 에러 envelope 의 분류 의미를 보존한다 (현존
             # ``meta_validation`` 분기와 동형).
             fmt.output(
@@ -173,8 +172,8 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            # #1843 sub-PR 6: text-mode 도 STRATEGY_VALIDATION_ERROR 안정
-            # 코드를 명시 부여한다 (JSON 분기의 ``code`` 필드와 동일 SSOT).
+            # text-mode 도 STRATEGY_VALIDATION_ERROR 안정 코드를 명시
+            # 부여한다 (JSON 분기의 ``code`` 필드와 동일 SSOT).
             # ``OutputFormatter.error`` 가 text 모드에서 code 를 stdout 에
             # 출력하지 않지만 (포맷 책임 분리), drift guard ``fmt.error``
             # callsite invariant 를 충족하기 위한 명시 부여.
@@ -192,7 +191,7 @@ def submit(ctx: click.Context, path: str) -> None:
         strategy_cls = StrategyLoader.load(filepath)
     except StrategyLoadError as e:
         if fmt.is_json:
-            # #1789: load 실패에도 안정 ``code`` 를 envelope 에 포함한다.
+            # load 실패에도 안정 ``code`` 를 envelope 에 포함한다.
             fmt.output(
                 {
                     "submitted": False,
@@ -202,10 +201,9 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            # #1843 sub-PR 6: helper 가 ``StrategyLoadError`` →
-            # ``STRATEGY_LOAD_ERROR`` 안정 코드를 surface 한다 (JSON 분기의
-            # ``code`` 필드와 동일 SSOT). 도메인 문구 "Load test failed:" 는
-            # ``fallback_message`` 로 보존.
+            # helper 가 ``StrategyLoadError`` → ``STRATEGY_LOAD_ERROR`` 안정
+            # 코드를 surface 한다 (JSON 분기의 ``code`` 필드와 동일 SSOT).
+            # 도메인 문구 "Load test failed:" 는 ``fallback_message`` 로 보존.
             emit_cli_error(fmt, e, fallback_message=f"Load test failed: {e}")
         raise SystemExit(1)
 
@@ -215,7 +213,7 @@ def submit(ctx: click.Context, path: str) -> None:
     # validation error 처리 (dict 등 invalid shape의 AttributeError 누출 차단).
     # registry.register(meta.name, meta.version, ...) 호출 전에 ingress에서
     # 차단해야 StrategyMeta가 아닌 객체가 attribute access 단계에서
-    # AttributeError traceback으로 stderr에 새는 #1756 회귀를 막는다.
+    # AttributeError traceback으로 stderr에 새는 회귀를 막는다.
     if not isinstance(meta, StrategyMeta):
         error_message = (
             f"meta는 StrategyMeta 인스턴스여야 합니다 "
@@ -249,7 +247,7 @@ def submit(ctx: click.Context, path: str) -> None:
 
     # 4. Registry 등록
     async def _register() -> dict:
-        # #1857: ``_create_registry`` async context manager 전환.
+        # ``_create_registry`` async context manager lifecycle.
         async with _create_registry(ctx=ctx) as (registry, _):
             await registry.initialize()
             record = await registry.register(
@@ -276,10 +274,10 @@ def submit(ctx: click.Context, path: str) -> None:
         result = _run(_register())
     except StrategyError as e:
         if fmt.is_json:
-            # #1789: register 실패 (duplicate id 등) envelope 에 typed
-            # ``code`` 를 포함한다. 예외 인스턴스가 class-level ``code`` 를
-            # 가지면 우선 사용하고, 없으면 generic ``STRATEGY_ERROR``
-            # fallback 으로 envelope 일관성을 유지한다.
+            # register 실패 (duplicate id 등) envelope 에 typed ``code`` 를
+            # 포함한다. 예외 인스턴스가 class-level ``code`` 를 가지면 우선
+            # 사용하고, 없으면 generic ``STRATEGY_ERROR`` fallback 으로
+            # envelope 일관성을 유지한다.
             fmt.output(
                 {
                     "submitted": False,
@@ -289,8 +287,8 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            # #1843 sub-PR 6: helper 가 ``StrategyError`` MRO lookup 으로
-            # subclass 별 typed 코드 (예: ``IncompatibleExchangeError`` →
+            # helper 가 ``StrategyError`` MRO lookup 으로 subclass 별 typed
+            # 코드 (예: ``IncompatibleExchangeError`` →
             # ``STRATEGY_INCOMPATIBLE_EXCHANGE``) 를 surface 한다. registry
             # miss + ``.code`` 미부여 시 ``EXECUTION_ERROR`` fallback (구
             # ``str(e)`` no-code 회귀 차단).
@@ -317,9 +315,9 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     fmt = get_formatter(ctx)
 
     # Preflight: invalid --status는 registry/DB 진입 전에 차단한다.
-    # `StrategyStatus` enum이 SSOT이며 직접 비교한다 (#1463 임시 frozenset 제거).
-    # 이로써 일반적인 입력 오타가 `StrategyStatus(status)` ValueError →
-    # Python traceback으로 새지 않고 flat JSON error로 종료된다.
+    # `StrategyStatus` enum이 SSOT이며 직접 비교한다. 이로써 일반적인 입력
+    # 오타가 `StrategyStatus(status)` ValueError → Python traceback으로
+    # 새지 않고 flat JSON error로 종료된다.
     valid_statuses = {s.value for s in StrategyStatus}
     if status is not None and status not in valid_statuses:
         fmt.error(
@@ -329,7 +327,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         raise SystemExit(1)
 
     async def _list() -> list[dict]:
-        # #1857: ``_create_registry`` async context manager 전환.
+        # ``_create_registry`` async context manager lifecycle.
         async with _create_registry(ctx=ctx) as (registry, _):
             filter_status = StrategyStatus(status) if status else None
             records = await registry.list_strategies(status=filter_status)
@@ -355,7 +353,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
     # `sqlite3.OperationalError: no such table: strategies` 는 빈 결과로
     # 정규화한다. `_create_registry()` 가 `await registry.initialize()` 를
     # 보장하므로 정상 경로에서는 발생하지 않지만, race/regress 시에도
-    # 사용자에게 내부 schema 명을 노출하지 않도록 방어한다 (#1753).
+    # 사용자에게 내부 schema 명을 노출하지 않도록 방어한다.
     try:
         rows = _run(_list())
     except click.ClickException:
@@ -412,7 +410,7 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
                 actor=actor,
             )
 
-        # #1857: ``_create_registry`` async context manager 전환.
+        # ``_create_registry`` async context manager lifecycle.
         async with _create_registry(ctx=ctx) as (registry, _):
             await registry.initialize()
             await registry.update_status(strategy_id, target_status)
@@ -435,8 +433,8 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
         fmt.error(str(e), code="STRATEGY_INVALID_STATUS_TRANSITION")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1796: typed exception 의 class-level ``code`` 속성을 우선 surface
-        # 한다 (예: ``StrategyNotFoundError.code = "STRATEGY_NOT_FOUND"``).
+        # typed exception 의 class-level ``code`` 속성을 우선 surface 한다
+        # (예: ``StrategyNotFoundError.code = "STRATEGY_NOT_FOUND"``).
         # 속성이 없는 일반 ``StrategyError`` 는 기존 ``STRATEGY_ERROR``
         # fallback 으로 유지된다 (회귀 없음).
         fmt.error(str(e), code=getattr(e, "code", "STRATEGY_ERROR"))
@@ -459,7 +457,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _info() -> dict | None:
-        # #1857: ``_create_registry`` async context manager 전환.
+        # ``_create_registry`` async context manager lifecycle.
         async with _create_registry(ctx=ctx) as (registry, _):
             records = await registry.get_by_name(name)
             if not records:
@@ -507,8 +505,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     # 호출 표면 try/except: fresh DB 또는 race 상황의
     # `sqlite3.OperationalError: no such table: strategies` 는 not-found 로
     # 정규화한다. 다른 OperationalError(예: malformed DB)는 STRATEGY_ERROR 로
-    # 분류하여 내부 traceback 노출을 차단한다 (strategy_summary line 560-564
-    # 동형 SSOT, #1753).
+    # 분류하여 내부 traceback 노출을 차단한다 (strategy_summary 동형 SSOT).
     try:
         result = _run(_info())
     except sqlite3.OperationalError as e:
@@ -522,8 +519,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
         raise SystemExit(1) from e
 
     if result is None:
-        # `strategy_summary` line 566-568 / spec line 567 STRATEGY_NOT_FOUND
-        # SSOT 재사용 (#1753).
+        # `strategy_summary` / spec STRATEGY_NOT_FOUND SSOT 재사용.
         fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
         raise SystemExit(1)
 
@@ -635,7 +631,7 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _summary() -> dict | None:
-        # #1857: ``_create_registry`` async context manager 전환.
+        # ``_create_registry`` async context manager lifecycle.
         from ante.trade.performance import PerformanceTracker
 
         async with _create_registry(ctx=ctx) as (registry, db):
@@ -711,7 +707,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     """전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용).
 
     --account-id 옵션은 필수다. 미지정 시 fallback 없이 명시적으로 실패한다
-    (#1218 Edge resolver 정렬, query 정책 일관).
+    (Edge resolver 정렬, query 정책 일관).
     """
     fmt = get_formatter(ctx)
 
@@ -727,15 +723,15 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     )
 
     async def _perf() -> dict | None:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        # ``open_cli_db`` 헬퍼 lifecycle (cleanup invariant — 예외/cancellation
+        # 시에도 ``Database.close()`` 1회 보장).
         from ante.strategy.registry import StrategyRegistry
         from ante.trade.performance import PerformanceTracker
 
         async with open_cli_db(ctx) as db:
             registry = StrategyRegistry(db)
             # fresh DB에서도 strategies 테이블이 존재하도록 정규화한다
-            # (#1753 Codex Plan v2 must-fix 1: `_create_registry` 경로와
-            # 동형 처리).
+            # (`_create_registry` 경로와 동형 처리).
             await registry.initialize()
             records = await registry.get_by_name(name)
             if not records:
@@ -749,8 +745,8 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
             # 핸들로 lightweight 단건 존재 쿼리만 수행한다. 쿼리 의미는
             # AccountService.get(account_id 단건, status 필터 없음)과
             # 일치하며 미존재 시 동일한 AccountNotFoundError 메시지로
-            # 분기한다 (#1559 일관). db.close()는 아래 finally가 단독
-            # 소유한다(lifecycle 불변).
+            # 분기한다. db.close()는 아래 finally가 단독 소유한다
+            # (lifecycle 불변).
             #
             # ``accounts`` 테이블은 ``AccountService.initialize()`` 에서만
             # 생성된다. 이 경로는 raw ``Database`` 핸들만 쓰고
@@ -761,7 +757,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
             # 해당 account 미존재와 동치이므로 동일한
             # AccountNotFoundError 로 정규화한다. 단, malformed db 같은
             # 다른 ``OperationalError`` 까지 삼키지 않도록 "no such table"
-            # 메시지일 때로만 좁힌다 (#1558/#1559 에서 검증된 패턴).
+            # 메시지일 때로만 좁힌다.
             try:
                 account_row = await db.fetch_one(
                     "SELECT 1 FROM accounts WHERE account_id = ?",
@@ -796,8 +792,8 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
         raise SystemExit(1) from e
     except sqlite3.OperationalError as e:
         # fresh DB / race 상황의 `no such table: strategies` 는 not-found 로
-        # 정규화한다 (#1753 Codex Plan v2 must-fix 1, strategy_info 동형
-        # 패턴). 다른 OperationalError 는 STRATEGY_ERROR 로 분류한다.
+        # 정규화한다 (strategy_info 동형 패턴). 다른 OperationalError 는
+        # STRATEGY_ERROR 로 분류한다.
         if "no such table" in str(e).lower():
             result = None
         else:
@@ -808,8 +804,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
         raise SystemExit(1) from e
 
     if result is None:
-        # strategy_summary line 567 / strategy_info STRATEGY_NOT_FOUND SSOT
-        # 재사용 (#1753).
+        # strategy_summary / strategy_info STRATEGY_NOT_FOUND SSOT 재사용.
         fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
         raise SystemExit(1)
 

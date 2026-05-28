@@ -96,7 +96,7 @@ def run(
         )
         raise SystemExit(1)
 
-    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).
+    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, SSOT helper 위임).
     # precedence: date/exchange 검증 이후 → ① timeframe → ② 빈 segment →
     # ③ KRX symbol shape. config build·BacktestService.run·_save_backtest_run
     # 이전이어야 invalid 입력 시 backtest_runs history가 생성되지 않는다.

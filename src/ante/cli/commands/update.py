@@ -49,8 +49,8 @@ def check_disk_space(db_path: Path) -> tuple[bool, str]:
 def check_server_running() -> bool:
     """서버가 실행 중인지 PID 파일로 확인. stale PID는 무시.
 
-    Refs #1157: ``--config-dir``로 가리킨 디렉토리의 canonical PID 파일만 본다.
-    명시적으로 ``Config.load(config_dir=get_config_dir())``로 인스턴스를 만들어
+    ``--config-dir``로 가리킨 디렉토리의 canonical PID 파일만 본다. 명시적으로
+    ``Config.load(config_dir=get_config_dir())``로 인스턴스를 만들어
     ``read_pid_file(config)``에 전달한다 — 0-arg ``read_pid_file()``은
     ``ANTE_CONFIG_DIR`` env/default 폴백을 보므로, 다른 ``config_dir``로 실행 중인
     server runtime을 누락해 update를 server 실행 중에 진행하는 위험이 있다.
@@ -104,7 +104,7 @@ def update(
     종료한다. `--yes` 게이트는 server 상태 검사와 PyPI 조회 **앞에**
     평가하므로, 서버 실행/네트워크 느림·실패 환경에서도 `--yes` 누락
     호출은 server-running 안내나 PyPI 실패가 아닌 동일한 구조화 에러
-    코드로 거절된다 (#1626 D1, Codex P2 2차).
+    코드로 거절된다.
     """
     from ante.update.checker import (
         get_current_version,
@@ -132,7 +132,7 @@ def update(
             click.echo(f"현재 버전: {current}")
         latest = get_latest_version()
         if latest is None:
-            # #1843 sub-PR 6: PyPI 조회 실패 (네트워크/HTTP 오류) 안정 코드.
+            # PyPI 조회 실패 (네트워크/HTTP 오류) 안정 코드.
             # ``UPDATE_CHECK_FAILED`` 는 ``--check`` dry-run 경로의 외부
             # 의존성 실패 surface (taxonomy ``external`` 카테고리 의미).
             fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
@@ -152,15 +152,15 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
-    # 2) 비대화형 입력 계약 (#1170, #1171, #1626 SSOT): `--check`이 아닌 실제
-    #    업데이트 실행 호출에는 `--yes`가 반드시 필요하다. 이 게이트는
-    #    server 상태 검사(`check_server_running()`)와 PyPI 조회
-    #    (`get_latest_version()`) **앞에** 위치해야 한다 — 그래야:
+    # 2) 비대화형 입력 계약: `--check`이 아닌 실제 업데이트 실행 호출에는
+    #    `--yes`가 반드시 필요하다. 이 게이트는 server 상태 검사
+    #    (`check_server_running()`)와 PyPI 조회 (`get_latest_version()`)
+    #    **앞에** 위치해야 한다 — 그래야:
     #    (a) 서버 실행 환경에서도 `--yes` 누락 호출이 server-running 안내가
-    #        아닌 ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (#1626 D1: spec
-    #        precedence — confirmation gate가 server 상태보다 우선).
+    #        아닌 ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (spec precedence:
+    #        confirmation gate가 server 상태보다 우선).
     #    (b) 네트워크 느림/실패 환경에서도 PyPI 실패가 아닌 동일한 구조화
-    #        에러 코드로 거절된다 (Codex P2 finding 2차).
+    #        에러 코드로 거절된다.
     #    자동화는 server/네트워크 상태와 무관하게 동일한 코드를 받는다.
     #    게이트 통과 전이므로 server 상태 검사/PyPI 조회/backup/pip upgrade/
     #    migration 등 부수 효과는 일체 발생하지 않는다.
@@ -174,9 +174,9 @@ def update(
 
     # 3) 서버 실행 중 확인 — `--yes` 게이트 통과 후, 실제 update 부수 효과
     #    이전에 평가한다. `--force` 없이 서버가 실행 중이면
-    #    ``UPDATE_SERVER_RUNNING``(#1626 D2: SSOT 02-design-decisions.md:115,
-    #    03-commands.md)으로 거절한다. `--force` 시 가드를 우회한다(현
-    #    graceful shutdown은 미구현 TODO — 본 이슈 범위 밖, 후속 후보).
+    #    ``UPDATE_SERVER_RUNNING`` (SSOT: docs/specs/cli/02-design-decisions.md,
+    #    03-commands.md) 으로 거절한다. `--force` 시 가드를 우회한다(현
+    #    graceful shutdown은 미구현 TODO).
     if check_server_running():
         if force:
             if not fmt.is_json:
@@ -196,9 +196,9 @@ def update(
     # 업데이트 실행 — `--yes` 게이트 통과 후에만 PyPI를 조회한다.
     latest = target_version or get_latest_version()
     if latest is None:
-        # #1843 sub-PR 6: 실제 업데이트 경로 PyPI 조회 실패 동일 안정 코드.
-        # ``--check`` dry-run 경로 (line 135) 와 동일 ``UPDATE_CHECK_FAILED``
-        # SSOT — 두 경로의 외부 의존성 실패 surface 일치.
+        # 실제 업데이트 경로 PyPI 조회 실패 동일 안정 코드.
+        # ``--check`` dry-run 경로와 동일 ``UPDATE_CHECK_FAILED`` SSOT —
+        # 두 경로의 외부 의존성 실패 surface 일치.
         fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
         raise SystemExit(1)
 
@@ -221,7 +221,7 @@ def update(
     db_path = Path(get_db_path(ctx))
     # 마이그레이션 서브프로세스에 넘길 데이터 루트.
     # 런타임이 `data.path` 로 보는 경로와 동일해야 v002 Parquet 마이그레이션이
-    # 실제 데이터 트리에 적용된다 (Refs #1125 Codex 13차 review Finding 1).
+    # 실제 데이터 트리에 적용된다.
     data_path = get_data_path(ctx)
     ok, msg = check_disk_space(db_path)
     if not ok:
@@ -245,7 +245,7 @@ def update(
 
     # 의존성 스냅샷 저장 — 스냅샷은 DB 디렉터리 옆에 저장해 백업과 위치를
     # 통일한다. `get_db_path(ctx)` 결과의 부모 디렉터리를 그대로 전달해
-    # 과거 `./db` CWD 폴백이 남기던 유령 파일을 없앤다 (Refs #1125).
+    # 과거 `./db` CWD 폴백이 남기던 유령 파일을 없앤다.
     if not fmt.is_json:
         click.echo("의존성 스냅샷 저장 중...")
     snapshot_path = snapshot_dependencies(current, db_dir=db_path.parent)
@@ -259,9 +259,9 @@ def update(
     if not fmt.is_json:
         click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
-        # #1843 sub-PR 6: pip install 실패의 안정 코드. ``UPDATE_INSTALL_FAILED``
-        # 는 pip subprocess 비정상 종료 surface (taxonomy ``external``
-        # 카테고리 의미 — pip/PyPI 인프라 의존성 실패).
+        # pip install 실패의 안정 코드. ``UPDATE_INSTALL_FAILED`` 는 pip
+        # subprocess 비정상 종료 surface (taxonomy ``external`` 카테고리 의미
+        # — pip/PyPI 인프라 의존성 실패).
         fmt.error("업데이트 실패", code="UPDATE_INSTALL_FAILED")
         raise SystemExit(1)
 

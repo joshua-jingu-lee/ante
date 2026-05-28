@@ -50,11 +50,10 @@ async def _create_treasury(
     *,
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Treasury, Database]]:
-    """CLI 에서 ``Treasury`` async context manager (#1857).
+    """CLI 에서 ``Treasury`` async context manager.
 
-    이전 시그니처(``async def`` → ``tuple[Treasury, Database]``)에서
-    ``open_cli_db`` 기반 async context manager 로 전환했다 (#1855 factory
-    composition, #1856 account.py 패턴 1:1 미러). 호출 패턴:
+    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
+    1:1 미러). 호출 패턴:
 
         async with _create_treasury(account_id, ctx=ctx) as (t, db):
             ...
@@ -64,8 +63,8 @@ async def _create_treasury(
     initialize`` 라이프사이클 실패 시에도 ``db.close()`` 가 보장된다.
     valid-but-missing account_id(예: ``acc-9999``) 가 들어오면
     ``account_service.get`` 이 :class:`AccountNotFoundError` 를 raise 하는데,
-    이전 inline 패턴(#1725) 에서 aiosqlite 연결이 leak 되어 6초 hang 회귀가
-    있었고 본 helper 가 동일 cleanup 을 보장한다.
+    이전 inline 패턴에서 aiosqlite 연결이 leak 되어 6초 hang 회귀가 있었고
+    본 helper 가 동일 cleanup 을 보장한다.
     """
     from ante.account.scoping import require_account_id
     from ante.account.service import AccountService
@@ -102,7 +101,7 @@ async def _create_treasury(
 async def _create_treasury_manager(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[TreasuryManager, Database]]:
-    """CLI 에서 ``TreasuryManager`` async context manager (#1857).
+    """CLI 에서 ``TreasuryManager`` async context manager.
 
     ``_create_treasury`` 동형 패턴. ``open_cli_db`` 가 ``initialize_all`` /
     ``account_service.list`` 등 lifecycle 실패 시에도 ``db.close()`` 를
@@ -139,22 +138,21 @@ def status(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
 
     # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다(#1635 Split B Layer 1). `_create_treasury`는 이미
-    # `require_account_id`를 `db.connect()` 이전에 호출하지만(leak-free), CLI
-    # 콜백이 non-Click `InvalidAccountIdError`를 명시적으로 catch하지 않아
-    # traceback으로 새던 contract-drift를 본 ingress 거부가 닫는다. 에러코드는
-    # #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    # 이전에 거부한다. `_create_treasury`는 이미 `require_account_id`를
+    # `db.connect()` 이전에 호출하지만(leak-free), CLI 콜백이 non-Click
+    # `InvalidAccountIdError`를 명시적으로 catch하지 않아 traceback으로 새던
+    # contract-drift를 본 ingress 거부가 닫는다. 에러코드는 SSOT
+    # `VALIDATION_ERROR` (helper가 `e.code` 재사용).
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     async def _run_status() -> dict:
-        # #1857: ``_create_treasury`` async context manager 전환.
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             return t.get_summary()
 
     # valid-but-missing account_id(예: `acc-9999`)는 `account_service.get`에서
     # `AccountNotFoundError`로 raise된다. Click 기본 핸들러가 typed exception을
-    # 모르고 traceback/빈 stdout으로 새던 contract-drift를 본 매핑이 닫는다
-    # (#1725). 에러코드는 `ACCOUNT_NOT_FOUND` SSOT.
+    # 모르고 traceback/빈 stdout으로 새던 contract-drift를 본 매핑이 닫는다.
+    # 에러코드는 `ACCOUNT_NOT_FOUND` SSOT.
     try:
         result = _run(_run_status())
     except AccountNotFoundError as e:
@@ -213,7 +211,8 @@ def transactions(
     reject_inverted_date_range(from_date, to_date, fmt)
 
     async def _run_transactions() -> dict:
-        # #1857: ``open_cli_db`` 헬퍼 lifecycle (#1722/#1799 cleanup invariant).
+        # ``open_cli_db`` 헬퍼 lifecycle (cleanup invariant — 예외/cancellation
+        # 시에도 ``Database.close()`` 1회 보장).
         async with open_cli_db(ctx) as db:
             where: list[str] = []
             params: list[str | int] = []
@@ -286,8 +285,8 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         )
 
     async def _run_budgets() -> dict:
-        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
-        # context manager 전환. 두 분기 모두 ``open_cli_db`` 가 normal/
+        # ``_create_treasury`` / ``_create_treasury_manager`` async context
+        # manager lifecycle. 두 분기 모두 ``open_cli_db`` 가 normal/
         # exception/cancellation 모든 경로에서 ``db.close()`` 를 보장한다.
         async def _collect_items(treasuries: list) -> dict:
             items = []
@@ -308,7 +307,7 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
     # valid-but-missing account_id(예: `acc-9999`)는 `_create_treasury` 내부의
     # `account_service.get`에서 `AccountNotFoundError`로 raise된다. Click 기본
     # 핸들러가 typed exception을 모르고 traceback/빈 stdout으로 새던
-    # contract-drift를 본 매핑이 닫는다 (#1758, status/snapshot #1725 동형).
+    # contract-drift를 본 매핑이 닫는다 (status/snapshot 동형).
     # 에러코드는 `ACCOUNT_NOT_FOUND` SSOT.
     try:
         result = _run(_run_budgets())
@@ -316,7 +315,7 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
@@ -357,7 +356,7 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
                 {"account_id": account_id, "balance": amount},
                 actor=actor,
             )
-        # #1857: ``_create_treasury`` async context manager 전환.
+        # ``_create_treasury`` async context manager lifecycle.
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             await t.set_account_balance(amount)
             return {
@@ -366,8 +365,8 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
                 "updated_at": datetime.now(UTC).isoformat(),
             }
 
-    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
-    # (#1758, #1725). Click/Exception fallback은 기존(#1722 IPC 분기)을 보존한다.
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다.
+    # Click/Exception fallback은 기존(IPC 분기)을 보존한다.
     try:
         result = _run(_run_set_balance())
     except click.ClickException as e:
@@ -379,7 +378,7 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
@@ -404,12 +403,12 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
 
-    # #1656 E bucket defense-in-depth: invalid account_id(`default`/패턴
-    # 위반/`""`)를 `ipc_send`(→`_handle_treasury_allocate`) 이전에 거부한다.
+    # defense-in-depth: invalid account_id(`default`/패턴 위반/`""`)를
+    # `ipc_send`(→`_handle_treasury_allocate`) 이전에 거부한다.
     # IPC handler가 1차 보증(handler-first require_account_id)하지만, CLI
-    # ingress 거부는 clean early exit(traceback 부재) + #1634/#1635 동형
-    # 방어선이다. `--account` required arg라 전 입력을 검증한다. 에러코드는
-    # #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    # ingress 거부는 clean early exit(traceback 부재) 방어선이다.
+    # `--account` required arg라 전 입력을 검증한다. 에러코드는 SSOT
+    # `VALIDATION_ERROR` (helper가 `e.code` 재사용).
     account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.treasury.allocate"
     )
@@ -423,14 +422,14 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
             actor=actor,
         )
 
-    # #1809 (oracle A7 @ a5d8edf): ``Treasury.allocate`` 가 reject 시 typed
-    # exception 을 raise 하고 IPC server 가 stable ``code``
-    # (``TREASURY_INSUFFICIENT_BALANCE`` / ``TREASURY_INVALID_AMOUNT``) 로
-    # envelope ``error`` 를 만들어 보낸다. ``ipc_send`` 는 그 envelope 을
+    # ``Treasury.allocate`` 가 reject 시 typed exception 을 raise 하고 IPC
+    # server 가 stable ``code`` (``TREASURY_INSUFFICIENT_BALANCE`` /
+    # ``TREASURY_INVALID_AMOUNT``) 로 envelope ``error`` 를 만들어 보낸다.
+    # ``ipc_send`` 는 그 envelope 을
     # ``ClickException.ipc_error_code`` / ``ipc_error_message`` 로 부착하여
     # raise 한다. 이전 ``except ClickException: raise`` 흐름은 middleware
     # fallback 에서 ``IPC_ERROR`` 로 표준화되어 stable code 가 surface 되지
-    # 않았다. ``set_balance``/``snapshot``/``status`` (#1758/#1725) 와 동형
+    # 않았다. ``set_balance``/``snapshot``/``status`` 와 동형
     # ``ipc_error_code`` 직접 매핑 패턴으로 일치시킨다.
     try:
         result = _run(_run_allocate())
@@ -443,14 +442,14 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
         # click.exceptions.Exit(1) 로 동형 보존.
         emit_cli_error(fmt, e)
 
-    # #1809: ``_handle_treasury_allocate`` 가 reject 시 typed exception 으로
+    # ``_handle_treasury_allocate`` 가 reject 시 typed exception 으로
     # raise 하므로 정상 응답은 항상 ``success=True``. 잔존 false 경로는
     # 방어적 invariant 로 유지하되 stable ``code`` 를 부착한다.
     if result.get("success"):
@@ -478,9 +477,9 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
 
-    # #1656 E bucket defense-in-depth: `allocate`와 동형 — invalid account_id를
+    # defense-in-depth: `allocate`와 동형 — invalid account_id를
     # `ipc_send`(→`_handle_treasury_deallocate`) 이전에 거부한다(required arg
-    # 전검증, clean early exit). 에러코드는 #1633 SSOT `VALIDATION_ERROR`.
+    # 전검증, clean early exit). 에러코드는 SSOT `VALIDATION_ERROR`.
     account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.treasury.deallocate"
     )
@@ -494,7 +493,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
             actor=actor,
         )
 
-    # #1809: allocate 와 동형 — typed exception envelope ``code``
+    # allocate 와 동형 — typed exception envelope ``code``
     # (``TREASURY_INVALID_AMOUNT`` / ``TREASURY_BUDGET_NOT_FOUND`` /
     # ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE``) 를 surface 한다.
     try:
@@ -508,7 +507,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
@@ -568,9 +567,9 @@ def snapshot(
     fmt = get_formatter(ctx)
 
     # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다(#1635 Split B Layer 1). `status`와 동일 `_create_treasury`
+    # 이전에 거부한다. `status`와 동일 `_create_treasury`
     # construction-lifecycle 경계를 공유하므로 동형으로 ingress에서 차단한다.
-    # 에러코드는 #1633 SSOT `VALIDATION_ERROR`(helper가 `e.code` 재사용).
+    # 에러코드는 SSOT `VALIDATION_ERROR` (helper가 `e.code` 재사용).
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     # 옵션 검증: --date 와 --from/--to 는 동시 사용 불가
@@ -593,7 +592,7 @@ def snapshot(
     )
 
     async def _run_snapshot() -> dict | list[dict] | None:
-        # #1857: ``_create_treasury`` async context manager 전환.
+        # ``_create_treasury`` async context manager lifecycle.
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             if date_str:
                 return await t.get_daily_snapshot(date_str)
@@ -606,7 +605,7 @@ def snapshot(
             today = datetime.now(UTC).strftime("%Y-%m-%d")
             return await t.get_daily_snapshot(today)
 
-    # valid-but-missing account_id 매핑은 status와 동형이다 (#1725).
+    # valid-but-missing account_id 매핑은 status와 동형이다.
     try:
         result = _run(_run_snapshot())
     except AccountNotFoundError as e:
@@ -675,8 +674,8 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         )
 
     async def _run_value() -> dict:
-        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
-        # context manager 전환. 분기별로 별도 with 블록을 열어 두 분기 모두
+        # ``_create_treasury`` / ``_create_treasury_manager`` async context
+        # manager lifecycle. 분기별로 별도 with 블록을 열어 두 분기 모두
         # ``open_cli_db`` 가 normal/exception/cancellation 경로에서
         # ``db.close()`` 를 보장한다.
         async def _collect_values(treasuries: list) -> dict:
@@ -726,16 +725,16 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         async with _create_treasury_manager(ctx=ctx) as (manager, _):
             return await _collect_values(manager.list_all())
 
-    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
-    # (#1758, #1725). outer try는 `_create_treasury`(line ~612)와
-    # `_create_treasury_manager`(line ~615) 두 경로의 raise를 모두 cover한다.
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다.
+    # outer try는 `_create_treasury`와 `_create_treasury_manager` 두 경로의
+    # raise를 모두 cover한다.
     try:
         result = _run(_run_value())
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
@@ -779,8 +778,8 @@ def portfolio_history(
     )
 
     async def _run_history() -> dict:
-        # #1857: ``_create_treasury`` / ``_create_treasury_manager`` async
-        # context manager 전환. budgets/portfolio.value 와 동형 분기 패턴.
+        # ``_create_treasury`` / ``_create_treasury_manager`` async context
+        # manager lifecycle. budgets/portfolio.value 와 동형 분기 패턴.
         async def _collect_history(treasuries: list) -> dict:
             by_date: dict[str, dict[str, float | str]] = {}
             for treasury_obj in treasuries:
@@ -818,16 +817,16 @@ def portfolio_history(
         async with _create_treasury_manager(ctx=ctx) as (manager, _):
             return await _collect_history(manager.list_all())
 
-    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다
-    # (#1758, #1725). outer try는 `_create_treasury`(line ~699)와
-    # `_create_treasury_manager`(line ~702) 두 경로의 raise를 모두 cover한다.
+    # valid-but-missing account_id 매핑은 status/snapshot/budgets와 동형이다.
+    # outer try는 `_create_treasury`와 `_create_treasury_manager` 두 경로의
+    # raise를 모두 cover한다.
     try:
         result = _run(_run_history())
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except Exception as e:
-        # #1843 sub-PR 4: emit_cli_error 정렬 — CLI/IPC 동일 public code surface.
+        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         # registry MRO lookup 으로 treasury typed exception 은 안정 코드
         # (TREASURY_*) 로 resolve, 나머지는 .code 속성 fallback 또는
         # EXECUTION_ERROR. raise SystemExit 동작은 helper 가
