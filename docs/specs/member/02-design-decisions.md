@@ -214,9 +214,11 @@ master 외 호출자를 `PermissionError`로 거부하며, 표면 계약(CLI com
 이 invariant에 정합한다. `member:admin`
 agent token으로의 접근은 1.0에서 허용되지 않는다.
 
-> 후속 implementation 정렬: #1543 (CLI 표면 가드 master-only로 일치),
-> #1544 (oracle host probe scope 기대값 정렬). 본 결정 SSOT는 #1542이며,
-> 부모 #1511(oracle host probe scope drift)에서 시작된 정합 작업이다.
+> #1542 (결정 SSOT) 기준의 CLI 표면 가드 master-only 정렬은 #1543 완료
+> (`require_master`가 `src/ante/cli/middleware.py`에 정의되고 member admin
+> mutation CLI에 적용). oracle host probe scope 기대값 정렬은 #1544(별도,
+> ante-oracle)에서 진행. 부모 #1511(oracle host probe scope drift)에서
+> 시작된 정합 작업이다.
 
 ### Member command runtime boundary
 
