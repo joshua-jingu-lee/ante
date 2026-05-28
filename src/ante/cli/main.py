@@ -217,4 +217,4 @@ cli.add_command(system)  # type: ignore[has-type]
 cli.add_command(trade)  # type: ignore[has-type]
 cli.add_command(treasury)  # type: ignore[has-type]
 cli.add_command(update)  # type: ignore[has-type]
-cli.add_command(feed)
+cli.add_command(feed)  # type: ignore[has-type]

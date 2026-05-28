@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli._data_path import resolve_data_path
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
@@ -50,8 +51,7 @@ def _validate_iso_date(value: str, option: str, fmt: object) -> None:
         raise SystemExit(1)
 
 
-_DEFAULT_DATA_PATH = "data/"
-_DATA_PATH_HELP = "데이터 저장소 경로"
+_DATA_PATH_HELP = "데이터 저장소 경로 (미지정 시 config_dir 기반)"
 _SCOPE_DATA_WRITE = "data:write"
 _SCOPE_DATA_READ = "data:read"
 _SEPARATOR = "──────────────────────────────────────────────────"
@@ -96,14 +96,15 @@ def feed_config() -> None:
 @feed_config.command("set")
 @click.argument("key")
 @click.argument("value")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_WRITE)
-def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None:
+def config_set(ctx: click.Context, key: str, value: str, data_path: str | None) -> None:
     """API 키를 .feed/.env 파일에 저장한다."""
     from ante.feed.config import API_KEYS, FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
 
     if key not in API_KEYS:
@@ -124,14 +125,15 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str) -> None
 
 
 @feed_config.command("list")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_READ)
-def config_list(ctx: click.Context, data_path: str) -> None:
+def config_list(ctx: click.Context, data_path: str | None) -> None:
     """등록된 API 키 목록을 마스킹하여 표시한다."""
     from ante.feed.config import FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
     keys = cfg.list_api_keys()
@@ -147,14 +149,15 @@ def config_list(ctx: click.Context, data_path: str) -> None:
 
 
 @feed_config.command("check")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_READ)
-def config_check(ctx: click.Context, data_path: str) -> None:
+def config_check(ctx: click.Context, data_path: str | None) -> None:
     """API 키 존재 여부를 확인한다."""
     from ante.feed.config import FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
     statuses = cfg.check_api_keys()
@@ -230,7 +233,7 @@ def _ensure_initialized(  # noqa: ANN001, ANN201
 
 
 @feed_run.command("backfill")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.option(
     "--since", default=None, help="수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드)"
 )
@@ -239,7 +242,7 @@ def _ensure_initialized(  # noqa: ANN001, ANN201
 @require_scope(_SCOPE_DATA_WRITE)
 def run_backfill(
     ctx: click.Context,
-    data_path: str,
+    data_path: str | None,
     since: str | None,
 ) -> None:
     """과거 데이터를 1회 수집한다 (backfill)."""
@@ -254,6 +257,7 @@ def run_backfill(
         validate_backfill_since,
     )
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
@@ -311,7 +315,7 @@ def run_backfill(
 
 
 @feed_run.command("daily")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.option(
     "--date", "target_date", default=None, help="수집 대상일 (YYYY-MM-DD, 기본값: 어제)"
 )
@@ -320,7 +324,7 @@ def run_backfill(
 @require_scope(_SCOPE_DATA_WRITE)
 def run_daily(
     ctx: click.Context,
-    data_path: str,
+    data_path: str | None,
     target_date: str | None,
 ) -> None:
     """어제(또는 지정일) 데이터를 1회 수집한다 (daily)."""
@@ -330,6 +334,7 @@ def run_daily(
     from ante.feed.cli_output import format_daily_result
     from ante.feed.config import FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
@@ -377,17 +382,18 @@ def run_daily(
 
 
 @feed.command("start")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_WRITE)
-def feed_start(ctx: click.Context, data_path: str) -> None:
+def feed_start(ctx: click.Context, data_path: str | None) -> None:
     """내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다."""
     import asyncio
 
     from ante.feed.cli_scheduler import run_scheduler_loop
     from ante.feed.config import FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
@@ -423,14 +429,15 @@ def feed_start(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("init")
-@click.argument("data_path", default=_DEFAULT_DATA_PATH)
+@click.argument("data_path", required=False, default=None)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_WRITE)
-def feed_init(ctx: click.Context, data_path: str) -> None:
+def feed_init(ctx: click.Context, data_path: str | None) -> None:
     """DataFeed 운영 디렉토리를 초기화한다."""
     from ante.feed.config import FeedConfig
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
     created = cfg.init()
@@ -449,16 +456,17 @@ def feed_init(ctx: click.Context, data_path: str) -> None:
 
 
 @feed.command("status")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_READ)
-def feed_status(ctx: click.Context, data_path: str) -> None:
+def feed_status(ctx: click.Context, data_path: str | None) -> None:
     """수집 상태를 조회한다."""
 
     from ante.feed.config import FeedConfig
     from ante.feed.report.generator import ReportGenerator
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
@@ -612,7 +620,7 @@ def _load_latest_report(
 @click.option("--symbol", required=True, help="종목 코드 (6자리)")
 @click.option("--timeframe", default="1d", help="타임프레임 (기본값: 1d)")
 @click.option("--source", default="external", help="데이터 소스 식별자")
-@click.option("--data-path", default=_DEFAULT_DATA_PATH, help=_DATA_PATH_HELP)
+@click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
 @require_auth
 @require_scope(_SCOPE_DATA_WRITE)
@@ -622,7 +630,7 @@ def feed_inject(
     symbol: str,
     timeframe: str,
     source: str,
-    data_path: str,
+    data_path: str | None,
 ) -> None:
     """외부 CSV 파일에서 과거 데이터를 수동 주입한다."""
     from pathlib import Path as _Path
@@ -636,6 +644,7 @@ def feed_inject(
     from ante.data.store import ParquetStore
     from ante.feed.injector import FeedInjector
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     filepath = _Path(path)
 

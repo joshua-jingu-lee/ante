@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import click
 
+from ante.cli._data_path import resolve_data_path
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
@@ -26,7 +27,11 @@ def data() -> None:
 )
 @click.option("--offset", default=0, type=click.IntRange(min=0), help="조회 offset")
 @click.option("--limit", default=50, type=click.IntRange(min=1), help="조회 개수")
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @format_option
 @click.pass_context
@@ -39,7 +44,7 @@ def data_list(
     data_type: str | None,
     offset: int,
     limit: int,
-    data_path: str,
+    data_path: str | None,
     db_path: str | None,
 ) -> None:
     """보유 데이터셋 목록."""
@@ -49,6 +54,7 @@ def data_list(
     from ante.data.datasets import list_datasets, validate_dataset_filters
     from ante.data.store import ParquetStore
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     resolved_db_path = db_path or get_db_path(ctx)
@@ -110,16 +116,21 @@ def data_list(
 
 @data.command("info")
 @click.argument("dataset_id")
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @format_option
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def data_info(ctx: click.Context, dataset_id: str, data_path: str) -> None:
+def data_info(ctx: click.Context, dataset_id: str, data_path: str | None) -> None:
     """데이터셋 상세 조회."""
     from ante.data.datasets import get_dataset_detail
     from ante.data.store import ParquetStore
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     try:
@@ -169,7 +180,11 @@ def data_info(ctx: click.Context, dataset_id: str, data_path: str) -> None:
     default=False,
     help="삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패",
 )
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @format_option
 @click.pass_context
 @require_auth
@@ -179,12 +194,13 @@ def data_delete(
     dataset_id: str,
     data_type: str | None,
     yes: bool,
-    data_path: str,
+    data_path: str | None,
 ) -> None:
     """데이터셋 삭제."""
     from ante.data.datasets import delete_dataset, validate_dataset_filters
     from ante.data.store import ParquetStore
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     if not yes:
         fmt.error(
@@ -211,27 +227,37 @@ def data_delete(
 
 
 @data.command()
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def schema(ctx: click.Context, data_path: str) -> None:
+def schema(ctx: click.Context, data_path: str | None) -> None:
     """데이터 스키마 조회."""
     from ante.data.schemas import OHLCV_SCHEMA
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     fmt.output({k: str(v) for k, v in OHLCV_SCHEMA.items()})
 
 
 @data.command()
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def storage(ctx: click.Context, data_path: str) -> None:
+def storage(ctx: click.Context, data_path: str | None) -> None:
     """저장 용량 현황."""
     from ante.data.store import ParquetStore
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     usage = store.get_storage_usage()
@@ -256,7 +282,11 @@ def storage(ctx: click.Context, data_path: str) -> None:
 @click.option(
     "--fix", is_flag=True, default=False, help="손상 파일을 .corrupted로 이동"
 )
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @click.pass_context
 @require_auth
 @require_scope("data:read")
@@ -265,7 +295,7 @@ def validate(
     symbol: str | None,
     timeframe: str,
     fix: bool,
-    data_path: str,
+    data_path: str | None,
 ) -> None:
     """Parquet 파일 무결성 검증."""
 
@@ -276,6 +306,7 @@ def validate(
     )
     from ante.data.store import ParquetStore
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
 
     # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).

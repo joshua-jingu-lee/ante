@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-22
+> 마지막 갱신: 2026-05-29
 
 ## 목차
 
@@ -293,7 +293,7 @@ ante account create [OPTIONS]
 | `--credential-env` | - | TEXT | — | credential을 환경변수에서 읽는다 (권장 채널) |
 | `--credential-file` | - | TEXT | — | credential을 파일에서 읽는다 (권장 채널) |
 | `--broker-config` | - | TEXT | — | broker-specific 설정 (free-form pass-through, 예: is_paper=true) |
-| `--market-order-reserve-buffer-rate` | - | FLOAT | — | 시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). omit 시 BrokerPreset 기본값을 사용한다 (#1333). |
+| `--market-order-reserve-buffer-rate` | - | FLOAT | — | 시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). omit 시 BrokerPreset 기본값을 사용한다 (#1333). NaN/Infinity/음수는 거부된다 (#1723). |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1432,7 +1432,7 @@ ante data list [OPTIONS]
 | `--type` | - | ohlcv / fundamental | — | 데이터 유형 필터 |
 | `--offset` | - | INT (0~) | 0 | 조회 offset |
 | `--limit` | - | INT (1~) | 50 | 조회 개수 |
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
@@ -1458,7 +1458,7 @@ ante data info <DATASET_ID> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1485,7 +1485,7 @@ ante data delete <DATASET_ID> [OPTIONS]
 |------|------|------|--------|------|
 | `--type` | - | ohlcv / fundamental | — | dataset_id 파생 유형과 일치해야 하는 데이터 유형 |
 | `--yes` | - | BOOLEAN | false | 삭제를 확인 (위험 명령). 누락 시 prompt 없이 에러로 실패 |
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -1504,7 +1504,7 @@ ante data schema [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante data storage
@@ -1522,7 +1522,7 @@ ante data storage [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante data validate
@@ -1543,7 +1543,7 @@ ante data validate [OPTIONS]
 | `--symbol` | - | TEXT | — | 검증할 종목 코드 (미지정 시 전체) |
 | `--timeframe` | - | TEXT | 1d | 타임프레임 |
 | `--fix` | - | BOOLEAN | false | 손상 파일을 .corrupted로 이동 |
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 
 
 ---
@@ -1577,7 +1577,7 @@ ante backtest run <STRATEGY_PATH> --start <START> --end <END> [OPTIONS]
 | `--balance` | - | FLOAT | 10000000 | 초기 자금 |
 | `--timeframe` | - | TEXT | 1d | 타임프레임 |
 | `--exchange` | - | TEXT | KRX | 거래소 (기본: KRX) |
-| `--data-path` | - | TEXT | data/ | 데이터 디렉토리 경로 |
+| `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
 
 
@@ -2595,7 +2595,7 @@ ante feed config set <KEY> <VALUE> [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante feed config list
@@ -2613,7 +2613,7 @@ ante feed config list [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante feed config check
@@ -2631,7 +2631,7 @@ ante feed config check [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante feed run backfill
@@ -2649,7 +2649,7 @@ ante feed run backfill [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 | `--since` | - | TEXT | — | 수집 시작일 (YYYY-MM-DD, config 기본값 오버라이드) |
 
 
@@ -2668,7 +2668,7 @@ ante feed run daily [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 | `--date` | - | TEXT | — | 수집 대상일 (YYYY-MM-DD, 기본값: 어제) |
 
 
@@ -2687,7 +2687,7 @@ ante feed start [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante feed init
@@ -2723,7 +2723,7 @@ ante feed status [OPTIONS]
 
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ### ante feed inject
@@ -2750,7 +2750,7 @@ ante feed inject <PATH> --symbol <SYMBOL> [OPTIONS]
 | `--symbol` | O | TEXT | — | 종목 코드 (6자리) |
 | `--timeframe` | - | TEXT | 1d | 타임프레임 (기본값: 1d) |
 | `--source` | - | TEXT | external | 데이터 소스 식별자 |
-| `--data-path` | - | TEXT | data/ | 데이터 저장소 경로 |
+| `--data-path` | - | TEXT | — | 데이터 저장소 경로 (미지정 시 config_dir 기반) |
 
 
 ---
