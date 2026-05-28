@@ -76,7 +76,15 @@ class Database:
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator["Database"]:
-        """트랜잭션 컨텍스트 매니저. 실패 시 자동 ROLLBACK."""
+        """트랜잭션 컨텍스트 매니저.
+
+        asyncio.CancelledError / KeyboardInterrupt / SystemExit 포함 모든
+        BaseException 경로에서 ROLLBACK을 시도한 뒤 원본 예외를 재전파한다.
+        ROLLBACK 자체 실패는 swallow하여 원본 예외(특히 CancelledError) 보존을
+        우선한다.
+
+        nested transaction은 지원하지 않는다. savepoint는 본 구현 범위 외.
+        """
         if self._in_transaction:
             raise RuntimeError("중첩 트랜잭션은 지원하지 않습니다")
         conn = self._get_writer()
@@ -85,8 +93,12 @@ class Database:
             await conn.execute("BEGIN")
             yield self
             await conn.execute("COMMIT")
-        except Exception:
-            await conn.execute("ROLLBACK")
+        except BaseException:
+            try:
+                await conn.execute("ROLLBACK")
+            except BaseException:
+                # rollback 실패도 swallow — 원본 예외 보존이 우선
+                pass
             raise
         finally:
             self._in_transaction = False
