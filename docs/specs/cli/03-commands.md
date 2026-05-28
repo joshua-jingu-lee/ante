@@ -106,7 +106,7 @@ allowlist 후보에서 제거한다.
 | `ante strategy submit <path>` | `offline` | 검증 + 로드 테스트 + StrategyRegistry 등록 |
 | `ante strategy list` | `offline` | StrategyRegistry 조회 |
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
-| `ante strategy performance <name> [--account-id <account_id>]` | `offline` | 성과 DB 집계 |
+| `ante strategy performance <name> --account-id <account_id>` | `offline` | 성과 DB 집계 (account-scoped, semantic-required) |
 | `ante strategy set-status <strategy_id> --status adopted\|archived` | `runtime IPC` | 전략 상태 변경 |
 | `ante strategy summary <strategy_id> --period daily\|weekly\|monthly` | `offline` | 성과 기간 집계 |
 | `ante treasury status --account <account_id>` | `offline` | persisted treasury 상태 조회 (`--account` 필수) |
@@ -402,7 +402,7 @@ ante strategy submit <path>        # 검증 + 로드 테스트 + 전략 등록
 ante strategy list                 # 등록된 전략 목록
 ante strategy info <name>          # 전략 상세 (메타데이터, 파라미터)
 ante strategy set-status <strategy_id> --status adopted|archived  # 전략 상태 변경
-ante strategy performance <name> [--account-id <account_id>]  # 전략 전체 성과 (모든 봇 집계, Agent 피드백용)
+ante strategy performance <name> --account-id <account_id>  # 전략 전체 성과 (계좌별, 모든 봇 집계, Agent 피드백용)
 ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기간별 성과 집계
 ```
 

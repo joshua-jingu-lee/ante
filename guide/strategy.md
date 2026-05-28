@@ -487,6 +487,6 @@ ante strategy list --status active
 # 전략 상세 정보
 ante strategy info momentum_breakout
 
-# 전략 성과 조회 (모든 봇 합산)
-ante strategy performance momentum_breakout
+# 전략 성과 조회 (지정 계좌의 모든 봇 합산)
+ante strategy performance momentum_breakout --account-id domestic
 ```
