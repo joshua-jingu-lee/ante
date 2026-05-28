@@ -32,7 +32,7 @@ _AUTH_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
     ("member", "regenerate-recovery-key"),
 }
 
-# DB encryption key chokepoint 면제 커맨드 경로 목록 (#1913).
+# DB encryption key chokepoint 면제 커맨드 경로 목록.
 #
 # auth exempt와 의미가 다르므로 별도 정의한다. 면제 4 경로는 각자
 # ``ANTE_DB_ENCRYPTION_KEY`` 를 요구하지 않는 cold path이다:
@@ -187,7 +187,7 @@ def require_auth(fn: Callable) -> Callable:
     ctx.obj["member"]가 None이면 에러 출력 후 종료.
 
     멱등(idempotent) — 이미 같은 가드가 부착된 함수에 재적용되어도 한 번만
-    감싸지도록 ``_require_auth_applied`` sentinel marker로 dedupe한다. #1404
+    감싸지도록 ``_require_auth_applied`` sentinel marker로 dedupe한다.
     ``authenticated_group`` factory가 leaf command callback을 자동 wrapping할 때,
     명령 자체에 이미 명시적으로 부착된 ``@require_auth`` 또는 ``@require_scope``의
     내부 가드와 중복 호출되는 것을 방지한다.
@@ -222,25 +222,25 @@ def require_master(fn: Callable) -> Callable:
     이면 ``permission_denied`` 로 종료.
 
     member admin mutation 은 master-only 계약이다. CLI 표면 가드는 동일한
-    invariant 를 진입점에서 적용한다 (#1543 — #1511 oracle drift 수렴).
+    invariant 를 진입점에서 적용한다.
 
     멱등(idempotent) — 이미 ``require_master`` 가 부착된 함수에 재적용되어도
     한 번만 감싸지도록 자체 ``_require_master_applied`` sentinel marker 로
     dedupe 한다. ``_require_auth_applied`` 를 dedupe key 로 쓰면, callback 에
     ``@require_auth`` 가 먼저 적용되어 있을 때 ``@require_master`` 가 자체 wrap
     을 건너뛰어 master 검증이 발화하지 않는 idempotent 버그가 생기므로 자체
-    marker 를 분리한다 (#1543 — Codex 브랜치 리뷰 finding 1).
+    marker 를 분리한다.
 
     동시에 ``_require_auth_applied`` marker 도 함께 set 한다. 본 가드는 자체
     적으로 ``member is None`` 인증 검증을 포함하므로, ``authenticated_group``
     factory 가 leaf command callback 을 ``require_auth`` 로 자동 wrap 할 때
     중복 wrap 을 방지하기 위함이다 (``require_auth`` / ``require_scope`` 와
-    동일한 보호 패턴). #1404
+    동일한 보호 패턴).
 
     Note:
-        ``member:admin`` scope vocabulary 는 #1542 결정으로 reserved 상태로
-        유지된다 (``src/ante/member/scopes.py`` SSOT). 본 데코레이터는 scope
-        보유 여부를 검사하지 않으며, master 가 아니면 무조건 거부한다.
+        ``member:admin`` scope vocabulary 는 reserved 상태로 유지된다
+        (``src/ante/member/scopes.py`` SSOT). 본 데코레이터는 scope 보유 여부를
+        검사하지 않으며, master 가 아니면 무조건 거부한다.
     """
     if getattr(fn, "_require_master_applied", False):
         return fn
@@ -322,7 +322,7 @@ def require_scope(*scopes: str) -> Callable:
             return fn(*args, **kwargs)
 
         wrapper._required_scopes = scopes  # type: ignore[attr-defined]
-        # @require_scope wrapper도 member==None을 직접 검사한다. #1404
+        # @require_scope wrapper도 member==None을 직접 검사한다.
         # ``authenticated_group``이 leaf callback을 자동으로 ``require_auth``로
         # wrapping할 때 같은 검사가 두 번 발화하지 않도록 sentinel marker로
         # dedupe 신호를 남긴다.
@@ -383,7 +383,7 @@ class AuthenticatedGroup(_LeafPathMixin):
     - `cli/02-design-decisions.md — default-deny CLI 인증 게이트`
     - `cli/03-commands.md — 공개 명령 allowlist`
 
-    동작 (#1404 P2 정정):
+    동작:
 
     1. **invoke 단계 가드 (primary, H2 강화)**:
        ``Group.invoke(ctx)`` 진입 직후 ``super().invoke(ctx)`` 호출 **전에**
@@ -404,7 +404,7 @@ class AuthenticatedGroup(_LeafPathMixin):
        - ``--version`` 은 root ``@click.version_option`` 이 root callback 진입
          이전에 ``ctx.exit()`` 시키므로 ``ante --version`` 만 면제되고, nested
          위치(``ante bot list --version`` 등) 는 invoke 단계 가드가 정상
-         발화한다. (#1404 P2 정정)
+         발화한다.
        - 경로 해석이 leaf command까지 도달하지 못한 경우(=group으로 끝남):
          click이 ``no_args_is_help`` 또는 ``Missing command`` 처리로
          callback에 도달하지 않는다.
@@ -444,14 +444,14 @@ class AuthenticatedGroup(_LeafPathMixin):
             ctx.obj["_leaf_command"] = path[-1]
 
         # 2. root callback의 글로벌 옵션을 ``ctx.obj``로 미리 미러링한다.
-        #    (#1404 P1 정정) ``Group.invoke``는 ``super().invoke(ctx)`` 안에서
-        #    root callback을 실행하지만, 인증 게이트는 그보다 먼저 발화한다.
-        #    ``--config-dir`` 같이 인증 시점에 영향을 주는 옵션은 root callback
-        #    실행을 기다리지 않고 ``ctx.params`` 에서 직접 읽어 ``ctx.obj`` 에
-        #    반영해 두어야 ``authenticate_member`` 가 정확한 DB 경로를 본다.
+        #    ``Group.invoke``는 ``super().invoke(ctx)`` 안에서 root callback을
+        #    실행하지만, 인증 게이트는 그보다 먼저 발화한다. ``--config-dir``
+        #    같이 인증 시점에 영향을 주는 옵션은 root callback 실행을 기다리지
+        #    않고 ``ctx.params`` 에서 직접 읽어 ``ctx.obj`` 에 반영해 두어야
+        #    ``authenticate_member`` 가 정확한 DB 경로를 본다.
         _mirror_root_globals_to_obj(ctx)
 
-        # 3. DB encryption key chokepoint (#1913).
+        # 3. DB encryption key chokepoint.
         #    invoke 단계 인증 게이트 직전에 ``ANTE_DB_ENCRYPTION_KEY`` 가 설정
         #    되어 있고 Fernet canonical 형식을 만족하는지 단일 chokepoint에서
         #    검증한다. 미설정/형식 위반 시 typed exception을 envelope error로
@@ -480,7 +480,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         all_args: list[str],
         path: tuple[str, ...],
     ) -> bool:
-        """DB encryption key chokepoint 발화 여부 (#1913).
+        """DB encryption key chokepoint 발화 여부.
 
         skip 조건은 auth 게이트와 동일한 메타 면제 정책을 공유한다:
 
@@ -606,7 +606,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         # click이 callback에 도달하기 전에 ctx.exit()하므로 가드 skip.
         # ``--version`` 은 root ``@click.version_option`` 에서만 면제되며,
         # nested 위치(예: ``ante bot list --version``)는 인증 게이트가 발화해야
-        # parse error 응답이 인증 없이 노출되지 않는다. (#1404 P2 정정)
+        # parse error 응답이 인증 없이 노출되지 않는다.
         if _has_meta_help_before_dashdash(all_args):
             return False
 
@@ -689,7 +689,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         ``e.show()`` 로 stderr 에 ``Usage: ... Error: ...`` 텍스트를 출력하고
         ``sys.exit(e.exit_code)`` (보통 2) 한다. 이는 ``--format json`` 모드의
         구조화 에러 계약 (스펙 ``docs/specs/cli/02-design-decisions.md:78-81``,
-        ``{status, code, message}`` envelope + exit 1) 과 어긋난다 (#1539).
+        ``{status, code, message}`` envelope + exit 1) 과 어긋난다.
 
         본 오버라이드는 ``--format`` raw 토큰을 sniff 해 json 모드일 때만 click
         의 ``standalone_mode=False`` 로 호출하고 ``UsageError`` 를 직접 catch 해
@@ -737,7 +737,7 @@ class AuthenticatedGroup(_LeafPathMixin):
 
             _sys.exit(1)
         except click.ClickException as e:
-            # #1754: IPC 미기동/타임아웃 등 비-``UsageError`` ``ClickException``
+            # IPC 미기동/타임아웃 등 비-``UsageError`` ``ClickException``
             # 도 JSON 모드 구조화 에러 계약 (``{status, code, message}``
             # envelope + exit non-zero, ``docs/specs/cli/02-design-decisions.md
             # :78-81``) 을 만족해야 한다.
@@ -823,12 +823,11 @@ class AuthenticatedGroup(_LeafPathMixin):
 # click이 callback에 도달하기 전에 ``ctx.exit()`` 시키는 메타 옵션 토큰.
 # ``_has_meta_help_before_dashdash``가 사용한다.
 #
-# (#1404 P2 정정) ``--version`` 은 ``@click.version_option`` 이 root 콜백
-# 진입 **이전**에 ``ctx.exit()`` 시키므로 root 수준의 ``ante --version`` 은
-# 이미 면제가 보장된다. nested 위치 (``ante bot list --version`` 등) 에서는
-# Click parse error 응답이 인증 없이 노출되는 부작용을 막아야 하므로 메타
-# 면제 토큰에서 ``--version`` 을 제거하고 invoke 단계 가드가 정상적으로
-# 발화하도록 한다.
+# ``--version`` 은 ``@click.version_option`` 이 root 콜백 진입 **이전**에
+# ``ctx.exit()`` 시키므로 root 수준의 ``ante --version`` 은 이미 면제가
+# 보장된다. nested 위치 (``ante bot list --version`` 등) 에서는 Click parse
+# error 응답이 인증 없이 노출되는 부작용을 막아야 하므로 메타 면제 토큰에서
+# ``--version`` 을 제거하고 invoke 단계 가드가 정상적으로 발화하도록 한다.
 _META_HELP_TOKENS: frozenset[str] = frozenset({"--help", "-h"})
 
 
@@ -858,13 +857,12 @@ def _has_meta_help_before_dashdash(args: list[str]) -> bool:
 def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
     """root callback의 글로벌 옵션을 ``ctx.obj`` 에 미러링.
 
-    (#1404 P1 정정) ``AuthenticatedGroup.invoke`` 의 인증 게이트는
-    ``super().invoke(ctx)`` 호출 **이전** 에 발화하므로, 같은
-    ``super().invoke(ctx)`` 안에서 실행되는 root callback의 부작용
-    (``ctx.obj["config_dir"] = ...`` 등) 이 아직 반영되지 않은 상태다.
-    인증 시점에 ``--config-dir`` 등을 정확히 반영하지 못하면
-    ``authenticate_member`` 가 default config dir의 DB를 보게 되어,
-    명시한 인스턴스의 토큰이 어긋난 DB에서 인증 실패하는 회귀가 발생한다.
+    ``AuthenticatedGroup.invoke`` 의 인증 게이트는 ``super().invoke(ctx)``
+    호출 **이전** 에 발화하므로, 같은 ``super().invoke(ctx)`` 안에서 실행되는
+    root callback의 부작용 (``ctx.obj["config_dir"] = ...`` 등) 이 아직 반영되지
+    않은 상태다. 인증 시점에 ``--config-dir`` 등을 정확히 반영하지 못하면
+    ``authenticate_member`` 가 default config dir의 DB를 보게 되어, 명시한
+    인스턴스의 토큰이 어긋난 DB에서 인증 실패하는 회귀가 발생한다.
 
     본 헬퍼는 ``ctx.params`` 에 이미 파싱돼 들어 있는 root 옵션을 읽어
     ``ctx.obj`` 키로 동일하게 반영한다. root callback이 나중에
@@ -875,7 +873,7 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
     - ``config_dir`` (str → ``pathlib.Path``): ``--config-dir`` /
       ``ANTE_CONFIG_DIR``. ``authenticate_member`` → ``get_db_path`` →
       ``get_config_dir`` 가 ``ctx.obj["config_dir"]`` 를 우선 참조한다.
-    - ``output_format`` (str → ``OutputFormatter``): ``--format``. (#1533)
+    - ``output_format`` (str → ``OutputFormatter``): ``--format``.
       인증/권한 실패 경로가 JSON 모드에서 구조화 에러를 stdout으로
       출력하려면 ``ctx.obj["formatter"]`` 가 인증 게이트 발화 시점에도
       존재해야 한다. root callback이 같은 키를 다시 채우더라도 의미는
@@ -904,7 +902,7 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
 
 
 def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
-    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다 (#1533).
+    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다.
 
     - JSON 모드 (``ctx.obj["formatter"]`` 의 ``is_json``): ``OutputFormatter.error``
       를 통해 ``{"status":"error","code":<code>,"message":<message>}`` JSON을
@@ -925,7 +923,7 @@ def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
 
 
 def _emit_error_envelope(ctx: click.Context, message: str, *, code: str) -> None:
-    """generic stable-code error envelope 출력 (#1913).
+    """generic stable-code error envelope 출력.
 
     인증 실패 외 typed exception (예: ``EncryptionKeyMissingError`` /
     ``EncryptionKeyInvalidError``) 을 JSON envelope 또는 텍스트 메시지로
@@ -1002,7 +1000,7 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
         if ctx.resilient_parsing:
             return callback(*args, **kwargs)
 
-        # 2. invoke 단계 가드가 이미 발화한 경우(#1404 P2 정정),
+        # 2. invoke 단계 가드가 이미 발화한 경우,
         #    ``authenticate_member`` 중복 호출 비용을 피하기 위해 callback 단계는
         #    skip한다. invoke 단계가 ``ctx.obj["_auth_gate_invoked"] = True``
         #    marker를 남기므로 이를 확인. invoke 단계가 어떤 이유로든 발화하지
