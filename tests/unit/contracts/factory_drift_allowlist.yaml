@@ -54,15 +54,15 @@ direct_database_construction:
   # bar 와 함께 장시간 작업) 이고, `backtest history` 는 `offline` 이지만
   # #1857 잔여로 본 사이클에서 마이그레이션 보류.
   - path: src/ante/cli/commands/backtest.py
-    line: 206
+    line: 212
     reason: "backtest run — long_running (progress-bar driven, deferred migration)"
   - path: src/ante/cli/commands/backtest.py
-    line: 249
+    line: 255
     reason: "backtest history — offline (deferred migration, post-#1818 follow-up)"
 
   # data domain — `data list` callsite. #1857 잔여로 본 사이클에서 보류.
   - path: src/ante/cli/commands/data.py
-    line: 82
+    line: 88
     reason: "data list — offline (deferred migration, post-#1818 follow-up)"
 
   # init — root-level `ante init` bootstrap command. CLI registry 의

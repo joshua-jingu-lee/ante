@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from ante.cli._data_path import resolve_data_path
 from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.main import get_formatter
 
@@ -34,7 +35,11 @@ def backtest() -> None:
 )
 @click.option("--timeframe", default="1d", help="타임프레임")
 @click.option("--exchange", default="KRX", help="거래소 (기본: KRX)")
-@click.option("--data-path", default="data/", help="데이터 디렉토리 경로")
+@click.option(
+    "--data-path",
+    default=None,
+    help="데이터 디렉토리 경로 (미지정 시 config_dir 기반)",
+)
 @click.option("--db-path", default=None, help="DB 경로 (미지정 시 config_dir 기반)")
 @click.pass_context
 @require_auth
@@ -48,7 +53,7 @@ def run(
     balance: float,
     timeframe: str,
     exchange: str,
-    data_path: str,
+    data_path: str | None,
     db_path: str | None,
 ) -> None:
     """백테스트 실행."""
@@ -63,6 +68,7 @@ def run(
         is_valid_timeframe,
     )
 
+    data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
