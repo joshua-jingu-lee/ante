@@ -54,6 +54,20 @@ Non-Goals).
 - ``MemberInvalidRecoveryCredentialError`` →
   ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth`` (#1826)
 
+#1915 member domain 2 sub-class 추가 (실측 ``.code`` mirror, #1843 sub-PR 1
+1:1 미러):
+
+- ``MemberInvalidEmojiError`` → ``MEMBER_INVALID_EMOJI`` / ``validation``
+  (#1915; ``_validate_emoji_format`` 형식 거부 — CLI ``set-emoji`` /
+  ``register`` / master bootstrap 표면. ``ValueError`` 다중상속으로 기존
+  generic fallback 회귀 없음.)
+- ``MemberMasterProtectedError`` → ``MEMBER_MASTER_PROTECTED`` /
+  ``permission`` (#1915; ``_assert_not_master`` 호출 — CLI ``suspend`` /
+  ``revoke`` 표면. ``PermissionDeniedError`` (비-master 의 master-only
+  operation 시도) 와 의미 분리 — master 본인을 대상으로 한 파괴적
+  operation 거부. ``PermissionError`` 다중상속으로 기존 generic fallback
+  회귀 없음.)
+
 ``MemberError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 1 Non-Goals).
@@ -225,7 +239,9 @@ from ante.config.exceptions import ConfigValidationError
 from ante.contracts.errors import ErrorSpec
 from ante.member.errors import (
     MemberAlreadyExistsError,
+    MemberInvalidEmojiError,
     MemberInvalidRecoveryCredentialError,
+    MemberMasterProtectedError,
     MemberNotFoundError,
     MemberStateConflictError,
     PermissionDeniedError,
@@ -380,6 +396,28 @@ _MEMBER_ALREADY_EXISTS_SPEC: Final[ErrorSpec] = ErrorSpec(
 _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="MEMBER_INVALID_RECOVERY_CREDENTIAL",
     category="auth",
+)
+
+
+# ── member #1915: emoji 형식 / master 보호 typed exception lock ──────────────
+
+# emoji 형식 거부 (``_validate_emoji_format`` — 단일 이모지 외 입력)
+# 는 입력 계약 위반이므로 taxonomy ``validation`` 카테고리. CLI
+# ``set-emoji`` / ``register`` / master bootstrap 표면이 동일 안정 코드
+# ``MEMBER_INVALID_EMOJI`` 를 surface 한다.
+_MEMBER_INVALID_EMOJI_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_INVALID_EMOJI",
+    category="validation",
+)
+
+# master 보호 위반 (``_assert_not_master`` — master 본인을 대상으로 한
+# suspend / revoke 거부) 는 권한 정책 거부이므로 taxonomy ``permission``
+# 카테고리. ``PERMISSION_DENIED`` (비-master 의 master-only operation 시도)
+# 와 의미 분리 — 본 코드는 master 본인을 대상으로 한 파괴적 operation
+# 거부를 의미한다.
+_MEMBER_MASTER_PROTECTED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_MASTER_PROTECTED",
+    category="permission",
 )
 
 
@@ -707,6 +745,9 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,
     MemberAlreadyExistsError: _MEMBER_ALREADY_EXISTS_SPEC,
     MemberInvalidRecoveryCredentialError: _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC,
+    # ── #1915 member 2 sub-class (emoji 형식 / master 보호) ───────────────
+    MemberInvalidEmojiError: _MEMBER_INVALID_EMOJI_SPEC,
+    MemberMasterProtectedError: _MEMBER_MASTER_PROTECTED_SPEC,
     # ── #1843 sub-PR 2 approval 2 sub-class (실측 .code mirror) ───────────
     ApprovalStatusConflictError: _APPROVAL_STATUS_CONFLICT_SPEC,
     ApprovalValidationError: _APPROVAL_VALIDATION_ERROR_SPEC,

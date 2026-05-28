@@ -21,6 +21,19 @@ credential validation 거부를 typed exception 으로 좁힌다. CLI envelope
 안정 코드를 surface 한다. ``ValueError`` 다중상속으로 #1805 패턴 1:1
 미러 — 기존 ``except (ValueError, PermissionError)`` fallback 분기가
 회귀 없이 동일하게 잡히도록 한다.
+
+Refs #1915: ``MemberInvalidEmojiError`` 와 ``MemberMasterProtectedError`` 를
+신규 도입해 emoji 형식 검증 거부 (``_validate_emoji_format``) 와 master
+보호 위반 (``_assert_not_master``) 을 typed exception 으로 좁힌다. CLI
+envelope 이 각각 ``"MEMBER_INVALID_EMOJI"`` / ``"MEMBER_MASTER_PROTECTED"``
+안정 코드를 surface 한다. ``ValueError`` / ``PermissionError`` 다중상속
+으로 #1805/#1807 패턴 1:1 미러 — 기존 ``except (ValueError,
+PermissionError)`` generic fallback 분기 (CLI ``set-emoji`` /
+``suspend`` / ``revoke``) 가 회귀 없이 동일하게 잡히도록 한다.
+emoji 중복 (``_validate_emoji_unique``) 와 타입-역할 invariant
+(``_assert_type_role``) 는 본 PR scope 외로 보존된다 — 이슈 #1915
+본문은 ``MEMBER_INVALID_EMOJI`` (형식 거부) / ``MEMBER_MASTER_PROTECTED``
+(master 보호) 두 표면만 명시한다.
 """
 
 
@@ -177,3 +190,60 @@ class MemberInvalidRecoveryCredentialError(MemberError, ValueError, PermissionEr
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class MemberInvalidEmojiError(MemberError, ValueError):
+    """emoji 형식 검증 거부 (#1915).
+
+    ``MemberService._validate_emoji_format`` 이 단일 이모지가 아닌 입력을
+    받았을 때 raise 한다. 빈 문자열은 허용되며, 그 외 입력은 ``emoji_pkg``
+    (``_is_single_emoji``) 가 단일 이모지로 인식하는 문자열만 통과한다.
+
+    ``MemberError`` 와 ``ValueError`` 다중상속으로 둔다 — #1807
+    ``MemberAlreadyExistsError`` 패턴 1:1 미러. 기존 caller (CLI
+    ``set-emoji`` 의 ``except ValueError`` generic fallback, ``test_member.py:
+    602/606`` 의 ``pytest.raises(ValueError, match="단일 이모지만")`` 단언)
+    가 회귀 없이 동일하게 잡히도록 한다. ``emit_cli_error`` registry-first
+    lookup 이 본 typed exception 을 받아 안정 코드를 surface 한다 (Python
+    MRO 보장).
+
+    ``_validate_emoji_unique`` (emoji 중복 거부) 는 본 PR scope 외 — 이슈
+    #1915 본문은 형식 거부 표면만 명시. ``register`` / ``bootstrap_master``
+    가 호출하는 형식 검증도 동일 typed exception 으로 자동 정렬된다.
+
+    클래스 레벨 ``code`` 속성은 CLI/IPC envelope 이 안정 코드
+    ``"MEMBER_INVALID_EMOJI"`` 로 surface 하도록 한다.
+    """
+
+    code: str = "MEMBER_INVALID_EMOJI"
+
+
+class MemberMasterProtectedError(MemberError, PermissionError):
+    """master 보호 위반 (#1915).
+
+    ``MemberService._assert_not_master`` 가 master role 멤버에 대한
+    ``suspend`` / ``revoke`` 요청을 거부할 때 raise 한다. master 보호 동작
+    자체는 그대로 유지되며, raise 타입만 typed exception 으로 좁힌다.
+
+    ``MemberError`` 와 ``PermissionError`` 다중상속으로 둔다 — 기존 caller
+    (CLI ``suspend`` / ``revoke`` 의 ``except (ValueError, PermissionError)``
+    generic fallback, ``test_member_service_master_guard.py:239/245`` 의
+    ``pytest.raises(PermissionError, match="master는 ...")`` 단언) 가 회귀
+    없이 동일하게 잡히도록 한다. ``emit_cli_error`` registry-first lookup
+    이 본 typed exception 을 받아 안정 코드를 surface 한다 (Python MRO 보장).
+
+    ``_assert_type_role`` (타입-역할 invariant 거부) 는 본 PR scope 외 —
+    이슈 #1915 본문은 master 보호 표면만 명시.
+
+    ``PermissionDeniedError`` 와의 분리: ``PermissionDeniedError`` 는 비-master
+    호출자의 master-only operation 시도 (``@require_master`` decorator) 를 의미
+    하는 반면, 본 ``MemberMasterProtectedError`` 는 master 본인을 대상으로 한
+    파괴적 operation (suspend / revoke) 거부를 의미한다. 두 fault 의 의미적
+    분리를 envelope 안정 코드로도 분리한다 (``PERMISSION_DENIED`` vs
+    ``MEMBER_MASTER_PROTECTED``).
+
+    클래스 레벨 ``code`` 속성은 CLI/IPC envelope 이 안정 코드
+    ``"MEMBER_MASTER_PROTECTED"`` 로 surface 하도록 한다.
+    """
+
+    code: str = "MEMBER_MASTER_PROTECTED"
