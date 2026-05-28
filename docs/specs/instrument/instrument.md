@@ -35,7 +35,8 @@ Instrument 모듈은 **종목 마스터 데이터를 중앙 관리하는 모듈*
 
 > canonical exchange 허용값·검증 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
 > Instrument는 canonical-only(`*` 거부) 표면이며, instrument CLI `list`/`sync`/`import`의
-> non-canonical 신규 입력 거부 enforcement는 #1577에서 정렬한다(현재 코드/스펙 drift).
+> non-canonical 신규 입력은 `INSTRUMENT_INVALID_EXCHANGE` 코드 + non-zero exit + 구조화 error
+> payload로 거부된다 (#1577 완료).
 
 ## Instrument 모델
 
