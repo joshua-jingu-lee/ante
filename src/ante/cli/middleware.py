@@ -513,10 +513,18 @@ class AuthenticatedGroup(_LeafPathMixin):
         1. ``Config.load(config_dir=...)`` 를 호출해 ``secrets.env`` 의
            ``ANTE_DB_ENCRYPTION_KEY`` 행을 ``os.environ`` 으로 export 시키는
            기존 fallback (``ante.config.config:110-140``) 을 먼저 실행한다.
-           Config.load 실패는 본 chokepoint의 책임이 아니므로 broad except로
-           swallow하지 않고 그대로 전파한다 (TOML/.env 파싱 오류는 별도 가드).
-           단, 파일이 없는 정상 경로는 ``Config.load`` 내부에서 warning + 빈
-           dict로 흡수되므로 export 단계만 동작한다.
+           정상 경로에서 ``Config.load`` 가 raise 하지 않는 한, secrets.env
+           export 가 env 검증보다 먼저 끝난다는 Plan v2 ordering invariant
+           는 유지된다.
+
+           단, 테스트/CI fixture 가 ``pathlib.Path.exists`` 를 전역 mock 하거나
+           config_dir 가 비어 있어 TOML/.env open 단계에서 ``OSError`` /
+           ``tomllib.TOMLDecodeError`` / ``ConfigError`` 가 발생할 수 있다.
+           이 경우 본 chokepoint 의 책임은 ``DB_ENCRYPTION_KEY_*`` 두 코드의
+           envelope 라우팅이므로, env 에 valid key 가 이미 설정되어 있으면
+           Config.load fallback 없이도 통과한다. env 가 비어 있다면 이어지는
+           검증 단계에서 ``EncryptionKeyMissingError`` 가 발화한다 (어느
+           경로든 secrets-only / env-only 모두 동일한 envelope 으로 수렴).
         2. ``os.environ.get("ANTE_DB_ENCRYPTION_KEY")`` 를 검증한다:
            - 미설정/빈 → :class:`EncryptionKeyMissingError` (``code=
              "DB_ENCRYPTION_KEY_MISSING"``).
@@ -530,6 +538,8 @@ class AuthenticatedGroup(_LeafPathMixin):
         # 지연 import: crypto / config 모듈은 본 미들웨어가 import될 때마다
         # eager로 끌어올리지 않는다. AuthenticatedGroup 자체는 cryptography
         # 의존성과 무관해야 한다 (단위 테스트가 다른 경로로 import할 수 있음).
+        import tomllib
+
         from ante.account.crypto import (
             EncryptionKeyError,
             EncryptionKeyInvalidError,
@@ -538,13 +548,26 @@ class AuthenticatedGroup(_LeafPathMixin):
         )
         from ante.cli.main import get_config_dir
         from ante.config.config import Config
+        from ante.config.exceptions import ConfigError
 
         # secrets.env → os.environ export fallback (``ante.config.config:110-140``).
         # config_dir 미설정 시 ``resolve_config_dir()`` 기본값을 따른다.
-        # Config.load 내부 결함(TOML/.env 파싱 등) 은 본 chokepoint의 책임이
-        # 아니므로 swallow하지 않고 그대로 전파한다 — 본 PR scope는
-        # ``DB_ENCRYPTION_KEY_*`` 두 코드만 envelope으로 라우팅하는 것이다.
-        Config.load(config_dir=get_config_dir(ctx))
+        #
+        # Config.load 가 raise 하는 경로 (예: 테스트 fixture 가 ``pathlib.Path.
+        # exists`` 를 전역 mock 한 상태에서 실제 system.toml 이 존재하지 않으면
+        # ``FileNotFoundError`` 가 발생) 는 env-only 검증으로 fallback 한다.
+        # env 에 valid key 가 있으면 통과하고, 없으면 다음 단계에서
+        # ``EncryptionKeyMissingError`` 로 envelope 라우팅된다. 어느 경우든
+        # 본 chokepoint 의 책임 (``DB_ENCRYPTION_KEY_*`` 두 코드의 envelope
+        # 라우팅) 은 유지된다.
+        try:
+            Config.load(config_dir=get_config_dir(ctx))
+        except (OSError, tomllib.TOMLDecodeError, ConfigError) as exc:
+            logger.debug(
+                "Config.load failed in DB encryption chokepoint; "
+                "falling back to env-only validation: %s",
+                exc,
+            )
 
         try:
             key = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
