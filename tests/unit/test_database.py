@@ -1,5 +1,8 @@
 """Database 래퍼 단위 테스트."""
 
+import asyncio
+from unittest.mock import patch
+
 import pytest
 
 from ante.core import Database
@@ -113,3 +116,61 @@ async def test_transaction_ddl(db):
     assert row is not None
     assert row["col_b"] == "b"
     assert row["col_c"] == "c"
+
+
+# --- BaseException(CancelledError 등) 경로 ROLLBACK 회귀 (#1923) ---
+
+
+async def test_transaction_rollback_on_cancelled_error(db):
+    """asyncio.CancelledError 경로에서도 INSERT가 롤백되고 원본 예외가 재전파된다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    with pytest.raises(asyncio.CancelledError):
+        async with db.transaction():
+            await db.execute("INSERT INTO t (val) VALUES (?)", ("cancelled",))
+            raise asyncio.CancelledError()
+
+    rows = await db.fetch_all("SELECT * FROM t")
+    assert rows == []
+
+
+async def test_transaction_state_allows_new_transaction_after_cancelled_error(db):
+    """CancelledError 후 _in_transaction이 해제되어 새 트랜잭션이 가능하다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    with pytest.raises(asyncio.CancelledError):
+        async with db.transaction():
+            await db.execute("INSERT INTO t (val) VALUES (?)", ("first",))
+            raise asyncio.CancelledError()
+
+    # 동일 Database 인스턴스에서 새 트랜잭션이 정상 시작/COMMIT 가능해야 한다.
+    async with db.transaction():
+        await db.execute("INSERT INTO t (val) VALUES (?)", ("second",))
+
+    rows = await db.fetch_all("SELECT val FROM t")
+    assert [row["val"] for row in rows] == ["second"]
+
+
+async def test_transaction_rollback_failure_preserves_original_exception(db):
+    """ROLLBACK 자체가 실패해도 원본 예외(CancelledError)가 호출자에게 전달된다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    real_execute = db._get_writer().execute
+
+    async def execute_with_rollback_failure(sql, *args, **kwargs):
+        if sql.strip().upper().startswith("ROLLBACK"):
+            raise RuntimeError("rollback boom")
+        return await real_execute(sql, *args, **kwargs)
+
+    with patch.object(
+        db._get_writer(),
+        "execute",
+        side_effect=execute_with_rollback_failure,
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            async with db.transaction():
+                await db.execute("INSERT INTO t (val) VALUES (?)", ("x",))
+                raise asyncio.CancelledError()
+
+    # _in_transaction 플래그도 finally에서 해제되어야 한다.
+    assert db._in_transaction is False
