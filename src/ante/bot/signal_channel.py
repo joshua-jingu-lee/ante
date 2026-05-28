@@ -169,11 +169,11 @@ class SignalChannel:
         )
 
         self._eventbus.subscribe(OrderFilledEvent, self._on_fill)
-        # #1331: ``OrderModifyRejectedEvent`` 추가 — 외부 채널 구독자에게도
-        # 정정 거부/미구현 통보를 ``order_update`` 메시지로 전달한다.
-        # #1336: stop 주문 등록·발동·만료를 외부 채널에도 동일한
-        # ``{type:"order_update", ...}`` shape 로 전달한다 (외부 소비자
-        # 파싱 분기 추가 부담 회피).
+        # ``OrderModifyRejectedEvent`` — 외부 채널 구독자에게도 정정 거부/
+        # 미구현 통보를 ``order_update`` 메시지로 전달한다.
+        # stop 주문 등록·발동·만료도 외부 채널에 동일한 ``{type:
+        # "order_update", ...}`` shape 로 전달한다 (외부 소비자 파싱 분기
+        # 추가 부담 회피).
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -203,8 +203,8 @@ class SignalChannel:
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, self._on_fill)
-        # #1331: 등록과 동일하게 ``OrderModifyRejectedEvent`` 해지 추가.
-        # #1336: stop 이벤트 3종 해지 추가.
+        # 등록과 동일하게 ``OrderModifyRejectedEvent`` 와 stop 이벤트 3종
+        # 해지.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -284,26 +284,26 @@ class SignalChannel:
             status = "cancel_failed"
             reason = event.error_message
         elif isinstance(event, OrderModifyRejectedEvent):
-            # #1331: 정정 거부/미구현 통보를 status로 잠그고, 외부 dict
-            # shape는 기존 ``{type:"order_update", ...}`` 패턴을 그대로
-            # 유지한다. ``type``을 ``"modify_rejected"`` 같은 새 형태로
-            # 바꾸면 외부 소비자(stdin/stdout 기반 에이전트)가 파싱
-            # 분기를 추가해야 하므로 의도적으로 잠갔다.
+            # 정정 거부/미구현 통보를 status 로 잠그고, 외부 dict shape 는
+            # 기존 ``{type:"order_update", ...}`` 패턴을 그대로 유지한다.
+            # ``type`` 을 ``"modify_rejected"`` 같은 새 형태로 바꾸면 외부
+            # 소비자(stdin/stdout 기반 에이전트) 가 파싱 분기를 추가해야
+            # 하므로 의도적으로 잠갔다.
             status = "modify_rejected"
             reason = event.reason
         elif isinstance(event, StopOrderRegisteredEvent):
-            # #1336: stop 등록 통보. 외부 채널에는 식별 핵심인 stop_order_id
-            # 만 ``order_id`` 키로 전달하고, dict shape 는 기존
-            # ``{type:"order_update", order_id, status, reason}`` 그대로 유지.
+            # stop 등록 통보. 외부 채널에는 식별 핵심인 stop_order_id 만
+            # ``order_id`` 키로 전달하고, dict shape 는 기존 ``{type:
+            # "order_update", order_id, status, reason}`` 그대로 유지.
             status = "stop_registered"
             order_id = event.stop_order_id
         elif isinstance(event, StopOrderTriggeredEvent):
-            # #1336: stop 트리거 통보.
+            # stop 트리거 통보.
             status = "stop_triggered"
             order_id = event.stop_order_id
         elif isinstance(event, StopOrderExpiredEvent):
-            # #1336: stop 만료 통보. ``reason`` 은
-            # ``"session_ended"`` | ``"manager_stopped"``.
+            # stop 만료 통보. ``reason`` 은 ``"session_ended"`` |
+            # ``"manager_stopped"``.
             status = "stop_expired"
             order_id = event.stop_order_id
             reason = event.reason

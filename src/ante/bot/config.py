@@ -23,9 +23,8 @@ class BotStatus(StrEnum):
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
 
-# Runtime control 허용 범위 (#1456 — 본 파일의 ``MIN_*``/``MAX_*`` 상수가
-# SSOT). 범위 밖 값은 ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로
-# 거부된다.
+# Runtime control 허용 범위 (본 파일의 ``MIN_*``/``MAX_*`` 상수가 SSOT).
+# 범위 밖 값은 ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로 거부된다.
 MIN_MAX_RESTART_ATTEMPTS = 1
 MAX_MAX_RESTART_ATTEMPTS = 10
 MIN_RESTART_COOLDOWN_SECONDS = 10
@@ -40,15 +39,15 @@ MAX_MAX_SIGNALS_PER_STEP = 200
 class BotConfig:
     """봇 설정.
 
-    ``account_id`` 는 봇 생성 진입점에서 검증된다 (#1217 → #1241 SPLIT-2).
-    fallback (`""`, ``None``, ``"default"``) 또는 형식 위반 값은 거부된다.
+    ``account_id`` 는 봇 생성 진입점에서 검증된다. fallback (`""`, ``None``,
+    ``"default"``) 또는 형식 위반 값은 거부된다.
 
     runtime control 4개 필드 (``max_restart_attempts``,
     ``restart_cooldown_seconds``, ``step_timeout_seconds``,
-    ``max_signals_per_step``) 는 #1456 허용 범위 내에서만 허용된다
-    (코드 SSOT: 본 파일의 ``MIN_*``/``MAX_*`` 상수). 범위 밖 값은
-    ``ValueError`` 로 거부되어 ``update_bot`` (manager.py:340) 의 재구성
-    경로에서도 동일하게 차단된다.
+    ``max_signals_per_step``) 는 허용 범위 내에서만 허용된다 (코드 SSOT: 본
+    파일의 ``MIN_*``/``MAX_*`` 상수). 범위 밖 값은 ``ValueError`` 로 거부
+    되어 ``update_bot`` (manager.py:340) 의 재구성 경로에서도 동일하게
+    차단된다.
     """
 
     bot_id: str
@@ -92,7 +91,7 @@ def validate_runtime_controls(
     step_timeout_seconds: int,
     max_signals_per_step: int,
 ) -> None:
-    """Runtime control 4개 필드 범위 검증. 범위 밖이면 ``ValueError`` (#1456).
+    """Runtime control 4개 필드 범위 검증. 범위 밖이면 ``ValueError``.
 
     코드 SSOT: 본 파일의 ``MIN_*``/``MAX_*`` 상수 + Pydantic Field +
     manual OpenAPI schema bounds.

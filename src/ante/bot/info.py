@@ -1,7 +1,7 @@
 """Bot info enrichment helper — IPC 공유.
 
-Refs #1712: IPC ``bot.status`` 가 ``bot`` info 보강 로직
-(strategy/budget/positions 조인)을 공유하기 위한 extraction.
+IPC ``bot.status`` 가 ``bot`` info 보강 로직 (strategy/budget/positions
+조인) 을 공유하기 위한 extraction.
 
 설계 원칙:
 - 본 helper 는 순수 도메인 dict 변환만 수행하며, IPC 표면 매핑은 handler가
@@ -9,9 +9,9 @@ Refs #1712: IPC ``bot.status`` 가 ``bot`` info 보강 로직
 - 의존성은 모두 keyword-only optional — 보유한 객체만 보강에 기여한다. None
   이면 해당 섹션은 skip 되며 dict 에 키가 추가되지 않는다(누락 vs. 빈 값
   의미 구분).
-- ``trade_service`` 는 #1712 에서 ``ServiceRegistry`` 에 optional 로 도입
-  되었다. legacy / cold-path 환경에서 None 이면 ``positions`` 키 자체가
-  부재한다(회귀 lock).
+- ``trade_service`` 는 ``ServiceRegistry`` 에 optional 로 주입된다.
+  legacy / cold-path 환경에서 None 이면 ``positions`` 키 자체가 부재한다
+  (회귀 lock).
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ async def enrich_bot_info(
 ) -> dict[str, Any]:
     """``bot.get_info()`` 결과에 strategy/budget/positions 정보를 보강한다.
 
-    Refs #1712: 응답 shape/field/key 순서를 변경하지 않으며, 의존성 None 시
-    해당 섹션 키 자체가 부재한다.
+    응답 shape/field/key 순서를 변경하지 않으며, 의존성 None 시 해당 섹션
+    키 자체가 부재한다.
 
     Args:
         bot: ``get_info()`` 메서드를 가진 Bot 인스턴스. info 의 ``strategy_id``
@@ -43,7 +43,7 @@ async def enrich_bot_info(
             로 미리 resolve 한 뒤 전달한다.
         trade_service: ``TradeService`` (또는 ``get_positions(bot_id=...,
             include_closed=...)`` await coroutine 을 노출하는 stub). None
-            이면 ``positions`` 키가 추가되지 않는다(회귀 lock — #1712 cold-path
+            이면 ``positions`` 키가 추가되지 않는다 (회귀 lock — cold-path
             / legacy 환경 호환).
 
     Returns:
