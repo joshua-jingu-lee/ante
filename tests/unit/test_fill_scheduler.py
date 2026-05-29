@@ -212,8 +212,8 @@ async def test_catch_up_idempotent(tracker, applier):
 async def test_window_covers_earliest_open(tracker, applier):
     """get_order_history window 의 from_date 가 가장 이른 (당일) open 영업일.
 
-    EOD 만료(expire_stale)가 과거 영업일 open 을 expired 로 전이하므로, 폴
-    window 에 남는 건 당일(DATE) open 이다. from_date 가 그 영업일을 덮는다.
+    poll-first: 폴(복구)이 expire 보다 먼저 돌므로, 당일 open 이 살아 있어
+    from_date 가 그 영업일(DATE)을 덮는다. to_date 는 오늘(KST).
     """
     app, _ph, _eb = applier
     await _seed(tracker, order_id="ord-today", broker_order_id="0001", qty=10.0)
@@ -226,6 +226,42 @@ async def test_window_covers_earliest_open(tracker, applier):
     from_date, to_date = broker.last_args
     assert from_date == DATE
     assert to_date == DATE
+
+
+async def test_window_covers_prior_day_open_before_expire(tracker, applier):
+    """poll-first: 전일 open 이 expire **전** 폴 window 를 거슬러 넓힌다 (I8).
+
+    submitted_date < 오늘인 open 이 있을 때, 메타리뷰 이전 결함은 expire 를 먼저
+    돌려 그 open 을 제거하고 from_date 를 좁혔다. poll-first 는 만료 전 open 을
+    읽어 from_date 가 전일 영업일(20200101)을 덮으므로, 다운타임 체결분을 폴이
+    복구할 수 있다.
+    """
+    app, _ph, _eb = applier
+    await tracker.open(
+        order_id="ord-prior",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="005930",
+        side="buy",
+        order_type="market",
+        ordered_qty=10.0,
+        submitted_date="20200101",  # 전일(EOD 경과 가정).
+    )
+    broker = FakeBroker(history=[])  # 체결 없음 → 복구 0건.
+    sched = FillReconcileScheduler(
+        broker=broker, order_tracker=tracker, fill_applier=app, account_id=ACCT
+    )
+    await sched.catch_up_once()
+    # 폴이 expire 전에 실행 — 1콜, window from_date 가 전일을 덮는다.
+    assert broker.call_count == 1
+    assert broker.last_args is not None
+    from_date, to_date = broker.last_args
+    assert from_date == "20200101"  # 전일 open 을 덮는 window (I8).
+    assert to_date == DATE
+    # 체결이 없었으므로 폴 후 expire 가 genuinely-dead open 을 만료.
+    assert (await tracker.get("ord-prior")).status == "expired"
 
 
 @pytest.fixture(autouse=True)
@@ -326,12 +362,15 @@ async def test_periodic_loop_swallows_poll_failure(tracker, applier):
 # ── Finding 2: 폴 사이클의 EOD 만료 → 만료 주문 더는 폴 안 됨 ──
 
 
-async def test_poll_expires_stale_then_no_poll(tracker, applier):
-    """EOD 경과한 open 주문은 폴 사이클의 expire_stale 로 만료되어 더는 폴되지 않음.
+async def test_poll_first_then_expire_stale_no_more_poll(tracker, applier):
+    """poll-first: EOD 경과 open 은 **폴(복구 시도) 후** expire 되고, 다음
+    사이클부턴 폴되지 않는다 (무한 폴 방지하되 복구 우선).
 
-    submitted_date < 오늘인 open 주문만 있을 때, catch_up_once 가 expire_stale →
-    get_open_orders 순으로 동작하므로 만료 후 open 이 비어 get_order_history 0콜.
-    (#1946 Finding 2: expire_stale 런타임 호출이 없어 무한 폴되던 결함 수정.)
+    submitted_date < 오늘인 open 만 있을 때, catch_up_once 는 get_open_orders →
+    get_order_history(복구) → expire_stale 순으로 동작한다. 첫 사이클은 만료 전
+    open 이 살아 있어 폴 1콜(체결 없음 → applied=0), 그 후 genuinely-dead open
+    을 expired 로 전이한다. 둘째 사이클은 open 이 비어 0콜.
+    (#1946 메타리뷰: expire 를 폴 앞에 두면 다운타임 체결분 복구 실패 → 회귀.)
     """
     app, _ph, _eb = applier
     # 과거 영업일 open 주문 (어제, EOD 경과 가정).
@@ -347,19 +386,22 @@ async def test_poll_expires_stale_then_no_poll(tracker, applier):
         ordered_qty=10.0,
         submitted_date="20200101",
     )
-    broker = FakeBroker(history=[])
+    broker = FakeBroker(history=[])  # 체결 없음 → genuinely-dead.
     sched = FillReconcileScheduler(
         broker=broker, order_tracker=tracker, fill_applier=app, account_id=ACCT
     )
     result = await sched.catch_up_once()
     assert result.succeeded is True
     assert result.applied == 0
-    # 만료되어 폴 대상에서 빠짐 → get_order_history 0콜.
-    assert broker.call_count == 0
-    # 주문은 expired 로 종료.
+    # poll-first — 첫 사이클은 만료 전 open 을 폴(복구 시도)한다 → 1콜.
+    assert broker.call_count == 1
+    # 체결이 없으므로 폴 후 genuinely-dead open 을 expired 로 종료.
     assert (await tracker.get("ord-stale")).status == "expired"
     # 이후 get_open_orders 에도 없음.
     assert await tracker.get_open_orders(ACCT) == []
+    # 둘째 사이클: open 이 비어 더는 폴되지 않음 (무한 폴 없음).
+    await sched.catch_up_once()
+    assert broker.call_count == 1
 
 
 async def test_poll_keeps_today_open(tracker, applier):

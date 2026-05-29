@@ -187,12 +187,26 @@ class FillReconcileScheduler:
                 )
 
     async def _poll_and_apply(self) -> int:
-        """open 있을 때만 get_order_history 1콜 → 매칭 주문 FillApplier 적용.
+        """**poll-first**: open(만료 전) → history 1콜 → 적용 → 그 후 EOD 만료.
 
-        호출 전에 **EOD 만료**(``OrderTracker.expire_stale``)를 돌려, 영업일이
-        지난 open 주문을 ``expired`` 로 전이한다. 이로써 EOD 경과한 일중 주문이
-        ``get_open_orders`` 에 잔존해 매 사이클 무한 폴되는 것을 막는다
-        (#1946 Finding 2).
+        순서가 곧 정합성 invariant 다 (#1946 메타리뷰).
+
+        1. ``get_open_orders`` 로 추적 open(non-terminal)을 **만료 전에** 읽는다.
+           ``from_date`` 는 그 open 들의 가장 이른 ``submitted_date`` 로 잡아, 전일
+           open 이 있으면 폴 window 가 그 영업일까지 거슬러 올라간다(I8).
+        2. open 이 있으면 ``get_order_history`` 1콜 → 관측 체결을
+           ``FillApplier.apply_cumulative`` 로 멱등 적용한다(복구). 다운타임 중
+           체결분(전일 open 포함)이 여기서 ``filled``/``partially_filled`` 로 전이
+           되어 다음 단계의 만료 대상에서 **자동 제외**된다(I1·I2).
+        3. **복구 후에** ``expire_stale`` 로 EOD 경과 + 체결 미관측(genuinely-dead)
+           인 ``open`` 만 ``expired`` 로 전이한다. 부분 체결(``partially_filled``)은
+           만료 대상이 아니다(체결 진행 중). 이로써 일중 미체결 주문의 무한 폴은
+           막되, 다운타임 체결분을 만료/외부매수로 오분류하지 않는다(I2·I7).
+
+        expire 를 poll **앞**에 두면(이전 결함), 전일 open 이 다운타임 중 체결됐어도
+        복구 전에 expired 되어 폴 0콜·미복구로 남고, ``catch_up_once`` 가
+        ``succeeded=True`` 를 반환해 barrier external-buy 차단이 무력화된다(#1945
+        회귀). poll-first 가 이 구조를 해소한다(I3).
 
         Returns:
             적용된 체결(delta>0) 건수.
@@ -201,24 +215,26 @@ class FillReconcileScheduler:
             Exception: ``get_order_history`` 실패(CB open·rate·network)를 그대로
                 전파한다. 주기 루프(``_loop``)는 이를 잡아 삼키고 다음 사이클에
                 멱등 재시도하나, ``catch_up_once`` 는 startup 폴 실패를 감지해
-                barrier 결정에 반영한다.
+                barrier 결정에 반영한다. (실패 시 만료도 돌지 않아, 미복구
+                체결분이 다음 성공 사이클의 폴 window 에 그대로 남는다 — I8.)
         """
         today = business_date_kst()
-        # EOD 경과한 open 주문을 expired 로 전이 (무한 폴 방지). today 이전
-        # 영업일(submitted_date < today)만 만료 — 당일 open 은 유지.
-        await self._tracker.expire_stale(self._account_id, before_date=today)
 
+        # 1) 만료 **전에** open 을 읽어 폴 window 를 잡는다. 전일 open(다운타임
+        #    체결 가능)도 이 시점엔 살아 있어 from_date 를 거슬러 덮는다(I8).
         open_orders = await self._tracker.get_open_orders(self._account_id)
         if not open_orders:
             # event-gated: 추적 open 주문이 없으면 폴하지 않는다 (0콜).
+            # 만료시킬 open 도 없으므로 expire_stale 도 생략한다.
             return 0
 
-        # window: 가장 이른 추적 open 주문의 영업일부터 오늘(KST)까지.
         from_date = min(o.submitted_date for o in open_orders)
         to_date = today
 
-        # 사이클당 1콜. (브로커 어댑터가 pagination 을 내부에서 처리.)
-        # 실패는 호출자에게 전파한다(주기 루프는 삼키고, catch_up 은 재시도/보고).
+        # 2) 사이클당 1콜로 history 를 폴해 다운타임 체결을 **먼저** 복구한다.
+        #    (브로커 어댑터가 pagination 을 내부에서 처리.) 실패는 호출자에게
+        #    전파한다(주기 루프는 삼키고, catch_up 은 재시도/보고) — 이때 아래
+        #    expire 는 실행되지 않아 미복구 체결분이 영구 만료되지 않는다(I7).
         history = await self._broker.get_order_history(
             from_date=from_date, to_date=to_date
         )
@@ -242,4 +258,9 @@ class FillReconcileScheduler:
             )
             if delta > 0:
                 applied += 1
+
+        # 3) 복구가 끝난 **뒤에** EOD 경과 + 체결 미관측(genuinely-dead) open 만
+        #    만료한다. 위 폴로 체결된 주문은 이미 filled/partially_filled 로 전이돼
+        #    expire_stale 의 만료 대상(genuinely-dead open)에서 자동 제외된다(I2).
+        await self._tracker.expire_stale(self._account_id, before_date=today)
         return applied

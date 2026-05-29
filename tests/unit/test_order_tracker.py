@@ -158,6 +158,50 @@ async def test_lookup_excludes_terminal(tracker):
     assert await tracker.lookup_order_id("acct-A", "0001", "20260529") is None
 
 
+async def test_lookup_matches_prior_day_open_with_later_observation(tracker):
+    """spec §4.1 (I6): 전일 seed 된 non-terminal 주문을 당일 관측(observed_date)
+    으로 매핑한다 (``submitted_date <= observed_date``).
+
+    전일 open 이 다운타임 중 체결돼 당일 history(ord_dt) 로 관측될 때, 정확매칭
+    이면 누락되어 복구가 실패한다. ``<=`` 완화가 이 케이스를 덮는다.
+    """
+    await _seed(
+        tracker, order_id="ord-prior", broker_order_id="0001", submitted_date="20260528"
+    )
+    # 당일(또는 이후) 영업일로 관측 — 전일 open 이 매핑돼야 한다.
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-prior"
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260528") == "ord-prior"
+
+
+async def test_lookup_excludes_future_submitted(tracker):
+    """``submitted_date > observed_date`` 인(미래 영업일 seed) 주문은 배제한다.
+
+    일자 재사용 격리: 관측 영업일보다 미래에 seed 된 동일 odno 주문이 현재
+    관측에 매핑되지 않게 한다.
+    """
+    await _seed(
+        tracker,
+        order_id="ord-future",
+        broker_order_id="0001",
+        submitted_date="20260530",
+    )
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") is None
+
+
+async def test_lookup_prefers_latest_nonterminal_on_reuse(tracker):
+    """같은 odno 의 non-terminal 이 여러 영업일에 동시 존재하면 ``submitted_date``
+    최신(MAX) 1건을 결정론적으로 고른다 ("가장 최근 주문 우선").
+    """
+    await _seed(
+        tracker, order_id="ord-old", broker_order_id="0001", submitted_date="20260528"
+    )
+    await _seed(
+        tracker, order_id="ord-new", broker_order_id="0001", submitted_date="20260529"
+    )
+    # 둘 다 non-terminal·관측일 이하 → 최신(20260529) 우선.
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-new"
+
+
 # ── open / terminal ──────────────────────────────────
 
 
@@ -217,3 +261,34 @@ async def test_expire_stale(tracker):
 async def test_expire_stale_no_open(tracker):
     count = await tracker.expire_stale("acct-A", before_date="20260529")
     assert count == 0
+
+
+async def test_expire_stale_excludes_partially_filled(tracker):
+    """spec §8 (I2): EOD 경과해도 부분 체결(partially_filled)은 만료하지 않는다.
+
+    체결이 관측·진행 중인 주문은 genuinely-dead 가 아니다. ``open`` 상태만
+    만료 대상이다 (poll-first 복구로 partially_filled 가 된 다운타임 체결분이
+    이어서 만료/오분류되지 않게 보장).
+    """
+    # 전일 seed 후 부분 체결로 partially_filled 전이.
+    await _seed(
+        tracker,
+        order_id="ord-partial",
+        broker_order_id="0001",
+        submitted_date="20260528",
+        ordered_qty=100.0,
+    )
+    delta = await tracker.record_fill("ord-partial", 40.0, 1000.0)
+    assert delta == 40.0
+    assert (await tracker.get("ord-partial")).status == "partially_filled"
+
+    # 전일 genuinely-dead open (체결 없음) 도 함께 둔다.
+    await _seed(
+        tracker, order_id="ord-dead", broker_order_id="0002", submitted_date="20260528"
+    )
+
+    count = await tracker.expire_stale("acct-A", before_date="20260529")
+    # open 인 ord-dead 만 만료. partially_filled 는 제외.
+    assert count == 1
+    assert (await tracker.get("ord-partial")).status == "partially_filled"
+    assert (await tracker.get("ord-dead")).status == "expired"

@@ -489,10 +489,10 @@ async def test_eod_expiry_terminal(stack):
     assert await tracker.get_open_orders(ACCT) == []
 
 
-async def test_scheduler_poll_cycle_expires_stale_no_more_poll(stack):
-    """Finding 2: FillReconcileScheduler 폴 사이클이 EOD 지난 open 을 expire_stale
-    로 만료해, 더는 get_order_history 를 호출하지 않는다 (무한 폴 + rate 무력화
-    방지). expire_stale 런타임 호출처가 없던 결함 수정 (#1946 Finding 2).
+async def test_scheduler_poll_first_then_expires_stale_no_more_poll(stack):
+    """poll-first: 폴 사이클이 EOD 지난 open 을 **폴(복구 시도) 후** expire 해,
+    그 다음 사이클부턴 get_order_history 를 호출하지 않는다 (무한 폴 방지하되
+    복구 우선). 메타리뷰: expire 를 폴 앞에 두면 다운타임 체결분 복구 실패 회귀.
     """
     tracker = stack["tracker"]
     await tracker.open(
@@ -507,7 +507,7 @@ async def test_scheduler_poll_cycle_expires_stale_no_more_poll(stack):
         ordered_qty=10.0,
         submitted_date="20200101",  # EOD 한참 경과.
     )
-    broker = FakeBroker(history=[])
+    broker = FakeBroker(history=[])  # 체결 없음 → genuinely-dead.
 
     sched = FillReconcileScheduler(
         broker=broker,  # type: ignore[arg-type]
@@ -515,16 +515,131 @@ async def test_scheduler_poll_cycle_expires_stale_no_more_poll(stack):
         fill_applier=stack["applier"],
         account_id=ACCT,
     )
-    # 폴 사이클 1회 — expire_stale 가 먼저 돌아 open 이 비고, 폴 0콜.
+    # 폴 사이클 1회 — 만료 전 open 을 먼저 폴(복구 시도) → 1콜, 체결 없으니 0건,
+    # 그 후 genuinely-dead open 을 expired 로 종료.
     result = await sched.catch_up_once()
     assert result.succeeded is True
     assert result.applied == 0
-    assert broker.history_calls == 0  # 만료 주문은 폴되지 않음.
+    assert broker.history_calls == 1  # poll-first — 복구 시도가 먼저.
     assert (await tracker.get("ord-stale")).status == "expired"
 
-    # 다음 사이클도 0콜 (만료가 지속, 무한 폴 없음).
+    # 다음 사이클은 open 이 비어 더는 폴 안 됨 (무한 폴 없음).
     await sched.catch_up_once()
-    assert broker.history_calls == 0
+    assert broker.history_calls == 1
+
+
+async def test_prior_day_downtime_fill_recovered_before_expire_no_misclass(
+    stack, eventbus
+):
+    """#1946 메타리뷰 직격 (I1·I2·I3·I7·I8): 전일 open 이 다운타임 중 체결됐을 때,
+    catch_up 이 expire **전** poll 로 복구하고 reconcile external-buy 오분류가
+    없어야 한다.
+
+    회귀 시나리오 (attempt-2 가 expire→poll 순으로 깨뜨린 케이스):
+    - 전일(submitted_date < today) open 100주 + 같은 영업일 history 체결 100주.
+    - 메타리뷰 이전 결함: expire 가 폴 앞이라 전일 open 이 먼저 expired → 폴 0콜
+      → applied=0, succeeded=True → barrier 가 external-buy 차단을 안 해 미복구
+      체결(internal=0, broker=100)을 "외부 매수" 로 오분류.
+    - poll-first: 만료 전 open 을 폴해 100주 복구(succeeded=True, applied>0) →
+      internal=broker=100 → reconcile 무오분류.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    mismatches: list[PositionMismatchEvent] = []
+
+    async def _mh(e):
+        if isinstance(e, PositionMismatchEvent):
+            mismatches.append(e)
+
+    eventbus.subscribe(PositionMismatchEvent, _mh)
+
+    # 전일 영업일(어제 KST) — DATE 보다 엄격히 과거.
+    yesterday = business_date_kst(datetime.now(UTC) - timedelta(days=1))
+    assert yesterday < DATE
+
+    tracker = stack["tracker"]
+    await tracker.open(
+        order_id="ord-prior",
+        account_id=ACCT,
+        bot_id=BOT,
+        strategy_id=STRAT,
+        broker_order_id="0001",
+        symbol=SYMBOL,
+        side="buy",
+        order_type="market",
+        ordered_qty=100.0,
+        submitted_date=yesterday,
+    )
+    # 다운타임 중 체결 — history 는 전일 주문일자(ord_dt)로 100주 체결을 보고.
+    hist = _hist("0001", 100.0, 70000.0)
+    hist["timestamp"] = yesterday
+    broker = FakeBroker(
+        history=[hist],
+        positions=[{"symbol": SYMBOL, "quantity": 100.0, "avg_price": 70000.0}],
+    )
+
+    fill_sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=tracker,
+        fill_applier=stack["applier"],
+        account_id=ACCT,
+    )
+    # 1) 기동 카치업 — expire **전** poll 로 전일 체결 복구.
+    result = await fill_sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 1  # "expire 로 0콜" 이 아니라 실제 복구 (I3).
+    assert broker.history_calls == 1
+
+    # 복구로 주문이 filled 전이 → expire 대상에서 자동 제외 (I2). external 아님.
+    assert (await tracker.get("ord-prior")).status == "filled"
+    pos = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
+    assert pos["quantity"] == 100.0
+
+    # 2) barrier: catch_up succeeded=True 이고 internal=broker=100 → 무오분류.
+    corrections = await stack["reconciler"].reconcile(
+        bot_id=BOT,
+        broker_positions=await broker.get_account_positions(),
+        account_id=ACCT,
+    )
+    assert corrections == []
+    assert mismatches == []  # 전일 다운타임 체결을 "외부 매수" 로 오분류하지 않음.
+
+
+async def test_prior_day_open_no_fill_expires_after_poll(stack):
+    """대조 (I2 경계): 전일 open 인데 다운타임 체결이 **없으면** poll 후
+    genuinely-dead 로 expire 된다 (복구할 게 없는 진짜 미체결만 만료).
+    """
+    from datetime import UTC, datetime, timedelta
+
+    yesterday = business_date_kst(datetime.now(UTC) - timedelta(days=1))
+    tracker = stack["tracker"]
+    await tracker.open(
+        order_id="ord-prior-dead",
+        account_id=ACCT,
+        bot_id=BOT,
+        strategy_id=STRAT,
+        broker_order_id="0009",
+        symbol=SYMBOL,
+        side="buy",
+        order_type="market",
+        ordered_qty=100.0,
+        submitted_date=yesterday,
+    )
+    broker = FakeBroker(history=[])  # 체결 없음.
+    fill_sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=tracker,
+        fill_applier=stack["applier"],
+        account_id=ACCT,
+    )
+    result = await fill_sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 0
+    assert broker.history_calls == 1  # poll-first: 복구 시도가 먼저.
+    # 복구할 체결이 없는 genuinely-dead open → expired.
+    assert (await tracker.get("ord-prior-dead")).status == "expired"
+    pos = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
+    assert pos["quantity"] == 0.0
 
 
 # ── OrderSubmittedEvent 구독 경로 (main 배선 검증) ───

@@ -164,8 +164,10 @@ transactional-outbox 기반 exactly-once **이벤트 전달**은 별도 후속 �
 - cadence **≥60s**. KIS rate budget(paper 5/min·live 20/min, 주문제출·가격
   fallback·잔고 reconcile·fill poll이 동일 큐 공유)을 보호한다. 주문 제출이
   starve되지 않도록 가격 fallback 루프와 우선순위/상호배타를 둔다.
-- `get_order_history` window는 추적 open 주문의 `submitted_at` 이후를 덮도록
-  잡고 pagination·당일 필터를 처리한다 (stream-before-seed race도 폴이 멱등 흡수).
+- `get_order_history` window는 **EOD 만료 전** 추적 open 주문의 가장 이른
+  `submitted_date` 이후를 덮도록 잡고 pagination·당일 필터를 처리한다
+  (stream-before-seed race도 폴이 멱등 흡수). 만료가 이 open을 먼저 제거해
+  window를 좁히지 않는다 (§6.1 poll-first, §8 참조).
 
 ### 6.1 기동 카치업 (catch_up_once)
 
@@ -173,6 +175,27 @@ transactional-outbox 기반 exactly-once **이벤트 전달**은 별도 후속 �
 `catch_up_once()`는 open이 있으면 `get_order_history`(submitted_at 이후,
 pagination)를 **1회** 폴해 다운타임 중 발생한 체결을 `FillApplier`로 멱등
 따라잡는다.
+
+#### poll-first 순서 (복구가 EOD 만료보다 선행 — 정합성 invariant)
+
+폴 사이클(`catch_up_once`·주기 루프 공통 코어 `_poll_and_apply`)은 **반드시**
+다음 순서를 지킨다:
+
+1. `get_open_orders`로 추적 open(non-terminal)을 **EOD 만료 전에** 읽고,
+   `from_date`를 그 중 가장 이른 `submitted_date`로 잡는다(전일 open이 있으면
+   window가 그 영업일까지 거슬러 올라간다 — §8 window invariant).
+2. open이 있으면 `get_order_history` 1콜로 다운타임 체결을 `FillApplier`로 멱등
+   **복구**한다. 복구된 주문은 `filled`/`partially_filled`로 전이된다.
+3. **복구가 끝난 뒤에만** §8의 EOD 만료(`expire_stale`)를 돌린다.
+
+이 순서는 §7 barrier(fill 복구가 reconcile보다 선행)와 **하나의 순서
+invariant**다. EOD 만료를 폴 **앞**에 두면, 전일 open이 다운타임 중 체결됐어도
+복구 전에 `expired`로 전이되어 폴이 0콜로 끝나고, `catch_up_once`가
+`succeeded=True`(applied=0)를 반환해 barrier의 external-buy 차단이 무력화된다.
+그 결과 미복구 ante 체결(internal=0, broker>0)이 "외부 매수"로 오분류된다
+(#1945 회귀). poll-first는 이를 구조적으로 막는다. `succeeded=True`는 폴이 실제
+실행돼 다운타임 체결을 흡수했음을 의미하며, "만료로 open이 비어 0콜"은 성공으로
+취급하지 않는다.
 
 ## 7. barrier ordering (재기동 무오분류)
 
@@ -186,9 +209,23 @@ hard barrier**다.
 
 ## 8. EOD 만료
 
-유효기간이 지난 open 주문(일중 주문이 EOD 경과, pending에도 없고 history 체결도
-없음)은 `mark_terminal(expired)`로 표기한다. 무한 폴과 phantom pending을
-방지한다.
+유효기간이 지난 open 주문(일중 주문이 EOD 경과, pending에도 없고 **history
+체결도 없는** genuinely-dead 주문)만 `mark_terminal(expired)`로 표기한다. 무한
+폴과 phantom pending을 방지한다.
+
+만료 조건과 순서를 다음으로 못박는다(§6.1 poll-first의 한 축):
+
+- **대상은 `open` 상태만**이다. 부분 체결(`partially_filled`)은 체결이 관측·진행
+  중이므로 genuinely-dead가 아니며 만료하지 않는다.
+- 만료는 같은 폴 사이클에서 **history 폴(복구)이 끝난 뒤에** 실행한다. 다운타임
+  중 체결된 open은 그 폴에서 `filled`/`partially_filled`로 전이되어 이 만료에서
+  **자동 제외**된다. 즉 "EOD 경과 open 중 history 체결이 관측되지 않은" 주문만
+  남아 만료되므로, 미복구 체결분을 영구 만료하거나 "외부 매수"로 오분류하지
+  않는다.
+- 만료가 폴 window를 좁히지 않는다: window의 `from_date`는 만료 **전** open의
+  가장 이른 `submitted_date`로 잡혀, 전일 open의 다운타임 체결을 덮는다(§6.1
+  window invariant). 폴이 실패하면 만료도 실행되지 않아, 미복구 체결분은 다음
+  성공 사이클의 폴 window에 그대로 남는다.
 
 ## 9. 경계 (out of scope)
 

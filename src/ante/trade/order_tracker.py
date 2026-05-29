@@ -264,12 +264,23 @@ class OrderTracker:
         broker_order_id: str,
         submitted_date: str,
     ) -> str | None:
-        """관측(account/broker_order_id/date) → 내부 order_id 매핑.
+        """관측(account/broker_order_id/observed_date) → 내부 order_id 매핑.
 
-        non-terminal/same-day scope. 영업일 재사용으로 terminal 된 과거 주문과
-        새 주문이 같은 broker_order_id 를 갖더라도 ``submitted_date`` 로 분리되며,
-        terminal 주문은 매핑 대상에서 제외해 잔여 폴이 종료 주문을 되살리지
-        않게 한다.
+        spec §4.1 scope: **non-terminal** 이면서 추적 ``submitted_date`` 가 관측
+        영업일 **이하**(``submitted_date <= observed_date``)인 주문을 매핑한다.
+        정확매칭(``= observed_date``)이 아니라 ``<=`` 로 완화하는 이유 (I6):
+
+        - 폴이 관측한 KIS ``ord_dt``(주문일자)는 tracker seed 의
+          ``business_date_kst()`` 와 보통 동일하나, KST 영업일 rollover 나 timezone
+          drift 로 미세하게 어긋날 수 있다. 전일(또는 그 이전) 영업일에 seed 된
+          non-terminal 주문이 다운타임 중 체결돼 당일 history 로 관측될 때, 정확
+          매칭이면 매핑이 누락되어 복구가 실패한다. ``<=`` 가 이를 덮는다.
+        - 일자 재사용 격리는 유지된다: 같은 ``broker_order_id`` 의 과거 주문은
+          체결/취소/만료로 **terminal** 이 되어 매핑 대상에서 제외되고, 미래
+          영업일(``submitted_date > observed_date``) seed 는 ``<=`` 가 배제한다.
+        - 같은 odno 의 non-terminal 이 여러 영업일에 동시 존재하는 경합에서는
+          ``submitted_date`` 최신(MAX) 1건을 골라 "가장 최근 주문 우선" 으로
+          결정론적이게 한다.
         """
         validated = require_account_id(
             account_id, context="order_tracker.lookup_order_id"
@@ -278,7 +289,9 @@ class OrderTracker:
         row = await self._db.fetch_one(
             f"""SELECT order_id FROM order_tracker
                  WHERE account_id = ? AND broker_order_id = ?
-                   AND submitted_date = ? AND status IN ({placeholders})""",
+                   AND submitted_date <= ? AND status IN ({placeholders})
+                 ORDER BY submitted_date DESC
+                 LIMIT 1""",
             (validated, broker_order_id, submitted_date, *sorted(OPEN_STATUSES)),
         )
         return row["order_id"] if row else None
@@ -292,27 +305,32 @@ class OrderTracker:
         return OrderTrackerRecord.from_row(row) if row else None
 
     async def expire_stale(self, account_id: str, before_date: str) -> int:
-        """``submitted_date < before_date`` 인 open 주문을 ``expired`` 표기.
+        """``submitted_date < before_date`` 인 **genuinely-dead** ``open`` 만
+        ``expired`` 표기.
 
-        EOD 경과한 일중 주문(pending 에도 없고 history 체결도 없음)이 무한 폴·
-        phantom pending 을 만들지 않도록 종료한다. 만료 건수를 반환한다.
+        spec §8: EOD 경과 open 중 **history 체결이 관측되지 않은** genuinely-dead
+        주문(pending 에도 없음)만 만료한다. 부분 체결(``partially_filled``)은
+        체결이 관측·진행 중이므로 만료 대상이 **아니다** — ``open`` 상태만
+        만료한다(I2). fill-recovery 가 poll-first 로 다운타임 체결을 먼저 복구하면
+        해당 주문은 ``filled``/``partially_filled`` 로 전이되어 자연히 이 만료에서
+        제외된다. 이로써 일중 미체결 주문의 무한 폴·phantom pending 은 막되, 미복구
+        체결분을 영구 만료/오분류하지 않는다(I7). 만료 건수를 반환한다.
         """
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
-        placeholders = ", ".join("?" for _ in OPEN_STATUSES)
         before = await self._db.fetch_one(
-            f"""SELECT COUNT(*) AS c FROM order_tracker
+            """SELECT COUNT(*) AS c FROM order_tracker
                  WHERE account_id = ? AND submitted_date < ?
-                   AND status IN ({placeholders})""",
-            (validated, before_date, *sorted(OPEN_STATUSES)),
+                   AND status = 'open'""",
+            (validated, before_date),
         )
         count = int(before["c"]) if before else 0
         if count:
             await self._db.execute(
-                f"""UPDATE order_tracker
+                """UPDATE order_tracker
                        SET status = 'expired', terminal_at = datetime('now')
                      WHERE account_id = ? AND submitted_date < ?
-                       AND status IN ({placeholders})""",
-                (validated, before_date, *sorted(OPEN_STATUSES)),
+                       AND status = 'open'""",
+                (validated, before_date),
             )
             logger.info(
                 "OrderTracker EOD 만료: account=%s, %d건 (before=%s)",
