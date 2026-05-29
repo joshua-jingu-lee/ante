@@ -775,6 +775,9 @@ async def _init_reconcile_scheduler(s: Services) -> None:
     reconciler = PositionReconciler(
         trade_service=s.trade_service,
         eventbus=s.eventbus,
+        # #1950: broker > internal(외부 매수 후보) 분기에서 ante 미반영 체결
+        # (self-submitted)을 외부 매수와 구분하기 위한 OrderTracker self-check.
+        order_tracker=s.order_tracker,
     )
 
     accounts = await s.account_service.list()
@@ -1740,6 +1743,9 @@ async def _init_ipc(s: Services) -> None:
     reconciler = PositionReconciler(
         trade_service=s.trade_service,
         eventbus=s.eventbus,
+        # #1950: IPC 수동 reconcile 경로도 OrderTracker self-check 를 갖도록
+        # scheduler 경로와 동일하게 주입한다(두 경로 정합).
+        order_tracker=s.order_tracker,
     )
 
     service_registry = ServiceRegistry(
