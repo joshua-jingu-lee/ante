@@ -258,6 +258,35 @@ class OrderTracker:
         )
         return [OrderTrackerRecord.from_row(r) for r in rows]
 
+    async def get_open_orders_for(
+        self,
+        account_id: str,
+        bot_id: str,
+        symbol: str,
+        side: str,
+    ) -> list[OrderTrackerRecord]:
+        """``(account_id, bot_id, symbol, side)`` 의 non-terminal 주문 (#1950).
+
+        PositionReconciler 의 self-submitted fill 분류(reconciler self-check)에
+        쓰인다. ``open``/``partially_filled`` 인 주문만 반환하므로, FillApplier 가
+        아직 기록 못 한(``recorded_filled_qty < ordered_qty``) ante 주문이 정확히
+        이 범위에 든다. terminal(filled/expired/cancelled/...) 주문은 제외되어,
+        주문 해소 후 잔여 broker 초과분이 외부 거래로 재검출되게 한다(R2-1 bounded
+        known-limitation). 상세: ``docs/specs/trade/03-07-position-reconciler.md``.
+        """
+        validated = require_account_id(
+            account_id, context="order_tracker.get_open_orders_for"
+        )
+        placeholders = ", ".join("?" for _ in OPEN_STATUSES)
+        rows = await self._db.fetch_all(
+            f"""SELECT * FROM order_tracker
+                 WHERE account_id = ? AND bot_id = ? AND symbol = ? AND side = ?
+                   AND status IN ({placeholders})
+                 ORDER BY submitted_at""",
+            (validated, bot_id, symbol, side, *sorted(OPEN_STATUSES)),
+        )
+        return [OrderTrackerRecord.from_row(r) for r in rows]
+
     async def lookup_order_id(
         self,
         account_id: str,
