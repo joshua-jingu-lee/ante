@@ -156,3 +156,43 @@ class TestVirtualProviderStopGuard:
         evt = filled[0]
         assert evt.order_type == "limit"
         assert evt.price == 1050.0
+
+
+class TestVirtualProviderFillDedupKeyPolicy:
+    """#1949: VirtualProvider 직접 발행 경로의 fill_dedup_key 빈키 정책.
+
+    VirtualExecutor 는 가상 체결을 즉시 1회 직접 발행하며 FillApplier/OrderTracker
+    (CAS) 와 outbox 를 거치지 않는다. 결정적 키(order_id:confirmed_cumulative)의
+    산출 기반(CAS 확정 누적값)이 없고 at-least-once 재전달도 없으므로, dedup 비대상
+    이며 fill_dedup_key 는 빈키("")로 발행한다.
+    """
+
+    async def test_virtual_fill_has_empty_dedup_key(self, eventbus):
+        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
+        executor.subscribe()
+
+        filled: list[OrderFilledEvent] = []
+        eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
+
+        await eventbus.publish(
+            OrderApprovedEvent(
+                order_id="ord-virt-1",
+                account_id="acct1",
+                bot_id="virtual1",
+                strategy_id="A7",
+                symbol="069500",
+                side="buy",
+                quantity=1.0,
+                order_type="market",
+                price=1000.0,
+                reserved_amount=1000.0 * 1.00015,
+            )
+        )
+
+        assert len(filled) == 1
+        # 빈키 정책: VirtualProvider 직접 발행은 dedup 비대상.
+        assert filled[0].fill_dedup_key == ""

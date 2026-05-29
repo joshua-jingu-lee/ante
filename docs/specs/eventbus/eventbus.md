@@ -100,7 +100,7 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 | `OrderRejectedEvent` | RuleEngine / Treasury | Bot, Notification | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `reason`, `exchange` |
 | `OrderApprovedEvent` | Treasury | APIGateway | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reserved_amount`, `exchange` |
 | `OrderSubmittedEvent` | APIGateway | Bot, Trade | `account_id`, `order_id`, `bot_id`, `strategy_id`, `broker_order_id`, `symbol`, `side`, `quantity`, `order_type`, `exchange` |
-| `OrderFilledEvent` | BrokerAdapter | Bot, Treasury, Trade, Notification | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `requested_quantity`, `remaining_quantity`, `commission`, `order_type`, `reason`, `exchange` |
+| `OrderFilledEvent` | BrokerAdapter / FillApplier(outbox) | Bot, Treasury, Trade, Notification | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `requested_quantity`, `remaining_quantity`, `commission`, `order_type`, `reason`, `exchange`, `fill_dedup_key` |
 | `OrderCancelledEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `reason`, `exchange` |
 | `OrderFailedEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `order_type`, `error_message`, `exchange` |
 
@@ -231,6 +231,32 @@ canonical DB 상태를 남긴 뒤 서버 재시작 시 반영된다.
 4. **핸들러별 에러 격리 (FreqTrade 패턴)**
    - 한 핸들러의 예외가 다른 핸들러 실행을 막지 않음
    - 예외 발생 시 로깅 후 다음 핸들러 계속 실행
+
+### 체결 이벤트 전달 시맨틱: at-least-once (transactional outbox — #1949)
+
+`EventBus.publish`는 fire-and-forget(인메모리, 핸들러 예외 swallow)이라 발행 직후
+crash하면 이벤트가 유실된다. 체결(`OrderFilledEvent`)은 Treasury 정산·전략
+`on_fill`·notification 등 다운스트림 효과가 있어, FillApplier 경로의 발행을
+**transactional outbox**로 durable하게 만든다(#1949).
+
+- **원자 기록**: `FillApplier`는 체결 적용 `Database.transaction()` 안에서
+  `OrderFilledEvent` payload를 `fill_outbox` 테이블에 함께 커밋한다(recorded
+  advance + trade + position과 동일 원자 경계). commit 성공 = 이벤트 영속 보장
+  → commit↔publish 사이 crash window가 닫힌다(이벤트 무손실).
+- **at-least-once 발행**: `FillOutboxPublisher` 워커가 미발행 row를 읽어
+  **publish 성공 → mark published 순서**(역순 금지)로 발행하고, 기동 시 미발행분을
+  재전달한다. publish↔mark 사이 micro-window에서 같은 이벤트가 **두 번 발행될 수
+  있다**(at-least-once).
+- **결정적 `fill_dedup_key`**: 모든 outbox 발행 이벤트는
+  `fill_dedup_key = order_id:canonical(confirmed_cumulative)`(CAS로 확정된 누적
+  체결량 기준)를 싣는다. 소비자가 at-least-once 재전달을 식별·멱등 처리하는 키다.
+  outbox 미경유 직접 발행 경로(VirtualProvider)는 dedup 비대상이며 빈키(`""`)다.
+- **소비자 멱등화 경계**: at-least-once 재전달 시 비멱등 소비자
+  (Treasury/Bot/SignalChannel)의 이중처리 가능은 #1949 범위 밖의 알려진 잔여이며,
+  소비자 멱등화는 별도 이슈(#1957)에서 `fill_dedup_key`를 소비해 해소한다.
+  #1949는 소비자 무변경(무손실 전달 + 결정적 키 제공까지).
+
+상세: `docs/specs/broker-adapter/18-fill-recovery.md` §10.
 
 ### Transient `_consumed` marker (Gateway-only stop, OrderModifyEvent — #1331)
 

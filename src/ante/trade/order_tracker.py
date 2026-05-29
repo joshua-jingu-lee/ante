@@ -60,6 +60,25 @@ CREATE INDEX IF NOT EXISTS idx_order_tracker_open
 
 
 @dataclass(frozen=True, slots=True)
+class RecordFillResult:
+    """``record_fill`` CAS 결과 (#1949).
+
+    Attributes:
+        delta: 적용된 증분(``new_cumulative - 이전 recorded``). no-op이면 0.
+        confirmed_cumulative: **CAS ``RETURNING recorded_filled_qty`` 로 확정된**
+            누적 체결량. ``delta>0`` 일 때 advance 된 확정값(= new_cumulative)을
+            담고, no-op(``delta<=0``)이면 직전 recorded 값을 그대로 반영한다.
+
+            outbox/이벤트의 결정적 ``fill_dedup_key`` 는 **이 확정값**으로 생성해야
+            한다(입력 ``observed_cumulative`` 가 아니다). 동일 advance 경계는 항상
+            같은 확정값을 내므로, 재전달 시 키가 결정적이다.
+    """
+
+    delta: float
+    confirmed_cumulative: float
+
+
+@dataclass(frozen=True, slots=True)
 class OrderTrackerRecord:
     """추적 주문 스냅샷."""
 
@@ -171,12 +190,18 @@ class OrderTracker:
         order_id: str,
         new_cumulative: float,
         avg_price: float,
-    ) -> float:
-        """원자 CAS advance. 적용된 delta를 반환.
+    ) -> RecordFillResult:
+        """원자 CAS advance. ``RecordFillResult(delta, confirmed_cumulative)`` 반환.
 
         ``delta = new_cumulative - 이전 recorded_filled_qty``.
-        ``delta <= 0`` 이면 0 반환(no-op). ``delta > 0`` 이면 recorded 를
-        new_cumulative 로 갱신하고 status 를 부분/완료로 전이한 뒤 delta 반환.
+        ``delta <= 0`` 이면 ``delta=0`` no-op(직전 recorded 를 confirmed 로 반영).
+        ``delta > 0`` 이면 recorded 를 new_cumulative 로 갱신하고 status 를
+        부분/완료로 전이한 뒤, **CAS ``RETURNING recorded_filled_qty`` 로 확정된
+        누적값**을 ``confirmed_cumulative`` 로 반환한다(#1949).
+
+        ``confirmed_cumulative`` 는 outbox/이벤트의 결정적 ``fill_dedup_key`` 산출
+        기준이다. 입력 ``new_cumulative`` 가 아니라 DB 가 RETURNING 으로 돌려준
+        값을 노출해, 재전달 시 키 비결정성을 없앤다.
 
         **반드시 FillApplier 의 ``Database.transaction()`` + Lock 안에서 호출.**
         writer 연결에서 현재값을 읽고(``execute_fetch_one``) 진행 중인 트랜잭션의
@@ -189,14 +214,14 @@ class OrderTracker:
             (order_id,),
         )
         if row is None:
-            return 0.0
+            return RecordFillResult(delta=0.0, confirmed_cumulative=0.0)
 
         prev = float(row["recorded_filled_qty"] or 0.0)
         ordered = float(row["ordered_qty"] or 0.0)
         delta = new_cumulative - prev
         if delta <= 0:
-            # 관측 역전 또는 이미 반영됨 — 단조성 유지, no-op.
-            return 0.0
+            # 관측 역전 또는 이미 반영됨 — 단조성 유지, no-op. 확정값은 직전 recorded.
+            return RecordFillResult(delta=0.0, confirmed_cumulative=prev)
 
         # terminal(취소/거부/실패/만료) 이후에도 잔여 체결이 관측되면 부분/완료로
         # 되돌린다. CAS WHERE 절은 단조성(recorded < :c)만 강제한다.
@@ -227,8 +252,10 @@ class OrderTracker:
         if updated is None:
             # 동시 advance 로 다른 호출이 먼저 recorded 를 올림 — 단조성 보존, no-op.
             # (단일 Lock 경로에선 발생하지 않으나 방어적으로 처리.)
-            return 0.0
-        return delta
+            return RecordFillResult(delta=0.0, confirmed_cumulative=prev)
+        # CAS RETURNING 으로 확정된 누적값. fill_dedup_key 의 결정적 기준.
+        confirmed = float(updated["recorded_filled_qty"] or 0.0)
+        return RecordFillResult(delta=delta, confirmed_cumulative=confirmed)
 
     async def mark_terminal(self, order_id: str, status: str) -> None:
         """주문을 종료 상태로 표기 (취소/거부/실패/만료).

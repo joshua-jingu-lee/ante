@@ -222,7 +222,15 @@ class VirtualExecutor:
         # 가상 체결: 포지션/잔고 업데이트
         portfolio.apply_fill(symbol, side, quantity, fill_price, commission)
 
-        # OrderFilledEvent 발행
+        # OrderFilledEvent 발행.
+        #
+        # #1949 fill_dedup_key 빈키 정책: VirtualProvider 는 가상 체결을 즉시 1회
+        # 직접 발행하는 경로로, FillApplier/OrderTracker(CAS) 와 outbox 를 거치지
+        # 않는다. 따라서 결정적 fill_dedup_key(= order_id:confirmed_cumulative)의
+        # 산출 기반(CAS 확정 누적값)이 없다. at-least-once 재전달도 없으므로(outbox
+        # 미경유, 단발 in-memory 발행) dedup 대상이 아니다 → fill_dedup_key 는
+        # **빈키("")** 로 둔다. (default 이므로 명시 생략 가능하나, 정책을 코드로
+        # 못박기 위해 명시한다.) 소비자(#1957)는 빈키를 "dedup 비대상" 으로 본다.
         await self._eventbus.publish(
             OrderFilledEvent(
                 order_id=order_id,
@@ -237,6 +245,7 @@ class VirtualExecutor:
                 commission=commission,
                 order_type=order_type,
                 timestamp=datetime.now(UTC),
+                fill_dedup_key="",
             )
         )
         logger.info(

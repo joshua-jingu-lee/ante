@@ -103,10 +103,14 @@ paper·live 간 / 영업일 재사용으로 충돌할 수 있다. 따라서:
 
 - `open(order_id, account_id, bot_id, strategy_id, broker_order_id, symbol, side, order_type, ordered_qty, submitted_date)`:
   `OrderSubmittedEvent`로 추적 주문 seed.
-- `record_fill(order_id, new_cumulative, avg_price) → applied_delta`:
-  원자 CAS advance. `delta = new_cumulative - 이전 recorded`. `delta<=0`이면 0
-  반환(no-op), `delta>0`이면 `recorded=new_cumulative`로 갱신 후 delta 반환.
-  status를 부분/완료로 갱신. **FillApplier의 트랜잭션 안에서만 호출**.
+- `record_fill(order_id, new_cumulative, avg_price) → RecordFillResult(delta, confirmed_cumulative)`:
+  원자 CAS advance. `delta = new_cumulative - 이전 recorded`. `delta<=0`이면
+  `delta=0` no-op(`confirmed_cumulative`=직전 recorded), `delta>0`이면
+  `recorded=new_cumulative`로 갱신하고 status를 부분/완료로 전이한 뒤
+  **CAS `RETURNING recorded_filled_qty`로 확정된 누적값**을 `confirmed_cumulative`로
+  반환한다. **FillApplier의 트랜잭션 안에서만 호출**. `confirmed_cumulative`는
+  체결 이벤트 outbox의 결정적 `fill_dedup_key` 산출 기준이다(§10, #1949) —
+  입력 `observed_cumulative`가 아니라 DB가 RETURNING으로 확정한 값을 쓴다.
 - `mark_terminal(order_id, status)`: 취소·거부·실패·만료 종료 표기.
 - `get_open_orders(account_id)`: 계좌의 non-terminal(open/partially_filled) 주문.
 - `lookup_order_id(account_id, broker_order_id, submitted_date) → order_id | None`:
@@ -148,13 +152,25 @@ publish 전체**를 감싼다.
 `asyncio.Lock`은 프로세스 내 동시성만 막는다. crash 원자성은 단일 트랜잭션이
 보장한다.
 
-### 5.2 bounded limitation — 이벤트 전달 (후속)
+### 5.2 이벤트 전달 durability (#1949 — R4 한계 해소)
 
-commit ↔ event-publish 사이 narrow crash window에서 다운스트림 이벤트 전달
-(Treasury 정산·strategy `on_fill` 알림)이 유실될 수 있다. 이는 (i) 재기동
-catch-up + 기존 position/treasury reconcile로 재정합되며, (ii) 완전한
-transactional-outbox 기반 exactly-once **이벤트 전달**은 별도 후속 이슈(#1949)로
-분리한다. **positions durability는 본 스펙에서 종결**한다.
+이전에는 `OrderFilledEvent`가 **commit 이후** 발행되어, commit ↔ event-publish
+사이 narrow crash window에서 다운스트림 이벤트 전달(Treasury 정산·strategy
+`on_fill` 알림)이 유실될 수 있었다(#1946 R4 bounded-limitation).
+
+**#1949 transactional outbox로 이 crash window를 닫는다(이벤트 무손실)**: §3의
+체결 적용 트랜잭션 **안**에서 `OrderFilledEvent` payload를 `fill_outbox`
+테이블에 함께 INSERT한다(recorded advance + trade + position과 동일 원자 커밋).
+commit 성공 = 이벤트 영속 보장이므로, commit-후-crash에서도 재기동 시
+`FillOutboxPublisher`가 미발행 row를 재전달한다(§10). 상세는 §10과
+`docs/specs/eventbus/eventbus.md`(전달 시맨틱).
+
+전달 시맨틱은 **at-least-once(무손실)**다. publish↔mark 사이 micro-window에서
+같은 이벤트가 두 번 발행될 수 있으나, 각 이벤트는 결정적 `fill_dedup_key`를 실어
+보낸다. **at-least-once 재전달 시 비멱등 소비자(Treasury/Bot/SignalChannel)의
+이중처리 가능은 #1949 범위 밖의 알려진 잔여이며, 소비자 멱등화는 별도 이슈
+(#1957)에서 해소**한다. #1949는 outbox 무손실 전달 + 결정적 키 제공까지 책임진다.
+**positions durability는 #1946에서, 이벤트 전달 durability는 #1949에서 종결**한다.
 
 ## 6. FillReconcileScheduler — 백스톱 폴러
 
@@ -237,3 +253,65 @@ hard barrier**다.
 - 전략 `ctx.get_open_orders()`(live) 백엔드 연결은 별도 후속 이슈(유저스토리 #2).
 - 스트림 `H0STCNI0` HTS ID 복원은 선택적 지연 최적화 — 정합성은 REST 백스톱이
   보장한다.
+- **소비자 멱등화**(Treasury txn-dedup·Bot/SignalChannel bounded)는 #1949 범위
+  밖이며 별도 이슈(#1957)에서 해소한다. #1949는 소비자 무변경이다.
+
+## 10. 체결 이벤트 transactional outbox (#1949)
+
+commit↔publish crash window(§5.2)를 닫는 durability/at-least-once 메커니즘.
+구현체: `src/ante/trade/fill_outbox.py`(`FillOutbox`, `FillOutboxPublisher`).
+
+### 10.1 outbox 테이블 (`fill_outbox`)
+
+| 컬럼 | 설명 |
+|------|------|
+| `id` | PK (AUTOINCREMENT, 발행 순서 보존) |
+| `fill_dedup_key` | **UNIQUE**. 결정적 체결 식별자 = `order_id:canonical(confirmed_cumulative)` |
+| `payload` | `OrderFilledEvent` 생성자 인자 JSON (`event_id`/`timestamp` 제외 — 발행 시 생성) |
+| `created_at` | 생성 시각 |
+| `published` | 발행 여부 (0/1) |
+| `published_at` | 발행 시각 |
+
+`UNIQUE(fill_dedup_key)` + `ON CONFLICT DO NOTHING`으로 같은 체결의 중복 outbox
+row 생성을 막는다(같은 fill을 두 번 관측해도 row 1개).
+
+### 10.2 결정적 `fill_dedup_key`
+
+`fill_dedup_key = f"{order_id}:{canonical(confirmed_cumulative)}"`.
+
+- `confirmed_cumulative`는 §4.3 `record_fill`이 CAS `RETURNING
+  recorded_filled_qty`로 **확정**한 누적값이다(입력 `observed_cumulative`가
+  아니다). 같은 advance 경계는 항상 같은 확정값을 내므로 키가 결정적이다.
+- `canonical(value)` = `repr(float(value))`. SQLite REAL·Python `float`은 모두
+  IEEE754 double이며 `repr`은 round-trip을 보장하는 최단 표현이라, 재전달 시
+  키 비결정성이 없다. 고정 소수 포맷(`f"{:.Nf}"`)은 유효 자릿수를 잘라 서로 다른
+  체결량이 같은 키로 충돌할 수 있어 쓰지 않는다.
+
+### 10.3 원자 INSERT (FillApplier)
+
+`FillApplier._apply_locked`의 체결 적용 `Database.transaction()` **안**에서
+recorded advance + `TradeRecord` insert + `PositionHistory.on_trade`와 함께
+outbox row를 INSERT한다. commit 성공 = 이벤트 영속 보장. (outbox 미주입
+fallback 경로는 #1949 이전과 동일하게 commit 직후 직접 1회 발행하며, 이 경로는
+crash window가 잔존하고 빈 `fill_dedup_key`를 쓴다.)
+
+### 10.4 퍼블리셔 워커 (`FillOutboxPublisher`)
+
+- **순서 불변식**: row마다 **publish 성공 → mark_published** 순서를 지킨다
+  (역순 금지). publish가 실패(예외)하면 마킹하지 않아 다음 사이클·기동에 재전달
+  한다(at-least-once).
+- **기동 재전달**: `catch_up_once()`가 미발행 row를 id 오름차순으로 한 번 드레인
+  한다. main 기동에서 소비자 구독·체결 catch-up 이후 await하여, commit-후-crash로
+  미발행된 이벤트를 재전달한다.
+- **드레인 트리거**: `FillApplier`가 enqueue 직후 `notify()`로 워커를 깨운다.
+  주기 루프(`start()`)는 통지 누락에 대한 백스톱이다.
+- **graceful stop**: `stop()`은 루프를 취소한다. 미발행 row는 outbox에 durable
+  하게 남아 다음 기동의 `catch_up_once`가 재전달한다(무손실).
+
+### 10.5 VirtualProvider 빈키 정책
+
+`VirtualExecutor`(`src/ante/bot/providers/virtual.py`)는 가상 체결을 즉시 1회
+직접 발행하며 FillApplier/OrderTracker(CAS)·outbox를 거치지 않는다. 결정적 키의
+산출 기반(CAS 확정 누적값)이 없고 at-least-once 재전달도 없으므로 dedup 비대상
+이다 → `fill_dedup_key`는 **빈키(`""`)**로 발행한다. 소비자(#1957)는 빈키를
+"dedup 비대상"으로 본다.
