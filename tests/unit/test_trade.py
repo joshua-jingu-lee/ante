@@ -71,6 +71,73 @@ def eventbus():
     return EventBus()
 
 
+@pytest.fixture
+async def order_tracker(db):
+    from ante.trade.order_tracker import OrderTracker
+
+    t = OrderTracker(db)
+    await t.initialize()
+    return t
+
+
+@pytest.fixture
+async def fill_applier(db, order_tracker, position_history, eventbus, recorder):
+    """#1946: 체결의 durable 적용(trades + positions)은 FillApplier 가 수행한다.
+
+    TradeRecorder._on_filled 는 더 이상 trades/position 을 만들지 않으므로,
+    "체결 → trades/positions 반영" 을 검증하는 테스트는 본 fixture 를 통해
+    체결을 적용한다.
+    """
+    from ante.trade.fill_applier import FillApplier
+
+    return FillApplier(
+        db=db,
+        order_tracker=order_tracker,
+        position_history=position_history,
+        eventbus=eventbus,
+    )
+
+
+async def _apply_fill(
+    applier,
+    tracker,
+    *,
+    order_id: str,
+    broker_order_id: str,
+    cumulative: float,
+    avg_price: float,
+    side: str = "buy",
+    bot_id: str = "bot1",
+    strategy_id: str = "s1",
+    symbol: str = "005930",
+    account_id: str = "acc-test",
+    ordered_qty: float | None = None,
+    submitted_date: str = "20260529",
+) -> float:
+    """OrderTracker seed + FillApplier.apply_cumulative 로 체결을 적용 (#1946)."""
+    existing = await tracker.get(order_id)
+    if existing is None:
+        await tracker.open(
+            order_id=order_id,
+            account_id=account_id,
+            bot_id=bot_id,
+            strategy_id=strategy_id,
+            broker_order_id=broker_order_id,
+            symbol=symbol,
+            side=side,
+            order_type="market",
+            ordered_qty=ordered_qty if ordered_qty is not None else cumulative,
+            submitted_date=submitted_date,
+        )
+    return await applier.apply_cumulative(
+        account_id=account_id,
+        broker_order_id=broker_order_id,
+        observed_cumulative=cumulative,
+        avg_price=avg_price,
+        submitted_date=submitted_date,
+    )
+
+
 def _make_filled_event(
     *,
     bot_id: str = "bot1",
@@ -124,23 +191,53 @@ class TestTradeRecorder:
         )
         assert "idx_trades_account" in {row["name"] for row in indexes}
 
-    async def test_on_filled_records_trade(self, recorder, db):
-        """OrderFilledEvent → trades 테이블에 기록."""
+    async def test_on_filled_does_not_record_trade(self, recorder, db):
+        """#1946: TradeRecorder._on_filled 는 trades 를 만들지 않는다.
+
+        fill 의 durable 적용은 FillApplier 단일 권위자가 수행한다(이중 적용 방지).
+        TradeRecorder 는 알림만 발행한다.
+        """
         event = _make_filled_event()
         await recorder._on_filled(event)
 
         rows = await db.fetch_all("SELECT * FROM trades")
-        assert len(rows) == 1
-        assert rows[0]["bot_id"] == "bot1"
-        assert rows[0]["status"] == "filled"
+        assert rows == []
 
-    async def test_on_filled_updates_position(self, recorder, position_history):
-        """체결 시 포지션도 갱신."""
+    async def test_on_filled_does_not_update_position(self, recorder, position_history):
+        """#1946: TradeRecorder._on_filled 는 position 을 갱신하지 않는다.
+
+        R5 락: fill 경로의 position 갱신은 FillApplier(트랜잭션) 단일 권위자만
+        수행하고 TradeRecorder 는 같은 fill 에 position 을 다시 갱신하지 않는다.
+        """
         event = _make_filled_event(side="buy", quantity=10, price=50000)
         await recorder._on_filled(event)
 
-        pos = await position_history.get_current("bot1", "005930")
-        assert pos["quantity"] == 10
+        pos = await position_history.get_current(
+            "bot1", "005930", account_id="acc-test"
+        )
+        assert pos["quantity"] == 0  # FillApplier 만 갱신하므로 변화 없음.
+
+    async def test_fill_applier_records_trade_and_position(
+        self, fill_applier, order_tracker, db, position_history
+    ):
+        """#1946: FillApplier 가 trades insert + position 갱신을 단일 권위자로 수행."""
+        delta = await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+        )
+        assert delta == 10.0
+        rows = await db.fetch_all("SELECT * FROM trades WHERE status = 'filled'")
+        assert len(rows) == 1
+        assert rows[0]["bot_id"] == "bot1"
+        pos = await position_history.get_current(
+            "bot1", "005930", account_id="acc-test"
+        )
+        assert pos["quantity"] == 10.0
         assert pos["avg_entry_price"] == 50000.0
 
     async def test_on_rejected_records(self, recorder, db):
@@ -208,27 +305,66 @@ class TestTradeRecorder:
         rows = await db.fetch_all("SELECT * FROM trades WHERE status = 'cancelled'")
         assert len(rows) == 1
 
-    async def test_duplicate_trade_id_ignored(self, recorder, db):
-        """동일 trade_id 중복 기록 방지 (INSERT OR IGNORE)."""
-        event = _make_filled_event()
-        await recorder._on_filled(event)
-        await recorder._on_filled(event)
-
-        rows = await db.fetch_all("SELECT * FROM trades")
+    async def test_duplicate_fill_observation_ignored(
+        self, fill_applier, order_tracker, db
+    ):
+        """#1946: 같은 누적 체결 2회 관측 → trades 1행만 (FillApplier 멱등)."""
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+        )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+        )
+        rows = await db.fetch_all("SELECT * FROM trades WHERE status = 'filled'")
         assert len(rows) == 1
 
-    async def test_get_trades_filter_bot(self, recorder):
-        """봇별 거래 조회."""
-        await recorder._on_filled(_make_filled_event(bot_id="bot1"))
-        await recorder._on_filled(_make_filled_event(bot_id="bot2"))
+    async def test_get_trades_filter_bot(self, recorder, fill_applier, order_tracker):
+        """봇별 거래 조회 (#1946: FillApplier 가 trades 생성)."""
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            bot_id="bot1",
+        )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord2",
+            broker_order_id="bk2",
+            cumulative=10.0,
+            avg_price=50000.0,
+            bot_id="bot2",
+        )
 
         trades = await recorder.get_trades(bot_id="bot1")
         assert len(trades) == 1
         assert trades[0].bot_id == "bot1"
 
-    async def test_get_trades_filter_status(self, recorder, db):
-        """상태별 거래 조회."""
-        await recorder._on_filled(_make_filled_event())
+    async def test_get_trades_filter_status(
+        self, recorder, fill_applier, order_tracker, db
+    ):
+        """상태별 거래 조회 (#1946: filled 는 FillApplier, failed 는 TradeRecorder)."""
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+        )
 
         event = OrderFailedEvent(
             event_id=uuid4(),
@@ -265,7 +401,7 @@ class TestTradeRecorder:
         # legacy default account_id row 5개를 먼저 가장 최근 timestamp 로 넣는다.
         # SQL 정렬은 ``timestamp DESC`` 이므로 LIMIT 으로 자르면 자연히
         # 첫 페이지가 legacy 만으로 채워졌어야 했다 (SSOT 적용 전 시나리오).
-        from datetime import UTC, datetime, timedelta
+        from datetime import UTC, datetime
 
         base = datetime.now(UTC)
         for i in range(5):
@@ -347,28 +483,73 @@ class TestTradeRecorder:
         assert len(rows) == 1
         assert rows[0]["quantity"] == 5  # abs(15-10)
 
-    async def test_eventbus_integration(self, recorder, eventbus):
-        """EventBus 구독 통합 테스트."""
+    async def test_eventbus_integration_rejected(self, recorder, eventbus, db):
+        """EventBus 구독 통합 — 비-fill 상태(rejected)는 TradeRecorder 가 기록."""
         recorder.subscribe(eventbus)
 
-        event = _make_filled_event()
+        event = OrderRejectedEvent(
+            event_id=uuid4(),
+            timestamp=datetime.now(UTC),
+            order_id="ord1",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=50000.0,
+            order_type="market",
+            reason="rule violation",
+            account_id="acc-test",
+        )
         await eventbus.publish(event)
 
-        trades = await recorder.get_trades()
+        trades = await recorder.get_trades(status=TradeStatus.REJECTED)
+        assert len(trades) == 1
+
+    async def test_eventbus_integration_fill_via_applier(
+        self, recorder, fill_applier, order_tracker, eventbus
+    ):
+        """#1946: FillApplier 가 OrderFilledEvent 발행 → trades 1행 (멱등 경로)."""
+        recorder.subscribe(eventbus)
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+        )
+        trades = await recorder.get_trades(status=TradeStatus.FILLED)
         assert len(trades) == 1
 
     async def test_on_filled_buy_notification_includes_cumulative(
-        self, recorder, eventbus
+        self, recorder, fill_applier, order_tracker, eventbus
     ):
-        """매수 알림에 누적 수량, 평단가 포함."""
+        """매수 알림에 누적 수량, 평단가 포함 (#1946: FillApplier 적용 → 알림)."""
         from ante.eventbus.events import NotificationEvent
 
         captured: list[NotificationEvent] = []
         eventbus.subscribe(NotificationEvent, lambda e: captured.append(e))
         recorder.subscribe(eventbus)
 
-        await eventbus.publish(_make_filled_event(side="buy", quantity=10, price=50000))
-        await eventbus.publish(_make_filled_event(side="buy", quantity=20, price=60000))
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+        )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord2",
+            broker_order_id="bk2",
+            cumulative=20.0,
+            avg_price=60000.0,
+            side="buy",
+        )
 
         assert len(captured) == 2
         # 2차 매수 알림: 누적 30주, 평단가 = (10*50000+20*60000)/30 ≈ 56667
@@ -376,8 +557,10 @@ class TestTradeRecorder:
         assert "누적 30주" in msg
         assert "평단가" in msg
 
-    async def test_on_filled_sell_notification_includes_pnl(self, recorder, eventbus):
-        """매도 알림에 잔여 수량, 평단가, 실현 손익 포함."""
+    async def test_on_filled_sell_notification_includes_pnl(
+        self, recorder, fill_applier, order_tracker, eventbus
+    ):
+        """매도 알림에 잔여 수량, 평단가, 실현 손익 포함 (#1946)."""
         from ante.eventbus.events import NotificationEvent
 
         captured: list[NotificationEvent] = []
@@ -385,9 +568,26 @@ class TestTradeRecorder:
         recorder.subscribe(eventbus)
 
         # 매수 10주 @ 50,000
-        await eventbus.publish(_make_filled_event(side="buy", quantity=10, price=50000))
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+        )
         # 매도 5주 @ 60,000 → 실현 손익 = (60000 - 50000) * 5 = 50,000
-        await eventbus.publish(_make_filled_event(side="sell", quantity=5, price=60000))
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord2",
+            broker_order_id="bk2",
+            cumulative=5.0,
+            avg_price=60000.0,
+            side="sell",
+            ordered_qty=5.0,
+        )
 
         assert len(captured) == 2
         sell_msg = captured[1].message
@@ -1073,72 +1273,56 @@ class TestPerformanceTracker:
         assert metrics.win_rate == 0.0
         assert metrics.net_pnl == 0.0
 
-    async def test_calculate_with_trades(self, recorder, position_history, performance):
-        """수익/손실 거래 혼합 시 성과 계산."""
-        now = datetime.now(UTC)
-
+    async def test_calculate_with_trades(
+        self, fill_applier, order_tracker, performance
+    ):
+        """수익/손실 거래 혼합 시 성과 계산 (#1946: FillApplier 가 trades 생성)."""
         # 매수 1: 005930 10주 @ 50000
-        await recorder._on_filled(
-            _make_filled_event(
-                symbol="005930",
-                side="buy",
-                quantity=10,
-                price=50000,
-            )
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+            symbol="005930",
         )
-
         # 매도 1: 005930 10주 @ 55000 (수익)
-        sell1 = OrderFilledEvent(
-            event_id=uuid4(),
-            timestamp=now + timedelta(hours=1),
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
             order_id="ord2",
             broker_order_id="bk2",
-            bot_id="bot1",
-            strategy_id="s1",
-            symbol="005930",
+            cumulative=10.0,
+            avg_price=55000.0,
             side="sell",
-            quantity=10.0,
-            price=55000.0,
-            commission=100.0,
-            order_type="market",
-            account_id="acc-test",
+            symbol="005930",
+            ordered_qty=10.0,
         )
-        await recorder._on_filled(sell1)
-
         # 매수 2: 000660 5주 @ 100000
-        buy2 = OrderFilledEvent(
-            event_id=uuid4(),
-            timestamp=now + timedelta(hours=2),
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
             order_id="ord3",
             broker_order_id="bk3",
-            bot_id="bot1",
-            strategy_id="s1",
-            symbol="000660",
+            cumulative=5.0,
+            avg_price=100000.0,
             side="buy",
-            quantity=5.0,
-            price=100000.0,
-            order_type="market",
-            account_id="acc-test",
+            symbol="000660",
         )
-        await recorder._on_filled(buy2)
-
         # 매도 2: 000660 5주 @ 90000 (손실)
-        sell2 = OrderFilledEvent(
-            event_id=uuid4(),
-            timestamp=now + timedelta(hours=3),
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
             order_id="ord4",
             broker_order_id="bk4",
-            bot_id="bot1",
-            strategy_id="s1",
-            symbol="000660",
+            cumulative=5.0,
+            avg_price=90000.0,
             side="sell",
-            quantity=5.0,
-            price=90000.0,
-            commission=50.0,
-            order_type="market",
-            account_id="acc-test",
+            symbol="000660",
+            ordered_qty=5.0,
         )
-        await recorder._on_filled(sell2)
 
         metrics = await performance.calculate(account_id="acc-test", bot_id="bot1")
         assert metrics.total_trades == 2  # 매도 2건
@@ -1203,28 +1387,31 @@ class TestPerformanceTracker:
         pnl_list = [100.0] * 30
         assert performance._calculate_sharpe(pnl_list) is None
 
-    async def test_profit_factor_no_loss(self, recorder, position_history, performance):
-        """손실 없으면 profit_factor = inf."""
-        now = datetime.now(UTC)
-
-        await recorder._on_filled(
-            _make_filled_event(side="buy", quantity=10, price=50000)
+    async def test_profit_factor_no_loss(
+        self, fill_applier, order_tracker, performance
+    ):
+        """손실 없으면 profit_factor = inf (#1946: FillApplier 경로)."""
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+            symbol="005930",
         )
-        sell = OrderFilledEvent(
-            event_id=uuid4(),
-            timestamp=now + timedelta(hours=1),
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
             order_id="ord2",
             broker_order_id="bk2",
-            bot_id="bot1",
-            strategy_id="s1",
-            symbol="005930",
+            cumulative=10.0,
+            avg_price=55000.0,
             side="sell",
-            quantity=10.0,
-            price=55000.0,
-            order_type="market",
-            account_id="acc-test",
+            symbol="005930",
+            ordered_qty=10.0,
         )
-        await recorder._on_filled(sell)
 
         metrics = await performance.calculate(account_id="acc-test", bot_id="bot1")
         assert metrics.profit_factor == float("inf")

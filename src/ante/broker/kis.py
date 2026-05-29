@@ -970,23 +970,59 @@ class KISDomesticAdapter(KISBaseAdapter):
         }
 
         result = await self._request("GET", url, tr_id, params=params)
-        history = []
-        for item in result.get("output1", []):
-            history.append(
-                {
-                    "order_id": item.get("odno", ""),
+        return self._fold_order_history(result.get("output1", []))
+
+    @staticmethod
+    def _fold_order_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """inquire-daily-ccld ``output1`` 행을 (odno, 영업일)별로 fold.
+
+        KIS ``output1`` 은 조회 구분에 따라 주문별 누적 1행 또는 부분체결별 다행이
+        올 수 있다 (#1946 R1-4). 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
+
+        - ``filled_quantity`` = 누적 체결수량 ``tot_ccld_qty`` 의 **max**
+          (누적 행이면 마지막 값, 부분체결 행이면 단조 증가하므로 max 가 안전).
+        - ``price`` = **실체결가** = ``tot_ccld_amt`` / ``tot_ccld_qty``
+          (체결금액/체결수량). ``tot_ccld_amt`` 가 없으면 ``avg_prvs``(평균체결가),
+          그것도 없으면 ``ord_unpr``(주문가) 순으로 fallback. 주문가(``ord_unpr``)를
+          체결가로 쓰던 기존 매핑을 교정한다.
+
+        ``broker_order_id``(odno) / 누적 체결qty / avg price / 영업일(ord_dt) 을
+        반환에 포함해 FillApplier 의 ``(account_id, broker_order_id, submitted_date)``
+        조회와 누적 체결 advance 를 가능하게 한다.
+        """
+        folded: dict[tuple[str, str], dict[str, Any]] = {}
+        for item in rows:
+            odno = str(item.get("odno", ""))
+            ord_dt = str(item.get("ord_dt", ""))
+            if not odno:
+                continue
+            cum_qty = float(item.get("tot_ccld_qty", 0) or 0)
+            ccld_amt = float(item.get("tot_ccld_amt", 0) or 0)
+            avg_prvs = float(item.get("avg_prvs", 0) or 0)
+            ord_unpr = float(item.get("ord_unpr", 0) or 0)
+            # 실체결가 우선순위: 체결금액/체결수량 → 평균체결가 → 주문가.
+            if cum_qty > 0 and ccld_amt > 0:
+                fill_price = ccld_amt / cum_qty
+            elif avg_prvs > 0:
+                fill_price = avg_prvs
+            else:
+                fill_price = ord_unpr
+
+            key = (odno, ord_dt)
+            existing = folded.get(key)
+            if existing is None or cum_qty >= existing["filled_quantity"]:
+                # 누적 체결qty 가 더 크거나 같은(최신) 행으로 갱신.
+                folded[key] = {
+                    "order_id": odno,
                     "symbol": item.get("pdno", ""),
                     "side": "buy" if item.get("sll_buy_dvsn_cd") == "02" else "sell",
-                    "quantity": float(item.get("ord_qty", 0)),
-                    "filled_quantity": float(item.get("tot_ccld_qty", 0)),
-                    "price": float(item.get("ord_unpr", 0)),
-                    "status": "filled"
-                    if float(item.get("tot_ccld_qty", 0)) > 0
-                    else "pending",
-                    "timestamp": item.get("ord_dt", ""),
+                    "quantity": float(item.get("ord_qty", 0) or 0),
+                    "filled_quantity": cum_qty,
+                    "price": fill_price,
+                    "status": "filled" if cum_qty > 0 else "pending",
+                    "timestamp": ord_dt,
                 }
-            )
-        return history
+        return list(folded.values())
 
 
 # ── 하위호환 별칭 ─────────────────────────────────────

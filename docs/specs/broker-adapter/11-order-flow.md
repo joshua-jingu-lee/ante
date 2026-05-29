@@ -20,7 +20,7 @@ Bot → OrderRequestEvent (market/limit)
 ```
 
 **체결 확인 경로 (#1946)**: `OrderFilledEvent`는 실시간 체결 통보 스트림(빠른
-경로)으로만 발행하지 않는다. 스트림 유무·paper/live 무관하게 체결이 내부에
+경로)으로만 발행하지 않는다. 스트림 유무·모의투자·실전투자 무관하게 체결이 내부에
 반영되도록, REST `get_order_history` 백스톱 폴(`FillReconcileScheduler`)이 정합성을
 보증한다. 두 경로는 `FillApplier`(단일 멱등 choke point)로 수렴하여 같은 체결을
 몇 번 관측하든 포지션은 정확히 한 번 반영된다. 상세는

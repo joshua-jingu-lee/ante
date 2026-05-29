@@ -12,7 +12,6 @@ from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
     BotStartedEvent,
     BotStoppedEvent,
-    OrderFilledEvent,
     StreamConnectedEvent,
     StreamDisconnectedEvent,
 )
@@ -111,6 +110,27 @@ def bot_manager_mock() -> MagicMock:
     return bm
 
 
+class FakeFillApplier:
+    """테스트용 FillApplier 대체 — apply_stream_increment 호출을 기록 (#1946).
+
+    #1946 이후 ``_on_execution`` 은 직접 OrderFilledEvent 를 발행하지 않고
+    FillApplier 로 라우팅한다. 스트림 fast-path 가 올바른 account_id /
+    broker_order_id(=odno) / 증분으로 라우팅하는지 본 fake 로 검증한다.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def apply_stream_increment(self, **kwargs) -> float:
+        self.calls.append(kwargs)
+        return float(kwargs.get("increment", 0.0))
+
+
+@pytest.fixture
+def fill_applier() -> FakeFillApplier:
+    return FakeFillApplier()
+
+
 @pytest.fixture
 def integration(
     stream_client: FakeStreamClient,
@@ -119,6 +139,7 @@ def integration(
     stop_order_manager: StopOrderManager,
     gateway_mock: MagicMock,
     bot_manager_mock: MagicMock,
+    fill_applier: FakeFillApplier,
 ) -> StreamIntegration:
     return StreamIntegration(
         stream_client=stream_client,
@@ -128,6 +149,7 @@ def integration(
         stop_order_manager=stop_order_manager,
         gateway=gateway_mock,
         bot_manager=bot_manager_mock,
+        fill_applier=fill_applier,  # type: ignore[arg-type]
         fallback_poll_interval=0.1,
         sync_interval=0.1,
     )
@@ -227,21 +249,19 @@ async def test_execution_callback_invalidates_cache(
 
 
 @pytest.mark.asyncio
-async def test_execution_callback_publishes_event(
+async def test_execution_callback_routes_to_fill_applier(
     integration: StreamIntegration,
     stream_client: FakeStreamClient,
-    eventbus: EventBus,
+    fill_applier: FakeFillApplier,
 ) -> None:
-    """체결 통보 시 OrderFilledEvent가 발행된다."""
+    """#1946: 체결 통보는 직접 OrderFilledEvent 발행 대신 FillApplier 로 라우팅된다.
+
+    스트림 payload 의 ``order_id`` 는 broker 주문번호(odno), ``quantity`` 는
+    per-execution 증분으로 ``apply_stream_increment`` 에 전달된다. (실제
+    OrderFilledEvent 발행은 FillApplier 가 commit 이후 단일 멱등 경로로 수행.)
+    """
     await integration.start()
     try:
-        received: list[OrderFilledEvent] = []
-
-        async def handler(event: OrderFilledEvent) -> None:
-            received.append(event)
-
-        eventbus.subscribe(OrderFilledEvent, handler)
-
         execution = {
             "symbol": "005930",
             "order_id": "ord-1",
@@ -251,9 +271,13 @@ async def test_execution_callback_publishes_event(
         }
         await stream_client.fire_execution(execution)
 
-        assert len(received) == 1
-        assert received[0].symbol == "005930"
-        assert received[0].price == 70000.0
+        assert len(fill_applier.calls) == 1
+        call = fill_applier.calls[0]
+        assert call["account_id"] == "acc-001"
+        assert call["broker_order_id"] == "ord-1"
+        assert call["increment"] == 10.0
+        assert call["avg_price"] == 70000.0
+        assert call["submitted_date"]  # KST 영업일.
     finally:
         await integration.stop()
 
@@ -568,19 +592,12 @@ async def test_construction_without_account_id_raises(
 async def test_execution_uses_lifecycle_account_id_when_payload_missing(
     integration: StreamIntegration,
     stream_client: FakeStreamClient,
-    eventbus: EventBus,
+    fill_applier: FakeFillApplier,
 ) -> None:
     """broker payload에 account_id가 없으면 lifecycle account_id로 fallback
-    하여 OrderFilledEvent가 정상 발행된다."""
+    하여 FillApplier 라우팅 account_id 가 lifecycle 값이 된다 (#1946)."""
     await integration.start()
     try:
-        received: list[OrderFilledEvent] = []
-
-        async def handler(event: OrderFilledEvent) -> None:
-            received.append(event)
-
-        eventbus.subscribe(OrderFilledEvent, handler)
-
         # broker payload에 account_id 없음 → integration._account_id="acc-001" 사용
         await stream_client.fire_execution(
             {
@@ -592,9 +609,9 @@ async def test_execution_uses_lifecycle_account_id_when_payload_missing(
             }
         )
 
-        assert len(received) == 1
-        assert received[0].account_id == "acc-001"
-        assert received[0].order_id == "ord-1"
+        assert len(fill_applier.calls) == 1
+        assert fill_applier.calls[0]["account_id"] == "acc-001"
+        assert fill_applier.calls[0]["broker_order_id"] == "ord-1"
     finally:
         await integration.stop()
 
@@ -603,18 +620,11 @@ async def test_execution_uses_lifecycle_account_id_when_payload_missing(
 async def test_execution_payload_account_id_overrides_lifecycle(
     integration: StreamIntegration,
     stream_client: FakeStreamClient,
-    eventbus: EventBus,
+    fill_applier: FakeFillApplier,
 ) -> None:
-    """broker payload의 account_id가 lifecycle account_id를 오버라이드한다."""
+    """broker payload의 account_id가 lifecycle account_id를 오버라이드한다 (#1946)."""
     await integration.start()
     try:
-        received: list[OrderFilledEvent] = []
-
-        async def handler(event: OrderFilledEvent) -> None:
-            received.append(event)
-
-        eventbus.subscribe(OrderFilledEvent, handler)
-
         await stream_client.fire_execution(
             {
                 "symbol": "005930",
@@ -626,8 +636,8 @@ async def test_execution_payload_account_id_overrides_lifecycle(
             }
         )
 
-        assert len(received) == 1
-        assert received[0].account_id == "acc-other"
+        assert len(fill_applier.calls) == 1
+        assert fill_applier.calls[0]["account_id"] == "acc-other"
     finally:
         await integration.stop()
 

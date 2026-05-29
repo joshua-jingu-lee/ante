@@ -62,6 +62,24 @@ class Database:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
+    async def execute_fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+        """writer 연결에서 실행 후 단일 행을 반환 (RETURNING 등 atomic 패턴용).
+
+        ``execute`` 와 동일하게 **writer 연결**에서 실행하므로, 진행 중인
+        ``transaction()`` 의 미커밋 변경을 같은 트랜잭션 안에서 일관되게
+        관측한다. reader 연결을 쓰는 ``fetch_one`` 은 WAL 격리로 인해 진행
+        중인 writer 트랜잭션의 uncommitted row를 보지 못하므로, CAS 후
+        ``RETURNING`` 으로 결과를 원자적으로 읽어야 하는 경로는 이 메서드를
+        쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
+        """
+        conn = self._get_writer()
+        async with conn.execute(sql, params) as cursor:
+            row = await cursor.fetchone()
+            result = dict(row) if row else None
+        if not self._in_transaction:
+            await conn.commit()
+        return result
+
     async def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         """다중 행 조회."""
         conn = self._get_reader()

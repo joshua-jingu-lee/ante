@@ -77,36 +77,25 @@ class TradeRecorder:
         eventbus.subscribe(OrderCancelFailedEvent, self._on_cancel_failed, priority=10)
 
     async def _on_filled(self, event: object) -> None:
-        """체결 이벤트 → 거래 기록 + 포지션 갱신 + 알림 발행."""
+        """체결 이벤트 → 체결 알림 발행.
+
+        #1946: fill 의 durable 적용(trades insert + ``positions``)은 **FillApplier
+        단일 권위자**가 단일 트랜잭션으로 수행한다. ``OrderFilledEvent`` 는 commit
+        이후 발행되므로, 본 핸들러(priority=10, 가장 늦게 실행)가 호출될 때는 이미
+        trades/positions 가 반영된 상태다. 따라서 TradeRecorder 는 fill 경로에서
+        trades insert·position 갱신을 **다시 하지 않는다**(이중 적용 방지). 갱신된
+        포지션을 읽어 체결 알림만 발행한다. rejected/failed/cancelled 등 비-fill
+        상태 기록은 별도 핸들러에서 유지한다.
+        """
         from ante.eventbus.events import NotificationEvent, OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
             return
 
-        record = TradeRecord(
-            trade_id=event.event_id,
-            bot_id=event.bot_id,
-            strategy_id=event.strategy_id,
-            symbol=event.symbol,
-            side=event.side,
-            quantity=event.quantity,
-            price=event.price,
-            status=TradeStatus.FILLED,
-            order_type=event.order_type,
-            reason=event.reason,
-            commission=event.commission,
-            timestamp=event.timestamp,
-            order_id=event.order_id,
-            exchange=event.exchange,
-            account_id=event.account_id,
-        )
-        await self._save(record)
-        await self._position_history.on_trade(record)
-
         side_label = "매수" if event.side == "buy" else "매도"
         if self._eventbus:
             position = await self._position_history.get_current(
-                event.bot_id, event.symbol
+                event.bot_id, event.symbol, account_id=event.account_id
             )
             base_msg = (
                 f"봇 `{event.bot_id}`\n"
