@@ -52,7 +52,9 @@ Treasury는 아래 이벤트를 구독하여 자금 정산을 수행한다 (prio
 | 구독 이벤트 | priority | 처리 내용 |
 |------------|----------|----------|
 | OrderValidatedEvent | 80 | 룰 검증 통과 후 자금 예약. 예산 부족 시 OrderRejectedEvent 발행, 성공 시 OrderApprovedEvent 발행 |
-| OrderFilledEvent | 80 | 매수: 예약 → 투입 정산 (차액 복원). 매도: 회수 금액을 가용 예산에 복원. 거래 이력 기록 |
-| OrderCancelledEvent | 80 | 예약 자금 해제 (원래 예약 금액 정확히 복원) |
-| OrderFailedEvent | 80 | 예약 자금 해제 (원래 예약 금액 정확히 복원) |
-| BotStoppedEvent | 80 | 봇 중지 시 해당 봇의 모든 미체결 예약 자금 일괄 해제 |
+| OrderFilledEvent | 80 | 매수: fill(delta)마다 실비용만큼 예약 차감(비례 정산), terminal에서만 잔여 예약 회수. 매도: 회수 금액을 가용 예산에 복원. 거래 이력 기록 (부분체결 비례 정산 #1947 — [03-treasury-model.md](03-treasury-model.md) 참조) |
+| OrderCancelledEvent | 80 | **잔여 예약**만 해제 (부분체결 후 취소 시 기체결분 보존) |
+| OrderFailedEvent | 80 | **잔여 예약**만 해제 (부분체결 후 실패 시 기체결분 보존) |
+| BotStoppedEvent | 80 | 봇 중지 시 해당 봇의 각 주문 **잔여 예약** 일괄 회수 (기체결분 보존) |
+
+> 매수 부분체결 비례 정산(per-fill 차감 · terminal 잔여 회수 · `OrderTracker` terminal 판정 · tracker 부재 시 full-fill fallback)의 상세 의미는 [03-treasury-model.md](03-treasury-model.md) "매수 부분체결 비례 정산"을 따른다. buy 한정 — 매도는 예약 부재로 per-fill 누적 가산이 이미 정확하다(#1947, D5).
