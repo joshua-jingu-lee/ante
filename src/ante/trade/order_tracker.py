@@ -161,8 +161,9 @@ class OrderTracker:
        캐시를 바꾸면 rollback 시 stale. 체결 미러는 commit 직후 FillApplier 가
        ``mirror_fill_to_cache`` 로 한다(post-commit 전용).
     3. ``mark_terminal`` — DB write 후 ``_evict_open_cache``.
-    4. ``expire_stale``  — batch UPDATE 영향 order_id 를 ``RETURNING`` 으로 받아
-       일괄 ``_evict_open_cache``.
+    4. ``expire_stale``  — 단일 ``UPDATE … RETURNING`` 으로 **실제 expired 된**
+       order_id 만 받아 그 ID 만 ``_evict_open_cache``. 사전 SELECT 가 없어
+       SELECT↔UPDATE 사이 fill commit(open→partial/filled) TOCTOU 가 없다.
 
     **invariant**: ``open``/``mark_terminal``/``expire_stale`` 는 자체 commit 을
     소유한다 — 외부 ``Database.transaction()`` 내부에서 호출하지 않는다. Database 는
@@ -568,26 +569,25 @@ class OrderTracker:
         체결분을 영구 만료/오분류하지 않는다(I7). 만료 건수를 반환한다.
         """
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
-        # #1948: 사전 SELECT 로 만료 대상 order_id 를 받아, DB UPDATE 성공 후
-        # 일괄 ``_evict_open_cache`` 한다(batch terminal 전이 캐시 정합).
-        # 사전 SELECT 와 후속 UPDATE 의 WHERE 절은 동일 조건(account/date/status='open')
-        # 이므로 standalone 단일 writer 경로에서 집합이 일치한다.
-        targets = await self._db.fetch_all(
-            """SELECT order_id FROM order_tracker
+        # #1948: 단일 원자 UPDATE ... RETURNING. 사전 SELECT 를 두면 SELECT↔UPDATE
+        # 사이에 다른 코루틴(FillApplier)이 fill 을 commit 해 open→partially_filled/
+        # filled 로 전이시킬 때, UPDATE(WHERE status='open')는 그 주문을 건드리지
+        # 않는데도 pre-SELECT 결과로 evict 해 여전히 open(또는 partial)인 주문이
+        # 캐시에서 사라진다(캐시=commit 된 DB open 미러 invariant 위반). UPDATE 가
+        # 실제로 expired 한 order_id 만 RETURNING 으로 받아 그 ID 들만 evict 하면
+        # TOCTOU race 자체가 구조적으로 사라진다. writer 연결 단일 호출이라
+        # 읽기↔쓰기 분리도 없다.
+        expired = await self._db.execute_fetch_all(
+            """UPDATE order_tracker
+                   SET status = 'expired', terminal_at = datetime('now')
                  WHERE account_id = ? AND submitted_date < ?
-                   AND status = 'open'""",
+                   AND status = 'open'
+            RETURNING order_id""",
             (validated, before_date),
         )
-        count = len(targets)
+        count = len(expired)
         if count:
-            await self._db.execute(
-                """UPDATE order_tracker
-                       SET status = 'expired', terminal_at = datetime('now')
-                     WHERE account_id = ? AND submitted_date < ?
-                       AND status = 'open'""",
-                (validated, before_date),
-            )
-            for row in targets:
+            for row in expired:
                 self._evict_open_cache(row["order_id"])
             logger.info(
                 "OrderTracker EOD 만료: account=%s, %d건 (before=%s)",
