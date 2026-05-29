@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.position import PositionHistory
 
 logger = logging.getLogger(__name__)
@@ -155,6 +156,7 @@ class Treasury:
         market_order_reserve_buffer_rate: Decimal = Decimal("0"),
         order_reserve_price_resolver: Callable[[str], Awaitable[float]] | None = None,
         bot_status_checker: Callable[[str], str] | None = None,
+        order_tracker: OrderTracker | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
@@ -173,6 +175,12 @@ class Treasury:
         # ``set_order_reserve_price_resolver``로 후속 주입된다.
         self._order_reserve_price_resolver = order_reserve_price_resolver
         self._bot_status_checker = bot_status_checker
+        # #1947: 부분체결 비례 정산을 위한 OrderTracker 참조 (read-only 조회).
+        # ``_on_order_filled`` buy 분기에서 order_id 로 ordered_qty /
+        # recorded_filled_qty 를 조회해 terminal(전량 체결) 판정을 한다.
+        # None 이면(미주입 또는 VirtualProvider 직접 full-fill 등 tracker 부재
+        # 주문) buy 정산은 기존 full-fill pop-once semantics 로 fallback 한다.
+        self._order_tracker = order_tracker
 
         self._account_balance: float = 0.0
         self._purchasable_amount: float = 0.0
@@ -184,9 +192,12 @@ class Treasury:
         self._external_eval_amount: float = 0.0
         self._budgets: dict[str, BotBudget] = {}
         self._unallocated: float = 0.0
-        self._reservations: dict[
-            str, tuple[str, float]
-        ] = {}  # order_id -> (bot_id, amount)
+        # order_id -> (bot_id, remaining_reserved).
+        # #1947: 두번째 항은 주문의 **잔여 예약**(아직 정산되지 않은 예약 자금)이다.
+        # ``reserve_for_order`` 에서 예약 총액 R 로 초기화되고, 매수 부분체결마다
+        # 그 fill 이 커버한 만큼 감소한다. 주문이 terminal(전량 체결/취소/실패/봇중지)
+        # 에 도달하면 잔여 예약을 budget 으로 회수하고 entry 를 제거한다.
+        self._reservations: dict[str, tuple[str, float]] = {}
         self._sync_task: asyncio.Task[None] | None = None
 
         # KIS 계좌 메타 정보 (broker 연결 후 set_account_info로 설정)
@@ -335,6 +346,16 @@ class Treasury:
     def set_bot_status_checker(self, checker: Callable[[str], str]) -> None:
         """봇 상태 확인 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
         self._bot_status_checker = checker
+
+    def set_order_tracker(self, order_tracker: OrderTracker) -> None:
+        """부분체결 비례 정산용 OrderTracker 참조 주입 (#1947).
+
+        생성자 주입 대신 부팅 순서상 OrderTracker 가 Treasury 보다 먼저
+        준비될 수 없는 partial wiring 경로(테스트 등)를 위한 후속 주입 경로다.
+        미주입(``None``) 시 buy 정산은 full-fill pop-once semantics 로 fallback
+        한다 (R1-2 — VirtualProvider 직접 full-fill 보존).
+        """
+        self._order_tracker = order_tracker
 
     def set_order_reserve_price_resolver(
         self, resolver: Callable[[str], Awaitable[float]]
@@ -641,21 +662,29 @@ class Treasury:
         budget.available -= amount
         budget.reserved += amount
         budget.last_updated = datetime.now(UTC)
+        # #1947: 잔여 예약(remaining_reserved)을 예약 총액 R(=amount)로 초기화한다.
+        # 이후 매수 부분체결마다 그 fill 의 covered 만큼 감소한다.
         self._reservations[order_id] = (bot_id, amount)
 
         await self._save_budget(budget)
         return True
 
     async def release_reservation(self, bot_id: str, order_id: str) -> None:
-        """주문 취소/실패 시 예약 해제."""
+        """주문 취소/실패 시 **잔여 예약**만 해제 (#1947).
+
+        ``self._reservations[order_id][1]`` 은 잔여 예약(``remaining_reserved``)
+        이다. 부분체결 후 취소/실패라면 이미 체결된 분은 ``_on_order_filled`` 에서
+        ``spent`` 로 정산되며 ``reserved`` 에서 차감되었으므로, 여기서는 아직
+        정산되지 않은 잔여 예약만 회수해 기체결분을 보존한다.
+        """
         budget = self._budgets.get(bot_id)
         entry = self._reservations.pop(order_id, None)
-        amount = entry[1] if entry else 0.0
-        if not budget or amount <= 0:
+        remaining = entry[1] if entry else 0.0
+        if not budget or remaining <= 0:
             return
 
-        budget.reserved = max(0.0, budget.reserved - amount)
-        budget.available += amount
+        budget.reserved = max(0.0, budget.reserved - remaining)
+        budget.available += remaining
         budget.last_updated = datetime.now(UTC)
 
         await self._save_budget(budget)
@@ -664,7 +693,9 @@ class Treasury:
         """특정 봇의 미체결 예약 내역 조회.
 
         Returns:
-            {order_id: amount, ...}
+            ``{order_id: remaining_reserved, ...}`` — 두번째 항은 #1947 이후
+            주문의 **잔여 예약**(아직 정산되지 않은 예약 자금)이다. 부분체결된
+            주문이면 이미 체결된 분을 제외한 잔여만 반영한다.
         """
         return {
             oid: amt for oid, (bid, amt) in self._reservations.items() if bid == bot_id
@@ -1053,34 +1084,7 @@ class Treasury:
         commission = event.commission
 
         if event.side == "buy":
-            entry = self._reservations.pop(event.order_id, None)
-            reserved_amount = entry[1] if entry else 0.0
-            actual_cost = fill_value + commission
-            budget.reserved = max(0.0, budget.reserved - reserved_amount)
-            budget.spent += actual_cost
-            surplus = reserved_amount - actual_cost
-            if surplus > 0:
-                # 체결가가 reserve 보다 낮음 — 잔여 reserve 를 available 로 환수.
-                budget.available += surplus
-            elif surplus < 0:
-                # 체결가가 reserve 보다 높음 (시장가 매수의 가격 변동 등).
-                # 초과분을 available 에서 추가 차감한다 — invariant: 결과적으로
-                # available 이 음수가 될 수 있으나 이는 정상 운영 상태가 아니며
-                # 후속 매수 reserve 가 거부되는 것은 자연스러운 결과다 (#1333).
-                # 별도 EventBus 이벤트는 신설하지 않으며 audit 용 warning 만
-                # 남긴다.
-                extra_cost = -surplus
-                budget.available -= extra_cost
-                logger.warning(
-                    "market_order_reserve_shortfall: bot=%s order=%s "
-                    "extra_cost=%s reserved=%s actual=%s "
-                    "(available may be negative)",
-                    event.bot_id,
-                    event.order_id,
-                    f"{extra_cost:,.2f}",
-                    f"{reserved_amount:,.2f}",
-                    f"{actual_cost:,.2f}",
-                )
+            await self._settle_buy_fill(event, budget, fill_value, commission)
         else:
             actual_proceeds = fill_value - commission
             budget.returned += actual_proceeds
@@ -1096,6 +1100,116 @@ class Treasury:
                 f"{event.side} {event.symbol} {event.quantity} @ {event.price:,.0f}"
             ),
         )
+
+    async def _settle_buy_fill(
+        self, event: Any, budget: BotBudget, fill_value: float, commission: float
+    ) -> None:
+        """매수 체결 정산 — 부분체결 비례 정산 + terminal 잔여 회수 (#1947).
+
+        per-fill 회계(R1-1):
+          - ``actual_cost = quantity*price + commission``
+          - ``covered = min(remaining_reserved, actual_cost)``
+          - ``reserved -= covered`` ; ``remaining_reserved -= covered`` ;
+            ``spent += actual_cost``
+          - ``shortfall = actual_cost - covered``; ``shortfall>0`` 이면
+            ``available -= shortfall`` (체결가>예약분 = 기존 #1333 shortfall
+            동작 보존, audit warning 유지)
+
+        terminal 판정은 OrderTracker(``recorded_filled_qty >= ordered_qty``)로
+        한다 — FillApplier 가 ``record_fill()`` 커밋 후 ``OrderFilledEvent`` 를
+        발행하므로 Treasury 가 보는 tracker 상태는 이번 fill 을 이미 포함한다
+        (R1-3). terminal 이면 잔여 예약(under-fill surplus)을 회수하고 entry 를
+        제거한다; 중간 partial 이면 entry 를 유지한다.
+
+        OrderTracker 미주입 또는 ``get(order_id)`` 가 None 이면(예:
+        VirtualProvider 직접 full-fill — tracker 에 seed 안 됨) 기존 full-fill
+        pop-once semantics 로 fallback 한다 (R1-2).
+
+        불변식 ``available = allocated - reserved - spent + returned`` 가 부분체결
+        전 구간에서 유지된다.
+        """
+        order_id = event.order_id
+        actual_cost = fill_value + commission
+
+        record = None
+        if self._order_tracker is not None:
+            record = await self._order_tracker.get(order_id)
+
+        if record is None:
+            # Fallback (R1-2): tracker 부재 주문 — 단일 full-fill 가정 pop-once.
+            self._settle_buy_full_fill(event, budget, actual_cost)
+            return
+
+        # Per-fill 비례 정산 (R1-1).
+        entry = self._reservations.get(order_id)
+        remaining = entry[1] if entry else 0.0
+
+        covered = min(remaining, actual_cost)
+        budget.reserved = max(0.0, budget.reserved - covered)
+        budget.spent += actual_cost
+        remaining -= covered
+
+        shortfall = actual_cost - covered
+        if shortfall > 0:
+            # 체결가가 잔여 예약분을 초과 (시장가 가격 변동 등). 초과분을
+            # available 에서 추가 차감한다 (#1333 동작 보존). available 이 음수가
+            # 될 수 있으나 정상 상태가 아니며 후속 reserve 거부로 자연 수렴한다.
+            budget.available -= shortfall
+            logger.warning(
+                "market_order_reserve_shortfall: bot=%s order=%s "
+                "shortfall=%s actual=%s (available may be negative)",
+                event.bot_id,
+                order_id,
+                f"{shortfall:,.2f}",
+                f"{actual_cost:,.2f}",
+            )
+
+        terminal = record.ordered_qty > 0 and (
+            record.recorded_filled_qty >= record.ordered_qty
+        )
+        if terminal:
+            # 전량 체결 — 잔여 예약(미체결분 버퍼)을 available 로 회수.
+            if remaining > 0:
+                budget.reserved = max(0.0, budget.reserved - remaining)
+                budget.available += remaining
+            self._reservations.pop(order_id, None)
+        elif entry is not None:
+            # 중간 partial — 잔여 예약을 갱신해 다음 fill 정산에 이월.
+            self._reservations[order_id] = (entry[0], remaining)
+
+    def _settle_buy_full_fill(
+        self, event: Any, budget: BotBudget, actual_cost: float
+    ) -> None:
+        """tracker 부재 매수 full-fill pop-once 정산 (#1947 R1-2 fallback).
+
+        VirtualProvider 처럼 단일 full-fill 이벤트만 발행하고 OrderTracker 에
+        seed 되지 않는 주문은 #1947 이전과 동일한 전액 pop + surplus/shortfall
+        1회 정산이 정확하다.
+        """
+        entry = self._reservations.pop(event.order_id, None)
+        reserved_amount = entry[1] if entry else 0.0
+        budget.reserved = max(0.0, budget.reserved - reserved_amount)
+        budget.spent += actual_cost
+        surplus = reserved_amount - actual_cost
+        if surplus > 0:
+            # 체결가가 reserve 보다 낮음 — 잔여 reserve 를 available 로 환수.
+            budget.available += surplus
+        elif surplus < 0:
+            # 체결가가 reserve 보다 높음 (시장가 매수의 가격 변동 등).
+            # 초과분을 available 에서 추가 차감한다 (#1333). available 이 음수가
+            # 될 수 있으나 정상 상태가 아니며 후속 reserve 거부로 자연 수렴한다.
+            extra_cost = -surplus
+            budget.available -= extra_cost
+            logger.warning(
+                "market_order_reserve_shortfall: bot=%s order=%s "
+                "extra_cost=%s reserved=%s actual=%s "
+                "(available may be negative)",
+                event.bot_id,
+                event.order_id,
+                f"{extra_cost:,.2f}",
+                f"{reserved_amount:,.2f}",
+                f"{actual_cost:,.2f}",
+            )
 
     async def _on_order_cancelled(self, event: object) -> None:
         """주문 취소 시 예약 해제."""
@@ -1122,7 +1236,13 @@ class Treasury:
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 시 해당 봇의 모든 예약 자금 일괄 해제."""
+        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수 (#1947).
+
+        ``get_reservations`` 가 주문별 잔여 예약(``remaining_reserved``)을
+        반환하므로, 부분체결된 주문이라도 이미 체결된 분은 ``_on_order_filled``
+        에서 ``spent`` 로 정산되어 ``reserved`` 에서 빠진 상태이고 여기서는 잔여만
+        회수한다. 기체결분 정산은 보존된다.
+        """
         from ante.eventbus.events import BotStoppedEvent
 
         if not isinstance(event, BotStoppedEvent):
