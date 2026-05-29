@@ -185,6 +185,7 @@ class BackfillRunner:
             ctx,
             is_blocked,
         )
+        ctx.warnings.extend(store.drain_warnings())
         await self._collect_dart(
             data_path,
             feed_dir,
@@ -193,7 +194,9 @@ class BackfillRunner:
             store,
             ctx,
         )
+        ctx.warnings.extend(store.drain_warnings())
         self._compute_indicators(store, ctx)
+        ctx.warnings.extend(store.drain_warnings())
 
         return ctx.to_result("backfill", started_at)
 

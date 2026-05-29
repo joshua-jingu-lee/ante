@@ -10,9 +10,25 @@ DataFeed는 `ante.data.store.ParquetStore.write()`를 호출하여 저장한다.
 자체 Parquet 읽기/쓰기 구현(`store/parquet.py`)을 두지 않는다.
 
 **쓰기 모드는 merge/dedup**이다. `write()`는 기존 월별 파티션과 새 데이터를 병합한 뒤
-natural key(`timestamp` 또는 `date`) 기준으로 중복을 제거하고 정렬한다.
+natural key 기준으로 중복을 제거하고 정렬한다.
 이로써 **멱등성이 보장**되므로 장애 후 같은 범위를 다시 수집해도 중복 행이 누적되지 않는다.
 값 정정이나 전체 재생성을 위한 true partition replace는 1.0 계약에 포함하지 않는다.
+
+natural key는 data_type별로 결정된다:
+
+| data_type | natural key | 근거 |
+|-----------|-------------|------|
+| `ohlcv` / `tick` | `timestamp` | 시점당 한 행 |
+| `fundamental` | `(date, source)` | 다중 소스 공존 (아래 참조) |
+
+`fundamental`은 **다중 소스가 같은 월 파티션을 공유**한다 — data.go.kr의 일별
+`market_cap`/`shares_listed`와 DART의 분기 재무제표가 모두
+`{data.path}/fundamental/{exchange}/{symbol}/{YYYY-MM}.parquet`에 기록된다.
+DART date는 분기말일(3/31·6/30·9/30·12/31)이라 data.go.kr의 같은 거래일 일별 행과
+date가 충돌할 수 있다. 따라서 natural key를 `date` 단독이 아닌 `(date, source)`로 두어
+두 소스의 서로 다른(null-complementary) 행을 **모두 보존**한다. 병합은 컬럼 합집합 +
+null-fill(schema-union) 방식이며, merge가 (방어적으로) 실패해도 기존 파티션을
+덮어쓰지 않고 데이터 품질 경고(report `warnings`)로 표면화한다(데이터 무손실 우선).
 
 ### 쓰기 소유권
 

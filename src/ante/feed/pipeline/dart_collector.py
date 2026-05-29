@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import logging
+from calendar import monthrange
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import polars as pl
 
-from ante.data.normalizer import DARTNormalizer
+from ante.data.normalizer import _REPRT_CODE_MAP, DARTNormalizer
 from ante.data.store import ParquetStore
 from ante.feed.pipeline.checkpoint import Checkpoint
 from ante.feed.sources.dart import (
@@ -33,6 +35,33 @@ REPRT_TO_QUARTER: dict[str, str] = {
 
 # 기본 설정 상수
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
+
+# `today`는 KST(UTC+9) 캘린더 기준으로 산출한다. 분기 period-end 비교는
+# backfill_runner._today_kst()와 동일 기준이어야 한다(repo 전반 KST 정합).
+_KST = timezone(timedelta(hours=9))
+
+
+def _today_kst() -> date:
+    """오늘 날짜(KST 캘린더)를 반환한다."""
+    return datetime.now(tz=_KST).date()
+
+
+def _quarter_period_end(year: int, reprt_code: str) -> date | None:
+    """(year, reprt_code)가 가리키는 분기의 period-END 날짜를 반환한다.
+
+    reprt_code → 종료월(3/6/9/12) 매핑은 normalizer `_REPRT_CODE_MAP`를
+    SSOT로 재사용하며, 그 월의 말일을 period-end로 본다(DART normalizer의
+    `_convert_report_date`와 동일 규칙).
+
+    Returns:
+        period-end 날짜. reprt_code가 매핑에 없으면 None.
+    """
+    mapping = _REPRT_CODE_MAP.get(reprt_code)
+    if mapping is None:
+        return None
+    _, month = mapping
+    day = monthrange(year, month)[1]
+    return date(year, month, day)
 
 
 class DARTCollector:
@@ -92,13 +121,15 @@ class DARTCollector:
     def _resolve_year_range(
         config: dict[str, Any],
     ) -> tuple[int, int]:
-        """설정에서 수집 연도 범위를 결정한다."""
-        from datetime import date
+        """설정에서 수집 연도 범위를 결정한다.
 
+        end_year는 KST 기준 현재 연도이며, 분기 단위 미래 컷오프는
+        `_collect_quarters`의 period-end(KST) 비교가 담당한다(#1964).
+        """
         schedule = config.get("schedule", {})
         backfill_since = schedule.get("backfill_since", DEFAULT_BACKFILL_SINCE)
         start_year = int(backfill_since[:4])
-        end_year = date.today().year
+        end_year = _today_kst().year
         return start_year, end_year
 
     @staticmethod
@@ -125,10 +156,21 @@ class DARTCollector:
         symbols: set[str] = set()
         warns: list[dict] = []
 
+        # collectable 상한: period-end가 today(KST)를 지난 분기만 fetch/save.
+        # 미래 분기(예: 실행일 2026-05-29 기준 2026-Q2/Q3/Q4)는 데이터가
+        # 존재할 수 없으므로 fetch도 checkpoint.save도 수행하지 않는다.
+        # 이로써 checkpoint가 미래 분기로 전진하지 않는다(#1964).
+        today = _today_kst()
+
         for year in range(start_year, end_year + 1):
             for reprt_code in REPRT_CODES:
                 quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
                 if last_checkpoint and quarter_key <= last_checkpoint:
+                    continue
+
+                period_end = _quarter_period_end(year, reprt_code)
+                if period_end is not None and period_end > today:
+                    # 미래 분기: fetch/save 모두 건너뛴다.
                     continue
 
                 written, syms = await self._fetch_quarter(
