@@ -113,7 +113,7 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 
 | 단계 | 인증 방식 | 비고 |
 |------|-----------|------|
-| 현재 (private repo) | API 토큰 (`PYPI_TOKEN` secret) | GitHub environment: `pypi` |
+| 현재 (private repo) | API 토큰 (`PYPI_API_TOKEN` secret) | GitHub environment: `pypi` |
 | 공개 후 | Trusted Publisher (OIDC) | pending publisher 등록 완료 |
 
 전환 시: `publish.yml`에서 `password:` 라인 제거 → OIDC 자동 적용.
@@ -133,7 +133,7 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 
 ### publish.yml 실패
 
-- PyPI 토큰 만료 시 GitHub Secrets에서 `PYPI_TOKEN`을 갱신한다.
+- PyPI 토큰 만료 시 GitHub Secrets에서 `PYPI_API_TOKEN`을 갱신한다.
 - Docker login 실패 시 `GITHUB_TOKEN`의 `packages: write` 권한과 repository package 설정을 확인한다.
 - Docker build 실패 시 release PR의 Docker build 검증과 실제 publish 환경 차이를 비교한다.
 
