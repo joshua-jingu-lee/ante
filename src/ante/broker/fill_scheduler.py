@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -37,11 +38,35 @@ _KST = timezone(timedelta(hours=9))
 MIN_POLL_INTERVAL = 60.0
 DEFAULT_POLL_INTERVAL = 60.0
 
+# 기동 카치업 bounded backoff. startup 폴이 CB/rate/network 로 실패하면 짧게
+# 재시도해 일시 장애를 흡수한다. 모두 실패하면 succeeded=False 로 보고해 barrier
+# 가 reconcile external-buy 분류를 건너뛰게 한다(미복구 체결 오분류 방지, #1946).
+CATCH_UP_MAX_ATTEMPTS = 3
+CATCH_UP_BACKOFF_BASE = 1.0
+
 
 def business_date_kst(when: datetime | None = None) -> str:
     """KST 기준 영업일 ``YYYYMMDD`` (KIS ord_dt 매칭용)."""
     moment = when or datetime.now(UTC)
     return moment.astimezone(_KST).strftime("%Y%m%d")
+
+
+@dataclass(frozen=True, slots=True)
+class CatchUpResult:
+    """기동 카치업 결과 (#1946 Finding 1).
+
+    ``succeeded`` 는 startup 폴이 **명시적으로 끝났는지**(정상 0건/open-없음/체결
+    적용 포함)를 뜻한다. CB/rate/network 로 폴 자체가 실패하면 ``succeeded=False``
+    다 — 이 경우를 "0건 성공" 과 반드시 구분해야, main barrier 가 reconcile
+    external-buy 분류를 건너뛰어 미복구 체결을 "외부 매수" 로 오분류하지 않는다.
+
+    Attributes:
+        succeeded: startup 폴이 성공(또는 명시적 open-없음)했는지.
+        applied: 적용된 체결(delta>0) 건수.
+    """
+
+    succeeded: bool
+    applied: int
 
 
 class FillReconcileScheduler:
@@ -69,17 +94,54 @@ class FillReconcileScheduler:
     def account_id(self) -> str:
         return self._account_id
 
-    async def catch_up_once(self) -> int:
+    async def catch_up_once(self) -> CatchUpResult:
         """기동 카치업: open 주문이 있으면 1회 폴 → FillApplier.
 
-        다운타임 중 발생한 체결을 멱등 따라잡는다. 적용된 체결 이벤트 수를
-        반환한다. open 이 없으면 0콜·0건.
+        다운타임 중 발생한 체결을 멱등 따라잡는다. open 이 없으면 0콜·0건이며
+        명시적 **성공**(``succeeded=True``)으로 본다.
+
+        폴 자체가 CB/rate/network 로 실패하면 **bounded backoff 로 재시도**하고,
+        그래도 실패하면 ``succeeded=False`` 를 반환한다. 주기 루프(``_loop``)와
+        달리 startup 폴 실패를 "0건 성공" 으로 삼키지 않는다 — main barrier 가
+        이 결과로 reconcile external-buy 분류를 건너뛸지 결정하기 때문이다
+        (#1946 Finding 1).
 
         **barrier 보장**: main 기동에서 이 메서드의 await 완료 후에만
-        ``ReconcileScheduler.start()`` 를 시작해, position reconcile 이 미복구
-        체결을 "외부 매수" 로 오분류하지 않게 한다.
+        ``ReconcileScheduler.start()`` 를 시작하고, ``succeeded`` 가 False 면
+        external-buy 분류를 연기해, position reconcile 이 미복구 체결을
+        "외부 매수" 로 오분류하지 않게 한다.
         """
-        return await self._poll_and_apply()
+        last_exc: Exception | None = None
+        for attempt in range(1, CATCH_UP_MAX_ATTEMPTS + 1):
+            try:
+                applied = await self._poll_and_apply()
+            except Exception as exc:  # CB open·rate·network — bounded 재시도.
+                last_exc = exc
+                if attempt < CATCH_UP_MAX_ATTEMPTS:
+                    backoff = CATCH_UP_BACKOFF_BASE * attempt
+                    logger.warning(
+                        "기동 카치업 폴 실패 (account=%s, attempt=%d/%d) — "
+                        "%.1fs 후 재시도",
+                        self._account_id,
+                        attempt,
+                        CATCH_UP_MAX_ATTEMPTS,
+                        backoff,
+                        exc_info=True,
+                    )
+                    await asyncio.sleep(backoff)
+                continue
+            else:
+                return CatchUpResult(succeeded=True, applied=applied)
+
+        # 모든 시도 실패 — startup 폴 미성공. barrier 가 external-buy 분류를 연기.
+        logger.error(
+            "기동 카치업 폴 %d회 모두 실패 (account=%s) — reconcile external-buy "
+            "분류를 연기한다",
+            CATCH_UP_MAX_ATTEMPTS,
+            self._account_id,
+            exc_info=last_exc,
+        )
+        return CatchUpResult(succeeded=False, applied=0)
 
     async def start(self) -> None:
         """주기 폴 루프 시작 (catch_up_once 와 별개의 background task)."""
@@ -116,16 +178,36 @@ class FillReconcileScheduler:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                logger.exception(
-                    "FillReconcileScheduler 폴 오류 (account=%s)", self._account_id
+                # 주기 루프는 폴 실패(CB/rate/network)를 삼키고 다음 사이클에
+                # 멱등 재시도한다. (startup 카치업과 달리 barrier 영향 없음.)
+                logger.warning(
+                    "FillReconcileScheduler 폴 오류 (account=%s) — 다음 사이클 재시도",
+                    self._account_id,
+                    exc_info=True,
                 )
 
     async def _poll_and_apply(self) -> int:
         """open 있을 때만 get_order_history 1콜 → 매칭 주문 FillApplier 적용.
 
+        호출 전에 **EOD 만료**(``OrderTracker.expire_stale``)를 돌려, 영업일이
+        지난 open 주문을 ``expired`` 로 전이한다. 이로써 EOD 경과한 일중 주문이
+        ``get_open_orders`` 에 잔존해 매 사이클 무한 폴되는 것을 막는다
+        (#1946 Finding 2).
+
         Returns:
             적용된 체결(delta>0) 건수.
+
+        Raises:
+            Exception: ``get_order_history`` 실패(CB open·rate·network)를 그대로
+                전파한다. 주기 루프(``_loop``)는 이를 잡아 삼키고 다음 사이클에
+                멱등 재시도하나, ``catch_up_once`` 는 startup 폴 실패를 감지해
+                barrier 결정에 반영한다.
         """
+        today = business_date_kst()
+        # EOD 경과한 open 주문을 expired 로 전이 (무한 폴 방지). today 이전
+        # 영업일(submitted_date < today)만 만료 — 당일 open 은 유지.
+        await self._tracker.expire_stale(self._account_id, before_date=today)
+
         open_orders = await self._tracker.get_open_orders(self._account_id)
         if not open_orders:
             # event-gated: 추적 open 주문이 없으면 폴하지 않는다 (0콜).
@@ -133,21 +215,13 @@ class FillReconcileScheduler:
 
         # window: 가장 이른 추적 open 주문의 영업일부터 오늘(KST)까지.
         from_date = min(o.submitted_date for o in open_orders)
-        to_date = business_date_kst()
+        to_date = today
 
-        try:
-            # 사이클당 1콜. (브로커 어댑터가 pagination 을 내부에서 처리.)
-            history = await self._broker.get_order_history(
-                from_date=from_date, to_date=to_date
-            )
-        except Exception:
-            # CB open·rate·네트워크 실패 — 다음 사이클에서 멱등 재시도.
-            logger.warning(
-                "FillReconcileScheduler get_order_history 실패 (account=%s)",
-                self._account_id,
-                exc_info=True,
-            )
-            return 0
+        # 사이클당 1콜. (브로커 어댑터가 pagination 을 내부에서 처리.)
+        # 실패는 호출자에게 전파한다(주기 루프는 삼키고, catch_up 은 재시도/보고).
+        history = await self._broker.get_order_history(
+            from_date=from_date, to_date=to_date
+        )
 
         applied = 0
         for item in history:

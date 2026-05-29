@@ -145,6 +145,63 @@ class TestStartStop:
         finally:
             await scheduler.stop()
 
+    async def test_start_passes_skip_external_buy_to_initial_reconcile(
+        self, reconciler, broker, bot_manager, eventbus
+    ):
+        """skip_initial_external_buy=True 면 기동 즉시 대사에 skip_external_buy=True
+        를 전달한다 (#1946 Finding 1 barrier).
+        """
+        sched = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+            interval_seconds=1800,
+            skip_initial_external_buy=True,
+        )
+        await sched.start()
+        try:
+            assert reconciler.reconcile.call_count == 1
+            assert reconciler.reconcile.call_args.kwargs["skip_external_buy"] is True
+        finally:
+            await sched.stop()
+
+    async def test_start_default_does_not_skip_external_buy(
+        self, scheduler, reconciler
+    ):
+        """기본(skip_initial_external_buy=False)은 기동 대사에서도 skip 안 함."""
+        await scheduler.start()
+        try:
+            assert reconciler.reconcile.call_args.kwargs["skip_external_buy"] is False
+        finally:
+            await scheduler.stop()
+
+    async def test_periodic_reconcile_does_not_skip_external_buy(
+        self, reconciler, broker, bot_manager, eventbus
+    ):
+        """기동에만 skip — 이후 주기 루프 대사는 skip_external_buy=False (barrier
+        는 1회성). fill 폴 루프가 복구를 진행하므로 정상 처리한다.
+        """
+        sched = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+            interval_seconds=0.05,
+            skip_initial_external_buy=True,
+        )
+        await sched.start()
+        await asyncio.sleep(0.18)  # 주기 루프 몇 회 돌게.
+        await sched.stop()
+
+        calls = reconciler.reconcile.call_args_list
+        assert len(calls) >= 2
+        # 첫 호출(기동)만 skip=True, 나머지(주기)는 모두 skip=False.
+        assert calls[0].kwargs["skip_external_buy"] is True
+        assert all(c.kwargs["skip_external_buy"] is False for c in calls[1:])
+
     async def test_stop_cancels_task(self, scheduler):
         """stop() 시 스케줄러 태스크가 취소된다."""
         await scheduler.start()
@@ -212,6 +269,19 @@ class TestConfiguration:
             interval_seconds=600,
         )
         assert sched._interval == 600
+
+    def test_skip_initial_external_buy_defaults_false(
+        self, reconciler, broker, bot_manager, eventbus
+    ):
+        """skip_initial_external_buy 기본값은 False (#1946)."""
+        sched = ReconcileScheduler(
+            reconciler=reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+        )
+        assert sched._skip_initial_external_buy is False
 
     def test_requires_broker_account_id(
         self, reconciler, broker, bot_manager, eventbus

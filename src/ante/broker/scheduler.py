@@ -38,6 +38,11 @@ class ReconcileScheduler:
         broker_account_id: 이 스케줄러가 바인딩된 broker의 account_id.
             ``run_once()``는 이 account_id에 일치하는 봇만 reconcile한다.
         interval_seconds: 대사 반복 주기 (초). 기본 1800(30분).
+        skip_initial_external_buy: True 면 ``start()`` 의 **기동 즉시 1회 대사**
+            에서만 "외부 매수" 분류 보정을 건너뛴다(#1946 Finding 1 barrier).
+            계좌의 fill 카치업이 성공하지 못한 채 기동 reconcile 이 돌면 미복구
+            ante 체결을 "외부 매수" 로 오분류하므로, 그 1회만 연기한다. 이후
+            주기 대사는 fill 폴 루프가 복구를 진행하므로 정상 처리한다.
     """
 
     def __init__(
@@ -49,6 +54,7 @@ class ReconcileScheduler:
         *,
         broker_account_id: str,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
+        skip_initial_external_buy: bool = False,
     ) -> None:
         if not broker_account_id:
             raise ValueError(
@@ -60,6 +66,7 @@ class ReconcileScheduler:
         self._eventbus = eventbus
         self._broker_account_id = broker_account_id
         self._interval = interval_seconds
+        self._skip_initial_external_buy = skip_initial_external_buy
         self._task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
@@ -72,7 +79,10 @@ class ReconcileScheduler:
             "ReconcileScheduler 시작 (주기: %d초)",
             int(self._interval),
         )
-        await self.run_once()
+        # 기동 즉시 대사. fill 카치업 미성공 계좌는 이 1회만 external-buy 분류를
+        # 연기한다(barrier). 이후 주기 루프(_loop)는 fill 복구가 진행되므로
+        # 정상 처리(skip 안 함).
+        await self.run_once(skip_external_buy=self._skip_initial_external_buy)
         self._task = asyncio.create_task(
             self._loop(),
             name="reconcile-scheduler",
@@ -89,11 +99,17 @@ class ReconcileScheduler:
             self._task = None
             logger.info("ReconcileScheduler 종료")
 
-    async def run_once(self) -> list[dict[str, Any]]:
+    async def run_once(
+        self, *, skip_external_buy: bool = False
+    ) -> list[dict[str, Any]]:
         """1회 대사를 수행하고 보정 내역을 반환한다.
 
         모든 활성(running) 봇에 대해 브로커 포지션을 조회하고,
         PositionReconciler.reconcile()을 호출하여 불일치를 보정한다.
+
+        Args:
+            skip_external_buy: True 면 "외부 매수" 분류 보정을 건너뛴다(barrier,
+                #1946 Finding 1). fill 카치업 미성공 시 기동 대사에만 쓰인다.
 
         Returns:
             각 봇별 보정 내역을 합산한 리스트.
@@ -143,6 +159,7 @@ class ReconcileScheduler:
                     bot_id=bot_id,
                     broker_positions=broker_positions,
                     account_id=account_id,
+                    skip_external_buy=skip_external_buy,
                 )
                 all_corrections.extend(corrections)
             except Exception:

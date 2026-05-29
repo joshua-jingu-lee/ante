@@ -210,6 +210,59 @@ class TestExternalBuy:
         assert corrections[0]["new_quantity"] == 20
         assert corrections[0]["reason"] == "외부 매수"
 
+    async def test_external_buy_skipped_when_flag_set(
+        self, reconciler, position_history, eventbus
+    ):
+        """skip_external_buy=True 면 "외부 매수" 보정·이벤트를 건너뛴다
+        (#1946 Finding 1 barrier).
+        """
+        mismatch_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 20, "avg_price": 55000},
+            ],
+            account_id="acc-test",
+            skip_external_buy=True,
+        )
+
+        assert corrections == []  # external-buy 억제.
+        assert mismatch_events == []  # 이벤트도 발행 안 함.
+        # 포지션도 보정되지 않음 (0 유지).
+        pos = await position_history.get_current("bot-1", "005930")
+        assert pos["quantity"] == 0
+
+    async def test_skip_external_buy_does_not_affect_other_classes(
+        self, reconciler, position_history, eventbus
+    ):
+        """skip_external_buy=True 라도 "외부 청산"·"외부 일부 매도" 는 정상 보정한다
+        (skip 은 external-buy 만 타겟 — 다른 안전 보정은 유지).
+        """
+        # 내부 50주 보유 (외부 청산 시나리오).
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        # 다른 종목: 내부 40주, 브로커 20주 (외부 일부 매도).
+        await _set_position(position_history, "bot-1", "000660", 40, 80000)
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                # 005930: 브로커 0주 → 외부 청산 (skip 대상 아님).
+                {"symbol": "000660", "quantity": 20, "avg_price": 80000},
+                # 신규 외부 매수 종목 (skip 대상).
+                {"symbol": "035720", "quantity": 10, "avg_price": 30000},
+            ],
+            account_id="acc-test",
+            skip_external_buy=True,
+        )
+
+        reasons = {c["symbol"]: c["reason"] for c in corrections}
+        # 외부 청산·일부 매도는 보정됨, external-buy(035720)는 억제.
+        assert reasons.get("005930") == "외부 청산"
+        assert reasons.get("000660") == "외부 일부 매도"
+        assert "035720" not in reasons
+
 
 # ── 시나리오 5: 복수 종목 불일치 ───────────────────
 

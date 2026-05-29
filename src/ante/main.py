@@ -170,6 +170,10 @@ class Services:
     reconcile_schedulers: dict[str, Any] = field(default_factory=dict)
     # #1946: 계좌별 FillReconcileScheduler pool (체결 백스톱 폴러).
     fill_schedulers: dict[str, Any] = field(default_factory=dict)
+    # #1946 barrier: 기동 체결 카치업이 **성공하지 못한** 계좌 집합. 이 계좌들의
+    # ReconcileScheduler 는 기동 즉시 대사에서 "외부 매수" 분류를 건너뛰어
+    # (skip_initial_external_buy), 미복구 ante 체결을 외부 매수로 오분류하지 않는다.
+    fill_catch_up_failed_accounts: set[str] = field(default_factory=set)
     daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
@@ -695,10 +699,14 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
 
     1번이 **await 완료**된 뒤에야 호출자가 ``ReconcileScheduler.start()`` 를
     시작하므로(hard barrier), position reconcile 이 미복구 체결을 "외부 매수"로
-    오분류하지 않는다.
+    오분류하지 않는다. 카치업이 **성공하지 못한**(폴 실패) 계좌는
+    ``s.fill_catch_up_failed_accounts`` 에 기록해, 그 계좌의 기동 reconcile 이
+    external-buy 분류를 건너뛰게 한다(#1946 Finding 1 — startup 폴 실패를
+    "0건 성공" 으로 삼켜 barrier 를 우회하던 결함 수정).
     """
     from ante.broker.fill_scheduler import FillReconcileScheduler
 
+    s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
         try:
             broker = await s.account_service.get_broker(account.account_id)
@@ -712,19 +720,22 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
             account_id=account.account_id,
         )
         # 기동 카치업 — barrier. reconcile 보다 반드시 선행.
-        try:
-            applied = await scheduler.catch_up_once()
-            if applied:
-                logger.info(
-                    "기동 체결 카치업: account=%s, %d건 반영",
-                    account.account_id,
-                    applied,
-                )
-        except Exception:
+        # CatchUpResult.succeeded 로 폴 실패와 "정상 0건/open-없음" 을 구분한다.
+        result = await scheduler.catch_up_once()
+        if not result.succeeded:
+            # 폴 미성공 — 미복구 체결이 남아 있을 수 있다. 이 계좌의 기동
+            # reconcile external-buy 분류를 연기해 오분류를 막는다.
+            s.fill_catch_up_failed_accounts.add(account.account_id)
             logger.warning(
-                "기동 체결 카치업 실패: account=%s",
+                "기동 체결 카치업 미성공: account=%s — reconcile external-buy "
+                "분류를 연기한다(barrier 유지)",
                 account.account_id,
-                exc_info=True,
+            )
+        elif result.applied:
+            logger.info(
+                "기동 체결 카치업: account=%s, %d건 반영",
+                account.account_id,
+                result.applied,
             )
         await scheduler.start()
         s.fill_schedulers[account.account_id] = scheduler
@@ -774,6 +785,12 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         except Exception:
             continue
 
+        # #1946 barrier: fill 카치업 미성공 계좌는 기동 즉시 대사에서 external-buy
+        # 분류를 연기한다(미복구 ante 체결 오분류 방지). 이후 주기 대사는 fill 폴
+        # 루프가 복구를 진행하므로 정상 처리한다.
+        skip_initial_external_buy = (
+            account.account_id in s.fill_catch_up_failed_accounts
+        )
         scheduler = ReconcileScheduler(
             reconciler=reconciler,
             broker=broker,
@@ -781,6 +798,7 @@ async def _init_reconcile_scheduler(s: Services) -> None:
             eventbus=s.eventbus,
             broker_account_id=account.account_id,
             interval_seconds=interval,
+            skip_initial_external_buy=skip_initial_external_buy,
         )
         try:
             await scheduler.start()

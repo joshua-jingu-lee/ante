@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import pytest
 
+from ante.broker import fill_scheduler as fill_scheduler_module
 from ante.broker.fill_scheduler import FillReconcileScheduler, business_date_kst
+from ante.broker.scheduler import ReconcileScheduler
 from ante.core.database import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -46,6 +48,12 @@ class FakeBroker:
 
     async def get_account_positions(self):
         return list(self._positions)
+
+
+@pytest.fixture(autouse=True)
+def _fast_catch_up_backoff(monkeypatch):
+    """카치업 backoff 를 0 으로 줄여 폴-실패 재시도 통합 테스트를 빠르게 한다."""
+    monkeypatch.setattr(fill_scheduler_module, "CATCH_UP_BACKOFF_BASE", 0.0)
 
 
 @pytest.fixture
@@ -152,8 +160,9 @@ async def test_barrier_fill_before_reconcile_no_misclassification(stack, eventbu
         fill_applier=stack["applier"],
         account_id=ACCT,
     )
-    applied = await fill_sched.catch_up_once()
-    assert applied == 1
+    result = await fill_sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 1
 
     pos = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
     assert pos["quantity"] == 100.0
@@ -195,6 +204,148 @@ async def test_without_barrier_reconcile_would_misclassify(stack, eventbus):
         account_id=ACCT,
     )
     assert len(corrections) == 1
+    assert len(mismatches) == 1
+    assert mismatches[0].reason == "외부 매수"
+
+
+# ── Finding 1: catch_up 실패 → reconcile external-buy 미실행 (barrier 유지) ──
+
+
+async def test_catch_up_failure_skips_reconcile_external_buy(stack, eventbus):
+    """startup 카치업이 get_order_history 실패면, reconcile external-buy 보정이
+    실행되지 않는다 (barrier 유지, #1946 Finding 1).
+
+    시나리오: ante 가 100주 주문(추적 seed) → 다운타임 중 체결 → 재기동.
+    startup 폴이 CB/rate/network 로 실패(succeeded=False) → 미복구 체결이 남아
+    internal=0 인데 broker=100. 이때 external-buy 분류를 진행하면 "외부 매수" 로
+    오분류된다. skip_external_buy 로 그 보정·이벤트가 억제돼야 한다.
+    """
+    mismatches: list[PositionMismatchEvent] = []
+    corrections_events: list = []
+
+    async def _mh(e):
+        if isinstance(e, PositionMismatchEvent):
+            mismatches.append(e)
+
+    eventbus.subscribe(PositionMismatchEvent, _mh)
+
+    await _submit(
+        eventbus, stack["tracker"], order_id="ord-1", broker_order_id="0001", qty=100.0
+    )
+
+    class BoomBroker:
+        """폴은 실패, 잔고는 미복구 체결 100주 노출."""
+
+        async def get_order_history(self, from_date=None, to_date=None):
+            raise RuntimeError("circuit open")
+
+        async def get_account_positions(self):
+            return [{"symbol": SYMBOL, "quantity": 100.0, "avg_price": 70000.0}]
+
+    broker = BoomBroker()
+
+    # 1) 기동 카치업 — 폴 실패 → succeeded=False.
+    fill_sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=stack["tracker"],
+        fill_applier=stack["applier"],
+        account_id=ACCT,
+    )
+    result = await fill_sched.catch_up_once()
+    assert result.succeeded is False  # 폴 미성공 — barrier 가 external-buy 연기.
+
+    # internal 포지션은 미복구 상태(0).
+    pos = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
+    assert pos["quantity"] == 0.0
+
+    # 2) barrier: catch_up 미성공이므로 reconcile 은 external-buy 분류를 건너뛴다.
+    corrections = await stack["reconciler"].reconcile(
+        bot_id=BOT,
+        broker_positions=await broker.get_account_positions(),
+        account_id=ACCT,
+        skip_external_buy=True,
+    )
+    corrections_events.extend(corrections)
+    # external-buy 보정·오분류 미발생 (barrier 유지).
+    assert corrections == []
+    assert mismatches == []
+
+
+async def test_catch_up_failure_then_recovery_reconcile_normal(stack, eventbus):
+    """대조: skip 은 external-buy 만. 폴 복구 후(또는 skip=False) 정상 처리.
+
+    같은 미복구 상태라도 skip_external_buy=False 면 "외부 매수" 분류가 진행된다
+    (barrier 해제 후 정상 동작 — 영구 억제가 아님을 락).
+    """
+    mismatches: list[PositionMismatchEvent] = []
+
+    async def _mh(e):
+        if isinstance(e, PositionMismatchEvent):
+            mismatches.append(e)
+
+    eventbus.subscribe(PositionMismatchEvent, _mh)
+
+    await _submit(
+        eventbus, stack["tracker"], order_id="ord-1", broker_order_id="0001", qty=100.0
+    )
+    broker = FakeBroker(
+        positions=[{"symbol": SYMBOL, "quantity": 100.0, "avg_price": 70000.0}],
+    )
+    # skip 해제 → external-buy 정상 분류 (barrier 만 1회 억제, 이후 정상).
+    corrections = await stack["reconciler"].reconcile(
+        bot_id=BOT,
+        broker_positions=await broker.get_account_positions(),
+        account_id=ACCT,
+        skip_external_buy=False,
+    )
+    assert len(corrections) == 1
+    assert len(mismatches) == 1
+    assert mismatches[0].reason == "외부 매수"
+
+
+async def test_reconcile_scheduler_initial_skip_then_periodic_normal(stack, eventbus):
+    """ReconcileScheduler(skip_initial_external_buy=True): 기동 1회만 external-buy
+    억제, 이후 주기 대사는 정상 처리 (#1946 Finding 1 barrier 수명).
+    """
+    from unittest.mock import MagicMock
+
+    mismatches: list[PositionMismatchEvent] = []
+
+    async def _mh(e):
+        if isinstance(e, PositionMismatchEvent):
+            mismatches.append(e)
+
+    eventbus.subscribe(PositionMismatchEvent, _mh)
+
+    await _submit(
+        eventbus, stack["tracker"], order_id="ord-1", broker_order_id="0001", qty=100.0
+    )
+    broker = FakeBroker(
+        positions=[{"symbol": SYMBOL, "quantity": 100.0, "avg_price": 70000.0}],
+    )
+    bot_manager = MagicMock()
+    bot_manager.list_bots = MagicMock(
+        return_value=[{"bot_id": BOT, "status": "running", "account_id": ACCT}]
+    )
+
+    sched = ReconcileScheduler(
+        reconciler=stack["reconciler"],
+        broker=broker,  # type: ignore[arg-type]
+        bot_manager=bot_manager,
+        eventbus=eventbus,
+        broker_account_id=ACCT,
+        interval_seconds=1800,
+        skip_initial_external_buy=True,
+    )
+
+    # 기동 즉시 대사 (run_once with skip) — external-buy 억제.
+    initial = await sched.run_once(skip_external_buy=True)
+    assert initial == []
+    assert mismatches == []  # barrier — 기동엔 external-buy 분류 안 함.
+
+    # 이후 주기 대사 (skip 없음) — 정상 external-buy 분류.
+    periodic = await sched.run_once()
+    assert len(periodic) == 1
     assert len(mismatches) == 1
     assert mismatches[0].reason == "외부 매수"
 
@@ -336,6 +487,44 @@ async def test_eod_expiry_terminal(stack):
     assert (await tracker.get("ord-stale")).status == "expired"
     # 만료 후 open 목록에서 빠져 폴 대상이 아니다.
     assert await tracker.get_open_orders(ACCT) == []
+
+
+async def test_scheduler_poll_cycle_expires_stale_no_more_poll(stack):
+    """Finding 2: FillReconcileScheduler 폴 사이클이 EOD 지난 open 을 expire_stale
+    로 만료해, 더는 get_order_history 를 호출하지 않는다 (무한 폴 + rate 무력화
+    방지). expire_stale 런타임 호출처가 없던 결함 수정 (#1946 Finding 2).
+    """
+    tracker = stack["tracker"]
+    await tracker.open(
+        order_id="ord-stale",
+        account_id=ACCT,
+        bot_id=BOT,
+        strategy_id=STRAT,
+        broker_order_id="0001",
+        symbol=SYMBOL,
+        side="buy",
+        order_type="market",
+        ordered_qty=10.0,
+        submitted_date="20200101",  # EOD 한참 경과.
+    )
+    broker = FakeBroker(history=[])
+
+    sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=tracker,
+        fill_applier=stack["applier"],
+        account_id=ACCT,
+    )
+    # 폴 사이클 1회 — expire_stale 가 먼저 돌아 open 이 비고, 폴 0콜.
+    result = await sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 0
+    assert broker.history_calls == 0  # 만료 주문은 폴되지 않음.
+    assert (await tracker.get("ord-stale")).status == "expired"
+
+    # 다음 사이클도 0콜 (만료가 지속, 무한 폴 없음).
+    await sched.catch_up_once()
+    assert broker.history_calls == 0
 
 
 # ── OrderSubmittedEvent 구독 경로 (main 배선 검증) ───
