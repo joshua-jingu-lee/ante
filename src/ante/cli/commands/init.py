@@ -583,10 +583,19 @@ def init(
 
     # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)
     config_path.mkdir(parents=True, exist_ok=True)
-    # db.path는 절대 경로로 기록한다. 서버(`ante system start`)와 IPC가
-    # cwd와 무관하게 동일한 DB 파일을 보도록 보장하기 위함이다.
-    db_absolute = (config_path / _DB_FILENAME).resolve()
-    system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=str(db_absolute))
+    # db.path는 스펙(`docs/specs/config/03-design-decisions.md:203`)에 따라
+    # **상대 경로 기본값**(`db/ante.db`)으로 기록한다 — "ante init은 상대 경로
+    # 기본값을 기록하고, resolver가 절대 경로로 정규화한다". 절대 경로를
+    # baking하면 config 디렉토리를 다른 위치로 복사·마운트(`--config-dir`/
+    # `ANTE_CONFIG_DIR`)했을 때 baked된 원본 절대 경로를 계속 가리켜
+    # relocatable하지 않다 (#1965).
+    #
+    # cwd 독립성은 상대 경로로도 유지된다: `Config.load`는 항상 config_dir를
+    # arg/env/`~/.config/ante`/`./config`에서 확정해 기억하고(`config.py`
+    # `resolve_config_dir`), `resolve_path`가 상대 경로를 그 config_dir 기준으로
+    # 결합하기 때문이다(cwd 무관). 서버(`main.py`)·CLI(`get_db_path`)·IPC·
+    # cold-path 모두 동일한 config_dir resolution을 공유한다.
+    system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=_DB_FILENAME)
     _ensure_file(artifacts["system.toml"], system_toml_content)
     # secrets.env는 ANTE_DB_ENCRYPTION_KEY를 보장하기 위해 별도 helper로 처리한다.
     # 이미 존재하는 파일은 내용을 보존하면서 키 라인만 갱신/추가하며, 신규
