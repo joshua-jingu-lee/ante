@@ -11,10 +11,20 @@ Bot → OrderRequestEvent (market/limit)
   → RuleEngine 검증 → OrderValidatedEvent
   → Treasury 자금 예약 → OrderApprovedEvent
   → APIGateway rate limit → BrokerAdapter.place_order()
-  → KIS API 주문 접수 → 주문번호 반환
-  → 실시간 스트리밍으로 체결 확인 → OrderFilledEvent
+  → KIS API 주문 접수 → 주문번호 반환 → OrderSubmittedEvent → OrderTracker.open(…)
+  → 체결 확인 → OrderFilledEvent
+        - 빠른 경로: 실시간 체결 통보 스트림 (선택적, 저지연)
+        - 백스톱  : REST get_order_history 폴 (정합성 보증, 항상)
+        둘 다 단일 멱등 choke point(FillApplier)로 수렴 → 포지션 정확히 1회 반영
   → Treasury 자금 정산 + Trade 포지션 업데이트
 ```
+
+**체결 확인 경로 (#1946)**: `OrderFilledEvent`는 실시간 체결 통보 스트림(빠른
+경로)으로만 발행하지 않는다. 스트림 유무·모의투자·실전투자 무관하게 체결이 내부에
+반영되도록, REST `get_order_history` 백스톱 폴(`FillReconcileScheduler`)이 정합성을
+보증한다. 두 경로는 `FillApplier`(단일 멱등 choke point)로 수렴하여 같은 체결을
+몇 번 관측하든 포지션은 정확히 한 번 반영된다. 상세는
+[18-fill-recovery.md](18-fill-recovery.md)를 참조한다.
 
 ### stop/stop_limit 주문 (에뮬레이션)
 

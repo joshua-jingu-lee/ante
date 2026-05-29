@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-27 (KST)
+> 마지막 생성 시점: 2026-05-29 (KST)
 
 ## 최상위 구조
 
@@ -134,7 +134,9 @@ src/ante/
 │   ├── reconciler.py                 # PositionReconciler — 포지션 정합성 검증 및 자동 보정
 │   ├── service.py                    # TradeService — 위 컴포넌트 조합
 │   ├── __init__.py
-│   └── daily_report.py
+│   ├── daily_report.py
+│   ├── fill_applier.py
+│   └── order_tracker.py
 ├── broker/
 │   ├── base.py                       # BrokerAdapter ABC
 │   ├── models.py                     # CommissionInfo dataclass
@@ -148,7 +150,8 @@ src/ante/
 │   ├── __init__.py
 │   ├── registry.py
 │   ├── scheduler.py
-│   └── test.py
+│   ├── test.py
+│   └── fill_scheduler.py
 ├── gateway/
 │   ├── gateway.py                    # APIGateway — rate limit, 캐시, 이벤트 기반 주문
 │   ├── rate_limiter.py               # RateLimiter — 호출 빈도 제한
@@ -253,7 +256,8 @@ src/ante/
 │   ├── __init__.py
 │   ├── cold_path.py
 │   ├── _validators.py
-│   └── db_context.py
+│   ├── db_context.py
+│   └── _data_path.py
 ├── account/
 │   ├── __init__.py
 │   ├── crypto.py
@@ -386,7 +390,10 @@ tests/
 │   │   ├── test_cli_backfill_date_validation.py
 │   │   ├── test_cli_config_set.py
 │   │   ├── test_backfill_since_clean_reject.py
-│   │   └── test_cli_backfill_until_removed.py
+│   │   ├── test_cli_backfill_until_removed.py
+│   │   ├── test_cli_daily_date_forward.py
+│   │   ├── test_daily_runner_target_date.py
+│   │   └── test_orchestrator_run_daily_target_date.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -398,7 +405,13 @@ tests/
 │   │   ├── test_instrument_exchange_validation.py
 │   │   ├── test_db_context_manager.py
 │   │   ├── test_cli_factory_migration_cleanup.py
-│   │   └── test_factory_drift_check.py
+│   │   ├── test_factory_drift_check.py
+│   │   ├── conftest.py
+│   │   ├── test_create_services_anti_pattern_scanner.py
+│   │   ├── test_create_services_mock_helper.py
+│   │   ├── test_data_path_callsites.py
+│   │   ├── test_data_path_helper.py
+│   │   └── test_db_encryption_key_chokepoint.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -632,7 +645,13 @@ tests/
 │   ├── test_instrument_success_output_drift.py
 │   ├── test_rule_success_output_drift.py
 │   ├── test_signal_success_output_drift.py
-│   └── test_trade_success_output_drift.py
+│   ├── test_trade_success_output_drift.py
+│   ├── test_signal_key_rotate_transaction.py
+│   ├── test_fill_applier.py
+│   ├── test_fill_recovery_integration.py
+│   ├── test_fill_scheduler.py
+│   ├── test_kis_order_history_fold.py
+│   └── test_order_tracker.py
 └── __init__.py
 ```
 
@@ -668,7 +687,8 @@ scripts/
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── run_ai_review.sh
 ├── setup_actions_runners.sh
-└── check_import_path.py              # 현재 worktree import sanity check
+├── check_import_path.py              # 현재 worktree import sanity check
+└── scan_create_services_anti_pattern.py
 ```
 
 ## docs/ — 설계 문서
@@ -792,7 +812,8 @@ docs/
 │   │   ├── 15-reconciliation.md
 │   │   ├── 16-eventbus-integration.md
 │   │   ├── 17-notification-events.md
-│   │   └── 19-scope-out.md
+│   │   ├── 19-scope-out.md
+│   │   └── 18-fill-recovery.md
 │   ├── cli/
 │   │   ├── README.md
 │   │   ├── cli.md
@@ -914,7 +935,8 @@ docs/
 │   │   ├── 05-cli-usage.md
 │   │   ├── 06-testing.md
 │   │   ├── 07-notification-events.md
-│   │   └── 09-cross-module-notes.md
+│   │   ├── 09-cross-module-notes.md
+│   │   └── 03-08-fill-recovery.md
 │   ├── treasury/
 │   │   ├── README.md
 │   │   ├── treasury.md

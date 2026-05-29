@@ -153,6 +153,9 @@ class Services:
     position_history: Any = None
     performance_tracker: Any = None
     trade_service: Any = None
+    # #1946 fill-recovery: 추적 주문 영속 + 단일 멱등 choke point.
+    order_tracker: Any = None
+    fill_applier: Any = None
     bot_manager: Any = None
     virtual_executor: Any = None
     live_portfolio: Any = None
@@ -165,6 +168,12 @@ class Services:
     # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool. 활성 broker 가
     # 있는 계좌마다 인스턴스를 만들어 dict 에 account_id 키로 등록한다.
     reconcile_schedulers: dict[str, Any] = field(default_factory=dict)
+    # #1946: 계좌별 FillReconcileScheduler pool (체결 백스톱 폴러).
+    fill_schedulers: dict[str, Any] = field(default_factory=dict)
+    # #1946 barrier: 기동 체결 카치업이 **성공하지 못한** 계좌 집합. 이 계좌들의
+    # ReconcileScheduler 는 기동 즉시 대사에서 "외부 매수" 분류를 건너뛰어
+    # (skip_initial_external_buy), 미복구 ante 체결을 외부 매수로 오분류하지 않는다.
+    fill_catch_up_failed_accounts: set[str] = field(default_factory=set)
     daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
@@ -346,6 +355,69 @@ async def _migrate_is_paper_to_broker_config(s: Services) -> None:
         )
 
 
+def _subscribe_order_tracker(eventbus: Any, order_tracker: Any) -> None:
+    """OrderTracker 를 주문 lifecycle 이벤트에 구독시킨다 (#1946).
+
+    - ``OrderSubmittedEvent`` → ``open`` seed (order_id PK, broker_order_id,
+      account/bot/strategy 정체성, KST 영업일).
+    - ``OrderCancelledEvent`` / ``OrderRejectedEvent`` / ``OrderFailedEvent``
+      → ``mark_terminal`` (이미 filled 인 주문은 보존).
+    """
+    from ante.broker.fill_scheduler import business_date_kst
+    from ante.eventbus.events import (
+        OrderCancelledEvent,
+        OrderFailedEvent,
+        OrderRejectedEvent,
+        OrderSubmittedEvent,
+    )
+
+    async def _on_submitted(event: object) -> None:
+        if not isinstance(event, OrderSubmittedEvent):
+            return
+        if not event.order_id or not event.broker_order_id:
+            # 추적 키가 없으면 seed 하지 않는다 (백스톱이 잡지 못하나 무결성 우선).
+            logger.warning(
+                "OrderSubmittedEvent 추적 seed skip — order_id/broker_order_id 누락:"
+                " order_id=%s broker_order_id=%s",
+                event.order_id,
+                event.broker_order_id,
+            )
+            return
+        await order_tracker.open(
+            order_id=event.order_id,
+            account_id=event.account_id,
+            bot_id=event.bot_id,
+            strategy_id=event.strategy_id,
+            broker_order_id=event.broker_order_id,
+            symbol=event.symbol,
+            side=event.side,
+            order_type=event.order_type,
+            ordered_qty=event.quantity,
+            submitted_date=business_date_kst(event.timestamp),
+            submitted_at=event.timestamp.isoformat() if event.timestamp else None,
+        )
+
+    async def _on_terminal(event: object) -> None:
+        if isinstance(event, OrderCancelledEvent):
+            status = "cancelled"
+        elif isinstance(event, OrderRejectedEvent):
+            status = "rejected"
+        elif isinstance(event, OrderFailedEvent):
+            status = "failed"
+        else:
+            return
+        if not event.order_id:
+            return
+        await order_tracker.mark_terminal(event.order_id, status)
+
+    # priority=5: TradeRecorder(10)·Treasury(80) 보다 먼저 seed/terminal 을 반영해
+    # 후속 핸들러가 일관된 tracker 상태를 보게 한다.
+    eventbus.subscribe(OrderSubmittedEvent, _on_submitted, priority=5)
+    eventbus.subscribe(OrderCancelledEvent, _on_terminal, priority=5)
+    eventbus.subscribe(OrderRejectedEvent, _on_terminal, priority=5)
+    eventbus.subscribe(OrderFailedEvent, _on_terminal, priority=5)
+
+
 async def _init_trading(s: Services) -> None:
     """Strategy, Trade, TreasuryManager, RuleEngineManager, BotManager."""
     assert s.db is not None
@@ -371,6 +443,24 @@ async def _init_trading(s: Services) -> None:
     s.trade_recorder = TradeRecorder(db=s.db, position_history=s.position_history)
     await s.trade_recorder.initialize()
     s.trade_recorder.subscribe(s.eventbus)
+
+    # #1946 fill-recovery: OrderTracker(추적 주문 영속) + FillApplier(단일 멱등
+    # choke point). fill 의 durable 적용(trades + positions)은 FillApplier 가
+    # 단일 트랜잭션으로 수행한다. TradeRecorder 는 fill 경로에서 position 을
+    # 다시 갱신하지 않는다(이중 적용 방지). OrderTracker 는 OrderSubmittedEvent
+    # 로 open seed, 취소/거부/실패로 terminal 표기한다.
+    from ante.trade import FillApplier, OrderTracker
+
+    s.order_tracker = OrderTracker(db=s.db)
+    await s.order_tracker.initialize()
+    s.fill_applier = FillApplier(
+        db=s.db,
+        order_tracker=s.order_tracker,
+        position_history=s.position_history,
+        eventbus=s.eventbus,
+    )
+    _subscribe_order_tracker(s.eventbus, s.order_tracker)
+    logger.info("OrderTracker / FillApplier 초기화 완료")
 
     s.performance_tracker = PerformanceTracker(db=s.db)
 
@@ -584,13 +674,78 @@ async def _init_gateway(s: Services) -> None:
     # Treasury 잔고 동기화 (Broker 연결 이후)
     await _init_treasury_sync(s, accounts)
 
-    # ReconcileScheduler 초기화
+    # #1946 hard barrier: 각 계좌의 FillReconcileScheduler.catch_up_once() 를
+    # await 완료한 뒤에만 ReconcileScheduler.start()(즉시 run_once 로 position
+    # 대사) 를 시작한다. fill 복구가 position reconcile 보다 반드시 선행해야
+    # reconciler 가 미복구 ante 체결을 "외부 매수" 로 오분류하지 않는다.
+    if connected_count and s.fill_applier and s.order_tracker:
+        await _init_fill_recovery_schedulers(s, accounts)
+
+    # ReconcileScheduler 초기화 (fill 복구 barrier 이후)
     if connected_count and s.trade_service:
         await _init_reconcile_scheduler(s)
 
     # DailyReportScheduler 초기화
     if s.performance_tracker and s.trade_recorder and s.position_history:
         await _init_daily_report_scheduler(s)
+
+
+async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> None:
+    """FillReconcileScheduler 생성 + 기동 카치업(barrier) + 주기 폴 시작 (#1946).
+
+    각 활성 broker 계좌마다 ``FillReconcileScheduler`` 를 만들고:
+    1. ``catch_up_once()`` 를 **await** 해 다운타임 중 체결을 멱등 따라잡는다.
+    2. 주기 폴 루프를 시작한다.
+
+    1번이 **await 완료**된 뒤에야 호출자가 ``ReconcileScheduler.start()`` 를
+    시작하므로(hard barrier), position reconcile 이 미복구 체결을 "외부 매수"로
+    오분류하지 않는다. 카치업이 **성공하지 못한**(폴 실패) 계좌는
+    ``s.fill_catch_up_failed_accounts`` 에 기록해, 그 계좌의 기동 reconcile 이
+    external-buy 분류를 건너뛰게 한다(#1946 Finding 1 — startup 폴 실패를
+    "0건 성공" 으로 삼켜 barrier 를 우회하던 결함 수정).
+    """
+    from ante.broker.fill_scheduler import FillReconcileScheduler
+
+    s.fill_catch_up_failed_accounts.clear()
+    for account in accounts:
+        try:
+            broker = await s.account_service.get_broker(account.account_id)
+        except Exception:
+            continue
+
+        scheduler = FillReconcileScheduler(
+            broker=broker,
+            order_tracker=s.order_tracker,
+            fill_applier=s.fill_applier,
+            account_id=account.account_id,
+        )
+        # 기동 카치업 — barrier. reconcile 보다 반드시 선행.
+        # CatchUpResult.succeeded 로 폴 실패와 "정상 0건/open-없음" 을 구분한다.
+        result = await scheduler.catch_up_once()
+        if not result.succeeded:
+            # 폴 미성공 — 미복구 체결이 남아 있을 수 있다. 이 계좌의 기동
+            # reconcile external-buy 분류를 연기해 오분류를 막는다.
+            s.fill_catch_up_failed_accounts.add(account.account_id)
+            logger.warning(
+                "기동 체결 카치업 미성공: account=%s — reconcile external-buy "
+                "분류를 연기한다(barrier 유지)",
+                account.account_id,
+            )
+        elif result.applied:
+            logger.info(
+                "기동 체결 카치업: account=%s, %d건 반영",
+                account.account_id,
+                result.applied,
+            )
+        await scheduler.start()
+        s.fill_schedulers[account.account_id] = scheduler
+
+    if s.fill_schedulers:
+        logger.info(
+            "FillReconcileScheduler 시작 완료: 계좌 %d개 (%s)",
+            len(s.fill_schedulers),
+            ", ".join(s.fill_schedulers),
+        )
 
 
 async def _init_reconcile_scheduler(s: Services) -> None:
@@ -630,6 +785,12 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         except Exception:
             continue
 
+        # #1946 barrier: fill 카치업 미성공 계좌는 기동 즉시 대사에서 external-buy
+        # 분류를 연기한다(미복구 ante 체결 오분류 방지). 이후 주기 대사는 fill 폴
+        # 루프가 복구를 진행하므로 정상 처리한다.
+        skip_initial_external_buy = (
+            account.account_id in s.fill_catch_up_failed_accounts
+        )
         scheduler = ReconcileScheduler(
             reconciler=reconciler,
             broker=broker,
@@ -637,6 +798,7 @@ async def _init_reconcile_scheduler(s: Services) -> None:
             eventbus=s.eventbus,
             broker_account_id=account.account_id,
             interval_seconds=interval,
+            skip_initial_external_buy=skip_initial_external_buy,
         )
         try:
             await scheduler.start()
@@ -756,6 +918,8 @@ async def _init_stream_integration(
         stop_order_manager=stop_order_manager,
         gateway=s.api_gateway,
         bot_manager=s.bot_manager,
+        # #1946: 스트림(빠른 경로) 체결을 단일 멱등 choke point 로 라우팅.
+        fill_applier=s.fill_applier,
     )
 
     try:
@@ -1723,6 +1887,19 @@ async def _shutdown(s: Services) -> None:
                 exc_info=True,
             )
     s.reconcile_schedulers.clear()
+
+    # #1946: FillReconcileScheduler pool 정리
+    for fill_account_id, fill_scheduler in list(s.fill_schedulers.items()):
+        try:
+            await fill_scheduler.stop()
+            logger.info("FillReconcileScheduler 종료: account=%s", fill_account_id)
+        except Exception:
+            logger.warning(
+                "FillReconcileScheduler 종료 실패: account=%s",
+                fill_account_id,
+                exc_info=True,
+            )
+    s.fill_schedulers.clear()
 
     # 각 계좌의 Treasury sync 중지
     if s.treasury_manager:

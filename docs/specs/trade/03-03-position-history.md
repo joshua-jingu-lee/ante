@@ -6,6 +6,12 @@
 
 구현: `src/ante/trade/position.py` 참조
 
+> **체결(fill) 적용 경로 (#1946)**: `on_trade(record)`는 fill 경로에서 **FillApplier
+> 단일 권위자**가 단일 DB 트랜잭션 안에서 호출한다(`Database.transaction()` 내
+> `_db.execute`는 commit하지 않으므로 한 트랜잭션에 묶임). CAS advance + trade insert
+> 와 원자적으로 묶여 crash-safe exactly-once를 보장한다. 상세:
+> [03-08-fill-recovery.md](03-08-fill-recovery.md).
+
 #### PositionSnapshot 필드
 
 | 필드 | 타입 | 기본값 | 설명 |

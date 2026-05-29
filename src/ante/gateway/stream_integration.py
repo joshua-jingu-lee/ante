@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from ante.gateway.cache import ResponseCache
     from ante.gateway.gateway import APIGateway
     from ante.gateway.stop_order import StopOrderManager
+    from ante.trade.fill_applier import FillApplier
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +52,7 @@ class StreamIntegration:
         stop_order_manager: StopOrderManager | None = None,
         gateway: APIGateway | None = None,
         bot_manager: BotManager | None = None,
+        fill_applier: FillApplier | None = None,
         fallback_poll_interval: float = DEFAULT_FALLBACK_POLL_INTERVAL,
         sync_interval: float = DEFAULT_SYNC_INTERVAL,
     ) -> None:
@@ -68,6 +71,7 @@ class StreamIntegration:
         self._stop_order_manager = stop_order_manager
         self._gateway = gateway
         self._bot_manager = bot_manager
+        self._fill_applier = fill_applier
         self._fallback_poll_interval = fallback_poll_interval
         self._sync_interval = sync_interval
 
@@ -172,16 +176,23 @@ class StreamIntegration:
     # ── 체결 콜백 ──────────────────────────────────
 
     async def _on_execution(self, execution: dict[str, Any]) -> None:
-        """실시간 체결 통보 콜백.
+        """실시간 체결 통보 콜백 (빠른 경로 — #1946).
 
-        캐시 무효화 + OrderFilledEvent 발행.
+        캐시 무효화 + ``FillApplier`` 라우팅.
+
+        직접 ``OrderFilledEvent`` 를 발행하지 않는다. 스트림(빠른 경로)과 REST
+        백스톱 폴이 단일 멱등 choke point(``FillApplier``)로 수렴해 같은 체결을
+        몇 번 관측하든 포지션이 정확히 한 번 반영되게 한다. 스트림 payload 의
+        ``order_id`` 는 broker 주문번호(odno)이며, ``quantity`` 는 per-execution
+        증분이므로 ``apply_stream_increment`` 로 누적 환산해 적용한다.
 
         ``account_id``는 broker payload 우선, 없으면 lifecycle에 묶인
-        ``self._account_id``로 fallback한다. 둘 다 비어있으면
-        OrderFilledEvent는 strict marker(``_requires_account_id``)에 의해
-        InvalidAccountIdError를 raise하므로, 발행을 시도하지 않고 WARNING
-        로그 후 skip한다 (캐시 무효화는 그래도 best-effort 수행).
+        ``self._account_id``로 fallback한다. 둘 다 비어있으면 라우팅을 skip하고
+        WARNING만 남긴다 (캐시 무효화는 best-effort 수행). 백스톱 폴이 체결을
+        멱등 복구하므로 fast-path skip 은 정합성을 깨지 않는다.
         """
+        from ante.broker.fill_scheduler import business_date_kst
+
         symbol = execution.get("symbol", "")
         account_id = execution.get("account_id", "") or self._account_id
 
@@ -193,11 +204,11 @@ class StreamIntegration:
             if symbol:
                 self._cache.invalidate(f"{account_id}:price:{symbol}")
 
-        # account_id 가 비어 있으면 strict OrderFilledEvent를 만들 수 없다.
-        # 라이브 경로 보존을 위해 발행을 skip하고 WARNING만 남긴다.
+        # account_id 가 비어 있으면 FillApplier 라우팅(account-scoped 조회)이
+        # 불가능하다. 백스톱 폴이 복구하므로 skip + WARNING.
         if not account_id:
             logger.warning(
-                "체결 통보에 account_id가 없어 OrderFilledEvent 발행을 skip합니다: "
+                "체결 통보에 account_id가 없어 FillApplier 라우팅을 skip합니다: "
                 "symbol=%s order_id=%s side=%s",
                 symbol,
                 execution.get("order_id", ""),
@@ -205,20 +216,39 @@ class StreamIntegration:
             )
             return
 
-        # 체결 이벤트 발행
-        from ante.eventbus.events import OrderFilledEvent
-
-        await self._eventbus.publish(
-            OrderFilledEvent(
-                account_id=account_id,
-                order_id=execution.get("order_id", ""),
-                symbol=symbol,
-                side=execution.get("side", ""),
-                quantity=execution.get("quantity", 0.0),
-                price=execution.get("price", 0.0),
-                exchange="KRX",
+        # FillApplier 미주입(REST 전용 모드 등)이면 백스톱 폴에 일임.
+        if self._fill_applier is None:
+            logger.debug(
+                "FillApplier 미설정 — 스트림 체결은 백스톱 폴이 복구: %s %s",
+                symbol,
+                execution.get("order_id", ""),
             )
+            return
+
+        broker_order_id = str(execution.get("order_id", ""))
+        increment = float(execution.get("quantity", 0.0) or 0.0)
+        avg_price = float(execution.get("price", 0.0) or 0.0)
+        if not broker_order_id or increment <= 0:
+            return
+
+        ts = execution.get("timestamp")
+        submitted_date = (
+            business_date_kst(ts) if isinstance(ts, datetime) else business_date_kst()
         )
+        try:
+            await self._fill_applier.apply_stream_increment(
+                account_id=account_id,
+                broker_order_id=broker_order_id,
+                increment=increment,
+                avg_price=avg_price,
+                submitted_date=submitted_date,
+            )
+        except Exception:
+            logger.exception(
+                "스트림 체결 FillApplier 라우팅 실패: %s %s",
+                symbol,
+                broker_order_id,
+            )
 
         logger.debug("체결 통보 처리: %s %s", symbol, execution.get("side", ""))
 
