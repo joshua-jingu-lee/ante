@@ -1724,3 +1724,449 @@ class TestUpdateBudget:
         assert budget.allocated == 0.0
         assert budget.available == 0.0
         assert treasury.unallocated == 10_000_000.0
+
+
+# -- 부분체결 비례 정산 (#1947) -------------------------------
+
+
+def _assert_treasury_invariant(treasury, bot_id):
+    """불변식 available = allocated - reserved - spent + returned 검증."""
+    budget = treasury.get_budget(bot_id)
+    assert budget is not None
+    expected_available = (
+        budget.allocated - budget.reserved - budget.spent + budget.returned
+    )
+    assert budget.available == pytest.approx(expected_available), (
+        f"불변식 위반: available={budget.available} != "
+        f"allocated({budget.allocated}) - reserved({budget.reserved}) - "
+        f"spent({budget.spent}) + returned({budget.returned}) = {expected_available}"
+    )
+
+
+async def _seed_tracker(order_tracker, *, order_id, bot_id, ordered_qty, side="buy"):
+    """OrderTracker 에 추적 주문을 seed (open seed)."""
+    await order_tracker.open(
+        order_id=order_id,
+        account_id=ACCOUNT_ID,
+        bot_id=bot_id,
+        strategy_id="s1",
+        broker_order_id=f"bk-{order_id}",
+        symbol="005930",
+        side=side,
+        order_type="limit",
+        ordered_qty=ordered_qty,
+        submitted_date="2026-05-29",
+    )
+
+
+def _buy_fill_event(*, order_id, bot_id, quantity, price, commission):
+    return OrderFilledEvent(
+        order_id=order_id,
+        broker_order_id=f"bk-{order_id}",
+        bot_id=bot_id,
+        strategy_id="s1",
+        symbol="005930",
+        side="buy",
+        quantity=quantity,
+        price=price,
+        commission=commission,
+        order_type="limit",
+        account_id=ACCOUNT_ID,
+    )
+
+
+@pytest.fixture
+async def order_tracker(db):
+    from ante.trade.order_tracker import OrderTracker
+
+    tracker = OrderTracker(db=db)
+    await tracker.initialize()
+    return tracker
+
+
+@pytest.fixture
+async def tracked_treasury(db, eventbus, order_tracker):
+    """OrderTracker 가 주입된 Treasury — 부분체결 비례 정산 경로."""
+    t = Treasury(
+        db=db,
+        eventbus=eventbus,
+        account_id=ACCOUNT_ID,
+        currency=CURRENCY,
+        buy_commission_rate=0.00015,
+        sell_commission_rate=0.00195,
+        order_tracker=order_tracker,
+    )
+    await t.initialize()
+    await t.set_account_balance(10_000_000.0)
+    return t
+
+
+class TestPartialFillSettlement:
+    """부분체결 비례 정산: per-fill 차감 + terminal 잔여 회수 (#1947)."""
+
+    async def test_partial_fill_two_steps_settles_proportionally(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """10주 매수, 4주+6주 부분체결 → 단계별 reserved/spent/available 정확.
+
+        첫 4주 fill 이 전체 예약을 해제하지 않고(과거 결함), 둘째 6주 fill 에서만
+        terminal 에 도달해 잔여 예약을 회수해야 한다.
+        """
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        # 10주 * 50,000 = 500,000 + buffer 100 → 예약 500,100
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        # 1차 체결: 4주 @ 50,000, commission 30 → actual_cost 200,030
+        await order_tracker.record_fill("ord1", 4.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=4.0,
+                price=50_000.0,
+                commission=30.0,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # covered = min(500_100, 200_030) = 200_030
+        assert budget.spent == pytest.approx(200_030.0)
+        assert budget.reserved == pytest.approx(500_100.0 - 200_030.0)  # 300,070
+        # 첫 fill 에서 예약이 전액 해제되지 않음 — entry 유지
+        assert "ord1" in treasury.get_reservations("bot1")
+        assert treasury.get_reservations("bot1")["ord1"] == pytest.approx(300_070.0)
+        _assert_treasury_invariant(treasury, "bot1")
+
+        # 2차 체결: 6주 @ 50,000, commission 45 → actual_cost 300,045 → terminal
+        await order_tracker.record_fill("ord1", 10.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=6.0,
+                price=50_000.0,
+                commission=45.0,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # spent = 200,030 + 300,045 = 500,075
+        assert budget.spent == pytest.approx(500_075.0)
+        # terminal: 잔여 예약(300,070 - 300,045 = 25) 회수 → reserved 0
+        assert budget.reserved == pytest.approx(0.0)
+        # available: 1M - 500,100 + 25(잔여 회수) = 499,925
+        assert budget.available == pytest.approx(499_925.0)
+        # terminal 도달 → entry 제거
+        assert "ord1" not in treasury.get_reservations("bot1")
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_terminal_only_releases_remaining(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """중간 partial 에서는 잔여를 회수하지 않고 terminal 에서만 회수한다."""
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        # 3주 체결 (non-terminal)
+        await order_tracker.record_fill("ord1", 3.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=3.0,
+                price=50_000.0,
+                commission=0.0,
+            )
+        )
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # non-terminal: 잔여 예약 유지 (회수 없음)
+        assert budget.reserved == pytest.approx(500_000.0 - 150_000.0)  # 350,000
+        assert "ord1" in treasury.get_reservations("bot1")
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_partial_then_cancel_releases_only_remaining(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """부분체결 후 취소 시 잔여 예약만 회수, 기체결분은 spent 로 보존."""
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        # 4주 체결 (non-terminal)
+        await order_tracker.record_fill("ord1", 4.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=4.0,
+                price=50_000.0,
+                commission=0.0,
+            )
+        )
+        # 잔여 6주분 취소
+        await eventbus.publish(
+            OrderCancelledEvent(
+                order_id="ord1",
+                broker_order_id="bk-ord1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=6.0,
+                price=50_000.0,
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # 기체결 4주분 spent = 200,000 보존
+        assert budget.spent == pytest.approx(200_000.0)
+        # 잔여 예약(500,000 - 200,000 = 300,000) 회수 → reserved 0
+        assert budget.reserved == pytest.approx(0.0)
+        # available: 1M - 200,000(spent) = 800,000
+        assert budget.available == pytest.approx(800_000.0)
+        assert "ord1" not in treasury.get_reservations("bot1")
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_partial_then_failed_releases_only_remaining(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """부분체결 후 실패 시 잔여 예약만 회수."""
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        await order_tracker.record_fill("ord1", 5.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=5.0,
+                price=50_000.0,
+                commission=0.0,
+            )
+        )
+        await eventbus.publish(
+            OrderFailedEvent(
+                order_id="ord1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=5.0,
+                price=50_000.0,
+                order_type="limit",
+                error_message="broker error",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.spent == pytest.approx(250_000.0)
+        assert budget.reserved == pytest.approx(0.0)
+        assert budget.available == pytest.approx(750_000.0)
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_partial_then_bot_stopped_releases_only_remaining(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """부분체결 후 봇 중지 시 각 주문의 잔여 예약만 회수."""
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 300_000.0)
+        await treasury.reserve_for_order("bot1", "ord2", 200_000.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=6.0
+        )
+        await _seed_tracker(
+            order_tracker, order_id="ord2", bot_id="bot1", ordered_qty=4.0
+        )
+
+        # ord1 부분체결 2주 (non-terminal)
+        await order_tracker.record_fill("ord1", 2.0, 50_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=2.0,
+                price=50_000.0,
+                commission=0.0,
+            )
+        )
+
+        # 봇 중지 → ord1 잔여(300,000-100,000=200,000) + ord2 전액(200,000) 회수
+        await eventbus.publish(BotStoppedEvent(bot_id="bot1", account_id=ACCOUNT_ID))
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.spent == pytest.approx(100_000.0)
+        assert budget.reserved == pytest.approx(0.0)
+        # available: 1M - 100,000(spent) = 900,000
+        assert budget.available == pytest.approx(900_000.0)
+        assert treasury.get_reservations("bot1") == {}
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_partial_shortfall_deducts_available(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """체결가 > 잔여 예약분이면 초과분을 available 에서 차감 (불변식 유지).
+
+        시장가 매수의 가격 변동 등으로 fill 실비용이 남은 예약을 초과하는
+        경우 (#1333 shortfall 동작 보존).
+        """
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        # 10주 예약 500,000 (50,000/주 가정)
+        await treasury.reserve_for_order("bot1", "ord1", 500_000.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        # 1차: 9주 @ 55,000 = 495,000 → covered 495,000, 잔여 5,000
+        await order_tracker.record_fill("ord1", 9.0, 55_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=9.0,
+                price=55_000.0,
+                commission=0.0,
+            )
+        )
+        _assert_treasury_invariant(treasury, "bot1")
+
+        # 2차(terminal): 1주 @ 55,000 = 55,000, 잔여 예약 5,000 → shortfall 50,000
+        await order_tracker.record_fill("ord1", 10.0, 55_000.0)
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=1.0,
+                price=55_000.0,
+                commission=0.0,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # spent = 495,000 + 55,000 = 550,000
+        assert budget.spent == pytest.approx(550_000.0)
+        assert budget.reserved == pytest.approx(0.0)
+        # available: 1M - 550,000 = 450,000 (shortfall 50,000 차감 반영)
+        assert budget.available == pytest.approx(450_000.0)
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_tracker_missing_falls_back_to_full_fill(
+        self, tracked_treasury, eventbus
+    ):
+        """OrderTracker.get=None (tracker 미seed) → full-fill pop-once fallback.
+
+        VirtualProvider 가 OrderTracker 에 seed 하지 않고 직접 단일 full-fill
+        이벤트를 발행하는 경로 (R1-2). tracked_treasury 는 tracker 가 주입돼
+        있으나 해당 order_id 를 seed 하지 않아 get=None 이 된다.
+        """
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+        # 의도적으로 order_tracker 에 seed 하지 않음 → get(ord1)=None
+
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=10.0,
+                price=50_000.0,
+                commission=75.0,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        # full-fill pop-once: spent 500,075, surplus 25 환수
+        assert budget.reserved == pytest.approx(0.0)
+        assert budget.spent == pytest.approx(500_075.0)
+        assert budget.available == pytest.approx(499_925.0)
+        assert "ord1" not in treasury.get_reservations("bot1")
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_no_order_tracker_injected_uses_full_fill(self, treasury, eventbus):
+        """OrderTracker 미주입 Treasury 도 full-fill fallback 으로 정산 (회귀)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+
+        await eventbus.publish(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=10.0,
+                price=50_000.0,
+                commission=75.0,
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == pytest.approx(0.0)
+        assert budget.spent == pytest.approx(500_075.0)
+        assert budget.available == pytest.approx(499_925.0)
+        _assert_treasury_invariant(treasury, "bot1")
+
+    async def test_sell_side_unchanged_with_tracker(
+        self, tracked_treasury, order_tracker, eventbus
+    ):
+        """매도 부분체결은 예약 부재로 per-fill 누적 가산이 그대로 정확 (회귀)."""
+        treasury = tracked_treasury
+        await treasury.allocate("bot1", 1_000_000.0)
+        await _seed_tracker(
+            order_tracker,
+            order_id="sell1",
+            bot_id="bot1",
+            ordered_qty=10.0,
+            side="sell",
+        )
+
+        # 매도 4주 + 6주 부분체결
+        for qty in (4.0, 6.0):
+            await eventbus.publish(
+                OrderFilledEvent(
+                    order_id="sell1",
+                    broker_order_id="bk-sell1",
+                    bot_id="bot1",
+                    strategy_id="s1",
+                    symbol="005930",
+                    side="sell",
+                    quantity=qty,
+                    price=55_000.0,
+                    commission=qty * 55_000.0 * 0.00195,
+                    order_type="limit",
+                    account_id=ACCOUNT_ID,
+                )
+            )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        total_proceeds = sum(
+            qty * 55_000.0 - qty * 55_000.0 * 0.00195 for qty in (4.0, 6.0)
+        )
+        assert budget.returned == pytest.approx(total_proceeds)
+        assert budget.available == pytest.approx(1_000_000.0 + total_proceeds)
+        _assert_treasury_invariant(treasury, "bot1")
