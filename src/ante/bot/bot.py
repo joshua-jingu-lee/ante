@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.config import BotConfig, BotStatus
+from ante.eventbus.fill_dedup_guard import FillDedupGuard
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -52,6 +53,10 @@ class Bot:
         self.error_message: str | None = None
         self._consecutive_failures: int = 0
         self._max_consecutive_failures: int = 3
+        # #1957: 체결 이벤트 bounded 멱등 가드. outbox at-least-once 재전달 시
+        # 같은 fill 의 전략 follow-up 중복 발행을 억제한다(best-effort —
+        # 재기동/maxlen 초과는 known-limitation).
+        self._fill_dedup_guard = FillDedupGuard()
 
     async def start(self) -> None:
         """봇 시작. 전략 인스턴스화 + 실행 루프 Task 생성."""
@@ -241,12 +246,26 @@ class Bot:
             )
 
     async def on_order_filled(self, event: object) -> None:
-        """체결 통보를 전략에 전달."""
+        """체결 통보를 전략에 전달.
+
+        #1957: outbox at-least-once 재전달 시 같은 fill 의 전략 follow-up 이
+        이중 발행되지 않도록 bounded dedup 한다. 비빈키 ``fill_dedup_key`` 가
+        이미 처리됐으면 follow-up 을 skip(early-return). 빈키(VirtualProvider
+        직접발행 등 재전달 없는 단발 경로)는 가드 비대상으로 항상 처리한다.
+        ``fill_dedup_key`` 를 ``strategy.on_fill`` dict 로 전달해 전략이 자체
+        dedup 할 수 있게 한다(보장은 사용자 코드 책임 = known-limitation).
+        """
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
             return
         if not self.strategy or event.bot_id != self.bot_id:
+            return
+
+        # 비빈키만 dedup. seen_or_add 는 await 없는 동기 원자 구간(#1957).
+        if event.fill_dedup_key and self._fill_dedup_guard.seen_or_add(
+            event.fill_dedup_key
+        ):
             return
 
         follow_up = await self.strategy.on_fill(
@@ -257,6 +276,7 @@ class Bot:
                 "quantity": event.quantity,
                 "price": event.price,
                 "timestamp": event.timestamp,
+                "fill_dedup_key": event.fill_dedup_key,
             }
         )
         await self._publish_signals(follow_up or [])

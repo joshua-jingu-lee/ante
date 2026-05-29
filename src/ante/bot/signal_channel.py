@@ -13,6 +13,8 @@ import sys
 from typing import TYPE_CHECKING, Any, TextIO
 from uuid import uuid4
 
+from ante.eventbus.fill_dedup_guard import FillDedupGuard
+
 if TYPE_CHECKING:
     from ante.bot.bot import Bot
     from ante.eventbus.bus import EventBus
@@ -43,6 +45,11 @@ class SignalChannel:
         self._input = input_stream or sys.stdin
         self._output = output_stream or sys.stdout
         self._running = False
+        # #1957: 체결 이벤트 bounded 멱등 가드. outbox at-least-once 재전달 시
+        # 같은 fill 의 중복 JSON write 를 억제한다(best-effort — 재기동/maxlen
+        # 초과는 known-limitation). 외부 에이전트는 payload 의 fill_dedup_key 로
+        # 자체 dedup 도 가능하다.
+        self._fill_dedup_guard = FillDedupGuard()
 
     def _write(self, data: dict[str, Any]) -> None:
         """JSON Line 출력."""
@@ -222,12 +229,23 @@ class SignalChannel:
         """체결 이벤트 → 외부 전달.
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
+
+        #1957: outbox at-least-once 재전달 시 같은 fill 의 중복 write 를 bounded
+        dedup 한다. 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 write skip. 빈키
+        (재전달 없는 단발 경로)는 가드 비대상으로 항상 write. payload 에
+        ``fill_dedup_key`` 를 실어 외부 에이전트의 자체 dedup 도 지원한다.
         """
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
             return
         if event.bot_id != self._bot.bot_id:
+            return
+
+        # 비빈키만 dedup. seen_or_add 는 await 없는 동기 원자 구간(#1957).
+        if event.fill_dedup_key and self._fill_dedup_guard.seen_or_add(
+            event.fill_dedup_key
+        ):
             return
 
         self._write(
@@ -240,6 +258,7 @@ class SignalChannel:
                 "price": event.price,
                 "commission": event.commission,
                 "timestamp": event.timestamp,
+                "fill_dedup_key": event.fill_dedup_key,
             }
         )
 

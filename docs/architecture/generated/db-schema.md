@@ -6,7 +6,7 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
 > 마지막 갱신: 2026-05-29
 
-- 테이블: **23**개
+- 테이블: **24**개
 - 인덱스: **32**개
 
 ## 목차
@@ -63,8 +63,9 @@ erDiagram
 | 19 | [trades](#trades) | `trade` | 체결 기록 | 17 |
 | 20 | [bot_budgets](#bot_budgets) | `treasury` | 봇별 예산 | 8 |
 | 21 | [treasury_transactions](#treasury_transactions) | `treasury` | 자금 트랜잭션 이력 | 7 |
-| 22 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
-| 23 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
+| 22 | [treasury_fill_dedup](#treasury_fill_dedup) | `treasury` | 체결 이벤트 멱등 dedup (#1957) | 4 |
+| 23 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
+| 24 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
 
 ## DDL
 
@@ -554,6 +555,19 @@ CREATE INDEX IF NOT EXISTS idx_treasury_transactions_account
     ON treasury_transactions(account_id);
 ```
 
+### treasury_fill_dedup
+
+모듈: `treasury.treasury`
+
+```sql
+CREATE TABLE IF NOT EXISTS treasury_fill_dedup (
+    fill_dedup_key TEXT PRIMARY KEY,
+    bot_id         TEXT,
+    account_id     TEXT,
+    processed_at   TEXT DEFAULT (datetime('now'))
+);
+```
+
 ### treasury_state
 
 모듈: `treasury.treasury`
@@ -655,6 +669,7 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 | `trades` | 영구 보존 |
 | `bot_budgets` | 영구 보존 |
 | `treasury_transactions` | 영구 보존 |
+| `treasury_fill_dedup` | 영구 보존 (#1957 — prune/retention은 follow-up) |
 | `treasury_state` | 영구 보존 |
 | `treasury_daily_snapshots` | 영구 보존 |
 

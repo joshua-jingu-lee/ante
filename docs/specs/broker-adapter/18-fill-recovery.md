@@ -167,10 +167,27 @@ commit 성공 = 이벤트 영속 보장이므로, commit-후-crash에서도 재�
 
 전달 시맨틱은 **at-least-once(무손실)**다. publish↔mark 사이 micro-window에서
 같은 이벤트가 두 번 발행될 수 있으나, 각 이벤트는 결정적 `fill_dedup_key`를 실어
-보낸다. **at-least-once 재전달 시 비멱등 소비자(Treasury/Bot/SignalChannel)의
-이중처리 가능은 #1949 범위 밖의 알려진 잔여이며, 소비자 멱등화는 별도 이슈
-(#1957)에서 해소**한다. #1949는 outbox 무손실 전달 + 결정적 키 제공까지 책임진다.
+보낸다. #1949는 outbox 무손실 전달 + 결정적 키 제공까지 책임진다.
 **positions durability는 #1946에서, 이벤트 전달 durability는 #1949에서 종결**한다.
+
+**소비자 멱등화 (#1957 완료)**: at-least-once 재전달 시 비멱등 소비자의
+이중처리는 #1957에서 `fill_dedup_key`를 소비해 소비자별로 해소했다.
+
+- **Treasury = 진짜 exactly-once-effect**: 전용 `treasury_fill_dedup`
+  테이블(PK=`fill_dedup_key`)에 `INSERT OR IGNORE ... RETURNING`으로
+  dedup-insert를 정산 `Database.transaction()` 안에서 **가장 먼저** 수행하고,
+  신규일 때만 정산한다(재전달=정산 0회 추가). dedup-insert ⟺ 정산이 단일
+  트랜잭션으로 원자 결합되고, rollback 시 인메모리 예산/예약을 진입 전 snapshot
+  으로 복원해 split-brain을 막는다. DB-persisted라 재기동 후에도 동작.
+- **Bot / SignalChannel / TradeRecorder = bounded dedup (best-effort)**:
+  전략 follow-up·외부 JSON write·NotificationEvent 재발행을 공유
+  `FillDedupGuard`(in-memory `deque(maxlen=512)`)로 억제한다.
+  **known-limitation**: 프로세스 재기동 시 가드 소실, `maxlen` 윈도우를 벗어난
+  재전달은 식별 못 함. DB-persisted exactly-once 승격은 #1957 비목표이며
+  **follow-up 후보**다. TradeRecorder의 `trades` insert(`INSERT OR IGNORE`)는
+  이미 DB-멱등이나 `NotificationEvent` 재발행이 effect 비멱등이라 가드 대상이다.
+- **Gateway = 무변경**(cache invalidate 멱등). **빈키(`""`) = dedup 비대상**
+  (VirtualProvider 직접발행·outbox 미주입 fallback = 재전달 없는 단발 경로).
 
 ## 6. FillReconcileScheduler — 백스톱 폴러
 
