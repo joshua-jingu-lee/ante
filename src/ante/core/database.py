@@ -80,6 +80,24 @@ class Database:
             await conn.commit()
         return result
 
+    async def execute_fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+        """writer 연결에서 실행 후 다중 행을 반환 (다건 RETURNING 등 atomic 패턴용).
+
+        ``execute_fetch_one`` 의 다건 버전. ``execute`` 와 동일하게 **writer
+        연결**에서 단일 호출로 실행하므로, 한 번의 UPDATE/DELETE ... RETURNING 으로
+        실제 영향받은 행들을 원자적으로 받는다(읽기↔쓰기 분리 race 없음). reader
+        연결을 쓰는 ``fetch_all`` 은 진행 중인 writer 트랜잭션의 uncommitted row 를
+        보지 못하므로, 영향 행 집합을 RETURNING 으로 받아야 하는 경로는 이 메서드를
+        쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
+        """
+        conn = self._get_writer()
+        async with conn.execute(sql, params) as cursor:
+            rows = await cursor.fetchall()
+            result = [dict(row) for row in rows]
+        if not self._in_transaction:
+            await conn.commit()
+        return result
+
     async def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
         """다중 행 조회."""
         conn = self._get_reader()

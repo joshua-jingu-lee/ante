@@ -72,10 +72,15 @@ class RecordFillResult:
             outbox/이벤트의 결정적 ``fill_dedup_key`` 는 **이 확정값**으로 생성해야
             한다(입력 ``observed_cumulative`` 가 아니다). 동일 advance 경계는 항상
             같은 확정값을 내므로, 재전달 시 키가 결정적이다.
+        new_status: advance 후 확정된 주문 상태(``filled`` 또는
+            ``partially_filled``). no-op(``delta<=0``)이면 직전 status 를 반영한다.
+            #1948 의 ``FillApplier`` post-commit ``mirror_fill_to_cache`` 에서
+            캐시 상태/evict 판단에 쓴다.
     """
 
     delta: float
     confirmed_cumulative: float
+    new_status: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,21 +121,100 @@ class OrderTrackerRecord:
             submitted_date=row["submitted_date"],
         )
 
+    def to_open_order_dict(self) -> dict[str, object]:
+        """통일 OpenOrder dict 스키마로 매핑 (#1948).
+
+        OrderView ``get_open_orders`` 의 SSOT 스키마. 전략/telegram/IPC 소비자가
+        공통으로 의존한다. ``remaining_qty = ordered_qty - recorded_filled_qty``
+        (중복방어 판단용). ``amount`` (예약 금액)는 Treasury 도메인이지
+        OrderView 가시성이 아니므로 **제외**한다.
+
+        스키마 SSOT: ``docs/specs/strategy/03-04-provider-and-views.md``.
+        """
+        remaining = self.ordered_qty - self.recorded_filled_qty
+        return {
+            "order_id": self.order_id,
+            "symbol": self.symbol,
+            "side": self.side,
+            "ordered_qty": self.ordered_qty,
+            "recorded_filled_qty": self.recorded_filled_qty,
+            "remaining_qty": remaining if remaining > 0 else 0.0,
+            "status": self.status,
+            "submitted_at": self.submitted_at,
+        }
+
 
 class OrderTracker:
     """추적 주문 영속 저장소 + 누적 체결 단조 advance.
 
     ``record_fill`` 은 ``FillApplier`` 의 단일 트랜잭션 + ``asyncio.Lock`` 안에서만
     호출되어야 한다 (멱등·crash 원자성은 FillApplier 가 보장).
+
+    인메모리 open 캐시 (#1948): LIVE ``ctx.get_open_orders()`` 의 sync 백엔드.
+    캐시는 **commit 된 DB 상태의 미러**일 뿐 진리원이 아니다(DB 가 SSOT).
+    캐시 키 = ``(account_id, bot_id, order_id)`` — 단일계좌 다중봇에서 타-봇 누출
+    방지. 캐시 진입 경로는 4개뿐이며 모두 **DB commit 확정 이후** 반영한다:
+
+    1. ``open``      — ``INSERT … RETURNING`` 으로 write 성공 확인 후 upsert
+                       (중복 OrderSubmittedEvent 의 blind 덮어쓰기 방지).
+    2. ``record_fill`` → **캐시 미접근**. FillApplier 트랜잭션 내부 호출이라 여기서
+       캐시를 바꾸면 rollback 시 stale. 체결 미러는 commit 직후 FillApplier 가
+       ``mirror_fill_to_cache`` 로 한다(post-commit 전용).
+    3. ``mark_terminal`` — DB write 후 ``_evict_open_cache``.
+    4. ``expire_stale``  — 단일 ``UPDATE … RETURNING`` 으로 **실제 expired 된**
+       order_id 만 받아 그 ID 만 ``_evict_open_cache``. 사전 SELECT 가 없어
+       SELECT↔UPDATE 사이 fill commit(open→partial/filled) TOCTOU 가 없다.
+
+    **invariant**: ``open``/``mark_terminal``/``expire_stale`` 는 자체 commit 을
+    소유한다 — 외부 ``Database.transaction()`` 내부에서 호출하지 않는다. Database 는
+    중첩 트랜잭션을 ``RuntimeError`` 로 거부하므로(``core/database.py``) 위반 시
+    silent stale 이 아니라 loud 실패로 드러난다.
     """
 
     def __init__(self, db: Database) -> None:
         self._db = db
+        # 인메모리 open 캐시. key=(account_id, bot_id, order_id) → 레코드.
+        # commit 된 open/partially_filled 만 보관(terminal 은 evict).
+        self._open_cache: dict[tuple[str, str, str], OrderTrackerRecord] = {}
 
     async def initialize(self) -> None:
-        """스키마 생성."""
+        """스키마 생성 + open 캐시 warm.
+
+        DB 의 open/partially_filled row 로 캐시를 적재한다. warm 완료 전 sync
+        조회는 빈 결과(cold)일 수 있으며, 이는 best-effort 한계다(DB 가 진리원,
+        잔여 안전망은 reconciler). #1948 known-limitation.
+        """
         await self._db.execute_script(ORDER_TRACKER_SCHEMA)
-        logger.info("OrderTracker 초기화 완료")
+        await self._warm_open_cache()
+        logger.info("OrderTracker 초기화 완료 (open 캐시 %d건)", len(self._open_cache))
+
+    async def _warm_open_cache(self) -> None:
+        """DB 의 non-terminal 주문을 인메모리 open 캐시에 적재."""
+        placeholders = ", ".join("?" for _ in OPEN_STATUSES)
+        rows = await self._db.fetch_all(
+            f"""SELECT * FROM order_tracker
+                 WHERE status IN ({placeholders})""",
+            tuple(sorted(OPEN_STATUSES)),
+        )
+        self._open_cache.clear()
+        for row in rows:
+            record = OrderTrackerRecord.from_row(row)
+            self._open_cache[self._cache_key(record)] = record
+
+    @staticmethod
+    def _cache_key(record: OrderTrackerRecord) -> tuple[str, str, str]:
+        """캐시 키 = (account_id, bot_id, order_id)."""
+        return (record.account_id, record.bot_id, record.order_id)
+
+    def _evict_open_cache(self, order_id: str) -> None:
+        """terminal 전이 공통 헬퍼 — order_id 의 캐시 엔트리를 제거.
+
+        ``mark_terminal``/``expire_stale`` 가 DB write 성공 직후 호출한다. 캐시
+        키는 (account_id, bot_id, order_id) 라 order_id 단독으로는 직접 찾을 수
+        없으므로 order_id 일치 엔트리를 모두 제거한다(order_id 는 PK 라 유일).
+        """
+        for key in [k for k in self._open_cache if k[2] == order_id]:
+            del self._open_cache[key]
 
     async def open(
         self,
@@ -152,15 +236,22 @@ class OrderTracker:
         order_id PK 재제출(중복 이벤트)은 무시한다 (``ON CONFLICT DO NOTHING``).
         같은 ``(account_id, broker_order_id, submitted_date)`` UNIQUE 충돌도
         동일하게 무시되어 seed 멱등성을 보장한다.
+
+        #1948: ``RETURNING`` 으로 **실제 INSERT 가 일어났을 때에만** open 캐시에
+        upsert 한다. 중복 OrderSubmittedEvent(ON CONFLICT DO NOTHING — row 미반환)
+        는 캐시를 건드리지 않아, 이후 advance 된 캐시 상태를 blind 하게 덮어쓰지
+        않는다. **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
+        소유)** — 위반 시 nested-txn RuntimeError 로 loud 실패.
         """
         validated = require_account_id(account_id, context="order_tracker.open")
-        await self._db.execute(
+        inserted = await self._db.execute_fetch_one(
             """INSERT INTO order_tracker
                    (order_id, account_id, bot_id, strategy_id, broker_order_id,
                     symbol, side, order_type, ordered_qty, recorded_filled_qty,
                     avg_fill_price, status, submitted_at, submitted_date)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 'open', ?, ?)
-               ON CONFLICT DO NOTHING""",
+               ON CONFLICT DO NOTHING
+               RETURNING order_id""",
             (
                 order_id,
                 validated,
@@ -175,14 +266,34 @@ class OrderTracker:
                 submitted_date,
             ),
         )
+        if inserted is not None:
+            # DB write 확정 — 캐시 upsert (open, recorded=0).
+            record = OrderTrackerRecord(
+                order_id=order_id,
+                account_id=validated,
+                bot_id=bot_id,
+                strategy_id=strategy_id,
+                broker_order_id=broker_order_id,
+                symbol=symbol,
+                side=side,
+                order_type=order_type,
+                ordered_qty=ordered_qty,
+                recorded_filled_qty=0.0,
+                avg_fill_price=0.0,
+                status="open",
+                submitted_at=submitted_at,
+                submitted_date=submitted_date,
+            )
+            self._open_cache[self._cache_key(record)] = record
         logger.debug(
-            "주문 추적 seed: %s / odno=%s %s %s qty=%s (account=%s)",
+            "주문 추적 seed: %s / odno=%s %s %s qty=%s (account=%s, inserted=%s)",
             order_id,
             broker_order_id,
             side,
             symbol,
             ordered_qty,
             validated,
+            inserted is not None,
         )
 
     async def record_fill(
@@ -207,6 +318,13 @@ class OrderTracker:
         writer 연결에서 현재값을 읽고(``execute_fetch_one``) 진행 중인 트랜잭션의
         일관된 상태를 본 뒤 CAS UPDATE 하므로, 단일 writer + Lock 으로 read↔update
         사이 race 가 없다.
+
+        #1948 invariant: 이 메서드는 **인메모리 open 캐시를 절대 건드리지 않는다.**
+        FillApplier 트랜잭션 내부 호출이라, 여기서 캐시를 advance/evict 하면 이후
+        ``_save_trade``/position/outbox 실패로 트랜잭션이 rollback 될 때 DB 는
+        원복돼도 캐시는 stale advance 로 남아 sync 조회가 잘못된 값을 본다. 체결
+        캐시 미러는 **commit 성공 직후** FillApplier 가 ``mirror_fill_to_cache`` 로
+        한다.
         """
         row = await self._db.execute_fetch_one(
             """SELECT recorded_filled_qty, ordered_qty, status
@@ -214,14 +332,18 @@ class OrderTracker:
             (order_id,),
         )
         if row is None:
-            return RecordFillResult(delta=0.0, confirmed_cumulative=0.0)
+            return RecordFillResult(delta=0.0, confirmed_cumulative=0.0, new_status="")
 
         prev = float(row["recorded_filled_qty"] or 0.0)
         ordered = float(row["ordered_qty"] or 0.0)
         delta = new_cumulative - prev
         if delta <= 0:
             # 관측 역전 또는 이미 반영됨 — 단조성 유지, no-op. 확정값은 직전 recorded.
-            return RecordFillResult(delta=0.0, confirmed_cumulative=prev)
+            return RecordFillResult(
+                delta=0.0,
+                confirmed_cumulative=prev,
+                new_status=str(row["status"]),
+            )
 
         # terminal(취소/거부/실패/만료) 이후에도 잔여 체결이 관측되면 부분/완료로
         # 되돌린다. CAS WHERE 절은 단조성(recorded < :c)만 강제한다.
@@ -252,15 +374,66 @@ class OrderTracker:
         if updated is None:
             # 동시 advance 로 다른 호출이 먼저 recorded 를 올림 — 단조성 보존, no-op.
             # (단일 Lock 경로에선 발생하지 않으나 방어적으로 처리.)
-            return RecordFillResult(delta=0.0, confirmed_cumulative=prev)
+            return RecordFillResult(
+                delta=0.0, confirmed_cumulative=prev, new_status=str(row["status"])
+            )
         # CAS RETURNING 으로 확정된 누적값. fill_dedup_key 의 결정적 기준.
         confirmed = float(updated["recorded_filled_qty"] or 0.0)
-        return RecordFillResult(delta=delta, confirmed_cumulative=confirmed)
+        return RecordFillResult(
+            delta=delta, confirmed_cumulative=confirmed, new_status=new_status
+        )
+
+    def mirror_fill_to_cache(
+        self,
+        order_id: str,
+        confirmed_cumulative: float,
+        new_status: str,
+    ) -> None:
+        """**post-commit 전용** 체결 캐시 미러 (#1948, sync).
+
+        FillApplier 가 ``Database.transaction()`` 블록이 **정상 COMMIT 된 직후**에만
+        호출한다(rollback 경로에서는 호출되지 않는다). 캐시의
+        ``recorded_filled_qty``/``status`` 를 **CAS 확정값**(``confirmed_cumulative``)
+        으로 미러링하고, terminal(``filled``)이면 evict 한다. 입력 observed 값이
+        아니라 DB 가 RETURNING 으로 확정한 값만 반영해 단조성을 보존한다.
+
+        캐시 miss(cold-cache 등 캐시에 해당 order 가 없는 경우)는 보수적으로
+        무시한다 — DB 가 진리원이며, 다음 warm/조회는 DB 기준이다(best-effort).
+        """
+        for key, record in list(self._open_cache.items()):
+            if key[2] != order_id:
+                continue
+            if new_status == "filled" or new_status in TERMINAL_STATUSES:
+                # 완료/종료 — open window 종료, evict.
+                del self._open_cache[key]
+                return
+            self._open_cache[key] = OrderTrackerRecord(
+                order_id=record.order_id,
+                account_id=record.account_id,
+                bot_id=record.bot_id,
+                strategy_id=record.strategy_id,
+                broker_order_id=record.broker_order_id,
+                symbol=record.symbol,
+                side=record.side,
+                order_type=record.order_type,
+                ordered_qty=record.ordered_qty,
+                recorded_filled_qty=confirmed_cumulative,
+                avg_fill_price=record.avg_fill_price,
+                status=new_status or record.status,
+                submitted_at=record.submitted_at,
+                submitted_date=record.submitted_date,
+            )
+            return
 
     async def mark_terminal(self, order_id: str, status: str) -> None:
         """주문을 종료 상태로 표기 (취소/거부/실패/만료).
 
         이미 ``filled`` 인 주문은 덮어쓰지 않는다 (체결 완료가 우선).
+
+        #1948: DB write 후 ``_evict_open_cache`` 로 캐시에서 제거(terminal 은 open
+        이 아니므로). **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
+        소유)**. 이미 ``filled`` 였던 주문은 캐시에 없으므로 evict 가 no-op 이고,
+        non-terminal 이었던 주문만 제거된다.
         """
         if status not in TERMINAL_STATUSES:
             raise ValueError(f"비-terminal status: {status!r}")
@@ -270,6 +443,29 @@ class OrderTracker:
                 WHERE order_id = ? AND status != 'filled'""",
             (status, order_id),
         )
+        self._evict_open_cache(order_id)
+
+    def get_open_orders_for_bot_sync(
+        self, account_id: str, bot_id: str
+    ) -> list[OrderTrackerRecord]:
+        """``(account_id, bot_id)`` 의 non-terminal 주문 sync 조회 (#1948).
+
+        LIVE ``ctx.get_open_orders()`` 의 백엔드. 이벤트 루프 스레드 위 await 된
+        코루틴 내부에서 전략이 sync 호출하므로 **DB I/O 없이 인메모리 캐시만** 읽는다.
+        캐시는 OPEN_STATUSES(open/partially_filled) 만 보관하므로 terminal 은
+        자연히 제외된다. ``(account_id, bot_id)`` 스코프로 필터해 단일계좌 다중봇에서
+        타-봇 주문 누출을 막는다. cold-cache 시 빈 결과(best-effort) — known-limitation.
+        """
+        validated = require_account_id(
+            account_id, context="order_tracker.get_open_orders_for_bot_sync"
+        )
+        records = [
+            record
+            for (acct, bid, _oid), record in self._open_cache.items()
+            if acct == validated and bid == bot_id
+        ]
+        records.sort(key=lambda r: (r.submitted_at or "", r.order_id))
+        return records
 
     async def get_open_orders(self, account_id: str) -> list[OrderTrackerRecord]:
         """계좌의 non-terminal(open/partially_filled) 주문."""
@@ -373,21 +569,26 @@ class OrderTracker:
         체결분을 영구 만료/오분류하지 않는다(I7). 만료 건수를 반환한다.
         """
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
-        before = await self._db.fetch_one(
-            """SELECT COUNT(*) AS c FROM order_tracker
+        # #1948: 단일 원자 UPDATE ... RETURNING. 사전 SELECT 를 두면 SELECT↔UPDATE
+        # 사이에 다른 코루틴(FillApplier)이 fill 을 commit 해 open→partially_filled/
+        # filled 로 전이시킬 때, UPDATE(WHERE status='open')는 그 주문을 건드리지
+        # 않는데도 pre-SELECT 결과로 evict 해 여전히 open(또는 partial)인 주문이
+        # 캐시에서 사라진다(캐시=commit 된 DB open 미러 invariant 위반). UPDATE 가
+        # 실제로 expired 한 order_id 만 RETURNING 으로 받아 그 ID 들만 evict 하면
+        # TOCTOU race 자체가 구조적으로 사라진다. writer 연결 단일 호출이라
+        # 읽기↔쓰기 분리도 없다.
+        expired = await self._db.execute_fetch_all(
+            """UPDATE order_tracker
+                   SET status = 'expired', terminal_at = datetime('now')
                  WHERE account_id = ? AND submitted_date < ?
-                   AND status = 'open'""",
+                   AND status = 'open'
+            RETURNING order_id""",
             (validated, before_date),
         )
-        count = int(before["c"]) if before else 0
+        count = len(expired)
         if count:
-            await self._db.execute(
-                """UPDATE order_tracker
-                       SET status = 'expired', terminal_at = datetime('now')
-                     WHERE account_id = ? AND submitted_date < ?
-                       AND status = 'open'""",
-                (validated, before_date),
-            )
+            for row in expired:
+                self._evict_open_cache(row["order_id"])
             logger.info(
                 "OrderTracker EOD 만료: account=%s, %d건 (before=%s)",
                 validated,

@@ -183,6 +183,13 @@ class FillApplier:
         outbox 에 INSERT 한다(원자 커밋). commit 성공 = 이벤트 영속 보장이므로
         commit↔publish 사이 crash window 가 닫힌다. 발행은 트랜잭션 밖에서
         publisher 워커(at-least-once)에 위임한다.
+
+        #1948 open 캐시 미러: ``record_fill`` 은 트랜잭션 내부 호출이라 캐시를
+        건드리지 않는다(rollback 시 stale 방지). LIVE ``get_open_orders`` 의 sync
+        캐시는 트랜잭션 블록이 **정상 COMMIT 된 직후** ``mirror_fill_to_cache`` 로만
+        갱신한다. rollback(``_save_trade``/position/outbox 실패) 시 commit 이후
+        지점에 도달하지 못해 캐시는 불변 — DB(원복)와 일관된다. 스트림/폴 양
+        경로의 공통 코어라 미러 호출은 이 한 지점뿐이다.
         """
         from ante.trade.fill_outbox import make_fill_dedup_key
         from ante.trade.order_tracker import OrderTrackerRecord
@@ -225,7 +232,14 @@ class FillApplier:
                     fill_dedup_key=fill_dedup_key, payload=payload
                 )
 
-        # commit 성공. outbox 경유면 워커가 발행(crash window 닫힘), 미주입이면
+        # commit 성공 (rollback 시 이 지점 미도달). #1948: LIVE get_open_orders 의
+        # sync open 캐시를 CAS 확정값(confirmed_cumulative)/확정 status 로 미러링.
+        # delta>0 경로만 도달하므로 항상 유효한 advance 다.
+        self._tracker.mirror_fill_to_cache(
+            order_id, result.confirmed_cumulative, result.new_status
+        )
+
+        # outbox 경유면 워커가 발행(crash window 닫힘), 미주입이면
         # 기존처럼 commit 직후 직접 발행한다.
         if self._outbox is not None:
             if self._publisher is not None:

@@ -623,7 +623,10 @@ class TelegramCommandReceiver:
 
         # 보유 종목 있음 — 메시지 B
         symbols = sorted(positions.keys())
-        pending_amount = sum(order.get("amount", 0) for order in open_orders)
+        # #1948: 통일 OpenOrder dict 스키마는 amount(예약 금액)를 담지 않는다
+        # (Treasury 도메인). 미체결 가시성은 주문 건수로 표시한다. live 봇은 과거
+        # amount 부재로 0원 오표시였으므로, 건수 표시가 의미상 정확한 정정이다.
+        pending_count = len(open_orders)
 
         lines = [
             header,
@@ -632,7 +635,7 @@ class TelegramCommandReceiver:
             "중지 후 포지션을 직접 관리해야 합니다.",
             "",
             f"보유: {', '.join(symbols)}",
-            f"체결대기: {pending_amount:,.0f}원",
+            f"체결대기 주문: {pending_count}건",
         ]
         return "\n".join(lines)
 

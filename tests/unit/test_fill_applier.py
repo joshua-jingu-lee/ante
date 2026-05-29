@@ -334,3 +334,85 @@ async def test_crash_during_apply_rolls_back(
     assert delta == 40.0
     pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
     assert pos["quantity"] == 40.0
+
+
+# ── #1948 R2: txn rollback ↔ sync open 캐시 정합 (NEW blocking 회귀) ──
+
+
+async def test_rollback_does_not_advance_sync_open_cache(
+    db, tracker, position_history, eventbus, monkeypatch
+):
+    """record_fill 성공 후 _save_trade/position 실패 → rollback → sync
+    get_open_orders 가 **stale advance 를 미반환** (R2 핵심 회귀 락).
+
+    캐시는 record_fill 에서 건드리지 않고 commit 직후 mirror_fill_to_cache 로만
+    갱신되므로, rollback 시 캐시는 DB(원복)와 일관되게 불변이어야 한다.
+    """
+    rec = TradeRecorder(db, position_history)
+    await rec.initialize()
+    applier = FillApplier(
+        db=db,
+        order_tracker=tracker,
+        position_history=position_history,
+        eventbus=eventbus,
+    )
+    await _seed(tracker)
+    # warm 직후 캐시는 open, recorded=0.
+    before = tracker.get_open_orders_for_bot_sync(ACCT, "bot-1")
+    assert len(before) == 1
+    assert before[0].recorded_filled_qty == 0.0
+
+    orig_on_trade = position_history.on_trade
+
+    async def _boom(record):
+        raise RuntimeError("simulated crash mid-transaction")
+
+    monkeypatch.setattr(position_history, "on_trade", _boom)
+    with pytest.raises(RuntimeError):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=40.0,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+
+    # rollback — DB 미advance + 캐시도 stale advance 없음 (여전히 recorded=0, open).
+    rec_row = await tracker.get("ord-1")
+    assert rec_row.recorded_filled_qty == 0.0
+    cached = tracker.get_open_orders_for_bot_sync(ACCT, "bot-1")
+    assert len(cached) == 1
+    assert cached[0].recorded_filled_qty == 0.0
+    assert cached[0].status == "open"
+
+    # 복구 후 정상 적용 → commit 직후 mirror 로 캐시가 advance 된다.
+    monkeypatch.setattr(position_history, "on_trade", orig_on_trade)
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert delta == 40.0
+    advanced = tracker.get_open_orders_for_bot_sync(ACCT, "bot-1")
+    assert len(advanced) == 1
+    assert advanced[0].recorded_filled_qty == 40.0
+    assert advanced[0].status == "partially_filled"
+
+
+async def test_full_fill_evicts_sync_open_cache_post_commit(
+    applier, tracker, position_history
+):
+    """완전 체결 commit 후 mirror 가 캐시에서 evict → sync 미노출."""
+    await _seed(tracker)
+    assert len(tracker.get_open_orders_for_bot_sync(ACCT, "bot-1")) == 1
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=100.0,  # ordered_qty 도달 → filled
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert delta == 100.0
+    assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []

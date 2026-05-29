@@ -162,7 +162,6 @@ class Services:
     bot_manager: Any = None
     virtual_executor: Any = None
     live_portfolio: Any = None
-    live_order_view: Any = None
     strategy_snapshot: Any = None
     api_gateway: Any = None
     # SPLIT-3 (#1242): multi-account StreamIntegration pool. KIS 활성 계좌마다
@@ -533,9 +532,9 @@ async def _init_trading(s: Services) -> None:
     )
     s.virtual_executor.subscribe()
 
-    from ante.bot.providers.live import LiveOrderView
-
-    s.live_order_view = LiveOrderView(order_registry=None)  # type: ignore[arg-type]  # Broker 연결 후 설정
+    # #1948: 봇별 LiveOrderView 는 StrategyContextFactory 가 order_tracker +
+    # config.account_id 로 생성한다(account scope closure binding). 과거의 단일
+    # 공유 LiveOrderView(order_registry=None — 항상 빈 결과)는 제거됐다.
 
     strategies_dir = Path(s.config.get("strategy.dir", "strategies"))
     s.strategy_snapshot = StrategySnapshot(strategies_dir)
@@ -1056,13 +1055,15 @@ def _init_context_factory(s: Services) -> None:
         data_provider=s.data_provider,
         account_service=s.account_service,
         live_portfolio=s.live_portfolio,
-        live_order_view=s.live_order_view,
         virtual_executor=s.virtual_executor,
         live_trade_history=live_trade_history,
         treasury_manager=s.treasury_manager,
         position_history=s.position_history,
         api_gateway=s.api_gateway,
         parquet_store=s.parquet_store,
+        # #1948: LIVE get_open_orders 백엔드 — 봇별 LiveOrderView 가 이 tracker 의
+        # sync open 캐시를 account scope 로 조회한다.
+        order_tracker=s.order_tracker,
     )
     s.bot_manager._context_factory = context_factory
     logger.info("StrategyContextFactory 설정 완료")

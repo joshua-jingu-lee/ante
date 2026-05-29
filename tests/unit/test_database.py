@@ -45,6 +45,35 @@ async def test_fetch_one_returns_none(db):
     assert await db.fetch_one("SELECT * FROM t WHERE id = 999") is None
 
 
+async def test_execute_fetch_all_returns_affected_rows(db):
+    """UPDATE … RETURNING 으로 실제 영향받은 다건을 writer 단일 호출로 반환."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, status TEXT);")
+    await db.execute("INSERT INTO t (id, status) VALUES (1, 'open')")
+    await db.execute("INSERT INTO t (id, status) VALUES (2, 'open')")
+    await db.execute("INSERT INTO t (id, status) VALUES (3, 'filled')")
+
+    rows = await db.execute_fetch_all(
+        "UPDATE t SET status = 'expired' WHERE status = 'open' RETURNING id",
+        (),
+    )
+    # status='open' 2건만 RETURNING — 'filled' 는 영향 없음.
+    assert sorted(r["id"] for r in rows) == [1, 2]
+    # 실제 DB 도 갱신됨(reader 에서도 commit 관측).
+    after = await db.fetch_all("SELECT id, status FROM t ORDER BY id")
+    assert [r["status"] for r in after] == ["expired", "expired", "filled"]
+
+
+async def test_execute_fetch_all_empty_when_no_match(db):
+    """매칭 행이 없으면 빈 리스트 반환."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, status TEXT);")
+    await db.execute("INSERT INTO t (id, status) VALUES (1, 'filled')")
+    rows = await db.execute_fetch_all(
+        "UPDATE t SET status = 'expired' WHERE status = 'open' RETURNING id",
+        (),
+    )
+    assert rows == []
+
+
 async def test_wal_mode(db):
     """WAL 모드가 활성화되어 있다."""
     row = await db.fetch_one("PRAGMA journal_mode")

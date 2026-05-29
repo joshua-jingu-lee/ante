@@ -127,10 +127,74 @@ class TestLivePortfolioView:
         assert balance["available"] == 1_000_000.0
 
 
+class _StubTracker:
+    """OrderTracker sync 접근자만 모사하는 stub (#1948)."""
+
+    def __init__(self, records=None):
+        self._records = records or []
+
+    def get_open_orders_for_bot_sync(self, account_id, bot_id):
+        return [
+            r
+            for r in self._records
+            if r.account_id == account_id and r.bot_id == bot_id
+        ]
+
+
+def _make_record(**kw):
+    from ante.trade.order_tracker import OrderTrackerRecord
+
+    defaults = dict(
+        order_id="ord-1",
+        account_id="acct-A",
+        bot_id="bot1",
+        strategy_id="s1",
+        broker_order_id="0001",
+        symbol="005930",
+        side="buy",
+        order_type="market",
+        ordered_qty=100.0,
+        recorded_filled_qty=0.0,
+        avg_fill_price=0.0,
+        status="open",
+        submitted_at="2026-05-29T00:00:00+00:00",
+        submitted_date="20260529",
+    )
+    defaults.update(kw)
+    return OrderTrackerRecord(**defaults)
+
+
 class TestLiveOrderView:
     def test_get_open_orders_empty(self):
-        """미체결 주문 없으면 빈 목록."""
-        view = LiveOrderView(order_registry=None)
+        """미체결 주문 없으면 빈 목록 (OrderTracker 캐시 비어있음)."""
+        view = LiveOrderView(order_tracker=_StubTracker(), account_id="acct-A")
+        assert view.get_open_orders("bot1") == []
+
+    def test_get_open_orders_maps_unified_schema(self):
+        """OrderTracker 레코드를 통일 OpenOrder dict 스키마로 매핑."""
+        rec = _make_record(ordered_qty=100.0, recorded_filled_qty=40.0)
+        view = LiveOrderView(order_tracker=_StubTracker([rec]), account_id="acct-A")
+        orders = view.get_open_orders("bot1")
+        assert len(orders) == 1
+        o = orders[0]
+        assert set(o.keys()) == {
+            "order_id",
+            "symbol",
+            "side",
+            "ordered_qty",
+            "recorded_filled_qty",
+            "remaining_qty",
+            "status",
+            "submitted_at",
+        }
+        assert "amount" not in o
+        assert o["order_id"] == "ord-1"
+        assert o["remaining_qty"] == 60.0
+
+    def test_get_open_orders_account_scope(self):
+        """다른 account 의 봇 주문은 누출되지 않음."""
+        rec = _make_record(account_id="acct-B", bot_id="bot1")
+        view = LiveOrderView(order_tracker=_StubTracker([rec]), account_id="acct-A")
         assert view.get_open_orders("bot1") == []
 
 
@@ -205,14 +269,27 @@ class TestVirtualOrderView:
         assert ov.get_open_orders("virtual1") == []
 
     def test_pending_orders_tracked(self):
-        """예약된 주문이 미체결 목록에 나타남."""
+        """예약된 주문이 미체결 목록에 통일 스키마로 나타남."""
         pv = VirtualPortfolioView(bot_id="virtual1", initial_balance=10_000_000.0)
         pv.reserve("ord1", 500_000.0)
 
         ov = VirtualOrderView(portfolio=pv)
         orders = ov.get_open_orders("virtual1")
         assert len(orders) == 1
-        assert orders[0]["order_id"] == "ord1"
+        o = orders[0]
+        assert o["order_id"] == "ord1"
+        # #1948: 통일 OpenOrder dict 스키마 — amount(예약 금액) 제외, 수량 기반.
+        assert set(o.keys()) == {
+            "order_id",
+            "symbol",
+            "side",
+            "ordered_qty",
+            "recorded_filled_qty",
+            "remaining_qty",
+            "status",
+            "submitted_at",
+        }
+        assert "amount" not in o
 
 
 # ── US-3: VirtualExecutor ─────────────────────────
@@ -555,6 +632,90 @@ class TestStrategyContextFactory:
 
         assert isinstance(ctx, StrategyContext)
         assert ctx.bot_id == "live1"
+
+    def test_create_live_context_per_bot_order_view_account_binding(self, eventbus):
+        """order_tracker 주입 시 봇별 LiveOrderView 가 config.account_id 로 binding."""
+        from ante.account.models import Account, TradingMode
+        from ante.bot.providers.live import LivePortfolioView
+
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+
+        class FakeLivePortfolio(LivePortfolioView):
+            def __init__(self):
+                pass
+
+            def get_positions(self, bot_id):
+                return {}
+
+            def get_balance(self, bot_id):
+                return {"allocated": 0.0, "available": 0.0, "reserved": 0.0}
+
+        # 두 계좌의 동일 bot_id 주문이 캐시에 공존 — account scope 격리 검증.
+        rec_a = _make_record(order_id="ord-a", account_id="acct-A", bot_id="bot-x")
+        rec_b = _make_record(order_id="ord-b", account_id="acct-B", bot_id="bot-x")
+        tracker = _StubTracker([rec_a, rec_b])
+
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
+            live_portfolio=FakeLivePortfolio(),
+            order_tracker=tracker,
+        )
+
+        ctx_a = factory.create(
+            BotConfig(bot_id="bot-x", strategy_id="s1", account_id="acct-A")
+        )
+        orders_a = ctx_a.get_open_orders()
+        assert [o["order_id"] for o in orders_a] == ["ord-a"]
+
+        ctx_b = factory.create(
+            BotConfig(bot_id="bot-x", strategy_id="s1", account_id="acct-B")
+        )
+        orders_b = ctx_b.get_open_orders()
+        assert [o["order_id"] for o in orders_b] == ["ord-b"]
+
+    def test_create_live_context_empty_order_view_fallback(self, eventbus):
+        """order_tracker·live_order_view 모두 미주입이면 빈 결과 stub (회귀 방지)."""
+        from ante.account.models import Account, TradingMode
+        from ante.bot.providers.live import LivePortfolioView
+
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+
+        class FakeLivePortfolio(LivePortfolioView):
+            def __init__(self):
+                pass
+
+            def get_positions(self, bot_id):
+                return {}
+
+            def get_balance(self, bot_id):
+                return {"allocated": 0.0, "available": 0.0, "reserved": 0.0}
+
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
+            live_portfolio=FakeLivePortfolio(),
+        )
+        ctx = factory.create(
+            BotConfig(bot_id="live1", strategy_id="s1", account_id="live-acct")
+        )
+        assert ctx.get_open_orders() == []
 
     def test_resolve_virtual_balance_with_budget(self, eventbus):
         """TreasuryManager 존재 + BotBudget 배정 시 allocated 값 반환."""

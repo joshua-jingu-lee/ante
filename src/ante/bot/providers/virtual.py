@@ -104,17 +104,39 @@ class VirtualPortfolioView(PortfolioView):
 
 
 class VirtualOrderView(OrderView):
-    """Virtual 계좌 봇용 OrderView. VirtualPortfolioView의 미체결 주문 추적."""
+    """Virtual 계좌 봇용 OrderView. VirtualPortfolioView의 미체결 주문 추적.
+
+    #1948: VirtualExecutor 는 ``OrderApprovedEvent`` 를 즉시 가상 체결하고
+    ``OrderSubmittedEvent`` 를 발행하지 않으므로(발행처는 live gateway 단독),
+    virtual 주문은 OrderTracker 에 들어가지 않는다 → OrderTracker 백엔드 미사용.
+    virtual 은 즉시 체결로 open window 가 사실상 없어
+    ``_pending_orders`` (프로덕션 대개 빈)를 **통일 OpenOrder dict 스키마**로
+    best-effort 매핑한다. amount(예약 금액)는 OrderView 스키마에서 제외한다.
+    """
 
     def __init__(self, portfolio: VirtualPortfolioView) -> None:
         self._portfolio = portfolio
 
     def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:
-        """미체결 주문 목록 조회."""
-        return [
-            {"order_id": oid, **info}
-            for oid, info in self._portfolio._pending_orders.items()
-        ]
+        """미체결 주문 목록 조회 (통일 OpenOrder dict 스키마)."""
+        result: list[dict[str, Any]] = []
+        for oid, info in self._portfolio._pending_orders.items():
+            ordered_qty = float(info.get("ordered_qty", 0.0))
+            recorded = float(info.get("recorded_filled_qty", 0.0))
+            remaining = ordered_qty - recorded
+            result.append(
+                {
+                    "order_id": oid,
+                    "symbol": info.get("symbol", ""),
+                    "side": info.get("side", ""),
+                    "ordered_qty": ordered_qty,
+                    "recorded_filled_qty": recorded,
+                    "remaining_qty": remaining if remaining > 0 else 0.0,
+                    "status": info.get("status", "open"),
+                    "submitted_at": info.get("submitted_at"),
+                }
+            )
+        return result
 
 
 class VirtualExecutor:

@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 from ante.strategy.base import OrderView, PortfolioView, TradeHistoryView
 
 if TYPE_CHECKING:
-    from ante.broker.order_registry import OrderRegistry
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.position import PositionHistory
     from ante.trade.recorder import TradeRecorder
     from ante.treasury.treasury import Treasury
@@ -57,18 +57,29 @@ class LivePortfolioView(PortfolioView):
 
 
 class LiveOrderView(OrderView):
-    """Live 봇용 OrderView. Broker OrderRegistry에서 미체결 주문 조회."""
+    """Live 봇용 OrderView. OrderTracker(ante 제출 미체결 SSOT) 경유 (#1948).
 
-    def __init__(self, order_registry: OrderRegistry) -> None:
-        self._registry = order_registry
+    ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
+    로 binding 한다(``LiveDataProvider`` 패턴 미러). ``get_open_orders`` 는
+    OrderTracker 의 sync 인메모리 open 캐시(commit 된 DB 미러)를
+    ``(account_id, bot_id)`` 스코프로 조회한다 — DB I/O 없이 이벤트 루프 위
+    await 된 코루틴 내부에서 안전하게 sync 호출된다.
+
+    **scope 경계**: OrderTracker 는 ante 가 제출한 주문만 추적한다. 수동/외부
+    주문은 반영되지 않는다(전략 "미체결" 정의 = ante 제출 한정). cold-cache(warm
+    완료 전) 시 빈 결과가 가능하다(best-effort, reconciler net) — known-limitation.
+    """
+
+    def __init__(self, order_tracker: OrderTracker, account_id: str) -> None:
+        self._order_tracker = order_tracker
+        self._account_id = account_id
 
     def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:
-        """미체결 주문 목록 조회.
-
-        OrderRegistry는 DB 기반이므로 동기 조회가 제한적이다.
-        현재는 빈 목록을 반환하며, 실시간 주문 추적은 Phase 2에서 구현.
-        """
-        return []
+        """ante 제출 미체결 주문 목록 조회 (통일 OpenOrder dict 스키마)."""
+        records = self._order_tracker.get_open_orders_for_bot_sync(
+            self._account_id, bot_id
+        )
+        return [r.to_open_order_dict() for r in records]
 
 
 class LiveTradeHistoryView(TradeHistoryView):
