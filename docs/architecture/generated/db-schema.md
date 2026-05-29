@@ -6,8 +6,8 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
 > 마지막 갱신: 2026-05-29
 
-- 테이블: **22**개
-- 인덱스: **31**개
+- 테이블: **23**개
+- 인덱스: **32**개
 
 ## 목차
 
@@ -56,14 +56,15 @@ erDiagram
 | 12 | [members](#members) | `member` | 멤버 (사용자/에이전트) 등록 정보 | 17 |
 | 13 | [reports](#reports) | `report` | 전략 리포트 | 20 |
 | 14 | [strategies](#strategies) | `strategy` | 전략 등록 정보 | 12 |
-| 15 | [order_tracker](#order_tracker) | `trade` |  | 16 |
-| 16 | [positions](#positions) | `trade` | 현재 포지션 | 7 |
-| 17 | [position_history](#position_history) | `trade` | 포지션 변동 이력 | 12 |
-| 18 | [trades](#trades) | `trade` | 체결 기록 | 17 |
-| 19 | [bot_budgets](#bot_budgets) | `treasury` | 봇별 예산 | 8 |
-| 20 | [treasury_transactions](#treasury_transactions) | `treasury` | 자금 트랜잭션 이력 | 7 |
-| 21 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
-| 22 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
+| 15 | [fill_outbox](#fill_outbox) | `trade` | 체결 이벤트 transactional outbox (#1949) | 6 |
+| 16 | [order_tracker](#order_tracker) | `trade` |  | 16 |
+| 17 | [positions](#positions) | `trade` | 현재 포지션 | 7 |
+| 18 | [position_history](#position_history) | `trade` | 포지션 변동 이력 | 12 |
+| 19 | [trades](#trades) | `trade` | 체결 기록 | 17 |
+| 20 | [bot_budgets](#bot_budgets) | `treasury` | 봇별 예산 | 8 |
+| 21 | [treasury_transactions](#treasury_transactions) | `treasury` | 자금 트랜잭션 이력 | 7 |
+| 22 | [treasury_state](#treasury_state) | `treasury` | 계좌별 자산 상태 | 6 |
+| 23 | [treasury_daily_snapshots](#treasury_daily_snapshots) | `treasury` | 일간 자산 스냅샷 | 14 |
 
 ## DDL
 
@@ -386,6 +387,24 @@ CREATE TABLE IF NOT EXISTS strategies (
 );
 ```
 
+### fill_outbox
+
+모듈: `trade.fill_outbox`
+
+```sql
+CREATE TABLE IF NOT EXISTS fill_outbox (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    fill_dedup_key  TEXT NOT NULL UNIQUE,
+    payload         TEXT NOT NULL,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    published       INTEGER NOT NULL DEFAULT 0,
+    published_at    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_fill_outbox_unpublished
+    ON fill_outbox(published, id);
+```
+
 ### order_tracker
 
 모듈: `trade.order_tracker`
@@ -598,17 +617,18 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 | 18 | `idx_members_org` | `members` | `org` |
 | 19 | `idx_reports_strategy` | `reports` | `strategy_name` |
 | 20 | `idx_reports_status` | `reports` | `status` |
-| 21 | `idx_order_tracker_broker` | `order_tracker` | `account_id, broker_order_id, submitted_date` |
-| 22 | `idx_order_tracker_open` | `order_tracker` | `account_id, status` |
-| 23 | `idx_position_history_bot` | `position_history` | `bot_id, timestamp` |
-| 24 | `idx_position_history_account` | `position_history` | `account_id, bot_id, timestamp` |
-| 25 | `idx_trades_account` | `trades` | `account_id, timestamp` |
-| 26 | `idx_trades_bot` | `trades` | `bot_id, timestamp` |
-| 27 | `idx_trades_strategy` | `trades` | `strategy_id, timestamp` |
-| 28 | `idx_trades_symbol` | `trades` | `symbol, timestamp` |
-| 29 | `idx_trades_status` | `trades` | `status` |
-| 30 | `idx_bot_budgets_account` | `bot_budgets` | `account_id` |
-| 31 | `idx_treasury_transactions_account` | `treasury_transactions` | `account_id` |
+| 21 | `idx_fill_outbox_unpublished` | `fill_outbox` | `published, id` |
+| 22 | `idx_order_tracker_broker` | `order_tracker` | `account_id, broker_order_id, submitted_date` |
+| 23 | `idx_order_tracker_open` | `order_tracker` | `account_id, status` |
+| 24 | `idx_position_history_bot` | `position_history` | `bot_id, timestamp` |
+| 25 | `idx_position_history_account` | `position_history` | `account_id, bot_id, timestamp` |
+| 26 | `idx_trades_account` | `trades` | `account_id, timestamp` |
+| 27 | `idx_trades_bot` | `trades` | `bot_id, timestamp` |
+| 28 | `idx_trades_strategy` | `trades` | `strategy_id, timestamp` |
+| 29 | `idx_trades_symbol` | `trades` | `symbol, timestamp` |
+| 30 | `idx_trades_status` | `trades` | `status` |
+| 31 | `idx_bot_budgets_account` | `bot_budgets` | `account_id` |
+| 32 | `idx_treasury_transactions_account` | `treasury_transactions` | `account_id` |
 
 ## 보존 정책
 
@@ -628,6 +648,7 @@ CREATE TABLE IF NOT EXISTS treasury_daily_snapshots (
 | `members` | 영구 보존 |
 | `reports` | 영구 보존 |
 | `strategies` | 영구 보존 |
+| `fill_outbox` | 영구 보존 |
 | `order_tracker` | 영구 보존 |
 | `positions` | 영구 보존 |
 | `position_history` | 영구 보존 |

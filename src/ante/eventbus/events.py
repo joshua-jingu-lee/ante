@@ -197,7 +197,15 @@ class OrderSubmittedEvent(Event):
 
 @dataclass(frozen=True)
 class OrderFilledEvent(Event):
-    """BrokerAdapter → EventBus: 체결 완료."""
+    """BrokerAdapter → EventBus: 체결 완료.
+
+    ``fill_dedup_key`` (#1949): 동일 체결을 결정적으로 식별하는 키.
+    FillApplier 경로는 ``f"{order_id}:{canonical(confirmed_cumulative)}"``
+    (CAS RETURNING 확정 누적값 기준)로 채운다. outbox at-least-once 재전달 시
+    소비자가 이중처리를 식별·억제하는 데 쓰인다(소비는 #1957). default ``""`` 로
+    backward-compat 을 유지하며, VirtualProvider 등 outbox 미경유 직접 발행 경로는
+    빈키(``""``)를 그대로 둔다(dedup 비대상 — eventbus 스펙 참조).
+    """
 
     _requires_account_id: ClassVar[bool] = True
 
@@ -216,6 +224,7 @@ class OrderFilledEvent(Event):
     order_type: str = ""
     reason: str = ""
     exchange: str = "KRX"
+    fill_dedup_key: str = ""
 
 
 @dataclass(frozen=True)

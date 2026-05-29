@@ -66,6 +66,7 @@ TABLE_DESCRIPTIONS: dict[str, str] = {
     "signal_keys": "봇별 시그널 키",
     "strategies": "전략 등록 정보",
     "trades": "체결 기록",
+    "fill_outbox": "체결 이벤트 transactional outbox (#1949)",
     "positions": "현재 포지션",
     "position_history": "포지션 변동 이력",
     "bot_budgets": "봇별 예산",

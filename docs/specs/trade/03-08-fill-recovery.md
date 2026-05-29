@@ -33,7 +33,7 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
 |---|---|---|
 | `initialize` | `None` | 스키마 생성 |
 | `open(order_id, account_id, bot_id, strategy_id, broker_order_id, symbol, side, order_type, ordered_qty, submitted_date)` | `None` | `OrderSubmittedEvent`로 추적 주문 seed |
-| `record_fill(order_id, new_cumulative, avg_price)` | `applied_delta: float` | 원자 CAS advance. `delta = new_cumulative - 이전 recorded`; `<=0`이면 0(no-op), `>0`이면 recorded 갱신 후 delta. **FillApplier 트랜잭션 내에서만 호출** |
+| `record_fill(order_id, new_cumulative, avg_price)` | `RecordFillResult(delta, confirmed_cumulative)` | 원자 CAS advance. `delta = new_cumulative - 이전 recorded`; `<=0`이면 `delta=0`(no-op), `>0`이면 recorded 갱신 후 delta. `confirmed_cumulative` = CAS `RETURNING recorded_filled_qty` 확정값(체결 이벤트 outbox `fill_dedup_key` 산출 기준, #1949). **FillApplier 트랜잭션 내에서만 호출** |
 | `mark_terminal(order_id, status)` | `None` | 취소·거부·실패·만료 종료 표기 |
 | `get_open_orders(account_id)` | `list[OrderTrackerRecord]` | 계좌의 non-terminal 주문 |
 | `lookup_order_id(account_id, broker_order_id, submitted_date)` | `str \| None` | 관측 → 내부 order_id 매핑(non-terminal/same-day) |
@@ -55,9 +55,12 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
    외부 포지션은 reconciler 영역).
 2. `Database.transaction()` 단일 트랜잭션 안에서: CAS advance(delta 산출) →
    `delta<=0`이면 no-op → `delta>0`이면 `TradeRecord` insert +
-   `PositionHistory.on_trade` → commit.
-3. commit 이후 `OrderFilledEvent`(quantity=delta, price=avg_price,
-   order_id/bot_id/strategy_id/account_id는 tracker에서 복원) 1회 발행.
+   `PositionHistory.on_trade` + (#1949) `OrderFilledEvent` payload를
+   `fill_outbox`에 INSERT → commit.
+3. commit 이후 `FillOutboxPublisher` 워커가 outbox 미발행분을 at-least-once 발행
+   한다(이벤트는 quantity=delta, price=avg_price, order_id/bot_id/strategy_id/
+   account_id는 tracker 복원, `fill_dedup_key` 포함). outbox 미주입 fallback
+   경로는 commit 직후 직접 1회 발행한다(crash window 잔존, #1949 이전 동작).
 
 ### crash 원자성
 
@@ -65,10 +68,13 @@ CAS advance와 trade insert·position update가 단일 트랜잭션으로 묶이
 도중 crash하면 rollback되어 recorded가 advance되지 않고 재기동 후 다음 폴이
 동일 delta를 재적용한다. → positions/trades는 **crash-safe exactly-once**.
 
-`OrderFilledEvent`는 **커밋 이후 발행되는 알림**(strategy `on_fill`, Treasury
-정산, notification)이다. commit↔publish 사이 narrow crash window의 이벤트 전달
-유실은 재기동 catch-up + reconcile로 재정합되며, 완전한 exactly-once 이벤트
-전달은 별도 후속(transactional outbox)으로 분리한다.
+`OrderFilledEvent`는 다운스트림 알림(strategy `on_fill`, Treasury 정산,
+notification)이다. **#1949 transactional outbox로 commit↔publish crash window를
+닫는다**: 체결 적용 txn 안에서 이벤트 payload를 `fill_outbox`에 함께 커밋하므로
+(commit 성공 = 이벤트 영속), commit-후-crash에서도 재기동 시 퍼블리셔가 미발행분을
+재전달한다(**at-least-once 무손실**). 전달 시맨틱·결정적 `fill_dedup_key`·소비자
+멱등화 경계(#1957)는 `docs/specs/broker-adapter/18-fill-recovery.md` §10과
+`docs/specs/eventbus/eventbus.md`를 따른다.
 
 ## TradeRecorder와의 관계 (권위 일원화)
 

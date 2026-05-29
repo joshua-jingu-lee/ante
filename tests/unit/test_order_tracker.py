@@ -61,8 +61,11 @@ async def _seed(
 
 async def test_record_fill_first_advance(tracker):
     await _seed(tracker)
-    delta = await tracker.record_fill("ord-1", 40.0, 1000.0)
-    assert delta == 40.0
+    # #1949: record_fill 은 RecordFillResult(delta, confirmed_cumulative) 반환.
+    result = await tracker.record_fill("ord-1", 40.0, 1000.0)
+    assert result.delta == 40.0
+    # confirmed_cumulative 는 CAS RETURNING 확정값(= 입력 누적값과 일치).
+    assert result.confirmed_cumulative == 40.0
     rec = await tracker.get("ord-1")
     assert rec.recorded_filled_qty == 40.0
     assert rec.status == "partially_filled"
@@ -73,8 +76,10 @@ async def test_record_fill_same_cumulative_twice_delta_zero(tracker):
     await _seed(tracker)
     first = await tracker.record_fill("ord-1", 40.0, 1000.0)
     second = await tracker.record_fill("ord-1", 40.0, 1000.0)
-    assert first == 40.0
-    assert second == 0.0
+    assert first.delta == 40.0
+    assert second.delta == 0.0
+    # no-op 의 confirmed_cumulative 는 직전 확정값(40)을 그대로 반영 → 결정적 키.
+    assert second.confirmed_cumulative == 40.0
     rec = await tracker.get("ord-1")
     assert rec.recorded_filled_qty == 40.0
 
@@ -83,8 +88,9 @@ async def test_record_fill_monotonic_increase(tracker):
     """누적 증가 → 정확한 delta (40 → 100: delta 60)."""
     await _seed(tracker)
     await tracker.record_fill("ord-1", 40.0, 1000.0)
-    delta = await tracker.record_fill("ord-1", 100.0, 1010.0)
-    assert delta == 60.0
+    result = await tracker.record_fill("ord-1", 100.0, 1010.0)
+    assert result.delta == 60.0
+    assert result.confirmed_cumulative == 100.0
     rec = await tracker.get("ord-1")
     assert rec.recorded_filled_qty == 100.0
     # ordered_qty(100) 도달 → filled.
@@ -95,15 +101,18 @@ async def test_record_fill_decrease_is_noop(tracker):
     """관측 역전(누적 감소) → 단조성 유지, no-op."""
     await _seed(tracker)
     await tracker.record_fill("ord-1", 100.0, 1000.0)
-    delta = await tracker.record_fill("ord-1", 60.0, 990.0)
-    assert delta == 0.0
+    result = await tracker.record_fill("ord-1", 60.0, 990.0)
+    assert result.delta == 0.0
+    # 역전 no-op 의 확정값은 직전 누적(100) — 재전달 키 결정성 유지.
+    assert result.confirmed_cumulative == 100.0
     rec = await tracker.get("ord-1")
     assert rec.recorded_filled_qty == 100.0
 
 
 async def test_record_fill_unknown_order_returns_zero(tracker):
-    delta = await tracker.record_fill("does-not-exist", 50.0, 1000.0)
-    assert delta == 0.0
+    result = await tracker.record_fill("does-not-exist", 50.0, 1000.0)
+    assert result.delta == 0.0
+    assert result.confirmed_cumulative == 0.0
 
 
 async def test_record_fill_concurrent_no_double(tracker):
@@ -119,7 +128,7 @@ async def test_record_fill_concurrent_no_double(tracker):
         tracker.record_fill("ord-1", 60.0, 1000.0),
     )
     # 정확히 한 호출만 delta>0(=60), 나머지는 0.
-    positive = [r for r in results if r > 0]
+    positive = [r.delta for r in results if r.delta > 0]
     assert positive == [60.0]
     rec = await tracker.get("ord-1")
     assert rec.recorded_filled_qty == 60.0
@@ -278,8 +287,8 @@ async def test_expire_stale_excludes_partially_filled(tracker):
         submitted_date="20260528",
         ordered_qty=100.0,
     )
-    delta = await tracker.record_fill("ord-partial", 40.0, 1000.0)
-    assert delta == 40.0
+    result = await tracker.record_fill("ord-partial", 40.0, 1000.0)
+    assert result.delta == 40.0
     assert (await tracker.get("ord-partial")).status == "partially_filled"
 
     # 전일 genuinely-dead open (체결 없음) 도 함께 둔다.

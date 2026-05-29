@@ -156,6 +156,9 @@ class Services:
     # #1946 fill-recovery: 추적 주문 영속 + 단일 멱등 choke point.
     order_tracker: Any = None
     fill_applier: Any = None
+    # #1949: 체결 이벤트 transactional outbox + 퍼블리셔 워커(durability/at-least-once).
+    fill_outbox: Any = None
+    fill_outbox_publisher: Any = None
     bot_manager: Any = None
     virtual_executor: Any = None
     live_portfolio: Any = None
@@ -449,18 +452,38 @@ async def _init_trading(s: Services) -> None:
     # 단일 트랜잭션으로 수행한다. TradeRecorder 는 fill 경로에서 position 을
     # 다시 갱신하지 않는다(이중 적용 방지). OrderTracker 는 OrderSubmittedEvent
     # 로 open seed, 취소/거부/실패로 terminal 표기한다.
-    from ante.trade import FillApplier, OrderTracker
+    #
+    # #1949 durability: FillOutbox(체결 이벤트 transactional outbox) +
+    # FillOutboxPublisher(미발행 row 발행 워커)를 FillApplier 에 주입한다.
+    # FillApplier 는 체결 적용 txn 안에서 OrderFilledEvent payload 를 outbox 에
+    # 함께 커밋하고(crash window 닫힘), publisher 워커가 commit↔publish 밖에서
+    # at-least-once 로 발행한다. 기동 재전달(catch_up)·graceful stop 은 아래
+    # _init_fill_outbox_publisher / shutdown 에서 처리한다.
+    from ante.trade import (
+        FillApplier,
+        FillOutbox,
+        FillOutboxPublisher,
+        OrderTracker,
+    )
 
     s.order_tracker = OrderTracker(db=s.db)
     await s.order_tracker.initialize()
+    s.fill_outbox = FillOutbox(db=s.db)
+    await s.fill_outbox.initialize()
+    s.fill_outbox_publisher = FillOutboxPublisher(
+        outbox=s.fill_outbox,
+        eventbus=s.eventbus,
+    )
     s.fill_applier = FillApplier(
         db=s.db,
         order_tracker=s.order_tracker,
         position_history=s.position_history,
         eventbus=s.eventbus,
+        outbox=s.fill_outbox,
+        publisher=s.fill_outbox_publisher,
     )
     _subscribe_order_tracker(s.eventbus, s.order_tracker)
-    logger.info("OrderTracker / FillApplier 초기화 완료")
+    logger.info("OrderTracker / FillApplier / FillOutbox 초기화 완료")
 
     s.performance_tracker = PerformanceTracker(db=s.db)
 
@@ -686,6 +709,13 @@ async def _init_gateway(s: Services) -> None:
     if connected_count and s.fill_applier and s.order_tracker:
         await _init_fill_recovery_schedulers(s, accounts)
 
+    # #1949: 체결 catch-up(위)이 만든 outbox row + commit-후-crash 로 미발행된
+    # row 를 publisher 가 기동 재전달한 뒤 주기 드레인 루프를 시작한다. 소비자는
+    # 이 시점에 이미 구독돼 있어 재전달 이벤트를 수신한다. broker 연결 여부와
+    # 무관하게(워커는 enqueue 직후 notify drain 도 담당) 항상 켠다.
+    if s.fill_outbox_publisher:
+        await _init_fill_outbox_publisher(s)
+
     # ReconcileScheduler 초기화 (fill 복구 barrier 이후)
     if connected_count and s.trade_service:
         await _init_reconcile_scheduler(s)
@@ -751,6 +781,26 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
             len(s.fill_schedulers),
             ", ".join(s.fill_schedulers),
         )
+
+
+async def _init_fill_outbox_publisher(s: Services) -> None:
+    """FillOutboxPublisher 기동 재전달(catch_up) + 주기 드레인 루프 시작 (#1949).
+
+    1. ``catch_up_once()`` 를 **await** 해, 직전 FillReconcileScheduler 카치업이
+       만든 outbox row 와 이전 실행의 commit-후-crash 로 미발행된 row 를 재전달
+       한다(at-least-once 무손실 전달). 소비자는 이 시점에 이미 구독돼 있다.
+    2. 주기 드레인 루프(``start()``)를 시작한다. 워커는 ``FillApplier`` 가 enqueue
+       직후 호출하는 ``notify()`` 로 즉시 드레인되며, 주기 루프는 누락 통지에 대한
+       백스톱이다.
+    """
+    publisher = s.fill_outbox_publisher
+    if publisher is None:
+        return
+    redelivered = await publisher.catch_up_once()
+    if redelivered:
+        logger.info("기동 outbox 재전달: %d건", redelivered)
+    await publisher.start()
+    logger.info("FillOutboxPublisher 시작 완료")
 
 
 async def _init_reconcile_scheduler(s: Services) -> None:
@@ -1911,6 +1961,15 @@ async def _shutdown(s: Services) -> None:
                 exc_info=True,
             )
     s.fill_schedulers.clear()
+
+    # #1949: FillOutboxPublisher graceful stop. 미발행 row 가 남아도 outbox 에
+    # durable 하게 영속돼 있어, 다음 기동의 catch_up_once 가 재전달한다(무손실).
+    if s.fill_outbox_publisher:
+        try:
+            await s.fill_outbox_publisher.stop()
+            logger.info("FillOutboxPublisher 종료")
+        except Exception:
+            logger.warning("FillOutboxPublisher 종료 실패", exc_info=True)
 
     # 각 계좌의 Treasury sync 중지
     if s.treasury_manager:
