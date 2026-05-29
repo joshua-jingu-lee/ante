@@ -93,22 +93,37 @@ class Database:
     async def connect(self) -> None:
         """DB 연결 초기화. writer + reader 두 연결 생성.
 
-        어느 한쪽 연결이라도 실패하면 이미 열린 연결(writer)을 ``close()`` 로
-        정리한 뒤 원본 예외를 재전파한다. ``connect()`` 가 부분적으로 성공한
-        상태(예: writer만 열림)에서 raise되면 호출자가 받은 ``Database`` 핸들에
-        leak된 aiosqlite worker thread가 남아, ``asyncio.run`` 종료 시 닫힌
-        이벤트 루프를 건드려 stderr noise를 유발하기 때문이다(#1965). ``close()``
-        는 ``None`` 연결을 건너뛰므로 부분 성공/완전 실패 모두에서 안전하다.
+        어느 한쪽 연결이라도 실패하면 이미 열린 연결(writer)을 worker thread
+        join 까지 포함해 **결정적으로 drain** 한 뒤 원본 예외를 재전파한다.
+        ``connect()`` 가 부분적으로 성공한 상태(예: writer만 열림)에서 raise되면
+        호출자가 받은 ``Database`` 핸들에 leak된 aiosqlite worker thread가 남아,
+        ``asyncio.run`` 종료 시 닫힌 이벤트 루프를 건드려 stderr noise를
+        유발하기 때문이다(#1965).
+
+        주의(#1970): 일반 ``close()`` 는 ``await conn.close()`` 만 호출하는데
+        aiosqlite ``Connection.close()`` 는 worker thread 루프에 종료
+        신호(``_running=False``)만 보내고 **``thread.join`` 을 하지 않는다**.
+        따라서 ``close()`` 반환 직후에도 worker ``_connection_worker_thread`` 가
+        아직 종료 중일 수 있다. partial-failure 정리에서 ``close()`` 만 쓰면
+        thread teardown 이 느린 환경(Linux CI)에서 "정리 직후 leak 없음" 단언이
+        타이밍 의존으로 간헐 실패한다. 이를 막기 위해 여기서는 이미 할당된
+        연결을 :meth:`_drain_failed_conn` (close + ``thread.join``)으로 정리해
+        반환 시점에 worker thread leak 이 없음을 결정적으로 보장한다.
 
         ``_init_conn`` 이 raise하는 경우(예: 첫 writer 연결 실패) 해당 연결의
         worker thread는 ``_init_conn`` 내부에서 이미 drain되며, 여기서는 이미
-        할당된 ``self._writer`` 만 ``close()`` 한다.
+        할당된 ``self._writer`` (reader 실패 시) 만 drain한다. join 은
+        bounded(5s) + 예외 swallow 이므로 원본 connect 예외를 가리거나 hang
+        하지 않는다.
         """
         try:
             self._writer = await self._init_conn()
             self._reader = await self._init_conn()
         except BaseException:
-            await self.close()
+            for conn in (self._writer, self._reader):
+                if conn is not None:
+                    await self._drain_failed_conn(conn)
+            self._writer = self._reader = None
             raise
 
     async def close(self) -> None:
