@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import date
+from pathlib import Path
+
+import pytest
+
+from ante.data.store import ParquetStore
+from ante.feed.pipeline.checkpoint import Checkpoint
 from ante.feed.pipeline.dart_collector import REPRT_TO_QUARTER, DARTCollector
 
 
@@ -78,3 +85,76 @@ class TestCheckpointMigration:
         """빈 문자열은 그대로 반환한다."""
         result = DARTCollector._migrate_checkpoint_key("")
         assert result == ""
+
+
+class _StubDARTSource:
+    """fetch_corp_codes/fetch_financial을 흉내내는 최소 DART 소스 스텁.
+
+    호출된 (year, reprt_code) 조합을 기록하여 미래 분기 fetch 여부를 검증한다.
+    """
+
+    def __init__(self, corp_code_map: dict[str, str]) -> None:
+        self._corp_code_map = corp_code_map
+        self.fetched: list[tuple[str, str]] = []
+
+    async def fetch_corp_codes(self, save_path: Path) -> dict[str, str]:
+        return self._corp_code_map
+
+    async def fetch_financial(
+        self,
+        corp_codes: list[str],
+        year: str,
+        reprt_code: str,
+    ) -> list[dict]:
+        # fetch된 분기를 기록. 데이터는 없는 것으로 처리(과거 분기여도 빈 응답).
+        self.fetched.append((year, reprt_code))
+        return []
+
+
+class TestCheckpointFutureQuarterClamp:
+    """checkpoint가 today(KST) 기준 미래 분기로 전진하지 않는지 검증한다(#1964)."""
+
+    async def test_dart_checkpoint_not_future_quarter(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """today=2026-05-29 mock 시 period-end > today 분기는 fetch/save 모두 skip.
+
+        2026-05-29 기준:
+          - 2026-Q1 (period-end 3/31) = collectable
+          - 2026-Q2 (6/30) / Q3 (9/30) / Q4 (12/31) = 미래 → skip
+        수정 전에는 _collect_quarters가 모든 분기를 무조건 save하여
+        checkpoint가 2026-Q4까지 전진했다.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        source = _StubDARTSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2026-01-01"}}
+        await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+        )
+
+        last = checkpoint.get_last_date()
+        # 미래 분기(Q2/Q3/Q4)로 전진하지 않음. Q1만 collectable.
+        assert last not in {"2026-Q2", "2026-Q3", "2026-Q4"}
+        assert last == "2026-Q1"
+
+        # 미래 분기는 fetch조차 하지 않는다 (period-end > today).
+        future_codes = {"11012", "11014", "11011"}  # Q2/Q3/Q4 reprt_code
+        fetched_2026 = {rc for (yr, rc) in source.fetched if yr == "2026"}
+        assert fetched_2026 & future_codes == set()
+        assert ("2026", "11013") in source.fetched  # Q1은 fetch됨

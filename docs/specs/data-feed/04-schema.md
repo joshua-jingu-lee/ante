@@ -40,6 +40,15 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 | 디렉토리 | OHLCV: `{data.path}/ohlcv/{timeframe}/{exchange}/{symbol}/{YYYY-MM}.parquet`; 기타: `{data.path}/{data_type}/{exchange}/{symbol}/{YYYY-MM}.parquet` |
 | 파티셔닝 | 1m 이상: 월별, 10s/30s: 일별 (YYYY-MM-DD) |
 | 쓰기 방식 | `ParquetStore.write()` 호출 (natural-key merge/dedup — 멱등성 보장) |
+| natural key | OHLCV/tick: `timestamp`; fundamental: `(date, source)` |
 | 정렬 | timestamp/date 오름차순 |
-| 중복 | 동일 timestamp 행 없을 것 |
+| 중복 | natural key 동일 행 없을 것 (OHLCV/tick: 동일 `timestamp`; fundamental: 동일 `(date, source)`) |
 | 타임존 | UTC |
+
+> **fundamental 다중 소스 공존**: `fundamental` 파티션에는 data.go.kr의 일별
+> `market_cap`/`shares_listed`와 DART의 분기 재무제표가 같은 `{YYYY-MM}.parquet`에
+> 함께 기록된다. DART date는 분기말일(3/31·6/30·9/30·12/31)이라 data.go.kr 일별 행과
+> date가 충돌할 수 있으므로, natural key를 `date` 단독이 아닌 `(date, source)`로 두어
+> 두 소스의 행을 모두 보존한다. 병합은 컬럼 합집합 + null-fill(schema-union)이며,
+> 한 소스에만 있는 컬럼은 다른 소스 행에서 null로 채워진다. 자세한 근거는
+> [02-design-decisions.md](02-design-decisions.md) `운영 모델 — DataStore 경유 저장` 절 참조.
