@@ -1229,17 +1229,28 @@ class TestInitConfigDirContract:
         assert (target / "secrets.env").exists()
 
 
-class TestInitSystemTomlAbsoluteDbPath:
-    """init이 생성하는 system.toml의 db.path가 절대 경로여야 한다.
+class TestInitSystemTomlRelocatableDbPath:
+    """init이 생성하는 system.toml의 db.path가 **상대 경로**여야 한다 (#1965).
 
-    Codex 12차 리뷰 Finding 2 회귀 — 상대 경로 `db/ante.db`를 그대로 쓰면
-    서버(`ante system start`)와 IPC가 cwd 기준 `./db/ante.db`를 보고,
-    CLI는 `<config_dir>/db/ante.db`를 보아 두 DB가 어긋난다.
+    스펙 SSOT: ``docs/specs/config/03-design-decisions.md:203`` — "ante init은
+    상대 경로 기본값을 기록하고, resolver가 절대 경로로 정규화한다." 같은 문서
+    :213 표는 ``db.path`` 기본값을 ``db/ante.db`` → ``<config_dir>/db/ante.db``로
+    규정한다.
+
+    절대 경로를 baking하면 config 디렉토리를 다른 위치로 복사·마운트
+    (``--config-dir``/``ANTE_CONFIG_DIR``)했을 때 baked된 원본 절대 경로를
+    계속 가리켜 relocatable하지 않다 — 이것이 #1965의 근본 원인이었다
+    (auth가 baked된 ``/opt/ante-config/db/ante.db``를 봄). cwd 독립성은
+    ``Config.load``가 항상 config_dir를 확정·보존하므로 상대 경로로도 유지된다.
+
+    (과거 회귀 노트: Codex 12차 리뷰 Finding 2는 cwd 독립성을 위해 절대 경로를
+    요구했으나, 그 fix는 relocatability를 깨뜨렸다. 올바른 invariant는
+    "상대 db.path + config_dir-anchored resolution"이다 — 스펙 :201-203.)
     """
 
-    def test_system_toml_db_path_is_absolute(self, runner, tmp_path):
-        """fresh init 후 system.toml의 db.path가 `<config>/db/ante.db` 절대 경로."""
-        target = tmp_path / "abs-cfg"
+    def test_system_toml_db_path_is_relative(self, runner, tmp_path):
+        """fresh init 후 system.toml의 db.path가 상대 경로 ``db/ante.db``."""
+        target = tmp_path / "rel-cfg"
 
         patches = _patch_init()
         for p in patches:
@@ -1253,16 +1264,21 @@ class TestInitSystemTomlAbsoluteDbPath:
         assert result.exit_code == 0, result.output
 
         toml_text = (target / "system.toml").read_text()
-        expected = (target / "db" / "ante.db").resolve()
-        assert f'path = "{expected}"' in toml_text, (
-            f"db.path 절대 경로가 system.toml에 없음:\n{toml_text}"
+        # 스펙 :213 기본값 — 상대 경로가 그대로 기록되어야 한다.
+        assert 'path = "db/ante.db"' in toml_text, (
+            f"db.path 상대 경로가 system.toml에 없음:\n{toml_text}"
         )
-        # 더 이상 상대 경로 'db/ante.db' (큰따옴표 포함)가 system.toml에 없어야
-        assert 'path = "db/ante.db"' not in toml_text
+        # baked된 절대 경로는 더 이상 기록되지 않아야 한다 (relocatability).
+        absolute = (target / "db" / "ante.db").resolve()
+        assert f'path = "{absolute}"' not in toml_text, (
+            f"db.path가 여전히 절대 경로로 baked됨:\n{toml_text}"
+        )
 
-    def test_system_toml_db_path_with_root_config_dir(self, runner, tmp_path):
-        """`--config-dir <path> init` 경로에서도 db.path가 절대 경로."""
-        target = tmp_path / "abs-root"
+    def test_system_toml_db_path_with_root_config_dir_is_relative(
+        self, runner, tmp_path
+    ):
+        """``--config-dir <path> init`` 경로에서도 db.path가 상대 경로."""
+        target = tmp_path / "rel-root"
 
         patches = _patch_init()
         for p in patches:
@@ -1275,8 +1291,68 @@ class TestInitSystemTomlAbsoluteDbPath:
 
         assert result.exit_code == 0, result.output
         toml_text = (target / "system.toml").read_text()
-        expected = (target / "db" / "ante.db").resolve()
-        assert f'path = "{expected}"' in toml_text
+        assert 'path = "db/ante.db"' in toml_text, toml_text
+
+    def test_db_dir_still_created(self, runner, tmp_path):
+        """상대 경로 기록과 무관하게 ``<config_dir>/db/`` 디렉토리는 생성된다."""
+        target = tmp_path / "rel-dbdir"
+
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(target)])
+        finally:
+            for p in patches:
+                p.stop()
+
+        assert result.exit_code == 0, result.output
+        assert (target / "db").is_dir(), (
+            "init이 <config_dir>/db/ 디렉토리를 생성해야 함"
+        )
+
+    def test_relative_db_path_relocatable_to_new_config_dir(self, runner, tmp_path):
+        """init한 config를 새 위치로 복사하고 ``--config-dir B``로 가리키면
+        db.path가 ``B/db/ante.db``로 해석된다 (relocatable).
+
+        이것이 #1965의 핵심 회귀 게이트다: 수정 전에는 system.toml에 baked된
+        절대 ``A/db/ante.db``를 계속 봐서 새 위치 B로 옮겨도 A를 가리켰다.
+        """
+        import shutil
+
+        from ante.cli.main import get_db_path
+
+        dir_a = tmp_path / "config-a"
+        patches = _patch_init()
+        for p in patches:
+            p.start()
+        try:
+            result = runner.invoke(cli, ["init", "--dir", str(dir_a)])
+        finally:
+            for p in patches:
+                p.stop()
+        assert result.exit_code == 0, result.output
+
+        # A를 다른 경로 B로 통째로 복사 (Docker mount/relocate 시나리오 모사).
+        dir_b = tmp_path / "config-b"
+        shutil.copytree(dir_a, dir_b)
+
+        # ctx.obj["config_dir"] = B 인 Click 컨텍스트로 get_db_path 호출.
+        ctx = click.Context(cli)
+        ctx.obj = {"config_dir": dir_b}
+        with ctx:
+            resolved = Path(get_db_path(ctx))
+
+        expected = (dir_b / "db" / "ante.db").resolve()
+        assert resolved.resolve() == expected, (
+            f"relocated config의 db.path가 B로 해석되지 않음:\n"
+            f"  resolved={resolved}\n  expected={expected}\n"
+            f"  (baked 절대 경로 A를 계속 가리키면 #1965 회귀)"
+        )
+        # 옛 위치 A를 가리키지 않아야 한다.
+        assert (dir_a / "db" / "ante.db").resolve() != resolved.resolve(), (
+            "relocated config가 여전히 원본 A 경로를 가리킴 (#1965 회귀)"
+        )
 
 
 class TestInitSystemTomlRuntimeSection:

@@ -1,9 +1,13 @@
 """SQLite WAL 모드 비동기 래퍼."""
 
+import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 
 class Database:
@@ -15,21 +19,97 @@ class Database:
         self._reader: aiosqlite.Connection | None = None
         self._in_transaction: bool = False
 
+    @staticmethod
+    async def _drain_failed_conn(conn: aiosqlite.Connection) -> None:
+        """실패한 aiosqlite 연결의 background worker thread를 결정적으로 정리한다.
+
+        근본 배경(#1965): ``await aiosqlite.connect(...)`` 의 ``__await__`` 는
+        먼저 worker thread를 ``start()`` 한 뒤 실제 ``sqlite3.connect`` 를 큐에
+        넣는다. 파일을 열 수 없으면(예: ``unable to open database file``)
+        aiosqlite 의 ``_connect`` 가 내부적으로 ``stop()`` 을 호출해 종료
+        sentinel을 큐에 넣지만, 그 **future를 폐기**하고 예외를 재전파한다.
+        따라서 worker thread는 (스스로 곧 종료하긴 하나) 호출자 쪽에서 종료를
+        **동기화할 수단이 없다**. 이 상태로 ``asyncio.run`` 이 이벤트 루프를
+        먼저 닫으면, worker thread가 닫힌 루프에 ``call_soon_threadsafe`` 를
+        시도해 stderr에 ``RuntimeError: Event loop is closed`` traceback이
+        남는다(``--format json`` stderr 청결 계약 위반).
+
+        정리 전략:
+
+        1. ``conn.close()`` — 연결이 실제로 열렸던 경우(PRAGMA 단계 실패 등)
+           내부 종료 future를 await 해 worker를 비운다. 연결이 안 열렸으면
+           (``_connection is None``) no-op으로 빠르게 반환한다.
+        2. 그래도 thread가 살아 있으면(=connect 자체 실패로 future가 폐기된
+           경우), 그 thread를 이벤트 루프 밖(executor)에서 ``join`` 해 루프
+           teardown **이전**에 worker가 확실히 종료하도록 동기화한다.
+
+        ``_thread`` 접근은 aiosqlite 내부 구현에 의존하지만, 모두 ``getattr``
+        방어로 감싸 향후 구현이 바뀌어도 graceful degrade(예외 없이 best-effort)
+        하도록 한다. 어떤 단계의 예외든 swallow하여 호출자에게는 원본 connect
+        예외만 surface한다.
+        """
+        try:
+            await conn.close()
+        except Exception:
+            logger.debug("aiosqlite close() on failed connect raised", exc_info=True)
+
+        thread = getattr(conn, "_thread", None)
+        if thread is None:
+            return
+        try:
+            if thread.is_alive():
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(None, thread.join, 5.0)
+        except Exception:
+            logger.debug("joining aiosqlite worker thread raised", exc_info=True)
+
     async def _init_conn(self) -> aiosqlite.Connection:
-        """공통 PRAGMA 설정으로 연결 초기화."""
-        conn = await aiosqlite.connect(self._db_path)
-        await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA synchronous=NORMAL")
-        await conn.execute("PRAGMA temp_store=MEMORY")
-        await conn.execute("PRAGMA foreign_keys=ON")
-        await conn.execute("PRAGMA busy_timeout=5000")
-        conn.row_factory = aiosqlite.Row
+        """공통 PRAGMA 설정으로 연결 초기화.
+
+        ``aiosqlite.connect`` 의 ``await`` 또는 이후 PRAGMA 단계가 실패하면,
+        이미 ``start()`` 된 worker thread가 leak된다(``connect()`` 가
+        ``self._writer``/``self._reader`` 에 할당하기 **전**에 raise되므로
+        ``Database.close()`` 로도 회수할 수 없다). 이 경우 :meth:`_drain_failed_conn`
+        으로 worker thread를 결정적으로 정리한 뒤 원본 예외를 재전파한다(#1965).
+
+        ``aiosqlite.connect(...)`` 는 ``await`` 전에 ``Connection`` 객체를
+        반환하므로, ``await`` 자체가 실패하더라도 그 객체 핸들을 잡아 thread를
+        정리할 수 있도록 ``await`` 를 객체 생성과 분리한다.
+        """
+        conn = aiosqlite.connect(self._db_path)
+        try:
+            await conn
+            await conn.execute("PRAGMA journal_mode=WAL")
+            await conn.execute("PRAGMA synchronous=NORMAL")
+            await conn.execute("PRAGMA temp_store=MEMORY")
+            await conn.execute("PRAGMA foreign_keys=ON")
+            await conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = aiosqlite.Row
+        except BaseException:
+            await self._drain_failed_conn(conn)
+            raise
         return conn
 
     async def connect(self) -> None:
-        """DB 연결 초기화. writer + reader 두 연결 생성."""
-        self._writer = await self._init_conn()
-        self._reader = await self._init_conn()
+        """DB 연결 초기화. writer + reader 두 연결 생성.
+
+        어느 한쪽 연결이라도 실패하면 이미 열린 연결(writer)을 ``close()`` 로
+        정리한 뒤 원본 예외를 재전파한다. ``connect()`` 가 부분적으로 성공한
+        상태(예: writer만 열림)에서 raise되면 호출자가 받은 ``Database`` 핸들에
+        leak된 aiosqlite worker thread가 남아, ``asyncio.run`` 종료 시 닫힌
+        이벤트 루프를 건드려 stderr noise를 유발하기 때문이다(#1965). ``close()``
+        는 ``None`` 연결을 건너뛰므로 부분 성공/완전 실패 모두에서 안전하다.
+
+        ``_init_conn`` 이 raise하는 경우(예: 첫 writer 연결 실패) 해당 연결의
+        worker thread는 ``_init_conn`` 내부에서 이미 drain되며, 여기서는 이미
+        할당된 ``self._writer`` 만 ``close()`` 한다.
+        """
+        try:
+            self._writer = await self._init_conn()
+            self._reader = await self._init_conn()
+        except BaseException:
+            await self.close()
+            raise
 
     async def close(self) -> None:
         """연결 종료."""
