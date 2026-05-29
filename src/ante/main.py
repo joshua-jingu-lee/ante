@@ -474,7 +474,12 @@ async def _init_trading(s: Services) -> None:
     # TreasuryManager — 계좌별 Treasury 인스턴스 관리
     from ante.treasury import TreasuryManager
 
-    s.treasury_manager = TreasuryManager(db=s.db, eventbus=s.eventbus)
+    # #1947: 부분체결 비례 정산을 위해 OrderTracker(상단에서 생성)를 주입한다.
+    # Treasury 가 buy fill 에서 order_id 로 ordered_qty/recorded_filled_qty 를
+    # 조회해 terminal(전량 체결) 판정 후에만 잔여 예약을 회수한다.
+    s.treasury_manager = TreasuryManager(
+        db=s.db, eventbus=s.eventbus, order_tracker=s.order_tracker
+    )
     accounts = await s.account_service.list()
     await s.treasury_manager.initialize_all(accounts)
     logger.info("TreasuryManager 초기화 완료: %d개 계좌", len(accounts))

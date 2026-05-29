@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.trade.order_tracker import OrderTracker
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +20,18 @@ logger = logging.getLogger(__name__)
 class TreasuryManager:
     """계좌별 Treasury 인스턴스를 생성하고 관리하는 상위 계층."""
 
-    def __init__(self, db: Database, eventbus: EventBus) -> None:
+    def __init__(
+        self,
+        db: Database,
+        eventbus: EventBus,
+        *,
+        order_tracker: OrderTracker | None = None,
+    ) -> None:
         self._db = db
         self._eventbus = eventbus
+        # #1947: 부분체결 비례 정산용 OrderTracker 를 각 Treasury 에 주입한다.
+        # 단일 인스턴스(account-agnostic — PK 가 전역 유일 order_id)를 공유한다.
+        self._order_tracker = order_tracker
         self._treasuries: dict[str, Treasury] = {}
 
     async def create_treasury(self, account: Account) -> Treasury:
@@ -42,6 +52,7 @@ class TreasuryManager:
             buy_commission_rate=float(account.buy_commission_rate),
             sell_commission_rate=float(account.sell_commission_rate),
             market_order_reserve_buffer_rate=account.market_order_reserve_buffer_rate,
+            order_tracker=self._order_tracker,
         )
         await treasury.initialize()
         self._treasuries[account.account_id] = treasury
