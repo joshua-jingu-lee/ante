@@ -2,6 +2,7 @@
 
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import Event
+from ante.eventbus.fill_dedup_guard import FillDedupGuard
 from ante.eventbus.history import EventHistoryStore
 
-__all__ = ["Event", "EventBus", "EventHistoryStore"]
+__all__ = ["Event", "EventBus", "EventHistoryStore", "FillDedupGuard"]

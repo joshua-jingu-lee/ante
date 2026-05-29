@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from ante.account.errors import InvalidAccountIdError
 from ante.account.scoping import require_account_id
+from ante.eventbus.fill_dedup_guard import FillDedupGuard
 from ante.trade.models import TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
@@ -53,6 +54,12 @@ class TradeRecorder:
         self._db = db
         self._position_history = position_history
         self._eventbus: EventBus | None = None
+        # #1957: 체결 이벤트 bounded 멱등 가드. trades 는 INSERT OR IGNORE 로
+        # 이미 DB-멱등이나, NotificationEvent 재발행은 effect 비멱등이라 outbox
+        # at-least-once 재전달 시 중복 알림이 난다. 비빈키 재전달을 가드로
+        # early-return 해 중복 알림을 차단한다(best-effort — 재기동/maxlen 초과는
+        # known-limitation).
+        self._fill_dedup_guard = FillDedupGuard()
 
     async def initialize(self) -> None:
         """스키마 생성."""
@@ -86,10 +93,23 @@ class TradeRecorder:
         trades insert·position 갱신을 **다시 하지 않는다**(이중 적용 방지). 갱신된
         포지션을 읽어 체결 알림만 발행한다. rejected/failed/cancelled 등 비-fill
         상태 기록은 별도 핸들러에서 유지한다.
+
+        #1957: trades insert(``_save``, INSERT OR IGNORE) 는 DB-멱등이지만 아래
+        ``NotificationEvent`` publish 는 effect 비멱등이다(NotificationService 의
+        60s in-memory content dedup 만 거쳐 재기동/catch_up 재전달 시 중복 알림).
+        따라서 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 **early-return** 해
+        중복 NotificationEvent 재발행을 차단한다. 빈키(재전달 없는 단발 경로)는
+        가드 비대상으로 항상 처리한다.
         """
         from ante.eventbus.events import NotificationEvent, OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
+            return
+
+        # 비빈키만 dedup. seen_or_add 는 await 없는 동기 원자 구간(#1957).
+        if event.fill_dedup_key and self._fill_dedup_guard.seen_or_add(
+            event.fill_dedup_key
+        ):
             return
 
         side_label = "매수" if event.side == "buy" else "매도"

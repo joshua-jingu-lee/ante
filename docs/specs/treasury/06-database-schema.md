@@ -35,6 +35,19 @@ CREATE TABLE treasury_transactions (
     created_at       TEXT DEFAULT (datetime('now'))
 );
 
+-- 체결 이벤트 멱등 dedup (#1957)
+-- OrderFilledEvent 의 outbox at-least-once 재전달에 대해 Treasury 정산을
+-- 진짜 exactly-once-effect 로 만든다. fill_dedup_key(= #1949 결정적 키)를
+-- PRIMARY KEY 로 두고, _on_order_filled 가 정산 트랜잭션 안에서 INSERT OR
+-- IGNORE ... RETURNING 으로 신규 여부를 판정한다(행 반환=신규=정산 1회,
+-- 충돌=이미 처리=정산 0회 추가). dedup-insert ⟺ 정산이 1:1 원자 결합된다.
+CREATE TABLE treasury_fill_dedup (
+    fill_dedup_key TEXT PRIMARY KEY,   -- order_id:canonical(confirmed_cumulative)
+    bot_id         TEXT,
+    account_id     TEXT,
+    processed_at   TEXT DEFAULT (datetime('now'))
+);
+
 -- 계좌별 상태 저장
 CREATE TABLE treasury_state (
     account_id         TEXT PRIMARY KEY,                   -- 계좌별 분리 (기존: key TEXT PK)
@@ -52,5 +65,10 @@ CREATE INDEX idx_treasury_transactions_account
 > **마이그레이션**: 1.0 이전 fresh schema 기준으로 Treasury DB는 fallback
 > account 값을 생성하지 않는다. 기존 invalid dev DB 데이터의 자동 보존/변환은
 > 이 계약의 범위가 아니다.
+
+> **`treasury_fill_dedup` 보존 (#1957)**: fill 이벤트당 1행으로 누적되나 PK
+> 인덱스만 증가하며 키 충돌이 없어 정합성 위험이 아니다. 개인 홈서버 fill
+> 볼륨상 장기 비이슈이므로 retention/prune(terminal 주문 dedup row 정리 또는
+> N일 경과 삭제)은 **별도 follow-up 후보**로 분리한다(#1957 bounded scope).
 
 > **참고**: `positions` 테이블은 Trade 모듈이 소유한다. [trade.md](../trade/trade.md) 참조.

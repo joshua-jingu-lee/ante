@@ -251,10 +251,28 @@ crash하면 이벤트가 유실된다. 체결(`OrderFilledEvent`)은 Treasury �
   `fill_dedup_key = order_id:canonical(confirmed_cumulative)`(CAS로 확정된 누적
   체결량 기준)를 싣는다. 소비자가 at-least-once 재전달을 식별·멱등 처리하는 키다.
   outbox 미경유 직접 발행 경로(VirtualProvider)는 dedup 비대상이며 빈키(`""`)다.
-- **소비자 멱등화 경계**: at-least-once 재전달 시 비멱등 소비자
-  (Treasury/Bot/SignalChannel)의 이중처리 가능은 #1949 범위 밖의 알려진 잔여이며,
-  소비자 멱등화는 별도 이슈(#1957)에서 `fill_dedup_key`를 소비해 해소한다.
-  #1949는 소비자 무변경(무손실 전달 + 결정적 키 제공까지).
+- **소비자 멱등화 (#1957 완료)**: at-least-once 재전달 시 비멱등 소비자의
+  이중처리는 #1957에서 `fill_dedup_key`를 소비해 소비자별로 해소했다. 정책은
+  소비자 효과의 reversibility에 따라 두 단계로 나뉜다.
+  - **Treasury = 진짜 exactly-once-effect**: `_on_order_filled`가 정산
+    `Database.transaction()` **안에서** 전용 `treasury_fill_dedup`
+    테이블(PK=`fill_dedup_key`)에 `INSERT OR IGNORE ... RETURNING`으로
+    dedup-insert를 **가장 먼저** 수행하고, 행이 반환될 때만(신규) 정산한다
+    (충돌=이미 처리=정산 0회 추가). dedup-insert ⟺ 정산이 단일 트랜잭션으로
+    원자 결합되며, rollback 시 인메모리 `_budgets`/`_reservations`를
+    진입 전 snapshot으로 복원해 메모리+DB split-brain을 막는다. DB-persisted라
+    재기동 후에도 동작한다.
+  - **Bot / SignalChannel / TradeRecorder = bounded dedup (best-effort)**:
+    전략 follow-up·외부 JSON write·NotificationEvent 재발행은 외부/사용자 코드
+    효과라 공유 `FillDedupGuard`(in-memory `deque(maxlen=512)` + `set` 미러)로
+    비빈키 재전달을 억제한다. **known-limitation**: 프로세스 재기동 시 가드
+    소실, `maxlen` 윈도우를 벗어난 재전달은 식별 못 함(이중 처리 가능).
+    DB-persisted exactly-once로의 승격은 #1957 비목표이며 **follow-up 후보**다.
+  - **Gateway = 무변경**: cache invalidate는 멱등이라 dedup 불필요.
+  - **빈키(`""`) = dedup 비대상**: VirtualProvider 직접발행·FillApplier outbox
+    미주입 fallback은 단발 in-memory 발행(재전달 없음)이라 네 소비자 모두
+    빈키는 항상 처리한다(비빈키만 dedup).
+  - #1949는 소비자 무변경(무손실 전달 + 결정적 키 제공까지)이었고, 소비는 #1957.
 
 상세: `docs/specs/broker-adapter/18-fill-recovery.md` §10.
 

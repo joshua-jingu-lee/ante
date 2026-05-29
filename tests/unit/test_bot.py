@@ -463,6 +463,131 @@ class TestBot:
         assert len(received) == 0
         await bot.stop()
 
+    async def test_on_order_filled_bounded_dedup_nonempty_key(self, eventbus, ctx):
+        """#1957: 같은 비빈키 fill 재전달 → follow-up 1회만 발행."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="fill_react_v1.0.0",
+            interval_seconds=999,
+            account_id="acc-test",
+        )
+        received = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=FillReactStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+
+        event = OrderFilledEvent(
+            order_id="ord1",
+            broker_order_id="bk1",
+            bot_id="bot1",
+            strategy_id="fill_react_v1.0.0",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=50000.0,
+            order_type="market",
+            account_id="acc-test",
+            fill_dedup_key="ord1:10.0",
+        )
+        await bot.on_order_filled(event)
+        await bot.on_order_filled(event)
+
+        # 재전달은 억제 — follow-up 1회만.
+        assert len(received) == 1
+        await bot.stop()
+
+    async def test_on_order_filled_empty_key_not_deduped(self, eventbus, ctx):
+        """#1957: 빈키 fill 재전달 → follow-up 2회 (dedup 비대상)."""
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="fill_react_v1.0.0",
+            interval_seconds=999,
+            account_id="acc-test",
+        )
+        received = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: received.append(e))
+
+        bot = Bot(
+            config=config,
+            strategy_cls=FillReactStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+
+        event = OrderFilledEvent(
+            order_id="ord1",
+            broker_order_id="bk1",
+            bot_id="bot1",
+            strategy_id="fill_react_v1.0.0",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=50000.0,
+            order_type="market",
+            account_id="acc-test",
+            fill_dedup_key="",
+        )
+        await bot.on_order_filled(event)
+        await bot.on_order_filled(event)
+
+        assert len(received) == 2
+        await bot.stop()
+
+    async def test_on_order_filled_passes_dedup_key_to_strategy(self, eventbus, ctx):
+        """#1957: strategy.on_fill dict 에 fill_dedup_key 가 전달된다."""
+        captured_fills: list[dict] = []
+
+        class CaptureStrategy(Strategy):
+            meta = StrategyMeta(name="cap", version="1.0.0", description="t")
+
+            async def on_step(self, context):
+                return []
+
+            async def on_fill(self, fill):
+                captured_fills.append(fill)
+                return []
+
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="cap_v1.0.0",
+            interval_seconds=999,
+            account_id="acc-test",
+        )
+        bot = Bot(
+            config=config,
+            strategy_cls=CaptureStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+
+        await bot.on_order_filled(
+            OrderFilledEvent(
+                order_id="ord1",
+                broker_order_id="bk1",
+                bot_id="bot1",
+                strategy_id="cap_v1.0.0",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=50000.0,
+                order_type="market",
+                account_id="acc-test",
+                fill_dedup_key="ord1:10.0",
+            )
+        )
+
+        assert len(captured_fills) == 1
+        assert captured_fills[0]["fill_dedup_key"] == "ord1:10.0"
+        await bot.stop()
+
     async def test_on_order_update_rejected(self, eventbus, ctx, simple_config):
         """주문 거부 통보 → 전략 on_order_update() 호출."""
         updates = []

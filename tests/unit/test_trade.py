@@ -596,6 +596,70 @@ class TestTradeRecorder:
         assert "실현 손익" in sell_msg
         assert "+50,000원" in sell_msg
 
+    async def test_on_filled_nonempty_key_redelivery_notifies_once(
+        self, recorder, fill_applier, order_tracker, eventbus
+    ):
+        """#1957: 같은 비빈키 fill 재전달 → NotificationEvent 1회만 (effect 멱등).
+
+        trades insert(INSERT OR IGNORE)는 DB-멱등이나 NotificationEvent 재발행은
+        effect 비멱등이므로, bounded dedup 으로 재전달 시 알림을 1회만 발행한다.
+        """
+        from dataclasses import replace as _replace
+
+        from ante.eventbus.events import NotificationEvent
+
+        captured: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: captured.append(e))
+
+        # 포지션 seed (알림 메시지가 position 을 읽으므로). _on_filled 는 구독하지
+        # 않고(시드 fill 의 자체 알림 배제) eventbus 참조만 주입해 직접 호출한다.
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+        )
+        recorder._eventbus = eventbus
+
+        event = _replace(
+            _make_filled_event(side="buy", quantity=10.0, price=50000.0),
+            fill_dedup_key="ord1:10.0",
+        )
+        await recorder._on_filled(event)
+        await recorder._on_filled(event)
+
+        assert len(captured) == 1
+
+    async def test_on_filled_empty_key_redelivery_notifies_twice(
+        self, recorder, fill_applier, order_tracker, eventbus
+    ):
+        """#1957: 빈키 fill 재전달 → NotificationEvent 2회 (dedup 비대상)."""
+        from ante.eventbus.events import NotificationEvent
+
+        captured: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: captured.append(e))
+
+        await _apply_fill(
+            fill_applier,
+            order_tracker,
+            order_id="ord1",
+            broker_order_id="bk1",
+            cumulative=10.0,
+            avg_price=50000.0,
+            side="buy",
+        )
+        recorder._eventbus = eventbus
+
+        event = _make_filled_event(side="buy", quantity=10.0, price=50000.0)
+        assert event.fill_dedup_key == ""
+        await recorder._on_filled(event)
+        await recorder._on_filled(event)
+
+        assert len(captured) == 2
+
 
 # ── PositionHistory ──────────────────────────────────
 

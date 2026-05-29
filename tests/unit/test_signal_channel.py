@@ -255,6 +255,69 @@ class TestEventForwarding:
         await channel._on_fill(event)
         assert output.getvalue() == ""
 
+
+class TestFillBoundedDedup:
+    """SignalChannel 체결 bounded dedup (#1957)."""
+
+    async def test_fill_includes_dedup_key(
+        self, channel: SignalChannel, output: io.StringIO
+    ) -> None:
+        """JSON payload 에 fill_dedup_key 가 포함된다."""
+        event = OrderFilledEvent(
+            order_id="ORD-001",
+            bot_id="bot-001",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=58200.0,
+            commission=87.3,
+            account_id="acc-test",
+            fill_dedup_key="ORD-001:10.0",
+        )
+        await channel._on_fill(event)
+        resp = json.loads(output.getvalue().strip())
+        assert resp["fill_dedup_key"] == "ORD-001:10.0"
+
+    async def test_nonempty_key_redelivery_writes_once(
+        self, channel: SignalChannel, output: io.StringIO
+    ) -> None:
+        """같은 비빈키 fill 2회 → write 1회 (stdout 1줄)."""
+        event = OrderFilledEvent(
+            order_id="ORD-001",
+            bot_id="bot-001",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=58200.0,
+            account_id="acc-test",
+            fill_dedup_key="ORD-001:10.0",
+        )
+        await channel._on_fill(event)
+        await channel._on_fill(event)
+
+        lines = [ln for ln in output.getvalue().splitlines() if ln]
+        assert len(lines) == 1
+
+    async def test_empty_key_redelivery_writes_twice(
+        self, channel: SignalChannel, output: io.StringIO
+    ) -> None:
+        """빈키 fill 2회 → write 2회 (dedup 비대상)."""
+        event = OrderFilledEvent(
+            order_id="ORD-001",
+            bot_id="bot-001",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            price=58200.0,
+            account_id="acc-test",
+            fill_dedup_key="",
+        )
+        await channel._on_fill(event)
+        await channel._on_fill(event)
+
+        lines = [ln for ln in output.getvalue().splitlines() if ln]
+        assert len(lines) == 2
+
     async def test_order_rejected_forwarded(
         self, channel: SignalChannel, output: io.StringIO
     ) -> None:

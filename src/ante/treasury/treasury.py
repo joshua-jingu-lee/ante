@@ -6,6 +6,7 @@ import asyncio
 import logging
 import math
 from collections.abc import Awaitable, Callable
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
@@ -68,6 +69,13 @@ CREATE TABLE IF NOT EXISTS treasury_transactions (
     amount           REAL NOT NULL,
     description      TEXT DEFAULT '',
     created_at       TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS treasury_fill_dedup (
+    fill_dedup_key TEXT PRIMARY KEY,
+    bot_id         TEXT,
+    account_id     TEXT,
+    processed_at   TEXT DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS treasury_state (
@@ -1067,7 +1075,15 @@ class Treasury:
         )
 
     async def _on_order_filled(self, event: object) -> None:
-        """체결 이벤트 처리 -- 예약 자금 정산."""
+        """체결 이벤트 처리 -- 예약 자금 정산.
+
+        #1957: outbox at-least-once 재전달에 대한 **진짜 exactly-once-effect**.
+        ``fill_dedup_key`` 가 비빈키면 전용 ``treasury_fill_dedup`` 테이블에
+        ``INSERT OR IGNORE`` 한 뒤 정산을 **같은 트랜잭션**에 묶어, 재전달(이미
+        처리된 키)은 정산을 0회 추가한다(dedup-insert ⟺ 정산 1:1). 빈키
+        (VirtualProvider 직접발행 / FillApplier fallback = 단발 in-memory, 재전달
+        없음)는 dedup 비대상으로 현행 정산을 그대로 수행한다(설계 결정 5).
+        """
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
@@ -1080,6 +1096,68 @@ class Treasury:
         if not budget:
             return
 
+        # 빈키: dedup 비대상 — 현행 정산 그대로 (트랜잭션·snapshot 없이).
+        if not event.fill_dedup_key:
+            await self._apply_fill_settlement(event, budget)
+            return
+
+        # 비빈키: dedup-insert + 정산을 단일 트랜잭션으로 원자 결합.
+        #
+        # split-brain 방지(R1-2): settle 본문(``_settle_buy_fill`` 등)이
+        # ``_budgets[bot_id]``/``_reservations[order_id]`` 를 **즉시 mutate**
+        # 하므로, 트랜잭션 rollback 시 DB 는 원복돼도 메모리만 변경되는 split 이
+        # 생긴다. 진입 **전**에 이 이벤트가 touch 하는 항목(단일 bot budget +
+        # 매수 시 단일 order reservation)을 snapshot(값 copy + 존재 플래그)하고,
+        # rollback 경로에서 복원한다.
+        bot_id = event.bot_id
+        order_id = event.order_id
+        budget_snapshot = replace(budget)
+        reservation_present = order_id in self._reservations
+        reservation_snapshot = (
+            self._reservations[order_id] if reservation_present else None
+        )
+
+        try:
+            async with self._db.transaction():
+                # dedup-insert 를 **가장 먼저** (R1-3): RETURNING 으로 신규 삽입
+                # 여부를 원자적으로 판정한다. ``OR IGNORE`` 충돌(이미 처리됨)이면
+                # 행이 반환되지 않아 settle 을 호출하지 않고 early-return →
+                # terminal 재전달의 예약 회수/정산 재실행 차단.
+                inserted = await self._db.execute_fetch_one(
+                    """INSERT OR IGNORE INTO treasury_fill_dedup
+                       (fill_dedup_key, bot_id, account_id)
+                       VALUES (?, ?, ?)
+                       RETURNING fill_dedup_key""",
+                    (event.fill_dedup_key, bot_id, self._account_id),
+                )
+                if inserted is None:
+                    # 이미 처리된 fill — 정산 0회 추가. 메모리 미변경이라 복원
+                    # 불필요(COMMIT 으로 dedup row no-op 확정).
+                    return
+                # 신규 키: 정산 본문(메모리 + DB write)을 같은 트랜잭션에서.
+                await self._apply_fill_settlement(event, budget)
+        except BaseException:
+            # rollback 발생 — 트랜잭션 진입 후 변경된 메모리를 snapshot 으로 복원.
+            # ``_apply_fill_settlement`` 가 부분 진행 후 예외를 던졌을 수 있으므로
+            # budget 값과 reservation 존재 여부를 진입 전 상태로 되돌린다.
+            self._restore_budget(budget, budget_snapshot)
+            if reservation_present:
+                # 기존 엔트리: 값 복원 (정산이 갱신/제거했을 수 있음).
+                self._reservations[order_id] = reservation_snapshot  # type: ignore[assignment]
+            else:
+                # 원래 없던 엔트리: pop 으로 제거 (partial-restore hole 방지).
+                self._reservations.pop(order_id, None)
+            raise
+
+    async def _apply_fill_settlement(self, event: Any, budget: BotBudget) -> None:
+        """체결 정산 본문 — 인메모리 예산 갱신 + DB 동기화.
+
+        ``_on_order_filled`` 의 dedup 분기에서 호출된다. 비빈키 경로에서는
+        ``Database.transaction()`` 안에서 호출되어 ``_save_budget`` /
+        ``_log_transaction`` 의 단발 ``execute`` 가 같은 트랜잭션에 묶인다(중첩
+        트랜잭션을 열지 않는다). ``_settle_buy_fill`` 도 인메모리 연산만 하므로
+        트랜잭션 안/밖 양쪽에서 동작한다.
+        """
         fill_value = event.quantity * event.price
         commission = event.commission
 
@@ -1100,6 +1178,20 @@ class Treasury:
                 f"{event.side} {event.symbol} {event.quantity} @ {event.price:,.0f}"
             ),
         )
+
+    @staticmethod
+    def _restore_budget(target: BotBudget, snapshot: BotBudget) -> None:
+        """rollback 시 ``_budgets`` 항목을 snapshot 값으로 in-place 복원.
+
+        ``_budgets[bot_id]`` 의 객체 identity 를 유지(외부 참조 보존)하면서
+        mutable 필드만 snapshot 으로 되돌린다.
+        """
+        target.allocated = snapshot.allocated
+        target.available = snapshot.available
+        target.reserved = snapshot.reserved
+        target.spent = snapshot.spent
+        target.returned = snapshot.returned
+        target.last_updated = snapshot.last_updated
 
     async def _settle_buy_fill(
         self, event: Any, budget: BotBudget, fill_value: float, commission: float
