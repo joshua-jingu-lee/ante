@@ -30,4 +30,5 @@
 | [15-reconciliation.md](15-reconciliation.md) | 대사 (Reconciliation) |
 | [16-eventbus-integration.md](16-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [17-notification-events.md](17-notification-events.md) | 알림 이벤트 정의 (Notification Events) |
+| [18-fill-recovery.md](18-fill-recovery.md) | 체결 반영 경로 (Fill Recovery) — 스트림(빠른경로)+REST(백스톱), OrderTracker/FillApplier 멱등 |
 | [19-scope-out.md](19-scope-out.md) | 스펙 아웃 (Scope-out) |

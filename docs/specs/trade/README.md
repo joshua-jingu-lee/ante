@@ -16,6 +16,7 @@
 | [01-overview.md](01-overview.md) | 개요 |
 | [02-reference-implementations.md](02-reference-implementations.md) | 참고 구현체 분석 |
 | [03-design-decisions.md](03-design-decisions.md) | 설계 결정 |
+| [03-08-fill-recovery.md](03-08-fill-recovery.md) | OrderTracker / FillApplier — 체결 durability 권위자 (#1946) |
 | [04-eventbus-integration.md](04-eventbus-integration.md) | 이벤트 버스 연동 (EventBus Integration) |
 | [05-cli-usage.md](05-cli-usage.md) | CLI 사용 |
 | [06-testing.md](06-testing.md) | 테스트 고려사항 |

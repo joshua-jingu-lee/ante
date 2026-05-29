@@ -6,6 +6,12 @@
 
 구현: `src/ante/trade/recorder.py` 참조
 
+> **체결(fill) 권위 일원화 (#1946)**: `_on_filled`는 더 이상 fill 경로의 포지션을
+> 갱신하지 않는다. fill의 durable 적용(`TradeRecord` + `positions`)은 **FillApplier
+> 단일 권위자**(단일 트랜잭션)가 수행해 스트림+폴 이중 경로의 이중 적용을 방지한다.
+> TradeRecorder는 rejected/failed/cancelled 등 비-fill 상태 기록과 체결 알림을
+> 유지한다. 상세: [03-08-fill-recovery.md](03-08-fill-recovery.md).
+
 #### 퍼블릭 메서드
 
 | 메서드 | 파라미터 | 반환값 | 설명 |
