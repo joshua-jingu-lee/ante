@@ -297,7 +297,12 @@ class TestCommands:
         )
 
     async def test_stop_bot_with_positions(self, receiver, bot_manager):
-        """보유 종목 있으면 메시지 B — 종목명 및 체결대기 금액 표시."""
+        """보유 종목 있으면 메시지 B — 종목명 및 미체결 주문 건수 표시.
+
+        #1948: 통일 OpenOrder dict 스키마에 amount(예약 금액)가 없으므로
+        체결대기는 금액 합이 아닌 **주문 건수**로 표시한다(live amount 부재
+        0원 오표시 버그 정정).
+        """
         bot = _make_running_bot(
             positions={
                 "005930": {
@@ -307,7 +312,28 @@ class TestCommands:
                 },
                 "035720": {"symbol": "035720", "quantity": 5, "avg_entry_price": 50000},
             },
-            open_orders=[{"amount": 500_000}, {"amount": 300_000}],
+            open_orders=[
+                {
+                    "order_id": "o1",
+                    "symbol": "005930",
+                    "side": "buy",
+                    "ordered_qty": 10.0,
+                    "recorded_filled_qty": 0.0,
+                    "remaining_qty": 10.0,
+                    "status": "open",
+                    "submitted_at": None,
+                },
+                {
+                    "order_id": "o2",
+                    "symbol": "035720",
+                    "side": "buy",
+                    "ordered_qty": 5.0,
+                    "recorded_filled_qty": 0.0,
+                    "remaining_qty": 5.0,
+                    "status": "open",
+                    "submitted_at": None,
+                },
+            ],
         )
         bot_manager.get_bot.return_value = bot
         result = await receiver._cmd_stop(["bot-1"])
@@ -316,7 +342,7 @@ class TestCommands:
         assert "포지션을 직접 관리" in result
         assert "005930" in result
         assert "035720" in result
-        assert "800,000원" in result
+        assert "체결대기 주문: 2건" in result
 
     async def test_stop_bot_already_stopped(self, receiver, bot_manager):
         """이미 중지된 봇은 안내 메시지 반환."""

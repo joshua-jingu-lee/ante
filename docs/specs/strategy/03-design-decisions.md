@@ -68,7 +68,7 @@
 
 #### OrderView 메서드 시그니처
 
-상세 내용: [03-04-provider-and-views.md](03-04-provider-and-views.md)
+`get_open_orders`는 통일 **OpenOrder dict 스키마**(`order_id`, `symbol`, `side`, `ordered_qty`, `recorded_filled_qty`, `remaining_qty`, `status`, `submitted_at` — `amount` 제외)를 반환한다. LIVE는 **OrderTracker SSOT 경유**(ante 제출 미체결 한정, cross-step 가시성). 상세 스키마·매핑·known-limitation: [03-04-provider-and-views.md](03-04-provider-and-views.md)
 
 ### StrategyContext — 전략에 노출되는 제한된 API
 

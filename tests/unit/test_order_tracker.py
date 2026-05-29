@@ -301,3 +301,149 @@ async def test_expire_stale_excludes_partially_filled(tracker):
     assert count == 1
     assert (await tracker.get("ord-partial")).status == "partially_filled"
     assert (await tracker.get("ord-dead")).status == "expired"
+
+
+# ── #1948: sync open 캐시 + LIVE get_open_orders 백엔드 ──────
+
+
+def _open_ids(tracker, account_id="acct-A", bot_id="bot-1"):
+    return [
+        r.order_id for r in tracker.get_open_orders_for_bot_sync(account_id, bot_id)
+    ]
+
+
+async def test_open_seeds_sync_cache(tracker):
+    """open() 후 sync 캐시에 즉시 노출."""
+    await _seed(tracker)
+    assert _open_ids(tracker) == ["ord-1"]
+
+
+async def test_duplicate_open_event_single_cache_entry(tracker):
+    """중복 OrderSubmittedEvent(open) 2회 → 캐시 단일 entry (blind insert 회귀 락)."""
+    await _seed(tracker)
+    # 첫 체결로 캐시를 advance.
+    await tracker.record_fill("ord-1", 40.0, 1000.0)
+    tracker.mirror_fill_to_cache("ord-1", 40.0, "partially_filled")
+    # 중복 open 이벤트(ON CONFLICT DO NOTHING — DB 미변경) 재수신.
+    await _seed(tracker)
+    records = tracker.get_open_orders_for_bot_sync("acct-A", "bot-1")
+    assert len(records) == 1
+    # 중복 open 이 advance 된 캐시(40)를 blind 하게 0 으로 덮어쓰지 않음.
+    assert records[0].recorded_filled_qty == 40.0
+
+
+async def test_record_fill_alone_does_not_touch_cache(tracker):
+    """record_fill 단독 호출은 캐시 미변경 (캐시는 mirror_fill_to_cache 로만)."""
+    await _seed(tracker)
+    result = await tracker.record_fill("ord-1", 100.0, 1000.0)  # filled
+    assert result.delta == 100.0
+    assert result.new_status == "filled"
+    # record_fill 만으로는 캐시가 그대로 — 여전히 open, recorded=0.
+    records = tracker.get_open_orders_for_bot_sync("acct-A", "bot-1")
+    assert len(records) == 1
+    assert records[0].recorded_filled_qty == 0.0
+    assert records[0].status == "open"
+
+
+async def test_mirror_fill_partial_then_filled_evicts(tracker):
+    """mirror_fill_to_cache: partial 은 미러, filled 는 evict."""
+    await _seed(tracker)
+    # partial 미러.
+    await tracker.record_fill("ord-1", 40.0, 1000.0)
+    tracker.mirror_fill_to_cache("ord-1", 40.0, "partially_filled")
+    recs = tracker.get_open_orders_for_bot_sync("acct-A", "bot-1")
+    assert len(recs) == 1
+    assert recs[0].recorded_filled_qty == 40.0
+    assert recs[0].status == "partially_filled"
+    # filled 미러 → evict.
+    await tracker.record_fill("ord-1", 100.0, 1010.0)
+    tracker.mirror_fill_to_cache("ord-1", 100.0, "filled")
+    assert _open_ids(tracker) == []
+
+
+async def test_mark_terminal_evicts_cache(tracker):
+    """mark_terminal 후 sync 조회에서 제외."""
+    await _seed(tracker)
+    assert _open_ids(tracker) == ["ord-1"]
+    await tracker.mark_terminal("ord-1", "cancelled")
+    assert _open_ids(tracker) == []
+
+
+async def test_expire_stale_evicts_cache(tracker):
+    """expire_stale 후 만료 주문 sync 미노출 (batch evict)."""
+    await _seed(
+        tracker, order_id="ord-old", broker_order_id="0009", submitted_date="20260528"
+    )
+    await _seed(
+        tracker, order_id="ord-new", broker_order_id="0010", submitted_date="20260529"
+    )
+    assert sorted(_open_ids(tracker)) == ["ord-new", "ord-old"]
+    count = await tracker.expire_stale("acct-A", before_date="20260529")
+    assert count == 1
+    # 만료된 ord-old 는 캐시에서 제거, ord-new 는 유지.
+    assert _open_ids(tracker) == ["ord-new"]
+
+
+async def test_sync_cache_account_bot_scope(tracker):
+    """(account_id, bot_id) 스코프 — 타 account/bot 누출 없음."""
+    await _seed(tracker, order_id="a1", account_id="acct-A", broker_order_id="0001")
+    await _seed(tracker, order_id="b1", account_id="acct-B", broker_order_id="0002")
+    # 타-봇 주문(다른 bot_id) 직접 open.
+    await tracker.open(
+        order_id="other-bot",
+        account_id="acct-A",
+        bot_id="bot-2",
+        strategy_id="s",
+        broker_order_id="0003",
+        symbol="005930",
+        side="buy",
+        order_type="market",
+        ordered_qty=10.0,
+        submitted_date="20260529",
+    )
+    assert _open_ids(tracker, "acct-A", "bot-1") == ["a1"]
+    assert _open_ids(tracker, "acct-B", "bot-1") == ["b1"]
+    assert _open_ids(tracker, "acct-A", "bot-2") == ["other-bot"]
+
+
+async def test_to_open_order_dict_schema(tracker):
+    """통일 OpenOrder dict 스키마 + remaining_qty."""
+    await _seed(tracker, ordered_qty=100.0)
+    await tracker.record_fill("ord-1", 30.0, 1000.0)
+    tracker.mirror_fill_to_cache("ord-1", 30.0, "partially_filled")
+    recs = tracker.get_open_orders_for_bot_sync("acct-A", "bot-1")
+    d = recs[0].to_open_order_dict()
+    assert set(d.keys()) == {
+        "order_id",
+        "symbol",
+        "side",
+        "ordered_qty",
+        "recorded_filled_qty",
+        "remaining_qty",
+        "status",
+        "submitted_at",
+    }
+    assert "amount" not in d
+    assert d["ordered_qty"] == 100.0
+    assert d["recorded_filled_qty"] == 30.0
+    assert d["remaining_qty"] == 70.0
+
+
+async def test_warm_open_cache_from_db(db):
+    """initialize() 가 DB 의 open/partially_filled 를 캐시에 warm."""
+    # 1st tracker 로 DB 에 주문 seed + 부분 체결.
+    t1 = OrderTracker(db)
+    await t1.initialize()
+    await _seed(t1, order_id="ord-open", broker_order_id="0001")
+    await _seed(t1, order_id="ord-part", broker_order_id="0002")
+    await t1.record_fill("ord-part", 40.0, 1000.0)
+    t1.mirror_fill_to_cache("ord-part", 40.0, "partially_filled")
+    await _seed(t1, order_id="ord-done", broker_order_id="0003")
+    await t1.record_fill("ord-done", 100.0, 1000.0)  # filled (DB)
+    t1.mirror_fill_to_cache("ord-done", 100.0, "filled")
+
+    # 새 tracker 가 동일 DB 로 warm — terminal(filled) 제외, open/partial 만.
+    t2 = OrderTracker(db)
+    await t2.initialize()
+    ids = sorted(_open_ids(t2))
+    assert ids == ["ord-open", "ord-part"]

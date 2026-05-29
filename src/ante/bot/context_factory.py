@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.account.models import TradingMode
 from ante.bot.config import BotConfig
@@ -13,6 +13,7 @@ from ante.bot.providers.virtual import (
     VirtualOrderView,
     VirtualPortfolioView,
 )
+from ante.strategy.base import OrderView
 from ante.strategy.context import StrategyContext
 
 if TYPE_CHECKING:
@@ -24,6 +25,7 @@ if TYPE_CHECKING:
     from ante.data.store import ParquetStore
     from ante.gateway.gateway import APIGateway
     from ante.strategy.base import DataProvider
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.position import PositionHistory
     from ante.treasury.manager import TreasuryManager
 
@@ -55,6 +57,7 @@ class StrategyContextFactory:
         position_history: PositionHistory | None = None,
         api_gateway: APIGateway | None = None,
         parquet_store: ParquetStore | None = None,
+        order_tracker: OrderTracker | None = None,
     ) -> None:
         self._data_provider = data_provider
         self._account_service = account_service
@@ -66,6 +69,10 @@ class StrategyContextFactory:
         self._position_history = position_history
         self._api_gateway = api_gateway
         self._parquet_store = parquet_store
+        # #1948: 주입되면 봇별 LiveOrderView 를 account_id closure 로 생성해
+        # OrderTracker sync 캐시에서 미체결을 조회한다. 미주입(virtual-only/legacy)
+        # 이면 공유 fallback ``live_order_view`` (없으면 빈 결과 stub)를 쓴다.
+        self._order_tracker = order_tracker
 
     def create(self, config: BotConfig) -> StrategyContext:
         """BotConfig 기반으로 적절한 StrategyContext 생성.
@@ -113,18 +120,38 @@ class StrategyContextFactory:
         msg = "Live 봇 생성에 필요한 Portfolio Provider가 설정되지 않았습니다"
         raise ValueError(msg)
 
+    def _resolve_live_order_view(self, config: BotConfig) -> OrderView:
+        """봇별 LiveOrderView 를 결정 (#1948).
+
+        ``order_tracker`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
+        binding 한 **봇별** ``LiveOrderView`` 를 생성한다(``LiveDataProvider`` 패턴
+        미러). 단일계좌 다중봇에서 봇별 account scope 격리를 보장한다. 미주입이면
+        공유 fallback ``live_order_view`` 를, 그것도 없으면 빈 결과 stub 을 쓴다
+        (virtual-only/legacy 환경 호환 — 회귀 방지).
+        """
+        if self._order_tracker is not None:
+            from ante.bot.providers.live import LiveOrderView
+
+            return LiveOrderView(
+                order_tracker=self._order_tracker,
+                account_id=config.account_id,
+            )
+        if self._live_order_view is not None:
+            return self._live_order_view
+        return _EmptyOrderView()
+
     def _create_live_context(self, config: BotConfig) -> StrategyContext:
         """Live 봇용 StrategyContext 생성.
 
         ``APIGateway`` 가 주입돼 있으면 봇별로 새 ``LiveDataProvider``
         인스턴스를 만들어 ``config.account_id`` 를 closure 로 binding 한다.
         그 외 환경에서는 공유 ``self._data_provider`` 를 그대로 사용한다.
+
+        OrderView 도 동일하게 ``order_tracker`` 주입 시 봇별 ``LiveOrderView`` 를
+        생성해 ``account_id`` 를 closure 로 격리한다(#1948).
         """
         portfolio = self._get_live_portfolio(config)
-
-        if self._live_order_view is None:
-            msg = "Live 봇 생성에 필요한 Provider가 설정되지 않았습니다"
-            raise ValueError(msg)
+        order_view = self._resolve_live_order_view(config)
 
         data_provider = self._data_provider
         if self._api_gateway is not None:
@@ -140,7 +167,7 @@ class StrategyContextFactory:
             bot_id=config.bot_id,
             data_provider=data_provider,
             portfolio=portfolio,
-            order_view=self._live_order_view,
+            order_view=order_view,
             trade_history=self._live_trade_history,
         )
         logger.info("Live StrategyContext 생성: %s", config.bot_id)
@@ -206,3 +233,14 @@ class StrategyContextFactory:
                     config.account_id,
                 )
         return 0.0
+
+
+class _EmptyOrderView(OrderView):
+    """order_tracker 와 공유 live_order_view 가 모두 미주입일 때의 fallback.
+
+    virtual-only/legacy 환경에서 LIVE 컨텍스트 생성이 ValueError 로 깨지지 않도록
+    빈 미체결 목록을 반환한다(#1948 회귀 방지).
+    """
+
+    def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:
+        return []
