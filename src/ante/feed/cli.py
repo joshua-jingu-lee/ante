@@ -348,32 +348,18 @@ def run_daily(
 
     orchestrator = _build_orchestrator(cfg)
 
-    # --date 옵션이 있으면 generate_daily_date를 패치
-    if target_date is not None:
-        import ante.feed.pipeline.scheduler as _sched
-
-        _original_generate = _sched.generate_daily_date
-
-        def _override(reference: object = None) -> str:
-            return target_date  # type: ignore[return-value]
-
-        _sched.generate_daily_date = _override  # type: ignore[assignment]
-        try:
-            result = asyncio.run(
-                orchestrator.run_daily(
-                    data_path=Path(data_path),
-                    config=config,
-                )
-            )
-        finally:
-            _sched.generate_daily_date = _original_generate
-    else:
-        result = asyncio.run(
-            orchestrator.run_daily(
-                data_path=Path(data_path),
-                config=config,
-            )
+    # #1943: --date 값을 명시 파라미터로 chain 한다. 이전에는
+    # `scheduler.generate_daily_date` 모듈 속성을 monkey-patch 했으나
+    # daily_runner.py 가 import 시점에 함수 객체를 local 로 바인딩하므로
+    # 그 패치는 실제 호출 경로에 닿지 않아 --date 가 무시되었다.
+    # ``target_date=None`` 이면 DailyRunner 내부에서 기본 fallback(어제).
+    result = asyncio.run(
+        orchestrator.run_daily(
+            data_path=Path(data_path),
+            config=config,
+            target_date=target_date,
         )
+    )
 
     format_daily_result(result, fmt)
 
