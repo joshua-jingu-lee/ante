@@ -360,6 +360,82 @@ async def test_backfill_wait_cancelled_by_stop_event(
 
 
 @pytest.mark.asyncio
+async def test_backfill_stop_wins_when_window_clears_simultaneously(
+    tmp_data_path: Path,
+) -> None:
+    """대기 중 stop_event set과 거래시간 window 동시 해제가 겹쳐도 stop 우선.
+
+    race 시나리오: ``is_trading_paused`` 가 1회 True(대기 진입)였다가, 대기
+    도중 stop_event가 set되고 **동시에** window도 풀려 다음 평가가 False가
+    되는 경우. ``asyncio.wait_for`` 가 (TimeoutError 없이) 정상 반환하므로,
+    수정 전 코드는 ``waited += poll`` 후 ``while is_trading_paused`` 재평가가
+    False가 되어 루프를 빠져나가 ``return False``(수집 진행) — stop 요청을
+    무시한다(race FAIL).
+
+    수정 후에는 wait가 TimeoutError 없이 깨어난 시점에서 즉시
+    ``BACKFILL_STOP_REQUESTED`` 를 적재하고 ``True`` 를 반환해야 한다.
+    """
+    config = _config_with_window("00:00", "23:59", backfill_since="2024-01-01")
+    target_dates = ["2024-01-01", "2024-01-02", "2024-01-03"]
+
+    store = ParquetStore(base_path=tmp_data_path)
+    source = _date_driven_source()
+    orchestrator = FeedOrchestrator(data_go_kr_source=source, store=store)
+
+    stop_event = asyncio.Event()
+
+    # 첫 평가(대기 진입)는 True, 이후 평가는 False(window가 동시에 풀림).
+    pause_flags = iter([True])
+
+    def _paused_then_clears(_config: dict[str, Any]) -> bool:
+        try:
+            return next(pause_flags)
+        except StopIteration:
+            return False
+
+    # daemon 경로: wait_for가 대기하던 중 stop이 도착(set)한 것을 시뮬레이션.
+    # TimeoutError 없이 정상 반환하므로, 같은 사이클에 window가 풀려도(다음
+    # is_trading_paused=False) stop이 우선되어야 한다.
+    async def _fake_wait_for(_awaitable: Any, timeout: float) -> None:
+        if asyncio.iscoroutine(_awaitable):
+            _awaitable.close()
+        stop_event.set()
+
+    # sleep 경로(stop_event is None)는 이 테스트에서 사용되지 않아야 한다.
+    async def _must_not_sleep(_delay: float) -> None:
+        raise AssertionError("daemon 경로(stop_event)에서는 sleep을 쓰지 않는다")
+
+    with (
+        patch.object(
+            FeedOrchestrator,
+            "_is_trading_paused",
+            staticmethod(_paused_then_clears),
+        ),
+        patch.object(bf_mod.asyncio, "wait_for", _fake_wait_for),
+        patch.object(bf_mod.asyncio, "sleep", _must_not_sleep),
+        patch.object(
+            bf_mod.BackfillRunner,
+            "_resolve_dates",
+            staticmethod(lambda _config, _feed_dir: list(target_dates)),
+        ),
+    ):
+        result = await orchestrator.run_backfill(
+            tmp_data_path, config, stop_event=stop_event
+        )
+
+    # stop 우선: BACKFILL_STOP_REQUESTED가 적재되어 clean-success가 아니다.
+    codes = {e.get("code") for e in result.config_errors if isinstance(e, dict)}
+    assert CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED in codes, (
+        "window 동시 해제 race에서도 stop 요청이 우선되어야 한다"
+    )
+    assert CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED in BACKFILL_DATE_ERROR_CODES
+    # stop이 우선되었으므로 첫 날짜를 포함해 어떤 날짜도 수집되지 않았다.
+    assert _stored_dates(store) == set(), (
+        "stop이 무시되고 수집이 진행되면(race) 날짜가 저장된다 — 그러면 안 된다"
+    )
+
+
+@pytest.mark.asyncio
 async def test_backfill_stop_requested_before_wait(
     tmp_data_path: Path,
 ) -> None:

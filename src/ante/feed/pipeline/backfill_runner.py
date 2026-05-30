@@ -447,11 +447,24 @@ class BackfillRunner:
                         timeout=GUARD_WAIT_POLL_SECONDS,
                     )
                 except TimeoutError:
-                    pass
-            else:
-                # one-shot: asyncio.run SIGINT가 이 sleep을 취소해 중단 가능.
-                await asyncio.sleep(GUARD_WAIT_POLL_SECONDS)
+                    # poll 경과(stop 미수신) — window/상한을 루프 top에서 재확인.
+                    waited += GUARD_WAIT_POLL_SECONDS
+                    continue
+                # TimeoutError 아님 ⇒ wait 도중 stop_event가 set됨 ⇒ 즉시 중단.
+                # 같은 사이클에 거래시간 window가 동시에 풀려 while 재평가가
+                # False가 되더라도 그 race를 통과시키지 않고 stop을 우선한다.
+                logger.info("Backfill 중단 요청 수신, 거래시간 대기 종료")
+                ctx.config_errors.append(
+                    {
+                        "code": CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,
+                        "error": "중단 요청으로 backfill 거래시간 대기를 종료했습니다",
+                        "source": "data_go_kr",
+                    }
+                )
+                return True
 
+            # one-shot: asyncio.run SIGINT가 이 sleep을 취소해 중단 가능.
+            await asyncio.sleep(GUARD_WAIT_POLL_SECONDS)
             waited += GUARD_WAIT_POLL_SECONDS
 
         return False
