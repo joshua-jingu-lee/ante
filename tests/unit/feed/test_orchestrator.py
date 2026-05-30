@@ -352,6 +352,87 @@ def test_is_blocked_empty_guard() -> None:
     assert FeedOrchestrator._is_blocked(config, "2024-01-01") is False
 
 
+# ── 가드 분리 (#1972): _is_blocked_day / _is_trading_paused ──────────────
+
+
+def test_is_blocked_day_true_for_listed_weekday() -> None:
+    """blocked_days에 해당하는 target_date 요일이면 True (skip 대상)."""
+    # 2024-01-06 = 토요일
+    config = {"guard": {"blocked_days": ["sat", "sun"]}}
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-06") is True
+
+
+def test_is_blocked_day_false_for_unlisted_weekday() -> None:
+    """blocked_days에 없는 요일이면 False."""
+    # 2024-01-01 = 월요일
+    config = {"guard": {"blocked_days": ["sat", "sun"]}}
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-01") is False
+
+
+def test_is_blocked_day_ignores_trading_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_is_blocked_day는 현재 시각/거래시간 가드를 보지 않는다 (target_date 전용)."""
+    # blocked_days가 비어 있으면, blocked_hours/pause가 설정돼 있어도 False.
+    config = {
+        "guard": {
+            "blocked_days": [],
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-01") is False
+
+
+def test_is_trading_paused_true_inside_window() -> None:
+    """현재 KST 시각이 거래시간 window 안이면 True (대기 대상)."""
+    import ante.feed.pipeline.orchestrator as orch_mod
+
+    # 현재 시각을 무조건 포함하는 window로 강제.
+    config = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    # 종일 window이므로 실제 현재 KST 시각과 무관하게 True.
+    assert orch_mod.FeedOrchestrator._is_trading_paused(config) is True
+
+
+def test_is_trading_paused_false_when_disabled() -> None:
+    """pause_during_trading=False면 window가 있어도 False."""
+    config = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": False,
+        }
+    }
+    assert FeedOrchestrator._is_trading_paused(config) is False
+
+
+def test_is_trading_paused_ignores_target_date() -> None:
+    """_is_trading_paused는 target_date(요일)를 인자로 받지 않는다."""
+    # blocked_days만 있고 blocked_hours가 없으면 거래시간 가드는 False.
+    config = {"guard": {"blocked_days": ["mon"]}}
+    assert FeedOrchestrator._is_trading_paused(config) is False
+
+
+def test_is_blocked_is_or_composition() -> None:
+    """_is_blocked는 _is_blocked_day OR _is_trading_paused 합성(동작 보존)."""
+    # day만 차단: 2024-01-06 토요일.
+    day_only = {"guard": {"blocked_days": ["sat"]}}
+    assert FeedOrchestrator._is_blocked(day_only, "2024-01-06") is True
+    # hour만 차단: 종일 window.
+    hour_only = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    assert FeedOrchestrator._is_blocked(hour_only, "2024-01-01") is True
+    # 둘 다 비활성: False.
+    neither = {"guard": {"blocked_days": ["sat"]}}
+    assert FeedOrchestrator._is_blocked(neither, "2024-01-01") is False
+
+
 # ── Lock 파일 테스트 ─────────────────────────────────────
 
 

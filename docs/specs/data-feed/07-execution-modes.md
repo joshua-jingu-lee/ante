@@ -38,7 +38,10 @@ ante feed run backfill
   ├─ 날짜 범위 결정 (체크포인트 이후 ~ 오늘)
   │
   ├─ [날짜별 루프]
-  │   ├─ 방어 가드 (blocked_days/blocked_hours) → 해당 시 대기
+  │   ├─ 방어 가드
+  │   │   ├─ blocked_days(해당 날짜 요일) → 해당 날짜 skip (비거래일, 데이터 없음)
+  │   │   └─ blocked_hours(pause_during_trading, 현재 시각) → 해당 시 대기 후 resume
+  │   │       (대기 상한 초과 또는 SIGTERM 중단 시 체크포인트 저장 + config_error로 종료)
   │   ├─ 일일 한도 확인 → 도달 시 체크포인트 저장 후 종료
   │   │
   │   ├─ Extract: API 호출 (전종목 조회, 페이지네이션)
