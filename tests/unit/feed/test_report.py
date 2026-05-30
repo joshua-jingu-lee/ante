@@ -401,7 +401,8 @@ class TestBackfillReportSurfacesStoreMergeWarning:
             config={"schedule": {"backfill_since": "2025-09-29"}},
             feed_dir=feed_dir,
             started_at=datetime.now(tz=UTC),
-            is_blocked=lambda config, target_date: False,
+            is_blocked_day=lambda config, target_date: False,
+            is_trading_paused=lambda config: False,
         )
 
         store_merge_warnings = [

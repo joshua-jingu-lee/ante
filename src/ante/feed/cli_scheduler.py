@@ -58,7 +58,9 @@ async def run_scheduler_loop(
             daily_ran_today = True
 
         if not backfill_ran_today and current_time >= str(backfill_at):
-            await _run_backfill_job(orchestrator, data_path, config, current_date)
+            await _run_backfill_job(
+                orchestrator, data_path, config, current_date, stop_event
+            )
             backfill_ran_today = True
 
         await _wait_or_stop(stop_event, timeout=60.0)
@@ -113,21 +115,33 @@ async def _run_backfill_job(
     data_path: str,
     config: dict[str, Any],
     current_date: str,
+    stop_event: asyncio.Event | None = None,
 ) -> None:
     """Backfill 수집 작업을 1회 실행한다.
 
     `result.config_errors`에 coded date error(CLI_INVALID_DATE /
-    INVALID_DATE_RANGE)가 포함된 경우 "Backfill 완료" 메시지를 출력하지
-    않고 명시 오류를 echo/log한다. 기존 비날짜 config_errors(소스 누락·
-    lock 경합·rate-limit 등)는 현행 완료 메시지 흐름을 유지한다.
+    INVALID_DATE_RANGE / GUARD_PERMANENTLY_BLOCKED /
+    BACKFILL_STOP_REQUESTED)가 포함된 경우 "Backfill 완료" 메시지를
+    출력하지 않고 명시 오류/중단을 echo/log한다. 기존 비날짜
+    config_errors(소스 누락·lock 경합·rate-limit 등)는 현행 완료 메시지
+    흐름을 유지한다.
+
+    ``stop_event`` 는 상주 스케줄러 루프가 보유한 종료 이벤트로, 거래시간
+    가드 대기 중 SIGTERM/SIGINT 수신 시 backfill 루프를 깨워 안전 종료
+    시키기 위해 ``orchestrator.run_backfill`` 로 전파한다(#1972). 직접
+    호출(테스트 등)에서는 ``None`` 이며 one-shot 의미로 동작한다.
     """
-    from ante.feed.pipeline.backfill_runner import BACKFILL_DATE_ERROR_CODES
+    from ante.feed.pipeline.backfill_runner import (
+        BACKFILL_DATE_ERROR_CODES,
+        CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,
+    )
 
     logger.info("Backfill 수집 시작 (%s)", current_date)
     try:
         result = await orchestrator.run_backfill(
             data_path=Path(data_path),
             config=config,
+            stop_event=stop_event,
         )
         coded_date_errors = [
             entry
@@ -139,13 +153,21 @@ async def _run_backfill_job(
             for entry in coded_date_errors:
                 code = entry.get("code")
                 message = entry.get("error", "")
+                # stop_event 중단은 "중단", 그 외 coded error(미래/형식 오류·
+                # 가드 영구차단)는 "차단"으로 구분해 echo/log한다.
+                label = (
+                    "중단"
+                    if code == CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED
+                    else "차단"
+                )
                 logger.error(
-                    "Backfill 차단 (%s): code=%s, error=%s",
+                    "Backfill %s (%s): code=%s, error=%s",
+                    label,
                     current_date,
                     code,
                     message,
                 )
-                click.echo(f"[{current_date}] Backfill 차단: {code} — {message}")
+                click.echo(f"[{current_date}] Backfill {label}: {code} — {message}")
             return
         click.echo(
             f"[{current_date}] Backfill 완료: "
