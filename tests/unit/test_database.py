@@ -1,8 +1,10 @@
 """Database 래퍼 단위 테스트."""
 
 import asyncio
+import sqlite3
 from unittest.mock import patch
 
+import aiosqlite
 import pytest
 
 from ante.core import Database
@@ -294,3 +296,255 @@ async def test_transaction_rollback_failure_preserves_original_exception(db):
 
     # _in_transaction 플래그도 finally에서 해제되어야 한다.
     assert db._in_transaction is False
+
+
+# --- read-only 연결 모드 (#1974 offline-factory.md §2 옵션 A) ---
+
+
+async def _seed_rw_db(path: str) -> None:
+    """write 가능한 ``Database`` 로 테이블 1개 + 행 1건을 생성 후 close 한다."""
+    writer = Database(path)
+    await writer.connect()
+    try:
+        await writer.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT);")
+        await writer.execute("INSERT INTO t (id, v) VALUES (1, 'alpha')")
+    finally:
+        await writer.close()
+
+
+async def test_read_only_reads_existing_db(tmp_path):
+    """``read_only=True`` 로 기존 DB 를 schema/WAL 쓰기 없이 read 한다."""
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    ro = Database(db_path, read_only=True)
+    await ro.connect()
+    try:
+        rows = await ro.fetch_all("SELECT id, v FROM t ORDER BY id")
+        assert rows == [{"id": 1, "v": "alpha"}]
+        one = await ro.fetch_one("SELECT v FROM t WHERE id = 1")
+        assert one == {"v": "alpha"}
+    finally:
+        await ro.close()
+
+
+async def test_read_only_opens_reader_only_no_writer(tmp_path):
+    """``read_only=True`` 는 reader 단일 연결만 열고 writer 는 미개방."""
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    ro = Database(db_path, read_only=True)
+    await ro.connect()
+    try:
+        assert ro._reader is not None
+        assert ro._writer is None
+    finally:
+        await ro.close()
+
+
+async def test_read_only_write_methods_raise_read_only_error(tmp_path):
+    """ro 모드에서 write 경로 호출 시 ReadOnlyDatabaseError 로 명확히 실패한다.
+
+    "DB 연결되지 않음" 이 아니라 read-only 전용 에러여야 한다(_writer 미개방).
+    """
+    from ante.core.database import ReadOnlyDatabaseError
+
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    ro = Database(db_path, read_only=True)
+    await ro.connect()
+    try:
+        with pytest.raises(ReadOnlyDatabaseError, match="read-only Database"):
+            await ro.execute("INSERT INTO t (id, v) VALUES (2, 'beta')")
+        with pytest.raises(ReadOnlyDatabaseError, match="read-only Database"):
+            await ro.execute_script("CREATE TABLE t2 (id INTEGER)")
+        with pytest.raises(ReadOnlyDatabaseError, match="read-only Database"):
+            await ro.execute_fetch_one("UPDATE t SET v = 'x' RETURNING id")
+        with pytest.raises(ReadOnlyDatabaseError, match="read-only Database"):
+            await ro.execute_fetch_all("UPDATE t SET v = 'x' RETURNING id")
+        with pytest.raises(ReadOnlyDatabaseError, match="read-only Database"):
+            async with ro.transaction():
+                pass  # pragma: no cover
+    finally:
+        await ro.close()
+
+
+async def test_read_only_skips_write_pragmas(tmp_path):
+    """ro 연결은 쓰기 PRAGMA(journal_mode=WAL/synchronous)를 발화하지 않는다.
+
+    ``mode=ro`` 연결의 ``PRAGMA journal_mode`` 는 메인 DB 가 WAL 모드여도 ro
+    연결에서 변경되지 않으며, ``synchronous`` 도 설정하지 않는다. 본 테스트는
+    ``_open_ro_conn`` 이 실행하는 PRAGMA 시퀀스를 가로채 WAL/synchronous 쓰기
+    PRAGMA 가 발화되지 않음을 단언한다.
+    """
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    executed: list[str] = []
+    real_execute = aiosqlite.Connection.execute
+
+    def _spy_execute(self, sql, *a, **kw):  # noqa: ANN001, ANN002, ANN003, ANN202
+        executed.append(sql)
+        return real_execute(self, sql, *a, **kw)
+
+    ro = Database(db_path, read_only=True)
+    with patch.object(aiosqlite.Connection, "execute", _spy_execute):
+        await ro.connect()
+    try:
+        normalized = [s.strip().lower() for s in executed]
+        assert not any("journal_mode" in s for s in normalized), (
+            f"ro 연결이 journal_mode PRAGMA 를 발화함: {executed}"
+        )
+        assert not any("synchronous" in s for s in normalized), (
+            f"ro 연결이 synchronous PRAGMA 를 발화함: {executed}"
+        )
+        # read-only PRAGMA 는 적용되어야 한다.
+        assert any("foreign_keys" in s for s in normalized)
+        assert any("busy_timeout" in s for s in normalized)
+        assert any("temp_store" in s for s in normalized)
+    finally:
+        await ro.close()
+
+
+async def test_read_only_uri_uses_mode_ro_and_uri_flag(tmp_path):
+    """ro 연결은 ``file:...?mode=ro`` URI 를 ``uri=True`` 로 연다."""
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    captured: dict = {}
+    real_connect = aiosqlite.connect
+
+    def _spy_connect(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        if not captured:
+            captured["args"] = args
+            captured["kwargs"] = dict(kwargs)
+        return real_connect(*args, **kwargs)
+
+    ro = Database(db_path, read_only=True)
+    with patch("ante.core.database.aiosqlite.connect", side_effect=_spy_connect):
+        await ro.connect()
+    try:
+        uri = captured["args"][0]
+        assert uri.startswith("file:"), uri
+        assert "mode=ro" in uri, uri
+        assert "immutable" not in uri, uri  # 정상 DB → fallback 미발생
+        assert captured["kwargs"].get("uri") is True, captured["kwargs"]
+    finally:
+        await ro.close()
+
+
+async def test_read_only_immutable_fallback_on_wal_artifact(tmp_path):
+    """mode=ro probe 가 WAL/권한 OperationalError 로 실패하면 immutable 재연결.
+
+    첫 ``_open_ro_conn`` (mode=ro) 의 probe 가 ``unable to open database file`` 로
+    실패하도록 강제하면, ``_init_ro_conn`` 이 ``immutable=1`` URI 로 재연결해
+    read 에 성공해야 한다.
+    """
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    real_probe = Database._probe_ro_conn
+    calls = {"n": 0}
+
+    async def _probe_first_fails(conn):  # noqa: ANN001, ANN202
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("unable to open database file")
+        return await real_probe(conn)
+
+    uris: list[str] = []
+    real_connect = aiosqlite.connect
+
+    def _spy_connect(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        uris.append(args[0])
+        return real_connect(*args, **kwargs)
+
+    ro = Database(db_path, read_only=True)
+    with (
+        patch.object(Database, "_probe_ro_conn", staticmethod(_probe_first_fails)),
+        patch("ante.core.database.aiosqlite.connect", side_effect=_spy_connect),
+    ):
+        await ro.connect()
+    try:
+        # 첫 연결은 mode=ro, 재연결은 immutable=1.
+        assert any("immutable=1" in u for u in uris), uris
+        rows = await ro.fetch_all("SELECT id, v FROM t ORDER BY id")
+        assert rows == [{"id": 1, "v": "alpha"}]
+    finally:
+        await ro.close()
+
+
+async def test_read_only_no_such_table_not_fallback(tmp_path):
+    """probe 가 ``no such table`` 로 실패하면 immutable fallback 하지 않고 재전파.
+
+    ``no such table``/``malformed``/``not a database`` 는 WAL/권한 계열이 아니므로
+    fallback 대상이 아니다. probe 단계에서 이런 메시지가 나오면 재연결 없이
+    원본 예외를 재전파해야 한다(연결 leak 없이 정리).
+    """
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    before = set(_live_worker_threads())
+    connect_count = {"n": 0}
+    real_connect = aiosqlite.connect
+
+    def _count_connect(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        connect_count["n"] += 1
+        return real_connect(*args, **kwargs)
+
+    async def _probe_no_such_table(conn):  # noqa: ANN001, ANN202
+        raise sqlite3.OperationalError("no such table: backtest_runs")
+
+    ro = Database(db_path, read_only=True)
+    with (
+        patch.object(Database, "_probe_ro_conn", staticmethod(_probe_no_such_table)),
+        patch("ante.core.database.aiosqlite.connect", side_effect=_count_connect),
+    ):
+        with pytest.raises(sqlite3.OperationalError, match="no such table"):
+            await ro.connect()
+
+    # fallback 재연결이 일어나지 않았어야 한다(연결 1회만).
+    assert connect_count["n"] == 1, connect_count
+    # 실패한 연결의 worker thread 가 leak 되지 않아야 한다(#1965 보존).
+    leaked = set(_live_worker_threads()) - before
+    assert not leaked, f"no-such-table 재전파 후 worker thread 누수: {leaked}"
+
+
+async def test_read_only_malformed_not_fallback(tmp_path):
+    """probe 가 ``database disk image is malformed`` 면 fallback 하지 않고 재전파."""
+    db_path = str(tmp_path / "ro.db")
+    await _seed_rw_db(db_path)
+
+    connect_count = {"n": 0}
+    real_connect = aiosqlite.connect
+
+    def _count_connect(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+        connect_count["n"] += 1
+        return real_connect(*args, **kwargs)
+
+    async def _probe_malformed(conn):  # noqa: ANN001, ANN202
+        raise sqlite3.OperationalError("database disk image is malformed")
+
+    ro = Database(db_path, read_only=True)
+    with (
+        patch.object(Database, "_probe_ro_conn", staticmethod(_probe_malformed)),
+        patch("ante.core.database.aiosqlite.connect", side_effect=_count_connect),
+    ):
+        with pytest.raises(sqlite3.OperationalError, match="malformed"):
+            await ro.connect()
+
+    assert connect_count["n"] == 1, connect_count
+
+
+async def test_read_only_connect_failure_drains_worker_thread(tmp_path):
+    """ro 연결 자체가 실패해도 aiosqlite worker thread 가 누수되지 않는다(#1965)."""
+    bad_path = str(tmp_path / "no-such-dir" / "ro.db")
+    ro = Database(bad_path, read_only=True)
+
+    before = set(_live_worker_threads())
+    with pytest.raises(Exception, match="unable to open database file"):
+        await ro.connect()
+
+    leaked = set(_live_worker_threads()) - before
+    assert not leaked, f"ro connect 실패 후 worker thread 누수: {leaked} (#1965)"

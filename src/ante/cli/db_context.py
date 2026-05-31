@@ -16,8 +16,15 @@ Codex Plan Review v2 lock:
 2. cleanup은 ``except BaseException``으로 ``asyncio.CancelledError``까지 catch한다.
 3. ``Database.close()``가 실패해도 원래 body 예외를 가린다거나 chain되지 않도록
    inner try/except로 ``close()`` 실패를 무시하고 원래 예외만 surface한다.
-4. ``read_only``는 caller hint metadata일 뿐, ``Database`` 생성자에는 전달하지
-   않는다 (#1854 contract 옵션 B — Database API 변경 금지).
+4. ``read_only=True``일 때만 ``Database(db_path, read_only=True)``로 전달한다
+   (#1974 offline-factory.md §2 옵션 A — Database read-only 연결 모드 채택).
+   ``read_only=False``이면 기존 ``Database(db_path)`` 호출을 byte-for-byte
+   유지한다(kwarg 미전달 — #1856/#1857 patch 호환 및 모든 write 소비자 무영향
+   invariant). read-only 모드는 기존 스키마를 부트스트랩 없이 읽는 offline read
+   명령(현재 ``backtest history``)에만 적용된다 — §4 예외 service
+   (`AccountService`/`MemberService`/`ApprovalService`/`AuditLogger`/
+   `DynamicConfigService`)는 ``initialize()``가 schema DDL을 발화해야 read가
+   가능하므로 schema 분리 전까지 ``read_only=True`` 대상이 아니다.
 """
 
 from __future__ import annotations
@@ -54,10 +61,14 @@ async def open_cli_db(
             를 통해 결정된 DB 경로를 ``get_db_path(ctx)``로 해석한다.
             ``None``을 전달하면 ``ValueError``를 발생시킨다 — legacy 암시
             fallback에 의존하지 않는다.
-        read_only: caller hint. ``Database`` 생성자에는 전달되지 않으며,
-            현재는 메타데이터로만 유지된다 (#1854 contract 옵션 B). 후속
-            이슈에서 read-only enforcement가 필요하면 이 플래그를 통해
-            확장한다.
+        read_only: ``True`` 면 ``Database(db_path, read_only=True)`` 로 전달해
+            SQLite ``mode=ro`` 단일 reader 연결을 열고 schema/WAL 쓰기를 회피한다
+            (#1974 offline-factory.md §2 옵션 A — Database read-only 연결 모드).
+            ``False`` (기본) 이면 기존 ``Database(db_path)`` 호출을
+            byte-for-byte 유지한다 (kwarg 미전달, 모든 write 소비자 무영향).
+            read-only 모드는 기존 스키마를 부트스트랩 없이 읽는 offline read
+            명령(현재 ``backtest history``)에만 사용한다 — §4 예외 service 는
+            schema 분리 전까지 ``read_only=True`` 대상이 아니다.
         db_path_override: optional 명시 DB 경로. ``None`` 이면
             ``get_db_path(ctx)`` 로 해석한다. ``approval list/info/review/
             audit-types`` 등 ``--db-path`` Click option 을 지원하는 명령은
@@ -81,10 +92,6 @@ async def open_cli_db(
         raise ValueError(
             "open_cli_db requires explicit Click context (legacy fallback deprecated)"
         )
-    # ``read_only`` is a caller hint only; it is intentionally not forwarded
-    # to ``Database.__init__`` per #1854 contract option B (no Database API
-    # signature change in this PR scope).
-    _ = read_only
     # #1857: lazy module-attribute access for ``get_db_path`` /
     # ``Database`` to honor test patches of either:
     #   - ``ante.cli.main.get_db_path`` (callsite import binding)
@@ -110,7 +117,13 @@ async def open_cli_db(
         _db_cls = _module_db_cls
     else:
         _db_cls = _ORIGINAL_DATABASE
-    db = _db_cls(db_path)
+    # #1974: ``read_only=True`` 일 때만 ``read_only`` kwarg 를 전달한다. False
+    # 경로는 기존 ``_db_cls(db_path)`` 호출을 byte-for-byte 유지해 모든 write
+    # 소비자·#1856/#1857 patch(mock) 호환을 보존한다 (offline-factory.md §2 옵션 A).
+    if read_only:
+        db = _db_cls(db_path, read_only=True)
+    else:
+        db = _db_cls(db_path)
     await db.connect()
     try:
         yield db

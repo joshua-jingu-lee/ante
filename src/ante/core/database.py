@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import sqlite3
+import urllib.request
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -9,12 +11,54 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+# read-only(``mode=ro``) probe(``PRAGMA schema_version``) 가 아래 메시지 계열
+# ``sqlite3.OperationalError`` 로 실패하면 ``immutable=1`` 로 재연결 fallback 한다
+# (offline-factory.md §2 옵션 A). WAL DB 를 실제 read-only 파일시스템에서 ro 로
+# 열면 SQLite 가 ``-wal``/``-shm`` 을 생성/쓰기 시도하다 실패하는데, 그 표면
+# 메시지는 환경(권한·잔여 WAL artifact)에 따라 아래 중 하나로 나타난다.
+#
+# 반대로 ``no such table`` (테이블 부재 — query 시점에 발생, connect probe 단계
+# 아님), ``database disk image is malformed``, ``file is not a database`` 는
+# 데이터 무결성/스키마 문제이지 WAL/권한 문제가 아니므로 fallback 하지 않고
+# 재전파한다(blanket OperationalError fallback 금지 — 메시지 allowlist 로만 좁힘).
+_RO_IMMUTABLE_FALLBACK_SIGNATURES: tuple[str, ...] = (
+    "attempt to write a readonly database",
+    "unable to open database file",
+    "disk i/o error",
+    "-wal",
+    "-shm",
+)
+
+
+def _is_ro_fallback_error(exc: sqlite3.OperationalError) -> bool:
+    """probe 실패가 ``immutable=1`` fallback 대상(WAL/권한 계열)인지 판별한다."""
+    message = str(exc).lower()
+    return any(sig in message for sig in _RO_IMMUTABLE_FALLBACK_SIGNATURES)
+
+
+class ReadOnlyDatabaseError(RuntimeError):
+    """read-only ``Database`` 에서 write 연산을 시도했을 때 발생한다.
+
+    ``read_only=True`` 로 생성된 ``Database`` 는 writer 연결을 열지 않으므로
+    ``execute``/``execute_script``/``execute_fetch_*``/``transaction`` 등 writer
+    경로를 호출하면 "연결되지 않음"이 아니라 본 예외로 명확히 실패한다
+    (offline-factory.md §2 옵션 A).
+    """
+
 
 class Database:
-    """SQLite WAL 모드 비동기 래퍼. 모든 모듈이 공유."""
+    """SQLite WAL 모드 비동기 래퍼. 모든 모듈이 공유.
 
-    def __init__(self, db_path: str) -> None:
+    기본(``read_only=False``)은 writer + reader 두 연결을 열고 WAL 모드를
+    설정한다(기존 baseline). ``read_only=True``는 reader 단일 연결만 SQLite
+    ``file:...?mode=ro`` URI 로 열어 schema/WAL 쓰기 없이 기존 DB 를 읽는다
+    (offline-factory.md §2 옵션 A). read-only 모드는 기존 스키마를 부트스트랩
+    없이 읽는 offline read 명령(현재 ``backtest history``)에만 적용된다.
+    """
+
+    def __init__(self, db_path: str, *, read_only: bool = False) -> None:
         self._db_path = db_path
+        self._read_only = read_only
         self._writer: aiosqlite.Connection | None = None
         self._reader: aiosqlite.Connection | None = None
         self._in_transaction: bool = False
@@ -90,8 +134,96 @@ class Database:
             raise
         return conn
 
+    def _ro_uri(self, *, immutable: bool) -> str:
+        """read-only SQLite URI 를 생성한다.
+
+        절대경로를 ``urllib.request.pathname2url`` 로 escape 해 공백/특수문자/
+        Windows drive 문자를 안전하게 처리한다(f-string 직접 보간 금지). 본
+        URI 는 ``aiosqlite.connect(..., uri=True)`` 로만 열어야 한다 — ``uri``
+        플래그가 없으면 ``mode=ro``/``immutable=1`` 쿼리스트링이 리터럴 파일명의
+        일부로 취급된다.
+
+        ``immutable=1`` 은 read-only artifact 전용이다(live 동시쓰기 DB 비대상).
+        WAL DB 를 실제 read-only 파일시스템에서 ``mode=ro`` 만으로 열면 SQLite 가
+        ``-wal``/``-shm`` 를 생성/쓰기하려다 실패하므로, immutable fallback 으로
+        DB 파일을 변경 불가 스냅샷으로 간주해 sidecar 없이 read 한다.
+        """
+        url = urllib.request.pathname2url(self._db_path)
+        query = "mode=ro&immutable=1" if immutable else "mode=ro"
+        return f"file:{url}?{query}"
+
+    async def _init_ro_conn(self) -> aiosqlite.Connection:
+        """read-only(``mode=ro``) 연결을 초기화한다(쓰기 PRAGMA skip).
+
+        ``mode=ro`` 로 연결한 직후 ``PRAGMA schema_version`` probe read 를
+        수행한다. WAL artifact/권한 계열 ``sqlite3.OperationalError`` 로 probe 가
+        실패하면(:func:`_is_ro_fallback_error`) ``immutable=1`` 로 재연결한다.
+        그 외(예: ``no such table`` — query 시점 발생, ``malformed`` 등)는
+        재전파한다.
+
+        쓰기 PRAGMA(``journal_mode=WAL``/``synchronous=NORMAL``)는 read-only 파일
+        시스템에서 실패하므로 발화하지 않고, ``foreign_keys``/``busy_timeout``/
+        ``temp_store``/``row_factory`` 만 적용한다.
+
+        연결 실패 시 :meth:`_init_conn` 과 동일하게 :meth:`_drain_failed_conn`
+        으로 worker thread 를 결정적으로 정리한다(#1965/#1970).
+        """
+        conn = await self._open_ro_conn(immutable=False)
+        try:
+            await self._probe_ro_conn(conn)
+        except sqlite3.OperationalError as exc:
+            if not _is_ro_fallback_error(exc):
+                # no such table / malformed / not a database 등은 fallback 대상이
+                # 아니다 — 연결을 정리하고 원본 예외를 재전파한다.
+                await self._drain_failed_conn(conn)
+                raise
+            logger.debug(
+                "read-only mode=ro probe 실패 — immutable=1 fallback 재연결: %s",
+                exc,
+            )
+            await self._drain_failed_conn(conn)
+            conn = await self._open_ro_conn(immutable=True)
+            try:
+                await self._probe_ro_conn(conn)
+            except BaseException:
+                await self._drain_failed_conn(conn)
+                raise
+        except BaseException:
+            await self._drain_failed_conn(conn)
+            raise
+        return conn
+
+    async def _open_ro_conn(self, *, immutable: bool) -> aiosqlite.Connection:
+        """``mode=ro``(또는 ``immutable=1``) URI 로 연결하고 read-only PRAGMA 적용."""
+        uri = self._ro_uri(immutable=immutable)
+        conn = aiosqlite.connect(uri, uri=True)
+        try:
+            await conn
+            await conn.execute("PRAGMA temp_store=MEMORY")
+            await conn.execute("PRAGMA foreign_keys=ON")
+            await conn.execute("PRAGMA busy_timeout=5000")
+            conn.row_factory = aiosqlite.Row
+        except BaseException:
+            await self._drain_failed_conn(conn)
+            raise
+        return conn
+
+    @staticmethod
+    async def _probe_ro_conn(conn: aiosqlite.Connection) -> None:
+        """최소 probe read(``PRAGMA schema_version``)로 ro 연결 가독성을 확인."""
+        async with conn.execute("PRAGMA schema_version") as cursor:
+            await cursor.fetchone()
+
     async def connect(self) -> None:
-        """DB 연결 초기화. writer + reader 두 연결 생성.
+        """DB 연결 초기화.
+
+        ``read_only=True`` 면 reader 단일 ``mode=ro`` 연결만 열고 ``_writer`` 는
+        미개방한다(write 경로는 :class:`ReadOnlyDatabaseError`). probe/fallback
+        실패 시에도 :meth:`_init_ro_conn` 이 worker thread 를 drain 하므로 leak
+        없이 정리된다(#1965/#1970).
+
+        ``read_only=False`` 면 기존 baseline 그대로 writer + reader 두 연결을
+        생성한다(아래 docstring 의 partial-failure drain 보존).
 
         어느 한쪽 연결이라도 실패하면 이미 열린 연결(writer)을 worker thread
         join 까지 포함해 **결정적으로 drain** 한 뒤 원본 예외를 재전파한다.
@@ -116,6 +248,11 @@ class Database:
         bounded(5s) + 예외 swallow 이므로 원본 connect 예외를 가리거나 hang
         하지 않는다.
         """
+        if self._read_only:
+            # reader 단일 mode=ro 연결만. probe/fallback 실패 시 _init_ro_conn 이
+            # 이미 worker thread 를 drain 하므로 여기서 추가 정리는 불필요하다.
+            self._reader = await self._init_ro_conn()
+            return
         try:
             self._writer = await self._init_conn()
             self._reader = await self._init_conn()
@@ -134,6 +271,11 @@ class Database:
         self._writer = self._reader = None
 
     def _get_writer(self) -> aiosqlite.Connection:
+        if self._read_only:
+            raise ReadOnlyDatabaseError(
+                "read-only Database: write operation not permitted "
+                "(read_only=True 로 생성된 연결은 writer 가 없습니다)"
+            )
         if not self._writer:
             raise RuntimeError("DB 연결되지 않음. connect()를 먼저 호출하세요.")
         return self._writer
