@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-29 (KST)
+> 마지막 생성 시점: 2026-05-31 (KST)
 
 ## 최상위 구조
 
@@ -61,7 +61,8 @@ src/ante/
 │   ├── bus.py                        # EventBus — asyncio.Queue 기반 발행/구독
 │   ├── events.py                     # 전체 이벤트 dataclass 정의
 │   ├── history.py                    # EventHistory — 이벤트 이력 추적
-│   └── __init__.py
+│   ├── __init__.py
+│   └── fill_dedup_guard.py
 ├── audit/
 │   ├── logger.py                     # AuditLogger — 감사 로그 기록 (SQLite)
 │   └── __init__.py
@@ -136,7 +137,8 @@ src/ante/
 │   ├── __init__.py
 │   ├── daily_report.py
 │   ├── fill_applier.py
-│   └── order_tracker.py
+│   ├── order_tracker.py
+│   └── fill_outbox.py
 ├── broker/
 │   ├── base.py                       # BrokerAdapter ABC
 │   ├── models.py                     # CommissionInfo dataclass
@@ -393,7 +395,9 @@ tests/
 │   │   ├── test_cli_backfill_until_removed.py
 │   │   ├── test_cli_daily_date_forward.py
 │   │   ├── test_daily_runner_target_date.py
-│   │   └── test_orchestrator_run_daily_target_date.py
+│   │   ├── test_orchestrator_run_daily_target_date.py
+│   │   ├── test_backfill_guard_wait.py
+│   │   └── test_indicator_calculator.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -651,7 +655,12 @@ tests/
 │   ├── test_fill_recovery_integration.py
 │   ├── test_fill_scheduler.py
 │   ├── test_kis_order_history_fold.py
-│   └── test_order_tracker.py
+│   ├── test_order_tracker.py
+│   ├── test_cli_backtest_history_readonly.py
+│   ├── test_fill_dedup_guard.py
+│   ├── test_fill_outbox.py
+│   ├── test_kis_error_codes_40240000.py
+│   └── test_treasury_fill_dedup.py
 └── __init__.py
 ```
 
