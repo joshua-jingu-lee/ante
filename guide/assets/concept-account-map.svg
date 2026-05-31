@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 545" role="img" aria-label="개념 관계도: 계좌 중심 구조">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#7b8794"/>
+    </marker>
+  </defs>
+  <style>
+    text{font-family:'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic','Segoe UI',sans-serif;}
+    .container{fill:#eef4fb;stroke:#6b8cae;stroke-width:1.8;}
+    .owned{fill:#dce9f7;stroke:#6b8cae;stroke-width:1.5;}
+    .scoped{fill:#e6f4ea;stroke:#5a9a6f;stroke-width:1.5;stroke-dasharray:5 4;}
+    .common{fill:#f0f1f3;stroke:#aeb6c0;stroke-width:1.5;}
+    .t{font-size:14px;fill:#1f2933;font-weight:600;}
+    .t2{font-size:12.5px;fill:#1f2933;font-weight:600;}
+    .sub{font-size:11px;fill:#7b8794;}
+    .leg{font-size:12px;fill:#52606d;}
+    .edge{font-size:11px;fill:#52606d;}
+    .flow{stroke:#7b8794;stroke-width:1.6;fill:none;}
+  </style>
+  <rect width="760" height="545" fill="#ffffff"/>
+
+  <!-- Account container -->
+  <rect x="240" y="150" width="280" height="210" rx="12" class="container"/>
+  <text x="380" y="176" text-anchor="middle" class="t">Account (계좌)</text>
+  <text x="380" y="194" text-anchor="middle" class="sub">거래소 · 통화 · 브로커 · 인증</text>
+
+  <rect x="256" y="208" width="118" height="52" rx="8" class="owned"/>
+  <text x="315" y="230" text-anchor="middle" class="t2">Treasury</text>
+  <text x="315" y="248" text-anchor="middle" class="sub">자금</text>
+
+  <rect x="386" y="208" width="118" height="52" rx="8" class="owned"/>
+  <text x="445" y="230" text-anchor="middle" class="t2">RuleEngine</text>
+  <text x="445" y="248" text-anchor="middle" class="sub">룰</text>
+
+  <rect x="256" y="288" width="118" height="52" rx="8" class="owned"/>
+  <text x="315" y="319" text-anchor="middle" class="t2">Bot</text>
+
+  <rect x="386" y="288" width="118" height="52" rx="8" class="owned"/>
+  <text x="445" y="319" text-anchor="middle" class="t2">BrokerAdapter</text>
+
+  <!-- surrounding -->
+  <rect x="40" y="40" width="150" height="56" rx="9" class="common"/>
+  <text x="115" y="64" text-anchor="middle" class="t">Member</text>
+  <text x="115" y="82" text-anchor="middle" class="sub">사용자 · 에이전트</text>
+
+  <rect x="305" y="38" width="170" height="56" rx="9" class="common"/>
+  <text x="390" y="62" text-anchor="middle" class="t">Strategy Registry</text>
+  <text x="390" y="80" text-anchor="middle" class="sub">전략 공급</text>
+
+  <rect x="40" y="250" width="150" height="56" rx="9" class="common"/>
+  <text x="115" y="274" text-anchor="middle" class="t">DataStore</text>
+  <text x="115" y="292" text-anchor="middle" class="sub">시세 데이터</text>
+
+  <rect x="575" y="226" width="150" height="56" rx="9" class="common"/>
+  <text x="650" y="250" text-anchor="middle" class="t">EventBus</text>
+  <text x="650" y="268" text-anchor="middle" class="sub">이벤트 버스</text>
+
+  <rect x="575" y="418" width="150" height="56" rx="9" class="scoped"/>
+  <text x="650" y="442" text-anchor="middle" class="t">Trade 기록</text>
+  <text x="650" y="460" text-anchor="middle" class="sub">scoped</text>
+
+  <rect x="255" y="438" width="170" height="56" rx="9" class="scoped"/>
+  <text x="340" y="462" text-anchor="middle" class="t">Approval</text>
+  <text x="340" y="480" text-anchor="middle" class="sub">결재 · scoped</text>
+
+  <!-- edges -->
+  <path class="flow" marker-end="url(#arr)" d="M165,96 C210,118 235,130 258,150"/>
+  <text x="180" y="128" class="edge">운용</text>
+
+  <path class="flow" marker-end="url(#arr)" d="M388,94 C360,150 332,210 318,286"/>
+  <text x="300" y="150" text-anchor="end" class="edge">전략 공급</text>
+
+  <path class="flow" marker-end="url(#arr)" d="M190,290 C220,302 232,306 254,310"/>
+  <text x="196" y="324" class="edge">데이터</text>
+
+  <path class="flow" marker-end="url(#arr)" d="M504,312 C540,304 558,288 573,272"/>
+  <text x="512" y="296" class="edge">체결 이벤트</text>
+
+  <path class="flow" marker-end="url(#arr)" d="M650,282 L650,416"/>
+  <text x="660" y="352" class="edge">구독</text>
+
+  <path class="flow" marker-end="url(#arr)" d="M340,436 L340,362"/>
+  <text x="350" y="402" class="edge">채택</text>
+
+  <!-- legend -->
+  <rect x="40" y="508" width="14" height="14" rx="3" class="owned"/>
+  <text x="60" y="520" class="leg">계좌 종속</text>
+  <rect x="150" y="508" width="14" height="14" rx="3" class="scoped"/>
+  <text x="170" y="520" class="leg">범위 지정 (scoped)</text>
+  <rect x="320" y="508" width="14" height="14" rx="3" class="common"/>
+  <text x="340" y="520" class="leg">공용 (계좌 밖)</text>
+</svg>

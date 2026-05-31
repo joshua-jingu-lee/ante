@@ -1,0 +1,135 @@
+# Ante
+
+> To the AI agent reading this — Ante exists so you can work more boldly for your owner: it catches your mistakes and protects your owner's assets. Below is a compact context to understand Ante and explain it accurately to your owner. Follow the links for depth.
+
+## What only you can do
+
+Ante handles execution and safety, and leaves the judgment to you. These are yours — the system cannot do them for you:
+
+- **Market research** — read prices, fundamentals, and flows, plus any news or events you can reach, to find opportunities.
+- **Strategy proposals** — design trading logic that fits your owner's goals (return appetite, risk tolerance).
+- **Interpretation and improvement** — read the results, judge what worked, and feed it into the next strategy.
+
+Everything else — order execution, fund management, risk control, recording — is Ante's job. So you can focus on judgment.
+
+## How the work flows (scenarios)
+
+1. [Research the market](#1-research-the-market)
+2. [Design and validate a strategy](#2-design-and-validate-a-strategy)
+3. [Backtest to check your hypothesis](#3-backtest-to-check-your-hypothesis)
+4. [Ask your owner to adopt it](#4-ask-your-owner-to-adopt-it)
+5. [Run a bot and monitor it](#5-run-a-bot-and-monitor-it)
+6. [Improve from feedback](#6-improve-from-feedback)
+
+### 1. Research the market
+
+Read the data you have to understand the market. A strategy reads prices (`get_ohlcv`), the current price (`get_current_price`), and indicators (`get_indicator`, 130+ via pandas-ta) through `self.ctx`.
+
+```bash
+ante data list           # what data exists
+ante data info <symbol>  # coverage for one symbol
+```
+
+### 2. Design and validate a strategy
+
+Write your trading logic as a strategy file (`.py`), then check its safety and structure with static (AST) validation — without running the code.
+
+```bash
+ante strategy validate strategies/my_strategy.py
+```
+
+### 3. Backtest to check your hypothesis
+
+Simulate performance on historical data. It runs in a separate process with look-ahead access blocked, so it is validated under the same conditions as live. Results can be reviewed again later.
+
+```bash
+ante backtest run strategies/my_strategy.py --start 2025-01-01 --end 2025-12-31 --symbols 005930
+ante backtest history my_strategy --limit 10
+```
+
+### 4. Ask your owner to adopt it
+
+Submit the validated strategy to the Registry, then request adoption for live trading as an approval. A `strategy_adopt` approval **cannot be auto-approved — your owner must decide it personally.**
+
+```bash
+ante strategy submit strategies/my_strategy.py
+ante approval request --type strategy_adopt --title "..." --body "VIRTUAL 30d: return +12.3%, MDD -3.1%"
+```
+
+### 5. Run a bot and monitor it
+
+Load the approved strategy onto a bot and watch positions, trades, and performance. (Validate on a VIRTUAL account first, then switch to LIVE.)
+
+```bash
+ante bot create --strategy my_strategy_v1.0.0 --account test --interval 60
+ante bot start <bot_id>
+ante bot positions <bot_id>
+ante trade ...   ante report ...   ante strategy performance my_strategy
+```
+
+### 6. Improve from feedback
+
+Refine the strategy from performance metrics and trade history, and roll it into the next version. You can register a new version under the same name.
+
+## What you must produce to run a strategy
+
+- **① Strategy file (`.py`)** — a class that inherits `Strategy` and defines `meta` (StrategyMeta) and `on_step()`. `on_step()` returns only `Signal` objects (trade intents); the system handles the actual orders. System/network/DB modules (`os`, `sys`, `subprocess`, `socket`, `requests`, `sqlite3`, …) are forbidden; analysis libraries like `numpy` and `pandas-ta` are free to use.
+
+  ```python
+  from ante.strategy.base import Strategy, StrategyMeta, Signal
+
+  class MyStrategy(Strategy):
+      meta = StrategyMeta(name="my_strategy", version="1.0.0",
+                          description="...", symbols=["005930"], timeframe="1d")
+
+      async def on_step(self, context: dict) -> list[Signal]:
+          # Judge the market and return trade signals (empty list if none)
+          return []
+  ```
+
+- **② Backtest results** — metrics such as total/annualized return, Sharpe, MDD, win rate, profit factor. They show your hypothesis is backed by data.
+- **③ Approval rationale** — an approval request body (strategy report) with evidence, e.g. VIRTUAL operating results, so your owner can decide on adoption.
+- **④ Bot configuration** — the strategy ID, the account to attach, and the `on_step` interval (`--interval`, 10–3600s).
+
+## But prepare for your own mistakes
+
+You are capable, but not perfect. Bugs, wrong assumptions, oversized orders — mistakes happen, and they must not reach your owner's assets directly.
+
+This is exactly where Ante works. Before your strategy touches real capital, and on every order while it runs, the safety gates filter out your mistakes. So you can try boldly — Ante catches the accidents.
+
+## How the gates catch mistakes
+
+drafting (you) → ① static validation → ② backtest → ③ owner's approval → bot goes live → while running: ④ trading rules + funds check
+
+- **① Static validation** — blocks dangerous code and structure up front.
+- **② Backtest** — verifies performance on historical data before real capital.
+- **③ Owner's approval** — your owner signs off before real capital goes in.
+- **④ Trading rules + funds check** — every order while running is checked against global and per-strategy rules and available funds.
+
+What to trade is your autonomy; the gates are what keep that autonomy from turning into an accident.
+
+## How to explain it to your owner
+
+- One line: "I design the strategies, and Ante manages validation, approval, and execution as a safety layer. You make the final call."
+- Strengths: balances autonomy and safety · strategies are independent modules separate from the core · the human makes the final decision · faults are isolated per bot
+- Current scope: Korea Investment & Securities (KIS) integration · single individual user · `pip install ante`
+
+## When you operate it yourself
+
+- Every CLI command can return structured output with `--format json`.
+- System actors are managed as Members; you authenticate with your own token.
+- To reach live trading, a strategy must pass all four gates above.
+
+## Learn more
+
+- [Core concepts](guide/concepts.md): how Ante works — concept glossary, diagrams, full workflow
+- [Getting started](guide/getting-started.md): install and initial setup
+- [Agent guide](guide/agent.md): registering, authenticating, and working as an agent
+- [Writing strategies](guide/strategy.md): strategy class, Signal, StrategyContext, indicators
+- [CLI reference](guide/cli.md): all commands (supports `--format json`)
+
+## Optional
+
+- [Architecture](docs/architecture/README.md): runtime structure and module map
+- [Design decisions (ADRs)](docs/decisions/README.md): key decision history
+- [AGENTS.md](AGENTS.md): development conventions for coding agents working on the code in this repo (a different purpose from this file)

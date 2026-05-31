@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 690" role="img" aria-label="주문 한 건의 흐름">
+  <defs>
+    <marker id="arr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#7b8794"/>
+    </marker>
+    <marker id="arrx" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#c0405a"/>
+    </marker>
+  </defs>
+  <style>
+    text{font-family:'Apple SD Gothic Neo','Noto Sans KR','Malgun Gothic','Segoe UI',sans-serif;}
+    .box{fill:#eef2f6;stroke:#c4ccd4;stroke-width:1.5;}
+    .gate{fill:#fdf1d6;stroke:#dca63a;stroke-width:1.6;}
+    .ext{fill:#e7ecf1;stroke:#9aa5b1;stroke-width:1.5;}
+    .stop{fill:#fbe9ec;stroke:#c0405a;stroke-width:1.5;}
+    .t{font-size:14px;fill:#1f2933;font-weight:600;}
+    .sub{font-size:11px;fill:#7b8794;}
+    .leg{font-size:12px;fill:#52606d;}
+    .red{font-size:11px;fill:#c0405a;}
+    .flow{stroke:#7b8794;stroke-width:1.8;fill:none;}
+    .stopline{stroke:#c0405a;stroke-width:1.5;fill:none;}
+  </style>
+  <rect width="640" height="690" fill="#ffffff"/>
+
+  <!-- legend -->
+  <rect x="20" y="16" width="13" height="13" rx="3" class="gate"/>
+  <text x="40" y="27" class="leg">게이트(관문)</text>
+  <text x="430" y="27" class="leg" text-anchor="end">전 구간 EventBus로 연결</text>
+
+  <!-- main column -->
+  <rect x="150" y="44"  width="220" height="52" rx="9" class="box"/>
+  <text x="260" y="66"  text-anchor="middle" class="t">Bot — Signal 생성</text>
+  <text x="260" y="84"  text-anchor="middle" class="sub">전략이 매매 신호를 낸다</text>
+
+  <rect x="150" y="124" width="220" height="52" rx="9" class="gate"/>
+  <text x="260" y="146" text-anchor="middle" class="t">RuleEngine</text>
+  <text x="260" y="164" text-anchor="middle" class="sub">전역 + 전략별 룰 검증</text>
+
+  <rect x="150" y="204" width="220" height="52" rx="9" class="gate"/>
+  <text x="260" y="226" text-anchor="middle" class="t">Treasury</text>
+  <text x="260" y="244" text-anchor="middle" class="sub">자금 확인 · 예약</text>
+
+  <rect x="150" y="284" width="220" height="52" rx="9" class="box"/>
+  <text x="260" y="306" text-anchor="middle" class="t">APIGateway</text>
+  <text x="260" y="324" text-anchor="middle" class="sub">rate limit 큐</text>
+
+  <rect x="150" y="364" width="220" height="52" rx="9" class="box"/>
+  <text x="260" y="386" text-anchor="middle" class="t">BrokerAdapter</text>
+  <text x="260" y="404" text-anchor="middle" class="sub">주문 실행</text>
+
+  <rect x="150" y="444" width="220" height="52" rx="9" class="ext"/>
+  <text x="260" y="475" text-anchor="middle" class="t">증권사 API (KIS)</text>
+
+  <rect x="150" y="524" width="220" height="52" rx="9" class="box"/>
+  <text x="260" y="546" text-anchor="middle" class="t">체결</text>
+  <text x="260" y="564" text-anchor="middle" class="sub">OrderFilledEvent</text>
+
+  <!-- main arrows -->
+  <path class="flow" marker-end="url(#arr)" d="M260,96  L260,122"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,176 L260,202"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,256 L260,282"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,336 L260,362"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,416 L260,442"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,496 L260,522"/>
+
+  <!-- stop branch -->
+  <rect x="450" y="150" width="160" height="56" rx="9" class="stop"/>
+  <text x="530" y="183" text-anchor="middle" class="t" fill="#c0405a">거래 차단</text>
+  <path class="stopline" marker-end="url(#arrx)" d="M370,150 C420,150 430,172 448,176"/>
+  <text x="392" y="140" class="red">위반</text>
+  <path class="stopline" marker-end="url(#arrx)" d="M370,230 C420,230 432,200 448,192"/>
+  <text x="392" y="246" class="red">부족</text>
+
+  <!-- fan out -->
+  <g>
+    <rect x="20"  y="612" width="140" height="56" rx="9" class="box"/>
+    <text x="90"  y="636" text-anchor="middle" class="t">포지션 갱신</text>
+    <text x="90"  y="654" text-anchor="middle" class="sub">Bot</text>
+
+    <rect x="173" y="612" width="140" height="56" rx="9" class="box"/>
+    <text x="243" y="636" text-anchor="middle" class="t">잔고 갱신</text>
+    <text x="243" y="654" text-anchor="middle" class="sub">Treasury</text>
+
+    <rect x="326" y="612" width="140" height="56" rx="9" class="box"/>
+    <text x="396" y="636" text-anchor="middle" class="t">거래 기록</text>
+    <text x="396" y="654" text-anchor="middle" class="sub">Trade</text>
+
+    <rect x="479" y="612" width="140" height="56" rx="9" class="box"/>
+    <text x="549" y="636" text-anchor="middle" class="t">알림</text>
+    <text x="549" y="654" text-anchor="middle" class="sub">Notification</text>
+  </g>
+  <path class="flow" marker-end="url(#arr)" d="M260,576 C200,592 110,596 92,610"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,576 C250,592 244,598 244,610"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,576 C300,592 380,598 394,610"/>
+  <path class="flow" marker-end="url(#arr)" d="M260,576 C360,592 520,594 546,610"/>
+</svg>
