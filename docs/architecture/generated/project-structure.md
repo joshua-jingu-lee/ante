@@ -990,6 +990,11 @@ guide/
 ├── getting-started.md                # 설치·초기 설정 가이드
 ├── security.md                       # 보안 가이드
 ├── strategy.md                       # 전략 개발 가이드
-└── assets/                           # 가이드 이미지·SVG
-    └── how-it-works.svg              # 시스템 구조 도식
+├── assets/                           # 가이드 이미지·SVG
+│   ├── how-it-works.svg              # 시스템 구조 도식
+│   ├── concept-account-map.svg
+│   ├── concept-order-flow.svg
+│   └── concept-strategy-lifecycle.svg
+├── concepts.md
+└── modules.md
 ```
