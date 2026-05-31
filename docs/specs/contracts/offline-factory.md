@@ -2,8 +2,8 @@
 
 > Parent epic: [#1818 CLI offline service composition factory & runtime guard SSOT](https://github.com/joshua-jingu-lee/ante/issues/1818)
 > Owning issue: [#1854 CLI offline service factory 계약 및 read_only 초기화 정책 정리](https://github.com/joshua-jingu-lee/ante/issues/1854)
-> Status: 1.0 normative — CLI `offline` / `cold-path` execution class가 사용하는 service composition factory의 책임/비책임, read_only 초기화 정책, ctx 기반 path resolution 정책의 단일 SSOT.
-> Scope: 본 문서는 SSOT spec. production factory 구현(`open_cli_db`)은 [#1855](https://github.com/joshua-jingu-lee/ante/issues/1855)에서 도입되어 `src/ante/cli/db_context.py`에 존재한다.
+> Status: 1.1 normative — CLI `offline` / `cold-path` execution class가 사용하는 service composition factory의 책임/비책임, read_only 초기화 정책, ctx 기반 path resolution 정책의 단일 SSOT. 1.1(#1974 R2, 2026-05-31 KST)에서 §2를 amend해 `read_only=True`에 옵션 A(`Database` SQLite read-only 연결 모드)를 옵션 B와 함께 normative로 채택했다.
+> Scope: 본 문서는 SSOT spec. production factory 구현(`open_cli_db`)은 [#1855](https://github.com/joshua-jingu-lee/ante/issues/1855)에서 도입되어 `src/ante/cli/db_context.py`에 존재하며, 옵션 A(`Database` read-only 연결 모드)는 [#1974](https://github.com/joshua-jingu-lee/ante/issues/1974) R2에서 `src/ante/core/database.py`에 도입된다.
 > Migration order: [docs/specs/contracts/README.md#migration-domain-order](README.md#migration-domain-order)와 [#1820](https://github.com/joshua-jingu-lee/ante/issues/1820)에서 SSOT로 결정된 `account → member → approval → bot → treasury → broker → strategy → 기타` 순서를 따른다. 본 문서는 본 순서를 **재선언하지 않는다**.
 
 ## 목적
@@ -95,18 +95,71 @@ command 본체 또는 별도 wrapper)가 가진다.
 
 ### 2.1 결정
 
-**옵션 B (factory-level skip)**를 normative로 채택한다.
+`read_only=True`는 **옵션 B (factory-level `initialize()` skip)**와 **옵션 A
+(`Database` SQLite read-only 연결 모드)**를 **함께** 의미한다(2026-05-31 KST
+#1974 R2 amend). 즉:
 
-- `Database.__init__` signature는 변경하지 않는다. 현재 baseline
-  (`src/ante/core/database.py`의 `Database(db_path: str)`)을 그대로 유지한다.
-  본 SSOT는 `Database` API에 `read_only` kwarg를 추가하지 **않는다**.
-- 대신 factory가 호출 시점에 `read_only: bool` (또는 동등 분류) 값을 받아
-  다음을 결정한다.
+> **`read_only=True` ≡ (a) `service.initialize()` skip(옵션 B) + (b) `Database`
+> 연결을 SQLite read-only(`mode=ro`)로 open(옵션 A).**
+
+본 amend 이전(1.0)에는 옵션 B만 normative였고 §2.3에서 옵션 A를 보류했다. 그러나
+옵션 B만으로는 `service.initialize()`를 skip해도 `Database.connect()`가
+writer+reader 두 연결을 열고 각각 `PRAGMA journal_mode=WAL`(쓰기 필요)을
+실행하므로, **실제 read-only 파일시스템(DB 파일 0444 / 디렉터리 0555)에서는
+여전히 `attempt to write a readonly database`로 실패**한다(#1974 재현). 본
+amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 gap을 닫는다.
+
+#### (a) 옵션 B — factory-level `initialize()` skip
+
+- factory가 호출 시점에 `read_only: bool` (또는 동등 분류) 값을 받아 다음을
+  결정한다.
   - `read_only=True`: `service.initialize()` 호출을 **skip**한다. 해당 service
     가 `_db.execute_script(...)` / `_db.execute(ALTER ...)` 등의 schema/DDL
     trigger를 가지더라도 read-only 명령 경로에서는 그것을 발화하지 않는다.
   - `read_only=False`: `service.initialize()`를 호출한다. schema migration /
     DDL이 발동될 수 있다.
+
+#### (b) 옵션 A — `Database` SQLite read-only 연결 모드
+
+- `Database.__init__`은 backward-compatible keyword-only 파라미터
+  `read_only: bool = False`를 가진다
+  (`Database(db_path: str, *, read_only: bool = False)`).
+  - **`read_only=False` 경로는 기존 baseline과 byte-for-byte 동일**해야 한다
+    — writer + reader 두 연결을 열고 WAL/synchronous 포함 기존 PRAGMA 시퀀스를
+    그대로 적용한다. 22+ callsite·`main.py`·모든 write 경로는 무영향이다(invariant).
+  - `read_only=True`이면:
+    - reader **단일 연결**만 SQLite `file:<escaped-abs-path>?mode=ro` URI로
+      연다(`aiosqlite.connect(uri, uri=True)` — `uri=True` 필수). writer는
+      개방하지 않으며, writer 경로(`execute`/`execute_script`/`execute_fetch_*`/
+      `transaction`) 호출은 read-only 전용 에러(`ReadOnlyDatabaseError`)로 실패한다.
+    - 쓰기 PRAGMA(`journal_mode=WAL`, `synchronous=NORMAL`)는 **skip**한다
+      (read-only fs에서 실패하므로). `foreign_keys=ON`/`busy_timeout`/
+      `temp_store=MEMORY`/`row_factory`만 적용한다.
+    - **immutable fallback**: `mode=ro` 연결 직후 최소 probe read
+      (`PRAGMA schema_version`)를 수행한다. probe가 WAL artifact/권한 계열
+      `sqlite3.OperationalError`(메시지 allowlist: `attempt to write a readonly
+      database`, `unable to open database file`, `disk I/O error`,
+      `-wal`/`-shm` 접근 실패류)로 실패하면 `file:...?mode=ro&immutable=1`로
+      **재연결**한다. `no such table`(테이블 부재 — query 시점 발생, connect
+      probe 단계 아님), `database disk image is malformed`, `file is not a
+      database`는 fallback 대상이 **아니며 재전파**한다(blanket OperationalError
+      fallback 금지 — 메시지 allowlist로만 좁힌다).
+    - `immutable=1`은 **read-only artifact 전용**이다. immutable 모드는 `-wal`/
+      `-shm` sidecar를 무시하고 메인 DB 파일만 읽으므로, live 동시쓰기 DB나
+      checkpoint되지 않은 WAL frame이 메인 DB에 합쳐지지 않은 artifact에는
+      적용하지 않는다(Non-Goals 참조). Ante의 `Database.close()`는 마지막 연결
+      종료 시 WAL을 checkpoint하고 sidecar를 제거하므로, 정상적으로 freeze된
+      backtest artifact는 모든 커밋 데이터가 메인 DB에 있어 immutable fallback이
+      데이터 손실 없이 신뢰 가능하다.
+- factory(`open_cli_db`)는 `read_only=True`일 때만 `Database(db_path,
+  read_only=True)`로 전달한다. `read_only=False`이면 기존 `Database(db_path)`
+  호출을 byte-for-byte 유지한다(kwarg 미전달).
+
+#### 적용 범위
+
+옵션 A의 `read_only=True`는 **기존 스키마를 부트스트랩 없이 읽을 수 있는
+명령(현재 `backtest history`)에만** 적용한다. §4 예외 service는 본 모드의
+대상이 아니다(§4.1 명확화 참조).
 
 ### 2.2 read-only / read-write 분류 결정 기준
 
@@ -121,19 +174,28 @@ command 본체 또는 별도 wrapper)가 가진다.
   **않는다**. enumeration은 [docs/specs/cli/03-commands.md](../cli/03-commands.md)
   + #1815 registry가 SSOT다.
 
-### 2.3 옵션 A를 채택하지 않은 이유
+### 2.3 옵션 A 채택 (#1974 R2, 2026-05-31 KST)
 
-Plan v1 Codex review 권고:
+본 절은 1.0에서 "옵션 A를 채택하지 않은 이유"였다. #1974 R2 amend로 **옵션 A를
+채택**한다. 이력과 채택 근거는 다음과 같다.
 
-- `Database`에 `read_only: bool = False`를 추가하는 옵션 A는 본 spec PR 범위가
-  아닌 `Database` API 변경이다. spec-only PR (#1854)에서 `Database` API
-  contract를 변경하면 docs PR과 code PR이 충돌한다.
-- factory-level skip(옵션 B)은 `Database` API를 그대로 두고도 invariant
-  ("read-only 명령은 schema/DDL trigger하지 않는다")를 만족한다.
-- #1855/#1856/#1857 구현 시 `Database` API에 `read_only` mode 추가가
-  고려되었으나, 본 spec은 옵션 B(factory-level skip)를 normative로 채택한
-  결정만 lock하며 — 향후 `Database` API에 `read_only` mode를 추가하는 결정이
-  내려지더라도 본 spec과 충돌하지 않는다.
+이력(1.0): spec-only PR(#1854)에서 `Database` API를 변경하면 docs PR과 code
+PR이 충돌하므로, 당시에는 factory-level skip(옵션 B)만 normative로 lock하고
+옵션 A를 보류했다. 단, 1.0은 "향후 `Database` API에 `read_only` mode를 추가하는
+결정이 내려지더라도 본 spec과 충돌하지 않는다"고 명시했다 — **본 amend가 바로 그
+결정**이다.
+
+채택 근거(#1974 R2): 옵션 B만으로는 실제 read-only 파일시스템에서 `backtest
+history`가 `attempt to write a readonly database`로 실패한다(§2.1 amend 참조).
+`service.initialize()`를 skip해도 `Database.connect()`의 writer+reader WAL
+PRAGMA가 쓰기를 요구하기 때문이다. 따라서 옵션 A를 normative로 채택해
+`Database`에 backward-compatible `read_only` 연결 모드를 도입한다. 본 amend의
+구체 정책은 §2.1 (b)에 lock한다.
+
+- 옵션 B와 옵션 A는 상호배타가 아니라 **함께** `read_only=True`의 의미를
+  구성한다(§2.1).
+- 옵션 A는 `Database` API에 keyword-only `read_only: bool = False`를 추가하되,
+  `read_only=False` 경로를 byte-for-byte 보존해 기존 소비자에 무영향이다.
 
 ## 3. ctx 기반 path resolution 정책
 
@@ -182,6 +244,17 @@ non-bootstrapped DB에서는 read-only 명령이라도 schema가 한 번은 생�
 service는 read-only 명령에서도 `initialize()`를 호출한다 (즉 옵션 B의 skip
 규칙에서 제외된다).
 
+**§2 옵션 A와의 관계 (중요, #1974 R2 명확화)**: §4 예외 service
+(`AccountService`/`MemberService`/`ApprovalService`/`AuditLogger`/
+`DynamicConfigService`)는 `initialize()`가 schema DDL을 발화해야 read가
+가능하므로 — fresh/non-bootstrapped DB에서 schema를 쓰기로 생성해야 하므로 —
+**schema 분리(§4.3) 전까지 `read_only=True`의 대상이 아니다.** 옵션 A의
+`read_only=True`(Database read-only 연결 모드)는 **기존 스키마를 부트스트랩 없이
+읽을 수 있는 명령(현재 `backtest history`)에만** 적용한다. §4 예외 service를
+read-only 연결 모드로 강제하면 `initialize()`의 schema DDL이 read-only 연결에서
+실패하므로, 이들은 본 amend의 적용 대상에서 명시적으로 제외한다. 이들의 read-only
+지원은 §4.3 schema 분리 결정을 선행 조건으로 하는 별도 follow-up이다.
+
 ### 4.2 예외 목록 (baseline 2026-05-27 KST)
 
 본 표는 `src/ante/{domain}/service.py`의 `initialize()` 본문이 schema /
@@ -199,14 +272,17 @@ service를 변경하면 본 표를 갱신한다.
 ### 4.3 후속 분리 가능성
 
 본 예외는 **service `initialize()` 내부에 read path와 schema 부트스트랩이
-얽혀 있기 때문**에 발생한다. #1855는 factory 책임 경계(spec §2)를 lock하는
-방향으로 진행됐으며, `Database` API에 `read_only` mode를 도입하지 않는
-옵션 B 정책은 본 spec §2 결정에 따라 유지된다. 향후 다음 중 하나를 채택하면
-본 표는 축소될 수 있다 — 본 SSOT는 어느 쪽도 강제하지 않는다.
+얽혀 있기 때문**에 발생한다. #1974 R2 amend로 §2는 옵션 A(`Database` read-only
+연결 모드)를 채택했으나, **이는 기존 스키마를 부트스트랩 없이 읽는 명령에만
+적용**되므로 본 §4 예외 service에는 직접 적용할 수 없다 — 이들은
+`initialize()`의 schema DDL을 쓰기로 생성해야 read가 가능하기 때문이다(§4.1
+명확화). 따라서 본 예외 service의 read-only 지원은 아래 schema 분리를 **선행
+조건**으로 한다. 향후 다음 중 하나를 채택하면 본 표는 축소될 수 있다 — 본 SSOT는
+어느 쪽도 강제하지 않는다.
 
 - service에 `ensure_schema()` / `open_existing()` 등의 분리 entrypoint 도입 →
-  read-only factory는 `ensure_schema()`만 호출, write path는 기존
-  `initialize()` 호출
+  read-only factory는 schema 부트스트랩 없이 기존 스키마를 `read_only=True`로
+  읽고, write path는 기존 `initialize()` 호출
 - factory가 schema 부재를 감지해 `ensure_schema()` 호출 후 read 진행
 
 본 표는 baseline lock일 뿐, 후속 schema separation 결정은 별도 spec change로
@@ -290,13 +366,20 @@ account/member/approval을 같은 1차 PR(#1856)에 함께 다뤘다" — 가
 
 본 SSOT가 다루지 **않는** 항목.
 
-- factory production code 구현 — #1855/#1856/#1857에서 완료.
+- factory production code 구현 — #1855/#1856/#1857에서 완료. 옵션 A
+  (`Database` read-only 연결 모드)의 production 구현은 #1974 R2에서 완료한다.
 - CLI command migration enumeration — 동일.
 - DI framework 도입.
 - IPC routing / IPC fallback 통합.
-- `Database` API 확장 (`read_only` kwarg 등) — 본 SSOT는 옵션 B를 채택해
-  `Database` API 변경 없이 invariant를 만족하도록 lock 한다.
-- runtime `src/ante/main.py` composition root 변경.
+- 옵션 A `read_only=True`를 `backtest history` 외 명령(report/data/§4 예외
+  service 등)으로 확대 — 별도 follow-up. §4 예외 service는 schema 분리(§4.3)를
+  선행 조건으로 한다.
+- live 동시쓰기 DB의 read-only 일관성 — `immutable=1`은 read-only artifact
+  전용이며, checkpoint되지 않은 live WAL frame은 대상이 아니다(§2.1 (b)).
+- WAL→다른 journal 마이그레이션, DB immutable 정책 전면 재설계.
+- runtime `src/ante/main.py` composition root에 `read_only` 적용 — 서버 runtime은
+  write가 필요하다.
 - envelope/error taxonomy 본문 변경.
-- service `initialize()` schema 분리 — 본 spec §2가 factory-level skip(옵션 B)로
-  lock; #1855/#1856/#1857 migration이 그 lock을 따른다.
+- service `initialize()` schema 분리 — 본 spec §2가 옵션 B(factory-level skip) +
+  옵션 A(Database read-only 연결 모드)를 lock하나, §4 예외 service의 read path와
+  schema 부트스트랩 분리는 별도 spec change(§4.3)로 다룬다.

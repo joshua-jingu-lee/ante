@@ -1,12 +1,14 @@
 """Tests for :func:`ante.cli.db_context.open_cli_db` lifecycle context manager.
 
-Plan v2 SSOT — 8 시나리오:
+Plan v2 SSOT (+ #1974 R2 옵션 A) — 9 시나리오:
 1. ``open_cli_db``가 connect된 :class:`Database`를 yield 한다.
 2. normal exit에서 ``close()``가 호출된다.
 3. body 예외가 발생해도 ``close()``가 호출된다.
 4. ``asyncio.CancelledError`` cancellation 경로에서도 ``close()``가 호출된다.
 5. ``get_db_path(ctx)``가 ctx로부터 명시적으로 resolve된다 (``--config-dir``).
-6. ``read_only=True``는 ``Database.__init__``에 전달되지 않는다 (#1854 옵션 B).
+6. ``read_only=True``는 ``Database.__init__``에 ``read_only=True`` kwarg로
+   전달되고, ``read_only=False``(기본)는 kwarg 미전달로 byte-for-byte 유지된다
+   (#1974 R2 옵션 A — offline-factory.md §2).
 7. ``ctx=None``은 ``ValueError``로 명시적으로 거부된다 (legacy fallback 의존 안 함).
 8. body 예외와 ``db.close()`` 실패가 함께 발생할 때 body 예외만 surface한다.
 
@@ -125,12 +127,13 @@ async def test_open_cli_db_uses_ctx_db_path(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_open_cli_db_read_only_not_passed_to_database_init(
+async def test_open_cli_db_read_only_true_passed_to_database_init(
     tmp_path: Path,
 ) -> None:
-    """6) ``read_only=True``는 hint일 뿐 ``Database.__init__``에 전달되지 않는다.
+    """6a) ``read_only=True``는 ``Database(db_path, read_only=True)``로 전달된다.
 
-    #1854 contract 옵션 B — Database API 시그니처 변경 금지.
+    #1974 R2 contract 옵션 A — Database read-only 연결 모드. factory 는
+    ``read_only=True`` 일 때만 ``read_only`` kwarg 를 forward 한다.
     """
     cfg_dir = _bootstrap_config_dir(tmp_path)
     ctx = _make_ctx_with_config_dir(cfg_dir)
@@ -141,7 +144,28 @@ async def test_open_cli_db_read_only_not_passed_to_database_init(
         instance.close = AsyncMock()
         async with open_cli_db(ctx, read_only=True):
             pass
-    # 위치 인자 1개(db_path)만 전달, read_only는 kwargs에 없어야 한다.
+    db_cls.assert_called_once_with(expected_db_path, read_only=True)
+
+
+@pytest.mark.asyncio
+async def test_open_cli_db_read_only_false_byte_for_byte_no_kwarg(
+    tmp_path: Path,
+) -> None:
+    """6b) ``read_only=False``(기본)는 기존 ``Database(db_path)`` 호출을 유지한다.
+
+    #1974 R2 invariant — False 경로는 kwarg 미전달로 byte-for-byte 동일해야
+    하며(모든 write 소비자·#1856/#1857 patch 호환), ``read_only`` 가 kwargs 에
+    없어야 한다.
+    """
+    cfg_dir = _bootstrap_config_dir(tmp_path)
+    ctx = _make_ctx_with_config_dir(cfg_dir)
+    expected_db_path = str(cfg_dir / "db" / "ante.db")
+    with patch("ante.cli.db_context.Database") as db_cls:
+        instance = db_cls.return_value
+        instance.connect = AsyncMock()
+        instance.close = AsyncMock()
+        async with open_cli_db(ctx):  # read_only 기본값 False
+            pass
     db_cls.assert_called_once_with(expected_db_path)
     call = db_cls.call_args
     assert "read_only" not in call.kwargs

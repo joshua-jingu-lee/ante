@@ -28,7 +28,7 @@ socket)이 사용자/Agent에게 노출하는 **wire-level 계약의 SSOT**를 �
 | Vocabulary code | [src/ante/contracts/vocab.py](../../../src/ante/contracts/vocab.py) | #1822 | `ContractKind`, `EnvelopeForm`, `AuthMode` Literal SSOT |
 | Drift helper skeleton | [tests/unit/contracts/helpers.py](../../../tests/unit/contracts/helpers.py) | #1823 | Click/IPC iterator, `*Error` class / `fmt.error` callsite helper |
 | Error taxonomy | [docs/specs/contracts/error-taxonomy.md](error-taxonomy.md) | #1816 / #1839 | `code` vocabulary + 8 category + auth legacy alias + 대표 fault lock |
-| Offline service factory contract | [docs/specs/contracts/offline-factory.md](offline-factory.md) | #1818 / #1854 | CLI `offline`/`cold-path` factory 책임·비책임 + `read_only` skip 정책 + ctx path resolution + read-only 예외 |
+| Offline service factory contract | [docs/specs/contracts/offline-factory.md](offline-factory.md) | #1818 / #1854 / #1974 | CLI `offline`/`cold-path` factory 책임·비책임 + `read_only` 정책(옵션 B skip + 옵션 A Database read-only 연결 모드) + ctx path resolution + read-only 예외 |
 | Migration domain order | 본 문서 [Migration Domain Order](#migration-domain-order) | #1820 | `account → member → approval → bot → treasury → broker → strategy → 기타` |
 
 ### Envelope shape (#1821)
@@ -132,9 +132,14 @@ error-taxonomy.md 자체를 갱신한다.
 - factory 비책임: IPC 호출, IPC fallback, runtime vs offline 분기, active
   runtime guard 호출, audit logging, auth/scope 검증, envelope 직렬화, error
   code 매핑.
-- `read_only` 정책: 옵션 B (factory-level skip) — `Database` API는 변경하지
-  않고, read-only 명령에서 factory가 `service.initialize()` 호출을 skip해 schema
-  /DDL trigger를 차단한다.
+- `read_only` 정책 (#1974 R2 amend): `read_only=True` ≡ 옵션 B (factory-level
+  `service.initialize()` skip) + 옵션 A (`Database` SQLite read-only 연결 모드).
+  옵션 A는 `Database(db_path, *, read_only=False)` backward-compatible 파라미터로,
+  `read_only=True`이면 `file:...?mode=ro` 단일 reader 연결(WAL 쓰기 PRAGMA skip,
+  실패 시 `immutable=1` fallback)을 열어 실제 read-only 파일시스템에서도 schema
+  /WAL 쓰기 없이 read한다. `read_only=False` 경로는 기존 baseline과 byte-for-byte
+  동일(모든 write 소비자 무영향). 옵션 A의 `read_only=True`는 기존 스키마를
+  부트스트랩 없이 읽는 명령(현재 `backtest history`)에만 적용한다.
 - ctx 정책: 신규 factory 내부에서 `get_db_path(ctx)` 명시 전달이 권장. ctx 없는
   암시 fallback은 deprecated.
 - read-only 예외: `AccountService`/`MemberService`/`ApprovalService`/

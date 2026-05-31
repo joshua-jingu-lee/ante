@@ -185,6 +185,13 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴,
 #1843 sub-PR 1/2/3/4/5 Non-Goals 동형).
 
+#1974 R2 가 추가한 core 1 class lock:
+
+- ``ReadOnlyDatabaseError`` → ``EXECUTION_ERROR`` / ``internal`` (read-only
+  ``Database`` 에서 writer 경로 호출 시 발생하는 프로그래밍/사용 오류 guard.
+  정상 경로에서는 발생하지 않으며, 발생 시 호출 코드 버그를 의미하므로
+  taxonomy ``internal`` 로 명시 매핑 — 암묵적 fallback drift 가 아님을 lock).
+
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 #1819 dispatch wrapper 가 도입할 예정인
 ``ServiceNotConfiguredError`` 의 ErrorSpec value 를 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 reserved 보존한다. 해당 exception class
@@ -237,6 +244,7 @@ from ante.broker.registry import (
 )
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.errors import ErrorSpec
+from ante.core.database import ReadOnlyDatabaseError
 from ante.member.errors import (
     MemberAlreadyExistsError,
     MemberInvalidEmojiError,
@@ -704,6 +712,21 @@ _SERVICE_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── core 1 class lock (#1974 R2) ─────────────────────────────────────────────
+#
+# ``ReadOnlyDatabaseError`` 는 read-only ``Database`` (``read_only=True``) 에서
+# writer 경로(``execute``/``execute_script``/``transaction`` 등)를 호출했을 때
+# 발생하는 **프로그래밍/사용 오류** guard 다 (offline-factory.md §2 옵션 A). 정상
+# 코드 경로에서는 발생하지 않으며, 발생 시 호출 코드의 버그를 의미한다. 따라서
+# taxonomy SSOT (#1839) 의 ``EXECUTION_ERROR`` / ``internal`` (코드 버그 /
+# unexpected programming error) 로 명시 매핑한다 — 암묵적 fallback drift 가
+# 아니라 의도된 분류임을 registry 로 lock 한다.
+_READ_ONLY_DATABASE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="EXECUTION_ERROR",
+    category="internal",
+)
+
+
 # ── fallback (registry miss + .code 도 없을 때) ──────────────────────────────
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -784,6 +807,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     ConfigValidationError: _CONFIG_VALIDATION_ERROR_SPEC,
     # ── #1843 sub-PR 6 rule 1 sub-class (실측 .code mirror) ───────────────
     RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
+    # ── #1974 R2 core 1 class (read-only Database write-guard) ────────────
+    ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 

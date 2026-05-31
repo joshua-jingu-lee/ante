@@ -660,7 +660,8 @@ tests/
 │   ├── test_fill_dedup_guard.py
 │   ├── test_fill_outbox.py
 │   ├── test_kis_error_codes_40240000.py
-│   └── test_treasury_fill_dedup.py
+│   ├── test_treasury_fill_dedup.py
+│   └── test_cli_backtest_history_readonly_fs.py
 └── __init__.py
 ```
 
