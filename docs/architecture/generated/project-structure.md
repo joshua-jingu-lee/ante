@@ -395,7 +395,9 @@ tests/
 │   │   ├── test_cli_backfill_until_removed.py
 │   │   ├── test_cli_daily_date_forward.py
 │   │   ├── test_daily_runner_target_date.py
-│   │   └── test_orchestrator_run_daily_target_date.py
+│   │   ├── test_orchestrator_run_daily_target_date.py
+│   │   ├── test_backfill_guard_wait.py
+│   │   └── test_indicator_calculator.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -654,6 +656,7 @@ tests/
 │   ├── test_fill_scheduler.py
 │   ├── test_kis_order_history_fold.py
 │   ├── test_order_tracker.py
+│   ├── test_cli_backtest_history_readonly.py
 │   ├── test_fill_dedup_guard.py
 │   ├── test_fill_outbox.py
 │   ├── test_kis_error_codes_40240000.py

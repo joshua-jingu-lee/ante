@@ -206,6 +206,112 @@ class TestInvalidTokenJsonFormat:
         assert "인증 실패" in result.stderr, result.stderr
 
 
+# ── auth DB connect 실패 시 aiosqlite traceback noise 부재 (#1965) ──────────
+
+
+class TestAuthDbFailureNoAiosqliteTraceback:
+    """auth 가 DB connect 실패로 ``auth_failed`` 를 낼 때 aiosqlite worker thread
+    traceback 이 stderr 에 새지 않아야 한다 (#1965).
+
+    근본 원인: ``_run_authenticate`` 의 ``await db.connect()`` 가
+    'unable to open database file' 로 실패하면, ``asyncio.run`` 종료 시 정리되지
+    않은 aiosqlite worker thread 가 닫힌 이벤트 루프를 건드려
+    ``Exception in thread Thread-N (_connection_worker_thread): ...
+    RuntimeError: Event loop is closed`` 가 JSON envelope **이후** stderr 로
+    출력됐다. 이는 ``--format json`` stderr 청결 계약(스펙
+    ``docs/specs/cli/02-design-decisions.md``)을 위반한다.
+
+    수정: ``Database.connect()`` 가 실패 연결의 worker thread 를 결정적으로
+    drain(``_drain_failed_conn``)하고, ``_run_authenticate`` 가 connect 실패
+    경로에서도 ``db.close()`` 를 보장한다.
+
+    플랫폼 주의: ``RuntimeError: Event loop is closed`` traceback 의 발생 자체는
+    OS/런타임 thread teardown 타이밍에 의존(Linux/Docker 에서 재현, macOS 에서는
+    드묾). 따라서 본 테스트는 (a) 깨끗한 ``auth_failed`` JSON envelope 와
+    (b) stderr 에 aiosqlite traceback marker 부재를 확인하는 contract 회귀로
+    구성한다. 결정적 worker-thread drain 자체는
+    ``tests/unit/test_database.py`` 의 connect-failure drain 테스트가 보장한다.
+    """
+
+    _AIOSQLITE_NOISE_MARKERS = (
+        "Event loop is closed",
+        "_connection_worker_thread",
+        "Exception in thread",
+        "Traceback (most recent call last)",
+    )
+
+    def test_auth_db_failure_emits_clean_json_without_traceback(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """접근 불가 DB → ``auth_failed`` JSON(stdout) + stderr 청결."""
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        # 존재하지 않는 config_dir → system.toml 없음 → db.path 기본
+        # ``<config_dir>/db/ante.db`` 의 부모 디렉토리가 없어 connect 가
+        # 'unable to open database file' 로 실패한다.
+        missing_dir = tmp_path / "no-such-config-dir"  # mkdir 하지 않음
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "--config-dir",
+                str(missing_dir),
+                "bot",
+                "list",
+            ],
+        )
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        # (a) stdout 은 깨끗한 단일 JSON auth_failed envelope.
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "auth_failed", payload
+        assert "인증 실패" in str(payload["message"]), payload
+
+        # (b) stderr 에 aiosqlite traceback noise 가 없어야 한다.
+        for marker in self._AIOSQLITE_NOISE_MARKERS:
+            assert marker not in result.stderr, (
+                f"stderr 에 aiosqlite traceback noise({marker!r}) 가 새어 나옴:\n"
+                f"{result.stderr!r}"
+            )
+
+    def test_auth_db_failure_run_authenticate_drains_failed_connection(
+        self, tmp_path: Path
+    ) -> None:
+        """``_run_authenticate`` 의 connect 실패 경로가 실패 연결을 결정적으로
+        정리한다 (#1965).
+
+        ``_run_authenticate`` 는 자체 ``asyncio.run`` 을 돌리고, connect 실패 시
+        그 안에서 ``Database.connect()`` 가 ``_drain_failed_conn`` 으로 실패 연결의
+        worker thread 를 join 한다. 본 테스트는 그 drain 이 실제로 호출되는지를
+        spy 로 검증한다 — 루프 teardown 타이밍에 의존하지 않는 결정적 회귀.
+
+        수정 전: ``Database`` 에 ``_drain_failed_conn`` 자체가 없고 connect 실패
+        연결을 정리하지 않으므로(worker thread 누수), 이 검증은 성립하지 않는다.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from ante.cli.middleware import _run_authenticate
+        from ante.core.database import Database
+
+        bad_path = str(tmp_path / "no-such-dir" / "ante.db")
+
+        real_drain = Database._drain_failed_conn
+        drain_spy = AsyncMock(side_effect=real_drain)
+        with patch.object(Database, "_drain_failed_conn", drain_spy):
+            with pytest.raises(PermissionError, match="DB 접근 불가"):
+                _run_authenticate("sk_stale_invalid", bad_path)
+
+        assert drain_spy.await_count >= 1, (
+            "connect 실패 연결의 worker thread 가 drain 되지 않음 (#1965)"
+        )
+
+
 # ── scope 부족 분기 (agent + --format json) ─────────────────────────────────
 
 

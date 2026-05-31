@@ -344,6 +344,102 @@ class TestParquetStore:
         result = store.read("005930", "1m")
         assert len(result) == 5
 
+    async def test_store_fundamental_multisource_no_data_loss(self, store):
+        """다중 소스 fundamental이 같은 월 파티션에서 서로 덮어쓰지 않는다(#1964).
+
+        data.go.kr(market_cap/shares_listed)를 먼저 쓰고, 같은 symbol/월에
+        DART(재무제표)를 quarter-end date로 쓴 뒤 read하면 양쪽 소스의 행과
+        컬럼이 **모두** 보존되어야 한다. 수정 전에는 schema mismatch로
+        DART write가 기존 파일을 덮어써 data.go.kr 행이 소실됐다.
+        """
+        from datetime import date
+
+        # data.go.kr: 9월 일별 fundamental (quarter-end 9/30 포함)
+        dg = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 29), date(2025, 9, 30)],
+                "symbol": ["005930", "005930"],
+                "market_cap": [500000000000, 510000000000],
+                "shares_listed": [5970000000, 5970000000],
+                "source": ["data_go_kr", "data_go_kr"],
+            }
+        )
+        # DART: 3Q 재무제표 (date = quarter-end 9/30) — 다른 스키마
+        dart = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "symbol": ["005930"],
+                "total_assets": [9000000000000.0],
+                "total_debt": [3000000000000.0],
+                "total_equity": [6000000000000.0],
+                "revenue": [2000000000000.0],
+                "net_income": [300000000000.0],
+                "source": ["dart"],
+            }
+        )
+        store.write("005930", "krx", dg, data_type="fundamental")
+        store.write("005930", "krx", dart, data_type="fundamental")
+
+        result = store.read("005930", "krx", data_type="fundamental")
+
+        # 양쪽 소스 행이 모두 보존: data.go.kr 2행 + DART 1행 = 3행
+        assert len(result) == 3
+        assert sorted(result["source"].unique().to_list()) == ["dart", "data_go_kr"]
+
+        # 양쪽 컬럼 집합이 모두 보존(합집합 스키마)
+        cols = set(result.columns)
+        assert {"market_cap", "shares_listed"} <= cols  # data.go.kr
+        assert {"total_assets", "total_equity", "net_income"} <= cols  # DART
+
+        # quarter-end(9/30)에서 data.go.kr 행과 DART 행이 공존
+        q_end = result.filter(pl.col("date") == date(2025, 9, 30))
+        assert len(q_end) == 2
+        dg_row = q_end.filter(pl.col("source") == "data_go_kr")
+        dart_row = q_end.filter(pl.col("source") == "dart")
+        assert dg_row["market_cap"][0] == 510000000000
+        assert dart_row["total_assets"][0] == 9000000000000.0
+
+        # merge 이상이 없었음(silent overwrite 경로 제거 확인)
+        assert store.drain_warnings() == []
+
+    async def test_store_read_heterogeneous_monthly_schemas(self, store):
+        """월마다 스키마가 다른 파티션을 raise 없이 합집합으로 읽는다(#1964).
+
+        data.go.kr-only 월과 DART-only 월이 섞여 있어도 read가 예외 없이
+        컬럼 합집합 DataFrame을 반환해야 한다. 수정 전에는 vertical concat이
+        스키마 불일치로 raise했다.
+        """
+        from datetime import date
+
+        # 8월: data.go.kr-only 스키마
+        aug = pl.DataFrame(
+            {
+                "date": [date(2025, 8, 14)],
+                "symbol": ["005930"],
+                "market_cap": [480000000000],
+                "shares_listed": [5970000000],
+                "source": ["data_go_kr"],
+            }
+        )
+        # 9월: DART-only 스키마 (완전히 다른 컬럼 집합)
+        sep = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "symbol": ["005930"],
+                "total_assets": [9000000000000.0],
+                "net_income": [300000000000.0],
+                "source": ["dart"],
+            }
+        )
+        store.write("005930", "krx", aug, data_type="fundamental")
+        store.write("005930", "krx", sep, data_type="fundamental")
+
+        # raise 없이 합집합 반환
+        result = store.read("005930", "krx", data_type="fundamental")
+        assert len(result) == 2
+        cols = set(result.columns)
+        assert {"market_cap", "shares_listed", "total_assets", "net_income"} <= cols
+
 
 # ── normalizer.py 테스트 ─────────────────────────────
 

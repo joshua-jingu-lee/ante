@@ -352,6 +352,87 @@ def test_is_blocked_empty_guard() -> None:
     assert FeedOrchestrator._is_blocked(config, "2024-01-01") is False
 
 
+# ── 가드 분리 (#1972): _is_blocked_day / _is_trading_paused ──────────────
+
+
+def test_is_blocked_day_true_for_listed_weekday() -> None:
+    """blocked_days에 해당하는 target_date 요일이면 True (skip 대상)."""
+    # 2024-01-06 = 토요일
+    config = {"guard": {"blocked_days": ["sat", "sun"]}}
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-06") is True
+
+
+def test_is_blocked_day_false_for_unlisted_weekday() -> None:
+    """blocked_days에 없는 요일이면 False."""
+    # 2024-01-01 = 월요일
+    config = {"guard": {"blocked_days": ["sat", "sun"]}}
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-01") is False
+
+
+def test_is_blocked_day_ignores_trading_hours(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_is_blocked_day는 현재 시각/거래시간 가드를 보지 않는다 (target_date 전용)."""
+    # blocked_days가 비어 있으면, blocked_hours/pause가 설정돼 있어도 False.
+    config = {
+        "guard": {
+            "blocked_days": [],
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    assert FeedOrchestrator._is_blocked_day(config, "2024-01-01") is False
+
+
+def test_is_trading_paused_true_inside_window() -> None:
+    """현재 KST 시각이 거래시간 window 안이면 True (대기 대상)."""
+    import ante.feed.pipeline.orchestrator as orch_mod
+
+    # 현재 시각을 무조건 포함하는 window로 강제.
+    config = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    # 종일 window이므로 실제 현재 KST 시각과 무관하게 True.
+    assert orch_mod.FeedOrchestrator._is_trading_paused(config) is True
+
+
+def test_is_trading_paused_false_when_disabled() -> None:
+    """pause_during_trading=False면 window가 있어도 False."""
+    config = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": False,
+        }
+    }
+    assert FeedOrchestrator._is_trading_paused(config) is False
+
+
+def test_is_trading_paused_ignores_target_date() -> None:
+    """_is_trading_paused는 target_date(요일)를 인자로 받지 않는다."""
+    # blocked_days만 있고 blocked_hours가 없으면 거래시간 가드는 False.
+    config = {"guard": {"blocked_days": ["mon"]}}
+    assert FeedOrchestrator._is_trading_paused(config) is False
+
+
+def test_is_blocked_is_or_composition() -> None:
+    """_is_blocked는 _is_blocked_day OR _is_trading_paused 합성(동작 보존)."""
+    # day만 차단: 2024-01-06 토요일.
+    day_only = {"guard": {"blocked_days": ["sat"]}}
+    assert FeedOrchestrator._is_blocked(day_only, "2024-01-06") is True
+    # hour만 차단: 종일 window.
+    hour_only = {
+        "guard": {
+            "blocked_hours": ["00:00-23:59"],
+            "pause_during_trading": True,
+        }
+    }
+    assert FeedOrchestrator._is_blocked(hour_only, "2024-01-01") is True
+    # 둘 다 비활성: False.
+    neither = {"guard": {"blocked_days": ["sat"]}}
+    assert FeedOrchestrator._is_blocked(neither, "2024-01-01") is False
+
+
 # ── Lock 파일 테스트 ─────────────────────────────────────
 
 
@@ -404,37 +485,53 @@ async def test_concurrent_run_blocked(
 
 @pytest.mark.asyncio
 async def test_compute_derived_indicators(tmp_data_path: Path) -> None:
-    """PER/PBR/EPS/BPS/ROE/부채비율이 올바르게 계산된다."""
+    """PER/PBR/EPS/BPS/ROE/부채비율이 cadence-aware as-of join으로 계산된다.
+
+    #1968: data.go.kr 일별(market_cap/shares_listed) + DART 분기(net_income/
+    total_equity/total_debt)가 `(date, source)` 키로 별도 행으로 보존되므로,
+    지표는 일별 행에 그 날짜 기준 가장 최근 분기 재무를 as-of 결합해 계산된다.
+    """
     store = ParquetStore(base_path=tmp_data_path)
 
-    # fundamental 데이터 준비
-    fundamental_df = pl.DataFrame(
+    # data.go.kr 일별 행 (분기 보고 이후 날짜) — 재무 컬럼은 null.
+    daily_df = pl.DataFrame(
         {
             "date": [date(2024, 12, 31)],
             "symbol": ["005930"],
             "market_cap": [400_000_000_000_000],
             "shares_listed": [5_969_782_550],
+            "source": ["data_go_kr"],
+        }
+    )
+    # DART 분기 행 (분기말) — 가격/주식수 컬럼은 null.
+    quarterly_df = pl.DataFrame(
+        {
+            "date": [date(2024, 9, 30)],
+            "symbol": ["005930"],
             "net_income": [50_000_000_000_000],
             "total_equity": [300_000_000_000_000],
             "total_debt": [100_000_000_000_000],
-            "source": ["test"],
+            "source": ["dart"],
         }
     )
 
-    store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", daily_df, data_type="fundamental")
+    store.write("005930", "krx", quarterly_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
     rows = calculator.compute(store, ["005930"])
 
     assert rows > 0
 
-    # 결과 읽기
+    # 결과 읽기 — 지표는 일별(data_go_kr) 행에 부여된다.
     result = store.read("005930", "krx", data_type="fundamental")
     assert not result.is_empty()
 
-    row = result.row(0, named=True)
+    daily = result.filter(pl.col("source") == "data_go_kr")
+    assert len(daily) == 1
+    row = daily.row(0, named=True)
 
-    # PER = 시가총액 / 순이익
+    # PER = 시가총액 / 순이익 (as-of 2024-09-30 분기 재무)
     expected_per = 400_000_000_000_000 / 50_000_000_000_000
     assert abs(row["per"] - expected_per) < 0.01
 
@@ -461,29 +558,37 @@ async def test_compute_derived_indicators(tmp_data_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_compute_derived_zero_division(tmp_data_path: Path) -> None:
-    """분모가 0이면 파생 지표가 None이 된다."""
+    """분모가 0이면 파생 지표가 None이 된다 (#1968 as-of join 경로)."""
     store = ParquetStore(base_path=tmp_data_path)
 
-    fundamental_df = pl.DataFrame(
+    daily_df = pl.DataFrame(
         {
             "date": [date(2024, 12, 31)],
             "symbol": ["005930"],
             "market_cap": [400_000_000_000_000],
-            "shares_listed": [0],  # 0으로 나누기
-            "net_income": [0],  # 0으로 나누기
-            "total_equity": [0],  # 0으로 나누기
+            "shares_listed": [0],  # 0으로 나누기 (EPS/BPS 분모)
+            "source": ["data_go_kr"],
+        }
+    )
+    quarterly_df = pl.DataFrame(
+        {
+            "date": [date(2024, 9, 30)],
+            "symbol": ["005930"],
+            "net_income": [0],  # 0으로 나누기 (PER 분모)
+            "total_equity": [0],  # 0으로 나누기 (PBR/ROE/부채비율 분모)
             "total_debt": [100_000_000_000_000],
-            "source": ["test"],
+            "source": ["dart"],
         }
     )
 
-    store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", daily_df, data_type="fundamental")
+    store.write("005930", "krx", quarterly_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
     calculator.compute(store, ["005930"])
 
     result = store.read("005930", "krx", data_type="fundamental")
-    row = result.row(0, named=True)
+    row = result.filter(pl.col("source") == "data_go_kr").row(0, named=True)
 
     # 분모 0이면 None
     assert row["per"] is None
@@ -496,26 +601,30 @@ async def test_compute_derived_zero_division(tmp_data_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_compute_derived_missing_columns(tmp_data_path: Path) -> None:
-    """필수 컬럼이 없으면 해당 지표를 건너뛴다."""
+    """분기(DART) 소스가 없으면 graceful하게 0을 반환한다 (#1968).
+
+    data.go.kr 일별 행만 있고 DART 분기 행이 없으면, as-of 결합 대상이 없으므로
+    지표를 부여하지 않고 0을 반환한다(에러 없이).
+    """
     store = ParquetStore(base_path=tmp_data_path)
 
-    # market_cap만 있고 net_income 등이 없는 경우
-    fundamental_df = pl.DataFrame(
+    # data.go.kr 일별 행만 존재 (DART 분기 행 없음).
+    daily_df = pl.DataFrame(
         {
             "date": [date(2024, 12, 31)],
             "symbol": ["005930"],
             "market_cap": [400_000_000_000_000],
             "shares_listed": [5_969_782_550],
-            "source": ["test"],
+            "source": ["data_go_kr"],
         }
     )
 
-    store.write("005930", "krx", fundamental_df, data_type="fundamental")
+    store.write("005930", "krx", daily_df, data_type="fundamental")
 
     calculator = IndicatorCalculator()
-    # 에러 없이 실행되어야 함
+    # 에러 없이 실행되고, 분기 소스 부재로 0을 반환해야 함.
     rows = calculator.compute(store, ["005930"])
-    assert rows >= 0
+    assert rows == 0
 
 
 # ── DART 수집 테스트 ─────────────────────────────────────

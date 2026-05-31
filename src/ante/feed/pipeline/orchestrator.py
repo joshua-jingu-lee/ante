@@ -6,6 +6,7 @@ lock 관리, 방어 가드, 리포트 생성만 담당한다.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from datetime import UTC, date, datetime, timedelta, timezone
@@ -75,6 +76,7 @@ class FeedOrchestrator:
         self,
         data_path: Path,
         config: dict[str, Any],
+        stop_event: asyncio.Event | None = None,
     ) -> CollectionResult:
         """과거 데이터 대량 수집 (backfill 모드).
 
@@ -82,6 +84,12 @@ class FeedOrchestrator:
         수행한다. malformed/future일 때는 lock 파일을 만들지 않고
         coded config_error만 담은 결과를 즉시 반환한다(체크포인트·소스
         진입 차단).
+
+        ``stop_event`` 는 상주 스케줄러(``feed start``)가 SIGTERM/SIGINT
+        수신 시 거래시간 대기 중인 backfill 루프를 깨워 안전 종료시키기
+        위해 전달한다. one-shot(``feed run backfill``)은 ``None`` 이며,
+        이 경우 대기는 ``asyncio.sleep`` 로 동작해 ``asyncio.run`` 의
+        SIGINT 취소로 중단된다.
         """
         feed_dir = data_path / ".feed"
         started_at = datetime.now(tz=UTC)
@@ -112,7 +120,9 @@ class FeedOrchestrator:
                 config,
                 feed_dir,
                 started_at,
-                self._is_blocked,
+                self._is_blocked_day,
+                self._is_trading_paused,
+                stop_event=stop_event,
             )
             self._save_report(data_path, feed_dir, result, "backfill")
             return result
@@ -156,35 +166,72 @@ class FeedOrchestrator:
             self._release_lock(feed_dir)
 
     # ── 방어 가드 ─────────────────────────────────────────
+    #
+    # 가드는 의미가 다른 두 축으로 분리한다 (#1972):
+    #   - ``_is_blocked_day``  : ``blocked_days``. **target_date 기반**.
+    #     과거 특정 요일(예: 주말)은 데이터가 없어 영원히 채워지지 않으므로
+    #     backfill 루프는 해당 날짜를 **skip** 해야 한다(대기하면 그 날짜의
+    #     요일은 절대 안 바뀌어 무한 hang).
+    #   - ``_is_trading_paused`` : ``pause_during_trading`` + ``blocked_hours``.
+    #     **현재 시각(KST) 기반**. 거래시간 동안 API 부하를 피하려는 의도이며
+    #     window가 지나면 데이터는 존재하므로 backfill 루프는 **대기 후
+    #     resume** 해야 한다.
+    # ``_is_blocked`` 는 두 축의 OR 합성으로 동작을 보존한다 — daily_runner는
+    # 이 결합 술어를 그대로 사용한다(무변경).
 
     @staticmethod
-    def _is_blocked(config: dict[str, Any], target_date: str) -> bool:
-        """방어 가드 조건을 확인한다."""
+    def _is_blocked_day(config: dict[str, Any], target_date: str) -> bool:
+        """``blocked_days`` 가드 — target_date의 요일 기반.
+
+        해당 요일이면 ``True`` (그 과거 날짜는 데이터가 없어 skip 대상).
+        """
         guard = config.get("guard", {})
-
         blocked_days = guard.get("blocked_days", [])
-        if blocked_days:
-            d = date.fromisoformat(target_date)
-            day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-            current_day = day_names[d.weekday()]
-            if current_day in [bd.lower() for bd in blocked_days]:
-                return True
+        if not blocked_days:
+            return False
 
+        d = date.fromisoformat(target_date)
+        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+        current_day = day_names[d.weekday()]
+        return current_day in [bd.lower() for bd in blocked_days]
+
+    @staticmethod
+    def _is_trading_paused(config: dict[str, Any]) -> bool:
+        """``pause_during_trading`` + ``blocked_hours`` 가드 — 현재 시각 기반.
+
+        현재 KST 시각이 거래시간 window 안에 있으면 ``True`` (대기 대상).
+        midnight-spanning window(예: "23:00-02:00")는 현 문자열 비교가
+        다루지 못한다(pre-existing known-limitation, 본 이슈 범위 밖).
+        """
+        guard = config.get("guard", {})
         pause_during_trading = guard.get("pause_during_trading", False)
         blocked_hours = guard.get("blocked_hours", [])
 
-        if pause_during_trading and blocked_hours:
-            kst = timezone(timedelta(hours=9))
-            now_kst = datetime.now(tz=kst)
-            current_hour_min = now_kst.strftime("%H:%M")
+        if not (pause_during_trading and blocked_hours):
+            return False
 
-            for window in blocked_hours:
-                if "-" in window:
-                    start_time, end_time = window.split("-")
-                    if start_time.strip() <= current_hour_min <= end_time.strip():
-                        return True
+        kst = timezone(timedelta(hours=9))
+        now_kst = datetime.now(tz=kst)
+        current_hour_min = now_kst.strftime("%H:%M")
+
+        for window in blocked_hours:
+            if "-" in window:
+                start_time, end_time = window.split("-")
+                if start_time.strip() <= current_hour_min <= end_time.strip():
+                    return True
 
         return False
+
+    @classmethod
+    def _is_blocked(cls, config: dict[str, Any], target_date: str) -> bool:
+        """방어 가드 조건을 확인한다(두 축의 합성).
+
+        daily 모드 등 "차단 시 skip(다음 run 재시도)" 의미가 필요한 호출자가
+        사용한다. 동작은 분리 이전과 동일하다(behavior-preserving).
+        """
+        return cls._is_blocked_day(config, target_date) or cls._is_trading_paused(
+            config
+        )
 
     # ── Lock 파일 관리 ────────────────────────────────────
 

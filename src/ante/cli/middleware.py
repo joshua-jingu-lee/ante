@@ -135,6 +135,24 @@ def _run_authenticate(token: str, db_path: str) -> Member:
         try:
             await db.connect()
         except Exception as e:  # noqa: BLE001 — sqlite/OS 오류 통일 처리
+            # connect 실패 경로에서도 ``db.close()`` 를 보장한다. ``connect()`` 가
+            # 부분적으로 성공(writer만 열림)한 뒤 raise되면 aiosqlite worker
+            # thread가 leak되어, JSON envelope 출력 **이후** ``asyncio.run`` 종료
+            # 시 닫힌 이벤트 루프를 건드려 stderr에 ``RuntimeError: Event loop
+            # is closed`` traceback을 남긴다(#1965). 이는 ``--format json`` 의
+            # stderr 청결 계약을 위반한다. ``report.py`` / ``db_context.py`` 의
+            # ``except BaseException`` cleanup 패턴을 미러한다.
+            #
+            # NOTE: ``Database.connect()`` 자체도 부분 연결을 정리하므로
+            # (``core/database.py``) 통상 ``db.close()`` 는 no-op이지만, auth
+            # 표면에서도 동일 invariant를 이중 방어로 보장한다. ``close()`` 실패는
+            # 원본 ``PermissionError`` 를 가리지 않도록 swallow한다.
+            try:
+                await db.close()
+            except Exception:
+                logger.debug(
+                    "db.close() after failed connect raised — ignored", exc_info=True
+                )
             msg = (
                 f"DB 접근 불가 ({db_path}): {e}. "
                 "`ante init --dir <config_dir>` 이후 동일 `--config-dir`로 실행하세요."

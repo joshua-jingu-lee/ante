@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -44,14 +46,36 @@ _BACKFILL_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 CONFIG_ERROR_CODE_INVALID_DATE = "CLI_INVALID_DATE"
 CONFIG_ERROR_CODE_INVALID_DATE_RANGE = "INVALID_DATE_RANGE"
 
+# 거래시간 가드(`blocked_hours`+`pause_during_trading`) 대기 관련 coded
+# config_error 코드 (#1972). backfill 날짜별 루프가 거래시간 window 안에서
+# 대기하다가, 누적 대기가 상한(MAX_GUARD_WAIT_SECONDS)을 넘으면
+# ``GUARD_PERMANENTLY_BLOCKED`` 를, 상주 스케줄러 stop_event로 대기가
+# 중단되면 ``BACKFILL_STOP_REQUESTED`` 를 result.config_errors에 적재한다.
+# 둘 다 mid-range partial 종료를 관측 가능하게 만드는 마커이며
+# (clean-success 차단), BACKFILL_DATE_ERROR_CODES에 포함되어 CLI exit-1 /
+# daemon 차단 echo 경로를 그대로 탄다.
+CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED = "GUARD_PERMANENTLY_BLOCKED"
+CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED = "BACKFILL_STOP_REQUESTED"
+
 # 신설 coded config_errors의 코드 집합. CLI/scheduler에서 이 집합으로만
 # 새 envelope/차단 분기를 trigger한다 (기존 비날짜 entries 보존).
 BACKFILL_DATE_ERROR_CODES = frozenset(
     {
         CONFIG_ERROR_CODE_INVALID_DATE,
         CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
+        CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED,
+        CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,
     }
 )
+
+# 거래시간 가드 대기 폴링 주기/상한 (초). 모듈 상수 — `[guard]` 스키마
+# 확장 없이 고정값으로 둔다(#1972 Non-Goal). 테스트는 이 상수들을
+# patch/주입해 시간 비의존(결정적)으로 검증한다.
+GUARD_WAIT_POLL_SECONDS = 60.0
+# 상한은 하루를 충분히 넘긴다(거래시간 window가 자정 안에 끝나면 그날
+# 안에 반드시 해제되므로, 정상 운영에서는 도달하지 않는다). 도달은
+# 설정 오류(예: 24시간 전체 차단)를 의미한다.
+MAX_GUARD_WAIT_SECONDS = 26 * 60 * 60.0
 
 # `today`는 KST 캘린더 기준으로 산출한다. backfill_since는 거래일 단위
 # 날짜이며 cli_scheduler도 KST(UTC+9)로 동작한다(see cli_scheduler.KST).
@@ -141,13 +165,26 @@ class BackfillRunner:
         config: dict[str, Any],
         feed_dir: Path,
         started_at: datetime,
-        is_blocked: Any,
+        is_blocked_day: Callable[[dict[str, Any], str], bool],
+        is_trading_paused: Callable[[dict[str, Any]], bool],
+        stop_event: asyncio.Event | None = None,
     ) -> CollectionResult:
         """Backfill 내부 구현. data.go.kr + DART 수집 후 지표 계산.
 
         backfill_since strict 검증은 수렴점이므로 수집 메서드 진입 전
         가장 먼저 수행한다. malformed/future일 때는 체크포인트·소스
         접근 없이 coded config_error만 담은 result를 즉시 반환한다.
+
+        가드는 두 술어로 분리되어 주입된다 (#1972):
+            ``is_blocked_day(config, target_date)`` — ``blocked_days``
+            (target_date 요일). 해당 날짜는 데이터가 없어 **skip**.
+            ``is_trading_paused(config)`` — ``blocked_hours`` +
+            ``pause_during_trading`` (현재 시각). 해당 시 window가 풀릴
+            때까지 **대기 후** 그 날짜를 수집한다.
+
+        ``stop_event`` 가 주어지면(상주 스케줄러) 거래시간 대기 중
+        SIGTERM/SIGINT로 깨어나 체크포인트를 저장한 partial을 반환하며
+        ``BACKFILL_STOP_REQUESTED`` 마커를 적재한다.
         """
         # strict 날짜 검증을 가장 먼저 수행해 malformed/future config가
         # checkpoint/소스/지표 어디에도 도달하지 않도록 한다.
@@ -183,8 +220,11 @@ class BackfillRunner:
             store,
             ohlcv_checkpoint,
             ctx,
-            is_blocked,
+            is_blocked_day,
+            is_trading_paused,
+            stop_event,
         )
+        ctx.warnings.extend(store.drain_warnings())
         await self._collect_dart(
             data_path,
             feed_dir,
@@ -193,7 +233,9 @@ class BackfillRunner:
             store,
             ctx,
         )
+        ctx.warnings.extend(store.drain_warnings())
         self._compute_indicators(store, ctx)
+        ctx.warnings.extend(store.drain_warnings())
 
         return ctx.to_result("backfill", started_at)
 
@@ -270,16 +312,37 @@ class BackfillRunner:
         store: ParquetStore,
         checkpoint: Checkpoint,
         ctx: _RunContext,
-        is_blocked: Any,
+        is_blocked_day: Callable[[dict[str, Any], str], bool],
+        is_trading_paused: Callable[[dict[str, Any]], bool],
+        stop_event: asyncio.Event | None,
     ) -> None:
-        """data.go.kr 날짜별 수집을 실행한다."""
+        """data.go.kr 날짜별 수집을 실행한다.
+
+        가드 분리 (#1972):
+            - ``is_blocked_day`` 가 True인 비거래 요일은 **skip**한다
+              (그 과거 날짜는 데이터가 없어 대기해도 영원히 안 채워짐).
+            - 그 외 날짜는 ``is_trading_paused`` 가 풀릴 때까지 **대기한 뒤**
+              수집한다(window가 지나면 데이터는 존재).
+        """
         if self._data_go_kr is None:
             return
 
         for target_date in dates:
-            if is_blocked(config, target_date):
-                logger.debug("방어 가드: %s 스킵", target_date)
+            if is_blocked_day(config, target_date):
+                logger.debug("방어 가드(blocked_days): %s 스킵", target_date)
                 continue
+
+            # 거래시간 가드가 활성이면 풀릴 때까지 대기한다. 대기가 stop_event
+            # 또는 max-wait 상한으로 중단되면 체크포인트만 저장된 partial로
+            # 루프를 빠져나간다(관측 가능한 coded marker 적재).
+            should_stop = await self._wait_out_trading_pause(
+                config,
+                is_trading_paused,
+                stop_event,
+                ctx,
+            )
+            if should_stop:
+                break
 
             try:
                 written, syms, warns = await self._data_go_kr.collect(
@@ -313,6 +376,98 @@ class BackfillRunner:
                         "reason": str(exc),
                     }
                 )
+
+    async def _wait_out_trading_pause(
+        self,
+        config: dict[str, Any],
+        is_trading_paused: Callable[[dict[str, Any]], bool],
+        stop_event: asyncio.Event | None,
+        ctx: _RunContext,
+    ) -> bool:
+        """거래시간 가드(``blocked_hours``)가 풀릴 때까지 대기한다.
+
+        ``is_trading_paused(config)`` 가 True인 동안 ``GUARD_WAIT_POLL_SECONDS``
+        주기로 폴링한다.
+
+        - 상주 스케줄러(``stop_event`` 주어짐): ``asyncio.wait_for`` 로 poll
+          만큼 대기하되 stop_event가 set되면 즉시 깨어난다(SIGTERM 안전종료).
+        - one-shot(``stop_event=None``): ``asyncio.sleep`` 로 대기하며,
+          ``asyncio.run`` 의 SIGINT가 task를 취소해 중단할 수 있다.
+
+        Returns:
+            ``True``  — stop_event 또는 max-wait 상한으로 대기가 중단됨.
+                루프는 즉시 break하고 체크포인트만 저장된 partial을 반환한다.
+                (각각 ``BACKFILL_STOP_REQUESTED`` /
+                ``GUARD_PERMANENTLY_BLOCKED`` coded marker가 적재됨.)
+            ``False`` — 가드가 풀려 정상적으로 해당 날짜를 수집할 수 있음.
+        """
+        waited = 0.0
+        first_log = True
+
+        while is_trading_paused(config):
+            # 대기 진입 직전에 stop이 이미 요청되었으면 즉시 중단한다.
+            if stop_event is not None and stop_event.is_set():
+                logger.info("Backfill 중단 요청 수신, 거래시간 대기 종료")
+                ctx.config_errors.append(
+                    {
+                        "code": CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,
+                        "error": "중단 요청으로 backfill 거래시간 대기를 종료했습니다",
+                        "source": "data_go_kr",
+                    }
+                )
+                return True
+
+            if waited >= MAX_GUARD_WAIT_SECONDS:
+                logger.error(
+                    "거래시간 가드 대기 상한(%.0fs) 초과 — backfill 중단",
+                    MAX_GUARD_WAIT_SECONDS,
+                )
+                ctx.config_errors.append(
+                    {
+                        "code": CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED,
+                        "error": (
+                            "거래시간 가드(blocked_hours)가 대기 상한"
+                            f"({MAX_GUARD_WAIT_SECONDS:.0f}s)을 초과해 해제되지 "
+                            "않았습니다. blocked_hours 설정을 확인하세요"
+                        ),
+                        "source": "data_go_kr",
+                    }
+                )
+                return True
+
+            if first_log:
+                logger.info("방어 가드(blocked_hours): 거래시간 종료까지 대기")
+                first_log = False
+
+            if stop_event is not None:
+                # stop set 시 즉시 깨어난다. 그 외에는 poll만큼 대기 후 재확인.
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=GUARD_WAIT_POLL_SECONDS,
+                    )
+                except TimeoutError:
+                    # poll 경과(stop 미수신) — window/상한을 루프 top에서 재확인.
+                    waited += GUARD_WAIT_POLL_SECONDS
+                    continue
+                # TimeoutError 아님 ⇒ wait 도중 stop_event가 set됨 ⇒ 즉시 중단.
+                # 같은 사이클에 거래시간 window가 동시에 풀려 while 재평가가
+                # False가 되더라도 그 race를 통과시키지 않고 stop을 우선한다.
+                logger.info("Backfill 중단 요청 수신, 거래시간 대기 종료")
+                ctx.config_errors.append(
+                    {
+                        "code": CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,
+                        "error": "중단 요청으로 backfill 거래시간 대기를 종료했습니다",
+                        "source": "data_go_kr",
+                    }
+                )
+                return True
+
+            # one-shot: asyncio.run SIGINT가 이 sleep을 취소해 중단 가능.
+            await asyncio.sleep(GUARD_WAIT_POLL_SECONDS)
+            waited += GUARD_WAIT_POLL_SECONDS
+
+        return False
 
     async def _collect_dart(
         self,

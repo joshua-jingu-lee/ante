@@ -59,6 +59,40 @@ _TIME_COLUMN: dict[str, str] = {
     "tick": "timestamp",
 }
 
+
+def _natural_key(data_type: str, columns: list[str]) -> list[str]:
+    """data_type별 merge/dedup용 natural key 컬럼 목록을 결정한다.
+
+    natural key는 같은 월 파티션 내에서 "같은 논리 행"을 식별하는 기준이며,
+    merge 시 `unique(subset=key, keep="last")`로 멱등성을 보장한다.
+
+    - fundamental: `["date", "source"]`(둘 다 존재 시) 또는 `["date"]`.
+      DART 재무제표 date는 분기말일(3/31·6/30·9/30·12/31)이라
+      data.go.kr의 같은 거래일 일별 fundamental과 같은 월 파티션에서
+      date가 충돌할 수 있다. `source`까지 키에 포함하면 두 소스의
+      서로 다른(null-complementary) 행을 **모두 보존**한다(#1964).
+    - ohlcv/tick(및 기타 default): `["timestamp"]`(존재 시) 또는 `[]`.
+
+    Args:
+        data_type: 데이터 타입 (ohlcv/fundamental/tick/...).
+        columns: 대상 DataFrame의 컬럼 목록.
+
+    Returns:
+        natural key 컬럼 목록. 키 컬럼이 데이터에 없으면 빈 목록.
+    """
+    cols = set(columns)
+    if data_type == "fundamental":
+        if "date" in cols and "source" in cols:
+            return ["date", "source"]
+        if "date" in cols:
+            return ["date"]
+        return []
+    # ohlcv/tick 및 default: 단일 timestamp 키
+    if "timestamp" in cols:
+        return ["timestamp"]
+    return []
+
+
 # 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용.
 # 코드 레벨 SSOT(`ante.core.exchange.CANONICAL_EXCHANGES`)에 위임한다.
 # 값(canonical 5종 frozenset)·`migrate_parquet_paths()` 동작은 위임
@@ -171,10 +205,29 @@ class ParquetStore:
     ) -> None:
         self._base = Path(base_path)
         self._compression = compression
+        # merge 이상(데이터 손실 가능성이 있던 케이스)을 구조화 경고로 버퍼링.
+        # backfill_runner가 collector/indicator 호출 직후 drain하여
+        # CollectionResult.warnings(→ report `warnings`)로 전파한다(#1964).
+        self._pending_warnings: list[dict] = []
 
     @property
     def base_path(self) -> Path:
         return self._base
+
+    def drain_warnings(self) -> list[dict]:
+        """누적된 store 이상 경고를 반환하고 버퍼를 비운다.
+
+        호출자(backfill_runner)가 한 단계(collector/indicator) 종료 직후
+        drain하여 run context의 warnings로 옮긴다. 반환 후 내부 버퍼는
+        비워지므로 같은 경고가 중복 전파되지 않는다.
+
+        Returns:
+            누적 경고 목록의 복사본. 각 항목은
+            `{"type": "store_merge", "path": str, "message": str}` 형태.
+        """
+        drained = list(self._pending_warnings)
+        self._pending_warnings.clear()
+        return drained
 
     def _resolve_path(
         self,
@@ -295,7 +348,10 @@ class ParquetStore:
         if not dfs:
             return pl.DataFrame()
 
-        df = pl.concat(dfs)
+        # 월별 파티션은 소스/시기에 따라 이종 스키마일 수 있다
+        # (data.go.kr-only, DART-only, 지표 보강 후 등). diagonal_relaxed로
+        # 컬럼 합집합 + null-fill + supertype 강제 결합하여 raise 없이 읽는다.
+        df = pl.concat(dfs, how="diagonal_relaxed")
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
 
         if start and time_col in df.columns:
@@ -346,12 +402,12 @@ class ParquetStore:
         path.mkdir(parents=True, exist_ok=True)
 
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
+        key = _natural_key(data_type, data.columns)
         partitioned = self._partition_by_month(data, time_col)
 
         for month_val, group in partitioned:
             filepath = path / f"{month_val}.parquet"
-            unique_col = time_col if time_col in group.columns else None
-            self._persist_partition(filepath, group, unique_col)
+            self._persist_partition(filepath, group, key)
 
         logger.debug("Wrote %d rows for %s/%s", len(data), symbol, timeframe)
 
@@ -377,24 +433,60 @@ class ParquetStore:
         ]
 
     def _persist_partition(
-        self, filepath: Path, group: pl.DataFrame, unique_col: str | None
+        self, filepath: Path, group: pl.DataFrame, key: list[str]
     ) -> None:
-        """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge."""
+        """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge.
+
+        merge 전략(#1964):
+        - 기존 파일이 있으면 `pl.concat(how="diagonal_relaxed")`로
+          컬럼 합집합 + null-fill + supertype 강제 결합한다(이종 스키마 무손실).
+        - natural key가 있으면 `unique(subset=key, keep="last")`로 신규 write
+          우선 dedup 후 key로 정렬한다(멱등성).
+        - **silent overwrite 금지**: concat이 (방어적으로) 여전히 raise하면
+          기존 파일을 덮어쓰지 않고 store 이상 경고만 기록한 뒤 반환한다.
+          기존 데이터 보존을 데이터 신규 반영보다 우선한다.
+
+        Args:
+            filepath: 대상 파티션 파일 경로.
+            group: 이번 write로 들어온 (단일 월) DataFrame.
+            key: natural key 컬럼 목록. 비어 있으면 dedup/sort 생략.
+        """
         if filepath.exists():
             try:
                 existing = pl.read_parquet(filepath)
-                merged = pl.concat([existing, group])
-                if unique_col:
-                    merged = merged.unique(subset=[unique_col]).sort(unique_col)
+                merged = pl.concat([existing, group], how="diagonal_relaxed")
+                if key:
+                    present = [c for c in key if c in merged.columns]
+                    if present:
+                        merged = merged.unique(subset=present, keep="last").sort(
+                            present
+                        )
                 merged.write_parquet(str(filepath), compression=self._compression)
                 return
-            except Exception:
+            except Exception as exc:
+                # 방어: diagonal_relaxed로도 결합 불가한 케이스. 기존 파일을
+                # 절대 덮어쓰지 않고(데이터 손실 방지) 이상만 기록한다.
                 logger.warning(
-                    "Failed to merge with existing file: %s, overwriting", filepath
+                    "Parquet 파티션 merge 실패: %s — 기존 파일 보존, write 건너뜀 (%s)",
+                    filepath,
+                    exc,
                 )
+                self._pending_warnings.append(
+                    {
+                        "type": "store_merge",
+                        "path": str(filepath),
+                        "message": (
+                            f"파티션 merge 실패로 이번 write를 건너뛰어 기존 데이터를 "
+                            f"보존했습니다: {exc}"
+                        ),
+                    }
+                )
+                return
 
-        if unique_col and unique_col in group.columns:
-            group = group.sort(unique_col)
+        if key:
+            present = [c for c in key if c in group.columns]
+            if present:
+                group = group.unique(subset=present, keep="last").sort(present)
         group.write_parquet(str(filepath), compression=self._compression)
 
     def append(
