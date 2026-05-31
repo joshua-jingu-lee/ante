@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 from typing import TYPE_CHECKING, Any
 
 import click
 
 from ante.cli._data_path import resolve_data_path
 from ante.cli._validators import validate_positive_finite_amount
+from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 
 if TYPE_CHECKING:
@@ -243,24 +245,34 @@ def history(
     db_path: str | None,
 ) -> None:
     """전략별 백테스트 실행 이력 조회."""
-    from ante.cli.main import get_db_path
-
     fmt = get_formatter(ctx)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     async def _list() -> list[dict]:
         from ante.backtest.run_store import BacktestRunStore
-        from ante.core.database import Database
 
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        # ``backtest history`` 는 offline read 명령이므로 read-only DB 에서
+        # schema DDL 을 발화하면 안 된다 (offline-factory.md §2 옵션 B —
+        # read-only 명령은 ``service.initialize()`` skip). 따라서
+        # ``BacktestRunStore.initialize()`` (CREATE TABLE backtest_runs) 를
+        # 호출하지 않는다. ``--db-path`` Click option 은 원시 값 (None 가능) 을
+        # 그대로 ``db_path_override`` 로 전달한다 — ``open_cli_db`` 가 None 이면
+        # ``get_db_path(ctx)`` 로 해석하므로 기존 ``--db-path`` 동작과 동치다
+        # (approval.py 패턴; offline-factory.md §1.1).
+        async with open_cli_db(ctx, read_only=True, db_path_override=db_path) as db:
             store = BacktestRunStore(db)
-            await store.initialize()
-            runs = await store.list_by_strategy(strategy_name, limit=limit)
+            # fresh / non-bootstrapped DB 에서는 `backtest_runs` 테이블이 아직
+            # 생성되지 않은 상태일 수 있다 (initialize() 를 거치지 않기 때문).
+            # 정의상 테이블 부재는 해당 전략의 이력 부재와 동치이므로 빈 이력으로
+            # 정규화한다. malformed DB 같은 다른 OperationalError 까지 삼키지
+            # 않도록 "no such table" 메시지로만 좁혀 그 외는 호출 표면의
+            # BACKTEST_ERROR 분류로 재전파한다 (trade.py:trade_info 동형).
+            try:
+                runs = await store.list_by_strategy(strategy_name, limit=limit)
+            except sqlite3.OperationalError as e:
+                if "no such table" in str(e).lower():
+                    return []
+                raise
             return [r.to_dict() for r in runs]
-        finally:
-            await db.close()
 
     try:
         rows = asyncio.run(_list())
