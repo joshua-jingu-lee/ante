@@ -24,6 +24,8 @@ _get_required_scopes = _mod._get_required_scopes
 _format_scope_cell = _mod._format_scope_cell
 _format_token_cell = _mod._format_token_cell
 _write_command_detail = _mod._write_command_detail
+CLI_GENERATED_NOTICE = _mod.CLI_GENERATED_NOTICE
+CLI_MODULE_GUIDE_NOTICE = _mod.CLI_MODULE_GUIDE_NOTICE
 generate_cli_reference = _mod.generate_cli_reference
 
 # ── 헬퍼 함수 테스트 ─────────────────────────────────────────────────────────
@@ -397,6 +399,17 @@ class TestGenerateCliReference:
 
         assert "CLI 명령어를 정리한 문서" in content
         assert "마지막 갱신" in content
+
+    def test_header_preserves_generated_and_module_guide_notices(self) -> None:
+        """재생성 시 자동 생성 안내와 모듈 가이드 링크가 사라지지 않는다."""
+
+        buf = io.StringIO()
+        generate_cli_reference(buf)
+        content = buf.getvalue()
+
+        assert CLI_GENERATED_NOTICE in content
+        assert CLI_MODULE_GUIDE_NOTICE in content
+        assert "[모듈과 운영 영역](modules.md)" in content
 
     def test_options_have_details(self) -> None:
         """옵션이 있는 명령어에 옵션 테이블이 포함된다."""
