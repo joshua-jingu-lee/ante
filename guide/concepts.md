@@ -63,61 +63,12 @@ Ante의 설계를 한 표로 요약하면 이렇습니다.
 - **계좌로 범위 지정**: Trade 기록, Approval, 전략 성과
 - **계좌 밖 (공용)**: Member, Strategy Registry, DataStore, EventBus, Backtest
 
-## 개념 사전
+## 주요 모듈로 이어 보기
 
-> 패턴: **무엇 → 왜 → 무엇과 이어지나 → 관련 명령**
+여기까지가 Ante의 큰 흐름입니다. 각 모듈이 정확히 무엇을 의미하고 어떤 CLI 명령 그룹이 무엇을 제어하는지는 [모듈과 운영 영역](modules.md)에서 이어서 봅니다.
 
-### 거래의 주체
-
-- **Strategy (전략)** — "언제·무엇을·얼마나 사고팔까"를 담은 Python 클래스.
-  *왜:* 에이전트의 자율이 표현되는 단위. · *이어짐:* Registry가 로드해 Bot에 공급. · *명령:* `ante strategy validate / submit / performance`
-- **Signal (시그널)** — 전략이 내는 매매 의도(종목·방향·수량 등).
-  *왜:* 전략 로직과 실제 주문 사이의 표준 신호. · *이어짐:* Bot이 받아 주문 흐름으로. · *명령:* (런타임 내부)
-- **Bot (봇)** — 전략을 실어 독립 asyncio Task로 돌리는 실행 엔진.
-  *왜:* 전략을 실제로 "운영"하는 주체. 한 봇의 사고가 다른 봇에 번지지 않도록 격리. · *이어짐:* Strategy를 로드, Signal을 주문으로. · *명령:* `ante bot create / start / stop / positions`
-
-### 자금과 계좌
-
-- **Account (계좌)** — 거래소·통화·브로커·인증을 묶는 최상위 단위.
-  *왜:* 봇·자금·룰이 모두 한 계좌 아래 모임. · *이어짐:* Treasury·RuleEngine·Bot·Broker의 소유자. · *명령:* `ante account create / list / info`
-- **Treasury (자금 관리)** — 전체 잔고를 쥐고 봇별 예산을 배분·예약·정산.
-  *왜:* 자금이 한 곳에서 통제돼야 과다 집행을 막음. · *이어짐:* 주문 직전 자금 게이트. · *명령:* `ante treasury ...`
-
-### 안전 게이트
-
-- **Rule Engine (거래 룰)** — 모든 주문을 2계층(전역·전략별) 룰로 검증.
-  *왜:* 손실·과열을 시스템 차원에서 차단. · *이어짐:* Signal → 검증 → 통과/차단. · *명령:* `ante rule list / info / create / update`
-- **Backtest (백테스트)** — 과거 데이터로 전략 성과를 격리 시뮬레이션.
-  *왜:* 실자본 전에 가설을 검증. · *이어짐:* DataStore에서 읽고 리포트 생성. · *명령:* `ante backtest run / history`
-- **Approval (결재)** — 에이전트의 요청을 사용자가 승인·반려.
-  *왜:* 사람이 최종 결정권을 쥐는 지점. · *이어짐:* 요청 → 알림 → 승인 시 자동 반영. · *명령:* `ante approval request / review / approve / reject`
-
-### 외부 연동
-
-- **Broker Adapter (증권사 연동)** — 증권사 API를 통일된 인터페이스로 추상화(현재 KIS).
-  *왜:* 코어를 특정 증권사에서 분리. · *이어짐:* 주문 실행·체결 보고. · *명령:* `ante broker status / balance / positions`
-- **API Gateway** — 여러 봇의 API 요청을 큐잉·캐싱·rate limit.
-  *왜:* 증권사 호출 한도를 안전하게 지킴. · *이어짐:* Treasury 통과 후 Broker 앞단.
-
-### 데이터
-
-- **DataStore** — 시세·재무 데이터의 유일한 Parquet 접근 계층.
-  *왜:* 데이터 읽기/쓰기를 한 계층으로 통일. · *이어짐:* Bot·Backtest·전략이 조회. · *명령:* `ante data list / info / schema`
-- **DataFeed** — 공공 API에서 과거 데이터를 배치 수집하는 ETL.
-  *왜:* 백테스트·전략에 쓸 데이터를 채움. · *이어짐:* DataStore에 적재. · *명령:* `ante feed init / run / start`
-
-### 행위자와 기반
-
-- **Member (멤버)** — 사용자·에이전트를 등록·인증·권한 관리(RBAC).
-  *왜:* 누가 무엇을 할 수 있는지의 기준. · *이어짐:* 계좌를 운용, 행동은 Audit에 기록. · *명령:* `ante member list / register`
-- **EventBus** — asyncio 큐 기반 이벤트 발행/구독 인프라.
-  *왜:* 모듈을 느슨하게 잇는 1:N 통신. · *이어짐:* 주문 흐름 전 구간의 척추.
-
-### 기록과 관찰
-
-- **Trade (거래 기록·성과)** — 체결/취소/거부를 영속 저장하고 성과 지표 산출.
-  *왜:* 다음 전략 개선의 근거. · *이어짐:* 체결 이벤트를 구독해 자동 기록. · *명령:* `ante trade ... / ante report ...`
+특히 처음 운용한다면 `account`와 `broker`, `treasury`의 차이, `data`와 `feed`의 차이, `strategy`와 `bot`의 차이를 먼저 확인하는 것이 좋습니다.
 
 ## 다음 단계
 
-개념이 잡혔다면, [시작하기](getting-started.md)에서 설치부터 첫 전략 가동까지 직접 따라가 볼 수 있습니다. 전략을 직접 쓰려면 [전략 작성 가이드](strategy.md)를, 에이전트로 일한다면 [에이전트 가이드](agent.md)를 보세요. 더 깊은 동작 원리는 [아키텍처 문서](../docs/architecture/README.md)에 있습니다.
+개념이 잡혔다면, [모듈과 운영 영역](modules.md)에서 명령 그룹별 제어 대상을 확인하고 [시작하기](getting-started.md)에서 설치부터 첫 전략 가동까지 직접 따라가 볼 수 있습니다. 전략을 직접 쓰려면 [전략 작성 가이드](strategy.md)를, 에이전트로 일한다면 [에이전트 가이드](agent.md)를 보세요. 더 깊은 동작 원리는 [아키텍처 문서](../docs/architecture/README.md)에 있습니다.

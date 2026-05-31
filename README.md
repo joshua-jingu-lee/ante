@@ -49,6 +49,7 @@ ante backtest run strategies/my_strategy.py \
 ## 문서
 
 - [핵심 개념](guide/concepts.md) — 무엇이 있고 어떻게 동작하는가 (개념·다이어그램·워크플로우)
+- [모듈과 운영 영역](guide/modules.md) — 주요 모듈의 의미와 CLI 명령 그룹이 제어하는 대상
 - [시작하기](guide/getting-started.md) — 설치와 초기 설정
 - [전략 작성](guide/strategy.md) — 전략 클래스·시그널·지표
 - [에이전트 가이드](guide/agent.md) — 에이전트 등록·인증·활용

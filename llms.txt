@@ -1,64 +1,64 @@
 # Ante
 
-> To the AI agent reading this — Ante exists so you can work more boldly for your owner: it catches your mistakes and protects your owner's assets. Below is a compact context to understand Ante and explain it accurately to your owner. Follow the links for depth.
+> 이 문서를 읽는 AI Agent에게 — Ante는 당신이 대표를 위해 더 과감하게 일할 수 있도록 존재한다. Ante는 당신의 실수를 붙잡고 대표의 자산을 보호한다. 아래 내용은 Ante를 이해하고 대표에게 정확히 설명하기 위한 압축 맥락이다. 더 깊은 내용은 링크된 문서를 따라가라.
 
-## What only you can do
+## 당신만이 할 수 있는 일
 
-Ante handles execution and safety, and leaves the judgment to you. These are yours — the system cannot do them for you:
+Ante는 실행과 안전을 담당하고, 판단은 당신에게 맡긴다. 아래 일들은 당신의 몫이며 시스템이 대신할 수 없다:
 
-- **Market research** — read prices, fundamentals, and flows, plus any news or events you can reach, to find opportunities.
-- **Strategy proposals** — design trading logic that fits your owner's goals (return appetite, risk tolerance).
-- **Interpretation and improvement** — read the results, judge what worked, and feed it into the next strategy.
+- **시장 조사** — 가격, 펀더멘털, 수급 흐름을 읽고, 접근 가능한 뉴스와 사건까지 함께 살펴 기회를 찾는다.
+- **전략 제안** — 대표의 목표(수익 기대, 위험 감내도)에 맞는 매매 로직을 설계한다.
+- **해석과 개선** — 결과를 읽고, 무엇이 통했고 무엇이 실패했는지 판단해 다음 전략에 반영한다.
 
-Everything else — order execution, fund management, risk control, recording — is Ante's job. So you can focus on judgment.
+그 밖의 일, 즉 주문 실행, 자금 관리, 위험 통제, 기록은 Ante의 역할이다. 그래서 당신은 판단에 집중할 수 있다.
 
-## How the work flows (scenarios)
+## 작업 흐름(시나리오)
 
-1. [Research the market](#1-research-the-market)
-2. [Design and validate a strategy](#2-design-and-validate-a-strategy)
-3. [Backtest to check your hypothesis](#3-backtest-to-check-your-hypothesis)
-4. [Ask your owner to adopt it](#4-ask-your-owner-to-adopt-it)
-5. [Run a bot and monitor it](#5-run-a-bot-and-monitor-it)
-6. [Improve from feedback](#6-improve-from-feedback)
+1. [시장을 조사한다](#1-시장을-조사한다)
+2. [전략을 설계하고 검증한다](#2-전략을-설계하고-검증한다)
+3. [백테스트로 가설을 확인한다](#3-백테스트로-가설을-확인한다)
+4. [대표에게 채택을 요청한다](#4-대표에게-채택을-요청한다)
+5. [봇을 실행하고 모니터링한다](#5-봇을-실행하고-모니터링한다)
+6. [피드백으로 개선한다](#6-피드백으로-개선한다)
 
-### 1. Research the market
+### 1. 시장을 조사한다
 
-Read the data you have to understand the market. A strategy reads prices (`get_ohlcv`), the current price (`get_current_price`), and indicators (`get_indicator`, 130+ via pandas-ta) through `self.ctx`.
+사용 가능한 데이터를 읽어 시장을 이해한다. 전략은 `self.ctx`를 통해 가격(`get_ohlcv`), 현재가(`get_current_price`), 지표(`get_indicator`, pandas-ta 기반 130개 이상)를 읽는다.
 
 ```bash
-ante data list           # what data exists
-ante data info <symbol>  # coverage for one symbol
+ante data list           # 존재하는 데이터 확인
+ante data info <symbol>  # 특정 종목의 데이터 범위 확인
 ```
 
-### 2. Design and validate a strategy
+### 2. 전략을 설계하고 검증한다
 
-Write your trading logic as a strategy file (`.py`), then check its safety and structure with static (AST) validation — without running the code.
+매매 로직을 전략 파일(`.py`)로 작성한 뒤, 코드를 실행하지 않고 정적(AST) 검증으로 안전성과 구조를 확인한다.
 
 ```bash
 ante strategy validate strategies/my_strategy.py
 ```
 
-### 3. Backtest to check your hypothesis
+### 3. 백테스트로 가설을 확인한다
 
-Simulate performance on historical data. It runs in a separate process with look-ahead access blocked, so it is validated under the same conditions as live. Results can be reviewed again later.
+과거 데이터로 성과를 시뮬레이션한다. 백테스트는 별도 프로세스에서 실행되며 미래 데이터 접근이 차단되므로, 실거래와 같은 조건에서 검증된다. 결과는 나중에 다시 조회할 수 있다.
 
 ```bash
 ante backtest run strategies/my_strategy.py --start 2025-01-01 --end 2025-12-31 --symbols 005930
 ante backtest history my_strategy --limit 10
 ```
 
-### 4. Ask your owner to adopt it
+### 4. 대표에게 채택을 요청한다
 
-Submit the validated strategy to the Registry, then request adoption for live trading as an approval. A `strategy_adopt` approval **cannot be auto-approved — your owner must decide it personally.**
+검증된 전략을 Registry에 제출한 뒤, 실거래 채택을 승인 요청으로 올린다. `strategy_adopt` 승인은 **자동 승인될 수 없다. 대표가 직접 결정해야 한다.**
 
 ```bash
 ante strategy submit strategies/my_strategy.py
 ante approval request --type strategy_adopt --title "..." --body "VIRTUAL 30d: return +12.3%, MDD -3.1%"
 ```
 
-### 5. Run a bot and monitor it
+### 5. 봇을 실행하고 모니터링한다
 
-Load the approved strategy onto a bot and watch positions, trades, and performance. (Validate on a VIRTUAL account first, then switch to LIVE.)
+승인된 전략을 봇에 올리고 포지션, 거래, 성과를 살핀다. 먼저 VIRTUAL 계정에서 검증한 뒤 LIVE로 전환한다.
 
 ```bash
 ante bot create --strategy my_strategy_v1.0.0 --account test --interval 60
@@ -67,13 +67,13 @@ ante bot positions <bot_id>
 ante trade ...   ante report ...   ante strategy performance my_strategy
 ```
 
-### 6. Improve from feedback
+### 6. 피드백으로 개선한다
 
-Refine the strategy from performance metrics and trade history, and roll it into the next version. You can register a new version under the same name.
+성과 지표와 거래 이력을 바탕으로 전략을 다듬고 다음 버전으로 반영한다. 같은 이름 아래 새 버전을 등록할 수 있다.
 
-## What you must produce to run a strategy
+## 전략을 실행하기 위해 반드시 준비할 것
 
-- **① Strategy file (`.py`)** — a class that inherits `Strategy` and defines `meta` (StrategyMeta) and `on_step()`. `on_step()` returns only `Signal` objects (trade intents); the system handles the actual orders. System/network/DB modules (`os`, `sys`, `subprocess`, `socket`, `requests`, `sqlite3`, …) are forbidden; analysis libraries like `numpy` and `pandas-ta` are free to use.
+- **① 전략 파일(`.py`)** — `Strategy`를 상속하고 `meta`(StrategyMeta)와 `on_step()`을 정의하는 클래스다. `on_step()`은 오직 `Signal` 객체(거래 의도)만 반환한다. 실제 주문은 시스템이 처리한다. 시스템/네트워크/DB 모듈(`os`, `sys`, `subprocess`, `socket`, `requests`, `sqlite3`, …)은 금지되며, `numpy`, `pandas-ta` 같은 분석 라이브러리는 자유롭게 사용할 수 있다.
 
   ```python
   from ante.strategy.base import Strategy, StrategyMeta, Signal
@@ -83,53 +83,53 @@ Refine the strategy from performance metrics and trade history, and roll it into
                           description="...", symbols=["005930"], timeframe="1d")
 
       async def on_step(self, context: dict) -> list[Signal]:
-          # Judge the market and return trade signals (empty list if none)
+          # 시장을 판단하고 거래 신호를 반환한다. 없으면 빈 리스트를 반환한다.
           return []
   ```
 
-- **② Backtest results** — metrics such as total/annualized return, Sharpe, MDD, win rate, profit factor. They show your hypothesis is backed by data.
-- **③ Approval rationale** — an approval request body (strategy report) with evidence, e.g. VIRTUAL operating results, so your owner can decide on adoption.
-- **④ Bot configuration** — the strategy ID, the account to attach, and the `on_step` interval (`--interval`, 10–3600s).
+- **② 백테스트 결과** — 총수익률, 연환산 수익률, Sharpe, MDD, 승률, profit factor 같은 지표다. 당신의 가설이 데이터로 뒷받침되는지 보여준다.
+- **③ 승인 근거** — 대표가 채택 여부를 판단할 수 있도록 근거를 담은 승인 요청 본문(전략 리포트)이다. 예: VIRTUAL 운영 결과.
+- **④ 봇 설정** — 전략 ID, 연결할 계정, `on_step` 실행 주기(`--interval`, 10-3600초)다.
 
-## But prepare for your own mistakes
+## 하지만 자신의 실수에 대비하라
 
-You are capable, but not perfect. Bugs, wrong assumptions, oversized orders — mistakes happen, and they must not reach your owner's assets directly.
+당신은 유능하지만 완벽하지는 않다. 버그, 잘못된 가정, 과도한 주문은 언제든 생길 수 있고, 그런 실수가 대표의 자산에 곧장 닿아서는 안 된다.
 
-This is exactly where Ante works. Before your strategy touches real capital, and on every order while it runs, the safety gates filter out your mistakes. So you can try boldly — Ante catches the accidents.
+Ante는 바로 이 지점에서 작동한다. 전략이 실제 자본을 건드리기 전, 그리고 실행 중 모든 주문마다 안전 게이트가 실수를 걸러낸다. 그래서 당신은 과감하게 시도할 수 있다. 사고는 Ante가 붙잡는다.
 
-## How the gates catch mistakes
+## 게이트가 실수를 잡는 방식
 
-drafting (you) → ① static validation → ② backtest → ③ owner's approval → bot goes live → while running: ④ trading rules + funds check
+초안 작성(당신) → ① 정적 검증 → ② 백테스트 → ③ 대표 승인 → 봇 실거래 시작 → 실행 중: ④ 거래 룰 + 자금 확인
 
-- **① Static validation** — blocks dangerous code and structure up front.
-- **② Backtest** — verifies performance on historical data before real capital.
-- **③ Owner's approval** — your owner signs off before real capital goes in.
-- **④ Trading rules + funds check** — every order while running is checked against global and per-strategy rules and available funds.
+- **① 정적 검증** — 위험한 코드와 잘못된 구조를 사전에 차단한다.
+- **② 백테스트** — 실제 자본을 투입하기 전 과거 데이터로 성과를 검증한다.
+- **③ 대표 승인** — 실제 자본이 들어가기 전 대표가 직접 승인한다.
+- **④ 거래 룰 + 자금 확인** — 실행 중 모든 주문을 전역/전략별 룰과 가용 자금 기준으로 검사한다.
 
-What to trade is your autonomy; the gates are what keep that autonomy from turning into an accident.
+무엇을 거래할지는 당신의 자율성에 속한다. 게이트는 그 자율성이 사고로 바뀌지 않게 하는 장치다.
 
-## How to explain it to your owner
+## 대표에게 설명하는 법
 
-- One line: "I design the strategies, and Ante manages validation, approval, and execution as a safety layer. You make the final call."
-- Strengths: balances autonomy and safety · strategies are independent modules separate from the core · the human makes the final decision · faults are isolated per bot
-- Current scope: Korea Investment & Securities (KIS) integration · single individual user · `pip install ante`
+- 한 줄 요약: "저는 전략을 설계하고, Ante는 검증·승인·실행을 안전 계층으로 관리합니다. 최종 결정은 대표가 내립니다."
+- 강점: 자율성과 안전의 균형 · 전략은 코어와 분리된 독립 모듈 · 최종 결정권은 사람에게 있음 · 장애가 봇 단위로 격리됨
+- 현재 범위: 한국투자증권(KIS) 연동 · 단일 개인 사용자 · `pip install ante`
 
-## When you operate it yourself
+## 당신이 직접 운용할 때
 
-- Every CLI command can return structured output with `--format json`.
-- System actors are managed as Members; you authenticate with your own token.
-- To reach live trading, a strategy must pass all four gates above.
+- 모든 CLI 명령은 `--format json`으로 구조화된 출력을 반환할 수 있다.
+- 시스템 행위자는 Member로 관리되며, 당신은 자신의 토큰으로 인증한다.
+- 실거래에 도달하려면 전략이 위 네 가지 게이트를 모두 통과해야 한다.
 
-## Learn more
+## 더 알아보기
 
-- [Core concepts](guide/concepts.md): how Ante works — concept glossary, diagrams, full workflow
-- [Getting started](guide/getting-started.md): install and initial setup
-- [Agent guide](guide/agent.md): registering, authenticating, and working as an agent
-- [Writing strategies](guide/strategy.md): strategy class, Signal, StrategyContext, indicators
-- [CLI reference](guide/cli.md): all commands (supports `--format json`)
+- [핵심 개념](guide/concepts.md): Ante 작동 방식 — 개념 용어집, 다이어그램, 전체 워크플로우
+- [시작하기](guide/getting-started.md): 설치와 초기 설정
+- [Agent 가이드](guide/agent.md): Agent 등록, 인증, 작업 방식
+- [전략 작성](guide/strategy.md): 전략 클래스, Signal, StrategyContext, 지표
+- [CLI 레퍼런스](guide/cli.md): 전체 명령어(`--format json` 지원)
 
-## Optional
+## 선택 자료
 
-- [Architecture](docs/architecture/README.md): runtime structure and module map
-- [Design decisions (ADRs)](docs/decisions/README.md): key decision history
-- [AGENTS.md](AGENTS.md): development conventions for coding agents working on the code in this repo (a different purpose from this file)
+- [아키텍처](docs/architecture/README.md): 런타임 구조와 모듈 지도
+- [설계 결정(ADR)](docs/decisions/README.md): 주요 설계 결정 이력
+- [AGENTS.md](AGENTS.md): 이 저장소의 코드를 다루는 개발 에이전트용 작업 규칙. 이 파일과 목적이 다르다.

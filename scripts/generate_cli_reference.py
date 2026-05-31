@@ -219,6 +219,14 @@ def _write_header(out: TextIO) -> None:
         "각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.\n\n"
     )
     out.write(f"> 마지막 갱신: {today}\n\n")
+    out.write(
+        "> 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. "
+        "명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.\n\n"
+    )
+    out.write(
+        "명령 그룹이 Ante의 어떤 모듈과 운영 영역을 제어하는지 먼저 보려면 "
+        "[모듈과 운영 영역](modules.md)을 확인하세요.\n\n"
+    )
 
 
 def _write_toc(

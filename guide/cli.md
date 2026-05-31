@@ -2,7 +2,11 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-29
+> 마지막 갱신: 2026-05-31
+
+> 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. 명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.
+
+명령 그룹이 Ante의 어떤 모듈과 운영 영역을 제어하는지 먼저 보려면 [모듈과 운영 영역](modules.md)을 확인하세요.
 
 ## 목차
 
@@ -162,15 +166,15 @@ ante [OPTIONS] <command>
 | `ante account delete` | 계좌 삭제 (소프트 딜리트, cold-path 전용). | `account:write` | H·A |
 | `ante account credentials` | 인증 정보 조회 (마스킹). | `account:read` | H·A |
 | `ante account set-credentials` | 인증 정보 재설정 (비대화형, cold-path 전용). | `account:write` | H·A |
-| `ante account repair-timezone` | legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용, #1474). | `account:write` | H·A |
+| `ante account repair-timezone` | legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용). | `account:write` | H·A |
 | `ante audit list` | 감사 로그 목록 조회. | `audit:read` | H·A |
 | `ante approval request` | 결재 요청 생성. | `approval:write` | H·A |
 | `ante approval list` | 결재 목록 조회. | `approval:read` | H·A |
 | `ante approval info` | 결재 상세 조회. | `approval:read` | H·A |
 | `ante approval review` | 검토 의견 추가. | `approval:read` | H·A |
 | `ante approval reopen` | 거절된 결재 재상신. | `approval:write` | H·A |
-| `ante approval audit-types` | ``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별 (#1472). | `approval:read` | H·A |
-| `ante approval cancel-invalid` | legacy invalid-type approval row 의 administrative cancellation (#1472). | `approval:admin` | H·A |
+| `ante approval audit-types` | ``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별. | `approval:read` | H·A |
+| `ante approval cancel-invalid` | legacy invalid-type approval row 의 administrative cancellation. | `approval:admin` | H·A |
 | `ante approval cancel` | 결재 철회 (요청자만 가능). | `approval:write` | H·A |
 | `ante approval approve` | 결재 승인. | `approval:admin` | H·A |
 | `ante approval reject` | 결재 거절. | `approval:admin` | H·A |
@@ -219,7 +223,7 @@ ante [OPTIONS] <command>
 | `ante instrument import` | CSV/JSON 파일에서 종목 데이터 import. | `data:write` | H·A |
 | `ante member list` | 멤버 목록 조회. | `member:read` | H·A |
 | `ante member info` | 멤버 상세 정보 조회. | `member:read` | H·A |
-| `ante member list-invalid-roles` | ``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468). | `member:read` | H·A |
+| `ante member list-invalid-roles` | ``MemberRole`` enum 외 role 을 가진 legacy member row 식별. | `member:read` | H·A |
 | `ante member register` | 멤버 등록 (토큰 발급). | master-only | H(master) |
 | `ante member set-emoji` | 멤버 이모지 설정/변경. | master-only | H(master) |
 | `ante member update-scopes` | 멤버 권한 범위 변경. | master-only | H(master) |
@@ -293,7 +297,7 @@ ante account create [OPTIONS]
 | `--credential-env` | - | TEXT | — | credential을 환경변수에서 읽는다 (권장 채널) |
 | `--credential-file` | - | TEXT | — | credential을 파일에서 읽는다 (권장 채널) |
 | `--broker-config` | - | TEXT | — | broker-specific 설정 (free-form pass-through, 예: is_paper=true) |
-| `--market-order-reserve-buffer-rate` | - | FLOAT | — | 시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). omit 시 BrokerPreset 기본값을 사용한다 (#1333). NaN/Infinity/음수는 거부된다 (#1723). |
+| `--market-order-reserve-buffer-rate` | - | FLOAT | — | 시장가 매수 reserve buffer 비율 (예: 0.005=0.5%). omit 시 BrokerPreset 기본값을 사용한다. NaN/Infinity/음수는 거부된다. |
 | `--format` | - | text / json | — | 출력 형식 (text 또는 json) |
 
 
@@ -474,7 +478,7 @@ ante account set-credentials <ACCOUNT_ID> [OPTIONS]
 
 ### ante account repair-timezone
 
-legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용, #1474).
+legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용).
 
 ``_row_to_account`` 가 stored invalid timezone 을 보존하면서
 ``Account.timezone_invalid`` marker 를 노출한 row 를 운영자가 명시한
@@ -668,7 +672,7 @@ ante approval reopen <ID> [OPTIONS]
 
 ### ante approval audit-types
 
-``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별 (#1472).
+``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별.
 
 분류는 ``offline`` (DB 직접 조회) 이며 ``approval list`` 와 동일하게
 ``ApprovalService.initialize()`` 가 수반된다. 정상 type row 는 enum SSOT
@@ -694,7 +698,7 @@ ante approval audit-types [OPTIONS]
 
 ### ante approval cancel-invalid
 
-legacy invalid-type approval row 의 administrative cancellation (#1472).
+legacy invalid-type approval row 의 administrative cancellation.
 
 일반 ``ante approval cancel`` 의 requester ownership rule 을 우회한다 —
 invalid-type row 의 requester 는 신뢰할 수 없거나 사라졌을 수 있다. 이
@@ -1386,7 +1390,7 @@ ante strategy summary <STRATEGY_ID> --period <PERIOD> [OPTIONS]
 전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용).
 
 --account-id 옵션은 필수다. 미지정 시 fallback 없이 명시적으로 실패한다
-(#1218 Edge resolver 정렬, query 정책 일관).
+(Edge resolver 정렬, query 정책 일관).
 
 - **필요 scope**: `strategy:read`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -1864,7 +1868,7 @@ ante member info <MEMBER_ID> [OPTIONS]
 
 ### ante member list-invalid-roles
 
-``MemberRole`` enum 외 role 을 가진 legacy member row 식별 (#1468).
+``MemberRole`` enum 외 role 을 가진 legacy member row 식별.
 
 본 명령은 canonical config 의 ``db.path`` (``get_db_path()``) 단일 DB 에
 대해서만 invalid-role row 를 식별한다. 다른 DB 파일 대상 점검은 본 PR scope
@@ -2549,7 +2553,7 @@ ante를 최신 버전으로 업데이트합니다.
 종료한다. `--yes` 게이트는 server 상태 검사와 PyPI 조회 **앞에**
 평가하므로, 서버 실행/네트워크 느림·실패 환경에서도 `--yes` 누락
 호출은 server-running 안내나 PyPI 실패가 아닌 동일한 구조화 에러
-코드로 거절된다 (#1626 D1, Codex P2 2차).
+코드로 거절된다.
 
 - **필요 scope**: —
 - **토큰**: 인증 불필요
