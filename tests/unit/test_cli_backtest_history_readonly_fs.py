@@ -22,6 +22,29 @@ read-only 디렉터리 때문에 실패하지 않도록 한다. root/권한무�
 가 의미 없으므로 skip 한다.
 
 수정 전에는 ``attempt to write a readonly database`` 로 FAIL (BACKTEST_ERROR).
+
+추가 (R2 [P2] 후속, offline-factory.md §2 옵션 A 가정 검증):
+:class:`TestBacktestHistoryRealAuthReadOnlyFilesystem` 는 ``authenticate_member``
+를 **mock 하지 않고** 실제 CLI 인증 경로를 통과시킨다. ``backtest history`` 는
+``@require_auth`` 라 본문 실행 전에 ``authenticate_member()`` 가
+``get_db_path(ctx)`` (= ``--config-dir`` 의 ``<config_dir>/db/ante.db``, **쓰기**
+멤버 DB) 에 ``Database()`` + ``MemberService.initialize()`` (DDL) 를 연다. 이는
+``--db-path`` 아티팩트와 **독립** 경로다. 따라서:
+
+- writable config-dir 에 ``MemberService.bootstrap_master`` 로 실제 master 멤버 +
+  토큰을 생성하고 (``get_db_path`` 가 가리키는 ``<config_dir>/db/ante.db``),
+  토큰을 ``ANTE_MEMBER_TOKEN`` 환경변수로 설정한다. master(HUMAN) 는
+  ``require_scope("backtest:run")`` 를 무제한 통과한다.
+- **별도** read-only 아티팩트 DB(0o444/0o555) 를 ``--db-path`` 로 지정한다.
+- ``ante --format json backtest history momentum --db-path <ro>
+  --config-dir <writable>`` → exit 0 + runs 1 건.
+
+이는 운영자 repro (auth 통과 + 본문 ``BACKTEST_ERROR``) 의 정확한 mock-free
+재현이다: auth 는 writable config DB 로 통과하고, 실패는 read-only ``--db-path``
+본문에서 발생했었다 → R2 의 ``Database`` read-only 연결 모드가 그 본문 실패를
+해소한다. (config-dir 멤버 DB 까지 read-only 인 'full read-only ante home' 은
+``MemberService`` §4 예외 service 의 DDL 때문에 §4 스키마 분리가 선행이며 본
+결정 범위 밖 — follow-up #1978.)
 """
 
 from __future__ import annotations
@@ -37,9 +60,12 @@ import pytest
 from click.testing import CliRunner
 
 from ante.backtest.run_store import BACKTEST_RUNS_SCHEMA
+from ante.cli.commands.init import _DB_FILENAME, SYSTEM_TOML_TEMPLATE
 from ante.cli.main import cli
 from ante.core.database import Database
+from ante.eventbus.bus import EventBus
 from ante.member.models import Member, MemberRole, MemberType
+from ante.member.service import MemberService
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -228,3 +254,137 @@ class TestBacktestHistoryReadOnlyFilesystem:
         assert len(data["runs"]) == 1, data
         assert data["runs"][0]["strategy_name"] == "momentum"
         assert data["runs"][0]["run_id"] == "run-momentum-1"
+
+
+# ── 실 인증(비-mock) end-to-end ────────────────────────────────────────────
+
+
+def _bootstrap_writable_config(config_dir: Path) -> str:
+    """writable config-dir 에 실제 master 멤버 + 토큰을 부트스트랩하고 토큰 반환.
+
+    ``ante init`` 이 만드는 것과 동형으로 ``<config_dir>/system.toml`` (``[db]
+    path = "db/ante.db"``) + ``<config_dir>/db/ante.db`` 에 master 멤버를 만든다.
+    ``get_db_path(ctx)`` 가 ``--config-dir`` 로부터 이 경로를 해석하므로,
+    ``authenticate_member`` 의 실제 auth 경로 (``MemberService.initialize()`` DDL
+    + ``authenticate(token)``) 가 mock 없이 통과한다.
+
+    토큰 발급 패턴은 ``ante init`` 의 ``_bootstrap_master``
+    (``MemberService.bootstrap_master`` → ``(member, token, recovery_key)``) 를
+    미러한다. master(HUMAN) 는 ``require_scope("backtest:run")`` 를 무제한
+    통과하므로 별도 scope 부여가 필요 없다.
+    """
+    config_dir.mkdir(parents=True, exist_ok=True)
+    (config_dir / "system.toml").write_text(
+        SYSTEM_TOML_TEMPLATE.format(db_path=_DB_FILENAME)
+    )
+    member_db = config_dir / _DB_FILENAME
+    member_db.parent.mkdir(parents=True, exist_ok=True)
+
+    async def _create() -> str:
+        db = Database(str(member_db))
+        await db.connect()
+        try:
+            svc = MemberService(db, EventBus())
+            await svc.initialize()
+            _member, token, _recovery = await svc.bootstrap_master(
+                "owner", "pass123", name="Owner"
+            )
+            return token
+        finally:
+            await db.close()
+
+    return asyncio.run(_create())
+
+
+def _run_history_real_auth(
+    artifact_dir: Path,
+    artifact_db: Path,
+    config_dir: Path,
+):
+    """read-only 아티팩트를 ``--db-path`` 로, writable config-dir 를
+    ``--config-dir`` 로 주어 실제 auth 경로를 통과하는 ``backtest history`` 실행.
+
+    아티팩트 디렉터리/파일을 read-only(파일 0o444 / 디렉터리 0o555) 로 만들고
+    ``try/finally`` 로 권한 복구한다. config-dir 은 writable 로 둔다 (auth 가
+    ``MemberService.initialize()`` DDL 을 써야 하므로).
+    """
+    sidecars = [
+        artifact_dir / f"{artifact_db.name}-wal",
+        artifact_dir / f"{artifact_db.name}-shm",
+    ]
+    os.chmod(artifact_db, 0o444)
+    for s in sidecars:
+        if s.exists():
+            os.chmod(s, 0o444)
+    os.chmod(artifact_dir, 0o555)
+    try:
+        return CliRunner().invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "--config-dir",
+                str(config_dir),
+                "backtest",
+                "history",
+                "momentum",
+                "--db-path",
+                str(artifact_db),
+            ],
+        )
+    finally:
+        os.chmod(artifact_dir, 0o755)
+        os.chmod(artifact_db, 0o644)
+        for s in sidecars:
+            if s.exists():
+                os.chmod(s, 0o644)
+
+
+@_requires_unprivileged
+class TestBacktestHistoryRealAuthReadOnlyFilesystem:
+    """``authenticate_member`` 를 mock 하지 않는 실 end-to-end (#1974 R2 [P2]).
+
+    R1 의 프록시(쓰기 가능 temp DB + auth mock) 가 실제 read-only mount 의 본문
+    실패를 가리지 못했던 교훈에 따라, 본 테스트는 실제 CLI 경로를 mock 없이
+    증명한다:
+
+    - auth (``get_db_path(ctx)`` = writable config-dir 멤버 DB) → 실제
+      ``MemberService.initialize()`` DDL + ``authenticate(token)`` 통과.
+    - 본문 (``--db-path`` = 별도 read-only 아티팩트, 0o444/0o555) → ``Database``
+      read-only 연결 모드(mode=ro/immutable) 로 read.
+
+    두 경로가 독립이므로 auth 는 writable config 로 통과하고 본문은 read-only
+    아티팩트를 읽어 exit 0 + runs 1 건이어야 한다. 이는 운영자 repro
+    (auth 통과 + 본문 ``BACKTEST_ERROR``) 의 mock-free 재현이다.
+    """
+
+    def test_real_auth_history_on_readonly_artifact_checkpointed(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        # 1) writable config-dir 에 실제 master + 토큰.
+        config_dir = tmp_path / "config"
+        token = _bootstrap_writable_config(config_dir)
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", token)
+        # 토큰 파일 폴백 경로가 환경에 따라 끼어들지 않도록 차단.
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "nonexistent-token"))
+
+        # 2) 별도 read-only 아티팩트 DB (config-dir 와 다른 트리).
+        artifact_dir = tmp_path / "artifact"
+        artifact_dir.mkdir()
+        artifact_db = artifact_dir / "ante.db"
+        _seed_db_with_one_run(str(artifact_db))
+        _checkpoint_truncate(str(artifact_db))
+
+        # 3) 실 auth(writable config) + 본문(read-only --db-path) 동시 통과.
+        result = _run_history_real_auth(artifact_dir, artifact_db, config_dir)
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "runs" in data, data
+        assert len(data["runs"]) == 1, data
+        assert data["runs"][0]["strategy_name"] == "momentum"
+        assert data["runs"][0]["run_id"] == "run-momentum-1"
+        # config-dir 멤버 DB 는 writable 이어야 한다 (auth DDL). 회귀 방지로
+        # auth 경로가 read-only 아티팩트를 건드리지 않았음을 확인한다.
+        member_db = config_dir / _DB_FILENAME
+        assert member_db.exists(), "auth 는 config-dir 멤버 DB 로 통과해야 한다"

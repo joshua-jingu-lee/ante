@@ -161,6 +161,29 @@ amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 
 명령(현재 `backtest history`)에만** 적용한다. §4 예외 service는 본 모드의
 대상이 아니다(§4.1 명확화 참조).
 
+**CLI 인증 경로와의 경계 (중요, #1974 R2 [P2] 명확화)**: 옵션 A의
+`read_only=True`(Database read-only 연결 모드)는 **command 본문이 여는
+`--db-path` 아티팩트 read에만** 적용된다. 이는 command 본문 실행 **전에**
+`AuthenticatedGroup`/`require_auth`가 발화하는 **CLI 인증 경로와 독립**이다:
+`authenticate_member()` → `_run_authenticate()`는 `get_db_path(ctx)`
+(= `--config-dir`로 해석되는 `<config_dir>/db/ante.db`, **config-dir 멤버 DB**)
+에 쓰기 `Database()` + `MemberService.initialize()`(schema DDL)를 연다. 이
+멤버 DB 경로는 본문의 `--db-path` 아티팩트와 **다른 트리**이며 read-only 연결
+모드의 대상이 **아니다**.
+
+따라서 운영 시나리오는 두 갈래로 갈린다.
+
+- **read-only 아티팩트 + writable config-dir** (본 결정이 해소): 멤버 DB가
+  쓰기 가능하면 auth는 그 DB로 통과하고, command 본문은 read-only `--db-path`
+  아티팩트를 옵션 A로 읽는다 → exit 0. 운영자 repro
+  (`backtest history`가 auth는 통과하고 본문에서 `BACKTEST_ERROR`로 실패)가
+  정확히 이 갈래이며, 본 amend가 그 본문 실패를 해소한다.
+- **config-dir 멤버 DB까지 read-only인 'full read-only ante home'** (범위 밖):
+  멤버 DB가 read-only면 `MemberService`(§4 예외 service)의 `initialize()`
+  schema DDL이 read-only 연결에서 실패하므로, 본 시나리오는 §4 schema
+  분리(§4.3)를 **선행 조건**으로 한다. 본 결정의 범위 밖이며 follow-up
+  [#1978](https://github.com/joshua-jingu-lee/ante/issues/1978)로 분리한다.
+
 ### 2.2 read-only / read-write 분류 결정 기준
 
 - 1차 SSOT: [docs/specs/cli/03-commands.md](../cli/03-commands.md)의
@@ -286,7 +309,12 @@ service를 변경하면 본 표를 갱신한다.
 - factory가 schema 부재를 감지해 `ensure_schema()` 호출 후 read 진행
 
 본 표는 baseline lock일 뿐, 후속 schema separation 결정은 별도 spec change로
-다룬다.
+다룬다. 특히 CLI 인증 경로(`require_auth` → `MemberService.initialize()`)가
+config-dir 멤버 DB에 schema DDL을 써야 하므로, **config-dir 멤버 DB까지
+read-only인 'full read-only ante home'** 지원은 본 schema 분리를 선행 조건으로
+하는 별도 follow-up
+[#1978](https://github.com/joshua-jingu-lee/ante/issues/1978)에서 다룬다(§2.1
+"CLI 인증 경로와의 경계" 참조).
 
 ### 4.4 예외 외 service
 
