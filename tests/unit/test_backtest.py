@@ -1693,3 +1693,233 @@ class TestGetTradeHistory:
         )
         history = executor.get_trade_history()
         assert history[0]["timestamp"] is None
+
+
+# ── get_positions PortfolioView 스키마 테스트 (#2074) ─
+
+
+class TestGetPositionsSchema:
+    """BacktestExecutor.get_positions가 PortfolioView 스키마(current_price/
+    unrealized_pnl)를 라이브와 parity로 제공하는지 검증(#2074).
+
+    spec docs/specs/strategy/03-04-provider-and-views.md L29:
+      get_positions → {symbol: {quantity, avg_price, current_price, unrealized_pnl}}
+    """
+
+    async def test_repro_current_price_and_unrealized_pnl(self, store):
+        """이슈 재현: step1 buy 1주 @100, step2 price 120.
+
+        step2에서 context["portfolio"](run 루프가 만든 dict)와
+        ctx.get_positions()(전략이 호출) 두 경로 모두 005930이
+        {quantity:1, avg_price:100.0, current_price:120.0, unrealized_pnl:20.0}.
+        """
+        # run 루프 첫 on_step은 current_idx=1에서 일어난다.
+        #   step1(on_step #1) -> idx1 close=100 (매수가 100)
+        #   step2(on_step #2) -> idx2 close=120 (현재가 120)
+        # idx0은 매수/현재가에 쓰이지 않으므로 임의값.
+        closes = [50.0, 100.0, 120.0, 120.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        captured: dict[str, Any] = {}
+
+        class BuyStep1CaptureStep2(Strategy):
+            meta = StrategyMeta(name="buy_capture", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                if self._step == 2:
+                    # run 루프가 만든 context["portfolio"]와 ctx.get_positions()
+                    # 두 경로를 step2에서 캡처한다.
+                    captured["context_portfolio"] = context["portfolio"]
+                    captured["ctx_positions"] = self.ctx.get_positions()
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyStep1CaptureStep2,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+
+        expected = {
+            "quantity": 1,
+            "avg_price": 100.0,
+            "current_price": 120.0,
+            "unrealized_pnl": 20.0,
+        }
+        # 두 경로(run 루프 dict / 전략 호출) 모두 동일 스키마/값.
+        for path in ("context_portfolio", "ctx_positions"):
+            positions = captured[path]
+            assert "005930" in positions, path
+            pos = positions["005930"]
+            assert pos["quantity"] == pytest.approx(expected["quantity"]), path
+            assert pos["avg_price"] == pytest.approx(expected["avg_price"]), path
+            assert pos["current_price"] == pytest.approx(expected["current_price"]), (
+                path
+            )
+            assert pos["unrealized_pnl"] == pytest.approx(expected["unrealized_pnl"]), (
+                path
+            )
+            # 스키마 키 정확성(라이브 PortfolioView parity)
+            assert set(pos.keys()) == {
+                "quantity",
+                "avg_price",
+                "current_price",
+                "unrealized_pnl",
+            }, path
+
+    async def test_price_lookup_failure_falls_back_to_avg_price(self, store):
+        """가격 조회 실패/없음 → current_price=avg_price, unrealized_pnl=0.
+
+        보유 후 get_current_price가 항상 실패(예외)하면, get_positions의
+        current_price는 avg_price(매수가)로 fallback하고 unrealized_pnl=0.
+        """
+        closes = [50.0, 100.0, 120.0, 120.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        captured: dict[str, Any] = {}
+
+        class BuyStep1CaptureStep2(Strategy):
+            meta = StrategyMeta(name="buy_capture_fb", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                if self._step == 2:
+                    captured["context_portfolio"] = context["portfolio"]
+                    captured["ctx_positions"] = self.ctx.get_positions()
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyStep1CaptureStep2,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        real_get_price = provider.get_current_price
+
+        async def flaky_get_price(symbol: str) -> float:
+            # 매수 체결에는 정상가가 필요하므로 보유 후(_refresh_current_prices /
+            # _calculate_equity 경로)에만 실패시킨다.
+            if executor._positions:
+                raise BacktestDataError("simulated lookup failure")
+            return await real_get_price(symbol)
+
+        with patch.object(provider, "get_current_price", side_effect=flaky_get_price):
+            await executor.run()
+
+        for path in ("context_portfolio", "ctx_positions"):
+            pos = captured[path]["005930"]
+            # 현재가 조회 실패 → avg_price(매수가 100) fallback, pnl=0
+            assert pos["avg_price"] == pytest.approx(100.0), path
+            assert pos["current_price"] == pytest.approx(100.0), path
+            assert pos["unrealized_pnl"] == pytest.approx(0.0), path
+
+    async def test_get_positions_no_cache_falls_back_to_avg_price(self, data_provider):
+        """run 루프 밖(캐시 미구성)에서 보유 포지션이 있으면 avg_price fallback.
+
+        _current_prices가 비어 있으면 current_price=avg_price, unrealized_pnl=0
+        (lookahead/provider 재호출 없이 안전한 기본값).
+        """
+        executor = BacktestExecutor(
+            strategy_cls=EmptyStrategy,
+            data_provider=data_provider,
+        )
+        # run 없이 포지션만 주입(캐시는 비어 있음).
+        executor._positions["005930"] = {"quantity": 3, "avg_price": 100.0}
+        positions = executor.get_positions("backtest")
+        pos = positions["005930"]
+        assert pos["quantity"] == 3
+        assert pos["avg_price"] == pytest.approx(100.0)
+        assert pos["current_price"] == pytest.approx(100.0)
+        assert pos["unrealized_pnl"] == pytest.approx(0.0)
+
+    async def test_empty_positions_returns_empty(self, data_provider):
+        """보유 포지션이 없으면 빈 dict."""
+        executor = BacktestExecutor(
+            strategy_cls=EmptyStrategy,
+            data_provider=data_provider,
+        )
+        assert executor.get_positions("backtest") == {}
+
+    async def test_no_lookahead_uses_current_bar_price(self, store):
+        """lookahead 방지: 매 step current_price가 그 step 현재가 기준.
+
+        step1에서 매수(idx1 close=100)한 직후 step1의 current_price는 아직
+        step1 봉 가격(100)이어야 하고, 다음 봉(idx2 close=120)을 미리 보지
+        않는다. 또 이전 봉 가격이 다음 step에 stale로 남지 않는다.
+        """
+        closes = [50.0, 100.0, 120.0, 130.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        # step별로 ctx.get_positions()의 current_price를 기록한다.
+        seen: list[float | None] = []
+
+        class BuyThenObserve(Strategy):
+            meta = StrategyMeta(name="buy_observe", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    # step1: on_step 시점엔 미보유 → 매수 신호. 매수 후 같은
+                    # step에서 캐시는 이 step 진입 시점(미보유) 기준이라 비어 있다.
+                    signals = [Signal(symbol="005930", side="buy", quantity=1)]
+                    positions = self.ctx.get_positions()
+                    seen.append(positions.get("005930", {}).get("current_price"))
+                    return signals
+                pos = self.ctx.get_positions().get("005930")
+                seen.append(pos["current_price"] if pos else None)
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenObserve,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+
+        # step1: 매수 직전 미보유라 캐시 없음 → current_price None.
+        assert seen[0] is None
+        # step2: idx2 close=120 (이전 봉 100이 stale로 남지 않음).
+        assert seen[1] == pytest.approx(120.0)
+        # step3: idx3 close=130 (lookahead/stale 없음, 매 step 새 가격).
+        assert seen[2] == pytest.approx(130.0)
