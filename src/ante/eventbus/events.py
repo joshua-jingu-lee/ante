@@ -354,6 +354,8 @@ class BotStepCompletedEvent(Event):
     account_id: str = ""
     result: str = ""
     message: str = ""
+    signal_count: int = 0
+    duration_ms: int = 0
 
 
 @dataclass(frozen=True)
