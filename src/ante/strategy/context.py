@@ -14,14 +14,17 @@ from ante.strategy.base import (
     TradeHistoryView,
 )
 from ante.strategy.exceptions import StrategyFileAccessError
+from ante.strategy.file_access import STRATEGIES_ROOT, resolve_strategy_path
 
 if TYPE_CHECKING:
     import polars as pl
 
 logger = logging.getLogger(__name__)
 
-# strategies/ 디렉토리 기준 경로 (프로젝트 루트 기준)
-_STRATEGIES_ROOT = Path("strategies")
+# strategies/ 디렉토리 기준 경로 (프로젝트 루트 기준).
+# 보안 경계 SSOT 는 ``ante.strategy.file_access.STRATEGIES_ROOT`` 로 이동했다.
+# 기존 ``_STRATEGIES_ROOT`` 이름을 참조하던 코드 호환을 위해 alias 로 재노출한다.
+_STRATEGIES_ROOT = STRATEGIES_ROOT
 
 
 class StrategyContext:
@@ -155,22 +158,20 @@ class StrategyContext:
     # ── 파일 접근 ──
 
     def _resolve_strategy_path(self, path: str) -> Path:
-        """전략 파일 경로를 검증하고 절대 경로로 변환."""
-        # 절대 경로 차단
-        if Path(path).is_absolute():
-            raise StrategyFileAccessError(f"Absolute paths are not allowed: {path}")
+        """전략 파일 경로를 검증하고 절대 경로로 변환.
 
-        # 경로 탈출 시도 차단
-        resolved = (self._strategies_dir / path).resolve()
-        if not resolved.is_relative_to(self._strategies_dir):
-            raise StrategyFileAccessError(f"Path escapes strategies directory: {path}")
-
-        return resolved
+        보안 경계는 공용 helper ``resolve_strategy_path`` 가 단일 소유한다
+        (절대경로 거부/탈출 차단/symlink escape 차단, #2083).
+        """
+        return resolve_strategy_path(self._strategies_dir, path)
 
     def load_file(self, path: str) -> bytes:
         """전략 전용 파일 읽기 (바이너리).
 
         strategies/ 하위 경로만 허용. 경로 탈출 시도 차단.
+
+        경로 검증(절대경로/탈출 차단)을 통과한 뒤에만 로그를 남긴다(기존 동작
+        보존). 미존재 파일은 helper 가 ``StrategyFileAccessError`` 로 거부한다.
         """
         resolved = self._resolve_strategy_path(path)
 
@@ -183,7 +184,8 @@ class StrategyContext:
     def load_text(self, path: str, encoding: str = "utf-8") -> str:
         """전략 전용 파일 읽기 (텍스트).
 
-        strategies/ 하위 경로만 허용. 경로 탈출 시도 차단.
+        strategies/ 하위 경로만 허용. 경로 탈출 시도 차단. ``load_file`` 을
+        경유해 로그/보안 동작을 그대로 공유한다(기존 동작 보존).
         """
         data = self.load_file(path)
         return data.decode(encoding)
