@@ -128,6 +128,12 @@ def validate_schema(
         if missing:
             errors.append(f"레코드 {i}: 필수 필드 누락: {sorted(missing)}")
 
+        # 레코드별 필수 필드 non-null 확인 (#2103)
+        present_required = required_set & record_keys
+        null_required = sorted(f for f in present_required if record.get(f) is None)
+        if null_required:
+            errors.append(f"레코드 {i}: 필수 필드 null 값: {null_required}")
+
         # 레코드별 숫자 필드 타입 변환 가능 여부 확인
         for field_name in numeric_fields & record_keys:
             value = record.get(field_name)
@@ -179,6 +185,7 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
         _check_positive_prices(record, symbol, warnings)
         _check_volume_non_negative(record, symbol, warnings)
         _check_ohlc_relationship(record, symbol, warnings)
+        _check_temporal_parseable(record, symbol, warnings)
 
     _validate_time_series(records, warnings)
 
@@ -306,6 +313,28 @@ def _check_ohlc_relationship(
         warnings.append(f"{symbol}: low > open (low={low_val}, open={o})")
     if o > h:
         warnings.append(f"{symbol}: open > high (open={o}, high={h})")
+
+
+def _check_temporal_parseable(
+    record: dict[str, Any],
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """timestamp/date가 지원 형식으로 파싱 가능한지 검증한다.
+
+    Args:
+        record: 검증할 레코드.
+        symbol: 심볼 식별자 (경고 메시지용).
+        warnings: 경고를 추가할 목록.
+    """
+    for field_name in ("timestamp", "date"):
+        value = record.get(field_name)
+        if value is None:
+            continue  # null은 schema 계층 소관
+        if not isinstance(value, str):
+            continue  # 이미 datetime 등 비문자열이면 skip(오탐 방지)
+        if _try_parse_date(value) is None:
+            warnings.append(f"{symbol}: {field_name} 파싱 불가 ({field_name}={value})")
 
 
 def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) -> None:

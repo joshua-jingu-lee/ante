@@ -222,6 +222,35 @@ class TestValidateSchema:
         assert result.passed is True
         assert result.errors == []
 
+    def test_null_required_timestamp_is_error(self) -> None:
+        """present-but-null 필수 필드(timestamp=None)는 schema error (#2103)."""
+        record = _make_ohlcv_record()
+        record["timestamp"] = None
+        result = validate_schema([record], OHLCV_REQUIRED_FIELDS)
+        assert result.passed is False
+        assert any(
+            "레코드 0: 필수 필드 null 값" in e and "timestamp" in e
+            for e in result.errors
+        )
+
+    def test_null_required_open_is_error(self) -> None:
+        """present-but-null 필수 필드(open=None)는 schema error (#2103)."""
+        record = _make_ohlcv_record()
+        record["open"] = None
+        result = validate_schema([record], OHLCV_REQUIRED_FIELDS)
+        assert result.passed is False
+        assert any(
+            "레코드 0: 필수 필드 null 값" in e and "open" in e for e in result.errors
+        )
+
+    def test_null_non_required_field_not_error(self) -> None:
+        """비필수 필드 null(amount=None)은 null 값 error가 아니다 (#2103)."""
+        record = _make_ohlcv_record()
+        record["amount"] = None
+        result = validate_schema([record], OHLCV_REQUIRED_FIELDS)
+        assert result.passed is True
+        assert not any("필수 필드 null 값" in e for e in result.errors)
+
     def test_later_record_only_numeric_field_checked(self) -> None:
         """첫 레코드에 없고 이후 레코드에만 있는 숫자 필드의 비숫자 값도 검출."""
         first = {
@@ -482,6 +511,42 @@ class TestValidateBusiness:
         for substring in ("<= 0", "low > close", "open > high", "low > open"):
             assert not any(substring in w for w in result.warnings)
 
+    # --- temporal 파싱 가능성 검증 (#2103) ---------------------------------
+
+    def test_unparseable_timestamp_is_warning(self) -> None:
+        """파싱 불가 timestamp는 business 경고이며 passed=True (#2103)."""
+        record = _make_ohlcv_record(timestamp="not-a-date")
+        result = validate_business([record])
+        assert result.passed is True
+        assert result.errors == []
+        assert any("timestamp 파싱 불가" in w for w in result.warnings)
+
+    def test_parseable_timestamp_no_warning(self) -> None:
+        """회귀: 파싱 가능한 timestamp는 파싱불가 경고가 없다 (#2103)."""
+        record = _make_ohlcv_record(timestamp="2026-01-01")
+        result = validate_business([record])
+        assert result.passed is True
+        assert not any("파싱 불가" in w for w in result.warnings)
+
+    def test_datetime_timestamp_no_false_positive(self) -> None:
+        """datetime 객체 timestamp(이미 파싱됨)는 파싱불가 오탐이 없다 (#2103)."""
+        from datetime import datetime
+
+        record = _make_ohlcv_record()
+        record["timestamp"] = datetime(2026, 1, 1, 0, 0, 0)
+        result = validate_business([record])
+        assert result.passed is True
+        assert not any("파싱 불가" in w for w in result.warnings)
+
+    def test_unparseable_date_field_is_warning(self) -> None:
+        """date 필드 파싱 불가도 경고로 관측된다 (#2103)."""
+        record = _make_ohlcv_record()
+        del record["timestamp"]
+        record["date"] = "garbage"
+        result = validate_business([record])
+        assert result.passed is True
+        assert any("date 파싱 불가" in w for w in result.warnings)
+
 
 # ===========================================================================
 # 5. 통합 검증 (validate_all)
@@ -519,6 +584,38 @@ class TestValidateAll:
         records = [_make_ohlcv_record()]
         result = validate_all(records, OHLCV_REQUIRED_FIELDS)
         assert result.passed is True
+
+    def test_null_required_field_blocks_pipeline(self) -> None:
+        """null 필수 필드(timestamp=None)는 schema error로 파이프라인 차단 (#2103)."""
+        record = _make_ohlcv_record()
+        record["timestamp"] = None
+        result = validate_all([record], OHLCV_REQUIRED_FIELDS, status_code=200)
+        assert result.passed is False
+        assert any("필수 필드 null 값" in e and "timestamp" in e for e in result.errors)
+
+    def test_null_required_open_blocks_pipeline(self) -> None:
+        """null 필수 필드(open=None)는 schema error로 파이프라인 차단 (#2103)."""
+        record = _make_ohlcv_record()
+        record["open"] = None
+        result = validate_all([record], OHLCV_REQUIRED_FIELDS, status_code=200)
+        assert result.passed is False
+        assert any("필수 필드 null 값" in e and "open" in e for e in result.errors)
+
+    def test_unparseable_timestamp_passes_schema_warns_business(self) -> None:
+        """파싱 불가 timestamp: schema 통과 후 business 경고 전파 (#2103)."""
+        record = _make_ohlcv_record(timestamp="not-a-date")
+        result = validate_all([record], OHLCV_REQUIRED_FIELDS, status_code=200)
+        assert result.passed is True
+        assert result.errors == []
+        assert any("timestamp 파싱 불가" in w for w in result.warnings)
+
+    def test_valid_record_no_temporal_warning(self) -> None:
+        """회귀: 정상 레코드는 errors=[] 이고 temporal 경고도 없다 (#2103)."""
+        record = _make_ohlcv_record(timestamp="2026-01-01")
+        result = validate_all([record], OHLCV_REQUIRED_FIELDS, status_code=200)
+        assert result.passed is True
+        assert result.errors == []
+        assert not any("파싱 불가" in w for w in result.warnings)
 
 
 # ===========================================================================
