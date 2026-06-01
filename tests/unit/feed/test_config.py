@@ -196,6 +196,72 @@ class TestCheckApiKeys:
         datagokr = next(s for s in statuses if s["key"] == "ANTE_DATAGOKR_API_KEY")
         assert datagokr["source"] == "env"
 
+    def test_empty_env_file_value_is_not_set(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (a) #2104 재현: .env에 빈 DART 키 + 정상 DATAGOKR 키.
+        # 환경변수가 .env를 가리지 않도록 명시적으로 제거한다.
+        monkeypatch.delenv("ANTE_DART_API_KEY", raising=False)
+        monkeypatch.delenv("ANTE_DATAGOKR_API_KEY", raising=False)
+        cfg.feed_dir.mkdir(parents=True, exist_ok=True)
+        cfg.env_path.write_text("ANTE_DART_API_KEY=\nANTE_DATAGOKR_API_KEY=abc\n")
+
+        statuses = cfg.check_api_keys()
+        dart = next(s for s in statuses if s["key"] == "ANTE_DART_API_KEY")
+        datagokr = next(s for s in statuses if s["key"] == "ANTE_DATAGOKR_API_KEY")
+
+        assert dart["set"] is False
+        assert dart["source"] == ""
+        assert datagokr["set"] is True
+        assert datagokr["source"] == ".env"
+
+    def test_env_var_takes_priority_with_set_true(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (b) 환경변수 경로가 set=True/source="env"로 잡힌다.
+        monkeypatch.setenv("ANTE_DART_API_KEY", "xyz")
+        statuses = cfg.check_api_keys()
+        dart = next(s for s in statuses if s["key"] == "ANTE_DART_API_KEY")
+        assert dart["set"] is True
+        assert dart["source"] == "env"
+
+    def test_missing_key_is_not_set(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (c) .env 없음 + 키 없음 → set=False/source="".
+        for key in API_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        statuses = cfg.check_api_keys()
+        for entry in statuses:
+            assert entry["set"] is False
+            assert entry["source"] == ""
+
+    def test_whitespace_only_env_file_value_is_not_set(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (d) 공백뿐인 .env 값은 strip되어 ""로 정규화 → set=False (회귀 lock).
+        monkeypatch.delenv("ANTE_DART_API_KEY", raising=False)
+        cfg.feed_dir.mkdir(parents=True, exist_ok=True)
+        cfg.env_path.write_text("ANTE_DART_API_KEY=   \n")
+
+        statuses = cfg.check_api_keys()
+        dart = next(s for s in statuses if s["key"] == "ANTE_DART_API_KEY")
+        assert dart["set"] is False
+        assert dart["source"] == ""
+
+    def test_set_true_rows_always_have_source(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # (e) set/source 정합 lock: set=True인 row는 source∈{"env",".env"}.
+        monkeypatch.setenv("ANTE_DART_API_KEY", "xyz")
+        cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "abc123")
+        statuses = cfg.check_api_keys()
+        for entry in statuses:
+            if entry["set"]:
+                assert entry["source"] in {"env", ".env"}
+            else:
+                assert entry["source"] == ""
+
 
 # ── _mask_value ───────────────────────────────────────────────────────────────
 
