@@ -383,3 +383,204 @@ class TestRunnerForwardsToValidateConfig:
     async def test_invalid_timeframe_rejected_via_runner(self):
         with pytest.raises(BacktestConfigError, match="Invalid timeframe"):
             await runner.run_backtest(_cfg(timeframe="oracle-invalid"))
+
+
+# ── exchange canonical 검증 (#2034) ──────────────────────────────────────
+
+
+class TestValidateConfigRejectsInvalidExchange:
+    """``_validate_config`` 가 canonical 아닌 exchange를 BacktestConfigError로.
+
+    core.md ``## Canonical Exchange Vocabulary`` / D-016. programmatic dict는
+    임의 값이 유입되므로 KRX-shape 블록이 읽기 전에 SSOT ``is_canonical`` 로
+    canonical 5종을 강제한다. ``*`` 는 strategy 전용 wildcard라 거부.
+    """
+
+    @pytest.mark.parametrize("bad", ["INVALID", "*", "krx", "nyse"])
+    def test_non_canonical_str_exchange_rejected(self, bad):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="Invalid exchange"):
+            svc._validate_config(_cfg(exchange=bad))
+
+    @pytest.mark.parametrize("bad", [123, None, ["KRX"], 1.5])
+    def test_non_str_exchange_rejected(self, bad):
+        """non-str(임의 타입)도 BacktestConfigError (TypeError 아님)."""
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="Invalid exchange"):
+            svc._validate_config(_cfg(exchange=bad))
+
+    @pytest.mark.parametrize("good", ["NYSE", "NASDAQ", "AMEX", "TEST"])
+    def test_canonical_non_krx_exchange_passes(self, good):
+        """canonical 5종 중 비-KRX → 통과 (symbol shape 미검증)."""
+        svc = BacktestService()
+        validated = svc._validate_config(_cfg(exchange=good, symbols=["AAPL"]))
+        assert isinstance(validated, BacktestConfig)
+        assert validated.exchange == good
+
+    def test_canonical_krx_exchange_passes_with_valid_symbol(self):
+        """KRX → 통과(회귀; 기존 KRX symbol shape 검증 유지되게 valid 6자리)."""
+        svc = BacktestService()
+        validated = svc._validate_config(_cfg(exchange="KRX", symbols=["005930"]))
+        assert isinstance(validated, BacktestConfig)
+        assert validated.exchange == "KRX"
+        assert validated.symbols == ["005930"]
+
+
+# ── date vocabulary 검증 (#2035) ─────────────────────────────────────────
+
+
+class TestValidateConfigRejectsInvalidDate:
+    """``_validate_config`` 가 invalid start_date/end_date를 BacktestConfigError로.
+
+    required 검사가 존재를 보장하므로 shape(YYYY-MM-DD)·실재성·순서만 검증한다.
+    """
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "20260510",  # 구분자 없음
+            "2026-W19-1",  # ISO week shape (non-canonical)
+            "2026/05/10",  # 잘못된 구분자
+            "2026-5-1",  # zero-pad 안됨
+            "2026-13-40",  # shape은 맞지만 비실재 월/일
+        ],
+    )
+    def test_invalid_start_date_shape_rejected(self, bad):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="Invalid start_date"):
+            svc._validate_config(_cfg(start_date=bad))
+
+    @pytest.mark.parametrize("bad", [123, None, ["2026-01-01"]])
+    def test_non_str_start_date_rejected(self, bad):
+        """non-str(임의 타입)도 BacktestConfigError (TypeError 아님)."""
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="Invalid start_date"):
+            svc._validate_config(_cfg(start_date=bad))
+
+    def test_invalid_end_date_rejected(self):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="Invalid end_date"):
+            svc._validate_config(_cfg(end_date="2026-13-40"))
+
+    def test_start_after_end_rejected(self):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="is after"):
+            svc._validate_config(_cfg(start_date="2026-05-20", end_date="2026-05-10"))
+
+    def test_valid_date_range_passes(self):
+        svc = BacktestService()
+        validated = svc._validate_config(
+            _cfg(start_date="2026-05-10", end_date="2026-05-20", symbols=["005930"])
+        )
+        assert validated.start_date == "2026-05-10"
+        assert validated.end_date == "2026-05-20"
+
+    def test_same_start_end_date_passes(self):
+        """start == end 는 허용 (단일 날짜 백테스트)."""
+        svc = BacktestService()
+        validated = svc._validate_config(
+            _cfg(start_date="2026-05-10", end_date="2026-05-10")
+        )
+        assert validated.start_date == "2026-05-10"
+
+
+# ── numeric 검증 (#2036) ─────────────────────────────────────────────────
+
+
+class TestValidateConfigRejectsInvalidNumeric:
+    """``_validate_config`` 가 invalid 숫자 필드를 BacktestConfigError로.
+
+    config에 **존재하는** 숫자 키만 검사하고 미존재는 BacktestConfig
+    기본값(valid)을 따른다. bool은 int subclass라 명시 제외.
+    """
+
+    @pytest.mark.parametrize(
+        "bad",
+        [float("nan"), float("inf"), float("-inf"), 0, -1, "x", None, True],
+    )
+    def test_invalid_initial_balance_rejected(self, bad):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="initial_balance"):
+            svc._validate_config(_cfg(initial_balance=bad))
+
+    def test_valid_initial_balance_passes(self):
+        svc = BacktestService()
+        validated = svc._validate_config(_cfg(initial_balance=5_000_000.0))
+        assert validated.initial_balance == 5_000_000.0
+
+    @pytest.mark.parametrize(
+        "bad",
+        [-0.1, float("nan"), float("inf"), "x", None, True],
+    )
+    def test_invalid_buy_commission_rate_rejected(self, bad):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match="buy_commission_rate"):
+            svc._validate_config(_cfg(buy_commission_rate=bad))
+
+    @pytest.mark.parametrize(
+        "rate_key",
+        ["buy_commission_rate", "sell_commission_rate", "slippage_rate"],
+    )
+    def test_zero_rate_passes(self, rate_key):
+        """rate=0 은 허용 (allow_zero=True)."""
+        svc = BacktestService()
+        validated = svc._validate_config(_cfg(**{rate_key: 0}))
+        assert getattr(validated, rate_key) == 0
+
+    @pytest.mark.parametrize(
+        "rate_key",
+        ["sell_commission_rate", "slippage_rate"],
+    )
+    def test_negative_rate_rejected(self, rate_key):
+        svc = BacktestService()
+        with pytest.raises(BacktestConfigError, match=rate_key):
+            svc._validate_config(_cfg(**{rate_key: -0.1}))
+
+    def test_missing_numeric_keys_use_defaults(self):
+        """숫자 키 미존재 → BacktestConfig 기본값(valid) → 통과."""
+        svc = BacktestService()
+        validated = svc._validate_config(_cfg())
+        assert validated.initial_balance == 10_000_000.0
+        assert validated.buy_commission_rate == 0.00015
+        assert validated.sell_commission_rate == 0.00195
+        assert validated.slippage_rate == 0.001
+
+
+# ── run_subprocess: invalid 3축 → subprocess 미기동 (#2034/#2035/#2036) ──
+
+
+class TestRunSubprocessEarlyFailsOnNewAxes:
+    """run_subprocess(): 신규 3축 invalid → BacktestConfigError, subprocess 미기동."""
+
+    @pytest.mark.asyncio
+    async def test_invalid_exchange_no_subprocess(self):
+        with patch(
+            "ante.backtest.service.asyncio.create_subprocess_exec"
+        ) as mock_spawn:
+            svc = BacktestService()
+            with pytest.raises(BacktestConfigError, match="Invalid exchange"):
+                await svc.run_subprocess(_cfg(exchange="INVALID"))
+
+        mock_spawn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_date_no_subprocess(self):
+        with patch(
+            "ante.backtest.service.asyncio.create_subprocess_exec"
+        ) as mock_spawn:
+            svc = BacktestService()
+            with pytest.raises(BacktestConfigError, match="Invalid start_date"):
+                await svc.run_subprocess(_cfg(start_date="20260510"))
+
+        mock_spawn.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_invalid_initial_balance_no_subprocess(self):
+        with patch(
+            "ante.backtest.service.asyncio.create_subprocess_exec"
+        ) as mock_spawn:
+            svc = BacktestService()
+            with pytest.raises(BacktestConfigError, match="initial_balance"):
+                await svc.run_subprocess(_cfg(initial_balance=float("nan")))
+
+        mock_spawn.assert_not_called()
