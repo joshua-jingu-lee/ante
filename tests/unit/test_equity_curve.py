@@ -175,6 +175,9 @@ async def test_feedback_get_equity_curve():
     mock_trade = AsyncMock()
     mock_trade.get_trades = AsyncMock(return_value=trades)
     mock_bots = MagicMock()
+    mock_bot = MagicMock()
+    mock_bot.config.account_id = "acc-test"
+    mock_bots.get_bot = MagicMock(return_value=mock_bot)
 
     fb = PerformanceFeedback(trade_service=mock_trade, bot_manager=mock_bots)
     curve = await fb.get_equity_curve("bot1", initial_balance=10000000)
@@ -197,6 +200,9 @@ async def test_feedback_get_equity_curve_no_trades():
     mock_trade = AsyncMock()
     mock_trade.get_trades = AsyncMock(return_value=[])
     mock_bots = MagicMock()
+    mock_bot = MagicMock()
+    mock_bot.config.account_id = "acc-test"
+    mock_bots.get_bot = MagicMock(return_value=mock_bot)
 
     fb = PerformanceFeedback(trade_service=mock_trade, bot_manager=mock_bots)
     curve = await fb.get_equity_curve("bot1")

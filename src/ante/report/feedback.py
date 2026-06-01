@@ -36,7 +36,7 @@ class PerformanceFeedback:
         metrics = await self._trade.get_performance(
             account_id=account_id, bot_id=bot_id
         )
-        positions = await self._trade.get_positions(bot_id)
+        positions = await self._trade.get_positions(bot_id, account_id=account_id)
         return {
             "bot_id": bot_id,
             "metrics": {
@@ -79,8 +79,21 @@ class PerformanceFeedback:
         bot_id: str,
         limit: int = 100,
     ) -> list[dict]:
-        """봇의 거래 이력 조회."""
-        trades = await self._trade.get_trades(bot_id=bot_id, limit=limit)
+        """봇의 거래 이력 조회.
+
+        Raises:
+            BotNotFoundError: 봇 미발견 시. ``get_bot_performance`` 와 동일하게
+                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다 (#2136).
+        """
+        from ante.bot.exceptions import BotNotFoundError
+
+        bot = self._bots.get_bot(bot_id)
+        if bot is None:
+            raise BotNotFoundError(bot_id)
+        account_id = bot.config.account_id
+        trades = await self._trade.get_trades(
+            account_id=account_id, bot_id=bot_id, limit=limit
+        )
         return [
             {
                 "timestamp": (t.timestamp.isoformat() if t.timestamp else None),
@@ -108,11 +121,23 @@ class PerformanceFeedback:
 
         Returns:
             ``[{"date": "2025-01-01", "value": 10000000}, ...]`` 형식.
+
+        Raises:
+            BotNotFoundError: 봇 미발견 시. ``get_bot_performance`` 와 동일하게
+                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다 (#2136).
         """
+        from ante.bot.exceptions import BotNotFoundError
         from ante.trade.recorder import TradeStatus
 
+        bot = self._bots.get_bot(bot_id)
+        if bot is None:
+            raise BotNotFoundError(bot_id)
+        account_id = bot.config.account_id
         trades = await self._trade.get_trades(
-            bot_id=bot_id, status=TradeStatus.FILLED, limit=10000
+            account_id=account_id,
+            bot_id=bot_id,
+            status=TradeStatus.FILLED,
+            limit=10000,
         )
         if not trades:
             return []
