@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.config import BotConfig, BotStatus
@@ -108,8 +109,12 @@ class Bot:
         """메인 실행 루프."""
         from ante.eventbus.events import BotErrorEvent, BotStepCompletedEvent
 
+        # 이전 반복의 stale step_start 가 후속 error emit 에 새지 않도록
+        # 매 while 반복 시작에서 None 으로 재설정한다.
+        step_start: float | None = None
         try:
             while self.status == BotStatus.RUNNING:
+                step_start = None
                 step_context = {
                     "timestamp": datetime.now(UTC),
                     "portfolio": self._ctx.get_positions(),
@@ -118,11 +123,20 @@ class Bot:
 
                 # on_step 타임아웃 적용
                 try:
+                    step_start = monotonic()
                     signals = await asyncio.wait_for(
                         self.strategy.on_step(step_context),  # type: ignore[union-attr]
                         timeout=self.config.step_timeout_seconds,
                     )
+                    # wait_for 정상 반환 직후 1 회 계산 — 시그널/action 발행
+                    # 시간을 제외한 on_step 순수 실행 시간. success 와
+                    # signal_overflow 발행에 공통 사용한다.
+                    step_duration_ms = int((monotonic() - step_start) * 1000)
                 except TimeoutError:
+                    # step_start 는 wait_for 직전에 set 되므로 timeout 진입
+                    # 시점엔 항상 float (assert 로 narrow — mypy guard).
+                    assert step_start is not None
+                    timeout_duration_ms = int((monotonic() - step_start) * 1000)
                     self._consecutive_failures += 1
                     timeout_msg = (
                         f"on_step timeout "
@@ -140,6 +154,8 @@ class Bot:
                             account_id=self.config.account_id,
                             result="timeout",
                             message=timeout_msg,
+                            signal_count=0,
+                            duration_ms=timeout_duration_ms,
                         )
                     )
                     if self._consecutive_failures >= self._max_consecutive_failures:
@@ -185,6 +201,8 @@ class Bot:
                             account_id=self.config.account_id,
                             result="signal_overflow",
                             message=overflow_msg,
+                            signal_count=len(signals),
+                            duration_ms=step_duration_ms,
                         )
                     )
                     await self._eventbus.publish(
@@ -218,6 +236,8 @@ class Bot:
                         account_id=self.config.account_id,
                         result="success",
                         message=f"signals={len(signals)}",
+                        signal_count=len(signals),
+                        duration_ms=step_duration_ms,
                     )
                 )
 
@@ -235,6 +255,12 @@ class Bot:
                     account_id=self.config.account_id,
                     result="error",
                     message=str(e),
+                    signal_count=0,
+                    duration_ms=(
+                        int((monotonic() - step_start) * 1000)
+                        if step_start is not None
+                        else 0
+                    ),
                 )
             )
             await self._eventbus.publish(
