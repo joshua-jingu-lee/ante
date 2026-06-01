@@ -426,11 +426,15 @@ async def _handle_bot_status(
         except KeyError:
             treasury_for_bot = None
 
+    # #2137: 포지션 보강을 봇 계좌로 스코핑한다. account_id 가 전달되면
+    # ``enrich_bot_info`` 가 ``get_positions(..., account_id=...)`` 로 조회해
+    # 타 계좌 stale/legacy 포지션 누출을 차단한다.
     info = await enrich_bot_info(
         bot,
         strategy_registry=getattr(svc, "strategy_registry", None),
         treasury=treasury_for_bot,
         trade_service=getattr(svc, "trade_service", None),
+        account_id=bot.config.account_id,
     )
     return {"bot": info}
 

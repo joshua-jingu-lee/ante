@@ -467,8 +467,9 @@ def test_bot_positions_empty_envelope_matches_raw_legacy(
     책임 밖이다.
     """
     db, _ = mock_database_direct
-    # bot 존재 확인 → 실재 (SELECT 1 FROM bots WHERE bot_id = ?)
-    db.fetch_one.return_value = {"1": 1}
+    # bot 존재 확인 → 실재 (SELECT account_id FROM bots WHERE bot_id = ?).
+    # #2137: account_id 스코핑 — valid account_id row 를 반환한다.
+    db.fetch_one.return_value = {"account_id": "acc-1"}
 
     # TradeService.get_positions 가 빈 list 반환하도록 mock.
     trade_service = AsyncMock()
@@ -502,7 +503,8 @@ def test_bot_positions_non_empty_envelope_matches_raw_legacy(
 ) -> None:
     """``bot positions`` non-empty: ``{positions: [...]}`` 평면 dict."""
     db, _ = mock_database_direct
-    db.fetch_one.return_value = {"1": 1}
+    # #2137: account_id 스코핑 — valid account_id row 를 반환한다.
+    db.fetch_one.return_value = {"account_id": "acc-1"}
 
     # Position dataclass 같은 객체 mock.
     pos = MagicMock()

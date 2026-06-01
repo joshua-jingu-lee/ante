@@ -321,12 +321,60 @@ class TestHandleBotStatus:
                 "realized_pnl": 1500.0,
             }
         ]
+        # #2137: bot.status handler 가 봇 계좌(``acc-1``) 로 포지션 조회를
+        # 스코핑한다 — ``account_id`` kwarg 전파를 lock 한다.
         trade_service.get_positions.assert_awaited_once_with(
-            bot_id="bot-1", include_closed=True
+            bot_id="bot-1", include_closed=True, account_id="acc-1"
         )
         # read-only — audit 호출 없음
         assert audit_log is not None
         audit_log.assert_not_awaited()
+
+    async def test_positions_scoped_to_bot_account_blocks_other_account(
+        self,
+    ) -> None:
+        """#2137: bot.status 는 봇 계좌(``acc-a``) 로만 포지션을 조회한다.
+
+        ``get_positions`` stub 이 ``account_id`` kwarg 에 따라 계좌별 포지션을
+        반환하도록 모사한다. 봇 계좌가 ``acc-a`` 이므로 ``acc-b`` 포지션
+        (``BBB``) 은 status 결과에 누출되지 않아야 한다 (이슈 재현 시나리오).
+        """
+        bot = _make_bot(
+            bot_id="bot-shared",
+            account_id="acc-a",
+            info={"bot_id": "bot-shared", "status": "running", "strategy_id": ""},
+        )
+
+        pos_a = SimpleNamespace(
+            symbol="AAA", quantity=1.0, avg_entry_price=100.0, realized_pnl=10.0
+        )
+        pos_b = SimpleNamespace(
+            symbol="BBB", quantity=2.0, avg_entry_price=200.0, realized_pnl=20.0
+        )
+
+        async def _scoped_get_positions(
+            *, bot_id: str, include_closed: bool, account_id: str | None = None
+        ) -> list[SimpleNamespace]:
+            # account_id 미전달(=all-account) 이면 두 계좌 포지션이 모두 섞인다.
+            if account_id is None:
+                return [pos_a, pos_b]
+            if account_id == "acc-a":
+                return [pos_a]
+            return [pos_b]
+
+        trade_service = MagicMock()
+        trade_service.get_positions = AsyncMock(side_effect=_scoped_get_positions)
+
+        svc, _ = _make_svc(bot=bot, trade_service=trade_service)
+
+        result = await _handle_bot_status(svc, {"bot_id": "bot-shared"}, "admin-master")
+
+        symbols = [p["symbol"] for p in result["bot"]["positions"]]
+        assert symbols == ["AAA"], symbols
+        assert "BBB" not in symbols
+        trade_service.get_positions.assert_awaited_once_with(
+            bot_id="bot-shared", include_closed=True, account_id="acc-a"
+        )
 
     async def test_success_without_trade_service_omits_positions(self) -> None:
         """``trade_service=None`` 시 positions 키 부재 (회귀 lock)."""

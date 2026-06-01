@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.account.scoping import is_invalid_account_id
 from ante.cli._validators import (
     reject_invalid_account_id,
     validate_positive_finite_amount,
@@ -629,7 +630,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             # 일 때로만 좁힌다.
             try:
                 bot_row = await db.fetch_one(
-                    "SELECT 1 FROM bots WHERE bot_id = ?", (bot_id,)
+                    "SELECT account_id FROM bots WHERE bot_id = ?", (bot_id,)
                 )
             except sqlite3.OperationalError as e:
                 if "no such table" in str(e).lower():
@@ -638,6 +639,21 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             if bot_row is None:
                 return None
 
+            # #2137: 봇 row 의 account_id 로 포지션 조회를 스코핑한다.
+            # ``TradeService.get_positions(bot_id)`` 는 account_id 생략 시
+            # all-account 조회로 동작해 같은 bot_id 의 타 계좌 stale/legacy
+            # 포지션이 섞일 수 있다. invalid (None/""/"default"/형식 위반) 면
+            # fail-closed 로 ``VALIDATION_ERROR`` (``raise SystemExit(1)``) 해
+            # 빈 성공 응답(0 포지션과 구분 불가) 을 차단한다.
+            account_id = bot_row["account_id"]
+            if is_invalid_account_id(account_id):
+                fmt.error(
+                    f"봇의 account_id 가 유효하지 않아 포지션을 조회할 수 없습니다:"
+                    f" {bot_id} (account_id={account_id!r})",
+                    code="VALIDATION_ERROR",
+                )
+                raise SystemExit(1)
+
             position_history = PositionHistory(db)
             await position_history.initialize()
             recorder = TradeRecorder(db, position_history)
@@ -645,7 +661,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             performance = PerformanceTracker(db)
 
             service = TradeService(recorder, position_history, performance)
-            positions = await service.get_positions(bot_id)
+            positions = await service.get_positions(bot_id, account_id=account_id)
             return [
                 {
                     "symbol": p.symbol,

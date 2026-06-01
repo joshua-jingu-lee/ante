@@ -25,6 +25,7 @@ async def enrich_bot_info(
     strategy_registry: Any | None = None,
     treasury: Any | None = None,
     trade_service: Any | None = None,
+    account_id: str | None = None,
 ) -> dict[str, Any]:
     """``bot.get_info()`` 결과에 strategy/budget/positions 정보를 보강한다.
 
@@ -45,6 +46,12 @@ async def enrich_bot_info(
             include_closed=...)`` await coroutine 을 노출하는 stub). None
             이면 ``positions`` 키가 추가되지 않는다 (회귀 lock — cold-path
             / legacy 환경 호환).
+        account_id: 봇 소속 계좌(``bot.config.account_id``). ``None`` 이 아니면
+            (#2137) ``trade_service.get_positions(...)`` 호출에 ``account_id=``
+            kwarg 를 추가해 포지션 조회를 봇 계좌로 스코핑한다(타 계좌 stale
+            /legacy 포지션 누출 차단). ``None`` 이면 기존 ``get_positions(bot_id=
+            ..., include_closed=True)`` call shape 를 그대로 보존한다(legacy
+            stub / 미전달 호출처 회귀 lock). 응답 shape 에는 영향을 주지 않는다.
 
     Returns:
         ``bot.get_info()`` base dict + 보강 키 dict.
@@ -78,10 +85,18 @@ async def enrich_bot_info(
             }
 
     # 포지션 정보 추가 — include_closed=True 보존.
+    # account_id 가 주어지면(#2137) 봇 계좌로 스코핑해 타 계좌 stale/legacy
+    # 포지션 누출을 차단한다. None 이면 기존 call shape 를 그대로 유지한다
+    # (legacy stub / 미전달 호출처 회귀 lock).
     if trade_service is not None:
-        positions = await trade_service.get_positions(
-            bot_id=bot.bot_id, include_closed=True
-        )
+        if account_id is not None:
+            positions = await trade_service.get_positions(
+                bot_id=bot.bot_id, include_closed=True, account_id=account_id
+            )
+        else:
+            positions = await trade_service.get_positions(
+                bot_id=bot.bot_id, include_closed=True
+            )
         info["positions"] = [
             {
                 "symbol": p.symbol,
