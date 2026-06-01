@@ -78,7 +78,7 @@ def data_list(
 
     datasets = result["items"]
     if not datasets:
-        fmt.output({"datasets": [], "count": 0})
+        fmt.output({"datasets": [], "count": result["total"]})
         return
 
     async def _enrich(items: list[dict]) -> list[dict]:
