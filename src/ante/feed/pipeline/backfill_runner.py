@@ -323,9 +323,22 @@ class BackfillRunner:
               (그 과거 날짜는 데이터가 없어 대기해도 영원히 안 채워짐).
             - 그 외 날짜는 ``is_trading_paused`` 가 풀릴 때까지 **대기한 뒤**
               수집한다(window가 지나면 데이터는 존재).
+
+        checkpoint 미전진 (#2078, #2054 동형 halt):
+            ``dates`` 는 오름차순이고 ``Checkpoint.save`` 는 last-write-wins이므로,
+            transient 실패(generic ``except Exception``) 이후의 날짜 성공이
+            checkpoint를 실패 날짜 너머로 전진시키면 그 실패 날짜는 다음 run에서
+            ``last_checkpoint`` 이전으로 간주되어 영구 skip된다. 첫 transient
+            실패 시 ``halt = True`` 를 세워 이후 ``checkpoint.save`` 를 모두
+            건너뛴다(실패 직전 날짜에 checkpoint 고정). 수집 자체는 best-effort로
+            계속하므로 ``continue``(루프 진행)는 유지한다 — DataGoKr 결과는
+            ParquetStore natural-key dedup으로 재-fetch overwrite 멱등.
         """
         if self._data_go_kr is None:
             return
+
+        # 첫 transient 실패 이후 checkpoint 전진을 멈추는 플래그(#2078).
+        halt = False
 
         for target_date in dates:
             if is_blocked_day(config, target_date):
@@ -352,7 +365,10 @@ class BackfillRunner:
                 ctx.add_success(written, syms, warns)
                 if written > 0:
                     ctx.data_types.update(["ohlcv", "fundamental"])
-                checkpoint.save(target_date)
+                # halt 이후에는 checkpoint를 전진시키지 않는다(#2078). 앞선
+                # 실패 날짜 너머로 last_date가 진행되면 그 날짜가 영구 skip된다.
+                if not halt:
+                    checkpoint.save(target_date)
 
             except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
                 logger.critical("data.go.kr 수집 중단: %s", exc)
@@ -376,6 +392,10 @@ class BackfillRunner:
                         "reason": str(exc),
                     }
                 )
+                # 이후 날짜 성공이 checkpoint를 실패 날짜 너머로 전진시키지
+                # 못하도록 halt한다(#2078). break는 도입하지 않고(best-effort
+                # 수집 계속) checkpoint.save만 위 success 경로에서 가드한다.
+                halt = True
 
     async def _wait_out_trading_pause(
         self,
