@@ -426,8 +426,19 @@ class ReconcileEvent(Event):
 
 @dataclass(frozen=True)
 class ExternalSignalEvent(Event):
-    """REST API → EventBus: 외부 AI Agent 시그널."""
+    """REST API → EventBus: 외부 AI Agent 시그널.
 
+    Refs #2146: ``ExternalSignalEvent`` 는 봇 계좌(``bot.config.account_id``)에
+    귀속되는 account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한
+    컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
+    ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
+    ``"default"``, 형식 위반) 을 ``Event.__post_init__`` 에서 차단한다.
+    발행자(``SignalChannel._handle_signal``)는 봇 계좌를 명시 전달한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     bot_id: str = ""
     signal_id: str = ""
     symbol: str = ""

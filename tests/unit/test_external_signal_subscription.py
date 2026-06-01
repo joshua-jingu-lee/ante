@@ -156,6 +156,7 @@ class TestBotManagerSignalSubscription:
         bot.strategy = _AcceptingStrategy(ctx=ctx)
 
         event = ExternalSignalEvent(
+            account_id="acc-test",
             bot_id="bot-001",
             signal_id="sig-001",
             symbol="005930",
@@ -192,6 +193,7 @@ class TestBotManagerSignalSubscription:
         await manager.remove_bot("bot-001")
 
         event = ExternalSignalEvent(
+            account_id="acc-test",
             bot_id="bot-001",
             signal_id="sig-002",
             symbol="005930",
