@@ -21,19 +21,29 @@ logger = logging.getLogger(__name__)
 
 
 class LivePortfolioView(PortfolioView):
-    """Live 봇용 PortfolioView. Treasury(잔고) + Trade(포지션) 경유."""
+    """Live 봇용 PortfolioView. Treasury(잔고) + Trade(포지션) 경유.
+
+    ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
+    로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_positions`` 는
+    ``PositionHistory`` 인메모리 캐시를 ``(account_id, bot_id)`` 스코프로 조회해
+    타 계좌 포지션이 전략 컨텍스트에 누출되지 않게 한다(#2139).
+    """
 
     def __init__(
         self,
         treasury: Treasury,
         position_history: PositionHistory,
+        account_id: str,
     ) -> None:
         self._treasury = treasury
         self._position_history = position_history
+        self._account_id = account_id
 
     def get_positions(self, bot_id: str) -> dict[str, Any]:
-        """현재 보유 포지션 조회 (인메모리 캐시)."""
-        snapshots = self._position_history.get_positions_sync(bot_id)
+        """현재 보유 포지션 조회 (인메모리 캐시, 봇 계좌 스코프)."""
+        snapshots = self._position_history.get_positions_sync(
+            bot_id, account_id=self._account_id
+        )
         return {
             s.symbol: {
                 "symbol": s.symbol,
@@ -83,10 +93,17 @@ class LiveOrderView(OrderView):
 
 
 class LiveTradeHistoryView(TradeHistoryView):
-    """Live 봇용 TradeHistoryView. TradeRecorder에서 거래 이력 조회."""
+    """Live 봇용 TradeHistoryView. TradeRecorder에서 거래 이력 조회.
 
-    def __init__(self, trade_recorder: TradeRecorder) -> None:
+    ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
+    로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_trade_history`` 는
+    ``get_trades`` 호출을 ``(account_id, bot_id)`` 스코프로 좁혀 타 계좌 거래
+    이력이 전략 컨텍스트에 누출되지 않게 한다(#2139).
+    """
+
+    def __init__(self, trade_recorder: TradeRecorder, account_id: str) -> None:
         self._recorder = trade_recorder
+        self._account_id = account_id
 
     async def get_trade_history(
         self,
@@ -94,9 +111,12 @@ class LiveTradeHistoryView(TradeHistoryView):
         symbol: str | None = None,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        """봇의 거래 이력 조회."""
+        """봇의 거래 이력 조회 (봇 계좌 스코프)."""
         records = await self._recorder.get_trades(
-            bot_id=bot_id, symbol=symbol, limit=limit
+            account_id=self._account_id,
+            bot_id=bot_id,
+            symbol=symbol,
+            limit=limit,
         )
         return [
             {

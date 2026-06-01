@@ -66,7 +66,11 @@ class TestLivePortfolioView:
         position_history = PositionHistory(db=db)
         await position_history.initialize()
 
-        view = LivePortfolioView(treasury=treasury, position_history=position_history)
+        view = LivePortfolioView(
+            treasury=treasury,
+            position_history=position_history,
+            account_id="acc-test",
+        )
         assert view.get_positions("bot1") == {}
 
     async def test_get_positions_with_data(self, db, eventbus):
@@ -93,7 +97,11 @@ class TestLivePortfolioView:
         )
         await position_history.on_trade(record)
 
-        view = LivePortfolioView(treasury=treasury, position_history=position_history)
+        view = LivePortfolioView(
+            treasury=treasury,
+            position_history=position_history,
+            account_id="acc-test",
+        )
         positions = view.get_positions("bot1")
         assert "005930" in positions
         assert positions["005930"]["quantity"] == 10.0
@@ -106,7 +114,11 @@ class TestLivePortfolioView:
         position_history = PositionHistory(db=db)
         await position_history.initialize()
 
-        view = LivePortfolioView(treasury=treasury, position_history=position_history)
+        view = LivePortfolioView(
+            treasury=treasury,
+            position_history=position_history,
+            account_id="acc-test",
+        )
         balance = view.get_balance("bot1")
         assert balance["allocated"] == 0.0
         assert balance["available"] == 0.0
@@ -121,7 +133,11 @@ class TestLivePortfolioView:
         position_history = PositionHistory(db=db)
         await position_history.initialize()
 
-        view = LivePortfolioView(treasury=treasury, position_history=position_history)
+        view = LivePortfolioView(
+            treasury=treasury,
+            position_history=position_history,
+            account_id="acc-test",
+        )
         balance = view.get_balance("bot1")
         assert balance["allocated"] == 1_000_000.0
         assert balance["available"] == 1_000_000.0

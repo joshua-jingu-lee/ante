@@ -1041,12 +1041,9 @@ def _init_context_factory(s: Services) -> None:
     설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
     """
     from ante.bot import StrategyContextFactory
-    from ante.bot.providers.live import LiveTradeHistoryView
 
     if s.api_gateway:
         s.virtual_executor._gateway = s.api_gateway
-
-    live_trade_history = LiveTradeHistoryView(trade_recorder=s.trade_recorder)
 
     if not s.data_provider:
         s.data_provider = _NullDataProvider()
@@ -1056,7 +1053,6 @@ def _init_context_factory(s: Services) -> None:
         account_service=s.account_service,
         live_portfolio=s.live_portfolio,
         virtual_executor=s.virtual_executor,
-        live_trade_history=live_trade_history,
         treasury_manager=s.treasury_manager,
         position_history=s.position_history,
         api_gateway=s.api_gateway,
@@ -1064,6 +1060,9 @@ def _init_context_factory(s: Services) -> None:
         # #1948: LIVE get_open_orders 백엔드 — 봇별 LiveOrderView 가 이 tracker 의
         # sync open 캐시를 account scope 로 조회한다.
         order_tracker=s.order_tracker,
+        # #2139: LIVE get_trade_history 백엔드 — 봇별 LiveTradeHistoryView 가
+        # 봇 계좌(config.account_id) scope 로 거래 이력을 조회한다.
+        trade_recorder=s.trade_recorder,
     )
     s.bot_manager._context_factory = context_factory
     logger.info("StrategyContextFactory 설정 완료")
