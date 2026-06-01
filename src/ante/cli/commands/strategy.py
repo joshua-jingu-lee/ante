@@ -773,10 +773,13 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
                 raise AccountNotFoundError(f"계좌 '{account_id}'를 찾을 수 없습니다.")
 
             tracker = PerformanceTracker(db)
-            # 최신 버전의 strategy_id 기준으로 성과 계산
+            # 최신 버전의 strategy_id 기준으로 성과 계산.
+            # trades.strategy_id 는 ``{name}_v{version}`` (= record.strategy_id)
+            # 형식으로 저장되므로 record.name 으로 필터하면 실거래가 있어도
+            # 0건으로 집계된다. record.strategy_id 로 필터해야 한다 (#2135).
             record = records[0]
             metrics = await tracker.calculate(
-                account_id=account_id, strategy_id=record.name
+                account_id=account_id, strategy_id=record.strategy_id
             )
 
             return {
