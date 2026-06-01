@@ -884,8 +884,32 @@ class BotManager:
 
         from ante.eventbus.events import OrderRequestEvent
 
-        positions = await self._trade_service.get_positions(bot_id=bot.bot_id)
-        open_positions = [p for p in positions if p.quantity > 0]
+        account_id = bot.config.account_id
+        # 1차 방어: 봇 계좌로 조회 범위를 한정한다 (account_id=None이면 타 계좌
+        # 포지션까지 섞여 반환되므로 반드시 봇 계좌를 지정).
+        positions = await self._trade_service.get_positions(
+            bot_id=bot.bot_id, account_id=account_id
+        )
+
+        # 2차 방어 (fail-closed): 조회 결과가 비정상적으로 혼입되더라도, 봇 계좌와
+        # 엄격히 일치하는 포지션만 청산한다. 불일치/None/""/누락(falsy/missing)은
+        # 모두 제외하고 경고 로그를 남긴다 (truthy 비교가 아니라 엄격 동등 비교).
+        open_positions: list[Any] = []
+        for p in positions:
+            if p.quantity <= 0:
+                continue
+            pos_account_id = getattr(p, "account_id", None)
+            if pos_account_id != account_id:
+                logger.warning(
+                    "청산 대상 제외 (계좌 불일치): bot=%s symbol=%s "
+                    "pos_account_id=%r bot_account_id=%r",
+                    bot.bot_id,
+                    getattr(p, "symbol", None),
+                    pos_account_id,
+                    account_id,
+                )
+                continue
+            open_positions.append(p)
 
         if not open_positions:
             logger.info("청산 대상 포지션 없음: bot=%s", bot.bot_id)
@@ -893,7 +917,7 @@ class BotManager:
 
         for pos in open_positions:
             event = OrderRequestEvent(
-                account_id=bot.config.account_id,
+                account_id=account_id,
                 bot_id=bot.bot_id,
                 strategy_id=bot.config.strategy_id,
                 symbol=pos.symbol,

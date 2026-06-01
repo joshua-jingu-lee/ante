@@ -66,12 +66,14 @@ class FakePositionSnapshot:
         quantity: float,
         avg_entry_price: float = 0.0,
         exchange: str = "KRX",
+        account_id: str = "test",
     ) -> None:
         self.bot_id = bot_id
         self.symbol = symbol
         self.quantity = quantity
         self.avg_entry_price = avg_entry_price
         self.exchange = exchange
+        self.account_id = account_id
 
 
 class FakeTradeService:
@@ -79,10 +81,23 @@ class FakeTradeService:
 
     def __init__(self) -> None:
         self._positions: dict[str, list[FakePositionSnapshot]] = {}
+        # get_positions 호출 시 전달된 account_id 인자 캡처 (검증용).
+        self.get_positions_calls: list[dict[str, object]] = []
 
     async def get_positions(
-        self, bot_id: str, include_closed: bool = False
+        self,
+        bot_id: str,
+        include_closed: bool = False,
+        *,
+        account_id: str | None = None,
     ) -> list[FakePositionSnapshot]:
+        self.get_positions_calls.append(
+            {
+                "bot_id": bot_id,
+                "include_closed": include_closed,
+                "account_id": account_id,
+            }
+        )
         return self._positions.get(bot_id, [])
 
 
@@ -304,3 +319,78 @@ class TestDeleteBotHandlePositions:
         await manager.delete_bot("bot1", handle_positions="liquidate")
 
         assert "bot1" in published[0].reason
+
+
+class TestLiquidateAccountScope:
+    """#2138: 청산 조회/발행이 봇 계좌로만 스코핑되는지 검증."""
+
+    async def test_get_positions_called_with_bot_account_id(
+        self, manager, ctx, eventbus, trade_service
+    ):
+        """get_positions가 봇 계좌(account_id)로 호출된다 (1차 방어)."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-a")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        trade_service._positions["bot1"] = [
+            FakePositionSnapshot("bot1", "AAA", 50, account_id="acc-a"),
+        ]
+
+        await manager.delete_bot("bot1", handle_positions="liquidate")
+
+        # get_positions가 봇 계좌(acc-a)로 호출되었는지 인자 캡처로 검증.
+        assert trade_service.get_positions_calls
+        last_call = trade_service.get_positions_calls[-1]
+        assert last_call["bot_id"] == "bot1"
+        assert last_call["account_id"] == "acc-a"
+
+    async def test_liquidate_excludes_other_account_positions(
+        self, manager, ctx, eventbus, trade_service
+    ):
+        """타 계좌(acc-b) 포지션이 혼입돼도 청산 주문이 발행되지 않는다 (2차 방어).
+
+        invariant: 발행된 모든 OrderRequestEvent의 (account_id, symbol)이
+        봇 계좌(acc-a) 포지션에서만 유래한다.
+        """
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-a")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        # get_positions가 비정상적으로 타 계좌(acc-b) 포지션까지 반환하는 상황.
+        trade_service._positions["bot1"] = [
+            FakePositionSnapshot("bot1", "AAA", 50, account_id="acc-a"),
+            FakePositionSnapshot("bot1", "BBB", 30, account_id="acc-b"),
+        ]
+
+        published: list[OrderRequestEvent] = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: published.append(e))
+
+        await manager.delete_bot("bot1", handle_positions="liquidate")
+
+        # acc-a의 AAA만 발행되고 acc-b의 BBB는 절대 발행되지 않는다.
+        assert len(published) == 1
+        allowed = {("acc-a", "AAA")}
+        for event in published:
+            assert (event.account_id, event.symbol) in allowed
+        symbols = {e.symbol for e in published}
+        assert "BBB" not in symbols
+
+    async def test_liquidate_excludes_falsy_or_missing_account_id(
+        self, manager, ctx, eventbus, trade_service
+    ):
+        """account_id가 None/""/봇계좌 불일치인 포지션은 모두 제외된다 (fail-closed)."""
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-a")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+
+        valid = FakePositionSnapshot("bot1", "AAA", 50, account_id="acc-a")
+        none_acc = FakePositionSnapshot("bot1", "NNN", 10, account_id="acc-a")
+        none_acc.account_id = None  # type: ignore[assignment]
+        empty_acc = FakePositionSnapshot("bot1", "EEE", 10, account_id="")
+        trade_service._positions["bot1"] = [valid, none_acc, empty_acc]
+
+        published: list[OrderRequestEvent] = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: published.append(e))
+
+        await manager.delete_bot("bot1", handle_positions="liquidate")
+
+        assert len(published) == 1
+        assert published[0].symbol == "AAA"
+        assert published[0].account_id == "acc-a"
