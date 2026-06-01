@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
@@ -122,8 +123,17 @@ class DARTCollector:
         self,
         feed_dir: Path,
     ) -> dict[str, str]:
-        """고유번호 매핑을 로드하거나 다운로드한다."""
+        """고유번호 매핑을 캐시에서 로드하거나 다운로드한다."""
         corp_codes_path = feed_dir / "dart_corp_codes.json"
+        if corp_codes_path.exists():
+            try:
+                data = json.loads(corp_codes_path.read_text())
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning("DART: 고유번호 캐시 파싱 실패(%s), 재다운로드", e)
+            else:
+                if isinstance(data, dict) and data:
+                    return {str(k): str(v) for k, v in data.items()}
+                logger.warning("DART: 고유번호 캐시가 비정상(빈/비-dict), 재다운로드")
         return await self._source.fetch_corp_codes(save_path=corp_codes_path)
 
     @staticmethod
