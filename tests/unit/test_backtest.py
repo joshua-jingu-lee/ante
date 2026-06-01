@@ -240,15 +240,24 @@ class TestBacktestResult:
 
 
 class TestBacktestDataProvider:
-    async def test_load_and_get_ohlcv(self, data_provider):
+    async def test_pre_advance_ohlcv_empty(self, data_provider):
+        """load 직후(pre-advance, current_idx=-1)는 OHLCV가 비어 있다(#2061)."""
+        assert data_provider.current_idx == -1
         df = await data_provider.get_ohlcv("005930", "1d", limit=100)
-        assert len(df) == 1  # current_idx=0, 첫 행만 보임
+        assert df.is_empty()  # head(0): 첫 advance() 이전이라 노출 데이터 없음
+
+    async def test_first_advance_exposes_first_row(self, data_provider):
+        """첫 advance()가 row 0으로 전진하여 첫 행을 노출한다(#2061)."""
+        assert data_provider.advance() is True
+        assert data_provider.current_idx == 0  # 첫 advance가 row 0 처리
+        df = await data_provider.get_ohlcv("005930", "1d", limit=100)
+        assert len(df) == 1  # row 0만 보임
 
     async def test_advance_increases_visible_data(self, data_provider):
-        data_provider.advance()
-        data_provider.advance()
+        data_provider.advance()  # idx 0
+        data_provider.advance()  # idx 1
         df = await data_provider.get_ohlcv("005930", "1d", limit=100)
-        assert len(df) == 3  # idx 0,1,2
+        assert len(df) == 2  # idx 0,1
 
     async def test_advance_returns_false_at_end(self, data_provider):
         for _ in range(20):
@@ -256,17 +265,34 @@ class TestBacktestDataProvider:
         assert data_provider.advance() is False
 
     async def test_get_current_price(self, data_provider):
+        data_provider.advance()  # idx -1 -> 0: 현재가가 노출됨
         price = await data_provider.get_current_price("005930")
         assert price > 0
 
+    async def test_get_current_price_pre_advance_unavailable(self, data_provider):
+        """pre-advance(current_idx=-1)에서는 현재가가 unavailable(#2061)."""
+        assert data_provider.current_idx == -1
+        with pytest.raises(BacktestDataError):
+            await data_provider.get_current_price("005930")
+
     async def test_get_current_price_no_data(self, data_provider):
+        data_provider.advance()  # idx 0
         with pytest.raises(BacktestDataError):
             await data_provider.get_current_price("999999")
 
     async def test_get_current_timestamp(self, data_provider):
+        data_provider.advance()  # idx -1 -> 0: 현재 시각이 노출됨
         ts = data_provider.get_current_timestamp()
         assert ts is not None
         assert isinstance(ts, datetime)
+
+    async def test_get_current_timestamp_pre_advance_none(self, data_provider):
+        """pre-advance(current_idx=-1)에서는 현재 시각이 None(#2061).
+
+        음수 인덱스로 마지막 행을 잘못 반환하지 않도록 가드한다.
+        """
+        assert data_provider.current_idx == -1
+        assert data_provider.get_current_timestamp() is None
 
     async def test_get_current_timestamp_empty_cache(self, store):
         provider = BacktestDataProvider(
@@ -281,18 +307,18 @@ class TestBacktestDataProvider:
         data_provider.advance()
         data_provider.advance()
         data_provider.reset()
-        assert data_provider.current_idx == 0
+        assert data_provider.current_idx == -1  # 첫 row 이전으로 복귀
 
     async def test_limit_respects_future_cutoff(self, data_provider):
         """limit이 현재까지 데이터보다 크면 현재까지만 반환."""
-        data_provider.advance()
+        data_provider.advance()  # idx 0
         df = await data_provider.get_ohlcv("005930", "1d", limit=100)
-        assert len(df) == 2
+        assert len(df) == 1
 
     async def test_get_indicator_returns_computed_values(self, data_provider):
         """get_indicator()가 실제 지표 값을 계산하여 반환."""
-        # 기본 데이터 10행, 모두 전진
-        for _ in range(9):
+        # 기본 데이터 10행, 모두 전진 (idx -1 시작 → 10회 advance로 idx 9 도달)
+        for _ in range(10):
             data_provider.advance()
         result = await data_provider.get_indicator("005930", "sma", {"length": 5})
         assert isinstance(result, dict)
@@ -308,7 +334,7 @@ class TestBacktestDataProvider:
             store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
         )
         provider.load("005930", "1d")
-        for _ in range(29):
+        for _ in range(30):
             provider.advance()
         result = await provider.get_indicator("005930", "rsi", {"length": 14})
         assert isinstance(result, dict)
@@ -322,7 +348,7 @@ class TestBacktestDataProvider:
             store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
         )
         provider.load("005930", "1d")
-        for _ in range(39):
+        for _ in range(40):
             provider.advance()
         result = await provider.get_indicator("005930", "macd")
         assert isinstance(result, dict)
@@ -409,6 +435,7 @@ class TestBacktestStrategyContext:
             data_provider=data_provider,
             portfolio=executor,
         )
+        data_provider.advance()  # idx -1 -> 0: 첫 행 노출(#2061)
         df = await ctx.get_ohlcv("005930")
         assert len(df) >= 1
 
@@ -1065,11 +1092,11 @@ class TestBacktestMarkToMarket:
 
     async def test_open_position_valued_at_current_price_gain(self, store):
         """(a) 진입 후 가격 상승 — final_balance가 현재가 미실현이익 반영."""
-        # idx0=100, idx1(매수)=110, ... 마지막 봉=150 으로 상승
+        # idx0(매수)=100, idx1=110, ... 마지막 봉=150 으로 상승(#2061: 첫 on_step=row0)
         closes = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0]
         result, _ = await self._run_buy_and_hold(store, closes)
 
-        # BuyAndHold는 idx1(close=110)에서 10주 매수
+        # BuyAndHold는 첫 on_step(row 0, close=100)에서 10주 매수(#2061)
         buy_trade = result.trades[0]
         assert buy_trade.side == "buy"
         qty = buy_trade.quantity
@@ -1099,7 +1126,7 @@ class TestBacktestMarkToMarket:
 
         buy_trade = result.trades[0]
         qty = buy_trade.quantity
-        avg_price = buy_trade.price  # 110
+        avg_price = buy_trade.price  # 100 (row 0, 첫 on_step 매수 — #2061)
         last_price = closes[-1]  # 60
 
         cash = result.equity_curve[-1]["balance"]
@@ -1117,10 +1144,12 @@ class TestBacktestMarkToMarket:
 
         buy_trade = result.trades[0]
         qty = buy_trade.quantity  # 10
-        # 매수는 idx1(첫 on_step, current_idx=1, close=110)에서 발생
-        # equity_curve[i]는 advance()로 current_idx=i+1 인 시점에 기록됨
+        # 매수는 row 0(첫 on_step, current_idx=0, close=100)에서 발생(#2061).
+        # equity_curve[i]는 advance()로 current_idx=i 인 시점에 기록됨
+        # (커서 초기값 -1 → step i가 row i 처리).
+        assert len(result.equity_curve) == len(closes)  # 전 행 처리(N step)
         for i, point in enumerate(result.equity_curve):
-            current_idx = i + 1
+            current_idx = i
             expected_close = closes[current_idx]
             expected_equity = point["balance"] + qty * expected_close
             assert point["equity"] == pytest.approx(expected_equity), (
@@ -1750,11 +1779,10 @@ class TestGetPositionsSchema:
         ctx.get_positions()(전략이 호출) 두 경로 모두 005930이
         {quantity:1, avg_price:100.0, current_price:120.0, unrealized_pnl:20.0}.
         """
-        # run 루프 첫 on_step은 current_idx=1에서 일어난다.
-        #   step1(on_step #1) -> idx1 close=100 (매수가 100)
-        #   step2(on_step #2) -> idx2 close=120 (현재가 120)
-        # idx0은 매수/현재가에 쓰이지 않으므로 임의값.
-        closes = [50.0, 100.0, 120.0, 120.0]
+        # run 루프 첫 on_step은 current_idx=0에서 일어난다(#2061: 첫 행부터 처리).
+        #   step1(on_step #1) -> idx0 close=100 (매수가 100)
+        #   step2(on_step #2) -> idx1 close=120 (현재가 120)
+        closes = [100.0, 120.0, 120.0, 120.0]
         df = _make_ohlcv_df_with_closes(closes)
         store.write("005930", "1d", df)
         provider = BacktestDataProvider(
@@ -1824,8 +1852,10 @@ class TestGetPositionsSchema:
 
         보유 후 get_current_price가 항상 실패(예외)하면, get_positions의
         current_price는 avg_price(매수가)로 fallback하고 unrealized_pnl=0.
+
+        step1(첫 on_step)은 idx0(close=100)에서 매수한다(#2061).
         """
-        closes = [50.0, 100.0, 120.0, 120.0]
+        closes = [100.0, 120.0, 120.0, 120.0]
         df = _make_ohlcv_df_with_closes(closes)
         store.write("005930", "1d", df)
         provider = BacktestDataProvider(
@@ -1909,11 +1939,11 @@ class TestGetPositionsSchema:
     async def test_no_lookahead_uses_current_bar_price(self, store):
         """lookahead 방지: 매 step current_price가 그 step 현재가 기준.
 
-        step1에서 매수(idx1 close=100)한 직후 step1의 current_price는 아직
-        step1 봉 가격(100)이어야 하고, 다음 봉(idx2 close=120)을 미리 보지
-        않는다. 또 이전 봉 가격이 다음 step에 stale로 남지 않는다.
+        step1에서 매수(idx0 close=100)한 직후 step1의 current_price는 아직
+        step1 봉 가격(100)이어야 하고, 다음 봉(idx1 close=120)을 미리 보지
+        않는다. 또 이전 봉 가격이 다음 step에 stale로 남지 않는다(#2061: 첫 행부터).
         """
-        closes = [50.0, 100.0, 120.0, 130.0]
+        closes = [100.0, 120.0, 130.0, 130.0]
         df = _make_ohlcv_df_with_closes(closes)
         store.write("005930", "1d", df)
         provider = BacktestDataProvider(
@@ -1956,7 +1986,120 @@ class TestGetPositionsSchema:
 
         # step1: 매수 직전 미보유라 캐시 없음 → current_price None.
         assert seen[0] is None
-        # step2: idx2 close=120 (이전 봉 100이 stale로 남지 않음).
+        # step2: idx1 close=120 (이전 봉 100이 stale로 남지 않음).
         assert seen[1] == pytest.approx(120.0)
-        # step3: idx3 close=130 (lookahead/stale 없음, 매 step 새 가격).
+        # step3: idx2 close=130 (lookahead/stale 없음, 매 step 새 가격).
         assert seen[2] == pytest.approx(130.0)
+
+
+# ── 첫 데이터 행(row 0) 처리 회귀 (#2061) ──────────
+
+
+def _make_record_step_strategy() -> tuple[type[Strategy], list[tuple[int, Any]]]:
+    """on_step마다 (current_idx, timestamp)를 공유 리스트에 기록하는 전략 클래스.
+
+    run()이 전략 인스턴스를 내부에서 생성하므로, 관측은 클로저로 공유한다.
+    """
+    seen: list[tuple[int, Any]] = []
+
+    class _RecordStepStrategy(Strategy):
+        meta = StrategyMeta(name="record_step", version="1.0", description="t")
+
+        async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+            # 백테스트 컨텍스트는 provider를 self.ctx._data로 보관한다.
+            seen.append((self.ctx._data.current_idx, context["timestamp"]))
+            return []
+
+    return _RecordStepStrategy, seen
+
+
+class TestBacktestFirstRowProcessed:
+    """#2061: 첫 데이터 행(row 0)이 누락되지 않고 처리되는지 회귀.
+
+    버그(이전): `_current_idx=0` + `advance()`가 `+=1` 먼저 → 첫 행 skip,
+    1행 데이터는 on_step 0회의 빈 성공, N행은 N-1 step.
+    수정 후: 커서 초기값 -1 → 첫 advance()가 row 0 → N행 전부 처리(N step).
+    """
+
+    def _build_provider(self, store, n: int) -> BacktestDataProvider:
+        df = _make_ohlcv_df(n=n)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        return provider
+
+    async def test_single_row_runs_one_step(self, store):
+        """1행 데이터셋 → on_step 1회, equity_curve 길이 1 (빈 성공 아님)."""
+        provider = self._build_provider(store, n=1)
+        assert provider.get_total_steps() == 1
+
+        strategy_cls, seen = _make_record_step_strategy()
+        executor = BacktestExecutor(
+            strategy_cls=strategy_cls,
+            data_provider=provider,
+        )
+        result = await executor.run()
+
+        assert len(seen) == 1  # on_step 1회 (이전 버그: 0회)
+        assert len(result.equity_curve) == 1  # 빈 성공이 아님
+        # 첫(유일) on_step은 row 0(current_idx=0)을 본다.
+        assert seen[0][0] == 0
+
+    async def test_n_rows_run_n_steps(self, store):
+        """N행 데이터셋 → N step: on_step 호출수 == equity_curve == total_steps == N."""
+        n = 7
+        provider = self._build_provider(store, n=n)
+        assert provider.get_total_steps() == n
+
+        progress: list[tuple[int, int]] = []
+
+        strategy_cls, seen = _make_record_step_strategy()
+        executor = BacktestExecutor(
+            strategy_cls=strategy_cls,
+            data_provider=provider,
+        )
+        result = await executor.run(
+            progress_callback=lambda c, t: progress.append((c, t))
+        )
+
+        # on_step 호출수 == equity_curve 길이 == total_steps == N 모두 일치.
+        assert len(seen) == n
+        assert len(result.equity_curve) == n
+        assert provider.get_total_steps() == n
+        # progress 최종 콜백은 (N, N)이어야 한다(off-by-one 아님).
+        assert progress[-1] == (n, n)
+        assert len(progress) == n
+
+    async def test_first_on_step_sees_row_zero(self, store):
+        """첫 on_step이 행0(current_idx=0)을 보고, 이후 단조 증가한다(#2061)."""
+        n = 5
+        provider = self._build_provider(store, n=n)
+        cached = provider._cache["005930:1d"]
+        first_ts = cached["timestamp"][0]
+
+        strategy_cls, seen = _make_record_step_strategy()
+        executor = BacktestExecutor(
+            strategy_cls=strategy_cls,
+            data_provider=provider,
+        )
+        await executor.run()
+
+        # 첫 on_step은 row 0(current_idx=0, 첫 timestamp)을 본다.
+        assert seen[0][0] == 0
+        assert seen[0][1] == first_ts
+        # current_idx는 0..N-1로 모든 행을 한 번씩 본다.
+        assert [idx for idx, _ in seen] == list(range(n))
+
+    async def test_pre_advance_guards(self, store):
+        """루프 진입 전(pre-advance, current_idx=-1) 조회 가드(#2061).
+
+        get_current_timestamp는 None, get_ohlcv는 empty여야 한다(음수 인덱스로
+        마지막 행을 잘못 반환하지 않음).
+        """
+        provider = self._build_provider(store, n=5)
+        assert provider.current_idx == -1
+        assert provider.get_current_timestamp() is None
+        df = await provider.get_ohlcv("005930", "1d", limit=100)
+        assert df.is_empty()
