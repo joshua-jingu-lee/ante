@@ -161,6 +161,71 @@ class TestCheckpointFutureQuarterClamp:
         assert ("2026", "11013") in source.fetched  # Q1은 fetch됨
 
 
+class TestEmptyCorpCodeMapWarning:
+    """#2079: corp_code_map이 비면 structured warning을 반환에 표면화한다."""
+
+    async def test_empty_corp_code_map_surfaces_warning(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """(a) 이슈 재현: 빈 매핑 → rows=0/symbols=∅/warns 1건(empty_corp_code_map).
+
+        수정 전에는 logger.warning만 남기고 `(0, set(), [])`를 반환해
+        CLI/report에서 clean no-op처럼 보였다. 이제 구조화 warning을
+        반환에 포함해 표면화한다.
+        """
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        # fetch_corp_codes가 빈 dict를 반환하는 가짜 source.
+        source = _StubDARTSource({})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2026-01-01"}}
+        rows, symbols, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+        )
+
+        assert rows == 0
+        assert symbols == set()
+        assert len(warns) == 1
+        assert warns[0]["type"] == "empty_corp_code_map"
+        assert warns[0]["source"] == "dart"
+        # 빈 매핑이면 분기 fetch는 수행되지 않는다.
+        assert source.fetched == []
+
+    async def test_non_empty_map_has_no_empty_corp_warning(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """(b) 비어있지 않은 매핑 경로는 empty_corp_code_map warning을 내지 않는다."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        # fetch_financial이 빈 응답(terminal no-data)을 반환하므로 다른 warn 없음.
+        source = _StubDARTSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2026-01-01"}}
+        _rows, _symbols, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+        )
+
+        assert all(w.get("type") != "empty_corp_code_map" for w in warns)
+
+
 class _ScriptedDARTSource:
     """(year, reprt_code)별로 raise/raw_items 응답을 스크립트로 지정하는 스텁.
 
