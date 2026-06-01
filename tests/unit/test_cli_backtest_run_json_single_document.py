@@ -13,9 +13,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import polars as pl
 from click.testing import CliRunner
 
 from ante.backtest.result import BacktestResult
@@ -178,3 +181,260 @@ class TestBacktestRunTextModeMetricTableRegression:
         assert "Sharpe Ratio" in result.output
         # 결과 페이로드 텍스트 템플릿도 같이 출력된다 (기존 회귀 보존).
         assert "Run ID: run-test-1752" in result.output
+
+
+# ── #1995: 명시 종목 전체 무데이터 → BACKTEST_DATA_NOT_FOUND ───────────
+
+# 데이터 없음(빈 store) 케이스를 실제 BacktestService/ParquetStore end-to-end로
+# 재현한다. 명시 종목 전체가 row_count=0이면 backtest_runs 이력을 저장하지 않고
+# exit 1 + BACKTEST_DATA_NOT_FOUND 로 실패해야 한다(fake success 차단).
+
+_EMPTY_STRATEGY_SRC = '''\
+"""테스트용 무동작 전략 (데이터 없음 케이스 재현)."""
+
+from typing import Any
+
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+
+class EmptyStrategy(Strategy):
+    """아무 시그널도 내지 않는 전략."""
+
+    meta = StrategyMeta(
+        name="empty",
+        version="1.0",
+        description="Does nothing",
+    )
+
+    async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        return []
+'''
+
+
+def _make_ohlcv_df(symbol: str, n: int = 10, base_price: float = 50000.0):
+    """테스트용 OHLCV DataFrame (test_backtest.py 헬퍼 미러)."""
+    start = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
+    timestamps = pl.datetime_range(
+        start,
+        start + timedelta(days=n - 1),
+        interval="1d",
+        eager=True,
+        time_zone="UTC",
+    )
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": [symbol] * n,
+            "open": [base_price + i * 100 for i in range(n)],
+            "high": [base_price + i * 100 + 50 for i in range(n)],
+            "low": [base_price + i * 100 - 50 for i in range(n)],
+            "close": [base_price + i * 100 + 25 for i in range(n)],
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
+def _write_strategy(tmp_path) -> str:
+    """EmptyStrategy 전략 파일을 작성하고 경로를 반환."""
+    strategy = tmp_path / "empty_strategy.py"
+    strategy.write_text(_EMPTY_STRATEGY_SRC)
+    return str(strategy)
+
+
+def _count_runs(db_path: str, strategy_name: str = "empty") -> int:
+    """backtest_runs 테이블에 저장된 해당 전략 run 개수를 센다.
+
+    테이블이 아직 없을 수 있으므로 initialize() 후 조회한다(초기화는 멱등).
+    """
+    from ante.backtest.run_store import BacktestRunStore
+    from ante.core.database import Database
+
+    async def _query() -> int:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            store = BacktestRunStore(db)
+            await store.initialize()
+            runs = await store.list_by_strategy(strategy_name)
+            return len(runs)
+        finally:
+            await db.close()
+
+    return asyncio.run(_query())
+
+
+def _invoke_real_run(runner: CliRunner, tmp_path, *extra_args: str):
+    """실제 BacktestService/ParquetStore/DB로 `backtest run`을 호출."""
+    strategy_path = _write_strategy(tmp_path)
+    data_path = tmp_path / "data"
+    data_path.mkdir(exist_ok=True)
+    db_path = tmp_path / "ante.db"
+
+    return (
+        runner.invoke(
+            cli,
+            [
+                *extra_args,
+                "backtest",
+                "run",
+                strategy_path,
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-01-31",
+                "--data-path",
+                str(data_path),
+                "--db-path",
+                str(db_path),
+            ],
+        ),
+        str(db_path),
+        data_path,
+    )
+
+
+class TestBacktestRunDataNotFound:
+    """#1995: 명시 종목 전체가 무데이터(row_count=0)면 실패하고 이력을 남기지 않는다."""
+
+    def test_all_explicit_symbols_no_data_fails_without_history(self, tmp_path):
+        """(a) 재현: 빈 store + `--symbols 999999` → exit 1 + 이력 미저장.
+
+        분기 추가 전에는 exit 0 성공 + backtest_runs 이력이 저장되는 fake
+        success였다. 가드는 _save_backtest_run 이전에서 차단해야 한다.
+        """
+        runner = _make_runner()
+        strategy_path = _write_strategy(tmp_path)
+        data_path = tmp_path / "data"
+        data_path.mkdir(exist_ok=True)
+        db_path = tmp_path / "ante.db"
+
+        # store는 비어 있다(write 안 함) → 999999 row_count=0.
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                strategy_path,
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-01-31",
+                "--symbols",
+                "999999",
+                "--data-path",
+                str(data_path),
+                "--db-path",
+                str(db_path),
+            ],
+        )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        assert payload["code"] == "BACKTEST_DATA_NOT_FOUND"
+        # backtest_runs 이력이 남지 않아야 한다 (fake success 방지).
+        assert _count_runs(str(db_path)) == 0
+
+    def test_explicit_symbol_with_data_succeeds_and_saves_history(self, tmp_path):
+        """(b) 회귀: 데이터 있는 종목 정상 run → exit 0 + run_id 저장."""
+        runner = _make_runner()
+        strategy_path = _write_strategy(tmp_path)
+        data_path = tmp_path / "data"
+        data_path.mkdir(exist_ok=True)
+        db_path = tmp_path / "ante.db"
+
+        # ParquetStore에 005930 OHLCV를 적재해 row_count>0 을 만든다.
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=data_path)
+        store.write("005930", "1d", _make_ohlcv_df("005930"))
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                strategy_path,
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-01-31",
+                "--symbols",
+                "005930",
+                "--data-path",
+                str(data_path),
+                "--db-path",
+                str(db_path),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload.get("run_id")
+        # 이력이 정확히 1건 저장된다.
+        assert _count_runs(str(db_path)) == 1
+
+    def test_no_symbols_run_skips_guard(self, tmp_path):
+        """(c) 회귀: `--symbols` 생략(no-symbols) → 가드 미적용(기존 동작 보존).
+
+        explicit_symbols 가 falsy([])이므로 데이터가 없어도 실패하지 않고
+        기존 no-symbols 백테스트 경로(성공)를 그대로 탄다.
+        """
+        runner = _make_runner()
+        result, db_path, _data_path = _invoke_real_run(
+            runner, tmp_path, "--format", "json"
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload.get("run_id")
+        # no-symbols 정상 run 은 기존대로 이력을 남긴다.
+        assert _count_runs(str(db_path)) == 1
+
+    def test_partial_missing_symbol_still_succeeds(self, tmp_path):
+        """(d) 비목표 lock: 데이터 있는 종목 + 999999(무데이터) → 현행 성공.
+
+        부분 누락은 #1995 비목표다. all(row_count==0) 이 False 이므로 가드를
+        건너뛰고 기존 성공 동작을 유지해야 한다(회귀 방지).
+        """
+        runner = _make_runner()
+        strategy_path = _write_strategy(tmp_path)
+        data_path = tmp_path / "data"
+        data_path.mkdir(exist_ok=True)
+        db_path = tmp_path / "ante.db"
+
+        from ante.data.store import ParquetStore
+
+        store = ParquetStore(base_path=data_path)
+        store.write("005930", "1d", _make_ohlcv_df("005930"))
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                strategy_path,
+                "--start",
+                "2026-01-01",
+                "--end",
+                "2026-01-31",
+                "--symbols",
+                "005930,999999",
+                "--data-path",
+                str(data_path),
+                "--db-path",
+                str(db_path),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload.get("run_id")
+        assert _count_runs(str(db_path)) == 1
