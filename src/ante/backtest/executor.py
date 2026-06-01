@@ -81,7 +81,7 @@ class BacktestExecutor:
             for signal in signals:
                 await self._execute_signal(signal, timestamp)
 
-            equity = self._calculate_equity()
+            equity = await self._calculate_equity()
             self._equity_curve.append(
                 {
                     "timestamp": str(timestamp),
@@ -95,7 +95,13 @@ class BacktestExecutor:
 
         strategy.on_stop()
 
-        final_equity = self._calculate_equity()
+        # 루프 종료 후 advance()가 커서를 1칸 더 올린 상태이므로
+        # 여기서 _calculate_equity()/get_current_price()를 재호출하면
+        # 다음 봉(미래) 가격을 보는 lookahead가 된다. 마지막 시뮬레이션 봉의
+        # equity를 재사용한다.
+        final_equity = (
+            self._equity_curve[-1]["equity"] if self._equity_curve else self._balance
+        )
         total_return = (
             (final_equity - self._initial_balance) / self._initial_balance * 100
             if self._initial_balance > 0
@@ -112,7 +118,7 @@ class BacktestExecutor:
             total_return=total_return,
             trades=self._trades,
             equity_curve=self._equity_curve,
-            metrics=self._calculate_metrics(),
+            metrics=self._calculate_metrics(final_equity),
         )
 
     async def _execute_signal(self, signal: Signal, timestamp: Any) -> None:
@@ -176,21 +182,50 @@ class BacktestExecutor:
             if pos["quantity"] <= 0:
                 del self._positions[symbol]
 
-    def _calculate_equity(self) -> float:
-        """현재 자산 가치."""
+    async def _calculate_equity(self) -> float:
+        """현재 bar 시점의 자산 가치 (mark-to-market).
+
+        미청산 포지션을 현재 bar 종가로 평가한다. 가격 조회가 실패
+        (None/<=0/예외)하면 해당 포지션은 avg_price(원가)로 fallback하되
+        symbol을 포함한 경고를 남긴다(조용히 숨기지 않는다).
+
+        Note: 현재 bar 가격이 SSOT이므로 반드시 run 루프 안에서만 호출한다.
+        루프 종료 후 호출하면 advance()가 올린 미래 봉을 보는 lookahead가 된다.
+        """
         equity = self._balance
-        for pos in self._positions.values():
-            equity += pos["quantity"] * pos["avg_price"]
+        for symbol, pos in self._positions.items():
+            mark_price = pos["avg_price"]
+            try:
+                current_price = await self._data.get_current_price(symbol)
+                if current_price is not None and current_price > 0:
+                    mark_price = current_price
+                else:
+                    logger.warning(
+                        "현재가 평가 불가(symbol=%s, price=%r) — avg_price로 fallback",
+                        symbol,
+                        current_price,
+                    )
+            except Exception:
+                logger.warning(
+                    "현재가 조회 실패(symbol=%s) — avg_price로 fallback",
+                    symbol,
+                    exc_info=True,
+                )
+            equity += pos["quantity"] * mark_price
         return equity
 
-    def _calculate_metrics(self) -> dict:
-        """성과 지표 계산."""
+    def _calculate_metrics(self, final_equity: float) -> dict:
+        """성과 지표 계산.
+
+        Args:
+            final_equity: 마지막 시뮬레이션 봉의 mark-to-market equity.
+                run()에서 equity_curve[-1] 기반으로 전달한다(재계산하지 않음).
+        """
         from ante.backtest.metrics import calculate_metrics
 
         if not self._trades:
             return {}
 
-        final_equity = self._calculate_equity()
         metrics = calculate_metrics(
             trades=self._trades,
             equity_curve=self._equity_curve,

@@ -114,6 +114,39 @@ def _make_ohlcv_df(
     )
 
 
+def _make_ohlcv_df_with_closes(
+    closes: list[float],
+    symbol: str = "005930",
+) -> pl.DataFrame:
+    """명시한 종가 시퀀스를 갖는 테스트용 OHLCV DataFrame.
+
+    비평탄(상승/하락 혼합) 가격으로 mark-to-market 평가를 검증할 때 사용한다.
+    """
+    from datetime import timedelta
+
+    n = len(closes)
+    start = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
+    timestamps = pl.datetime_range(
+        start,
+        start + timedelta(days=n - 1),
+        interval="1d",
+        eager=True,
+        time_zone="UTC",
+    )
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": [symbol] * n,
+            "open": [c - 25 for c in closes],
+            "high": [c + 50 for c in closes],
+            "low": [c - 50 for c in closes],
+            "close": list(closes),
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
 @pytest.fixture
 def data_dir(tmp_path):
     return tmp_path / "data"
@@ -456,9 +489,18 @@ class TestBacktestExecutor:
         result = await executor.run()
         assert len(result.trades) == 1
         assert result.trades[0].side == "buy"
-        # 수수료/슬리피지=0이고 avg_price 평가이므로 equity는 유지
-        # balance(현금)는 감소했는지 확인
+        # balance(현금)는 매수로 감소했는지 확인
         assert result.equity_curve[0]["balance"] < result.initial_balance
+        # 미청산 포지션을 현재가(mark-to-market)로 평가한다.
+        # _make_ohlcv_df의 close는 단조 상승하므로, 매수 후 미실현이익이
+        # 발생하여 final_balance가 매수 시점 원가 기반 평가보다 커진다.
+        buy_price = result.trades[0].price
+        qty = result.trades[0].quantity
+        cost_basis_equity = result.equity_curve[-1]["balance"] + qty * buy_price
+        # final_balance == 마지막 시뮬레이션 봉 equity (lookahead 없음)
+        assert result.final_balance == result.equity_curve[-1]["equity"]
+        # 현재가 기반 평가가 원가 기반보다 크다(가격 상승 fixture)
+        assert result.final_balance > cost_basis_equity
 
     async def test_buy_sell(self, data_provider):
         data_provider.reset()
@@ -619,6 +661,214 @@ class TestBacktestExecutor:
 
         # 매수/매도 수수료율이 다르므로 수수료 비율도 다름
         assert buy_trade.commission != sell_trade.commission
+
+
+# ── Mark-to-Market 평가 테스트 (#1987) ─────────────
+
+
+class TestBacktestMarkToMarket:
+    """미청산 포지션을 현재가로 평가하는지 검증."""
+
+    async def _run_buy_and_hold(self, store, closes, **executor_kwargs):
+        """closes 시퀀스로 데이터를 적재하고 BuyAndHold 백테스트 실행."""
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            **executor_kwargs,
+        )
+        result = await executor.run()
+        return result, provider
+
+    async def test_open_position_valued_at_current_price_gain(self, store):
+        """(a) 진입 후 가격 상승 — final_balance가 현재가 미실현이익 반영."""
+        # idx0=100, idx1(매수)=110, ... 마지막 봉=150 으로 상승
+        closes = [100.0, 110.0, 120.0, 130.0, 140.0, 150.0]
+        result, _ = await self._run_buy_and_hold(store, closes)
+
+        # BuyAndHold는 idx1(close=110)에서 10주 매수
+        buy_trade = result.trades[0]
+        assert buy_trade.side == "buy"
+        qty = buy_trade.quantity
+        avg_price = buy_trade.price
+        last_price = closes[-1]
+
+        # 원가(avg_price) 기반 평가가 아니라 현재가 기반이어야 함
+        cash = result.equity_curve[-1]["balance"]
+        cost_basis_equity = cash + qty * avg_price
+        market_equity = cash + qty * last_price
+
+        assert last_price > avg_price  # fixture 상승 전제
+        assert result.final_balance == pytest.approx(market_equity)
+        assert result.final_balance != pytest.approx(cost_basis_equity)
+        assert result.final_balance > cost_basis_equity
+
+        # total_return도 현재가 기반
+        expected_return = (
+            (market_equity - result.initial_balance) / result.initial_balance * 100
+        )
+        assert result.total_return == pytest.approx(expected_return)
+
+    async def test_open_position_valued_at_current_price_loss(self, store):
+        """(a') 진입 후 가격 하락 — 미실현손실도 반영(avg_price 아님)."""
+        closes = [100.0, 110.0, 90.0, 80.0, 70.0, 60.0]
+        result, _ = await self._run_buy_and_hold(store, closes)
+
+        buy_trade = result.trades[0]
+        qty = buy_trade.quantity
+        avg_price = buy_trade.price  # 110
+        last_price = closes[-1]  # 60
+
+        cash = result.equity_curve[-1]["balance"]
+        market_equity = cash + qty * last_price
+        cost_basis_equity = cash + qty * avg_price
+
+        assert last_price < avg_price  # 하락 전제
+        assert result.final_balance == pytest.approx(market_equity)
+        assert result.final_balance < cost_basis_equity
+
+    async def test_equity_curve_step_uses_current_price(self, store):
+        """(b) equity_curve의 각 step equity가 해당 step 현재가 기반."""
+        closes = [100.0, 110.0, 120.0, 130.0, 140.0]
+        result, _ = await self._run_buy_and_hold(store, closes)
+
+        buy_trade = result.trades[0]
+        qty = buy_trade.quantity  # 10
+        # 매수는 idx1(첫 on_step, current_idx=1, close=110)에서 발생
+        # equity_curve[i]는 advance()로 current_idx=i+1 인 시점에 기록됨
+        for i, point in enumerate(result.equity_curve):
+            current_idx = i + 1
+            expected_close = closes[current_idx]
+            expected_equity = point["balance"] + qty * expected_close
+            assert point["equity"] == pytest.approx(expected_equity), (
+                f"step {i}: equity {point['equity']} != "
+                f"cash + qty*close({expected_close})"
+            )
+
+    async def test_price_lookup_failure_falls_back_to_avg_price(self, store, caplog):
+        """(c) 가격 조회 실패(None/0/raise) 시 avg_price fallback + 경고 로그."""
+        import logging
+
+        closes = [100.0, 110.0, 120.0, 130.0, 140.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        # get_current_price를 None 반환 / 예외 / 0 으로 번갈아 실패시킴
+        call_count = {"n": 0}
+        real_get_price = provider.get_current_price
+
+        async def flaky_get_price(symbol: str) -> float:
+            # _execute_signal(매수 체결)에는 정상가가 필요하므로
+            # 포지션 보유 후(_calculate_equity 경로)에만 실패시킨다.
+            if executor._positions:
+                call_count["n"] += 1
+                mode = call_count["n"] % 3
+                if mode == 0:
+                    return None  # type: ignore[return-value]
+                if mode == 1:
+                    raise BacktestDataError("simulated lookup failure")
+                return 0.0
+            return await real_get_price(symbol)
+
+        with patch.object(provider, "get_current_price", side_effect=flaky_get_price):
+            with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+                result = await executor.run()
+
+        buy_trade = result.trades[0]
+        qty = buy_trade.quantity
+        avg_price = buy_trade.price
+
+        # 모든 평가가 실패했으므로 avg_price(원가) fallback
+        cash = result.equity_curve[-1]["balance"]
+        assert result.final_balance == pytest.approx(cash + qty * avg_price)
+
+        # 경고 로그에 symbol이 포함되어야 함(조용히 숨기지 않음)
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "가격 조회 실패 시 경고 로그가 있어야 함"
+        assert any("005930" in r.getMessage() for r in warnings)
+
+    async def test_no_lookahead_final_valuation_reuses_last_bar(self, store):
+        """(d) 불균등 길이 데이터셋 회귀 + final valuation lookahead 차단.
+
+        - final_balance == equity_curve[-1]["equity"]
+        - 루프 종료 후 advance()가 올린 미래 봉 가격을 쓰지 않음
+          (final valuation에서 get_current_price를 재호출하지 않음을 lock)
+        """
+        # 두 심볼: 길이가 다름(005930=4행, 000660=8행).
+        # get_total_steps/advance는 min 길이(=4)를 따르므로
+        # 시뮬레이션은 005930 idx0..3 까지만 진행된다.
+        df_a = _make_ohlcv_df_with_closes([100.0, 110.0, 120.0, 130.0], symbol="005930")
+        df_b = _make_ohlcv_df_with_closes(
+            [200.0, 210.0, 220.0, 230.0, 240.0, 250.0, 260.0, 270.0],
+            symbol="000660",
+        )
+        store.write("005930", "1d", df_a)
+        store.write("000660", "1d", df_b)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+
+        # get_current_price 호출 추적: 마지막 호출 시점의 current_idx를 기록
+        idx_at_call: list[int] = []
+        real_get_price = provider.get_current_price
+
+        async def tracking_get_price(symbol: str) -> float:
+            idx_at_call.append(provider.current_idx)
+            return await real_get_price(symbol)
+
+        with patch.object(
+            provider, "get_current_price", side_effect=tracking_get_price
+        ):
+            result = await executor.run()
+
+        # final_balance는 마지막 시뮬레이션 봉 equity 재사용 (재계산 아님)
+        assert result.final_balance == result.equity_curve[-1]["equity"]
+
+        # 시뮬레이션은 min 길이(4) 기준. 마지막 평가 봉은 005930 idx=3 (close=130).
+        # get_current_price는 current_idx <= 3 인 시점에서만 호출되어야 한다.
+        # (루프 종료 후 advance()로 current_idx=4가 된 뒤 재호출되면 lookahead)
+        assert idx_at_call, "get_current_price가 호출되어야 함"
+        assert max(idx_at_call) <= 3, (
+            f"final valuation이 미래 봉(current_idx>3)을 참조함: {idx_at_call}"
+        )
+
+        # 005930 마지막 평가가는 idx=3 close=130 (idx=4는 데이터 없음/미래)
+        buy_trade = result.trades[0]
+        qty = buy_trade.quantity
+        cash = result.equity_curve[-1]["balance"]
+        assert result.final_balance == pytest.approx(cash + qty * 130.0)
 
 
 # ── BacktestService 테스트 ─────────────────────────
