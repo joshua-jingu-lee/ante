@@ -234,6 +234,74 @@ class TestParquetStore:
         result = store.read("005930", "1m")
         assert result.is_empty()
 
+    async def test_write_null_timestamp_rejected(self, store, data_dir):
+        """null timestamp(partition key) ohlcv df는 ValueError 거부·미저장(#2107)."""
+        df = pl.DataFrame(
+            {
+                "timestamp": pl.Series([None], dtype=pl.Datetime(time_zone="UTC")),
+                "symbol": ["005930"],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+                "source": ["test"],
+            }
+        )
+        with pytest.raises(ValueError):
+            store.write("005930", "1m", df)
+
+        # None.parquet 등 어떤 파티션도 생성되지 않아야 한다.
+        # (path.mkdir 전에 raise되므로 디렉토리 자체가 없을 수 있다.)
+        assert not data_dir.exists() or list(data_dir.rglob("*.parquet")) == []
+
+    async def test_write_valid_timestamp_regression(self, store, data_dir):
+        """유효 timestamp df는 정상 write/read, YYYY-MM.parquet 생성(#2107 회귀)."""
+        df = _make_ohlcv_df()
+        store.write("005930", "1m", df)
+
+        parquet_path = data_dir / "ohlcv" / "1m" / "KRX" / "005930" / "2026-03.parquet"
+        assert parquet_path.exists()
+
+        result = store.read("005930", "1m")
+        assert len(result) == 5
+        assert result["timestamp"].is_null().any() is False
+
+    async def test_write_mixed_null_timestamp_rejected(self, store, data_dir):
+        """valid + null timestamp 혼합 df는 전체 거부·partial 미생성(#2107)."""
+        valid = _make_ohlcv_df(n=2)
+        null_row = pl.DataFrame(
+            {
+                "timestamp": pl.Series([None], dtype=pl.Datetime(time_zone="UTC")),
+                "symbol": ["005930"],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+                "source": ["test"],
+            }
+        )
+        df = pl.concat([valid, null_row], how="vertical")
+        with pytest.raises(ValueError):
+            store.write("005930", "1m", df)
+
+        assert not data_dir.exists() or list(data_dir.rglob("*.parquet")) == []
+
+    async def test_write_fundamental_null_date_rejected(self, store, data_dir):
+        """fundamental(time_col='date') null date df는 ValueError로 거부(#2107)."""
+        df = pl.DataFrame(
+            {
+                "date": pl.Series([None], dtype=pl.Date),
+                "symbol": ["005930"],
+                "source": ["dart"],
+            }
+        )
+        with pytest.raises(ValueError):
+            store.write("005930", "", df, data_type="fundamental")
+
+        assert not data_dir.exists() or list(data_dir.rglob("*.parquet")) == []
+
     async def test_multi_month_partitioning(self, store, data_dir):
         """2개월에 걸친 데이터가 각각 별도 파일로 파티셔닝."""
         ts_march = pl.datetime_range(
