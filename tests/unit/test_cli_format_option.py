@@ -23,6 +23,7 @@ from ante.cli.commands.bot import bot_list
 from ante.cli.commands.data import data_list
 from ante.cli.commands.member import member_info
 from ante.cli.commands.report import schema as report_schema
+from ante.cli.formatter import OutputFormatter
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 
@@ -720,3 +721,129 @@ class TestMemberInfoFormatOption1701:
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
         assert payload["member_id"] == "m-1701"
+
+
+# ── #2024: non-finite float → strict JSON null 정규화 ──────────
+
+
+def _capture_formatter_output(fn) -> str:  # noqa: ANN001
+    """``OutputFormatter`` 가 ``click.echo`` 한 stdout 을 캡처한다.
+
+    ``CliRunner.isolation()`` 은 click 의 출력 스트림을 가로채므로 click 명령
+    호출 없이 포맷터 단독 출력도 안전하게 수집할 수 있다.
+    """
+    runner = CliRunner()
+    with runner.isolation() as (stdout, _stderr):
+        fn()
+    return stdout.getvalue().decode("utf-8")
+
+
+class TestNonFiniteFloatStrictJson2024:
+    """#2024: ``--format json`` 출력이 inf/nan 을 ``null`` 로 정규화해 strict JSON.
+
+    SSOT: 손실 0 건 백테스트의 ``profit_factor=inf`` 같은 non-finite float 가
+    비표준 ``Infinity``/``NaN`` 토큰으로 직렬화되면 strict JSON parser(Agent
+    파싱 표면)가 실패한다. ``allow_nan=False`` + sanitize 로 ``null`` 정규화한다.
+    """
+
+    def test_output_inf_becomes_null_and_strict_parseable(self) -> None:
+        """(a) profit_factor=inf 출력이 strict json.loads 성공 + None."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.output({"metrics": {"profit_factor": float("inf")}})
+        )
+        # strict parse (allow_nan 기본 False) — Infinity 토큰이면 raise.
+        payload = json.loads(out)
+        assert payload["metrics"]["profit_factor"] is None
+
+    def test_output_negative_inf_and_nan_become_null(self) -> None:
+        """(b) -inf, nan 모두 None."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.output(
+                {
+                    "neg_inf": float("-inf"),
+                    "nan": float("nan"),
+                }
+            )
+        )
+        payload = json.loads(out)
+        assert payload["neg_inf"] is None
+        assert payload["nan"] is None
+
+    def test_output_nested_dict_list_non_finite_become_null(self) -> None:
+        """(c) 중첩 dict/list 내부 non-finite → None."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.output(
+                {
+                    "outer": {
+                        "inner": [
+                            {"pf": float("inf")},
+                            float("nan"),
+                            1.5,
+                        ],
+                    },
+                }
+            )
+        )
+        payload = json.loads(out)
+        assert payload["outer"]["inner"][0]["pf"] is None
+        assert payload["outer"]["inner"][1] is None
+        assert payload["outer"]["inner"][2] == 1.5
+
+    def test_output_finite_values_preserved(self) -> None:
+        """(d) 회귀: finite float/int/str/bool 값 보존 (bool 은 None 아님)."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.output(
+                {
+                    "ratio": 1.5,
+                    "count": 7,
+                    "name": "alpha",
+                    "flag_true": True,
+                    "flag_false": False,
+                }
+            )
+        )
+        payload = json.loads(out)
+        assert payload["ratio"] == 1.5
+        assert payload["count"] == 7
+        assert payload["name"] == "alpha"
+        # bool 은 float 로 강등돼 None 되면 안 됨.
+        assert payload["flag_true"] is True
+        assert payload["flag_false"] is False
+
+    def test_table_path_inf_strict_parseable(self) -> None:
+        """(e) table() 경로도 inf 포함 시 strict JSON."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.table(
+                [{"symbol": "AAA", "pf": float("inf")}],
+                ["symbol", "pf"],
+            )
+        )
+        payload = json.loads(out)
+        assert isinstance(payload, list)
+        assert payload[0]["pf"] is None
+        assert payload[0]["symbol"] == "AAA"
+
+    def test_success_path_inf_strict_parseable(self) -> None:
+        """(e) success() 경로도 inf 포함 시 strict JSON."""
+        fmt = OutputFormatter("json")
+        out = _capture_formatter_output(
+            lambda: fmt.success("done", data={"pf": float("inf")})
+        )
+        payload = json.loads(out)
+        assert payload["status"] == "ok"
+        assert payload["data"]["pf"] is None
+
+    def test_datetime_value_serialized_via_default_str(self) -> None:
+        """(f) 회귀: datetime 값은 default=str 로 문자열 직렬화 유지."""
+        from datetime import UTC, datetime
+
+        fmt = OutputFormatter("json")
+        dt = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+        out = _capture_formatter_output(lambda: fmt.output({"ts": dt}))
+        payload = json.loads(out)
+        assert payload["ts"] == str(dt)
