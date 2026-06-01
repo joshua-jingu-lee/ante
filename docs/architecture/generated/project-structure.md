@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-05-31 (KST)
+> 마지막 생성 시점: 2026-06-02 (KST)
 
 ## 최상위 구조
 
@@ -110,7 +110,8 @@ src/ante/
 │   ├── loader.py                     # StrategyLoader — 전략 파일 동적 로드
 │   ├── registry.py                   # StrategyRegistry — 전략 등록/관리
 │   ├── validator.py                  # StrategyValidator — AST 기반 정적 검증
-│   └── __init__.py
+│   ├── __init__.py
+│   └── file_access.py
 ├── rule/
 │   ├── base.py                       # Rule ABC, RuleContext, RuleEvaluation, EvaluationResult
 │   ├── engine.py                     # RuleEngine — 전역/전략별 룰 평가
@@ -397,7 +398,8 @@ tests/
 │   │   ├── test_daily_runner_target_date.py
 │   │   ├── test_orchestrator_run_daily_target_date.py
 │   │   ├── test_backfill_guard_wait.py
-│   │   └── test_indicator_calculator.py
+│   │   ├── test_indicator_calculator.py
+│   │   └── test_backfill_data_go_kr_checkpoint.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -661,7 +663,16 @@ tests/
 │   ├── test_fill_outbox.py
 │   ├── test_kis_error_codes_40240000.py
 │   ├── test_treasury_fill_dedup.py
-│   └── test_cli_backtest_history_readonly_fs.py
+│   ├── test_cli_backtest_history_readonly_fs.py
+│   ├── test_approval_bot_delete_account_scope.py
+│   ├── test_bot_live_account_scope.py
+│   ├── test_bot_schema.py
+│   ├── test_bot_step_completed_fields.py
+│   ├── test_cli_bot_positions_account_scope.py
+│   ├── test_feedback_account_scope.py
+│   ├── test_member_security_events.py
+│   ├── test_rule_engine_unrealized_account_scope.py
+│   └── test_strategy_file_access.py
 └── __init__.py
 ```
 
