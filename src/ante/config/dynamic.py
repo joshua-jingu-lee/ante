@@ -253,6 +253,7 @@ class DynamicConfigService:
                VALUES (?, ?, ?, datetime('now'))
                ON CONFLICT(key) DO UPDATE SET
                  value = excluded.value,
+                 category = excluded.category,
                  updated_at = excluded.updated_at""",
             (key, json_value, category),
         )

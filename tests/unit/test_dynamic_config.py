@@ -1,5 +1,6 @@
 """DynamicConfigService 단위 테스트."""
 
+import json
 import math
 
 import pytest
@@ -92,6 +93,61 @@ async def test_get_by_category(service):
     assert len(rules) == 2
     assert rules["rule.a"] == 1
     assert rules["rule.b"] == 2
+
+
+# ── #2133 oracle: set UPSERT 가 기존 키의 category 갱신 ───────────────────
+
+
+async def test_set_updates_category_on_existing_key(service):
+    """기존 키를 다른 category 로 재설정하면 DB row 의 category 도 갱신된다.
+
+    이슈 재현(#2133): UPSERT conflict-update 가 value/updated_at 만 갱신하고
+    category 를 누락하면 최초 category("alpha")가 그대로 남는 버그.
+    """
+    await service.set("k", "v1", category="alpha")
+    await service.set("k", "v2", category="beta")
+
+    row = await service._db.fetch_one(
+        "SELECT key, value, category FROM dynamic_config WHERE key = ?",
+        ("k",),
+    )
+    assert row is not None
+    # category 가 마지막 set 의 값으로 이동했다 (이전 "alpha" 아님).
+    assert row["category"] == "beta"
+    # value 회귀: "v2" 로 갱신됐다 (JSON 직렬화된 형태).
+    assert json.loads(row["value"]) == "v2"
+
+
+async def test_set_category_change_reflected_in_get_by_category(service):
+    """category 이동 후 get_by_category 가 정합하게 동작한다 (#2133).
+
+    새 category 에는 키가 포함되고, 이전 category 에는 더 이상 포함되지 않는다.
+    """
+    await service.set("k", "v1", category="alpha")
+    await service.set("k", "v2", category="beta")
+
+    beta = await service.get_by_category("beta")
+    assert "k" in beta
+    assert beta["k"] == "v2"
+
+    alpha = await service.get_by_category("alpha")
+    assert "k" not in alpha
+
+
+async def test_set_category_change_event_carries_new_category(service, eventbus):
+    """category 이동 시 ConfigChangedEvent.category 는 새 값을 담는다 (#2133).
+
+    기존 동작 유지 — 이벤트는 이미 새 category 를 담고 있었고, 이 수정으로
+    DB 와 이벤트가 정합해진다.
+    """
+    await service.set("k", "v1", category="alpha")
+    await service.set("k", "v2", category="beta")
+
+    assert len(eventbus.published) == 2
+    last_event = eventbus.published[-1]
+    assert isinstance(last_event, ConfigChangedEvent)
+    assert last_event.key == "k"
+    assert last_event.category == "beta"
 
 
 async def test_exists(service):
