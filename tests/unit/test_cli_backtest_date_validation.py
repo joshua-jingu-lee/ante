@@ -124,8 +124,159 @@ class TestBacktestDateValidation:
                 "2025-01-01",
             ],
         )
+        # 'not-a-date' 는 strict YYYY-MM-DD 가드(#2053)에서 INVALID_DATE 로 거부된다.
         assert result.exit_code == 1
-        assert "날짜 형식" in result.output
+        assert "형식이 올바르지 않습니다" in result.output
+
+
+class TestBacktestStrictIsoDate:
+    """backtest run --start/--end strict YYYY-MM-DD 가드 (이슈 #2053).
+
+    Python 3.11+ ``date.fromisoformat`` 이 수락하는 basic ISO(``20260510``)·
+    week date(``2026-W19-1``) 변형은 ParquetStore 의 Polars 파싱이 거부하므로
+    CLI preflight 단계에서 INVALID_DATE 로 차단되어야 한다. 정상 확장 형식은
+    날짜 검증을 통과해 이후 실행 단계로 진입한다.
+    """
+
+    def test_basic_iso_start_rejected(self, tmp_path):
+        """(a) 재현: --start 20260510 (basic ISO)는 INVALID_DATE 로 거부."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "20260510",
+                "--end",
+                "2026-05-20",
+            ],
+        )
+        assert result.exit_code == 1
+        assert '"code": "INVALID_DATE"' in result.output
+
+    def test_week_date_start_rejected(self, tmp_path):
+        """(b) --start 2026-W19-1 (ISO week date)는 INVALID_DATE 로 거부."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "2026-W19-1",
+                "--end",
+                "2026-05-20",
+            ],
+        )
+        assert result.exit_code == 1
+        assert '"code": "INVALID_DATE"' in result.output
+
+    def test_basic_iso_end_rejected(self, tmp_path):
+        """(c) --end 20260510 (basic ISO)도 검증됨 — INVALID_DATE 로 거부."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "2026-05-10",
+                "--end",
+                "20260510",
+            ],
+        )
+        assert result.exit_code == 1
+        assert '"code": "INVALID_DATE"' in result.output
+
+    def test_valid_extended_iso_passes_validation(self, tmp_path):
+        """(d) 회귀: 정상 YYYY-MM-DD 는 날짜 검증을 통과해 실행 단계로 진입."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        with patch("ante.backtest.service.BacktestService") as mock_service:
+            mock_service.side_effect = RuntimeError("stop after validation")
+            result = runner.invoke(
+                cli,
+                [
+                    "backtest",
+                    "run",
+                    str(strategy),
+                    "--start",
+                    "2026-05-10",
+                    "--end",
+                    "2026-05-20",
+                ],
+            )
+
+        # 날짜 검증 통과 → exchange/timeframe/symbol 검증 후 BacktestService 진입
+        mock_service.assert_called_once()
+        assert "형식이 올바르지 않습니다" not in result.output
+
+    def test_nonexistent_calendar_date_rejected(self, tmp_path):
+        """(e) 회귀: strict 형식이나 비실재 날짜(2026-13-40)는 fromisoformat 거부."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "2026-13-40",
+                "--end",
+                "2026-05-20",
+            ],
+        )
+        assert result.exit_code == 1
+        assert '"code": "INVALID_DATE"' in result.output
+
+    def test_start_after_end_still_invalid_range(self, tmp_path):
+        """(f) 회귀: 정상 형식 역전(start > end)은 INVALID_DATE_RANGE 유지."""
+        strategy = tmp_path / "test_strategy.py"
+        strategy.write_text("# dummy")
+        runner = _make_runner()
+
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "backtest",
+                "run",
+                str(strategy),
+                "--start",
+                "2026-05-20",
+                "--end",
+                "2026-05-10",
+            ],
+        )
+        assert result.exit_code == 1
+        assert '"code": "INVALID_DATE_RANGE"' in result.output
 
 
 class TestBacktestBalanceValidation:
