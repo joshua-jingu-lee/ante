@@ -59,22 +59,28 @@ class TestValidateConfigExchangeDefault:
         )
         assert validated.exchange == "NYSE"
 
-    def test_validate_config_does_not_canonical_validate(self):
-        """_validate_config는 canonical 검증을 하지 않는다 (CLI 경계 단일 검증).
+    def test_validate_config_rejects_non_canonical_exchange(self):
+        """_validate_config가 non-canonical exchange를 거부한다 (#2034 supersede).
 
-        서비스/config 이중검증 금지 — 비-canonical 값도 plumbing은 그대로
-        통과시킨다 (게이트는 CLI ingress).
+        #1585 당시에는 "게이트는 CLI ingress, 서비스 이중검증 금지"였으나,
+        #2034가 programmatic dict 경로의 fake-success(invalid exchange가
+        그대로 통과)를 닫기 위해 ``_validate_config`` 단일 chokepoint에
+        canonical 검증(SSOT ``is_canonical``)을 추가하면서 이 정책을
+        supersede했다 (timeframe/symbol #1604와 동형). CLI는 ingress에서
+        별도 거부하지만 programmatic 직접 호출의 fake-success를 닫는다.
         """
+        from ante.backtest.exceptions import BacktestConfigError
+
         svc = BacktestService()
-        validated = svc._validate_config(
-            {
-                "strategy_path": "s.py",
-                "start_date": "2026-01-01",
-                "end_date": "2026-01-02",
-                "exchange": "ORACLE_INVALID_EXCHANGE",
-            }
-        )
-        assert validated.exchange == "ORACLE_INVALID_EXCHANGE"
+        with pytest.raises(BacktestConfigError, match="Invalid exchange"):
+            svc._validate_config(
+                {
+                    "strategy_path": "s.py",
+                    "start_date": "2026-01-01",
+                    "end_date": "2026-01-02",
+                    "exchange": "ORACLE_INVALID_EXCHANGE",
+                }
+            )
 
 
 class TestServicePassesExchangeToProvider:
