@@ -154,6 +154,7 @@ class DataGoKrSource:
         Raises:
             DailyLimitExceededError: 일일 한도 초과 시.
             CriticalApiError: 서비스키 미등록/만료 등 복구 불가능 에러.
+            DataGoKrError: 빈 페이지인데 totalCount 미달(부분 수집) 시.
         """
         # YYYY-MM-DD → YYYYMMDD (API 요청 형식)
         bas_dt = date.replace("-", "")
@@ -186,8 +187,17 @@ class DataGoKrSource:
                 )
 
                 # 페이지네이션 종료 조건
-                if len(all_items) >= total_count or len(items) == 0:
+                if len(all_items) >= total_count:
                     break
+                if len(items) == 0:
+                    # 빈 페이지인데 total_count 미달 → 부분 수집 이상 (fail-loud)
+                    msg = (
+                        f"부분 수집 감지: date={date} "
+                        f"collected={len(all_items)} total={total_count} "
+                        f"(page={page_no} 빈 페이지)"
+                    )
+                    logger.error(msg)
+                    raise DataGoKrError(msg)
 
                 page_no += 1
         finally:
