@@ -57,8 +57,11 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `OrderCancelledEvent`, `OrderFailedEvent`
 - Stop order / 취소 실패: `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
   `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`
-- 봇 lifecycle: `BotStartedEvent`, `BotStoppedEvent`, `BotErrorEvent`,
-  `BotStepCompletedEvent`, `BotRestartExhaustedEvent`
+- 봇 lifecycle: `BotStartedEvent`, `BotStopEvent`, `BotStoppedEvent`,
+  `BotErrorEvent`, `BotStepCompletedEvent`, `BotRestartExhaustedEvent` —
+  `BotStopEvent` (#2145) 는 봇 중지 요청으로, 발행자(`RuleEngine`)가
+  봇 계좌(`RuleEngine._account_id`)를 명시 전달하며 `_requires_account_id`
+  로 invalid fallback 을 차단한다.
 - 계좌/잔고/리포트: `AccountSuspendedEvent`, `AccountActivatedEvent`,
   `BalanceSyncedEvent`, `DailyReportEvent`
 - 실시간 스트림 (#1242 SPLIT-3): `StreamConnectedEvent`,
@@ -77,7 +80,6 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
   `CircuitBreakerEvent`,
-  `BotStopEvent`,
   `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
 
 **구현 노트**:
