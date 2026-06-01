@@ -55,6 +55,8 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `OrderModifyRejectedEvent`, `OrderValidatedEvent`, `OrderRejectedEvent`,
   `OrderApprovedEvent`, `OrderSubmittedEvent`, `OrderFilledEvent`,
   `OrderCancelledEvent`, `OrderFailedEvent`
+- Stop order / 취소 실패: `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
+  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`
 - 봇 lifecycle: `BotStartedEvent`, `BotStoppedEvent`, `BotErrorEvent`,
   `BotStepCompletedEvent`, `BotRestartExhaustedEvent`
 - 계좌/잔고/리포트: `AccountSuspendedEvent`, `AccountActivatedEvent`,
@@ -63,15 +65,19 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `StreamDisconnectedEvent` — KIS multi-account 환경에서 각 계좌마다 별도의
   ``KISStreamClient`` 인스턴스가 발행하므로 `account_id` 가 명시 전달되어야
   한다 (한 계좌 disconnect 가 다른 계좌의 fallback 을 켜지 않도록 격리).
+- 외부 시그널 (#2146): `ExternalSignalEvent` — 외부 AI Agent 시그널은
+  대상 봇 계좌(`bot.config.account_id`)에 귀속된다. `SignalChannel` 이 봇
+  계좌를 명시 전달하며, multi-account 환경에서 시그널을 account 기준으로
+  감사/필터링/추적할 수 있도록 `_requires_account_id` 로 invalid fallback 을
+  차단한다.
 
 **비대상 (system-wide event)**:
 - `SystemStartedEvent`, `SystemShutdownEvent`, `NotificationEvent`,
   `BacktestCompleteEvent`, `ConfigChangedEvent`, `ApprovalCreatedEvent`,
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
-  `CircuitBreakerEvent`, `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
-  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`,
-  `BotStopEvent`, `ExternalSignalEvent`,
+  `CircuitBreakerEvent`,
+  `BotStopEvent`,
   `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
 
 **구현 노트**:

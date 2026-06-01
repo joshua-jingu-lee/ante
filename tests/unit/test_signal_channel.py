@@ -22,6 +22,10 @@ def bot() -> MagicMock:
     """Bot mock."""
     b = MagicMock()
     b.bot_id = "bot-001"
+    # #2146: _handle_signal 이 bot.config.account_id 를 ExternalSignalEvent 에
+    # 싣는다. MagicMock default account_id 는 invalid 라 검증기에서 거부되므로
+    # valid 값을 명시 설정한다.
+    b.config.account_id = "acc-test"
     return b
 
 
@@ -90,6 +94,8 @@ class TestHandleSignal:
         assert event.symbol == "005930"
         assert event.action == "buy"
         assert event.bot_id == "bot-001"
+        # #2146: 봇 계좌(bot.config.account_id)가 이벤트에 실려야 한다.
+        assert event.account_id == "acc-test"
 
         # ack 응답
         resp = json.loads(output.getvalue().strip())
@@ -114,6 +120,18 @@ class TestHandleSignal:
         event = eventbus.publish.call_args[0][0]
         assert event.confidence == 0.95
         assert event.action == "sell"
+
+    async def test_signal_carries_bot_account_id(
+        self, channel: SignalChannel, eventbus: MagicMock
+    ) -> None:
+        """#2146: _handle_signal 이 봇 계좌(account_id)를 실은 이벤트를 발행한다."""
+        msg = json.dumps({"type": "signal", "symbol": "005930", "side": "buy"})
+        await channel._handle_line(msg)
+
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, ExternalSignalEvent)
+        # bot fixture 의 config.account_id 가 그대로 이벤트에 전파되어야 한다.
+        assert event.account_id == "acc-test"
 
 
 class TestHandleQuery:

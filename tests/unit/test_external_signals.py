@@ -6,6 +6,9 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+
+from ante.account.errors import InvalidAccountIdError
 from ante.eventbus.events import ExternalSignalEvent
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 from ante.strategy.validator import StrategyValidator
@@ -181,6 +184,7 @@ class TestBotExternalSignal:
         bot = _make_bot(_InhouseStrategy)
 
         event = ExternalSignalEvent(
+            account_id="test",
             bot_id="bot-001",
             signal_id="sig-001",
             symbol="005930",
@@ -199,6 +203,7 @@ class TestBotExternalSignal:
         bot = _make_bot(_OutsourcedStrategy)
 
         event = ExternalSignalEvent(
+            account_id="test",
             bot_id="bot-001",
             signal_id="sig-001",
             symbol="005930",
@@ -220,6 +225,7 @@ class TestBotExternalSignal:
         bot = _make_bot(_OutsourcedStrategy)
 
         event = ExternalSignalEvent(
+            account_id="test",
             bot_id="bot-999",  # 다른 봇
             signal_id="sig-001",
             symbol="005930",
@@ -241,6 +247,7 @@ class TestBotExternalSignal:
         bot.strategy = None
 
         event = ExternalSignalEvent(
+            account_id="test",
             bot_id="bot-001",
             signal_id="sig-001",
             symbol="005930",
@@ -249,3 +256,38 @@ class TestBotExternalSignal:
 
         await bot.on_external_signal(event)
         bot._eventbus.publish.assert_not_called()
+
+
+# ── #2146: ExternalSignalEvent account-scoped marker ────────
+
+
+class TestExternalSignalAccountScoped:
+    """#2146: ExternalSignalEvent 가 account-scoped marker 를 갖는지 검증."""
+
+    def test_requires_account_id_marker(self) -> None:
+        """_requires_account_id marker 가 True 다."""
+        assert ExternalSignalEvent._requires_account_id is True
+        assert "account_id" in ExternalSignalEvent.__dataclass_fields__
+
+    def test_valid_account_id_constructs(self) -> None:
+        """valid account_id 면 정상 생성된다."""
+        event = ExternalSignalEvent(
+            account_id="acc-test",
+            bot_id="bot-001",
+            signal_id="sig-001",
+            symbol="005930",
+            action="buy",
+        )
+        assert event.account_id == "acc-test"
+
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    def test_invalid_account_id_raises(self, invalid: str | None) -> None:
+        """invalid account_id(None/""/"default") 면 InvalidAccountIdError raise."""
+        with pytest.raises(InvalidAccountIdError):
+            ExternalSignalEvent(
+                account_id=invalid,  # type: ignore[arg-type]
+                bot_id="bot-001",
+                signal_id="sig-001",
+                symbol="005930",
+                action="buy",
+            )

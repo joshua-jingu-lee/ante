@@ -111,6 +111,7 @@ class SignalChannel:
         signal_id = f"sig-{uuid4().hex[:12]}"
 
         event = ExternalSignalEvent(
+            account_id=self._bot.config.account_id,
             bot_id=self._bot.bot_id,
             signal_id=signal_id,
             symbol=msg.get("symbol", ""),
