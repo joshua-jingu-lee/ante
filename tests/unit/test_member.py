@@ -14,6 +14,7 @@ from ante.eventbus.events import (
     MemberRegisteredEvent,
     MemberRevokedEvent,
     MemberSuspendedEvent,
+    NotificationEvent,
 )
 from ante.member.auth import (
     generate_recovery_key,
@@ -338,13 +339,64 @@ class TestSuspendReactivateRevoke:
         assert isinstance(excinfo.value, ValueError)
 
     async def test_suspend_publishes_event(self, service, eventbus):
-        events = []
-        eventbus.subscribe(MemberSuspendedEvent, events.append)
+        # 회귀 (#2150 task d): suspend 는 도메인 이벤트와 보안 알림을 모두 발행.
+        domain_events: list = []
+        notifications: list = []
+        eventbus.subscribe(MemberSuspendedEvent, domain_events.append)
+        eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.suspend("agent-01", suspended_by="owner")
-        assert len(events) == 1
-        assert events[0].member_id == "agent-01"
+        assert len(domain_events) == 1
+        assert domain_events[0].member_id == "agent-01"
+        # 도메인 이벤트 직후 보안 알림도 발행되어야 한다 (regression lock).
+        suspend_notifs = [n for n in notifications if n.title == "멤버 정지"]
+        assert len(suspend_notifs) == 1
+
+    async def test_suspend_publishes_notification(self, service, eventbus):
+        """#2150 (a)/(c): suspend 후 ``title=="멤버 정지"`` NotificationEvent 1건.
+
+        title 기준 필터로 카운트한다 (category/type 만으로 세지 않음 — 향후
+        register/reactivate 알림 추가에 견고, 순서 비의존).
+        """
+        notifications: list = []
+        eventbus.subscribe(NotificationEvent, notifications.append)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+
+        suspend_notifs = [n for n in notifications if n.title == "멤버 정지"]
+        assert len(suspend_notifs) == 1
+        notif = suspend_notifs[0]
+        assert notif.category == "member"
+        assert notif.level == "warning"
+        # (c) message 에 member_id 와 실행자(suspended_by) 포함.
+        assert "agent-01" in notif.message
+        assert "owner" in notif.message
+
+    async def test_suspend_failure_no_notification(self, service, eventbus):
+        """#2150 (e): suspend 실패 시 알림·도메인 이벤트 모두 미발행.
+
+        이미 SUSPENDED 인 멤버를 다시 suspend → ``MemberStateConflictError``
+        raise 경로에서는 ``title=="멤버 정지"`` 알림도, 도메인 이벤트도 나가지
+        않는다.
+        """
+        from ante.member.errors import MemberStateConflictError
+
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT)
+        await service.suspend("agent-01", suspended_by="owner")
+
+        # 첫 suspend 의 발행물을 배제하기 위해 두 번째 suspend 직전부터 수집.
+        domain_events: list = []
+        notifications: list = []
+        eventbus.subscribe(MemberSuspendedEvent, domain_events.append)
+        eventbus.subscribe(NotificationEvent, notifications.append)
+        with pytest.raises(MemberStateConflictError):
+            await service.suspend("agent-01", suspended_by="owner")
+
+        assert [n for n in notifications if n.title == "멤버 정지"] == []
+        assert domain_events == []
 
     async def test_reactivate_publishes_event(self, service, eventbus):
         from ante.eventbus.events import MemberReactivatedEvent
@@ -360,12 +412,37 @@ class TestSuspendReactivateRevoke:
         assert events[0].reactivated_by == "owner"
 
     async def test_revoke_publishes_event(self, service, eventbus):
-        events = []
-        eventbus.subscribe(MemberRevokedEvent, events.append)
+        # 회귀 (#2150 task d): revoke 는 도메인 이벤트와 보안 알림을 모두 발행.
+        domain_events: list = []
+        notifications: list = []
+        eventbus.subscribe(MemberRevokedEvent, domain_events.append)
+        eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
         await service.register("agent-01", MemberType.AGENT)
         await service.revoke("agent-01", revoked_by="owner")
-        assert len(events) == 1
+        assert len(domain_events) == 1
+        revoke_notifs = [n for n in notifications if n.title == "멤버 폐기"]
+        assert len(revoke_notifs) == 1
+
+    async def test_revoke_publishes_notification(self, service, eventbus):
+        """#2150 (b)/(c): revoke 후 ``title=="멤버 폐기"`` NotificationEvent 1건.
+
+        suspend 알림 테스트와 1:1 미러. title 기준 필터로 카운트한다.
+        """
+        notifications: list = []
+        eventbus.subscribe(NotificationEvent, notifications.append)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT)
+        await service.revoke("agent-01", revoked_by="owner")
+
+        revoke_notifs = [n for n in notifications if n.title == "멤버 폐기"]
+        assert len(revoke_notifs) == 1
+        notif = revoke_notifs[0]
+        assert notif.category == "member"
+        assert notif.level == "warning"
+        # (c) message 에 member_id 와 실행자(revoked_by) 포함.
+        assert "agent-01" in notif.message
+        assert "owner" in notif.message
 
 
 class TestRotateToken:

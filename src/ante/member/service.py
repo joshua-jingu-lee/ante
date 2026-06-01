@@ -624,12 +624,24 @@ class MemberService:
             (MemberStatus.SUSPENDED, now, member_id),
         )
 
-        from ante.eventbus.events import MemberSuspendedEvent
+        from ante.eventbus.events import MemberSuspendedEvent, NotificationEvent
 
         await self._eventbus.publish(
             MemberSuspendedEvent(
                 member_id=member_id,
                 suspended_by=suspended_by,
+            )
+        )
+        # 보안 알림 wiring (#2150): member/07·eventbus.md 가 명시한 Notification
+        # 구독자를 producer 직접 발행 패턴으로 연결한다 (auth_service
+        # ``_publish_auth_failed`` 동형). NotificationService 가 NotificationEvent
+        # 를 이미 구독하므로 추가 wiring 불필요.
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="warning",
+                title="멤버 정지",
+                message=f"멤버 `{member_id}`\n정지 실행: `{suspended_by}`",
+                category="member",
             )
         )
 
@@ -695,12 +707,21 @@ class MemberService:
             (MemberStatus.REVOKED, now, member_id),
         )
 
-        from ante.eventbus.events import MemberRevokedEvent
+        from ante.eventbus.events import MemberRevokedEvent, NotificationEvent
 
         await self._eventbus.publish(
             MemberRevokedEvent(
                 member_id=member_id,
                 revoked_by=revoked_by,
+            )
+        )
+        # 보안 알림 wiring (#2150): suspend 와 1:1 미러. producer 직접 발행.
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="warning",
+                title="멤버 폐기",
+                message=f"멤버 `{member_id}`\n폐기 실행: `{revoked_by}`",
+                category="member",
             )
         )
 
