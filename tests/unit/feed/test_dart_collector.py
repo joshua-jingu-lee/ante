@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -501,3 +502,97 @@ class TestCheckpointHaltOnFailure:
         assert checkpoint.get_last_date() is None
         assert rows == 0
         assert len(warns) == 4
+
+
+class _CountingCorpCodeSource:
+    """fetch_corp_codes 호출 횟수를 기록하고 save_path에 결과를 작성하는 스텁.
+
+    캐시 미스(다운로드) 경로가 정확히 몇 번 발동하는지 검증하기 위해
+    호출 카운터를 노출한다. save_path가 주어지면 실제 다운로드 동작을
+    흉내내 캐시 파일도 기록한다(_load_corp_codes의 save_path 갱신 계약).
+    """
+
+    def __init__(self, corp_code_map: dict[str, str]) -> None:
+        self._corp_code_map = corp_code_map
+        self.calls = 0
+
+    async def fetch_corp_codes(self, save_path: Path) -> dict[str, str]:
+        self.calls += 1
+        save_path.write_text(json.dumps(self._corp_code_map))
+        return dict(self._corp_code_map)
+
+
+class TestCorpCodeCacheReuse:
+    """#2021: 존재하는 corp_code 캐시를 재사용하고, 비정상 캐시는 재다운로드한다."""
+
+    async def test_valid_cache_hit_skips_download(self, tmp_path: Path) -> None:
+        """(a) 유효 non-empty 캐시 존재 → fetch_corp_codes 미호출, 캐시 맵 반환."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        cache = feed_dir / "dart_corp_codes.json"
+        cache.write_text(json.dumps({"00126380": "005930"}))
+
+        source = _CountingCorpCodeSource({"99999999": "000000"})
+        collector = DARTCollector(source=source)
+
+        result = await collector._load_corp_codes(feed_dir)
+
+        assert source.calls == 0
+        assert result == {"00126380": "005930"}
+
+    async def test_missing_cache_downloads(self, tmp_path: Path) -> None:
+        """(b) 캐시 파일 없음 → fetch_corp_codes 호출(1회), 다운로드 맵 반환."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+
+        source = _CountingCorpCodeSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        result = await collector._load_corp_codes(feed_dir)
+
+        assert source.calls == 1
+        assert result == {"00126380": "005930"}
+
+    async def test_corrupt_cache_falls_back_to_download(self, tmp_path: Path) -> None:
+        """(c) 손상된 JSON 캐시 → 재다운로드(1회)."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        (feed_dir / "dart_corp_codes.json").write_text("not json{")
+
+        source = _CountingCorpCodeSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        result = await collector._load_corp_codes(feed_dir)
+
+        assert source.calls == 1
+        assert result == {"00126380": "005930"}
+
+    async def test_empty_dict_cache_falls_back_to_download(
+        self, tmp_path: Path
+    ) -> None:
+        """(d) 빈 dict({}) 캐시 → 재다운로드(1회)."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        (feed_dir / "dart_corp_codes.json").write_text(json.dumps({}))
+
+        source = _CountingCorpCodeSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        result = await collector._load_corp_codes(feed_dir)
+
+        assert source.calls == 1
+        assert result == {"00126380": "005930"}
+
+    async def test_non_dict_cache_falls_back_to_download(self, tmp_path: Path) -> None:
+        """(e) 비-dict JSON([]) 캐시 → 재다운로드(1회)."""
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        (feed_dir / "dart_corp_codes.json").write_text(json.dumps([]))
+
+        source = _CountingCorpCodeSource({"00126380": "005930"})
+        collector = DARTCollector(source=source)
+
+        result = await collector._load_corp_codes(feed_dir)
+
+        assert source.calls == 1
+        assert result == {"00126380": "005930"}
