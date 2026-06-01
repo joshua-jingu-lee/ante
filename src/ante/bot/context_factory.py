@@ -24,9 +24,10 @@ if TYPE_CHECKING:
     )
     from ante.data.store import ParquetStore
     from ante.gateway.gateway import APIGateway
-    from ante.strategy.base import DataProvider
+    from ante.strategy.base import DataProvider, TradeHistoryView
     from ante.trade.order_tracker import OrderTracker
     from ante.trade.position import PositionHistory
+    from ante.trade.recorder import TradeRecorder
     from ante.treasury.manager import TreasuryManager
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ class StrategyContextFactory:
         api_gateway: APIGateway | None = None,
         parquet_store: ParquetStore | None = None,
         order_tracker: OrderTracker | None = None,
+        trade_recorder: TradeRecorder | None = None,
     ) -> None:
         self._data_provider = data_provider
         self._account_service = account_service
@@ -73,6 +75,11 @@ class StrategyContextFactory:
         # OrderTracker sync 캐시에서 미체결을 조회한다. 미주입(virtual-only/legacy)
         # 이면 공유 fallback ``live_order_view`` (없으면 빈 결과 stub)를 쓴다.
         self._order_tracker = order_tracker
+        # #2139: 주입되면 봇별 LiveTradeHistoryView 를 account_id closure 로 생성해
+        # TradeRecorder 조회를 봇 계좌 스코프로 좁힌다(LiveOrderView 패턴 미러).
+        # 미주입(virtual-only/legacy/test)이면 공유 fallback
+        # ``live_trade_history`` 를 그대로 쓴다.
+        self._trade_recorder = trade_recorder
 
     def create(self, config: BotConfig) -> StrategyContext:
         """BotConfig 기반으로 적절한 StrategyContext 생성.
@@ -107,6 +114,7 @@ class StrategyContextFactory:
                 return LivePortfolioView(
                     treasury=treasury,
                     position_history=self._position_history,
+                    account_id=config.account_id,
                 )
             except KeyError:
                 logger.warning(
@@ -140,6 +148,25 @@ class StrategyContextFactory:
             return self._live_order_view
         return _EmptyOrderView()
 
+    def _resolve_live_trade_history(self, config: BotConfig) -> TradeHistoryView | None:
+        """봇별 LiveTradeHistoryView 를 결정 (#2139).
+
+        ``trade_recorder`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
+        binding 한 **봇별** ``LiveTradeHistoryView`` 를 생성한다(``LiveOrderView``
+        #1948 패턴 미러). 단일계좌 다중봇에서 봇 계좌 scope 격리를 보장해 타 계좌
+        거래 이력이 전략 컨텍스트에 누출되지 않게 한다. 미주입이면 공유 fallback
+        ``live_trade_history`` 를 그대로 반환한다(virtual-only/legacy/test 환경
+        호환 — 공유 인스턴스의 private 멤버에 접근하지 않는다).
+        """
+        if self._trade_recorder is not None:
+            from ante.bot.providers.live import LiveTradeHistoryView
+
+            return LiveTradeHistoryView(
+                trade_recorder=self._trade_recorder,
+                account_id=config.account_id,
+            )
+        return self._live_trade_history
+
     def _create_live_context(self, config: BotConfig) -> StrategyContext:
         """Live 봇용 StrategyContext 생성.
 
@@ -168,7 +195,7 @@ class StrategyContextFactory:
             data_provider=data_provider,
             portfolio=portfolio,
             order_view=order_view,
-            trade_history=self._live_trade_history,
+            trade_history=self._resolve_live_trade_history(config),
         )
         logger.info("Live StrategyContext 생성: %s", config.bot_id)
         return ctx
