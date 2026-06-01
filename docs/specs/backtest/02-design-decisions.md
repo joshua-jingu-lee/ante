@@ -278,6 +278,8 @@ def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
 | `get_open_orders() → list[dict]` | 미체결 주문 (백테스트에서는 항상 빈 리스트) |
 | `cancel_order(order_id, reason) → None` | 주문 취소 (백테스트에서는 무시) |
 | `modify_order(order_id, quantity, price, reason) → None` | 주문 정정 (백테스트에서는 무시) |
+| `load_file(path) → bytes` | 전략 전용 파일 읽기 (바이너리). 라이브와 동일하게 `strategies/` 하위만 허용하고 절대경로/탈출/symlink escape는 `StrategyFileAccessError`로 거부 (#2083) |
+| `load_text(path, encoding="utf-8") → str` | 전략 전용 파일 읽기 (텍스트). `load_file` 위임 후 디코딩 (#2083) |
 | `log(message, level) → None` | 전략 로그 출력 |
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조

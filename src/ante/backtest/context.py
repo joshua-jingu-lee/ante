@@ -6,8 +6,15 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from ante.strategy.base import OrderAction
+from ante.strategy.file_access import (
+    STRATEGIES_ROOT,
+    load_strategy_file,
+    load_strategy_text,
+)
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import polars as pl
 
     from ante.backtest.data_provider import BacktestDataProvider
@@ -28,12 +35,19 @@ class BacktestStrategyContext:
         bot_id: str,
         data_provider: BacktestDataProvider,
         portfolio: BacktestExecutor,
+        strategies_dir: Path | None = None,
     ) -> None:
         self._bot_id = bot_id
         self._data = data_provider
         self._portfolio = portfolio
         self._actions: list[OrderAction] = []
         self.logger = logging.getLogger(f"backtest.strategy.{bot_id}")
+        # 라이브 StrategyContext 와 동일한 strategies/ 샌드박스 기본값을 쓴다.
+        # 보안 경계 SSOT 는 ante.strategy.file_access 가 단일 소유한다(#2083).
+        # ante.strategy.context._STRATEGIES_ROOT 를 직접 import 하지 않는다.
+        self._strategies_dir = (
+            strategies_dir.resolve() if strategies_dir else STRATEGIES_ROOT.resolve()
+        )
 
     async def get_ohlcv(
         self,
@@ -96,6 +110,23 @@ class BacktestStrategyContext:
         reason: str = "",
     ) -> None:
         """주문 정정 (백테스트에서는 무시)."""
+
+    def load_file(self, path: str) -> bytes:
+        """전략 전용 파일 읽기 (바이너리).
+
+        라이브 ``StrategyContext.load_file`` 과 동일한 보안 경계(strategies/
+        하위만 허용, 절대경로/탈출/symlink escape 차단, 미존재 거부)를 공용
+        helper 위임으로 제공한다(#2083).
+        """
+        return load_strategy_file(self._strategies_dir, path)
+
+    def load_text(self, path: str, encoding: str = "utf-8") -> str:
+        """전략 전용 파일 읽기 (텍스트).
+
+        라이브 ``StrategyContext.load_text`` 과 동일한 보안 경계를 공용 helper
+        위임으로 제공한다(#2083).
+        """
+        return load_strategy_text(self._strategies_dir, path, encoding)
 
     def log(self, message: str, level: str = "info") -> None:
         """전략 로그 출력."""

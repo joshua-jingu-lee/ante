@@ -10,6 +10,8 @@ from ante.backtest.context import BacktestStrategyContext
 from ante.backtest.result import BacktestResult, BacktestTrade
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from ante.backtest.data_provider import BacktestDataProvider
     from ante.strategy.base import Signal, Strategy
 
@@ -59,6 +61,7 @@ class BacktestExecutor:
         sell_commission_rate: float = 0.00195,
         slippage_rate: float = 0.001,
         exchange: str = "KRX",
+        strategies_dir: Path | None = None,
     ) -> None:
         self._strategy_cls = strategy_cls
         self._data = data_provider
@@ -67,6 +70,9 @@ class BacktestExecutor:
         self._sell_commission_rate = sell_commission_rate
         self._slippage_rate = slippage_rate
         self._exchange = exchange
+        # 전략 파일 접근 샌드박스 루트. None 이면 BacktestStrategyContext 가
+        # 라이브와 동일한 기본 strategies/ 루트를 쓴다(#2083).
+        self._strategies_dir = strategies_dir
 
         self._balance = initial_balance
         self._positions: dict[str, dict[str, float]] = {}
@@ -88,6 +94,7 @@ class BacktestExecutor:
             bot_id="backtest",
             data_provider=self._data,
             portfolio=self,
+            strategies_dir=self._strategies_dir,
         )
         strategy = self._strategy_cls(ctx)
         strategy.on_start()
