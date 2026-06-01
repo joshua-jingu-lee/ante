@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from ante.account.errors import InvalidAccountIdError
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
@@ -670,3 +671,143 @@ class TestNoOrderTracker:
         )
         assert len(corrections) == 1
         assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+
+
+# ── #2058: account-scoped 승격 (account_id 전파 + entry validation) ──────
+
+
+class TestReconcileAccountIdPropagation:
+    """#2058: reconcile 이 발행하는 이벤트에 입력 account_id 가 전파되는지 검증."""
+
+    async def test_mismatch_event_carries_input_account_id(
+        self, reconciler, position_history, eventbus
+    ):
+        """(a) 발행된 PositionMismatchEvent.account_id == reconcile 입력 account_id."""
+        await _set_position(
+            position_history, "bot-1", "005930", 50, 50000, account_id="acc-test"
+        )
+
+        mismatch_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],  # 전량 외부 청산
+            account_id="acc-test",
+        )
+
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].account_id == "acc-test"
+
+    async def test_reconcile_event_carries_input_account_id(
+        self, reconciler, position_history, eventbus
+    ):
+        """(b) 발행된 ReconcileEvent.account_id == reconcile 입력 account_id."""
+        await _set_position(
+            position_history, "bot-1", "005930", 50, 50000, account_id="acc-test"
+        )
+
+        reconcile_events: list = []
+        eventbus.subscribe(ReconcileEvent, lambda e: reconcile_events.append(e))
+
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+
+        assert len(reconcile_events) == 1
+        assert reconcile_events[0].account_id == "acc-test"
+
+
+class TestReconcileEntryValidation:
+    """#2058: reconcile() 진입부 require_account_id fail-fast 검증.
+
+    marker(_requires_account_id)가 아니라 entry validation 에서 raise되어,
+    invalid account_id 는 어떤 이벤트도 발행되기 전에 차단된다.
+    """
+
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    async def test_invalid_account_id_raises_at_entry(
+        self, reconciler, position_history, eventbus, invalid
+    ):
+        """(c) invalid account_id 면 InvalidAccountIdError raise + 이벤트 미발행."""
+        await _set_position(
+            position_history, "bot-1", "005930", 50, 50000, account_id="acc-test"
+        )
+
+        mismatch_events: list = []
+        reconcile_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+        eventbus.subscribe(ReconcileEvent, lambda e: reconcile_events.append(e))
+
+        with pytest.raises(InvalidAccountIdError):
+            await reconciler.reconcile(
+                bot_id="bot-1",
+                broker_positions=[],
+                account_id=invalid,  # type: ignore[arg-type]
+            )
+
+        # entry 에서 차단되어 어떤 이벤트도 발행되지 않는다.
+        assert mismatch_events == []
+        assert reconcile_events == []
+
+
+class TestReconcileEventsAccountScopedMarker:
+    """#2058: 두 이벤트의 account-scoped marker 동작 (test_external_signals 동형)."""
+
+    def test_mismatch_requires_account_id_marker(self) -> None:
+        """_requires_account_id marker 가 True 이고 account_id 필드가 존재한다."""
+        assert PositionMismatchEvent._requires_account_id is True
+        assert "account_id" in PositionMismatchEvent.__dataclass_fields__
+
+    def test_reconcile_requires_account_id_marker(self) -> None:
+        """_requires_account_id marker 가 True 이고 account_id 필드가 존재한다."""
+        assert ReconcileEvent._requires_account_id is True
+        assert "account_id" in ReconcileEvent.__dataclass_fields__
+
+    def test_mismatch_valid_account_id_constructs(self) -> None:
+        """valid account_id 면 정상 생성된다."""
+        event = PositionMismatchEvent(
+            account_id="acc-test",
+            bot_id="bot-1",
+            symbol="005930",
+            internal_qty=50.0,
+            broker_qty=0.0,
+            reason="외부 청산",
+        )
+        assert event.account_id == "acc-test"
+
+    def test_reconcile_valid_account_id_constructs(self) -> None:
+        """valid account_id 면 정상 생성된다."""
+        event = ReconcileEvent(
+            account_id="acc-test",
+            bot_id="bot-1",
+            discrepancy_count=1,
+            corrections=[],
+        )
+        assert event.account_id == "acc-test"
+
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    def test_mismatch_invalid_account_id_raises(self, invalid: str | None) -> None:
+        """invalid account_id 면 InvalidAccountIdError raise."""
+        with pytest.raises(InvalidAccountIdError):
+            PositionMismatchEvent(
+                account_id=invalid,  # type: ignore[arg-type]
+                bot_id="bot-1",
+                symbol="005930",
+                internal_qty=50.0,
+                broker_qty=0.0,
+                reason="외부 청산",
+            )
+
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    def test_reconcile_invalid_account_id_raises(self, invalid: str | None) -> None:
+        """invalid account_id 면 InvalidAccountIdError raise."""
+        with pytest.raises(InvalidAccountIdError):
+            ReconcileEvent(
+                account_id=invalid,  # type: ignore[arg-type]
+                bot_id="bot-1",
+                discrepancy_count=1,
+                corrections=[],
+            )

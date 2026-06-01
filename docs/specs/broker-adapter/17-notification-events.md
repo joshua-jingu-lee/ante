@@ -11,6 +11,7 @@
 **트리거**: 대사(Reconcile) 수행 중 봇의 내부 포지션과 브로커 실제 포지션의 수량이 불일치할 때
 
 **데이터 수집**:
+- `PositionReconciler.reconcile(account_id=...)` → 대사 대상 계좌 식별자 (#2058)
 - `TradeService.get_positions(bot_id)` → 내부 포지션 수량
 - `BrokerAdapter.get_account_positions()` → 브로커 실제 수량
 
@@ -21,7 +22,7 @@ level: critical
 title: 포지션 불일치
 category: broker
 
-봇: `{bot_id}` · 종목: `{symbol}`
+계좌: `{account_id}` · 봇: `{bot_id}` · 종목: `{symbol}`
 내부: {internal_qty}주 · 브로커: {broker_qty}주
 사유: {reason}
 ```
