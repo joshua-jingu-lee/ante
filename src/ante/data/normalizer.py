@@ -575,6 +575,8 @@ def _normalize_timestamp(df: pl.DataFrame) -> pl.DataFrame:
     elif isinstance(ts_dtype, pl.Datetime):
         if ts_dtype.time_zone is None:
             df = df.with_columns(pl.col("timestamp").dt.replace_time_zone("UTC"))
+        elif ts_dtype.time_zone != "UTC":
+            df = df.with_columns(pl.col("timestamp").dt.convert_time_zone("UTC"))
     else:
         raise ValueError(f"지원하지 않는 timestamp 타입: {ts_dtype}")
 

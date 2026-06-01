@@ -578,6 +578,101 @@ class TestDataNormalizer:
         assert result["open"].dtype == pl.Float64
         assert result["volume"].dtype == pl.Int64
 
+    def test_normalize_tz_aware_kst_converts_to_utc(self, normalizer):
+        """tz-aware(KST) timestamp는 시점 보존하며 UTC로 변환된다 (#2105)."""
+        from zoneinfo import ZoneInfo
+
+        kst = ZoneInfo("Asia/Seoul")
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2026, 1, 1, 9, 0, tzinfo=kst)],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+            }
+        )
+        result = normalizer.normalize(df)
+        assert isinstance(result["timestamp"].dtype, pl.Datetime)
+        assert result["timestamp"].dtype.time_zone == "UTC"
+        # KST 09:00 → UTC 00:00 (시점 보존 변환)
+        assert result["timestamp"][0] == datetime(2026, 1, 1, 0, 0, tzinfo=UTC)
+
+    def test_normalize_naive_datetime_labels_utc(self, normalizer):
+        """naive datetime은 UTC 라벨만 붙이고 값은 불변 (#2105 회귀)."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2026, 1, 1, 9, 0)],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+            }
+        )
+        result = normalizer.normalize(df)
+        assert result["timestamp"].dtype.time_zone == "UTC"
+        # 라벨만 UTC, 값(시/분)은 그대로
+        assert result["timestamp"][0] == datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+
+    def test_normalize_already_utc_unchanged(self, normalizer):
+        """이미 UTC tz-aware timestamp는 값/타입 불변 (#2105 회귀)."""
+        df = pl.DataFrame(
+            {
+                "timestamp": [datetime(2026, 1, 1, 9, 0, tzinfo=UTC)],
+                "open": [50000.0],
+                "high": [50100.0],
+                "low": [49900.0],
+                "close": [50050.0],
+                "volume": [1000],
+            }
+        )
+        result = normalizer.normalize(df)
+        assert result["timestamp"].dtype.time_zone == "UTC"
+        assert result["timestamp"][0] == datetime(2026, 1, 1, 9, 0, tzinfo=UTC)
+
+    async def test_normalize_kst_and_utc_merge_same_partition(self, normalizer, store):
+        """KST·UTC 혼재 데이터가 같은 파티션에서 supertype 충돌 없이 merge (#2105)."""
+        from zoneinfo import ZoneInfo
+
+        kst_df = normalizer.normalize(
+            pl.DataFrame(
+                {
+                    "timestamp": [
+                        datetime(2026, 1, 1, 9, 0, tzinfo=ZoneInfo("Asia/Seoul"))
+                    ],
+                    "symbol": ["005930"],
+                    "open": [50000.0],
+                    "high": [50100.0],
+                    "low": [49900.0],
+                    "close": [50050.0],
+                    "volume": [1000],
+                }
+            )
+        )
+        utc_df = normalizer.normalize(
+            pl.DataFrame(
+                {
+                    "timestamp": [datetime(2026, 1, 1, 1, 0, tzinfo=UTC)],
+                    "symbol": ["005930"],
+                    "open": [51000.0],
+                    "high": [51100.0],
+                    "low": [50900.0],
+                    "close": [51050.0],
+                    "volume": [2000],
+                }
+            )
+        )
+
+        store.write("005930", "1m", kst_df)
+        # 동일 symbol/timeframe/월 파티션으로 merge — supertype 실패 없이 성공해야 함
+        store.write("005930", "1m", utc_df)
+
+        result = store.read("005930", "1m")
+        assert len(result) == 2
+        assert result["timestamp"].dtype.time_zone == "UTC"
+
 
 # ── DataGoKrNormalizer 테스트 ─────────────────────────
 
