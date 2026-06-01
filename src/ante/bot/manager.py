@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS bots (
     bot_id       TEXT PRIMARY KEY,
     name         TEXT NOT NULL DEFAULT '',
     strategy_id  TEXT NOT NULL,
-    account_id   TEXT NOT NULL DEFAULT 'test',
+    account_id   TEXT NOT NULL,
     config_json  TEXT NOT NULL,
     auto_start   BOOLEAN DEFAULT 0,
     status       TEXT DEFAULT 'created',

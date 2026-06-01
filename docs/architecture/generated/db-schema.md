@@ -4,7 +4,7 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-> 마지막 갱신: 2026-05-29
+> 마지막 갱신: 2026-06-02
 
 - 테이블: **24**개
 - 인덱스: **32**개
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS bots (
     bot_id       TEXT PRIMARY KEY,
     name         TEXT NOT NULL DEFAULT '',
     strategy_id  TEXT NOT NULL,
-    account_id   TEXT NOT NULL DEFAULT 'test',
+    account_id   TEXT NOT NULL,
     config_json  TEXT NOT NULL,
     auto_start   BOOLEAN DEFAULT 0,
     status       TEXT DEFAULT 'created',
