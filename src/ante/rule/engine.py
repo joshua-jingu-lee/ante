@@ -1097,6 +1097,7 @@ class RuleEngine:
             elif action == RuleAction.STOP_BOT:
                 await self._eventbus.publish(
                     BotStopEvent(
+                        account_id=self._account_id,
                         bot_id=event.bot_id,
                         reason="Rule violation",
                     )

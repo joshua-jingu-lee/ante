@@ -218,7 +218,9 @@ async def test_on_bot_stop_request_silent_ignores_state_conflict(
     # 핸들러가 BotStateConflict 를 흡수하는지 직접 호출로 검증한다
     # (eventbus.publish 는 핸들러 예외를 로깅만 하고 삼킬 수 있어 회귀
     # 보장이 약하다 — 핸들러 함수를 직접 await 한다).
-    event = BotStopEvent(bot_id=bot.bot_id, reason="test-1759-cold-path")
+    event = BotStopEvent(
+        account_id="acc-test", bot_id=bot.bot_id, reason="test-1759-cold-path"
+    )
     # raise 가 전파되지 않으면 통과. 어떤 예외든 잡히면 회귀.
     await manager._on_bot_stop_request(event)
     # 상태는 CREATED 그대로 (silent ignore).

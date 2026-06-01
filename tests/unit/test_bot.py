@@ -933,7 +933,9 @@ class TestBotManager:
         await manager.create_bot(config, SimpleStrategy, ctx)
         await manager.start_bot("bot1")
 
-        await eventbus.publish(BotStopEvent(bot_id="bot1", reason="rule violation"))
+        await eventbus.publish(
+            BotStopEvent(account_id="acc-test", bot_id="bot1", reason="rule violation")
+        )
 
         assert manager.get_bot("bot1").status == BotStatus.STOPPED
 

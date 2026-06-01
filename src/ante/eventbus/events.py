@@ -301,8 +301,20 @@ class BotStartedEvent(Event):
 
 @dataclass(frozen=True)
 class BotStopEvent(Event):
-    """RuleEngine/사용자 → EventBus: 봇 중지 요청."""
+    """RuleEngine/사용자 → EventBus: 봇 중지 요청.
 
+    Refs #2145: ``BotStopEvent`` 는 봇 계좌(``RuleEngine._account_id``)에
+    귀속되는 account-scoped 이벤트다. 다른 봇 lifecycle 이벤트
+    (``BotStartedEvent``/``BotStoppedEvent``/``BotErrorEvent``) 와 동일한
+    컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
+    ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
+    ``"default"``, 형식 위반) 을 ``Event.__post_init__`` 에서 차단한다.
+    발행자(``RuleEngine._execute_actions``)는 봇 계좌를 명시 전달한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     bot_id: str = ""
     reason: str = ""
 

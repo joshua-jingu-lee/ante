@@ -893,6 +893,36 @@ class TestRuleEngineEventBus:
             suspended_by="rule_engine",
         )
 
+    async def test_stop_bot_action_carries_account_id(self, engine, eventbus):
+        """STOP_BOT 발동 시 봇 계좌(account_id)를 실은 BotStopEvent 발행 (#2145).
+
+        engine fixture 는 account_id="domestic" 이므로, 발행된 BotStopEvent 의
+        account_id 가 봇 계좌로 전파되어 multi-account 환경에서 감사/필터링이
+        가능해야 한다. account_id 가 없으면 InvalidAccountIdError 로 발행
+        자체가 차단된다.
+        """
+        from ante.eventbus.events import BotStopEvent, OrderRequestEvent
+
+        received: list[BotStopEvent] = []
+        eventbus.subscribe(BotStopEvent, lambda e: received.append(e))
+
+        event = OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+        await engine._execute_actions([RuleAction.STOP_BOT], event)
+
+        assert len(received) == 1
+        assert received[0].account_id == "domestic"
+        assert received[0].bot_id == "bot1"
+        assert received[0].reason == "Rule violation"
+
     async def test_rule_engine_rejects_invalid_signal_side(
         self, engine, eventbus, monkeypatch
     ):

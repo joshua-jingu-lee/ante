@@ -7,6 +7,7 @@
 
 import pytest
 
+from ante.account.errors import InvalidAccountIdError
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
     AccountActivatedEvent,
@@ -14,6 +15,7 @@ from ante.eventbus.events import (
     BalanceSyncedEvent,
     BotErrorEvent,
     BotStartedEvent,
+    BotStopEvent,
     BotStoppedEvent,
     OrderApprovedEvent,
     OrderCancelEvent,
@@ -199,3 +201,40 @@ class TestAccountIdBackwardCompat:
 
         assert len(received) == 1
         assert received[0].account_id == "acc-001"
+
+
+# ── #2145: BotStopEvent account-scoped marker ────────
+
+
+class TestBotStopEventAccountScoped:
+    """#2145: BotStopEvent 가 account-scoped marker 를 갖는지 검증.
+
+    #2146 ExternalSignalEvent 패턴 미러: 봇 중지 요청은 봇 계좌에 귀속되며
+    invalid fallback (None/""/"default") 을 ``Event.__post_init__`` 에서 차단한다.
+    """
+
+    def test_requires_account_id_marker(self) -> None:
+        """_requires_account_id marker 가 True 이고 account_id 필드가 존재한다."""
+        assert BotStopEvent._requires_account_id is True
+        assert "account_id" in BotStopEvent.__dataclass_fields__
+
+    def test_valid_account_id_constructs(self) -> None:
+        """valid account_id 면 정상 생성되고 필드가 보존된다."""
+        event = BotStopEvent(
+            account_id="acc-test",
+            bot_id="bot-001",
+            reason="Rule violation",
+        )
+        assert event.account_id == "acc-test"
+        assert event.bot_id == "bot-001"
+        assert event.reason == "Rule violation"
+
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    def test_invalid_account_id_raises(self, invalid: str | None) -> None:
+        """invalid account_id(None/""/"default") 면 InvalidAccountIdError raise."""
+        with pytest.raises(InvalidAccountIdError):
+            BotStopEvent(
+                account_id=invalid,  # type: ignore[arg-type]
+                bot_id="bot-001",
+                reason="Rule violation",
+            )
