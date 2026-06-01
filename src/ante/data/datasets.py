@@ -29,6 +29,11 @@ def validate_dataset_filters(
         return None
     if data_type not in ("ohlcv", "fundamental"):
         raise ValueError("data_type은 ohlcv 또는 fundamental이어야 합니다")
+    if data_type == "fundamental" and timeframe is not None:
+        raise ValueError(
+            "fundamental 데이터셋에는 timeframe 필터를 적용할 수 없습니다 "
+            "(timeframe은 OHLCV 전용)"
+        )
     return data_type  # type: ignore[return-value]
 
 

@@ -550,3 +550,96 @@ def test_data_validate_non_empty_envelope_matches_raw_legacy(tmp_path) -> None:
     assert payload["summary"]["valid"] == 3
     assert payload["summary"]["corrupted"] == 0
     assert payload["summary"]["fixed"] is False
+
+
+# ── 9. data list fundamental+timeframe 모순 조합 거부 (#1983) ────────────────
+#
+# fundamental 데이터셋은 timeframe="" 으로 저장되며 timeframe 차원이 없다.
+# `--timeframe` 은 OHLCV bar 전용 필터이므로 `--type fundamental --timeframe
+# <tf>` 조합은 조용히 무시(전체 fundamental 반환)되어선 안 되고
+# `validate_dataset_filters` 단계에서 ValueError → CLI `DATA_INVALID_FILTER`
+# exit 1 로 거부되어야 한다.
+#
+# precedence: ① timeframe vocabulary (기존) → ② data_type 유효성 (기존)
+#             → ③ fundamental+timeframe 모순 거부 (#1983 신규).
+
+
+class TestValidateDatasetFiltersFundamentalTimeframe:
+    """``validate_dataset_filters`` fundamental+timeframe 모순 거부 단위 (#1983)."""
+
+    def test_fundamental_with_timeframe_rejected(self) -> None:
+        """(a) 재현: fundamental + 유효 timeframe → ValueError 거부."""
+        from ante.data.datasets import validate_dataset_filters
+
+        with pytest.raises(ValueError) as exc_info:
+            validate_dataset_filters(data_type="fundamental", timeframe="1d")
+        # 모순 거부 메시지 (vocabulary 메시지가 아님 — precedence 통과 후).
+        assert "fundamental" in str(exc_info.value)
+        assert "timeframe" in str(exc_info.value)
+        assert "허용되지 않은 timeframe" not in str(exc_info.value)
+
+    def test_fundamental_without_timeframe_returns_fundamental(self) -> None:
+        """(b) 회귀: fundamental + timeframe 미지정 → "fundamental" 정상 반환."""
+        from ante.data.datasets import validate_dataset_filters
+
+        assert (
+            validate_dataset_filters(data_type="fundamental", timeframe=None)
+            == "fundamental"
+        )
+
+    def test_ohlcv_with_timeframe_returns_ohlcv(self) -> None:
+        """(c) 회귀: ohlcv + 유효 timeframe → "ohlcv" 정상 반환 (거부 안 함)."""
+        from ante.data.datasets import validate_dataset_filters
+
+        assert validate_dataset_filters(data_type="ohlcv", timeframe="1d") == "ohlcv"
+
+    def test_fundamental_with_invalid_timeframe_hits_vocabulary_first(self) -> None:
+        """(d) 회귀: fundamental + 비-canonical timeframe → vocabulary error 우선.
+
+        precedence ① (timeframe vocabulary) 가 ③ (모순 거부) 보다 먼저 평가되어,
+        invalid timeframe 메시지("허용되지 않은 timeframe")가 반환되어야 한다.
+        """
+        from ante.data.datasets import validate_dataset_filters
+
+        with pytest.raises(ValueError) as exc_info:
+            validate_dataset_filters(data_type="fundamental", timeframe="invalid")
+        assert "허용되지 않은 timeframe" in str(exc_info.value)
+
+    def test_timeframe_only_without_data_type_returns_none(self) -> None:
+        """(e) 회귀: data_type 미지정 + timeframe → None 반환 (비목표, 기존 동작).
+
+        data_type=None + timeframe 조합은 별개 contract (Non-Goal) 이므로
+        기존대로 None 을 반환하며 모순 거부 대상이 아니다.
+        """
+        from ante.data.datasets import validate_dataset_filters
+
+        assert validate_dataset_filters(timeframe="1d") is None
+
+
+def test_data_list_fundamental_with_timeframe_rejected_cli(tmp_path) -> None:
+    """CLI: ``data list --type fundamental --timeframe 1d`` → exit 1 +
+    ``DATA_INVALID_FILTER`` (#1983).
+
+    CLI 경계의 ``except ValueError → fmt.error(code="DATA_INVALID_FILTER");
+    raise SystemExit(1)`` 매핑을 통해 모순 조합이 거부되는지 락한다.
+    조용히 전체 fundamental 을 반환(exit 0)하던 회귀 증상을 차단한다.
+    """
+    result = _invoke(
+        [
+            "--format",
+            "json",
+            "data",
+            "list",
+            "--type",
+            "fundamental",
+            "--timeframe",
+            "1d",
+            "--data-path",
+            str(tmp_path),
+        ]
+    )
+    assert result.exit_code == 1, result.output
+
+    payload = _load_json_payload(result.output)
+    assert payload["status"] == "error"
+    assert payload["code"] == "DATA_INVALID_FILTER"
