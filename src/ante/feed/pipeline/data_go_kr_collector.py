@@ -7,6 +7,7 @@ from typing import Any
 
 import polars as pl
 
+from ante.core.market_data_vocab import is_krx_symbol
 from ante.data.normalizer import DataGoKrNormalizer
 from ante.data.store import ParquetStore
 from ante.feed.transform.validate import validate_all
@@ -54,7 +55,14 @@ class DataGoKrCollector:
             logger.debug("data.go.kr: date=%s 데이터 없음", target_date)
             return 0, set(), []
 
-        warns = self._validate(raw_items, target_date)
+        raw_items, symbol_warns = self._filter_invalid_symbols(raw_items, target_date)
+        warns = symbol_warns + self._validate(raw_items, target_date)
+        if not raw_items:
+            logger.warning(
+                "data.go.kr: date=%s 유효 KRX 심볼 없음(전 row drop)", target_date
+            )
+            return 0, set(), warns
+
         df = pl.DataFrame(raw_items)
         df = self._deduplicate(df)
 
@@ -65,6 +73,29 @@ class DataGoKrCollector:
         )
 
         return rows_written, symbols, warns
+
+    @staticmethod
+    def _filter_invalid_symbols(
+        raw_items: list[dict],
+        target_date: str,
+    ) -> tuple[list[dict], list[dict]]:
+        """srtnCd가 KRX 6자리 형식이 아닌 row를 drop하고 구조화 warning을 반환한다."""
+        valid: list[dict] = []
+        warns: list[dict] = []
+        for item in raw_items:
+            srtn: Any = item.get("srtnCd")
+            if is_krx_symbol(srtn):
+                valid.append(item)
+            else:
+                warns.append(
+                    {
+                        "date": target_date,
+                        "source": "data_go_kr",
+                        "type": "invalid_symbol",
+                        "message": f"비KRX 심볼 drop: srtnCd={srtn!r}",
+                    }
+                )
+        return valid, warns
 
     @staticmethod
     def _validate(
