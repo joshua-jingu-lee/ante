@@ -122,45 +122,44 @@ class BacktestExecutor:
         )
 
     async def _execute_signal(self, signal: Signal, timestamp: Any) -> None:
-        """Signal을 가상 체결."""
+        """Signal을 가상 체결.
+
+        체결 수량(``executed_qty``)을 분기별로 먼저 확정한 뒤, 수수료/슬리피지/
+        거래 기록을 모두 체결 수량 기준으로 계산한다. 보유 수량을 초과하는 매도는
+        보유분만 체결되므로, 초과 요청 수량이 수수료·슬리피지·거래 수량에
+        반영되지 않는다(#1989).
+        """
         price = await self._data.get_current_price(signal.symbol)
 
         if signal.side == "buy":
             exec_price = price * (1 + self._slippage_rate)
-        else:
-            exec_price = price * (1 - self._slippage_rate)
-
-        rate = (
-            self._buy_commission_rate
-            if signal.side == "buy"
-            else self._sell_commission_rate
-        )
-        commission = exec_price * signal.quantity * rate
-
-        if signal.side == "buy":
-            cost = exec_price * signal.quantity + commission
+            executed_qty = signal.quantity
+            commission = exec_price * executed_qty * self._buy_commission_rate
+            cost = exec_price * executed_qty + commission
             if self._balance < cost:
                 return
             self._balance -= cost
-            self._update_position(signal.symbol, signal.quantity, exec_price)
+            self._update_position(signal.symbol, executed_qty, exec_price)
         else:
+            exec_price = price * (1 - self._slippage_rate)
             pos = self._positions.get(signal.symbol, {})
-            sell_qty = min(signal.quantity, pos.get("quantity", 0))
-            if sell_qty <= 0:
+            executed_qty = min(signal.quantity, pos.get("quantity", 0))
+            if executed_qty <= 0:
                 return
-            proceeds = exec_price * sell_qty - commission
+            commission = exec_price * executed_qty * self._sell_commission_rate
+            proceeds = exec_price * executed_qty - commission
             self._balance += proceeds
-            self._update_position(signal.symbol, -sell_qty, exec_price)
+            self._update_position(signal.symbol, -executed_qty, exec_price)
 
         self._trades.append(
             BacktestTrade(
                 timestamp=timestamp,
                 symbol=signal.symbol,
                 side=signal.side,
-                quantity=signal.quantity,
+                quantity=executed_qty,
                 price=exec_price,
                 commission=commission,
-                slippage=abs(exec_price - price) * signal.quantity,
+                slippage=abs(exec_price - price) * executed_qty,
                 reason=signal.reason,
                 exchange=self._exchange,
             )

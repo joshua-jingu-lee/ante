@@ -630,6 +630,118 @@ class TestBacktestExecutor:
         assert len(result.trades) == 2
         # 매도 거래는 실제로 실행됨 (보유량 5주만 매도)
 
+    async def test_oversell_uses_executed_qty_for_fee_and_trade(self, store):
+        """#1989: 보유 초과 매도 시 수수료/슬리피지/거래 수량이 체결 수량 기준.
+
+        5주 보유 중 10주 매도 요청 → 보유분 5주만 체결되어야 하며,
+        commission/slippage/BacktestTrade.quantity 모두 요청 수량(10)이 아닌
+        체결 수량(5) 기준이어야 한다.
+
+        slippage_rate를 nonzero(0.02)로 두어, 슬리피지가 요청 수량(10)이 아닌
+        체결 수량(5) 기준임을 단독으로 검증한다(slippage=0이면 두 기준이
+        모두 0.0이라 구별 불가).
+        """
+
+        class Buy5Sell10(Strategy):
+            meta = StrategyMeta(name="buy5_sell10", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=5)]
+                if self._step == 2:
+                    return [Signal(symbol="005930", side="sell", quantity=10)]
+                return []
+
+        # 평탄 가격 fixture(close=100), 4행 → 슬리피지/수수료 검증 결정적
+        closes = [100.0, 100.0, 100.0, 100.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        # slippage_rate=0.02: sell exec_price = 100*(1-0.02)=98,
+        # slippage = |98-100|*5 = 10.0 (체결 5주 기준; 요청 10주면 20.0)
+        slippage_rate = 0.02
+        sell_commission_rate = 0.01
+        executor = BacktestExecutor(
+            strategy_cls=Buy5Sell10,
+            data_provider=provider,
+            initial_balance=10000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=sell_commission_rate,
+            slippage_rate=slippage_rate,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 2
+        buy_trade = result.trades[0]
+        sell_trade = result.trades[1]
+        assert buy_trade.side == "buy"
+        assert sell_trade.side == "sell"
+
+        # sell exec_price = base_price * (1 - slippage_rate) = 100 * 0.98 = 98.0
+        exec_price = 100.0 * (1 - slippage_rate)
+        assert sell_trade.price == pytest.approx(98.0)
+        assert sell_trade.price == pytest.approx(exec_price)
+
+        # (a) 거래 수량은 요청(10)이 아닌 체결(5) 기준
+        assert sell_trade.quantity == 5
+
+        # (b) 매도 수수료는 5주 기준 (exec_price * 5 * 0.01 = 4.9),
+        #     요청 10주 기준(9.8)이 아님
+        expected_commission = exec_price * 5 * sell_commission_rate
+        assert sell_trade.commission == pytest.approx(expected_commission)
+        assert sell_trade.commission == pytest.approx(4.9)
+
+        # (c) 슬리피지는 체결 수량(5) 기준 = |98-100|*5 = 10.0.
+        #     요청 수량(10) 기준이면 20.0이라 아래 assert가 FAIL해야 한다.
+        assert sell_trade.slippage == pytest.approx(abs(exec_price - 100.0) * 5)
+        assert sell_trade.slippage == pytest.approx(10.0)
+
+        # (d) balance/포지션 정합:
+        #     buy 5주 @ 100*(1+0.02)=102, fee 0 → 비용 510 → 잔고 9490.0
+        #     sell 5주 @ 98, fee 4.9 → 수익 98*5-4.9=485.1 → 잔고 9975.1, 포지션 0
+        assert executor._positions.get("005930") is None
+        # final_balance == equity_curve[-1] equity, 포지션 청산 후 현금만 남음
+        assert result.equity_curve[-1]["balance"] == pytest.approx(9975.1)
+
+    async def test_buy_path_unchanged_with_fees(self, data_provider):
+        """#1989 회귀: buy 경로는 signal.quantity==executed_qty이므로 동작 불변.
+
+        매수 수수료/슬리피지가 요청 수량 기준으로 정확히 기록되는지 확인한다.
+        """
+        data_provider.reset()
+        buy_rate = 0.001
+        slip_rate = 0.01
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=data_provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=buy_rate,
+            sell_commission_rate=0.0,
+            slippage_rate=slip_rate,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1
+        buy_trade = result.trades[0]
+        assert buy_trade.side == "buy"
+        # BuyAndHold는 10주 매수 → 체결 수량 == 요청 수량
+        assert buy_trade.quantity == 10
+        exec_price = buy_trade.price
+        # 수수료 = exec_price * 10 * buy_rate (요청==체결)
+        assert buy_trade.commission == pytest.approx(exec_price * 10 * buy_rate)
+        # 슬리피지 = |exec_price - base_price| * 10
+        base_price = exec_price / (1 + slip_rate)
+        assert buy_trade.slippage == pytest.approx(abs(exec_price - base_price) * 10)
+
     async def test_executor_split_commission(self, data_provider):
         """매수/매도 수수료율이 각각 독립 적용되는지 검증."""
         data_provider.reset()
