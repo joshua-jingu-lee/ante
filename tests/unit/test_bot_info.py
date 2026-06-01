@@ -140,6 +140,73 @@ class TestEnrichBotInfo:
             bot_id="bot-1", include_closed=True
         )
 
+    async def test_account_id_propagated_to_get_positions(self) -> None:
+        """#2137: ``account_id`` 전달 시 ``get_positions`` 에 kwarg 로 전파.
+
+        포지션 조회가 봇 계좌로 스코핑되어 타 계좌 stale/legacy 포지션 누출을
+        차단한다. 응답 shape 은 불변이다.
+        """
+        bot = _make_bot()
+        position = SimpleNamespace(
+            symbol="005930",
+            quantity=10,
+            avg_entry_price=70000.0,
+            realized_pnl=1500.0,
+        )
+        trade_service = MagicMock()
+        trade_service.get_positions = AsyncMock(return_value=[position])
+
+        info = await enrich_bot_info(
+            bot, trade_service=trade_service, account_id="acc-a"
+        )
+
+        trade_service.get_positions.assert_awaited_once_with(
+            bot_id="bot-1", include_closed=True, account_id="acc-a"
+        )
+        # 응답 shape 불변 — account_id 는 호출 인자에만 영향, dict 에는 미반영.
+        assert info["positions"] == [
+            {
+                "symbol": "005930",
+                "quantity": 10,
+                "avg_entry_price": 70000.0,
+                "realized_pnl": 1500.0,
+            }
+        ]
+
+    async def test_account_id_omitted_preserves_call_shape_and_response(
+        self,
+    ) -> None:
+        """#2137 회귀 lock: ``account_id`` 미전달 시 기존 call shape 보존.
+
+        legacy stub / 미전달 호출처가 ``account_id`` kwarg 없이 호출되던 동작을
+        그대로 유지한다 (account_id kwarg 가 추가되지 않아야 함). 응답 dict 도
+        기존과 동일하다.
+        """
+        bot = _make_bot()
+        position = SimpleNamespace(
+            symbol="005930",
+            quantity=10,
+            avg_entry_price=70000.0,
+            realized_pnl=1500.0,
+        )
+        trade_service = MagicMock()
+        trade_service.get_positions = AsyncMock(return_value=[position])
+
+        info = await enrich_bot_info(bot, trade_service=trade_service)
+
+        # account_id kwarg 가 추가되지 않은 기존 call shape — 회귀 lock.
+        trade_service.get_positions.assert_awaited_once_with(
+            bot_id="bot-1", include_closed=True
+        )
+        assert info["positions"] == [
+            {
+                "symbol": "005930",
+                "quantity": 10,
+                "avg_entry_price": 70000.0,
+                "realized_pnl": 1500.0,
+            }
+        ]
+
     async def test_trade_service_none_omits_positions(self) -> None:
         """#1712 회귀 lock: ``trade_service=None`` 시 positions 키 부재.
 
