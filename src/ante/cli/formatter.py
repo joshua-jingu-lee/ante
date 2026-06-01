@@ -4,12 +4,26 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 from typing import TYPE_CHECKING
 
 import click
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+
+def _sanitize_non_finite(obj: object) -> object:
+    """비표준 JSON 토큰(Infinity/NaN) 방지: non-finite float를 None으로 정규화."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _sanitize_non_finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_non_finite(v) for v in obj]
+    return obj
 
 
 def format_option(fn: Callable) -> Callable:
@@ -52,7 +66,15 @@ class OutputFormatter:
     def output(self, data: dict | list, text_template: str = "") -> None:
         """데이터 출력."""
         if self._format == "json":
-            click.echo(json.dumps(data, indent=2, default=str, ensure_ascii=False))
+            click.echo(
+                json.dumps(
+                    _sanitize_non_finite(data),
+                    indent=2,
+                    default=str,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            )
         elif text_template and isinstance(data, dict):
             click.echo(text_template.format(**data))
         else:
@@ -61,7 +83,15 @@ class OutputFormatter:
     def table(self, rows: list[dict], columns: list[str]) -> None:
         """테이블 형태 출력."""
         if self._format == "json":
-            click.echo(json.dumps(rows, indent=2, default=str, ensure_ascii=False))
+            click.echo(
+                json.dumps(
+                    _sanitize_non_finite(rows),
+                    indent=2,
+                    default=str,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            )
             return
 
         if not rows:
@@ -79,7 +109,12 @@ class OutputFormatter:
         """에러 출력."""
         if self._format == "json":
             click.echo(
-                json.dumps({"status": "error", "code": code, "message": message})
+                json.dumps(
+                    _sanitize_non_finite(
+                        {"status": "error", "code": code, "message": message}
+                    ),
+                    allow_nan=False,
+                )
             )
         else:
             click.echo(f"Error: {message}", err=True)
@@ -92,6 +127,14 @@ class OutputFormatter:
                 "message": message,
                 "data": data if data is not None else {},
             }
-            click.echo(json.dumps(result, indent=2, default=str, ensure_ascii=False))
+            click.echo(
+                json.dumps(
+                    _sanitize_non_finite(result),
+                    indent=2,
+                    default=str,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            )
         else:
             click.echo(message)
