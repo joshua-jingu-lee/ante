@@ -86,7 +86,12 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `BacktestCompleteEvent`, `ConfigChangedEvent`, `ApprovalCreatedEvent`,
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
-  `CircuitBreakerEvent`
+  `MemberTokenRotatedEvent`, `MemberPasswordChangedEvent`,
+  `MemberRecoveryKeyRegeneratedEvent`, `CircuitBreakerEvent`
+- 멤버 보안 이벤트(`MemberTokenRotatedEvent`, `MemberPasswordChangedEvent`,
+  `MemberRecoveryKeyRegeneratedEvent`)는 다른 Member 이벤트와 동일하게
+  member-scoped 다 (`member_id` ≠ `account_id`). account marker
+  (`_requires_account_id`) 를 적용하지 않으며, 발행자는 `MemberService` 다.
 
 **구현 노트**:
 - dataclass field ordering 제약 때문에 `account_id` 필드는 default `""` 를

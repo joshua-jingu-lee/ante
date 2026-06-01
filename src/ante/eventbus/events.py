@@ -572,6 +572,31 @@ class MemberAuthFailedEvent(Event):
     reason: str = ""
 
 
+@dataclass(frozen=True)
+class MemberTokenRotatedEvent(Event):
+    """MemberService → EventBus: 토큰 재발급."""
+
+    member_id: str = ""
+    rotated_by: str = ""
+
+
+@dataclass(frozen=True)
+class MemberPasswordChangedEvent(Event):
+    """MemberService → EventBus: 패스워드 변경/리셋."""
+
+    member_id: str = ""
+    changed_by: str = ""
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class MemberRecoveryKeyRegeneratedEvent(Event):
+    """MemberService → EventBus: recovery key 재발급."""
+
+    member_id: str = ""
+    regenerated_by: str = ""
+
+
 # ── 일일 리포트 (DailyReport) ──────────────────────
 
 

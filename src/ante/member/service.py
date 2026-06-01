@@ -722,7 +722,14 @@ class MemberService:
         """
         await self._assert_master(rotated_by, "rotate_token")
         member = await self._get_or_raise(member_id)
-        return await self._token_manager.rotate_token(member, rotated_by)
+        result = await self._token_manager.rotate_token(member, rotated_by)
+
+        from ante.eventbus.events import MemberTokenRotatedEvent
+
+        await self._eventbus.publish(
+            MemberTokenRotatedEvent(member_id=member_id, rotated_by=rotated_by)
+        )
+        return result
 
     # ── 패스워드·복구키 관리 (RecoveryKeyManager 위임) ─
 
@@ -735,6 +742,14 @@ class MemberService:
             member, old_password, new_password
         )
 
+        from ante.eventbus.events import MemberPasswordChangedEvent
+
+        await self._eventbus.publish(
+            MemberPasswordChangedEvent(
+                member_id=member_id, changed_by=member_id, reason="change"
+            )
+        )
+
     async def reset_password(
         self, member_id: str, recovery_key: str, new_password: str
     ) -> None:
@@ -744,12 +759,29 @@ class MemberService:
             member, recovery_key, new_password
         )
 
+        from ante.eventbus.events import MemberPasswordChangedEvent
+
+        await self._eventbus.publish(
+            MemberPasswordChangedEvent(
+                member_id=member_id, changed_by=member_id, reason="reset"
+            )
+        )
+
     async def regenerate_recovery_key(self, member_id: str, password: str) -> str:
         """복구 키 재발급."""
         member = await self._get_or_raise(member_id)
-        return await self._recovery_key_manager.regenerate_recovery_key(
+        recovery_key = await self._recovery_key_manager.regenerate_recovery_key(
             member, password
         )
+
+        from ante.eventbus.events import MemberRecoveryKeyRegeneratedEvent
+
+        await self._eventbus.publish(
+            MemberRecoveryKeyRegeneratedEvent(
+                member_id=member_id, regenerated_by=member_id
+            )
+        )
+        return recovery_key
 
     # ── 권한 관리 ──────────────────────────────────────
 
