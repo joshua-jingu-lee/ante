@@ -570,7 +570,12 @@ class RuleEngine:
             return 0.0
 
         try:
-            positions = await self._trade_service.get_positions(bot_id)
+            # account_id 스코핑(#2140): RuleEngine은 계좌별 인스턴스이므로,
+            # 같은 bot_id를 공유하는 타 계좌 포지션이 미실현 손익에 혼입되어
+            # UnrealizedLossLimitRule이 오판하지 않도록 자기 계좌로 한정한다.
+            positions = await self._trade_service.get_positions(
+                bot_id, account_id=self._account_id
+            )
             total = 0.0
             for pos in positions:
                 if pos.symbol == order_symbol:
