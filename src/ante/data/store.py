@@ -398,10 +398,16 @@ class ParquetStore:
         if data.is_empty():
             return
 
+        time_col = _TIME_COLUMN.get(data_type, "timestamp")
+        if time_col in data.columns and bool(data[time_col].is_null().any()):
+            raise ValueError(
+                f"partition key '{time_col}'에 null 값이 있어 저장을 거부합니다 "
+                f"(symbol={symbol}, timeframe={timeframe}, data_type={data_type})"
+            )
+
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         path.mkdir(parents=True, exist_ok=True)
 
-        time_col = _TIME_COLUMN.get(data_type, "timestamp")
         key = _natural_key(data_type, data.columns)
         partitioned = self._partition_by_month(data, time_col)
 
