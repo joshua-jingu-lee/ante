@@ -187,6 +187,20 @@ def run(
         result_dict = result.to_dict()
         metrics = result_dict.get("metrics", {})
 
+        # #1995: 명시 종목 전체가 데이터 없음(row_count=0)이면 이력 저장 없이 실패
+        explicit_symbols = config["symbols"]
+        datasets = result_dict.get("datasets", [])
+        if (
+            explicit_symbols
+            and datasets
+            and all(d.get("row_count", 0) == 0 for d in datasets)
+        ):
+            fmt.error(
+                f"명시한 종목의 데이터가 없습니다(row_count=0): {explicit_symbols}",
+                code="BACKTEST_DATA_NOT_FOUND",
+            )
+            raise SystemExit(1)
+
         # backtest_runs 이력 저장
         run_id = asyncio.run(
             _save_backtest_run(resolved_db_path, result, config, metrics)
