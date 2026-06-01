@@ -317,9 +317,16 @@ class TestPerformanceFeedback:
         assert result["bot_count"] == 1  # bot1만 s1 전략
 
     async def test_get_trade_history(self, mock_trade_service, mock_bot_manager):
-        """거래 이력 조회."""
+        """거래 이력 조회 — 봇 계좌로 스코핑 (#2136)."""
+        mock_bot = MagicMock()
+        mock_bot.config.account_id = "acc-test"
+        mock_bot_manager.get_bot = MagicMock(return_value=mock_bot)
+
         fb = PerformanceFeedback(mock_trade_service, mock_bot_manager)
         result = await fb.get_trade_history("bot1", limit=50)
 
         assert isinstance(result, list)
-        mock_trade_service.get_trades.assert_called_once_with(bot_id="bot1", limit=50)
+        # 봇 config의 account_id가 trade service로 전달, limit 보존 (#2136).
+        mock_trade_service.get_trades.assert_called_once_with(
+            account_id="acc-test", bot_id="bot1", limit=50
+        )
