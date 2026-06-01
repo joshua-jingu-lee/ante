@@ -38,7 +38,10 @@ class BacktestDataProvider(DataProvider):
         self._end = end_date
         self._exchange = exchange
         self._cache: dict[str, pl.DataFrame] = {}
-        self._current_idx: int = 0
+        # 초기 커서는 첫 row 이전(-1)에 위치한다. 첫 advance()가 row 0으로
+        # 전진하여 첫 데이터 행을 처리한다(#2061). pre-advance 상태(idx=-1)에서는
+        # OHLCV가 empty, current timestamp는 None, current price는 unavailable이다.
+        self._current_idx: int = -1
         self._loaded_datasets: list[DatasetInfo] = []
 
     @property
@@ -136,6 +139,10 @@ class BacktestDataProvider(DataProvider):
 
     def get_current_timestamp(self) -> datetime | None:
         """현재 시뮬레이션 시각."""
+        if self._current_idx < 0:
+            # pre-advance 상태(첫 advance() 이전). 음수 인덱스로 마지막 행을
+            # 잘못 반환하지 않도록 명시적으로 None을 반환한다(#2061).
+            return None
         if not self._cache:
             return None
         first_df = next(iter(self._cache.values()))
@@ -153,6 +160,6 @@ class BacktestDataProvider(DataProvider):
         return min(len(df) for df in self._cache.values())
 
     def reset(self) -> None:
-        """인덱스 초기화."""
-        self._current_idx = 0
+        """인덱스 초기화. 커서를 첫 row 이전(-1)으로 되돌린다."""
+        self._current_idx = -1
         self._loaded_datasets.clear()

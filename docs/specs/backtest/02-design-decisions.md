@@ -55,6 +55,15 @@
 - `advance()` 호출 시 인덱스가 1씩 증가, 전략은 항상 "현재까지의 데이터"만 볼 수 있음
 - 라이브 DataProvider와 동일한 인터페이스 → 전략 코드 변경 없이 라이브/백테스트 전환 가능
 
+**커서 계약 (cursor contract)**:
+- **초기 커서는 첫 row 이전(`_current_idx = -1`)에 위치한다.** `reset()`도 `-1`로 되돌린다.
+- **첫 `advance()`가 커서를 row 0으로 전진**시킨다. 따라서 백테스트 루프(`while advance():`)는 row 0부터 row N-1까지 전 행을 처리하며, `on_step()` 호출 횟수 == `equity_curve` 길이 == `get_total_steps()` == N으로 일관된다.
+- **pre-advance 상태(`_current_idx = -1`, 첫 `advance()` 이전)**에서의 조회 계약:
+  - `get_ohlcv()` → empty DataFrame (`head(0)`)
+  - `get_current_timestamp()` → `None` (음수 인덱스로 마지막 행을 반환하지 않도록 명시적 가드)
+  - `get_current_price()` → empty OHLCV에서 `BacktestDataError` (현재가 unavailable)
+- **implicit warm-up 없음**: 시스템은 row 0을 건너뛰지 않으며 별도의 warm-up 구간을 두지 않는다. row 0에서 lookback이 필요한 전략은 그 시점에 history가 1개 봉뿐이므로, 충분한 history 확보는 전략의 책임이다(정책상 의도된 노출).
+
 ### BacktestExecutor — 시뮬레이션 실행
 
 > 소스: [`src/ante/backtest/executor.py`](../../../src/ante/backtest/executor.py)
