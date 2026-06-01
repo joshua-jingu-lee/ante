@@ -326,6 +326,56 @@ class TestValidateBusiness:
         result = validate_business(records)
         assert any("중복" in w for w in result.warnings)
 
+    def test_duplicate_dates_normalized_temporal_key(self) -> None:
+        """이슈 재현: 같은 시점의 다른 형식 timestamp도 중복으로 감지 (#2102).
+
+        "2026-01-01T00:00:00"과 "2026-01-01 00:00:00"은 _try_parse_date()가
+        동일 datetime으로 파싱하므로 정규화 키 비교로 중복이 감지되어야 한다.
+        """
+        records = [
+            _make_ohlcv_record(timestamp="2026-01-01T00:00:00"),
+            _make_ohlcv_record(timestamp="2026-01-01 00:00:00"),
+        ]
+        result = validate_business(records)
+        assert result.passed is True
+        assert any("중복 날짜 감지" in w for w in result.warnings)
+
+    def test_duplicate_dates_same_raw_regression(self) -> None:
+        """회귀: 동일 raw 문자열 중복은 그대로 감지된다 (#2102)."""
+        records = [
+            _make_ohlcv_record(timestamp="2026-01-01"),
+            _make_ohlcv_record(timestamp="2026-01-01"),
+        ]
+        result = validate_business(records)
+        assert any("중복 날짜 감지" in w for w in result.warnings)
+
+    def test_distinct_dates_no_duplicate_warning(self) -> None:
+        """서로 다른 시점은 중복 경고가 없어야 한다 (#2102)."""
+        records = [
+            _make_ohlcv_record(timestamp="2026-01-01"),
+            _make_ohlcv_record(timestamp="2026-01-02"),
+        ]
+        result = validate_business(records)
+        assert not any("중복 날짜 감지" in w for w in result.warnings)
+
+    def test_unparseable_duplicate_raw_fallback(self) -> None:
+        """파싱 불가 동일 값은 raw fallback으로 중복 감지 (#2102)."""
+        records = [
+            _make_ohlcv_record(timestamp="bad"),
+            _make_ohlcv_record(timestamp="bad"),
+        ]
+        result = validate_business(records)
+        assert any("중복 날짜 감지" in w for w in result.warnings)
+
+    def test_unparseable_distinct_no_duplicate(self) -> None:
+        """파싱 불가 서로 다른 값은 중복 경고가 없어야 한다 (#2102)."""
+        records = [
+            _make_ohlcv_record(timestamp="bad1"),
+            _make_ohlcv_record(timestamp="bad2"),
+        ]
+        result = validate_business(records)
+        assert not any("중복 날짜 감지" in w for w in result.warnings)
+
     def test_date_order_reversal(self) -> None:
         records = [
             _make_ohlcv_record(timestamp="2024-01-03"),

@@ -342,17 +342,22 @@ def _check_duplicate_dates(
 ) -> None:
     """날짜 중복을 검사한다.
 
+    파싱 가능한 값은 _try_parse_date() 결과(정규화 temporal key)로,
+    파싱 불가능한 값은 raw 문자열로 fallback하여 중복을 판정한다.
+
     Args:
         symbol: 심볼 식별자.
         dates: 날짜 문자열 목록.
         warnings: 경고를 추가할 목록.
     """
-    seen: set[str] = set()
+    seen: set[datetime | str] = set()
     duplicates: list[str] = []
     for d in dates:
-        if d in seen:
+        parsed = _try_parse_date(d)
+        key: datetime | str = parsed if parsed is not None else d
+        if key in seen:
             duplicates.append(d)
-        seen.add(d)
+        seen.add(key)
 
     if duplicates:
         warnings.append(f"{symbol}: 중복 날짜 감지: {duplicates}")
