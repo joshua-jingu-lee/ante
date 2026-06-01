@@ -324,3 +324,53 @@ class BacktestExecutor:
             "available": self._balance,
             "reserved": 0,
         }
+
+    def get_trade_history(
+        self,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """백테스트 중 누적된 가상 거래 이력을 최신순으로 반환.
+
+        라이브 ``StrategyContext.get_trade_history`` 와 동일한 full dict shape
+        (``trade_id``/``symbol``/``side``/``quantity``/``price``/``status``/
+        ``order_type``/``reason``/``commission``/``timestamp``)를 제공해, 같은
+        전략 코드가 라이브/백테스트에서 동일하게 동작하도록 parity를 맞춘다(#2075).
+
+        - ``self._trades`` (append 순 = 시간순)를 최신순(역순)으로 정렬한다.
+        - *symbol* 이 주어지면 해당 symbol만 남긴 뒤 *limit* 개로 자른다
+          (필터를 limit **이전에** 적용).
+        - ``trade_id`` 는 원본 ``self._trades`` 인덱스 기반(``f"bt-{i}"``)으로
+          합성해 결정적이다.
+        - ``status`` 는 backtest 거래가 모두 체결되므로 ``"filled"``,
+          ``order_type`` 은 시장가 체결이므로 ``"market"`` 으로 합성한다.
+        - ``timestamp`` 는 ``datetime`` 이면 ``.isoformat()``, ``str`` 이면 그대로,
+          ``None`` 이면 ``None`` (backtest timestamp 소스가 datetime/str 혼재 가능).
+        """
+        # 원본 인덱스를 보존한 채 최신순(역순)으로 정렬한다. enumerate를 정렬
+        # 전에 수행해 정렬/필터 후에도 trade_id가 결정적으로 유지되게 한다.
+        indexed = list(enumerate(self._trades))
+        indexed.reverse()
+
+        if symbol is not None:
+            indexed = [(i, t) for i, t in indexed if t.symbol == symbol]
+
+        indexed = indexed[:limit]
+
+        return [
+            {
+                "trade_id": f"bt-{i}",
+                "symbol": t.symbol,
+                "side": t.side,
+                "quantity": t.quantity,
+                "price": t.price,
+                "status": "filled",
+                "order_type": "market",
+                "reason": t.reason,
+                "commission": t.commission,
+                "timestamp": t.timestamp.isoformat()
+                if hasattr(t.timestamp, "isoformat")
+                else t.timestamp,
+            }
+            for i, t in indexed
+        ]

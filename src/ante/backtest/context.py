@@ -69,6 +69,18 @@ class BacktestStrategyContext:
         """가용 자금 현황."""
         return self._portfolio.get_balance(self._bot_id)
 
+    async def get_trade_history(
+        self,
+        symbol: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """거래 이력 조회. 최신순 반환.
+
+        라이브 ``StrategyContext.get_trade_history`` 와 동일한 시그니처/shape를
+        제공한다. 백테스트 실행 중 누적된 가상 거래 이력을 위임한다(#2075).
+        """
+        return self._portfolio.get_trade_history(symbol, limit)
+
     def get_open_orders(self) -> list[dict[str, Any]]:
         """백테스트에서는 미체결 주문 없음."""
         return []
