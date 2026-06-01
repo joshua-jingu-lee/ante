@@ -195,6 +195,41 @@ def test_data_list_empty_envelope_matches_raw_legacy(tmp_path) -> None:
     assert payload == {"datasets": [], "count": 0}
 
 
+# ── 1b. list out-of-range page (total>0, items empty) → count==total (#1986) ─
+
+
+def test_data_list_out_of_range_page_count_preserves_total(tmp_path) -> None:
+    """``data list`` out-of-range offset: items 빈 페이지여도 count==total (#1986).
+
+    ``list_datasets`` 는 빈 items 에도 ``total`` (전체 매칭 수) 를 반환한다.
+    큰 ``--offset`` 으로 페이지가 비어도 ``count`` 는 전체 매칭 수
+    (``result["total"]``) 를 유지해야 한다 (이전엔 ``0`` 하드코딩 → 회귀).
+    """
+    with patch(
+        "ante.data.datasets.list_datasets",
+        return_value={"items": [], "total": 3129},
+    ):
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "data",
+                "list",
+                "--data-path",
+                str(tmp_path),
+                "--offset",
+                "100000",
+            ]
+        )
+    assert result.exit_code == 0, result.output
+
+    payload = _load_json_payload(result.output)
+    assert _is_raw_legacy_payload(payload), (
+        f"data list out-of-range: standard envelope 아님. payload={payload!r}"
+    )
+    assert payload == {"datasets": [], "count": 3129}
+
+
 # ── 2. list non-empty → raw_legacy ─────────────────────────────────────────
 
 
