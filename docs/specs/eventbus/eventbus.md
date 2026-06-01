@@ -55,6 +55,8 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `OrderModifyRejectedEvent`, `OrderValidatedEvent`, `OrderRejectedEvent`,
   `OrderApprovedEvent`, `OrderSubmittedEvent`, `OrderFilledEvent`,
   `OrderCancelledEvent`, `OrderFailedEvent`
+- Stop order / 취소 실패: `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
+  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`
 - 봇 lifecycle: `BotStartedEvent`, `BotStoppedEvent`, `BotErrorEvent`,
   `BotStepCompletedEvent`, `BotRestartExhaustedEvent`
 - 계좌/잔고/리포트: `AccountSuspendedEvent`, `AccountActivatedEvent`,
@@ -74,8 +76,7 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   `BacktestCompleteEvent`, `ConfigChangedEvent`, `ApprovalCreatedEvent`,
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
-  `CircuitBreakerEvent`, `OrderCancelFailedEvent`, `StopOrderRegisteredEvent`,
-  `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`,
+  `CircuitBreakerEvent`,
   `BotStopEvent`,
   `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
 
