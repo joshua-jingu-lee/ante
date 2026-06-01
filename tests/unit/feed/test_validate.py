@@ -358,6 +358,80 @@ class TestValidateBusiness:
         assert len(result.warnings) > 0
         assert result.errors == []
 
+    # --- NaN/inf finite 검증 (#2089) ---------------------------------------
+
+    def test_nan_inf_observed_as_warning(self) -> None:
+        """이슈 재현: NaN/inf 값은 business 경고로 관측되며 passed=True (#2089)."""
+        record = _make_ohlcv_record()
+        record["open"] = "NaN"
+        record["high"] = "inf"
+        record["low"] = float("nan")
+        result = validate_business([record])
+        assert result.passed is True
+        assert result.errors == []
+        finite_warnings = [w for w in result.warnings if "비정상 값(NaN/inf)" in w]
+        # open/high/low 세 필드 모두 finite 경고가 남아야 함
+        assert any("open" in w for w in finite_warnings)
+        assert any("high" in w for w in finite_warnings)
+        assert any("low" in w for w in finite_warnings)
+
+    def test_finite_warnings_propagate_via_validate_all(self) -> None:
+        """schema 통과(필수 필드 충족) 시 business finite 경고가 전파된다 (#2089)."""
+        record = _make_ohlcv_record()
+        record["open"] = "NaN"
+        record["high"] = "inf"
+        result = validate_all([record], OHLCV_REQUIRED_FIELDS, status_code=200)
+        assert result.passed is True
+        assert any("비정상 값(NaN/inf)" in w for w in result.warnings)
+
+    def test_valid_finite_data_no_finite_warning(self) -> None:
+        """회귀: 정상 finite 데이터에는 finite 경고가 없다 (#2089)."""
+        record = _make_ohlcv_record()
+        result = validate_business([record])
+        assert result.passed is True
+        assert not any("비정상 값(NaN/inf)" in w for w in result.warnings)
+
+    def test_volume_inf_no_crash(self) -> None:
+        """volume=inf는 int() OverflowError 없이 finite 경고만 남긴다 (#2089)."""
+        record = _make_ohlcv_record()
+        record["volume"] = "inf"
+        result = validate_business([record])
+        assert result.passed is True
+        assert any("비정상 값(NaN/inf)" in w and "volume" in w for w in result.warnings)
+        # volume<0 오탐 경고는 없어야 함
+        assert not any("volume < 0" in w for w in result.warnings)
+
+    def test_none_fields_skipped_by_finite_check(self) -> None:
+        """None 필드는 finite 검사에서 건너뛴다 (경고 없음) (#2089)."""
+        record = _make_ohlcv_record()
+        record["amount"] = None
+        result = validate_business([record])
+        assert result.passed is True
+        assert not any("비정상 값(NaN/inf)" in w for w in result.warnings)
+
+    def test_nonfinite_does_not_trigger_downstream_false_positive(self) -> None:
+        """중복/오탐 차단 lock: -inf/inf는 finite 경고만, downstream 오탐 없음 (#2089).
+
+        open=-inf는 _check_positive_prices의 price<=0 오탐 위치,
+        low=inf는 _check_ohlc_relationship의 low>close 오탐 위치를 유발한다.
+        finite 가드로 이들 downstream 경고가 발생하지 않아야 한다.
+        """
+        record = _make_ohlcv_record()
+        record["open"] = float("-inf")
+        record["low"] = float("inf")
+        result = validate_business([record])
+        assert result.passed is True
+        assert result.errors == []
+
+        finite_warnings = [w for w in result.warnings if "비정상 값(NaN/inf)" in w]
+        # finite 경고는 open/low 두 필드에 대해 존재
+        assert any("open" in w for w in finite_warnings)
+        assert any("low" in w for w in finite_warnings)
+        # finite 경고 외 downstream 오탐 경고는 전무해야 함
+        assert len(result.warnings) == len(finite_warnings)
+        for substring in ("<= 0", "low > close", "open > high", "low > open"):
+            assert not any(substring in w for w in result.warnings)
+
 
 # ===========================================================================
 # 5. 통합 검증 (validate_all)
