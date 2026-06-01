@@ -584,6 +584,61 @@ class TestStrategyPerformance:
         assert data["metrics"]["total_trades"] == 10
         tracker.calculate.assert_awaited_once()
 
+    def test_performance_filters_by_strategy_id_not_name(self, runner):
+        """#2135: PerformanceTracker.calculate 에 record.strategy_id 로 필터.
+
+        ``trades.strategy_id`` 는 ``{name}_v{version}`` (= record.strategy_id)
+        형식으로 저장되므로, record.name(``momentum``)으로 필터하면 실거래가
+        있어도 0건으로 집계된다. 따라서 calculate 는 record.strategy_id
+        (``momentum_v1.0``)로 호출되어야 하며, 그 결과 metrics 가 0건이 아닌
+        실제 집계로 반환된다. 픽스 전(record.name 전달)에는 kwargs 단언이
+        ``momentum`` ≠ ``momentum_v1.0`` 으로 FAIL 한다.
+        """
+        # 실거래가 집계된 비-0 metrics. record.name 으로 필터하면 0건이 되는
+        # 시나리오를 대표한다 (총 거래>0, 총 손익 반영).
+        nonzero = PerformanceMetrics(
+            total_trades=1,
+            winning_trades=1,
+            losing_trades=0,
+            win_rate=1.0,
+            total_pnl=10000.0,
+            net_pnl=10000.0,
+        )
+        p_db, p_path, p_reg, p_track, _db, tracker = self._patch_perf_internals(
+            records=[_SAMPLE_RECORD],
+            account_row={"1": 1},
+            metrics=nonzero,
+        )
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        # 반환 dict shape 불변: name 과 strategy_id 둘 다 노출.
+        assert data["strategy_name"] == _SAMPLE_RECORD.name  # "momentum"
+        assert data["strategy_id"] == _SAMPLE_RECORD.strategy_id  # "momentum_v1.0"
+        # 0건이 아니라 실제 집계가 반환된다.
+        assert data["metrics"]["total_trades"] == 1
+        assert data["metrics"]["total_pnl"] == 10000.0
+        # 필터 인자는 record.name 이 아니라 record.strategy_id 여야 한다.
+        tracker.calculate.assert_awaited_once_with(
+            account_id="acc-test",
+            strategy_id=_SAMPLE_RECORD.strategy_id,
+        )
+        # 회귀 방어: name 으로 호출되면 0건 집계로 회귀한다.
+        _args, kwargs = tracker.calculate.await_args
+        assert kwargs["strategy_id"] != _SAMPLE_RECORD.name
+
     def test_performance_strategy_not_found_regression(self, runner):
         """regression guard: strategy 미존재 → 기존 "전략을 찾을 수 없습니다" 유지.
 
