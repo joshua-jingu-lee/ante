@@ -6,6 +6,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from ante.data.store import ParquetStore
+from ante.feed.pipeline.data_go_kr_collector import DataGoKrCollector
 from ante.feed.sources.base import RateLimiter
 from ante.feed.sources.data_go_kr import (
     CriticalApiError,
@@ -489,3 +491,117 @@ class TestFetchByDate:
             await source.fetch_by_date("2024-03-01")
 
         assert captured_params[0]["basDt"] == "20240301"
+
+
+# ── DataGoKrCollector: srtnCd KRX 검증 (#2080) ────────────────
+
+
+def _raw(srtn: object) -> dict:
+    """data.go.kr raw item(이슈 재현 dict, normalizer 기대 필드 셋)."""
+    return {
+        "basDt": "20260102",
+        "srtnCd": srtn,
+        "mkp": "100",
+        "hipr": "110",
+        "lopr": "90",
+        "clpr": "105",
+        "trqu": "1000",
+        "trPrc": "100000",
+        "mrktTotAmt": "1000000",
+        "lstgStCnt": "10000",
+    }
+
+
+class _FakeSource:
+    """fetch(date)가 미리 지정한 raw item 리스트를 반환하는 가짜 source."""
+
+    def __init__(self, items: list[dict]) -> None:
+        self._items = items
+
+    async def fetch(self, target_date: str) -> list[dict]:
+        return self._items
+
+
+def _invalid_symbol_warns(warns: list[dict]) -> list[dict]:
+    """warns 목록에서 invalid_symbol 타입만 추출한다."""
+    return [w for w in warns if w.get("type") == "invalid_symbol"]
+
+
+class TestCollectorSymbolValidation:
+    """DataGoKrCollector가 비KRX srtnCd를 drop+warning 처리한다 (#2080)."""
+
+    @pytest.mark.asyncio
+    async def test_non_krx_symbol_dropped(self, tmp_path) -> None:
+        """(a) srtnCd='ABCDEF' 단일 → 저장 0, invalid_symbol warning 1건."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("ABCDEF")]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        invalid = _invalid_symbol_warns(warns)
+        assert len(invalid) == 1
+        assert "ABCDEF" in invalid[0]["message"]
+        assert store.list_symbols("1d") == []
+        assert store.list_symbols(data_type="fundamental") == []
+
+    @pytest.mark.asyncio
+    async def test_valid_krx_symbol_stored(self, tmp_path) -> None:
+        """(b) 정상 KRX '005930' → 저장됨, invalid_symbol warning 없음."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _invalid_symbol_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+        assert store.list_symbols(data_type="fundamental") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_mixed_valid_and_invalid(self, tmp_path) -> None:
+        """(c) 혼합('005930'+'ABCDEF') → valid만 저장, invalid drop+warning."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw("005930"), _raw("ABCDEF")])
+        )
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        invalid = _invalid_symbol_warns(warns)
+        assert len(invalid) == 1
+        assert "ABCDEF" in invalid[0]["message"]
+        assert store.list_symbols("1d") == ["005930"]
+        assert store.list_symbols(data_type="fundamental") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_non_string_symbols_dropped(self, tmp_path) -> None:
+        """(d) 비문자열/None srtnCd(None, 123456 int) → drop+warning."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw(None), _raw(123456)]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        assert len(_invalid_symbol_warns(warns)) == 2
+        assert store.list_symbols("1d") == []
+        assert store.list_symbols(data_type="fundamental") == []
+
+    @pytest.mark.asyncio
+    async def test_unicode_digit_symbol_dropped(self, tmp_path) -> None:
+        """(e) Unicode digit '１２３４５６' → drop(ASCII 아님)."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("１２３４５６")]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        assert len(_invalid_symbol_warns(warns)) == 1
+        assert store.list_symbols("1d") == []
+        assert store.list_symbols(data_type="fundamental") == []
