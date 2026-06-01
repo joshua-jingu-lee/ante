@@ -94,7 +94,16 @@ class DARTCollector:
         corp_code_map = await self._load_corp_codes(feed_dir)
         if not corp_code_map:
             logger.warning("DART: 고유번호 매핑이 비어있음")
-            return 0, set(), []
+            warns: list[dict] = [
+                {
+                    "source": "dart",
+                    "type": "empty_corp_code_map",
+                    "message": (
+                        "DART 고유번호 매핑이 비어 있어 fundamental 수집을 건너뜀"
+                    ),
+                }
+            ]
+            return 0, set(), warns
 
         start_year, end_year = self._resolve_year_range(config)
         last_checkpoint = checkpoint.get_last_date()
