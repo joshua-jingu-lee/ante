@@ -345,6 +345,78 @@ class TestFetchByDate:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_empty_page_below_total_raises(self, source: DataGoKrSource) -> None:
+        """빈 페이지인데 totalCount 미달이면 DataGoKrError를 발생시킨다 (#2069)."""
+        page1 = _make_response([_make_item(srtn_cd="005930")], total_count=3)
+        page2 = _make_response([], total_count=3)
+
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return page1
+            return page2
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with pytest.raises(DataGoKrError) as exc_info:
+                await source.fetch_by_date("2024-03-01")
+
+        # 부분 수집 메시지에 수집/전체 건수가 노출되어야 한다
+        assert "collected=1" in str(exc_info.value)
+        assert "total=3" in str(exc_info.value)
+        # 빈 페이지(page2)까지 실제 호출되어야 한다
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_multi_page_exact_total_no_raise(
+        self, source: DataGoKrSource
+    ) -> None:
+        """다중 페이지로 totalCount를 정확히 채우면 raise 없이 전건 반환한다."""
+        page1_items = [_make_item(srtn_cd=f"00{i:04d}") for i in range(1000)]
+        page1 = _make_response(page1_items, total_count=1001)
+        page2_items = [_make_item(srtn_cd="019999")]
+        page2 = _make_response(page2_items, total_count=1001)
+
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return page1
+            return page2
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            result = await source.fetch_by_date("2024-03-01")
+
+        assert len(result) == 1001
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_single_page_exact_total_no_raise(
+        self, source: DataGoKrSource
+    ) -> None:
+        """단일 페이지로 totalCount를 완수하면 정상 반환한다."""
+        items = [_make_item(srtn_cd=f"00{i:04d}") for i in range(3)]
+        response = _make_response(items, total_count=3)
+
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            return response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            result = await source.fetch_by_date("2024-03-01")
+
+        assert len(result) == 3
+        # totalCount 완수 시 추가 페이지 요청이 없어야 한다
+        assert call_count == 1
+
+    @pytest.mark.asyncio
     async def test_daily_limit_raises(self, source: DataGoKrSource) -> None:
         """일일 한도 도달 시 DailyLimitExceededError를 발생시킨다."""
         # 한도의 90% 도달 상태 설정
