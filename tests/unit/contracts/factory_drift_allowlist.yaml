@@ -55,7 +55,7 @@ direct_database_construction:
   # `backtest history` 는 `offline` 이며 #1974 에서 `open_cli_db` (read_only)
   # 로 마이그레이션되어 직접 Database 생성 callsite 가 사라졌다 — 엔트리 제거.
   - path: src/ante/cli/commands/backtest.py
-    line: 214
+    line: 229
     reason: "backtest run — long_running (progress-bar driven, deferred migration)"
 
   # data domain — `data list` callsite. #1857 잔여로 본 사이클에서 보류.

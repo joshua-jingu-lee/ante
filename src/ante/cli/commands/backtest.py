@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,13 @@ from ante.cli.main import get_formatter
 if TYPE_CHECKING:
     from ante.backtest.result import BacktestResult
 from ante.cli.middleware import require_auth, require_scope
+
+# strict YYYY-MM-DD 가드 (feed/cli.py·backfill_runner.py 패턴 미러). Python
+# 3.11+ ``date.fromisoformat`` 은 basic ISO(``20260510``)·week date
+# (``2026-W19-1``) 까지 수락하지만 ParquetStore.read 의 Polars ``str.to_datetime``
+# 는 이를 거부한다. CLI preflight 와 실행 단계 파싱 의미를 일치시키기 위해
+# 확장 형식만 허용한다 (#2053).
+_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 @click.group()
@@ -74,7 +82,14 @@ def run(
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
-    # 시작일/종료일 검증
+    # 시작일/종료일 검증 — strict YYYY-MM-DD만 허용 (basic ISO/week date 거부; #2053)
+    for label, value in (("시작일", start), ("종료일", end)):
+        if _ISO_DATE_RE.fullmatch(value) is None:
+            fmt.error(
+                f"{label} 형식이 올바르지 않습니다: '{value}' (YYYY-MM-DD 형식 필요)",
+                code="INVALID_DATE",
+            )
+            raise SystemExit(1)
     try:
         start_date = datetime.date.fromisoformat(start)
         end_date = datetime.date.fromisoformat(end)
