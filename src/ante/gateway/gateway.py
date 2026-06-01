@@ -371,7 +371,21 @@ class APIGateway:
             return
 
         try:
-            await self.cancel_order(event.order_id, account_id=event.account_id)
+            ok = await self.cancel_order(event.order_id, account_id=event.account_id)
+            if not ok:
+                # 브로커가 예외 없이 False(취소 실패)를 반환한 경우.
+                # 성공 이벤트를 발행하지 않고 실패 이벤트로 전환한다 (#2142).
+                logger.warning("주문 취소 실패(broker False 반환): %s", event.order_id)
+                await self._eventbus.publish(
+                    OrderCancelFailedEvent(
+                        account_id=event.account_id,
+                        order_id=event.order_id,
+                        bot_id=event.bot_id,
+                        strategy_id=event.strategy_id,
+                        error_message="브로커가 취소 실패(False)를 반환함",
+                    )
+                )
+                return
             await self._eventbus.publish(
                 OrderCancelledEvent(
                     account_id=event.account_id,
