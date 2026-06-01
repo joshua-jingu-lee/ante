@@ -229,6 +229,64 @@ async def test_set_invalid_log_level_raises_config_validation_error(service, eve
     assert eventbus.published == []
 
 
+# ── #2132 oracle A7: notification.min_level enum invariant ────────────────
+
+
+def test_notification_min_levels_match_enum_ssot():
+    """하드코드 set ↔ ``NotificationLevel`` enum 값 정합 lock (#2132 drift).
+
+    ``_VALID_NOTIFICATION_MIN_LEVELS`` 는 config → notification 의존을 피하려고
+    하드코드된 SSOT 미러다. enum 값이 추가/변경되면 이 테스트가 실패해 미러를
+    갱신하도록 강제한다. (테스트에서만 NotificationLevel import 허용)
+    """
+    from ante.config.dynamic import _VALID_NOTIFICATION_MIN_LEVELS
+    from ante.notification.base import NotificationLevel
+
+    assert _VALID_NOTIFICATION_MIN_LEVELS == {
+        level.value for level in NotificationLevel
+    }
+
+
+@pytest.mark.parametrize("level", ["critical", "error", "warning", "info"])
+async def test_set_valid_notification_min_level_succeeds(service, eventbus, level):
+    """valid lowercase enum 값은 저장되고 이벤트가 발행된다 (#2132)."""
+    await service.set("notification.min_level", level, category="notification")
+
+    assert await service.get("notification.min_level") == level
+    assert len(eventbus.published) == 1
+
+
+@pytest.mark.parametrize("bad_value", ["verbose", "CRITICAL"])
+async def test_set_invalid_notification_min_level_raises(service, eventbus, bad_value):
+    """invalid 값(``verbose``)·대문자(``CRITICAL``) 거부 + 미저장 + 이벤트 미발행.
+
+    ``CONFIG_VALIDATION_ERROR`` 코드 보유. case-sensitive lowercase 정책이므로
+    ``"CRITICAL"`` 도 거부된다 (소비자 ``NotificationLevel(str(raw))`` 일치) (#2132).
+    """
+    with pytest.raises(ConfigValidationError, match="notification.min_level") as exc:
+        await service.set("notification.min_level", bad_value, category="notification")
+    assert exc.value.code == "CONFIG_VALIDATION_ERROR"
+
+    # 영속/이벤트 사이드이펙트가 발생하지 않아야 한다.
+    assert not await service.exists("notification.min_level")
+    assert eventbus.published == []
+
+
+def test_validate_value_notification_min_level_enum():
+    """함수 경계 직접 검증: valid 통과 / invalid → ConfigValidationError (#2132)."""
+    for valid in ("critical", "error", "warning", "info"):
+        validate_value("notification.min_level", valid)
+
+    with pytest.raises(ConfigValidationError, match="notification.min_level"):
+        validate_value("notification.min_level", "verbose")
+    with pytest.raises(ConfigValidationError, match="대소문자 구분"):
+        validate_value("notification.min_level", "CRITICAL")
+    with pytest.raises(ConfigValidationError, match="notification.min_level"):
+        validate_value("notification.min_level", 10)
+    with pytest.raises(ConfigValidationError, match="notification.min_level"):
+        validate_value("notification.min_level", None)
+
+
 # ── #1412 oracle A7: numeric finite invariant (write + read) ──────────────
 
 

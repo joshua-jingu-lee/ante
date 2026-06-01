@@ -31,6 +31,13 @@ logger = logging.getLogger(__name__)
 
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
+# NotificationLevel enum 값 SSOT 미러 (ante.notification.base.NotificationLevel).
+# 소비자 ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
+# (service.py:90) case-sensitive lowercase 멤버와 정확 일치해야 한다. config →
+# notification 의존을 피하려고 하드코드하며, 두 집합의 정합성은 drift 테스트가
+# ``{level.value for level in NotificationLevel}`` 대조로 lock 한다 (#2132).
+_VALID_NOTIFICATION_MIN_LEVELS = {"critical", "error", "warning", "info"}
+
 
 def _is_value_finite(value: Any) -> tuple[bool, Any]:
     """value 안의 모든 numeric `float` 를 재귀적으로 검사한다 (#1412 oracle A7).
@@ -88,21 +95,27 @@ def validate_value(key: str, value: Any) -> None:
         동일하게 동작한다. `bool` 과 `int` 는 finite 검사에서 제외된다(상세
         규칙은 ``_is_value_finite`` 문서 참고).
 
-    `system.log_level` 처럼 enum SSOT가 정의된 키는 invalid 값을 즉시 거부한다.
-    정의되지 않은 키는 numeric finite 가드 외에는 통과(generic CRUD 동작 유지).
+    `system.log_level`/`notification.min_level` 처럼 enum SSOT가 정의된 키는
+    invalid 값을 즉시 거부한다. 정의되지 않은 키는 numeric finite 가드 외에는
+    통과(generic CRUD 동작 유지).
 
     대소문자 정책: `system.log_level` 은 대소문자 구분으로 거부한다. 즉
     ``_VALID_LOG_LEVELS`` 멤버(전부 대문자)와 정확 일치해야 통과하고,
     ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다 (#1379 oracle A7).
+    `notification.min_level` 도 대소문자 구분으로 거부한다. 소비자
+    ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
+    ``_VALID_NOTIFICATION_MIN_LEVELS`` 멤버(전부 소문자)와 정확 일치해야 하고,
+    ``"CRITICAL"`` 같은 대문자 입력은 거부된다 (#2132).
 
     Raises:
         ValueError: numeric finite invariant 를 위반한 경우 (#1412, generic
             가드 — 별 multi-consumer 표면이라 코드화 비목표).
-        ConfigValidationError: ``system.log_level`` 같은 키별 enum invariant
-            를 위반한 경우. ``ValueError`` 서브클래스이므로 web 글로벌
-            핸들러는 그대로 422로 변환하고, IPC 서버는 ``.code`` 속성으로
-            ``CONFIG_VALIDATION_ERROR`` 안정코드를 envelope에 노출한다
-            (#1673). 호출자(web/IPC/CLI)는 이를 도메인 응답으로 변환한다.
+        ConfigValidationError: ``system.log_level``/``notification.min_level``
+            같은 키별 enum invariant 를 위반한 경우. ``ValueError`` 서브클래스
+            이므로 web 글로벌 핸들러는 그대로 422로 변환하고, IPC 서버는
+            ``.code`` 속성으로 ``CONFIG_VALIDATION_ERROR`` 안정코드를 envelope에
+            노출한다 (#1673). 호출자(web/IPC/CLI)는 이를 도메인 응답으로
+            변환한다.
     """
     # Generic numeric finite 가드 (#1412). dict/list 내부까지 재귀 검사한다.
     # 이 ValueError 는 별 multi-consumer 표면이므로 코드화하지 않는다 (#1673
@@ -121,6 +134,16 @@ def validate_value(key: str, value: Any) -> None:
             # CONFIG_VALIDATION_ERROR JSON envelope로 정리하도록 한다 (#1673).
             raise ConfigValidationError(
                 "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
+            )
+
+    if key == "notification.min_level":
+        # system.log_level 분기와 동형. ConfigValidationError 동일 메커니즘
+        # (code=CONFIG_VALIDATION_ERROR)으로 CLI/IPC가 정리한다. NotificationLevel
+        # 값과 일치하는 case-sensitive lowercase 멤버만 통과("CRITICAL" 거부) (#2132).
+        if not isinstance(value, str) or value not in _VALID_NOTIFICATION_MIN_LEVELS:
+            raise ConfigValidationError(
+                "notification.min_level은 _VALID_NOTIFICATION_MIN_LEVELS "
+                "멤버여야 합니다 (대소문자 구분)."
             )
 
 
