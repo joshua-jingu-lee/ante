@@ -636,6 +636,10 @@ class TestBacktestExecutor:
         5주 보유 중 10주 매도 요청 → 보유분 5주만 체결되어야 하며,
         commission/slippage/BacktestTrade.quantity 모두 요청 수량(10)이 아닌
         체결 수량(5) 기준이어야 한다.
+
+        slippage_rate를 nonzero(0.02)로 두어, 슬리피지가 요청 수량(10)이 아닌
+        체결 수량(5) 기준임을 단독으로 검증한다(slippage=0이면 두 기준이
+        모두 0.0이라 구별 불가).
         """
 
         class Buy5Sell10(Strategy):
@@ -662,13 +666,17 @@ class TestBacktestExecutor:
         )
         provider.load("005930", "1d")
 
+        # slippage_rate=0.02: sell exec_price = 100*(1-0.02)=98,
+        # slippage = |98-100|*5 = 10.0 (체결 5주 기준; 요청 10주면 20.0)
+        slippage_rate = 0.02
+        sell_commission_rate = 0.01
         executor = BacktestExecutor(
             strategy_cls=Buy5Sell10,
             data_provider=provider,
             initial_balance=10000,
             buy_commission_rate=0.0,
-            sell_commission_rate=0.01,
-            slippage_rate=0.0,
+            sell_commission_rate=sell_commission_rate,
+            slippage_rate=slippage_rate,
         )
         result = await executor.run()
 
@@ -678,24 +686,31 @@ class TestBacktestExecutor:
         assert buy_trade.side == "buy"
         assert sell_trade.side == "sell"
 
-        exec_price = sell_trade.price  # slippage=0 → 100.0
+        # sell exec_price = base_price * (1 - slippage_rate) = 100 * 0.98 = 98.0
+        exec_price = 100.0 * (1 - slippage_rate)
+        assert sell_trade.price == pytest.approx(98.0)
+        assert sell_trade.price == pytest.approx(exec_price)
 
         # (a) 거래 수량은 요청(10)이 아닌 체결(5) 기준
         assert sell_trade.quantity == 5
 
-        # (b) 매도 수수료는 5주 기준 (exec_price * 5 * 0.01), 요청 10주(10.0) 아님
-        assert sell_trade.commission == pytest.approx(exec_price * 5 * 0.01)
-        assert sell_trade.commission == pytest.approx(5.0)
+        # (b) 매도 수수료는 5주 기준 (exec_price * 5 * 0.01 = 4.9),
+        #     요청 10주 기준(9.8)이 아님
+        expected_commission = exec_price * 5 * sell_commission_rate
+        assert sell_trade.commission == pytest.approx(expected_commission)
+        assert sell_trade.commission == pytest.approx(4.9)
 
-        # (c) 슬리피지도 5주 기준 (slippage_rate=0 → 0.0)
+        # (c) 슬리피지는 체결 수량(5) 기준 = |98-100|*5 = 10.0.
+        #     요청 수량(10) 기준이면 20.0이라 아래 assert가 FAIL해야 한다.
         assert sell_trade.slippage == pytest.approx(abs(exec_price - 100.0) * 5)
-        assert sell_trade.slippage == pytest.approx(0.0)
+        assert sell_trade.slippage == pytest.approx(10.0)
 
-        # (d) balance/포지션 정합: buy 5@100(fee 0) → -500,
-        #     sell 5@100 fee 1% → +500-5=+495 → 잔고 9995.0, 포지션 0
+        # (d) balance/포지션 정합:
+        #     buy 5주 @ 100*(1+0.02)=102, fee 0 → 비용 510 → 잔고 9490.0
+        #     sell 5주 @ 98, fee 4.9 → 수익 98*5-4.9=485.1 → 잔고 9975.1, 포지션 0
         assert executor._positions.get("005930") is None
         # final_balance == equity_curve[-1] equity, 포지션 청산 후 현금만 남음
-        assert result.equity_curve[-1]["balance"] == pytest.approx(9995.0)
+        assert result.equity_curve[-1]["balance"] == pytest.approx(9975.1)
 
     async def test_buy_path_unchanged_with_fees(self, data_provider):
         """#1989 회귀: buy 경로는 signal.quantity==executed_qty이므로 동작 불변.
