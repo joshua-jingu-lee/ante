@@ -116,18 +116,19 @@ def validate_schema(
         warnings.append("레코드가 비어있음")
         return ValidationResult(passed=True, warnings=warnings, errors=errors)
 
-    # 첫 레코드 기준으로 필수 필드 존재 여부 확인
-    first_record_keys = set(records[0].keys())
-    missing_fields = set(required_fields) - first_record_keys
-    if missing_fields:
-        errors.append(f"필수 필드 누락: {sorted(missing_fields)}")
-
-    # 숫자 필드 타입 변환 가능 여부 확인
+    required_set = set(required_fields)
     numeric_fields = {"open", "high", "low", "close", "volume", "amount"}
-    check_fields = numeric_fields & first_record_keys
 
     for i, record in enumerate(records):
-        for field_name in check_fields:
+        record_keys = set(record.keys())
+
+        # 레코드별 필수 필드 존재 여부 확인
+        missing = required_set - record_keys
+        if missing:
+            errors.append(f"레코드 {i}: 필수 필드 누락: {sorted(missing)}")
+
+        # 레코드별 숫자 필드 타입 변환 가능 여부 확인
+        for field_name in numeric_fields & record_keys:
             value = record.get(field_name)
             if value is None:
                 continue

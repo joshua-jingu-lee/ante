@@ -200,6 +200,69 @@ class TestValidateSchema:
         result = validate_schema([record], OHLCV_REQUIRED_FIELDS)
         assert result.passed is True
 
+    def test_later_record_missing_field_detected(self) -> None:
+        """첫 레코드 정상 + 이후 레코드 필수 필드 누락 → passed=False (#2087)."""
+        first = _make_ohlcv_record(symbol="005930")
+        second = _make_ohlcv_record(symbol="000660")
+        del second["close"]
+        result = validate_schema([first, second], OHLCV_REQUIRED_FIELDS)
+        assert result.passed is False
+        assert any("레코드 1" in e and "close" in e for e in result.errors)
+        # 첫 레코드는 정상이므로 "레코드 0" 누락 에러는 없어야 함
+        assert not any("레코드 0: 필수 필드 누락" in e for e in result.errors)
+
+    def test_all_records_valid_multi(self) -> None:
+        """모든 레코드가 정상이면 passed=True (회귀)."""
+        records = [
+            _make_ohlcv_record(symbol="005930", timestamp="2024-01-02"),
+            _make_ohlcv_record(symbol="000660", timestamp="2024-01-03"),
+            _make_ohlcv_record(symbol="035720", timestamp="2024-01-04"),
+        ]
+        result = validate_schema(records, OHLCV_REQUIRED_FIELDS)
+        assert result.passed is True
+        assert result.errors == []
+
+    def test_later_record_only_numeric_field_checked(self) -> None:
+        """첫 레코드에 없고 이후 레코드에만 있는 숫자 필드의 비숫자 값도 검출."""
+        first = {
+            "timestamp": "2024-01-02",
+            "symbol": "005930",
+            "open": "100.0",
+            "high": "110.0",
+            "low": "90.0",
+            "close": "105.0",
+            "volume": "1000",
+            "source": "data_go_kr",
+            # amount 없음
+        }
+        second = {
+            "timestamp": "2024-01-03",
+            "symbol": "000660",
+            "open": "100.0",
+            "high": "110.0",
+            "low": "90.0",
+            "close": "105.0",
+            "volume": "1000",
+            "source": "data_go_kr",
+            "amount": "not_a_number",  # 첫 레코드엔 없는 숫자 필드
+        }
+        required = [
+            "timestamp",
+            "symbol",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "source",
+        ]
+        result = validate_schema([first, second], required)
+        assert result.passed is False
+        assert any(
+            "레코드 1" in e and "amount" in e and "변환 불가" in e
+            for e in result.errors
+        )
+
 
 # ===========================================================================
 # 4. 비즈니스 계층 (validate_business)
