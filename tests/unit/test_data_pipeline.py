@@ -926,6 +926,59 @@ class TestRetentionPolicy:
         result = store.read("005930", "", data_type="fundamental")
         assert result.is_empty()
 
+    def test_is_expired_month_end_31day_regression(self):
+        """#2100: 31일 월은 실제 월말(05-31) 기준 age를 계산해 보존.
+
+        수정 전엔 월말을 28로 하드코딩해 05-31 데이터를 3일 일찍
+        만료 처리(True)했다. 05-31 기준 30일 경과는 보존 기간(31일)
+        이내이므로 보존(False)이어야 한다.
+        """
+        assert (
+            RetentionPolicy._is_expired(
+                "2026-05", 31, datetime(2026, 6, 30, tzinfo=UTC)
+            )
+            is False
+        )
+
+    def test_is_expired_leap_february_boundary(self):
+        """#2100: 윤년 2월은 실제 월말(02-29) 기준으로 age 계산."""
+        assert (
+            RetentionPolicy._is_expired("2024-02", 1, datetime(2024, 3, 1, tzinfo=UTC))
+            is False
+        )
+
+    def test_is_expired_common_february_boundary(self):
+        """#2100: 평년 2월은 실제 월말(02-28) 기준으로 age 계산."""
+        assert (
+            RetentionPolicy._is_expired("2026-02", 1, datetime(2026, 3, 1, tzinfo=UTC))
+            is False
+        )
+
+    def test_is_expired_31day_month_expires(self):
+        """#2100: 보존 기간을 실제로 넘긴 31일 월은 정상 만료."""
+        assert (
+            RetentionPolicy._is_expired(
+                "2026-05", 29, datetime(2026, 6, 30, tzinfo=UTC)
+            )
+            is True
+        )
+
+    def test_is_expired_invalid_filename(self):
+        """#2100: 잘못된 파일명은 except 경로로 보존(False) 유지."""
+        assert (
+            RetentionPolicy._is_expired(
+                "invalid", 30, datetime(2026, 6, 30, tzinfo=UTC)
+            )
+            is False
+        )
+
+    def test_is_expired_invalid_month(self):
+        """#2100: 잘못된 월은 IllegalMonthError(⊂ ValueError)로 보존(False)."""
+        assert (
+            RetentionPolicy._is_expired("2024-13", 30, datetime(2026, 1, 1, tzinfo=UTC))
+            is False
+        )
+
 
 # ── DARTNormalizer 테스트 ─────────────────────────────
 
