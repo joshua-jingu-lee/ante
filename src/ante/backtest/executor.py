@@ -351,11 +351,15 @@ class BacktestExecutor:
         Args:
             final_equity: 마지막 시뮬레이션 봉의 mark-to-market equity.
                 run()에서 equity_curve[-1] 기반으로 전달한다(재계산하지 않음).
+
+        Note: 무거래(``self._trades == []``)여도 early-return하지 않고
+        ``calculate_metrics`` 를 호출한다. ``calculate_metrics`` 는 빈 거래/평탄
+        equity_curve에서도 div-by-zero/NaN/inf 없이 core 13지표를 산출하며
+        (거래 기반 지표는 0/None, equity 기반 지표는 equity_curve 기준),
+        compat 필드(buy_trades/sell_trades/total_slippage)는 빈 거래에서 자연히
+        0이 된다. 무거래 result에서도 지표 키가 안정적으로 존재하도록 한다(#2125).
         """
         from ante.backtest.metrics import calculate_metrics
-
-        if not self._trades:
-            return {}
 
         metrics = calculate_metrics(
             trades=self._trades,

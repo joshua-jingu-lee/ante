@@ -567,14 +567,51 @@ class TestBacktestExecutor:
         assert "max_drawdown" in result.metrics
         assert "win_rate" in result.metrics
 
-    async def test_metrics_empty_for_no_trades(self, data_provider):
+    async def test_metrics_computed_for_no_trades(self, data_provider):
+        """무거래여도 metrics는 {}가 아니라 계산 가능한 지표를 채운다(#2125).
+
+        ``calculate_metrics`` 는 빈 거래/평탄 equity_curve에서도 core 13지표를
+        산출하므로(거래 기반은 0/None, equity 기반은 equity_curve 기준),
+        무거래 result도 core 13 + compat 3(총 16키)을 안정적으로 노출한다.
+        """
         data_provider.reset()
         executor = BacktestExecutor(
             strategy_cls=EmptyStrategy,
             data_provider=data_provider,
         )
         result = await executor.run()
-        assert result.metrics == {}
+
+        # 무거래여도 metrics가 비어 있지 않다.
+        assert result.metrics != {}
+        assert len(result.trades) == 0
+
+        # core 13지표 키가 모두 존재한다.
+        core_keys = {
+            "total_return",
+            "annual_return",
+            "sharpe_ratio",
+            "max_drawdown",
+            "max_drawdown_duration",
+            "total_trades",
+            "winning_trades",
+            "losing_trades",
+            "win_rate",
+            "profit_factor",
+            "avg_profit",
+            "avg_loss",
+            "total_commission",
+        }
+        assert core_keys <= set(result.metrics)
+
+        # compat 3필드가 빈 거래에서 자연히 0이 된다.
+        assert result.metrics["buy_trades"] == 0
+        assert result.metrics["sell_trades"] == 0
+        assert result.metrics["total_slippage"] == 0
+
+        # 거래 기반 지표는 무거래 시 0/0.0이다.
+        assert result.metrics["total_trades"] == 0
+        assert result.metrics["win_rate"] == 0.0
+        assert result.metrics["total_commission"] == 0.0
 
     async def test_result_to_dict(self, data_provider):
         data_provider.reset()
