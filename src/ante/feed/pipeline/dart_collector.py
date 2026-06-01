@@ -162,6 +162,16 @@ class DARTCollector:
         # 이로써 checkpoint가 미래 분기로 전진하지 않는다(#1964).
         today = _today_kst()
 
+        # 첫 실패(ok=False) 이후에는 이 run에서 checkpoint를 더 전진시키지
+        # 않는다(#2054). checkpoint는 quarter_key 오름차순 last-write-wins로
+        # monotonic 전진하므로, 실패 분기 이후의 성공 분기를 save하면 checkpoint가
+        # 실패 분기를 넘어 전진해 다음 run에서 재시도되지 않는다. halt 플래그로
+        # 실패 분기 직전에 checkpoint를 고정해 다음 run이 실패 분기부터 재개한다.
+        # 실패 이후 분기 fetch는 best-effort로 계속하며(데이터는 best-effort
+        # 저장), 재-fetch는 ParquetStore의 natural-key dedup(keep="last")로
+        # overwrite 멱등이라 중복 누적이 발생하지 않는다.
+        halt = False
+
         for year in range(start_year, end_year + 1):
             for reprt_code in REPRT_CODES:
                 quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
@@ -173,7 +183,7 @@ class DARTCollector:
                     # 미래 분기: fetch/save 모두 건너뛴다.
                     continue
 
-                written, syms = await self._fetch_quarter(
+                written, syms, ok = await self._fetch_quarter(
                     corp_codes_list,
                     corp_code_map,
                     store,
@@ -183,7 +193,10 @@ class DARTCollector:
                 )
                 rows_written += written
                 symbols.update(syms)
-                checkpoint.save(quarter_key)
+                if not ok:
+                    halt = True
+                if ok and not halt:
+                    checkpoint.save(quarter_key)
 
         logger.info(
             "DART 수집 완료: symbols=%d rows=%d",
@@ -200,8 +213,22 @@ class DARTCollector:
         year: int,
         reprt_code: str,
         warns: list[dict],
-    ) -> tuple[int, set[str]]:
-        """단일 분기 재무제표를 수집/정규화/저장한다."""
+    ) -> tuple[int, set[str], bool]:
+        """단일 분기 재무제표를 수집/정규화/저장한다.
+
+        Returns:
+            (기록 행 수, 수집된 심볼 집합, ok). ``ok``는 이 분기가 checkpoint
+            전진 자격을 갖는지를 나타낸다(#2054):
+
+            - transient 예외(warn 추가) → ``ok=False``(미전진, 다음 run 재시도)
+            - ``not raw_items``(upstream terminal no-data) → ``ok=True``
+              (정당한 빈-성공; checkpoint 전진하여 무한 재시도 방지)
+            - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
+              warn 추가 + ``ok=False``(데이터 손실 surface, 미전진)
+            - 정상 저장(written>0) → ``ok=True``
+
+            ``DARTDailyLimitError``/``DARTCriticalError``는 기존대로 re-raise.
+        """
         try:
             raw_items = await self._source.fetch_financial(
                 corp_codes_list,
@@ -225,16 +252,42 @@ class DARTCollector:
                     "message": str(exc),
                 }
             )
-            return 0, set()
+            return 0, set(), False
 
         if not raw_items:
-            return 0, set()
+            # upstream terminal no-data: 정당한 빈-성공. checkpoint를 전진시켜
+            # 데이터 없는 분기를 무한 재시도하지 않는다.
+            return 0, set(), True
 
-        return self._normalize_and_store(
+        written, syms = self._normalize_and_store(
             raw_items,
             corp_code_map,
             store,
         )
+        if written == 0:
+            # raw_items는 있으나 정규화/저장에서 0 rows(normalized empty,
+            # symbol 컬럼 부재 등 no-storable). 데이터 손실을 surface하고
+            # checkpoint를 전진시키지 않아 다음 run에서 재시도되게 한다.
+            logger.warning(
+                "DART 정규화/저장 결과 0건: year=%s reprt=%s raw=%d",
+                year,
+                reprt_code,
+                len(raw_items),
+            )
+            warns.append(
+                {
+                    "source": "dart",
+                    "year": str(year),
+                    "reprt_code": reprt_code,
+                    "message": (
+                        f"raw {len(raw_items)}건이 정규화/저장에서 0건으로 "
+                        "처리됨(no-storable)"
+                    ),
+                }
+            )
+            return 0, syms, False
+
+        return written, syms, True
 
     def _normalize_and_store(
         self,
