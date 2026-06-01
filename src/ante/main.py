@@ -1487,7 +1487,9 @@ async def _init_approval(s: Services) -> None:
                     "system:bot_manager",
                 )
             )
-        positions = s.position_history.get_positions_sync(bot_id)
+        positions = s.position_history.get_positions_sync(
+            bot_id, account_id=bot.config.account_id
+        )
         if positions:
             results.append(
                 ValidationResult(
