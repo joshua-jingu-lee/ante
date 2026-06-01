@@ -78,6 +78,12 @@ class BacktestExecutor:
         self._positions: dict[str, dict[str, float]] = {}
         self._trades: list[BacktestTrade] = []
         self._equity_curve: list[dict] = []
+        # 현재 step 시점의 보유 심볼별 현재가 스냅샷. run 루프가 매 step
+        # 보유 심볼 기준으로 새로 구성하고, get_positions()는 provider를
+        # 재호출하지 않고 이 캐시만 읽어 PortfolioView 스키마의 current_price/
+        # unrealized_pnl을 합성한다(#2074). step 사이에 stale/lookahead 가격이
+        # 남지 않도록 매 step 새로 채운다.
+        self._current_prices: dict[str, float] = {}
 
     async def run(
         self,
@@ -104,6 +110,12 @@ class BacktestExecutor:
             timestamp = self._data.get_current_timestamp()
             if timestamp is None:
                 break
+
+            # 현재 봉 시점의 현재가 스냅샷을 보유 심볼 기준으로 새로 구성한다.
+            # get_positions()가 이 캐시만 읽으므로, context(portfolio) 생성 이전에
+            # 갱신해야 PortfolioView의 current_price/unrealized_pnl이 현재 봉을
+            # 반영한다(#2074). 매 step 새로 채워 stale/lookahead를 막는다.
+            await self._refresh_current_prices()
 
             context = {
                 "timestamp": timestamp,
@@ -259,6 +271,48 @@ class BacktestExecutor:
             if pos["quantity"] <= 0:
                 del self._positions[symbol]
 
+    async def _refresh_current_prices(self) -> None:
+        """현재 봉 시점의 보유 심볼별 현재가 스냅샷을 새로 구성한다(#2074).
+
+        ``get_positions()`` 가 PortfolioView 스키마(current_price/unrealized_pnl)를
+        제공할 때 읽는 캐시다. provider를 재호출하지 않는 sync get_positions를
+        유지하기 위해, run 루프가 현재 봉 가격을 미리 여기에 채운다.
+
+        - **매 step 새로 구성**한다(dict를 새로 만들어 교체). 이전 봉 가격이
+          남으면 stale/lookahead가 되므로, 직전 step에 보유했다가 청산된 심볼은
+          캐시에서 자연히 사라진다.
+        - 보유 심볼(``self._positions`` 키)에 대해서만 ``get_current_price`` 를
+          조회한다. 조회 실패(예외)/``None``/``<= 0`` 이면 해당 심볼은 그 포지션의
+          ``avg_price`` 로 fallback 확정한다(``_calculate_equity`` 와 동일 정책).
+
+        Note: 현재 봉 가격이 SSOT이므로 반드시 run 루프 안(advance 직후, 다음
+        advance 이전)에서만 호출한다. 루프 종료 후 호출하면 미래 봉을 보는
+        lookahead가 된다.
+        """
+        prices: dict[str, float] = {}
+        for symbol, pos in self._positions.items():
+            avg_price = pos["avg_price"]
+            mark_price = avg_price
+            try:
+                current_price = await self._data.get_current_price(symbol)
+                if current_price is not None and current_price > 0:
+                    mark_price = current_price
+                else:
+                    logger.warning(
+                        "현재가 조회 불가(symbol=%s, price=%r) — avg_price로 fallback",
+                        symbol,
+                        current_price,
+                    )
+            except Exception:
+                logger.warning(
+                    "현재가 조회 실패(symbol=%s) — avg_price로 fallback",
+                    symbol,
+                    exc_info=True,
+                )
+            prices[symbol] = mark_price
+        # 매 step 통째로 교체해 이전 봉/청산 심볼 가격이 남지 않게 한다.
+        self._current_prices = prices
+
     async def _calculate_equity(self) -> float:
         """현재 bar 시점의 자산 가치 (mark-to-market).
 
@@ -318,11 +372,28 @@ class BacktestExecutor:
         return metrics
 
     def get_positions(self, bot_id: str) -> dict[str, Any]:
-        """PortfolioView 인터페이스."""
-        return {
-            s: {"quantity": p["quantity"], "avg_price": p["avg_price"]}
-            for s, p in self._positions.items()
-        }
+        """PortfolioView 인터페이스.
+
+        spec ``03-04-provider-and-views.md`` L29 PortfolioView 스키마대로
+        ``{symbol: {"quantity","avg_price","current_price","unrealized_pnl"}}`` 를
+        반환해 라이브와 parity를 맞춘다(#2074).
+
+        provider를 재호출하지 않고 run 루프가 매 step 미리 채운
+        ``self._current_prices`` 캐시만 읽는다(sync 유지). 캐시에 심볼이 없으면
+        (예: run 루프 밖에서 호출되거나 가격 미조회) ``avg_price`` 로 fallback해
+        ``unrealized_pnl == 0`` 이 된다.
+        """
+        result: dict[str, Any] = {}
+        for symbol, p in self._positions.items():
+            avg_price = p["avg_price"]
+            current_price = self._current_prices.get(symbol, avg_price)
+            result[symbol] = {
+                "quantity": p["quantity"],
+                "avg_price": avg_price,
+                "current_price": current_price,
+                "unrealized_pnl": (current_price - avg_price) * p["quantity"],
+            }
+        return result
 
     def get_balance(self, bot_id: str) -> dict[str, float]:
         """PortfolioView 인터페이스."""
