@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import polars as pl
 import pytest
 
 from ante.data.store import ParquetStore
@@ -158,3 +159,280 @@ class TestCheckpointFutureQuarterClamp:
         fetched_2026 = {rc for (yr, rc) in source.fetched if yr == "2026"}
         assert fetched_2026 & future_codes == set()
         assert ("2026", "11013") in source.fetched  # Q1은 fetch됨
+
+
+class _ScriptedDARTSource:
+    """(year, reprt_code)별로 raise/raw_items 응답을 스크립트로 지정하는 스텁.
+
+    behaviors[(year, reprt_code)] 값:
+      - Exception 인스턴스 → 해당 분기 fetch_financial에서 raise
+      - list[dict]          → 해당 분기 raw_items로 반환
+      - 미지정              → 빈 리스트([]) 반환(terminal no-data)
+    """
+
+    def __init__(
+        self,
+        corp_code_map: dict[str, str],
+        behaviors: dict[tuple[str, str], object] | None = None,
+    ) -> None:
+        self._corp_code_map = corp_code_map
+        self._behaviors = behaviors or {}
+        self.fetched: list[tuple[str, str]] = []
+
+    async def fetch_corp_codes(self, save_path: Path) -> dict[str, str]:
+        return self._corp_code_map
+
+    async def fetch_financial(
+        self,
+        corp_codes: list[str],
+        year: str,
+        reprt_code: str,
+    ) -> list[dict]:
+        self.fetched.append((year, reprt_code))
+        behavior = self._behaviors.get((year, reprt_code), [])
+        if isinstance(behavior, Exception):
+            raise behavior
+        assert isinstance(behavior, list)
+        return behavior
+
+
+class _ScriptedNormalizer:
+    """raw_items 길이/내용과 무관하게 미리 정한 DataFrame을 반환하는 스텁.
+
+    _normalize_and_store가 `normalize(df, corp_code_map)`를 호출하므로
+    동일 시그니처를 제공한다. 반환 DataFrame의 row 수가 written을 결정한다.
+    """
+
+    def __init__(self, result_for: dict[tuple[str, str], pl.DataFrame]) -> None:
+        # raw_items 첫 항목의 (bsns_year, reprt_code)로 결과를 선택한다.
+        self._result_for = result_for
+
+    def normalize(
+        self,
+        df: pl.DataFrame,
+        corp_code_map: dict[str, str],
+    ) -> pl.DataFrame:
+        first = df.row(0, named=True)
+        key = (str(first["bsns_year"]), str(first["reprt_code"]))
+        result = self._result_for.get(key)
+        if result is not None:
+            return result
+        # 기본: symbol 1개, 1행을 가진 정상 정규화 결과
+        return pl.DataFrame(
+            {
+                "date": [date(int(key[0]), 12, 31)],
+                "symbol": ["005930"],
+                "revenue": [100],
+                "source": ["dart"],
+            }
+        )
+
+
+def _raw_item(year: str, reprt_code: str) -> dict:
+    """ScriptedNormalizer가 (year, reprt_code)를 식별할 수 있는 최소 raw row."""
+    return {
+        "corp_code": "00126380",
+        "bsns_year": year,
+        "reprt_code": reprt_code,
+        "account_nm": "매출액",
+        "thstrm_amount": "100",
+        "fs_div": "OFS",
+    }
+
+
+def _stored_df(year: str) -> pl.DataFrame:
+    """정상 저장(written>0)을 유발하는 정규화 결과 DataFrame."""
+    return pl.DataFrame(
+        {
+            "date": [date(int(year), 12, 31)],
+            "symbol": ["005930"],
+            "revenue": [100],
+            "source": ["dart"],
+        }
+    )
+
+
+def _make_collector_env(
+    tmp_path: Path,
+    behaviors: dict[tuple[str, str], object],
+    norm_results: dict[tuple[str, str], pl.DataFrame] | None = None,
+) -> tuple[DARTCollector, Checkpoint, ParquetStore, _ScriptedDARTSource, dict]:
+    """공통 collect 환경(과거 연도 single-year)을 구성한다.
+
+    backfill_since를 과거(2015)로 두고 today를 KST 현재로 두면 모든 분기가
+    collectable하므로 본 테스트들은 단일 연도(2015) 4분기를 순회한다.
+    """
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+    store = ParquetStore(base_path=tmp_path / "data")
+    checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+    source = _ScriptedDARTSource({"00126380": "005930"}, behaviors)
+    normalizer = _ScriptedNormalizer(norm_results or {})
+    collector = DARTCollector(source=source, normalizer=normalizer)
+    config = {"schedule": {"backfill_since": "2015-01-01"}}
+    return collector, checkpoint, store, source, config
+
+
+async def _run_collect(
+    tmp_path: Path,
+    collector: DARTCollector,
+    checkpoint: Checkpoint,
+    store: ParquetStore,
+    config: dict,
+    end_year: int = 2015,
+) -> tuple[int, set[str], list[dict]]:
+    """단일 연도만 순회하도록 _resolve_year_range를 고정해 collect 실행."""
+    # end_year를 고정(_today_kst 기반 현재 연도 대신)하여 단일 연도만 순회.
+    return await collector._collect_quarters(  # type: ignore[attr-defined]
+        {"00126380": "005930"},
+        store,
+        checkpoint,
+        2015,
+        end_year,
+        None,
+    )
+
+
+# 2015-Q1 period-end(3/31)는 today(2026+)보다 과거이므로 모든 분기 collectable.
+# REPRT_CODES 시간순: 11013(Q1) 11012(Q2) 11014(Q3) 11011(Q4).
+
+
+class TestCheckpointHaltOnFailure:
+    """#2054: 분기 수집 실패 시 checkpoint가 전진하지 않는지 검증한다."""
+
+    async def test_single_transient_failure_no_checkpoint(self, tmp_path: Path) -> None:
+        """(a) 단일 분기 transient 실패 → 해당 분기 checkpoint 미저장.
+
+        Q1(11013)에서 RuntimeError raise. 이후 Q2/Q3/Q4는 정상 성공해도
+        halt 이후라 checkpoint는 전진하지 않는다(None).
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): RuntimeError("temporary upstream error"),
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors
+        )
+        rows, syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        assert checkpoint.get_last_date() is None
+        assert len(warns) == 1
+        assert warns[0]["reprt_code"] == "11013"
+
+    async def test_q2_failure_does_not_advance_past_q1(self, tmp_path: Path) -> None:
+        """(b) Q2 실패 후 Q3 성공이어도 checkpoint가 Q1에 머무름(monotonic 회귀).
+
+        Q1 성공 → checkpoint=2015-Q1. Q2 실패 → halt. Q3 성공해도 save 안 함.
+        checkpoint가 Q3로 전진하면 다음 run에서 Q2가 skip되어 영구 누락된다.
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],  # Q1 성공
+            ("2015", "11012"): RuntimeError("Q2 transient"),  # Q2 실패
+            ("2015", "11014"): [_raw_item("2015", "11014")],  # Q3 성공
+            ("2015", "11011"): [_raw_item("2015", "11011")],  # Q4 성공
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors
+        )
+        await _run_collect(tmp_path, collector, checkpoint, store, config)
+
+        # 실패 분기(Q2)를 넘어 전진하지 않는다. Q1에 고정.
+        assert checkpoint.get_last_date() == "2015-Q1"
+
+    async def test_terminal_no_data_advances_checkpoint(self, tmp_path: Path) -> None:
+        """(c) not raw_items(terminal no-data) → checkpoint 정상 전진(빈-성공).
+
+        모든 분기가 빈 응답([]). 정당한 빈-성공이므로 checkpoint는 마지막
+        분기(Q4)까지 전진하여 무한 재시도를 방지한다.
+        """
+        behaviors: dict[tuple[str, str], object] = {}  # 전부 [] 반환
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors
+        )
+        _rows, _syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        assert checkpoint.get_last_date() == "2015-Q4"
+        assert warns == []
+
+    async def test_raw_present_but_stored_zero_halts(self, tmp_path: Path) -> None:
+        """(d) raw_items>0인데 정규화/저장 0건 → warns 추가 + checkpoint 미전진.
+
+        Q1은 raw_items가 있으나 normalize가 빈 DataFrame을 반환(no-storable).
+        데이터 손실을 surface(warns)하고 checkpoint는 전진하지 않는다.
+        """
+        empty_norm = pl.DataFrame(
+            {"date": [], "symbol": [], "revenue": [], "source": []},
+            schema={
+                "date": pl.Date,
+                "symbol": pl.Utf8,
+                "revenue": pl.Int64,
+                "source": pl.Utf8,
+            },
+        )
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],  # raw 있음
+        }
+        norm_results = {("2015", "11013"): empty_norm}  # 정규화 결과 0건
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        _rows, _syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        assert checkpoint.get_last_date() is None
+        assert len(warns) == 1
+        assert warns[0]["reprt_code"] == "11013"
+        assert "no-storable" in warns[0]["message"]
+
+    async def test_all_success_advances_checkpoint(self, tmp_path: Path) -> None:
+        """(e) 전 분기 정상 저장 → checkpoint가 마지막 분기까지 정상 전진."""
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df("2015"),
+            ("2015", "11012"): _stored_df("2015"),
+            ("2015", "11014"): _stored_df("2015"),
+            ("2015", "11011"): _stored_df("2015"),
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        rows, syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        assert checkpoint.get_last_date() == "2015-Q4"
+        assert warns == []
+        assert rows > 0
+        assert syms == {"005930"}
+
+    async def test_issue_repro_all_fail_no_checkpoint(self, tmp_path: Path) -> None:
+        """(f) 이슈 재현: 전 분기 transient 실패 → checkpoint 미전진(None)."""
+        err = RuntimeError("temporary upstream error")
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): err,
+            ("2015", "11012"): err,
+            ("2015", "11014"): err,
+            ("2015", "11011"): err,
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors
+        )
+        rows, _syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        assert checkpoint.get_last_date() is None
+        assert rows == 0
+        assert len(warns) == 4
