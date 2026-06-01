@@ -343,6 +343,175 @@ class TestBotOrders:
         assert bot1_orders[0].symbol == "005930"
 
 
+class TestAccountOrders:
+    """계좌별 주문 조회 테스트 (#2124, get_orders_for_bot 동형)."""
+
+    def test_get_orders_for_account_exists(self) -> None:
+        """#2124 재현 해소: get_orders_for_account 메서드 존재."""
+        assert hasattr(StopOrderManager, "get_orders_for_account")
+
+    async def test_get_orders_for_account_isolates_by_account(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """여러 계좌 등록 시 해당 계좌 활성 주문만 반환 (타 계좌 격리)."""
+        await manager.register(
+            order_id="ord-a1",
+            bot_id="bot-001",
+            strategy_id="stg-001",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=49000.0,
+            account_id="acc-a",
+        )
+        await manager.register(
+            order_id="ord-a2",
+            bot_id="bot-002",
+            strategy_id="stg-002",
+            symbol="000660",
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-a",
+        )
+        await manager.register(
+            order_id="ord-b1",
+            bot_id="bot-003",
+            strategy_id="stg-003",
+            symbol="035720",
+            side="buy",
+            quantity=3.0,
+            order_type="stop",
+            stop_price=50000.0,
+            account_id="acc-b",
+        )
+
+        acc_a_orders = manager.get_orders_for_account("acc-a")
+        assert len(acc_a_orders) == 2
+        assert all(o.account_id == "acc-a" for o in acc_a_orders)
+        assert {o.symbol for o in acc_a_orders} == {"005930", "000660"}
+
+        acc_b_orders = manager.get_orders_for_account("acc-b")
+        assert len(acc_b_orders) == 1
+        assert acc_b_orders[0].account_id == "acc-b"
+        assert acc_b_orders[0].symbol == "035720"
+
+    @patch.object(StopOrderManager, "_is_in_session", return_value=True)
+    async def test_get_orders_for_account_excludes_triggered_and_expired(
+        self,
+        _mock_session: MagicMock,
+        manager: StopOrderManager,
+        eventbus: MagicMock,
+    ) -> None:
+        """triggered/expired 주문은 제외 (active_orders 기반)."""
+        manager.start()
+
+        # 트리거될 주문
+        triggered_id = await manager.register(
+            order_id="ord-trig",
+            bot_id="bot-001",
+            strategy_id="stg-001",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=49000.0,
+            account_id="acc-a",
+        )
+        # 만료시킬 주문
+        expired_id = await manager.register(
+            order_id="ord-exp",
+            bot_id="bot-002",
+            strategy_id="stg-002",
+            symbol="000660",
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-a",
+        )
+        # 활성으로 유지될 주문
+        await manager.register(
+            order_id="ord-active",
+            bot_id="bot-003",
+            strategy_id="stg-003",
+            symbol="035720",
+            side="buy",
+            quantity=3.0,
+            order_type="stop",
+            stop_price=200000.0,
+            account_id="acc-a",
+        )
+
+        # triggered 주문 trigger 처리
+        await manager.on_price_update("005930", 48500.0, account_id="acc-a")
+        # expired 주문 만료 처리
+        expired_order = manager.get_order(expired_id)
+        assert expired_order is not None
+        await manager._expire_order(expired_order, "session_ended")
+
+        triggered_order = manager.get_order(triggered_id)
+        assert triggered_order is not None
+        assert triggered_order.triggered is True
+
+        acc_a_orders = manager.get_orders_for_account("acc-a")
+        assert len(acc_a_orders) == 1
+        assert acc_a_orders[0].order_id == "ord-active"
+
+    def test_get_orders_for_account_unknown_returns_empty(
+        self, manager: StopOrderManager
+    ) -> None:
+        """미존재 account_id → 빈 리스트 (데이터 누출 없음)."""
+        assert manager.get_orders_for_account("acc-unknown") == []
+
+    async def test_get_orders_for_account_subset_of_active(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """get_orders_for_bot 과 교차 정합 — 같은 active set 의 부분집합."""
+        await manager.register(
+            order_id="ord-1",
+            bot_id="bot-001",
+            strategy_id="stg-001",
+            symbol="005930",
+            side="sell",
+            quantity=10.0,
+            order_type="stop",
+            stop_price=49000.0,
+            account_id="acc-a",
+        )
+        await manager.register(
+            order_id="ord-2",
+            bot_id="bot-001",
+            strategy_id="stg-002",
+            symbol="000660",
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-b",
+        )
+
+        active = manager.active_orders
+        acc_a_orders = manager.get_orders_for_account("acc-a")
+        bot1_orders = manager.get_orders_for_bot("bot-001")
+
+        # 두 조회 모두 active_orders 의 부분집합
+        active_ids = {o.stop_order_id for o in active}
+        assert {o.stop_order_id for o in acc_a_orders} <= active_ids
+        assert {o.stop_order_id for o in bot1_orders} <= active_ids
+
+        # acc-a 활성 주문 = bot-001 의 acc-a 주문 (ord-1) 한 건과 교차 정합
+        acc_a_ids = {o.stop_order_id for o in acc_a_orders}
+        bot1_ids = {o.stop_order_id for o in bot1_orders}
+        assert acc_a_ids & bot1_ids == {
+            o.stop_order_id
+            for o in active
+            if o.account_id == "acc-a" and o.bot_id == "bot-001"
+        }
+
+
 class TestSignalTradingSession:
     """Signal trading_session 필드 테스트."""
 

@@ -182,6 +182,10 @@ class StopOrderManager:
         """봇의 활성 스탑 주문 목록."""
         return [o for o in self.active_orders if o.bot_id == bot_id]
 
+    def get_orders_for_account(self, account_id: str) -> list[StopOrder]:
+        """계좌의 활성 스탑 주문 목록."""
+        return [o for o in self.active_orders if o.account_id == account_id]
+
     async def on_price_update(
         self, symbol: str, price: float, *, account_id: str
     ) -> None:
