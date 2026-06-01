@@ -178,7 +178,7 @@ class FeedConfig:
             result.append(
                 {
                     "key": key,
-                    "set": val is not None,
+                    "set": bool(val),
                     "source": source,
                 }
             )
