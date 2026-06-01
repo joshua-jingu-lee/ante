@@ -73,14 +73,20 @@ override하면, `Event.__post_init__` 이 다음을 수행한다:
   계좌를 명시 전달하며, multi-account 환경에서 시그널을 account 기준으로
   감사/필터링/추적할 수 있도록 `_requires_account_id` 로 invalid fallback 을
   차단한다.
+- 대사 (#2058): `PositionMismatchEvent`, `ReconcileEvent` — 포지션 대사
+  결과는 대사 대상 계좌에 귀속된다. 발행자(`PositionReconciler.reconcile`)가
+  reconcile 입력 `account_id` 를 명시 전달하며, multi-account 환경에서 불일치·
+  보정 알림을 account 기준으로 추적할 수 있도록 `_requires_account_id` 로
+  invalid fallback 을 차단한다. `reconcile()` 진입부에서
+  `require_account_id` 로 valid 를 확정하므로 invalid account_id 는 이벤트
+  발행 이전에 차단된다.
 
 **비대상 (system-wide event)**:
 - `SystemStartedEvent`, `SystemShutdownEvent`, `NotificationEvent`,
   `BacktestCompleteEvent`, `ConfigChangedEvent`, `ApprovalCreatedEvent`,
   `ApprovalResolvedEvent`, `MemberRegisteredEvent`, `MemberSuspendedEvent`,
   `MemberReactivatedEvent`, `MemberRevokedEvent`, `MemberAuthFailedEvent`,
-  `CircuitBreakerEvent`,
-  `PositionMismatchEvent`, `ReconcileEvent` (현재 ext spec 단계에서 marker 미적용)
+  `CircuitBreakerEvent`
 
 **구현 노트**:
 - dataclass field ordering 제약 때문에 `account_id` 필드는 default `""` 를
@@ -145,8 +151,8 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `PositionMismatchEvent` | PositionReconciler | Notification | `bot_id`, `symbol`, `internal_qty`, `broker_qty`, `reason` |
-| `ReconcileEvent` | PositionReconciler | Notification | `bot_id`, `discrepancy_count`, `corrections` |
+| `PositionMismatchEvent` | PositionReconciler | Notification | `account_id`, `bot_id`, `symbol`, `internal_qty`, `broker_qty`, `reason` |
+| `ReconcileEvent` | PositionReconciler | Notification | `account_id`, `bot_id`, `discrepancy_count`, `corrections` |
 
 #### 외부 시그널 (External Signal)
 

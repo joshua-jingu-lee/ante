@@ -353,6 +353,55 @@ class TestReconcilerNotification:
         assert "포지션 불일치" in notifs[0].title
         assert "005930" in notifs[0].message
         assert "bot-1" in notifs[0].message
+        # #2058: 알림 메시지 첫 줄에 계좌가 표시된다.
+        assert "acc-test" in notifs[0].message
+        assert "계좌: `acc-test`" in notifs[0].message
+
+    async def test_sync_delay_notification_includes_account(self):
+        """#2058: self-submitted(동기화 지연) info 알림 메시지에도 계좌가 포함된다."""
+        eventbus = EventBus()
+        collected = _collect_notifications(eventbus)
+
+        trade_service = AsyncMock()
+        # 내부 포지션: 005930 50주
+        mock_position = MagicMock()
+        mock_position.symbol = "005930"
+        mock_position.quantity = 50.0
+        mock_position.avg_entry_price = 70000.0
+        trade_service.get_positions.return_value = [mock_position]
+
+        # OrderTracker: broker 초과분(30주)을 설명하는 미체결 매수 주문 존재
+        order_tracker = AsyncMock()
+        open_order = MagicMock()
+        open_order.ordered_qty = 30.0
+        open_order.recorded_filled_qty = 0.0
+        order_tracker.get_open_orders_for.return_value = [open_order]
+
+        from ante.trade.reconciler import PositionReconciler
+
+        reconciler = PositionReconciler(
+            trade_service=trade_service,
+            eventbus=eventbus,
+            order_tracker=order_tracker,
+        )
+
+        # 브로커: 005930 80주 (내부 50주보다 30주 초과 → self-submitted)
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 80.0, "avg_price": 70000}
+            ],
+            account_id="acc-test",
+        )
+
+        notifs = [n for n in collected if n.category == "broker"]
+        assert len(notifs) == 1
+        assert notifs[0].level == "info"
+        assert "포지션 동기화 지연" in notifs[0].title
+        # #2058: info 알림 메시지 첫 줄에도 계좌가 표시된다.
+        assert "계좌: `acc-test`" in notifs[0].message
+        assert "bot-1" in notifs[0].message
+        assert "005930" in notifs[0].message
 
 
 # ── approval/service.py (2건) ──────────────────────────

@@ -417,8 +417,21 @@ class BacktestCompleteEvent(Event):
 
 @dataclass(frozen=True)
 class PositionMismatchEvent(Event):
-    """포지션 불일치 감지."""
+    """포지션 불일치 감지.
 
+    Refs #2058: ``PositionMismatchEvent`` 는 대사(reconcile) 대상 계좌에
+    귀속되는 account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한
+    컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
+    ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
+    ``"default"``, 형식 위반) 을 ``Event.__post_init__`` 에서 차단한다.
+    발행자(``PositionReconciler.reconcile``)는 reconcile 입력
+    ``account_id`` 를 명시 전달하며, multi-account 환경에서 불일치 알림을
+    계좌 기준으로 추적할 수 있게 한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     bot_id: str = ""
     symbol: str = ""
     internal_qty: float = 0.0
@@ -428,8 +441,21 @@ class PositionMismatchEvent(Event):
 
 @dataclass(frozen=True)
 class ReconcileEvent(Event):
-    """Reconciler → EventBus: 대사 보정 완료."""
+    """Reconciler → EventBus: 대사 보정 완료.
 
+    Refs #2058: ``ReconcileEvent`` 는 대사(reconcile) 대상 계좌에 귀속되는
+    account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한 컨벤션으로
+    ``account_id`` 를 첫 데이터 필드로 배치하고, ``_requires_account_id``
+    마커로 invalid fallback (``""``, ``None``, ``"default"``, 형식 위반) 을
+    ``Event.__post_init__`` 에서 차단한다. 발행자
+    (``PositionReconciler.reconcile``)는 reconcile 입력 ``account_id`` 를
+    명시 전달하며, multi-account 환경에서 보정 결과를 계좌 기준으로
+    추적할 수 있게 한다.
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
     bot_id: str = ""
     discrepancy_count: int = 0
     corrections: list = field(default_factory=list)  # type: ignore[assignment]

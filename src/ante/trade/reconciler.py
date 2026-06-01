@@ -68,11 +68,20 @@ class PositionReconciler:
         Returns:
             보정 내역 리스트. 불일치가 없으면 빈 리스트.
         """
+        from ante.account.scoping import require_account_id
         from ante.eventbus.events import (
             NotificationEvent,
             PositionMismatchEvent,
             ReconcileEvent,
         )
+
+        # #2058: PositionMismatchEvent/ReconcileEvent 는 account-scoped 이벤트로
+        # 승격되어 valid account_id 를 요구한다. marker(_requires_account_id) 는
+        # "존재"가 아니라 "valid"를 요구하므로, source 인 reconcile() 진입부에서
+        # invalid("" / None / "default" / 형식 위반) 를 fail-fast 로 차단한다.
+        # 여기서 raise되면 이후 모든 emit/notification/correct_position 경로가
+        # 실행되지 않는다.
+        account_id = require_account_id(account_id, context="reconciler.reconcile")
 
         internal = await self._trade_service.get_positions(
             bot_id, account_id=account_id
@@ -139,6 +148,7 @@ class PositionReconciler:
                     )
                     await self._eventbus.publish(
                         PositionMismatchEvent(
+                            account_id=account_id,
                             bot_id=bot_id,
                             symbol=symbol,
                             internal_qty=i_qty,
@@ -151,7 +161,8 @@ class PositionReconciler:
                             level="info",
                             title="포지션 동기화 지연",
                             message=(
-                                f"봇: `{bot_id}` · 종목: `{symbol}`\n"
+                                f"계좌: `{account_id}` · 봇: `{bot_id}` · "
+                                f"종목: `{symbol}`\n"
                                 f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
                                 f"사유: {REASON_SELF_SUBMITTED} "
                                 "(체결 반영 대기 — 자동 보정 없음)"
@@ -192,6 +203,7 @@ class PositionReconciler:
 
             await self._eventbus.publish(
                 PositionMismatchEvent(
+                    account_id=account_id,
                     bot_id=bot_id,
                     symbol=symbol,
                     internal_qty=i_qty,
@@ -204,7 +216,8 @@ class PositionReconciler:
                     level="critical",
                     title="포지션 불일치",
                     message=(
-                        f"봇: `{bot_id}` · 종목: `{symbol}`\n"
+                        f"계좌: `{account_id}` · 봇: `{bot_id}` · "
+                        f"종목: `{symbol}`\n"
                         f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
                         f"사유: {reason}"
                     ),
@@ -230,6 +243,7 @@ class PositionReconciler:
             )
             await self._eventbus.publish(
                 ReconcileEvent(
+                    account_id=account_id,
                     bot_id=bot_id,
                     discrepancy_count=len(corrections),
                     corrections=corrections,
