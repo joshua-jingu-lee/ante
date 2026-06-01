@@ -1443,3 +1443,253 @@ class TestBacktestResultConfigFields:
             "datasets",
         }
         assert set(d.keys()) == expected_keys
+
+
+# ── get_trade_history 테스트 (#2075) ──────────────
+
+
+# 라이브 StrategyContext.get_trade_history 와 동일한 full dict shape.
+_TRADE_HISTORY_KEYS = {
+    "trade_id",
+    "symbol",
+    "side",
+    "quantity",
+    "price",
+    "status",
+    "order_type",
+    "reason",
+    "commission",
+    "timestamp",
+}
+
+
+class _MultiTradeStrategy(Strategy):
+    """여러 symbol에 걸쳐 매매를 발생시키는 테스트 전략."""
+
+    meta = StrategyMeta(
+        name="multi_trade",
+        version="1.0",
+        description="multi-symbol buy/sell",
+    )
+
+    def __init__(self, ctx: Any) -> None:
+        super().__init__(ctx)
+        self._step = 0
+
+    async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        self._step += 1
+        if self._step == 1:
+            return [Signal(symbol="005930", side="buy", quantity=10, reason="entry-a")]
+        if self._step == 2:
+            return [Signal(symbol="000660", side="buy", quantity=5, reason="entry-b")]
+        if self._step == 3:
+            return [Signal(symbol="005930", side="sell", quantity=10, reason="exit-a")]
+        return []
+
+
+@pytest.fixture
+async def multi_symbol_provider(store):
+    """005930 / 000660 두 종목이 적재된 BacktestDataProvider."""
+    for symbol in ("005930", "000660"):
+        store.write(symbol, "1d", _make_ohlcv_df(symbol=symbol))
+    provider = BacktestDataProvider(
+        store=store,
+        start_date="2026-01-01",
+        end_date="2026-12-31",
+    )
+    provider.load("005930", "1d")
+    provider.load("000660", "1d")
+    return provider
+
+
+class TestGetTradeHistory:
+    """BacktestStrategyContext / BacktestExecutor.get_trade_history 검증."""
+
+    async def _run_multi(self, provider):
+        executor = BacktestExecutor(
+            strategy_cls=_MultiTradeStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.001,
+            sell_commission_rate=0.001,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+        ctx = BacktestStrategyContext(
+            bot_id="test",
+            data_provider=provider,
+            portfolio=executor,
+        )
+        return executor, ctx
+
+    async def test_full_shape_keys(self, multi_symbol_provider):
+        """(a) 매매 후 full shape 키 전부를 포함한 dict 리스트 (AttributeError 없음)."""
+        _executor, ctx = await self._run_multi(multi_symbol_provider)
+        history = await ctx.get_trade_history()
+        assert isinstance(history, list)
+        assert len(history) == 3
+        for entry in history:
+            assert set(entry.keys()) == _TRADE_HISTORY_KEYS
+            assert entry["status"] == "filled"
+            assert entry["order_type"] == "market"
+            assert isinstance(entry["trade_id"], str)
+            assert entry["trade_id"].startswith("bt-")
+
+    async def test_timestamp_iso_string(self, multi_symbol_provider):
+        """(b) datetime timestamp는 ISO 문자열로 변환된다."""
+        _executor, ctx = await self._run_multi(multi_symbol_provider)
+        history = await ctx.get_trade_history()
+        for entry in history:
+            assert isinstance(entry["timestamp"], str)
+            # ISO 8601 문자열은 fromisoformat으로 round-trip 가능해야 한다.
+            datetime.fromisoformat(entry["timestamp"])
+
+    async def test_symbol_filter_then_limit(self, multi_symbol_provider):
+        """(c) symbol 필터를 limit 이전에 적용한다."""
+        _executor, ctx = await self._run_multi(multi_symbol_provider)
+
+        # 005930: buy(step1) + sell(step3) = 2건, 000660: buy(step2) = 1건
+        only_a = await ctx.get_trade_history(symbol="005930")
+        assert len(only_a) == 2
+        assert all(e["symbol"] == "005930" for e in only_a)
+
+        only_b = await ctx.get_trade_history(symbol="000660")
+        assert len(only_b) == 1
+        assert only_b[0]["symbol"] == "000660"
+
+        # 필터를 limit 이전에 적용: 005930에 한해 limit=1이면 1건만 남는다.
+        limited = await ctx.get_trade_history(symbol="005930", limit=1)
+        assert len(limited) == 1
+        assert limited[0]["symbol"] == "005930"
+        # 최신순이므로 005930의 가장 최근 거래(sell)가 남는다.
+        assert limited[0]["side"] == "sell"
+
+    async def test_newest_first(self, multi_symbol_provider):
+        """(d) 최신순: 가장 최근 거래가 [0]."""
+        _executor, ctx = await self._run_multi(multi_symbol_provider)
+        history = await ctx.get_trade_history()
+        # 발생 순서: buy(005930) -> buy(000660) -> sell(005930)
+        # 최신순이므로 역순으로 반환된다.
+        assert history[0]["symbol"] == "005930"
+        assert history[0]["side"] == "sell"
+        assert history[0]["reason"] == "exit-a"
+        assert history[-1]["symbol"] == "005930"
+        assert history[-1]["side"] == "buy"
+        assert history[-1]["reason"] == "entry-a"
+
+    async def test_trade_id_deterministic_original_index(self, multi_symbol_provider):
+        """trade_id는 원본 append 인덱스 기반으로 결정적이다."""
+        _executor, ctx = await self._run_multi(multi_symbol_provider)
+        history = await ctx.get_trade_history()
+        # 최신순: 원본 인덱스 2, 1, 0 순서 -> bt-2, bt-1, bt-0
+        assert [e["trade_id"] for e in history] == ["bt-2", "bt-1", "bt-0"]
+
+    async def test_empty_when_no_trades(self, data_provider):
+        """(e) 거래가 없으면 빈 리스트를 반환한다."""
+        executor = BacktestExecutor(
+            strategy_cls=EmptyStrategy,
+            data_provider=data_provider,
+        )
+        ctx = BacktestStrategyContext(
+            bot_id="test",
+            data_provider=data_provider,
+            portfolio=executor,
+        )
+        assert await ctx.get_trade_history() == []
+
+    async def test_issue_repro_no_attribute_error(self):
+        """(f) 이슈 #2075 재현 스크립트가 AttributeError 없이 동작한다.
+
+        FakeProvider는 timestamp를 str로 반환하므로, str timestamp가
+        그대로(isoformat 미적용) 유지되는 robustness도 함께 검증한다.
+        """
+
+        class FakeProvider:
+            start = "2026-01-01"
+            end = "2026-01-01"
+
+            def __init__(self) -> None:
+                self.i = -1
+
+            def get_total_steps(self) -> int:
+                return 1
+
+            def advance(self) -> bool:
+                self.i += 1
+                return self.i < 1
+
+            def get_current_timestamp(self) -> str:
+                return "2026-01-01"
+
+            async def get_current_price(self, symbol: str) -> float:
+                return 100.0
+
+        captured: dict[str, Any] = {}
+
+        class TradeHistoryStrategy(Strategy):
+            meta = StrategyMeta(
+                name="trade_history_strategy",
+                version="1.0",
+                description="t",
+            )
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                captured["history"] = await self.ctx.get_trade_history()
+                return []
+
+        # AttributeError 없이 완주해야 한다.
+        await BacktestExecutor(TradeHistoryStrategy, FakeProvider()).run()
+        assert captured["history"] == []
+
+    async def test_str_timestamp_passthrough(self, store):
+        """str timestamp 소스는 isoformat 미적용으로 그대로 유지된다."""
+
+        executor = BacktestExecutor(
+            strategy_cls=EmptyStrategy,
+            data_provider=BacktestDataProvider(
+                store=store,
+                start_date="2026-01-01",
+                end_date="2026-12-31",
+            ),
+        )
+        executor._trades.append(
+            BacktestTrade(
+                timestamp="2026-01-01",  # type: ignore[arg-type]
+                symbol="005930",
+                side="buy",
+                quantity=1,
+                price=100.0,
+                commission=0.1,
+                slippage=0.0,
+                reason="manual",
+            )
+        )
+        history = executor.get_trade_history()
+        assert history[0]["timestamp"] == "2026-01-01"
+        assert history[0]["trade_id"] == "bt-0"
+
+    async def test_none_timestamp_passthrough(self, store):
+        """None timestamp는 None으로 유지된다(라이브 None-safe parity)."""
+
+        executor = BacktestExecutor(
+            strategy_cls=EmptyStrategy,
+            data_provider=BacktestDataProvider(
+                store=store,
+                start_date="2026-01-01",
+                end_date="2026-12-31",
+            ),
+        )
+        executor._trades.append(
+            BacktestTrade(
+                timestamp=None,  # type: ignore[arg-type]
+                symbol="005930",
+                side="buy",
+                quantity=1,
+                price=100.0,
+                commission=0.1,
+                slippage=0.0,
+                reason="manual",
+            )
+        )
+        history = executor.get_trade_history()
+        assert history[0]["timestamp"] is None
