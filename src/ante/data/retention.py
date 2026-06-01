@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import calendar
 import logging
 from datetime import UTC, datetime
 
@@ -158,7 +159,9 @@ class RetentionPolicy:
         """
         try:
             year, month = month_str.split("-")
-            file_month_end = datetime(int(year), int(month), 28, tzinfo=UTC)
+            y, m = int(year), int(month)
+            last_day = calendar.monthrange(y, m)[1]
+            file_month_end = datetime(y, m, last_day, tzinfo=UTC)
             age_days = (now - file_month_end).days
             return age_days > max_days
         except (ValueError, IndexError):
