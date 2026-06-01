@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 from typing import TYPE_CHECKING, Any
 
 from ante.backtest.context import BacktestStrategyContext
@@ -13,6 +14,33 @@ if TYPE_CHECKING:
     from ante.strategy.base import Signal, Strategy
 
 logger = logging.getLogger(__name__)
+
+# 라이브 preflight가 허용하는 side vocabulary. RuleEngine이 OrderRequestEvent를
+# 검증할 때와 동일하게 case-sensitive로 buy/sell만 허용한다(#1991).
+_ALLOWED_SIDES = ("buy", "sell")
+
+
+def _is_valid_quantity(value: object) -> bool:
+    """``value``가 finite한 ``int``/``float`` quantity인지 판정.
+
+    RuleEngine ``_is_finite_quantity``와 동일 정책 (cross-module import 회피):
+    private helper를 import하면 backtest가 rule 모듈 내부 구현에 결합되므로,
+    같은 정책을 backtest 안에 작은 local mirror로 둔다(#1991, codex 지시).
+
+    - ``bool``은 제외한다(``True``/``False``를 수량으로 보지 않음).
+      ``isinstance(True, int) == True`` 이므로 명시적으로 잠근다.
+    - ``int``/``float``만 허용하고, ``math.isfinite``로 ``NaN``/``inf``를 차단한다.
+    - Python ``int``는 임의 정밀도라 ``10**10000`` 같은 거대 정수는 ``float``
+      변환 시 ``OverflowError`` (또는 ``ValueError``/``TypeError``)를 던진다.
+      이때도 finite-호환이 아니므로 ``False``로 떨어뜨린다(overflow guard).
+    - 본 helper는 절대 raise하지 않는 invariant를 유지한다.
+    """
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError, TypeError):
+        return False
 
 
 class BacktestExecutor:
@@ -128,7 +156,50 @@ class BacktestExecutor:
         거래 기록을 모두 체결 수량 기준으로 계산한다. 보유 수량을 초과하는 매도는
         보유분만 체결되므로, 초과 요청 수량이 수수료·슬리피지·거래 수량에
         반영되지 않는다(#1989).
+
+        가격 조회/분기 이전에 Signal을 검증한다(#1991, #2066 포괄). 라이브
+        ``RuleEngine`` preflight와 동일하게 ``side ∈ {"buy","sell"}`` 와 finite
+        양수 ``quantity`` 만 허용한다. 무효 Signal은 거래를 발행하지 않고 진단
+        로그만 남긴 뒤 skip한다(라이브 OrderRejectedEvent와 달리 backtest는
+        이벤트 없음). 특히 ``hold`` 등 buy/sell 이외 side는 **절대 sell 분기로
+        라우팅하지 않는다**(unknown side가 매도로 처리되던 회귀 차단).
         """
+        # ── Signal 검증 (가격 조회/분기 이전) ──────────────────────────
+        # side 검증: case-sensitive로 buy/sell만 허용. hold/unknown은 skip하여
+        # sell 분기 라우팅을 차단한다. 진단 로그는 hold(전략 작성 가이드)와
+        # unknown side(잘못된 값 경고)를 문구로 구분한다.
+        if signal.side not in _ALLOWED_SIDES:
+            if signal.side == "hold":
+                logger.warning(
+                    "Signal skip(hold): symbol=%s side=%r quantity=%r — "
+                    "hold는 no-op이므로 Signal을 발행하지 말 것(거래 미발행)",
+                    signal.symbol,
+                    signal.side,
+                    signal.quantity,
+                )
+            else:
+                logger.warning(
+                    "Signal skip(unknown side): symbol=%s side=%r quantity=%r — "
+                    'side는 {"buy","sell"}만 허용(거래 미발행)',
+                    signal.symbol,
+                    signal.side,
+                    signal.quantity,
+                )
+            return
+
+        # quantity 검증: finite numeric이 아니거나(NaN/inf/non-number/bool/거대
+        # 정수) <= 0(음수/0)이면 skip. 음수 buy는 cost가 음수가 되어 잔고
+        # 검사를 통과하므로 여기서 fail-closed로 막는다.
+        if not _is_valid_quantity(signal.quantity) or signal.quantity <= 0:
+            logger.warning(
+                "Signal skip(invalid quantity): symbol=%s side=%r quantity=%r — "
+                "quantity는 finite한 양수여야 함(거래 미발행)",
+                signal.symbol,
+                signal.side,
+                signal.quantity,
+            )
+            return
+
         price = await self._data.get_current_price(signal.symbol)
 
         if signal.side == "buy":

@@ -775,6 +775,231 @@ class TestBacktestExecutor:
         assert buy_trade.commission != sell_trade.commission
 
 
+# ── Signal 검증 테스트 (#1991, #2066 포괄) ─────────
+
+
+class _OneSignalStrategy(Strategy):
+    """첫 스텝에 주어진 Signal 하나만 발행하는 전략."""
+
+    meta = StrategyMeta(name="one_signal", version="1.0", description="t")
+
+    #: 클래스 변수로 발행할 Signal을 주입한다.
+    signal: Signal
+
+    def __init__(self, ctx: Any) -> None:
+        super().__init__(ctx)
+        self._emitted = False
+
+    async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        if not self._emitted:
+            self._emitted = True
+            return [self.signal]
+        return []
+
+
+def _make_one_signal_strategy(signal: Signal) -> type[Strategy]:
+    """첫 스텝에 ``signal`` 하나만 발행하는 전략 클래스를 만든다."""
+    return type(
+        "InjectedOneSignalStrategy",
+        (_OneSignalStrategy,),
+        {"signal": signal},
+    )
+
+
+class TestBacktestSignalValidation:
+    """무효 Signal(side/quantity)을 거래 발행 없이 skip하는지 검증.
+
+    라이브 RuleEngine preflight와 동일 vocabulary: side ∈ {"buy","sell"},
+    quantity finite & > 0. #2066(음수/0/NaN quantity)을 포괄한다.
+    """
+
+    async def _run_single_signal(self, store, signal: Signal):
+        """평탄 가격(close=100) fixture에서 단일 Signal 백테스트 실행."""
+        df = _make_ohlcv_df_with_closes([100.0, 100.0, 100.0, 100.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(signal),
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+        return executor, result
+
+    async def test_negative_buy_quantity_skipped(self, store):
+        """Signal(side="buy", quantity=-1) → 거래 미발행 + 현금/포지션 불변."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=-1)
+        )
+        assert len(result.trades) == 0
+        # 음수 buy가 cost를 음수로 만들어 현금을 늘리던 회귀를 차단(현금 불변).
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_nan_buy_quantity_skipped(self, store):
+        """#2066: Signal(side="buy", quantity=NaN) → skip."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=float("nan"))
+        )
+        assert len(result.trades) == 0
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_inf_buy_quantity_skipped(self, store):
+        """#2066: Signal(side="buy", quantity=inf) → skip."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=float("inf"))
+        )
+        assert len(result.trades) == 0
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_zero_buy_quantity_skipped(self, store):
+        """#2066: Signal(side="buy", quantity=0) → skip."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=0)
+        )
+        assert len(result.trades) == 0
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_bool_buy_quantity_skipped(self, store):
+        """정책 일치: bool quantity(True)는 수량으로 보지 않고 skip."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=True)
+        )
+        assert len(result.trades) == 0
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_unknown_side_skipped(self, store):
+        """unknown side("foo") → skip(거래 미발행)."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="foo", quantity=1)
+        )
+        assert len(result.trades) == 0
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        assert executor._positions == {}
+
+    async def test_hold_side_not_routed_to_sell(self, store):
+        """포지션 보유 중 Signal(side="hold", quantity=1) → 매도되지 않음.
+
+        Repro 2 회귀(#1991): buy/sell 이외 side가 sell 분기로 라우팅되어
+        포지션이 청산되고 ledger side가 hold로 기록되던 버그를 차단한다.
+        hold Signal은 거래를 발행하지 않고 포지션을 그대로 유지해야 한다.
+        """
+        df = _make_ohlcv_df_with_closes([100.0, 100.0, 100.0, 100.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        class BuyThenHold(Strategy):
+            meta = StrategyMeta(name="buy_then_hold", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                if self._step == 2:
+                    return [Signal(symbol="005930", side="hold", quantity=1)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenHold,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # 매수 거래 1건만 기록되고, hold는 거래를 발행하지 않는다.
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        assert all(t.side != "hold" for t in result.trades)
+        # 포지션이 hold로 청산되지 않고 유지된다(1주 보유).
+        assert executor._positions["005930"]["quantity"] == 1
+
+    async def test_valid_buy_processed(self, store):
+        """회귀: 유효 Signal(side="buy", quantity=5)는 정상 처리."""
+        executor, result = await self._run_single_signal(
+            store, Signal(symbol="005930", side="buy", quantity=5)
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        assert result.trades[0].quantity == 5
+        assert executor._positions["005930"]["quantity"] == 5
+
+    async def test_valid_sell_processed(self, store):
+        """회귀: 유효 Signal(side="sell", quantity=3)은 정상 처리."""
+        df = _make_ohlcv_df_with_closes([100.0, 100.0, 100.0, 100.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        class BuyThenSell(Strategy):
+            meta = StrategyMeta(name="buy_then_sell", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=5)]
+                if self._step == 2:
+                    return [Signal(symbol="005930", side="sell", quantity=3)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenSell,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 2
+        assert result.trades[0].side == "buy"
+        assert result.trades[1].side == "sell"
+        assert result.trades[1].quantity == 3
+        # buy 5 - sell 3 = 2주 잔여
+        assert executor._positions["005930"]["quantity"] == 2
+
+    async def test_skip_emits_warning_with_diagnostics(self, store, caplog):
+        """skip 시 logger.warning에 symbol/side/quantity가 포함된다."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            await self._run_single_signal(
+                store, Signal(symbol="005930", side="buy", quantity=-1)
+            )
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "무효 Signal skip 시 경고 로그가 있어야 함"
+        msg = warnings[0].getMessage()
+        assert "005930" in msg
+        assert "buy" in msg
+        assert "-1" in msg
+
+
 # ── Mark-to-Market 평가 테스트 (#1987) ─────────────
 
 
