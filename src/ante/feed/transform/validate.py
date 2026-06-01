@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import datetime
 from typing import Any
 
@@ -174,6 +175,7 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
 
     for i, record in enumerate(records):
         symbol = record.get("symbol", f"record_{i}")
+        _check_finite_values(record, symbol, warnings)
         _check_positive_prices(record, symbol, warnings)
         _check_volume_non_negative(record, symbol, warnings)
         _check_ohlc_relationship(record, symbol, warnings)
@@ -189,6 +191,36 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
         warnings=warnings,
         errors=[],
     )
+
+
+def _check_finite_values(
+    record: dict[str, Any],
+    symbol: str,
+    warnings: list[str],
+) -> None:
+    """OHLCV 숫자 필드가 유한(finite)한지 검증한다.
+
+    NaN/inf 값은 schema 계층(float 변환 가능)을 통과하지만 데이터 품질
+    문제이므로 business 계층 경고로 관측한다. 숫자 변환 실패는 schema 계층
+    소관이므로 건너뛴다.
+
+    Args:
+        record: 검증할 레코드.
+        symbol: 심볼 식별자 (경고 메시지용).
+        warnings: 경고를 추가할 목록.
+    """
+    for field_name in ("open", "high", "low", "close", "volume", "amount"):
+        value = record.get(field_name)
+        if value is None:
+            continue
+        try:
+            num = float(str(value))
+        except (ValueError, TypeError):
+            continue  # 숫자 변환 실패는 스키마 계층 소관
+        if not math.isfinite(num):
+            warnings.append(
+                f"{symbol}: {field_name} 비정상 값(NaN/inf) ({field_name}={value})"
+            )
 
 
 def _check_positive_prices(
@@ -209,8 +241,10 @@ def _check_positive_prices(
             continue
         try:
             price = float(value)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, OverflowError):
             continue  # 스키마 검증에서 이미 잡힘
+        if not math.isfinite(price):
+            continue  # NaN/inf는 _check_finite_values가 단독 관측
         if price <= 0:
             warnings.append(f"{symbol}: {price_field} <= 0 ({price_field}={price})")
 
@@ -232,8 +266,8 @@ def _check_volume_non_negative(
         return
     try:
         vol = int(float(str(volume_val)))
-    except (ValueError, TypeError):
-        return
+    except (ValueError, TypeError, OverflowError):
+        return  # NaN/inf(int 변환 OverflowError 포함)는 _check_finite_values가 관측
     if vol < 0:
         warnings.append(f"{symbol}: volume < 0 (volume={vol})")
 
@@ -255,11 +289,14 @@ def _check_ohlc_relationship(
         h = float(record["high"]) if "high" in record else None
         low_val = float(record["low"]) if "low" in record else None
         c = float(record["close"]) if "close" in record else None
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError):
         return  # 숫자 변환 실패는 스키마 계층에서 처리
 
     if o is None or h is None or low_val is None or c is None:
         return
+
+    if not all(math.isfinite(v) for v in (o, h, low_val, c)):
+        return  # NaN/inf는 _check_finite_values가 단독 관측 (관계 오탐 차단)
 
     if low_val > c:
         warnings.append(f"{symbol}: low > close (low={low_val}, close={c})")
