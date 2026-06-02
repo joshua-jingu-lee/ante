@@ -120,18 +120,27 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **CLI
 | `ante bot remove <id>` | `bot.delete` | `bot:{bot_id}` |
 | `ante bot signal-key <id> --rotate` | `bot.signal_key.rotate` | `bot:{bot_id}` |
 | `ante broker reconcile --fix` | `broker.reconcile` | `account:{account_id}` |
-| `ante member register` | `member.create` | `member:{member_id}` |
+| `ante member register` | `member.register` | `member:{member_id}` |
+| `ante member set-emoji <id> <emoji>` | `member.set_emoji` | `member:{member_id}` |
+| `ante member update-scopes <id>` | `member.update_scopes` | `member:{member_id}` |
 | `ante member suspend <id>` | `member.suspend` | `member:{member_id}` |
 | `ante member reactivate <id>` | `member.reactivate` | `member:{member_id}` |
 | `ante member revoke <id>` | `member.revoke` | `member:{member_id}` |
 | `ante member rotate-token <id>` | `member.rotate_token` | `member:{member_id}` |
-| `ante member reset-password` | `member.reset_password` | `member:{member_id}` |
-| `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{member_id}` |
+| `ante member reset-password` | `member.reset_password` | `member:{master_member_id}` |
+| `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{master_member_id}` |
 
 `ante bot start`/`ante bot stop`은 audit action(`bot.start`/`bot.stop`) 이름을
 사용한다. 봇 생애주기 변경은 단일 audit action namespace로 모인다.
 `ante bot status`는 read-only live 조회이므로 audit 대상이 아니다
 (상태 변경 액션만 기록하는 audit 기록 원칙).
+
+`ante member reset-password`/`ante member regenerate-recovery-key`는 인증 불필요
+(auth-exempt) 커맨드다. 대상은 항상 master 멤버이며 그 `member_id`는 서버 handler가
+master-lookup으로 해석해 `resource`에 기록한다. 다만 audit row의 `member_id`(행위자)는
+client가 보낸 actor(스푸핑 가능)를 신뢰하지 않고 handler가 고정한 sentinel 상수
+(`recovery`)로 기록한다. recovery key, 새/현재 password 등 비밀값은 audit detail,
+audit_log, IPC error envelope, server 로그 어디에도 기록하지 않는다.
 
 ### 구현 방식
 

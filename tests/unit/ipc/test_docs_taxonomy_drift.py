@@ -53,15 +53,9 @@ _IPC_COMMAND_PREFIXES = (
 # 본문 prose 에서 언급된 contextual command name.
 _DOCS_NON_REGISTRY_TOKENS = frozenset(
     {
-        # member.* runtime IPC stub (CLI 표 surface, 실제 wiring 후속) — ipc.md:160-168
-        "member.register",
-        "member.set_emoji",
-        "member.suspend",
-        "member.reactivate",
-        "member.revoke",
-        "member.rotate_token",
-        "member.reset_password",
-        "member.regenerate_recovery_key",
+        # Refs #2113: member.* 8 (register/set_emoji/suspend/reactivate/revoke/
+        # rotate_token/reset_password/regenerate_recovery_key) 이 모두
+        # ``register_all_handlers()`` 에 wiring 되어 화이트리스트에서 제거됨.
         # cold-path 전용 — ipc.md:70-74 / 193 / 273
         "account.delete",
         "account.create",

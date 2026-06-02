@@ -508,6 +508,33 @@ def member_register(
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
 
     async def _run_register() -> tuple[dict, str]:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            # IPC-first: 서버 실행 중이면 runtime IPC 로 위임한다. handler 가
+            # token 을 result 에 담아 반환하므로 동일 shape (fields + token) 으로
+            # 분리해 cold-path 출력 parity 를 보존한다 (#2113).
+            payload = await ipc_send(
+                "member.register",
+                {
+                    "member_id": member_id,
+                    "member_type": member_type,
+                    "org": org,
+                    "name": name,
+                    "scopes": scope_list,
+                },
+                actor=actor,
+            )
+            token = payload.get("token", "")
+            return {
+                "member_id": payload.get("member_id", member_id),
+                "type": payload.get("type", member_type),
+                "role": payload.get("role", ""),
+                "org": payload.get("org", org),
+                "name": payload.get("name", name),
+            }, token
+
         async with _create_service(ctx) as service:
             m, token = await service.register(
                 member_id=member_id,
@@ -527,6 +554,14 @@ def member_register(
 
     try:
         result, token = _run(_run_register())
+    except click.ClickException as e:
+        # IPC error envelope (서버 미기동/타임아웃 또는 server-side 거부) 를
+        # stable code 로 surface 한다 (secret 비노출 — message 는 envelope 의
+        # code/message 만 사용).
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except PermissionDeniedError:
         # PERMISSION_DENIED code 명시 — master 검증 위반의 안정 코드.
         # CLI surface override 보존: 사용자 친화 한국어 문구
@@ -571,12 +606,27 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_set_emoji() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "member.set_emoji",
+                {"member_id": member_id, "emoji": emoji},
+                actor=actor,
+            )
+
         async with _create_service(ctx) as service:
             m = await service.update_emoji(member_id, emoji, updated_by=actor)
             return {"member_id": m.member_id, "emoji": m.emoji}
 
     try:
         result = _run(_run_set_emoji())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except MemberNotFoundError:
         # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
         # (CLI/IPC 일관성: ``MemberNotFoundError.code`` 와 동형, ``member
@@ -666,12 +716,27 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_suspend() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "member.suspend",
+                {"member_id": member_id},
+                actor=actor,
+            )
+
         async with _create_service(ctx) as service:
             m = await service.suspend(member_id, suspended_by=actor)
             return {"member_id": m.member_id, "status": m.status}
 
     try:
         result = _run(_run_suspend())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except PermissionDeniedError:
         # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
@@ -706,12 +771,27 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_reactivate() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "member.reactivate",
+                {"member_id": member_id},
+                actor=actor,
+            )
+
         async with _create_service(ctx) as service:
             m = await service.reactivate(member_id, reactivated_by=actor)
             return {"member_id": m.member_id, "status": m.status}
 
     try:
         result = _run(_run_reactivate())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except PermissionDeniedError:
         # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
@@ -764,12 +844,27 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
         raise SystemExit(1)
 
     async def _run_revoke() -> dict:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            return await ipc_send(
+                "member.revoke",
+                {"member_id": member_id},
+                actor=actor,
+            )
+
         async with _create_service(ctx) as service:
             m = await service.revoke(member_id, revoked_by=actor)
             return {"member_id": m.member_id, "status": m.status}
 
     try:
         result = _run(_run_revoke())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except PermissionDeniedError:
         # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
@@ -797,12 +892,32 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     actor = get_member_id(ctx)
 
     async def _run_rotate() -> tuple[dict, str]:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            # handler 가 token 을 result 에 담아 반환 — cold-path 출력 parity
+            # ({member_id} fields + token) 를 위해 분리한다 (#2113).
+            payload = await ipc_send(
+                "member.rotate_token",
+                {"member_id": member_id},
+                actor=actor,
+            )
+            return {"member_id": payload.get("member_id", member_id)}, payload.get(
+                "token", ""
+            )
+
         async with _create_service(ctx) as service:
             m, token = await service.rotate_token(member_id, rotated_by=actor)
             return {"member_id": m.member_id}, token
 
     try:
         result, token = _run(_run_rotate())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except PermissionDeniedError:
         # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
@@ -863,6 +978,19 @@ def member_reset_password(
     )
 
     async def _run_reset() -> None:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            # auth-exempt: client 는 secret 만 보내고 master-lookup 은 서버
+            # handler(chokepoint)가 수행한다. actor 는 audit member_id 로
+            # 신뢰되지 않으며 handler 가 고정 sentinel 로 기록한다 (#2113).
+            await ipc_send(
+                "member.reset_password",
+                {"recovery_key": recovery_key, "new_password": new_password},
+            )
+            return
+
         async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
@@ -873,6 +1001,13 @@ def member_reset_password(
 
     try:
         _run(_run_reset())
+    except click.ClickException as e:
+        # IPC error envelope 만 surface — recovery_key/new_password 는 절대
+        # message 에 싣지 않는다 (secret 비노출).
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except MemberInvalidRecoveryCredentialError as e:
         # invalid recovery credential 은 안정 코드
         # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
@@ -923,6 +1058,19 @@ def member_regenerate_recovery_key(
     )
 
     async def _run_regen() -> str:
+        from ante.cli.cold_path import is_active_runtime
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        if is_active_runtime():
+            # auth-exempt: client 는 secret(password) 만 보내고 master-lookup 은
+            # 서버 handler 가 수행한다. 새 recovery key 는 result 로만 surface
+            # 한다 (audit/log/envelope 비노출) (#2113).
+            payload = await ipc_send(
+                "member.regenerate_recovery_key",
+                {"password": password},
+            )
+            return payload.get("recovery_key", "")
+
         async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
             master = next((m for m in members if m.role == "master"), None)
@@ -933,6 +1081,13 @@ def member_regenerate_recovery_key(
 
     try:
         new_key = _run(_run_regen())
+    except click.ClickException as e:
+        # IPC error envelope 만 surface — password/new recovery key 는 절대
+        # message 에 싣지 않는다 (secret 비노출).
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        fmt.error(message, code=code)
+        raise SystemExit(1) from e
     except MemberInvalidRecoveryCredentialError as e:
         # invalid 현재 패스워드는 안정 코드
         # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
