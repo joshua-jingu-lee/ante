@@ -511,6 +511,96 @@ class TestStrategy(Strategy):
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert not any("top-level" in e.lower() for e in result.errors)
 
+    def test_toplevel_if_body_call_detected(self, validator, tmp_path):
+        """#2018: 최상위 if 본문의 실행문(함수 호출)을 검출한다.
+
+        `if True:` 등 조건이 무엇이든 if-body는 import-time에 실행되므로
+        top-level 규칙으로 재귀 검사되어야 한다. 과거에는 if 전체를 skip해
+        side effect가 우회되었다.
+        """
+        code = """
+if True:
+    foo()
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_if_else_call_detected(self, validator, tmp_path):
+        """#2018: 최상위 if의 else 본문 실행문도 검출한다 (elif/else 분기)."""
+        code = """
+if SOME_FLAG:
+    pass
+else:
+    bar()
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_if_elif_call_detected(self, validator, tmp_path):
+        """#2018: 최상위 if의 elif 본문(orelse에 중첩된 If)도 재귀 검출한다."""
+        code = """
+if A:
+    pass
+elif B:
+    baz()
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_if_type_checking_import_allowed(self, validator, tmp_path):
+        """#2018 회귀: `if TYPE_CHECKING:` 본문의 import는 오탐 없이 통과한다.
+
+        AST 정적 검사라 TYPE_CHECKING이 정의되지 않아도 무관(실행하지 않음).
+        if-body의 import는 기존 top-level import 허용 규칙으로 통과해야 한다.
+        """
+        code = """
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ante.strategy import Signal
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_if_literal_assign_allowed(self, validator, tmp_path):
+        """#2018 회귀: if 본문의 리터럴 상수 할당은 오탐 없이 통과한다."""
+        code = """
+if FLAG:
+    CONST = "a"
+else:
+    CONST = "b"
+
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("top-level" in e.lower() for e in result.errors)
+
     def test_open_error(self, validator, tmp_path):
         """open 호출은 에러."""
         code = """
