@@ -185,12 +185,16 @@ class TestReadWriteWithExchange:
         assert len(result) == 1
 
     def test_get_date_range_with_exchange(self, tmp_store: ParquetStore) -> None:
-        """exchange별 데이터 기간 조회."""
+        """exchange별 데이터 기간 조회.
+
+        (이슈 #2014) 월 stem "2026-01" 이 아니라 실제 row 날짜를 반환.
+        _make_ohlcv_df 기본: 2026-01-01~2026-01-03(일 단위 3건) → 첫 row "2026-01-01".
+        """
         df = _make_ohlcv_df()
         tmp_store.write("005930", "1d", df, exchange="KRX")
         result = tmp_store.get_date_range("005930", "1d", exchange="KRX")
         assert result is not None
-        assert result[0] == "2026-01"
+        assert result == ("2026-01-01", "2026-01-03")
 
     def test_get_row_count_with_exchange(self, tmp_store: ParquetStore) -> None:
         """exchange별 행 수 조회."""
