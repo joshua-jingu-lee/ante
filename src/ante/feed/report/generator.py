@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ante.feed.models.result import CollectionResult
@@ -15,6 +16,9 @@ from ante.feed.models.result import CollectionResult
 logger = logging.getLogger(__name__)
 
 REPORTS_DIR = "reports"
+
+# started_at parse 실패 시 정렬 후순위로 밀기 위한 sentinel(UTC aware).
+_MIN_STARTED_AT = datetime.min.replace(tzinfo=UTC)
 
 
 class ReportGenerator:
@@ -90,15 +94,49 @@ class ReportGenerator:
     def list_reports(self, limit: int = 10) -> list[Path]:
         """최근 리포트 목록을 반환한다.
 
+        각 리포트 JSON의 ``started_at``을 datetime으로 파싱한 값을 기준으로
+        내림차순(최신 우선) 정렬한다. 파일명(``{date}-{mode}.json``)은 같은
+        날짜의 daily/backfill 순서를 사전식으로 오판하므로 정렬 키로 쓰지
+        않는다(#2047).
+
+        ``started_at`` 누락·파싱 실패·파일 읽기 실패 시 해당 파일은 목록에서
+        제외하지 않고 정렬 키를 최소값으로 두어 뒤로 보낸다(전체 실패 방지).
+        같은 ``started_at``끼리는 파일명 역순을 보조 키로 두어 안정 정렬한다.
+
         Args:
             limit: 최대 반환 개수 (최신 순).
 
         Returns:
-            리포트 파일 경로 목록.
+            리포트 파일 경로 목록 (최신 N개).
         """
         reports_dir = self._feed_dir / REPORTS_DIR
         if not reports_dir.exists():
             return []
 
-        files = sorted(reports_dir.glob("*.json"), reverse=True)
+        files = list(reports_dir.glob("*.json"))
+        # started_at 내림차순, tie는 파일명 역순(둘 다 reverse=True와 정합).
+        files.sort(
+            key=lambda path: (self._started_at_key(path), path.name),
+            reverse=True,
+        )
         return files[:limit]
+
+    def _started_at_key(self, path: Path) -> datetime:
+        """정렬용 ``started_at`` datetime(UTC aware)을 반환한다.
+
+        읽기/파싱 실패 또는 ``started_at`` 누락 시 ``_MIN_STARTED_AT``을
+        반환하여 해당 리포트를 후순위로 밀고, 예외는 삼키되 debug 로그로 남긴다.
+        """
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            started_at = raw.get("started_at") if isinstance(raw, dict) else None
+            if not isinstance(started_at, str):
+                logger.debug("리포트 started_at 누락/비문자열: %s", path)
+                return _MIN_STARTED_AT
+            parsed = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as exc:
+            logger.debug("리포트 started_at 파싱 실패: %s (%s)", path, exc)
+            return _MIN_STARTED_AT
