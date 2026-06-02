@@ -73,6 +73,11 @@ _TIME_COLUMN: dict[str, str] = {
     "tick": "timestamp",
 }
 
+# `read(end=...)`에서 엄격 date-only(`YYYY-MM-DD`)를 식별하는 정규식.
+# 시간 성분/timezone suffix/basic ISO 등 그 외 형식은 매치하지 않으며
+# 기존 `<= end`(정확 instant) 경로로 처리된다(#2081).
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
 
 def _natural_key(data_type: str, columns: list[str]) -> list[str]:
     """data_type별 merge/dedup용 natural key 컬럼 목록을 결정한다.
@@ -346,7 +351,10 @@ class ParquetStore:
             symbol: 종목 코드
             timeframe: 타임프레임 (1m, 5m, 15m, 1h, 1d)
             start: 시작 시간 (ISO 형식, inclusive)
-            end: 종료 시간 (ISO 형식, inclusive)
+            end: 종료 시간 (ISO 형식, inclusive). date-only(`YYYY-MM-DD`)는
+                해당 날짜 whole-day inclusive(당일 23:59:59.999까지)로
+                해석되어 intraday 당일 장중 데이터가 포함된다(#2081).
+                시간 성분이 있는 형식은 그 정확 instant까지 inclusive다.
             limit: 최근 N건만 반환
             data_type: 데이터 타입 (ohlcv, fundamental, tick)
             exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
@@ -396,9 +404,26 @@ class ParquetStore:
                 pl.col(time_col) >= pl.lit(start).str.to_datetime(time_zone="UTC")
             )
         if end and time_col in df.columns:
-            df = df.filter(
-                pl.col(time_col) <= pl.lit(end).str.to_datetime(time_zone="UTC")
-            )
+            # date-only end(`YYYY-MM-DD`)는 whole-day inclusive로 해석한다.
+            # `<= 2026-01-02 00:00 UTC`로 파싱하면 intraday(1m/5m/1h) 당일
+            # 장중 row(09:01, 15:30 등)가 모두 제외된다(#2081). 따라서
+            # date-only일 때는 자정 instant가 아니라 그 날 전체를 포함하도록
+            # `< (end_date + 1 day)`(당일 23:59:59.999까지)로 필터한다.
+            # 1d(daily) bar는 00:00이라 +1day exclusive로도 당일 bar가
+            # 그대로 포함되어 기존 동작과 동일하다(회귀 없음).
+            #
+            # 시간 성분이 있는 end(datetime, timezone suffix, basic ISO 등
+            # date-only가 아닌 모든 형식)는 기존 `<= end`(정확 instant)를
+            # 유지한다.
+            if _DATE_ONLY_RE.match(end):
+                df = df.filter(
+                    pl.col(time_col)
+                    < pl.lit(end).str.to_datetime(time_zone="UTC") + pl.duration(days=1)
+                )
+            else:
+                df = df.filter(
+                    pl.col(time_col) <= pl.lit(end).str.to_datetime(time_zone="UTC")
+                )
 
         if time_col in df.columns:
             df = df.sort(time_col)
