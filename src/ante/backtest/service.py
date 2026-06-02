@@ -30,6 +30,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+BACKTEST_RESULT_SENTINEL = "__ANTE_BACKTEST_RESULT__"
+
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -112,7 +114,13 @@ class BacktestService:
             msg = f"Backtest subprocess failed: {stderr.decode()}"
             raise BacktestError(msg)
 
-        return json.loads(stdout.decode())
+        stdout_text = stdout.decode()
+        for line in stdout_text.splitlines():
+            if line.startswith(BACKTEST_RESULT_SENTINEL):
+                payload = line[len(BACKTEST_RESULT_SENTINEL) :]
+                return json.loads(payload)
+        msg = "Backtest subprocess did not emit a result line"
+        raise BacktestError(msg)
 
     async def _publish_complete_event(
         self,
