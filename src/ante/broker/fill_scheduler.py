@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -49,6 +50,38 @@ def business_date_kst(when: datetime | None = None) -> str:
     """KST 기준 영업일 ``YYYYMMDD`` (KIS ord_dt 매칭용)."""
     moment = when or datetime.now(UTC)
     return moment.astimezone(_KST).strftime("%Y%m%d")
+
+
+def _normalize_history_date(raw: str) -> str:
+    """``get_order_history`` 의 ``timestamp`` 를 KST 영업일 ``YYYYMMDD`` 로 정규화.
+
+    ``OrderTracker.lookup_order_id`` 와 ``FillApplier.apply_cumulative`` 는
+    ``submitted_date`` 를 KST 영업일 ``YYYYMMDD`` 문자열로 가정해 tracker seed 의
+    ``submitted_date`` 와 ``<=`` 비교한다(order_tracker.py §4.1). 그런데
+    Test/Mock 어댑터의 ``get_order_history`` 는 ``created_at.isoformat()`` (ISO
+    8601) 을 ``timestamp`` 로 내보내므로, 정규화 없이 그대로 넘기면 ISO 문자열이
+    ``YYYYMMDD`` 와의 문자열 비교에서 항상 큰 값이 되어 매핑이 누락되고 복구가
+    no-op(applied=0)이 된다(#2004). KIS 어댑터는 이미 ``ord_dt`` (YYYYMMDD) 를
+    내보내므로 그대로 통과시킨다.
+
+    Args:
+        raw: ``get_order_history`` item 의 ``timestamp`` 원문 문자열.
+
+    Returns:
+        KST 영업일 ``YYYYMMDD``. 빈 문자열이거나 ISO 파싱이 불가하면 ``""`` 를
+        반환해 호출부가 ``to_date`` fallback 을 적용하게 한다.
+    """
+    if re.fullmatch(r"\d{8}", raw):
+        # YYYYMMDD passthrough (KIS ord_dt).
+        return raw
+    try:
+        dt = datetime.fromisoformat(raw)
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        # naive ISO 는 UTC 로 가정한 뒤 KST 영업일로 환산한다.
+        dt = dt.replace(tzinfo=UTC)
+    return business_date_kst(dt)
 
 
 @dataclass(frozen=True, slots=True)
@@ -248,7 +281,13 @@ class FillReconcileScheduler:
             if cumulative <= 0:
                 continue
             avg_price = float(item.get("price", 0.0) or 0.0)
-            item_date = str(item.get("timestamp", "")) or to_date
+            # ISO timestamp(Test/Mock) 는 KST 영업일 YYYYMMDD 로 정규화한다.
+            # tracker 의 submitted_date(<=) 매칭 전제와 맞춰 복구 no-op 을
+            # 방지한다(#2004). KIS ord_dt(YYYYMMDD)는 그대로 통과. 빈/파싱불가
+            # 는 to_date(오늘 KST) 로 fallback.
+            item_date = (
+                _normalize_history_date(str(item.get("timestamp", ""))) or to_date
+            )
             delta = await self._applier.apply_cumulative(
                 account_id=self._account_id,
                 broker_order_id=broker_order_id,
