@@ -1999,6 +1999,77 @@ def _factory():
         assert not result.valid
         assert any("No class inheriting from Strategy" in e for e in result.errors)
 
+    def test_import_as_used_before_local_redefine_passes(self, validator, tmp_path):
+        """import-as 후 class 사용, 그 뒤 local 재정의 → 사용 시점 바인딩으로 인정.
+
+        Python 은 정의 순서로 이름을 바인딩한다. `class X(S)` 시점의 S 는 import
+        된 ante Strategy 이므로(런타임 유효·loader 가 X 카운트) X 를 **인정**해야
+        한다. 이후 `class S` 의 local 재정의는 X 판정에 영향을 주지 않는다.
+        (3차 Codex FAIL 케이스 — 정의 순서를 무시한 false negative 회귀 락.)
+        """
+        code = """
+from ante.strategy import Strategy as S, StrategyMeta
+
+class X(S):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+class S:
+    pass
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_local_redefine_before_use_not_counted(self, validator, tmp_path):
+        """import 후 local 재정의가 사용보다 먼저 → 사용 시점엔 local shadow → 미인정.
+
+        `from ante.strategy import Strategy` 로 ante 바인딩 후, `class Strategy`
+        가 그 이름을 local 로 재바인딩한 다음 `class X(Strategy)` 가 온다. X 정의
+        시점의 Strategy 는 local 클래스이므로 미인정(loader 도 X 는 ante 비상속이라
+        비카운트, 정합).
+        """
+        code = """
+from ante.strategy import Strategy
+
+class Strategy:
+    pass
+
+class X(Strategy):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+    def test_original_2042_bug_strategy_meta_only_not_counted(
+        self, validator, tmp_path
+    ):
+        """원래 #2042 버그: StrategyMeta 만 import + local `class Strategy` → 미인정.
+
+        Strategy 라는 이름은 ante 로 바인딩된 적이 없고(StrategyMeta 만 import),
+        `class Strategy` 가 local 정의이므로 `class X(Strategy)` 는 미인정.
+        """
+        code = """
+from ante.strategy import StrategyMeta
+
+class Strategy:
+    pass
+
+class X(Strategy):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
 
 # ── #2052 loader: 파일 정의 subclass만 카운트 ────────────────────────
 
@@ -2107,6 +2178,57 @@ class TestValidateLoadParity:
         """로컬 `class Strategy` shadow: validate 0개 ⟺ load 0개(둘 다 실패)."""
         f = tmp_path / "shadow_strategy.py"
         f.write_text(
+            "class Strategy:\n"
+            "    pass\n"
+            "\n"
+            "class X(Strategy):\n"
+            "    meta = None\n"
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        result = StrategyValidator().validate(f)
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+        with pytest.raises(StrategyLoadError, match="No Strategy subclass"):
+            StrategyLoader.load(f)
+
+    def test_import_as_then_redefine_parity(self, tmp_path):
+        """import-as 후 사용, 그 뒤 local 재정의: validate 인정 ⟺ load 성공.
+
+        X 정의 시점의 S 는 import 된 ante Strategy 이므로 X 는 실제 ante
+        Strategy subclass(`__module__ == module.__name__`)다. 이후 `class S`
+        local 재정의는 X 의 base 에 영향을 주지 않는다. validate 가 X 를
+        인정하면 load 도 X 하나를 반환해야 한다.
+        """
+        f = tmp_path / "import_as_redefine_strategy.py"
+        f.write_text(
+            "from ante.strategy import Strategy as S, StrategyMeta\n"
+            "\n"
+            "class X(S):\n"
+            '    meta = StrategyMeta(name="t", version="1.0.0", description="t")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+            "\n"
+            "class S:\n"
+            "    pass\n"
+        )
+        result = StrategyValidator().validate(f)
+        assert result.valid
+        cls = StrategyLoader.load(f)
+        assert cls.__name__ == "X"
+        assert issubclass(cls, Strategy)
+
+    def test_local_redefine_before_use_parity(self, tmp_path):
+        """local 재정의가 사용보다 먼저: validate 미인정 ⟺ load 실패.
+
+        `class X(Strategy)` 시점의 Strategy 는 local 클래스로 재바인딩된 뒤이므로
+        X 는 ante 비상속. validate 가 0개로 판정하면 load 도 0개로 실패해야 한다.
+        """
+        f = tmp_path / "local_first_strategy.py"
+        f.write_text(
+            "from ante.strategy import Strategy\n"
+            "\n"
             "class Strategy:\n"
             "    pass\n"
             "\n"

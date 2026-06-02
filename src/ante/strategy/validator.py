@@ -185,88 +185,86 @@ class StrategyValidator:
     def _find_strategy_classes(self, tree: ast.Module) -> list[ast.ClassDef]:
         """실제 ante ``Strategy`` 를 상속하는 module-level 클래스 노드 탐색 (#2042).
 
-        import alias 를 추적하여 ante.strategy(또는 .base)에서 **module-scope**
-        로 import 된 ``Strategy`` 의 로컬 바인딩명, 그리고 모듈 별칭
-        (`astg.Strategy`, `ante.strategy.Strategy`)만 ante Strategy 로 인정한다.
-        파일 module-scope 에 동일 이름의 로컬 ``class`` 정의(shadow)가 있으면
-        그 base 로 상속한 클래스는 ante Strategy 로 보지 않는다.
+        **`tree.body`(module-scope)를 정의 순서대로 위에서 아래로 한 번** 순회하며
+        이름별 "현재 바인딩"을 추적한다(`name_binding: dict[str, str]`,
+        값 ∈ {``"ante_strategy"``, ``"local_class"``, ``"other"``})와 모듈 별칭
+        (`module_aliases: set[str]`). 각 ``ClassDef`` 를 만나면 **먼저** 그 시점의
+        바인딩으로 base 를 해석해 ante ``Strategy`` 상속 여부를 판정하고, **그
+        다음** 그 클래스 이름을 ``local_class`` 로 갱신한다(이후 등장 클래스에만
+        shadow 적용).
 
-        탐지·바인딩 수집·shadow 판정 모두 **module-scope(`tree.body`)** 로
+        Python 은 이름을 **실행 시점(정의 순서)** 에 바인딩하므로, 클래스 정의
+        시점의 바인딩으로 base 를 해석해야 런타임/loader 의미와 정합한다. 예:
+        ``import Strategy as S; class X(S); class S`` 는 X 정의 시점에 S 가 import
+        된 ante ``Strategy`` 이므로 X 를 인정하고(loader 도 X 카운트), 그 뒤에 온
+        ``class S`` 만 로컬로 재바인딩한다. 반대로 ``import Strategy; class
+        Strategy; class X(Strategy)`` 는 X 정의 시점에 Strategy 가 이미 로컬
+        클래스로 재바인딩된 뒤이므로 미인정한다(loader 도 비카운트).
+
+        탐지·바인딩 추적·shadow 판정 모두 **module-scope(`tree.body`)** 로
         한정한다. loader 는 import·실행 후 module 네임스페이스(`vars(module)`)
         에서 Strategy subclass 를 찾으므로, 함수/클래스 내부에 중첩된 import·
-        class 정의는 module attribute 가 아니라 loader 가 보지 못한다. validator
-        가 `ast.walk` 로 트리 전체를 보면 함수-로컬 `from ante.strategy import
-        Strategy` 같은 바인딩을 module-scope 클래스에 잘못 적용해(false
-        positive) loader 와 불일치하므로, module-scope 로 한정해 정합시킨다.
+        class 정의는 module attribute 가 아니라 loader 가 보지 못한다. 함수-로컬
+        `from ante.strategy import Strategy` 같은 바인딩을 module-scope 클래스에
+        적용하면(false positive) loader 와 불일치하므로, module-scope 로 한정해
+        정합시킨다.
 
         Known-limitation (의도된 비대칭): transitive/intermediate-base
         (다른 파일에서 Strategy 를 상속한 중간 베이스)·다단계 재export·
         동적 import 는 정적 인식하지 않는다. loader 의 런타임 ``issubclass``
         가 최종 권위다(현재 validator 와 동일, 회귀 아님).
         """
-        strategy_names, module_aliases = self._collect_strategy_bindings(tree)
-        local_class_names = {
-            node.name for node in tree.body if isinstance(node, ast.ClassDef)
-        }
-
-        result: list[ast.ClassDef] = []
-        for node in tree.body:  # module-level ClassDef 만 (loader 정합)
-            if not isinstance(node, ast.ClassDef):
-                continue
-            for base in node.bases:
-                if self._base_is_strategy(
-                    base, strategy_names, module_aliases, local_class_names
-                ):
-                    result.append(node)
-                    break
-        return result
-
-    def _collect_strategy_bindings(self, tree: ast.Module) -> tuple[set[str], set[str]]:
-        """module-scope import 스캔으로 Strategy 바인딩명·모듈 별칭 수집 (#2042).
-
-        **`tree.body`(모듈 최상위)만** 순회한다. 함수/클래스 내부의 중첩
-        import 는 런타임 module 네임스페이스(loader 의 `vars(module)`)에 바인딩
-        되지 않으므로 module-scope 클래스 base 해석에 쓰면 false positive 가
-        된다(함수-로컬 `from ante.strategy import Strategy` 가 있어도 module
-        네임스페이스에는 Strategy 가 없어 `class X(Strategy)` 는 런타임에
-        NameError). 따라서 module-level `Import`/`ImportFrom` 만 Strategy
-        바인딩으로 인정해 loader 와 정합시킨다.
-
-        Returns:
-            ``(strategy_names, module_aliases)``
-            - strategy_names: ante.strategy/.base 에서 module-scope import 된
-              ``Strategy`` 의 로컬 바인딩명. ``from ante.strategy import
-              Strategy`` → {"Strategy"}, ``... import Strategy as S`` → {"S"}.
-            - module_aliases: ante.strategy(및 .base) 모듈 별칭.
-              ``import ante.strategy`` → {"ante.strategy"},
-              ``import ante.strategy as astg`` → {"astg"}.
-        """
-        strategy_names: set[str] = set()
+        name_binding: dict[str, str] = {}
         module_aliases: set[str] = set()
-        for node in tree.body:  # module-level import 만 (loader 네임스페이스 정합)
+        result: list[ast.ClassDef] = []
+
+        for node in tree.body:  # module-level 정의 순서 단일 패스 (loader 정합)
             if isinstance(node, ast.ImportFrom):
+                # ante.strategy/.base 에서 module-scope import 된 ``Strategy``
+                # (asname 포함)의 바인딩명을 ante_strategy 로 기록.
                 if node.module in self._STRATEGY_MODULES and node.level == 0:
                     for alias in node.names:
                         if alias.name == "Strategy":
-                            strategy_names.add(alias.asname or alias.name)
+                            name_binding[alias.asname or alias.name] = "ante_strategy"
             elif isinstance(node, ast.Import):
+                # ante.strategy(및 .base) 모듈 별칭을 Attribute 경로 해석용으로 기록.
+                # ``import ante.strategy`` → "ante.strategy",
+                # ``import ante.strategy as astg`` → "astg".
                 for alias in node.names:
                     if alias.name in self._STRATEGY_MODULES:
                         module_aliases.add(alias.asname or alias.name)
-        return strategy_names, module_aliases
+            elif isinstance(node, ast.ClassDef):
+                # 1) 현재 바인딩으로 base 해석 → Strategy subclass 여부 판정.
+                for base in node.bases:
+                    if self._base_is_strategy(base, name_binding, module_aliases):
+                        result.append(node)
+                        break
+                # 2) 그다음 이 클래스 이름을 로컬 클래스로 재바인딩(이후 shadow).
+                name_binding[node.name] = "local_class"
+            elif isinstance(node, ast.Assign):
+                # 이름 재바인딩은 보수적으로 "other"(ante 도 local 도 아님).
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        name_binding[target.id] = "other"
+            elif isinstance(node, ast.AnnAssign):
+                if node.value is not None and isinstance(node.target, ast.Name):
+                    name_binding[node.target.id] = "other"
+        return result
 
     def _base_is_strategy(
         self,
         base: ast.expr,
-        strategy_names: set[str],
+        name_binding: dict[str, str],
         module_aliases: set[str],
-        local_class_names: set[str],
     ) -> bool:
-        """base 표현식이 실제 ante Strategy 를 가리키는지 판정 (#2042)."""
-        # `class X(Strategy)` / `class X(S)` — import 된 바인딩명이고
-        # 파일 내부 로컬 클래스로 shadow 되지 않은 경우만.
+        """base 표현식이 (정의 시점 바인딩 기준) 실제 ante Strategy 인지 판정 (#2042).
+
+        ``name_binding`` 은 클래스 정의 시점까지의 module-level 바인딩 상태다.
+        """
+        # `class X(Strategy)` / `class X(S)` — 정의 시점에 그 이름이 ante
+        # Strategy 로 바인딩돼 있을 때만 인정. local_class/other/미바인딩이면 미인정.
         if isinstance(base, ast.Name):
-            return base.id in strategy_names and base.id not in local_class_names
+            return name_binding.get(base.id) == "ante_strategy"
         # `class X(astg.Strategy)` / `class X(ante.strategy.Strategy)` —
         # value 가 module_aliases 로 해석되는 경우만.
         if isinstance(base, ast.Attribute) and base.attr == "Strategy":
