@@ -677,6 +677,206 @@ class TestStrategy(Strategy):
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert not any("top-level" in e.lower() for e in result.errors)
 
+    def test_toplevel_class_decorator_bare_name_forbidden(self, validator, tmp_path):
+        """#2032 재현: top-level class의 bare Name decorator를 금지한다.
+
+        `@run_on_import` 는 정의 시점(import-time)에 `run_on_import(S)` 를
+        실행하므로 부작용 우회 경로다. run_on_import 자체는 같은 파일의
+        decorator 없는 top-level def라 그 자체로는 통과해야 한다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def run_on_import(cls):
+    return cls
+
+
+@run_on_import
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden top-level decorator" in e for e in result.errors)
+
+    def test_toplevel_class_decorator_with_call_forbidden(self, validator, tmp_path):
+        """#2032: 호출형 class decorator(`@deco()`)도 금지한다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def deco(arg=None):
+    def wrap(cls):
+        return cls
+    return wrap
+
+
+@deco()
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden top-level decorator" in e for e in result.errors)
+
+    def test_toplevel_function_decorator_forbidden(self, validator, tmp_path):
+        """#2033: top-level function decorator를 금지한다.
+
+        `@deco\\ndef f(): ...` 는 정의 시점에 `deco(f)` 를 실행한다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def deco(fn):
+    return fn
+
+
+@deco
+def helper():
+    return 1
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden top-level decorator" in e for e in result.errors)
+
+    def test_toplevel_default_argument_call_forbidden(self, validator, tmp_path):
+        """#2033: top-level 함수의 default argument 식 호출을 금지한다.
+
+        `def f(x=helper()): ...` 의 `helper()` 는 def 평가 시점(import-time)에
+        실행되어 부작용을 일으킬 수 있다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def helper():
+    return 1
+
+
+def f(x=helper()):
+    return x
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("default argument call" in e for e in result.errors)
+
+    def test_toplevel_kw_default_argument_call_forbidden(self, validator, tmp_path):
+        """#2033: keyword-only default 식 호출도 금지한다 (kw_defaults)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def helper():
+    return 1
+
+
+def f(*, x=helper()):
+    return x
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("default argument call" in e for e in result.errors)
+
+    def test_toplevel_method_decorator_no_false_positive(self, validator, tmp_path):
+        """#2032/#2033 회귀: 메서드 내부 decorator는 오탐하지 않는다.
+
+        클래스 body 는 _check_toplevel_body 가 순회하지 않으므로
+        `@property`/`@staticmethod` 같은 메서드 decorator는 영향이 없어야 한다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    @property
+    def name(self):
+        return "test"
+
+    @staticmethod
+    def util():
+        return 1
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("decorator" in e.lower() for e in result.errors)
+
+    def test_toplevel_literal_default_no_false_positive(self, validator, tmp_path):
+        """#2033 회귀: 리터럴/Name default(`x=1`, `x=CONST`)는 통과한다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+CONST = 5
+
+
+def f(x=1, y=CONST):
+    return x + y
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_plain_def_no_false_positive(self, validator, tmp_path):
+        """#2032/#2033 회귀: decorator 없는 top-level def는 통과한다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+
+def helper(a, b):
+    return a + b
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("top-level" in e.lower() for e in result.errors)
+
     def test_open_error(self, validator, tmp_path):
         """open 호출은 에러."""
         code = """
