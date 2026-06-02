@@ -2389,17 +2389,19 @@ class TestBacktestOnFillFollowUp:
     async def test_infinite_follow_up_truncated_at_cap(self, store, monkeypatch):
         """(e) 무한 follow-up: on_fill이 매 호출 buy 발행 → cap에서 정확히 truncate.
 
-        on_fill이 매번 follow-up buy를 발행해도 _MAX_FILLS_PER_STEP cap에서
-        끊겨 무한루프 없이 종료된다. cap을 작게(5) monkeypatch해 테스트가 빠르게
-        끝나도록 한다(타임아웃 가드).
+        on_fill이 매번 follow-up buy를 발행해도 _MAX_FOLLOW_UP_FILLS_PER_STEP
+        cap에서 끊겨 무한루프 없이 종료된다. cap을 작게(5) monkeypatch해 테스트가
+        빠르게 끝나도록 한다(타임아웃 가드).
 
-        cap 검사는 다음 체결을 실행하기 전에 ``fills_this_step >= cap`` 으로
-        선검사하므로(#2073 off-by-one 수정), 한 step당 체결은 **정확히 cap개**다
-        (cap+1번째 체결은 실행되지 않는다).
+        cap은 **follow-up 연쇄에만** 적용된다(on_step 신호는 cap 없이 전부 체결).
+        따라서 한 step의 총 체결은 ``entry(on_step) 1 + follow-up cap``개다. cap
+        검사는 다음 follow-up 체결을 실행하기 전에 ``follow_up_fills >= cap`` 으로
+        선검사하므로(#2073), follow-up 체결은 **정확히 cap개**다(cap+1번째는 실행
+        되지 않는다).
         """
         import ante.backtest.executor as executor_mod
 
-        monkeypatch.setattr(executor_mod, "_MAX_FILLS_PER_STEP", 5)
+        monkeypatch.setattr(executor_mod, "_MAX_FOLLOW_UP_FILLS_PER_STEP", 5)
 
         provider = self._make_provider(store)
 
@@ -2436,12 +2438,70 @@ class TestBacktestOnFillFollowUp:
         # 무한루프면 여기서 hang → 테스트 타임아웃. 정상 종료해야 한다.
         result = await executor.run()
 
-        # cap=5(monkeypatch): 다음 체결을 실행하기 전에 fills_this_step >= cap을
-        # 선검사하고 break하므로, 한 step당 체결은 **정확히 cap(=5)** 개다(cap+1
-        # 번째 체결은 실행되지 않음 — #2073 off-by-one 수정). 첫 step만 on_step이
+        # cap=5(monkeypatch)는 follow-up 연쇄에만 적용된다. entry(on_step) 1건은
+        # cap 없이 체결되고, 그 뒤 follow-up은 다음 체결 실행 전 선검사
+        # (follow_up_fills >= cap)로 break하므로 **정확히 cap(=5)** 개만 체결된다
+        # (cap+1번째 follow-up 체결은 실행되지 않음 — #2073). 첫 step만 on_step이
         # buy를 발행하고 이후 step은 _entered=True라 추가 entry가 없으므로, 총
-        # 체결은 정확히 cap이다(무한 누적/무한루프 없음). 정상 종료 + cap 정확성이
-        # 핵심 검증.
-        assert len(result.trades) == executor_mod._MAX_FILLS_PER_STEP
-        # cap에 도달한 모든 체결마다 on_fill이 호출되었다(체결당 1회, 정확히 cap회).
-        # cap+1번째 체결 시도는 막혔으므로 on_fill 호출도 cap회를 넘지 않는다.
+        # 체결은 정확히 1 + cap이다(무한 누적/무한루프 없음). 정상 종료 + cap
+        # 정확성이 핵심 검증.
+        assert len(result.trades) == 1 + executor_mod._MAX_FOLLOW_UP_FILLS_PER_STEP
+        # entry 체결 + cap에 도달한 모든 follow-up 체결마다 on_fill이 호출되었다.
+        # cap+1번째 follow-up 체결 시도는 막혔으므로 on_fill 호출도 1+cap회를
+        # 넘지 않는다.
+
+    async def test_on_step_signals_not_capped(self, store, monkeypatch):
+        """(f) 회귀 락: on_step 신호는 cap 미적용 → cap 초과해도 전부 체결(#2073).
+
+        cap(_MAX_FOLLOW_UP_FILLS_PER_STEP)을 작게(3) monkeypatch한 뒤, on_step이
+        cap을 초과하는 5개의 buy 신호를 반환한다. on_fill은 follow-up을 발행하지
+        않는다(기본 []). cap이 follow-up 연쇄에만 적용되므로 on_step 신호 5개는
+        모두 체결되어야 한다(cap=3에서 truncate되면 안 됨).
+
+        이 테스트는 "cap이 최초 on_step 신호 체결부터 적용·카운트하던" 회귀
+        (전략이 한 step에 cap 초과 on_step 신호를 정상 반환하면 follow-up이
+        없어도 조용히 truncate)를 lock한다.
+        """
+        import ante.backtest.executor as executor_mod
+
+        monkeypatch.setattr(executor_mod, "_MAX_FOLLOW_UP_FILLS_PER_STEP", 3)
+
+        provider = self._make_provider(store)
+
+        class ManyOnStepSignals(Strategy):
+            meta = StrategyMeta(
+                name="many_on_step_signals", version="1.0", description="t"
+            )
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    # cap(=3)을 초과하는 5개의 on_step buy 신호.
+                    return [
+                        Signal(symbol="005930", side="buy", quantity=1)
+                        for _ in range(5)
+                    ]
+                return []
+
+            # on_fill은 follow-up을 발행하지 않는다(base 기본 []).
+
+        executor = BacktestExecutor(
+            strategy_cls=ManyOnStepSignals,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # on_step 신호 5개는 cap(=3)과 무관하게 모두 체결된다(cap은 follow-up
+        # 전용). 회귀 시(cap이 on_step에도 적용) trades 길이가 3으로 truncate된다.
+        assert len(result.trades) == 5
+        assert all(t.side == "buy" for t in result.trades)
+        # 5주 누적 포지션.
+        assert executor._positions["005930"]["quantity"] == 5

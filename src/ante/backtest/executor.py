@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from ante.backtest.context import BacktestStrategyContext
@@ -23,9 +24,11 @@ _ALLOWED_SIDES = ("buy", "sell")
 
 # 한 step 안에서 처리할 on_fill follow-up 체결 수 상한. on_fill이 follow-up
 # Signal을 발행하고 그 follow-up이 다시 체결되어 또 follow-up을 발행하는
-# 연쇄(BFS)가 무한히 도는 것을 막는 안전 cap이다. 한도 초과 시 해당 step의
-# 나머지 follow-up을 truncate하고 경고를 남긴다(#2073).
-_MAX_FILLS_PER_STEP = 1000
+# 연쇄(BFS)가 무한히 도는 것을 막는 안전 cap이다. **on_step 신호 체결에는
+# 적용하지 않고 follow-up 연쇄에만 적용한다**(전략이 한 step에 1000개를 초과하는
+# on_step 신호를 정상 반환하는 기존 backtest 동작을 회귀시키지 않기 위함). 한도
+# 초과 시 해당 step의 나머지 follow-up을 truncate하고 경고를 남긴다(#2073).
+_MAX_FOLLOW_UP_FILLS_PER_STEP = 1000
 
 
 def _is_valid_quantity(value: object) -> bool:
@@ -139,33 +142,48 @@ class BacktestExecutor:
 
             signals = await strategy.on_step(context)
 
-            # on_step Signal을 체결한 뒤, 체결된 fill마다 strategy.on_fill(fill)을
-            # 호출해 follow-up Signal을 같은 step에서 연쇄 체결한다(라이브 bot이
-            # OrderFilledEvent→on_fill→follow_up을 처리하는 것과 parity, #2073).
-            # base.Strategy.on_fill 기본은 [] 이므로 override하지 않은 전략은
-            # 추가 체결이 없다. follow-up이 다시 follow-up을 부르는 무한 연쇄는
-            # _MAX_FILLS_PER_STEP에서 truncate한다.
-            queue: list[Signal] = list(signals)
-            fills_this_step = 0
-            while queue:
-                # cap 검사는 다음 체결을 실행하기 전에 한다(>= 선검사). 이렇게
-                # 해야 정확히 _MAX_FILLS_PER_STEP개만 체결되고, cap에 도달한 뒤의
-                # 1001번째 체결이 실행/기록되지 않는다(#2073 off-by-one 수정).
-                if fills_this_step >= _MAX_FILLS_PER_STEP:
-                    logger.warning(
-                        "on_fill follow-up 한도(%d) 도달 — step %s truncate",
-                        _MAX_FILLS_PER_STEP,
-                        timestamp,
-                    )
-                    break
-                sig = queue.pop(0)
+            # 체결된 fill마다 strategy.on_fill(fill)을 호출해 follow-up Signal을
+            # 같은 step에서 연쇄 체결한다(라이브 bot이 OrderFilledEvent→on_fill→
+            # follow_up을 처리하는 것과 parity, #2073). base.Strategy.on_fill 기본은
+            # [] 이므로 override하지 않은 전략은 추가 체결이 없다.
+            #
+            # cap(_MAX_FOLLOW_UP_FILLS_PER_STEP)은 **follow-up 연쇄에만** 적용한다.
+            # on_step 신호 자체는 cap 없이 전부 체결해야 한다. 그렇지 않으면 한
+            # step에 1000개를 초과하는 on_step 신호를 정상 반환하는 전략이 조용히
+            # truncate되어 기존 backtest 동작이 회귀한다(#2073 리뷰 지적).
+
+            # Phase 1: on_step 신호는 cap 없이 전부 체결(기존 동작 보존). 각 체결
+            #          마다 on_fill을 호출하고 그 follow-up은 phase 2 큐로 모은다.
+            follow_up_queue: deque[Signal] = deque()
+            for sig in signals:
                 fill = await self._execute_signal(sig, timestamp)
                 if fill is None:
                     continue
-                fills_this_step += 1
                 follow_ups = await strategy.on_fill(fill)
                 if follow_ups:
-                    queue.extend(follow_ups)
+                    follow_up_queue.extend(follow_ups)
+
+            # Phase 2: on_fill follow-up 연쇄(BFS)는 cap으로 bounded해 무한 연쇄를
+            #          막는다. cap 검사는 다음 체결을 실행하기 전에 한다(>= 선검사)
+            #          이므로 정확히 cap개의 follow-up만 체결된다. no-fill(None)은
+            #          follow_up_fills를 증가시키지 않는다.
+            follow_up_fills = 0
+            while follow_up_queue:
+                if follow_up_fills >= _MAX_FOLLOW_UP_FILLS_PER_STEP:
+                    logger.warning(
+                        "on_fill follow-up 한도(%d) 도달 — step %s truncate",
+                        _MAX_FOLLOW_UP_FILLS_PER_STEP,
+                        timestamp,
+                    )
+                    break
+                sig = follow_up_queue.popleft()
+                fill = await self._execute_signal(sig, timestamp)
+                if fill is None:
+                    continue
+                follow_up_fills += 1
+                follow_ups = await strategy.on_fill(fill)
+                if follow_ups:
+                    follow_up_queue.extend(follow_ups)
 
             equity = await self._calculate_equity()
             self._equity_curve.append(
