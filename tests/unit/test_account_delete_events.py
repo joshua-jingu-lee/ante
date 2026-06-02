@@ -12,7 +12,7 @@ from ante.account.models import Account, AccountStatus
 from ante.account.service import AccountService
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
-from ante.eventbus.events import AccountSuspendedEvent
+from ante.eventbus.events import AccountSuspendedEvent, NotificationEvent
 
 
 @pytest_asyncio.fixture
@@ -123,6 +123,28 @@ class TestAccountDeleteEvents:
         # AccountSuspendedEvent는 새로 발행되지 않아야 함
         # (이미 suspend 시 1회 발행되었지만 delete()에서는 추가 발행 없음)
         assert len(published) == 0
+
+    @pytest.mark.asyncio
+    async def test_delete_does_not_publish_notification(self, service, eventbus):
+        """delete() 경로는 NotificationEvent를 발행하지 않는다 (#2131 회귀).
+
+        delete가 발행하는 ``AccountSuspendedEvent``(reason="Account deletion")는
+        구조적 삭제용 봇 중지 트리거이지 킬 스위치가 아니므로 CRITICAL 알림
+        대상이 아니다. suspend()에 추가된 NotificationEvent wiring이 delete
+        경로로 새어 들어가지 않음을 가드한다.
+        """
+        await service.create(_make_account())
+
+        notifications: list[NotificationEvent] = []
+
+        async def on_notification(event: NotificationEvent) -> None:
+            notifications.append(event)
+
+        eventbus.subscribe(NotificationEvent, on_notification)
+
+        await service.delete("main", deleted_by="admin")
+
+        assert notifications == []
 
     @pytest.mark.asyncio
     async def test_delete_sets_status_and_clears_cache(self, service):

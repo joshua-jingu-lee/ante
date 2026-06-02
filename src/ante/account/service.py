@@ -746,13 +746,32 @@ class AccountService:
             (AccountStatus.SUSPENDED, account.updated_at.isoformat(), account_id),
         )
 
-        from ante.eventbus.events import AccountSuspendedEvent
+        from ante.eventbus.events import AccountSuspendedEvent, NotificationEvent
 
         await self._eventbus.publish(
             AccountSuspendedEvent(
                 account_id=account_id,
                 reason=reason,
                 suspended_by=suspended_by,
+            )
+        )
+        # 킬 스위치 CRITICAL 알림 wiring (#2131): notification.md 트리거 표가
+        # "거래 상태 변경(킬 스위치)" 담당을 AccountService·레벨 CRITICAL·
+        # category system 으로 명시한다. producer 직접 발행 패턴
+        # (approval ``_publish_created``·member ``suspend`` 동형).
+        # suspend_all 은 본 메서드를 계좌별로 호출하므로 계좌별 CRITICAL 이
+        # 자동 커버된다. NotificationService 가 NotificationEvent 를 이미
+        # 구독하므로 추가 wiring 불필요.
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="critical",
+                title="거래 상태 변경 (킬 스위치)",
+                message=(
+                    f"계좌 `{account_id}` 정지(SUSPENDED)\n"
+                    f"사유: {reason}\n"
+                    f"실행: `{suspended_by}`"
+                ),
+                category="system",
             )
         )
 
@@ -786,12 +805,23 @@ class AccountService:
             (AccountStatus.ACTIVE, account.updated_at.isoformat(), account_id),
         )
 
-        from ante.eventbus.events import AccountActivatedEvent
+        from ante.eventbus.events import AccountActivatedEvent, NotificationEvent
 
         await self._eventbus.publish(
             AccountActivatedEvent(
                 account_id=account_id,
                 activated_by=activated_by,
+            )
+        )
+        # 킬 스위치 해제 INFO 알림 wiring (#2131): suspend CRITICAL 의 짝.
+        # 재활성은 비긴급이므로 INFO 를 유지한다(스펙 비목표: CRITICAL 승격
+        # 금지). activate_all 은 본 메서드를 계좌별로 호출하므로 자동 커버.
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="거래 상태 변경 (킬 스위치 해제)",
+                message=(f"계좌 `{account_id}` 재활성(ACTIVE)\n실행: `{activated_by}`"),
+                category="system",
             )
         )
 
