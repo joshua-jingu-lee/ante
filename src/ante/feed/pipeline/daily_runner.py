@@ -79,7 +79,13 @@ class DailyRunner:
         ctx = _RunContext()
         store = self._store or ParquetStore(base_path=data_path)
 
+        # 각 store 쓰기 단계 직후 store의 merge 이상 경고를 drain하여
+        # CollectionResult.warnings(→ daily report `warnings`)로 표면화한다.
+        # backfill_runner.run()의 drain 지점(data.go.kr/DART/지표 후)을
+        # 정확히 미러한다(#2002). collector 미주입(None) skip 경로에서도
+        # drain은 빈 경고를 반환해 안전하다.
         await self._collect_data_go_kr(target_date, store, ctx)
+        ctx.warnings.extend(store.drain_warnings())
         await self._collect_dart(
             data_path,
             feed_dir,
@@ -87,7 +93,9 @@ class DailyRunner:
             store,
             ctx,
         )
+        ctx.warnings.extend(store.drain_warnings())
         self._compute_indicators(store, ctx)
+        ctx.warnings.extend(store.drain_warnings())
 
         return ctx.to_result("daily", started_at, target_date=target_date)
 
