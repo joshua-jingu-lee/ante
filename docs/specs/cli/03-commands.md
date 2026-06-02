@@ -104,7 +104,7 @@ allowlist 후보에서 제거한다.
 | `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
 | `ante strategy validate <path>` | `offline` | AST 정적 검증 |
 | `ante strategy submit <path>` | `offline` | 검증 + 로드 테스트 + StrategyRegistry 등록 |
-| `ante strategy list [--status registered\|adopted\|archived]` | `offline` | StrategyRegistry 조회 |
+| `ante strategy list` | `offline` | StrategyRegistry 조회 |
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
 | `ante strategy performance <name> --account-id <account_id>` | `offline` | 성과 DB 집계 (account-scoped, semantic-required) |
 | `ante strategy set-status <strategy_id> --status adopted\|archived` | `runtime IPC` | 전략 상태 변경 |
@@ -135,7 +135,7 @@ allowlist 후보에서 제거한다.
 | `ante config history <key>` | `offline` | dynamic config history 조회 |
 | `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
-| `ante approval audit-types [--status ...] [--db-path ...] [--format ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
+| `ante approval audit-types [--status ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
 | `ante approval cancel-invalid <id>` | `runtime IPC` | scope `approval:admin`. legacy invalid-type row administrative cleanup (#1472) |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
