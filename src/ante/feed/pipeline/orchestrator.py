@@ -237,22 +237,65 @@ class FeedOrchestrator:
 
     @staticmethod
     def _acquire_lock(feed_dir: Path) -> bool:
-        """Lock 파일을 생성하여 동시 실행을 방지한다."""
+        """Lock 파일을 원자적으로 생성하여 동시 실행을 방지한다.
+
+        ``os.O_CREAT | os.O_EXCL`` 로 lock 파일을 생성하므로
+        ``exists()`` 확인 후 ``write_text()`` 하던 비원자 경로(check-then-write)
+        에서 동시 시작 시 둘 다 획득하던 race를 제거한다(#2007/#2057).
+        ``FileExistsError`` 일 때만 기존 lock의 liveness 를 검사한다.
+
+        liveness 분류:
+          - ``ProcessLookupError`` → 프로세스 없음(stale) → 제거 후 재시도
+          - ``PermissionError`` → 프로세스 존재(signal 권한 없음) → **alive**,
+            차단(return False) (#2006). 기존엔 stale 제거 except 에 묶여 있어
+            살아있는 프로세스의 lock 을 삭제하고 획득하던 오판이었다.
+          - PID 파싱/읽기 실패(``ValueError``/``OSError``) → malformed=stale →
+            제거 후 재시도
+
+        stale 제거 후 다른 프로세스가 그 사이 lock 을 다시 잡는 race 에 대비해
+        bounded(3회) 재시도하고, 실패 시 안전하게 ``False`` 를 반환한다.
+        """
         lock_path = feed_dir / LOCK_FILE
         feed_dir.mkdir(parents=True, exist_ok=True)
 
-        if lock_path.exists():
+        for _ in range(3):
             try:
-                pid = int(lock_path.read_text().strip())
-                os.kill(pid, 0)
-                logger.error("다른 수집 프로세스가 실행 중 (PID=%d)", pid)
-                return False
-            except (ValueError, ProcessLookupError, PermissionError, OSError):
-                logger.warning("비정상 lock 파일 감지, 제거 후 진행")
-                lock_path.unlink(missing_ok=True)
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError:
+                # lock 이미 존재 → liveness 검사
+                try:
+                    pid = int(lock_path.read_text().strip())
+                except (ValueError, OSError):
+                    logger.warning("비정상 lock 파일(PID 파싱 불가), 제거 후 재시도")
+                    lock_path.unlink(missing_ok=True)
+                    continue
 
-        lock_path.write_text(str(os.getpid()))
-        return True
+                try:
+                    os.kill(pid, 0)
+                except ProcessLookupError:
+                    logger.warning("stale lock 감지(PID=%d 없음), 제거 후 재시도", pid)
+                    lock_path.unlink(missing_ok=True)
+                    continue
+                except PermissionError:
+                    # 프로세스 존재(signal 권한 없음) → alive, 차단 (#2006)
+                    logger.error(
+                        "다른 수집 프로세스가 실행 중 (PID=%d, signal 권한 없음)", pid
+                    )
+                    return False
+                else:
+                    logger.error("다른 수집 프로세스가 실행 중 (PID=%d)", pid)
+                    return False
+            else:
+                # 원자적 생성 성공 → 획득. 기존 write_text(str(pid)) 와 동일하게
+                # 십진 문자열 PID 를 기록한다(release/다른 reader 호환).
+                try:
+                    os.write(fd, str(os.getpid()).encode())
+                finally:
+                    os.close(fd)
+                return True
+
+        logger.error("lock 획득 실패(반복 race)")
+        return False
 
     @staticmethod
     def _release_lock(feed_dir: Path) -> None:
