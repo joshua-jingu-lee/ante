@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from ante.broker import fill_scheduler as fill_scheduler_module
@@ -15,6 +17,7 @@ from ante.broker.fill_scheduler import (
     MIN_POLL_INTERVAL,
     CatchUpResult,
     FillReconcileScheduler,
+    _normalize_history_date,
     business_date_kst,
 )
 from ante.core.database import Database
@@ -430,8 +433,203 @@ def test_business_date_kst_format():
 
 def test_business_date_kst_crosses_utc_midnight():
     """UTC 자정 직후라도 KST 기준 영업일을 준다 (KIS ord_dt 매칭)."""
-    from datetime import UTC, datetime
-
     # 2026-05-29 23:30 UTC == 2026-05-30 08:30 KST.
     moment = datetime(2026, 5, 29, 23, 30, tzinfo=UTC)
     assert business_date_kst(moment) == "20260530"
+
+
+# ── #2004: get_order_history timestamp 정규화 ─────────
+
+
+def test_normalize_history_date_yyyymmdd_passthrough():
+    """YYYYMMDD(KIS ord_dt)는 그대로 통과한다 (회귀 방지)."""
+    assert _normalize_history_date("20260102") == "20260102"
+
+
+def test_normalize_history_date_iso_tzaware_to_kst_business_date():
+    """tz-aware ISO timestamp → KST 영업일 YYYYMMDD (Test/Mock 어댑터 형식)."""
+    # 2026-01-02 09:01 UTC == 2026-01-02 18:01 KST.
+    assert _normalize_history_date("2026-01-02T09:01:00+00:00") == "20260102"
+
+
+def test_normalize_history_date_iso_tzaware_crosses_kst_midnight():
+    """UTC 자정 직전 tz-aware ISO → KST 익일 영업일로 환산."""
+    # 2026-01-02 23:30 UTC == 2026-01-03 08:30 KST.
+    assert _normalize_history_date("2026-01-02T23:30:00+00:00") == "20260103"
+
+
+def test_normalize_history_date_naive_iso_assumes_utc():
+    """tzinfo 없는 naive ISO 는 UTC 로 가정 후 KST 영업일로 환산."""
+    # naive 2026-01-02 09:01 → UTC 가정 == 2026-01-02 18:01 KST.
+    assert _normalize_history_date("2026-01-02T09:01:00") == "20260102"
+
+
+def test_normalize_history_date_empty_returns_empty():
+    """빈 문자열은 빈 문자열 → 호출부 to_date fallback."""
+    assert _normalize_history_date("") == ""
+
+
+def test_normalize_history_date_unparseable_returns_empty():
+    """파싱 불가 문자열은 빈 문자열 → 호출부 to_date fallback."""
+    assert _normalize_history_date("not-a-date") == ""
+
+
+class _SpyApplier:
+    """apply_cumulative 호출 인자(submitted_date)를 캡처하는 spy."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict] = []
+
+    async def apply_cumulative(self, **kwargs):
+        self.calls.append(kwargs)
+        # delta>0 를 흉내내 applied 카운트를 올린다.
+        return float(kwargs["observed_cumulative"])
+
+
+async def test_iso_timestamp_normalized_to_business_date_for_applier(tracker):
+    """(a) ISO timestamp item → submitted_date 가 KST 영업일 YYYYMMDD 로 정규화."""
+    spy = _SpyApplier()
+    await _seed(tracker, broker_order_id="0001", qty=100.0)
+    broker = FakeBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 100.0,
+                "price": 1000.0,
+                "timestamp": "2026-01-02T09:01:00+00:00",
+            }
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=spy,  # type: ignore[arg-type]
+        account_id=ACCT,
+    )
+    result = await sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 1
+    assert len(spy.calls) == 1
+    submitted_date = spy.calls[0]["submitted_date"]
+    assert submitted_date == "20260102"  # KST 영업일, ISO 아님.
+    assert "T" not in submitted_date
+
+
+async def test_yyyymmdd_timestamp_passthrough_for_applier(tracker):
+    """(b) YYYYMMDD timestamp(KIS) → 그대로 submitted_date (회귀)."""
+    spy = _SpyApplier()
+    await _seed(tracker, broker_order_id="0001", qty=100.0)
+    broker = FakeBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 100.0,
+                "price": 1000.0,
+                "timestamp": "20260102",
+            }
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=spy,  # type: ignore[arg-type]
+        account_id=ACCT,
+    )
+    await sched.catch_up_once()
+    assert spy.calls[0]["submitted_date"] == "20260102"
+
+
+async def test_naive_iso_timestamp_normalized_for_applier(tracker):
+    """(c) naive ISO timestamp → UTC 가정 KST 영업일 YYYYMMDD."""
+    spy = _SpyApplier()
+    await _seed(tracker, broker_order_id="0001", qty=100.0)
+    broker = FakeBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 100.0,
+                "price": 1000.0,
+                "timestamp": "2026-01-02T09:01:00",
+            }
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=spy,  # type: ignore[arg-type]
+        account_id=ACCT,
+    )
+    await sched.catch_up_once()
+    assert spy.calls[0]["submitted_date"] == "20260102"
+
+
+async def test_empty_timestamp_falls_back_to_to_date_for_applier(tracker):
+    """(d) 빈/파싱불가 timestamp → to_date(오늘 KST) fallback."""
+    spy = _SpyApplier()
+    await _seed(tracker, broker_order_id="0001", qty=100.0)
+    broker = FakeBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 100.0,
+                "price": 1000.0,
+                "timestamp": "",
+            },
+            {
+                "order_id": "0002",
+                "filled_quantity": 50.0,
+                "price": 1000.0,
+                "timestamp": "garbage",
+            },
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=spy,  # type: ignore[arg-type]
+        account_id=ACCT,
+    )
+    await sched.catch_up_once()
+    assert len(spy.calls) == 2
+    assert spy.calls[0]["submitted_date"] == DATE  # to_date == today(KST).
+    assert spy.calls[1]["submitted_date"] == DATE
+
+
+async def test_catch_up_recovers_iso_timestamp_end_to_end(tracker, applier):
+    """(e) end-to-end: ISO timestamp(Test/Mock 형식) history → 복구 applied>0.
+
+    #2004 회귀: tracker 는 KST 영업일 DATE 로 seed 됐는데, ISO timestamp 를
+    정규화하지 않고 submitted_date 로 넘기면 lookup_order_id 의
+    ``submitted_date <= observed_date(YYYYMMDD)`` 문자열 비교에서 ISO 가 항상
+    크게 잡혀 매핑 누락 → applied=0(no-op)이 된다. 정규화 후엔 영업일 매칭으로
+    복구가 성공해야 한다.
+    """
+    app, ph, _eb = applier
+    await _seed(tracker, broker_order_id="0001", qty=100.0)
+    # Test/Mock 어댑터의 created_at.isoformat() 과 동일한 tz-aware ISO.
+    # DATE(오늘 KST) 와 같은 영업일이 되도록 오늘 정오(UTC) 를 쓴다.
+    iso_ts = datetime.now(UTC).replace(hour=3, minute=0, second=0).isoformat()
+    assert business_date_kst(datetime.fromisoformat(iso_ts)) == DATE
+    broker = FakeBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "symbol": "005930",
+                "side": "buy",
+                "quantity": 100.0,
+                "filled_quantity": 100.0,
+                "price": 1000.0,
+                "status": "filled",
+                "timestamp": iso_ts,
+            }
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker, order_tracker=tracker, fill_applier=app, account_id=ACCT
+    )
+    result = await sched.catch_up_once()
+    assert result.succeeded is True
+    assert result.applied == 1  # 정규화 덕분에 복구 성공 (no-op 아님).
+    pos = await ph.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 100.0
+    assert (await tracker.get("ord-1")).status == "filled"
