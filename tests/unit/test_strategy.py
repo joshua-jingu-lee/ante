@@ -357,6 +357,8 @@ class TestStrategy(Strategy):
     def test_missing_meta(self, validator, tmp_path):
         """meta 클래스 변수가 없으면 실패."""
         code = """
+from ante.strategy import Strategy
+
 class TestStrategy(Strategy):
     async def on_step(self, context):
         return []
@@ -368,8 +370,10 @@ class TestStrategy(Strategy):
     def test_missing_on_step(self, validator, tmp_path):
         """on_step 메서드가 없으면 실패."""
         code = """
+from ante.strategy import Strategy, StrategyMeta
+
 class TestStrategy(Strategy):
-    meta = None
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
 """
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert not result.valid
@@ -1058,13 +1062,15 @@ class TestStrategy(Strategy):
     def test_multiple_strategy_classes(self, validator, tmp_path):
         """복수 Strategy 클래스는 실패."""
         code = """
+from ante.strategy import Strategy, StrategyMeta
+
 class A(Strategy):
-    meta = None
+    meta = StrategyMeta(name="a", version="1.0.0", description="a")
     async def on_step(self, context):
         return []
 
 class B(Strategy):
-    meta = None
+    meta = StrategyMeta(name="b", version="1.0.0", description="b")
     async def on_step(self, context):
         return []
 """
@@ -1507,6 +1513,479 @@ class TestStrategy(Strategy):
 """
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert not any("Invalid exchange" in e for e in result.errors)
+
+
+# ── #2040 validator: async hook 계약 ──────────────────────────────────
+
+
+class TestValidatorAsyncHookContract:
+    """#2040 — 런타임 await hook 이 sync `def` 면 error."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_sync_on_step_rejected(self, validator, tmp_path):
+        """필수 on_step 이 sync `def` 면 'must be async' error."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "on_step() must be async (use 'async def')" in e for e in result.errors
+        )
+
+    def test_async_on_step_passes(self, validator, tmp_path):
+        """async on_step 은 통과(async 위반 없음)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("must be async" in e for e in result.errors)
+
+    def test_sync_on_fill_rejected(self, validator, tmp_path):
+        """정의된 on_fill 이 sync `def` 면 error(런타임 await 시 TypeError)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+    def on_fill(self, fill):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "on_fill() must be async (use 'async def')" in e for e in result.errors
+        )
+
+    def test_async_on_fill_passes(self, validator, tmp_path):
+        """async def on_fill override 는 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+    async def on_fill(self, fill):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("must be async" in e for e in result.errors)
+
+    def test_sync_on_data_order_update_position_corrected_rejected(
+        self, validator, tmp_path
+    ):
+        """on_data/on_order_update/on_position_corrected sync 도 각각 error."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+    def on_data(self, data):
+        return []
+
+    def on_order_update(self, update):
+        return None
+
+    def on_position_corrected(self, correction):
+        return None
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("on_data() must be async" in e for e in result.errors)
+        assert any("on_order_update() must be async" in e for e in result.errors)
+        assert any("on_position_corrected() must be async" in e for e in result.errors)
+
+    def test_sync_on_start_on_stop_unaffected(self, validator, tmp_path):
+        """on_start/on_stop 은 sync 계약 → sync `def` 여도 영향 없음(통과)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    def on_start(self):
+        pass
+
+    def on_stop(self):
+        pass
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("must be async" in e for e in result.errors)
+
+
+# ── #2041 validator: meta=StrategyMeta(...) 타입 ─────────────────────
+
+
+class TestValidatorMetaTypeContract:
+    """#2041 — meta 할당 값이 StrategyMeta(...) 호출이어야 한다."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_meta_dict_rejected(self, validator, tmp_path):
+        """meta = {...} (dict) 는 타입 불일치 error."""
+        code = """
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = {"name": "t", "version": "1.0.0", "description": "t"}
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_meta_none_rejected(self, validator, tmp_path):
+        """meta = None 은 타입 불일치 error."""
+        code = """
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_meta_other_call_rejected(self, validator, tmp_path):
+        """다른 호출(dict(...))은 StrategyMeta 호출이 아니므로 error."""
+        code = """
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = dict(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_meta_strategy_meta_call_passes(self, validator, tmp_path):
+        """meta = StrategyMeta(...) Name 호출은 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_meta_strategy_meta_attribute_call_passes(self, validator, tmp_path):
+        """meta = base.StrategyMeta(...) Attribute 호출도 통과."""
+        code = """
+import ante.strategy.base as base
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = base.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+
+# ── #2042 validator: 실제 ante Strategy 상속만 (import 별칭 추적) ──────
+
+
+class TestValidatorStrategyImportAware:
+    """#2042 — import alias 추적으로 실제 ante Strategy 상속만 인정."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_local_strategy_shadow_not_counted(self, validator, tmp_path):
+        """파일 내 로컬 `class Strategy` 정의 → 그 base 상속은 ante Strategy 아님."""
+        code = """
+class Strategy:
+    pass
+
+class X(Strategy):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        # 실제 ante Strategy subclass 0개 → "No class inheriting from Strategy".
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+    def test_direct_import_strategy_passes(self, validator, tmp_path):
+        """from ante.strategy import Strategy; class X(Strategy) → 인정·통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class X(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_import_strategy_base_passes(self, validator, tmp_path):
+        """from ante.strategy.base import Strategy 도 인정·통과."""
+        code = """
+from ante.strategy.base import Strategy, StrategyMeta
+
+class X(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_aliased_import_strategy_passes(self, validator, tmp_path):
+        """from ante.strategy import Strategy as S; class X(S) → 인정·통과."""
+        code = """
+from ante.strategy import Strategy as S, StrategyMeta
+
+class X(S):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_module_alias_attribute_strategy_passes(self, validator, tmp_path):
+        """import ante.strategy as astg; class X(astg.Strategy) → 인정·통과."""
+        code = """
+import ante.strategy as astg
+from ante.strategy import StrategyMeta
+
+class X(astg.Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_dotted_module_attribute_strategy_passes(self, validator, tmp_path):
+        """import ante.strategy; class X(ante.strategy.Strategy) → 인정·통과."""
+        code = """
+import ante.strategy
+from ante.strategy import StrategyMeta
+
+class X(ante.strategy.Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_unrelated_base_not_counted(self, validator, tmp_path):
+        """import 안 한 임의 base 이름은 ante Strategy 로 인식 안 함."""
+        code = """
+class X(SomeOtherBase):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+
+# ── #2052 loader: 파일 정의 subclass만 카운트 ────────────────────────
+
+
+class TestLoaderFileDefinedOnly:
+    """#2052 — import 된 Strategy subclass 제외, 파일 정의 subclass만 카운트."""
+
+    def test_imported_subclass_not_counted(self, tmp_path):
+        """helper 의 ImportedStrategy 를 import 한 main → MainStrategy 만 카운트."""
+        helper = tmp_path / "helper_mod.py"
+        helper.write_text(
+            "from ante.strategy import Strategy, StrategyMeta\n"
+            "\n"
+            "class ImportedStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="imp", version="1.0.0", description="i")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        main = tmp_path / "main_strategy.py"
+        main.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(tmp_path)!r})\n"
+            "from helper_mod import ImportedStrategy  # noqa: F401\n"
+            "from ante.strategy import Strategy, StrategyMeta\n"
+            "\n"
+            "class MainStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="main", version="1.0.0", description="m")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        cls = StrategyLoader.load(main)
+        assert cls.__name__ == "MainStrategy"
+        assert issubclass(cls, Strategy)
+
+    def test_two_local_subclasses_rejected(self, tmp_path):
+        """같은 파일에 2개 정의 → Multiple Strategy subclasses error."""
+        main = tmp_path / "two_strategy.py"
+        main.write_text(
+            "from ante.strategy import Strategy, StrategyMeta\n"
+            "\n"
+            "class AStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="a", version="1.0.0", description="a")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+            "\n"
+            "class BStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="b", version="1.0.0", description="b")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        with pytest.raises(StrategyLoadError, match="Multiple Strategy subclasses"):
+            StrategyLoader.load(main)
+
+
+# ── validate ↔ load 패리티 (#2040 번들) ──────────────────────────────
+
+
+class TestValidateLoadParity:
+    """validate(파일 정의 실제 Strategy subclass 1개) ↔ load(module-origin 1개)."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def test_imported_subclass_parity(self, tmp_path):
+        """helper import + main 1개 정의: validate 통과 ⟺ load 성공."""
+        helper = tmp_path / "helper_mod.py"
+        helper.write_text(
+            "from ante.strategy import Strategy, StrategyMeta\n"
+            "\n"
+            "class ImportedStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="imp", version="1.0.0", description="i")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        # validate 대상은 main 파일만 본다(AST 파일-scope). import 된
+        # ImportedStrategy 는 main AST 에 클래스 정의가 없으므로 카운트 안 됨.
+        main = tmp_path / "main_strategy.py"
+        main.write_text(
+            "import sys\n"
+            f"sys.path.insert(0, {str(tmp_path)!r})\n"
+            "from helper_mod import ImportedStrategy  # noqa: F401\n"
+            "from ante.strategy import Strategy, StrategyMeta\n"
+            "\n"
+            "class MainStrategy(Strategy):\n"
+            '    meta = StrategyMeta(name="main", version="1.0.0", description="m")\n'
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        result = StrategyValidator().validate(main)
+        # validate: 'import sys'/sys.path 호출 등 top-level 제약은 본 케이스가
+        # 패리티 집합 동형 확인 목적이므로 Strategy-count 측면만 검증한다.
+        assert not any("Multiple Strategy" in e for e in result.errors)
+        assert not any("No class inheriting" in e for e in result.errors)
+        # load: import 된 subclass 제외 → 정상 1개 로드.
+        cls = StrategyLoader.load(main)
+        assert cls.__name__ == "MainStrategy"
+
+    def test_local_shadow_parity(self, tmp_path):
+        """로컬 `class Strategy` shadow: validate 0개 ⟺ load 0개(둘 다 실패)."""
+        f = tmp_path / "shadow_strategy.py"
+        f.write_text(
+            "class Strategy:\n"
+            "    pass\n"
+            "\n"
+            "class X(Strategy):\n"
+            "    meta = None\n"
+            "\n"
+            "    async def on_step(self, context):\n"
+            "        return []\n"
+        )
+        result = StrategyValidator().validate(f)
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+        with pytest.raises(StrategyLoadError, match="No Strategy subclass"):
+            StrategyLoader.load(f)
 
 
 # ── ante.strategy lazy attribute access 회귀 (#1463) ──────────────────

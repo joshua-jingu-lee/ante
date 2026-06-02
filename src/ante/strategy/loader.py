@@ -41,12 +41,17 @@ class StrategyLoader:
         except Exception as e:
             raise StrategyLoadError(f"Failed to execute module {filepath}: {e}") from e
 
+        # #2052: 현재 파일에서 정의된 subclass만 카운트한다.
+        # `obj.__module__ == module.__name__` 조건으로 import 된 Strategy
+        # subclass(다른 모듈 origin)를 제외하여, validator(AST 파일-scope 정의
+        # Strategy subclass 1개)와 동일한 집합을 세도록 패리티를 맞춘다(#2040).
         strategy_classes = [
             obj
             for obj in vars(module).values()
             if isinstance(obj, type)
             and issubclass(obj, Strategy)
             and obj is not Strategy
+            and obj.__module__ == module.__name__
         ]
 
         if len(strategy_classes) == 0:

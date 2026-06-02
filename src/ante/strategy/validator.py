@@ -44,6 +44,17 @@ class ValidationResult:
 class StrategyValidator:
     """AST 기반 전략 파일 정적 검증."""
 
+    # #2040 — base.py에서 `async def`이고 런타임이 await하는 hook 집합.
+    # on_step=abstract async 필수, 나머지=async default(override 시 await됨).
+    # on_start/on_stop은 sync 계약이라 의도적으로 제외.
+    ASYNC_HOOKS: set[str] = {
+        "on_step",
+        "on_fill",
+        "on_data",
+        "on_order_update",
+        "on_position_corrected",
+    }
+
     FORBIDDEN_MODULES: set[str] = {
         "os",
         "sys",
@@ -114,10 +125,18 @@ class StrategyValidator:
         # 3. 필수 요소 검사
         if len(strategy_classes) == 1:
             cls = strategy_classes[0]
+            # #2041: meta 부재 → error. 존재하지만 StrategyMeta(...) 호출이
+            # 아니면(dict/None/다른 호출 등) 타입 불일치 error.
             if not self._has_class_var(cls, "meta"):
                 errors.append("Missing 'meta' class variable (StrategyMeta)")
+            elif not self._meta_is_strategy_meta_call(cls):
+                errors.append("'meta' must be a StrategyMeta(...) instance")
             if not self._has_method(cls, "on_step"):
                 errors.append("Missing required method: on_step()")
+
+            # #2040: 런타임이 await하는 hook이 sync `def`면 await 시 TypeError.
+            # 정의된(클래스 body) async hook이 sync면 error.
+            errors.extend(self._async_hook_violations(cls))
 
             # accepts_external_signals=True인 전략에 on_data() 구현 여부 경고
             if self._has_accepts_external_signals(cls) and not self._has_method(
@@ -160,17 +179,99 @@ class StrategyValidator:
             warnings=warnings,
         )
 
+    # ante.strategy / ante.strategy.base 에서 Strategy 를 export 하는 모듈 경로.
+    _STRATEGY_MODULES: set[str] = {"ante.strategy", "ante.strategy.base"}
+
     def _find_strategy_classes(self, tree: ast.Module) -> list[ast.ClassDef]:
-        """Strategy를 상속하는 클래스 노드 탐색."""
+        """실제 ante ``Strategy`` 를 상속하는 클래스 노드 탐색 (#2042).
+
+        import alias 를 추적하여 ante.strategy(또는 .base)에서 import 된
+        ``Strategy`` 의 로컬 바인딩명, 그리고 모듈 별칭(`astg.Strategy`,
+        `ante.strategy.Strategy`)만 ante Strategy 로 인정한다. 파일 내부에
+        동일 이름의 로컬 ``class`` 정의(shadow)가 있으면 그 base 로 상속한
+        클래스는 ante Strategy 로 보지 않는다.
+
+        Known-limitation (의도된 비대칭): transitive/intermediate-base
+        (다른 파일에서 Strategy 를 상속한 중간 베이스)·다단계 재export·
+        동적 import 는 정적 인식하지 않는다. loader 의 런타임 ``issubclass``
+        가 최종 권위다(현재 validator 와 동일, 회귀 아님).
+        """
+        strategy_names, module_aliases = self._collect_strategy_bindings(tree)
+        local_class_names = {
+            node.name for node in tree.body if isinstance(node, ast.ClassDef)
+        }
+
         result: list[ast.ClassDef] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                for base in node.bases:
-                    if isinstance(base, ast.Name) and base.id == "Strategy":
-                        result.append(node)
-                    elif isinstance(base, ast.Attribute) and base.attr == "Strategy":
-                        result.append(node)
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for base in node.bases:
+                if self._base_is_strategy(
+                    base, strategy_names, module_aliases, local_class_names
+                ):
+                    result.append(node)
+                    break
         return result
+
+    def _collect_strategy_bindings(self, tree: ast.Module) -> tuple[set[str], set[str]]:
+        """import 스캔으로 Strategy 로컬 바인딩명·모듈 별칭 집합 수집 (#2042).
+
+        Returns:
+            ``(strategy_names, module_aliases)``
+            - strategy_names: ante.strategy/.base 에서 import 된 ``Strategy``
+              의 로컬 바인딩명. ``from ante.strategy import Strategy`` →
+              {"Strategy"}, ``... import Strategy as S`` → {"S"}.
+            - module_aliases: ante.strategy(및 .base) 모듈 별칭.
+              ``import ante.strategy`` → {"ante.strategy"},
+              ``import ante.strategy as astg`` → {"astg"}.
+        """
+        strategy_names: set[str] = set()
+        module_aliases: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module in self._STRATEGY_MODULES and node.level == 0:
+                    for alias in node.names:
+                        if alias.name == "Strategy":
+                            strategy_names.add(alias.asname or alias.name)
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name in self._STRATEGY_MODULES:
+                        module_aliases.add(alias.asname or alias.name)
+        return strategy_names, module_aliases
+
+    def _base_is_strategy(
+        self,
+        base: ast.expr,
+        strategy_names: set[str],
+        module_aliases: set[str],
+        local_class_names: set[str],
+    ) -> bool:
+        """base 표현식이 실제 ante Strategy 를 가리키는지 판정 (#2042)."""
+        # `class X(Strategy)` / `class X(S)` — import 된 바인딩명이고
+        # 파일 내부 로컬 클래스로 shadow 되지 않은 경우만.
+        if isinstance(base, ast.Name):
+            return base.id in strategy_names and base.id not in local_class_names
+        # `class X(astg.Strategy)` / `class X(ante.strategy.Strategy)` —
+        # value 가 module_aliases 로 해석되는 경우만.
+        if isinstance(base, ast.Attribute) and base.attr == "Strategy":
+            return self._attr_value_to_str(base.value) in module_aliases
+        return False
+
+    @staticmethod
+    def _attr_value_to_str(node: ast.expr) -> str | None:
+        """`ante.strategy` / `astg` 등 dotted name 표현식을 문자열로 평탄화.
+
+        Attribute/Name 만 dotted name 으로 해석하고, 그 외(Call 등)는 None.
+        """
+        parts: list[str] = []
+        cur: ast.expr = node
+        while isinstance(cur, ast.Attribute):
+            parts.append(cur.attr)
+            cur = cur.value
+        if not isinstance(cur, ast.Name):
+            return None
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
 
     def _has_class_var(self, cls: ast.ClassDef, name: str) -> bool:
         """클래스 변수 할당 존재 여부."""
@@ -190,6 +291,62 @@ class StrategyValidator:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 if node.name == name:
                     return True
+        return False
+
+    def _method_is_async(self, cls: ast.ClassDef, name: str) -> bool | None:
+        """클래스 body 에 정의된 메서드의 async 여부 (#2040).
+
+        Returns:
+            정의돼 있고 ``async def`` → True,
+            정의돼 있고 sync ``def`` → False,
+            클래스에 정의되지 않음 → None.
+        마지막 정의를 기준으로 한다(중복 정의 시 런타임 바인딩과 동일).
+        """
+        result: bool | None = None
+        for node in cls.body:
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                if node.name == name:
+                    result = isinstance(node, ast.AsyncFunctionDef)
+        return result
+
+    def _async_hook_violations(self, cls: ast.ClassDef) -> list[str]:
+        """런타임 await hook 이 sync ``def`` 로 정의된 위반 목록 (#2040).
+
+        ``ASYNC_HOOKS`` 중 클래스에 정의된 hook 이 sync 면 await 시 TypeError
+        가 나므로 error. 정의되지 않은 hook(base default 상속)은 검사하지
+        않는다(on_step 부재는 별도 "Missing required method" 검사가 담당).
+        """
+        errors: list[str] = []
+        for hook in sorted(self.ASYNC_HOOKS):
+            is_async = self._method_is_async(cls, hook)
+            if is_async is False:
+                errors.append(f"{hook}() must be async (use 'async def')")
+        return errors
+
+    def _meta_is_strategy_meta_call(self, cls: ast.ClassDef) -> bool:
+        """``meta`` 할당 값이 ``StrategyMeta(...)`` 호출인지 검사 (#2041).
+
+        클래스 body 의 ``meta`` Assign/AnnAssign value 가 ``ast.Call`` 이고
+        func 가 ``Name(id="StrategyMeta")`` 또는 ``Attribute(attr="StrategyMeta")``
+        여야 True. dict/None/다른 호출 등은 False. ``meta`` 가 아예 없으면
+        (별도 부재 검사가 담당) True 를 반환하지 않도록 호출부에서 존재
+        확인 후 사용한다.
+        """
+        for node in cls.body:
+            if not isinstance(node, ast.Assign | ast.AnnAssign):
+                continue
+            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+            if not isinstance(target, ast.Name) or target.id != "meta":
+                continue
+            value = node.value
+            if not isinstance(value, ast.Call):
+                return False
+            func = value.func
+            if isinstance(func, ast.Name) and func.id == "StrategyMeta":
+                return True
+            if isinstance(func, ast.Attribute) and func.attr == "StrategyMeta":
+                return True
+            return False
         return False
 
     @staticmethod
