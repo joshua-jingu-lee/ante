@@ -16,7 +16,7 @@ from ante.feed.pipeline.checkpoint import Checkpoint
 from ante.feed.pipeline.dart_collector import DARTCollector
 from ante.feed.pipeline.data_go_kr_collector import DataGoKrCollector
 from ante.feed.pipeline.indicator_calculator import IndicatorCalculator
-from ante.feed.pipeline.scheduler import generate_backfill_dates
+from ante.feed.pipeline.scheduler import generate_backfill_dates, is_business_day
 from ante.feed.sources.dart import (
     CriticalApiError as DARTCriticalError,
 )
@@ -105,6 +105,60 @@ def _parse_strict_backfill_since(value: str) -> date | None:
 def _today_kst() -> date:
     """오늘 날짜(KST 캘린더)를 반환한다."""
     return datetime.now(tz=_KST).date()
+
+
+# data.go.kr OHLCV는 영업일 D의 데이터가 다음 영업일 13:00 KST 이후에
+# 공개된다(스펙 docs/specs/data-feed/05-data-sources.md: "영업일 D+1,
+# 오후 1시 이후"). backfill 상한을 이 deadline이 지난 마지막 영업일로
+# capping해 미공개 날짜를 애초에 시도하지 않는다(quota 보호).
+_DATA_GO_KR_PUBLISH_HOUR_KST = 13
+
+
+def _next_business_day(d: date) -> date:
+    """``d`` 다음의 첫 영업일(주말 skip)을 반환한다.
+
+    ``is_business_day``(scheduler.py)는 weekday만 본다(KR 공휴일 미인식).
+    cap은 보조(quota 보호)일 뿐이며 데이터 무결성은 ``written > 0`` guard가
+    보장하므로, 공휴일 미인식으로 cap이 다소 낙관적이어도 데이터 손실은
+    없다(빈 응답 → checkpoint 미전진 → 재시도).
+    """
+    nxt = d + timedelta(days=1)
+    while not is_business_day(nxt.isoformat()):
+        nxt += timedelta(days=1)
+    return nxt
+
+
+def _last_published_date(now_kst: datetime) -> date:
+    """``now_kst`` 시점에 확실히 공개된 마지막 OHLCV 날짜를 반환한다.
+
+    어제부터 거꾸로 영업일 ``D`` 를 훑으며, ``D`` 의 데이터 공개 deadline
+    (``next_business_day(D)`` 의 13:00 KST)이 ``now_kst`` 이하인 첫 ``D`` 를
+    반환한다. 무한 루프 방지를 위해 최대 14일까지만 거슬러 올라간다(주말 +
+    연속 비영업 구간을 충분히 덮는 보수적 bound). 그 안에 없으면 가장 오래
+    거슬러 올라간 영업일을 반환한다(cap이 과도하게 좁아져도 무결성은 guard가
+    보장).
+
+    Args:
+        now_kst: 기준 시각(KST aware datetime). 테스트는 이 인자를 주입해
+            결정적으로 검증한다.
+
+    Returns:
+        확실히 공개된 마지막 영업일 ``date``.
+    """
+    today = now_kst.date()
+    candidate = today - timedelta(days=1)
+    # 14일 bound: 주말 + 비영업 구간을 덮는 안전 상한(무한 루프 방지).
+    for _ in range(14):
+        if is_business_day(candidate.isoformat()):
+            deadline = datetime.combine(
+                _next_business_day(candidate),
+                datetime.min.time().replace(hour=_DATA_GO_KR_PUBLISH_HOUR_KST),
+                tzinfo=_KST,
+            )
+            if deadline <= now_kst:
+                return candidate
+        candidate -= timedelta(days=1)
+    return candidate
 
 
 def validate_backfill_since(
@@ -281,9 +335,16 @@ class BackfillRunner:
         ohlcv_checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
         last_date = ohlcv_checkpoint.get_last_date()
 
+        # 상한을 KST today 대신 "확실히 공개된 마지막 날짜"로 cap한다(#2015).
+        # 미공개 최근일(D+1 13:00 KST 미도래)을 빈 응답으로 시도해 quota를
+        # 낭비하는 것을 막는다. 데이터 무결성은 written>0 checkpoint guard가
+        # 보장하므로 cap은 보조적이다.
+        published_end = _last_published_date(datetime.now(tz=_KST))
+
         return list(
             generate_backfill_dates(
                 start=backfill_since,
+                end=published_end.isoformat(),
                 last_checkpoint=last_date,
             )
         )
@@ -365,9 +426,17 @@ class BackfillRunner:
                 ctx.add_success(written, syms, warns)
                 if written > 0:
                     ctx.data_types.update(["ohlcv", "fundamental"])
-                # halt 이후에는 checkpoint를 전진시키지 않는다(#2078). 앞선
-                # 실패 날짜 너머로 last_date가 진행되면 그 날짜가 영구 skip된다.
-                if not halt:
+                # checkpoint는 데이터가 실제 저장된 날짜(written > 0)에만
+                # 전진시킨다(#2015). 빈 응답(written == 0: 미공개/지연공개/
+                # 캘린더 미인식 공휴일)에 전진하면 그 날짜가 다음 run에서
+                # last_checkpoint 이전으로 간주되어 영구 skip된다(데이터 손실).
+                # dates는 오름차순이므로 checkpoint = 마지막 written>0 날짜이며,
+                # 내부 빈 날짜는 다음 데이터 날짜에서 jump해 자연 커버(stall 없음),
+                # trailing 빈 날짜는 미전진 → 다음 실행에서 재시도(손실 없음).
+                #
+                # halt 이후에는 written 여부와 무관하게 전진시키지 않는다(#2078).
+                # 앞선 실패 날짜 너머로 last_date가 진행되면 그 날짜가 영구 skip된다.
+                if not halt and written > 0:
                     checkpoint.save(target_date)
 
             except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
