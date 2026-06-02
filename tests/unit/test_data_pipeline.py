@@ -1406,3 +1406,84 @@ class TestDARTNormalizer:
 
         assert "dart" in DART_NORMALIZER_REGISTRY
         assert DART_NORMALIZER_REGISTRY["dart"] is DARTNormalizer
+
+
+# ── datasets.py (data info / data list) row_count·file_size (#1982) ──────────
+
+
+def _make_fundamental_df(symbol: str = "005930", n: int = 3) -> pl.DataFrame:
+    """테스트용 fundamental DataFrame 생성 (date 파티션 키)."""
+    from datetime import date
+
+    return pl.DataFrame(
+        {
+            "date": [date(2026, 3, i + 1) for i in range(n)],
+            "symbol": [symbol] * n,
+            "market_cap": [500_000_000_000 + i for i in range(n)],
+            "per": [12.5 + i for i in range(n)],
+            "source": ["dart"] * n,
+        }
+    )
+
+
+class TestDatasetsRowCount:
+    """``data info`` / ``data list`` 의 row_count·file_size 산출 (#1982)."""
+
+    def test_info_fundamental_row_count_is_actual(self, store):
+        """(a) 재현: data info fundamental → 실제 행 수(>0), 0 하드코딩 제거.
+
+        이전엔 ``get_dataset_detail`` 이 fundamental 에 대해 row_count 를 항상
+        ``0`` 으로 표시했다. 실제 ParquetStore 에 fundamental 을 write 한 뒤
+        row_count 가 write 한 행 수와 일치해야 한다.
+        """
+        from ante.data.datasets import get_dataset_detail
+
+        df = _make_fundamental_df("005930", n=3)
+        store.write("005930", "", df, data_type="fundamental")
+
+        result = get_dataset_detail(store, "005930__fundamental")
+        assert result["dataset"]["row_count"] == 3
+        assert result["dataset"]["data_type"] == "fundamental"
+        # file_size 는 기존 rglob 합산 불변 — 실제 파일이 있으므로 > 0.
+        assert result["dataset"]["file_size"] > 0
+
+    def test_info_ohlcv_row_count_is_actual(self, store):
+        """(b) 회귀: data info ohlcv → 실제 행 수(기존 동작 유지)."""
+        from ante.data.datasets import get_dataset_detail
+
+        df = _make_ohlcv_df("005930", n=5)
+        store.write("005930", "1m", df)
+
+        result = get_dataset_detail(store, "005930__1m")
+        assert result["dataset"]["row_count"] == 5
+        assert result["dataset"]["data_type"] == "ohlcv"
+        assert result["dataset"]["file_size"] > 0
+
+    def test_list_row_count_and_file_size_are_none(self, store):
+        """(c) data list: 각 item 의 row_count·file_size 가 None(미계산)."""
+        from ante.data.datasets import list_datasets
+
+        store.write("005930", "1m", _make_ohlcv_df("005930", n=5))
+        store.write(
+            "005930", "", _make_fundamental_df("005930", n=3), data_type="fundamental"
+        )
+
+        result = list_datasets(store)
+        assert result["items"], "데이터셋이 비어 있으면 안 됨"
+        for item in result["items"]:
+            assert item["row_count"] is None, item
+            assert item["file_size"] is None, item
+
+    def test_list_total_count_preserved(self, store):
+        """(d) 회귀: list count(total) 는 실제 매칭 데이터셋 수 유지 (#1986)."""
+        from ante.data.datasets import list_datasets
+
+        store.write("005930", "1m", _make_ohlcv_df("005930", n=5))
+        store.write(
+            "005930", "", _make_fundamental_df("005930", n=3), data_type="fundamental"
+        )
+
+        result = list_datasets(store)
+        # ohlcv(005930__1m) 1건 + fundamental(005930__fundamental) 1건.
+        assert result["total"] == 2
+        assert len(result["items"]) == 2

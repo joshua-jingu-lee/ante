@@ -91,8 +91,8 @@ def list_datasets(
         except Exception:
             item["start_date"] = None
             item["end_date"] = None
-        item["row_count"] = 0
-        item["file_size"] = 0
+        item["row_count"] = None
+        item["file_size"] = None
 
     return {"items": paged, "total": total}
 
@@ -123,9 +123,7 @@ def get_dataset_detail(store: ParquetStore, dataset_id: str) -> dict[str, Any]:
         raise FileNotFoundError("데이터셋을 찾을 수 없습니다")
 
     date_range = store.get_date_range(symbol, tf_for_store, data_type=data_type)
-    row_count = (
-        0 if data_type == "fundamental" else store.get_row_count(symbol, tf_for_store)
-    )
+    row_count = store.get_row_count(symbol, tf_for_store, data_type=data_type)
     file_size = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
     dataset_meta = {
         "id": dataset_id,
