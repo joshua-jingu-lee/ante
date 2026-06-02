@@ -3552,6 +3552,54 @@ class TestBacktestOrderTypeGate:
         sells = [t for t in result.trades if t.side == "sell"]
         assert len(sells) == 1
 
+    async def test_stop_buy_triggered_applies_slippage_no_cap(self, store):
+        """stop buy(S=200, slip>0), 현재가 210 → 체결 + exec = price*(1+slip)(cap 없음).
+
+        stop은 트리거되면 시장가로 변환되어 limit cap 대상이 아니다. 슬리피지가 그대로
+        불리하게(매수가 상승) 반영된다(stop_limit buy의 ``min(.,L)`` cap과 대조).
+        현재가 210, slippage 0.01 → exec_price = 210*1.01 = 212.1.
+        """
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop",
+                stop_price=200.0,
+            ),
+            current_close=210.0,
+            slippage_rate=0.01,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        # stop은 트리거→시장가, cap 없음 → 210*(1+0.01) = 212.1 그대로.
+        assert result.trades[0].price == pytest.approx(212.1)
+
+    async def test_stop_sell_triggered_applies_slippage_no_cap(self, store):
+        """stop sell(S=80, slip>0), 현재가 70(보유) → exec = price*(1-slip)(cap 없음).
+
+        stop sell은 트리거되면 시장가로 변환되어 limit cap 대상이 아니다. 슬리피지가
+        그대로 불리하게(매도가 하락) 반영된다(stop_limit sell의 ``max(.,L)`` cap과
+        대조). step 2 현재가 70, slippage 0.01 → sell exec_price = 70*(1-0.01) = 69.3.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop",
+                stop_price=80.0,
+            ),
+            closes=[70.0, 70.0],
+            slippage_rate=0.01,
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        # stop은 트리거→시장가, cap 없음 → 70*(1-0.01) = 69.3 그대로.
+        assert sells[0].price == pytest.approx(69.3)
+
     # ── stop_limit (단일-봉 conjunction 근사) ──────────
 
     async def test_stop_limit_buy_triggered_within_band(self, store):
@@ -3721,6 +3769,60 @@ class TestBacktestOrderTypeGate:
         assert sells[0].price == pytest.approx(100.0)
         assert sells[0].price >= 100.0
 
+    async def test_stop_limit_buy_slippage_does_not_exceed_limit(self, store):
+        """slippage cap(stop_limit buy): S=150,L=160, 현재가 160, slip>0 → exec ≤ 160.
+
+        160 >= S=150 and 160 <= L=160 으로 stop 트리거+limit 충족(단일-봉 conjunction).
+        market이면 160*(1+0.01)=161.6으로 limit을 초과하지만, stop_limit buy도 limit과
+        동일하게 ``min(slipped, L)`` cap으로 L(160)을 넘지 않아야 한다.
+        """
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=150.0,
+                price=160.0,
+            ),
+            current_close=160.0,
+            slippage_rate=0.01,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        # min(160*1.01=161.6, 160) = 160. 슬리피지가 limit을 불리하게 넘지 않는다.
+        assert result.trades[0].price == pytest.approx(160.0)
+        assert result.trades[0].price <= 160.0
+
+    async def test_stop_limit_sell_slippage_does_not_drop_below_limit(self, store):
+        """slippage cap(stop_limit sell): S=100,L=90, 현재가 90(보유) slip>0 → exec≥90.
+
+        90 <= S=100 and 90 >= L=90 으로 stop 트리거+limit 충족(단일-봉 conjunction).
+        market sell이면 90*(1-0.01)=89.1로 limit 미만을 수취하지만, stop_limit sell은
+        limit과 동일하게 ``max(slipped, L)`` cap으로 L(90) 미만을 수취하지 않아야 한다
+        (buy의 ``min(.,L)`` 와 대칭). step 1 market buy로 보유 포지션을 확보한 뒤
+        step 2 stop_limit sell을 평가한다.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=100.0,
+                price=90.0,
+            ),
+            closes=[90.0, 90.0],
+            slippage_rate=0.01,
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        # max(90*0.99=89.1, 90) = 90. 슬리피지가 limit 아래로 내려가지 않는다.
+        assert sells[0].price == pytest.approx(90.0)
+        assert sells[0].price >= 90.0
+
     # ── market 회귀 ────────────────────────────────────
 
     async def test_market_order_fills_immediately(self, store):
@@ -3746,6 +3848,44 @@ class TestBacktestOrderTypeGate:
         _, result = await self._run_single_signal(store, sig, current_close=100.0)
         assert len(result.trades) == 1
         assert result.trades[0].side == "buy"
+
+    async def test_market_buy_exec_price_applies_slippage_no_cap(self, store):
+        """market buy(명시, slip>0) → 즉시 체결 + exec = price*(1+slip)(cap 없음).
+
+        market은 limit cap 대상이 아니므로 슬리피지가 그대로 불리하게(매수가 상승)
+        반영된다(limit/stop_limit의 ``min(.,L)`` cap과 대조). 단일-봉 fixture에서
+        현재가 100, slippage 0.01 → exec_price = 100*1.01 = 101.
+        """
+        _, result = await self._run_single_signal(
+            store,
+            Signal(symbol="005930", side="buy", quantity=10, order_type="market"),
+            current_close=100.0,
+            slippage_rate=0.01,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        # market은 cap 없음 → 100*(1+0.01) = 101 그대로.
+        assert result.trades[0].price == pytest.approx(101.0)
+
+    async def test_market_sell_fills_immediately_applies_slippage_no_cap(self, store):
+        """market sell(보유, slip>0) → 즉시 체결 + exec = price*(1-slip)(cap 없음).
+
+        market sell은 트리거 게이트 없이 즉시 체결되고(회귀: 보유 청산 보존),
+        limit cap 대상이 아니므로 슬리피지가 그대로 불리하게(매도가 하락) 반영된다
+        (limit/stop_limit sell의 ``max(.,L)`` cap과 대조). step 1 market buy로
+        보유 포지션을 확보한 뒤 step 2 market sell을 평가한다. step 2 현재가 100,
+        slippage 0.01 → sell exec_price = 100*(1-0.01) = 99.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(symbol="005930", side="sell", quantity=10, order_type="market"),
+            closes=[100.0, 100.0],
+            slippage_rate=0.01,
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        # market sell은 cap 없음 → 100*(1-0.01) = 99 그대로(limit cap 미적용 대조).
+        assert sells[0].price == pytest.approx(99.0)
 
     # ── 필수 가격 필드 누락 / 알 수 없는 order_type ────
 
