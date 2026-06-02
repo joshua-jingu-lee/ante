@@ -150,7 +150,7 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `BacktestCompleteEvent` | BacktestEngine | CLI, Notification | `backtest_id`, `strategy_id`, `status` (`"success"` / `"error"`), `result_path`, `error_message` |
+| `BacktestCompleteEvent` | BacktestEngine | CLI, Notification | `backtest_id`, `strategy_id`, `status` (`"completed"`, 백테스트 성공 완료 시 발행), `result_path`, `error_message` |
 
 #### 대사 (Reconciliation)
 
