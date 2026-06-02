@@ -924,6 +924,111 @@ class TestStrategy(Strategy):
         result = validator.validate(self._write_strategy(tmp_path, code))
         assert result.valid
 
+    def test_invalid_exchange_via_module_constant(self, validator, tmp_path):
+        """모듈 상수로 전달된 invalid exchange도 검출한다 (#2022 재현).
+
+        `EXCHANGE = "INVALID"` 모듈 상수를 `exchange=EXCHANGE`로 전달하면
+        예전에는 literal이 아니라서 None 반환 → 검사 skip(보안 우회)이었다.
+        이제 모듈 레벨 문자열 상수를 정적 해석해 거부해야 한다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+EXCHANGE = "INVALID"
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange=EXCHANGE,
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Invalid exchange value: 'INVALID'" in e for e in result.errors)
+
+    def test_invalid_exchange_literal_regression(self, validator, tmp_path):
+        """literal invalid exchange는 기존대로 거부(불변, 회귀)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="INVALID",
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Invalid exchange value: 'INVALID'" in e for e in result.errors)
+
+    def test_valid_exchange_via_module_constant(self, validator, tmp_path):
+        """valid 모듈 상수 exchange는 통과한다(오탐 없음, 회귀)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+EX = "NYSE"
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange=EX,
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("Invalid exchange" in e for e in result.errors)
+
+    def test_valid_exchange_literal_regression(self, validator, tmp_path):
+        """literal valid exchange는 기존대로 통과(불변, 회귀)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX",
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("Invalid exchange" in e for e in result.errors)
+
+    def test_unresolvable_exchange_no_error(self, validator, tmp_path):
+        """해석 불가(계산식/import 이름) exchange는 검사 skip(None, 기존 동작).
+
+        비리터럴 실행식 해석은 본 이슈 비목표(#2043). 모듈 문자열 상수가
+        아닌 Name(여기서는 함수 호출 결과)은 exchange 에러를 내지 않는다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+def pick():
+    return "INVALID"
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange=pick(),
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("Invalid exchange" in e for e in result.errors)
+
 
 # ── ante.strategy lazy attribute access 회귀 (#1463) ──────────────────
 
