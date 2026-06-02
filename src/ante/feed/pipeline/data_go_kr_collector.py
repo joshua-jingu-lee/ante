@@ -8,22 +8,14 @@ from typing import Any
 import polars as pl
 
 from ante.core.market_data_vocab import is_krx_symbol
-from ante.data.normalizer import DataGoKrNormalizer
+from ante.data.normalizer import (
+    DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS,
+    DataGoKrNormalizer,
+)
 from ante.data.store import ParquetStore
 from ante.feed.transform.validate import validate_all
 
 logger = logging.getLogger(__name__)
-
-# OHLCV 필수 검증 필드
-OHLCV_REQUIRED_FIELDS = [
-    "timestamp",
-    "symbol",
-    "open",
-    "high",
-    "low",
-    "close",
-    "volume",
-]
 
 
 class DataGoKrCollector:
@@ -56,14 +48,20 @@ class DataGoKrCollector:
             return 0, set(), []
 
         raw_items, symbol_warns = self._filter_invalid_symbols(raw_items, target_date)
-        warns = symbol_warns + self._validate(raw_items, target_date)
-        if not raw_items:
+
+        # (a) schema 선필터: 필수 raw 필드 누락/null 레코드를 drop & 에러 로그.
+        survivors, schema_warns = self._filter_schema_invalid(raw_items, target_date)
+        # (b) survivor 검증: business 경고 수집 + 비-schema 실패 surface.
+        business_warns = self._validate(survivors, target_date)
+
+        warns = symbol_warns + schema_warns + business_warns
+        if not survivors:
             logger.warning(
-                "data.go.kr: date=%s 유효 KRX 심볼 없음(전 row drop)", target_date
+                "data.go.kr: date=%s 유효 레코드 없음(전 row drop)", target_date
             )
             return 0, set(), warns
 
-        df = pl.DataFrame(raw_items)
+        df = pl.DataFrame(survivors)
         df = self._deduplicate(df)
 
         rows_written, symbols = self._normalize_and_store(
@@ -98,13 +96,72 @@ class DataGoKrCollector:
         return valid, warns
 
     @staticmethod
+    def _filter_schema_invalid(
+        raw_items: list[dict],
+        target_date: str,
+    ) -> tuple[list[dict], list[dict]]:
+        """raw 필수 필드가 누락/null인 레코드를 drop하고 구조화 warning을 반환한다.
+
+        판정 기준은 validate_schema와 동일하다: 필수 필드의 키가 없거나(missing
+        key) 값이 None(null)이면 schema 실패로 간주한다. drop된 레코드는 에러
+        로그를 남기고 type=schema_validation 엔트리로 surface한다(저장 차단).
+        """
+        survivors: list[dict] = []
+        warns: list[dict] = []
+        for item in raw_items:
+            missing = [f for f in DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS if f not in item]
+            null_fields = [
+                f
+                for f in DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS
+                if f in item and item.get(f) is None
+            ]
+            if missing or null_fields:
+                reason = []
+                if missing:
+                    reason.append(f"누락={missing}")
+                if null_fields:
+                    reason.append(f"null={null_fields}")
+                detail = ", ".join(reason)
+                logger.error(
+                    "data.go.kr: date=%s 필수 필드 누락/null로 레코드 skip "
+                    "(srtnCd=%r, %s)",
+                    target_date,
+                    item.get("srtnCd"),
+                    detail,
+                )
+                warns.append(
+                    {
+                        "date": target_date,
+                        "source": "data_go_kr",
+                        "type": "schema_validation",
+                        "message": (
+                            f"필수 필드 누락/null로 레코드 skip: "
+                            f"srtnCd={item.get('srtnCd')!r}, {detail}"
+                        ),
+                    }
+                )
+            else:
+                survivors.append(item)
+        return survivors, warns
+
+    @staticmethod
     def _validate(
         raw_items: list[dict],
         target_date: str,
     ) -> list[dict]:
-        """데이터를 검증하고 경고 목록을 반환한다."""
-        validation = validate_all(raw_items, OHLCV_REQUIRED_FIELDS)
+        """선필터를 통과한 레코드를 검증하고 경고 목록을 반환한다.
+
+        schema 계층은 선필터(_filter_schema_invalid)에서 이미 통과했으므로
+        여기서는 business 경고를 수집한다. transport/syntax 등 비-schema 실패가
+        나오면 폐기하지 않고 에러 로그 + schema_validation 엔트리로 surface한다.
+        """
         warns: list[dict] = []
+        if not raw_items:
+            return warns
+
+        validation = validate_all(raw_items, list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS))
+
+        # business 계층 경고 (저장 유지)
         for w in validation.warnings:
             warns.append(
                 {
@@ -112,6 +169,18 @@ class DataGoKrCollector:
                     "source": "data_go_kr",
                     "type": "business_rule",
                     "message": w,
+                }
+            )
+
+        # 비-schema(transport/syntax 등) 실패는 무시하지 않고 surface한다.
+        for err in validation.errors:
+            logger.error("data.go.kr: date=%s survivor 검증 실패: %s", target_date, err)
+            warns.append(
+                {
+                    "date": target_date,
+                    "source": "data_go_kr",
+                    "type": "schema_validation",
+                    "message": err,
                 }
             )
         return warns

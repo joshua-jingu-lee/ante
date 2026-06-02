@@ -677,3 +677,137 @@ class TestCollectorSymbolValidation:
         assert len(_invalid_symbol_warns(warns)) == 1
         assert store.list_symbols("1d") == []
         assert store.list_symbols(data_type="fundamental") == []
+
+
+# ── DataGoKrCollector: raw schema 검증 (#2055 / #2008) ─────────
+
+
+def _schema_warns(warns: list[dict]) -> list[dict]:
+    """warns 목록에서 schema_validation 타입만 추출한다."""
+    return [w for w in warns if w.get("type") == "schema_validation"]
+
+
+class TestCollectorSchemaValidation:
+    """DataGoKrCollector가 raw 스키마 실패 레코드를 skip하고 surface한다 (#2055)."""
+
+    @pytest.mark.asyncio
+    async def test_valid_raw_no_false_schema_failure(self, tmp_path) -> None:
+        """정상 raw → 허위 schema 실패 0건, 정규화/저장 정상(rows>0)."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _schema_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_missing_required_field_skipped(self, tmp_path) -> None:
+        """raw 필수 필드(mkp) 누락 레코드 → skip + schema_validation warning."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        del item["mkp"]
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        schema = _schema_warns(warns)
+        assert len(schema) == 1
+        assert "mkp" in schema[0]["message"]
+        assert store.list_symbols("1d") == []
+
+    @pytest.mark.asyncio
+    async def test_null_required_field_skipped(self, tmp_path) -> None:
+        """raw 필수 필드(clpr) null 레코드 → missing과 동일하게 skip."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["clpr"] = None
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        schema = _schema_warns(warns)
+        assert len(schema) == 1
+        assert "clpr" in schema[0]["message"]
+        assert store.list_symbols("1d") == []
+
+    @pytest.mark.asyncio
+    async def test_mixed_valid_and_malformed(self, tmp_path) -> None:
+        """혼합 batch(valid + malformed) → valid만 저장, malformed surface."""
+        store = ParquetStore(base_path=tmp_path)
+        good = _raw("005930")
+        bad_missing = _raw("000660")
+        del bad_missing["hipr"]
+        bad_null = _raw("035720")
+        bad_null["trqu"] = None
+        collector = DataGoKrCollector(source=_FakeSource([good, bad_missing, bad_null]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert len(_schema_warns(warns)) == 2
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_business_anomaly_record_kept(self, tmp_path) -> None:
+        """business 이상치(lopr>hipr)도 schema는 통과하므로 survivor 저장 유지(회귀).
+
+        business 계층은 비차단(경고)이므로 schema를 통과한 레코드는 값 이상치가
+        있어도 저장된다. raw 키(lopr/hipr)는 business 계층이 보는 정규화 컬럼명
+        (low/high)이 아니어서 collect 단계의 raw warns에는 잡히지 않지만,
+        핵심 회귀 불변은 'schema 통과 → 차단되지 않고 저장'이다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        # lopr(=200) > hipr(=110): 값 이상치이지만 raw 필수 필드는 모두 존재.
+        item = _raw("005930")
+        item["lopr"] = "200"
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _schema_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+
+    def test_business_layer_warns_on_normalized_keys(self) -> None:
+        """business 계층은 정규화 컬럼명(low/high) 기준으로 warning을 낸다(회귀).
+
+        survivor 검증이 business_rule 채널을 보존하는지 직접 확인한다.
+        """
+        from ante.feed.transform.validate import validate_all
+
+        norm = {
+            "timestamp": "20260102",
+            "symbol": "005930",
+            "open": 100.0,
+            "high": 110.0,
+            "low": 200.0,  # low > high/open/close → business 위반
+            "close": 105.0,
+            "volume": 1000,
+        }
+        result = validate_all(
+            [norm],
+            ["timestamp", "symbol", "open", "high", "low", "close", "volume"],
+        )
+        assert result.passed is True  # business 위반은 차단하지 않음
+        assert result.errors == []
+        assert any("low > " in w for w in result.warnings)
+
+    def test_validate_all_passes_for_valid_raw(self) -> None:
+        """#2055/#2008 repro: 정상 raw가 도출 상수로 schema PASS."""
+        from ante.data.normalizer import DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS
+        from ante.feed.transform.validate import validate_all
+
+        result = validate_all(
+            [_raw("005930")], list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS)
+        )
+        assert result.passed is True
+        assert result.errors == []

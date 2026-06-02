@@ -253,6 +253,21 @@ class DataGoKrNormalizer(BaseNormalizer):
         return df.select(available)
 
 
+# OHLCV 필수 정규화 컬럼 집합 (선택적 amount 제외).
+_OHLCV_REQUIRED_NORMALIZED: frozenset[str] = frozenset(
+    {"timestamp", "symbol", "open", "high", "low", "close", "volume"}
+)
+
+# raw data.go.kr OHLCV 필수 필드 — DataGoKrNormalizer._OHLCV_MAPPING에서
+# 도출한 SSOT. 정규화 후 컬럼명이 OHLCV 필수 집합에 드는 raw 키만 추출하며,
+# 선택적 trPrc(→amount)는 제외된다. _OHLCV_MAPPING 삽입순을 보존한다.
+DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS: tuple[str, ...] = tuple(
+    raw
+    for raw, norm in DataGoKrNormalizer._OHLCV_MAPPING.items()
+    if norm in _OHLCV_REQUIRED_NORMALIZED
+)
+
+
 # ── DART 재무제표 Normalizer ─────────────────────────
 
 # DART 계정과목명 → FUNDAMENTAL_SCHEMA 필드 매핑
