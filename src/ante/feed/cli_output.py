@@ -42,6 +42,9 @@ def _backfill_result_dict(result: CollectionResult) -> dict[str, Any]:
         "symbols_total": result.symbols_total,
         "symbols_success": result.symbols_success,
         "symbols_failed": result.symbols_failed,
+        # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed=0이어도
+        # >0일 수 있다(#2117). 상세는 failures 배열.
+        "failures_total": len(result.failures),
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,
@@ -59,6 +62,9 @@ def _daily_result_dict(result: CollectionResult) -> dict[str, Any]:
         "symbols_total": result.symbols_total,
         "symbols_success": result.symbols_success,
         "symbols_failed": result.symbols_failed,
+        # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed=0이어도
+        # >0일 수 있다(#2117). 상세는 failures 배열.
+        "failures_total": len(result.failures),
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,

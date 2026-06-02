@@ -43,6 +43,12 @@ class TestBackfillResultDict:
         assert "warnings" in d
         assert "config_errors" in d
 
+    def test_includes_failures_total_key(self) -> None:
+        """failures_total 키가 포함된다(#2117)."""
+        d = _backfill_result_dict(_result())
+
+        assert "failures_total" in d
+
     def test_empty_lists_when_result_empty(self) -> None:
         """비어 있는 경우 빈 리스트로 직렬화된다."""
         d = _backfill_result_dict(_result())
@@ -50,6 +56,24 @@ class TestBackfillResultDict:
         assert d["failures"] == []
         assert d["warnings"] == []
         assert d["config_errors"] == []
+        assert d["failures_total"] == 0
+
+    def test_date_level_failure_surfaces_with_symbols_failed_zero(self) -> None:
+        """날짜/소스 단위 실패는 symbols_failed=0이어도 failures_total>0(#2117)."""
+        result = _result(
+            symbols_total=0,
+            symbols_success=0,
+            symbols_failed=0,
+            failures=[
+                {"date": "2026-03-16", "source": "data_go_kr", "reason": "HTTP 500"},
+                {"source": "dart", "reason": "연결 실패"},
+            ],
+        )
+
+        d = _backfill_result_dict(result)
+
+        assert d["symbols_failed"] == 0
+        assert d["failures_total"] == 2
 
     def test_values_match_collection_result(self) -> None:
         """항목이 있을 때 값이 CollectionResult와 일치한다."""
@@ -85,6 +109,12 @@ class TestDailyResultDict:
         assert "warnings" in d
         assert "config_errors" in d
 
+    def test_includes_failures_total_key(self) -> None:
+        """failures_total 키가 포함된다(#2117)."""
+        d = _daily_result_dict(_result(mode="daily", target_date="2026-03-17"))
+
+        assert "failures_total" in d
+
     def test_empty_lists_when_result_empty(self) -> None:
         """비어 있는 경우 빈 리스트로 직렬화된다."""
         d = _daily_result_dict(_result(mode="daily", target_date="2026-03-17"))
@@ -92,6 +122,25 @@ class TestDailyResultDict:
         assert d["failures"] == []
         assert d["warnings"] == []
         assert d["config_errors"] == []
+        assert d["failures_total"] == 0
+
+    def test_date_level_failure_surfaces_with_symbols_failed_zero(self) -> None:
+        """날짜/소스 단위 실패는 symbols_failed=0이어도 failures_total>0(#2117)."""
+        result = _result(
+            mode="daily",
+            target_date="2026-03-17",
+            symbols_total=0,
+            symbols_success=0,
+            symbols_failed=0,
+            failures=[
+                {"date": "2026-03-16", "source": "data_go_kr", "reason": "HTTP 500"},
+            ],
+        )
+
+        d = _daily_result_dict(result)
+
+        assert d["symbols_failed"] == 0
+        assert d["failures_total"] == 1
 
     def test_values_match_collection_result(self) -> None:
         """항목이 있을 때 값이 CollectionResult와 일치한다."""

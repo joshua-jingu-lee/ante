@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -134,6 +135,7 @@ class TestReportGenerate:
         assert summary["symbols_total"] == 2487
         assert summary["symbols_success"] == 2485
         assert summary["symbols_failed"] == 2
+        assert summary["failures_total"] == 1
         assert summary["rows_written"] == 2485
         assert summary["data_types"] == ["ohlcv", "fundamental"]
 
@@ -191,6 +193,14 @@ class TestReportGenerateEmpty:
         gen = ReportGenerator(feed_dir)
         report = gen.generate(empty_result)
         assert report["config_errors"] == []
+
+    def test_empty_failures_total_zero(
+        self, feed_dir: Path, empty_result: CollectionResult
+    ) -> None:
+        """failures가 비어있으면 summary.failures_total이 0이다(#2117)."""
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(empty_result)
+        assert report["summary"]["failures_total"] == 0
 
     def test_empty_result_has_all_keys(
         self, feed_dir: Path, empty_result: CollectionResult
@@ -518,3 +528,180 @@ class TestBackfillReportSurfacesStoreMergeWarning:
 
         # 손상 파일은 보존됨(데이터 손실 방지).
         assert (part_dir / "2025-09.parquet").read_bytes() == b"corrupt-not-parquet"
+
+
+class TestReportFailuresTotalSurfacesNonSymbolFailures:
+    """비-심볼(날짜/소스) 실패가 summary.failures_total로 표면화되는지 검증(#2117).
+
+    symbols_failed는 종목 귀속 실패만 세므로 날짜/소스 단위 실패는 0으로 남지만,
+    failures_total은 len(failures)라 정직하게 표면화된다.
+    """
+
+    def test_date_level_failure_surfaces_in_failures_total(
+        self, feed_dir: Path
+    ) -> None:
+        """data.go.kr 날짜 단위 실패는 symbols_failed=0이어도 failures_total>0."""
+        # backfill_runner가 기록하는 date-level failure 형태({date,source,reason}).
+        result = CollectionResult(
+            mode="backfill",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            symbols_total=0,
+            symbols_success=0,
+            symbols_failed=0,
+            rows_written=0,
+            data_types=[],
+            failures=[
+                {
+                    "date": "2026-03-16",
+                    "source": "data_go_kr",
+                    "reason": "HTTP 500 after 3 retries",
+                },
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        # 날짜 단위 실패는 종목에 귀속되지 않아 symbols_failed에 잡히지 않는다.
+        assert summary["symbols_failed"] == 0
+        # 그러나 failures_total로는 정직하게 표면화된다.
+        assert summary["failures_total"] == 1
+        assert len(report["failures"]) == 1
+
+    def test_dart_source_failure_surfaces_in_failures_total(
+        self, feed_dir: Path
+    ) -> None:
+        """DART 소스 단위 실패는 symbols_failed=0이어도 failures_total>0."""
+        # backfill_runner가 기록하는 DART source failure 형태({source,reason}).
+        result = CollectionResult(
+            mode="backfill",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            symbols_total=0,
+            symbols_success=0,
+            symbols_failed=0,
+            rows_written=0,
+            data_types=[],
+            failures=[
+                {
+                    "source": "dart",
+                    "reason": "DART API 연결 실패",
+                },
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        assert summary["symbols_failed"] == 0
+        assert summary["failures_total"] == 1
+
+    def test_symbol_level_failure_keeps_symbols_failed_accurate(
+        self, feed_dir: Path
+    ) -> None:
+        """심볼 단위 성공/실패는 symbols_failed가 정확히 유지된다(부풀리지 않음)."""
+        result = CollectionResult(
+            mode="daily",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            target_date="2026-03-16",
+            symbols_total=3,
+            symbols_success=2,
+            symbols_failed=1,
+            rows_written=2,
+            data_types=["ohlcv"],
+            failures=[
+                {
+                    "symbol": "003920",
+                    "date": "2026-03-16",
+                    "source": "data_go_kr",
+                    "reason": "타임아웃",
+                },
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        # 심볼 귀속 실패는 그대로 symbols_failed에 잡히고 failures_total과 일치.
+        assert summary["symbols_failed"] == 1
+        assert summary["failures_total"] == 1
+
+    def test_mixed_symbol_and_date_failures(self, feed_dir: Path) -> None:
+        """심볼+날짜 단위 실패 혼재 시 failures_total > symbols_failed."""
+        result = CollectionResult(
+            mode="backfill",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            symbols_total=2,
+            symbols_success=1,
+            symbols_failed=1,
+            rows_written=1,
+            data_types=["ohlcv"],
+            failures=[
+                {"symbol": "003920", "reason": "심볼 단위 실패"},
+                {"date": "2026-03-15", "source": "data_go_kr", "reason": "날짜 실패"},
+                {"source": "dart", "reason": "소스 실패"},
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        # symbols_failed는 심볼 귀속분만(1), failures_total은 전체(3).
+        assert summary["symbols_failed"] == 1
+        assert summary["failures_total"] == 3
+
+
+_SPEC_DOC = (
+    Path(__file__).resolve().parents[3]
+    / "docs"
+    / "specs"
+    / "data-feed"
+    / "10-checkpoints-and-reports.md"
+)
+
+
+def _spec_report_summary_keys() -> set[str]:
+    """스펙 문서 리포트 예시 JSON의 summary 필드셋을 추출한다.
+
+    fenced ```json 블록 중 `"summary"`를 포함하는 첫 블록을 골라, 줄단위
+    `//` 주석을 제거한 뒤 파싱한다(스펙 예시는 주석을 포함하므로).
+    """
+    text = _SPEC_DOC.read_text(encoding="utf-8")
+    blocks = re.findall(r"```json\n(.*?)```", text, re.DOTALL)
+    for block in blocks:
+        if '"summary"' not in block:
+            continue
+        no_comments = "\n".join(
+            line for line in block.splitlines() if not line.strip().startswith("//")
+        )
+        payload = json.loads(no_comments)
+        return set(payload["summary"].keys())
+    raise AssertionError("스펙 문서에서 summary 예시 블록을 찾지 못함")
+
+
+class TestSpecSummaryFieldsetParity:
+    """스펙 예시의 summary 필드셋과 generate() summary 직렬화가 정합한지 검증(#2117)."""
+
+    def test_generate_summary_keys_match_spec(
+        self, feed_dir: Path, sample_result: CollectionResult
+    ) -> None:
+        """generate() summary 키 집합 == 스펙 예시 summary 필드셋."""
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(sample_result)
+
+        assert set(report["summary"].keys()) == _spec_report_summary_keys()
+
+    def test_spec_contains_failures_total(self) -> None:
+        """스펙 예시 summary에 failures_total 필드가 명시돼 있다."""
+        assert "failures_total" in _spec_report_summary_keys()

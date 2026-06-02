@@ -744,11 +744,18 @@ def _echo_report_section(latest_report: dict | None) -> None:
     click.echo(_SEPARATOR)
     if latest_report:
         summary = latest_report.get("summary", {})
+        # 총 실패 건수: summary.failures_total(신규)을 우선하되, 구버전 리포트엔
+        # 없으므로 failures 배열 길이로 폴백한다. 날짜/소스 단위 비-심볼 실패는
+        # symbols_failed에 잡히지 않으므로 별도 병기한다(#2117).
+        failures_total = summary.get(
+            "failures_total", len(latest_report.get("failures", []))
+        )
         click.echo(f"  mode: {latest_report.get('mode', '?')}")
         click.echo(f"  date: {latest_report.get('target_date', '?')}")
         click.echo(
             f"  result: {summary.get('symbols_success', 0)} success"
             f" / {summary.get('symbols_failed', 0)} failed"
+            f" / {failures_total} total failures"
             f" / {len(latest_report.get('warnings', []))} warnings"
         )
         click.echo(f"  rows: {summary.get('rows_written', 0)}")

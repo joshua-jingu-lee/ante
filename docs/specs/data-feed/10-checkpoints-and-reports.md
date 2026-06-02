@@ -37,6 +37,7 @@ backfill/daily 실행 완료 시 생성되는 **운영 기록**.
     "symbols_total": 2487,
     "symbols_success": 2485,
     "symbols_failed": 2,
+    "failures_total": 2,
     "rows_written": 2485,
     "data_types": ["ohlcv", "fundamental"]
   },
@@ -66,8 +67,9 @@ backfill/daily 실행 완료 시 생성되는 **운영 기록**.
 
 | 필드 | 설명 |
 |------|------|
-| `summary` | 수집 결과 요약 (종목 수, 성공/실패, 기록 행 수) |
-| `failures` | 수집 실패 건 (종목, 날짜, 사유, 재시도 횟수) |
+| `summary` | 수집 결과 요약 (종목 수, 성공/실패, 총 실패 건수, 기록 행 수) |
+| `summary.failures_total` | 총 실패 건수(`len(failures)`). `symbols_failed`는 종목 단위 실패만 세지만, `failures`에는 날짜/소스 단위 실패(예: data.go.kr 특정 날짜 실패, DART 소스 실패)가 종목에 귀속되지 않은 채 포함될 수 있다. 따라서 `symbols_failed=0`이어도 `failures_total>0`일 수 있으며, 상세는 `failures` 배열을 참조한다. |
+| `failures` | 수집 실패 건. 종목 단위(종목, 날짜, 사유, 재시도 횟수)뿐 아니라 종목에 귀속되지 않는 날짜/소스 단위 실패도 포함한다. |
 | `warnings` | 데이터 품질 경고 (비즈니스 규칙 위반, 시계열 갭 등) |
 | `config_errors` | 설정 오류 (잘못된 routing, 누락된 API 키 등) |
 
