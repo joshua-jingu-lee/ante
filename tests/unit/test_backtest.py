@@ -3319,6 +3319,59 @@ class TestBacktestOrderTypeGate:
         result = await executor.run()
         return executor, result
 
+    async def _run_buy_then_sell(
+        self,
+        store,
+        sell_signal: Signal,
+        closes: list[float],
+        *,
+        buy_quantity: float = 10,
+        slippage_rate: float = 0.0,
+    ):
+        """step 1에서 market buy로 포지션을 만든 뒤 step 2에서 *sell_signal* 평가.
+
+        보유 포지션이 필요한 sell 게이트(stop_limit sell 등)/sell-side slippage cap을
+        검증하기 위한 패턴이다(기존 ``BuyThenLimitSell``/``BuyThenStopSell`` 동형).
+        step 1 market buy는 게이트 무관하게 ``closes[0]`` 종가로 즉시 체결되고, step
+        2에서 ``closes[1]`` 종가로 *sell_signal* 트리거/체결가가 게이트된다. 봉이 2개
+        이상 필요하므로 *closes* 는 최소 2개를 준다.
+        """
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        captured = sell_signal
+        qty = buy_quantity
+
+        class BuyThenSell(Strategy):
+            meta = StrategyMeta(name="buy_then_sell", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=qty)]
+                if self._step == 2:
+                    return [captured]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenSell,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=slippage_rate,
+        )
+        result = await executor.run()
+        return executor, result
+
     # ── limit ─────────────────────────────────────────
 
     async def test_limit_buy_not_triggered_above(self, store):
@@ -3551,6 +3604,72 @@ class TestBacktestOrderTypeGate:
         )
         assert len(result.trades) == 0
 
+    async def test_stop_limit_sell_triggered_within_band(self, store):
+        """stop_limit sell(S=100,L=90), 현재가 95(보유 후) → 체결.
+
+        sell 트리거 조건은 ``현재가 <= S and 현재가 >= L``: 95 <= 100 and 95 >= 90
+        이므로 stop 트리거 + limit 충족이 동시에 만족된다(단일-봉 conjunction).
+        step 1 market buy로 보유 포지션을 만든 뒤 step 2 sell을 평가한다.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=100.0,
+                price=90.0,
+            ),
+            closes=[95.0, 95.0],
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        # limit cap: max(95*(1-slip=0), 90) = 95. exec_price ≥ limit(90).
+        assert sells[0].price >= 90.0
+
+    async def test_stop_limit_sell_not_triggered_above_stop(self, store):
+        """stop_limit sell(S=100,L=90), 현재가 110(보유 후) → 미체결(stop 트리거 안 됨).
+
+        110 > S=100 이라 sell stop(현재가 <= S)이 트리거되지 않는다. 보유 포지션이
+        있어도 게이트가 side 분기 이전이라 sell 거래가 발행되지 않는다.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=100.0,
+                price=90.0,
+            ),
+            closes=[110.0, 110.0],
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 0
+
+    async def test_stop_limit_sell_not_triggered_below_limit(self, store):
+        """stop_limit sell(S=100,L=90), 현재가 85(보유 후) → 미체결(limit 미충족).
+
+        85 <= S=100 으로 stop은 트리거되지만 85 < L=90 이라 sell limit(현재가 >= L)이
+        충족되지 않아 conjunction이 깨진다. 보유 포지션이 있어도 미체결.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=100.0,
+                price=90.0,
+            ),
+            closes=[85.0, 85.0],
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 0
+
     # ── slippage cap ──────────────────────────────────
 
     async def test_limit_buy_slippage_does_not_exceed_limit(self, store):
@@ -3575,6 +3694,32 @@ class TestBacktestOrderTypeGate:
         # min(100*1.01, 100) = 100. 슬리피지가 limit을 불리하게 넘지 않는다.
         assert result.trades[0].price == pytest.approx(100.0)
         assert result.trades[0].price <= 100.0
+
+    async def test_limit_sell_slippage_does_not_drop_below_limit(self, store):
+        """slippage cap(sell): limit sell L=100, 현재가 100, slippage>0 → exec ≥ 100.
+
+        sell 슬리피지는 ``price*(1-slip)`` 로 불리하게 내려가 market이면 99로 limit
+        미만을 수취하지만, limit은 ``max(99, 100)`` cap으로 limit(100) 미만을 수취하지
+        않아야 한다(buy의 ``min(.,L)`` 와 대칭인 sell ``max(.,L)`` 검증). step 1 market
+        buy로 보유 포지션을 확보한 뒤 step 2 limit sell을 평가한다.
+        """
+        _, result = await self._run_buy_then_sell(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="limit",
+                price=100.0,
+            ),
+            closes=[100.0, 100.0],
+            slippage_rate=0.01,
+        )
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        # max(100*0.99, 100) = 100. 슬리피지가 limit 아래로 내려가지 않는다.
+        assert sells[0].price == pytest.approx(100.0)
+        assert sells[0].price >= 100.0
 
     # ── market 회귀 ────────────────────────────────────
 
