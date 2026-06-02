@@ -413,7 +413,7 @@ Bot.on_signal()
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `OrderCancelFailedEvent` | APIGateway | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `error_message` |
+| `OrderCancelFailedEvent` | APIGateway | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `error_message` |
 
 #### Stop Order
 

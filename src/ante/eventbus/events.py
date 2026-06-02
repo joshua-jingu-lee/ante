@@ -652,7 +652,13 @@ class CircuitBreakerEvent(Event):
 
 @dataclass(frozen=True)
 class OrderCancelFailedEvent(Event):
-    """주문 취소 실패."""
+    """주문 취소 실패.
+
+    Refs #2044: 전략 ``on_order_update(status="cancel_failed")`` 스펙의
+    필수 키 ``symbol``/``side`` 를 채우기 위해 ``OrderCancelledEvent`` 와
+    동형으로 필드를 보유한다. default 빈값으로 하위호환을 유지하며,
+    Gateway 핸들러가 OrderTracker record 에서 채운다.
+    """
 
     _requires_account_id: ClassVar[bool] = True
 
@@ -660,6 +666,8 @@ class OrderCancelFailedEvent(Event):
     order_id: str = ""
     bot_id: str = ""
     strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
     error_message: str = ""
 
 

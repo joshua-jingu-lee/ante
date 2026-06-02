@@ -409,6 +409,17 @@ class APIGateway:
         if not isinstance(event, OrderCancelEvent):
             return
 
+        # #2044: 전략 on_order_update(cancelled/cancel_failed) 스펙의 필수 키
+        # symbol/side 를 OrderTracker record 에서 채운다. cross-account leak
+        # 방지를 위해 record.account_id == event.account_id 일 때만 채우고,
+        # order_tracker 미주입 / record 미발견 / account 불일치 시에는 ""
+        # 로 graceful 하게 비운다 (예외 없음).
+        sym, sd = "", ""
+        if self._order_tracker is not None:
+            record = await self._order_tracker.get(event.order_id)
+            if record is not None and record.account_id == event.account_id:
+                sym, sd = record.symbol, record.side
+
         try:
             ok = await self.cancel_order(event.order_id, account_id=event.account_id)
             if not ok:
@@ -421,6 +432,8 @@ class APIGateway:
                         order_id=event.order_id,
                         bot_id=event.bot_id,
                         strategy_id=event.strategy_id,
+                        symbol=sym,
+                        side=sd,
                         error_message="브로커가 취소 실패(False)를 반환함",
                     )
                 )
@@ -431,8 +444,8 @@ class APIGateway:
                     order_id=event.order_id,
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
-                    symbol="",
-                    side="",
+                    symbol=sym,
+                    side=sd,
                     quantity=0.0,
                     price=0.0,
                     reason=event.reason,
@@ -446,6 +459,8 @@ class APIGateway:
                     order_id=event.order_id,
                     bot_id=event.bot_id,
                     strategy_id=event.strategy_id,
+                    symbol=sym,
+                    side=sd,
                     error_message=str(e),
                 )
             )

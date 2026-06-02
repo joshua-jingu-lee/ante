@@ -15,6 +15,7 @@ from ante.eventbus.events import (
     BotStopEvent,
     BotStoppedEvent,
     OrderCancelEvent,
+    OrderCancelFailedEvent,
     OrderFilledEvent,
     OrderRejectedEvent,
     OrderRequestEvent,
@@ -626,6 +627,54 @@ class TestBot:
         assert len(updates) == 1
         assert updates[0]["status"] == "rejected"
         assert updates[0]["reason"] == "insufficient funds"
+
+        await bot.stop()
+
+    async def test_on_order_update_cancel_failed_forwards_symbol_side(
+        self, eventbus, ctx, simple_config
+    ):
+        """#2044: cancel_failed 통보가 event.symbol/side 를 전략에 forward.
+
+        하드코딩 ``symbol=""``/``side=""`` 제거 회귀 잠금 — Gateway 가 채운
+        OrderCancelFailedEvent.symbol/side 가 그대로 전략 update 로 전달돼야
+        한다.
+        """
+        updates = []
+
+        class TrackStrategy(Strategy):
+            meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+            async def on_step(self, context):
+                return []
+
+            async def on_order_update(self, update):
+                updates.append(update)
+
+        bot = Bot(
+            config=simple_config,
+            strategy_cls=TrackStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+
+        await bot.on_order_update(
+            OrderCancelFailedEvent(
+                order_id="ord1",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                error_message="브로커가 취소 실패(False)를 반환함",
+                account_id="acc-test",
+            )
+        )
+
+        assert len(updates) == 1
+        assert updates[0]["status"] == "cancel_failed"
+        assert updates[0]["symbol"] == "005930"
+        assert updates[0]["side"] == "buy"
+        assert updates[0]["reason"] == "브로커가 취소 실패(False)를 반환함"
 
         await bot.stop()
 
