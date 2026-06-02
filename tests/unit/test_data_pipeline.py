@@ -205,10 +205,59 @@ class TestParquetStore:
         assert store.list_symbols("1d") == []
 
     async def test_get_date_range(self, store):
+        # _make_ohlcv_df 기본: 2026-03-01 09:00~09:04(5분) → 첫/마지막 row 날짜 동일.
+        # (이슈 #2014) 월 stem "2026-03"이 아니라 실제 row 날짜 "2026-03-01"을 반환.
         store.write("005930", "1m", _make_ohlcv_df())
         result = store.get_date_range("005930", "1m")
         assert result is not None
-        assert result == ("2026-03", "2026-03")
+        assert result == ("2026-03-01", "2026-03-01")
+
+    async def test_get_date_range_actual_dates_multi_month(self, store):
+        """(이슈 #2014) 여러 월에 걸친 ohlcv → 실제 첫/마지막 row 날짜(YYYY-MM-DD).
+
+        월 stem("2026-01"/"2026-03")이 아니라 실제 row 날짜
+        ("2026-01-02"/"2026-03-15")를 반환해야 한다.
+        """
+        timestamps = pl.Series(
+            [
+                datetime(2026, 1, 2, 9, 0, tzinfo=UTC),
+                datetime(2026, 1, 20, 9, 0, tzinfo=UTC),
+                datetime(2026, 3, 15, 15, 30, tzinfo=UTC),
+            ]
+        )
+        n = len(timestamps)
+        df = pl.DataFrame(
+            {
+                "timestamp": timestamps,
+                "symbol": ["005930"] * n,
+                "open": [50000.0] * n,
+                "high": [50100.0] * n,
+                "low": [49900.0] * n,
+                "close": [50050.0] * n,
+                "volume": [1000] * n,
+                "source": ["test"] * n,
+            }
+        )
+        store.write("005930", "1d", df)
+        result = store.get_date_range("005930", "1d")
+        assert result == ("2026-01-02", "2026-03-15")
+
+    async def test_get_date_range_fundamental_actual_dates(self, store):
+        """(이슈 #2014) fundamental은 date 컬럼 기준 실제 첫/마지막 날짜."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 2, 10), date(2026, 5, 28)],
+                "symbol": ["005930", "005930"],
+                "market_cap": [500000000000, 510000000000],
+                "per": [12.5, 12.8],
+                "source": ["dart", "dart"],
+            }
+        )
+        store.write("005930", "", df, data_type="fundamental")
+        result = store.get_date_range("005930", "", data_type="fundamental")
+        assert result == ("2026-02-10", "2026-05-28")
 
     async def test_get_date_range_none(self, store):
         assert store.get_date_range("999999", "1m") is None
@@ -1487,3 +1536,28 @@ class TestDatasetsRowCount:
         # ohlcv(005930__1m) 1건 + fundamental(005930__fundamental) 1건.
         assert result["total"] == 2
         assert len(result["items"]) == 2
+
+    def test_info_ohlcv_start_end_date_are_actual(self, store):
+        """(이슈 #2014) data info ohlcv → start/end_date 가 실제 row 날짜.
+
+        _make_ohlcv_df 기본은 2026-03-01 09:00~09:04(5분) → 첫/마지막 row 날짜
+        모두 "2026-03-01". 월 stem "2026-03" 이 아니라 실제 날짜를 반영해야 한다.
+        """
+        from ante.data.datasets import get_dataset_detail
+
+        store.write("005930", "1m", _make_ohlcv_df("005930", n=5))
+        result = get_dataset_detail(store, "005930__1m")
+        assert result["dataset"]["start_date"] == "2026-03-01"
+        assert result["dataset"]["end_date"] == "2026-03-01"
+
+    def test_info_fundamental_start_end_date_are_actual(self, store):
+        """(이슈 #2014) data info fundamental → start/end_date 가 실제 date 컬럼 값."""
+        from ante.data.datasets import get_dataset_detail
+
+        # _make_fundamental_df: date(2026,3,1)~date(2026,3,3) (n=3).
+        store.write(
+            "005930", "", _make_fundamental_df("005930", n=3), data_type="fundamental"
+        )
+        result = get_dataset_detail(store, "005930__fundamental")
+        assert result["dataset"]["start_date"] == "2026-03-01"
+        assert result["dataset"]["end_date"] == "2026-03-03"
