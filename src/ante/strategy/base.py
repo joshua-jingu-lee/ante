@@ -86,7 +86,12 @@ class StrategyMeta:
         )
 
     def __hash__(self) -> int:
-        return hash(tuple(getattr(self, attr) for attr in self.__slots__))
+        return hash(
+            tuple(
+                tuple(v) if isinstance(v, list) else v
+                for v in (getattr(self, attr) for attr in self.__slots__)
+            )
+        )
 
     def __repr__(self) -> str:
         fields = ", ".join(f"{a}={getattr(self, a)!r}" for a in self.__slots__)
