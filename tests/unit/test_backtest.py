@@ -147,6 +147,35 @@ def _make_ohlcv_df_with_closes(
     )
 
 
+# ── Helper: 디스크 전략 파일 ─────────────────────────
+
+# StrategyValidator(#2039)가 service.run에서 load 직전 통과시키는, 금지
+# 모듈/builtin/top-level 코드가 없는 최소 유효 전략 소스. service.run은 실제
+# 파일을 read_text 하므로, load를 mock하더라도 strategy_path는 실존하는 유효
+# 파일을 가리켜야 검증을 통과한다.
+_VALID_STRATEGY_SOURCE = '''\
+"""테스트용 최소 유효 전략."""
+
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+
+class _DiskStrategy(Strategy):
+    meta = StrategyMeta(name="disk", version="1.0", description="t")
+
+    async def on_step(self, context):
+        return []
+'''
+
+
+def _write_valid_strategy(directory) -> str:
+    """``directory`` 에 유효 전략 파일을 쓰고 그 경로 문자열을 반환."""
+    from pathlib import Path
+
+    path = Path(directory) / "valid_strategy.py"
+    path.write_text(_VALID_STRATEGY_SOURCE)
+    return str(path)
+
+
 @pytest.fixture
 def data_dir(tmp_path):
     return tmp_path / "data"
@@ -1623,8 +1652,9 @@ class TestBacktestService:
         """run() 후 result.config=BacktestConfig, datasets=list[DatasetInfo]."""
         service = BacktestService(data_path=str(data_dir))
 
+        strategy_path = _write_valid_strategy(data_dir)
         config = {
-            "strategy_path": "dummy.py",
+            "strategy_path": strategy_path,
             "start_date": "2026-01-01",
             "end_date": "2026-12-31",
             "symbols": ["005930"],
@@ -1640,7 +1670,7 @@ class TestBacktestService:
 
         # config는 BacktestConfig 인스턴스
         assert isinstance(result.config, BacktestConfig)
-        assert result.config.strategy_path == "dummy.py"
+        assert result.config.strategy_path == strategy_path
         assert result.config.symbols == ["005930"]
         assert result.config.start_date == "2026-01-01"
         assert result.config.end_date == "2026-12-31"
@@ -1673,7 +1703,7 @@ class TestBacktestService:
 
         service = BacktestService(data_path=str(wrong))
         config = {
-            "strategy_path": "dummy.py",
+            "strategy_path": _write_valid_strategy(tmp_path),
             "start_date": "2026-01-01",
             "end_date": "2026-12-31",
             "symbols": ["005930"],
@@ -1708,7 +1738,7 @@ class TestBacktestService:
         wrong.mkdir()
         service = BacktestService(data_path=str(wrong))
         config = {
-            "strategy_path": "dummy.py",
+            "strategy_path": _write_valid_strategy(tmp_path),
             "start_date": "2026-01-01",
             "end_date": "2026-12-31",
             "symbols": ["005930"],
@@ -1735,7 +1765,7 @@ class TestBacktestService:
 
         service = BacktestService(data_path=str(default_dir))
         config = {
-            "strategy_path": "dummy.py",
+            "strategy_path": _write_valid_strategy(tmp_path),
             "start_date": "2026-01-01",
             "end_date": "2026-12-31",
             "symbols": ["005930"],
@@ -1751,6 +1781,163 @@ class TestBacktestService:
         assert len(result.datasets) == 1
         assert result.datasets[0].row_count > 0
         assert result.config.data_paths == [str(default_dir)]
+
+
+# ── service.run StrategyValidator 검증 게이트 (#2039) ─
+
+
+# import-time(top-level)에 marker 파일을 생성하는 금지 코드를 담은 전략 소스.
+# StrategyLoader.load(import)가 실행되면 marker가 생성되므로, marker 부재로
+# "금지 코드가 실행되지 않았음(=import 안 됨)"을 직접 단언할 수 있다.
+# top-level `open(...)` 는 FORBIDDEN_BUILTINS라 StrategyValidator가 거부한다.
+_FORBIDDEN_OPEN_STRATEGY_TMPL = '''\
+"""import 시점에 marker 파일을 생성하는 금지 전략."""
+
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+open({marker!r}, "w").write("pwned")
+
+
+class _EvilStrategy(Strategy):
+    meta = StrategyMeta(name="evil", version="1.0", description="t")
+
+    async def on_step(self, context):
+        return []
+'''
+
+
+# top-level 금지 모듈 import(`import os`)를 담은 전략 소스. import-time에
+# os.environ을 쓰진 않지만, FORBIDDEN_MODULES 위반으로 거부되어야 하며 load가
+# 호출되지 않아야 한다(검증 단계에서 차단).
+_FORBIDDEN_IMPORT_STRATEGY = '''\
+"""금지 모듈을 import 하는 전략."""
+
+import os
+
+from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+
+class _EvilImportStrategy(Strategy):
+    meta = StrategyMeta(name="evil_import", version="1.0", description="t")
+
+    async def on_step(self, context):
+        return []
+'''
+
+
+class TestBacktestServiceStrategyValidation:
+    """service.run이 StrategyLoader.load(import) 전에 StrategyValidator로
+    전략 파일을 정적 검증하여, 금지 코드가 import 시점에 실행되는 우회를
+    차단하는지 검증한다(#2039).
+
+    backtest run은 public CLI에서 파일 경로를 직접 받아 in-process(backtest.py)
+    /subprocess(runner.py) 양쪽 모두 service.run을 단일 chokepoint로 거치므로,
+    여기서 service.run을 직접 호출해 두 경로를 대표한다.
+    """
+
+    def _config(self, strategy_path: str, data_path) -> dict[str, Any]:
+        return {
+            "strategy_path": strategy_path,
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+            "data_path": str(data_path),
+        }
+
+    async def test_forbidden_open_blocked_before_import(self, tmp_path, data_dir):
+        """핵심(repro): top-level open() 전략 → BacktestConfigError +
+        import(load) 미실행으로 marker 파일 미생성.
+
+        검증이 load 이전에 일어나 금지 코드가 실행되지 않음을 marker 부재로
+        직접 단언한다. StrategyLoader.load는 호출조차 되지 않아야 한다.
+        """
+        from pathlib import Path
+        from unittest.mock import patch
+
+        marker = tmp_path / "pwned.txt"
+        strategy_file = tmp_path / "evil_open.py"
+        strategy_file.write_text(
+            _FORBIDDEN_OPEN_STRATEGY_TMPL.format(marker=str(marker))
+        )
+
+        service = BacktestService(data_path=str(data_dir))
+        config = self._config(str(strategy_file), data_dir)
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+        ) as mock_load:
+            with pytest.raises(BacktestConfigError, match="전략 검증 실패"):
+                await service.run(config)
+
+        # (a) 금지 코드(import-time open)가 실행되지 않았다 → marker 부재.
+        assert not marker.exists(), (
+            "marker가 생성됨 = 전략이 import되어 금지 코드가 실행됨(검증 우회)"
+        )
+        # (b) 검증 실패 시 load는 호출조차 되지 않는다(import 시도 자체 차단).
+        mock_load.assert_not_called()
+        # (c) marker 경로가 Path로도 미존재(이중 단언).
+        assert not Path(marker).exists()
+
+    async def test_forbidden_import_blocked(self, tmp_path, data_dir):
+        """top-level 금지 모듈 import(`import os`) 전략 → 차단 + load 미호출."""
+        from unittest.mock import patch
+
+        strategy_file = tmp_path / "evil_import.py"
+        strategy_file.write_text(_FORBIDDEN_IMPORT_STRATEGY)
+
+        service = BacktestService(data_path=str(data_dir))
+        config = self._config(str(strategy_file), data_dir)
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+        ) as mock_load:
+            with pytest.raises(BacktestConfigError, match="전략 검증 실패"):
+                await service.run(config)
+        mock_load.assert_not_called()
+
+    async def test_valid_strategy_runs_through_real_load(self, loaded_store, data_dir):
+        """회귀: 유효 전략은 검증을 통과해 실제 load·실행으로 정상 완료한다.
+
+        load를 mock하지 않고 실제 StrategyLoader.load가 디스크 전략을 import해
+        백테스트가 끝까지 수행됨을 확인한다(검증 게이트가 정상 전략을 막지 않음).
+        """
+        strategy_file = data_dir / "valid_strategy.py"
+        strategy_file.write_text(_VALID_STRATEGY_SOURCE)
+
+        service = BacktestService(data_path=str(data_dir))
+        config = self._config(str(strategy_file), data_dir)
+
+        result = await service.run(config)
+
+        assert isinstance(result.config, BacktestConfig)
+        assert result.config.strategy_path == str(strategy_file)
+        assert len(result.datasets) == 1
+        assert result.datasets[0].symbol == "005930"
+        assert len(result.equity_curve) > 0
+
+    async def test_run_subprocess_blocks_forbidden_strategy(self, tmp_path, data_dir):
+        """subprocess 경로(runner → service.run)도 금지 전략을 차단한다(#2039).
+
+        ``run_subprocess`` 는 실제 자식 프로세스에서 ``ante.backtest.runner`` 를
+        실행하고, runner는 ``service.run`` 을 호출하므로 검증 게이트를 거친다.
+        반환 코드 != 0 으로 실패하고, BacktestError로 표면화되며, marker 파일이
+        생성되지 않아야 한다(자식 프로세스에서도 금지 코드 미실행).
+        """
+        marker = tmp_path / "pwned_subprocess.txt"
+        strategy_file = tmp_path / "evil_open_sub.py"
+        strategy_file.write_text(
+            _FORBIDDEN_OPEN_STRATEGY_TMPL.format(marker=str(marker))
+        )
+
+        service = BacktestService(data_path=str(data_dir))
+        config = self._config(str(strategy_file), data_dir)
+
+        with pytest.raises(BacktestError):
+            await service.run_subprocess(config)
+
+        # 자식 프로세스에서도 금지 코드가 실행되지 않아 marker가 없어야 한다.
+        assert not marker.exists()
 
 
 # ── Exceptions 테스트 ──────────────────────────────
@@ -3508,7 +3695,7 @@ class TestNonDailyTimeframe:
 
         service = BacktestService(data_path=str(data_dir))
         config = {
-            "strategy_path": "dummy.py",
+            "strategy_path": _write_valid_strategy(tmp_path),
             "start_date": "2026-01-01",
             "end_date": "2026-12-31",
             "symbols": ["005930"],
