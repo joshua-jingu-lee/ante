@@ -226,11 +226,19 @@ class DataGoKrCollector:
         rows_written += self._store_ohlcv(df, store, symbols)
         rows_written += self._store_fundamental(df, store, symbols)
 
+        # 종목 메타데이터(symbol/exchange/name/market)를 `.feed/instruments.parquet`에
+        # upsert한다(spec data-feed/04-schema.md INSTRUMENTS). ohlcv/fundamental과
+        # 의미가 다른(심볼 1행 마스터) 산출이라 rows_written에 합산하지 않고 별도
+        # 로그만 남긴다. 저장 실패가 ohlcv/fundamental 결과를 회귀시키지 않도록
+        # 호출은 ohlcv/fundamental 저장 뒤에 둔다.
+        instruments_written = self._store_instruments(df, store)
+
         logger.info(
-            "data.go.kr 수집 완료: date=%s symbols=%d rows=%d",
+            "data.go.kr 수집 완료: date=%s symbols=%d rows=%d instruments=%d",
             target_date,
             len(symbols),
             rows_written,
+            instruments_written,
         )
         return rows_written, symbols
 
@@ -271,3 +279,171 @@ class DataGoKrCollector:
             rows += len(sym_df)
             symbols.add(sym)
         return rows
+
+    # INSTRUMENTS 스키마 컬럼 순서(spec data-feed/04-schema.md).
+    _INSTRUMENTS_COLUMNS = ("symbol", "exchange", "name", "market")
+
+    @classmethod
+    def _store_instruments(cls, df: pl.DataFrame, store: ParquetStore) -> int:
+        """종목 메타데이터를 `.feed/instruments.parquet`에 upsert한다.
+
+        매핑(spec data-feed/04-schema.md INSTRUMENTS, 05-data-sources.md):
+        `srtnCd`→symbol, `itmsNm`→name, `mrktCtg`→market, exchange="KRX".
+        itmsNm/mrktCtg 컬럼이 둘 다 없으면(메타데이터 전무) 무가치한 파일을
+        만들지 않도록 저장을 건너뛴다. 적어도 하나의 메타 컬럼이 있으면 누락 셀은
+        빈 문자열로 안전 처리한다.
+
+        upsert 정책:
+        - 신규 batch는 symbol 기준 1행으로 dedup한다.
+        - 기존 `.feed/instruments.parquet`가 있으면 symbol을 키로 merge한다.
+          단 신규 행의 name/market가 비어있으면(누락/빈 문자열) 기존 non-empty
+          값을 덮어쓰지 않고 보존한다(Codex refinement). 신규 값이 non-empty면
+          갱신한다.
+        - 파일이 없으면 신규 생성한다.
+
+        symbol 컬럼이 없거나 결과가 비어있으면 파일을 생성/변경하지 않는다.
+
+        Returns:
+            파일에 기록된 instrument 행 수. 미기록(빈 입력)이면 0.
+        """
+        # df는 survivors raw DataFrame이므로 종목코드 컬럼은 `srtnCd`다.
+        if "srtnCd" not in df.columns:
+            return 0
+
+        # itmsNm/mrktCtg가 둘 다 없으면 메타데이터 전무 → 무가치 파일 생성 방지.
+        if "itmsNm" not in df.columns and "mrktCtg" not in df.columns:
+            logger.debug(
+                "data.go.kr instruments: 메타 컬럼(itmsNm/mrktCtg) 전무(rows=%d) "
+                "— 파일 미생성",
+                df.height,
+            )
+            return 0
+
+        height = df.height
+        symbol_expr = pl.col("srtnCd").cast(pl.Utf8)
+        name_expr = (
+            pl.col("itmsNm").cast(pl.Utf8) if "itmsNm" in df.columns else pl.lit("")
+        )
+        market_expr = (
+            pl.col("mrktCtg").cast(pl.Utf8) if "mrktCtg" in df.columns else pl.lit("")
+        )
+
+        new_df = df.select(
+            symbol_expr.alias("symbol"),
+            pl.lit("KRX").alias("exchange"),
+            name_expr.alias("name"),
+            market_expr.alias("market"),
+        )
+        # null(누락 셀)은 빈 문자열로 정규화하여 보존 로직이 일관되게 동작하게 한다.
+        new_df = new_df.with_columns(
+            pl.col("name").fill_null(""),
+            pl.col("market").fill_null(""),
+        )
+        # 유효한 symbol만 유지(빈/null symbol drop) 후 symbol 기준 dedup(1행/심볼).
+        new_df = new_df.filter(
+            pl.col("symbol").is_not_null() & (pl.col("symbol") != "")
+        ).unique(subset=["symbol"], keep="last")
+
+        if new_df.is_empty():
+            logger.debug(
+                "data.go.kr instruments: 유효 symbol 없음(rows=%d) — 파일 미변경",
+                height,
+            )
+            return 0
+
+        path = store.base_path / ".feed" / "instruments.parquet"
+        if path.exists():
+            try:
+                existing = pl.read_parquet(path)
+            except Exception as exc:
+                # 기존 파일 손상 시 신규 데이터로 덮어쓰지 않고 보존(데이터 손실 방지).
+                logger.warning(
+                    "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
+                    "write 건너뜀 (%s)",
+                    exc,
+                )
+                return 0
+            merged = cls._merge_instruments(existing, new_df)
+        else:
+            merged = new_df
+
+        merged = merged.select(list(cls._INSTRUMENTS_COLUMNS))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged.write_parquet(str(path))
+        logger.info(
+            "data.go.kr instruments 갱신: path=%s rows=%d",
+            path,
+            merged.height,
+        )
+        return merged.height
+
+    @staticmethod
+    def _merge_instruments(
+        existing: pl.DataFrame, new_df: pl.DataFrame
+    ) -> pl.DataFrame:
+        """기존 instruments와 신규 행을 symbol 기준으로 merge한다.
+
+        - 신규 symbol은 그대로 추가한다.
+        - 기존 symbol은 갱신하되, 신규 name/market가 빈 문자열이면 기존
+          non-empty 값을 보존한다(빈 신규값이 기존 값을 덮어쓰지 않게).
+        - exchange는 항상 "KRX"로 유지한다.
+        """
+        # 기존 프레임을 INSTRUMENTS 컬럼으로 정규화(누락 컬럼은 빈 문자열).
+        existing = existing.with_columns(
+            *[
+                pl.lit("").alias(col)
+                for col in ("symbol", "exchange", "name", "market")
+                if col not in existing.columns
+            ]
+        )
+        existing = existing.select("symbol", "exchange", "name", "market")
+        existing = existing.with_columns(
+            pl.col("symbol").cast(pl.Utf8),
+            pl.col("exchange").cast(pl.Utf8).fill_null(""),
+            pl.col("name").cast(pl.Utf8).fill_null(""),
+            pl.col("market").cast(pl.Utf8).fill_null(""),
+        )
+
+        new_idx = {row["symbol"]: row for row in new_df.iter_rows(named=True)}
+        existing_symbols: set[str] = set()
+        merged_rows: list[dict] = []
+
+        for row in existing.iter_rows(named=True):
+            sym = row["symbol"]
+            existing_symbols.add(sym)
+            incoming = new_idx.get(sym)
+            if incoming is None:
+                merged_rows.append(row)
+                continue
+            # 신규값이 non-empty면 갱신, 빈 값이면 기존 보존.
+            merged_rows.append(
+                {
+                    "symbol": sym,
+                    "exchange": "KRX",
+                    "name": incoming["name"] or row["name"],
+                    "market": incoming["market"] or row["market"],
+                }
+            )
+
+        # 기존에 없던 신규 symbol 추가.
+        for sym, incoming in new_idx.items():
+            if sym in existing_symbols:
+                continue
+            merged_rows.append(
+                {
+                    "symbol": sym,
+                    "exchange": "KRX",
+                    "name": incoming["name"],
+                    "market": incoming["market"],
+                }
+            )
+
+        return pl.DataFrame(
+            merged_rows,
+            schema={
+                "symbol": pl.Utf8,
+                "exchange": pl.Utf8,
+                "name": pl.Utf8,
+                "market": pl.Utf8,
+            },
+        )

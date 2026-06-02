@@ -1349,3 +1349,254 @@ class TestCollectorValidationGate:
         assert len(_schema_warns(warns)) == 2
         assert store.list_symbols("1d") == []
         assert store.list_symbols(data_type="fundamental") == []
+
+
+# ── DataGoKrCollector: instruments.parquet 갱신 (#2020) ────────
+
+
+def _raw_inst(
+    srtn: str = "005930",
+    itms_nm: str | None = "삼성전자",
+    mrkt_ctg: str | None = "KOSPI",
+) -> dict:
+    """instruments 메타데이터 필드(itmsNm/mrktCtg)를 포함한 raw item.
+
+    itms_nm/mrkt_ctg를 None으로 주면 해당 키를 제거한다(컬럼 누락 모사).
+    """
+    item = _raw(srtn)
+    if itms_nm is not None:
+        item["itmsNm"] = itms_nm
+    if mrkt_ctg is not None:
+        item["mrktCtg"] = mrkt_ctg
+    return item
+
+
+def _read_instruments(store: ParquetStore):
+    """`.feed/instruments.parquet`를 읽어 (path, DataFrame) 반환.
+
+    없으면 (path, None).
+    """
+    import polars as pl
+
+    path = store.base_path / ".feed" / "instruments.parquet"
+    if not path.exists():
+        return path, None
+    return path, pl.read_parquet(path)
+
+
+class TestCollectorInstrumentsStore:
+    """#2020: data.go.kr 수집 시 .feed/instruments.parquet upsert."""
+
+    @pytest.mark.asyncio
+    async def test_instruments_written_on_collect(self, tmp_path) -> None:
+        """(a) collect → instruments.parquet 생성.
+
+        symbol/exchange/name/market 채워짐.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
+        )
+
+        await collector.collect("20260102", store)
+
+        path, df = _read_instruments(store)
+        assert path == tmp_path / ".feed" / "instruments.parquet"
+        assert df is not None
+        assert df.columns == ["symbol", "exchange", "name", "market"]
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        assert row == {
+            "symbol": "005930",
+            "exchange": "KRX",
+            "name": "삼성전자",
+            "market": "KOSPI",
+        }
+
+    @pytest.mark.asyncio
+    async def test_instruments_upsert_no_duplicate_across_days(self, tmp_path) -> None:
+        """(b) 같은 심볼 2일 수집 → symbol upsert, 중복 0행."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
+        )
+
+        await collector.collect("20260102", store)
+        await collector.collect("20260103", store)
+
+        _, df = _read_instruments(store)
+        assert df is not None
+        assert df.height == 1
+        assert df["symbol"].to_list() == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_instruments_empty_new_values_preserve_existing(
+        self, tmp_path
+    ) -> None:
+        """(c) 신규 row의 itmsNm/mrktCtg 빈값 → 기존 non-empty 보존(덮어쓰기 안 함)."""
+        store = ParquetStore(base_path=tmp_path)
+        # 1일차: name/market 채워서 저장.
+        first = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
+        )
+        await first.collect("20260102", store)
+
+        # 2일차: itmsNm/mrktCtg 키 자체가 없는(누락) raw → 빈 값으로 들어옴.
+        second = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", itms_nm=None, mrkt_ctg=None)])
+        )
+        await second.collect("20260103", store)
+
+        _, df = _read_instruments(store)
+        assert df is not None
+        assert df.height == 1
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        # 빈 신규값이 기존 non-empty를 덮어쓰지 않아야 한다.
+        assert row["name"] == "삼성전자"
+        assert row["market"] == "KOSPI"
+
+    @pytest.mark.asyncio
+    async def test_instruments_non_empty_new_values_update(self, tmp_path) -> None:
+        """신규 non-empty 값은 기존 값을 갱신한다."""
+        store = ParquetStore(base_path=tmp_path)
+        first = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "구종목명", "KOSPI")])
+        )
+        await first.collect("20260102", store)
+
+        second = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSDAQ")])
+        )
+        await second.collect("20260103", store)
+
+        _, df = _read_instruments(store)
+        assert df is not None
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        assert row["name"] == "삼성전자"
+        assert row["market"] == "KOSDAQ"
+
+    @pytest.mark.asyncio
+    async def test_instruments_multiple_symbols(self, tmp_path) -> None:
+        """여러 심볼 수집 → 각 심볼 1행씩 instruments에 기록."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource(
+                [
+                    _raw_inst("005930", "삼성전자", "KOSPI"),
+                    _raw_inst("000660", "SK하이닉스", "KOSPI"),
+                    _raw_inst("035720", "카카오", "KOSDAQ"),
+                ]
+            )
+        )
+
+        await collector.collect("20260102", store)
+
+        _, df = _read_instruments(store)
+        assert df is not None
+        assert df.height == 3
+        assert set(df["symbol"].to_list()) == {"005930", "000660", "035720"}
+
+    @pytest.mark.asyncio
+    async def test_ohlcv_fundamental_no_regression_with_instruments(
+        self, tmp_path
+    ) -> None:
+        """(d) instruments 저장 추가 후에도 ohlcv/fundamental 저장이 회귀 없이 유지."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
+        )
+
+        rows, symbols, _ = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert store.list_symbols("1d") == ["005930"]
+        assert store.list_symbols(data_type="fundamental") == ["005930"]
+        # instruments도 함께 기록된다.
+        _, df = _read_instruments(store)
+        assert df is not None
+        assert df["symbol"].to_list() == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_instruments_not_written_on_missing_meta_columns(
+        self, tmp_path
+    ) -> None:
+        """(e) itmsNm/mrktCtg 컬럼 둘 다 전무 → 무가치 파일 미생성(크래시 없음).
+
+        메타데이터가 전혀 없으면(srtnCd만 존재) instruments.parquet를 생성하지
+        않는다. ohlcv/fundamental 등 다른 저장 경로는 정상 진행한다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        # itmsNm/mrktCtg 키가 전혀 없는 raw(=_raw 기본).
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        rows, symbols, _ = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        path, df = _read_instruments(store)
+        assert not path.exists()
+        assert df is None
+
+    @pytest.mark.asyncio
+    async def test_instruments_written_with_only_name_column(self, tmp_path) -> None:
+        """메타 컬럼이 하나만 있어도(itmsNm만) 파일 생성, 누락 컬럼은 빈 문자열."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", mrkt_ctg=None)])
+        )
+
+        await collector.collect("20260102", store)
+
+        path, df = _read_instruments(store)
+        assert path.exists()
+        assert df is not None
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        assert row["name"] == "삼성전자"
+        assert row["market"] == ""
+
+    @pytest.mark.asyncio
+    async def test_instruments_written_with_only_market_column(self, tmp_path) -> None:
+        """메타 컬럼이 하나만 있어도(mrktCtg만) 파일 생성, 누락 컬럼은 빈 문자열."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", itms_nm=None, mrkt_ctg="KOSPI")])
+        )
+
+        await collector.collect("20260102", store)
+
+        path, df = _read_instruments(store)
+        assert path.exists()
+        assert df is not None
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        assert row["name"] == ""
+        assert row["market"] == "KOSPI"
+
+    @pytest.mark.asyncio
+    async def test_instruments_not_written_on_empty_response(self, tmp_path) -> None:
+        """(e) 빈 응답 → instruments 파일 미생성, 크래시 없음."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        path, df = _read_instruments(store)
+        assert not path.exists()
+        assert df is None
+
+    @pytest.mark.asyncio
+    async def test_instruments_not_written_on_all_dropped(self, tmp_path) -> None:
+        """모든 레코드가 선필터 drop되어 survivors=[] → instruments 미생성."""
+        store = ParquetStore(base_path=tmp_path)
+        bad = _raw_inst("005930", "삼성전자", "KOSPI")
+        del bad["mkp"]  # 필수 필드 누락 → 선필터 drop.
+        collector = DataGoKrCollector(source=_FakeSource([bad]))
+
+        rows, symbols, _ = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        path, df = _read_instruments(store)
+        assert not path.exists()
+        assert df is None
