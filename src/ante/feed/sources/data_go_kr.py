@@ -31,6 +31,10 @@ DAILY_LIMIT = 10_000
 NUM_OF_ROWS = 1000
 REQUEST_TIMEOUT = 30  # 초
 
+# 재시도 불가 HTTP status (spec 09-failure-recovery: 즉시 스킵/실패 로그).
+# 재시도 가능(408/429/5xx/timeout/연결 오류)은 이 집합 밖이라 기존대로 재시도된다.
+_NON_RETRYABLE_HTTP_STATUS = frozenset({400, 401, 403, 404, 422})
+
 
 # ── 에러 분류 ──────────────────────────────────────────────
 
@@ -40,6 +44,7 @@ class ErrorAction(StrEnum):
 
     OK = "ok"
     RETRY = "retry"
+    RETRY_ONCE = "retry_once"
     SKIP = "skip"
     DAILY_LIMIT = "daily_limit"
     CRITICAL = "critical"
@@ -56,7 +61,7 @@ _ERROR_CODE_MAP: dict[str, ErrorAction] = {
     "30": ErrorAction.CRITICAL,  # SERVICE_KEY_IS_NOT_REGISTERED_ERROR
     "31": ErrorAction.CRITICAL,  # DEADLINE_HAS_EXPIRED_ERROR
     "32": ErrorAction.SKIP,  # UNREGISTERED_IP_ERROR
-    "99": ErrorAction.RETRY,  # UNKNOWN_ERROR
+    "99": ErrorAction.RETRY_ONCE,  # UNKNOWN_ERROR (spec: 1회 재시도 후 스킵)
 }
 
 
@@ -251,6 +256,19 @@ class DataGoKrSource:
                     timeout=REQUEST_TIMEOUT,
                 )
             except (TimeoutError, aiohttp.ClientError) as exc:
+                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
+                # 처리한다 (spec 09-failure-recovery, #2026). body 에러 코드의
+                # SKIP 액션과 동일하게 error 로그 + DataGoKrError raise.
+                if (
+                    isinstance(exc, aiohttp.ClientResponseError)
+                    and exc.status in _NON_RETRYABLE_HTTP_STATUS
+                ):
+                    msg = (
+                        f"재시도 불가 HTTP 에러 (status={exc.status}): "
+                        f"basDt={bas_dt}, pageNo={page_no}"
+                    )
+                    logger.error(msg)
+                    raise DataGoKrError(msg) from exc
                 last_error = exc
                 delay = self._backoff_delay(attempt)
                 logger.warning(
@@ -285,9 +303,13 @@ class DataGoKrSource:
                 logger.error(msg)
                 raise DataGoKrError(msg)
 
-            # RETRY
+            # RETRY / RETRY_ONCE
             last_error = DataGoKrError(f"API 에러 (code={result_code}): {result_msg}")
-            if attempt < self._max_retries - 1:
+            # RETRY_ONCE(99 UNKNOWN_ERROR)는 최대 1회만 재시도한다
+            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
+            # attempt>=1이면 더 이상 재시도하지 않고 최종 실패로 떨어진다.
+            retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
+            if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
                 logger.warning(
                     "data.go.kr API 에러 (attempt=%d/%d, code=%s):"
@@ -299,6 +321,9 @@ class DataGoKrSource:
                     delay,
                 )
                 await asyncio.sleep(delay)
+            elif action == ErrorAction.RETRY_ONCE:
+                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
+                break
 
         # 재시도 소진
         msg = f"data.go.kr 요청 최종 실패: basDt={bas_dt}, pageNo={page_no}"

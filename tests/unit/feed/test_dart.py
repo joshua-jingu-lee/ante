@@ -8,7 +8,10 @@ import zipfile
 from unittest.mock import AsyncMock, patch
 from xml.etree.ElementTree import Element, SubElement, tostring
 
+import aiohttp
 import pytest
+from multidict import CIMultiDict
+from yarl import URL
 
 from ante.feed.sources.base import RateLimiter
 from ante.feed.sources.dart import (
@@ -143,8 +146,8 @@ class TestClassifyError:
         assert classify_error("800") == ErrorAction.RETRY
 
     def test_undefined_error(self) -> None:
-        """900은 RETRY로 분류한다."""
-        assert classify_error("900") == ErrorAction.RETRY
+        """900은 RETRY_ONCE로 분류한다 (1회 재시도 후 스킵, #2027)."""
+        assert classify_error("900") == ErrorAction.RETRY_ONCE
 
     def test_expired_account(self) -> None:
         """901은 CRITICAL로 분류한다."""
@@ -500,6 +503,232 @@ class TestFetchFinancial:
 
         # 첫 번째 배치만 실행됨
         assert call_count == 1
+
+
+# -- HTTP status 재시도 분류 (#2026) -----------------------------------
+
+
+def _client_response_error(status: int) -> aiohttp.ClientResponseError:
+    """지정 status를 가진 aiohttp.ClientResponseError를 생성한다."""
+    request_info = aiohttp.RequestInfo(
+        url=URL("https://opendart.fss.or.kr/test"),
+        method="GET",
+        headers=CIMultiDict(),
+        real_url=URL("https://opendart.fss.or.kr/test"),
+    )
+    return aiohttp.ClientResponseError(
+        request_info=request_info,
+        history=(),
+        status=status,
+        message=f"HTTP {status}",
+    )
+
+
+class TestHttpStatusRetryPolicy:
+    """#2026: HTTP 4xx 비재시도 / 408·429·5xx·timeout·연결 오류 재시도."""
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+    @pytest.mark.asyncio
+    async def test_non_retryable_status_fails_immediately(
+        self, source: DARTSource, status: int
+    ) -> None:
+        """400/401/403/404/422는 재시도 없이 1회 호출 후 즉시 실패한다."""
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            raise _client_response_error(status)
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == 1
+
+    @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
+    @pytest.mark.asyncio
+    async def test_retryable_status_retries(
+        self, source: DARTSource, status: int
+    ) -> None:
+        """408/429/5xx ClientResponseError는 max_retries까지 재시도한다."""
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            raise _client_response_error(status)
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_retries(self, source: DARTSource) -> None:
+        """TimeoutError는 재시도 대상이다."""
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            raise TimeoutError("timed out")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_connection_error_without_status_retries(
+        self, source: DARTSource
+    ) -> None:
+        """status 없는 ClientConnectionError(연결 오류)는 재시도 대상이다."""
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            raise aiohttp.ClientConnectionError("Connection refused")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == source._max_retries == 2
+
+
+# -- UNDEFINED(900) RETRY_ONCE 1회 재시도 cap (#2027) ------------------
+
+
+class TestRetryOnceCap:
+    """#2027: status=900(정의되지 않은 오류)는 1회만 재시도(총 2회 호출) 후 스킵."""
+
+    @pytest.mark.asyncio
+    async def test_undefined_status_retries_once_then_skips(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """900은 max_retries(=3)와 무관하게 2회 호출(1회 재시도) 후 실패한다."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        error_response = {"status": "900", "message": "정의되지 않은 오류"}
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            return error_response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        # RETRY_ONCE → 최초 1회 + 재시도 1회 = 총 2회 (max_retries=3 미사용)
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_general_retry_status_uses_max_retries(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """일반 RETRY status(800)는 max_retries(=3) 전체를 사용한다 (회귀)."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        error_response = {"status": "800", "message": "시스템 점검 중"}
+        call_count = 0
+
+        async def mock_request(session, url, params):
+            nonlocal call_count
+            call_count += 1
+            return error_response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert call_count == 3
+
+
+# -- corp_code 다운로드 경로 retry 정책 대칭 (#2026/#2027) ---------------
+
+
+class _FakeJsonErrorResponse:
+    """_download_corp_code_zip의 session.get(...) JSON 에러 응답 모킹."""
+
+    def __init__(self, body: str) -> None:
+        self._body = body
+        self.content_type = "application/json"
+
+    async def __aenter__(self) -> _FakeJsonErrorResponse:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def text(self) -> str:
+        return self._body
+
+
+class TestCorpCodeRetryPolicy:
+    """corp_code ZIP 다운로드 경로에도 #2026/#2027이 동형 적용된다."""
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+    @pytest.mark.asyncio
+    async def test_non_retryable_status_fails_immediately(
+        self, source: DARTSource, status: int
+    ) -> None:
+        """전송 단계 4xx는 재시도 없이 1회 호출 후 즉시 실패한다 (#2026)."""
+        call_count = 0
+
+        def fake_get(url, params=None):
+            nonlocal call_count
+            call_count += 1
+            raise _client_response_error(status)
+
+        with patch("aiohttp.ClientSession.get", side_effect=fake_get):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError):
+                    await source.fetch_corp_codes()
+
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_undefined_status_retries_once_then_skips(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """JSON status=900은 max_retries(=3)와 무관하게 2회 호출 후 실패한다 (#2027)."""
+        source = DARTSource(
+            api_key="test-dart-api-key-0123456789abcdef01",
+            rate_limiter=rate_limiter,
+            max_retries=3,
+        )
+        body = json.dumps({"status": "900", "message": "정의되지 않은 오류"})
+        call_count = 0
+
+        def fake_get(url, params=None):
+            nonlocal call_count
+            call_count += 1
+            return _FakeJsonErrorResponse(body)
+
+        with patch("aiohttp.ClientSession.get", side_effect=fake_get):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_corp_codes()
+
+        assert call_count == 2
 
 
 # -- daily_count attempt 기준 카운팅 (#2106) ----------------------------

@@ -34,6 +34,10 @@ DAILY_LIMIT = 20_000
 BATCH_SIZE = 100  # fnlttMultiAcnt 최대 100개 회사
 REQUEST_TIMEOUT = 60  # 다중회사 응답이 커질 수 있으므로 넉넉하게
 
+# 재시도 불가 HTTP status (spec 09-failure-recovery: 즉시 스킵/실패 로그).
+# 재시도 가능(408/429/5xx/timeout/연결 오류)은 이 집합 밖이라 기존대로 재시도된다.
+_NON_RETRYABLE_HTTP_STATUS = frozenset({400, 401, 403, 404, 422})
+
 # 보고서 코드 매핑
 REPRT_CODES: dict[str, str] = {
     "11013": "1분기보고서",
@@ -52,6 +56,7 @@ class ErrorAction(StrEnum):
     OK = "ok"
     NO_DATA = "no_data"
     RETRY = "retry"
+    RETRY_ONCE = "retry_once"
     SKIP = "skip"
     DAILY_LIMIT = "daily_limit"
     CRITICAL = "critical"
@@ -69,7 +74,7 @@ _ERROR_CODE_MAP: dict[str, ErrorAction] = {
     "100": ErrorAction.SKIP,  # 부적절한 필드 값
     "101": ErrorAction.SKIP,  # 부적절한 접근
     "800": ErrorAction.RETRY,  # 시스템 점검 중
-    "900": ErrorAction.RETRY,  # 정의되지 않은 오류
+    "900": ErrorAction.RETRY_ONCE,  # 정의되지 않은 오류 (spec: 1회 재시도 후 스킵)
     "901": ErrorAction.CRITICAL,  # 개인정보 보유기간 만료
 }
 
@@ -314,6 +319,9 @@ class DARTSource:
             # 1 attempt = 1 increment.
             self._rate_limiter.increment_daily()
 
+            # 이번 attempt의 JSON 에러 코드 분류(없으면 전송 오류 = RETRY 취급).
+            action = ErrorAction.RETRY
+
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
                     async with session.get(url, params=params) as resp:
@@ -353,9 +361,22 @@ class DARTSource:
                             return await resp.read()
 
             except (TimeoutError, aiohttp.ClientError) as exc:
+                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
+                # 처리한다 (spec 09-failure-recovery, #2026).
+                if (
+                    isinstance(exc, aiohttp.ClientResponseError)
+                    and exc.status in _NON_RETRYABLE_HTTP_STATUS
+                ):
+                    msg = f"DART 재시도 불가 HTTP 에러 (status={exc.status})"
+                    logger.error(msg)
+                    raise DARTError(msg) from exc
                 last_error = exc
 
-            if attempt < self._max_retries - 1:
+            # RETRY_ONCE(900 정의되지 않은 오류)는 최대 1회만 재시도한다
+            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
+            # 전송 오류/일반 RETRY는 기존 max_retries를 유지한다.
+            retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
+            if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
                 logger.warning(
                     "DART corpCode 다운로드 실패 (attempt=%d/%d): %s. %.1f초 후 재시도",
@@ -365,6 +386,9 @@ class DARTSource:
                     delay,
                 )
                 await asyncio.sleep(delay)
+            elif action == ErrorAction.RETRY_ONCE:
+                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
+                break
 
         msg = "DART 고유번호 ZIP 다운로드 최종 실패"
         logger.error(msg)
@@ -447,6 +471,19 @@ class DARTSource:
                     timeout=REQUEST_TIMEOUT,
                 )
             except (TimeoutError, aiohttp.ClientError) as exc:
+                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
+                # 처리한다 (spec 09-failure-recovery, #2026). body 에러 코드의
+                # SKIP 액션과 동일하게 error 로그 + DARTError raise.
+                if (
+                    isinstance(exc, aiohttp.ClientResponseError)
+                    and exc.status in _NON_RETRYABLE_HTTP_STATUS
+                ):
+                    msg = (
+                        f"DART 재시도 불가 HTTP 에러 (status={exc.status}): "
+                        f"year={year}, reprt={reprt_code}"
+                    )
+                    logger.error(msg)
+                    raise DARTError(msg) from exc
                 last_error = exc
                 delay = self._backoff_delay(attempt)
                 logger.warning(
@@ -492,9 +529,13 @@ class DARTSource:
                 logger.error(msg)
                 raise DARTError(msg)
 
-            # RETRY
+            # RETRY / RETRY_ONCE
             last_error = DARTError(f"DART API 에러 (status={status}): {message}")
-            if attempt < self._max_retries - 1:
+            # RETRY_ONCE(900 정의되지 않은 오류)는 최대 1회만 재시도한다
+            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
+            # attempt>=1이면 더 이상 재시도하지 않고 최종 실패로 떨어진다.
+            retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
+            if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
                 logger.warning(
                     "DART API 에러 (attempt=%d/%d, status=%s): %s. %.1f초 후 재시도",
@@ -505,6 +546,9 @@ class DARTSource:
                     delay,
                 )
                 await asyncio.sleep(delay)
+            elif action == ErrorAction.RETRY_ONCE:
+                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
+                break
 
         msg = f"DART fnlttMultiAcnt 요청 최종 실패: year={year}, reprt={reprt_code}"
         logger.error(msg)
