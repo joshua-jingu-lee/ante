@@ -811,3 +811,189 @@ class TestReconcileEventsAccountScopedMarker:
                 discrepancy_count=1,
                 corrections=[],
             )
+
+
+# ── dry_run detect-only (#2119/#2122) ────────────────
+
+
+class TestReconcileDryRun:
+    """``dry_run=True`` 는 분류·이벤트는 유지하되 correct_position 을 보류한다.
+
+    기존 external-buy/self-check 분류 로직은 무변경이며, 이벤트도 동일하게
+    발행되어야 한다 — 보정(correct_position)만 건너뛴다.
+    """
+
+    async def test_dry_run_skips_correction_keeps_events(
+        self, reconciler, position_history, eventbus
+    ):
+        """dry_run=True: 외부 청산을 탐지하나 보정은 0건. 이벤트는 발행."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+
+        mismatch_events: list = []
+        notif_events: list = []
+        reconcile_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+        eventbus.subscribe(ReconcileEvent, lambda e: reconcile_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],  # 브로커 0주 → 외부 청산 분류.
+            account_id="acc-test",
+            dry_run=True,
+        )
+
+        # 보정 0건 — correct_position 미호출.
+        assert corrections == []
+        # 포지션은 그대로 (보정 안 됨).
+        pos = await position_history.get_current("bot-1", "005930")
+        assert pos["quantity"] == 50
+        # 분류/탐지 이벤트는 그대로 발행.
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].reason == "외부 청산"
+        assert len(notif_events) == 1
+        # 보정이 0이므로 ReconcileEvent(보정 완료)는 발행 안 됨.
+        assert reconcile_events == []
+
+    async def test_dry_run_no_mismatch_no_events(
+        self, reconciler, position_history, eventbus
+    ):
+        """dry_run=True 라도 일치하면 이벤트도 보정도 없음."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        mismatch_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[{"symbol": "005930", "quantity": 50, "avg_price": 1}],
+            account_id="acc-test",
+            dry_run=True,
+        )
+
+        assert corrections == []
+        assert mismatch_events == []
+
+    async def test_default_dry_run_false_still_corrects(
+        self, reconciler, position_history
+    ):
+        """기존 호출자 무회귀: dry_run 미지정(기본 False)은 보정 동작 유지."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+
+        assert len(corrections) == 1
+        pos = await position_history.get_current("bot-1", "005930")
+        assert pos["quantity"] == 0
+
+
+# ── account-level detect-only 합산 (#2118/#2120) ─────
+
+
+class TestAccountLevelDetection:
+    """계좌 총합 broker vs 전 봇(상태 무관) open internal 합산 비교.
+
+    같은 심볼을 보유한 다중봇을 per-bot 비교가 false external-buy/청산으로
+    오판하던 것을 합산으로 제거한다(#2118/#2120). correct_position 은 절대
+    호출하지 않고 account-scoped NotificationEvent 만 발행한다.
+    """
+
+    async def test_multi_bot_same_symbol_sum_matches(
+        self, reconciler, position_history, eventbus
+    ):
+        """(e/#2118) 두 봇 internal 30+70=100, 브로커 100 → 불일치 없음."""
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
+        await _set_position(position_history, "bot-2", "005930", 70, 50000)
+
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        mismatches = await reconciler.detect_account_level(
+            [{"symbol": "005930", "quantity": 100, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        # 합산 일치 → false-positive 없음.
+        assert mismatches == []
+        assert notif_events == []
+
+    async def test_multi_bot_sum_mismatch_emits_account_notification(
+        self, reconciler, position_history, eventbus
+    ):
+        """(d) 합산 80, 브로커 100 → 계좌 단위 불일치 + account NotificationEvent.
+
+        PositionMismatchEvent(bot-scoped)는 발행하지 않고 NotificationEvent 만.
+        correct_position 미호출 (반환 mismatch 만, 보정 0).
+        """
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
+        await _set_position(position_history, "bot-2", "005930", 50, 50000)
+
+        notif_events: list = []
+        mismatch_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        mismatches = await reconciler.detect_account_level(
+            [{"symbol": "005930", "quantity": 100, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        assert len(mismatches) == 1
+        assert mismatches[0]["symbol"] == "005930"
+        assert mismatches[0]["internal_qty"] == 80
+        assert mismatches[0]["broker_qty"] == 100
+        assert mismatches[0]["diff"] == 20
+        # account-scoped: NotificationEvent 만, bot-scoped 이벤트 없음.
+        assert len(notif_events) == 1
+        assert notif_events[0].category == "broker"
+        assert mismatch_events == []
+        # 포지션은 보정되지 않음 (detect-only).
+        pos1 = await position_history.get_current("bot-1", "005930")
+        pos2 = await position_history.get_current("bot-2", "005930")
+        assert pos1["quantity"] == 30
+        assert pos2["quantity"] == 50
+
+    async def test_zero_bots_with_broker_position_detected(self, reconciler, eventbus):
+        """(k) 0봇 + broker 보유 → 계좌 단위 불일치 탐지 (no-op 아님)."""
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        mismatches = await reconciler.detect_account_level(
+            [{"symbol": "005930", "quantity": 10, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        assert len(mismatches) == 1
+        assert mismatches[0]["internal_qty"] == 0
+        assert mismatches[0]["broker_qty"] == 10
+        assert len(notif_events) == 1
+
+    async def test_compute_account_diff_is_side_effect_free(
+        self, reconciler, position_history, eventbus
+    ):
+        """compute_account_diff 는 이벤트/보정 없이 diff 만 반환한다(순수)."""
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
+
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        diff = await reconciler.compute_account_diff(
+            [{"symbol": "005930", "quantity": 100, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        assert len(diff) == 1
+        assert diff[0]["diff"] == 70
+        # 순수 — 이벤트 미발행.
+        assert notif_events == []
+
+    async def test_account_level_invalid_account_id_raises(self, reconciler):
+        """(j) account-level 경로도 require_account_id 회귀."""
+        with pytest.raises(InvalidAccountIdError):
+            await reconciler.detect_account_level(
+                [{"symbol": "005930", "quantity": 10}],
+                account_id="default",
+            )

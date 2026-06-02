@@ -43,6 +43,46 @@ def _make_click_context(*, fix: bool = False) -> MagicMock:
     return ctx
 
 
+def _offline_reconcile_result(broker_positions, internal_positions) -> dict:
+    """``broker.py`` 오프라인 폴백 합산 로직 1:1 미러 (#2120).
+
+    src ``_run_reconcile`` 와 동일하게 broker/internal 을 **심볼별 합산**한 뒤
+    비교한다. 같은 심볼을 가진 다중봇 internal 을 덮어쓰지 않고 합산해야
+    per-bot false discrepancy 가 사라진다.
+    """
+    broker_totals: dict[str, float] = {}
+    for bp in broker_positions:
+        b_qty = float(bp.get("quantity", 0) or 0)
+        if b_qty != 0:
+            sym = bp["symbol"]
+            broker_totals[sym] = broker_totals.get(sym, 0.0) + b_qty
+    internal_totals: dict[str, float] = {}
+    for ip in internal_positions:
+        internal_totals[ip.symbol] = internal_totals.get(ip.symbol, 0.0) + ip.quantity
+
+    all_symbols = set(broker_totals.keys()) | set(internal_totals.keys())
+    discrepancies = []
+    for symbol in sorted(all_symbols):
+        broker_qty = broker_totals.get(symbol, 0.0)
+        internal_qty = internal_totals.get(symbol, 0.0)
+        if broker_qty != internal_qty:
+            discrepancies.append(
+                {
+                    "symbol": symbol,
+                    "broker_qty": broker_qty,
+                    "internal_qty": internal_qty,
+                    "diff": broker_qty - internal_qty,
+                }
+            )
+    return {
+        "total_symbols": len(all_symbols),
+        "discrepancies": discrepancies,
+        "match": len(discrepancies) == 0,
+        "fix_applied": False,
+        "corrections": 0,
+    }
+
+
 class TestReconcileOfflineNoDeps:
     """오프라인 폴백 경로에서 불필요한 의존성이 제거되었는지 확인한다."""
 
@@ -111,38 +151,11 @@ class TestReconcileOfflineLogic:
                 return_value=mock_position_history,
             ),
         ):
-            # _run_reconcile 내부 로직을 직접 호출
+            # _run_reconcile 내부 로직(#2120 합산)을 직접 미러 호출
 
             broker_positions = await mock_adapter.get_account_positions()
             internal_positions = await mock_position_history.get_all_positions()
-
-            broker_map = {p["symbol"]: p for p in broker_positions}
-            internal_map = {p.symbol: p for p in internal_positions}
-
-            all_symbols = set(broker_map.keys()) | set(internal_map.keys())
-            discrepancies = []
-            for symbol in sorted(all_symbols):
-                bp = broker_map.get(symbol)
-                ip = internal_map.get(symbol)
-                broker_qty = float(bp.get("quantity", 0)) if bp else 0.0
-                internal_qty = ip.quantity if ip else 0.0
-                if broker_qty != internal_qty:
-                    discrepancies.append(
-                        {
-                            "symbol": symbol,
-                            "broker_qty": broker_qty,
-                            "internal_qty": internal_qty,
-                            "diff": broker_qty - internal_qty,
-                        }
-                    )
-
-            result = {
-                "total_symbols": len(all_symbols),
-                "discrepancies": discrepancies,
-                "match": len(discrepancies) == 0,
-                "fix_applied": False,
-                "corrections": 0,
-            }
+            result = _offline_reconcile_result(broker_positions, internal_positions)
 
             assert result["match"] is True
             assert result["total_symbols"] == 2
@@ -172,34 +185,7 @@ class TestReconcileOfflineLogic:
 
         broker_positions = await mock_adapter.get_account_positions()
         internal_positions = await mock_position_history.get_all_positions()
-
-        broker_map = {p["symbol"]: p for p in broker_positions}
-        internal_map = {p.symbol: p for p in internal_positions}
-
-        all_symbols = set(broker_map.keys()) | set(internal_map.keys())
-        discrepancies = []
-        for symbol in sorted(all_symbols):
-            bp = broker_map.get(symbol)
-            ip = internal_map.get(symbol)
-            broker_qty = float(bp.get("quantity", 0)) if bp else 0.0
-            internal_qty = ip.quantity if ip else 0.0
-            if broker_qty != internal_qty:
-                discrepancies.append(
-                    {
-                        "symbol": symbol,
-                        "broker_qty": broker_qty,
-                        "internal_qty": internal_qty,
-                        "diff": broker_qty - internal_qty,
-                    }
-                )
-
-        result = {
-            "total_symbols": len(all_symbols),
-            "discrepancies": discrepancies,
-            "match": len(discrepancies) == 0,
-            "fix_applied": False,
-            "corrections": 0,
-        }
+        result = _offline_reconcile_result(broker_positions, internal_positions)
 
         assert result["match"] is False
         assert result["total_symbols"] == 2
@@ -216,3 +202,49 @@ class TestReconcileOfflineLogic:
         assert d_035720["broker_qty"] == 20.0
         assert d_035720["internal_qty"] == 0.0
         assert d_035720["diff"] == 20.0
+
+    @pytest.mark.asyncio
+    async def test_reconcile_offline_multi_bot_same_symbol_sum(
+        self, mock_adapter: AsyncMock, mock_db: AsyncMock
+    ) -> None:
+        """(#2120) 같은 심볼을 보유한 다중봇 internal 을 합산해 비교한다.
+
+        bot1 30주 + bot2 70주 = 100주, 브로커 100주 → 합산 일치(불일치 없음).
+        이전 ``{p.symbol: p}`` 덮어쓰기는 한 봇 수량만 비교해 false discrepancy
+        를 만들었다(per-bot 오판). 합산으로 제거됨을 검증한다.
+        """
+        mock_adapter.get_account_positions = AsyncMock(
+            return_value=[{"symbol": "005930", "quantity": "100"}]
+        )
+        internal = [
+            _FakePosition(
+                bot_id="bot1", symbol="005930", quantity=30.0, avg_entry_price=70000
+            ),
+            _FakePosition(
+                bot_id="bot2", symbol="005930", quantity=70.0, avg_entry_price=70000
+            ),
+        ]
+        mock_position_history = AsyncMock()
+        mock_position_history.initialize = AsyncMock()
+        mock_position_history.get_all_positions = AsyncMock(return_value=internal)
+
+        broker_positions = await mock_adapter.get_account_positions()
+        internal_positions = await mock_position_history.get_all_positions()
+        result = _offline_reconcile_result(broker_positions, internal_positions)
+
+        # 합산 100 == 브로커 100 → 불일치 없음 (false-positive 제거).
+        assert result["match"] is True
+        assert result["discrepancies"] == []
+
+
+class TestReconcileOfflineSourceSums:
+    """오프라인 폴백 src 가 internal 을 **합산**(덮어쓰기 금지)하는지 lock (#2120)."""
+
+    def test_source_aggregates_internal_totals(self) -> None:
+        """src 에 심볼별 합산 누적 코드(``internal_totals``)가 존재한다."""
+        assert "internal_totals" in _BROKER_SOURCE
+        assert "broker_totals" in _BROKER_SOURCE
+
+    def test_source_does_not_overwrite_internal_by_symbol(self) -> None:
+        """src 가 더 이상 ``{p.symbol: p}`` 덮어쓰기 dict 컴프리헨션을 쓰지 않는다."""
+        assert "{p.symbol: p for p in internal_positions}" not in _BROKER_SOURCE

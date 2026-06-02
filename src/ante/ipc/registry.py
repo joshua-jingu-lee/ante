@@ -832,46 +832,114 @@ async def _handle_broker_positions(
     return {"positions": await broker.get_positions()}
 
 
+def _broker_reconcile_envelope(
+    *,
+    account_id: str,
+    fix: bool,
+    bot_count: int,
+    adjustments: list[dict[str, Any]],
+    mismatches: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """``broker.reconcile`` 통일 응답 envelope 을 만든다.
+
+    account-level 신규 필드(``account_id``/``fix``/``bot_count``/``adjustments``/
+    ``mismatches``)와, CLI/agent display 호환을 위한 legacy 필드
+    (``total_symbols``/``discrepancies``/``match``/``fix_applied``/``corrections``)
+    를 함께 노출해 IPC·CLI passthrough envelope shape 를 일관 유지한다.
+    """
+    return {
+        "account_id": account_id,
+        "fix": fix,
+        "bot_count": bot_count,
+        "adjustments": adjustments,
+        "mismatches": mismatches,
+        # ── legacy display 호환 (CLI passthrough / 기존 envelope shape) ──
+        "total_symbols": len(mismatches),
+        "discrepancies": mismatches,
+        "match": len(mismatches) == 0,
+        "fix_applied": fix,
+        "corrections": len(adjustments),
+    }
+
+
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    from ante.account.errors import InvalidAccountIdError
+    """``broker.reconcile`` — **account-level** 대사 (#2119/#2121/#2122/#2118/#2120).
+
+    account_id 만으로 동작한다(bot_id 불요 #2119). 서버 BrokerAdapter 가 계좌
+    총합을 직접 조회하며(caller-supplied broker_positions 무시 #2121), ``fix``
+    플래그를 준수한다(#2122). 잘못된 ``correct_position`` 이 실거래 포지션을
+    손상시키지 않도록 **correction 은 봇이 정확히 1개인 계좌에서만** 기존
+    ``reconcile`` 로직에 위임하고, 그 외(2+봇·0봇)는 detect-only 다.
+
+    봇 count 분기 (status 무관 — 수동 IPC 는 user-initiated 라 봇 상태와
+    무관하게 단일봇 귀속이 자명):
+        - 정확히 1봇: ``reconciler.reconcile(bot_id, ..., dry_run=not fix)`` —
+          기존 self-check/skip_external_buy/external-buy 분류 그대로(#1950/#1946
+          무변경). fix=True 면 보정, fix=False 면 detect-only.
+        - 2+봇: ``reconciler.detect_account_level(...)`` (correct_position 미호출).
+        - 0봇 + broker_positions 비어있지 않음: account-level detect/alert.
+    """
     from ante.account.scoping import require_account_id
 
-    # #1623 Split C / #1633 finding: ``require_account_id``를
-    # ``args["bot_id"]`` **이전**으로 둔다. 그래야 bot_id 없는
-    # invalid-account-only direct-IPC probe도 ``InvalidAccountIdError``
-    # (code="VALIDATION_ERROR", #1633 SSOT)로 raise되어 server.py:323
-    # ``getattr(e, "code", ...)``를 거쳐 VALIDATION_ERROR envelope이 된다.
-    # bot_id를 먼저 읽으면 ``KeyError``가 먼저 터져 EXECUTION_ERROR로
-    # 오분류된다. status/balance/positions handler는 이미 require_account_id
-    # 최우선이라 무변경 — reconcile만 ordering 대상.
+    # #1623 Split C / #1633 finding 유지: ``require_account_id`` 가 함수 최상단.
+    # invalid-account-only direct-IPC probe 도 ``InvalidAccountIdError``
+    # (code="VALIDATION_ERROR", #1633 SSOT)로 먼저 raise 된다.
     account_id = require_account_id(
         args.get("account_id"), context="ipc.broker.reconcile"
     )
-    bot_id = args["bot_id"]
+    fix = bool(args.get("fix", False))
 
-    # Refs #1240 review (P2-1): BotManager로부터 봇의 실제 account_id를 조회해
-    # 요청 payload의 account_id와 일치하지 않으면 거부한다. 잘못된 account_id가
-    # ``correct_position(...)`` 까지 흘러가 다른 계좌의 positions / adjustment
-    # trade가 손상되는 cross-account corruption을 차단하기 위함이다.
+    # #2121: 서버 BrokerAdapter 가 계좌 총합을 직접 조회한다. caller-supplied
+    # broker_positions(args["broker_positions"]) 는 신뢰하지 않고 무시한다 —
+    # 빈 리스트나 조작된 값이 외부청산으로 오보정되는 것을 차단한다.
+    broker = await svc.account.get_broker(account_id)
+    broker_positions = await broker.get_account_positions()
+
+    # 계좌 봇 목록 (status 무관 count — #2119 ambiguity 판정 기준).
     bot_manager = getattr(svc, "bot_manager", None)
+    account_bots: list[str] = []
     if bot_manager is not None:
-        bot = bot_manager.get_bot(bot_id)
-        if bot is not None:
-            bot_account_id = getattr(bot.config, "account_id", None)
-            if bot_account_id and bot_account_id != account_id:
-                raise InvalidAccountIdError(
-                    f"(ipc.broker.reconcile) bot_id={bot_id!r} 의 account_id는 "
-                    f"{bot_account_id!r} 인데 요청은 {account_id!r} 입니다. "
-                    "다른 계좌의 포지션을 조작할 수 없습니다."
-                )
+        for info in bot_manager.list_bots():
+            if info.get("account_id") == account_id:
+                account_bots.append(info["bot_id"])
+    bot_count = len(account_bots)
 
-    broker_positions = args.get("broker_positions", [])
-    adjustments = await svc.reconciler.reconcile(
-        bot_id, broker_positions, account_id=account_id
+    if bot_count == 1:
+        # 단일봇 — 귀속 자명. 기존 reconcile 로직 그대로 위임(self-check/external
+        # 분류 무변경). fix=True 보정 / fix=False detect-only(dry_run).
+        adjustments = await svc.reconciler.reconcile(
+            account_bots[0],
+            broker_positions,
+            account_id=account_id,
+            dry_run=not fix,
+        )
+        # display(discrepancies)는 보정 **이후** 상태로 계좌 단위 합산 비교를
+        # 재계산한다(순수, 이벤트 無). fix=True 면 보정 후 0으로 수렴, dry_run
+        # 이면 미보정 불일치가 그대로 남는다.
+        mismatches = await svc.reconciler.compute_account_diff(
+            broker_positions, account_id=account_id
+        )
+        return _broker_reconcile_envelope(
+            account_id=account_id,
+            fix=fix,
+            bot_count=bot_count,
+            adjustments=adjustments,
+            mismatches=mismatches,
+        )
+
+    # 2+봇 또는 0봇 — 귀속 ambiguous(#2270). detect-only(보정 없음).
+    mismatches = await svc.reconciler.detect_account_level(
+        broker_positions, account_id=account_id
     )
-    return {"bot_id": bot_id, "adjustments": adjustments}
+    return _broker_reconcile_envelope(
+        account_id=account_id,
+        fix=fix,
+        bot_count=bot_count,
+        adjustments=[],
+        mismatches=mismatches,
+    )
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
@@ -1103,15 +1171,18 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="entity",
         required_services=frozenset({"approval"}),
     )
-    # broker.reconcile은 reconciler.reconcile()이 correct_position/이벤트
-    # publish를 수행하므로 일괄 mutating으로 분류한다. CLI ``--fix=False``
-    # dryrun 분리는 후속 이슈.
+    # broker.reconcile은 account-level (#2119): 서버 BrokerAdapter
+    # (svc.account.get_broker)로 계좌 총합을 조회하고, 1봇-total 계좌면
+    # reconciler.reconcile(correct_position/이벤트 publish 가능)에 위임하며,
+    # 2+봇·0봇이면 detect_account_level(알림만)을 수행한다. fix=False(dry_run)
+    # 여도 broker 조회·이벤트 발행이 있으므로 일괄 mutating으로 분류한다.
+    # required_services: account(broker 조회) + reconciler + bot_manager(count).
     registry.register(
         "broker.reconcile",
         _handle_broker_reconcile,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"reconciler", "bot_manager"}),
+        required_services=frozenset({"account", "reconciler", "bot_manager"}),
         account_id_policy="required",
     )
 
