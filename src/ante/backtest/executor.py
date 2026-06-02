@@ -73,7 +73,10 @@ class BacktestExecutor:
         strategies_dir: Path | None = None,
     ) -> None:
         self._strategy_cls = strategy_cls
-        self._data = data_provider
+        # 구체 BacktestDataProvider로 어노테이트한다(#2098). 체결가 게이트
+        # get_current_bar_price는 backtest 전용이라 base DataProvider ABC에는
+        # 없으므로, 호출이 mypy에 잡히지 않도록 구체 타입으로 좁힌다.
+        self._data: BacktestDataProvider = data_provider
         self._initial_balance = initial_balance
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
@@ -231,8 +234,13 @@ class BacktestExecutor:
         체결 시 라이브 bot의 ``strategy.on_fill(fill)`` dict와 동일한 shape
         (``order_id``/``symbol``/``side``/``quantity``/``price``/``timestamp``/
         ``fill_dedup_key``)의 fill dict를 반환한다(#2073). 체결되지 않은 모든
-        경로(side invalid/hold, quantity invalid, buy 잔고 부족, sell 보유 없음)는
-        ``None`` 을 반환해 호출부가 follow-up(on_fill) 경로로 진입하지 않게 한다.
+        경로(side invalid/hold, quantity invalid, **현재 봉 없음(gap day/미시작)**,
+        buy 잔고 부족, sell 보유 없음)는 ``None`` 을 반환해 호출부가 follow-up
+        (on_fill) 경로로 진입하지 않게 한다.
+
+        체결가는 ``get_current_bar_price`` (current_ts 정확 일치 봉가)로 게이트한다
+        (#2098). 심볼이 현재 step에 봉이 없으면 None이 와서 미체결 skip한다 —
+        stale as-of 가격으로 비거래일에 체결하지 않는다.
         backtest는 단발 체결이므로 ``fill_dedup_key`` 는 항상 빈 문자열이다
         (라이브와 달리 dedup이 불필요).
 
@@ -284,7 +292,21 @@ class BacktestExecutor:
             )
             return None
 
-        price = await self._data.get_current_price(signal.symbol)
+        # 체결가는 현재 봉(current_ts 정확 일치) 종가로 게이트한다(#2098).
+        # as-of(get_current_price)는 gap day에 이전 봉가를 반환하므로 그 가격으로
+        # 비거래일 체결을 하면 lookahead/stale 체결이 된다. None이면(심볼이 이
+        # step에 봉이 없음 = gap day/미시작) 미체결로 skip한다.
+        price = self._data.get_current_bar_price(signal.symbol)
+        if price is None:
+            logger.warning(
+                "Signal skip(no current bar): symbol=%s side=%r quantity=%r ts=%s — "
+                "해당 step에 봉 없음(gap day/미시작), 미체결",
+                signal.symbol,
+                signal.side,
+                signal.quantity,
+                timestamp,
+            )
+            return None
 
         if signal.side == "buy":
             exec_price = price * (1 + self._slippage_rate)
