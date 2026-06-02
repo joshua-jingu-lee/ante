@@ -24,10 +24,14 @@ StrategyContext에 주입되는 인터페이스. 라이브/백테스트/모의�
 
 #### PortfolioView 메서드 시그니처
 
+`get_positions`/`get_balance`가 반환하는 dict의 키는 **실행 모드에 따라 다르다**. 백테스트는 시세 소스(step 가격 캐시)를 보유해 평가 키(`current_price`/`unrealized_pnl`)를 합성하지만, live/virtual은 sync API·시세 소스 부재로 포지션 상태 키(`avg_entry_price`/`realized_pnl`)만 제공한다. 메서드 행은 모드별 키를 분기해 표기한다.
+
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|---------|--------|------|
-| `get_positions` | `bot_id: str` | `dict[str, Any]` | 현재 보유 포지션 조회. `{symbol: {"quantity", "avg_price", "current_price", "unrealized_pnl"}}` |
-| `get_balance` | `bot_id: str` | `dict[str, float]` | 봇 할당 자금 현황. `{"total", "available", "reserved"}` |
+| `get_positions` | `bot_id: str` | `dict[str, Any]` | 현재 보유 포지션 조회. `{symbol: {...}}`. **Backtest**: `{"quantity", "avg_price", "current_price", "unrealized_pnl"}` (`current_price`/`unrealized_pnl`은 step 가격으로 합성, #2074). **Live/Virtual**: `{"quantity", "avg_entry_price", "realized_pnl"}` |
+| `get_balance` | `bot_id: str` | `dict[str, float]` | 봇 할당 자금 현황. **Backtest**: `{"total", "available", "reserved"}`. **Live/Virtual**: `{"allocated", "available", "reserved"}` |
+
+- **모드 간 키 parity 미보장 (known-limitation)**: Live/Virtual은 sync API이며 PortfolioView 단에 시세 소스가 없어 `current_price`/`unrealized_pnl`을 동기 제공하지 않는다. Live/Virtual 전략은 보유 포지션의 평가손익이 필요하면 `get_current_price(symbol)`(모드 공통)로 현재가를 조회해 직접 계산한다. Backtest는 step 가격 캐시(#2074)로 평가 키를 합성하므로 별도 조회가 불필요하다. 모드 간 키 명칭/표면 통일(parity)은 후속 #2272 범위다.
 
 #### OrderView 메서드 시그니처
 
