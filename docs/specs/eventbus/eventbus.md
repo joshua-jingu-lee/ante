@@ -113,15 +113,15 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 |------------|--------|--------|----------|
 | `OrderRequestEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `order_type`, `price?`, `stop_price?`, `reason`, `exchange` |
 | `OrderCancelEvent` | Bot | APIGateway | `account_id`, `bot_id`, `strategy_id`, `order_id`, `reason` |
-| `OrderModifyEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `order_id`, `quantity`, `price?`, `reason` |
-| `OrderModifyRejectedEvent` | RuleEngine | Bot | `account_id`, `bot_id`, `strategy_id`, `order_id`, `reason` |
+| `OrderModifyEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `order_id`, `symbol`, `side`, `quantity`, `price?`, `reason` |
+| `OrderModifyRejectedEvent` | RuleEngine | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `reason` |
 | `OrderValidatedEvent` | RuleEngine | Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reason`, `exchange` |
 | `OrderRejectedEvent` | RuleEngine / Treasury | Bot, Notification | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `reason`, `exchange` |
 | `OrderApprovedEvent` | Treasury | APIGateway | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reserved_amount`, `exchange` |
 | `OrderSubmittedEvent` | APIGateway | Bot, Trade | `account_id`, `order_id`, `bot_id`, `strategy_id`, `broker_order_id`, `symbol`, `side`, `quantity`, `order_type`, `exchange` |
 | `OrderFilledEvent` | BrokerAdapter / FillApplier(outbox) | Bot, Treasury, Trade, Notification | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `requested_quantity`, `remaining_quantity`, `commission`, `order_type`, `reason`, `exchange`, `fill_dedup_key` |
 | `OrderCancelledEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `reason`, `exchange` |
-| `OrderFailedEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `order_type`, `error_message`, `exchange` |
+| `OrderFailedEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `order_type`, `error_message`, `error_code`, `exchange` |
 
 **참고**: `OrderUpdateEvent`는 EventBus 발행 대상이 아닌, Bot 내부에서 `OrderSubmitted/Rejected/Cancelled/Failed` 이벤트를 전략의 `on_order_update()`에 통합 전달하기 위한 변환용 데이터 클래스이다.
 핵심 필드: `order_id`, `bot_id`, `strategy_id`, `status` (`"submitted"` / `"rejected"` / `"cancelled"` / `"failed"`), `symbol`, `side`, `order_type`, `quantity`, `reason`, `exchange`.
@@ -134,7 +134,9 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 | `BotStopEvent` | RuleEngine / 사용자 | BotManager | `account_id`, `bot_id`, `reason` |
 | `BotStoppedEvent` | BotManager | — | `account_id`, `bot_id` |
 | `BotErrorEvent` | BotManager | Notification | `account_id`, `bot_id`, `error_message` |
+| `BotStepCompletedEvent` | Bot | — | `account_id`, `bot_id`, `result`, `message`, `signal_count`, `duration_ms` |
 | `BotRestartExhaustedEvent` | BotManager | Notification | `account_id`, `bot_id`, `restart_attempts`, `last_error` |
+| `SystemStartedEvent` | Main | — | `auto_started_bots` |
 | `SystemShutdownEvent` | Main | 전체 | `reason` |
 
 `TradingStateChangedEvent`는 legacy 이벤트이며 1.0 런타임 계약에서는 사용하지 않는다.
@@ -144,7 +146,7 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `NotificationEvent` | 각 모듈 | NotificationService | `level` (`"critical"` / `"error"` / `"warning"` / `"info"`), `message`, `detail`, `metadata` |
+| `NotificationEvent` | 각 모듈 | NotificationService | `level` (`"critical"` / `"error"` / `"warning"` / `"info"`), `title`, `message`, `category`, `buttons?` |
 
 #### 백테스트 (Backtest)
 
@@ -175,15 +177,15 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `ApprovalCreatedEvent` | ApprovalService | Notification | `approval_id`, `approval_type`, `requester`, `title` |
+| `ApprovalCreatedEvent` | ApprovalService | Notification | `approval_id`, `approval_type`, `requester`, `title`, `auto_approved` |
 | `ApprovalResolvedEvent` | ApprovalService | Bot, Notification | `approval_id`, `approval_type`, `resolution`, `resolved_by` |
 
 #### 계좌 (Account)
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `AccountSuspendedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `reason` |
-| `AccountActivatedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id` |
+| `AccountSuspendedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `reason`, `suspended_by` |
+| `AccountActivatedEvent` | AccountService | RuleEngine, Bot, Notification | `account_id`, `activated_by` |
 
 `AccountCreatedEvent`와 `AccountDeletedEvent`는 1.0 런타임 EventBus 계약에 포함하지 않는다.
 계좌 생성/삭제는 cold-path structural operation이며, 서버 실행 중 consumer topology를 hot wiring하지 않는다.
@@ -392,6 +394,12 @@ Bot.on_signal()
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
 | `BalanceSyncedEvent` | Treasury | — | `account_id`, `account_balance`, `purchasable_amount`, `total_evaluation`, `external_purchase_amount`, `external_eval_amount` |
+
+#### 일일 리포트 (DailyReport)
+
+| 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
+|------------|--------|--------|----------|
+| `DailyReportEvent` | DailyReportScheduler | Treasury | `account_id`, `report_date`, `trade_count`, `has_trades`, `daily_pnl`, `daily_return`, `net_trade_amount`, `unrealized_pnl` |
 
 #### Circuit Breaker
 
