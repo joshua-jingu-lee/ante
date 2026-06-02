@@ -33,6 +33,22 @@ from ante.backtest.config import BacktestConfig
 from ante.backtest.exceptions import BacktestConfigError
 from ante.backtest.result import BacktestResult
 from ante.backtest.service import BACKTEST_RESULT_SENTINEL, BacktestService
+from ante.strategy.validator import ValidationResult
+
+
+def _bypass_validator():
+    """service.run의 StrategyValidator 게이트(#2039)를 우회한다.
+
+    유효 config가 data load까지 진행하는 회귀 테스트는 StrategyLoader를 mock해
+    실제 전략 파일 없이 ``s.py`` 경로로 run을 구동하므로, load 직전 추가된 정적
+    검증도 valid 결과로 대체한다. invalid-config 거부 테스트는 _validate_config
+    단계에서 더 일찍 raise되므로 이 우회의 영향을 받지 않는다.
+    """
+    return patch(
+        "ante.backtest.service.StrategyValidator.validate",
+        return_value=ValidationResult(valid=True),
+    )
+
 
 _BASE: dict = {
     "strategy_path": "s.py",
@@ -269,6 +285,7 @@ class TestServiceRunEarlyFailsBeforeDataLoad:
         """유효 config 회귀: run()이 정상적으로 data load까지 진행."""
         provider_instance, executor_instance = _patched_run_components()
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader") as mock_loader,
             patch("ante.backtest.service.ParquetStore"),
             patch(
@@ -292,6 +309,7 @@ class TestServiceRunEarlyFailsBeforeDataLoad:
         """[R2-F1] {"symbols": None} → run() no-symbols 정상, data load 0."""
         provider_instance, executor_instance = _patched_run_components()
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader") as mock_loader,
             patch("ante.backtest.service.ParquetStore"),
             patch(

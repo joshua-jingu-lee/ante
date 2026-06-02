@@ -26,19 +26,23 @@ from ante.backtest import runner
 from ante.backtest.exceptions import BacktestError
 from ante.backtest.service import BACKTEST_RESULT_SENTINEL, BacktestService
 
+# #2039: 전략 파일은 import 시점에 코드를 실행할 수 없으므로(top-level
+# print/`import sys` 는 StrategyValidator가 거부), stdout noise는 검증을
+# 통과하는 위치인 ``on_step`` (런타임) 에서 print 한다. runner subprocess의
+# stdout에 결과 sentinel 라인 외 noise가 섞여도 run_subprocess가 sentinel
+# 라인만 파싱하는지(#2065)를 그대로 검증한다.
 _NOISE_STRATEGY = """\
-print("strategy import noise")
-import sys
-print("more stdout noise from module top", file=sys.stdout)
 from typing import Any
 
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 
 
 class NoiseStrategy(Strategy):
-    meta = StrategyMeta(name="noise", version="1.0", description="noisy import")
+    meta = StrategyMeta(name="noise", version="1.0", description="noisy run")
 
     async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+        print("strategy runtime stdout noise")
+        print("more stdout noise from on_step")
         return []
 """
 
@@ -71,6 +75,37 @@ def _write_strategy(tmp_path: Path, source: str) -> Path:
     return strat
 
 
+def _write_ohlcv(data_dir: Path, symbol: str, *, n: int = 5) -> None:
+    """``data_dir`` 에 ``symbol`` 1d OHLCV를 적재(런타임 step 발생용)."""
+    from datetime import UTC, datetime, timedelta
+
+    import polars as pl
+
+    from ante.data.store import ParquetStore
+
+    start = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
+    timestamps = pl.datetime_range(
+        start,
+        start + timedelta(days=n - 1),
+        interval="1d",
+        eager=True,
+        time_zone="UTC",
+    )
+    df = pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": [symbol] * n,
+            "open": [50000.0 + i * 100 for i in range(n)],
+            "high": [50000.0 + i * 100 + 50 for i in range(n)],
+            "low": [50000.0 + i * 100 - 50 for i in range(n)],
+            "close": [50000.0 + i * 100 + 25 for i in range(n)],
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+    ParquetStore(base_path=data_dir).write(symbol, "1d", df)
+
+
 def _cfg(tmp_path: Path, strat: Path) -> dict:
     # symbols=[] (no-symbols backtest 정상) → 데이터 적재 불필요로 경량.
     return {
@@ -95,11 +130,16 @@ class TestSubprocessTolerantToStdoutNoise:
         self, tmp_path: Path
     ) -> None:
         strat = _write_strategy(tmp_path, _NOISE_STRATEGY)
+        # on_step(런타임)에서 stdout noise를 내려면 step이 실행되어야 하므로
+        # 데이터를 적재하고 symbol을 지정한다(#2039로 import-time noise 불가).
+        _write_ohlcv(tmp_path / "data", "005930")
         svc = BacktestService(data_path=str(tmp_path / "data"))
 
         # 변경 전이라면 noise 라인 때문에 json.loads(stdout) 가
         # JSONDecodeError 를 던졌다. 이제는 sentinel 라인만 파싱한다.
-        out = await svc.run_subprocess(_cfg(tmp_path, strat))
+        cfg = _cfg(tmp_path, strat)
+        cfg["symbols"] = ["005930"]
+        out = await svc.run_subprocess(cfg)
 
         assert isinstance(out, dict)
         assert _RESULT_KEYS <= set(out)

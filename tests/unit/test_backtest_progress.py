@@ -7,6 +7,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from ante.backtest.executor import BacktestExecutor
+from ante.strategy.validator import ValidationResult
+
+
+def _bypass_validator():
+    """service.run의 StrategyValidator 게이트(#2039)를 우회한다.
+
+    이 테스트는 StrategyLoader.load를 mock해 실제 전략 파일 없이 ``test.py``
+    경로로 run을 구동하므로, load 직전 정적 검증도 valid 결과로 대체한다.
+    """
+    return patch(
+        "ante.backtest.service.StrategyValidator.validate",
+        return_value=ValidationResult(valid=True),
+    )
 
 
 class TestProgressCallback:
@@ -87,6 +100,7 @@ class TestBacktestServiceProgress:
     async def test_service_passes_callback(self):
         """BacktestService가 progress_callback을 전달한다."""
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader.load") as mock_load,
             patch("ante.backtest.service.BacktestDataProvider") as mock_dp_cls,
             patch("ante.backtest.service.BacktestExecutor") as mock_exec_cls,
