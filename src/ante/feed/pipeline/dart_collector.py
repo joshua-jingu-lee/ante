@@ -6,6 +6,7 @@ import json
 import logging
 from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +37,26 @@ REPRT_TO_QUARTER: dict[str, str] = {
 
 # 기본 설정 상수
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
+
+
+class QuarterStatus(Enum):
+    """단일 분기 수집 결과의 3-상태(#2028).
+
+    ``_fetch_quarter``가 반환하며, ``_collect_quarters``의 checkpoint 전진/
+    halt 결정을 구동한다. 기존 2-값 bool(ok)을 대체한다.
+
+    - ``OK``: 정상 저장(written>0). checkpoint 전진 자격.
+    - ``HALT``: transient 예외 / raw-present no-storable(written==0). 데이터
+      손실 가능성을 surface하고 이 run의 checkpoint 전진을 동결한다(#2054).
+    - ``SKIP_EMPTY``: ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시
+      가능). checkpoint를 전진시키지 않으면서 halt도 세우지 않아, 오름차순
+      순회에서 후속 분기 처리를 계속한다(#2028).
+    """
+
+    OK = "ok"
+    HALT = "halt"
+    SKIP_EMPTY = "skip_empty"
+
 
 # `today`는 KST(UTC+9) 캘린더 기준으로 산출한다. 분기 period-end 비교는
 # backfill_runner._today_kst()와 동일 기준이어야 한다(repo 전반 KST 정합).
@@ -181,14 +202,21 @@ class DARTCollector:
         # 이로써 checkpoint가 미래 분기로 전진하지 않는다(#1964).
         today = _today_kst()
 
-        # 첫 실패(ok=False) 이후에는 이 run에서 checkpoint를 더 전진시키지
-        # 않는다(#2054). checkpoint는 quarter_key 오름차순 last-write-wins로
-        # monotonic 전진하므로, 실패 분기 이후의 성공 분기를 save하면 checkpoint가
-        # 실패 분기를 넘어 전진해 다음 run에서 재시도되지 않는다. halt 플래그로
-        # 실패 분기 직전에 checkpoint를 고정해 다음 run이 실패 분기부터 재개한다.
-        # 실패 이후 분기 fetch는 best-effort로 계속하며(데이터는 best-effort
-        # 저장), 재-fetch는 ParquetStore의 natural-key dedup(keep="last")로
-        # overwrite 멱등이라 중복 누적이 발생하지 않는다.
+        # 첫 HALT(transient 예외 / raw-present no-storable) 이후에는 이 run에서
+        # checkpoint를 더 전진시키지 않는다(#2054). checkpoint는 quarter_key
+        # 오름차순 last-write-wins로 monotonic 전진하므로, HALT 분기 이후의 성공
+        # 분기를 save하면 checkpoint가 HALT 분기를 넘어 전진해 다음 run에서
+        # 재시도되지 않는다. halt 플래그로 HALT 분기 직전에 checkpoint를 고정해
+        # 다음 run이 HALT 분기부터 재개한다. HALT 이후 분기 fetch는 best-effort로
+        # 계속하며(데이터는 best-effort 저장), 재-fetch는 ParquetStore의
+        # natural-key dedup(keep="last")로 overwrite 멱등이라 중복 누적이
+        # 발생하지 않는다.
+        #
+        # SKIP_EMPTY(not raw_items, 미공시 가능)는 halt를 세우지 않고 checkpoint도
+        # 전진시키지 않는다(#2028). 오름차순 순회라 내부 빈 분기는 후속 데이터
+        # 분기의 checkpoint.save가 jump하여 커버하고, trailing 빈 분기는 미전진
+        # 상태로 남아 다음 run에서 재시도된다(분기종료 직후 빈 응답을 "완료"로
+        # 오인해 이후 공시를 누락하던 버그 해소).
         halt = False
 
         for year in range(start_year, end_year + 1):
@@ -202,7 +230,7 @@ class DARTCollector:
                     # 미래 분기: fetch/save 모두 건너뛴다.
                     continue
 
-                written, syms, ok = await self._fetch_quarter(
+                written, syms, status = await self._fetch_quarter(
                     corp_codes_list,
                     corp_code_map,
                     store,
@@ -212,10 +240,11 @@ class DARTCollector:
                 )
                 rows_written += written
                 symbols.update(syms)
-                if not ok:
+                if status is QuarterStatus.HALT:
                     halt = True
-                if ok and not halt:
+                elif status is QuarterStatus.OK and not halt:
                     checkpoint.save(quarter_key)
+                # QuarterStatus.SKIP_EMPTY: checkpoint 미전진 + halt 미설정(no-op).
 
         logger.info(
             "DART 수집 완료: symbols=%d rows=%d",
@@ -232,19 +261,22 @@ class DARTCollector:
         year: int,
         reprt_code: str,
         warns: list[dict],
-    ) -> tuple[int, set[str], bool]:
+    ) -> tuple[int, set[str], QuarterStatus]:
         """단일 분기 재무제표를 수집/정규화/저장한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, ok). ``ok``는 이 분기가 checkpoint
-            전진 자격을 갖는지를 나타낸다(#2054):
+            (기록 행 수, 수집된 심볼 집합, status). ``status``는 이 분기에 대한
+            checkpoint 전진/halt 결정을 구동하는 3-상태다(#2028, #2054):
 
-            - transient 예외(warn 추가) → ``ok=False``(미전진, 다음 run 재시도)
-            - ``not raw_items``(upstream terminal no-data) → ``ok=True``
-              (정당한 빈-성공; checkpoint 전진하여 무한 재시도 방지)
+            - transient 예외(warn 추가) → ``QuarterStatus.HALT``
+              (미전진 + 이후 분기 동결, 다음 run 재시도)
+            - ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시 가능) →
+              ``QuarterStatus.SKIP_EMPTY``(미전진하되 halt 미설정; 후속 분기
+              처리는 계속). 과거에는 ``ok=True``로 checkpoint를 전진시켜 빈
+              분기를 "완료"로 오인하고 이후 공시를 누락했다(#2028 버그).
             - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
-              warn 추가 + ``ok=False``(데이터 손실 surface, 미전진)
-            - 정상 저장(written>0) → ``ok=True``
+              warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
+            - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)
 
             ``DARTDailyLimitError``/``DARTCriticalError``는 기존대로 re-raise.
         """
@@ -271,12 +303,15 @@ class DARTCollector:
                     "message": str(exc),
                 }
             )
-            return 0, set(), False
+            return 0, set(), QuarterStatus.HALT
 
         if not raw_items:
-            # upstream terminal no-data: 정당한 빈-성공. checkpoint를 전진시켜
-            # 데이터 없는 분기를 무한 재시도하지 않는다.
-            return 0, set(), True
+            # 빈 응답: 분기종료 직후 아직 공시되지 않았을 수 있다(미공시 가능).
+            # checkpoint를 전진시키면 이후 공시를 영구 누락하므로(분기 완료
+            # 오인, #2028) 미전진한다. 단 halt는 세우지 않아 후속 분기 처리는
+            # 계속한다(오름차순 순회에서 내부 빈 분기는 후속 데이터 분기의
+            # checkpoint.save가 jump 커버, trailing 빈 분기는 다음 run 재시도).
+            return 0, set(), QuarterStatus.SKIP_EMPTY
 
         written, syms = self._normalize_and_store(
             raw_items,
@@ -304,9 +339,9 @@ class DARTCollector:
                     ),
                 }
             )
-            return 0, syms, False
+            return 0, syms, QuarterStatus.HALT
 
-        return written, syms, True
+        return written, syms, QuarterStatus.OK
 
     def _normalize_and_store(
         self,

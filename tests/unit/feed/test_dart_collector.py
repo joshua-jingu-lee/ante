@@ -127,7 +127,9 @@ class TestCheckpointFutureQuarterClamp:
           - 2026-Q1 (period-end 3/31) = collectable
           - 2026-Q2 (6/30) / Q3 (9/30) / Q4 (12/31) = 미래 → skip
         수정 전에는 _collect_quarters가 모든 분기를 무조건 save하여
-        checkpoint가 2026-Q4까지 전진했다.
+        checkpoint가 2026-Q4까지 전진했다. 미래 컷오프 이후에도 Q1이 빈 응답
+        이면 SKIP_EMPTY로 미전진하므로(#2028) 어떤 미래 분기로도 전진하지
+        않는다(미래 컷오프 #1964 동작 자체는 유지).
         """
         import ante.feed.pipeline.dart_collector as dc
 
@@ -151,9 +153,10 @@ class TestCheckpointFutureQuarterClamp:
         )
 
         last = checkpoint.get_last_date()
-        # 미래 분기(Q2/Q3/Q4)로 전진하지 않음. Q1만 collectable.
+        # 미래 분기(Q2/Q3/Q4)로 전진하지 않음. Q1은 빈 응답이라 SKIP_EMPTY로
+        # 미전진(#2028)하므로 checkpoint는 None에 머문다.
         assert last not in {"2026-Q2", "2026-Q3", "2026-Q4"}
-        assert last == "2026-Q1"
+        assert last is None
 
         # 미래 분기는 fetch조차 하지 않는다 (period-end > today).
         future_codes = {"11012", "11014", "11011"}  # Q2/Q3/Q4 reprt_code
@@ -409,22 +412,36 @@ class TestCheckpointHaltOnFailure:
         # 실패 분기(Q2)를 넘어 전진하지 않는다. Q1에 고정.
         assert checkpoint.get_last_date() == "2015-Q1"
 
-    async def test_terminal_no_data_advances_checkpoint(self, tmp_path: Path) -> None:
-        """(c) not raw_items(terminal no-data) → checkpoint 정상 전진(빈-성공).
+    async def test_empty_quarters_do_not_advance_checkpoint(
+        self, tmp_path: Path
+    ) -> None:
+        """(c) not raw_items(미공시 가능) → checkpoint 미전진, halt 미설정(#2028).
 
-        모든 분기가 빈 응답([]). 정당한 빈-성공이므로 checkpoint는 마지막
-        분기(Q4)까지 전진하여 무한 재시도를 방지한다.
+        모든 분기가 빈 응답([]). 분기종료 직후·공시 전 빈 응답일 수 있으므로
+        SKIP_EMPTY로 처리해 checkpoint를 전진시키지 않는다(이후 공시 누락
+        방지). 단 halt가 아니므로 전 분기 fetch는 계속 수행된다.
+
+        수정 전에는 빈-성공(ok=True)으로 checkpoint가 Q4까지 전진해, 분기종료
+        직후 빈 응답을 "완료"로 확정하고 이후 공시를 영구 누락했다(#2028 버그).
         """
         behaviors: dict[tuple[str, str], object] = {}  # 전부 [] 반환
-        collector, checkpoint, store, _source, config = _make_collector_env(
+        collector, checkpoint, store, source, config = _make_collector_env(
             tmp_path, behaviors
         )
         _rows, _syms, warns = await _run_collect(
             tmp_path, collector, checkpoint, store, config
         )
 
-        assert checkpoint.get_last_date() == "2015-Q4"
+        # 빈 분기는 미전진 → 다음 run에서 재시도 가능(공시 누락 방지).
+        assert checkpoint.get_last_date() is None
         assert warns == []
+        # halt가 아니므로 전 분기(4개)를 모두 fetch한다(stall 없음).
+        assert source.fetched == [
+            ("2015", "11013"),
+            ("2015", "11012"),
+            ("2015", "11014"),
+            ("2015", "11011"),
+        ]
 
     async def test_raw_present_but_stored_zero_halts(self, tmp_path: Path) -> None:
         """(d) raw_items>0인데 정규화/저장 0건 → warns 추가 + checkpoint 미전진.
@@ -502,6 +519,146 @@ class TestCheckpointHaltOnFailure:
         assert checkpoint.get_last_date() is None
         assert rows == 0
         assert len(warns) == 4
+
+
+class TestEmptyQuarterSkip:
+    """#2028: 빈 분기(not raw_items)를 SKIP_EMPTY로 처리해 checkpoint를 전진/
+
+    halt시키지 않으면서도 후속 분기 처리를 계속하는지 검증한다.
+
+    근본 버그: 분기종료 직후·공시 전 빈 응답을 "완료"(ok=True)로 확정해
+    checkpoint가 전진하면 이후 공시를 영구 누락했다. SKIP_EMPTY는 미전진하되
+    halt를 세우지 않아 stall 없이 trailing 분기 재시도를 보장한다.
+    """
+
+    async def test_fetch_quarter_returns_skip_empty_for_no_data(
+        self, tmp_path: Path
+    ) -> None:
+        """_fetch_quarter가 not raw_items에 SKIP_EMPTY를 반환한다(3-상태 계약)."""
+        from ante.feed.pipeline.dart_collector import QuarterStatus
+
+        collector, _checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors={}
+        )
+        warns: list[dict] = []
+        written, syms, status = await collector._fetch_quarter(
+            ["00126380"],
+            {"00126380": "005930"},
+            store,
+            2015,
+            "11013",
+            warns,
+        )
+        assert status is QuarterStatus.SKIP_EMPTY
+        assert written == 0
+        assert syms == set()
+        assert warns == []
+
+    async def test_empty_quarter_skips_without_halt(self, tmp_path: Path) -> None:
+        """(a) 빈 분기 → checkpoint 미전진 AND halt 미설정(후속 처리 계속).
+
+        Q1만 빈 응답, Q2~Q4는 정상 저장. halt가 세워지지 않으므로 Q2~Q4는
+        정상 save되어 checkpoint가 Q4까지 전진한다(빈 Q1이 stall을 일으키지
+        않음). 빈 분기 자체는 미전진하되 후속 데이터 분기가 jump 커버한다.
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11012"): [_raw_item("2015", "11012")],  # Q2 data
+            ("2015", "11014"): [_raw_item("2015", "11014")],  # Q3 data
+            ("2015", "11011"): [_raw_item("2015", "11011")],  # Q4 data
+            # Q1(11013) 미지정 → [] (빈, SKIP_EMPTY)
+        }
+        norm_results = {
+            ("2015", "11012"): _stored_df("2015"),
+            ("2015", "11014"): _stored_df("2015"),
+            ("2015", "11011"): _stored_df("2015"),
+        }
+        collector, checkpoint, store, source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        rows, _syms, warns = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+
+        # 빈 Q1이 halt를 세우지 않아 Q2~Q4가 정상 저장 → Q4까지 전진.
+        assert checkpoint.get_last_date() == "2015-Q4"
+        assert warns == []
+        assert rows > 0
+        # 빈 분기에서 stall하지 않고 전 분기 fetch 진행.
+        assert ("2015", "11011") in source.fetched
+
+    async def test_internal_empty_quarter_jump_covered(self, tmp_path: Path) -> None:
+        """(b) 내부 빈 분기 D1<Qe<D2 → checkpoint=D2(Qe jump, halt 없어 D2 저장).
+
+        Q1(data) → checkpoint Q1. Q2(empty, SKIP_EMPTY) → 미전진·미halt.
+        Q3(data) → checkpoint Q3로 jump(내부 빈 Q2를 건너뛴 커버). Q4(empty)는
+        trailing이므로 미전진. 최종 checkpoint는 마지막 데이터 분기 Q3.
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],  # Q1 data (D1)
+            # Q2(11012) 미지정 → [] (내부 빈, Qe)
+            ("2015", "11014"): [_raw_item("2015", "11014")],  # Q3 data (D2)
+            # Q4(11011) 미지정 → [] (trailing 빈)
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df("2015"),
+            ("2015", "11014"): _stored_df("2015"),
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        await _run_collect(tmp_path, collector, checkpoint, store, config)
+
+        # 내부 빈 Q2를 jump하여 D2(Q3)로 전진. halt가 없어 D2가 정상 저장됨.
+        assert checkpoint.get_last_date() == "2015-Q3"
+
+    async def test_trailing_empty_quarter_retryable(self, tmp_path: Path) -> None:
+        """(c) trailing 빈 분기 → 마지막 데이터 분기 유지(재시도 가능).
+
+        Q1(data) → checkpoint Q1. Q2~Q4 모두 빈(SKIP_EMPTY) → 미전진. 최종
+        checkpoint는 Q1에 머물러 다음 run에서 Q2부터 재개(공시되면 수집).
+        수정 전에는 빈 Q2~Q4가 ok=True로 전진해 Q4가 "완료"되어 이후 공시를
+        누락했다.
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],  # Q1 data
+            # Q2/Q3/Q4 미지정 → [] (trailing 빈)
+        }
+        norm_results = {("2015", "11013"): _stored_df("2015")}
+        collector, checkpoint, store, source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+        await _run_collect(tmp_path, collector, checkpoint, store, config)
+
+        # 마지막 데이터 분기(Q1) 유지 → 다음 run에서 Q2부터 재시도.
+        assert checkpoint.get_last_date() == "2015-Q1"
+        # trailing 빈 분기도 모두 fetch(stall 없음).
+        assert ("2015", "11011") in source.fetched
+
+    async def test_issue_repro_empty_source_no_advance(self, tmp_path: Path) -> None:
+        """(e) 이슈 재현: fake source fetch_financial=[] → 그 분기 미전진.
+
+        모든 분기가 빈 응답인 fake source. 어떤 분기도 checkpoint를 전진시키지
+        않으므로(미공시 분기 완료 오인 제거) 최종 checkpoint는 None에 머문다.
+        """
+        source = _StubDARTSource({"00126380": "005930"})  # 항상 [] 반환
+        collector = DARTCollector(source=source)
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        rows, _syms, warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        assert checkpoint.get_last_date() is None
+        assert rows == 0
+        assert warns == []
 
 
 class _CountingCorpCodeSource:
