@@ -58,11 +58,19 @@ CREATE INDEX IF NOT EXISTS idx_order_registry_account_bot
 
 ### ReconcileScheduler — 주기적 대사
 
-> ⏳ **미구현** — 아래 설계는 확정되었으나, 코드가 아직 작성되지 않았다.
+> **구현 완료** — `src/ante/broker/scheduler.py`에 `ReconcileScheduler`로 구현되었다.
 
-구현 예정: `src/ante/broker/scheduler.py`
+구현: `src/ante/broker/scheduler.py`
 
-ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BotManager`, `EventBus`를 주입받아, 설정된 간격(기본 30분)으로 모든 활성 봇의 대사를 수행한다. 불일치 감지 시 로그 경고와 함께 `NotificationEvent`를 발행한다.
+ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BrokerAdapter`(실제 잔고 조회), `BotManager`(활성 봇 목록), `EventBus`를 positional 인자로 주입받는다. 추가로 keyword-only 인자를 받는다:
+
+- `broker_account_id`(필수): 이 스케줄러 인스턴스가 바인딩된 broker 계좌의 account_id. 빈 값이면 `ValueError`. `run_once()`는 이 account_id에 일치하는 활성(running) 봇만 대사하고, 다른 계좌의 봇은 명시적으로 skip한다(SPLIT-1 단일 broker 바인딩 가드). multi-broker pool은 SPLIT-3에서 도입한다(`src/ante/main.py`의 `_init_reconcile_scheduler`가 활성 broker별 스케줄러를 생성·관리).
+- `interval_seconds`(기본 `DEFAULT_INTERVAL_SECONDS` = 1800초 = 30분): 대사 반복 주기.
+- `skip_initial_external_buy`(기본 `False`): True면 `start()`의 **기동 즉시 1회 대사에서만** "외부 매수" 분류 보정을 건너뛴다(이후 주기 대사는 정상 처리).
+
+`start()`는 시작 즉시 1회 대사(`run_once(skip_external_buy=self._skip_initial_external_buy)`)를 수행한 뒤 `interval_seconds` 주기로 대사 루프를 돈다. 불일치 감지 시 로그 경고와 함께 `NotificationEvent`를 발행한다.
+
+**#1946 fill 복구 barrier**: 서버 기동 시(`src/ante/main.py`) 각 계좌의 `FillReconcileScheduler.catch_up_once()`가 await 완료된 뒤에야 `ReconcileScheduler.start()`가 호출된다. fill 복구가 position 대사에 선행해야 미복구 ante 체결이 "외부 매수"로 오분류되지 않기 때문이다. fill 카치업에 **실패한** 계좌(`s.fill_catch_up_failed_accounts`)는 `skip_initial_external_buy=True`로 생성되어, 그 계좌의 기동 즉시 1회 대사에서만 external-buy 분류 보정을 건너뛴다.
 
 ### 대사 실행 시점
 
