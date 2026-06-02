@@ -81,6 +81,9 @@ class StrategyReport:
 
     # 백테스트 결과 요약
     backtest_period: str = ""
+    # 참조한 백테스트 run_id (CLI ``--run`` 또는 payload backtest_run_id).
+    # 빈 문자열은 "참조 없음"을 의미한다 (#1999).
+    backtest_run_id: str = ""
     total_return_pct: float = 0.0
     total_trades: int = 0
     sharpe_ratio: float | None = None

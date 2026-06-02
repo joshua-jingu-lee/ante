@@ -41,14 +41,14 @@ direct_database_construction:
   # 제외 scope 결정에 따라 본 factory migration 사이클에서 별도 spec 정렬 PR
   # 로 이연된 잔여. 후속 이슈에서 `open_cli_db` 로 마이그레이션할 후보.
   - path: src/ante/cli/commands/report.py
-    line: 127
+    line: 130
+    reason: "report submit — offline (deferred migration, post-#1818 follow-up)"
+  - path: src/ante/cli/commands/report.py
+    line: 232
     reason: "report list — offline (deferred migration, post-#1818 follow-up)"
   - path: src/ante/cli/commands/report.py
-    line: 226
+    line: 408
     reason: "report view — offline (deferred migration, post-#1818 follow-up)"
-  - path: src/ante/cli/commands/report.py
-    line: 402
-    reason: "report performance — offline (deferred migration, post-#1818 follow-up)"
 
   # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (progress
   # bar 와 함께 장시간 작업) 이라 직접 Database 생성을 유지한다.

@@ -41,6 +41,7 @@ AI Agent가 전략 백테스트 후 리포트를 제출하면 시스템에 축�
 | submitted_at | datetime | 제출 시각 |
 | submitted_by | str | 제출자 (기본: "agent") |
 | backtest_period | str | 백테스트 기간 (예: "2024-01 ~ 2026-03") |
+| backtest_run_id | str | 참조한 백테스트 run_id (기본: ""). 빈 문자열은 참조 없음. CLI `--run` 또는 제출 payload `backtest_run_id`로 지정하며, 비어있지 않으면 `BacktestRunStore`에서 존재 검증 후 저장 |
 | total_return_pct | float | 총 수익률 (%) |
 | total_trades | int | 총 거래 수 |
 | sharpe_ratio | float \| None | 샤프 비율 |
@@ -115,7 +116,7 @@ AI Agent가 전략 백테스트 후 리포트를 제출하면 시스템에 축�
   ],
   "optional_fields": [
     "sharpe_ratio", "max_drawdown_pct", "win_rate",
-    "risks", "recommendations", "detail_json"
+    "risks", "recommendations", "detail_json", "backtest_run_id"
   ],
   "format": "JSON",
   "example": {
@@ -160,6 +161,7 @@ CREATE TABLE reports (
     submitted_at       TEXT NOT NULL,
     submitted_by       TEXT DEFAULT 'agent',
     backtest_period    TEXT DEFAULT '',
+    backtest_run_id    TEXT DEFAULT '',
     total_return_pct   REAL DEFAULT 0.0,
     total_trades       INTEGER DEFAULT 0,
     sharpe_ratio       REAL,
