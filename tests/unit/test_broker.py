@@ -218,6 +218,9 @@ class TestKISAdapterAPI:
         resp.status = status
         resp.json = AsyncMock(return_value=json_data)
         resp.text = AsyncMock(return_value="error text")
+        # 연속조회 헤더 tr_cont (#2126): 단일 페이지로 끝나도록 "D" 고정.
+        # 실제 dict 로 지정해 AsyncMock 자동 속성(미await coroutine) 경고를 막는다.
+        resp.headers = {"tr_cont": "D"}
         resp.__aenter__ = AsyncMock(return_value=resp)
         resp.__aexit__ = AsyncMock(return_value=False)
         return resp
