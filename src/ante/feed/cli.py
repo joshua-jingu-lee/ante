@@ -397,6 +397,10 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
 
     orchestrator = _build_orchestrator(cfg)
 
+    # #2030/#2070: 스케줄러 진입 chokepoint 에서 시간 형식을 1회 fail-fast
+    # 검증해 non-padded("9:00") 등으로 인한 조용한 미실행을 차단한다.
+    # run_scheduler_loop 진입부에도 동일 가드가 있으나(defense-in-depth),
+    # CLI 에서는 traceback 대신 구조화 에러로 변환해 출력한다.
     try:
         asyncio.run(
             run_scheduler_loop(
@@ -407,6 +411,12 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
                 backfill_at=backfill_at,
             )
         )
+    except ValueError as exc:
+        fmt.error(  # type: ignore[attr-defined]
+            f"스케줄 시간 설정이 올바르지 않습니다: {exc}",
+            code="CLI_INVALID_SCHEDULE_TIME",
+        )
+        raise SystemExit(1) from exc
     except KeyboardInterrupt:
         click.echo("\nDataFeed 스케줄러 종료")
 

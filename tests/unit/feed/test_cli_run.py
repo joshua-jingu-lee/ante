@@ -381,6 +381,85 @@ class TestFeedStart:
         assert result.exit_code == 0
         assert "스케줄러" in result.output
 
+    @staticmethod
+    def _init_with_schedule(
+        tmp_path: Path, daily_at: str, backfill_at: str, blocked_hours: str
+    ) -> str:
+        data_dir = tmp_path / "data"
+        feed_dir = data_dir / ".feed"
+        feed_dir.mkdir(parents=True)
+        (feed_dir / "config.toml").write_text(
+            "[schedule]\n"
+            f'daily_at = "{daily_at}"\n'
+            f'backfill_at = "{backfill_at}"\n'
+            'backfill_since = "2024-01-01"\n'
+            "\n"
+            "[guard]\n"
+            "blocked_days = []\n"
+            f"blocked_hours = [{blocked_hours}]\n"
+            "pause_during_trading = true\n"
+        )
+        (feed_dir / "checkpoints").mkdir()
+        (feed_dir / "reports").mkdir()
+        return str(data_dir)
+
+    def test_invalid_daily_at_fails_fast_not_silent(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """non-padded daily_at("9:00")이면 조용히 미실행이 아니라 명시 에러로 실패."""
+        data_path = self._init_with_schedule(
+            tmp_path,
+            daily_at="9:00",
+            backfill_at="01:00",
+            blocked_hours='"09:00-15:30"',
+        )
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_build.return_value = AsyncMock()
+            result = runner.invoke(
+                cli,
+                ["feed", "start", "--data-path", data_path],
+            )
+        assert result.exit_code != 0
+        assert "daily_at" in result.output
+
+    def test_invalid_blocked_hours_fails_fast(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """non-padded blocked_hours 끝점("16:00-9:00")이면 명시 에러로 실패."""
+        data_path = self._init_with_schedule(
+            tmp_path,
+            daily_at="16:00",
+            backfill_at="01:00",
+            blocked_hours='"16:00-9:00"',
+        )
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_build.return_value = AsyncMock()
+            result = runner.invoke(
+                cli,
+                ["feed", "start", "--data-path", data_path],
+            )
+        assert result.exit_code != 0
+        assert "blocked_hours" in result.output
+
+    def test_invalid_schedule_json_error_code(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """JSON 모드에서 구조화 에러 코드를 노출한다."""
+        data_path = self._init_with_schedule(
+            tmp_path,
+            daily_at="25:00",
+            backfill_at="01:00",
+            blocked_hours='"09:00-15:30"',
+        )
+        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+            mock_build.return_value = AsyncMock()
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "feed", "start", "--data-path", data_path],
+            )
+        assert result.exit_code != 0
+        assert "CLI_INVALID_SCHEDULE_TIME" in result.output
+
 
 # ── ante feed run --help ─────────────────────────────────────────────────
 
