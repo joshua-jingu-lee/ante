@@ -14,6 +14,7 @@ from ante.backtest.metrics import (
     _sharpe_ratio,
     calculate_metrics,
 )
+from ante.backtest.result import resample_equity_curve_daily
 
 
 @dataclass(frozen=True)
@@ -252,6 +253,131 @@ class TestAnnualReturn:
         curve = [{"equity": 100 + i} for i in range(252)]
         result = _annual_return(curve, 10.0)
         assert abs(result - 10.0) < 0.5
+
+
+# ── Intraday 일별 리샘플 (#2013) ──────────────────
+#
+# annual_return / Sharpe는 "일(day)" 단위가 전제이므로 calculate_metrics가
+# equity_curve를 한 번 일별 리샘플(threshold=0)한 뒤 헬퍼에 넘긴다.
+# intraday(하루 여러 bar) 백테스트에서 bar 개수를 일수로 오인하던 왜곡을
+# 수정하면서, 1d(날짜당 1봉) 백테스트는 결과가 불변(backward compat)이어야 한다.
+
+
+class TestCalculateMetricsDailyResample:
+    def test_intraday_annual_return_uses_distinct_dates(self):
+        """intraday(5m, 2일치) → annual_return이 bar 수가 아닌 distinct 날짜 수 기준."""
+        # 하루 여러 bar, 2 캘린더 날짜
+        equity_curve = [
+            {"timestamp": "2024-01-01T09:00:00", "equity": 10_000_000},
+            {"timestamp": "2024-01-01T09:05:00", "equity": 10_010_000},
+            {"timestamp": "2024-01-01T15:30:00", "equity": 10_100_000},
+            {"timestamp": "2024-01-02T09:00:00", "equity": 10_120_000},
+            {"timestamp": "2024-01-02T09:05:00", "equity": 10_150_000},
+            {"timestamp": "2024-01-02T15:30:00", "equity": 10_200_000},
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=10_000_000,
+            final_balance=10_200_000,
+        )
+        # total_return = 2.0% → days=2(distinct 날짜) 기준 연환산.
+        # bar 수(6)가 아니라 날짜 수(2)를 일수로 사용해야 한다.
+        # (1 + 0.02) ** (252/2) - 1) * 100 ≈ 1112.3322
+        assert metrics["annual_return"] == pytest.approx(1112.3322, abs=1e-3)
+        # bar 수(6) 기준이라면 ~129.7244 → 그 값이 아님을 확인.
+        assert metrics["annual_return"] != pytest.approx(129.7244, abs=1e-3)
+
+    def test_intraday_sharpe_uses_daily_returns(self):
+        """intraday(3일치) → Sharpe가 bar-간이 아닌 일간 수익률 기준."""
+        # 하루 여러 bar, 3 캘린더 날짜 (일별 마지막: 10.1M, 10.2M, 10.3M)
+        equity_curve = [
+            {"timestamp": "2024-01-01T09:00:00", "equity": 10_000_000},
+            {"timestamp": "2024-01-01T15:30:00", "equity": 10_100_000},
+            {"timestamp": "2024-01-02T09:00:00", "equity": 10_050_000},
+            {"timestamp": "2024-01-02T15:30:00", "equity": 10_200_000},
+            {"timestamp": "2024-01-03T09:00:00", "equity": 10_180_000},
+            {"timestamp": "2024-01-03T15:30:00", "equity": 10_300_000},
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=10_000_000,
+            final_balance=10_300_000,
+        )
+        # 일별 종가 [10.1M, 10.2M, 10.3M] 기준 일간 수익률로 계산.
+        daily_equities = [10_100_000, 10_200_000, 10_300_000]
+        expected = _sharpe_ratio(daily_equities)
+        assert metrics["sharpe_ratio"] == pytest.approx(round(expected, 4))
+        # bar-간 수익률(6포인트) 기준이라면 ~10.7058 → 그 값이 아님.
+        assert metrics["sharpe_ratio"] != pytest.approx(10.7058, abs=1e-3)
+
+    def test_one_day_backward_compat(self):
+        """1d(날짜당 1봉) → annual_return/sharpe가 리샘플 전과 동일(회귀 락)."""
+        equity_curve = [
+            {"timestamp": "2024-01-01", "equity": 10_000_000},
+            {"timestamp": "2024-01-02", "equity": 10_050_000},
+            {"timestamp": "2024-01-03", "equity": 10_030_000},
+            {"timestamp": "2024-01-04", "equity": 10_200_000},
+        ]
+        total_return = (10_200_000 - 10_000_000) / 10_000_000 * 100
+
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=10_000_000,
+            final_balance=10_200_000,
+        )
+        # 날짜당 1봉이므로 리샘플 결과 == 원본 → 헬퍼 직접 호출과 동일해야 함.
+        expected_annual = round(_annual_return(equity_curve, total_return), 4)
+        expected_sharpe = _sharpe_ratio([e["equity"] for e in equity_curve])
+        assert metrics["annual_return"] == expected_annual
+        assert metrics["sharpe_ratio"] == pytest.approx(round(expected_sharpe, 4))
+
+    def test_single_date_intraday_sharpe_none(self):
+        """단일 날짜 intraday → daily 1포인트 → sharpe None(크래시 없음)."""
+        equity_curve = [
+            {"timestamp": "2024-01-01T09:00:00", "equity": 10_000_000},
+            {"timestamp": "2024-01-01T09:05:00", "equity": 10_010_000},
+            {"timestamp": "2024-01-01T15:30:00", "equity": 10_100_000},
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=10_000_000,
+            final_balance=10_100_000,
+        )
+        assert metrics["sharpe_ratio"] is None
+
+    def test_same_date_points_fold_to_last(self):
+        """같은 날짜의 여러 포인트가 마지막 값으로 접힌다(chronological fold)."""
+        curve = [
+            {"timestamp": "2024-01-01T09:00", "equity": 100},
+            {"timestamp": "2024-01-01T15:00", "equity": 200},
+            {"timestamp": "2024-01-02T09:00", "equity": 300},
+            {"timestamp": "2024-01-02T15:00", "equity": 400},
+        ]
+        daily = resample_equity_curve_daily(curve, threshold=0)
+        # 날짜별 마지막 포인트만, 시간순 유지
+        assert [p["equity"] for p in daily] == [200, 400]
+
+    def test_max_drawdown_uses_raw_bars(self):
+        """max_drawdown은 raw 봉 기준 — intraday 낙폭이 일별 리샘플로 약화되지 않음."""
+        # intraday 10% 낙폭 후 종가에서 회복 → 일별 리샘플하면 MDD=0이 되어버림.
+        equity_curve = [
+            {"timestamp": "2024-01-01T09:00:00", "equity": 10_000_000},
+            {"timestamp": "2024-01-01T12:00:00", "equity": 9_000_000},
+            {"timestamp": "2024-01-01T15:30:00", "equity": 10_050_000},
+            {"timestamp": "2024-01-02T15:30:00", "equity": 10_100_000},
+        ]
+        metrics = calculate_metrics(
+            trades=[],
+            equity_curve=equity_curve,
+            initial_balance=10_000_000,
+            final_balance=10_100_000,
+        )
+        # raw 봉 peak=10.0M, trough=9.0M → MDD=10% (일별 리샘플이면 0%가 됨)
+        assert metrics["max_drawdown"] == pytest.approx(10.0)
 
 
 # ── Trade PnL Estimation ──────────────────────
