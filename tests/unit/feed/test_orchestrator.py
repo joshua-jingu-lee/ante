@@ -29,6 +29,23 @@ from ante.feed.sources.data_go_kr import (
 # ── Fixtures ─────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _disable_publication_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#2015 publication cap을 이 파일 내에서만 중립화한다 (#2277).
+
+    이 파일의 backfill 테스트는 mock 소스라 실제 D+1 13:00 공시 지연과 무관하다.
+    cap이 끼면 ``backfill_since=어제`` 같은 상대 날짜가 wall-clock(KST 13:00
+    경계)에 의존해 캘린더 flaky가 된다(KST 00:00–13:00 구간에 published_end<어제로
+    range 공집합 → rows_written=0). 호출 지점인
+    ``backfill_runner._last_published_date`` 를 항등(오늘 KST)으로 대체해 backfill
+    range를 시각 무관하게 만든다. 파일-local autouse 이므로
+    ``test_backfill_last_published_cap.py`` 의 #2015 cap 검증은 마스킹하지 않는다.
+    """
+    import ante.feed.pipeline.backfill_runner as br
+
+    monkeypatch.setattr(br, "_last_published_date", lambda now_kst: now_kst.date())
+
+
 def _make_data_go_kr_records(
     date_str: str = "20240101",
     symbols: list[str] | None = None,

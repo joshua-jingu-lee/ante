@@ -14,6 +14,7 @@ import pytest
 
 from ante.broker import fill_scheduler as fill_scheduler_module
 from ante.broker.fill_scheduler import (
+    _KST,
     MIN_POLL_INTERVAL,
     CatchUpResult,
     FillReconcileScheduler,
@@ -607,8 +608,13 @@ async def test_catch_up_recovers_iso_timestamp_end_to_end(tracker, applier):
     app, ph, _eb = applier
     await _seed(tracker, broker_order_id="0001", qty=100.0)
     # Test/Mock 어댑터의 created_at.isoformat() 과 동일한 tz-aware ISO.
-    # DATE(오늘 KST) 와 같은 영업일이 되도록 오늘 정오(UTC) 를 쓴다.
-    iso_ts = datetime.now(UTC).replace(hour=3, minute=0, second=0).isoformat()
+    # DATE(영업일 YYYYMMDD)에서 파생한 KST 정오를 써서 now 비의존(완전 결정적)으로
+    # 같은 영업일을 보장한다 (#2277: UTC 저녁이면 hour=3 UTC 구성이 KST 익일로
+    # 넘어가 business_date_kst != DATE 가 되는 wall-clock flaky 제거).
+    ref = datetime.strptime(DATE, "%Y%m%d").replace(
+        hour=12, minute=0, second=0, tzinfo=_KST
+    )
+    iso_ts = ref.isoformat()
     assert business_date_kst(datetime.fromisoformat(iso_ts)) == DATE
     broker = FakeBroker(
         history=[
