@@ -45,7 +45,9 @@ def _backfill_result_dict(result: CollectionResult) -> dict[str, Any]:
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,
-        "config_errors": result.config_errors,
+        "failures": list(result.failures),
+        "warnings": list(result.warnings),
+        "config_errors": list(result.config_errors),
     }
 
 
@@ -60,7 +62,9 @@ def _daily_result_dict(result: CollectionResult) -> dict[str, Any]:
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,
-        "config_errors": result.config_errors,
+        "failures": list(result.failures),
+        "warnings": list(result.warnings),
+        "config_errors": list(result.config_errors),
     }
 
 
