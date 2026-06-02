@@ -136,3 +136,60 @@ class TestFeedConfigSetSupportedKey:
         assert env_path.exists()
         assert "ANTE_DART_API_KEY=dart_value_123" in env_path.read_text()
         assert "Saved ANTE_DART_API_KEY" in result.stdout
+
+
+class TestFeedConfigSetNewlineRejection:
+    """#2051: 개행 포함 value는 키 주입 위험으로 구조화 에러로 거부한다."""
+
+    def test_json_format_rejects_newline_value(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """--format json: 개행 value → exit 1 + 구조화 envelope, 키 미주입."""
+        result = runner.invoke(
+            cli,
+            [
+                "--format",
+                "json",
+                "feed",
+                "config",
+                "set",
+                "ANTE_DATAGOKR_API_KEY",
+                "a\nANTE_DART_API_KEY=evil",
+                "--data-path",
+                data_path,
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        payload = json.loads(result.stdout.strip())
+        assert payload["status"] == "error"
+        assert payload["code"] == "CONFIG_INVALID_VALUE"
+        assert "개행" in payload["message"]
+        # 거부 시 .env가 생성되지 않아 DART 키가 주입되지 않는다.
+        assert not (Path(data_path) / ".feed" / ".env").exists()
+
+    def test_text_format_rejects_newline_value(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """--format text: 개행 value → stderr Error 라인, exit 1, 키 미주입."""
+        result = runner.invoke(
+            cli,
+            [
+                "feed",
+                "config",
+                "set",
+                "ANTE_DATAGOKR_API_KEY",
+                "a\nANTE_DART_API_KEY=evil",
+                "--data-path",
+                data_path,
+            ],
+            catch_exceptions=False,
+        )
+        assert result.exit_code == 1, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "개행" in result.stderr
+        assert result.stdout.strip() == ""
+        assert not (Path(data_path) / ".feed" / ".env").exists()

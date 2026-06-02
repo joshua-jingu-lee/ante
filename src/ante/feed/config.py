@@ -118,7 +118,18 @@ class FeedConfig:
         return result
 
     def set_api_key(self, key: str, value: str) -> Path:
-        """API 키를 .env 파일에 저장한다. 파일 퍼미션을 0600으로 설정한다."""
+        """API 키를 .env 파일에 저장한다. 파일 퍼미션을 0600으로 설정한다.
+
+        Raises:
+            ValueError: value에 개행 문자(`\\n` 또는 `\\r`)가 포함된 경우.
+                _load_env_file은 quoting/escaping을 지원하지 않으므로
+                개행이 포함된 value는 후속 라인을 별도 `KEY=VALUE`로
+                재해석하게 만들어 다른 API 키를 주입할 수 있다(#2051).
+                escaping 대신 reject하며, 파일은 변경하지 않는다.
+        """
+        if "\n" in value or "\r" in value:
+            raise ValueError("API 키 값에 개행 문자를 포함할 수 없습니다")
+
         self._feed_dir.mkdir(parents=True, exist_ok=True)
 
         env_values = self._load_env_file()

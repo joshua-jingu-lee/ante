@@ -96,6 +96,46 @@ class TestSetApiKey:
         assert "ANTE_DART_API_KEY=key2" in content
 
 
+class TestSetApiKeyNewlineRejection:
+    """#2051: 개행 포함 value는 .env 키 주입 위험으로 거부한다."""
+
+    def test_newline_value_raises_value_error(self, cfg: FeedConfig) -> None:
+        # 개행 뒤에 KEY=VALUE를 끼워 다른 키 주입을 시도하는 페이로드.
+        with pytest.raises(ValueError, match="개행"):
+            cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "a\nANTE_DART_API_KEY=evil")
+
+    def test_newline_value_does_not_inject_other_key(self, cfg: FeedConfig) -> None:
+        # 거부 시 .env 자체가 생성되지 않아야 한다(쓰기 전 검증, 파일 미변경).
+        with pytest.raises(ValueError):
+            cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "a\nANTE_DART_API_KEY=evil")
+        assert not cfg.env_path.exists()
+        keys = cfg.load_api_keys()
+        assert keys["ANTE_DART_API_KEY"] is None
+
+    def test_newline_value_preserves_existing_env(self, cfg: FeedConfig) -> None:
+        # 기존 .env가 있을 때 거부되면 기존 내용이 그대로 유지된다.
+        cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "realkey")
+        before = cfg.env_path.read_text()
+        with pytest.raises(ValueError):
+            cfg.set_api_key("ANTE_DART_API_KEY", "x\nANTE_DATAGOKR_API_KEY=evil")
+        assert cfg.env_path.read_text() == before
+        keys = cfg.load_api_keys()
+        assert keys["ANTE_DATAGOKR_API_KEY"] == "realkey"
+        assert keys["ANTE_DART_API_KEY"] is None
+
+    def test_carriage_return_value_rejected(self, cfg: FeedConfig) -> None:
+        with pytest.raises(ValueError, match="개행"):
+            cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "a\rANTE_DART_API_KEY=evil")
+        assert not cfg.env_path.exists()
+
+    def test_normal_value_still_saved(self, cfg: FeedConfig) -> None:
+        # 개행 없는 정상 value는 기존대로 저장된다.
+        result = cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "realkey")
+        assert result == cfg.env_path
+        keys = cfg.load_api_keys()
+        assert keys["ANTE_DATAGOKR_API_KEY"] == "realkey"
+
+
 # ── list_api_keys ─────────────────────────────────────────────────────────────
 
 
