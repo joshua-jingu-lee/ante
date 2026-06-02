@@ -344,6 +344,109 @@ class TestReportListReports:
         assert reports[1].name == "2026-03-10-daily.json"
 
 
+def _write_report(reports_dir: Path, filename: str, started_at: str | None) -> None:
+    """started_at만 담은 최소 리포트 JSON을 기록한다(테스트 헬퍼)."""
+    payload: dict = {"mode": filename.split("-")[-1].removesuffix(".json")}
+    if started_at is not None:
+        payload["started_at"] = started_at
+    (reports_dir / filename).write_text(
+        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
+    )
+
+
+class TestListReportsSortedByStartedAt:
+    """list_reports()가 파일명이 아닌 started_at 기준으로 정렬되는지 검증(#2047)."""
+
+    def test_same_date_backfill_after_daily_is_latest(self, feed_dir: Path) -> None:
+        """같은 날짜에서 늦게 끝난 backfill이 최신으로 선택된다.
+
+        파일명 역정렬은 daily('d') > backfill('b')라 daily를 최신으로 오판한다.
+        started_at(daily 07:00Z < backfill 08:00Z) 기준이면 backfill이 최신이다.
+        """
+        reports_dir = feed_dir / REPORTS_DIR
+        reports_dir.mkdir()
+        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00Z")
+        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
+
+        gen = ReportGenerator(feed_dir)
+        reports = gen.list_reports(limit=1)
+
+        assert len(reports) == 1
+        assert reports[0].name == "2026-06-01-backfill.json"
+
+    def test_different_dates_picks_later_date(self, feed_dir: Path) -> None:
+        """날짜가 다르면 늦은 날짜의 리포트가 최신으로 선택된다."""
+        reports_dir = feed_dir / REPORTS_DIR
+        reports_dir.mkdir()
+        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
+        _write_report(reports_dir, "2026-06-02-daily.json", "2026-06-02T07:00:00Z")
+
+        gen = ReportGenerator(feed_dir)
+        reports = gen.list_reports()
+
+        assert reports[0].name == "2026-06-02-daily.json"
+        assert reports[1].name == "2026-06-01-backfill.json"
+
+    def test_missing_or_malformed_started_at_sorted_last(self, feed_dir: Path) -> None:
+        """started_at 누락/손상 리포트는 크래시 없이 후순위로 밀린다."""
+        reports_dir = feed_dir / REPORTS_DIR
+        reports_dir.mkdir()
+        # 정상 리포트.
+        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00Z")
+        # started_at 누락.
+        _write_report(reports_dir, "2026-06-02-daily.json", None)
+        # started_at malformed.
+        _write_report(reports_dir, "2026-06-03-daily.json", "not-a-timestamp")
+        # JSON 자체가 손상.
+        (reports_dir / "2026-06-04-daily.json").write_text("{ broken", encoding="utf-8")
+
+        gen = ReportGenerator(feed_dir)
+        reports = gen.list_reports()
+
+        # 4개 모두 목록에 포함(전체 실패 방지).
+        assert len(reports) == 4
+        # 정상 started_at을 가진 리포트가 가장 앞(최신).
+        assert reports[0].name == "2026-06-01-daily.json"
+        # 키가 동률(min)인 나머지는 파일명 역순 보조키로 안정 정렬.
+        rest = [p.name for p in reports[1:]]
+        assert rest == [
+            "2026-06-04-daily.json",
+            "2026-06-03-daily.json",
+            "2026-06-02-daily.json",
+        ]
+
+    def test_tie_started_at_uses_filename_secondary_key(self, feed_dir: Path) -> None:
+        """동일 started_at(tie)은 파일명 역순 보조키로 안정 정렬된다."""
+        reports_dir = feed_dir / REPORTS_DIR
+        reports_dir.mkdir()
+        same = "2026-06-01T08:00:00Z"
+        _write_report(reports_dir, "2026-06-01-backfill.json", same)
+        _write_report(reports_dir, "2026-06-01-daily.json", same)
+
+        gen = ReportGenerator(feed_dir)
+        reports = gen.list_reports()
+
+        # tie면 파일명 역순: 'daily' > 'backfill'.
+        assert [p.name for p in reports] == [
+            "2026-06-01-daily.json",
+            "2026-06-01-backfill.json",
+        ]
+
+    def test_naive_started_at_is_normalized_aware(self, feed_dir: Path) -> None:
+        """tz 없는 started_at도 UTC aware로 normalize되어 비교 가능하다."""
+        reports_dir = feed_dir / REPORTS_DIR
+        reports_dir.mkdir()
+        # naive(타임존 없음) vs aware Z.
+        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00")
+        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
+
+        gen = ReportGenerator(feed_dir)
+        reports = gen.list_reports(limit=1)
+
+        # naive 비교로 인한 TypeError 없이 backfill(08:00)이 최신.
+        assert reports[0].name == "2026-06-01-backfill.json"
+
+
 class _AnomalyDataGoKrCollector:
     """store merge 이상을 발생시키는 stub data.go.kr collector.
 
