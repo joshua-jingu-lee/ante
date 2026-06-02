@@ -475,6 +475,7 @@ async def _handle_bot_update(
 async def _handle_treasury_allocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
@@ -501,6 +502,21 @@ async def _handle_treasury_allocate(
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
+    # #2128 (Refs #1240 P2-1 broker.reconcile 1:1 미러): 봇의 실제
+    # ``account_id`` 와 요청 payload 의 ``account_id`` 가 다르면 거부한다.
+    # 다른 계좌의 예산을 변경하는 cross-account corruption 을 차단하기 위함.
+    # ``BotNotFoundError`` 가드 직후라 ``bot`` 은 non-None — reconcile 의
+    # ``bot is not None`` 방어 분기는 불필요하나, ``and bot_account_id``
+    # None-safe 가드는 동형으로 유지(legacy bot.config.account_id=None 은
+    # 차단하지 않음). ``InvalidAccountIdError`` (code="VALIDATION_ERROR",
+    # #1633 SSOT) 가 server.py envelope 에서 VALIDATION_ERROR 로 surface.
+    bot_account_id = getattr(bot.config, "account_id", None)
+    if bot_account_id and bot_account_id != account_id:
+        raise InvalidAccountIdError(
+            f"(ipc.treasury.allocate) bot_id={bot_id!r} 의 account_id는 "
+            f"{bot_account_id!r} 인데 요청은 {account_id!r} 입니다. "
+            "다른 계좌의 예산을 변경할 수 없습니다."
+        )
     treasury = svc.treasury_manager.get(account_id)
     # #1809 (oracle A7 @ a5d8edf): ``Treasury.allocate`` 가 reject 시
     # ``bool=False`` 대신 reject reason 별 typed exception 을 raise 한다
@@ -516,6 +532,7 @@ async def _handle_treasury_allocate(
 async def _handle_treasury_deallocate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
@@ -534,6 +551,18 @@ async def _handle_treasury_deallocate(
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
+    # #2128 (Refs #1240 P2-1 broker.reconcile 1:1 미러): allocate 와 동형 —
+    # 봇의 실제 ``account_id`` 와 요청 ``account_id`` 가 다르면
+    # ``InvalidAccountIdError`` (code="VALIDATION_ERROR", #1633 SSOT) 로 거부.
+    # ``and bot_account_id`` None-safe 가드로 legacy(account_id=None) 는
+    # 차단하지 않는다.
+    bot_account_id = getattr(bot.config, "account_id", None)
+    if bot_account_id and bot_account_id != account_id:
+        raise InvalidAccountIdError(
+            f"(ipc.treasury.deallocate) bot_id={bot_id!r} 의 account_id는 "
+            f"{bot_account_id!r} 인데 요청은 {account_id!r} 입니다. "
+            "다른 계좌의 예산을 변경할 수 없습니다."
+        )
     treasury = svc.treasury_manager.get(account_id)
     # #1809 (oracle A7 @ a5d8edf): allocate 와 동형 — typed exception
     # (``TreasuryInvalidAmountError`` / ``TreasuryBudgetNotFoundError`` /
