@@ -135,7 +135,7 @@ allowlist 후보에서 제거한다.
 | `ante config history <key>` | `offline` | dynamic config history 조회 |
 | `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
-| `ante approval audit-types [--status ...] [--db-path ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
+| `ante approval audit-types [--status ...] [--db-path ...] [--format ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
 | `ante approval cancel-invalid <id>` | `runtime IPC` | scope `approval:admin`. legacy invalid-type row administrative cleanup (#1472) |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
