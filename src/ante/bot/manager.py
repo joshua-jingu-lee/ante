@@ -495,8 +495,33 @@ class BotManager:
             if not updates and new_budget is None:
                 return bot
 
-            # BotConfig 재생성
+            # strategy_id 변경 검증 (#2129).
+            # ``bot.config`` 교체 + DB 저장(``_save_bot_config``) 전에
+            # StrategyRegistry 존재 + 계좌 exchange 호환을 검증한다. 미등록/
+            # 비호환이면 ``StrategyNotFoundError`` / ``IncompatibleExchangeError``
+            # 로 raise 하여 stale·invalid strategy_id 가 컬럼/``config_json``
+            # 에 commit 되지 않도록 막는다 (create_bot L390-402 선례 재사용).
+            #
+            # account_id 는 update_bot kwargs (``updates``) 로 함께 변경될 수
+            # 있다 (아래 ``config_fields.update(updates)`` 가 account_id 컬럼을
+            # 덮어쓴다). 한 요청이 account_id 와 strategy_id 를 동시에 바꾸면
+            # 새 전략의 exchange 호환은 **옛 계좌가 아니라 새(effective) 계좌**
+            # 로 검증해야 한다. 그렇지 않으면 새 계좌에 비호환 전략이 commit
+            # 될 수 있다. effective account_id = 요청이 account_id 를 바꾸면 그
+            # 새 값, 아니면 ``old_config.account_id``.
             old_config = bot.config
+            effective_account_id = updates.get("account_id", old_config.account_id)
+            new_strategy_id = updates.get("strategy_id")
+            if (
+                new_strategy_id is not None
+                and new_strategy_id != old_config.strategy_id
+            ):
+                await self._validate_strategy_change(
+                    account_id=effective_account_id,
+                    strategy_id=new_strategy_id,
+                )
+
+            # BotConfig 재생성
             config_fields = {
                 "bot_id": old_config.bot_id,
                 "strategy_id": old_config.strategy_id,
@@ -665,6 +690,12 @@ class BotManager:
 
         running 상태이면 중지 후 전략을 교체하고 재시작한다.
         stopped/created 상태이면 전략 ID만 교체한다.
+
+        전략 ID 를 ``bot.config`` (런타임) 와 DB 에 동시에 반영한다. DB
+        저장은 ``_save_bot_config(bot.config)`` 로 수행하여 ``bots.strategy_id``
+        컬럼과 ``config_json.strategy_id`` 를 항상 일관되게 갱신한다
+        (#2130). running 봇의 lifecycle 순서 (stop → old rule unload →
+        persist → new rule load → start) 는 그대로 보존한다.
         """
         bot = self._get_bot(bot_id)
         was_running = bot.status == BotStatus.RUNNING
@@ -674,7 +705,9 @@ class BotManager:
             self._remove_strategy_rules(bot.config.strategy_id)
 
         bot.config.strategy_id = strategy_id
-        await self._update_bot_strategy(bot_id, strategy_id)
+        # 컬럼만 갱신하던 ``_update_bot_strategy`` 대신 ``_save_bot_config`` 로
+        # 컬럼 + ``config_json.strategy_id`` 를 함께 persist 한다 (#2130).
+        await self._save_bot_config(bot.config)
 
         if was_running:
             self._load_strategy_rules(strategy_id)
@@ -701,7 +734,9 @@ class BotManager:
             )
 
         bot.config.strategy_id = strategy_id
-        await self._update_bot_strategy(bot_id, strategy_id)
+        # 컬럼 + ``config_json.strategy_id`` 를 함께 persist 하여 일관성 유지
+        # (#2130).
+        await self._save_bot_config(bot.config)
 
         logger.info("전략 교체: bot=%s strategy=%s", bot_id, strategy_id)
 
@@ -972,6 +1007,62 @@ class BotManager:
         if bot is None:
             raise BotNotFoundError(bot_id)
         return bot
+
+    async def _validate_strategy_change(
+        self, *, account_id: str, strategy_id: str
+    ) -> None:
+        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다 (#2129).
+
+        ``create_bot`` (L390-402) 의 검증 선례를 ``update_bot`` 컨텍스트에서
+        재사용한다. ``create_bot`` 은 ``strategy_cls`` 를 직접 받지만
+        ``update_bot`` 은 ``strategy_id`` 만 받으므로:
+
+        - **존재 검증**: ``StrategyRegistry`` 에 ``strategy_id`` 가 등록되어
+          있는지 확인한다. 미등록이면 ``StrategyNotFoundError``
+          (code=``STRATEGY_NOT_FOUND``) 로 raise 한다.
+        - **exchange 호환 검증**: ``account_service`` 가 주입되어 있으면 계좌를
+          조회하고, ``StrategyLoader`` 로 전략 메타의 exchange 를 읽어
+          ``validate_exchange`` 로 호환성을 검증한다 (``create_bot`` 과 동일
+          하게 ``IncompatibleExchangeError`` / ``ValueError`` 로 raise). meta
+          로딩은 ``rotate_signal_key`` 의 cold-path 패턴과 동형이다.
+
+        검증 실패 시 ``bot.config`` 교체나 ``_save_bot_config`` (DB 저장) 가
+        일어나기 전에 raise 하여 invalid·stale strategy_id 가 컬럼/
+        ``config_json`` 에 commit 되지 않도록 한다.
+        """
+        from ante.strategy.registry import StrategyRegistry
+
+        registry = StrategyRegistry(self._db)
+        await registry.initialize()
+        record = await registry.get(strategy_id)
+        if record is None:
+            from ante.strategy.exceptions import StrategyNotFoundError
+
+            raise StrategyNotFoundError(f"전략 미발견: {strategy_id}")
+
+        # account_service 미주입 시 exchange 검증은 skip (create_bot 과 동일하게
+        # account 정보가 없으면 호환성 검증을 수행하지 않는다).
+        if self._account_service is None:
+            return
+
+        account = await self._account_service.get(account_id)
+
+        from ante.strategy.loader import StrategyLoader
+        from ante.strategy.validator import validate_exchange
+
+        strategy_cls = StrategyLoader.load(Path(record.filepath))
+        strategy_exchange = getattr(
+            getattr(strategy_cls, "meta", None), "exchange", "KRX"
+        )
+        strategy_name = getattr(
+            getattr(strategy_cls, "meta", None), "name", strategy_id
+        )
+        validate_exchange(
+            strategy_exchange=strategy_exchange,
+            account_exchange=account.exchange,
+            strategy_name=strategy_name,
+            account_name=account.name,
+        )
 
     # ── 전략별 룰 관리 ─────────────────────────────────
 
@@ -1336,14 +1427,6 @@ class BotManager:
 
     # ── DB ───────────────────────────────────────────
 
-    async def _update_bot_strategy(self, bot_id: str, strategy_id: str) -> None:
-        """봇의 전략 ID를 DB에 갱신."""
-        await self._db.execute(
-            "UPDATE bots SET strategy_id = ?, updated_at = datetime('now')"
-            " WHERE bot_id = ?",
-            (strategy_id, bot_id),
-        )
-
     async def _save_bot_config(self, config: BotConfig) -> None:
         """봇 설정 DB 저장.
 
@@ -1351,6 +1434,13 @@ class BotManager:
         도 함께 직렬화한다. 누락 시 ``load_from_db`` 에서 dataclass default
         로 복원되어 사용자가 PUT 으로 변경한 값이 silent 하게 default 로
         되돌아가는 회귀가 발생한다.
+
+        ``ON CONFLICT DO UPDATE`` 에서 ``strategy_id`` 컬럼도 함께 갱신한다
+        (#2129/#2130). ``config_json`` 에는 ``strategy_id`` 가 항상 포함되어
+        있었으나 과거에는 UPDATE SET 에서 ``strategy_id`` 컬럼이 제외되어
+        ``update_bot(strategy_id=...)`` 경로에서 컬럼이 stale 해졌다. 컬럼과
+        ``config_json.strategy_id`` 를 동일 INSERT/UPSERT 안에서 같은
+        ``config`` 객체로부터 쓰므로 두 store 는 항상 일관된다.
         """
         config_dict = {
             "bot_id": config.bot_id,
@@ -1370,6 +1460,7 @@ class BotManager:
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(bot_id) DO UPDATE SET
                  name = excluded.name,
+                 strategy_id = excluded.strategy_id,
                  config_json = excluded.config_json,
                  updated_at = datetime('now')""",
             (
