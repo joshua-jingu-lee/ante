@@ -255,6 +255,26 @@ class BacktestExecutor:
         로그만 남긴 뒤 skip한다(라이브 OrderRejectedEvent와 달리 backtest는
         이벤트 없음). 특히 ``hold`` 등 buy/sell 이외 side는 **절대 sell 분기로
         라우팅하지 않는다**(unknown side가 매도로 처리되던 회귀 차단).
+
+        가격 게이트 통과 후 **side 체결 분기 이전에** ``signal.order_type`` 트리거
+        게이트(``_order_triggered``)를 적용한다(#1994). limit/stop/stop_limit이
+        현재 봉가로 조건을 충족하지 않으면 미체결로 skip(``return None``)해, 기존에
+        order_type을 무시하고 모든 주문을 즉시 시장가로 체결하던 버그를 차단한다.
+        market(기본)은 항상 트리거되어 기존 시장가 체결 동작을 보존한다(회귀 방지).
+
+        체결가(``exec_price``)는 게이트 통과 후 order_type별 정책으로 산출한다:
+        market/stop(트리거→시장가)은 기존대로 슬리피지만 적용한 ``price * (1 ±
+        slippage_rate)``, limit/stop_limit은 슬리피지가 limit(``L=signal.price``)을
+        불리하게 넘지 않도록 buy는 ``min(.., L)`` sell은 ``max(.., L)`` 로 cap한다
+        (매수는 L 초과 지불 없음, 매도는 L 미만 수취 없음). slippage 필드는
+        ``abs(exec_price - price) * executed_qty`` 로 일관되게 기록한다.
+
+        known-limitation(#1994, 의도적 수용·후속 이슈 대상):
+        - per-bar 평가만 한다. 미충족 주문을 다음 봉까지 보존하는 cross-bar
+          resting order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델).
+        - stop_limit은 "트리거 후 limit 대기" 2단계 상태를 보존하지 못해, **같은
+          봉에서 stop 트리거 + limit 충족이 동시에 만족**되는 단일-봉 conjunction
+          으로 근사한다. cross-bar triggered-then-resting 상태는 미모델링한다.
         """
         # ── Signal 검증 (가격 조회/분기 이전) ──────────────────────────
         # side 검증: case-sensitive로 buy/sell만 허용. hold/unknown은 skip하여
@@ -308,8 +328,15 @@ class BacktestExecutor:
             )
             return None
 
+        # ── order_type 트리거 게이트 (side 분기 이전) ───────────────────
+        # limit/stop/stop_limit이 현재 봉가로 조건을 충족하지 않으면 미체결로
+        # skip한다(#1994). market(기본)은 항상 True라 기존 시장가 체결 동작이
+        # 보존된다(회귀 방지). #2073 fill dict|None 계약과 일관되게 return None.
+        if not self._order_triggered(signal, price):
+            return None
+
         if signal.side == "buy":
-            exec_price = price * (1 + self._slippage_rate)
+            exec_price = self._apply_slippage_cap(signal, price, "buy")
             executed_qty = signal.quantity
             commission = exec_price * executed_qty * self._buy_commission_rate
             cost = exec_price * executed_qty + commission
@@ -318,7 +345,7 @@ class BacktestExecutor:
             self._balance -= cost
             self._update_position(signal.symbol, executed_qty, exec_price)
         else:
-            exec_price = price * (1 - self._slippage_rate)
+            exec_price = self._apply_slippage_cap(signal, price, "sell")
             pos = self._positions.get(signal.symbol, {})
             executed_qty = min(signal.quantity, pos.get("quantity", 0))
             if executed_qty <= 0:
@@ -354,6 +381,111 @@ class BacktestExecutor:
             "timestamp": timestamp,
             "fill_dedup_key": "",
         }
+
+    def _order_triggered(self, signal: Signal, price: float) -> bool:
+        """``signal.order_type`` 트리거가 현재 봉가(*price*)로 충족되는지 판정(#1994).
+
+        side 체결 분기 이전에 호출한다. ``True`` 면 체결 진행, ``False`` 면 호출부가
+        미체결로 skip한다. 필수 가격 필드 누락/알 수 없는 order_type은 fail-closed로
+        ``False`` + 경고를 남긴다(거래 미발행).
+
+        - ``market``(기본): 항상 True(즉시 시장가 체결). 기존 동작 보존(회귀 방지).
+        - ``limit``(``signal.price=L`` 필수): buy는 ``price <= L``, sell은
+          ``price >= L`` 이면 트리거.
+        - ``stop``(``signal.stop_price=S`` 필수): buy는 ``price >= S``, sell은
+          ``price <= S`` 이면 트리거(트리거 시 시장가로 변환되어 체결).
+        - ``stop_limit``(``S=stop_price``, ``L=price`` 둘 다 필수): buy는
+          ``price >= S and price <= L``, sell은 ``price <= S and price >= L`` 이면
+          트리거. **단일-봉 conjunction 근사**(stop 트리거 + limit 충족 동시 만족).
+          "트리거 후 limit 대기" 2단계 상태와 cross-bar triggered-then-resting은
+          모델링하지 않는다(#1994 known-limitation, 의도적 수용·후속 이슈 대상).
+
+        per-bar 평가만 하며 미충족 주문을 다음 봉까지 보존하는 cross-bar resting
+        order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델, #1994).
+        """
+        order_type = signal.order_type
+        if order_type == "market":
+            return True
+
+        is_buy = signal.side == "buy"
+        limit = signal.price
+        stop = signal.stop_price
+
+        if order_type == "limit":
+            if limit is None:
+                logger.warning(
+                    "invalid limit order: missing price — symbol=%s side=%s (미체결)",
+                    signal.symbol,
+                    signal.side,
+                )
+                return False
+            triggered = price <= limit if is_buy else price >= limit
+        elif order_type == "stop":
+            if stop is None:
+                logger.warning(
+                    "invalid stop order: missing stop_price — symbol=%s side=%s "
+                    "(미체결)",
+                    signal.symbol,
+                    signal.side,
+                )
+                return False
+            triggered = price >= stop if is_buy else price <= stop
+        elif order_type == "stop_limit":
+            if stop is None or limit is None:
+                logger.warning(
+                    "invalid stop_limit order: missing price/stop_price — "
+                    "symbol=%s side=%s (미체결)",
+                    signal.symbol,
+                    signal.side,
+                )
+                return False
+            triggered = (
+                (price >= stop and price <= limit)
+                if is_buy
+                else (price <= stop and price >= limit)
+            )
+        else:
+            logger.warning(
+                "invalid order_type: unknown type=%r — symbol=%s side=%s (미체결)",
+                order_type,
+                signal.symbol,
+                signal.side,
+            )
+            return False
+
+        if not triggered:
+            logger.debug(
+                "order not triggered: type=%s side=%s price=%s limit=%s stop=%s",
+                order_type,
+                signal.side,
+                price,
+                limit,
+                stop,
+            )
+        return triggered
+
+    def _apply_slippage_cap(self, signal: Signal, price: float, side: str) -> float:
+        """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다(#1994).
+
+        - ``market``/``stop``(트리거→시장가): 기존대로 슬리피지만 적용한
+          ``price * (1 ± slippage_rate)``.
+        - ``limit``/``stop_limit``: 슬리피지가 limit(``L=signal.price``)을 불리하게
+          넘지 않도록 cap한다 — buy는 ``min(price*(1+slip), L)``, sell은
+          ``max(price*(1-slip), L)``. 매수는 L 초과 지불 없음, 매도는 L 미만 수취
+          없음. 게이트(``_order_triggered``)를 통과한 limit/stop_limit은
+          ``signal.price`` 가 None이 아님이 보장된다.
+        """
+        limit = signal.price
+        is_capped_limit = signal.order_type in ("limit", "stop_limit")
+        if side == "buy":
+            slipped = price * (1 + self._slippage_rate)
+            if is_capped_limit and limit is not None:
+                return min(slipped, limit)
+            return slipped
+        slipped = price * (1 - self._slippage_rate)
+        if is_capped_limit and limit is not None:
+            return max(slipped, limit)
+        return slipped
 
     def _update_position(self, symbol: str, qty_delta: float, price: float) -> None:
         """포지션 업데이트."""
