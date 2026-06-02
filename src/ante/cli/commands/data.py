@@ -7,7 +7,7 @@ import click
 from ante.cli._data_path import resolve_data_path
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
-from ante.cli.middleware import require_auth, require_scope
+from ante.cli.middleware import enforce_scope, require_auth, require_scope
 
 
 @click.group()
@@ -305,6 +305,19 @@ def validate(
         is_valid_timeframe,
     )
     from ante.data.store import ParquetStore
+
+    # 조건부 권한 경계: `--fix` 는 손상 파일을 `.corrupted` 로 격리(rename)하는
+    # mutating 경로다. flat scope 모델(`member/scopes.py` SSOT — 계층 없음)에서
+    # `data:write` 는 `data:read` 를 함의하지 않으므로, `@require_scope("data:read")`
+    # 데코레이터에 더해 write 권한을 조건부로 검증한다. 어떤 입력검증·경로
+    # resolution·파일 mutation(store.validate(..., fix=True) 의 rename)보다
+    # **먼저** 발화한다. 미인가(read-only) 토큰은 입력 유효성·경로 resolution과
+    # 무관하게 즉시 permission_denied 여야 하므로(정보 노출 순서 정리 + 어떤
+    # side effect보다 우선) 함수 본문 최상단에서 fail-fast 한다. enforce_scope 는
+    # ctx 만 필요하고 _emit_auth_error 는 get_formatter 선행이 불필요하다
+    # (require_scope 데코레이터도 본문 진입 전 발화한다).
+    if fix:
+        enforce_scope(ctx, "data:write")
 
     data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
