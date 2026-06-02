@@ -2,15 +2,19 @@
 
 Refs #1853 (#1819 epic 종결): ``src/ante/contracts/cli_registry.py`` 의
 ``execution="runtime_ipc"`` entries 가 가리키는 ``ipc_command`` 가 실제로
-``ante.ipc.registry.register_all_handlers()`` 에 등록된 27 commands 중
+``ante.ipc.registry.register_all_handlers()`` 에 등록된 commands 중
 하나이거나, ``EXPECTED_MISSING_IPC_COMMANDS`` baseline (후속 wiring stub —
-docs/specs/ipc/ipc.md:273-276 명시) 중 하나여야 한다.
+docs/specs/ipc/ipc.md 명시) 중 하나여야 한다.
 
 baseline 밖의 미존재 (예: 오타, 명칭 변경 누락) → 즉시 FAIL.
 
-baseline 12 entries 의 후속 wiring 은 별도 child issue 에서 점진 제거되며,
+baseline entries 의 후속 wiring 은 별도 child issue 에서 점진 제거되며,
 removal 시 본 모듈의 ``EXPECTED_MISSING_IPC_COMMANDS`` 도 함께 갱신해야 한다
 (SSOT 한쪽만 갱신되는 회귀를 본 test 가 차단).
+
+Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
+``bot.signal_key`` (read) 4건이 ``register_all_handlers()`` 에 wiring 되어
+baseline 에서 제거되었다 (12→8). 잔여 baseline 은 member.* 8건이다.
 """
 
 from __future__ import annotations
@@ -20,13 +24,13 @@ import pytest
 from ante.contracts.cli_registry import all_contracts
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 
-# ``docs/specs/ipc/ipc.md:273-276`` 명시 — ``register_all_handlers()`` 에
-# 아직 wiring 되지 않은 12 commands. CLI registry 의 ``ipc_command`` stub
-# 값은 후속 wiring 이슈로 점진 제거된다.
+# ``docs/specs/ipc/ipc.md`` 명시 — ``register_all_handlers()`` 에 아직 wiring
+# 되지 않은 8 commands. CLI registry 의 ``ipc_command`` stub 값은 후속 wiring
+# 이슈로 점진 제거된다.
 #
 # member.* 8: ipc.md:160-168 표 stub. ``member.update_scopes`` 만 현재 등록.
-# bot.* 4: ipc.md:97-103 / 274 — ``bot.list`` / ``bot.info`` / ``bot.positions`` /
-#   ``bot.signal_key`` 의 live 조회/회수 IPC 후속 wiring.
+# bot.* 4 (``bot.list`` / ``bot.info`` / ``bot.positions`` / ``bot.signal_key``)
+# 는 #2112 에서 wiring 완료되어 baseline 에서 제거되었다.
 EXPECTED_MISSING_IPC_COMMANDS: frozenset[str] = frozenset(
     {
         # member runtime IPC stub (8)
@@ -38,11 +42,6 @@ EXPECTED_MISSING_IPC_COMMANDS: frozenset[str] = frozenset(
         "member.rotate_token",
         "member.reset_password",
         "member.regenerate_recovery_key",
-        # bot query 계열 후속 wiring (4)
-        "bot.list",
-        "bot.info",
-        "bot.positions",
-        "bot.signal_key",
     }
 )
 
@@ -55,9 +54,11 @@ def loaded_registry() -> CommandRegistry:
 
 
 def test_baseline_size_locked() -> None:
-    """baseline 크기를 12 로 lock — 후속 wiring 이슈가 줄여나갈 때 본 lock 도
-    함께 갱신해야 한다 (SSOT 동기화 강제)."""
-    assert len(EXPECTED_MISSING_IPC_COMMANDS) == 12, (
+    """baseline 크기를 8 로 lock — 후속 wiring 이슈가 줄여나갈 때 본 lock 도
+    함께 갱신해야 한다 (SSOT 동기화 강제).
+
+    Refs #2112: bot.* read 4건 wiring 완료로 12→8."""
+    assert len(EXPECTED_MISSING_IPC_COMMANDS) == 8, (
         f"baseline size={len(EXPECTED_MISSING_IPC_COMMANDS)}; "
         "후속 wiring 이슈에서 baseline 항목을 제거했다면 본 lock 도 함께 갱신."
     )

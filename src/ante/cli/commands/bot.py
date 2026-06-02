@@ -159,7 +159,10 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
     if account_id is not None:
         account_id = reject_invalid_account_id(account_id, fmt, context="cli.bot.list")
 
-    async def _run_list() -> list[dict]:
+    actor = get_member_id(ctx)
+
+    async def _run_list_fallback() -> list[dict]:
+        # 서버 정지(``IPC_SERVER_NOT_RUNNING``) snapshot fallback (#2112).
         # ``_create_services`` async context manager lifecycle.
         # ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
         # ``Database.close()`` 를 보장한다.
@@ -177,7 +180,37 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
                 )
             return [dict(r) for r in rows]
 
-    result = _run(_run_list())
+    async def _run_list() -> list[dict]:
+        # 서버 실행 중이면 live ``bot.list`` IPC 우선 (#2112). ``ipc_send`` 가
+        # 서버 정지 시 ``IPC_SERVER_NOT_RUNNING`` ClickException 으로 surface 하면
+        # 기존 snapshot DB 경로로 fallback 한다(스펙: runtime IPC + snapshot
+        # fallback). ``IPC_TIMEOUT`` / server-error 는 fallback 없이 surface 한다
+        # (stale snapshot silent 반환 회귀 차단). IPC result 와 fallback 모두
+        # 6-key projection list 로 동일 shape 이다.
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        args: dict = {}
+        if account_id is not None:
+            args["account_id"] = account_id
+        try:
+            ipc_result = await ipc_send("bot.list", args, actor=actor)
+        except click.ClickException as e:
+            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
+                raise
+            return await _run_list_fallback()
+        return list(ipc_result.get("bots", []))
+
+    try:
+        result = _run(_run_list())
+    except click.ClickException as e:
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
 
     if not result:
         fmt.output({"message": "등록된 봇이 없습니다.", "bots": []})
@@ -200,19 +233,51 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
 def bot_info(ctx: click.Context, bot_id: str) -> None:
     """봇 상세 정보 조회."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
-    async def _run_info() -> dict | None:
+    async def _run_info_fallback() -> dict | None:
+        # 서버 정지(``IPC_SERVER_NOT_RUNNING``) snapshot fallback (#2112).
         # ``_create_services`` async context manager lifecycle.
         async with _create_services(ctx=ctx) as (db, _, _, _):
             row = await db.fetch_one("SELECT * FROM bots WHERE bot_id = ?", (bot_id,))
             return dict(row) if row else None
 
-    result = _run(_run_info())
+    async def _run_info() -> dict | None:
+        # 서버 실행 중이면 live ``bot.info`` IPC 우선 (#2112). 서버 정지
+        # (``IPC_SERVER_NOT_RUNNING``) 시에만 기존 snapshot DB 경로로 fallback.
+        # IPC ``BOT_NOT_FOUND`` / ``IPC_TIMEOUT`` / server-error 는 fallback 없이
+        # surface 한다. IPC result 는 ``{"bot": info}`` envelope 이므로 inner
+        # ``bot`` dict 를 추출해 fallback 의 ``SELECT * FROM bots`` 행과 공통
+        # 핵심키(bot_id/name/status/account_id/strategy_id) parity 를 맞춘다.
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        try:
+            ipc_result = await ipc_send("bot.info", {"bot_id": bot_id}, actor=actor)
+        except click.ClickException as e:
+            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
+                raise
+            return await _run_info_fallback()
+        return ipc_result.get("bot")
+
+    try:
+        result = _run(_run_info())
+    except click.ClickException as e:
+        # IPC ``BOT_NOT_FOUND`` 포함 surface 경로 — fallback 의 None sentinel
+        # (``if not result``) 과 동일하게 ``BOT_NOT_FOUND`` exit 1 로 정렬된다.
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
 
     if not result:
         # missing bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 해 자동화가
         # 메시지 파싱 없이 분류할 수 있도록 한다 (CLI/IPC 일관성:
-        # ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와 동형).
+        # ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와 동형). fallback 의
+        # snapshot 미존재 행이 이 분기로 들어온다(IPC 경로는 위에서 surface).
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 
@@ -224,7 +289,10 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
         click.echo(f"  전략      : {result['strategy_id']}")
         click.echo(f"  계좌      : {result.get('account_id', 'test')}")
         click.echo(f"  상태      : {result['status']}")
-        click.echo(f"  생성일    : {result['created_at']}")
+        # ``created_at`` 은 persisted snapshot 행에만 있고 live ``get_info()``
+        # (IPC 경로) 에는 부재하므로 ``.get`` 으로 안전 접근한다 (live≠snapshot
+        # 완전 통일은 #2112 non-goal; 공통 핵심키만 parity).
+        click.echo(f"  생성일    : {result.get('created_at')}")
 
 
 def _parse_param(value: str) -> tuple[str, object]:
@@ -458,8 +526,12 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다 (#2111).
     서버가 정지되어 있으면 ``IPC_SERVER_NOT_RUNNING`` 으로 거부하며, cold-path
     DB mutation 으로 대체하지 않는다 (runtime 경계 / audit / live 상태 정합성
-    보존). 조회(rotate 미지정)는 기존 cold-path 를 유지한다 (#2112 가 read IPC
-    라우팅 소유).
+    보존).
+
+    조회(rotate 미지정)는 runtime IPC (``bot.signal_key`` read) 우선 + 서버
+    정지 시 snapshot DB fallback 이다 (#2112; ``--rotate`` 와 정반대로 서버
+    정지 시 기존 직접 DB 경로를 보존한다 — 스펙: runtime IPC + snapshot
+    fallback).
     """
     fmt = get_formatter(ctx)
 
@@ -506,7 +578,10 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
         return
 
-    async def _run_signal_key() -> dict:
+    actor = get_member_id(ctx)
+
+    async def _run_signal_key_fallback() -> dict:
+        # 서버 정지(``IPC_SERVER_NOT_RUNNING``) snapshot fallback (#2112).
         # ``_create_services`` async context manager lifecycle.
         from ante.bot.signal_key import SignalKeyManager
 
@@ -550,8 +625,44 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 return {"bot_id": bot_id, "signal_key": None}
             return {"bot_id": bot_id, "signal_key": key}
 
+    async def _run_signal_key() -> dict:
+        # 서버 실행 중이면 live ``bot.signal_key`` (read) IPC 우선 (#2112).
+        # ``--rotate`` (#2111, mutating) 와 별개 read command 다. 서버 정지
+        # (``IPC_SERVER_NOT_RUNNING``) 시에만 기존 snapshot DB 경로로 fallback.
+        # IPC ``BOT_NOT_FOUND`` 는 fallback 의 ``missing`` sentinel 과 동일하게
+        # 정규화해 후처리(``BOT_NOT_FOUND`` exit 1) 를 공통화한다.
+        # ``IPC_TIMEOUT`` / server-error 는 아래 ``except click.ClickException``
+        # 에서 fallback 없이 surface 한다(stale snapshot 은폐 차단). IPC result
+        # ``{bot_id, signal_key}`` 는 fallback 과 동일 shape 이며, signal_key
+        # None(미발급) 은 후처리(``SIGNAL_KEY_NOT_SET``) 가 공통 처리한다.
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        try:
+            return await ipc_send("bot.signal_key", {"bot_id": bot_id}, actor=actor)
+        except click.ClickException as e:
+            ipc_code = getattr(e, "ipc_error_code", "")
+            if ipc_code == "IPC_SERVER_NOT_RUNNING":
+                return await _run_signal_key_fallback()
+            if ipc_code == "BOT_NOT_FOUND":
+                # fallback 미존재 sentinel 과 동일 shape 으로 정규화 → 후처리 공통.
+                return {"bot_id": bot_id, "missing": True}
+            raise
+
     try:
         result = _run(_run_signal_key())
+    except click.ClickException as e:
+        # IPC ``IPC_TIMEOUT`` / server-error surface 경로 — fallback 없이 원본
+        # code/message 를 복원해 text/JSON 공용 envelope 안정성을 보존한다
+        # (``bot status`` 형제 패턴 1:1 미러). ``BOT_NOT_FOUND`` /
+        # ``IPC_SERVER_NOT_RUNNING`` 은 ``_run_signal_key`` 내부에서 이미 흡수.
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
     except Exception as e:
         # bot 존재확인 중 non-"no such table" ``OperationalError``
         # (malformed/locked DB 등)가 재던져지면 여기로 떨어진다. JSON error를
@@ -600,8 +711,10 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 def bot_positions(ctx: click.Context, bot_id: str) -> None:
     """봇 보유 포지션 조회."""
     fmt = get_formatter(ctx)
+    actor = get_member_id(ctx)
 
-    async def _run_positions() -> list[dict] | None:
+    async def _run_positions_fallback() -> list[dict] | None:
+        # 서버 정지(``IPC_SERVER_NOT_RUNNING``) snapshot fallback (#2112).
         # ``open_cli_db`` 헬퍼가 service ``initialize()`` /
         # ``get_positions()`` 예외 / cancellation 모든 경로에서
         # ``Database.close()`` 1회 호출을 보장한다 (cleanup invariant).
@@ -668,12 +781,47 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
                 for p in positions
             ]
 
-    result = _run(_run_positions())
+    async def _run_positions() -> list[dict] | None:
+        # 서버 실행 중이면 live ``bot.positions`` IPC 우선 (#2112). 서버 정지
+        # (``IPC_SERVER_NOT_RUNNING``) 시에만 기존 snapshot DB 경로로 fallback.
+        # IPC ``BOT_NOT_FOUND`` / ``IPC_TIMEOUT`` / server-error 는 surface 한다.
+        # IPC 서버 handler 가 봇 계좌(``bot.config.account_id``) 로 포지션을
+        # 스코핑하므로 (#2137), 타 계좌 누출 차단은 IPC·fallback 공통이다.
+        # IPC result 는 ``{"positions": [...]}`` envelope 이며 fallback list 와
+        # 동일 4-key projection 이다. None sentinel(미존재) 은 fallback 전용 —
+        # IPC 경로의 미존재는 ``BOT_NOT_FOUND`` ClickException 으로 surface 된다.
+        from ante.cli.commands.ipc_helpers import ipc_send
+
+        try:
+            ipc_result = await ipc_send(
+                "bot.positions", {"bot_id": bot_id}, actor=actor
+            )
+        except click.ClickException as e:
+            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
+                raise
+            return await _run_positions_fallback()
+        return list(ipc_result.get("positions", []))
+
+    try:
+        result = _run(_run_positions())
+    except click.ClickException as e:
+        # IPC ``BOT_NOT_FOUND`` 포함 surface 경로 — fallback 의 None sentinel
+        # (``if result is None``) 과 동일하게 ``BOT_NOT_FOUND`` exit 1 로
+        # 정렬된다. ``IPC_TIMEOUT`` / server-error 도 fallback 없이 surface.
+        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+        message = getattr(e, "ipc_error_message", None) or e.message
+        if fmt.is_json:
+            fmt.error(message, code=code)
+        else:
+            text = f"{code}: {message}" if code else message
+            fmt.error(text)
+        raise SystemExit(1) from e
 
     if result is None:
         # 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로 surface 한다
         # (CLI/IPC 일관성: ``BotNotFoundError.code = "BOT_NOT_FOUND"`` 와
-        # 동형, ``bot info`` / ``bot remove`` 형제 패턴 1:1 미러).
+        # 동형, ``bot info`` / ``bot remove`` 형제 패턴 1:1 미러). fallback 의
+        # snapshot 미존재가 이 분기로 들어온다(IPC 경로는 위에서 surface).
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 

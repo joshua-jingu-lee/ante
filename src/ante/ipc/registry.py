@@ -478,6 +478,139 @@ async def _handle_bot_status(
     return {"bot": info}
 
 
+# CLI ``bot list`` 출력 6-key projection (SSOT: cli/commands/bot.py:bot_list).
+# live ``Bot.get_info()`` 에는 ``created_at`` 이 없으므로(persisted DB 컬럼) None
+# 기본값으로 채워 snapshot fallback 과 동일 shape 을 보장한다 (#2112 Codex
+# condition 1: list/info 후처리 전 ``created_at=None`` 기본값).
+_BOT_LIST_KEYS = (
+    "bot_id",
+    "name",
+    "strategy_id",
+    "account_id",
+    "status",
+    "created_at",
+)
+
+
+async def _handle_bot_list(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 목록 조회 IPC handler (read-only, #2112).
+
+    ``bot status`` (``_handle_bot_status``) 미러 — read-only 분류이므로 audit
+    logger 호출 없음. ``svc.bot_manager.list_bots()`` 가 반환하는 live
+    ``Bot.get_info()`` dict 들을 CLI ``bot list`` 의 6-key projection
+    (``bot_id``/``name``/``strategy_id``/``account_id``/``status``/
+    ``created_at``) 으로 좁혀 snapshot fallback 의 ``SELECT ... FROM bots``
+    행과 동일 shape 을 surface 한다.
+
+    ``--account`` 필터는 CLI ingress 에서 검증된 뒤 ``account_id`` arg 로
+    전달된다. ``None`` 이면 전체, 지정되면 해당 계좌 봇만 반환한다 (CLI SQL
+    filter 와 동형). live ``get_info()`` 에 ``created_at`` 이 없으므로 None
+    기본값으로 채운다 (snapshot 행과 key parity).
+    """
+    account_id = args.get("account_id")
+    bots = svc.bot_manager.list_bots()
+    result: list[dict[str, Any]] = []
+    for info in bots:
+        if account_id is not None and info.get("account_id") != account_id:
+            continue
+        result.append({key: info.get(key) for key in _BOT_LIST_KEYS})
+    return {"bots": result}
+
+
+async def _handle_bot_info(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 상세 정보 조회 IPC handler (read-only, #2112).
+
+    ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 가
+    ``None`` 이면 ``BotNotFoundError`` (``BOT_NOT_FOUND`` envelope). 존재하면
+    ``Bot.get_info()`` 전체를 ``{"bot": info}`` envelope 으로 반환한다. CLI
+    fallback 의 ``SELECT * FROM bots`` 행과 공통 핵심키(``bot_id``/``name``/
+    ``status``/``account_id``/``strategy_id``) 가 일치한다 (live≠snapshot 의
+    완전 통일은 follow-up; #2112 non-goal).
+    """
+    from ante.bot.exceptions import BotNotFoundError
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+    return {"bot": bot.get_info()}
+
+
+async def _handle_bot_positions(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 보유 포지션 조회 IPC handler (read-only, #2112).
+
+    ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 존재
+    확인(``None`` → ``BotNotFoundError``) 후 ``trade_service`` 로 포지션을
+    조회한다.
+
+    ``trade_service`` 는 legacy ``ServiceRegistry`` 에서 ``None`` 일 수 있으므로
+    ``getattr`` safe-access 한다 (``_handle_bot_status`` 의 ``trade_service``
+    optional 처리 동형). **서비스 미구성(None)과 빈 포지션(0개) 을 혼동하지
+    않는다** (#2112 Codex condition 2): ``trade_service`` 가 없으면 빈 list 를
+    반환하되, 이는 "조회 불가" 가 아니라 "포지션 보강 미구성" 으로서 봇이
+    존재함은 이미 확인되었다(``BotNotFoundError`` 분기와 분리). #2137:
+    포지션 조회를 봇 계좌(``bot.config.account_id``) 로 스코핑해 타 계좌
+    stale/legacy 포지션 누출을 차단한다.
+    """
+    from ante.bot.exceptions import BotNotFoundError
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    trade_service = getattr(svc, "trade_service", None)
+    if trade_service is None:
+        # 서비스 미구성(legacy registry) — 봇은 존재하나 포지션 보강 경로 부재.
+        # 빈 포지션(0개) 과 동일 shape 이지만 의미상 "미구성" 이다. read-only
+        # 분류 정렬: 키 부재가 아니라 빈 collection 으로 graceful surface.
+        return {"positions": []}
+
+    positions = await trade_service.get_positions(
+        bot_id, account_id=bot.config.account_id
+    )
+    return {
+        "positions": [
+            {
+                "symbol": p.symbol,
+                "quantity": p.quantity,
+                "avg_entry_price": p.avg_entry_price,
+                "realized_pnl": p.realized_pnl,
+            }
+            for p in positions
+        ]
+    }
+
+
+async def _handle_bot_signal_key(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 시그널 키 조회 IPC handler (read-only, #2112).
+
+    ``bot status`` 미러 — read-only, audit 없음. ``bot.signal_key.rotate``
+    (#2111, mutating) 와 별개의 read command 다. ``get_bot(bot_id)`` 존재
+    확인(``None`` → ``BotNotFoundError``) 후 ``get_signal_key(bot_id)`` 로
+    현재 키를 조회한다. 키 미발급이면 ``signal_key=None`` 을 반환하며, CLI
+    후처리(``SIGNAL_KEY_NOT_SET``) 가 None sentinel 을 surface 한다 (IPC·
+    fallback 공통).
+    """
+    from ante.bot.exceptions import BotNotFoundError
+
+    bot_id = args["bot_id"]
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    key = await svc.bot_manager.get_signal_key(bot_id)
+    return {"bot_id": bot_id, "signal_key": key}
+
+
 async def _handle_bot_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -982,9 +1115,9 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """27개 런타임 커맨드 핸들러를 일괄 등록.
+    """32개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(23개) 또는 read-only(4개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(24개) 또는 read-only(8개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -1014,8 +1147,13 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     ``bot.stop`` / ``bot.update`` / ``treasury.set_balance`` /
     ``strategy.set_status`` / ``member.update_scopes`` /
     ``approval.cancel_invalid`` / ``rule.update``.
+
+    Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
+    ``bot.signal_key`` (read-only) 추가 — ``bot list/info/positions/signal-key``
+    의 runtime IPC 경로. CLI 가 서버 정지 시 snapshot DB fallback 한다. audit
+    없음(read-only). read-only 4→8, 총 28→32.
     """
-    # ── mutating (23개): 서버 상태/DB를 변경 ──────────
+    # ── mutating (24개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
     registry.register(
         "system.halt",
@@ -1238,7 +1376,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
     )
 
-    # ── read-only (4개): live 조회만 ──────────────────
+    # ── read-only (8개): live 조회만 ──────────────────
     # broker.* read-only — broker 객체 메서드 결과를 그대로 envelope에 surface.
     # status는 connected/healthy/exchange dict(entity), balance는 broker
     # response dict 그대로(raw passthrough), positions는 list collection.
@@ -1273,5 +1411,46 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=False,
         result_kind="entity",
         result_key="bot",
+        required_services=frozenset({"bot_manager"}),
+    )
+    # bot.* read-only (#2112) — ``bot list/info/positions/signal-key`` 의 runtime
+    # IPC 경로. ``bot.status`` 미러: is_mutating=False, audit_action 없음. CLI 가
+    # 서버 정지 시 ``IPC_SERVER_NOT_RUNNING`` 일 때만 기존 snapshot DB 경로로
+    # fallback 한다 (스펙: runtime IPC + snapshot fallback). bot.signal_key
+    # (read) 는 #2111 의 mutating ``bot.signal_key.rotate`` 와 별개 command 다.
+    registry.register(
+        "bot.list",
+        _handle_bot_list,
+        is_mutating=False,
+        result_kind="collection",
+        result_key="bots",
+        required_services=frozenset({"bot_manager"}),
+        account_id_policy="optional_filter",
+    )
+    registry.register(
+        "bot.info",
+        _handle_bot_info,
+        is_mutating=False,
+        result_kind="entity",
+        result_key="bot",
+        required_services=frozenset({"bot_manager"}),
+    )
+    # positions 는 ``trade_service`` optional(legacy registry None 가능)이라
+    # required_services 에서 제외하고 handler 가 graceful 처리한다. 봇 존재
+    # 확인은 ``bot_manager`` 로 수행하므로 required 에 포함.
+    registry.register(
+        "bot.positions",
+        _handle_bot_positions,
+        is_mutating=False,
+        result_kind="collection",
+        result_key="positions",
+        required_services=frozenset({"bot_manager"}),
+    )
+    registry.register(
+        "bot.signal_key",
+        _handle_bot_signal_key,
+        is_mutating=False,
+        result_kind="entity",
+        result_key="signal_key",
         required_services=frozenset({"bot_manager"}),
     )

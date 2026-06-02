@@ -65,7 +65,7 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 28개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 32개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
@@ -82,10 +82,14 @@ def test_register_all_handlers() -> None:
 
     Refs #2111: ``bot.signal_key.rotate`` (mutating) 추가 — ``bot signal-key
     --rotate`` 의 runtime IPC 경로.
+
+    Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
+    ``bot.signal_key`` (read-only) 4건 추가 — ``bot list/info/positions/
+    signal-key`` 의 runtime IPC 경로 (28→32).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 28
+    assert len(registry.commands) == 32
 
     expected = {
         "system.halt",
@@ -99,6 +103,10 @@ def test_register_all_handlers() -> None:
         "bot.stop",
         "bot.update",
         "bot.status",
+        "bot.list",
+        "bot.info",
+        "bot.positions",
+        "bot.signal_key",
         "treasury.allocate",
         "treasury.deallocate",
         "treasury.set_balance",
@@ -125,12 +133,15 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 28개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+    """등록된 32개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
     read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
 
     Refs #2111: ``bot.signal_key.rotate`` mutating 추가.
+
+    Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
+    ``bot.signal_key`` read-only 추가 (read-only 4→8).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
@@ -166,10 +177,14 @@ def test_register_all_handlers_taxonomy() -> None:
         "broker.balance",
         "broker.positions",
         "bot.status",
+        "bot.list",
+        "bot.info",
+        "bot.positions",
+        "bot.signal_key",
     }
 
     assert len(mutating) == 24
-    assert len(read_only) == 4
+    assert len(read_only) == 8
     assert mutating | read_only == set(registry.commands)
 
     for command in mutating:
@@ -1022,11 +1037,11 @@ class TestRegisteredCommandsMetadataCompleteness:
         for spec in loaded.iter_specs():
             assert spec.cross_validators == (), spec.name
 
-    def test_iter_specs_returns_all_28_specs(self, loaded: CommandRegistry) -> None:
-        """``iter_specs``가 28 commands 모두를 ``CommandSpec`` 인스턴스로
-        반환한다."""
+    def test_iter_specs_returns_all_32_specs(self, loaded: CommandRegistry) -> None:
+        """``iter_specs``가 32 commands 모두를 ``CommandSpec`` 인스턴스로
+        반환한다 (#2112: 28→32, bot.* read 4건 추가)."""
         specs = loaded.iter_specs()
-        assert len(specs) == 28
+        assert len(specs) == 32
         assert all(isinstance(s, CommandSpec) for s in specs)
         # 등록 순서 보존(dict insertion order).
         assert [s.name for s in specs] == loaded.commands
