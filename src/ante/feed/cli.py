@@ -116,7 +116,13 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str | None) 
         raise SystemExit(1)
 
     cfg = FeedConfig(data_path)
-    env_path = cfg.set_api_key(key, value)
+    try:
+        env_path = cfg.set_api_key(key, value)
+    except ValueError as e:
+        # #2051: 개행 등 .env quoting 미지원으로 거부된 value는 구조화
+        # 에러로 표면화한다(파일 미변경). set_api_key가 쓰기 전 검증한다.
+        fmt.error(str(e), code="CONFIG_INVALID_VALUE")
+        raise SystemExit(1) from e
 
     fmt.success(
         f"Saved {key} to {env_path}",
@@ -697,10 +703,20 @@ def feed_inject(
             }
         )
     else:
+        # #2050: 하드코딩된 경로(`ohlcv/krx/{tf}/{symbol}/`)는 실제
+        # ParquetStore 레이아웃(`ohlcv/{tf}/{exchange}/{symbol}/`)과 순서·
+        # 대소문자가 어긋났다. injector가 store.write를 default exchange="KRX"
+        # 로 호출하므로 동일 인자로 store.resolve_path를 호출해 실제 저장
+        # 경로를 그대로 출력한다(drift 방지). base 상대경로로 표시한다.
+        written = store.resolve_path(symbol, timeframe, exchange="KRX")
+        try:
+            written_display = written.relative_to(_Path(data_path))
+        except ValueError:
+            written_display = written
         click.echo()
         click.echo(f"Loaded {count} rows from {filepath.name}")
         click.echo(f"Normalized: source={source}, schema=OHLCV")
         click.echo(f"Validated: {count} rows passed")
-        click.echo(f"Written to ohlcv/krx/{timeframe}/{symbol}/")
+        click.echo(f"Written to {written_display}/")
         click.echo()
         click.echo(f"Injected {count} rows for {symbol} ({timeframe})")
