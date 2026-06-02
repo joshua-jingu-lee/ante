@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -286,6 +287,168 @@ class TestRateLimiter:
         # 여러 번 acquire해도 에러 없이 동작한다
         for _ in range(5):
             await rl.acquire()
+
+    def test_backward_compat_two_positional_args(self) -> None:
+        """기존 호출부의 RateLimiter(tps, daily) 시그니처가 그대로 동작한다."""
+        rl = RateLimiter(25.0, 10_000)
+        assert rl.daily_count == 0
+        rl.increment_daily()
+        assert rl.daily_count == 1
+
+
+# ── RateLimiter: token refill 시간 전진 (#2048) ───────────────
+
+
+class TestRateLimiterTokenRefill:
+    """#2048: sleep 경로의 _last_refill 전진으로 2x TPS 허용을 차단한다."""
+
+    @pytest.mark.asyncio
+    async def test_last_refill_advances_past_sleep(self) -> None:
+        """토큰 소진 후 sleep 분기에서 _last_refill이 now + wait_time로 전진한다.
+
+        sleep 동안 흐른 시간을 다음 acquire의 elapsed로 재크레딧하면 설정 TPS의
+        약 2배가 허용된다. monotonic을 결정적으로 mock해 _last_refill이 sleep
+        종료 시점으로 명시 전진하는지 단언한다.
+        """
+        rl = RateLimiter(tps_limit=2.0, daily_limit=100)
+        # burst=2 토큰을 먼저 소진시키고, _last_refill을 mock 시계 기준으로 맞춘다.
+        rl._tokens = 0.0
+        rl._last_refill = 1000.0
+
+        clock = {"t": 1000.0}
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            # 실제 이벤트 루프 시간 진행을 흉내내지 않아도 _last_refill 단언으로 충분.
+
+        with (
+            patch(
+                "ante.feed.sources.base.time.monotonic",
+                side_effect=lambda: clock["t"],
+            ),
+            patch(
+                "ante.feed.sources.base.asyncio.sleep",
+                side_effect=fake_sleep,
+            ),
+        ):
+            await rl.acquire()
+
+        # rate=2 → 토큰 1개 충전에 wait_time = (1 - 0) / 2 = 0.5초.
+        assert sleeps == [0.5]
+        # _last_refill은 now(1000.0) + wait_time(0.5)로 전진해야 한다.
+        assert rl._last_refill == pytest.approx(1000.5)
+        # sleep 분기 종료 후 토큰은 0으로 유지된다.
+        assert rl._tokens == 0.0
+
+    @pytest.mark.asyncio
+    async def test_throughput_not_exceed_configured_rate(self) -> None:
+        """소진 후 연속 acquire의 누적 대기가 설정 rate를 초과 허용하지 않는다.
+
+        _last_refill이 sleep만큼 전진하지 않으면 두 번째 sleep 분기가 첫
+        sleep 구간을 재크레딧해 wait_time이 0으로 줄어든다(=2x TPS). 전진
+        수정 후에는 acquire마다 1/rate초의 wait_time이 일정하게 유지된다.
+        """
+        rl = RateLimiter(tps_limit=2.0, daily_limit=100)
+        # 토큰 소진 + _last_refill을 mock 시계 시작점으로 맞춘다.
+        rl._tokens = 0.0
+        rl._last_refill = 0.0
+
+        clock = {"t": 0.0}
+        sleeps: list[float] = []
+
+        async def fake_sleep(seconds: float) -> None:
+            sleeps.append(seconds)
+            # sleep이 실제로 시계를 진행시킨다고 가정(상주 프로세스의 실시간).
+            clock["t"] += seconds
+
+        with (
+            patch(
+                "ante.feed.sources.base.time.monotonic",
+                side_effect=lambda: clock["t"],
+            ),
+            patch(
+                "ante.feed.sources.base.asyncio.sleep",
+                side_effect=fake_sleep,
+            ),
+        ):
+            for _ in range(3):
+                await rl.acquire()
+
+        # rate=2 → 매 acquire마다 0.5초 대기가 일정하게 유지되어야 한다.
+        # _last_refill이 전진하지 않으면 2번째 이후 wait_time이 0으로 붕괴된다.
+        assert sleeps == [0.5, 0.5, 0.5]
+
+
+# ── RateLimiter: 날짜 변경 self-reset (#2019) ─────────────────
+
+
+class TestRateLimiterDailyReset:
+    """#2019: 상주 프로세스가 자정을 넘겨도 daily_count가 self-reset된다."""
+
+    def test_increment_resets_on_date_change(self) -> None:
+        """D일 N회 증가 후 D+1로 바뀌면 다음 increment에서 1로 리셋된다."""
+        current = {"d": date(2026, 6, 1)}
+        rl = RateLimiter(tps_limit=10.0, daily_limit=100, now_date=lambda: current["d"])
+
+        for _ in range(5):
+            rl.increment_daily()
+        assert rl.daily_count == 5
+
+        current["d"] = date(2026, 6, 2)
+        rl.increment_daily()
+        assert rl.daily_count == 1
+
+    def test_same_day_accumulates(self) -> None:
+        """같은 날 내에서는 누적이 유지된다."""
+        rl = RateLimiter(
+            tps_limit=10.0, daily_limit=100, now_date=lambda: date(2026, 6, 1)
+        )
+        for _ in range(7):
+            rl.increment_daily()
+        assert rl.daily_count == 7
+
+    def test_is_daily_limit_reached_resets_on_date_change(self) -> None:
+        """증가 없이 자정을 넘긴 check도 새 날짜의 0을 반영해 한도 해제된다."""
+        current = {"d": date(2026, 6, 1)}
+        rl = RateLimiter(tps_limit=10.0, daily_limit=100, now_date=lambda: current["d"])
+
+        for _ in range(90):
+            rl.increment_daily()
+        assert rl.is_daily_limit_reached() is True
+
+        # 날짜가 바뀌면 increment 없이 check만으로도 카운터가 리셋된다.
+        current["d"] = date(2026, 6, 2)
+        assert rl.is_daily_limit_reached() is False
+        assert rl.daily_count == 0
+
+    def test_reset_daily_sets_current_date_baseline(self) -> None:
+        """reset_daily는 카운터를 0으로 되돌리고 _daily_date를 현재로 갱신한다."""
+        current = {"d": date(2026, 6, 1)}
+        rl = RateLimiter(tps_limit=10.0, daily_limit=100, now_date=lambda: current["d"])
+
+        for _ in range(10):
+            rl.increment_daily()
+        assert rl.daily_count == 10
+
+        rl.reset_daily()
+        assert rl.daily_count == 0
+        assert rl._daily_date == date(2026, 6, 1)
+
+        # reset 직후 같은 날 increment는 1부터 누적된다(재리셋 없음).
+        rl.increment_daily()
+        assert rl.daily_count == 1
+
+    def test_default_now_date_uses_kst(self) -> None:
+        """now_date 미지정 시 KST 기준 현재 날짜로 동작한다(스모크)."""
+        from datetime import datetime
+
+        from ante.feed.sources.base import _KST
+
+        rl = RateLimiter(tps_limit=10.0, daily_limit=100)
+        rl.increment_daily()
+        assert rl.daily_count == 1
+        assert rl._daily_date == datetime.now(tz=_KST).date()
 
 
 # ── fetch_by_date ────────────────────────────────────────────
