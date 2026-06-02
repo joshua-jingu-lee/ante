@@ -444,123 +444,256 @@ class TestSystemKillSwitchHandlers:
         svc.bot_manager.start_all.assert_not_called()
 
 
-# ── broker.reconcile cross-account guard (Refs #1240 review P2-1) ──
+# ── broker.reconcile account-level 재설계 (#2119/2121/2122/2118/2120) ──
 
 
-class TestHandleBrokerReconcile:
-    """broker.reconcile IPC 핸들러의 account 일치 가드.
+def _make_reconcile_svc(
+    *,
+    bots: list[dict],
+    broker_positions: list[dict] | None = None,
+):
+    """account-level reconcile 핸들러용 svc mock 을 만든다.
 
-    Refs #1240 review (P2-1): 요청자가 ``bot_id`` 와 다른 ``account_id`` 를
-    보내면 잘못된 account_id 가 ``reconciler.reconcile(...)`` 으로 흘러
-    다른 계좌의 positions / adjustment trade 가 손상된다. BotManager 로
-    봇의 실제 account_id 를 조회하여 일치하지 않으면 거부한다.
+    - ``svc.account.get_broker(account_id)`` → broker mock(``get_account_positions``)
+    - ``svc.bot_manager.list_bots()`` → ``bots``
+    - ``svc.reconciler`` → reconcile/detect_account_level/compute_account_diff mock
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    broker = AsyncMock()
+    broker.get_account_positions = AsyncMock(
+        return_value=broker_positions if broker_positions is not None else []
+    )
+
+    account_svc = AsyncMock()
+    account_svc.get_broker = AsyncMock(return_value=broker)
+
+    bot_manager = MagicMock()
+    bot_manager.list_bots = MagicMock(return_value=bots)
+
+    reconciler = AsyncMock()
+    reconciler.reconcile = AsyncMock(return_value=[])
+    reconciler.detect_account_level = AsyncMock(return_value=[])
+    reconciler.compute_account_diff = AsyncMock(return_value=[])
+
+    svc = MagicMock()
+    svc.account = account_svc
+    svc.bot_manager = bot_manager
+    svc.reconciler = reconciler
+    return svc, broker, reconciler
+
+
+class TestHandleBrokerReconcileAccountLevel:
+    """``broker.reconcile`` IPC 핸들러 account-level 재설계 (#2119).
+
+    bot_id 없이 account_id 만으로 도달하고, 서버 BrokerAdapter 가 계좌 총합을
+    직접 조회하며(#2121), fix 플래그를 준수하고(#2122), 봇 count 로 보정/탐지를
+    분기한다(1봇=위임 / 2+봇·0봇=detect-only).
     """
 
     @pytest.mark.asyncio
-    async def test_broker_reconcile_rejects_account_mismatch(self):
-        from unittest.mock import AsyncMock, MagicMock
+    async def test_reaches_account_level_without_bot_id(self):
+        """(a) bot_id 없이 account_id 만으로 도달하고 서버 broker 를 조회한다."""
+        from ante.ipc.registry import _handle_broker_reconcile
 
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10, "avg_price": 1}],
+        )
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        # 서버 broker 조회 (caller-supplied 무시).
+        svc.account.get_broker.assert_awaited_once_with("acc-a")
+        broker.get_account_positions.assert_awaited_once()
+        assert result["account_id"] == "acc-a"
+        assert result["bot_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_fix_false_dry_run_no_correction(self):
+        """(b) fix=False → 단일봇 reconcile(dry_run=True) — correct_position 미호출."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+        )
+
+        reconciler.reconcile.assert_awaited_once()
+        assert reconciler.reconcile.call_args.kwargs["dry_run"] is True
+        assert result["fix"] is False
+        assert result["fix_applied"] is False
+
+    @pytest.mark.asyncio
+    async def test_single_bot_fix_true_delegates_correction(self):
+        """(c) 1봇 계좌 fix=True → 기존 reconcile 보정(dry_run=False) 위임."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "stopped", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        reconciler.reconcile.assert_awaited_once()
+        call = reconciler.reconcile.call_args
+        assert call.args[0] == "bot-1"
+        assert call.kwargs["account_id"] == "acc-a"
+        assert call.kwargs["dry_run"] is False
+        reconciler.detect_account_level.assert_not_called()
+        assert result["corrections"] == 1
+        assert result["fix_applied"] is True
+
+    @pytest.mark.asyncio
+    async def test_multi_bot_detect_only(self):
+        """(d) 2+봇 → detect_account_level (correct_position 미호출)."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[
+                {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
+                {"bot_id": "bot-2", "status": "running", "account_id": "acc-a"},
+            ],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.detect_account_level.return_value = [
+            {"symbol": "005930", "broker_qty": 10, "internal_qty": 8, "diff": 2}
+        ]
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        reconciler.reconcile.assert_not_called()
+        reconciler.detect_account_level.assert_awaited_once()
+        assert result["bot_count"] == 2
+        assert result["adjustments"] == []
+        assert result["mismatches"][0]["symbol"] == "005930"
+        # detect-only — fix=True 여도 보정은 없다.
+        assert result["corrections"] == 0
+
+    @pytest.mark.asyncio
+    async def test_ignores_caller_supplied_broker_positions(self):
+        """(f) caller-supplied broker_positions 무시 — 서버 broker 조회값 사용."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+
+        await _handle_broker_reconcile(
+            svc,
+            {
+                "account_id": "acc-a",
+                "fix": True,
+                # 악의/오류 입력 — 무시되어야 한다.
+                "broker_positions": [{"symbol": "FAKE", "quantity": 9999}],
+            },
+            "cli-user",
+        )
+
+        # reconcile 에 전달된 broker_positions 는 서버 조회값이어야 한다.
+        passed = reconciler.reconcile.call_args.args[1]
+        assert passed == [{"symbol": "005930", "quantity": 10}]
+        assert all(p["symbol"] != "FAKE" for p in passed)
+
+    @pytest.mark.asyncio
+    async def test_zero_bots_with_broker_positions_detect_alert(self):
+        """(k) 0봇 + broker_positions 존재 → detect/alert (no-op 아님)."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.detect_account_level.return_value = [
+            {"symbol": "005930", "broker_qty": 10, "internal_qty": 0, "diff": 10}
+        ]
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+        )
+
+        reconciler.reconcile.assert_not_called()
+        reconciler.detect_account_level.assert_awaited_once()
+        assert result["bot_count"] == 0
+        assert result["mismatches"][0]["diff"] == 10
+
+    @pytest.mark.asyncio
+    async def test_bot_count_status_agnostic(self):
+        """(l) 봇 count 는 status 무관 — stopped/error 봇도 count 에 포함된다."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[
+                {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
+                {"bot_id": "bot-2", "status": "stopped", "account_id": "acc-a"},
+                {"bot_id": "bot-3", "status": "error", "account_id": "acc-a"},
+            ],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        # 3봇(status 무관) → 2+봇 → detect-only.
+        assert result["bot_count"] == 3
+        reconciler.reconcile.assert_not_called()
+        reconciler.detect_account_level.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_other_account_bots_excluded_from_count(self):
+        """다른 계좌 봇은 count 에서 제외된다 (account-scoped count)."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[
+                {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
+                {"bot_id": "bot-x", "status": "running", "account_id": "acc-other"},
+            ],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+
+        result = await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        # acc-a 단일봇만 count → reconcile 위임.
+        assert result["bot_count"] == 1
+        reconciler.reconcile.assert_awaited_once()
+        assert reconciler.reconcile.call_args.args[0] == "bot-1"
+
+    @pytest.mark.asyncio
+    async def test_require_account_id_rejected(self):
+        """(j) require_account_id 회귀 — invalid account_id 는 즉시 거부."""
         from ante.account.errors import InvalidAccountIdError
         from ante.ipc.registry import _handle_broker_reconcile
 
-        # 봇은 acc-a 소속인데 요청은 acc-b 로 들어옴.
-        fake_bot = MagicMock()
-        fake_bot.config = MagicMock()
-        fake_bot.config.account_id = "acc-a"
+        svc, broker, reconciler = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+        )
 
-        fake_bot_manager = MagicMock()
-        fake_bot_manager.get_bot.return_value = fake_bot
-
-        fake_reconciler = AsyncMock()
-
-        svc = MagicMock()
-        svc.bot_manager = fake_bot_manager
-        svc.reconciler = fake_reconciler
-
-        with pytest.raises(InvalidAccountIdError, match="acc-a"):
+        with pytest.raises(InvalidAccountIdError):
             await _handle_broker_reconcile(
-                svc,
-                {
-                    "bot_id": "bot-1",
-                    "account_id": "acc-b",
-                    "broker_positions": [],
-                },
-                "cli-user",
+                svc, {"account_id": "default", "fix": True}, "cli-user"
             )
 
-        # reconcile 까지 절대 도달하지 않아야 한다.
-        fake_reconciler.reconcile.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_broker_reconcile_passes_when_account_matches(self):
-        from unittest.mock import AsyncMock, MagicMock
-
-        from ante.ipc.registry import _handle_broker_reconcile
-
-        fake_bot = MagicMock()
-        fake_bot.config = MagicMock()
-        fake_bot.config.account_id = "acc-a"
-
-        fake_bot_manager = MagicMock()
-        fake_bot_manager.get_bot.return_value = fake_bot
-
-        fake_reconciler = AsyncMock()
-        fake_reconciler.reconcile.return_value = []
-
-        svc = MagicMock()
-        svc.bot_manager = fake_bot_manager
-        svc.reconciler = fake_reconciler
-
-        result = await _handle_broker_reconcile(
-            svc,
-            {
-                "bot_id": "bot-1",
-                "account_id": "acc-a",
-                "broker_positions": [],
-            },
-            "cli-user",
-        )
-
-        assert result == {"bot_id": "bot-1", "adjustments": []}
-        fake_reconciler.reconcile.assert_awaited_once_with(
-            "bot-1", [], account_id="acc-a"
-        )
-
-    @pytest.mark.asyncio
-    async def test_broker_reconcile_passes_when_bot_not_found(self):
-        """알 수 없는 ``bot_id`` 는 reconcile 단계에서 처리되도록 통과시킨다.
-
-        BotManager 에 없는 봇이라도 mismatch 검증 단계에서 false negative 로
-        막아버리면 cold-path / migration 시나리오가 깨진다. account_id 형식
-        검증은 ``require_account_id`` 가 이미 수행하므로 이 단계는 mismatch
-        만 책임진다.
-        """
-        from unittest.mock import AsyncMock, MagicMock
-
-        from ante.ipc.registry import _handle_broker_reconcile
-
-        fake_bot_manager = MagicMock()
-        fake_bot_manager.get_bot.return_value = None
-
-        fake_reconciler = AsyncMock()
-        fake_reconciler.reconcile.return_value = []
-
-        svc = MagicMock()
-        svc.bot_manager = fake_bot_manager
-        svc.reconciler = fake_reconciler
-
-        result = await _handle_broker_reconcile(
-            svc,
-            {
-                "bot_id": "unknown-bot",
-                "account_id": "acc-a",
-                "broker_positions": [],
-            },
-            "cli-user",
-        )
-
-        assert result == {"bot_id": "unknown-bot", "adjustments": []}
-        fake_reconciler.reconcile.assert_awaited_once()
+        # broker 조회/reconcile 까지 도달하지 않아야 한다.
+        svc.account.get_broker.assert_not_called()
+        reconciler.reconcile.assert_not_called()
+        reconciler.detect_account_level.assert_not_called()
 
 
 # ── #1379 oracle A7: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──

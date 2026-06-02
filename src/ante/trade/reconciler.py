@@ -46,6 +46,7 @@ class PositionReconciler:
         *,
         account_id: str,
         skip_external_buy: bool = False,
+        dry_run: bool = False,
     ) -> list[dict[str, Any]]:
         """봇의 내부 포지션과 브로커 포지션을 대조하여 보정.
 
@@ -64,9 +65,15 @@ class PositionReconciler:
                 `skip_external_buy` 와 무관하게 항상 수행되며, 이 플래그는 분류
                 결과 중 "외부 매수" 보정만 억제하는 별도 계층이다. 주기
                 reconcile(`skip_external_buy=False`)에서도 self 는 보정되지 않는다.
+            dry_run: True 면 **detect-only** 모드 — 분류·로그·PositionMismatchEvent
+                /NotificationEvent 발행은 그대로 수행하되 ``correct_position`` 을
+                **호출하지 않는다**(보정 0건). 기존 external-buy/self-check 분류
+                로직은 무변경이며, 발행되는 이벤트도 동일하다. 보정만 보류한다.
+                (#2119/#2122: 다중봇 귀속 ambiguity·user-initiated detect 경로용.)
+                기본 False — 기존 호출자는 변경 없이 보정 동작 유지(무회귀).
 
         Returns:
-            보정 내역 리스트. 불일치가 없으면 빈 리스트.
+            보정 내역 리스트. 불일치가 없거나 ``dry_run=True`` 면 빈 리스트.
         """
         from ante.account.scoping import require_account_id
         from ante.eventbus.events import (
@@ -225,6 +232,22 @@ class PositionReconciler:
                 )
             )
 
+            if dry_run:
+                # detect-only: 분류·이벤트는 위에서 발행했으나 실제 보정
+                # (correct_position)은 호출하지 않는다(#2119/#2122). 다중봇
+                # 귀속이 ambiguous하거나 user-initiated 탐지 요청인 경로에서
+                # 잘못된 보정으로 실거래 포지션을 손상시키지 않기 위함이다.
+                logger.info(
+                    "포지션 불일치 [%s] %s: 내부=%.2f, 브로커=%.2f → %s "
+                    "(dry-run — 보정 보류)",
+                    bot_id,
+                    symbol,
+                    i_qty,
+                    b_qty,
+                    reason,
+                )
+                continue
+
             correction = await self._trade_service.correct_position(
                 bot_id=bot_id,
                 symbol=symbol,
@@ -251,6 +274,134 @@ class PositionReconciler:
             )
 
         return corrections
+
+    async def compute_account_diff(
+        self,
+        broker_positions: list[dict[str, Any]],
+        *,
+        account_id: str,
+    ) -> list[dict[str, Any]]:
+        """계좌 총합(broker) vs 전 봇 internal 합산 비교 — **순수(side-effect 無)**.
+
+        broker 는 계좌 **총합**만 주므로 per-bot/per-symbol 귀속이 근본적으로
+        ambiguous하다(#2270). 이 메서드는 이벤트/보정 없이 **읽기 전용으로**
+        계좌 단위 심볼별 불일치만 계산한다(display/detect 공용).
+
+        비교 기준:
+            - broker: ``get_account_positions()`` 의 심볼별 총 수량.
+            - internal: 해당 계좌의 **모든 봇(상태 무관) open 포지션을 심볼별로
+              합산**(``TradeService.get_all_positions(account_id)``). per-bot
+              비교가 같은 심볼을 보유한 다중봇을 false external-buy/청산으로
+              오판하던 것을 제거한다(#2120).
+
+        Returns:
+            불일치 내역 리스트. 일치 시 빈 리스트.
+            각 항목: {"symbol", "broker_qty", "internal_qty", "diff"}.
+        """
+        from ante.account.scoping import require_account_id
+
+        account_id = require_account_id(
+            account_id, context="reconciler.compute_account_diff"
+        )
+
+        # 전 봇(상태 무관) open 포지션을 심볼별 합산 — #2120 다중봇 합산.
+        internal = await self._trade_service.get_all_positions(account_id=account_id)
+        internal_totals: dict[str, float] = {}
+        for p in internal:
+            if p.quantity > 0:
+                internal_totals[p.symbol] = (
+                    internal_totals.get(p.symbol, 0.0) + p.quantity
+                )
+
+        broker_totals: dict[str, float] = {}
+        for bp in broker_positions:
+            qty = float(bp.get("quantity", 0.0))
+            if qty > 0:
+                symbol = bp["symbol"]
+                broker_totals[symbol] = broker_totals.get(symbol, 0.0) + qty
+
+        mismatches: list[dict[str, Any]] = []
+        all_symbols = set(internal_totals.keys()) | set(broker_totals.keys())
+        for symbol in sorted(all_symbols):
+            i_qty = internal_totals.get(symbol, 0.0)
+            b_qty = broker_totals.get(symbol, 0.0)
+            if i_qty == b_qty:
+                continue
+            mismatches.append(
+                {
+                    "symbol": symbol,
+                    "broker_qty": b_qty,
+                    "internal_qty": i_qty,
+                    "diff": b_qty - i_qty,
+                }
+            )
+        return mismatches
+
+    async def detect_account_level(
+        self,
+        broker_positions: list[dict[str, Any]],
+        *,
+        account_id: str,
+    ) -> list[dict[str, Any]]:
+        """계좌 단위 불일치 **detect-only** — 탐지 + account-scoped 알림.
+
+        다중봇(또는 0봇) 계좌에서 ``correct_position`` 을 **절대 호출하지 않고**,
+        :meth:`compute_account_diff` 로 계산한 불일치를 account-scoped
+        ``NotificationEvent`` 로 알린다(#2118/#2120). 신규 도메인 이벤트를
+        신설하지 않고 ``NotificationEvent`` 만 사용한다 — bot-scoped 인
+        ``PositionMismatchEvent``/``ReconcileEvent`` 는 다중봇 귀속이 ambiguous
+        하므로 이 경로에서 발행하지 않는다.
+
+        Args:
+            broker_positions: 서버 BrokerAdapter 가 조회한 계좌 총합.
+            account_id: 대상 계좌 ID (account-scoped 이벤트에 필수).
+
+        Returns:
+            불일치 내역 리스트(detect-only — 보정 없음). 일치 시 빈 리스트.
+        """
+        from ante.account.scoping import require_account_id
+        from ante.eventbus.events import NotificationEvent
+
+        account_id = require_account_id(
+            account_id, context="reconciler.detect_account_level"
+        )
+
+        mismatches = await self.compute_account_diff(
+            broker_positions, account_id=account_id
+        )
+        for m in mismatches:
+            symbol = m["symbol"]
+            i_qty = m["internal_qty"]
+            b_qty = m["broker_qty"]
+            logger.warning(
+                "계좌 단위 포지션 불일치 [%s] %s: 내부합산=%.2f, 브로커=%.2f "
+                "(detect-only — 다중봇 귀속 ambiguous, 보정 보류 #2270)",
+                account_id,
+                symbol,
+                i_qty,
+                b_qty,
+            )
+            await self._eventbus.publish(
+                NotificationEvent(
+                    level="critical",
+                    title="계좌 단위 포지션 불일치",
+                    message=(
+                        f"계좌: `{account_id}` · 종목: `{symbol}`\n"
+                        f"내부 합산: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
+                        "사유: 계좌 단위 수량 불일치 (다중봇 귀속 ambiguous — "
+                        "자동 보정 보류, 수동 확인 필요)"
+                    ),
+                    category="broker",
+                )
+            )
+
+        if mismatches:
+            logger.info(
+                "계좌 단위 대사 완료 [%s]: 불일치 %d건 (detect-only)",
+                account_id,
+                len(mismatches),
+            )
+        return mismatches
 
     async def _is_self_submitted_fill(
         self,
