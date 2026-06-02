@@ -70,6 +70,11 @@ class BacktestService:
             start_date=validated.start_date,
             end_date=validated.end_date,
             exchange=validated.exchange,
+            # run timeframe을 provider에 인지시켜, 내부 read 경로
+            # (체결가/equity/지표)가 ``{symbol}:{timeframe}`` 캐시 키를
+            # 조회하도록 한다(#2012). 미전달 시 1d로 떨어져 비-1d run의
+            # 체결가가 1d 종가로 새는 버그가 생긴다.
+            timeframe=validated.timeframe,
         )
 
         for symbol in validated.symbols:
