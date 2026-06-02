@@ -32,18 +32,19 @@ Agent: 리포트 제출 (근거 자료)
 
 Notification 모듈은 양방향 통신을 지원한다. `TelegramAdapter`가 발송을, `TelegramCommandReceiver`가 getUpdates 폴링 기반 명령 수신을 담당한다.
 
-- **발송**: `ApprovalCreatedEvent` 구독 → 결재 요약 메시지 + 인라인 버튼(승인/거절) 전송
+- **발송**: `ApprovalService`가 `NotificationEvent`(category=`approval`, 승인/거절 버튼 포함)를 직접 발행하고, `NotificationService`가 `NotificationEvent`를 구독해 결재 요약 + 인라인 버튼(승인/거절)을 전송
 - **수신**: 인라인 버튼 `callback_query` 또는 `/approve <id>`, `/reject <id>` 명령어 → `ApprovalService` 호출
 
 **인라인 버튼 결재 흐름:**
 
 ```
 결재 요청 생성
-  → NotificationService가 ApprovalCreatedEvent 수신
-    → TelegramAdapter.send_with_buttons():
-      메시지: "📋 결재 요청 [budget_change]\n전략 A 예산 증액\n..."
-      버튼:  [✅ 승인] [❌ 거절]
-                ↓ callback_data: "approve:{id}" / "reject:{id}"
+  → ApprovalService가 NotificationEvent(category=approval, 버튼 포함) 발행
+    → NotificationService가 NotificationEvent 수신
+      → TelegramAdapter.send_with_buttons():
+        메시지: "📋 결재 요청 [budget_change]\n전략 A 예산 증액\n..."
+        버튼:  [✅ 승인] [❌ 거절]
+                  ↓ callback_data: "approve:{id}" / "reject:{id}"
 
 사용자가 버튼 탭
   → TelegramCommandReceiver가 callback_query 수신
