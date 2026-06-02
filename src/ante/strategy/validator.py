@@ -327,6 +327,21 @@ class StrategyValidator:
             if isinstance(node, ast.Import | ast.ImportFrom):
                 continue
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+                # #2032/#2033: decorator는 정의 시점(import-time) 실행 → 전부 금지
+                if node.decorator_list:
+                    errors.append(
+                        f"Forbidden top-level decorator at line {node.lineno}: "
+                        f"{type(node).__name__}"
+                    )
+                # #2033: 함수 default argument 식의 import-time call 금지
+                if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                    for default in [*node.args.defaults, *node.args.kw_defaults]:
+                        if default is not None and self._contains_call(default):
+                            lineno = getattr(default, "lineno", node.lineno)
+                            errors.append(
+                                f"Forbidden top-level code at line {lineno}: "
+                                f"default argument call"
+                            )
                 continue
             if isinstance(node, ast.Pass):
                 continue
