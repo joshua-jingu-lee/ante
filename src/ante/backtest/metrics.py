@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ante.backtest.result import resample_equity_curve_daily
+
 
 def calculate_metrics(
     trades: list[Any],
@@ -33,15 +35,25 @@ def calculate_metrics(
     )
     metrics["total_return"] = round(total_return, 4)
 
-    # 연환산 수익률
-    metrics["annual_return"] = round(_annual_return(equity_curve, total_return), 4)
-
     # ── Equity Curve 기반 지표 ────────────────────────
-    equities = [e["equity"] for e in equity_curve] if equity_curve else []
+    # annual_return / Sharpe는 "일(day)" 단위가 전제이므로, 봉 개수가 아닌
+    # 캘린더 날짜 기준으로 한 번 일별 리샘플한 뒤 헬퍼에 전달한다.
+    # (intraday 백테스트에서 bar 개수를 일수로 오인하던 왜곡 수정 — #2013)
+    # threshold=0: 비어있지 않은 모든 curve를 일별로 접는다. 기본 500은 짧은
+    # intraday(<500 bar)를 리샘플하지 않아 버그가 잔존하므로 반드시 0을 사용.
+    daily_curve = resample_equity_curve_daily(equity_curve, threshold=0)
 
-    sharpe = _sharpe_ratio(equities)
+    # 연환산 수익률 (일별 리샘플된 distinct 날짜 수를 일수로 사용)
+    metrics["annual_return"] = round(_annual_return(daily_curve, total_return), 4)
+
+    # Sharpe: 일별 리샘플(날짜당 마지막 equity) 기준 일간 수익률
+    daily_equities = [e["equity"] for e in daily_curve]
+    sharpe = _sharpe_ratio(daily_equities)
     metrics["sharpe_ratio"] = round(sharpe, 4) if sharpe is not None else None
 
+    # max_drawdown은 raw equity(전체 봉) 기준으로 유지한다.
+    # intraday 낙폭(peak-to-trough)은 일별 리샘플로 약화되어선 안 된다.
+    equities = [e["equity"] for e in equity_curve] if equity_curve else []
     mdd, mdd_duration = _max_drawdown(equities)
     metrics["max_drawdown"] = round(mdd, 4)
     metrics["max_drawdown_duration"] = mdd_duration
