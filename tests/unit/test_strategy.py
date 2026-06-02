@@ -1559,6 +1559,198 @@ class TestStrategy(Strategy):
         assert not any("Invalid exchange" in e for e in result.errors)
 
 
+# ── #2017 validator: symbols ↔ exchange 일관성 경고 ──────────────────
+
+
+class TestValidatorSymbolsExchangeConsistency:
+    """#2017 — symbols 명시 시 형식이 exchange(KRX)와 맞는지 경고(warn-only).
+
+    spec 03-09 항목9. KRX 전략에 KRX 종목코드 형식(6자리 숫자)이 아닌 심볼은
+    경고하되 valid 는 유지(에러 아님). 비-KRX/wildcard/None exchange, 또는
+    symbols 가 비-literal/미지정/빈 list 면 skip.
+    """
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_krx_with_us_symbol_warns_but_valid(self, validator, tmp_path):
+        """exchange='KRX' + symbols=['AAPL'] → valid=True + 형식 불일치 경고(repro)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=["AAPL"],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert any("AAPL" in w and "KRX symbol format" in w for w in result.warnings)
+
+    def test_krx_with_krx_symbol_no_warning(self, validator, tmp_path):
+        """exchange='KRX' + symbols=['005930'] → 경고 없음."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=["005930"],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_krx_mixed_symbols_only_bad_warns(self, validator, tmp_path):
+        """exchange='KRX' + symbols=['005930','AAPL'] → 'AAPL'만 경고."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=["005930", "AAPL"],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        krx_warnings = [w for w in result.warnings if "KRX symbol format" in w]
+        assert len(krx_warnings) == 1
+        assert "AAPL" in krx_warnings[0]
+        assert not any("005930" in w for w in krx_warnings)
+
+    def test_wildcard_exchange_no_warning(self, validator, tmp_path):
+        """exchange='*'(wildcard) + symbols=['AAPL'] → 경고 없음(skip; 형식 미정의)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="*", symbols=["AAPL"],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_non_krx_exchange_no_warning(self, validator, tmp_path):
+        """exchange='NASDAQ'(비-KRX) + symbols=['AAPL'] → 경고 없음(형식 미정의)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="NASDAQ", symbols=["AAPL"],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_symbols_unspecified_no_warning(self, validator, tmp_path):
+        """symbols 미지정 → 경고 없음."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX",
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_symbols_non_literal_no_warning(self, validator, tmp_path):
+        """symbols 비-literal(모듈변수/계산식) → 경고 없음(정적 해석 skip)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+SYMS = ["AAPL"]
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=SYMS,
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_symbols_list_with_non_constant_element_no_warning(
+        self, validator, tmp_path
+    ):
+        """symbols list 안에 비-Constant 원소(Name) 포함 → 정적 해석 불가 skip."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+SYM = "AAPL"
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=["005930", SYM],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+    def test_symbols_empty_list_no_warning(self, validator, tmp_path):
+        """symbols=[] → 경고 없음."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(
+        name="test", version="1.0.0",
+        description="test", exchange="KRX", symbols=[],
+    )
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("KRX symbol format" in w for w in result.warnings)
+
+
 # ── #2040 validator: async hook 계약 ──────────────────────────────────
 
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ante.core.exchange import STRATEGY_EXCHANGES
+from ante.core.market_data_vocab import is_krx_symbol
 
 # 코드 레벨 SSOT(`ante.core.exchange.STRATEGY_EXCHANGES` = canonical 5종 ∪
 # {`*`})에 위임한다. 이름·타입(`set[str]`)·값·검증 결과·에러 메시지는
@@ -182,6 +183,24 @@ class StrategyValidator:
                     f"Invalid exchange value: '{exchange_value}'. "
                     f"Valid values: {sorted(VALID_EXCHANGES)}"
                 )
+
+            # 9. symbols ↔ exchange 일관성 경고 (#2017, spec 03-09 항목9).
+            # exchange == "KRX" 이고 symbols 가 정적 해석 가능한 literal list 인
+            # 경우에만, KRX 종목코드 형식(6자리 숫자)과 맞지 않는 심볼을 경고한다.
+            # warn-only — valid 는 그대로 유지(에러 아님). 비-KRX/wildcard/None
+            # exchange, 또는 symbols 가 비-literal/미지정/빈 list 면 skip
+            # (형식 정의 없음). 비-KRX 거래소 심볼 형식 검사는 1.0 비목표.
+            if exchange_value == "KRX":
+                symbols = self._extract_meta_symbols(
+                    strategy_classes[0].node, module_consts
+                )
+                if symbols is not None:
+                    for symbol in symbols:
+                        if not is_krx_symbol(symbol):
+                            warnings.append(
+                                f"Symbol '{symbol}' does not match KRX symbol "
+                                f"format (exchange=KRX)"
+                            )
 
         # 5. 금지 모듈 import
         forbidden = self._find_forbidden_imports(tree)
@@ -598,6 +617,46 @@ class StrategyValidator:
                             and kw.value.id in module_consts
                         ):
                             return module_consts[kw.value.id]
+        return None
+
+    def _extract_meta_symbols(
+        self, cls: ast.ClassDef, module_consts: dict[str, str]
+    ) -> list[str] | None:
+        """meta에서 symbols 값을 정적 해석해 추출 (#2017, _extract_meta_exchange 동형).
+
+        ``meta = StrategyMeta(..., symbols=[...])`` 의 ``symbols`` kwarg 를 찾아,
+        값이 ``ast.List`` 이고 모든 원소가 str ``ast.Constant`` 이면 ``list[str]``
+        로 반환한다. 빈 list ``[]`` 는 빈 list 로 반환한다(경고 없음).
+
+        다음은 정적 해석 불가로 보고 ``None`` 을 반환해 일관성 경고를 skip 한다:
+        symbols 미지정, 비-List(Name/계산식/Tuple/Set 등), List 이지만 비-str
+        Constant 원소나 비-Constant 원소(Name/계산식 등)를 포함하는 경우.
+        ``_module_string_constants`` 는 문자열 스칼라 상수만 담으므로 list 상수
+        이름(Name)은 정적 해석하지 않는다(literal list only, known-limitation).
+        """
+        for node in cls.body:
+            if isinstance(node, ast.Assign | ast.AnnAssign):
+                target = (
+                    node.targets[0] if isinstance(node, ast.Assign) else node.target
+                )
+                if not isinstance(target, ast.Name) or target.id != "meta":
+                    continue
+                value = node.value
+                if isinstance(value, ast.Call):
+                    for kw in value.keywords:
+                        if kw.arg != "symbols":
+                            continue
+                        if not isinstance(kw.value, ast.List):
+                            return None
+                        symbols: list[str] = []
+                        for elt in kw.value.elts:
+                            if isinstance(elt, ast.Constant) and isinstance(
+                                elt.value, str
+                            ):
+                                symbols.append(elt.value)
+                            else:
+                                return None
+                        return symbols
         return None
 
     def _has_accepts_external_signals(self, cls: ast.ClassDef) -> bool:
