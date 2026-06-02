@@ -104,25 +104,61 @@ class ReconcileScheduler:
     ) -> list[dict[str, Any]]:
         """1회 대사를 수행하고 보정 내역을 반환한다.
 
-        모든 활성(running) 봇에 대해 브로커 포지션을 조회하고,
-        PositionReconciler.reconcile()을 호출하여 불일치를 보정한다.
+        이 스케줄러가 바인딩된 ``broker_account_id`` 계좌에 대해 브로커 총합을
+        1회 조회하고, **봇 귀속 ambiguity(status 무관 봇 count)** 와 **correction
+        실행 범위(running 봇)** 를 분리해 처리한다(#2118).
+
+        - 1봇-total 계좌이고 **그 봇이 running**: 기존 ``reconcile`` 보정
+          (self-check/skip_external_buy/external-buy 분류 무변경 #1946/#1950).
+        - 1봇-total 인데 그 봇이 stopped/error(미-running): correction 미실행 →
+          ``reconcile(dry_run=True)`` detect-only(기존 lifecycle 범위 보존 —
+          scheduler 가 비활성 봇을 자동 보정하지 않는다).
+        - 2+봇 계좌: ``detect_account_level`` (correct_position 미호출). 계좌
+          총합 vs 전 봇 합산 비교로 #2118/#2120 false external-buy 제거.
 
         Args:
             skip_external_buy: True 면 "외부 매수" 분류 보정을 건너뛴다(barrier,
                 #1946 Finding 1). fill 카치업 미성공 시 기동 대사에만 쓰인다.
+                1봇-total+running 보정 경로에만 적용된다.
 
         Returns:
-            각 봇별 보정 내역을 합산한 리스트.
+            각 봇별 보정 내역을 합산한 리스트. detect-only 경로는 보정이 없으므로
+            기여하지 않는다(불일치는 NotificationEvent 로 알림).
         """
         from ante.bot.config import BotStatus
 
         all_corrections: list[dict[str, Any]] = []
 
         bots = self._bot_manager.list_bots()
-        active_bots = [b for b in bots if b.get("status") == BotStatus.RUNNING]
 
-        if not active_bots:
-            logger.debug("대사 대상 활성 봇 없음")
+        # 이 스케줄러는 단일 broker(self._broker_account_id)에 바인딩돼 있다.
+        # 다른 계좌의 봇에 이 broker의 positions를 적용하면 데이터 정합성이
+        # 깨지므로(SPLIT-1 가드) 자기 계좌 봇만 다룬다. SPLIT-3 multi-broker
+        # pool 도입 시 이 가드를 제거한다.
+        account_id = self._broker_account_id
+        account_bots = []
+        for b in bots:
+            bot_account_id = b.get("account_id")
+            if not bot_account_id:
+                logger.warning(
+                    "대사 스킵: bot=%s account_id 누락 (DB 정리 필요)",
+                    b.get("bot_id"),
+                )
+                continue
+            if bot_account_id != account_id:
+                logger.warning(
+                    "대사 스킵: scheduler is bound to %s; "
+                    "bot %s belongs to %s — "
+                    "skipping until SPLIT-3 multi-broker pool",
+                    account_id,
+                    b.get("bot_id"),
+                    bot_account_id,
+                )
+                continue
+            account_bots.append(b)
+
+        if not account_bots:
+            logger.debug("대사 대상 봇 없음 (account=%s)", account_id)
             return all_corrections
 
         try:
@@ -131,50 +167,53 @@ class ReconcileScheduler:
             logger.exception("대사 중 브로커 포지션 조회 실패")
             return all_corrections
 
-        for bot_info in active_bots:
+        # ambiguity 판정 = status 무관 봇 count(#2119). correction 실행 범위는
+        # 아래에서 running 봇으로 별도 한정(#2118 v4: stopped/error 단일봇
+        # 자동보정 금지 — 기존 lifecycle 범위 보존).
+        bot_count = len(account_bots)
+
+        if bot_count == 1:
+            bot_info = account_bots[0]
             bot_id = bot_info["bot_id"]
-            account_id = bot_info.get("account_id")
-            if not account_id:
-                logger.warning(
-                    "대사 스킵: bot=%s account_id 누락 (DB 정리 필요)",
-                    bot_id,
-                )
-                continue
-            if account_id != self._broker_account_id:
-                # SPLIT-1 가드: 이 스케줄러는 단일 broker(self._broker_account_id)
-                # 에 바인딩돼 있다. 다른 계좌의 봇에 이 broker의 positions를
-                # 적용하면 데이터 정합성이 깨지므로 명시적으로 skip한다.
-                # SPLIT-3에서 multi-broker pool 도입 시 이 가드를 제거한다.
-                logger.warning(
-                    "대사 스킵: scheduler is bound to %s; "
-                    "bot %s belongs to %s — "
-                    "skipping until SPLIT-3 multi-broker pool",
-                    self._broker_account_id,
-                    bot_id,
-                    account_id,
-                )
-                continue
+            is_running = bot_info.get("status") == BotStatus.RUNNING
+            # 1봇-total + running 만 보정. stopped/error 면 dry_run detect-only
+            # (scheduler 가 비활성 봇을 자동 보정하지 않는다 — lifecycle 범위 보존).
             try:
                 corrections = await self._reconciler.reconcile(
                     bot_id=bot_id,
                     broker_positions=broker_positions,
                     account_id=account_id,
                     skip_external_buy=skip_external_buy,
+                    dry_run=not is_running,
                 )
                 all_corrections.extend(corrections)
             except Exception:
                 logger.exception("대사 실패 [%s]", bot_id)
+            if not is_running:
+                logger.debug(
+                    "주기 대사: 단일봇 %s 미-running → detect-only (보정 보류)",
+                    bot_id,
+                )
+        else:
+            # 2+봇 — 귀속 ambiguous(#2270). detect-only(correct_position 미호출).
+            try:
+                await self._reconciler.detect_account_level(
+                    broker_positions,
+                    account_id=account_id,
+                )
+            except Exception:
+                logger.exception("계좌 단위 대사 실패 [%s]", account_id)
 
         if all_corrections:
             logger.info(
-                "주기 대사 완료: 활성 봇 %d개, 보정 %d건",
-                len(active_bots),
+                "주기 대사 완료: 계좌 봇 %d개, 보정 %d건",
+                bot_count,
                 len(all_corrections),
             )
         else:
             logger.debug(
-                "주기 대사 완료: 활성 봇 %d개, 불일치 없음",
-                len(active_bots),
+                "주기 대사 완료: 계좌 봇 %d개, 보정 없음",
+                bot_count,
             )
 
         return all_corrections

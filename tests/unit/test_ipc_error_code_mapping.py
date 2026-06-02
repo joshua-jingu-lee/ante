@@ -543,18 +543,21 @@ async def test_ipc_dispatch_broker_reconcile_invalid_account_only_validation_err
 
 
 @pytest.mark.asyncio
-async def test_ipc_dispatch_broker_reconcile_missing_account_keeps_keyerror_path(
+async def test_ipc_dispatch_broker_reconcile_valid_account_no_bot_id_reaches_handler(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
-    """#1556 회귀 유지: **valid** account_id로 reconcile하면
-    ``require_account_id``를 통과하므로 invalid-account 분기가 아니라 기존
-    경로(bot_id 부재 시 ``KeyError`` → EXECUTION_ERROR)를 그대로 탄다.
+    """#2119 account-level 재설계: **valid** account_id 면 bot_id 없이도
+    ``require_account_id`` 통과 후 account-level handler 본문에 도달한다.
 
-    #1636은 invalid-account-only를 VALIDATION_ERROR로 정렬하되,
-    valid account_id의 기존 reconcile 동작(bot_id 누락 → KeyError →
-    EXECUTION_ERROR)은 **불변**이어야 한다. require_account_id를 bot_id
-    이전으로 옮긴 ordering 변경이 valid 경로의 KeyError 계약을 깨지
-    않음을 가드한다 (narrow scope: reconcile invalid만 변경, valid 불변).
+    이전(#1636)에는 valid account_id + bot_id 누락이 ``args["bot_id"]``
+    ``KeyError`` → EXECUTION_ERROR 였으나, account-level 재설계로 bot_id 를
+    더 이상 읽지 않으므로 KeyError 가 발생하지 않는다. 본 회귀는:
+        - invalid-account-only 는 여전히 VALIDATION_ERROR (위 테스트가 가드).
+        - valid account 는 require_account_id 를 통과한 뒤 handler 본문
+          (서버 broker 조회)에 도달한다.
+    fixture 의 ``account`` 서비스가 MagicMock 이라 ``await
+    get_broker(...)`` 가 awaitable 이 아니어서 EXECUTION_ERROR(VALIDATION
+    아님)로 표면된다 — KeyError(bot_id) 가 아니라 handler 본문 도달의 증거다.
     """
     from ante.ipc.registry import register_all_handlers
 
@@ -566,15 +569,14 @@ async def test_ipc_dispatch_broker_reconcile_missing_account_keeps_keyerror_path
     try:
         client = IPCClient(socket_path, timeout=5.0)
 
-        # valid account_id + bot_id 누락 → require_account_id 통과 후
-        # args["bot_id"] KeyError → EXECUTION_ERROR (기존 계약 불변)
+        # valid account_id + bot_id 누락 → require_account_id 통과 → handler 본문
+        # (broker 조회). VALIDATION_ERROR 가 아니어야 한다(account 검증은 통과).
         response = await client.send(
             "broker.reconcile",
             {"account_id": "oracle-valid-account"},
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "EXECUTION_ERROR", response
         assert response["error"]["code"] != "VALIDATION_ERROR", response
     finally:
         await server.stop()

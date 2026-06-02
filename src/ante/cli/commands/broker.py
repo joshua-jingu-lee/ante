@@ -366,16 +366,30 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                         account_id=validated_account_id
                     )
 
-                    broker_map = {p["symbol"]: p for p in broker_positions}
-                    internal_map = {p.symbol: p for p in internal_positions}
+                    # #2120: 같은 심볼을 보유한 다중봇 internal 을 **심볼별로
+                    # 합산**한다. ``{p.symbol: p}`` dict 컴프리헨션은 동일 심볼을
+                    # 덮어써 한 봇 수량만 비교 대상이 되어 다중봇 계좌를 false
+                    # discrepancy 로 오판했다(per-bot 오판). detect-only 경로이므로
+                    # 계좌 총합 broker vs 전 봇 합산 internal 을 비교한다.
+                    broker_totals: dict[str, float] = {}
+                    for bp in broker_positions:
+                        b_qty = float(bp.get("quantity", 0) or 0)
+                        if b_qty != 0:
+                            sym = bp["symbol"]
+                            broker_totals[sym] = broker_totals.get(sym, 0.0) + b_qty
+                    internal_totals: dict[str, float] = {}
+                    for ip in internal_positions:
+                        internal_totals[ip.symbol] = (
+                            internal_totals.get(ip.symbol, 0.0) + ip.quantity
+                        )
 
-                    all_symbols = set(broker_map.keys()) | set(internal_map.keys())
+                    all_symbols = set(broker_totals.keys()) | set(
+                        internal_totals.keys()
+                    )
                     discrepancies = []
                     for symbol in sorted(all_symbols):
-                        bp = broker_map.get(symbol)
-                        ip = internal_map.get(symbol)
-                        broker_qty = float(bp.get("quantity", 0)) if bp else 0.0
-                        internal_qty = ip.quantity if ip else 0.0
+                        broker_qty = broker_totals.get(symbol, 0.0)
+                        internal_qty = internal_totals.get(symbol, 0.0)
                         if broker_qty != internal_qty:
                             discrepancies.append(
                                 {
