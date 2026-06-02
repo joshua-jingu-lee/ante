@@ -43,7 +43,11 @@ def backtest() -> None:
     callback=validate_positive_finite_amount,
     help="초기 자금",
 )
-@click.option("--timeframe", default="1d", help="타임프레임")
+@click.option(
+    "--timeframe",
+    default=None,
+    help="타임프레임 (미지정 시 전략 meta)",
+)
 @click.option("--exchange", default="KRX", help="거래소 (기본: KRX)")
 @click.option(
     "--data-path",
@@ -61,7 +65,7 @@ def run(
     end: str,
     symbols: str | None,
     balance: float,
-    timeframe: str,
+    timeframe: str | None,
     exchange: str,
     data_path: str | None,
     db_path: str | None,
@@ -117,7 +121,12 @@ def run(
     # precedence: date/exchange 검증 이후 → ① timeframe → ② 빈 segment →
     # ③ KRX symbol shape. config build·BacktestService.run·_save_backtest_run
     # 이전이어야 invalid 입력 시 backtest_runs history가 생성되지 않는다.
-    if not is_valid_timeframe(timeframe):
+    #
+    # #2060: ``--timeframe`` 생략(None) 은 "전략 meta 사용" 신호이므로 CLI
+    # vocab 검증을 skip 하고 config 에 None 을 그대로 전달한다 —
+    # BacktestService.run() 이 load 후 StrategyMeta.timeframe 으로 fallback·
+    # 재검증한다. 명시값(비-None)은 기존대로 ingress 에서 거부한다.
+    if timeframe is not None and not is_valid_timeframe(timeframe):
         fmt.error(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
             f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
@@ -152,6 +161,8 @@ def run(
         "end_date": end,
         "symbols": symbols.split(",") if symbols else [],
         "initial_balance": balance,
+        # #2060: ``--timeframe`` 생략 시 None 을 그대로 전달 — service.run()
+        # 이 StrategyMeta.timeframe 으로 fallback 한다(명시값은 그대로 전달).
         "timeframe": timeframe,
         "exchange": exchange,
         "data_path": data_path,
