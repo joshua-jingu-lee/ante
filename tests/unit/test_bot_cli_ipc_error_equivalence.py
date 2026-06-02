@@ -364,6 +364,12 @@ class TestBotAlreadyExistsEquivalence:
         strategy_registry = MagicMock()
         strategy_registry.get = AsyncMock(return_value=strategy_record)
 
+        # Refs #2110: bot.create 가 audit 대상이 되어 required_services 에
+        # audit_logger 가 추가됐다 — preflight 통과를 위해 주입한다
+        # (account.suspend 동형). 실패 경로(BotAlreadyExistsError)라 audit
+        # 발화는 일어나지 않지만 preflight 는 audit_logger 존재를 요구한다.
+        audit_logger = MagicMock()
+        audit_logger.log = AsyncMock(return_value=None)
         svc_registry = ServiceRegistry(
             account=MagicMock(),
             bot_manager=bot_manager,
@@ -374,6 +380,7 @@ class TestBotAlreadyExistsEquivalence:
             eventbus=MagicMock(),
             member_service=MagicMock(),
             strategy_registry=strategy_registry,
+            audit_logger=audit_logger,
         )
         cmd_registry = CommandRegistry()
         register_all_handlers(cmd_registry)

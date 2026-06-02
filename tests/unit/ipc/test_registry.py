@@ -247,7 +247,17 @@ class TestHandleBotCreate:
         finally:
             ante.strategy.loader.StrategyLoader.load = original_load
 
-        assert result == {"bot_id": "new-bot"}
+        # Refs #2110: bot.create 가 audit 대상이 되어 handler 가
+        # ``_audit_detail`` reserved key 를 함께 반환한다(resource 는 생성 결과
+        # bot.bot_id). public envelope 진입 전 _dispatch wrapper 가 pop 한다.
+        assert result == {
+            "bot_id": "new-bot",
+            "_audit_detail": {
+                "resource": "bot:new-bot",
+                "detail": "",
+                "ip": "",
+            },
+        }
         fake_registry.get.assert_awaited_once_with("strat-1")
         fake_bot_manager.create_bot.assert_awaited_once()
         call_kwargs = fake_bot_manager.create_bot.call_args.kwargs
@@ -993,10 +1003,22 @@ class TestRegisteredCommandsMetadataCompleteness:
 
         Refs #2111: ``bot.signal_key.rotate`` 가 audit_action 부여
         (action="bot.signal_key.rotate", audit.md:121 SSOT) (10→11 commands).
+
+        Refs #2110: audit.md 가 audit 대상으로 정의했으나 누락돼 있던 상태변경
+        명령 7개에 audit_action wiring (11→18 commands):
+        ``system.halt`` / ``system.clear_halt`` / ``bot.create`` /
+        ``bot.remove``(action ``bot.delete``) / ``approval.approve`` /
+        ``approval.reject`` / ``approval.cancel`` — audit.md:112-120 SSOT.
         """
         expected_actions = {
             "account.suspend",
             "account.activate",
+            "system.halt",
+            "system.clear_halt",
+            "bot.create",
+            # bot.remove command 의 audit action 은 audit.md SSOT 에 따라
+            # ``bot.delete`` (command 이름과 의도적으로 다름).
+            "bot.delete",
             "bot.start",
             "bot.stop",
             "bot.update",
@@ -1004,6 +1026,9 @@ class TestRegisteredCommandsMetadataCompleteness:
             "treasury.set_balance",
             "strategy.set_status",
             "member.update_scopes",
+            "approval.approve",
+            "approval.reject",
+            "approval.cancel",
             "approval.cancel_invalid",
             "account.rule.update",
         }
