@@ -191,6 +191,20 @@ async def _make_krx_account(account_service, account_id="acc-test"):
     return account
 
 
+async def _make_nasdaq_account(account_service, account_id="acc-nasdaq"):
+    account = Account(
+        account_id=account_id,
+        name="나스닥계좌",
+        exchange="NASDAQ",
+        currency="USD",
+        broker_type="test",
+        status=AccountStatus.ACTIVE,
+        credentials={"app_key": "test", "app_secret": "test"},
+    )
+    await account_service.create(account)
+    return account
+
+
 async def _row_strategy_ids(db, bot_id):
     """``bots`` row 의 컬럼 strategy_id 와 config_json.strategy_id 를 반환."""
     row = await db.fetch_one(
@@ -317,6 +331,114 @@ class TestUpdateBotStrategyConsistency:
         with pytest.raises(StrategyNotFoundError):
             await manager.update_bot("bot1", strategy_id="missing_v1.0.0")
         assert manager.get_bot("bot1").config.strategy_id == "s1"
+
+
+# ── account_id + strategy_id 동시 변경 → effective(새) 계좌로 검증 (브랜치 리뷰) ──
+
+
+class TestUpdateBotEffectiveAccountValidation:
+    """#2129 브랜치 리뷰: account_id 와 strategy_id 동시 변경 시 새 전략의
+    exchange 호환을 **옛 계좌가 아닌 새(effective) 계좌**로 검증한다.
+
+    수정 전에는 ``_validate_strategy_change(old_config.account_id, ...)`` 로
+    옛 계좌를 사용해, 새 계좌에 비호환 전략이 commit 될 수 있었다.
+    """
+
+    async def test_simultaneous_change_compatible_with_new_account_persists_both(
+        self, manager_with_account, account_service, ctx, db, tmp_path
+    ):
+        """(a) 새 strategy 가 **새 계좌(NASDAQ)** exchange 와 호환 → 통과·둘 다 저장.
+
+        봇은 KRX 계좌(acc-test)에서 시작하지만, 한 요청으로 account_id 를
+        NASDAQ 계좌(acc-nasdaq)로, strategy 를 NASDAQ 전략으로 동시에 바꾼다.
+        새 전략은 옛 계좌(KRX)와는 비호환이지만 effective(새, NASDAQ) 계좌와는
+        호환이므로 통과해야 한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_nasdaq_account(account_service)
+        nasdaq_sid = await _register_strategy(
+            db, _NASDAQ_STRATEGY_SOURCE, "nasdaq_only", "1.0.0", tmp_path
+        )
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager_with_account.update_bot(
+            "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
+        )
+
+        # effective(새, NASDAQ) 계좌로 검증을 통과해 둘 다 새 값으로 commit.
+        # account_id 는 memory config 와 config_json 에 새 값으로 직렬화된다.
+        # (``bots.account_id`` 컬럼 자체는 ``_save_bot_config`` UPSERT 가
+        # 갱신하지 않는 별개의 사전 결함 — 본 브랜치 리뷰 범위 밖.)
+        assert bot.config.account_id == "acc-nasdaq"
+        assert bot.config.strategy_id == nasdaq_sid
+        col, cfg = await _row_strategy_ids(db, "bot1")
+        assert col == nasdaq_sid == cfg
+        row = await db.fetch_one(
+            "SELECT config_json FROM bots WHERE bot_id = ?", ("bot1",)
+        )
+        assert json.loads(row["config_json"])["account_id"] == "acc-nasdaq"
+
+    async def test_simultaneous_change_incompatible_with_new_account_raises(
+        self, manager_with_account, account_service, ctx, db, tmp_path
+    ):
+        """(b) 새 strategy 가 **새 계좌(NASDAQ)** exchange 와 비호환 → raise·미변경.
+
+        봇은 KRX 계좌에서 시작. 한 요청으로 account_id 를 NASDAQ 계좌로,
+        strategy 를 KRX 전략으로 동시에 바꾼다. KRX 전략은 옛 계좌(KRX)와는
+        호환이지만 effective(새, NASDAQ) 계좌와는 비호환이므로, effective
+        계좌로 검증하면 raise 되어야 한다 (옛 계좌로 검증하면 잘못 통과).
+
+        검증은 swap/DB 저장 전이므로 옛·새 store 모두 미변경이어야 한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_nasdaq_account(account_service)
+        krx_sid = await _register_strategy(
+            db, _KRX_STRATEGY_SOURCE, "krx_compat", "1.0.0", tmp_path
+        )
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        with pytest.raises(IncompatibleExchangeError):
+            await manager_with_account.update_bot(
+                "bot1", account_id="acc-nasdaq", strategy_id=krx_sid
+            )
+
+        # swap/저장 전 raise: memory config 와 DB(컬럼·config_json·account_id)
+        # 모두 옛 값 유지.
+        bot = manager_with_account.get_bot("bot1")
+        assert bot.config.strategy_id == "s1"
+        assert bot.config.account_id == "acc-test"
+        col, cfg = await _row_strategy_ids(db, "bot1")
+        assert col == "s1" == cfg
+        row = await db.fetch_one(
+            "SELECT account_id FROM bots WHERE bot_id = ?", ("bot1",)
+        )
+        assert row["account_id"] == "acc-test"
+
+    async def test_account_only_change_does_not_trigger_validation(
+        self, manager_with_account, account_service, ctx, db
+    ):
+        """(c) account_id 만 바꾸고 strategy 동일 → 전략 검증 미트리거.
+
+        ``s1`` 은 registry 에 등록되지 않았지만, strategy_id 가 그대로이므로
+        검증이 트리거되지 않아 account_id-only update 가 성공해야 한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_krx_account(account_service, account_id="acc-test2")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager_with_account.update_bot("bot1", account_id="acc-test2")
+
+        # strategy 검증 미트리거 → 미등록 ``s1`` 에도 raise 없이 성공.
+        # account_id 는 memory config + config_json 에 새 값으로 반영된다.
+        assert bot.config.account_id == "acc-test2"
+        assert bot.config.strategy_id == "s1"
+        row = await db.fetch_one(
+            "SELECT config_json FROM bots WHERE bot_id = ?", ("bot1",)
+        )
+        assert json.loads(row["config_json"])["account_id"] == "acc-test2"
 
 
 # ── (d)(e) assign_strategy / change_strategy 일관성 ──────────────

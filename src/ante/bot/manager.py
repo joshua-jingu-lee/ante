@@ -501,14 +501,23 @@ class BotManager:
             # 비호환이면 ``StrategyNotFoundError`` / ``IncompatibleExchangeError``
             # 로 raise 하여 stale·invalid strategy_id 가 컬럼/``config_json``
             # 에 commit 되지 않도록 막는다 (create_bot L390-402 선례 재사용).
+            #
+            # account_id 는 update_bot kwargs (``updates``) 로 함께 변경될 수
+            # 있다 (아래 ``config_fields.update(updates)`` 가 account_id 컬럼을
+            # 덮어쓴다). 한 요청이 account_id 와 strategy_id 를 동시에 바꾸면
+            # 새 전략의 exchange 호환은 **옛 계좌가 아니라 새(effective) 계좌**
+            # 로 검증해야 한다. 그렇지 않으면 새 계좌에 비호환 전략이 commit
+            # 될 수 있다. effective account_id = 요청이 account_id 를 바꾸면 그
+            # 새 값, 아니면 ``old_config.account_id``.
             old_config = bot.config
+            effective_account_id = updates.get("account_id", old_config.account_id)
             new_strategy_id = updates.get("strategy_id")
             if (
                 new_strategy_id is not None
                 and new_strategy_id != old_config.strategy_id
             ):
                 await self._validate_strategy_change(
-                    account_id=old_config.account_id,
+                    account_id=effective_account_id,
                     strategy_id=new_strategy_id,
                 )
 
