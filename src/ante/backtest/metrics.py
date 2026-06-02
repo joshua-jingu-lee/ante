@@ -198,7 +198,9 @@ def _estimate_trade_pnl(trades: list[Any]) -> list[float]:
                 positions[symbol] = {"quantity": 0, "total_cost": 0.0}
             pos = positions[symbol]
             pos["quantity"] += trade.quantity
-            pos["total_cost"] += trade.price * trade.quantity
+            # 매수 수수료를 원가(cost basis)에 포함한다. avg_cost가 주당으로
+            # amortize되어 부분 매도에서도 일관되게 반영된다 (#1990).
+            pos["total_cost"] += trade.price * trade.quantity + trade.commission
         elif trade.side == "sell":
             pos = positions.get(symbol) or {}
             if pos and pos.get("quantity", 0) > 0:
