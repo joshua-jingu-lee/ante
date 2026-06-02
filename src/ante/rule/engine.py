@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury.treasury import Treasury
 
@@ -266,6 +267,7 @@ class RuleEngine:
         treasury: Treasury | None = None,
         trade_service: TradeService | None = None,
         account: Account | None = None,
+        order_tracker: OrderTracker | None = None,
     ) -> None:
         from ante.account.scoping import require_account_id
 
@@ -277,6 +279,11 @@ class RuleEngine:
         self._bot_strategy_resolver = bot_strategy_resolver
         self._treasury = treasury
         self._trade_service = trade_service
+        # #2045: 권위 주문 메타(symbol/side) 복원용. ``ctx.modify_order()`` 경로는
+        # ``OrderAction``/``OrderModifyEvent``에 symbol/side를 채우지 못하므로
+        # ``_on_order_modify``에서 order_id 기준으로 enrich한다. optional default
+        # None — 미주입이면 graceful degrade(symbol/side "" 유지, 기존 동작).
+        self._order_tracker = order_tracker
         # Account snapshot — reload 경로(``_on_config_changed``)에서 broker_type별
         # default를 다시 merge할 때 참조한다. 생명주기 동안 broker_type 불변 가정.
         # 기존 호출자(테스트 fixture 등) 호환을 위해 ``None`` 허용 — None일 때
@@ -1128,6 +1135,31 @@ class RuleEngine:
         # account_id 필터링
         if event.account_id != self._account_id:
             return
+
+        # #2045: modify_rejected 계약(symbol/side 필수키) 충족 — 단일 chokepoint.
+        # ``ctx.modify_order()`` 경로의 ``OrderModifyEvent``는 symbol/side가 빈
+        # 값이다(OrderAction에 없음). RuleEngine은 EventBus 첫 핸들러(priority
+        # 100)이고 EventBus가 동일 event 인스턴스를 후속 구독자(Gateway,
+        # priority 50)에 그대로 전달하므로(#1331 ``_consumed`` 선례가 동일
+        # 인스턴스 공유를 증명), 여기서 한 번 enrich하면 RuleEngine 거부 +
+        # 통과 후 Gateway not-implemented 거부가 모두 채워진 symbol/side를 본다.
+        # account_id 필터 직후이므로 record는 동일 계좌로 scope된다(cross-account
+        # leak 없음). order_tracker 미주입 / record 미발견 / account 불일치는
+        # graceful degrade(symbol/side "" 유지). EventBus가 copy/fanout으로
+        # 바뀌면 이 same-instance mutation이 Gateway에 전파되지 않으므로 회귀
+        # (``_consumed``와 동일 가정).
+        if self._order_tracker is not None and not event.symbol and not event.side:
+            try:
+                record = await self._order_tracker.get(event.order_id)
+            except Exception:
+                logger.warning(
+                    "주문 정정 메타 조회 실패: order=%s — symbol/side 미보강",
+                    event.order_id,
+                )
+                record = None
+            if record is not None and record.account_id == event.account_id:
+                object.__setattr__(event, "symbol", record.symbol)
+                object.__setattr__(event, "side", record.side)
 
         # 계좌 상태 조회
         account_status = "active"

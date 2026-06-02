@@ -514,6 +514,9 @@ async def _init_trading(s: Services) -> None:
         account_service=s.account_service,
         treasury_manager=s.treasury_manager,
         trade_service=s.trade_service,
+        # #2045: modify_rejected 의 symbol/side 보강용 권위 주문 메타 소스.
+        # OrderTracker 는 상단(#1946)에서 이미 생성되어 있다.
+        order_tracker=s.order_tracker,
     )
     await s.rule_engine_manager.initialize_all(
         accounts, config=s.config, dynamic_config=s.dynamic_config
