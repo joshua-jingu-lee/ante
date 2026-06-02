@@ -107,6 +107,8 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 > 주문 흐름 전체에서 이 값이 `order_id`로 전달되며, 주문의 라이프사이클을 추적하는 키로 사용.
 > 증권사가 반환하는 주문번호는 별도로 `broker_order_id` 필드에 저장.
 
+> **구독자 열 표기**: 구독자 열은 해당 이벤트를 직접 `subscribe`하는 모듈을 나열한다. 단 `Notification`은 도메인 이벤트 자체를 구독한다는 뜻이 아니라, 그 이벤트가 **NotificationEvent 발행 경로를 통해 사용자 알림 대상이 됨**을 표기한 것이다(`NotificationService`는 `NotificationEvent`/`ConfigChangedEvent`만 직접 구독한다).
+
 #### 주문 흐름 (Order Flow)
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
