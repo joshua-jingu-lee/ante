@@ -459,6 +459,107 @@ def test_acquire_lock_stale(tmp_path: Path) -> None:
     assert FeedOrchestrator._acquire_lock(feed_dir) is True
 
 
+def test_acquire_lock_records_current_pid(tmp_path: Path) -> None:
+    """정상 획득 시 lock 파일에 현재 PID가 십진 문자열로 기록된다.
+
+    기존 ``write_text(str(pid))`` 와 동일한 형식이어야
+    release/다른 reader 호환이 유지된다(#2007).
+    """
+    import os
+
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+
+    assert FeedOrchestrator._acquire_lock(feed_dir) is True
+    assert (feed_dir / "lock").read_text() == str(os.getpid())
+
+
+def test_acquire_lock_blocked_when_alive(tmp_path: Path) -> None:
+    """살아있는 프로세스(현재 PID)의 lock 보유 중에는 재획득이 차단된다.
+
+    원자성/이중 획득 차단: 현재 PID는 ``os.kill(pid, 0)`` 성공=alive 이므로
+    이미 lock 을 점유 중이면 두 번째 획득 시도는 ``False`` 이고 lock 파일도
+    보존된다(#2007/#2057).
+    """
+    import os
+
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+
+    # 첫 번째 획득(현재 PID 점유)
+    assert FeedOrchestrator._acquire_lock(feed_dir) is True
+    assert (feed_dir / "lock").read_text() == str(os.getpid())
+
+    # 두 번째 획득 시도 → alive 로 판정되어 차단, lock 보존
+    assert FeedOrchestrator._acquire_lock(feed_dir) is False
+    assert (feed_dir / "lock").exists()
+    assert (feed_dir / "lock").read_text() == str(os.getpid())
+
+
+def test_acquire_lock_permission_error_is_alive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``os.kill`` PermissionError(EPERM)는 alive 로 보고 차단한다 (#2006).
+
+    EPERM 은 프로세스가 존재하나 signal 권한이 없을 때 발생한다.
+    기존엔 stale 제거 except 에 묶여 lock 을 삭제하고 획득하던 오판이었다.
+    수정 후에는 차단(``False``)하고 lock 파일을 보존해야 한다.
+    """
+    import ante.feed.pipeline.orchestrator as orch_mod
+
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+
+    # 임의 PID 로 lock 파일 생성
+    (feed_dir / "lock").write_text("12345")
+
+    def _raise_permission(pid: int, sig: int) -> None:
+        raise PermissionError
+
+    monkeypatch.setattr(orch_mod.os, "kill", _raise_permission)
+
+    assert FeedOrchestrator._acquire_lock(feed_dir) is False
+    # alive 판정 → lock 파일을 삭제하지 않고 보존
+    assert (feed_dir / "lock").exists()
+    assert (feed_dir / "lock").read_text() == "12345"
+
+
+def test_acquire_lock_stale_process_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``os.kill`` ProcessLookupError(ESRCH)는 stale 로 보고 제거 후 획득한다."""
+    import os
+
+    import ante.feed.pipeline.orchestrator as orch_mod
+
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+
+    (feed_dir / "lock").write_text("12345")
+
+    def _raise_lookup(pid: int, sig: int) -> None:
+        raise ProcessLookupError
+
+    monkeypatch.setattr(orch_mod.os, "kill", _raise_lookup)
+
+    assert FeedOrchestrator._acquire_lock(feed_dir) is True
+    # stale 제거 후 현재 PID 로 재획득
+    assert (feed_dir / "lock").read_text() == str(os.getpid())
+
+
+def test_acquire_lock_malformed_pid(tmp_path: Path) -> None:
+    """PID 파싱이 불가능한 malformed lock 은 제거 후 획득한다."""
+    import os
+
+    feed_dir = tmp_path / ".feed"
+    feed_dir.mkdir()
+
+    (feed_dir / "lock").write_text("notapid")
+
+    assert FeedOrchestrator._acquire_lock(feed_dir) is True
+    assert (feed_dir / "lock").read_text() == str(os.getpid())
+
+
 @pytest.mark.asyncio
 async def test_concurrent_run_blocked(
     tmp_data_path: Path,
