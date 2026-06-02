@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from ante.backtest.config import BacktestConfig
 from ante.backtest.service import BacktestService
 from ante.eventbus.events import BacktestCompleteEvent
+from ante.strategy.base import StrategyMeta
 from ante.strategy.validator import ValidationResult
 
 
@@ -22,6 +24,17 @@ def _bypass_validator():
         "ante.backtest.service.StrategyValidator.validate",
         return_value=ValidationResult(valid=True),
     )
+
+
+def _strategy_cls_with_meta() -> MagicMock:
+    """``StrategyLoader.load`` 가 반환할 strategy_cls 모사 (실제 ``.meta`` 보유).
+
+    #2060 meta fallback 으로 run() 이 ``strategy_cls.meta`` 에 접근하므로 실제
+    ``StrategyMeta`` 를 단 strategy_cls 를 반환한다(symbols=[] → no-symbols).
+    """
+    cls = MagicMock()
+    cls.meta = StrategyMeta(name="s", version="1.0", description="evt")
+    return cls
 
 
 class TestBacktestCompleteEventPublish:
@@ -44,11 +57,15 @@ class TestBacktestCompleteEventPublish:
             "end_date": "2025-12-31",
         }
 
-        with patch.object(service, "_validate_config"):
+        with patch.object(
+            service,
+            "_validate_config",
+            return_value=BacktestConfig(strategy_path="strategies/test.py"),
+        ):
             with _bypass_validator():
                 with patch(
                     "ante.backtest.service.StrategyLoader.load",
-                    return_value=MagicMock,
+                    return_value=_strategy_cls_with_meta(),
                 ):
                     with patch(
                         "ante.backtest.service.BacktestDataProvider",
@@ -84,11 +101,15 @@ class TestBacktestCompleteEventPublish:
             "end_date": "2025-12-31",
         }
 
-        with patch.object(service, "_validate_config"):
+        with patch.object(
+            service,
+            "_validate_config",
+            return_value=BacktestConfig(strategy_path="strategies/test.py"),
+        ):
             with _bypass_validator():
                 with patch(
                     "ante.backtest.service.StrategyLoader.load",
-                    return_value=MagicMock,
+                    return_value=_strategy_cls_with_meta(),
                 ):
                     with patch(
                         "ante.backtest.service.BacktestDataProvider",
