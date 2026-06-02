@@ -130,7 +130,10 @@ class StrategyValidator:
 
         # 4. exchange 유효성 검증
         if len(strategy_classes) == 1:
-            exchange_value = self._extract_meta_exchange(strategy_classes[0])
+            module_consts = self._module_string_constants(tree)
+            exchange_value = self._extract_meta_exchange(
+                strategy_classes[0], module_consts
+            )
             if exchange_value is not None and exchange_value not in VALID_EXCHANGES:
                 errors.append(
                     f"Invalid exchange value: '{exchange_value}'. "
@@ -189,8 +192,38 @@ class StrategyValidator:
                     return True
         return False
 
-    def _extract_meta_exchange(self, cls: ast.ClassDef) -> str | None:
-        """meta에서 exchange 값을 추출. 없으면 None 반환."""
+    @staticmethod
+    def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+        """모듈 레벨 `NAME = "literal"` 문자열 상수 map (정적 해석용)."""
+        consts: dict[str, str] = {}
+        for node in tree.body:  # 모듈 레벨만
+            if (
+                isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                for t in node.targets:
+                    if isinstance(t, ast.Name):
+                        consts[t.id] = node.value.value
+            elif (
+                isinstance(node, ast.AnnAssign)
+                and node.value is not None
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+                and isinstance(node.target, ast.Name)
+            ):
+                consts[node.target.id] = node.value.value
+        return consts
+
+    def _extract_meta_exchange(
+        self, cls: ast.ClassDef, module_consts: dict[str, str]
+    ) -> str | None:
+        """meta에서 exchange 값을 추출. 없으면 None 반환.
+
+        exchange kwarg 가 literal(`ast.Constant`)이면 그대로,
+        모듈 레벨 문자열 상수 이름(`ast.Name`)이면 ``module_consts`` 로
+        정적 해석한다. 해석 불가(계산식/비문자열 Name)는 None(기존 동작).
+        """
         for node in cls.body:
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 target = (
@@ -201,8 +234,15 @@ class StrategyValidator:
                 value = node.value
                 if isinstance(value, ast.Call):
                     for kw in value.keywords:
-                        if kw.arg == "exchange" and isinstance(kw.value, ast.Constant):
+                        if kw.arg != "exchange":
+                            continue
+                        if isinstance(kw.value, ast.Constant):
                             return str(kw.value.value)
+                        if (
+                            isinstance(kw.value, ast.Name)
+                            and kw.value.id in module_consts
+                        ):
+                            return module_consts[kw.value.id]
         return None
 
     def _has_accepts_external_signals(self, cls: ast.ClassDef) -> bool:
