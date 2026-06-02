@@ -98,6 +98,50 @@ class TestSignal:
         assert m.timeframe == "1d"
         assert m.exchange == "KRX"
 
+    def test_meta_hash_symbols_none(self):
+        """symbols=None인 meta는 해시 가능하다."""
+        m = StrategyMeta(name="x", version="1.0.0", description="x", symbols=None)
+        assert isinstance(hash(m), int)
+
+    def test_meta_hash_symbols_list_single(self):
+        """symbols가 단일 원소 list여도 해시 가능하다 (이슈 #2049 repro)."""
+        m = StrategyMeta(name="x", version="1.0.0", description="x", symbols=["005930"])
+        assert isinstance(hash(m), int)
+
+    def test_meta_hash_symbols_list_multi(self):
+        """symbols가 다중 원소 list여도 해시 가능하다."""
+        m = StrategyMeta(
+            name="x",
+            version="1.0.0",
+            description="x",
+            symbols=["005930", "000660"],
+        )
+        assert isinstance(hash(m), int)
+
+    def test_meta_eq_hash_consistency(self):
+        """같은 값(동일 symbols list)인 두 meta는 eq True이고 hash가 같다."""
+        m1 = StrategyMeta(
+            name="x", version="1.0.0", description="x", symbols=["005930", "000660"]
+        )
+        m2 = StrategyMeta(
+            name="x", version="1.0.0", description="x", symbols=["005930", "000660"]
+        )
+        assert m1 == m2
+        assert hash(m1) == hash(m2)
+
+    def test_meta_usable_in_set_and_dict(self):
+        """list symbols를 가진 meta가 set/dict 키로 동작한다."""
+        m1 = StrategyMeta(
+            name="x", version="1.0.0", description="x", symbols=["005930"]
+        )
+        m2 = StrategyMeta(
+            name="y", version="1.0.0", description="y", symbols=["000660"]
+        )
+        assert {m1, m2} == {m1, m2}
+        mapping = {m1: "a", m2: "b"}
+        assert mapping[m1] == "a"
+        assert mapping[m2] == "b"
+
     def test_signal_defaults(self):
         """Signal 기본값."""
         s = Signal(symbol="005930", side="buy", quantity=10.0)
