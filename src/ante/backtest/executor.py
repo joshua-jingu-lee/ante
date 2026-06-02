@@ -148,18 +148,21 @@ class BacktestExecutor:
             queue: list[Signal] = list(signals)
             fills_this_step = 0
             while queue:
+                # cap 검사는 다음 체결을 실행하기 전에 한다(>= 선검사). 이렇게
+                # 해야 정확히 _MAX_FILLS_PER_STEP개만 체결되고, cap에 도달한 뒤의
+                # 1001번째 체결이 실행/기록되지 않는다(#2073 off-by-one 수정).
+                if fills_this_step >= _MAX_FILLS_PER_STEP:
+                    logger.warning(
+                        "on_fill follow-up 한도(%d) 도달 — step %s truncate",
+                        _MAX_FILLS_PER_STEP,
+                        timestamp,
+                    )
+                    break
                 sig = queue.pop(0)
                 fill = await self._execute_signal(sig, timestamp)
                 if fill is None:
                     continue
                 fills_this_step += 1
-                if fills_this_step > _MAX_FILLS_PER_STEP:
-                    logger.warning(
-                        "on_fill follow-up 한도(%d) 초과 — step %s truncate",
-                        _MAX_FILLS_PER_STEP,
-                        timestamp,
-                    )
-                    break
                 follow_ups = await strategy.on_fill(fill)
                 if follow_ups:
                     queue.extend(follow_ups)

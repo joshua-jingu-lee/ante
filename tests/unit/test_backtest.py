@@ -2387,11 +2387,15 @@ class TestBacktestOnFillFollowUp:
         assert on_fill_calls == 0
 
     async def test_infinite_follow_up_truncated_at_cap(self, store, monkeypatch):
-        """(e) 무한 follow-up: on_fill이 매 호출 buy 발행 → cap에서 truncate.
+        """(e) 무한 follow-up: on_fill이 매 호출 buy 발행 → cap에서 정확히 truncate.
 
         on_fill이 매번 follow-up buy를 발행해도 _MAX_FILLS_PER_STEP cap에서
         끊겨 무한루프 없이 종료된다. cap을 작게(5) monkeypatch해 테스트가 빠르게
         끝나도록 한다(타임아웃 가드).
+
+        cap 검사는 다음 체결을 실행하기 전에 ``fills_this_step >= cap`` 으로
+        선검사하므로(#2073 off-by-one 수정), 한 step당 체결은 **정확히 cap개**다
+        (cap+1번째 체결은 실행되지 않는다).
         """
         import ante.backtest.executor as executor_mod
 
@@ -2432,10 +2436,12 @@ class TestBacktestOnFillFollowUp:
         # 무한루프면 여기서 hang → 테스트 타임아웃. 정상 종료해야 한다.
         result = await executor.run()
 
-        # cap=5(monkeypatch): 한 step에서 fills_this_step이 cap을 초과하는 순간
-        # break하므로, 한 step당 체결은 cap+1(=6, break를 유발한 체결은 이미
-        # 실행됨)을 넘지 않는다. 첫 step만 on_step이 buy를 발행하고 이후
-        # step은 _entered=True라 추가 entry가 없으므로, 총 체결은 cap+1로
-        # bounded된다(무한 누적/무한루프 없음). 정상 종료 자체가 핵심 검증.
-        assert len(result.trades) >= 1
-        assert len(result.trades) <= executor_mod._MAX_FILLS_PER_STEP + 1
+        # cap=5(monkeypatch): 다음 체결을 실행하기 전에 fills_this_step >= cap을
+        # 선검사하고 break하므로, 한 step당 체결은 **정확히 cap(=5)** 개다(cap+1
+        # 번째 체결은 실행되지 않음 — #2073 off-by-one 수정). 첫 step만 on_step이
+        # buy를 발행하고 이후 step은 _entered=True라 추가 entry가 없으므로, 총
+        # 체결은 정확히 cap이다(무한 누적/무한루프 없음). 정상 종료 + cap 정확성이
+        # 핵심 검증.
+        assert len(result.trades) == executor_mod._MAX_FILLS_PER_STEP
+        # cap에 도달한 모든 체결마다 on_fill이 호출되었다(체결당 1회, 정확히 cap회).
+        # cap+1번째 체결 시도는 막혔으므로 on_fill 호출도 cap회를 넘지 않는다.
