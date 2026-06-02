@@ -302,6 +302,65 @@ class TestFeedInjectValidationPrecedence:
         _assert_no_parquet_artifact(data_path)
 
 
+class TestFeedInjectWrittenPath:
+    """#2050: text 출력 'Written to' 경로가 실제 ParquetStore 레이아웃과 정합.
+
+    하드코딩 `ohlcv/krx/{tf}/{symbol}/`가 아니라
+    `store.resolve_path(symbol, tf, exchange="KRX")`(= `ohlcv/{tf}/KRX/{symbol}/`)
+    를 출력한다(drift 방지).
+    """
+
+    def test_written_path_matches_store_resolve_path(self, tmp_path):
+        """text 모드 'Written to' 경로 == store.resolve_path base 상대경로."""
+        from ante.data.store import ParquetStore
+
+        runner = _make_runner()
+        csv = _write_csv(tmp_path)
+        data_path = tmp_path / "data"
+
+        with patch("ante.feed.injector.FeedInjector") as mock_injector:
+            mock_injector.return_value.inject_csv.return_value = 3
+            result = runner.invoke(
+                cli,
+                _inject_args(csv, data_path, "--symbol", "005930", "--timeframe", "1d"),
+            )
+
+        assert result.exit_code == 0, result.output
+        expected = ParquetStore(base_path=data_path).resolve_path(
+            "005930", "1d", exchange="KRX"
+        )
+        expected_rel = expected.relative_to(data_path)
+        assert f"Written to {expected_rel}/" in result.output
+        # 실제 레이아웃 정합: ohlcv/{tf}/{exchange}/{symbol}/
+        assert "Written to ohlcv/1d/KRX/005930/" in result.output
+        # 기존 하드코딩 잘못된 경로(ohlcv/krx/{tf}/{symbol}/)는 더 이상 출력 안 됨.
+        assert "ohlcv/krx/1d/005930/" not in result.output
+
+    def test_written_path_not_emitted_in_json_mode(self, tmp_path):
+        """JSON 모드는 'Written to' 텍스트 라인을 출력하지 않는다(회귀 락)."""
+        runner = _make_runner()
+        csv = _write_csv(tmp_path)
+        data_path = tmp_path / "data"
+
+        with patch("ante.feed.injector.FeedInjector") as mock_injector:
+            mock_injector.return_value.inject_csv.return_value = 3
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    *_inject_args(
+                        csv, data_path, "--symbol", "005930", "--timeframe", "1d"
+                    ),
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["rows"] == 3
+        assert "Written to" not in result.stdout
+
+
 class TestFeedInjectAuthDecorators:
     """@require_auth / @require_scope("data:write") 데코레이터 정상 동작."""
 
