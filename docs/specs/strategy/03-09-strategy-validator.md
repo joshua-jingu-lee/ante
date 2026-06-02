@@ -32,9 +32,9 @@
 2. **Strategy 상속 클래스 존재 여부** — 파일 내 정확히 1개의 Strategy 하위 클래스 필요 (에러). 메시지(`"No class inheriting from Strategy found"`, `"Multiple Strategy subclasses found: ..."`)는 사용자가 제출한 식별자(클래스명)를 의도적으로 노출하는 **actionable 계약**이다 (#1675 no-reflection 매트릭스 OUT-OF-SCOPE).
 3. **필수 요소 검사** — `meta` 클래스 변수, `on_step()` 메서드 존재 확인 (에러). `accepts_external_signals=True`인데 `on_data()` 미구현 시 경고. 메시지의 멤버명·키워드는 actionable 계약이다.
 4. **금지 모듈 import 검사** — 시스템 접근(`os`, `subprocess`), 네트워크(`requests`, `httpx`), DB 직접 접근(`sqlite3`), 파일시스템(`pathlib`) 등 차단 (에러). `"Forbidden import: {module}"` 의 module 식별자는 actionable 계약이다.
-5. **금지된 내장 함수 호출** — `eval()`, `exec()`, `compile()`, `__import__()` 호출 탐지 (에러). `"Forbidden built-in call: {name}() at line {lineno}"` 의 함수명·라인은 actionable 계약이다.
+5. **금지된 내장 함수 호출** — `eval()`, `exec()`, `compile()`, `__import__()`, `open()`, `globals()`, `locals()` 호출 탐지 (에러). `"Forbidden built-in call: {name}() at line {lineno}"` 의 함수명·라인은 actionable 계약이다. `open()`은 builtin 파일시스템 게이트, `globals()`/`locals()`는 샌드박스 우회 경로이므로 경고가 아닌 에러로 차단한다 (전략은 파일시스템 접근 불가 — #4의 `pathlib` import 에러 차단과 정합). 이 목록의 SSOT는 `src/ante/strategy/validator.py`의 `FORBIDDEN_BUILTINS` 집합이며, 향후 항목 추가 시 코드와 본 스펙을 함께 동기한다. 탐지는 직접 호출(`open(...)`)뿐 아니라 `__builtins__["open"](...)` / `__builtins__.open(...)` 우회 형태도 포함한다.
 6. **금지된 최상위 코드** — import, 클래스/함수 정의, 리터럴 상수 할당, docstring 외의 최상위 실행 코드 차단 (에러). `"Forbidden top-level code at line {lineno}: {NodeType}"` 의 AST 노드 타입명·라인은 actionable 계약이다.
-7. **위험 패턴 경고** — `open()` 파일 접근 호출 탐지 (경고)
+7. **위험 패턴 경고** — 현재 경고로 분류되는 위험 패턴 없음. `open()` 파일 접근 호출은 보안 강화 결정에 따라 #5(금지된 내장 함수 호출)로 승격되어 **에러**로 차단한다. `_find_dangerous_patterns()`는 현재 빈 경고 목록을 반환하며, 향후 로드는 허용하되 알릴 위험 패턴이 생기면 이 항목에 추가한다.
 8. **exchange 유효성 검증** — `meta.exchange` 값이 유효한 거래소 코드인지 검증 (에러). 유효 값: `VALID_EXCHANGES = {"KRX", "NYSE", "NASDAQ", "AMEX", "TEST", "*"}`. `"Invalid exchange value: '{value}'. Valid values: ..."` 의 exchange 식별자는 actionable 계약이다.
 9. **symbols와 exchange 일관성 경고** — `symbols`가 명시된 경우, 심볼 형식이 exchange와 맞는지 경고 표시. 예: KRX 전략에 `"AAPL"`은 KRX 종목코드 형식이 아님 (경고)
 
@@ -54,6 +54,7 @@
    - 시스템 접근(os, sys, subprocess, shutil, ctypes), 네트워크(socket, http, urllib, requests, aiohttp, httpx), DB 직접 접근(sqlite3, sqlalchemy), 코드 로딩(importlib, pickle), 파일시스템(pathlib) 차단
 
 3. **경고(warning)와 에러(error) 분리**
-   - 에러: 로드 차단 사유 (금지 모듈, 필수 요소 미비)
-   - 경고: 사용자에게 알리되 로드는 허용 (eval 호출, open 사용 등)
+   - 에러: 로드 차단 사유 (금지 모듈, 필수 요소 미비, 금지된 내장 함수 호출)
+   - 경고: 사용자에게 알리되 로드는 허용 (예: `accepts_external_signals=True`인데 `on_data()` 미구현, symbols/exchange 형식 불일치)
+   - 파일시스템/샌드박스 우회 경로는 모두 에러로 차단한다: `open()`/`globals()`/`locals()` 호출(#5), `pathlib`/`os`/`subprocess` import(#4)
    - CLI에서 `ante strategy validate`로 확인 가능
