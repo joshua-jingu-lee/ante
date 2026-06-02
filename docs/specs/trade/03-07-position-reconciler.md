@@ -51,13 +51,18 @@
   - 실제 포지션/체결 복구는 **FillApplier(#1946)** 가 단일 권위자로 수행한다(reconciler 는
     복구하지 않는다).
 - `excess > capacity` 또는 **매칭 주문 없음** → 기존 **"외부 매수"** 로 정상 보정·알림
-  (level=critical). 단 `skip_external_buy=True` 면 그 보정만 억제된다(아래 layering).
+  (level=critical). 단 `skip_external_buy=True` 면 그 보정 **및 `PositionMismatchEvent`/
+  `NotificationEvent` 발행**이 모두 억제되고 경고 로그만 남는다(아래 layering).
+  self_submitted 분기(보정 skip + info 이벤트는 **발행**)와 달리, external-buy+skip 은
+  불일치 이벤트 자체를 발행하지 않는다.
 
 **self-check 와 `skip_external_buy` 의 layering(R1-1, normative):** self-check 는
 `skip_external_buy` 와 **무관하게 항상** 수행된다. `skip_external_buy`(#1946 기동 barrier)는
-분류 결과 중 **external-buy "보정"만 억제**하는 별도 계층이다. 따라서 주기
-reconcile(`skip_external_buy=False`)에서도 self 는 보정되지 않고, self 가 "외부 매수"로
-재오분류되지 않는다.
+분류 결과 중 **external-buy 분류의 보정 + 불일치 이벤트(`PositionMismatchEvent`/
+`NotificationEvent`) 발행을 억제**(경고 로그만 남김)하는 별도 계층이다. 이는 보정은 skip 하되
+info 이벤트는 발행하는 self_submitted 분기와 다르다 — external-buy+skip 은 그 1회의 불일치
+관측 자체를 다음 주기로 연기한다. 따라서 주기 reconcile(`skip_external_buy=False`)에서도
+self 는 보정되지 않고, self 가 "외부 매수"로 재오분류되지 않는다.
 
 **bounded known-limitation(R2-1, normative):** broker 포지션은 **총량**만 제공하므로
 self+external 혼재를 원천적으로 분해할 수 없다(예: ante 미체결 100, self 미기록 50, 숨은
