@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -27,6 +28,7 @@ CREATE TABLE IF NOT EXISTS reports (
     submitted_at       TEXT NOT NULL,
     submitted_by       TEXT DEFAULT 'agent',
     backtest_period    TEXT DEFAULT '',
+    backtest_run_id    TEXT DEFAULT '',
     total_return_pct   REAL DEFAULT 0.0,
     total_trades       INTEGER DEFAULT 0,
     sharpe_ratio       REAL,
@@ -46,6 +48,13 @@ CREATE INDEX IF NOT EXISTS idx_reports_status
     ON reports(status);
 """
 
+# 기존 reports 테이블(backtest_run_id 컬럼 없는 pre-#1999 DB)에 컬럼을 추가하는
+# 멱등 마이그레이션. ``CREATE TABLE`` 은 ``IF NOT EXISTS`` 라 기존 테이블에는
+# 신규 컬럼을 만들지 않으므로 ALTER 가 필요하다 (member/service.py 선례).
+_BACKTEST_RUN_ID_MIGRATION = (
+    "ALTER TABLE reports ADD COLUMN backtest_run_id TEXT DEFAULT ''"
+)
+
 
 class ReportStore:
     """리포트 저장·관리."""
@@ -54,8 +63,18 @@ class ReportStore:
         self._db = db
 
     async def initialize(self) -> None:
-        """스키마 생성."""
+        """스키마 생성 + 컬럼 마이그레이션."""
         await self._db.execute_script(REPORT_SCHEMA)
+        # backtest_run_id 컬럼 멱등 추가 (#1999). 컬럼이 이미 존재하면
+        # ``sqlite3.OperationalError: duplicate column name: backtest_run_id`` 가
+        # 발생하므로 그 메시지만 무시하고, 다른 ``OperationalError`` (예: disk
+        # I/O, locked, schema 손상)는 그대로 전파해 silent failure 를 막는다.
+        try:
+            await self._db.execute(_BACKTEST_RUN_ID_MIGRATION)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+            logger.debug("backtest_run_id 컬럼 이미 존재 — 마이그레이션 skip")
         logger.info("ReportStore 초기화 완료")
 
     async def submit(self, report: StrategyReport) -> str:
@@ -75,12 +94,13 @@ class ReportStore:
             """INSERT INTO reports
                (report_id, strategy_name, strategy_version,
                 strategy_path, status, submitted_at, submitted_by,
-                backtest_period, total_return_pct, total_trades,
+                backtest_period, backtest_run_id,
+                total_return_pct, total_trades,
                 sharpe_ratio, max_drawdown_pct, win_rate,
                 summary, rationale, risks, recommendations,
                 detail_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                       ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 report.report_id,
                 report.strategy_name,
@@ -90,6 +110,7 @@ class ReportStore:
                 report.submitted_at.isoformat(),
                 report.submitted_by,
                 report.backtest_period,
+                report.backtest_run_id,
                 report.total_return_pct,
                 report.total_trades,
                 report.sharpe_ratio,
@@ -138,7 +159,8 @@ class ReportStore:
                 """UPDATE reports
                    SET strategy_version = ?, strategy_path = ?,
                        submitted_at = ?, submitted_by = ?,
-                       backtest_period = ?, total_return_pct = ?,
+                       backtest_period = ?, backtest_run_id = ?,
+                       total_return_pct = ?,
                        total_trades = ?, sharpe_ratio = ?,
                        max_drawdown_pct = ?, win_rate = ?,
                        summary = ?, rationale = ?, risks = ?,
@@ -150,6 +172,7 @@ class ReportStore:
                     report.submitted_at.isoformat(),
                     report.submitted_by,
                     report.backtest_period,
+                    report.backtest_run_id,
                     report.total_return_pct,
                     report.total_trades,
                     report.sharpe_ratio,
@@ -265,6 +288,7 @@ class ReportStore:
                 "risks",
                 "recommendations",
                 "detail_json",
+                "backtest_run_id",
             ],
             "format": "JSON",
             "example": {
@@ -301,6 +325,7 @@ class ReportStore:
             ),
             submitted_by=row.get("submitted_by", "agent"),
             backtest_period=row.get("backtest_period", ""),
+            backtest_run_id=row.get("backtest_run_id") or "",
             total_return_pct=float(row.get("total_return_pct", 0)),
             total_trades=int(row.get("total_trades", 0)),
             sharpe_ratio=(

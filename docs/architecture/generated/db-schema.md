@@ -4,7 +4,7 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-> 마지막 갱신: 2026-06-02
+> 마지막 갱신: 2026-06-03
 
 - 테이블: **24**개
 - 인덱스: **32**개
@@ -54,7 +54,7 @@ erDiagram
 | 10 | [event_log](#event_log) | `eventbus` | 이벤트 감사 로그 | 6 |
 | 11 | [instruments](#instruments) | `instrument` | 종목 메타데이터 | 8 |
 | 12 | [members](#members) | `member` | 멤버 (사용자/에이전트) 등록 정보 | 17 |
-| 13 | [reports](#reports) | `report` | 전략 리포트 | 20 |
+| 13 | [reports](#reports) | `report` | 전략 리포트 | 21 |
 | 14 | [strategies](#strategies) | `strategy` | 전략 등록 정보 | 12 |
 | 15 | [fill_outbox](#fill_outbox) | `trade` | 체결 이벤트 transactional outbox (#1949) | 6 |
 | 16 | [order_tracker](#order_tracker) | `trade` |  | 16 |
@@ -347,6 +347,7 @@ CREATE TABLE IF NOT EXISTS reports (
     submitted_at       TEXT NOT NULL,
     submitted_by       TEXT DEFAULT 'agent',
     backtest_period    TEXT DEFAULT '',
+    backtest_run_id    TEXT DEFAULT '',
     total_return_pct   REAL DEFAULT 0.0,
     total_trades       INTEGER DEFAULT 0,
     sharpe_ratio       REAL,

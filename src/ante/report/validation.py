@@ -20,6 +20,10 @@ class ReportSubmitRequest(BaseModel):
     strategy_version: str
     strategy_path: str
     backtest_period: str
+    # 참조한 백테스트 run_id. payload로 직접 줄 수도 있고 CLI ``--run`` 으로도
+    # 줄 수 있다 (#1999). ``extra='forbid'`` 모델이라 payload 우회를 막기 위해
+    # 명시 필드로 선언한다. 빈 문자열은 "참조 없음".
+    backtest_run_id: str = ""
     total_return_pct: float = Field(allow_inf_nan=False)
     total_trades: int = Field(ge=0)
     sharpe_ratio: float | None = Field(default=None, allow_inf_nan=False)

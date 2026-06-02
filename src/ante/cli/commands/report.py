@@ -86,10 +86,6 @@ def submit(
 
     report_data: dict = dict(raw_data)
 
-    # --run 옵션으로 백테스트 run 참조 추가
-    if run_id:
-        report_data["backtest_run_id"] = run_id
-
     # ── ReportSubmitRequest 검증 ───────────────────────────────────────
     # SSOT: ``src/ante/report/validation.py::ReportSubmitRequest``.
     #
@@ -99,10 +95,12 @@ def submit(
     #
     # CLI 전용 extras 처리:
     # - ``submitted_by``는 모델 외부 필드 (CLI에서 분리 후 StrategyReport에 주입)
-    # - ``backtest_run_id``는 모델 외부 (run_id 참조용, store 컬럼 아님)
     # - ``detail_json``이 dict로 들어오면 직렬화 (모델은 str 요구)
+    #
+    # ``backtest_run_id`` (#1999): payload 또는 CLI ``--run`` 으로 줄 수 있다.
+    # ``ReportSubmitRequest`` 의 명시 필드이므로 ``extra='forbid'`` 검증을
+    # 통과하며, 검증 후 ``effective_run_id`` 로 존재검증 + 영속한다 (아래 _submit).
     submitted_by = report_data.pop("submitted_by", "agent")
-    report_data.pop("backtest_run_id", None)  # --run 옵션 결과는 모델 검증 대상 아님
     raw_detail = report_data.get("detail_json")
     if isinstance(raw_detail, dict):
         report_data["detail_json"] = json.dumps(raw_detail)
@@ -121,21 +119,28 @@ def submit(
         )
         raise SystemExit(1) from exc
 
+    # effective run_id (#1999): CLI ``--run`` 우선, 없으면 payload
+    # ``backtest_run_id``. ``--run`` 과 payload 가 둘 다 비어있지 않으면 ``--run``
+    # 이 silent override 한다 (테스트로 고정). 빈 문자열은 "참조 없음".
+    effective_run_id = run_id if run_id else validated.backtest_run_id
+
     async def _submit() -> dict:
         from ante.core.database import Database
 
         db = Database(resolved_db_path)
         await db.connect()
         try:
-            # run_id가 제공되면 backtest_runs에서 참조 검증
-            if run_id:
+            # effective_run_id 가 제공되면 (CLI --run 이든 payload 이든) backtest_runs
+            # 에서 존재 검증한다. payload 직접 주입도 검증 경로를 동일하게 거쳐
+            # 미존재 run 참조가 영속되는 우회를 차단한다 (#1999).
+            if effective_run_id:
                 from ante.backtest.run_store import BacktestRunStore
 
                 run_store = BacktestRunStore(db)
                 await run_store.initialize()
-                bt_run = await run_store.get(run_id)
+                bt_run = await run_store.get(effective_run_id)
                 if not bt_run:
-                    msg = f"백테스트 run을 찾을 수 없습니다: {run_id}"
+                    msg = f"백테스트 run을 찾을 수 없습니다: {effective_run_id}"
                     raise ValueError(msg)
 
             store = ReportStore(db)
@@ -156,6 +161,7 @@ def submit(
                 submitted_at=datetime.now(tz=UTC),
                 submitted_by=submitted_by,
                 backtest_period=validated.backtest_period,
+                backtest_run_id=effective_run_id,
                 total_return_pct=validated.total_return_pct,
                 total_trades=validated.total_trades,
                 sharpe_ratio=validated.sharpe_ratio,
@@ -173,7 +179,7 @@ def submit(
                 "report_id": report_id,
                 "strategy": report_obj.strategy_name,
                 "status": report_obj.status.value,
-                "backtest_run_id": run_id,
+                "backtest_run_id": report_obj.backtest_run_id,
             }
         finally:
             await db.close()
@@ -414,6 +420,7 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
                 "submitted_at": str(r.submitted_at),
                 "submitted_by": r.submitted_by,
                 "backtest_period": r.backtest_period,
+                "backtest_run_id": r.backtest_run_id,
                 "total_return_pct": r.total_return_pct,
                 "total_trades": r.total_trades,
                 "sharpe_ratio": r.sharpe_ratio,
