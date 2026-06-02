@@ -3274,3 +3274,396 @@ class TestNonDailyTimeframe:
         # datasets는 5m 기준.
         assert len(result.datasets) == 1
         assert result.datasets[0].timeframe == "5m"
+
+
+# ── order_type 트리거/리밋 게이트 (#1994) ──────────
+
+
+class TestBacktestOrderTypeGate:
+    """``Signal.order_type`` 트리거 게이트 + 체결가 limit cap 검증(#1994).
+
+    이전에는 executor가 order_type/price/stop_price를 무시하고 모든 주문을 현재
+    봉가로 즉시 시장가 체결했다. 이제 limit/stop/stop_limit은 현재 봉가로 조건을
+    충족할 때만 체결되고, limit/stop_limit 체결가는 슬리피지가 limit을 불리하게
+    넘지 않도록 cap된다. market(기본)은 항상 즉시 체결되어 기존 동작이 보존된다.
+    """
+
+    async def _run_single_signal(
+        self,
+        store,
+        signal: Signal,
+        current_close: float,
+        *,
+        slippage_rate: float = 0.0,
+    ):
+        """현재 봉 종가가 ``current_close`` 인 단일-봉 fixture에서 단일 Signal 실행.
+
+        BacktestExecutor.run은 첫 advance()가 row 0을 노출하므로(#2061), row 0
+        종가를 ``current_close`` 로 두면 첫 on_step에서 발행한 Signal이 그 가격으로
+        게이트/체결된다. 단일 봉이라 보유 포지션이 다음 봉으로 넘어가지 않는다.
+        """
+        df = _make_ohlcv_df_with_closes([current_close])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(signal),
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=slippage_rate,
+        )
+        result = await executor.run()
+        return executor, result
+
+    # ── limit ─────────────────────────────────────────
+
+    async def test_limit_buy_not_triggered_above(self, store):
+        """limit buy price=50, 현재가 100 → 미충족(현재가 > limit) → 미체결."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930", side="buy", quantity=10, order_type="limit", price=50.0
+            ),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 0
+
+    async def test_limit_buy_triggered_below_caps_at_limit(self, store):
+        """limit buy price=50, 현재가 40 → 체결, exec_price ≤ 50(cap)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930", side="buy", quantity=10, order_type="limit", price=50.0
+            ),
+            current_close=40.0,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        assert result.trades[0].price <= 50.0
+
+    async def test_limit_sell_not_triggered_below(self, store):
+        """limit sell price=150, 현재가 100 → 미충족(현재가 < limit) → 미체결."""
+        # 먼저 보유 포지션이 있어야 sell이 의미가 있으나, 트리거 게이트는 side
+        # 분기 이전이라 보유와 무관하게 미충족이면 skip된다. 보유 없이도 미체결.
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="limit",
+                price=150.0,
+            ),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 0
+
+    async def test_limit_sell_triggered_above_caps_at_limit(self, store):
+        """limit sell price=150, 현재가 160(보유 후) → 체결, exec_price ≥ 150(cap)."""
+        df = _make_ohlcv_df_with_closes([160.0, 160.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        class BuyThenLimitSell(Strategy):
+            meta = StrategyMeta(name="buy_limit_sell", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=10)]
+                if self._step == 2:
+                    return [
+                        Signal(
+                            symbol="005930",
+                            side="sell",
+                            quantity=10,
+                            order_type="limit",
+                            price=150.0,
+                        )
+                    ]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenLimitSell,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+        assert sells[0].price >= 150.0
+
+    # ── stop ──────────────────────────────────────────
+
+    async def test_stop_buy_not_triggered_below(self, store):
+        """stop buy stop_price=200, 현재가 100 → 미충족(현재가 < stop) → 미체결."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop",
+                stop_price=200.0,
+            ),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 0
+
+    async def test_stop_buy_triggered_above(self, store):
+        """stop buy stop_price=200, 현재가 210 → 체결(트리거→시장가)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop",
+                stop_price=200.0,
+            ),
+            current_close=210.0,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+
+    async def test_stop_sell_not_triggered_above(self, store):
+        """stop sell stop_price=80, 현재가 100 → 미충족(현재가 > stop) → 미체결."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="sell",
+                quantity=10,
+                order_type="stop",
+                stop_price=80.0,
+            ),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 0
+
+    async def test_stop_sell_triggered_below(self, store):
+        """stop sell stop_price=80, 현재가 70(보유 후) → 체결(트리거→시장가)."""
+        df = _make_ohlcv_df_with_closes([70.0, 70.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        class BuyThenStopSell(Strategy):
+            meta = StrategyMeta(name="buy_stop_sell", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=10)]
+                if self._step == 2:
+                    return [
+                        Signal(
+                            symbol="005930",
+                            side="sell",
+                            quantity=10,
+                            order_type="stop",
+                            stop_price=80.0,
+                        )
+                    ]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenStopSell,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+        sells = [t for t in result.trades if t.side == "sell"]
+        assert len(sells) == 1
+
+    # ── stop_limit (단일-봉 conjunction 근사) ──────────
+
+    async def test_stop_limit_buy_triggered_within_band(self, store):
+        """stop_limit buy(S=150,L=160), 현재가 155 → 체결(stop 트리거+limit 충족)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=150.0,
+                price=160.0,
+            ),
+            current_close=155.0,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        assert result.trades[0].price <= 160.0
+
+    async def test_stop_limit_buy_not_triggered_below_stop(self, store):
+        """stop_limit buy(S=150,L=160), 현재가 100 → 미체결(stop 트리거 안 됨)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=150.0,
+                price=160.0,
+            ),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 0
+
+    async def test_stop_limit_buy_not_triggered_above_limit(self, store):
+        """stop_limit buy(S=150,L=160), 현재가 170 → 미체결(limit 초과)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="stop_limit",
+                stop_price=150.0,
+                price=160.0,
+            ),
+            current_close=170.0,
+        )
+        assert len(result.trades) == 0
+
+    # ── slippage cap ──────────────────────────────────
+
+    async def test_limit_buy_slippage_does_not_exceed_limit(self, store):
+        """slippage cap: limit buy L=100, 현재가 100, slippage>0 → exec_price ≤ 100.
+
+        market이면 exec_price = 100*(1+0.01)=101로 limit을 초과하지만, limit은
+        min cap으로 100을 넘지 않아야 한다.
+        """
+        _, result = await self._run_single_signal(
+            store,
+            Signal(
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="limit",
+                price=100.0,
+            ),
+            current_close=100.0,
+            slippage_rate=0.01,
+        )
+        assert len(result.trades) == 1
+        # min(100*1.01, 100) = 100. 슬리피지가 limit을 불리하게 넘지 않는다.
+        assert result.trades[0].price == pytest.approx(100.0)
+        assert result.trades[0].price <= 100.0
+
+    # ── market 회귀 ────────────────────────────────────
+
+    async def test_market_order_fills_immediately(self, store):
+        """market(명시) → 현재가로 즉시 체결(회귀)."""
+        _, result = await self._run_single_signal(
+            store,
+            Signal(symbol="005930", side="buy", quantity=10, order_type="market"),
+            current_close=100.0,
+        )
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+
+    async def test_default_market_with_price_none_fills(self, store):
+        """기본 order_type(market)+price=None → 즉시 체결(회귀).
+
+        Signal 기본값(order_type="market", price=None, stop_price=None)이 게이트를
+        통과해 기존 시장가 체결 동작이 보존되는지 확인한다.
+        """
+        sig = Signal(symbol="005930", side="buy", quantity=10)
+        assert sig.order_type == "market"
+        assert sig.price is None
+        assert sig.stop_price is None
+        _, result = await self._run_single_signal(store, sig, current_close=100.0)
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+
+    # ── 필수 가격 필드 누락 / 알 수 없는 order_type ────
+
+    async def test_limit_missing_price_skipped_with_warning(self, store, caplog):
+        """limit + price=None → 미체결 skip + warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            _, result = await self._run_single_signal(
+                store,
+                Signal(symbol="005930", side="buy", quantity=10, order_type="limit"),
+                current_close=100.0,
+            )
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("limit" in r.getMessage() for r in warnings)
+
+    async def test_stop_missing_stop_price_skipped_with_warning(self, store, caplog):
+        """stop + stop_price=None → 미체결 skip + warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            _, result = await self._run_single_signal(
+                store,
+                Signal(symbol="005930", side="buy", quantity=10, order_type="stop"),
+                current_close=100.0,
+            )
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("stop" in r.getMessage() for r in warnings)
+
+    async def test_stop_limit_missing_field_skipped_with_warning(self, store, caplog):
+        """stop_limit + 한쪽 필드 누락(stop_price만, price=None) → 미체결 skip."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            _, result = await self._run_single_signal(
+                store,
+                Signal(
+                    symbol="005930",
+                    side="buy",
+                    quantity=10,
+                    order_type="stop_limit",
+                    stop_price=150.0,
+                ),
+                current_close=155.0,
+            )
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("stop_limit" in r.getMessage() for r in warnings)
+
+    async def test_unknown_order_type_skipped_with_warning(self, store, caplog):
+        """알 수 없는 order_type → 미체결 skip + warning."""
+        import logging
+
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            _, result = await self._run_single_signal(
+                store,
+                Signal(
+                    symbol="005930", side="buy", quantity=10, order_type="trailing_stop"
+                ),
+                current_close=100.0,
+            )
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert any("order_type" in r.getMessage() for r in warnings)
