@@ -502,6 +502,120 @@ class TestFetchFinancial:
         assert call_count == 1
 
 
+# -- daily_count attempt 기준 카운팅 (#2106) ----------------------------
+
+
+class _FakeZipResponse:
+    """_download_corp_code_zip의 session.get(...) async context manager 모킹.
+
+    ZIP 바이너리 응답을 흉내낸다 (content_type='application/zip').
+    """
+
+    def __init__(self, zip_bytes: bytes) -> None:
+        self._zip_bytes = zip_bytes
+        self.content_type = "application/zip"
+
+    async def __aenter__(self) -> _FakeZipResponse:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def read(self) -> bytes:
+        return self._zip_bytes
+
+
+class TestDailyCountAttemptCounting:
+    """모든 실제 HTTP 호출 경로에서 daily_count가 attempt 기준으로 증가한다.
+
+    실패/재시도 attempt도 카운트되고, 성공 시 1 attempt = 1 increment로
+    이중 카운트가 없어야 한다 (#2106).
+    """
+
+    # -- financial (_fetch_multi_acnt) 경로 --
+
+    @pytest.mark.asyncio
+    async def test_financial_failed_attempts_counted(self, source: DARTSource) -> None:
+        """financial: _do_request가 항상 실패해도 attempt 수만큼 카운트된다."""
+        import aiohttp
+
+        async def always_fail(session, url, params):
+            raise aiohttp.ClientConnectionError("Connection refused")
+
+        with patch.object(source, "_do_request", side_effect=always_fail):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_financial(["00126380"], "2024", "11011")
+
+        # max_retries=2 → 실패해도 2회 카운트 (기존엔 0)
+        assert source.rate_limiter.daily_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_financial_success_counts_once(self, source: DARTSource) -> None:
+        """financial: 단일 배치 성공 → daily_count == 1 (이중 카운트 없음)."""
+        response = _make_financial_response([_make_financial_item()])
+
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            await source.fetch_financial(["00126380"], "2024", "11011")
+
+        assert source.rate_limiter.daily_count == 1
+
+    @pytest.mark.asyncio
+    async def test_financial_multi_batch_counts_per_batch(
+        self, source: DARTSource
+    ) -> None:
+        """financial: 150 corp(2배치) 성공 → daily_count == 배치 수(2)."""
+        corp_codes = [f"{i:08d}" for i in range(150)]
+        response = _make_financial_response([_make_financial_item()])
+
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            await source.fetch_financial(corp_codes, "2024", "11011")
+
+        assert source.rate_limiter.daily_count == 2
+
+    # -- corp_code ZIP download (_download_corp_code_zip) 경로 --
+
+    @pytest.mark.asyncio
+    async def test_corp_code_success_counts_once(self, source: DARTSource) -> None:
+        """corp_code: ZIP 다운로드 성공 1회 → daily_count == 1.
+
+        성공 후 외부 increment를 제거하고 attempt 내부 카운트로 일원화했으므로
+        이중 카운트가 없어야 한다 (#2106).
+        """
+        zip_bytes = _make_corp_code_zip(
+            [{"corp_code": "00126380", "stock_code": "005930"}]
+        )
+
+        with patch(
+            "aiohttp.ClientSession.get",
+            return_value=_FakeZipResponse(zip_bytes),
+        ):
+            result = await source.fetch_corp_codes()
+
+        assert result == {"00126380": "005930"}
+        assert source.rate_limiter.daily_count == 1
+
+    @pytest.mark.asyncio
+    async def test_corp_code_failed_attempts_counted(self, source: DARTSource) -> None:
+        """corp_code: download가 항상 실패해도 attempt 수만큼 카운트된다."""
+        import aiohttp
+
+        with patch(
+            "aiohttp.ClientSession.get",
+            side_effect=aiohttp.ClientConnectionError("Connection refused"),
+        ):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DARTError, match="최종 실패"):
+                    await source.fetch_corp_codes()
+
+        # max_retries=2 → 실패해도 2회 카운트 (기존엔 0)
+        assert source.rate_limiter.daily_count == source._max_retries == 2
+
+
 # -- fetch (DataSource 프로토콜) ----------------------------------------
 
 

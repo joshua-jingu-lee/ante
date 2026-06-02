@@ -200,7 +200,8 @@ class DARTSource:
             if own_session:
                 await session.close()
 
-        self._rate_limiter.increment_daily()
+        # daily_count는 _download_corp_code_zip 내부에서 각 HTTP attempt마다
+        # 카운트된다 (#2106). 여기서 성공 후 별도 increment하지 않는다.
 
         # ZIP 해제 및 XML 파싱
         corp_code_map = self._parse_corp_code_zip(zip_bytes)
@@ -308,6 +309,10 @@ class DARTSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
+            # 실제 HTTP 요청(session.get) 시도 직전에 카운트한다.
+            # 성공/실패와 무관하게 모든 attempt를 반영한다 (#2106).
+            # 1 attempt = 1 increment.
+            self._rate_limiter.increment_daily()
 
             try:
                 async with asyncio.timeout(REQUEST_TIMEOUT):
@@ -431,13 +436,16 @@ class DARTSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
+            # 실제 HTTP 요청 시도(_do_request) 직전에 카운트한다.
+            # 성공/실패와 무관하게 모든 attempt를 반영한다 (#2106).
+            # 1 attempt = 1 increment.
+            self._rate_limiter.increment_daily()
 
             try:
                 data = await asyncio.wait_for(
                     self._do_request(session, url, params),
                     timeout=REQUEST_TIMEOUT,
                 )
-                self._rate_limiter.increment_daily()
             except (TimeoutError, aiohttp.ClientError) as exc:
                 last_error = exc
                 delay = self._backoff_delay(attempt)

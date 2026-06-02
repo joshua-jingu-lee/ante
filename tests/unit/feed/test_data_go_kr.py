@@ -699,6 +699,97 @@ class TestFetchByDate:
                 await source.fetch_by_date("2024-03-01")
 
     @pytest.mark.asyncio
+    async def test_failed_attempts_counted_in_daily(
+        self, source: DataGoKrSource
+    ) -> None:
+        """실패한 attempt도 daily_count에 반영된다 (#2106 repro).
+
+        _do_request가 항상 ClientError를 던지면 max_retries(=2)번 시도하고
+        최종 실패한다. 실제 HTTP 요청이 그만큼 나갔으므로 daily_count는
+        attempt 수(=max_retries)와 같아야 한다. 기존엔 성공 후에만
+        increment하여 0으로 남았다.
+        """
+        import aiohttp
+
+        async def always_fail(session, params):
+            raise aiohttp.ClientConnectionError("Connection refused")
+
+        with patch.object(source, "_do_request", side_effect=always_fail):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        # max_retries=2 → 2번 시도, 모두 실패해도 2회 카운트
+        assert source.rate_limiter.daily_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_success_counts_once_no_double(self, source: DataGoKrSource) -> None:
+        """성공 시 attempt 1회만 카운트되고 이중 카운트가 없다 (#2106).
+
+        단일 페이지 성공 → daily_count == 1.
+        """
+        response = _make_response([_make_item()], total_count=1)
+
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            await source.fetch_by_date("2024-03-01")
+
+        assert source.rate_limiter.daily_count == 1
+
+    @pytest.mark.asyncio
+    async def test_multi_page_count_equals_page_count(
+        self, source: DataGoKrSource
+    ) -> None:
+        """다중 페이지 수집 시 daily_count == page 수 (이중 카운트 없음, #2106)."""
+        page1_items = [_make_item(srtn_cd=f"00{i:04d}") for i in range(1000)]
+        page1 = _make_response(page1_items, total_count=1500)
+        page2_items = [_make_item(srtn_cd=f"01{i:04d}") for i in range(500)]
+        page2 = _make_response(page2_items, total_count=1500)
+
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            return page1 if call_count == 1 else page2
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            await source.fetch_by_date("2024-03-01")
+
+        # 2 페이지 = 2 attempt = 2 increment
+        assert call_count == 2
+        assert source.rate_limiter.daily_count == 2
+
+    @pytest.mark.asyncio
+    async def test_retry_then_success_counts_each_attempt(
+        self, source: DataGoKrSource
+    ) -> None:
+        """재시도 후 성공 시 실패 attempt + 성공 attempt 모두 카운트된다 (#2106).
+
+        첫 시도(ClientError 실패) + 두 번째 시도(성공) → daily_count == 2.
+        실제 HTTP 요청이 2회 나갔으므로 2회 카운트가 맞다.
+        """
+        import aiohttp
+
+        success_response = _make_response([_make_item()], total_count=1)
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise aiohttp.ClientConnectionError("Connection refused")
+            return success_response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                await source.fetch_by_date("2024-03-01")
+
+        assert call_count == 2
+        assert source.rate_limiter.daily_count == 2
+
+    @pytest.mark.asyncio
     async def test_fetch_delegates_to_fetch_by_date(
         self, source: DataGoKrSource
     ) -> None:
