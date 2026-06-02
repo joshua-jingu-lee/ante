@@ -9,6 +9,7 @@ import logging
 import math
 import re
 import sys
+import uuid
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
@@ -154,13 +155,61 @@ class BacktestService:
         result.config = effective
         result.datasets = data_provider.loaded_datasets
 
+        # #1998: 결과를 durable artifact(JSON)로 저장하고 경로를 result 에 기록한다.
+        # 이 경로가 BacktestCompleteEvent.result_path / backtest_runs.result_path
+        # 로 전파되어 ReportDraftGenerator 가 자동 리포트 초안을 생성한다. 저장
+        # 디렉토리는 effective.data_paths[0] (항상 채워짐) 하위 ``.backtest/results``
+        # 를 anchor 로 쓴다. BacktestResult 에 wall-clock timestamp 필드가 없어
+        # UUID 로 충돌 없이 네이밍한다.
+        result.result_path = self._save_result_artifact(result, effective)
+
         # BacktestCompleteEvent 발행
-        await self._publish_complete_event(result, config)
+        await self._publish_complete_event(result)
 
         return result
 
+    def _save_result_artifact(
+        self,
+        result: BacktestResult,
+        effective: BacktestConfig,
+    ) -> str:
+        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다 (#1998).
+
+        저장 실패(read-only/ephemeral data dir 등)는 backtest 자체를 실패시키지
+        않는다 — warning 을 남기고 ``""`` 를 반환하여 빈 result_path 로 이벤트가
+        발행되게 한다(기존 무회귀 동작 보존, 자동 draft 만 skip). ``to_dict()``
+        의 직렬화 계약 그대로 저장하므로 ReportDraftGenerator._load_result 가
+        그대로 소비한다.
+        """
+        from pathlib import Path
+
+        try:
+            artifact_dir = Path(effective.data_paths[0]) / ".backtest" / "results"
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            name = (
+                f"{result.strategy_name}_v{result.strategy_version}_"
+                f"{uuid.uuid4().hex}.json"
+            )
+            path = artifact_dir / name
+            path.write_text(json.dumps(result.to_dict(), default=str))
+        except OSError as e:
+            logger.warning(
+                "백테스트 결과 artifact 저장 실패(자동 리포트 초안 skip): %s",
+                e,
+            )
+            return ""
+        else:
+            logger.info("백테스트 결과 artifact 저장: %s", path)
+            return str(path)
+
     async def run_subprocess(self, config: dict[str, Any]) -> dict:
-        """백테스트를 subprocess로 격리 실행 (D-004)."""
+        """백테스트를 subprocess로 격리 실행 (D-004).
+
+        #1998 비목표: 이 경로는 BacktestCompleteEvent 를 발행하지 않고 CLI 에서
+        사용되지 않으므로(critical path 밖), 결과 artifact 저장·자동 리포트 초안
+        생성을 지원하지 않는다. durable artifact + result_path 전파는 in-process
+        ``run()`` 한정이다.
+        """
         self._validate_config(config)
 
         proc = await asyncio.create_subprocess_exec(
@@ -190,7 +239,6 @@ class BacktestService:
     async def _publish_complete_event(
         self,
         result: BacktestResult,
-        config: dict[str, Any],
     ) -> None:
         """BacktestCompleteEvent 발행."""
         if not self._eventbus:
@@ -203,7 +251,9 @@ class BacktestService:
             backtest_id=strategy_id,
             strategy_id=strategy_id,
             status="completed",
-            result_path=config.get("result_path", ""),
+            # #1998: run() 이 저장한 durable artifact 경로(저장 실패 시 ""). 빈
+            # 경로면 ReportDraftGenerator 가 자동 초안을 skip 한다(무회귀).
+            result_path=result.result_path,
         )
         await self._eventbus.publish(event)
         logger.info("BacktestCompleteEvent 발행: %s", strategy_id)

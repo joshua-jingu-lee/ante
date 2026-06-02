@@ -239,6 +239,25 @@ class TestBacktestResult:
         assert "config" in d
         assert "datasets" in d
 
+    def test_result_path_excluded_from_to_dict(self):
+        """#1998: result_path 런타임 필드는 to_dict() 직렬화 계약에 포함되지 않는다.
+
+        artifact 파일의 self-reference 를 막고 draft 소비 shape 를 무변경으로
+        유지하기 위함. dataclass 기본값은 "" 이며 set 후에도 직렬화에서 제외된다.
+        """
+        result = BacktestResult(
+            strategy_name="test",
+            strategy_version="1.0",
+            start_date="2026-01-01",
+            end_date="2026-06-30",
+            initial_balance=10_000_000,
+            final_balance=10_500_000,
+            total_return=5.0,
+        )
+        assert result.result_path == ""  # dataclass 기본값
+        result.result_path = "/data/.backtest/results/test_v1.0_abc.json"
+        assert "result_path" not in result.to_dict()
+
     def test_result_to_dict_with_trades(self):
         trade = BacktestTrade(
             timestamp=datetime(2026, 1, 2, tzinfo=UTC),

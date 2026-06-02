@@ -265,7 +265,10 @@ async def _save_backtest_run(
             max_drawdown_pct=metrics.get("max_drawdown"),
             total_trades=len(result.trades),
             win_rate=metrics.get("win_rate"),
-            result_path="",
+            # #1998: service.run() 이 저장한 durable artifact 경로를 이력에 기록한다
+            # (저장 실패 시 ""). backtest_runs.result_path 와 BacktestCompleteEvent.
+            # result_path 가 동일 artifact 를 가리켜 추적성을 보장한다.
+            result_path=result.result_path,
         )
     finally:
         await db.close()
