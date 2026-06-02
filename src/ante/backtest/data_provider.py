@@ -36,11 +36,19 @@ class BacktestDataProvider(DataProvider):
         start_date: str,
         end_date: str,
         exchange: str = "KRX",
+        timeframe: str = "1d",
     ) -> None:
         self._store = store
         self._start = start_date
         self._end = end_date
         self._exchange = exchange
+        # 이 run의 실행 timeframe(#2012). service가 load()로 적재한 캐시 키
+        # ``{symbol}:{timeframe}`` 와 일치시키기 위해, 내부 read 경로
+        # (get_current_price/get_indicator/get_current_bar_price)의 기본
+        # timeframe으로 쓴다. 기본 "1d" 로 두어 timeframe 미지정 생성(기존
+        # 테스트/backward-compat)은 종전과 동일하게 동작한다. get_ohlcv ABC
+        # 시그니처(timeframe="1d")는 불변으로 유지한다(전략-facing 계약).
+        self._timeframe = timeframe
         self._cache: dict[str, pl.DataFrame] = {}
         # 초기 커서는 첫 row 이전(-1)에 위치한다. 첫 advance()가 timeline 0으로
         # 전진하여 첫 시각을 처리한다(#2061). pre-advance 상태(idx=-1)에서는
@@ -158,14 +166,22 @@ class BacktestDataProvider(DataProvider):
 
         체결 가능 가격은 ``get_current_bar_price``(현재 봉 정확 일치)를 별도로
         쓴다. 이 메서드의 as-of 가격으로 비거래일에 체결하면 안 된다(#2098).
+
+        조회 timeframe은 run timeframe(``self._timeframe``)이다(#2012). 이를
+        명시하지 않으면 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져 비-1d run에서
+        ``{symbol}:1d`` 캐시 미스 → 1d lazy-load → 1d 종가가 현재가로 새는
+        버그가 생긴다. get_ohlcv 자체가 current_ts ≤ 필터를 적용하므로
+        as-of 의미는 그대로 유지된다.
         """
-        df = await self.get_ohlcv(symbol, limit=1)
+        df = await self.get_ohlcv(symbol, self._timeframe, limit=1)
         if df.is_empty():
             msg = f"No data for {symbol} at step {self._current_idx}"
             raise BacktestDataError(msg)
         return float(df["close"][-1])
 
-    def get_current_bar_price(self, symbol: str, timeframe: str = "1d") -> float | None:
+    def get_current_bar_price(
+        self, symbol: str, timeframe: str | None = None
+    ) -> float | None:
         """현재 시각(current_ts)에 정확히 일치하는 봉의 종가(체결 가능가, #2098).
 
         current_ts가 None이면 None. 심볼 df에서 ``timestamp == current_ts`` 인
@@ -174,10 +190,17 @@ class BacktestDataProvider(DataProvider):
 
         as-of(get_current_price)와 달리 stale 가격을 쓰지 않으므로, 호출부는
         None을 "이번 step에 거래 불가"로 해석해 체결을 skip해야 한다.
+
+        *timeframe* 이 None(기본)이면 run timeframe(``self._timeframe``)을
+        쓴다(#2012). 비-1d run에서 기본값이 ``"1d"`` 이면 체결가가 1d 종가로
+        새므로, 실행 timeframe 캐시 키 ``{symbol}:{run_tf}`` 를 조회한다.
+        명시 *timeframe* 을 주면 그 키를 쓴다(exact-current_ts 매칭은 동일).
+        backtest 전용 메서드라 ABC 시그니처 제약이 없다.
         """
-        key = f"{symbol}:{timeframe}"
+        tf = timeframe or self._timeframe
+        key = f"{symbol}:{tf}"
         if key not in self._cache:
-            self.load(symbol, timeframe)
+            self.load(symbol, tf)
 
         current_ts = self.get_current_timestamp()
         if current_ts is None:
@@ -202,10 +225,14 @@ class BacktestDataProvider(DataProvider):
         OHLCV 데이터를 가져와 IndicatorCalculator로 지표를 계산한다.
         라이브(StrategyContext)와 동일한 로직을 사용하여
         백테스트-라이브 패리티를 보장한다.
+
+        조회 timeframe은 run timeframe(``self._timeframe``)이다(#2012). 명시
+        하지 않으면 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져 비-1d run에서 1d
+        봉으로 지표가 계산되는 오류가 생긴다.
         """
         from ante.strategy.indicators import IndicatorCalculator, ohlcv_to_dataframe
 
-        ohlcv_data = await self.get_ohlcv(symbol, limit=500)
+        ohlcv_data = await self.get_ohlcv(symbol, self._timeframe, limit=500)
         arrays = ohlcv_to_dataframe(ohlcv_data)
         return IndicatorCalculator.compute(indicator, arrays, **(params or {}))
 
