@@ -573,3 +573,45 @@ async def test_shutdown_readonly_passes_through_preflight(socket_path: str) -> N
         await server.drain_connections(timeout=0.1)
         if Path(socket_path).exists():
             server.unlink_socket()
+
+
+# ── #2109: broker.reconcile fail-closed audit_logger required ──────────────
+
+
+@pytest.mark.asyncio
+async def test_broker_reconcile_missing_audit_logger_rejected(
+    socket_path: str,
+) -> None:
+    """(e) ``broker.reconcile`` 은 ``audit_logger`` 미주입 시 preflight 거부.
+
+    Refs #2109: ``audit_logger`` 를 ``required_services`` 에 추가해 fail-closed
+    로 동작한다 — audit_logger 가 없으면 (unaudited correction 위험) 명령을
+    아예 거부한다. ``audit_logger`` 부재 검사는 account_id preflight 보다 먼저
+    이뤄지므로(required_services preflight 가 try 블록보다 앞) 유효 account_id
+    여부와 무관하게 ``SERVICE_NOT_CONFIGURED`` 다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    # account / reconciler / bot_manager 는 있으나 audit_logger 미주입.
+    svc_registry = _make_service_registry()
+    assert svc_registry.audit_logger is None
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "broker.reconcile",
+                "args": {"account_id": "acc-a", "fix": True},
+                "actor": "cli-user",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED"
+        assert "audit_logger" in response["error"]["message"]
+    finally:
+        await server.stop()

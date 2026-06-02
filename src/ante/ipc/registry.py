@@ -1190,6 +1190,25 @@ async def _handle_broker_reconcile(
             account_id=account_id,
             dry_run=not fix,
         )
+        # #2109: 실제 포지션 보정이 발생한 경우에만 조건부 audit. audit 원칙은
+        # 상태변경만 기록(docs/specs/.../audit.md L122 매핑 broker.reconcile →
+        # resource=account:{id}). detect-only(fix=False)나 보정 대상 없음
+        # (adjustments 빈)은 상태변경이 없어 기록하지 않는다. ``register`` 에는
+        # ``audit_action`` 을 부여하지 않으므로 ``_dispatch`` wrapper 의 무조건
+        # auto-fire 가 일어나지 않고, 조건부 발화 책임은 handler 가 소유한다.
+        # ``required_services`` 에 ``audit_logger`` 가 명시되어 preflight 에서
+        # 부재가 차단되므로(fail-closed) 여기서는 직접 호출한다 —
+        # unaudited correction 을 방지한다.
+        #
+        # 보정(상태변경) 직후 즉시 audit — 이후 post-processing
+        # (compute_account_diff) 실패가 audit 누락을 유발하지 않도록(#2109
+        # Codex). 상태변경(fix and adjustments)만 기록.
+        if fix and adjustments:
+            await svc.audit_logger.log(
+                member_id=actor,
+                action="broker.reconcile",
+                resource=f"account:{account_id}",
+            )
         # display(discrepancies)는 보정 **이후** 상태로 계좌 단위 합산 비교를
         # 재계산한다(순수, 이벤트 無). fix=True 면 보정 후 0으로 수렴, dry_run
         # 이면 미보정 불일치가 그대로 남는다.
@@ -1500,13 +1519,25 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     # reconciler.reconcile(correct_position/이벤트 publish 가능)에 위임하며,
     # 2+봇·0봇이면 detect_account_level(알림만)을 수행한다. fix=False(dry_run)
     # 여도 broker 조회·이벤트 발행이 있으므로 일괄 mutating으로 분류한다.
-    # required_services: account(broker 조회) + reconciler + bot_manager(count).
+    # required_services: account(broker 조회) + reconciler + bot_manager(count)
+    # + audit_logger(#2109).
+    #
+    # Refs #2109: ``--fix`` 가 실제 포지션 보정을 일으키는 경우 audit 대상이나,
+    # detect-only(fix=False / 0봇·2+봇 / 불일치 없음) 는 상태변경이 없어
+    # 기록 대상이 아니다. 따라서 ``audit_action`` 을 부여하지 **않고**(부여 시
+    # ``_dispatch`` wrapper 가 detect-only 까지 무조건 auto-fire → 과잉감사)
+    # handler 가 실제 correction(1봇 + adjustments 비어있지 않음) 에만 직접
+    # ``svc.audit_logger.log`` 를 호출한다. ``audit_logger`` 는
+    # ``required_services`` 에만 추가해 fail-closed preflight(미주입 시 명령
+    # 거부) 로 unaudited correction 을 방지한다.
     registry.register(
         "broker.reconcile",
         _handle_broker_reconcile,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"account", "reconciler", "bot_manager"}),
+        required_services=frozenset(
+            {"account", "reconciler", "bot_manager", "audit_logger"}
+        ),
         account_id_policy="required",
     )
 

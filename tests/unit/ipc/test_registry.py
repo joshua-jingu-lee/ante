@@ -489,6 +489,11 @@ def _make_reconcile_svc(
     - ``svc.account.get_broker(account_id)`` → broker mock(``get_account_positions``)
     - ``svc.bot_manager.list_bots()`` → ``bots``
     - ``svc.reconciler`` → reconcile/detect_account_level/compute_account_diff mock
+    - ``svc.audit_logger`` → ``log`` AsyncMock (#2109 조건부 audit injection).
+      ``broker.reconcile`` 은 ``required_services`` 에 ``audit_logger`` 를 두고
+      실제 correction(1봇 + adjustments 비어있지 않음) 시 ``log`` 를 호출하므로,
+      handler-level 테스트도 awaitable audit_logger 를 주입한다(account.suspend
+      선례 동형).
     """
     from unittest.mock import AsyncMock, MagicMock
 
@@ -508,11 +513,15 @@ def _make_reconcile_svc(
     reconciler.detect_account_level = AsyncMock(return_value=[])
     reconciler.compute_account_diff = AsyncMock(return_value=[])
 
+    audit_logger = MagicMock()
+    audit_logger.log = AsyncMock(return_value=None)
+
     svc = MagicMock()
     svc.account = account_svc
     svc.bot_manager = bot_manager
     svc.reconciler = reconciler
-    return svc, broker, reconciler
+    svc.audit_logger = audit_logger
+    return svc, broker, reconciler, audit_logger
 
 
 class TestHandleBrokerReconcileAccountLevel:
@@ -528,7 +537,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(a) bot_id 없이 account_id 만으로 도달하고 서버 broker 를 조회한다."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
             broker_positions=[{"symbol": "005930", "quantity": 10, "avg_price": 1}],
         )
@@ -548,7 +557,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(b) fix=False → 단일봇 reconcile(dry_run=True) — correct_position 미호출."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
             broker_positions=[{"symbol": "005930", "quantity": 10}],
         )
@@ -567,7 +576,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(c) 1봇 계좌 fix=True → 기존 reconcile 보정(dry_run=False) 위임."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "stopped", "account_id": "acc-a"}],
             broker_positions=[{"symbol": "005930", "quantity": 10}],
         )
@@ -591,7 +600,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(d) 2+봇 → detect_account_level (correct_position 미호출)."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[
                 {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
                 {"bot_id": "bot-2", "status": "running", "account_id": "acc-a"},
@@ -619,7 +628,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(f) caller-supplied broker_positions 무시 — 서버 broker 조회값 사용."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
             broker_positions=[{"symbol": "005930", "quantity": 10}],
         )
@@ -645,7 +654,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(k) 0봇 + broker_positions 존재 → detect/alert (no-op 아님)."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[],
             broker_positions=[{"symbol": "005930", "quantity": 10}],
         )
@@ -667,7 +676,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """(l) 봇 count 는 status 무관 — stopped/error 봇도 count 에 포함된다."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[
                 {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
                 {"bot_id": "bot-2", "status": "stopped", "account_id": "acc-a"},
@@ -690,7 +699,7 @@ class TestHandleBrokerReconcileAccountLevel:
         """다른 계좌 봇은 count 에서 제외된다 (account-scoped count)."""
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[
                 {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
                 {"bot_id": "bot-x", "status": "running", "account_id": "acc-other"},
@@ -713,7 +722,7 @@ class TestHandleBrokerReconcileAccountLevel:
         from ante.account.errors import InvalidAccountIdError
         from ante.ipc.registry import _handle_broker_reconcile
 
-        svc, broker, reconciler = _make_reconcile_svc(
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
         )
 
@@ -726,6 +735,169 @@ class TestHandleBrokerReconcileAccountLevel:
         svc.account.get_broker.assert_not_called()
         reconciler.reconcile.assert_not_called()
         reconciler.detect_account_level.assert_not_called()
+
+
+# ── #2109: broker.reconcile --fix 실제 보정 시 조건부 audit (handler-level) ──
+
+
+class TestHandleBrokerReconcileConditionalAudit:
+    """``broker.reconcile`` 의 handler-level 조건부 audit (#2109).
+
+    audit 원칙은 **상태변경만 기록**(audit.md:122 → action ``broker.reconcile``,
+    resource ``account:{account_id}``). 따라서 ``--fix`` intent 만으로는 부족하고,
+    실제 correction(1봇 + ``adjustments`` 비어있지 않음) 이 발생한 경우에만
+    ``svc.audit_logger.log`` 가 1회 발화한다.
+
+    ``register`` 에 ``audit_action`` 을 부여하지 않으므로 ``_dispatch`` wrapper 의
+    무조건 auto-fire 는 일어나지 않고, 조건부 발화 책임은 handler 가 소유한다
+    (``audit_action=None`` 은 introspection 으로 lock).
+    """
+
+    @pytest.mark.asyncio
+    async def test_fix_true_single_bot_with_adjustments_audits_once(self):
+        """(a) fix=True + 1봇 + adjustments 비어있지 않음 → audit 1회 (positive)."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
+
+        await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        audit_logger.log.assert_awaited_once_with(
+            member_id="cli-user",
+            action="broker.reconcile",
+            resource="account:acc-a",
+        )
+
+    @pytest.mark.asyncio
+    async def test_audit_fires_before_compute_account_diff_failure(self):
+        """(a-2) compute_account_diff 실패해도 audit 는 선발화됐다 (#2109 Codex).
+
+        audit 는 correction(상태변경) **직후** 발화해야 하므로, 이후 post-processing
+        인 ``compute_account_diff`` 가 예외를 던지더라도 (이미 발생한 보정에 대한)
+        audit 누락이 일어나면 안 된다. 예외는 그대로 전파되되, 그 전에
+        ``audit_logger.log`` 가 이미 1회 호출됐음을 단언한다.
+        """
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        # 실제 보정 발생 (1봇 + adjustments 비어있지 않음).
+        reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
+        # 보정 이후 post-processing 단계가 실패한다.
+        reconciler.compute_account_diff.side_effect = RuntimeError("diff failed")
+
+        with pytest.raises(RuntimeError, match="diff failed"):
+            await _handle_broker_reconcile(
+                svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            )
+
+        # compute_account_diff 실패 이전에 audit 가 이미 발화됐어야 한다.
+        audit_logger.log.assert_awaited_once_with(
+            member_id="cli-user",
+            action="broker.reconcile",
+            resource="account:acc-a",
+        )
+
+    @pytest.mark.asyncio
+    async def test_fix_false_detect_only_no_audit(self):
+        """(b) fix=False detect-only(상태변경 없음) → audit 미발화."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        # dry_run 이어도 reconcile 이 (구현상) 비어있지 않은 list 를 돌려줄 수
+        # 있으나, fix=False 면 실제 보정이 없으므로 audit 하지 않는다.
+        reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": False}]
+
+        await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+        )
+
+        audit_logger.log.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fix_true_multi_bot_detect_only_no_audit(self):
+        """(c-1) fix=True 이나 2+봇(detect-only 귀결) → audit 미발화."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[
+                {"bot_id": "bot-1", "status": "running", "account_id": "acc-a"},
+                {"bot_id": "bot-2", "status": "running", "account_id": "acc-a"},
+            ],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.detect_account_level.return_value = [
+            {"symbol": "005930", "broker_qty": 10, "internal_qty": 8, "diff": 2}
+        ]
+
+        await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        # detect-only 경로 → adjustments 없음 → audit 미발화.
+        audit_logger.log.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fix_true_zero_bots_detect_only_no_audit(self):
+        """(c-2) fix=True 이나 0봇(detect-only 귀결) → audit 미발화."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        reconciler.detect_account_level.return_value = [
+            {"symbol": "005930", "broker_qty": 10, "internal_qty": 0, "diff": 10}
+        ]
+
+        await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        audit_logger.log.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fix_true_single_bot_no_adjustments_no_audit(self):
+        """(d) fix=True + 1봇 이나 불일치 없음(adjustments 빈) → audit 미발화."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        # 보정 대상이 없으면 reconcile 은 빈 list 를 돌려준다(상태변경 없음).
+        reconciler.reconcile.return_value = []
+
+        await _handle_broker_reconcile(
+            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+        )
+
+        audit_logger.log.assert_not_awaited()
+
+    def test_register_audit_logger_required_but_audit_action_none(self) -> None:
+        """(f) introspection: ``audit_logger`` ∈ required_services, audit_action=None.
+
+        ``audit_action=None`` 이라 ``_dispatch`` wrapper auto-fire 대상이 아니며
+        (조건부는 handler 소유), 동시에 ``audit_logger`` 가 required 라
+        fail-closed preflight(미주입 거부) 가 보장된다.
+        """
+        registry = CommandRegistry()
+        register_all_handlers(registry)
+        spec = registry.get("broker.reconcile")
+        assert spec is not None
+        assert "audit_logger" in spec.required_services
+        assert spec.audit_action is None
 
 
 # ── #1379 oracle A7: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──
