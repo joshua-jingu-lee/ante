@@ -240,13 +240,16 @@ class DataGoKrSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
+            # 실제 HTTP 요청 시도(_do_request) 직전에 카운트한다.
+            # 성공/실패와 무관하게 모든 attempt를 반영하여 일일 한도 추적이
+            # 실패·재시도 시도를 누락하지 않도록 한다 (#2106). 1 attempt = 1 increment.
+            self._rate_limiter.increment_daily()
 
             try:
                 data = await asyncio.wait_for(
                     self._do_request(session, params),
                     timeout=REQUEST_TIMEOUT,
                 )
-                self._rate_limiter.increment_daily()
             except (TimeoutError, aiohttp.ClientError) as exc:
                 last_error = exc
                 delay = self._backoff_delay(attempt)
