@@ -1727,6 +1727,117 @@ class TestDARTNormalizer:
         assert len(result) == 1
         assert result["revenue"][0] == 1_000_000
 
+    def test_select_fs_div_mixed_year_preserves_ofs(
+        self, dart_normalizer, corp_code_map
+    ):
+        """회귀(#2011): 연도별로 CFS/OFS 혼재 시 OFS-only 연도 보존.
+
+        2025 annual은 CFS 보유, 2024 annual은 OFS-only.
+        bsns_year를 선택 키에 포함하지 않으면 2024 OFS가
+        2025 CFS와 동일한 (corp_code, reprt_code)로 간주돼
+        anti-join에서 삭제된다 → 2024 데이터 누락 회귀.
+        """
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"] * 2,
+                "account_nm": ["매출액", "매출액"],
+                "thstrm_amount": ["1,000,000", "900,000"],
+                # 2025: CFS / 2024: OFS-only
+                "fs_div": ["CFS", "OFS"],
+                "reprt_code": ["11011", "11011"],
+                "bsns_year": ["2025", "2024"],
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        # 두 연도 모두 보존되어야 한다.
+        assert len(result) == 2
+        by_date = {
+            d: rev
+            for d, rev in zip(
+                result["date"].to_list(),
+                result["revenue"].to_list(),
+            )
+        }
+        assert by_date[date(2025, 12, 31)] == 1_000_000  # CFS
+        assert by_date[date(2024, 12, 31)] == 900_000  # OFS 폴백 보존
+
+    def test_select_fs_div_same_year_cfs_only(self, dart_normalizer, corp_code_map):
+        """같은 연도에 CFS/OFS 둘 다 있으면 CFS만 선택 (연도 내 우선순위 유지)."""
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"] * 2,
+                "account_nm": ["매출액", "매출액"],
+                "thstrm_amount": ["1,000,000", "500,000"],
+                "fs_div": ["CFS", "OFS"],
+                "reprt_code": ["11011", "11011"],
+                "bsns_year": ["2025", "2025"],
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert len(result) == 1
+        assert result["revenue"][0] == 1_000_000
+
+    def test_select_fs_div_all_years_ofs_only(self, dart_normalizer, corp_code_map):
+        """전 연도 OFS-only: 모든 연도 OFS 보존."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"] * 2,
+                "account_nm": ["매출액", "매출액"],
+                "thstrm_amount": ["1,000,000", "900,000"],
+                "fs_div": ["OFS", "OFS"],
+                "reprt_code": ["11011", "11011"],
+                "bsns_year": ["2025", "2024"],
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert len(result) == 2
+        by_date = {
+            d: rev
+            for d, rev in zip(
+                result["date"].to_list(),
+                result["revenue"].to_list(),
+            )
+        }
+        assert by_date[date(2025, 12, 31)] == 1_000_000
+        assert by_date[date(2024, 12, 31)] == 900_000
+
+    def test_select_fs_div_all_years_cfs(self, dart_normalizer, corp_code_map):
+        """전 연도 CFS: 모든 연도 CFS 선택, OFS 제외."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "corp_code": ["00126380"] * 4,
+                "account_nm": ["매출액"] * 4,
+                "thstrm_amount": [
+                    "1,000,000",
+                    "111,111",
+                    "900,000",
+                    "99,999",
+                ],
+                "fs_div": ["CFS", "OFS", "CFS", "OFS"],
+                "reprt_code": ["11011"] * 4,
+                "bsns_year": ["2025", "2025", "2024", "2024"],
+            }
+        )
+        result = dart_normalizer.normalize(df, corp_code_map)
+        assert len(result) == 2
+        by_date = {
+            d: rev
+            for d, rev in zip(
+                result["date"].to_list(),
+                result["revenue"].to_list(),
+            )
+        }
+        # 두 연도 모두 CFS 값만 사용.
+        assert by_date[date(2025, 12, 31)] == 1_000_000
+        assert by_date[date(2024, 12, 31)] == 900_000
+
     def test_normalize_empty_df(self, dart_normalizer, corp_code_map):
         """빈 DataFrame 입력 시 빈 결과."""
         df = pl.DataFrame(

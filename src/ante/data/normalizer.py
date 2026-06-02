@@ -436,8 +436,10 @@ class DARTNormalizer:
     def _select_fs_div(self, df: pl.DataFrame) -> pl.DataFrame:
         """CFS(연결) 우선, 없으면 OFS(개별) 폴백.
 
-        corp_code + reprt_code 기준으로 CFS 데이터가 있으면
-        CFS만, CFS가 없는 조합은 OFS를 사용한다.
+        corp_code + reprt_code + bsns_year 기준으로 CFS 데이터가 있으면
+        CFS만, CFS가 없는 조합은 OFS를 사용한다. bsns_year를 키에 포함해야
+        연도별로 CFS 존재 여부를 판단하므로, 특정 연도에만 CFS가 있고
+        다른 연도는 OFS-only인 데이터의 OFS 폴백이 보존된다.
         """
         cfs = df.filter(pl.col("fs_div") == "CFS")
         ofs = df.filter(pl.col("fs_div") == "OFS")
@@ -447,13 +449,13 @@ class DARTNormalizer:
         if ofs.is_empty():
             return cfs
 
-        # CFS가 있는 (corp_code, reprt_code) 조합
-        cfs_keys = cfs.select("corp_code", "reprt_code").unique()
+        # CFS가 있는 (corp_code, reprt_code, bsns_year) 조합
+        cfs_keys = cfs.select("corp_code", "reprt_code", "bsns_year").unique()
 
         # OFS 중 CFS가 없는 조합만 추출
         ofs_fallback = ofs.join(
             cfs_keys,
-            on=["corp_code", "reprt_code"],
+            on=["corp_code", "reprt_code", "bsns_year"],
             how="anti",
         )
 
