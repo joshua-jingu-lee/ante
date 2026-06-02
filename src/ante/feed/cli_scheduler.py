@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import signal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,67 @@ logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
+# zero-padded ``HH:MM`` (24시간제) 만 허용. ``strptime("%H:%M")`` 은 ``"9:00"``
+# 같은 non-padded 입력도 수락하므로, 스케줄러의 사전식(``"09:00" >= "9:00"``)
+# 문자열 비교가 조용히 오동작(daily 영원히 미실행)하지 않도록 정규식으로
+# 형태를 고정한다. (#2030/#2070)
+_HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
+def _is_valid_hhmm(s: str) -> bool:
+    """``s`` 가 zero-padded ``HH:MM`` (00:00–23:59) 형식인지 검증한다.
+
+    ``"09:00"`` → True, ``"9:00"``/``"25:00"``/``"1600"``/``"24:00"`` → False.
+    """
+    return isinstance(s, str) and _HHMM_RE.fullmatch(s) is not None
+
+
+def _validate_schedule_times(
+    daily_at: str,
+    backfill_at: str,
+    blocked_hours: list[Any] | None = None,
+) -> None:
+    """스케줄러 진입 시 시간 설정을 1회 fail-fast 검증한다.
+
+    ``daily_at`` / ``backfill_at`` 은 zero-padded ``HH:MM`` 이어야 하고,
+    ``blocked_hours`` 의 각 항목은 ``"HH:MM-HH:MM"`` 형태로 양 끝점 모두
+    zero-padded ``HH:MM`` 이어야 한다. 하나라도 어긋나면 모든 위반을 모아
+    ``ValueError`` 로 즉시 실패시킨다(조용한 미실행 금지). 루프 매회가 아닌
+    진입 1회만 호출된다.
+
+    midnight-spanning window("23:00-02:00") 의 비교 의미 정정은 본 검증의
+    범위 밖이다(형식 검증만; 별도 이슈). 정상 형식의 cross-midnight 윈도우는
+    유효로 통과시킨다.
+    """
+    errors: list[str] = []
+
+    if not _is_valid_hhmm(daily_at):
+        errors.append(
+            f"잘못된 daily_at 형식: '{daily_at}' (zero-padded HH:MM 필요, 예: 16:00)"
+        )
+    if not _is_valid_hhmm(backfill_at):
+        errors.append(
+            f"잘못된 backfill_at 형식: '{backfill_at}' "
+            "(zero-padded HH:MM 필요, 예: 01:00)"
+        )
+
+    for window in blocked_hours or []:
+        if not isinstance(window, str) or "-" not in window:
+            errors.append(
+                f"잘못된 blocked_hours 항목: '{window}' "
+                "(HH:MM-HH:MM 형식 필요, 예: 09:00-15:30)"
+            )
+            continue
+        start_time, end_time = (part.strip() for part in window.split("-", 1))
+        if not _is_valid_hhmm(start_time) or not _is_valid_hhmm(end_time):
+            errors.append(
+                f"잘못된 blocked_hours 항목: '{window}' "
+                "(양 끝점 모두 zero-padded HH:MM 필요, 예: 09:00-15:30)"
+            )
+
+    if errors:
+        raise ValueError("; ".join(errors))
+
 
 async def run_scheduler_loop(
     orchestrator: Any,  # FeedOrchestrator  # noqa: ANN401
@@ -26,7 +88,22 @@ async def run_scheduler_loop(
     daily_at: str,
     backfill_at: str,
 ) -> None:
-    """스케줄 루프: daily_at / backfill_at 시각에 수집을 실행한다."""
+    """스케줄 루프: daily_at / backfill_at 시각에 수집을 실행한다.
+
+    진입 시 ``daily_at`` / ``backfill_at`` (및 config 의 ``blocked_hours``)
+    형식을 1회 fail-fast 검증한다(#2030/#2070). 모든 ``feed start`` 경로가
+    거치는 단일 chokepoint 이므로, non-padded("9:00") 등으로 인한 조용한
+    미실행을 진입 시점에 ``ValueError`` 로 차단한다. 루프 내부에서는 재검증
+    하지 않는다.
+
+    루프 내 순서는 spec(07-execution-modes)을 따라 backfill_at 체크를
+    daily_at 보다 먼저 평가한다 — 같은 틱에서 둘 다 도달하면 미완료 backfill
+    을 먼저 실행한 뒤 daily 로 넘어간다(#2031).
+    """
+    guard = config.get("guard") if isinstance(config, dict) else None
+    blocked_hours = guard.get("blocked_hours") if isinstance(guard, dict) else None
+    _validate_schedule_times(daily_at, backfill_at, blocked_hours)
+
     stop_event = _setup_signal_handlers()
 
     logger.info(
@@ -53,15 +130,18 @@ async def run_scheduler_loop(
             backfill_ran_today = False
         last_date = current_date
 
-        if not daily_ran_today and current_time >= str(daily_at):
-            await _run_daily_job(orchestrator, data_path, config, current_date)
-            daily_ran_today = True
-
+        # spec(07-execution-modes): backfill 미완료 → backfill_at 실행 후
+        # daily_at → daily. 같은 틱에서 둘 다 도달하면 backfill 을 먼저
+        # 실행한다(#2031). 하루 1회 플래그 로직은 보존한다.
         if not backfill_ran_today and current_time >= str(backfill_at):
             await _run_backfill_job(
                 orchestrator, data_path, config, current_date, stop_event
             )
             backfill_ran_today = True
+
+        if not daily_ran_today and current_time >= str(daily_at):
+            await _run_daily_job(orchestrator, data_path, config, current_date)
+            daily_ran_today = True
 
         await _wait_or_stop(stop_event, timeout=60.0)
 
