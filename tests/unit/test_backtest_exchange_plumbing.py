@@ -30,6 +30,20 @@ from ante.backtest.executor import BacktestExecutor
 from ante.backtest.result import BacktestResult, BacktestTrade
 from ante.backtest.service import BacktestService
 from ante.strategy.base import Signal, Strategy, StrategyMeta
+from ante.strategy.validator import ValidationResult
+
+
+def _bypass_validator():
+    """service.run의 StrategyValidator 게이트(#2039)를 우회한다.
+
+    이 파일의 run() exchange-plumbing 테스트는 StrategyLoader를 mock해 실제
+    전략 파일 없이 ``s.py`` 경로로 run을 구동한다. #2039에서 load 직전 추가된
+    정적 검증이 실제 파일을 읽지 않도록 valid 결과로 대체한다.
+    """
+    return patch(
+        "ante.backtest.service.StrategyValidator.validate",
+        return_value=ValidationResult(valid=True),
+    )
 
 
 class TestValidateConfigExchangeDefault:
@@ -115,6 +129,7 @@ class TestServicePassesExchangeToProvider:
         executor_instance.run = _fake_run
 
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader") as mock_loader,
             patch("ante.backtest.service.ParquetStore") as mock_store_cls,
             patch(
@@ -161,6 +176,7 @@ class TestServicePassesExchangeToProvider:
         executor_instance.run = _fake_run
 
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader") as mock_loader,
             patch("ante.backtest.service.ParquetStore"),
             patch(
@@ -330,6 +346,7 @@ class TestServicePassesExchangeToExecutor:
         executor_instance.run = _fake_run
 
         with (
+            _bypass_validator(),
             patch("ante.backtest.service.StrategyLoader") as mock_loader,
             patch("ante.backtest.service.ParquetStore"),
             patch(

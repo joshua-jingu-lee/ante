@@ -24,6 +24,7 @@ from ante.core.market_data_vocab import (
 )
 from ante.data.store import ParquetStore
 from ante.strategy.loader import StrategyLoader
+from ante.strategy.validator import StrategyValidator
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -60,7 +61,22 @@ class BacktestService:
 
         validated = self._validate_config(config)
 
-        strategy_cls = StrategyLoader.load(Path(validated.strategy_path))
+        # #2039: StrategyLoader.load(import)가 전략 파일을 실행하기 전에
+        #        StrategyValidator로 정적(AST) 안전성 검증을 수행한다.
+        #        validate 자체는 ast.parse 기반이라 전략 코드를 실행하지
+        #        않으므로, 금지 모듈/builtin/top-level 코드가 import 시점에
+        #        실행되는 것을 차단한다. backtest run은 public CLI에서 파일
+        #        경로를 직접 받아 in-process/subprocess 양쪽 모두 이
+        #        service.run 을 거치므로, load 직전 검증으로 모든 경로에서
+        #        우회를 막는다. valid=False면 load를 호출하지 않고 즉시
+        #        raise 하여 금지 코드가 실행되지 않는다(warnings는 비차단).
+        strategy_path = Path(validated.strategy_path)
+        val_result = StrategyValidator().validate(strategy_path)
+        if not val_result.valid:
+            msg = f"전략 검증 실패: {'; '.join(val_result.errors)}"
+            raise BacktestConfigError(msg)
+
+        strategy_cls = StrategyLoader.load(strategy_path)
 
         store = ParquetStore(
             base_path=validated.data_paths[0],
