@@ -1600,3 +1600,79 @@ class TestCollectorInstrumentsStore:
         path, df = _read_instruments(store)
         assert not path.exists()
         assert df is None
+
+
+# ── validate_credentials (#2046) ──────────────────────────────
+
+
+class TestValidateCredentials:
+    """data.go.kr 서비스키 유효성 3-state 검증 (mock HTTP, 실 네트워크 없음)."""
+
+    @pytest.mark.asyncio
+    async def test_valid_key_ok(self, source: DataGoKrSource) -> None:
+        """정상 응답(00) → valid=True."""
+        response = _make_response([_make_item()], total_count=1)
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is True
+        assert detail is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_key_30(self, source: DataGoKrSource) -> None:
+        """서비스키 미등록(30) → valid=False, 사유 포함."""
+        response = _make_response(
+            [],
+            total_count=0,
+            result_code="30",
+            result_msg="SERVICE_KEY_IS_NOT_REGISTERED_ERROR",
+        )
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is False
+        assert detail is not None
+        assert "30" in detail
+
+    @pytest.mark.asyncio
+    async def test_invalid_key_31_expired(self, source: DataGoKrSource) -> None:
+        """기한 만료(31)도 인증 실패 → valid=False."""
+        response = _make_response(
+            [],
+            total_count=0,
+            result_code="31",
+            result_msg="DEADLINE_HAS_EXPIRED_ERROR",
+        )
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, _ = await source.validate_credentials()
+        assert valid is False
+
+    @pytest.mark.asyncio
+    async def test_network_error_unknown(self, source: DataGoKrSource) -> None:
+        """네트워크 예외 → valid=None(검증 불가), 예외 미전파."""
+        with patch.object(
+            source,
+            "_do_request",
+            new_callable=AsyncMock,
+            side_effect=aiohttp.ClientError("connection refused"),
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is None
+        assert detail is not None
+        assert "네트워크" in detail
+
+    @pytest.mark.asyncio
+    async def test_timeout_unknown(self, source: DataGoKrSource) -> None:
+        """타임아웃 → valid=None(검증 불가), 예외 미전파."""
+
+        async def _slow(*args: object, **kwargs: object) -> dict:
+            raise TimeoutError
+
+        with patch.object(source, "_do_request", side_effect=_slow):
+            valid, detail = await source.validate_credentials()
+        assert valid is None
+        assert detail is not None

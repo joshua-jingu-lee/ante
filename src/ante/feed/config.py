@@ -174,9 +174,11 @@ class FeedConfig:
         return result
 
     def check_api_keys(self) -> list[dict[str, str | bool]]:
-        """API 키 존재 여부를 확인한다.
+        """API 키 존재 여부를 확인한다(동기, 네트워크 호출 없음).
 
-        유효성 검증은 네트워크 호출이 필요하므로 스텁.
+        존재여부만 반환하는 경량 경로다. ``feed status`` 등 네트워크
+        검증이 필요 없는 호출자가 사용한다. 유효성 검증이 필요하면
+        :meth:`check_api_keys_with_validation` 을 사용한다.
         """
         keys = self.load_api_keys()
         result: list[dict[str, str | bool]] = []
@@ -194,6 +196,63 @@ class FeedConfig:
                 }
             )
         return result
+
+    async def check_api_keys_with_validation(
+        self,
+    ) -> list[dict[str, str | bool | None]]:
+        """API 키 존재 여부 + 네트워크 유효성을 확인한다 (#2046).
+
+        존재여부는 :meth:`check_api_keys` 와 동일하게 판정하고, 설정된
+        키에 한해 해당 source의 경량 요청으로 유효성을 검증한다.
+
+        각 항목은 ``{key, set, source, valid, detail}`` 형태다.
+            * ``valid``  — ``True``(유효) / ``False``(인증 실패) /
+              ``None``(검증 불가 또는 미설정 → 검증 생략).
+            * ``detail`` — 인증 실패/검증 불가 시의 사유 문자열, 그 외 None.
+
+        미설정 키는 검증을 생략하며 ``valid``/``detail`` 은 None이다.
+        네트워크 예외/타임아웃(offline 포함)은 source 단에서 unknown으로
+        흡수되어 예외가 전파되지 않는다.
+        """
+        keys = self.load_api_keys()
+        result: list[dict[str, str | bool | None]] = []
+        for key in API_KEYS:
+            val = keys.get(key)
+            source = ""
+            valid: bool | None = None
+            detail: str | None = None
+            if val:
+                env_val = os.environ.get(key)
+                source = "env" if env_val else ".env"
+                valid, detail = await self._validate_key(key, val)
+            result.append(
+                {
+                    "key": key,
+                    "set": bool(val),
+                    "source": source,
+                    "valid": valid,
+                    "detail": detail,
+                }
+            )
+        return result
+
+    @staticmethod
+    async def _validate_key(key: str, value: str) -> tuple[bool | None, str | None]:
+        """단일 API 키를 해당 source의 경량 검증으로 평가한다 (#2046).
+
+        지원하지 않는 키는 검증을 생략한다(unknown=None). source의
+        validate_credentials는 네트워크 예외를 unknown으로 흡수하므로
+        여기서 추가 예외 처리는 하지 않는다.
+        """
+        if key == "ANTE_DART_API_KEY":
+            from ante.feed.sources.dart import DARTSource
+
+            return await DARTSource(api_key=value).validate_credentials()
+        if key == "ANTE_DATAGOKR_API_KEY":
+            from ante.feed.sources.data_go_kr import DataGoKrSource
+
+            return await DataGoKrSource(api_key=value).validate_credentials()
+        return None, None
 
     def _load_env_file(self) -> dict[str, str]:
         """.env 파일을 파싱하여 딕셔너리로 반환한다."""

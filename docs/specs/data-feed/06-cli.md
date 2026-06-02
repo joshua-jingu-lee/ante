@@ -126,7 +126,16 @@ $ ante feed config list
 **동작:**
 1. `.feed/.env` 및 환경변수에서 키 로드 (우선순위 적용)
 2. 각 키의 존재 여부 확인
-3. 키가 존재하면 해당 API에 경량 요청을 보내 유효성 검증
+3. 키가 존재하면 해당 API에 경량 요청을 보내 유효성을 **3-state**로 검증한다:
+   - `✓ 유효` — 키가 API에 수락됨 (DART `000`/`013`, data.go.kr `00` 등).
+   - `✗ 인증 실패` — 인증 거부 (DART `010`/`011`/`012`, data.go.kr `30`/`31`).
+   - `? 검증 불가 (네트워크)` — 네트워크 예외/타임아웃으로 검증을 완료하지
+     못함. offline 환경에서도 hang/실패 없이 graceful하게 이 상태로 떨어진다.
+4. 미설정 키는 검증을 생략한다 (`✗ 미설정`만 표시).
+
+`--format json` 출력은 각 키에 대해 `set`/`source`에 더해 `valid`(`true`/
+`false`/`null`)와 `detail`(인증 실패·검증 불가 사유, 그 외 `null`) 필드를
+포함한다. 미설정 키의 `valid`는 `null`이다.
 
 **출력 예시:**
 ```
@@ -146,6 +155,14 @@ API Key Status
   ANTE_DART_API_KEY      ✓ 설정됨 (source: .env)  ✗ 인증 실패
 ──────────────────────────────────────────────────
 설정: ante feed config set <KEY> <VALUE>
+
+$ ante feed config check   # offline / 네트워크 불가
+
+API Key Status
+──────────────────────────────────────────────────
+  ANTE_DATAGOKR_API_KEY  ✓ 설정됨 (source: .env)  ? 검증 불가 (네트워크)
+  ANTE_DART_API_KEY      ✓ 설정됨 (source: env)   ? 검증 불가 (네트워크)
+──────────────────────────────────────────────────
 ```
 
 ### `ante feed inject <path> --symbol <종목> [--timeframe <주기>] [--source <소스>]`

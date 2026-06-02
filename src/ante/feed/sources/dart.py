@@ -293,6 +293,62 @@ class DARTSource:
         )
         return all_items
 
+    async def validate_credentials(self) -> tuple[bool | None, str | None]:
+        """API 키 유효성을 경량 요청 1회로 검증한다 (#2046).
+
+        가장 싼 기존 요청 패턴(fnlttMultiAcnt.json)을 더미 파라미터로 1회
+        호출한다. DART는 인증키를 파라미터 유효성보다 먼저 평가하므로,
+        키가 유효하면 ``000``(정상) 또는 ``013``(조회된 데이터 없음)이
+        돌아오고, 키가 잘못되면 ``010/011/012`` 인증 에러(CRITICAL)가
+        돌아온다.
+
+        3-state를 반환한다:
+            * ``(True, None)``  — 유효 (키가 수락됨).
+            * ``(False, 사유)`` — 인증 실패 (CRITICAL 에러 코드).
+            * ``(None, 사유)``  — 검증 불가 (네트워크 예외/타임아웃).
+
+        offline·타임아웃 등 네트워크 예외는 unknown으로 흡수하며 예외를
+        전파하지 않는다. config check가 오프라인에서도 hang/실패 없이
+        graceful하게 동작하도록 보장한다.
+
+        Returns:
+            (valid, reason) 튜플. valid는 True/False/None.
+        """
+        url = f"{self._base_url}/fnlttMultiAcnt.json"
+        # 인증 평가만을 위한 최소 더미 파라미터(키 검증이 우선 수행됨).
+        params = {
+            "crtfc_key": self._api_key,
+            "corp_code": "00000000",
+            "bsns_year": "2024",
+            "reprt_code": "11011",
+        }
+
+        own_session = self._session is None
+        session = self._session or aiohttp.ClientSession()
+
+        try:
+            await self._rate_limiter.acquire()
+            self._rate_limiter.increment_daily()
+            data = await asyncio.wait_for(
+                self._do_request(session, url, params),
+                timeout=REQUEST_TIMEOUT,
+            )
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            logger.info("DART 키 검증 불가 (네트워크): %s", exc)
+            return None, f"검증 불가 (네트워크): {exc}"
+        finally:
+            if own_session:
+                await session.close()
+
+        status = str(data.get("status", "900"))
+        message = str(data.get("message", ""))
+        action = classify_error(status)
+
+        if action == ErrorAction.CRITICAL:
+            return False, f"인증 실패 (status={status}): {message}"
+        # OK / NO_DATA / 그 외(키는 수락됨) → 유효.
+        return True, None
+
     # -- 내부 메서드 ---------------------------------------------------
 
     async def _download_corp_code_zip(

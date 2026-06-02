@@ -879,3 +879,84 @@ class TestFetch:
         """일부 kwargs만 있으면 빈 리스트를 반환한다."""
         result = await source.fetch("2024-12-31", corp_codes=["00126380"])
         assert result == []
+
+
+# -- validate_credentials (#2046) --------------------------------------
+
+
+class TestValidateCredentials:
+    """DART 키 유효성 3-state 검증 (mock HTTP, 실 네트워크 없음)."""
+
+    @pytest.mark.asyncio
+    async def test_valid_key_ok(self, source: DARTSource) -> None:
+        """정상 응답(000) → valid=True."""
+        response = _make_financial_response([_make_financial_item()], status="000")
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is True
+        assert detail is None
+
+    @pytest.mark.asyncio
+    async def test_valid_key_no_data(self, source: DARTSource) -> None:
+        """데이터 없음(013)도 키는 수락된 것 → valid=True."""
+        response = _make_financial_response([], status="013", message="데이터 없음")
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is True
+        assert detail is None
+
+    @pytest.mark.asyncio
+    async def test_invalid_key_010(self, source: DARTSource) -> None:
+        """미등록 키(010) → valid=False, 사유 포함."""
+        response = _make_financial_response(
+            [], status="010", message="등록되지 않은 키입니다"
+        )
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is False
+        assert detail is not None
+        assert "010" in detail
+
+    @pytest.mark.asyncio
+    async def test_invalid_key_011_unusable(self, source: DARTSource) -> None:
+        """사용 불가 키(011)도 인증 실패 → valid=False."""
+        response = _make_financial_response(
+            [], status="011", message="사용할 수 없는 키"
+        )
+        with patch.object(
+            source, "_do_request", new_callable=AsyncMock, return_value=response
+        ):
+            valid, _ = await source.validate_credentials()
+        assert valid is False
+
+    @pytest.mark.asyncio
+    async def test_network_error_unknown(self, source: DARTSource) -> None:
+        """네트워크 예외 → valid=None(검증 불가), 예외 미전파."""
+        with patch.object(
+            source,
+            "_do_request",
+            new_callable=AsyncMock,
+            side_effect=aiohttp.ClientError("connection refused"),
+        ):
+            valid, detail = await source.validate_credentials()
+        assert valid is None
+        assert detail is not None
+        assert "네트워크" in detail
+
+    @pytest.mark.asyncio
+    async def test_timeout_unknown(self, source: DARTSource) -> None:
+        """타임아웃 → valid=None(검증 불가), 예외 미전파."""
+
+        async def _slow(*args: object, **kwargs: object) -> dict:
+            raise TimeoutError
+
+        with patch.object(source, "_do_request", side_effect=_slow):
+            valid, detail = await source.validate_credentials()
+        assert valid is None
+        assert detail is not None
