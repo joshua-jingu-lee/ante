@@ -2963,3 +2963,314 @@ class TestMultiSymbolTimeline:
         df = await provider.get_ohlcv("005930", limit=100)
         assert len(df) == 3
         assert provider.advance() is False
+
+
+# ── 비-1d 체결가/지표 run-timeframe 인지 (#2012) ──────────────────
+
+
+def _make_intraday_df(
+    timeframe_interval: str,
+    n: int,
+    symbol: str = "005930",
+    base_price: float = 50000.0,
+) -> pl.DataFrame:
+    """intraday(예: 5m, 1h) 봉 OHLCV DataFrame을 만든다(#2012).
+
+    *timeframe_interval* 은 polars datetime_range interval 문자열(예: "5m",
+    "1h")이다. 2026-01-02 09:00 UTC부터 *n* 개의 봉을 생성한다. 1d-decoy와
+    종가가 확실히 구분되도록 base_price를 호출부에서 다르게 준다.
+    """
+    from datetime import timedelta
+
+    start = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
+    # interval 단위만큼 n-1 step 뒤까지 봉을 만든다.
+    unit = timeframe_interval[-1]
+    amount = int(timeframe_interval[:-1])
+    if unit == "m":
+        end = start + timedelta(minutes=amount * (n - 1))
+    elif unit == "h":
+        end = start + timedelta(hours=amount * (n - 1))
+    else:  # pragma: no cover - 테스트는 m/h만 사용
+        raise ValueError(timeframe_interval)
+    timestamps = pl.datetime_range(
+        start,
+        end,
+        interval=timeframe_interval,
+        eager=True,
+        time_zone="UTC",
+    )
+    assert len(timestamps) == n
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": [symbol] * n,
+            "open": [base_price + i * 10 for i in range(n)],
+            "high": [base_price + i * 10 + 5 for i in range(n)],
+            "low": [base_price + i * 10 - 5 for i in range(n)],
+            "close": [base_price + i * 10 + 2 for i in range(n)],
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
+class TestNonDailyTimeframe:
+    """#2012: 비-1d run에서 체결가/지표/equity 조회가 설정 timeframe을 쓴다.
+
+    근본 버그: provider 내부 read 경로(get_current_price/get_indicator/
+    get_current_bar_price)가 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져
+    ``{symbol}:1d`` 캐시 미스 → 1d lazy-load → 체결가가 1d 종가로 샜다.
+    수정: provider가 run timeframe(self._timeframe)을 인지해 내부 기본값으로
+    쓴다. get_ohlcv ABC 시그니처는 불변.
+    """
+
+    def _store_with_5m_and_1d_decoy(self, store):
+        """동일 심볼에 5m 봉(run-tf)과 1d 봉(의도적 다른 가격 decoy)을 함께 적재.
+
+        5m 봉 base=50000(종가 50002~), 1d decoy base=99999(종가 100001~)로
+        가격대를 확연히 분리해, 체결가가 어느 timeframe에서 왔는지 단언으로
+        구분할 수 있게 한다.
+        """
+        five_m = _make_intraday_df("5m", n=12, base_price=50000.0)
+        # 같은 날짜에 1d 봉도 적재한다(절대 조회되면 안 되는 decoy).
+        one_d = _make_ohlcv_df(n=3, base_price=99999.0)
+        store.write("005930", "5m", five_m)
+        store.write("005930", "1d", one_d)
+        return five_m, one_d
+
+    async def test_fill_price_uses_run_timeframe_not_daily(self, store):
+        """핵심 회귀: 5m run의 체결가가 5m 봉가이고 1d 종가가 아니다.
+
+        end-to-end run으로 buy를 체결시키고, 체결가가 5m 가격대(50000대)이며
+        1d decoy 가격대(100000대)가 아님을 단언한다.
+        """
+        five_m, one_d = self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,  # step1에 005930 buy 10주
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,  # 슬리피지 0이라 체결가 == 봉 종가
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1
+        fill_price = result.trades[0].price
+        # 첫 step(첫 5m 봉) 종가 = base_price + 0*10 + 2 = 50002.
+        assert fill_price == pytest.approx(50002.0)
+        # 1d decoy 종가대(100001~)가 절대 아니다.
+        assert fill_price < 60000.0
+        # decoy 1d 봉의 어떤 종가와도 일치하지 않는다.
+        assert fill_price not in set(one_d["close"].to_list())
+
+    async def test_no_daily_cache_key_after_nonbt_run(self, store):
+        """캐시 키 미오염 게이트: 비-1d run 후 ``005930:1d`` 키가 생기지 않는다.
+
+        모든 내부 1d-default read 경로가 제거되었는지 회귀. run-tf 키만 존재.
+        """
+        self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+
+        # 내부 read 경로(get_current_price/get_current_bar_price/get_indicator)가
+        # 1d로 lazy-load하지 않으므로 1d 키가 없어야 한다.
+        assert "005930:1d" not in provider._cache
+        # run-tf 키만 존재한다.
+        assert "005930:5m" in provider._cache
+        assert set(provider._cache.keys()) == {"005930:5m"}
+
+    async def test_get_current_bar_price_default_resolves_run_tf(self, store):
+        """get_current_bar_price를 timeframe 인자 없이 호출하면 self._timeframe 봉.
+
+        5m provider에서 인자 없는 호출이 5m 봉 종가를 반환하고, 1d 키를
+        만들지 않는다.
+        """
+        self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+
+        provider.advance()  # 첫 5m 봉으로 전진
+        price = provider.get_current_bar_price("005930")  # timeframe 인자 없음
+        assert price == pytest.approx(50002.0)  # 첫 5m 봉 종가
+        assert "005930:1d" not in provider._cache
+
+    async def test_get_current_bar_price_explicit_timeframe_override(self, store):
+        """명시 timeframe 인자를 주면 그 키를 조회한다(backtest 전용 override).
+
+        decoy 1d 봉은 5m과 거래 시각(09:00)이 겹치는 첫 봉이 있으므로, 명시
+        ``timeframe="1d"`` 로 호출하면 그 시각에 1d 종가가 반환된다.
+        """
+        five_m, one_d = self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+        provider.advance()  # current_ts = 2026-01-02 09:00 (5m 첫 봉 == 1d 첫 봉)
+
+        # 1d 첫 봉(09:00) 종가 = 99999 + 0*100 + 25 = 100024.
+        explicit = provider.get_current_bar_price("005930", timeframe="1d")
+        assert explicit == pytest.approx(100024.0)
+        # default(run-tf=5m)는 여전히 5m 종가.
+        assert provider.get_current_bar_price("005930") == pytest.approx(50002.0)
+
+    async def test_get_current_price_uses_run_tf(self, store):
+        """5m provider의 get_current_price가 run-tf(5m) 캐시를 쓰고 1d 미로드."""
+        self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+        provider.advance()  # 첫 5m 봉
+
+        price = await provider.get_current_price("005930")
+        assert price == pytest.approx(50002.0)  # 5m as-of 최근 종가
+        assert "005930:1d" not in provider._cache
+
+    async def test_get_indicator_uses_run_tf(self, store):
+        """5m provider의 get_indicator가 run-tf(5m) OHLCV로 계산하고 1d 미로드."""
+        self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+        for _ in range(12):  # 12개 5m 봉 전부 전진
+            provider.advance()
+
+        result = await provider.get_indicator("005930", "sma", {"length": 3})
+        assert isinstance(result, dict)
+        assert "sma" in result
+        # 12개 5m 봉이 보여야 한다(1d decoy 3봉이 아니다).
+        assert len(result["sma"]) == 12
+        assert "005930:1d" not in provider._cache
+
+    async def test_timeline_only_run_tf_no_daily_union(self, store):
+        """timeline 정합: 비-1d run의 timeline이 run-tf timestamp만 union.
+
+        provider는 5m만 load하고 내부 read도 5m만 lazy-load하므로, 캐시에는
+        5m 봉만 있어 통합 timeline이 5m 시각만 포함한다(1d 오염 없음). 5m 12봉
+        end-to-end run의 step 수가 정확히 12다(1d 3봉이 union되지 않음).
+        """
+        self._store_with_5m_and_1d_decoy(store)
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+            timeframe="5m",
+        )
+        provider.load("005930", "5m")
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # 5m 12봉만 timeline에 들어간다(1d decoy 3봉 미union).
+        assert len(result.equity_curve) == 12
+        assert "005930:1d" not in provider._cache
+
+    async def test_backward_compat_defaults_to_daily(self, store):
+        """backward compat: timeframe 미지정 생성은 기본 1d로 동작한다.
+
+        기존 TestBacktestDataProvider/Executor 호출 형태(BacktestDataProvider
+        (store, start, end))가 1d 봉을 그대로 보고, 내부 read도 1d 키를 쓴다.
+        """
+        store.write("005930", "1d", _make_ohlcv_df(n=5))
+        provider = BacktestDataProvider(
+            store=store,
+            start_date="2026-01-01",
+            end_date="2026-12-31",
+        )
+        assert provider._timeframe == "1d"
+        provider.load("005930", "1d")
+        provider.advance()  # 첫 1d 봉
+
+        # get_current_bar_price 기본 해소 == 1d 봉 종가.
+        bar = provider.get_current_bar_price("005930")
+        # 첫 1d 봉 종가 = 50000 + 0*100 + 25 = 50025.
+        assert bar == pytest.approx(50025.0)
+        price = await provider.get_current_price("005930")
+        assert price == pytest.approx(50025.0)
+        assert "005930:1d" in provider._cache
+        # 1d만 적재했으므로 다른 tf 키는 없다.
+        assert set(provider._cache.keys()) == {"005930:1d"}
+
+    async def test_service_run_passes_run_tf_to_provider(self, tmp_path):
+        """service.run이 validated.timeframe을 provider에 전달(end-to-end).
+
+        store에 5m·1d를 모두 적재한 뒤 timeframe="5m" config로 service.run을
+        돌리면, 체결가가 5m 봉가이고 datasets/캐시가 5m 기준이다.
+        """
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+        bt_store = ParquetStore(base_path=data_dir)
+        bt_store.write(
+            "005930", "5m", _make_intraday_df("5m", n=12, base_price=50000.0)
+        )
+        bt_store.write("005930", "1d", _make_ohlcv_df(n=3, base_price=99999.0))
+
+        service = BacktestService(data_path=str(data_dir))
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "5m",
+            "data_path": str(data_dir),
+        }
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=BuyAndHoldStrategy,
+        ):
+            result = await service.run(config)
+
+        assert result.config.timeframe == "5m"
+        assert len(result.trades) == 1
+        # 체결가가 5m 봉가(50002, slippage 기본 0.001 적용).
+        assert result.trades[0].price == pytest.approx(50002.0 * 1.001)
+        assert result.trades[0].price < 60000.0
+        # datasets는 5m 기준.
+        assert len(result.datasets) == 1
+        assert result.datasets[0].timeframe == "5m"
