@@ -677,3 +677,253 @@ class TestCollectorSymbolValidation:
         assert len(_invalid_symbol_warns(warns)) == 1
         assert store.list_symbols("1d") == []
         assert store.list_symbols(data_type="fundamental") == []
+
+
+# ── DataGoKrCollector: raw schema 검증 (#2055 / #2008) ─────────
+
+
+def _schema_warns(warns: list[dict]) -> list[dict]:
+    """warns 목록에서 schema_validation 타입만 추출한다."""
+    return [w for w in warns if w.get("type") == "schema_validation"]
+
+
+class TestCollectorSchemaValidation:
+    """DataGoKrCollector가 raw 스키마 실패 레코드를 skip하고 surface한다 (#2055)."""
+
+    @pytest.mark.asyncio
+    async def test_valid_raw_no_false_schema_failure(self, tmp_path) -> None:
+        """정상 raw → 허위 schema 실패 0건, 정규화/저장 정상(rows>0)."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _schema_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_missing_required_field_skipped(self, tmp_path) -> None:
+        """raw 필수 필드(mkp) 누락 레코드 → skip + schema_validation warning."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        del item["mkp"]
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        schema = _schema_warns(warns)
+        assert len(schema) == 1
+        assert "mkp" in schema[0]["message"]
+        assert store.list_symbols("1d") == []
+
+    @pytest.mark.asyncio
+    async def test_null_required_field_skipped(self, tmp_path) -> None:
+        """raw 필수 필드(clpr) null 레코드 → missing과 동일하게 skip."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["clpr"] = None
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        schema = _schema_warns(warns)
+        assert len(schema) == 1
+        assert "clpr" in schema[0]["message"]
+        assert store.list_symbols("1d") == []
+
+    @pytest.mark.asyncio
+    async def test_mixed_valid_and_malformed(self, tmp_path) -> None:
+        """혼합 batch(valid + malformed) → valid만 저장, malformed surface."""
+        store = ParquetStore(base_path=tmp_path)
+        good = _raw("005930")
+        bad_missing = _raw("000660")
+        del bad_missing["hipr"]
+        bad_null = _raw("035720")
+        bad_null["trqu"] = None
+        collector = DataGoKrCollector(source=_FakeSource([good, bad_missing, bad_null]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert len(_schema_warns(warns)) == 2
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_business_anomaly_record_kept(self, tmp_path) -> None:
+        """business 이상치(lopr>hipr)도 schema는 통과하므로 survivor 저장 유지(회귀).
+
+        business 계층은 비차단(경고)이므로 schema를 통과한 레코드는 값 이상치가
+        있어도 저장된다. raw 키(lopr/hipr)는 business 계층이 보는 정규화 컬럼명
+        (low/high)이 아니어서 collect 단계의 raw warns에는 잡히지 않지만,
+        핵심 회귀 불변은 'schema 통과 → 차단되지 않고 저장'이다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        # lopr(=200) > hipr(=110): 값 이상치이지만 raw 필수 필드는 모두 존재.
+        item = _raw("005930")
+        item["lopr"] = "200"
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _schema_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+
+    def test_business_layer_warns_on_normalized_keys(self) -> None:
+        """business 계층은 정규화 컬럼명(low/high) 기준으로 warning을 낸다(회귀).
+
+        survivor 검증이 business_rule 채널을 보존하는지 직접 확인한다.
+        """
+        from ante.feed.transform.validate import validate_all
+
+        norm = {
+            "timestamp": "20260102",
+            "symbol": "005930",
+            "open": 100.0,
+            "high": 110.0,
+            "low": 200.0,  # low > high/open/close → business 위반
+            "close": 105.0,
+            "volume": 1000,
+        }
+        result = validate_all(
+            [norm],
+            ["timestamp", "symbol", "open", "high", "low", "close", "volume"],
+        )
+        assert result.passed is True  # business 위반은 차단하지 않음
+        assert result.errors == []
+        assert any("low > " in w for w in result.warnings)
+
+    def test_validate_all_passes_for_valid_raw(self) -> None:
+        """#2055/#2008 repro: 정상 raw가 도출 상수로 schema PASS."""
+        from ante.data.normalizer import DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS
+        from ante.feed.transform.validate import validate_all
+
+        result = validate_all(
+            [_raw("005930")], list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS)
+        )
+        assert result.passed is True
+        assert result.errors == []
+
+
+# ── DataGoKrCollector: validate_all 실패 게이트 (#2055 Codex FAIL) ──
+
+
+class _RecordingStore:
+    """write() 호출을 기록하는 가짜 store (저장 차단 검증용)."""
+
+    def __init__(self) -> None:
+        self.writes: list[tuple] = []
+
+    def write(self, symbol, timeframe, df, data_type) -> None:
+        self.writes.append((symbol, timeframe, data_type, len(df)))
+
+
+class TestCollectorValidationGate:
+    """survivor batch가 validate_all에서 passed=False면 저장을 차단한다 (#2055).
+
+    선필터(missing/null per-record skip)가 못 잡는 잔여 실패(transport
+    status≠200, syntax, 또는 향후 schema 검사)는 비차단으로 남으면 안 된다.
+    spec(09-failure-recovery.md): schema 실패 레코드는 skip(저장 금지).
+    """
+
+    @pytest.mark.asyncio
+    async def test_validate_all_failure_blocks_store(self, monkeypatch, caplog) -> None:
+        """validate_all이 passed=False → survivor 저장 차단(write 미호출, rows=0).
+
+        warns에 schema_validation 엔트리가 surface되고 logger.error가 남는다.
+        선필터(missing/null)로는 잡히지 않는 정상 raw survivor를 쓰지만,
+        validate_all을 직접 monkeypatch하여 transport/syntax 잔여 실패를 모사한다.
+        """
+        import logging
+
+        from ante.feed.models.result import ValidationResult
+
+        store = _RecordingStore()
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        def _fake_validate_all(records, required_fields, status_code=200):
+            # transport status≠200 잔여 실패를 모사: passed=False + errors.
+            return ValidationResult(
+                passed=False,
+                warnings=[],
+                errors=["HTTP 상태 코드 오류: 503"],
+            )
+
+        monkeypatch.setattr(
+            "ante.feed.pipeline.data_go_kr_collector.validate_all",
+            _fake_validate_all,
+        )
+
+        with caplog.at_level(logging.ERROR):
+            rows, symbols, warns = await collector.collect("20260102", store)
+
+        # 저장 차단: write 미호출, rows_written=0, symbols 추가 0.
+        assert rows == 0
+        assert symbols == set()
+        assert store.writes == []
+        # schema_validation 엔트리 surface.
+        schema = _schema_warns(warns)
+        assert len(schema) == 1
+        assert "503" in schema[0]["message"]
+        # logger.error 남김.
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_validate_all_failure_does_not_raise(self, monkeypatch) -> None:
+        """passed=False여도 예외 없이 (0, set(), warns)로 정상 반환한다.
+
+        다른 날짜/소스 수집을 막지 않도록 부분 결과를 정상 반환해야 한다.
+        collect() (written, syms, warns) 시그니처는 불변이다.
+        """
+        from ante.feed.models.result import ValidationResult
+
+        store = _RecordingStore()
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        monkeypatch.setattr(
+            "ante.feed.pipeline.data_go_kr_collector.validate_all",
+            lambda records, required_fields, status_code=200: ValidationResult(
+                passed=False, warnings=[], errors=["JSON 파싱 오류: mock"]
+            ),
+        )
+
+        result = await collector.collect("20260102", store)
+
+        assert isinstance(result, tuple)
+        assert len(result) == 3
+        written, syms, warns = result
+        assert written == 0
+        assert syms == set()
+        assert isinstance(warns, list)
+
+    @pytest.mark.asyncio
+    async def test_all_records_prefiltered_empty_survivors(self, tmp_path) -> None:
+        """선필터로 모든 레코드가 drop되어 survivors=[] → 저장 0건, 크래시/에러 없음.
+
+        validate_all([])은 빈-레코드 schema로 passed=True지만, survivors가
+        비어있으면 게이트 이전에 조기 반환하여 0건 저장으로 정상 통과한다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        # 두 레코드 모두 필수 필드 누락 → 선필터가 전부 drop.
+        bad1 = _raw("005930")
+        del bad1["mkp"]
+        bad2 = _raw("000660")
+        del bad2["clpr"]
+        collector = DataGoKrCollector(source=_FakeSource([bad1, bad2]))
+
+        rows, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows == 0
+        assert symbols == set()
+        # 두 레코드 모두 schema 선필터 skip warning으로 surface.
+        assert len(_schema_warns(warns)) == 2
+        assert store.list_symbols("1d") == []
+        assert store.list_symbols(data_type="fundamental") == []

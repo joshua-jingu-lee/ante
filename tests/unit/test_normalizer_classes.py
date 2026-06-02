@@ -4,7 +4,9 @@ import polars as pl
 import pytest
 
 from ante.data.normalizer import (
+    DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS,
     BaseNormalizer,
+    DataGoKrNormalizer,
     DefaultNormalizer,
     KISNormalizer,
     YahooNormalizer,
@@ -198,3 +200,44 @@ def test_no_timestamp_raises():
     df = pl.DataFrame({"open": [50000.0], "close": [50050.0]})
     with pytest.raises(ValueError, match="timestamp"):
         n.normalize(df)
+
+
+# ── DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS (SSOT 도출, #2055) ──
+
+
+def test_datagokr_raw_required_fields_derived_from_mapping():
+    """raw 필수 필드는 _OHLCV_MAPPING에서 도출되며 trPrc(amount)는 제외한다.
+
+    삽입순(basDt, srtnCd, mkp, hipr, lopr, clpr, trqu)을 보존한다.
+    """
+    assert DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS == (
+        "basDt",
+        "srtnCd",
+        "mkp",
+        "hipr",
+        "lopr",
+        "clpr",
+        "trqu",
+    )
+
+
+def test_datagokr_raw_required_excludes_optional_amount():
+    """선택적 trPrc(→amount)는 필수 집합에서 제외된다."""
+    assert "trPrc" not in DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS
+    # _OHLCV_MAPPING에서 trPrc는 amount로 매핑됨을 확인 (SSOT 근거).
+    assert DataGoKrNormalizer._OHLCV_MAPPING["trPrc"] == "amount"
+
+
+def test_datagokr_raw_required_normalized_targets_are_ohlcv_set():
+    """도출된 raw 필드의 정규화 타깃이 OHLCV 필수 집합과 정확히 일치한다."""
+    mapping = DataGoKrNormalizer._OHLCV_MAPPING
+    normalized = {mapping[raw] for raw in DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS}
+    assert normalized == {
+        "timestamp",
+        "symbol",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    }
