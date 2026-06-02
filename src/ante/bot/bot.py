@@ -361,8 +361,8 @@ class Bot:
             update = {
                 "order_id": event.order_id,
                 "status": "cancel_failed",
-                "symbol": "",
-                "side": "",
+                "symbol": event.symbol,
+                "side": event.side,
                 "reason": event.error_message,
             }
         elif isinstance(event, OrderModifyRejectedEvent):
