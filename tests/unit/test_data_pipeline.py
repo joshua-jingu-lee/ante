@@ -605,6 +605,144 @@ class TestParquetStore:
         assert result["symbol"][0] == "005930"
 
 
+def _make_ohlcv_df_at(symbol: str, times: list[str]) -> pl.DataFrame:
+    """주어진 ISO 시각 목록으로 OHLCV DataFrame을 만든다.
+
+    `_make_ohlcv_df`는 단일 시각 내 1m 연속 row만 만들 수 있어 multi-day /
+    임의 장중 시각 경계 테스트(#2081)에 부적합하므로 별도 헬퍼를 둔다.
+    """
+    n = len(times)
+    timestamps = pl.Series(
+        "timestamp",
+        [datetime.fromisoformat(t) for t in times],
+    ).dt.replace_time_zone("UTC")
+    return pl.DataFrame(
+        {
+            "timestamp": timestamps,
+            "symbol": [symbol] * n,
+            "open": [50000.0 + i * 100 for i in range(n)],
+            "high": [50100.0 + i * 100 for i in range(n)],
+            "low": [49900.0 + i * 100 for i in range(n)],
+            "close": [50050.0 + i * 100 for i in range(n)],
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
+class TestParquetStoreReadEndDateOnly:
+    """`read(end=...)` date-only whole-day inclusive 동작(#2081).
+
+    - date-only end는 당일 장중(intraday) row를 모두 포함해야 한다.
+    - 시간 성분이 있는 end는 그 정확 instant까지만 inclusive(기존 동작).
+    """
+
+    async def test_intraday_date_only_end_includes_whole_day(self, store):
+        """(a) 1m 데이터 read(end='2026-01-02') → 당일 장중 row 포함."""
+        store.write(
+            "005930",
+            "1m",
+            _make_ohlcv_df_at(
+                "005930",
+                [
+                    "2026-01-02T00:00:00",
+                    "2026-01-02T09:01:00",
+                    "2026-01-02T15:30:00",
+                    "2026-01-02T23:59:00",
+                ],
+            ),
+        )
+        result = store.read("005930", "1m", end="2026-01-02")
+        ts = result["timestamp"].dt.strftime("%H:%M").to_list()
+        # date-only end=2026-01-02 → 당일 자정(00:00)뿐 아니라 09:01/15:30/
+        # 23:59 등 당일 장중 row가 모두 포함되어야 한다(기존 버그는 00:00만).
+        assert ts == ["00:00", "09:01", "15:30", "23:59"]
+        assert len(result) == 4
+
+    async def test_daily_date_only_end_includes_day_bar_regression(self, store):
+        """(b) 1d 데이터 end=date-only → 당일 bar 포함(회귀 없음)."""
+        store.write(
+            "005930",
+            "1d",
+            _make_ohlcv_df_at(
+                "005930",
+                [
+                    "2026-01-01T00:00:00",
+                    "2026-01-02T00:00:00",
+                ],
+            ),
+        )
+        result = store.read("005930", "1d", end="2026-01-02")
+        dates = result["timestamp"].dt.strftime("%Y-%m-%d").to_list()
+        # 1d bar는 00:00이므로 +1day exclusive로도 당일 bar가 포함된다.
+        assert dates == ["2026-01-01", "2026-01-02"]
+        assert len(result) == 2
+
+    async def test_full_datetime_end_exact_instant_inclusive(self, store):
+        """(c) end=full datetime → 그 instant까지 inclusive, 이후 row 제외."""
+        store.write(
+            "005930",
+            "1m",
+            _make_ohlcv_df_at(
+                "005930",
+                [
+                    "2026-01-02T15:29:00",
+                    "2026-01-02T15:30:00",
+                    "2026-01-02T15:31:00",
+                ],
+            ),
+        )
+        result = store.read("005930", "1m", end="2026-01-02T15:30")
+        ts = result["timestamp"].dt.strftime("%H:%M").to_list()
+        # 시간 성분이 있는 end는 정확 instant(<= end) 유지: 15:30 포함, 15:31 제외.
+        assert ts == ["15:29", "15:30"]
+        assert len(result) == 2
+
+    async def test_start_filter_unchanged_regression(self, store):
+        """(d) start 필터 무변경 회귀."""
+        store.write(
+            "005930",
+            "1m",
+            _make_ohlcv_df_at(
+                "005930",
+                [
+                    "2026-03-01T09:00:00",
+                    "2026-03-01T09:03:00",
+                    "2026-03-01T09:07:00",
+                    "2026-03-01T09:10:00",
+                ],
+            ),
+        )
+        result = store.read(
+            "005930",
+            "1m",
+            start="2026-03-01T09:03:00",
+            end="2026-03-01T09:07:00",
+        )
+        ts = result["timestamp"].dt.strftime("%H:%M").to_list()
+        assert ts == ["09:03", "09:07"]
+
+    async def test_date_only_end_excludes_next_day(self, store):
+        """(e) end=date-only + 다음날 row → 다음날 제외(경계)."""
+        store.write(
+            "005930",
+            "1m",
+            _make_ohlcv_df_at(
+                "005930",
+                [
+                    "2026-01-02T23:59:00",
+                    "2026-01-03T00:00:00",
+                    "2026-01-03T09:01:00",
+                ],
+            ),
+        )
+        result = store.read("005930", "1m", end="2026-01-02")
+        ts = result["timestamp"].dt.strftime("%Y-%m-%d %H:%M").to_list()
+        # 다음날(2026-01-03) row는 00:00 포함 모두 제외되어야 한다.
+        assert ts == ["2026-01-02 23:59"]
+        assert len(result) == 1
+
+
 # ── normalizer.py 테스트 ─────────────────────────────
 
 
