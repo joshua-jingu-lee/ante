@@ -165,6 +165,86 @@ def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> N
     _validate_guard_config(config, fmt)
 
 
+# `[general].nice_value` 허용 범위. POSIX nice 값 규약(0=기본, 19=최저
+# 우선순위)을 따르며 스펙(docs/specs/data-feed/02-design-decisions.md)의
+# `nice_value = 10  # 0~19` 주석과 일치한다. 음수(우선순위 상승)는 root
+# 권한이 필요하고 수집 작업의 의도(양보)와 반대이므로 허용하지 않는다.
+_NICE_VALUE_MIN = 0
+_NICE_VALUE_MAX = 19
+_NICE_VALUE_DEFAULT = 10
+
+
+def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
+    """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다 (#2029).
+
+    ``feed start`` 진입 시 1회 fail-loud 검증한다. ``[general]`` 섹션은
+    ``_apply_log_level`` 이 이미 table 임을 보장하므로 여기서는 nice_value
+    자체만 본다(미지정 시 기본값 10). int 가 아니거나 ``0..19`` 범위를
+    벗어나면 구조화 에러(``CONFIG_INVALID_NICE_VALUE``) + ``SystemExit(1)``.
+
+    bool 은 파이썬에서 int 의 subclass 이지만 우선순위 값으로는 무의미하므로
+    명시적으로 거부한다.
+    """
+    general = config.get("general", {})
+    if not isinstance(general, dict):
+        # 방어적: 통상 _apply_log_level 이 먼저 거부하나, 호출 순서에
+        # 의존하지 않도록 여기서도 동일 코드로 거부한다.
+        fmt.error(  # type: ignore[attr-defined]
+            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})",
+            code="CONFIG_INVALID_GENERAL",
+        )
+        raise SystemExit(1)
+
+    nice_value = general.get("nice_value", _NICE_VALUE_DEFAULT)
+    if isinstance(nice_value, bool) or not isinstance(nice_value, int):
+        fmt.error(  # type: ignore[attr-defined]
+            f"nice_value 는 정수여야 합니다 "
+            f"(현재: {nice_value!r}, type={type(nice_value).__name__})",
+            code="CONFIG_INVALID_NICE_VALUE",
+        )
+        raise SystemExit(1)
+
+    if not (_NICE_VALUE_MIN <= nice_value <= _NICE_VALUE_MAX):
+        fmt.error(  # type: ignore[attr-defined]
+            f"nice_value 는 {_NICE_VALUE_MIN}..{_NICE_VALUE_MAX} 범위여야 합니다 "
+            f"(현재: {nice_value})",
+            code="CONFIG_INVALID_NICE_VALUE",
+        )
+        raise SystemExit(1)
+
+    return nice_value
+
+
+def _apply_process_nice(nice_value: int) -> None:
+    """현재 프로세스의 nice 값을 ``nice_value`` 절대값으로 설정한다 (#2029).
+
+    스펙(docs/specs/data-feed/08-resource-protection.md)의 "시작 시 프로세스
+    우선순위를 낮춘다" 계약을 ``feed start`` 상주 루프 진입 **전에** 적용한다.
+
+    ``os.nice(n)`` 은 현재 nice 에 ``n`` 을 더하는 누적 증분이라 부모 nice 가
+    0 이 아니면 config 의 ``nice_value`` 를 절대값으로 보장하지 못한다. 따라서
+    절대값을 직접 설정하는 ``os.setpriority(PRIO_PROCESS, 0, nice_value)`` 를
+    사용한다(POSIX). 적용은 best-effort 다 — 권한 부족/비-POSIX 등으로 실패해도
+    수집을 멈추지 않고 ``warning`` 으로 사유만 남긴다(feed start 실패 금지).
+    """
+    import os
+
+    try:
+        os.setpriority(os.PRIO_PROCESS, 0, nice_value)  # type: ignore[attr-defined]
+    except (PermissionError, OSError, AttributeError, ValueError) as exc:
+        # AttributeError: 비-POSIX(os.setpriority/PRIO_PROCESS 부재)
+        # PermissionError/OSError: 권한·플랫폼 제약. ValueError: 범위 밖
+        # (검증을 통과한 값이므로 통상 발생하지 않으나 방어).
+        logger.warning(
+            "프로세스 우선순위(nice=%d) 적용 실패 — 수집은 계속합니다: %s",
+            nice_value,
+            exc,
+        )
+        return
+
+    logger.info("프로세스 우선순위 적용: nice=%d", nice_value)
+
+
 _API_KEY_GUIDE = """\
 ──────────────────────────────────────────────────
 API 키 설정이 필요합니다.
@@ -505,6 +585,9 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
 
     config = cfg.load_config()
     _validate_and_apply_feed_config(config, fmt)
+    # #2029: nice_value 를 fail-loud 검증한 뒤 상주 루프 진입 전에 적용한다.
+    # feed start 한정(스펙) — feed run 일회성에는 적용하지 않는다.
+    nice_value = _validate_nice_value(config, fmt)
     schedule = config.get("schedule", {})
     daily_at = (
         schedule.get("daily_at", "16:00") if isinstance(schedule, dict) else "16:00"
@@ -514,6 +597,10 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
     )
 
     orchestrator = _build_orchestrator(cfg)
+
+    # #2029: 상주 스케줄러 루프(run_scheduler_loop) 진입 전에 OS 우선순위를
+    # 낮춰 봇이 CPU 를 필요로 할 때 양보하도록 한다. best-effort.
+    _apply_process_nice(nice_value)
 
     # #2030/#2070: 스케줄러 진입 chokepoint 에서 시간 형식을 1회 fail-fast
     # 검증해 non-padded("9:00") 등으로 인한 조용한 미실행을 차단한다.
