@@ -264,6 +264,13 @@ class _FakeDataProvider:
     async def get_current_price(self, symbol: str) -> float:
         return 100.0
 
+    def get_current_bar_price(self, symbol: str) -> float | None:
+        # 체결가 게이트(#2098): 현재 봉이 있으면 체결 가능가를 돌려준다.
+        # 이 fake는 모든 step에 봉이 있다고 보므로 as-of 가격과 동일하게 100.0.
+        if self.get_current_timestamp() is None:
+            return None
+        return 100.0
+
 
 def _make_executor(exchange: str | None) -> BacktestExecutor:
     kwargs = {"exchange": exchange} if exchange is not None else {}

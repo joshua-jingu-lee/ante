@@ -1218,9 +1218,12 @@ class TestBacktestMarkToMarket:
         - 루프 종료 후 advance()가 올린 미래 봉 가격을 쓰지 않음
           (final valuation에서 get_current_price를 재호출하지 않음을 lock)
         """
-        # 두 심볼: 길이가 다름(005930=4행, 000660=8행).
-        # get_total_steps/advance는 min 길이(=4)를 따르므로
-        # 시뮬레이션은 005930 idx0..3 까지만 진행된다.
+        # 두 심볼: 길이가 다름(005930=4행, 000660=8행). 두 심볼 모두 같은
+        # 시작일(2026-01-02)에서 일 단위 전진하므로 005930의 4개 timestamp는
+        # 000660의 8개 timestamp 부분집합이다. 통합 timeline은 union=8 시각이라
+        # 시뮬레이션은 idx 0..7(8 step) 진행된다(#2098: min 길이 truncation 폐기).
+        # 005930은 idx 4..7에 봉이 없지만 보유 포지션은 as-of 최근 봉가(close=130)
+        # 로 계속 mark-to-market된다.
         df_a = _make_ohlcv_df_with_closes([100.0, 110.0, 120.0, 130.0], symbol="005930")
         df_b = _make_ohlcv_df_with_closes(
             [200.0, 210.0, 220.0, 230.0, 240.0, 250.0, 260.0, 270.0],
@@ -1233,6 +1236,9 @@ class TestBacktestMarkToMarket:
         )
         provider.load("005930", "1d")
         provider.load("000660", "1d")
+
+        last_idx = provider.get_total_steps() - 1  # union timeline 마지막 step(=7)
+        assert last_idx == 7
 
         executor = BacktestExecutor(
             strategy_cls=BuyAndHoldStrategy,
@@ -1259,15 +1265,16 @@ class TestBacktestMarkToMarket:
         # final_balance는 마지막 시뮬레이션 봉 equity 재사용 (재계산 아님)
         assert result.final_balance == result.equity_curve[-1]["equity"]
 
-        # 시뮬레이션은 min 길이(4) 기준. 마지막 평가 봉은 005930 idx=3 (close=130).
-        # get_current_price는 current_idx <= 3 인 시점에서만 호출되어야 한다.
-        # (루프 종료 후 advance()로 current_idx=4가 된 뒤 재호출되면 lookahead)
+        # get_current_price는 루프 안(current_idx <= last_idx)에서만 호출되어야
+        # 한다. 루프 종료 후 advance()로 current_idx=last_idx+1이 된 뒤 재호출되면
+        # lookahead다.
         assert idx_at_call, "get_current_price가 호출되어야 함"
-        assert max(idx_at_call) <= 3, (
-            f"final valuation이 미래 봉(current_idx>3)을 참조함: {idx_at_call}"
+        assert max(idx_at_call) <= last_idx, (
+            f"final valuation이 미래 봉(current_idx>{last_idx})을 참조함: {idx_at_call}"
         )
 
-        # 005930 마지막 평가가는 idx=3 close=130 (idx=4는 데이터 없음/미래)
+        # 005930 마지막 보유 평가가는 as-of close=130 (idx 4..7엔 봉 없음 → 직전
+        # 최근 봉가 130 유지). idx 8(미래)을 보지 않는다.
         buy_trade = result.trades[0]
         qty = buy_trade.quantity
         cash = result.equity_curve[-1]["balance"]
@@ -2604,3 +2611,355 @@ class TestBacktestOnFillFollowUp:
         assert all(t.side == "buy" for t in result.trades)
         # 5주 누적 포지션.
         assert executor._positions["005930"]["quantity"] == 5
+
+
+# ── 멀티심볼 통합 timeline / as-of 관측 / 체결 게이트 (#2098, #1992) ──
+
+
+def _make_ohlcv_df_on_dates(
+    dates: list[datetime],
+    symbol: str,
+    closes: list[float] | None = None,
+) -> pl.DataFrame:
+    """명시한 거래일(tz-aware datetime) 목록으로 OHLCV DataFrame을 만든다.
+
+    심볼별 거래 달력이 다른(겹치지 않거나 부분 겹치는) 멀티심볼 시나리오를
+    구성할 때 사용한다(#2098/#1992). closes 미지정 시 기본 종가 시퀀스를 쓴다.
+    """
+    n = len(dates)
+    if closes is None:
+        closes = [50000.0 + i * 100 for i in range(n)]
+    assert len(closes) == n
+    return pl.DataFrame(
+        {
+            "timestamp": pl.Series(dates, dtype=pl.Datetime(time_zone="UTC")),
+            "symbol": [symbol] * n,
+            "open": [c - 25 for c in closes],
+            "high": [c + 50 for c in closes],
+            "low": [c - 50 for c in closes],
+            "close": list(closes),
+            "volume": [1000 + i * 10 for i in range(n)],
+            "source": ["test"] * n,
+        }
+    )
+
+
+def _d(day: int) -> datetime:
+    """2026-01-{day} 09:00 UTC tz-aware datetime 헬퍼."""
+    return datetime(2026, 1, day, 9, 0, tzinfo=UTC)
+
+
+class TestMultiSymbolTimeline:
+    """#2098/#1992: 심볼별 거래 달력이 다를 때 공유 row-index lookahead 차단.
+
+    통합 timeline(전 심볼 timestamp의 union) + as-of 관측 + 체결 current-bar
+    게이트가 올바르게 동작하는지 회귀.
+    """
+
+    async def test_2098_repro_no_future_exposure(self, store):
+        """#2098 재현: 캘린더가 어긋난 두 심볼에서 어느 step에서도 visible
+        last가 current_ts를 초과하지 않는다.
+
+        005930=[01-01,01-02], 000660=[01-02,01-03]. 기존 버그(공유 row-index)는
+        01-02 step(idx 1)에서 000660의 row 1(=01-03)을 노출해 미래를 봤다.
+        """
+        store.write("005930", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2)], "005930"))
+        store.write("000660", "1d", _make_ohlcv_df_on_dates([_d(2), _d(3)], "000660"))
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        # 통합 timeline = {01-01, 01-02, 01-03} 오름차순.
+        assert provider.get_total_steps() == 3
+
+        seen_ts: list[datetime] = []
+        while provider.advance():
+            current_ts = provider.get_current_timestamp()
+            assert current_ts is not None
+            seen_ts.append(current_ts)
+            for symbol in ("005930", "000660"):
+                df = await provider.get_ohlcv(symbol, limit=1)
+                if df.is_empty():
+                    continue
+                last_ts = df["timestamp"][-1]
+                # as-of: visible last가 current_ts보다 미래여서는 안 된다.
+                assert last_ts <= current_ts, (
+                    f"{symbol} visible last {last_ts} > current_ts {current_ts}"
+                )
+
+        # timeline은 정확히 정렬된 union이다.
+        assert seen_ts == [_d(1), _d(2), _d(3)]
+
+    async def test_2098_lagging_symbol_not_started(self, store):
+        """01-01 step에서 000660은 아직 미시작(visible empty)."""
+        store.write("005930", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2)], "005930"))
+        store.write("000660", "1d", _make_ohlcv_df_on_dates([_d(2), _d(3)], "000660"))
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        provider.advance()  # idx 0 → current_ts = 01-01
+        assert provider.get_current_timestamp() == _d(1)
+        a = await provider.get_ohlcv("005930", limit=10)
+        b = await provider.get_ohlcv("000660", limit=10)
+        assert len(a) == 1 and a["timestamp"][-1] == _d(1)
+        assert b.is_empty()  # 000660은 01-01엔 미시작
+
+    async def test_1992_repro_lagging_symbol_empty_until_start(self, store):
+        """#1992 재현: 시작이 크게 늦은 심볼은 시작 전 step에서 visible empty.
+
+        AAA001=[01-01,01-02,01-03], BBB001=[01-10,01-11,01-12]. 01-02 step에서
+        BBB visible은 empty여야 하고, 특히 BBB의 첫 봉(01-10)을 미리 노출하지
+        않는다(기존 공유 row-index 버그는 idx 1에서 BBB row 1=01-11을 노출).
+        """
+        store.write(
+            "AAA001", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2), _d(3)], "AAA001")
+        )
+        store.write(
+            "BBB001", "1d", _make_ohlcv_df_on_dates([_d(10), _d(11), _d(12)], "BBB001")
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("AAA001", "1d")
+        provider.load("BBB001", "1d")
+
+        # union = {01,02,03,10,11,12} 정확 정렬.
+        assert provider.get_total_steps() == 6
+
+        # 2026-01-02 step(idx 1)으로 전진.
+        provider.advance()  # idx 0 → 01-01
+        provider.advance()  # idx 1 → 01-02
+        assert provider.get_current_timestamp() == _d(2)
+
+        bbb = await provider.get_ohlcv("BBB001", limit=100)
+        assert bbb.is_empty()  # BBB는 01-02엔 미시작, 01-10/01-11을 노출하지 않음
+
+        aaa = await provider.get_ohlcv("AAA001", limit=100)
+        assert [t for t in aaa["timestamp"]] == [_d(1), _d(2)]
+
+    async def test_total_steps_equals_distinct_union(self, store):
+        """get_total_steps == 두 심볼 distinct timestamp union 개수."""
+        store.write(
+            "AAA001", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2), _d(3)], "AAA001")
+        )
+        store.write(
+            "BBB001", "1d", _make_ohlcv_df_on_dates([_d(2), _d(3), _d(4)], "BBB001")
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("AAA001", "1d")
+        provider.load("BBB001", "1d")
+        # union = {01,02,03,04} = 4.
+        assert provider.get_total_steps() == 4
+
+    async def test_get_current_bar_price_exact_match_and_gap(self, store):
+        """get_current_bar_price는 current_ts 정확 일치 봉가, 없으면 None."""
+        store.write(
+            "005930",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(1), _d(3)], "005930", closes=[100.0, 130.0]),
+        )
+        store.write(
+            "000660",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(2), _d(3)], "000660", closes=[200.0, 230.0]),
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        provider.advance()  # idx 0 → 01-01
+        assert provider.get_current_bar_price("005930") == pytest.approx(100.0)
+        # 005930은 01-02에 봉이 없다(gap). 000660은 01-01에 미시작.
+        provider.advance()  # idx 1 → 01-02
+        assert provider.get_current_bar_price("005930") is None  # gap day
+        assert provider.get_current_bar_price("000660") == pytest.approx(200.0)
+        provider.advance()  # idx 2 → 01-03 (둘 다 봉 있음)
+        assert provider.get_current_bar_price("005930") == pytest.approx(130.0)
+        assert provider.get_current_bar_price("000660") == pytest.approx(230.0)
+
+    async def test_get_current_bar_price_pre_advance_none(self, store):
+        """pre-advance(current_idx=-1)에서는 None."""
+        store.write("005930", "1d", _make_ohlcv_df_on_dates([_d(1)], "005930"))
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        assert provider.get_current_bar_price("005930") is None
+
+    async def test_gap_day_buy_signal_not_filled(self, store):
+        """gap day(current_ts에 봉 없음)에 buy 신호 → 미체결(trades에 추가 안 됨)."""
+        # 005930은 01-01, 01-03에만 봉이 있고 01-02는 gap.
+        store.write(
+            "005930",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(1), _d(3)], "005930", closes=[100.0, 130.0]),
+        )
+        # 000660이 01-02 봉을 만들어 timeline에 01-02를 넣는다.
+        store.write(
+            "000660",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(2)], "000660", closes=[200.0]),
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        # step 2(01-02, idx 1)에서 005930 buy 신호. 005930은 그날 봉이 없다.
+        class BuyOnGapStep(Strategy):
+            meta = StrategyMeta(name="buy_on_gap", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 2:  # 01-02 (005930 gap day)
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyOnGapStep,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # gap day 신호는 미체결: 005930 거래/포지션이 없어야 한다.
+        assert all(t.symbol != "005930" for t in result.trades)
+        assert "005930" not in executor._positions
+
+    async def test_not_started_symbol_buy_skipped_no_crash(self, store):
+        """아직 미시작인 심볼에 buy 신호 → skip, 크래시 없음."""
+        store.write("005930", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2)], "005930"))
+        # BBB는 01-10부터 시작.
+        store.write(
+            "BBB001",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(10), _d(11)], "BBB001"),
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("BBB001", "1d")
+
+        class BuyNotStarted(Strategy):
+            meta = StrategyMeta(name="buy_not_started", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:  # 01-01: BBB는 아직 미시작
+                    return [Signal(symbol="BBB001", side="buy", quantity=1)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyNotStarted,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()  # 크래시 없이 완료
+
+        assert all(t.symbol != "BBB001" for t in result.trades)
+        assert "BBB001" not in executor._positions
+
+    async def test_as_of_equity_preserved_on_gap_day(self, store):
+        """gap day에 보유 심볼 equity가 as-of 최근 봉가로 평가된다.
+
+        005930을 01-01에 매수 후, 005930이 봉이 없는 01-02(gap) step에서
+        005930 mark-to-market이 01-01 종가(as-of)로 유지된다.
+        """
+        store.write(
+            "005930",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(1), _d(3)], "005930", closes=[100.0, 130.0]),
+        )
+        store.write(
+            "000660",
+            "1d",
+            _make_ohlcv_df_on_dates([_d(2)], "000660", closes=[200.0]),
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+
+        # 매 step ctx.get_positions()의 005930 current_price를 기록.
+        seen_price: list[float | None] = []
+
+        class BuyThenHold(Strategy):
+            meta = StrategyMeta(name="buy_then_hold", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._bought = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                signals: list[Signal] = []
+                if not self._bought:
+                    self._bought = True
+                    signals = [Signal(symbol="005930", side="buy", quantity=1)]
+                pos = self.ctx.get_positions().get("005930")
+                seen_price.append(pos["current_price"] if pos else None)
+                return signals
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenHold,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+
+        # step1(01-01): 매수 직전 미보유 → None.
+        assert seen_price[0] is None
+        # step2(01-02, gap): 005930 보유, as-of 최근 봉가 100.0 유지(lookahead 아님).
+        assert seen_price[1] == pytest.approx(100.0)
+        # step3(01-03): 005930 봉 있음 → 130.0.
+        assert seen_price[2] == pytest.approx(130.0)
+
+    async def test_single_symbol_timeline_unchanged(self, store):
+        """단일심볼은 timeline == 자기 timestamps라 동작 불변(회귀 락)."""
+        store.write(
+            "005930", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2), _d(3)], "005930")
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        assert provider.get_total_steps() == 3
+        provider.advance()  # idx 0
+        df = await provider.get_ohlcv("005930", limit=100)
+        assert len(df) == 1
+        provider.advance()  # idx 1
+        df = await provider.get_ohlcv("005930", limit=100)
+        assert len(df) == 2
+        provider.advance()  # idx 2
+        df = await provider.get_ohlcv("005930", limit=100)
+        assert len(df) == 3
+        assert provider.advance() is False
