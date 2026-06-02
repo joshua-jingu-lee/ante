@@ -59,6 +59,12 @@ DEFAULT_BACKOFF_BASE = 1.0
 DEFAULT_CB_FAILURE_THRESHOLD = 5
 DEFAULT_CB_RECOVERY_TIMEOUT = 60
 
+# KIS 연속조회(CTX_AREA) 페이지네이션
+# 응답 헤더 tr_cont 값: "F"/"M" = 다음 페이지 있음, "D"/"E" = 마지막 페이지.
+_TR_CONT_HAS_NEXT = frozenset({"F", "M"})
+# 무한 루프 방지용 최대 페이지 수 안전 상한.
+DEFAULT_MAX_PAGINATION_PAGES = 100
+
 # 주문 관련 tr_id (재시도 횟수 분류용)
 _ORDER_TR_IDS = frozenset(
     {
@@ -431,8 +437,34 @@ class KISBaseAdapter(BrokerAdapter):
     ) -> dict[str, Any]:
         """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
 
+        body dict만 반환한다. 주문 접수/취소 등 비페이지 호출자가 사용하며,
+        응답 ``tr_cont`` 헤더가 필요한 연속조회 경로는 ``_request_with_cont``
+        를 사용한다.
+
         조율만 담당하며, 에러 분류는 KISErrorClassifier,
         재시도 전략은 KISRetryHandler에 위임한다.
+        """
+        body, _ = await self._request_with_cont(
+            method, url, tr_id, params=params, json_data=json_data
+        )
+        return body
+
+    async def _request_with_cont(
+        self,
+        method: str,
+        url: str,
+        tr_id: str,
+        params: dict[str, str] | None = None,
+        json_data: dict[str, Any] | None = None,
+        cont_header: str = "",
+    ) -> tuple[dict[str, Any], str]:
+        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
+
+        ``(body, tr_cont)`` 튜플을 반환하는 페이지네이션 전용 저수준 변형.
+        circuit-breaker / 재시도 / rate-limit / 타임아웃 정책을 ``_request``
+        와 **동일하게 공유**한다 (로직 중복 금지). ``cont_header`` 는 KIS 연속
+        조회 요청 헤더 ``tr_cont`` 값("" 최초 / "N" 다음)이며, 반환 두 번째
+        값은 응답 헤더 ``tr_cont`` ("F"/"M"=다음 있음 / "D"/"E"=마지막)이다.
         """
         self._circuit_breaker.check()
         await self._ensure_authenticated()
@@ -441,6 +473,8 @@ class KISBaseAdapter(BrokerAdapter):
         max_retries = self._get_max_retries(url, tr_id)
         timeout = self._timeout_order if tr_id in _ORDER_TR_IDS else self._timeout_query
         headers = self._get_headers(tr_id)
+        if cont_header:
+            headers["tr_cont"] = cont_header
         last_error: Exception | None = None
 
         for attempt in range(max_retries + 1):
@@ -473,19 +507,93 @@ class KISBaseAdapter(BrokerAdapter):
         params: dict[str, str] | None,
         json_data: dict[str, Any] | None,
         timeout: float,
-    ) -> dict[str, Any]:
-        """단일 HTTP 요청 실행 (타임아웃 적용)."""
+    ) -> tuple[dict[str, Any], str]:
+        """단일 HTTP 요청 실행 (타임아웃 적용).
+
+        ``(body, tr_cont)`` 튜플을 반환한다. ``tr_cont`` 는 KIS 연속조회 응답
+        헤더이며, 헤더가 없으면 빈 문자열이다. GET/POST 양쪽 모두 헤더를
+        캡처하되 의미 있는 값은 GET 조회 경로에서만 사용된다.
+        """
         async with asyncio.timeout(timeout):
             if method == "GET":
                 async with self._session.get(
                     url, headers=headers, params=params
                 ) as resp:
-                    return await self._handle_response(resp)
+                    body = await self._handle_response(resp)
+                    return body, resp.headers.get("tr_cont", "")
             else:
                 async with self._session.post(
                     url, headers=headers, json=json_data
                 ) as resp:
-                    return await self._handle_response(resp)
+                    body = await self._handle_response(resp)
+                    return body, resp.headers.get("tr_cont", "")
+
+    async def _request_paginated(
+        self,
+        method: str,
+        url: str,
+        tr_id: str,
+        base_params: dict[str, str],
+        row_key: str,
+    ) -> list[dict[str, Any]]:
+        """KIS 연속조회(CTX_AREA + tr_cont)를 따라 전 페이지 행을 누적한다.
+
+        ``base_params`` 는 첫 페이지 요청 파라미터이며 ``CTX_AREA_FK100`` /
+        ``CTX_AREA_NK100`` 은 빈 문자열로 시작한다(호출자가 전달). ``row_key``
+        로 지정한 단일 행 리스트(예: ``"output1"`` / ``"output"``)만 누적하며,
+        ``output2`` 같은 summary/metadata 는 누적하지 않는다.
+
+        연속 규약:
+            - 최초 요청: 요청 헤더 ``tr_cont`` = "" + cursor = "".
+            - 응답 헤더 ``tr_cont`` 가 "F"/"M" 이면 body 의 ``ctx_area_fk100`` /
+              ``ctx_area_nk100`` 를 다음 요청 ``CTX_AREA_FK100`` /
+              ``CTX_AREA_NK100`` 로 넣고 요청 헤더 ``tr_cont`` = "N" 로 재호출.
+            - "D"/"E"(또는 그 외) 이면 마지막 페이지로 보고 종료.
+
+        가드:
+            - "F"/"M" 인데 다음 cursor 가 비어 있으면 무한루프/누락을 막기 위해
+              ``logger.warning`` 후 중단(잔여 페이지 누락 가능성 surface).
+            - 최대 페이지 수(``DEFAULT_MAX_PAGINATION_PAGES``) 도달 시
+              ``logger.warning`` 후 중단.
+        """
+        rows: list[dict[str, Any]] = []
+        params = dict(base_params)
+        cont_header = ""
+
+        for page in range(1, DEFAULT_MAX_PAGINATION_PAGES + 1):
+            body, tr_cont = await self._request_with_cont(
+                method, url, tr_id, params=params, cont_header=cont_header
+            )
+            page_rows = body.get(row_key) or []
+            rows.extend(page_rows)
+
+            if tr_cont not in _TR_CONT_HAS_NEXT:
+                # "D"/"E" 또는 헤더 부재 → 마지막 페이지.
+                break
+
+            next_fk = str(body.get("ctx_area_fk100", "") or "").strip()
+            next_nk = str(body.get("ctx_area_nk100", "") or "").strip()
+            if not next_fk and not next_nk:
+                logger.warning(
+                    "KIS 연속조회 cursor 누락 [%s] tr_cont=%s page=%d "
+                    "(잔여 페이지 누락 가능)",
+                    tr_id,
+                    tr_cont,
+                    page,
+                )
+                break
+
+            params["CTX_AREA_FK100"] = next_fk
+            params["CTX_AREA_NK100"] = next_nk
+            cont_header = "N"
+        else:
+            logger.warning(
+                "KIS 연속조회 최대 페이지(%d) 도달 [%s] (잔여 페이지 누락 가능)",
+                DEFAULT_MAX_PAGINATION_PAGES,
+                tr_id,
+            )
+
+        return rows
 
     # ── 서브클래스 확장 포인트 ──────────────────────
 
@@ -627,13 +735,15 @@ class KISDomesticAdapter(KISBaseAdapter):
         }
 
     async def get_positions(self) -> list[dict[str, Any]]:
-        """보유 포지션 조회."""
+        """보유 포지션 조회 (CTX_AREA 연속조회로 전 페이지 누적)."""
         tr_id = "VTTC8434R" if self.is_paper else "TTTC8434R"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-balance"
-        result = await self._request("GET", url, tr_id, params=self._balance_params())
+        rows = await self._request_paginated(
+            "GET", url, tr_id, self._balance_params(), row_key="output1"
+        )
 
         positions = []
-        for item in result.get("output1", []):
+        for item in rows:
             qty = float(item.get("hldg_qty", 0))
             if qty > 0:
                 positions.append(
@@ -762,7 +872,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         return True
 
     async def get_order_status(self, order_id: str) -> dict[str, Any]:
-        """주문 상태 조회."""
+        """주문 상태 조회 (CTX_AREA 연속조회로 전 페이지 확보 후 검색)."""
         tr_id = "VTTC8036R" if self.is_paper else "TTTC8036R"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
         params = {
@@ -773,9 +883,11 @@ class KISDomesticAdapter(KISBaseAdapter):
             "INQR_DVSN_1": "1",
             "INQR_DVSN_2": "0",
         }
-        result = await self._request("GET", url, tr_id, params=params)
+        orders = await self._request_paginated(
+            "GET", url, tr_id, params, row_key="output"
+        )
 
-        for order in result.get("output", []):
+        for order in orders:
             if order.get("odno") == order_id:
                 return {
                     "order_id": order["odno"],
@@ -792,7 +904,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         raise OrderNotFoundError(f"Order {order_id} not found")
 
     async def get_pending_orders(self) -> list[dict[str, Any]]:
-        """미체결 주문 목록 조회."""
+        """미체결 주문 목록 조회 (CTX_AREA 연속조회로 전 페이지 누적)."""
         tr_id = "VTTC8036R" if self.is_paper else "TTTC8036R"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl"
         params = {
@@ -803,10 +915,12 @@ class KISDomesticAdapter(KISBaseAdapter):
             "INQR_DVSN_1": "1",
             "INQR_DVSN_2": "0",
         }
-        result = await self._request("GET", url, tr_id, params=params)
+        rows = await self._request_paginated(
+            "GET", url, tr_id, params, row_key="output"
+        )
 
         orders = []
-        for order in result.get("output", []):
+        for order in rows:
             orders.append(
                 {
                     "order_id": order.get("odno", ""),
@@ -947,7 +1061,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> list[dict[str, Any]]:
-        """주문/체결 이력 조회."""
+        """주문/체결 이력 조회 (CTX_AREA 연속조회로 전 페이지 누적 후 fold)."""
         tr_id = "VTTC8001R" if self.is_paper else "TTTC8001R"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 
@@ -969,8 +1083,10 @@ class KISDomesticAdapter(KISBaseAdapter):
             "CTX_AREA_NK100": "",
         }
 
-        result = await self._request("GET", url, tr_id, params=params)
-        return self._fold_order_history(result.get("output1", []))
+        rows = await self._request_paginated(
+            "GET", url, tr_id, params, row_key="output1"
+        )
+        return self._fold_order_history(rows)
 
     @staticmethod
     def _fold_order_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
