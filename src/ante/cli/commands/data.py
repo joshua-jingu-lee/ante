@@ -7,7 +7,7 @@ import click
 from ante.cli._data_path import resolve_data_path
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
-from ante.cli.middleware import require_auth, require_scope
+from ante.cli.middleware import enforce_scope, require_auth, require_scope
 
 
 @click.group()
@@ -331,6 +331,14 @@ def validate(
             code="DATA_VALIDATE_INVALID_SYMBOL",
         )
         raise SystemExit(1)
+
+    # 조건부 권한 경계: `--fix` 는 손상 파일을 `.corrupted` 로 격리(rename)하는
+    # mutating 경로다. flat scope 모델(`member/scopes.py` SSOT — 계층 없음)에서
+    # `data:write` 는 `data:read` 를 함의하지 않으므로, `@require_scope("data:read")`
+    # 데코레이터에 더해 write 권한을 조건부로 검증한다. 어떤 파일 mutation
+    # (store.validate(..., fix=True) 의 rename)보다 **먼저** 발화해야 한다.
+    if fix:
+        enforce_scope(ctx, "data:write")
 
     store = ParquetStore(base_path=data_path)
 

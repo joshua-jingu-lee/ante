@@ -492,17 +492,34 @@ account-scoped CLI 명령의 invalid `account_id`( `None`/빈 문자열/`default
 
 ### `ante data` — 데이터 관리
 
-모든 data 커맨드는 `@require_auth`와 `@require_scope("data:read")` 데코레이터 적용.
+모든 data 커맨드는 `@require_auth`를 적용해 인증을 요구한다. scope 경계는
+명령의 동작이 read-only인지 mutating인지에 따라 다르다:
+
+- read 전용(`list` / `info` / `schema` / `storage`, 그리고 `--fix` 없는
+  `validate`)은 `@require_scope("data:read")` 만 요구한다.
+- mutating 명령은 write 권한을 추가로 요구한다. `delete` 는
+  `@require_scope("data:write")`. `validate --fix` 는 손상 파일을
+  `.corrupted` 로 격리(rename)하는 mutating 경로이므로, 순수 검증의
+  `@require_scope("data:read")` 데코레이터에 더해 명령 본문에서
+  `enforce_scope(ctx, "data:write")` 로 write 권한을 조건부 검증한다(어떤
+  파일 mutation보다 먼저 발화).
+
+scope vocabulary(`src/ante/member/scopes.py` SSOT)는 flat frozenset으로
+계층이 없다 — `data:write` 가 `data:read` 를 함의하지 않는다. 따라서
+`validate --fix` 는 `data:read` 와 `data:write` 를 **모두** 보유한 토큰만
+실행할 수 있다(검증 read + 격리 write). Human(master/admin) 멤버는 scope
+제한 없이 모든 data 명령을 통과한다.
+
 `--data-path`를 생략하면 Config resolver가 정규화한 `data.path`를 사용한다.
 명시적 `--data-path`는 해당 커맨드의 작업 대상만 바꾸며 인스턴스 경계를 바꾸지 않는다.
 
 ```bash
-ante data list [--data-path <경로>] [--db-path <경로>]            # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동)
-ante data info <dataset_id> [--data-path <경로>] [--format text|json]  # 데이터셋 상세 조회
-ante data schema [--data-path <경로>]                             # OHLCV 데이터 스키마 조회
-ante data storage [--data-path <경로>]                            # 저장 용량 현황 (MB 단위, timeframe별)
-ante data validate [--symbol <종목>] [--timeframe <주기>] [--fix] [--data-path <경로>]  # Parquet 파일 무결성 검증
-ante data delete <dataset_id> --type ohlcv|fundamental --yes [--data-path <경로>] [--format text|json]  # 데이터셋 삭제 (위험 명령, --yes 필수)
+ante data list [--data-path <경로>] [--db-path <경로>]            # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동) (scope: data:read)
+ante data info <dataset_id> [--data-path <경로>] [--format text|json]  # 데이터셋 상세 조회 (scope: data:read)
+ante data schema [--data-path <경로>]                             # OHLCV 데이터 스키마 조회 (scope: data:read)
+ante data storage [--data-path <경로>]                            # 저장 용량 현황 (MB 단위, timeframe별) (scope: data:read)
+ante data validate [--symbol <종목>] [--timeframe <주기>] [--fix] [--data-path <경로>]  # Parquet 파일 무결성 검증 (scope: data:read, --fix 시 data:write 추가)
+ante data delete <dataset_id> --type ohlcv|fundamental --yes [--data-path <경로>] [--format text|json]  # 데이터셋 삭제 (위험 명령, --yes 필수) (scope: data:write)
 ```
 
 ### `ante backtest` — 백테스트
