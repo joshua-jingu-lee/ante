@@ -26,9 +26,12 @@ shape 와 일치함을 단순 lock 만 한다. callsite shape 가 drift 하면 �
 4. ``create`` → ``standard`` (``fmt.success(message, data)``)
 5. ``remove`` → ``standard`` (``fmt.success(message, data)``)
 6. ``signal-key`` query (no --rotate) → ``raw_legacy`` (``{bot_id, signal_key}``)
-7. ``signal-key --rotate`` → ``raw_legacy`` (#2111: JSON 모드 IPC
-   ``bot.signal_key.rotate`` envelope passthrough — ``bot start`` 동형
-   ``fmt.output(result)``. text 모드만 ``fmt.success`` 메시지).
+7. ``signal-key --rotate`` → ``standard`` (``fmt.success(message, data)``)
+   분기 mixed lock — registry 는 raw_legacy 우선이지만 rotate 분기가
+   standard envelope 임을 별도 lock 해 분기 mixed 사실을 명시한다
+   (account ``set-credentials`` 동형 정책). #2111: rotate 는 runtime IPC
+   (``bot.signal_key.rotate``) 로 라우팅되지만 출력 계약(standard envelope)
+   은 그대로 보존된다 — 라우팅 변경이 출력-shape 변경이 아님을 lock 한다.
 8. ``positions`` empty → ``raw_legacy`` (``{message, positions}``)
 9. ``positions`` non-empty → ``raw_legacy`` (``{positions: [...]}``)
 10. ``update`` → ``raw_legacy`` (``fmt.output(result)`` 평면)
@@ -401,17 +404,24 @@ def test_bot_signal_key_query_envelope_matches_raw_legacy(
     assert payload["signal_key"] == "sig-key-abc"
 
 
-# ── 6. bot signal-key --rotate → raw_legacy (IPC envelope passthrough) ────
+# ── 6. bot signal-key --rotate → standard (mixed-branch lock) ─────────────
 
 
-def test_bot_signal_key_rotate_envelope_matches_raw_legacy(mock_ipc_send) -> None:
-    """``bot signal-key --rotate``: JSON 모드 IPC envelope passthrough (#2111).
+def test_bot_signal_key_rotate_envelope_matches_operation_standard(
+    mock_ipc_send,
+) -> None:
+    """``bot signal-key --rotate``: ``fmt.success(message, data)`` → standard.
 
-    rotate 는 runtime IPC (``bot.signal_key.rotate``) 전용으로 라우팅된다.
-    JSON 모드는 IPC 응답을 ``fmt.output(result)`` 로 그대로 dump 한다
-    (``bot start`` 동형 — feedback_cli_json_envelope_passthrough 메모 정책).
-    registry 의 ``raw_legacy`` 정책에 부합. text 모드만 ``fmt.success`` 메시지를
-    내며, 본 test 는 JSON passthrough 만 lock 한다.
+    분기 mixed lock — registry 는 raw_legacy 우선이지만 rotate 분기가
+    standard envelope 임을 별도 lock 해 분기 mixed 사실을 명시한다
+    (account ``set-credentials`` 동형 정책). registry 가 ``raw_legacy`` 우선
+    분류임은 query 분기 test 가 lock 한다.
+
+    #2111: rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅되지만
+    출력 계약(standard envelope)은 그대로 보존된다. 본 test 는 (1) rotate 가
+    ``bot.signal_key.rotate`` IPC 로 라우팅되는 것과 (2) 출력이 standard
+    envelope 인 것을 함께 단언해, 라우팅 변경이 출력-shape 변경이 아님을
+    lock 한다.
     """
     mock_ipc_send.return_value = {
         "bot_id": "bot-1",
@@ -423,12 +433,15 @@ def test_bot_signal_key_rotate_envelope_matches_raw_legacy(mock_ipc_send) -> Non
     assert result.exit_code == 0, result.output
 
     payload = _load_json_payload(result.output)
-    assert _is_raw_legacy_envelope(payload), (
-        f"bot signal-key --rotate: standard envelope 아니어야 함 (IPC "
-        f"passthrough). payload={payload!r}"
+    assert _is_standard_envelope(payload), (
+        f"bot signal-key --rotate: standard envelope 이어야 함 (분기 mixed). "
+        f"payload={payload!r}"
     )
-    assert payload["signal_key"] == "new-sig-key-xyz"
-    assert payload["rotated"] is True
+    assert "시그널 키 재발급 완료" in payload["message"]
+    assert payload["data"]["signal_key"] == "new-sig-key-xyz"
+    assert payload["data"]["rotated"] is True
+
+    # rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅된다 (#2111).
     mock_ipc_send.assert_awaited_once()
     call_args = mock_ipc_send.await_args
     assert call_args.args[0] == "bot.signal_key.rotate"

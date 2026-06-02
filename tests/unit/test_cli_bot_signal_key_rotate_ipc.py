@@ -107,10 +107,14 @@ class TestRotateRoutesToIpcWhenServerRunning:
         mock_send.assert_awaited_once()
         assert mock_send.await_args.args[0] == "bot.signal_key.rotate"
         assert mock_send.await_args.args[1] == {"bot_id": "bot-1"}
-        # JSON 모드는 IPC envelope passthrough.
+        # 출력 계약 보존 (#2111): 라우팅을 IPC 로 옮겨도 출력은 기존
+        # standard envelope (``{status, message, data}``, json/text 공통) 을
+        # 유지한다. cli_registry signal-key 계약의 문서화·drift-test 된
+        # mixed-branch 결정.
         payload = json.loads(result.stdout)
-        assert payload["signal_key"] == "sk_ipc_rotated"
-        assert payload["rotated"] is True
+        assert payload["status"] == "ok"
+        assert payload["data"]["signal_key"] == "sk_ipc_rotated"
+        assert payload["data"]["rotated"] is True
 
     def test_rotate_text_mode_success_message(self, runner: CliRunner) -> None:
         """text 모드는 ``fmt.success`` 메시지로 surface (exit 0)."""

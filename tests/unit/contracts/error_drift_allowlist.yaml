@@ -27,7 +27,7 @@
 #       module = dotted module path (예: ante.account.errors).
 #       class_anchor = class 이름.
 
-# bot.py 497/933/969/1003 (구 940/976/1010 → 구 924/960/994 → 구 931/967/1001
+# bot.py 497/936/972/1006 (구 940/976/1010 → 구 924/960/994 → 구 931/967/1001
 # → 구 882/918/952) 와 config.py 212/215 (구 214/217 → 구 176/179) 의
 # ``ipc_send`` ClickException text-mode 분기는 ``text = f"{code}: {message}"``
 # prefix 패턴이 의도된 영구 UX 계약이다. 회귀 lock
@@ -39,23 +39,25 @@
 # (#1870 옵션 3). #1941 commands 주석 정리로 line 번호가 7줄 위로 이동.
 # #2137 bot status positions scope 변경으로 +16줄 이동 (924/960/994 → 940/976/1010).
 # #2111 signal-key --rotate IPC 라우팅 전환: cold-path rotate mutation 제거로
-# start/stop/status 분기가 -7줄 이동 (940/976/1010 → 933/969/1003) + rotate
-# text-mode 분기 신규 callsite (497) 동일 UX prefix 패턴 추가.
+# start/stop/status 분기가 이동 (940/976/1010 → 936/972/1006) + rotate
+# text-mode 분기 신규 callsite (497) 동일 UX prefix 패턴 추가. rotate 성공
+# 출력은 standard envelope (``fmt.success``) 를 그대로 보존하므로 출력 emit
+# 분기 변경이 위 fmt.error anchor 에 추가 영향을 주지 않는다.
 intended_no_code:
   - path: src/ante/cli/commands/bot.py
     line: 497
     snippet_sha1: "03fce6e088b7"
     reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
   - path: src/ante/cli/commands/bot.py
-    line: 933
+    line: 936
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 969
+    line: 972
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 1003
+    line: 1006
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py

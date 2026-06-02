@@ -141,7 +141,14 @@ class _NormalStrategy(Strategy):
 
 
 class TestRotateExternalStrategyAllowed:
-    """R1: external 전략 봇의 정상 rotate 는 IPC envelope passthrough (#2111)."""
+    """R1: external 전략 봇의 정상 rotate 는 IPC 라우팅 + standard envelope (#2111).
+
+    rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅되지만 출력
+    계약(standard envelope)은 그대로 보존된다. cli_registry signal-key 계약이
+    "``--rotate`` 경로는 ``fmt.success`` (standard)" 로 문서화·drift-test 된
+    mixed-branch 결정을 갖고 있으므로 라우팅 변경이 출력-shape 변경이
+    아님을 lock 한다.
+    """
 
     def test_rotate_external_strategy_exits_zero_with_key(
         self, runner: CliRunner
@@ -167,10 +174,12 @@ class TestRotateExternalStrategyAllowed:
             )
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        # JSON 모드는 IPC envelope passthrough (raw_legacy, bot start 동형).
+        # 출력 계약 보존: standard envelope (``{status, message, data}``).
         payload = json.loads(result.stdout)
-        assert payload["signal_key"] == "sk_external_rotated_42"
-        assert payload["rotated"] is True
+        assert payload["status"] == "ok"
+        assert payload["data"]["signal_key"] == "sk_external_rotated_42"
+        assert payload["data"]["rotated"] is True
+        # rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅된다.
         mock_send.assert_awaited_once()
         assert mock_send.await_args.args[0] == "bot.signal_key.rotate"
         assert mock_send.await_args.args[1] == {"bot_id": "bot-ext-1"}

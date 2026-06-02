@@ -434,12 +434,13 @@ class TestBotSignalKeyMissingExit:
         assert payload["signal_key"] == "sk_test123"
 
     def test_valid_rotate_exits_zero(self, runner: CliRunner) -> None:
-        """실재 bot --rotate 재발급은 exit 0 + IPC envelope passthrough.
+        """실재 bot --rotate 재발급은 exit 0 + IPC 라우팅 + standard envelope.
 
         Refs #2111: rotate 는 runtime IPC (``bot.signal_key.rotate``) 전용으로
-        라우팅된다. CLI 는 ``ipc_send`` 가 반환한 server envelope 을 JSON 모드
-        에서 ``fmt.output(result)`` 로 그대로 dump 한다 (``bot start`` 동형).
-        존재 확인 / accepts_external_signals 게이트는 서버
+        라우팅된다. 단, 출력 계약(standard envelope ``{status, message, data}``,
+        json/text 공통)은 그대로 보존된다 — cli_registry signal-key 계약의
+        문서화·drift-test 된 mixed-branch 결정. 라우팅 변경이 출력-shape 변경이
+        아님을 lock 한다. 존재 확인 / accepts_external_signals 게이트는 서버
         ``BotManager.rotate_signal_key`` 가 단일 chokepoint 로 수행한다.
         """
         with patch(
@@ -457,10 +458,12 @@ class TestBotSignalKeyMissingExit:
             )
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        # JSON 모드는 IPC envelope passthrough (raw_legacy).
+        # 출력 계약 보존: standard envelope (``{status, message, data}``).
         payload = json.loads(result.stdout)
-        assert payload["signal_key"] == "sk_rotated999"
-        assert payload["rotated"] is True
+        assert payload["status"] == "ok"
+        assert payload["data"]["signal_key"] == "sk_rotated999"
+        assert payload["data"]["rotated"] is True
+        # rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅된다.
         mock_send.assert_awaited_once()
         assert mock_send.await_args.args[0] == "bot.signal_key.rotate"
         assert mock_send.await_args.args[1] == {"bot_id": "b-1"}

@@ -497,10 +497,13 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 fmt.error(text)
             raise SystemExit(1) from e
 
-        if fmt.is_json:
-            fmt.output(result)
-        else:
-            fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
+        # 출력 계약 보존 (#2111): rotate 성공은 IPC 라우팅으로 옮겼더라도
+        # 기존 standard envelope (``{status, message, data}``, json/text 공통)
+        # 을 그대로 유지한다. cli_registry signal-key 계약이 "``--rotate``
+        # 경로는 ``fmt.success`` (standard)" 로 의도적·문서화·drift-test 된
+        # mixed-branch 결정을 갖고 있으므로 raw passthrough 로 바꾸지 않는다.
+        # passthrough 일관성 개선은 별도 명시적 follow-up 범위다.
+        fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
         return
 
     async def _run_signal_key() -> dict:
