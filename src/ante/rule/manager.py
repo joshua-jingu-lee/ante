@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury import TreasuryManager as TreasuryManagerType
 
@@ -27,11 +28,16 @@ class RuleEngineManager:
         account_service: AccountService,
         treasury_manager: TreasuryManagerType | None = None,
         trade_service: TradeService | None = None,
+        order_tracker: OrderTracker | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
         self._treasury_manager = treasury_manager
         self._trade_service = trade_service
+        # #2045: 생성하는 RuleEngine에 주입할 권위 주문 메타 소스. optional
+        # default None — 기존 호출자/테스트 무회귀. None이면 RuleEngine은 modify
+        # event의 symbol/side를 보강하지 않고 "" graceful degrade한다.
+        self._order_tracker = order_tracker
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -70,6 +76,7 @@ class RuleEngineManager:
             treasury=treasury,
             trade_service=self._trade_service,
             account=account,
+            order_tracker=self._order_tracker,
         )
 
         if rule_configs:
