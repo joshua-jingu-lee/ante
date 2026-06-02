@@ -128,6 +128,71 @@ class TestValidateFixScopeDenied:
         mock_store.assert_not_called()
 
 
+class TestValidateFixScopeFailFast:
+    """권한 체크가 입력검증·경로 resolution 보다 먼저 발화하는지 (fail-fast).
+
+    #2108 Codex 브랜치 리뷰 후속: `enforce_scope` 를 함수 본문 최상단(입력검증·
+    경로 resolution 이전)으로 이동했다. 미인가(read-only) 토큰은 입력 유효성과
+    무관하게 즉시 `permission_denied` 여야 하며, invalid timeframe/symbol 을
+    함께 줘도 `DATA_VALIDATE_INVALID_*` 가 아니라 `permission_denied` 가 먼저
+    나와야 한다(정보 노출 순서 정리 + 어떤 side effect 보다 우선).
+    """
+
+    def test_read_only_agent_fix_invalid_timeframe_denied_first(self):
+        """read-only Agent + --fix + invalid timeframe → permission_denied 우선."""
+        runner = _runner_for(_AGENT_READ_ONLY)
+        with patch("ante.data.store.ParquetStore") as mock_store:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    *_validate_args(
+                        "--symbol",
+                        "005930",
+                        "--timeframe",
+                        "9z",
+                        "--fix",
+                    ),
+                ],
+            )
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        # 권한 거부가 invalid timeframe 검증보다 먼저 발화한다.
+        assert payload["code"] == "permission_denied"
+        assert payload["code"] != "DATA_VALIDATE_INVALID_TIMEFRAME"
+        assert "data:write" in payload["message"]
+        mock_store.assert_not_called()
+
+    def test_read_only_agent_fix_invalid_symbol_denied_first(self):
+        """read-only Agent + --fix + invalid symbol → permission_denied 우선."""
+        runner = _runner_for(_AGENT_READ_ONLY)
+        with patch("ante.data.store.ParquetStore") as mock_store:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    *_validate_args(
+                        "--symbol",
+                        "BAD",
+                        "--timeframe",
+                        "1d",
+                        "--fix",
+                    ),
+                ],
+            )
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["status"] == "error"
+        # 권한 거부가 invalid symbol 검증보다 먼저 발화한다.
+        assert payload["code"] == "permission_denied"
+        assert payload["code"] != "DATA_VALIDATE_INVALID_SYMBOL"
+        assert "data:write" in payload["message"]
+        mock_store.assert_not_called()
+
+
 class TestValidateFixScopeAllowed:
     """write 권한 보유/Human 의 `--fix` 통과."""
 
