@@ -399,6 +399,12 @@ def _check_date_order(
 ) -> None:
     """날짜 순서 역전을 검사한다.
 
+    파싱된 datetime들이 tz-aware/naive로 혼재하면 ``<`` 비교가
+    ``TypeError``를 일으킨다. 정규화 batch는 통상 tz-awareness가 일관(전부
+    aware 또는 전부 naive)이지만, 방어적으로 인접 비교를 try/except로 감싸
+    혼재 시 해당 비교만 건너뛴다. 일관 tz(정상 케이스)에서는 역전을 정확히
+    감지한다.
+
     Args:
         symbol: 심볼 식별자.
         dates: 날짜 문자열 목록.
@@ -411,7 +417,12 @@ def _check_date_order(
             parsed_dates.append((dt, d))
 
     for j in range(1, len(parsed_dates)):
-        if parsed_dates[j][0] < parsed_dates[j - 1][0]:
+        try:
+            reversed_order = parsed_dates[j][0] < parsed_dates[j - 1][0]
+        except TypeError:
+            # tz-aware와 naive datetime 혼재 → 순서 판정 불가, 해당 비교 skip.
+            continue
+        if reversed_order:
             warnings.append(
                 f"{symbol}: 날짜 순서 역전 감지: "
                 f"{parsed_dates[j - 1][1]} -> {parsed_dates[j][1]}"
@@ -420,6 +431,12 @@ def _check_date_order(
 
 def _try_parse_date(value: str) -> datetime | None:
     """날짜 문자열을 파싱 시도한다.
+
+    먼저 고정 strptime 형식 4종을 시도하고, 모두 실패하면
+    ``datetime.fromisoformat`` 으로 fallback한다. fromisoformat은
+    timezone offset(``"2026-01-02 00:00:00+00:00"``)과 ISO ``T`` 구분자
+    offset(``"2026-01-02T00:00:00+00:00"``)을 처리하지만 ``"20260102"``
+    같은 구분자 없는 형식은 거부하므로 strptime 루프를 그대로 유지한다.
 
     Args:
         value: 날짜 문자열.
@@ -437,7 +454,11 @@ def _try_parse_date(value: str) -> datetime | None:
             return datetime.strptime(value, fmt)
         except ValueError:
             continue
-    return None
+    # strptime 4형식 모두 실패 시 ISO 8601 (tz offset 포함) fallback.
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def validate_all(
