@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import json
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ReportSubmitRequest(BaseModel):
@@ -28,3 +30,26 @@ class ReportSubmitRequest(BaseModel):
     risks: str = ""
     recommendations: str = ""
     detail_json: str = "{}"
+
+    @field_validator("detail_json")
+    @classmethod
+    def _validate_detail_json(cls, v: str) -> str:
+        """``detail_json``이 표준 JSON 문자열인지 검증한다.
+
+        비표준 JSON 토큰(``Infinity``/``-Infinity``/``NaN``)은 중첩
+        위치를 포함하여 거부한다. ``json.dumps``는 기본적으로 이 토큰을
+        직렬화하므로, dict 입력 경로(CLI)에서 ``float('inf')`` 등이
+        흘러들어오면 이 검증에서 차단된다. 파싱 불가능한 비-JSON 문자열도
+        거부한다. 검증을 통과하면 원본 문자열을 그대로 반환한다.
+        """
+
+        def _reject(constant: str) -> float:
+            msg = f"detail_json은 표준 JSON이어야 합니다 (비표준 토큰: {constant})"
+            raise ValueError(msg)
+
+        try:
+            json.loads(v, parse_constant=_reject)
+        except json.JSONDecodeError as exc:
+            msg = "detail_json은 유효한 JSON 문자열이어야 합니다"
+            raise ValueError(msg) from exc
+        return v
