@@ -10,6 +10,7 @@ import polars as pl
 
 from ante.backtest.config import DatasetInfo
 from ante.backtest.exceptions import BacktestDataError
+from ante.data.store import ParquetReadError
 from ante.strategy.base import DataProvider
 
 if TYPE_CHECKING:
@@ -79,15 +80,31 @@ class BacktestDataProvider(DataProvider):
         return list(self._loaded_datasets)
 
     def load(self, symbol: str, timeframe: str) -> int:
-        """데이터를 캐시에 로드. 로드된 행 수 반환."""
+        """데이터를 캐시에 로드. 로드된 행 수 반환.
+
+        손상 파티션은 `strict=True`로 fail-closed 처리한다(#2095). store가
+        손상 파티션을 silent skip하고 부분 데이터를 반환하면 백테스트가 일부
+        기간을 빠뜨린 채 성공할 수 있으므로, `ParquetReadError`를
+        `BacktestDataError`로 wrap해 loud 실패시킨다. get_ohlcv() 등의
+        on-demand 적재 경로도 이 load()를 거치므로 동일하게 strict가 적용된다.
+
+        Raises:
+            BacktestDataError: 손상 파티션으로 데이터 로드에 실패했을 때.
+        """
         key = f"{symbol}:{timeframe}"
-        df = self._store.read(
-            symbol,
-            timeframe,
-            start=self._start,
-            end=self._end,
-            exchange=self._exchange,
-        )
+        try:
+            df = self._store.read(
+                symbol,
+                timeframe,
+                start=self._start,
+                end=self._end,
+                exchange=self._exchange,
+                strict=True,
+            )
+        except ParquetReadError as e:
+            raise BacktestDataError(
+                f"백테스트 데이터 로드 실패(손상 파티션): {symbol}: {e}"
+            ) from e
         self._cache[key] = df
         # 새 데이터가 캐시에 들어오면 통합 timeline을 무효화한다(#2098). 다음
         # advance()/get_total_steps()/get_current_timestamp() 접근 시 lazy-build.
