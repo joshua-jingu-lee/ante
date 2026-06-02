@@ -78,6 +78,19 @@ _TIME_COLUMN: dict[str, str] = {
 # 기존 `<= end`(정확 instant) 경로로 처리된다(#2081).
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# subminute 파티셔닝 해상도 집합(04-schema.md 파일 규격, core.md 축 B 명시값).
+# OHLCV 중 이 timeframe은 월별이 아니라 **일별**(`YYYY-MM-DD.parquet`)로
+# 파티셔닝한다. OHLCV bar timeframe vocabulary(축 A,
+# `CANONICAL_TIMEFRAMES`)와는 별개 축이며, 여기에 값을 추가/재정의하지
+# 않는다(#2115).
+_SUBMINUTE_TIMEFRAMES: frozenset[str] = frozenset({"10s", "30s"})
+
+# legacy 월별 파일(`YYYY-MM.parquet`)만 매치하는 glob 패턴. 일별 파일
+# (`YYYY-MM-DD.parquet` = `????-??-??.parquet`)은 segment 수가 달라
+# 미매치다. subminute dir이 이미 월별로 채워져 있는지(coexistence 방지)
+# 판정하는 데만 쓴다(#2115).
+_LEGACY_MONTHLY_GLOB = "????-??.parquet"
+
 
 def _natural_key(data_type: str, columns: list[str]) -> list[str]:
     """data_type별 merge/dedup용 natural key 컬럼 목록을 결정한다.
@@ -441,7 +454,17 @@ class ParquetStore:
         data_type: str = "ohlcv",
         exchange: str = "KRX",
     ) -> None:
-        """데이터를 Parquet에 기록. 월별 파티셔닝, 중복 제거(merge).
+        """데이터를 Parquet에 기록. 파티셔닝, 중복 제거(merge).
+
+        파티셔닝 해상도(04-schema.md 파일 규격, #2115):
+        - OHLCV 중 subminute(`_SUBMINUTE_TIMEFRAMES` = 10s/30s)는 **일별**
+          (`YYYY-MM-DD.parquet`). 단 해당 dir에 이미 legacy 월별 파일
+          (`_LEGACY_MONTHLY_GLOB`)이 있으면 월별-only를 유지하고 일별을
+          신규 생성하지 않는다(월별+일별 coexistence 시 read glob+concat이
+          중복 timestamp를 반환하므로 이를 원천 차단). legacy 월별→일별
+          전환 migration은 destructive하므로 별도 follow-up #2267로 분리한다.
+        - 그 외(1m+ OHLCV, fundamental/tick 등)는 기존대로 **월별**
+          (`YYYY-MM.parquet`).
 
         신규 write/append/경로 생성은 canonical exchange만 허용한다
         (core.md ``## Canonical Exchange Vocabulary``). `append()`는
@@ -471,10 +494,26 @@ class ParquetStore:
         path.mkdir(parents=True, exist_ok=True)
 
         key = _natural_key(data_type, data.columns)
-        partitioned = self._partition_by_month(data, time_col)
 
-        for month_val, group in partitioned:
-            filepath = path / f"{month_val}.parquet"
+        # 파티셔닝 해상도 결정(#2115). subminute OHLCV는 일별이 기본이나,
+        # 이미 legacy 월별 파일이 있는 dir은 월별을 유지해 coexistence(월별+
+        # 일별 혼재 → read 중복 timestamp)를 만들지 않는다.
+        use_daily = data_type == "ohlcv" and timeframe in _SUBMINUTE_TIMEFRAMES
+        if use_daily and next(path.glob(_LEGACY_MONTHLY_GLOB), None) is not None:
+            use_daily = False
+            logger.warning(
+                "legacy 월별 파티션 존재 — 일별 전환은 #2267, 월별 유지"
+                "(coexistence 미생성): %s",
+                path,
+            )
+
+        if use_daily:
+            partitioned = self._partition_by_day(data, time_col)
+        else:
+            partitioned = self._partition_by_month(data, time_col)
+
+        for part_val, group in partitioned:
+            filepath = path / f"{part_val}.parquet"
             self._persist_partition(filepath, group, key)
 
         logger.debug("Wrote %d rows for %s/%s", len(data), symbol, timeframe)
@@ -498,6 +537,32 @@ class ParquetStore:
                 data_with_month.filter(pl.col("_month") == month_val).drop("_month"),
             )
             for month_val in data_with_month["_month"].unique().to_list()
+        ]
+
+    def _partition_by_day(
+        self, data: pl.DataFrame, time_col: str
+    ) -> list[tuple[str, pl.DataFrame]]:
+        """데이터를 일별로 분할하여 (`YYYY-MM-DD`, DataFrame) 리스트 반환.
+
+        `_partition_by_month`와 동형이며 파티션 key 해상도만 일별
+        (`%Y-%m-%d` / Date면 `cast(Utf8).str.slice(0, 10)`)이다. subminute
+        OHLCV(10s/30s) 일별 파티셔닝 전용(04-schema.md, #2115).
+        """
+        if time_col in data.columns:
+            if data[time_col].dtype == pl.Date:
+                day_series = data[time_col].cast(pl.Utf8).str.slice(0, 10)
+            else:
+                day_series = data[time_col].dt.strftime("%Y-%m-%d")
+        else:
+            day_series = pl.Series(["unknown"] * len(data))
+
+        data_with_day = data.with_columns(day_series.alias("_day"))
+        return [
+            (
+                day_val,
+                data_with_day.filter(pl.col("_day") == day_val).drop("_day"),
+            )
+            for day_val in data_with_day["_day"].unique().to_list()
         ]
 
     def _persist_partition(

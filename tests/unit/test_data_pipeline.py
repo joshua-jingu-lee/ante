@@ -630,6 +630,199 @@ def _make_ohlcv_df_at(symbol: str, times: list[str]) -> pl.DataFrame:
     )
 
 
+def _make_subminute_ohlcv_df(
+    symbol: str,
+    days: list[str],
+    rows_per_day: int = 3,
+    interval: str = "10s",
+) -> pl.DataFrame:
+    """여러 날에 걸친 subminute OHLCV DataFrame 생성(#2115).
+
+    각 날짜의 09:00:00부터 `interval` 간격으로 `rows_per_day`개의 row를
+    만든다. day는 `YYYY-MM-DD` 문자열.
+    """
+    from datetime import timedelta
+
+    step = 30 if interval == "30s" else 10
+    frames = []
+    for day in days:
+        base = datetime.fromisoformat(f"{day}T09:00:00")
+        timestamps = pl.datetime_range(
+            base,
+            base + timedelta(seconds=(rows_per_day - 1) * step),
+            interval=interval,
+            eager=True,
+            time_zone="UTC",
+        )
+        n = len(timestamps)
+        frames.append(
+            pl.DataFrame(
+                {
+                    "timestamp": timestamps,
+                    "symbol": [symbol] * n,
+                    "open": [50000.0] * n,
+                    "high": [50100.0] * n,
+                    "low": [49900.0] * n,
+                    "close": [50050.0] * n,
+                    "volume": [1000] * n,
+                    "source": ["test"] * n,
+                }
+            )
+        )
+    return pl.concat(frames)
+
+
+class TestParquetStoreSubminuteDailyPartition:
+    """subminute OHLCV(10s/30s) 일별 파티셔닝(04-schema.md, #2115).
+
+    - 신규 dir: `YYYY-MM-DD.parquet`(일별).
+    - 1m+/fundamental/tick: `YYYY-MM.parquet`(월별, 회귀).
+    - legacy 월별 파일이 있는 subminute dir: coexistence 미생성을 위해
+      월별 유지 + warning(일별 전환은 follow-up #2267).
+    """
+
+    async def test_new_10s_dir_daily_partition(self, store, data_dir):
+        """(a) 신규 10s ohlcv dir에 여러 날 write → 일별 파일들."""
+        df = _make_subminute_ohlcv_df(
+            "005930", ["2026-03-01", "2026-03-02", "2026-03-03"], interval="10s"
+        )
+        store.write("005930", "10s", df)
+
+        dir_ = data_dir / "ohlcv" / "10s" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == [
+            "2026-03-01.parquet",
+            "2026-03-02.parquet",
+            "2026-03-03.parquet",
+        ]
+
+    async def test_new_30s_dir_daily_partition(self, store, data_dir):
+        """(b) 신규 30s ohlcv dir도 동일하게 일별."""
+        df = _make_subminute_ohlcv_df(
+            "005930", ["2026-04-10", "2026-04-11"], interval="30s"
+        )
+        store.write("005930", "30s", df)
+
+        dir_ = data_dir / "ohlcv" / "30s" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-04-10.parquet", "2026-04-11.parquet"]
+
+    async def test_1m_ohlcv_monthly_regression(self, store, data_dir):
+        """(c) 1m ohlcv는 월별 유지(회귀)."""
+        df = _make_ohlcv_df("005930")  # 2026-03 1m bars
+        store.write("005930", "1m", df)
+
+        dir_ = data_dir / "ohlcv" / "1m" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-03.parquet"]
+
+    async def test_1d_ohlcv_monthly_regression(self, store, data_dir):
+        """(c) 1d ohlcv도 월별 유지(회귀)."""
+        df = _make_ohlcv_df("005930")
+        store.write("005930", "1d", df)
+
+        dir_ = data_dir / "ohlcv" / "1d" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-03.parquet"]
+
+    async def test_fundamental_monthly_regression(self, store, data_dir):
+        """(d) fundamental은 data_type gate로 월별 유지(timeframe 무관)."""
+        from datetime import date
+
+        df = pl.DataFrame(
+            {
+                "date": [date(2026, 3, 1), date(2026, 3, 2)],
+                "symbol": ["005930", "005930"],
+                "source": ["dart", "dart"],
+            }
+        )
+        store.write("005930", "", df, data_type="fundamental")
+
+        dir_ = data_dir / "fundamental" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-03.parquet"]
+
+    async def test_non_subminute_timeframe_gate_monthly(self, store, data_dir):
+        """(d) data_type=ohlcv여도 timeframe이 subminute가 아니면 월별.
+
+        예: 5m은 _SUBMINUTE_TIMEFRAMES에 없으므로 월별 파티션.
+        """
+        df = _make_ohlcv_df("005930")
+        store.write("005930", "5m", df)
+
+        dir_ = data_dir / "ohlcv" / "5m" / "KRX" / "005930"
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-03.parquet"]
+
+    async def test_daily_partition_roundtrip_with_dedup(self, store):
+        """(e) write 후 read 라운드트립 — 일별 정상 + natural-key dedup."""
+        df = _make_subminute_ohlcv_df(
+            "005930", ["2026-03-01", "2026-03-02"], rows_per_day=3, interval="10s"
+        )
+        store.write("005930", "10s", df)
+        # 같은 데이터 재write → 파일 내부 natural-key(timestamp) dedup 멱등
+        store.write("005930", "10s", df)
+
+        result = store.read("005930", "10s")
+        assert len(result) == 6  # 2일 × 3 rows, 중복 제거됨
+        # timestamp 중복 없음
+        assert result["timestamp"].n_unique() == 6
+        # 정렬됨
+        assert result["timestamp"].is_sorted()
+
+    async def test_legacy_monthly_dir_kept_monthly(self, store, data_dir, caplog):
+        """(f) legacy 월별 파일 있는 10s dir → 월별 유지, 일별 미생성, 중복 0."""
+        import logging
+
+        dir_ = data_dir / "ohlcv" / "10s" / "KRX" / "005930"
+        dir_.mkdir(parents=True, exist_ok=True)
+
+        # legacy 월별 파일 사전 생성(2026-03의 row 2개).
+        legacy = _make_subminute_ohlcv_df(
+            "005930", ["2026-03-01"], rows_per_day=2, interval="10s"
+        )
+        legacy_file = dir_ / "2026-03.parquet"
+        legacy.write_parquet(str(legacy_file))
+
+        # 같은 달의 신규 row를 추가 write → 일별 전환하지 않고 월별 유지.
+        new_df = _make_subminute_ohlcv_df(
+            "005930", ["2026-03-02"], rows_per_day=2, interval="10s"
+        )
+        with caplog.at_level(logging.WARNING, logger="ante.data.store"):
+            store.write("005930", "10s", new_df)
+
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        # 월별만 존재 — 일별(YYYY-MM-DD) 파일이 생기지 않아야 한다.
+        assert files == ["2026-03.parquet"]
+        assert any("#2267" in rec.message for rec in caplog.records)
+
+        # read에 중복 timestamp가 없어야 한다.
+        result = store.read("005930", "10s")
+        assert result["timestamp"].n_unique() == len(result)
+        assert len(result) == 4  # legacy 2 + new 2 (서로 다른 timestamp)
+
+    async def test_legacy_glob_does_not_match_daily_files(self, store, data_dir):
+        """(g) glob `????-??.parquet`는 일별 파일을 매치하지 않는다.
+
+        이미 일별로 채워진 dir에 추가 write해도 월별로 오인되지 않고
+        일별 파티션을 계속 생성한다.
+        """
+        # 신규 일별 dir 생성
+        df1 = _make_subminute_ohlcv_df("005930", ["2026-01-15"], interval="10s")
+        store.write("005930", "10s", df1)
+
+        dir_ = data_dir / "ohlcv" / "10s" / "KRX" / "005930"
+        # 일별 파일만 존재 — 월별 glob은 0건 매치
+        assert (dir_ / "2026-01-15.parquet").exists()
+        assert list(dir_.glob("????-??.parquet")) == []
+
+        # 추가 write도 일별 유지(월별 오인 없음)
+        df2 = _make_subminute_ohlcv_df("005930", ["2026-01-16"], interval="10s")
+        store.write("005930", "10s", df2)
+        files = sorted(f.name for f in dir_.glob("*.parquet"))
+        assert files == ["2026-01-15.parquet", "2026-01-16.parquet"]
+
+
 class TestParquetStoreReadEndDateOnly:
     """`read(end=...)` date-only whole-day inclusive 동작(#2081).
 
