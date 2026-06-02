@@ -416,8 +416,16 @@ class IPCServer:
                 if audit_logger is not None:
                     if audit_detail is None:
                         audit_detail = {}
+                    # Refs #2113: auth-exempt member 명령(reset_password /
+                    # regenerate_recovery_key)은 client 가 actor 를 임의로 보낼
+                    # 수 있으므로(스푸핑 가능) audit member_id 를 client actor 가
+                    # 아니라 handler 가 ``_audit_detail["member_id"]`` 로 고정한
+                    # sentinel 상수로 기록해야 한다. handler 가 member_id 를
+                    # 명시하지 않으면 기존 동작(``actor`` 사용)을 그대로 유지한다
+                    # (순수 additive override — 기존 audit_action 명령 회귀 없음).
+                    audit_member_id = audit_detail.get("member_id") or actor
                     await audit_logger.log(
-                        member_id=actor,
+                        member_id=audit_member_id,
                         action=spec.audit_action,
                         resource=audit_detail.get("resource") or "",
                         detail=audit_detail.get("detail") or "",

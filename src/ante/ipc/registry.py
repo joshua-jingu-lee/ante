@@ -924,6 +924,256 @@ async def _handle_member_update_scopes(
     }
 
 
+async def _handle_member_register(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """멤버 등록 IPC handler.
+
+    Refs #2113: ``member.update_scopes`` 미러. ``registered_by=actor`` 로
+    서버 측 master 게이트(``MemberService.register`` 내부 검증)를 보존한다.
+
+    secret 비노출: 발급 토큰은 사용자 표시용 result(``token``) 에만 담고,
+    ``_audit_detail`` (resource/detail) 이나 server logger / IPC error
+    envelope 어디에도 넘기지 않는다. ``_audit_detail`` 에는 resource 만 둔다.
+    """
+    member_id = args["member_id"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    created, token = await member.register(
+        member_id=member_id,
+        member_type=args["member_type"],
+        org=args.get("org", "default"),
+        name=args.get("name", ""),
+        scopes=list(args.get("scopes") or []),
+        registered_by=actor,
+    )
+    return {
+        "member_id": created.member_id,
+        "type": created.type,
+        "role": created.role,
+        "org": created.org,
+        "name": created.name,
+        "token": token,
+        "_audit_detail": {
+            "resource": f"member:{created.member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+async def _handle_member_set_emoji(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """멤버 emoji 설정 IPC handler.
+
+    Refs #2113: CLI ``member set-emoji`` → ``MemberService.update_emoji``
+    (``set_emoji`` 메서드는 없음). ``updated_by=actor`` 로 호출한다.
+    """
+    member_id = args["member_id"]
+    emoji = args["emoji"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    updated = await member.update_emoji(member_id, emoji, updated_by=actor)
+    return {
+        "member_id": updated.member_id,
+        "emoji": updated.emoji,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+async def _handle_member_suspend(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """멤버 일시 정지 IPC handler.
+
+    Refs #2113: ``suspended_by=actor`` 로 ``MemberService.suspend`` 내부의
+    master 게이트(``_assert_master(actor)``)를 보존한다.
+    """
+    member_id = args["member_id"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    updated = await member.suspend(member_id, suspended_by=actor)
+    return {
+        "member_id": updated.member_id,
+        "status": updated.status,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+async def _handle_member_reactivate(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """멤버 재활성화 IPC handler.
+
+    Refs #2113: ``reactivated_by=actor`` 로 master 게이트를 보존한다.
+    """
+    member_id = args["member_id"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    updated = await member.reactivate(member_id, reactivated_by=actor)
+    return {
+        "member_id": updated.member_id,
+        "status": updated.status,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+async def _handle_member_revoke(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """멤버 영구 폐기 IPC handler.
+
+    Refs #2113: ``revoked_by=actor`` 로 master 게이트를 보존한다. CLI
+    ``--yes`` 게이트는 라우팅 이전 CLI 단에서 검사한다.
+    """
+    member_id = args["member_id"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    updated = await member.revoke(member_id, revoked_by=actor)
+    return {
+        "member_id": updated.member_id,
+        "status": updated.status,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+async def _handle_member_rotate_token(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """토큰 재발급 IPC handler.
+
+    Refs #2113: ``rotated_by=actor`` 로 master 게이트를 보존한다.
+
+    secret 비노출: 새 토큰은 사용자 표시용 result(``token``) 에만 담고
+    ``_audit_detail`` / server logger / IPC error envelope 어디에도 넘기지
+    않는다.
+    """
+    member_id = args["member_id"]
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    updated, token = await member.rotate_token(member_id, rotated_by=actor)
+    return {
+        "member_id": updated.member_id,
+        "token": token,
+        "_audit_detail": {
+            "resource": f"member:{member_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
+# Refs #2113: auth-exempt member 명령(reset_password / regenerate_recovery_key)
+# 의 audit member_id 는 client-supplied actor(스푸핑 가능) 를 절대 쓰지 않고
+# handler 가 고정한 sentinel 상수를 ``_audit_detail["member_id"]`` 로 전달한다.
+# ``_dispatch`` wrapper 는 이 override 가 있으면 actor 대신 사용한다.
+_RECOVERY_AUDIT_MEMBER_ID = "recovery"
+
+
+async def _resolve_master_member_id(member: Any) -> str:
+    """master(human) 멤버 ID 를 서버 측에서 해석한다.
+
+    Refs #2113: reset_password / regenerate_recovery_key 는 auth-exempt 라
+    client 가 대상 member_id 를 보내지 않는다. master-lookup 을 CLI 가 아니라
+    서버 chokepoint(handler)에서 수행해 단일 경로로 일관 적용한다.
+    """
+    members = await member.list_members(member_type="human")
+    master = next((m for m in members if m.role == "master"), None)
+    if master is None:
+        msg = "master 멤버가 존재하지 않습니다"
+        raise ValueError(msg)
+    return master.member_id
+
+
+async def _handle_member_reset_password(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """recovery key 로 패스워드 리셋 IPC handler (auth-exempt).
+
+    Refs #2113: args 는 secret(``recovery_key`` / ``new_password``) 만 받는다.
+    대상 master member_id 는 서버 chokepoint 에서 ``list_members`` +
+    role filter 로 해석한다(client actor 신뢰 금지).
+
+    secret 비노출: ``recovery_key`` / ``new_password`` 는 ``_audit_detail``
+    (resource/detail) 이나 server logger / IPC error envelope 어디에도
+    넣지 않는다. ``detail`` 은 flow 표식만 둔다.
+
+    audit member_id 는 client actor(스푸핑 가능) 가 아니라 고정 sentinel
+    상수(``_RECOVERY_AUDIT_MEMBER_ID``) 로 기록한다 —
+    ``_audit_detail["member_id"]`` override 로 wrapper 에 전달한다.
+    """
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    recovery_key = args["recovery_key"]
+    new_password = args["new_password"]
+    master_id = await _resolve_master_member_id(member)
+    await member.reset_password(master_id, recovery_key, new_password)
+    return {
+        "_audit_detail": {
+            "resource": f"member:{master_id}",
+            "detail": "password reset via recovery key",
+            "ip": "",
+            "member_id": _RECOVERY_AUDIT_MEMBER_ID,
+        },
+    }
+
+
+async def _handle_member_regenerate_recovery_key(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """recovery key 재발급 IPC handler (auth-exempt).
+
+    Refs #2113: args 는 secret(``password``) 만 받는다. 대상 master member_id 는
+    서버 chokepoint 에서 해석한다(client actor 신뢰 금지).
+
+    secret 비노출: 입력 ``password`` 와 재발급된 ``recovery_key`` 는
+    ``_audit_detail`` (resource/detail) 이나 server logger / IPC error
+    envelope 어디에도 넘기지 않는다. 새 recovery key 는 사용자 표시용
+    result(``recovery_key``) 에만 담는다.
+
+    audit member_id 는 client actor 가 아니라 고정 sentinel 상수로 기록한다.
+    """
+    member = getattr(svc, "member_service", None)
+    if member is None:
+        raise RuntimeError("member service not configured")
+    password = args["password"]
+    master_id = await _resolve_master_member_id(member)
+    new_key = await member.regenerate_recovery_key(master_id, password)
+    return {
+        "recovery_key": new_key,
+        "_audit_detail": {
+            "resource": f"member:{master_id}",
+            "detail": "recovery key regenerated",
+            "ip": "",
+            "member_id": _RECOVERY_AUDIT_MEMBER_ID,
+        },
+    }
+
+
 async def _handle_config_set(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -1237,9 +1487,9 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """32개 런타임 커맨드 핸들러를 일괄 등록.
+    """40개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(24개) 또는 read-only(8개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(8개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -1273,12 +1523,15 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     (action ``bot.delete``) / ``approval.approve`` / ``approval.reject`` /
     ``approval.cancel``. 각각 account.suspend 동형으로 register 에 audit_action
     부여 + required_services union audit_logger, handler 가 ``_audit_detail``
-    반환. 현재 ``audit_action`` 부여 commands 는 18개:
+    반환. 현재 ``audit_action`` 부여 commands 는 26개:
     ``account.suspend`` / ``account.activate`` / ``system.halt`` /
     ``system.clear_halt`` / ``bot.create`` / ``bot.remove``(→``bot.delete``) /
     ``bot.start`` / ``bot.stop`` / ``bot.update`` /
     ``bot.signal_key.rotate`` / ``treasury.set_balance`` /
     ``strategy.set_status`` / ``member.update_scopes`` /
+    ``member.register`` / ``member.set_emoji`` / ``member.suspend`` /
+    ``member.reactivate`` / ``member.revoke`` / ``member.rotate_token`` /
+    ``member.reset_password`` / ``member.regenerate_recovery_key`` /
     ``approval.approve`` / ``approval.reject`` / ``approval.cancel`` /
     ``approval.cancel_invalid`` / ``rule.update``.
 
@@ -1286,8 +1539,19 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     ``bot.signal_key`` (read-only) 추가 — ``bot list/info/positions/signal-key``
     의 runtime IPC 경로. CLI 가 서버 정지 시 snapshot DB fallback 한다. audit
     없음(read-only). read-only 4→8, 총 28→32.
+
+    Refs #2113: member admin mutation 8개(``member.register`` /
+    ``member.set_emoji`` / ``member.suspend`` / ``member.reactivate`` /
+    ``member.revoke`` / ``member.rotate_token`` / ``member.reset_password`` /
+    ``member.regenerate_recovery_key``) 를 runtime IPC 로 wiring 한다
+    (``member.update_scopes`` 동형, IPC-first + 서버 정지 시 CLI cold-path
+    fallback). 발급 토큰/새 recovery key 는 사용자 표시용 result 에만 담고
+    audit/log/envelope 에는 노출하지 않는다. ``reset_password`` /
+    ``regenerate_recovery_key`` 는 auth-exempt 라 master-lookup 을 handler
+    (서버 chokepoint)에서 수행하고 audit member_id 를 고정 sentinel 상수로
+    기록한다. mutating 24→32, audit 18→26, 총 32→40.
     """
-    # ── mutating (24개): 서버 상태/DB를 변경 ──────────
+    # ── mutating (32개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
     # Refs #2110 (audit.md:115/116): kill switch 토글은 audit 대상이다.
     # audit_action 부여 + required_services 에 audit_logger 명시(account.suspend
@@ -1454,6 +1718,77 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.update_scopes",
+    )
+    # member.* admin mutation (#2113) — ``member.update_scopes`` 와 동형. 서버
+    # MemberService 위임 + audit_action 자동 발화. ``register`` / ``rotate_token``
+    # 은 발급 토큰을, ``regenerate_recovery_key`` 는 새 recovery key 를 사용자
+    # 표시용 result 에만 담고 audit/log/envelope 에는 절대 노출하지 않는다.
+    # ``reset_password`` / ``regenerate_recovery_key`` 는 auth-exempt 라
+    # audit member_id 를 client actor 가 아닌 고정 sentinel 상수로 기록한다.
+    # register audit_action 은 audit.md SSOT 에 따라 ``member.register`` 다.
+    registry.register(
+        "member.register",
+        _handle_member_register,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.register",
+    )
+    registry.register(
+        "member.set_emoji",
+        _handle_member_set_emoji,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.set_emoji",
+    )
+    registry.register(
+        "member.suspend",
+        _handle_member_suspend,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.suspend",
+    )
+    registry.register(
+        "member.reactivate",
+        _handle_member_reactivate,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.reactivate",
+    )
+    registry.register(
+        "member.revoke",
+        _handle_member_revoke,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.revoke",
+    )
+    registry.register(
+        "member.rotate_token",
+        _handle_member_rotate_token,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.rotate_token",
+    )
+    registry.register(
+        "member.reset_password",
+        _handle_member_reset_password,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.reset_password",
+    )
+    registry.register(
+        "member.regenerate_recovery_key",
+        _handle_member_regenerate_recovery_key,
+        is_mutating=True,
+        result_kind="entity",
+        required_services=frozenset({"member_service", "audit_logger"}),
+        audit_action="member.regenerate_recovery_key",
     )
     registry.register(
         "config.set",

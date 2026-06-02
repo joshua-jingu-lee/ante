@@ -240,7 +240,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 32개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 40개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -261,6 +261,14 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `rule.update` | mutating | DynamicConfig 기반 계좌 룰 수정 |
 | `strategy.set_status` | mutating | `StrategyRegistry.update_status()` 호출 |
 | `member.update_scopes` | mutating | `MemberService.update_scopes()` 호출 |
+| `member.register` | mutating | `MemberService.register()` 호출. 토큰 발급 + 감사 로그. 발급 토큰은 result 에만 surface (#2113) |
+| `member.set_emoji` | mutating | `MemberService.update_emoji()` 호출 (#2113) |
+| `member.suspend` | mutating | `MemberService.suspend()` 호출. master 게이트 + 세션 무효화 (#2113) |
+| `member.reactivate` | mutating | `MemberService.reactivate()` 호출 (#2113) |
+| `member.revoke` | mutating | `MemberService.revoke()` 호출. 토큰 해시 삭제 (#2113) |
+| `member.rotate_token` | mutating | `MemberService.rotate_token()` 호출. 새 토큰은 result 에만 surface (#2113) |
+| `member.reset_password` | mutating | auth-exempt. master-lookup 을 handler 에서 수행, audit member_id 는 고정 sentinel. secret 은 result/audit/log 비노출 (#2113) |
+| `member.regenerate_recovery_key` | mutating | auth-exempt. 새 recovery key 는 result 에만 surface (#2113) |
 | `config.set` | mutating | `DynamicConfigService.set()` 호출 |
 | `approval.request` | mutating | `ApprovalService.create()` 호출 |
 | `approval.approve` | mutating | `ApprovalService.approve()` 호출 |
@@ -283,9 +291,17 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 IPC command 분리는 별도 이슈 범위다.
 
 `account.delete`처럼 1.0 IPC 계약에서 제외되어 `CommandRegistry`에 등록되지 않는 명령은
-taxonomy 대상이 아니다. `member.update_scopes`를 제외한 `member.*`처럼 CLI/스펙 표에는 runtime IPC로
-표현되어 있으나 현재 `register_all_handlers()`에 없는 명령의 실제 wiring은 별도 후속 이슈에서
-다룬다.
+taxonomy 대상이 아니다. `member.*` 9개(`member.update_scopes` + admin mutation 8개)는 모두
+`register_all_handlers()`에 wiring되어 있으며, CLI는 서버 실행 중 runtime IPC로 위임하고 서버
+정지 시 maintenance fallback으로 `MemberService`를 직접 생성한다(IPC-first + 서버 정지 fallback,
+#2113).
+
+`member.register` / `member.rotate_token`의 발급 토큰과 `member.regenerate_recovery_key`의 새
+recovery key는 사용자 표시용 result에만 담고 audit detail / audit_log / IPC error envelope /
+server 로그 어디에도 노출하지 않는다. `member.reset_password` / `member.regenerate_recovery_key`는
+auth-exempt이므로 대상 master member_id를 client가 아니라 서버 handler에서 master-lookup으로
+해석하고, audit의 member_id는 client actor(스푸핑 가능)가 아니라 handler가 고정한 sentinel 상수로
+기록한다.
 
 ## 통신 프로토콜
 
