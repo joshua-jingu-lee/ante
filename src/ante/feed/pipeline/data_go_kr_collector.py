@@ -289,7 +289,9 @@ class DataGoKrCollector:
 
         매핑(spec data-feed/04-schema.md INSTRUMENTS, 05-data-sources.md):
         `srtnCd`→symbol, `itmsNm`→name, `mrktCtg`→market, exchange="KRX".
-        itmsNm/mrktCtg 컬럼이 없으면 빈 문자열로 안전 처리한다.
+        itmsNm/mrktCtg 컬럼이 둘 다 없으면(메타데이터 전무) 무가치한 파일을
+        만들지 않도록 저장을 건너뛴다. 적어도 하나의 메타 컬럼이 있으면 누락 셀은
+        빈 문자열로 안전 처리한다.
 
         upsert 정책:
         - 신규 batch는 symbol 기준 1행으로 dedup한다.
@@ -306,6 +308,15 @@ class DataGoKrCollector:
         """
         # df는 survivors raw DataFrame이므로 종목코드 컬럼은 `srtnCd`다.
         if "srtnCd" not in df.columns:
+            return 0
+
+        # itmsNm/mrktCtg가 둘 다 없으면 메타데이터 전무 → 무가치 파일 생성 방지.
+        if "itmsNm" not in df.columns and "mrktCtg" not in df.columns:
+            logger.debug(
+                "data.go.kr instruments: 메타 컬럼(itmsNm/mrktCtg) 전무(rows=%d) "
+                "— 파일 미생성",
+                df.height,
+            )
             return 0
 
         height = df.height

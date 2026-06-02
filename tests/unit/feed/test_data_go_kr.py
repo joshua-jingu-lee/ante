@@ -1511,11 +1511,13 @@ class TestCollectorInstrumentsStore:
         assert df["symbol"].to_list() == ["005930"]
 
     @pytest.mark.asyncio
-    async def test_instruments_missing_meta_columns_graceful(self, tmp_path) -> None:
-        """(e) itmsNm/mrktCtg 컬럼 전무 → graceful(파일 생성되되 빈 name/market).
+    async def test_instruments_not_written_on_missing_meta_columns(
+        self, tmp_path
+    ) -> None:
+        """(e) itmsNm/mrktCtg 컬럼 둘 다 전무 → 무가치 파일 미생성(크래시 없음).
 
-        symbol은 유효하므로 instruments 행은 기록되지만 name/market는 빈 문자열.
-        크래시가 발생하지 않아야 한다.
+        메타데이터가 전혀 없으면(srtnCd만 존재) instruments.parquet를 생성하지
+        않는다. ohlcv/fundamental 등 다른 저장 경로는 정상 진행한다.
         """
         store = ParquetStore(base_path=tmp_path)
         # itmsNm/mrktCtg 키가 전혀 없는 raw(=_raw 기본).
@@ -1525,13 +1527,43 @@ class TestCollectorInstrumentsStore:
 
         assert rows > 0
         assert symbols == {"005930"}
-        _, df = _read_instruments(store)
+        path, df = _read_instruments(store)
+        assert not path.exists()
+        assert df is None
+
+    @pytest.mark.asyncio
+    async def test_instruments_written_with_only_name_column(self, tmp_path) -> None:
+        """메타 컬럼이 하나만 있어도(itmsNm만) 파일 생성, 누락 컬럼은 빈 문자열."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", mrkt_ctg=None)])
+        )
+
+        await collector.collect("20260102", store)
+
+        path, df = _read_instruments(store)
+        assert path.exists()
         assert df is not None
         row = df.filter(df["symbol"] == "005930").to_dicts()[0]
-        assert row["symbol"] == "005930"
-        assert row["exchange"] == "KRX"
-        assert row["name"] == ""
+        assert row["name"] == "삼성전자"
         assert row["market"] == ""
+
+    @pytest.mark.asyncio
+    async def test_instruments_written_with_only_market_column(self, tmp_path) -> None:
+        """메타 컬럼이 하나만 있어도(mrktCtg만) 파일 생성, 누락 컬럼은 빈 문자열."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", itms_nm=None, mrkt_ctg="KOSPI")])
+        )
+
+        await collector.collect("20260102", store)
+
+        path, df = _read_instruments(store)
+        assert path.exists()
+        assert df is not None
+        row = df.filter(df["symbol"] == "005930").to_dicts()[0]
+        assert row["name"] == ""
+        assert row["market"] == "KOSPI"
 
     @pytest.mark.asyncio
     async def test_instruments_not_written_on_empty_response(self, tmp_path) -> None:
