@@ -104,7 +104,7 @@ allowlist 후보에서 제거한다.
 | `ante trade info <trade_id>` | `offline` | canonical DB 조회 |
 | `ante strategy validate <path>` | `offline` | AST 정적 검증 |
 | `ante strategy submit <path>` | `offline` | 검증 + 로드 테스트 + StrategyRegistry 등록 |
-| `ante strategy list` | `offline` | StrategyRegistry 조회 |
+| `ante strategy list [--status registered\|adopted\|archived]` | `offline` | StrategyRegistry 조회 |
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
 | `ante strategy performance <name> --account-id <account_id>` | `offline` | 성과 DB 집계 (account-scoped, semantic-required) |
 | `ante strategy set-status <strategy_id> --status adopted\|archived` | `runtime IPC` | 전략 상태 변경 |
@@ -135,7 +135,7 @@ allowlist 후보에서 제거한다.
 | `ante config history <key>` | `offline` | dynamic config history 조회 |
 | `ante approval request/approve/reject/cancel/reopen ...` | `runtime IPC` | 서버 ApprovalService + Notification/EventBus |
 | `ante approval list/info/review ...` | `offline` | approval 저장소 조회 |
-| `ante approval audit-types [--status ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
+| `ante approval audit-types [--status ...] [--db-path ...]` | `offline` | scope `approval:read`. legacy invalid-type row 식별 (#1472) |
 | `ante approval cancel-invalid <id>` | `runtime IPC` | scope `approval:admin`. legacy invalid-type row administrative cleanup (#1472) |
 | `ante init ...` | `bootstrap/maintenance` | 인스턴스 파일 + master/test account 생성 |
 | `ante member list/info ...` | `offline` | member 조회 |
@@ -399,7 +399,7 @@ exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다
 ```bash
 ante strategy validate <path>      # 전략 파일 정적 검증 (AST)
 ante strategy submit <path>        # 검증 + 로드 테스트 + 전략 등록
-ante strategy list                 # 등록된 전략 목록
+ante strategy list [--status registered|adopted|archived] [--format text|json]  # 등록된 전략 목록
 ante strategy info <name>          # 전략 상세 (메타데이터, 파라미터)
 ante strategy set-status <strategy_id> --status adopted|archived  # 전략 상태 변경
 ante strategy performance <name> --account-id <account_id>  # 전략 전체 성과 (계좌별, 모든 봇 집계, Agent 피드백용)
@@ -514,7 +514,7 @@ scope vocabulary(`src/ante/member/scopes.py` SSOT)는 flat frozenset으로
 명시적 `--data-path`는 해당 커맨드의 작업 대상만 바꾸며 인스턴스 경계를 바꾸지 않는다.
 
 ```bash
-ante data list [--data-path <경로>] [--db-path <경로>]            # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동) (scope: data:read)
+ante data list [--symbol <종목>] [--timeframe <주기>] [--type ohlcv|fundamental] [--offset N] [--limit N] [--data-path <경로>] [--db-path <경로>] [--format text|json]  # 보유 데이터셋 목록 (종목명 병기, InstrumentService 연동) (scope: data:read)
 ante data info <dataset_id> [--data-path <경로>] [--format text|json]  # 데이터셋 상세 조회 (scope: data:read)
 ante data schema [--data-path <경로>]                             # OHLCV 데이터 스키마 조회 (scope: data:read)
 ante data storage [--data-path <경로>]                            # 저장 용량 현황 (MB 단위, timeframe별) (scope: data:read)
@@ -527,7 +527,7 @@ ante data delete <dataset_id> --type ohlcv|fundamental --yes [--data-path <경�
 `--data-path`를 생략하면 canonical data root(`data.path`)에서 Parquet 데이터를 읽는다.
 
 ```bash
-ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--data-path <경로>]  # 진행률 바 표시 (text 모드)
+ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--exchange <거래소>] [--data-path <경로>] [--db-path <경로>]  # 진행률 바 표시 (text 모드, --exchange 기본 KRX)
 ante backtest history <strategy_name> [--limit N] [--db-path <경로>]  # 전략별 백테스트 실행 이력
 ```
 
@@ -604,14 +604,14 @@ ante config history <key>          # 설정 변경 이력 조회
 
 ```bash
 ante approval request --type <type> --title <title> [--body <text>] [--params <json>] [--reference-id <id>] [--expires-in 72h]  # 승인 요청 생성
-ante approval list [--status <상태>]        # 승인 요청 목록
-ante approval info <approval_id>            # 승인 요청 상세
-ante approval review <approval_id> --result pass|warn|fail [--detail <text>]  # 승인 요청 리뷰
+ante approval list [--status <상태>] [--type <유형>] [--db-path <경로>] [--format text|json]  # 승인 요청 목록
+ante approval info <approval_id> [--db-path <경로>] [--format text|json]  # 승인 요청 상세
+ante approval review <approval_id> --result pass|warn|fail [--detail <text>] [--db-path <경로>] [--format text|json]  # 승인 요청 리뷰
 ante approval cancel <approval_id>          # 승인 요청 취소
 ante approval approve <approval_id>         # 승인 요청 승인
 ante approval reject <approval_id>          # 승인 요청 거부
 ante approval reopen <approval_id> [--body <text>] [--params <json>]  # 거절된 요청 재상신 (params/body 수정 가능)
-ante approval audit-types [--status <상태>]   # legacy invalid-type row 식별 (#1472, scope approval:read)
+ante approval audit-types [--status <상태>] [--db-path <경로>] [--format text|json]  # legacy invalid-type row 식별 (#1472, scope approval:read)
 ante approval cancel-invalid <approval_id>    # legacy invalid-type row administrative cleanup (#1472, scope approval:admin)
 ```
 
