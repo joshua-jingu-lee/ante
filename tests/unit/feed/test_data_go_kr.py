@@ -5,7 +5,10 @@ from __future__ import annotations
 from datetime import date
 from unittest.mock import AsyncMock, patch
 
+import aiohttp
 import pytest
+from multidict import CIMultiDict
+from yarl import URL
 
 from ante.data.store import ParquetStore
 from ante.feed.pipeline.data_go_kr_collector import DataGoKrCollector
@@ -124,8 +127,12 @@ class TestClassifyError:
         assert classify_error("31") == ErrorAction.CRITICAL
 
     def test_unknown_error(self) -> None:
-        """99는 RETRY로 분류한다."""
-        assert classify_error("99") == ErrorAction.RETRY
+        """99는 RETRY_ONCE로 분류한다 (1회 재시도 후 스킵, #2027)."""
+        assert classify_error("99") == ErrorAction.RETRY_ONCE
+
+    def test_application_error_retry(self) -> None:
+        """01은 일반 RETRY로 분류한다 (max_retries 유지, 회귀)."""
+        assert classify_error("01") == ErrorAction.RETRY
 
     def test_unmapped_code_defaults_to_retry(self) -> None:
         """매핑되지 않은 코드는 RETRY로 분류한다."""
@@ -817,6 +824,167 @@ class TestFetchByDate:
             await source.fetch_by_date("2024-03-01")
 
         assert captured_params[0]["basDt"] == "20240301"
+
+
+# ── HTTP status 재시도 분류 (#2026) ───────────────────────────
+
+
+def _client_response_error(status: int) -> aiohttp.ClientResponseError:
+    """지정 status를 가진 aiohttp.ClientResponseError를 생성한다."""
+    request_info = aiohttp.RequestInfo(
+        url=URL("https://apis.data.go.kr/test"),
+        method="GET",
+        headers=CIMultiDict(),
+        real_url=URL("https://apis.data.go.kr/test"),
+    )
+    return aiohttp.ClientResponseError(
+        request_info=request_info,
+        history=(),
+        status=status,
+        message=f"HTTP {status}",
+    )
+
+
+class TestHttpStatusRetryPolicy:
+    """#2026: HTTP 4xx 비재시도 / 408·429·5xx·timeout·연결 오류 재시도."""
+
+    @pytest.mark.parametrize("status", [400, 401, 403, 404, 422])
+    @pytest.mark.asyncio
+    async def test_non_retryable_status_fails_immediately(
+        self, source: DataGoKrSource, status: int
+    ) -> None:
+        """400/401/403/404/422는 재시도 없이 1회 호출 후 즉시 실패한다."""
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            raise _client_response_error(status)
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError):
+                    await source.fetch_by_date("2024-03-01")
+
+        # 재시도 0 → _do_request 정확히 1회 호출
+        assert call_count == 1
+
+    @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
+    @pytest.mark.asyncio
+    async def test_retryable_status_retries(
+        self, source: DataGoKrSource, status: int
+    ) -> None:
+        """408/429/5xx ClientResponseError는 max_retries까지 재시도한다."""
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            raise _client_response_error(status)
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        # max_retries(=2)만큼 호출
+        assert call_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_timeout_error_retries(self, source: DataGoKrSource) -> None:
+        """TimeoutError는 재시도 대상이다."""
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            raise TimeoutError("timed out")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        assert call_count == source._max_retries == 2
+
+    @pytest.mark.asyncio
+    async def test_connection_error_without_status_retries(
+        self, source: DataGoKrSource
+    ) -> None:
+        """status 없는 ClientConnectionError(연결 오류)는 재시도 대상이다."""
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            raise aiohttp.ClientConnectionError("Connection refused")
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        assert call_count == source._max_retries == 2
+
+
+# ── UNKNOWN(99) RETRY_ONCE 1회 재시도 cap (#2027) ─────────────
+
+
+class TestRetryOnceCap:
+    """#2027: resultCode=99(UNKNOWN)는 1회만 재시도(총 2회 호출) 후 스킵."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_code_retries_once_then_skips(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """99는 max_retries(=3)와 무관하게 2회 호출(1회 재시도) 후 실패한다."""
+        # cap이 max_retries보다 작게 동작함을 보이려고 max_retries=3으로 둔다.
+        source = DataGoKrSource(
+            api_key="test-api-key", rate_limiter=rate_limiter, max_retries=3
+        )
+        error_response = _make_response(
+            [], result_code="99", result_msg="UNKNOWN_ERROR"
+        )
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            return error_response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        # RETRY_ONCE → 최초 1회 + 재시도 1회 = 총 2회 (max_retries=3 미사용)
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_general_retry_code_uses_max_retries(
+        self, rate_limiter: RateLimiter
+    ) -> None:
+        """일반 RETRY 코드(01)는 max_retries(=3) 전체를 사용한다 (회귀)."""
+        source = DataGoKrSource(
+            api_key="test-api-key", rate_limiter=rate_limiter, max_retries=3
+        )
+        error_response = _make_response(
+            [], result_code="01", result_msg="APPLICATION_ERROR"
+        )
+        call_count = 0
+
+        async def mock_request(session, params):
+            nonlocal call_count
+            call_count += 1
+            return error_response
+
+        with patch.object(source, "_do_request", side_effect=mock_request):
+            with patch.object(source, "_backoff_delay", return_value=0.0):
+                with pytest.raises(DataGoKrError, match="최종 실패"):
+                    await source.fetch_by_date("2024-03-01")
+
+        # 일반 RETRY → max_retries(=3)회 호출
+        assert call_count == 3
 
 
 # ── DataGoKrCollector: srtnCd KRX 검증 (#2080) ────────────────
