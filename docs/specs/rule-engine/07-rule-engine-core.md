@@ -13,10 +13,17 @@ RuleEngine은 룰을 로드하고 평가하는 메인 엔진입니다.
 ```python
 RuleEngine(
     eventbus: EventBus,
-    account_id: str = "default",
+    *,
+    account_id: str,
     account_service: AccountService | None = None,
+    bot_strategy_resolver: Callable[[str], str | None] | None = None,
+    treasury: Treasury | None = None,
+    trade_service: TradeService | None = None,
+    account: Account | None = None,
 )
 ```
+
+`eventbus`는 positional이고, 그 외 인자는 모두 keyword-only(`*,` 이후)입니다. `account_id`는 default fallback 없이 **필수**이며, 생성자 내부에서 `require_account_id(account_id, context="rule_engine.__init__")`로 즉시 검증됩니다 — 빈 값이나 `"default"` 같은 fallback은 거부됩니다.
 
 ### 의존성
 
