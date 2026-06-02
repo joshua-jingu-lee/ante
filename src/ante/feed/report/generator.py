@@ -51,6 +51,9 @@ class ReportGenerator:
                 "symbols_total": result.symbols_total,
                 "symbols_success": result.symbols_success,
                 "symbols_failed": result.symbols_failed,
+                # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed는
+                # 종목 귀속 실패만 세므로 symbols_failed=0이어도 >0일 수 있다(#2117).
+                "failures_total": len(result.failures),
                 "rows_written": result.rows_written,
                 "data_types": list(result.data_types),
             },

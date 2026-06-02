@@ -179,6 +179,51 @@ class TestFeedStatusWithReport:
         assert data["latest_report"]["mode"] == "daily"
         assert data["latest_report"]["summary"]["symbols_success"] == 2485
 
+    def test_shows_total_failures_with_non_symbol_failure(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """날짜/소스 단위 실패가 텍스트의 total failures로 표면화된다(#2117).
+
+        symbols_failed=0이어도 failures_total>0이면 '0 failed'와 별개로
+        'N total failures'가 표시되어 성공처럼 보이는 것을 막는다.
+        """
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="daily",
+            target_date="2026-03-16",
+            success=10,
+            failed=0,
+            extra_failures=[
+                {"date": "2026-03-16", "source": "data_go_kr", "reason": "HTTP 500"},
+                {"source": "dart", "reason": "연결 실패"},
+            ],
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "0 failed" in result.output
+        assert "2 total failures" in result.output
+
+    def test_total_failures_falls_back_to_failures_len(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """구버전 리포트(summary.failures_total 없음)는 failures 길이로 폴백한다."""
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="daily",
+            target_date="2026-03-16",
+            success=10,
+            failed=0,
+            extra_failures=[
+                {"date": "2026-03-16", "source": "data_go_kr", "reason": "HTTP 500"},
+            ],
+            include_failures_total=False,
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "1 total failures" in result.output
+
 
 class TestFeedStatusApiKeys:
     """API 키 상태 표시."""
@@ -233,24 +278,38 @@ def _create_report(
     success: int = 2485,
     failed: int = 0,
     warnings: int = 0,
+    extra_failures: list[dict] | None = None,
+    include_failures_total: bool = True,
 ) -> None:
-    """테스트용 리포트 파일을 생성한다."""
+    """테스트용 리포트 파일을 생성한다.
+
+    Args:
+        extra_failures: 종목에 귀속되지 않는 날짜/소스 단위 실패(#2117 검증용).
+        include_failures_total: summary에 failures_total을 넣을지(구버전 폴백 검증용).
+    """
     reports_dir = Path(data_path) / ".feed" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
+    failures: list[dict] = [
+        {"symbol": f"00{i:04d}", "reason": "test"} for i in range(failed)
+    ]
+    failures.extend(extra_failures or [])
+    summary: dict = {
+        "symbols_total": success + failed,
+        "symbols_success": success,
+        "symbols_failed": failed,
+        "rows_written": success,
+        "data_types": ["ohlcv", "fundamental"],
+    }
+    if include_failures_total:
+        summary["failures_total"] = len(failures)
     report = {
         "mode": mode,
         "started_at": f"{target_date}T16:00:12Z",
         "finished_at": f"{target_date}T16:05:34Z",
         "duration_seconds": 322,
         "target_date": target_date,
-        "summary": {
-            "symbols_total": success + failed,
-            "symbols_success": success,
-            "symbols_failed": failed,
-            "rows_written": success,
-            "data_types": ["ohlcv", "fundamental"],
-        },
-        "failures": [{"symbol": f"00{i:04d}", "reason": "test"} for i in range(failed)],
+        "summary": summary,
+        "failures": failures,
         "warnings": [
             {"symbol": f"00{i:04d}", "message": "test warning"} for i in range(warnings)
         ],
