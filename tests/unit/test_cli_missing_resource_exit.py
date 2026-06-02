@@ -55,6 +55,7 @@ import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -433,91 +434,72 @@ class TestBotSignalKeyMissingExit:
         assert payload["signal_key"] == "sk_test123"
 
     def test_valid_rotate_exits_zero(self, runner: CliRunner) -> None:
-        """실재 bot --rotate 재발급은 exit 0 + rotated 회귀 보존.
+        """실재 bot --rotate 재발급은 exit 0 + IPC envelope passthrough.
 
-        Refs #1761: rotate 분기가 ``strategy_id`` 를 함께 SELECT 하고
-        ``accepts_external_signals`` 게이트를 통과해야 ``skm.rotate`` 가
-        호출된다. ``StrategyRegistry``/``StrategyLoader`` 를 patch 해
-        external signals=True 전략을 시뮬레이션한다.
+        Refs #2111: rotate 는 runtime IPC (``bot.signal_key.rotate``) 전용으로
+        라우팅된다. CLI 는 ``ipc_send`` 가 반환한 server envelope 을 JSON 모드
+        에서 ``fmt.output(result)`` 로 그대로 dump 한다 (``bot start`` 동형).
+        존재 확인 / accepts_external_signals 게이트는 서버
+        ``BotManager.rotate_signal_key`` 가 단일 chokepoint 로 수행한다.
         """
-        from ante.strategy.base import StrategyMeta
-
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value={"strategy_id": "s-1"})
-        mock_skm = AsyncMock()
-        mock_skm.initialize = AsyncMock()
-        mock_skm.rotate = AsyncMock(return_value="sk_rotated999")
-
-        mock_record = MagicMock()
-        mock_record.filepath = "/fake/path.py"
-        mock_registry = AsyncMock()
-        mock_registry.initialize = AsyncMock()
-        mock_registry.get = AsyncMock(return_value=mock_record)
-
-        mock_strategy_cls = MagicMock()
-        mock_strategy_cls.meta = StrategyMeta(
-            name="ext",
-            version="1.0.0",
-            description="external",
-            accepts_external_signals=True,
-        )
-
-        with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
+        with patch(
+            "ante.cli.commands.ipc_helpers.ipc_send",
+            new=AsyncMock(
+                return_value={
+                    "bot_id": "b-1",
+                    "signal_key": "sk_rotated999",
+                    "rotated": True,
+                }
             ),
-            patch(
-                "ante.bot.signal_key.SignalKeyManager",
-                return_value=mock_skm,
-            ),
-            patch(
-                "ante.strategy.registry.StrategyRegistry",
-                return_value=mock_registry,
-            ),
-            patch(
-                "ante.strategy.loader.StrategyLoader.load",
-                return_value=mock_strategy_cls,
-            ),
-        ):
+        ) as mock_send:
             result = runner.invoke(
                 cli, ["--format", "json", "bot", "signal-key", "b-1", "--rotate"]
             )
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        # rotate 성공은 ``fmt.success`` envelope: {status:ok, message, data}.
+        # JSON 모드는 IPC envelope passthrough (raw_legacy).
         payload = json.loads(result.stdout)
-        assert payload["status"] == "ok"
-        assert payload["data"]["signal_key"] == "sk_rotated999"
-        assert payload["data"]["rotated"] is True
-        mock_skm.rotate.assert_awaited_once_with("b-1")
+        assert payload["signal_key"] == "sk_rotated999"
+        assert payload["rotated"] is True
+        mock_send.assert_awaited_once()
+        assert mock_send.await_args.args[0] == "bot.signal_key.rotate"
+        assert mock_send.await_args.args[1] == {"bot_id": "b-1"}
 
 
 class TestBotSignalKeyMissingBotExit:
-    """``ante bot signal-key <missing-bot> [--rotate]`` 은 exit 1 (#1596).
+    """``ante bot signal-key <missing-bot>`` 은 exit 1 (#1596 / #2111).
 
-    미존재 bot 에 대한 signal key 발급/조회를 차단한다 (oracle A7
+    미존재 bot 에 대한 signal key 조회/재발급을 차단한다 (oracle A7
     missing-resource). 형제 명령(`bot info`/`bot remove`/`bot positions`,
-    #1558)과 동일하게 "봇을 찾을 수 없습니다: {bot_id}" + exit 1, **에러
-    코드 없음**으로 거부하고, orphan credential 을 발급하지 않는다.
+    #1558)과 동일하게 "봇을 찾을 수 없습니다: {bot_id}" + exit 1 +
+    ``BOT_NOT_FOUND`` code 로 거부하고, orphan credential 을 발급하지 않는다.
 
-    target 경로는 ``_create_services()`` 의 ``Database`` 직접 조회
-    (``SELECT 1 FROM bots WHERE bot_id = ?``) — ``SignalKeyManager``
-    자체는 미변경 (Non-Goal).
+    read (조회, rotate 미지정) 경로는 ``_create_services()`` 의 ``Database``
+    직접 조회 (``SELECT ... FROM bots WHERE bot_id = ?``) cold-path 가
+    그대로 가드한다 — ``SignalKeyManager`` 자체는 미변경 (Non-Goal).
+
+    Refs #2111: ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``)
+    전용으로 라우팅되므로, 미존재 bot 거부는 서버
+    ``BotManager.rotate_signal_key`` 의 ``BotNotFoundError`` →
+    ``BOT_NOT_FOUND`` envelope 으로 일어난다. 본 클래스의 rotate 케이스는
+    ``ipc_send`` 가 server envelope 을 surface 하는 CLI 라우팅만 lock 하고,
+    orphan 미발급 invariant 는 서버 handler/manager 테스트가 책임진다.
     """
 
     def _missing_skm(self) -> AsyncMock:
-        """rotate/get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
+        """get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
 
-        미존재 bot 가드가 ``skm.rotate``/``skm.get_key`` **이전**에
-        걸리므로, 이 mock 의 메서드는 호출되어선 안 된다 (orphan
-        credential 미발급 검증).
+        read 경로 미존재 bot 가드가 ``skm.get_key`` **이전**에 걸리므로,
+        이 mock 의 메서드는 호출되어선 안 된다 (orphan credential 미조회
+        검증). rotate 는 cold-path 를 거치지 않으므로 (#2111 IPC 전용)
+        ``rotate`` 도 동일하게 미호출이어야 한다.
         """
         skm = AsyncMock()
         skm.initialize = AsyncMock()
         skm.rotate = AsyncMock(
-            side_effect=AssertionError("미존재 bot 인데 rotate 가 호출됨 (orphan)")
+            side_effect=AssertionError(
+                "rotate cold-path 가 호출됨 (#2111: IPC 전용이어야 함)"
+            )
         )
         skm.get_key = AsyncMock(
             side_effect=AssertionError("미존재 bot 인데 get_key 가 호출됨")
@@ -525,16 +507,22 @@ class TestBotSignalKeyMissingBotExit:
         return skm
 
     def test_missing_bot_rotate_exits_nonzero_json(self, runner: CliRunner) -> None:
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value=None)  # bots row 없음
-        mock_skm = self._missing_skm()
+        """#2111: 미존재 bot --rotate → 서버 ``BOT_NOT_FOUND`` envelope 을
+        ``ipc_send`` 가 surface, CLI 가 exit 1 + ``BOT_NOT_FOUND`` 로 보존."""
+        click_exc = click.ClickException(
+            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: oracle-missing-bot"
+        )
+        click_exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
+        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
+            "봇을 찾을 수 없습니다: oracle-missing-bot"
+        )
 
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._missing_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
@@ -556,26 +544,28 @@ class TestBotSignalKeyMissingBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
-        # #1784 Group A sweep: 미존재 bot 은 안정 코드 ``BOT_NOT_FOUND`` 로
-        # surface 한다 (CLI/IPC 일관성: ``BotNotFoundError.code`` 와 동형).
-        # 이전 #1558 의 "code 없음" 계약은 #1784 oracle A7 evidence 에서
-        # 자동화 분류 불가 결함으로 보고되어 본 sweep 에서 폐기.
+        # 서버 ``BotNotFoundError.code`` 와 동형 stable code.
         assert payload["code"] == "BOT_NOT_FOUND"
-        # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
+        # cold-path 미사용 회귀: 직접 DB rotate/get_key 미호출.
         mock_skm.rotate.assert_not_awaited()
         mock_skm.get_key.assert_not_awaited()
 
     def test_missing_bot_rotate_exits_nonzero_text(self, runner: CliRunner) -> None:
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value=None)
-        mock_skm = self._missing_skm()
+        """#2111: text 모드에서도 서버 envelope 을 surface (exit 1 + stderr)."""
+        click_exc = click.ClickException(
+            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: oracle-missing-bot"
+        )
+        click_exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
+        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
+            "봇을 찾을 수 없습니다: oracle-missing-bot"
+        )
 
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._missing_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
@@ -650,6 +640,9 @@ class TestBotSignalKeyMissingBotExit:
 
         ``no such table`` ``OperationalError`` 는 정의상 해당 bot_id 가
         존재할 수 없으므로 미존재 bot 과 동일하게 exit 1 + 거부 메시지.
+
+        Refs #2111: 본 정규화는 read (조회) cold-path 가 책임지므로 rotate
+        플래그 없이 read 경로로 lock 한다 (rotate 는 IPC 전용으로 이전).
         """
         import sqlite3
 
@@ -678,7 +671,6 @@ class TestBotSignalKeyMissingBotExit:
                     "bot",
                     "signal-key",
                     "oracle-missing-bot",
-                    "--rotate",
                 ],
             )
 
@@ -686,11 +678,15 @@ class TestBotSignalKeyMissingBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
-        mock_skm.rotate.assert_not_awaited()
+        mock_skm.get_key.assert_not_awaited()
 
     def test_other_operational_error_not_swallowed(self, runner: CliRunner) -> None:
         """``no such table`` 외 ``OperationalError`` 는 미존재로 정규화하지
-        않고 그대로 전파(일반 에러 경로 → exit 1, 거부 메시지 아님)."""
+        않고 그대로 전파(일반 에러 경로 → exit 1, 거부 메시지 아님).
+
+        Refs #2111: read (조회) cold-path 의 에러 정규화 회귀이므로 rotate
+        플래그 없이 lock 한다.
+        """
         import sqlite3
 
         mock_db = AsyncMock()
@@ -712,7 +708,7 @@ class TestBotSignalKeyMissingBotExit:
         ):
             result = runner.invoke(
                 cli,
-                ["--format", "json", "bot", "signal-key", "some-bot", "--rotate"],
+                ["--format", "json", "bot", "signal-key", "some-bot"],
             )
 
         # malformed db 는 미존재 bot 으로 둔갑하지 않는다 (메시지 구분).
@@ -721,7 +717,7 @@ class TestBotSignalKeyMissingBotExit:
         assert "봇을 찾을 수 없습니다" not in payload["message"]
         # non-"no such table" OperationalError 는 non-zero exit (#1596).
         assert result.exit_code != 0, result.output
-        mock_skm.rotate.assert_not_awaited()
+        mock_skm.get_key.assert_not_awaited()
 
     def test_db_error_exits_nonzero_json(self, runner: CliRunner) -> None:
         """bot 존재확인 중 non-"no such table" ``OperationalError`` (locked/
@@ -732,7 +728,10 @@ class TestBotSignalKeyMissingBotExit:
         exit code 가 0 으로 남아 자동화 호출자가 실패를 감지하지 못했다.
         형제 ``bot remove`` (raise SystemExit(1) from e)와 동일하게 non-zero
         exit 으로 정렬한다. 미존재 bot 거부 경로(exit 1 "봇을 찾을 수
-        없습니다", code 없음)는 별도 invariant 로 그대로 유지된다.
+        없습니다")는 별도 invariant 로 그대로 유지된다.
+
+        Refs #2111: read (조회) cold-path 의 DB 오류 exit-code 회귀이므로
+        rotate 플래그 없이 lock 한다 (rotate 는 IPC 전용으로 이전).
         """
         import sqlite3
 
@@ -755,7 +754,7 @@ class TestBotSignalKeyMissingBotExit:
         ):
             result = runner.invoke(
                 cli,
-                ["--format", "json", "bot", "signal-key", "some-bot", "--rotate"],
+                ["--format", "json", "bot", "signal-key", "some-bot"],
             )
 
         # 핵심 회귀 assert: DB 오류는 non-zero exit 으로 끝나야 한다.
@@ -764,8 +763,7 @@ class TestBotSignalKeyMissingBotExit:
         assert payload["status"] == "error"
         # locked DB 는 미존재 bot 으로 둔갑하지 않는다 (거부 메시지 아님).
         assert "봇을 찾을 수 없습니다" not in payload["message"]
-        # orphan credential 미발급: rotate/get_key 미호출 (가드 이전 실패).
-        mock_skm.rotate.assert_not_awaited()
+        # orphan credential 미조회: get_key 미호출 (가드 이전 실패).
         mock_skm.get_key.assert_not_awaited()
 
     def test_db_error_exits_nonzero_text(self, runner: CliRunner) -> None:
@@ -810,21 +808,30 @@ class TestBotSignalKeySoftDeletedBotExit:
     ``BotManager.load_from_db`` 의 운영 bot 정의(manager.py:212
     ``FROM bots WHERE status != 'deleted'``)와 정렬. soft-deleted bot 은
     row 없는 미존재 bot 과 동일한 missing sentinel → 동일 거부
-    ("봇을 찾을 수 없습니다" + exit 1, code 없음), orphan 미발급.
+    ("봇을 찾을 수 없습니다" + exit 1 + ``BOT_NOT_FOUND``), orphan 미발급.
+
+    Refs #2111: read (조회) cold-path 의 ``status != 'deleted'`` SELECT 가드
+    회귀는 ``test_soft_deleted_bot_lookup_*`` 가 보존한다. ``--rotate`` 는
+    runtime IPC (``bot.signal_key.rotate``) 전용으로 이전되었으므로,
+    soft-deleted bot rotate 거부는 서버 ``BotManager.rotate_signal_key`` 의
+    ``BotNotFoundError`` → ``BOT_NOT_FOUND`` envelope 으로 일어나며 (server
+    ``load_from_db`` 도 ``WHERE status != 'deleted'`` 정렬), rotate 케이스는
+    ``ipc_send`` 의 server envelope surface 만 lock 한다.
     """
 
     def _missing_skm(self) -> AsyncMock:
-        """rotate/get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
+        """get_key 가 호출되면 즉시 실패하는 SignalKeyManager mock.
 
-        soft-deleted bot 가드가 ``skm.rotate``/``skm.get_key`` **이전**에
-        걸리므로, 이 mock 의 메서드는 호출되어선 안 된다 (orphan
-        credential 미발급 검증).
+        read 경로 soft-deleted bot 가드가 ``skm.get_key`` **이전**에 걸리므로,
+        이 mock 의 메서드는 호출되어선 안 된다 (orphan credential 미조회
+        검증). rotate 는 cold-path 를 거치지 않으므로 (#2111 IPC 전용)
+        ``rotate`` 도 동일하게 미호출이어야 한다.
         """
         skm = AsyncMock()
         skm.initialize = AsyncMock()
         skm.rotate = AsyncMock(
             side_effect=AssertionError(
-                "soft-deleted bot 인데 rotate 가 호출됨 (orphan 재발급)"
+                "rotate cold-path 가 호출됨 (#2111: IPC 전용이어야 함)"
             )
         )
         skm.get_key = AsyncMock(
@@ -854,17 +861,31 @@ class TestBotSignalKeySoftDeletedBotExit:
         mock_db.fetch_one = AsyncMock(side_effect=fetch_one)
         return mock_db
 
+    def _bot_not_found_click_exc(self) -> click.ClickException:
+        """서버 ``BotNotFoundError`` → ``BOT_NOT_FOUND`` envelope 을 ``ipc_send``
+        가 변환한 ClickException 을 모사한다."""
+        exc = click.ClickException(
+            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: soft-deleted-bot"
+        )
+        exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
+        exc.ipc_error_message = (  # type: ignore[attr-defined]
+            "봇을 찾을 수 없습니다: soft-deleted-bot"
+        )
+        return exc
+
     def test_soft_deleted_bot_rotate_exits_nonzero_json(
         self, runner: CliRunner
     ) -> None:
-        mock_db = self._soft_deleted_db()
-        mock_skm = self._missing_skm()
+        """#2111: soft-deleted bot --rotate → 서버 ``BOT_NOT_FOUND`` envelope
+        을 ``ipc_send`` 가 surface, CLI 가 exit 1 + ``BOT_NOT_FOUND`` 로 보존."""
+        click_exc = self._bot_not_found_click_exc()
 
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._missing_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
@@ -886,24 +907,24 @@ class TestBotSignalKeySoftDeletedBotExit:
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
         assert "봇을 찾을 수 없습니다: soft-deleted-bot" in payload["message"]
-        # #1784 Group A sweep: 미존재 bot 과 동일 형제 계약 — 안정 코드
-        # ``BOT_NOT_FOUND`` 로 surface (이전 #1558 의 "code 없음" 폐기).
+        # 서버 ``BotNotFoundError.code`` 와 동형 stable code.
         assert payload["code"] == "BOT_NOT_FOUND"
-        # orphan credential 미발급: rotate 가 호출되지 않았어야 한다.
+        # cold-path 미사용 회귀: 직접 DB rotate/get_key 미호출.
         mock_skm.rotate.assert_not_awaited()
         mock_skm.get_key.assert_not_awaited()
 
     def test_soft_deleted_bot_rotate_exits_nonzero_text(
         self, runner: CliRunner
     ) -> None:
-        mock_db = self._soft_deleted_db()
-        mock_skm = self._missing_skm()
+        """#2111: text 모드에서도 서버 envelope 을 surface (exit 1 + stderr)."""
+        click_exc = self._bot_not_found_click_exc()
 
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._missing_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,

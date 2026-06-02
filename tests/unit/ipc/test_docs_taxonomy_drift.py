@@ -62,8 +62,6 @@ _DOCS_NON_REGISTRY_TOKENS = frozenset(
         "member.rotate_token",
         "member.reset_password",
         "member.regenerate_recovery_key",
-        # bot.signal_key.rotate 후속 wiring — ipc.md:86 / 274
-        "bot.signal_key.rotate",
         # bot.query 계열 후속 wiring — ipc.md:98 / 274
         "bot.query",
         # cold-path 전용 — ipc.md:70-74 / 193 / 273

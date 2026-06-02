@@ -65,7 +65,7 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 27개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 28개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
@@ -79,10 +79,13 @@ def test_register_all_handlers() -> None:
     Browser/HTTP 제거 parity: retained 운영 mutation 5개를 CLI/IPC로
     이전하면서 ``bot.update``, ``treasury.set_balance``, ``rule.update``,
     ``strategy.set_status``, ``member.update_scopes``를 추가.
+
+    Refs #2111: ``bot.signal_key.rotate`` (mutating) 추가 — ``bot signal-key
+    --rotate`` 의 runtime IPC 경로.
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 27
+    assert len(registry.commands) == 28
 
     expected = {
         "system.halt",
@@ -91,6 +94,7 @@ def test_register_all_handlers() -> None:
         "account.activate",
         "bot.create",
         "bot.remove",
+        "bot.signal_key.rotate",
         "bot.start",
         "bot.stop",
         "bot.update",
@@ -121,10 +125,12 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 27개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+    """등록된 28개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
     read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
+
+    Refs #2111: ``bot.signal_key.rotate`` mutating 추가.
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
@@ -136,6 +142,7 @@ def test_register_all_handlers_taxonomy() -> None:
         "account.activate",
         "bot.create",
         "bot.remove",
+        "bot.signal_key.rotate",
         "bot.start",
         "bot.stop",
         "bot.update",
@@ -161,7 +168,7 @@ def test_register_all_handlers_taxonomy() -> None:
         "bot.status",
     }
 
-    assert len(mutating) == 23
+    assert len(mutating) == 24
     assert len(read_only) == 4
     assert mutating | read_only == set(registry.commands)
 
@@ -968,6 +975,9 @@ class TestRegisteredCommandsMetadataCompleteness:
         Refs #1853 (#1819 epic 종결): rule.update 의 audit 호출을 wrapper 로
         이전(action="account.rule.update", helper 의 기존 action 이름 보존)
         (9→10 commands).
+
+        Refs #2111: ``bot.signal_key.rotate`` 가 audit_action 부여
+        (action="bot.signal_key.rotate", audit.md:121 SSOT) (10→11 commands).
         """
         expected_actions = {
             "account.suspend",
@@ -975,6 +985,7 @@ class TestRegisteredCommandsMetadataCompleteness:
             "bot.start",
             "bot.stop",
             "bot.update",
+            "bot.signal_key.rotate",
             "treasury.set_balance",
             "strategy.set_status",
             "member.update_scopes",
@@ -1011,11 +1022,11 @@ class TestRegisteredCommandsMetadataCompleteness:
         for spec in loaded.iter_specs():
             assert spec.cross_validators == (), spec.name
 
-    def test_iter_specs_returns_all_27_specs(self, loaded: CommandRegistry) -> None:
-        """``iter_specs``가 27 commands 모두를 ``CommandSpec`` 인스턴스로
+    def test_iter_specs_returns_all_28_specs(self, loaded: CommandRegistry) -> None:
+        """``iter_specs``가 28 commands 모두를 ``CommandSpec`` 인스턴스로
         반환한다."""
         specs = loaded.iter_specs()
-        assert len(specs) == 27
+        assert len(specs) == 28
         assert all(isinstance(s, CommandSpec) for s in specs)
         # 등록 순서 보존(dict insertion order).
         assert [s.name for s in specs] == loaded.commands

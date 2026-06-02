@@ -305,6 +305,45 @@ async def _handle_bot_remove(
     return {"bot_id": bot_id, "removed": True}
 
 
+async def _handle_bot_signal_key_rotate(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """봇 시그널 키 재발급 IPC handler.
+
+    Refs #2111: ``bot signal-key --rotate`` 의 runtime IPC 경로
+    (``bot.signal_key.rotate``). CLI 가 ``SignalKeyManager.rotate()`` 를 직접
+    호출하던 cold-path DB mutation 을 제거하고 본 handler 로만 라우팅한다 —
+    runtime 경계 / audit / live 상태 정합성을 보존한다.
+
+    ``BotManager.rotate_signal_key`` 는 ``_get_bot`` 존재 확인
+    (``BotNotFoundError``) → ``accepts_external_signals`` 게이트
+    (``BotNotAcceptingSignals``) → ``SignalKeyManager.rotate`` 위임의 동일
+    invariant 를 적용한다. 두 typed exception 은 그대로 propagate 하여
+    ``server.py`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope 이
+    ``BOT_NOT_FOUND`` / ``BOT_NOT_ACCEPTING_SIGNALS`` stable code 로
+    변환한다. 전략 미발견 등 그 외 ``BotError`` 는 ``EXECUTION_ERROR``
+    fallback (서버 경로 SSOT).
+
+    Refs audit.md:121: audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action = "bot.signal_key.rotate"`` 기반으로 자동
+    발화하며, handler 는 ``_audit_detail`` reserved key 로
+    ``resource = "bot:{bot_id}"`` 만 전달한다 (wrapper 가 ``pop`` 으로 public
+    envelope 진입 전에 strip).
+    """
+    bot_id = args["bot_id"]
+    new_key = await svc.bot_manager.rotate_signal_key(bot_id)
+    return {
+        "bot_id": bot_id,
+        "signal_key": new_key,
+        "rotated": True,
+        "_audit_detail": {
+            "resource": f"bot:{bot_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
+
+
 async def _handle_bot_start(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -1031,6 +1070,19 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         result_kind="operation",
         required_services=frozenset({"bot_manager"}),
+    )
+    # bot.signal_key.rotate (#2111) — ``bot signal-key --rotate`` 의 runtime IPC
+    # 경로. ``rotated`` bool flag envelope 이므로 ``bot.remove`` 와 동형
+    # ``operation`` kind. audit_action 부여 → ``required_services`` 에
+    # ``audit_logger`` 명시 (#1849 등록 lock). read (``bot.signal_key`` 조회)
+    # 는 별개 command 로 #2112 가 소유한다.
+    registry.register(
+        "bot.signal_key.rotate",
+        _handle_bot_signal_key_rotate,
+        is_mutating=True,
+        result_kind="operation",
+        required_services=frozenset({"bot_manager", "audit_logger"}),
+        audit_action="bot.signal_key.rotate",
     )
     registry.register(
         "bot.start",
