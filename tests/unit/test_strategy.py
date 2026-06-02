@@ -1819,6 +1819,231 @@ class TestStrategy(Strategy):
         assert not any("StrategyMeta(...) instance" in e for e in result.errors)
 
 
+# ── #2041 (5차) validator: meta StrategyMeta 호출을 import-aware 로 해석 ──
+# #2042(Strategy)와 동일한 order-aware import-resolution 으로 ante StrategyMeta
+# 만 인정한다. ante 가 아닌 임의 `*.StrategyMeta` 호출(false-positive)을 거부.
+
+
+class TestValidatorMetaImportAware:
+    """#2041 (5차) — meta = StrategyMeta(...) 호출이 ante StrategyMeta 인지 추적."""
+
+    @pytest.fixture
+    def validator(self):
+        return StrategyValidator()
+
+    def _write_strategy(self, tmp_path: Path, code: str) -> Path:
+        filepath = tmp_path / "test_strategy.py"
+        filepath.write_text(code)
+        return filepath
+
+    def test_fake_strategy_meta_attribute_call_rejected(self, validator, tmp_path):
+        """import fake; meta = fake.StrategyMeta(...) → false-positive 차단(이번 FAIL).
+
+        ``fake`` 는 ante.strategy module-alias 가 아니므로 ``fake.StrategyMeta(...)``
+        는 ante StrategyMeta 가 아니다. submit 의 isinstance(meta, StrategyMeta)
+        가 거부하는 것과 정합하게 validate 도 거부해야 한다.
+        """
+        code = """
+import fake
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = fake.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_arbitrary_module_strategy_meta_call_rejected(self, validator, tmp_path):
+        """import some_pkg; meta = some_pkg.StrategyMeta(...) 도 거부(임의 module)."""
+        code = """
+import some_pkg
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = some_pkg.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_module_alias_strategy_meta_call_passes(self, validator, tmp_path):
+        """import ante.strategy as astg; meta = astg.StrategyMeta(...) → 통과."""
+        code = """
+import ante.strategy as astg
+
+class TestStrategy(astg.Strategy):
+    meta = astg.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_dotted_module_strategy_meta_call_passes(self, validator, tmp_path):
+        """import ante.strategy; meta = ante.strategy.StrategyMeta(...) → 통과."""
+        code = """
+import ante.strategy
+
+class TestStrategy(ante.strategy.Strategy):
+    meta = ante.strategy.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_dotted_base_module_strategy_meta_call_passes(self, validator, tmp_path):
+        """import ante.strategy.base as base; meta = base.StrategyMeta(...) → 통과."""
+        code = """
+import ante.strategy.base as base
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    meta = base.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_direct_import_strategy_meta_name_call_passes(self, validator, tmp_path):
+        """from ante.strategy import StrategyMeta; meta = StrategyMeta(...) → 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_asname_import_strategy_meta_name_call_passes(self, validator, tmp_path):
+        """from ante.strategy import StrategyMeta as M; meta = M(...) → 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta as M
+
+class TestStrategy(Strategy):
+    meta = M(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_unimported_strategy_meta_name_call_rejected(self, validator, tmp_path):
+        """StrategyMeta 를 ante 에서 import 안 함 + meta = StrategyMeta(...) → 거부.
+
+        Strategy 만 import 하고 StrategyMeta 는 로컬 정의(ante 바인딩 아님)이므로
+        ``StrategyMeta(...)`` Name 호출은 ante StrategyMeta 가 아니다 → 거부.
+        실사용 전략은 항상 ante 에서 StrategyMeta 를 import 하므로 회귀 아님.
+        """
+        code = """
+from ante.strategy import Strategy
+
+class StrategyMeta:
+    def __init__(self, **kwargs):
+        pass
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_alias_rebind_before_meta_call_rejected(self, validator, tmp_path):
+        """astg = other 재바인딩 후 astg.StrategyMeta(...) → 거부 (order-aware).
+
+        ``import ante.strategy as astg`` 후 ``astg = 0`` 재바인딩이 module-alias 를
+        무효화하므로, 그 다음 정의된 클래스의 ``astg.StrategyMeta(...)`` 는 ante
+        StrategyMeta 로 해석되지 않는다. (base 도 ``ante.strategy`` 직접 import 로
+        인정받아 클래스 탐지 자체는 통과시킨 뒤 meta 만 거부됨을 확인.)
+        """
+        code = """
+import ante.strategy as astg
+from ante.strategy import Strategy
+
+astg = 0
+
+class TestStrategy(Strategy):
+    meta = astg.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_alias_used_before_rebind_meta_call_passes(self, validator, tmp_path):
+        """클래스 정의(astg.StrategyMeta) 후 astg 재바인딩 → 정의 시점 인정·통과.
+
+        클래스 정의 시점의 ``astg`` 는 아직 ante.strategy module-alias 이므로
+        meta 통과. 그 뒤 ``astg = 0`` 재바인딩은 이미 캡처된 스냅샷에 영향 없음.
+        """
+        code = """
+import ante.strategy as astg
+
+class TestStrategy(astg.Strategy):
+    meta = astg.StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+astg = 0
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_normal_strategy_fixture_regression(self, validator, tmp_path):
+        """회귀 핵심: 정상 전략(from ante.strategy import Strategy, StrategyMeta)
+        이 import-aware 강화 후에도 전부 통과.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert result.errors == []
+
+
 # ── #2042 validator: 실제 ante Strategy 상속만 (import 별칭 추적) ──────
 
 
