@@ -358,11 +358,12 @@ class StrategyValidator:
             # 리터럴 상수 할당
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 value = node.value
-                if value is not None and not self._contains_call(value):
-                    continue
                 if value is None:
-                    # 타입 어노테이션만 있는 경우 (x: int)
-                    continue
+                    continue  # 타입 어노테이션만 (x: int)
+                if self._is_literal_assign_value(value):
+                    continue  # 리터럴/Name/리터럴 컬렉션 허용
+                # 비리터럴 실행식 (BinOp/Subscript/Comprehension/Call/...) →
+                # 아래 errors.append로
             errors.append(
                 f"Forbidden top-level code at line {node.lineno}: {type(node).__name__}"
             )
@@ -374,6 +375,25 @@ class StrategyValidator:
         for child in ast.walk(node):
             if isinstance(child, ast.Call):
                 return True
+        return False
+
+    def _is_literal_assign_value(self, node: ast.expr) -> bool:
+        """assignment 값이 부작용 없는 리터럴/참조인지 (import-time 실행식 거부)."""
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, ast.Name):
+            return True  # 상수 참조(lookup) — 부작용 없음
+        if isinstance(node, ast.UnaryOp):
+            return self._is_literal_assign_value(node.operand)
+        if isinstance(node, ast.List | ast.Tuple | ast.Set):
+            return all(self._is_literal_assign_value(e) for e in node.elts)
+        if isinstance(node, ast.Dict):
+            return all(
+                k is not None
+                and self._is_literal_assign_value(k)
+                and self._is_literal_assign_value(v)
+                for k, v in zip(node.keys, node.values, strict=False)
+            )
         return False
 
     def _find_dangerous_patterns(self, tree: ast.Module) -> list[str]:

@@ -877,6 +877,119 @@ class TestStrategy(Strategy):
         assert result.valid
         assert not any("top-level" in e.lower() for e in result.errors)
 
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            "1 / 0",  # BinOp — import-time ZeroDivisionError
+            "[1][2]",  # Subscript — import-time IndexError
+            "[x for x in [1, 2, 3]]",  # ListComp — import-time 실행식
+        ],
+    )
+    def test_toplevel_nonliteral_assign_forbidden(self, validator, tmp_path, expr):
+        """#2043 재현: 호출이 없어도 비리터럴 실행식 최상위 할당을 금지한다.
+
+        과거에는 `not self._contains_call(value)` 만 검사해 BinOp/Subscript/
+        comprehension 같은 import-time 실행식이 그대로 통과했다.
+        """
+        code = f"""
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+CRASH = {expr}
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_call_assign_still_forbidden(self, validator, tmp_path):
+        """#2043 회귀: 호출 할당은 변경 후에도 여전히 금지(불변)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+X = foo()
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    @pytest.mark.parametrize(
+        "expr",
+        [
+            "5",  # Constant int
+            '"s"',  # Constant str
+            '["005930", "000660"]',  # literal list
+            '{"a": 1}',  # literal dict
+            "-1",  # UnaryOp on Constant
+            "OTHER_CONST",  # Name 참조(부작용 없는 lookup)
+            "(1, 2)",  # literal tuple
+            "{1, 2}",  # literal set
+        ],
+    )
+    def test_toplevel_literal_assign_no_false_positive(self, validator, tmp_path, expr):
+        """#2043 회귀: 리터럴/Name/리터럴 컬렉션 할당은 오탐 없이 통과한다."""
+        code = f"""
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+X = {expr}
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_annassign_nonliteral_forbidden(self, validator, tmp_path):
+        """#2043: AnnAssign 값이 비리터럴 실행식이면 금지한다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+X: int = 1 / 0
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("top-level" in e.lower() for e in result.errors)
+
+    def test_toplevel_annassign_literal_allowed(self, validator, tmp_path):
+        """#2043 회귀: 리터럴 값 AnnAssign은 통과한다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+X: list = [1, 2]
+
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not any("top-level" in e.lower() for e in result.errors)
+
     def test_open_error(self, validator, tmp_path):
         """open 호출은 에러."""
         code = """
