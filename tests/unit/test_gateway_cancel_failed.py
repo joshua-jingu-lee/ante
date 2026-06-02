@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -22,6 +22,22 @@ from ante.eventbus.events import (
 from ante.gateway import APIGateway
 
 
+def _order_tracker_mock(
+    *, order_id: str = "ord1", broker_order_id: str = "brk-ord1", account_id: str
+) -> AsyncMock:
+    """#2134: cancel_order broker_order_id 변환을 통과시키는 OrderTracker mock.
+
+    ``get(order_id)`` → 주어진 broker_order_id/account_id 레코드를 반환한다.
+    """
+    tracker = AsyncMock()
+    record = MagicMock()
+    record.order_id = order_id
+    record.broker_order_id = broker_order_id
+    record.account_id = account_id
+    tracker.get = AsyncMock(return_value=record)
+    return tracker
+
+
 @pytest.mark.asyncio
 async def test_cancel_failed_preserves_account_id() -> None:
     """브로커 cancel 예외 → 발행된 OrderCancelFailedEvent.account_id 보존."""
@@ -31,7 +47,11 @@ async def test_cancel_failed_preserves_account_id() -> None:
     mock_account_service = AsyncMock()
     mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-    gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
+    gw = APIGateway(
+        account_service=mock_account_service,
+        eventbus=eventbus,
+        order_tracker=_order_tracker_mock(account_id="acc-test"),
+    )
     gw.start()
 
     received: list[OrderCancelFailedEvent] = []
@@ -64,7 +84,11 @@ async def test_cancel_failed_includes_strategy_id() -> None:
     mock_account_service = AsyncMock()
     mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-    gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
+    gw = APIGateway(
+        account_service=mock_account_service,
+        eventbus=eventbus,
+        order_tracker=_order_tracker_mock(account_id="acc-test"),
+    )
     gw.start()
 
     received: list[OrderCancelFailedEvent] = []
@@ -99,7 +123,11 @@ async def test_cancel_broker_returns_false_emits_failed_event() -> None:
     mock_account_service = AsyncMock()
     mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-    gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
+    gw = APIGateway(
+        account_service=mock_account_service,
+        eventbus=eventbus,
+        order_tracker=_order_tracker_mock(account_id="acc-test"),
+    )
     gw.start()
 
     failed: list[OrderCancelFailedEvent] = []
@@ -140,7 +168,11 @@ async def test_cancel_broker_returns_true_emits_cancelled_event() -> None:
     mock_account_service = AsyncMock()
     mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-    gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
+    gw = APIGateway(
+        account_service=mock_account_service,
+        eventbus=eventbus,
+        order_tracker=_order_tracker_mock(account_id="acc-test"),
+    )
     gw.start()
 
     failed: list[OrderCancelFailedEvent] = []

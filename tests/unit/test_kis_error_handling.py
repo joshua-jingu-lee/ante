@@ -369,7 +369,7 @@ class TestCircuitBreakerEvent:
 class TestGatewayCancelFailed:
     async def test_cancel_failure_publishes_event(self):
         """Gateway 취소 실패 시 OrderCancelFailedEvent 발행."""
-        from unittest.mock import AsyncMock
+        from unittest.mock import AsyncMock, MagicMock
 
         from ante.eventbus.events import OrderCancelEvent
         from ante.gateway import APIGateway
@@ -380,7 +380,19 @@ class TestGatewayCancelFailed:
         mock_account_service = AsyncMock()
         mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
 
-        gw = APIGateway(account_service=mock_account_service, eventbus=eventbus)
+        # #2134: cancel_order broker_order_id 변환을 통과시키는 OrderTracker mock.
+        mock_tracker = AsyncMock()
+        record = MagicMock()
+        record.order_id = "ord1"
+        record.broker_order_id = "brk-ord1"
+        record.account_id = "acc-test"
+        mock_tracker.get = AsyncMock(return_value=record)
+
+        gw = APIGateway(
+            account_service=mock_account_service,
+            eventbus=eventbus,
+            order_tracker=mock_tracker,
+        )
         gw.start()
 
         received: list[OrderCancelFailedEvent] = []
