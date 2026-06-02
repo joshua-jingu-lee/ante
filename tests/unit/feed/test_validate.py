@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta, timezone
 
 from ante.feed.models.result import ValidationResult
 from ante.feed.transform.validate import (
+    _try_parse_date,
     validate_all,
     validate_business,
     validate_schema,
@@ -413,6 +415,65 @@ class TestValidateBusiness:
         result = validate_business(records)
         assert any("역전" in w for w in result.warnings)
 
+    def test_tz_aware_datetime_reversal_detected(self) -> None:
+        """이슈 재현: tz-aware datetime 시계열 역전이 감지된다 (#2099).
+
+        정규화 OHLCV의 timestamp는 tz-aware datetime이며 str()로 변환하면
+        "...+00:00" offset 형식이 된다. _try_parse_date의 fromisoformat
+        fallback으로 파싱되어 역전이 감지되어야 한다(기존엔 None→미감지).
+        """
+        records = [
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 2, tzinfo=UTC)),
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 1, tzinfo=UTC)),
+        ]
+        result = validate_business(records)
+        assert result.passed is True
+        assert any("역전" in w for w in result.warnings)
+
+    def test_tz_aware_datetime_ascending_no_reversal(self) -> None:
+        """정상: tz-aware 오름차순은 역전 경고가 없다 (#2099)."""
+        records = [
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 1, tzinfo=UTC)),
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 2, tzinfo=UTC)),
+        ]
+        result = validate_business(records)
+        assert result.passed is True
+        assert not any("역전" in w for w in result.warnings)
+
+    def test_naive_str_reversal_regression(self) -> None:
+        """회귀: naive datetime 문자열 역전 감지 유지 (#2099)."""
+        records = [
+            _make_ohlcv_record(timestamp="2026-01-02 00:00:00"),
+            _make_ohlcv_record(timestamp="2026-01-01 00:00:00"),
+        ]
+        result = validate_business(records)
+        assert any("역전" in w for w in result.warnings)
+
+    def test_compact_date_format_reversal_regression(self) -> None:
+        """회귀: %Y%m%d("20260102") 형식 파싱 및 역전 감지 유지 (#2099)."""
+        records = [
+            _make_ohlcv_record(timestamp="20260102"),
+            _make_ohlcv_record(timestamp="20260101"),
+        ]
+        result = validate_business(records)
+        assert any("역전" in w for w in result.warnings)
+
+    def test_mixed_aware_naive_no_typeerror(self) -> None:
+        """mixed aware/naive 한 series는 TypeError 없이 안전 처리 (#2099).
+
+        tz-aware와 naive datetime이 섞이면 < 비교가 TypeError를 내지만,
+        _check_date_order가 해당 비교를 건너뛰어 죽지 않아야 한다.
+        """
+        records = [
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 1, tzinfo=UTC)),
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 2)),  # naive
+            _make_ohlcv_record(timestamp=datetime(2026, 1, 3, tzinfo=UTC)),
+        ]
+        # TypeError 없이 정상 반환되어야 함
+        result = validate_business(records)
+        assert result.passed is True
+        assert result.errors == []
+
     def test_multiple_symbols_independent(self) -> None:
         """심볼이 다르면 시계열 검증이 독립적으로 수행된다."""
         records = [
@@ -656,3 +717,47 @@ class TestValidationResult:
         result = ValidationResult(passed=True)
         assert result.warnings == []
         assert result.errors == []
+
+
+# ===========================================================================
+# 7. _try_parse_date 단위 (#2099)
+# ===========================================================================
+
+
+class TestTryParseDate:
+    """_try_parse_date 날짜 파싱 헬퍼 테스트 (#2099)."""
+
+    def test_strptime_datetime_space(self) -> None:
+        assert _try_parse_date("2026-01-02 00:00:00") == datetime(2026, 1, 2, 0, 0, 0)
+
+    def test_strptime_datetime_t(self) -> None:
+        assert _try_parse_date("2026-01-02T00:00:00") == datetime(2026, 1, 2, 0, 0, 0)
+
+    def test_strptime_date_only(self) -> None:
+        assert _try_parse_date("2026-01-02") == datetime(2026, 1, 2)
+
+    def test_strptime_compact_date(self) -> None:
+        """%Y%m%d는 fromisoformat가 거부하므로 strptime 유지가 필요하다."""
+        assert _try_parse_date("20260102") == datetime(2026, 1, 2)
+
+    def test_fromisoformat_tz_offset_space(self) -> None:
+        """tz offset 포함 space 형식(str(tz-aware datetime))을 파싱한다."""
+        parsed = _try_parse_date("2026-01-02 00:00:00+00:00")
+        assert parsed == datetime(2026, 1, 2, 0, 0, 0, tzinfo=UTC)
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+
+    def test_fromisoformat_tz_offset_t(self) -> None:
+        """ISO T 구분자 + tz offset 형식을 파싱한다."""
+        parsed = _try_parse_date("2026-01-02T00:00:00+09:00")
+        assert parsed is not None
+        assert parsed.tzinfo is not None
+        assert parsed == datetime(
+            2026, 1, 2, 0, 0, 0, tzinfo=timezone(timedelta(hours=9))
+        )
+
+    def test_invalid_returns_none(self) -> None:
+        assert _try_parse_date("not-a-date") is None
+
+    def test_empty_returns_none(self) -> None:
+        assert _try_parse_date("") is None
