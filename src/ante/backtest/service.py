@@ -63,7 +63,7 @@ class BacktestService:
         strategy_cls = StrategyLoader.load(Path(validated.strategy_path))
 
         store = ParquetStore(
-            base_path=config.get("data_path", self._data_path),
+            base_path=validated.data_paths[0],
         )
         data_provider = BacktestDataProvider(
             store=store,

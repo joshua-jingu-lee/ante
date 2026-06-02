@@ -1391,6 +1391,105 @@ class TestBacktestService:
         assert result.datasets[0].timeframe == "1d"
         assert result.datasets[0].row_count > 0
 
+    async def test_run_loads_from_data_paths_override(self, tmp_path):
+        """#2000 재현: data_paths override가 실제 데이터 로딩에 반영.
+
+        생성자 data_path는 빈 ``wrong/``, config.data_paths는 데이터가
+        적재된 ``right/`` 를 가리키고 config에 ``data_path`` 는 없다.
+        수정 전에는 ParquetStore가 raw config의 ``data_path`` (없으면 생성자
+        기본=wrong/)를 사용해 0행을 로드했다. 수정 후에는 정규화된
+        validated.data_paths[0]=right/ 에서 로드되어야 한다.
+        """
+        wrong = tmp_path / "wrong"
+        right = tmp_path / "right"
+        wrong.mkdir()
+        right.mkdir()
+
+        # right/ 에만 실제 데이터를 적재
+        right_store = ParquetStore(base_path=right)
+        right_store.write("005930", "1d", _make_ohlcv_df())
+
+        service = BacktestService(data_path=str(wrong))
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+            # data_path 미포함; data_paths override만 제공
+            "data_paths": [str(right)],
+        }
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=EmptyStrategy,
+        ):
+            result = await service.run(config)
+
+        # right/ 에서 로드되어 데이터가 채워졌는지 확인
+        assert len(result.datasets) == 1
+        assert result.datasets[0].symbol == "005930"
+        assert result.datasets[0].row_count > 0
+        assert len(result.equity_curve) > 0
+        # result.config.data_paths 에는 사용자 override 가 그대로 남는다
+        assert result.config.data_paths == [str(right)]
+
+    async def test_run_data_path_backward_compat(self, tmp_path):
+        """회귀: data_path 지정 + data_paths 미지정 → 해당 경로 로드."""
+        right = tmp_path / "right"
+        right.mkdir()
+        right_store = ParquetStore(base_path=right)
+        right_store.write("005930", "1d", _make_ohlcv_df())
+
+        # 생성자 기본은 다른 빈 경로
+        wrong = tmp_path / "wrong"
+        wrong.mkdir()
+        service = BacktestService(data_path=str(wrong))
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+            "data_path": str(right),
+        }
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=EmptyStrategy,
+        ):
+            result = await service.run(config)
+
+        assert len(result.datasets) == 1
+        assert result.datasets[0].row_count > 0
+        assert result.config.data_paths == [str(right)]
+
+    async def test_run_uses_constructor_default_data_path(self, tmp_path):
+        """회귀: data_path/data_paths 둘 다 미지정 → 생성자 기본 사용."""
+        default_dir = tmp_path / "default"
+        default_dir.mkdir()
+        default_store = ParquetStore(base_path=default_dir)
+        default_store.write("005930", "1d", _make_ohlcv_df())
+
+        service = BacktestService(data_path=str(default_dir))
+        config = {
+            "strategy_path": "dummy.py",
+            "start_date": "2026-01-01",
+            "end_date": "2026-12-31",
+            "symbols": ["005930"],
+            "timeframe": "1d",
+        }
+
+        with patch(
+            "ante.backtest.service.StrategyLoader.load",
+            return_value=EmptyStrategy,
+        ):
+            result = await service.run(config)
+
+        assert len(result.datasets) == 1
+        assert result.datasets[0].row_count > 0
+        assert result.config.data_paths == [str(default_dir)]
+
 
 # ── Exceptions 테스트 ──────────────────────────────
 
