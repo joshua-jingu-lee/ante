@@ -420,6 +420,35 @@ class TestBacktestDataProvider:
         assert datasets1 == datasets2
         assert datasets1 is not datasets2
 
+    async def test_load_corrupt_partition_raises_data_error(
+        self, loaded_store, data_dir
+    ):
+        """손상 파티션 적재 시 load()가 BacktestDataError로 loud 실패(#2095).
+
+        정상 파티션만으로 silent 성공(부분 데이터로 일부 기간 누락)하던
+        버그의 repro. store.read(strict=True)가 ParquetReadError를 raise하면
+        load()가 BacktestDataError로 wrap·re-raise한다.
+        """
+        # 정상 1월 파티션(loaded_store) 옆에 손상 2월 파티션을 주입
+        part_dir = data_dir / "ohlcv" / "1d" / "KRX" / "005930"
+        (part_dir / "2026-02.parquet").write_text("not parquet")
+
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        with pytest.raises(BacktestDataError) as exc_info:
+            provider.load("005930", "1d")
+        assert "손상 파티션" in str(exc_info.value)
+
+    async def test_load_normal_data_regression(self, loaded_store):
+        """손상 없는 store는 load()가 정상 동작(회귀, #2095)."""
+        provider = BacktestDataProvider(
+            store=loaded_store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        rows = provider.load("005930", "1d")
+        assert rows == 10
+        assert len(provider.loaded_datasets) == 1
+
 
 # ── BacktestStrategyContext 테스트 ─────────────────
 

@@ -21,7 +21,7 @@ from ante.data.schemas import (
     validate_fundamental,
     validate_ohlcv,
 )
-from ante.data.store import ParquetStore
+from ante.data.store import ParquetReadError, ParquetStore
 
 # ── Fixtures ─────────────────────────────────────────
 
@@ -556,6 +556,53 @@ class TestParquetStore:
         assert len(result) == 2
         cols = set(result.columns)
         assert {"market_cap", "shares_listed", "total_assets", "net_income"} <= cols
+
+    async def test_read_strict_raises_on_corrupt_partition(self, store, data_dir):
+        """strict=True면 손상 파티션을 만나는 즉시 ParquetReadError를 raise(#2095).
+
+        정상 파티션 + 손상 파일이 섞여 있을 때, strict 경로는 부분 데이터로
+        silent 성공하지 않고 loud 실패한다.
+        """
+        # 정상 2월 파티션 작성
+        store.write("005930", "1d", _make_ohlcv_df(n=5, start="2026-02-01T09:00:00"))
+        # 같은 디렉토리에 손상 파티션 주입(읽을 수 있으나 parquet 아님)
+        part_dir = data_dir / "ohlcv" / "1d" / "KRX" / "005930"
+        (part_dir / "2026-03.parquet").write_text("not parquet")
+
+        with pytest.raises(ParquetReadError) as exc_info:
+            store.read("005930", "1d", strict=True)
+        # 손상 파일 경로가 메시지에 포함된다
+        assert "2026-03.parquet" in str(exc_info.value)
+
+    async def test_read_tolerant_skips_corrupt_partition_regression(
+        self, store, data_dir, caplog
+    ):
+        """strict=False(기본)는 손상 파티션을 skip하고 부분 반환(현 동작 회귀, #2095).
+
+        feed/CLI 등 부분-허용 공용 경로의 기존 tolerant 동작이 불변임을 확인한다.
+        손상 파티션은 logger.warning 후 skip되고, 정상 파티션만 반환된다.
+        """
+        import logging
+
+        store.write("005930", "1d", _make_ohlcv_df(n=5, start="2026-02-01T09:00:00"))
+        part_dir = data_dir / "ohlcv" / "1d" / "KRX" / "005930"
+        (part_dir / "2026-03.parquet").write_text("not parquet")
+
+        with caplog.at_level(logging.WARNING, logger="ante.data.store"):
+            result = store.read("005930", "1d")  # strict 기본 False
+
+        # 손상 파티션은 skip되고 정상 파티션(2월 5행)만 반환된다
+        assert len(result) == 5
+        assert any(
+            "Failed to read parquet file" in rec.message for rec in caplog.records
+        )
+
+    async def test_read_strict_normal_data_regression(self, store):
+        """손상 없는 store는 strict=True여도 정상 반환(회귀, #2095)."""
+        store.write("005930", "1d", _make_ohlcv_df(n=5, start="2026-02-01T09:00:00"))
+        result = store.read("005930", "1d", strict=True)
+        assert len(result) == 5
+        assert result["symbol"][0] == "005930"
 
 
 # ── normalizer.py 테스트 ─────────────────────────────
