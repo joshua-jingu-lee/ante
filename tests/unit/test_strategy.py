@@ -1936,6 +1936,69 @@ class X(SomeOtherBase):
         assert not result.valid
         assert any("No class inheriting from Strategy" in e for e in result.errors)
 
+    def test_function_local_import_not_counted(self, validator, tmp_path):
+        """함수-로컬 `from ante.strategy import Strategy` → module-scope
+        `class X(Strategy)` 를 Strategy subclass 로 인정하지 않음 (#2042 scope).
+
+        module-scope 에는 Strategy import 가 없으므로 런타임 module
+        네임스페이스에도 Strategy 가 없다(`class X(Strategy)` 는 NameError).
+        validator 가 `ast.walk` 로 함수 내부 import 까지 바인딩 수집하면
+        false positive 로 통과시켜 loader 와 불일치하므로, module-scope
+        한정으로 "No class inheriting from Strategy" 로 귀결돼야 한다.
+        """
+        code = """
+def _helper():
+    from ante.strategy import Strategy  # noqa: F401
+    return Strategy
+
+class X(Strategy):
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+    def test_module_level_import_still_passes(self, validator, tmp_path):
+        """정상 module-level import 회귀: module-scope import + class → 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class X(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_nested_class_not_counted_as_module_strategy(self, validator, tmp_path):
+        """함수/클래스 내부에 nested 정의된 Strategy subclass 는 module
+        attribute 가 아니므로 module strategy 로 카운트하지 않음.
+
+        module-scope 에 실제 Strategy subclass 가 없으면 nested 정의가
+        있더라도 loader(`vars(module)`)가 못 보는 것과 정합하게 "No class
+        inheriting from Strategy" 로 귀결된다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta  # noqa: F401
+
+def _factory():
+    class Inner(Strategy):
+        meta = StrategyMeta(name="inner", version="1.0.0", description="i")
+
+        async def on_step(self, context):
+            return []
+
+    return Inner
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
 
 # ── #2052 loader: 파일 정의 subclass만 카운트 ────────────────────────
 

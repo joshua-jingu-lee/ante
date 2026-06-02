@@ -183,13 +183,21 @@ class StrategyValidator:
     _STRATEGY_MODULES: set[str] = {"ante.strategy", "ante.strategy.base"}
 
     def _find_strategy_classes(self, tree: ast.Module) -> list[ast.ClassDef]:
-        """실제 ante ``Strategy`` 를 상속하는 클래스 노드 탐색 (#2042).
+        """실제 ante ``Strategy`` 를 상속하는 module-level 클래스 노드 탐색 (#2042).
 
-        import alias 를 추적하여 ante.strategy(또는 .base)에서 import 된
-        ``Strategy`` 의 로컬 바인딩명, 그리고 모듈 별칭(`astg.Strategy`,
-        `ante.strategy.Strategy`)만 ante Strategy 로 인정한다. 파일 내부에
-        동일 이름의 로컬 ``class`` 정의(shadow)가 있으면 그 base 로 상속한
-        클래스는 ante Strategy 로 보지 않는다.
+        import alias 를 추적하여 ante.strategy(또는 .base)에서 **module-scope**
+        로 import 된 ``Strategy`` 의 로컬 바인딩명, 그리고 모듈 별칭
+        (`astg.Strategy`, `ante.strategy.Strategy`)만 ante Strategy 로 인정한다.
+        파일 module-scope 에 동일 이름의 로컬 ``class`` 정의(shadow)가 있으면
+        그 base 로 상속한 클래스는 ante Strategy 로 보지 않는다.
+
+        탐지·바인딩 수집·shadow 판정 모두 **module-scope(`tree.body`)** 로
+        한정한다. loader 는 import·실행 후 module 네임스페이스(`vars(module)`)
+        에서 Strategy subclass 를 찾으므로, 함수/클래스 내부에 중첩된 import·
+        class 정의는 module attribute 가 아니라 loader 가 보지 못한다. validator
+        가 `ast.walk` 로 트리 전체를 보면 함수-로컬 `from ante.strategy import
+        Strategy` 같은 바인딩을 module-scope 클래스에 잘못 적용해(false
+        positive) loader 와 불일치하므로, module-scope 로 한정해 정합시킨다.
 
         Known-limitation (의도된 비대칭): transitive/intermediate-base
         (다른 파일에서 Strategy 를 상속한 중간 베이스)·다단계 재export·
@@ -202,7 +210,7 @@ class StrategyValidator:
         }
 
         result: list[ast.ClassDef] = []
-        for node in ast.walk(tree):
+        for node in tree.body:  # module-level ClassDef 만 (loader 정합)
             if not isinstance(node, ast.ClassDef):
                 continue
             for base in node.bases:
@@ -214,20 +222,28 @@ class StrategyValidator:
         return result
 
     def _collect_strategy_bindings(self, tree: ast.Module) -> tuple[set[str], set[str]]:
-        """import 스캔으로 Strategy 로컬 바인딩명·모듈 별칭 집합 수집 (#2042).
+        """module-scope import 스캔으로 Strategy 바인딩명·모듈 별칭 수집 (#2042).
+
+        **`tree.body`(모듈 최상위)만** 순회한다. 함수/클래스 내부의 중첩
+        import 는 런타임 module 네임스페이스(loader 의 `vars(module)`)에 바인딩
+        되지 않으므로 module-scope 클래스 base 해석에 쓰면 false positive 가
+        된다(함수-로컬 `from ante.strategy import Strategy` 가 있어도 module
+        네임스페이스에는 Strategy 가 없어 `class X(Strategy)` 는 런타임에
+        NameError). 따라서 module-level `Import`/`ImportFrom` 만 Strategy
+        바인딩으로 인정해 loader 와 정합시킨다.
 
         Returns:
             ``(strategy_names, module_aliases)``
-            - strategy_names: ante.strategy/.base 에서 import 된 ``Strategy``
-              의 로컬 바인딩명. ``from ante.strategy import Strategy`` →
-              {"Strategy"}, ``... import Strategy as S`` → {"S"}.
+            - strategy_names: ante.strategy/.base 에서 module-scope import 된
+              ``Strategy`` 의 로컬 바인딩명. ``from ante.strategy import
+              Strategy`` → {"Strategy"}, ``... import Strategy as S`` → {"S"}.
             - module_aliases: ante.strategy(및 .base) 모듈 별칭.
               ``import ante.strategy`` → {"ante.strategy"},
               ``import ante.strategy as astg`` → {"astg"}.
         """
         strategy_names: set[str] = set()
         module_aliases: set[str] = set()
-        for node in ast.walk(tree):
+        for node in tree.body:  # module-level import 만 (loader 네임스페이스 정합)
             if isinstance(node, ast.ImportFrom):
                 if node.module in self._STRATEGY_MODULES and node.level == 0:
                     for alias in node.names:
