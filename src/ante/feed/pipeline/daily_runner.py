@@ -159,12 +159,17 @@ class DailyRunner:
 
         checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
         try:
+            # daily=True: DART는 분기 공시이므로 daily-equivalent은 "최신
+            # collectable 분기 1개"만 수집한다(#2101). backfill_since 전 분기를
+            # 순회하지 않는다. 과거 미충전 분기 보정은 backfill 모드 책임이며,
+            # daily는 최신 분기 증분만 담당한다.
             written, syms, warns = await self._dart.collect(
                 data_path,
                 feed_dir,
                 checkpoint,
                 config,
                 store,
+                daily=True,
             )
             ctx.add_success(written, syms, warns)
             if written > 0:

@@ -107,8 +107,23 @@ class DARTCollector:
         checkpoint: Checkpoint,
         config: dict[str, Any],
         store: ParquetStore,
+        daily: bool = False,
     ) -> tuple[int, set[str], list[dict]]:
         """DART 재무제표를 분기별로 수집한다.
+
+        Args:
+            daily: ``True``면 daily-incremental 모드로, ``backfill_since`` 범위를
+                순회하지 않고 **최신 collectable 분기 1개만** 수집한다(#2101).
+                spec 07-execution-modes의 Daily Incremental("날짜 1개")에 대응하는
+                DART daily-equivalent다. DART는 분기 단위 공시이므로 daily 실행은
+                "오늘 기준 가장 최근에 공시 가능한 분기"만 확인한다. ``False``(기본,
+                backfill 모드)면 ``_resolve_year_range``의 전 분기를 순회한다.
+
+                운영 전제: daily 모드는 과거 미충전 분기를 보정하지 않는다(최신
+                분기 1개만 본다). checkpoint가 비거나 오래되어 과거 분기가 비어
+                있으면 ``feed run backfill``(daily=False, 전 분기 순회)로 채워야
+                한다. 과거 이력 backfill 책임은 backfill 모드에 있고, daily는
+                최신 분기 증분만 담당한다.
 
         Returns:
             (기록 행 수, 수집된 심볼 집합, 경고 목록).
@@ -127,10 +142,18 @@ class DARTCollector:
             ]
             return 0, set(), warns
 
-        start_year, end_year = self._resolve_year_range(config)
         last_checkpoint = checkpoint.get_last_date()
         last_checkpoint = self._migrate_checkpoint_key(last_checkpoint)
 
+        if daily:
+            return await self._collect_latest_quarter(
+                corp_code_map,
+                store,
+                checkpoint,
+                last_checkpoint,
+            )
+
+        start_year, end_year = self._resolve_year_range(config)
         return await self._collect_quarters(
             corp_code_map,
             store,
@@ -252,6 +275,103 @@ class DARTCollector:
             rows_written,
         )
         return rows_written, symbols, warns
+
+    @staticmethod
+    def _latest_collectable_quarter(
+        today: date,
+    ) -> tuple[int, str] | None:
+        """today(KST) 기준 가장 최근에 공시 가능한 (year, reprt_code)를 반환한다.
+
+        collectable = ``_quarter_period_end(year, reprt_code) <= today``인 분기.
+        그중 period_end가 가장 최근(=가장 큰)인 분기 1개를 고른다. period_end가
+        같으면 발생하지 않지만(reprt_code→종료월 1:1), 안전하게 결정적으로
+        고른다.
+
+        연말/연초 경계: annual(Q4, 12/31)은 익년 초까지 미공시일 수 있으므로
+        period_end<=today 기준으로 정확히 판정된다. 예를 들어 2026-01-15에는
+        2025-Q4(period_end 2025-12-31)가 collectable이며 2025 annual을 고른다.
+        반대로 2026-04-01에는 2026-Q1(3/31)이 가장 최근 collectable이다.
+
+        탐색 범위는 today 연도와 직전 연도(today.year-1)면 충분하다. 직전 연도
+        Q4(period_end 전년 12/31)는 today가 연초여도 항상 <=today이므로 후보가
+        비는 경우는 없다(따라서 실질적으로 None을 반환하지 않지만, 매핑 부재
+        등 방어를 위해 Optional 시그니처를 유지한다).
+
+        Returns:
+            (year, reprt_code) 또는 collectable 분기가 없으면 None.
+        """
+        best: tuple[int, str] | None = None
+        best_end: date | None = None
+        for year in (today.year - 1, today.year):
+            for reprt_code in REPRT_CODES:
+                period_end = _quarter_period_end(year, reprt_code)
+                if period_end is None or period_end > today:
+                    continue
+                if best_end is None or period_end > best_end:
+                    best_end = period_end
+                    best = (year, reprt_code)
+        return best
+
+    async def _collect_latest_quarter(
+        self,
+        corp_code_map: dict[str, str],
+        store: ParquetStore,
+        checkpoint: Checkpoint,
+        last_checkpoint: str | None,
+    ) -> tuple[int, set[str], list[dict]]:
+        """daily 모드: 최신 collectable 분기 1개만 수집한다(#2101).
+
+        ``backfill_since`` 범위를 순회하지 않고, today(KST) 기준 가장 최근에
+        공시 가능한 분기 1개에 대해서만 ``_fetch_quarter``를 수행한다. 단일
+        분기지만 checkpoint 전진/halt/SKIP_EMPTY 판정은 backfill 경로와 동일한
+        ``_fetch_quarter``/``QuarterStatus`` 로직을 그대로 재사용한다(#2028/#2054).
+
+        운영 전제: 이 경로는 최신 분기만 본다. 과거 미충전 분기는 backfill
+        모드로 채워야 하며, daily가 과거 누락을 보정하지 않는다.
+        """
+        corp_codes_list = list(corp_code_map.keys())
+        warns: list[dict] = []
+
+        today = _today_kst()
+        latest = self._latest_collectable_quarter(today)
+        if latest is None:
+            # collectable 분기 부재(매핑 이상 등): no-op.
+            logger.info("DART daily: collectable 분기 없음")
+            return 0, set(), warns
+
+        year, reprt_code = latest
+        quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
+
+        # 최신 분기가 이미 checkpoint done(<=last)이면 재수집하지 않는다(0 fetch).
+        if last_checkpoint and quarter_key <= last_checkpoint:
+            logger.info(
+                "DART daily: 최신 분기 %s 이미 수집됨(checkpoint=%s), skip",
+                quarter_key,
+                last_checkpoint,
+            )
+            return 0, set(), warns
+
+        written, syms, status = await self._fetch_quarter(
+            corp_codes_list,
+            corp_code_map,
+            store,
+            year,
+            reprt_code,
+            warns,
+        )
+        # SKIP_EMPTY(미공시 가능)/HALT(transient·no-storable)는 backfill과 동일하게
+        # checkpoint를 전진시키지 않는다. OK일 때만 save한다(#2028/#2054 보존).
+        if status is QuarterStatus.OK:
+            checkpoint.save(quarter_key)
+
+        logger.info(
+            "DART daily 수집 완료: quarter=%s symbols=%d rows=%d status=%s",
+            quarter_key,
+            len(syms),
+            written,
+            status.value,
+        )
+        return written, syms, warns
 
     async def _fetch_quarter(
         self,
