@@ -93,18 +93,22 @@ class TestSchemas:
         assert validate_ohlcv(df) is False
 
     def test_fundamental_schema_field_count(self):
-        assert len(FUNDAMENTAL_SCHEMA) == 18
+        # available_date(point-in-time 공시 접수일, #2010)를 추가해 19개.
+        assert len(FUNDAMENTAL_SCHEMA) == 19
 
     def test_fundamental_columns_list(self):
         assert "date" in FUNDAMENTAL_COLUMNS
+        assert "available_date" in FUNDAMENTAL_COLUMNS  # #2010
         assert "symbol" in FUNDAMENTAL_COLUMNS
         assert "market_cap" in FUNDAMENTAL_COLUMNS
         assert "per" in FUNDAMENTAL_COLUMNS
         assert "source" in FUNDAMENTAL_COLUMNS
-        assert len(FUNDAMENTAL_COLUMNS) == 18
+        assert len(FUNDAMENTAL_COLUMNS) == 19
 
     def test_fundamental_schema_types(self):
         assert FUNDAMENTAL_SCHEMA["date"] == pl.Date
+        # available_date도 Date 타입이며 nullable이다(#2010).
+        assert FUNDAMENTAL_SCHEMA["available_date"] == pl.Date
         assert FUNDAMENTAL_SCHEMA["symbol"] == pl.Utf8
         assert FUNDAMENTAL_SCHEMA["market_cap"] == pl.Int64
         assert FUNDAMENTAL_SCHEMA["per"] == pl.Float64
@@ -519,6 +523,76 @@ class TestParquetStore:
         # merge 이상이 없었음(silent overwrite 경로 제거 확인)
         assert store.drain_warnings() == []
 
+    async def test_store_fundamental_available_date_roundtrip(self, store):
+        """(c) available_date를 포함한 fundamental write→read 라운드트립 보존(#2010).
+
+        date(period_end)와 available_date(point-in-time 접수일)가 모두 보존되고,
+        같은 데이터 재write 시 natural key [date, source] dedup(keep="last")이
+        유지되어 행이 폭증하지 않는다(available_date는 키가 아니라 value).
+        """
+        from datetime import date
+
+        dart = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "available_date": [date(2025, 11, 14)],
+                "symbol": ["005930"],
+                "net_income": [300000000000],
+                "total_equity": [6000000000000],
+                "source": ["dart"],
+            }
+        )
+        store.write("005930", "krx", dart, data_type="fundamental")
+        # 동일 데이터 재write → dedup 멱등 확인.
+        store.write("005930", "krx", dart, data_type="fundamental")
+
+        result = store.read("005930", "krx", data_type="fundamental")
+
+        # [date, source] dedup으로 단일 행 유지(재write로 폭증하지 않음).
+        assert len(result) == 1
+        # 두 날짜 컬럼이 모두 보존된다.
+        assert "available_date" in result.columns
+        assert result["date"][0] == date(2025, 9, 30)
+        assert result["available_date"][0] == date(2025, 11, 14)
+        assert result.schema["available_date"] == pl.Date
+
+    async def test_store_fundamental_available_date_revision_keeps_last(self, store):
+        """known-limitation(#2010): 동일 [date, source]에 후속 available_date는
+
+        natural key가 [date, source]라 정정공시/재제출로 같은 period_end·source에
+        다른 available_date가 와도 최신값(keep="last")으로 overwrite된다(완전한
+        revision history 보존은 비목표). 두 번째 write의 available_date가 남는다.
+        """
+        from datetime import date
+
+        first = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "available_date": [date(2025, 11, 14)],
+                "symbol": ["005930"],
+                "net_income": [300000000000],
+                "source": ["dart"],
+            }
+        )
+        revised = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "available_date": [date(2025, 12, 1)],  # 정정공시 후속 접수일
+                "symbol": ["005930"],
+                "net_income": [310000000000],
+                "source": ["dart"],
+            }
+        )
+        store.write("005930", "krx", first, data_type="fundamental")
+        store.write("005930", "krx", revised, data_type="fundamental")
+
+        result = store.read("005930", "krx", data_type="fundamental")
+
+        # period_end+source가 같으므로 한 논리 행만 남고 최신값으로 overwrite.
+        assert len(result) == 1
+        assert result["available_date"][0] == date(2025, 12, 1)
+        assert result["net_income"][0] == 310000000000
+
     async def test_store_read_heterogeneous_monthly_schemas(self, store):
         """월마다 스키마가 다른 파티션을 raise 없이 합집합으로 읽는다(#1964).
 
@@ -556,6 +630,46 @@ class TestParquetStore:
         assert len(result) == 2
         cols = set(result.columns)
         assert {"market_cap", "shares_listed", "total_assets", "net_income"} <= cols
+
+    async def test_store_read_tolerates_available_date_only_in_one_source(self, store):
+        """(d) read union이 available_date를 가진 파티션과 없는 파티션을 섞어도
+
+        diagonal_relaxed가 추가 nullable 컬럼(available_date)을 null-fill로
+        tolerate한다(#2010). DART 행만 available_date를 갖고 data.go.kr 행은
+        available_date가 null로 채워진다(예외 없음).
+        """
+        from datetime import date
+
+        # data.go.kr: available_date 없음(8월 파티션)
+        dg = pl.DataFrame(
+            {
+                "date": [date(2025, 8, 14)],
+                "symbol": ["005930"],
+                "market_cap": [480000000000],
+                "source": ["data_go_kr"],
+            }
+        )
+        # DART: available_date 보유(9월 파티션)
+        dart = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "available_date": [date(2025, 11, 14)],
+                "symbol": ["005930"],
+                "net_income": [300000000000],
+                "source": ["dart"],
+            }
+        )
+        store.write("005930", "krx", dg, data_type="fundamental")
+        store.write("005930", "krx", dart, data_type="fundamental")
+
+        result = store.read("005930", "krx", data_type="fundamental")
+        assert len(result) == 2
+        assert "available_date" in result.columns
+        # data.go.kr 행은 available_date null, DART 행은 접수일 보유.
+        dg_row = result.filter(pl.col("source") == "data_go_kr")
+        dart_row = result.filter(pl.col("source") == "dart")
+        assert dg_row["available_date"][0] is None
+        assert dart_row["available_date"][0] == date(2025, 11, 14)
 
     async def test_read_strict_raises_on_corrupt_partition(self, store, data_dir):
         """strict=True면 손상 파티션을 만나는 즉시 ParquetReadError를 raise(#2095).
@@ -1944,6 +2058,102 @@ class TestDARTNormalizer:
 
         assert "dart" in DART_NORMALIZER_REGISTRY
         assert DART_NORMALIZER_REGISTRY["dart"] is DARTNormalizer
+
+    # ── available_date (point-in-time 공시 접수일, #2010) ──────────────
+
+    def test_available_date_from_rcept_no(self, dart_normalizer, corp_code_map):
+        """(a) rcept_no 존재 시 date=period_end + available_date=접수일 공존.
+
+        rcept_no=20250315000001(앞 8자리 20250315) + reprt=11013/year=2025 →
+        date==2025-03-31(분기말일/period_end), available_date==2025-03-15.
+        """
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11013"] * 5,
+            bsns_years=["2025"] * 5,
+        ).with_columns(pl.lit("20250315000001").alias("rcept_no"))
+
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        assert len(result) == 1
+        # period_end(분기말일)는 무변경.
+        assert result["date"][0] == date(2025, 3, 31)
+        # point-in-time 접수일은 rcept_no 앞 8자리.
+        assert "available_date" in result.columns
+        assert result["available_date"][0] == date(2025, 3, 15)
+
+    def test_available_date_null_when_rcept_no_absent(
+        self, dart_normalizer, corp_code_map
+    ):
+        """(b) rcept_no 부재 시 available_date=null + 행 생성·예외 없음(graceful)."""
+        from datetime import date
+
+        df = _make_dart_df(
+            reprt_codes=["11011"] * 5,
+            bsns_years=["2025"] * 5,
+        )
+        assert "rcept_no" not in df.columns
+
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        # 행은 정상 생성되고 재무 값도 보존된다.
+        assert len(result) == 1
+        assert result["date"][0] == date(2025, 12, 31)
+        assert result["revenue"][0] == 1_000_000
+        # available_date 컬럼은 존재하되 null이다(Date dtype).
+        assert "available_date" in result.columns
+        assert result.schema["available_date"] == pl.Date
+        assert result["available_date"][0] is None
+
+    def test_available_date_rcept_no_14digit_prefix_format(
+        self, dart_normalizer, corp_code_map
+    ):
+        """(e) rcept_no 14자리의 앞 8자리만 YYYYMMDD로 파싱(뒤 6자리 일련번호 무시)."""
+        from datetime import date
+
+        # 14자리 접수번호: 앞 8(20231130) = 접수일, 뒤 6(000042) = 일련번호.
+        df = _make_dart_df(
+            reprt_codes=["11014"] * 5,
+            bsns_years=["2023"] * 5,
+        ).with_columns(pl.lit("20231130000042").alias("rcept_no"))
+
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        assert result["available_date"][0] == date(2023, 11, 30)
+        # period_end는 분기(3Q=9/30)말일로 별개.
+        assert result["date"][0] == date(2023, 9, 30)
+
+    def test_available_date_non_yyyymmdd_degrades_to_null(
+        self, dart_normalizer, corp_code_map
+    ):
+        """(e) 비YYYYMMDD rcept_no 앞 8자리는 strict=False로 null 강등(예외 없음)."""
+        df = _make_dart_df(
+            reprt_codes=["11011"] * 5,
+            bsns_years=["2025"] * 5,
+        ).with_columns(pl.lit("ABCDEFGH999999").alias("rcept_no"))
+
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        # 행은 생성되고 available_date만 null로 강등.
+        assert len(result) == 1
+        assert result["available_date"][0] is None
+        # period_end·재무 값은 정상.
+        assert result["revenue"][0] == 1_000_000
+
+    def test_available_date_invalid_calendar_date_degrades_to_null(
+        self, dart_normalizer, corp_code_map
+    ):
+        """(e) 8자리지만 달력상 불가능한 날짜(20251345)도 null 강등."""
+        df = _make_dart_df(
+            reprt_codes=["11011"] * 5,
+            bsns_years=["2025"] * 5,
+        ).with_columns(pl.lit("20251345000001").alias("rcept_no"))
+
+        result = dart_normalizer.normalize(df, corp_code_map)
+
+        assert len(result) == 1
+        assert result["available_date"][0] is None
 
 
 # ── datasets.py (data info / data list) row_count·file_size (#1982) ──────────

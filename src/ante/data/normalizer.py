@@ -321,8 +321,14 @@ class DARTNormalizer:
 
         Returns:
             FUNDAMENTAL_SCHEMA 부분 컬럼을 가진 DataFrame.
-            포함: date, symbol, revenue, net_income,
+            포함: date, available_date, symbol, revenue, net_income,
             total_equity, total_debt, total_assets, source.
+
+        ``available_date``는 point-in-time 공시 접수일(#2010)이다. DART 응답의
+        ``rcept_no``(14자리, 앞 8자리=접수일자 ``YYYYMMDD``)에서 추출한다.
+        ``date``(period_end=분기말일)와 의미가 다른 **별도 value 컬럼**이며,
+        lookahead bias를 피하려는 소비자(#2067)가 as-of join 키로 쓸 수 있다.
+        ``rcept_no``가 없거나 접수일 파싱이 실패하면 null로 강등한다(graceful).
         """
         from ante.data.schemas import FUNDAMENTAL_COLUMNS
 
@@ -370,8 +376,15 @@ class DARTNormalizer:
         if df.is_empty():
             return pl.DataFrame(schema=empty_schema)
 
-        # reprt_code + bsns_year → date 변환
+        # reprt_code + bsns_year → date(period_end) 변환
         df = self._convert_report_date(df)
+
+        # point-in-time 공시 접수일(available_date) 파생(#2010).
+        # rcept_no(14자리)의 앞 8자리가 접수일자 YYYYMMDD다. 존재하면 그
+        # 부분을 Date로 파싱하고, 컬럼이 없거나(과거 raw·data.go.kr 등) 값이
+        # 비YYYYMMDD면 strict=False로 null 강등한다(graceful). period_end(date)와
+        # 별도 value 컬럼으로 보존하며, required_cols에는 넣지 않는다.
+        df = self._derive_available_date(df)
 
         # thstrm_amount 콤마 제거 + 숫자 변환
         df = df.with_columns(
@@ -394,9 +407,17 @@ class DARTNormalizer:
             return pl.DataFrame(schema=empty_schema)
 
         # 피벗: 행(계정과목별) → 열(종목별 필드)
+        #
+        # available_date를 index에 포함해 피벗 후에도 보존한다. 같은
+        # (symbol, date=period_end)에 대해 한 응답 내 available_date는 보통
+        # 단일값이라 행이 분할되지 않는다. 단, 정정공시/재제출로 동일
+        # period_end에 후속 rcept_no가 섞이면 available_date가 달라 행이
+        # 나뉠 수 있다 — 완전한 revision history 보존은 본 이슈의 비목표이며,
+        # store의 natural key [date, source] dedup(keep="last")이 최신 1행으로
+        # 수렴시킨다(known-limitation, #2010).
         pivoted = df.pivot(
             on="field_name",
-            index=["symbol", "date"],
+            index=["symbol", "date", "available_date"],
             values="amount_value",
             aggregate_function="first",
         )
@@ -491,6 +512,45 @@ class DARTNormalizer:
 
         df = df.with_columns(pl.Series("date", dates, dtype=pl.Date))
         return df.filter(pl.col("date").is_not_null())
+
+    def _derive_available_date(self, df: pl.DataFrame) -> pl.DataFrame:
+        """rcept_no → available_date(공시 접수일) 컬럼 파생(#2010).
+
+        DART 응답의 ``rcept_no``는 14자리 접수번호이며 **앞 8자리가 접수일자
+        ``YYYYMMDD``** 다(05-data-sources.md L84·dart-openapi.md). 이 앞 8자리를
+        ``Date``로 파싱해 point-in-time ``available_date``를 만든다.
+
+        graceful 강등(required 아님):
+        - ``rcept_no`` 컬럼이 없으면(과거 raw·data.go.kr 등) ``available_date``를
+          **전부 null**(``pl.Date``)로 채운다 — 예외를 던지지 않는다.
+        - ``rcept_no``가 있어도 앞 8자리가 ``YYYYMMDD`` 형식이 아니면
+          ``strict=False`` 파싱이 그 행만 null로 강등한다(전체 실패 아님).
+
+        ``date``(period_end)와는 의미가 다른 별도 value 컬럼이므로
+        ``_convert_report_date``처럼 null 행을 필터링하지 **않는다**.
+        """
+        if "rcept_no" not in df.columns:
+            logger.debug(
+                "DART: rcept_no 컬럼 부재 — available_date를 null로 채움 "
+                "(point-in-time 접수일 미상, #2010)"
+            )
+            return df.with_columns(pl.lit(None, dtype=pl.Date).alias("available_date"))
+
+        derived = df.with_columns(
+            pl.col("rcept_no")
+            .cast(pl.Utf8)
+            .str.slice(0, 8)
+            .str.to_date("%Y%m%d", strict=False)
+            .alias("available_date")
+        )
+
+        # 비YYYYMMDD/부재로 인한 null 강등 관측성(전수 null이면 디버그 로그).
+        if bool(derived["available_date"].is_null().all()):
+            logger.debug(
+                "DART: rcept_no 앞 8자리에서 available_date를 하나도 파싱하지 "
+                "못함 — 비YYYYMMDD 형식 가능성(#2010)"
+            )
+        return derived
 
 
 # ── Normalizer 레지스트리 ────────────────────────────

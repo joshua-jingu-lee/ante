@@ -103,6 +103,12 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
       data.go.kr의 같은 거래일 일별 fundamental과 같은 월 파티션에서
       date가 충돌할 수 있다. `source`까지 키에 포함하면 두 소스의
       서로 다른(null-complementary) 행을 **모두 보존**한다(#1964).
+      `available_date`(point-in-time 공시 접수일, #2010)는 논리 행을
+      식별하는 키가 아니라 **value 속성**이므로 natural key에 넣지 않는다.
+      key는 period_end(`date`)+`source`로 한 분기·소스당 한 논리 행을
+      식별하고, 정정공시/재제출로 동일 period_end에 후속 접수가 들어오면
+      `keep="last"`가 최신 `available_date`/값으로 overwrite한다(완전한
+      revision history 보존은 비목표, known-limitation).
     - ohlcv/tick(및 기타 default): `["timestamp"]`(존재 시) 또는 `[]`.
 
     Args:

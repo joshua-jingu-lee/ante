@@ -31,8 +31,17 @@ TICK_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
 }
 
 # 재무 데이터 스키마 (DART, data.go.kr 등)
+#
+# `date`는 보고 기간말일(period_end, 분기말 3/31·6/30·9/30·12/31)이고,
+# `available_date`는 그 데이터가 실제로 **알 수 있게 된 시점**(point-in-time,
+# DART 공시 접수일 rcept_dt)이다(#2010). lookahead bias를 피하려면 소비자가
+# `available_date` 기준 as-of join을 해야 하지만, consumer 전환은 별도 이슈
+# (#2067)이며 본 스키마는 producer가 `available_date`를 **저장**만 한다.
+# `available_date`는 nullable이다 — 소스(rcept_no)가 없거나 접수일 파싱이
+# 실패한 행은 null로 강등되고, data.go.kr 등 DART가 아닌 소스 행에서도 null이다.
 FUNDAMENTAL_SCHEMA: dict[str, pl.DataType | type[pl.DataType]] = {
     "date": pl.Date,
+    "available_date": pl.Date,
     "symbol": pl.Utf8,
     "market_cap": pl.Int64,
     "shares_listed": pl.Int64,
