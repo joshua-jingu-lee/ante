@@ -56,6 +56,115 @@ _SCOPE_DATA_WRITE = "data:write"
 _SCOPE_DATA_READ = "data:read"
 _SEPARATOR = "──────────────────────────────────────────────────"
 
+# `[general].log_level` 에 허용되는 logging 레벨명 (대문자). 스펙
+# (docs/specs/data-feed/02-design-decisions.md) 의 DEBUG/INFO/WARNING/ERROR 에
+# CRITICAL 을 더한 표준 logging 레벨 집합이다.
+_VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
+# DataFeed 패키지 로거. log_level 은 root 가 아닌 이 로거에만 적용한다.
+_FEED_LOGGER_NAME = "ante.feed"
+
+
+def _apply_log_level(config: dict[str, object], fmt: object) -> None:
+    """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다 (#2038).
+
+    유효한 레벨명(DEBUG/INFO/WARNING/ERROR/CRITICAL)이 아니면 INFO fallback
+    없이 구조화 에러(``CONFIG_INVALID_LOG_LEVEL``)로 거부하고 ``SystemExit(1)``
+    로 종료한다(fail-loud). root 로거·logging 포맷/핸들러는 변경하지 않으며,
+    ``ante.feed`` 패키지 로거의 레벨만 설정한다.
+    """
+    general = config.get("general", {})
+    if not isinstance(general, dict):
+        fmt.error(  # type: ignore[attr-defined]
+            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})",
+            code="CONFIG_INVALID_GENERAL",
+        )
+        raise SystemExit(1)
+
+    level_name = general.get("log_level", "INFO")
+    if not isinstance(level_name, str) or level_name.upper() not in _VALID_LOG_LEVELS:
+        allowed = ", ".join(sorted(_VALID_LOG_LEVELS))
+        fmt.error(  # type: ignore[attr-defined]
+            f"유효하지 않은 log_level: {level_name!r} (허용: {allowed})",
+            code="CONFIG_INVALID_LOG_LEVEL",
+        )
+        raise SystemExit(1)
+
+    logging.getLogger(_FEED_LOGGER_NAME).setLevel(getattr(logging, level_name.upper()))
+
+
+def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
+    """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다 (#2037).
+
+    - ``guard`` 는 table(dict) 이어야 한다.
+    - ``blocked_days`` 가 있으면 ``list`` 이고 각 원소는 ``str`` 이어야 한다.
+    - ``blocked_hours`` 가 있으면 ``list`` 이어야 한다. 각 window 의 형식
+      (``HH:MM-HH:MM``) 검증은 #2030 ``cli_scheduler._validate_schedule_times``
+      가 단일 책임으로 수행하므로(중복 분기 금지) 여기서는 list 여부만 본다.
+    - ``pause_during_trading`` 이 있으면 ``bool`` 이어야 한다.
+
+    무효 타입이면 구조화 에러(``CONFIG_INVALID_GUARD``)로 거부하고
+    ``SystemExit(1)`` 로 종료한다. 요일명 화이트리스트·blocked_hours 형식
+    검증은 본 함수의 범위가 아니다(비목표).
+    """
+    guard = config.get("guard", {})
+    if not isinstance(guard, dict):
+        fmt.error(  # type: ignore[attr-defined]
+            f"[guard] 섹션은 table 이어야 합니다 (현재: {type(guard).__name__})",
+            code="CONFIG_INVALID_GUARD",
+        )
+        raise SystemExit(1)
+
+    errors: list[str] = []
+
+    if "blocked_days" in guard:
+        blocked_days = guard["blocked_days"]
+        if not isinstance(blocked_days, list):
+            errors.append(
+                f"blocked_days 는 list 여야 합니다 "
+                f"(현재: {type(blocked_days).__name__})"
+            )
+        else:
+            non_str = [d for d in blocked_days if not isinstance(d, str)]
+            if non_str:
+                errors.append(
+                    f"blocked_days 의 모든 원소는 요일 문자열이어야 합니다 "
+                    f"(비-문자열 원소: {non_str!r})"
+                )
+
+    if "blocked_hours" in guard and not isinstance(guard["blocked_hours"], list):
+        errors.append(
+            f"blocked_hours 는 list 여야 합니다 "
+            f"(현재: {type(guard['blocked_hours']).__name__})"
+        )
+
+    if "pause_during_trading" in guard and not isinstance(
+        guard["pause_during_trading"], bool
+    ):
+        errors.append(
+            f"pause_during_trading 는 bool 이어야 합니다 "
+            f"(현재: {type(guard['pause_during_trading']).__name__})"
+        )
+
+    if errors:
+        fmt.error(  # type: ignore[attr-defined]
+            "잘못된 [guard] 설정: " + "; ".join(errors),
+            code="CONFIG_INVALID_GUARD",
+        )
+        raise SystemExit(1)
+
+
+def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> None:
+    """feed 커맨드 공통 진입 검증/적용 (#2037 + #2038).
+
+    ``feed run backfill`` / ``feed run daily`` / ``feed start`` 가 config 로드
+    직후 호출하는 단일 chokepoint 다. ``[general].log_level`` 을 ``ante.feed``
+    로거에 적용(#2038)하고 ``[guard]`` 타입을 검증(#2037)한다. 무효 입력은
+    구조화 에러 + ``SystemExit(1)`` 로 fail-loud 처리한다.
+    """
+    _apply_log_level(config, fmt)
+    _validate_guard_config(config, fmt)
+
+
 _API_KEY_GUIDE = """\
 ──────────────────────────────────────────────────
 API 키 설정이 필요합니다.
@@ -289,6 +398,7 @@ def run_backfill(
             raise SystemExit(1)
 
     config = cfg.load_config()
+    _validate_and_apply_feed_config(config, fmt)
 
     # CLI 옵션으로 schedule 오버라이드
     if since is not None:
@@ -351,6 +461,7 @@ def run_daily(
         _validate_iso_date(target_date, "--date", fmt)
 
     config = cfg.load_config()
+    _validate_and_apply_feed_config(config, fmt)
 
     orchestrator = _build_orchestrator(cfg)
 
@@ -393,6 +504,7 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
         raise SystemExit(1)
 
     config = cfg.load_config()
+    _validate_and_apply_feed_config(config, fmt)
     schedule = config.get("schedule", {})
     daily_at = (
         schedule.get("daily_at", "16:00") if isinstance(schedule, dict) else "16:00"
