@@ -1435,12 +1435,15 @@ class BotManager:
         로 복원되어 사용자가 PUT 으로 변경한 값이 silent 하게 default 로
         되돌아가는 회귀가 발생한다.
 
-        ``ON CONFLICT DO UPDATE`` 에서 ``strategy_id`` 컬럼도 함께 갱신한다
-        (#2129/#2130). ``config_json`` 에는 ``strategy_id`` 가 항상 포함되어
-        있었으나 과거에는 UPDATE SET 에서 ``strategy_id`` 컬럼이 제외되어
-        ``update_bot(strategy_id=...)`` 경로에서 컬럼이 stale 해졌다. 컬럼과
-        ``config_json.strategy_id`` 를 동일 INSERT/UPSERT 안에서 같은
-        ``config`` 객체로부터 쓰므로 두 store 는 항상 일관된다.
+        ``ON CONFLICT DO UPDATE`` 에서 ``strategy_id`` 컬럼과 ``account_id``
+        컬럼도 함께 갱신한다 (#2129/#2130/#2274). ``config_json`` 에는
+        ``strategy_id`` / ``account_id`` 가 항상 포함되어 있었으나 과거에는
+        UPDATE SET 에서 두 컬럼이 제외되어 ``update_bot(strategy_id=...)`` /
+        ``update_bot(account_id=...)`` 경로에서 컬럼이 stale 해졌다 (재시작 시
+        ``load_from_db`` 가 컬럼에서 읽어 옛 값으로 복원되는 drift). 컬럼과
+        ``config_json.strategy_id`` / ``config_json.account_id`` 를 동일
+        INSERT/UPSERT 안에서 같은 ``config`` 객체로부터 쓰므로 두 store 는
+        항상 일관된다.
         """
         config_dict = {
             "bot_id": config.bot_id,
@@ -1461,6 +1464,7 @@ class BotManager:
                ON CONFLICT(bot_id) DO UPDATE SET
                  name = excluded.name,
                  strategy_id = excluded.strategy_id,
+                 account_id = excluded.account_id,
                  config_json = excluded.config_json,
                  updated_at = datetime('now')""",
             (

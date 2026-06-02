@@ -173,6 +173,18 @@ async def _read_db_interval(db: Database, bot_id: str) -> int:
     return int(payload["interval_seconds"])
 
 
+async def _read_db_account_ids(db: Database, bot_id: str) -> tuple[str, str]:
+    """DB ``bots.account_id`` 컬럼과 ``config_json.account_id`` 를 읽는다 (#2274)."""
+    import json
+
+    row = await db.fetch_one(
+        "SELECT account_id, config_json FROM bots WHERE bot_id = ?", (bot_id,)
+    )
+    assert row is not None
+    payload = json.loads(row["config_json"])
+    return row["account_id"], payload["account_id"]
+
+
 # ----------------------------------------------------------------------------
 # Tests
 # ----------------------------------------------------------------------------
@@ -284,6 +296,54 @@ class TestUpdateBotBudgetRollback:
         assert bot is not None
         assert bot.config.interval_seconds == 60
         assert await _read_db_interval(db, bot_id) == 60
+
+    async def test_update_bot_account_id_change_rolls_back_to_old_on_failure(
+        self, eventbus, db, ctx
+    ) -> None:
+        """#2274: account_id 를 함께 바꾼 update 가 budget 실패로 rollback 되면
+        ``bots.account_id`` 컬럼·config_json 둘 다 옛 account_id 로 복원된다.
+
+        #2274 가 UPSERT 에 ``account_id = excluded.account_id`` 를 추가한 뒤,
+        rollback 의 ``_save_bot_config(old_config)`` 가 컬럼·config_json 을 모두
+        옛 ``old_config.account_id`` 로 되돌리는지(stale 신 account_id 가 남지
+        않는지) 확인하는 회귀 가드.
+
+        treasury 는 새(effective) account_id 로 조회되므로 새 account 에 raising
+        treasury 를 등록해 ``update_budget`` 까지 진입 후 raise 시킨다.
+        """
+
+        class _BoomError(RuntimeError):
+            pass
+
+        raising_treasury = _RaisingTreasury(_BoomError("boom"))
+        # budget 처리는 new_config.account_id(='acc-new') 로 treasury 를 조회한다.
+        tm = _RaisingTreasuryManager("acc-new", raising_treasury)
+
+        manager = BotManager(eventbus=eventbus, db=db, treasury_manager=tm)
+        await manager.initialize()
+        bot_id = await _make_stopped_bot(
+            manager, ctx, account_id="acc-old", interval_seconds=60
+        )
+
+        # 변경 전 컬럼·config_json 모두 옛 account_id.
+        acc_col, acc_cfg = await _read_db_account_ids(db, bot_id)
+        assert acc_col == "acc-old" == acc_cfg
+
+        with pytest.raises(_BoomError):
+            await manager.update_bot(bot_id, account_id="acc-new", budget=100_000.0)
+
+        # update_budget 은 새 account_id 의 treasury 로 진입했어야 한다.
+        assert raising_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+
+        bot = manager.get_bot(bot_id)
+        assert bot is not None
+        # memory rollback: 옛 account_id 로 복원.
+        assert bot.config.account_id == "acc-old"
+        # DB rollback: 컬럼·config_json 둘 다 옛 account_id 로 복원되고
+        # 신 account_id("acc-new") 가 stale 로 남지 않는다.
+        acc_col, acc_cfg = await _read_db_account_ids(db, bot_id)
+        assert acc_col == "acc-old"
+        assert acc_cfg == "acc-old"
 
     async def test_update_bot_budget_failure_cancellation(
         self, eventbus, db, ctx

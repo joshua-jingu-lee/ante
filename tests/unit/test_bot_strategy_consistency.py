@@ -214,6 +214,15 @@ async def _row_strategy_ids(db, bot_id):
     return row["strategy_id"], cfg["strategy_id"]
 
 
+async def _row_account_ids(db, bot_id):
+    """``bots`` row 의 컬럼 account_id 와 config_json.account_id 를 반환 (#2274)."""
+    row = await db.fetch_one(
+        "SELECT account_id, config_json FROM bots WHERE bot_id = ?", (bot_id,)
+    )
+    cfg = json.loads(row["config_json"])
+    return row["account_id"], cfg["account_id"]
+
+
 # ── (a) update_bot --strategy (등록·호환) → 컬럼+config_json 둘 다 새 ID ──
 
 
@@ -368,16 +377,14 @@ class TestUpdateBotEffectiveAccountValidation:
 
         # effective(새, NASDAQ) 계좌로 검증을 통과해 둘 다 새 값으로 commit.
         # account_id 는 memory config 와 config_json 에 새 값으로 직렬화된다.
-        # (``bots.account_id`` 컬럼 자체는 ``_save_bot_config`` UPSERT 가
-        # 갱신하지 않는 별개의 사전 결함 — 본 브랜치 리뷰 범위 밖.)
+        # #2274 수정 이후 ``bots.account_id`` 컬럼도 UPSERT 가 함께 갱신하므로
+        # 컬럼·config_json 둘 다 새 값으로 일관된다.
         assert bot.config.account_id == "acc-nasdaq"
         assert bot.config.strategy_id == nasdaq_sid
         col, cfg = await _row_strategy_ids(db, "bot1")
         assert col == nasdaq_sid == cfg
-        row = await db.fetch_one(
-            "SELECT config_json FROM bots WHERE bot_id = ?", ("bot1",)
-        )
-        assert json.loads(row["config_json"])["account_id"] == "acc-nasdaq"
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-nasdaq" == acc_cfg
 
     async def test_simultaneous_change_incompatible_with_new_account_raises(
         self, manager_with_account, account_service, ctx, db, tmp_path
@@ -432,13 +439,12 @@ class TestUpdateBotEffectiveAccountValidation:
         bot = await manager_with_account.update_bot("bot1", account_id="acc-test2")
 
         # strategy 검증 미트리거 → 미등록 ``s1`` 에도 raise 없이 성공.
-        # account_id 는 memory config + config_json 에 새 값으로 반영된다.
+        # account_id 는 memory config + config_json + 컬럼에 새 값으로 반영된다
+        # (#2274: UPSERT 가 account_id 컬럼도 갱신).
         assert bot.config.account_id == "acc-test2"
         assert bot.config.strategy_id == "s1"
-        row = await db.fetch_one(
-            "SELECT config_json FROM bots WHERE bot_id = ?", ("bot1",)
-        )
-        assert json.loads(row["config_json"])["account_id"] == "acc-test2"
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test2" == acc_cfg
 
 
 # ── (d)(e) assign_strategy / change_strategy 일관성 ──────────────
@@ -660,3 +666,114 @@ class TestReloadConsistency:
         reloaded = manager2.get_bot("bot1")
         col, cfg = await _row_strategy_ids(db, "bot1")
         assert reloaded.config.strategy_id == col == cfg == new_sid
+
+
+# ── #2274: bots.account_id 컬럼 ↔ config_json.account_id 일관성 회귀 ──────────
+
+
+class TestUpdateBotAccountConsistency:
+    """#2274 (#2129/#2130 동형): ``update_bot(account_id=...)`` 가
+    ``bots.account_id`` 컬럼과 ``config_json.account_id`` 를 항상 동일하게
+    갱신하는지, 재시작(``load_from_db``) 시 새 account_id 로 복원되는지 검증한다.
+
+    수정 전에는 ``_save_bot_config`` 의 ``ON CONFLICT DO UPDATE SET`` 에
+    ``account_id`` 컬럼이 빠져 있어, ``update_bot`` 으로 account_id 를 바꿔도
+    컬럼이 stale 하게 옛 값으로 남고, ``load_from_db`` 가 컬럼을 읽어 재시작 시
+    옛 account_id 로 복원되는 drift 가 있었다.
+    """
+
+    async def test_update_account_id_updates_column_not_stale(
+        self, manager_with_account, account_service, ctx, db
+    ):
+        """(a) update_bot(account_id=new) → 컬럼·config_json 둘 다 new(stale 아님).
+
+        strategy_id 는 그대로(미등록 ``s1``)라 전략 검증을 트리거하지 않으므로
+        account_id-only 변경만 검증한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_krx_account(account_service, account_id="acc-new")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        # 생성 직후 컬럼·config_json 모두 옛 값.
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test" == acc_cfg
+
+        bot = await manager_with_account.update_bot("bot1", account_id="acc-new")
+
+        assert bot.config.account_id == "acc-new"
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        # 컬럼이 stale("acc-test") 로 남지 않고 새 값으로 갱신되어야 한다.
+        assert acc_col == "acc-new"
+        assert acc_cfg == "acc-new"
+
+    async def test_update_account_id_then_reload_restores_new(
+        self, manager_with_account, account_service, eventbus, ctx, db
+    ):
+        """(b) account_id 변경 후 새 매니저로 load_from_db → 새 account_id 복원.
+
+        ``load_from_db`` 는 ``bots.account_id`` 컬럼에서 account_id 를 읽으므로,
+        UPSERT 가 컬럼을 갱신하지 않으면 재시작 시 옛 값으로 복원되는 drift 가
+        발생한다. 컬럼이 갱신되면 재로드된 config 가 새 account_id 여야 한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_krx_account(account_service, account_id="acc-new")
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+        await manager_with_account.update_bot("bot1", account_id="acc-new")
+
+        # 재시작 시뮬레이션: 새 매니저로 DB 에서 재로드.
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        count = await manager2.load_from_db()
+        assert count == 1
+
+        reloaded = manager2.get_bot("bot1")
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        # 옛 account_id("acc-test") 로 복원되지 않고 새 값이어야 한다.
+        assert reloaded.config.account_id == acc_col == acc_cfg == "acc-new"
+
+    async def test_simultaneous_strategy_and_account_change_persists_both(
+        self, manager_with_account, account_service, ctx, db, tmp_path
+    ):
+        """(c) strategy_id + account_id 동시 변경 → 둘 다 컬럼·config_json persist.
+
+        #2129/#2130 회귀 보존: 새 전략은 새(effective, NASDAQ) 계좌와 호환이므로
+        검증을 통과하고, strategy_id·account_id 컬럼과 config_json 이 모두 새
+        값으로 일관되게 commit 되어야 한다.
+        """
+        await _make_krx_account(account_service)
+        await _make_nasdaq_account(account_service)
+        nasdaq_sid = await _register_strategy(
+            db, _NASDAQ_STRATEGY_SOURCE, "nasdaq_only", "1.0.0", tmp_path
+        )
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager_with_account.update_bot(
+            "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
+        )
+
+        assert bot.config.strategy_id == nasdaq_sid
+        assert bot.config.account_id == "acc-nasdaq"
+        sid_col, sid_cfg = await _row_strategy_ids(db, "bot1")
+        assert sid_col == nasdaq_sid == sid_cfg
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-nasdaq" == acc_cfg
+
+    async def test_update_without_account_change_is_noop_on_account_column(
+        self, manager_with_account, account_service, ctx, db
+    ):
+        """(e) account_id 미변경 update(name 만 변경) → account_id 컬럼 무영향."""
+        await _make_krx_account(account_service)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", name="old", account_id="acc-test"
+        )
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager_with_account.update_bot("bot1", name="new")
+
+        assert bot.config.name == "new"
+        assert bot.config.account_id == "acc-test"
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test" == acc_cfg
