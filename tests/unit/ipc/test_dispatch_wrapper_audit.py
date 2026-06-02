@@ -20,7 +20,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -760,5 +760,485 @@ async def test_audit_action_without_audit_logger_no_crash(socket_path: str) -> N
         # crash 없이 정상 응답 + _audit_detail strip.
         assert response["status"] == "ok"
         assert "_audit_detail" not in response["result"]
+    finally:
+        await server.stop()
+
+
+# ── #2110 audit wiring (system halt/clear-halt, bot create/remove, ───────────
+#    approval approve/reject/cancel) ─────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_system_halt_audit_action_fires(socket_path: str) -> None:
+    """Refs #2110 (audit.md:115): ``system.halt`` 가 wrapper 자동 audit 발화.
+
+    resource 는 ``system:kill_switch`` (audit.md SSOT). handler 성공 후
+    ``audit_logger.log`` 1회 호출 + ``_audit_detail`` strip.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.suspend_all = AsyncMock(return_value=[])
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "system.halt",
+                "args": {"reason": "ops halt"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="system.halt",
+            resource="system:kill_switch",
+            detail="reason=ops halt",
+            ip="",
+        )
+        fake_account.suspend_all.assert_awaited_once_with(
+            reason="ops halt", suspended_by="alice"
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_system_clear_halt_audit_action_fires(socket_path: str) -> None:
+    """Refs #2110 (audit.md:116): ``system.clear_halt`` 자동 audit 발화."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.activate_all = AsyncMock(return_value=[])
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "system.clear_halt",
+                "args": {},
+                "actor": "bob",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="bob",
+            action="system.clear_halt",
+            resource="system:kill_switch",
+            detail="",
+            ip="",
+        )
+        fake_account.activate_all.assert_awaited_once_with(activated_by="bob")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_system_halt_audit_not_fired_on_failure(socket_path: str) -> None:
+    """Refs #2110: handler 예외(suspend_all 실패) 시 audit 미발화."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.suspend_all = AsyncMock(side_effect=RuntimeError("boom"))
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "system.halt",
+                "args": {"reason": "x"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_create_audit_action_fires_with_result_bot_id(
+    socket_path: str,
+) -> None:
+    """Refs #2110 (audit.md:117): ``bot.create`` 자동 audit 발화.
+
+    resource 는 **생성 결과** ``bot.bot_id`` 를 쓴다 — 요청 args 의 ``bot_id``
+    가 비어 있어도(서버가 채움) result 의 bot_id 로 audit 한다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_bot = MagicMock()
+    fake_bot.bot_id = "bot-generated-7"
+    fake_bot_manager = MagicMock()
+    fake_bot_manager.create_bot = AsyncMock(return_value=fake_bot)
+
+    strategy_record = MagicMock()
+    strategy_record.filepath = "/tmp/_fake_strategy.py"
+    strategy_registry = MagicMock()
+    strategy_registry.get = AsyncMock(return_value=strategy_record)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger,
+        bot_manager=fake_bot_manager,
+        strategy_registry=strategy_registry,
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        with patch("ante.strategy.loader.StrategyLoader.load") as mock_load:
+            mock_load.return_value = MagicMock()
+            response = await server._dispatch(
+                {
+                    "id": "1",
+                    "command": "bot.create",
+                    "args": {
+                        "account_id": "acc1",
+                        "strategy_id": "s1",
+                        "name": "test",
+                        # bot_id 비움 — resource 는 result bot_id 로 채워져야 함.
+                        "bot_id": "",
+                    },
+                    "actor": "alice",
+                }
+            )
+        assert response["status"] == "ok"
+        assert response["result"] == {"bot_id": "bot-generated-7"}
+        assert "_audit_detail" not in response["result"]
+        # resource 는 요청 args 의 빈 bot_id 가 아니라 생성 결과 bot_id.
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="bot.create",
+            resource="bot:bot-generated-7",
+            detail="",
+            ip="",
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_remove_audit_action_is_bot_delete(socket_path: str) -> None:
+    """Refs #2110 (audit.md:120): ``bot.remove`` command 의 audit action 은
+    audit.md SSOT 에 따라 ``bot.delete`` (command 이름과 다름)."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_bot_manager = MagicMock()
+    fake_bot_manager.remove_bot = AsyncMock(return_value=None)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, bot_manager=fake_bot_manager
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "bot.remove",
+                "args": {"bot_id": "bot-9"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        assert response["result"] == {"bot_id": "bot-9", "removed": True}
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="bot.delete",
+            resource="bot:bot-9",
+            detail="",
+            ip="",
+        )
+        fake_bot_manager.remove_bot.assert_awaited_once_with("bot-9")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_remove_audit_not_fired_on_failure(socket_path: str) -> None:
+    """Refs #2110: ``BotNotFoundError`` 등 거부 경로는 audit 미발화."""
+    from ante.bot.exceptions import BotNotFoundError
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_bot_manager = MagicMock()
+    fake_bot_manager.remove_bot = AsyncMock(side_effect=BotNotFoundError("bot-missing"))
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, bot_manager=fake_bot_manager
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "bot.remove",
+                "args": {"bot_id": "bot-missing"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "BOT_NOT_FOUND"
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_approval_approve_audit_action_fires(socket_path: str) -> None:
+    """Refs #2110 (audit.md:112): ``approval.approve`` 자동 audit 발화.
+
+    resource 는 ``approval:{id}`` (요청 args 의 id).
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_request = MagicMock()
+    fake_request.id = "apr-1"
+    fake_request.status = "approved"
+    fake_approval = MagicMock()
+    fake_approval.approve = AsyncMock(return_value=fake_request)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, approval=fake_approval
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "approval.approve",
+                "args": {"id": "apr-1"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="approval.approve",
+            resource="approval:apr-1",
+            detail="",
+            ip="",
+        )
+        fake_approval.approve.assert_awaited_once_with("apr-1", resolved_by="alice")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_approval_reject_audit_action_fires(socket_path: str) -> None:
+    """Refs #2110 (audit.md:113): ``approval.reject`` 자동 audit 발화."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_request = MagicMock()
+    fake_request.id = "apr-2"
+    fake_request.status = "rejected"
+    fake_approval = MagicMock()
+    fake_approval.reject = AsyncMock(return_value=fake_request)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, approval=fake_approval
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "approval.reject",
+                "args": {"id": "apr-2", "reason": "no good"},
+                "actor": "bob",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="bob",
+            action="approval.reject",
+            resource="approval:apr-2",
+            detail="reason=no good",
+            ip="",
+        )
+        fake_approval.reject.assert_awaited_once_with(
+            "apr-2", resolved_by="bob", reject_reason="no good"
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_approval_cancel_audit_action_fires(socket_path: str) -> None:
+    """Refs #2110 (audit.md:114): ``approval.cancel`` 자동 audit 발화."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_request = MagicMock()
+    fake_request.id = "apr-3"
+    fake_request.status = "cancelled"
+    fake_approval = MagicMock()
+    fake_approval.cancel = AsyncMock(return_value=fake_request)
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, approval=fake_approval
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "approval.cancel",
+                "args": {"id": "apr-3"},
+                "actor": "carol",
+            }
+        )
+        assert response["status"] == "ok"
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="carol",
+            action="approval.cancel",
+            resource="approval:apr-3",
+            detail="",
+            ip="",
+        )
+        fake_approval.cancel.assert_awaited_once_with("apr-3", requester="carol")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_approval_approve_audit_not_fired_on_failure(socket_path: str) -> None:
+    """Refs #2110: approve handler 예외 시 audit 미발화."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_approval = MagicMock()
+    fake_approval.approve = AsyncMock(side_effect=RuntimeError("boom"))
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, approval=fake_approval
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "approval.approve",
+                "args": {"id": "apr-x"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_2110_commands_preflight_reject_without_audit_logger(
+    socket_path: str,
+) -> None:
+    """Refs #2110: audit_logger 미주입 시 7개 명령 모두 preflight 거부.
+
+    account.suspend 선례 동형 — required_services 에 audit_logger 가 추가됐으므로
+    legacy/미주입 환경에서는 handler 도달 전 ``SERVICE_NOT_CONFIGURED`` 로
+    차단되고 audit/상태변경이 일어나지 않는다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    svc_registry = _make_service_registry()  # audit_logger=None (default)
+    assert svc_registry.audit_logger is None
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        for command, args in [
+            ("system.halt", {}),
+            ("system.clear_halt", {}),
+            ("bot.create", {"account_id": "acc1", "strategy_id": "s1"}),
+            ("bot.remove", {"bot_id": "b1"}),
+            ("approval.approve", {"id": "apr-1"}),
+            ("approval.reject", {"id": "apr-1"}),
+            ("approval.cancel", {"id": "apr-1"}),
+        ]:
+            spec = cmd_registry.get(command)
+            assert spec is not None
+            assert "audit_logger" in spec.required_services, command
+            response = await server._dispatch(
+                {"id": "1", "command": command, "args": args, "actor": "x"}
+            )
+            assert response["status"] == "error", command
+            assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", command
     finally:
         await server.stop()

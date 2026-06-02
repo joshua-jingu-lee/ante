@@ -190,16 +190,42 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
 async def _handle_system_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """전역 거래 정지(kill switch) IPC handler.
+
+    Refs #2110 (audit.md:115): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="system.halt"`` 기반으로 자동 발화한다. handler
+    는 ``_audit_detail`` reserved key 로 ``resource="system:kill_switch"`` 를
+    전달하며, wrapper 가 ``pop`` 으로 public envelope 진입 전에 strip 한다.
+    """
     reason = args.get("reason", "IPC halt")
     accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
-    return _kill_switch_payload("halted", accounts)
+    payload = _kill_switch_payload("halted", accounts)
+    payload["_audit_detail"] = {
+        "resource": "system:kill_switch",
+        "detail": f"reason={reason}",
+        "ip": "",
+    }
+    return payload
 
 
 async def _handle_system_clear_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """전역 거래 정지 해제 IPC handler.
+
+    Refs #2110 (audit.md:116): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="system.clear_halt"`` 기반으로 자동 발화한다.
+    handler 는 ``_audit_detail`` reserved key 로
+    ``resource="system:kill_switch"`` 를 전달한다.
+    """
     accounts = await svc.account.activate_all(activated_by=actor)
-    return _kill_switch_payload("halt_cleared", accounts)
+    payload = _kill_switch_payload("halt_cleared", accounts)
+    payload["_audit_detail"] = {
+        "resource": "system:kill_switch",
+        "detail": "",
+        "ip": "",
+    }
+    return payload
 
 
 async def _handle_account_suspend(
@@ -294,15 +320,43 @@ async def _handle_bot_create(
         strategy_cls=strategy_cls,
         source_path=Path(record.filepath),
     )
-    return {"bot_id": bot.bot_id}
+    # Refs #2110 (audit.md:117): resource 는 **생성 결과** ``bot.bot_id`` 를
+    # 사용한다 — 요청 args 의 ``bot_id`` 는 빈 문자열일 수 있어(서버가 채움)
+    # 신뢰하지 않는다. audit 호출은 ``_dispatch`` wrapper 가
+    # ``CommandSpec.audit_action="bot.create"`` 기반으로 자동 발화하며 handler
+    # 는 ``_audit_detail`` 만 전달(wrapper 가 ``pop`` 으로 strip).
+    return {
+        "bot_id": bot.bot_id,
+        "_audit_detail": {
+            "resource": f"bot:{bot.bot_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_bot_remove(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """봇 제거 IPC handler.
+
+    Refs #2110 (audit.md:120): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="bot.delete"`` 기반으로 자동 발화한다. command
+    이름은 ``bot.remove`` 이지만 audit action 은 audit.md SSOT 에 따라
+    ``bot.delete`` 다. handler 는 ``_audit_detail`` reserved key 로
+    ``resource="bot:{bot_id}"`` 를 전달한다.
+    """
     bot_id = args["bot_id"]
     await svc.bot_manager.remove_bot(bot_id)
-    return {"bot_id": bot_id, "removed": True}
+    return {
+        "bot_id": bot_id,
+        "removed": True,
+        "_audit_detail": {
+            "resource": f"bot:{bot_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_bot_signal_key_rotate(
@@ -898,26 +952,75 @@ async def _handle_approval_request(
 async def _handle_approval_approve(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    request = await svc.approval.approve(args["id"], resolved_by=actor)
-    return {"id": request.id, "status": str(request.status)}
+    """승인 요청 승인 IPC handler.
+
+    Refs #2110 (audit.md:112): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="approval.approve"`` 기반으로 자동 발화한다.
+    handler 는 ``_audit_detail`` reserved key 로
+    ``resource="approval:{id}"`` 를 전달한다.
+    """
+    approval_id = args["id"]
+    request = await svc.approval.approve(approval_id, resolved_by=actor)
+    return {
+        "id": request.id,
+        "status": str(request.status),
+        "_audit_detail": {
+            "resource": f"approval:{approval_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_approval_reject(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
+    """승인 요청 거부 IPC handler.
+
+    Refs #2110 (audit.md:113): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="approval.reject"`` 기반으로 자동 발화한다.
+    handler 는 ``_audit_detail`` reserved key 로
+    ``resource="approval:{id}"`` 를 전달한다.
+    """
+    approval_id = args["id"]
+    reason = args.get("reason", "")
     request = await svc.approval.reject(
-        args["id"],
+        approval_id,
         resolved_by=actor,
-        reject_reason=args.get("reason", ""),
+        reject_reason=reason,
     )
-    return {"id": request.id, "status": str(request.status)}
+    return {
+        "id": request.id,
+        "status": str(request.status),
+        "_audit_detail": {
+            "resource": f"approval:{approval_id}",
+            "detail": f"reason={reason}",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_approval_cancel(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    request = await svc.approval.cancel(args["id"], requester=actor)
-    return {"id": request.id, "status": str(request.status)}
+    """승인 요청 취소 IPC handler.
+
+    Refs #2110 (audit.md:114): audit 호출은 ``_dispatch`` wrapper 가
+    ``CommandSpec.audit_action="approval.cancel"`` 기반으로 자동 발화한다.
+    handler 는 ``_audit_detail`` reserved key 로
+    ``resource="approval:{id}"`` 를 전달한다.
+    """
+    approval_id = args["id"]
+    request = await svc.approval.cancel(approval_id, requester=actor)
+    return {
+        "id": request.id,
+        "status": str(request.status),
+        "_audit_detail": {
+            "resource": f"approval:{approval_id}",
+            "detail": "",
+            "ip": "",
+        },
+    }
 
 
 async def _handle_approval_cancel_invalid(
@@ -1141,11 +1244,23 @@ def register_all_handlers(registry: CommandRegistry) -> None:
 
     Refs #1853 (#1819 epic 종결): ``rule.update`` 의 audit 호출을 wrapper 로
     이전한다(helper 의 ``audit_logger`` 인자를 IPC handler 에서 ``None`` 으로
-    전달, wrapper 가 ``audit_action="account.rule.update"`` 자동 발화). 현재
-    ``audit_action`` 부여 commands 는 10개:
-    ``account.suspend`` / ``account.activate`` / ``bot.start`` /
-    ``bot.stop`` / ``bot.update`` / ``treasury.set_balance`` /
+    전달, wrapper 가 ``audit_action="account.rule.update"`` 자동 발화).
+
+    Refs #2110 (audit.md:112-120): audit.md 가 audit 대상으로 정의했으나
+    ``audit_action`` 누락으로 audit_log 에 기록되지 않던 상태변경 명령 7개에
+    ``audit_action`` + ``audit_logger`` required 를 wiring 한다 —
+    ``system.halt`` (action ``system.halt``) / ``system.clear_halt`` /
+    ``bot.create`` (resource 는 생성 결과 ``bot.bot_id``) / ``bot.remove``
+    (action ``bot.delete``) / ``approval.approve`` / ``approval.reject`` /
+    ``approval.cancel``. 각각 account.suspend 동형으로 register 에 audit_action
+    부여 + required_services union audit_logger, handler 가 ``_audit_detail``
+    반환. 현재 ``audit_action`` 부여 commands 는 18개:
+    ``account.suspend`` / ``account.activate`` / ``system.halt`` /
+    ``system.clear_halt`` / ``bot.create`` / ``bot.remove``(→``bot.delete``) /
+    ``bot.start`` / ``bot.stop`` / ``bot.update`` /
+    ``bot.signal_key.rotate`` / ``treasury.set_balance`` /
     ``strategy.set_status`` / ``member.update_scopes`` /
+    ``approval.approve`` / ``approval.reject`` / ``approval.cancel`` /
     ``approval.cancel_invalid`` / ``rule.update``.
 
     Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
@@ -1155,19 +1270,25 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     """
     # ── mutating (24개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
+    # Refs #2110 (audit.md:115/116): kill switch 토글은 audit 대상이다.
+    # audit_action 부여 + required_services 에 audit_logger 명시(account.suspend
+    # 동형) — wrapper 가 handler 성공 후 자동 발화하고 audit_logger 부재 시
+    # preflight 가 차단한다.
     registry.register(
         "system.halt",
         _handle_system_halt,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"account"}),
+        required_services=frozenset({"account", "audit_logger"}),
+        audit_action="system.halt",
     )
     registry.register(
         "system.clear_halt",
         _handle_system_clear_halt,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"account"}),
+        required_services=frozenset({"account", "audit_logger"}),
+        audit_action="system.clear_halt",
     )
     # account.* — Refs #1852 (#1819 epic): account_id_policy="required" 로
     # wrapper preflight 가 invalid/missing account_id 를 InvalidAccountIdError
@@ -1192,22 +1313,29 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
         audit_action="account.activate",
     )
-    # bot.* — bot 객체 entity 반환, audit_action은 start/stop/update만.
+    # bot.* — bot 객체 entity 반환. Refs #2110 (audit.md:117/120): create/remove
+    # 도 audit 대상이다. create 의 resource 는 생성 결과 bot.bot_id, remove 의
+    # audit action 은 command 이름과 달리 ``bot.delete`` 다(audit.md SSOT).
+    # audit_action 부여 → required_services 에 audit_logger 명시.
     registry.register(
         "bot.create",
         _handle_bot_create,
         is_mutating=True,
         result_kind="entity",
         result_key="bot_id",
-        required_services=frozenset({"strategy_registry", "bot_manager"}),
+        required_services=frozenset(
+            {"strategy_registry", "bot_manager", "audit_logger"}
+        ),
         account_id_policy="required",
+        audit_action="bot.create",
     )
     registry.register(
         "bot.remove",
         _handle_bot_remove,
         is_mutating=True,
         result_kind="operation",
-        required_services=frozenset({"bot_manager"}),
+        required_services=frozenset({"bot_manager", "audit_logger"}),
+        audit_action="bot.delete",
     )
     # bot.signal_key.rotate (#2111) — ``bot signal-key --rotate`` 의 runtime IPC
     # 경로. ``rotated`` bool flag envelope 이므로 ``bot.remove`` 와 동형
@@ -1315,9 +1443,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="operation",
         required_services=frozenset({"dynamic_config"}),
     )
-    # approval.* — request/approve/reject/cancel/reopen은 audit_logger 호출이
-    # 없고(서비스 내부 history append가 fallback), cancel_invalid만 명시
-    # ``approval.cancel_invalid`` audit를 남긴다(#1418 → #1472 SPLIT-D).
+    # approval.* — request/reopen은 audit_logger 호출이 없고(서비스 내부 history
+    # append가 fallback). Refs #2110 (audit.md:112/113/114): approve/reject/
+    # cancel 은 audit 대상이다 — audit_action 부여 + required_services 에
+    # audit_logger 명시(resource="approval:{id}"). cancel_invalid 는 별개
+    # administrative path 로 ``approval.cancel_invalid`` audit를 남긴다
+    # (#1418 → #1472 SPLIT-D).
     registry.register(
         "approval.request",
         _handle_approval_request,
@@ -1330,21 +1461,24 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_approval_approve,
         is_mutating=True,
         result_kind="entity",
-        required_services=frozenset({"approval"}),
+        required_services=frozenset({"approval", "audit_logger"}),
+        audit_action="approval.approve",
     )
     registry.register(
         "approval.reject",
         _handle_approval_reject,
         is_mutating=True,
         result_kind="entity",
-        required_services=frozenset({"approval"}),
+        required_services=frozenset({"approval", "audit_logger"}),
+        audit_action="approval.reject",
     )
     registry.register(
         "approval.cancel",
         _handle_approval_cancel,
         is_mutating=True,
         result_kind="entity",
-        required_services=frozenset({"approval"}),
+        required_services=frozenset({"approval", "audit_logger"}),
+        audit_action="approval.cancel",
     )
     registry.register(
         "approval.cancel_invalid",
