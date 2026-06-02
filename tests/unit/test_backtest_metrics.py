@@ -152,6 +152,36 @@ class TestCalculateMetrics:
         assert metrics["win_rate"] == 50.0
         assert metrics["profit_factor"] > 0
 
+    def test_buy_commission_only_classified_as_loss(self):
+        """이슈 repro(#1990): 매수 수수료만으로 손실인 거래가 losing으로 분류.
+
+        buy(price=100, qty=1, commission=10) + sell(price=100, qty=1,
+        commission=0) → pnl=-10 → losing_trades=1, winning_trades=0,
+        win_rate=0, avg_loss≈10.
+        (기존: 매수 수수료 미반영 pnl=0 → winning/losing 어느 쪽도 아님)
+        """
+        trades = [
+            FakeTrade(datetime(2024, 1, 1), "A", "buy", 1, 100, 10),
+            FakeTrade(datetime(2024, 1, 5), "A", "sell", 1, 100, 0),
+        ]
+        equity_curve = [
+            {"timestamp": "2024-01-01", "equity": 10000},
+            {"timestamp": "2024-01-05", "equity": 9990},
+        ]
+
+        metrics = calculate_metrics(
+            trades=trades,
+            equity_curve=equity_curve,
+            initial_balance=10000,
+            final_balance=9990,
+        )
+
+        assert metrics["total_trades"] == 1
+        assert metrics["winning_trades"] == 0
+        assert metrics["losing_trades"] == 1
+        assert metrics["win_rate"] == 0.0
+        assert metrics["avg_loss"] == pytest.approx(10.0)
+
     def test_profit_factor_no_loss(self):
         """손실 없을 때 profit_factor = inf."""
         trades = [
@@ -426,6 +456,71 @@ class TestEstimateTradePnl:
         assert len(pnl) == 2
         assert pnl[0] == pytest.approx(100.0)  # A: (110-100)*10
         assert pnl[1] == pytest.approx(-50.0)  # B: (190-200)*5
+
+    def test_buy_commission_only_round_trip_is_loss(self):
+        """이슈 repro(#1990): 매수 수수료 때문에만 손실인 round-trip.
+
+        buy(price=100, qty=1, commission=10) + sell(price=100, qty=1,
+        commission=0) → 매수 수수료가 원가에 포함되어 pnl=-10.0.
+        (기존: 매수 수수료 미반영으로 pnl=0.0 → 손익 어느 쪽도 아님)
+        """
+        trades = [
+            FakeTrade(datetime(2024, 1, 1), "A", "buy", 1, 100, 10),
+            FakeTrade(datetime(2024, 1, 5), "A", "sell", 1, 100, 0),
+        ]
+        pnl = _estimate_trade_pnl(trades)
+        assert len(pnl) == 1
+        # avg_cost = (100*1 + 10) / 1 = 110 → (100 - 110)*1 - 0 = -10
+        assert pnl[0] == pytest.approx(-10.0)
+
+    def test_both_buy_and_sell_commission(self):
+        """매수·매도 수수료 모두 반영.
+
+        buy(commission=5) + sell(commission=5), 동일가 → pnl=-10.
+        """
+        trades = [
+            FakeTrade(datetime(2024, 1, 1), "A", "buy", 1, 100, 5),
+            FakeTrade(datetime(2024, 1, 5), "A", "sell", 1, 100, 5),
+        ]
+        pnl = _estimate_trade_pnl(trades)
+        assert len(pnl) == 1
+        # avg_cost = (100 + 5) / 1 = 105 → (100 - 105)*1 - 5 = -10
+        assert pnl[0] == pytest.approx(-10.0)
+
+    def test_profitable_trade_with_buy_commission_in_cost(self):
+        """이익 거래 — 매수 수수료가 avg_cost에 amortize.
+
+        buy(price=100, qty=1, commission=1) + sell(price=120, qty=1,
+        commission=1) → avg_cost=101 → (120-101)*1 - 1 = 18.
+        """
+        trades = [
+            FakeTrade(datetime(2024, 1, 1), "A", "buy", 1, 100, 1),
+            FakeTrade(datetime(2024, 1, 5), "A", "sell", 1, 120, 1),
+        ]
+        pnl = _estimate_trade_pnl(trades)
+        assert len(pnl) == 1
+        assert pnl[0] == pytest.approx(18.0)
+
+    def test_partial_sell_amortizes_buy_commission(self):
+        """다중 매수 후 부분 매도 — 매수 수수료가 수량에 일관되게 amortize.
+
+        buy1(price=100, qty=10, commission=20) +
+        buy2(price=120, qty=10, commission=20) →
+          total_cost = (100*10+20) + (120*10+20) = 1020 + 1220 = 2240
+          quantity   = 20 → avg_cost = 112.0
+        sell(price=130, qty=5, commission=2) →
+          pnl = (130 - 112)*5 - 2 = 88.0
+        남은 포지션: quantity=15, total_cost = 2240 - 112*5 = 1680
+          (avg_cost가 여전히 112.0으로 일관 — 매수 수수료 포함 유지)
+        """
+        trades = [
+            FakeTrade(datetime(2024, 1, 1), "A", "buy", 10, 100, 20),
+            FakeTrade(datetime(2024, 1, 2), "A", "buy", 10, 120, 20),
+            FakeTrade(datetime(2024, 1, 3), "A", "sell", 5, 130, 2),
+        ]
+        pnl = _estimate_trade_pnl(trades)
+        assert len(pnl) == 1
+        assert pnl[0] == pytest.approx(88.0)
 
 
 # ── CLI 지표 표시 ──────────────────────────────
