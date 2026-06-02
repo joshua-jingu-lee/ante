@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import deque
 from typing import TYPE_CHECKING, Any
 
 from ante.backtest.context import BacktestStrategyContext
@@ -20,6 +21,14 @@ logger = logging.getLogger(__name__)
 # 라이브 preflight가 허용하는 side vocabulary. RuleEngine이 OrderRequestEvent를
 # 검증할 때와 동일하게 case-sensitive로 buy/sell만 허용한다(#1991).
 _ALLOWED_SIDES = ("buy", "sell")
+
+# 한 step 안에서 처리할 on_fill follow-up 체결 수 상한. on_fill이 follow-up
+# Signal을 발행하고 그 follow-up이 다시 체결되어 또 follow-up을 발행하는
+# 연쇄(BFS)가 무한히 도는 것을 막는 안전 cap이다. **on_step 신호 체결에는
+# 적용하지 않고 follow-up 연쇄에만 적용한다**(전략이 한 step에 1000개를 초과하는
+# on_step 신호를 정상 반환하는 기존 backtest 동작을 회귀시키지 않기 위함). 한도
+# 초과 시 해당 step의 나머지 follow-up을 truncate하고 경고를 남긴다(#2073).
+_MAX_FOLLOW_UP_FILLS_PER_STEP = 1000
 
 
 def _is_valid_quantity(value: object) -> bool:
@@ -84,6 +93,14 @@ class BacktestExecutor:
         # unrealized_pnl을 합성한다(#2074). step 사이에 stale/lookahead 가격이
         # 남지 않도록 매 step 새로 채운다.
         self._current_prices: dict[str, float] = {}
+        # 체결마다 1씩 증가하는 결정적 order_id 시퀀스. on_fill(fill) dict의
+        # order_id로 라이브 OrderFilledEvent.order_id 자리를 채운다(#2073).
+        self._order_seq = 0
+
+    def _next_order_id(self) -> str:
+        """체결마다 증가하는 결정적 order_id(``bt-{n}``)를 발급한다(#2073)."""
+        self._order_seq += 1
+        return f"bt-{self._order_seq}"
 
     async def run(
         self,
@@ -125,8 +142,48 @@ class BacktestExecutor:
 
             signals = await strategy.on_step(context)
 
-            for signal in signals:
-                await self._execute_signal(signal, timestamp)
+            # 체결된 fill마다 strategy.on_fill(fill)을 호출해 follow-up Signal을
+            # 같은 step에서 연쇄 체결한다(라이브 bot이 OrderFilledEvent→on_fill→
+            # follow_up을 처리하는 것과 parity, #2073). base.Strategy.on_fill 기본은
+            # [] 이므로 override하지 않은 전략은 추가 체결이 없다.
+            #
+            # cap(_MAX_FOLLOW_UP_FILLS_PER_STEP)은 **follow-up 연쇄에만** 적용한다.
+            # on_step 신호 자체는 cap 없이 전부 체결해야 한다. 그렇지 않으면 한
+            # step에 1000개를 초과하는 on_step 신호를 정상 반환하는 전략이 조용히
+            # truncate되어 기존 backtest 동작이 회귀한다(#2073 리뷰 지적).
+
+            # Phase 1: on_step 신호는 cap 없이 전부 체결(기존 동작 보존). 각 체결
+            #          마다 on_fill을 호출하고 그 follow-up은 phase 2 큐로 모은다.
+            follow_up_queue: deque[Signal] = deque()
+            for sig in signals:
+                fill = await self._execute_signal(sig, timestamp)
+                if fill is None:
+                    continue
+                follow_ups = await strategy.on_fill(fill)
+                if follow_ups:
+                    follow_up_queue.extend(follow_ups)
+
+            # Phase 2: on_fill follow-up 연쇄(BFS)는 cap으로 bounded해 무한 연쇄를
+            #          막는다. cap 검사는 다음 체결을 실행하기 전에 한다(>= 선검사)
+            #          이므로 정확히 cap개의 follow-up만 체결된다. no-fill(None)은
+            #          follow_up_fills를 증가시키지 않는다.
+            follow_up_fills = 0
+            while follow_up_queue:
+                if follow_up_fills >= _MAX_FOLLOW_UP_FILLS_PER_STEP:
+                    logger.warning(
+                        "on_fill follow-up 한도(%d) 도달 — step %s truncate",
+                        _MAX_FOLLOW_UP_FILLS_PER_STEP,
+                        timestamp,
+                    )
+                    break
+                sig = follow_up_queue.popleft()
+                fill = await self._execute_signal(sig, timestamp)
+                if fill is None:
+                    continue
+                follow_up_fills += 1
+                follow_ups = await strategy.on_fill(fill)
+                if follow_ups:
+                    follow_up_queue.extend(follow_ups)
 
             equity = await self._calculate_equity()
             self._equity_curve.append(
@@ -168,8 +225,16 @@ class BacktestExecutor:
             metrics=self._calculate_metrics(final_equity),
         )
 
-    async def _execute_signal(self, signal: Signal, timestamp: Any) -> None:
+    async def _execute_signal(self, signal: Signal, timestamp: Any) -> dict | None:
         """Signal을 가상 체결.
+
+        체결 시 라이브 bot의 ``strategy.on_fill(fill)`` dict와 동일한 shape
+        (``order_id``/``symbol``/``side``/``quantity``/``price``/``timestamp``/
+        ``fill_dedup_key``)의 fill dict를 반환한다(#2073). 체결되지 않은 모든
+        경로(side invalid/hold, quantity invalid, buy 잔고 부족, sell 보유 없음)는
+        ``None`` 을 반환해 호출부가 follow-up(on_fill) 경로로 진입하지 않게 한다.
+        backtest는 단발 체결이므로 ``fill_dedup_key`` 는 항상 빈 문자열이다
+        (라이브와 달리 dedup이 불필요).
 
         체결 수량(``executed_qty``)을 분기별로 먼저 확정한 뒤, 수수료/슬리피지/
         거래 기록을 모두 체결 수량 기준으로 계산한다. 보유 수량을 초과하는 매도는
@@ -204,7 +269,7 @@ class BacktestExecutor:
                     signal.side,
                     signal.quantity,
                 )
-            return
+            return None
 
         # quantity 검증: finite numeric이 아니거나(NaN/inf/non-number/bool/거대
         # 정수) <= 0(음수/0)이면 skip. 음수 buy는 cost가 음수가 되어 잔고
@@ -217,7 +282,7 @@ class BacktestExecutor:
                 signal.side,
                 signal.quantity,
             )
-            return
+            return None
 
         price = await self._data.get_current_price(signal.symbol)
 
@@ -227,7 +292,7 @@ class BacktestExecutor:
             commission = exec_price * executed_qty * self._buy_commission_rate
             cost = exec_price * executed_qty + commission
             if self._balance < cost:
-                return
+                return None
             self._balance -= cost
             self._update_position(signal.symbol, executed_qty, exec_price)
         else:
@@ -235,7 +300,7 @@ class BacktestExecutor:
             pos = self._positions.get(signal.symbol, {})
             executed_qty = min(signal.quantity, pos.get("quantity", 0))
             if executed_qty <= 0:
-                return
+                return None
             commission = exec_price * executed_qty * self._sell_commission_rate
             proceeds = exec_price * executed_qty - commission
             self._balance += proceeds
@@ -254,6 +319,19 @@ class BacktestExecutor:
                 exchange=self._exchange,
             )
         )
+
+        # 라이브 bot.py가 strategy.on_fill에 넘기는 dict와 동일 shape(#2073).
+        # backtest는 단발 체결이라 dedup이 불필요하므로 fill_dedup_key는 빈
+        # 문자열로 둔다(라이브는 OrderFilledEvent.fill_dedup_key 사용).
+        return {
+            "order_id": self._next_order_id(),
+            "symbol": signal.symbol,
+            "side": signal.side,
+            "quantity": executed_qty,
+            "price": exec_price,
+            "timestamp": timestamp,
+            "fill_dedup_key": "",
+        }
 
     def _update_position(self, symbol: str, qty_delta: float, price: float) -> None:
         """포지션 업데이트."""

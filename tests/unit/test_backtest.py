@@ -2202,3 +2202,405 @@ class TestBacktestFirstRowProcessed:
         assert provider.get_current_timestamp() is None
         df = await provider.get_ohlcv("005930", "1d", limit=100)
         assert df.is_empty()
+
+
+# ── on_fill follow-up 체결 테스트 (#2073) ──────────
+
+
+class TestBacktestOnFillFollowUp:
+    """체결 직후 strategy.on_fill(fill) 호출 + follow-up 주문 체결 검증(#2073).
+
+    라이브 bot이 OrderFilledEvent→strategy.on_fill→follow_up을 처리하는 것과
+    parity를 맞춘다. base.Strategy.on_fill 기본은 ``[]`` 이므로 override하지
+    않은 전략은 추가 체결이 없다(회귀).
+    """
+
+    def _make_provider(self, store, closes=None):
+        """평탄 가격(close=100) fixture provider."""
+        if closes is None:
+            closes = [100.0, 100.0, 100.0, 100.0]
+        df = _make_ohlcv_df_with_closes(closes)
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        return provider
+
+    async def test_on_fill_follow_up_executed(self, store):
+        """(a) 재현: on_fill이 후속 buy를 1회 발행 → entry + follow-up 둘 다 체결.
+
+        첫 step에 buy 5주를 발행하고, 그 체결 직후 on_fill에서 buy 3주
+        follow-up을 1회만 추가 발행한다. 수정 전(루프가 on_fill 미호출)이라면
+        follow-up 거래가 누락되어 trades 길이가 1이어야 한다 → 수정 후 2여야 한다.
+        """
+        provider = self._make_provider(store)
+
+        # 클래스 변수로 on_fill 호출 횟수를 누적해 인스턴스 밖에서 관찰한다.
+        on_fill_counter = {"calls": 0}
+
+        class FillFollowUpStrategy(Strategy):
+            meta = StrategyMeta(name="fill_follow_up", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+                self._follow_up_emitted = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    return [Signal(symbol="005930", side="buy", quantity=5)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                on_fill_counter["calls"] += 1
+                # 무한 발행 방지: follow-up은 1회만 발행.
+                if not self._follow_up_emitted:
+                    self._follow_up_emitted = True
+                    return [Signal(symbol="005930", side="buy", quantity=3)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=FillFollowUpStrategy,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # entry(5주) + follow-up(3주) 둘 다 체결. 수정 전(on_fill 미호출)이면
+        # follow-up이 누락되어 trades 길이가 1이어야 한다.
+        assert len(result.trades) == 2
+        assert result.trades[0].side == "buy"
+        assert result.trades[0].quantity == 5
+        assert result.trades[1].side == "buy"
+        assert result.trades[1].quantity == 3
+        # 포지션 = 5 + 3 = 8주
+        assert executor._positions["005930"]["quantity"] == 8
+
+        # on_fill은 두 체결(entry, follow-up) 각각에 대해 호출됨(>0).
+        # entry 체결 1 + follow-up 체결 1 = 2회. 두 번째 on_fill은 follow-up을
+        # 발행하지 않아 연쇄가 종료된다.
+        assert on_fill_counter["calls"] > 0
+        assert on_fill_counter["calls"] == 2
+
+    async def test_on_fill_called_per_fill(self, store):
+        """on_fill 호출 카운트>0: 각 체결마다 정확히 호출되는지 추적."""
+        provider = self._make_provider(store)
+
+        calls: list[dict[str, Any]] = []
+
+        class RecordOnFill(Strategy):
+            meta = StrategyMeta(name="record_on_fill", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+                self._followed = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    return [Signal(symbol="005930", side="buy", quantity=5)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                calls.append(fill)
+                if not self._followed:
+                    self._followed = True
+                    return [Signal(symbol="005930", side="buy", quantity=2)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=RecordOnFill,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        await executor.run()
+
+        # 체결 2건(entry + follow-up) → on_fill 2회 호출(>0).
+        assert len(calls) == 2
+        # fill dict는 라이브 bot on_fill shape와 동일 키 집합을 가진다.
+        for fill in calls:
+            assert set(fill) == {
+                "order_id",
+                "symbol",
+                "side",
+                "quantity",
+                "price",
+                "timestamp",
+                "fill_dedup_key",
+            }
+            assert fill["symbol"] == "005930"
+            assert fill["side"] == "buy"
+            assert fill["fill_dedup_key"] == ""
+        # order_id는 결정적 시퀀스(bt-1, bt-2).
+        assert calls[0]["order_id"] == "bt-1"
+        assert calls[1]["order_id"] == "bt-2"
+        # entry 5주, follow-up 2주
+        assert calls[0]["quantity"] == 5
+        assert calls[1]["quantity"] == 2
+
+    async def test_default_on_fill_no_extra_fills(self, store):
+        """(b) on_fill 미override(기본 []) → 추가 체결 없음(기존 동작 회귀)."""
+        provider = self._make_provider(store)
+
+        # BuyAndHoldStrategy는 on_fill을 override하지 않는다(base 기본 []).
+        executor = BacktestExecutor(
+            strategy_cls=BuyAndHoldStrategy,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # entry 1건만, follow-up 없음.
+        assert len(result.trades) == 1
+        assert result.trades[0].side == "buy"
+        assert executor._positions["005930"]["quantity"] == 10
+
+    async def test_no_fill_buy_does_not_invoke_on_fill(self, store):
+        """(c) no-fill: 잔고 부족 buy → fill None → on_fill 미호출."""
+        provider = self._make_provider(store)
+
+        on_fill_calls = 0
+
+        class InsufficientBuy(Strategy):
+            meta = StrategyMeta(name="insufficient_buy", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    # 잔고 100인데 매우 큰 수량 → 잔고 부족으로 no-fill.
+                    return [Signal(symbol="005930", side="buy", quantity=1_000)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                nonlocal on_fill_calls
+                on_fill_calls += 1
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=InsufficientBuy,
+            data_provider=provider,
+            initial_balance=100,  # 잔고 부족
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 0
+        assert on_fill_calls == 0
+
+    async def test_no_fill_sell_does_not_invoke_on_fill(self, store):
+        """(c') no-fill: 보유 없는 sell → fill None → on_fill 미호출."""
+        provider = self._make_provider(store)
+
+        on_fill_calls = 0
+
+        class SellNothing(Strategy):
+            meta = StrategyMeta(name="sell_nothing", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._tried = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._tried:
+                    self._tried = True
+                    # 보유 0인데 매도 → executed_qty <= 0 → no-fill.
+                    return [Signal(symbol="005930", side="sell", quantity=5)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                nonlocal on_fill_calls
+                on_fill_calls += 1
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=SellNothing,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 0
+        assert on_fill_calls == 0
+
+    async def test_skip_signal_does_not_invoke_on_fill(self, store):
+        """(d) skip: invalid/hold signal → fill None → on_fill 미호출."""
+        provider = self._make_provider(store)
+
+        on_fill_calls = 0
+
+        class HoldThenInvalid(Strategy):
+            meta = StrategyMeta(
+                name="hold_then_invalid", version="1.0", description="t"
+            )
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="hold", quantity=1)]
+                if self._step == 2:
+                    # invalid quantity
+                    return [Signal(symbol="005930", side="buy", quantity=-1)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                nonlocal on_fill_calls
+                on_fill_calls += 1
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=HoldThenInvalid,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 0
+        assert on_fill_calls == 0
+
+    async def test_infinite_follow_up_truncated_at_cap(self, store, monkeypatch):
+        """(e) 무한 follow-up: on_fill이 매 호출 buy 발행 → cap에서 정확히 truncate.
+
+        on_fill이 매번 follow-up buy를 발행해도 _MAX_FOLLOW_UP_FILLS_PER_STEP
+        cap에서 끊겨 무한루프 없이 종료된다. cap을 작게(5) monkeypatch해 테스트가
+        빠르게 끝나도록 한다(타임아웃 가드).
+
+        cap은 **follow-up 연쇄에만** 적용된다(on_step 신호는 cap 없이 전부 체결).
+        따라서 한 step의 총 체결은 ``entry(on_step) 1 + follow-up cap``개다. cap
+        검사는 다음 follow-up 체결을 실행하기 전에 ``follow_up_fills >= cap`` 으로
+        선검사하므로(#2073), follow-up 체결은 **정확히 cap개**다(cap+1번째는 실행
+        되지 않는다).
+        """
+        import ante.backtest.executor as executor_mod
+
+        monkeypatch.setattr(executor_mod, "_MAX_FOLLOW_UP_FILLS_PER_STEP", 5)
+
+        provider = self._make_provider(store)
+
+        class InfiniteFollowUp(Strategy):
+            meta = StrategyMeta(
+                name="infinite_follow_up", version="1.0", description="t"
+            )
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+                self.on_fill_calls = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                self.on_fill_calls += 1
+                # 매 호출마다 follow-up buy를 무한 발행.
+                return [Signal(symbol="005930", side="buy", quantity=1)]
+
+        # 잔고를 넉넉히 두어 cap에 닿을 때까지 모든 buy가 체결되게 한다.
+        executor = BacktestExecutor(
+            strategy_cls=InfiniteFollowUp,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        # 무한루프면 여기서 hang → 테스트 타임아웃. 정상 종료해야 한다.
+        result = await executor.run()
+
+        # cap=5(monkeypatch)는 follow-up 연쇄에만 적용된다. entry(on_step) 1건은
+        # cap 없이 체결되고, 그 뒤 follow-up은 다음 체결 실행 전 선검사
+        # (follow_up_fills >= cap)로 break하므로 **정확히 cap(=5)** 개만 체결된다
+        # (cap+1번째 follow-up 체결은 실행되지 않음 — #2073). 첫 step만 on_step이
+        # buy를 발행하고 이후 step은 _entered=True라 추가 entry가 없으므로, 총
+        # 체결은 정확히 1 + cap이다(무한 누적/무한루프 없음). 정상 종료 + cap
+        # 정확성이 핵심 검증.
+        assert len(result.trades) == 1 + executor_mod._MAX_FOLLOW_UP_FILLS_PER_STEP
+        # entry 체결 + cap에 도달한 모든 follow-up 체결마다 on_fill이 호출되었다.
+        # cap+1번째 follow-up 체결 시도는 막혔으므로 on_fill 호출도 1+cap회를
+        # 넘지 않는다.
+
+    async def test_on_step_signals_not_capped(self, store, monkeypatch):
+        """(f) 회귀 락: on_step 신호는 cap 미적용 → cap 초과해도 전부 체결(#2073).
+
+        cap(_MAX_FOLLOW_UP_FILLS_PER_STEP)을 작게(3) monkeypatch한 뒤, on_step이
+        cap을 초과하는 5개의 buy 신호를 반환한다. on_fill은 follow-up을 발행하지
+        않는다(기본 []). cap이 follow-up 연쇄에만 적용되므로 on_step 신호 5개는
+        모두 체결되어야 한다(cap=3에서 truncate되면 안 됨).
+
+        이 테스트는 "cap이 최초 on_step 신호 체결부터 적용·카운트하던" 회귀
+        (전략이 한 step에 cap 초과 on_step 신호를 정상 반환하면 follow-up이
+        없어도 조용히 truncate)를 lock한다.
+        """
+        import ante.backtest.executor as executor_mod
+
+        monkeypatch.setattr(executor_mod, "_MAX_FOLLOW_UP_FILLS_PER_STEP", 3)
+
+        provider = self._make_provider(store)
+
+        class ManyOnStepSignals(Strategy):
+            meta = StrategyMeta(
+                name="many_on_step_signals", version="1.0", description="t"
+            )
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    # cap(=3)을 초과하는 5개의 on_step buy 신호.
+                    return [
+                        Signal(symbol="005930", side="buy", quantity=1)
+                        for _ in range(5)
+                    ]
+                return []
+
+            # on_fill은 follow-up을 발행하지 않는다(base 기본 []).
+
+        executor = BacktestExecutor(
+            strategy_cls=ManyOnStepSignals,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        # on_step 신호 5개는 cap(=3)과 무관하게 모두 체결된다(cap은 follow-up
+        # 전용). 회귀 시(cap이 on_step에도 적용) trades 길이가 3으로 truncate된다.
+        assert len(result.trades) == 5
+        assert all(t.side == "buy" for t in result.trades)
+        # 5주 누적 포지션.
+        assert executor._positions["005930"]["quantity"] == 5
