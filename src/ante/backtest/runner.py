@@ -9,6 +9,8 @@ import asyncio
 import json
 import sys
 
+from ante.backtest.service import BACKTEST_RESULT_SENTINEL
+
 
 async def run_backtest(config: dict) -> dict:
     """백테스트 실행 후 결과를 dict로 반환."""
@@ -34,7 +36,7 @@ def main() -> None:
     """stdin에서 config JSON을 읽고, 결과를 stdout으로 출력."""
     config = json.loads(sys.stdin.read())
     result = asyncio.run(run_backtest(config))
-    print(json.dumps(result, default=str))
+    print(f"{BACKTEST_RESULT_SENTINEL}{json.dumps(result, default=str)}")
 
 
 if __name__ == "__main__":
