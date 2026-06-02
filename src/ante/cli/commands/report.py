@@ -427,7 +427,17 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
         finally:
             await db.close()
 
-    result = asyncio.run(_view())
+    # DB 연결/조회 실패 시 traceback 노출 대신 구조화된 에러 envelope 로
+    # 변환한다 (``report_list`` L255-260 와 동형). ``_view()`` 내부 try/finally
+    # 는 ``db.close()`` 만 보장할 뿐 예외를 삼키지 않으므로, 호출 경계에서
+    # ``REPORT_ERROR`` 로 정규화해 ``exit 1`` 로 종료한다. ``REPORT_NOT_FOUND``
+    # (result None) 와 정상 출력은 DB 에러와 구분되는 별도 경로이므로
+    # ``except`` 밖에 그대로 둔다.
+    try:
+        result = asyncio.run(_view())
+    except Exception as e:
+        fmt.error(str(e), code="REPORT_ERROR")
+        raise SystemExit(1) from e
 
     if not result:
         fmt.error(f"리포트를 찾을 수 없습니다: {report_id}", code="REPORT_NOT_FOUND")
