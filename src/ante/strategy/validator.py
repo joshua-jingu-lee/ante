@@ -284,13 +284,37 @@ class StrategyValidator:
         """금지된 내장 함수 호출 탐지 (에러)."""
         errors: list[str] = []
         for node in ast.walk(tree):
-            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-                if node.func.id in self.FORBIDDEN_BUILTINS:
-                    errors.append(
-                        f"Forbidden built-in call: "
-                        f"{node.func.id}() at line {node.lineno}"
-                    )
+            if not isinstance(node, ast.Call):
+                continue
+            name = self._forbidden_builtin_name(node.func)
+            if name is not None:
+                errors.append(
+                    f"Forbidden built-in call: {name}() at line {node.lineno}"
+                )
         return errors
+
+    def _forbidden_builtin_name(self, func: ast.expr) -> str | None:
+        # 1) open(...) 직접 호출
+        if isinstance(func, ast.Name) and func.id in self.FORBIDDEN_BUILTINS:
+            return func.id
+        # 2) __builtins__["open"](...)
+        if isinstance(func, ast.Subscript) and self._is_builtins_ref(func.value):
+            key = func.slice
+            if (
+                isinstance(key, ast.Constant)
+                and isinstance(key.value, str)
+                and key.value in self.FORBIDDEN_BUILTINS
+            ):
+                return key.value
+        # 3) __builtins__.open(...)
+        if isinstance(func, ast.Attribute) and self._is_builtins_ref(func.value):
+            if func.attr in self.FORBIDDEN_BUILTINS:
+                return func.attr
+        return None
+
+    @staticmethod
+    def _is_builtins_ref(node: ast.expr) -> bool:
+        return isinstance(node, ast.Name) and node.id == "__builtins__"
 
     def _find_forbidden_toplevel(self, tree: ast.Module) -> list[str]:
         """금지된 최상위 코드 탐지 (에러)."""

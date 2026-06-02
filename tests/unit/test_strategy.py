@@ -455,6 +455,82 @@ class TestStrategy(Strategy):
         assert not result.valid
         assert any("__import__" in e for e in result.errors)
 
+    def test_forbidden_builtins_subscript_open_bypass(self, validator, tmp_path):
+        """#2023 재현: __builtins__["open"](...) subscript 우회를 검출."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        f = __builtins__["open"]("/tmp/x", "w")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden built-in call: open()" in e for e in result.errors)
+
+    def test_forbidden_builtins_attribute_eval_bypass(self, validator, tmp_path):
+        """#2023: __builtins__.eval(...) attribute 우회를 검출."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        __builtins__.eval("1")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden built-in call: eval()" in e for e in result.errors)
+
+    def test_forbidden_builtins_direct_call_regression(self, validator, tmp_path):
+        """회귀: 직접 open()/eval() 호출은 기존대로 검출(메시지 포맷 불변)."""
+        code = """
+class TestStrategy(Strategy):
+    meta = None
+    async def on_step(self, context):
+        eval("1+1")
+        open("/tmp/x", "w")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("Forbidden built-in call: eval()" in e for e in result.errors)
+        assert any("Forbidden built-in call: open()" in e for e in result.errors)
+
+    def test_forbidden_builtins_no_false_positive(self, validator, tmp_path):
+        """오탐 없음: 정상 전략 + 비-__builtins__ subscript/attribute는 미검출."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        config = {"open": "value"}
+        x = config["open"]
+        obj = context
+        obj.open()
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("Forbidden built-in call" in e for e in result.errors)
+
+    def test_forbidden_builtins_non_forbidden_subscript_key(self, validator, tmp_path):
+        """__builtins__["print"](비금지)은 FORBIDDEN_BUILTINS 한정으로 미검출."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta, Signal
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        __builtins__["print"]("hi")
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("Forbidden built-in call" in e for e in result.errors)
+
     def test_forbidden_toplevel_function_call_assign(self, validator, tmp_path):
         """최상위 함수 호출 할당은 에러."""
         code = """
