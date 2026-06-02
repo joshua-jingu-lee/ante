@@ -82,6 +82,10 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 |
 | `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
 | `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 |
+| `ante bot list [--account]` | `bot.list` | `BotManager.list_bots()` (read-only) | live 봇 목록 조회. `--account` 필터 후 CLI 6-key(`bot_id`/`name`/`strategy_id`/`account_id`/`status`/`created_at`) projection. 서버 정지 시 snapshot DB fallback |
+| `ante bot info <bot_id>` | `bot.info` | `BotManager.get_bot()` (read-only) | live 봇 상세 조회. `{"bot": info}` envelope. 서버 정지 시 snapshot DB fallback |
+| `ante bot positions <bot_id>` | `bot.positions` | `BotManager.get_bot()` + `TradeService.get_positions()` (read-only) | live 포지션 조회. 봇 계좌로 스코핑(#2137). `trade_service` 부재(legacy registry) 시 빈 collection graceful. 서버 정지 시 snapshot DB fallback |
+| `ante bot signal-key <bot_id>` | `bot.signal_key` | `BotManager.get_signal_key()` (read-only) | live 시그널 키 조회. `{bot_id, signal_key}` (None 허용). `--rotate`(`bot.signal_key.rotate`, mutating)와 별개 read command. 서버 정지 시 snapshot DB fallback |
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
 | `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
 
@@ -95,9 +99,12 @@ error code를 사용한다.
 - `BOT_STATE_CONFLICT` (신규): `bot.start`/`bot.stop`의 `BotManager.start_bot()` /
   `stop_bot()` 호출 중 `BotError`.
 
-서버 실행 중 `ante bot list/info/positions/signal-key`는 `bot.query` 계열 IPC로
-서버의 live 상태를 우선 조회한다. 서버가 정지된 상태에서는 DB에 저장된 persisted
-snapshot 조회만 허용한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
+서버 실행 중 `ante bot list/info/positions/signal-key`는 각각 `bot.list` /
+`bot.info` / `bot.positions` / `bot.signal_key` IPC로 서버의 live 상태를 우선
+조회한다(#2112, read-only). 서버가 정지된 상태(`IPC_SERVER_NOT_RUNNING`)에서는
+DB에 저장된 persisted snapshot 조회로 fallback한다(runtime IPC + snapshot
+fallback). `IPC_TIMEOUT`/server-error는 stale snapshot 은폐를 막기 위해
+fallback 없이 surface한다. 단, `ante bot remove`는 #1161 cold-path 예외로 server stopped
 상태에서 `signal_keys`, 전략 스냅샷, Treasury budget, `bots.status='deleted'`만 직접
 정리할 수 있다. `handle_positions=liquidate`는 IPC runtime 경로에서만 의미가 있고,
 cold-path 삭제는 항상 keep 의미다.
@@ -233,7 +240,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 28개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 32개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -266,6 +273,10 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
 | `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
 | `bot.status` | read-only | `BotManager.get_bot()` live 조회. `{bot: ...}` envelope (#1712) |
+| `bot.list` | read-only | `BotManager.list_bots()` live 조회. `--account` 필터 + CLI 6-key projection, `{bots: [...]}` envelope (#2112) |
+| `bot.info` | read-only | `BotManager.get_bot()` live 조회. `{bot: info}` envelope (#2112) |
+| `bot.positions` | read-only | `BotManager.get_bot()` 존재확인 + `TradeService.get_positions()` 봇 계좌 스코핑(#2137). `{positions: [...]}` envelope (#2112) |
+| `bot.signal_key` | read-only | `BotManager.get_signal_key()` live 조회. `{bot_id, signal_key}` (None 허용). `bot.signal_key.rotate`(mutating)와 별개 read command (#2112) |
 
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용

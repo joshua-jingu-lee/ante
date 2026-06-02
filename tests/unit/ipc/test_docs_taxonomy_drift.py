@@ -62,14 +62,16 @@ _DOCS_NON_REGISTRY_TOKENS = frozenset(
         "member.rotate_token",
         "member.reset_password",
         "member.regenerate_recovery_key",
-        # bot.query 계열 후속 wiring — ipc.md:98 / 274
-        "bot.query",
         # cold-path 전용 — ipc.md:70-74 / 193 / 273
         "account.delete",
         "account.create",
         "account.set_credentials",
     }
 )
+# Refs #2112: 종전 ``bot.query`` placeholder 토큰은 ``bot.list`` / ``bot.info`` /
+# ``bot.positions`` / ``bot.signal_key`` (read) 4건 wiring 완료로 docs/specs/
+# ipc.md 에서 제거되었고, 4건은 모두 ``register_all_handlers()`` 에 등록되므로
+# non-registry 화이트리스트에서 더 이상 필요 없다.
 
 
 def _parse_docs_taxonomy_table() -> dict[str, str]:

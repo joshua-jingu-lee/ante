@@ -17,7 +17,7 @@
   - 주입 시 positions 보강.
   - 부재 시 ``positions`` 키 부재(회귀 lock, #1712 cold-path 호환).
 - ``CommandRegistry`` 등록 invariant: taxonomy(start/stop=mutating,
-  status=read-only), 27 count.
+  status=read-only), 32 count (#2112 bot read 4건 포함).
 """
 
 from __future__ import annotations
@@ -652,9 +652,11 @@ class TestRegistryRegistration:
         assert spec.is_mutating is False
         assert spec.handler is _handle_bot_status
 
-    def test_total_command_count_is_28(self) -> None:
+    def test_total_command_count_is_32(self) -> None:
         """#1712 이후 CLI/IPC parity mutation 5개 + #2111
-        ``bot.signal_key.rotate`` 를 포함한다."""
+        ``bot.signal_key.rotate`` + #2112 ``bot.list`` / ``bot.info`` /
+        ``bot.positions`` / ``bot.signal_key`` (read-only) 4건을 포함한다
+        (28→32)."""
         registry = CommandRegistry()
         register_all_handlers(registry)
-        assert len(registry.commands) == 28
+        assert len(registry.commands) == 32
