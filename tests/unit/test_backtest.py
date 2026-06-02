@@ -1064,6 +1064,232 @@ class TestBacktestSignalValidation:
         assert "-1" in msg
 
 
+# ── config.symbols universe 거부 테스트 (#2072) ─────
+
+
+class TestBacktestSymbolUniverse:
+    """전략이 config.symbols universe 밖 Signal.symbol을 반환하면 거래(체결)를
+    거부하는지 검증(#2072).
+
+    - universe(``symbols``)가 설정된 경우: 목록 밖 symbol은 미체결 skip하고,
+      가격조회(get_current_bar_price)도 발생하지 않는다(가격조회 이전 위치).
+    - universe 미설정(``symbols=None``/``[]``)인 경우: 거부하지 않는다(현 동작
+      유지, #2060 분리).
+    - 검증 순서: invalid side/quantity skip이 universe 검사보다 우선한다.
+    """
+
+    def _two_symbol_provider(self, store):
+        """universe(005930)와 universe 밖(000660) 데이터를 모두 적재한 provider.
+
+        이슈 repro 그대로 universe 밖 종목 데이터도 store/provider에 존재하지만
+        거래되지 않아야 함을 보이기 위해, 두 종목을 모두 load한다.
+        """
+        store.write("005930", "1d", _make_ohlcv_df_with_closes([100.0, 100.0, 100.0]))
+        store.write(
+            "000660",
+            "1d",
+            _make_ohlcv_df_with_closes([200.0, 200.0, 200.0], symbol="000660"),
+        )
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+        provider.load("000660", "1d")
+        return provider
+
+    async def test_out_of_universe_symbol_rejected(self, store, caplog):
+        """핵심(repro): universe=["005930"]인데 Signal "000660" → 미체결 + 경고."""
+        import logging
+
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="000660", side="buy", quantity=1)
+            ),
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=["005930"],
+        )
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            result = await executor.run()
+
+        # universe 밖 종목은 거래되지 않는다(미체결).
+        assert len(result.trades) == 0
+        assert executor._positions == {}
+        assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
+        # universe skip 경고에 symbol/universe가 포함된다.
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings, "universe 밖 Signal skip 시 경고가 있어야 함"
+        msg = warnings[0].getMessage()
+        assert "000660" in msg
+        assert "universe" in msg.lower()
+        assert "005930" in msg  # 설정된 universe 진단
+
+    async def test_out_of_universe_symbol_no_price_lookup(self, store):
+        """universe 밖 symbol은 가격조회(get_current_bar_price)도 발생하지 않는다.
+
+        universe 검사가 가격조회 이전에 위치함을 직접 단언한다(#2072). 000660은
+        한 번도 가격조회되지 않아야 한다(005930은 보유 심볼이 없어 조회되지 않음).
+        """
+        provider = self._two_symbol_provider(store)
+        looked_up: list[str] = []
+        original = provider.get_current_bar_price
+
+        def _tracking_get_current_bar_price(symbol, *args, **kwargs):
+            looked_up.append(symbol)
+            return original(symbol, *args, **kwargs)
+
+        with patch.object(
+            provider,
+            "get_current_bar_price",
+            side_effect=_tracking_get_current_bar_price,
+        ):
+            executor = BacktestExecutor(
+                strategy_cls=_make_one_signal_strategy(
+                    Signal(symbol="000660", side="buy", quantity=1)
+                ),
+                data_provider=provider,
+                initial_balance=10_000,
+                buy_commission_rate=0.0,
+                sell_commission_rate=0.0,
+                slippage_rate=0.0,
+                symbols=["005930"],
+            )
+            result = await executor.run()
+
+        assert len(result.trades) == 0
+        # universe 밖 000660은 체결 경로에서 가격조회되지 않는다.
+        assert "000660" not in looked_up
+
+    async def test_in_universe_symbol_fills(self, store):
+        """회귀: universe=["005930"] + Signal "005930" → 정상 체결."""
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="005930", side="buy", quantity=5)
+            ),
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=["005930"],
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1
+        assert result.trades[0].symbol == "005930"
+        assert result.trades[0].side == "buy"
+        assert executor._positions["005930"]["quantity"] == 5
+
+    async def test_empty_universe_does_not_reject(self, store):
+        """빈 universe(symbols=None) → universe 밖 종목도 거부 안 함(현 동작).
+
+        #2060 분리: universe 미설정(빈 frozenset)일 때 기존 동작(거래 허용)을
+        보존한다. 이슈 repro와 동일하게 000660이 거래된다.
+        """
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="000660", side="buy", quantity=1)
+            ),
+            data_provider=provider,
+            initial_balance=100_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=None,
+        )
+        result = await executor.run()
+
+        # universe 미설정 → 거부하지 않으므로 000660이 체결된다(현 동작 보존).
+        assert len(result.trades) == 1
+        assert result.trades[0].symbol == "000660"
+        assert executor._positions["000660"]["quantity"] == 1
+
+    async def test_empty_list_universe_does_not_reject(self, store):
+        """빈 universe(symbols=[]) → frozenset()이라 거부 안 함(현 동작)."""
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="000660", side="buy", quantity=1)
+            ),
+            data_provider=provider,
+            initial_balance=100_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=[],
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1
+        assert result.trades[0].symbol == "000660"
+
+    async def test_invalid_quantity_skip_precedes_universe_check(self, store, caplog):
+        """검증 순서: universe 밖 + invalid quantity → quantity skip이 우선.
+
+        side/quantity 검증(#1991)이 universe 검사(#2072)보다 앞이므로, 둘 다
+        위반하면 quantity skip 메시지가 나온다.
+        """
+        import logging
+
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="000660", side="buy", quantity=-1)
+            ),
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=["005930"],
+        )
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            result = await executor.run()
+
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings
+        msg = warnings[0].getMessage()
+        # quantity skip이 universe 검사보다 우선 — quantity 진단 문구가 나온다.
+        assert "quantity" in msg.lower()
+        assert "universe" not in msg.lower()
+
+    async def test_valid_out_of_universe_emits_universe_skip(self, store, caplog):
+        """검증 순서: universe 밖 + valid side/quantity → universe skip 메시지.
+
+        side/quantity가 유효하면 universe 검사 단계까지 진행되어 universe skip
+        메시지가 나온다(quantity skip 아님).
+        """
+        import logging
+
+        provider = self._two_symbol_provider(store)
+        executor = BacktestExecutor(
+            strategy_cls=_make_one_signal_strategy(
+                Signal(symbol="000660", side="buy", quantity=1)
+            ),
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+            symbols=["005930"],
+        )
+        with caplog.at_level(logging.WARNING, logger="ante.backtest.executor"):
+            result = await executor.run()
+
+        assert len(result.trades) == 0
+        warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warnings
+        msg = warnings[0].getMessage()
+        assert "universe" in msg.lower()
+
+
 # ── Mark-to-Market 평가 테스트 (#1987) ─────────────
 
 

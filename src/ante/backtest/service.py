@@ -88,6 +88,10 @@ class BacktestService:
             sell_commission_rate=validated.sell_commission_rate,
             slippage_rate=validated.slippage_rate,
             exchange=validated.exchange,
+            # config.symbols universe를 executor에 전달해, 전략이 universe 밖
+            # Signal.symbol을 반환해도 거래(체결)하지 않게 한다(#2072). 빈
+            # symbols(universe 미설정)는 frozenset()이 되어 거부하지 않는다.
+            symbols=validated.symbols,
         )
 
         result = await executor.run(progress_callback=progress_callback)

@@ -71,12 +71,17 @@ class BacktestExecutor:
         slippage_rate: float = 0.001,
         exchange: str = "KRX",
         strategies_dir: Path | None = None,
+        symbols: list[str] | None = None,
     ) -> None:
         self._strategy_cls = strategy_cls
         # 구체 BacktestDataProvider로 어노테이트한다(#2098). 체결가 게이트
         # get_current_bar_price는 backtest 전용이라 base DataProvider ABC에는
         # 없으므로, 호출이 mypy에 잡히지 않도록 구체 타입으로 좁힌다.
         self._data: BacktestDataProvider = data_provider
+        # config.symbols universe. 거래(체결) 대상 종목 집합이다(#2072).
+        # 비어 있으면(None/[]) universe 미설정으로 보고 거부하지 않는다
+        # (현 동작 유지 — 빈 universe/symbols 기본값 정책은 #2060 범위).
+        self._allowed_symbols: frozenset[str] = frozenset(symbols or [])
         self._initial_balance = initial_balance
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
@@ -256,6 +261,12 @@ class BacktestExecutor:
         이벤트 없음). 특히 ``hold`` 등 buy/sell 이외 side는 **절대 sell 분기로
         라우팅하지 않는다**(unknown side가 매도로 처리되던 회귀 차단).
 
+        side/quantity 검증 통과 후 **가격 조회(``get_current_bar_price``) 이전에**
+        config.symbols universe 검사를 한다(#2072). ``symbols`` 가 설정된 경우
+        그 목록 밖의 ``signal.symbol`` 은 거래하지 않고 skip(``return None``)해
+        가격조회(on-demand load)도 거래도 발생하지 않는다. ``symbols`` 가 비어
+        있으면(universe 미설정) 거부하지 않는다(현 동작 유지, #2060 범위).
+
         가격 게이트 통과 후 **side 체결 분기 이전에** ``signal.order_type`` 트리거
         게이트(``_order_triggered``)를 적용한다(#1994). limit/stop/stop_limit이
         현재 봉가로 조건을 충족하지 않으면 미체결로 skip(``return None``)해, 기존에
@@ -309,6 +320,22 @@ class BacktestExecutor:
                 signal.symbol,
                 signal.side,
                 signal.quantity,
+            )
+            return None
+
+        # ── universe 검사 (가격 조회/분기 이전, #2072) ───────────────────
+        # config.symbols universe가 설정된 경우, 그 목록 밖의 symbol은 거래하지
+        # 않는다(미체결). 가격조회(get_current_bar_price)보다 앞에 두어 universe
+        # 밖 종목은 on-demand load/가격조회도 거래도 발생하지 않는다.
+        # self._allowed_symbols가 비어 있으면(universe 미설정) 거부하지 않는다
+        # (현 동작 유지 — 빈 universe/symbols 기본값 정책은 #2060 범위).
+        if self._allowed_symbols and signal.symbol not in self._allowed_symbols:
+            logger.warning(
+                "Signal skip(symbol not in backtest universe): symbol=%s side=%r — "
+                "config.symbols=%s 외 종목은 거래하지 않음(미체결)",
+                signal.symbol,
+                signal.side,
+                sorted(self._allowed_symbols),
             )
             return None
 
