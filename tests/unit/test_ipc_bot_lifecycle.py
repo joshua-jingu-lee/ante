@@ -29,15 +29,18 @@ import pytest
 
 from ante.bot.exceptions import (
     BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE,
+    BOT_NOT_ACCEPTING_SIGNALS_CODE,
     BOT_NOT_FOUND_CODE,
     BOT_STATE_CONFLICT_CODE,
     BotAccountCredentialsNotConfigured,
     BotError,
+    BotNotAcceptingSignals,
     BotNotFoundError,
     BotStateConflict,
 )
 from ante.ipc.registry import (
     CommandRegistry,
+    _handle_bot_signal_key_rotate,
     _handle_bot_start,
     _handle_bot_status,
     _handle_bot_stop,
@@ -66,6 +69,8 @@ def _make_svc(
     account: SimpleNamespace | None = None,
     start_side_effect: Exception | None = None,
     stop_side_effect: Exception | None = None,
+    rotate_signal_key_side_effect: Exception | None = None,
+    rotate_signal_key_return: str | None = None,
     with_audit_logger: bool = True,
     strategy_registry: object | None = None,
     treasury_manager: object | None = None,
@@ -79,6 +84,12 @@ def _make_svc(
     bot_manager.get_bot = MagicMock(return_value=bot)
     bot_manager.start_bot = AsyncMock(side_effect=start_side_effect)
     bot_manager.stop_bot = AsyncMock(side_effect=stop_side_effect)
+    # #2111: rotate_signal_key 기본 stub. 각 테스트가 return_value /
+    # side_effect 를 override 한다.
+    bot_manager.rotate_signal_key = AsyncMock(
+        side_effect=rotate_signal_key_side_effect,
+        return_value=rotate_signal_key_return,
+    )
 
     account_service = MagicMock()
     if account is not None:
@@ -283,6 +294,130 @@ class TestHandleBotStop:
             },
         }
         svc.bot_manager.stop_bot.assert_awaited_once_with("bot-1")
+
+
+# ── bot.signal_key.rotate (#2111) ────────────────────
+
+
+class TestHandleBotSignalKeyRotate:
+    """``_handle_bot_signal_key_rotate`` 정상 + 거부 경로 (#2111).
+
+    ``bot signal-key --rotate`` 의 runtime IPC handler. 존재 확인 /
+    accepts_external_signals 게이트 / ``SignalKeyManager.rotate`` 위임은
+    ``BotManager.rotate_signal_key`` 가 단일 chokepoint 로 수행하며, handler 는
+    typed exception 을 그대로 propagate 한다 (``server.py`` envelope 이 stable
+    code 변환).
+    """
+
+    async def test_success_returns_rotated_envelope(self) -> None:
+        """성공 시 ``{bot_id, signal_key, rotated:True, _audit_detail}``.
+
+        handler 는 ``BotManager.rotate_signal_key`` 를 호출하고 새 키를 envelope
+        으로 반환한다. audit 발화는 ``_dispatch`` wrapper 가 수행하므로 handler
+        본문은 ``_audit_detail`` 만 채운다(#1851 동형).
+        """
+        bot = _make_bot(bot_id="bot-1")
+        svc, audit_log = _make_svc(
+            bot=bot, rotate_signal_key_return="sk_rotated_new_99"
+        )
+
+        result = await _handle_bot_signal_key_rotate(
+            svc, {"bot_id": "bot-1"}, "admin-master"
+        )
+
+        assert result == {
+            "bot_id": "bot-1",
+            "signal_key": "sk_rotated_new_99",
+            "rotated": True,
+            "_audit_detail": {
+                "resource": "bot:bot-1",
+                "detail": "",
+                "ip": "",
+            },
+        }
+        svc.bot_manager.rotate_signal_key.assert_awaited_once_with("bot-1")
+        # handler 본문은 audit 를 직접 호출하지 않는다(#1851).
+        assert audit_log is not None
+        audit_log.assert_not_awaited()
+
+    async def test_missing_bot_propagates_bot_not_found(self) -> None:
+        """미존재 봇 → ``BotNotFoundError`` (code=BOT_NOT_FOUND) propagate.
+
+        ``BotManager.rotate_signal_key`` 의 ``_get_bot`` 존재 확인이 raise 한
+        typed exception 을 handler 가 가로채지 않고 그대로 올린다.
+        """
+        bot = _make_bot(bot_id="missing")
+        svc, _ = _make_svc(
+            bot=bot,
+            rotate_signal_key_side_effect=BotNotFoundError("missing"),
+        )
+
+        with pytest.raises(BotNotFoundError) as exc:
+            await _handle_bot_signal_key_rotate(
+                svc, {"bot_id": "missing"}, "admin-master"
+            )
+
+        assert exc.value.code == BOT_NOT_FOUND_CODE
+
+    async def test_non_external_strategy_propagates_not_accepting(self) -> None:
+        """accepts_external_signals=False → ``BotNotAcceptingSignals``
+        (code=BOT_NOT_ACCEPTING_SIGNALS) propagate."""
+        bot = _make_bot(bot_id="bot-1")
+        svc, _ = _make_svc(
+            bot=bot,
+            rotate_signal_key_side_effect=BotNotAcceptingSignals(
+                "이 봇의 전략은 외부 시그널을 받지 않습니다: bot_id=bot-1"
+            ),
+        )
+
+        with pytest.raises(BotNotAcceptingSignals) as exc:
+            await _handle_bot_signal_key_rotate(
+                svc, {"bot_id": "bot-1"}, "admin-master"
+            )
+
+        assert exc.value.code == BOT_NOT_ACCEPTING_SIGNALS_CODE
+
+    async def test_strategy_missing_propagates_bot_error(self) -> None:
+        """전략 미발견 → ``BotError`` propagate (server.py 가 ``EXECUTION_ERROR``
+        fallback — error-equivalence 단언 없음, 서버 경로 SSOT, #2111).
+
+        cold-path 는 전략 미발견 시 ``STRATEGY_NOT_FOUND`` sentinel 을 냈으나,
+        runtime IPC 전용 전환 후 서버 ``rotate_signal_key`` 의 ``BotError`` 가
+        ``getattr(e, "code", "EXECUTION_ERROR")`` fallback 으로 변환된다. 이
+        known 미세차는 error-equivalence 회귀 lock 이 strategy-missing parity 를
+        단언하지 않으므로 서버 경로를 SSOT 로 수용한다.
+        """
+        bot = _make_bot(bot_id="bot-1")
+        svc, _ = _make_svc(
+            bot=bot,
+            rotate_signal_key_side_effect=BotError("전략 미발견: s-1"),
+        )
+
+        with pytest.raises(BotError):
+            await _handle_bot_signal_key_rotate(
+                svc, {"bot_id": "bot-1"}, "admin-master"
+            )
+        # BotError 는 stable ``code`` 속성이 없어 envelope 이 EXECUTION_ERROR 로
+        # fallback (회귀 명시): ``BotNotFoundError`` / ``BotNotAcceptingSignals``
+        # 와 달리 STRATEGY_NOT_FOUND 코드를 갖지 않는다.
+        assert not hasattr(BotError("x"), "code")
+
+    async def test_succeeds_when_audit_logger_is_none(self) -> None:
+        """``audit_logger=None`` 환경에서도 핸들러는 정상 성공 (#1851 동형)."""
+        bot = _make_bot(bot_id="bot-1")
+        svc, _ = _make_svc(
+            bot=bot,
+            rotate_signal_key_return="sk_rotated_2",
+            with_audit_logger=False,
+        )
+
+        result = await _handle_bot_signal_key_rotate(
+            svc, {"bot_id": "bot-1"}, "admin-master"
+        )
+
+        assert result["rotated"] is True
+        assert result["signal_key"] == "sk_rotated_2"
+        assert result["_audit_detail"]["resource"] == "bot:bot-1"
 
 
 # ── bot.status ───────────────────────────────────────
@@ -517,8 +652,9 @@ class TestRegistryRegistration:
         assert spec.is_mutating is False
         assert spec.handler is _handle_bot_status
 
-    def test_total_command_count_is_27(self) -> None:
-        """#1712 이후 CLI/IPC parity mutation 5개를 포함한다."""
+    def test_total_command_count_is_28(self) -> None:
+        """#1712 이후 CLI/IPC parity mutation 5개 + #2111
+        ``bot.signal_key.rotate`` 를 포함한다."""
         registry = CommandRegistry()
         register_all_handlers(registry)
-        assert len(registry.commands) == 27
+        assert len(registry.commands) == 28

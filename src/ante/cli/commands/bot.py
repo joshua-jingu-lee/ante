@@ -453,8 +453,58 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
 @require_auth
 @require_scope("bot:admin")
 def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
-    """봇 시그널 키 조회 또는 재발급."""
+    """봇 시그널 키 조회 또는 재발급.
+
+    ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다 (#2111).
+    서버가 정지되어 있으면 ``IPC_SERVER_NOT_RUNNING`` 으로 거부하며, cold-path
+    DB mutation 으로 대체하지 않는다 (runtime 경계 / audit / live 상태 정합성
+    보존). 조회(rotate 미지정)는 기존 cold-path 를 유지한다 (#2112 가 read IPC
+    라우팅 소유).
+    """
     fmt = get_formatter(ctx)
+
+    if rotate:
+        # ``--rotate`` 는 runtime IPC 전용 (#2111). ``BotManager.rotate_signal_key``
+        # 가 존재 확인 (``BotNotFoundError`` → ``BOT_NOT_FOUND``) +
+        # accepts_external_signals 게이트 (``BotNotAcceptingSignals`` →
+        # ``BOT_NOT_ACCEPTING_SIGNALS``) + ``SignalKeyManager.rotate`` 위임을
+        # 단일 chokepoint 로 수행한다. 서버 정지 시 ``ipc_send`` 가
+        # ``IPC_SERVER_NOT_RUNNING`` ClickException 으로 surface 하며, cold-path
+        # DB mutation 으로 fallback 하지 않는다.
+        actor = get_member_id(ctx)
+
+        async def _run_rotate() -> dict:
+            from ante.cli.commands.ipc_helpers import ipc_send
+
+            return await ipc_send(
+                "bot.signal_key.rotate", {"bot_id": bot_id}, actor=actor
+            )
+
+        try:
+            result = _run(_run_rotate())
+        except click.ClickException as e:
+            # ``bot start`` 형제 패턴 1:1 미러: ipc_send 가 부착한 원본
+            # code/message 를 split 없이 복원해 text/JSON 공용 envelope
+            # 안정성을 보존한다. 서버 정지(``IPC_SERVER_NOT_RUNNING``) /
+            # 타임아웃(``IPC_TIMEOUT``) / server error envelope 모두 동일
+            # 경로로 surface 되며, 직접 DB rotate 로 fallback 하지 않는다.
+            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+            message = getattr(e, "ipc_error_message", None) or e.message
+            if fmt.is_json:
+                fmt.error(message, code=code)
+            else:
+                text = f"{code}: {message}" if code else message
+                fmt.error(text)
+            raise SystemExit(1) from e
+
+        # 출력 계약 보존 (#2111): rotate 성공은 IPC 라우팅으로 옮겼더라도
+        # 기존 standard envelope (``{status, message, data}``, json/text 공통)
+        # 을 그대로 유지한다. cli_registry signal-key 계약이 "``--rotate``
+        # 경로는 ``fmt.success`` (standard)" 로 의도적·문서화·drift-test 된
+        # mixed-branch 결정을 갖고 있으므로 raw passthrough 로 바꾸지 않는다.
+        # passthrough 일관성 개선은 별도 명시적 follow-up 범위다.
+        fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
+        return
 
     async def _run_signal_key() -> dict:
         # ``_create_services`` async context manager lifecycle.
@@ -464,10 +514,9 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             skm = SignalKeyManager(db)
             await skm.initialize()
 
-            # 미존재 bot 에 대한 signal key 발급/조회를 막기 위해
-            # rotate/get_key 호출 전에 bot 존재를 먼저 확인한다. 미존재면
-            # sentinel(``missing=True``)을 반환하여 orphan credential 발급을
-            # 차단한다. 형제 명령(`bot info`/`bot remove`/`bot positions`)과
+            # 미존재 bot 에 대한 signal key 조회를 막기 위해 get_key 호출 전에
+            # bot 존재를 먼저 확인한다. 미존재면 sentinel(``missing=True``)을
+            # 반환한다. 형제 명령(`bot info`/`bot remove`/`bot positions`)과
             # 동일하게 code 없는 에러 + exit 1 로 거부한다.
             #
             # ``status != 'deleted'`` 조건은 ``BotManager.load_from_db``
@@ -475,8 +524,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             # 운영 bot 정의와 정렬한다. ``bot remove`` 는 키 폐기 후
             # soft-delete (manager.py:826 ``UPDATE bots SET status =
             # 'deleted'``) 하므로 row 가 남는다 — 이를 운영상 미존재로
-            # 취급하지 않으면 soft-deleted bot 에 ``--rotate`` 가
-            # orphan credential 을 재발급하는 버그류.
+            # 취급한다.
             #
             # ``bots`` 테이블은 ``BotManager.initialize()`` 에서 생성되며
             # 위 ``_create_services()`` 가 이를 보장하지만, 방어적으로
@@ -484,9 +532,6 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             # 한다 (malformed db 같은 다른 ``OperationalError`` 까지
             # 삼키지 않도록 메시지로 좁힌다, 형제 패턴 동형).
             try:
-                # ``--rotate`` 게이트가 ``strategy_id`` 를 필요로 하므로
-                # 존재 확인 쿼리에서 함께 SELECT 한다. row 의 truthiness 는
-                # 보존되어 기존 미존재/소프트삭제 거부 회귀와 동일하게 동작한다.
                 bot_row = await db.fetch_one(
                     "SELECT strategy_id FROM bots "
                     "WHERE bot_id = ? AND status != 'deleted'",
@@ -499,46 +544,6 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                     raise
             if bot_row is None:
                 return {"bot_id": bot_id, "missing": True}
-
-            if rotate:
-                # accepts_external_signals 게이트.
-                # ``BotManager.rotate_signal_key`` 가 적용하는 동일 invariant
-                # 를 CLI cold-path 에도 적용해 defense-in-depth 를 유지한다
-                # (CLI 는 BotManager 를 우회해 ``SignalKeyManager`` 를 직접
-                # 호출하므로 manager 게이트가 cover 하지 않는다).
-                from ante.bot.exceptions import BOT_NOT_ACCEPTING_SIGNALS_CODE
-                from ante.strategy.loader import StrategyLoader
-                from ante.strategy.registry import StrategyRegistry
-
-                strategy_id = bot_row["strategy_id"]
-                registry = StrategyRegistry(db)
-                await registry.initialize()
-                record = await registry.get(strategy_id)
-                if record is None:
-                    return {
-                        "bot_id": bot_id,
-                        "error": f"전략 미발견: {strategy_id}",
-                        "code": "STRATEGY_NOT_FOUND",
-                        "external_signals_disabled": True,
-                    }
-                strategy_cls = StrategyLoader.load(Path(record.filepath))
-                if not getattr(
-                    getattr(strategy_cls, "meta", None),
-                    "accepts_external_signals",
-                    False,
-                ):
-                    return {
-                        "bot_id": bot_id,
-                        "error": (
-                            "이 봇의 전략은 외부 시그널을 받지 않습니다: "
-                            f"bot_id={bot_id}, strategy_id={strategy_id}"
-                        ),
-                        "code": BOT_NOT_ACCEPTING_SIGNALS_CODE,
-                        "external_signals_disabled": True,
-                    }
-
-                new_key = await skm.rotate(bot_id)
-                return {"bot_id": bot_id, "signal_key": new_key, "rotated": True}
 
             key = await skm.get_key(bot_id)
             if not key:
@@ -566,14 +571,6 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
         ctx.exit(1)
 
-    if result.get("external_signals_disabled"):
-        # ``accepts_external_signals=False`` 전략 봇에 rotate 가 새 키를
-        # 발급해 orphan credential 이 생기던 회귀를 막는다. ``signal connect``
-        # 의 동형 거부 (``ante/cli/commands/signal.py``) 와 동일한
-        # ``BOT_NOT_ACCEPTING_SIGNALS`` 코드를 stable 하게 노출한다.
-        fmt.error(result["error"], code=result.get("code", ""))
-        raise SystemExit(1)
-
     if result.get("signal_key") is None:
         # 시그널 키 미발급은 안정 코드 ``SIGNAL_KEY_NOT_SET`` 로 surface 한다.
         # 미존재 bot (``BOT_NOT_FOUND``) 분기보다 뒤에 둬서 두 의미를 envelope
@@ -586,14 +583,13 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
         )
         ctx.exit(1)
 
-    if result.get("rotated"):
-        fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
+    # read (조회) 경로 출력. ``--rotate`` 는 위 IPC 전용 분기에서 이미 return
+    # 되므로 여기 도달하는 result 는 항상 조회 결과다 (#2111: rotated 분기 제거).
+    if fmt.is_json:
+        fmt.output(result)
     else:
-        if fmt.is_json:
-            fmt.output(result)
-        else:
-            click.echo(f"  Bot ID     : {result['bot_id']}")
-            click.echo(f"  Signal Key : {result['signal_key']}")
+        click.echo(f"  Bot ID     : {result['bot_id']}")
+        click.echo(f"  Signal Key : {result['signal_key']}")
 
 
 @bot.command("positions")

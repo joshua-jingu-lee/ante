@@ -621,6 +621,103 @@ async def test_account_suspend_account_id_policy_required_preflight(
         await server.stop()
 
 
+# ── bot.signal_key.rotate wrapper audit (#2111) ───────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_bot_signal_key_rotate_audit_action_fires(socket_path: str) -> None:
+    """Refs #2111: ``bot.signal_key.rotate`` 가 wrapper 자동 audit 발화한다.
+
+    register_all_handlers 가 ``audit_action="bot.signal_key.rotate"`` 를
+    부여하므로 handler 정상 종료 후 wrapper 가 ``audit_logger.log`` 를 1회
+    호출하고 ``_audit_detail`` 의 ``resource="bot:{bot_id}"`` (audit.md:121)
+    를 전달한다.
+    """
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_bot_manager = MagicMock()
+    fake_bot_manager.rotate_signal_key = AsyncMock(return_value="sk_new_rotated")
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, bot_manager=fake_bot_manager
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "bot.signal_key.rotate",
+                "args": {"bot_id": "bot-7"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "ok"
+        # public envelope 은 rotated/signal_key 를 담고 _audit_detail 은 strip.
+        assert response["result"] == {
+            "bot_id": "bot-7",
+            "signal_key": "sk_new_rotated",
+            "rotated": True,
+        }
+        assert "_audit_detail" not in response["result"]
+        # audit.md:121 SSOT: action=bot.signal_key.rotate, resource=bot:{bot_id}.
+        audit_logger.log.assert_awaited_once_with(
+            member_id="alice",
+            action="bot.signal_key.rotate",
+            resource="bot:bot-7",
+            detail="",
+            ip="",
+        )
+        fake_bot_manager.rotate_signal_key.assert_awaited_once_with("bot-7")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_signal_key_rotate_audit_not_fired_on_failure(
+    socket_path: str,
+) -> None:
+    """Refs #2111: ``BotNotFoundError`` 등 거부 경로는 audit 발화 안 함 +
+    stable code envelope (실패 시 audit invariant)."""
+    from ante.bot.exceptions import BotNotFoundError
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_bot_manager = MagicMock()
+    fake_bot_manager.rotate_signal_key = AsyncMock(
+        side_effect=BotNotFoundError("bot-missing")
+    )
+
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, bot_manager=fake_bot_manager
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "bot.signal_key.rotate",
+                "args": {"bot_id": "bot-missing"},
+                "actor": "alice",
+            }
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "BOT_NOT_FOUND"
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
 @pytest.mark.asyncio
 async def test_audit_action_without_audit_logger_no_crash(socket_path: str) -> None:
     """방어 케이스 — audit_action 부여되었지만 audit_logger 가 None.

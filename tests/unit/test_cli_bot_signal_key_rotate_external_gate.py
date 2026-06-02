@@ -22,19 +22,27 @@ Root cause (사실):
 
 ## 회귀 lock
 
-- R1 (회귀 보존 — external strategy): ``accepts_external_signals=True`` 전략의
-  봇은 ``--rotate`` 가 exit 0 + ``rotated=True`` envelope, ``skm.rotate``
-  호출됨.
-- R2 (게이트 — non-external strategy): ``accepts_external_signals=False``
-  전략의 봇은 ``--rotate`` 가 exit 1 + ``code="BOT_NOT_ACCEPTING_SIGNALS"``
-  envelope.
-- R3 (orphan 차단): R2 조건에서 ``skm.rotate`` 가 **호출되지 않는다**
-  (게이트가 키 발급 자체를 차단해 orphan credential 미발급).
+Refs #2111: ``bot signal-key --rotate`` 는 runtime IPC
+(``bot.signal_key.rotate``) 전용으로 라우팅된다. CLI cold-path 의 직접
+``SignalKeyManager.rotate`` 호출과 in-CLI accepts_external_signals 게이트는
+제거되었다. accepts_external_signals invariant 는 서버
+``BotManager.rotate_signal_key`` (R5) 가 단일 chokepoint 로 적용하며, CLI
+표면은 ``ipc_send`` 의 server envelope 을 surface 한다.
+
+- R1 (회귀 보존 — external strategy): external 전략 봇의 정상 rotate 는
+  ``ipc_send`` 가 ``{rotated:True, signal_key}`` envelope 을 반환하고 CLI 가
+  exit 0 + IPC envelope passthrough 로 surface 한다.
+- R2 (게이트 — non-external strategy): non-external 전략 봇은 서버가
+  ``BotNotAcceptingSignals`` → ``BOT_NOT_ACCEPTING_SIGNALS`` envelope 을
+  반환하고, CLI 가 exit 1 + ``code="BOT_NOT_ACCEPTING_SIGNALS"`` 로 보존한다.
+- R3 (orphan 차단): R2 조건에서 CLI 는 ``SignalKeyManager`` 를 직접 호출하지
+  않는다 (cold-path 미사용 회귀 — orphan credential 미발급은 서버 게이트
+  R5 가 책임).
 - R4 (sanity): non-rotate get 경로는 게이트 적용 대상 아님 — 기존 키 조회는
-  정상 동작 (회귀 보존).
+  정상 동작 (read cold-path 회귀 보존).
 - R5 (BotManager 게이트): ``BotManager.rotate_signal_key`` 가 동일 invariant
   를 raise ``BotNotAcceptingSignals`` (code=``BOT_NOT_ACCEPTING_SIGNALS``) 로
-  적용 — IPC / server-side 경로의 defense-in-depth.
+  적용 — runtime IPC / server-side 경로의 단일 chokepoint.
 """
 
 from __future__ import annotations
@@ -129,68 +137,30 @@ class _NormalStrategy(Strategy):
         return []
 
 
-def _make_strategy_patches(*, accepts_external_signals: bool) -> tuple:
-    """``StrategyRegistry`` + ``StrategyLoader.load`` patch tuple 을 생성한다.
-
-    rotate 게이트가 봇의 ``strategy_id`` 로 registry 조회 → ``StrategyLoader``
-    로 클래스 로드 → ``meta.accepts_external_signals`` 확인하는 경로를
-    단위 테스트에서 시뮬레이션한다.
-    """
-    mock_record = MagicMock()
-    mock_record.filepath = "/fake/path.py"
-    mock_registry = AsyncMock()
-    mock_registry.initialize = AsyncMock()
-    mock_registry.get = AsyncMock(return_value=mock_record)
-
-    mock_strategy_cls = MagicMock()
-    mock_strategy_cls.meta = StrategyMeta(
-        name="t",
-        version="1.0.0",
-        description="t",
-        accepts_external_signals=accepts_external_signals,
-    )
-
-    return (
-        patch(
-            "ante.strategy.registry.StrategyRegistry",
-            return_value=mock_registry,
-        ),
-        patch(
-            "ante.strategy.loader.StrategyLoader.load",
-            return_value=mock_strategy_cls,
-        ),
-    )
-
-
 # ── R1: 회귀 보존 ─────────────────────────────────────
 
 
 class TestRotateExternalStrategyAllowed:
-    """R1: ``accepts_external_signals=True`` 전략 봇은 rotate 정상."""
+    """R1: external 전략 봇의 정상 rotate 는 IPC 라우팅 + standard envelope (#2111).
+
+    rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅되지만 출력
+    계약(standard envelope)은 그대로 보존된다. cli_registry signal-key 계약이
+    "``--rotate`` 경로는 ``fmt.success`` (standard)" 로 문서화·drift-test 된
+    mixed-branch 결정을 갖고 있으므로 라우팅 변경이 출력-shape 변경이
+    아님을 lock 한다.
+    """
 
     def test_rotate_external_strategy_exits_zero_with_key(
         self, runner: CliRunner
     ) -> None:
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value={"strategy_id": "ext-1"})
-        mock_skm = AsyncMock()
-        mock_skm.initialize = AsyncMock()
-        mock_skm.rotate = AsyncMock(return_value="sk_external_rotated_42")
-
-        reg_patch, loader_patch = _make_strategy_patches(accepts_external_signals=True)
-        with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
-            patch(
-                "ante.bot.signal_key.SignalKeyManager",
-                return_value=mock_skm,
-            ),
-            reg_patch,
-            loader_patch,
-        ):
+        mock_send = AsyncMock(
+            return_value={
+                "bot_id": "bot-ext-1",
+                "signal_key": "sk_external_rotated_42",
+                "rotated": True,
+            }
+        )
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", new=mock_send):
             result = runner.invoke(
                 cli,
                 [
@@ -204,30 +174,50 @@ class TestRotateExternalStrategyAllowed:
             )
 
         assert result.exit_code == 0, result.stdout + result.stderr
+        # 출력 계약 보존: standard envelope (``{status, message, data}``).
         payload = json.loads(result.stdout)
         assert payload["status"] == "ok"
         assert payload["data"]["signal_key"] == "sk_external_rotated_42"
         assert payload["data"]["rotated"] is True
-        mock_skm.rotate.assert_awaited_once_with("bot-ext-1")
+        # rotate 는 runtime IPC (``bot.signal_key.rotate``) 로 라우팅된다.
+        mock_send.assert_awaited_once()
+        assert mock_send.await_args.args[0] == "bot.signal_key.rotate"
+        assert mock_send.await_args.args[1] == {"bot_id": "bot-ext-1"}
 
 
 # ── R2 + R3: 게이트 + orphan 차단 ─────────────────────
 
 
 class TestRotateNonExternalStrategyRejected:
-    """R2/R3: non-external 전략 봇은 rotate 거부 + skm.rotate 미호출."""
+    """R2/R3: non-external 전략 봇은 서버 게이트가 거부, CLI 는 envelope surface
+    + cold-path 미사용 (#2111)."""
 
-    def _gated_skm(self) -> AsyncMock:
-        """rotate 가 호출되면 즉시 실패하는 SignalKeyManager mock.
+    def _not_accepting_click_exc(self) -> object:
+        """서버 ``BotNotAcceptingSignals`` → ``BOT_NOT_ACCEPTING_SIGNALS``
+        envelope 을 ``ipc_send`` 가 변환한 ClickException 을 모사한다."""
+        import click
 
-        R3 검증의 핵심: 게이트가 ``skm.rotate`` **이전** 에 걸려야 한다.
-        ``assert_not_awaited`` 와 함께 이중으로 orphan 미발급을 lock 한다.
+        message = (
+            "이 봇의 전략은 외부 시그널을 받지 않습니다: "
+            "bot_id=bot-normal-1, strategy_id=normal-1"
+        )
+        exc = click.ClickException(f"{BOT_NOT_ACCEPTING_SIGNALS_CODE}: {message}")
+        exc.ipc_error_code = BOT_NOT_ACCEPTING_SIGNALS_CODE  # type: ignore[attr-defined]
+        exc.ipc_error_message = message  # type: ignore[attr-defined]
+        return exc
+
+    def _guard_skm(self) -> AsyncMock:
+        """직접 호출되면 즉시 실패하는 SignalKeyManager mock.
+
+        R3 회귀: rotate 는 cold-path 를 거치지 않고 IPC 로만 라우팅되므로
+        ``SignalKeyManager`` 가 CLI 에서 직접 호출되어선 안 된다 (orphan
+        credential 미발급은 서버 게이트 R5 책임).
         """
         skm = AsyncMock()
         skm.initialize = AsyncMock()
         skm.rotate = AsyncMock(
             side_effect=AssertionError(
-                "non-external 전략인데 rotate 가 호출됨 (orphan credential)"
+                "rotate cold-path 가 호출됨 (#2111: IPC 전용이어야 함)"
             )
         )
         skm.get_key = AsyncMock()
@@ -236,23 +226,18 @@ class TestRotateNonExternalStrategyRejected:
     def test_rotate_non_external_strategy_exits_one_with_code_json(
         self, runner: CliRunner
     ) -> None:
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value={"strategy_id": "normal-1"})
-        mock_skm = self._gated_skm()
+        click_exc = self._not_accepting_click_exc()
 
-        reg_patch, loader_patch = _make_strategy_patches(accepts_external_signals=False)
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._guard_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
             ),
-            reg_patch,
-            loader_patch,
         ):
             result = runner.invoke(
                 cli,
@@ -273,30 +258,25 @@ class TestRotateNonExternalStrategyRejected:
         assert payload["code"] == BOT_NOT_ACCEPTING_SIGNALS_CODE
         assert payload["code"] == "BOT_NOT_ACCEPTING_SIGNALS"
         assert "외부 시그널을 받지 않습니다" in payload["message"]
-        # R3: 게이트가 키 발급을 차단 — skm.rotate 미호출 (orphan 미발급).
+        # R3: CLI 가 SignalKeyManager 를 직접 호출하지 않는다 (cold-path 미사용).
         mock_skm.rotate.assert_not_awaited()
 
     def test_rotate_non_external_strategy_exits_one_text(
         self, runner: CliRunner
     ) -> None:
         """text 모드에서도 동일 거부 — exit 1 + stderr ``Error:``."""
-        mock_db = AsyncMock()
-        mock_db.close = AsyncMock()
-        mock_db.fetch_one = AsyncMock(return_value={"strategy_id": "normal-1"})
-        mock_skm = self._gated_skm()
+        click_exc = self._not_accepting_click_exc()
 
-        reg_patch, loader_patch = _make_strategy_patches(accepts_external_signals=False)
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click_exc
+
+        mock_skm = self._guard_skm()
         with (
-            patch(
-                "ante.cli.commands.bot._create_services",
-                new=_acm_factory((mock_db, None, None, None)),
-            ),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
             patch(
                 "ante.bot.signal_key.SignalKeyManager",
                 return_value=mock_skm,
             ),
-            reg_patch,
-            loader_patch,
         ):
             result = runner.invoke(
                 cli, ["bot", "signal-key", "bot-normal-1", "--rotate"]
