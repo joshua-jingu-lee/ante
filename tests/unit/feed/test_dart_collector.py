@@ -661,6 +661,262 @@ class TestEmptyQuarterSkip:
         assert warns == []
 
 
+class TestDailyLatestQuarter:
+    """#2101: daily 모드는 최신 collectable 분기 1개만 수집한다.
+
+    수정 전 ``feed run daily``는 ``collect()``를 daily 구분 없이 호출해
+    ``_resolve_year_range``로 backfill_since(예 2015)부터 전 분기를 순회했다
+    (사실상 DART backfill 동작). daily=True는 today(KST) 기준 최신 collectable
+    분기 1개만 ``_fetch_quarter``하고, checkpoint/SKIP_EMPTY/HALT 로직(#2028/
+    #2054)은 backfill 경로와 동일하게 보존한다.
+    """
+
+    async def test_daily_collects_only_latest_quarter_ignoring_backfill_since(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """(a) daily=True + checkpoint 부재 → 최신 분기 1개만 fetch(backfill 무시).
+
+        today=2026-05-29, backfill_since=2015. backfill(daily=False)이라면 2015~2026
+        전 분기를 순회하겠지만, daily=True는 2026-05-29 기준 최신 collectable 분기
+        (2026-Q1, period_end 3/31)만 fetch한다. 2015 등 과거 분기는 fetch하지 않는다.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        # 최신 분기(2026-Q1)는 데이터를 반환(written>0)하도록 스크립트.
+        behaviors: dict[tuple[str, str], object] = {
+            ("2026", "11013"): [_raw_item("2026", "11013")],
+        }
+        source = _ScriptedDARTSource({"00126380": "005930"}, behaviors)
+        normalizer = _ScriptedNormalizer({("2026", "11013"): _stored_df("2026")})
+        collector = DARTCollector(source=source, normalizer=normalizer)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        rows, syms, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+
+        # 정확히 최신 분기 1개(2026-Q1)만 fetch. 과거/미래 분기 없음.
+        assert source.fetched == [("2026", "11013")]
+        assert rows > 0
+        assert syms == {"005930"}
+        assert warns == []
+        # 최신 분기 성공 → checkpoint가 2026-Q1로 전진.
+        assert checkpoint.get_last_date() == "2026-Q1"
+
+    async def test_daily_latest_quarter_already_done_zero_fetch(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """(b) daily=True + 최신 분기 checkpoint done → 0 fetch(skip).
+
+        today=2026-05-29 → 최신 collectable = 2026-Q1. checkpoint가 이미 2026-Q1이면
+        재수집하지 않는다(fetch 0회).
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+        checkpoint.save("2026-Q1")  # 최신 분기 이미 완료
+
+        source = _ScriptedDARTSource({"00126380": "005930"}, {})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        rows, syms, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+
+        assert source.fetched == []  # fetch 0회
+        assert rows == 0
+        assert syms == set()
+        assert warns == []
+        # checkpoint는 변하지 않음(이미 최신).
+        assert checkpoint.get_last_date() == "2026-Q1"
+
+    async def test_daily_latest_quarter_empty_response_skip_empty(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """(e-1) daily 최신 분기 빈 응답(미공시) → SKIP_EMPTY: 미전진(checkpoint None).
+
+        분기종료 직후·공시 전 빈 응답은 SKIP_EMPTY로 처리해 checkpoint를
+        전진시키지 않는다(#2028 보존). 다음 daily run에서 재시도된다.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        # 최신 분기(2026-Q1) 미지정 → 빈 응답([]).
+        source = _ScriptedDARTSource({"00126380": "005930"}, {})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        rows, _syms, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+
+        # 최신 분기 1개만 fetch했으나 빈 응답 → 미전진.
+        assert source.fetched == [("2026", "11013")]
+        assert rows == 0
+        assert warns == []
+        assert checkpoint.get_last_date() is None  # SKIP_EMPTY 미전진
+
+    async def test_daily_latest_quarter_transient_failure_halts(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """(e-2) daily 최신 분기 transient 실패 → HALT: warn 추가 + checkpoint 미전진.
+
+        ``_fetch_quarter``의 HALT 경로(transient 예외)가 daily 경로에서도
+        동일하게 동작한다(#2054 보존). checkpoint는 전진하지 않고 warn이 표면화된다.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        behaviors: dict[tuple[str, str], object] = {
+            ("2026", "11013"): RuntimeError("transient upstream"),
+        }
+        source = _ScriptedDARTSource({"00126380": "005930"}, behaviors)
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        rows, _syms, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+
+        assert source.fetched == [("2026", "11013")]
+        assert rows == 0
+        assert checkpoint.get_last_date() is None  # HALT 미전진
+        assert len(warns) == 1
+        assert warns[0]["reprt_code"] == "11013"
+
+
+class TestLatestCollectableQuarter:
+    """#2101: ``_latest_collectable_quarter`` 산출이 period_end<=today 최대로 정확."""
+
+    def test_mid_year_picks_q1(self) -> None:
+        """(d-1) 2026-05-29 → 2026-Q1(3/31)이 최신 collectable(Q2~Q4는 미래)."""
+        result = DARTCollector._latest_collectable_quarter(date(2026, 5, 29))
+        assert result == (2026, "11013")  # 2026-Q1
+
+    def test_after_q2_period_end_picks_q2(self) -> None:
+        """(d-2) 2026-08-15 → 2026-Q2(6/30)가 최신(Q3 9/30은 미래)."""
+        result = DARTCollector._latest_collectable_quarter(date(2026, 8, 15))
+        assert result == (2026, "11012")  # 2026-Q2
+
+    def test_year_start_boundary_picks_prev_annual(self) -> None:
+        """(d-3) 연초 경계 2026-01-15 → 2025-Q4(annual, 2025-12-31)가 최신.
+
+        annual은 익년 초까지 미공시일 수 있으나 period_end<=today 기준이므로
+        2025-12-31<=2026-01-15로 collectable이다. 2026-Q1(3/31)은 미래라 제외.
+        """
+        result = DARTCollector._latest_collectable_quarter(date(2026, 1, 15))
+        assert result == (2025, "11011")  # 2025-Q4(annual)
+
+    def test_exact_period_end_is_collectable(self) -> None:
+        """(d-4) today == period_end(2026-03-31) → 그 분기(2026-Q1) collectable(<=)."""
+        result = DARTCollector._latest_collectable_quarter(date(2026, 3, 31))
+        assert result == (2026, "11013")  # 2026-Q1
+
+    def test_year_end_picks_annual(self) -> None:
+        """(d-5) 2026-12-31 → 2026-Q4(annual, 12/31)가 최신 collectable."""
+        result = DARTCollector._latest_collectable_quarter(date(2026, 12, 31))
+        assert result == (2026, "11011")  # 2026-Q4
+
+
+class TestBackfillUnchangedRegression:
+    """#2101: daily=False(기본, backfill)는 기존 전 분기 순회를 유지(회귀 락)."""
+
+    async def test_backfill_default_iterates_all_quarters(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """(c) collect(daily=False) → backfill_since~현재 전 분기 순회(무변경).
+
+        today=2016-05-29, backfill_since=2015. daily 구분 없는 기존 동작은
+        2015 전 분기(Q1~Q4) + 2016 collectable 분기(Q1)를 순회한다. daily 플래그
+        도입 후에도 기본값 False 경로는 동일하게 전 분기를 fetch한다.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2016, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        source = _ScriptedDARTSource({"00126380": "005930"}, {})
+        collector = DARTCollector(source=source)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        # daily 인자 생략(기본 False) → backfill 경로.
+        await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+        )
+
+        # 2015 전 분기 + 2016-Q1(collectable). 2016-Q2~Q4(6/30 이후)는 미래라 제외.
+        assert source.fetched == [
+            ("2015", "11013"),
+            ("2015", "11012"),
+            ("2015", "11014"),
+            ("2015", "11011"),
+            ("2016", "11013"),
+        ]
+
+
 class _CountingCorpCodeSource:
     """fetch_corp_codes 호출 횟수를 기록하고 save_path에 결과를 작성하는 스텁.
 
