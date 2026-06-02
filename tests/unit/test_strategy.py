@@ -1747,6 +1747,77 @@ class TestStrategy(Strategy):
         assert result.valid
         assert not any("StrategyMeta(...) instance" in e for e in result.errors)
 
+    def test_meta_reassigned_last_strategy_meta_passes(self, validator, tmp_path):
+        """meta=None 후 meta=StrategyMeta(...) 재할당 → 마지막 값 기준 통과(핵심)."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = None
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
+    def test_meta_reassigned_last_none_rejected(self, validator, tmp_path):
+        """meta=StrategyMeta(...) 후 meta=None 재할당 → 마지막이 None 이라 error."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+    meta = None
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_meta_annotation_only_rejected(self, validator, tmp_path):
+        """annotation-only `meta: StrategyMeta`(값 없음) → 값 할당 없음 → error.
+
+        런타임에 클래스 속성을 만들지 않으므로 StrategyMeta 인스턴스가 아니다.
+        ``_has_class_var`` 는 AnnAssign 을 True 로 보지만(존재), 마지막 값-할당이
+        없으므로 must-be-StrategyMeta error 로 귀결되어 두 검사가 정합한다.
+        """
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta: StrategyMeta
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any(
+            "'meta' must be a StrategyMeta(...) instance" in e for e in result.errors
+        )
+
+    def test_meta_annotated_assign_strategy_meta_passes(self, validator, tmp_path):
+        """annotated 값-할당 `meta: StrategyMeta = StrategyMeta(...)` 통과."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta: StrategyMeta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+        assert not any("StrategyMeta(...) instance" in e for e in result.errors)
+
 
 # ── #2042 validator: 실제 ante Strategy 상속만 (import 별칭 추적) ──────
 

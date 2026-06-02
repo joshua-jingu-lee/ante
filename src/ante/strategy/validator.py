@@ -324,29 +324,51 @@ class StrategyValidator:
         return errors
 
     def _meta_is_strategy_meta_call(self, cls: ast.ClassDef) -> bool:
-        """``meta`` 할당 값이 ``StrategyMeta(...)`` 호출인지 검사 (#2041).
+        """``meta`` 의 마지막 값-할당이 ``StrategyMeta(...)`` 호출인지 검사 (#2041).
 
-        클래스 body 의 ``meta`` Assign/AnnAssign value 가 ``ast.Call`` 이고
-        func 가 ``Name(id="StrategyMeta")`` 또는 ``Attribute(attr="StrategyMeta")``
-        여야 True. dict/None/다른 호출 등은 False. ``meta`` 가 아예 없으면
-        (별도 부재 검사가 담당) True 를 반환하지 않도록 호출부에서 존재
-        확인 후 사용한다.
+        클래스 body 를 순서대로 순회하여 ``meta`` 를 타깃으로 하는 **마지막**
+        값-할당 노드를 선택한다(런타임은 마지막 할당값을 클래스 속성으로
+        쓰므로 그와 일치). 그 value 가 ``ast.Call`` 이고 func 가
+        ``Name(id="StrategyMeta")`` 또는 ``Attribute(attr="StrategyMeta")`` 여야
+        True. dict/None/다른 호출 등은 False.
+
+        값-할당 판정:
+        - ``ast.Assign``: targets 에 ``Name(id="meta")`` 가 포함되면 value 가
+          ``meta`` 의 런타임 속성값이 된다.
+        - ``ast.AnnAssign``: target 이 ``Name(id="meta")`` 이고 **value 가 not
+          None** 일 때만 값-할당. annotation-only(``meta: StrategyMeta``)는
+          런타임에 클래스 속성을 만들지 않으므로 값-할당으로 치지 않는다.
+
+        ``meta`` 값-할당이 하나도 없으면(annotation-only 만 있거나 부재) False.
+        부재 자체는 별도 ``_has_class_var`` 검사가 담당하고, annotation-only 는
+        StrategyMeta 인스턴스 값이 없으므로 must-be-StrategyMeta error 로 귀결돼
+        두 검사가 모순되지 않는다(부재 → Missing, 존재하나 마지막 값이
+        StrategyMeta 호출 아님 → must-be-StrategyMeta).
         """
+        last_value: ast.expr | None = None
         for node in cls.body:
-            if not isinstance(node, ast.Assign | ast.AnnAssign):
-                continue
-            target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-            if not isinstance(target, ast.Name) or target.id != "meta":
-                continue
-            value = node.value
-            if not isinstance(value, ast.Call):
-                return False
-            func = value.func
-            if isinstance(func, ast.Name) and func.id == "StrategyMeta":
-                return True
-            if isinstance(func, ast.Attribute) and func.attr == "StrategyMeta":
-                return True
+            if isinstance(node, ast.Assign):
+                if any(
+                    isinstance(t, ast.Name) and t.id == "meta" for t in node.targets
+                ):
+                    last_value = node.value
+            elif isinstance(node, ast.AnnAssign):
+                target = node.target
+                if (
+                    isinstance(target, ast.Name)
+                    and target.id == "meta"
+                    and node.value is not None
+                ):
+                    last_value = node.value
+        if last_value is None:
             return False
+        if not isinstance(last_value, ast.Call):
+            return False
+        func = last_value.func
+        if isinstance(func, ast.Name) and func.id == "StrategyMeta":
+            return True
+        if isinstance(func, ast.Attribute) and func.attr == "StrategyMeta":
+            return True
         return False
 
     @staticmethod
