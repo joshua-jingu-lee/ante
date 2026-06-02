@@ -349,13 +349,20 @@ def config_list(ctx: click.Context, data_path: str | None) -> None:
 @require_auth
 @require_scope(_SCOPE_DATA_READ)
 def config_check(ctx: click.Context, data_path: str | None) -> None:
-    """API 키 존재 여부를 확인한다."""
+    """API 키 존재 여부와 유효성을 확인한다.
+
+    설정된 키는 해당 API에 경량 요청을 보내 3-state로 검증한다:
+    ✓ 유효 / ✗ 인증 실패 / ? 검증 불가(네트워크). offline/타임아웃은
+    검증 불가(unknown)로 graceful 처리한다.
+    """
+    import asyncio
+
     from ante.feed.config import FeedConfig
 
     data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
-    statuses = cfg.check_api_keys()
+    statuses = asyncio.run(cfg.check_api_keys_with_validation())
 
     if fmt.is_json:
         fmt.output({"keys": statuses})
@@ -367,7 +374,14 @@ def config_check(ctx: click.Context, data_path: str | None) -> None:
         for entry in statuses:
             if entry["set"]:
                 source_info = f"(source: {entry['source']})"
-                click.echo(f"  {entry['key']:<30} ✓ 설정됨 {source_info}")
+                valid = entry["valid"]
+                if valid is True:
+                    verdict = "✓ 유효"
+                elif valid is False:
+                    verdict = "✗ 인증 실패"
+                else:
+                    verdict = "? 검증 불가 (네트워크)"
+                click.echo(f"  {entry['key']:<30} ✓ 설정됨 {source_info}  {verdict}")
             else:
                 click.echo(f"  {entry['key']:<30} ✗ 미설정")
                 all_set = False

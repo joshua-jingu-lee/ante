@@ -303,6 +303,90 @@ class TestCheckApiKeys:
                 assert entry["source"] == ""
 
 
+# ── check_api_keys_with_validation (#2046) ────────────────────────────────────
+
+
+class TestCheckApiKeysWithValidation:
+    """네트워크 유효성 3-state 경로 (source.validate_credentials mock)."""
+
+    @pytest.mark.asyncio
+    async def test_unset_keys_skip_validation(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """미설정 키는 검증을 생략한다 (valid/detail=None, set=False)."""
+        for key in API_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        statuses = await cfg.check_api_keys_with_validation()
+        for entry in statuses:
+            assert entry["set"] is False
+            assert entry["valid"] is None
+            assert entry["detail"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_key_validates_valid(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """설정된 키가 유효하면 valid=True/detail=None."""
+        for key in API_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        cfg.set_api_key("ANTE_DART_API_KEY", "dart-key-value")
+
+        from ante.feed.sources import dart as dart_mod
+
+        async def _ok(self: object) -> tuple[bool, None]:
+            return True, None
+
+        monkeypatch.setattr(dart_mod.DARTSource, "validate_credentials", _ok)
+        statuses = await cfg.check_api_keys_with_validation()
+        dart = next(s for s in statuses if s["key"] == "ANTE_DART_API_KEY")
+        assert dart["set"] is True
+        assert dart["source"] == ".env"
+        assert dart["valid"] is True
+        assert dart["detail"] is None
+
+    @pytest.mark.asyncio
+    async def test_set_key_validates_invalid(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """인증 실패 키는 valid=False + detail 사유."""
+        for key in API_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        cfg.set_api_key("ANTE_DATAGOKR_API_KEY", "datagokr-key")
+
+        from ante.feed.sources import data_go_kr as dg_mod
+
+        async def _invalid(self: object) -> tuple[bool, str]:
+            return False, "인증 실패 (code=30): not registered"
+
+        monkeypatch.setattr(dg_mod.DataGoKrSource, "validate_credentials", _invalid)
+        statuses = await cfg.check_api_keys_with_validation()
+        dg = next(s for s in statuses if s["key"] == "ANTE_DATAGOKR_API_KEY")
+        assert dg["valid"] is False
+        assert dg["detail"] is not None
+        assert "30" in dg["detail"]
+
+    @pytest.mark.asyncio
+    async def test_set_key_validation_unknown(
+        self, cfg: FeedConfig, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """검증 불가(네트워크)는 valid=None + detail 사유, 예외 미전파."""
+        for key in API_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        cfg.set_api_key("ANTE_DART_API_KEY", "dart-key-value")
+
+        from ante.feed.sources import dart as dart_mod
+
+        async def _unknown(self: object) -> tuple[None, str]:
+            return None, "검증 불가 (네트워크): offline"
+
+        monkeypatch.setattr(dart_mod.DARTSource, "validate_credentials", _unknown)
+        statuses = await cfg.check_api_keys_with_validation()
+        dart = next(s for s in statuses if s["key"] == "ANTE_DART_API_KEY")
+        assert dart["valid"] is None
+        assert dart["detail"] is not None
+        assert "네트워크" in dart["detail"]
+
+
 # ── _mask_value ───────────────────────────────────────────────────────────────
 
 

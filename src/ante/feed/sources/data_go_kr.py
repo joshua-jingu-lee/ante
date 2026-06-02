@@ -212,6 +212,61 @@ class DataGoKrSource:
         logger.info("data.go.kr 수집 완료: date=%s records=%d", date, len(all_items))
         return all_items
 
+    async def validate_credentials(self) -> tuple[bool | None, str | None]:
+        """서비스키 유효성을 경량 요청 1회로 검증한다 (#2046).
+
+        가장 싼 기존 요청 패턴(getStockPriceInfo 1페이지, numOfRows=1)을
+        더미 기준일자로 1회 호출한다. data.go.kr은 서비스키를 우선
+        평가하므로, 키가 유효하면 ``00``(정상) 또는 다른 비인증 에러가
+        돌아오고, 키가 미등록/만료면 ``30/31`` 인증 에러(CRITICAL)가
+        돌아온다.
+
+        3-state를 반환한다:
+            * ``(True, None)``  — 유효 (키가 수락됨).
+            * ``(False, 사유)`` — 인증 실패 (CRITICAL 에러 코드).
+            * ``(None, 사유)``  — 검증 불가 (네트워크 예외/타임아웃).
+
+        offline·타임아웃 등 네트워크 예외는 unknown으로 흡수하며 예외를
+        전파하지 않는다. config check가 오프라인에서도 hang/실패 없이
+        graceful하게 동작하도록 보장한다.
+
+        Returns:
+            (valid, reason) 튜플. valid는 True/False/None.
+        """
+        # 인증 평가만을 위한 최소 더미 파라미터(서비스키 검증이 우선 수행됨).
+        params = {
+            "serviceKey": self._api_key,
+            "numOfRows": "1",
+            "pageNo": "1",
+            "resultType": "json",
+            "basDt": "20240102",
+        }
+
+        own_session = self._session is None
+        session = self._session or aiohttp.ClientSession()
+
+        try:
+            await self._rate_limiter.acquire()
+            self._rate_limiter.increment_daily()
+            data = await asyncio.wait_for(
+                self._do_request(session, params),
+                timeout=REQUEST_TIMEOUT,
+            )
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            logger.info("data.go.kr 키 검증 불가 (네트워크): %s", exc)
+            return None, f"검증 불가 (네트워크): {exc}"
+        finally:
+            if own_session:
+                await session.close()
+
+        result_code, result_msg = self._extract_result_code(data)
+        action = classify_error(result_code)
+
+        if action == ErrorAction.CRITICAL:
+            return False, f"인증 실패 (code={result_code}): {result_msg}"
+        # OK / 그 외(키는 수락됨) → 유효.
+        return True, None
+
     async def _fetch_page(
         self,
         session: aiohttp.ClientSession,
