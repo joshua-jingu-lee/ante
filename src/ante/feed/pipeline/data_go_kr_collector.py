@@ -51,13 +51,25 @@ class DataGoKrCollector:
 
         # (a) schema 선필터: 필수 raw 필드 누락/null 레코드를 drop & 에러 로그.
         survivors, schema_warns = self._filter_schema_invalid(raw_items, target_date)
-        # (b) survivor 검증: business 경고 수집 + 비-schema 실패 surface.
-        business_warns = self._validate(survivors, target_date)
+        # (b) survivor 검증: business 경고 수집 + passed 게이트 판정.
+        validation_passed, validation_warns = self._validate(survivors, target_date)
 
-        warns = symbol_warns + schema_warns + business_warns
+        warns = symbol_warns + schema_warns + validation_warns
         if not survivors:
             logger.warning(
                 "data.go.kr: date=%s 유효 레코드 없음(전 row drop)", target_date
+            )
+            return 0, set(), warns
+
+        # (c) 검증 게이트: survivor batch가 validate_all에서 passed=False면
+        # (transport status≠200, syntax, 또는 향후 schema 검사) 저장하지 않는다.
+        # spec(09-failure-recovery.md): schema 실패 레코드는 스킵(저장 금지).
+        if not validation_passed:
+            logger.warning(
+                "data.go.kr: date=%s survivor 검증 실패(passed=False)로 저장 차단 "
+                "(survivors=%d)",
+                target_date,
+                len(survivors),
             )
             return 0, set(), warns
 
@@ -148,16 +160,24 @@ class DataGoKrCollector:
     def _validate(
         raw_items: list[dict],
         target_date: str,
-    ) -> list[dict]:
-        """선필터를 통과한 레코드를 검증하고 경고 목록을 반환한다.
+    ) -> tuple[bool, list[dict]]:
+        """선필터를 통과한 레코드를 검증하고 (passed, 경고 목록)을 반환한다.
 
         schema 계층은 선필터(_filter_schema_invalid)에서 이미 통과했으므로
-        여기서는 business 경고를 수집한다. transport/syntax 등 비-schema 실패가
-        나오면 폐기하지 않고 에러 로그 + schema_validation 엔트리로 surface한다.
+        실무상 survivor 검증은 거의 항상 passed=True다. 다만 transport
+        (status≠200)/syntax 또는 향후 schema 검사가 잔여 실패를 surface할 수
+        있으므로 batch 단위 게이트로 전달한다. passed=False면 호출자가 batch
+        저장을 차단한다(spec 09-failure-recovery.md: schema 실패 skip).
+
+        raw_items가 비어있으면 validate_all이 schema 빈-레코드로 passed=True를
+        반환하므로 게이트를 막지 않는다(선필터로 전 row drop된 정상 케이스).
+
+        Returns:
+            (validation.passed, 구조화 경고 목록).
         """
         warns: list[dict] = []
         if not raw_items:
-            return warns
+            return True, warns
 
         validation = validate_all(raw_items, list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS))
 
@@ -173,6 +193,7 @@ class DataGoKrCollector:
             )
 
         # 비-schema(transport/syntax 등) 실패는 무시하지 않고 surface한다.
+        # passed=False면 호출자가 batch 저장을 차단한다(저장 금지).
         for err in validation.errors:
             logger.error("data.go.kr: date=%s survivor 검증 실패: %s", target_date, err)
             warns.append(
@@ -183,7 +204,7 @@ class DataGoKrCollector:
                     "message": err,
                 }
             )
-        return warns
+        return validation.passed, warns
 
     @staticmethod
     def _deduplicate(df: pl.DataFrame) -> pl.DataFrame:
