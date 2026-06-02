@@ -1009,3 +1009,73 @@ class TestCorpCodeCacheReuse:
 
         assert source.calls == 1
         assert result == {"00126380": "005930"}
+
+
+class TestAvailableDateEndToEnd:
+    """#2010: raw_items의 rcept_no가 collector→실제 normalizer→store를 거쳐
+
+    available_date(point-in-time 접수일)로 저장되는지 end-to-end로 확인한다.
+    (collector는 raw dict를 projection 없이 normalize에 넘긴다.)
+    """
+
+    async def test_rcept_no_flows_to_store_as_available_date(
+        self, tmp_path: Path
+    ) -> None:
+        """raw_items에 rcept_no가 있으면 store에 available_date가 저장된다."""
+        store = ParquetStore(base_path=tmp_path / "data")
+        # 실제 DARTNormalizer를 쓰는 collector(normalizer 미주입 → 기본 실제 사용).
+        collector = DARTCollector(source=object())
+
+        raw_items = [
+            {
+                "rcept_no": "20250315000001",  # 앞 8자리 = 접수일 2025-03-15
+                "corp_code": "00126380",
+                "account_nm": "당기순이익",
+                "thstrm_amount": "200,000",
+                "fs_div": "CFS",
+                "reprt_code": "11013",  # 1Q → period_end 3/31
+                "bsns_year": "2025",
+            },
+        ]
+
+        written, syms = collector._normalize_and_store(
+            raw_items,
+            {"00126380": "005930"},
+            store,
+        )
+
+        assert written == 1
+        assert syms == {"005930"}
+
+        result = store.read("005930", "krx", data_type="fundamental")
+        assert len(result) == 1
+        assert "available_date" in result.columns
+        assert result["date"][0] == date(2025, 3, 31)  # period_end
+        assert result["available_date"][0] == date(2025, 3, 15)  # 접수일
+
+    async def test_no_rcept_no_stores_null_available_date(self, tmp_path: Path) -> None:
+        """raw_items에 rcept_no가 없어도 정상 저장되고 available_date=null."""
+        store = ParquetStore(base_path=tmp_path / "data")
+        collector = DARTCollector(source=object())
+
+        raw_items = [
+            {
+                "corp_code": "00126380",
+                "account_nm": "당기순이익",
+                "thstrm_amount": "200,000",
+                "fs_div": "CFS",
+                "reprt_code": "11011",
+                "bsns_year": "2025",
+            },
+        ]
+
+        written, syms = collector._normalize_and_store(
+            raw_items,
+            {"00126380": "005930"},
+            store,
+        )
+
+        assert written == 1
+        result = store.read("005930", "krx", data_type="fundamental")
+        assert "available_date" in result.columns
+        assert result["available_date"][0] is None
