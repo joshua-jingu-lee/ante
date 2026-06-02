@@ -19,6 +19,28 @@ semantic(#1968, PR 명문화):
     후속 정제 이슈). 분모가 0/null이면 해당 지표는 null이다
     (``_ratio_expr`` 가드 유지). 지표는 가격 기반 지표의 자연 단위인 **일별
     행**(data.go.kr 행)에 부여하여 write-back한다.
+
+lookahead 제거(#2067):
+    as-of join 키를 분기 **period_end(date)** 가 아니라 그 재무가 실제로
+    **공시되어 알 수 있게 된 시점**(availability)로 바꾼다. period_end부터
+    분기 값을 적용하면, 예컨대 Q1(3/31) 재무가 공시(5월 중순)되기 전인 4월
+    거래일에 미래 정보를 쓰게 되어 lookahead bias가 발생한다.
+
+    분기 프레임마다 effective availability 키를 계산한다::
+
+        effective = coalesce(available_date, period_end + statutory_lag)
+
+    - ``available_date``(#2010, DART 공시 접수일 rcept_dt)가 있으면 **그대로**
+      쓴다(point-in-time 정확).
+    - 없는 legacy 행은 **자본시장법 법정 제출기한**으로 보수적 fallback한다:
+      분기/반기/3분기 보고서(period_end 월 ∈ {3,6,9})는 기말 후 45일,
+      사업보고서(period_end 월 == 12)는 기말 후 90일.
+    - 일별 거래일 ``date``(data.go.kr, point-in-time 정확)는 변경하지 않는다.
+
+    known-limitation: available_date 없는 legacy 행의 fallback은 "법정기한 내
+    공시" 가정이라 지연제출/정정공시/특수연장은 완전히 보장하지 못한다. 다만
+    fallback은 실제 공시일보다 **늦은(보수적)** 쪽이라 lookahead 측면에서는
+    안전하다(실제보다 며칠 늦게 반영될 뿐 미래 정보를 당겨쓰지 않는다).
 """
 
 from __future__ import annotations
@@ -35,6 +57,30 @@ logger = logging.getLogger(__name__)
 # source별 행 분리 기준 (normalizer가 부여하는 source 문자열 SSOT).
 _DAILY_SOURCE = "data_go_kr"
 _QUARTERLY_SOURCE = "dart"
+
+# 분기 프레임의 period-end(기말일) 컬럼. 일별 거래일 date와 동명이지만 의미가
+# 다르다(분기 행에서는 period_end, 일별 행에서는 거래일). as-of 결합은 더 이상
+# 이 컬럼을 직접 join 키로 쓰지 않는다(#2067 lookahead 제거).
+_PERIOD_END_KEY = "date"
+
+# DART 공시 접수일(point-in-time availability, #2010). nullable.
+_AVAILABLE_DATE_KEY = "available_date"
+
+# effective availability 키와 join_asof 양쪽 alias용 임시 컬럼명. write-back
+# 전 반드시 제거한다(FUNDAMENTAL 스키마 밖이므로 _FUNDAMENTAL_COLUMN_SET 필터로
+# 자연 제거되지만, 명시적으로도 drop한다).
+_EFFECTIVE_KEY = "_effective_available"
+_ASOF_KEY = "_asof_join_key"
+
+# 자본시장법 법정 제출기한(보수적 fallback). available_date가 없는 legacy 행에
+# 한해 period_end 월로 분류해 더한다:
+#   - 분기/반기/3분기 보고서(period_end 월 3/6/9) → 기말 후 45일
+#   - 사업(연간)보고서(period_end 월 12) → 기말 후 90일
+# 이 외(비표준) 월의 행은 분류 불가 → join 전 제거한다.
+_LAG_QUARTERLY_DAYS = 45
+_LAG_ANNUAL_DAYS = 90
+_QUARTERLY_PERIOD_END_MONTHS = (3, 6, 9)
+_ANNUAL_PERIOD_END_MONTH = 12
 
 # as-of join 키.
 _JOIN_KEY = "date"
@@ -151,7 +197,7 @@ class IndicatorCalculator:
         daily: pl.DataFrame,
         quarterly: pl.DataFrame,
     ) -> pl.DataFrame | None:
-        """일별 프레임에 그 날짜 기준 가장 최근 분기 재무를 as-of 결합한다.
+        """일별 거래일에 그 시점 이전 **공시된** 가장 최근 분기 재무를 결합한다.
 
         ``store.read``의 ``diagonal_relaxed`` union 때문에 daily/quarterly
         sub-frame은 동일한 컬럼 union을 보유한다(상대 소스 컬럼은 null-fill).
@@ -159,12 +205,26 @@ class IndicatorCalculator:
 
         - 일별 프레임에서 ``_QUARTERLY_FINANCIAL_COLUMNS``(일별 행에선 null)를
           **버려** join 후 분기 값이 null로 덮이지 않게 한다.
-        - 분기 프레임에서는 그 재무 컬럼만 join 키(date)와 함께 **가져온다**.
+        - 분기 프레임에서는 그 재무 컬럼만 **availability 키**와 함께 가져온다.
 
-        결합 결과는 일별 identity(date, symbol, source=data_go_kr,
-        market_cap, shares_listed 등)를 유지하면서 그 날짜 이전 가장 최근
-        분기 재무를 부여받는다. 가져올 분기 재무 컬럼이 하나도 없으면
-        ``None``을 반환한다.
+        as-of 키는 분기 period_end가 아니라 effective availability다(#2067):
+
+            effective = coalesce(available_date, period_end + statutory_lag)
+
+        - ``available_date``(#2010)가 있으면 그대로(point-in-time).
+        - 없으면 period_end 월로 법정 제출기한을 도출:
+          {3,6,9} → +45일, 12 → +90일.
+        - 비표준 period_end 월(위 4개월이 아님) 또는 effective가 끝내 null인
+          행은 정렬·결합 안정성을 위해 **join 전 제거**한다.
+
+        그 다음 일별 거래일 ``date`` ↔ 분기 ``effective``를 동일한 임시 join
+        컬럼명(``_ASOF_KEY``)으로 alias하고 ``strategy="backward"``로 결합한다
+        (backward는 inclusive — 거래일 == effective면 적용). 결합 결과는 일별
+        identity를 유지하면서, 그 거래일 **이전(또는 당일) 공시된** 가장 최근
+        분기 재무만 부여받는다. 임시 키는 결합 직후 제거한다.
+
+        가져올 분기 재무 컬럼이 하나도 없거나, effective availability를 가진
+        분기 행이 하나도 남지 않으면 ``None``을 반환한다.
         """
         financial_cols = [
             col for col in _QUARTERLY_FINANCIAL_COLUMNS if col in quarterly.columns
@@ -172,15 +232,67 @@ class IndicatorCalculator:
         if not financial_cols:
             return None
 
+        quarterly_eff = IndicatorCalculator._with_effective_availability(quarterly)
+        if quarterly_eff.is_empty():
+            return None
+
         # 일별 프레임에서 분기 재무 컬럼(null-fill된 잔재)을 제거해 충돌 차단.
         daily_identity = daily.drop([c for c in financial_cols if c in daily.columns])
-        quarterly_fin = quarterly.select([_JOIN_KEY, *financial_cols])
 
-        return daily_identity.sort(_JOIN_KEY).join_asof(
-            quarterly_fin.sort(_JOIN_KEY),
-            on=_JOIN_KEY,
+        # 양쪽을 동일한 임시 join 키로 alias: 일별=거래일 date, 분기=effective.
+        daily_keyed = daily_identity.with_columns(
+            pl.col(_JOIN_KEY).alias(_ASOF_KEY),
+        )
+        quarterly_keyed = quarterly_eff.select(
+            pl.col(_EFFECTIVE_KEY).alias(_ASOF_KEY),
+            *[pl.col(c) for c in financial_cols],
+        )
+
+        joined = daily_keyed.sort(_ASOF_KEY).join_asof(
+            quarterly_keyed.sort(_ASOF_KEY),
+            on=_ASOF_KEY,
             strategy="backward",
         )
+        # 임시 join 키 제거(스키마 밖). _EFFECTIVE_KEY는 분기 프레임에만 있었고
+        # select로 가져오지 않았으므로 결합 결과엔 없다.
+        return joined.drop(_ASOF_KEY)
+
+    @staticmethod
+    def _with_effective_availability(quarterly: pl.DataFrame) -> pl.DataFrame:
+        """분기 프레임에 effective availability 키(``_EFFECTIVE_KEY``)를 부여한다.
+
+        ``effective = coalesce(available_date, period_end + statutory_lag)``.
+        statutory_lag은 period_end 월로 분류한다(3/6/9 → +45일, 12 → +90일).
+        비표준 period_end 월이면서 available_date도 없는 행, 또는 effective가
+        끝내 null인 행은 **제거**한다(as-of 정렬 안정성 + lookahead 안전).
+
+        ``available_date`` 컬럼은 #2010 이전 legacy 파티션에는 아예 없을 수
+        있으므로(존재해도 nullable), 없으면 전 행 null(=법정기한 fallback만
+        사용)로 취급한다.
+        """
+        if _AVAILABLE_DATE_KEY in quarterly.columns:
+            available = pl.col(_AVAILABLE_DATE_KEY)
+        else:
+            available = pl.lit(None, dtype=pl.Date)
+
+        month = pl.col(_PERIOD_END_KEY).dt.month()
+        # period_end 월로 법정 제출기한(일수)을 분류. 비표준 월은 null.
+        lag_days = (
+            pl.when(month.is_in(list(_QUARTERLY_PERIOD_END_MONTHS)))
+            .then(pl.lit(_LAG_QUARTERLY_DAYS))
+            .when(month == _ANNUAL_PERIOD_END_MONTH)
+            .then(pl.lit(_LAG_ANNUAL_DAYS))
+            .otherwise(None)
+        )
+        # period_end + statutory_lag (분류 불가 월이면 lag_days null → fallback도
+        # null로 전파).
+        fallback = pl.col(_PERIOD_END_KEY) + pl.duration(days=lag_days)
+
+        with_eff = quarterly.with_columns(
+            pl.coalesce(available, fallback).cast(pl.Date).alias(_EFFECTIVE_KEY),
+        )
+        # effective가 null인 행 제거(available_date 없고 + period_end 월도 비표준).
+        return with_eff.filter(pl.col(_EFFECTIVE_KEY).is_not_null())
 
     @staticmethod
     def _build_expressions(cols: set[str]) -> list[pl.Expr]:
