@@ -1372,7 +1372,10 @@ def _raw_inst(
 
 
 def _read_instruments(store: ParquetStore):
-    """`.feed/instruments.parquet`를 읽어 (path, DataFrame) 반환. 없으면 (path, None)."""
+    """`.feed/instruments.parquet`를 읽어 (path, DataFrame) 반환.
+
+    없으면 (path, None).
+    """
     import polars as pl
 
     path = store.base_path / ".feed" / "instruments.parquet"
@@ -1386,7 +1389,10 @@ class TestCollectorInstrumentsStore:
 
     @pytest.mark.asyncio
     async def test_instruments_written_on_collect(self, tmp_path) -> None:
-        """(a) collect → instruments.parquet 생성(symbol/exchange/name/market 채워짐)."""
+        """(a) collect → instruments.parquet 생성.
+
+        symbol/exchange/name/market 채워짐.
+        """
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(
             source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
