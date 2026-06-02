@@ -295,7 +295,11 @@ class StrategyValidator:
     def _find_forbidden_toplevel(self, tree: ast.Module) -> list[str]:
         """금지된 최상위 코드 탐지 (에러)."""
         errors: list[str] = []
-        for node in tree.body:
+        self._check_toplevel_body(tree.body, errors)
+        return errors
+
+    def _check_toplevel_body(self, body: list[ast.stmt], errors: list[str]) -> None:
+        for node in body:
             if isinstance(node, ast.Import | ast.ImportFrom):
                 continue
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
@@ -303,6 +307,11 @@ class StrategyValidator:
             if isinstance(node, ast.Pass):
                 continue
             if isinstance(node, ast.If):
+                # #2018: if/elif/else body는 import-time 실행 → 동일 규칙 재귀.
+                # If.test 조건식은 범위 밖(eval/exec/금지 import는
+                # _find_forbidden_builtins/_find_forbidden_imports의 walk가 전역 탐지).
+                self._check_toplevel_body(node.body, errors)
+                self._check_toplevel_body(node.orelse, errors)
                 continue
             # 모듈 docstring (문자열 리터럴 Expr)
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
@@ -318,7 +327,6 @@ class StrategyValidator:
             errors.append(
                 f"Forbidden top-level code at line {node.lineno}: {type(node).__name__}"
             )
-        return errors
 
     def _contains_call(self, node: ast.AST) -> bool:
         """AST 서브트리에 함수 호출이 포함되어 있는지 확인."""
