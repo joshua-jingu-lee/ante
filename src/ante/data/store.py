@@ -16,6 +16,20 @@ from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 logger = logging.getLogger(__name__)
 
 
+class ParquetReadError(Exception):
+    """Parquet 파티션을 읽는 도중 손상 파일을 만났을 때 발생.
+
+    `ParquetStore.read(..., strict=True)` 경로 전용 예외다. tolerant
+    경로(`strict=False`, 기본)는 손상 파티션을 logger.warning + continue로
+    skip하므로 이 예외를 발생시키지 않는다(feed/CLI 회귀 방지). strict
+    경로(backtest data 로드 등)는 손상 파티션을 만나면 부분 데이터로
+    silent 성공하지 않고 이 예외로 즉시 실패한다(#2095).
+
+    메시지에 손상 파일 경로와 원인 예외를 포함하며, `raise ... from exc`
+    로 원인 예외 체인을 보존한다.
+    """
+
+
 def _is_safe_path_segment(seg: str) -> bool:
     """단일 path segment가 traversal-safe한지 판정.
 
@@ -324,6 +338,7 @@ class ParquetStore:
         limit: int | None = None,
         data_type: str = "ohlcv",
         exchange: str = "KRX",
+        strict: bool = False,
     ) -> pl.DataFrame:
         """Parquet에서 데이터 읽기.
 
@@ -335,6 +350,17 @@ class ParquetStore:
             limit: 최근 N건만 반환
             data_type: 데이터 타입 (ohlcv, fundamental, tick)
             exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
+            strict: 손상 파티션 처리 정책(#2095).
+                - False(기본): tolerant. 손상 파티션을 logger.warning 후
+                  skip하고 나머지로 부분 DataFrame을 반환한다(feed/CLI 등
+                  부분-허용 공용 경로의 기존 동작 보존).
+                - True: fail-closed. 손상 파티션을 만나면 부분 데이터로
+                  silent 성공하지 않고 즉시 `ParquetReadError`를 raise한다
+                  (backtest 데이터 로드 전용). 부분 데이터로 백테스트가
+                  일부 기간을 빠뜨린 채 성공하는 버그를 차단한다.
+
+        Raises:
+            ParquetReadError: strict=True이며 손상 파티션을 만났을 때.
         """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         if not path.exists():
@@ -348,7 +374,11 @@ class ParquetStore:
         for f in files:
             try:
                 dfs.append(pl.read_parquet(f))
-            except Exception:
+            except Exception as exc:
+                if strict:
+                    raise ParquetReadError(
+                        f"Corrupt parquet partition: {f}: {exc}"
+                    ) from exc
                 logger.warning("Failed to read parquet file: %s", f)
                 continue
 

@@ -131,6 +131,13 @@ pending_migration:
   - module: ante.config.exceptions
     class_anchor: ConfigError
     reason: "base — no callsite; pending_migration baseline (#1842 AccountError 동형)"
+  # #2095: store 내부 손상-파티션 예외. read(strict=True) 경로에서만 raise되며
+  # data_provider.load()가 즉시 BacktestDataError(이미 pending_migration 등록)로
+  # wrap·re-raise하므로 CLI/IPC 표면에 직접 노출되지 않는다. backtest sibling
+  # 예외(BacktestDataError 등)와 동형으로 baseline 보존.
+  - module: ante.data.store
+    class_anchor: ParquetReadError
+    reason: "internal store fault wrapped into BacktestDataError (#2095); baseline (#1842 동형)"
   - module: ante.feed.sources.dart
     class_anchor: CriticalApiError
     reason: "baseline (#1841); register in #1842/#1843"

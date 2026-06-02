@@ -21,7 +21,7 @@ from ante.data.schemas import (
     TICK_SCHEMA,
     TIMEFRAMES,
 )
-from ante.data.store import ParquetStore, migrate_parquet_paths
+from ante.data.store import ParquetReadError, ParquetStore, migrate_parquet_paths
 
 __all__ = [
     "BaseNormalizer",
@@ -35,6 +35,7 @@ __all__ = [
     "KISNormalizer",
     "OHLCV_COLUMNS",
     "OHLCV_SCHEMA",
+    "ParquetReadError",
     "ParquetStore",
     "RetentionPolicy",
     "TICK_SCHEMA",
