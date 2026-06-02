@@ -23,6 +23,7 @@ CLI 우회 programmatic 직접 호출의 fake-success를 닫는다.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -31,7 +32,7 @@ from ante.backtest import runner
 from ante.backtest.config import BacktestConfig
 from ante.backtest.exceptions import BacktestConfigError
 from ante.backtest.result import BacktestResult
-from ante.backtest.service import BacktestService
+from ante.backtest.service import BACKTEST_RESULT_SENTINEL, BacktestService
 
 _BASE: dict = {
     "strategy_path": "s.py",
@@ -348,7 +349,10 @@ class TestRunSubprocessEarlyFailsBeforeSpawn:
         mock_proc = MagicMock()
 
         async def _fake_communicate(input=None):
-            return (b'{"ok": true}', b"")
+            # runner가 결과 라인을 sentinel prefix로 출력(#2065)하는 것을
+            # 모사한다. parent run_subprocess는 sentinel 라인만 파싱한다.
+            line = f"{BACKTEST_RESULT_SENTINEL}{json.dumps({'ok': True})}\n"
+            return (line.encode(), b"")
 
         mock_proc.communicate = _fake_communicate
         mock_proc.returncode = 0
