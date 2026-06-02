@@ -215,11 +215,27 @@ class TestAPIGateway:
         return EventBus()
 
     @pytest.fixture
-    async def gateway(self, account_service, eventbus):
+    def order_tracker(self):
+        """OrderTracker mock — order_id → broker_order_id 변환용 (#2134).
+
+        ``get("ORD001")`` → broker_order_id="BRK-ORD001", account_id="acc-001"
+        레코드를 반환한다.
+        """
+        tracker = AsyncMock()
+        record = MagicMock()
+        record.order_id = "ORD001"
+        record.broker_order_id = "BRK-ORD001"
+        record.account_id = "acc-001"
+        tracker.get = AsyncMock(return_value=record)
+        return tracker
+
+    @pytest.fixture
+    async def gateway(self, account_service, eventbus, order_tracker):
         gw = APIGateway(
             account_service=account_service,
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
+            order_tracker=order_tracker,
         )
         gw.start()
         return gw
@@ -286,10 +302,11 @@ class TestAPIGateway:
         broker.place_order.assert_called_once()
 
     async def test_cancel_order(self, gateway, broker):
-        """주문 취소 — account_id로 라우팅."""
+        """주문 취소 — account_id 라우팅 + OrderTracker broker_order_id 변환 (#2134)."""
         result = await gateway.cancel_order("ORD001", account_id="acc-001")
         assert result is True
-        broker.cancel_order.assert_called_once_with("ORD001")
+        # 내부 order_id 가 아니라 변환된 broker_order_id 로 broker 호출.
+        broker.cancel_order.assert_called_once_with("BRK-ORD001")
 
     async def test_rate_limiter_per_account(self, gateway):
         """계좌별 독립 rate limiter 생성."""
@@ -347,6 +364,51 @@ class TestAPIGateway:
         with pytest.raises(InvalidAccountIdError):
             await gateway.cancel_order("ORD001", account_id="")
 
+    async def test_cancel_order_record_not_found_fail_closed(
+        self, gateway, broker, order_tracker
+    ):
+        """#2134: OrderTracker 레코드 미발견 → False + broker 미호출."""
+        order_tracker.get = AsyncMock(return_value=None)
+
+        result = await gateway.cancel_order("UNKNOWN", account_id="acc-001")
+
+        assert result is False
+        broker.cancel_order.assert_not_called()
+
+    async def test_cancel_order_no_tracker_fail_closed(
+        self, account_service, eventbus, broker
+    ):
+        """#2134: order_tracker 미주입 → fail-closed (내부 order_id passthrough 금지).
+
+        broker 를 호출하지 않고 False 를 반환한다 (P1 재발 방지).
+        """
+        gw = APIGateway(
+            account_service=account_service,
+            eventbus=eventbus,
+            rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
+        )
+        gw.start()
+
+        result = await gw.cancel_order("ORD001", account_id="acc-001")
+
+        assert result is False
+        broker.cancel_order.assert_not_called()
+
+    async def test_cancel_order_cross_account_blocked(
+        self, gateway, broker, order_tracker
+    ):
+        """#2134: record.account_id ≠ 요청 account_id → False + broker 미호출."""
+        record = MagicMock()
+        record.order_id = "ORD001"
+        record.broker_order_id = "BRK-ORD001"
+        record.account_id = "acc-OTHER"
+        order_tracker.get = AsyncMock(return_value=record)
+
+        result = await gateway.cancel_order("ORD001", account_id="acc-001")
+
+        assert result is False
+        broker.cancel_order.assert_not_called()
+
 
 # ── APIGateway EventBus 통합 ──────────────────────
 
@@ -370,11 +432,23 @@ class TestAPIGatewayEvents:
         return EventBus()
 
     @pytest.fixture
-    async def gateway(self, account_service, eventbus):
+    def order_tracker(self):
+        """OrderTracker mock — order_id="ord1" → broker_order_id="BRK-ord1" (#2134)."""
+        tracker = AsyncMock()
+        record = MagicMock()
+        record.order_id = "ord1"
+        record.broker_order_id = "BRK-ord1"
+        record.account_id = "acc-001"
+        tracker.get = AsyncMock(return_value=record)
+        return tracker
+
+    @pytest.fixture
+    async def gateway(self, account_service, eventbus, order_tracker):
         gw = APIGateway(
             account_service=account_service,
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
+            order_tracker=order_tracker,
         )
         gw.start()
         return gw
@@ -473,7 +547,11 @@ class TestAPIGatewayEvents:
     async def test_order_cancel_event_with_account_id(
         self, gateway, eventbus, broker, account_service
     ):
-        """OrderCancelEvent → account_id로 브로커 선택 → OrderCancelledEvent."""
+        """OrderCancelEvent → account_id로 브로커 선택 → OrderCancelledEvent.
+
+        #2134: 이벤트 경로도 cancel_order 를 통해 OrderTracker broker_order_id
+        변환을 거친다 (내부 order_id "ord1" → broker_order_id "BRK-ord1").
+        """
         received = []
         eventbus.subscribe(OrderCancelledEvent, lambda e: received.append(e))
 
@@ -492,6 +570,8 @@ class TestAPIGatewayEvents:
         assert received[0].reason == "test cancel"
         assert received[0].account_id == "acc-001"
         account_service.get_broker.assert_called_with("acc-001")
+        # broker 에는 변환된 broker_order_id 가 전달된다 (내부 order_id 아님).
+        broker.cancel_order.assert_called_once_with("BRK-ord1")
 
     async def test_order_filled_invalidates_account_cache(
         self, gateway, eventbus, broker

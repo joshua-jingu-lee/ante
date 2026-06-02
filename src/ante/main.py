@@ -590,6 +590,7 @@ async def _init_gateway(s: Services) -> None:
         account_service=s.account_service,
         eventbus=s.eventbus,
         stop_order_manager=stop_order_manager,
+        order_tracker=s.order_tracker,
     )
     s.api_gateway.start()
     logger.info("APIGateway 시작 완료")
