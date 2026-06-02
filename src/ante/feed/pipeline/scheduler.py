@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
+
+# KST(UTC+9) 캘린더 기준. backfill_runner._KST / dart_collector._KST와
+# 동일 기준이어야 한다(repo 전반 KST 정합). feed 스케줄/검증은 모두 KST today를
+# 사용하므로 OS local TZ가 아닌 KST로 기본 날짜를 산출한다.
+_KST = timezone(timedelta(hours=9))
 
 
 def generate_backfill_dates(
@@ -21,14 +26,14 @@ def generate_backfill_dates(
 
     Args:
         start: 시작 날짜 (YYYY-MM-DD, config의 backfill_since).
-        end: 종료 날짜 (YYYY-MM-DD). None이면 오늘.
+        end: 종료 날짜 (YYYY-MM-DD). None이면 KST 기준 오늘.
         last_checkpoint: 마지막 체크포인트 날짜 (YYYY-MM-DD). 있으면 그 다음 날부터.
 
     Yields:
         날짜 문자열 (YYYY-MM-DD), 오름차순.
     """
     start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end) if end else date.today()
+    end_date = date.fromisoformat(end) if end else datetime.now(tz=_KST).date()
 
     # 체크포인트가 있으면 그 다음 날부터 시작
     if last_checkpoint:
@@ -60,12 +65,12 @@ def generate_daily_date(reference: date | None = None) -> str:
     """Daily 모드에서 수집할 날짜 (전일)를 반환한다.
 
     Args:
-        reference: 기준 날짜. None이면 오늘.
+        reference: 기준 날짜. None이면 KST 기준 오늘.
 
     Returns:
         전일 날짜 문자열 (YYYY-MM-DD).
     """
-    ref = reference or date.today()
+    ref = reference or datetime.now(tz=_KST).date()
     yesterday = ref - timedelta(days=1)
     return yesterday.isoformat()
 
