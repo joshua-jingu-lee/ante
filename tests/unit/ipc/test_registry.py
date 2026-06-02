@@ -775,6 +775,38 @@ class TestHandleBrokerReconcileConditionalAudit:
         )
 
     @pytest.mark.asyncio
+    async def test_audit_fires_before_compute_account_diff_failure(self):
+        """(a-2) compute_account_diff 실패해도 audit 는 선발화됐다 (#2109 Codex).
+
+        audit 는 correction(상태변경) **직후** 발화해야 하므로, 이후 post-processing
+        인 ``compute_account_diff`` 가 예외를 던지더라도 (이미 발생한 보정에 대한)
+        audit 누락이 일어나면 안 된다. 예외는 그대로 전파되되, 그 전에
+        ``audit_logger.log`` 가 이미 1회 호출됐음을 단언한다.
+        """
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        svc, broker, reconciler, audit_logger = _make_reconcile_svc(
+            bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
+            broker_positions=[{"symbol": "005930", "quantity": 10}],
+        )
+        # 실제 보정 발생 (1봇 + adjustments 비어있지 않음).
+        reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
+        # 보정 이후 post-processing 단계가 실패한다.
+        reconciler.compute_account_diff.side_effect = RuntimeError("diff failed")
+
+        with pytest.raises(RuntimeError, match="diff failed"):
+            await _handle_broker_reconcile(
+                svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            )
+
+        # compute_account_diff 실패 이전에 audit 가 이미 발화됐어야 한다.
+        audit_logger.log.assert_awaited_once_with(
+            member_id="cli-user",
+            action="broker.reconcile",
+            resource="account:acc-a",
+        )
+
+    @pytest.mark.asyncio
     async def test_fix_false_detect_only_no_audit(self):
         """(b) fix=False detect-only(상태변경 없음) → audit 미발화."""
         from ante.ipc.registry import _handle_broker_reconcile

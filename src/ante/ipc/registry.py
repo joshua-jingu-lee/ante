@@ -1190,12 +1190,6 @@ async def _handle_broker_reconcile(
             account_id=account_id,
             dry_run=not fix,
         )
-        # display(discrepancies)는 보정 **이후** 상태로 계좌 단위 합산 비교를
-        # 재계산한다(순수, 이벤트 無). fix=True 면 보정 후 0으로 수렴, dry_run
-        # 이면 미보정 불일치가 그대로 남는다.
-        mismatches = await svc.reconciler.compute_account_diff(
-            broker_positions, account_id=account_id
-        )
         # #2109: 실제 포지션 보정이 발생한 경우에만 조건부 audit. audit 원칙은
         # 상태변경만 기록(docs/specs/.../audit.md L122 매핑 broker.reconcile →
         # resource=account:{id}). detect-only(fix=False)나 보정 대상 없음
@@ -1205,12 +1199,22 @@ async def _handle_broker_reconcile(
         # ``required_services`` 에 ``audit_logger`` 가 명시되어 preflight 에서
         # 부재가 차단되므로(fail-closed) 여기서는 직접 호출한다 —
         # unaudited correction 을 방지한다.
+        #
+        # 보정(상태변경) 직후 즉시 audit — 이후 post-processing
+        # (compute_account_diff) 실패가 audit 누락을 유발하지 않도록(#2109
+        # Codex). 상태변경(fix and adjustments)만 기록.
         if fix and adjustments:
             await svc.audit_logger.log(
                 member_id=actor,
                 action="broker.reconcile",
                 resource=f"account:{account_id}",
             )
+        # display(discrepancies)는 보정 **이후** 상태로 계좌 단위 합산 비교를
+        # 재계산한다(순수, 이벤트 無). fix=True 면 보정 후 0으로 수렴, dry_run
+        # 이면 미보정 불일치가 그대로 남는다.
+        mismatches = await svc.reconciler.compute_account_diff(
+            broker_positions, account_id=account_id
+        )
         return _broker_reconcile_envelope(
             account_id=account_id,
             fix=fix,
