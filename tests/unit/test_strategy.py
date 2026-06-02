@@ -2070,6 +2070,105 @@ class X(Strategy):
         assert not result.valid
         assert any("No class inheriting from Strategy" in e for e in result.errors)
 
+    def test_module_alias_rebind_before_use_not_counted(self, validator, tmp_path):
+        """module-alias 재바인딩 후 사용 → 미인정 (#2042 4차 Codex FAIL 락).
+
+        `import ante.strategy as astg` 로 module-alias 등록 후 `astg = object()`
+        가 그 이름을 재바인딩한 다음 `class X(astg.Strategy)` 가 온다. X 정의
+        시점의 astg 는 ante.strategy 모듈이 아닌 다른 객체이므로 미인정해야
+        한다(loader 도 `astg.Strategy` AttributeError 로 X 정의 자체가 실패).
+        name_binding 의 재바인딩 무효화와 대칭으로 module_aliases 도 무효화돼야
+        한다. (재바인딩 값은 top-level 허용 리터럴을 써 forbidden-toplevel 검사와
+        직교하게 둔다.)
+        """
+        code = """
+import ante.strategy as astg
+from ante.strategy import StrategyMeta
+
+astg = 0
+
+class X(astg.Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+    def test_module_alias_used_before_rebind_passes(self, validator, tmp_path):
+        """module-alias 사용 후 재바인딩 → 인정 (정의 순서 보존).
+
+        `class X(astg.Strategy)` 시점의 astg 는 아직 ante.strategy module 이므로
+        인정(런타임 유효·loader 가 X 카운트). 그 뒤 `astg = object()` 재바인딩은
+        X 판정에 영향을 주지 않는다. 재바인딩 무효화가 order-aware 임을 락.
+        (재바인딩 값은 top-level 허용 리터럴을 써 forbidden-toplevel 검사와
+        직교하게 둔다.)
+        """
+        code = """
+import ante.strategy as astg
+from ante.strategy import StrategyMeta
+
+class X(astg.Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+
+astg = 0
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid
+
+    def test_dotted_module_root_rebind_before_use_not_counted(
+        self, validator, tmp_path
+    ):
+        """dotted alias root 이름 재바인딩 후 사용 → 미인정 (#2042).
+
+        `import ante.strategy` 로 module-alias("ante.strategy") 등록 후 root
+        이름 `ante` 를 재바인딩하면 `ante.strategy.Strategy` 경로가 더 이상 ante
+        모듈을 가리키지 않으므로 미인정해야 한다. dotted alias 무효화는 root
+        이름 기준이다. (재바인딩 값은 top-level 허용 리터럴을 써
+        forbidden-toplevel 검사와 직교하게 둔다.)
+        """
+        code = """
+import ante.strategy
+from ante.strategy import StrategyMeta
+
+ante = 0
+
+class X(ante.strategy.Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
+    def test_star_import_strategy_not_counted(self, validator, tmp_path):
+        """`from ante.strategy import *` star-import → 미인정 (known-limitation).
+
+        star-import 는 Strategy 를 명시 바인딩명으로 추적하지 않으므로 보수적
+        으로 strategy_names 에 추가하지 않는다(미인정). loader 보다 약하지만
+        흔치 않은 의도된 known-limitation 범위다. authoritative gate 는 loader
+        의 런타임 issubclass.
+        """
+        code = """
+from ante.strategy import *
+
+class X(Strategy):
+    meta = StrategyMeta(name="t", version="1.0.0", description="t")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert not result.valid
+        assert any("No class inheriting from Strategy" in e for e in result.errors)
+
 
 # ── #2052 loader: 파일 정의 subclass만 카운트 ────────────────────────
 

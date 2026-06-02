@@ -209,19 +209,59 @@ class StrategyValidator:
         적용하면(false positive) loader 와 불일치하므로, module-scope 로 한정해
         정합시킨다.
 
-        Known-limitation (의도된 비대칭): transitive/intermediate-base
-        (다른 파일에서 Strategy 를 상속한 중간 베이스)·다단계 재export·
-        동적 import 는 정적 인식하지 않는다. loader 의 런타임 ``issubclass``
-        가 최종 권위다(현재 validator 와 동일, 회귀 아님).
+        재바인딩 무효화(`name_binding` ↔ `module_aliases` 대칭, #2042 4차):
+        ``name_binding`` 뿐 아니라 ``module_aliases`` 도 정의 순서대로 재바인딩
+        되면 무효화한다. 즉 ``import ante.strategy as astg; astg = other; class
+        X(astg.Strategy)`` 는 X 정의 시점에 ``astg`` 가 이미 다른 값으로
+        재바인딩됐으므로 미인정한다(loader 도 비카운트). 반대로 ``import
+        ante.strategy as astg; class X(astg.Strategy); astg = other`` 는 X 가
+        재바인딩 **이전**이라 인정한다. ``import ante.strategy``(dotted alias)는
+        root 이름(``ante``)이 재바인딩되면 무효화한다. 재바인딩 노드는
+        ``Assign``/value 있는 ``AnnAssign``/``ClassDef``/``Import``/``ImportFrom``
+        /``del`` 이다.
+
+        정적 name-resolution 모델 (bounded, #2042 known-limitation):
+        다음을 정확히 모델링한다 — 직접/asname import (``from ante.strategy
+        import Strategy [as S]``), ``import ante.strategy [as x]`` module-alias,
+        module-level 정의 순서 기반 local-class shadow, 그리고 Name·module-alias
+        의 재바인딩(``Assign``/``AnnAssign``/``ClassDef``/``del``/재import) 무효화.
+        그 밖의 병리적 케이스 — 조건부 import, ``from ante.strategy import *``
+        star-import, 간접 alias 체인(``x = ante.strategy; x.Strategy``), 동적
+        import 등 — 는 정적으로 모델링하지 않는다(known-limitation). validate 는
+        정적 best-effort pre-check 이며, 실제 Strategy 상속의 **authoritative
+        gate 는 loader 의 런타임 ``issubclass(obj, Strategy)``** 다. 이 비대칭은
+        의도적으로 수용한다(추가 round chase 차단). star-import 는 보수적으로
+        Strategy 를 명시 바인딩하지 않아 미인정(loader 보다 약하나 흔치 않은
+        known-limitation 범위).
         """
         name_binding: dict[str, str] = {}
         module_aliases: set[str] = set()
         result: list[ast.ClassDef] = []
 
+        def _discard_module_aliases(name: str) -> None:
+            """이름 재바인딩 시 그 이름이 가리키던 module-alias 를 제거.
+
+            직접 별칭(``astg``)이거나, dotted alias(``ante.strategy``)의 root
+            이름(``ante``)이 재바인딩되면 해당 alias 들을 module_aliases 에서
+            제거한다.
+            """
+            module_aliases.discard(name)
+            for stale in {a for a in module_aliases if a.split(".", 1)[0] == name}:
+                module_aliases.discard(stale)
+
+        def _invalidate(name: str) -> None:
+            """이름 재바인딩 시 ante 바인딩/module-alias 둘 다 무효화 (대칭)."""
+            # Name 바인딩: 이전이 무엇이든 ante 도 local 도 아닌 "other" 로.
+            name_binding[name] = "other"
+            _discard_module_aliases(name)
+
         for node in tree.body:  # module-level 정의 순서 단일 패스 (loader 정합)
             if isinstance(node, ast.ImportFrom):
-                # ante.strategy/.base 에서 module-scope import 된 ``Strategy``
-                # (asname 포함)의 바인딩명을 ante_strategy 로 기록.
+                # 1) 재import 도 재바인딩 → 기존 ante 바인딩/alias 먼저 무효화.
+                for alias in node.names:
+                    _invalidate(alias.asname or alias.name)
+                # 2) ante.strategy/.base 에서 module-scope import 된 ``Strategy``
+                #    (asname 포함)의 바인딩명을 ante_strategy 로 (재)기록.
                 if node.module in self._STRATEGY_MODULES and node.level == 0:
                     for alias in node.names:
                         if alias.name == "Strategy":
@@ -231,8 +271,12 @@ class StrategyValidator:
                 # ``import ante.strategy`` → "ante.strategy",
                 # ``import ante.strategy as astg`` → "astg".
                 for alias in node.names:
+                    # 재import 도 재바인딩 → 바인딩명을 먼저 무효화한 뒤
+                    # 해당 import 가 ante module 이면 alias 로 (재)등록.
+                    bound = alias.asname or alias.name
+                    _invalidate(bound)
                     if alias.name in self._STRATEGY_MODULES:
-                        module_aliases.add(alias.asname or alias.name)
+                        module_aliases.add(bound)
             elif isinstance(node, ast.ClassDef):
                 # 1) 현재 바인딩으로 base 해석 → Strategy subclass 여부 판정.
                 for base in node.bases:
@@ -240,16 +284,46 @@ class StrategyValidator:
                         result.append(node)
                         break
                 # 2) 그다음 이 클래스 이름을 로컬 클래스로 재바인딩(이후 shadow).
+                #    클래스 정의는 그 이름의 module-alias 도 무효화한다(대칭).
+                _discard_module_aliases(node.name)
                 name_binding[node.name] = "local_class"
             elif isinstance(node, ast.Assign):
-                # 이름 재바인딩은 보수적으로 "other"(ante 도 local 도 아님).
+                # 이름 재바인딩은 보수적으로 "other"(ante 도 local 도 아님) +
+                # module-alias 무효화(대칭).
+                for target in node.targets:
+                    for name in self._assign_target_names(target):
+                        _invalidate(name)
+            elif isinstance(node, ast.AnnAssign):
+                # value 가 있는 AnnAssign 만 실제 바인딩 → 무효화.
+                if node.value is not None and isinstance(node.target, ast.Name):
+                    _invalidate(node.target.id)
+            elif isinstance(node, ast.Delete):
+                # `del astg` / `del Strategy` 도 바인딩 제거 → 무효화.
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        name_binding[target.id] = "other"
-            elif isinstance(node, ast.AnnAssign):
-                if node.value is not None and isinstance(node.target, ast.Name):
-                    name_binding[node.target.id] = "other"
+                        _invalidate(target.id)
         return result
+
+    @staticmethod
+    def _assign_target_names(target: ast.expr) -> list[str]:
+        """Assign 타깃에서 module-level 로 재바인딩되는 Name id 들을 수집.
+
+        ``x = ...`` → ``["x"]``, ``x = y = ...`` 는 각 target 이 별도로
+        들어오므로 호출당 하나. ``x, y = ...`` (Tuple/List unpack)도 포함한다.
+        Attribute/Subscript 타깃(``obj.x = ...``)은 module-level Name 재바인딩이
+        아니므로 무시한다.
+        """
+        if isinstance(target, ast.Name):
+            return [target.id]
+        if isinstance(target, ast.Tuple | ast.List):
+            names: list[str] = []
+            for elt in target.elts:
+                if isinstance(elt, ast.Name):
+                    names.append(elt.id)
+                elif isinstance(elt, ast.Starred) and isinstance(elt.value, ast.Name):
+                    names.append(elt.value.id)
+            return names
+        return []
 
     def _base_is_strategy(
         self,
