@@ -350,6 +350,55 @@ def require_scope(*scopes: str) -> Callable:
     return decorator
 
 
+def enforce_scope(ctx: click.Context, *scopes: str) -> None:
+    """명령 내부에서 조건부로 scope를 검증한다(imperative).
+
+    ``require_scope`` 데코레이터는 명령 진입 시점에 고정 scope를 강제하지만,
+    일부 명령은 입력 옵션에 따라 mutating 경로로 분기한다(예:
+    ``data validate --fix`` 는 손상 파일을 ``.corrupted`` 로 격리하므로 read
+    검증에 더해 write 권한이 필요하다). 이런 조건부 권한 경계를 데코레이터로
+    표현할 수 없으므로, 명령 본문에서 mutation 직전에 호출하는 imperative
+    헬퍼를 제공한다.
+
+    ``require_scope`` 데코레이터와 동일 규칙을 적용한다:
+
+    - ``ctx.obj["member"]`` 가 ``None`` 이면 ``auth_required`` emit 후
+      ``SystemExit(1)``.
+    - Human(master, admin) 멤버는 scope 제한 없이 통과.
+    - Agent 멤버는 ``scopes`` 를 모두 보유해야 한다. 부족 시
+      ``permission_denied`` 를 부족 scope와 함께 emit 후 ``SystemExit(1)``.
+
+    SCOPE_VOCABULARY 는 flat frozenset(계층 없음)이므로 ``data:write`` 가
+    ``data:read`` 를 함의하지 않는다. 따라서 ``@require_scope("data:read")`` 데코
+    레이터와 본 헬퍼의 ``enforce_scope(ctx, "data:write")`` 호출이 결합되면
+    Agent는 두 scope를 모두 보유한 토큰만 통과한다(검증 read + 격리 write).
+    """
+    from ante.member.models import MemberType
+
+    member: Member | None = ctx.obj.get("member")
+    if member is None:
+        _emit_auth_error(
+            ctx,
+            "auth_required",
+            "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+        )
+        raise SystemExit(1)
+
+    # Human(master, admin)은 scope 무제한 — require_scope 와 동일.
+    if member.type == MemberType.HUMAN:
+        return
+
+    # Agent는 scope 검증 — require_scope 와 동일 규칙/메시지.
+    missing = [s for s in scopes if s not in member.scopes]
+    if missing:
+        _emit_auth_error(
+            ctx,
+            "permission_denied",
+            f"권한이 부족합니다. 필요 권한: {', '.join(missing)}",
+        )
+        raise SystemExit(1)
+
+
 def get_member_id(ctx: click.Context) -> str:
     """인증된 멤버 ID를 반환. 미인증 시 'unknown'."""
     member: Member | None = ctx.obj.get("member")
