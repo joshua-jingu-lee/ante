@@ -47,6 +47,7 @@ class APIGateway:
         eventbus: EventBus,
         rate_config: RateLimitConfig | None = None,
         stop_order_manager: Any | None = None,
+        order_tracker: Any | None = None,
     ) -> None:
         self._account_service = account_service
         self._eventbus = eventbus
@@ -57,6 +58,7 @@ class APIGateway:
         self._cache = ResponseCache()
         self._running = False
         self._stop_order_manager = stop_order_manager
+        self._order_tracker = order_tracker
 
     async def _get_broker(self, account_id: str) -> BrokerAdapter:
         """AccountService에서 브로커 인스턴스를 획득한다."""
@@ -243,16 +245,53 @@ class APIGateway:
     async def cancel_order(self, order_id: str, *, account_id: str) -> bool:
         """주문 취소. account_id로 브로커 라우팅.
 
+        취소 대상은 **내부 order_id** 로 들어오지만 BrokerAdapter 는
+        broker_order_id(증권사 주문번호, KIS ``odno`` 등)를 요구한다. #2134:
+        OrderTracker 로 ``order_id → broker_order_id`` 를 변환한 뒤 broker 에
+        전달한다. 변환 불가/검증 실패 시 **fail-closed** 로 ``False`` 를 반환하고
+        broker 를 호출하지 않는다 (내부 order_id 를 broker 로 passthrough 하지
+        않는다 — P1 재발 방지).
+
         SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
         require_account_id(account_id, context="gateway.cancel_order")
 
+        # #2134: fail-closed broker_order_id 변환 — broker 호출 전에 검증.
+        if self._order_tracker is None:
+            logger.error(
+                "order_tracker 미주입 — broker_order_id 변환 불가, 취소 차단 "
+                "(order_id=%s, account=%s)",
+                order_id,
+                account_id,
+            )
+            return False
+
+        record = await self._order_tracker.get(order_id)
+        if record is None:
+            logger.warning(
+                "취소 대상 주문 미발견 — broker_order_id 변환 불가, 취소 차단 "
+                "(order_id=%s, account=%s)",
+                order_id,
+                account_id,
+            )
+            return False
+
+        if record.account_id != account_id:
+            logger.warning(
+                "cross-account 취소 시도 차단 "
+                "(order_id=%s, record.account=%s, 요청 account=%s)",
+                order_id,
+                record.account_id,
+                account_id,
+            )
+            return False
+
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)
-        return await broker.cancel_order(order_id)
+        return await broker.cancel_order(record.broker_order_id)
 
     # ── EventBus 핸들러 ──────────────────────────────
 
