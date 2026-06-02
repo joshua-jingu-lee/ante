@@ -93,6 +93,13 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
     return []
 
 
+def _date_str(value: object) -> str:
+    """Datetime/Date/str을 YYYY-MM-DD 문자열로."""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()[:10]  # type: ignore[attr-defined]
+    return str(value)[:10]
+
+
 # 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용.
 # 코드 레벨 SSOT(`ante.core.exchange.CANONICAL_EXCHANGES`)에 위임한다.
 # 값(canonical 5종 frozenset)·`migrate_parquet_paths()` 동작은 위임
@@ -533,12 +540,24 @@ class ParquetStore:
         data_type: str = "ohlcv",
         exchange: str = "KRX",
     ) -> tuple[str, str] | None:
-        """종목의 데이터 기간 조회. (첫 파일 stem, 마지막 파일 stem) 반환."""
+        """종목의 데이터 기간 조회. (첫 row 날짜, 마지막 row 날짜) YYYY-MM-DD 반환.
+
+        파일은 월별 stem 정렬이므로 첫 파일 min(time_col) = 전역 최소,
+        마지막 파일 max(time_col) = 전역 최대. 읽기 실패/빈 컬럼 시 파일 stem fallback.
+        """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         files = sorted(path.glob("*.parquet")) if path.exists() else []
         if not files:
             return None
-        return files[0].stem, files[-1].stem
+        time_col = _TIME_COLUMN.get(data_type, "timestamp")
+        try:
+            first_min = pl.read_parquet(files[0]).select(pl.col(time_col).min()).item()
+            last_max = pl.read_parquet(files[-1]).select(pl.col(time_col).max()).item()
+        except Exception:
+            return files[0].stem, files[-1].stem
+        if first_min is None or last_max is None:
+            return files[0].stem, files[-1].stem
+        return _date_str(first_min), _date_str(last_max)
 
     def get_row_count(
         self,
