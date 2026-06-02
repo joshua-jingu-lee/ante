@@ -41,6 +41,13 @@ def _make_service_registry(*, bot_present: bool) -> ServiceRegistry:
     bot_manager = MagicMock()
     if bot_present:
         present_bot = MagicMock()
+        # #2128: account-scoping 가드(``bot.config.account_id`` vs 요청
+        # ``account_id``)가 추가되어 present-bot 분기는 요청 payload 의
+        # ``account_id="domestic"`` 과 일치하는 config 를 가져야 #1792 정상
+        # 경로 회귀가 유지된다. mismatch 검증 자체는 #2128 전용 테스트
+        # (tests/unit/ipc/test_treasury_account_scoping.py)가 담당한다.
+        present_bot.config = MagicMock()
+        present_bot.config.account_id = "domestic"
         bot_manager.get_bot = MagicMock(return_value=present_bot)
     else:
         bot_manager.get_bot = MagicMock(return_value=None)
