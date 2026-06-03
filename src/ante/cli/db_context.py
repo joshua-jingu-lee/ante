@@ -21,7 +21,8 @@ Codex Plan Review v2 lock:
    ``read_only=False``이면 기존 ``Database(db_path)`` 호출을 byte-for-byte
    유지한다(kwarg 미전달 — #1856/#1857 patch 호환 및 모든 write 소비자 무영향
    invariant). read-only 모드는 기존 스키마를 부트스트랩 없이 읽는 offline read
-   명령(현재 ``backtest history``)에만 적용된다 — §4 예외 service
+   명령(현재 ``backtest history``, ``data list`` 의 종목명 보강 — #1984)에만
+   적용된다 — §4 예외 service
    (`AccountService`/`MemberService`/`ApprovalService`/`AuditLogger`/
    `DynamicConfigService`)는 ``initialize()``가 schema DDL을 발화해야 read가
    가능하므로 schema 분리 전까지 ``read_only=True`` 대상이 아니다.
@@ -67,8 +68,9 @@ async def open_cli_db(
             ``False`` (기본) 이면 기존 ``Database(db_path)`` 호출을
             byte-for-byte 유지한다 (kwarg 미전달, 모든 write 소비자 무영향).
             read-only 모드는 기존 스키마를 부트스트랩 없이 읽는 offline read
-            명령(현재 ``backtest history``)에만 사용한다 — §4 예외 service 는
-            schema 분리 전까지 ``read_only=True`` 대상이 아니다.
+            명령(현재 ``backtest history``, ``data list`` 의 종목명 보강 —
+            #1984)에만 사용한다 — §4 예외 service 는 schema 분리 전까지
+            ``read_only=True`` 대상이 아니다.
         db_path_override: optional 명시 DB 경로. ``None`` 이면
             ``get_db_path(ctx)`` 로 해석한다. ``approval list/info/review/
             audit-types`` 등 ``--db-path`` Click option 을 지원하는 명령은

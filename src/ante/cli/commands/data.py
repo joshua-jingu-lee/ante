@@ -5,6 +5,7 @@ from __future__ import annotations
 import click
 
 from ante.cli._data_path import resolve_data_path
+from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import enforce_scope, require_auth, require_scope
@@ -50,14 +51,12 @@ def data_list(
     """보유 데이터셋 목록."""
     import asyncio
 
-    from ante.cli.main import get_db_path
     from ante.data.datasets import list_datasets, validate_dataset_filters
     from ante.data.store import ParquetStore
 
     data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
-    resolved_db_path = db_path or get_db_path(ctx)
 
     try:
         normalized_type = validate_dataset_filters(
@@ -82,21 +81,40 @@ def data_list(
         return
 
     async def _enrich(items: list[dict]) -> list[dict]:
-        from ante.core.database import Database
         from ante.instrument.service import InstrumentService
 
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        # ``data list`` 는 ParquetStore (파일) 에서 datasets 를 읽는 offline read
+        # 명령이며, DB 는 종목명 보강 (``get_name``) 에만 쓰인다. read-only DB
+        # artifact (``--db-path`` 로 지정된 0444 파일 / 0555 부모 디렉터리) 에서
+        # ``InstrumentService.initialize()`` (CREATE TABLE instruments DDL) 나
+        # ``Database(read_only=False)`` (WAL PRAGMA writer 연결) 를 발화하면
+        # read-only fs 에서 실패한다. 따라서 ``backtest history`` (#1974) 와 동형
+        # 으로 ``open_cli_db(read_only=True)`` + ``svc.load_readonly()`` (DDL 없는
+        # 캐시 워밍) 를 사용한다 (offline-factory.md §2 옵션 A). ``--db-path``
+        # 원시 값 (None 가능) 을 그대로 ``db_path_override`` 로 전달하면
+        # ``open_cli_db`` 가 None 일 때 ``get_db_path(ctx)`` 로 해석하므로 기존
+        # ``--db-path`` 동작과 동치다 (approval.py / backtest.py 패턴).
+        async with open_cli_db(ctx, read_only=True, db_path_override=db_path) as db:
             svc = InstrumentService(db)
-            await svc.initialize()
+            # initialize() 대신 load_readonly(): schema DDL 없이 캐시만 워밍한다.
+            # instruments 테이블이 부재하면 빈 캐시로 정규화되어 ``get_name`` 이
+            # symbol fallback 을 반환한다 (malformed/locked 등 다른
+            # OperationalError 는 재전파 → 아래 DATA_ERROR 로 변환).
+            await svc.load_readonly()
             for item in items:
                 item["name"] = svc.get_name(item["symbol"])
             return items
-        finally:
-            await db.close()
 
-    datasets = asyncio.run(_enrich(datasets))
+    try:
+        datasets = asyncio.run(_enrich(datasets))
+    except Exception as e:
+        # malformed/locked DB 등 종목명 보강 단계의 DB 에러는 traceback 을
+        # JSON 으로 노출하지 않고 public error code 로 변환한다 (#1984 —
+        # ``backtest history`` 의 BACKTEST_ERROR 분류 동형). read-only 성공
+        # 경로 (테이블 존재/부재 graceful) 는 본 분기에 들어오지 않는다.
+        fmt.error(str(e), code="DATA_ERROR")
+        raise SystemExit(1) from e
+
     if fmt.is_json:
         fmt.output({"datasets": datasets, "count": result["total"]})
     else:

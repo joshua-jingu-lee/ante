@@ -58,10 +58,10 @@ direct_database_construction:
     line: 254
     reason: "backtest run — long_running (progress-bar driven, deferred migration)"
 
-  # data domain — `data list` callsite. #1857 잔여로 본 사이클에서 보류.
-  - path: src/ante/cli/commands/data.py
-    line: 88
-    reason: "data list — offline (deferred migration, post-#1818 follow-up)"
+  # data domain — `data list` 는 `offline` 이며 #1984 에서 `open_cli_db`
+  # (read_only) + InstrumentService.load_readonly() 로 마이그레이션되어 직접
+  # Database 생성 callsite 가 사라졌다 — 엔트리 제거 (backtest history #1974
+  # 동형).
 
   # init — root-level `ante init` bootstrap command. CLI registry 의
   # 94 entries 외 follow-up set (`("init",)`). bootstrap 단계에서 DB 자체를
