@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 _COND_STATUS_FILLED = "t.status = ?"
 _COND_SIDE_SELL = "t.side = 'sell'"
 _COND_BOT_ID = "t.bot_id = ?"
+_COND_STRATEGY_ID = "t.strategy_id = ?"
 _JOIN_POSITION_HISTORY = """LEFT JOIN position_history ph
                 ON ph.trade_id = CAST(t.trade_id AS TEXT)
                 AND ph.action = 'sell'"""
@@ -107,6 +108,7 @@ class PerformanceTracker:
         end_date: str | None = None,
         *,
         account_id: str | None = None,
+        strategy_id: str | None = None,
     ) -> list[DailySummary]:
         """일별 성과 집계.
 
@@ -118,6 +120,12 @@ class PerformanceTracker:
                 집계한다 (read query 정책 — #1218 영역). 단일 계좌에
                 바인딩된 호출자(DailyReportScheduler 등)는 자기 계좌만
                 집계되도록 명시적으로 전달해야 한다 (#1240).
+            strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체를
+                집계한다. 지정 시 ``trades.strategy_id`` 컬럼(거래 시점
+                전략 귀속 durable key)으로 전략 전체 거래를 집계하며,
+                봇 멤버십/상태(삭제 여부)나 봇의 이후 전략 변경과
+                무관하다 (#2144). ``bot_id``/``account_id`` 와 함께
+                전달되면 AND 로 결합된다.
         """
         conditions: list[str] = [
             _COND_STATUS_FILLED,
@@ -131,6 +139,9 @@ class PerformanceTracker:
         if account_id:
             conditions.append("t.account_id = ?")
             params.append(account_id)
+        if strategy_id:
+            conditions.append(_COND_STRATEGY_ID)
+            params.append(strategy_id)
         if start_date:
             conditions.append("date(t.timestamp) >= ?")
             params.append(start_date)
@@ -173,6 +184,8 @@ class PerformanceTracker:
     async def get_weekly_summary(
         self,
         bot_id: str | None = None,
+        *,
+        strategy_id: str | None = None,
     ) -> list[WeeklySummary]:
         """주별 성과 집계.
 
@@ -180,6 +193,10 @@ class PerformanceTracker:
 
         Args:
             bot_id: 봇 ID 필터 (None이면 전체)
+            strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체.
+                지정 시 ``trades.strategy_id`` 로 전략 전체 거래를
+                집계하며 봇 멤버십/상태와 무관하다 (#2144). ``bot_id`` 와
+                함께 전달되면 AND 로 결합된다.
         """
         conditions: list[str] = [
             _COND_STATUS_FILLED,
@@ -190,6 +207,9 @@ class PerformanceTracker:
         if bot_id:
             conditions.append(_COND_BOT_ID)
             params.append(bot_id)
+        if strategy_id:
+            conditions.append(_COND_STRATEGY_ID)
+            params.append(strategy_id)
 
         where = " AND ".join(conditions)
         query = f"""
@@ -229,12 +249,18 @@ class PerformanceTracker:
         self,
         bot_id: str | None = None,
         year: int | None = None,
+        *,
+        strategy_id: str | None = None,
     ) -> list[MonthlySummary]:
         """월별 성과 집계.
 
         Args:
             bot_id: 봇 ID 필터 (None이면 전체)
             year: 연도 필터 (None이면 전체)
+            strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체.
+                지정 시 ``trades.strategy_id`` 로 전략 전체 거래를
+                집계하며 봇 멤버십/상태와 무관하다 (#2144). ``bot_id``/
+                ``year`` 와 함께 전달되면 AND 로 결합된다.
         """
         conditions: list[str] = [
             _COND_STATUS_FILLED,
@@ -245,6 +271,9 @@ class PerformanceTracker:
         if bot_id:
             conditions.append(_COND_BOT_ID)
             params.append(bot_id)
+        if strategy_id:
+            conditions.append(_COND_STRATEGY_ID)
+            params.append(strategy_id)
         if year:
             conditions.append("strftime('%Y', t.timestamp) = ?")
             params.append(str(year))

@@ -30,9 +30,9 @@ empty JSON 분기 +1):
 5. ``info`` (found) → ``raw_legacy`` (``fmt.output(result)`` 평면 metadata
    + params dict)
 6. ``summary`` (with items) → ``raw_legacy`` (``fmt.output(result)`` 평면
-   ``{strategy_id, period, bot_id, items}``)
+   ``{strategy_id, period, items}`` — #2144 로 단일 ``bot_id`` 제거)
 7. ``summary`` empty JSON 분기 → ``raw_legacy`` (``fmt.output(result)``
-   동일 평면 ``{strategy_id, period, bot_id, items: []}``)
+   동일 평면 ``{strategy_id, period, items: []}``)
 8. ``performance`` (found) → ``raw_legacy`` (``fmt.output(result)`` 평면
    ``{strategy_name, strategy_id, metrics}``)
 9. ``set-status`` (IPC 분기) → ``raw_legacy`` (``fmt.output(result)`` 평면
@@ -410,19 +410,16 @@ def test_strategy_summary_with_items_envelope_matches_raw_legacy(
 ) -> None:
     """``strategy summary`` with items: ``fmt.output(result)`` 평면 dict.
 
-    strategy.py:662-663: ``if fmt.is_json: fmt.output(result)`` → ``{strategy_id,
-    period, bot_id, items: [...]}``. text 모드는 fmt.table 분기.
+    strategy.py: ``if fmt.is_json: fmt.output(result)`` → ``{strategy_id,
+    period, items: [...]}``. #2144 로 단일 ``bot_id`` 필드는 제거되었다
+    (전략 전체 집계라 첫 봇만 가리키는 필드는 의미가 없다). text 모드는
+    fmt.table 분기.
     """
     from ante.trade.models import DailySummary
 
     registry, _db = mock_create_registry
     record = _make_record()
     registry.get = AsyncMock(return_value=record)
-
-    # _find_bot_id_for_strategy 는 db.fetch_one 을 호출한다.
-    # mock_create_registry fixture 의 db 가 default 로 ``None`` 을 반환하지만,
-    # 본 케이스에서 bot_id 가 있는 결과를 보고 싶다면 fetch_one 을 customize.
-    _db.fetch_one = AsyncMock(return_value={"bot_id": "bot-1"})
 
     daily = DailySummary(
         date="2026-01-01",
@@ -447,7 +444,8 @@ def test_strategy_summary_with_items_envelope_matches_raw_legacy(
     )
     assert payload["strategy_id"] == "strat-1"
     assert payload["period"] == "daily"
-    assert payload["bot_id"] == "bot-1"
+    # #2144: 단일 bot_id 필드 제거 (전략 전체 집계, 첫-봇 artifact 아님).
+    assert "bot_id" not in payload
     assert isinstance(payload["items"], list)
     assert len(payload["items"]) == 1
     assert payload["items"][0]["date"] == "2026-01-01"
@@ -469,7 +467,6 @@ def test_strategy_summary_empty_json_envelope_matches_raw_legacy(
     registry, _db = mock_create_registry
     record = _make_record()
     registry.get = AsyncMock(return_value=record)
-    _db.fetch_one = AsyncMock(return_value=None)  # bot_id 부재 → None.
 
     # PerformanceTracker.get_daily_summary 가 빈 list 반환.
     with patch(
@@ -486,7 +483,8 @@ def test_strategy_summary_empty_json_envelope_matches_raw_legacy(
         f"strategy summary empty json: standard envelope 아님. payload={payload!r}"
     )
     assert payload["strategy_id"] == "strat-1"
-    assert payload["bot_id"] is None
+    # #2144: 단일 bot_id 필드 제거.
+    assert "bot_id" not in payload
     assert payload["items"] == []
 
 

@@ -349,3 +349,94 @@ class TestReportPerformanceCLI:
                 ],
             )
             assert result.exit_code == 0
+
+
+class TestSummaryStrategyIdFilter:
+    """get_*_summary 의 strategy_id 필터 (#2144).
+
+    ``trades.strategy_id`` (거래 시점 전략 귀속 durable key) 로 전략 전체
+    거래를 집계한다. 봇 멤버십/상태와 무관하며, bot_id/account_id 와 함께
+    전달되면 AND 로 결합된다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_daily_summary_with_strategy_filter(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_daily_summary(strategy_id="strat-1")
+
+        assert result == []
+        query, params = db.fetch_all.call_args[0]
+        assert "t.strategy_id = ?" in query
+        assert "strat-1" in params
+
+    @pytest.mark.asyncio
+    async def test_weekly_summary_with_strategy_filter(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_weekly_summary(strategy_id="strat-1")
+
+        assert result == []
+        query, params = db.fetch_all.call_args[0]
+        assert "t.strategy_id = ?" in query
+        assert "strat-1" in params
+
+    @pytest.mark.asyncio
+    async def test_monthly_summary_with_strategy_filter(self):
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        result = await tracker.get_monthly_summary(strategy_id="strat-1")
+
+        assert result == []
+        query, params = db.fetch_all.call_args[0]
+        assert "t.strategy_id = ?" in query
+        assert "strat-1" in params
+
+    @pytest.mark.asyncio
+    async def test_daily_summary_bot_and_strategy_are_anded(self):
+        """bot_id + strategy_id 동시 전달 시 둘 다 AND 로 적용."""
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        await tracker.get_daily_summary(bot_id="bot-1", strategy_id="strat-1")
+
+        query, params = db.fetch_all.call_args[0]
+        assert "t.bot_id = ?" in query
+        assert "t.strategy_id = ?" in query
+        assert "bot-1" in params
+        assert "strat-1" in params
+
+    @pytest.mark.asyncio
+    async def test_monthly_summary_year_and_strategy_are_anded(self):
+        """year + strategy_id 동시 전달 시 둘 다 AND 로 적용."""
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        await tracker.get_monthly_summary(year=2026, strategy_id="strat-1")
+
+        query, params = db.fetch_all.call_args[0]
+        assert "strftime('%Y', t.timestamp) = ?" in query
+        assert "t.strategy_id = ?" in query
+        assert "2026" in params
+        assert "strat-1" in params
+
+    @pytest.mark.asyncio
+    async def test_daily_summary_no_strategy_filter_omits_condition(self):
+        """strategy_id 미전달(기존 호출자) 시 strategy_id 조건 미포함 (무회귀)."""
+        db = AsyncMock()
+        db.fetch_all = AsyncMock(return_value=[])
+
+        tracker = PerformanceTracker(db)
+        await tracker.get_daily_summary(bot_id="bot-1")
+
+        query, params = db.fetch_all.call_args[0]
+        assert "t.strategy_id = ?" not in query
+        assert "strat-1" not in params
