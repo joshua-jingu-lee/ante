@@ -53,7 +53,9 @@ class Database:
     설정한다(기존 baseline). ``read_only=True``는 reader 단일 연결만 SQLite
     ``file:...?mode=ro`` URI 로 열어 schema/WAL 쓰기 없이 기존 DB 를 읽는다
     (offline-factory.md §2 옵션 A). read-only 모드는 기존 스키마를 부트스트랩
-    없이 읽는 offline read 명령(현재 ``backtest history``)에만 적용된다.
+    없이 읽는 offline read 명령(현재 ``backtest history`` — #1974, ``data list``
+    의 종목명 보강 — #1984, ``report list``/``report view`` — #2114)에만
+    적용된다.
     """
 
     def __init__(self, db_path: str, *, read_only: bool = False) -> None:
