@@ -272,10 +272,16 @@ class TestServiceLayerTypedRaise:
             service = MemberService(db, eventbus=eventbus)
             await service.initialize()
 
-            await service.register("agent-grp-r", MemberType.AGENT)
+            # #2294: register 는 무조건 master actor 를 요구한다.
+            await service.bootstrap_master("owner", "pass1234")
+            await service.register(
+                "agent-grp-r", MemberType.AGENT, registered_by="owner"
+            )
 
             with pytest.raises(MemberAlreadyExistsError) as excinfo:
-                await service.register("agent-grp-r", MemberType.AGENT)
+                await service.register(
+                    "agent-grp-r", MemberType.AGENT, registered_by="owner"
+                )
             assert getattr(excinfo.value, "code", None) == "MEMBER_ALREADY_EXISTS"
             assert excinfo.value.member_id == "agent-grp-r"
             # ``ValueError`` 다중상속 회귀 보호 — 기존 ``except ValueError``

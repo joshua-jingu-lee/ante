@@ -402,6 +402,18 @@ async def test_regenerate_recovery_key_handler_sentinel_and_result_only(
     _assert_no_secret(_audit_call_strings(audit_logger))
 
 
+def test_recovery_audit_sentinel_is_reserved_namespace() -> None:
+    """#2295: recovery audit sentinel 은 reserved ``system:`` 네임스페이스 값.
+
+    이전 (#2295 이전): ``"recovery"`` — 사용자/agent member_id 와 충돌 가능.
+    #2295 가 ``"system:recovery"`` 로 변경해 ``system:kill_switch`` 와 동일한
+    reserved ``system:`` 네임스페이스에 두고 충돌을 제거한다 (member register
+    가 ``system:`` prefix 등록을 거부 — defense-in-depth).
+    """
+    assert _RECOVERY_AUDIT_MEMBER_ID == "system:recovery"
+    assert _RECOVERY_AUDIT_MEMBER_ID.startswith("system:")
+
+
 # ── (e) comprehensive secret 비노출: 실패 경로 envelope + server log ────────
 
 

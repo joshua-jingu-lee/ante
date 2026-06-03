@@ -57,6 +57,13 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ORG = "default"
 
+# Refs #2295: ``system:`` 는 system audit sentinel 네임스페이스
+# (``system:kill_switch`` / ``system:recovery``) 전용 reserved prefix 다. 사용자/
+# agent 등록 member_id 가 이 prefix 를 점유하면 audit 행위자(member_id) 식별이
+# 오염되므로 ``register`` 가 거부한다. 정확히 ``startswith(_RESERVED_MEMBER_ID_PREFIX)``
+# 만 거부하며 ``system`` 단독·``systemic`` 등은 오거부하지 않는다.
+_RESERVED_MEMBER_ID_PREFIX = "system:"
+
 MEMBER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS members (
     member_id          TEXT PRIMARY KEY,
@@ -392,9 +399,26 @@ class MemberService:
         재검증한다. 검증은 ``_assert_master``
         직후, ``_assert_type_role`` 직전에 둬서 enum membership 위반이
         type-role 분기보다 먼저 거부되도록 한다.
+
+        master 검증은 **무조건** 수행한다 (#2294 — #2113 메타리뷰 후속). 이전
+        에는 ``if registered_by:`` 가드로 빈 actor 를 우회 허용했으나, 형제
+        mutation (suspend/reactivate/revoke/rotate_token/update_scopes) 가 모두
+        무조건 ``_assert_master`` 를 호출하는 것·#1351 이 ``update_scopes`` 에서
+        동일 가드를 제거한 선례와 동형으로 무조건 호출한다. ``registered_by=""``
+        (빈 actor) 는 ``_assert_master("")`` → ``get("")`` 가 ``None`` 을 반환해
+        ``PermissionDeniedError`` 로 거부된다 (의도된 defense-in-depth). 정상
+        IPC actor (``'ipc'``) / CLI actor (``'unknown'``) 는 truthy 이므로
+        master 조회 경로를 거쳐 무영향이다.
+
+        ``member_id`` 가 ``system:`` reserved prefix 로 시작하면 등록을 거부
+        한다 (#2295 — audit sentinel 네임스페이스 보호). existing-member 조회
+        이전에 ``ReservedMemberIdError`` (.code=MEMBER_ID_RESERVED) 로 거부해,
+        legacy ``system:*`` 행이 있어도 MEMBER_ALREADY_EXISTS 가 아닌 reserved
+        코드가 surface 되도록 한다. 정확히 ``startswith("system:")`` 만 거부하며
+        ``system`` 단독·``systemic`` 등은 오거부하지 않는다.
         """
-        if registered_by:
-            await self._assert_master(registered_by, "register")
+        await self._assert_master(registered_by, "register")
+        self._assert_reserved_member_id(member_id)
         self._assert_role_enum(role)
         self._assert_type_enum(member_type)
         self._assert_type_role(member_type, role)
@@ -886,6 +910,27 @@ class MemberService:
         for scope in scopes:
             if not is_valid_scope(scope):
                 raise InvalidScopeError(scope)
+
+    @staticmethod
+    def _assert_reserved_member_id(member_id: str) -> None:
+        """reserved ``system:`` prefix 점유 여부를 검증한다 (#2295).
+
+        ``system:`` 는 system audit sentinel 네임스페이스 (``system:kill_switch``
+        / ``system:recovery``) 전용이다. 사용자/agent 등록 member_id 가 이 prefix
+        를 점유하면 audit row 의 행위자(member_id) 식별이 오염되므로 ``register``
+        가 거부한다.
+
+        existing-member 조회 이전에 호출해, legacy ``system:*`` 행이 DB 에 있어도
+        ``MemberAlreadyExistsError`` (MEMBER_ALREADY_EXISTS) 가 아니라
+        ``ReservedMemberIdError`` (MEMBER_ID_RESERVED) 가 surface 되도록 한다.
+
+        정확히 ``startswith("system:")`` 만 거부한다 — ``system`` 단독,
+        ``systemic`` 등 콜론 없는 일반 member_id 는 오거부하지 않는다.
+        """
+        from ante.member.errors import ReservedMemberIdError
+
+        if member_id.startswith(_RESERVED_MEMBER_ID_PREFIX):
+            raise ReservedMemberIdError(member_id)
 
     @staticmethod
     def _assert_role_enum(role: str) -> None:
