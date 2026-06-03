@@ -109,6 +109,14 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 - ``BotStrategyAlreadyRunningError`` → ``BOT_STRATEGY_ALREADY_RUNNING`` /
   ``state_conflict`` (#1800; "1전략 1봇" 정책 거부)
 
+#2282 가 추가한 bot 불변 필드 lock (Account ``AccountImmutableFieldError`` 선례
+미러):
+
+- ``BotImmutableFieldError`` → ``BOT_IMMUTABLE_FIELD`` / ``validation``
+  (#2282; ``update_bot`` 의 ``account_id`` 변경 거부 — treasury 예산·broker
+  credential·포지션이 account-bound 라 생성 후 불변. ``ACCOUNT_IMMUTABLE_FIELD``
+  / ``validation`` 동형 분류)
+
 ``BotError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
 ``AccountError`` 와 동일 패턴, #1843 sub-PR 3 Non-Goals).
@@ -231,6 +239,7 @@ from ante.approval.models import ApprovalValidationError
 from ante.bot.exceptions import (
     BotAccountCredentialsNotConfigured,
     BotAlreadyExistsError,
+    BotImmutableFieldError,
     BotNotAcceptingSignals,
     BotNotFoundError,
     BotStateConflict,
@@ -510,6 +519,14 @@ _BOT_ALREADY_EXISTS_SPEC: Final[ErrorSpec] = ErrorSpec(
 _BOT_STRATEGY_ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_STRATEGY_ALREADY_RUNNING",
     category="state_conflict",
+)
+
+# ``update_bot`` 의 ``account_id`` 변경 거부 (#2282). treasury 예산·broker
+# credential·포지션이 account-bound 라 생성 후 불변 — 입력 계약 위반이므로
+# Account ``ACCOUNT_IMMUTABLE_FIELD`` 와 동형으로 ``validation`` 카테고리.
+_BOT_IMMUTABLE_FIELD_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_IMMUTABLE_FIELD",
+    category="validation",
 )
 
 
@@ -797,6 +814,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BotNotAcceptingSignals: _BOT_NOT_ACCEPTING_SIGNALS_SPEC,
     BotAlreadyExistsError: _BOT_ALREADY_EXISTS_SPEC,
     BotStrategyAlreadyRunningError: _BOT_STRATEGY_ALREADY_RUNNING_SPEC,
+    # ── #2282 bot account_id 불변 lock (Account 선례 미러) ────────────────
+    BotImmutableFieldError: _BOT_IMMUTABLE_FIELD_SPEC,
     # ── #1843 sub-PR 4 treasury 7 sub-class (실측 .code mirror) ───────────
     TreasuryInvalidAmountError: _TREASURY_INVALID_AMOUNT_SPEC,
     TreasuryInsufficientUnallocatedError: _TREASURY_INSUFFICIENT_BALANCE_SPEC,

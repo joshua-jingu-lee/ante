@@ -11,10 +11,12 @@ from ante.bot.config import (
 from ante.bot.context_factory import StrategyContextFactory
 from ante.bot.exceptions import (
     BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE,
+    BOT_IMMUTABLE_FIELD_CODE,
     BOT_NOT_FOUND_CODE,
     BOT_STATE_CONFLICT_CODE,
     BotAccountCredentialsNotConfigured,
     BotError,
+    BotImmutableFieldError,
     BotNotFoundError,
     BotStateConflict,
 )
@@ -26,11 +28,13 @@ __all__ = [
     "BotAccountCredentialsNotConfigured",
     "BotConfig",
     "BotError",
+    "BotImmutableFieldError",
     "BotNotFoundError",
     "BotStateConflict",
     "BotManager",
     "BotStatus",
     "BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE",
+    "BOT_IMMUTABLE_FIELD_CODE",
     "BOT_NOT_FOUND_CODE",
     "BOT_STATE_CONFLICT_CODE",
     "MAX_INTERVAL_SECONDS",
