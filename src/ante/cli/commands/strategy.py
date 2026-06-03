@@ -73,21 +73,6 @@ async def _create_registry(
         yield registry, db
 
 
-async def _find_bot_id_for_strategy(db, strategy_id: str) -> str | None:  # noqa: ANN001
-    """전략에 연결된 첫 번째 봇 ID를 반환한다."""
-    try:
-        row = await db.fetch_one(
-            "SELECT bot_id FROM bots WHERE strategy_id = ? AND status != 'deleted' "
-            "ORDER BY bot_id LIMIT 1",
-            (strategy_id,),
-        )
-    except sqlite3.OperationalError as e:
-        if "no such table" in str(e).lower():
-            return None
-        raise
-    return row["bot_id"] if row else None
-
-
 @strategy.command()
 @click.argument("path", type=click.Path(exists=True))
 @click.pass_context
@@ -627,7 +612,18 @@ def _load_strategy_params(filepath: str) -> dict | None:
 @require_auth
 @require_scope("strategy:read")
 def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
-    """전략 기간별 성과 집계."""
+    """전략 기간별 성과 집계 (전략 전체 거래, absolute 지표).
+
+    전략의 ``trades.strategy_id`` (거래 시점 전략 귀속 durable key)로
+    해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇/여러 계좌에서
+    운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고 봇의 이후
+    전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다 (#2144).
+
+    지표는 ``realized_pnl``/``trade_count``/``win_rate`` 의 **기간별 절대
+    집계**다. ``strategy performance`` (계좌별 portfolio-relative) 와 달리
+    account-scoped 가 아니므로 여러 계좌·통화의 거래가 섞일 수 있다
+    (다중 통화 운용 시 ``realized_pnl`` 은 통화가 혼합될 수 있다).
+    """
     fmt = get_formatter(ctx)
 
     async def _summary() -> dict | None:
@@ -641,23 +637,27 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
                 return None
 
             tracker = PerformanceTracker(db)
-            bot_id = await _find_bot_id_for_strategy(db, strategy_id)
             if period == "daily":
-                daily_summaries = await tracker.get_daily_summary(bot_id=bot_id)
+                daily_summaries = await tracker.get_daily_summary(
+                    strategy_id=strategy_id
+                )
                 items = [asdict(s) for s in daily_summaries]
             elif period == "weekly":
-                weekly_summaries = await tracker.get_weekly_summary(bot_id=bot_id)
+                weekly_summaries = await tracker.get_weekly_summary(
+                    strategy_id=strategy_id
+                )
                 items = [
                     {**asdict(s), "week_label": s.week_label} for s in weekly_summaries
                 ]
             else:
-                monthly_summaries = await tracker.get_monthly_summary(bot_id=bot_id)
+                monthly_summaries = await tracker.get_monthly_summary(
+                    strategy_id=strategy_id
+                )
                 items = [asdict(s) for s in monthly_summaries]
 
             return {
                 "strategy_id": strategy_id,
                 "period": period,
-                "bot_id": bot_id,
                 "items": items,
             }
 

@@ -108,7 +108,7 @@ allowlist 후보에서 제거한다.
 | `ante strategy info <name>` | `offline` | StrategyRegistry 조회 |
 | `ante strategy performance <name> --account-id <account_id>` | `offline` | 성과 DB 집계 (account-scoped, semantic-required) |
 | `ante strategy set-status <strategy_id> --status adopted\|archived` | `runtime IPC` | 전략 상태 변경 |
-| `ante strategy summary <strategy_id> --period daily\|weekly\|monthly` | `offline` | 성과 기간 집계 |
+| `ante strategy summary <strategy_id> --period daily\|weekly\|monthly` | `offline` | 전략 전체 거래의 기간별 절대 집계 (cross-account, `trades.strategy_id`) |
 | `ante treasury status --account <account_id>` | `offline` | persisted treasury 상태 조회 (`--account` 필수) |
 | `ante treasury allocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
 | `ante treasury deallocate <bot_id> <amount> --account <account_id>` | `runtime IPC` | 서버 TreasuryManager 캐시 갱신 |
@@ -408,6 +408,16 @@ ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기�
 
 `strategy submit`은 전략 파일을 `StrategyRegistry`에 등록하고 `strategy_id`를 생성한다.
 이후 봇 생성은 이 `strategy_id`를 참조한다.
+
+`strategy summary`는 전략의 `trades.strategy_id`(거래 시점 전략 귀속 키)로
+해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇·여러 계좌에서
+운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고, 봇이 이후 다른
+전략으로 바뀌어 발생시킨 거래는 오염되지 않는다. 지표는
+`realized_pnl`/`trade_count`/`win_rate`의 **기간별 절대(absolute) 집계**다.
+`strategy performance`(계좌별 portfolio-relative, `--account-id` semantic-required)와
+달리 account-scoped가 아니므로 여러 계좌·통화의 거래가 섞일 수 있고, 다중 통화
+운용 시 `realized_pnl`은 통화가 혼합될 수 있다. 응답에는 단일 `bot_id`가
+포함되지 않는다(전략 전체 집계라 첫 봇만 가리키는 필드는 의미가 없다).
 
 ### `ante treasury` — 자금 관리
 
