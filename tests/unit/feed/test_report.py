@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -243,12 +244,13 @@ class TestReportSave:
         data_path: Path,
         sample_result: CollectionResult,
     ) -> None:
-        """파일 경로가 {YYYY-MM-DD}-{mode}.json 패턴이다."""
+        """파일 경로가 {YYYY-MM-DDTHHMMSS}-{mode}.json 패턴이다(#2123)."""
         gen = ReportGenerator(feed_dir)
         report = gen.generate(sample_result)
         path = gen.save(data_path, report, "daily")
 
-        assert path.name == "2026-03-17-daily.json"
+        # started_at='2026-03-17T16:00:12Z' → 초까지 포함, 콜론 제거.
+        assert path.name == "2026-03-17T160012-daily.json"
         assert path.parent == data_path / ".feed" / REPORTS_DIR
 
     def test_file_is_valid_json(
@@ -286,12 +288,72 @@ class TestReportSave:
         data_path: Path,
         empty_result: CollectionResult,
     ) -> None:
-        """backfill 모드일 때 파일명에 backfill이 포함된다."""
+        """backfill 모드일 때 파일명이 타임스탬프+backfill 패턴이다(#2123)."""
         gen = ReportGenerator(feed_dir)
         report = gen.generate(empty_result)
         path = gen.save(data_path, report, "backfill")
 
-        assert path.name == "2026-03-15-backfill.json"
+        # started_at='2026-03-15T10:00:00Z' → 초까지 포함, 콜론 제거.
+        assert path.name == "2026-03-15T100000-backfill.json"
+
+    def test_same_day_different_time_rerun_preserves_both(
+        self,
+        feed_dir: Path,
+        data_path: Path,
+        sample_result: CollectionResult,
+    ) -> None:
+        """같은 날+같은 mode를 다른 시각에 2회 save하면 2개 파일이 보존된다(#2123).
+
+        과거 형식({YYYY-MM-DD}-{mode}.json)은 두 번째 저장이 첫 번째를 덮어써
+        운영 이력이 소실됐다. 초까지 포함하는 파일명이면 서로 다른 파일이 된다.
+        """
+        gen = ReportGenerator(feed_dir)
+
+        report1 = gen.generate(sample_result)
+        path1 = gen.save(data_path, report1, "daily")
+
+        # 같은 날·같은 mode지만 시각만 다른 두 번째 실행.
+        later = replace(sample_result, started_at="2026-03-17T18:30:45Z")
+        report2 = gen.generate(later)
+        path2 = gen.save(data_path, report2, "daily")
+
+        assert path1.name == "2026-03-17T160012-daily.json"
+        assert path2.name == "2026-03-17T183045-daily.json"
+        assert path1 != path2
+        # 두 파일 모두 존재(덮어쓰기/소실 없음).
+        assert path1.exists()
+        assert path2.exists()
+        reports_dir = data_path / ".feed" / REPORTS_DIR
+        assert len(list(reports_dir.glob("*.json"))) == 2
+
+    def test_same_second_rerun_suffix_no_overwrite(
+        self,
+        feed_dir: Path,
+        data_path: Path,
+        sample_result: CollectionResult,
+    ) -> None:
+        """동일 started_at(같은 초) rerun은 suffix를 붙여 소실 없이 보존한다(#2123).
+
+        파일명이 동일 초로 충돌하면 -1, -2 ... suffix를 붙인다. 어떤 기존
+        이력도 덮어쓰지 않으므로 N회 save → N개 파일이 모두 남는다.
+        """
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(sample_result)
+
+        path1 = gen.save(data_path, report, "daily")
+        path2 = gen.save(data_path, report, "daily")
+        path3 = gen.save(data_path, report, "daily")
+
+        # 충돌 suffix 형식 고정: 첫 파일은 suffix 없음, 이후 -1, -2.
+        assert path1.name == "2026-03-17T160012-daily.json"
+        assert path2.name == "2026-03-17T160012-daily-1.json"
+        assert path3.name == "2026-03-17T160012-daily-2.json"
+        # 세 파일 모두 존재(소실 0).
+        assert path1.exists()
+        assert path2.exists()
+        assert path3.exists()
+        reports_dir = data_path / ".feed" / REPORTS_DIR
+        assert len(list(reports_dir.glob("*.json"))) == 3
 
     def test_saved_content_matches_report(
         self,
@@ -321,8 +383,13 @@ class TestReportListReports:
         """저장된 리포트 파일 목록을 반환한다."""
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
-        (reports_dir / "2026-03-15-daily.json").write_text("{}", encoding="utf-8")
-        (reports_dir / "2026-03-16-daily.json").write_text("{}", encoding="utf-8")
+        # 신형식 파일명({YYYY-MM-DDTHHMMSS}-{mode}.json) (#2123).
+        (reports_dir / "2026-03-15T100000-daily.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        (reports_dir / "2026-03-16T100000-daily.json").write_text(
+            "{}", encoding="utf-8"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports()
@@ -333,7 +400,7 @@ class TestReportListReports:
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
         for i in range(5):
-            (reports_dir / f"2026-03-{10 + i:02d}-daily.json").write_text(
+            (reports_dir / f"2026-03-{10 + i:02d}T100000-daily.json").write_text(
                 "{}", encoding="utf-8"
             )
 
@@ -342,20 +409,33 @@ class TestReportListReports:
         assert len(reports) == 3
 
     def test_sorted_reverse(self, feed_dir: Path) -> None:
-        """최신 순으로 정렬된다."""
+        """최신 순으로 정렬된다.
+
+        started_at이 없는({}) 파일은 키가 동률이라 파일명 역순 보조키로
+        정렬된다. 신형식 파일명({YYYY-MM-DDTHHMMSS}-{mode}.json)에서도
+        역순 정렬이 동일하게 동작함을 회귀로 고정한다(#2123).
+        """
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
-        (reports_dir / "2026-03-10-daily.json").write_text("{}", encoding="utf-8")
-        (reports_dir / "2026-03-15-daily.json").write_text("{}", encoding="utf-8")
+        (reports_dir / "2026-03-10T100000-daily.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        (reports_dir / "2026-03-15T100000-daily.json").write_text(
+            "{}", encoding="utf-8"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports()
-        assert reports[0].name == "2026-03-15-daily.json"
-        assert reports[1].name == "2026-03-10-daily.json"
+        assert reports[0].name == "2026-03-15T100000-daily.json"
+        assert reports[1].name == "2026-03-10T100000-daily.json"
 
 
 def _write_report(reports_dir: Path, filename: str, started_at: str | None) -> None:
-    """started_at만 담은 최소 리포트 JSON을 기록한다(테스트 헬퍼)."""
+    """started_at만 담은 최소 리포트 JSON을 기록한다(테스트 헬퍼).
+
+    신형식 파일명({YYYY-MM-DDTHHMMSS}-{mode}.json)에서 mode는 마지막
+    ``-`` 토큰('{mode}.json')에서 추출한다(#2123).
+    """
     payload: dict = {"mode": filename.split("-")[-1].removesuffix(".json")}
     if started_at is not None:
         payload["started_at"] = started_at
@@ -365,7 +445,11 @@ def _write_report(reports_dir: Path, filename: str, started_at: str | None) -> N
 
 
 class TestListReportsSortedByStartedAt:
-    """list_reports()가 파일명이 아닌 started_at 기준으로 정렬되는지 검증(#2047)."""
+    """list_reports()가 파일명이 아닌 started_at 기준으로 정렬되는지 검증(#2047).
+
+    파일명에 시각이 포함되어도(#2123) 정렬 키는 여전히 JSON 내용의 started_at이며,
+    파일명은 tie-break 보조키로만 쓰인다(운영 코드에 파일명 파싱 추가 없음).
+    """
 
     def test_same_date_backfill_after_daily_is_latest(self, feed_dir: Path) -> None:
         """같은 날짜에서 늦게 끝난 backfill이 최신으로 선택된다.
@@ -375,40 +459,52 @@ class TestListReportsSortedByStartedAt:
         """
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
-        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00Z")
-        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
+        _write_report(
+            reports_dir, "2026-06-01T070000-daily.json", "2026-06-01T07:00:00Z"
+        )
+        _write_report(
+            reports_dir, "2026-06-01T080000-backfill.json", "2026-06-01T08:00:00Z"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports(limit=1)
 
         assert len(reports) == 1
-        assert reports[0].name == "2026-06-01-backfill.json"
+        assert reports[0].name == "2026-06-01T080000-backfill.json"
 
     def test_different_dates_picks_later_date(self, feed_dir: Path) -> None:
         """날짜가 다르면 늦은 날짜의 리포트가 최신으로 선택된다."""
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
-        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
-        _write_report(reports_dir, "2026-06-02-daily.json", "2026-06-02T07:00:00Z")
+        _write_report(
+            reports_dir, "2026-06-01T080000-backfill.json", "2026-06-01T08:00:00Z"
+        )
+        _write_report(
+            reports_dir, "2026-06-02T070000-daily.json", "2026-06-02T07:00:00Z"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports()
 
-        assert reports[0].name == "2026-06-02-daily.json"
-        assert reports[1].name == "2026-06-01-backfill.json"
+        assert reports[0].name == "2026-06-02T070000-daily.json"
+        assert reports[1].name == "2026-06-01T080000-backfill.json"
 
     def test_missing_or_malformed_started_at_sorted_last(self, feed_dir: Path) -> None:
         """started_at 누락/손상 리포트는 크래시 없이 후순위로 밀린다."""
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
         # 정상 리포트.
-        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00Z")
+        _write_report(
+            reports_dir, "2026-06-01T070000-daily.json", "2026-06-01T07:00:00Z"
+        )
         # started_at 누락.
-        _write_report(reports_dir, "2026-06-02-daily.json", None)
+        _write_report(reports_dir, "2026-06-02T070000-daily.json", None)
         # started_at malformed.
-        _write_report(reports_dir, "2026-06-03-daily.json", "not-a-timestamp")
+        _write_report(reports_dir, "2026-06-03T070000-daily.json", "not-a-timestamp")
         # JSON 자체가 손상.
-        (reports_dir / "2026-06-04-daily.json").write_text("{ broken", encoding="utf-8")
+        (reports_dir / "2026-06-04T070000-daily.json").write_text(
+            "{ broken", encoding="utf-8"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports()
@@ -416,13 +512,13 @@ class TestListReportsSortedByStartedAt:
         # 4개 모두 목록에 포함(전체 실패 방지).
         assert len(reports) == 4
         # 정상 started_at을 가진 리포트가 가장 앞(최신).
-        assert reports[0].name == "2026-06-01-daily.json"
+        assert reports[0].name == "2026-06-01T070000-daily.json"
         # 키가 동률(min)인 나머지는 파일명 역순 보조키로 안정 정렬.
         rest = [p.name for p in reports[1:]]
         assert rest == [
-            "2026-06-04-daily.json",
-            "2026-06-03-daily.json",
-            "2026-06-02-daily.json",
+            "2026-06-04T070000-daily.json",
+            "2026-06-03T070000-daily.json",
+            "2026-06-02T070000-daily.json",
         ]
 
     def test_tie_started_at_uses_filename_secondary_key(self, feed_dir: Path) -> None:
@@ -430,16 +526,16 @@ class TestListReportsSortedByStartedAt:
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
         same = "2026-06-01T08:00:00Z"
-        _write_report(reports_dir, "2026-06-01-backfill.json", same)
-        _write_report(reports_dir, "2026-06-01-daily.json", same)
+        _write_report(reports_dir, "2026-06-01T080000-backfill.json", same)
+        _write_report(reports_dir, "2026-06-01T080000-daily.json", same)
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports()
 
         # tie면 파일명 역순: 'daily' > 'backfill'.
         assert [p.name for p in reports] == [
-            "2026-06-01-daily.json",
-            "2026-06-01-backfill.json",
+            "2026-06-01T080000-daily.json",
+            "2026-06-01T080000-backfill.json",
         ]
 
     def test_naive_started_at_is_normalized_aware(self, feed_dir: Path) -> None:
@@ -447,14 +543,18 @@ class TestListReportsSortedByStartedAt:
         reports_dir = feed_dir / REPORTS_DIR
         reports_dir.mkdir()
         # naive(타임존 없음) vs aware Z.
-        _write_report(reports_dir, "2026-06-01-daily.json", "2026-06-01T07:00:00")
-        _write_report(reports_dir, "2026-06-01-backfill.json", "2026-06-01T08:00:00Z")
+        _write_report(
+            reports_dir, "2026-06-01T070000-daily.json", "2026-06-01T07:00:00"
+        )
+        _write_report(
+            reports_dir, "2026-06-01T080000-backfill.json", "2026-06-01T08:00:00Z"
+        )
 
         gen = ReportGenerator(feed_dir)
         reports = gen.list_reports(limit=1)
 
         # naive 비교로 인한 TypeError 없이 backfill(08:00)이 최신.
-        assert reports[0].name == "2026-06-01-backfill.json"
+        assert reports[0].name == "2026-06-01T080000-backfill.json"
 
 
 class _AnomalyDataGoKrCollector:
@@ -688,6 +788,35 @@ def _spec_report_summary_keys() -> set[str]:
         payload = json.loads(no_comments)
         return set(payload["summary"].keys())
     raise AssertionError("스펙 문서에서 summary 예시 블록을 찾지 못함")
+
+
+class TestSpecFilenameFormatParity:
+    """스펙에 문서화된 리포트 파일명 형식과 save() 산출 형식이 정합한지 검증(#2123)."""
+
+    def test_spec_documents_timestamp_filename_format(self) -> None:
+        """스펙(10-checkpoints)에 시각 포함 파일명 형식이 명시돼 있다."""
+        text = _SPEC_DOC.read_text(encoding="utf-8")
+        # 경로 패턴과 예시 모두 초까지 포함하는 형식이어야 한다.
+        assert "{YYYY-MM-DDTHHMMSS}-{mode}.json" in text
+        assert "2026-03-17T160012-daily.json" in text
+        # 구형식({YYYY-MM-DD}-{mode}.json)이 잔존하면 안 된다.
+        assert "{YYYY-MM-DD}-{mode}.json" not in text
+
+    def test_save_filename_matches_spec_format(
+        self,
+        feed_dir: Path,
+        data_path: Path,
+        sample_result: CollectionResult,
+    ) -> None:
+        """save() 파일명이 스펙 형식({YYYY-MM-DDTHHMMSS}-{mode}.json)을 만족한다."""
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(sample_result)
+        path = gen.save(data_path, report, "daily")
+
+        # 스펙 형식의 정규식 검증(콜론 없는 초단위 타임스탬프 + mode).
+        assert re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{6}-(daily|backfill)\.json", path.name
+        )
 
 
 class TestSpecSummaryFieldsetParity:

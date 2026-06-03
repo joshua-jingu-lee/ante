@@ -22,10 +22,13 @@
 ### 리포트
 
 backfill/daily 실행 완료 시 생성되는 **운영 기록**.
-`{data.path}/.feed/reports/{YYYY-MM-DD}-{mode}.json`에 저장.
+`{data.path}/.feed/reports/{YYYY-MM-DDTHHMMSS}-{mode}.json`에 저장.
+타임스탬프는 `started_at`의 초까지(콜론 제거)이며, 같은 날 같은 mode를 다시
+실행해도 서로 다른 파일명을 얻어 기존 이력을 덮어쓰지 않는다(#2123). 같은 초의
+`started_at`으로 재실행되어 파일명이 충돌하면 `-1`, `-2` ... suffix를 붙여 보존한다.
 
 ```json
-// reports/2026-03-17-daily.json
+// reports/2026-03-17T160012-daily.json
 {
   "mode": "daily",
   "started_at": "2026-03-17T16:00:12Z",
