@@ -325,20 +325,59 @@ class TestRegisterReservedMemberIdGuard:
         assert member.member_id == "agent-normal"
 
     async def test_reserved_guard_precedes_existing_member_lookup(
-        self, populated_service: MemberService
+        self, populated_service: MemberService, db: Database
     ) -> None:
         """reserved guard 는 existing-member 조회 *이전* 에 배치되어야 한다.
 
-        legacy ``system:*`` 행이 DB 에 있어도 ``MEMBER_ALREADY_EXISTS`` 가
-        아니라 ``MEMBER_ID_RESERVED`` 가 surface 되어야 한다 (Codex v2).
-        guard 가 정상이면 DB 에 row 가 없으므로 INSERT 우회 자체로
-        reserved 코드만 raise 된다 — 별도 row 주입 없이 reserved 가 항상
-        먼저 매칭됨을 단언한다.
+        순서 불변(reserved guard → existing-member 조회)을 결정적으로 잠근다:
+        legacy ``system:*`` member 행을 DB 에 직접 seed(register 우회 INSERT)한
+        뒤 *같은* ``system:*`` member_id 로 ``register`` 를 호출하면, guard 가
+        존재 조회보다 앞서므로 ``MemberAlreadyExistsError``
+        (MEMBER_ALREADY_EXISTS) 가 아니라 ``ReservedMemberIdError``
+        (MEMBER_ID_RESERVED) 가 surface 되어야 한다 (Codex v2).
+
+        회귀 검출력: guard 를 제거하거나 위치를 existing 조회 *뒤* 로 옮기면
+        seed 된 row 때문에 ``MemberAlreadyExistsError`` 가 raise 되어 이 단언이
+        FAIL 한다.
         """
-        with pytest.raises(ReservedMemberIdError):
+        # legacy system:* member 행을 reserved guard 를 우회해 직접 seed.
+        # (register 의 INSERT INTO members 와 동일 컬럼 셋.)
+        await db.execute(
+            """INSERT INTO members
+               (member_id, type, role, org, name, emoji, status, scopes,
+                token_hash, password_hash, recovery_key_hash,
+                created_at, created_by, token_expires_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "system:recovery",
+                MemberType.AGENT,
+                "default",
+                "default",
+                "system:recovery",
+                "",
+                MemberStatus.ACTIVE,
+                "[]",
+                "legacy_hash",
+                "",
+                "",
+                "2020-01-01T00:00:00+00:00",
+                "owner",
+                None,
+            ),
+        )
+        # seed 된 row 가 실제로 존재함을 확인 — guard 부재 시 이 row 가
+        # MemberAlreadyExistsError 경로로 빠진다는 전제를 명시.
+        seeded = await populated_service.get("system:recovery")
+        assert seeded is not None
+        assert seeded.member_id == "system:recovery"
+
+        # guard 가 정상이면 row 존재에도 불구하고 reserved 코드가 surface 된다.
+        with pytest.raises(ReservedMemberIdError) as excinfo:
             await populated_service.register(
                 "system:recovery", MemberType.AGENT, registered_by="owner"
             )
+        assert excinfo.value.code == "MEMBER_ID_RESERVED"
+
         # reserved guard 통과 후에도 일반 member_id duplicate 는 여전히
         # MemberAlreadyExistsError 로 별개 surface 됨 (분리된 fault 확인).
         await populated_service.register(

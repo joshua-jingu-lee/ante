@@ -575,12 +575,37 @@ class TestMasterPermissionCheck:
             await service.register("new-agent", MemberType.AGENT, registered_by="ghost")
 
     async def test_register_without_caller_fails(self, service):
-        """``registered_by``가 빈 문자열이면 PermissionDeniedError (#2294 회귀 잠금).
+        """``registered_by``가 빈 문자열(빈 actor)이면 PermissionDeniedError (#2294).
 
         과거에는 빈 caller가 master 검증을 우회했으나(``if registered_by:``
         가드), #2294 (#2113 메타리뷰 후속)가 이 분기를 제거하고 형제 mutation
-        과 동일하게 무조건 master 검증을 강제한다. ``_assert_master("")`` →
-        ``get("")`` 가 ``None`` 을 반환해 거부된다 (의도된 defense-in-depth).
+        과 동일하게 무조건 master 검증을 강제한다. ``registered_by=""`` (빈
+        actor) 는 ``_assert_master("")`` → ``get("")`` 가 ``None`` 을 반환해
+        거부된다 (의도된 defense-in-depth).
+
+        빈-actor 경로를 정확히 검증한다: master(``owner``) 가 *존재하는*
+        상태에서 호출해 — caller 부재가 master 존재 여부와 무관하게 빈 actor
+        자체로 거부됨을 잠근다 (unknown-caller 케이스는 별도
+        ``test_register_with_unknown_caller_fails`` 가 검증).
+        """
+        from ante.member.errors import PermissionDeniedError
+
+        await service.bootstrap_master("owner", "pass123")
+        # 빈 문자열 명시.
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register("agent-01", MemberType.AGENT, registered_by="")
+        # ``registered_by`` 생략(기본값 "") 도 동일하게 거부된다.
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register("agent-02", MemberType.AGENT)
+
+    async def test_register_with_unknown_caller_fails(self, service):
+        """존재하지 않는 caller("owner" 부트스트랩 전) 도 거부된다.
+
+        빈-actor 케이스(``test_register_without_caller_fails``) 와 별개로
+        unknown-caller(존재하지 않는 member_id) 경로를 잠근다. master 미존재
+        상태에서 ``_assert_master("owner")`` → ``get("owner")`` 가 ``None`` 을
+        반환해 동일하게 거부된다 (``test_register_by_nonexistent_caller_fails``
+        의 "ghost" 와 동형).
         """
         from ante.member.errors import PermissionDeniedError
 
