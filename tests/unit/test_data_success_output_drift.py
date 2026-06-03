@@ -236,10 +236,10 @@ def test_data_list_out_of_range_page_count_preserves_total(tmp_path) -> None:
 def test_data_list_non_empty_envelope_matches_raw_legacy(tmp_path) -> None:
     """``data list`` non-empty: ``{datasets: [...], count: N}`` 평면.
 
-    data.py:95: ``fmt.output({"datasets": datasets, "count": result["total"]})``
-    JSON 분기. ``_enrich`` 후 InstrumentService 가 name 을 추가하지만 본
-    fixture 는 InstrumentService 까지 mock 하기 어려우므로 ``get_name`` 만
-    patch 한다.
+    ``fmt.output({"datasets": datasets, "count": result["total"]})`` JSON 분기.
+    ``_enrich`` 후 InstrumentService 가 name 을 추가하지만 본 fixture 는
+    InstrumentService 까지 mock 하기 어려우므로 ``load_readonly`` (read-only
+    캐시 워밍 — #1984) 와 ``get_name`` 을 patch 한다.
     """
     items = [
         {
@@ -259,7 +259,7 @@ def test_data_list_non_empty_envelope_matches_raw_legacy(tmp_path) -> None:
             return_value={"items": items, "total": 1},
         ),
         patch(
-            "ante.instrument.service.InstrumentService.initialize",
+            "ante.instrument.service.InstrumentService.load_readonly",
             new=AsyncMock(),
         ),
         patch(
