@@ -13,6 +13,7 @@ from ante.eventbus.events import BacktestCompleteEvent, NotificationEvent
 from ante.member.models import Member, MemberRole, MemberType
 from ante.report.draft import ReportDraftGenerator
 from ante.report.models import ReportStatus
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -193,23 +194,25 @@ class TestOnBacktestComplete:
 class TestReportViewCLI:
     def test_view_existing_report(self, runner):
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = {
-                "report_id": "rpt-1",
-                "strategy": "momentum v1.0.0",
-                "status": "draft",
-                "submitted_at": "2026-03-13",
-                "submitted_by": "system",
-                "backtest_period": "2025-01 ~ 2025-12",
-                "total_return_pct": 15.0,
-                "total_trades": 42,
-                "sharpe_ratio": 1.2,
-                "max_drawdown_pct": -8.5,
-                "win_rate": 0.58,
-                "summary": "백테스트 자동 생성 초안",
-                "rationale": "",
-                "risks": "",
-                "recommendations": "",
-            }
+            mock_run.side_effect = asyncio_run_returning(
+                {
+                    "report_id": "rpt-1",
+                    "strategy": "momentum v1.0.0",
+                    "status": "draft",
+                    "submitted_at": "2026-03-13",
+                    "submitted_by": "system",
+                    "backtest_period": "2025-01 ~ 2025-12",
+                    "total_return_pct": 15.0,
+                    "total_trades": 42,
+                    "sharpe_ratio": 1.2,
+                    "max_drawdown_pct": -8.5,
+                    "win_rate": 0.58,
+                    "summary": "백테스트 자동 생성 초안",
+                    "rationale": "",
+                    "risks": "",
+                    "recommendations": "",
+                }
+            )
             result = runner.invoke(cli, ["report", "view", "rpt-1"])
             assert result.exit_code == 0
             assert "rpt-1" in result.output
@@ -217,14 +220,14 @@ class TestReportViewCLI:
 
     def test_view_not_found(self, runner):
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = asyncio_run_returning(None)
             result = runner.invoke(cli, ["report", "view", "nonexistent"])
             assert result.exit_code == 1
             assert "찾을 수 없습니다" in result.output
 
     def test_view_not_found_json(self, runner):
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = None
+            mock_run.side_effect = asyncio_run_returning(None)
             result = runner.invoke(
                 cli, ["--format", "json", "report", "view", "nonexistent"]
             )
@@ -236,23 +239,25 @@ class TestReportViewCLI:
 
     def test_view_json_format(self, runner):
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = {
-                "report_id": "rpt-1",
-                "strategy": "momentum v1.0.0",
-                "status": "draft",
-                "submitted_at": "2026-03-13",
-                "submitted_by": "system",
-                "backtest_period": "2025-01 ~ 2025-12",
-                "total_return_pct": 15.0,
-                "total_trades": 42,
-                "sharpe_ratio": 1.2,
-                "max_drawdown_pct": -8.5,
-                "win_rate": 0.58,
-                "summary": "초안",
-                "rationale": "",
-                "risks": "",
-                "recommendations": "",
-            }
+            mock_run.side_effect = asyncio_run_returning(
+                {
+                    "report_id": "rpt-1",
+                    "strategy": "momentum v1.0.0",
+                    "status": "draft",
+                    "submitted_at": "2026-03-13",
+                    "submitted_by": "system",
+                    "backtest_period": "2025-01 ~ 2025-12",
+                    "total_return_pct": 15.0,
+                    "total_trades": 42,
+                    "sharpe_ratio": 1.2,
+                    "max_drawdown_pct": -8.5,
+                    "win_rate": 0.58,
+                    "summary": "초안",
+                    "rationale": "",
+                    "risks": "",
+                    "recommendations": "",
+                }
+            )
             result = runner.invoke(cli, ["--format", "json", "report", "view", "rpt-1"])
             assert result.exit_code == 0
             data = json.loads(result.output)

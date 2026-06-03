@@ -26,6 +26,7 @@ from ante.cli.commands.report import schema as report_schema
 from ante.cli.formatter import OutputFormatter
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 
 def _acm_factory(value):  # noqa: ANN001, ANN202
@@ -516,7 +517,7 @@ class TestTradeInfoFormatOption:
 
         with patch(
             "ante.cli.commands.trade.asyncio.run",
-            return_value=None,
+            side_effect=asyncio_run_returning(None),
         ):
             result = runner.invoke(
                 cli, ["trade", "info", "trade-123", "--format", "json"]

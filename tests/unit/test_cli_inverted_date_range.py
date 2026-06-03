@@ -37,6 +37,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -310,7 +311,7 @@ class TestValidRangeRegression:
     )
     def test_valid_passes_to_service(self, runner, cmd, args):
         with patch(_ASYNC_ENTRYPOINTS[cmd]) as mock_async:
-            mock_async.return_value = []
+            mock_async.side_effect = asyncio_run_returning([])
             result = runner.invoke(cli, args)
         assert result.exit_code == 0, _stdout(result)
         mock_async.assert_called_once()
@@ -351,14 +352,16 @@ class TestValidRangeRegression:
     )
     def test_treasury_valid_passes_to_service(self, runner, args):
         with patch("ante.cli.commands.treasury._run") as mock_run:
-            mock_run.return_value = {
-                "account_id": "oracle-paper",
-                "snapshot_date": "2026-01-15",
-                "total_asset": 1.0,
-                "ante_eval_amount": 1.0,
-                "ante_purchase_amount": 1.0,
-                "unallocated": 0.0,
-            }
+            mock_run.side_effect = asyncio_run_returning(
+                {
+                    "account_id": "oracle-paper",
+                    "snapshot_date": "2026-01-15",
+                    "total_asset": 1.0,
+                    "ante_eval_amount": 1.0,
+                    "ante_purchase_amount": 1.0,
+                    "unallocated": 0.0,
+                }
+            )
             result = runner.invoke(cli, ["--format", "json", *args])
         assert result.exit_code == 0, _stdout(result)
         mock_run.assert_called_once()

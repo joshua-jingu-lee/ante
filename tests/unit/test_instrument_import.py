@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -51,7 +52,7 @@ class TestInstrumentImportCSV:
         )
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = 2
+            mock_run.side_effect = asyncio_run_returning(2)
             result = runner.invoke(
                 cli,
                 ["instrument", "import", str(csv_file)],
@@ -82,7 +83,7 @@ class TestInstrumentImportJSON:
         json_file.write_text(json.dumps(data))
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = 2
+            mock_run.side_effect = asyncio_run_returning(2)
             result = runner.invoke(
                 cli,
                 ["instrument", "import", str(json_file)],

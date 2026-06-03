@@ -10,6 +10,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -44,7 +45,7 @@ def runner():
 class TestBacktestHistory:
     def test_history_empty(self, runner):
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = []
+            mock_run.side_effect = asyncio_run_returning([])
             result = runner.invoke(cli, ["backtest", "history", "test_stg"])
             assert result.exit_code == 0
             assert "이력이 없습니다" in result.output
@@ -66,7 +67,7 @@ class TestBacktestHistory:
             },
         ]
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = rows
+            mock_run.side_effect = asyncio_run_returning(rows)
             result = runner.invoke(cli, ["backtest", "history", "momentum"])
             assert result.exit_code == 0
             assert "run-1" in result.output
@@ -88,7 +89,7 @@ class TestBacktestHistory:
             },
         ]
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = rows
+            mock_run.side_effect = asyncio_run_returning(rows)
             result = runner.invoke(
                 cli, ["--format", "json", "backtest", "history", "momentum"]
             )
@@ -117,12 +118,14 @@ class TestReportSubmitWithRun:
         )
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = {
-                "report_id": "rpt-123",
-                "strategy": "momentum",
-                "status": "submitted",
-                "backtest_run_id": "run-1",
-            }
+            mock_run.side_effect = asyncio_run_returning(
+                {
+                    "report_id": "rpt-123",
+                    "strategy": "momentum",
+                    "status": "submitted",
+                    "backtest_run_id": "run-1",
+                }
+            )
             result = runner.invoke(
                 cli,
                 [

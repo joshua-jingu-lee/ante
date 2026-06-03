@@ -12,6 +12,7 @@ from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 from ante.trade.models import DailySummary, MonthlySummary
 from ante.trade.performance import PerformanceTracker
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -270,29 +271,33 @@ class TestGetMonthlySummary:
 class TestReportPerformanceCLI:
     def test_daily_performance_text(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "date": "2026-03-10",
-                    "realized_pnl": 15000.0,
-                    "trade_count": 3,
-                    "win_rate": 0.67,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "date": "2026-03-10",
+                        "realized_pnl": 15000.0,
+                        "trade_count": 3,
+                        "win_rate": 0.67,
+                    }
+                ]
+            )
             result = runner.invoke(cli, ["report", "performance", "--period", "daily"])
             assert result.exit_code == 0
             assert "2026-03-10" in result.output
 
     def test_monthly_performance_json(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "year": 2026,
-                    "month": 3,
-                    "realized_pnl": 50000.0,
-                    "trade_count": 10,
-                    "win_rate": 0.7,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "year": 2026,
+                        "month": 3,
+                        "realized_pnl": 50000.0,
+                        "trade_count": 10,
+                        "win_rate": 0.7,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 ["--format", "json", "report", "performance", "--period", "monthly"],
@@ -305,21 +310,23 @@ class TestReportPerformanceCLI:
 
     def test_performance_empty(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = []
+            mock_run.side_effect = asyncio_run_returning([])
             result = runner.invoke(cli, ["report", "performance"])
             assert result.exit_code == 0
             assert "없습니다" in result.output
 
     def test_daily_with_bot_filter(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "date": "2026-03-10",
-                    "realized_pnl": 5000.0,
-                    "trade_count": 1,
-                    "win_rate": 1.0,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "date": "2026-03-10",
+                        "realized_pnl": 5000.0,
+                        "trade_count": 1,
+                        "win_rate": 1.0,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 ["report", "performance", "--bot-id", "bot-1"],
@@ -328,15 +335,17 @@ class TestReportPerformanceCLI:
 
     def test_monthly_with_year_filter(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "year": 2025,
-                    "month": 12,
-                    "realized_pnl": 100000.0,
-                    "trade_count": 20,
-                    "win_rate": 0.6,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "year": 2025,
+                        "month": 12,
+                        "realized_pnl": 100000.0,
+                        "trade_count": 20,
+                        "win_rate": 0.6,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 [

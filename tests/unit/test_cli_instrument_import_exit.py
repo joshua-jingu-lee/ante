@@ -37,6 +37,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -494,7 +495,7 @@ class TestValidKrxSymbolRegression:
         )
 
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = 1
+            mock_run.side_effect = asyncio_run_returning(1)
             result = runner.invoke(
                 cli,
                 ["instrument", "import", str(json_file)],
