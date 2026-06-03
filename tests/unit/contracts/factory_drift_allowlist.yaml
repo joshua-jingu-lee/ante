@@ -46,13 +46,16 @@ direct_database_construction:
     line: 131
     reason: "report submit — offline write (INSERT), read-only 비대상; deferred migration"
 
-  # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (progress
-  # bar 와 함께 장시간 작업) 이라 직접 Database 생성을 유지한다.
+  # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (subprocess
+  # 격리 실행, D-004) 이라 직접 Database 생성을 유지한다. #2001 에서 in-process
+  # 실행이 subprocess 격리로 전환되며 `_save_backtest_run` 의 직접 Database 생성
+  # callsite 줄번호가 이동했다 (import 정리 + docstring 추가). write(INSERT)
+  # 명령이라 read-only 마이그레이션 대상이 아니다.
   # `backtest history` 는 `offline` 이며 #1974 에서 `open_cli_db` (read_only)
   # 로 마이그레이션되어 직접 Database 생성 callsite 가 사라졌다 — 엔트리 제거.
   - path: src/ante/cli/commands/backtest.py
-    line: 254
-    reason: "backtest run — long_running (progress-bar driven, deferred migration)"
+    line: 242
+    reason: "backtest run — long_running (subprocess 격리 D-004), write INSERT; deferred migration"
 
   # data domain — `data list` 는 `offline` 이며 #1984 에서 `open_cli_db`
   # (read_only) + InstrumentService.load_readonly() 로 마이그레이션되어 직접

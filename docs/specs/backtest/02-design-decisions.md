@@ -70,7 +70,12 @@
 
 가상 체결 시뮬레이션 엔진. 슬리피지, 수수료를 포함하여 현실적인 시뮬레이션을 제공한다.
 
-`run(progress_callback=None)` 메서드는 선택적 진행률 콜백을 받아 CLI 프로그레스 바와 연동한다.
+`run(progress_callback=None)` 메서드는 선택적 진행률 콜백을 받는다. 이 콜백은
+in-process `BacktestService.run()` 을 임베드 호출하는 경우(프로그래매틱/IPC
+임베드)에만 진행률을 스트리밍한다. `ante backtest run` CLI 는 D-004 격리 계약대로
+`run_subprocess()`(`python -m ante.backtest.runner`) 경로를 사용하며, 자식
+프로세스 stdout 은 단일 결과 라인이라 진행률 스트리밍을 지원하지 않는다(progress
+bar 없음 — 격리 우선, #2001).
 
 **시뮬레이션 루프**:
 ```
@@ -228,8 +233,8 @@ def to_dict(self) -> dict:
 
 | 메서드 | 설명 |
 |--------|------|
-| `run(config, progress_callback=None) → BacktestResult` | 백테스트를 in-process로 실행. 선택적 진행률 콜백 지원 |
-| `run_subprocess(config) → dict` | 백테스트를 subprocess로 격리 실행 (D-004), JSON 결과 반환 |
+| `run(config, progress_callback=None) → BacktestResult` | 백테스트를 in-process로 실행. 진행률 콜백은 in-process 임베드 호출 한정 (CLI subprocess 경로는 미지원) |
+| `run_subprocess(config) → dict` | 백테스트를 subprocess로 격리 실행 (D-004). `ante backtest run` CLI 의 격리 경로. `runner.run_backtest` 가 emit 하는 additive envelope(`to_dict()` superset + 런타임 `result_path`/`strategy_name`/`strategy_version`)를 반환해 `result_path` 를 `backtest_runs` 이력으로 전파한다 (#1998/#2001) |
 
 **설정 필수 키**: `strategy_path`, `start_date`, `end_date`
 **선택 키**: `symbols` (list[str]), `timeframe` (기본 `"1d"`), `initial_balance` (기본 10,000,000), `buy_commission_rate` (기본 0.00015), `sell_commission_rate` (기본 0.00195), `slippage_rate` (기본 0.001), `data_paths` (기본 Config resolver의 `data.path`), `data_path` (하위호환, 단수)
@@ -266,9 +271,9 @@ def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
 | 모듈 | 영향 | 조치 |
 |------|------|------|
 | **ReportDraftGenerator** | 자동 호환 — `detail = dict(result_data)` 로 전체 복사하므로 config/datasets 자동 포함 | 수정 불필요 |
-| **BacktestRunner** (subprocess) | 자동 호환 — service.py에서 주입 후 `result.to_dict()`에 포함 | 수정 불필요 |
+| **BacktestRunner** (subprocess) | `run_backtest()` 는 `result.to_dict()` superset envelope(+ 런타임 `result_path`/`strategy_name`/`strategy_version`)를 emit한다. config/datasets 는 to_dict 키로 그대로 포함. `output_path` 파일 아티팩트는 to_dict 그대로 유지 (#2001) | 수정 불필요 |
 | **BacktestRunStore** | params_json에 입력 config만 저장 중 | 선택: resolved config 저장으로 개선 가능 |
-| **CLI** (`backtest run`) | to_dict() 기존 키 유지, 신규 키 추가만 | 선택: 결과 출력에 config 요약 추가 |
+| **CLI** (`backtest run`) | `run_subprocess()` 의 envelope dict 를 소비 — to_dict 키 유지 + 런타임 `result_path`/`strategy_name`/`strategy_version` 직접 사용. `_save_backtest_run` 은 combined `strategy` 를 split 파싱하지 않는다 (#2001) | 선택: 결과 출력에 config 요약 추가 |
 | **to_dict() 소비자** | 기존 필드 불변, 추가 키만 — **backward compatible** | 기존 코드 수정 불필요 |
 
 ### BacktestStrategyContext

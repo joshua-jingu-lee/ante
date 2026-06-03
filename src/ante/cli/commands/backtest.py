@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import re
 import sqlite3
-from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -13,9 +12,6 @@ from ante.cli._data_path import resolve_data_path
 from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
-
-if TYPE_CHECKING:
-    from ante.backtest.result import BacktestResult
 from ante.cli.middleware import require_auth, require_scope
 
 # strict YYYY-MM-DD 가드 (feed/cli.py·backfill_runner.py 패턴 미러). Python
@@ -119,13 +115,15 @@ def run(
 
     # 타임프레임/심볼 검증 (CLI 경계 단일 지점, SSOT helper 위임).
     # precedence: date/exchange 검증 이후 → ① timeframe → ② 빈 segment →
-    # ③ KRX symbol shape. config build·BacktestService.run·_save_backtest_run
-    # 이전이어야 invalid 입력 시 backtest_runs history가 생성되지 않는다.
+    # ③ KRX symbol shape. config build·BacktestService.run_subprocess·
+    # _save_backtest_run 이전이어야 invalid 입력 시 backtest_runs history가
+    # 생성되지 않는다 (subprocess 생성 전 ingress 거부 — #2053/#2060/#1995).
     #
     # #2060: ``--timeframe`` 생략(None) 은 "전략 meta 사용" 신호이므로 CLI
-    # vocab 검증을 skip 하고 config 에 None 을 그대로 전달한다 —
-    # BacktestService.run() 이 load 후 StrategyMeta.timeframe 으로 fallback·
-    # 재검증한다. 명시값(비-None)은 기존대로 ingress 에서 거부한다.
+    # vocab 검증을 skip 하고 config 에 None 을 그대로 전달한다 — subprocess
+    # 자식 프로세스의 ``BacktestService.run()`` 이 load 후 StrategyMeta.
+    # timeframe 으로 fallback·재검증한다. 명시값(비-None)은 기존대로 ingress
+    # 에서 거부한다.
     if timeframe is not None and not is_valid_timeframe(timeframe):
         fmt.error(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
@@ -161,8 +159,9 @@ def run(
         "end_date": end,
         "symbols": symbols.split(",") if symbols else [],
         "initial_balance": balance,
-        # #2060: ``--timeframe`` 생략 시 None 을 그대로 전달 — service.run()
-        # 이 StrategyMeta.timeframe 으로 fallback 한다(명시값은 그대로 전달).
+        # #2060: ``--timeframe`` 생략 시 None 을 그대로 전달 — subprocess
+        # 자식의 service.run() 이 StrategyMeta.timeframe 으로 fallback 한다
+        # (명시값은 그대로 전달).
         "timeframe": timeframe,
         "exchange": exchange,
         "data_path": data_path,
@@ -170,32 +169,14 @@ def run(
 
     try:
         service = BacktestService(data_path=data_path)
-        show_progress = not fmt.is_json
 
-        progress_bar: Any = None
-
-        def _progress_callback(current: int, total: int) -> None:
-            nonlocal progress_bar
-            if not show_progress:
-                return
-            if progress_bar is None and total > 0:
-                progress_bar = click.progressbar(
-                    length=total,
-                    label="백테스트 진행",
-                    show_percent=True,
-                    show_pos=True,
-                )
-                progress_bar.__enter__()
-            if progress_bar is not None:
-                progress_bar.update(1)
-
-        result = asyncio.run(service.run(config, progress_callback=_progress_callback))
-
-        if progress_bar is not None:
-            progress_bar.__exit__(None, None, None)
-            click.echo()
-
-        result_dict = result.to_dict()
+        # #2001: D-004 격리 계약대로 subprocess(`python -m ante.backtest.runner`)
+        # 로 실행한다. 자식 프로세스 stdout 은 단일 결과 라인이라 진행률
+        # 스트리밍이 불가하므로 in-process 전용 progress bar 는 제거한다
+        # (cli/03-commands.md·backtest/02-design-decisions.md 정합). 반환
+        # ``result_dict`` 는 ``to_dict()`` superset envelope 로 런타임 메타데이터
+        # (result_path/strategy_name/strategy_version)를 포함한다.
+        result_dict = asyncio.run(service.run_subprocess(config))
         metrics = result_dict.get("metrics", {})
 
         # #1995: 명시 종목 전체가 데이터 없음(row_count=0)이면 이력 저장 없이 실패
@@ -214,7 +195,7 @@ def run(
 
         # backtest_runs 이력 저장
         run_id = asyncio.run(
-            _save_backtest_run(resolved_db_path, result, config, metrics)
+            _save_backtest_run(resolved_db_path, result_dict, config, metrics)
         )
         result_dict["run_id"] = run_id
 
@@ -243,11 +224,18 @@ def run(
 
 async def _save_backtest_run(
     db_path: str,
-    result: BacktestResult,
+    result_dict: dict,
     config: dict,
     metrics: dict,
 ) -> str:
-    """backtest_runs 테이블에 이력 저장."""
+    """backtest_runs 테이블에 이력 저장 (#2001: envelope dict 기반).
+
+    ``result_dict`` 는 ``service.run_subprocess`` 가 반환한 additive envelope
+    (``to_dict()`` superset + 런타임 메타데이터)이다. ``strategy_name`` /
+    ``strategy_version`` 은 envelope 의 개별 키를 직접 사용하며 combined
+    ``strategy`` (``"{name}_v{version}"``) 를 split 파싱하지 않는다 — 버전
+    문자열에 ``_v`` 가 포함될 수 있어 split 이 안전하지 않기 때문이다.
+    """
     from ante.backtest.run_store import BacktestRunStore
     from ante.core.database import Database
 
@@ -257,18 +245,19 @@ async def _save_backtest_run(
         store = BacktestRunStore(db)
         await store.initialize()
         return await store.save(
-            strategy_name=result.strategy_name,
-            strategy_version=result.strategy_version,
+            # combined "strategy" 파싱 금지 — envelope 개별 키 직접 사용.
+            strategy_name=result_dict["strategy_name"],
+            strategy_version=result_dict["strategy_version"],
             params=config,
-            total_return_pct=round(result.total_return, 2),
+            total_return_pct=result_dict["total_return_pct"],
             sharpe_ratio=metrics.get("sharpe_ratio"),
             max_drawdown_pct=metrics.get("max_drawdown"),
-            total_trades=len(result.trades),
+            total_trades=result_dict["total_trades"],
             win_rate=metrics.get("win_rate"),
-            # #1998: service.run() 이 저장한 durable artifact 경로를 이력에 기록한다
-            # (저장 실패 시 ""). backtest_runs.result_path 와 BacktestCompleteEvent.
-            # result_path 가 동일 artifact 를 가리켜 추적성을 보장한다.
-            result_path=result.result_path,
+            # #1998: subprocess 의 run() 이 저장한 durable artifact 경로를 이력에
+            # 기록한다(저장 실패 시 ""). run_subprocess envelope 의 result_path 가
+            # backtest_runs.result_path 로 전파되어 추적성을 보장한다.
+            result_path=result_dict["result_path"],
         )
     finally:
         await db.close()

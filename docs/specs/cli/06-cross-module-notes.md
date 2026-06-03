@@ -10,6 +10,6 @@
 - **Member 스펙**: `member list/info`는 오프라인 조회가 가능하다. 등록, 상태 변경, 토큰/패스워드/복구키 변경은 서버 실행 중 IPC로 처리하고, 서버 정지 상태에서는 recovery/maintenance fallback만 허용한다.
 - **Strategy 스펙**: `ante strategy validate`는 StrategyValidator를 호출하고, `ante strategy submit <path>`는 검증 + 로드 테스트 + StrategyRegistry 등록을 수행한다. 등록 결과인 `strategy_id`가 `ante bot create --strategy` 입력이다.
 - **Report Store 스펙**: `ante report submit/schema` → ReportStore, PerformanceFeedback 호출
-- **Backtest 스펙**: `ante backtest run` → BacktestService.run_backtest() (subprocess)
+- **Backtest 스펙**: `ante backtest run` → BacktestService.run_subprocess() (subprocess 격리, D-004)
 - **Data Pipeline 스펙**: `ante data list/schema/storage/validate` → ParquetStore 호출. `ante data retention` 커맨드는 미구현 (RetentionPolicy는 프로그래매틱 사용만)
 - **DataFeed 스펙**: `ante feed init/status/config/inject/run/start` → FeedConfig, FeedInjector, FeedOrchestrator 호출

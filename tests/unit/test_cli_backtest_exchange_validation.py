@@ -178,10 +178,11 @@ class TestBacktestExchangeValidation:
 
 
 def _capture_config():
-    """BacktestService.run에 넘어온 config dict를 캡처하는 스파이.
+    """BacktestService.run_subprocess 에 넘어온 config dict를 캡처하는 스파이 (#2001).
 
     CLI가 검증만 통과시키고 config에 exchange를 누락해도 잡아낸다
-    (validation/plumbing 테스트만으로는 못 잡는 hop — q2).
+    (validation/plumbing 테스트만으로는 못 잡는 hop — q2). CLI 가 subprocess
+    격리 경로(run_subprocess)로 전환되었으므로 그 hop 을 spy 한다.
     """
     captured: dict = {}
 
@@ -189,7 +190,7 @@ def _capture_config():
         def __init__(self, *args, **kwargs):
             pass
 
-        async def run(self, config, progress_callback=None):
+        async def run_subprocess(self, config):
             captured["config"] = dict(config)
             raise RuntimeError("stop after config handoff")
 

@@ -450,11 +450,12 @@ class TestResultToDictSerializesExchange:
 
 
 class TestRunnerForwardsToDictUnmodified:
-    """runner.run_backtest()는 service 결과의 to_dict()를 무가공 반환.
+    """runner.run_backtest()는 service 결과의 to_dict() superset envelope 반환 (#2001).
 
-    subprocess 실제 기동은 무거우므로, runner가 result.to_dict()를
-    그대로 전달함을 가벼운 단위로 갈음한다 (to_dict 출력 단언은 in-process
-    TestResultToDictSerializesExchange가 필수로 커버).
+    subprocess 실제 기동은 무거우므로, runner가 result.to_dict()의 모든 키를
+    보존하면서 런타임 메타데이터(result_path/strategy_name/strategy_version)를
+    additive 로 surface 함을 가벼운 단위로 갈음한다 (to_dict 출력 단언은
+    in-process TestResultToDictSerializesExchange가 필수로 커버).
     """
 
     @pytest.mark.asyncio
@@ -504,7 +505,16 @@ class TestRunnerForwardsToDictUnmodified:
                 }
             )
 
-        assert out == result.to_dict()
+        # #2001: envelope 은 to_dict() 의 superset — to_dict 의 모든 키/값을
+        # 보존하면서 런타임 메타데이터 3키를 additive 로 추가한다.
+        to_dict = result.to_dict()
+        assert set(out) >= set(to_dict), "to_dict() 키가 모두 보존되어야 한다"
+        for key, value in to_dict.items():
+            assert out[key] == value, f"{key} 값이 to_dict 와 동일해야 한다"
+        # 런타임 메타데이터 3키 surface.
+        assert out["result_path"] == result.result_path
+        assert out["strategy_name"] == "S"
+        assert out["strategy_version"] == "1"
         assert out["trades"][0]["exchange"] == "NYSE"
 
 
