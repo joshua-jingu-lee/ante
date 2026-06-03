@@ -51,6 +51,10 @@ Non-Goals).
   ``state_conflict`` (#1825)
 - ``MemberAlreadyExistsError`` → ``MEMBER_ALREADY_EXISTS`` /
   ``state_conflict`` (#1826)
+- ``ReservedMemberIdError`` → ``MEMBER_ID_RESERVED`` / ``validation``
+  (#2295; ``register`` 의 ``system:`` reserved-prefix guard — duplicate
+  와 별개 fault, existing-member 조회 이전 거부. ``ValueError`` 다중상속
+  으로 기존 generic fallback 회귀 없음.)
 - ``MemberInvalidRecoveryCredentialError`` →
   ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth`` (#1826)
 
@@ -253,6 +257,7 @@ from ante.member.errors import (
     MemberNotFoundError,
     MemberStateConflictError,
     PermissionDeniedError,
+    ReservedMemberIdError,
 )
 from ante.member.scopes import InvalidScopeError
 from ante.rule.exceptions import RuleConfigError
@@ -397,6 +402,16 @@ _MEMBER_STATE_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
 _MEMBER_ALREADY_EXISTS_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="MEMBER_ALREADY_EXISTS",
     category="state_conflict",
+)
+
+# reserved ``system:`` prefix member_id 등록 거부 (#2295) 는 입력 네임스페이스
+# 계약 위반이므로 taxonomy ``validation`` 카테고리. duplicate
+# (``MEMBER_ALREADY_EXISTS`` / state_conflict) 와 별개 fault 로 분리한다 — register
+# 의 reserved-prefix guard 가 existing-member 조회 이전에 배치되어 legacy
+# ``system:*`` 행이 있어도 본 코드가 surface 된다.
+_MEMBER_ID_RESERVED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_ID_RESERVED",
+    category="validation",
 )
 
 # recovery credential validation 거부는 의미상 인증(auth) 카테고리.
@@ -767,6 +782,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     MemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
     MemberStateConflictError: _MEMBER_STATE_CONFLICT_SPEC,
     MemberAlreadyExistsError: _MEMBER_ALREADY_EXISTS_SPEC,
+    # ── #2295 member reserved-prefix guard (실측 .code mirror) ────────────
+    ReservedMemberIdError: _MEMBER_ID_RESERVED_SPEC,
     MemberInvalidRecoveryCredentialError: _MEMBER_INVALID_RECOVERY_CREDENTIAL_SPEC,
     # ── #1915 member 2 sub-class (emoji 형식 / master 보호) ───────────────
     MemberInvalidEmojiError: _MEMBER_INVALID_EMOJI_SPEC,

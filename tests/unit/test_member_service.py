@@ -48,7 +48,9 @@ async def _seed_invalid_role_row(
     invalid_role: str = "oracle_invalid_role",
 ) -> None:
     """write path 를 우회해 legacy invalid-role agent row 를 심는다."""
-    await service.register(member_id, MemberType.AGENT)
+    # #2294: register 는 무조건 master actor 를 요구한다. 본 helper 의 caller 는
+    # 모두 사전에 ``bootstrap_master("owner", ...)`` 를 수행한다.
+    await service.register(member_id, MemberType.AGENT, registered_by="owner")
     await db.execute(
         "UPDATE members SET role = ? WHERE member_id = ?",
         (invalid_role, member_id),
