@@ -437,11 +437,23 @@ async def test_stop_accepting_does_not_block_on_active_connection(
     # 보장한 뒤 캡처한다.
     underlying = server._server
     assert underlying is not None
+    server_side_transports: list = []
     for _ in range(50):
-        if _capture_server_side_transports(underlying):
+        server_side_transports = _capture_server_side_transports(underlying)
+        if server_side_transports:
             break
         await asyncio.sleep(0)
-    server_side_transports = _capture_server_side_transports(underlying)
+    # Refs #2304 (Codex 브랜치 리뷰 attempt 1): 캡처가 비어 있으면 fixture
+    # 종료 시 ``_settle_server_side_transports`` 가 no-op 이 되어 누수 차단을
+    # 검증하지 못한다(회귀 시 silent pass). active 연결이 결정적으로
+    # ``asyncio.Server._clients`` 에 등록돼 server-side transport 가 캡처됐음을
+    # 단언해, (a) cleanup 이 실제로 수행됨을 보장하고 (b) 향후 캡처 로직이
+    # 깨지면(빈 결과) 이 테스트가 FAIL 해 회귀를 잡는다.
+    assert server_side_transports, (
+        "server-side accepted transport 캡처가 비어 있다 — active 연결이 "
+        "asyncio.Server._clients 에 등록되지 않아 teardown cleanup 이 "
+        "no-op 이 된다 (Refs #2304)."
+    )
     try:
         # 1초 안에 stop_accepting이 완료되어야 한다 — wait_closed 미사용 검증.
         await asyncio.wait_for(server.stop_accepting(), timeout=1.0)
@@ -494,11 +506,22 @@ async def test_drain_connections_with_timeout(
     # server-side accepted transport 를 캡처한다 (등록 시간 yield 보장).
     underlying = server._server
     assert underlying is not None
+    server_side_transports: list = []
     for _ in range(50):
-        if _capture_server_side_transports(underlying):
+        server_side_transports = _capture_server_side_transports(underlying)
+        if server_side_transports:
             break
         await asyncio.sleep(0)
-    server_side_transports = _capture_server_side_transports(underlying)
+    # Refs #2304 (Codex 브랜치 리뷰 attempt 1): 캡처가 비어 있으면 fixture
+    # 종료 시 ``_settle_server_side_transports`` 가 no-op 이 되어 drain timeout
+    # 경로의 누수 차단을 검증하지 못한다(회귀 시 silent pass). server-side
+    # transport 가 결정적으로 캡처됐음을 단언해 cleanup 수행을 보장하고, 캡처
+    # 로직이 깨지면 이 테스트가 FAIL 하도록 한다.
+    assert server_side_transports, (
+        "server-side accepted transport 캡처가 비어 있다 — active 연결이 "
+        "asyncio.Server._clients 에 등록되지 않아 teardown cleanup 이 "
+        "no-op 이 된다 (Refs #2304)."
+    )
     try:
         await server.stop_accepting()
         # 짧은 timeout으로 drain — TimeoutError가 외부로 전파되면 안 된다.
