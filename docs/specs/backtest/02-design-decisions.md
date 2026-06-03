@@ -64,6 +64,16 @@
   - `get_current_price()` → empty OHLCV에서 `BacktestDataError` (현재가 unavailable)
 - **implicit warm-up 없음**: 시스템은 row 0을 건너뛰지 않으며 별도의 warm-up 구간을 두지 않는다. row 0에서 lookback이 필요한 전략은 그 시점에 history가 1개 봉뿐이므로, 충분한 history 확보는 전략의 책임이다(정책상 의도된 노출).
 
+**무거래 zero-OHLC 행의 backtest-load 정규화 (#2071)**:
+
+> 소스: [`src/ante/backtest/data_provider.py`](../../../src/ante/backtest/data_provider.py) `_normalize_no_trade_bars`
+
+data.go.kr 원본 OHLCV는 거래정지/무거래일을 `open==high==low==0 & close>0 & volume==0`(amount 컬럼이 있으면 `amount==0`까지) 시그니처로 표현한다(V2 장기 데이터에서 다수 관찰). 이 행을 그대로 두면 전략이 high/low/open을 직접 쓸 때 intraday range가 `0..close`처럼 비현실적으로 벌어져 변동성·가격범위 지표를 왜곡한다. `BacktestDataProvider.load()`는 `store.read()` 직후(캐시 저장 전) 이 행을 **flat bar(`O=H=L=C=close`)로 정규화**한다.
+
+- **(a) backtest view 한정 — 저장 raw 불변**: 정규화는 `load()`가 캐시에 담기 직전의 DataFrame에만 적용된다. 저장 raw(parquet)는 변형하지 않는다. 이는 데이터 무손실 우선 원칙([data-feed/02 L31](../data-feed/02-design-decisions.md), [data-feed/09](../data-feed/09-failure-recovery.md)의 "비즈니스 위반(`low<=open/close<=high` 등)은 경고 로그 후 저장" 계약)을 유지하기 위함이다. 따라서 storage/normalizer/report/품질 경고 pipeline은 본 정책에서 **제외**된다. `get_ohlcv()` 등 on-demand 적재 경로도 `load()`를 거치므로 동일하게 정규화가 적용된다.
+- **(b) flat-bar 의미 — intraday range만 0**: `O=H=L=C=close`는 무거래일의 **intraday range를 0으로 본다**는 뜻이며 close(carrying price)는 보존된다. 이는 "모든 변동성이 0"이라는 의미가 **아니다** — **전일 종가 대비 변화(ATR true-range의 `|close - prev_close|`, 갭 등 일간 변화 지표)는 그대로 보존**된다.
+- **(c) 정확 시그니처 한정 — 마스킹 방지**: 정규화는 위 정확 시그니처에만 적용한다. partial-zero(예: `open>0 & low==0`), `volume>0`, `amount>0`인 행은 실제 데이터 오류일 수 있으므로 **마스킹하지 않고 그대로 둔다**. 무거래 bar를 missing/제외 처리하지 않는다(flat-bar가 carrying price 보존에 더 안전). live/실거래 데이터 경로는 정규화 대상이 아니다(백테스트 한정).
+
 ### BacktestExecutor — 시뮬레이션 실행
 
 > 소스: [`src/ante/backtest/executor.py`](../../../src/ante/backtest/executor.py)
