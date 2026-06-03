@@ -15,8 +15,9 @@ import logging
 
 import pytest
 
-from ante.bot import BotConfig, BotManager
+from ante.bot import BotConfig, BotImmutableFieldError, BotManager
 from ante.bot.config import BotStatus
+from ante.bot.exceptions import BOT_IMMUTABLE_FIELD_CODE
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.strategy import (
@@ -297,26 +298,25 @@ class TestUpdateBotBudgetRollback:
         assert bot.config.interval_seconds == 60
         assert await _read_db_interval(db, bot_id) == 60
 
-    async def test_update_bot_account_id_change_rolls_back_to_old_on_failure(
+    async def test_update_bot_account_id_change_rejected_before_budget(
         self, eventbus, db, ctx
     ) -> None:
-        """#2274: account_id 를 함께 바꾼 update 가 budget 실패로 rollback 되면
-        ``bots.account_id`` 컬럼·config_json 둘 다 옛 account_id 로 복원된다.
+        """#2282: account_id 를 다른 값으로 바꾸려는 update 는 budget 처리/
+        rollback 경로에 도달하기 전에 ``BotImmutableFieldError`` 로 거부된다.
 
-        #2274 가 UPSERT 에 ``account_id = excluded.account_id`` 를 추가한 뒤,
-        rollback 의 ``_save_bot_config(old_config)`` 가 컬럼·config_json 을 모두
-        옛 ``old_config.account_id`` 로 되돌리는지(stale 신 account_id 가 남지
-        않는지) 확인하는 회귀 가드.
-
-        treasury 는 새(effective) account_id 로 조회되므로 새 account 에 raising
-        treasury 를 등록해 ``update_budget`` 까지 진입 후 raise 시킨다.
+        #2274 가 account_id 변경을 실제 persist 되게 만들면서 treasury 예산·
+        broker credential·포지션이 account-bound 라 재배치 안 되는 불일치가
+        표면화됐고, #2282 가 ``account_id`` 를 ``update_bot`` 의 불변 필드로
+        제약했다. 가드는 budget(treasury) 처리보다 먼저 평가되므로,
+        ``update_budget`` 은 호출되지 않고 컬럼·config_json·memory 모두
+        미변경이어야 한다.
         """
 
         class _BoomError(RuntimeError):
             pass
 
         raising_treasury = _RaisingTreasury(_BoomError("boom"))
-        # budget 처리는 new_config.account_id(='acc-new') 로 treasury 를 조회한다.
+        # account_id 가 거부되므로 treasury 는 어느 account 로도 진입하지 않는다.
         tm = _RaisingTreasuryManager("acc-new", raising_treasury)
 
         manager = BotManager(eventbus=eventbus, db=db, treasury_manager=tm)
@@ -329,18 +329,17 @@ class TestUpdateBotBudgetRollback:
         acc_col, acc_cfg = await _read_db_account_ids(db, bot_id)
         assert acc_col == "acc-old" == acc_cfg
 
-        with pytest.raises(_BoomError):
+        with pytest.raises(BotImmutableFieldError) as exc_info:
             await manager.update_bot(bot_id, account_id="acc-new", budget=100_000.0)
+        assert exc_info.value.code == BOT_IMMUTABLE_FIELD_CODE
 
-        # update_budget 은 새 account_id 의 treasury 로 진입했어야 한다.
-        assert raising_treasury.update_budget_calls == [(bot_id, 100_000.0)]
+        # account_id 가 budget 처리 이전에 거부되므로 update_budget 미호출.
+        assert raising_treasury.update_budget_calls == []
 
         bot = manager.get_bot(bot_id)
         assert bot is not None
-        # memory rollback: 옛 account_id 로 복원.
+        # memory·DB(컬럼·config_json) 모두 옛 account_id 로 미변경.
         assert bot.config.account_id == "acc-old"
-        # DB rollback: 컬럼·config_json 둘 다 옛 account_id 로 복원되고
-        # 신 account_id("acc-new") 가 stale 로 남지 않는다.
         acc_col, acc_cfg = await _read_db_account_ids(db, bot_id)
         assert acc_col == "acc-old"
         assert acc_cfg == "acc-old"

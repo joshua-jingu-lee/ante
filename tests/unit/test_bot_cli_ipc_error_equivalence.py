@@ -19,6 +19,10 @@
   ``bot create`` 표면 중복 등록 거부, 실제 ``bot.create`` IPC handler 회귀)
 - ``BotStrategyAlreadyRunningError`` → ``BOT_STRATEGY_ALREADY_RUNNING``
   (state_conflict; ``bot create`` 표면 "1전략 1봇" 정책 거부)
+- ``BotImmutableFieldError`` → ``BOT_IMMUTABLE_FIELD`` (validation; #2282
+  ``bot.update`` 표면 ``account_id`` 변경 거부 — treasury 예산·broker
+  credential·포지션이 account-bound 라 생성 후 불변. 실제 ``bot.update`` IPC
+  handler 회귀로 envelope code surface 확인)
 
 bot CLI 의 mutating 표면 (``create``/``remove``/``start``/``stop``/``status``)
 은 모두 ``ipc_send`` 경유이므로 CLI direct path equivalence 는 ``ipc_send``
@@ -49,6 +53,7 @@ from click.testing import CliRunner
 from ante.bot.exceptions import (
     BotAccountCredentialsNotConfigured,
     BotAlreadyExistsError,
+    BotImmutableFieldError,
     BotNotAcceptingSignals,
     BotNotFoundError,
     BotStateConflict,
@@ -471,3 +476,82 @@ class TestBotStrategyAlreadyRunningEquivalence:
             "전략 s1 은 이미 실행 중인 다른 봇이 사용 중입니다"
         )
         assert _ipc_envelope_code(exc) == "BOT_STRATEGY_ALREADY_RUNNING"
+
+
+# ── (7) BotImmutableFieldError ↔ BOT_IMMUTABLE_FIELD (update) ───────────────
+
+
+class TestBotImmutableFieldEquivalence:
+    """``BotImmutableFieldError`` 는 양쪽에서 ``BOT_IMMUTABLE_FIELD`` (#2282).
+
+    CLI direct path: ``bot update`` 표면 — ``ipc_send`` 가 server error
+    envelope (code=``BOT_IMMUTABLE_FIELD``) 을 ClickException 으로 변환하고
+    CLI middleware 분기가 동일 코드를 surface 한다. registry MRO lookup 으로
+    ``BotImmutableFieldError`` → ``BOT_IMMUTABLE_FIELD`` resolve.
+
+    IPC path: 실제 ``bot.update`` IPC handler 를 ``IPCServer`` 위에서 실행해
+    ``account_id`` 변경 요청이 envelope code 로 거부됨을 확인한다 (#1842
+    ``account.suspend`` / ``bot.create`` 1:1 동형 회귀 lock).
+    """
+
+    def test_ipc_envelope_immutable_field(self) -> None:
+        exc = BotImmutableFieldError("account_id 는 생성 후 변경할 수 없습니다")
+        assert _ipc_envelope_code(exc) == "BOT_IMMUTABLE_FIELD"
+
+    @pytest.mark.asyncio
+    async def test_ipc_envelope_immutable_field_via_real_handler(self) -> None:
+        """실제 ``bot.update`` IPC handler 가 ``account_id`` 변경 거부 코드를
+        envelope 으로 surface 한다 (#2282; ``bot.create`` 1:1 동형 회귀 lock).
+
+        handler 는 ``svc.bot_manager.get_bot`` 으로 봇 존재를 먼저 확인한 뒤
+        ``update_bot`` 을 호출하므로, ``get_bot`` 은 봇을 돌려주고 ``update_bot``
+        이 ``BotImmutableFieldError`` 를 raise 하도록 mock 한다. handler 의
+        ``except BotError: raise`` 가 typed 예외를 그대로 propagate 하고 IPC
+        server 가 ``getattr(e, "code", ...)`` 로 ``BOT_IMMUTABLE_FIELD`` envelope
+        을 생성한다.
+        """
+
+        td = tempfile.mkdtemp(prefix="ipc_bot_immutable", dir="/tmp")
+        socket_path = str(Path(td) / "t.sock")
+
+        bot_manager = MagicMock()
+        bot_manager.get_bot = MagicMock(return_value=MagicMock())
+        bot_manager.update_bot = AsyncMock(
+            side_effect=BotImmutableFieldError(
+                "account_id 는 생성 후 변경할 수 없습니다: bot-1"
+            )
+        )
+
+        audit_logger = MagicMock()
+        audit_logger.log = AsyncMock(return_value=None)
+        svc_registry = ServiceRegistry(
+            account=MagicMock(),
+            bot_manager=bot_manager,
+            treasury_manager=MagicMock(),
+            dynamic_config=MagicMock(),
+            approval=MagicMock(),
+            reconciler=MagicMock(),
+            eventbus=MagicMock(),
+            member_service=MagicMock(),
+            strategy_registry=MagicMock(),
+            audit_logger=audit_logger,
+        )
+        cmd_registry = CommandRegistry()
+        register_all_handlers(cmd_registry)
+
+        server = IPCServer(socket_path, svc_registry, cmd_registry)
+        await server.start()
+        try:
+            client = IPCClient(socket_path, timeout=5.0)
+            response = await client.send(
+                "bot.update",
+                {
+                    "bot_id": "bot-1",
+                    "updates": {"account_id": "acc-new"},
+                },
+                actor="tester",
+            )
+            assert response["status"] == "error"
+            assert response["error"]["code"] == "BOT_IMMUTABLE_FIELD"
+        finally:
+            await server.stop()
