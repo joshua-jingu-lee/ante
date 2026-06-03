@@ -257,6 +257,12 @@ class DARTCollector:
         # 분기의 checkpoint.save가 jump하여 커버하고, trailing 빈 분기는 미전진
         # 상태로 남아 다음 run에서 재시도된다(분기종료 직후 빈 응답을 "완료"로
         # 오인해 이후 공시를 누락하던 버그 해소).
+        #
+        # store-merge 실패(#1993 R2)는 분기별로 독립 판정한다. halt와 달리 이후
+        # 분기로 전파되지 않으며(halt를 세우지 않음), 해당 분기만 checkpoint를
+        # 미전진시켜 다음 run에 재시도되게 한다. data.go.kr는 runner R1이 store
+        # 경고 drain으로 가드하지만 DART는 checkpoint.save가 collector 내부라
+        # _fetch_quarter의 비파괴적 peek 결과(store_merge_failed)로 게이트한다.
         halt = False
 
         for year in range(start_year, end_year + 1):
@@ -270,7 +276,7 @@ class DARTCollector:
                     # 미래 분기: fetch/save 모두 건너뛴다.
                     continue
 
-                written, syms, status = await self._fetch_quarter(
+                written, syms, status, store_merge_failed = await self._fetch_quarter(
                     corp_codes_list,
                     corp_code_map,
                     store,
@@ -284,9 +290,14 @@ class DARTCollector:
                     halt = True
                 elif status is QuarterStatus.OK:
                     # storable 저장이 일어난 분기 — stored_ok 신호 set(net_delta
-                    # 무관). checkpoint 전진은 halt 미설정일 때만(#2054 보존).
+                    # 무관). checkpoint 전진은 halt 미설정 + store-merge 성공일
+                    # 때만(#2054 보존, #1993 R2). store-merge 실패(net_delta=0 +
+                    # store_merge 경고)면 QuarterStatus는 OK여도 checkpoint를
+                    # 전진시키지 않아 다음 run에 재시도된다(데이터 미반영 분기
+                    # 영구 skip 방지). store_merge 경고는 runner가 collect 종료 후
+                    # drain해 보고한다(DART는 비파괴적 peek만 함).
                     stored_ok = True
-                    if not halt:
+                    if not halt and not store_merge_failed:
                         checkpoint.save(quarter_key)
                 # QuarterStatus.SKIP_EMPTY: checkpoint 미전진 + halt 미설정(no-op).
 
@@ -377,7 +388,7 @@ class DARTCollector:
             )
             return 0, False, set(), warns
 
-        written, syms, status = await self._fetch_quarter(
+        written, syms, status, store_merge_failed = await self._fetch_quarter(
             corp_codes_list,
             corp_code_map,
             store,
@@ -386,9 +397,12 @@ class DARTCollector:
             warns,
         )
         # SKIP_EMPTY(미공시 가능)/HALT(transient·no-storable)는 backfill과 동일하게
-        # checkpoint를 전진시키지 않는다. OK일 때만 save한다(#2028/#2054 보존).
+        # checkpoint를 전진시키지 않는다. OK일 때만 save하되, store-merge 실패
+        # (net_delta=0 + store_merge 경고)면 QuarterStatus가 OK여도 checkpoint를
+        # 전진시키지 않는다(#1993 R2, 다음 run 재시도). store_merge 경고는 runner가
+        # collect 종료 후 drain해 보고한다(DART는 비파괴적 peek만 함).
         stored_ok = status is QuarterStatus.OK
-        if stored_ok:
+        if stored_ok and not store_merge_failed:
             checkpoint.save(quarter_key)
 
         logger.info(
@@ -408,12 +422,15 @@ class DARTCollector:
         year: int,
         reprt_code: str,
         warns: list[dict],
-    ) -> tuple[int, set[str], QuarterStatus]:
+    ) -> tuple[int, set[str], QuarterStatus, bool]:
         """단일 분기 재무제표를 수집/정규화/저장한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, status). ``status``는 이 분기에 대한
-            checkpoint 전진/halt 결정을 구동하는 3-상태다(#2028, #2054):
+            (기록 행 수, 수집된 심볼 집합, status, store_merge_failed).
+
+            ``status``는 이 분기에 대한 checkpoint 전진/halt 결정을 구동하는
+            3-상태다(#2028, #2054). **storable_rows 기준으로만 판정**하며
+            store-merge 실패를 절대 섞지 않는다(#2028 의미 보존):
 
             - transient 예외(warn 추가) → ``QuarterStatus.HALT``
               (미전진 + 이후 분기 동결, 다음 run 재시도)
@@ -424,6 +441,21 @@ class DARTCollector:
             - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
               warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
             - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)
+
+            ``store_merge_failed``는 이번 분기 ``store.write`` 가 파티션 merge
+            실패(기존 파일 보존 + ``store_merge`` 경고 적재, net_delta=0)를
+            일으켰는지다(#1993). data.go.kr는 runner R1이 store 경고 drain으로
+            checkpoint를 가드하지만 DART는 checkpoint.save를 collector 내부에서
+            하므로(``_collect_quarters``/``_collect_latest_quarter``) 호출자가 이
+            bool로 checkpoint 전진을 게이트한다. QuarterStatus는 storable 기준
+            그대로(OK)이되 store_merge_failed면 checkpoint만 미전진시켜 다음 run에
+            재시도되게 한다.
+
+            store_merge 감지는 ``store.pending_merge_failure_count()`` 의
+            **비파괴적 peek**로 한다. runner가 DART collect 전체 종료 후 단일
+            소유로 drain하므로(backfill_runner) DART가 drain하면 경고가 소실된다.
+            누적 카운트라 ``_normalize_and_store`` **직전/직후 증가분**으로 이번
+            분기 실패를 판정한다(이전 분기 경고가 아직 drain 안 됐을 수 있음).
 
             ``DARTDailyLimitError``/``DARTCriticalError``는 기존대로 re-raise.
         """
@@ -450,7 +482,7 @@ class DARTCollector:
                     "message": str(exc),
                 }
             )
-            return 0, set(), QuarterStatus.HALT
+            return 0, set(), QuarterStatus.HALT, False
 
         if not raw_items:
             # 빈 응답: 분기종료 직후 아직 공시되지 않았을 수 있다(미공시 가능).
@@ -458,7 +490,13 @@ class DARTCollector:
             # 오인, #2028) 미전진한다. 단 halt는 세우지 않아 후속 분기 처리는
             # 계속한다(오름차순 순회에서 내부 빈 분기는 후속 데이터 분기의
             # checkpoint.save가 jump 커버, trailing 빈 분기는 다음 run 재시도).
-            return 0, set(), QuarterStatus.SKIP_EMPTY
+            return 0, set(), QuarterStatus.SKIP_EMPTY, False
+
+        # store-merge 실패 감지(#1993): 비파괴적 peek로 _normalize_and_store
+        # 직전/직후 store_merge 경고 누적 카운트를 캡처하고 증가분으로 이번 분기
+        # 실패를 판정한다. drain은 runner가 collect 종료 후 단일 소유로 하므로
+        # 여기서는 count만 읽는다(drain 소유권 보존).
+        merge_failures_before = store.pending_merge_failure_count()
 
         # storable_rows/net_delta를 분리 수신(#1993). QuarterStatus 판정은
         # storable_rows(정규화/저장 가능 행 수) 기준으로 유지하고(#2028 무변경),
@@ -468,6 +506,10 @@ class DARTCollector:
             corp_code_map,
             store,
         )
+
+        merge_failures_after = store.pending_merge_failure_count()
+        store_merge_failed = merge_failures_after > merge_failures_before
+
         if storable_rows == 0:
             # raw_items는 있으나 정규화/저장에서 0 rows(normalized empty,
             # symbol 컬럼 부재 등 no-storable). net-delta가 아니라 storable
@@ -492,11 +534,13 @@ class DARTCollector:
                     ),
                 }
             )
-            return 0, syms, QuarterStatus.HALT
+            return 0, syms, QuarterStatus.HALT, store_merge_failed
 
         # storable_rows>0 → checkpoint 전진 자격(OK). 재수집이면 net_delta=0이라
-        # rows_written은 0이지만 status는 OK로 checkpoint가 정상 전진한다.
-        return net_delta, syms, QuarterStatus.OK
+        # rows_written은 0이지만 status는 OK로 checkpoint가 정상 전진한다. 단
+        # store-merge 실패(net_delta=0 + store_merge 경고)면 호출자가
+        # store_merge_failed로 checkpoint를 게이트해 미전진시킨다(다음 run 재시도).
+        return net_delta, syms, QuarterStatus.OK, store_merge_failed
 
     def _normalize_and_store(
         self,

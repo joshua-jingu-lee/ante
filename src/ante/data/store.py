@@ -274,6 +274,26 @@ class ParquetStore:
         self._pending_warnings.clear()
         return drained
 
+    def pending_merge_failure_count(self) -> int:
+        """현재 버퍼에 쌓인 ``store_merge`` 경고 수를 **비파괴적으로** 센다.
+
+        ``drain_warnings()`` 와 달리 버퍼를 비우지 않는다(read-only count).
+        DART collector처럼 checkpoint.save를 자체적으로 수행하는 호출자가
+        ``store.write`` 직전/직후 이 값을 비교해 이번 단계에서 발생한
+        store-merge 실패(파티션 merge 실패 → 기존 파일 보존, 데이터 미반영)를
+        감지하는 데 쓴다(#1993). 누적 카운트이므로 **직전/직후 증가분**으로
+        이번 단계의 실패를 판정해야 한다(이전 단계 경고가 아직 runner에 의해
+        drain되지 않았을 수 있음).
+
+        파괴적 drain은 backfill_runner가 collect 종료 후 단일 소유로 수행하므로,
+        DART가 여기서 drain하면 runner가 보고할 경고를 소실시킨다. 따라서 이
+        메서드는 절대 버퍼를 비우지 않는다(drain 소유권 보존, #1993 R2).
+
+        Returns:
+            ``type == "store_merge"`` 인 pending 경고의 수.
+        """
+        return sum(1 for w in self._pending_warnings if w.get("type") == "store_merge")
+
     def _resolve_path(
         self,
         symbol: str,

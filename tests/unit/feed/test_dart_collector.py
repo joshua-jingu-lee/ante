@@ -586,7 +586,7 @@ class TestRecollectQuarterDeltaZero:
 
         # 단일 분기 재수집(_fetch_quarter 직접): 이미 저장됨 → net_delta=0 + OK.
         warns2: list[dict] = []
-        net_delta, syms2, status = await collector._fetch_quarter(
+        net_delta, syms2, status, store_merge_failed = await collector._fetch_quarter(
             ["00126380"],
             {"00126380": "005930"},
             store,
@@ -595,10 +595,12 @@ class TestRecollectQuarterDeltaZero:
             warns2,
         )
         # storable>0이라 OK(no-storable HALT 아님), net_delta=0(재수집 dedup).
+        # store-merge 정상이므로 store_merge_failed=False(checkpoint 전진 자격).
         assert status is QuarterStatus.OK
         assert net_delta == 0
         assert syms2 == {"005930"}
         assert warns2 == []
+        assert store_merge_failed is False
 
         # 2차 전체 재수집(fresh checkpoint): 전부 재수집(net_delta=0)이어도 OK로
         # checkpoint가 Q4까지 정상 전진(stall 없음). #2028 무회귀.
@@ -637,7 +639,7 @@ class TestEmptyQuarterSkip:
             tmp_path, behaviors={}
         )
         warns: list[dict] = []
-        written, syms, status = await collector._fetch_quarter(
+        written, syms, status, store_merge_failed = await collector._fetch_quarter(
             ["00126380"],
             {"00126380": "005930"},
             store,
@@ -649,6 +651,7 @@ class TestEmptyQuarterSkip:
         assert written == 0
         assert syms == set()
         assert warns == []
+        assert store_merge_failed is False
 
     async def test_empty_quarter_skips_without_halt(self, tmp_path: Path) -> None:
         """(a) 빈 분기 → checkpoint 미전진 AND halt 미설정(후속 처리 계속).
@@ -1181,3 +1184,307 @@ class TestAvailableDateEndToEnd:
         result = store.read("005930", "krx", data_type="fundamental")
         assert "available_date" in result.columns
         assert result["available_date"][0] is None
+
+
+# ── store_merge 게이트(#1993 Finding 2): DART checkpoint 미전진 ───────────────
+
+
+def _corrupt_partition(store: ParquetStore, symbol: str, month: str) -> Path:
+    """해당 fundamental 파티션 월에 손상(읽기 불가) 파일을 사전 배치한다.
+
+    다음 ``store.write`` 가 이 파일과 merge를 시도하면 ParquetStore는 기존
+    파일을 덮어쓰지 않고 ``store_merge`` 경고만 ``_pending_warnings`` 에 적재한다
+    (net_delta=0, 기존 파일 보존). 실제 ParquetStore의 merge-실패 경로를
+    결정적으로 재현한다(test_daily_runner_store_merge_drain 동형).
+
+    Returns:
+        배치한 손상 파일 경로.
+    """
+    part_dir = store.base_path / "fundamental" / "KRX" / symbol
+    part_dir.mkdir(parents=True, exist_ok=True)
+    filepath = part_dir / f"{month}.parquet"
+    filepath.write_bytes(b"corrupt-not-parquet")
+    return filepath
+
+
+class TestStorePendingMergeFailureCountPeek:
+    """ParquetStore.pending_merge_failure_count는 비파괴적 peek다(#1993 Finding 2)."""
+
+    def test_counts_only_store_merge_and_does_not_drain(self, tmp_path: Path) -> None:
+        """store_merge 경고만 세고, 호출 후에도 drain_warnings가 동일 경고 반환."""
+        store = ParquetStore(base_path=tmp_path / "data")
+
+        # 손상 파티션 위로 write → store_merge 경고 1건 적재(net_delta=0).
+        _corrupt_partition(store, "005930", "2015-12")
+        df = _stored_df_quarter("2015", 12)
+        net_delta = store.write("005930", "krx", df, data_type="fundamental")
+        assert net_delta == 0
+
+        # peek: store_merge 1건. 비-store_merge 경고는 세지 않는다.
+        assert store.pending_merge_failure_count() == 1
+        # 반복 호출해도 동일(비파괴적).
+        assert store.pending_merge_failure_count() == 1
+
+        # drain은 여전히 경고를 반환한다 = peek가 버퍼를 비우지 않았다.
+        drained = store.drain_warnings()
+        assert len(drained) == 1
+        assert drained[0]["type"] == "store_merge"
+        # drain 후에는 count 0.
+        assert store.pending_merge_failure_count() == 0
+
+    def test_zero_when_no_merge_failure(self, tmp_path: Path) -> None:
+        """정상 write(merge 실패 없음)는 count 0."""
+        store = ParquetStore(base_path=tmp_path / "data")
+        df = _stored_df_quarter("2015", 12)
+        net_delta = store.write("005930", "krx", df, data_type="fundamental")
+        assert net_delta == 1
+        assert store.pending_merge_failure_count() == 0
+
+
+class TestDartStoreMergeFailureBlocksCheckpoint:
+    """#1993 Finding 2: DART store-merge 실패 분기는 checkpoint를 전진시키지 않는다.
+
+    DART는 checkpoint.save를 collector 내부에서 한다(data.go.kr처럼 runner R1
+    drain 가드를 거치지 않음). store.write가 merge 실패(net_delta=0 + store_merge
+    경고)를 내면 QuarterStatus는 storable_rows>0이라 OK지만, checkpoint는
+    store_merge_failed로 게이트되어 미전진해야 한다(다음 run 재시도). 비파괴적
+    peek로 분기 전후 증가분을 보므로 runner의 drain 소유권은 보존된다.
+    """
+
+    async def test_backfill_merge_failure_trailing_quarter_blocks_advance(
+        self, tmp_path: Path
+    ) -> None:
+        """backfill 경로: trailing 분기 merge 실패 → checkpoint 그 분기 미전진.
+
+        2015 단일 연도 4분기를 distinct 월에 저장하되, 마지막 분기 Q4(2015-12)
+        파티션을 손상시켜 merge 실패를 유발한다. Q1~Q3는 정상 저장되어 Q3까지
+        전진하지만, trailing Q4는 store-merge 실패로 미전진한다(checkpoint=Q3,
+        다음 run에 Q4부터 재시도). store-merge는 halt가 아니므로 Q1~Q3 전진은
+        기존대로 유지되고 손상된 trailing 분기만 막힌다.
+
+        주의: store-merge는 halt를 세우지 않으므로(지침), 내부(non-trailing)
+        분기가 막히면 후속 데이터 분기의 save가 checkpoint를 jump 전진시킨다.
+        따라서 단일 분기 미전진을 결정적으로 검증하려면 trailing 분기를
+        손상시킨다(daily 경로의 단일 분기 케이스와 동형).
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # trailing Q4(2015-12) 파티션 손상 → 이 분기 write가 merge 실패(net_delta=0).
+        _corrupt_partition(store, "005930", "2015-12")
+
+        net_delta, stored_ok, syms, warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        # Q1~Q3는 정상 전진, trailing Q4는 store-merge 실패라 미전진 → checkpoint=Q3.
+        assert checkpoint.get_last_date() == "2015-Q3"
+
+        # storable_rows>0 분기가 존재 → stored_ok=True(QuarterStatus 의미 무변경).
+        assert stored_ok is True
+        assert syms == {"005930"}
+        # store_merge 경고는 store 버퍼에 남아(비파괴적 peek) runner가 drain한다.
+        # collector는 warns에 store_merge를 넣지 않는다(드레인 소유권은 runner).
+        assert all(w.get("type") != "store_merge" for w in warns)
+        assert store.pending_merge_failure_count() >= 1
+
+    async def test_backfill_merge_failure_single_quarter_blocks_advance(
+        self, tmp_path: Path
+    ) -> None:
+        """backfill 경로(단일 collectable 분기): merge 실패 → checkpoint 미전진.
+
+        end_year=start_year에 last_checkpoint를 Q3로 두어 Q4 한 분기만
+        collectable하게 만든다. 그 단일 분기를 손상시키면 QuarterStatus는 OK여도
+        checkpoint가 Q3에서 전진하지 못한다(store_merge_failed 게이트).
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11011"): [_raw_item("2015", "11011")],  # Q4만 데이터
+        }
+        norm_results = {("2015", "11011"): _stored_df_quarter("2015", 12)}
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # Q4(2015-12) 손상 → merge 실패.
+        _corrupt_partition(store, "005930", "2015-12")
+
+        # 사전 checkpoint=Q3(Q1~Q3 완료 상태). last_checkpoint=Q3 → Q4만 순회.
+        checkpoint.save("2015-Q3")
+
+        net_delta, stored_ok, syms, warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            "2015-Q3",
+        )
+
+        # 단일 분기 Q4가 merge 실패 → checkpoint는 Q3에서 미전진(다음 run 재시도).
+        assert checkpoint.get_last_date() == "2015-Q3"
+        assert stored_ok is True  # storable_rows>0 → QuarterStatus OK
+        assert syms == {"005930"}
+        assert all(w.get("type") != "store_merge" for w in warns)
+        assert store.pending_merge_failure_count() >= 1
+
+    async def test_backfill_clean_recollect_quarter_still_advances(
+        self, tmp_path: Path
+    ) -> None:
+        """회귀 가드: store_merge 없는 재수집 분기(net_delta=0)는 전진(#1993 무회귀).
+
+        손상 파티션 없이 2회 collect한다. 2차는 dedup으로 net_delta=0이지만
+        store_merge 경고가 없으므로 checkpoint가 정상 전진해야 한다(Finding 2
+        게이트가 정상 재수집을 막지 않음을 확인).
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # 1차: 정상 저장 → Q4까지 전진.
+        await collector._collect_quarters(
+            {"00126380": "005930"}, store, checkpoint, 2015, 2015, None
+        )
+        assert checkpoint.get_last_date() == "2015-Q4"
+
+        # 2차(fresh checkpoint): 전부 재수집(net_delta=0), store_merge 없음 → 전진.
+        checkpoint2 = Checkpoint(tmp_path / ".feed", "dart", "fundamental")
+        net_delta2, _stored_ok2, _syms2, warns2 = await collector._collect_quarters(
+            {"00126380": "005930"}, store, checkpoint2, 2015, 2015, None
+        )
+        assert net_delta2 == 0  # 재수집 → net-new 0
+        assert checkpoint2.get_last_date() == "2015-Q4"  # store_merge 없음 → 전진
+        assert all(w.get("type") != "store_merge" for w in warns2)
+        assert store.pending_merge_failure_count() == 0
+
+    async def test_daily_merge_failure_quarter_no_checkpoint_advance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """daily 경로: 최신 분기 merge 실패 → checkpoint 미전진(QuarterStatus OK).
+
+        ``_collect_latest_quarter`` 도 backfill과 동일하게 store_merge_failed를
+        게이트한다. today=2026-05-29 → 최신 2026-Q1(period_end 3/31, 파티션
+        2026-03). 그 파티션을 손상시켜 merge 실패를 유발하면 checkpoint 미전진.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+
+        # 최신 분기(2026-Q1, period_end 3/31 → 파티션 2026-03)를 손상시킨다.
+        _corrupt_partition(store, "005930", "2026-03")
+
+        behaviors: dict[tuple[str, str], object] = {
+            ("2026", "11013"): [_raw_item("2026", "11013")],
+        }
+        source = _ScriptedDARTSource({"00126380": "005930"}, behaviors)
+        normalizer = _ScriptedNormalizer(
+            {("2026", "11013"): _stored_df_quarter("2026", 3)}
+        )
+        collector = DARTCollector(source=source, normalizer=normalizer)
+
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+        rows, stored_ok, syms, warns = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+
+        # 최신 분기만 fetch했고 merge 실패 → net_delta=0, checkpoint 미전진.
+        assert source.fetched == [("2026", "11013")]
+        assert rows == 0
+        # storable_rows>0이라 QuarterStatus는 OK → stored_ok=True(의미 무변경).
+        assert stored_ok is True
+        assert syms == {"005930"}
+        # store_merge 게이트로 checkpoint는 전진하지 않는다(다음 daily run 재시도).
+        assert checkpoint.get_last_date() is None
+        # collector는 store_merge를 warns에 넣지 않고 store 버퍼에 남긴다.
+        assert all(w.get("type") != "store_merge" for w in warns)
+        assert store.pending_merge_failure_count() >= 1
+
+    async def test_daily_clean_recollect_quarter_still_advances(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """회귀 가드: daily 재수집(net_delta=0, store_merge 없음)은 전진.
+
+        #1993 무회귀.
+        """
+        import ante.feed.pipeline.dart_collector as dc
+
+        monkeypatch.setattr(dc, "_today_kst", lambda: date(2026, 5, 29))
+
+        feed_dir = tmp_path / ".feed"
+        feed_dir.mkdir()
+        store = ParquetStore(base_path=tmp_path / "data")
+        behaviors: dict[tuple[str, str], object] = {
+            ("2026", "11013"): [_raw_item("2026", "11013")],
+        }
+        source = _ScriptedDARTSource({"00126380": "005930"}, behaviors)
+        normalizer = _ScriptedNormalizer(
+            {("2026", "11013"): _stored_df_quarter("2026", 3)}
+        )
+        collector = DARTCollector(source=source, normalizer=normalizer)
+        config = {"schedule": {"backfill_since": "2015-01-01"}}
+
+        # 1차: 정상 저장 → 2026-Q1 전진.
+        checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
+        await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint,
+            config=config,
+            store=store,
+            daily=True,
+        )
+        assert checkpoint.get_last_date() == "2026-Q1"
+
+        # 2차(fresh checkpoint): 재수집 net_delta=0, store_merge 없음 → 전진.
+        checkpoint2 = Checkpoint(feed_dir, "dart", "fundamental")
+        rows2, _stored_ok2, _syms2, warns2 = await collector.collect(
+            data_path=tmp_path / "data",
+            feed_dir=feed_dir,
+            checkpoint=checkpoint2,
+            config=config,
+            store=store,
+            daily=True,
+        )
+        assert rows2 == 0  # 재수집 → net-new 0
+        assert checkpoint2.get_last_date() == "2026-Q1"  # store_merge 없음 → 전진
+        assert all(w.get("type") != "store_merge" for w in warns2)
+        assert store.pending_merge_failure_count() == 0

@@ -46,13 +46,17 @@ class DataGoKrCollector:
               (= ``store.write`` 반환 합, rows_written). 재수집(dedup)이면 0이며,
               이는 정상이다(과대계상 제거).
             - ``stored_ok``: **유효 데이터가 store에 성공적으로 반영되었는지**.
-              net_delta와 무관하다 — 재수집으로 net_delta=0이어도 유효 데이터를
-              검증 통과시켜 ``store.write`` 를 호출 완료했으면 ``True`` 다(checkpoint
-              전진 자격). 빈 응답/전 row drop/validation 차단처럼 저장 자체를
-              하지 못한 경우만 ``False`` 다. store-merge 실패(기존 파일 보존)는
-              ``store.write`` 호출은 완료했으므로 여기서는 ``True`` 이며,
-              checkpoint 미전진은 runner가 store_merge 경고 존재로 별도 가드한다
-              (R1: ``_persist_partition`` 은 merge 실패 시 raise하지 않는다).
+              net_delta와 무관하며 ``bool(symbols)`` (실제 ``store.write`` 가
+              호출된 심볼 존재)에서 유도한다 — 재수집으로 net_delta=0이어도 유효
+              데이터를 정규화·저장 완료했으면 symbols가 비어있지 않아 ``True`` 다
+              (checkpoint 전진 자격). 빈 응답/전 row drop/validation 차단처럼 저장
+              자체를 못한 경우는 조기 ``False`` 반환하고, survivor가 validation을
+              통과했어도 정규화 단계에서 추가 drop돼 ohlcv/fundamental 둘 다
+              no-symbol이면 symbols가 비어 ``False`` 다(저장 0건 → 미전진).
+              store-merge 실패(기존 파일 보존)는 ``store.write`` 호출은 완료했으므로
+              해당 심볼이 symbols에 남아 여기서는 ``True`` 이며, checkpoint 미전진은
+              runner가 store_merge 경고 존재로 별도 가드한다(R1:
+              ``_persist_partition`` 은 merge 실패 시 raise하지 않는다).
         """
         raw_items = await self._source.fetch(target_date)
         if not raw_items:
@@ -94,10 +98,17 @@ class DataGoKrCollector:
             target_date,
         )
 
-        # 유효 survivor batch가 validation을 통과해 store.write를 호출 완료했다
-        # → stored_ok=True(net_delta=0 재수집이어도 checkpoint 전진 자격). 빈
-        # 응답/전 drop/validation 차단은 위에서 stored_ok=False로 조기 반환했다.
-        return net_delta, True, symbols, warns
+        # stored_ok는 하드코딩 True가 아니라 **실제 저장 심볼 존재(bool(symbols))**
+        # 에서 유도한다. `symbols`는 `_store_ohlcv`/`_store_fundamental`에서
+        # 실제 `store.write`가 호출된 심볼만 add되므로:
+        #   - 빈 응답/전 drop/validation 차단 → 위에서 stored_ok=False 조기 반환.
+        #   - survivor가 validation을 통과했더라도 정규화 단계에서 추가 drop돼
+        #     normalize_ohlcv·normalize_fundamental이 **둘 다** empty/no-symbol이면
+        #     symbols가 빈 set → stored_ok=False(미전진). 저장 0건인데 checkpoint를
+        #     전진시켜 데이터를 영구 skip하는 회귀를 막는다.
+        #   - 재수집(net_delta=0이지만 정규화 정상)은 symbols가 비어있지 않아
+        #     stored_ok=True(전진 유지). net_delta와 무관하게 저장 반영 여부만 본다.
+        return net_delta, bool(symbols), symbols, warns
 
     @staticmethod
     def _filter_invalid_symbols(
