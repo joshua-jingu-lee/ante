@@ -28,6 +28,9 @@ config/system.toml
 *.pem
 *.key
 
+# Runtime dependency snapshots (ante update가 config/db에 재생성하는 환경 의존 아티팩트)
+config/db/pip_freeze_v*.txt
+
 # Python
 __pycache__/
 *.pyc
