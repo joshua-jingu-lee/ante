@@ -1837,3 +1837,240 @@ class TestCollectorStoredOkRunnerGate:
         # 정규화 전drop으로 stored_ok=False → checkpoint 미전진(영구 skip 방지).
         assert checkpoint.get_last_date() is None
         assert collector.calls == ["2026-01-02"]
+
+
+# ── DataGoKrCollector: 정규화 후 business 검증 (#2222) ─────────
+
+
+def _business_warns(warns: list[dict]) -> list[dict]:
+    """warns 목록에서 business_rule 타입(source=data_go_kr)만 추출한다."""
+    return [
+        w
+        for w in warns
+        if w.get("type") == "business_rule" and w.get("source") == "data_go_kr"
+    ]
+
+
+class TestCollectorBusinessValidationPostNormalize:
+    """#2222: business 계층 검증을 정규화 후 OHLCV에 적용해 anomaly를 경고한다.
+
+    raw `_validate`/validate_all의 business는 raw 컬럼명(mkp/hipr/...)이라 no-op
+    이므로, `_store_ohlcv`가 normalize_ohlcv 직후 정규화 OHLCV(open/high/low/
+    close/volume)에 validate_business를 별도로 적용한다. 위반은 비차단 경고
+    (source=data_go_kr / type=business_rule)로 collect warns에 surface되고,
+    store는 진행한다(spec 09: business='경고 로그, 저장').
+    """
+
+    @pytest.mark.asyncio
+    async def test_low_gt_high_emits_business_warning(self, tmp_path) -> None:
+        """(a) 정규화 후 low>high/open/close 위반 → business_rule 경고 발행.
+
+        raw lopr(=200) > hipr(=110): 정규화 후 low(=200) > high/open/close.
+        raw 키(lopr/hipr)는 raw business가 못 보지만, 정규화 후 low/high로
+        검증되어 경고가 발행되어야 한다(이슈 핵심).
+        """
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["lopr"] = "200"  # low > high(110)/open(100)/close(105)
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        # 비차단: 저장은 진행(net_delta>0, 심볼 저장).
+        assert rows > 0
+        assert symbols == {"005930"}
+        # business_rule 경고가 정규화 컬럼명 기준으로 발행.
+        biz = _business_warns(warns)
+        assert len(biz) >= 1
+        assert any("low > " in w["message"] for w in biz)
+        for w in biz:
+            assert w["date"] == "20260102"
+            assert w["source"] == "data_go_kr"
+            assert w["type"] == "business_rule"
+        # 비차단이므로 실제 저장됨.
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_open_gt_high_emits_business_warning(self, tmp_path) -> None:
+        """(a') 정규화 후 open>high 위반 → business_rule 경고 발행."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["mkp"] = "999"  # open(=999) > high(=110)
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        biz = _business_warns(warns)
+        assert any("open > high" in w["message"] for w in biz)
+
+    @pytest.mark.asyncio
+    async def test_negative_volume_emits_business_warning(self, tmp_path) -> None:
+        """(b) 정규화 후 volume<0 → business_rule 경고 발행(비차단)."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["trqu"] = "-500"  # volume < 0
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        biz = _business_warns(warns)
+        assert any("volume < 0" in w["message"] for w in biz)
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_non_positive_price_emits_business_warning(self, tmp_path) -> None:
+        """(c) 정규화 후 price<=0(clpr=0) → business_rule 경고 발행(비차단)."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["clpr"] = "0"  # close <= 0
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        biz = _business_warns(warns)
+        assert any("close <= 0" in w["message"] for w in biz)
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_valid_ohlcv_no_business_warning(self, tmp_path) -> None:
+        """(d) 정상 OHLCV → business_rule 경고 0건, 정상 저장."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        assert rows > 0
+        assert symbols == {"005930"}
+        assert _business_warns(warns) == []
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_business_warning_does_not_block_store(self, tmp_path) -> None:
+        """(e) business 경고에도 store 진행(net_delta>0, stored_ok=True, 비차단).
+
+        OHLC 위반(low>high) + volume<0 동시 발생해도 차단되지 않는다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["lopr"] = "200"  # low > high
+        item["trqu"] = "-1"  # volume < 0
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        net_delta, stored_ok, symbols, warns = await collector.collect(
+            "20260102", store
+        )
+
+        assert net_delta > 0  # 경고에도 실제 저장 진행
+        assert stored_ok is True
+        assert symbols == {"005930"}
+        assert len(_business_warns(warns)) >= 2  # low>high + volume<0
+        assert store.list_symbols("1d") == ["005930"]
+
+    @pytest.mark.asyncio
+    async def test_collect_warns_contains_business_rule_envelope(
+        self, tmp_path
+    ) -> None:
+        """(f) collect warns에 source=data_go_kr/type=business_rule 봉투 포함."""
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        item["lopr"] = "200"
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        _rows, _stored_ok, _symbols, warns = await collector.collect("20260102", store)
+
+        biz = _business_warns(warns)
+        assert biz, "business_rule 경고가 collect warns에 surface되어야 한다"
+        envelope = biz[0]
+        assert set(envelope.keys()) >= {"date", "source", "type", "message"}
+        assert envelope["source"] == "data_go_kr"
+        assert envelope["type"] == "business_rule"
+
+    @pytest.mark.asyncio
+    async def test_raw_business_columns_absent_still_validated(self, tmp_path) -> None:
+        """(i) 이슈 회귀: raw에 정규화 business 컬럼(low/high)이 없어도 검증된다.
+
+        raw item은 mkp/hipr/lopr/clpr/trqu만 가지며 low/high/open/close/volume
+        컬럼이 없다. 수정 전에는 raw business가 컬럼 부재로 no-op이라 lopr>hipr
+        anomaly가 조용히 저장됐다. 수정 후에는 정규화(lopr→low, hipr→high) 후
+        검증되어 경고가 발행된다.
+        """
+        store = ParquetStore(base_path=tmp_path)
+        item = _raw("005930")
+        # raw 키만 존재(정규화 컬럼명 부재). lopr(=300) > hipr(=110) anomaly.
+        assert "low" not in item and "high" not in item
+        item["lopr"] = "300"
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        rows, _stored_ok, _symbols, warns = await collector.collect("20260102", store)
+
+        # 정규화 후 검증되어 경고 발행 + 비차단 저장.
+        assert rows > 0
+        assert any("low > " in w["message"] for w in _business_warns(warns))
+
+    @pytest.mark.asyncio
+    async def test_raw_validate_all_gate_no_regression(self, monkeypatch) -> None:
+        """(g) raw validate_all 게이트(transport/syntax/schema) 무회귀.
+
+        validate_all이 passed=False면 정규화 이전에 저장이 차단되고, 정규화 후
+        business 검증(_store_ohlcv)에는 도달하지 않는다(business 경고 0건).
+        """
+        from ante.feed.models.result import ValidationResult
+
+        store = _RecordingStore()
+        item = _raw("005930")
+        item["lopr"] = "200"  # 정규화되면 business 위반이지만 게이트가 먼저 막음
+        collector = DataGoKrCollector(source=_FakeSource([item]))
+
+        monkeypatch.setattr(
+            "ante.feed.pipeline.data_go_kr_collector.validate_all",
+            lambda records, required_fields, status_code=200: ValidationResult(
+                passed=False, warnings=[], errors=["HTTP 상태 코드 오류: 503"]
+            ),
+        )
+
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
+
+        # 게이트 차단: 저장 0, business 검증 미도달.
+        assert rows == 0
+        assert symbols == set()
+        assert store.writes == []
+        assert _business_warns(warns) == []
+        # raw 게이트 실패는 schema_validation으로 surface(무회귀).
+        assert len(_schema_warns(warns)) == 1
+
+    def test_validate_all_consumers_unaffected(self) -> None:
+        """(h) validate_all 다른 소비자(injector.py 등) 무영향.
+
+        본 이슈는 validate_all/validate_business를 수정하지 않고 collector에서
+        정규화 후 validate_business를 별도 호출만 추가한다. validate_all의 4계층
+        통합 계약(business=경고/passed=True)이 보존되는지 직접 확인한다.
+        """
+        from ante.data.normalizer import DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS
+        from ante.feed.transform.validate import validate_all, validate_business
+
+        # validate_all은 정상 raw에 대해 schema PASS + business no-op(컬럼 부재).
+        result = validate_all(
+            [_raw("005930")], list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS)
+        )
+        assert result.passed is True
+        assert result.errors == []
+
+        # validate_business는 정규화 컬럼명 기준으로 위반을 경고(passed 불변=True).
+        norm = {
+            "symbol": "005930",
+            "open": 100.0,
+            "high": 110.0,
+            "low": 200.0,
+            "close": 105.0,
+            "volume": 1000,
+        }
+        biz = validate_business([norm])
+        assert biz.passed is True
+        assert biz.errors == []
+        assert any("low > " in w for w in biz.warnings)
