@@ -13,7 +13,7 @@ from ante.data.normalizer import (
     DataGoKrNormalizer,
 )
 from ante.data.store import ParquetStore
-from ante.feed.transform.validate import validate_all
+from ante.feed.transform.validate import validate_all, validate_business
 
 logger = logging.getLogger(__name__)
 
@@ -92,10 +92,15 @@ class DataGoKrCollector:
         df = pl.DataFrame(survivors)
         df = self._deduplicate(df)
 
+        # business 계층은 정규화 후 OHLCV(open/high/low/close/volume)에 적용해야
+        # 의미가 있다(#2222). raw `_validate`/validate_all의 business는 raw 컬럼명
+        # (mkp/hipr/...)이라 no-op이므로, 정규화 후 별도 검증 경고를 warns에 surface
+        # 한다. business는 비차단(경고)이므로 store는 진행한다(spec 09).
         net_delta, symbols = self._normalize_and_store(
             df,
             store,
             target_date,
+            warns,
         )
 
         # stored_ok는 하드코딩 True가 아니라 **실제 저장 심볼 존재(bool(symbols))**
@@ -244,8 +249,16 @@ class DataGoKrCollector:
         df: pl.DataFrame,
         store: ParquetStore,
         target_date: str,
+        warns: list[dict],
     ) -> tuple[int, set[str]]:
         """OHLCV와 fundamental을 정규화하고 저장한다.
+
+        Args:
+            df: survivor raw DataFrame.
+            store: 저장소.
+            target_date: 수집 대상 날짜(경고 구조화용).
+            warns: business 경고를 누적할 목록(collect의 warns로 surface, #2222).
+                정규화 후 OHLCV business 위반은 비차단 경고로 여기 추가된다.
 
         Returns:
             ``(net_delta, symbols)``. net_delta는 ohlcv/fundamental ``store.write``
@@ -254,7 +267,7 @@ class DataGoKrCollector:
         rows_written = 0
         symbols: set[str] = set()
 
-        rows_written += self._store_ohlcv(df, store, symbols)
+        rows_written += self._store_ohlcv(df, store, symbols, target_date, warns)
         rows_written += self._store_fundamental(df, store, symbols)
 
         # 종목 메타데이터(symbol/exchange/name/market)를 `.feed/instruments.parquet`에
@@ -278,8 +291,25 @@ class DataGoKrCollector:
         df: pl.DataFrame,
         store: ParquetStore,
         symbols: set[str],
+        target_date: str,
+        warns: list[dict],
     ) -> int:
         """OHLCV 데이터를 정규화하여 심볼별로 저장한다.
+
+        정규화 직후 business 계층 검증(`validate_business`)을 정규화 OHLCV
+        (open/high/low/close/volume) 값에 적용한다(#2222). raw `_validate`의
+        business는 raw 컬럼명(mkp/hipr/...)이라 no-op이므로, 의미 있는 OHLC 정합성
+        (`low<=open/close<=high`)·price>0·volume>=0 anomaly 경고를 여기서 발행한다.
+        business는 비차단(경고)이므로 위반이 있어도 저장은 진행한다(spec 09:
+        business='경고 로그, 저장'). 시계열 갭(`_validate_time_series`)은 단일 날짜
+        collect + dedup 후 사실상 no-op이라 강한 보장 대상은 아니다.
+
+        Args:
+            df: survivor raw DataFrame.
+            store: 저장소.
+            symbols: 저장 심볼을 누적할 집합.
+            target_date: 수집 대상 날짜(경고 구조화용).
+            warns: business 경고를 누적할 목록(collect의 warns로 surface).
 
         Returns:
             ``store.write`` 반환(net-new 저장 행 수)의 합(#1993). 입력 len이
@@ -288,6 +318,20 @@ class DataGoKrCollector:
         ohlcv_df = self._normalizer.normalize_ohlcv(df)
         if ohlcv_df.is_empty() or "symbol" not in ohlcv_df.columns:
             return 0
+
+        # 정규화 후 OHLCV에 business 검증(비차단 경고). 기존 구조화 컨벤션
+        # (source=data_go_kr / type=business_rule, line 216의 raw business_rule
+        # 채널과 동일)으로 wrap하여 collect warns에 surface한다(신규 타입 금지).
+        business_result = validate_business(ohlcv_df.to_dicts())
+        for w in business_result.warnings:
+            warns.append(
+                {
+                    "date": target_date,
+                    "source": "data_go_kr",
+                    "type": "business_rule",
+                    "message": w,
+                }
+            )
 
         rows = 0
         for sym in ohlcv_df["symbol"].unique().to_list():
