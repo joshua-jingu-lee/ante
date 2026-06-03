@@ -537,7 +537,7 @@ ante data delete <dataset_id> --type ohlcv|fundamental --yes [--data-path <경�
 `--data-path`를 생략하면 canonical data root(`data.path`)에서 Parquet 데이터를 읽는다.
 
 ```bash
-ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--exchange <거래소>] [--data-path <경로>] [--db-path <경로>]  # 진행률 바 표시 (text 모드, --exchange 기본 KRX)
+ante backtest run <strategy_path> --start <날짜> --end <날짜> [--symbols <종목,...>] [--balance <초기자금>] [--timeframe <주기>] [--exchange <거래소>] [--data-path <경로>] [--db-path <경로>]  # subprocess 격리 실행(D-004), 진행률 스트리밍 없음 (--exchange 기본 KRX)
 ante backtest history <strategy_name> [--limit N] [--db-path <경로>]  # 전략별 백테스트 실행 이력
 ```
 

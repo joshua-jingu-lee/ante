@@ -20,7 +20,7 @@ callsite shape 와 일치함을 단순 lock 만 한다. callsite shape 가 drift
 history non-empty +1):
 
 0. registry sanity — backtest 2 entries 의 envelope 분류기 범위 내.
-1. ``run`` success (mock service.run) → ``raw_legacy`` (BacktestResult dict).
+1. ``run`` success (mock service.run_subprocess) → ``raw_legacy`` (envelope dict).
 2. ``history`` empty → ``raw_legacy`` (``{message, runs: []}``).
 3. ``history`` non-empty → ``raw_legacy`` (``{strategy_name, runs: [...]}``).
 """
@@ -143,24 +143,18 @@ def _load_json_payload(output: str) -> Any:
 def test_backtest_run_success_envelope_matches_raw_legacy(tmp_path: Path) -> None:
     """``backtest run`` success: ``fmt.output(result_dict, template)`` 평면 dict.
 
-    backtest.py:173-181: ``fmt.output(result_dict, ...)`` 평면 dict. ``result_dict``
-    는 ``BacktestResult.to_dict()`` 의 결과로 ``{strategy, period,
-    total_return_pct, total_trades, final_balance, trades, metrics,
-    equity_curve, config, datasets, run_id}`` 평면 shape. ``BacktestService.run``
-    을 mock 해 성공 경로를 강제한다.
+    backtest.py: ``fmt.output(result_dict, ...)`` 평면 dict. ``result_dict`` 는
+    ``run_subprocess`` 가 반환하는 envelope(``to_dict()`` superset + 런타임
+    result_path/strategy_name/strategy_version)이며 ``run_id`` 추가 후 평면 shape.
+    ``BacktestService.run_subprocess`` 를 mock 해 성공 경로를 강제한다 (#2001).
     """
     # strategy file (Path(exists=True) callback 통과용)
     strat_path = tmp_path / "strat.py"
     strat_path.write_text("# dummy strategy file\n", encoding="utf-8")
     db_path = tmp_path / "ante.db"
 
-    # BacktestResult mock — to_dict() 가 평면 dict 반환.
-    result_obj = MagicMock()
-    result_obj.strategy_name = "test_strategy"
-    result_obj.strategy_version = "1.0.0"
-    result_obj.total_return = 12.5
-    result_obj.trades = []
-    result_obj.to_dict.return_value = {
+    # run_subprocess 가 반환하는 envelope dict — 평면 shape.
+    result_envelope = {
         "strategy": "test_strategy_v1.0.0",
         "period": "2025-01-01 ~ 2025-12-31",
         "initial_balance": 10_000_000.0,
@@ -176,12 +170,16 @@ def test_backtest_run_success_envelope_matches_raw_legacy(tmp_path: Path) -> Non
         "trades": [],
         "config": {},
         "datasets": [],
+        # #2001: 런타임 메타데이터 3키.
+        "result_path": "",
+        "strategy_name": "test_strategy",
+        "strategy_version": "1.0.0",
     }
 
     with (
         patch(
-            "ante.backtest.service.BacktestService.run",
-            new=AsyncMock(return_value=result_obj),
+            "ante.backtest.service.BacktestService.run_subprocess",
+            new=AsyncMock(return_value=result_envelope),
         ),
         patch(
             "ante.backtest.run_store.BacktestRunStore.initialize",

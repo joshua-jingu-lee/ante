@@ -54,12 +54,12 @@ def _make_runner() -> CliRunner:
     return r
 
 
-def _make_result_with_metrics() -> BacktestResult:
-    """metrics가 비어있지 않은 BacktestResult를 만든다.
+def _make_result_envelope() -> dict:
+    """run_subprocess 가 반환하는 envelope(to_dict superset + 런타임 3키).
 
     `if metrics and not fmt.is_json:` 분기를 타려면 metrics가 truthy해야 한다.
     """
-    return BacktestResult(
+    result = BacktestResult(
         strategy_name="momentum",
         strategy_version="1.0.0",
         start_date="2026-01-01",
@@ -77,16 +77,22 @@ def _make_result_with_metrics() -> BacktestResult:
             "total_trades": 5,
         },
     )
+    return {
+        **result.to_dict(),
+        "result_path": result.result_path,
+        "strategy_name": result.strategy_name,
+        "strategy_version": result.strategy_version,
+    }
 
 
 class _SpyService:
-    """BacktestService를 흉내내고 미리 만들어진 BacktestResult를 돌려주는 spy."""
+    """BacktestService를 흉내내고 envelope dict 를 돌려주는 subprocess spy (#2001)."""
 
     def __init__(self, *args: object, **kwargs: object) -> None:
         pass
 
-    async def run(self, config: dict, progress_callback=None) -> BacktestResult:  # noqa: ARG002
-        return _make_result_with_metrics()
+    async def run_subprocess(self, config: dict) -> dict:  # noqa: ARG002
+        return _make_result_envelope()
 
 
 def _invoke_run(runner: CliRunner, tmp_path, *extra_args: str):
@@ -118,7 +124,7 @@ def _invoke_run(runner: CliRunner, tmp_path, *extra_args: str):
 
 async def _fake_save_backtest_run(
     db_path: str,  # noqa: ARG001
-    result,  # noqa: ARG001
+    result_dict: dict,  # noqa: ARG001
     config: dict,  # noqa: ARG001
     metrics: dict,  # noqa: ARG001
 ) -> str:
