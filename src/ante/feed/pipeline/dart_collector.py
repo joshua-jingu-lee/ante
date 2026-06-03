@@ -108,7 +108,7 @@ class DARTCollector:
         config: dict[str, Any],
         store: ParquetStore,
         daily: bool = False,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         """DART 재무제표를 분기별로 수집한다.
 
         Args:
@@ -126,7 +126,17 @@ class DARTCollector:
                 최신 분기 증분만 담당한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, 경고 목록).
+            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)`` (#1993):
+
+            - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**(rows_written).
+              재수집(dedup)이면 0이다.
+            - ``stored_ok``: **유효 분기 데이터가 store에 성공 반영되었는지**
+              (한 분기라도 ``QuarterStatus.OK``, 즉 storable_rows>0). net_delta와
+              무관하다 — 재수집으로 net_delta=0이어도 OK 분기가 있으면 True다.
+              빈 매핑/전 분기 SKIP_EMPTY/no-storable HALT 등 저장 반영이 전무하면
+              False다. DART checkpoint 전진은 내부 ``QuarterStatus`` 로직이 분기별로
+              자체 관리하므로(#2028/#2054), 이 stored_ok는 runner의
+              ``data_types`` 반영용이다(checkpoint 가드 아님).
         """
         corp_code_map = await self._load_corp_codes(feed_dir)
         if not corp_code_map:
@@ -140,7 +150,7 @@ class DARTCollector:
                     ),
                 }
             ]
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         last_checkpoint = checkpoint.get_last_date()
         last_checkpoint = self._migrate_checkpoint_key(last_checkpoint)
@@ -212,12 +222,19 @@ class DARTCollector:
         start_year: int,
         end_year: int,
         last_checkpoint: str | None,
-    ) -> tuple[int, set[str], list[dict]]:
-        """연도/분기를 순회하며 재무제표를 수집한다."""
+    ) -> tuple[int, bool, set[str], list[dict]]:
+        """연도/분기를 순회하며 재무제표를 수집한다.
+
+        Returns:
+            ``(net_delta, stored_ok, symbols, warns)`` (#1993). net_delta는
+            ``_fetch_quarter`` 가 반환한 rows_written(net-new 저장 행 수)의 합이며,
+            stored_ok는 한 분기라도 ``QuarterStatus.OK`` (storable 저장)였는지다.
+        """
         corp_codes_list = list(corp_code_map.keys())
         rows_written = 0
         symbols: set[str] = set()
         warns: list[dict] = []
+        stored_ok = False
 
         # collectable 상한: period-end가 today(KST)를 지난 분기만 fetch/save.
         # 미래 분기(예: 실행일 2026-05-29 기준 2026-Q2/Q3/Q4)는 데이터가
@@ -240,6 +257,12 @@ class DARTCollector:
         # 분기의 checkpoint.save가 jump하여 커버하고, trailing 빈 분기는 미전진
         # 상태로 남아 다음 run에서 재시도된다(분기종료 직후 빈 응답을 "완료"로
         # 오인해 이후 공시를 누락하던 버그 해소).
+        #
+        # store-merge 실패(#1993 R2)는 분기별로 독립 판정한다. halt와 달리 이후
+        # 분기로 전파되지 않으며(halt를 세우지 않음), 해당 분기만 checkpoint를
+        # 미전진시켜 다음 run에 재시도되게 한다. data.go.kr는 runner R1이 store
+        # 경고 drain으로 가드하지만 DART는 checkpoint.save가 collector 내부라
+        # _fetch_quarter의 비파괴적 peek 결과(store_merge_failed)로 게이트한다.
         halt = False
 
         for year in range(start_year, end_year + 1):
@@ -253,7 +276,7 @@ class DARTCollector:
                     # 미래 분기: fetch/save 모두 건너뛴다.
                     continue
 
-                written, syms, status = await self._fetch_quarter(
+                written, syms, status, store_merge_failed = await self._fetch_quarter(
                     corp_codes_list,
                     corp_code_map,
                     store,
@@ -265,16 +288,26 @@ class DARTCollector:
                 symbols.update(syms)
                 if status is QuarterStatus.HALT:
                     halt = True
-                elif status is QuarterStatus.OK and not halt:
-                    checkpoint.save(quarter_key)
+                elif status is QuarterStatus.OK:
+                    # storable 저장이 일어난 분기 — stored_ok 신호 set(net_delta
+                    # 무관). checkpoint 전진은 halt 미설정 + store-merge 성공일
+                    # 때만(#2054 보존, #1993 R2). store-merge 실패(net_delta=0 +
+                    # store_merge 경고)면 QuarterStatus는 OK여도 checkpoint를
+                    # 전진시키지 않아 다음 run에 재시도된다(데이터 미반영 분기
+                    # 영구 skip 방지). store_merge 경고는 runner가 collect 종료 후
+                    # drain해 보고한다(DART는 비파괴적 peek만 함).
+                    stored_ok = True
+                    if not halt and not store_merge_failed:
+                        checkpoint.save(quarter_key)
                 # QuarterStatus.SKIP_EMPTY: checkpoint 미전진 + halt 미설정(no-op).
 
         logger.info(
-            "DART 수집 완료: symbols=%d rows=%d",
+            "DART 수집 완료: symbols=%d rows=%d stored_ok=%s",
             len(symbols),
             rows_written,
+            stored_ok,
         )
-        return rows_written, symbols, warns
+        return rows_written, stored_ok, symbols, warns
 
     @staticmethod
     def _latest_collectable_quarter(
@@ -318,7 +351,7 @@ class DARTCollector:
         store: ParquetStore,
         checkpoint: Checkpoint,
         last_checkpoint: str | None,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         """daily 모드: 최신 collectable 분기 1개만 수집한다(#2101).
 
         ``backfill_since`` 범위를 순회하지 않고, today(KST) 기준 가장 최근에
@@ -328,6 +361,10 @@ class DARTCollector:
 
         운영 전제: 이 경로는 최신 분기만 본다. 과거 미충전 분기는 backfill
         모드로 채워야 하며, daily가 과거 누락을 보정하지 않는다.
+
+        Returns:
+            ``(net_delta, stored_ok, symbols, warns)`` (#1993). stored_ok는
+            최신 분기가 ``QuarterStatus.OK`` (storable 저장)인지다.
         """
         corp_codes_list = list(corp_code_map.keys())
         warns: list[dict] = []
@@ -337,7 +374,7 @@ class DARTCollector:
         if latest is None:
             # collectable 분기 부재(매핑 이상 등): no-op.
             logger.info("DART daily: collectable 분기 없음")
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         year, reprt_code = latest
         quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
@@ -349,9 +386,9 @@ class DARTCollector:
                 quarter_key,
                 last_checkpoint,
             )
-            return 0, set(), warns
+            return 0, False, set(), warns
 
-        written, syms, status = await self._fetch_quarter(
+        written, syms, status, store_merge_failed = await self._fetch_quarter(
             corp_codes_list,
             corp_code_map,
             store,
@@ -360,8 +397,12 @@ class DARTCollector:
             warns,
         )
         # SKIP_EMPTY(미공시 가능)/HALT(transient·no-storable)는 backfill과 동일하게
-        # checkpoint를 전진시키지 않는다. OK일 때만 save한다(#2028/#2054 보존).
-        if status is QuarterStatus.OK:
+        # checkpoint를 전진시키지 않는다. OK일 때만 save하되, store-merge 실패
+        # (net_delta=0 + store_merge 경고)면 QuarterStatus가 OK여도 checkpoint를
+        # 전진시키지 않는다(#1993 R2, 다음 run 재시도). store_merge 경고는 runner가
+        # collect 종료 후 drain해 보고한다(DART는 비파괴적 peek만 함).
+        stored_ok = status is QuarterStatus.OK
+        if stored_ok and not store_merge_failed:
             checkpoint.save(quarter_key)
 
         logger.info(
@@ -371,7 +412,7 @@ class DARTCollector:
             written,
             status.value,
         )
-        return written, syms, warns
+        return written, stored_ok, syms, warns
 
     async def _fetch_quarter(
         self,
@@ -381,12 +422,15 @@ class DARTCollector:
         year: int,
         reprt_code: str,
         warns: list[dict],
-    ) -> tuple[int, set[str], QuarterStatus]:
+    ) -> tuple[int, set[str], QuarterStatus, bool]:
         """단일 분기 재무제표를 수집/정규화/저장한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, status). ``status``는 이 분기에 대한
-            checkpoint 전진/halt 결정을 구동하는 3-상태다(#2028, #2054):
+            (기록 행 수, 수집된 심볼 집합, status, store_merge_failed).
+
+            ``status``는 이 분기에 대한 checkpoint 전진/halt 결정을 구동하는
+            3-상태다(#2028, #2054). **storable_rows 기준으로만 판정**하며
+            store-merge 실패를 절대 섞지 않는다(#2028 의미 보존):
 
             - transient 예외(warn 추가) → ``QuarterStatus.HALT``
               (미전진 + 이후 분기 동결, 다음 run 재시도)
@@ -397,6 +441,21 @@ class DARTCollector:
             - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
               warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
             - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)
+
+            ``store_merge_failed``는 이번 분기 ``store.write`` 가 파티션 merge
+            실패(기존 파일 보존 + ``store_merge`` 경고 적재, net_delta=0)를
+            일으켰는지다(#1993). data.go.kr는 runner R1이 store 경고 drain으로
+            checkpoint를 가드하지만 DART는 checkpoint.save를 collector 내부에서
+            하므로(``_collect_quarters``/``_collect_latest_quarter``) 호출자가 이
+            bool로 checkpoint 전진을 게이트한다. QuarterStatus는 storable 기준
+            그대로(OK)이되 store_merge_failed면 checkpoint만 미전진시켜 다음 run에
+            재시도되게 한다.
+
+            store_merge 감지는 ``store.pending_merge_failure_count()`` 의
+            **비파괴적 peek**로 한다. runner가 DART collect 전체 종료 후 단일
+            소유로 drain하므로(backfill_runner) DART가 drain하면 경고가 소실된다.
+            누적 카운트라 ``_normalize_and_store`` **직전/직후 증가분**으로 이번
+            분기 실패를 판정한다(이전 분기 경고가 아직 drain 안 됐을 수 있음).
 
             ``DARTDailyLimitError``/``DARTCriticalError``는 기존대로 re-raise.
         """
@@ -423,7 +482,7 @@ class DARTCollector:
                     "message": str(exc),
                 }
             )
-            return 0, set(), QuarterStatus.HALT
+            return 0, set(), QuarterStatus.HALT, False
 
         if not raw_items:
             # 빈 응답: 분기종료 직후 아직 공시되지 않았을 수 있다(미공시 가능).
@@ -431,17 +490,33 @@ class DARTCollector:
             # 오인, #2028) 미전진한다. 단 halt는 세우지 않아 후속 분기 처리는
             # 계속한다(오름차순 순회에서 내부 빈 분기는 후속 데이터 분기의
             # checkpoint.save가 jump 커버, trailing 빈 분기는 다음 run 재시도).
-            return 0, set(), QuarterStatus.SKIP_EMPTY
+            return 0, set(), QuarterStatus.SKIP_EMPTY, False
 
-        written, syms = self._normalize_and_store(
+        # store-merge 실패 감지(#1993): 비파괴적 peek로 _normalize_and_store
+        # 직전/직후 store_merge 경고 누적 카운트를 캡처하고 증가분으로 이번 분기
+        # 실패를 판정한다. drain은 runner가 collect 종료 후 단일 소유로 하므로
+        # 여기서는 count만 읽는다(drain 소유권 보존).
+        merge_failures_before = store.pending_merge_failure_count()
+
+        # storable_rows/net_delta를 분리 수신(#1993). QuarterStatus 판정은
+        # storable_rows(정규화/저장 가능 행 수) 기준으로 유지하고(#2028 무변경),
+        # 반환하는 written(rows_written)은 net_delta(실제 net-new 저장 행 수)다.
+        storable_rows, net_delta, syms = self._normalize_and_store(
             raw_items,
             corp_code_map,
             store,
         )
-        if written == 0:
+
+        merge_failures_after = store.pending_merge_failure_count()
+        store_merge_failed = merge_failures_after > merge_failures_before
+
+        if storable_rows == 0:
             # raw_items는 있으나 정규화/저장에서 0 rows(normalized empty,
-            # symbol 컬럼 부재 등 no-storable). 데이터 손실을 surface하고
-            # checkpoint를 전진시키지 않아 다음 run에서 재시도되게 한다.
+            # symbol 컬럼 부재 등 no-storable). net-delta가 아니라 storable
+            # 기준으로 판정한다 — 재수집(dedup, net_delta=0)은 storable>0이라
+            # 여기 걸리지 않고 OK로 처리되어 checkpoint stall을 만들지 않는다.
+            # no-storable은 데이터 손실을 surface하고 checkpoint를 전진시키지
+            # 않아 다음 run에서 재시도되게 한다.
             logger.warning(
                 "DART 정규화/저장 결과 0건: year=%s reprt=%s raw=%d",
                 year,
@@ -459,29 +534,49 @@ class DARTCollector:
                     ),
                 }
             )
-            return 0, syms, QuarterStatus.HALT
+            return 0, syms, QuarterStatus.HALT, store_merge_failed
 
-        return written, syms, QuarterStatus.OK
+        # storable_rows>0 → checkpoint 전진 자격(OK). 재수집이면 net_delta=0이라
+        # rows_written은 0이지만 status는 OK로 checkpoint가 정상 전진한다. 단
+        # store-merge 실패(net_delta=0 + store_merge 경고)면 호출자가
+        # store_merge_failed로 checkpoint를 게이트해 미전진시킨다(다음 run 재시도).
+        return net_delta, syms, QuarterStatus.OK, store_merge_failed
 
     def _normalize_and_store(
         self,
         raw_items: list[dict],
         corp_code_map: dict[str, str],
         store: ParquetStore,
-    ) -> tuple[int, set[str]]:
-        """raw 데이터를 정규화하고 심볼별로 저장한다."""
+    ) -> tuple[int, int, set[str]]:
+        """raw 데이터를 정규화하고 심볼별로 저장한다.
+
+        Returns:
+            ``(storable_rows, net_delta, symbols)`` — 두 신호를 **분리** 반환한다
+            (#1993, #2028 보존):
+
+            - ``storable_rows``: 정규화/저장 가능한 행 수(정규화 결과 심볼별 행
+              수의 합). normalized가 비거나 symbol 컬럼이 없으면 0. 이 값이
+              ``_fetch_quarter`` 의 ``written == 0`` no-storable HALT 판정을
+              구동한다(QuarterStatus 동작 무변경 — net-delta가 아니라 storable
+              기준). 재수집(dedup으로 net_delta=0)이어도 storable_rows>0이라
+              빈응답/no-storable과 구분된다.
+            - ``net_delta``: ``store.write`` 가 반환한 **실제 net-new 저장 행 수**
+              의 합(rows_written, #1993). 재수집/dedup이면 0.
+            - ``symbols``: 저장 대상 심볼 집합.
+        """
         df = pl.DataFrame(raw_items)
         normalized = self._normalizer.normalize(df, corp_code_map)
 
         if normalized.is_empty() or "symbol" not in normalized.columns:
-            return 0, set()
+            return 0, 0, set()
 
-        rows = 0
+        storable_rows = 0
+        net_delta = 0
         symbols: set[str] = set()
         for sym in normalized["symbol"].unique().to_list():
             sym_df = normalized.filter(pl.col("symbol") == sym)
-            store.write(sym, "krx", sym_df, data_type="fundamental")
-            rows += len(sym_df)
+            net_delta += store.write(sym, "krx", sym_df, data_type="fundamental")
+            storable_rows += len(sym_df)
             symbols.add(sym)
 
-        return rows, symbols
+        return storable_rows, net_delta, symbols

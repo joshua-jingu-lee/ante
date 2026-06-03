@@ -30,12 +30,13 @@ class _ScriptedDataGoKrCollector:
     """target_date별 raise/성공 응답을 스크립트로 지정하는 collector 스텁.
 
     ``BackfillRunner._collect_data_go_kr`` 가 호출하는
-    ``collect(target_date, store) -> (written, syms, warns)`` 시그니처를
-    그대로 구현한다.
+    ``collect(target_date, store) -> (net_delta, stored_ok, syms, warns)``
+    4-tuple 시그니처(#1993)를 그대로 구현한다. 성공(미실패)은 유효 데이터가
+    store에 반영된 것으로 보아 ``stored_ok=True`` 를 보고한다.
 
     Args:
         fail_dates: 이 집합에 든 날짜는 ``collect`` 가 transient 예외를 raise.
-        written_per_date: 성공 시 보고할 기록 행 수(>0이면 success로 집계).
+        written_per_date: 성공 시 보고할 net-new 저장 행 수(rows_written 집계용).
 
     Attributes:
         calls: ``collect`` 가 실제로 호출된 ``target_date`` 의 순서 리스트.
@@ -56,11 +57,23 @@ class _ScriptedDataGoKrCollector:
         self,
         target_date: str,
         store: object,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         self.calls.append(target_date)
         if target_date in self._fail_dates:
             raise RuntimeError(f"transient failure on {target_date}")
-        return self._written, {f"SYM-{target_date[-2:]}"}, []
+        return self._written, True, {f"SYM-{target_date[-2:]}"}, []
+
+
+class _NoWarnStore:
+    """drain_warnings()만 제공하는 최소 store 스텁(#1993).
+
+    collect 스텁은 store를 쓰지 않지만, runner는 checkpoint save 직전 store
+    경고를 drain하므로(R1: store-merge 실패 가드) ``drain_warnings() -> []``
+    가 필요하다. 항상 빈 목록(=store-merge 실패 없음)을 반환한다.
+    """
+
+    def drain_warnings(self) -> list[dict]:
+        return []
 
 
 async def _run_collect(
@@ -71,7 +84,8 @@ async def _run_collect(
     """``_collect_data_go_kr`` 를 직접 호출해 checkpoint/ctx/collector를 반환한다.
 
     이슈 #2078 재현 스크립트와 동일한 진입점(메서드 직접 호출 + 가드 no-op)을
-    사용한다. store는 collect 스텁이 사용하지 않으므로 sentinel object로 둔다.
+    사용한다. collect 스텁은 store를 안 쓰지만 runner가 store 경고를 drain하므로
+    ``_NoWarnStore`` (drain_warnings → [])를 주입한다.
     """
     collector = _ScriptedDataGoKrCollector(fail_dates=fail_dates)
     checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
@@ -81,7 +95,7 @@ async def _run_collect(
     await runner._collect_data_go_kr(
         dates,
         {},
-        object(),  # store: 스텁 collect가 사용하지 않음
+        _NoWarnStore(),  # store: collect 스텁 미사용, runner drain_warnings용
         checkpoint,
         ctx,
         lambda _config, _date: False,  # is_blocked_day: 항상 거래일

@@ -569,7 +569,7 @@ class _AnomalyDataGoKrCollector:
         self,
         target_date: str,
         store: ParquetStore,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         df = pl.DataFrame(
             {
                 "date": [date(2025, 9, 30)],
@@ -578,8 +578,12 @@ class _AnomalyDataGoKrCollector:
                 "source": ["data_go_kr"],
             }
         )
-        store.write("005930", "krx", df, data_type="fundamental")
-        return 1, {"005930"}, []
+        # merge 실패 시 store.write는 net_delta=0을 반환한다(기존 파일 보존).
+        net_delta = store.write("005930", "krx", df, data_type="fundamental")
+        # (net_delta, stored_ok, syms, warns) 4-tuple (#1993). 유효 데이터를
+        # validation 통과시켜 write 호출 완료 → stored_ok=True. store-merge 실패는
+        # store 경고로 별도 표면화되며 runner의 checkpoint 가드가 미전진 처리한다.
+        return net_delta, True, {"005930"}, []
 
 
 class TestBackfillReportSurfacesStoreMergeWarning:

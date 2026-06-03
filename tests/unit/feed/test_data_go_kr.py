@@ -1030,7 +1030,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("ABCDEF")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1046,7 +1046,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1062,7 +1062,7 @@ class TestCollectorSymbolValidation:
             source=_FakeSource([_raw("005930"), _raw("ABCDEF")])
         )
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1078,7 +1078,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw(None), _raw(123456)]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1092,7 +1092,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("１２３４５６")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1118,7 +1118,7 @@ class TestCollectorSchemaValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1133,7 +1133,7 @@ class TestCollectorSchemaValidation:
         del item["mkp"]
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1150,7 +1150,7 @@ class TestCollectorSchemaValidation:
         item["clpr"] = None
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1170,7 +1170,7 @@ class TestCollectorSchemaValidation:
         bad_null["trqu"] = None
         collector = DataGoKrCollector(source=_FakeSource([good, bad_missing, bad_null]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1192,7 +1192,7 @@ class TestCollectorSchemaValidation:
         item["lopr"] = "200"
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1239,13 +1239,19 @@ class TestCollectorSchemaValidation:
 
 
 class _RecordingStore:
-    """write() 호출을 기록하는 가짜 store (저장 차단 검증용)."""
+    """write() 호출을 기록하는 가짜 store (저장 차단 검증용).
+
+    write()는 ParquetStore와 동형으로 **net-new 저장 행 수**(int)를 반환한다
+    (#1993 fake store sweep). 신규 write로 가정해 ``len(df)`` 를 반환하므로,
+    collector의 ``rows += store.write(...)`` 누적이 None으로 깨지지 않는다.
+    """
 
     def __init__(self) -> None:
         self.writes: list[tuple] = []
 
-    def write(self, symbol, timeframe, df, data_type) -> None:
+    def write(self, symbol, timeframe, df, data_type) -> int:
         self.writes.append((symbol, timeframe, data_type, len(df)))
+        return len(df)
 
 
 class TestCollectorValidationGate:
@@ -1285,7 +1291,9 @@ class TestCollectorValidationGate:
         )
 
         with caplog.at_level(logging.ERROR):
-            rows, symbols, warns = await collector.collect("20260102", store)
+            rows, _stored_ok, symbols, warns = await collector.collect(
+                "20260102", store
+            )
 
         # 저장 차단: write 미호출, rows_written=0, symbols 추가 0.
         assert rows == 0
@@ -1300,10 +1308,11 @@ class TestCollectorValidationGate:
 
     @pytest.mark.asyncio
     async def test_validate_all_failure_does_not_raise(self, monkeypatch) -> None:
-        """passed=False여도 예외 없이 (0, set(), warns)로 정상 반환한다.
+        """passed=False여도 예외 없이 (0, False, set(), warns)로 정상 반환한다.
 
         다른 날짜/소스 수집을 막지 않도록 부분 결과를 정상 반환해야 한다.
-        collect() (written, syms, warns) 시그니처는 불변이다.
+        collect() (net_delta, stored_ok, syms, warns) 4-tuple 시그니처(#1993).
+        validation 차단은 stored_ok=False다.
         """
         from ante.feed.models.result import ValidationResult
 
@@ -1320,9 +1329,10 @@ class TestCollectorValidationGate:
         result = await collector.collect("20260102", store)
 
         assert isinstance(result, tuple)
-        assert len(result) == 3
-        written, syms, warns = result
-        assert written == 0
+        assert len(result) == 4
+        net_delta, stored_ok, syms, warns = result
+        assert net_delta == 0
+        assert stored_ok is False
         assert syms == set()
         assert isinstance(warns, list)
 
@@ -1341,7 +1351,7 @@ class TestCollectorValidationGate:
         del bad2["clpr"]
         collector = DataGoKrCollector(source=_FakeSource([bad1, bad2]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1505,7 +1515,7 @@ class TestCollectorInstrumentsStore:
             source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
         )
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1529,7 +1539,7 @@ class TestCollectorInstrumentsStore:
         # itmsNm/mrktCtg 키가 전혀 없는 raw(=_raw 기본).
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1577,7 +1587,7 @@ class TestCollectorInstrumentsStore:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1593,7 +1603,7 @@ class TestCollectorInstrumentsStore:
         del bad["mkp"]  # 필수 필드 누락 → 선필터 drop.
         collector = DataGoKrCollector(source=_FakeSource([bad]))
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1676,3 +1686,154 @@ class TestValidateCredentials:
             valid, detail = await source.validate_credentials()
         assert valid is None
         assert detail is not None
+
+
+# ── DataGoKrCollector: stored_ok = bool(symbols) 유도 (#1993 Finding 1) ─────
+
+
+class _EmptyNormalizer:
+    """normalize_ohlcv·normalize_fundamental이 둘 다 **빈** DataFrame을 반환한다.
+
+    survivor가 validation을 통과해도(정상 raw) 정규화 단계에서 추가 drop돼
+    저장 0건이 되는 케이스를 모사한다(no-symbol). DataGoKrNormalizer와 동형
+    시그니처를 제공한다(collector가 normalize_ohlcv/normalize_fundamental만
+    호출하므로 그 둘만 정의).
+    """
+
+    def normalize_ohlcv(self, df):  # type: ignore[no-untyped-def]
+        import polars as pl
+
+        return pl.DataFrame()
+
+    def normalize_fundamental(self, df):  # type: ignore[no-untyped-def]
+        import polars as pl
+
+        return pl.DataFrame()
+
+
+class TestCollectorStoredOkFromSymbols:
+    """stored_ok가 하드코딩 True가 아니라 bool(symbols)에서 유도된다 (#1993 Finding 1).
+
+    survivor가 validation을 통과해도 정규화 단계에서 ohlcv·fundamental이 둘 다
+    no-symbol이면 실제 저장 0건이다. 이때 stored_ok=True로 하드코딩하면 저장이
+    없는데 checkpoint가 전진해 데이터가 영구 skip된다(회귀). bool(symbols)로
+    유도하면 둘 다 빈 정규화 결과는 stored_ok=False(미전진)로 가드된다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_normalize_all_drop_yields_stored_ok_false(self, tmp_path) -> None:
+        """정규화 단계 전drop(둘 다 no-symbol) → stored_ok=False, symbols 빈 set."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw("005930")]),
+            normalizer=_EmptyNormalizer(),  # type: ignore[arg-type]
+        )
+
+        net_delta, stored_ok, symbols, _warns = await collector.collect(
+            "20260102", store
+        )
+
+        # 정규화 결과 0심볼 → 저장 0건 → bool(symbols)=False.
+        assert net_delta == 0
+        assert symbols == set()
+        assert stored_ok is False
+        # 실제로 어떤 데이터도 저장되지 않았다.
+        assert store.list_symbols("1d") == []
+        assert store.list_symbols(data_type="fundamental") == []
+
+    @pytest.mark.asyncio
+    async def test_normal_data_yields_stored_ok_true(self, tmp_path) -> None:
+        """정상 데이터(기본 normalizer) → stored_ok=True(회귀 가드)."""
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        net_delta, stored_ok, symbols, _warns = await collector.collect(
+            "20260102", store
+        )
+
+        assert net_delta > 0
+        assert symbols == {"005930"}
+        assert stored_ok is True
+
+    @pytest.mark.asyncio
+    async def test_recollect_delta_zero_yields_stored_ok_true(self, tmp_path) -> None:
+        """재수집(net_delta=0, 정규화 정상) → stored_ok=True(전진 유지, 회귀 가드).
+
+        같은 날짜를 두 번 collect한다. 2차는 dedup으로 net_delta=0이지만 정규화는
+        정상이라 symbols가 비어있지 않아 stored_ok=True여야 한다(stall 방지).
+        """
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
+
+        await collector.collect("20260102", store)
+        net_delta2, stored_ok2, symbols2, _warns2 = await collector.collect(
+            "20260102", store
+        )
+
+        # 재수집 → net-new 0이지만 정규화/저장 호출은 정상 → stored_ok True.
+        assert net_delta2 == 0
+        assert symbols2 == {"005930"}
+        assert stored_ok2 is True
+
+
+class _StoredOkScriptedCollector:
+    """runner 통합용: collect가 collector 단위 결과를 그대로 전달하는 thin wrapper.
+
+    실 DataGoKrCollector를 감싸 _collect_data_go_kr가 collector의 stored_ok를
+    그대로 받아 checkpoint를 게이트하는지 잠근다(#1993 Finding 1 end-to-end).
+    """
+
+    def __init__(self, inner: DataGoKrCollector) -> None:
+        self._inner = inner
+        self.calls: list[str] = []
+
+    async def collect(
+        self,
+        target_date: str,
+        store: ParquetStore,
+    ) -> tuple[int, bool, set[str], list[dict]]:
+        self.calls.append(target_date)
+        return await self._inner.collect(target_date, store)
+
+
+class TestCollectorStoredOkRunnerGate:
+    """runner가 collector stored_ok=False(정규화 전drop) 날짜를 미전진시킨다."""
+
+    @pytest.mark.asyncio
+    async def test_runner_blocks_checkpoint_on_normalize_all_drop(
+        self, tmp_path
+    ) -> None:
+        """정규화 전drop 날짜(stored_ok=False) → 해당 날짜 checkpoint 미전진.
+
+        Finding 1 회귀: collector가 저장 0건인데 stored_ok=True를 하드코딩하면
+        runner가 checkpoint를 전진시켜 데이터 영구 skip. bool(symbols) 유도로
+        stored_ok=False가 되어 runner의 기존 stored_ok 가드가 미전진시킨다.
+        """
+        from ante.feed.pipeline.backfill_runner import BackfillRunner, _RunContext
+        from ante.feed.pipeline.checkpoint import Checkpoint
+
+        feed_dir = tmp_path / ".feed"
+        store = ParquetStore(base_path=tmp_path / "data")
+        inner = DataGoKrCollector(
+            source=_FakeSource([_raw("005930")]),
+            normalizer=_EmptyNormalizer(),  # type: ignore[arg-type]
+        )
+        collector = _StoredOkScriptedCollector(inner)
+        checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
+        runner = BackfillRunner(data_go_kr_collector=collector)
+        ctx = _RunContext()
+
+        await runner._collect_data_go_kr(
+            ["2026-01-02"],
+            {},
+            store,
+            checkpoint,
+            ctx,
+            lambda _config, _date: False,
+            lambda _config: False,
+            None,
+        )
+
+        # 정규화 전drop으로 stored_ok=False → checkpoint 미전진(영구 skip 방지).
+        assert checkpoint.get_last_date() is None
+        assert collector.calls == ["2026-01-02"]

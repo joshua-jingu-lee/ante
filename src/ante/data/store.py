@@ -274,6 +274,26 @@ class ParquetStore:
         self._pending_warnings.clear()
         return drained
 
+    def pending_merge_failure_count(self) -> int:
+        """현재 버퍼에 쌓인 ``store_merge`` 경고 수를 **비파괴적으로** 센다.
+
+        ``drain_warnings()`` 와 달리 버퍼를 비우지 않는다(read-only count).
+        DART collector처럼 checkpoint.save를 자체적으로 수행하는 호출자가
+        ``store.write`` 직전/직후 이 값을 비교해 이번 단계에서 발생한
+        store-merge 실패(파티션 merge 실패 → 기존 파일 보존, 데이터 미반영)를
+        감지하는 데 쓴다(#1993). 누적 카운트이므로 **직전/직후 증가분**으로
+        이번 단계의 실패를 판정해야 한다(이전 단계 경고가 아직 runner에 의해
+        drain되지 않았을 수 있음).
+
+        파괴적 drain은 backfill_runner가 collect 종료 후 단일 소유로 수행하므로,
+        DART가 여기서 drain하면 runner가 보고할 경고를 소실시킨다. 따라서 이
+        메서드는 절대 버퍼를 비우지 않는다(drain 소유권 보존, #1993 R2).
+
+        Returns:
+            ``type == "store_merge"`` 인 pending 경고의 수.
+        """
+        return sum(1 for w in self._pending_warnings if w.get("type") == "store_merge")
+
     def _resolve_path(
         self,
         symbol: str,
@@ -459,8 +479,18 @@ class ParquetStore:
         data: pl.DataFrame,
         data_type: str = "ohlcv",
         exchange: str = "KRX",
-    ) -> None:
+    ) -> int:
         """데이터를 Parquet에 기록. 파티셔닝, 중복 제거(merge).
+
+        Returns:
+            이번 write로 **실제 새로 저장된 net-new 행 수**(rows_written, #1993).
+            파티션별 net delta = ``max(0, len(merged) - len(existing))``의 합이다
+            (legacy 중복 정리로 merged < existing이면 0으로 clamp). 빈 입력/
+            exchange는 0. 기존엔 입력 ``len(data)`` 를 누적해 dedup·재수집을
+            과대계상했다. 신규 파티션 write는 dedup 후 결과 행 수다. merge 실패
+            (기존 파일 보존 + store_merge 경고)는 0(저장 반영 없음). 반환은 정보용
+            이며 silent overwrite/transaction 동작은 변경하지 않는다(하위호환:
+            기존 None 반환을 사용하던 호출자 0건).
 
         파티셔닝 해상도(04-schema.md 파일 규격, #2115):
         - OHLCV 중 subminute(`_SUBMINUTE_TIMEFRAMES` = 10s/30s)는 **일별**
@@ -487,7 +517,7 @@ class ParquetStore:
             )
 
         if data.is_empty():
-            return
+            return 0
 
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
         if time_col in data.columns and bool(data[time_col].is_null().any()):
@@ -518,11 +548,19 @@ class ParquetStore:
         else:
             partitioned = self._partition_by_month(data, time_col)
 
+        net_delta = 0
         for part_val, group in partitioned:
             filepath = path / f"{part_val}.parquet"
-            self._persist_partition(filepath, group, key)
+            net_delta += self._persist_partition(filepath, group, key)
 
-        logger.debug("Wrote %d rows for %s/%s", len(data), symbol, timeframe)
+        logger.debug(
+            "Wrote %s/%s: input=%d net_new=%d",
+            symbol,
+            timeframe,
+            len(data),
+            net_delta,
+        )
+        return net_delta
 
     def _partition_by_month(
         self, data: pl.DataFrame, time_col: str
@@ -573,7 +611,7 @@ class ParquetStore:
 
     def _persist_partition(
         self, filepath: Path, group: pl.DataFrame, key: list[str]
-    ) -> None:
+    ) -> int:
         """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge.
 
         merge 전략(#1964):
@@ -589,10 +627,18 @@ class ParquetStore:
             filepath: 대상 파티션 파일 경로.
             group: 이번 write로 들어온 (단일 월) DataFrame.
             key: natural key 컬럼 목록. 비어 있으면 dedup/sort 생략.
+
+        Returns:
+            이 파티션에 **새로 저장된 net-new 행 수**(#1993):
+            ``max(0, len(merged) - len(existing))``. 기존 파일이 없으면 dedup
+            결과 행 수(신규 전량). 재write/dedup으로 merged 행 수가 늘지 않으면 0.
+            legacy 중복 정리로 merged < existing이면(행이 줄어들면) 0으로 clamp
+            한다. merge 실패(기존 파일 보존)는 저장 반영이 없으므로 0.
         """
         if filepath.exists():
             try:
                 existing = pl.read_parquet(filepath)
+                existing_len = len(existing)
                 merged = pl.concat([existing, group], how="diagonal_relaxed")
                 if key:
                     present = [c for c in key if c in merged.columns]
@@ -601,10 +647,13 @@ class ParquetStore:
                             present
                         )
                 merged.write_parquet(str(filepath), compression=self._compression)
-                return
+                # net-new = merged 행 수 - 기존 행 수. dedup으로 그대로면 0,
+                # legacy 중복 정리로 줄면 음수 → 0으로 clamp(과대/음수 방지).
+                return max(0, len(merged) - existing_len)
             except Exception as exc:
                 # 방어: diagonal_relaxed로도 결합 불가한 케이스. 기존 파일을
-                # 절대 덮어쓰지 않고(데이터 손실 방지) 이상만 기록한다.
+                # 절대 덮어쓰지 않고(데이터 손실 방지) 이상만 기록한다. 저장
+                # 반영이 없으므로 net-new는 0이다.
                 logger.warning(
                     "Parquet 파티션 merge 실패: %s — 기존 파일 보존, write 건너뜀 (%s)",
                     filepath,
@@ -620,13 +669,15 @@ class ParquetStore:
                         ),
                     }
                 )
-                return
+                return 0
 
         if key:
             present = [c for c in key if c in group.columns]
             if present:
                 group = group.unique(subset=present, keep="last").sort(present)
         group.write_parquet(str(filepath), compression=self._compression)
+        # 신규 파티션: dedup 후 결과 행 수가 곧 net-new 저장 행 수.
+        return len(group)
 
     def append(
         self,

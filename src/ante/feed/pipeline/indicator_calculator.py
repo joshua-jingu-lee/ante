@@ -133,7 +133,10 @@ class IndicatorCalculator:
         """심볼 목록에 대해 파생 지표를 계산하여 저장한다.
 
         Returns:
-            갱신된 행 수.
+            **net-new 저장 행 수**(rows_written, #1993). 지표 계산은 기존 일별
+            fundamental 행을 비율 컬럼만 채워 같은 natural key로 in-place
+            overwrite하므로(행 수 불변), 보통 net-delta=0이다. 이는 정상이며
+            rows_written 과대계상을 방지한다.
         """
         rows_updated = 0
 
@@ -159,6 +162,11 @@ class IndicatorCalculator:
         ``join_asof(strategy="backward")``로 결합한 뒤 비율을 계산하여
         일별 행을 write-back한다. 두 소스 중 하나라도 비어 있거나
         source/date 컬럼이 없으면 0을 반환한다(graceful).
+
+        Returns:
+            ``store.write`` 가 반환한 **net-new 저장 행 수**(#1993). 비율 컬럼만
+            채운 in-place overwrite(같은 natural key)라 행 수가 늘지 않으므로
+            보통 0이다(과대계상 방지). 계산 불가(graceful 0) 시에도 0.
         """
         try:
             fundamental = store.read(sym, "krx", data_type="fundamental")
@@ -189,8 +197,8 @@ class IndicatorCalculator:
         # write-back 전 FUNDAMENTAL 스키마 밖 컬럼(total_assets 등) 제거.
         keep = [c for c in updated.columns if c in _FUNDAMENTAL_COLUMN_SET]
         updated = updated.select(keep)
-        store.write(sym, "krx", updated, data_type="fundamental")
-        return len(updated)
+        # net-new 저장 행 수(#1993). in-place overwrite라 보통 0이다.
+        return store.write(sym, "krx", updated, data_type="fundamental")
 
     @staticmethod
     def _join_asof(

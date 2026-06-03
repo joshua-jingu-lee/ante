@@ -116,12 +116,14 @@ class DailyRunner:
             return
 
         try:
-            written, syms, warns = await self._data_go_kr.collect(
+            net_delta, stored_ok, syms, warns = await self._data_go_kr.collect(
                 target_date,
                 store,
             )
-            ctx.add_success(written, syms, warns)
-            if written > 0:
+            ctx.add_success(net_delta, syms, warns)
+            # data_types는 유효 데이터 store 반영 여부(stored_ok)로 표시한다 —
+            # 재수집(net_delta=0)이어도 데이터가 store에 있으므로 True(#1993).
+            if stored_ok:
                 ctx.data_types.update(["ohlcv", "fundamental"])
         except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
             ctx.config_errors.append(
@@ -163,7 +165,7 @@ class DailyRunner:
             # collectable 분기 1개"만 수집한다(#2101). backfill_since 전 분기를
             # 순회하지 않는다. 과거 미충전 분기 보정은 backfill 모드 책임이며,
             # daily는 최신 분기 증분만 담당한다.
-            written, syms, warns = await self._dart.collect(
+            net_delta, stored_ok, syms, warns = await self._dart.collect(
                 data_path,
                 feed_dir,
                 checkpoint,
@@ -171,8 +173,9 @@ class DailyRunner:
                 store,
                 daily=True,
             )
-            ctx.add_success(written, syms, warns)
-            if written > 0:
+            ctx.add_success(net_delta, syms, warns)
+            # data_types는 유효 분기 저장 여부(stored_ok)로 표시한다(#1993).
+            if stored_ok:
                 ctx.data_types.add("fundamental")
         except (DARTDailyLimitError, DARTCriticalError) as exc:
             ctx.config_errors.append(

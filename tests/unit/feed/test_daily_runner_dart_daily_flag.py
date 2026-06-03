@@ -33,9 +33,10 @@ class _RecordingDARTCollector:
         config: dict[str, Any],
         store: ParquetStore,
         daily: bool = False,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
+        # (net_delta, stored_ok, syms, warns) 4-tuple (#1993). 저장 반영 없음.
         self.daily_calls.append(daily)
-        return 0, set(), []
+        return 0, False, set(), []
 
 
 @pytest.mark.asyncio
