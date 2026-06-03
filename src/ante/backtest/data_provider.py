@@ -105,6 +105,9 @@ class BacktestDataProvider(DataProvider):
             raise BacktestDataError(
                 f"백테스트 데이터 로드 실패(손상 파티션): {symbol}: {e}"
             ) from e
+        # 무거래 zero-OHLC 행을 backtest view 한정으로 flat bar 정규화한다(#2071).
+        # 저장 raw(parquet)는 불변이며, 캐시 view에만 적용된다(데이터 무손실 우선).
+        df = self._normalize_no_trade_bars(df)
         self._cache[key] = df
         # 새 데이터가 캐시에 들어오면 통합 timeline을 무효화한다(#2098). 다음
         # advance()/get_total_steps()/get_current_timestamp() 접근 시 lazy-build.
@@ -124,6 +127,62 @@ class BacktestDataProvider(DataProvider):
         self._loaded_datasets.append(info)
 
         return len(df)
+
+    def _normalize_no_trade_bars(self, df: pl.DataFrame) -> pl.DataFrame:
+        """data.go.kr 무거래 zero-OHLC 행을 flat bar(O=H=L=C)로 정규화한다(#2071).
+
+        data.go.kr 원본은 거래정지/무거래일을 ``open==high==low==0 & close>0 &
+        volume==0`` (amount 컬럼 존재 시 ``amount==0`` 까지) 시그니처로 표현한다.
+        이 행을 그대로 두면 전략이 high/low/open을 직접 쓸 때 intraday range가
+        ``0..close`` 처럼 비현실적으로 벌어져 변동성·가격범위 지표를 왜곡한다.
+
+        **정규화 범위는 backtest view 한정이다.** 저장 raw(parquet)는 변형하지
+        않으며(데이터 무손실 우선 — data-feed/02 L31, data-feed/09 비즈니스
+        위반 경고-후-저장 계약), 이 메서드는 ``load()`` 가 캐시에 담기 직전의
+        DataFrame에만 적용된다. 따라서 리포트/품질 경고/저장 경로는 무영향이다.
+
+        정규화는 **정확 시그니처에만** 적용한다. partial-zero(예: ``open>0 &
+        low==0``), ``volume>0``, ``amount>0`` 인 행은 실제 데이터 오류일 수
+        있으므로 마스킹하지 않고 그대로 둔다. 무거래 행은 ``O=H=L=C=close`` 가
+        되어 intraday range가 0이 되지만, **전일 종가 대비 변화(ATR true-range의
+        ``|close - prev_close|``, 갭 등)는 그대로 보존된다** — "모든 변동성이
+        0"이 되는 것이 아니라 무거래일의 intraday range만 0으로 본다는 뜻이다.
+
+        OHLCV 컬럼이 없는(존재하지 않는 심볼의) 빈 df는 그대로 반환한다.
+        """
+        required = {"open", "high", "low", "close", "volume"}
+        if not required.issubset(df.columns):
+            return df
+        no_trade = (
+            (pl.col("open") == 0)
+            & (pl.col("high") == 0)
+            & (pl.col("low") == 0)
+            & (pl.col("close") > 0)
+            & (pl.col("volume") == 0)
+        )
+        if "amount" in df.columns:
+            no_trade = no_trade & (pl.col("amount") == 0)
+        normalized = df.with_columns(
+            pl.when(no_trade)
+            .then(pl.col("close"))
+            .otherwise(pl.col("open"))
+            .alias("open"),
+            pl.when(no_trade)
+            .then(pl.col("close"))
+            .otherwise(pl.col("high"))
+            .alias("high"),
+            pl.when(no_trade)
+            .then(pl.col("close"))
+            .otherwise(pl.col("low"))
+            .alias("low"),
+        )
+        if logger.isEnabledFor(logging.DEBUG):
+            count = int(df.filter(no_trade).height)
+            if count:
+                logger.debug(
+                    "무거래 zero-OHLC bar %d개를 flat bar로 정규화(#2071)", count
+                )
+        return normalized
 
     def _build_timeline(self) -> list[datetime]:
         """전 캐시 DataFrame의 timestamp를 union·오름차순 정렬·dedupe한 통합 시간축.
