@@ -70,7 +70,7 @@ API 키가 없으면 수집 시작 시 해당 소스를 스킵하고 리포트�
 │   ├── lock                             # 실행 중 lock (동시 실행 방지, PID 기록)
 │   ├── checkpoints/                     # 체크포인트 (소스별/데이터유형별)
 │   └── reports/                         # 수집/품질 리포트 이력
-│       └── {YYYY-MM-DD}-{mode}.json
+│       └── {YYYY-MM-DDTHHMMSS}-{mode}.json  # started_at 초까지 포함(같은 날 rerun 보존)
 │
 ├── ohlcv/                               # DataFeed → 1d만 소유
 │   └── 1d/{exchange}/{symbol}/{YYYY-MM}.parquet

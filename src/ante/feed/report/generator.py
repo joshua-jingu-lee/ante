@@ -1,7 +1,9 @@
 """수집 리포트 생성 모듈.
 
 CollectionResult를 JSON 파일로 변환하여 .feed/reports/ 에 저장한다.
-파일명 형식: {YYYY-MM-DD}-{mode}.json
+파일명 형식: {YYYY-MM-DDTHHMMSS}-{mode}.json (started_at의 초까지 포함, 콜론 제거).
+동일 started_at(같은 초) rerun으로 파일명이 충돌하면 -1, -2 ... suffix를 붙여
+기존 이력을 덮어쓰지 않는다(#2123).
 """
 
 from __future__ import annotations
@@ -66,8 +68,13 @@ class ReportGenerator:
     def save(self, data_path: Path, report: dict, mode: str) -> Path:
         """리포트를 JSON 파일로 저장한다.
 
-        경로: {data_path}/.feed/reports/{YYYY-MM-DD}-{mode}.json
-        날짜는 report의 started_at에서 추출한다.
+        경로: {data_path}/.feed/reports/{YYYY-MM-DDTHHMMSS}-{mode}.json
+        파일명의 타임스탬프는 report의 started_at에서 추출한다(초까지 포함,
+        콜론은 fs-safe하게 제거). 같은 날 다른 시각의 rerun은 서로 다른 파일명을
+        얻어 기존 리포트를 덮어쓰지 않는다(#2123).
+
+        같은 초의 started_at으로 rerun되어 파일명이 이미 존재하면, ``-1``,
+        ``-2`` ... 충돌 suffix를 붙여 어떤 기존 이력도 덮어쓰지 않는다(소실 0).
 
         Args:
             data_path: 데이터 루트 디렉토리.
@@ -78,13 +85,19 @@ class ReportGenerator:
             저장된 리포트 파일 경로.
         """
         started_at = report["started_at"]
-        date_str = started_at[:10]
+        # ISO started_at(예: '2026-03-17T16:00:12Z')의 초까지(YYYY-MM-DDTHH:MM:SS)
+        # 잘라 콜론을 제거 → '2026-03-17T160012' (fs-safe).
+        timestamp = started_at[:19].replace(":", "")
 
         reports_dir = data_path / ".feed" / REPORTS_DIR
         reports_dir.mkdir(parents=True, exist_ok=True)
 
-        filename = f"{date_str}-{mode}.json"
-        file_path = reports_dir / filename
+        file_path = reports_dir / f"{timestamp}-{mode}.json"
+        # 같은 초 rerun으로 파일명이 겹치면 suffix를 붙여 덮어쓰기 방지.
+        collision = 0
+        while file_path.exists():
+            collision += 1
+            file_path = reports_dir / f"{timestamp}-{mode}-{collision}.json"
 
         file_path.write_text(
             json.dumps(report, ensure_ascii=False, indent=2),
