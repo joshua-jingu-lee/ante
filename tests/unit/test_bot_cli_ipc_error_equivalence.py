@@ -153,7 +153,19 @@ class TestBotNotFoundEquivalence:
         async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
             raise click_exc
 
-        with patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise):
+        # #2309: ``bot remove`` 는 ``if is_active_runtime(): ipc_send(...) else:
+        # cold-path`` 분기(bot.py:492)를 가진다. ``is_active_runtime`` 은
+        # ``get_config_dir()`` 의 PID/socket 파일 존재로 판정하므로, mock 하지
+        # 않으면 xdist 워커에서 선행 테스트가 남긴 runtime-state 에 따라 분기가
+        # 비결정적이 된다(False → cold-path → 미설정 DB → code 없는 예외 →
+        # ``EXECUTION_ERROR`` 오분류). IPC-path equivalence 를 검증하는 본
+        # 테스트는 ``is_active_runtime`` 을 ``True`` 로 고정해 결정적으로
+        # ipc_send 경로를 타게 한다(``test_bot_success_output_drift.py`` /
+        # ``test_cli_bot_treasury_ipc.py`` 의 bot_remove IPC 테스트 미러).
+        with (
+            patch("ante.cli.commands.bot.is_active_runtime", return_value=True),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise),
+        ):
             result = runner.invoke(
                 cli,
                 ["--format", "json", "bot", "remove", "missing", "--yes"],

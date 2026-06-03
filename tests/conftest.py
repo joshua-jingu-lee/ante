@@ -48,29 +48,33 @@ def _set_encryption_key():
 
 @pytest.fixture(autouse=True)
 def _sync_boundary_cleanup():
-    """모든 테스트(sync + async) 경계에서 결정적 GC + patch.stopall 보장.
+    """모든 테스트(sync + async) 경계에서 ``patch.stopall`` 보장.
 
     Refs #2304: 기존 ``_cleanup_tasks`` 는 ``async def`` autouse fixture 라
-    async 테스트 경계에서만 ``gc.collect()`` / ``mock.patch.stopall()`` 을
-    수행한다. 반면 sync 테스트(예: ``CliRunner.invoke`` 가 내부적으로
-    ``asyncio.run(coro)`` 을 호출하는 ``ante bot remove`` 표면)는 같은 보장
-    밖에 있어, 직전 async IPC 테스트가 누수한 ``_SelectorTransport`` /
-    ``aiosqlite.Connection`` 이 sync 테스트의 ``asyncio.run`` cleanup 또는
-    GC 단계에서 ``RuntimeError: Event loop is closed`` 로 표출되며 원래
-    ClickException(예: ``BOT_NOT_FOUND``) 을 마스킹해 ``EXECUTION_ERROR`` 로
-    오분류되는 cross-test contamination 이 발생한다(full-suite ``-n auto``
-    flaky).
+    async 테스트 경계에서만 ``mock.patch.stopall()`` 을 수행한다. 반면 sync
+    테스트(예: ``CliRunner.invoke`` 가 내부적으로 ``asyncio.run(coro)`` 을
+    호출하는 ``ante bot remove`` 표면)는 같은 보장 밖에 있어, ``patch.start()``
+    후 ``stop()`` 누락(예: ``try`` 진입 전 예외)으로 module attribute 가 mock
+    으로 영구 leak 되는 cross-test contamination 이 발생할 수 있다. 본 sync
+    autouse fixture 는 sync + async 두 경계 **모두** 에서 매 테스트 종료 직후
+    ``mock.patch.stopall()`` 을 한 번 더 수행해 그 leak 을 차단한다(idempotent —
+    ``_cleanup_tasks`` async 와 중복 호출되어도 회귀 없음).
 
-    본 sync autouse fixture 는 sync + async 두 경계 **모두** 에서 매 테스트
-    종료 직후 ``gc.collect()`` 와 ``mock.patch.stopall()`` 을 한 번 더 수행해,
-    leak source 정리(IPC fixture 명시 close)의 보강 안전망으로 작동한다.
-    비용은 테스트당 ms 급(빈 GC + idempotent stopall)으로 suite 시간에
-    유의미한 영향이 없다. ``_cleanup_tasks`` (async) 와 중복으로 호출되어도
-    둘 다 멱등하므로 회귀가 없다.
+    Refs #2309: 본 fixture 에서 매-테스트 ``gc.collect()`` 는 제거했다.
+    - ``#2304`` 의 실제 flaky(``test_cli_direct_not_found_via_remove`` 의
+      ``EXECUTION_ERROR`` 오분류)는 GC 가능한 누수가 아니라 ``bot remove`` 의
+      ``is_active_runtime()`` runtime-state 분기가 비결정적이었던 것이며, 해당
+      테스트에 ``is_active_runtime`` mock 을 추가해 결정화했다. broad
+      ``gc.collect()`` 는 이 flaky 에 무효였다.
+    - ``#2304`` transport 누수는 ``test_server_client.py`` 의 server-side
+      transport 명시 ``close()`` (source-close, ``_settle_server_side_transports``)
+      로 이미 결정적으로 해소돼 broad GC 안전망이 불필요하다.
+    - 매-테스트 ``gc.collect()`` 는 full-suite 시간을 ~2x 로 회귀시키는 고비용
+      연산이라 제거해 성능을 회복한다.
+    - async 경계의 ``gc.collect()`` 는 ``_cleanup_tasks`` (Refs #1897) 에 그대로
+      유지된다.
     """
     yield
-    # Refs #2304: 남은 transport / DB Connection 객체를 결정적으로 정리.
-    gc.collect()
     # Refs #1904 / #2304: stop-orphaned patch leak 방어 (idempotent).
     mock.patch.stopall()
 
