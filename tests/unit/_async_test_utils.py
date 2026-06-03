@@ -21,14 +21,18 @@ from typing import Any
 def asyncio_run_returning(value: Any) -> Callable[..., Any]:
     """``patch("asyncio.run")`` 용 ``side_effect`` 팩토리(#1980).
 
-    반환된 함수는 첫 인자로 받은 coroutine 을 ``close()`` 하여
-    'coroutine was never awaited' 경고를 막고 ``value`` 를 반환한다.
-    ``-W error::RuntimeWarning`` 하에서도 동작하도록 coroutine 을 확실히 닫는다.
+    반환된 함수는 positional·keyword 로 전달된 **모든** coroutine 을
+    ``close()`` 하여 'coroutine was never awaited' 경고를 막고 ``value`` 를
+    반환한다. ``asyncio.run(main=coro)`` 처럼 keyword 로 넘어오거나 래퍼가
+    추가 인자를 함께 전달하는 경우에도 누락 없이 닫도록 args+kwargs 를 전수
+    스캔한다. ``-W error::RuntimeWarning`` 하에서도 동작하도록 coroutine 을
+    확실히 닫는다.
     """
 
-    def _run(coro: Any = None, *args: Any, **kwargs: Any) -> Any:
-        if inspect.iscoroutine(coro):
-            coro.close()
+    def _run(*args: Any, **kwargs: Any) -> Any:
+        for candidate in (*args, *kwargs.values()):
+            if inspect.iscoroutine(candidate):
+                candidate.close()
         return value
 
     return _run
