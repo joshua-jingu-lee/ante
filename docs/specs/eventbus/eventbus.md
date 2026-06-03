@@ -196,9 +196,9 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `MemberRegisteredEvent` | MemberService | Notification | `member_id`, `member_type`, `role`, `registered_by` |
+| `MemberRegisteredEvent` | MemberService | Audit | `member_id`, `member_type`, `role`, `registered_by` |
 | `MemberSuspendedEvent` | MemberService | SessionService, Notification | `member_id`, `suspended_by` |
-| `MemberReactivatedEvent` | MemberService | Notification | `member_id`, `reactivated_by` |
+| `MemberReactivatedEvent` | MemberService | Audit | `member_id`, `reactivated_by` |
 | `MemberRevokedEvent` | MemberService | SessionService, Notification | `member_id`, `revoked_by` |
 | `MemberTokenRotatedEvent` | MemberService | Audit | `member_id`, `rotated_by` |
 | `MemberPasswordChangedEvent` | MemberService | SessionService, Notification | `member_id`, `changed_by`, `reason` |
