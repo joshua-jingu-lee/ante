@@ -394,6 +394,21 @@ class BackfillRunner:
             건너뛴다(실패 직전 날짜에 checkpoint 고정). 수집 자체는 best-effort로
             계속하므로 ``continue``(루프 진행)는 유지한다 — DataGoKr 결과는
             ParquetStore natural-key dedup으로 재-fetch overwrite 멱등.
+
+        checkpoint 가드 = stored_ok 3-state (#1993, #2015 무회귀):
+            checkpoint 전진은 더 이상 ``written > 0``(net-delta)가 아니라
+            collector가 보고하는 ``stored_ok``(유효 데이터 store 성공 반영) 신호로
+            구동한다. rows_written을 net-new delta로 바꾸면 재수집 날짜는
+            net_delta=0이 되는데, ``written > 0`` 가드라면 그 날짜가 미전진해
+            checkpoint stall이 생긴다. 3-state로 분리:
+              - 빈 응답(stored_ok=False) → 미전진(#2015 보존)
+              - 유효 재수집(stored_ok=True, net_delta=0) → 전진(stall 해소)
+              - store-merge 실패 → 미전진. ``_persist_partition`` 은 merge 실패
+                시 raise하지 않고(R1) 기존 파일 보존 + ``store_merge`` 경고만
+                적재하므로, runner가 checkpoint save **직전** 이번 날짜 write 직후
+                store 경고를 drain해 ``store_merge`` 존재를 확인하는 가드로 미전진
+                시킨다. drain은 반드시 collect/write 직후·checkpoint save 직전에
+                수행한다(지연 drain이면 실패 날짜가 이미 전진).
         """
         if self._data_go_kr is None:
             return
@@ -419,24 +434,33 @@ class BackfillRunner:
                 break
 
             try:
-                written, syms, warns = await self._data_go_kr.collect(
+                net_delta, stored_ok, syms, warns = await self._data_go_kr.collect(
                     target_date,
                     store,
                 )
-                ctx.add_success(written, syms, warns)
-                if written > 0:
+                ctx.add_success(net_delta, syms, warns)
+                if stored_ok:
                     ctx.data_types.update(["ohlcv", "fundamental"])
-                # checkpoint는 데이터가 실제 저장된 날짜(written > 0)에만
-                # 전진시킨다(#2015). 빈 응답(written == 0: 미공개/지연공개/
-                # 캘린더 미인식 공휴일)에 전진하면 그 날짜가 다음 run에서
-                # last_checkpoint 이전으로 간주되어 영구 skip된다(데이터 손실).
-                # dates는 오름차순이므로 checkpoint = 마지막 written>0 날짜이며,
+
+                # R1: store 경고를 checkpoint save 직전·이번 날짜 write 직후
+                # drain한다. store-merge 실패(기존 파일 보존)는 raise하지 않고
+                # 경고만 남기므로, 이번 날짜에 발생한 store_merge가 있으면
+                # checkpoint를 전진시키지 않는다(데이터 미반영 날짜 영구 skip 방지).
+                store_merge_failed = self._drain_store_warnings(store, ctx)
+
+                # checkpoint는 유효 데이터가 store에 반영된 날짜(stored_ok)에만
+                # 전진시킨다(#1993/#2015). 빈 응답/전 drop/validation 차단
+                # (stored_ok=False: 미공개/지연공개/캘린더 미인식 공휴일)에
+                # 전진하면 그 날짜가 다음 run에서 last_checkpoint 이전으로 간주되어
+                # 영구 skip된다(데이터 손실). 유효 재수집(net_delta=0)은 stored_ok로
+                # 정상 전진해 stall을 만들지 않는다.
+                # dates는 오름차순이므로 checkpoint = 마지막 stored_ok 날짜이며,
                 # 내부 빈 날짜는 다음 데이터 날짜에서 jump해 자연 커버(stall 없음),
                 # trailing 빈 날짜는 미전진 → 다음 실행에서 재시도(손실 없음).
                 #
-                # halt 이후에는 written 여부와 무관하게 전진시키지 않는다(#2078).
-                # 앞선 실패 날짜 너머로 last_date가 진행되면 그 날짜가 영구 skip된다.
-                if not halt and written > 0:
+                # halt(#2078) 이후 또는 store-merge 실패 시에는 stored_ok여도
+                # 전진시키지 않는다(실패 날짜 너머 전진 → 영구 skip 방지).
+                if not halt and stored_ok and not store_merge_failed:
                     checkpoint.save(target_date)
 
             except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
@@ -465,6 +489,25 @@ class BackfillRunner:
                 # 못하도록 halt한다(#2078). break는 도입하지 않고(best-effort
                 # 수집 계속) checkpoint.save만 위 success 경로에서 가드한다.
                 halt = True
+
+    @staticmethod
+    def _drain_store_warnings(store: ParquetStore, ctx: _RunContext) -> bool:
+        """store의 pending 경고를 즉시 drain해 ctx.warnings로 옮기고,
+
+        이번 drain에 ``store_merge`` (파티션 merge 실패 → 기존 파일 보존, 데이터
+        미반영) 경고가 있었는지 반환한다(#1993 R1).
+
+        checkpoint save 직전에 호출해야 한다 — collect/write 직후 drain해야 이번
+        날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
+        실패 날짜가 이미 checkpoint를 전진시킨 뒤가 된다).
+
+        Returns:
+            이번 drain에 ``type == "store_merge"`` 경고가 하나라도 있었으면 True.
+        """
+        drained = store.drain_warnings()
+        if drained:
+            ctx.warnings.extend(drained)
+        return any(w.get("type") == "store_merge" for w in drained)
 
     async def _wait_out_trading_pause(
         self,
@@ -572,15 +615,17 @@ class BackfillRunner:
             return
 
         try:
-            written, syms, warns = await self._dart.collect(
+            net_delta, stored_ok, syms, warns = await self._dart.collect(
                 data_path,
                 feed_dir,
                 checkpoint,
                 config,
                 store,
             )
-            ctx.add_success(written, syms, warns)
-            if written > 0:
+            ctx.add_success(net_delta, syms, warns)
+            # data_types는 유효 분기 저장 여부(stored_ok)로 표시한다 — 재수집
+            # (net_delta=0)이어도 fundamental 데이터가 store에 있으므로 True(#1993).
+            if stored_ok:
                 ctx.data_types.add("fundamental")
         except (DARTDailyLimitError, DARTCriticalError) as exc:
             logger.critical("DART 수집 중단: %s", exc)
@@ -640,12 +685,17 @@ class _RunContext:
 
     def add_success(
         self,
-        written: int,
+        net_delta: int,
         syms: set[str],
         warns: list[dict],
     ) -> None:
-        """성공 결과를 집계한다."""
-        self.rows_written += written
+        """성공 결과를 집계한다.
+
+        ``net_delta`` 는 collector가 보고한 **실제 net-new 저장 행 수**
+        (rows_written, #1993)다. 입력 len 누적이 아니라 store가 실제 새로 저장한
+        delta를 누적하므로 재수집/dedup이 rows_written을 과대계상하지 않는다.
+        """
+        self.rows_written += net_delta
         self.total_symbols.update(syms)
         self.success_symbols.update(syms)
         if warns:

@@ -36,7 +36,7 @@ class _AnomalyDataGoKrCollector:
         self,
         target_date: str,
         store: ParquetStore,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         df = pl.DataFrame(
             {
                 "date": [date(2025, 9, 30)],
@@ -45,8 +45,11 @@ class _AnomalyDataGoKrCollector:
                 "source": ["data_go_kr"],
             }
         )
-        store.write("005930", "krx", df, data_type="fundamental")
-        return 1, {"005930"}, []
+        # merge 실패 시 store.write는 net_delta=0 반환(기존 파일 보존).
+        net_delta = store.write("005930", "krx", df, data_type="fundamental")
+        # (net_delta, stored_ok, syms, warns) 4-tuple (#1993). 유효 데이터 write
+        # 호출 완료 → stored_ok=True. store-merge 실패는 store 경고로 표면화된다.
+        return net_delta, True, {"005930"}, []
 
 
 @pytest.mark.asyncio
@@ -111,7 +114,7 @@ async def test_daily_run_no_store_warnings_when_clean(tmp_path: Path) -> None:
             self,
             target_date: str,
             store: ParquetStore,
-        ) -> tuple[int, set[str], list[dict]]:
+        ) -> tuple[int, bool, set[str], list[dict]]:
             df = pl.DataFrame(
                 {
                     "date": [date(2025, 9, 30)],
@@ -120,8 +123,9 @@ async def test_daily_run_no_store_warnings_when_clean(tmp_path: Path) -> None:
                     "source": ["data_go_kr"],
                 }
             )
-            store.write("005930", "krx", df, data_type="fundamental")
-            return 1, {"005930"}, []
+            net_delta = store.write("005930", "krx", df, data_type="fundamental")
+            # (net_delta, stored_ok, syms, warns) 4-tuple (#1993).
+            return net_delta, True, {"005930"}, []
 
     store = ParquetStore(base_path=data_path)
     runner = DailyRunner(

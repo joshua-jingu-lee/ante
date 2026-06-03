@@ -1030,7 +1030,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("ABCDEF")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1046,7 +1046,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1062,7 +1062,7 @@ class TestCollectorSymbolValidation:
             source=_FakeSource([_raw("005930"), _raw("ABCDEF")])
         )
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1078,7 +1078,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw(None), _raw(123456)]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1092,7 +1092,7 @@ class TestCollectorSymbolValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("１２３４５６")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1118,7 +1118,7 @@ class TestCollectorSchemaValidation:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1133,7 +1133,7 @@ class TestCollectorSchemaValidation:
         del item["mkp"]
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1150,7 +1150,7 @@ class TestCollectorSchemaValidation:
         item["clpr"] = None
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1170,7 +1170,7 @@ class TestCollectorSchemaValidation:
         bad_null["trqu"] = None
         collector = DataGoKrCollector(source=_FakeSource([good, bad_missing, bad_null]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1192,7 +1192,7 @@ class TestCollectorSchemaValidation:
         item["lopr"] = "200"
         collector = DataGoKrCollector(source=_FakeSource([item]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1239,13 +1239,19 @@ class TestCollectorSchemaValidation:
 
 
 class _RecordingStore:
-    """write() 호출을 기록하는 가짜 store (저장 차단 검증용)."""
+    """write() 호출을 기록하는 가짜 store (저장 차단 검증용).
+
+    write()는 ParquetStore와 동형으로 **net-new 저장 행 수**(int)를 반환한다
+    (#1993 fake store sweep). 신규 write로 가정해 ``len(df)`` 를 반환하므로,
+    collector의 ``rows += store.write(...)`` 누적이 None으로 깨지지 않는다.
+    """
 
     def __init__(self) -> None:
         self.writes: list[tuple] = []
 
-    def write(self, symbol, timeframe, df, data_type) -> None:
+    def write(self, symbol, timeframe, df, data_type) -> int:
         self.writes.append((symbol, timeframe, data_type, len(df)))
+        return len(df)
 
 
 class TestCollectorValidationGate:
@@ -1285,7 +1291,9 @@ class TestCollectorValidationGate:
         )
 
         with caplog.at_level(logging.ERROR):
-            rows, symbols, warns = await collector.collect("20260102", store)
+            rows, _stored_ok, symbols, warns = await collector.collect(
+                "20260102", store
+            )
 
         # 저장 차단: write 미호출, rows_written=0, symbols 추가 0.
         assert rows == 0
@@ -1300,10 +1308,11 @@ class TestCollectorValidationGate:
 
     @pytest.mark.asyncio
     async def test_validate_all_failure_does_not_raise(self, monkeypatch) -> None:
-        """passed=False여도 예외 없이 (0, set(), warns)로 정상 반환한다.
+        """passed=False여도 예외 없이 (0, False, set(), warns)로 정상 반환한다.
 
         다른 날짜/소스 수집을 막지 않도록 부분 결과를 정상 반환해야 한다.
-        collect() (written, syms, warns) 시그니처는 불변이다.
+        collect() (net_delta, stored_ok, syms, warns) 4-tuple 시그니처(#1993).
+        validation 차단은 stored_ok=False다.
         """
         from ante.feed.models.result import ValidationResult
 
@@ -1320,9 +1329,10 @@ class TestCollectorValidationGate:
         result = await collector.collect("20260102", store)
 
         assert isinstance(result, tuple)
-        assert len(result) == 3
-        written, syms, warns = result
-        assert written == 0
+        assert len(result) == 4
+        net_delta, stored_ok, syms, warns = result
+        assert net_delta == 0
+        assert stored_ok is False
         assert syms == set()
         assert isinstance(warns, list)
 
@@ -1341,7 +1351,7 @@ class TestCollectorValidationGate:
         del bad2["clpr"]
         collector = DataGoKrCollector(source=_FakeSource([bad1, bad2]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1505,7 +1515,7 @@ class TestCollectorInstrumentsStore:
             source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
         )
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1529,7 +1539,7 @@ class TestCollectorInstrumentsStore:
         # itmsNm/mrktCtg 키가 전혀 없는 raw(=_raw 기본).
         collector = DataGoKrCollector(source=_FakeSource([_raw("005930")]))
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows > 0
         assert symbols == {"005930"}
@@ -1577,7 +1587,7 @@ class TestCollectorInstrumentsStore:
         store = ParquetStore(base_path=tmp_path)
         collector = DataGoKrCollector(source=_FakeSource([]))
 
-        rows, symbols, warns = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, warns = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()
@@ -1593,7 +1603,7 @@ class TestCollectorInstrumentsStore:
         del bad["mkp"]  # 필수 필드 누락 → 선필터 drop.
         collector = DataGoKrCollector(source=_FakeSource([bad]))
 
-        rows, symbols, _ = await collector.collect("20260102", store)
+        rows, _stored_ok, symbols, _ = await collector.collect("20260102", store)
 
         assert rows == 0
         assert symbols == set()

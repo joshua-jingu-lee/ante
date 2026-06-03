@@ -108,7 +108,7 @@ class DARTCollector:
         config: dict[str, Any],
         store: ParquetStore,
         daily: bool = False,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         """DART 재무제표를 분기별로 수집한다.
 
         Args:
@@ -126,7 +126,17 @@ class DARTCollector:
                 최신 분기 증분만 담당한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, 경고 목록).
+            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)`` (#1993):
+
+            - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**(rows_written).
+              재수집(dedup)이면 0이다.
+            - ``stored_ok``: **유효 분기 데이터가 store에 성공 반영되었는지**
+              (한 분기라도 ``QuarterStatus.OK``, 즉 storable_rows>0). net_delta와
+              무관하다 — 재수집으로 net_delta=0이어도 OK 분기가 있으면 True다.
+              빈 매핑/전 분기 SKIP_EMPTY/no-storable HALT 등 저장 반영이 전무하면
+              False다. DART checkpoint 전진은 내부 ``QuarterStatus`` 로직이 분기별로
+              자체 관리하므로(#2028/#2054), 이 stored_ok는 runner의
+              ``data_types`` 반영용이다(checkpoint 가드 아님).
         """
         corp_code_map = await self._load_corp_codes(feed_dir)
         if not corp_code_map:
@@ -140,7 +150,7 @@ class DARTCollector:
                     ),
                 }
             ]
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         last_checkpoint = checkpoint.get_last_date()
         last_checkpoint = self._migrate_checkpoint_key(last_checkpoint)
@@ -212,12 +222,19 @@ class DARTCollector:
         start_year: int,
         end_year: int,
         last_checkpoint: str | None,
-    ) -> tuple[int, set[str], list[dict]]:
-        """연도/분기를 순회하며 재무제표를 수집한다."""
+    ) -> tuple[int, bool, set[str], list[dict]]:
+        """연도/분기를 순회하며 재무제표를 수집한다.
+
+        Returns:
+            ``(net_delta, stored_ok, symbols, warns)`` (#1993). net_delta는
+            ``_fetch_quarter`` 가 반환한 rows_written(net-new 저장 행 수)의 합이며,
+            stored_ok는 한 분기라도 ``QuarterStatus.OK`` (storable 저장)였는지다.
+        """
         corp_codes_list = list(corp_code_map.keys())
         rows_written = 0
         symbols: set[str] = set()
         warns: list[dict] = []
+        stored_ok = False
 
         # collectable 상한: period-end가 today(KST)를 지난 분기만 fetch/save.
         # 미래 분기(예: 실행일 2026-05-29 기준 2026-Q2/Q3/Q4)는 데이터가
@@ -265,16 +282,21 @@ class DARTCollector:
                 symbols.update(syms)
                 if status is QuarterStatus.HALT:
                     halt = True
-                elif status is QuarterStatus.OK and not halt:
-                    checkpoint.save(quarter_key)
+                elif status is QuarterStatus.OK:
+                    # storable 저장이 일어난 분기 — stored_ok 신호 set(net_delta
+                    # 무관). checkpoint 전진은 halt 미설정일 때만(#2054 보존).
+                    stored_ok = True
+                    if not halt:
+                        checkpoint.save(quarter_key)
                 # QuarterStatus.SKIP_EMPTY: checkpoint 미전진 + halt 미설정(no-op).
 
         logger.info(
-            "DART 수집 완료: symbols=%d rows=%d",
+            "DART 수집 완료: symbols=%d rows=%d stored_ok=%s",
             len(symbols),
             rows_written,
+            stored_ok,
         )
-        return rows_written, symbols, warns
+        return rows_written, stored_ok, symbols, warns
 
     @staticmethod
     def _latest_collectable_quarter(
@@ -318,7 +340,7 @@ class DARTCollector:
         store: ParquetStore,
         checkpoint: Checkpoint,
         last_checkpoint: str | None,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         """daily 모드: 최신 collectable 분기 1개만 수집한다(#2101).
 
         ``backfill_since`` 범위를 순회하지 않고, today(KST) 기준 가장 최근에
@@ -328,6 +350,10 @@ class DARTCollector:
 
         운영 전제: 이 경로는 최신 분기만 본다. 과거 미충전 분기는 backfill
         모드로 채워야 하며, daily가 과거 누락을 보정하지 않는다.
+
+        Returns:
+            ``(net_delta, stored_ok, symbols, warns)`` (#1993). stored_ok는
+            최신 분기가 ``QuarterStatus.OK`` (storable 저장)인지다.
         """
         corp_codes_list = list(corp_code_map.keys())
         warns: list[dict] = []
@@ -337,7 +363,7 @@ class DARTCollector:
         if latest is None:
             # collectable 분기 부재(매핑 이상 등): no-op.
             logger.info("DART daily: collectable 분기 없음")
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         year, reprt_code = latest
         quarter_key = f"{year}-{REPRT_TO_QUARTER[reprt_code]}"
@@ -349,7 +375,7 @@ class DARTCollector:
                 quarter_key,
                 last_checkpoint,
             )
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         written, syms, status = await self._fetch_quarter(
             corp_codes_list,
@@ -361,7 +387,8 @@ class DARTCollector:
         )
         # SKIP_EMPTY(미공시 가능)/HALT(transient·no-storable)는 backfill과 동일하게
         # checkpoint를 전진시키지 않는다. OK일 때만 save한다(#2028/#2054 보존).
-        if status is QuarterStatus.OK:
+        stored_ok = status is QuarterStatus.OK
+        if stored_ok:
             checkpoint.save(quarter_key)
 
         logger.info(
@@ -371,7 +398,7 @@ class DARTCollector:
             written,
             status.value,
         )
-        return written, syms, warns
+        return written, stored_ok, syms, warns
 
     async def _fetch_quarter(
         self,
@@ -433,15 +460,21 @@ class DARTCollector:
             # checkpoint.save가 jump 커버, trailing 빈 분기는 다음 run 재시도).
             return 0, set(), QuarterStatus.SKIP_EMPTY
 
-        written, syms = self._normalize_and_store(
+        # storable_rows/net_delta를 분리 수신(#1993). QuarterStatus 판정은
+        # storable_rows(정규화/저장 가능 행 수) 기준으로 유지하고(#2028 무변경),
+        # 반환하는 written(rows_written)은 net_delta(실제 net-new 저장 행 수)다.
+        storable_rows, net_delta, syms = self._normalize_and_store(
             raw_items,
             corp_code_map,
             store,
         )
-        if written == 0:
+        if storable_rows == 0:
             # raw_items는 있으나 정규화/저장에서 0 rows(normalized empty,
-            # symbol 컬럼 부재 등 no-storable). 데이터 손실을 surface하고
-            # checkpoint를 전진시키지 않아 다음 run에서 재시도되게 한다.
+            # symbol 컬럼 부재 등 no-storable). net-delta가 아니라 storable
+            # 기준으로 판정한다 — 재수집(dedup, net_delta=0)은 storable>0이라
+            # 여기 걸리지 않고 OK로 처리되어 checkpoint stall을 만들지 않는다.
+            # no-storable은 데이터 손실을 surface하고 checkpoint를 전진시키지
+            # 않아 다음 run에서 재시도되게 한다.
             logger.warning(
                 "DART 정규화/저장 결과 0건: year=%s reprt=%s raw=%d",
                 year,
@@ -461,27 +494,45 @@ class DARTCollector:
             )
             return 0, syms, QuarterStatus.HALT
 
-        return written, syms, QuarterStatus.OK
+        # storable_rows>0 → checkpoint 전진 자격(OK). 재수집이면 net_delta=0이라
+        # rows_written은 0이지만 status는 OK로 checkpoint가 정상 전진한다.
+        return net_delta, syms, QuarterStatus.OK
 
     def _normalize_and_store(
         self,
         raw_items: list[dict],
         corp_code_map: dict[str, str],
         store: ParquetStore,
-    ) -> tuple[int, set[str]]:
-        """raw 데이터를 정규화하고 심볼별로 저장한다."""
+    ) -> tuple[int, int, set[str]]:
+        """raw 데이터를 정규화하고 심볼별로 저장한다.
+
+        Returns:
+            ``(storable_rows, net_delta, symbols)`` — 두 신호를 **분리** 반환한다
+            (#1993, #2028 보존):
+
+            - ``storable_rows``: 정규화/저장 가능한 행 수(정규화 결과 심볼별 행
+              수의 합). normalized가 비거나 symbol 컬럼이 없으면 0. 이 값이
+              ``_fetch_quarter`` 의 ``written == 0`` no-storable HALT 판정을
+              구동한다(QuarterStatus 동작 무변경 — net-delta가 아니라 storable
+              기준). 재수집(dedup으로 net_delta=0)이어도 storable_rows>0이라
+              빈응답/no-storable과 구분된다.
+            - ``net_delta``: ``store.write`` 가 반환한 **실제 net-new 저장 행 수**
+              의 합(rows_written, #1993). 재수집/dedup이면 0.
+            - ``symbols``: 저장 대상 심볼 집합.
+        """
         df = pl.DataFrame(raw_items)
         normalized = self._normalizer.normalize(df, corp_code_map)
 
         if normalized.is_empty() or "symbol" not in normalized.columns:
-            return 0, set()
+            return 0, 0, set()
 
-        rows = 0
+        storable_rows = 0
+        net_delta = 0
         symbols: set[str] = set()
         for sym in normalized["symbol"].unique().to_list():
             sym_df = normalized.filter(pl.col("symbol") == sym)
-            store.write(sym, "krx", sym_df, data_type="fundamental")
-            rows += len(sym_df)
+            net_delta += store.write(sym, "krx", sym_df, data_type="fundamental")
+            storable_rows += len(sym_df)
             symbols.add(sym)
 
-        return rows, symbols
+        return storable_rows, net_delta, symbols

@@ -188,7 +188,7 @@ class TestEmptyCorpCodeMapWarning:
         collector = DARTCollector(source=source)
 
         config = {"schedule": {"backfill_since": "2026-01-01"}}
-        rows, symbols, warns = await collector.collect(
+        rows, _stored_ok, symbols, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -219,7 +219,7 @@ class TestEmptyCorpCodeMapWarning:
         collector = DARTCollector(source=source)
 
         config = {"schedule": {"backfill_since": "2026-01-01"}}
-        _rows, _symbols, warns = await collector.collect(
+        _rows, _stored_ok, _symbols, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -350,9 +350,14 @@ async def _run_collect(
     config: dict,
     end_year: int = 2015,
 ) -> tuple[int, set[str], list[dict]]:
-    """단일 연도만 순회하도록 _resolve_year_range를 고정해 collect 실행."""
+    """단일 연도만 순회하도록 _resolve_year_range를 고정해 collect 실행.
+
+    ``_collect_quarters`` 는 #1993 이후 ``(net_delta, stored_ok, syms, warns)``
+    4-tuple을 반환한다. 기존 호출부 호환을 위해 stored_ok를 떼고
+    ``(net_delta, syms, warns)`` 3-tuple로 어댑트해 반환한다(net_delta=rows_written).
+    """
     # end_year를 고정(_today_kst 기반 현재 연도 대신)하여 단일 연도만 순회.
-    return await collector._collect_quarters(  # type: ignore[attr-defined]
+    net_delta, _stored_ok, syms, warns = await collector._collect_quarters(  # type: ignore[attr-defined]
         {"00126380": "005930"},
         store,
         checkpoint,
@@ -360,6 +365,7 @@ async def _run_collect(
         end_year,
         None,
     )
+    return net_delta, syms, warns
 
 
 # 2015-Q1 period-end(3/31)는 today(2026+)보다 과거이므로 모든 분기 collectable.
@@ -521,6 +527,96 @@ class TestCheckpointHaltOnFailure:
         assert len(warns) == 4
 
 
+def _stored_df_quarter(year: str, month: int) -> pl.DataFrame:
+    """분기별로 distinct한 period_end(date)를 가진 정규화 결과(재수집 delta 검증용)."""
+    from calendar import monthrange
+
+    day = monthrange(int(year), month)[1]
+    return pl.DataFrame(
+        {
+            "date": [date(int(year), month, day)],
+            "symbol": ["005930"],
+            "revenue": [100],
+            "source": ["dart"],
+        }
+    )
+
+
+class TestRecollectQuarterDeltaZero:
+    """#1993/#2028: 재수집 분기는 net_delta=0이어도 QuarterStatus.OK로 전진한다.
+
+    rows_written을 net-new 저장 delta로 바꾸면 이미 저장된 분기를 다시 수집할 때
+    net_delta=0이 된다. QuarterStatus 판정을 net-delta가 아니라 **storable_rows**
+    (정규화/저장 가능 행 수) 기준으로 유지하므로, 재수집 분기는 storable>0이라
+    OK로 checkpoint가 정상 전진한다(net-delta로 판정하면 no-storable HALT로
+    오판해 stall). #2028 QuarterStatus(SKIP_EMPTY/HALT/OK) 동작은 무변경이다.
+    """
+
+    async def test_recollect_quarter_storable_positive_net_delta_zero_ok(
+        self, tmp_path: Path
+    ) -> None:
+        """이미 저장된 분기 재수집: storable>0, net_delta=0, status=OK, 전진."""
+        from ante.feed.pipeline.dart_collector import QuarterStatus
+
+        # 분기별 distinct date(3/31, 6/30, 9/30, 12/31)로 실제 신규 저장 보장.
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # 1차 수집: 4개 분기 신규 저장 → net_delta>0.
+        rows1, syms1, warns1 = await _run_collect(
+            tmp_path, collector, checkpoint, store, config
+        )
+        assert checkpoint.get_last_date() == "2015-Q4"
+        assert rows1 > 0
+        assert warns1 == []
+        assert syms1 == {"005930"}
+
+        # 단일 분기 재수집(_fetch_quarter 직접): 이미 저장됨 → net_delta=0 + OK.
+        warns2: list[dict] = []
+        net_delta, syms2, status = await collector._fetch_quarter(
+            ["00126380"],
+            {"00126380": "005930"},
+            store,
+            2015,
+            "11013",
+            warns2,
+        )
+        # storable>0이라 OK(no-storable HALT 아님), net_delta=0(재수집 dedup).
+        assert status is QuarterStatus.OK
+        assert net_delta == 0
+        assert syms2 == {"005930"}
+        assert warns2 == []
+
+        # 2차 전체 재수집(fresh checkpoint): 전부 재수집(net_delta=0)이어도 OK로
+        # checkpoint가 Q4까지 정상 전진(stall 없음). #2028 무회귀.
+        checkpoint2 = Checkpoint(tmp_path / ".feed", "dart", "fundamental")
+        net_delta2, stored_ok2, _syms3, warns3 = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint2,
+            2015,
+            2015,
+            None,
+        )
+        assert checkpoint2.get_last_date() == "2015-Q4"
+        assert net_delta2 == 0  # 전부 재수집 → net-new 0(과대계상 제거)
+        assert stored_ok2 is True  # storable 저장 분기 존재 → stored_ok True
+        assert warns3 == []
+
+
 class TestEmptyQuarterSkip:
     """#2028: 빈 분기(not raw_items)를 SKIP_EMPTY로 처리해 checkpoint를 전진/
 
@@ -647,7 +743,7 @@ class TestEmptyQuarterSkip:
         store = ParquetStore(base_path=tmp_path / "data")
         checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
 
-        rows, _syms, warns = await collector._collect_quarters(
+        rows, stored_ok, _syms, warns = await collector._collect_quarters(
             {"00126380": "005930"},
             store,
             checkpoint,
@@ -658,6 +754,8 @@ class TestEmptyQuarterSkip:
 
         assert checkpoint.get_last_date() is None
         assert rows == 0
+        # 전 분기 빈 응답(SKIP_EMPTY) → 저장 반영 전무 → stored_ok=False.
+        assert stored_ok is False
         assert warns == []
 
 
@@ -700,7 +798,7 @@ class TestDailyLatestQuarter:
         collector = DARTCollector(source=source, normalizer=normalizer)
 
         config = {"schedule": {"backfill_since": "2015-01-01"}}
-        rows, syms, warns = await collector.collect(
+        rows, _stored_ok, syms, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -741,7 +839,7 @@ class TestDailyLatestQuarter:
         collector = DARTCollector(source=source)
 
         config = {"schedule": {"backfill_since": "2015-01-01"}}
-        rows, syms, warns = await collector.collect(
+        rows, _stored_ok, syms, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -781,7 +879,7 @@ class TestDailyLatestQuarter:
         collector = DARTCollector(source=source)
 
         config = {"schedule": {"backfill_since": "2015-01-01"}}
-        rows, _syms, warns = await collector.collect(
+        rows, _stored_ok, _syms, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -822,7 +920,7 @@ class TestDailyLatestQuarter:
         collector = DARTCollector(source=source)
 
         config = {"schedule": {"backfill_since": "2015-01-01"}}
-        rows, _syms, warns = await collector.collect(
+        rows, _stored_ok, _syms, warns = await collector.collect(
             data_path=tmp_path / "data",
             feed_dir=feed_dir,
             checkpoint=checkpoint,
@@ -1038,13 +1136,15 @@ class TestAvailableDateEndToEnd:
             },
         ]
 
-        written, syms = collector._normalize_and_store(
+        storable_rows, net_delta, syms = collector._normalize_and_store(
             raw_items,
             {"00126380": "005930"},
             store,
         )
 
-        assert written == 1
+        # 신규 write: storable_rows == net_delta == 1 (#1993).
+        assert storable_rows == 1
+        assert net_delta == 1
         assert syms == {"005930"}
 
         result = store.read("005930", "krx", data_type="fundamental")
@@ -1069,13 +1169,15 @@ class TestAvailableDateEndToEnd:
             },
         ]
 
-        written, syms = collector._normalize_and_store(
+        storable_rows, net_delta, syms = collector._normalize_and_store(
             raw_items,
             {"00126380": "005930"},
             store,
         )
 
-        assert written == 1
+        # 신규 write: storable_rows == net_delta == 1 (#1993).
+        assert storable_rows == 1
+        assert net_delta == 1
         result = store.read("005930", "krx", data_type="fundamental")
         assert "available_date" in result.columns
         assert result["available_date"][0] is None

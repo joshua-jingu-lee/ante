@@ -73,7 +73,11 @@ class CollectionResult:
     """수집 실패 종목 수."""
 
     rows_written: int = 0
-    """저장된 총 행 수."""
+    """**net-new 저장 행 수** (#1993).
+
+    store에 실제로 새로 저장된 행 수의 합이다. 입력 len 누적이 아니라 파티션별
+    ``max(0, len(merged) - len(existing))`` delta의 합이므로, 재수집/dedup/
+    지표 in-place overwrite는 0으로 집계된다(과대계상 제거)."""
 
     data_types: list[str] = field(default_factory=list)
     """수집된 데이터 유형 목록 (예: ['ohlcv', 'fundamental'])."""

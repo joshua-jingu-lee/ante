@@ -109,8 +109,11 @@ def test_indicator_asof_join_non_null(store: ParquetStore) -> None:
         ],
     )
 
+    # 지표 계산은 기존 일별 행을 비율 컬럼만 채워 같은 natural key로 in-place
+    # overwrite한다(행 수 불변) → net-new 저장 행 수 = 0(#1993). 데이터 정확성은
+    # 아래 비율 assert로 검증한다(rows_written 과대계상 제거).
     rows = IndicatorCalculator().compute(store, [SYMBOL])
-    assert rows == 2
+    assert rows == 0
 
     daily = _daily_rows(store)
     assert len(daily) == 2
@@ -427,8 +430,10 @@ def test_indicator_nonstandard_period_end_month_removed(store: ParquetStore) -> 
         ],
     )
 
+    # in-place overwrite(같은 natural key) → net-new 저장 0(#1993). 정확성은
+    # 아래 비율 assert로 검증.
     rows = IndicatorCalculator().compute(store, [SYMBOL])
-    assert rows == 1
+    assert rows == 0
 
     row = _daily_rows(store).row(0, named=True)
     # 비표준 행이 제거되고 표준 Q1만 적용 → Q1 값으로 산출(999 값이 아님).

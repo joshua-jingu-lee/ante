@@ -22,16 +22,35 @@ from ante.feed.pipeline.backfill_runner import BackfillRunner, _RunContext
 from ante.feed.pipeline.checkpoint import Checkpoint
 
 
+class _NoWarnStore:
+    """drain_warnings()만 제공하는 최소 store 스텁(#1993).
+
+    collect 스텁은 store를 쓰지 않지만, runner는 checkpoint save 직전 store
+    경고를 drain하므로(R1: store-merge 실패 가드) ``drain_warnings() -> []`` 가
+    필요하다. 항상 빈 목록(=store-merge 실패 없음)을 반환한다.
+    """
+
+    def drain_warnings(self) -> list[dict]:
+        return []
+
+
 class _WrittenScriptedCollector:
     """target_date별 written 행 수를 스크립트로 지정하는 collector 스텁.
 
     ``BackfillRunner._collect_data_go_kr`` 가 호출하는
-    ``collect(target_date, store) -> (written, syms, warns)`` 시그니처를
-    그대로 구현한다.
+    ``collect(target_date, store) -> (net_delta, stored_ok, syms, warns)``
+    4-tuple 시그니처(#1993)를 그대로 구현한다.
+
+    이 스텁은 ``written>0`` 을 "유효 데이터 store 반영"(stored_ok=True), ``written==0``
+    을 "빈 응답"(stored_ok=False)으로 매핑한다. 따라서 #2015 빈 응답 미전진
+    회귀를 그대로 잠근다(빈 응답=stored_ok False → checkpoint 미전진). 재수집
+    (유효 데이터 stored_ok=True, net_delta=0)으로 인한 전진은 별도 테스트에서
+    검증한다.
 
     Args:
-        written_by_date: 날짜→written 행 수 맵. 맵에 없는 날짜는 ``default``.
-        default: 맵에 없는 날짜의 written(기본 0 = 빈 응답).
+        written_by_date: 날짜→net_delta(net-new 저장 행 수) 맵. 맵에 없는 날짜는
+            ``default``. 0은 빈 응답(stored_ok=False)으로 본다.
+        default: 맵에 없는 날짜의 net_delta(기본 0 = 빈 응답).
 
     Attributes:
         calls: ``collect`` 가 실제로 호출된 ``target_date`` 의 순서 리스트.
@@ -50,12 +69,13 @@ class _WrittenScriptedCollector:
         self,
         target_date: str,
         store: object,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         self.calls.append(target_date)
-        written = self._written_by_date.get(target_date, self._default)
-        # written > 0 인 날짜만 symbol을 보고한다(빈 응답은 symbol 없음).
-        syms = {f"SYM-{target_date[-2:]}"} if written > 0 else set()
-        return written, syms, []
+        net_delta = self._written_by_date.get(target_date, self._default)
+        # net_delta>0 = 유효 데이터 store 반영(stored_ok), 0 = 빈 응답(미전진).
+        stored_ok = net_delta > 0
+        syms = {f"SYM-{target_date[-2:]}"} if stored_ok else set()
+        return net_delta, stored_ok, syms, []
 
 
 async def _run_collect(
@@ -66,7 +86,8 @@ async def _run_collect(
     """``_collect_data_go_kr`` 를 직접 호출해 checkpoint/ctx/collector를 반환한다.
 
     가드(is_blocked_day/is_trading_paused)는 no-op으로 두고, stop_event는
-    None(one-shot)으로 둔다. store는 스텁이 사용하지 않으므로 sentinel.
+    None(one-shot)으로 둔다. collect 스텁은 store를 안 쓰지만 runner가 store
+    경고를 drain하므로 ``_NoWarnStore`` (drain_warnings → [])를 주입한다(#1993).
     """
     collector = _WrittenScriptedCollector(written_by_date=written_by_date)
     checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
@@ -76,7 +97,7 @@ async def _run_collect(
     await runner._collect_data_go_kr(
         dates,
         {},
-        object(),  # store: 스텁 collect가 사용하지 않음
+        _NoWarnStore(),  # store: collect 스텁 미사용, runner drain_warnings용
         checkpoint,
         ctx,
         lambda _config, _date: False,  # is_blocked_day: 항상 거래일
@@ -213,11 +234,12 @@ async def test_halt_blocks_advance_even_when_written_positive(
             self,
             target_date: str,
             store: object,
-        ) -> tuple[int, set[str], list[dict]]:
+        ) -> tuple[int, bool, set[str], list[dict]]:
             self.calls.append(target_date)
             if target_date == "2026-01-02":
                 raise RuntimeError("transient")
-            return 1, {f"SYM-{target_date[-2:]}"}, []  # written>0
+            # net_delta>0 + stored_ok=True(유효 저장).
+            return 1, True, {f"SYM-{target_date[-2:]}"}, []
 
     feed_dir = tmp_path / ".feed"
     collector = _FailThenWrittenCollector()
@@ -228,7 +250,7 @@ async def test_halt_blocks_advance_even_when_written_positive(
     await runner._collect_data_go_kr(
         ["2026-01-01", "2026-01-02", "2026-01-03"],
         {},
-        object(),
+        _NoWarnStore(),
         checkpoint,
         ctx,
         lambda _config, _date: False,

@@ -36,16 +36,28 @@ class DataGoKrCollector:
         self,
         target_date: str,
         store: ParquetStore,
-    ) -> tuple[int, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict]]:
         """특정 날짜의 전종목 데이터를 수집한다.
 
         Returns:
-            (기록 행 수, 수집된 심볼 집합, 경고 목록).
+            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)`` (#1993):
+
+            - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**
+              (= ``store.write`` 반환 합, rows_written). 재수집(dedup)이면 0이며,
+              이는 정상이다(과대계상 제거).
+            - ``stored_ok``: **유효 데이터가 store에 성공적으로 반영되었는지**.
+              net_delta와 무관하다 — 재수집으로 net_delta=0이어도 유효 데이터를
+              검증 통과시켜 ``store.write`` 를 호출 완료했으면 ``True`` 다(checkpoint
+              전진 자격). 빈 응답/전 row drop/validation 차단처럼 저장 자체를
+              하지 못한 경우만 ``False`` 다. store-merge 실패(기존 파일 보존)는
+              ``store.write`` 호출은 완료했으므로 여기서는 ``True`` 이며,
+              checkpoint 미전진은 runner가 store_merge 경고 존재로 별도 가드한다
+              (R1: ``_persist_partition`` 은 merge 실패 시 raise하지 않는다).
         """
         raw_items = await self._source.fetch(target_date)
         if not raw_items:
             logger.debug("data.go.kr: date=%s 데이터 없음", target_date)
-            return 0, set(), []
+            return 0, False, set(), []
 
         raw_items, symbol_warns = self._filter_invalid_symbols(raw_items, target_date)
 
@@ -59,7 +71,7 @@ class DataGoKrCollector:
             logger.warning(
                 "data.go.kr: date=%s 유효 레코드 없음(전 row drop)", target_date
             )
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         # (c) 검증 게이트: survivor batch가 validate_all에서 passed=False면
         # (transport status≠200, syntax, 또는 향후 schema 검사) 저장하지 않는다.
@@ -71,18 +83,21 @@ class DataGoKrCollector:
                 target_date,
                 len(survivors),
             )
-            return 0, set(), warns
+            return 0, False, set(), warns
 
         df = pl.DataFrame(survivors)
         df = self._deduplicate(df)
 
-        rows_written, symbols = self._normalize_and_store(
+        net_delta, symbols = self._normalize_and_store(
             df,
             store,
             target_date,
         )
 
-        return rows_written, symbols, warns
+        # 유효 survivor batch가 validation을 통과해 store.write를 호출 완료했다
+        # → stored_ok=True(net_delta=0 재수집이어도 checkpoint 전진 자격). 빈
+        # 응답/전 drop/validation 차단은 위에서 stored_ok=False로 조기 반환했다.
+        return net_delta, True, symbols, warns
 
     @staticmethod
     def _filter_invalid_symbols(
@@ -219,7 +234,12 @@ class DataGoKrCollector:
         store: ParquetStore,
         target_date: str,
     ) -> tuple[int, set[str]]:
-        """OHLCV와 fundamental을 정규화하고 저장한다."""
+        """OHLCV와 fundamental을 정규화하고 저장한다.
+
+        Returns:
+            ``(net_delta, symbols)``. net_delta는 ohlcv/fundamental ``store.write``
+            반환(실제 net-new 저장 행 수)의 합이다(#1993). 재수집/dedup이면 0.
+        """
         rows_written = 0
         symbols: set[str] = set()
 
@@ -248,7 +268,12 @@ class DataGoKrCollector:
         store: ParquetStore,
         symbols: set[str],
     ) -> int:
-        """OHLCV 데이터를 정규화하여 심볼별로 저장한다."""
+        """OHLCV 데이터를 정규화하여 심볼별로 저장한다.
+
+        Returns:
+            ``store.write`` 반환(net-new 저장 행 수)의 합(#1993). 입력 len이
+            아니라 실제 저장 delta다(재수집/dedup이면 0).
+        """
         ohlcv_df = self._normalizer.normalize_ohlcv(df)
         if ohlcv_df.is_empty() or "symbol" not in ohlcv_df.columns:
             return 0
@@ -256,8 +281,7 @@ class DataGoKrCollector:
         rows = 0
         for sym in ohlcv_df["symbol"].unique().to_list():
             sym_df = ohlcv_df.filter(pl.col("symbol") == sym)
-            store.write(sym, "1d", sym_df, data_type="ohlcv")
-            rows += len(sym_df)
+            rows += store.write(sym, "1d", sym_df, data_type="ohlcv")
             symbols.add(sym)
         return rows
 
@@ -267,7 +291,12 @@ class DataGoKrCollector:
         store: ParquetStore,
         symbols: set[str],
     ) -> int:
-        """fundamental 데이터를 정규화하여 심볼별로 저장한다."""
+        """fundamental 데이터를 정규화하여 심볼별로 저장한다.
+
+        Returns:
+            ``store.write`` 반환(net-new 저장 행 수)의 합(#1993). 입력 len이
+            아니라 실제 저장 delta다(재수집/dedup이면 0).
+        """
         fund_df = self._normalizer.normalize_fundamental(df)
         if fund_df.is_empty() or "symbol" not in fund_df.columns:
             return 0
@@ -275,8 +304,7 @@ class DataGoKrCollector:
         rows = 0
         for sym in fund_df["symbol"].unique().to_list():
             sym_df = fund_df.filter(pl.col("symbol") == sym)
-            store.write(sym, "krx", sym_df, data_type="fundamental")
-            rows += len(sym_df)
+            rows += store.write(sym, "krx", sym_df, data_type="fundamental")
             symbols.add(sym)
         return rows
 

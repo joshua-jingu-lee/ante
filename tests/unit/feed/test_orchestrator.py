@@ -639,7 +639,9 @@ async def test_compute_derived_indicators(tmp_data_path: Path) -> None:
     calculator = IndicatorCalculator()
     rows = calculator.compute(store, ["005930"])
 
-    assert rows > 0
+    # 지표 write-back은 기존 일별 행을 같은 natural key로 in-place overwrite하므로
+    # net-new 저장 행 수 = 0(#1993). 데이터 정확성은 아래 비율 assert로 검증한다.
+    assert rows == 0
 
     # 결과 읽기 — 지표는 일별(data_go_kr) 행에 부여된다.
     result = store.read("005930", "krx", data_type="fundamental")
