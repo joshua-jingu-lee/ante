@@ -14,6 +14,7 @@ BOT_STATE_CONFLICT_CODE = "BOT_STATE_CONFLICT"
 BOT_NOT_ACCEPTING_SIGNALS_CODE = "BOT_NOT_ACCEPTING_SIGNALS"
 BOT_ALREADY_EXISTS_CODE = "BOT_ALREADY_EXISTS"
 BOT_STRATEGY_ALREADY_RUNNING_CODE = "BOT_STRATEGY_ALREADY_RUNNING"
+BOT_IMMUTABLE_FIELD_CODE = "BOT_IMMUTABLE_FIELD"
 
 
 class BotError(Exception):
@@ -89,3 +90,23 @@ class BotStrategyAlreadyRunningError(BotError):
     """
 
     code: str = BOT_STRATEGY_ALREADY_RUNNING_CODE
+
+
+class BotImmutableFieldError(BotError):
+    """봇 생성 후 변경할 수 없는 불변 필드 수정 시도 (#2282).
+
+    ``account_id`` 는 봇이 참조하는 treasury 예산·broker credential·포지션
+    격리가 모두 **account-bound** 라, ``update_bot`` 으로 변경하면 옛 account
+    아래의 예산/credential/포지션이 새 account 로 재배치되지 않아 불일치가
+    발생한다. 복잡한 re-isolation 대신 ``account_id`` 를 ``update_bot`` 의
+    불변 필드로 제약하고, 변경이 필요하면 봇을 삭제 후 재생성하도록 안내한다
+    (Account.update 의 ``AccountImmutableFieldError`` 선례 미러).
+
+    클래스 레벨 ``code`` 속성은 IPC ``server.py`` 의
+    ``getattr(e, "code", ...)`` 가 안정 코드 ``BOT_IMMUTABLE_FIELD`` 로
+    변환하도록 한다. ``bot.update`` handler 의 ``except BotError: raise`` 가
+    ``BotError`` 서브클래스인 본 예외를 그대로 surface 하므로 IPC/CLI 표면이
+    동일 코드를 노출한다.
+    """
+
+    code: str = BOT_IMMUTABLE_FIELD_CODE

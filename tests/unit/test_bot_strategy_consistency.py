@@ -15,7 +15,8 @@ import json
 import pytest
 
 from ante.account.models import Account, AccountStatus
-from ante.bot import BotConfig, BotManager, BotStatus
+from ante.bot import BotConfig, BotImmutableFieldError, BotManager, BotStatus
+from ante.bot.exceptions import BOT_IMMUTABLE_FIELD_CODE
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.strategy import (
@@ -345,23 +346,28 @@ class TestUpdateBotStrategyConsistency:
 # ── account_id + strategy_id 동시 변경 → effective(새) 계좌로 검증 (브랜치 리뷰) ──
 
 
-class TestUpdateBotEffectiveAccountValidation:
-    """#2129 브랜치 리뷰: account_id 와 strategy_id 동시 변경 시 새 전략의
-    exchange 호환을 **옛 계좌가 아닌 새(effective) 계좌**로 검증한다.
+class TestUpdateBotAccountIdImmutableVsStrategy:
+    """#2282: ``account_id`` 는 ``update_bot`` 의 불변 필드다. 가드는 strategy
+    검증/BotConfig 재생성보다 **먼저** 평가되므로, account_id 변경을 동반한
+    요청은 strategy 호환성 검증에 도달하기 전에 ``BotImmutableFieldError`` 로
+    거부된다.
 
-    수정 전에는 ``_validate_strategy_change(old_config.account_id, ...)`` 로
-    옛 계좌를 사용해, 새 계좌에 비호환 전략이 commit 될 수 있었다.
+    #2129 가 도입했던 "account_id+strategy_id 동시 변경 시 effective(새) 계좌로
+    strategy 검증" 시나리오는 account_id 가 불변이 되면서 더 이상 발생할 수
+    없다(account_id 변경 자체가 먼저 거부). 따라서 strategy 검증은 항상
+    ``old_config.account_id`` 로 수행된다. 본 클래스는 (1) account_id 동반
+    변경이 strategy 검증 이전에 거부되는지, (2) account_id 를 바꾸지 않는
+    strategy 변경은 무회귀로 동작하는지 검증한다.
     """
 
-    async def test_simultaneous_change_compatible_with_new_account_persists_both(
+    async def test_simultaneous_account_and_strategy_change_rejected_before_validation(
         self, manager_with_account, account_service, ctx, db, tmp_path
     ):
-        """(a) 새 strategy 가 **새 계좌(NASDAQ)** exchange 와 호환 → 통과·둘 다 저장.
+        """(a) account_id + strategy_id 동시 변경 → strategy 검증 이전에 거부.
 
-        봇은 KRX 계좌(acc-test)에서 시작하지만, 한 요청으로 account_id 를
-        NASDAQ 계좌(acc-nasdaq)로, strategy 를 NASDAQ 전략으로 동시에 바꾼다.
-        새 전략은 옛 계좌(KRX)와는 비호환이지만 effective(새, NASDAQ) 계좌와는
-        호환이므로 통과해야 한다.
+        새 전략(NASDAQ)이 옛 계좌(KRX)와는 비호환이지만, account_id 불변 가드가
+        strategy 검증보다 먼저 평가되므로 ``IncompatibleExchangeError`` 가 아니라
+        ``BotImmutableFieldError`` 로 거부된다. 옛·새 store 모두 미변경이어야 한다.
         """
         await _make_krx_account(account_service)
         await _make_nasdaq_account(account_service)
@@ -371,80 +377,91 @@ class TestUpdateBotEffectiveAccountValidation:
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
 
-        bot = await manager_with_account.update_bot(
-            "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
-        )
+        with pytest.raises(BotImmutableFieldError) as exc_info:
+            await manager_with_account.update_bot(
+                "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
+            )
+        assert exc_info.value.code == BOT_IMMUTABLE_FIELD_CODE
 
-        # effective(새, NASDAQ) 계좌로 검증을 통과해 둘 다 새 값으로 commit.
-        # account_id 는 memory config 와 config_json 에 새 값으로 직렬화된다.
-        # #2274 수정 이후 ``bots.account_id`` 컬럼도 UPSERT 가 함께 갱신하므로
-        # 컬럼·config_json 둘 다 새 값으로 일관된다.
-        assert bot.config.account_id == "acc-nasdaq"
-        assert bot.config.strategy_id == nasdaq_sid
+        # 거부 후 memory config·DB(컬럼·config_json) 모두 옛 값 유지.
+        bot = manager_with_account.get_bot("bot1")
+        assert bot.config.strategy_id == "s1"
+        assert bot.config.account_id == "acc-test"
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert col == nasdaq_sid == cfg
+        assert col == "s1" == cfg
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
-        assert acc_col == "acc-nasdaq" == acc_cfg
+        assert acc_col == "acc-test" == acc_cfg
 
-    async def test_simultaneous_change_incompatible_with_new_account_raises(
+    async def test_strategy_change_same_account_still_validated_and_persisted(
         self, manager_with_account, account_service, ctx, db, tmp_path
     ):
-        """(b) 새 strategy 가 **새 계좌(NASDAQ)** exchange 와 비호환 → raise·미변경.
+        """(b) account_id 미변경 strategy 변경 → effective(=옛) 계좌로 검증·persist.
 
-        봇은 KRX 계좌에서 시작. 한 요청으로 account_id 를 NASDAQ 계좌로,
-        strategy 를 KRX 전략으로 동시에 바꾼다. KRX 전략은 옛 계좌(KRX)와는
-        호환이지만 effective(새, NASDAQ) 계좌와는 비호환이므로, effective
-        계좌로 검증하면 raise 되어야 한다 (옛 계좌로 검증하면 잘못 통과).
-
-        검증은 swap/DB 저장 전이므로 옛·새 store 모두 미변경이어야 한다.
+        account_id 를 바꾸지 않으므로 불변 가드를 통과하고, strategy 호환성
+        검증(옛 계좌=KRX)이 정상 수행되어 KRX 호환 전략으로 교체된다. account_id
+        는 무회귀로 옛 값을 유지한다.
         """
         await _make_krx_account(account_service)
-        await _make_nasdaq_account(account_service)
         krx_sid = await _register_strategy(
             db, _KRX_STRATEGY_SOURCE, "krx_compat", "1.0.0", tmp_path
         )
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
 
-        with pytest.raises(IncompatibleExchangeError):
-            await manager_with_account.update_bot(
-                "bot1", account_id="acc-nasdaq", strategy_id=krx_sid
-            )
+        bot = await manager_with_account.update_bot("bot1", strategy_id=krx_sid)
 
-        # swap/저장 전 raise: memory config 와 DB(컬럼·config_json·account_id)
-        # 모두 옛 값 유지.
-        bot = manager_with_account.get_bot("bot1")
-        assert bot.config.strategy_id == "s1"
+        assert bot.config.strategy_id == krx_sid
         assert bot.config.account_id == "acc-test"
         col, cfg = await _row_strategy_ids(db, "bot1")
-        assert col == "s1" == cfg
-        row = await db.fetch_one(
-            "SELECT account_id FROM bots WHERE bot_id = ?", ("bot1",)
-        )
-        assert row["account_id"] == "acc-test"
+        assert col == krx_sid == cfg
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test" == acc_cfg
 
-    async def test_account_only_change_does_not_trigger_validation(
+    async def test_account_id_noop_same_value_passes(
         self, manager_with_account, account_service, ctx, db
     ):
-        """(c) account_id 만 바꾸고 strategy 동일 → 전략 검증 미트리거.
+        """(c) account_id 를 같은 값으로 포함 → no-op 통과(거부 아님).
 
-        ``s1`` 은 registry 에 등록되지 않았지만, strategy_id 가 그대로이므로
-        검증이 트리거되지 않아 account_id-only update 가 성공해야 한다.
+        updates 에 ``account_id`` 가 현재와 동일하게 포함되어도 변경이 아니므로
+        불변 가드를 통과한다. ``s1`` 은 미등록이지만 strategy_id 가 그대로라
+        검증이 트리거되지 않아 raise 없이 성공한다.
+        """
+        await _make_krx_account(account_service)
+        config = BotConfig(
+            bot_id="bot1", strategy_id="s1", name="old", account_id="acc-test"
+        )
+        await manager_with_account.create_bot(config, SimpleStrategy, ctx)
+
+        bot = await manager_with_account.update_bot(
+            "bot1", account_id="acc-test", name="new"
+        )
+
+        assert bot.config.account_id == "acc-test"
+        assert bot.config.name == "new"
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test" == acc_cfg
+
+    async def test_account_only_change_to_different_value_rejected(
+        self, manager_with_account, account_service, ctx, db
+    ):
+        """(d) account_id 만 다른 값으로 변경 → ``BotImmutableFieldError`` 거부.
+
+        strategy_id 가 그대로라 strategy 검증은 트리거되지 않지만, account_id
+        불변 가드가 다른 값으로의 변경을 거부한다. memory·DB 모두 미변경.
         """
         await _make_krx_account(account_service)
         await _make_krx_account(account_service, account_id="acc-test2")
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
 
-        bot = await manager_with_account.update_bot("bot1", account_id="acc-test2")
+        with pytest.raises(BotImmutableFieldError) as exc_info:
+            await manager_with_account.update_bot("bot1", account_id="acc-test2")
+        assert exc_info.value.code == BOT_IMMUTABLE_FIELD_CODE
 
-        # strategy 검증 미트리거 → 미등록 ``s1`` 에도 raise 없이 성공.
-        # account_id 는 memory config + config_json + 컬럼에 새 값으로 반영된다
-        # (#2274: UPSERT 가 account_id 컬럼도 갱신).
-        assert bot.config.account_id == "acc-test2"
-        assert bot.config.strategy_id == "s1"
+        bot = manager_with_account.get_bot("bot1")
+        assert bot.config.account_id == "acc-test"
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
-        assert acc_col == "acc-test2" == acc_cfg
+        assert acc_col == "acc-test" == acc_cfg
 
 
 # ── (d)(e) assign_strategy / change_strategy 일관성 ──────────────
@@ -672,23 +689,27 @@ class TestReloadConsistency:
 
 
 class TestUpdateBotAccountConsistency:
-    """#2274 (#2129/#2130 동형): ``update_bot(account_id=...)`` 가
-    ``bots.account_id`` 컬럼과 ``config_json.account_id`` 를 항상 동일하게
-    갱신하는지, 재시작(``load_from_db``) 시 새 account_id 로 복원되는지 검증한다.
+    """#2282 (#2274 후속): ``account_id`` 는 ``update_bot`` 의 불변 필드다.
+    다른 값으로의 변경은 ``BotImmutableFieldError`` 로 거부된다.
 
-    수정 전에는 ``_save_bot_config`` 의 ``ON CONFLICT DO UPDATE SET`` 에
-    ``account_id`` 컬럼이 빠져 있어, ``update_bot`` 으로 account_id 를 바꿔도
-    컬럼이 stale 하게 옛 값으로 남고, ``load_from_db`` 가 컬럼을 읽어 재시작 시
-    옛 account_id 로 복원되는 drift 가 있었다.
+    #2274 가 ``_save_bot_config`` 의 ``ON CONFLICT DO UPDATE SET`` 에
+    ``account_id = excluded.account_id`` 를 추가해 컬럼 drift 를 고쳤고, 그
+    결과 ``update_bot`` 으로 account_id 를 바꾸면 재시작 시 실제로 복원되며
+    treasury 예산·broker credential·포지션이 재배치되지 않는 불일치가 표면화됐다
+    (#2282). 정책 결정: ``account_id`` 를 불변 필드로 제약(Account.update 선례
+    미러). 단, ``_save_bot_config`` 의 ``account_id = excluded`` UPSERT 자체는
+    create/load·내부 persistence(change_strategy 등) 경로의 컬럼↔config_json
+    일관성을 위해 그대로 유지된다 — 제약은 ``update_bot`` ingress 에서만 적용.
     """
 
-    async def test_update_account_id_updates_column_not_stale(
+    async def test_update_account_id_to_different_value_rejected(
         self, manager_with_account, account_service, ctx, db
     ):
-        """(a) update_bot(account_id=new) → 컬럼·config_json 둘 다 new(stale 아님).
+        """(a) update_bot(account_id=other) → ``BotImmutableFieldError`` 거부.
 
-        strategy_id 는 그대로(미등록 ``s1``)라 전략 검증을 트리거하지 않으므로
-        account_id-only 변경만 검증한다.
+        strategy_id 는 그대로(미등록 ``s1``)라 전략 검증을 트리거하지 않지만,
+        account_id 불변 가드가 다른 값으로의 변경을 거부한다. 컬럼·config_json
+        모두 옛 값으로 미변경이어야 한다.
         """
         await _make_krx_account(account_service)
         await _make_krx_account(account_service, account_id="acc-new")
@@ -699,30 +720,40 @@ class TestUpdateBotAccountConsistency:
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
         assert acc_col == "acc-test" == acc_cfg
 
-        bot = await manager_with_account.update_bot("bot1", account_id="acc-new")
+        with pytest.raises(BotImmutableFieldError) as exc_info:
+            await manager_with_account.update_bot("bot1", account_id="acc-new")
+        assert exc_info.value.code == BOT_IMMUTABLE_FIELD_CODE
 
-        assert bot.config.account_id == "acc-new"
+        # 거부 후 memory·컬럼·config_json 모두 옛 값 미변경.
+        bot = manager_with_account.get_bot("bot1")
+        assert bot.config.account_id == "acc-test"
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
-        # 컬럼이 stale("acc-test") 로 남지 않고 새 값으로 갱신되어야 한다.
-        assert acc_col == "acc-new"
-        assert acc_cfg == "acc-new"
+        assert acc_col == "acc-test" == acc_cfg
 
-    async def test_update_account_id_then_reload_restores_new(
+    async def test_save_bot_config_upsert_preserves_account_id_on_internal_persist(
         self, manager_with_account, account_service, eventbus, ctx, db
     ):
-        """(b) account_id 변경 후 새 매니저로 load_from_db → 새 account_id 복원.
+        """(b) #2274 무회귀: ``_save_bot_config`` UPSERT(account_id=excluded) 가
+        내부 persistence 경로(change_strategy)에서 account_id 컬럼↔config_json
+        일관성을 유지하고, 재시작(load_from_db) 시 그대로 복원된다.
 
-        ``load_from_db`` 는 ``bots.account_id`` 컬럼에서 account_id 를 읽으므로,
-        UPSERT 가 컬럼을 갱신하지 않으면 재시작 시 옛 값으로 복원되는 drift 가
-        발생한다. 컬럼이 갱신되면 재로드된 config 가 새 account_id 여야 한다.
+        account_id 변경은 ``update_bot`` 에서 거부되지만, ``account_id =
+        excluded.account_id`` UPSERT 자체는 create/내부 persistence 경로에서
+        유지되어야 한다(#2282 stop condition). change_strategy 는 account_id 를
+        바꾸지 않은 채 ``_save_bot_config`` 를 다시 호출하므로, UPSERT 가
+        account_id 컬럼을 같은 값으로 일관되게 보존하는지 검증한다.
         """
         await _make_krx_account(account_service)
-        await _make_krx_account(account_service, account_id="acc-new")
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
-        await manager_with_account.update_bot("bot1", account_id="acc-new")
 
-        # 재시작 시뮬레이션: 새 매니저로 DB 에서 재로드.
+        # 내부 persistence 경로(account_id 미변경)로 _save_bot_config 재호출.
+        await manager_with_account.change_strategy("bot1", "s2")
+
+        acc_col, acc_cfg = await _row_account_ids(db, "bot1")
+        assert acc_col == "acc-test" == acc_cfg
+
+        # 재시작 시뮬레이션: 새 매니저로 DB 에서 재로드 → account_id 복원.
         manager2 = BotManager(eventbus=eventbus, db=db)
         await manager2.initialize()
         count = await manager2.load_from_db()
@@ -730,17 +761,16 @@ class TestUpdateBotAccountConsistency:
 
         reloaded = manager2.get_bot("bot1")
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
-        # 옛 account_id("acc-test") 로 복원되지 않고 새 값이어야 한다.
-        assert reloaded.config.account_id == acc_col == acc_cfg == "acc-new"
+        assert reloaded.config.account_id == acc_col == acc_cfg == "acc-test"
 
-    async def test_simultaneous_strategy_and_account_change_persists_both(
+    async def test_simultaneous_strategy_and_account_change_rejected(
         self, manager_with_account, account_service, ctx, db, tmp_path
     ):
-        """(c) strategy_id + account_id 동시 변경 → 둘 다 컬럼·config_json persist.
+        """(c) strategy_id + account_id 동시 변경 → account_id 불변 가드가 먼저 거부.
 
-        #2129/#2130 회귀 보존: 새 전략은 새(effective, NASDAQ) 계좌와 호환이므로
-        검증을 통과하고, strategy_id·account_id 컬럼과 config_json 이 모두 새
-        값으로 일관되게 commit 되어야 한다.
+        account_id 불변 가드가 strategy 검증보다 먼저 평가되므로, 새 전략의
+        호환성과 무관하게 ``BotImmutableFieldError`` 로 거부된다. strategy_id·
+        account_id 컬럼·config_json 모두 옛 값으로 미변경이어야 한다.
         """
         await _make_krx_account(account_service)
         await _make_nasdaq_account(account_service)
@@ -750,16 +780,19 @@ class TestUpdateBotAccountConsistency:
         config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
         await manager_with_account.create_bot(config, SimpleStrategy, ctx)
 
-        bot = await manager_with_account.update_bot(
-            "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
-        )
+        with pytest.raises(BotImmutableFieldError) as exc_info:
+            await manager_with_account.update_bot(
+                "bot1", account_id="acc-nasdaq", strategy_id=nasdaq_sid
+            )
+        assert exc_info.value.code == BOT_IMMUTABLE_FIELD_CODE
 
-        assert bot.config.strategy_id == nasdaq_sid
-        assert bot.config.account_id == "acc-nasdaq"
+        bot = manager_with_account.get_bot("bot1")
+        assert bot.config.strategy_id == "s1"
+        assert bot.config.account_id == "acc-test"
         sid_col, sid_cfg = await _row_strategy_ids(db, "bot1")
-        assert sid_col == nasdaq_sid == sid_cfg
+        assert sid_col == "s1" == sid_cfg
         acc_col, acc_cfg = await _row_account_ids(db, "bot1")
-        assert acc_col == "acc-nasdaq" == acc_cfg
+        assert acc_col == "acc-test" == acc_cfg
 
     async def test_update_without_account_change_is_noop_on_account_column(
         self, manager_with_account, account_service, ctx, db

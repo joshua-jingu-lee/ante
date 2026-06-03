@@ -20,6 +20,7 @@ from ante.bot.config import (
 from ante.bot.exceptions import (
     BotAlreadyExistsError,
     BotError,
+    BotImmutableFieldError,
     BotNotAcceptingSignals,
     BotNotFoundError,
     BotStateConflict,
@@ -494,6 +495,27 @@ class BotManager:
 
             if not updates and new_budget is None:
                 return bot
+
+            # account_id 불변 가드 (#2282).
+            # ``account_id`` 는 treasury 예산(옛 account 할당)·broker
+            # credential(옛 account 바인딩)·포지션 격리가 모두 **account-bound**
+            # 라, ``update_bot`` 으로 바꾸면 옛 account 아래 예산/credential/
+            # 포지션이 새 account 로 재배치되지 않아 불일치가 발생한다 (#2274 가
+            # account_id 컬럼 drift 를 고치며 변경이 실제 persist 되도록 만들면서
+            # 표면화). 복잡한 re-isolation 대신 ``account_id`` 를 불변 필드로
+            # 제약하고 변경 시 typed error 로 거부한다 (Account.update 의
+            # ``AccountImmutableFieldError`` 선례 미러). 같은 값(no-op)·미포함은
+            # 통과한다. 가드는 status 검증 직후, effective_account_id 로 strategy
+            # 검증/BotConfig 재생성 이전에 둔다 — 다른 필드(name/budget/
+            # strategy_id 등) 변경은 영향받지 않는다.
+            new_account_id = updates.get("account_id")
+            if new_account_id is not None and new_account_id != bot.config.account_id:
+                raise BotImmutableFieldError(
+                    "account_id 는 생성 후 변경할 수 없습니다 (treasury 예산·"
+                    "broker credential·포지션이 account-bound). 변경하려면 봇을 "
+                    f"삭제 후 재생성하세요: {bot_id} "
+                    f"(현재: {bot.config.account_id}, 요청: {new_account_id})"
+                )
 
             # strategy_id 변경 검증 (#2129).
             # ``bot.config`` 교체 + DB 저장(``_save_bot_config``) 전에
