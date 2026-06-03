@@ -158,7 +158,8 @@ amend는 §2.3의 보류를 해제하고 옵션 A를 normative로 채택해 이 
 #### 적용 범위
 
 옵션 A의 `read_only=True`는 **기존 스키마를 부트스트랩 없이 읽을 수 있는
-명령(현재 `backtest history`)에만** 적용한다. §4 예외 service는 본 모드의
+명령(현재 `backtest history`(#1974), `data list`의 종목명 보강(#1984),
+`report list`/`report view`(#2114))에만** 적용한다. §4 예외 service는 본 모드의
 대상이 아니다(§4.1 명확화 참조).
 
 **CLI 인증 경로와의 경계 (중요, #1974 R2 [P2] 명확화)**: 옵션 A의
@@ -273,10 +274,11 @@ service는 read-only 명령에서도 `initialize()`를 호출한다 (즉 옵션 
 가능하므로 — fresh/non-bootstrapped DB에서 schema를 쓰기로 생성해야 하므로 —
 **schema 분리(§4.3) 전까지 `read_only=True`의 대상이 아니다.** 옵션 A의
 `read_only=True`(Database read-only 연결 모드)는 **기존 스키마를 부트스트랩 없이
-읽을 수 있는 명령(현재 `backtest history`)에만** 적용한다. §4 예외 service를
-read-only 연결 모드로 강제하면 `initialize()`의 schema DDL이 read-only 연결에서
-실패하므로, 이들은 본 amend의 적용 대상에서 명시적으로 제외한다. 이들의 read-only
-지원은 §4.3 schema 분리 결정을 선행 조건으로 하는 별도 follow-up이다.
+읽을 수 있는 명령(현재 `backtest history`(#1974), `data list`의 종목명
+보강(#1984), `report list`/`report view`(#2114))에만** 적용한다. §4 예외
+service를 read-only 연결 모드로 강제하면 `initialize()`의 schema DDL이 read-only
+연결에서 실패하므로, 이들은 본 amend의 적용 대상에서 명시적으로 제외한다. 이들의
+read-only 지원은 §4.3 schema 분리 결정을 선행 조건으로 하는 별도 follow-up이다.
 
 ### 4.2 예외 목록 (baseline 2026-05-27 KST)
 
@@ -399,9 +401,12 @@ account/member/approval을 같은 1차 PR(#1856)에 함께 다뤘다" — 가
 - CLI command migration enumeration — 동일.
 - DI framework 도입.
 - IPC routing / IPC fallback 통합.
-- 옵션 A `read_only=True`를 `backtest history` 외 명령(report/data/§4 예외
-  service 등)으로 확대 — 별도 follow-up. §4 예외 service는 schema 분리(§4.3)를
-  선행 조건으로 한다.
+- 옵션 A `read_only=True`를 §4 예외 service
+  (`AccountService`/`MemberService`/`ApprovalService`/`AuditLogger`/
+  `DynamicConfigService`)로 확대 — 별도 follow-up. §4 예외 service는 schema
+  분리(§4.3)를 선행 조건으로 한다. (`backtest history`(#1974) /
+  `data list`(#1984) / `report list`·`report view`(#2114)는 이미 적용 — §적용
+  범위 참조.)
 - live 동시쓰기 DB의 read-only 일관성 — `immutable=1`은 read-only artifact
   전용이며, checkpoint되지 않은 live WAL frame은 대상이 아니다(§2.1 (b)).
 - WAL→다른 journal 마이그레이션, DB immutable 정책 전면 재설계.

@@ -112,7 +112,13 @@ class TestReportListValidStatus:
     """`report list` valid `--status`는 회귀 없이 정상 동작 (#1462)."""
 
     def test_report_list_valid_status_still_works(self, runner, tmp_path) -> None:
-        """valid `--status`는 preflight 통과 후 ReportStore.list_reports 호출."""
+        """valid `--status`는 preflight 통과 후 ReportStore.list_reports 호출.
+
+        #2114: `report list` 는 read-only DB artifact 조회 경로로 확대되어
+        `open_cli_db(read_only=True)` 를 거친다 → `Database(db_path,
+        read_only=True)` 로 생성되고 `ReportStore.initialize()` (DDL) 는
+        호출되지 않는다 (backtest history #1974 / data list #1984 동형).
+        """
         db_cls, store_cls, store = _mock_store_layer([])
         db_path = str(tmp_path / "report.db")
         with (
@@ -132,7 +138,9 @@ class TestReportListValidStatus:
                 ],
             )
         assert result.exit_code == 0, result.output
-        db_cls.assert_called_once_with(db_path)
+        db_cls.assert_called_once_with(db_path, read_only=True)
+        # read-only 조회는 schema DDL 부트스트랩(initialize)을 발화하지 않는다.
+        store.initialize.assert_not_called()
         store.list_reports.assert_awaited_once_with(
             status=ReportStatus.SUBMITTED,
         )
