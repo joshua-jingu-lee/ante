@@ -1090,7 +1090,12 @@ async def _handle_member_rotate_token(
 # 의 audit member_id 는 client-supplied actor(스푸핑 가능) 를 절대 쓰지 않고
 # handler 가 고정한 sentinel 상수를 ``_audit_detail["member_id"]`` 로 전달한다.
 # ``_dispatch`` wrapper 는 이 override 가 있으면 actor 대신 사용한다.
-_RECOVERY_AUDIT_MEMBER_ID = "recovery"
+#
+# Refs #2295: sentinel 값을 ``"recovery"`` → ``"system:recovery"`` 로 변경한다.
+# 기존 ``system:kill_switch`` audit 네임스페이스 관례와 정합하며, 사용자/agent
+# member_id 와 충돌하지 않는 reserved ``system:`` prefix 네임스페이스에 둔다
+# (member register 가 ``system:`` prefix 등록을 거부 — defense-in-depth).
+_RECOVERY_AUDIT_MEMBER_ID = "system:recovery"
 
 
 async def _resolve_master_member_id(member: Any) -> str:

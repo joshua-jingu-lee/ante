@@ -139,8 +139,10 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **CLI
 (auth-exempt) 커맨드다. 대상은 항상 master 멤버이며 그 `member_id`는 서버 handler가
 master-lookup으로 해석해 `resource`에 기록한다. 다만 audit row의 `member_id`(행위자)는
 client가 보낸 actor(스푸핑 가능)를 신뢰하지 않고 handler가 고정한 sentinel 상수
-(`recovery`)로 기록한다. recovery key, 새/현재 password 등 비밀값은 audit detail,
-audit_log, IPC error envelope, server 로그 어디에도 기록하지 않는다.
+(`system:recovery`)로 기록한다. 이 sentinel은 `system:kill_switch`와 동일한 reserved
+`system:` 네임스페이스에 둬서 사용자/agent `member_id`와 충돌하지 않는다(`member
+register`가 `system:` prefix 등록을 거부). recovery key, 새/현재 password 등 비밀값은
+audit detail, audit_log, IPC error envelope, server 로그 어디에도 기록하지 않는다.
 
 ### 구현 방식
 

@@ -203,24 +203,38 @@ class TestRegister:
         assert member.scopes == ["strategy:write", "data:read"]
 
     async def test_register_duplicate_fails(self, service):
-        await service.register("agent-01", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         with pytest.raises(ValueError, match="이미 존재하는"):
-            await service.register("agent-01", MemberType.AGENT)
+            await service.register("agent-01", MemberType.AGENT, registered_by="owner")
 
     async def test_register_agent_as_master_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
         with pytest.raises(PermissionError, match="agent 타입은 master"):
             await service.register(
-                "bad-agent", MemberType.AGENT, role=MemberRole.MASTER
+                "bad-agent",
+                MemberType.AGENT,
+                role=MemberRole.MASTER,
+                registered_by="owner",
             )
 
     async def test_register_agent_as_admin_fails(self, service):
+        await service.bootstrap_master("owner", "pass123")
         with pytest.raises(PermissionError, match="agent 타입은 master 또는 admin"):
-            await service.register("bad-agent", MemberType.AGENT, role=MemberRole.ADMIN)
+            await service.register(
+                "bad-agent",
+                MemberType.AGENT,
+                role=MemberRole.ADMIN,
+                registered_by="owner",
+            )
 
 
 class TestAuthenticate:
     async def test_authenticate_token(self, service):
-        _, token = await service.register("agent-01", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        _, token = await service.register(
+            "agent-01", MemberType.AGENT, registered_by="owner"
+        )
         member = await service.authenticate(token)
         assert member.member_id == "agent-01"
 
@@ -229,13 +243,16 @@ class TestAuthenticate:
             await service.authenticate("invalid_token_xyz")
 
     async def test_authenticate_wrong_token(self, service):
-        await service.register("agent-01", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         with pytest.raises(PermissionError, match="인증 실패"):
             await service.authenticate("ante_ak_nonexistent_token")
 
     async def test_authenticate_suspended_member(self, service):
         await service.bootstrap_master("owner", "pass123")
-        _, token = await service.register("agent-01", MemberType.AGENT)
+        _, token = await service.register(
+            "agent-01", MemberType.AGENT, registered_by="owner"
+        )
         await service.suspend("agent-01", suspended_by="owner")
         with pytest.raises(PermissionError, match="비활성 멤버"):
             await service.authenticate(token)
@@ -267,7 +284,8 @@ class TestAuthenticatePassword:
             await service.authenticate_password("owner", "wrong")
 
     async def test_agent_cannot_password_auth(self, service):
-        await service.register("agent-01", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         with pytest.raises(PermissionError, match="human 멤버만"):
             await service.authenticate_password("agent-01", "anything")
 
@@ -279,7 +297,7 @@ class TestAuthenticatePassword:
 class TestSuspendReactivateRevoke:
     async def test_suspend_and_reactivate(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         m = await service.suspend("agent-01", suspended_by="owner")
         assert m.status == MemberStatus.SUSPENDED
 
@@ -293,14 +311,14 @@ class TestSuspendReactivateRevoke:
 
     async def test_revoke(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         m = await service.revoke("agent-01", revoked_by="owner")
         assert m.status == MemberStatus.REVOKED
         assert m.token_hash == ""
 
     async def test_revoke_suspended_member(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.suspend("agent-01", suspended_by="owner")
         m = await service.revoke("agent-01", revoked_by="owner")
         assert m.status == MemberStatus.REVOKED
@@ -308,7 +326,7 @@ class TestSuspendReactivateRevoke:
 
     async def test_revoke_already_revoked_fails(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.revoke("agent-01", revoked_by="owner")
         with pytest.raises(PermissionError, match="active, suspended 상태에서만"):
             await service.revoke("agent-01", revoked_by="owner")
@@ -328,7 +346,7 @@ class TestSuspendReactivateRevoke:
         from ante.member.errors import MemberStateConflictError
 
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         with pytest.raises(MemberStateConflictError) as excinfo:
             await service.reactivate("agent-01", reactivated_by="owner")
         assert excinfo.value.code == "MEMBER_STATE_CONFLICT"
@@ -345,7 +363,7 @@ class TestSuspendReactivateRevoke:
         eventbus.subscribe(MemberSuspendedEvent, domain_events.append)
         eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.suspend("agent-01", suspended_by="owner")
         assert len(domain_events) == 1
         assert domain_events[0].member_id == "agent-01"
@@ -362,7 +380,7 @@ class TestSuspendReactivateRevoke:
         notifications: list = []
         eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.suspend("agent-01", suspended_by="owner")
 
         suspend_notifs = [n for n in notifications if n.title == "멤버 정지"]
@@ -384,7 +402,7 @@ class TestSuspendReactivateRevoke:
         from ante.member.errors import MemberStateConflictError
 
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.suspend("agent-01", suspended_by="owner")
 
         # 첫 suspend 의 발행물을 배제하기 위해 두 번째 suspend 직전부터 수집.
@@ -404,7 +422,7 @@ class TestSuspendReactivateRevoke:
         events: list = []
         eventbus.subscribe(MemberReactivatedEvent, events.append)
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.suspend("agent-01", suspended_by="owner")
         await service.reactivate("agent-01", reactivated_by="owner")
         assert len(events) == 1
@@ -418,7 +436,7 @@ class TestSuspendReactivateRevoke:
         eventbus.subscribe(MemberRevokedEvent, domain_events.append)
         eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.revoke("agent-01", revoked_by="owner")
         assert len(domain_events) == 1
         revoke_notifs = [n for n in notifications if n.title == "멤버 폐기"]
@@ -432,7 +450,7 @@ class TestSuspendReactivateRevoke:
         notifications: list = []
         eventbus.subscribe(NotificationEvent, notifications.append)
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         await service.revoke("agent-01", revoked_by="owner")
 
         revoke_notifs = [n for n in notifications if n.title == "멤버 폐기"]
@@ -448,7 +466,9 @@ class TestSuspendReactivateRevoke:
 class TestRotateToken:
     async def test_rotate_token(self, service):
         await service.bootstrap_master("owner", "pass123")
-        _, old_token = await service.register("agent-01", MemberType.AGENT)
+        _, old_token = await service.register(
+            "agent-01", MemberType.AGENT, registered_by="owner"
+        )
         _, new_token = await service.rotate_token("agent-01", rotated_by="owner")
         assert old_token != new_token
         # 새 토큰으로 인증 성공
@@ -499,7 +519,7 @@ class TestPasswordManagement:
 class TestScopes:
     async def test_update_scopes(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         m = await service.update_scopes(
             "agent-01", ["strategy:write", "data:read"], updated_by="owner"
         )
@@ -516,7 +536,8 @@ class TestMasterPermissionCheck:
         """agent 역할의 멤버가 register 호출 시 PermissionDeniedError."""
         from ante.member.errors import PermissionDeniedError
 
-        await service.register("agent-caller", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-caller", MemberType.AGENT, registered_by="owner")
         with pytest.raises(PermissionDeniedError, match="master만"):
             await service.register(
                 "new-agent", MemberType.AGENT, registered_by="agent-caller"
@@ -553,17 +574,26 @@ class TestMasterPermissionCheck:
         with pytest.raises(PermissionDeniedError, match="master만"):
             await service.register("new-agent", MemberType.AGENT, registered_by="ghost")
 
-    async def test_register_without_caller_succeeds(self, service):
-        """registered_by가 빈 문자열(내부 호출)이면 검증 스킵."""
-        member, token = await service.register("agent-01", MemberType.AGENT)
-        assert member.member_id == "agent-01"
+    async def test_register_without_caller_fails(self, service):
+        """``registered_by``가 빈 문자열이면 PermissionDeniedError (#2294 회귀 잠금).
+
+        과거에는 빈 caller가 master 검증을 우회했으나(``if registered_by:``
+        가드), #2294 (#2113 메타리뷰 후속)가 이 분기를 제거하고 형제 mutation
+        과 동일하게 무조건 master 검증을 강제한다. ``_assert_master("")`` →
+        ``get("")`` 가 ``None`` 을 반환해 거부된다 (의도된 defense-in-depth).
+        """
+        from ante.member.errors import PermissionDeniedError
+
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await service.register("agent-01", MemberType.AGENT, registered_by="owner")
 
     async def test_update_scopes_by_agent_fails(self, service):
         """agent 역할의 멤버가 update_scopes 호출 시 PermissionDeniedError."""
         from ante.member.errors import PermissionDeniedError
 
-        await service.register("agent-01", MemberType.AGENT)
-        await service.register("agent-caller", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
+        await service.register("agent-caller", MemberType.AGENT, registered_by="owner")
         with pytest.raises(PermissionDeniedError, match="master만"):
             await service.update_scopes(
                 "agent-01", ["strategy:write"], updated_by="agent-caller"
@@ -572,7 +602,7 @@ class TestMasterPermissionCheck:
     async def test_update_scopes_by_master_succeeds(self, service):
         """master 역할이면 update_scopes 정상 수행."""
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         m = await service.update_scopes(
             "agent-01", ["strategy:write"], updated_by="owner"
         )
@@ -587,28 +617,42 @@ class TestMasterPermissionCheck:
         """
         from ante.member.errors import PermissionDeniedError
 
-        await service.register("agent-01", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         with pytest.raises(PermissionDeniedError, match="master만"):
             await service.update_scopes("agent-01", ["data:read"])
 
 
 class TestList:
     async def test_list_all(self, service):
-        await service.register("agent-01", MemberType.AGENT)
-        await service.register("agent-02", MemberType.AGENT, org="risk")
+        # #2294: register 는 무조건 master actor 를 요구한다. master(human) +
+        # agent 2 명 → 전체 3 명.
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
+        await service.register(
+            "agent-02", MemberType.AGENT, org="risk", registered_by="owner"
+        )
         members = await service.list_members()
-        assert len(members) == 2
+        assert len(members) == 3
+        agents = [m for m in members if m.type == MemberType.AGENT]
+        assert len(agents) == 2
 
     async def test_list_by_type(self, service):
         await service.bootstrap_master("owner", "pass123")
-        await service.register("agent-01", MemberType.AGENT)
+        await service.register("agent-01", MemberType.AGENT, registered_by="owner")
         humans = await service.list_members(member_type=MemberType.HUMAN)
         assert len(humans) == 1
         assert humans[0].type == MemberType.HUMAN
 
     async def test_list_by_org(self, service):
-        await service.register("a1", MemberType.AGENT, org="strategy-lab")
-        await service.register("a2", MemberType.AGENT, org="risk")
+        # #2294: master(org=default) + agent a1(strategy-lab)/a2(risk).
+        await service.bootstrap_master("owner", "pass123")
+        await service.register(
+            "a1", MemberType.AGENT, org="strategy-lab", registered_by="owner"
+        )
+        await service.register(
+            "a2", MemberType.AGENT, org="risk", registered_by="owner"
+        )
         result = await service.list_members(org="risk")
         assert len(result) == 1
         assert result[0].member_id == "a2"
@@ -633,12 +677,20 @@ class TestEmojiField:
         assert m.emoji == ""
 
     async def test_register_auto_assigns_emoji(self, service):
-        member, _ = await service.register("a1", MemberType.AGENT)
+        # #2294: register 는 무조건 master actor 를 요구한다. master 는 non-pool
+        # emoji(👑) 로 부트스트랩해 pool 자동 배정/유일성 검증에 간섭하지 않는다.
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        member, _ = await service.register(
+            "a1", MemberType.AGENT, registered_by="owner"
+        )
         assert member.emoji != ""
         assert member.emoji in ANIMAL_EMOJI_POOL
 
     async def test_register_with_explicit_emoji(self, service):
-        member, _ = await service.register("a1", MemberType.AGENT, emoji="🎸")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        member, _ = await service.register(
+            "a1", MemberType.AGENT, emoji="🎸", registered_by="owner"
+        )
         assert member.emoji == "🎸"
 
     async def test_bootstrap_auto_assigns_emoji(self, service):
@@ -651,21 +703,30 @@ class TestEmojiField:
         assert member.emoji == "👑"
 
     async def test_emoji_persisted_in_db(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         fetched = await service.get("a1")
         assert fetched.emoji == "🐶"
 
 
 class TestUpdateEmoji:
     async def test_update_emoji(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         m = await service.update_emoji("a1", "🐱", updated_by="owner")
         assert m.emoji == "🐱"
         fetched = await service.get("a1")
         assert fetched.emoji == "🐱"
 
     async def test_update_emoji_to_empty(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         m = await service.update_emoji("a1", "", updated_by="owner")
         assert m.emoji == ""
 
@@ -676,59 +737,100 @@ class TestUpdateEmoji:
 
 class TestEmojiValidation:
     async def test_invalid_emoji_text(self, service):
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
         with pytest.raises(ValueError, match="단일 이모지만"):
-            await service.register("a1", MemberType.AGENT, emoji="abc")
+            await service.register(
+                "a1", MemberType.AGENT, emoji="abc", registered_by="owner"
+            )
 
     async def test_invalid_emoji_multiple(self, service):
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
         with pytest.raises(ValueError, match="단일 이모지만"):
-            await service.register("a1", MemberType.AGENT, emoji="🐶🐱")
+            await service.register(
+                "a1", MemberType.AGENT, emoji="🐶🐱", registered_by="owner"
+            )
 
     async def test_duplicate_emoji_fails(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         with pytest.raises(ValueError, match="이미.*사용 중"):
-            await service.register("a2", MemberType.AGENT, emoji="🐶")
+            await service.register(
+                "a2", MemberType.AGENT, emoji="🐶", registered_by="owner"
+            )
 
     async def test_duplicate_emoji_message_includes_owner(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         with pytest.raises(ValueError, match="a1"):
-            await service.register("a2", MemberType.AGENT, emoji="🐶")
+            await service.register(
+                "a2", MemberType.AGENT, emoji="🐶", registered_by="owner"
+            )
 
     async def test_empty_emoji_allows_duplicates(self, service):
         # emoji=""는 빈 문자열 명시 (자동 배정 안 함)
-        m1, _ = await service.register("a1", MemberType.AGENT, emoji="")
-        m2, _ = await service.register("a2", MemberType.AGENT, emoji="")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        m1, _ = await service.register(
+            "a1", MemberType.AGENT, emoji="", registered_by="owner"
+        )
+        m2, _ = await service.register(
+            "a2", MemberType.AGENT, emoji="", registered_by="owner"
+        )
         assert m1.emoji == ""
         assert m2.emoji == ""
 
     async def test_update_emoji_duplicate_fails(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
-        await service.register("a2", MemberType.AGENT, emoji="🐱")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
+        await service.register(
+            "a2", MemberType.AGENT, emoji="🐱", registered_by="owner"
+        )
         with pytest.raises(ValueError, match="이미.*사용 중"):
             await service.update_emoji("a2", "🐶")
 
     async def test_update_emoji_same_value_ok(self, service):
-        await service.register("a1", MemberType.AGENT, emoji="🐶")
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        await service.register(
+            "a1", MemberType.AGENT, emoji="🐶", registered_by="owner"
+        )
         m = await service.update_emoji("a1", "🐶")
         assert m.emoji == "🐶"
 
 
 class TestAutoAssignEmoji:
     async def test_auto_assign_unique(self, service):
-        m1, _ = await service.register("a1", MemberType.AGENT)
-        m2, _ = await service.register("a2", MemberType.AGENT)
+        # #2294: master 는 non-pool emoji(👑) 로 부트스트랩해 pool 자동 배정에
+        # 간섭하지 않는다.
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        m1, _ = await service.register("a1", MemberType.AGENT, registered_by="owner")
+        m2, _ = await service.register("a2", MemberType.AGENT, registered_by="owner")
         assert m1.emoji != m2.emoji
 
     async def test_auto_assign_exhausted_pool(self, service):
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
         for i in range(len(ANIMAL_EMOJI_POOL)):
             await service.register(
-                f"a{i}", MemberType.AGENT, emoji=ANIMAL_EMOJI_POOL[i]
+                f"a{i}",
+                MemberType.AGENT,
+                emoji=ANIMAL_EMOJI_POOL[i],
+                registered_by="owner",
             )
         # 풀 소진 후 등록 — 에러 없이 빈 문자열
-        member, _ = await service.register("overflow", MemberType.AGENT)
+        member, _ = await service.register(
+            "overflow", MemberType.AGENT, registered_by="owner"
+        )
         assert member.emoji == ""
 
     async def test_auto_assigned_can_be_changed(self, service):
-        member, _ = await service.register("a1", MemberType.AGENT)
+        await service.bootstrap_master("owner", "pass123", emoji="👑")
+        member, _ = await service.register(
+            "a1", MemberType.AGENT, registered_by="owner"
+        )
         original = member.emoji
         m = await service.update_emoji("a1", "🎸")
         assert m.emoji == "🎸"

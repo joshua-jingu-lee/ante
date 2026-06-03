@@ -151,6 +151,39 @@ class MemberAlreadyExistsError(MemberError, ValueError):
         super().__init__(f"이미 존재하는 member_id: {member_id}")
 
 
+class ReservedMemberIdError(MemberError, ValueError):
+    """reserved ``system:`` prefix member_id 등록 거부 (#2295).
+
+    ``register`` 가 ``member_id.startswith("system:")`` 등록 요청을 받았을 때
+    raise 한다. ``system:`` 는 system audit sentinel 네임스페이스
+    (``system:kill_switch`` / ``system:recovery``) 전용 reserved prefix 이며,
+    사용자/agent member_id 가 이를 점유하면 audit 행위자 식별이 오염된다.
+
+    ``MemberError`` 와 ``ValueError`` 다중상속으로 둔다 — #1807
+    ``MemberAlreadyExistsError`` 패턴 1:1 미러. 기존 caller (CLI ``register``
+    의 ``except (ValueError, PermissionError)`` generic fallback) 가 회귀
+    없이 동일하게 잡히도록 한다. ``except ReservedMemberIdError`` 를 먼저 둔
+    caller 는 typed 분기를 우선 매칭해 안정 코드 envelope 을 surface 한다
+    (Python MRO 보장).
+
+    duplicate (``MemberAlreadyExistsError`` / MEMBER_ALREADY_EXISTS) 와는
+    별개 fault 로 분리한다 (Codex v2) — register 의 reserved-prefix guard 는
+    existing-member 조회 *이전* 에 배치되어, legacy ``system:*`` 행이 있어도
+    MEMBER_ALREADY_EXISTS 가 아닌 ``MEMBER_ID_RESERVED`` 코드가 surface 된다.
+    permission fault (``PermissionDeniedError`` / PERMISSION_DENIED) 와도
+    별개다 — reserved-prefix 는 권한 부족이 아니라 입력 네임스페이스 위반이다.
+
+    클래스 레벨 ``code`` 속성은 CLI/IPC envelope 이 안정 코드
+    ``"MEMBER_ID_RESERVED"`` 로 surface 하도록 한다.
+    """
+
+    code: str = "MEMBER_ID_RESERVED"
+
+    def __init__(self, member_id: str) -> None:
+        self.member_id = member_id
+        super().__init__(f"예약된 member_id prefix 는 사용할 수 없습니다: {member_id}")
+
+
 class MemberInvalidRecoveryCredentialError(MemberError, ValueError, PermissionError):
     """recovery credential validation 거부 (#1806 Group R sweep).
 

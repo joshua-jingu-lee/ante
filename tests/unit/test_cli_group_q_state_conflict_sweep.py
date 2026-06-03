@@ -512,7 +512,9 @@ class TestServiceLayerTypedRaise:
 
             # master + ACTIVE agent 생성 → suspend 1회 후 재정지 시 typed.
             await service.bootstrap_master("owner", "pass1234")
-            await service.register("agent-grp-q", MemberType.AGENT)
+            await service.register(
+                "agent-grp-q", MemberType.AGENT, registered_by="owner"
+            )
             await service.suspend("agent-grp-q", suspended_by="owner")
 
             with pytest.raises(MemberStateConflictError) as excinfo:

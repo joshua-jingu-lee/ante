@@ -16,9 +16,11 @@ import pytest
 from ante.core.database import Database
 from ante.eventbus import EventBus
 from ante.member.errors import (
+    MemberAlreadyExistsError,
     MemberInvalidEmojiError,
     MemberMasterProtectedError,
     PermissionDeniedError,
+    ReservedMemberIdError,
 )
 from ante.member.models import MemberStatus, MemberType
 from ante.member.service import MemberService
@@ -196,6 +198,156 @@ class TestUpdateScopesMasterGuard:
             "agent-active", ["data:read"], updated_by="owner"
         )
         assert member.scopes == ["data:read"]
+
+
+# ── register (#2294 — 무조건 master 게이트) ────────────────────────────────
+
+
+class TestRegisterMasterGuard:
+    """#2294: ``register`` 의 master 검증이 **무조건** 수행되어야 한다.
+
+    이전에는 ``if registered_by:`` 가드로 빈 actor 가 master 검증을
+    우회했다. #2294 (#2113 메타리뷰 후속) 가 이 분기를 제거하고, 형제
+    mutation (suspend/reactivate/revoke/rotate_token/update_scopes) 과 동일
+    하게 caller 가 항상 master 여야 한다는 invariant 를 강제한다.
+    """
+
+    async def test_register_with_empty_caller_raises(
+        self, populated_service: MemberService
+    ) -> None:
+        """빈 actor("") 가 더 이상 master 검증을 우회하면 안 된다 (회귀 잠금).
+
+        ``_assert_master("")`` → ``get("")`` 가 ``None`` 을 반환해
+        ``PermissionDeniedError`` 로 거부된다 (의도된 defense-in-depth).
+        """
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await populated_service.register(
+                "agent-new", MemberType.AGENT, registered_by=""
+            )
+
+    async def test_register_with_non_master_caller_raises(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await populated_service.register(
+                "agent-new", MemberType.AGENT, registered_by="agent-caller"
+            )
+
+    async def test_register_with_unknown_caller_raises(
+        self, populated_service: MemberService
+    ) -> None:
+        """CLI 미인증 actor("unknown") 도 존재하지 않으므로 거부된다."""
+        with pytest.raises(PermissionDeniedError, match="master만"):
+            await populated_service.register(
+                "agent-new", MemberType.AGENT, registered_by="unknown"
+            )
+
+    async def test_register_with_master_caller_succeeds(
+        self, populated_service: MemberService
+    ) -> None:
+        member, token = await populated_service.register(
+            "agent-new", MemberType.AGENT, registered_by="owner"
+        )
+        assert member.member_id == "agent-new"
+        assert token.startswith("ante_ak_")
+
+
+# ── register reserved-prefix guard (#2295) ─────────────────────────────────
+
+
+class TestRegisterReservedMemberIdGuard:
+    """#2295: ``register`` 가 reserved ``system:`` prefix member_id 를 거부.
+
+    ``system:`` 는 system audit sentinel 네임스페이스
+    (``system:kill_switch`` / ``system:recovery``) 전용 reserved prefix 다.
+    사용자/agent member_id 가 이를 점유하면 audit 행위자 식별이 오염되므로
+    ``ReservedMemberIdError`` (.code=MEMBER_ID_RESERVED) 로 거부한다.
+    """
+
+    async def test_register_system_recovery_rejected(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(ReservedMemberIdError):
+            await populated_service.register(
+                "system:recovery", MemberType.AGENT, registered_by="owner"
+            )
+
+    async def test_register_system_colon_arbitrary_rejected(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(ReservedMemberIdError):
+            await populated_service.register(
+                "system:abc", MemberType.AGENT, registered_by="owner"
+            )
+
+    async def test_reserved_error_has_stable_code(
+        self, populated_service: MemberService
+    ) -> None:
+        with pytest.raises(ReservedMemberIdError) as excinfo:
+            await populated_service.register(
+                "system:kill_switch", MemberType.AGENT, registered_by="owner"
+            )
+        assert excinfo.value.code == "MEMBER_ID_RESERVED"
+
+    async def test_reserved_error_is_valueerror(
+        self, populated_service: MemberService
+    ) -> None:
+        """``ValueError`` 다중상속으로 기존 generic fallback 회귀 없음."""
+        with pytest.raises(ValueError):
+            await populated_service.register(
+                "system:x", MemberType.AGENT, registered_by="owner"
+            )
+
+    async def test_register_plain_system_allowed(
+        self, populated_service: MemberService
+    ) -> None:
+        """콜론 없는 ``system`` 단독 member_id 는 오거부하지 않는다."""
+        member, _ = await populated_service.register(
+            "system", MemberType.AGENT, registered_by="owner"
+        )
+        assert member.member_id == "system"
+
+    async def test_register_systemic_allowed(
+        self, populated_service: MemberService
+    ) -> None:
+        """``systemic`` 등 ``system:`` 으로 시작하지 않는 member_id 는 허용."""
+        member, _ = await populated_service.register(
+            "systemic", MemberType.AGENT, registered_by="owner"
+        )
+        assert member.member_id == "systemic"
+
+    async def test_register_normal_id_allowed(
+        self, populated_service: MemberService
+    ) -> None:
+        member, _ = await populated_service.register(
+            "agent-normal", MemberType.AGENT, registered_by="owner"
+        )
+        assert member.member_id == "agent-normal"
+
+    async def test_reserved_guard_precedes_existing_member_lookup(
+        self, populated_service: MemberService
+    ) -> None:
+        """reserved guard 는 existing-member 조회 *이전* 에 배치되어야 한다.
+
+        legacy ``system:*`` 행이 DB 에 있어도 ``MEMBER_ALREADY_EXISTS`` 가
+        아니라 ``MEMBER_ID_RESERVED`` 가 surface 되어야 한다 (Codex v2).
+        guard 가 정상이면 DB 에 row 가 없으므로 INSERT 우회 자체로
+        reserved 코드만 raise 된다 — 별도 row 주입 없이 reserved 가 항상
+        먼저 매칭됨을 단언한다.
+        """
+        with pytest.raises(ReservedMemberIdError):
+            await populated_service.register(
+                "system:recovery", MemberType.AGENT, registered_by="owner"
+            )
+        # reserved guard 통과 후에도 일반 member_id duplicate 는 여전히
+        # MemberAlreadyExistsError 로 별개 surface 됨 (분리된 fault 확인).
+        await populated_service.register(
+            "agent-dup", MemberType.AGENT, registered_by="owner"
+        )
+        with pytest.raises(MemberAlreadyExistsError):
+            await populated_service.register(
+                "agent-dup", MemberType.AGENT, registered_by="owner"
+            )
 
 
 # ── master 우선순위 회귀 ───────────────────────────────────────────────────
