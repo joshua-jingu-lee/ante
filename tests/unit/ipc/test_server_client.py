@@ -40,6 +40,52 @@ def service_registry() -> ServiceRegistry:
     return _make_service_registry()
 
 
+def _capture_server_side_transports(
+    underlying: asyncio.AbstractServer,
+) -> list:
+    """``underlying`` asyncio.Server 의 accepted-connection transport 목록 캡처.
+
+    Refs #2304: ``asyncio.Server._clients`` 는 ``connection_made`` 시점에 등록되는
+    server-side accepted transport 의 set 이다. active 연결을 일부러 열어 둔
+    테스트(``stop_accepting``/``drain_connections`` 부분 경로만 호출)에서는
+    server-side ``_handle_connection`` 의 transport 가 같은 테스트 경계 안에서
+    결정적으로 닫히지 않는다. 이 transport 가 ``_sock`` LIVE + ``_server`` SET
+    상태로 GC 되면 ``_SelectorTransport.__del__`` → ``Server._detach`` →
+    ``Server._wakeup`` 에서 ``self._waiters`` 가 이미 ``None`` (앞선 ``wait_closed``
+    완료로 소진) 이라 ``for waiter in waiters: TypeError: 'NoneType' object is not
+    iterable`` 가 unraisable 로 새고, 후속 sync 테스트의 ``asyncio.run`` cleanup
+    에서 ``RuntimeError: Event loop is closed`` 로 표출돼 원래 에러를 마스킹한다.
+
+    이를 차단하기 위해 transport reference 를 ``stop_accepting`` (= ``_server`` 를
+    ``None`` 으로 비움) **전에** 캡처해 두고, fixture 종료 시
+    ``_settle_server_side_transports`` 로 명시 close 한다. 단일 underlying private
+    attribute (``_clients``) 만 읽으며, production IPCServer 동작은 변경하지
+    않는다 (테스트 격리 전용).
+    """
+    clients = getattr(underlying, "_clients", None)
+    return list(clients) if clients else []
+
+
+async def _settle_server_side_transports(
+    transports: list, *, max_iters: int = 50
+) -> None:
+    """캡처된 server-side transport 들을 명시적으로 close 하고 teardown 을 정착.
+
+    Refs #2304: 각 transport 에 ``close()`` 를 호출하면 ``_call_connection_lost``
+    가 ``loop.call_soon`` 으로 스케줄된다. ``_call_connection_lost`` 는 ``_sock``/
+    ``_server`` 를 정리하고 ``server._detach`` 를 (``_waiters`` 가 아직 일관된
+    상태에서) **단 한 번** 호출하므로, 이후 GC 시 ``__del__`` 이
+    ``_sock is None`` 가드에 걸려 안전하게 무시된다. 콜백이 실제 실행될 때까지
+    ``asyncio.sleep(0)`` 으로 양보한다.
+    """
+    for transport in transports:
+        transport.close()
+    for _ in range(max_iters):
+        if all(getattr(t, "_sock", None) is None for t in transports):
+            return
+        await asyncio.sleep(0)
+
+
 @pytest.mark.asyncio
 async def test_roundtrip(socket_path: str, service_registry: ServiceRegistry) -> None:
     """요청 -> 응답 라운드트립."""
@@ -385,6 +431,29 @@ async def test_stop_accepting_does_not_block_on_active_connection(
     # 클라이언트 연결만 열고 요청은 보내지 않음 — 서버 측 _handle_connection이
     # 첫 decode에서 대기 상태로 머문다 (active 연결).
     reader, writer = await asyncio.open_unix_connection(socket_path)
+    # Refs #2304: stop_accepting() 이 ``server._server`` 를 None 으로 비우기
+    # 전에 underlying asyncio.Server 를 잡아, accepted 된 server-side transport
+    # 를 캡처한다. ``connection_made`` 가 ``_clients`` 에 등록될 시간을 yield 로
+    # 보장한 뒤 캡처한다.
+    underlying = server._server
+    assert underlying is not None
+    server_side_transports: list = []
+    for _ in range(50):
+        server_side_transports = _capture_server_side_transports(underlying)
+        if server_side_transports:
+            break
+        await asyncio.sleep(0)
+    # Refs #2304 (Codex 브랜치 리뷰 attempt 1): 캡처가 비어 있으면 fixture
+    # 종료 시 ``_settle_server_side_transports`` 가 no-op 이 되어 누수 차단을
+    # 검증하지 못한다(회귀 시 silent pass). active 연결이 결정적으로
+    # ``asyncio.Server._clients`` 에 등록돼 server-side transport 가 캡처됐음을
+    # 단언해, (a) cleanup 이 실제로 수행됨을 보장하고 (b) 향후 캡처 로직이
+    # 깨지면(빈 결과) 이 테스트가 FAIL 해 회귀를 잡는다.
+    assert server_side_transports, (
+        "server-side accepted transport 캡처가 비어 있다 — active 연결이 "
+        "asyncio.Server._clients 에 등록되지 않아 teardown cleanup 이 "
+        "no-op 이 된다 (Refs #2304)."
+    )
     try:
         # 1초 안에 stop_accepting이 완료되어야 한다 — wait_closed 미사용 검증.
         await asyncio.wait_for(server.stop_accepting(), timeout=1.0)
@@ -405,6 +474,11 @@ async def test_stop_accepting_does_not_block_on_active_connection(
             await asyncio.sleep(0)
         # 후속 정리 (남은 연결 drain + socket 제거).
         await server.drain_connections(timeout=0.5)
+        # Refs #2304: 캡처한 server-side transport 를 명시 close 해 teardown 을
+        # 같은 테스트 경계 안에서 정착 — LIVE transport 가 닫힌 loop 에 바인딩된
+        # 채 후속(특히 sync) 테스트로 전이되어 ``__del__`` 에서 unraisable 로
+        # 새는 것을 차단한다.
+        await _settle_server_side_transports(server_side_transports)
         server.unlink_socket()
 
 
@@ -428,6 +502,26 @@ async def test_drain_connections_with_timeout(
 
     # 클라이언트 연결을 잡아 둠 (요청 미전송)
     reader, writer = await asyncio.open_unix_connection(socket_path)
+    # Refs #2304: stop_accepting() 전에 underlying asyncio.Server 를 잡아
+    # server-side accepted transport 를 캡처한다 (등록 시간 yield 보장).
+    underlying = server._server
+    assert underlying is not None
+    server_side_transports: list = []
+    for _ in range(50):
+        server_side_transports = _capture_server_side_transports(underlying)
+        if server_side_transports:
+            break
+        await asyncio.sleep(0)
+    # Refs #2304 (Codex 브랜치 리뷰 attempt 1): 캡처가 비어 있으면 fixture
+    # 종료 시 ``_settle_server_side_transports`` 가 no-op 이 되어 drain timeout
+    # 경로의 누수 차단을 검증하지 못한다(회귀 시 silent pass). server-side
+    # transport 가 결정적으로 캡처됐음을 단언해 cleanup 수행을 보장하고, 캡처
+    # 로직이 깨지면 이 테스트가 FAIL 하도록 한다.
+    assert server_side_transports, (
+        "server-side accepted transport 캡처가 비어 있다 — active 연결이 "
+        "asyncio.Server._clients 에 등록되지 않아 teardown cleanup 이 "
+        "no-op 이 된다 (Refs #2304)."
+    )
     try:
         await server.stop_accepting()
         # 짧은 timeout으로 drain — TimeoutError가 외부로 전파되면 안 된다.
@@ -436,22 +530,22 @@ async def test_drain_connections_with_timeout(
     finally:
         # Refs #1897: 누수 cleanup — production drain 이 timeout 으로 끝났을
         # 경우에도, fixture 종료 시점에는 server-side transport 까지 결정적으로
-        # 닫혀야 한다. client 측 writer 를 먼저 닫고 충분히 큰 timeout 으로 한
-        # 번 더 drain 해 server-side _handle_connection 의 finally 가
-        # transport detach 를 완료할 시간을 보장한다. ``drain_connections`` 는
-        # 첫 호출에서 ``_closing_server`` 를 비우므로 두 번째 호출은 noop —
-        # 따라서 underlying server.wait_closed 를 직접 await 한다.
+        # 닫혀야 한다. client 측 writer 를 먼저 닫고 server-side
+        # _handle_connection 의 finally 가 transport detach 를 완료할 시간을
+        # 양보한다.
         writer.close()
         try:
             await writer.wait_closed()
         except Exception:
             pass
-        # underlying asyncio.Server reference 를 복원하기 위해 server 내부
-        # attribute (private) 를 직접 들여다본다. drain 직후 _closing_server 는
-        # None 으로 비워졌으나, asyncio.Server.wait_closed 는 _waiters 가 None
-        # 이면 즉시 return 하므로 부작용이 없다.
         for _ in range(20):
             await asyncio.sleep(0)
+        # Refs #2304: drain 이 timeout 으로 끝나 server-side transport 가
+        # ``_sock`` LIVE 로 남는 경로에서도, 캡처한 transport 를 명시 close 해
+        # ``_call_connection_lost`` 를 같은 loop 에서 실행시켜 teardown 을
+        # 정착한다. ``_SelectorTransport.__del__`` → ``Server._wakeup``
+        # (``_waiters=None``) 재진입으로 unraisable 이 새는 것을 차단한다.
+        await _settle_server_side_transports(server_side_transports)
         server.unlink_socket()
 
 
