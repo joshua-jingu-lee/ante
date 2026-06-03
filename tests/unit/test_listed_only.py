@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from ante.cli.main import cli
 from ante.instrument.service import InstrumentService
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -120,22 +121,24 @@ class TestListCLIListedOnly:
     def test_list_without_listed_only(self, runner):
         """기본 list는 모든 종목 표시."""
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "name": "삼성전자",
-                    "name_en": "Samsung",
-                    "type": "stock",
-                    "listed": "Y",
-                },
-                {
-                    "symbol": "000000",
-                    "name": "폐지종목",
-                    "name_en": "Delisted",
-                    "type": "stock",
-                    "listed": "N",
-                },
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "symbol": "005930",
+                        "name": "삼성전자",
+                        "name_en": "Samsung",
+                        "type": "stock",
+                        "listed": "Y",
+                    },
+                    {
+                        "symbol": "000000",
+                        "name": "폐지종목",
+                        "name_en": "Delisted",
+                        "type": "stock",
+                        "listed": "N",
+                    },
+                ]
+            )
             result = runner.invoke(cli, ["instrument", "list"])
             assert result.exit_code == 0
             assert "005930" in result.output
@@ -144,15 +147,17 @@ class TestListCLIListedOnly:
     def test_list_with_listed_only(self, runner):
         """--listed-only 시 상장 종목만 표시."""
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "name": "삼성전자",
-                    "name_en": "Samsung",
-                    "type": "stock",
-                    "listed": "Y",
-                },
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "symbol": "005930",
+                        "name": "삼성전자",
+                        "name_en": "Samsung",
+                        "type": "stock",
+                        "listed": "Y",
+                    },
+                ]
+            )
             result = runner.invoke(cli, ["instrument", "list", "--listed-only"])
             assert result.exit_code == 0
             assert "005930" in result.output
@@ -162,15 +167,17 @@ class TestSearchCLIListedOnly:
     def test_search_without_listed_only(self, runner):
         """기본 search는 모든 종목 검색."""
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "exchange": "KRX",
-                    "name": "삼성전자",
-                    "name_en": "Samsung",
-                    "type": "stock",
-                },
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "symbol": "005930",
+                        "exchange": "KRX",
+                        "name": "삼성전자",
+                        "name_en": "Samsung",
+                        "type": "stock",
+                    },
+                ]
+            )
             result = runner.invoke(cli, ["instrument", "search", "삼성"])
             assert result.exit_code == 0
             assert "005930" in result.output
@@ -178,15 +185,17 @@ class TestSearchCLIListedOnly:
     def test_search_with_listed_only(self, runner):
         """--listed-only 시 상장 종목만 검색."""
         with patch("asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "symbol": "005930",
-                    "exchange": "KRX",
-                    "name": "삼성전자",
-                    "name_en": "Samsung",
-                    "type": "stock",
-                },
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "symbol": "005930",
+                        "exchange": "KRX",
+                        "name": "삼성전자",
+                        "name_en": "Samsung",
+                        "type": "stock",
+                    },
+                ]
+            )
             result = runner.invoke(
                 cli, ["instrument", "search", "--listed-only", "삼성"]
             )

@@ -14,6 +14,7 @@ from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
 from ante.strategy.registry import StrategyRecord, StrategyStatus
 from ante.trade.models import PerformanceMetrics
+from tests.unit._async_test_utils import asyncio_run_returning
 
 
 def _acm_factory(value):  # noqa: ANN001, ANN202
@@ -335,7 +336,7 @@ class TestStrategyPerformance:
         with (
             patch("ante.cli.commands.strategy.asyncio.run") as mock_run,
         ):
-            mock_run.return_value = None
+            mock_run.side_effect = asyncio_run_returning(None)
             result = runner.invoke(cli, ["strategy", "performance", "nonexistent"])
             assert result.exit_code == 1
 
@@ -347,7 +348,10 @@ class TestStrategyPerformance:
             "metrics": asdict(_SAMPLE_METRICS),
         }
 
-        with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
+        with patch(
+            "ante.cli.commands.strategy.asyncio.run",
+            side_effect=asyncio_run_returning(expected),
+        ):
             result = runner.invoke(
                 cli,
                 ["strategy", "performance", "momentum", "--account-id", "acc-test"],
@@ -364,7 +368,10 @@ class TestStrategyPerformance:
             "metrics": asdict(_SAMPLE_METRICS),
         }
 
-        with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
+        with patch(
+            "ante.cli.commands.strategy.asyncio.run",
+            side_effect=asyncio_run_returning(expected),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -392,7 +399,10 @@ class TestStrategyPerformance:
             "metrics": asdict(empty),
         }
 
-        with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
+        with patch(
+            "ante.cli.commands.strategy.asyncio.run",
+            side_effect=asyncio_run_returning(expected),
+        ):
             result = runner.invoke(
                 cli,
                 [
@@ -448,7 +458,10 @@ class TestStrategyPerformance:
         # 실제 _perf 코루틴 실행을 차단하기 위해 asyncio.run 결과만 mock한다.
         # 실패 분기(account-id 누락)는 별도 테스트가 책임지며, 본 테스트는
         # account-id 옵션이 있으면 SystemExit 없이 정상 흐름을 탄다는 것을 보장한다.
-        with patch("ante.cli.commands.strategy.asyncio.run", return_value=expected):
+        with patch(
+            "ante.cli.commands.strategy.asyncio.run",
+            side_effect=asyncio_run_returning(expected),
+        ):
             result = runner.invoke(
                 cli,
                 [

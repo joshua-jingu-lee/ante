@@ -17,6 +17,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit._async_test_utils import asyncio_run_returning
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -323,14 +324,16 @@ class TestValidPeriodOptionCombosRegression:
 
     def test_daily_with_start_and_end(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "date": "2026-01-15",
-                    "realized_pnl": 12000.0,
-                    "trade_count": 2,
-                    "win_rate": 0.5,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "date": "2026-01-15",
+                        "realized_pnl": 12000.0,
+                        "trade_count": 2,
+                        "win_rate": 0.5,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 [
@@ -350,15 +353,17 @@ class TestValidPeriodOptionCombosRegression:
 
     def test_monthly_with_year(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "year": 2026,
-                    "month": 1,
-                    "realized_pnl": 50000.0,
-                    "trade_count": 10,
-                    "win_rate": 0.7,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "year": 2026,
+                        "month": 1,
+                        "realized_pnl": 50000.0,
+                        "trade_count": 10,
+                        "win_rate": 0.7,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 [
@@ -380,14 +385,16 @@ class TestValidPeriodOptionCombosRegression:
 
     def test_daily_with_bot_id_and_dates(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = [
-                {
-                    "date": "2026-01-10",
-                    "realized_pnl": 3000.0,
-                    "trade_count": 1,
-                    "win_rate": 1.0,
-                }
-            ]
+            mock_run.side_effect = asyncio_run_returning(
+                [
+                    {
+                        "date": "2026-01-10",
+                        "realized_pnl": 3000.0,
+                        "trade_count": 1,
+                        "win_rate": 1.0,
+                    }
+                ]
+            )
             result = runner.invoke(
                 cli,
                 [
@@ -408,14 +415,14 @@ class TestValidPeriodOptionCombosRegression:
 
     def test_daily_default_no_options(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = []
+            mock_run.side_effect = asyncio_run_returning([])
             result = runner.invoke(cli, ["report", "performance"])
         assert result.exit_code == 0
         mock_run.assert_called_once()
 
     def test_monthly_default_no_options(self, runner):
         with patch("ante.cli.commands.report.asyncio.run") as mock_run:
-            mock_run.return_value = []
+            mock_run.side_effect = asyncio_run_returning([])
             result = runner.invoke(
                 cli,
                 ["report", "performance", "--period", "monthly"],
