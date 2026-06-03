@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
 
 import click
 from pydantic import ValidationError
@@ -221,22 +222,38 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
         raise SystemExit(1)
 
     async def _list() -> list[dict]:
-        from ante.core.database import Database
-
-        # ``db.connect()`` 이후의 모든 라이프사이클(``ReportStore.initialize``,
-        # ``list_reports`` 호출 포함)을 ``except BaseException`` 블록으로 감싸
-        # 실패 시 ``db.close()``를 보장한다. ``initialize``/``list_reports`` 가
-        # raise되면 aiosqlite 연결이 leak되어 asyncio 종료 시 worker thread가
-        # 정리되며 stderr에 traceback이 노출되는 회귀를 차단한다
-        # (``_create_account_service`` cleanup 패턴 1:1 미러).
-        db = Database(resolved_db_path)
-        try:
-            await db.connect()
+        # ``report list`` 는 offline read 명령이므로 read-only DB 아티팩트
+        # (0444 파일 / 0555 부모 디렉터리 — 실제 read-only mount) 도 열 수 있어야
+        # 한다. 기존 ``Database(resolved_db_path)`` (writer + WAL PRAGMA) +
+        # ``ReportStore.initialize()`` (CREATE TABLE reports DDL) 는 read-only fs
+        # 에서 ``attempt to write a readonly database`` 로 실패했다. backtest
+        # history (#1974) / data list (#1984) 동형으로 ``open_cli_db(
+        # read_only=True)`` (mode=ro + immutable fallback, WAL/DDL 미발화) 를
+        # 사용하고 ``initialize()`` 를 호출하지 않는다.
+        #
+        # ``ReportStore.list_reports`` 는 캐시 없이 rows 를 직접 SELECT 하므로
+        # initialize 의 schema 부트스트랩이 read 에 필요하지 않다(#1984
+        # InstrumentService 캐시 워밍과 달리 캐시 워밍도 불요). 단, ``reports``
+        # 테이블이 부재한(아직 한 번도 부트스트랩되지 않은) DB 에서는 SELECT 가
+        # ``sqlite3.OperationalError: no such table: reports`` 로 실패하므로,
+        # 그 메시지에 한해 빈 목록으로 graceful 처리한다. 다른
+        # ``OperationalError`` (locked / disk I/O / malformed 등) 는 삼키지 않고
+        # 재전파해 호출 경계에서 ``REPORT_ERROR`` 로 변환되도록 한다.
+        async with open_cli_db(
+            ctx, read_only=True, db_path_override=resolved_db_path
+        ) as db:
             store = ReportStore(db=db)
-            await store.initialize()
             report_status = ReportStatus(status) if status else None
-            reports = await store.list_reports(status=report_status)
-            rows = [
+            try:
+                reports = await store.list_reports(status=report_status)
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc).lower():
+                    raise
+                logger.debug(
+                    "reports 테이블 부재 — 빈 목록으로 graceful 처리", exc_info=True
+                )
+                return []
+            return [
                 {
                     "report_id": r.report_id,
                     "strategy": r.strategy_name,
@@ -245,18 +262,6 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
                 }
                 for r in reports
             ]
-        except BaseException:
-            try:
-                await db.close()
-            except Exception:
-                # close 실패는 원본 예외를 가리지 않고 무시한다 — 호출자가
-                # 안정적인 ``code`` 로 종료할 수 있어야 한다.
-                logger.debug(
-                    "db.close() after list failure raised — ignored", exc_info=True
-                )
-            raise
-        await db.close()
-        return rows
 
     try:
         rows = asyncio.run(_list())
@@ -403,14 +408,32 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
     resolved_db_path = db_path or get_db_path(ctx)
 
     async def _view() -> dict | None:
-        from ante.core.database import Database
-
-        db = Database(resolved_db_path)
-        await db.connect()
-        try:
+        # ``report view`` 도 offline read 명령이므로 read-only DB 아티팩트를
+        # 열 수 있어야 한다. ``report list`` 와 동형으로 ``open_cli_db(
+        # read_only=True)`` (mode=ro + immutable fallback, WAL/DDL 미발화) +
+        # ``initialize()`` 미호출. ``ReportStore.get`` 도 캐시 없이 단일 row 를
+        # SELECT 하므로 schema 부트스트랩이 read 에 필요하지 않다(backtest
+        # history #1974 / data list #1984 동형).
+        #
+        # ``reports`` 테이블이 부재한 DB 에서는 ``get`` 의 SELECT 가
+        # ``sqlite3.OperationalError: no such table: reports`` 로 실패하므로 그
+        # 메시지에 한해 ``None`` (미발견) 으로 graceful 처리한다 → 호출 경계에서
+        # ``REPORT_NOT_FOUND`` envelope 로 종료된다. 다른 ``OperationalError`` 는
+        # 재전파해 ``REPORT_ERROR`` 로 변환되도록 한다(삼키지 않음).
+        async with open_cli_db(
+            ctx, read_only=True, db_path_override=resolved_db_path
+        ) as db:
             store = ReportStore(db)
-            await store.initialize()
-            r = await store.get(report_id)
+            try:
+                r = await store.get(report_id)
+            except sqlite3.OperationalError as exc:
+                if "no such table" not in str(exc).lower():
+                    raise
+                logger.debug(
+                    "reports 테이블 부재 — 미발견(None)으로 graceful 처리",
+                    exc_info=True,
+                )
+                return None
             if not r:
                 return None
             return {
@@ -431,8 +454,6 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
                 "risks": r.risks,
                 "recommendations": r.recommendations,
             }
-        finally:
-            await db.close()
 
     # DB 연결/조회 실패 시 traceback 노출 대신 구조화된 에러 envelope 로
     # 변환한다 (``report_list`` L255-260 와 동형). ``_view()`` 내부 try/finally

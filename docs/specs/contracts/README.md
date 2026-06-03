@@ -139,7 +139,8 @@ error-taxonomy.md 자체를 갱신한다.
   실패 시 `immutable=1` fallback)을 열어 실제 read-only 파일시스템에서도 schema
   /WAL 쓰기 없이 read한다. `read_only=False` 경로는 기존 baseline과 byte-for-byte
   동일(모든 write 소비자 무영향). 옵션 A의 `read_only=True`는 기존 스키마를
-  부트스트랩 없이 읽는 명령(현재 `backtest history`)에만 적용한다.
+  부트스트랩 없이 읽는 명령(현재 `backtest history`(#1974), `data list`의
+  종목명 보강(#1984), `report list`/`report view`(#2114))에만 적용한다.
 - ctx 정책: 신규 factory 내부에서 `get_db_path(ctx)` 명시 전달이 권장. ctx 없는
   암시 fallback은 deprecated.
 - read-only 예외: `AccountService`/`MemberService`/`ApprovalService`/

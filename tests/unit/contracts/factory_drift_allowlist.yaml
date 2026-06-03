@@ -37,18 +37,14 @@ direct_database_construction:
     line: 48
     reason: "signal connect — long_running stream channel (external process lifecycle)"
 
-  # report domain — offline execution 이지만 #1857 epic 의 broker/signal
-  # 제외 scope 결정에 따라 본 factory migration 사이클에서 별도 spec 정렬 PR
-  # 로 이연된 잔여. 후속 이슈에서 `open_cli_db` 로 마이그레이션할 후보.
+  # report domain — `report list` / `report view` 는 `offline` read 명령이며
+  # #2114 에서 `open_cli_db` (read_only) 로 마이그레이션되어 직접 Database 생성
+  # callsite 가 사라졌다 — 두 엔트리 제거 (backtest history #1974 / data list
+  # #1984 동형). `report submit` 은 write 명령(INSERT)이라 read-only 대상이
+  # 아니며 직접 Database 생성을 유지한다 — 단일 엔트리 잔존.
   - path: src/ante/cli/commands/report.py
-    line: 130
-    reason: "report submit — offline (deferred migration, post-#1818 follow-up)"
-  - path: src/ante/cli/commands/report.py
-    line: 232
-    reason: "report list — offline (deferred migration, post-#1818 follow-up)"
-  - path: src/ante/cli/commands/report.py
-    line: 408
-    reason: "report view — offline (deferred migration, post-#1818 follow-up)"
+    line: 131
+    reason: "report submit — offline write (INSERT), read-only 비대상; deferred migration"
 
   # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (progress
   # bar 와 함께 장시간 작업) 이라 직접 Database 생성을 유지한다.
