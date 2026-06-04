@@ -268,6 +268,8 @@ class RuleEngine:
         trade_service: TradeService | None = None,
         account: Account | None = None,
         order_tracker: OrderTracker | None = None,
+        unrecovered_buy_guard_min_age: float = 60.0,
+        allow_unrecovered_buy_overlap: bool = False,
     ) -> None:
         from ante.account.scoping import require_account_id
 
@@ -289,6 +291,17 @@ class RuleEngine:
         # 기존 호출자(테스트 fixture 등) 호환을 위해 ``None`` 허용 — None일 때
         # reload 경로는 helper를 우회하여 stored 그대로 적용한다 (#1296).
         self._account = account
+
+        # #2315: 미복구 self-order 반복 매수 가드 설정.
+        # ``unrecovered_buy_guard_min_age``는 미복구 outstanding buy 주문이 차단
+        # 대상이 되기까지 경과해야 하는 최소 age(초)다. 기본 60.0 =
+        # max(fill_poll_interval 60s, 60s) — fill-recovery 폴이 최소 1회 미복구
+        # 잔량을 복구할 기회를 보장한 뒤에만 차단한다(빠른 연속 분할매수 비차단).
+        # ``allow_unrecovered_buy_overlap``은 계좌 기본 opt-out이며, 봇/전략 단위
+        # override는 ``set_unrecovered_buy_overlap``로 등록한다.
+        self._unrecovered_buy_guard_min_age = unrecovered_buy_guard_min_age
+        self._allow_unrecovered_buy_overlap_default = allow_unrecovered_buy_overlap
+        self._allow_unrecovered_buy_overlap_by_bot: dict[str, bool] = {}
 
         self._account_rules: list[Rule] = []
         self._strategy_rules: dict[str, list[Rule]] = {}
@@ -334,6 +347,16 @@ class RuleEngine:
     def set_bot_strategy_resolver(self, resolver: Callable[[str], str | None]) -> None:
         """봇 ID → 전략 ID 변환 콜백 설정 (초기화 후 BotManager 연결 시 호출)."""
         self._bot_strategy_resolver = resolver
+
+    def set_unrecovered_buy_overlap(self, bot_id: str, allow: bool) -> None:
+        """봇 단위 ``allow_unrecovered_buy_overlap`` opt-out 등록 (#2315).
+
+        의도적으로 미복구 outstanding self-buy와 중첩되는 다중 주문을 내는 전략은
+        ``allow=True``로 등록하여 미복구 매수 가드를 면제받는다. 미등록 봇은 계좌
+        기본값(``allow_unrecovered_buy_overlap`` 생성자 인자, 기본 ``False``)을
+        따른다.
+        """
+        self._allow_unrecovered_buy_overlap_by_bot[bot_id] = allow
 
     def update_rules(self, bot_id: str, rules: list[dict[str, Any]]) -> None:
         """봇의 거래 규칙을 갱신.
@@ -593,6 +616,125 @@ class RuleEngine:
         except Exception:
             logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
             return 0.0
+
+    @staticmethod
+    def _unrecovered_buy_age_seconds(submitted_at: str | None) -> float | None:
+        """``submitted_at`` ISO 문자열의 age(초)를 계산. 산정 불가면 ``None`` (#2315).
+
+        ``submitted_at``은 ``OrderSubmittedEvent.timestamp.isoformat()`` (tz-aware
+        UTC)로 seed되지만 nullable이고 형식이 깨질 수 있다. ``None``/비문자열/파싱
+        불가/naive(미인지) datetime은 모두 **age 산정 불가**로 보아 ``None``을
+        반환한다. 호출부는 ``None``일 때 차단룰 조건②(age ≥ threshold)를 **미충족**
+        으로 처리해 차단하지 않는다(과대차단 회피). 음수 age(미래 timestamp)는
+        0.0으로 클램프하여 절대 threshold를 넘지 않게 한다.
+        """
+        from datetime import UTC, datetime
+
+        if not isinstance(submitted_at, str) or not submitted_at:
+            return None
+        try:
+            parsed = datetime.fromisoformat(submitted_at)
+        except (ValueError, TypeError):
+            return None
+        if parsed.tzinfo is None:
+            # naive datetime은 UTC↔KST 등 오프셋 모호성으로 age를 신뢰할 수 없으므로
+            # 산정 불가로 처리한다(차단하지 않음).
+            return None
+        age = (datetime.now(UTC) - parsed).total_seconds()
+        return max(age, 0.0)
+
+    async def _check_unrecovered_buy_guard(self, event: object) -> str | None:
+        """미복구 self-order 반복 매수 가드 (#2315 — #2314 캐스케이드 방어).
+
+        새 ``buy`` ``OrderRequestEvent``를 다음 **4조건 AND** 성립 시에만 차단하고,
+        차단 시 reject reason 문자열을 반환한다. 미충족이면 ``None``(허용).
+
+        1. 같은 ``(account_id, bot_id, symbol, side="buy")``에 ``OrderTracker``의
+           non-terminal(open/partially_filled) buy 주문 중
+           ``remaining = ordered_qty - recorded_filled_qty > 0``인 주문 존재.
+        2. 그 주문의 ``submitted_at`` age ≥ ``unrecovered_buy_guard_min_age``
+           (기본 60s = max(fill_poll_interval 60s, 60s) — 최소 1회 fill-recovery
+           폴 기회 경과). age 산정 불가(None/파싱불가/naive)면 미충족(허용).
+        3. ``get_positions``로 조회한 해당 symbol 내부 position 수량 == 0
+           (전략이 보유를 인지 못한 #2314 증상).
+        4. opt-out ``allow_unrecovered_buy_overlap``(봇 override → 계좌 기본)이
+           false.
+
+        합법적 분할매수/피라미딩은 비차단: position>0(보유 인지)·age<threshold
+        (빠른 연속 주문)·opt-out=true·다른 키(account/bot/symbol/side)는 통과한다.
+
+        fail-open 방지(#1302 invariant 보존): ``self._order_tracker is None``이면
+        가드 **비활성**(reconciler #1950 패턴 동형 — tracker 미주입 시 self-check
+        생략 = 허용). 가드 활성 중 ``get_open_orders_for``/``get_positions`` 조회가
+        **예외**면 여기서 try/except로 삼켜 허용(silent-pass)하지 **않는다** —
+        예외를 그대로 ``_on_order_request`` catch-all까지 전파시켜 fail-closed
+        generic reject로 audit trail을 잠근다. 정상 DB의 일시적 조회 예외도 보수적
+        으로 reject되지만(과도 거부 trade-off), #2314 캐스케이드(반복매수→예산
+        소진→외부매수 오분류→재매도) 회피를 우선한다.
+        """
+        # 조건①의 선결: side="buy"만 대상. tracker 미주입이면 가드 비활성(허용).
+        if self._order_tracker is None or self._trade_service is None:
+            return None
+        if getattr(event, "side", None) != "buy":
+            return None
+
+        bot_id = getattr(event, "bot_id", "")
+        symbol = getattr(event, "symbol", "")
+
+        # opt-out(조건④): 봇 override → 계좌 기본. true면 가드 면제(허용).
+        allow_overlap = self._allow_unrecovered_buy_overlap_by_bot.get(
+            bot_id, self._allow_unrecovered_buy_overlap_default
+        )
+        if allow_overlap:
+            return None
+
+        # 조건①: non-terminal self-buy 중 remaining > 0인 주문 존재.
+        # NOTE(#2315 fail-closed): get_open_orders_for 예외는 여기서 잡지 않고
+        # _on_order_request catch-all로 전파시켜 fail-closed reject한다.
+        open_orders = await self._order_tracker.get_open_orders_for(
+            account_id=self._account_id,
+            bot_id=bot_id,
+            symbol=symbol,
+            side="buy",
+        )
+        unrecovered = [
+            o for o in open_orders if (o.ordered_qty - o.recorded_filled_qty) > 0
+        ]
+        if not unrecovered:
+            return None
+
+        # 조건②: 미복구 주문 중 age ≥ threshold인 주문이 하나라도 존재.
+        # age 산정 불가(None)는 미충족으로 보아 해당 주문을 무시한다(과대차단 회피).
+        threshold = self._unrecovered_buy_guard_min_age
+        aged = [
+            o
+            for o in unrecovered
+            if (age := self._unrecovered_buy_age_seconds(o.submitted_at)) is not None
+            and age >= threshold
+        ]
+        if not aged:
+            return None
+
+        # 조건③: 해당 symbol 내부 position 수량 == 0.
+        # NOTE(#2315 fail-closed): get_positions 예외도 catch-all로 전파한다.
+        positions = await self._trade_service.get_positions(
+            bot_id, account_id=self._account_id
+        )
+        held_qty = sum(p.quantity for p in positions if p.symbol == symbol)
+        if held_qty != 0:
+            return None
+
+        # 4조건 AND 성립 → 차단. audit trail용 reason 조립(_safe_str로 안전화).
+        oldest = aged[0]
+        remaining = oldest.ordered_qty - oldest.recorded_filled_qty
+        return (
+            f"Unrecovered buy guard: outstanding self-buy order "
+            f"{_safe_str(oldest.order_id)} on {_safe_str(symbol)} "
+            f"(remaining={remaining}, status={_safe_str(oldest.status)}) "
+            f"is unrecovered (age ≥ {threshold}s) while internal position is 0 "
+            f"— blocking duplicate buy to prevent #2314 cascade "
+            f"(set allow_unrecovered_buy_overlap to opt out)"
+        )
 
     # ── EventBus 핸들러 ──────────────────────────────
 
@@ -956,6 +1098,24 @@ class RuleEngine:
                         account_id=self._account_id,
                         event=event,
                         reason=reason,
+                    )
+                )
+                return
+
+            # 미복구 self-order 반복 매수 가드 (#2315 — #2314 캐스케이드 방어).
+            # side/order_type/symbol/quantity 계약 검증 이후, RuleContext 생성/룰
+            # evaluate 이전에 둔다. 4조건 AND(미복구 outstanding self-buy + age≥
+            # threshold + 내부 position==0 + opt-out=false) 성립 시에만 차단한다.
+            # tracker/trade_service 미주입이면 비활성(허용). 가드 내부의 OrderTracker/
+            # get_positions 조회 예외는 silent-pass하지 않고 본 try의 catch-all로
+            # 전파되어 fail-closed generic reject로 audit trail을 잠근다(#1302 보존).
+            guard_reason = await self._check_unrecovered_buy_guard(event)
+            if guard_reason is not None:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=guard_reason,
                     )
                 )
                 return

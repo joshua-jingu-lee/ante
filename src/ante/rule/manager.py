@@ -29,6 +29,8 @@ class RuleEngineManager:
         treasury_manager: TreasuryManagerType | None = None,
         trade_service: TradeService | None = None,
         order_tracker: OrderTracker | None = None,
+        unrecovered_buy_guard_min_age: float = 60.0,
+        allow_unrecovered_buy_overlap: bool = False,
     ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
@@ -38,6 +40,11 @@ class RuleEngineManager:
         # default None — 기존 호출자/테스트 무회귀. None이면 RuleEngine은 modify
         # event의 symbol/side를 보강하지 않고 "" graceful degrade한다.
         self._order_tracker = order_tracker
+        # #2315: 미복구 self-order 반복 매수 가드 설정을 생성하는 모든 RuleEngine에
+        # 전파한다. 봇/전략 단위 opt-out은 RuleEngine.set_unrecovered_buy_overlap
+        # 로 별도 등록한다.
+        self._unrecovered_buy_guard_min_age = unrecovered_buy_guard_min_age
+        self._allow_unrecovered_buy_overlap = allow_unrecovered_buy_overlap
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -77,6 +84,8 @@ class RuleEngineManager:
             trade_service=self._trade_service,
             account=account,
             order_tracker=self._order_tracker,
+            unrecovered_buy_guard_min_age=self._unrecovered_buy_guard_min_age,
+            allow_unrecovered_buy_overlap=self._allow_unrecovered_buy_overlap,
         )
 
         if rule_configs:
