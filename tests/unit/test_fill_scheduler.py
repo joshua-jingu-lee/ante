@@ -639,3 +639,672 @@ async def test_catch_up_recovers_iso_timestamp_end_to_end(tracker, applier):
     pos = await ph.get_current("bot-1", "005930", account_id=ACCT)
     assert pos["quantity"] == 100.0
     assert (await tracker.get("ord-1")).status == "filled"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# position-derived bounded fallback (#2314·#2316 §11)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class FallbackBroker:
+    """get_order_history + get_positions 를 흉내내는 fake broker (#2314).
+
+    ``is_paper`` 로 §11.6 paper 게이트를, ``positions_calls`` 로 §11.2 rate budget
+    (미복구 open buy 없으면 get_positions 미호출)을 단언한다.
+    """
+
+    def __init__(
+        self,
+        *,
+        history: list[dict] | None = None,
+        positions: list[dict] | None = None,
+        is_paper: bool = True,
+    ) -> None:
+        self._history = history or []
+        self._positions = positions or []
+        self.is_paper = is_paper
+        self.history_calls = 0
+        self.positions_calls = 0
+
+    def set_history(self, history: list[dict]) -> None:
+        self._history = history
+
+    def set_positions(self, positions: list[dict]) -> None:
+        self._positions = positions
+
+    async def get_order_history(self, from_date=None, to_date=None):
+        self.history_calls += 1
+        return list(self._history)
+
+    async def get_positions(self):
+        self.positions_calls += 1
+        return list(self._positions)
+
+
+@pytest.fixture
+async def fallback_applier(db, tracker):
+    """FillApplier + PositionHistory + TradeService(get_all_positions) + EventBus.
+
+    fallback 은 internal_account_qty 조회에 TradeService.get_all_positions 를,
+    late-ccld alert 발행에 EventBus 를 쓴다. 실 컴포넌트로 통합 경로를 검증한다.
+    """
+    from ante.trade.performance import PerformanceTracker
+    from ante.trade.service import TradeService
+
+    ph = PositionHistory(db)
+    await ph.initialize()
+    rec = TradeRecorder(db, ph)
+    await rec.initialize()
+    perf = PerformanceTracker(db)
+    eb = EventBus()
+    app = FillApplier(db=db, order_tracker=tracker, position_history=ph, eventbus=eb)
+    svc = TradeService(recorder=rec, position_history=ph, performance=perf)
+    return app, ph, eb, svc
+
+
+def _pos(symbol: str, quantity: float, avg_price: float = 1000.0) -> dict:
+    return {"symbol": symbol, "quantity": quantity, "avg_price": avg_price}
+
+
+def _make_fallback_sched(
+    broker, tracker, app, svc, *, eventbus=None, fallback_enabled=True
+):
+    return FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=app,
+        account_id=ACCT,
+        trade_service=svc,
+        eventbus=eventbus,
+        fallback_enabled=fallback_enabled,
+    )
+
+
+# ── 시나리오 1 (핵심·#2314 재현): ccld 0건 + 잔고 1주 → fallback 수렴 ──
+
+
+async def test_fallback_recovers_full_fill_from_balance(fallback_applier, tracker):
+    """ccld 0건 + 잔고 069500 1주 + 유일 미복구 open buy(ordered 1, recorded 0)
+    → fallback 이 FillApplier 로 1주 수렴 → recorded==1, status=filled, 포지션 1주.
+    """
+    app, ph, eb, svc = fallback_applier
+    events: list[OrderFilledEvent] = []
+
+    async def _h(e):
+        if isinstance(e, OrderFilledEvent):
+            events.append(e)
+
+    eb.subscribe(OrderFilledEvent, _h)
+
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0, 9500.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    result = await sched.catch_up_once()
+
+    assert result.succeeded is True
+    assert result.applied == 1
+    # ccld 0건 → fallback 이 잔고에서 역도출.
+    assert broker.history_calls == 1
+    assert broker.positions_calls == 1
+    rec = await tracker.get("ord-fb")
+    assert rec.recorded_filled_qty == 1.0
+    assert rec.status == "filled"
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 1.0
+    # avg_price 는 잔고 평단(§11.4).
+    assert pos["avg_entry_price"] == 9500.0
+    # OrderFilledEvent 1회 발행 (시나리오 2 의 일부).
+    assert len(events) == 1
+    assert events[0].quantity == 1.0
+
+
+# ── 시나리오 2: OrderFilledEvent 1회 + outbox fill_dedup_key 결정성 ──
+
+
+async def test_fallback_emits_single_event_and_deterministic_dedup_key(db, tracker):
+    """fallback 수렴 → OrderFilledEvent **1회** 발행 + outbox fill_dedup_key 결정성.
+
+    outbox 주입 경로로 fill_dedup_key = order_id:canonical(confirmed_cumulative)
+    가 결정적으로 채워지는지 검증한다.
+    """
+    from ante.trade.fill_outbox import FillOutbox, make_fill_dedup_key
+    from ante.trade.performance import PerformanceTracker
+    from ante.trade.service import TradeService
+
+    ph = PositionHistory(db)
+    await ph.initialize()
+    rec = TradeRecorder(db, ph)
+    await rec.initialize()
+    perf = PerformanceTracker(db)
+    eb = EventBus()
+    outbox = FillOutbox(db=db)
+    await outbox.initialize()
+    app = FillApplier(
+        db=db,
+        order_tracker=tracker,
+        position_history=ph,
+        eventbus=eb,
+        outbox=outbox,
+    )
+    svc = TradeService(recorder=rec, position_history=ph, performance=perf)
+
+    await tracker.open(
+        order_id="ord-fb2",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()
+
+    rows = await db.fetch_all("SELECT * FROM fill_outbox")
+    assert len(rows) == 1  # 단일 outbox row(= 단일 OrderFilledEvent).
+    # confirmed_cumulative == ordered_qty == 2.0 → 결정적 키.
+    expected_key = make_fill_dedup_key("ord-fb2", 2.0)
+    assert rows[0]["fill_dedup_key"] == expected_key
+
+
+# ── 시나리오 3: 멱등 (같은 상태 재폴 → 추가 반영 0) ──
+
+
+async def test_fallback_idempotent_on_repoll(fallback_applier, tracker):
+    """fallback 수렴 후 같은 상태 재폴 → 추가 반영 0(이중 반영 없음).
+
+    재폴 시 order 가 filled(terminal)라 미복구 open buy 후보가 없어
+    get_positions 도 호출되지 않는다(§11.2 rate budget).
+    """
+    app, ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+
+    first = await sched.catch_up_once()
+    assert first.applied == 1
+    assert broker.positions_calls == 1
+
+    second = await sched.catch_up_once()
+    assert second.applied == 0  # 멱등 — 추가 반영 없음.
+    # filled terminal → open 없음 → 폴 0콜, 잔고도 미호출.
+    assert broker.history_calls == 1  # 둘째 사이클은 open 없어 0콜(누계 유지).
+    assert broker.positions_calls == 1
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 1.0
+
+
+# ── 시나리오 4a: late-ccld 같은 누적 → CAS no-op (멱등) ──
+
+
+async def test_fallback_then_ccld_same_cumulative_noop(fallback_applier, tracker):
+    """fallback 수렴 후 ccld 가 같은 절대 누적을 반환 → record_fill CAS no-op."""
+    app, ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    first = await sched.catch_up_once()
+    assert first.applied == 1
+
+    # 이제 ccld 가 같은 체결(절대 누적 1)을 반환. 하지만 order 는 filled 라
+    # open 후보가 없어 폴되지 않는다 → no-op 보장(멱등). 포지션 불변.
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": DATE,
+            }
+        ]
+    )
+    second = await sched.catch_up_once()
+    assert second.applied == 0
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 1.0
+
+
+# ── 시나리오 4b: late-ccld 더 낮은 값 → reconcile alert 발행 ──
+
+
+async def test_late_ccld_lower_cumulative_emits_reconcile_alert(
+    fallback_applier, tracker
+):
+    """fallback 이 full fill 로 올린 뒤 ccld 가 **더 낮은** 누적 → no-op + alert.
+
+    §11.4: 비가역(CAS 단조)이라 정정은 못 하나 PositionMismatchEvent +
+    NotificationEvent 로 over-attribution 가능성을 surface 한다.
+    """
+    from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
+
+    app, ph, eb, svc = fallback_applier
+    mismatches: list[PositionMismatchEvent] = []
+    notifs: list[NotificationEvent] = []
+    eb.subscribe(
+        PositionMismatchEvent,
+        lambda e: (
+            mismatches.append(e) if isinstance(e, PositionMismatchEvent) else None
+        ),
+    )
+    eb.subscribe(
+        NotificationEvent,
+        lambda e: notifs.append(e) if isinstance(e, NotificationEvent) else None,
+    )
+
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    # fallback: 잔고 2주 == ordered 2 → full fill 로 recorded=2.
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 2.0
+
+    # late ccld: 실 체결 누적이 1(더 낮음) 이라고 반환. order 는 filled 라
+    # lookup_order_id(non-terminal scope)에 안 잡혀 폴 자체가 0콜이 되는 것을
+    # 막기 위해, alert 경로(_maybe_alert_late_ccld)는 history loop 에서 직접
+    # 호출된다. order 가 filled 여서 open 폴이 0콜이 되므로, alert 검증은
+    # _maybe_alert_late_ccld 를 직접 호출해 확인한다.
+    await sched._maybe_alert_late_ccld(
+        broker_order_id="0001",
+        observed_cumulative=1.0,
+        submitted_date=DATE,
+    )
+    assert len(mismatches) == 1
+    assert mismatches[0].internal_qty == 2.0
+    assert mismatches[0].broker_qty == 1.0
+    assert "late_ccld_over_attribution" in mismatches[0].reason
+    assert len(notifs) == 1
+    assert notifs[0].level == "warning"
+
+
+async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal(
+    fallback_applier, tracker
+):
+    """ccld 가 recorded 이상(정상 advance/멱등)이면 alert 미발행 (오경보 방지)."""
+    from ante.eventbus.events import PositionMismatchEvent
+
+    app, _ph, eb, svc = fallback_applier
+    mismatches: list[PositionMismatchEvent] = []
+    eb.subscribe(
+        PositionMismatchEvent,
+        lambda e: (
+            mismatches.append(e) if isinstance(e, PositionMismatchEvent) else None
+        ),
+    )
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()  # recorded=2.
+
+    # ccld == recorded (멱등) → alert 없음.
+    await sched._maybe_alert_late_ccld(
+        broker_order_id="0001", observed_cumulative=2.0, submitted_date=DATE
+    )
+    # ccld > recorded (정상 추가 advance) → alert 없음.
+    await sched._maybe_alert_late_ccld(
+        broker_order_id="0001", observed_cumulative=3.0, submitted_date=DATE
+    )
+    assert mismatches == []
+
+
+# ── 시나리오 5: self/external 경계 (excess != ordered, 다중 open buy) ──
+
+
+async def test_fallback_skipped_when_excess_not_equal_ordered(
+    fallback_applier, tracker
+):
+    """excess != ordered_qty(예: 60 vs ordered 100) → 미적용 (D+1 ccld 대기)."""
+    app, ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=100.0,
+        submitted_date=DATE,
+    )
+    # 잔고 60주 → excess 60 != ordered 100 → partial/모호 → 미적용.
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 60.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 1  # 후보 있어 잔고는 봤으나 매칭 실패.
+    rec = await tracker.get("ord-fb")
+    assert rec.recorded_filled_qty == 0.0  # 미적용 — 미반영 유지.
+    assert rec.status == "open"
+    # 포지션 미반영(빈 포지션 = quantity 0).
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 0.0
+
+
+async def test_fallback_skipped_when_multiple_open_buys_same_symbol(
+    fallback_applier, tracker
+):
+    """다중 open buy(같은 symbol) → 미적용 (귀속 불가, 외부/혼재 위험 회피)."""
+    app, _ph, _eb, svc = fallback_applier
+    for oid, odno in (("ord-a", "0001"), ("ord-b", "0002")):
+        await tracker.open(
+            order_id=oid,
+            account_id=ACCT,
+            bot_id="bot-1",
+            strategy_id="strat-1",
+            broker_order_id=odno,
+            symbol="069500",
+            side="buy",
+            order_type="market",
+            ordered_qty=1.0,
+            submitted_date=DATE,
+        )
+    # 잔고 2주 == 합 ordered 2 라도 어느 주문에 귀속할지 불가 → 미적용.
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert (await tracker.get("ord-a")).recorded_filled_qty == 0.0
+    assert (await tracker.get("ord-b")).recorded_filled_qty == 0.0
+
+
+async def test_fallback_excludes_external_qty_via_internal_subtraction(
+    fallback_applier, tracker
+):
+    """internal_account_qty 차감으로 기존 보유분이 excess 에 혼입되지 않는다(§11.1).
+
+    이미 internal 5주 보유(타 bot) + 잔고 6주 → excess 1 == ordered 1 → 적용.
+    (잔고 총량 6 을 self 로 오귀속하지 않음.)
+    """
+    from ante.trade.models import TradeRecord, TradeStatus
+
+    app, ph, _eb, svc = fallback_applier
+    # 타 bot 의 기존 보유 5주를 positions 에 직접 적재.
+    await ph.on_trade(
+        TradeRecord(
+            trade_id=__import__("uuid").uuid4(),
+            bot_id="bot-other",
+            strategy_id="strat-x",
+            symbol="069500",
+            side="buy",
+            quantity=5.0,
+            price=1000.0,
+            status=TradeStatus.FILLED,
+            order_type="market",
+            account_id=ACCT,
+        )
+    )
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    # 잔고 6주(기존 5 + self 1). excess = 6 - 5 = 1 == ordered 1.
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 6.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 1
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 1.0
+    # bot-1 포지션만 1주 증가, bot-other 는 불변.
+    pos1 = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos1["quantity"] == 1.0
+
+
+# ── 시나리오 6: rate budget (ccld 채우면 get_positions 미호출) ──
+
+
+async def test_get_positions_not_called_when_ccld_fills(fallback_applier, tracker):
+    """ccld 가 체결을 주면 미복구 open buy 가 없어 get_positions 미호출(§11.2)."""
+    app, ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    # ccld 가 체결 1 을 줌 → recorded advance → 미복구 후보 없음.
+    broker = FallbackBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": DATE,
+            }
+        ],
+        positions=[_pos("069500", 1.0)],
+    )
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 1  # ccld 로 복구.
+    assert broker.history_calls == 1
+    assert broker.positions_calls == 0  # rate budget — 잔고 미호출.
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 1.0
+
+
+async def test_get_positions_not_called_when_no_open_buy(fallback_applier, tracker):
+    """미복구 open buy 가 애초에 없으면 get_positions 미호출(§11.2).
+
+    open 이 sell 뿐이거나 0건이면 후보가 없어 잔고를 보지 않는다.
+    """
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-sell",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="sell",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    await sched.catch_up_once()
+    assert broker.positions_calls == 0  # buy 후보 없음 → 잔고 미호출.
+
+
+# ── 시나리오 7: disable flag / paper 게이트 ──
+
+
+async def test_fallback_disabled_flag_no_op(fallback_applier, tracker):
+    """fallback_enabled=False → fallback 미동작 (get_positions 미호출, 미반영)."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, fallback_enabled=False)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 0  # disable → 잔고 미호출.
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+
+
+async def test_fallback_skipped_when_broker_not_paper(fallback_applier, tracker):
+    """broker.is_paper=False(실전) → fallback 미동작(§11.6 live 분리)."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)], is_paper=False)
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 0  # 실전 → 잔고 미호출.
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+
+
+async def test_fallback_no_op_without_trade_service(applier, tracker):
+    """trade_service 미주입(legacy/partial wiring) → fallback 미동작."""
+    app, _ph, _eb = applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    # trade_service=None (기본).
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=app,
+        account_id=ACCT,
+    )
+    result = await sched.catch_up_once()
+    assert result.applied == 0
+    assert broker.positions_calls == 0
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+
+
+# ── 시나리오 8: 통합 — Treasury/TradeRecorder/캐시 evict (FillApplier 경로) ──
+
+
+async def test_fallback_integrates_full_fill_applier_path(db, tracker):
+    """fallback 이 FillApplier 단일 경로로 수렴 → trades insert · open 캐시 evict.
+
+    §11.8 단일 권위: fallback 도 FillApplier.apply_cumulative 만 거치므로
+    trades insert(TradeRecorder 스키마) · positions · open 캐시 evict 가 기존
+    FillApplier 경로로 정상 동작한다(통합).
+    """
+    from ante.trade.performance import PerformanceTracker
+    from ante.trade.service import TradeService
+
+    ph = PositionHistory(db)
+    await ph.initialize()
+    rec = TradeRecorder(db, ph)
+    await rec.initialize()
+    perf = PerformanceTracker(db)
+    eb = EventBus()
+    app = FillApplier(db=db, order_tracker=tracker, position_history=ph, eventbus=eb)
+    svc = TradeService(recorder=rec, position_history=ph, performance=perf)
+
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    # open 캐시에 진입돼 있어야 한다(sync 백엔드).
+    assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1")
+
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()
+
+    # trades insert(FillApplier _save_trade 경로).
+    trades = await db.fetch_all("SELECT * FROM trades WHERE order_id = ?", ("ord-fb",))
+    assert len(trades) == 1
+    assert trades[0]["quantity"] == 1.0
+    # open 캐시 evict(filled → mirror_fill_to_cache evict).
+    assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []

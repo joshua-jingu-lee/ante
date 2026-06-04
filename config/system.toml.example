@@ -4,6 +4,11 @@
 [system]
 log_level = "INFO"  # DEBUG, INFO, WARNING, ERROR
 timezone = "Asia/Seoul"
+# KIS 모의 당일 체결 position-derived bounded fallback (#2314, spec §11).
+# 백스톱(get_order_history)이 모의 당일 0건일 때 잔고 증분에서 self 체결을
+# 보수적으로 역도출해 수렴한다. KIS paper(is_paper=true) 한정 기본 활성이며,
+# false 로 두면 rollback 된다(§11.6 disable flag).
+fill_position_fallback_enabled = true
 
 [db]
 path = "db/ante.db"
