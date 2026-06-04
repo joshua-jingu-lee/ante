@@ -474,6 +474,23 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   (`recorded_filled_qty`), ccld가 반환한 더 낮은 절대 누적, 차이를 싣는다. 이
   경보는 §11.7 bounded known-limitation(협소 외부 흡수)을 **운영 관측 가능**하게
   만드는 백스톱이다.
+- **bounded fallback-verification 폴 (alert 도달성, normative)**: fallback이
+  주문을 full fill(`recorded_filled_qty = ordered_qty`)로 올리면 그 주문은
+  `filled`(terminal)가 되어 다음 사이클 `get_open_orders`에서 빠진다. 이때
+  §6.1·§11.2의 event-gated 폴이 open만 게이트로 삼으면 ccld를 더 폴하지 않아 위
+  late-ccld alert가 **도달 불가(dead code)** 가 된다. 따라서 fallback이 advance한
+  주문을 **in-memory verify set**(`broker_order_id → {fallback이 advance한
+  recorded, submitted_date}`)에 등록하고, 폴 게이트를 **open이 있거나 verify set이
+  비어있지 않으면** ccld를 폴하도록 확장한다(open·verify가 둘 다 없으면 여전히
+  미폴 — §11.2 rate budget 유지). 폴 window의 `from_date`는 verify 항목의
+  `submitted_date`까지 거슬러 덮어 ccld가 그 주문을 관측할 수 있게 한다. ccld가
+  verify 주문에 대해 `recorded`보다 **낮은 양수 누적**을 주면 위 alert를 발행하고
+  그 항목을 verify에서 제거하며, 동일/높은 누적(정상 advance/멱등)이면 조용히
+  제거한다. verify set은 **bounded**다: ccld 1회 관측 시 제거되고, 그 전이라도
+  영업일 경계(`submitted_date < today`, §8 `expire_stale`과 같은 D+1 경계)에
+  정리되어 무한 누적되지 않는다. verify set은 **in-memory 보조 상태일 뿐**이며
+  OrderTracker/positions/trades/outbox를 직접 수정하지 않는다(§11.8 단일 권위
+  보존).
 - **avg_price 근거**: fallback의 평균 체결가는 **잔고 평단(`get_positions`)**을
   근거로 쓴다(잔고가 제공하는 유일한 가격 정보). 주문가가 아니다.
 - **known-limitation(정정 없음)**: fallback이 먼저 쓴 `avg_fill_price`는 나중에
@@ -490,6 +507,10 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   끝난 뒤 실행한다. 만료를 fallback 앞에 두면 모의 당일 미반영 체결을 가진 open이
   복구 전에 `expired`로 전이되어 fallback이 대상을 잃고, §8 poll-first 회귀
   (미복구 체결의 "외부 매수" 오분류)가 재현된다.
+- **verify set EOD 정리**: §11.4 bounded fallback-verification의 in-memory verify
+  set은 `expire_stale`과 같은 영업일 경계에서, `submitted_date < today`(D+1 이후)인
+  항목을 정리한다. 당일 항목은 그날의 late-ccld 검증을 위해 유지하며, ccld가 한 번
+  관측되면 그 전이라도 즉시 제거된다(bounded — 무한 누적 방지).
 
 ### 11.6 적용 범위 (모의 기본 · 실전 분리)
 

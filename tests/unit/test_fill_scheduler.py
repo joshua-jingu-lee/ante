@@ -665,6 +665,7 @@ class FallbackBroker:
         self.is_paper = is_paper
         self.history_calls = 0
         self.positions_calls = 0
+        self.last_history_args: tuple | None = None
 
     def set_history(self, history: list[dict]) -> None:
         self._history = history
@@ -674,6 +675,7 @@ class FallbackBroker:
 
     async def get_order_history(self, from_date=None, to_date=None):
         self.history_calls += 1
+        self.last_history_args = (from_date, to_date)
         return list(self._history)
 
     async def get_positions(self):
@@ -829,7 +831,10 @@ async def test_fallback_idempotent_on_repoll(fallback_applier, tracker):
     """fallback 수렴 후 같은 상태 재폴 → 추가 반영 0(이중 반영 없음).
 
     재폴 시 order 가 filled(terminal)라 미복구 open buy 후보가 없어
-    get_positions 도 호출되지 않는다(§11.2 rate budget).
+    get_positions 는 호출되지 않는다(§11.2 rate budget). 단 #2318 Finding ②:
+    당일 verify set 이 남아 ccld 폴 게이트는 열린다(history 1콜) — verify 검증을
+    위함이며 잔고 역도출(get_positions)은 여전히 미호출이라 rate budget 핵심
+    (잔고/제출 큐)은 보호된다.
     """
     app, ph, _eb, svc = fallback_applier
     await tracker.open(
@@ -850,12 +855,17 @@ async def test_fallback_idempotent_on_repoll(fallback_applier, tracker):
     first = await sched.catch_up_once()
     assert first.applied == 1
     assert broker.positions_calls == 1
+    # fallback 적용 → 당일 verify 등록.
+    assert "0001" in sched._fallback_verify
 
     second = await sched.catch_up_once()
     assert second.applied == 0  # 멱등 — 추가 반영 없음.
-    # filled terminal → open 없음 → 폴 0콜, 잔고도 미호출.
-    assert broker.history_calls == 1  # 둘째 사이클은 open 없어 0콜(누계 유지).
+    # filled terminal → open 없음. 당일 verify 가 남아 ccld 폴 게이트는 열린다.
+    assert broker.history_calls == 2  # 둘째 사이클: verify 가 폴 게이트 오픈.
+    # 잔고 역도출은 미복구 후보 없어 여전히 미호출(§11.2 핵심 보호 유지).
     assert broker.positions_calls == 1
+    # ccld 빈 응답이라 verify 는 아직 남음(당일, 검증 미관측).
+    assert "0001" in sched._fallback_verify
     pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
     assert pos["quantity"] == 1.0
 
@@ -882,9 +892,12 @@ async def test_fallback_then_ccld_same_cumulative_noop(fallback_applier, tracker
     sched = _make_fallback_sched(broker, tracker, app, svc)
     first = await sched.catch_up_once()
     assert first.applied == 1
+    assert "0001" in sched._fallback_verify
 
-    # 이제 ccld 가 같은 체결(절대 누적 1)을 반환. 하지만 order 는 filled 라
-    # open 후보가 없어 폴되지 않는다 → no-op 보장(멱등). 포지션 불변.
+    # 이제 ccld 가 같은 체결(절대 누적 1)을 반환. order 는 filled 지만 #2318
+    # Finding ②: 당일 verify 가 폴 게이트를 열어 ccld 가 도달한다. ccld == recorded
+    # 라 record_fill CAS 는 no-op(멱등) 이고, verify 검증은 동일 누적이라 조용히
+    # 제거된다. 포지션 불변.
     broker.set_history(
         [
             {
@@ -897,6 +910,8 @@ async def test_fallback_then_ccld_same_cumulative_noop(fallback_applier, tracker
     )
     second = await sched.catch_up_once()
     assert second.applied == 0
+    assert broker.history_calls == 2  # verify 가 폴 게이트를 열어 ccld 도달.
+    assert "0001" not in sched._fallback_verify  # ccld 관측 → 검증 완료 제거.
     pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
     assert pos["quantity"] == 1.0
 
@@ -904,13 +919,16 @@ async def test_fallback_then_ccld_same_cumulative_noop(fallback_applier, tracker
 # ── 시나리오 4b: late-ccld 더 낮은 값 → reconcile alert 발행 ──
 
 
-async def test_late_ccld_lower_cumulative_emits_reconcile_alert(
+async def test_late_ccld_lower_cumulative_emits_reconcile_alert_via_poll(
     fallback_applier, tracker
 ):
-    """fallback 이 full fill 로 올린 뒤 ccld 가 **더 낮은** 누적 → no-op + alert.
+    """#2318 Finding ②: fallback full fill 후 **실제 poll 경로**로 더 낮은 ccld →
+    alert 발행 (도달성 검증).
 
     §11.4: 비가역(CAS 단조)이라 정정은 못 하나 PositionMismatchEvent +
-    NotificationEvent 로 over-attribution 가능성을 surface 한다.
+    NotificationEvent 로 over-attribution 가능성을 surface 한다. fallback 이 주문을
+    filled(terminal)로 올려 open 이 비어도, verify set 이 폴 게이트를 열어 ccld 가
+    _poll_and_apply 경로에서 도달한다(_maybe_alert 직접 호출 아님).
     """
     from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
 
@@ -940,34 +958,52 @@ async def test_late_ccld_lower_cumulative_emits_reconcile_alert(
         ordered_qty=2.0,
         submitted_date=DATE,
     )
-    # fallback: 잔고 2주 == ordered 2 → full fill 로 recorded=2.
+    # 1) fallback: ccld 0건 + 잔고 2주 == ordered 2 → full fill 로 recorded=2.
     broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
     sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
-    await sched.catch_up_once()
+    first = await sched.catch_up_once()
+    assert first.applied == 1
     assert (await tracker.get("ord-fb")).recorded_filled_qty == 2.0
+    # verify set 에 등록되어 다음 사이클 폴 게이트를 연다.
+    assert "0001" in sched._fallback_verify
 
-    # late ccld: 실 체결 누적이 1(더 낮음) 이라고 반환. order 는 filled 라
-    # lookup_order_id(non-terminal scope)에 안 잡혀 폴 자체가 0콜이 되는 것을
-    # 막기 위해, alert 경로(_maybe_alert_late_ccld)는 history loop 에서 직접
-    # 호출된다. order 가 filled 여서 open 폴이 0콜이 되므로, alert 검증은
-    # _maybe_alert_late_ccld 를 직접 호출해 확인한다.
-    await sched._maybe_alert_late_ccld(
-        broker_order_id="0001",
-        observed_cumulative=1.0,
-        submitted_date=DATE,
+    # 2) 다음 사이클: order 가 filled 라 open 은 비었지만 verify set 이 남아
+    #    ccld 를 폴한다. ccld 가 실 체결 누적 1(더 낮음)을 반환 → _poll_and_apply
+    #    경로에서 verify 검증 → alert 발행 (실제 도달성).
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": DATE,
+            }
+        ]
     )
+    await sched._poll_and_apply()
+    # verify set 이 비어있지 않아 ccld 를 폴했다(open 없음에도 도달).
+    assert broker.history_calls == 2
     assert len(mismatches) == 1
     assert mismatches[0].internal_qty == 2.0
     assert mismatches[0].broker_qty == 1.0
     assert "late_ccld_over_attribution" in mismatches[0].reason
     assert len(notifs) == 1
     assert notifs[0].level == "warning"
+    # 검증 완료 → verify 에서 제거(bounded).
+    assert "0001" not in sched._fallback_verify
+    # 포지션은 불변(비가역 no-op).
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 2.0
 
 
-async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal(
+async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal_via_poll(
     fallback_applier, tracker
 ):
-    """ccld 가 recorded 이상(정상 advance/멱등)이면 alert 미발행 (오경보 방지)."""
+    """#2318 Finding ②: ccld 가 recorded 이상(정상 advance/멱등)이면 alert 미발행.
+
+    실제 poll 경로로 검증한다. ccld == recorded(멱등)면 verify 에서 조용히 제거되고
+    alert 가 발행되지 않는다(오경보 방지).
+    """
     from ante.eventbus.events import PositionMismatchEvent
 
     app, _ph, eb, svc = fallback_applier
@@ -992,17 +1028,143 @@ async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal(
     )
     broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
     sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
-    await sched.catch_up_once()  # recorded=2.
+    await sched.catch_up_once()  # recorded=2, verify 등록.
+    assert "0001" in sched._fallback_verify
 
-    # ccld == recorded (멱등) → alert 없음.
-    await sched._maybe_alert_late_ccld(
-        broker_order_id="0001", observed_cumulative=2.0, submitted_date=DATE
+    # ccld == recorded (멱등 정상) → alert 없음 + verify 에서 조용히 제거.
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 2.0,
+                "price": 1000.0,
+                "timestamp": DATE,
+            }
+        ]
     )
-    # ccld > recorded (정상 추가 advance) → alert 없음.
-    await sched._maybe_alert_late_ccld(
-        broker_order_id="0001", observed_cumulative=3.0, submitted_date=DATE
-    )
+    await sched._poll_and_apply()
+    assert broker.history_calls == 2  # verify 가 폴 게이트를 열었다.
     assert mismatches == []
+    assert "0001" not in sched._fallback_verify  # 검증 완료 제거.
+
+
+async def test_verify_only_poll_gate_opens_ccld_poll(fallback_applier, tracker):
+    """#2318 Finding ②: open 이 없어도 verify set 이 있으면 _poll_and_apply 가 ccld
+    를 폴한다(폴 게이트 도달성). open·verify 둘 다 없을 때만 미폴(§11.2).
+    """
+    app, _ph, eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,  # 당일 → verify 가 EOD 정리에 살아남는다.
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    # fallback 적용 → filled → open 비고, 당일 verify 등록.
+    await sched.catch_up_once()
+    assert "0001" in sched._fallback_verify
+    assert await tracker.get_open_orders(ACCT) == []  # open 비었음.
+    calls_after_first = broker.history_calls
+
+    # open 이 비었지만 verify 가 있어 ccld 폴 게이트가 열린다.
+    broker.set_history([])  # ccld 없음.
+    await sched._poll_and_apply()
+    assert broker.history_calls == calls_after_first + 1  # verify-only 폴 도달.
+
+
+async def test_verify_window_from_date_covers_verify_submitted_date(
+    fallback_applier, tracker
+):
+    """#2318 Finding ②: 폴 window from_date 가 verify 주문의 submitted_date 까지
+    거슬러 덮는다(ccld 가 그 주문을 관측 가능하게).
+
+    verify 항목을 직접 주입(이전 사이클 등록 상태 흉내)하고 _poll_and_apply 의
+    from_date 를 last_history_args 로 검증한다. open 은 없다(verify-only).
+    """
+    from ante.broker.fill_scheduler import _FallbackVerifyEntry
+
+    app, _ph, eb, svc = fallback_applier
+    broker = FallbackBroker(history=[], positions=[])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    # open 없음. verify 항목만 전일 날짜로 직접 주입(폴 시점 from_date 결정 검증).
+    prior_date = "20200101"
+    sched._fallback_verify["0001"] = _FallbackVerifyEntry(
+        recorded=1.0, submitted_date=prior_date
+    )
+    await sched._poll_and_apply()
+    # 폴이 돌았고(verify 게이트), window from_date 가 verify submitted_date 를 덮는다.
+    assert broker.history_calls == 1
+    assert broker.last_history_args is not None
+    from_date, to_date = broker.last_history_args
+    assert from_date == prior_date  # ccld 가 전일 주문을 관측하도록 거슬러 덮음.
+    assert to_date == DATE
+    # 전일 항목은 같은 사이클 EOD 정리에서 제거된다(D+1 경계, 무한 누적 방지).
+    assert sched._fallback_verify == {}
+
+
+async def test_verify_set_eod_cleanup_on_business_day_boundary(
+    fallback_applier, tracker
+):
+    """#2318 Finding ②: verify set 은 영업일 경계(submitted_date < today)에 정리돼
+    무한 누적되지 않는다(§11.5 EOD 정리).
+    """
+    app, _ph, eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date="20200101",  # 전일(EOD 경과).
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()  # fallback 적용 → verify 등록(전일).
+    # _poll_and_apply 의 EOD 정리에서 submitted_date < today 라 즉시 제거됐다.
+    assert sched._fallback_verify == {}
+
+
+async def test_verify_set_today_entry_retained_across_idle_cleanup(
+    fallback_applier, tracker
+):
+    """#2318 Finding ②: 당일 verify 항목은 EOD 정리에서 유지된다(그날 ccld 검증용).
+
+    ccld 가 아직 안 와도(history 빈) 당일 항목은 verify 에 남아 다음 사이클에도
+    폴 게이트를 연다. ccld 가 한 번 관측되어야(또는 D+1 경계) 제거된다.
+    """
+    app, _ph, eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,  # 당일.
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    await sched.catch_up_once()  # fallback 적용 → 당일 verify 등록.
+    assert "0001" in sched._fallback_verify
+    # ccld 미관측(history 빈) 추가 사이클 — 당일 항목은 유지(EOD 경계 미도달).
+    broker.set_history([])
+    await sched._poll_and_apply()
+    assert "0001" in sched._fallback_verify  # 당일 → 유지.
+    assert broker.history_calls == 2  # verify 가 폴 게이트를 계속 연다.
 
 
 # ── 시나리오 5: self/external 경계 (excess != ordered, 다중 open buy) ──
@@ -1066,6 +1228,77 @@ async def test_fallback_skipped_when_multiple_open_buys_same_symbol(
     assert result.applied == 0
     assert (await tracker.get("ord-a")).recorded_filled_qty == 0.0
     assert (await tracker.get("ord-b")).recorded_filled_qty == 0.0
+
+
+async def test_fallback_skipped_when_partial_open_buy_coexists_with_unrecovered(
+    fallback_applier, tracker
+):
+    """#2318 Finding ①: 같은 symbol 에 partially_filled open buy(recorded>0) +
+    unrecovered buy(recorded==0) 공존 → fallback **미적용**.
+
+    유일성 판정을 미복구(recorded==0) 후보만으로 보면(이전 결함) unrecovered 1건만
+    세서 len==1 로 통과해 §11.3-1("그 symbol 의 추적 open buy 가 정확히 하나")를
+    위반한다. 유일성은 그 symbol 의 **모든 non-terminal(open/partially_filled)
+    buy 총수**(여기선 2)로 판정해야 하며, 1 이 아니면 미적용한다.
+    """
+    app, _ph, _eb, svc = fallback_applier
+    # 1) partially_filled open buy: ordered 2, ccld 부분체결 1 → recorded=1,
+    #    status=partially_filled (여전히 non-terminal open buy).
+    await tracker.open(
+        order_id="ord-partial",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    partial_delta = await app.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=1.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert partial_delta == 1.0
+    partial_rec = await tracker.get("ord-partial")
+    assert partial_rec.status == "partially_filled"
+    assert partial_rec.recorded_filled_qty == 1.0
+    # 2) unrecovered open buy: 같은 symbol, ordered 1, recorded 0.
+    await tracker.open(
+        order_id="ord-unrec",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0002",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    # 잔고: 기존 partial 1주(internal 반영됨) + unrecovered 1주 미반영 = 2주 보유.
+    # internal_account_qty 는 partial 의 1주. excess = 2 - 1 = 1 == unrec ordered 1.
+    # excess==ordered 만 보면 적용될 듯하나, 같은 symbol open buy 총수 2 → 미적용.
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    # ccld 0건이라 unrecovered 후보 존재 → 잔고는 봤으나(후보 있음) 유일성 위반
+    # 으로 미적용.
+    assert result.applied == 0
+    assert broker.positions_calls == 1
+    # unrecovered 는 미반영 유지 (open 그대로).
+    unrec = await tracker.get("ord-unrec")
+    assert unrec.recorded_filled_qty == 0.0
+    assert unrec.status == "open"
+    # partial 도 fallback 이 건드리지 않음 (recorded 그대로 1).
+    assert (await tracker.get("ord-partial")).recorded_filled_qty == 1.0
+    # verify set 에도 등록되지 않음 (미적용).
+    assert sched._fallback_verify == {}
 
 
 async def test_fallback_excludes_external_qty_via_internal_subtraction(
