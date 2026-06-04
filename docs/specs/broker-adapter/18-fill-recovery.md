@@ -491,7 +491,7 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   복구 전에 `expired`로 전이되어 fallback이 대상을 잃고, §8 poll-first 회귀
   (미복구 체결의 "외부 매수" 오분류)가 재현된다.
 
-### 11.6 paper/live 적용 범위
+### 11.6 적용 범위 (모의 기본 · 실전 분리)
 
 - **KIS paper(`is_paper=true`) 한정 기본 활성**. 모의 당일 ccld 지연이 확정된
   환경이므로 기본 켠다.
