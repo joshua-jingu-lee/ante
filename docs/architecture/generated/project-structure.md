@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-02 (KST)
+> 마지막 생성 시점: 2026-06-04 (KST)
 
 ## 최상위 구조
 
@@ -399,7 +399,18 @@ tests/
 │   │   ├── test_orchestrator_run_daily_target_date.py
 │   │   ├── test_backfill_guard_wait.py
 │   │   ├── test_indicator_calculator.py
-│   │   └── test_backfill_data_go_kr_checkpoint.py
+│   │   ├── test_backfill_data_go_kr_checkpoint.py
+│   │   ├── test_backfill_empty_response_checkpoint.py
+│   │   ├── test_backfill_last_published_cap.py
+│   │   ├── test_backfill_stored_ok_checkpoint.py
+│   │   ├── test_cli_config_check.py
+│   │   ├── test_cli_feed_config_validation.py
+│   │   ├── test_cli_feed_nice_value.py
+│   │   ├── test_cli_output.py
+│   │   ├── test_daily_runner_dart_daily_flag.py
+│   │   ├── test_daily_runner_store_merge_drain.py
+│   │   ├── test_rows_written_delta.py
+│   │   └── test_scheduler_time_validation.py
 │   ├── cli/
 │   │   ├── __init__.py
 │   │   ├── test_version.py
@@ -427,7 +438,9 @@ tests/
 │   │   ├── test_dispatch_wrapper_preflight.py
 │   │   ├── test_dispatch_wrapper_audit.py
 │   │   ├── test_cli_registry_ipc_cross_ref.py
-│   │   └── test_docs_taxonomy_drift.py
+│   │   ├── test_docs_taxonomy_drift.py
+│   │   ├── test_member_admin_ipc_wiring.py
+│   │   └── test_treasury_account_scoping.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py
@@ -672,7 +685,30 @@ tests/
 │   ├── test_feedback_account_scope.py
 │   ├── test_member_security_events.py
 │   ├── test_rule_engine_unrealized_account_scope.py
-│   └── test_strategy_file_access.py
+│   ├── test_strategy_file_access.py
+│   ├── _async_test_utils.py
+│   ├── test_account_killswitch_notification.py
+│   ├── test_backtest_meta_fallback.py
+│   ├── test_backtest_no_trade_normalize.py
+│   ├── test_backtest_subprocess_sentinel.py
+│   ├── test_bot_strategy_consistency.py
+│   ├── test_cli_backtest_result_path.py
+│   ├── test_cli_backtest_subprocess_isolation.py
+│   ├── test_cli_bot_read_ipc.py
+│   ├── test_cli_bot_signal_key_rotate_ipc.py
+│   ├── test_cli_data_list_readonly.py
+│   ├── test_cli_data_list_readonly_fs.py
+│   ├── test_cli_data_validate_fix_scope.py
+│   ├── test_cli_member_ipc_routing.py
+│   ├── test_cli_report_readonly_fs.py
+│   ├── test_cli_report_readonly_graceful.py
+│   ├── test_cli_report_view_db_error.py
+│   ├── test_kis_pagination.py
+│   ├── test_report_backtest_run_id.py
+│   ├── test_report_validation_detail_json.py
+│   ├── test_rule_engine_unrecovered_buy_guard.py
+│   ├── test_rule_modify_enrich.py
+│   └── test_strategy_summary_all_bots.py
 └── __init__.py
 ```
 
