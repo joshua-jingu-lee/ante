@@ -77,3 +77,28 @@ reconcile 에서 잔여 excess 가 **external 로 검출·보정**된다. → �
 
 **무변경 분기:** 외부 청산(`broker_qty == 0 && internal_qty > 0`), 외부 일부 매도
 (`broker_qty < internal_qty`), 수량 불일치는 self-check 대상이 아니며 기존 동작을 유지한다.
+
+## position-derived fallback 과의 관계 (#2314, normative)
+
+KIS 모의 당일 체결은 `get_order_history`(결제기준)가 0건을 주는 동안 잔고
+(`get_positions`, 체결기준)만 즉시 반영된다. 이 모의 당일 gap을 닫기 위해
+broker-adapter 측에 **잔고-역도출 fallback**(position-derived bounded fallback,
+`broker-adapter/18-fill-recovery.md` §11)이 정의된다. 이 fallback 은 reconciler 의
+self/external 분류 정책과 **충돌하지 않으며**, 다음 경계를 유지한다:
+
+- **복구 권위는 여전히 FillApplier 단일**이다. reconciler 는 self_submitted 분기
+  에서 복구하지 않고(보정 skip + info 이벤트만), 잔고-역도출 fallback **역시**
+  `FillApplier.apply_cumulative` 경로로만 수렴한다(`18-fill-recovery.md` §11.8).
+  reconciler 도 fallback 도 `positions`/`trades`/`recorded_filled_qty` 를 직접
+  수정하지 않는다 — position ownership 은 Trade 모듈 단일 소유로 유지된다.
+- **self/external 경계 공유(#1950)**: fallback 의 귀속도 본 문서의
+  `capacity = Σ(ordered_qty - recorded_filled_qty)`(non-terminal open buy) 한도
+  안에서만 일어나며, capacity 초과분은 **외부 매수 영역으로 유지**된다(fallback
+  이 외부 매수를 self 로 흡수하지 않는다). fallback 은 `(account, symbol, side=
+  buy)` 의 추적 open buy 가 **유일할 때만** 적용되어, 본 문서의 bounded
+  known-limitation(총량 기반 분류 한계)과 동형의 보수적 귀속을 따른다.
+- **수렴 순서**: fallback 이 잔고 excess 를 self 미반영 체결로 advance 하면, 다음
+  reconcile 에서 internal_qty 가 그만큼 올라 `broker_qty > internal_qty` excess 가
+  해소되어 self_submitted 분류 자체가 줄어든다. 즉 fallback 과 reconciler 는 같은
+  미반영 체결을 **이중 보정하지 않고**(FillApplier 멱등), fallback 이 빠른 수렴을,
+  reconciler 가 분류·경계 보존을 담당한다.
