@@ -83,20 +83,28 @@ reconcile 에서 잔여 excess 가 **external 로 검출·보정**된다. → �
 KIS 모의 당일 체결은 `get_order_history`(결제기준)가 0건을 주는 동안 잔고
 (`get_positions`, 체결기준)만 즉시 반영된다. 이 모의 당일 gap을 닫기 위해
 broker-adapter 측에 **잔고-역도출 fallback**(position-derived bounded fallback,
-`broker-adapter/18-fill-recovery.md` §11)이 정의된다. 이 fallback 은 reconciler 의
+[`../broker-adapter/18-fill-recovery.md`](../broker-adapter/18-fill-recovery.md) §11)이 정의된다. 이 fallback 은 reconciler 의
 self/external 분류 정책과 **충돌하지 않으며**, 다음 경계를 유지한다:
 
 - **복구 권위는 여전히 FillApplier 단일**이다. reconciler 는 self_submitted 분기
   에서 복구하지 않고(보정 skip + info 이벤트만), 잔고-역도출 fallback **역시**
-  `FillApplier.apply_cumulative` 경로로만 수렴한다(`18-fill-recovery.md` §11.8).
+  `FillApplier.apply_cumulative` 경로로만 수렴한다([`../broker-adapter/18-fill-recovery.md`](../broker-adapter/18-fill-recovery.md) §11.8).
   reconciler 도 fallback 도 `positions`/`trades`/`recorded_filled_qty` 를 직접
   수정하지 않는다 — position ownership 은 Trade 모듈 단일 소유로 유지된다.
-- **self/external 경계 공유(#1950)**: fallback 의 귀속도 본 문서의
+- **self/external 경계 공유(#1950)와 정직한 한계**: fallback 의 귀속은 본 문서의
   `capacity = Σ(ordered_qty - recorded_filled_qty)`(non-terminal open buy) 한도
-  안에서만 일어나며, capacity 초과분은 **외부 매수 영역으로 유지**된다(fallback
-  이 외부 매수를 self 로 흡수하지 않는다). fallback 은 `(account, symbol, side=
-  buy)` 의 추적 open buy 가 **유일할 때만** 적용되어, 본 문서의 bounded
-  known-limitation(총량 기반 분류 한계)과 동형의 보수적 귀속을 따른다.
+  안에서, 그리고 `(account, symbol, side=buy)` 의 추적 open buy 가 **유일하고
+  미복구(`recorded_filled_qty == 0`)이며 잔고 excess 가 그 주문의 `ordered_qty`
+  와 정확히 일치(full-fill 정확매칭)** 할 때만 일어난다(broker-adapter §11.3).
+  partial·모호한 excess 는 fallback 미적용으로 D+1 ccld 백스톱에 위임한다. 다만
+  fallback 은 "외부 매수를 self 로 흡수하지 않는다"를 **단정하지 않는다**: 외부
+  매수가 **정확히** 주문 수량을 보충하는 협소 케이스(self 부분 + 외부 =
+  `ordered_qty`)에서는 그 외부분이 self 로 **비가역 흡수**될 수 있다. 이는
+  broker-adapter §11.7 **paper-only bounded known-limitation**이며, late-ccld
+  reconcile alert(§11.4)로 관측 가능하게 한다. 같은 미반영 체결에 본 문서의
+  self_submitted **가역 skip**(보정 skip · 원장 미advance · 재검출 가능)이 적용
+  가능한 경로면 그 가역 경로를 우선한다. 이 보수적 귀속은 본 문서의 bounded
+  known-limitation(총량 기반 분류 한계)과 동형이다.
 - **수렴 순서**: fallback 이 잔고 excess 를 self 미반영 체결로 advance 하면, 다음
   reconcile 에서 internal_qty 가 그만큼 올라 `broker_qty > internal_qty` excess 가
   해소되어 self_submitted 분류 자체가 줄어든다. 즉 fallback 과 reconciler 는 같은

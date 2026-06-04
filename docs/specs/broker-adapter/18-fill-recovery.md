@@ -393,9 +393,10 @@ fallback의 관측 누적량 산출 기준은 **계좌 수준 excess**다:
   합**(특정 bot이 아닌 계좌 전 bot 포지션의 합). 이렇게 해야 기존 보유·타 bot
   포지션·외부 매수가 broker_qty에 혼입돼 있어도 그 분을 차감해 **self 미반영분만
   남긴다**.
-- `excess`는 **self-order capacity 한도로 clamp**한다(아래 §11.3). 즉
-  `applied ≤ capacity`. broker_qty에 숨은 외부 매수가 섞여 있어도 capacity를
-  넘는 excess는 fallback이 **취하지 않아 overfill을 구조적으로 금지**한다.
+- `excess`는 **self-order capacity 한도로 clamp**하되, fallback 적용 자체는 아래
+  §11.3의 **full-fill 정확매칭 조건**(`excess == ordered_qty`인 유일 미복구 open
+  buy)으로 더 협소화한다. broker_qty에 숨은 외부 매수가 섞여 있어도 정확매칭이
+  아닌 excess는 fallback이 **취하지 않아 overfill을 구조적으로 금지**한다.
 - `excess ≤ 0`이면 fallback 대상이 없다(no-op).
 
 ### 11.2 적용 순서 (§6.1 poll-first 확장)
@@ -408,27 +409,53 @@ fallback의 관측 누적량 산출 기준은 **계좌 수준 excess**다:
    주문은 capacity가 0이라 자동 제외된다.
 3. **그 다음에** §8 `expire_stale`을 실행한다.
 
-ccld가 당일 체결을 주는 정상 환경에서는 2의 capacity가 0이라 fallback이 **본질적
-으로 no-op**이다. 즉 fallback은 모의 당일 0건 gap에서만 실효한다.
+ccld가 당일 체결을 주는 정상 환경에서는 ccld가 `recorded_filled_qty`를 advance해
+잔고 excess(`broker_qty - internal_account_qty`)가 **0**으로 수렴하므로 fallback이
+**본질적으로 no-op**이다(부분 체결로 open이 남아도 그 잔량만큼 `excess`도 함께
+줄어 `excess == 0` → no-op이다 — no-op의 실제 조건은 `capacity == 0`이 아니라
+`excess == 0`이다; 부분 체결된 open 주문은 capacity>0이어도 excess가 0이면
+fallback이 취하지 않는다). 즉 fallback은 모의 당일 0건 gap에서만 실효한다.
 
-### 11.3 self-order capacity 매칭 — 유일 open buy 한정 (보수적 귀속)
+### 11.3 self-order capacity 매칭 — full-fill 정확매칭 한정 (비귀속 보수)
 
-fallback의 귀속 대상은 OrderTracker의 self-order capacity로 한정한다(#1950
-self/external 경계 재사용):
+fallback의 귀속 대상은 OrderTracker의 self-order capacity로 한정하되, **잔고
+excess가 그 유일 주문의 주문 수량과 정확히 일치하는 full-fill 케이스에만**
+적용한다(#1950 self/external 경계 재사용):
 
 - `capacity = Σ(ordered_qty - recorded_filled_qty)` — `(account_id, symbol,
   side="buy")`의 **non-terminal**(`open`·`partially_filled`) 추적 주문 미체결 잔량.
-- fallback은 그 `(account_id, symbol, side="buy")`에 대한 **추적 open buy 주문이
-  정확히 하나일 때만** 적용한다(결정적 귀속). `applied = min(excess, capacity)`로
-  그 유일 주문에 귀속할 증분을 산출하고, 새 누적값
-  `observed_cumulative = recorded_filled_qty + applied`를 그 주문의
+- fallback은 다음 조건을 **모두** 만족할 때만 적용한다(결정적 full fill 귀속):
+  1. 그 `(account_id, symbol, side="buy")`에 대한 **추적 open buy 주문이 정확히
+     하나**다.
+  2. 그 유일 주문이 **미복구 상태**(`recorded_filled_qty == 0`)다. 즉 ccld가 부분
+     도 반영하지 않은, 잔고에서만 관측되는 주문이다.
+  3. 그 symbol의 잔고 excess(`broker_qty(symbol) - internal_qty(symbol)`)가 그
+     주문의 **`ordered_qty`와 정확히 일치**한다(`excess == ordered_qty`).
+- 위 세 조건을 모두 만족하면 **full fill로만** advance한다:
+  `observed_cumulative = ordered_qty`. 이 절대 누적값을 그 주문의
   `broker_order_id`로 `FillApplier.apply_cumulative`에 넘긴다(§5 계약은 절대
   누적값을 받으며, CAS가 delta를 산출한다).
+- **부분 체결·모호한 excess(`excess != ordered_qty`)는 fallback을 적용하지
+  않는다**(미적용). 부분 분량 귀속(`min(excess, capacity)`)은 **본 스펙 비채택**
+  이다 — 잔고는 총량만 주므로 partial excess가 self 부분 + 동시 외부 매수의
+  혼재인지 결정할 수 없고, partial 귀속은 그 외부분을 self로 **비가역 흡수**할 수
+  있기 때문이다(CAS 단조 → late ccld가 실제 self 누적을 줘도 no-op, §11.4·§11.7).
+  미적용분은 **D+1 ccld 백스톱이 결제기준 원장으로 반영될 때까지 대기**(지연
+  반영)하며, 그 동안 동일 미반영 체결에 §03-07 reconciler 의 self_submitted 분기
+  (보정 skip · 원장 미advance · 재검출 가능, #1950)가 적용 가능한 경로면 그쪽을
+  우선한다.
 - **다중 self-order(같은 symbol에 둘 이상의 open buy) 또는 다중 bot 동일 symbol
   은 fallback을 적용하지 않는다**(미적용). 잔고는 총량만 주므로 excess를 어느
   주문에 얼마씩 귀속할지 결정할 수 없어, 보수적으로 외부/혼재 위험을 회피한다.
   이는 §11.7 **bounded known-limitation**이다. FIFO·비례 배분 등 다중 귀속 규칙은
   **본 스펙 비채택**이며 라이브 확인(#2317) 후 재검토한다.
+
+이 full-fill 정확매칭 조건은 partial 귀속이 동시 외부 매수를 self로 흡수하는
+경로(예: ante 미체결 100, self 부분 미기록 50, 숨은 외부 매수 10 → partial
+`excess 60`)를 **fallback 대상에서 제외**한다(`60 != 100` → 미적용). 이 케이스는
+D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않는다. 단 외부 매수가
+**정확히** 주문 수량을 채우는 협소 케이스(self 부분 + 외부 = ordered_qty)는
+§11.7 bounded known-limitation으로 남는다.
 
 ### 11.4 멱등성과 avg_price 한계 (late-ccld no-op)
 
@@ -436,6 +463,17 @@ self/external 경계 재사용):
   `get_order_history`가 같은 체결을 반환해도 `record_fill` CAS의 단조성
   (`recorded_filled_qty < :c`)으로 **no-op**이 된다(§4.4·§5). 같은 체결을 잔고
   경로·ccld 경로로 몇 번 관측하든 포지션은 정확히 1회 반영된다.
+- **late-ccld 불일치 reconcile alert (over-attribution 관측, normative)**:
+  fallback이 full fill(`observed_cumulative = ordered_qty`)로 advance한 뒤, D+1
+  ccld가 그 주문에 대해 **더 낮은 절대 누적**(`recorded_filled_qty`보다 작은 실
+  체결 누적)을 반환하면 CAS 단조성으로 **no-op**이라 잔고가 흡수했던 분(예:
+  §11.7의 협소 외부 매수)을 사후 정정할 수 없다. 이는 비가역이므로 정정은 못
+  하나, **`PositionMismatchEvent`/`NotificationEvent` reconcile alert로
+  surface**해 잠재 over-attribution을 침묵 흡수하지 않고 관측 가능하게 한다.
+  alert는 `(account_id, broker_order_id)`, fallback이 advance한 누적
+  (`recorded_filled_qty`), ccld가 반환한 더 낮은 절대 누적, 차이를 싣는다. 이
+  경보는 §11.7 bounded known-limitation(협소 외부 흡수)을 **운영 관측 가능**하게
+  만드는 백스톱이다.
 - **avg_price 근거**: fallback의 평균 체결가는 **잔고 평단(`get_positions`)**을
   근거로 쓴다(잔고가 제공하는 유일한 가격 정보). 주문가가 아니다.
 - **known-limitation(정정 없음)**: fallback이 먼저 쓴 `avg_fill_price`는 나중에
@@ -467,11 +505,28 @@ self/external 경계 재사용):
 본 fallback은 잔고가 **총량(누적)만** 제공한다는 한계 위에서 보수적으로
 설계됐고, 다음은 **bounded known-limitation**으로 선언한다:
 
+- **협소 외부 흡수(paper-only, 정직한 한계 선언)**: 본 fallback은 "외부 매수를
+  self로 흡수하지 않는다"를 **단정하지 않는다**. full-fill 정확매칭
+  (`excess == ordered_qty`, §11.3)은 partial 혼재(`excess != ordered_qty`)를
+  제외하지만, **외부 매수가 정확히 주문 수량을 보충하는 협소 케이스**(self 부분
+  미기록 + 동시 외부 매수의 합이 우연히 `ordered_qty`와 같아 `excess ==
+  ordered_qty`가 되는 경우)에서는 fallback이 그 **외부분까지 self로 비가역
+  흡수**할 수 있다(CAS 단조 → late ccld가 실제 더 낮은 self 누적을 줘도 no-op).
+  이를 **paper-only bounded known-limitation**으로 명시한다. 위험창이 협소한
+  근거: ① paper는 테스트 환경이라 동일 symbol 동시 외부 매수가 드물다, ②
+  full-fill 정확매칭 조건이 위험창을 `excess == ordered_qty` 정확 일치로
+  협소화한다(임의 partial은 §11.3에서 제외), ③ §11.4 late-ccld reconcile alert가
+  사후 over-attribution을 **관측 가능**하게 한다(침묵 흡수 아님). 같은 미반영
+  체결에 #1950의 **가역 skip**(보정 skip · 원장 미advance · 재검출 가능, §03-07)이
+  적용 가능한 경로에서는 그 가역 경로를 **우선**한다(비가역 fallback보다 안전).
+  live 확장은 §11.6·#2317 검증 뒤에만 허용한다.
 - **다중 self-order/다중 bot 동일 symbol 미적용**(§11.3): 유일 open buy일 때만
   귀속. 다중이면 fallback 미적용(외부 검출 지연 = 매칭 주문 해소 시점 ≤ EOD,
   reconciler §03-07 경계와 동형). 다중 귀속(FIFO 등)은 비채택.
 - **partial-fill 추적 한계**: 잔고는 누적만 주므로 부분 체결의 중간 경로를
-  재구성하지 못한다. fallback은 관측 시점 누적 excess만 advance한다.
+  재구성하지 못한다. fallback은 `recorded_filled_qty == 0`인 미복구 주문에
+  한해 `excess == ordered_qty`일 때만 full fill로 advance하며, 그 외 partial
+  excess는 D+1 ccld 백스톱에 위임한다(미적용).
 - **avg_price 정정 없음**(§11.4): 잔고 평단 근거 유지, ccld 실체결가로 사후
   정정 안 함.
 - **Treasury 비례 정산**: §9의 pre-existing 한계(부분 체결 비례 정산 미지원)는
@@ -485,8 +540,8 @@ self/external 경계 재사용):
 fallback도 **반드시 `FillApplier.apply_cumulative` 경로로만 수렴**한다. fallback이
 `OrderTracker`(`recorded_filled_qty` CAS)·`positions`·`trades`·`fill_outbox`를
 **직접 수정해서는 안 된다**. 산출한 `(account_id, broker_order_id,
-observed_cumulative=recorded_filled_qty+applied, avg_price=잔고평단,
-submitted_date)`(§11.3)를 `apply_cumulative`에 넘기면, §5의 단일 트랜잭션
+observed_cumulative=ordered_qty, avg_price=잔고평단,
+submitted_date)`(§11.3 full-fill 정확매칭)를 `apply_cumulative`에 넘기면, §5의 단일 트랜잭션
 (CAS advance + TradeRecord +
 PositionHistory.on_trade + outbox INSERT)과 commit-후 1회 이벤트 발행, §5.1 crash
 원자성, §10 결정적 `fill_dedup_key`가 그대로 적용된다. 이로써 fallback은 새
