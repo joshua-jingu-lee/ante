@@ -394,10 +394,15 @@ class FillReconcileScheduler:
             # advance 한 recorded 보다 **낮은** 양수면 over-attribution alert 를
             # 발행하고(비가역·CAS no-op) verify 에서 제거한다. 동일/높으면(정상)
             # 조용히 제거한다. 이 검증을 거쳐야 §11.4 alert 가 실제 poll 경로에서
-            # 도달 가능하다.
+            # 도달 가능하다. #2318 Codex 리뷰: KIS odno(broker_order_id)는 영업일
+            # 재사용 가능하므로(§4.1 유일키 = (account, odno, submitted_date)),
+            # ccld 행을 verify 항목과 매칭할 때 **(odno, item_date)** 쌍으로 비교해
+            # 폴 window 에 섞여 든 다른 날짜 재사용 odno 가 verify 항목을 잘못
+            # 매칭/alert/pop 하지 않게 한다(정확매칭, §11.3).
             await self._verify_fallback_against_ccld(
                 broker_order_id=broker_order_id,
                 observed_cumulative=cumulative,
+                item_date=item_date,
             )
             delta = await self._applier.apply_cumulative(
                 account_id=self._account_id,
@@ -454,6 +459,7 @@ class FillReconcileScheduler:
         *,
         broker_order_id: str,
         observed_cumulative: float,
+        item_date: str,
     ) -> None:
         """fallback 적용 주문의 ccld 절대 누적을 검증해 over-attribution 을 surface.
 
@@ -468,11 +474,29 @@ class FillReconcileScheduler:
         advance/멱등)면 조용히 처리한다. 어느 경우든 검증 후 그 항목을 verify 에서
         제거한다(bounded — ccld 가 한 번 관측되면 검증 완료).
 
+        #2318 Codex 리뷰(date-scope): KIS ``odno``(broker_order_id)는 **영업일
+        재사용** 가능하므로(spec §4.1 유일키 = ``(account, odno, submitted_date)``,
+        odno 단독은 전역 유일 키가 아님), 폴 window(``from_date`` 가 verify 항목의
+        ``submitted_date`` 까지 거슬러 덮음)에 **다른 날짜의 같은 odno** ccld 행이
+        섞여 들 수 있다. 그 행을 verify 항목과 매칭하면 late-ccld alert 를 오발화하고
+        verify 항목을 pop 해, 실제 fallback-advanced 주문이 영영 검증되지 않는다.
+        이를 막기 위해 ccld 행의 ``item_date`` 가 verify 항목의 ``submitted_date`` 와
+        **일치할 때만** 검증/alert/pop 한다. 날짜가 다르면 그 verify 항목에 대해
+        무시한다(다른 날짜 재사용 odno — OrderTracker 의
+        ``(account, odno, submitted_date)`` 조회 계약과 정합. ``find_by_broker_order``
+        가 date scope 를 인자로 안 받으므로, 매칭을 date 까지 좁히는 책임을 이 verify
+        비교 지점에 둔다).
+
         eventbus 미주입이면 alert 는 best-effort 로 생략하나, verify 항목 제거(누적
         방지)는 그대로 수행한다(멱등성·정확성 영향 없음).
         """
         entry = self._fallback_verify.get(broker_order_id)
         if entry is None:
+            return
+        # #2318 Codex 리뷰: date-scope 정확매칭. ccld 행의 영업일(item_date)이 verify
+        # 항목의 submitted_date 와 다르면 다른 날짜 재사용 odno 이므로 이 항목에 대해
+        # 무시한다(검증/alert/pop 안 함). 같은 날짜 ccld 만 그 항목을 검증·확정한다.
+        if entry.submitted_date != item_date:
             return
         recorded = entry.recorded
         # ccld 가 0 이거나 fallback recorded 이상이면 정상 경로(멱등 advance/no-op).

@@ -897,14 +897,15 @@ async def test_fallback_then_ccld_same_cumulative_noop(fallback_applier, tracker
     # 이제 ccld 가 같은 체결(절대 누적 1)을 반환. order 는 filled 지만 #2318
     # Finding ②: 당일 verify 가 폴 게이트를 열어 ccld 가 도달한다. ccld == recorded
     # 라 record_fill CAS 는 no-op(멱등) 이고, verify 검증은 동일 누적이라 조용히
-    # 제거된다. 포지션 불변.
+    # 제거된다. 포지션 불변. #2318 Codex 리뷰: timestamp=DATE 가 verify 항목의
+    # submitted_date=DATE 와 **같은 날짜**라 date-scope 매칭이 성립한다.
     broker.set_history(
         [
             {
                 "order_id": "0001",
                 "filled_quantity": 1.0,
                 "price": 1000.0,
-                "timestamp": DATE,
+                "timestamp": DATE,  # verify submitted_date(DATE)와 같은 날짜 → 매칭.
             }
         ]
     )
@@ -969,14 +970,15 @@ async def test_late_ccld_lower_cumulative_emits_reconcile_alert_via_poll(
 
     # 2) 다음 사이클: order 가 filled 라 open 은 비었지만 verify set 이 남아
     #    ccld 를 폴한다. ccld 가 실 체결 누적 1(더 낮음)을 반환 → _poll_and_apply
-    #    경로에서 verify 검증 → alert 발행 (실제 도달성).
+    #    경로에서 verify 검증 → alert 발행 (실제 도달성). #2318 Codex 리뷰:
+    #    timestamp=DATE 가 verify submitted_date=DATE 와 같은 날짜라 매칭한다.
     broker.set_history(
         [
             {
                 "order_id": "0001",
                 "filled_quantity": 1.0,
                 "price": 1000.0,
-                "timestamp": DATE,
+                "timestamp": DATE,  # verify submitted_date(DATE)와 같은 날짜 → 매칭.
             }
         ]
     )
@@ -1032,13 +1034,14 @@ async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal_via_poll(
     assert "0001" in sched._fallback_verify
 
     # ccld == recorded (멱등 정상) → alert 없음 + verify 에서 조용히 제거.
+    # #2318 Codex 리뷰: timestamp=DATE 가 verify submitted_date=DATE 와 같은 날짜.
     broker.set_history(
         [
             {
                 "order_id": "0001",
                 "filled_quantity": 2.0,
                 "price": 1000.0,
-                "timestamp": DATE,
+                "timestamp": DATE,  # verify submitted_date(DATE)와 같은 날짜 → 매칭.
             }
         ]
     )
@@ -1165,6 +1168,172 @@ async def test_verify_set_today_entry_retained_across_idle_cleanup(
     await sched._poll_and_apply()
     assert "0001" in sched._fallback_verify  # 당일 → 유지.
     assert broker.history_calls == 2  # verify 가 폴 게이트를 계속 연다.
+
+
+# ── #2318 Codex 리뷰: late-ccld verify date-scope (영업일 재사용 odno) ──
+
+
+async def test_late_ccld_different_date_same_odno_does_not_misfire(
+    fallback_applier, tracker
+):
+    """#2318 Codex 리뷰: 다른 날짜 같은 odno ccld 는 verify 항목을 매칭하지 않는다.
+
+    KIS odno(broker_order_id)는 영업일 재사용 가능하므로 유일키는
+    (account, odno, submitted_date)다(spec §4.1). 폴 window(from_date 가 verify
+    항목의 submitted_date 까지 거슬러 덮음)에 **다른 날짜(D-1)의 같은 odno=X** ccld
+    행(낮은 누적)이 섞여 들어도, 그 행은 verify 항목(odno=X, submitted_date=D)을
+    매칭하면 안 된다. 잘못 매칭하면 late-ccld alert 를 오발화하고 verify 항목을 pop
+    해 실제 fallback-advanced 주문이 영영 검증되지 않는다.
+
+    검증: alert **미발행** + verify 항목 **유지**(pop 안 됨).
+    """
+    from ante.broker.fill_scheduler import _FallbackVerifyEntry
+    from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
+
+    app, _ph, eb, svc = fallback_applier
+    mismatches: list[PositionMismatchEvent] = []
+    notifs: list[NotificationEvent] = []
+    eb.subscribe(
+        PositionMismatchEvent,
+        lambda e: (
+            mismatches.append(e) if isinstance(e, PositionMismatchEvent) else None
+        ),
+    )
+    eb.subscribe(
+        NotificationEvent,
+        lambda e: notifs.append(e) if isinstance(e, NotificationEvent) else None,
+    )
+
+    broker = FallbackBroker(history=[], positions=[])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    # 당일(D) verify 항목 직접 주입(fallback 이 full fill 로 recorded=2 advance 했음을
+    # 흉내). open 은 없다(filled terminal). 당일 → EOD 정리에 살아남는다.
+    sched._fallback_verify["0001"] = _FallbackVerifyEntry(
+        recorded=2.0, submitted_date=DATE
+    )
+    # ccld 가 **전일(D-1)** 같은 odno=0001 행(다른 주문, 더 낮은 누적 1)을 반환.
+    # from_date 가 verify 의 D 까지 덮으나, 이 행은 D-1 이라 verify 항목과 다른 날짜.
+    prior_date = "20200101"
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": prior_date,
+            }
+        ]
+    )
+    await sched._poll_and_apply()
+    assert broker.history_calls == 1  # verify 가 폴 게이트를 열었다(도달).
+    # date 불일치 → 오발화 없음. verify 항목은 그대로 유지(당일 D 의 ccld 대기).
+    assert mismatches == []
+    assert notifs == []
+    assert "0001" in sched._fallback_verify  # pop 안 됨 — 실제 주문 검증 보존.
+    assert sched._fallback_verify["0001"].submitted_date == DATE
+
+
+async def test_late_ccld_same_date_lower_cumulative_emits_and_pops(
+    fallback_applier, tracker
+):
+    """#2318 Codex 리뷰: 같은 날짜(D) 같은 odno·더 낮은 누적 → alert 발행 + pop.
+
+    date-scope 교정 후에도 **같은 날짜** 매칭 정상 동작을 확인한다(date 좁히기가
+    정상 경로를 막지 않음). verify 항목(odno=X, submitted_date=D)에 같은 날짜 D 의
+    ccld(낮은 누적)가 오면 over-attribution alert 1회 + verify pop.
+    """
+    from ante.broker.fill_scheduler import _FallbackVerifyEntry
+    from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
+
+    app, _ph, eb, svc = fallback_applier
+    mismatches: list[PositionMismatchEvent] = []
+    notifs: list[NotificationEvent] = []
+    eb.subscribe(
+        PositionMismatchEvent,
+        lambda e: (
+            mismatches.append(e) if isinstance(e, PositionMismatchEvent) else None
+        ),
+    )
+    eb.subscribe(
+        NotificationEvent,
+        lambda e: notifs.append(e) if isinstance(e, NotificationEvent) else None,
+    )
+
+    # alert 는 find_by_broker_order 로 bot_id/symbol/order_id 를 복원하므로 실제
+    # tracker 레코드가 (account, odno, submitted_date=DATE) 로 존재해야 한다.
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    sched._fallback_verify["0001"] = _FallbackVerifyEntry(
+        recorded=2.0, submitted_date=DATE
+    )
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,  # recorded=2 보다 낮음 → over-attribution.
+                "price": 1000.0,
+                "timestamp": DATE,  # 같은 날짜 D → 매칭.
+            }
+        ]
+    )
+    await sched._poll_and_apply()
+    assert len(mismatches) == 1
+    assert mismatches[0].internal_qty == 2.0
+    assert mismatches[0].broker_qty == 1.0
+    assert "late_ccld_over_attribution" in mismatches[0].reason
+    assert len(notifs) == 1
+    assert "0001" not in sched._fallback_verify  # 같은 날짜 검증 완료 → pop.
+
+
+async def test_late_ccld_same_date_higher_or_equal_pops_without_alert(
+    fallback_applier, tracker
+):
+    """#2318 Codex 리뷰: 같은 날짜(D) 동일/높은 누적 → alert 없음 + pop(정상 확정).
+
+    date-scope 교정 후 같은 날짜의 정상 ccld(멱등/advance)는 조용히 verify 에서
+    제거된다(오경보 방지).
+    """
+    from ante.broker.fill_scheduler import _FallbackVerifyEntry
+    from ante.eventbus.events import PositionMismatchEvent
+
+    app, _ph, eb, svc = fallback_applier
+    mismatches: list[PositionMismatchEvent] = []
+    eb.subscribe(
+        PositionMismatchEvent,
+        lambda e: (
+            mismatches.append(e) if isinstance(e, PositionMismatchEvent) else None
+        ),
+    )
+    broker = FallbackBroker(history=[], positions=[])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    sched._fallback_verify["0001"] = _FallbackVerifyEntry(
+        recorded=2.0, submitted_date=DATE
+    )
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 2.0,  # == recorded → 정상(멱등).
+                "price": 1000.0,
+                "timestamp": DATE,  # 같은 날짜 D → 매칭.
+            }
+        ]
+    )
+    await sched._poll_and_apply()
+    assert mismatches == []  # 동일 누적 → 오경보 없음.
+    assert "0001" not in sched._fallback_verify  # 검증 완료 → pop.
 
 
 # ── 시나리오 5: self/external 경계 (excess != ordered, 다중 open buy) ──
