@@ -744,6 +744,15 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
     """
     from ante.broker.fill_scheduler import FillReconcileScheduler
 
+    # #2314·#2316 §11.6: position-derived fallback 마스터 disable flag. KIS paper
+    # 기본 활성(True)을 두되 config 로 rollback 가능. 실제 적용은 추가로
+    # broker.is_paper 가 true 여야 한다(scheduler 내부 gate).
+    fallback_enabled = (
+        bool(s.config.get("system.fill_position_fallback_enabled", True))
+        if s.config is not None
+        else True
+    )
+
     s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
         try:
@@ -756,6 +765,11 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
             order_tracker=s.order_tracker,
             fill_applier=s.fill_applier,
             account_id=account.account_id,
+            # #2314·#2316 §11: 잔고 역도출 fallback 의 internal_account_qty 조회
+            # 의존성(§11.1) + late-ccld over-attribution alert(§11.4) 발행 경로.
+            trade_service=s.trade_service,
+            eventbus=s.eventbus,
+            fallback_enabled=fallback_enabled,
         )
         # 기동 카치업 — barrier. reconcile 보다 반드시 선행.
         # CatchUpResult.succeeded 로 폴 실패와 "정상 0건/open-없음" 을 구분한다.

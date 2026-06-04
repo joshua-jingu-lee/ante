@@ -556,6 +556,37 @@ class OrderTracker:
         )
         return OrderTrackerRecord.from_row(row) if row else None
 
+    async def find_by_broker_order(
+        self,
+        account_id: str,
+        broker_order_id: str,
+        submitted_date: str,
+    ) -> OrderTrackerRecord | None:
+        """관측(account/broker_order_id/observed_date) → 추적 레코드 (terminal 포함).
+
+        ``lookup_order_id`` 와 달리 **status 무관**(terminal 포함)으로 매핑한다.
+        #2316 §11.4 late-ccld over-attribution alert 전용 — fallback 이 full fill
+        로 advance 해 ``filled``(terminal)이 된 주문에 대해 이후 ccld 가 **더 낮은**
+        누적을 반환할 때, 그 주문의 현 ``recorded_filled_qty`` 와 비교해 경보를
+        surface 하기 위함이다. ``lookup_order_id`` 의 non-terminal scope 로는 이미
+        filled 된 주문을 찾지 못해 경보 자체가 누락된다.
+
+        scope/정렬은 ``lookup_order_id`` 와 동일하게 ``submitted_date <=
+        observed_date`` 의 최신(MAX) 1건이다(일자 재사용 격리·결정성 유지).
+        """
+        validated = require_account_id(
+            account_id, context="order_tracker.find_by_broker_order"
+        )
+        row = await self._db.fetch_one(
+            """SELECT * FROM order_tracker
+                 WHERE account_id = ? AND broker_order_id = ?
+                   AND submitted_date <= ?
+                 ORDER BY submitted_date DESC
+                 LIMIT 1""",
+            (validated, broker_order_id, submitted_date),
+        )
+        return OrderTrackerRecord.from_row(row) if row else None
+
     async def expire_stale(self, account_id: str, before_date: str) -> int:
         """``submitted_date < before_date`` 인 **genuinely-dead** ``open`` 만
         ``expired`` 표기.
