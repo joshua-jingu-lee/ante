@@ -2,6 +2,858 @@
 
 <!-- version list -->
 
+## v0.10.1 (2026-06-05)
+
+### Bug Fixes
+
+- **account**: #2131 suspend(CRITICAL)/activate(INFO) 킬스위치 NotificationEvent 직접 발행
+  ([#2262](https://github.com/joshua-jingu-lee/ante/pull/2262),
+  [`791bf94`](https://github.com/joshua-jingu-lee/ante/commit/791bf945d0e7282b86870429da0c8cce42cf1d44))
+
+- **backtest**: #1987 미청산 포지션을 현재가로 평가(mark-to-market), final valuation lookahead 차단
+  ([#2169](https://github.com/joshua-jingu-lee/ante/pull/2169),
+  [`b3f3238`](https://github.com/joshua-jingu-lee/ante/commit/b3f32380b841c1e84bce0c746664b765d0db78de))
+
+- **backtest**: #1989 초과 매도 시 체결 수량으로 수수료/슬리피지/거래 기록
+  ([#2170](https://github.com/joshua-jingu-lee/ante/pull/2170),
+  [`8106682`](https://github.com/joshua-jingu-lee/ante/commit/810668252bae4630a99d4de4086000fec6cf6059))
+
+- **backtest**: #1990 거래 PnL 추정에 매수 수수료를 원가에 포함 — 손실 거래 오분류 수정
+  ([#2227](https://github.com/joshua-jingu-lee/ante/pull/2227),
+  [`209eff1`](https://github.com/joshua-jingu-lee/ante/commit/209eff1b85c3bc73f88635e00f5baaa0503e4348))
+
+- **backtest**: #1991 invalid Signal(side/quantity) 검증 추가 (#2066 포함)
+  ([#2171](https://github.com/joshua-jingu-lee/ante/pull/2171),
+  [`b81c488`](https://github.com/joshua-jingu-lee/ante/commit/b81c4882540b1b063b715b1ce3ba7d1287e84c8a))
+
+- **backtest**: #1994 order_type 트리거/리밋 게이트 — 미충족 limit/stop 즉시 시장가 체결 차단
+  ([#2228](https://github.com/joshua-jingu-lee/ante/pull/2228),
+  [`493aa63`](https://github.com/joshua-jingu-lee/ante/commit/493aa637947f3c0bf35373f30b77869b1ae49344))
+
+- **backtest**: #1994 order_type 트리거/리밋 게이트 — 미충족 limit/stop 즉시 시장가 체결 차단(체결가 limit cap)
+  ([#2228](https://github.com/joshua-jingu-lee/ante/pull/2228),
+  [`493aa63`](https://github.com/joshua-jingu-lee/ante/commit/493aa637947f3c0bf35373f30b77869b1ae49344))
+
+- **backtest**: #1998 run()이 결과 artifact 저장 + result_path 전파 (자동 리포트 초안 경로 복구)
+  ([#2293](https://github.com/joshua-jingu-lee/ante/pull/2293),
+  [`7459dc8`](https://github.com/joshua-jingu-lee/ante/commit/7459dc82ef2de719a53d247fe33540cb430e15ff))
+
+- **backtest**: #2000 run()이 validated.data_paths를 실제 데이터 로딩에 사용
+  ([#2218](https://github.com/joshua-jingu-lee/ante/pull/2218),
+  [`6089b56`](https://github.com/joshua-jingu-lee/ante/commit/6089b568a6fcb939c09dc8ce7b4a00f0d3af6d7d))
+
+- **backtest**: #2012 비-1d 체결가/지표 조회를 설정 timeframe으로 — provider run-timeframe 인지
+  ([#2224](https://github.com/joshua-jingu-lee/ante/pull/2224),
+  [`9a2df3f`](https://github.com/joshua-jingu-lee/ante/commit/9a2df3f87a5a16f420f83a544fa0f7ffa064aef0))
+
+- **backtest**: #2013 비-1d 성과지표(annual_return/Sharpe)를 일별 리샘플 기준으로 — bar→일수 왜곡 수정
+  ([#2225](https://github.com/joshua-jingu-lee/ante/pull/2225),
+  [`26be0ea`](https://github.com/joshua-jingu-lee/ante/commit/26be0eae13263d71e932a7debeaf28fed8e4a415))
+
+- **backtest**: #2034 #2035 #2036 _validate_config가 exchange/date/numeric을 검증
+  ([#2204](https://github.com/joshua-jingu-lee/ante/pull/2204),
+  [`437691b`](https://github.com/joshua-jingu-lee/ante/commit/437691b6420ac7d2b4ec7250b6e08ecd24d72bdd))
+
+- **backtest**: #2039 backtest run이 StrategyLoader.load 전 StrategyValidator로 검증 — 금지 코드 import 실행 차단
+  ([#2236](https://github.com/joshua-jingu-lee/ante/pull/2236),
+  [`6a8875a`](https://github.com/joshua-jingu-lee/ante/commit/6a8875a672399f5547ce4362b3ad9aa5af37e467))
+
+- **backtest**: #2053 factory_drift allowlist의 backtest.py Database anchor 라인 갱신(214→229)
+  ([#2203](https://github.com/joshua-jingu-lee/ante/pull/2203),
+  [`b3b3c6a`](https://github.com/joshua-jingu-lee/ante/commit/b3b3c6a82db7f06ba6b4b9a08da0ca4bde6cf81d))
+
+- **backtest**: #2060 --symbols/--timeframe 생략 시 StrategyMeta로 fallback
+  ([#2255](https://github.com/joshua-jingu-lee/ante/pull/2255),
+  [`97c868f`](https://github.com/joshua-jingu-lee/ante/commit/97c868f49fc6cb28896b8f4d0d172a8a722a7645))
+
+- **backtest**: #2060 --symbols/--timeframe 생략 시 StrategyMeta로 fallback (Closes #2096)
+  ([#2255](https://github.com/joshua-jingu-lee/ante/pull/2255),
+  [`97c868f`](https://github.com/joshua-jingu-lee/ante/commit/97c868f49fc6cb28896b8f4d0d172a8a722a7645))
+
+- **backtest**: #2061 첫 데이터 행(row 0)을 처리하도록 커서 초기값 -1 + timestamp 가드
+  ([#2177](https://github.com/joshua-jingu-lee/ante/pull/2177),
+  [`6a7fc19`](https://github.com/joshua-jingu-lee/ante/commit/6a7fc190c855aae98ebd5d76abd6e338995006a4))
+
+- **backtest**: #2065 run_subprocess 결과를 sentinel marker로 stdout noise와 분리
+  ([#2216](https://github.com/joshua-jingu-lee/ante/pull/2216),
+  [`eedc928`](https://github.com/joshua-jingu-lee/ante/commit/eedc9285a4e399c7e384479c952b652085e7fb7f))
+
+- **backtest**: #2071 무거래 zero-OHLC 행 backtest-load flat-bar 정규화 (저장 raw 보존)
+  ([#2306](https://github.com/joshua-jingu-lee/ante/pull/2306),
+  [`757039c`](https://github.com/joshua-jingu-lee/ante/commit/757039cc2a48dad16682e51dbcd7655a22d51d5b))
+
+- **backtest**: #2072 config.symbols universe 밖 Signal.symbol 거래 거부(가격조회 전 조기 skip)
+  ([#2231](https://github.com/joshua-jingu-lee/ante/pull/2231),
+  [`b5ab9d1`](https://github.com/joshua-jingu-lee/ante/commit/b5ab9d188edaf01af219e91c16257aa2990a21f3))
+
+- **backtest**: #2073 BacktestExecutor on_fill 콜백+follow-up 체결 처리
+  ([#2219](https://github.com/joshua-jingu-lee/ante/pull/2219),
+  [`b139e20`](https://github.com/joshua-jingu-lee/ante/commit/b139e20b8d96f78b27db86b2aa02322d8305d372))
+
+- **backtest**: #2073 BacktestExecutor가 체결 후 on_fill 호출 및 follow-up 주문 체결
+  ([#2219](https://github.com/joshua-jingu-lee/ante/pull/2219),
+  [`b139e20`](https://github.com/joshua-jingu-lee/ante/commit/b139e20b8d96f78b27db86b2aa02322d8305d372))
+
+- **backtest**: #2073 cap을 on_fill follow-up에만 적용(on_step 신호 무제한·deque BFS) — 리뷰 회귀 수정
+  ([#2219](https://github.com/joshua-jingu-lee/ante/pull/2219),
+  [`b139e20`](https://github.com/joshua-jingu-lee/ante/commit/b139e20b8d96f78b27db86b2aa02322d8305d372))
+
+- **backtest**: #2073 on_fill follow-up cap을 루프 상단 선검사로 정확히 강제(off-by-one 수정)
+  ([#2219](https://github.com/joshua-jingu-lee/ante/pull/2219),
+  [`b139e20`](https://github.com/joshua-jingu-lee/ante/commit/b139e20b8d96f78b27db86b2aa02322d8305d372))
+
+- **backtest**: #2074 get_positions에 current_price/unrealized_pnl 추가 (PortfolioView 스키마 parity)
+  ([#2175](https://github.com/joshua-jingu-lee/ante/pull/2175),
+  [`c30db26`](https://github.com/joshua-jingu-lee/ante/commit/c30db2608e0497de87f84a57bb8d29ee0794d8ea))
+
+- **backtest**: #2075 BacktestStrategyContext.get_trade_history 추가 (라이브 parity)
+  ([#2173](https://github.com/joshua-jingu-lee/ante/pull/2173),
+  [`92b4b7a`](https://github.com/joshua-jingu-lee/ante/commit/92b4b7a91729ba256f6dc254630b925ee912a9ef))
+
+- **backtest**: #2083 strategy file-access 공용 helper 추출 +
+  BacktestStrategyContext.load_file/load_text
+  ([#2174](https://github.com/joshua-jingu-lee/ante/pull/2174),
+  [`13f78bc`](https://github.com/joshua-jingu-lee/ante/commit/13f78bcac5156da95f68d9bdcd9650b7e092059b))
+
+- **backtest**: #2098 멀티심볼 백테스트 timestamp 통합 timeline + 체결 current-bar gate (Closes #1992)
+  ([#2220](https://github.com/joshua-jingu-lee/ante/pull/2220),
+  [`93a0441`](https://github.com/joshua-jingu-lee/ante/commit/93a044160ff54869ae005593d76b09aa8df27b3c))
+
+- **backtest**: #2125 무거래 백테스트도 계산 가능한 성과지표 반환
+  ([#2176](https://github.com/joshua-jingu-lee/ante/pull/2176),
+  [`6b2cb0d`](https://github.com/joshua-jingu-lee/ante/commit/6b2cb0d8bb480380badfec430426d35961bb08d5))
+
+- **bot**: #2111 rotate JSON 출력을 standard envelope로 복원 (IPC 라우팅 유지, 출력 계약 보존)
+  ([#2280](https://github.com/joshua-jingu-lee/ante/pull/2280),
+  [`0474bd8`](https://github.com/joshua-jingu-lee/ante/commit/0474bd8a66ca71f833cd7954cd2841641530595c))
+
+- **bot**: #2111 signal-key --rotate를 bot.signal_key.rotate IPC로 라우팅 (cold-path DB mutation 제거)
+  ([#2280](https://github.com/joshua-jingu-lee/ante/pull/2280),
+  [`0474bd8`](https://github.com/joshua-jingu-lee/ante/commit/0474bd8a66ca71f833cd7954cd2841641530595c))
+
+- **bot**: #2111 signal-key --rotate를 bot.signal_key.rotate IPC로 라우팅 + cold-path DB mutation 제거
+  ([#2280](https://github.com/joshua-jingu-lee/ante/pull/2280),
+  [`0474bd8`](https://github.com/joshua-jingu-lee/ante/commit/0474bd8a66ca71f833cd7954cd2841641530595c))
+
+- **bot**: #2112 bot list/info/positions/signal-key(read)를 runtime IPC + snapshot fallback로 라우팅
+  ([#2286](https://github.com/joshua-jingu-lee/ante/pull/2286),
+  [`1273d58`](https://github.com/joshua-jingu-lee/ante/commit/1273d58e63e7e74165d3b3d762bcae050253f736))
+
+- **bot**: #2129 bots.strategy_id↔config_json 일관 갱신 + update_bot 전략 검증
+  ([#2275](https://github.com/joshua-jingu-lee/ante/pull/2275),
+  [`d70748b`](https://github.com/joshua-jingu-lee/ante/commit/d70748b064ac2800983628c9575df59e94dc255c))
+
+- **bot**: #2129 bots.strategy_id↔config_json 일관 갱신 + update_bot 전략 검증 (Closes #2130)
+  ([#2275](https://github.com/joshua-jingu-lee/ante/pull/2275),
+  [`d70748b`](https://github.com/joshua-jingu-lee/ante/commit/d70748b064ac2800983628c9575df59e94dc255c))
+
+- **bot**: #2129 update_bot 전략 검증에 effective account_id 사용 (account+strategy 동시 변경 대응, 브랜치 리뷰)
+  ([#2275](https://github.com/joshua-jingu-lee/ante/pull/2275),
+  [`d70748b`](https://github.com/joshua-jingu-lee/ante/commit/d70748b064ac2800983628c9575df59e94dc255c))
+
+- **bot**: #2137 bot status/positions 조회를 봇 계좌로 스코핑
+  ([#2168](https://github.com/joshua-jingu-lee/ante/pull/2168),
+  [`44c3bc9`](https://github.com/joshua-jingu-lee/ante/commit/44c3bc97c4edb5847f6de0ef9a71dab0b5b88130))
+
+- **bot**: #2137 error_drift allowlist line 번호 갱신(bot.py 940/976/1010)
+  ([#2168](https://github.com/joshua-jingu-lee/ante/pull/2168),
+  [`44c3bc9`](https://github.com/joshua-jingu-lee/ante/commit/44c3bc97c4edb5847f6de0ef9a71dab0b5b88130))
+
+- **bot**: #2138 _liquidate_positions를 봇 계좌로 스코핑 + fail-closed 방어
+  ([#2162](https://github.com/joshua-jingu-lee/ante/pull/2162),
+  [`6bce03b`](https://github.com/joshua-jingu-lee/ante/commit/6bce03b93af25a4c0633c6712a000be9653a9c99))
+
+- **bot**: #2139 Live 전략 컨텍스트 portfolio/trade history를 봇 계좌로 스코핑
+  ([#2165](https://github.com/joshua-jingu-lee/ante/pull/2165),
+  [`a399117`](https://github.com/joshua-jingu-lee/ante/commit/a3991175e0446486de0e7d50474f225218940cce))
+
+- **bot**: #2143 BOT_SCHEMA account_id DEFAULT 'test' 제거(스펙 정렬)
+  ([#2190](https://github.com/joshua-jingu-lee/ante/pull/2190),
+  [`67b750f`](https://github.com/joshua-jingu-lee/ante/commit/67b750fa24e7e4c89aac389cb80474bc80bb4fee))
+
+- **bot**: #2143 BOT_SCHEMA account_id DEFAULT 'test' 제거(스펙 정렬) + db-schema 재생성
+  ([#2190](https://github.com/joshua-jingu-lee/ante/pull/2190),
+  [`67b750f`](https://github.com/joshua-jingu-lee/ante/commit/67b750fa24e7e4c89aac389cb80474bc80bb4fee))
+
+- **bot**: #2274 _save_bot_config UPSERT가 account_id 컬럼도 갱신 (config_json↔컬럼 drift 제거, #2130 동형)
+  ([#2284](https://github.com/joshua-jingu-lee/ante/pull/2284),
+  [`614acd7`](https://github.com/joshua-jingu-lee/ante/commit/614acd7e889cee6b9df2dc437809af12c0ae3628))
+
+- **bot**: #2282 account_id를 update_bot 불변 필드로 제약
+  ([#2312](https://github.com/joshua-jingu-lee/ante/pull/2312),
+  [`23ba32c`](https://github.com/joshua-jingu-lee/ante/commit/23ba32ca5bf0bdf3a14817fa09c515f63db216d8))
+
+- **broker**: #2004 FillReconcileScheduler가 get_order_history timestamp를 KST YYYYMMDD로 정규화 (ISO 체결이력
+  복구) ([#2266](https://github.com/joshua-jingu-lee/ante/pull/2266),
+  [`130bf17`](https://github.com/joshua-jingu-lee/ante/commit/130bf17dfeafc1006956194bd7035d690ba68ccd))
+
+- **broker**: #2126 KIS 조회 메서드 CTX_AREA/tr_cont pagination 처리 (잔고·미체결·체결이력 전 페이지 수집)
+  ([#2261](https://github.com/joshua-jingu-lee/ante/pull/2261),
+  [`9486a91`](https://github.com/joshua-jingu-lee/ante/commit/9486a91c1b71560002efe2753c1583f36a4d549c))
+
+- **broker**: #2318 fallback 유일성 판정·late-ccld alert 도달성 교정 (Codex 리뷰 반영)
+  ([#2321](https://github.com/joshua-jingu-lee/ante/pull/2321),
+  [`3a6b83f`](https://github.com/joshua-jingu-lee/ante/commit/3a6b83fb0bbc0489a317e622a1ae1acd3681b2eb))
+
+- **broker**: #2318 KIS 모의 당일 position-derived bounded fallback 구현
+  ([#2321](https://github.com/joshua-jingu-lee/ante/pull/2321),
+  [`3a6b83f`](https://github.com/joshua-jingu-lee/ante/commit/3a6b83fb0bbc0489a317e622a1ae1acd3681b2eb))
+
+- **broker**: #2318 late-ccld verify를 (odno, item_date) date-scope로 교정 (Codex 리뷰 반영)
+  ([#2321](https://github.com/joshua-jingu-lee/ante/pull/2321),
+  [`3a6b83f`](https://github.com/joshua-jingu-lee/ante/commit/3a6b83fb0bbc0489a317e622a1ae1acd3681b2eb))
+
+- **cli**: #1965 init 상대 db.path(relocatable) + auth connect 실패 시 aiosqlite 정리
+  ([#1967](https://github.com/joshua-jingu-lee/ante/pull/1967),
+  [`81e8574`](https://github.com/joshua-jingu-lee/ante/commit/81e8574883ca063da463d4e2ca162cbcd57db795))
+
+- **cli**: #1974 backtest history offline read-only — initialize() 제거 + no such table 정규화
+  ([#1976](https://github.com/joshua-jingu-lee/ante/pull/1976),
+  [`d31ce22`](https://github.com/joshua-jingu-lee/ante/commit/d31ce22fdd710e17b9a01bbbde139fe6ea2de708))
+
+- **cli**: #1984 data list를 read-only DB artifact 조회로 확대 (load_readonly 캐시 워밍, backtest history 미러)
+  ([#2297](https://github.com/joshua-jingu-lee/ante/pull/2297),
+  [`a2a44a9`](https://github.com/joshua-jingu-lee/ante/commit/a2a44a934b48f26a3612577a4cf20c6e3892771b))
+
+- **cli**: #1985 report view DB 에러를 REPORT_ERROR envelope으로 처리(report list 동형)
+  ([#2246](https://github.com/joshua-jingu-lee/ante/pull/2246),
+  [`7edb767`](https://github.com/joshua-jingu-lee/ante/commit/7edb76771521891ba501b4271c3c3df4e99fde1d))
+
+- **cli**: #1986 data list 빈 페이지 count가 total을 유지
+  ([#2205](https://github.com/joshua-jingu-lee/ante/pull/2205),
+  [`74ea807`](https://github.com/joshua-jingu-lee/ante/commit/74ea80703aeb54ed5778d3b704fb0c51ccf19e58))
+
+- **cli**: #1995 backtest run이 명시 종목 전체 무데이터면 BACKTEST_DATA_NOT_FOUND로 실패
+  ([#2207](https://github.com/joshua-jingu-lee/ante/pull/2207),
+  [`a83390d`](https://github.com/joshua-jingu-lee/ante/commit/a83390daf3fae9407faa96ea17aaaed60a6dac41))
+
+- **cli**: #2001 backtest run CLI를 D-004 subprocess 격리 경로로 전환
+  ([#2302](https://github.com/joshua-jingu-lee/ante/pull/2302),
+  [`0baa3c7`](https://github.com/joshua-jingu-lee/ante/commit/0baa3c78355640c0063eb7faaf17f4fdec1fdcb0))
+
+- **cli**: #2024 OutputFormatter가 non-finite float를 null로 정규화해 strict JSON 출력
+  ([#2202](https://github.com/joshua-jingu-lee/ante/pull/2202),
+  [`f330266`](https://github.com/joshua-jingu-lee/ante/commit/f3302668096e05c6f376d848d67c5638e6590de9))
+
+- **cli**: #2053 backtest run이 strict YYYY-MM-DD만 허용
+  ([#2203](https://github.com/joshua-jingu-lee/ante/pull/2203),
+  [`b3b3c6a`](https://github.com/joshua-jingu-lee/ante/commit/b3b3c6a82db7f06ba6b4b9a08da0ca4bde6cf81d))
+
+- **cli**: #2108 data validate --fix에 data:write scope 조건부 검증 + data scope 문서 정렬
+  ([#2221](https://github.com/joshua-jingu-lee/ante/pull/2221),
+  [`3b7d98c`](https://github.com/joshua-jingu-lee/ante/commit/3b7d98c0e88b60944e1c9ba00e7550ebd3d90562))
+
+- **cli**: #2108 data validate --fix에 data:write scope 조건부 검증 + data scope 문서 정렬 (Closes #1996,
+  #2154) ([#2221](https://github.com/joshua-jingu-lee/ante/pull/2221),
+  [`3b7d98c`](https://github.com/joshua-jingu-lee/ante/commit/3b7d98c0e88b60944e1c9ba00e7550ebd3d90562))
+
+- **cli**: #2108 validate --fix 권한 체크를 입력검증·경로 resolution 이전 최상단으로 이동 (fail-fast)
+  ([#2221](https://github.com/joshua-jingu-lee/ante/pull/2221),
+  [`3b7d98c`](https://github.com/joshua-jingu-lee/ante/commit/3b7d98c0e88b60944e1c9ba00e7550ebd3d90562))
+
+- **cli**: #2114 report list/view를 read-only DB artifact 조회로 확대 (offline-factory read_only sweep)
+  ([#2298](https://github.com/joshua-jingu-lee/ante/pull/2298),
+  [`f6e0cd9`](https://github.com/joshua-jingu-lee/ante/commit/f6e0cd9297100240409f97ba545a290020007f06))
+
+- **cli**: #2114 report list/view를 read-only DB artifact 조회로 확대 (offline-factory 적용범위 sweep)
+  ([#2298](https://github.com/joshua-jingu-lee/ante/pull/2298),
+  [`f6e0cd9`](https://github.com/joshua-jingu-lee/ante/commit/f6e0cd9297100240409f97ba545a290020007f06))
+
+- **cli**: #2135 strategy performance를 record.strategy_id로 필터
+  ([#2178](https://github.com/joshua-jingu-lee/ante/pull/2178),
+  [`8e6dcf8`](https://github.com/joshua-jingu-lee/ante/commit/8e6dcf8e9c0ba11ffbde578362b7730697e7c99a))
+
+- **cli**: #2144 strategy summary를 trades.strategy_id로 전략 전체 집계 (첫 봇만→모든 트레이드)
+  ([#2299](https://github.com/joshua-jingu-lee/ante/pull/2299),
+  [`6073b69`](https://github.com/joshua-jingu-lee/ante/commit/6073b693f694bdd9d971d58d5ce8ee6f8887a849))
+
+- **config**: #2132 notification.min_level enum 검증 추가 (CONFIG_VALIDATION_ERROR)
+  ([#2179](https://github.com/joshua-jingu-lee/ante/pull/2179),
+  [`00a4373`](https://github.com/joshua-jingu-lee/ante/commit/00a43739d8f4b330fb40a6096002d58953855651))
+
+- **config**: #2133 DynamicConfigService.set UPSERT가 기존 키 category 갱신
+  ([#2188](https://github.com/joshua-jingu-lee/ante/pull/2188),
+  [`3cf0f2a`](https://github.com/joshua-jingu-lee/ante/commit/3cf0f2a799e0012041e010979512a3a97f3895cc))
+
+- **core**: #1970 Database.connect partial-failure 시 worker thread 결정적 join (flaky test 해소)
+  ([#1971](https://github.com/joshua-jingu-lee/ante/pull/1971),
+  [`48ae63f`](https://github.com/joshua-jingu-lee/ante/commit/48ae63f46afa19915968dfbdc9b4287d5d589586))
+
+- **core**: #1974 Database read-only 연결 모드(mode=ro+immutable fallback) — backtest history 실제
+  read-only mount 지원 ([#1979](https://github.com/joshua-jingu-lee/ante/pull/1979),
+  [`3c93086`](https://github.com/joshua-jingu-lee/ante/commit/3c93086d157d11ae47f154121c97e856c553e241))
+
+- **core**: #2114 Database docstring의 read_only 적용범위를 data list/report 포함 sweep 정렬
+  ([#2298](https://github.com/joshua-jingu-lee/ante/pull/2298),
+  [`f6e0cd9`](https://github.com/joshua-jingu-lee/ante/commit/f6e0cd9297100240409f97ba545a290020007f06))
+
+- **core**: #2141 bot_delete approval 검증을 봇 계좌로 스코핑
+  ([#2172](https://github.com/joshua-jingu-lee/ante/pull/2172),
+  [`2bf340f`](https://github.com/joshua-jingu-lee/ante/commit/2bf340f64ef87cc1f50ce7d115e3ab281801fde8))
+
+- **data**: #1982 data info가 fundamental row_count를 실제 계산, data list는 row_count/file_size를 null로
+  ([#2209](https://github.com/joshua-jingu-lee/ante/pull/2209),
+  [`9a88d11`](https://github.com/joshua-jingu-lee/ante/commit/9a88d11ea9afa71850ad43319b78c94f7d722eee))
+
+- **data**: #1983 data list가 fundamental+timeframe 모순 조합을 거부
+  ([#2208](https://github.com/joshua-jingu-lee/ante/pull/2208),
+  [`5006726`](https://github.com/joshua-jingu-lee/ante/commit/500672677188a1c2e32e30011263823e0286a3c9))
+
+- **data**: #2010 DART available_date(rcept_no 접수일) 저장 — point-in-time producer
+  ([#2281](https://github.com/joshua-jingu-lee/ante/pull/2281),
+  [`fb9c4b7`](https://github.com/joshua-jingu-lee/ante/commit/fb9c4b74f80914f31d3cea9e20dc3b4ca117c876))
+
+- **data**: #2011 DART CFS/OFS 선택에 bsns_year 포함 (연도별 OFS 폴백 보존)
+  ([#2276](https://github.com/joshua-jingu-lee/ante/pull/2276),
+  [`f1fb1e1`](https://github.com/joshua-jingu-lee/ante/commit/f1fb1e12fe8d6e7f2bee16cd99ab9060a7e43624))
+
+- **data**: #2014 get_date_range가 파일 stem 대신 실제 row 날짜 반환
+  ([#2211](https://github.com/joshua-jingu-lee/ante/pull/2211),
+  [`dd0de7a`](https://github.com/joshua-jingu-lee/ante/commit/dd0de7a26f441b8e9ae4048c37766dda67824591))
+
+- **data**: #2081 ParquetStore.read date-only end를 whole-day inclusive로 (intraday 당일 장중 포함)
+  ([#2265](https://github.com/joshua-jingu-lee/ante/pull/2265),
+  [`b5270c9`](https://github.com/joshua-jingu-lee/ante/commit/b5270c9c98c6fa5fd5dd97c4b9526023999911b8))
+
+- **data**: #2095 ParquetStore.read strict 옵션 + backtest load 손상 파티션 fail-closed(BacktestDataError)
+  ([#2232](https://github.com/joshua-jingu-lee/ante/pull/2232),
+  [`0cfe4b1`](https://github.com/joshua-jingu-lee/ante/commit/0cfe4b1457f23c3701932b9604d2b1165fb5a19e))
+
+- **data**: #2100 RetentionPolicy가 실제 월말 기준으로 age 계산
+  ([#2193](https://github.com/joshua-jingu-lee/ante/pull/2193),
+  [`8a4c7e0`](https://github.com/joshua-jingu-lee/ante/commit/8a4c7e06228cfc3e38cdd737bffb4ba6c01d6dc4))
+
+- **data**: #2105 DataNormalizer가 tz-aware timestamp를 UTC로 변환
+  ([#2200](https://github.com/joshua-jingu-lee/ante/pull/2200),
+  [`5a89637`](https://github.com/joshua-jingu-lee/ante/commit/5a8963735cf3181a8065bea33e53557a90e5b191))
+
+- **data**: #2107 ParquetStore가 null partition key를 ValueError로 거부
+  ([#2198](https://github.com/joshua-jingu-lee/ante/pull/2198),
+  [`3f04a17`](https://github.com/joshua-jingu-lee/ante/commit/3f04a17a93ae5319b52737edde997b6ffb798f7a))
+
+- **data**: #2115 ParquetStore가 ohlcv 10s/30s를 일별 파티션으로 (신규 dir만, legacy 월별은 #2267)
+  ([#2268](https://github.com/joshua-jingu-lee/ante/pull/2268),
+  [`b1f091b`](https://github.com/joshua-jingu-lee/ante/commit/b1f091b7dc7bbab29532fc6db099333e78b0e7f1))
+
+- **eventbus**: #2058 PositionMismatchEvent/ReconcileEvent account-scoped 승격 (account_id + marker +
+  알림 계좌 표시) ([#2184](https://github.com/joshua-jingu-lee/ante/pull/2184),
+  [`99df529`](https://github.com/joshua-jingu-lee/ante/commit/99df52985e78b570193c40afe5eac9d65e1f797a))
+
+- **eventbus**: #2145 BotStopEvent에 account_id 필드+marker 추가 및 RuleEngine 전파
+  ([#2182](https://github.com/joshua-jingu-lee/ante/pull/2182),
+  [`217b132`](https://github.com/joshua-jingu-lee/ante/commit/217b1328e3b6d09ef24ced340a5e4d4d6ff7fbda))
+
+- **eventbus**: #2146 ExternalSignalEvent account_id 필드+marker 추가 및 SignalChannel 전파
+  ([#2163](https://github.com/joshua-jingu-lee/ante/pull/2163),
+  [`0f49dd9`](https://github.com/joshua-jingu-lee/ante/commit/0f49dd9d8acf13ad90fb6a1b0b00ff31efb0f13c))
+
+- **eventbus**: #2146 ExternalSignalEvent에 account_id 필드+marker 추가 및 SignalChannel 전파
+  ([#2163](https://github.com/joshua-jingu-lee/ante/pull/2163),
+  [`0f49dd9`](https://github.com/joshua-jingu-lee/ante/commit/0f49dd9d8acf13ad90fb6a1b0b00ff31efb0f13c))
+
+- **eventbus**: #2147 멤버 보안 이벤트 3종 추가 및 MemberService 발행
+  ([#2185](https://github.com/joshua-jingu-lee/ante/pull/2185),
+  [`c386e50`](https://github.com/joshua-jingu-lee/ante/commit/c386e50b78f8813a33be6cd2881a6762383c94bc))
+
+- **eventbus**: #2155 BotStepCompletedEvent에 signal_count/duration_ms 추가 및 발행
+  ([#2183](https://github.com/joshua-jingu-lee/ante/pull/2183),
+  [`6a6f842`](https://github.com/joshua-jingu-lee/ante/commit/6a6f842c4179f93e2585855b9ee3d80dd8c4d110))
+
+- **feed**: #1964 fundamental 다중소스 merge 데이터손실 방지 + report.warnings + DART checkpoint clamp
+  ([#1966](https://github.com/joshua-jingu-lee/ante/pull/1966),
+  [`68bd10f`](https://github.com/joshua-jingu-lee/ante/commit/68bd10fab37ffc9d7d46c6bcac684a1265d949a1))
+
+- **feed**: #1968 파생지표 cadence-aware as-of join (다중소스 fundamental null 해소)
+  ([#1969](https://github.com/joshua-jingu-lee/ante/pull/1969),
+  [`e2baf03`](https://github.com/joshua-jingu-lee/ante/commit/e2baf03131d8c565185b6bc0afc55f933124057d))
+
+- **feed**: #1972 backfill 가드 분리 — blocked_days skip / blocked_hours 대기(+취소·관측성)
+  ([#1973](https://github.com/joshua-jingu-lee/ante/pull/1973),
+  [`dcfc108`](https://github.com/joshua-jingu-lee/ante/commit/dcfc108985285277dc74ec633135e05edb448d10))
+
+- **feed**: #1972 stop_event wake-up이 거래시간 window 동시 해제와 race해도 즉시 중단 (Codex 브랜치 리뷰 반영)
+  ([#1973](https://github.com/joshua-jingu-lee/ante/pull/1973),
+  [`dcfc108`](https://github.com/joshua-jingu-lee/ante/commit/dcfc108985285277dc74ec633135e05edb448d10))
+
+- **feed**: #1993 Codex review 후속 — data.go.kr stored_ok 유도 + DART store-merge checkpoint 게이트
+  ([#2301](https://github.com/joshua-jingu-lee/ante/pull/2301),
+  [`77f1a40`](https://github.com/joshua-jingu-lee/ante/commit/77f1a403a19d8007e1a87acd774b787324225300))
+
+- **feed**: #1993 rows_written을 net-new 저장 delta로 (checkpoint/DART QuarterStatus 신호 분리)
+  ([#2301](https://github.com/joshua-jingu-lee/ante/pull/2301),
+  [`77f1a40`](https://github.com/joshua-jingu-lee/ante/commit/77f1a403a19d8007e1a87acd774b787324225300))
+
+- **feed**: #1993 rows_written을 net-new 저장 delta로 — checkpoint·DART store-merge 가드 분리
+  ([#2301](https://github.com/joshua-jingu-lee/ante/pull/2301),
+  [`77f1a40`](https://github.com/joshua-jingu-lee/ante/commit/77f1a403a19d8007e1a87acd774b787324225300))
+
+- **feed**: #2002 daily_runner가 store_merge 경고를 CollectionResult.warnings로 drain (backfill 패턴 미러)
+  ([#2234](https://github.com/joshua-jingu-lee/ante/pull/2234),
+  [`131a74e`](https://github.com/joshua-jingu-lee/ante/commit/131a74e663ee6c4ceb6712b904ef8003824f6716))
+
+- **feed**: #2003 scheduler 날짜 생성 헬퍼를 KST 기준으로 (date.today→datetime.now(tz=KST))
+  ([#2233](https://github.com/joshua-jingu-lee/ante/pull/2233),
+  [`7025432`](https://github.com/joshua-jingu-lee/ante/commit/7025432c3aae750086bfe91e58fdc6533e895820))
+
+- **feed**: #2007 feed lock 원자적 획득(O_CREAT|O_EXCL) + PermissionError=alive 차단 (Closes #2057, #2006)
+  ([#2235](https://github.com/joshua-jingu-lee/ante/pull/2235),
+  [`18046e5`](https://github.com/joshua-jingu-lee/ante/commit/18046e53a878f0829aa6db0f874bf3826e8fc990))
+
+- **feed**: #2015 data.go.kr checkpoint를 written>0에만 전진 + 미공개일 backfill cap (데이터 누락 해소)
+  ([#2259](https://github.com/joshua-jingu-lee/ante/pull/2259),
+  [`e9f3e33`](https://github.com/joshua-jingu-lee/ante/commit/e9f3e334d8a80a7cfaffaf459c78e1034b9a5415))
+
+- **feed**: #2019 RateLimiter 날짜 self-reset + #2048 token refill 시간 전진 (2x TPS 차단)
+  ([#2229](https://github.com/joshua-jingu-lee/ante/pull/2229),
+  [`1b0e225`](https://github.com/joshua-jingu-lee/ante/commit/1b0e2258d476eec242d06873583056fe215cc29e))
+
+- **feed**: #2020 data.go.kr 수집 시 .feed/instruments.parquet 갱신
+  ([#2269](https://github.com/joshua-jingu-lee/ante/pull/2269),
+  [`a7e9ec9`](https://github.com/joshua-jingu-lee/ante/commit/a7e9ec95000f9eb041cbefa885345823146e127a))
+
+- **feed**: #2020 data.go.kr 수집 시 .feed/instruments.parquet 갱신 (srtnCd/itmsNm/mrktCtg upsert)
+  ([#2269](https://github.com/joshua-jingu-lee/ante/pull/2269),
+  [`a7e9ec9`](https://github.com/joshua-jingu-lee/ante/commit/a7e9ec95000f9eb041cbefa885345823146e127a))
+
+- **feed**: #2020 itmsNm/mrktCtg 컬럼 전무 시 instruments.parquet 미생성 (브랜치 리뷰 반영)
+  ([#2269](https://github.com/joshua-jingu-lee/ante/pull/2269),
+  [`a7e9ec9`](https://github.com/joshua-jingu-lee/ante/commit/a7e9ec95000f9eb041cbefa885345823146e127a))
+
+- **feed**: #2021 DARTCollector가 존재하는 corp_code 캐시를 재사용
+  ([#2206](https://github.com/joshua-jingu-lee/ante/pull/2206),
+  [`1d0191d`](https://github.com/joshua-jingu-lee/ante/commit/1d0191d8c4d8aff7c1127e496e72931193edfbb7))
+
+- **feed**: #2026 HTTP 4xx 비재시도 + #2027 UNKNOWN(99/900) 1회 재시도 — DataFeed source retry 정책 (Closes
+  #2027) ([#2240](https://github.com/joshua-jingu-lee/ante/pull/2240),
+  [`284a3fa`](https://github.com/joshua-jingu-lee/ante/commit/284a3fa7fcfbce8c2f303157e88f6994c7eabea4))
+
+- **feed**: #2028 DART 빈 분기를 SKIP_EMPTY로 checkpoint 미전진 (미공시 분기 완료 오인 해소)
+  ([#2260](https://github.com/joshua-jingu-lee/ante/pull/2260),
+  [`d785bc5`](https://github.com/joshua-jingu-lee/ante/commit/d785bc58bfe3b9cea881b3a96a3181f7ba0c1578))
+
+- **feed**: #2029 feed start에서 nice_value 적용 (os.setpriority, best-effort)
+  ([#2258](https://github.com/joshua-jingu-lee/ante/pull/2258),
+  [`91a83aa`](https://github.com/joshua-jingu-lee/ante/commit/91a83aaa11e761f3f200f8c3f26efba678d97fa0))
+
+- **feed**: #2030 scheduler daily_at/backfill_at/blocked_hours HH:MM 형식 검증 + loop 순서 backfill 우선
+  (Closes #2070, #2031) ([#2237](https://github.com/joshua-jingu-lee/ante/pull/2237),
+  [`046a0ef`](https://github.com/joshua-jingu-lee/ante/commit/046a0efebd1b99019eff5d8563478520b116feea))
+
+- **feed**: #2037 guard 타입 검증 + #2038 log_level 적용 — feed 커맨드 공통 config helper (Closes #2038)
+  ([#2245](https://github.com/joshua-jingu-lee/ante/pull/2245),
+  [`1edba76`](https://github.com/joshua-jingu-lee/ante/commit/1edba766e2a56f3ecce9e78c17f4bd896c9da0d4))
+
+- **feed**: #2046 feed config check API 키 네트워크 유효성 검증(valid/invalid/unknown 3-state)
+  ([#2287](https://github.com/joshua-jingu-lee/ante/pull/2287),
+  [`3c50689`](https://github.com/joshua-jingu-lee/ante/commit/3c506899857d999f2fbc3cd3e316c658c1baea95))
+
+- **feed**: #2047 list_reports를 started_at(datetime) 기준 정렬 — 같은 날짜 daily/backfill 순서 정정
+  ([#2257](https://github.com/joshua-jingu-lee/ante/pull/2257),
+  [`a951f62`](https://github.com/joshua-jingu-lee/ante/commit/a951f629cf8cc1fc97cc4c7447fc7422aa892269))
+
+- **feed**: #2051 config set 값 개행 거부(키 주입 차단) + #2050 inject 출력을 실제 store 경로로 (Closes #2050)
+  ([#2242](https://github.com/joshua-jingu-lee/ante/pull/2242),
+  [`eb81872`](https://github.com/joshua-jingu-lee/ante/commit/eb81872c50f6bf68a5948a772951dcc1300ec492))
+
+- **feed**: #2054 DART 분기 실패 시 checkpoint 미전진 (monotonic-safe 재시도)
+  ([#2180](https://github.com/joshua-jingu-lee/ante/pull/2180),
+  [`082d442`](https://github.com/joshua-jingu-lee/ante/commit/082d442864216ab3c746b3085f2611fd94afbf5c))
+
+- **feed**: #2055 DataGoKrCollector raw 필드 schema 검증 정정 + 실패 레코드 skip·surface (Closes #2008)
+  ([#2223](https://github.com/joshua-jingu-lee/ante/pull/2223),
+  [`4a95392`](https://github.com/joshua-jingu-lee/ante/commit/4a953929d396e02c4ecda069722180e620f2760d))
+
+- **feed**: #2055 DataGoKrCollector raw 필드 schema 검증 정정 + 실패 레코드 skip·게이트
+  ([#2223](https://github.com/joshua-jingu-lee/ante/pull/2223),
+  [`4a95392`](https://github.com/joshua-jingu-lee/ante/commit/4a953929d396e02c4ecda069722180e620f2760d))
+
+- **feed**: #2055 validate_all 실패(passed=False) survivor 저장 차단 — schema-skip 계약 방어적 강화
+  ([#2223](https://github.com/joshua-jingu-lee/ante/pull/2223),
+  [`4a95392`](https://github.com/joshua-jingu-lee/ante/commit/4a953929d396e02c4ecda069722180e620f2760d))
+
+- **feed**: #2067 fundamental as-of join을 공시 접수일(available_date) 기준으로 — lookahead 제거
+  ([#2283](https://github.com/joshua-jingu-lee/ante/pull/2283),
+  [`430c50a`](https://github.com/joshua-jingu-lee/ante/commit/430c50a848a5d81fe69ae8b7dff052306b890dc0))
+
+- **feed**: #2068 feed run --format json에 CollectionResult failures/warnings 포함
+  ([#2256](https://github.com/joshua-jingu-lee/ante/pull/2256),
+  [`97517a6`](https://github.com/joshua-jingu-lee/ante/commit/97517a6e2e36d924d318ab7e4cef70690d5c45e8))
+
+- **feed**: #2069 data.go.kr 부분 수집(빈 페이지+totalCount 미달)을 DataGoKrError로 fail-loud
+  ([#2194](https://github.com/joshua-jingu-lee/ante/pull/2194),
+  [`0c44ad5`](https://github.com/joshua-jingu-lee/ante/commit/0c44ad5a0b551e42f429ac5e55c754b968d3a586))
+
+- **feed**: #2078 data.go.kr backfill 실패 시 checkpoint 미전진 (#2054 동형 halt)
+  ([#2181](https://github.com/joshua-jingu-lee/ante/pull/2181),
+  [`5cd769f`](https://github.com/joshua-jingu-lee/ante/commit/5cd769f558c51fc88319618fec42d825f3a20bcd))
+
+- **feed**: #2079 DARTCollector가 빈 corp_code_map을 structured warning으로 표면화
+  ([#2199](https://github.com/joshua-jingu-lee/ante/pull/2199),
+  [`e9585d8`](https://github.com/joshua-jingu-lee/ante/commit/e9585d84264af0fee0d7033fda049337b9d6fca4))
+
+- **feed**: #2080 DataGoKrCollector가 비KRX srtnCd를 drop+warning 처리
+  ([#2195](https://github.com/joshua-jingu-lee/ante/pull/2195),
+  [`bd783d8`](https://github.com/joshua-jingu-lee/ante/commit/bd783d8e6ddae2d112f8b6ac6183f65d5be66040))
+
+- **feed**: #2087 validate_schema가 모든 레코드의 필수 필드/타입 검사
+  ([#2191](https://github.com/joshua-jingu-lee/ante/pull/2191),
+  [`7217621`](https://github.com/joshua-jingu-lee/ante/commit/7217621ffbccdbe10a91364b3eed9a31479f3a63))
+
+- **feed**: #2089 validate_business가 NaN/inf 값을 warning으로 관측
+  ([#2192](https://github.com/joshua-jingu-lee/ante/pull/2192),
+  [`8af7dca`](https://github.com/joshua-jingu-lee/ante/commit/8af7dcafc3db2979cafcc4b25db7d50c07c92a68))
+
+- **feed**: #2099 validate_business가 tz-aware timestamp 시계열 역전 감지 (_try_parse_date fromisoformat
+  fallback + mixed-tz 방어) ([#2239](https://github.com/joshua-jingu-lee/ante/pull/2239),
+  [`11e0528`](https://github.com/joshua-jingu-lee/ante/commit/11e0528a86bacd35c854fea6a9a7793682822216))
+
+- **feed**: #2101 DART daily 모드는 최신 분기 1개만 수집 (backfill_since 전 분기 순회 차단)
+  ([#2279](https://github.com/joshua-jingu-lee/ante/pull/2279),
+  [`c2c997b`](https://github.com/joshua-jingu-lee/ante/commit/c2c997b18b4b18288527b244b3eed92b331a14bc))
+
+- **feed**: #2102 validate_business가 정규화 temporal key로 중복 timestamp 감지
+  ([#2197](https://github.com/joshua-jingu-lee/ante/pull/2197),
+  [`559c534`](https://github.com/joshua-jingu-lee/ante/commit/559c534db8382f239116204a2a4b57bf3c6c39e2))
+
+- **feed**: #2103 validate가 null required field(error)와 unparseable timestamp(warning) 검출
+  ([#2201](https://github.com/joshua-jingu-lee/ante/pull/2201),
+  [`167f64c`](https://github.com/joshua-jingu-lee/ante/commit/167f64ce329bf2ef336fdd25db82309638c7f0a9))
+
+- **feed**: #2104 check_api_keys가 빈 API 키를 미설정으로 판정
+  ([#2196](https://github.com/joshua-jingu-lee/ante/pull/2196),
+  [`a586fc8`](https://github.com/joshua-jingu-lee/ante/commit/a586fc8184901d181162ab02f4fbe3c5ad91f62f))
+
+- **feed**: #2106 RateLimiter daily_count를 request attempt 기준으로 — 실패/재시도 시도 반영
+  ([#2230](https://github.com/joshua-jingu-lee/ante/pull/2230),
+  [`c82fc50`](https://github.com/joshua-jingu-lee/ante/commit/c82fc50cbfd9b8810ba4a059cde7f98bbf8c2664))
+
+- **feed**: #2117 summary에 failures_total 추가 — 비-심볼(날짜/소스) 실패 표면화
+  ([#2285](https://github.com/joshua-jingu-lee/ante/pull/2285),
+  [`0da8301`](https://github.com/joshua-jingu-lee/ante/commit/0da83015ce45f82098be59726abc4d672e400d88))
+
+- **feed**: #2123 report 파일명에 시각 포함 (같은 날 rerun 이력 보존, 동일초 suffix)
+  ([#2300](https://github.com/joshua-jingu-lee/ante/pull/2300),
+  [`54ad6b6`](https://github.com/joshua-jingu-lee/ante/commit/54ad6b664d49b2e7df65d6daa1cc01b119dc90ed))
+
+- **feed**: #2222 data.go.kr business 검증을 정규화 후 OHLCV에 적용
+  ([#2311](https://github.com/joshua-jingu-lee/ante/pull/2311),
+  [`2180695`](https://github.com/joshua-jingu-lee/ante/commit/21806959e92aac33199537d22d4b1184c536679a))
+
+- **gateway**: #2044 주문 취소 완료/실패 이벤트에 symbol/side 채움 (OrderTracker record, cross-account 가드)
+  ([#2288](https://github.com/joshua-jingu-lee/ante/pull/2288),
+  [`7312e1c`](https://github.com/joshua-jingu-lee/ante/commit/7312e1cd86595ae0015e1e213aee5a458518caa6))
+
+- **gateway**: #2124 StopOrderManager.get_orders_for_account 추가(스펙 parity)
+  ([#2189](https://github.com/joshua-jingu-lee/ante/pull/2189),
+  [`6207abb`](https://github.com/joshua-jingu-lee/ante/commit/6207abb6ba11e41ffb5b94911f30c0a846d683b7))
+
+- **gateway**: #2134 cancel_order가 OrderTracker로 broker_order_id 변환 (fail-closed + account scoping)
+  ([#2263](https://github.com/joshua-jingu-lee/ante/pull/2263),
+  [`557391b`](https://github.com/joshua-jingu-lee/ante/commit/557391b82cd4feece73493ebdbbce300bae668c7))
+
+- **gateway**: #2142 취소 broker False 반환 시 OrderCancelFailedEvent 발행
+  ([#2166](https://github.com/joshua-jingu-lee/ante/pull/2166),
+  [`098d5d9`](https://github.com/joshua-jingu-lee/ante/commit/098d5d9b14314ba9567081f53022f330d44869a6))
+
+- **ipc**: #2109 audit를 correction 직후로 이동 (compute_account_diff 실패가 audit 누락시키지 않도록)
+  ([#2291](https://github.com/joshua-jingu-lee/ante/pull/2291),
+  [`beae461`](https://github.com/joshua-jingu-lee/ante/commit/beae4611e3cad538704a6b9756f8ede912f02f48))
+
+- **ipc**: #2109 broker.reconcile --fix 실제 보정 시 조건부 audit (핸들러-레벨)
+  ([#2291](https://github.com/joshua-jingu-lee/ante/pull/2291),
+  [`beae461`](https://github.com/joshua-jingu-lee/ante/commit/beae4611e3cad538704a6b9756f8ede912f02f48))
+
+- **ipc**: #2109 broker.reconcile --fix 실제 보정 시 조건부 audit (핸들러-레벨, fail-closed audit_logger
+  required) ([#2291](https://github.com/joshua-jingu-lee/ante/pull/2291),
+  [`beae461`](https://github.com/joshua-jingu-lee/ante/commit/beae4611e3cad538704a6b9756f8ede912f02f48))
+
+- **ipc**: #2110 상태변경 명령 7개에 audit_action wiring (system halt/clear-halt, bot create/remove,
+  approval approve/reject/cancel) ([#2290](https://github.com/joshua-jingu-lee/ante/pull/2290),
+  [`e7e0cf0`](https://github.com/joshua-jingu-lee/ante/commit/e7e0cf00a786744e7b4c90ec1dbec5dd87c77576))
+
+- **ipc**: #2113 member admin mutation 8개 runtime IPC wiring (IPC-first+fallback, secret 비노출, audit)
+  ([#2296](https://github.com/joshua-jingu-lee/ante/pull/2296),
+  [`8775de9`](https://github.com/joshua-jingu-lee/ante/commit/8775de9f653685f46d0fd97606d5148a764e2c32))
+
+- **member**: #2150 멤버 정지/폐기 시 NotificationEvent 발행(보안 알림 wiring)
+  ([#2187](https://github.com/joshua-jingu-lee/ante/pull/2187),
+  [`bd6c1ae`](https://github.com/joshua-jingu-lee/ante/commit/bd6c1ae23bce46cb7a4529c167f29ce4d9122996))
+
+- **member**: #2294 #2295 register 무조건 master 게이트 + recovery audit sentinel 비충돌·reserved prefix
+  guard ([#2308](https://github.com/joshua-jingu-lee/ante/pull/2308),
+  [`c0c1f90`](https://github.com/joshua-jingu-lee/ante/commit/c0c1f9026e128a331d6d7068b7d7004438eb62b5))
+
+- **reconcile**: #2119 broker.reconcile account-level 재설계 — 1봇-total 보정/다중봇 detect-only (Closes
+  #2118, #2120, #2121, #2122) ([#2271](https://github.com/joshua-jingu-lee/ante/pull/2271),
+  [`aa0b19b`](https://github.com/joshua-jingu-lee/ante/commit/aa0b19b74aab316f29d6b800b101a7b62cb95040))
+
+- **repo**: #1981 config/db/pip_freeze 런타임 스냅샷 git 추적 제거
+  ([#2305](https://github.com/joshua-jingu-lee/ante/pull/2305),
+  [`06057cd`](https://github.com/joshua-jingu-lee/ante/commit/06057cdf5ff210285327fc51b20a4effcfa714f0))
+
+- **report**: #1999 report submit --run backtest_run_id durable 저장 (effective run_id 검증, 컬럼 마이그레이션)
+  ([#2292](https://github.com/joshua-jingu-lee/ante/pull/2292),
+  [`cd5ebf3`](https://github.com/joshua-jingu-lee/ante/commit/cd5ebf34d6e498146f53a4209c3f0a4bb4925531))
+
+- **report**: #2025 detail_json을 표준 JSON으로 검증(NaN/Infinity·비JSON 거부)
+  ([#2241](https://github.com/joshua-jingu-lee/ante/pull/2241),
+  [`96d2314`](https://github.com/joshua-jingu-lee/ante/commit/96d2314c7af8ee24a17139579627b0c7085c5b60))
+
+- **report**: #2136 PerformanceFeedback 조회를 봇 계좌로 스코핑
+  ([#2167](https://github.com/joshua-jingu-lee/ante/pull/2167),
+  [`ddf89b9`](https://github.com/joshua-jingu-lee/ante/commit/ddf89b9872026756efb020392a7649ece5c67a7b))
+
+- **rule**: #2045 RuleEngine이 modify event symbol/side를 OrderTracker로 enrich (modify_rejected 계약 충족,
+  단일 chokepoint) ([#2289](https://github.com/joshua-jingu-lee/ante/pull/2289),
+  [`01d1d2f`](https://github.com/joshua-jingu-lee/ante/commit/01d1d2ffd8c27416e4b7185fea607e91db5c96a9))
+
+- **rule**: #2140 RuleEngine 미실현손익 계산을 봇 계좌로 스코핑
+  ([#2164](https://github.com/joshua-jingu-lee/ante/pull/2164),
+  [`d62523d`](https://github.com/joshua-jingu-lee/ante/commit/d62523d52e2bf5b7680ace84b4b484565b3aed3b))
+
+- **rule**: #2315 미복구 self-order 반복 매수 가드 추가
+  ([#2320](https://github.com/joshua-jingu-lee/ante/pull/2320),
+  [`900bb1c`](https://github.com/joshua-jingu-lee/ante/commit/900bb1cbc64c5590e0f7e87b877593828b8c82dd))
+
+- **strategy**: #2017 StrategyValidator symbols/exchange 일관성 경고(KRX 형식 불일치 warning)
+  ([#2244](https://github.com/joshua-jingu-lee/ante/pull/2244),
+  [`445162e`](https://github.com/joshua-jingu-lee/ante/commit/445162e32f6732c15919364bf633cd8602beb874))
+
+- **strategy**: #2018 StrategyValidator가 최상위 if 내부 실행코드 검사
+  ([#2213](https://github.com/joshua-jingu-lee/ante/pull/2213),
+  [`50ef3c1`](https://github.com/joshua-jingu-lee/ante/commit/50ef3c10a5f2a7e538365067362d72bf26fe2479))
+
+- **strategy**: #2022 StrategyValidator가 모듈 상수로 전달된 invalid exchange 검출
+  ([#2212](https://github.com/joshua-jingu-lee/ante/pull/2212),
+  [`ead7592`](https://github.com/joshua-jingu-lee/ante/commit/ead75929251e94af5cb3bce4cdb0abf846dae9c6))
+
+- **strategy**: #2023 StrategyValidator가 __builtins__ subscript/attribute 우회 검출
+  ([#2214](https://github.com/joshua-jingu-lee/ante/pull/2214),
+  [`b94a38e`](https://github.com/joshua-jingu-lee/ante/commit/b94a38e2626c9f1f57a498030d1fed6e3386eef1))
+
+- **strategy**: #2032 #2033 StrategyValidator가 top-level decorator/default 부작용 검출
+  ([#2215](https://github.com/joshua-jingu-lee/ante/pull/2215),
+  [`80e8be1`](https://github.com/joshua-jingu-lee/ante/commit/80e8be168ef48dbbe72825ae5a888d01584d6a50))
+
+- **strategy**: #2040 StrategyValidator/Loader validate↔load 계약 패리티 (async hook/meta 타입/실제 Strategy
+  상속/loader 파일정의) ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2040 validate↔load 계약 패리티 — on_step async/meta 타입/실제 Strategy 상속/loader 파일정의 카운트
+  (Closes #2041, #2042, #2052) ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2041 meta StrategyMeta 호출을 import-aware로 해석(#2042와 일관) — fake.StrategyMeta
+  false-positive 차단 ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2041 meta 타입 검사를 마지막 할당 기준으로 — 재할당 false-positive 수정
+  ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2042 base 해석을 정의 순서 단일 패스로 — import-then-local-redefine name resolution 정합
+  ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2042 module-alias 재바인딩 무효화(name_binding 대칭) + 정적 name-resolution bounded
+  known-limitation 명문화 ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2042 Strategy 바인딩·클래스 탐지를 module-scope로 한정 — 함수내부 import false-positive 차단
+  ([#2226](https://github.com/joshua-jingu-lee/ante/pull/2226),
+  [`b44b371`](https://github.com/joshua-jingu-lee/ante/commit/b44b371eea115f8e85e2de140c3fd94934cedba4))
+
+- **strategy**: #2043 StrategyValidator가 비리터럴 최상위 assignment 실행식 차단
+  ([#2217](https://github.com/joshua-jingu-lee/ante/pull/2217),
+  [`b25c155`](https://github.com/joshua-jingu-lee/ante/commit/b25c15590f80b95814e9502b3a3de1e575ecb5fd))
+
+- **strategy**: #2049 StrategyMeta.__hash__가 list 필드(symbols)를 tuple로 변환 — unhashable TypeError 수정
+  ([#2238](https://github.com/joshua-jingu-lee/ante/pull/2238),
+  [`f8afac8`](https://github.com/joshua-jingu-lee/ante/commit/f8afac8df35045ac2856bb9ebd849ccfb28b887b))
+
+- **test**: #2277 wall-clock 의존 테스트 결정화 — orchestrator backfill cap 중립화 + fill KST 경계-안전 타임스탬프
+  ([#2278](https://github.com/joshua-jingu-lee/ante/pull/2278),
+  [`3a2b00b`](https://github.com/joshua-jingu-lee/ante/commit/3a2b00b3ad3896e05e42b3a9746e13d006d0ac28))
+
+- **treasury**: #2128 allocate/deallocate IPC가 bot account_id mismatch를 차단 (broker.reconcile 선례 미러)
+  ([#2264](https://github.com/joshua-jingu-lee/ante/pull/2264),
+  [`339cf03`](https://github.com/joshua-jingu-lee/ante/commit/339cf03d2f06fde0f5284ad49256186e89416117))
+
+### Chores
+
+- **docs**: #2143 project-structure.md 재생성(test_bot_schema 추가 반영)
+  ([#2190](https://github.com/joshua-jingu-lee/ante/pull/2190),
+  [`67b750f`](https://github.com/joshua-jingu-lee/ante/commit/67b750fa24e7e4c89aac389cb80474bc80bb4fee))
+
+### Code Style
+
+- **feed**: #2020 instruments 테스트 docstring E501 wrap (lint)
+  ([#2269](https://github.com/joshua-jingu-lee/ante/pull/2269),
+  [`a7e9ec9`](https://github.com/joshua-jingu-lee/ante/commit/a7e9ec95000f9eb041cbefa885345823146e127a))
+
+### Documentation
+
+- Add module guide ([#1977](https://github.com/joshua-jingu-lee/ante/pull/1977),
+  [`efdd9f5`](https://github.com/joshua-jingu-lee/ante/commit/efdd9f5148aceb90ebadb08aa5408881b0243665))
+
+- README guide 문서 구조 보강 ([#1977](https://github.com/joshua-jingu-lee/ante/pull/1977),
+  [`efdd9f5`](https://github.com/joshua-jingu-lee/ante/commit/efdd9f5148aceb90ebadb08aa5408881b0243665))
+
+- README·guide 재구성 — 핵심 개념 문서와 에이전트 온램프(llms.txt) 추가
+  ([#1977](https://github.com/joshua-jingu-lee/ante/pull/1977),
+  [`efdd9f5`](https://github.com/joshua-jingu-lee/ante/commit/efdd9f5148aceb90ebadb08aa5408881b0243665))
+
+- **approval**: #2151 알림 wiring을 현재 구조(ApprovalService가 NotificationEvent 직접 발행)에 맞게 3파일 갱신
+  ([#2253](https://github.com/joshua-jingu-lee/ante/pull/2253),
+  [`ab0bfd2`](https://github.com/joshua-jingu-lee/ante/commit/ab0bfd23505dace365287192e19bd2d4dd6849d1))
+
+- **broker**: #2159 ReconcileScheduler 절을 실제 구현 계약에 맞게 갱신 (미구현 표기 제거,
+  broker_account_id/skip_initial_external_buy/#1946 barrier 반영)
+  ([#2249](https://github.com/joshua-jingu-lee/ante/pull/2249),
+  [`5619690`](https://github.com/joshua-jingu-lee/ante/commit/561969092a3180b82e0db0f7673630e0c1caa95b))
+
+- **broker-adapter**: #2316 fallback을 full-fill 정확매칭으로 협소화 + external 흡수 한계 정직 선언 (Codex 리뷰 반영)
+  ([#2319](https://github.com/joshua-jingu-lee/ante/pull/2319),
+  [`1834c3a`](https://github.com/joshua-jingu-lee/ante/commit/1834c3aad15f8b0906918ee2813d16215fb73220))
+
+- **broker-adapter**: #2316 KIS 모의 당일 체결 position-derived bounded fallback 정의
+  ([#2319](https://github.com/joshua-jingu-lee/ante/pull/2319),
+  [`1834c3a`](https://github.com/joshua-jingu-lee/ante/commit/1834c3aad15f8b0906918ee2813d16215fb73220))
+
+- **broker-adapter**: #2316 §11.6 제목 paper/live → 모의·실전 (용어 가드 #1232 준수)
+  ([#2319](https://github.com/joshua-jingu-lee/ante/pull/2319),
+  [`1834c3a`](https://github.com/joshua-jingu-lee/ante/commit/1834c3aad15f8b0906918ee2813d16215fb73220))
+
+- **broker-adapter**: #2316 모의 당일 체결 position-derived bounded fallback 정의
+  ([#2319](https://github.com/joshua-jingu-lee/ante/pull/2319),
+  [`1834c3a`](https://github.com/joshua-jingu-lee/ante/commit/1834c3aad15f8b0906918ee2813d16215fb73220))
+
+- **cli**: #2156 approval audit-types 분류표 줄에 --format 보강 (브랜치 리뷰 반영)
+  ([#2247](https://github.com/joshua-jingu-lee/ante/pull/2247),
+  [`1665b4a`](https://github.com/joshua-jingu-lee/ante/commit/1665b4a95df951a05645b5b2fd1795124fb4eb56))
+
+- **cli**: #2156 CLI SSOT(03-commands.md) 명령 옵션을 실제 click 정의에 정렬 (data list/backtest run/strategy
+  list/approval) (Closes #2157, #2160, #2161)
+  ([#2247](https://github.com/joshua-jingu-lee/ante/pull/2247),
+  [`1665b4a`](https://github.com/joshua-jingu-lee/ante/commit/1665b4a95df951a05645b5b2fd1795124fb4eb56))
+
+- **cli**: #2156 분류표 줄 원복 — 옵션 보강은 canonical 상세 레퍼런스로 한정 (브랜치 리뷰 수렴)
+  ([#2247](https://github.com/joshua-jingu-lee/ante/pull/2247),
+  [`1665b4a`](https://github.com/joshua-jingu-lee/ante/commit/1665b4a95df951a05645b5b2fd1795124fb4eb56))
+
+- **cli**: CLI SSOT(03-commands.md) 명령 옵션을 실제 click 정의에 정렬 (data list/backtest run/strategy
+  list/approval) ([#2247](https://github.com/joshua-jingu-lee/ante/pull/2247),
+  [`1665b4a`](https://github.com/joshua-jingu-lee/ante/commit/1665b4a95df951a05645b5b2fd1795124fb4eb56))
+
+- **eventbus**: #1997 BacktestCompleteEvent.status 문서를 구현(completed)에 정렬
+  ([#2210](https://github.com/joshua-jingu-lee/ante/pull/2210),
+  [`c577573`](https://github.com/joshua-jingu-lee/ante/commit/c577573bb66b651ba4743b6f78a65fc2fdb2a190))
+
+- **eventbus**: #2146 marker 분류 목록을 코드 _requires_account_id와 정합화 (취소실패/stop order 4건 대상 이동)
+  ([#2163](https://github.com/joshua-jingu-lee/ante/pull/2163),
+  [`0f49dd9`](https://github.com/joshua-jingu-lee/ante/commit/0f49dd9d8acf13ad90fb6a1b0b00ff31efb0f13c))
+
+- **eventbus**: #2153 중앙 이벤트 표를 events.py dataclass에 정렬 — 필드 7행 drift + 누락
+  3행(BotStepCompleted/SystemStarted/DailyReport) (Closes #2148, #2158)
+  ([#2248](https://github.com/joshua-jingu-lee/ante/pull/2248),
+  [`1451465`](https://github.com/joshua-jingu-lee/ante/commit/1451465e65cf5c1cea9dd0f3ddd3db6c0e730e05))
+
+- **eventbus**: #2186 MemberRegistered/Reactivated 구독자 Notification→Audit (member/07 정합)
+  ([#2313](https://github.com/joshua-jingu-lee/ante/pull/2313),
+  [`f8d5e73`](https://github.com/joshua-jingu-lee/ante/commit/f8d5e73640522e4152b0928f700b4d9b10e48ae7))
+
+- **eventbus**: #2252 중앙 표 구독자 열의 Notification semantic(domain-notified) 정의 추가
+  ([#2254](https://github.com/joshua-jingu-lee/ante/pull/2254),
+  [`6a03623`](https://github.com/joshua-jingu-lee/ante/commit/6a036239147a1b3e54456214bb6442d14638d5e2))
+
+- **rule-engine**: #2152 RuleEngine 생성자 예시를 실제 시그니처(kw-only account_id 필수, require_account_id 검증)에
+  정렬 ([#2250](https://github.com/joshua-jingu-lee/ante/pull/2250),
+  [`69bab0a`](https://github.com/joshua-jingu-lee/ante/commit/69bab0a0da4f9c4b63204ef520d40d1b8b6f521c))
+
+- **strategy**: #2016 StrategyValidator 스펙을 impl에 정렬 — open/globals/locals를 금지 내장함수(에러)로, open() 경고
+  항목 제거 ([#2243](https://github.com/joshua-jingu-lee/ante/pull/2243),
+  [`30b7eaf`](https://github.com/joshua-jingu-lee/ante/commit/30b7eaf8cd43e2f5cf944014857ec504bd416e1e))
+
+- **strategy**: #2060 backtest --symbols/--timeframe 생략 시 StrategyMeta fallback 계약 명시
+  ([#2255](https://github.com/joshua-jingu-lee/ante/pull/2255),
+  [`97c868f`](https://github.com/joshua-jingu-lee/ante/commit/97c868f49fc6cb28896b8f4d0d172a8a722a7645))
+
+- **strategy**: #2127 PortfolioView get_positions/get_balance를 모드별(backtest/live·virtual) 키로 명시
+  (parity=#2272) ([#2273](https://github.com/joshua-jingu-lee/ante/pull/2273),
+  [`b7818b4`](https://github.com/joshua-jingu-lee/ante/commit/b7818b455b9490410dbd5a8f99717669de694011))
+
+- **trade**: #2149 skip_external_buy가 보정+불일치 이벤트 발행을 모두 억제함을 반영 (position-reconciler)
+  ([#2251](https://github.com/joshua-jingu-lee/ante/pull/2251),
+  [`1c52388`](https://github.com/joshua-jingu-lee/ante/commit/1c52388a32426334064f6a8b71f9c81fd41bc1d3))
+
+### Refactoring
+
+- **member**: #2294 register 무조건 master 게이트 + #2295 recovery sentinel 비충돌 reserved guard
+  ([#2308](https://github.com/joshua-jingu-lee/ante/pull/2308),
+  [`c0c1f90`](https://github.com/joshua-jingu-lee/ante/commit/c0c1f9026e128a331d6d7068b7d7004438eb62b5))
+
+### Testing
+
+- #1980 asyncio.run mock이 coroutine을 close하지 않아 발생하는 never-awaited 경고 제거
+  ([#2303](https://github.com/joshua-jingu-lee/ante/pull/2303),
+  [`e1f30be`](https://github.com/joshua-jingu-lee/ante/commit/e1f30be7764a95fd5ed264c7e246fc6d5c0a2757))
+
+- Preserve cli module guide notice ([#1977](https://github.com/joshua-jingu-lee/ante/pull/1977),
+  [`efdd9f5`](https://github.com/joshua-jingu-lee/ante/commit/efdd9f5148aceb90ebadb08aa5408881b0243665))
+
+- TestBacktestHistoryRealAuthReadOnlyFilesystem 추가. authenticate_member를
+  ([#1979](https://github.com/joshua-jingu-lee/ante/pull/1979),
+  [`3c93086`](https://github.com/joshua-jingu-lee/ante/commit/3c93086d157d11ae47f154121c97e856c553e241))
+
+- **backtest**: #1989 oversell 슬리피지 체결수량 회귀를 nonzero slippage로 강화
+  ([#2170](https://github.com/joshua-jingu-lee/ante/pull/2170),
+  [`8106682`](https://github.com/joshua-jingu-lee/ante/commit/810668252bae4630a99d4de4086000fec6cf6059))
+
+- **backtest**: #1994 order_type 게이트 buy/sell×타입×cap 전 매트릭스 커버(market sell 회귀·stop_limit sell cap
+  포함) ([#2228](https://github.com/joshua-jingu-lee/ante/pull/2228),
+  [`493aa63`](https://github.com/joshua-jingu-lee/ante/commit/493aa637947f3c0bf35373f30b77869b1ae49344))
+
+- **backtest**: #1994 stop_limit sell + sell-side slippage cap 테스트 보강
+  ([#2228](https://github.com/joshua-jingu-lee/ante/pull/2228),
+  [`493aa63`](https://github.com/joshua-jingu-lee/ante/commit/493aa637947f3c0bf35373f30b77869b1ae49344))
+
+- **backtest**: #2060 factory_drift allowlist backtest.py Database 행번호 갱신 (라인 shift 반영)
+  ([#2255](https://github.com/joshua-jingu-lee/ante/pull/2255),
+  [`97c868f`](https://github.com/joshua-jingu-lee/ante/commit/97c868f49fc6cb28896b8f4d0d172a8a722a7645))
+
+- **cli**: #1974 backtest history 실제 read-only fs e2e(비-mock auth) + §4 경계 문서화
+  ([#1979](https://github.com/joshua-jingu-lee/ante/pull/1979),
+  [`3c93086`](https://github.com/joshua-jingu-lee/ante/commit/3c93086d157d11ae47f154121c97e856c553e241))
+
+- **cli**: #1980 asyncio.run mock이 inline coroutine을 미소비해 발생하는 never-awaited 경고 제거
+  ([#2303](https://github.com/joshua-jingu-lee/ante/pull/2303),
+  [`e1f30be`](https://github.com/joshua-jingu-lee/ante/commit/e1f30be7764a95fd5ed264c7e246fc6d5c0a2757))
+
+- **cli**: #1980 asyncio_run_returning helper가 positional+keyword 모든 coroutine을 close
+  ([#2303](https://github.com/joshua-jingu-lee/ante/pull/2303),
+  [`e1f30be`](https://github.com/joshua-jingu-lee/ante/commit/e1f30be7764a95fd5ed264c7e246fc6d5c0a2757))
+
+- **cli**: #2309 bot remove flaky 결정화 — is_active_runtime mock + conftest gc.collect 제거
+  ([#2310](https://github.com/joshua-jingu-lee/ante/pull/2310),
+  [`c3d0a05`](https://github.com/joshua-jingu-lee/ante/commit/c3d0a05bd7b47ee5ad4dba065c14990fb51ce10b))
+
+- **ipc**: #2304 IPC transport teardown cross-test 오염 제거 (flaky CI 안정화)
+  ([#2307](https://github.com/joshua-jingu-lee/ante/pull/2307),
+  [`e182b78`](https://github.com/joshua-jingu-lee/ante/commit/e182b78c8b6634e2e8d763e3405e05495c3f199f))
+
+- **ipc**: #2304 IPC transport teardown 누수로 인한 flaky CI 안정화
+  ([#2307](https://github.com/joshua-jingu-lee/ante/pull/2307),
+  [`e182b78`](https://github.com/joshua-jingu-lee/ante/commit/e182b78c8b6634e2e8d763e3405e05495c3f199f))
+
+- **ipc**: #2304 leak-source 캡처 assert 보강 (빈 캡처 silent-pass 차단)
+  ([#2307](https://github.com/joshua-jingu-lee/ante/pull/2307),
+  [`e182b78`](https://github.com/joshua-jingu-lee/ante/commit/e182b78c8b6634e2e8d763e3405e05495c3f199f))
+
+- **member**: #2294 #2295 reserved-guard ordering·빈 actor 테스트 충실성 보강
+  ([#2308](https://github.com/joshua-jingu-lee/ante/pull/2308),
+  [`c0c1f90`](https://github.com/joshua-jingu-lee/ante/commit/c0c1f9026e128a331d6d7068b7d7004438eb62b5))
+
+
 ## v0.10.0 (2026-05-29)
 
 ### Bug Fixes
