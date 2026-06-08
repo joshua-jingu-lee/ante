@@ -309,3 +309,88 @@ def test_handle_response_http_200_success_returns_payload() -> None:
 
     result = _run(adapter._handle_response(resp))
     assert result == payload
+
+
+# ── 빈 msg1 폴백 (#2324) ──────────────────────────────────────────
+#
+# msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
+# APIError의 error_message가 절대 비어 있지 않도록 보장한다. 그렇지
+# 않으면 ``KIS API Error [40910000]: `` (콜론 뒤 공백)가 gateway 로그
+# 및 OrderFailedEvent.error_message로 전파되어 triage가 불가능하다.
+
+
+def test_handle_response_http_200_empty_msg1_unregistered_falls_back_to_code() -> None:
+    """HTTP 200 + rt_cd≠0 + 미등록 msg_cd + msg1="" → 코드 보존 폴백.
+
+    미등록 코드(40910000)도 ``알 수 없는 에러 (40910000)``로 코드가
+    보존된 non-empty triage-able 메시지가 된다.
+    """
+    adapter = _make_adapter()
+    payload = {"rt_cd": "1", "msg_cd": "40910000", "msg1": ""}
+    resp = _FakeResponse(status=200, text_body="", json_body=payload)
+
+    with pytest.raises(APIError) as exc_info:
+        _run(adapter._handle_response(resp))
+
+    err = exc_info.value
+    assert err.error_code == "40910000"
+    assert "40910000" in str(err)
+    assert "알 수 없는 에러 (40910000)" in str(err)
+    # 콜론 뒤 본문이 비공백이어야 한다.
+    assert str(err).split("]:", 1)[1].strip() != ""
+
+
+def test_handle_response_http_200_empty_msg1_registered_falls_back_to_korean() -> None:
+    """HTTP 200 + rt_cd≠0 + 등록 msg_cd + msg1="" → 한글 설명 폴백.
+
+    등록 코드(APBK0013)는 ``잘못된 종목코드``로 폴백된다.
+    """
+    adapter = _make_adapter()
+    payload = {"rt_cd": "1", "msg_cd": "APBK0013", "msg1": ""}
+    resp = _FakeResponse(status=200, text_body="", json_body=payload)
+
+    with pytest.raises(APIError) as exc_info:
+        _run(adapter._handle_response(resp))
+
+    err = exc_info.value
+    assert err.error_code == "APBK0013"
+    assert "잘못된 종목코드" in str(err)
+
+
+def test_handle_response_http_200_whitespace_msg1_falls_back() -> None:
+    """HTTP 200 + rt_cd≠0 + msg1="   " (공백만) → strip() 후 폴백.
+
+    공백만 있는 msg1도 strip() 후 빈 값으로 판정되어 폴백되어야 한다.
+    """
+    adapter = _make_adapter()
+    payload = {"rt_cd": "1", "msg_cd": "40910000", "msg1": "   "}
+    resp = _FakeResponse(status=200, text_body="", json_body=payload)
+
+    with pytest.raises(APIError) as exc_info:
+        _run(adapter._handle_response(resp))
+
+    err = exc_info.value
+    assert err.error_code == "40910000"
+    assert "알 수 없는 에러 (40910000)" in str(err)
+    assert str(err).split("]:", 1)[1].strip() != ""
+
+
+def test_handle_response_http_500_empty_msg1_falls_back_to_code() -> None:
+    """HTTP 500 business payload + msg1="" → 등록 코드 한글 폴백.
+
+    IGW00022는 등록 코드이므로 ``원주문번호 오류 또는 처리 불가``로
+    폴백되며, msg_cd / status_code는 보존된다.
+    """
+    adapter = _make_adapter()
+    body = json.dumps({"rt_cd": "1", "msg_cd": "IGW00022", "msg1": ""})
+    resp = _FakeResponse(status=500, text_body=body)
+
+    with pytest.raises(APIError) as exc_info:
+        _run(adapter._handle_response(resp))
+
+    err = exc_info.value
+    assert err.error_code == "IGW00022"
+    assert err.status_code == 500
+    assert "IGW00022" in str(err)
+    assert "원주문번호 오류 또는 처리 불가" in str(err)
+    assert str(err).split("]:", 1)[1].strip() != ""

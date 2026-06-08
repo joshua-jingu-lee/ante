@@ -23,6 +23,7 @@ from ante.broker.circuit_breaker import CircuitBreaker
 from ante.broker.error_codes import (
     PERMANENT_MSG_CODES,
     TRANSIENT_MSG_CODES,
+    get_error_message,
     is_retryable_http_status,
     is_retryable_msg_code,
 )
@@ -390,6 +391,12 @@ class KISBaseAdapter(BrokerAdapter):
             except (ValueError, TypeError):
                 pass
             if msg_cd:
+                # msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
+                # error_message가 비어 있지 않도록 보장한다 (#2324). 이 분기는
+                # msg_cd truthy일 때만 실행되므로 폴백은 항상 의미 있는 값이다.
+                msg1 = str(payload.get("msg1") or "").strip()
+                if not msg1:
+                    msg1 = get_error_message(msg_cd)
                 # retryable 우선순위 (#1338, Codex Plan Review v2):
                 # 1. PERMANENT_MSG_CODES → false 강제.
                 # 2. HTTP non-retryable (auth/client) → false 강제.
@@ -418,7 +425,11 @@ class KISBaseAdapter(BrokerAdapter):
         rt_cd = result.get("rt_cd", "")
         if rt_cd != "0":
             msg_cd = result.get("msg_cd", "")
-            msg1 = result.get("msg1", "Unknown")
+            # msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
+            # error_message가 비어 있지 않도록 보장한다 (#2324).
+            msg1 = str(result.get("msg1") or "").strip()
+            if not msg1:
+                msg1 = get_error_message(msg_cd)
             retryable = is_retryable_msg_code(msg_cd)
             raise APIError(
                 f"KIS API Error [{msg_cd}]: {msg1}",
