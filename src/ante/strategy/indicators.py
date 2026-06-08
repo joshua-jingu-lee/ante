@@ -97,6 +97,7 @@ class IndicatorCalculator:
             결과 키 → numpy 배열 딕셔너리.
             단일 출력: ``{"sma": array}``.
             다중 출력: ``{"macd": array, "signal": array, "hist": array}``.
+            데이터 부족 등으로 계산 불가 시(pandas-ta가 None 반환) 빈 dict ``{}``.
 
         Raises:
             ValueError: 미지원 지표 또는 필수 입력 누락.
@@ -133,6 +134,13 @@ class IndicatorCalculator:
             result = func(high, low, close, volume, **merged_params)
         else:
             raise ValueError(f"Unknown input type: {input_type}")
+
+        # 데이터 부족 등으로 pandas-ta가 None을 반환하면 계산 불가 → 빈 dict.
+        # 이 가드가 다중/단일 출력 두 None 경우를 한 곳에서 처리한다
+        # (LiveDataProvider.get_indicator의 빈 OHLCV 동작과 동일 sentinel).
+        if result is None:
+            logger.warning("지표 계산 불가(데이터 부족/None 결과): %s", name_lower)
+            return {}
 
         # 결과 포맷팅
         if name_lower in _MULTI_OUTPUT:

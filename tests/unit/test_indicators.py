@@ -83,6 +83,37 @@ def ohlcv_arrays() -> dict[str, np.ndarray]:
     }
 
 
+@pytest.fixture
+def short_ohlcv_arrays() -> dict[str, np.ndarray]:
+    """지표 계산에 부족한 짧은 OHLCV (n=5).
+
+    macd(slow=26 + signal=9), bbands(length=20), stoch(k=14) 등의 lookback
+    윈도우 미만이라 pandas-ta가 ``None``을 반환한다.
+    """
+    rng = np.random.default_rng(42)
+    n = 5
+    close = 50000.0 + np.cumsum(rng.normal(0, 100, n))
+    high = close + rng.uniform(50, 200, n)
+    low = close - rng.uniform(50, 200, n)
+    open_ = close + rng.normal(0, 50, n)
+    volume = rng.uniform(1000, 10000, n)
+    return {
+        "open": open_,
+        "high": high,
+        "low": low,
+        "close": close,
+        "volume": volume,
+    }
+
+
+@pytest.fixture
+def empty_ohlcv_arrays() -> dict[str, np.ndarray]:
+    """빈 OHLCV 배열 딕셔너리."""
+    return {
+        k: np.array([], dtype=float) for k in ("open", "high", "low", "close", "volume")
+    }
+
+
 # ── IndicatorCalculator ──
 
 
@@ -254,6 +285,78 @@ def test_compute_stoch(ohlcv_arrays: dict[str, np.ndarray]):
     assert set(result.keys()) == {"slowk", "slowd"}
 
 
+# ── None 결과 가드 (#2323) ──
+#
+# pandas-ta는 데이터 부족 시 None을 반환할 수 있다. compute()가 이를 방어하지
+# 않으면 다중 출력 지표는 `dict(zip(keys, [np.asarray(r) for r in result]))`
+# 에서 `TypeError: 'NoneType' object is not iterable`로 하드 크래시하고
+# (보고된 버그), 단일 출력 지표는 `np.asarray(None)` → `array(None, dtype=object)`
+# 로 조용히 오염된다. 두 경우 모두 빈 dict `{}`를 반환해야 한다.
+
+
+def test_compute_macd_short_returns_empty(
+    short_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """짧은 OHLCV에서 macd는 빈 dict를 반환한다 (보고된 TypeError 미발생)."""
+    result = IndicatorCalculator.compute("macd", short_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_bbands_short_returns_empty(
+    short_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """짧은 OHLCV에서 bbands는 빈 dict를 반환한다 (보고된 TypeError 미발생)."""
+    result = IndicatorCalculator.compute("bbands", short_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_stoch_short_returns_empty(
+    short_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """짧은 OHLCV에서 stoch는 빈 dict를 반환한다 (_MULTI_OUTPUT 대표성)."""
+    result = IndicatorCalculator.compute("stoch", short_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_macd_empty_returns_empty(
+    empty_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """빈 OHLCV에서 macd는 빈 dict를 반환한다."""
+    result = IndicatorCalculator.compute("macd", empty_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_bbands_empty_returns_empty(
+    empty_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """빈 OHLCV에서 bbands는 빈 dict를 반환한다."""
+    result = IndicatorCalculator.compute("bbands", empty_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_sma_empty_returns_empty(
+    empty_ohlcv_arrays: dict[str, np.ndarray],
+):
+    """빈 OHLCV에서 단일 출력 sma는 빈 dict를 반환한다.
+
+    가드 이전에는 `np.asarray(None)` → `{"sma": array(None, dtype=object)}`
+    로 조용히 오염된 0-d object array를 반환했다. 이제 빈 dict여야 한다.
+    """
+    result = IndicatorCalculator.compute("sma", empty_ohlcv_arrays)
+    assert result == {}
+
+
+def test_compute_none_guard_logs_warning(
+    short_ohlcv_arrays: dict[str, np.ndarray],
+    caplog: pytest.LogCaptureFixture,
+):
+    """계산 불가 시 경고 로그를 남긴다."""
+    with caplog.at_level(logging.WARNING, logger="ante.strategy.indicators"):
+        result = IndicatorCalculator.compute("macd", short_ohlcv_arrays)
+    assert result == {}
+    assert any("지표 계산 불가" in rec.message for rec in caplog.records)
+
+
 # ── ohlcv_to_dataframe / ohlcv_to_numpy ──
 
 
@@ -375,6 +478,71 @@ async def test_context_get_indicator_computes_directly():
     result = await ctx.get_indicator("005930", "sma", {"length": 10})
     assert "sma" in result
     assert isinstance(result["sma"], np.ndarray)
+
+
+async def test_context_get_indicator_short_ohlcv_returns_empty():
+    """짧은 OHLCV에서 get_indicator(macd)가 빈 dict를 반환한다 (#2323).
+
+    보고된 end-to-end 경로: ctx.get_indicator -> IndicatorCalculator.compute가
+    데이터 부족 시 None을 받아 `TypeError: 'NoneType' object is not iterable`
+    로 봇 루프를 크래시시켰다. 이제 빈 dict로 안정적으로 반환되어야 한다.
+
+    get_indicator는 `get_ohlcv(symbol, limit=500)`을 호출하지만, 아래 Fake는
+    limit을 무시하고 macd lookback(slow=26+signal=9) 미만인 n=5짜리 짧은
+    DataFrame을 반환해 계산 불가를 유도한다.
+    """
+
+    class FakeDataProvider:
+        async def get_ohlcv(
+            self, symbol: str, timeframe: str = "1d", limit: int = 100
+        ) -> pl.DataFrame:
+            # limit 무시: 항상 n=5짜리 짧은 데이터만 반환.
+            rng = np.random.default_rng(42)
+            n = 5
+            close = 50000.0 + np.cumsum(rng.normal(0, 100, n))
+            high = close + rng.uniform(50, 200, n)
+            low = close - rng.uniform(50, 200, n)
+            open_ = close + rng.normal(0, 50, n)
+            volume = rng.uniform(1000, 10000, n)
+            return pl.DataFrame(
+                {
+                    "open": open_.tolist(),
+                    "high": high.tolist(),
+                    "low": low.tolist(),
+                    "close": close.tolist(),
+                    "volume": volume.tolist(),
+                }
+            )
+
+        async def get_current_price(self, symbol: str) -> float:
+            return 50000.0
+
+        async def get_indicator(
+            self, symbol: str, indicator: str, params: dict | None = None
+        ) -> dict:
+            return {"fallback": True}
+
+    class FakePortfolio:
+        def get_positions(self, bot_id: str) -> dict:
+            return {}
+
+        def get_balance(self, bot_id: str) -> dict:
+            return {}
+
+    class FakeOrderView:
+        def get_open_orders(self, bot_id: str) -> list:
+            return []
+
+    from ante.strategy.context import StrategyContext
+
+    ctx = StrategyContext(
+        bot_id="test-bot",
+        data_provider=FakeDataProvider(),  # type: ignore[arg-type]
+        portfolio=FakePortfolio(),  # type: ignore[arg-type]
+        order_view=FakeOrderView(),  # type: ignore[arg-type]
+    )
+    result = await ctx.get_indicator("069500", "macd", {})
+    assert result == {}
 
 
 # ── LiveDataProvider 지표 계산 통합 테스트 ──
