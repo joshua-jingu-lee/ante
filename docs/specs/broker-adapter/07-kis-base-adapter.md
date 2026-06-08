@@ -50,5 +50,6 @@ KIS API는 broker-side business failure(예: 원주문번호 오류, 잘못된 �
    2. HTTP status가 non-retryable(401/403/404/422 등) → `False` (강제, msg_cd 무시).
    3. `msg_cd` ∈ `TRANSIENT_MSG_CODES` → `True`.
    4. 그 외 unknown msg_cd → HTTP status retryable 기준에 위임.
+5. **메시지 비공백 보장 (#2324)**: business error 승격 시 `msg1`이 빈 문자열/공백이면 `get_error_message(msg_cd)`로 폴백해 `APIError`의 error_message가 절대 비어 있으면 안 된다. 미등록 코드도 `알 수 없는 에러 ({msg_cd})`로 코드가 보존된 triage-able 메시지가 된다. (generic `HTTP <status>: <text>` fallback 경로는 해당 없음.)
 
 HTTP 200 + `rt_cd != "0"` 경로는 기존 동작을 유지하며 별도로 `error_code = msg_cd`만 설정한다 (status_code 미설정).
