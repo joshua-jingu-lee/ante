@@ -36,6 +36,8 @@ pandas-ta를 래핑하여 15종의 기술 지표를 계산한다. pandas-ta는 *
 | `supported_indicators` | — | `list[str]` | 지원 지표 목록 |
 | `compute` | `name: str, ohlcv: dict[str, ndarray], **params` | `dict[str, ndarray]` | 지표 계산. 단일 출력: `{"sma": array}`, 다중: `{"macd": array, "signal": array, "hist": array}` |
 
+데이터 부족 등으로 지표를 계산할 수 없으면(pandas-ta가 `None` 반환) `compute`는 빈 dict `{}`를 반환한다 (`LiveDataProvider.get_indicator`의 빈 OHLCV 동작과 동일 sentinel). 이 계약은 단일·다중 출력 지표 모두에 적용되며, 세 소비자(`StrategyContext` / `LiveDataProvider` / `BacktestDataProvider`)가 동일하게 안정적인 빈 결과를 받는다.
+
 `ohlcv_to_numpy()` 유틸리티: polars DataFrame 또는 `list[dict]`를 numpy 배열 딕셔너리로 변환.
 
 **설계 근거**:
