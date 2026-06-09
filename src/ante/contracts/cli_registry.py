@@ -1842,9 +1842,10 @@ AUDIT_CONTRACTS: tuple[CliCommandContract, ...] = (
 # 일반 ``fmt.success`` / ``fmt.output`` 단일 envelope dump 는 *발생하지
 # 않는다* — validation 실패 분기 (``_fail``) 만 JSON 모드에서 ``fmt.error(
 # msg, code=...)`` envelope 을 dump 하고 즉시 SystemExit 한다 (signal.py:93-
-# 104). 채널 수립 후에는 ``SignalChannel.run()`` 이 JSON Lines stream 을
-# 직접 stdin/stdout 으로 처리한다 — fmt 계열 호출 없음. envelope SSOT
-# (#1821) 의 ``ContractKind = "stream"`` 으로 분류한다.
+# 104). 핸드셰이크 OK 후에는 CLI 가 데몬과 양방향 relay(``_pump_in`` /
+# ``_pump_out``) 만 수행해 JSON Lines stream 을 stdin/stdout 위로 운반한다
+# (#2338 thin IPC relay — in-process ``SignalChannel`` 미구성). fmt 계열 호출
+# 없음. envelope SSOT (#1821) 의 ``ContractKind = "stream"`` 으로 분류한다.
 #
 # envelope 표기: 본 leaf 는 단일 envelope dump 가 없으므로 ``raw_legacy``
 # 로 표시한다 — 일반 success/data envelope 이 부재하다는 의미를 본 registry
@@ -1859,9 +1860,11 @@ AUDIT_CONTRACTS: tuple[CliCommandContract, ...] = (
 # execution 분류 (``docs/specs/cli/03-commands.md`` SSOT — signal connect
 # 는 long-running / streaming 분류):
 # - ``long_running`` (1 개, 전체): ``connect``. ``asyncio.run(_run_connect)``
-#   로 ``SignalChannel.run()`` (stream loop) 을 실행. 본 registry 의
-#   ExecutionClass vocab 매핑 (모듈 docstring normative 표) 에 따라
-#   ``"long_running"`` 으로 분류 (streaming 도 흡수).
+#   가 데몬으로 ``signal.connect`` 핸드셰이크를 보낸 뒤 OK 면 동일 연결 위에서
+#   ``gather(pump_in, pump_out)`` 양방향 relay (stream loop) 를 실행한다 (#2338
+#   thin IPC relay — daemon-위임). 본 registry 의 ExecutionClass vocab 매핑
+#   (모듈 docstring normative 표) 에 따라 ``"long_running"`` 으로 분류 (streaming
+#   도 흡수).
 SIGNAL_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("signal", "connect"),
