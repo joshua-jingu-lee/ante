@@ -210,18 +210,18 @@ baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴
 ``SignalKeyManagerNotConfigured`` (``.code="SERVICE_NOT_CONFIGURED"``) 를 도입해
 이 상수를 ``EXCEPTION_TO_SPEC`` 한 줄 entry 로 wiring 한다(전용 코드 미발명).
 
-#2336 (PR#1) signal.connect 핸드셰이크 신규 4코드:
+#2336 (PR#1) / #2337 (PR#2) signal.connect 핸드셰이크 신규 4코드:
 
 - ``INVALID_SIGNAL_KEY`` (validation) — ``InvalidSignalKey`` typed entry.
 - ``BOT_NOT_RUNNING`` (state_conflict) — ``BotNotRunning`` typed entry.
 - ``MALFORMED_REQUEST`` (validation) — server.py 가 비-dict 첫 프레임에 inline
   envelope 으로 발화. typed exception 없음 → 상수-only(entry 미등록).
 - ``BOT_SIGNAL_CHANNEL_BUSY`` (state_conflict) — bot_id 당 단일 connect 거부.
-  raiser 는 PR#2(#2337) ``SignalChannelRegistry`` 이며, 본 PR 은 ErrorSpec
-  상수만 등록해 #2335 contract-drift 를 종료한다(상수-only, PR#1 raiser 없음).
+  raiser 는 PR#2(#2337) ``SignalChannelRegistry.register`` 이며, PR#2 가
+  ``BotSignalChannelBusy`` typed entry 를 추가한다(PR#1 은 상수-only 였음).
 
-즉 typed-2(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``) + inline-2
-(``MALFORMED_REQUEST``/``BOT_SIGNAL_CHANNEL_BUSY``) split. typed-2 의
+즉 PR#2 머지 후 typed-3(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``/
+``BOT_SIGNAL_CHANNEL_BUSY``) + inline-1(``MALFORMED_REQUEST``) split. typed-3 의
 ``EXCEPTION_TO_SPEC`` entry 는 helper 의 bare-``.code``→``internal`` wrap 을
 회피해 category 정확성을 lock 하는 load-bearing 이다.
 
@@ -258,6 +258,7 @@ from ante.bot.exceptions import (
     BotNotAcceptingSignals,
     BotNotFoundError,
     BotNotRunning,
+    BotSignalChannelBusy,
     BotStateConflict,
     BotStrategyAlreadyRunningError,
     InvalidSignalKey,
@@ -552,12 +553,13 @@ _BOT_IMMUTABLE_FIELD_SPEC: Final[ErrorSpec] = ErrorSpec(
 #
 # error-taxonomy.md 가 신규 4코드를 분류한다: ``INVALID_SIGNAL_KEY``=validation,
 # ``BOT_NOT_RUNNING``=state_conflict, ``MALFORMED_REQUEST``=validation,
-# ``BOT_SIGNAL_CHANNEL_BUSY``=state_conflict. 이 중 typed exception 이 존재하는
-# 2코드(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``)만 ``EXCEPTION_TO_SPEC`` 에
-# entry 를 갖고, 나머지 2코드는 상수-only(``MALFORMED_REQUEST`` 는 server.py 가
-# 비-dict 첫 프레임에 대해 inline envelope 으로 발화, ``BOT_SIGNAL_CHANNEL_BUSY``
-# 의 raiser 는 단일-connect 정책으로 PR#2(#2337)). ``_MALFORMED_REQUEST_SPEC``
-# 와 동형으로 ``_SERVICE_NOT_CONFIGURED_SPEC`` reserved 선례를 따른다.
+# ``BOT_SIGNAL_CHANNEL_BUSY``=state_conflict. PR#2(#2337) 머지 후 typed
+# exception 이 존재하는 3코드(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``/
+# ``BOT_SIGNAL_CHANNEL_BUSY``)가 ``EXCEPTION_TO_SPEC`` entry 를 갖고, 나머지
+# 1코드(``MALFORMED_REQUEST``)는 상수-only(server.py 가 비-dict 첫 프레임에 대해
+# inline envelope 으로 발화). ``BOT_SIGNAL_CHANNEL_BUSY`` 의 raiser 는 단일-connect
+# 정책으로 PR#2 의 ``SignalChannelRegistry.register`` 다. ``_MALFORMED_REQUEST_SPEC``
+# 는 ``_SERVICE_NOT_CONFIGURED_SPEC`` reserved 선례를 따른다(typed 없음).
 
 # ``signal.connect`` 게이트① — signal key 검증 실패. 입력 계약 위반이므로
 # ``validation`` 카테고리. server.py:446 ``getattr(e, "code", ...)`` 가
@@ -586,8 +588,9 @@ _MALFORMED_REQUEST_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 # 같은 봇에 이미 active session 이 있을 때 두 번째 핸드셰이크 거부 (bot_id 당
 # 단일 connect). 운영 상태 충돌이므로 ``state_conflict``. raiser 는 PR#2
-# (#2337) 의 ``SignalChannelRegistry`` 이며, 본 PR 은 ErrorSpec 상수만 등록해
-# #2335 contract-drift 를 종료한다(상수-only, PR#1 에 raiser 없음 — 의도적).
+# (#2337) 의 ``SignalChannelRegistry.register`` (atomic check-and-insert) 이며,
+# PR#2 가 ``BotSignalChannelBusy`` typed entry 를 ``EXCEPTION_TO_SPEC`` 에
+# wiring 해 category 정확성(``internal`` wrap 회피)을 lock 한다(PR#1 상수-only).
 _BOT_SIGNAL_CHANNEL_BUSY_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_SIGNAL_CHANNEL_BUSY",
     category="state_conflict",
@@ -880,13 +883,17 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     BotStrategyAlreadyRunningError: _BOT_STRATEGY_ALREADY_RUNNING_SPEC,
     # ── #2282 bot account_id 불변 lock (Account 선례 미러) ────────────────
     BotImmutableFieldError: _BOT_IMMUTABLE_FIELD_SPEC,
-    # ── #2336/#2334 PR#1 signal.connect 핸드셰이크 (typed 2 + 재사용 1) ────
-    # ``MALFORMED_REQUEST``/``BOT_SIGNAL_CHANNEL_BUSY`` 는 typed exception 이
-    # 없어 entry 를 두지 않는다(추가 시 NameError — ``_SERVICE_NOT_CONFIGURED_SPEC``
-    # 상수-only 선례). ``SignalKeyManagerNotConfigured`` 는 기존
-    # ``_SERVICE_NOT_CONFIGURED_SPEC`` 를 재사용해 category 정확성을 wiring.
+    # ── #2336/#2334 PR#1 + #2337 PR#2 signal.connect 핸드셰이크 (typed 3 + 재사용 1) ─
+    # ``MALFORMED_REQUEST`` 만 typed exception 이 없어 entry 를 두지 않는다(상수-only,
+    # ``_SERVICE_NOT_CONFIGURED_SPEC`` 선례 — server.py inline 발화). PR#2 가
+    # ``BotSignalChannelBusy`` (``SignalChannelRegistry.register`` raiser) typed
+    # entry 를 추가했다(PR#1 은 ``_BOT_SIGNAL_CHANNEL_BUSY_SPEC`` 상수-only).
+    # ``SignalKeyManagerNotConfigured`` 는 기존 ``_SERVICE_NOT_CONFIGURED_SPEC`` 를
+    # 재사용해 category 정확성을 wiring. ``SignalChannelRegistryFrozen`` 은
+    # shutdown-only 내부 가드라 EXCEPTION_TO_SPEC 미등록(generic EXECUTION_ERROR).
     InvalidSignalKey: _INVALID_SIGNAL_KEY_SPEC,
     BotNotRunning: _BOT_NOT_RUNNING_SPEC,
+    BotSignalChannelBusy: _BOT_SIGNAL_CHANNEL_BUSY_SPEC,
     SignalKeyManagerNotConfigured: _SERVICE_NOT_CONFIGURED_SPEC,
     # ── #1843 sub-PR 4 treasury 7 sub-class (실측 .code mirror) ───────────
     TreasuryInvalidAmountError: _TREASURY_INVALID_AMOUNT_SPEC,

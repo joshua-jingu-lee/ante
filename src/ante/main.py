@@ -160,6 +160,9 @@ class Services:
     fill_outbox: Any = None
     fill_outbox_publisher: Any = None
     bot_manager: Any = None
+    # #2337: signal.connect lifecycle 권위 레지스트리. _init_trading 에서 1개
+    # 인스턴스를 만들어 BotManager·ServiceRegistry·IPCServer 3곳에 동일 주입한다.
+    signal_channel_registry: Any = None
     virtual_executor: Any = None
     live_portfolio: Any = None
     strategy_snapshot: Any = None
@@ -553,6 +556,14 @@ async def _init_trading(s: Services) -> None:
     signal_key_manager = SignalKeyManager(db=s.db)
     await signal_key_manager.initialize()
 
+    # #2337: signal.connect lifecycle 권위 레지스트리를 BotManager 생성 **전**
+    # 만들어, BotManager·ServiceRegistry(_init_ipc)·IPCServer 3곳에 동일 인스턴스
+    # 를 주입한다. zero-arg(구독은 BotManager 소관). shutdown 에서 freeze →
+    # close_all('draining') 으로 sweep 한다.
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
+
+    s.signal_channel_registry = SignalChannelRegistry()
+
     s.bot_manager = BotManager(
         eventbus=s.eventbus,
         db=s.db,
@@ -562,6 +573,7 @@ async def _init_trading(s: Services) -> None:
         treasury_manager=s.treasury_manager,
         trade_service=s.trade_service,
         signal_key_manager=signal_key_manager,
+        signal_channel_registry=s.signal_channel_registry,
     )
     await s.bot_manager.initialize()
 
@@ -1838,6 +1850,10 @@ async def _init_ipc(s: Services) -> None:
         # ``trade_service`` 를 주입한다. ``audit_logger`` 와 동형의 optional
         # 필드이며, ``enrich_bot_info`` 가 None 시 positions 키를 부재시킨다.
         trade_service=s.trade_service,
+        # Refs #2337: signal.connect 핸드셰이크 핸들러가 atomic register 로
+        # 단일-connect 게이트를 걸고 ``_run_signal_stream`` 이 adopt/unregister
+        # 하도록 BotManager 와 동일 인스턴스를 주입한다.
+        signal_channel_registry=s.signal_channel_registry,
     )
 
     command_registry = CommandRegistry()
@@ -1951,6 +1967,17 @@ async def _shutdown(s: Services) -> None:
     if s.ipc_server:
         await s.ipc_server.stop_accepting()
         logger.info("IPCServer 새 연결 수락 중지")
+
+    # Refs #2337: signal.connect 채널 sweep. stop_accepting 직후·stop_all/
+    # db.close **앞**(channels-before-bots-before-db). **freeze 먼저**(새
+    # register window 차단 — signal.connect 는 is_mutating=False 라 SHUTTING_DOWN
+    # 핸드셰이크 통과) → close_all('draining') 으로 await-to-completion(단순
+    # cancel 이 아니라 read/writer 정리 완료까지 대기 — query 코루틴이 db.close
+    # 너머 생존 금지). None-safe.
+    if s.signal_channel_registry:
+        s.signal_channel_registry.freeze()
+        await s.signal_channel_registry.close_all("draining")
+        logger.info("SignalChannelRegistry sweep 완료 — 모든 시그널 채널 종료")
 
     if s.daily_report_scheduler:
         await s.daily_report_scheduler.stop()

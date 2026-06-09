@@ -20,6 +20,11 @@ BOT_IMMUTABLE_FIELD_CODE = "BOT_IMMUTABLE_FIELD"
 # SSOT(error-taxonomy.md) 의 공통 ``SERVICE_NOT_CONFIGURED`` 를 재사용한다.
 INVALID_SIGNAL_KEY_CODE = "INVALID_SIGNAL_KEY"
 BOT_NOT_RUNNING_CODE = "BOT_NOT_RUNNING"
+# Refs #2334 / #2337 (PR#2): bot_id 당 단일 connect 정책. 같은 봇에 이미 active
+# session 이 있을 때 두 번째 핸드셰이크를 거부하는 stable code. PR#1 은 상수-only
+# 로 ErrorSpec 만 등록했고, raiser(``SignalChannelRegistry.register``)와
+# ``EXCEPTION_TO_SPEC`` typed entry 는 본 PR 에서 추가한다.
+BOT_SIGNAL_CHANNEL_BUSY_CODE = "BOT_SIGNAL_CHANNEL_BUSY"
 
 
 class BotError(Exception):
@@ -170,3 +175,39 @@ class SignalKeyManagerNotConfigured(BotError):  # noqa: N818
 
     def __init__(self) -> None:
         super().__init__("SignalKeyManager not configured: signal_key_manager")
+
+
+class BotSignalChannelBusy(BotError):  # noqa: N818
+    """``signal.connect`` 단일-connect 정책 — active session 존재 (#2334/#2337).
+
+    ``SignalChannelRegistry.register`` 가 같은 ``bot_id`` 에 대해 두 번째
+    핸드셰이크를 atomic check-and-insert 로 거부할 때 raise 한다. ack write
+    **전** 핸드셰이크 핸들러에서 raise 되어 IPC ``server.py`` 의
+    ``getattr(e, "code", ...)`` 가 안정 코드 ``BOT_SIGNAL_CHANNEL_BUSY`` 로
+    변환한 Phase-B error envelope 으로 거부된다(stream 미진입).
+
+    **redaction 불변**: 메시지에 ``bot_id``/``session_id``/키를 절대
+    interpolate 하지 않는다. ``__init__`` 인자를 0개로 강제해 식별자가 새는
+    경로를 차단한다(``InvalidSignalKey`` 선례 미러, error-taxonomy.md
+    ``state_conflict`` 카테고리).
+    """
+
+    code: str = BOT_SIGNAL_CHANNEL_BUSY_CODE
+
+    def __init__(self) -> None:
+        super().__init__("Bot already has an active signal channel session")
+
+
+class SignalChannelRegistryFrozen(BotError):  # noqa: N818
+    """``SignalChannelRegistry`` 가 freeze 된 후 register 시도 (#2334/#2337).
+
+    shutdown sweep(``freeze()`` → ``close_all('draining')``) 진입 후 들어온
+    핸드셰이크가 새 session 을 등록하려 할 때 ``register`` 가 raise 한다.
+    re-register leak(sweep 이후 채널 누적)을 차단하는 내부 가드다.
+
+    **EXCEPTION_TO_SPEC 미등록(코드 없음)**: 정상 운영에서는 발생하지 않는
+    shutdown-only 경로이고, raise 시점은 핸드셰이크 핸들러 내부라 IPC
+    ``_dispatch`` 의 generic ``EXECUTION_ERROR`` fallback 으로 충분하다(전용
+    안정 코드를 발명하지 않는다). adopt-time generation re-check 의 즉시
+    self-close 분기와 동형 — 외부 표면에 stable code 를 노출할 계약이 없다.
+    """

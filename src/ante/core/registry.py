@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from ante.approval.service import ApprovalService
     from ante.audit.logger import AuditLogger
     from ante.bot.manager import BotManager
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
     from ante.config.dynamic import DynamicConfigService
     from ante.eventbus import EventBus
     from ante.member.service import MemberService
@@ -50,3 +51,10 @@ class ServiceRegistry:
     audit_logger: AuditLogger | Any = field(default=None)
     trade_service: TradeService | Any = field(default=None)
     member_service: MemberService | Any = field(default=None)
+    # Refs #2334 / #2337 (PR#2): signal.connect lifecycle 의 단일 권위 레지스트리.
+    # 핸드셰이크 핸들러(``_handle_signal_connect``)가 atomic ``register`` 로
+    # 단일-connect 게이트를 걸고, ``_run_signal_stream`` 이 adopt/unregister 하며,
+    # ``BotManager`` 가 rotate/delete/bot-stopped teardown 으로 ``close_bot`` 한다.
+    # ``audit_logger`` 와 동형의 optional 필드 — legacy/headless 환경(테스트, CLI
+    # cold-path)은 ``None`` 이며 핸들러는 ``getattr(svc, ..., None)`` no-op 한다.
+    signal_channel_registry: SignalChannelRegistry | Any = field(default=None)

@@ -10,8 +10,11 @@ Refs #1184: lifecycle state machine을 도입해 shutdown 중 mutating
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import logging
 import os
+import struct
 import uuid
 from enum import Enum
 from pathlib import Path
@@ -25,6 +28,45 @@ if TYPE_CHECKING:
     from ante.ipc.registry import CommandRegistry
 
 logger = logging.getLogger(__name__)
+
+# Refs #2334 §14 (#2337): signal.connect outbound out_queue 의 bounded 상한.
+# 초과(laggard)면 disconnect-laggard 로 ``{closed,reason:lagged}`` 후 종료한다.
+# config 화는 §14 follow-up(본 PR 은 상수, known-limitation).
+SIGNAL_OUT_QUEUE_MAX = 512
+# Refs #2337 F2: daemon-initiated close 가 in-flight on_data publish 를 grace
+# 동안 await 한 뒤 read_task 를 cancel 한다(at-most-one trailing). 초과분은
+# 백그라운드 publish 계속 + read_task cancel(§14 tunable, known-limitation).
+SIGNAL_INFLIGHT_GRACE = 2.0
+# Refs #2337: signal.connect 핸드셰이크의 expected typed-validation 거부 코드.
+# ``_dispatch`` 가 이 집합의 코드는 traceback 없는 구조화 WARNING 으로 로깅해
+# 키/args 노출과 가짜 ERROR traceback 을 회피한다(그 외는 logger.exception).
+_EXPECTED_DISPATCH_REJECT_CODES = frozenset(
+    {
+        "INVALID_SIGNAL_KEY",
+        "BOT_NOT_RUNNING",
+        "BOT_NOT_ACCEPTING_SIGNALS",
+        "BOT_SIGNAL_CHANNEL_BUSY",
+        "MALFORMED_REQUEST",
+    }
+)
+
+
+def _encode_signal_frame(frame: dict) -> bytes:
+    """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화 (#2337).
+
+    ``protocol.encode`` 와 동일한 ``[4바이트 빅엔디안 길이][JSON]`` framing 이되,
+    legacy ``SignalChannel._write`` 와 byte-identical 한 페이로드를 위해
+    ``json.dumps(..., default=str)`` 를 쓴다(``timestamp`` 등 datetime 을 ISO
+    문자열로 — legacy stdout 경로의 ``default=str`` 와 정합, INV-OUT-1). 1MB
+    초과는 ``MessageTooLargeError`` (outbound non-fatal 처리 대상).
+    """
+    payload = json.dumps(frame, default=str, ensure_ascii=False).encode("utf-8")
+    if len(payload) > protocol.MAX_MESSAGE_SIZE:
+        raise MessageTooLargeError(
+            f"메시지 크기({len(payload)} bytes)가 "
+            f"최대 제한({protocol.MAX_MESSAGE_SIZE} bytes)을 초과"
+        )
+    return struct.pack("!I", len(payload)) + payload
 
 
 class IPCServerState(Enum):
@@ -101,6 +143,11 @@ class IPCServer:
         """
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        # Refs #2334 §보안 (#2337): runtime dir 0o700(소유자만 접근). umask
+        # 독립적으로 기존 dir 에도 재적용한다 — server.start 가 단독 0o700
+        # 소유자다(main.py 의 mkdir 은 chmod 하지 않음). socket 0o600 과 함께
+        # 외부 프로세스의 signal.connect UDS 접근면을 닫는다.
+        os.chmod(path.parent, 0o700)
 
         # 잔존 소켓 파일 정리
         if path.exists():
@@ -254,10 +301,26 @@ class IPCServer:
                 ):
                     # wire 전송 직전 센티넬 strip (절대 노출 안 됨).
                     result.pop("_stream", None)
-                    ack = await protocol.encode(response)
-                    writer.write(ack)
-                    await writer.drain()
-                    await self._run_signal_stream(reader, writer, result["bot_id"])
+                    session_id = result["session_id"]
+                    bot_id = result["bot_id"]
+                    # #2337 F1+F4 (3): ack write/drain 실패 시 register 누수 차단.
+                    # register 는 핸드셰이크 핸들러(ack 전 happen-before)에서 이미
+                    # 성공했으나, ack write 실패 시 ``_run_signal_stream`` 미진입
+                    # → finally 부재 → handle 누수. 여기서 unregister(missing-key
+                    # no-op 라 stream finally 와 멱등)로 차단한 뒤 re-raise 해
+                    # ``_handle_connection`` finally 가 writer teardown 을 소유한다.
+                    reg = getattr(
+                        self._service_registry, "signal_channel_registry", None
+                    )
+                    try:
+                        ack = await protocol.encode(response)
+                        writer.write(ack)
+                        await writer.drain()
+                    except Exception:
+                        if reg is not None:
+                            reg.unregister(bot_id, session_id)
+                        raise
+                    await self._run_signal_stream(reader, writer, bot_id, session_id)
                     # break 아님 — hijack 연결은 lockstep 재진입 금지. finally 가
                     # teardown(writer close) 를 단일 소유한다.
                     return
@@ -488,13 +551,20 @@ class IPCServer:
                 "result": result,
             }
         except Exception as e:
-            logger.exception("IPC 커맨드 실행 오류: %s", command)
             # 예외 인스턴스/클래스에 ``code`` 속성이 있으면 안정 코드로
             # 노출한다 (#1144 invariant S5). 기존 예외(account.suspend/activate
             # 등)는 ``code`` 속성이 없어 자동으로 ``EXECUTION_ERROR``로
             # 폴백된다 — 회귀 없음. Refs #1850: ``InvalidAccountIdError``
             # (``code="VALIDATION_ERROR"``) 도 본 경로로 envelope 변환된다.
             error_code = getattr(e, "code", "EXECUTION_ERROR")
+            # Refs #2337: signal.connect 핸드셰이크의 expected typed-validation
+            # 거부는 traceback/args 를 노출하지 않는 구조화 WARNING 으로 로깅한다
+            # (invalid-key caplog 에 ``sk_`` 부재, expected-exc ERROR traceback
+            # 부재). 그 외(internal/unexpected)는 기존 ``logger.exception`` 유지.
+            if error_code in _EXPECTED_DISPATCH_REJECT_CODES:
+                logger.warning("IPC handshake rejected: %s (%s)", command, error_code)
+            else:
+                logger.exception("IPC 커맨드 실행 오류: %s", command)
             return {
                 "id": request_id,
                 "status": "error",
@@ -509,38 +579,342 @@ class IPCServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         bot_id: str,
+        session_id: str,
     ) -> None:
-        """signal.connect Phase-C 스트림 바디 루프 (#2334 / #2336 PR#1 스켈레톤).
+        """signal.connect Phase-C 스트림 host (#2334 §6/§7, #2337 PR#2).
 
         핸드셰이크 OK 후 동일 연결을 hijack 해 long-lived 양방향 스트림으로
-        운반한다. PR#1 은 call seam + per-read timeout 없는 read-until-EOF 루프만
-        제공한다. 시그니처 ``(reader, writer, bot_id)`` 는 PR#2(#2337) relay 가
-        그대로 쓰도록 고정한다.
+        운반한다. host 구성:
+
+        - **bounded out_queue + 단일 writer_task**: ``asyncio.Queue(maxsize=
+          SIGNAL_OUT_QUEUE_MAX)`` + write_lock 으로 ack(inbound)·fill(eventbus)
+          프레임 순서를 보존한다(INV-OUT-3). writer 는 FIFO drain →
+          ``protocol.encode`` → write+drain.
+        - **read_task**: ``protocol.decode`` → ``channel._handle_message``. per-read
+          timeout 없음(idle 정상). inbound >1MB 는 **terminal close**(decode 가
+          body read 전 raise → framing desync, continue 금지, INV-OUT-7).
+        - **adopt + self-close re-check (F1+F4)**: register 된 placeholder handle
+          을 회수해 데이터플레인을 채운다. adopt 시점에 ``handle.closed`` 또는
+          generation 불일치(rotate-in-window)면 read/writer 풀 루프 미진입 →
+          single closed frame flush 후 self-close.
+        - **closing supervisor (F2)**: ``handle.close()``(동기, daemon-initiated)
+          가 set 한 ``closing_event`` 를 감지하면 ``_initiate_close`` async 순서를
+          실행(await-inflight grace → read_task cancel → writer join).
+        - **finally(INV-OUT-9)**: ``mark_closed`` → ``_unsubscribe_events`` →
+          ``reg.unregister`` 정확히 1회(register 성공 후 모든 경로). writer 는
+          **절대 직접 close 안 함** — ``_handle_connection`` finally 단독 소유.
 
         Phase-C read 에는 per-read timeout 을 **절대** 적용하지 않는다 — idle
-        스트림(무전송 대기)은 정상이며 liveness 는 app-level ``{ping→pong}``
-        heartbeat 로 확인한다(ipc.md §"Timeout 계약"). EOF(client close)에는
-        ``IncompleteReadError`` 로 graceful 종료한다.
+        스트림은 정상이며 liveness 는 app-level ``{ping→pong}`` 로 확인한다.
 
-        PR#2(#2337) 이연(known-limitation):
+        headless(reg=None): adopt/self-close/unregister 를 스킵하고 channel
+        데이터플레인만 구동한다.
+        """
+        from ante.bot.signal_channel import SignalChannel
 
-        * inbound 프레임 routing/ack/pong → 현재는 read+discard.
-        * >1MB 프레임 비치명 ``{"type":"error","message":"result_too_large"}``
-          후 스트림 유지 → 현재는 ``MessageTooLargeError`` 로 close. PR#1 은
-          Phase-C 의존 client 가 없어 close 허용.
-        * ``SignalChannel``/bounded ``out_queue``/writer_task/eventbus
-          subscribe·relay/``SignalChannelRegistry``/teardown = 전부 PR#2.
+        reg = getattr(self._service_registry, "signal_channel_registry", None)
+        svc = self._service_registry
+        bot = svc.bot_manager.get_bot(bot_id)
+        if bot is None:
+            # 핸드셰이크와 stream 진입 사이에 봇이 사라진 극단 race — register
+            # 누수만 정리하고 종료(writer 는 _handle_connection finally 소유).
+            if reg is not None:
+                reg.unregister(bot_id, session_id)
+            return
 
-        ``writer`` 를 직접 close 하지 않는다 — ``_handle_connection`` finally 가
-        teardown 을 단일 소유한다.
+        out_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=SIGNAL_OUT_QUEUE_MAX)
+        write_lock = asyncio.Lock()
+        flush_done = asyncio.Event()
+        # daemon-initiated close ↔ async teardown 브릿지(F2). handle.close(sync)
+        # 와 laggard 가 이 event 를 set 하고, supervisor 가 _initiate_close 를
+        # 실행한다. headless(reg=None)에서도 laggard teardown 이 동작하도록 항상
+        # 생성한다.
+        closing_event = asyncio.Event()
+
+        def _force_closed_frame(reason: str) -> None:
+            """``{closed,reason}`` force-slot enqueue(QueueFull→1 drop 후 재시도)."""
+            frame = {"type": "closed", "reason": reason}
+            try:
+                out_queue.put_nowait(frame)
+            except asyncio.QueueFull:
+                try:
+                    out_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+                with contextlib.suppress(asyncio.QueueFull):
+                    out_queue.put_nowait(frame)
+
+        def _trigger_lagged() -> None:
+            """disconnect-laggard teardown (INV-OUT-6). idempotent.
+
+            out_queue full 로 프레임 drop 시 1회 호출. channel ``_closed`` flip
+            (이후 _on_fill/_on_order_update no-op) + ``{error,stream_lagged}``
+            best-effort(QueueFull drop 허용) + ``{closed,lagged}`` force-slot +
+            closing_event set 으로 supervisor 의 daemon_close teardown 진입.
+            socket I/O await 없음(bus 핸들러 inline 안전).
+            """
+            if closing_event.is_set():
+                return
+            channel.mark_closed()
+            with contextlib.suppress(asyncio.QueueFull):
+                out_queue.put_nowait({"type": "error", "message": "stream_lagged"})
+            _force_closed_frame("lagged")
+            closing_event.set()
+
+        def _enqueue(frame: dict) -> None:
+            """sink 콜백 — newline-free dict 를 out_queue 에 put_nowait.
+
+            laggard-aware: QueueFull 이면 채널 laggard teardown 을 트리거한다
+            (raw put_nowait 금지 — INV-OUT-6 backpressure swallow 우회 명시체크).
+            """
+            try:
+                out_queue.put_nowait(frame)
+            except asyncio.QueueFull:
+                _trigger_lagged()
+
+        channel = SignalChannel(
+            bot,
+            svc.eventbus,
+            bot._ctx,
+            sink=_enqueue,
+            is_full=out_queue.full,
+            on_lagged=_trigger_lagged,
+        )
+        channel._subscribe_events()
+
+        # adopt (F1+F4 step 4) — placeholder handle 데이터플레인 채우기. handle.
+        # closing_event 를 stream-local event 와 동일 객체로 바인딩해 sync
+        # handle.close()가 supervisor 를 깨우게 한다.
+        handle = reg.get(bot_id, session_id) if reg is not None else None
+        if handle is not None:
+            handle.out_queue = out_queue
+            handle.on_closed = channel.mark_closed
+            handle.closing_event = closing_event
+
+        # F4 self-close 재확인: adopt 직후 이미 닫혔거나(register 후 ack 전
+        # close_bot/rotate) generation 불일치(rotate-in-window)면 풀 루프 미진입.
+        # handle is not None ⇒ reg is not None(handle 은 reg.get 유래)이나 명시
+        # 가드로 mypy union-attr 을 좁힌다.
+        if reg is not None and handle is not None:
+            rotated = reg.current_generation(bot_id) != handle.generation
+            if handle.closed or rotated:
+                if rotated and not handle.closed:
+                    handle.close("rotated")
+                reason = (
+                    handle._pending_close_reason or handle.close_reason or "rotated"
+                )
+                await self._self_close_signal_stream(
+                    channel, writer, reason, reg, bot_id, session_id
+                )
+                return
+
+        try:
+            await self._drive_signal_stream(
+                reader,
+                writer,
+                channel,
+                out_queue,
+                write_lock,
+                flush_done,
+                closing_event,
+                handle,
+            )
+        finally:
+            # INV-OUT-9: 모든 종료 경로 정확히 1회.
+            channel.mark_closed()
+            channel._unsubscribe_events()
+            if reg is not None:
+                reg.unregister(bot_id, session_id)
+
+    async def _self_close_signal_stream(
+        self,
+        channel: object,
+        writer: asyncio.StreamWriter,
+        reason: str,
+        reg: object,
+        bot_id: str,
+        session_id: str,
+    ) -> None:
+        """adopt-time self-close (F4) — single closed frame flush 후 정리.
+
+        read/writer 풀 루프를 띄우지 않고 ``{type:closed,reason}`` 1프레임만
+        wire 로 내보낸 뒤 ``mark_closed`` → ``_unsubscribe_events`` →
+        ``unregister`` 한다(INV-OUT-9 정확히 1회). writer 는 직접 close 안 함.
         """
         try:
+            try:
+                frame = _encode_signal_frame({"type": "closed", "reason": reason})
+                writer.write(frame)
+                await writer.drain()
+            except (BrokenPipeError, OSError, MessageTooLargeError):
+                pass
+        finally:
+            channel.mark_closed()  # type: ignore[attr-defined]
+            channel._unsubscribe_events()  # type: ignore[attr-defined]
+            if reg is not None:
+                reg.unregister(bot_id, session_id)  # type: ignore[attr-defined]
+
+    async def _drive_signal_stream(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        channel: object,
+        out_queue: asyncio.Queue[dict],
+        write_lock: asyncio.Lock,
+        flush_done: asyncio.Event,
+        closing_event: asyncio.Event,
+        handle: object,
+    ) -> None:
+        """read_task + writer_task + closing supervisor 를 구동·정리한다.
+
+        writer 는 FIFO drain → encode → write. ``frame.type=='closed'`` 면 write
+        후 ``flush_done.set()`` + return(INV-OUT-8 flush-before-cancel).
+        outbound >1MB 는 ``{type:error,result_too_large}`` non-fatal continue
+        (INV-OUT-7). read_task 는 EOF/inbound-1MB 에 return. closing supervisor 는
+        ``handle.closing_event`` 또는 read/writer 완료를 감지해 ``_initiate_close``
+        async teardown 을 실행한다(F2 sync close ↔ async teardown 브릿지).
+        """
+
+        async def _writer_loop() -> None:
             while True:
-                # PR#1: routing 없음 — 프레임을 읽어 discard.
-                await protocol.decode(reader)
-        except asyncio.IncompleteReadError:
-            # EOF (어느 쪽이든 소켓 close) — graceful 종료.
-            return
-        except MessageTooLargeError:
-            # PR#1: close. PR#2 에서 비치명 result_too_large 로 스트림 유지.
-            return
+                frame = await out_queue.get()
+                try:
+                    data = _encode_signal_frame(frame)
+                except MessageTooLargeError:
+                    # outbound >1MB 비치명: result_too_large 후 stream 유지.
+                    try:
+                        data = _encode_signal_frame(
+                            {"type": "error", "message": "result_too_large"}
+                        )
+                    except MessageTooLargeError:
+                        continue
+                    async with write_lock:
+                        writer.write(data)
+                        await writer.drain()
+                    continue
+                async with write_lock:
+                    writer.write(data)
+                    await writer.drain()
+                if frame.get("type") == "closed":
+                    # teardown frame write 완료 → grace supervisor 깨우고 종료.
+                    flush_done.set()
+                    return
+
+        async def _reader_loop() -> None:
+            while True:
+                try:
+                    msg = await protocol.decode(reader)
+                except asyncio.IncompleteReadError:
+                    return  # EOF — graceful 종료.
+                except MessageTooLargeError:
+                    return  # inbound >1MB — terminal close(framing desync 회피).
+                await channel._handle_message(msg)  # type: ignore[attr-defined]
+
+        read_task = asyncio.ensure_future(_reader_loop())
+        writer_task = asyncio.ensure_future(_writer_loop())
+        if handle is not None:
+            handle.read_task = read_task  # type: ignore[attr-defined]
+            handle.writer_task = writer_task  # type: ignore[attr-defined]
+
+        closing_waiter = asyncio.ensure_future(closing_event.wait())
+        try:
+            # read/writer 중 하나라도 종료하거나, daemon-initiated close(또는
+            # laggard)가 closing_event 를 set 하면 teardown 으로 진입한다.
+            await asyncio.wait(
+                [read_task, writer_task, closing_waiter],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            # daemon-initiated close 여부: closing_event 가 set 됐으면(rotate/
+            # close_bot/shutdown/laggard — closed frame force-slot 됨) flush-
+            # before-cancel grace 순서, 아니면 자연 종료(EOF/writer-exit)라 즉시
+            # sibling cancel.
+            daemon_close = closing_event.is_set()
+            await self._initiate_close(
+                channel,
+                read_task,
+                writer_task,
+                flush_done,
+                daemon_close=daemon_close,
+            )
+        finally:
+            if not closing_waiter.done():
+                closing_waiter.cancel()
+            # 남은 task 강제 정리(중복 cancel/await 는 멱등).
+            for task in (read_task, writer_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(
+                read_task,
+                writer_task,
+                closing_waiter,
+                return_exceptions=True,
+            )
+
+    async def _initiate_close(
+        self,
+        channel: object,
+        read_task: asyncio.Task,
+        writer_task: asyncio.Task,
+        flush_done: asyncio.Event,
+        *,
+        daemon_close: bool,
+    ) -> None:
+        """teardown async 순서 (F2, INV-OUT-8).
+
+        ``daemon_close=True`` (rotate/close_bot/shutdown — ``handle.close`` 가
+        ``closing_event`` set + closed frame force-slot):
+
+        1. channel ``_accepting``/``_closed`` set(sync close 가 이미 했을 수
+           있으나 멱등) — NEW admit 거부 + ``_on_fill`` no-op.
+        2. in-flight on_data publish 를 grace 동안 await(``asyncio.shield`` 로
+           grace 타임아웃이 publish 자체를 중단시키지 않게 방어). 초과면 publish
+           는 백그라운드 계속, read_task 만 cancel(at-most-one trailing).
+        3. read_task cancel.
+        4. writer 가 closed frame 을 flush(``flush_done``)할 때까지 grace 대기 후
+           writer join(flush-before-cancel). 미flush 면 grace 후 cancel.
+
+        ``daemon_close=False`` (자연 종료 — EOF/writer-exit/laggard): flush 할
+        teardown frame 이 없으므로 in-flight 만 grace await 후 sibling 을 즉시
+        cancel(불필요한 grace 대기 회피).
+        """
+        channel.mark_closed()  # type: ignore[attr-defined]
+
+        inflight = getattr(channel, "_inflight", None)
+        if inflight is not None and not inflight.done():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(inflight), timeout=SIGNAL_INFLIGHT_GRACE
+                )
+            except (TimeoutError, Exception):  # noqa: BLE001
+                # grace 초과/publish 예외 — publish 는 백그라운드 계속, 진행.
+                pass
+
+        if not read_task.done():
+            read_task.cancel()
+
+        if daemon_close and not writer_task.done():
+            # closed frame flush-before-cancel(INV-OUT-8). flush_done 은 writer 가
+            # closed frame 을 write 한 직후 set 된다 — grace 안에 set 되면 join,
+            # 아니면(극단 stall) cancel.
+            if flush_done.is_set():
+                with contextlib.suppress(Exception):
+                    await writer_task
+            else:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.shield(flush_done.wait()),
+                        timeout=SIGNAL_INFLIGHT_GRACE,
+                    )
+                    with contextlib.suppress(Exception):
+                        await writer_task
+                except TimeoutError:
+                    writer_task.cancel()
+        elif not writer_task.done():
+            # 자연 종료 — flush 할 frame 없음. 즉시 cancel.
+            writer_task.cancel()
+
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await read_task
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await writer_task

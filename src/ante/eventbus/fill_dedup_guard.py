@@ -37,6 +37,19 @@ class FillDedupGuard:
         self._order: deque[str] = deque(maxlen=maxlen)
         self._seen: set[str] = set()
 
+    def __contains__(self, key: str) -> bool:
+        """read-only 멤버십 검사 (#2337 INV-OUT-4).
+
+        ``seen_or_add`` 와 달리 가드 상태를 **변경하지 않는다**. SignalChannel
+        ``_on_fill`` 가 enqueue **전** dedup 게이트로 비-커밋 검사를 하기 위한
+        seam 이다 — full-drop(enqueue 실패) 시 키를 마킹하지 않아 다음 재전달이
+        보존되도록 하려면, 검사 시점에는 커밋하지 않고 ``_emit`` 성공 **후**
+        별도로 ``seen_or_add`` 를 호출해야 한다(dedup-mark-after-enqueue).
+
+        ``await`` 없는 동기 read 이며 ``self._seen`` 멤버십만 조회한다.
+        """
+        return key in self._seen
+
     def seen_or_add(self, key: str) -> bool:
         """키를 원자적으로 검사+추가한다.
 
