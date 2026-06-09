@@ -60,11 +60,11 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
 
 | Category | 의미 | 대표 code 예 |
 |----------|------|--------------|
-| `validation` | 입력 계약 위반(필수 옵션 누락, enum 비멤버, 형식 오류, 도메인 식별자 형식 위반) | `VALIDATION_ERROR`, `CLI_MISSING_REQUIRED_INPUT`, `CLI_OPTION_CONFLICT`, `CONFIG_VALIDATION_ERROR`, `STRATEGY_VALIDATION_ERROR`, `APPROVAL_VALIDATION_ERROR`, `REPORT_VALIDATION_ERROR`, `INVALID_DATE_RANGE`, `INVALID_DATE` |
+| `validation` | 입력 계약 위반(필수 옵션 누락, enum 비멤버, 형식 오류, 도메인 식별자 형식 위반) | `VALIDATION_ERROR`, `CLI_MISSING_REQUIRED_INPUT`, `CLI_OPTION_CONFLICT`, `CONFIG_VALIDATION_ERROR`, `STRATEGY_VALIDATION_ERROR`, `APPROVAL_VALIDATION_ERROR`, `REPORT_VALIDATION_ERROR`, `INVALID_DATE_RANGE`, `INVALID_DATE`, `INVALID_SIGNAL_KEY`, `MALFORMED_REQUEST` |
 | `auth` | 인증 누락/실패 | `AUTH_REQUIRED`, `AUTH_FAILED` |
 | `permission` | 인증은 됐으나 scope/role 부족 | `PERMISSION_DENIED`, `MEMBER_INVALID_SCOPE` |
 | `not_found` | 대상 resource 존재하지 않음 | `BOT_NOT_FOUND`, `ACCOUNT_NOT_FOUND`, `APPROVAL_NOT_FOUND`, `MEMBER_NOT_FOUND` |
-| `state_conflict` | 대상이 요청한 상태 전이를 허용하지 않는 상태 | `BOT_STATE_CONFLICT`, `ACCOUNT_ALREADY_DELETED`, `UPDATE_SERVER_RUNNING` |
+| `state_conflict` | 대상이 요청한 상태 전이를 허용하지 않는 상태 | `BOT_STATE_CONFLICT`, `ACCOUNT_ALREADY_DELETED`, `UPDATE_SERVER_RUNNING`, `BOT_NOT_RUNNING`, `BOT_SIGNAL_CHANNEL_BUSY` |
 | `service_unavailable` | 서버 lifecycle / 의존 서비스 미구성으로 dispatch 거부 | `SERVICE_UNAVAILABLE`, `SERVICE_NOT_CONFIGURED` |
 | `external` | broker/외부 API 실패로 ante가 dispatch 책임을 다한 뒤 외부 시스템에서 발생한 오류 | `BROKER_API_ERROR`, `BROKER_AUTH_FAILED` |
 | `internal` | 코드 버그/예외 미분류 fallback | `EXECUTION_ERROR`, `UNKNOWN_COMMAND` |
@@ -84,8 +84,15 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
    `REPORT_*`, `UPDATE_*`). 도메인이 없으면 `CLI_*` prefix(예:
    `CLI_MISSING_REQUIRED_INPUT`, `CLI_OPTION_CONFLICT`, `CLI_CONFIRMATION_REQUIRED`).
 3. **공통 코드**: `VALIDATION_ERROR`, `EXECUTION_ERROR`, `SERVICE_UNAVAILABLE`,
-   `SERVICE_NOT_CONFIGURED`, `UNKNOWN_COMMAND`는 도메인 prefix 없이 공통 vocabulary로
-   유지한다. 도메인이 명확한 위반은 도메인 prefix specialize를 권장한다.
+   `SERVICE_NOT_CONFIGURED`, `UNKNOWN_COMMAND`, `INVALID_SIGNAL_KEY`,
+   `MALFORMED_REQUEST`는 도메인 prefix 없이 공통 vocabulary로 유지한다.
+   `INVALID_SIGNAL_KEY`/`MALFORMED_REQUEST`는 #2334 `signal.connect` 데이터-플레인
+   입력 계약 위반 코드로, 키 비노출(redaction) 대상이자 transport-level 형식 위반이라
+   특정 도메인으로 specialize하지 않는 도메인-non-prefix common code다(`signal.py`가 이미
+   `INVALID_SIGNAL_KEY`를 string literal로 노출, #1705 byte-lock 정합). 도메인이 명확한
+   위반은 도메인 prefix specialize를 권장한다.
+
+> **MAJOR 해소**: 신규 prefix-less 코드 2건을 명명 규칙 공통 코드 화이트리스트(rule 3)에 명시 추가하여 SSOT 자기모순을 제거했다. `signal.py`가 이미 `INVALID_SIGNAL_KEY` literal을 노출·#1705 byte-lock 대상이므로 재명명(option B) 대신 화이트리스트 확장(option A)을 채택했다.
 4. **명명 규칙 예외 (legacy date-range)**: `INVALID_DATE_RANGE` / `INVALID_DATE`는
    `backtest run` CLI가 이미 사용 중인 호환 유지용 legacy/common date-range
    코드로 `CLI_*` prefix 예외다(SSOT: `docs/specs/cli/02-design-decisions.md` —
@@ -193,6 +200,37 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
 - 새 domain exception을 추가할 때는 본 표 형식으로 후속 PR에서 SSOT를 확장한다.
   본 SSOT는 모든 exception을 enumerate하지 않는다 — 본 PR 범위 밖이다.
 
+## `signal.connect` 스트리밍 신규 코드 분류 (normative)
+
+[#2334 `ante signal connect` daemon-위임 스트리밍 아키텍처](https://github.com/joshua-jingu-lee/ante/issues/2334)
+가 도입하는 신규 안정 코드를 본 taxonomy의 기존 category에 귀속한다.
+본 절은 **분류만 normative로 lock**한다. `ErrorSpec`/`error_registry.py`
+실제 등록과 `signal connect` daemon-위임 동작은 구현 PR(transport/ingress
+· outbound/lifecycle · CLI relay) **머지 후에만 실행 가능**(동기 버그 #2333 unblock)
+하며, 본 docs-only spec PR은 코드 동작을 도입하지 않는다.
+
+| Public code | Category | 트리거 (#2334 §5/§9) | 비고 |
+|-------------|----------|----------------------|------|
+| `INVALID_SIGNAL_KEY` | `validation` | 핸드셰이크 게이트 1 — signal key 검증 실패(`validate_signal_key` → None) | 키는 데이터-플레인 입력 계약. 현재 CLI(`src/ante/cli/commands/signal.py:58`)가 이미 string literal로 노출하나 taxonomy SSOT·`error_registry.py` 미등록 — 본 절이 첫 SSOT 등재. 도메인 prefix 없는 common code(키 비노출 redaction 대상, `sk_` 미포함). |
+| `BOT_NOT_RUNNING` | `state_conflict` | 핸드셰이크 게이트 3 — 봇 존재하나 `status != RUNNING` | 봇이 요청한 상태 전이(시그널 스트림 attach)를 허용하지 않는 상태. sibling `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`)와 동형. 현재 CLI(`signal.py:73`)가 string literal로 노출하나 SSOT 미등록 — 본 절이 첫 SSOT 등재. message에 `bot_id`/`status`(소문자 `BotStatus.value`) 포함. |
+| `MALFORMED_REQUEST` | `validation` | 핸드셰이크 첫 프레임이 비-dict로 decode(`_handle_connection` 가드) | 입력 프레임 형식 위반(요청 계약 위반). terminal, 1프레임 error 후 close. |
+| `BOT_SIGNAL_CHANNEL_BUSY` | `state_conflict` | bot_id당 단일 active session 정책 — 2번째 `signal.connect` 핸드셰이크 거부 | 봇의 현재 상태(이미 active channel 보유)가 새 연결 전이를 허용하지 않음. 본 릴리스 single-connect 정책 lock. |
+
+인접 기존 코드(재정의 금지, reference만):
+
+- `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 대표 fault lock 표에 이미 등록됨.
+- `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`) — 게이트 4. 코드 레지스트리(`src/ante/contracts/error_registry.py:504-505`)에 `ErrorSpec(category="state_conflict")`로 등록됨, 단 본 taxonomy 문서 표에는 미등재(`bot signal-key --rotate`/`signal connect` 공유). 분류는 `state_conflict`.
+- `SERVICE_UNAVAILABLE`(`service_unavailable`) — `DRAINING`/`STOPPED` 핸드셰이크 거부. lifecycle gate 정렬(envelopes.md/ipc.md).
+- `SERVICE_NOT_CONFIGURED`(`service_unavailable`) — `required_services`(`bot_manager`) 부재 또는 `signal_key_manager` 미구성. #2334 신규 typed exception `SignalKeyManagerNotConfigured` → `SERVICE_NOT_CONFIGURED("signal_key_manager")`로 매핑되며, `error_registry.py` 등록은 #2334 구현 PR이 수행한다(코드 재정의 아님). `## SERVICE_NOT_CONFIGURED (normative)` 절 정렬.
+- `IPC_SERVER_NOT_RUNNING` / `IPC_TIMEOUT` — 데몬 미기동/핸드셰이크 30s 초과. 기존 IPC 표면 코드(`src/ante/cli/commands/ipc_helpers.py`, ipc.md)이며 본 SSOT가 새로 도입하지 않는다. message는 #2334 구현 시 기존 IPC 문자열을 SSOT로 재사용.
+
+규칙:
+
+- 신규 4건은 #2334 구현 PR에서 `error_registry.py` `ErrorSpec` 등록 + 대표 fault lock 표 확장의 회귀 lock이다(typed exception `InvalidSignalKey`/`BotNotRunning`/`SignalKeyManagerNotConfigured` → public code).
+- auth lowercase legacy alias(`auth_required` 등)는 signal connect의 CLI-side `@require_auth`에 그대로 적용되며 본 절이 재정의하지 않는다(Legacy alias 정렬).
+
+> coherence minor 해소: `SignalKeyManagerNotConfigured`→`SERVICE_NOT_CONFIGURED` 매핑을 typed-exception 회귀 lock 목록에 포함했고, `BOT_NOT_ACCEPTING_SIGNALS` "이미 등록" 출처를 코드 레지스트리(`error_registry.py:504-505`, category=`state_conflict` 코드 확인)와 taxonomy 문서 미등재로 명확히 구분했다.
+
 ## Broker external code 분리
 
 본 SSOT는 broker 원천 code(KIS `msg_cd` 등)와 ante public envelope code를 분리한다.
@@ -275,6 +313,7 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 | Success JSON output 표준화 | — | [#1815](https://github.com/joshua-jingu-lee/ante/issues/1815) |
 | IPC metadata 확장 | — | [#1819](https://github.com/joshua-jingu-lee/ante/issues/1819) |
 | Offline service factory | — | [#1818](https://github.com/joshua-jingu-lee/ante/issues/1818) |
+| `signal.connect` 스트리밍 신규 코드 분류 (`INVALID_SIGNAL_KEY`/`BOT_NOT_RUNNING`/`MALFORMED_REQUEST`/`BOT_SIGNAL_CHANNEL_BUSY`) | normative (분류만) | [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334) `ErrorSpec` 등록 + 대표 fault lock 확장 + daemon relay 구현(동기 버그 #2333 unblock) |
 
 ## 변경 정책
 

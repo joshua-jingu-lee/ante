@@ -63,3 +63,13 @@ class BotStepCompletedEvent(Event):
 | `AccountSuspendedEvent` | 계좌 정지 시 해당 계좌의 봇만 중지 | — (BotManager가 계좌별 `stop_bot()` 호출) |
 | `AccountActivatedEvent` | 계좌 재활성화 시 계좌 상태 변화 인지 | — (BotManager가 로깅만 수행; 자동 재시작은 수행하지 않음) |
 | `BotErrorEvent` | 봇 에러 시 자동 재시작 정책 수행 | — (BotManager가 `_on_bot_error()` 처리) |
+
+### 데몬-side SignalChannel 구독 (`signal.connect`, #2334)
+
+`ante signal connect`(데몬-위임 스트리밍, #2334)가 활성화되면, 위 `OrderFilledEvent` 및 9종 `order_update` 이벤트(`OrderSubmittedEvent`/`OrderRejectedEvent`/`OrderCancelledEvent`/`OrderFailedEvent`/`OrderCancelFailedEvent`/`OrderModifyRejectedEvent`/`StopOrderRegisteredEvent`/`StopOrderTriggeredEvent`/`StopOrderExpiredEvent`)는 **데몬-resident `SignalChannel`이 동일한 `svc.eventbus` 인스턴스에서 추가로 구독**하여 connect된 외부 AI Agent에게 outbound 프레임(`fill`/`order_update`)으로 중계한다. 봇 본체의 전략 콜백(`on_fill()`/`on_order_update()`) 구독과 **같은 단일 데몬 EventBus** 위에서 병렬로 동작하며, 구독 위치만 데몬-side로 명시될 뿐 **이벤트 vocab·`order_update` 9종 status·`ExternalSignalEvent` flow는 변경 없다**(SSOT 재확인).
+
+- 구독 대상(불변): `OrderFilledEvent → fill`, 9종 `order_update`(status vocab `submitted｜rejected｜cancelled｜failed｜cancel_failed｜modify_rejected｜stop_registered｜stop_triggered｜stop_expired`). `event.bot_id`가 connect된 봇과 일치하는 프레임만 중계.
+- 인바운드 `ExternalSignalEvent`(위 표 참조)는 데몬 `svc.eventbus`에 publish되어 `bot.on_external_signal` → `strategy.on_data` 경로로 동일하게 처리된다.
+- outbound 프레임 shape·delivery·backpressure 계약의 SSOT는 [`docs/specs/ipc/ipc.md`](../ipc/ipc.md)의 스트리밍 절이다(본 문서는 구독 대상 이벤트의 정합만 재확인).
+
+> 이 데몬-side 구독 경로는 **구현 PR 머지 후(동기 버그 #2333 unblock)에만 실제 동작**한다. 본 절은 스펙 정합 재확인이며, 머지 전 `ante signal connect`는 아직 RUNNING 봇으로 연결되지 않는다.

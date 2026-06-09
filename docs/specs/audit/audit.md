@@ -129,6 +129,7 @@ AuditLogger는 인프라(기록·조회)만 제공한다. 실제 기록은 **CLI
 | `ante member rotate-token <id>` | `member.rotate_token` | `member:{member_id}` |
 | `ante member reset-password` | `member.reset_password` | `member:{master_member_id}` |
 | `ante member regenerate-recovery-key` | `member.regenerate_recovery_key` | `member:{master_member_id}` |
+| `ante signal connect` | `signal.connect` | `bot:{bot_id}` |
 
 `ante bot start`/`ante bot stop`은 audit action(`bot.start`/`bot.stop`) 이름을
 사용한다. 봇 생애주기 변경은 단일 audit action namespace로 모인다.
@@ -143,6 +144,25 @@ client가 보낸 actor(스푸핑 가능)를 신뢰하지 않고 handler가 고�
 `system:` 네임스페이스에 둬서 사용자/agent `member_id`와 충돌하지 않는다(`member
 register`가 `system:` prefix 등록을 거부). recovery key, 새/현재 password 등 비밀값은
 audit detail, audit_log, IPC error envelope, server 로그 어디에도 기록하지 않는다.
+
+`ante signal connect`는 외부 에이전트의 JSON Lines 시그널 스트림을 데몬에서 RUNNING 중인 봇에
+연결하는 long-lived 커맨드다. audit은 **연결 수립 시 1회만** 기록한다. 데몬 핸들러가
+게이트(인증·키 검증·봇 RUNNING 등)를 통과한 직후 `signal.connect` / `bot:{bot_id}`로 단일
+기록하며, 이후 흐르는 개별 시그널마다 기록하지 않는다(per-signal audit 금지 — flooding 방지).
+연결 해제/teardown도 상태 변경 액션이 아니므로 기록하지 않는다. audit row의 `member_id`(행위자)는
+client가 핸드셰이크로 보낸 actor(스푸핑 가능)를 신뢰하지 않고, handler가 고정한 sentinel 상수
+`ipc`로 기록한다 — client 입력을 권위적 member_id로 신뢰하지 않는다는 `member register`/
+`reset-password` sentinel 정책과 동일한 #2113 원칙이다. 다만 `reset-password`의
+`system:recovery`와 달리 본 sentinel은 reserved `system:` 네임스페이스를 쓰지 않는 bare
+string `ipc`다(스펙 §8 확정값; `server.py`의 `actor` 기본값 `ipc` 정합). `member register`의
+`system:` prefix 거부 가드가 bare `ipc` 충돌을 막지 못할 가능성은 본 spec PR 범위 밖이며,
+필요 시 별도 후속 이슈로 다룬다. 게이트 실패 시에는 audit을 남기지 않는다(fail-without-audit).
+
+> ⚠️ `ante signal connect`의 데몬-위임 스트리밍 동작은 구현 PR 머지 후(동기 버그 #2333
+> unblock) 실제로 실행 가능하다. 본 절은 채택된 audit 계약만 기술하며, 현재 코드에서
+> 곧바로 동작함을 의미하지 않는다.
+
+> **BLOCKER 해소 (경로 B)**: spec §8 확정값인 bare string `ipc`를 그대로 반영하되, 기존 audit.md의 reserved `system:` 선례와의 **네임스페이스 차이를 명시적으로 노출**하고 충돌 가능성을 후속 이슈로 이연했다. 코드 사실(`server.py:342` `actor = request.get("actor", "ipc")`)도 bare `ipc`를 이미 사용하므로 spec 계약·코드·문서가 일관된다. "동일 정책" 단언은 "동일 #2113 **원칙**(client 입력 비신뢰)"으로 약화하여 표면 모순을 제거했다(reviewer 왕복 차단).
 
 ### 구현 방식
 
