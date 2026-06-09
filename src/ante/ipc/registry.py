@@ -689,12 +689,21 @@ async def _handle_signal_connect(
       ``BotNotAcceptingSignals``.
 
     ``account_id`` 는 LIVE ``bot.config`` 에서만 취하고 ``args`` 의 spoof 값은
-    무시한다. ``audit_action=None`` (자동 audit OFF) — 단일 manual connect-audit
-    는 PR#2(#2337) lifecycle 소관이다. 키는 로깅/반환에 노출하지 않는다.
+    무시한다. ``audit_action=None`` (자동 audit OFF) — 본 PR(#2337)이 게이트
+    통과 후 단일 manual connect-audit 를 직접 1회 발화한다(actor sentinel
+    ``"ipc"``). 키는 로깅/반환에 노출하지 않는다.
 
-    PR#2(#2337) 경계: routing/``SignalChannel``/out_queue/teardown/단일-connect
-    ``BOT_SIGNAL_CHANNEL_BUSY`` raise 는 본 PR 범위 밖이다.
+    #2337 register happen-before ack (F1+F4): gate-4 통과 후 ``_stream``
+    반환 **전** ``SignalChannelRegistry.register`` 를 atomic check-and-insert
+    로 호출한다(``BotSignalChannelBusy``/``SignalChannelRegistryFrozen`` 둘 다
+    ack write **전** raise → Phase-B envelope, stream 미진입). 이 시점의
+    ``ChannelHandle`` 은 placeholder(데이터플레인 None) 이며 ``generation`` 을
+    스냅샷한다 — ``_run_signal_stream`` 진입 후 adopt 가 데이터플레인을 채우고
+    generation re-check 로 rotate-in-window 를 self-close 한다. ``reg`` 가
+    ``None`` (headless/legacy)이면 register 를 스킵하고 session_id 만 전달한다.
     """
+    from uuid import uuid4
+
     from ante.bot.config import BotStatus
     from ante.bot.exceptions import (
         BotNotAcceptingSignals,
@@ -727,9 +736,37 @@ async def _handle_signal_connect(
     if not bot.strategy or not bot.strategy.meta.accepts_external_signals:
         raise BotNotAcceptingSignals(f"Bot {bot_id} does not accept external signals")
 
+    # 단일 manual connect-audit 1회 (#2334 §8, #2337). actor sentinel ``"ipc"``.
+    # ``required_services`` 에 audit_logger 를 추가하지 않는다(headless 호환) —
+    # getattr None-guard 로 부재 시 no-op. 키/식별 토큰은 detail 에 싣지 않는다.
+    audit_logger = getattr(svc, "audit_logger", None)
+    if audit_logger is not None:
+        await audit_logger.log(
+            member_id="ipc",
+            action="signal.connect",
+            resource=f"bot:{bot_id}",
+            detail="",
+            ip="",
+        )
+
+    # register happen-before ack (#2337 F1+F4). placeholder ChannelHandle 을
+    # generation 스냅샷과 함께 atomic 등록한다. busy/frozen 은 ack 전 raise.
+    session_id = uuid4().hex
+    reg = getattr(svc, "signal_channel_registry", None)
+    if reg is not None:
+        from ante.bot.signal_channel_registry import ChannelHandle
+
+        handle = ChannelHandle(
+            session_id=session_id,
+            bot_id=bot_id,
+            generation=reg.current_generation(bot_id),
+        )
+        reg.register(handle)
+
     return {
         "bot_id": bot_id,
         "account_id": bot.config.account_id,
+        "session_id": session_id,
         "_stream": "signal.connect",
     }
 

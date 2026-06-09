@@ -31,6 +31,7 @@ from ante.bot.exceptions import (
 if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.bot.context_factory import StrategyContextFactory
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
     from ante.bot.signal_key import SignalKeyManager  # noqa: F811
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -140,6 +141,7 @@ class BotManager:
         account_service: AccountService | None = None,
         treasury_manager: TreasuryManager | None = None,
         trade_service: TradeService | None = None,
+        signal_channel_registry: SignalChannelRegistry | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._db = db
@@ -151,6 +153,11 @@ class BotManager:
         self._account_service = account_service
         self._treasury_manager = treasury_manager
         self._trade_service = trade_service
+        # #2337: signal.connect lifecycle 권위 레지스트리(rotate/delete/bot-stopped
+        # teardown 의 close_bot 대상). main.py 가 ServiceRegistry·IPCServer 와
+        # 동일 인스턴스를 주입한다. 테스트/headless 는 ``None`` 이며 teardown
+        # hook 은 None-guard no-op.
+        self._signal_channel_registry = signal_channel_registry
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
@@ -161,6 +168,20 @@ class BotManager:
         # ``_get_update_lock`` 으로만 노출하여 외부에서 직접 dict 를 만지지
         # 않도록 한다.
         self._bot_update_locks: dict[str, asyncio.Lock] = {}
+        # #2337 F3: per-bot 직렬화 lock 저장소. on_step()+drain span(``_run_loop``)
+        # 과 on_external_signal span(on_data+_publish_signals)을 같은 lock 으로
+        # 직렬화해 ``_ctx._pending_actions`` 인터리브를 차단한다. stable bot_id
+        # 키라 restart 를 생존하며 ``create_bot`` 이 Bot 에 주입한다.
+        self._bot_signal_locks: dict[str, asyncio.Lock] = {}
+
+    def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
+        """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy, #2337).
+
+        stable ``bot_id`` 키로 lazy setdefault 한다 — restart 후에도 같은 lock
+        인스턴스를 재사용해 직렬화 불변을 유지한다(F3). ``create_bot`` 이 Bot
+        생성 시 주입하고, 봇 자신이 두 span 을 이 lock 으로 감싼다.
+        """
+        return self._bot_signal_locks.setdefault(bot_id, asyncio.Lock())
 
     def _get_update_lock(self, bot_id: str) -> asyncio.Lock:
         """``update_bot`` 직렬화용 per-bot lock 을 lazy 로 발급한다.
@@ -429,6 +450,8 @@ class BotManager:
             exchange=account.exchange if account else "",
             trading_mode=account.trading_mode.value if account else "",
             currency=account.currency if account else "",
+            # #2337 F3: on_step ↔ on_external_signal 직렬화 lock 주입(stable key).
+            signal_lock=self._get_signal_lock(config.bot_id),
         )
 
         self._register_bot_events(bot)
@@ -859,6 +882,13 @@ class BotManager:
             )
 
         bot = self._get_bot(bot_id)
+        # #2337: signal 채널 teardown 을 **bot.stop() 앞** 에 둔다(순서 BUG 수정,
+        # first-close-wins). delete 가 stop 보다 먼저 'deleted' 로 닫아야 후속
+        # BotStoppedEvent 의 'bot_stopped' close_bot 이 멱등 no-op(이미 closed)
+        # 가 되어 closed.reason='deleted' 가 보존된다. 동기·비-raise.
+        reg = self._signal_channel_registry
+        if reg is not None:
+            reg.close_bot(bot_id, "deleted")
         if bot.status == BotStatus.RUNNING:
             await bot.stop()
 
@@ -1176,6 +1206,13 @@ class BotManager:
 
         if not isinstance(event, BotStoppedEvent):
             return
+        # #2337 teardown 커버리지(lifecycle BLOCKER): 봇 중지 시 signal 채널을
+        # close_bot 한다. **suppress early-return 앞** 에 둬야 흔한 managed-stop
+        # 봇도 silent leak 하지 않는다. close_bot 은 동기·비-raise 라 bus swallow
+        # 로 notify 가 미실행되지 않는다.
+        reg = self._signal_channel_registry
+        if reg is not None:
+            reg.close_bot(event.bot_id, "bot_stopped")
         if event.bot_id in self._suppress_notification_bot_ids:
             self._suppress_notification_bot_ids.discard(event.bot_id)
             return
@@ -1194,6 +1231,16 @@ class BotManager:
 
         if not isinstance(event, BotErrorEvent):
             return
+
+        # #2337 teardown 커버리지(lifecycle BLOCKER): 자율 ERROR 전이는
+        # BotStoppedEvent 를 발화하지 않으므로 ``_on_bot_stopped`` 가 커버하지
+        # 못한다. **NotificationEvent publish·auto_restart early-return 앞** 에
+        # close_bot 을 둬 non-restart-error 봇의 channel leak 을 차단한다.
+        # reason 은 ``bot_stopped`` (closed.reason vocab; ERROR 도 동일 종료
+        # 시맨틱). 동기·비-raise.
+        reg = self._signal_channel_registry
+        if reg is not None:
+            reg.close_bot(event.bot_id, "bot_stopped")
 
         await self._eventbus.publish(
             NotificationEvent(
@@ -1387,7 +1434,17 @@ class BotManager:
                 f"bot_id={bot_id}, strategy_id={bot.config.strategy_id}"
             )
 
-        return await self._signal_key_manager.rotate(bot_id)
+        # #2337: rotate 성공 **후** signal 채널 teardown. ROLLBACK(rotate raise)
+        # 경로는 여기 도달 전 예외라 bump/close_bot 안 함(옛 키 채널 유지).
+        # ``bump_generation`` 으로 rotate-in-window 핸드셰이크를 adopt-time
+        # re-check self-close 시키고, ``close_bot('rotated')`` 로 활성 세션을
+        # 닫는다. teardown 은 SignalKeyManager.rotate 가 아니라 여기서만 한다.
+        new_key = await self._signal_key_manager.rotate(bot_id)
+        reg = self._signal_channel_registry
+        if reg is not None:
+            reg.bump_generation(bot_id)
+            reg.close_bot(bot_id, "rotated")
+        return new_key
 
     def get_restart_count(self, bot_id: str) -> int:
         """봇의 현재 재시작 시도 횟수."""

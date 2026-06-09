@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ante.account.errors import InvalidAccountIdError
+from ante.bot.config import BotStatus
 from ante.eventbus.events import ExternalSignalEvent
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 from ante.strategy.validator import StrategyValidator
@@ -172,6 +173,10 @@ def _make_bot(strategy_cls: type[Strategy]) -> MagicMock:
 
     bot = Bot(config=config, strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus)
     bot.strategy = strategy_cls(ctx=ctx)
+    # #2337: on_external_signal 이 상태 재검증(RUNNING 아니면 거부)한다(#2333
+    # daemon-side fix). start() 없이 on_data 발화를 테스트하려면 RUNNING 을
+    # 명시해야 한다(이전엔 default CREATED 였으나 가드 미존재로 통과했다).
+    bot.status = BotStatus.RUNNING
 
     return bot
 

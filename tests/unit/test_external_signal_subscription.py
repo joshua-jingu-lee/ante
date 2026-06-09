@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ante.bot.bot import Bot
-from ante.bot.config import BotConfig
+from ante.bot.config import BotConfig, BotStatus
 from ante.bot.manager import BotManager
 from ante.bot.signal_channel import SignalChannel
 from ante.core.database import Database
@@ -154,6 +154,10 @@ class TestBotManagerSignalSubscription:
         )
         # 전략 인스턴스 설정 (start() 없이도 on_external_signal 테스트 가능)
         bot.strategy = _AcceptingStrategy(ctx=ctx)
+        # #2337: on_external_signal 이 상태 재검증(RUNNING 아니면 거부)한다(#2333
+        # daemon-side fix). start() 없이 on_data 발화를 테스트하므로 RUNNING 을
+        # 명시한다(이전엔 default CREATED 였으나 가드 미존재로 통과했다).
+        bot.status = BotStatus.RUNNING
 
         event = ExternalSignalEvent(
             account_id="acc-test",
