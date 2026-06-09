@@ -108,6 +108,29 @@ class HangingReader(FakeReader):
         raise AssertionError("unreachable")
 
 
+class DeferredFrameReader(FakeReader):
+    """handshake OK 이후의 Phase-C 프레임을 ``_pump_in`` 완료 **뒤** 에 도착시키는
+    ``StreamReader`` 대역.
+
+    ``boundary_pos`` (handshake 프레임 끝 byte offset) 이후의 첫 read 마다 짧은
+    ``asyncio.sleep(0)`` 양보를 끼워, 데몬 잔여 프레임이 stdin EOF(=``_pump_in``
+    완료) 직후 비동기적으로 도착하는 현실 타이밍을 모사한다. 이로써 **비대칭
+    teardown** (pump_in 먼저 done → pump_out drain) 이 실제로 잔여 프레임을 stdout
+    으로 흘려보내는지 회귀-lock 한다. 대칭 cancel 회귀였다면 이 프레임들이 누락된다.
+    """
+
+    def __init__(self, frames: list[bytes], boundary_pos: int) -> None:
+        super().__init__(frames)
+        self._boundary = boundary_pos
+
+    async def readexactly(self, n: int) -> bytes:
+        if self._pos >= self._boundary:
+            # Phase-C 영역 — 잔여 프레임 도착을 이벤트루프 양보 뒤로 미룬다.
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+        return await super().readexactly(n)
+
+
 class FakeWriter:
     """write/drain/write_eof/close/wait_closed no-op ``StreamWriter`` 대역."""
 
@@ -372,6 +395,63 @@ class TestSignalConnectInformationalStderr1705:
         assert result.exit_code == 0, (result.stdout, result.stderr)
         assert "Connected to bot bot-1705\n" in result.stderr
         assert "Ready for JSON Lines communication on stdin/stdout\n" in result.stderr
+
+
+# ──────────────────────────────────────────────────────────────
+# C2. EOF-drain regression — pump_in 먼저 종료 시 pump_out 잔여 프레임 drain
+# ──────────────────────────────────────────────────────────────
+
+
+class TestSignalConnectEofDrain2338:
+    """**비대칭** Phase-C teardown 회귀 lock (#2338 Codex 브랜치 리뷰 FAIL).
+
+    stdin EOF 로 ``_pump_in`` 이 먼저 완료해도 ``_pump_out`` 을 cancel 하지 않고
+    await 하여, 데몬의 잔여 ack/``{type:closed}`` 프레임을 socket EOF 까지 stdout
+    으로 drain 한 뒤 exit 0 임을 단언한다.
+
+    회귀(대칭 ``for task in pending: task.cancel()``) 였다면 ``_pump_in`` 이 먼저
+    done 인 순간 ``_pump_out`` 이 즉시 cancel 되어 잔여 프레임이 stdout 에 누락된다.
+    ``_pump_in`` 은 **idle stub 으로 가리지 않고** stdin EOF 를 실제로 모사하는
+    stub(``write_eof`` 후 즉시 return)으로 패치해 EOF→drain 경로를 노출한다.
+    """
+
+    def test_residual_frames_drained_after_stdin_eof(self, runner: CliRunner) -> None:
+        ack_frame = {"type": "ack", "signal_id": "sig-1"}
+
+        # OK handshake 프레임 끝 byte offset = boundary. 이후(ack/closed)는
+        # ``_pump_in`` 완료 뒤 비동기 도착(DeferredFrameReader).
+        ok = _frame(_ok_frame("bot-1705"))
+        boundary = len(ok)
+        frames = [ok, _frame(ack_frame), _frame(_CLOSED_FRAME)]
+        reader = DeferredFrameReader(frames, boundary_pos=boundary)
+        writer = FakeWriter()
+
+        async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            return reader, writer
+
+        # stdin EOF 를 실제로 모사: half-close 후 즉시 return → ``_pump_in`` 이
+        # ``_pump_out`` 보다 먼저 done 이 되어 비대칭 else-분기(await pump_out)를
+        # 트리거한다.
+        async def _eof_pump_in(w):  # noqa: ANN001, ANN202
+            w.write_eof()
+
+        with (
+            patch(_PATH_EXISTS_TARGET, return_value=True),
+            patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+            patch(_OPEN_CONN_TARGET, _open),
+            patch("ante.cli.commands.signal._pump_in", _eof_pump_in),
+        ):
+            result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+        assert result.exit_code == 0, (result.stdout, result.stderr)
+
+        # stdin EOF 이후에도 잔여 ack 프레임이 stdout 으로 drain 되어야 한다.
+        out_lines = [ln for ln in result.stdout.splitlines() if ln]
+        decoded = [json.loads(ln) for ln in out_lines]
+        assert ack_frame in decoded, result.stdout
+        assert _CLOSED_FRAME in decoded, result.stdout
+        # closed 프레임 informational stderr 도 방출된다.
+        assert "channel closed: eof\n" in result.stderr
 
 
 # ──────────────────────────────────────────────────────────────

@@ -96,17 +96,27 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
         _err(f"Connected to bot {bot_id}")
         _err("Ready for JSON Lines communication on stdin/stdout")
 
-        # Phase C — 양방향 relay. 한쪽 pump 가 완료하면 sibling 을 cancel 한다
-        # (plain gather 는 idle stdin readline 에서 영구 hang).
+        # Phase C — 양방향 relay. teardown 은 **비대칭** 이다(plain gather 는 idle
+        # stdin readline 에서 영구 hang, 대칭 cancel 은 잔여 프레임 drain 을 끊음).
         pump_in = asyncio.ensure_future(_pump_in(writer))
         pump_out = asyncio.ensure_future(_pump_out(reader))
-        done, pending = await asyncio.wait(
+        done, _pending = await asyncio.wait(
             {pump_in, pump_out}, return_when=asyncio.FIRST_COMPLETED
         )
-        for task in pending:
-            task.cancel()
+        if pump_out in done:
+            # ``_pump_out`` 이 먼저 종료(daemon closed 프레임 또는 socket EOF) →
+            # idle stdin 무한 대기 방지를 위해 ``_pump_in`` 을 cancel 한다.
+            pump_in.cancel()
             with contextlib.suppress(asyncio.CancelledError):
-                await task
+                await pump_in
+        else:
+            # stdin EOF(``write_eof`` half-close) 로 ``_pump_in`` 이 먼저 종료 →
+            # ``_pump_out`` 을 cancel 하지 **않고** await 하여 데몬의 잔여 ack/
+            # closed 프레임을 socket EOF 까지 drain 한 뒤 종료한다.
+            await pump_out
+        # ``_pump_in``/``_pump_out`` 은 write/read 예외를 내부에서 이미 swallow
+        # (BrokenPipe/OSError/IncompleteReadError → 정상 return)하므로 정상 경로에서
+        # 추가 예외는 없다. ``await pump_out`` 도 동일 swallow 로 예외 없이 종료한다.
     finally:
         writer.close()
         with contextlib.suppress(Exception):
