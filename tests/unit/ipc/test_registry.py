@@ -65,7 +65,7 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 40개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 41개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
@@ -95,7 +95,7 @@ def test_register_all_handlers() -> None:
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 40
+    assert len(registry.commands) == 41
 
     expected = {
         "system.halt",
@@ -113,6 +113,7 @@ def test_register_all_handlers() -> None:
         "bot.info",
         "bot.positions",
         "bot.signal_key",
+        "signal.connect",
         "treasury.allocate",
         "treasury.deallocate",
         "treasury.set_balance",
@@ -147,7 +148,7 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 40개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+    """등록된 41개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
     read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
@@ -158,6 +159,8 @@ def test_register_all_handlers_taxonomy() -> None:
     ``bot.signal_key`` read-only 추가 (read-only 4→8).
 
     Refs #2113: member admin mutation 8건 추가 (mutating 24→32).
+
+    Refs #2334 (#2336 PR#1): ``signal.connect`` read-only 추가 (read-only 8→9).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
@@ -205,10 +208,11 @@ def test_register_all_handlers_taxonomy() -> None:
         "bot.info",
         "bot.positions",
         "bot.signal_key",
+        "signal.connect",
     }
 
     assert len(mutating) == 32
-    assert len(read_only) == 8
+    assert len(read_only) == 9
     assert mutating | read_only == set(registry.commands)
 
     for command in mutating:
@@ -1274,12 +1278,12 @@ class TestRegisteredCommandsMetadataCompleteness:
         for spec in loaded.iter_specs():
             assert spec.cross_validators == (), spec.name
 
-    def test_iter_specs_returns_all_40_specs(self, loaded: CommandRegistry) -> None:
-        """``iter_specs``가 40 commands 모두를 ``CommandSpec`` 인스턴스로
+    def test_iter_specs_returns_all_41_specs(self, loaded: CommandRegistry) -> None:
+        """``iter_specs``가 41 commands 모두를 ``CommandSpec`` 인스턴스로
         반환한다 (#2112: 28→32, bot.* read 4건; #2113: 32→40, member admin
-        mutation 8건 추가)."""
+        mutation 8건 추가; #2334/#2336 PR#1: 40→41, ``signal.connect``)."""
         specs = loaded.iter_specs()
-        assert len(specs) == 40
+        assert len(specs) == 41
         assert all(isinstance(s, CommandSpec) for s in specs)
         # 등록 순서 보존(dict insertion order).
         assert [s.name for s in specs] == loaded.commands

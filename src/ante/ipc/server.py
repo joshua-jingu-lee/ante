@@ -230,7 +230,38 @@ class IPCServer:
                     await writer.drain()
                     break
 
+                # Refs #2334 (#2336 PR#1): 첫 프레임이 JSON object 가 아니면
+                # (list/scalar 등) MALFORMED_REQUEST 1프레임 후 close. 비-dict 는
+                # usable id 가 없어 id=None (MESSAGE_TOO_LARGE 블록 미러).
+                if not isinstance(request, dict):
+                    response = self._malformed_request("요청은 JSON object여야 합니다")
+                    data = await protocol.encode(response)
+                    writer.write(data)
+                    await writer.drain()
+                    break
+
                 response = await self._dispatch(request)
+
+                # Refs #2334 (#2336 PR#1): signal.connect 핸드셰이크 OK 응답이면
+                # 동일 연결을 long-lived 스트림으로 connection-upgrade 한다.
+                # 센티넬은 ``response["result"]["_stream"]`` (중첩) — 최상위로
+                # 읽으면 silent fall-through 로 센티넬이 누출된다.
+                result = response.get("result")
+                if (
+                    response.get("status") == "ok"
+                    and isinstance(result, dict)
+                    and result.get("_stream") == "signal.connect"
+                ):
+                    # wire 전송 직전 센티넬 strip (절대 노출 안 됨).
+                    result.pop("_stream", None)
+                    ack = await protocol.encode(response)
+                    writer.write(ack)
+                    await writer.drain()
+                    await self._run_signal_stream(reader, writer, result["bot_id"])
+                    # break 아님 — hijack 연결은 lockstep 재진입 금지. finally 가
+                    # teardown(writer close) 를 단일 소유한다.
+                    return
+
                 data = await protocol.encode(response)
                 writer.write(data)
                 await writer.drain()
@@ -257,6 +288,26 @@ class IPCServer:
             "status": "error",
             "error": {
                 "code": "SERVICE_UNAVAILABLE",
+                "message": message,
+            },
+        }
+
+    @staticmethod
+    def _malformed_request(message: str) -> dict:
+        """``MALFORMED_REQUEST`` error 응답 dict 생성.
+
+        Refs #2334 (#2336 PR#1): 첫 프레임이 JSON object 가 아닐 때 사용한다.
+        비-dict 입력은 usable ``id`` 가 없어 ``id=None`` 으로 고정한다
+        (``MESSAGE_TOO_LARGE`` 블록 동형). taxonomy SSOT
+        (``docs/specs/contracts/error-taxonomy.md``) 의 ``validation`` 카테고리
+        안정 코드. ``_service_unavailable`` 와 동일 envelope shape 으로 다른 IPC
+        consumer(CLI/MCP)가 기존 generic error path 로 흘러가게 한다.
+        """
+        return {
+            "id": None,
+            "status": "error",
+            "error": {
+                "code": "MALFORMED_REQUEST",
                 "message": message,
             },
         }
@@ -452,3 +503,44 @@ class IPCServer:
                     "message": str(e),
                 },
             }
+
+    async def _run_signal_stream(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+        bot_id: str,
+    ) -> None:
+        """signal.connect Phase-C 스트림 바디 루프 (#2334 / #2336 PR#1 스켈레톤).
+
+        핸드셰이크 OK 후 동일 연결을 hijack 해 long-lived 양방향 스트림으로
+        운반한다. PR#1 은 call seam + per-read timeout 없는 read-until-EOF 루프만
+        제공한다. 시그니처 ``(reader, writer, bot_id)`` 는 PR#2(#2337) relay 가
+        그대로 쓰도록 고정한다.
+
+        Phase-C read 에는 per-read timeout 을 **절대** 적용하지 않는다 — idle
+        스트림(무전송 대기)은 정상이며 liveness 는 app-level ``{ping→pong}``
+        heartbeat 로 확인한다(ipc.md §"Timeout 계약"). EOF(client close)에는
+        ``IncompleteReadError`` 로 graceful 종료한다.
+
+        PR#2(#2337) 이연(known-limitation):
+
+        * inbound 프레임 routing/ack/pong → 현재는 read+discard.
+        * >1MB 프레임 비치명 ``{"type":"error","message":"result_too_large"}``
+          후 스트림 유지 → 현재는 ``MessageTooLargeError`` 로 close. PR#1 은
+          Phase-C 의존 client 가 없어 close 허용.
+        * ``SignalChannel``/bounded ``out_queue``/writer_task/eventbus
+          subscribe·relay/``SignalChannelRegistry``/teardown = 전부 PR#2.
+
+        ``writer`` 를 직접 close 하지 않는다 — ``_handle_connection`` finally 가
+        teardown 을 단일 소유한다.
+        """
+        try:
+            while True:
+                # PR#1: routing 없음 — 프레임을 읽어 discard.
+                await protocol.decode(reader)
+        except asyncio.IncompleteReadError:
+            # EOF (어느 쪽이든 소켓 close) — graceful 종료.
+            return
+        except MessageTooLargeError:
+            # PR#1: close. PR#2 에서 비치명 result_too_large 로 스트림 유지.
+            return

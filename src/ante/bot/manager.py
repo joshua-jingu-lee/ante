@@ -25,6 +25,7 @@ from ante.bot.exceptions import (
     BotNotFoundError,
     BotStateConflict,
     BotStrategyAlreadyRunningError,
+    SignalKeyManagerNotConfigured,
 )
 
 if TYPE_CHECKING:
@@ -1325,6 +1326,23 @@ class BotManager:
         if not self._signal_key_manager:
             return None
         return await self._signal_key_manager.get_key(bot_id)
+
+    async def validate_signal_key(self, key: str) -> str | None:
+        """``signal.connect`` 핸드셰이크 게이트① — signal key → bot_id 검증.
+
+        Refs #2334/#2336 (PR#1): IPC ``_handle_signal_connect`` 가 호출하는
+        passthrough. 세 결과를 분리한다.
+
+        * manager 구성 + key hit → ``bot_id``.
+        * manager 구성 + key miss → ``None`` (핸들러가 ``InvalidSignalKey``
+          로 변환; 본 메서드는 raise 하지 않음).
+        * manager 미구성(``_signal_key_manager is None``) →
+          ``SignalKeyManagerNotConfigured`` (generic ``BotError`` /
+          EXECUTION_ERROR fold 회피). 키는 로깅/메시지에 노출하지 않는다.
+        """
+        if self._signal_key_manager is None:
+            raise SignalKeyManagerNotConfigured()
+        return await self._signal_key_manager.validate_key(key)
 
     async def rotate_signal_key(self, bot_id: str) -> str:
         """시그널 키 재발급.

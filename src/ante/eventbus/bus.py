@@ -79,7 +79,11 @@ class EventBus:
                     type(event).__name__,
                 )
 
-        handlers = self._handlers.get(type(event), [])
+        # Refs #2334 §6 stale-ref guard: 핸들러 순회 전에 list 를 snapshot 한다.
+        # publish 중 한 핸들러가 같은 event_type 에 subscribe(in-place
+        # append+sort) / 다른 핸들러가 unsubscribe(rebind) 해도 in-flight 순회는
+        # 결정적이다(skip/double-fire/RuntimeError 없음). 기존 동작 보존.
+        handlers = list(self._handlers.get(type(event), []))
         if not handlers:
             logger.debug("구독자 없는 이벤트: %s", type(event).__name__)
             return

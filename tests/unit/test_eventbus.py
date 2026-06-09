@@ -223,3 +223,75 @@ async def test_event_immutability():
     event = OrderRequestEvent(symbol="005930", account_id="acc-test")
     with pytest.raises(AttributeError):
         event.symbol = "other"  # type: ignore[misc]
+
+
+# ── publish 핸들러 리스트 snapshot stale-ref 가드 (#2334 §6) ────────
+
+
+async def test_publish_handler_subscribe_during_publish_is_deterministic(bus):
+    """publish 중 한 핸들러가 같은 event_type 에 subscribe 해도 in-flight
+    순회가 결정적이다 (#2334 §6 stale-ref guard).
+
+    snapshot(``handlers = list(...)``) 없이 in-place append+sort 되는
+    리스트를 직접 순회하면 새로 추가된 핸들러가 같은 publish 안에서
+    double-fire 되거나 ``RuntimeError: list changed size during iteration``
+    위험이 있다. snapshot 이 in-flight 순회를 결정화한다.
+    """
+    fired: list[str] = []
+
+    async def late_handler(event):
+        fired.append("late")
+
+    async def subscriber(event):
+        fired.append("subscriber")
+        # publish 진행 중 같은 event_type 에 새 핸들러 등록(append+sort).
+        bus.subscribe(OrderRequestEvent, late_handler)
+
+    bus.subscribe(OrderRequestEvent, subscriber)
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
+
+    # 첫 publish 의 snapshot 에는 late_handler 가 없으므로 호출되지 않는다.
+    assert fired == ["subscriber"]
+
+    # 두 번째 publish 부터는 late_handler 가 정상 포함된다.
+    fired.clear()
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
+    assert fired.count("subscriber") == 1
+    assert fired.count("late") == 1
+
+
+async def test_publish_handler_unsubscribe_during_publish_no_skip(bus):
+    """publish 중 한 핸들러가 다른 핸들러를 unsubscribe(rebind) 해도 남은
+    핸들러가 skip 되지 않는다 (#2334 §6 stale-ref guard).
+
+    snapshot 이 없으면 ``unsubscribe`` 가 ``self._handlers[type]`` 를
+    새 리스트로 rebind 하면서 진행 중인 순회가 stale list 를 참조하거나
+    index drift 로 핸들러를 누락할 수 있다. snapshot 이 양쪽을 결정화한다.
+    """
+    fired: list[str] = []
+
+    async def victim(event):
+        fired.append("victim")
+
+    async def unsubscriber(event):
+        fired.append("unsubscriber")
+        # 진행 중 victim 을 등록 해제(같은 event_type list rebind).
+        bus.unsubscribe(OrderRequestEvent, victim)
+
+    async def tail(event):
+        fired.append("tail")
+
+    # priority 로 unsubscriber → victim → tail 순서 강제.
+    bus.subscribe(OrderRequestEvent, unsubscriber, priority=30)
+    bus.subscribe(OrderRequestEvent, victim, priority=20)
+    bus.subscribe(OrderRequestEvent, tail, priority=10)
+
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
+
+    # snapshot 덕분에 이번 publish 의 모든 핸들러(victim 포함)가 호출된다.
+    assert fired == ["unsubscriber", "victim", "tail"]
+
+    # 다음 publish 부터는 victim 이 제거되어 호출되지 않는다.
+    fired.clear()
+    await bus.publish(OrderRequestEvent(account_id="acc-test"))
+    assert fired == ["unsubscriber", "tail"]
