@@ -156,6 +156,16 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   받아 `OutputFormatter.success(...)` 또는 `OutputFormatter.error(code, message)`로
   CLI envelope 1회 wrapping 한다. 이 동형은 `ante bot start/stop/status`의 IPC
   passthrough reference 패턴이다 (`src/ante/cli/commands/bot.py`).
+- **streaming 핸드셰이크 passthrough(`signal connect`)**: `signal connect`의 핸드셰이크
+  단계는 데몬이 생성한 IPC error envelope의 `error.code`/`error.message`를 CLI error
+  envelope으로 **1회만** 옮긴다. 이때 `message`는 **verbatim passthrough**한다 —
+  CLI가 번역·재작성·접두(`Error:` 등)하지 않는다. 따라서 데몬 핸드셰이크 검증
+  에러는 `{status:error, code, message}` 형태로 #1705 회귀 lock과 byte-identical하게
+  유지된다. 이는 위 **CLI IPC 헬퍼 계약**의 동형(streaming 표면) 적용이며, `code`
+  vocabulary와 streaming 프로토콜 자체는 본 SSOT 범위 밖이다(각각
+  `docs/specs/contracts/error-taxonomy.md`, `docs/specs/ipc/ipc.md`). 계약 정의는
+  [#2334](https://github.com/joshua-jingu-lee/ante/issues/2334)이며 **구현 PR 머지
+  후 동작**한다(동기 버그 #2333 unblock; spec 단계에서는 미동작).
 - **결론**: 어느 표면이든 사용자/Agent에게 보이는 envelope은 CLI envelope 4형태
   중 하나(텍스트/JSON), IPC envelope 4형태 중 하나(서버 응답)다. CLI가 IPC
   envelope 그대로를 출력하거나, IPC가 CLI envelope을 반환하는 시나리오는 본

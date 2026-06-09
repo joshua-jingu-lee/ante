@@ -102,7 +102,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 | `stop_all` | — | `None` | 모든 실행 중 봇 중지 + 재시작 태스크 취소. 시스템 셧다운 시 호출 |
 | `list_bots` | — | `list[dict[str, Any]]` | 봇 목록 조회 |
 | `get_bot` | `bot_id: str` | `Bot \| None` | 봇 조회. 없으면 None |
-| `rotate_signal_key` | `bot_id: str` | `str` | 기존 시그널 키 폐기 + 새 키 발급. 연결 중인 채널은 즉시 끊김 |
+| `rotate_signal_key` | `bot_id: str` | `str` | 기존 시그널 키 폐기 + 새 키 발급. DB rotate 커밋 직후 해당 봇의 활성 시그널 채널을 teardown한다 — **커밋 후 NEW signal은 admit되지 않으며, 옛 키로 이미 진입한 in-flight signal은 최대 1개까지 정상 완료**(in-flight abort 아님). enforcement 메커니즘은 아래 `### 채널 teardown enforcement (#2334)` 참조. 구현 PR 머지 후 적용(동기 버그 #2333 unblock) |
 | `get_signal_key` | `bot_id: str` | `str \| None` | 봇의 시그널 키 조회. `accepts_external_signals=False`이면 `None` |
 | `get_restart_count` | `bot_id: str` | `int` | 봇의 현재 재시작 시도 횟수 |
 | `assign_strategy` | `bot_id: str, strategy_id: str` | `None` | 봇에 전략 배정. RUNNING이면 중지→전략 교체→재시작. STOPPED/CREATED이면 전략 ID만 교체 |
@@ -242,7 +242,7 @@ create_bot(config)
     └─ False → signal_key 없음
   ↓
 [운영 중]
-  → rotate_signal_key(bot_id) — 키 갱신 (기존 채널 즉시 끊김)
+  → rotate_signal_key(bot_id) — 키 갱신 (커밋 후 NEW signal 미admit; in-flight at-most-one 완료, abort 아님 — ↓ 채널 teardown enforcement)
   ↓
 remove_bot(bot_id)
   → signal_key 폐기
@@ -286,6 +286,36 @@ Bot이 ExternalSignalEvent를 수신하면:
 3. `strategy.on_data(event.data)` 호출
 4. 반환된 Signal을 `_publish_signals()`로 발행
 5. 체결/상태 변경 시 채널을 통해 외부에 통보
+
+### 채널 teardown enforcement (#2334)
+
+> wire/transport 세부(3-phase upgrade, 1:1 framing, `closed.reason` vocab 등)는 [ipc.md](../ipc/ipc.md) streaming 절이 SSOT다. 본 절은 채널 생명주기 **계약**만 정의한다.
+> **적용 시점**: 본 enforcement는 **구현 PR 머지 후(동기 버그 #2333 unblock)** 동작한다. 그 전까지 `ante signal connect`는 데몬이 아닌 CLI-프로세스의 `BotManager`를 보므로 데몬에서 RUNNING 중인 봇 채널에 닿지 못한다(현 동작 = #2333 dead-end). 따라서 아래 "즉시 끊김" 계약은 **현재 실행 가능 동작이 아니라 채택된 목표 계약**이다.
+
+기존 스펙은 "키 갱신 시 기존 채널은 즉시 끊긴다"고 단언했으나 **enforcement 메커니즘은 명세되지 않았다**. #2334로 다음을 정규화한다.
+
+**`SignalChannelRegistry`**: 데몬에 상주하는 활성 채널 레지스트리. `bot_id → {session_id → ChannelHandle}` 구조로 활성 시그널 채널을 추적하며, `rotate_signal_key`/`delete_bot`/봇 상태 전이/데몬 shutdown이 봇 단위로 채널을 강제 종료(`close_bot(bot_id, reason)` / `close_all(reason)`)할 수 있게 한다. 데몬 부팅 시 단일 인스턴스를 BotManager·IPC 서버에 공유 주입한다(미사용 환경은 None 허용).
+
+**단일 active connect 정책**: 본 릴리스는 **bot_id당 동시 active 시그널 채널 1개**만 허용한다. 같은 봇에 대한 두 번째 `signal connect` 핸드셰이크는 stable code **`BOT_SIGNAL_CHANNEL_BUSY`**로 거부된다(동시 same-bot 구독의 fan-out·dedup 경합 클래스 제거). 레지스트리는 미래 multi-connect 대비 `session_id` 키를 유지하되, 정책은 현 릴리스에서 single로 잠근다. (코드 분류 SSOT는 [error-taxonomy.md](../contracts/error-taxonomy.md).)
+
+**teardown 트리거**: 오직 rotate/delete만 거는 대신, **봇이 RUNNING을 이탈하는 모든 경로**를 단일 메커니즘으로 덮는다.
+
+| 트리거 | 메커니즘 | `closed.reason` |
+|--------|----------|------------------|
+| 키 회전 | `rotate_signal_key` — DB rotate **커밋 성공 직후** `close_bot(bot_id, "rotated")`. ROLLBACK 시 teardown 안 함(옛 키 유효) | `rotated` |
+| 봇 삭제 | `delete_bot` — `bot.stop()` **호출 전**에 `close_bot(bot_id, "deleted")`(채널이 dead ctx를 pump하지 않도록) | `deleted` |
+| 봇 RUNNING 이탈(graceful stop·자율 ERROR·account-suspend·rule-engine stop·auto-restart·`stop_all`) | `BotStoppedEvent`/`BotErrorEvent`를 `bot_id` 필터로 **이벤트-구동** 구독 → 수신 시 `close_bot(bot_id, "bot_stopped")` | `bot_stopped` |
+| 데몬 shutdown | shutdown sweep에서 봇 stop·DB close **이전에** `close_all("draining")`(channels-before-bots-before-db 불변) | `draining` |
+
+- teardown hook은 **BotManager 계층**(rotate/delete 메서드·이벤트 구독)에만 둔다. pure-DB primitive(`SignalKeyManager.rotate/revoke`)에는 두지 않는다 — cold-path(서버 정지 상태)에서도 도달하는 경로이기 때문이다.
+
+**rotate→teardown 정밀 보장**: rotate 커밋이 active signal 처리 중에 발생해도 in-flight `strategy.on_data` 체인을 mid-chain cancel하면 전략 상태가 손상된다. 따라서 보장을 다음과 같이 정밀화한다.
+
+1. teardown은 먼저 `accepting=False`를 set하여 이후 inbound signal admit을 거부한다.
+2. in-flight publish/`on_data` span은 shield되어 완료된다(mid-chain cancel 금지).
+3. 결과 보장 = **"커밋 후 NEW signal은 admit되지 않으며, 옛 키로 진입한 in-flight signal은 최대 1개(at-most-one)까지 정상 완료된다"** — **"in-flight signal abort"가 아니다.** 즉 rotate/delete 직후 새 주문을 유발하는 신규 시그널 주입은 불가능하고, 옛 키로 이미 진입한 trailing signal 1개와 그에 따른 trailing fill만 관측될 수 있다.
+
+이 enforcement는 "직접 DB 수정으로 봇 status/signal key를 바꾸면 `_bots`·실행 task·EventBus 구독·외부 signal channel이 어긋나므로 허용하지 않는다"는 본 문서의 런타임 IPC 위임 원칙(위 참조)과 정합한다.
 
 ### 예외 격리 (D-003)
 

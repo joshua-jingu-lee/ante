@@ -247,8 +247,16 @@ PRAGMA가 쓰기를 요구하기 때문이다. 따라서 옵션 A를 normative�
 ### 3.2 후속 책임 (현재 진행 중 항목)
 
 - ctx 없는 `get_db_path()` 호출의 점진 제거는 진행 중이다. 잔여 callsite:
-  `src/ante/cli/commands/signal.py:48`, `src/ante/cli/commands/broker.py:34,354`
-  — 이들은 #1855/#1856/#1857 후속 cleanup 대상이다.
+  - `src/ante/cli/commands/signal.py:48` — **resolved by #2333**. `ante signal
+    connect`가 데몬-위임 thin IPC relay로 재설계되면서 CLI-프로세스 내
+    `Database`/`EventBus`/`BotManager` offline 구성이 삭제되고, 그 안의 ctx 없는
+    `get_db_path()` 호출도 함께 **자연 소거**된다(별도 #1855/#1856/#1857 cleanup
+    불필요). 본 spec PR은 추적표 항목을 spec 레벨에서 `resolved by #2333`로
+    close할 뿐이며, 실제 callsite 삭제는 **#2333 구현 PR(thin IPC relay 재작성)이
+    merge된 이후에 적용**된다 — 그 전까지 signal.py의 offline 구성은 코드에
+    그대로 존재한다.
+  - `src/ante/cli/commands/broker.py:34,354` — 이들은 #1855/#1856/#1857 후속
+    cleanup 대상이다(잔여).
 - 본 SSOT는 helper 자체의 deprecation timeline을 강제하지 않는다. fallback
   helper signature 자체는 #1855/#1856/#1857 migration이 완료된 이후 별도
   이슈로 제거를 검토한다.

@@ -160,6 +160,23 @@ credentials 복호화, 연결 세션, rate limit, circuit breaker, audit 경로�
 있다. `broker order`와 `broker stream prices`는 일반 운영 IPC 대상이 아니며 별도
 maintenance/test 스펙 없이는 제공하지 않는다.
 
+#### Signal
+
+| CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
+|-----------|-----------|-------------|-------------|
+| `ante signal connect` | `signal.connect` | `BotManager.validate_signal_key()` (#2334 신규) + `BotManager.get_bot()` (read-only handshake) → 데몬-resident `SignalChannel` | streaming. 핸드셰이크는 데몬 LIVE 상태로 signal key→bot 4-게이트를 검증(read-only handshake)하고, 통과 시 동일 연결을 connection-upgrade로 long-lived 양방향 스트림으로 전환하여 외부 시그널을 봇의 `svc.eventbus`에 전달하고 fill/order_update를 역방향으로 되돌린다 |
+
+`signal.connect`는 단일 `ante.sock` 위에서 connection-upgrade(3-phase)로 동작하는 유일한
+streaming 커맨드다. 핸드셰이크 자체는 `is_mutating=False` read-only이며, 일반 요청
+envelope으로 `_dispatch`를 통과해 lifecycle gate와 `required_services`(`bot_manager`)
+preflight를 재사용한다(`validate_signal_key`는 #2334에서 신설되는 `BotManager` 메서드다).
+핸드셰이크 4-게이트 검증과 wire 계약은 `### Signal connect 스트리밍 프로토콜` 절에서
+정규로 기술한다. 신규 TCP/WS 포트나 두 번째 소켓 파일은 도입하지 않는다.
+
+> 이 행은 본 스펙에서 확정하는 계약이며, 실제 실행은 구현 PR 머지 후(동기 버그 #2333
+> unblock) 가능하다. 그전까지 stopped/미구현 데몬에 `signal connect`하면 핸드셰이크
+> 단계에서 `IPC_SERVER_NOT_RUNNING` 등으로 종료된다.
+
 #### Member
 
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
@@ -178,11 +195,20 @@ maintenance/test 스펙 없이는 제공하지 않는다.
 
 `system start`, `system stop`, `system status`, 서버 live 상태가 필요 없는 조회
 커맨드, `backtest`, `data`, `strategy validate/submit`, `report`, `instrument`,
-`member list/info`, `audit`, `signal` 등.
+`member list/info`, `audit` 등.
 
 조회 커맨드라도 서버가 가진 live 상태를 읽어야 하면 런타임 IPC 대상이다. 대표적으로
 `bot list/info/status/positions/signal-key`의 live 조회와
 `broker status/balance/positions`가 여기에 속한다.
+
+`signal connect`는 더 이상 오프라인 커맨드가 아니다. 데몬에서 RUNNING 중인 봇의
+LIVE `svc.bot_manager`/`svc.eventbus`를 경유해 외부 시그널을 전달하고 fill/order_update를
+역방향 스트림으로 되돌리는 streaming 런타임 커맨드로, IPC를 통해 서버에 위임한다(아래
+`#### Signal` 표와 `### Signal connect 스트리밍 프로토콜` 절). 이 재분류 자체가 #2333의
+스펙 레벨 root cause 정정이다 — CLI 프로세스가 자체 `EventBus`/`BotManager`를 구성하던
+기존 경로는 데몬 구독자에 닿지 않는 dead-end였다. 분류·계약은 본 스펙에서 확정되며,
+실제 streaming 동작은 구현 PR 머지 후(동기 버그 #2333 unblock) 활성화된다. 그 전까지
+현 CLI-프로세스 EventBus 구성은 코드에 그대로 존재한다(=#2333 dead-end).
 
 ### Cold-path structural 커맨드
 
@@ -240,7 +266,7 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 40개가
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 41개가
 SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
@@ -285,6 +311,7 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `bot.info` | read-only | `BotManager.get_bot()` live 조회. `{bot: info}` envelope (#2112) |
 | `bot.positions` | read-only | `BotManager.get_bot()` 존재확인 + `TradeService.get_positions()` 봇 계좌 스코핑(#2137). `{positions: [...]}` envelope (#2112) |
 | `bot.signal_key` | read-only | `BotManager.get_signal_key()` live 조회. `{bot_id, signal_key}` (None 허용). `bot.signal_key.rotate`(mutating)와 별개 read command (#2112) |
+| `signal.connect` | read-only | 핸드셰이크는 `BotManager.validate_signal_key()` + `BotManager.get_bot()` 4-게이트 LIVE 검증만 수행하고 서버/DB 상태를 변경하지 않음. 통과 시 동일 연결을 데몬-resident `SignalChannel` 양방향 스트림으로 connection-upgrade(`_dispatch` 외부). `is_mutating=False`, `audit_action=None`(자동 발화 끔 — 핸들러가 4-게이트 통과 직후 직접 1회만 기록, per-signal 금지) (#2334) |
 
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
@@ -389,6 +416,81 @@ lock 되어 있다. 본 절은 envelope 형태만 다루며 vocabulary는 재정
 
 최대 메시지 크기: 1MB
 
+### Signal connect 스트리밍 프로토콜
+
+`signal.connect`는 표준 요청/응답 lockstep과 달리, 단일 `ante.sock` 위에서
+connection-upgrade(hijack)로 long-lived 양방향 스트림을 운반하는 유일한 커맨드다.
+신규 소켓/포트를 만들지 않고, outer wire 프레임(`[4바이트 빅엔디안 길이][UTF-8 JSON]`,
+최대 1MB)을 그대로 재사용한다. inbound(`signal`/`query`/`ping`) · outbound
+(`ack`/`result`/`fill`/`order_update`/`pong`/`error`/`closed`) JSON-Lines 메시지
+vocab과 shape의 SSOT는 bot 모듈 스펙([bot/04-eventbus-integration.md](../bot/04-eventbus-integration.md),
+[bot/03-design-decisions.md](../bot/03-design-decisions.md))이다. 본 절은 IPC 전송
+계층의 3-phase·framing·timeout·종료 계약만 기술한다.
+
+> 본 절은 계약(스펙)이며, 실제 streaming 실행은 구현 PR 머지 후(동기 버그 #2333
+> unblock) 가능하다.
+
+#### 3-Phase 연결
+
+| Phase | 방향 | 프레임 | 내용 |
+|-------|------|--------|------|
+| A — 핸드셰이크 요청 | client→daemon | 정확히 1 | 표준 요청 envelope. `{"id":"<uuid>","command":"signal.connect","args":{"key":"sk_..."},"actor":"<member_id>"}`. 키는 `args.key`에만. `_dispatch`를 통과해 lifecycle gate + `required_services`(`bot_manager`) + typed-exception→stable-code 변환을 재사용 |
+| B — 핸드셰이크 응답 | daemon→client | 정확히 1 | OK: `{"id":<same>,"status":"ok","result":{"bot_id":"<id>","account_id":"<id>"}}`. ERROR: `{"id":<same>,"status":"error","error":{"code":<CODE>,"message":<MSG>}}` 1프레임 후 close(Phase C 미진입). 핸들러가 반환하는 `_stream` 센티넬은 wire 전송 직전 strip되어 절대 노출되지 않음 |
+| C — 스트림 바디 | 양방향 | 무제한 | OK 후에만 진입. 각 프레임 = 1 JSON-Lines 객체. RPC가 아니므로 `id` 상관관계 없음. 종료 = 어느 쪽이든 소켓 close(EOF), 또는 데몬이 보내는 단일 `{"type":"closed","reason":...}` 프레임 |
+
+핸드셰이크 4-게이트(데몬-side, LIVE 상태)는 순서대로: ① signal key 검증
+(`validate_signal_key` → None이면 `INVALID_SIGNAL_KEY`), ② 봇 존재
+(`get_bot` → None이면 `BOT_NOT_FOUND`), ③ 봇 RUNNING(`BOT_NOT_RUNNING`),
+④ 봇이 외부 시그널 수용(`BOT_NOT_ACCEPTING_SIGNALS`). 첫 프레임이 비-dict로
+decode되면 `MALFORMED_REQUEST` 1프레임 후 close. 같은 봇에 이미 active session이
+있으면 두 번째 핸드셰이크는 `BOT_SIGNAL_CHANNEL_BUSY`로 거부한다(본 릴리스는 bot_id당
+단일 connect). 위 stable code들의 vocabulary SSOT는
+[error-taxonomy.md](../contracts/error-taxonomy.md)다.
+
+lifecycle gate는 일반 명령과 동일하게 적용된다. `signal.connect`는 `is_mutating=False`
+이므로 `SHUTTING_DOWN`에서 핸드셰이크는 통과하지만, `DRAINING`/`STOPPED`는
+`SERVICE_UNAVAILABLE`로 거부된다. 데몬 shutdown 시 활성 스트림은 DRAINING 전이에서
+`{"type":"closed","reason":"draining"}`로 정리된다.
+
+#### 1:1 framing 불변
+
+- **모든 논리 JSON-Lines 메시지 = 정확히 1 length-prefixed 프레임.** 한 프레임에
+  여러 메시지를 묶거나(batching) 이중 framing하지 않는다.
+- **데몬은 프레임 내부 payload에 trailing `'\n'`(embedded newline)을 싣지 않는다.**
+  `'\n'` 재부착은 CLI가 stdout으로 기록할 때만 수행한다. raw-newline 모드 전환은 없다.
+- 프레임 단위 1MB 초과 시 데몬은 비치명 `{"type":"error","message":"result_too_large"}`로
+  응답하고 스트림을 유지한다(close 아님).
+
+#### Timeout 계약
+
+- **핸드셰이크 응답(Phase B)에만** bounded 30s timeout을 적용한다
+  (`asyncio.wait_for(decode, 30)`).
+- **Phase C 스트림 바디 read에는 per-read timeout을 절대 적용하지 않는다.** idle
+  스트림(무전송 대기)은 정상이며, liveness는 app-level `{ping→pong}` heartbeat로
+  확인한다. 표준 `IPCClient.send`의 30s decode timeout 경로는 Phase C에 재사용하지
+  않는다.
+
+#### `closed.reason` 정규 vocab (SSOT)
+
+데몬 주도 종료는 정확히 1개 `{"type":"closed","reason":<...>}` 프레임을 best-effort로
+보낸 뒤 소켓을 닫는다. `reason`은 다음 단일 정규 집합으로 통일한다:
+**`{rotated, deleted, bot_stopped, draining, lagged}`**.
+
+| 트리거 | reason |
+|--------|--------|
+| signal key 회전(`bot.signal_key.rotate`) | `rotated` |
+| 봇 삭제(`bot.remove`) | `deleted` |
+| 봇이 RUNNING 이탈(stop/error/suspend 등 — 정밀 트리거 집합은 [bot/03-design-decisions.md](../bot/03-design-decisions.md) SSOT) | `bot_stopped` |
+| 데몬 shutdown DRAINING 전이 | `draining` |
+| out_queue overflow(느린 소비자) | `lagged` |
+
+외부 소비자는 **알 수 없는 `reason`을 generic terminal close로 처리**해야 한다
+(forward-compat). standalone `shutdown` reason은 없으며, 유일한 shutdown 트리거는
+DRAINING 전이로 `draining`을 발화한다. teardown trigger 메커니즘의 정밀 계약은
+[bot/03-design-decisions.md](../bot/03-design-decisions.md)를 따른다.
+
+> coherence minor 해소: teardown 표의 `bot_stopped` 트리거 셀은 enumeration 권위를 bot/03으로 단일화("정밀 트리거 집합은 bot/03 SSOT")하여 03과의 비대칭을 제거했다. closed.reason vocab 집합 자체는 03/spec §6과 byte-identical.
+
 ## 컴포넌트 설계
 
 ### IPCServer
@@ -492,9 +594,28 @@ drift다.
 
 ## 보안 고려
 
-- **소켓 파일 권한**: 생성 시 `0o600` (소유자만 읽기/쓰기) — 로컬 머신의 다른 사용자 접근 차단
+- **소켓·runtime dir 파일 권한**: 소켓 파일은 생성 시 `0o600`(소유자만 읽기/쓰기), runtime
+  디렉터리(`<config_dir>/run/`)는 `0o700`으로 생성·강제한다(umask에 의존하지 않으며, 기존
+  디렉터리도 권한을 검증한다) — 로컬 머신의 다른 사용자 접근 차단
 - **인증 이중화 불필요**: 일반 CLI는 이미 `ANTE_MEMBER_TOKEN`으로 인증 + Member scope 확인을 수행하므로, IPC 계층에서 재인증하지 않는다. IPC는 별도 permission vocabulary를 소유하지 않고 `actor` 필드로 감사 추적만 전달한다. `member reset-password`처럼 인증 면제 recovery 커맨드는 토큰 대신 recovery key 또는 현재 패스워드를 서버 서비스가 검증한다
+- **`signal.connect` 키 검증은 데몬-side**: 실질 인가는 signal key 검증이며,
+  `validate_signal_key`를 데몬 핸들러에서 `svc.bot_manager` 경유로 수행한다. CLI
+  `@require_auth`는 "CLI 명령 실행 여부"만 게이트한다. signal key(`sk_` 접두)는 audit
+  detail / audit_log / IPC error envelope / `closed` 프레임 / 서버 로그 어디에도 노출하지
+  않는다(핸드셰이크 실패 path도 키를 traceback에 싣지 않는다)
+- **`signal.connect` cross-bot 누출 방지**: `ExternalSignalEvent`의 `account_id`/`bot_id`는
+  항상 LIVE `bot.config`에서만 생성하며, 클라이언트가 보낸 `account_id`/`bot_id`는
+  무시·override 불가다. 연결당 `SignalChannel`은 단일 `bot_id`에 바인딩되고,
+  fill/order_update는 `event.bot_id == bot.bot_id` 필터로 자기 봇만 수신한다
+- **`signal.connect` audit actor sentinel**: connect는 연결당 1회만 audit하며(per-signal
+  audit 금지), audit의 member_id는 spoof 가능한 client-supplied `actor`가 아니라 sentinel
+  `ipc`로 기록한다(`server.py`의 `actor` 기본값 정합, #2113). audit 기록은 4-게이트 통과
+  직후 `audit_logger`가 구성된 경우에만 getattr-safe하게 1회 수행한다
 - **요청 크기 제한**: 메시지 최대 크기 1MB — 과도한 페이로드 차단
+
+> `signal.connect` 보안 불변(키 검증 daemon-side·키 비노출·account_id/bot_id LIVE-only·
+> dir 0o700·actor sentinel audit)은 본 스펙에서 확정하는 계약이며, 코드 반영은 구현 PR
+> 머지 후(동기 버그 #2333 unblock)에 이루어진다.
 
 ## 파일 구조
 
