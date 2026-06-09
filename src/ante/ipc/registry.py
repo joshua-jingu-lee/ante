@@ -665,6 +665,75 @@ async def _handle_bot_signal_key(
     return {"bot_id": bot_id, "signal_key": key}
 
 
+async def _handle_signal_connect(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """``signal.connect`` 핸드셰이크 IPC handler (read-only, #2334/#2336 PR#1).
+
+    데몬-side·LIVE 상태 4-게이트를 순서대로 검증한 뒤, 통과 시
+    ``_stream`` 센티넬이 포함된 dict 를 반환한다. ``IPCServer._handle_connection``
+    이 ``response["result"]["_stream"] == "signal.connect"`` 를 감지해 동일 연결을
+    long-lived 스트림으로 connection-upgrade 하며, wire 전송 직전 센티넬을 strip
+    한다(절대 노출 안 됨 — ipc.md §"1:1 framing 불변").
+
+    4-게이트(ipc.md §"3-Phase 연결"):
+
+    * ① signal key 검증: ``validate_signal_key(key)`` → ``None`` 이면
+      ``InvalidSignalKey``. key 부재(``args`` 에 ``key`` 없음)도 ``args.get`` 으로
+      ``None`` → 동일 거부(``KeyError`` 아님).
+    * ② 봇 존재: ``get_bot(bot_id)`` → ``None`` 이면 ``BotNotFoundError``
+      (기존 코드 재사용, 재정의 금지).
+    * ③ 봇 RUNNING: ``bot.status != BotStatus.RUNNING`` 이면
+      ``BotNotRunning(bot_id, bot.status.value)`` (소문자 ``.value``).
+    * ④ 외부 시그널 수용: 전략 부재 또는 ``accepts_external_signals=False`` 면
+      ``BotNotAcceptingSignals``.
+
+    ``account_id`` 는 LIVE ``bot.config`` 에서만 취하고 ``args`` 의 spoof 값은
+    무시한다. ``audit_action=None`` (자동 audit OFF) — 단일 manual connect-audit
+    는 PR#2(#2337) lifecycle 소관이다. 키는 로깅/반환에 노출하지 않는다.
+
+    PR#2(#2337) 경계: routing/``SignalChannel``/out_queue/teardown/단일-connect
+    ``BOT_SIGNAL_CHANNEL_BUSY`` raise 는 본 PR 범위 밖이다.
+    """
+    from ante.bot.config import BotStatus
+    from ante.bot.exceptions import (
+        BotNotAcceptingSignals,
+        BotNotFoundError,
+        BotNotRunning,
+        InvalidSignalKey,
+    )
+
+    # 게이트① — signal key 검증. key 부재/비-str(``args={}`` 포함) 은
+    # ``args.get`` 으로 ``None`` → miss 와 동일하게 ``InvalidSignalKey``
+    # (``KeyError`` 아님). manager 미구성 시는 ``validate_signal_key`` 가
+    # ``SignalKeyManagerNotConfigured`` 를 raise 한다.
+    key = args.get("key")
+    if not isinstance(key, str):
+        raise InvalidSignalKey()
+    bot_id = await svc.bot_manager.validate_signal_key(key)
+    if bot_id is None:
+        raise InvalidSignalKey()
+
+    # 게이트② — 봇 존재.
+    bot = svc.bot_manager.get_bot(bot_id)
+    if bot is None:
+        raise BotNotFoundError(bot_id)
+
+    # 게이트③ — 봇 RUNNING.
+    if bot.status != BotStatus.RUNNING:
+        raise BotNotRunning(bot_id, bot.status.value)
+
+    # 게이트④ — 외부 시그널 수용.
+    if not bot.strategy or not bot.strategy.meta.accepts_external_signals:
+        raise BotNotAcceptingSignals(f"Bot {bot_id} does not accept external signals")
+
+    return {
+        "bot_id": bot_id,
+        "account_id": bot.config.account_id,
+        "_stream": "signal.connect",
+    }
+
+
 async def _handle_bot_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
@@ -1492,9 +1561,9 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """40개 런타임 커맨드 핸들러를 일괄 등록.
+    """41개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(8개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(9개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -1555,6 +1624,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     ``regenerate_recovery_key`` 는 auth-exempt 라 master-lookup 을 handler
     (서버 chokepoint)에서 수행하고 audit member_id 를 고정 sentinel 상수로
     기록한다. mutating 24→32, audit 18→26, 총 32→40.
+
+    Refs #2334 (#2336 PR#1): ``signal.connect`` (read-only) 추가 — daemon-위임
+    signal.connect 핸드셰이크의 4-게이트 LIVE 검증 경로. 통과 시 동일 연결을
+    connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``;
+    connect-audit 1회는 PR#2 #2337). read-only 8→9, 총 40→41. mutating 32 /
+    audit 26 불변(signal.connect 는 비-mutating·비-audit).
     """
     # ── mutating (32개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
@@ -1958,4 +2033,17 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="entity",
         result_key="signal_key",
         required_services=frozenset({"bot_manager"}),
+    )
+    # Refs #2334 (#2336 PR#1): signal.connect 핸드셰이크. read-only(4-게이트
+    # LIVE 검증만 수행, 상태 미변경) · ``result_kind="stream"`` (통과 시
+    # 동일 연결을 connection-upgrade) · ``audit_action`` 생략(=None, 자동 audit
+    # OFF — connect-audit 1회는 PR#2 #2337). ``account_id_policy="none"``:
+    # account_id 는 LIVE ``bot.config`` 에서만 취하고 args 는 무시한다.
+    registry.register(
+        "signal.connect",
+        _handle_signal_connect,
+        is_mutating=False,
+        result_kind="stream",
+        required_services=frozenset({"bot_manager"}),
+        account_id_policy="none",
     )

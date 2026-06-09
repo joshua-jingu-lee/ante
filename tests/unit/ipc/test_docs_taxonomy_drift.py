@@ -46,6 +46,9 @@ _IPC_COMMAND_PREFIXES = (
     "config.",
     "approval.",
     "broker.",
+    # Refs #2334 (#2336 PR#1): signal.connect drift lock 활성화. prefix 추가
+    # 전에는 docs 의 signal.* row 가 silent skip(dead lock) 됐다.
+    "signal.",
 )
 
 # docs 표에는 등장하지만 IPC ``CommandRegistry`` 등록 대상이 아닌 토큰.

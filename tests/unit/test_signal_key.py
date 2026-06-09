@@ -320,3 +320,60 @@ class TestBotManagerSignalKey:
 
         key = await manager.get_signal_key("bot-005")
         assert key == "sk_test"
+
+    async def test_validate_signal_key_hit(self) -> None:
+        """manager 구성 + key hit → bot_id 반환 (#2334/#2336 게이트①)."""
+        from ante.bot.manager import BotManager
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.execute_script = AsyncMock()
+        eventbus = MagicMock()
+        eventbus.subscribe = MagicMock()
+
+        skm = MagicMock()
+        skm.validate_key = AsyncMock(return_value="bot-hit")
+
+        manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
+
+        bot_id = await manager.validate_signal_key("sk_x")
+        assert bot_id == "bot-hit"
+        skm.validate_key.assert_awaited_once_with("sk_x")
+
+    async def test_validate_signal_key_miss_returns_none(self) -> None:
+        """manager 구성 + key miss → None (raise 하지 않음)."""
+        from ante.bot.manager import BotManager
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.execute_script = AsyncMock()
+        eventbus = MagicMock()
+        eventbus.subscribe = MagicMock()
+
+        skm = MagicMock()
+        skm.validate_key = AsyncMock(return_value=None)
+
+        manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=skm)
+
+        assert await manager.validate_signal_key("sk_bad") is None
+
+    async def test_validate_signal_key_manager_none_raises_typed(self) -> None:
+        """signal_key_manager=None → SignalKeyManagerNotConfigured.
+
+        generic BotError(EXECUTION_ERROR fold) 가 아니라 typed exception 으로
+        SERVICE_NOT_CONFIGURED 코드를 가진다.
+        """
+        from ante.bot.exceptions import SignalKeyManagerNotConfigured
+        from ante.bot.manager import BotManager
+
+        db = MagicMock()
+        db.execute = AsyncMock()
+        db.execute_script = AsyncMock()
+        eventbus = MagicMock()
+        eventbus.subscribe = MagicMock()
+
+        manager = BotManager(eventbus=eventbus, db=db, signal_key_manager=None)
+
+        with pytest.raises(SignalKeyManagerNotConfigured) as ei:
+            await manager.validate_signal_key("sk_x")
+        assert ei.value.code == "SERVICE_NOT_CONFIGURED"

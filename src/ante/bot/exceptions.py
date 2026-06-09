@@ -15,6 +15,11 @@ BOT_NOT_ACCEPTING_SIGNALS_CODE = "BOT_NOT_ACCEPTING_SIGNALS"
 BOT_ALREADY_EXISTS_CODE = "BOT_ALREADY_EXISTS"
 BOT_STRATEGY_ALREADY_RUNNING_CODE = "BOT_STRATEGY_ALREADY_RUNNING"
 BOT_IMMUTABLE_FIELD_CODE = "BOT_IMMUTABLE_FIELD"
+# Refs #2334 / #2336 (PR#1): signal.connect 핸드셰이크 4-게이트 stable code.
+# ``SignalKeyManagerNotConfigured`` 는 전용 코드를 발명하지 않고 taxonomy
+# SSOT(error-taxonomy.md) 의 공통 ``SERVICE_NOT_CONFIGURED`` 를 재사용한다.
+INVALID_SIGNAL_KEY_CODE = "INVALID_SIGNAL_KEY"
+BOT_NOT_RUNNING_CODE = "BOT_NOT_RUNNING"
 
 
 class BotError(Exception):
@@ -110,3 +115,58 @@ class BotImmutableFieldError(BotError):
     """
 
     code: str = BOT_IMMUTABLE_FIELD_CODE
+
+
+class InvalidSignalKey(BotError):  # noqa: N818
+    """``signal.connect`` 핸드셰이크 게이트① — signal key 검증 실패 (#2334/#2336).
+
+    ``validate_signal_key`` 가 ``None`` 을 반환한 경우(미발급/회전/오타 키)
+    핸들러가 raise 한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가
+    안정 코드 ``INVALID_SIGNAL_KEY`` 로 변환한다.
+
+    **redaction 불변**: 메시지에 키/bot_id 를 절대 interpolate 하지 않는다.
+    ``__init__`` 인자를 0개로 강제해 호출처 실수로 키가 새는 경로를 차단한다
+    (error-taxonomy.md ``validation`` 카테고리).
+    """
+
+    code: str = INVALID_SIGNAL_KEY_CODE
+
+    def __init__(self) -> None:
+        super().__init__("Invalid signal key")
+
+
+class BotNotRunning(BotError):  # noqa: N818
+    """``signal.connect`` 핸드셰이크 게이트③ — 봇이 RUNNING 아님 (#2334/#2336).
+
+    handshake 시점에 ``bot.status != BotStatus.RUNNING`` 이면 핸들러가 raise
+    한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가 안정 코드
+    ``BOT_NOT_RUNNING`` 으로 변환한다 (error-taxonomy.md ``state_conflict``).
+
+    ``status`` 는 caller(핸들러 게이트③)가 ``bot.status.value`` 로 넘긴
+    **소문자** ``BotStatus.value`` 다. 본 클래스는 받은 문자열을 그대로
+    포맷하며 ``BotStatus.name``(대문자)/``repr`` 을 사용하지 않는다.
+    """
+
+    code: str = BOT_NOT_RUNNING_CODE
+
+    def __init__(self, bot_id: str, status: str) -> None:
+        self.bot_id = bot_id
+        self.status = status
+        super().__init__(f"Bot is not running: {bot_id} (status: {status})")
+
+
+class SignalKeyManagerNotConfigured(BotError):  # noqa: N818
+    """``signal.connect`` 키 검증에 필요한 ``SignalKeyManager`` 가 부재 (#2334/#2336).
+
+    ``BotManager.validate_signal_key`` 가 ``_signal_key_manager is None`` 일 때
+    raise 한다. ``rotate_signal_key`` 의 generic ``BotError``(EXECUTION_ERROR
+    로 fold) 를 미러하지 않고, taxonomy SSOT 의 공통 안정 코드
+    ``SERVICE_NOT_CONFIGURED``(``service_unavailable``) 를 재사용한다 —
+    전용 코드를 발명하지 않는다. 메시지는 키-free 이며 관찰 가능한
+    ``signal_key_manager`` 토큰만 포함한다.
+    """
+
+    code: str = "SERVICE_NOT_CONFIGURED"
+
+    def __init__(self) -> None:
+        super().__init__("SignalKeyManager not configured: signal_key_manager")
