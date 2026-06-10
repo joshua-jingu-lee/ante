@@ -38,6 +38,17 @@ class KISDomesticAdapter(KISBaseAdapter):
 | 주문 취소/정정 | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
 | 미체결 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl` | GET |
 
+### order-cash TR ID 매핑
+
+주문 접수(`order-cash`) 호출 시 `place_order`는 `is_paper` × `side` 조합으로 아래 KIS 공식 현행 TR ID를 전송한다. **order-cash 한정**이며, 취소/정정(`order-rvsecncl`, `VTTC0803U`/`TTTC0803U`)·잔고·현재가 등 다른 TR ID는 이 표의 범위 밖이다.
+
+| 환경 | 매수 | 매도 |
+|------|------|------|
+| 모의(paper) | `VTTC0012U` | `VTTC0011U` |
+| 실전(live) | `TTTC0012U` | `TTTC0011U` |
+
+> 출처: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py) 및 KIS Developers 포털(2축 검증). 구버전 TR ID(`VTTC0802U`/`TTTC0802U`/`VTTC0801U`/`TTTC0311U`)는 deprecated 되어 모의 매수 시 `40910000 모의투자 주문이 불가한 계좌입니다`로 거절되므로 현행 매핑으로 갱신했다(#2342).
+
 ### KIS 주문 유형 매핑
 
 KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한다. `stop`/`stop_limit`이 전달되면 `ValueError`를 발생시킨다 (상위 계층에서 변환 후 호출해야 함).

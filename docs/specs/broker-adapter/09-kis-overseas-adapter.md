@@ -13,7 +13,7 @@ KISBaseAdapter를 상속하여 해외주식 전용 로직을 구현할 예정이
 | 항목 | KISDomesticAdapter | KISOverseasAdapter |
 |------|-------------------|-------------------|
 | API 경로 | `/uapi/domestic-stock/v1/` | `/uapi/overseas-stock/v1/` |
-| TR ID 매핑 | `TTTC0802U` (매수) 등 | `TTTT1002U` (매수) 등, **거래소별** |
+| TR ID 매핑 | `TTTC0012U` (매수) 등 | `TTTT1002U` (매수) 등, **거래소별** |
 | 주문 파라미터 | `ORD_DVSN`, `PDNO` (6자리) | `OVRS_EXCG_CD`, `TR_CRCY_CD`, 티커 |
 | 잔고 조회 | 원화 단일 | 통화별 분리 (`wcrc_frcr_dvsn_cd`) |
 | 시세 조회 | `fid_cond_mrkt_div_code: "J"` | `EXCD: "NAS"` 등 |
