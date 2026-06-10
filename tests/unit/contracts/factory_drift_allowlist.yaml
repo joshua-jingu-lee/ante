@@ -28,14 +28,10 @@ direct_database_construction:
     line: 354
     reason: "broker reconcile — adapter_db fallback (runtime_ipc cold_path branch)"
 
-  # signal connect — long_running / streaming external process.
-  # SignalChannel.run() 이 stdin/stdout JSON Lines stream loop 를 형성한다.
-  # Database lifecycle 이 external process runtime 과 엮여 있어 단순
-  # `open_cli_db` async-context wrap 으로 동치 변환이 불가능하다 (signal.py:35-38
-  # 주석 invariant).
-  - path: src/ante/cli/commands/signal.py
-    line: 48
-    reason: "signal connect — long_running stream channel (external process lifecycle)"
+  # signal connect — #2338 PR#3 에서 CLI `_run_connect` 를 thin IPC relay 로
+  # 재작성하며 in-process `Database(...)` 직접 생성이 제거됐다(데몬-위임). 더
+  # 이상 callsite 가 없으므로 allowlist 엔트리도 함께 삭제한다(drift test 의
+  # `stale_baseline` sanity 와 정합).
 
   # report domain — `report list` / `report view` 는 `offline` read 명령이며
   # #2114 에서 `open_cli_db` (read_only) 로 마이그레이션되어 직접 Database 생성

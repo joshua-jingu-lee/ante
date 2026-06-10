@@ -129,38 +129,15 @@ class SignalChannel:
         if self._on_lagged is not None:
             self._on_lagged()
 
-    async def run(self) -> None:
-        """채널 실행 루프. stdin에서 읽고 처리."""
-        self._running = True
-        self._subscribe_events()
-
-        loop = asyncio.get_event_loop()
-        reader = asyncio.StreamReader()
-        protocol = asyncio.StreamReaderProtocol(reader)
-        await loop.connect_read_pipe(lambda: protocol, self._input)
-
-        while self._running:
-            try:
-                line = await reader.readline()
-                if not line:
-                    break
-                await self._handle_line(line.decode("utf-8").strip())
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                logger.exception("채널 메시지 처리 오류")
-
-        self._running = False
-        self._unsubscribe_events()
-
     async def _handle_line(self, line: str) -> None:
-        """legacy stdin 라인 파싱 → ``_handle_message`` 위임.
+        """stdin 라인 파싱 → ``_handle_message`` 위임.
 
         ``json.loads`` 만 담당하고(empty-guard·``JSONDecodeError``) routing 은
-        ``_handle_message(dict)`` 가 한다. ``run()``(legacy connect_read_pipe)
-        은 본 메서드 경유라 투명하다. 데몬 경로(``_run_signal_stream``)는
+        ``_handle_message(dict)`` 가 한다. 데몬 경로(``_run_signal_stream``)는
         protocol.decode 로 이미 dict 를 얻으므로 ``_handle_message`` 를 직접
-        호출한다(json.loads 중복 회피).
+        호출한다(json.loads 중복 회피). CLI relay(#2338) 전환 후 in-process
+        ``connect_read_pipe`` 루프(구 ``run()``)는 제거됐고, 본 메서드는 단위
+        테스트의 라인-레벨 진입점으로만 남는다.
         """
         if not line:
             return

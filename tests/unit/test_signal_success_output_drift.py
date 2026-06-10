@@ -15,8 +15,16 @@ callsite 의 envelope shape 사이의 drift 를 lock 한다.
 위로 수립한다 (long-running / streaming). ``fmt.success`` / ``fmt.output``
 단일 envelope dump 는 *발생하지 않는다*. validation 실패 분기 (``_fail``)
 만 JSON 모드에서 ``fmt.error(msg, code=...)`` envelope 을 dump 하고 즉시
-SystemExit (signal.py:93-104). success-output drift test 의 일반 envelope
-매칭 scope 밖이며, 본 모듈은 registry envelope 분류기 sanity 만 lock.
+SystemExit 한다. success-output drift test 의 일반 envelope 매칭 scope 밖이며,
+본 모듈은 registry envelope 분류기 sanity 만 lock.
+
+#2338 마이그레이션: ``signal connect`` 가 데몬-위임 thin IPC relay 로 재작성
+되어 invalid key 거부는 더 이상 in-process ``validate_key`` 가 아니라 데몬의
+**Phase-B error frame** 으로 도착한다. 본 모듈의 invalid-key JSON drift lock
+도 in-process ``Database``/``SignalKeyManager`` patch 에서 IPC-layer mock
+(``asyncio.open_unix_connection`` + ``INVALID_SIGNAL_KEY`` Phase-B frame)으로
+repoint 한다 — relay 가 ``resp["error"]`` 를 ``_fail`` 로 flatten 해 동일한
+``fmt.error`` envelope 을 byte-identical 로 dump 함을 lock 한다.
 
 3 시나리오 (registry sanity +1 + validation error envelope +1 + connect
 가 fmt.success 를 호출하지 않음 +1):
@@ -34,7 +42,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from click.testing import CliRunner
@@ -147,29 +155,65 @@ def _load_json_payload(output: str) -> Any:
 def test_signal_connect_invalid_key_emits_error_envelope(tmp_path: Path) -> None:
     """``signal connect`` invalid key: ``fmt.error`` JSON envelope 발화.
 
-    signal.py:50-52: ``validate_key`` 가 ``None`` 반환 시 ``_fail(fmt,
-    "Invalid signal key", "INVALID_SIGNAL_KEY")``. JSON 모드는 stdout 으로
-    ``{status: "error", code, message}`` envelope 을 dump 하고 exit 1.
+    #2338 데몬-위임 relay: invalid key 는 데몬 Phase-B error frame
+    (``{status:error, error:{code:INVALID_SIGNAL_KEY, message:...}}``)으로
+    도착하고, relay 가 이를 ``_fail`` 로 flatten 해 JSON 모드 stdout 으로
+    ``{status:error, code, message}`` envelope 을 dump 하고 exit 1.
 
     본 시나리오는 success-output drift 의 일반 envelope 매칭 scope 밖이지만,
     signal connect 의 유일한 stdout JSON dump 경로이므로 본 모듈이 함께
     lock 한다 (registry stream leaf 의 "success envelope 부재" 를 보완).
     """
-    db = MagicMock()
-    db.connect = AsyncMock()
-    db.close = AsyncMock()
-    skm = MagicMock()
-    skm.initialize = AsyncMock()
-    skm.validate_key = AsyncMock(return_value=None)
+    import asyncio
+    import struct
 
-    # signal.py 는 ``_run_connect`` 내부에서 lazy import 하므로 원본 모듈을
-    # 직접 patch 한다.
+    payload = json.dumps(
+        {
+            "id": "h1",
+            "status": "error",
+            "error": {"code": "INVALID_SIGNAL_KEY", "message": "Invalid signal key"},
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    frame = struct.pack("!I", len(payload)) + payload
+
+    class _Reader:
+        def __init__(self) -> None:
+            self._buf = frame
+            self._pos = 0
+
+        async def readexactly(self, n: int):  # noqa: ANN202
+            if self._pos + n > len(self._buf):
+                partial = self._buf[self._pos :]
+                self._pos = len(self._buf)
+                raise asyncio.IncompleteReadError(partial, n)
+            chunk = self._buf[self._pos : self._pos + n]
+            self._pos += n
+            return chunk
+
+    class _Writer:
+        def write(self, _data: bytes) -> None:
+            return None
+
+        async def drain(self) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+        async def wait_closed(self) -> None:
+            return None
+
+    async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        return _Reader(), _Writer()
+
     with (
-        patch("ante.core.database.Database", return_value=db),
+        patch("ante.cli.commands.signal.Path.exists", return_value=True),
         patch(
-            "ante.bot.signal_key.SignalKeyManager",
-            return_value=skm,
+            "ante.cli.commands.signal.get_socket_path",
+            return_value="/tmp/test-ante.sock",
         ),
+        patch("asyncio.open_unix_connection", _open),
     ):
         result = _invoke(
             [
@@ -188,11 +232,11 @@ def test_signal_connect_invalid_key_emits_error_envelope(tmp_path: Path) -> None
     assert result.exit_code == 1, result.stdout
 
     # JSON envelope 는 stdout 에 dump 된다 (fmt.error).
-    payload = _load_json_payload(result.stdout)
-    assert isinstance(payload, dict)
-    assert payload.get("status") == "error"
-    assert payload.get("code") == "INVALID_SIGNAL_KEY"
-    assert "message" in payload
+    payload_out = _load_json_payload(result.stdout)
+    assert isinstance(payload_out, dict)
+    assert payload_out.get("status") == "error"
+    assert payload_out.get("code") == "INVALID_SIGNAL_KEY"
+    assert "message" in payload_out
 
 
 # ── 2. signal.py callsite 부재 단언 (success envelope 미생성) ───────────

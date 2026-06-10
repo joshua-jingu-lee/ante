@@ -41,12 +41,18 @@ running / 시그널 미수용)는 모두 동일 invariant("signal connect 연결
 (#1557 narrow-scope 선례: 동일 결함 분기 일괄 정렬, half-fix 회피).
 4개 가드 전부 ``raise SystemExit(1)``로 정렬되며, ``_err`` stderr 메시지·
 문구는 그대로 유지(streaming 명령 — JSON envelope 비대상)되고, 정상 경로
-(``_err("Connected ...")`` 안내 후 ``channel.run()`` 정상 반환 → exit 0)는
-불변임을 ``TestSignalConnect*`` 에서 회귀 보장한다.
+(``_err("Connected ...")`` 안내 후 채널 종료 → exit 0)는 불변임을
+``TestSignalConnect*`` 에서 회귀 보장한다.
 
-``signal_connect``는 ``asyncio.run(_run_connect(key))``만 호출하므로
-``SystemExit(1)``이 ``finally: await db.close()`` 실행 후 asyncio.run
-경계를 통해 process exit code 1로 전파됨을 CliRunner exit_code로 확인한다.
+#2338 마이그레이션: ``signal connect`` 가 in-process ``Database``/``BotManager``/
+``SignalChannel`` 구성에서 **데몬-위임 thin IPC relay** 로 재작성됐다. 따라서
+본 #1560 invariant 테스트도 4 게이트의 in-process patch(Database/SignalKey
+Manager/BotManager/SignalChannel)를 **IPC-layer mock** 으로 repoint 한다 —
+``asyncio.open_unix_connection`` 을 fake reader/writer 로 교체하고, 데몬
+Phase-B 응답 프레임(error/ok)을 직접 주입해 exit-1(가드)·exit-0(정상 종료)
+invariant 를 byte-identical 로 유지한다. ``signal_connect`` 가
+``asyncio.run(_run_connect)`` 만 호출하므로 ``SystemExit(1)`` 이 asyncio.run
+경계를 통해 process exit code 1 로 전파됨을 CliRunner exit_code 로 확인한다.
 """
 
 from __future__ import annotations
@@ -1054,6 +1060,56 @@ class TestMemberInfoMissingExit:
 # ── signal connect 연결 실패 exit code (#1560) ────────────
 
 
+def _signal_frame(d: dict) -> bytes:
+    """dict → length-prefixed wire 프레임 ([4B big-endian len][UTF-8 JSON])."""
+    import struct
+
+    payload = json.dumps(d, ensure_ascii=False).encode("utf-8")
+    return struct.pack("!I", len(payload)) + payload
+
+
+class _SignalFakeReader:
+    """미리 framed bytes 를 ``readexactly`` 로 슬라이스 제공하는 reader 대역.
+
+    소진 시 ``IncompleteReadError`` 를 raise 해 socket EOF 를 모사한다.
+    """
+
+    def __init__(self, frames: list[bytes]) -> None:
+        import asyncio
+
+        self._asyncio = asyncio
+        self._buf = b"".join(frames)
+        self._pos = 0
+
+    async def readexactly(self, n: int):  # noqa: ANN202
+        if self._pos + n > len(self._buf):
+            partial = self._buf[self._pos :]
+            self._pos = len(self._buf)
+            raise self._asyncio.IncompleteReadError(partial, n)
+        chunk = self._buf[self._pos : self._pos + n]
+        self._pos += n
+        return chunk
+
+
+class _SignalFakeWriter:
+    """write/drain/write_eof/close/wait_closed no-op writer 대역."""
+
+    def write(self, data: bytes) -> None:
+        return None
+
+    async def drain(self) -> None:
+        return None
+
+    def write_eof(self) -> None:
+        return None
+
+    def close(self) -> None:
+        return None
+
+    async def wait_closed(self) -> None:
+        return None
+
+
 def _invoke_signal_connect(
     runner: CliRunner,
     *,
@@ -1061,49 +1117,92 @@ def _invoke_signal_connect(
     bot: object | None,
     channel_runs: bool = False,
 ) -> object:
-    """``signal connect``의 의존성을 mock한 뒤 invoke한다.
+    """``signal connect`` 의 IPC transport 를 mock 한 뒤 invoke 한다 (#2338).
 
-    ``_run_connect``는 함수 로컬 import로 ``Database``/``SignalKeyManager``/
-    ``BotManager``/``SignalChannel``/``get_db_path``를 resolve하므로 각 원본
-    모듈 속성을 패치하면 결정적으로 가드 분기를 탄다.
+    재작성된 ``_run_connect`` 는 데몬-위임 thin relay 이므로 in-process
+    Database/SignalKeyManager/BotManager/SignalChannel patch 대신, 데몬이
+    보냈을 **Phase-B 응답 프레임** 을 ``asyncio.open_unix_connection`` fake
+    transport 로 주입한다. ``bot_id``/``bot`` 인자는 어느 게이트가 발화했을지를
+    결정해 그에 대응하는 데몬 error envelope(byte-identical code/message)을
+    구성한다 — exit-1(가드)·exit-0(정상) invariant 는 유지된다.
 
     Args:
-        bot_id: ``SignalKeyManager.validate_key`` 반환값. ``None``이면
-            invalid-key 가드.
-        bot: ``BotManager.get_bot`` 반환값. ``None``이면 bot-not-found 가드.
-            객체면 status/strategy 속성으로 나머지 가드를 제어한다.
-        channel_runs: ``True``면 ``SignalChannel.run``을 정상 반환 mock으로
-            교체해 정상 경로(exit 0)를 검증한다.
+        bot_id: invalid-key 게이트 결정. ``None`` 이면 ``INVALID_SIGNAL_KEY``.
+        bot: bot-not-found / 상태 게이트 결정. ``None`` 이면 ``BOT_NOT_FOUND``,
+            객체면 status/strategy 속성으로 BOT_NOT_RUNNING /
+            BOT_NOT_ACCEPTING_SIGNALS 를 결정한다.
+        channel_runs: ``True`` 면 OK + closed frame 을 주입해 정상 종료(exit 0).
     """
-    mock_db = MagicMock()
-    mock_db.connect = AsyncMock()
-    mock_db.close = AsyncMock()
+    import asyncio
 
-    mock_skm = MagicMock()
-    mock_skm.initialize = AsyncMock()
-    mock_skm.validate_key = AsyncMock(return_value=bot_id)
+    from ante.bot.config import BotStatus
 
-    mock_manager = MagicMock()
-    mock_manager.initialize = AsyncMock()
-    mock_manager.get_bot = MagicMock(return_value=bot)
+    # 데몬 4-게이트 동형으로 어느 거부 프레임을 주입할지 결정한다.
+    if bot_id is None:
+        frame = {
+            "id": "h1",
+            "status": "error",
+            "error": {"code": "INVALID_SIGNAL_KEY", "message": "Invalid signal key"},
+        }
+    elif bot is None:
+        frame = {
+            "id": "h1",
+            "status": "error",
+            "error": {
+                "code": "BOT_NOT_FOUND",
+                "message": f"Bot not found: {bot_id}",
+            },
+        }
+    elif getattr(bot, "status", None) != BotStatus.RUNNING:
+        status_value = bot.status.value
+        frame = {
+            "id": "h1",
+            "status": "error",
+            "error": {
+                "code": "BOT_NOT_RUNNING",
+                "message": f"Bot is not running: {bot_id} (status: {status_value})",
+            },
+        }
+    elif not getattr(bot.strategy.meta, "accepts_external_signals", False):
+        frame = {
+            "id": "h1",
+            "status": "error",
+            "error": {
+                "code": "BOT_NOT_ACCEPTING_SIGNALS",
+                "message": f"Bot {bot_id} does not accept external signals",
+            },
+        }
+    else:
+        # 모든 게이트 통과 — OK handshake.
+        frame = {
+            "id": "h1",
+            "status": "ok",
+            "result": {"bot_id": bot_id, "account_id": "acc", "session_id": "s1"},
+        }
 
-    mock_channel = MagicMock()
-    mock_channel.run = AsyncMock(return_value=None)
+    frames = [_signal_frame(frame)]
+    if channel_runs:
+        frames.append(_signal_frame({"type": "closed", "reason": "eof"}))
+
+    reader = _SignalFakeReader(frames)
+    writer = _SignalFakeWriter()
+
+    async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+        return reader, writer
+
+    async def _idle_pump_in(_writer):  # noqa: ANN001, ANN202
+        # 정상 경로(channel_runs)에서 가짜 stdin 의 connect_read_pipe 부작용을
+        # 피하고 ``_pump_out`` 이 closed frame 으로 종료를 주도하게 한다.
+        await asyncio.Event().wait()
 
     with (
-        patch("ante.core.database.Database", return_value=mock_db),
+        patch("ante.cli.commands.signal.Path.exists", return_value=True),
         patch(
-            "ante.bot.signal_key.SignalKeyManager",
-            return_value=mock_skm,
+            "ante.cli.commands.signal.get_socket_path",
+            return_value="/tmp/test-ante.sock",
         ),
-        patch(
-            "ante.bot.manager.BotManager",
-            return_value=mock_manager,
-        ),
-        patch(
-            "ante.bot.signal_channel.SignalChannel",
-            return_value=mock_channel,
-        ),
+        patch("asyncio.open_unix_connection", _open),
+        patch("ante.cli.commands.signal._pump_in", _idle_pump_in),
     ):
         return runner.invoke(cli, ["signal", "connect", "--key", "sk_probe"])
 
