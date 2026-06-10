@@ -44,8 +44,8 @@ class KISDomesticAdapter(KISBaseAdapter):
 
 | 환경 | 매수 | 매도 |
 |------|------|------|
-| 모의(paper) | `VTTC0012U` | `VTTC0011U` |
-| 실전(live) | `TTTC0012U` | `TTTC0011U` |
+| 모의 | `VTTC0012U` | `VTTC0011U` |
+| 실전 | `TTTC0012U` | `TTTC0011U` |
 
 > 출처: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py) 및 KIS Developers 포털(2축 검증). 구버전 TR ID(`VTTC0802U`/`TTTC0802U`/`VTTC0801U`/`TTTC0311U`)는 deprecated 되어 모의 매수 시 `40910000 모의투자 주문이 불가한 계좌입니다`로 거절되므로 현행 매핑으로 갱신했다(#2342).
 
