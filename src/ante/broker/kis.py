@@ -69,10 +69,10 @@ DEFAULT_MAX_PAGINATION_PAGES = 100
 # 주문 관련 tr_id (재시도 횟수 분류용)
 _ORDER_TR_IDS = frozenset(
     {
-        "VTTC0802U",
-        "TTTC0802U",  # 매수
-        "VTTC0801U",
-        "TTTC0311U",  # 매도
+        "VTTC0012U",
+        "TTTC0012U",  # 매수
+        "VTTC0011U",
+        "TTTC0011U",  # 매도
         "VTTC0803U",
         "TTTC0803U",  # 취소
     }
@@ -801,9 +801,9 @@ class KISDomesticAdapter(KISBaseAdapter):
             )
 
         if side == "buy":
-            tr_id = "VTTC0802U" if self.is_paper else "TTTC0802U"
+            tr_id = "VTTC0012U" if self.is_paper else "TTTC0012U"
         else:
-            tr_id = "VTTC0801U" if self.is_paper else "TTTC0311U"
+            tr_id = "VTTC0011U" if self.is_paper else "TTTC0011U"
 
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-cash"
         order_data = self._build_order_data(symbol, side, quantity, order_type, price)

@@ -372,7 +372,7 @@ async def test_request_returns_body_only() -> None:
     adapter._ensure_authenticated = AsyncMock()  # type: ignore[method-assign]
     adapter._rate_limit_wait = AsyncMock()  # type: ignore[method-assign]
 
-    result = await adapter._request("POST", "url", "TTTC0802U", json_data={"x": "1"})
+    result = await adapter._request("POST", "url", "TTTC0012U", json_data={"x": "1"})
 
     assert result == body
     assert isinstance(result, dict)
