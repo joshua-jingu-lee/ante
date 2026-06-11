@@ -479,3 +479,109 @@ class TestBrokerAccountScoping:
         assert reconciler.reconcile.call_args.kwargs["bot_id"] == "bot-1"
         reconciler.detect_account_level.assert_not_called()
         assert any("bot-orphan" in rec.getMessage() for rec in caplog.records)
+
+
+# ── #2352: 단일봇+running 라우팅에서 미귀속 보유 carryover 제외 (real reconciler) ──
+
+
+class TestUnattributedHoldingRouting:
+    """단일봇+running 보정 경로에서 미귀속 보유(carryover)가 corrections 에
+    포함되지 않음을 **실제** PositionReconciler 로 검증한다(#2352).
+
+    scheduler 라우팅(bot_count==1 && running → reconcile(dry_run=False))은
+    무변경이며, detect-only 정책은 reconcile() 내부 분류에서 처리된다. 2+봇
+    detect_account_level 경로는 무변경 회귀로 함께 고정한다.
+    """
+
+    @pytest.fixture
+    async def real_db(self, tmp_path):
+        from ante.core.database import Database
+
+        database = Database(str(tmp_path / "sched.db"))
+        await database.connect()
+        yield database
+        await database.close()
+
+    @pytest.fixture
+    async def real_reconciler(self, real_db, eventbus):
+        from ante.trade.order_tracker import OrderTracker
+        from ante.trade.performance import PerformanceTracker
+        from ante.trade.position import PositionHistory
+        from ante.trade.reconciler import PositionReconciler
+        from ante.trade.recorder import TradeRecorder
+        from ante.trade.service import TradeService
+
+        ph = PositionHistory(real_db)
+        await ph.initialize()
+        rec = TradeRecorder(real_db, ph)
+        await rec.initialize()
+        ot = OrderTracker(real_db)
+        await ot.initialize()
+        perf = PerformanceTracker(real_db)
+        service = TradeService(rec, ph, perf)
+        return PositionReconciler(
+            trade_service=service,
+            eventbus=eventbus,
+            order_tracker=ot,
+        )
+
+    async def test_single_running_bot_carryover_excluded_from_corrections(
+        self, real_reconciler, broker, bot_manager, eventbus
+    ):
+        """단일봇+running: 미거래 carryover(069500)가 corrections 에 미포함.
+
+        broker 가 069500 2주 보유(내부 0, 추적 open buy 전무)를 보고하나,
+        scheduler 의 dry_run=False 보정 경로에서도 미귀속 보유는 force-write 되지
+        않는다.
+        """
+        broker.get_account_positions.return_value = [
+            {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+        ]
+        bot_manager.list_bots.return_value = [
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+        ]
+        sched = ReconcileScheduler(
+            reconciler=real_reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+            interval_seconds=0.1,
+        )
+
+        corrections = await sched.run_once()
+
+        # 미귀속 보유 → 보정 0건(force-write 없음).
+        assert corrections == []
+
+    async def test_multi_bot_detect_account_level_unchanged(
+        self, real_reconciler, broker, bot_manager, eventbus
+    ):
+        """2+봇 → detect_account_level 경로 무변경(보정 0, account 알림만)."""
+        notif_events: list = []
+        from ante.eventbus.events import NotificationEvent
+
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        broker.get_account_positions.return_value = [
+            {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+        ]
+        bot_manager.list_bots.return_value = [
+            {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            {"bot_id": "bot-2", "status": "running", "account_id": "acc-test"},
+        ]
+        sched = ReconcileScheduler(
+            reconciler=real_reconciler,
+            broker=broker,
+            bot_manager=bot_manager,
+            eventbus=eventbus,
+            broker_account_id="acc-test",
+            interval_seconds=0.1,
+        )
+
+        corrections = await sched.run_once()
+
+        # 2+봇 detect-only — 보정 0건, account-scoped NotificationEvent 발행.
+        assert corrections == []
+        assert len(notif_events) == 1
+        assert notif_events[0].category == "broker"

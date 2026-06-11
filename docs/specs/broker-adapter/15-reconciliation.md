@@ -64,11 +64,28 @@ CREATE INDEX IF NOT EXISTS idx_order_registry_account_bot
 
 ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BrokerAdapter`(실제 잔고 조회), `BotManager`(활성 봇 목록), `EventBus`를 positional 인자로 주입받는다. 추가로 keyword-only 인자를 받는다:
 
-- `broker_account_id`(필수): 이 스케줄러 인스턴스가 바인딩된 broker 계좌의 account_id. 빈 값이면 `ValueError`. `run_once()`는 이 account_id에 일치하는 활성(running) 봇만 대사하고, 다른 계좌의 봇은 명시적으로 skip한다(SPLIT-1 단일 broker 바인딩 가드). multi-broker pool은 SPLIT-3에서 도입한다(`src/ante/main.py`의 `_init_reconcile_scheduler`가 활성 broker별 스케줄러를 생성·관리).
+- `broker_account_id`(필수): 이 스케줄러 인스턴스가 바인딩된 broker 계좌의 account_id. 빈 값이면 `ValueError`. `run_once()`는 이 account_id에 일치하는 봇만 대사 대상으로 삼고, 다른 계좌의 봇은 명시적으로 skip한다(SPLIT-1 단일 broker 바인딩 가드). multi-broker pool은 SPLIT-3에서 도입한다(`src/ante/main.py`의 `_init_reconcile_scheduler`가 활성 broker별 스케줄러를 생성·관리).
 - `interval_seconds`(기본 `DEFAULT_INTERVAL_SECONDS` = 1800초 = 30분): 대사 반복 주기.
-- `skip_initial_external_buy`(기본 `False`): True면 `start()`의 **기동 즉시 1회 대사에서만** "외부 매수" 분류 보정을 건너뛴다(이후 주기 대사는 정상 처리).
+- `skip_initial_external_buy`(기본 `False`): True면 `start()`의 **기동 즉시 1회 대사에서만** "외부 매수" 분류 보정을 건너뛴다(이후 주기 대사는 정상 처리). 단일봇+running 보정 경로에만 적용된다.
 
 `start()`는 시작 즉시 1회 대사(`run_once(skip_external_buy=self._skip_initial_external_buy)`)를 수행한 뒤 `interval_seconds` 주기로 대사 루프를 돈다. 불일치 감지 시 로그 경고와 함께 `NotificationEvent`를 발행한다.
+
+**`run_once()` 라우팅 (`bot_count==1` vs `2+`, normative):** `run_once()`는 자기
+`broker_account_id` 계좌의 broker 총합을 1회 조회한 뒤, **봇 귀속 ambiguity(status 무관 봇
+count)** 와 **correction 실행 범위(running 봇)** 를 분리해 분기한다(#2118/#2119/#2270). 과거
+스펙의 "활성(running) 봇만 대사하는 단일 경로" 기술은 stale 이며, 실제 라우팅은 다음과 같다:
+
+| 계좌 봇 수(status 무관) | 봇 상태 | 동작 |
+|---|---|---|
+| 1봇 | `running` | `reconcile(dry_run=False)` — self-check/skip_external_buy/external-buy 분류 그대로 보정(#1946/#1950). 단, **미귀속 보유(internal_qty==0 && capacity==0)는 detect-only** 로 보정 제외([../trade/03-07-position-reconciler.md](../trade/03-07-position-reconciler.md), #2352). |
+| 1봇 | `stopped`/`error`(미-running) | `reconcile(dry_run=True)` detect-only — scheduler 가 비활성 봇을 자동 보정하지 않는다(lifecycle 범위 보존, #2118 v4). |
+| 2+봇 | (무관) | `detect_account_level` — `correct_position` 미호출. 계좌 총합 vs 전 봇 합산 비교로 #2118/#2120 false external-buy 제거. bot-scoped `PositionMismatchEvent`/`ReconcileEvent` 대신 account-scoped `NotificationEvent` 만 발행. |
+
+ambiguity 판정 count 는 **status 무관**이다(#2119). 즉 `stopped`/`error` 봇도 count 에
+포함되므로, 2+봇이면 일부만 running 이어도 detect-only 로 귀결된다. 다른 계좌의 봇과
+`account_id` 누락 봇은 count 에서 제외된다(WARNING). 수동 대사(IPC `broker reconcile`)도
+동일한 count 분기를 쓰되, user-initiated 라 봇 상태와 무관하게 단일봇 귀속이 자명하므로
+`dry_run = not fix` 로 동작한다([../ipc/ipc.md](../ipc/ipc.md) Broker 절).
 
 **#1946 fill 복구 barrier**: 서버 기동 시(`src/ante/main.py`) 각 계좌의 `FillReconcileScheduler.catch_up_once()`가 await 완료된 뒤에야 `ReconcileScheduler.start()`가 호출된다. fill 복구가 position 대사에 선행해야 미복구 ante 체결이 "외부 매수"로 오분류되지 않기 때문이다. fill 카치업에 **실패한** 계좌(`s.fill_catch_up_failed_accounts`)는 `skip_initial_external_buy=True`로 생성되어, 그 계좌의 기동 즉시 1회 대사에서만 external-buy 분류 보정을 건너뛴다.
 
