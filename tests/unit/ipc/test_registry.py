@@ -928,6 +928,120 @@ class TestHandleBrokerReconcileConditionalAudit:
         assert spec.audit_action is None
 
 
+# ── #2352: broker.reconcile --fix 에서 미귀속 보유 보정 제외 (real reconciler) ──
+
+
+class TestHandleBrokerReconcileUnattributedHolding:
+    """``broker.reconcile`` 수동 대사(IPC, registry.py:1545 단일봇 경로)에서
+    미귀속 보유(carryover)가 ``--fix`` 에도 보정되지 않고 ``mismatches`` 에는
+    그대로 보고되는지 **실제** PositionReconciler 로 검증한다(#2352).
+
+    핸들러는 ``svc.reconciler.reconcile(dry_run=not fix)`` 로 위임하므로
+    detect-only 정책은 reconcile() 내부 분류에서 적용된다. ``adjustments``(보정
+    내역)에서는 제외되고, 보정-이후 ``compute_account_diff`` 가 재계산한
+    ``mismatches`` 에는 미보정 불일치로 남는다(운영자 관측 보존).
+    """
+
+    @pytest.fixture
+    async def real_svc(self, tmp_path):
+        """1봇(acc-test) + 실제 PositionReconciler 를 가진 svc mock."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+        from ante.trade.order_tracker import OrderTracker
+        from ante.trade.performance import PerformanceTracker
+        from ante.trade.position import PositionHistory
+        from ante.trade.reconciler import PositionReconciler
+        from ante.trade.recorder import TradeRecorder
+        from ante.trade.service import TradeService
+
+        database = Database(str(tmp_path / "ipc-recon.db"))
+        await database.connect()
+
+        ph = PositionHistory(database)
+        await ph.initialize()
+        rec = TradeRecorder(database, ph)
+        await rec.initialize()
+        ot = OrderTracker(database)
+        await ot.initialize()
+        perf = PerformanceTracker(database)
+        service = TradeService(rec, ph, perf)
+        reconciler = PositionReconciler(
+            trade_service=service,
+            eventbus=EventBus(),
+            order_tracker=ot,
+        )
+
+        broker = AsyncMock()
+        broker.get_account_positions = AsyncMock(
+            return_value=[{"symbol": "069500", "quantity": 2, "avg_price": 30000}]
+        )
+        account_svc = AsyncMock()
+        account_svc.get_broker = AsyncMock(return_value=broker)
+
+        bot_manager = MagicMock()
+        bot_manager.list_bots = MagicMock(
+            return_value=[
+                {"bot_id": "bot-1", "status": "running", "account_id": "acc-test"},
+            ]
+        )
+
+        audit_logger = MagicMock()
+        audit_logger.log = AsyncMock(return_value=None)
+
+        svc = MagicMock()
+        svc.account = account_svc
+        svc.bot_manager = bot_manager
+        svc.reconciler = reconciler
+        svc.audit_logger = audit_logger
+
+        yield svc
+        await database.close()
+
+    @pytest.mark.asyncio
+    async def test_fix_true_unattributed_holding_excluded_from_adjustments(
+        self, real_svc
+    ):
+        """--fix 여도 미귀속 보유는 adjustments(보정)에서 제외되고 mismatches 에
+        보고된다 + audit 미발화(상태변경 없음).
+        """
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        result = await _handle_broker_reconcile(
+            real_svc, {"account_id": "acc-test", "fix": True}, "cli-user"
+        )
+
+        # 미귀속 보유 → 보정 0건(force-write 없음).
+        assert result["adjustments"] == []
+        assert result["corrections"] == 0
+        # mismatch 는 그대로 보고(운영자 관측 보존) — 069500 내부0/브로커2.
+        assert len(result["mismatches"]) == 1
+        m = result["mismatches"][0]
+        assert m["symbol"] == "069500"
+        assert m["internal_qty"] == 0
+        assert m["broker_qty"] == 2
+        assert m["diff"] == 2
+        # bot_count==1 단일봇 경로.
+        assert result["bot_count"] == 1
+        # 상태변경(보정)이 없으므로 audit 미발화(#2109 조건부 audit).
+        real_svc.audit_logger.log.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_fix_false_dry_run_also_reports_unattributed_mismatch(self, real_svc):
+        """--fix 미지정(detect-only)에서도 미귀속 보유가 mismatches 에 보고된다."""
+        from ante.ipc.registry import _handle_broker_reconcile
+
+        result = await _handle_broker_reconcile(
+            real_svc, {"account_id": "acc-test", "fix": False}, "cli-user"
+        )
+
+        assert result["adjustments"] == []
+        assert len(result["mismatches"]) == 1
+        assert result["mismatches"][0]["symbol"] == "069500"
+        assert result["fix_applied"] is False
+
+
 # ── #1379 oracle A7: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──
 
 

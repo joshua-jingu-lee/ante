@@ -260,10 +260,18 @@ pagination)를 **1회** 폴해 다운타임 중 발생한 체결을 `FillApplier
 invariant**다. EOD 만료를 폴 **앞**에 두면, 전일 open이 다운타임 중 체결됐어도
 복구 전에 `expired`로 전이되어 폴이 0콜로 끝나고, `catch_up_once`가
 `succeeded=True`(applied=0)를 반환해 barrier의 external-buy 차단이 무력화된다.
-그 결과 미복구 ante 체결(internal=0, broker>0)이 "외부 매수"로 오분류된다
-(#1945 회귀). poll-first는 이를 구조적으로 막는다. `succeeded=True`는 폴이 실제
-실행돼 다운타임 체결을 흡수했음을 의미하며, "만료로 open이 비어 0콜"은 성공으로
-취급하지 않는다.
+그 결과 미복구 ante 체결(internal=0, broker>0)이 reconciler 의 self/external 분류로
+**오귀속**된다(#1945 회귀). poll-first는 이를 구조적으로 막는다. `succeeded=True`는
+폴이 실제 실행돼 다운타임 체결을 흡수했음을 의미하며, "만료로 open이 비어 0콜"은
+성공으로 취급하지 않는다.
+
+> 참고(#2352): 위 회귀에서 매칭 open 주문이 `expired`(terminal)로 사라지면
+> reconciler 입장에서 `internal_qty == 0 && capacity == 0` 이 되어, 그 보유는
+> "외부 매수" force-write 가 아니라 **미귀속 보유 detect-only**(보정 skip · critical
+> 알림)로 분류된다([../trade/03-07-position-reconciler.md](../trade/03-07-position-reconciler.md)
+> 미귀속 보유 절). 따라서 barrier 무력화의 잔여 위험은 "잘못된 force-write/자동
+> 매도"가 아니라 "복구 지연된 보유의 오귀속 알림"으로 좁혀진다 — poll-first 순서
+> invariant 가 근본 차단을 담당한다는 사실은 변하지 않는다.
 
 ## 7. barrier ordering (재기동 무오분류)
 

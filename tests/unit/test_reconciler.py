@@ -18,6 +18,7 @@ from ante.trade.position import PositionHistory
 from ante.trade.reconciler import (
     REASON_EXTERNAL_BUY,
     REASON_SELF_SUBMITTED,
+    REASON_UNATTRIBUTED_HOLDING,
     PositionReconciler,
 )
 from ante.trade.recorder import TradeRecorder
@@ -249,8 +250,24 @@ class TestNoMismatch:
 
 
 class TestExternalBuy:
-    async def test_external_buy_detected(self, reconciler, position_history):
-        """내부 0주, 브로커 20주 → 외부 매수로 보정."""
+    async def test_external_buy_detected(
+        self, reconciler, position_history, order_tracker
+    ):
+        """내부 10주(잔존) + 추적 open buy 존재(capacity>0) & excess>capacity →
+        외부 매수로 보정 (#2352 재분류: i_qty>0 || capacity>0 만 외부 매수 보장).
+
+        ante open buy 5주 + 내부 10주, 브로커 20주 → excess 10 > capacity 5 →
+        외부 매수. internal_qty>0 이므로 미귀속 보유(#2352) 대상이 아니다.
+        """
+        await _set_position(position_history, "bot-1", "005930", 10, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-eb",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=5,
+        )
+
         corrections = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[
@@ -261,14 +278,19 @@ class TestExternalBuy:
 
         assert len(corrections) == 1
         assert corrections[0]["new_quantity"] == 20
-        assert corrections[0]["reason"] == "외부 매수"
+        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
 
     async def test_external_buy_skipped_when_flag_set(
-        self, reconciler, position_history, eventbus
+        self, reconciler, position_history, order_tracker, eventbus
     ):
         """skip_external_buy=True 면 "외부 매수" 보정·이벤트를 건너뛴다
         (#1946 Finding 1 barrier).
+
+        #2352 재분류: barrier 가 적용되려면 외부 매수로 분류돼야 하므로,
+        internal_qty>0(잔존) 케이스로 구성한다(미귀속 보유와 직교).
         """
+        await _set_position(position_history, "bot-1", "005930", 10, 50000)
+
         mismatch_events: list = []
         eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
 
@@ -283,9 +305,9 @@ class TestExternalBuy:
 
         assert corrections == []  # external-buy 억제.
         assert mismatch_events == []  # 이벤트도 발행 안 함.
-        # 포지션도 보정되지 않음 (0 유지).
+        # 포지션도 보정되지 않음 (10 유지 — barrier 가 외부 매수 보정을 억제).
         pos = await position_history.get_current("bot-1", "005930")
-        assert pos["quantity"] == 0
+        assert pos["quantity"] == 10
 
     async def test_skip_external_buy_does_not_affect_other_classes(
         self, reconciler, position_history, eventbus
@@ -417,7 +439,12 @@ class TestSelfSubmittedFill:
     async def test_excess_over_capacity_is_external_buy(
         self, reconciler, order_tracker
     ):
-        """R1-3 (b): excess > capacity → 외부 매수 정상 보정."""
+        """R1-3 (b): excess > capacity → 외부 매수 정상 보정.
+
+        #2352 경계 보존: capacity > 0(추적 open buy 존재) 이면 internal_qty==0
+        이어도 미귀속 보유로 빠지지 않고 #1950 그대로 외부 매수 force-write 한다.
+        신규 detect-only 분기는 capacity==0 부분집합만 변경한다.
+        """
         # ante 미체결 10주, 브로커 30주(내부 0) → excess 30 > capacity 10.
         await _seed_open_order(
             order_tracker,
@@ -437,8 +464,14 @@ class TestSelfSubmittedFill:
         assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
         assert corrections[0]["new_quantity"] == 30
 
-    async def test_no_matching_order_is_external_buy(self, reconciler, order_tracker):
-        """매칭 주문 없음 → 외부 매수."""
+    async def test_no_matching_order_is_unattributed_holding(
+        self, reconciler, order_tracker
+    ):
+        """매칭 주문 없음 + internal_qty==0 → 미귀속 보유 detect-only (#2352).
+
+        #2352 재분류: 과거에는 외부 매수 force-write 였으나, 어느 봇도 추적하지
+        않은 보유(capacity==0 && internal_qty==0)는 보정하지 않는다.
+        """
         corrections = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[
@@ -446,12 +479,16 @@ class TestSelfSubmittedFill:
             ],
             account_id="acc-test",
         )
-        assert len(corrections) == 1
-        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+        assert corrections == []
 
-    async def test_bot_id_mismatch_is_external_buy(self, reconciler, order_tracker):
-        """R1-3: 다른 봇의 ante 주문은 매칭 안 됨 → 외부 매수."""
-        # bot-2 의 매수 주문은 bot-1 의 self-check 에 잡히지 않는다.
+    async def test_bot_id_mismatch_is_unattributed_holding(
+        self, reconciler, order_tracker
+    ):
+        """다른 봇의 ante 주문은 매칭 안 됨 + internal==0 → 미귀속 보유 (#2352).
+
+        bot-2 의 매수 주문은 bot-1 의 self-check 에 잡히지 않으므로 bot-1 입장에서
+        capacity==0. 과거 외부 매수 → 미귀속 보유 detect-only 로 재분류.
+        """
         await _seed_open_order(
             order_tracker,
             order_id="ord-1",
@@ -466,11 +503,14 @@ class TestSelfSubmittedFill:
             ],
             account_id="acc-test",
         )
-        assert len(corrections) == 1
-        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+        assert corrections == []
 
-    async def test_sell_order_does_not_match(self, reconciler, order_tracker):
-        """side=sell 주문은 self-check(buy) 에 매칭 안 됨 → 외부 매수."""
+    async def test_sell_order_does_not_match_is_unattributed_holding(
+        self, reconciler, order_tracker
+    ):
+        """side=sell 주문은 self-check(buy) 에 매칭 안 됨 + internal==0 → 미귀속
+        보유 (#2352 재분류). buy capacity==0 이므로 미귀속.
+        """
         await _seed_open_order(
             order_tracker,
             order_id="ord-1",
@@ -486,8 +526,7 @@ class TestSelfSubmittedFill:
             ],
             account_id="acc-test",
         )
-        assert len(corrections) == 1
-        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+        assert corrections == []
 
     async def test_self_check_runs_when_skip_external_buy_false(
         self, reconciler, position_history, order_tracker, eventbus
@@ -550,7 +589,11 @@ class TestSelfSubmittedFill:
         assert notif_events[0].level == "info"
 
     async def test_account_scoped_matching(self, reconciler, order_tracker):
-        """다른 account 의 ante 주문은 매칭 안 됨 → 외부 매수."""
+        """다른 account 의 ante 주문은 매칭 안 됨 + internal==0 → 미귀속 보유.
+
+        #2352 재분류: acc-other 의 주문은 acc-test self-check 에 잡히지 않아
+        capacity==0 이고 internal_qty==0 이므로 미귀속 보유 detect-only.
+        """
         await _seed_open_order(
             order_tracker,
             order_id="ord-1",
@@ -566,8 +609,7 @@ class TestSelfSubmittedFill:
             ],
             account_id="acc-test",
         )
-        assert len(corrections) == 1
-        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+        assert corrections == []
 
 
 # ── 시나리오 7: R2-2 혼재(self + 숨은 외부) bounded ──────
@@ -575,16 +617,26 @@ class TestSelfSubmittedFill:
 
 class TestMixedBoundedCase:
     """R2-2: excess ≤ capacity 인 혼재(self + 숨은 외부)는 self_submitted 로
-    분류(보정 skip)되고, ante 주문 해소 후 다음 reconcile 에서 잔여 external 이
-    검출된다 (bounded known-limitation).
+    분류(보정 skip)되고, ante 주문 해소 후 다음 reconcile 에서의 거동을 검증한다.
+
+    #2352 재서술: #1950 의 "주문 해소 후 잔여 excess 가 external 로 검출·보정"
+    보장은 ``internal_qty > 0 || capacity > 0`` 케이스에 한정된다. 주문이 해소된
+    뒤에도 ``internal_qty == 0 && capacity == 0`` 이면 그 보유는 미귀속 보유로
+    영구 detect-only(force-write 보류)가 된다 — internal 이 0 인 채 capacity 가
+    사라진 보유는 어느 봇도 추적하지 않는 보유이므로 그 봇 소유로 단정하지 않는다.
     """
 
-    async def test_hidden_external_detected_after_order_resolves(
+    async def test_holding_unattributed_after_order_resolves_with_zero_internal(
         self, reconciler, position_history, order_tracker
     ):
-        """혼재 → self(보정 skip) → ante 주문 terminal 후 잔여 external 검출."""
-        # ante 미체결 buy 100주(open). 브로커 60주(내부 0): self 50 + 숨은 외부 10
-        # 가정 — excess 60 ≤ capacity 100 → 전량 self 로 분류(보정 skip).
+        """혼재 → self(보정 skip) → ante 주문 terminal & internal==0 → 미귀속 보유.
+
+        #2352: 주문 해소 후 internal 이 0 이고 capacity 도 0 이면 외부 매수
+        force-write 가 아니라 미귀속 보유 detect-only 다(#1950 bounded invariant
+        재서술).
+        """
+        # ante 미체결 buy 100주(open). 브로커 60주(내부 0) — excess 60 ≤ capacity
+        # 100 → self 로 분류(보정 skip).
         await _seed_open_order(
             order_tracker,
             order_id="ord-1",
@@ -607,7 +659,8 @@ class TestMixedBoundedCase:
         # ante 주문이 EOD expire_stale 로 해소(terminal) — open set 이탈.
         await order_tracker.mark_terminal("ord-1", "expired")
 
-        # 2차 reconcile: 매칭 open 주문 없음 → 잔여 excess(60) 가 external 로 검출.
+        # 2차 reconcile: 매칭 open 주문 없음(capacity==0) & internal==0 → 미귀속
+        # 보유 detect-only (force-write 안 함).
         corrections2 = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[
@@ -615,14 +668,17 @@ class TestMixedBoundedCase:
             ],
             account_id="acc-test",
         )
-        assert len(corrections2) == 1
-        assert corrections2[0]["reason"] == REASON_EXTERNAL_BUY
-        assert corrections2[0]["new_quantity"] == 60
+        assert corrections2 == []
 
-    async def test_external_detected_after_order_fully_filled(
+    async def test_residual_external_detected_when_internal_nonzero(
         self, reconciler, position_history, order_tracker
     ):
-        """ante 주문 완전 체결(filled→open set 이탈) 후 잔여 external 검출."""
+        """internal_qty > 0(잔존) 이면 주문 해소 후 잔여 excess 가 여전히 외부
+        매수로 검출·보정된다 (#2352: bounded invariant 의 internal>0 가지 보존).
+        """
+        # 내부 30주 잔존 + ante 미체결 buy 100주(open). 브로커 90주 →
+        # excess 60 ≤ capacity 100 → self(보정 skip).
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
         await _seed_open_order(
             order_tracker,
             order_id="ord-1",
@@ -630,29 +686,28 @@ class TestMixedBoundedCase:
             symbol="005930",
             ordered_qty=100,
         )
-        # 1차: self → 보정 skip.
         corrections = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[
-                {"symbol": "005930", "quantity": 60, "avg_price": 55000},
+                {"symbol": "005930", "quantity": 90, "avg_price": 55000},
             ],
             account_id="acc-test",
         )
         assert corrections == []
 
-        # ante 주문 완전 체결 → filled(terminal, open set 이탈).
-        await order_tracker.record_fill("ord-1", 100, 55000)
-
+        # ante 주문 해소(terminal) — capacity==0. 그러나 internal_qty==30(>0)
+        # 이므로 미귀속 보유 대상이 아니다 → 잔여 excess 가 외부 매수로 검출.
+        await order_tracker.mark_terminal("ord-1", "expired")
         corrections2 = await reconciler.reconcile(
             bot_id="bot-1",
             broker_positions=[
-                {"symbol": "005930", "quantity": 60, "avg_price": 55000},
+                {"symbol": "005930", "quantity": 90, "avg_price": 55000},
             ],
             account_id="acc-test",
         )
-        # 매칭 open 주문 없음 → 외부 매수로 검출.
         assert len(corrections2) == 1
         assert corrections2[0]["reason"] == REASON_EXTERNAL_BUY
+        assert corrections2[0]["new_quantity"] == 90
 
 
 # ── 시나리오 8: OrderTracker 미주입 하위 호환 ──────────
@@ -660,12 +715,151 @@ class TestMixedBoundedCase:
 
 class TestNoOrderTracker:
     async def test_external_buy_without_order_tracker(self, service, eventbus):
-        """order_tracker 미주입 시 self-check 생략 → 기존 외부 매수 동작."""
+        """order_tracker 미주입 시 self-check·미귀속 판정 생략 → 기존 외부 매수.
+
+        #2352 하위 호환: capacity 판정 불가(order_tracker None)이면 신규 미귀속
+        보유 detect-only 분기를 적용하지 않고 기존 외부 매수 force-write 를 유지한다.
+        """
         rec = PositionReconciler(trade_service=service, eventbus=eventbus)
         corrections = await rec.reconcile(
             bot_id="bot-1",
             broker_positions=[
                 {"symbol": "005930", "quantity": 20, "avg_price": 55000},
+            ],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+
+
+# ── 시나리오 9: 미귀속 보유 carryover detect-only (#2352) ──
+
+
+class TestUnattributedHolding:
+    """#2352: 단일봇 미거래 carryover(internal_qty==0 && capacity==0)는 그 봇의
+    '외부 매수' 로 force-write 되지 않고 detect-only(보정 skip, 이벤트/critical
+    알림 유지)로 처리된다 — 전략 오매도(#2317 canary) 방지.
+    """
+
+    async def test_unattributed_holding_skips_correction_keeps_events(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """internal==0 && capacity==0(추적 open buy 전무) → correct_position 미호출
+        + reason="미귀속 보유" PositionMismatchEvent + critical NotificationEvent.
+        """
+        mismatch_events: list = []
+        notif_events: list = []
+        reconcile_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+        eventbus.subscribe(ReconcileEvent, lambda e: reconcile_events.append(e))
+
+        # 내부 0, 브로커 2주(이월/미거래). 추적 open buy 전무 → 미귀속 보유.
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+            ],
+            account_id="acc-test",
+        )
+
+        # 보정 0건 — correct_position 미호출(force-write 없음).
+        assert corrections == []
+        # 포지션은 0 유지 (전략이 미보유 종목을 자기 포지션으로 인식하지 않는다).
+        pos = await position_history.get_current("bot-1", "069500")
+        assert pos["quantity"] == 0
+        # PositionMismatchEvent 는 미귀속 보유 사유로 발행(운영자 관측 유지).
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].reason == REASON_UNATTRIBUTED_HOLDING
+        assert mismatch_events[0].symbol == "069500"
+        assert mismatch_events[0].internal_qty == 0
+        assert mismatch_events[0].broker_qty == 2
+        # NotificationEvent 는 critical(미귀속 보유는 운영 안전 경로).
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "critical"
+        # 보정 0건 → ReconcileEvent(보정 완료)는 발행 안 됨.
+        assert reconcile_events == []
+
+    async def test_canary_scenario_no_force_write(
+        self, reconciler, position_history, order_tracker
+    ):
+        """#2317 canary 재현 고정: 069500 내부 0 → 브로커 2 가 force-write 되지
+        않는다(과거: 외부 매수로 quantity=2 force-write → 전략 오매도).
+        """
+        await reconciler.reconcile(
+            bot_id="oracle-probe-bot",
+            broker_positions=[
+                {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+            ],
+            account_id="acc-test",
+        )
+        pos = await position_history.get_current("oracle-probe-bot", "069500")
+        # 미보유 종목이 봇 포지션으로 기록되지 않음 — 오매도 방지.
+        assert pos["quantity"] == 0
+
+    async def test_unattributed_holding_skips_even_under_skip_external_buy(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """미귀속 보유는 is_external_buy=False 이므로 skip_external_buy barrier 와
+        직교 — barrier 가 켜져도 critical 관측은 발행되고 보정은 여전히 skip.
+        """
+        mismatch_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+            ],
+            account_id="acc-test",
+            skip_external_buy=True,
+        )
+
+        assert corrections == []
+        # external-buy barrier 와 직교 — 미귀속 보유 이벤트는 발행된다.
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].reason == REASON_UNATTRIBUTED_HOLDING
+
+    async def test_self_submitted_still_takes_precedence(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """capacity>0(추적 open buy 존재, excess<=capacity)는 #1950 self_submitted
+        우선 — 미귀속 보유로 빠지지 않는다(경계 보존).
+        """
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-1",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=20,
+        )
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 20, "avg_price": 55000},
+            ],
+            account_id="acc-test",
+        )
+
+        assert corrections == []
+        # self_submitted → info 알림(미귀속 보유 critical 아님).
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "info"
+
+    async def test_no_order_tracker_keeps_external_buy_for_carryover(
+        self, service, eventbus
+    ):
+        """order_tracker 미주입이면 미귀속 판정 불가 → 기존 외부 매수 force-write
+        유지(하위 호환 — main.py 두 배선 경로는 항상 주입).
+        """
+        rec = PositionReconciler(trade_service=service, eventbus=eventbus)
+        corrections = await rec.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "069500", "quantity": 2, "avg_price": 30000},
             ],
             account_id="acc-test",
         )

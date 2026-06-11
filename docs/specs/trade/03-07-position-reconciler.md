@@ -28,7 +28,7 @@
 3. 불일치 감지 시 분류(아래) 후 `PositionMismatchEvent` 발행 + (외부 거래만) `TradeService.correct_position()` 호출로 보정
 4. 보정 건이 있으면 `ReconcileEvent` 발행
 
-**불일치 유형:** 외부 청산, 외부 일부 매도, 외부 매수, 수량 불일치, **ante 미반영 체결(self-submitted)**
+**불일치 유형:** 외부 청산, 외부 일부 매도, 외부 매수, 수량 불일치, **ante 미반영 체결(self-submitted)**, **미귀속 보유(unattributed-holding, #2352 detect-only)**
 
 ## self / external 분류 정책 (#1950, normative)
 
@@ -77,6 +77,68 @@ reconcile 에서 잔여 excess 가 **external 로 검출·보정**된다. → �
 
 **무변경 분기:** 외부 청산(`broker_qty == 0 && internal_qty > 0`), 외부 일부 매도
 (`broker_qty < internal_qty`), 수량 불일치는 self-check 대상이 아니며 기존 동작을 유지한다.
+
+## 미귀속 보유 detect-only (#2352, normative)
+
+`broker_qty > internal_qty` 분기에서 self-check 가 self_submitted 로 매칭되지 **않은**
+뒤, 추가로 **`internal_qty == 0` 이고 `capacity == 0`**(= `(account_id, bot_id, symbol,
+side="buy")` 의 non-terminal open buy 가 **전무**)인 보유는 **미귀속 보유**(사유:
+`미귀속 보유`)로 분류하고 **detect-only** 처리한다.
+
+**분류 규칙(normative):**
+
+- 판정: self-check 미매칭(self_submitted 아님) → `internal_qty == 0` → `(account_id,
+  bot_id, symbol, side="buy")` 의 non-terminal open buy 가 **하나도 없음**(capacity == 0).
+  세 조건을 모두 만족하면 미귀속 보유다.
+- `correct_position` 자동 보정을 **호출하지 않는다**(force-write 없음). 단일봇이라는
+  이유만으로 그 봇이 거래(추적)한 적 없는 보유를 그 봇 소유로 단정하지 않는다.
+- `PositionMismatchEvent`(reason=`미귀속 보유`) + `NotificationEvent`(level=**critical**)는
+  **기존대로 발행**한다. 운영자 관측 가능성을 줄이지 않는다(detect-only ≠ 침묵). 경고
+  로그에 미귀속(force-write 보류)을 명시한다.
+- `skip_external_buy` 와 **직교**한다: 미귀속 보유는 외부 매수(`is_external_buy`)가
+  아니므로 #1946 barrier 가 그 이벤트 발행을 억제하지 않는다. `dry_run` 여부와도
+  무관하게(보정 모드에서도) `correct_position` 을 호출하지 않는다 — 보정 정책 자체가
+  "귀속 불가 보유는 보정하지 않는다"이기 때문이다.
+
+**근거(결함 판정, #2317 canary):** 단일봇 force-write 경로(#2118/#2119/#2270)의 설계
+근거는 "봇 **간** 귀속 ambiguity 부재"이지 "어느 봇도 거래하지 않은 보유를 그 봇 소유로
+단정"이 아니다. 미거래 carryover(영업일 이월·계좌 원래 잔고)를 그 봇의 외부 매수로
+force-write 하면 전략이 미보유 종목을 자기 포지션으로 인식해 **실거래 오매도**를 접수한다
+(#2317 런타임에서 입증: `069500` 내부 0 → 브로커 2 force-write → 전략 'sell all' → KIS
+모의 `sell market 069500 2`). #1945/#1950 의 보수적 trade-off("해로운 자동 매도 회피 >
+external-detection 완전성")와 동일 방향이며, 보정 skip + 관측(이벤트/알림) 유지는 침묵
+결함이 아니다.
+
+**reason 명칭의 보수적 분류 성격:** "미귀속 보유"는 "이월"이 아닌 보수적 분류명이다 —
+현재 자료(internal 0, 추적 open buy 전무)로 **귀속 불가**한 보유를 가리키며, 영업일
+이월뿐 아니라 ante 가 추적하지 않은 외부 신규 매수까지 포함한다. 어느 쪽이든 그 봇
+소유라는 보장이 없으므로 동일하게 detect-only 로 둔다.
+
+**#1950 경계 보존(normative):** `capacity > 0`(추적 open buy 존재)인 모든 케이스는 #1950
+normative 를 그대로 따른다 — `excess <= capacity` → self_submitted(보정 skip + info
+이벤트), `excess > capacity` → **외부 매수 force-write**(`internal_qty == 0` 이어도). 즉
+미귀속 보유 분기는 #1950 이 규정하지 않은 `capacity == 0 && internal_qty == 0` 부분집합만
+변경한다. `internal_qty > 0`(잔존 보유 위 외부 매수)인 케이스도 기존 외부 매수 force-write
+를 유지한다.
+
+**#1950 bounded invariant 재서술(normative):** #1950 의 "매칭 ante 주문이 해소되면 다음
+reconcile 에서 잔여 excess 가 external 로 **검출·보정**된다"는 보장은 `internal_qty > 0 ||
+capacity > 0` 케이스에 **한정**된다. 주문이 해소된 뒤에도 `internal_qty == 0 && capacity
+== 0` 이면 그 보유는 미귀속 보유로 **영구 detect-only**(자동 보정 없음, critical 알림
+반복)로 전환된다. 이는 자동 귀속보다 **안전을 우선**하는 normative 결정이다(잘못된
+force-write 로 인한 실거래 오매도를 영구 방지). carryover 의 수동 채택(봇 귀속) UX 는
+정의되지 않은 별도 경로이며 필요 시 후속 이슈로 다룬다.
+
+**`order_tracker is None` 하위 호환(normative):** OrderTracker 미주입이면 capacity 를
+판정할 수 없으므로 미귀속 보유 분기를 적용하지 않고 **기존 외부 매수 동작을 유지**한다.
+`main.py` 의 두 배선 경로(ReconcileScheduler·IPC 수동 reconcile)는 항상 OrderTracker 를
+주입하므로 실제 운영 경로에서는 미귀속 보유 detect-only 가 항상 활성이다.
+
+**적용 경로:** 본 규칙은 `reconcile()` 내부 분류에서 적용되므로, 주기 대사
+(`ReconcileScheduler`)와 수동 대사(IPC `broker reconcile --fix`, `src/ante/ipc/registry.py`
+단일봇 경로) **모두** 동일하게 미귀속 보유를 보정에서 제외한다. 수동 대사의 `--fix` 에서도
+미귀속 보유는 `adjustments`(보정 내역)에 포함되지 않고 `mismatches` 에는 미보정 불일치로
+남아 보고된다.
 
 ## position-derived fallback 과의 관계 (#2314, normative)
 
