@@ -16,9 +16,12 @@ rate budget 보호:
 
 position-derived bounded fallback (#2314·#2316 §11):
 - KIS 모의 ``inquire-daily-ccld``(``get_order_history``)는 일별 결제기준 원장이라
-  당일 체결을 0건으로 지연 반영한다. 반면 잔고(``get_positions``)는 체결기준
-  즉시반영이다. 백스톱이 당일 0건을 줄 때 잔고 증분(``broker_qty -
-  internal_account_qty``)에서 self-submitted 체결을 **보수적 역도출**해
+  당일 체결을 지연 반영할 수 있다. 레거시 tr_id(``*8001R`` 세대)는 모의 당일 체결을
+  0건으로 반환했으나, 신 tr_id ``VTTC0081R``(#2349)은 당일 체결을 반환함이 #2317
+  라이브로 확인됐다(백스톱 지연/유실에 무관히 fallback 은 멱등 백업으로 유지).
+  반면 잔고(``get_positions``)는 체결기준 즉시반영이다. 백스톱이 당일 0건을 줄 때
+  잔고 증분(``broker_qty - internal_account_qty``)에서 self-submitted 체결을
+  **보수적 역도출**해
   ``FillApplier.apply_cumulative`` 로 멱등 수렴한다(§11.8 단일 권위 — 새 권위자
   미생성). **KIS paper 한정 기본 활성**(§11.6), disable flag 로 rollback 가능.
 

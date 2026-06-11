@@ -142,8 +142,11 @@ force-write 로 인한 실거래 오매도를 영구 방지). carryover 의 수�
 
 ## position-derived fallback 과의 관계 (#2314, normative)
 
-KIS 모의 당일 체결은 `get_order_history`(결제기준)가 0건을 주는 동안 잔고
-(`get_positions`, 체결기준)만 즉시 반영된다. 이 모의 당일 gap을 닫기 위해
+KIS 모의 당일 체결은 레거시 tr_id `VTTC8001R` 의 `get_order_history`(결제기준)가
+0건을 주는 동안 잔고(`get_positions`, 체결기준)만 즉시 반영된다(신 tr_id
+`VTTC0081R`(#2349)은 당일 체결을 반환함이 #2317 라이브로 확인됨 — 단,
+position-derived fallback 은 백스톱 지연/유실에 무관히 멱등 백업으로 유지된다).
+이 모의 당일 gap을 닫기 위해
 broker-adapter 측에 **잔고-역도출 fallback**(position-derived bounded fallback,
 [`../broker-adapter/18-fill-recovery.md`](../broker-adapter/18-fill-recovery.md) §11)이 정의된다. 이 fallback 은 reconciler 의
 self/external 분류 정책과 **충돌하지 않으며**, 다음 경계를 유지한다:

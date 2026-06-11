@@ -20,7 +20,11 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from ante.broker.kis import DEFAULT_MAX_PAGINATION_PAGES, KISDomesticAdapter
+from ante.broker.kis import (
+    DEFAULT_EXCG_ID_DVSN_CD,
+    DEFAULT_MAX_PAGINATION_PAGES,
+    KISDomesticAdapter,
+)
 
 _CONFIG = {
     "app_key": "test-key",
@@ -440,3 +444,153 @@ async def test_request_with_cont_empty_header_not_injected() -> None:
 
     # 최초 요청: tr_cont 헤더는 빈 문자열이거나 부재(어느 쪽도 KIS 최초조회로 동작).
     assert captured["headers"].get("tr_cont", "") == ""
+
+
+# ── inquire-daily-ccld tr_id 4코드 분기 + EXCG_ID_DVSN_CD (#2349) ──
+#
+# get_order_history 가 KST 3개월 경계(start-date 단독 기준)로 inner/before 를
+# 판정하고, is_paper × inner/before 4코드로 tr_id 를 선택하는지, 그리고
+# EXCG_ID_DVSN_CD hygiene 파라미터를 주입하는지 검증한다. 서버측 효과
+# (레거시 0행 vs 신 4행)는 #2317 라이브로 닫혀 있으므로 mock 하지 않고,
+# 클라이언트 측 tr_id/param 선택 로직만 단언한다.
+
+# 레거시 tr_id — 회귀 lock 대상(더 이상 전송되지 않음).
+_LEGACY_CCLD_TR_IDS = frozenset({"VTTC8001R", "TTTC8001R", "VTSC9115R", "CTSC9115R"})
+
+
+def _make_ccld_adapter(*, is_paper: bool) -> KISDomesticAdapter:
+    """inquire-daily-ccld tr_id/param 선택만 검증하기 위한 어댑터."""
+    config = dict(_CONFIG)
+    config["is_paper"] = is_paper
+    return KISDomesticAdapter(config=config)
+
+
+def _capture_ccld_call(
+    adapter: KISDomesticAdapter,
+) -> dict[str, Any]:
+    """get_order_history 가 _request_paginated 에 넘긴 tr_id/params 를 캡처한다."""
+    captured: dict[str, Any] = {}
+
+    async def fake_paginated(method, url, tr_id, params, row_key="output1"):  # type: ignore[no-untyped-def]
+        captured["tr_id"] = tr_id
+        captured["params"] = dict(params)
+        return []
+
+    adapter._request_paginated = fake_paginated  # type: ignore[method-assign]
+    return captured
+
+
+@pytest.mark.parametrize("is_paper", [True, False])
+@pytest.mark.parametrize(
+    ("from_date", "expected_kind"),
+    [
+        # cutoff 당일(2026-03-11) 포함 → inner.
+        ("20260311", "inner"),
+        # cutoff 익일(이내) → inner.
+        ("20260312", "inner"),
+        # cutoff 전일(3개월보다 더 과거) → before.
+        ("20260310", "before"),
+    ],
+)
+async def test_get_order_history_selects_tr_id_by_kst_three_month_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    is_paper: bool,
+    from_date: str,
+    expected_kind: str,
+) -> None:
+    """KST cutoff 당일/익일/전일 × 모의/실전 4매핑 tr_id 선택을 clock 고정으로 단언.
+
+    KST today=2026-06-11 → cutoff=2026-03-11(달력 3개월 전 동일 일자).
+    INQR_STRT_DT >= cutoff → inner(0081R 계열), < cutoff → before(9215R 계열).
+    """
+    # clock 고정: KST 영업일 = 2026-06-11.
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
+
+    expected = {
+        ("inner", True): "VTTC0081R",
+        ("inner", False): "TTTC0081R",
+        ("before", True): "VTSC9215R",
+        ("before", False): "CTSC9215R",
+    }[(expected_kind, is_paper)]
+
+    adapter = _make_ccld_adapter(is_paper=is_paper)
+    captured = _capture_ccld_call(adapter)
+
+    await adapter.get_order_history(from_date=from_date, to_date="20260611")
+
+    assert captured["tr_id"] == expected
+    # 레거시 tr_id 회귀 lock.
+    assert captured["tr_id"] not in _LEGACY_CCLD_TR_IDS
+    # EXCG_ID_DVSN_CD hygiene 파라미터 주입(상수 재사용).
+    assert captured["params"]["EXCG_ID_DVSN_CD"] == DEFAULT_EXCG_ID_DVSN_CD == "KRX"
+
+
+@pytest.mark.parametrize("is_paper", [True, False])
+async def test_get_order_history_default_from_date_is_inner(
+    monkeypatch: pytest.MonkeyPatch, is_paper: bool
+) -> None:
+    """기본 from_date(now-7d, UTC 현행 유지)는 항상 inner(0081R 계열) 회귀.
+
+    호출자가 from_date 를 명시하지 않으면 종전과 동일하게 inner 경로로 동작해야
+    한다(tr_id 만 0081R 계열로 교체). UTC 기본 날짜 산출은 무변경이다.
+    """
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
+    expected = "VTTC0081R" if is_paper else "TTTC0081R"
+
+    adapter = _make_ccld_adapter(is_paper=is_paper)
+    captured = _capture_ccld_call(adapter)
+
+    await adapter.get_order_history()
+
+    assert captured["tr_id"] == expected
+    assert captured["params"]["EXCG_ID_DVSN_CD"] == "KRX"
+
+
+async def test_get_order_history_crossing_window_uses_single_before_query(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """교차 구간(from<cutoff<=to)은 split 없이 before 단일 쿼리(start-date 기준).
+
+    bounded known-limitation: cutoff 를 가로지르는 창은 start-date 기준으로
+    before 단일 코드를 선택하며, split query 를 발행하지 않는다(_request_paginated
+    1회 호출).
+    """
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
+    adapter = _make_ccld_adapter(is_paper=True)
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    async def fake_paginated(method, url, tr_id, params, row_key="output1"):  # type: ignore[no-untyped-def]
+        calls.append((tr_id, dict(params)))
+        return []
+
+    adapter._request_paginated = fake_paginated  # type: ignore[method-assign]
+
+    # from(03-01) < cutoff(03-11) <= to(06-11) — 교차 구간.
+    await adapter.get_order_history(from_date="20260301", to_date="20260611")
+
+    # split 없이 단일 before 쿼리.
+    assert len(calls) == 1
+    assert calls[0][0] == "VTSC9215R"
+    assert calls[0][1]["INQR_STRT_DT"] == "20260301"
+    assert calls[0][1]["INQR_END_DT"] == "20260611"
+
+
+async def test_get_order_history_month_end_boundary_clamp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """말일 보정: 대상 월에 동일 일자가 없으면 그 월 말일을 cutoff 로 쓴다.
+
+    KST today=2026-05-31 → 3개월 전 동일 일자(02-31)는 부재 → 02-28(2026 비윤년)
+    말일로 보정. INQR_STRT_DT=20260228 은 cutoff 당일이라 inner.
+    """
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260531")
+    adapter = _make_ccld_adapter(is_paper=True)
+    captured = _capture_ccld_call(adapter)
+
+    # cutoff = 2026-02-28(말일 보정). 당일은 inner.
+    await adapter.get_order_history(from_date="20260228", to_date="20260531")
+    assert captured["tr_id"] == "VTTC0081R"
+
+    # cutoff 전일(02-27)은 before.
+    await adapter.get_order_history(from_date="20260227", to_date="20260531")
+    assert captured["tr_id"] == "VTSC9215R"
