@@ -15,6 +15,7 @@ import asyncio
 import json
 import logging
 from abc import abstractmethod
+from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -34,6 +35,7 @@ from ante.broker.exceptions import (
     OrderNotFoundError,
     RateLimitError,
 )
+from ante.broker.fill_scheduler import business_date_kst
 from ante.broker.models import CommissionInfo
 
 if TYPE_CHECKING:
@@ -80,6 +82,11 @@ _ORDER_TR_IDS = frozenset(
 
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
+
+# 취소(order-rvsecncl) 시 전송할 KRX_FWDG_ORD_ORGNO 캐시 상한.
+# 어댑터 인스턴스(=계좌)당 미체결 주문 수를 넉넉히 덮으면서 무한 증가를 막는다.
+# 초과 시 가장 오래된 항목부터 제거(LRU 근사: insertion-order eviction).
+_KRX_FWDG_ORGNO_CACHE_MAXLEN = 1024
 
 
 class KISErrorClassifier:
@@ -711,6 +718,19 @@ class KISDomesticAdapter(KISBaseAdapter):
             + config.get("sell_tax_rate", 0.0018),
         )
 
+        # order-cash 응답에서 캡처한 KRX_FWDG_ORD_ORGNO 캐시 (#2345).
+        # 취소(order-rvsecncl)는 원주문별 한국거래소전송주문조직번호를 전송해야
+        # 한다. place_order 성공 응답의 output.KRX_FWDG_ORD_ORGNO(non-empty)를
+        # (값, 제출 KST 영업일)로 broker_order_id(ODNO)에 매핑해 둔다. cancel_order
+        # 는 순수 dict 조회(네트워크 없음)로 이를 주입한다.
+        #
+        # scope: 어댑터 인스턴스(=계좌, gateway._get_broker(account_id))당 분리.
+        #   추가로 KIS odno 는 영업일 재사용 가능(OrderTracker 문서)하므로 캐시
+        #   값에 제출 영업일을 함께 두고 취소 시 영업일 불일치면 miss 로 처리한다.
+        # bounded: OrderedDict + maxlen 으로 무한 증가/stale 누적을 막는다.
+        # known-limitation: in-process 한정(재기동 시 소실 → miss=필드 생략, 안전).
+        self._krx_fwdg_orgno_cache: OrderedDict[str, tuple[str, str]] = OrderedDict()
+
     # ── 계좌 정보 조회 ─────────────────────────────
 
     def _balance_params(self) -> dict[str, str]:
@@ -809,7 +829,13 @@ class KISDomesticAdapter(KISBaseAdapter):
         order_data = self._build_order_data(symbol, side, quantity, order_type, price)
 
         result = await self._request("POST", url, tr_id, json_data=order_data)
-        broker_order_id = result["output"]["ODNO"]
+        output = result["output"]
+        broker_order_id = output["ODNO"]
+        # 취소 시 전송할 KRX_FWDG_ORD_ORGNO 를 order-cash 응답에서 직접 캡처한다
+        # (#2345). 공식 order-cash 결과 컬럼(chk_order_cash.py)에 ODNO/ORD_TMD 와
+        # 함께 KRX_FWDG_ORD_ORGNO 가 정의되어 있다. 응답 구조 변동에 방어적으로
+        # 대응하기 위해 .get() 으로 읽고, non-empty 일 때만 캐시한다(오값 전송 금지).
+        self._cache_krx_fwdg_orgno(broker_order_id, output.get("KRX_FWDG_ORD_ORGNO"))
         logger.info(
             "주문 접수: %s %s %s %.0f주 → %s",
             side,
@@ -819,6 +845,22 @@ class KISDomesticAdapter(KISBaseAdapter):
             broker_order_id,
         )
         return broker_order_id
+
+    def _cache_krx_fwdg_orgno(self, broker_order_id: str, orgno: str | None) -> None:
+        """order-cash 응답의 KRX_FWDG_ORD_ORGNO 를 제출 영업일과 함께 캐시 (#2345).
+
+        non-empty 값만 저장한다. broker_order_id(ODNO) 키로 (값, 제출 KST 영업일)
+        을 매핑하며, bounded(OrderedDict + maxlen)로 무한 증가를 막는다.
+        취소 시 cancel_order 가 영업일 일치 여부까지 확인해 주입한다.
+        """
+        if not orgno:
+            # 응답에 필드가 없거나 빈 값이면 캐시하지 않는다 → 취소 시 miss(생략).
+            return
+        cache = self._krx_fwdg_orgno_cache
+        cache[broker_order_id] = (orgno, business_date_kst())
+        cache.move_to_end(broker_order_id)
+        while len(cache) > _KRX_FWDG_ORGNO_CACHE_MAXLEN:
+            cache.popitem(last=False)
 
     def _build_order_data(
         self,
@@ -865,7 +907,14 @@ class KISDomesticAdapter(KISBaseAdapter):
         return mapping.get(status_code, "unknown")
 
     async def cancel_order(self, order_id: str) -> bool:
-        """주문 취소."""
+        """주문 취소.
+
+        취소(order-rvsecncl) body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``
+        (한국거래소전송주문조직번호)를 전송한다(#2345). 값은 place_order 시
+        order-cash 응답에서 캡처해 둔 인메모리 캐시에서 가져오며, 순수 dict
+        조회로 네트워크/추가 조회를 하지 않는다. 캐시 miss 또는 제출 영업일
+        불일치(odno 재사용 등) 시에는 필드를 생략한다(기존 동작 유지).
+        """
         tr_id = "VTTC0803U" if self.is_paper else "TTTC0803U"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
         cancel_data = {
@@ -878,6 +927,15 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_UNPR": "0",
             "QTY_ALL_ORD_YN": "Y",
         }
+        cached = self._krx_fwdg_orgno_cache.get(order_id)
+        if cached is not None and cached[1] == business_date_kst():
+            cancel_data["KRX_FWDG_ORD_ORGNO"] = cached[0]
+        else:
+            logger.debug(
+                "취소 KRX_FWDG_ORD_ORGNO 생략: %s (cache=%s)",
+                order_id,
+                "miss" if cached is None else "stale-date",
+            )
         await self._request("POST", url, tr_id, json_data=cancel_data)
         logger.info("주문 취소 성공: %s", order_id)
         return True

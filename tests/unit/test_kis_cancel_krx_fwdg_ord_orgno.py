@@ -1,0 +1,188 @@
+"""KIS 국내주식 취소(order-rvsecncl) body의 KRX_FWDG_ORD_ORGNO 계약 테스트 (#2345).
+
+``KISDomesticAdapter`` 는 원주문 접수(order-cash) 응답의
+``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)를 인메모리 캐시에 보존하고,
+취소 시 같은 broker_order_id(ODNO)·같은 KST 영업일이면 cancel body 에 주입한다.
+캐시 miss / 응답에 필드 없음 / 영업일 불일치(odno 재사용) 시에는 필드를 생략한다
+(기존 8필드 동작 유지, 네트워크/추가 조회 없음).
+
+캡처 원천: 공식 order-cash 결과 컬럼(chk_order_cash.py)에 ODNO/ORD_TMD 와 함께
+``KRX_FWDG_ORD_ORGNO`` 가 정의되어 있어, place_order 가 읽는 동일 ``output`` dict
+에서 직접 캡처한다.
+"""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock
+
+import pytest
+
+from ante.broker.fill_scheduler import business_date_kst
+from ante.broker.kis import KISDomesticAdapter
+
+_ORGNO = "00950"
+
+
+def _make_adapter(*, is_paper: bool = False) -> KISDomesticAdapter:
+    """네트워크 없이 place/cancel body 만 검증하기 위한 어댑터."""
+    config = {
+        "app_key": "test-key",
+        "app_secret": "test-secret",
+        "account_no": "1234567890",
+        "is_paper": is_paper,
+    }
+    return KISDomesticAdapter(config=config)
+
+
+def _stub_request(adapter: KISDomesticAdapter, response: dict) -> AsyncMock:
+    """``_request`` 와 인증/레이트리밋을 stub 하고 mock 을 반환한다."""
+    adapter._ensure_authenticated = AsyncMock()  # type: ignore[method-assign]
+    adapter._rate_limit_wait = AsyncMock()  # type: ignore[method-assign]
+    request = AsyncMock(return_value=response)
+    adapter._request = request  # type: ignore[method-assign]
+    return request
+
+
+def _captured_cancel_body(request: AsyncMock) -> dict:
+    """캡처된 cancel POST 의 json_data(키워드 인자)를 반환한다."""
+    return request.call_args.kwargs["json_data"]
+
+
+async def test_place_then_cancel_includes_krx_fwdg_ord_orgno() -> None:
+    """(a) place 응답에 필드 포함 → 같은 영업일 cancel body 에 캐시값 주입."""
+    adapter = _make_adapter()
+    request = _stub_request(
+        adapter, {"output": {"ODNO": "0001234567", "KRX_FWDG_ORD_ORGNO": _ORGNO}}
+    )
+
+    order_id = await adapter.place_order("005930", "buy", 10, "market")
+    assert order_id == "0001234567"
+
+    result = await adapter.cancel_order(order_id)
+    assert result is True
+
+    body = _captured_cancel_body(request)
+    assert body["KRX_FWDG_ORD_ORGNO"] == _ORGNO
+    assert body["ORGN_ODNO"] == order_id
+
+
+async def test_cancel_cache_miss_omits_field_and_succeeds() -> None:
+    """(b) 캐시에 없는 order_id 취소 → 필드 생략 + 취소 정상(True)."""
+    adapter = _make_adapter()
+    request = _stub_request(adapter, {"output": {}})
+
+    result = await adapter.cancel_order("9999999999")
+    assert result is True
+
+    body = _captured_cancel_body(request)
+    assert "KRX_FWDG_ORD_ORGNO" not in body
+
+
+async def test_place_without_orgno_field_not_cached() -> None:
+    """(c) place 응답에 KRX_FWDG_ORD_ORGNO 없음 → 캐시 안 함 → cancel 시 생략."""
+    adapter = _make_adapter()
+    request = _stub_request(adapter, {"output": {"ODNO": "0001234567"}})
+
+    order_id = await adapter.place_order("005930", "buy", 10, "market")
+    await adapter.cancel_order(order_id)
+
+    body = _captured_cancel_body(request)
+    assert "KRX_FWDG_ORD_ORGNO" not in body
+
+
+async def test_place_with_empty_orgno_not_cached() -> None:
+    """(c') place 응답 필드가 빈 문자열 → 캐시 안 함(오값 전송 금지)."""
+    adapter = _make_adapter()
+    request = _stub_request(
+        adapter, {"output": {"ODNO": "0001234567", "KRX_FWDG_ORD_ORGNO": ""}}
+    )
+
+    order_id = await adapter.place_order("005930", "buy", 10, "market")
+    await adapter.cancel_order(order_id)
+
+    body = _captured_cancel_body(request)
+    assert "KRX_FWDG_ORD_ORGNO" not in body
+
+
+async def test_cancel_stale_business_day_omits_field() -> None:
+    """(d) 영업일 불일치(재사용 odno, 과거 영업일 캐시) → 필드 생략."""
+    adapter = _make_adapter()
+    request = _stub_request(adapter, {"output": {}})
+
+    # 과거 영업일로 직접 캐시를 seed 해 odno 재사용 상황을 재현한다.
+    adapter._krx_fwdg_orgno_cache["0001234567"] = (_ORGNO, "20200101")
+    assert business_date_kst() != "20200101"
+
+    result = await adapter.cancel_order("0001234567")
+    assert result is True
+
+    body = _captured_cancel_body(request)
+    assert "KRX_FWDG_ORD_ORGNO" not in body
+
+
+async def test_cancel_body_regression_lock() -> None:
+    """(e) 기존 cancel body 8필드 회귀 lock (캐시 hit 시에도 기존 필드 불변)."""
+    adapter = _make_adapter()
+    request = _stub_request(
+        adapter, {"output": {"ODNO": "0001234567", "KRX_FWDG_ORD_ORGNO": _ORGNO}}
+    )
+
+    order_id = await adapter.place_order("005930", "buy", 10, "market")
+    await adapter.cancel_order(order_id)
+
+    body = _captured_cancel_body(request)
+    assert body["CANO"] == "12345678"
+    assert body["ACNT_PRDT_CD"] == "90"
+    assert body["ORGN_ODNO"] == order_id
+    assert body["ORD_DVSN"] == "01"
+    assert body["RVSE_CNCL_DVSN_CD"] == "02"
+    assert body["ORD_QTY"] == "0"
+    assert body["ORD_UNPR"] == "0"
+    assert body["QTY_ALL_ORD_YN"] == "Y"
+    # 신규 필드 1개만 추가되어 총 9필드.
+    assert set(body) == {
+        "CANO",
+        "ACNT_PRDT_CD",
+        "ORGN_ODNO",
+        "ORD_DVSN",
+        "RVSE_CNCL_DVSN_CD",
+        "ORD_QTY",
+        "ORD_UNPR",
+        "QTY_ALL_ORD_YN",
+        "KRX_FWDG_ORD_ORGNO",
+    }
+
+
+async def test_cache_is_bounded() -> None:
+    """캐시는 maxlen 으로 bounded — 무한 증가하지 않고 오래된 항목부터 evict."""
+    from ante.broker.kis import _KRX_FWDG_ORGNO_CACHE_MAXLEN
+
+    adapter = _make_adapter()
+    today = business_date_kst()
+    for i in range(_KRX_FWDG_ORGNO_CACHE_MAXLEN + 50):
+        adapter._cache_krx_fwdg_orgno(f"odno-{i}", _ORGNO)
+
+    assert len(adapter._krx_fwdg_orgno_cache) == _KRX_FWDG_ORGNO_CACHE_MAXLEN
+    # 가장 오래된 항목들이 evict 됨.
+    assert "odno-0" not in adapter._krx_fwdg_orgno_cache
+    # 최신 항목은 유지되고 영업일도 함께 저장됨.
+    last_key = f"odno-{_KRX_FWDG_ORGNO_CACHE_MAXLEN + 49}"
+    assert adapter._krx_fwdg_orgno_cache[last_key] == (_ORGNO, today)
+
+
+@pytest.mark.parametrize("is_paper", [True, False])
+async def test_cancel_works_for_paper_and_live(is_paper: bool) -> None:
+    """모의/실전 모두 캐시 hit 시 cancel body 에 필드 주입."""
+    adapter = _make_adapter(is_paper=is_paper)
+    request = _stub_request(
+        adapter, {"output": {"ODNO": "0001234567", "KRX_FWDG_ORD_ORGNO": _ORGNO}}
+    )
+
+    order_id = await adapter.place_order("005930", "buy", 10, "market")
+    await adapter.cancel_order(order_id)
+
+    body = _captured_cancel_body(request)
+    assert body["KRX_FWDG_ORD_ORGNO"] == _ORGNO
+    # tr_id 도 환경별로 올바른지(취소 tr_id 회귀): 0803U 유지.
+    cancel_tr_id = request.call_args_list[-1].args[2]
+    assert cancel_tr_id == ("VTTC0803U" if is_paper else "TTTC0803U")
