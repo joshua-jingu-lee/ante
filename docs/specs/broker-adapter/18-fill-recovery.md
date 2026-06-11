@@ -37,11 +37,14 @@ ante가 제출한 주문은 (모의투자·실전투자, 스트림 유무와 무
 원장이 당일 반영되는 환경을 전제로 한다**. **KIS 모의투자(`is_paper=true`)에서는
 이 전제가 거짓이다**:
 
-- KIS 모의 `inquire-daily-ccld`(`get_order_history`, tr_id `VTTC8001R`)는 **일별
-  정산/결제기준 원장**이라 **당일 체결이 지연 반영(0건)**된다(KIS 공식 POSTMAN
-  v1.6: *"일별 조회로, 당일 주문내역은 지연될 수 있습니다"* + 한국투자증권
-  attention_23 확정). 그 동안 `recorded_filled_qty=0`이 고정되어 #1945류
-  미반영 캐스케이드 위험이 재현된다.
+- KIS 모의 `inquire-daily-ccld`(`get_order_history`)는 **일별 정산/결제기준
+  원장**이라 잠재적 당일 지연 반영 위험이 KIS 공식 근거로 남아 있다(KIS 공식
+  POSTMAN v1.6: *"일별 조회로, 당일 주문내역은 지연될 수 있습니다"* + 한국투자증권
+  attention_23). 다만 **이 지연은 tr_id 세대에 의존한다**: 레거시 `VTTC8001R`은
+  모의 당일 체결을 0건으로 반환하나(#2317 라이브 A/B로 장중·마감후·D+6 3시점
+  일관 입증), 현행 신 tr_id `VTTC0081R`(#2349)은 **당일 체결을 반환함이 #2317
+  라이브로 확인**됐다. 레거시 경로에서는 `recorded_filled_qty=0`이 고정되어
+  #1945류 미반영 캐스케이드 위험이 재현되었다.
 - 반면 잔고(`inquire-balance`/`get_positions`, tr_id `VTTC8434R`)는 **체결기준
   이라 당일 즉시 반영**된다.
 
@@ -524,10 +527,11 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
 
 - **KIS paper(`is_paper=true`) 한정 기본 활성**. 모의 당일 ccld 지연이 확정된
   환경이므로 기본 켠다.
-- **live는 capability/config flag로 분리**한다. 라이브 ccld 지연 폭(D+1 vs
-  장중 분 단위), `EXCG_ID_DVSN_CD`·신 tr_id(`VTTC0081R`)의 당일 반영 개선 여부가
-  외부 문서로 닫히지 않아, 라이브 활성은 **canary 후속(#2317)** 검증 뒤에만
-  허용한다(known-limitation §11.7).
+- **live는 capability/config flag로 분리**한다. `EXCG_ID_DVSN_CD`·신
+  tr_id(`VTTC0081R`)의 **당일 반영 효과는 #2317 라이브 A/B로 확인됐다**(레거시
+  `VTTC8001R` 0행 vs 신 `VTTC0081R` 당일 반영, #2349 적용). 다만 라이브 ccld
+  지연 폭(D+1 vs 장중 분 단위) 등 잔여 라이브 의존 항목은 여전히 닫히지 않아,
+  라이브 활성은 그 잔여 검증 뒤에만 허용한다(known-limitation §11.7).
 
 ### 11.7 bounded known-limitation
 
@@ -560,9 +564,11 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   정정 안 함.
 - **Treasury 비례 정산**: §9의 pre-existing 한계(부분 체결 비례 정산 미지원)는
   fallback이 악화시키지 않으며 별도 후속 이슈로 둔다.
-- **라이브 의존(#2317)**: 지연 폭 확정, multi-order/partial 식별 가능성,
-  `EXCG_ID_DVSN_CD`·신 tr_id 효과는 라이브 검증이 필요하다. live 활성·다중 귀속
-  완화는 #2317 결과 뒤 재검토한다.
+- **라이브 의존(#2317)**: `EXCG_ID_DVSN_CD`·신 tr_id(`VTTC0081R`, #2349)의 당일
+  반영 효과는 **#2317 라이브 A/B로 확인 완료**다(레거시 `8001R` 0행 vs 신
+  `0081R` 당일 반영). 다만 지연 폭 확정, multi-order/partial 식별 가능성(#2353),
+  live 활성·다중 귀속 완화는 **여전히 라이브 의존**으로 남으며 #2317 결과 뒤
+  재검토한다.
 
 ### 11.8 FillApplier 단일 권위 (직접 수정 금지)
 

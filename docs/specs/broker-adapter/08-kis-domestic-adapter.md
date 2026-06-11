@@ -92,6 +92,22 @@ class KISDomesticAdapter(KISBaseAdapter):
 
 > 출처: [KIS open-trading-api `order_rvsecncl.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_rvsecncl/order_rvsecncl.py) 및 공식 레거시/Postman PAPER 샘플(`VTTC0803U`/`TTTC0803U`에서 `KRX_FWDG_ORD_ORGNO`를 원주문별 값으로 전송). 취소 tr_id `0803U→0013U` 마이그레이션과 `EXCG_ID_DVSN_CD`는 별도 live-gated 이슈(#2346) 범위다.
 
+### inquire-daily-ccld TR ID 매핑 (#2349)
+
+주문/체결 이력 조회(`inquire-daily-ccld`, `get_order_history`)는 `is_paper` × **3개월 경계**(inner/before) 조합으로 아래 KIS 공식 현행 TR ID를 전송한다. **inquire-daily-ccld 한정**이며, order-cash·취소·잔고·현재가 등 다른 엔드포인트 TR ID는 이 표의 범위 밖이다.
+
+| 구분 | 실전 | 모의 |
+|------|------|------|
+| 3개월 이내 (inner) | `TTTC0081R` | `VTTC0081R` |
+| 3개월 이전 (before) | `CTSC9215R` | `VTSC9215R` |
+
+- **3개월 경계 판정 (ante 로컬 normative 정책)**: 공식 예제는 `pd_dv=inner\|before`를 호출자 인자로 받을 뿐 경계를 계산하지 않으므로, ante가 경계 정책을 소유한다(공식 산식 미러 아님). **cutoff = KST 오늘 기준 달력 3개월 전 동일 일자**(예: KST 2026-06-11 → cutoff 2026-03-11). 대상 월에 동일 일자가 없으면 그 월 말일로 보정한다(예: 2026-05-31 → cutoff 2026-02-28). **판정은 `INQR_STRT_DT`(start-date) 단독 기준**: `>= cutoff`이면 inner(cutoff 당일 포함), `< cutoff`이면 before. 기본 `from_date`(now-7d)는 항상 inner다(레거시 `VTTC8001R`/`TTTC8001R` 단일 코드 대신 inner `0081R` 계열로 교체). 레거시 before `VTSC9115R`/`CTSC9115R`은 비채택이다.
+- **교차 구간(`from < cutoff <= to`) bounded known-limitation**: cutoff를 가로지르는 창은 split query 없이 start-date 기준 before 단일 쿼리로 처리한다(완전성은 known-limitation). 현행 호출자(`FillReconcileScheduler`)는 항상 ≤7일 창이라 실제 운영 경로는 inner 고정이며, before 분기는 caller가 3개월 이전 `from_date`를 줄 때만 활성화된다.
+- **`EXCG_ID_DVSN_CD`는 hard-required가 아님 (hygiene)**: 이 엔드포인트에서 `EXCG_ID_DVSN_CD`(`'KRX'`, 모듈 상수 `DEFAULT_EXCG_ID_DVSN_CD` 재사용)는 데이터 완전성/NXT 누락 방지를 위한 **optional hygiene**으로 주입한다. 공식 예제도 조건부 append이며 `ValueError` 가드가 없다. 이는 order-cash의 `40910000` 거절-fix(#2342/#2345)와 **다른 프레임**이다(거절-fix가 아닌 데이터 완전성 보강).
+- **신 tr_id 효과**: 레거시 `VTTC8001R`은 모의 당일 체결을 반환하지 못하나(0행), 신 `VTTC0081R`은 당일 체결을 반환함이 #2317 라이브 A/B로 확인됐다(`docs/specs/broker-adapter/18-fill-recovery.md` §2.1).
+
+> 출처: [KIS open-trading-api `inquire_daily_ccld.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_daily_ccld/inquire_daily_ccld.py)(공식 예제가 inner/before별 4코드와 조건부 `EXCG_ID_DVSN_CD` append를 정의) + #2314 근본원인 조사 + #2317 라이브 측정.
+
 ### KIS 주문 유형 매핑
 
 KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한다. `stop`/`stop_limit`이 전달되면 `ValueError`를 발생시킨다 (상위 계층에서 변환 후 호출해야 함).

@@ -12,6 +12,7 @@ KIS REST API를 통해 주문, 조회를 처리한다.
 from __future__ import annotations
 
 import asyncio
+import calendar
 import json
 import logging
 from abc import abstractmethod
@@ -86,6 +87,22 @@ _ORDER_TR_IDS = frozenset(
 # NXT/SOR 등 다른 거래소 라우팅은 현재 미지원(요구 발생 시 config 표면화는 후속).
 DEFAULT_EXCG_ID_DVSN_CD = "KRX"
 
+# inquire-daily-ccld(주문/체결 이력) TR ID 매핑 (#2349).
+# KIS 공식 현행은 3개월 경계(inner/before) × 모의/실전 4코드로 분기한다. 레거시
+# 단일 코드(`*8001R` 세대)와 레거시 before(`*9115R` 세대)는 비채택.
+# 출처: KIS open-trading-api examples_llm/domestic_stock/inquire_daily_ccld.
+#   - inner(조회 기준일로부터 3개월 이내): 모의 VTTC0081R / 실전 TTTC0081R
+#   - before(3개월 이전): 모의 VTSC9215R / 실전 CTSC9215R
+_CCLD_TR_ID_INNER_PAPER = "VTTC0081R"
+_CCLD_TR_ID_INNER_LIVE = "TTTC0081R"
+_CCLD_TR_ID_BEFORE_PAPER = "VTSC9215R"
+_CCLD_TR_ID_BEFORE_LIVE = "CTSC9215R"
+
+# inquire-daily-ccld inner/before 판정의 3개월 경계(ante 로컬 normative 정책).
+# 공식 예제는 pd_dv=inner|before 를 호출자 인자로 받을 뿐 경계를 계산하지 않으므로
+# ante 가 정책을 소유한다(#2349). KST 오늘 기준 달력 3개월 전 동일 일자가 cutoff.
+_CCLD_BOUNDARY_MONTHS = 3
+
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
 
@@ -93,6 +110,30 @@ _AUTH_PATH = "/oauth2/tokenP"
 # 어댑터 인스턴스(=계좌)당 미체결 주문 수를 넉넉히 덮으면서 무한 증가를 막는다.
 # 초과 시 가장 오래된 항목부터 제거(LRU 근사: insertion-order eviction).
 _KRX_FWDG_ORGNO_CACHE_MAXLEN = 1024
+
+
+def _ccld_three_month_cutoff(today_kst: str) -> str:
+    """inquire-daily-ccld inner/before 경계 cutoff ``YYYYMMDD`` (#2349, normative).
+
+    KST 오늘(``today_kst``, ``YYYYMMDD``) 기준 **달력 3개월 전 동일 일자**를
+    cutoff 로 산출한다. 대상 월에 동일 일자가 없으면(예: 5/31 → 2/31 부재) 그
+    월의 **말일**로 보정한다(예: 2026-05-31 → 2026-02-28).
+
+    ``INQR_STRT_DT >= cutoff`` 이면 inner(cutoff 당일 포함), ``< cutoff`` 이면
+    before 로 판정한다(start-date 단독 기준). 공식 예제는 ``pd_dv`` 인자를 받을
+    뿐 경계를 계산하지 않으므로 본 cutoff 산식은 ante 로컬 정책이다.
+    """
+    year = int(today_kst[:4])
+    month = int(today_kst[4:6])
+    day = int(today_kst[6:8])
+    # 달력 3개월 전 (year, month) 산출.
+    total = (year * 12 + (month - 1)) - _CCLD_BOUNDARY_MONTHS
+    target_year, target_month = divmod(total, 12)
+    target_month += 1
+    # 말일 보정: 대상 월에 동일 일자가 없으면 그 월 말일로 clamp.
+    last_day = calendar.monthrange(target_year, target_month)[1]
+    target_day = min(day, last_day)
+    return f"{target_year:04d}{target_month:02d}{target_day:02d}"
 
 
 class KISErrorClassifier:
@@ -1140,16 +1181,37 @@ class KISDomesticAdapter(KISBaseAdapter):
         from_date: str | None = None,
         to_date: str | None = None,
     ) -> list[dict[str, Any]]:
-        """주문/체결 이력 조회 (CTX_AREA 연속조회로 전 페이지 누적 후 fold)."""
-        tr_id = "VTTC8001R" if self.is_paper else "TTTC8001R"
+        """주문/체결 이력 조회 (CTX_AREA 연속조회로 전 페이지 누적 후 fold).
+
+        tr_id 는 KST 3개월 경계(inner/before) × 모의/실전 4코드로 분기한다(#2349).
+        조회 시작일(``INQR_STRT_DT``)이 KST 오늘 기준 3개월 전 cutoff 이상이면
+        inner(``*0081R``), 미만이면 before(``*9215R``)다(start-date 단독 기준).
+        교차 구간(``from < cutoff <= to``)은 split query 없이 start-date 기준
+        before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다
+        (현행 호출자 FillReconcileScheduler 는 항상 ≤7일 창이라 inner 고정).
+        """
+        # 기본 날짜 산출은 UTC 현행 유지(기존 동작 invariant). KST 는 경계 판정에만.
+        now = datetime.now(UTC)
+        start_date = from_date or (now - timedelta(days=7)).strftime("%Y%m%d")
+        end_date = to_date or now.strftime("%Y%m%d")
+
+        # 3개월 경계 판정: KST 오늘 기준 cutoff 와 start_date 비교(start-date 단독).
+        cutoff = _ccld_three_month_cutoff(business_date_kst())
+        is_inner = start_date >= cutoff
+        if is_inner:
+            tr_id = _CCLD_TR_ID_INNER_PAPER if self.is_paper else _CCLD_TR_ID_INNER_LIVE
+        else:
+            tr_id = (
+                _CCLD_TR_ID_BEFORE_PAPER if self.is_paper else _CCLD_TR_ID_BEFORE_LIVE
+            )
+
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-daily-ccld"
 
-        now = datetime.now(UTC)
         params = {
             "CANO": self.account_no[:8],
             "ACNT_PRDT_CD": self.account_no[8:10],
-            "INQR_STRT_DT": from_date or (now - timedelta(days=7)).strftime("%Y%m%d"),
-            "INQR_END_DT": to_date or now.strftime("%Y%m%d"),
+            "INQR_STRT_DT": start_date,
+            "INQR_END_DT": end_date,
             "SLL_BUY_DVSN_CD": "00",
             "INQR_DVSN": "00",
             "PDNO": "",
@@ -1158,6 +1220,10 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ODNO": "",
             "INQR_DVSN_3": "00",
             "INQR_DVSN_1": "",
+            # 거래소ID구분코드 hygiene(#2349). order-cash(#2344)의 40910000
+            # 거절-fix 와 달리 이 엔드포인트는 hard-required 가 아니며, 데이터
+            # 완전성(NXT 누락 방지)을 위한 optional 주입이다(공식 조건부 append).
+            "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
             "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": "",
         }
