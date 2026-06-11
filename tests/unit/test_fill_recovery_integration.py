@@ -87,11 +87,17 @@ async def stack(db, eventbus):
         db=db, order_tracker=tracker, position_history=ph, eventbus=eventbus
     )
     reconciler = PositionReconciler(trade_service=service, eventbus=eventbus)
+    # #2351: order_tracker 주입 reconciler — sell-side self-check 통합 검증용
+    # (운영 배선과 동형: main.py 의 두 배선 경로는 항상 OrderTracker 를 주입한다).
+    reconciler_with_tracker = PositionReconciler(
+        trade_service=service, eventbus=eventbus, order_tracker=tracker
+    )
     return {
         "ph": ph,
         "tracker": tracker,
         "applier": applier,
         "reconciler": reconciler,
+        "reconciler_with_tracker": reconciler_with_tracker,
         "service": service,
     }
 
@@ -462,6 +468,99 @@ async def test_1945_regression_paper_poll_recovery(stack, eventbus):
 
     pos2 = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
     assert pos2["quantity"] == 0.0  # 정확히 청산.
+
+
+# ── #2351: sell-side self detect-only → ccld 단일 차감(이중 차감 없음) ──
+
+
+async def test_2351_self_sell_detect_only_then_ccld_single_decrement(stack, eventbus):
+    """#2351 통합: 모의 ccld 지연창의 self 매도가 reconciler 에서 detect-only 로
+    분류(보정 skip)된 뒤, ccld 가 그 매도를 적용해도 **이중 차감 없이** FillApplier
+    경로로 **정확히 1회만** 차감된다.
+
+    시나리오:
+    1) buy 100 복구 → positions=100(내부=브로커 일치).
+    2) ante 가 sell 100 self 제출(추적 seed) → 잔고는 즉시 0 으로 감소하나 ccld 는
+       당일 0건(모의 지연) → 내부 매도 미반영(positions 여전히 100).
+    3) reconcile(order_tracker 주입): deficit 100 == sell capacity 100 → self_submitted
+       detect-only. correct_position(force-write down) 미호출 → positions 100 유지.
+    4) ccld 가 sell 100 을 반환 → FillApplier 가 매도 1회 적용 → positions=0.
+       reconciler 가 force-write 하지 않았으므로 이중 차감(음수/0 중복)이 없다.
+    """
+    mismatches: list[PositionMismatchEvent] = []
+    fills: list[OrderFilledEvent] = []
+
+    async def _mh(e):
+        if isinstance(e, PositionMismatchEvent):
+            mismatches.append(e)
+
+    async def _fh(e):
+        if isinstance(e, OrderFilledEvent):
+            fills.append(e)
+
+    eventbus.subscribe(PositionMismatchEvent, _mh)
+    eventbus.subscribe(OrderFilledEvent, _fh)
+
+    # 1) buy 100 복구 → positions=100.
+    await _submit(
+        eventbus,
+        stack["tracker"],
+        order_id="ord-buy",
+        broker_order_id="0001",
+        qty=100.0,
+    )
+    broker = FakeBroker(
+        history=[_hist("0001", 100.0, 70000.0, side="buy")],
+        positions=[{"symbol": SYMBOL, "quantity": 100.0, "avg_price": 70000.0}],
+    )
+    fill_sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=stack["tracker"],
+        fill_applier=stack["applier"],
+        account_id=ACCT,
+    )
+    await fill_sched.catch_up_once()
+    assert (await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT))[
+        "quantity"
+    ] == 100.0
+
+    # 2) ante sell 100 self 제출(추적 seed). 잔고는 즉시 0, ccld 는 당일 0건.
+    await _submit(
+        eventbus,
+        stack["tracker"],
+        order_id="ord-sell",
+        broker_order_id="0002",
+        qty=100.0,
+        side="sell",
+    )
+    broker._history = []  # 모의 ccld 당일 0건(매도 미반영).
+    broker._positions = []  # 잔고는 매도 즉시 반영 → 0.
+
+    # 3) reconcile(order_tracker 주입): deficit 100 <= sell capacity 100 → self
+    #    detect-only. force-write down 미발생 → positions 100 유지.
+    corrections = await stack["reconciler_with_tracker"].reconcile(
+        bot_id=BOT,
+        broker_positions=await broker.get_account_positions(),
+        account_id=ACCT,
+    )
+    assert corrections == []  # 보정 skip(외부 청산 force-write 아님).
+    assert len(mismatches) == 1
+    assert mismatches[0].reason == "ante 미반영 체결"
+    # 내부 포지션은 reconciler 가 손대지 않아 100 유지(복구는 ccld 백스톱 위임).
+    assert (await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT))[
+        "quantity"
+    ] == 100.0
+
+    # 4) ccld 가 sell 100 을 반환 → FillApplier 가 매도를 1회 적용 → positions=0.
+    broker._history = [_hist("0002", 100.0, 71000.0, side="sell")]
+    await fill_sched.catch_up_once()
+
+    pos = await stack["ph"].get_current(BOT, SYMBOL, account_id=ACCT)
+    assert pos["quantity"] == 0.0  # 정확히 1회 차감 — 이중 차감 없음(음수/잔류 없음).
+    # 매도 체결 이벤트는 ccld 경로로 정확히 1회 발행(sell delta=100).
+    sell_fills = [f for f in fills if f.order_id == "ord-sell"]
+    assert len(sell_fills) == 1
+    assert sell_fills[0].quantity == 100.0
 
 
 # ── EOD 만료 ─────────────────────────────────────────

@@ -17,6 +17,8 @@ from ante.trade.performance import PerformanceTracker
 from ante.trade.position import PositionHistory
 from ante.trade.reconciler import (
     REASON_EXTERNAL_BUY,
+    REASON_EXTERNAL_LIQUIDATION,
+    REASON_EXTERNAL_PARTIAL_SELL,
     REASON_SELF_SUBMITTED,
     REASON_UNATTRIBUTED_HOLDING,
     PositionReconciler,
@@ -865,6 +867,388 @@ class TestUnattributedHolding:
         )
         assert len(corrections) == 1
         assert corrections[0]["reason"] == REASON_EXTERNAL_BUY
+
+
+# ── 시나리오 10: sell-side self-check 대칭 확장 (#2351) ──
+
+
+class TestSellSideSelfCheck:
+    """broker < internal(외부 청산/외부 일부 매도 후보) 분기에서 ante 미반영 self
+    매도(self-submitted-unrecorded-fill)를 외부 매도와 구분한다 (#2351 — #1950
+    buy-side 정확 대칭).
+
+    KIS 모의 ccld 지연창: 잔고(get_positions)는 매도 즉시 감소하나 ccld(당일 0건)가
+    내부 매도를 반영하지 못해 broker_qty < internal_qty 가 된다. deficit 이 ante
+    미반영 sell capacity 로 설명되면 외부 거래로 단정하지 않고 보정 skip + info
+    이벤트만 발행한다(복구는 FillApplier ccld 백스톱에 위임).
+    """
+
+    async def test_full_self_sell_within_capacity_skips_correction(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """(a) b_qty == 0 전량 self 매도(deficit <= capacity) → 보정 미호출 · info
+        · reason="ante 미반영 체결".
+
+        구현 전 FAIL 회귀 락: 현행 코드는 이를 '외부 청산'(critical)으로 분류 +
+        correct_position(quantity=0) force-write 했다.
+        """
+        # 내부 50주 보유, ante self 매도 50주 미체결(open sell), 브로커 0주.
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=50,
+            side="sell",
+        )
+
+        mismatch_events: list = []
+        notif_events: list = []
+        reconcile_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+        eventbus.subscribe(ReconcileEvent, lambda e: reconcile_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],  # 브로커 0주.
+            account_id="acc-test",
+        )
+
+        # 보정 skip — FillApplier(ccld 백스톱)에 위임. force-write 없음.
+        assert corrections == []
+        # 포지션 보정 안 됨 (50 유지 — 외부 청산이라면 0 으로 force-write).
+        pos = await position_history.get_current("bot-1", "005930")
+        assert pos["quantity"] == 50
+        # PositionMismatchEvent 는 self-submitted 사유(외부 청산 아님)로 발행.
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].reason == REASON_SELF_SUBMITTED
+        assert mismatch_events[0].internal_qty == 50
+        assert mismatch_events[0].broker_qty == 0
+        # NotificationEvent 는 info(자동 보정 유발 안 함 — critical 아님).
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "info"
+        # 보정 0건 → ReconcileEvent 미발행.
+        assert reconcile_events == []
+
+    async def test_partial_self_sell_within_capacity_skips_correction(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """(b) 0 < b_qty < i_qty 부분 self 매도(deficit <= capacity) → detect-only.
+
+        현행: '외부 일부 매도'(critical) + correct_position(quantity=b_qty).
+        """
+        # 내부 50주, ante self 매도 30주 미체결, 브로커 20주(deficit 30 <= cap 30).
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=30,
+            side="sell",
+        )
+
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 20, "avg_price": 50000},
+            ],
+            account_id="acc-test",
+        )
+
+        assert corrections == []
+        pos = await position_history.get_current("bot-1", "005930")
+        assert pos["quantity"] == 50  # 보정 안 됨(외부 일부 매도라면 20).
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "info"
+
+    async def test_partial_fill_capacity_exact(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(c) partial capacity(recorded_filled_qty>0) 정확 계산.
+
+        sell 50주 주문 중 30주 이미 기록 → 잔여 sell capacity = 20. deficit 20 ==
+        capacity 20 → self(보정 skip). 단 잔여분만 capacity 로 잡힘을 고정.
+        """
+        # 내부 50주, ante sell 50 주문 중 30 기록 → 잔여 capacity 20.
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=50,
+            side="sell",
+            recorded_filled_qty=30,
+        )
+        # 브로커 30주 → deficit 20 == capacity 20 → self.
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 30, "avg_price": 50000},
+            ],
+            account_id="acc-test",
+        )
+        assert corrections == []
+
+    async def test_deficit_over_capacity_is_external_mixed(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(d) 혼재 `0 < capacity < deficit` → 기존 외부 보정 유지(bounded
+        known-limitation 경계 고정).
+
+        self 매도 + 진짜 외부 매도 혼재는 잔고 총량만으로 분리 보정 불가 — 분리
+        알고리즘 비채택, 기존 외부 분류(force-write)를 유지한다.
+        """
+        # 내부 50주, ante sell 20주 미체결, 브로커 10주 → deficit 40 > capacity 20.
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=20,
+            side="sell",
+        )
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 10, "avg_price": 50000},
+            ],
+            account_id="acc-test",
+        )
+        # deficit > capacity → 기존 외부 일부 매도 분류·보정 유지.
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_PARTIAL_SELL
+        assert corrections[0]["new_quantity"] == 10
+
+    async def test_full_liquidation_deficit_over_capacity_stays_external(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(d') b_qty==0 인데 deficit > sell capacity → 외부 청산 유지(무회귀)."""
+        # 내부 50주, ante sell 20주 미체결, 브로커 0주 → deficit 50 > capacity 20.
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=20,
+            side="sell",
+        )
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
+        assert corrections[0]["new_quantity"] == 0
+
+    async def test_no_matching_sell_order_is_external_liquidation(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(e) 매칭 sell 주문 없음 → 진짜 외부 청산 무회귀(보정 유지)."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        # sell capacity 0 (추적 open sell 전무).
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
+        assert corrections[0]["new_quantity"] == 0
+
+    async def test_no_matching_sell_order_is_external_partial_sell(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(e') 매칭 sell 주문 없음 → 진짜 외부 일부 매도 무회귀(보정 유지)."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 30, "avg_price": 50000},
+            ],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_PARTIAL_SELL
+        assert corrections[0]["new_quantity"] == 30
+
+    async def test_buy_order_does_not_satisfy_sell_self_check(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(e'') side="buy" open 주문은 sell capacity 에 잡히지 않음 → 외부 청산
+        유지. self-check 는 side 별 분리(buy/sell capacity 비혼입)임을 고정.
+        """
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        # buy 주문 50주는 sell-side self-check 의 capacity 가 아니다.
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-buy",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=50,
+            side="buy",
+        )
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
+
+    async def test_other_bot_sell_order_does_not_match(
+        self, reconciler, position_history, order_tracker
+    ):
+        """(e''') 다른 봇의 sell 주문은 매칭 안 됨 → 외부 청산 유지(무회귀)."""
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-2",
+            symbol="005930",
+            ordered_qty=50,
+            side="sell",
+        )
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
+
+    async def test_self_sell_check_runs_when_skip_external_buy_true(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """(f-경계) sell self-check 는 skip_external_buy 와 직교 — 그 플래그가 켜져도
+        외부 청산/일부 매도 분기의 sell self-check 는 수행되고 self 는 detect-only.
+        """
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-sell",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=50,
+            side="sell",
+        )
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+            skip_external_buy=True,  # external-buy 만 타겟 — sell 분기 무영향.
+        )
+        assert corrections == []
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "info"
+
+    async def test_buy_side_self_check_unaffected_regression(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """(f) buy-side self-check(#1950) 무회귀 — sell-side 확장이 buy capacity 를
+        오염시키지 않는다. broker > internal + buy capacity → 여전히 self.
+        """
+        await _seed_open_order(
+            order_tracker,
+            order_id="ord-buy",
+            bot_id="bot-1",
+            symbol="005930",
+            ordered_qty=20,
+            side="buy",
+        )
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 20, "avg_price": 55000},
+            ],
+            account_id="acc-test",
+        )
+        assert corrections == []
+        assert len(notif_events) == 1
+        assert notif_events[0].level == "info"
+
+    async def test_unattributed_holding_unaffected_regression(
+        self, reconciler, position_history, order_tracker, eventbus
+    ):
+        """(f) 미귀속 보유(#2352) 무회귀 — broker > internal && internal==0 &&
+        buy capacity==0 은 여전히 미귀속 보유 detect-only(sell-side 변경 무영향).
+        """
+        mismatch_events: list = []
+        eventbus.subscribe(PositionMismatchEvent, lambda e: mismatch_events.append(e))
+
+        corrections = await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "069500", "quantity": 2, "avg_price": 30000},
+            ],
+            account_id="acc-test",
+        )
+        assert corrections == []
+        assert len(mismatch_events) == 1
+        assert mismatch_events[0].reason == REASON_UNATTRIBUTED_HOLDING
+
+    async def test_no_order_tracker_keeps_external_liquidation(self, service, eventbus):
+        """(g) order_tracker 미주입 → sell self-check 생략 → 기존 외부 청산 분류·보정
+        fallback(하위 호환).
+        """
+        rec = PositionReconciler(trade_service=service, eventbus=eventbus)
+        # 내부 50주를 직접 seed (service.position_history 경유).
+        await rec._trade_service.correct_position(
+            bot_id="bot-1",
+            symbol="005930",
+            quantity=50,
+            avg_price=50000,
+            reason="seed",
+            account_id="acc-test",
+        )
+        corrections = await rec.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
+        assert corrections[0]["new_quantity"] == 0
+
+    async def test_order_tracker_query_failure_falls_back_to_external(
+        self, service, eventbus, order_tracker, position_history, monkeypatch
+    ):
+        """(g) OrderTracker 조회 실패 → sell self-check 포기 → 기존 외부 청산 분류
+        fallback(reconcile 을 깨뜨리지 않는 방어).
+        """
+        rec = PositionReconciler(
+            trade_service=service, eventbus=eventbus, order_tracker=order_tracker
+        )
+        await _set_position(position_history, "bot-1", "005930", 50, 50000)
+
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("tracker query failed")
+
+        monkeypatch.setattr(order_tracker, "get_open_orders_for", _boom)
+
+        corrections = await rec.reconcile(
+            bot_id="bot-1",
+            broker_positions=[],
+            account_id="acc-test",
+        )
+        # 조회 실패 → 보수적으로 외부 청산 분류·보정 유지.
+        assert len(corrections) == 1
+        assert corrections[0]["reason"] == REASON_EXTERNAL_LIQUIDATION
 
 
 # ── #2058: account-scoped 승격 (account_id 전파 + entry validation) ──────

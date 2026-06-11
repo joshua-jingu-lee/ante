@@ -136,10 +136,43 @@ class PositionReconciler:
             # #2352: detect-only(보정 skip)로 분류되었으나 critical 관측은 유지하는
             # 미귀속 보유. is_external_buy 와 직교 — correct_position 만 건너뛴다.
             is_detect_only = False
-            if b_qty == 0 and i_qty > 0:
-                reason = REASON_EXTERNAL_LIQUIDATION
-            elif b_qty < i_qty:
-                reason = REASON_EXTERNAL_PARTIAL_SELL
+            if b_qty < i_qty:
+                # #2351: broker < internal — "외부 청산"(b_qty==0)·"외부 일부
+                # 매도"(0<b_qty<i_qty) 후보. #1950 buy-side 와 **정확히 대칭**으로
+                # ante 미반영 self 매도(self-submitted-unrecorded-fill)를 외부
+                # 매도와 구분하기 위해 **항상** sell-side self-check 를 수행한다
+                # (skip_external_buy 와 무관 — 그 플래그는 external-buy 만 타겟).
+                # KIS 모의 ccld 지연창(잔고는 매도 즉시 감소·ccld 당일 0건)에서
+                # FillApplier 가 아직 기록 못 한 self 매도가 정확히 이 범위에 든다.
+                if await self._is_self_submitted_fill(
+                    bot_id=bot_id,
+                    account_id=account_id,
+                    symbol=symbol,
+                    excess=i_qty - b_qty,
+                    side="sell",
+                ):
+                    # self 매도 미반영: 외부 거래가 아니므로 보정(force-write down)을
+                    # skip 한다. 복구는 FillApplier(ccld 백스톱) 단일 권위에 위임 —
+                    # 순수 self-sell 구간에 한해 원장 우회·이중 차감 면을 제거한다.
+                    self._log_self_submitted(bot_id, symbol, i_qty, b_qty)
+                    await self._publish_self_submitted(
+                        account_id=account_id,
+                        bot_id=bot_id,
+                        symbol=symbol,
+                        i_qty=i_qty,
+                        b_qty=b_qty,
+                    )
+                    continue
+                # #2351 혼재 케이스 `0 < sell_capacity < deficit`: self 매도와 진짜
+                # 외부 매도가 혼재하면 잔고 총량만으로 분리 보정이 불가하므로
+                # (비례 배분 등 분리 알고리즘 비채택) 기존 외부 분류·보정을
+                # 유지한다. 이때 self 매도분이 이후 ccld 로 적용되면 이중 차감/PnL
+                # 누락 면이 잔존한다 — buy-side §11.7 협소 외부 흡수와 동형인 bounded
+                # known-limitation 으로 03-07 에 선언한다.
+                if b_qty == 0:
+                    reason = REASON_EXTERNAL_LIQUIDATION
+                else:
+                    reason = REASON_EXTERNAL_PARTIAL_SELL
             elif b_qty > i_qty:
                 # #1950: broker > internal — "외부 매수" 후보. ante 미반영
                 # 체결(self-submitted)을 외부 매수와 구분하기 위해 **항상**
@@ -149,43 +182,19 @@ class PositionReconciler:
                     account_id=account_id,
                     symbol=symbol,
                     excess=b_qty - i_qty,
+                    side="buy",
                 ):
                     # self-submitted-unrecorded-fill: 외부 거래가 아니므로 자동
                     # 보정/매도를 유발하지 않는다. 실제 포지션 복구는
                     # FillApplier(#1946) 가 단일 권위자로 수행한다. reconciler 는
                     # info 알림만 내고 correct_position 을 호출하지 않는다.
-                    logger.info(
-                        "포지션 불일치 [%s] %s: 내부=%.2f, 브로커=%.2f → %s "
-                        "(ante 미반영 체결 — 보정 skip, FillApplier 위임)",
-                        bot_id,
-                        symbol,
-                        i_qty,
-                        b_qty,
-                        REASON_SELF_SUBMITTED,
-                    )
-                    await self._eventbus.publish(
-                        PositionMismatchEvent(
-                            account_id=account_id,
-                            bot_id=bot_id,
-                            symbol=symbol,
-                            internal_qty=i_qty,
-                            broker_qty=b_qty,
-                            reason=REASON_SELF_SUBMITTED,
-                        )
-                    )
-                    await self._eventbus.publish(
-                        NotificationEvent(
-                            level="info",
-                            title="포지션 동기화 지연",
-                            message=(
-                                f"계좌: `{account_id}` · 봇: `{bot_id}` · "
-                                f"종목: `{symbol}`\n"
-                                f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
-                                f"사유: {REASON_SELF_SUBMITTED} "
-                                "(체결 반영 대기 — 자동 보정 없음)"
-                            ),
-                            category="broker",
-                        )
+                    self._log_self_submitted(bot_id, symbol, i_qty, b_qty)
+                    await self._publish_self_submitted(
+                        account_id=account_id,
+                        bot_id=bot_id,
+                        symbol=symbol,
+                        i_qty=i_qty,
+                        b_qty=b_qty,
                     )
                     continue
                 # #2352: self-check 미매칭 이후 — 미귀속 보유(carryover) 판정.
@@ -456,6 +465,63 @@ class PositionReconciler:
             )
         return mismatches
 
+    def _log_self_submitted(
+        self, bot_id: str, symbol: str, i_qty: float, b_qty: float
+    ) -> None:
+        """self-submitted 미반영 체결 info 로그 (방향 중립 — #1950 buy / #2351 sell)."""
+        logger.info(
+            "포지션 불일치 [%s] %s: 내부=%.2f, 브로커=%.2f → %s "
+            "(ante 미반영 체결 — 보정 skip, FillApplier 위임)",
+            bot_id,
+            symbol,
+            i_qty,
+            b_qty,
+            REASON_SELF_SUBMITTED,
+        )
+
+    async def _publish_self_submitted(
+        self,
+        *,
+        account_id: str,
+        bot_id: str,
+        symbol: str,
+        i_qty: float,
+        b_qty: float,
+    ) -> None:
+        """self-submitted 분기 공통 이벤트 발행 — `PositionMismatchEvent` +
+        info `NotificationEvent`. buy-side(#1950)·sell-side(#2351) 동일 계층.
+
+        reason 은 방향 중립 ``REASON_SELF_SUBMITTED`` 를 재사용한다. 방향은
+        ``internal_qty``/``broker_qty`` 대소(buy=broker>internal, sell=
+        internal>broker)로 판별된다.
+        """
+        from ante.eventbus.events import NotificationEvent, PositionMismatchEvent
+
+        await self._eventbus.publish(
+            PositionMismatchEvent(
+                account_id=account_id,
+                bot_id=bot_id,
+                symbol=symbol,
+                internal_qty=i_qty,
+                broker_qty=b_qty,
+                reason=REASON_SELF_SUBMITTED,
+            )
+        )
+        await self._eventbus.publish(
+            NotificationEvent(
+                level="info",
+                title="포지션 동기화 지연",
+                message=(
+                    f"계좌: `{account_id}` · 봇: `{bot_id}` · "
+                    f"종목: `{symbol}`\n"
+                    f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
+                    f"사유: {REASON_SELF_SUBMITTED} "
+                    "(체결 반영 대기 — 자동 보정 없음)"
+                ),
+                category="broker",
+            )
+        )
+
     async def _is_self_submitted_fill(
         self,
         *,
@@ -463,24 +529,34 @@ class PositionReconciler:
         account_id: str,
         symbol: str,
         excess: float,
+        side: str,
     ) -> bool:
-        """broker 초과분(``excess``)이 ante 미반영 체결로 설명되는지 판정 (#1950).
+        """broker-internal 불일치(``excess``)가 ante 미반영 체결로 설명되는지 판정.
 
-        OrderTracker 에서 ``(account_id, bot_id, symbol, side="buy")`` 의
-        non-terminal(open/partially_filled) 주문을 조회하고, 그 미체결 잔량 합
-        (capacity = Σ(ordered_qty − recorded_filled_qty)) 과 ``excess`` 를 비교한다.
+        방향 대칭(#1950 buy / #2351 sell). OrderTracker 에서 ``(account_id, bot_id,
+        symbol, side)`` 의 non-terminal(open/partially_filled) 주문을 조회하고, 그
+        미체결 잔량 합(capacity = Σ(ordered_qty − recorded_filled_qty)) 과 ``excess``
+        를 비교한다.
+
+        - ``side="buy"`` (#1950): ``excess = broker_qty - internal_qty`` — 외부 매수
+          후보. 매칭되는 미반영 self 매수로 설명 가능한지 판정.
+        - ``side="sell"`` (#2351): ``excess = internal_qty - broker_qty``(deficit) —
+          외부 청산/일부 매도 후보. 매칭되는 미반영 self 매도로 설명 가능한지 판정.
+          KIS 모의 ccld 지연창(잔고는 매도 즉시 감소·ccld 당일 0건)에서 FillApplier 가
+          아직 기록 못 한 self 매도가 정확히 non-terminal sell capacity 에 든다.
 
         - ``excess <= capacity`` → True (self_submitted_unrecorded_fill).
           ante 가 제출했으나 FillApplier 가 아직 기록 못 한 체결로 설명 가능.
-        - ``excess > capacity`` 또는 매칭 주문 없음 → False (외부 매수로 분류).
-        - OrderTracker 미주입 → False (하위 호환 — 기존 "외부 매수" 동작).
+        - ``excess > capacity`` 또는 매칭 주문 없음 → False (외부 거래로 분류).
+        - OrderTracker 미주입 → False (하위 호환 — 기존 외부 분류 동작).
 
-        **bounded known-limitation (R2-1)**: broker 포지션은 총량만 주므로
-        ante 미체결 capacity 안에 숨은 진짜 외부 매수는 즉시 보정되지 않는다.
-        이는 #1945 auto-sell 캐스케이드 회피를 외부 검출 완전성보다 우선하는
-        보수적 trade-off다. 매칭 ante 주문이 해소(완전 체결→open set 이탈, 또는
-        EOD expire_stale→terminal)되면 다음 reconcile 에서 잔여 excess 가 external
-        로 검출된다. 상세: ``docs/specs/trade/03-07-position-reconciler.md``.
+        **bounded known-limitation (R2-1, 방향 대칭)**: broker 포지션은 총량만
+        주므로 capacity 안에 숨은 진짜 외부 거래(buy: 외부 매수 / sell: 외부 매도)는
+        즉시 보정되지 않는다. 이는 #1945 auto-sell 캐스케이드 회피를 외부 검출
+        완전성보다 우선하는 보수적 trade-off다. 매칭 ante 주문이 해소(완전 체결→open
+        set 이탈, 또는 EOD expire_stale→terminal)되면 다음 reconcile 에서 잔여
+        excess 가 external 로 검출된다. 상세:
+        ``docs/specs/trade/03-07-position-reconciler.md``.
         """
         if self._order_tracker is None:
             return False
@@ -490,16 +566,18 @@ class PositionReconciler:
                 account_id=account_id,
                 bot_id=bot_id,
                 symbol=symbol,
-                side="buy",
+                side=side,
             )
         except Exception:
             # OrderTracker 조회 실패 시 self-check 를 포기하고 보수적으로 외부
-            # 매수로 분류한다(안전 보정 유지). 조회 자체가 reconcile 을 깨뜨리지
+            # 거래로 분류한다(안전 보정 유지). 조회 자체가 reconcile 을 깨뜨리지
             # 않도록 방어한다.
             logger.exception(
-                "self-check OrderTracker 조회 실패 [%s] %s — external 분류로 폴백",
+                "self-check OrderTracker 조회 실패 [%s] %s side=%s — "
+                "external 분류로 폴백",
                 bot_id,
                 symbol,
+                side,
             )
             return False
 
