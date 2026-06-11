@@ -73,7 +73,8 @@ LOOP_BACKOFF_MULTIPLIER_CAP = 8
 
 # steady-state cooldown 집계 대상 broker-transient 예외(#2350). 이 부류만 연속 실패
 # 카운터에 누적해 cooldown 을 연장한다. 그 외 예외(내부 버그류)는 backoff 로 은폐하지
-# 않고 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행 동작 보존).
+# 않고 카운터를 0 으로 리셋해 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행
+# 동작 보존, #2350 Codex R1 P2).
 _LOOP_BACKOFF_EXCEPTIONS: tuple[type[Exception], ...] = (
     TimeoutError,
     CircuitOpenError,
@@ -308,8 +309,9 @@ class FillReconcileScheduler:
         이후 ×4, ×8 cap) late-ccld 타임아웃 연타로 차단기 OPEN 을 60s 주기로
         갱신·연장하지 않게 한다(#2350). 정상 완료 시 카운터를 0 으로 리셋해
         ``poll_interval`` 고정 주기로 복귀한다. broker-transient 가 아닌 예외(내부
-        버그류)는 backoff 로 은폐하지 않고 기존대로 즉시 다음 주기 + 경고 로그를
-        유지한다(현행 동작 보존). 이 cooldown 은 ``_loop`` steady-state 한정이며
+        버그류)는 backoff 로 은폐하지 않는다 — 연속 실패 카운터를 0 으로 리셋해(선행
+        transient 로 올라간 backoff 가 있으면 함께 해제) 즉시 다음 주기 + 경고 로그를
+        유지한다(#2350 Codex R1 P2). 이 cooldown 은 ``_loop`` steady-state 한정이며
         ``catch_up_once`` 의 bounded backoff 와 비간섭이다.
         """
         consecutive_transient_failures = 0
@@ -349,8 +351,11 @@ class FillReconcileScheduler:
                 )
             except Exception:
                 # broker-transient 가 아닌 예외(내부 버그류)는 cooldown 으로 은폐하지
-                # 않는다. 카운터를 건드리지 않아(연장 안 함) 기존대로 즉시 다음 주기에
-                # 멱등 재시도하고 경고 로그를 남긴다(현행 동작 보존, #2350).
+                # 않는다. 선행 transient 실패로 backoff 가 올라가 있었다면 카운터를 0
+                # 으로 리셋해 다음 사이클이 base poll_interval 로 복귀하게 한다(내부
+                # 결함을 이전 backoff 로 계속 잠재우지 않음, #2350 Codex R1 P2).
+                # 이후 경고 로그를 남기고 기존대로 즉시 다음 주기에 멱등 재시도한다.
+                consecutive_transient_failures = 0
                 logger.warning(
                     "FillReconcileScheduler 폴 오류 (account=%s) — 다음 사이클 재시도",
                     self._account_id,

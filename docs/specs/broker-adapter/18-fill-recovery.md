@@ -311,8 +311,10 @@ broker-wide 로 차단된다(cross-concern 결합). 이를 끊기 위해 두 nor
   리셋해 `poll_interval` 고정 주기로 복귀한다(성공 경로 주기 불변).
 - **실패 집계 범위**: broker-transient 예외(`TimeoutError`·`CircuitOpenError`·
   `APIError`·`ConnectionError`/`OSError`)만 카운트한다. 그 외 예외(내부 버그류)는
-  cooldown 으로 은폐하지 않고 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행
-  동작 보존).
+  cooldown 의 backoff 대상이 아니며, 발생 시 **연속 실패 카운터를 0 으로 리셋**한다.
+  따라서 선행 transient 실패로 backoff 가 올라가 있었더라도 내부 버그류 예외 직후의
+  다음 사이클은 base `poll_interval` 로 복귀한다(내부 결함을 이전 backoff 로 계속
+  잠재우지 않음). 경고 로그는 기존대로 남긴다(현행 동작 보존).
 - **적용 범위**: cooldown 은 `_loop` steady-state 한정이다. 기동 카치업
   `catch_up_once`의 bounded backoff(§6.1, `CATCH_UP_MAX_ATTEMPTS`)는 **무변경·
   비간섭**이며, 기동 barrier(§7) 결정에 영향을 주지 않는다.

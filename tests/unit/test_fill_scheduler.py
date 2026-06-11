@@ -515,6 +515,35 @@ async def test_loop_non_transient_exception_does_not_extend_cooldown(
     assert all(s == MIN_POLL_INTERVAL for s in sleeps)
 
 
+async def test_loop_non_transient_after_transient_resets_cooldown(
+    monkeypatch,
+) -> None:
+    """선행 transient 실패로 backoff 가 올라간 뒤 비-transient 예외는 카운터를 리셋한다.
+
+    Codex R1 [P2]: transient 실패 1회(backoff ×2) 후 반복되는 내부 오류(ValueError
+    등 비-transient)가 발생하면, 비-transient 분기가 카운터를 0 으로 리셋해 다음
+    사이클이 base `poll_interval` 로 복귀해야 한다. 리셋하지 않으면 이전 backoff
+    (최대 ×8)로 계속 잠들어 "내부 버그류는 cooldown 으로 은폐하지 않고 기존 주기로
+    재시도한다"는 §6.2 의도를 위반한다.
+    """
+    sched = _cooldown_sched()
+    # transient 1회(→ ×2) → 비-transient 3회(리셋되어 base 유지여야 함).
+    outcomes: list[BaseException | None] = [
+        TimeoutError("transient"),
+        ValueError("internal bug"),
+        ValueError("internal bug"),
+        ValueError("internal bug"),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    assert sleeps[0] == base  # 진입 전(실패 0).
+    assert sleeps[1] == base * 2  # transient 1실패 후 → cooldown ×2.
+    # 비-transient 예외가 카운터를 리셋 → 이후 진입 sleep 은 모두 base 로 복귀.
+    # (리셋이 빠지면 sleeps[2] 가 ×2 로 남아 backoff 가 이어진다.)
+    assert sleeps[2] == base
+    assert sleeps[3] == base
+
+
 async def test_loop_cooldown_cap_below_recovery_and_reconciler_windows() -> None:
     """cooldown 상한(기본 60s×8=480s)이 CB recovery(60s)·reconciler(1800s) 보다 짧다.
 
