@@ -38,6 +38,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from ante.account.scoping import require_account_id
+from ante.broker.exceptions import APIError, CircuitOpenError
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
@@ -61,6 +62,26 @@ DEFAULT_POLL_INTERVAL = 60.0
 # 가 reconcile external-buy 분류를 건너뛰게 한다(미복구 체결 오분류 방지, #1946).
 CATCH_UP_MAX_ATTEMPTS = 3
 CATCH_UP_BACKOFF_BASE = 1.0
+
+# steady-state 폴 루프(_loop) 연속 실패 cooldown 상한 배수 (#2350).
+# n번째 연속 실패 직후 sleep = poll_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)
+# (첫 실패 ×2, 이후 ×4, ×8 cap). 기본 poll 60s 기준 상한 480s — CB
+# recovery_timeout(60s)·reconciler 주기(1800s)보다 짧아 복구 관측을 놓치지 않으면서
+# late-ccld 타임아웃 연타로 차단기 OPEN 을 60s 주기로 갱신·연장하지 않게 한다. fill
+# 반영 지연 상한도 480s 로 bounded. catch_up_once 의 bounded backoff 와는 비간섭.
+LOOP_BACKOFF_MULTIPLIER_CAP = 8
+
+# steady-state cooldown 집계 대상 broker-transient 예외(#2350). 이 부류만 연속 실패
+# 카운터에 누적해 cooldown 을 연장한다. 그 외 예외(내부 버그류)는 backoff 로 은폐하지
+# 않고 카운터를 0 으로 리셋해 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행
+# 동작 보존, #2350 Codex R1 P2).
+_LOOP_BACKOFF_EXCEPTIONS: tuple[type[Exception], ...] = (
+    TimeoutError,
+    CircuitOpenError,
+    APIError,
+    ConnectionError,
+    OSError,
+)
 
 
 def business_date_kst(when: datetime | None = None) -> str:
@@ -279,22 +300,70 @@ class FillReconcileScheduler:
             self._task = None
 
     async def _loop(self) -> None:
+        """steady-state 주기 폴 루프 (+ #2350 연속 실패 cooldown).
+
+        정상 사이클은 ``poll_interval`` 고정 주기로 ``_poll_and_apply`` 를 반복한다.
+        broker-transient 실패(``_LOOP_BACKOFF_EXCEPTIONS``: TimeoutError/
+        CircuitOpenError/APIError/Connection/OSError)가 **연속**되면 sleep 을
+        ``poll_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)`` 로 늘려(첫 실패 ×2,
+        이후 ×4, ×8 cap) late-ccld 타임아웃 연타로 차단기 OPEN 을 60s 주기로
+        갱신·연장하지 않게 한다(#2350). 정상 완료 시 카운터를 0 으로 리셋해
+        ``poll_interval`` 고정 주기로 복귀한다. broker-transient 가 아닌 예외(내부
+        버그류)는 backoff 로 은폐하지 않는다 — 연속 실패 카운터를 0 으로 리셋해(선행
+        transient 로 올라간 backoff 가 있으면 함께 해제) 즉시 다음 주기 + 경고 로그를
+        유지한다(#2350 Codex R1 P2). 이 cooldown 은 ``_loop`` steady-state 한정이며
+        ``catch_up_once`` 의 bounded backoff 와 비간섭이다.
+        """
+        consecutive_transient_failures = 0
         while self._running:
-            await asyncio.sleep(self._poll_interval)
+            # 연속 broker-transient 실패가 있으면 sleep 을 늘려 OPEN 갱신/타임아웃
+            # 연타를 흡수한다. 0 이면 기존 poll_interval 고정 주기(성공 경로 불변).
+            if consecutive_transient_failures > 0:
+                multiplier = min(
+                    2**consecutive_transient_failures, LOOP_BACKOFF_MULTIPLIER_CAP
+                )
+                sleep_for = self._poll_interval * multiplier
+            else:
+                sleep_for = self._poll_interval
+            await asyncio.sleep(sleep_for)
             if not self._running:
                 return
             try:
                 await self._poll_and_apply()
             except asyncio.CancelledError:
                 raise
+            except _LOOP_BACKOFF_EXCEPTIONS:
+                # broker-transient 폴 실패(CB open/rate/network/타임아웃)를 삼키고
+                # 다음 사이클에 멱등 재시도하되, 연속 실패 카운터를 올려 cooldown 을
+                # 연장한다(#2350). (startup 카치업과 달리 barrier 영향 없음.)
+                consecutive_transient_failures += 1
+                logger.warning(
+                    "FillReconcileScheduler 폴 오류 (account=%s, 연속실패=%d) — "
+                    "%.0fs 후 재시도",
+                    self._account_id,
+                    consecutive_transient_failures,
+                    self._poll_interval
+                    * min(
+                        2**consecutive_transient_failures,
+                        LOOP_BACKOFF_MULTIPLIER_CAP,
+                    ),
+                    exc_info=True,
+                )
             except Exception:
-                # 주기 루프는 폴 실패(CB/rate/network)를 삼키고 다음 사이클에
-                # 멱등 재시도한다. (startup 카치업과 달리 barrier 영향 없음.)
+                # broker-transient 가 아닌 예외(내부 버그류)는 cooldown 으로 은폐하지
+                # 않는다. 선행 transient 실패로 backoff 가 올라가 있었다면 카운터를 0
+                # 으로 리셋해 다음 사이클이 base poll_interval 로 복귀하게 한다(내부
+                # 결함을 이전 backoff 로 계속 잠재우지 않음, #2350 Codex R1 P2).
+                # 이후 경고 로그를 남기고 기존대로 즉시 다음 주기에 멱등 재시도한다.
+                consecutive_transient_failures = 0
                 logger.warning(
                     "FillReconcileScheduler 폴 오류 (account=%s) — 다음 사이클 재시도",
                     self._account_id,
                     exc_info=True,
                 )
+            else:
+                # 정상 완료 — cooldown 카운터 리셋, poll_interval 고정 주기 복귀.
+                consecutive_transient_failures = 0
 
     async def _poll_and_apply(self) -> int:
         """**poll-first**: open(만료 전) → history 1콜 → fallback → 그 후 EOD 만료.

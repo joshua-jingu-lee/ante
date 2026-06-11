@@ -522,6 +522,8 @@ class KISBaseAdapter(BrokerAdapter):
         params: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
         cont_header: str = "",
+        *,
+        cb_exempt_timeout: bool = False,
     ) -> tuple[dict[str, Any], str]:
         """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
 
@@ -530,6 +532,16 @@ class KISBaseAdapter(BrokerAdapter):
         와 **동일하게 공유**한다 (로직 중복 금지). ``cont_header`` 는 KIS 연속
         조회 요청 헤더 ``tr_cont`` 값("" 최초 / "N" 다음)이며, 반환 두 번째
         값은 응답 헤더 ``tr_cont`` ("F"/"M"=다음 있음 / "D"/"E"=마지막)이다.
+
+        ``cb_exempt_timeout`` 은 **호출측 차단기 회계 opt-out** 이다(#2350).
+        ``True`` 면 ``TimeoutError`` 계열(aiohttp timeout 포함, ``TimeoutError``
+        하위)의 실패를 ``CircuitBreaker.record_failure()`` 에 **기록하지 않는다**.
+        late-ccld(``get_order_history``) 조회 타임아웃이 어댑터 전역 단일 차단기를
+        OPEN 시켜 무관한 treasury 잔고/포지션 동기화·주문 경로까지 broker-wide 로
+        차단하는 cross-concern blast radius 를 끊기 위함이다. 회계 제외는
+        ``TimeoutError`` 에 **한정**되며 HTTP 5xx/``APIError`` 등 다른 실패는
+        기본값(``False``) 호출자와 동일하게 그대로 기록된다. ``check()`` 는 여전히
+        통과하므로 다른 concern 이 연 차단기에는 종속한다(주문 경로 보호 무변경).
         """
         self._circuit_breaker.check()
         await self._ensure_authenticated()
@@ -553,8 +565,14 @@ class KISBaseAdapter(BrokerAdapter):
                 retryable, record_failure = KISErrorClassifier.classify(e)
                 if not retryable:
                     raise
+                # #2350: 차단기 회계 판정은 to_api_error() 변환 **전** raw 예외 e
+                # 기준이다. cb_exempt_timeout 이면서 raw 예외가 TimeoutError 계열
+                # (aiohttp timeout 포함 — TimeoutError 하위)일 때만 회계에서 제외하고,
+                # 그 외 실패(HTTP 5xx/APIError 등)는 기존대로 기록한다.
                 last_error = KISErrorClassifier.to_api_error(e, timeout)
-                if record_failure:
+                if record_failure and not (
+                    cb_exempt_timeout and isinstance(e, TimeoutError)
+                ):
                     self._circuit_breaker.record_failure()
                 if self._retry_handler.should_retry(attempt, max_retries):
                     await self._retry_handler.wait_and_log(
@@ -600,6 +618,8 @@ class KISBaseAdapter(BrokerAdapter):
         tr_id: str,
         base_params: dict[str, str],
         row_key: str,
+        *,
+        cb_exempt_timeout: bool = False,
     ) -> list[dict[str, Any]]:
         """KIS 연속조회(CTX_AREA + tr_cont)를 따라 전 페이지 행을 누적한다.
 
@@ -607,6 +627,11 @@ class KISBaseAdapter(BrokerAdapter):
         ``CTX_AREA_NK100`` 은 빈 문자열로 시작한다(호출자가 전달). ``row_key``
         로 지정한 단일 행 리스트(예: ``"output1"`` / ``"output"``)만 누적하며,
         ``output2`` 같은 summary/metadata 는 누적하지 않는다.
+
+        ``cb_exempt_timeout`` 은 ``_request_with_cont`` 로 그대로 전파되는 차단기
+        회계 opt-out 이다(#2350). late-ccld(``get_order_history``) 폴 경로만
+        ``True`` 로 호출해 조회 타임아웃이 어댑터 전역 단일 차단기를 OPEN 시키지
+        않게 한다. 다른 호출자는 기본값 ``False`` 로 무변경이다.
 
         연속 규약:
             - 최초 요청: 요청 헤더 ``tr_cont`` = "" + cursor = "".
@@ -627,7 +652,12 @@ class KISBaseAdapter(BrokerAdapter):
 
         for page in range(1, DEFAULT_MAX_PAGINATION_PAGES + 1):
             body, tr_cont = await self._request_with_cont(
-                method, url, tr_id, params=params, cont_header=cont_header
+                method,
+                url,
+                tr_id,
+                params=params,
+                cont_header=cont_header,
+                cb_exempt_timeout=cb_exempt_timeout,
             )
             page_rows = body.get(row_key) or []
             rows.extend(page_rows)
@@ -1228,8 +1258,13 @@ class KISDomesticAdapter(KISBaseAdapter):
             "CTX_AREA_NK100": "",
         }
 
+        # #2350: late-ccld 조회 타임아웃은 차단기 회계에서 제외한다. 체결이력 폴이
+        # 반복 타임아웃해도 어댑터 전역 단일 차단기가 OPEN 되지 않아, 같은 어댑터를
+        # 공유하는 treasury 잔고/포지션 동기화·주문 경로가 broker-wide 로 차단되지
+        # 않는다. 회계 제외는 TimeoutError 에 한정되며 5xx/APIError 등은 그대로
+        # 기록된다(주문 경로 보호 무변경).
         rows = await self._request_paginated(
-            "GET", url, tr_id, params, row_key="output1"
+            "GET", url, tr_id, params, row_key="output1", cb_exempt_timeout=True
         )
         return self._fold_order_history(rows)
 
