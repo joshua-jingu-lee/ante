@@ -13,8 +13,10 @@ from datetime import UTC, datetime
 import pytest
 
 from ante.broker import fill_scheduler as fill_scheduler_module
+from ante.broker.exceptions import APIError, CircuitOpenError
 from ante.broker.fill_scheduler import (
     _KST,
+    LOOP_BACKOFF_MULTIPLIER_CAP,
     MIN_POLL_INTERVAL,
     CatchUpResult,
     FillReconcileScheduler,
@@ -361,6 +363,169 @@ async def test_periodic_loop_swallows_poll_failure(tracker, applier):
     except _asyncio.CancelledError:
         pass
     assert broker.call_count >= 1
+
+
+# ── #2350: steady-state 폴 루프 연속 실패 cooldown ──────────────
+
+
+def _cooldown_sched(poll_interval: float = MIN_POLL_INTERVAL) -> FillReconcileScheduler:
+    """_loop cooldown 만 단독 검증하기 위한 최소 스케줄러(의존성 미주입)."""
+    return FillReconcileScheduler(
+        broker=FakeBroker(),  # type: ignore[arg-type]
+        order_tracker=None,  # type: ignore[arg-type]
+        fill_applier=None,  # type: ignore[arg-type]
+        account_id=ACCT,
+        poll_interval=poll_interval,
+    )
+
+
+async def _drive_loop(
+    sched: FillReconcileScheduler,
+    *,
+    poll_outcomes: list[BaseException | None],
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[float]:
+    """_loop 를 ``poll_outcomes`` 길이만큼 결정적으로 돌리고 sleep 인자를 수집한다.
+
+    ``asyncio.sleep`` 을 가로채 실제 대기 없이 sleep 인자(=다음 사이클 대기시간)를
+    기록하고, ``_poll_and_apply`` 를 스크립트(None=정상 완료, Exception=발생)로
+    교체한다. 마지막 outcome 소진 후 ``_running`` 을 False 로 떨궈 루프를 종료한다.
+    """
+    import asyncio as _asyncio
+
+    sleeps: list[float] = []
+    outcomes = iter(poll_outcomes)
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(fill_scheduler_module.asyncio, "sleep", fake_sleep)
+
+    async def fake_poll() -> int:
+        try:
+            outcome = next(outcomes)
+        except StopIteration:
+            sched._running = False
+            return 0
+        if outcome is not None:
+            raise outcome
+        return 0
+
+    sched._poll_and_apply = fake_poll  # type: ignore[method-assign]
+    sched._running = True
+    await _asyncio.wait_for(sched._loop(), timeout=5.0)
+    return sleeps
+
+
+async def test_loop_success_path_keeps_fixed_interval(monkeypatch) -> None:
+    """정상 완료 경로는 poll_interval 고정 주기를 유지한다(cooldown 미발동)."""
+    sched = _cooldown_sched()
+    sleeps = await _drive_loop(
+        sched, poll_outcomes=[None, None, None], monkeypatch=monkeypatch
+    )
+    # 매 사이클 진입 전 sleep 은 항상 base poll_interval.
+    assert all(s == MIN_POLL_INTERVAL for s in sleeps)
+
+
+async def test_loop_consecutive_transient_failures_extend_sleep_with_cap(
+    monkeypatch,
+) -> None:
+    """연속 broker-transient 실패 시 sleep 이 ×2→×4→×8(cap) 로 연장된다(#2350).
+
+    n번째 연속 실패 후 다음 사이클 sleep = poll_interval × min(2^n, cap). 4회
+    연속 실패면 ×2, ×4, ×8, ×8(cap) 순으로 다음 sleep 이 늘어난다.
+    """
+    sched = _cooldown_sched()
+    # 5회 연속 TimeoutError → 6번째 진입 직전까지의 sleep 시퀀스를 본다.
+    outcomes: list[BaseException | None] = [TimeoutError("t")] * 5
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    # sleeps[0] = 첫 사이클 진입 전(실패 0건) → base.
+    # sleeps[1] = 1실패 후 → ×2, sleeps[2]=×4, sleeps[3]=×8, sleeps[4]=×8(cap).
+    assert sleeps[0] == base
+    assert sleeps[1] == base * 2
+    assert sleeps[2] == base * 4
+    assert sleeps[3] == base * LOOP_BACKOFF_MULTIPLIER_CAP  # 8
+    assert sleeps[4] == base * LOOP_BACKOFF_MULTIPLIER_CAP  # 8 (cap 유지)
+    assert LOOP_BACKOFF_MULTIPLIER_CAP == 8
+
+
+async def test_loop_success_resets_cooldown_counter(monkeypatch) -> None:
+    """정상 완료 시 연속 실패 카운터가 0 으로 리셋돼 base 주기로 복귀한다(#2350)."""
+    sched = _cooldown_sched()
+    # 실패 2회 → 성공 1회(리셋) → 실패 1회.
+    outcomes: list[BaseException | None] = [
+        TimeoutError("t"),
+        TimeoutError("t"),
+        None,  # 성공 → 리셋.
+        TimeoutError("t"),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    assert sleeps[0] == base  # 진입 전(실패 0).
+    assert sleeps[1] == base * 2  # 1실패 후.
+    assert sleeps[2] == base * 4  # 2실패 후.
+    # 성공이 카운터를 리셋 → 다음 진입 sleep 은 base 로 복귀.
+    assert sleeps[3] == base  # 리셋 후.
+
+
+async def test_loop_circuit_open_error_counts_as_transient(monkeypatch) -> None:
+    """CircuitOpenError 도 broker-transient 로 cooldown 카운트된다(#2350)."""
+    sched = _cooldown_sched()
+    outcomes: list[BaseException | None] = [
+        CircuitOpenError("open"),
+        CircuitOpenError("open"),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    assert sleeps[0] == base
+    assert sleeps[1] == base * 2  # CircuitOpenError 1회 후 cooldown 연장.
+
+
+async def test_loop_api_error_counts_as_transient(monkeypatch) -> None:
+    """APIError 도 broker-transient 로 cooldown 카운트된다(#2350)."""
+    sched = _cooldown_sched()
+    outcomes: list[BaseException | None] = [
+        APIError("server busy", retryable=True),
+        APIError("server busy", retryable=True),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    assert sleeps[0] == base
+    assert sleeps[1] == base * 2
+
+
+async def test_loop_non_transient_exception_does_not_extend_cooldown(
+    monkeypatch,
+) -> None:
+    """비-transient 예외(내부 버그류)는 cooldown 을 연장하지 않는다(현행 보존, #2350).
+
+    ValueError 등 broker-transient 가 아닌 예외는 연속 실패 카운터에 누적되지
+    않으므로, 다음 사이클 sleep 은 base poll_interval 을 유지한다(backoff 로
+    내부 결함을 은폐하지 않음).
+    """
+    sched = _cooldown_sched()
+    outcomes: list[BaseException | None] = [
+        ValueError("internal bug"),
+        ValueError("internal bug"),
+        ValueError("internal bug"),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    # 비-transient 예외는 카운터 미증가 → 항상 base 주기.
+    assert all(s == MIN_POLL_INTERVAL for s in sleeps)
+
+
+async def test_loop_cooldown_cap_below_recovery_and_reconciler_windows() -> None:
+    """cooldown 상한(기본 60s×8=480s)이 CB recovery(60s)·reconciler(1800s) 보다 짧다.
+
+    복구 관측을 놓치지 않는 bounded cap 임을 상수로 잠근다(#2350 근거 주석).
+    """
+    base = 60.0  # 기본 poll_interval.
+    cap_sleep = base * LOOP_BACKOFF_MULTIPLIER_CAP
+    assert cap_sleep == 480.0
+    # CB recovery_timeout(60s) 보다 길지만 reconciler 주기(1800s) 보다 짧아 복구
+    # 관측을 유지한다(상한이 reconciler 주기를 넘기지 않음).
+    assert cap_sleep < 1800.0
 
 
 # ── Finding 2: 폴 사이클의 EOD 만료 → 만료 주문 더는 폴 안 됨 ──

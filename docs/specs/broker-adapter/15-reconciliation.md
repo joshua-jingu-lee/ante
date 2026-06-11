@@ -101,4 +101,14 @@ ambiguity 판정 count 는 **status 무관**이다(#2119). 즉 `stopped`/`error`
 사용한다. 서버 밖에서 별도 BrokerAdapter를 직접 생성해 대사하면 서버가 보유한
 연결 상태, circuit breaker, TradeService 인메모리 상태와 어긋날 수 있다.
 
+**blast radius 경계 (normative, #2350)**: 이 공유 circuit breaker 는 어댑터
+인스턴스(=계좌)당 단일이며, 같은 계좌의 `FillReconcileScheduler`(체결 폴)와
+treasury 실전 동기화(`get_account_balance`/`get_positions`)가 동일 어댑터를
+공유한다. 체결이력 폴(`get_order_history` → `inquire-daily-ccld`)의 `TimeoutError`
+는 차단기 회계에서 제외되므로, 체결 폴이 반복 타임아웃해도 차단기가 OPEN 되어
+treasury 잔고/포지션 동기화·주문 경로를 broker-wide 로 차단하지 않는다(cross-concern
+격리). 회계 제외는 late-ccld `TimeoutError` 에 한정되며 다른 실패(5xx/`APIError`)는
+그대로 차단기에 반영된다([10-commission-info.md](10-commission-info.md)·
+[18-fill-recovery.md](18-fill-recovery.md)).
+
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조

@@ -15,7 +15,7 @@ KISBaseAdapter는 한국투자증권 Open API의 국내/해외 공통 로직을 
 | OAuth2 인증 | 토큰 발급·갱신·만료 관리 (동일 APP KEY) |
 | HTTP 클라이언트 | aiohttp 세션, 헤더 구성, 에러 파싱 |
 | Rate Limiter 연동 | APIGateway의 rate limiter 사용 |
-| CircuitBreaker | 장애 감지·차단·복구 상태 머신 |
+| CircuitBreaker | 장애 감지·차단·복구 상태 머신. **어댑터 전역 단일**(주문 경로 보호 우선)이며 주문·조회 모든 경로가 공유한다. **late-ccld(`get_order_history`) `TimeoutError`는 회계에서 제외**(호출측 opt-out)되어 체결이력 폴 타임아웃이 무관한 treasury 동기화·주문 경로를 broker-wide 로 차단하지 않는다(#2350, [10-commission-info.md](10-commission-info.md)). |
 | 재시도 로직 | 지수 백오프 + 에러 분류 기반 재시도 |
 | Base URL 결정 | `broker_config.is_paper`에 따라 실전/모의 도메인 분기 |
 | `connect()` / `disconnect()` | API 연결·해제 |

@@ -88,7 +88,16 @@ async def test_two_pages_passes_cursor_and_accumulates() -> None:
     responses = iter([(page1, "F"), (page2, "D")])
     snapshots: list[tuple[str, str, str]] = []
 
-    async def fake(method, url, tr_id, params=None, json_data=None, cont_header=""):  # type: ignore[no-untyped-def]
+    async def fake(  # type: ignore[no-untyped-def]
+        method,
+        url,
+        tr_id,
+        params=None,
+        json_data=None,
+        cont_header="",
+        *,
+        cb_exempt_timeout=False,
+    ):
         snapshots.append(
             (
                 params["CTX_AREA_FK100"],
@@ -471,9 +480,14 @@ def _capture_ccld_call(
     """get_order_history 가 _request_paginated 에 넘긴 tr_id/params 를 캡처한다."""
     captured: dict[str, Any] = {}
 
-    async def fake_paginated(method, url, tr_id, params, row_key="output1"):  # type: ignore[no-untyped-def]
+    async def fake_paginated(  # type: ignore[no-untyped-def]
+        method, url, tr_id, params, row_key="output1", *, cb_exempt_timeout=False
+    ):
         captured["tr_id"] = tr_id
         captured["params"] = dict(params)
+        # #2350: get_order_history 는 late-ccld 차단기 회계 제외를 위해 항상
+        # cb_exempt_timeout=True 로 _request_paginated 를 호출한다.
+        captured["cb_exempt_timeout"] = cb_exempt_timeout
         return []
 
     adapter._request_paginated = fake_paginated  # type: ignore[method-assign]
@@ -523,6 +537,8 @@ async def test_get_order_history_selects_tr_id_by_kst_three_month_boundary(
     assert captured["tr_id"] not in _LEGACY_CCLD_TR_IDS
     # EXCG_ID_DVSN_CD hygiene 파라미터 주입(상수 재사용).
     assert captured["params"]["EXCG_ID_DVSN_CD"] == DEFAULT_EXCG_ID_DVSN_CD == "KRX"
+    # #2350: late-ccld 폴은 차단기 회계 제외(opt-out)로 호출된다.
+    assert captured["cb_exempt_timeout"] is True
 
 
 @pytest.mark.parametrize("is_paper", [True, False])
@@ -559,7 +575,9 @@ async def test_get_order_history_crossing_window_uses_single_before_query(
     adapter = _make_ccld_adapter(is_paper=True)
     calls: list[tuple[str, dict[str, Any]]] = []
 
-    async def fake_paginated(method, url, tr_id, params, row_key="output1"):  # type: ignore[no-untyped-def]
+    async def fake_paginated(  # type: ignore[no-untyped-def]
+        method, url, tr_id, params, row_key="output1", *, cb_exempt_timeout=False
+    ):
         calls.append((tr_id, dict(params)))
         return []
 

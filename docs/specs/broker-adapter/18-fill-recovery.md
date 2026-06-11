@@ -276,6 +276,47 @@ invariant**다. EOD 만료를 폴 **앞**에 두면, 전일 open이 다운타임
 > 매도"가 아니라 "복구 지연된 보유의 오귀속 알림"으로 좁혀진다 — poll-first 순서
 > invariant 가 근본 차단을 담당한다는 사실은 변하지 않는다.
 
+### 6.2 steady-state 폴 루프 cooldown · late-ccld 차단기 회계 제외 (#2350)
+
+체결이력 폴(`get_order_history` → `inquire-daily-ccld`)은 어댑터 전역 단일
+`CircuitBreaker`를 주문·잔고 조회와 공유한다. 폴 타임아웃 누적이 차단기를 OPEN
+시키면 같은 어댑터를 공유하는 treasury 잔고/포지션 동기화·주문 경로까지
+broker-wide 로 차단된다(cross-concern 결합). 이를 끊기 위해 두 normative 규칙을
+둔다.
+
+**late-ccld `TimeoutError` 차단기 회계 제외 (normative)**: `get_order_history`
+경로의 `TimeoutError` 계열(aiohttp timeout 포함, `TimeoutError` 하위)은 차단기
+`record_failure()`에 **기록되지 않는다**(호출측 opt-out). 따라서 체결이력 폴이
+반복 타임아웃해도 차단기는 OPEN 되지 않으며, **차단기 상태 변경 이벤트/알림도
+발생하지 않는다**(`CircuitBreakerEvent`/`NotificationEvent`의 발생 조건을 좁힐 뿐
+스키마/종류는 무변경 — [16-eventbus-integration.md](16-eventbus-integration.md)·
+[17-notification-events.md](17-notification-events.md) unchanged). 회계 제외는
+**late-ccld `TimeoutError` 에 한정**되며, HTTP 5xx/`APIError` 등 다른 실패는
+기존대로 차단기에 기록된다(실제 KIS 서버 장애 보호 유지). 차단기 `check()` 통과는
+그대로라 다른 concern 이 연 차단기에는 종속한다(주문 경로 보호 무변경). 어댑터 측
+계약은 [10-commission-info.md](10-commission-info.md)·[07-kis-base-adapter.md](07-kis-base-adapter.md)
+참조.
+
+**steady-state cooldown (normative)**: 주기 루프(`_loop`)는 정상 사이클에서
+`poll_interval` 고정 주기를 유지하되, **연속 broker-transient 실패** 시 다음 사이클
+대기를 backoff 로 늘려 OPEN 갱신/타임아웃 연타를 흡수한다.
+
+- **sequence**: n번째 연속 실패 직후 다음 사이클 sleep = `poll_interval × min(2^n,
+  8)`. 즉 첫 실패 후 ×2, 이후 ×4, ×8(cap).
+- **cap 근거**: 기본 `poll_interval` 60s 기준 상한 480s(=60×8). 이는 CB
+  `recovery_timeout`(60s)·reconciler 주기(1800s)보다 짧아 복구 관측을 놓치지
+  않으면서 OPEN 을 60s 주기로 갱신·연장하지 않는다. fill 반영 지연 상한도 480s 로
+  bounded.
+- **reset**: `_poll_and_apply`가 예외 없이 정상 완료되면 연속 실패 카운터를 0 으로
+  리셋해 `poll_interval` 고정 주기로 복귀한다(성공 경로 주기 불변).
+- **실패 집계 범위**: broker-transient 예외(`TimeoutError`·`CircuitOpenError`·
+  `APIError`·`ConnectionError`/`OSError`)만 카운트한다. 그 외 예외(내부 버그류)는
+  cooldown 으로 은폐하지 않고 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행
+  동작 보존).
+- **적용 범위**: cooldown 은 `_loop` steady-state 한정이다. 기동 카치업
+  `catch_up_once`의 bounded backoff(§6.1, `CATCH_UP_MAX_ATTEMPTS`)는 **무변경·
+  비간섭**이며, 기동 barrier(§7) 결정에 영향을 주지 않는다.
+
 ## 7. barrier ordering (재기동 무오분류)
 
 기존 `ReconcileScheduler.start()`는 즉시 `run_once()`로 position 대사를 돈다.
