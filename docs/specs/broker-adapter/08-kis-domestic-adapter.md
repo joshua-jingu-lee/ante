@@ -49,6 +49,31 @@ class KISDomesticAdapter(KISBaseAdapter):
 
 > 출처: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py) 및 KIS Developers 포털(2축 검증). 구버전 TR ID(`VTTC0802U`/`TTTC0802U`/`VTTC0801U`/`TTTC0311U`)는 deprecated 되어 모의 매수 시 `40910000 모의투자 주문이 불가한 계좌입니다`로 거절되므로 현행 매핑으로 갱신했다(#2342).
 
+### order-rvsecncl 취소 바디 계약 (#2345)
+
+주문 취소(`order-rvsecncl`, `cancel_order`)는 레거시 TR ID `VTTC0803U`(모의)/`TTTC0803U`(실전)로 아래 바디를 전송한다. **취소 한정**이며 정정(modify)·order-cash·잔고 등은 이 표의 범위 밖이다.
+
+| 필드 | 값 | 설명 |
+|------|------|------|
+| `CANO` | `account_no[:8]` | 종합계좌번호 |
+| `ACNT_PRDT_CD` | `account_no[8:10]` | 계좌상품코드 |
+| `ORGN_ODNO` | `order_id` | 원주문번호(ODNO) |
+| `ORD_DVSN` | `'01'` | 주문구분 |
+| `RVSE_CNCL_DVSN_CD` | `'02'` | 정정취소구분(02=취소) |
+| `ORD_QTY` | `'0'` | 주문수량(전량취소 시 0) |
+| `ORD_UNPR` | `'0'` | 주문단가 |
+| `QTY_ALL_ORD_YN` | `'Y'` | 잔량전부주문여부 |
+| `KRX_FWDG_ORD_ORGNO` | 원주문 캡처값(조건부) | 한국거래소전송주문조직번호 |
+
+`KRX_FWDG_ORD_ORGNO`(한국거래소전송주문조직번호)는 원주문별 값으로, 누락 시 mis-route/거절 위험이 있다. ante는 이 값을 다음 규칙으로 처리한다:
+
+- **원천**: 원주문 접수(`order-cash`) 성공 응답 `output`의 동일 필드명 `KRX_FWDG_ORD_ORGNO`를 직접 캡처한다(공식 order-cash 결과 컬럼에 `ODNO`/`ORD_TMD`와 함께 정의). `inquire-psbl-rvsecncl` 조회의 `ord_gno_brno`(주문채번지점번호)는 동일성 미보장(오값 위험)이라 **사용하지 않는다**.
+- **캐시 키 scope**: 어댑터 인스턴스(=계좌, `gateway._get_broker(account_id)`로 계좌별 분리) + 제출 KST 영업일(YYYYMMDD). KIS `odno`는 영업일 재사용이 가능하므로 영업일까지 키에 포함해 재사용 odno에 과거 조직번호를 붙이는 오값을 차단한다.
+- **주입/생략**: `cancel_order`는 캐시 hit & 영업일 일치 시에만 `KRX_FWDG_ORD_ORGNO`를 주입한다. 캐시 miss(인메모리 미보존)·응답에 필드 없음·영업일 불일치 시에는 **필드를 생략**(기존 8필드 동작 유지)하고 debug 로그를 남긴다. 취소 경로에서 **추가 조회/네트워크 호출은 하지 않는다**(순수 dict 연산).
+- **bounded / known-limitation**: 캐시는 `OrderedDict` + maxlen으로 무한 증가·stale 누적을 막는다. **in-process 한정**이라 재기동 시 캐시가 소실되며, 그 경우 miss로 처리되어 필드를 생략한다(추정값을 전송하지 않으므로 안전). cross-process/외부주문 취소의 원천 확보는 영속화(Option A) 또는 검증된 조회 원천을 별도 이슈로 다룬다.
+
+> 출처: [KIS open-trading-api `order_rvsecncl.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_rvsecncl/order_rvsecncl.py) 및 공식 레거시/Postman PAPER 샘플(`VTTC0803U`/`TTTC0803U`에서 `KRX_FWDG_ORD_ORGNO`를 원주문별 값으로 전송). 취소 tr_id `0803U→0013U` 마이그레이션과 `EXCG_ID_DVSN_CD`는 별도 live-gated 이슈(#2346) 범위다.
+
 ### KIS 주문 유형 매핑
 
 KISDomesticAdapter는 `order_type` 문자열을 KIS ORD_DVSN 코드로 매핑한다. `stop`/`stop_limit`이 전달되면 `ValueError`를 발생시킨다 (상위 계층에서 변환 후 호출해야 함).
