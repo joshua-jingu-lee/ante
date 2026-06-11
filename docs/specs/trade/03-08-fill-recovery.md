@@ -36,6 +36,7 @@ DB 트랜잭션으로 수행한다. 빠른 경로(실시간 체결 통보 스트
 | `record_fill(order_id, new_cumulative, avg_price)` | `RecordFillResult(delta, confirmed_cumulative)` | 원자 CAS advance. `delta = new_cumulative - 이전 recorded`; `<=0`이면 `delta=0`(no-op), `>0`이면 recorded 갱신 후 delta. `confirmed_cumulative` = CAS `RETURNING recorded_filled_qty` 확정값(체결 이벤트 outbox `fill_dedup_key` 산출 기준, #1949). **FillApplier 트랜잭션 내에서만 호출** |
 | `mark_terminal(order_id, status)` | `None` | 취소·거부·실패·만료 종료 표기 |
 | `get_open_orders(account_id)` | `list[OrderTrackerRecord]` | 계좌의 non-terminal 주문 |
+| `get_open_orders_for(account_id, bot_id, symbol, side)` | `list[OrderTrackerRecord]` | `(account_id, bot_id, symbol, side)` 의 non-terminal(open/partially_filled) 주문. PositionReconciler self-check 의 capacity 산출용 — `side="buy"`(#1950 외부 매수 후보·#2352 미귀속 보유 판정), `side="sell"`(#2351 외부 청산/일부 매도 후보 — 미반영 self 매도 capacity). `side` 필터로 buy/sell capacity 가 혼입되지 않는다 |
 | `lookup_order_id(account_id, broker_order_id, submitted_date)` | `str \| None` | 관측 → 내부 order_id 매핑(non-terminal/same-day) |
 | `expire_stale(account_id, before_date)` | `int` | EOD 경과 open → `expired`, 만료 건수 반환 |
 

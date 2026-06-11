@@ -75,8 +75,78 @@ reconcile 에서 잔여 excess 가 **external 로 검출·보정**된다. → �
 주문 해소 시점(≤ EOD)** 까지. 포지션 총량 기반 분류의 한계는 본 bounded 선언으로 종결한다
 (완전 분해는 broker fill-level 데이터 계약이 필요한 out-of-scope).
 
-**무변경 분기:** 외부 청산(`broker_qty == 0 && internal_qty > 0`), 외부 일부 매도
-(`broker_qty < internal_qty`), 수량 불일치는 self-check 대상이 아니며 기존 동작을 유지한다.
+**sell-side 대칭 분기(#2351):** 외부 청산(`broker_qty == 0 && internal_qty > 0`)·외부
+일부 매도(`0 < broker_qty < internal_qty`)도 아래 "sell-side self / external 분류 정책
+(#2351)" 절의 self-check 대상이다(buy-side #1950 의 정확 대칭). 그 외 수량 불일치는
+self-check 대상이 아니며 기존 동작을 유지한다.
+
+> **정정(#2351):** 종전 본 절은 외부 청산/외부 일부 매도를 "self-check 대상이 아니며
+> 기존 동작 유지"로 기술했으나, **단일봇 + running(`dry_run=False`) 경로에서 외부
+> 청산/일부 매도 분류도 `correct_position(quantity=broker_qty)` force-write 를 호출**한다
+> (`dry_run=True` 에서만 보정 보류). 즉 이 분기는 detect-only 가 아니라 보정을 유발하는
+> 분기였고, KIS 모의 ccld 지연창에서 self 매도가 이 분기로 오라벨링되면 원장(trade
+> record/PnL)이 force-write 로 우회 수렴되는 결함이 있었다(#2314/#2351). 아래 sell-side
+> self-check 가 그 순수 self-sell 구간을 보정에서 제외해 이 결함을 닫는다.
+
+## sell-side self / external 분류 정책 (#2351, normative)
+
+`broker_qty < internal_qty`(외부 청산·외부 일부 매도 후보) 불일치는 **항상**
+self-submitted vs external 을 구분한다. **buy-side(#1950)의 정확한 방향 대칭**이다.
+
+KIS 모의투자에서 ante 가 직접 제출한 **매도(self 매도)**가 체결되면 잔고
+(`get_positions`, 체결기준)는 즉시 감소하나, 모의 `inquire-daily-ccld`
+(`get_order_history`)는 당일 0건을 주는 지연창 동안 내부 매도가 미반영
+(`internal_qty` 유지)된다. 그 결과 `broker_qty < internal_qty` 가 되어 reconciler 가
+이를 외부 청산/외부 일부 매도로 **오라벨링**하고, 단일봇 + running 경로에서
+`correct_position` force-write 로 원장을 우회 수렴시키는 결함(#2314)이 발생했다.
+
+**분류 규칙(normative):**
+
+- `deficit = internal_qty - broker_qty`.
+- `sell_capacity = Σ(ordered_qty - recorded_filled_qty)` — OrderTracker 에서
+  `(account_id, bot_id, symbol, side="sell")` 의 **non-terminal**(`open`·
+  `partially_filled`) 주문을 조회한 미체결 잔량 합. ante 미반영 self 매도는
+  FillApplier 가 아직 기록 못 한 상태이므로 해당 ante 매도 주문이 정확히 이 범위에
+  든다. (buy-side capacity 와는 `side` 로 분리되어 혼입되지 않는다.)
+- `deficit <= sell_capacity` (매칭 self 매도 존재) → **`self_submitted`** (사유:
+  `ante 미반영 체결` — 기존 `REASON_SELF_SUBMITTED` 재사용. 이 문구는 **방향 중립**
+  이며, 방향은 `internal_qty > broker_qty`(sell) vs `broker_qty > internal_qty`(buy) +
+  capacity side 로 판별된다).
+  - `correct_position` 자동 보정(force-write down)을 **skip** 한다.
+  - `PositionMismatchEvent`(reason=`ante 미반영 체결`) + `NotificationEvent`(level=
+    **info**)만 발행한다(buy-side self_submitted 분기와 **동일 계층**).
+  - 실제 포지션/체결 복구는 **FillApplier(#1946) 단일 권위 경로(ccld 백스톱)**가
+    수행한다. reconciler 는 복구하지 않는다 — **순수 self-sell 구간
+    (`deficit <= sell_capacity`)에 한해** 원장 우회·이중 차감 면을 제거한다.
+- `deficit > sell_capacity`·**매칭 sell 주문 없음**(진짜 외부 거래)·`order_tracker
+  is None`/조회 실패 → 기존 **외부 청산**(`broker_qty == 0`) / **외부 일부 매도**
+  (`0 < broker_qty < internal_qty`) 분류·보정을 그대로 유지한다(무회귀, level=critical).
+
+**self-check 와 `skip_external_buy` 의 직교(normative):** sell-side self-check 는
+`skip_external_buy`(#1946 기동 barrier, external-**buy** 타겟)와 **무관하게 항상**
+수행된다. 그 플래그는 external-buy 분류만 억제하므로 sell-side 분기에 영향을 주지
+않는다.
+
+**혼재 케이스 `0 < sell_capacity < deficit` 의 bounded known-limitation(normative):**
+self 매도와 진짜 외부 매도가 혼재하면(예: internal 50, ante 미체결 sell 20, 숨은 외부
+매도 30 → `deficit 50 > sell_capacity 20`) 잔고 **총량**만으로 self 매도분과 외부
+매도분을 분리 보정할 수 없다. 따라서 **분리 알고리즘(비례 배분·부분 귀속 등)은
+비채택**하고 기존 외부 분류(force-write down)를 유지한다. 이때 그 self 매도분이 이후
+ccld 로 적용되면 같은 매도를 ccld 가 다시 차감(이중 차감)하거나 force-write 가 PnL 을
+누락하는 면이 **잔존**한다. 이는 buy-side §11.7 협소 외부 흡수와 **동형**인 bounded
+known-limitation 이다. 위험창이 협소한 근거: 동일 종목 self 매도가 pending 인 동안
+**동시에** 같은 종목 외부 매도가 발생해야 하는 **이중 조건**이라 드물고, ccld 지연창
+자체가 신 tr_id(`VTTC0081R`, #2349) 적용 후 폴 주기 수준으로 축소된다. 완전 분해는
+broker fill-level 데이터 계약이 필요한 out-of-scope 다.
+
+**bounded known-limitation(총량 기반 검출 지연, normative):** broker 포지션은 **총량**
+만 제공하므로 "self 매도 vs 진짜 외부 청산"을 총량만으로 완전 분해할 수 없다 —
+buy-side #1950 R2-1 과 동형이다. `deficit <= sell_capacity` 로 self 로 분류된 구간 안에
+숨은 진짜 외부 매도(`internal_qty > broker_qty` + sell capacity 로 판별)는 즉시 external
+로 검출되지 않고, 매칭 ante 매도 주문이 해소(완전 체결 → `get_open_orders` 이탈, 또는
+EOD `expire_stale` → terminal)되는 시점까지 검출이 **지연**된다(bounded — 지연 ≤ EOD).
+이는 #1945 류 캐스케이드 회피·원장 우회 차단을 external-detection 완전성보다 우선하는
+보수적 trade-off 다. 포지션 총량 기반 분류의 한계는 본 bounded 선언으로 종결한다.
 
 ## 미귀속 보유 detect-only (#2352, normative)
 

@@ -48,6 +48,14 @@ ante가 제출한 주문은 (모의투자·실전투자, 스트림 유무와 무
 - 반면 잔고(`inquire-balance`/`get_positions`, tr_id `VTTC8434R`)는 **체결기준
   이라 당일 즉시 반영**된다.
 
+**이 모의 당일 ccld 지연은 방향 무관(#2351)**이다. 매수뿐 아니라 **매도**도 동일하게
+잔고는 즉시 반영(매도 시 잔고 수량 즉시 감소)되나 ccld 는 당일 0건을 줄 수 있다.
+따라서 미반영 self **매도**도 잔고와 내부 원장이 어긋나는 지연창을 만든다 —
+`broker_qty < internal_qty`. 이 sell-side gap 의 처리는 **reconciler 가 소유**한다:
+position-derived fallback(§11)은 **buy-only**(§11/§11.3 명시 한정)이고, 미반영 self
+매도의 외부 오라벨링/force-write 방지는 `../trade/03-07-position-reconciler.md`
+의 **sell-side self-check 대칭 확장(#2351)**이 담당한다(§11.7 sell-side 항목 참조).
+
 따라서 모의 당일 체결에 한해 백스톱은 **유일 SSOT가 아니다**. 백스톱(확정 정합)
 + 잔고-역도출 fallback(당일 보수적 수렴, bounded)의 **이중 입력 모델**로
 보강한다(§11). fallback은 본 §의 FillApplier 멱등 모델을 재사용하며 **새 권위자를
@@ -438,6 +446,18 @@ crash window가 잔존하고 빈 `fill_dedup_key`를 쓴다.)
 본 절의 normative 문장은 **KIS paper(`is_paper=true`) 한정 기본 활성**을 전제로
 한다(§11.6). live 적용 범위는 §11.6·#2317에 따른다.
 
+**fallback 방향 한정 — buy-only (normative, #2351):** 본 fallback 은 **매수(buy)
+방향에만 적용**한다. 잔고 excess(`broker_qty - internal_account_qty > 0`)에서 미반영
+self **매수**를 역도출하며, `(account_id, symbol, side="buy")` 의 추적 open buy 만
+귀속 대상이다(§11.3). **매도(sell) 방향으로는 fallback 을 적용하지 않는다.** 잔고
+총량 감소에서 매도 체결을 합성(synthesize)하는 것은 buy-side 보다 비가역 위험이
+크고(CAS 단조 advance 의 매도판이 잘못된 차감을 되돌릴 수 없음), 신 tr_id
+(`VTTC0081R`, #2349) 적용 후 모의 당일 ccld 가 행을 반환해 지연창이 폴 주기 수준으로
+축소되므로 효익도 작다. 미반영 self **매도**의 외부 오라벨링/force-write 방지는
+position-derived fallback 이 아니라 **reconciler 의 sell-side self-check 대칭
+확장(#2351, `../trade/03-07-position-reconciler.md`)**이 담당하며, 실제 매도 체결
+복구는 ccld 백스톱에 위임한다. sell-side 항목 상세는 §11.7 참조.
+
 ### 11.1 account-level excess 산식 (overfill 금지)
 
 fallback의 관측 누적량 산출 기준은 **계좌 수준 excess**다:
@@ -470,11 +490,14 @@ ccld가 당일 체결을 주는 정상 환경에서는 ccld가 `recorded_filled_
 `excess == 0`이다; 부분 체결된 open 주문은 capacity>0이어도 excess가 0이면
 fallback이 취하지 않는다). 즉 fallback은 모의 당일 0건 gap에서만 실효한다.
 
-### 11.3 self-order capacity 매칭 — full-fill 정확매칭 한정 (비귀속 보수)
+### 11.3 self-order capacity 매칭 — full-fill 정확매칭 한정 (비귀속 보수, buy-only)
 
 fallback의 귀속 대상은 OrderTracker의 self-order capacity로 한정하되, **잔고
 excess가 그 유일 주문의 주문 수량과 정확히 일치하는 full-fill 케이스에만**
-적용한다(#1950 self/external 경계 재사용):
+적용한다(#1950 self/external 경계 재사용). **귀속 대상은 `side="buy"` 추적 주문에
+한정한다(buy-only 명시 한정, #2351)** — 매도 방향 합성은 비채택이며(§11 도입부),
+미반영 self 매도는 reconciler sell-side self-check(`../trade/03-07-position-reconciler.md`)
+가 처리한다:
 
 - `capacity = Σ(ordered_qty - recorded_filled_qty)` — `(account_id, symbol,
   side="buy")`의 **non-terminal**(`open`·`partially_filled`) 추적 주문 미체결 잔량.
@@ -603,6 +626,18 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   재구성하지 못한다. fallback은 `recorded_filled_qty == 0`인 미복구 주문에
   한해 `excess == ordered_qty`일 때만 full fill로 advance하며, 그 외 partial
   excess는 D+1 ccld 백스톱에 위임한다(미적용).
+- **sell-side fallback 미적용 (buy-only 명시 한정, #2351)**: position-derived
+  fallback 은 **매수 방향에만** 적용한다(§11/§11.3). 모의 ccld 지연은 방향 무관
+  (§2.1)이라 미반영 self **매도**도 `broker_qty < internal_qty` gap 을 만들지만,
+  잔고 총량 감소에서 매도 체결을 합성하는 것은 비가역 위험(CAS 단조 매도 advance
+  를 되돌릴 수 없음)이 커 **비채택**한다. 대신 이 sell-side gap 은 두 권위로 처리
+  한다: ① **reconciler sell-side self-check 대칭 확장**(`../trade/03-07-position-reconciler.md`,
+  #2351)이 미반영 self 매도를 외부 청산/일부 매도로 오라벨링·force-write 하지 않고
+  detect-only(보정 skip + info 이벤트)로 두며(buy-side #1950 대칭), ② 실제 매도
+  체결 복구는 **ccld 백스톱**(`get_order_history`)에 위임한다(매도 fill 합성 없음).
+  reconciler sell-side 의 bounded known-limitation(혼재 `0 < sell_capacity < deficit`
+  의 이중 차감/PnL 누락 잔존, 총량 기반 검출 지연 ≤ EOD)은 buy-side 협소 외부
+  흡수와 **동형**이며 그 문서에 선언한다.
 - **avg_price 정정 없음**(§11.4): 잔고 평단 근거 유지, ccld 실체결가로 사후
   정정 안 함.
 - **Treasury 비례 정산**: §9의 pre-existing 한계(부분 체결 비례 정산 미지원)는
