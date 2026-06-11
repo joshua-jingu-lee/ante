@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-04 (KST)
+> 마지막 생성 시점: 2026-06-12 (KST)
 
 ## 최상위 구조
 
@@ -100,7 +100,8 @@ src/ante/
 │   │   └── __init__.py
 │   ├── __init__.py
 │   ├── cold_path.py
-│   └── info.py
+│   ├── info.py
+│   └── signal_channel_registry.py
 ├── strategy/
 │   ├── base.py                       # Strategy ABC, StrategyMeta, TradeHistoryView
 │   ├── context.py                    # StrategyContext — 전략 실행 컨텍스트 (파일 접근, 로깅, 거래 이력)
@@ -440,7 +441,8 @@ tests/
 │   │   ├── test_cli_registry_ipc_cross_ref.py
 │   │   ├── test_docs_taxonomy_drift.py
 │   │   ├── test_member_admin_ipc_wiring.py
-│   │   └── test_treasury_account_scoping.py
+│   │   ├── test_treasury_account_scoping.py
+│   │   └── test_server_signal_connect.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py
@@ -637,7 +639,8 @@ tests/
 │   │   ├── factory_drift_allowlist.yaml
 │   │   ├── docs_drift_allowlist.yaml
 │   │   ├── test_cli_registry_docs_drift.py
-│   │   └── test_cli_registry_guide_sync.py
+│   │   ├── test_cli_registry_guide_sync.py
+│   │   └── test_signal_connect_codes.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -708,8 +711,22 @@ tests/
 │   ├── test_report_validation_detail_json.py
 │   ├── test_rule_engine_unrecovered_buy_guard.py
 │   ├── test_rule_modify_enrich.py
-│   └── test_strategy_summary_all_bots.py
-└── __init__.py
+│   ├── test_strategy_summary_all_bots.py
+│   ├── test_bot_signal_connect_exceptions.py
+│   ├── test_ipc_server_signal_stream.py
+│   ├── test_kis_cancel_krx_fwdg_ord_orgno.py
+│   ├── test_kis_cb_ccld_timeout_decoupling.py
+│   ├── test_kis_order_tr_id.py
+│   ├── test_signal_channel_outbound.py
+│   ├── test_signal_channel_registry.py
+│   ├── test_signal_connect_audit.py
+│   └── test_signal_connect_busy.py
+├── __init__.py
+└── integration/
+    ├── __init__.py
+    ├── test_signal_connect_cli_repro_2333.py
+    ├── test_signal_connect_repro_2333.py
+    └── test_signal_connect_stream.py
 ```
 
 ## deploy/ — 서비스 배포
