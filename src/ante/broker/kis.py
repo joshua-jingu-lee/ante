@@ -80,6 +80,12 @@ _ORDER_TR_IDS = frozenset(
     }
 )
 
+# 거래소ID구분코드(EXCG_ID_DVSN_CD) 기본값.
+# 에픽 #2354 일관성 목표의 공유 단일 출처 — order-cash(#2344) 외 후속 이슈
+# (inquire-daily-ccld #2349 등)가 재사용할 예정이다. 국내 KRX 주문 기본값으로,
+# NXT/SOR 등 다른 거래소 라우팅은 현재 미지원(요구 발생 시 config 표면화는 후속).
+DEFAULT_EXCG_ID_DVSN_CD = "KRX"
+
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
 
@@ -878,6 +884,10 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_DVSN": self._map_order_type(order_type),
             "ORD_QTY": str(int(quantity)),
             "ORD_UNPR": "0",
+            # 거래소ID구분코드 — KIS 공식 order-cash 현행 계약의 필수 필드(#2344).
+            # 공식 order_cash.py 가 excg_id_dvsn_cd 누락 시 ValueError 로 가드한다.
+            # market/limit·side 무관 공통(국내 KRX 기본).
+            "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
         }
         if order_type == "limit" and price is not None:
             data["ORD_UNPR"] = str(int(price))

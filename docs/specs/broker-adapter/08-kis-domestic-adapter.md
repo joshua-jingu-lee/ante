@@ -21,7 +21,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 |------|------|
 | `currency` | `"KRW"` 반환 |
 | API 경로 | `/uapi/domestic-stock/v1/` |
-| 주문 파라미터 | `ORD_DVSN`, `PDNO` (6자리 종목코드) |
+| 주문 파라미터 | `ORD_DVSN`, `PDNO` (6자리 종목코드), `EXCG_ID_DVSN_CD` (`KRX`) |
 | 잔고 조회 | 원화 단일 (`TTTC8434R`) |
 | 시세 조회 | `fid_cond_mrkt_div_code: "J"` |
 | 심볼 정규화 | 6자리 숫자 (`005930`) |
@@ -48,6 +48,24 @@ class KISDomesticAdapter(KISBaseAdapter):
 | 실전 | `TTTC0012U` | `TTTC0011U` |
 
 > 출처: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py) 및 KIS Developers 포털(2축 검증). 구버전 TR ID(`VTTC0802U`/`TTTC0802U`/`VTTC0801U`/`TTTC0311U`)는 deprecated 되어 모의 매수 시 `40910000 모의투자 주문이 불가한 계좌입니다`로 거절되므로 현행 매핑으로 갱신했다(#2342).
+
+### order-cash 주문 바디 계약 (#2344)
+
+주문 접수(`order-cash`, `place_order` → `_build_order_data`)는 `is_paper` × `side` × `order_type` 무관하게 아래 바디를 전송한다. **order-cash 한정**이며 취소/정정(`order-rvsecncl`)·잔고·현재가 등은 이 표의 범위 밖이다. `EXCG_ID_DVSN_CD`는 모듈 레벨 상수 `DEFAULT_EXCG_ID_DVSN_CD="KRX"`로 주입한다(에픽 #2354 일관성 목표의 공유 단일 출처 — 후속 이슈가 재사용).
+
+| 필드 | 값 | 설명 |
+|------|------|------|
+| `CANO` | `account_no[:8]` | 종합계좌번호 |
+| `ACNT_PRDT_CD` | `account_no[8:10]` | 계좌상품코드 |
+| `PDNO` | `normalize_symbol(symbol)` (6자리) | 종목코드 |
+| `ORD_DVSN` | `order_type` 매핑(시장가 `'01'`/지정가 `'00'` 등) | 주문구분 |
+| `ORD_QTY` | `str(int(quantity))` | 주문수량 |
+| `ORD_UNPR` | 시장가 `'0'` / 지정가 `str(int(price))` | 주문단가 |
+| `EXCG_ID_DVSN_CD` | `'KRX'` | 거래소ID구분코드(국내 KRX 기본·NXT/SOR 미지원) |
+
+- **출처**: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py). 공식 예제는 `order_cash()` 인자로 `excg_id_dvsn_cd`를 필수로 받고 누락 시 `ValueError`로 가드하며, 요청 바디에 `"EXCG_ID_DVSN_CD": excg_id_dvsn_cd`로 포함한다. ante 이전 바디에는 이 필드가 빠져 공식 현행 계약과 drift 상태였다.
+- **`40910000` 인과 caveat**: 2026-06-11 KST 모의 smoke에서 #2342 TR ID 갱신 후에도 모의 매수가 `40910000 모의투자 주문이 불가한 계좌입니다`로 실패했다. 본 계약 정합이 그 실패의 직접 원인인지는 **미확정**이며, 머지 후 다음 거래일 모의 smoke(`buy 1 → fill/position → sell 1 → flatten`)로 검증한다. 지속 실패 시 계좌 자격/provisioning 가설은 별도 이슈로 분리한다(본 이슈는 contract drift 해소로 종결).
+- **비목표(`SLL_TYPE`/`CNDT_PRIC`)**: 공식 예제 바디에는 `SLL_TYPE`(매도유형)·`CNDT_PRIC`(조건가격)이 존재하나, 필수 `ValueError` 가드는 `EXCG_ID_DVSN_CD`에만 있고 거절 근거 관측이 없어 본 PR 비목표다. 추측성 빈 문자열 필드 추가는 행동 변화 위험만 있으므로 제외하며, 거절 근거가 관측되면 후속 이슈로 다룬다.
 
 ### order-rvsecncl 취소 바디 계약 (#2345)
 
