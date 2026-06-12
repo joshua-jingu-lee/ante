@@ -522,6 +522,45 @@ async def _seed_trades_db(db_path: str, rows: list[dict]) -> None:
         await db.close()
 
 
+async def _seed_adjustment_via_recorder(db_path: str, *, account_id: str) -> str:
+    """실제 ``TradeRecorder.save_adjustment()`` 로 보정 행 1건을 생성하고 날짜 반환.
+
+    #2371: 보정 행 timestamp 가 ``save_trade`` 와 동일한 UTC-aware isoformat 으로
+    저장됨을 CLI 실경로로 검증하기 위해, raw INSERT 가 아니라 실제 서비스 메서드를
+    경유한다. wall-clock 비결정(UTC 자정 경계)은 호출자가 **저장된 timestamp 에서
+    날짜를 읽어** 동일 날짜로 조회하므로 제거된다. 저장 날짜(``YYYY-MM-DD``)를
+    반환한다.
+    """
+    from ante.core.database import Database
+    from ante.trade.position import PositionHistory
+    from ante.trade.recorder import TradeRecorder
+
+    db = Database(db_path)
+    await db.connect()
+    try:
+        ph = PositionHistory(db)
+        await ph.initialize()
+        rec = TradeRecorder(db, ph)
+        await rec.initialize()
+        await rec.save_adjustment(
+            bot_id="bot1",
+            symbol="005930",
+            old_quantity=10.0,
+            new_quantity=15.0,
+            reason="broker mismatch",
+            account_id=account_id,
+        )
+        row = await db.fetch_one(
+            "SELECT timestamp FROM trades WHERE status = 'adjusted'"
+        )
+        assert row is not None
+        ts: str = row["timestamp"]
+        # 저장 날짜(달력일)만 추출 — isoformat 의 'T' 앞 날짜 부분.
+        return ts[:10]
+    finally:
+        await db.close()
+
+
 def _trade_list_ids(runner, tmp_path, *cli_args: str) -> list[str]:
     """``trade list --format json`` 을 실제 시드 DB 에 대해 실행, trade_id 집합 반환.
 
@@ -638,66 +677,39 @@ class TestTradeListToEndOfDayBoundary:
             f"다음날 자정 행은 제외, 당일 행만 포함돼야 한다. ids={ids}"
         )
 
-    def test_blank_format_adjustment_row_included_in_to_only_query(
+    def test_adjustment_row_included_in_to_only_query(
         self, runner, tmp_path, _seed_db_path
     ):
-        """공백 구분 포맷(adjustment 행)이 ``--to D``(from 미지정) 쿼리에 포함.
+        """#2371: 실 ``save_adjustment()`` 보정 행이 ``--to D``(from 미지정)에 포함.
 
-        ``save_adjustment`` 는 SQLite ``datetime('now')`` 로 ``'YYYY-MM-DD
-        HH:MM:SS'`` (공백 구분) 포맷을 저장한다. 실호출은 wall-clock(UTC 자정
-        경계 비결정)이므로 **고정 ``'2026-06-12 09:30:00'`` 행을 직접 주입**
-        한다. ``--to 2026-06-12`` 상한(``...T23:59:59.999999+00:00``)과의
-        lexical 비교에서 ``' '(0x20) < 'T'(0x54)`` 이므로 param 보다 작아
-        포함된다.
+        보정 행은 ``save_trade`` 와 동일한 UTC-aware isoformat 으로 저장된다.
+        wall-clock 비결정(UTC 자정 경계)은 **저장된 timestamp 의 날짜를 읽어**
+        그 날짜로 ``--to`` 상한(``...T23:59:59.999999+00:00``)을 지정해 제거한다.
         """
-        asyncio.run(
-            _seed_trades_db(
-                _seed_db_path,
-                [
-                    {
-                        "trade_id": "55555555-5555-5555-5555-555555555555",
-                        "side": "adjustment",
-                        "status": "adjusted",
-                        "timestamp": "2026-06-12 09:30:00",
-                    }
-                ],
-            )
+        adj_date = asyncio.run(
+            _seed_adjustment_via_recorder(_seed_db_path, account_id="acc-real")
         )
-        ids = _trade_list_ids(runner, tmp_path, "--to", "2026-06-12")
-        assert ids == ["55555555-5555-5555-5555-555555555555"], (
-            f"공백 포맷 당일 adjustment 행이 --to 쿼리에 포함돼야 한다. ids={ids}"
+        ids = _trade_list_ids(runner, tmp_path, "--to", adj_date)
+        assert len(ids) == 1, (
+            f"보정 행이 --to {adj_date} 쿼리에 포함돼야 한다. ids={ids}"
         )
 
-    def test_blank_format_adjustment_row_excluded_when_from_specified(
+    def test_adjustment_row_included_when_from_specified(
         self, runner, tmp_path, _seed_db_path
     ):
-        """known-limitation 가드: 공백 포맷 행은 ``--from D`` 지정 시 제외(현재 동작).
+        """#2371: 실 ``save_adjustment()`` 보정 행이 ``--from D`` 당일 경계에 포함.
 
-        ``--from 2026-06-12`` 는 naive ``T00:00:00`` 하한으로 들어가고, 공백
-        포맷 당일 행 ``'2026-06-12 09:30:00'`` 은 ``' '(0x20) < 'T'(0x54)`` 라
-        param 보다 작아 ``timestamp >= ?`` 에서 제외된다. 이는 main 기존재
-        known-limitation(이슈 본문 Non-Goals — 저장 포맷 정규화 follow-up)
-        이며, 본 수정이 도입·악화하지 않는다. 의도치 않은 변화를 감지하는
-        회귀 가드로 현재 동작을 고정한다.
+        #2370 의 known-limitation(공백 포맷 행이 ``--from`` 당일 ``T00:00:00``
+        하한에서 lexical 제외)을 해소한다. 보정 행이 isoformat UTC 로 저장되므로
+        당일 ``--from``/``--to`` 동일 날짜 조회에 포함된다(**main RED**: 공백 포맷이라
+        제외). wall-clock 비결정은 저장 날짜를 읽어 동일 날짜로 조회해 제거한다.
         """
-        asyncio.run(
-            _seed_trades_db(
-                _seed_db_path,
-                [
-                    {
-                        "trade_id": "66666666-6666-6666-6666-666666666666",
-                        "side": "adjustment",
-                        "status": "adjusted",
-                        "timestamp": "2026-06-12 09:30:00",
-                    }
-                ],
-            )
+        adj_date = asyncio.run(
+            _seed_adjustment_via_recorder(_seed_db_path, account_id="acc-real")
         )
-        ids = _trade_list_ids(
-            runner, tmp_path, "--from", "2026-06-12", "--to", "2026-06-12"
-        )
-        assert ids == [], (
-            f"known-limitation: --from 지정 시 공백 포맷 당일 행은 제외. ids={ids}"
+        ids = _trade_list_ids(runner, tmp_path, "--from", adj_date, "--to", adj_date)
+        assert len(ids) == 1, (
+            f"보정 행이 --from/--to {adj_date} 당일 경계에 포함돼야 한다. ids={ids}"
         )
 
     def test_from_only_returns_same_day_intraday(self, runner, tmp_path, _seed_db_path):

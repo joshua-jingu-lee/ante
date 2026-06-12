@@ -399,11 +399,12 @@ exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다
 --to 2026-06-12`처럼 같은 날짜를 지정하면 그 날 발생한 거래가 모두 포함된다
 (`treasury transactions`·`bot logs`·`audit list`의 날짜 필터 경계 동작과 일치).
 
-> known-limitation: 대사 보정(`adjustment`) 행은 `timestamp`가 공백 구분
-> 포맷(`YYYY-MM-DD HH:MM:SS`)으로 저장되어, `--from`을 지정하면 같은 날 보정
-> 행이 시작일 경계(`00:00:00`)에서 누락될 수 있다. 본 이슈 대상인 실거래
-> 행(ISO 8601 UTC 포맷)은 영향받지 않으며, 보정 행의 `--from` 경계 해소는
-> 저장 포맷 정규화 follow-up으로 분리한다.
+대사 보정(`adjustment`) 행을 포함한 모든 거래 행은 `timestamp`를 UTC-aware
+ISO 8601 isoformat(`YYYY-MM-DDTHH:MM:SS[.ffffff]+00:00`) 단일 포맷으로 저장하므로
+(`trades.timestamp` invariant — [trade/03-05-sqlite-schema.md](../trade/03-05-sqlite-schema.md)),
+`--from` 당일 경계에서 보정 행이 누락되지 않는다. 과거 공백 구분 포맷
+(`YYYY-MM-DD HH:MM:SS`)으로 저장된 행은 마이그레이션 v005가 isoformat UTC로
+정규화한 뒤 동일하게 조회된다(v005 적용 전제).
 
 ### `ante strategy` — 전략 관리
 

@@ -15,7 +15,11 @@ from ante.db.migrations import (
     get_applied_seqs,
     run_migrations,
 )
-from ante.db.versions import v001_baseline, v002_parquet_migration
+from ante.db.versions import (
+    v001_baseline,
+    v002_parquet_migration,
+    v005_trades_timestamp_isoformat,
+)
 
 
 @pytest.fixture
@@ -325,3 +329,128 @@ class TestMigrationsCliDbPath:
             f"migrations 러너 실패: stdout={result.stdout} stderr={result.stderr}"
         )
         assert db_file.exists(), "ANTE_DB_PATH 로 전달한 파일이 생성돼야 합니다"
+
+
+async def _bootstrap_trades_schema(db: Database) -> None:
+    """trades 스키마를 부트스트랩한다 (TradeRecorder.initialize 경유)."""
+    from ante.trade.position import PositionHistory
+    from ante.trade.recorder import TradeRecorder
+
+    ph = PositionHistory(db)
+    await ph.initialize()
+    rec = TradeRecorder(db, ph)
+    await rec.initialize()
+
+
+async def _insert_trade_row(db: Database, trade_id: str, timestamp: str) -> None:
+    """trades 에 raw timestamp 행을 직접 주입한다 (마이그레이션 테스트 한정)."""
+    await db.execute(
+        "INSERT INTO trades "
+        "(trade_id, bot_id, strategy_id, symbol, side, quantity, price, status, "
+        " order_type, reason, commission, timestamp, order_id, account_id, "
+        " currency, exchange) "
+        "VALUES (?, 'bot1', 's1', '005930', 'buy', 10.0, 50000.0, 'filled', "
+        "'market', 'seed', 0.0, ?, ?, 'acc-real', 'KRW', 'KRX')",
+        (trade_id, timestamp, trade_id),
+    )
+
+
+class TestV005TradesTimestampIsoformat:
+    """#2371: v005 — trades.timestamp 공백 포맷 → UTC-aware isoformat 협소 변환."""
+
+    async def test_registered_in_migrations(self):
+        """v005 가 MIGRATIONS 리스트에 등록되어 있다."""
+        seqs = [seq for seq, _, _ in MIGRATIONS]
+        fns = [fn for _, _, fn in MIGRATIONS]
+        assert 5 in seqs
+        assert v005_trades_timestamp_isoformat.migrate in fns
+
+    async def test_blank_format_row_converted_others_unchanged(self, db: Database):
+        """공백 19자 행만 변환, isoformat 행·변형 행은 불변."""
+        await _bootstrap_trades_schema(db)
+        # (a) 공백 구분 19자 UTC 행 — 변환 대상.
+        await _insert_trade_row(
+            db, "11111111-1111-1111-1111-111111111111", "2026-06-12 09:30:00"
+        )
+        # (b) 이미 isoformat aware 행 — 불변.
+        await _insert_trade_row(
+            db, "22222222-2222-2222-2222-222222222222", "2026-06-12T04:43:53+00:00"
+        )
+        # (c) 변형 행: '+09:00' suffix(19자 아님, 텍스트) — 불변.
+        await _insert_trade_row(
+            db, "33333333-3333-3333-3333-333333333333", "2026-06-12 09:30:00+09:00"
+        )
+
+        await v005_trades_timestamp_isoformat.migrate(db)
+
+        rows = await db.fetch_all("SELECT trade_id, timestamp FROM trades")
+        ts_by_id = {r["trade_id"]: r["timestamp"] for r in rows}
+        # (a) 공백 19자 행 → isoformat UTC 로 변환.
+        assert (
+            ts_by_id["11111111-1111-1111-1111-111111111111"]
+            == "2026-06-12T09:30:00+00:00"
+        )
+        # (b) isoformat 행 불변.
+        assert (
+            ts_by_id["22222222-2222-2222-2222-222222222222"]
+            == "2026-06-12T04:43:53+00:00"
+        )
+        # (c) 변형 행 불변(19자 아님 + GLOB 미일치).
+        assert (
+            ts_by_id["33333333-3333-3333-3333-333333333333"]
+            == "2026-06-12 09:30:00+09:00"
+        )
+
+    async def test_idempotent_rerun(self, db: Database):
+        """재실행 멱등 — 변환 후 패턴 미일치라 두 번째 실행은 no-op."""
+        await _bootstrap_trades_schema(db)
+        await _insert_trade_row(
+            db, "11111111-1111-1111-1111-111111111111", "2026-06-12 09:30:00"
+        )
+
+        await v005_trades_timestamp_isoformat.migrate(db)
+        first = await db.fetch_one(
+            "SELECT timestamp FROM trades "
+            "WHERE trade_id = '11111111-1111-1111-1111-111111111111'"
+        )
+        assert first is not None
+        assert first["timestamp"] == "2026-06-12T09:30:00+00:00"
+
+        # 재실행 — 변환된 행은 패턴 미일치라 불변.
+        await v005_trades_timestamp_isoformat.migrate(db)
+        second = await db.fetch_one(
+            "SELECT timestamp FROM trades "
+            "WHERE trade_id = '11111111-1111-1111-1111-111111111111'"
+        )
+        assert second is not None
+        assert second["timestamp"] == "2026-06-12T09:30:00+00:00"
+
+    async def test_no_trades_table_noop(self, db: Database):
+        """trades 테이블 부재 DB 에서 no-op 통과(fresh install 가드)."""
+        # trades 스키마를 부트스트랩하지 않은 빈 DB.
+        row = await db.fetch_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='trades'"
+        )
+        assert row is None
+        # 예외 없이 통과해야 한다.
+        await v005_trades_timestamp_isoformat.migrate(db)
+
+    async def test_run_migrations_applies_v005(self, db: Database):
+        """run_migrations 전체 실행이 v005 를 적용하고 공백 행을 변환한다."""
+        await _bootstrap_trades_schema(db)
+        await _insert_trade_row(
+            db, "11111111-1111-1111-1111-111111111111", "2026-06-12 09:30:00"
+        )
+
+        applied = await run_migrations(db)
+        assert "005_0.10.1" in applied
+
+        row = await db.fetch_one(
+            "SELECT timestamp FROM trades "
+            "WHERE trade_id = '11111111-1111-1111-1111-111111111111'"
+        )
+        assert row is not None
+        assert row["timestamp"] == "2026-06-12T09:30:00+00:00"
+
+        applied_seqs = await get_applied_seqs(db)
+        assert 5 in applied_seqs

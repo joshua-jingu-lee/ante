@@ -22,6 +22,10 @@
 | `save` | `record: TradeRecord` | `None` | 거래 기록 저장 (Reconciler용 public wrapper) |
 | `save_adjustment` | `bot_id: str`, `symbol: str`, `old_quantity: float`, `new_quantity: float`, `reason: str` | `None` | 대사 보정 이력 기록 |
 
+`save_adjustment`는 `timestamp`를 `datetime.now(UTC).isoformat()`(UTC-aware ISO 8601)
+으로 저장한다 — `save`/`_save`와 동일 포맷이며 `trades.timestamp` 단일 포맷
+invariant([03-05-sqlite-schema.md](03-05-sqlite-schema.md))를 따른다.
+
 **설계 근거**:
 
 1. **이벤트 구독 방식 (EventBus 자동 기록)**

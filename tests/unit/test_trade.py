@@ -483,6 +483,38 @@ class TestTradeRecorder:
         assert len(rows) == 1
         assert rows[0]["quantity"] == 5  # abs(15-10)
 
+    async def test_save_adjustment_timestamp_isoformat_utc(self, recorder, db):
+        """#2371: 보정 행 timestamp 가 UTC-aware isoformat(``T`` 구분 + ``+00:00``).
+
+        save_trade/_save_trade 와 동일하게 ``datetime.now(UTC).isoformat()`` 포맷으로
+        저장돼야 한다(과거 SQLite ``datetime('now')`` 공백 구분 포맷 금지). lexical
+        비교에서 공백(``0x20``) < ``'T'``(``0x54``) 라 ``--from`` 당일 경계 누락을
+        유발하던 회귀를 닫는다.
+        """
+        before = datetime.now(UTC)
+        await recorder.save_adjustment(
+            bot_id="bot1",
+            symbol="005930",
+            old_quantity=10,
+            new_quantity=15,
+            reason="broker mismatch",
+            account_id="acc-test",
+        )
+        after = datetime.now(UTC)
+
+        rows = await db.fetch_all("SELECT * FROM trades WHERE status = 'adjusted'")
+        assert len(rows) == 1
+        ts_raw = rows[0]["timestamp"]
+        # 공백 구분 포맷 금지: 날짜/시각 구분자가 ``T`` 여야 한다.
+        assert " " not in ts_raw, f"공백 구분 포맷 금지, ts={ts_raw!r}"
+        assert "T" in ts_raw, f"isoformat ``T`` 구분자가 있어야 한다, ts={ts_raw!r}"
+        # UTC-aware suffix.
+        assert ts_raw.endswith("+00:00"), f"UTC-aware suffix 필요, ts={ts_raw!r}"
+        # round-trip 파싱 가능 + 호출 시각 범위 내.
+        parsed = datetime.fromisoformat(ts_raw)
+        assert parsed.tzinfo is not None
+        assert before <= parsed <= after
+
     async def test_eventbus_integration_rejected(self, recorder, eventbus, db):
         """EventBus 구독 통합 — 비-fill 상태(rejected)는 TradeRecorder 가 기록."""
         recorder.subscribe(eventbus)
