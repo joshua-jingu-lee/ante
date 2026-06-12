@@ -394,6 +394,17 @@ ante trade info <trade_id>         # 거래 상세
 exit code 1로 거부한다(빈 결과 반환 금지). 한쪽만 지정·둘 다 미지정·동일
 날짜는 정상 처리한다.
 
+`--from`은 시작일 `00:00:00`부터, `--to`는 종료일 당일 끝(end-of-day,
+`23:59:59.999999` 포함)까지를 경계로 조회한다. 따라서 `--from 2026-06-12
+--to 2026-06-12`처럼 같은 날짜를 지정하면 그 날 발생한 거래가 모두 포함된다
+(`treasury transactions`·`bot logs`·`audit list`의 날짜 필터 경계 동작과 일치).
+
+> known-limitation: 대사 보정(`adjustment`) 행은 `timestamp`가 공백 구분
+> 포맷(`YYYY-MM-DD HH:MM:SS`)으로 저장되어, `--from`을 지정하면 같은 날 보정
+> 행이 시작일 경계(`00:00:00`)에서 누락될 수 있다. 본 이슈 대상인 실거래
+> 행(ISO 8601 UTC 포맷)은 영향받지 않으며, 보정 행의 `--from` 경계 해소는
+> 저장 포맷 정규화 follow-up으로 분리한다.
+
 ### `ante strategy` — 전략 관리
 
 ```bash
