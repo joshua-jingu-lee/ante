@@ -315,15 +315,36 @@ def test_handle_response_http_200_success_returns_payload() -> None:
 #
 # msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
 # APIError의 error_message가 절대 비어 있지 않도록 보장한다. 그렇지
-# 않으면 ``KIS API Error [40910000]: `` (콜론 뒤 공백)가 gateway 로그
+# 않으면 ``KIS API Error [99999999]: `` (콜론 뒤 공백)가 gateway 로그
 # 및 OrderFailedEvent.error_message로 전파되어 triage가 불가능하다.
 
 
 def test_handle_response_http_200_empty_msg1_unregistered_falls_back_to_code() -> None:
     """HTTP 200 + rt_cd≠0 + 미등록 msg_cd + msg1="" → 코드 보존 폴백.
 
-    미등록 코드(40910000)도 ``알 수 없는 에러 (40910000)``로 코드가
+    미등록 코드(99999999)도 ``알 수 없는 에러 (99999999)``로 코드가
     보존된 non-empty triage-able 메시지가 된다.
+    """
+    adapter = _make_adapter()
+    payload = {"rt_cd": "1", "msg_cd": "99999999", "msg1": ""}
+    resp = _FakeResponse(status=200, text_body="", json_body=payload)
+
+    with pytest.raises(APIError) as exc_info:
+        _run(adapter._handle_response(resp))
+
+    err = exc_info.value
+    assert err.error_code == "99999999"
+    assert "99999999" in str(err)
+    assert "알 수 없는 에러 (99999999)" in str(err)
+    # 콜론 뒤 본문이 비공백이어야 한다.
+    assert str(err).split("]:", 1)[1].strip() != ""
+
+
+def test_handle_response_http_200_empty_msg1_40910000_falls_back_to_korean() -> None:
+    """HTTP 200 + rt_cd≠0 + 40910000(등록 코드) + msg1="" → 한글 설명 폴백.
+
+    40910000은 이제 PERMANENT 등록 코드(#2361)이므로 빈 ``msg1``은 unknown
+    폴백이 아니라 등록 한글 메시지로 떨어진다.
     """
     adapter = _make_adapter()
     payload = {"rt_cd": "1", "msg_cd": "40910000", "msg1": ""}
@@ -335,7 +356,7 @@ def test_handle_response_http_200_empty_msg1_unregistered_falls_back_to_code() -
     err = exc_info.value
     assert err.error_code == "40910000"
     assert "40910000" in str(err)
-    assert "알 수 없는 에러 (40910000)" in str(err)
+    assert "모의투자 주문 불가 계좌 (모의 자격/신청 상태 확인 필요)" in str(err)
     # 콜론 뒤 본문이 비공백이어야 한다.
     assert str(err).split("]:", 1)[1].strip() != ""
 
@@ -363,15 +384,15 @@ def test_handle_response_http_200_whitespace_msg1_falls_back() -> None:
     공백만 있는 msg1도 strip() 후 빈 값으로 판정되어 폴백되어야 한다.
     """
     adapter = _make_adapter()
-    payload = {"rt_cd": "1", "msg_cd": "40910000", "msg1": "   "}
+    payload = {"rt_cd": "1", "msg_cd": "99999999", "msg1": "   "}
     resp = _FakeResponse(status=200, text_body="", json_body=payload)
 
     with pytest.raises(APIError) as exc_info:
         _run(adapter._handle_response(resp))
 
     err = exc_info.value
-    assert err.error_code == "40910000"
-    assert "알 수 없는 에러 (40910000)" in str(err)
+    assert err.error_code == "99999999"
+    assert "알 수 없는 에러 (99999999)" in str(err)
     assert str(err).split("]:", 1)[1].strip() != ""
 
 

@@ -64,7 +64,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 | `EXCG_ID_DVSN_CD` | `'KRX'` | 거래소ID구분코드(국내 KRX 기본·NXT/SOR 미지원) |
 
 - **출처**: [KIS open-trading-api `order_cash.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_cash/order_cash.py). 공식 예제는 `order_cash()` 인자로 `excg_id_dvsn_cd`를 필수로 받고 누락 시 `ValueError`로 가드하며, 요청 바디에 `"EXCG_ID_DVSN_CD": excg_id_dvsn_cd`로 포함한다. ante 이전 바디에는 이 필드가 빠져 공식 현행 계약과 drift 상태였다.
-- **`40910000` 인과 caveat**: 2026-06-11 KST 모의 smoke에서 #2342 TR ID 갱신 후에도 모의 매수가 `40910000 모의투자 주문이 불가한 계좌입니다`로 실패했다. 본 계약 정합이 그 실패의 직접 원인인지는 **미확정**이며, 머지 후 다음 거래일 모의 smoke(`buy 1 → fill/position → sell 1 → flatten`)로 검증한다. 지속 실패 시 계좌 자격/provisioning 가설은 별도 이슈로 분리한다(본 이슈는 contract drift 해소로 종결).
+- **`40910000` 인과 caveat**: 2026-06-11 KST 모의 smoke에서 #2342 TR ID 갱신 후에도 모의 매수가 `40910000 모의투자 주문이 불가한 계좌입니다`로 실패했다. 본 계약 정합이 그 실패의 직접 원인인지는 **미확정**이며, 머지 후 다음 거래일 모의 smoke(`buy 1 → fill/position → sell 1 → flatten`)로 검증한다. 지속 실패 시 계좌 자격/provisioning 가설은 별도 이슈로 분리한다(본 이슈는 contract drift 해소로 종결). 한편 `40910000`은 계좌 자격/모의 신청 상태 거절이라 재시도해도 결과가 동일하므로 PERMANENT(`is_retryable_msg_code → False`)로 분류한다(#2361: 3세션 일관 관측, 무익 재시도 차단).
 - **비목표(`SLL_TYPE`/`CNDT_PRIC`)**: 공식 예제 바디에는 `SLL_TYPE`(매도유형)·`CNDT_PRIC`(조건가격)이 존재하나, 필수 `ValueError` 가드는 `EXCG_ID_DVSN_CD`에만 있고 거절 근거 관측이 없어 본 PR 비목표다. 추측성 빈 문자열 필드 추가는 행동 변화 위험만 있으므로 제외하며, 거절 근거가 관측되면 후속 이슈로 다룬다.
 
 ### order-rvsecncl 취소 바디 계약 (#2345)
