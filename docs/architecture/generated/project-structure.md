@@ -720,7 +720,8 @@ tests/
 │   ├── test_signal_channel_outbound.py
 │   ├── test_signal_channel_registry.py
 │   ├── test_signal_connect_audit.py
-│   └── test_signal_connect_busy.py
+│   ├── test_signal_connect_busy.py
+│   └── test_kis_error_codes_40910000.py
 ├── __init__.py
 └── integration/
     ├── __init__.py
