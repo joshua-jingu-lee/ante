@@ -317,7 +317,19 @@ class KISBaseAdapter(BrokerAdapter):
             raise ImportError("aiohttp 패키지가 필요합니다: pip install aiohttp") from e
 
         self._session = aiohttp.ClientSession()
-        await self._authenticate()
+        try:
+            await self._authenticate()
+        except BaseException:
+            # 인증 실패/취소 시 connect()가 소유한 session을 닫는다 (#2368).
+            # connect() 성공 전까지 session은 connect()가 소유하므로,
+            # 모든 호출자(CLI _get_broker/account service/runtime)가 공통으로
+            # aiohttp Unclosed 경고/리소스 누수에서 벗어난다.
+            session, self._session = self._session, None
+            try:
+                await session.close()
+            except Exception:
+                pass  # close 실패 swallow — 원본 예외 보존
+            raise
         self.is_connected = True
         logger.info("KIS API 연결 완료 (모의투자: %s)", self.is_paper)
 
