@@ -6,7 +6,7 @@ import asyncio
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import UTC, date, datetime, time
 from typing import TYPE_CHECKING
 
 import click
@@ -116,8 +116,28 @@ def trade_list(
     async def _run_list() -> list[dict]:
         # ``_create_trade_service`` async context manager lifecycle.
         async with _create_trade_service(ctx=ctx) as (service, _):
+            # ``--from`` 은 naive ``T00:00:00`` 하한을 그대로 유지한다(비변경).
+            #   - aware fd 로 바꾸면, 자정 정각에 저장된 naive isoformat 행
+            #     (``'D'`` prefix-shorter)이 lexical 비교에서 의도치 않게
+            #     제외되는 반례가 생긴다.
+            #   - 공백 구분 포맷(``save_adjustment`` 의 ``'D HH:MM:SS'``)의 당일
+            #     ``--from`` 경계 제외(``' '(0x20) < 'T'(0x54)``)는 main 기존재
+            #     known-limitation 이며 본 수정은 도입·악화하지 않는다
+            #     (#2367 Non-Goals — 저장 포맷 정규화 follow-up).
             fd = datetime.fromisoformat(from_date) if from_date else None
-            td = datetime.fromisoformat(to_date) if to_date else None
+            # ``--to D`` 는 date-only 일 때 당일 end-of-day(``23:59:59.999999``)
+            # UTC-aware 상한으로 변환한다. date-only 를 ``fromisoformat`` 으로
+            # 그대로 넘기면 ``T00:00:00`` 이 되어 당일 장중 거래가
+            # ``timestamp <= ?`` 에서 전부 제외된다(#2367). ``bot.py:941``
+            # (``_parse_log_datetime`` end-of-day)의 ``time.max, tzinfo=UTC``
+            # 선례를 1:1 미러한다. isoformat aware 저장(당일 마지막 microsecond
+            # equal 포함, 다음날 제외) / 공백 포맷 저장(``' ' < 'T'`` 포함, 다음날
+            # 날짜 prefix 제외) 두 포맷 모두 lexical 상한이 정확하다.
+            td = (
+                datetime.combine(date.fromisoformat(to_date), time.max, tzinfo=UTC)
+                if to_date
+                else None
+            )
             trades = await service.get_trades(
                 bot_id=bot_id,
                 strategy_id=strategy_id,
