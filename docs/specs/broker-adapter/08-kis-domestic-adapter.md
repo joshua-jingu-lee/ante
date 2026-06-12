@@ -40,7 +40,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 
 ### order-cash TR ID 매핑
 
-주문 접수(`order-cash`) 호출 시 `place_order`는 `is_paper` × `side` 조합으로 아래 KIS 공식 현행 TR ID를 전송한다. **order-cash 한정**이며, 취소/정정(`order-rvsecncl`, `VTTC0803U`/`TTTC0803U`)·잔고·현재가 등 다른 TR ID는 이 표의 범위 밖이다.
+주문 접수(`order-cash`) 호출 시 `place_order`는 `is_paper` × `side` 조합으로 아래 KIS 공식 현행 TR ID를 전송한다. **order-cash 한정**이며, 취소/정정(`order-rvsecncl`, `VTTC0013U`/`TTTC0013U`)·잔고·현재가 등 다른 TR ID는 이 표의 범위 밖이다.
 
 | 환경 | 매수 | 매도 |
 |------|------|------|
@@ -67,9 +67,9 @@ class KISDomesticAdapter(KISBaseAdapter):
 - **`40910000` 인과 caveat**: 2026-06-11 KST 모의 smoke에서 #2342 TR ID 갱신 후에도 모의 매수가 `40910000 모의투자 주문이 불가한 계좌입니다`로 실패했다. 본 계약 정합이 그 실패의 직접 원인인지는 **미확정**이며, 머지 후 다음 거래일 모의 smoke(`buy 1 → fill/position → sell 1 → flatten`)로 검증한다. 지속 실패 시 계좌 자격/provisioning 가설은 별도 이슈로 분리한다(본 이슈는 contract drift 해소로 종결). 한편 `40910000`은 계좌 자격/모의 신청 상태 거절이라 재시도해도 결과가 동일하므로 PERMANENT(`is_retryable_msg_code → False`)로 분류한다(#2361: 3세션 일관 관측, 무익 재시도 차단).
 - **비목표(`SLL_TYPE`/`CNDT_PRIC`)**: 공식 예제 바디에는 `SLL_TYPE`(매도유형)·`CNDT_PRIC`(조건가격)이 존재하나, 필수 `ValueError` 가드는 `EXCG_ID_DVSN_CD`에만 있고 거절 근거 관측이 없어 본 PR 비목표다. 추측성 빈 문자열 필드 추가는 행동 변화 위험만 있으므로 제외하며, 거절 근거가 관측되면 후속 이슈로 다룬다.
 
-### order-rvsecncl 취소 바디 계약 (#2345)
+### order-rvsecncl 취소 바디 계약 (#2345, #2346)
 
-주문 취소(`order-rvsecncl`, `cancel_order`)는 레거시 TR ID `VTTC0803U`(모의)/`TTTC0803U`(실전)로 아래 바디를 전송한다. **취소 한정**이며 정정(modify)·order-cash·잔고 등은 이 표의 범위 밖이다.
+주문 취소(`order-rvsecncl`, `cancel_order`)는 신세대 TR ID `VTTC0013U`(모의)/`TTTC0013U`(실전)로 아래 바디를 전송한다(레거시 `VTTC0803U`/`TTTC0803U`에서 마이그레이션 — #2346). 신세대 body는 `EXCG_ID_DVSN_CD`를 `[필수]`로 요구하며, 모듈 레벨 공유 상수 `DEFAULT_EXCG_ID_DVSN_CD="KRX"`로 주입한다(에픽 #2354 일관성 목표의 공유 단일 출처 — order-cash(#2344)·inquire-daily-ccld(#2349)와 동일 상수 재사용). **취소 한정**이며 정정(modify)·order-cash·잔고 등은 이 표의 범위 밖이다.
 
 | 필드 | 값 | 설명 |
 |------|------|------|
@@ -81,16 +81,18 @@ class KISDomesticAdapter(KISBaseAdapter):
 | `ORD_QTY` | `'0'` | 주문수량(전량취소 시 0) |
 | `ORD_UNPR` | `'0'` | 주문단가 |
 | `QTY_ALL_ORD_YN` | `'Y'` | 잔량전부주문여부 |
+| `EXCG_ID_DVSN_CD` | `'KRX'` | 거래소ID구분코드(신세대 필수·국내 KRX 기본·NXT/SOR 미지원) |
 | `KRX_FWDG_ORD_ORGNO` | 원주문 캡처값(조건부) | 한국거래소전송주문조직번호 |
 
 `KRX_FWDG_ORD_ORGNO`(한국거래소전송주문조직번호)는 원주문별 값으로, 누락 시 mis-route/거절 위험이 있다. ante는 이 값을 다음 규칙으로 처리한다:
 
 - **원천**: 원주문 접수(`order-cash`) 성공 응답 `output`의 동일 필드명 `KRX_FWDG_ORD_ORGNO`를 직접 캡처한다(공식 order-cash 결과 컬럼에 `ODNO`/`ORD_TMD`와 함께 정의). `inquire-psbl-rvsecncl` 조회의 `ord_gno_brno`(주문채번지점번호)는 동일성 미보장(오값 위험)이라 **사용하지 않는다**.
 - **캐시 키 scope**: 어댑터 인스턴스(=계좌, `gateway._get_broker(account_id)`로 계좌별 분리) + 제출 KST 영업일(YYYYMMDD). KIS `odno`는 영업일 재사용이 가능하므로 영업일까지 키에 포함해 재사용 odno에 과거 조직번호를 붙이는 오값을 차단한다.
-- **주입/생략**: `cancel_order`는 캐시 hit & 영업일 일치 시에만 `KRX_FWDG_ORD_ORGNO`를 주입한다. 캐시 miss(인메모리 미보존)·응답에 필드 없음·영업일 불일치 시에는 **필드를 생략**(기존 8필드 동작 유지)하고 debug 로그를 남긴다. 취소 경로에서 **추가 조회/네트워크 호출은 하지 않는다**(순수 dict 연산).
+- **주입/생략**: `cancel_order`는 캐시 hit & 영업일 일치 시에만 `KRX_FWDG_ORD_ORGNO`를 주입한다. 캐시 miss(인메모리 미보존)·응답에 필드 없음·영업일 불일치 시에는 **필드를 생략**(고정 9필드 — 8필드 + `EXCG_ID_DVSN_CD`)하고 debug 로그를 남긴다. 취소 경로에서 **추가 조회/네트워크 호출은 하지 않는다**(순수 dict 연산).
+- **신세대(0013U) 호환**: 2026-06-12 라이브 A/B에서 `VTTC0013U + EXCG_ID_DVSN_CD=KRX + KRX_FWDG_ORD_ORGNO`(cache-hit 경로)가 정상 접수(`40630000 취소 완료`)됨을 확인했다. 따라서 **cache-hit 경로의 신세대 정상 동작은 라이브 검증됨**이며, cache miss/stale 시 `KRX_FWDG_ORD_ORGNO` 생략은 기존 #2345 known-limitation을 그대로 유지한다(생략 시에도 신세대 0013U 자체는 정상 — '완전 호환' 단정이 아니라 cache-hit 정상 + miss/stale 기존 한계).
 - **bounded / known-limitation**: 캐시는 `OrderedDict` + maxlen으로 무한 증가·stale 누적을 막는다. **in-process 한정**이라 재기동 시 캐시가 소실되며, 그 경우 miss로 처리되어 필드를 생략한다(추정값을 전송하지 않으므로 안전). cross-process/외부주문 취소의 원천 확보는 영속화(Option A) 또는 검증된 조회 원천을 별도 이슈로 다룬다.
 
-> 출처: [KIS open-trading-api `order_rvsecncl.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_rvsecncl/order_rvsecncl.py) 및 공식 레거시/Postman PAPER 샘플(`VTTC0803U`/`TTTC0803U`에서 `KRX_FWDG_ORD_ORGNO`를 원주문별 값으로 전송). 취소 tr_id `0803U→0013U` 마이그레이션과 `EXCG_ID_DVSN_CD`는 별도 live-gated 이슈(#2346) 범위다.
+> 출처: [KIS open-trading-api `order_rvsecncl.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_rvsecncl/order_rvsecncl.py)의 demo 분기가 `VTTC0013U`(실전 `TTTC0013U`)를 사용하고 신세대 body에서 `EXCG_ID_DVSN_CD`를 `[필수]`로 가드한다. `KRX_FWDG_ORD_ORGNO`는 레거시였던 `VTTC0803U`/`TTTC0803U` 시절부터 원주문별 값으로 전송하던 필드로, 신세대 0013U body에서도 동일하게 사용한다. 취소 tr_id `0803U→0013U` 마이그레이션과 `EXCG_ID_DVSN_CD` 동반은 2026-06-12 라이브 A/B(both_ok — (A) 레거시 `0803U` 정상 / (B) 신세대 `0013U + EXCG_ID_DVSN_CD=KRX` 정상)로 검증해 단일 신세대 경로를 채택했다(#2346 — 레거시 fallback 이중화는 YAGNI 기각).
 
 ### inquire-daily-ccld TR ID 매핑 (#2349)
 

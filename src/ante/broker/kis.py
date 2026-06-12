@@ -76,8 +76,8 @@ _ORDER_TR_IDS = frozenset(
         "TTTC0012U",  # 매수
         "VTTC0011U",
         "TTTC0011U",  # 매도
-        "VTTC0803U",
-        "TTTC0803U",  # 취소
+        "VTTC0013U",
+        "TTTC0013U",  # 취소 (#2346 라이브 A/B both_ok 2026-06-12, 신세대 0013U)
     }
 )
 
@@ -990,13 +990,18 @@ class KISDomesticAdapter(KISBaseAdapter):
     async def cancel_order(self, order_id: str) -> bool:
         """주문 취소.
 
-        취소(order-rvsecncl) body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``
-        (한국거래소전송주문조직번호)를 전송한다(#2345). 값은 place_order 시
-        order-cash 응답에서 캡처해 둔 인메모리 캐시에서 가져오며, 순수 dict
-        조회로 네트워크/추가 조회를 하지 않는다. 캐시 miss 또는 제출 영업일
-        불일치(odno 재사용 등) 시에는 필드를 생략한다(기존 동작 유지).
+        취소(order-rvsecncl)는 신세대 tr_id ``VTTC0013U``(모의)/``TTTC0013U``
+        (실전)로 전송하며, 신세대 필수 필드 ``EXCG_ID_DVSN_CD``(공유 상수
+        ``DEFAULT_EXCG_ID_DVSN_CD="KRX"``)를 포함한다(#2346 라이브 A/B both_ok
+        2026-06-12).
+
+        body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)를
+        조건부로 전송한다(#2345). 값은 place_order 시 order-cash 응답에서 캡처해
+        둔 인메모리 캐시에서 가져오며, 순수 dict 조회로 네트워크/추가 조회를 하지
+        않는다. 캐시 miss 또는 제출 영업일 불일치(odno 재사용 등) 시에는 필드를
+        생략한다(기존 동작 유지).
         """
-        tr_id = "VTTC0803U" if self.is_paper else "TTTC0803U"
+        tr_id = "VTTC0013U" if self.is_paper else "TTTC0013U"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
         cancel_data = {
             "CANO": self.account_no[:8],
@@ -1007,6 +1012,8 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_QTY": "0",
             "ORD_UNPR": "0",
             "QTY_ALL_ORD_YN": "Y",
+            # 신세대(0013U) 필수 필드 — 공유 상수 재사용("KRX" 리터럴 금지, #2344).
+            "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
         }
         cached = self._krx_fwdg_orgno_cache.get(order_id)
         if cached is not None and cached[1] == business_date_kst():
