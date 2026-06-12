@@ -46,7 +46,7 @@ ID: `{id}`
 - `reject_reason` → 거절 사유 (거절 시)
 - 예외 발생 여부 → executor 실행 실패, 이미 처리됨, 만료됨, ID 없음
 
-**중복 알림 방지 정책**: 텔레그램 명령(`/approve`, `/reject`, 인라인 버튼)으로 처리된 경우 직접 응답(reply)만 발송하고 NotificationEvent는 발행하지 않는다. CLI 등 텔레그램 외 채널에서 처리된 경우에만 NotificationEvent를 발행한다. 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
+**중복 알림 방지 정책**: 텔레그램에서 처리된 경우(결재 인라인 버튼 callback `approve:{id}`/`reject:{id}`)는 직접 응답(reply)만 발송하고 NotificationEvent는 발행하지 않는다. CLI 등 텔레그램 외 채널에서 처리된 경우에만 NotificationEvent를 발행한다. 이를 통해 사용자는 어떤 채널에서 처리하든 정확히 1번만 메시지를 수신한다.
 
 **NotificationEvent 발행** (CLI 등 텔레그램 외 채널에서 처리 시):
 
@@ -61,9 +61,9 @@ category: approval
 ID: `{id}`
 ```
 
-**텔레그램 명령 직접 응답** (텔레그램에서 처리 시, 명령 발신자에게 reply):
+**텔레그램 버튼 처리 직접 응답** (인라인 버튼 callback으로 처리 시, 사용자에게 reply):
 
-| 결과 | `/approve` 응답 | `/reject` 응답 |
+| 결과 | 승인(`approve:{id}`) 응답 | 거절(`reject:{id}`) 응답 |
 |------|-----------------|----------------|
 | 성공 | `✅ 결재 승인 완료\n제목: {title}\nID: {id}` | `❌ 결재 거절 완료\n제목: {title}\nID: {id}\n사유: {reason}` |
 | executor 실행 실패 | `⚠️ 승인되었으나 실행 실패\n제목: {title}\nID: {id}\n사유: {error}` | — |
@@ -71,4 +71,4 @@ ID: `{id}`
 | 만료됨 | `ℹ️ 만료된 결재입니다\nID: {id}` | 동일 |
 | ID 없음 | `❌ 결재를 찾을 수 없습니다\nID: {id}` | 동일 |
 
-> 인라인 버튼으로 거절 시 사유는 기본값(`"사용자 거절"`)을 사용한다. 상세 사유가 필요하면 `/reject <id> <reason>` 명령어를 직접 입력한다.
+> 인라인 버튼으로 거절 시 사유는 기본값(`"사용자 거절"`)을 사용한다. 상세 사유가 필요하면 CLI(`ante approval reject <id> --reason <reason>`)로 처리한다.
