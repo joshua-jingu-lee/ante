@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -500,3 +501,108 @@ class TestOrderRegistry:
     async def test_remove_nonexistent(self, registry):
         """존재하지 않는 주문 삭제 (무시)."""
         await registry.remove("nonexistent", "acc-test")  # should not raise
+
+
+# ── KISAdapter.connect() 인증 실패 시 session 정리 (#2368) ──────────
+
+
+class TestKISAdapterConnectCleanup:
+    """connect() 인증 실패/취소 시 aiohttp session 누수 방지 (#2368).
+
+    근본 원인: connect()가 ClientSession 생성 후 _authenticate() raise 시
+    session을 닫지 않고 전파 → stderr에 aiohttp Unclosed 경고 잔존.
+    """
+
+    @staticmethod
+    def _patch_client_session(monkeypatch) -> MagicMock:
+        """aiohttp.ClientSession() 생성을 추적 가능한 mock session으로 치환.
+
+        connect() 내부 `import aiohttp` → `aiohttp.ClientSession()` 경로를
+        가로채, 생성된 session 인스턴스의 close 호출/잔존 여부를 검증한다.
+        """
+        import aiohttp
+
+        session = MagicMock(name="ClientSession")
+        session.close = AsyncMock()
+        monkeypatch.setattr(aiohttp, "ClientSession", MagicMock(return_value=session))
+        return session
+
+    async def test_connect_auth_failure_closes_session(self, monkeypatch):
+        """인증 HTTP 403(EGW00133) 실패 시 session close + _session None + 미연결."""
+        adapter = KISAdapter(KIS_CONFIG)
+        session = self._patch_client_session(monkeypatch)
+
+        # _authenticate 가 HTTP 403(EGW00133 형태 body)로 AuthenticationError raise.
+        async def _fail() -> None:
+            raise AuthenticationError(
+                '인증 실패 (HTTP 403): {"error_code":"EGW00133",'
+                '"error_description":"접근토큰 발급 잠시 후 다시 시도하세요"}'
+            )
+
+        monkeypatch.setattr(adapter, "_authenticate", _fail)
+
+        with pytest.raises(AuthenticationError, match="EGW00133"):
+            await adapter.connect()
+
+        # (b) 생성됐던 session 이 닫히고 _session 이 비워졌다.
+        session.close.assert_awaited_once()
+        assert adapter._session is None
+        # (c) 인증 성공 전이므로 미연결 상태 유지.
+        assert adapter.is_connected is False
+
+    async def test_connect_cancellation_closes_session(self, monkeypatch):
+        """인증 대기 중 CancelledError → session 정리 + CancelledError 재전파."""
+        adapter = KISAdapter(KIS_CONFIG)
+        session = self._patch_client_session(monkeypatch)
+
+        async def _cancel() -> None:
+            raise asyncio.CancelledError()
+
+        monkeypatch.setattr(adapter, "_authenticate", _cancel)
+
+        with pytest.raises(asyncio.CancelledError):
+            await adapter.connect()
+
+        session.close.assert_awaited_once()
+        assert adapter._session is None
+        assert adapter.is_connected is False
+
+    async def test_connect_close_failure_preserves_original_error(self, monkeypatch):
+        """cleanup close() 실패는 swallow하고 원본 인증 예외를 보존한다."""
+        adapter = KISAdapter(KIS_CONFIG)
+        session = self._patch_client_session(monkeypatch)
+        session.close = AsyncMock(side_effect=RuntimeError("close boom"))
+
+        async def _fail() -> None:
+            raise AuthenticationError("인증 실패 (HTTP 403): EGW00133")
+
+        monkeypatch.setattr(adapter, "_authenticate", _fail)
+
+        # close 실패가 원본 예외를 가리지 않는다.
+        with pytest.raises(AuthenticationError, match="EGW00133"):
+            await adapter.connect()
+
+        session.close.assert_awaited_once()
+        assert adapter._session is None
+        assert adapter.is_connected is False
+
+    async def test_connect_success_keeps_session(self, monkeypatch):
+        """정상 connect → session 유지·is_connected True, 이후 disconnect 정상."""
+        adapter = KISAdapter(KIS_CONFIG)
+        session = self._patch_client_session(monkeypatch)
+
+        async def _ok() -> None:
+            adapter.access_token = "test_token"
+
+        monkeypatch.setattr(adapter, "_authenticate", _ok)
+
+        await adapter.connect()
+
+        assert adapter._session is session
+        assert adapter.is_connected is True
+        session.close.assert_not_called()
+
+        await adapter.disconnect()
+        session.close.assert_awaited_once()
+        assert adapter._session is None
+        assert adapter.is_connected is False
