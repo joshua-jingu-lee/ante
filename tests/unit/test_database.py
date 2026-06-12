@@ -548,3 +548,262 @@ async def test_read_only_connect_failure_drains_worker_thread(tmp_path):
 
     leaked = set(_live_worker_threads()) - before
     assert not leaked, f"ro connect 실패 후 worker thread 누수: {leaked} (#1965)"
+
+
+# --- writer 태스크 간 직렬화 + 트랜잭션 owner 추적 (#2365) ---
+#
+# 같은 writer 연결을 여러 asyncio 태스크가 공유할 때, ``execute*()`` 의
+# implicit BEGIN(``conn.execute(sql)``)과 ``conn.commit()`` 사이 await 경계에서
+# 태스크가 전환되면, 다른 태스크의 ``transaction()`` 이 이미 열린 SQLite
+# 트랜잭션 위에서 ``BEGIN`` 을 실행해 ``cannot start a transaction within a
+# transaction`` 으로 실패한다(race A). 역방향(race B)에서는 standalone
+# ``execute()`` 가 진행 중인 트랜잭션에 합류해 무관한 쓰기가 rollback 으로
+# 소실된다. 아래 테스트는 commit 지점을 ``asyncio.Event`` barrier 로 결정적으로
+# 고정해 두 race 를 재현한다(stress 비사용).
+
+
+def _install_commit_barrier(db):
+    """writer 연결의 ``commit()`` 을 asyncio.Event barrier 로 가로챈다.
+
+    반환된 ``released`` Event 를 set 하기 전까지 ``commit()`` 호출은
+    ``reached`` Event 를 set 한 뒤 대기한다. 이로써 자동커밋 ``execute()`` 를
+    "``execute`` 완료 후 ``commit`` 직전" 윈도우에 결정적으로 고정할 수 있다.
+    원래 ``commit`` 은 ``released`` 후 정상 실행된다.
+    """
+    writer = db._get_writer()
+    real_commit = writer.commit
+    reached = asyncio.Event()
+    released = asyncio.Event()
+
+    async def gated_commit(*args, **kwargs):
+        reached.set()
+        await released.wait()
+        return await real_commit(*args, **kwargs)
+
+    patcher = patch.object(writer, "commit", side_effect=gated_commit)
+    patcher.start()
+    return reached, released, patcher
+
+
+async def test_concurrent_autocommit_then_transaction_race_a(db):
+    """race A: 태스크1 자동커밋 write 가 commit 직전 고정된 윈도우에서 태스크2가
+    ``transaction()`` 을 진입해도 중첩 트랜잭션 오류 없이 성공하고, 태스크1의
+    write 도 보존된다.
+
+    수정 전(main): 태스크2 ``transaction()`` 의 ``BEGIN`` 이 태스크1이 연
+    implicit 트랜잭션 위에서 실행돼 ``sqlite3.OperationalError: cannot start a
+    transaction within a transaction`` (a 실패), 그리고 ``transaction()`` 의
+    BaseException ROLLBACK 이 태스크1의 implicit write 를 되돌려 소실(b 실패) →
+    둘 다 RED.
+    """
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    reached, released, patcher = _install_commit_barrier(db)
+    try:
+        # 태스크1: 자동커밋 INSERT — execute 완료 후 commit 직전에서 고정된다.
+        task1 = asyncio.create_task(
+            db.execute("INSERT INTO t (id, val) VALUES (1, 'task1')")
+        )
+        # 태스크1 이 commit barrier 에 도달할 때까지 대기.
+        await asyncio.wait_for(reached.wait(), timeout=5.0)
+
+        # 윈도우 안에서 태스크2 가 transaction() 진입 (내부 write 포함).
+        async def task2_body():
+            async with db.transaction():
+                await db.execute("INSERT INTO t (id, val) VALUES (2, 'task2')")
+
+        task2 = asyncio.create_task(task2_body())
+
+        # 태스크2 가 lock 대기(또는 실패)에 도달할 시간을 준 뒤 barrier 해제.
+        await asyncio.sleep(0.05)
+        released.set()
+
+        # (a) 태스크2 트랜잭션이 예외 없이 성공해야 한다.
+        await asyncio.wait_for(task2, timeout=5.0)
+        await asyncio.wait_for(task1, timeout=5.0)
+    finally:
+        patcher.stop()
+
+    # (a) 태스크2 행 커밋 + (b) 태스크1 write 보존.
+    rows = await db.fetch_all("SELECT id, val FROM t ORDER BY id")
+    assert [(r["id"], r["val"]) for r in rows] == [(1, "task1"), (2, "task2")]
+
+
+async def test_concurrent_transaction_then_autocommit_race_b(db):
+    """race B: 태스크1 ``transaction()`` 진행 중 태스크2 standalone ``execute()`` 가
+    트랜잭션에 합류하지 않고 독립 커밋되며, 태스크1 rollback 시 태스크1 행만
+    소실된다.
+
+    수정 전(main): 태스크2 ``execute()`` 가 ``_in_transaction`` 플래그를 보고
+    commit 을 skip → 태스크1 트랜잭션에 합류 → 태스크1 rollback 으로 태스크2
+    행까지 소실(RED).
+    """
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    task2_may_start = asyncio.Event()
+    task2_inserted = asyncio.Event()
+
+    async def task1_body():
+        with pytest.raises(ValueError, match="의도적 예외"):
+            async with db.transaction():
+                await db.execute("INSERT INTO t (id, val) VALUES (1, 'task1')")
+                # 태스크2 가 standalone execute 를 시도하도록 양보.
+                task2_may_start.set()
+                await asyncio.wait_for(task2_inserted.wait(), timeout=5.0)
+                raise ValueError("의도적 예외")
+
+    async def task2_body():
+        await asyncio.wait_for(task2_may_start.wait(), timeout=5.0)
+        # owner 태스크가 아니므로 transaction 합류 금지 → lock 대기 후 독립 커밋.
+        # owner 트랜잭션이 lock 을 쥐고 있으므로 task1 이 commit/rollback 으로
+        # lock 을 놓을 때까지 여기서 대기한다(교착 없음 — task1 은 task2 완료를
+        # 직접 await 하지 않고 Event 로만 동기화).
+        insert = asyncio.create_task(
+            db.execute("INSERT INTO t (id, val) VALUES (2, 'task2')")
+        )
+        # task1 이 rollback 으로 진행하도록 신호.
+        task2_inserted.set()
+        await asyncio.wait_for(insert, timeout=5.0)
+
+    await asyncio.gather(task1_body(), task2_body())
+
+    # 태스크2 행만 커밋 유지, 태스크1 행은 rollback 으로 소실.
+    rows = await db.fetch_all("SELECT id, val FROM t ORDER BY id")
+    assert [(r["id"], r["val"]) for r in rows] == [(2, "task2")]
+
+
+async def test_autocommit_cancel_leaves_no_open_transaction(db):
+    """자동커밋 ``execute()`` 가 commit 대기 중 cancel 돼도 implicit 트랜잭션이
+    잔존하지 않아 이후 ``transaction()`` 이 정상 동작한다(#2365)."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    reached, released, patcher = _install_commit_barrier(db)
+    try:
+        task1 = asyncio.create_task(
+            db.execute("INSERT INTO t (id, val) VALUES (1, 'task1')")
+        )
+        await asyncio.wait_for(reached.wait(), timeout=5.0)
+        # execute 완료 후 commit 대기 중에 cancel.
+        task1.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task1
+    finally:
+        # barrier 를 풀어 cleanup ROLLBACK(또는 commit) 이 진행되도록 한다.
+        released.set()
+        patcher.stop()
+
+    # implicit 트랜잭션 잔존이 없어야 — 새 transaction() 이 BEGIN 에서 실패하면 안 됨.
+    async with db.transaction():
+        await db.execute("INSERT INTO t (id, val) VALUES (2, 'after')")
+    rows = await db.fetch_all("SELECT id, val FROM t ORDER BY id")
+    assert [(r["id"], r["val"]) for r in rows] == [(2, "after")]
+
+
+async def test_double_cancel_during_commit_and_rollback_releases_lock(db):
+    """``transaction()`` COMMIT 대기 중 cancel → cleanup ROLLBACK 대기 중 재-cancel
+    해도 lock 이 해제되고 다음 ``transaction()``/``execute()`` 가 정상 동작한다
+    (enqueue-before-release invariant 검증, #2365 r2-②)."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    writer = db._get_writer()
+    real_execute = writer.execute
+    commit_reached = asyncio.Event()
+    rollback_reached = asyncio.Event()
+    release_commit = asyncio.Event()
+    release_rollback = asyncio.Event()
+
+    async def gated_execute(sql, *args, **kwargs):
+        upper = sql.strip().upper()
+        if upper.startswith("COMMIT"):
+            # COMMIT 은 enqueue 전 barrier — 1차 cancel 이 COMMIT 결과 대기를
+            # abandon 하게 한다(자동커밋 race 와 동형).
+            commit_reached.set()
+            await release_commit.wait()
+            return await real_execute(sql, *args, **kwargs)
+        if upper.startswith("ROLLBACK"):
+            # enqueue-before-release invariant 충실 재현: cleanup ROLLBACK 은
+            # real_execute 로 **먼저 실행(enqueue+settle)** 한 뒤 barrier 로
+            # 추가 대기한다. 그래야 2차 cancel 이 "ROLLBACK 이 worker FIFO 에
+            # 들어가 settle 된 후 결과 후처리 대기만 abandon" 하는 실제 코드의
+            # invariant 와 동형이 된다(release 전에 cancel 해 enqueue 자체를
+            # 막으면 프록시가 실제 조건을 왜곡 — 금지).
+            result = await real_execute(sql, *args, **kwargs)
+            rollback_reached.set()
+            await release_rollback.wait()
+            return result
+        return await real_execute(sql, *args, **kwargs)
+
+    async def txn_body():
+        async with db.transaction():
+            await db.execute("INSERT INTO t (id, val) VALUES (1, 'x')")
+
+    with patch.object(writer, "execute", side_effect=gated_execute):
+        task = asyncio.create_task(txn_body())
+        # COMMIT 대기 진입까지 대기 후 1차 cancel.
+        await asyncio.wait_for(commit_reached.wait(), timeout=5.0)
+        task.cancel()
+        # cancel 이 COMMIT await 에 전달돼 cleanup ROLLBACK 으로 진입할 시간을 준다.
+        release_commit.set()
+        # cleanup ROLLBACK 대기 진입까지 대기 후 2차 cancel.
+        await asyncio.wait_for(rollback_reached.wait(), timeout=5.0)
+        task.cancel()
+        release_rollback.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    # lock 이 해제되어 다음 트랜잭션/자동커밋이 정상 동작해야 한다.
+    async with db.transaction():
+        await db.execute("INSERT INTO t (id, val) VALUES (2, 'next')")
+    await db.execute("INSERT INTO t (id, val) VALUES (3, 'auto')")
+    rows = await db.fetch_all("SELECT id FROM t ORDER BY id")
+    assert [r["id"] for r in rows] == [2, 3]
+
+
+async def test_child_task_execute_does_not_join_owner_transaction(db):
+    """owner ``transaction()`` 블록 안에서 생성된 child task 의 ``execute()`` 는
+    owner 트랜잭션에 합류하지 않고 lock 대기 → owner commit 후 독립 커밋된다.
+
+    owner 는 child 완료를 블록 안에서 직접 await 하지 않는다(교착 경로는 문서
+    invariant 로 금지). owner 가 commit 으로 lock 을 놓은 뒤 child 가 커밋된다.
+    """
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    child: asyncio.Task | None = None
+
+    async with db.transaction():
+        await db.execute("INSERT INTO t (id, val) VALUES (1, 'owner')")
+        # child task 는 별도 태스크 → owner 가 아니므로 lock 대기.
+        child = asyncio.create_task(
+            db.execute("INSERT INTO t (id, val) VALUES (2, 'child')")
+        )
+        # owner 는 child 완료를 직접 await 하지 않는다(교착 방지). child 가 lock
+        # 대기 상태에 도달하도록 잠깐 양보만 한다.
+        await asyncio.sleep(0.05)
+        # child 는 아직 commit 되지 않았어야 한다(owner 가 lock 보유).
+        assert not child.done()
+
+    # owner commit 으로 lock 해제 → child 가 독립 커밋.
+    await asyncio.wait_for(child, timeout=5.0)
+    rows = await db.fetch_all("SELECT id, val FROM t ORDER BY id")
+    assert [(r["id"], r["val"]) for r in rows] == [(1, "owner"), (2, "child")]
+
+
+async def test_execute_script_inside_transaction_raises(db):
+    """``transaction()`` owner 태스크가 ``execute_script()`` 를 호출하면 RuntimeError.
+
+    Python ``executescript`` 의 암묵 COMMIT 이 열린 트랜잭션을 임의 커밋하는
+    사고를 차단한다(schema/lifecycle 전용).
+    """
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY);")
+    async with db.transaction():
+        with pytest.raises(RuntimeError, match="트랜잭션 안에서는"):
+            await db.execute_script("CREATE TABLE t2 (id INTEGER)")
+
+
+async def test_execute_script_outside_transaction_still_works(db):
+    """트랜잭션 밖에서는 ``execute_script()`` 가 기존대로 동작한다."""
+    await db.execute_script("CREATE TABLE t3 (id INTEGER PRIMARY KEY, v TEXT);")
+    await db.execute("INSERT INTO t3 (v) VALUES ('ok')")
+    row = await db.fetch_one("SELECT v FROM t3")
+    assert row is not None
+    assert row["v"] == "ok"

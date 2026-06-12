@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -407,3 +408,110 @@ class TestTreasuryEmptyKeyNotDeduped:
             "SELECT * FROM treasury_fill_dedup WHERE fill_dedup_key = ''"
         )
         assert empty_rows == []
+
+
+class TestTreasuryFillOutboxDrainUnderConcurrentWrite:
+    """fill 경로 통합 회귀: 실제 ``Treasury._on_order_filled`` EventBus 구독 +
+    ``FillOutboxPublisher.catch_up_once()`` drain 이, 같은 writer 연결을 공유하는
+    백그라운드 자동커밋 write 와 동시에 진행돼도 중첩 트랜잭션 오류 없이 정산을
+    완료한다(#2365).
+
+    EventBus 가 핸들러 예외를 swallow 하므로 예외를 기대하지 않고, drain 후
+    상태를 직접 검증한다: ``treasury_fill_dedup`` row 수 = fill 수, budget
+    정산 반영, ``fill_outbox.published=1``.
+    """
+
+    async def test_fill_drain_settles_under_concurrent_autocommit(
+        self, treasury, order_tracker, db, eventbus
+    ):
+        from ante.trade.fill_outbox import (
+            FillOutbox,
+            FillOutboxPublisher,
+            make_fill_dedup_key,
+        )
+
+        outbox = FillOutbox(db)
+        await outbox.initialize()
+        publisher = FillOutboxPublisher(outbox=outbox, eventbus=eventbus)
+
+        # 보조 테이블(백그라운드 자동커밋 write 대상).
+        await db.execute_script("CREATE TABLE bg (id INTEGER PRIMARY KEY, val TEXT);")
+
+        # buy fill 예산/예약 준비.
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+        await order_tracker.record_fill("ord1", 10.0, 50_000.0)
+
+        key = make_fill_dedup_key("ord1", 10.0)
+        payload = {
+            "account_id": ACCOUNT_ID,
+            "order_id": "ord1",
+            "broker_order_id": "bk-ord1",
+            "bot_id": "bot1",
+            "strategy_id": "s1",
+            "symbol": "005930",
+            "side": "buy",
+            "quantity": 10.0,
+            "price": 50_000.0,
+            "commission": 75.0,
+            "order_type": "limit",
+            "fill_dedup_key": key,
+        }
+        # outbox 에 fill row enqueue (트랜잭션 밖 자동커밋).
+        await outbox.enqueue(fill_dedup_key=key, payload=payload)
+
+        # 백그라운드 자동커밋 write 를 commit 직전에 고정해 race 윈도우를 만든다.
+        writer = db._get_writer()
+        real_commit = writer.commit
+        reached = asyncio.Event()
+        released = asyncio.Event()
+        first = {"gated": False}
+
+        async def gated_commit(*args, **kwargs):
+            # 첫 commit(백그라운드 write)만 barrier 로 고정한다.
+            if not first["gated"]:
+                first["gated"] = True
+                reached.set()
+                await released.wait()
+            return await real_commit(*args, **kwargs)
+
+        with patch.object(writer, "commit", side_effect=gated_commit):
+            bg = asyncio.create_task(
+                db.execute("INSERT INTO bg (id, val) VALUES (1, 'bg')")
+            )
+            await asyncio.wait_for(reached.wait(), timeout=5.0)
+
+            # 윈도우 안에서 outbox drain → Treasury._on_order_filled 가
+            # transaction() 진입(수정 전: 중첩 트랜잭션 오류로 정산 누락).
+            drain = asyncio.create_task(publisher.catch_up_once())
+            await asyncio.sleep(0.05)
+            released.set()
+
+            published_count = await asyncio.wait_for(drain, timeout=5.0)
+            await asyncio.wait_for(bg, timeout=5.0)
+
+        # 발행 1건.
+        assert published_count == 1
+
+        # dedup row 수 = fill 수(1).
+        assert await _fill_dedup_count(db, key) == 1
+        # budget 정산 반영(spent = 500,000 + 75).
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.spent == pytest.approx(500_075.0)
+        assert budget.reserved == pytest.approx(0.0)
+        _assert_invariant(treasury, "bot1")
+        # fill tx 1건.
+        assert await _tx_fill_count(db, "bot1") == 1
+        # outbox published=1.
+        rows = await db.fetch_all(
+            "SELECT published FROM fill_outbox WHERE fill_dedup_key = ?", (key,)
+        )
+        assert len(rows) == 1
+        assert rows[0]["published"] == 1
+        # 백그라운드 write 도 보존.
+        bg_rows = await db.fetch_all("SELECT id, val FROM bg")
+        assert [(r["id"], r["val"]) for r in bg_rows] == [(1, "bg")]

@@ -63,7 +63,34 @@ class Database:
         self._read_only = read_only
         self._writer: aiosqlite.Connection | None = None
         self._reader: aiosqlite.Connection | None = None
-        self._in_transaction: bool = False
+        # writer 직렬화 + 트랜잭션 소유 태스크 추적(#2365).
+        #
+        # 단일 writer 연결을 여러 asyncio 태스크가 공유하면, ``execute*()`` 의
+        # implicit BEGIN(``conn.execute(sql)``)과 ``conn.commit()`` 사이 await
+        # 경계에서 태스크가 전환돼 두 종류의 race 가 난다:
+        #   - race A: 다른 태스크가 이미 열린 SQLite 트랜잭션 위에서
+        #     ``transaction()`` 의 ``BEGIN`` 을 실행 → "cannot start a
+        #     transaction within a transaction".
+        #   - race B: standalone ``execute()`` 가 진행 중인 트랜잭션에 합류 →
+        #     owner rollback 시 무관한 쓰기가 조용히 소실.
+        # ``_write_lock`` 으로 모든 writer 쓰기/트랜잭션을 태스크 간 직렬화하고,
+        # ``_txn_owner`` 로 현재 트랜잭션을 소유한 태스크를 추적해 그 태스크의
+        # 쓰기만 트랜잭션에 합류(commit skip)시킨다.
+        self._write_lock = asyncio.Lock()
+        self._txn_owner: asyncio.Task | None = None
+
+    @property
+    def _in_transaction(self) -> bool:
+        """현재 호출 태스크가 트랜잭션 owner 인지(같은 태스크 합류 판정).
+
+        ``_txn_owner`` 기반으로 단순화한다(외부 production 참조 없음). 트랜잭션은
+        소유 태스크 한정으로만 합류하므로, **현재 태스크가 owner 일 때만** True.
+        owner 가 아닌 태스크에서 보면 트랜잭션이 진행 중이어도 False 다(독립
+        자동커밋 경로). 회귀 테스트(``test_transaction_rollback_failure_
+        preserves_original_exception``)가 ``finally`` 해제를 직접 관측한다.
+        """
+        owner = self._txn_owner
+        return owner is not None and owner is asyncio.current_task()
 
     @staticmethod
     async def _drain_failed_conn(conn: aiosqlite.Connection) -> None:
@@ -287,12 +314,45 @@ class Database:
             raise RuntimeError("DB 연결되지 않음. connect()를 먼저 호출하세요.")
         return self._reader
 
+    @staticmethod
+    async def _best_effort_rollback(conn: aiosqlite.Connection) -> None:
+        """non-owner 자동커밋 경로의 cleanup ROLLBACK(best-effort, #2365).
+
+        cancellation-safety invariant: 이 메서드는 ``except BaseException`` 진입
+        **직후** suspension 없이 곧바로 ``await conn.execute("ROLLBACK")`` 에
+        도달해야 한다. asyncio cancellation 은 suspension point 에서만 전달되고,
+        aiosqlite ``Connection.execute(...)`` 는 첫 suspension(``await future``)
+        **이전 동기 구간에서 SQL 을 worker FIFO 에 ``put_nowait``** 하므로, await
+        문이 실행을 시작하면 ROLLBACK 은 반드시 enqueue 된다(취소는 결과 대기만
+        abandon). ROLLBACK 자체 실패는 swallow 한다 — 원본 예외 보존이 우선.
+        """
+        try:
+            await conn.execute("ROLLBACK")
+        except BaseException:
+            # rollback 실패도 swallow — 원본 예외 보존이 우선.
+            pass
+
     async def execute(self, sql: str, params: tuple = ()) -> None:
-        """INSERT/UPDATE/DELETE 실행."""
+        """INSERT/UPDATE/DELETE 실행.
+
+        현재 태스크가 트랜잭션 owner 면 lock 없이 인라인 실행 + commit skip
+        (같은 태스크 트랜잭션 합류). 아니면 ``_write_lock`` 안에서 실행 후
+        독립 commit 한다(태스크 간 직렬화 — #2365).
+        """
         conn = self._get_writer()
-        await conn.execute(sql, params)
-        if not self._in_transaction:
-            await conn.commit()
+        if self._in_transaction:
+            await conn.execute(sql, params)
+            return
+        async with self._write_lock:
+            try:
+                await conn.execute(sql, params)
+                await conn.commit()
+            except BaseException:
+                # cancellation 등으로 commit 전에 중단되면 implicit 트랜잭션이
+                # 잔존해 다음 lock holder 의 BEGIN 을 깨뜨린다 — best-effort
+                # ROLLBACK 으로 정리(직전 suspension 없이 곧바로 진입).
+                await self._best_effort_rollback(conn)
+                raise
 
     async def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
         """단일 행 조회. dict(컬럼명 → 값) 반환."""
@@ -310,13 +370,24 @@ class Database:
         중인 writer 트랜잭션의 uncommitted row를 보지 못하므로, CAS 후
         ``RETURNING`` 으로 결과를 원자적으로 읽어야 하는 경로는 이 메서드를
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
+
+        현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
+        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화 — #2365).
         """
         conn = self._get_writer()
-        async with conn.execute(sql, params) as cursor:
-            row = await cursor.fetchone()
-            result = dict(row) if row else None
-        if not self._in_transaction:
-            await conn.commit()
+        if self._in_transaction:
+            async with conn.execute(sql, params) as cursor:
+                row = await cursor.fetchone()
+                return dict(row) if row else None
+        async with self._write_lock:
+            try:
+                async with conn.execute(sql, params) as cursor:
+                    row = await cursor.fetchone()
+                    result = dict(row) if row else None
+                await conn.commit()
+            except BaseException:
+                await self._best_effort_rollback(conn)
+                raise
         return result
 
     async def execute_fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -328,13 +399,24 @@ class Database:
         연결을 쓰는 ``fetch_all`` 은 진행 중인 writer 트랜잭션의 uncommitted row 를
         보지 못하므로, 영향 행 집합을 RETURNING 으로 받아야 하는 경로는 이 메서드를
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
+
+        현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
+        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화 — #2365).
         """
         conn = self._get_writer()
-        async with conn.execute(sql, params) as cursor:
-            rows = await cursor.fetchall()
-            result = [dict(row) for row in rows]
-        if not self._in_transaction:
-            await conn.commit()
+        if self._in_transaction:
+            async with conn.execute(sql, params) as cursor:
+                rows = await cursor.fetchall()
+                return [dict(row) for row in rows]
+        async with self._write_lock:
+            try:
+                async with conn.execute(sql, params) as cursor:
+                    rows = await cursor.fetchall()
+                    result = [dict(row) for row in rows]
+                await conn.commit()
+            except BaseException:
+                await self._best_effort_rollback(conn)
+                raise
         return result
 
     async def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
@@ -345,35 +427,79 @@ class Database:
             return [dict(row) for row in rows]
 
     async def execute_script(self, sql: str) -> None:
-        """DDL 스크립트 실행 (테이블 생성 등)."""
+        """DDL 스크립트 실행 (schema/lifecycle 전용 — 테이블 생성 등).
+
+        **트랜잭션 안에서 호출 금지**: Python ``executescript`` 는 실행 전에
+        열린 트랜잭션을 암묵 COMMIT 하므로, ``transaction()`` owner 태스크가
+        호출하면 진행 중인 트랜잭션을 의도치 않게 커밋해 원자성을 깨뜨린다.
+        owner 태스크 호출은 ``RuntimeError`` 로 차단한다(#2365). schema 부트
+        스트랩/마이그레이션은 트랜잭션 밖에서만 호출한다 — ``db/migrations.py``
+        모듈 docstring 의 작성 규칙 참조.
+
+        non-owner(트랜잭션 밖) 호출은 ``_write_lock`` 안에서 실행한다(태스크 간
+        직렬화). ``executescript`` 자체가 암묵 COMMIT 으로 끝나므로 별도
+        ``conn.commit()`` 는 하지 않는다(기존 시맨틱 유지).
+        """
+        if self._in_transaction:
+            raise RuntimeError(
+                "트랜잭션 안에서는 execute_script 를 호출할 수 없습니다 "
+                "(executescript 의 암묵 COMMIT 이 열린 트랜잭션을 깨뜨립니다)"
+            )
         conn = self._get_writer()
-        await conn.executescript(sql)
+        async with self._write_lock:
+            await conn.executescript(sql)
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator["Database"]:
         """트랜잭션 컨텍스트 매니저.
+
+        ``_write_lock`` 안에서 현재 태스크를 ``_txn_owner`` 로 등록하고
+        ``BEGIN`` → yield → ``COMMIT`` 한다. owner 태스크의 ``execute*()`` 만
+        commit 을 skip 하고 트랜잭션에 합류하며, 다른 태스크의 writer 쓰기는
+        lock 에서 대기해 직렬화된다(#2365).
 
         asyncio.CancelledError / KeyboardInterrupt / SystemExit 포함 모든
         BaseException 경로에서 ROLLBACK을 시도한 뒤 원본 예외를 재전파한다.
         ROLLBACK 자체 실패는 swallow하여 원본 예외(특히 CancelledError) 보존을
         우선한다.
 
-        nested transaction은 지원하지 않는다. savepoint는 본 구현 범위 외.
+        cancellation-safety invariant(#2365): cleanup ROLLBACK 은 ``except
+        BaseException`` 진입 **직후 suspension 없이** 곧바로 ``await
+        conn.execute("ROLLBACK")`` 에 도달한다. asyncio cancellation 은
+        suspension point 에서만 전달되고, aiosqlite ``Connection.execute`` 는
+        첫 suspension 이전 동기 구간에서 SQL 을 worker FIFO 에 ``put_nowait``
+        하므로, ``COMMIT`` await 이 cancel 돼도 ROLLBACK 은 enqueue 되어 worker
+        FIFO 직렬성에 의해 다음 lock holder 의 SQL 보다 먼저 settle 된다.
+        ``BEGIN`` 도 "await 문 실행 시작 = enqueue 보장" 으로 취급해, cancellation
+        -during-BEGIN 에서도 cleanup ROLLBACK 을 **무조건 시도**한다(``begun``
+        플래그로 건너뛰는 패턴 금지, ``asyncio.shield`` 미사용).
+
+        nested transaction은 지원하지 않는다(같은 태스크 재진입은 lock 획득
+        **전** RuntimeError 로 차단 — 재획득 deadlock 방지). savepoint는 본
+        구현 범위 외.
         """
-        if self._in_transaction:
+        # 같은 태스크 재진입 = 중첩 트랜잭션. lock 획득 전에 검사해야 자기 자신이
+        # 보유한 lock 을 재획득하려다 deadlock 하는 일을 막는다.
+        if self._txn_owner is asyncio.current_task():
             raise RuntimeError("중첩 트랜잭션은 지원하지 않습니다")
         conn = self._get_writer()
-        self._in_transaction = True
-        try:
-            await conn.execute("BEGIN")
-            yield self
-            await conn.execute("COMMIT")
-        except BaseException:
+        async with self._write_lock:
+            self._txn_owner = asyncio.current_task()
             try:
-                await conn.execute("ROLLBACK")
+                await conn.execute("BEGIN")
+                yield self
+                # COMMIT 결과를 관찰한 뒤 정상 반환한다(enqueue 만 하고 결과를
+                # 버리지 않는다 — r2-①). 비취소 예외/취소 모두 아래 except 로.
+                await conn.execute("COMMIT")
             except BaseException:
-                # rollback 실패도 swallow — 원본 예외 보존이 우선
-                pass
-            raise
-        finally:
-            self._in_transaction = False
+                # cancellation 포함 모든 경로에서 cleanup ROLLBACK 을 무조건
+                # 시도한다 — 진입 직후 suspension 없이 곧바로 ROLLBACK await
+                # 에 도달한다(직전 cancellation-safety invariant 참조).
+                try:
+                    await conn.execute("ROLLBACK")
+                except BaseException:
+                    # rollback 실패도 swallow — 원본 예외 보존이 우선
+                    pass
+                raise
+            finally:
+                self._txn_owner = None
