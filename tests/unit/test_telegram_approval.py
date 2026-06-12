@@ -346,149 +346,69 @@ class TestCallbackQuery:
         assert "승인 완료" in receiver._reply.call_args[0][1]
 
 
-# ── /approve, /reject 명령어 ─────────────────────
+# ── /approve, /reject 텍스트 명령 스펙아웃 회귀 (#2379) ──
+# 텔레그램 결재는 인라인 버튼 callback 전용. 텍스트 명령 /approve·/reject는
+# public contract에서 제거되었고, 알 수 없는 명령으로 폴스루해야 한다.
+# (콜백 경로 approve:{id}/reject:{id}는 TestCallbackQuery에서 green 유지)
 
 
-class TestApproveRejectCommands:
-    """텍스트 명령어 /approve, /reject 테스트."""
+class TestApproveRejectTextCommandsRemoved:
+    """텍스트 명령 /approve, /reject 스펙아웃 회귀 (#2379)."""
 
-    async def test_approve_command(self, receiver, approval_service):
-        """/approve <id> 명령이 suppress_notification=True로 호출한다."""
-        result = await receiver._cmd_approve(["abc123"])
-        assert "✅ 결재 승인 완료" in result
-        approval_service.approve.assert_called_once_with(
-            "abc123", resolved_by="telegram", suppress_notification=True
-        )
+    async def test_approve_text_command_unknown(self, receiver, approval_service):
+        """/approve <id> 텍스트 명령은 알 수 없는 명령으로 응답한다."""
+        update = {
+            "message": {
+                "text": "/approve abc",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
 
-    async def test_approve_response_format(self, receiver, approval_service):
-        """/approve 성공 시 제목과 ID를 포함한 스펙 형식 응답."""
-        approval_service.approve.return_value = _make_approval_request(
-            title="봇 중지 요청", status="approved"
-        )
-        result = await receiver._cmd_approve(["abc123"])
-        assert "✅ 결재 승인 완료" in result
-        assert "제목: 봇 중지 요청" in result
-        assert "ID: abc123" in result
+        reply_text = receiver._reply.call_args[0][1]
+        assert reply_text == "알 수 없는 명령입니다. /help를 입력해 주세요."
+        approval_service.approve.assert_not_called()
 
-    async def test_approve_execution_failed(self, receiver, approval_service):
-        """/approve executor 실행 실패 시 경고 형식 응답."""
-        approval_service.approve.return_value = _make_approval_request(
-            title="봇 중지 요청",
-            status="execution_failed",
-            history=[{"action": "execution_failed", "detail": "봇이 이미 중지됨"}],
-        )
-        result = await receiver._cmd_approve(["abc123"])
-        assert "⚠️ 승인되었으나 실행 실패" in result
-        assert "제목: 봇 중지 요청" in result
-        assert "사유: 봇이 이미 중지됨" in result
+    async def test_reject_text_command_unknown(self, receiver, approval_service):
+        """/reject <id> 텍스트 명령은 알 수 없는 명령으로 응답한다."""
+        update = {
+            "message": {
+                "text": "/reject abc 사유",
+                "from": {"id": 12345},
+                "chat": {"id": 100},
+            }
+        }
+        receiver._reply = AsyncMock()
+        await receiver._handle_update(update)
 
-    async def test_approve_no_args(self, receiver):
-        """/approve 인자 없으면 안내 메시지."""
-        result = await receiver._cmd_approve([])
-        assert "ID를 지정" in result
+        reply_text = receiver._reply.call_args[0][1]
+        assert reply_text == "알 수 없는 명령입니다. /help를 입력해 주세요."
+        approval_service.reject.assert_not_called()
 
-    async def test_approve_no_service(self, adapter):
-        """approval_service 없으면 안내 메시지."""
-        r = TelegramCommandReceiver(
-            adapter=adapter, allowed_user_ids=[12345], approval_service=None
-        )
-        result = await r._cmd_approve(["abc123"])
-        assert "연결되지 않았습니다" in result
+    async def test_execute_approve_unknown(self, receiver, approval_service):
+        """_execute 경로에서 approve 명령은 알 수 없는 명령으로 폴스루한다."""
+        result = await receiver._execute("approve", ["abc"], 12345, 100)
+        assert result == "알 수 없는 명령입니다. /help를 입력해 주세요."
+        approval_service.approve.assert_not_called()
 
-    async def test_approve_not_found(self, receiver, approval_service):
-        """존재하지 않는 결재 ID에 대한 에러 메시지."""
-        approval_service.approve.side_effect = ValueError(
-            "결재 요청을 찾을 수 없음: abc123"
-        )
-        result = await receiver._cmd_approve(["abc123"])
-        assert "결재를 찾을 수 없습니다" in result
-        assert "ID: abc123" in result
+    async def test_execute_reject_unknown(self, receiver, approval_service):
+        """_execute 경로에서 reject 명령은 알 수 없는 명령으로 폴스루한다."""
+        result = await receiver._execute("reject", ["abc"], 12345, 100)
+        assert result == "알 수 없는 명령입니다. /help를 입력해 주세요."
+        approval_service.reject.assert_not_called()
 
-    async def test_approve_already_processed(self, receiver, approval_service):
-        """이미 처리된 결재에 대한 에러 메시지."""
-        approval_service.approve.side_effect = ValueError(
-            "pending/execution_failed 상태에서만 승인 가능 (현재: approved)"
-        )
-        result = await receiver._cmd_approve(["abc123"])
-        assert "이미 처리된 결재입니다" in result
-        assert "ID: abc123" in result
-
-    async def test_reject_command(self, receiver, approval_service):
-        """/reject <id> [reason] 명령이 suppress_notification=True로 호출한다."""
-        result = await receiver._cmd_reject(["abc123", "리스크", "과다"])
-        assert "❌ 결재 거절 완료" in result
-        approval_service.reject.assert_called_once_with(
-            "abc123",
-            resolved_by="telegram",
-            reject_reason="리스크 과다",
-            suppress_notification=True,
-        )
-
-    async def test_reject_response_format(self, receiver, approval_service):
-        """/reject 성공 시 스펙 형식 응답."""
-        approval_service.reject.return_value = _make_approval_request(
-            title="예산 변경", status="rejected"
-        )
-        result = await receiver._cmd_reject(["abc123", "리스크", "과다"])
-        assert "❌ 결재 거절 완료" in result
-        assert "제목: 예산 변경" in result
-        assert "ID: abc123" in result
-        assert "사유: 리스크 과다" in result
-
-    async def test_reject_default_reason(self, receiver, approval_service):
-        """/reject <id> 사유 미지정 시 기본 사유."""
-        await receiver._cmd_reject(["abc123"])
-        approval_service.reject.assert_called_once_with(
-            "abc123",
-            resolved_by="telegram",
-            reject_reason="사용자 거절",
-            suppress_notification=True,
-        )
-
-    async def test_reject_no_args(self, receiver):
-        """/reject 인자 없으면 안내 메시지."""
-        result = await receiver._cmd_reject([])
-        assert "ID를 지정" in result
-
-    async def test_reject_no_service(self, adapter):
-        """approval_service 없으면 안내 메시지."""
-        r = TelegramCommandReceiver(
-            adapter=adapter, allowed_user_ids=[12345], approval_service=None
-        )
-        result = await r._cmd_reject(["abc123"])
-        assert "연결되지 않았습니다" in result
-
-    async def test_reject_not_found(self, receiver, approval_service):
-        """존재하지 않는 결재 ID에 대한 에러 메시지."""
-        approval_service.reject.side_effect = ValueError(
-            "결재 요청을 찾을 수 없음: abc123"
-        )
-        result = await receiver._cmd_reject(["abc123"])
-        assert "결재를 찾을 수 없습니다" in result
-
-    async def test_reject_already_processed(self, receiver, approval_service):
-        """이미 처리된 결재에 대한 에러 메시지."""
-        approval_service.reject.side_effect = ValueError(
-            "pending/execution_failed 상태에서만 거절 가능 (현재: rejected)"
-        )
-        result = await receiver._cmd_reject(["abc123"])
-        assert "이미 처리된 결재입니다" in result
-
-    async def test_help_includes_approval_commands(self, receiver):
-        """/help에 /approve, /reject 명령이 포함된다."""
+    async def test_help_excludes_approval_text_commands(self, receiver):
+        """/help에 /approve, /reject 텍스트 명령이 노출되지 않는다."""
         result = receiver._cmd_help([])
-        assert "/approve" in result
-        assert "/reject" in result
+        assert "/approve" not in result
+        assert "/reject" not in result
 
-    async def test_execute_approve(self, receiver, approval_service):
-        """_execute를 통해 /approve가 라우팅된다."""
-        result = await receiver._execute("approve", ["abc123"], 12345, 100)
-        assert "승인 완료" in result
-
-    async def test_execute_reject(self, receiver, approval_service):
-        """_execute를 통해 /reject가 라우팅된다."""
-        result = await receiver._execute("reject", ["abc123"], 12345, 100)
-        assert "거절 완료" in result
+    def test_cmd_approve_reject_methods_removed(self, receiver):
+        """_cmd_approve, _cmd_reject 메서드가 제거되었다."""
+        assert not hasattr(receiver, "_cmd_approve")
+        assert not hasattr(receiver, "_cmd_reject")
 
 
 # ── NotificationService 결재 이벤트 구독 ─────────
