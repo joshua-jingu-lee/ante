@@ -15,6 +15,7 @@ from ante.trade.models import TradeRecord, TradeStatus
 if TYPE_CHECKING:
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
     from ante.trade.position import PositionHistory
 
 logger = logging.getLogger(__name__)
@@ -50,9 +51,17 @@ CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 class TradeRecorder:
     """EventBus 이벤트를 구독하여 거래를 자동 기록."""
 
-    def __init__(self, db: Database, position_history: PositionHistory) -> None:
+    def __init__(
+        self,
+        db: Database,
+        position_history: PositionHistory,
+        instrument_service: InstrumentService | None = None,
+    ) -> None:
         self._db = db
         self._position_history = position_history
+        # #2377: 체결 알림 종목명 병기용. 미주입(None)이면 종목코드만 표기하는
+        # 기존 경로를 유지한다(CLI 생성 경로는 미주입 — 알림 미발행).
+        self._instrument_service = instrument_service
         self._eventbus: EventBus | None = None
         # #1957: 체결 이벤트 bounded 멱등 가드. trades 는 INSERT OR IGNORE 로
         # 이미 DB-멱등이나, NotificationEvent 재발행은 effect 비멱등이라 outbox
@@ -117,9 +126,27 @@ class TradeRecorder:
             position = await self._position_history.get_current(
                 event.bot_id, event.symbol, account_id=event.account_id
             )
+            # #2377: 종목코드만 노출하던 라인에 종목명 병기. 미주입/조회 불가 시
+            # symbol-only 로 폴백한다(format_label 이 폴백을 내장 — 무예외·무IO).
+            #
+            # known-limitation(#2377): OrderFilledEvent.exchange 는 일부
+            # producer(durable fill 의 FillApplier._build_filled_payload,
+            # VirtualProvider)에서 기본값 KRX 로 들어올 수 있다. 이 경우 비-KRX
+            # 종목은 instrument cache((symbol, exchange) 키) 미스로 symbol-only
+            # 폴백된다(병기 누락이지 오표기 아님 — 다른 종목명 표기 안 함, #2377
+            # 불변식 보존). producer exchange 전파(account_id 기반 역추적)는
+            # plan 의 "schema 확장 금지"·"비-KRX 거래소 이름 소스 확장 비목표"에
+            # 따라 후속 이슈 영역.
+            symbol_label = (
+                self._instrument_service.format_label(
+                    event.symbol, event.exchange, markdown=True
+                )
+                if self._instrument_service is not None
+                else f"`{event.symbol}`"
+            )
             base_msg = (
                 f"봇 `{event.bot_id}`\n"
-                f"종목: `{event.symbol}`\n"
+                f"종목: {symbol_label}\n"
                 f"{side_label} {event.quantity}주 @ {event.price:,.0f}원"
             )
             if event.side == "buy":

@@ -12,6 +12,8 @@ import pytest
 
 from ante.eventbus import EventBus
 from ante.eventbus.events import NotificationEvent
+from ante.instrument.models import Instrument
+from ante.instrument.service import InstrumentService
 
 
 def _collect_notifications(eventbus: EventBus) -> list[NotificationEvent]:
@@ -24,6 +26,20 @@ def _collect_notifications(eventbus: EventBus) -> list[NotificationEvent]:
 
     eventbus.subscribe(NotificationEvent, _handler)
     return collected
+
+
+def _instrument_service_with(*pairs: tuple[str, str]) -> InstrumentService:
+    """#2377: 캐시만 채운 InstrumentService stub (DB 접근 없음, 동기 조회용).
+
+    ``pairs`` 는 ``(symbol, name)`` 튜플. format_label 은 메모리 캐시 dict 만
+    동기 조회하므로 DB/initialize 없이도 종목명 병기를 검증할 수 있다.
+    """
+    svc = InstrumentService(db=MagicMock())
+    svc._cache = {
+        (symbol, "KRX"): Instrument(symbol=symbol, exchange="KRX", name=name)
+        for symbol, name in pairs
+    }
+    return svc
 
 
 # ── bot/manager.py (4건) ──────────────────────────
@@ -207,6 +223,164 @@ class TestTradeRecorderNotifications:
         assert notifications[0].category == "trade"
         assert "취소 실패" in notifications[0].title
         assert "Already filled" in notifications[0].message
+
+    # ── #2377: 체결 알림 종목명 병기 ──────────────────────
+
+    @pytest.fixture
+    async def recorder_with_instrument(self, eventbus, tmp_path):
+        """instrument_service 가 주입된 TradeRecorder (종목명 병기 경로)."""
+        from ante.core.database import Database
+        from ante.trade.position import PositionHistory
+        from ante.trade.recorder import TradeRecorder
+
+        db = Database(str(tmp_path / "test.db"))
+        await db.connect()
+        ph = PositionHistory(db)
+        await ph.initialize()
+        instrument_service = _instrument_service_with(("005930", "삼성전자"))
+        rec = TradeRecorder(
+            db=db,
+            position_history=ph,
+            instrument_service=instrument_service,
+        )
+        await rec.initialize()
+        rec.subscribe(eventbus)
+        try:
+            yield rec
+        finally:
+            await db.close()
+
+    async def test_filled_notification_includes_name(
+        self, recorder_with_instrument, eventbus, notifications
+    ):
+        """#2377: 적재 시 체결 알림에 종목코드+종목명 병기 (markdown backtick)."""
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o1",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=100.0,
+                price=72000.0,
+                order_type="market",
+                account_id="acc-test",
+            )
+        )
+        assert len(notifications) == 1
+        assert "종목: `005930` (삼성전자)" in notifications[0].message
+
+    async def test_filled_notification_fallback_unknown_symbol(
+        self, recorder_with_instrument, eventbus, notifications
+    ):
+        """#2377: 미적재 종목은 종목코드만 (symbol-only 폴백)."""
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o9",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="999999",
+                side="buy",
+                quantity=10.0,
+                price=1000.0,
+                order_type="market",
+                account_id="acc-test",
+            )
+        )
+        assert len(notifications) == 1
+        assert "종목: `999999`\n" in notifications[0].message
+        assert "(" not in notifications[0].message.split("종목: ")[1].split("\n")[0]
+
+    async def test_filled_notification_no_instrument_service(
+        self, recorder, eventbus, notifications
+    ):
+        """#2377: 미주입(None)이면 기존 종목코드 표기 유지(하위 호환)."""
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o1",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=100.0,
+                price=72000.0,
+                order_type="market",
+                account_id="acc-test",
+            )
+        )
+        assert len(notifications) == 1
+        assert "종목: `005930`\n" in notifications[0].message
+
+    @pytest.fixture
+    async def recorder_with_nyse_instrument(self, eventbus, tmp_path):
+        """비-KRX 캐시(NYSE)만 적재된 TradeRecorder (exchange 기본값 폴백 고정용)."""
+        from ante.core.database import Database
+        from ante.trade.position import PositionHistory
+        from ante.trade.recorder import TradeRecorder
+
+        db = Database(str(tmp_path / "test.db"))
+        await db.connect()
+        ph = PositionHistory(db)
+        await ph.initialize()
+        # ("AAPL", "NYSE") 만 적재 — KRX 키는 부재.
+        instrument_service = InstrumentService(db=MagicMock())
+        instrument_service._cache = {
+            ("AAPL", "NYSE"): Instrument(
+                symbol="AAPL", exchange="NYSE", name="Apple Inc."
+            )
+        }
+        rec = TradeRecorder(
+            db=db,
+            position_history=ph,
+            instrument_service=instrument_service,
+        )
+        await rec.initialize()
+        rec.subscribe(eventbus)
+        try:
+            yield rec
+        finally:
+            await db.close()
+
+    async def test_filled_notification_exchange_default_krx_fallback(
+        self, recorder_with_nyse_instrument, eventbus, notifications
+    ):
+        """#2377 Codex P2-1: exchange 기본값(KRX) 폴백 고정 — 오표기 없음 불변식.
+
+        cache 에는 ``("AAPL", "NYSE")`` 만 적재. durable fill /
+        VirtualProvider 경로처럼 ``OrderFilledEvent.exchange`` 가 dataclass
+        기본값 ``KRX`` 로 들어오면 ``(AAPL, KRX)`` cache 미스 →  symbol-only
+        폴백된다(병기 누락, 오표기 아님). 발행은 정상 성공하고 라벨에는
+        다른 종목명("Apple Inc." 등)이 절대 섞이지 않는다(invariant).
+        """
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o-nyse",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="AAPL",
+                side="buy",
+                quantity=10.0,
+                price=190.0,
+                order_type="market",
+                account_id="acc-test",
+                # exchange 미지정 → dataclass 기본값 "KRX" 적용(폴백 트리거).
+            )
+        )
+        # 알림 발행이 성공(불변식: 발행 실패/지연 금지).
+        assert len(notifications) == 1
+        msg = notifications[0].message
+        # symbol-only 폴백 — 종목명 병기 없음.
+        assert "종목: `AAPL`\n" in msg
+        # 오표기 없음 — 다른 거래소(NYSE) 종목명이 라벨에 섞이지 않는다.
+        assert "Apple Inc." not in msg
 
 
 # ── main.py (2건) ──────────────────────────
@@ -402,6 +576,153 @@ class TestReconcilerNotification:
         assert "계좌: `acc-test`" in notifs[0].message
         assert "bot-1" in notifs[0].message
         assert "005930" in notifs[0].message
+
+    # ── #2377: 포지션 불일치/동기화 지연 알림 종목명 병기 ──────
+
+    async def test_position_mismatch_includes_name(self):
+        """#2377: 적재 시 포지션 불일치 알림에 종목명 병기 (markdown backtick)."""
+        eventbus = EventBus()
+        collected = _collect_notifications(eventbus)
+
+        trade_service = AsyncMock()
+        mock_position = MagicMock()
+        mock_position.symbol = "005930"
+        mock_position.quantity = 100.0
+        mock_position.avg_entry_price = 70000.0
+        trade_service.get_positions.return_value = [mock_position]
+        trade_service.correct_position.return_value = {
+            "symbol": "005930",
+            "old_qty": 100.0,
+            "new_qty": 50.0,
+        }
+
+        from ante.trade.reconciler import PositionReconciler
+
+        reconciler = PositionReconciler(
+            trade_service=trade_service,
+            eventbus=eventbus,
+            instrument_service=_instrument_service_with(("005930", "삼성전자")),
+        )
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 50.0, "avg_price": 70000}
+            ],
+            account_id="acc-test",
+        )
+
+        notifs = [n for n in collected if n.category == "broker"]
+        assert len(notifs) == 1
+        assert "종목: `005930` (삼성전자)" in notifs[0].message
+
+    async def test_position_mismatch_fallback_unknown_symbol(self):
+        """#2377: 미적재 종목은 종목코드만 (symbol-only 폴백)."""
+        eventbus = EventBus()
+        collected = _collect_notifications(eventbus)
+
+        trade_service = AsyncMock()
+        mock_position = MagicMock()
+        mock_position.symbol = "005930"
+        mock_position.quantity = 100.0
+        mock_position.avg_entry_price = 70000.0
+        trade_service.get_positions.return_value = [mock_position]
+        trade_service.correct_position.return_value = {
+            "symbol": "005930",
+            "old_qty": 100.0,
+            "new_qty": 50.0,
+        }
+
+        from ante.trade.reconciler import PositionReconciler
+
+        # 빈 캐시 instrument_service → 폴백.
+        reconciler = PositionReconciler(
+            trade_service=trade_service,
+            eventbus=eventbus,
+            instrument_service=_instrument_service_with(),
+        )
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 50.0, "avg_price": 70000}
+            ],
+            account_id="acc-test",
+        )
+
+        notifs = [n for n in collected if n.category == "broker"]
+        assert len(notifs) == 1
+        assert "종목: `005930`\n" in notifs[0].message
+        assert "(" not in notifs[0].message.split("종목: ")[1].split("\n")[0]
+
+    async def test_position_mismatch_no_instrument_service(self):
+        """#2377: 미주입(None)이면 기존 종목코드 표기 유지(하위 호환)."""
+        eventbus = EventBus()
+        collected = _collect_notifications(eventbus)
+
+        trade_service = AsyncMock()
+        mock_position = MagicMock()
+        mock_position.symbol = "005930"
+        mock_position.quantity = 100.0
+        mock_position.avg_entry_price = 70000.0
+        trade_service.get_positions.return_value = [mock_position]
+        trade_service.correct_position.return_value = {
+            "symbol": "005930",
+            "old_qty": 100.0,
+            "new_qty": 50.0,
+        }
+
+        from ante.trade.reconciler import PositionReconciler
+
+        reconciler = PositionReconciler(trade_service=trade_service, eventbus=eventbus)
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 50.0, "avg_price": 70000}
+            ],
+            account_id="acc-test",
+        )
+
+        notifs = [n for n in collected if n.category == "broker"]
+        assert len(notifs) == 1
+        assert "종목: `005930`\n" in notifs[0].message
+
+    async def test_sync_delay_includes_name(self):
+        """#2377: 동기화 지연(self-submitted) info 알림에도 종목명 병기."""
+        eventbus = EventBus()
+        collected = _collect_notifications(eventbus)
+
+        trade_service = AsyncMock()
+        mock_position = MagicMock()
+        mock_position.symbol = "005930"
+        mock_position.quantity = 50.0
+        mock_position.avg_entry_price = 70000.0
+        trade_service.get_positions.return_value = [mock_position]
+
+        order_tracker = AsyncMock()
+        open_order = MagicMock()
+        open_order.ordered_qty = 30.0
+        open_order.recorded_filled_qty = 0.0
+        order_tracker.get_open_orders_for.return_value = [open_order]
+
+        from ante.trade.reconciler import PositionReconciler
+
+        reconciler = PositionReconciler(
+            trade_service=trade_service,
+            eventbus=eventbus,
+            order_tracker=order_tracker,
+            instrument_service=_instrument_service_with(("005930", "삼성전자")),
+        )
+        await reconciler.reconcile(
+            bot_id="bot-1",
+            broker_positions=[
+                {"symbol": "005930", "quantity": 80.0, "avg_price": 70000}
+            ],
+            account_id="acc-test",
+        )
+
+        notifs = [n for n in collected if n.category == "broker"]
+        assert len(notifs) == 1
+        assert "포지션 동기화 지연" in notifs[0].title
+        assert "종목: `005930` (삼성전자)" in notifs[0].message
 
 
 # ── approval/service.py (2건) ──────────────────────────

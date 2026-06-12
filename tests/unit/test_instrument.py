@@ -129,6 +129,159 @@ class TestInstrumentServiceGetName:
         assert service.get_name("005930") == "005930"
 
 
+class TestInstrumentServiceFormatLabel:
+    """#2377: 텔레그램 알림용 ``{symbol} (종목명)`` 병기 라벨 헬퍼.
+
+    sync·무예외·무IO — 알림 핸들러(백그라운드 태스크 포함)에서 await 없이 호출한다.
+    조회 실패(미적재·테이블 부재·빈 name·name==symbol) 시 symbol-only 폴백한다.
+    """
+
+    @pytest.mark.asyncio
+    async def test_format_label_plain_loaded(self, service):
+        """적재 성공 — plain: ``069500 (KODEX 200)``."""
+        inst = Instrument(symbol="069500", exchange="KRX", name="KODEX 200")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("069500") == "069500 (KODEX 200)"
+
+    @pytest.mark.asyncio
+    async def test_format_label_markdown_loaded(self, service):
+        """적재 성공 — markdown: backtick symbol + 괄호 종목명."""
+        inst = Instrument(symbol="069500", exchange="KRX", name="KODEX 200")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("069500", markdown=True) == "`069500` (KODEX 200)"
+
+    @pytest.mark.asyncio
+    async def test_format_label_explicit_exchange(self, service):
+        """exchange 명시 전달 경로(체결 이벤트 등)."""
+        inst = Instrument(symbol="005930", exchange="KRX", name="삼성전자")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("005930", "KRX") == "005930 (삼성전자)"
+        assert (
+            service.format_label("005930", "KRX", markdown=True)
+            == "`005930` (삼성전자)"
+        )
+
+    def test_format_label_cold_empty_cache_plain(self, service):
+        """fresh service / cold 빈 캐시 — symbol-only 폴백 (plain)."""
+        # service fixture 는 initialize 만 호출(빈 instruments 테이블) → 빈 캐시.
+        assert service.format_label("069500") == "069500"
+
+    def test_format_label_cold_empty_cache_markdown(self, service):
+        """cold 빈 캐시 — markdown 폴백은 backtick symbol 만."""
+        assert service.format_label("069500", markdown=True) == "`069500`"
+
+    def test_format_label_missing_table_normalized_cache(self, db):
+        """missing-table 정규화(빈 캐시) — symbol-only 폴백."""
+        # load_readonly 가 'no such table' 를 빈 캐시로 정규화한 상태와 동치.
+        svc = InstrumentService(db=db)
+        svc._cache = {}
+        assert svc.format_label("069500") == "069500"
+        assert svc.format_label("069500", markdown=True) == "`069500`"
+
+    @pytest.mark.asyncio
+    async def test_format_label_empty_name(self, service):
+        """빈 name — symbol-only 폴백."""
+        inst = Instrument(symbol="005930", exchange="KRX", name="")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("005930") == "005930"
+        assert service.format_label("005930", markdown=True) == "`005930`"
+
+    def test_format_label_name_equals_symbol(self, db):
+        """name == symbol — 병기하지 않고 symbol-only."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("069500", "KRX"): Instrument(
+                symbol="069500", exchange="KRX", name="069500"
+            )
+        }
+        assert svc.format_label("069500") == "069500"
+        assert svc.format_label("069500", markdown=True) == "`069500`"
+
+    # ── #2377 Codex P2: name Markdown escape (텔레그램 발송 실패 방지) ──
+
+    def test_format_label_escapes_underscore_plain(self, db):
+        """name 의 ``_`` 를 백슬래시 escape (plain 모드도 최종 Markdown parse).
+
+        텔레그램 ``parse_mode="Markdown"`` 에서 ``_`` 는 italic entity 를
+        연다. escape 하지 않으면 parse 실패로 알림 발송 자체가 실패한다
+        (#2377 불변식: 발송 실패 금지).
+        """
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("FOO", "KRX"): Instrument(symbol="FOO", exchange="KRX", name="FOO_BAR")
+        }
+        assert svc.format_label("FOO") == "FOO (FOO\\_BAR)"
+
+    def test_format_label_escapes_underscore_markdown(self, db):
+        """markdown 모드 — name 의 ``_`` escape, symbol(백틱)은 불변."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("FOO", "KRX"): Instrument(symbol="FOO", exchange="KRX", name="FOO_BAR")
+        }
+        assert svc.format_label("FOO", markdown=True) == "`FOO` (FOO\\_BAR)"
+
+    def test_format_label_escapes_bracket(self, db):
+        """name 의 ``[`` escape (inline link entity 시작 방지)."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("ACME", "KRX"): Instrument(
+                symbol="ACME", exchange="KRX", name="ACME [ADR]"
+            )
+        }
+        assert svc.format_label("ACME") == "ACME (ACME \\[ADR])"
+        assert svc.format_label("ACME", markdown=True) == "`ACME` (ACME \\[ADR])"
+
+    def test_format_label_escapes_all_legacy_specials(self, db):
+        """``_`` ``*`` `````` ``[`` 전부 백슬래시 prefix (한 번에)."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("X", "KRX"): Instrument(symbol="X", exchange="KRX", name="a_b*c`d[e")
+        }
+        assert svc.format_label("X") == "X (a\\_b\\*c\\`d\\[e)"
+
+    @pytest.mark.asyncio
+    async def test_format_label_korean_name_unchanged(self, service):
+        """회귀 고정 — 특수문자 없는 한글 name 은 출력 불변(escape 무영향)."""
+        inst = Instrument(symbol="005930", exchange="KRX", name="삼성전자")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("005930") == "005930 (삼성전자)"
+        assert service.format_label("005930", markdown=True) == "`005930` (삼성전자)"
+
+    def test_format_label_no_db_io(self, db):
+        """no-IO 회귀 고정 — format_label 은 DB fetch / await 를 일으키지 않는다.
+
+        _warm_cache / _ensure_cache / get 을 호출하면 RuntimeError 로 즉시 실패하게
+        막아, format_label 이 캐시 dict 만 동기 조회함을 강제한다(알림 경로 IO 금지).
+        """
+
+        async def _explode(*_a, **_k):  # pragma: no cover - 호출되면 실패
+            raise RuntimeError("format_label 은 DB IO / await 를 호출해서는 안 된다")
+
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("069500", "KRX"): Instrument(
+                symbol="069500", exchange="KRX", name="KODEX 200"
+            )
+        }
+        # async 경로를 전부 폭발시켜 동기-캐시-only 조회임을 고정.
+        svc._warm_cache = _explode  # type: ignore[method-assign]
+        svc._ensure_cache = _explode  # type: ignore[method-assign]
+        svc.get = _explode  # type: ignore[method-assign]
+        # DB 도 직접 건드리지 않음을 보장.
+        svc._db.fetch_all = _explode  # type: ignore[method-assign]
+        svc._db.fetch_one = _explode  # type: ignore[method-assign]
+
+        assert svc.format_label("069500") == "069500 (KODEX 200)"
+        assert svc.format_label("069500", markdown=True) == "`069500` (KODEX 200)"
+        # 미적재 symbol 도 동기 폴백(여전히 DB 비접근).
+        assert svc.format_label("999999") == "999999"
+
+
 class TestInstrumentServiceSearch:
     @pytest.mark.asyncio
     async def test_search_by_name(self, service):

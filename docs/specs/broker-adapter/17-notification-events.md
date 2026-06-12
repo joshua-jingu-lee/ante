@@ -22,10 +22,18 @@ level: critical
 title: 포지션 불일치
 category: broker
 
-계좌: `{account_id}` · 봇: `{bot_id}` · 종목: `{symbol}`
+계좌: `{account_id}` · 봇: `{bot_id}` · 종목: `{symbol}` ({name})
 내부: {internal_qty}주 · 브로커: {broker_qty}주
 사유: {reason}
 ```
+
+> 종목 표기는 `InstrumentService.format_label(symbol, markdown=True)`로 생성한다
+> ([instrument.md](../instrument/instrument.md#instrumentservice), #2377). 종목명
+> 조회가 가능하면 `` 종목: `{symbol}` ({name}) ``로 병기하고, 조회 불가(미적재·
+> 테이블 부재·빈 name·`name == symbol`) 시 `` 종목: `{symbol}` ``로 폴백한다.
+> `PositionReconciler`에 `instrument_service`가 미주입(`None`)이면 항상
+> symbol-only로 표기한다. reconciler payload에는 exchange가 없어 KRX 기본값으로
+> 조회한다.
 
 ### 2. 서킷 브레이커 차단
 

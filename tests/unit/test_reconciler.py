@@ -1575,3 +1575,57 @@ class TestAccountLevelDetection:
                 [{"symbol": "005930", "quantity": 10}],
                 account_id="default",
             )
+
+    async def test_account_level_mismatch_includes_name(
+        self, service, eventbus, order_tracker, position_history
+    ):
+        """#2377: 적재 시 계좌 단위 불일치 알림에 종목명 병기."""
+        from unittest.mock import MagicMock
+
+        from ante.instrument.models import Instrument
+        from ante.instrument.service import InstrumentService
+
+        # format_label 은 캐시 dict 만 동기 조회하므로 db 는 미사용(MagicMock).
+        instrument_service = InstrumentService(db=MagicMock())
+        instrument_service._cache = {
+            ("005930", "KRX"): Instrument(
+                symbol="005930", exchange="KRX", name="삼성전자"
+            )
+        }
+        reconciler = PositionReconciler(
+            trade_service=service,
+            eventbus=eventbus,
+            order_tracker=order_tracker,
+            instrument_service=instrument_service,
+        )
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
+        await _set_position(position_history, "bot-2", "005930", 50, 50000)
+
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        await reconciler.detect_account_level(
+            [{"symbol": "005930", "quantity": 100, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        assert len(notif_events) == 1
+        assert "종목: `005930` (삼성전자)" in notif_events[0].message
+
+    async def test_account_level_mismatch_fallback_no_instrument(
+        self, reconciler, position_history, eventbus
+    ):
+        """#2377: 미주입(None)이면 종목코드만 표기 유지(하위 호환)."""
+        await _set_position(position_history, "bot-1", "005930", 30, 50000)
+        await _set_position(position_history, "bot-2", "005930", 50, 50000)
+
+        notif_events: list = []
+        eventbus.subscribe(NotificationEvent, lambda e: notif_events.append(e))
+
+        await reconciler.detect_account_level(
+            [{"symbol": "005930", "quantity": 100, "avg_price": 50000}],
+            account_id="acc-test",
+        )
+
+        assert len(notif_events) == 1
+        assert "종목: `005930`\n" in notif_events[0].message

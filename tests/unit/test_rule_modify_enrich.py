@@ -313,3 +313,32 @@ async def test_rule_engine_manager_injects_order_tracker(
     )
     engine = manager.create_engine("domestic")
     assert engine._order_tracker is tracker
+
+
+def test_rule_engine_manager_init_without_instrument_service(
+    mock_account_service: AsyncMock,
+) -> None:
+    """#2377: RuleEngineManager는 instrument_service 미전달로도 생성된다(무회귀)."""
+    manager = RuleEngineManager(
+        eventbus=EventBus(),
+        account_service=mock_account_service,
+    )
+    assert manager._instrument_service is None
+
+
+async def test_rule_engine_manager_injects_instrument_service(
+    mock_account_service: AsyncMock,
+) -> None:
+    """#2377: Manager가 생성하는 RuleEngine에 instrument_service가 전달되는지 잠근다."""
+    from unittest.mock import MagicMock
+
+    from ante.instrument.service import InstrumentService
+
+    instrument_service = InstrumentService(db=MagicMock())
+    manager = RuleEngineManager(
+        eventbus=EventBus(),
+        account_service=mock_account_service,
+        instrument_service=instrument_service,
+    )
+    engine = manager.create_engine("domestic")
+    assert engine._instrument_service is instrument_service

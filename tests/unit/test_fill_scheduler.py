@@ -903,7 +903,14 @@ def _pos(symbol: str, quantity: float, avg_price: float = 1000.0) -> dict:
 
 
 def _make_fallback_sched(
-    broker, tracker, app, svc, *, eventbus=None, fallback_enabled=True
+    broker,
+    tracker,
+    app,
+    svc,
+    *,
+    eventbus=None,
+    fallback_enabled=True,
+    instrument_service=None,
 ):
     return FillReconcileScheduler(
         broker=broker,
@@ -913,6 +920,7 @@ def _make_fallback_sched(
         trade_service=svc,
         eventbus=eventbus,
         fallback_enabled=fallback_enabled,
+        instrument_service=instrument_service,
     )
 
 
@@ -1190,6 +1198,68 @@ async def test_late_ccld_lower_cumulative_emits_reconcile_alert_via_poll(
     # 포지션은 불변(비가역 no-op).
     pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
     assert pos["quantity"] == 2.0
+    # #2377: instrument_service 미주입 경로(plain 폴백) — 종목코드만 표기.
+    assert "069500 주문(odno=" in notifs[0].message
+    assert "(KODEX 200)" not in notifs[0].message
+
+
+async def test_late_ccld_over_attribution_alert_includes_name(
+    fallback_applier, tracker
+):
+    """#2377: instrument_service 적재 시 over-attribution 알림에 종목명 plain 병기.
+
+    자연 문장 안 임베딩 지점이라 백틱 없는 plain(``069500 (KODEX 200)``)을 사용한다.
+    """
+    from unittest.mock import MagicMock
+
+    from ante.eventbus.events import NotificationEvent
+    from ante.instrument.models import Instrument
+    from ante.instrument.service import InstrumentService
+
+    app, _ph, eb, svc = fallback_applier
+    notifs: list[NotificationEvent] = []
+    eb.subscribe(
+        NotificationEvent,
+        lambda e: notifs.append(e) if isinstance(e, NotificationEvent) else None,
+    )
+
+    # format_label 은 캐시 dict 만 동기 조회하므로 db 는 미사용(MagicMock).
+    instrument_service = InstrumentService(db=MagicMock())
+    instrument_service._cache = {
+        ("069500", "KRX"): Instrument(symbol="069500", exchange="KRX", name="KODEX 200")
+    }
+
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(
+        broker, tracker, app, svc, eventbus=eb, instrument_service=instrument_service
+    )
+    await sched.catch_up_once()
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": DATE,
+            }
+        ]
+    )
+    await sched._poll_and_apply()
+
+    assert len(notifs) == 1
+    assert "069500 (KODEX 200) 주문(odno=" in notifs[0].message
 
 
 async def test_late_ccld_alert_not_emitted_when_ccld_higher_or_equal_via_poll(

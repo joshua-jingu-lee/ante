@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
     from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury.treasury import Treasury
@@ -270,6 +271,7 @@ class RuleEngine:
         order_tracker: OrderTracker | None = None,
         unrecovered_buy_guard_min_age: float = 60.0,
         allow_unrecovered_buy_overlap: bool = False,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         from ante.account.scoping import require_account_id
 
@@ -291,6 +293,9 @@ class RuleEngine:
         # 기존 호출자(테스트 fixture 등) 호환을 위해 ``None`` 허용 — None일 때
         # reload 경로는 helper를 우회하여 stored 그대로 적용한다 (#1296).
         self._account = account
+        # #2377: Rule violation NOTIFY 알림 종목명 병기용. 미주입(None)이면
+        # 종목코드만 표기하는 기존 경로를 유지한다(CLI 생성 경로는 미주입).
+        self._instrument_service = instrument_service
 
         # #2315: 미복구 self-order 반복 매수 가드 설정.
         # ``unrecovered_buy_guard_min_age``는 미복구 outstanding buy 주문이 차단
@@ -1253,11 +1258,20 @@ class RuleEngine:
 
         for action in actions:
             if action == RuleAction.NOTIFY:
+                # #2377: Rule violation 메시지의 종목코드에 종목명 병기. 백틱 없는
+                # plain 메시지 형식이므로 plain label(``069500 (KODEX 200)``)을
+                # 사용한다. OrderRequestEvent 는 exchange 를 보유하므로 명시
+                # 전달한다. 미주입/조회 불가 시 symbol-only 로 폴백한다.
+                symbol_label = (
+                    self._instrument_service.format_label(event.symbol, event.exchange)
+                    if self._instrument_service is not None
+                    else event.symbol
+                )
                 await self._eventbus.publish(
                     NotificationEvent(
                         level="error",
                         message=(
-                            f"Rule violation for bot {event.bot_id}: {event.symbol}"
+                            f"Rule violation for bot {event.bot_id}: {symbol_label}"
                         ),
                     )
                 )
