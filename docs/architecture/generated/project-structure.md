@@ -277,7 +277,8 @@ src/ante/
 │   │   ├── v001_baseline.py
 │   │   ├── v002_parquet_migration.py
 │   │   ├── v003_broker_config.py
-│   │   └── v004_strategy_status_simplify.py
+│   │   ├── v004_strategy_status_simplify.py
+│   │   └── v005_trades_timestamp_isoformat.py
 │   ├── __init__.py
 │   ├── backup.py
 │   └── migrations.py

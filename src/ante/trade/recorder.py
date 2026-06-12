@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -285,18 +285,24 @@ class TradeRecorder:
         account_id = require_account_id(
             account_id, context="trade_recorder.save_adjustment"
         )
+        # #2371: timestamp 는 save_trade/_save_trade 와 동일한 UTC-aware isoformat 으로
+        # 저장한다(과거 SQLite ``datetime('now')`` 공백 구분 포맷 금지). lexical
+        # 비교에서 공백(0x20) < 'T'(0x54) 라 ``trade list --from`` 당일 경계에서
+        # 보정 행이 누락되던 단일-포맷 invariant 위반을 닫는다.
+        timestamp = datetime.now(UTC).isoformat()
         await self._db.execute(
             """INSERT INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
                 status, order_type, reason, timestamp, account_id)
                VALUES (?, ?, '', ?, 'adjustment', ?, 0.0, 'adjusted', '', ?,
-                       datetime('now'), ?)""",
+                       ?, ?)""",
             (
                 str(uuid4()),
                 bot_id,
                 symbol,
                 abs(new_quantity - old_quantity),
                 reason,
+                timestamp,
                 account_id,
             ),
         )

@@ -38,6 +38,16 @@ CREATE INDEX idx_trades_status ON trades(status);
 fallback을 두지 않는다. `TradeRecorder`는 저장 직전과 명시 account 조회
 필터에서 Account ID scoping helper로 `None`, 빈 문자열, `default`를 거부한다.
 
+`trades.timestamp`는 **단일 포맷 invariant**를 가진다: UTC-aware ISO 8601
+isoformat(`YYYY-MM-DDTHH:MM:SS[.ffffff]+00:00`, 예: `2026-06-12T04:43:53+00:00`)
+으로만 저장한다. 모든 쓰기 경로(`save_trade`/`_save_trade`/`save_adjustment`)는
+`datetime.now(UTC).isoformat()` 동일 포맷을 쓰며, SQLite `datetime('now')`의 공백
+구분 포맷(`YYYY-MM-DD HH:MM:SS`)을 `timestamp` 값으로 저장하지 않는다. 이 invariant는
+TEXT lexical 비교에서 공백(`0x20`) < `T`(`0x54`)로 인한 날짜/정렬 쿼리 누락
+(`trade list --from` 당일 경계 등)을 차단한다. 과거 공백 포맷으로 저장된 행은
+마이그레이션 v005(`v005_trades_timestamp_isoformat`)가 isoformat UTC로 정규화한다.
+(`created_at` 등 다른 컬럼은 각자 계약이며 이 invariant는 `timestamp` 한정이다.)
+
 봇별 종목 포지션 현재 상태:
 ```sql
 CREATE TABLE positions (
