@@ -86,6 +86,7 @@ CREATE INDEX IF NOT EXISTS idx_instruments_name ON instruments(name);
 | `initialize` | — | None | 스키마 생성 + 전체 캐시 워밍 |
 | `get` | symbol: str, exchange: str = "KRX" | Instrument \| None | 캐시에서 조회 |
 | `get_name` | symbol: str, exchange: str = "KRX" | str | 동기 종목명 조회. 캐시 미스 또는 name이 빈 문자열이면 symbol 반환 |
+| `format_label` | symbol: str, exchange: str = "KRX", *, markdown: bool = False | str | 동기 알림용 `{symbol} (종목명)` 병기 라벨. `markdown=False`(plain): 조회 성공 시 `069500 (KODEX 200)`, 실패 시 `069500`. `markdown=True`: 조회 성공 시 `` `069500` (KODEX 200) ``, 실패 시 `` `069500` `` (백틱 안 monospace 가독성 위해 종목명은 괄호 밖). `get_name`과 동일하게 캐시 dict만 동기 조회(무예외·무IO) — 캐시 미스·테이블 부재·빈 name·`name == symbol` 시 종목명 병기 없이 symbol-only 폴백 |
 | `search` | keyword: str, limit: int = 20, listed_only: bool = False | list[Instrument] | name, name_en, symbol LIKE 검색. listed_only=True이면 상장 종목만 반환 |
 | `bulk_upsert` | instruments: list[Instrument] | int | 대량 등록/갱신 + 캐시 갱신. 처리 건수 반환 |
 
@@ -146,6 +147,6 @@ CSV/JSON 파일에서 종목 데이터를 일괄 등록/갱신한다. 파일 확
 
 ## 타 모듈 설계 시 참고
 
-- **Notification**: `NotificationService`에 `instrument_service` 주입 시 체결 알림에 종목명 병기
+- **Notification**: 종목코드를 직접 포맷하는 **알림 발행자**(`TradeRecorder`·`PositionReconciler`·`FillReconcileScheduler`·`RuleEngine` 등)에 `instrument_service`를 선택 주입(`instrument_service: InstrumentService | None = None`)하고, 발행 지점에서 `format_label`로 `{symbol} (종목명)`을 병기한다. 표기 SSOT는 `format_label` 한 곳이며, 각 발행자가 `get_name`을 개별 조합하지 않는다. 미주입(`None`)이면 종목코드만 표기하는 기존 경로를 유지한다(`NotificationService` 자체가 아니라 발행자 측 주입 — #2377).
 - **Data Pipeline**: 시세 데이터 수집 시 종목 메타데이터도 함께 갱신하는 설계 고려
 - **CLI**: 종목 검색/조회 명령은 InstrumentService를 통해 구현한다.

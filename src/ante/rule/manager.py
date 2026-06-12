@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
     from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
     from ante.treasury import TreasuryManager as TreasuryManagerType
@@ -31,6 +32,7 @@ class RuleEngineManager:
         order_tracker: OrderTracker | None = None,
         unrecovered_buy_guard_min_age: float = 60.0,
         allow_unrecovered_buy_overlap: bool = False,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
@@ -45,6 +47,9 @@ class RuleEngineManager:
         # 로 별도 등록한다.
         self._unrecovered_buy_guard_min_age = unrecovered_buy_guard_min_age
         self._allow_unrecovered_buy_overlap = allow_unrecovered_buy_overlap
+        # #2377: 생성하는 모든 RuleEngine 에 Rule violation 알림 종목명 병기
+        # 소스를 pass-through 한다. None 이면 종목코드만 표기(하위 호환).
+        self._instrument_service = instrument_service
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -86,6 +91,7 @@ class RuleEngineManager:
             order_tracker=self._order_tracker,
             unrecovered_buy_guard_min_age=self._unrecovered_buy_guard_min_age,
             allow_unrecovered_buy_overlap=self._allow_unrecovered_buy_overlap,
+            instrument_service=self._instrument_service,
         )
 
         if rule_configs:

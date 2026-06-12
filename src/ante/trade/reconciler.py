@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
     from ante.trade.order_tracker import OrderTracker
     from ante.trade.service import TradeService
 
@@ -37,6 +38,7 @@ class PositionReconciler:
         trade_service: TradeService,
         eventbus: EventBus,
         order_tracker: OrderTracker | None = None,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         self._trade_service = trade_service
         self._eventbus = eventbus
@@ -45,6 +47,21 @@ class PositionReconciler:
         # 미주입(None)이면 self-check 를 생략하고 기존 "외부 매수" 분류로 동작한다
         # (하위 호환 — 다만 main.py 의 두 배선 경로는 항상 주입한다).
         self._order_tracker = order_tracker
+        # #2377: 포지션 불일치/동기화 지연 알림 종목명 병기용. 미주입(None)이면
+        # 종목코드만 표기하는 기존 경로를 유지한다. reconciler payload 에는
+        # exchange 가 없어 KRX 기본값으로 조회한다(schema 미확장).
+        self._instrument_service = instrument_service
+
+    def _symbol_label(self, symbol: str) -> str:
+        """#2377: 알림 메시지용 ``\\`{symbol}\\` (종목명)`` 병기 라벨(markdown).
+
+        미주입/조회 불가 시 backtick symbol-only 로 폴백한다(format_label 폴백
+        내장 — sync·무예외·무IO). reconciler payload 에 exchange 가 없어 KRX
+        기본값으로 조회한다.
+        """
+        if self._instrument_service is not None:
+            return self._instrument_service.format_label(symbol, markdown=True)
+        return f"`{symbol}`"
 
     async def reconcile(
         self,
@@ -280,7 +297,7 @@ class PositionReconciler:
                     title="포지션 불일치",
                     message=(
                         f"계좌: `{account_id}` · 봇: `{bot_id}` · "
-                        f"종목: `{symbol}`\n"
+                        f"종목: {self._symbol_label(symbol)}\n"
                         f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
                         f"사유: {reason}"
                     ),
@@ -448,7 +465,7 @@ class PositionReconciler:
                     level="critical",
                     title="계좌 단위 포지션 불일치",
                     message=(
-                        f"계좌: `{account_id}` · 종목: `{symbol}`\n"
+                        f"계좌: `{account_id}` · 종목: {self._symbol_label(symbol)}\n"
                         f"내부 합산: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
                         "사유: 계좌 단위 수량 불일치 (다중봇 귀속 ambiguous — "
                         "자동 보정 보류, 수동 확인 필요)"
@@ -513,7 +530,7 @@ class PositionReconciler:
                 title="포지션 동기화 지연",
                 message=(
                     f"계좌: `{account_id}` · 봇: `{bot_id}` · "
-                    f"종목: `{symbol}`\n"
+                    f"종목: {self._symbol_label(symbol)}\n"
                     f"내부: {i_qty:.0f}주 · 브로커: {b_qty:.0f}주\n"
                     f"사유: {REASON_SELF_SUBMITTED} "
                     "(체결 반영 대기 — 자동 보정 없음)"

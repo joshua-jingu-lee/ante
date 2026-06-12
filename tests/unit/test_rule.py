@@ -923,6 +923,89 @@ class TestRuleEngineEventBus:
         assert received[0].bot_id == "bot1"
         assert received[0].reason == "Rule violation"
 
+    # ── #2377: Rule violation NOTIFY 종목명 병기 (plain) ──────
+
+    def _notify_event(self):
+        from ante.eventbus.events import OrderRequestEvent
+
+        return OrderRequestEvent(
+            account_id="domestic",
+            bot_id="bot1",
+            strategy_id="s1",
+            symbol="005930",
+            side="buy",
+            quantity=10.0,
+            order_type="market",
+            price=50000.0,
+        )
+
+    async def test_notify_action_includes_name(self, eventbus, mock_account_service):
+        """#2377: 적재 시 Rule violation NOTIFY 메시지에 종목명 plain 병기."""
+        from unittest.mock import MagicMock
+
+        from ante.eventbus.events import NotificationEvent
+        from ante.instrument.models import Instrument
+        from ante.instrument.service import InstrumentService
+
+        instrument_service = InstrumentService(db=MagicMock())
+        instrument_service._cache = {
+            ("005930", "KRX"): Instrument(
+                symbol="005930", exchange="KRX", name="삼성전자"
+            )
+        }
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+            instrument_service=instrument_service,
+        )
+
+        received: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: received.append(e))
+
+        await engine._execute_actions([RuleAction.NOTIFY], self._notify_event())
+
+        assert len(received) == 1
+        assert received[0].message == "Rule violation for bot bot1: 005930 (삼성전자)"
+
+    async def test_notify_action_fallback_unknown_symbol(
+        self, eventbus, mock_account_service
+    ):
+        """#2377: 미적재 종목은 종목코드만 (symbol-only 폴백)."""
+        from unittest.mock import MagicMock
+
+        from ante.eventbus.events import NotificationEvent
+        from ante.instrument.service import InstrumentService
+
+        # 빈 캐시 → 폴백.
+        instrument_service = InstrumentService(db=MagicMock())
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+            instrument_service=instrument_service,
+        )
+
+        received: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: received.append(e))
+
+        await engine._execute_actions([RuleAction.NOTIFY], self._notify_event())
+
+        assert len(received) == 1
+        assert received[0].message == "Rule violation for bot bot1: 005930"
+
+    async def test_notify_action_no_instrument_service(self, engine, eventbus):
+        """#2377: 미주입(None)이면 기존 종목코드 표기 유지(하위 호환)."""
+        from ante.eventbus.events import NotificationEvent
+
+        received: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: received.append(e))
+
+        await engine._execute_actions([RuleAction.NOTIFY], self._notify_event())
+
+        assert len(received) == 1
+        assert received[0].message == "Rule violation for bot bot1: 005930"
+
     async def test_rule_engine_rejects_invalid_signal_side(
         self, engine, eventbus, monkeypatch
     ):

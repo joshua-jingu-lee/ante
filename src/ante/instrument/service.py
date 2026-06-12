@@ -115,6 +115,37 @@ class InstrumentService:
         inst = self._cache.get((symbol, exchange))
         return inst.name if inst and inst.name else symbol
 
+    def format_label(
+        self, symbol: str, exchange: str = "KRX", *, markdown: bool = False
+    ) -> str:
+        """알림용 ``{symbol} (종목명)`` 병기 라벨을 동기 반환한다 (#2377).
+
+        텔레그램 알림에서 종목코드만 노출되는 지점들이 각자 ``get_name`` 을
+        조합하지 않고 이 헬퍼만 사용해 표기를 SSOT 로 단일화한다. 발행자가
+        완성된 label 을 받아 백틱/괄호 조립 실수를 차단한다.
+
+        반환 계약:
+
+        - ``markdown=False`` (plain): 조회 성공 시 ``069500 (KODEX 200)``,
+          실패 시 ``069500``.
+        - ``markdown=True``: 조회 성공 시 ``` `069500` (KODEX 200) ```,
+          실패 시 ``` `069500` ``` (백틱 안에 종목명을 넣으면 텔레그램
+          monospace 로 가독성이 떨어지므로 종목명은 백틱 밖 괄호에 둔다).
+
+        sync·무예외·무IO — ``get_name`` 과 동일하게 메모리 캐시 dict 만 동기
+        조회한다(``get()``/``_ensure_cache()`` 의 async DB fetch 를 경유하지
+        않는다). 백그라운드 태스크(reconciler·fill_scheduler)에서 ``await``
+        없이 호출되므로 알림 경로에 IO·지연을 추가하지 않는다. 캐시
+        미스·테이블 부재(빈 캐시)·빈 name·``name == symbol`` 은 모두 종목명
+        병기 없이 symbol-only 로 폴백한다.
+        """
+        base = f"`{symbol}`" if markdown else symbol
+        inst = self._cache.get((symbol, exchange))
+        name = inst.name if inst else ""
+        if not name or name == symbol:
+            return base
+        return f"{base} ({name})"
+
     async def search(
         self,
         keyword: str,

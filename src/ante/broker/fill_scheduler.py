@@ -43,6 +43,7 @@ from ante.broker.exceptions import APIError, CircuitOpenError
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter
     from ante.eventbus.bus import EventBus
+    from ante.instrument.service import InstrumentService
     from ante.trade.fill_applier import FillApplier
     from ante.trade.order_tracker import OrderTracker, OrderTrackerRecord
     from ante.trade.service import TradeService
@@ -182,6 +183,7 @@ class FillReconcileScheduler:
         trade_service: TradeService | None = None,
         eventbus: EventBus | None = None,
         fallback_enabled: bool = True,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         """계좌별 체결 백스톱 폴러.
 
@@ -202,6 +204,8 @@ class FillReconcileScheduler:
             fallback_enabled: position-derived fallback **마스터 disable flag**
                 (#2316 §11.6). KIS paper 기본 활성을 두되 ``False`` 로 rollback
                 가능. 실제 적용은 추가로 ``broker.is_paper`` 가 true 여야 한다.
+            instrument_service: #2377 over-attribution 의심 알림의 종목명 병기용.
+                ``None`` 이면 종목코드만 표기하는 기존 경로를 유지한다(폴백).
         """
         require_account_id(account_id, context="fill_scheduler.__init__")
         self._broker = broker
@@ -212,6 +216,9 @@ class FillReconcileScheduler:
         self._trade_service = trade_service
         self._eventbus = eventbus
         self._fallback_enabled = fallback_enabled
+        # #2377: over-attribution 의심 알림 종목명 병기용. 미주입(None)이면
+        # 종목코드만 표기하는 기존 경로를 유지한다.
+        self._instrument_service = instrument_service
         self._task: asyncio.Task[None] | None = None
         self._running = False
         # #2318 Finding ②: fallback 이 filled(terminal)로 올린 주문의 사후 ccld
@@ -635,12 +642,21 @@ class FillReconcileScheduler:
                 ),
             )
         )
+        # #2377: 자연 문장(``... {symbol} 주문(odno=...)을 ...``) 안에 종목코드가
+        # 임베딩된 지점이므로, 문장 흐름을 깨는 백틱 monospace 대신 plain 병기
+        # (``069500 (KODEX 200)``)를 사용한다. exchange 는 alert payload 에 없어
+        # KRX 기본값. 미주입/조회 불가 시 symbol-only 로 폴백한다.
+        symbol_label = (
+            self._instrument_service.format_label(record.symbol)
+            if self._instrument_service is not None
+            else record.symbol
+        )
         await self._eventbus.publish(
             NotificationEvent(
                 level="warning",
                 title="체결 over-attribution 의심 (모의 fallback)",
                 message=(
-                    f"잔고 역도출 fallback 이 {record.symbol} 주문(odno="
+                    f"잔고 역도출 fallback 이 {symbol_label} 주문(odno="
                     f"{broker_order_id})을 recorded={recorded} 로 올렸으나, 이후 "
                     f"ccld 가 더 낮은 누적={observed_cumulative} (diff={diff})를 "
                     "반환했습니다. 비가역이라 정정되지 않으며 협소 외부 매수 흡수 "
