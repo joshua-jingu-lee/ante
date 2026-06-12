@@ -1065,6 +1065,124 @@ async def test_get_cached_broker_returns_instance_after_get_broker(service):
 
 
 @pytest.mark.asyncio
+async def test_reconnect_during_inflight_get_broker_connect_uses_new_config(
+    service,
+):
+    """in-flight 초기 connect ↔ 설정 변경 race: 최종 캐시는 신 설정 (#2372).
+
+    회귀 방지 (#2372 Codex P2): 초기 ``get_broker()`` 가 per-account lock 을
+    쥔 채 ``connect()`` 를 대기하는 in-flight 구간(아직 캐시 미기록)에서
+    ``update(credentials=...)`` → ``_reconnect_broker()`` 가 들어오면, lock
+    없이 캐시 부재 조기 반환하던 구현은 reconnect 를 조용히 건너뛰고 직후
+    get_broker 가 **구 설정 adapter 를 캐시에 기록**해 DB(신 설정)와 캐시(구
+    설정)가 영구 어긋났다.
+
+    본 테스트는 connect 를 ``asyncio.Event`` 로 게이트해 그 윈도를 결정적으로
+    재현한다: 구 설정(app_key='test') connect 가 정지한 사이 update 를 시작해
+    reconnect 가 같은 lock 대기에 진입하게 만든 뒤 게이트를 풀어, lock 직렬화
+    구현에서는 reconnect 가 in-flight connect 완료 후 진입해 신 설정으로
+    rebuild + swap 하므로 **최종 캐시 adapter 의 app_key == 'new'** 가 되어야
+    한다. lock 직렬화 전(현 HEAD)에는 'test' 로 남아 RED.
+    """
+    import asyncio
+    import unittest.mock
+
+    await service.create(_make_account())
+
+    from ante.broker.test import TestBrokerAdapter
+
+    old_connect_started = asyncio.Event()
+    release_old_connect = asyncio.Event()
+    original_connect = TestBrokerAdapter.connect
+
+    async def gated_connect(self):  # noqa: ANN001
+        # 구 설정(초기 get_broker) connect 만 게이트해 in-flight 윈도를 벌린다.
+        # 신 설정(reconnect) connect 는 즉시 통과시킨다.
+        if self.config.get("app_key") == "test":
+            old_connect_started.set()
+            await release_old_connect.wait()
+        await original_connect(self)
+
+    with unittest.mock.patch.object(TestBrokerAdapter, "connect", gated_connect):
+        # T1: 초기 get_broker — 구 설정 adapter 를 build 하고 connect 에서 정지.
+        get_task = asyncio.create_task(service.get_broker("main"))
+
+        # 구 설정 connect 가 in-flight(캐시 미기록·lock 보유)에 도달할 때까지 대기.
+        await asyncio.wait_for(old_connect_started.wait(), timeout=2.0)
+        assert "main" not in service._brokers  # 아직 캐시 미기록
+
+        # T2: 설정 변경 — _reconnect_broker 가 같은 lock 대기에 진입한다.
+        update_task = asyncio.create_task(
+            service.update("main", credentials={"app_key": "new", "app_secret": "new"})
+        )
+        # reconnect 가 lock 대기 상태에 진입할 시간을 준다.
+        await asyncio.sleep(0.05)
+
+        # 게이트 해제 → T1 완료(구 adapter 캐시) → lock 해제 → T2 reconnect 진입.
+        release_old_connect.set()
+
+        await asyncio.wait_for(get_task, timeout=2.0)
+        await asyncio.wait_for(update_task, timeout=2.0)
+
+    # 최종 캐시 adapter 는 신 설정으로 생성·연결되어야 한다.
+    cached = service.get_cached_broker("main")
+    assert cached is not None
+    assert cached.config.get("app_key") == "new"
+    assert cached.is_connected is True
+
+
+@pytest.mark.asyncio
+async def test_reconnect_broker_direct_serializes_with_inflight_get_broker(service):
+    """`_reconnect_broker` 직접 호출도 in-flight connect 와 lock 직렬화 (#2372).
+
+    update() 우회로 ``_reconnect_broker`` 를 직접 호출하는 경로도 동일 lock
+    으로 직렬화되는지 격리 검증한다. 구 설정 adapter 의 connect 가 정지한 채
+    DB credentials 만 신 설정으로 갱신한 뒤 reconnect 를 호출하면, lock 직렬화
+    구현에서는 in-flight connect 완료 후 reconnect 가 진입해 신 설정으로
+    rebuild + swap 하므로 최종 캐시 adapter 의 app_key == 'new' 여야 한다.
+    """
+    import asyncio
+    import unittest.mock
+
+    await service.create(_make_account())
+
+    from ante.broker.test import TestBrokerAdapter
+
+    old_connect_started = asyncio.Event()
+    release_old_connect = asyncio.Event()
+    original_connect = TestBrokerAdapter.connect
+
+    async def gated_connect(self):  # noqa: ANN001
+        if self.config.get("app_key") == "test":
+            old_connect_started.set()
+            await release_old_connect.wait()
+        await original_connect(self)
+
+    with unittest.mock.patch.object(TestBrokerAdapter, "connect", gated_connect):
+        get_task = asyncio.create_task(service.get_broker("main"))
+        await asyncio.wait_for(old_connect_started.wait(), timeout=2.0)
+        assert "main" not in service._brokers
+
+        # DB·인메모리 계좌 캐시의 credentials 를 신 설정으로 직접 갱신한 뒤
+        # _reconnect_broker 를 호출한다(update() 경로 우회, lock 직렬화만 검증).
+        account = await service.get("main")
+        account.credentials = {"app_key": "new", "app_secret": "new"}
+        service._accounts["main"] = account
+
+        reconnect_task = asyncio.create_task(service._reconnect_broker("main"))
+        await asyncio.sleep(0.05)
+
+        release_old_connect.set()
+        await asyncio.wait_for(get_task, timeout=2.0)
+        await asyncio.wait_for(reconnect_task, timeout=2.0)
+
+    cached = service.get_cached_broker("main")
+    assert cached is not None
+    assert cached.config.get("app_key") == "new"
+    assert cached.is_connected is True
+
+
+@pytest.mark.asyncio
 async def test_create_account_with_broker_config(service):
     """생성 시 broker_config가 DB에 저장/로드."""
     account = _make_account(broker_config={"is_paper": True, "hts_id": "myid"})
