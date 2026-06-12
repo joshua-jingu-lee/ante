@@ -201,6 +201,57 @@ class TestInstrumentServiceFormatLabel:
         assert svc.format_label("069500") == "069500"
         assert svc.format_label("069500", markdown=True) == "`069500`"
 
+    # ── #2377 Codex P2: name Markdown escape (텔레그램 발송 실패 방지) ──
+
+    def test_format_label_escapes_underscore_plain(self, db):
+        """name 의 ``_`` 를 백슬래시 escape (plain 모드도 최종 Markdown parse).
+
+        텔레그램 ``parse_mode="Markdown"`` 에서 ``_`` 는 italic entity 를
+        연다. escape 하지 않으면 parse 실패로 알림 발송 자체가 실패한다
+        (#2377 불변식: 발송 실패 금지).
+        """
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("FOO", "KRX"): Instrument(symbol="FOO", exchange="KRX", name="FOO_BAR")
+        }
+        assert svc.format_label("FOO") == "FOO (FOO\\_BAR)"
+
+    def test_format_label_escapes_underscore_markdown(self, db):
+        """markdown 모드 — name 의 ``_`` escape, symbol(백틱)은 불변."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("FOO", "KRX"): Instrument(symbol="FOO", exchange="KRX", name="FOO_BAR")
+        }
+        assert svc.format_label("FOO", markdown=True) == "`FOO` (FOO\\_BAR)"
+
+    def test_format_label_escapes_bracket(self, db):
+        """name 의 ``[`` escape (inline link entity 시작 방지)."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("ACME", "KRX"): Instrument(
+                symbol="ACME", exchange="KRX", name="ACME [ADR]"
+            )
+        }
+        assert svc.format_label("ACME") == "ACME (ACME \\[ADR])"
+        assert svc.format_label("ACME", markdown=True) == "`ACME` (ACME \\[ADR])"
+
+    def test_format_label_escapes_all_legacy_specials(self, db):
+        """``_`` ``*`` `````` ``[`` 전부 백슬래시 prefix (한 번에)."""
+        svc = InstrumentService(db=db)
+        svc._cache = {
+            ("X", "KRX"): Instrument(symbol="X", exchange="KRX", name="a_b*c`d[e")
+        }
+        assert svc.format_label("X") == "X (a\\_b\\*c\\`d\\[e)"
+
+    @pytest.mark.asyncio
+    async def test_format_label_korean_name_unchanged(self, service):
+        """회귀 고정 — 특수문자 없는 한글 name 은 출력 불변(escape 무영향)."""
+        inst = Instrument(symbol="005930", exchange="KRX", name="삼성전자")
+        await service.bulk_upsert([inst])
+
+        assert service.format_label("005930") == "005930 (삼성전자)"
+        assert service.format_label("005930", markdown=True) == "`005930` (삼성전자)"
+
     def test_format_label_no_db_io(self, db):
         """no-IO 회귀 고정 — format_label 은 DB fetch / await 를 일으키지 않는다.
 

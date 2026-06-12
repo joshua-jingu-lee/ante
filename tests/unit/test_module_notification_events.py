@@ -317,6 +317,71 @@ class TestTradeRecorderNotifications:
         assert len(notifications) == 1
         assert "종목: `005930`\n" in notifications[0].message
 
+    @pytest.fixture
+    async def recorder_with_nyse_instrument(self, eventbus, tmp_path):
+        """비-KRX 캐시(NYSE)만 적재된 TradeRecorder (exchange 기본값 폴백 고정용)."""
+        from ante.core.database import Database
+        from ante.trade.position import PositionHistory
+        from ante.trade.recorder import TradeRecorder
+
+        db = Database(str(tmp_path / "test.db"))
+        await db.connect()
+        ph = PositionHistory(db)
+        await ph.initialize()
+        # ("AAPL", "NYSE") 만 적재 — KRX 키는 부재.
+        instrument_service = InstrumentService(db=MagicMock())
+        instrument_service._cache = {
+            ("AAPL", "NYSE"): Instrument(
+                symbol="AAPL", exchange="NYSE", name="Apple Inc."
+            )
+        }
+        rec = TradeRecorder(
+            db=db,
+            position_history=ph,
+            instrument_service=instrument_service,
+        )
+        await rec.initialize()
+        rec.subscribe(eventbus)
+        try:
+            yield rec
+        finally:
+            await db.close()
+
+    async def test_filled_notification_exchange_default_krx_fallback(
+        self, recorder_with_nyse_instrument, eventbus, notifications
+    ):
+        """#2377 Codex P2-1: exchange 기본값(KRX) 폴백 고정 — 오표기 없음 불변식.
+
+        cache 에는 ``("AAPL", "NYSE")`` 만 적재. durable fill /
+        VirtualProvider 경로처럼 ``OrderFilledEvent.exchange`` 가 dataclass
+        기본값 ``KRX`` 로 들어오면 ``(AAPL, KRX)`` cache 미스 →  symbol-only
+        폴백된다(병기 누락, 오표기 아님). 발행은 정상 성공하고 라벨에는
+        다른 종목명("Apple Inc." 등)이 절대 섞이지 않는다(invariant).
+        """
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o-nyse",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="AAPL",
+                side="buy",
+                quantity=10.0,
+                price=190.0,
+                order_type="market",
+                account_id="acc-test",
+                # exchange 미지정 → dataclass 기본값 "KRX" 적용(폴백 트리거).
+            )
+        )
+        # 알림 발행이 성공(불변식: 발행 실패/지연 금지).
+        assert len(notifications) == 1
+        msg = notifications[0].message
+        # symbol-only 폴백 — 종목명 병기 없음.
+        assert "종목: `AAPL`\n" in msg
+        # 오표기 없음 — 다른 거래소(NYSE) 종목명이 라벨에 섞이지 않는다.
+        assert "Apple Inc." not in msg
+
 
 # ── main.py (2건) ──────────────────────────
 

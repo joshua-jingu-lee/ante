@@ -138,13 +138,34 @@ class InstrumentService:
         없이 호출되므로 알림 경로에 IO·지연을 추가하지 않는다. 캐시
         미스·테이블 부재(빈 캐시)·빈 name·``name == symbol`` 은 모두 종목명
         병기 없이 symbol-only 로 폴백한다.
+
+        반환 라벨은 발행자→NotificationService 를 거쳐 텔레그램
+        ``parse_mode="Markdown"`` (legacy) 로 전송된다. name 에 legacy Markdown
+        특수문자(``_`` ``*`` ```` ` ```` ``[``)가 있으면 텔레그램 parse 가 실패해
+        해당 알림 발송 자체가 실패할 수 있으므로(불변식: 발송 실패 금지),
+        name 부분을 백슬래시로 escape 한다(markdown=True/plain 양 모드 — 두 모드
+        다 최종적으로 Markdown parse 메시지에 삽입되기 때문). symbol 은
+        영숫자(종목코드)라 escape 비대상이다.
         """
         base = f"`{symbol}`" if markdown else symbol
         inst = self._cache.get((symbol, exchange))
         name = inst.name if inst else ""
         if not name or name == symbol:
             return base
-        return f"{base} ({name})"
+        return f"{base} ({self._escape_markdown(name)})"
+
+    @staticmethod
+    def _escape_markdown(text: str) -> str:
+        """텔레그램 legacy Markdown parse 실패 방지(불변식: 발송 실패 금지).
+
+        legacy Markdown 특수문자(``_`` ``*`` ```` ` ```` ``[``)를 백슬래시로 escape
+        한다. 종목명에 이 문자가 들어가면(예: ``FOO_BAR``, ``ACME [ADR]``)
+        텔레그램 ``parse_mode="Markdown"`` 가 entity parse 에 실패해 알림 발송이
+        실패하므로 라벨 삽입 전 무력화한다.
+        """
+        for ch in ("_", "*", "`", "["):
+            text = text.replace(ch, f"\\{ch}")
+        return text
 
     async def search(
         self,
