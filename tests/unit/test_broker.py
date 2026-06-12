@@ -606,3 +606,44 @@ class TestKISAdapterConnectCleanup:
         session.close.assert_awaited_once()
         assert adapter._session is None
         assert adapter.is_connected is False
+
+    async def test_connect_idempotent_keeps_existing_session(self, monkeypatch):
+        """이미 연결된 adapter 에 connect 재호출 → 기존 session 유지·새 session 미생성.
+
+        회귀 방지 (#2372): connect() 가 호출마다 새 ClientSession 을 생성하면,
+        get_broker 직후 호출자(CLI _get_broker·runtime startup)가 connect 를
+        재호출할 때 기존 session 이 교체되며 누수된다. 연결 상태면 no-op 으로
+        멱등하게 동작해야 한다.
+        """
+        adapter = KISAdapter(KIS_CONFIG)
+
+        async def _ok() -> None:
+            adapter.access_token = "test_token"
+
+        monkeypatch.setattr(adapter, "_authenticate", _ok)
+
+        # ClientSession 생성 횟수 추적.
+        import aiohttp
+
+        created_sessions: list[MagicMock] = []
+
+        def _make_session(*args, **kwargs):  # noqa: ANN002, ANN003
+            s = MagicMock(name=f"ClientSession-{len(created_sessions)}")
+            s.close = AsyncMock()
+            created_sessions.append(s)
+            return s
+
+        monkeypatch.setattr(aiohttp, "ClientSession", _make_session)
+
+        # 1) 첫 connect: session 1개 생성·연결 성공.
+        await adapter.connect()
+        first_session = adapter._session
+        assert first_session is created_sessions[0]
+        assert adapter.is_connected is True
+        assert len(created_sessions) == 1
+
+        # 2) 재호출(멱등): 새 session 미생성, 기존 session 그대로 유지.
+        await adapter.connect()
+        assert adapter._session is first_session
+        assert len(created_sessions) == 1
+        first_session.close.assert_not_called()

@@ -2058,12 +2058,18 @@ async def _shutdown(s: Services) -> None:
         s.ipc_server.stop_dispatching()
         logger.info("IPCServer dispatch 거부 시작")
 
-    # 각 계좌의 BrokerAdapter disconnect
+    # 각 계좌의 BrokerAdapter disconnect.
+    # 종료 경로는 cached-only 접근자를 사용한다(#2372). get_broker 는
+    # connect-gate 가 되어 미캐시 계좌를 새로 인증/연결한 뒤 끊는 회귀를
+    # 일으키므로, 종료 중에는 이미 연결된(캐시된) 어댑터만 끊는다.
+    # 미캐시 계좌는 끊을 연결도 없으므로 skip 한다.
     if s.account_service:
         accounts = await s.account_service.list()
         for account in accounts:
+            broker = s.account_service.get_cached_broker(account.account_id)
+            if broker is None:
+                continue
             try:
-                broker = await s.account_service.get_broker(account.account_id)
                 await broker.disconnect()
                 logger.info("Broker 연결 해제: account=%s", account.account_id)
             except Exception:

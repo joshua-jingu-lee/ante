@@ -247,7 +247,9 @@ class TestBrokerAdapter(BrokerAdapter):
     # ── 연결 ──────────────────────────────────────────────
 
     async def connect(self) -> None:
-        """Test 브로커 연결 (항상 성공)."""
+        """Test 브로커 연결 (항상 성공). 멱등(#2372): 이미 연결됐으면 no-op."""
+        if self.is_connected:
+            return
         self.is_connected = True
         logger.info(
             "Test Broker 연결됨 (seed=%d, cash=%.0f)",

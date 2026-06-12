@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -166,6 +167,10 @@ class AccountService:
         self._eventbus = eventbus
         self._accounts: dict[str, Account] = {}
         self._brokers: dict[str, BrokerAdapter] = {}
+        # cache-miss 직렬화용 per-account lock (#2372). 동시 miss 가 각각
+        # build+connect 해 세션을 누수하고 마지막만 캐시되는 race 를 차단한다.
+        # lock dict 항목 생성은 await 없는 동기 구간이라 그 자체로 race-free.
+        self._broker_locks: dict[str, asyncio.Lock] = {}
         # 런타임 인지 플래그(#1144 invariant S1).
         # boot mutation 종료 직후(``main._init_account`` 마지막)
         # ``mark_runtime_started()``로 True가 되며, 이후 cold-path 전용 메서드/필드
@@ -999,18 +1004,56 @@ class AccountService:
     # ── 브로커 인스턴스 ──────────────────────────────────
 
     async def get_broker(self, account_id: str) -> BrokerAdapter:
-        """계좌의 BrokerAdapter 인스턴스를 반환. lazy init + 캐싱.
+        """계좌의 BrokerAdapter 인스턴스를 반환. lazy init + 연결-성공-후-캐싱.
+
+        최초 호출 시 어댑터를 생성하고 ``connect()`` 를 수행하며, **연결에
+        성공한 경우에만** 캐시에 기록한 뒤 반환한다. connect 가 실패하면
+        캐시에 남기지 않고 예외를 전파하므로(#2372), 일시적 인증/네트워크
+        오류로 미연결 adapter 가 캐시에 잔존해 후속 소비자가 재사용하는 일이
+        없다. 이는 재연결 경로(:meth:`_reconnect_broker`)의 connect-성공-후-캐시
+        원칙과 동일하다 — 초기 경로의 비대칭을 제거한다.
+
+        cache-hit 경로(런타임 hot-path)는 connect 없이 캐시된 인스턴스를 즉시
+        반환한다(connect 는 멱등이므로 호출자가 이후 connect 를 재호출해도
+        no-op). cache-miss 경로는 per-account :class:`asyncio.Lock` 으로
+        직렬화하고 lock 안에서 캐시를 double-check 하여, 동일 계좌의 동시
+        miss 가 각각 build+connect 해 세션을 누수하고 마지막만 캐시되는 race
+        를 차단한다.
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
             InvalidBrokerTypeError: broker_type이 BROKER_REGISTRY에 등록되지 않음.
         """
-        if account_id in self._brokers:
-            return self._brokers[account_id]
+        # lock-free fast path: cache-hit 면 lock 없이 즉시 반환.
+        broker = self._brokers.get(account_id)
+        if broker is not None:
+            return broker
 
-        broker = await self._build_broker_adapter(account_id)
-        self._brokers[account_id] = broker
-        return broker
+        # per-account lock 으로 miss 경로 직렬화. dict 항목 생성은 await 없는
+        # 동기 구간이므로 setdefault 자체로 race-free 하다.
+        lock = self._broker_locks.setdefault(account_id, asyncio.Lock())
+        async with lock:
+            # double-checked: lock 대기 중 선행 태스크가 캐시했으면 재사용.
+            broker = self._brokers.get(account_id)
+            if broker is not None:
+                return broker
+
+            broker = await self._build_broker_adapter(account_id)
+            # connect 성공 후에만 캐시에 기록한다. 실패 시 캐시 미기록 +
+            # 예외 전파(connect 내부에서 session cleanup 수행, #2368).
+            await broker.connect()
+            self._brokers[account_id] = broker
+            return broker
+
+    def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
+        """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음, #2372).
+
+        캐시에 없으면 ``None`` 을 반환하며 새 어댑터를 생성하거나 연결하지
+        않는다. 종료(shutdown) 루프처럼 "이미 연결된 어댑터만 끊으면 되는"
+        경로에서 사용한다 — 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를
+        차단한다(미캐시 = 끊을 연결도 없음).
+        """
+        return self._brokers.get(account_id)
 
     async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
         """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).

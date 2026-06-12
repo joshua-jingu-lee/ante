@@ -100,7 +100,9 @@ class MockBrokerAdapter(BrokerAdapter):
     # ── 연결 ──────────────────────────────────────────
 
     async def connect(self) -> None:
-        """Mock 연결 (항상 성공)."""
+        """Mock 연결 (항상 성공). 멱등(#2372): 이미 연결됐으면 no-op."""
+        if self.is_connected:
+            return
         self.is_connected = True
         logger.info("Mock Broker 연결됨")
 
