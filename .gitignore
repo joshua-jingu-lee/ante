@@ -36,6 +36,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+uv.lock
 *.egg-info/
 dist/
 build/
