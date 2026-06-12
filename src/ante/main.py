@@ -2063,10 +2063,15 @@ async def _shutdown(s: Services) -> None:
     # connect-gate 가 되어 미캐시 계좌를 새로 인증/연결한 뒤 끊는 회귀를
     # 일으키므로, 종료 중에는 이미 연결된(캐시된) 어댑터만 끊는다.
     # 미캐시 계좌는 끊을 연결도 없으므로 skip 한다.
+    # get_cached_broker 는 per-account lock 으로 in-flight 초기 connect 를
+    # drain 한 뒤 조회한다(#2372 Codex P2). 동기 즉시 조회였다면 cache-miss
+    # connect 가 in-flight 인 계좌를 None 으로 skip 하고, 그 connect 가 직후
+    # 성공해 이 루프가 끝난 뒤 캐시에 기록된 세션이 DB close 이후까지
+    # 잔존했다 — lock 대기로 그 윈도를 닫는다.
     if s.account_service:
         accounts = await s.account_service.list()
         for account in accounts:
-            broker = s.account_service.get_cached_broker(account.account_id)
+            broker = await s.account_service.get_cached_broker(account.account_id)
             if broker is None:
                 continue
             try:

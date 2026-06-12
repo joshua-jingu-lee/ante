@@ -1076,15 +1076,30 @@ class AccountService:
             self._brokers[account_id] = broker
             return broker
 
-    def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
+    async def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
         """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음, #2372).
 
         캐시에 없으면 ``None`` 을 반환하며 새 어댑터를 생성하거나 연결하지
         않는다. 종료(shutdown) 루프처럼 "이미 연결된 어댑터만 끊으면 되는"
         경로에서 사용한다 — 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를
         차단한다(미캐시 = 끊을 연결도 없음).
+
+        **동시성 (#2372 Codex P2):** 조회를 ``get_broker()`` /
+        ``_reconnect_broker()`` 와 **동일한** per-account lock
+        (:meth:`_broker_lock_for`) 안에서 수행해, in-flight 한 초기
+        ``connect()`` 의 완료를 기다린 뒤(= drain) 캐시를 재확인한다. 동기
+        즉시 조회였다면, 종료 중 cache-miss ``get_broker()`` 가 lock 을 쥔 채
+        ``connect()`` 를 대기하는 in-flight 구간(아직 캐시 미기록)에서
+        shutdown 루프가 이를 ``None`` 으로 보고 skip 하고, 직후 connect 가
+        성공해 **disconnect 루프가 끝난 뒤에** 연결된 adapter 가 캐시에 기록돼
+        세션이 DB close 이후까지 잔존했다. lock 대기로 drain 하면, in-flight
+        connect 가 성공한 경우 캐시된 adapter 를 반환(→ shutdown 이
+        disconnect)하고, 실패한 경우 캐시 미기록이므로 ``None`` 을 반환한다.
+        새 adapter 생성/connect 는 일으키지 않는다(lock 안에서 단순 조회).
+        lock 보유 중 본 메서드를 호출하는 경로가 없어 재귀 deadlock 도 없다.
         """
-        return self._brokers.get(account_id)
+        async with self._broker_lock_for(account_id):
+            return self._brokers.get(account_id)
 
     async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
         """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).

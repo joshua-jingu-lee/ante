@@ -1047,7 +1047,7 @@ async def test_get_cached_broker_returns_none_when_uncached(service):
     import unittest.mock
 
     with unittest.mock.patch.object(TestBrokerAdapter, "connect", counting_connect):
-        cached = service.get_cached_broker("main")
+        cached = await service.get_cached_broker("main")
 
     assert cached is None
     assert call_count["connect"] == 0
@@ -1060,8 +1060,112 @@ async def test_get_cached_broker_returns_instance_after_get_broker(service):
     await service.create(_make_account())
 
     built = await service.get_broker("main")
-    cached = service.get_cached_broker("main")
+    cached = await service.get_cached_broker("main")
     assert cached is built
+
+
+@pytest.mark.asyncio
+async def test_get_cached_broker_drains_inflight_connect(service):
+    """get_cached_broker: in-flight 초기 connect 를 drain 후 캐시된 adapter 반환.
+
+    회귀 방지 (#2372 Codex P2): 종료(shutdown) 루프가 cached-only 접근자로
+    "이미 연결된 어댑터만 끊을" 때, 동기 즉시 조회였다면 cache-miss
+    ``get_broker()`` 가 per-account lock 을 쥔 채 ``connect()`` 를 대기하는
+    in-flight 구간(아직 캐시 미기록)을 ``None`` 으로 보고 skip 하고, 그 connect
+    가 직후 성공해 disconnect 루프가 끝난 뒤 캐시에 기록된 세션이 DB close
+    이후까지 잔존했다.
+
+    본 테스트는 connect 를 ``asyncio.Event`` 로 게이트해 그 윈도를 결정적으로
+    재현한다: T1 ``get_broker()`` 가 connect 에서 정지(in-flight·캐시 미기록)한
+    사이 T2 ``get_cached_broker()`` 를 태스크로 시작해 같은 lock 대기에
+    진입시킨 뒤 게이트를 푼다. async lock-drain 구현에서는 T2 가 in-flight
+    connect 완료를 기다린 뒤 조회하므로 **연결된 adapter 를 반환**(None 아님)
+    해야 한다. 동기 즉시 조회(전 HEAD)였다면 T2 가 캐시 미기록 시점에 ``None``
+    을 반환해 RED.
+    """
+    import asyncio
+    import unittest.mock
+
+    await service.create(_make_account())
+
+    from ante.broker.test import TestBrokerAdapter
+
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+    original_connect = TestBrokerAdapter.connect
+
+    async def gated_connect(self):  # noqa: ANN001
+        connect_started.set()
+        await release_connect.wait()
+        await original_connect(self)
+
+    with unittest.mock.patch.object(TestBrokerAdapter, "connect", gated_connect):
+        # T1: 초기 get_broker — adapter build 후 connect 에서 정지(캐시 미기록).
+        get_task = asyncio.create_task(service.get_broker("main"))
+        await asyncio.wait_for(connect_started.wait(), timeout=2.0)
+        assert "main" not in service._brokers  # in-flight: 아직 캐시 미기록
+
+        # T2: get_cached_broker — 같은 per-account lock 대기에 진입한다.
+        cached_task = asyncio.create_task(service.get_cached_broker("main"))
+        # T2 가 lock 대기에 진입할 시간을 준다(즉시 None 반환하지 않아야 함).
+        await asyncio.sleep(0.05)
+        assert not cached_task.done(), (
+            "동기 즉시 조회면 lock 대기 없이 None 으로 즉시 완료 → drain 누락"
+        )
+
+        # 게이트 해제 → T1 connect 완료·캐시 기록·lock 해제 → T2 진입.
+        release_connect.set()
+
+        built = await asyncio.wait_for(get_task, timeout=2.0)
+        cached = await asyncio.wait_for(cached_task, timeout=2.0)
+
+    # drain 후 조회: in-flight connect 가 성공했으므로 캐시된 adapter 반환.
+    assert cached is not None
+    assert cached is built
+    assert cached.is_connected is True
+
+
+@pytest.mark.asyncio
+async def test_get_cached_broker_returns_none_when_inflight_connect_fails(service):
+    """get_cached_broker: in-flight 초기 connect 가 실패하면 drain 후 None (#2372).
+
+    connect 실패 시 ``get_broker()`` 는 캐시에 기록하지 않으므로(connect-성공-
+    후-캐시), in-flight 구간을 drain 한 ``get_cached_broker()`` 는 ``None`` 을
+    반환해야 한다 — 미연결/세션-누수 adapter 를 종료 루프가 잡지 않는다.
+    """
+    import asyncio
+    import unittest.mock
+
+    await service.create(_make_account())
+
+    from ante.broker.test import TestBrokerAdapter
+
+    connect_started = asyncio.Event()
+    release_connect = asyncio.Event()
+
+    async def failing_connect(self):  # noqa: ANN001
+        connect_started.set()
+        await release_connect.wait()
+        raise RuntimeError("연결 실패")
+
+    with unittest.mock.patch.object(TestBrokerAdapter, "connect", failing_connect):
+        get_task = asyncio.create_task(service.get_broker("main"))
+        await asyncio.wait_for(connect_started.wait(), timeout=2.0)
+        assert "main" not in service._brokers
+
+        cached_task = asyncio.create_task(service.get_cached_broker("main"))
+        await asyncio.sleep(0.05)
+        assert not cached_task.done()  # lock 대기로 drain 중
+
+        release_connect.set()
+
+        with pytest.raises(RuntimeError):
+            await asyncio.wait_for(get_task, timeout=2.0)
+        cached = await asyncio.wait_for(cached_task, timeout=2.0)
+
+    # connect 실패 → 캐시 미기록 → drain 후 None.
+    assert cached is None
+    assert "main" not in service._brokers
 
 
 @pytest.mark.asyncio
@@ -1125,7 +1229,7 @@ async def test_reconnect_during_inflight_get_broker_connect_uses_new_config(
         await asyncio.wait_for(update_task, timeout=2.0)
 
     # 최종 캐시 adapter 는 신 설정으로 생성·연결되어야 한다.
-    cached = service.get_cached_broker("main")
+    cached = await service.get_cached_broker("main")
     assert cached is not None
     assert cached.config.get("app_key") == "new"
     assert cached.is_connected is True
@@ -1176,7 +1280,7 @@ async def test_reconnect_broker_direct_serializes_with_inflight_get_broker(servi
         await asyncio.wait_for(get_task, timeout=2.0)
         await asyncio.wait_for(reconnect_task, timeout=2.0)
 
-    cached = service.get_cached_broker("main")
+    cached = await service.get_cached_broker("main")
     assert cached is not None
     assert cached.config.get("app_key") == "new"
     assert cached.is_connected is True

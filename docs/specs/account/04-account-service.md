@@ -24,7 +24,7 @@ AccountService(db: Database, eventbus: EventBus)
 | `activate` | `account_id: str, activated_by: str` | `None` | status → ACTIVE. DELETED 계좌는 활성화 불가. `AccountActivatedEvent` 발행 |
 | `delete` | `account_id: str, deleted_by: str` | `None` | 소프트 딜리트 (status=DELETED). **cold-path 전용**. active Ante runtime이 살아 있으면 거부. 진입 직후 `bots` 테이블을 검사해 동일 `account_id`의 활성(non-deleted) 봇이 남아 있으면 `AccountHasActiveBotsError`로 차단(orphan bot 무결성). 1.0 정책상 `AccountDeletedEvent`는 발행하지 않는다 |
 | `get_broker` | `account_id: str` | `BrokerAdapter` | 계좌의 BrokerAdapter 인스턴스 반환. lazy init. 최초 호출 시 생성하고 `connect()`를 수행하여 **연결에 성공한 경우에만 캐싱**한다. 연결 실패 시 캐시에 남기지 않고 예외를 전파하므로(미연결 어댑터 잔존 차단), 일시적 인증/네트워크 실패는 다음 호출에서 자연 회복한다. cache-hit은 connect 없이 즉시 반환. cache-miss는 per-account lock으로 직렬화하여 동시 호출 시에도 단일 인스턴스·단일 connect를 보장한다 |
-| `get_cached_broker` | `account_id: str` | `BrokerAdapter \| None` | 이미 캐시된 BrokerAdapter만 반환(build/connect 없음). 미캐시면 `None`. 종료 루프처럼 "이미 연결된 어댑터만 끊는" 경로 전용 — 미캐시 계좌를 끊기 위해 새로 연결하는 회귀를 차단한다(동기 메서드) |
+| `get_cached_broker` | `account_id: str` | `BrokerAdapter \| None` | 이미 캐시된 BrokerAdapter만 반환(build/connect 없음). 미캐시면 `None`. 종료 루프처럼 "이미 연결된 어댑터만 끊는" 경로 전용 — 미캐시 계좌를 끊기 위해 새로 연결하는 회귀를 차단한다. **async 메서드**: per-account lock으로 in-flight 초기 연결을 drain한 뒤 조회하므로, 종료 중 in-flight connect가 끝난 직후 캐시되어 disconnect를 놓치는 세션 잔존을 막는다 |
 | `create_default_test_account` | — | `Account` | 테스트 계좌 자동 생성 (`ante init` 시 호출). 이미 존재하면 스킵 |
 | `suspend_all` | `reason: str, suspended_by: str` | `int` | 모든 ACTIVE 계좌를 SUSPENDED로 전환. 전환된 수 반환 (시스템 전체 Kill Switch) |
 | `activate_all` | `activated_by: str` | `int` | 모든 SUSPENDED 계좌를 ACTIVE로 복구. DELETED 계좌는 대상 제외 |
@@ -39,7 +39,7 @@ AccountService(db: Database, eventbus: EventBus)
 
 **connect 멱등**: 모든 BrokerAdapter의 `connect()`는 멱등이다 — 이미 연결된 상태(`is_connected`이고 활성 세션 보유)면 새 세션을 만들지 않고 no-op으로 반환한다. 따라서 `get_broker()`가 connect한 어댑터에 호출자가 `connect()`를 재호출해도 세션 교체로 인한 누수가 없다. cache-miss 경로는 per-account 락으로 직렬화하고 락 안에서 캐시를 재검사(double-checked)하므로, 동일 계좌의 동시 `get_broker()` 호출도 단일 인스턴스·단일 connect로 수렴한다.
 
-**cached-only 조회**: `get_cached_broker()`는 이미 캐시된 어댑터만 반환하며(build/connect 없음), 미캐시면 `None`을 반환한다. 종료 루프처럼 "이미 연결된 어댑터만 끊으면 되는" 경로는 이 접근자를 사용해, 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를 피한다(미캐시 = 끊을 연결도 없음).
+**cached-only 조회**: `get_cached_broker()`는 이미 캐시된 어댑터만 반환하며(build/connect 없음), 미캐시면 `None`을 반환한다. 종료 루프처럼 "이미 연결된 어댑터만 끊으면 되는" 경로는 이 접근자를 사용해, 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를 피한다(미캐시 = 끊을 연결도 없음). 조회는 `get_broker()`/`_reconnect_broker()`와 동일한 per-account lock 안에서 수행하여 in-flight 초기 연결을 drain한 뒤 캐시를 재확인한다(async 메서드). 동기 즉시 조회였다면, 종료 중 cache-miss `get_broker()`가 lock을 쥔 채 `connect()`를 대기하는 in-flight 구간을 `None`으로 보고 skip하고, 그 connect가 직후 성공해 disconnect 루프 종료 뒤 캐시에 기록된 세션이 DB close 이후까지 잔존했다 — lock 대기로 connect 완료를 기다린 뒤 조회해 이 윈도를 닫는다(연결 성공 시 캐시된 어댑터 반환→disconnect, 실패 시 `None`).
 
 > **`trading_mode`와 `broker_config`의 분리**: `trading_mode`는 시스템이 브로커 API를 실제로 호출할지 결정한다 (VIRTUAL=가상거래, LIVE=실거래). `broker_config`는 브로커 내부 동작 설정을 담는다. 예를 들어 KIS 브로커의 `is_paper`는 모의투자/실전투자 엔드포인트를 결정하는 브로커 내부 관심사이므로 `broker_config`에 속한다. `get_broker()`는 `trading_mode`로부터 `is_paper`를 파생하지 않는다.
 
