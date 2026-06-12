@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import UTC, datetime
@@ -166,6 +167,10 @@ class AccountService:
         self._eventbus = eventbus
         self._accounts: dict[str, Account] = {}
         self._brokers: dict[str, BrokerAdapter] = {}
+        # cache-miss 직렬화용 per-account lock (#2372). 동시 miss 가 각각
+        # build+connect 해 세션을 누수하고 마지막만 캐시되는 race 를 차단한다.
+        # lock dict 항목 생성은 await 없는 동기 구간이라 그 자체로 race-free.
+        self._broker_locks: dict[str, asyncio.Lock] = {}
         # 런타임 인지 플래그(#1144 invariant S1).
         # boot mutation 종료 직후(``main._init_account`` 마지막)
         # ``mark_runtime_started()``로 True가 되며, 이후 cold-path 전용 메서드/필드
@@ -668,6 +673,21 @@ class AccountService:
         불린 적 없는 구간)에는 의미가 없고, 다음 `get_broker()` 호출이 새
         설정으로 lazy init한다.
 
+        **동시성 (#2372):** 캐시 부재 조기 반환 검사를 포함한 본문 전체를
+        ``get_broker()`` 와 **동일한 per-account lock**
+        (:meth:`_broker_lock_for`) 안에서 수행한다. lock 없이 조기 반환하면,
+        초기 ``get_broker()`` 가 lock 을 쥐고 ``connect()`` 를 대기하는 동안
+        (아직 캐시가 비어 있는 in-flight 구간) update() 가 본 메서드를
+        호출했을 때 캐시가 비었다고 판단해 조용히 반환하고, 직후
+        ``get_broker()`` 가 **구 설정으로 만든 어댑터를 캐시에 기록**해
+        DB(신 설정)와 런타임 캐시(구 설정)가 영구 어긋난다. lock 으로
+        직렬화하면 reconnect 가 in-flight connect 의 완료를 기다린 뒤 진입하므로
+        ``in self._brokers`` 가 true 가 되어 신 설정으로 rebuild + connect 후
+        swap 한다(역순으로 reconnect 가 선점해도 get_broker 의 double-check 로
+        정합). ``_build_broker_adapter`` / ``connect()`` 는 ``get_broker()`` 를
+        재진입하지 않으므로 lock 재귀 deadlock 이 없다. update() 경로가 이
+        lock 대기로 connect 시간만큼 블록될 수 있으나 admin-path 라 수용한다.
+
         실패 의미론:
         - 새 어댑터 생성(`_build_broker_adapter`) 실패 → 캐시는 기존 브로커를
           그대로 유지하고, `BrokerReconnectFailedError`를 올려 update() 호출자가
@@ -687,36 +707,40 @@ class AccountService:
         재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
         기반 경로는 후속 작업으로 분리한다 (#1100의 범위를 넘어선다).
         """
-        if account_id not in self._brokers:
-            return
+        async with self._broker_lock_for(account_id):
+            # in-flight 초기 connect 가 있으면 이 lock 대기로 직렬화된다. 캐시
+            # 부재 검사를 lock 안에서 수행해야, 구-설정 adapter 가 캐시된 뒤에
+            # reconnect 가 진입해 신-설정으로 rebuild + swap 한다 (#2372).
+            if account_id not in self._brokers:
+                return
 
-        try:
-            new_broker = await self._build_broker_adapter(account_id)
-        except Exception as exc:
-            logger.error(
-                "브로커 어댑터 생성 실패: account=%s — 기존 캐시를 유지합니다.",
-                account_id,
-                exc_info=True,
-            )
-            raise BrokerReconnectFailedError(
-                f"계좌 '{account_id}'의 새 브로커 어댑터 생성에 실패했습니다."
-            ) from exc
+            try:
+                new_broker = await self._build_broker_adapter(account_id)
+            except Exception as exc:
+                logger.error(
+                    "브로커 어댑터 생성 실패: account=%s — 기존 캐시를 유지합니다.",
+                    account_id,
+                    exc_info=True,
+                )
+                raise BrokerReconnectFailedError(
+                    f"계좌 '{account_id}'의 새 브로커 어댑터 생성에 실패했습니다."
+                ) from exc
 
-        try:
-            await new_broker.connect()
-        except Exception as exc:
-            logger.error(
-                "브로커 재연결 실패: account=%s — 기존 캐시를 유지합니다.",
-                account_id,
-                exc_info=True,
-            )
-            raise BrokerReconnectFailedError(
-                f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
-            ) from exc
+            try:
+                await new_broker.connect()
+            except Exception as exc:
+                logger.error(
+                    "브로커 재연결 실패: account=%s — 기존 캐시를 유지합니다.",
+                    account_id,
+                    exc_info=True,
+                )
+                raise BrokerReconnectFailedError(
+                    f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
+                ) from exc
 
-        # connect 성공 후에만 캐시를 원자적으로 교체한다.
-        # 이전 어댑터는 의도적으로 disconnect하지 않는다 (docstring 참고).
-        self._brokers[account_id] = new_broker
+            # connect 성공 후에만 캐시를 원자적으로 교체한다.
+            # 이전 어댑터는 의도적으로 disconnect하지 않는다 (docstring 참고).
+            self._brokers[account_id] = new_broker
 
     # ── 상태 전이 ──────────────────────────────────────
 
@@ -998,19 +1022,84 @@ class AccountService:
 
     # ── 브로커 인스턴스 ──────────────────────────────────
 
+    def _broker_lock_for(self, account_id: str) -> asyncio.Lock:
+        """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성, #2372).
+
+        ``get_broker()`` 의 cache-miss build+connect 경로와
+        ``_reconnect_broker()`` 의 rebuild+connect 경로가 **동일한** lock
+        인스턴스를 공유해야, 초기 connect 가 in-flight 인 동안 설정 변경
+        reconnect 가 끼어들어 구-설정 adapter 가 캐시에 영구 고착되는 race 를
+        차단할 수 있다. dict 항목 생성은 ``await`` 없는 동기 구간이므로
+        ``setdefault`` 자체로 race-free 하다.
+        """
+        return self._broker_locks.setdefault(account_id, asyncio.Lock())
+
     async def get_broker(self, account_id: str) -> BrokerAdapter:
-        """계좌의 BrokerAdapter 인스턴스를 반환. lazy init + 캐싱.
+        """계좌의 BrokerAdapter 인스턴스를 반환. lazy init + 연결-성공-후-캐싱.
+
+        최초 호출 시 어댑터를 생성하고 ``connect()`` 를 수행하며, **연결에
+        성공한 경우에만** 캐시에 기록한 뒤 반환한다. connect 가 실패하면
+        캐시에 남기지 않고 예외를 전파하므로(#2372), 일시적 인증/네트워크
+        오류로 미연결 adapter 가 캐시에 잔존해 후속 소비자가 재사용하는 일이
+        없다. 이는 재연결 경로(:meth:`_reconnect_broker`)의 connect-성공-후-캐시
+        원칙과 동일하다 — 초기 경로의 비대칭을 제거한다.
+
+        cache-hit 경로(런타임 hot-path)는 connect 없이 캐시된 인스턴스를 즉시
+        반환한다(connect 는 멱등이므로 호출자가 이후 connect 를 재호출해도
+        no-op). cache-miss 경로는 per-account :class:`asyncio.Lock` 으로
+        직렬화하고 lock 안에서 캐시를 double-check 하여, 동일 계좌의 동시
+        miss 가 각각 build+connect 해 세션을 누수하고 마지막만 캐시되는 race
+        를 차단한다.
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
             InvalidBrokerTypeError: broker_type이 BROKER_REGISTRY에 등록되지 않음.
         """
-        if account_id in self._brokers:
-            return self._brokers[account_id]
+        # lock-free fast path: cache-hit 면 lock 없이 즉시 반환.
+        broker = self._brokers.get(account_id)
+        if broker is not None:
+            return broker
 
-        broker = await self._build_broker_adapter(account_id)
-        self._brokers[account_id] = broker
-        return broker
+        # per-account lock 으로 miss 경로 직렬화. _reconnect_broker 와 **동일한**
+        # lock 인스턴스를 재사용해(``_broker_lock_for``) in-flight 초기 connect 와
+        # 설정 변경 reconnect 가 서로 직렬화되도록 한다 (#2372).
+        async with self._broker_lock_for(account_id):
+            # double-checked: lock 대기 중 선행 태스크가 캐시했으면 재사용.
+            broker = self._brokers.get(account_id)
+            if broker is not None:
+                return broker
+
+            broker = await self._build_broker_adapter(account_id)
+            # connect 성공 후에만 캐시에 기록한다. 실패 시 캐시 미기록 +
+            # 예외 전파(connect 내부에서 session cleanup 수행, #2368).
+            await broker.connect()
+            self._brokers[account_id] = broker
+            return broker
+
+    async def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
+        """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음, #2372).
+
+        캐시에 없으면 ``None`` 을 반환하며 새 어댑터를 생성하거나 연결하지
+        않는다. 종료(shutdown) 루프처럼 "이미 연결된 어댑터만 끊으면 되는"
+        경로에서 사용한다 — 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를
+        차단한다(미캐시 = 끊을 연결도 없음).
+
+        **동시성 (#2372 Codex P2):** 조회를 ``get_broker()`` /
+        ``_reconnect_broker()`` 와 **동일한** per-account lock
+        (:meth:`_broker_lock_for`) 안에서 수행해, in-flight 한 초기
+        ``connect()`` 의 완료를 기다린 뒤(= drain) 캐시를 재확인한다. 동기
+        즉시 조회였다면, 종료 중 cache-miss ``get_broker()`` 가 lock 을 쥔 채
+        ``connect()`` 를 대기하는 in-flight 구간(아직 캐시 미기록)에서
+        shutdown 루프가 이를 ``None`` 으로 보고 skip 하고, 직후 connect 가
+        성공해 **disconnect 루프가 끝난 뒤에** 연결된 adapter 가 캐시에 기록돼
+        세션이 DB close 이후까지 잔존했다. lock 대기로 drain 하면, in-flight
+        connect 가 성공한 경우 캐시된 adapter 를 반환(→ shutdown 이
+        disconnect)하고, 실패한 경우 캐시 미기록이므로 ``None`` 을 반환한다.
+        새 adapter 생성/connect 는 일으키지 않는다(lock 안에서 단순 조회).
+        lock 보유 중 본 메서드를 호출하는 경로가 없어 재귀 deadlock 도 없다.
+        """
+        async with self._broker_lock_for(account_id):
+            return self._brokers.get(account_id)
 
     async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
         """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).

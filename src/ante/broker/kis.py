@@ -310,7 +310,16 @@ class KISBaseAdapter(BrokerAdapter):
     # ── 연결 ───────────────────────────────────────
 
     async def connect(self) -> None:
-        """KIS API 연결 및 인증."""
+        """KIS API 연결 및 인증.
+
+        멱등(#2372): 이미 연결된 상태(``is_connected`` 이고 활성 session 보유)면
+        새 session 을 만들지 않고 즉시 반환한다. ``get_broker`` 가 connect-성공-후
+        -캐시하므로, 호출자(CLI ``_get_broker``·runtime startup)가 캐시된
+        어댑터에 connect 를 재호출해도 기존 session 교체로 인한 누수가 없다.
+        """
+        if self.is_connected and self._session is not None:
+            return
+
         try:
             import aiohttp
         except ImportError as e:
