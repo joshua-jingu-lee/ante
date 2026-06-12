@@ -2,6 +2,18 @@
 
 schema_version 테이블을 관리하며, 등록된 마이그레이션을 순차 실행한다.
 DB 마이그레이션과 Parquet 데이터 마이그레이션을 모두 지원한다.
+
+마이그레이션 작성 규칙 (#2365)
+------------------------------
+각 마이그레이션은 ``run_migrations`` 의 ``async with db.transaction():`` 블록
+안에서 실행되어 schema_version INSERT 와 원자 커밋된다. **마이그레이션 본문에서
+``Database.execute_script`` 를 호출하지 않는다** — Python ``executescript`` 는
+실행 전에 열린 트랜잭션을 암묵 COMMIT 하므로 진행 중인 마이그레이션 트랜잭션을
+의도치 않게 커밋해 원자성을 깨뜨린다(트랜잭션 owner 태스크의 ``execute_script``
+호출은 ``Database`` 가 ``RuntimeError`` 로 차단한다). DDL 은 트랜잭션 안에서
+``db.execute(...)`` 로 문장 단위로 실행한다(상세: ``docs/specs/core/core.md`` Database
+동시성·트랜잭션 invariant). schema 부트스트랩처럼 ``execute_script`` 가 필요한
+초기화는 트랜잭션 밖에서 수행한다.
 """
 
 from __future__ import annotations

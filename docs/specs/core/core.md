@@ -35,7 +35,7 @@ canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기
 | `execute` | sql: str, params: tuple = () | None | INSERT/UPDATE/DELETE 실행 (writer 사용, 자동 커밋) |
 | `fetch_one` | sql: str, params: tuple = () | dict \| None | 단일 행 조회 (reader 사용). dict(컬럼명 → 값) 반환 |
 | `fetch_all` | sql: str, params: tuple = () | list[dict] | 다중 행 조회 (reader 사용) |
-| `execute_script` | sql: str | None | DDL 스크립트 실행 (테이블 생성 등, writer 사용) |
+| `execute_script` | sql: str | None | DDL 스크립트 실행 (테이블 생성 등, writer 사용). **트랜잭션 안에서 호출 금지** — schema/lifecycle 전용 |
 
 ### SQLite PRAGMA 설정
 
@@ -55,6 +55,48 @@ canonical DB 경로이다. 기본값은 `<config_dir>/db/ante.db`이며, CWD 기
 2. **aiosqlite 래핑**: asyncio 기반 시스템에서 DB I/O가 이벤트 루프를 차단하지 않도록 비동기 래퍼 사용
 3. **dict 반환**: `aiosqlite.Row`를 dict로 변환하여 모듈 간 데이터 전달을 단순화
 4. **자동 커밋**: `execute()` 호출 시 자동 커밋으로 트랜잭션 관리 단순화
+
+### 동시성·트랜잭션 invariant (#2365)
+
+단일 writer 연결을 여러 asyncio 태스크가 공유한다(예: 체결 폴 태스크의 자동커밋
+쓰기와 outbox publisher 태스크의 `Treasury` 정산 트랜잭션). `execute*()`의 implicit
+BEGIN과 commit 사이 await 경계에서 태스크가 전환되면 트랜잭션 상태가 어긋나
+정합성이 깨진다. Database는 다음 invariant로 이를 차단한다:
+
+1. **writer 직렬화**: writer 쓰기 API(`execute`/`execute_fetch_one`/
+   `execute_fetch_all`/`execute_script`)와 `transaction()`은 내부 `asyncio.Lock`으로
+   **태스크 간 직렬화**된다. 한 태스크의 implicit BEGIN↔commit 사이에 다른 태스크가
+   끼어들어 같은 connection에서 `BEGIN`을 실행하는 race(`cannot start a transaction
+   within a transaction`)를 제거한다.
+2. **트랜잭션 합류는 소유 태스크 한정**: `transaction()`은 진입한 태스크를 트랜잭션
+   소유 태스크로 등록한다. **소유 태스크의** `execute*()`만 commit을 skip하고 같은
+   트랜잭션에 합류한다. 다른 태스크의 writer 쓰기는 lock에서 대기해 독립 커밋되며,
+   소유 태스크의 트랜잭션에 합류하지 않는다(rollback 시 무관한 쓰기 소실 방지).
+3. **중첩 트랜잭션 금지**: 같은 태스크가 `transaction()`에 재진입하면 `RuntimeError`
+   (`중첩 트랜잭션은 지원하지 않습니다`). 재진입 검사는 lock 획득 **전**에 수행한다
+   (자기 자신이 보유한 lock 재획득 deadlock 방지). savepoint는 범위 밖이다.
+4. **트랜잭션 블록 안 child task / `asyncio.gather` DB write 금지**: `transaction()`
+   블록 안에서 별도 태스크(`asyncio.create_task`/`asyncio.gather`)로 DB write를 시작하고
+   그 완료를 블록 안에서 await하면, child는 소유 태스크가 아니라 lock 대기에 빠지고
+   owner는 child를 기다려 **교착**한다. 트랜잭션 본문의 모든 DB write는 소유 태스크가
+   직접 순차 await로 수행한다.
+5. **`execute_script`는 트랜잭션 밖 schema/lifecycle 전용**: Python `executescript`는
+   실행 전에 열린 트랜잭션을 암묵 COMMIT하므로, `transaction()` 소유 태스크가 호출하면
+   진행 중인 트랜잭션을 의도치 않게 커밋해 원자성을 깨뜨린다. 소유 태스크 호출은
+   `RuntimeError`로 차단한다. 마이그레이션·schema 부트스트랩은 트랜잭션 밖에서만
+   `execute_script`를 호출한다.
+6. **cancellation-safety**: `transaction()` COMMIT/자동커밋 commit이 cancel돼도
+   cleanup ROLLBACK을 무조건 시도해 implicit 트랜잭션 잔존을 막는다(다음 lock holder의
+   `BEGIN` 보호). cleanup ROLLBACK은 `except` 진입 직후 suspension 없이 곧바로
+   `await conn.execute("ROLLBACK")`에 도달한다 — asyncio cancellation은 suspension
+   point에서만 전달되고 aiosqlite는 첫 suspension 이전 동기 구간에서 SQL을 worker
+   FIFO에 enqueue하므로, ROLLBACK은 enqueue가 보장되고 worker FIFO 직렬성에 의해
+   다음 SQL보다 먼저 settle된다. `asyncio.shield`는 사용하지 않는다.
+   - **bounded known-limitation**: cancellation-during-COMMIT ack 모호성(COMMIT
+     enqueue 후 await 취소 → DB는 커밋됐는데 호출자는 취소 경로)은 별개의 pre-existing
+     invariant다. fill 정산 경로는 outbox at-least-once 재전달 + `treasury_fill_dedup`
+     멱등 + 재기동 시 메모리 상태 DB 재구축으로 **재기동 시** 자가 수렴한다(즉시 수렴
+     아님). 본 절은 이 모호성을 해소하지 않는다.
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 
