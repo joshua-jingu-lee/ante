@@ -370,8 +370,9 @@ hard barrier**다.
   (`is_paper=true`) 당일 체결은 예외**다: 백스톱(`get_order_history`)이 일별
   결제기준이라 당일 0건을 주므로 백스톱만으로 정합성이 보장되지 않는다(§2.1).
   이 모의 당일 gap은 §11 잔고-역도출 fallback(체결기준 잔고 즉시반영)으로 닫는다.
-  라이브의 잔여 의존(지연 폭·EXCG_ID_DVSN_CD·신 tr_id 효과 확인)은 #2317에서
-  검증한다(known-limitation).
+  `EXCG_ID_DVSN_CD`·신 tr_id 효과 확인은 **#2317/#2349로 확인 완료**다. 잔존
+  실전 의존은 ccld 지연 폭 확정뿐이며 실전 전환 시 확인한다(§11.6/§11.7
+  known-limitation).
 - **소비자 멱등화**(Treasury txn-dedup·Bot/SignalChannel bounded)는 #1949 범위
   밖이며 별도 이슈(#1957)에서 해소한다. #1949는 소비자 무변경이다.
 
@@ -524,8 +525,12 @@ excess가 그 유일 주문의 주문 수량과 정확히 일치하는 full-fill
 - **다중 self-order(같은 symbol에 둘 이상의 open buy) 또는 다중 bot 동일 symbol
   은 fallback을 적용하지 않는다**(미적용). 잔고는 총량만 주므로 excess를 어느
   주문에 얼마씩 귀속할지 결정할 수 없어, 보수적으로 외부/혼재 위험을 회피한다.
-  이는 §11.7 **bounded known-limitation**이다. FIFO·비례 배분 등 다중 귀속 규칙은
-  **본 스펙 비채택**이며 라이브 확인(#2317) 후 재검토한다.
+  이는 §11.7 **bounded known-limitation**이다. 2026-06-12 라이브 측정(#2353)으로
+  ccld(`VTTC0081R`)의 ODNO 단위 분리 식별은 **가능 확인**됐다(동일 symbol 4건 주문
+  전부 개별 ODNO row). 그럼에도 FIFO·비례 배분 등 다중 귀속 완화는 **비채택 유지**
+  한다 — ① 부분체결 추적은 미검증(잔고는 총량만 제공), ② #2349(신세대 tr_id)로
+  모의 당일 ccld 가 정상 반환되어 fallback 개입 창이 축소돼, 잔여 효익 대비 비가역
+  흡수 위험이 크다(#2353 adjudication 2026-06-12).
 
 이 full-fill 정확매칭 조건은 partial 귀속이 동시 외부 매수를 self로 흡수하는
 경로(예: ante 미체결 100, self 부분 미기록 50, 숨은 외부 매수 10 → partial
@@ -621,11 +626,20 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   live 확장은 §11.6·#2317 검증 뒤에만 허용한다.
 - **다중 self-order/다중 bot 동일 symbol 미적용**(§11.3): 유일 open buy일 때만
   귀속. 다중이면 fallback 미적용(외부 검출 지연 = 매칭 주문 해소 시점 ≤ EOD,
-  reconciler §03-07 경계와 동형). 다중 귀속(FIFO 등)은 비채택.
-- **partial-fill 추적 한계**: 잔고는 누적만 주므로 부분 체결의 중간 경로를
-  재구성하지 못한다. fallback은 `recorded_filled_qty == 0`인 미복구 주문에
-  한해 `excess == ordered_qty`일 때만 full fill로 advance하며, 그 외 partial
-  excess는 D+1 ccld 백스톱에 위임한다(미적용).
+  reconciler §03-07 경계와 동형). 2026-06-12 라이브 측정(#2353)으로 ccld
+  (`VTTC0081R`)는 동일 symbol 동시 다중 주문을 **개별 ODNO row 로 분리 식별 가능**
+  함이 확인됐다(식별 불가가 아님). 그럼에도 다중 귀속(FIFO·비례 배분 등)은 **정책상
+  비채택 유지** — 부분체결 추적 미검증 + #2349 로 fallback 개입 창 축소(잔여 효익
+  대비 비가역 흡수 위험, §11.3·#2353 adjudication). 본 항목은 **bounded
+  known-limitation** 지위를 유지한다.
+- **partial-fill 추적 한계 (bounded known-limitation 확정)**: 잔고는 누적
+  총량만 주므로 부분 체결의 중간 경로를 재구성하지 못한다. fallback은
+  `recorded_filled_qty == 0`인 미복구 주문에 한해 `excess == ordered_qty`일 때만
+  full fill로 advance하며, 그 외 partial excess는 D+1 ccld 백스톱에 위임한다
+  (미적용). 이 한계는 **확정**이다 — 근거: ① 잔고는 종목 총량(`hldg_qty`)만 제공해
+  주문 단위 부분 분량을 구분하지 못하고, ② 부분체결의 중간 경로가 잔고에서
+  재구성되지 않는다(#2353 adjudication 2026-06-12). 추후 라이브에서 부분체결
+  중간 경로가 실측되면 reopen 가능하다(현 시점 추가 측정 없이 확정).
 - **sell-side fallback 미적용 (buy-only 명시 한정, #2351)**: position-derived
   fallback 은 **매수 방향에만** 적용한다(§11/§11.3). 모의 ccld 지연은 방향 무관
   (§2.1)이라 미반영 self **매도**도 `broker_qty < internal_qty` gap 을 만들지만,
@@ -642,11 +656,12 @@ D+1 ccld 백스톱으로 반영되며, fallback이 외부분을 흡수하지 않
   정정 안 함.
 - **Treasury 비례 정산**: §9의 pre-existing 한계(부분 체결 비례 정산 미지원)는
   fallback이 악화시키지 않으며 별도 후속 이슈로 둔다.
-- **라이브 의존(#2317)**: `EXCG_ID_DVSN_CD`·신 tr_id(`VTTC0081R`, #2349)의 당일
+- **잔존 실전 의존**: `EXCG_ID_DVSN_CD`·신 tr_id(`VTTC0081R`, #2349)의 당일
   반영 효과는 **#2317 라이브 A/B로 확인 완료**다(레거시 `8001R` 0행 vs 신
-  `0081R` 당일 반영). 다만 지연 폭 확정, multi-order/partial 식별 가능성(#2353),
-  live 활성·다중 귀속 완화는 **여전히 라이브 의존**으로 남으며 #2317 결과 뒤
-  재검토한다.
+  `0081R` 당일 반영). multi-order/partial 식별 의존도 **#2353으로 종결**됐다
+  (multi-order 식별 가능 확인·다중 귀속 완화 비채택 확정, partial 추적 한계 확정).
+  잔존 라이브 의존 항목은 ① **실전 ccld 지연 폭 확정**(D+1 vs 장중 분 단위)과
+  ② **실전 활성 gate**(§11.6)뿐이며, 실전 전환 시 확인한다.
 
 ### 11.8 FillApplier 단일 권위 (직접 수정 금지)
 
