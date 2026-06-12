@@ -147,7 +147,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `polling_interval` | float | 3.0 | 폴링 간격 (초) |
 | `confirm_timeout` | float | 30.0 | 위험 명령 확인 대기 시간 (초) |
 | `bot_manager` | BotManager \| None | None | 봇 관리용 |
-| `treasury` | Treasury \| None | None | 자금 현황 조회용 |
+| `treasury_manager` | TreasuryManager \| None | None | 자금 현황 조회용 (전 계좌) |
 | `account_service` | AccountService \| None | None | 계좌 상태 제어용 |
 | `approval_service` | ApprovalService \| None | None | 결재 승인/거절 처리용 |
 
@@ -158,7 +158,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `/help` | 사용 가능한 명령어 목록 | - |
 | `/status` | 시스템 상태 요약 (거래 상태, 봇 현황) | - |
 | `/bots` | 봇 목록 + 상태 | - |
-| `/balance` | 자금 현황 요약 (계좌 잔고, 할당/미할당) | - |
+| `/balance` | 전 계좌 자금 현황 요약 (계좌별 잔고, 할당/미할당) | - |
 | `/halt [reason]` | 전체 거래 중지 (모든 ACTIVE 계좌를 SUSPENDED로 전환) | 2단계 확인 |
 | `/clear_halt` | 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) | 2단계 확인 |
 | `/stop <bot_id>` | 특정 봇 중지 | 2단계 확인 |

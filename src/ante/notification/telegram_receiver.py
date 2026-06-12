@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
     from ante.notification.telegram import TelegramAdapter
-    from ante.treasury.treasury import Treasury
+    from ante.treasury.manager import TreasuryManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class TelegramCommandReceiver:
         polling_interval: float = 3.0,
         confirm_timeout: float = 30.0,
         bot_manager: BotManager | None = None,
-        treasury: Treasury | None = None,
+        treasury_manager: TreasuryManager | None = None,
         account_service: AccountService | None = None,
         approval_service: ApprovalService | None = None,
     ) -> None:
@@ -43,7 +43,7 @@ class TelegramCommandReceiver:
         self._polling_interval = polling_interval
         self._confirm_timeout = confirm_timeout
         self._bot_manager = bot_manager
-        self._treasury = treasury
+        self._treasury_manager = treasury_manager
         self._account_service = account_service
         self._approval_service = approval_service
 
@@ -439,11 +439,34 @@ class TelegramCommandReceiver:
         return f"\U0001f916 봇 목록 ({running}/{total} 실행 중)\n" + "\n".join(lines)
 
     def _cmd_balance(self, args: list[str]) -> str:
-        """자금 현황."""
-        if not self._treasury:
-            return "Treasury가 연결되지 않았습니다."
+        """자금 현황 — 전 계좌 요약.
 
-        summary = self._treasury.get_summary()
+        SSOT: ``docs/specs/notification/notification.md`` 지원 명령 표.
+        ``TreasuryManager.list_all()`` (sync) 으로 등록된 모든 계좌의 잔고를
+        계좌별 섹션으로 렌더링한다 (#2378 — 단일 ``Treasury`` 주입 결함 정정).
+        """
+        if not self._treasury_manager:
+            return "TreasuryManager가 연결되지 않았습니다."
+
+        treasuries = self._treasury_manager.list_all()
+        if not treasuries:
+            return "등록된 계좌가 없습니다."
+
+        sections: list[str] = []
+        for treasury in treasuries:
+            sections.append(
+                f"계좌: {treasury.account_id}\n"
+                + self._render_account_balance(treasury.get_summary())
+            )
+
+        return "ℹ️ 자금 현황\n\n" + "\n\n".join(sections)
+
+    @staticmethod
+    def _render_account_balance(summary: dict[str, Any]) -> str:
+        """단일 계좌 자금 현황 본문 렌더링 (타이틀 제외).
+
+        예수금/매수가능/Ante 관리 종목(조건부)/봇 할당/미할당 포맷.
+        """
         balance = summary.get("account_balance", 0)
         purchasable = summary.get("purchasable_amount", 0)
         ante_purchase = summary.get("ante_purchase_amount", 0)
@@ -465,7 +488,6 @@ class TelegramCommandReceiver:
             pl_emoji = "➖"
 
         lines = [
-            "ℹ️ 자금 현황",
             f"계좌 예수금: {balance:,.0f}원",
             f"매수 가능: {purchasable:,.0f}원",
         ]
