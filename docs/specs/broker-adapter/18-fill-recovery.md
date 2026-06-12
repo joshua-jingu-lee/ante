@@ -371,8 +371,9 @@ hard barrier**다.
   결제기준이라 당일 0건을 주므로 백스톱만으로 정합성이 보장되지 않는다(§2.1).
   이 모의 당일 gap은 §11 잔고-역도출 fallback(체결기준 잔고 즉시반영)으로 닫는다.
   `EXCG_ID_DVSN_CD`·신 tr_id 효과 확인은 **#2317/#2349로 확인 완료**다. 잔존
-  실전 의존은 ccld 지연 폭 확정뿐이며 실전 전환 시 확인한다(§11.6/§11.7
-  known-limitation).
+  실전 의존은 ① 실전 ccld 지연 폭 확정과 ② 실전 활성 gate(§11.6 —
+  capability/config flag 분리, canary 검증 후 활성) 2개이며, 실전 전환 시
+  확인한다(§11.6/§11.7 known-limitation).
 - **소비자 멱등화**(Treasury txn-dedup·Bot/SignalChannel bounded)는 #1949 범위
   밖이며 별도 이슈(#1957)에서 해소한다. #1949는 소비자 무변경이다.
 
