@@ -25,7 +25,7 @@ direct_database_construction:
     line: 34
     reason: "broker live state — _create_account_service factory body (runtime_ipc cold_path fallback)"
   - path: src/ante/cli/commands/broker.py
-    line: 354
+    line: 362
     reason: "broker reconcile — adapter_db fallback (runtime_ipc cold_path branch)"
 
   # signal connect — #2338 PR#3 에서 CLI `_run_connect` 를 thin IPC relay 로

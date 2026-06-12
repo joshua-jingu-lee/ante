@@ -555,6 +555,115 @@ class TestStatusAndReconcileFollowupScope:
         assert "broker connection refused" in str(payload["error"]), payload
 
 
+# ── status 폴백 adapter.disconnect 대칭 (#2373) ─────────────────────────────
+
+
+class TestStatusFallbackDisconnectsAdapter:
+    """``broker status`` 직접 연결 폴백이 connect 성공 이후 ``adapter.disconnect()``
+    를 수행해 sibling(balance/positions/reconcile)과 대칭으로 session 을 정리하는지
+    검증한다 (#2373).
+
+    회귀 모델:
+        status 폴백 ``_run_status()`` 는 connect 성공 후 ``health_check()`` 만 하고
+        ``finally`` 에서 ``db.close()`` 만 호출 — ``adapter.disconnect()`` 부재로
+        KIS adapter 의 aiohttp session 이 프로세스 종료까지 잔존했다(``Unclosed
+        client session`` 경고). #2368 은 connect **실패** 경로를, 본 이슈는
+        connect **성공** 경로의 비대칭 누수를 닫는다.
+
+    설계:
+        ``_get_broker`` 를 직접 patch 해 ``disconnect = AsyncMock()`` 을 가진 mock
+        adapter 를 반환하게 하고, IPC 우선 시도는 ``ClickException`` 으로 막아
+        폴백 분기를 강제한다(``_patch_balance_fallback_raises`` 와 동형 하네스).
+        성공 경로와 ``health_check`` 예외 경로 양쪽에서 ``disconnect()`` 가 정확히
+        한 번 await 됨을 단언한다 — sibling 의 검증된 미러.
+    """
+
+    def _run_status_fallback(
+        self,
+        runner: CliRunner,
+        *,
+        health_check: AsyncMock,
+    ) -> tuple[object, AsyncMock]:
+        """IPC 미가용을 강제하고 ``_get_broker`` 를 mock adapter 로 patch 한 뒤
+        ``broker status --account acc-1`` 을 호출한다.
+
+        Returns:
+            (CliRunner result, disconnect AsyncMock) — disconnect 호출 검증용.
+        """
+        import click
+
+        from ante.broker.base import BrokerAdapter
+        from ante.cli.commands import broker as broker_cmd
+
+        async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click.ClickException("server unavailable")
+
+        mock_adapter = MagicMock(spec=BrokerAdapter)
+        mock_adapter.is_connected = True
+        mock_adapter.exchange = "KRX"
+        mock_adapter.health_check = health_check
+        mock_adapter.disconnect = AsyncMock(return_value=None)
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return mock_adapter, None
+
+        with (
+            patch.object(broker_cmd, "_ipc_broker_command", new=_raise_click),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "status",
+                    "--account",
+                    "acc-1",
+                ],
+            )
+        return result, mock_adapter.disconnect
+
+    def test_status_fallback_success_disconnects_adapter(
+        self, runner: CliRunner
+    ) -> None:
+        """health_check 성공 경로: status 폴백이 ``adapter.disconnect()`` 를 정확히
+        한 번 호출한다 (main RED — 현재 disconnect 미호출)."""
+        result, disconnect = self._run_status_fallback(
+            runner, health_check=AsyncMock(return_value=True)
+        )
+
+        assert result.exit_code == 0, (
+            f"expected exit 0, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = json.loads(result.stdout)
+        assert payload["connected"] is True, payload
+        assert payload["healthy"] is True, payload
+        disconnect.assert_awaited_once()
+
+    def test_status_fallback_health_check_error_disconnects_adapter(
+        self, runner: CliRunner
+    ) -> None:
+        """health_check 예외 경로: finally 가 disconnect 후 기존 ``except
+        Exception`` 분기(``connected:False``)에 도달한다. disconnect 호출 +
+        connected:False 변환이 모두 유지되어야 한다."""
+        result, disconnect = self._run_status_fallback(
+            runner,
+            health_check=AsyncMock(side_effect=RuntimeError("health probe failed")),
+        )
+
+        assert result.exit_code == 0, (
+            f"expected exit 0 (generic 실패 swallow 계약), got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = json.loads(result.stdout)
+        assert payload["connected"] is False, payload
+        assert payload["healthy"] is False, payload
+        assert "health probe failed" in str(payload["error"]), payload
+        disconnect.assert_awaited_once()
+
+
 # ── #1636 / #1623 Split C: invalid account_id ingress → VALIDATION_ERROR ────
 
 

@@ -142,8 +142,16 @@ def status(ctx: click.Context, account_id: str) -> None:
                         "exchange": adapter.exchange,
                     }
                 finally:
-                    if db:
-                        await db.close()
+                    # sibling(balance/positions/reconcile)과 대칭으로 connect 성공
+                    # 이후 adapter session 을 정리한다 (#2373). disconnect 가 raise
+                    # 해도 db.close() 가 실행되도록 내부 try/finally 로 중첩 —
+                    # aiosqlite 스레드 누수(hang) 방지를 disconnect 예외보다 우선
+                    # 보장한다.
+                    try:
+                        await adapter.disconnect()
+                    finally:
+                        if db:
+                            await db.close()
             except AccountNotFoundError:
                 raise
             except Exception as e:
