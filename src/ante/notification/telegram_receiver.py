@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
     from ante.notification.telegram import TelegramAdapter
-    from ante.treasury.treasury import Treasury
+    from ante.treasury.manager import TreasuryManager
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ class TelegramCommandReceiver:
         polling_interval: float = 3.0,
         confirm_timeout: float = 30.0,
         bot_manager: BotManager | None = None,
-        treasury: Treasury | None = None,
+        treasury_manager: TreasuryManager | None = None,
         account_service: AccountService | None = None,
         approval_service: ApprovalService | None = None,
     ) -> None:
@@ -43,7 +43,7 @@ class TelegramCommandReceiver:
         self._polling_interval = polling_interval
         self._confirm_timeout = confirm_timeout
         self._bot_manager = bot_manager
-        self._treasury = treasury
+        self._treasury_manager = treasury_manager
         self._account_service = account_service
         self._approval_service = approval_service
 
@@ -280,13 +280,13 @@ class TelegramCommandReceiver:
             return self._request_confirmation(command, args, user_id)
 
         # 즉시 실행 명령
+        # 결재 승인/거절은 인라인 버튼 callback(approve:{id}/reject:{id}) 전용이다
+        # (#2379). 텍스트 명령 /approve·/reject는 스펙아웃되어 unknown으로 폴스루한다.
         handlers: dict[str, Any] = {
             "help": self._cmd_help,
             "status": self._cmd_status,
             "bots": self._cmd_bots,
             "balance": self._cmd_balance,
-            "approve": self._cmd_approve,
-            "reject": self._cmd_reject,
         }
 
         handler = handlers.get(command)
@@ -379,8 +379,6 @@ class TelegramCommandReceiver:
             "/halt [reason] — 전체 거래 중지 (확인 필요)\n"
             "/clear_halt — 전역 정지 해제 (확인 필요; 봇은 자동 재시작되지 않음)\n"
             "/stop <bot_id> — 특정 봇 중지 (확인 필요)\n"
-            "/approve <id> — 결재 승인\n"
-            "/reject <id> [reason] — 결재 거절\n"
             "/help — 이 도움말"
         )
 
@@ -439,11 +437,34 @@ class TelegramCommandReceiver:
         return f"\U0001f916 봇 목록 ({running}/{total} 실행 중)\n" + "\n".join(lines)
 
     def _cmd_balance(self, args: list[str]) -> str:
-        """자금 현황."""
-        if not self._treasury:
-            return "Treasury가 연결되지 않았습니다."
+        """자금 현황 — 전 계좌 요약.
 
-        summary = self._treasury.get_summary()
+        SSOT: ``docs/specs/notification/notification.md`` 지원 명령 표.
+        ``TreasuryManager.list_all()`` (sync) 으로 등록된 모든 계좌의 잔고를
+        계좌별 섹션으로 렌더링한다 (#2378 — 단일 ``Treasury`` 주입 결함 정정).
+        """
+        if not self._treasury_manager:
+            return "TreasuryManager가 연결되지 않았습니다."
+
+        treasuries = self._treasury_manager.list_all()
+        if not treasuries:
+            return "등록된 계좌가 없습니다."
+
+        sections: list[str] = []
+        for treasury in treasuries:
+            sections.append(
+                f"계좌: {treasury.account_id}\n"
+                + self._render_account_balance(treasury.get_summary())
+            )
+
+        return "ℹ️ 자금 현황\n\n" + "\n\n".join(sections)
+
+    @staticmethod
+    def _render_account_balance(summary: dict[str, Any]) -> str:
+        """단일 계좌 자금 현황 본문 렌더링 (타이틀 제외).
+
+        예수금/매수가능/Ante 관리 종목(조건부)/봇 할당/미할당 포맷.
+        """
         balance = summary.get("account_balance", 0)
         purchasable = summary.get("purchasable_amount", 0)
         ante_purchase = summary.get("ante_purchase_amount", 0)
@@ -465,7 +486,6 @@ class TelegramCommandReceiver:
             pl_emoji = "➖"
 
         lines = [
-            "ℹ️ 자금 현황",
             f"계좌 예수금: {balance:,.0f}원",
             f"매수 가능: {purchasable:,.0f}원",
         ]
@@ -484,78 +504,6 @@ class TelegramCommandReceiver:
         lines.append(f"미할당: {unallocated:,.0f}원")
 
         return "\n".join(lines)
-
-    async def _cmd_approve(self, args: list[str]) -> str:
-        """결재 승인. /approve <id>"""
-        if not self._approval_service:
-            return "ApprovalService가 연결되지 않았습니다."
-        if not args:
-            return "결재 ID를 지정해 주세요. 예: /approve abc123"
-
-        approval_id = args[0]
-        try:
-            request = await self._approval_service.approve(
-                approval_id,
-                resolved_by="telegram",
-                suppress_notification=True,
-            )
-            if request.status == "execution_failed":
-                # executor 실행 실패 — history 마지막 항목에서 사유 추출
-                detail = ""
-                for entry in reversed(request.history):
-                    if entry.get("action") == "execution_failed":
-                        detail = entry.get("detail", "")
-                        break
-                return (
-                    f"⚠️ 승인되었으나 실행 실패\n"
-                    f"제목: {request.title}\n"
-                    f"ID: {approval_id}\n"
-                    f"사유: {detail}"
-                )
-            return f"✅ 결재 승인 완료\n제목: {request.title}\nID: {approval_id}"
-        except ValueError as e:
-            err = str(e)
-            if "찾을 수 없음" in err:
-                return f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
-            if "만료" in err:
-                return f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
-            return f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
-        except Exception:
-            logger.exception("결재 승인 오류: %s", approval_id)
-            return "승인 처리 중 오류가 발생했습니다."
-
-    async def _cmd_reject(self, args: list[str]) -> str:
-        """결재 거절. /reject <id> [reason]"""
-        if not self._approval_service:
-            return "ApprovalService가 연결되지 않았습니다."
-        if not args:
-            return "결재 ID를 지정해 주세요. 예: /reject abc123 사유"
-
-        approval_id = args[0]
-        reason = " ".join(args[1:]) if len(args) > 1 else "사용자 거절"
-        try:
-            request = await self._approval_service.reject(
-                approval_id,
-                resolved_by="telegram",
-                reject_reason=reason,
-                suppress_notification=True,
-            )
-            return (
-                f"❌ 결재 거절 완료\n"
-                f"제목: {request.title}\n"
-                f"ID: {approval_id}\n"
-                f"사유: {reason}"
-            )
-        except ValueError as e:
-            err = str(e)
-            if "찾을 수 없음" in err:
-                return f"❌ 결재를 찾을 수 없습니다\nID: {approval_id}"
-            if "만료" in err:
-                return f"ℹ️ 만료된 결재입니다\nID: {approval_id}"
-            return f"ℹ️ 이미 처리된 결재입니다 ({err})\nID: {approval_id}"
-        except Exception:
-            logger.exception("결재 거절 오류: %s", approval_id)
-            return "거절 처리 중 오류가 발생했습니다."
 
     async def _cmd_halt(self, args: list[str]) -> str:
         """전체 거래 중지."""

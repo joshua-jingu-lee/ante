@@ -25,15 +25,15 @@ Agent: 리포트 제출 (근거 자료)
 
 **흐름:**
 1. 결재 요청 생성 시, Notification이 Telegram으로 요약 메시지를 전송한다.
-2. 메시지에는 인라인 버튼(승인/거절) 또는 응답 명령어(`/approve <id>`, `/reject <id>`)가 포함된다.
-3. 사용자가 응답하면 Notification 어댑터가 이를 수신하여 `ApprovalService.approve()` 또는 `reject()`를 호출한다.
+2. 메시지에는 인라인 버튼(승인/거절)이 포함된다.
+3. 사용자가 버튼을 탭하면 Notification 어댑터가 `callback_query`를 수신하여 `ApprovalService.approve()` 또는 `reject()`를 호출한다.
 
 **Notification 어댑터 현황:**
 
 Notification 모듈은 양방향 통신을 지원한다. `TelegramAdapter`가 발송을, `TelegramCommandReceiver`가 getUpdates 폴링 기반 명령 수신을 담당한다.
 
 - **발송**: `ApprovalService`가 `NotificationEvent`(category=`approval`, 승인/거절 버튼 포함)를 직접 발행하고, `NotificationService`가 `NotificationEvent`를 구독해 결재 요약 + 인라인 버튼(승인/거절)을 전송
-- **수신**: 인라인 버튼 `callback_query` 또는 `/approve <id>`, `/reject <id>` 명령어 → `ApprovalService` 호출
+- **수신**: 인라인 버튼 `callback_query`(`approve:{id}`/`reject:{id}`) → `ApprovalService` 호출 (텔레그램 결재는 인라인 버튼 단일 경로; 텍스트 명령 `/approve`·`/reject`는 지원하지 않음)
 
 **인라인 버튼 결재 흐름:**
 
@@ -52,7 +52,7 @@ Notification 모듈은 양방향 통신을 지원한다. `TelegramAdapter`가 �
     → 처리 결과 메시지 응답
 ```
 
-인라인 버튼으로 거절 시 기본 사유("사용자 거절")를 사용한다. 상세 사유가 필요하면 `/reject <id> <reason>` 명령어를 직접 입력한다.
+인라인 버튼으로 거절 시 기본 사유("사용자 거절")를 사용한다. 상세 사유가 필요하면 CLI(`ante approval reject <id> --reason <reason>`)로 처리한다.
 
 **보안**: `TELEGRAM_CHAT_ID`와 일치하는 사용자만 명령을 실행할 수 있다. 개인 홈서버 환경에서는 이 수준이면 충분하다.
 

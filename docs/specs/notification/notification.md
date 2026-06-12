@@ -147,7 +147,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `polling_interval` | float | 3.0 | 폴링 간격 (초) |
 | `confirm_timeout` | float | 30.0 | 위험 명령 확인 대기 시간 (초) |
 | `bot_manager` | BotManager \| None | None | 봇 관리용 |
-| `treasury` | Treasury \| None | None | 자금 현황 조회용 |
+| `treasury_manager` | TreasuryManager \| None | None | 자금 현황 조회용 (전 계좌) |
 | `account_service` | AccountService \| None | None | 계좌 상태 제어용 |
 | `approval_service` | ApprovalService \| None | None | 결재 승인/거절 처리용 |
 
@@ -158,15 +158,15 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `/help` | 사용 가능한 명령어 목록 | - |
 | `/status` | 시스템 상태 요약 (거래 상태, 봇 현황) | - |
 | `/bots` | 봇 목록 + 상태 | - |
-| `/balance` | 자금 현황 요약 (계좌 잔고, 할당/미할당) | - |
+| `/balance` | 전 계좌 자금 현황 요약 (계좌별 잔고, 할당/미할당) | - |
 | `/halt [reason]` | 전체 거래 중지 (모든 ACTIVE 계좌를 SUSPENDED로 전환) | 2단계 확인 |
 | `/clear_halt` | 전역 정지 해제 (모든 SUSPENDED 계좌를 ACTIVE로 복구; 봇 자동 재시작 아님) | 2단계 확인 |
 | `/stop <bot_id>` | 특정 봇 중지 | 2단계 확인 |
 | `/confirm` | 위험 명령 확인 | - |
-| `/approve <id>` | 결재 승인 | 인라인 버튼 또는 명령어 |
-| `/reject <id> [reason]` | 결재 거절 | 인라인 버튼 또는 명령어 |
 
 **2단계 확인**: `halt`, `clear_halt`, `stop` 명령은 `_DANGEROUS_COMMANDS`로 분류되며, `/confirm` 입력 후 `confirm_timeout` 내에서만 실행된다. `/clear_halt`는 계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.
+
+**결재 처리**: 결재 승인/거절은 텍스트 명령이 아니라 결재 요청 알림에 첨부된 인라인 [승인]/[거절] 버튼 callback으로만 처리한다 (아래 [결재 인라인 버튼](#결재-인라인-버튼) 참조). 텔레그램 텍스트 명령 `/approve`·`/reject`는 지원하지 않는다.
 
 **보안**: `TELEGRAM_CHAT_ID`와 일치하지 않는 사용자의 명령은 무시하고 로그에 기록한다.
 
@@ -191,13 +191,13 @@ Approval 모듈이 NotificationEvent 발행 (buttons 포함)
       → answerCallbackQuery + 결과 메시지 발송
 ```
 
-**거절 사유 입력:** 인라인 버튼으로 거절 시 기본 사유("사용자 거절")를 사용한다. 상세 사유가 필요하면 `/reject <id> <reason>` 명령어를 직접 입력한다.
+**거절 사유 입력:** 인라인 버튼으로 거절 시 기본 사유("사용자 거절")를 사용한다. 상세 사유가 필요하면 CLI(`ante approval reject <id> --reason <reason>`)로 처리한다.
 
-### 텔레그램 명령 응답과 NotificationEvent 중복 방지
+### 텔레그램 처리 응답과 NotificationEvent 중복 방지
 
-텔레그램 명령(`/approve`, `/reject`, `/stop`, `/halt`, `/clear_halt` 등)으로 처리된 작업은 `TelegramCommandReceiver`가 직접 응답(reply)을 발송한다. 이때 동일 내용의 `NotificationEvent`를 발행하면 사용자가 같은 채널에서 메시지를 2번 수신하게 된다.
+텔레그램에서 처리된 작업(`/stop`, `/halt`, `/clear_halt` 등 명령 및 결재 인라인 버튼 callback `approve:{id}`/`reject:{id}`)은 `TelegramCommandReceiver`가 직접 응답(reply)을 발송한다. 이때 동일 내용의 `NotificationEvent`를 발행하면 사용자가 같은 채널에서 메시지를 2번 수신하게 된다.
 
-**정책**: 텔레그램 명령으로 트리거된 작업은 직접 응답만 발송하고, `NotificationEvent`는 발행하지 않는다. CLI 등 텔레그램 외 채널에서 처리된 경우에만 `NotificationEvent`를 발행한다.
+**정책**: 텔레그램에서 트리거된 작업은 직접 응답만 발송하고, `NotificationEvent`는 발행하지 않는다(`suppress_notification=True`). CLI 등 텔레그램 외 채널에서 처리된 경우에만 `NotificationEvent`를 발행한다. 즉 "1회 응답"은 NotificationEvent 중복을 억제한다는 의미이며, 직접 응답 자체의 횟수 제한이 아니다.
 
 ```
 텔레그램에서 처리 → 직접 응답(reply)만 발송, NotificationEvent 생략 → 1회

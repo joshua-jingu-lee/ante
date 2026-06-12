@@ -228,14 +228,23 @@ async def test_enabled_with_secrets_initializes_service(
         notification_mod, "NotificationService", _StubNotificationService
     )
 
+    captured_kwargs: list[dict[str, Any]] = []
+
     class _StubReceiver:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self.started = False
+            captured_kwargs.append(kwargs)
 
         def start(self) -> None:
             self.started = True
 
     monkeypatch.setattr(notification_mod, "TelegramCommandReceiver", _StubReceiver)
+
+    # #2378: `_init_notification`이 TelegramCommandReceiver에 자금 조회
+    # 의존성(TreasuryManager)을 주입하는지 회귀 가드. 주입 누락 시
+    # `/balance`가 런타임에서 항상 fallback 문구를 반환하는 버그가 발생한다.
+    sentinel_treasury_manager = object()
+    s.treasury_manager = sentinel_treasury_manager  # type: ignore[assignment]
 
     try:
         await _init_notification(s)
@@ -245,3 +254,7 @@ async def test_enabled_with_secrets_initializes_service(
     assert len(created) == 1, "NotificationService 생성자 호출 누락"
     assert s.notification_service is not None
     assert s.telegram_receiver is not None
+    assert len(captured_kwargs) == 1, "TelegramCommandReceiver 생성자 호출 누락"
+    assert captured_kwargs[0]["treasury_manager"] is s.treasury_manager, (
+        "TelegramCommandReceiver에 s.treasury_manager가 주입되어야 한다"
+    )

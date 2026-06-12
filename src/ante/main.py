@@ -1819,6 +1819,7 @@ async def _init_notification(s: Services) -> None:
             polling_interval=3.0,
             confirm_timeout=30.0,
             bot_manager=s.bot_manager,
+            treasury_manager=s.treasury_manager,
             account_service=s.account_service,
             approval_service=s.approval_service,
         )
