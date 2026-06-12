@@ -136,7 +136,8 @@ ccld 로 적용되면 같은 매도를 ccld 가 다시 차감(이중 차감)하�
 누락하는 면이 **잔존**한다. 이는 buy-side §11.7 협소 외부 흡수와 **동형**인 bounded
 known-limitation 이다. 위험창이 협소한 근거: 동일 종목 self 매도가 pending 인 동안
 **동시에** 같은 종목 외부 매도가 발생해야 하는 **이중 조건**이라 드물고, ccld 지연창
-자체가 신 tr_id(`VTTC0081R`, #2349) 적용 후 폴 주기 수준으로 축소된다. 완전 분해는
+자체가 신 tr_id(`VTTC0081R`, #2349) 적용 후 **모의 관측상** 폴 주기 수준으로
+축소된다(모의 한정 — 실전 `TTTC0081R` 지연 폭은 미검증). 완전 분해는
 broker fill-level 데이터 계약이 필요한 out-of-scope 다.
 
 **bounded known-limitation(총량 기반 검출 지연, normative):** broker 포지션은 **총량**
@@ -214,8 +215,10 @@ force-write 로 인한 실거래 오매도를 영구 방지). carryover 의 수�
 
 KIS 모의 당일 체결은 레거시 tr_id `VTTC8001R` 의 `get_order_history`(결제기준)가
 0건을 주는 동안 잔고(`get_positions`, 체결기준)만 즉시 반영된다(신 tr_id
-`VTTC0081R`(#2349)은 당일 체결을 반환함이 #2317 라이브로 확인됨 — 단,
-position-derived fallback 은 백스톱 지연/유실에 무관히 멱등 백업으로 유지된다).
+`VTTC0081R`(#2349)은 **모의** 당일 체결을 반환함이 모의 라이브(#2317 + #2353)로
+확인됨 — **모의 한정·실전 `TTTC0081R` 미검증**; 단, position-derived fallback 은
+KIS 공식 일별 원장 지연 가능성에 대해 백스톱 지연/유실에 무관히 멱등 백업으로
+유지된다).
 이 모의 당일 gap을 닫기 위해
 broker-adapter 측에 **잔고-역도출 fallback**(position-derived bounded fallback,
 [`../broker-adapter/18-fill-recovery.md`](../broker-adapter/18-fill-recovery.md) §11)이 정의된다. 이 fallback 은 reconciler 의
