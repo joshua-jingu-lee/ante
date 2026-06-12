@@ -51,10 +51,11 @@ def bot_manager():
     return mock
 
 
-@pytest.fixture
-def treasury():
+def _make_treasury(account_id: str = "test", summary: dict | None = None):
+    """``account_id`` property + sync ``get_summary()``를 갖는 Treasury mock."""
     mock = MagicMock()
-    mock.get_summary.return_value = {
+    mock.account_id = account_id
+    mock.get_summary.return_value = summary or {
         "account_balance": 10_000_000,
         "purchasable_amount": 7_000_000,
         "ante_purchase_amount": 2_500_000,
@@ -64,6 +65,14 @@ def treasury():
         "unallocated": 5_000_000,
         "bot_count": 2,
     }
+    return mock
+
+
+@pytest.fixture
+def treasury_manager():
+    """TreasuryManager mock — ``list_all()`` (sync) 가 단일 Treasury 반환."""
+    mock = MagicMock()
+    mock.list_all.return_value = [_make_treasury()]
     return mock
 
 
@@ -101,14 +110,14 @@ def account_service():
 
 
 @pytest.fixture
-def receiver(adapter, bot_manager, treasury, account_service):
+def receiver(adapter, bot_manager, treasury_manager, account_service):
     return TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
         polling_interval=1.0,
         confirm_timeout=30.0,
         bot_manager=bot_manager,
-        treasury=treasury,
+        treasury_manager=treasury_manager,
         account_service=account_service,
     )
 
@@ -207,6 +216,7 @@ class TestCommands:
     async def test_balance(self, receiver):
         result = receiver._cmd_balance([])
         assert "자금 현황" in result
+        assert "계좌: test" in result
         assert "계좌 예수금: 10,000,000원" in result
         assert "매수 가능: 7,000,000원" in result
         assert "매입: 2,500,000원" in result
@@ -215,42 +225,98 @@ class TestCommands:
         assert "봇 할당: 5,000,000원 (2개)" in result
         assert "미할당: 5,000,000원" in result
 
-    async def test_balance_no_positions(self, receiver, treasury):
+    async def test_balance_no_positions(self, receiver, treasury_manager):
         """Ante 관리 종목이 없으면 해당 섹션 미표시."""
-        treasury.get_summary.return_value = {
-            "account_balance": 10_000_000,
-            "purchasable_amount": 10_000_000,
-            "ante_purchase_amount": 0,
-            "ante_eval_amount": 0,
-            "ante_profit_loss": 0,
-            "total_allocated": 0,
-            "unallocated": 10_000_000,
-            "bot_count": 0,
-        }
+        treasury_manager.list_all.return_value = [
+            _make_treasury(
+                summary={
+                    "account_balance": 10_000_000,
+                    "purchasable_amount": 10_000_000,
+                    "ante_purchase_amount": 0,
+                    "ante_eval_amount": 0,
+                    "ante_profit_loss": 0,
+                    "total_allocated": 0,
+                    "unallocated": 10_000_000,
+                    "bot_count": 0,
+                }
+            )
+        ]
         result = receiver._cmd_balance([])
         assert "자금 현황" in result
         assert "Ante 관리 종목" not in result
         assert "봇 할당: 0원 (0개)" in result
 
-    async def test_balance_negative_pl(self, receiver, treasury):
+    async def test_balance_negative_pl(self, receiver, treasury_manager):
         """손실 시 음수 부호."""
-        treasury.get_summary.return_value = {
-            "account_balance": 10_000_000,
-            "purchasable_amount": 7_000_000,
-            "ante_purchase_amount": 2_500_000,
-            "ante_eval_amount": 2_300_000,
-            "ante_profit_loss": -200_000,
-            "total_allocated": 5_000_000,
-            "unallocated": 5_000_000,
-            "bot_count": 2,
-        }
+        treasury_manager.list_all.return_value = [
+            _make_treasury(
+                summary={
+                    "account_balance": 10_000_000,
+                    "purchasable_amount": 7_000_000,
+                    "ante_purchase_amount": 2_500_000,
+                    "ante_eval_amount": 2_300_000,
+                    "ante_profit_loss": -200_000,
+                    "total_allocated": 5_000_000,
+                    "unallocated": 5_000_000,
+                    "bot_count": 2,
+                }
+            )
+        ]
         result = receiver._cmd_balance([])
         assert "-200,000원" in result
 
-    async def test_balance_no_treasury(self, receiver):
-        receiver._treasury = None
+    async def test_balance_multi_account(self, receiver, treasury_manager):
+        """다계좌 — 계좌별 섹션이 각각 렌더링된다 (#2378 전 계좌 요약)."""
+        treasury_manager.list_all.return_value = [
+            _make_treasury(
+                account_id="acct-a",
+                summary={
+                    "account_balance": 10_000_000,
+                    "purchasable_amount": 7_000_000,
+                    "ante_purchase_amount": 0,
+                    "ante_eval_amount": 0,
+                    "ante_profit_loss": 0,
+                    "total_allocated": 3_000_000,
+                    "unallocated": 4_000_000,
+                    "bot_count": 1,
+                },
+            ),
+            _make_treasury(
+                account_id="acct-b",
+                summary={
+                    "account_balance": 20_000_000,
+                    "purchasable_amount": 15_000_000,
+                    "ante_purchase_amount": 0,
+                    "ante_eval_amount": 0,
+                    "ante_profit_loss": 0,
+                    "total_allocated": 5_000_000,
+                    "unallocated": 10_000_000,
+                    "bot_count": 2,
+                },
+            ),
+        ]
         result = receiver._cmd_balance([])
-        assert "연결되지 않았습니다" in result
+        # 최상단 타이틀은 1회만 노출
+        assert result.count("ℹ️ 자금 현황") == 1
+        # 두 계좌 헤더와 각 본문이 모두 노출
+        assert "계좌: acct-a" in result
+        assert "계좌: acct-b" in result
+        assert "계좌 예수금: 10,000,000원" in result
+        assert "계좌 예수금: 20,000,000원" in result
+        assert "봇 할당: 3,000,000원 (1개)" in result
+        assert "봇 할당: 5,000,000원 (2개)" in result
+
+    async def test_balance_no_accounts(self, receiver, treasury_manager):
+        """등록된 계좌가 없으면 안내 메시지."""
+        treasury_manager.list_all.return_value = []
+        result = receiver._cmd_balance([])
+        assert "등록된 계좌가 없습니다" in result
+
+    async def test_balance_no_treasury_manager(self, receiver):
+        """TreasuryManager 미주입 시 fallback 문구."""
+        receiver._treasury_manager = None
+        result = receiver._cmd_balance([])
+        assert "TreasuryManager가 연결되지 않았습니다" in result
 
     async def test_unknown_command(self, receiver):
         result = await receiver._execute("unknown", [], 12345, 100)
