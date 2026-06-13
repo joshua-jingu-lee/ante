@@ -2,6 +2,176 @@
 
 <!-- version list -->
 
+## v0.11.0 (2026-06-13)
+
+### Bug Fixes
+
+- **account**: #2372 _reconnect_broker를 per-account lock으로 직렬화 — in-flight connect와 설정 변경 race 제거
+  ([#2376](https://github.com/joshua-jingu-lee/ante/pull/2376),
+  [`13f9854`](https://github.com/joshua-jingu-lee/ante/commit/13f985488102114844b03b68b65c240da82318ce))
+
+- **account**: #2372 get_broker connect-성공-후-캐시 + per-account lock + connect 멱등 — 미연결 adapter 캐시 잔존
+  제거 ([#2376](https://github.com/joshua-jingu-lee/ante/pull/2376),
+  [`13f9854`](https://github.com/joshua-jingu-lee/ante/commit/13f985488102114844b03b68b65c240da82318ce))
+
+- **account**: #2372 get_broker connect-성공-후-캐시 + per-account lock — 미연결 adapter 캐시 잔존 제거
+  ([#2376](https://github.com/joshua-jingu-lee/ante/pull/2376),
+  [`13f9854`](https://github.com/joshua-jingu-lee/ante/commit/13f985488102114844b03b68b65c240da82318ce))
+
+- **account**: #2372 get_cached_broker를 lock-drain 조회로 — shutdown이 in-flight connect를 놓치는 세션 잔존 제거
+  ([#2376](https://github.com/joshua-jingu-lee/ante/pull/2376),
+  [`13f9854`](https://github.com/joshua-jingu-lee/ante/commit/13f985488102114844b03b68b65c240da82318ce))
+
+- **broker**: #2324 KIS 빈 msg1 시 get_error_message 폴백으로 비공백 에러메시지 보장
+  ([#2332](https://github.com/joshua-jingu-lee/ante/pull/2332),
+  [`5a32012`](https://github.com/joshua-jingu-lee/ante/commit/5a32012398363cc704f825f29e928081b198c5ee))
+
+- **broker**: #2342 KIS order-cash TR ID를 공식 현행(0011/0012)으로 갱신
+  ([#2343](https://github.com/joshua-jingu-lee/ante/pull/2343),
+  [`02934a9`](https://github.com/joshua-jingu-lee/ante/commit/02934a9276e4bd08fdcb898910b5fe6f1f5b81d7))
+
+- **broker**: #2344 KIS order-cash body에 EXCG_ID_DVSN_CD 추가 (공식 현행 계약 정합)
+  ([#2355](https://github.com/joshua-jingu-lee/ante/pull/2355),
+  [`5b39d50`](https://github.com/joshua-jingu-lee/ante/commit/5b39d50dc4b1e7911f1b70d9da2a47f87f77ef4f))
+
+- **broker**: #2345 KIS order-rvsecncl 취소 body에 KRX_FWDG_ORD_ORGNO 추가 (order-cash 응답 캡처·date-scoped
+  캐시) ([#2348](https://github.com/joshua-jingu-lee/ante/pull/2348),
+  [`c02eb07`](https://github.com/joshua-jingu-lee/ante/commit/c02eb07df23460f466263d43a3cd2117e4dcb511))
+
+- **broker**: #2350 late-ccld TimeoutError 차단기 회계 제외 + fill 폴 steady-state cooldown
+  ([#2358](https://github.com/joshua-jingu-lee/ante/pull/2358),
+  [`f4de3a8`](https://github.com/joshua-jingu-lee/ante/commit/f4de3a8dafecaa5298164dabed230556308501df))
+
+- **broker**: #2350 비-transient 예외 시 cooldown 카운터 리셋 (Codex R1 P2)
+  ([#2358](https://github.com/joshua-jingu-lee/ante/pull/2358),
+  [`f4de3a8`](https://github.com/joshua-jingu-lee/ante/commit/f4de3a8dafecaa5298164dabed230556308501df))
+
+- **broker**: #2361 40910000 모의 주문불가 계좌 PERMANENT 분류 (#1951 미러)
+  ([#2362](https://github.com/joshua-jingu-lee/ante/pull/2362),
+  [`660dad8`](https://github.com/joshua-jingu-lee/ante/commit/660dad83a31b2d5ea8585956915c082dbac6bb21))
+
+- **broker**: #2368 KIS connect 인증 실패 시 aiohttp session 정리 — unclosed 경고 제거
+  ([#2369](https://github.com/joshua-jingu-lee/ante/pull/2369),
+  [`196e05e`](https://github.com/joshua-jingu-lee/ante/commit/196e05e45652c23284110c410683b3bad6bd7c63))
+
+- **cli**: #2338 signal connect relay EOF 비대칭 teardown (pump_in EOF 시 pump_out drain)
+  ([#2341](https://github.com/joshua-jingu-lee/ante/pull/2341),
+  [`c28637d`](https://github.com/joshua-jingu-lee/ante/commit/c28637d072c65e3220da3d1760ef5066dc9a0132))
+
+- **cli**: #2367 trade list --to 날짜를 end-of-day 포함 경계로 — 당일 거래 조회 빈 결과 수정
+  ([#2370](https://github.com/joshua-jingu-lee/ante/pull/2370),
+  [`0b59bcf`](https://github.com/joshua-jingu-lee/ante/commit/0b59bcf3ed1ff308aa1fbc62215aef4bbb86788a))
+
+- **cli**: #2373 broker status 폴백에 adapter.disconnect 추가 — sibling 대칭 session 정리
+  ([#2375](https://github.com/joshua-jingu-lee/ante/pull/2375),
+  [`d993035`](https://github.com/joshua-jingu-lee/ante/commit/d993035ba0ee4c19c8ec5fe62b75de2d35f610ec))
+
+- **core**: #2365 Database writer 직렬화 + 트랜잭션 owner 추적 — 태스크 간 중첩 트랜잭션 race 제거
+  ([#2366](https://github.com/joshua-jingu-lee/ante/pull/2366),
+  [`84b4dd8`](https://github.com/joshua-jingu-lee/ante/commit/84b4dd8cd549dd0010fa8cc156156130e37cdb30))
+
+- **instrument**: #2377 format_label Markdown 이스케이프 + exchange 폴백 known-limitation 고정 (Codex P2 반영)
+  ([#2382](https://github.com/joshua-jingu-lee/ante/pull/2382),
+  [`c20c8ef`](https://github.com/joshua-jingu-lee/ante/commit/c20c8ef09dd90768339cd409e28add276993fb07))
+
+- **notification**: #2378 텔레그램 /balance TreasuryManager 주입 — 전 계좌 자금 현황 요약
+  ([#2380](https://github.com/joshua-jingu-lee/ante/pull/2380),
+  [`a1f567b`](https://github.com/joshua-jingu-lee/ante/commit/a1f567b4f7dbf2e3a2c72144069aa672e5f97b11))
+
+- **spec**: #2342 08 order-cash TR ID 표에서 (paper)/(live) terminology lint 잔재 제거
+  ([#2343](https://github.com/joshua-jingu-lee/ante/pull/2343),
+  [`02934a9`](https://github.com/joshua-jingu-lee/ante/commit/02934a9276e4bd08fdcb898910b5fe6f1f5b81d7))
+
+- **strategy**: #2323 IndicatorCalculator.compute None 결과 가드로 TypeError 차단
+  ([#2331](https://github.com/joshua-jingu-lee/ante/pull/2331),
+  [`3b72f37`](https://github.com/joshua-jingu-lee/ante/commit/3b72f37c942a2ab9de40e7c5e71a2492316d8af5))
+
+- **trade**: #2351 reconciler sell-side self-check 대칭 확장 — self 매도 외부 오라벨링/force-write 방지
+  ([#2359](https://github.com/joshua-jingu-lee/ante/pull/2359),
+  [`feed6e3`](https://github.com/joshua-jingu-lee/ante/commit/feed6e332178cb7148238bea9a21e2b42508a72d))
+
+- **trade**: #2352 단일봇 미귀속 보유(carryover) 외부매수 force-write 제거 — capacity==0 detect-only
+  ([#2356](https://github.com/joshua-jingu-lee/ante/pull/2356),
+  [`f3ca94a`](https://github.com/joshua-jingu-lee/ante/commit/f3ca94a444582934e4893ef24e06e5a6f8d57ac7))
+
+- **trade**: #2371 trades.timestamp 단일 isoformat invariant — save_adjustment 정규화 + v005 마이그레이션
+  ([#2374](https://github.com/joshua-jingu-lee/ante/pull/2374),
+  [`85bbdbd`](https://github.com/joshua-jingu-lee/ante/commit/85bbdbd15c57b3591b6bcdec519c973f2f0d011c))
+
+### Chores
+
+- .gitignore에 uv.lock 등록 — 로컬 uv 실행 산출물 미추적 처리
+  ([`b07e900`](https://github.com/joshua-jingu-lee/ante/commit/b07e9002c9622c04fd1bbbbe920805b5a0dd6ad3))
+
+- **broker**: #2346 KIS 취소 tr_id 신세대 0013U + EXCG_ID_DVSN_CD (라이브 A/B both_ok)
+  ([#2363](https://github.com/joshua-jingu-lee/ante/pull/2363),
+  [`abf09d1`](https://github.com/joshua-jingu-lee/ante/commit/abf09d16283f8fe5a1789d6886efc541ee321551))
+
+- **broker**: #2349 KIS inquire-daily-ccld tr_id 신세대 4코드(0081R/9215R) 분기 + EXCG_ID_DVSN_CD
+  ([#2357](https://github.com/joshua-jingu-lee/ante/pull/2357),
+  [`4ec5c3f`](https://github.com/joshua-jingu-lee/ante/commit/4ec5c3f4969384633a8b8e224a0f8a76cdfaef72))
+
+### Documentation
+
+- **generated**: Project-structure.md 전체 재생성 — #2350 신규 테스트 반영 + pre-existing drift 정리
+  ([#2358](https://github.com/joshua-jingu-lee/ante/pull/2358),
+  [`f4de3a8`](https://github.com/joshua-jingu-lee/ante/commit/f4de3a8dafecaa5298164dabed230556308501df))
+
+- **spec**: #2334 signal connect daemon-위임 스트리밍 아키텍처 스펙 반영
+  ([#2335](https://github.com/joshua-jingu-lee/ante/pull/2335),
+  [`a9f3e4d`](https://github.com/joshua-jingu-lee/ante/commit/a9f3e4d89346565a4b525612d776a352f75a625c))
+
+- **specs**: #2353 fill-recovery §11 측정 결과 반영 — 다중주문 ODNO 식별 확인·partial known-limitation 확정
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 fill-recovery 측정 결과 반영 — 다중주문 ODNO 식별 확인·partial known-limitation 확정·모의/실전 사실
+  매트릭스 정합 ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 §11.7 실전 의존을 TTTC0081R 기준으로 분리 표기 (Codex R2 P2)
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 §2.1 신 tr_id 효과 확인을 모의 한정으로 명시 (Codex R4 P2)
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 §9 잔존 실전 의존 표기 정합 (활성 gate 포함, Codex R1 P2)
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 모의/실전 검증 상태 전수 sweep — V코드 검증완료·T코드 미검증 단일 어휘 (Codex R3 P2)
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+- **specs**: #2353 사실 매트릭스 정합 — fallback 기본활성 근거 승격(공식 지연 가능성)·모의/실전 단일 어휘 교차 미러 (메타 리뷰)
+  ([#2364](https://github.com/joshua-jingu-lee/ante/pull/2364),
+  [`d82e022`](https://github.com/joshua-jingu-lee/ante/commit/d82e0229aced5337583017b0fa4f4e10aad5d8cd))
+
+### Features
+
+- **cli**: #2338 signal connect thin IPC relay + test migration (#2333 해소)
+  ([#2341](https://github.com/joshua-jingu-lee/ante/pull/2341),
+  [`c28637d`](https://github.com/joshua-jingu-lee/ante/commit/c28637d072c65e3220da3d1760ef5066dc9a0132))
+
+- **ipc**: #2336 signal.connect transport+ingress 골격 (4-게이트 핸들러·connection-upgrade·typed exceptions)
+  ([#2339](https://github.com/joshua-jingu-lee/ante/pull/2339),
+  [`373bb43`](https://github.com/joshua-jingu-lee/ante/commit/373bb431ff921d4499935d936951dc2742f2b7f2))
+
+- **ipc**: #2337 signal.connect outbound+registry+lifecycle (SignalChannelRegistry·bounded
+  queue·teardown·single-connect) ([#2340](https://github.com/joshua-jingu-lee/ante/pull/2340),
+  [`77cb4f1`](https://github.com/joshua-jingu-lee/ante/commit/77cb4f1702aaa50e32b34a62eb4718b14c3a97df))
+
+- **notification**: #2377 텔레그램 알림 종목코드 전 지점 종목명 병기 — InstrumentService.format_label SSOT
+  ([#2382](https://github.com/joshua-jingu-lee/ante/pull/2382),
+  [`c20c8ef`](https://github.com/joshua-jingu-lee/ante/commit/c20c8ef09dd90768339cd409e28add276993fb07))
+
+- **notification**: #2379 텔레그램 결재 인라인 버튼 전용화 — /approve·/reject 텍스트 명령 스펙아웃
+  ([#2381](https://github.com/joshua-jingu-lee/ante/pull/2381),
+  [`b5bb993`](https://github.com/joshua-jingu-lee/ante/commit/b5bb99347d5e7d398e6cbcda807396fe86b473d1))
+
+
 ## v0.10.1 (2026-06-05)
 
 ### Bug Fixes
