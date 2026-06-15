@@ -121,6 +121,34 @@ class TestAccountBalance:
         assert balance["stock_value"] > 0
 
 
+class TestBuyable:
+    """get_buyable() 동작 검증 (#2384)."""
+
+    @pytest.mark.asyncio
+    async def test_get_buyable_cash_based(
+        self, connected_broker: TestBrokerAdapter
+    ) -> None:
+        """현금 기반 산정 — 금액=cash, 수량=floor(cash/단가) (#2384)."""
+        result = await connected_broker.get_buyable("000001", price=50_000)
+        assert result["order_buyable_amount"] == 100_000_000.0
+        assert result["max_buyable_amount"] == 100_000_000.0
+        assert result["order_cash"] == 100_000_000.0
+        # cash=100_000_000, price=50_000 → qty=2000
+        assert result["order_buyable_qty"] == 2000.0
+        assert result["max_buyable_qty"] == 2000.0
+
+    @pytest.mark.asyncio
+    async def test_get_buyable_market_uses_internal_price(
+        self, connected_broker: TestBrokerAdapter
+    ) -> None:
+        """시장가/price=None이면 내부 시뮬레이션 가격을 단가로 사용 (#2384)."""
+        result = await connected_broker.get_buyable("000001")
+        assert result["order_buyable_amount"] == 100_000_000.0
+        # 내부 가격이 양수이므로 수량은 양의 정수
+        assert result["order_buyable_qty"] >= 0.0
+        assert result["order_buyable_qty"] == float(int(result["order_buyable_qty"]))
+
+
 class TestPositions:
     """get_positions() / get_account_positions() 동작 검증."""
 

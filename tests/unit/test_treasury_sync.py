@@ -36,12 +36,19 @@ async def treasury(db, eventbus):
 
 
 class FakeBroker:
-    """테스트용 가짜 브로커."""
+    """테스트용 가짜 브로커.
+
+    #2384: get_account_balance는 purchasable_amount 키를 더 이상 포함하지 않으며
+    (substitute_amount로 대체), purchasable_amount는 get_buyable의
+    order_buyable_amount로 별도 주입된다. 본 Fake도 새 _do_sync write-path를
+    따라 get_buyable stub을 제공한다(BrokerAdapter subclass는 아니다).
+    """
 
     def __init__(
         self,
         balance: dict | None = None,
         positions: list | None = None,
+        buyable_amount: float = 4_800_000.0,
     ) -> None:
         self._balance = balance or {
             "cash": 5_000_000.0,
@@ -49,14 +56,33 @@ class FakeBroker:
             "purchase_amount": 7_000_000.0,
             "eval_amount": 7_200_000.0,
             "total_profit_loss": 200_000.0,
-            "purchasable_amount": 4_800_000.0,
+            "substitute_amount": 0.0,
         }
         self._positions = positions or []
+        self._buyable_amount = buyable_amount
         self.call_count = 0
+        self.buyable_call_count = 0
+        self.last_buyable_symbol: str | None = None
 
     async def get_account_balance(self) -> dict:
         self.call_count += 1
         return self._balance
+
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict:
+        self.buyable_call_count += 1
+        self.last_buyable_symbol = symbol
+        return {
+            "order_buyable_amount": self._buyable_amount,
+            "max_buyable_amount": self._buyable_amount,
+            "order_cash": self._balance.get("cash", 0.0),
+            "order_buyable_qty": 0.0,
+            "max_buyable_qty": 0.0,
+        }
 
     async def get_positions(self) -> list:
         return self._positions
@@ -80,13 +106,34 @@ class FakePositionHistory:
 
 
 class FailingBroker:
-    """동기화 실패 시나리오용."""
+    """동기화 실패 시나리오용 (get_account_balance 실패)."""
 
     async def get_account_balance(self) -> dict:
         raise ConnectionError("API 연결 실패")
 
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict:
+        raise ConnectionError("매수가능 조회 실패")
+
     async def get_positions(self) -> list:
         return []
+
+
+class BuyableFailingBroker(FakeBroker):
+    """get_account_balance는 성공하나 get_buyable만 실패하는 시나리오용 (#2384 G7)."""
+
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict:
+        self.buyable_call_count += 1
+        raise ConnectionError("매수가능 조회 실패")
 
 
 # ── US-1: KIS 잔고 필드 전체 동기화 ───────────────
@@ -94,11 +141,13 @@ class FailingBroker:
 
 class TestSyncBalance:
     async def test_sync_balance_updates_all_fields(self, treasury):
-        """sync_balance가 6개 필드 모두 갱신."""
+        """sync_balance가 잔고 필드를 갱신하되 purchasable_amount는 미반영 (#2384)."""
+        # 사전 주입된 purchasable_amount (get_buyable write-path 모사)
+        treasury._purchasable_amount = 99_000.0
+
         await treasury.sync_balance(
             {
                 "cash": 5_000_000.0,
-                "purchasable_amount": 4_800_000.0,
                 "total_assets": 12_000_000.0,
                 "purchase_amount": 7_000_000.0,
                 "eval_amount": 7_200_000.0,
@@ -107,11 +156,22 @@ class TestSyncBalance:
         )
 
         assert treasury._account_balance == 5_000_000.0
-        assert treasury._purchasable_amount == 4_800_000.0
         assert treasury._total_evaluation == 12_000_000.0
         assert treasury._purchase_amount == 7_000_000.0
         assert treasury._eval_amount == 7_200_000.0
         assert treasury._total_profit_loss == 200_000.0
+        # #2384: sync_balance는 purchasable_amount를 읽지 않으므로 기존값 불변.
+        assert treasury._purchasable_amount == 99_000.0
+
+    async def test_sync_balance_ignores_purchasable_amount(self, treasury):
+        """sync_balance에 purchasable_amount를 넘겨도 반영하지 않는다 (#2384 G2)."""
+        treasury._purchasable_amount = 12_345.0
+        # 레거시 호출자가 purchasable_amount를 넣어도 무시되는 새 계약 고정.
+        await treasury.sync_balance(
+            {"cash": 5_000_000.0, "purchasable_amount": 4_800_000.0}
+        )
+        assert treasury._account_balance == 5_000_000.0
+        assert treasury._purchasable_amount == 12_345.0  # 미반영
 
     async def test_sync_balance_recalculates_unallocated(self, treasury):
         """sync_balance가 미할당 자금 재계산."""
@@ -124,11 +184,11 @@ class TestSyncBalance:
         assert treasury.unallocated == 5_000_000.0  # 8M - 3M
 
     async def test_sync_balance_preserves_existing_on_missing_keys(self, treasury):
-        """누락된 키는 기존 값 유지."""
+        """누락된 키는 기존 값 유지 (purchasable_amount는 sync_balance 무관)."""
+        treasury._purchasable_amount = 4_800_000.0  # get_buyable write-path 모사
         await treasury.sync_balance(
             {
                 "cash": 5_000_000.0,
-                "purchasable_amount": 4_800_000.0,
                 "total_assets": 12_000_000.0,
                 "purchase_amount": 7_000_000.0,
                 "eval_amount": 7_200_000.0,
@@ -140,6 +200,7 @@ class TestSyncBalance:
         await treasury.sync_balance({"cash": 6_000_000.0})
 
         assert treasury._account_balance == 6_000_000.0
+        # #2384: purchasable_amount는 sync_balance가 건드리지 않으므로 유지.
         assert treasury._purchasable_amount == 4_800_000.0  # 유지
 
     async def test_set_account_balance_backward_compatible(self, treasury):
@@ -150,10 +211,11 @@ class TestSyncBalance:
 
     async def test_sync_balance_persists_to_db(self, treasury, db, eventbus):
         """sync_balance 결과가 DB에 저장되어 재시작 후 복원."""
+        # purchasable_amount는 get_buyable write-path로 채워지는 값을 모사.
+        treasury._purchasable_amount = 4_800_000.0
         await treasury.sync_balance(
             {
                 "cash": 5_000_000.0,
-                "purchasable_amount": 4_800_000.0,
                 "total_assets": 12_000_000.0,
                 "purchase_amount": 7_000_000.0,
                 "eval_amount": 7_200_000.0,
@@ -170,14 +232,39 @@ class TestSyncBalance:
         assert t2._total_evaluation == 12_000_000.0
 
     async def test_purchasable_amount_in_kis(self):
-        """KIS get_account_balance에 purchasable_amount 포함 확인."""
+        """#2384: KIS get_account_balance는 psbl_sbst_amt를 substitute_amount로
+        매핑하고 purchasable_amount 키를 포함하지 않는다."""
+        from unittest.mock import AsyncMock
+
         from ante.broker.kis import KISAdapter
 
-        # KISAdapter의 get_account_balance 반환값에 purchasable_amount 키 존재 확인
-        # (실제 API 호출 없이 코드 구조 검증)
         adapter = KISAdapter.__new__(KISAdapter)
-        # _request 모킹 없이 반환 딕셔너리 키 확인만
-        assert hasattr(adapter, "get_account_balance")
+        adapter.base_url = "https://example.test"  # type: ignore[attr-defined]
+        adapter.is_paper = True  # type: ignore[attr-defined]
+        # inquire-balance(output2) 응답을 모킹.
+        adapter._request = AsyncMock(  # type: ignore[method-assign]
+            return_value={
+                "rt_cd": "0",
+                "output2": [
+                    {
+                        "dnca_tot_amt": "5000000",
+                        "tot_evlu_amt": "12000000",
+                        "pchs_amt_smtl_amt": "7000000",
+                        "evlu_amt_smtl_amt": "7200000",
+                        "evlu_pfls_smtl_amt": "200000",
+                        "psbl_sbst_amt": "321000",
+                    }
+                ],
+            }
+        )
+        adapter._balance_params = lambda: {}  # type: ignore[method-assign]
+
+        balance = await adapter.get_account_balance()
+
+        # psbl_sbst_amt → substitute_amount (대용가능금액 보존)
+        assert balance["substitute_amount"] == 321_000.0
+        # purchasable_amount(주문가능액) 키는 제거 — get_buyable이 SSOT (#2384)
+        assert "purchasable_amount" not in balance
 
 
 # ── US-2: 주기적 잔고 동기화 메커니즘 ─────────────
@@ -200,7 +287,7 @@ class TestSyncLoop:
         assert broker.call_count >= 1
 
     async def test_sync_updates_treasury_fields(self, treasury):
-        """동기화 루프가 Treasury 필드를 갱신."""
+        """동기화 루프가 필드를 갱신 (purchasable_amount는 get_buyable 주입)."""
         broker = FakeBroker()
         pos_history = FakePositionHistory()
 
@@ -209,8 +296,12 @@ class TestSyncLoop:
         await treasury.stop_sync()
 
         assert treasury._account_balance == 5_000_000.0
+        # #2384: purchasable_amount는 get_buyable의 order_buyable_amount로 주입.
         assert treasury._purchasable_amount == 4_800_000.0
         assert treasury._total_evaluation == 12_000_000.0
+        # 대표 종목으로 cycle당 1회 probe 호출됨.
+        assert broker.buyable_call_count >= 1
+        assert broker.last_buyable_symbol == "005930"
 
     async def test_sync_failure_keeps_old_values(self, treasury):
         """동기화 실패 시 이전 값 유지."""
@@ -240,6 +331,31 @@ class TestSyncLoop:
         assert len(received) == 1
         assert received[0].account_balance == 5_000_000.0
         assert received[0].purchasable_amount == 4_800_000.0
+
+    async def test_get_buyable_failure_keeps_old_value_no_event(
+        self, treasury, eventbus
+    ):
+        """#2384 G7: get_buyable 실패 시 purchasable_amount 이전값 유지 +
+        BalanceSyncedEvent 미발행."""
+        received = []
+        eventbus.subscribe(BalanceSyncedEvent, lambda e: received.append(e))
+
+        # 사전 주입된 매수가능액(이전 cycle 값 모사).
+        treasury._purchasable_amount = 7_777_000.0
+
+        broker = BuyableFailingBroker()
+        pos_history = FakePositionHistory()
+
+        treasury.start_sync(broker, pos_history, interval_seconds=100)
+        await asyncio.sleep(0.05)
+        await treasury.stop_sync()
+
+        # get_buyable는 호출되었으나 실패 → 예외로 cycle 중단.
+        assert broker.buyable_call_count >= 1
+        # 이전값 유지 (0으로 덮어쓰지 않음).
+        assert treasury._purchasable_amount == 7_777_000.0
+        # 잘못된 매수가능액으로 이벤트를 발행하지 않는다.
+        assert received == []
 
     async def test_double_start_ignored(self, treasury):
         """이미 동기화 실행 중이면 중복 시작 무시."""
@@ -466,10 +582,12 @@ class TestAntePurePerformance:
 
     async def test_summary_includes_new_fields(self, treasury):
         """get_summary에 신규 필드 모두 포함."""
+        # #2384: purchasable_amount는 get_buyable write-path로 주입되는 값을 모사
+        # (sync_balance는 더 이상 purchasable_amount를 반영하지 않는다).
+        treasury._purchasable_amount = 4_800_000.0
         await treasury.sync_balance(
             {
                 "cash": 5_000_000.0,
-                "purchasable_amount": 4_800_000.0,
                 "total_assets": 12_000_000.0,
                 "purchase_amount": 7_000_000.0,
                 "eval_amount": 7_200_000.0,

@@ -1481,13 +1481,37 @@ class TestTreasurySummary:
         assert summary["budget_exceeds_purchasable"] is False
 
     async def test_budget_exceeds_purchasable_warning(self, treasury):
-        """잔여예산 > 매수가능금액 시 경고 플래그."""
+        """잔여예산 > 매수가능금액 시 경고 플래그 (#2384: get_buyable write-path).
+
+        sync_balance는 더 이상 purchasable_amount를 반영하지 않으므로, 매수가능액은
+        _do_sync가 get_buyable의 order_buyable_amount로 주입한다.
+        """
         await treasury.allocate("bot1", 5_000_000.0)
-        await treasury.sync_balance(
-            {"cash": 10_000_000.0, "purchasable_amount": 3_000_000.0}
-        )
+
+        class _Broker:
+            async def get_account_balance(self):
+                return {"cash": 10_000_000.0, "total_assets": 10_000_000.0}
+
+            async def get_buyable(self, symbol, price=None, order_type="market"):
+                return {
+                    "order_buyable_amount": 3_000_000.0,
+                    "max_buyable_amount": 3_000_000.0,
+                    "order_cash": 10_000_000.0,
+                    "order_buyable_qty": 0.0,
+                    "max_buyable_qty": 0.0,
+                }
+
+            async def get_positions(self):
+                return []
+
+        class _PosHistory:
+            async def get_all_positions(self, *, account_id=None):
+                return []
+
+        await treasury._do_sync(_Broker(), _PosHistory())
 
         summary = treasury.get_summary()
+        assert summary["purchasable_amount"] == 3_000_000.0
         assert summary["budget_exceeds_purchasable"] is True
 
     async def test_no_warning_when_purchasable_zero(self, treasury):
@@ -1575,11 +1599,12 @@ class TestTreasuryPersistence:
         await t1.initialize()
         await t1.set_account_balance(10_000_000.0)
 
-        # sync_balance로 평가액 필드 설정
+        # #2384: purchasable_amount는 get_buyable write-path로 주입되는 값을 모사.
+        t1._purchasable_amount = 8_000_000.0
+        # sync_balance로 평가액 필드 설정 (purchasable_amount는 미반영)
         await t1.sync_balance(
             {
                 "cash": 10_000_000.0,
-                "purchasable_amount": 8_000_000.0,
                 "total_assets": 12_000_000.0,
                 "purchase_amount": 7_000_000.0,
                 "eval_amount": 7_200_000.0,

@@ -214,9 +214,12 @@ def test_broker_balance_envelope_matches_raw_legacy() -> None:
     broker.py:220: ``if fmt.is_json: fmt.output(result)`` → broker adapter
     가 반환하는 평면 잔고 dict. 본 fixture 는 IPC 분기를 mock 한다.
     """
+    # #2384: get_account_balance(broker balance passthrough)는 purchasable_amount
+    # 키를 더 이상 포함하지 않고(주문가능액 SSOT는 get_buyable), psbl_sbst_amt를
+    # substitute_amount로 보존한다. fixture 를 새 계약과 일치시킨다.
     ipc_response = {
         "account_balance": 10_000_000.0,
-        "purchasable_amount": 8_000_000.0,
+        "substitute_amount": 0.0,
         "total_evaluation": 12_500_000.0,
         "total_profit_loss": 2_500_000.0,
     }

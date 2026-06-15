@@ -129,8 +129,8 @@ class KISDomesticAdapter(KISBaseAdapter):
 | `CANO` | `account_no[:8]` | 종합계좌번호 |
 | `ACNT_PRDT_CD` | `account_no[8:10]` | 계좌상품코드 |
 | `PDNO` | `normalize_symbol(symbol)` (6자리) | 종목코드 |
-| `ORD_UNPR` | 시장가 `잠정 '0'` (#2384 preflight A/B로 확정 후 본 섹션 출처에 기록) / 지정가 `str(int(price))` | 주문단가 |
-| `ORD_DVSN` | `order_type` 매핑(기존 `_map_order_type` 재사용 후보) | 주문구분 |
+| `ORD_UNPR` | **실가(필수, '0' 아님)**: 시장가/`price=None`이면 대표종목 현재가(`get_current_price(symbol)` 1회 조회)를 단가로 사용 / 지정가 `str(int(price))` — KIS 공식 샘플 확정 | 주문단가 |
+| `ORD_DVSN` | `order_type` 매핑(`_map_order_type` 재사용, 시장가 → **`'01'`**) — KIS 공식 샘플 확정 | 주문구분 |
 | `CMA_EVLU_AMT_ICLD_YN` | `'N'` | CMA평가금액포함여부 |
 | `OVRS_ICLD_YN` | `'N'` | 해외포함여부 |
 
@@ -144,14 +144,14 @@ class KISDomesticAdapter(KISBaseAdapter):
 | `nrcvb_buy_qty` | `order_buyable_qty` | 미수 미사용 매수가능수량(**종목/단가 의존** — 시장가 probe에서는 계좌수준 의미 없음) |
 | `max_buy_qty` | `max_buyable_qty` | 최대 매수가능수량(**종목/단가 의존** — 동일) |
 
-- **계좌 대표 매수가능액 입력 규약**: 계좌 대표 매수가능액은 종목 무관한 미수없는 매수가능금액(`nrcvb_buy_amt`)을 얻기 위한 probe다. 대표 종목은 항시 거래되는 유효 국내 종목 코드(기본 하드코딩 `005930`, config override는 구현 옵션)를 시장가(`ORD_UNPR='0'` — 잠정, #2384 preflight로 확정)로 전송한다. 시장가 probe 호출에서 반환되는 종목/단가 의존 수량 값(`order_buyable_qty`/`max_buyable_qty`)은 '대표종목을 현재가로 살 때의 수량'이라는 **종목 종속 값이라 계좌수준 의미가 없다**. Treasury 동기화 경로는 금액 필드(`order_buyable_amount`)만 소비하고 수량 필드는 계좌 대표 컨텍스트에서 소비·영속화하지 않는다.
+- **계좌 대표 매수가능액 입력 규약**: 계좌 대표 매수가능액은 종목 무관한 미수없는 매수가능금액(`nrcvb_buy_amt`)을 얻기 위한 probe다. 대표 종목은 항시 거래되는 유효 국내 종목 코드(기본 하드코딩 `005930`, config override는 구현 옵션)를 시장가(`ORD_DVSN='01'`, `ORD_UNPR=대표종목 현재가` — KIS 공식 샘플 확정, '0' 아님)로 전송한다. 시장가 probe 시 `get_buyable`은 `get_current_price(symbol)`를 1회 호출해 `ORD_UNPR`로 사용한다(Treasury 등 호출처에 별도 현재가 조회를 추가하지 않는다). 시장가 probe 호출에서 반환되는 종목/단가 의존 수량 값(`order_buyable_qty`/`max_buyable_qty`)은 '대표종목을 현재가로 살 때의 수량'이라는 **종목 종속 값이라 계좌수준 의미가 없다**. Treasury 동기화 경로는 금액 필드(`order_buyable_amount`)만 소비하고 수량 필드는 계좌 대표 컨텍스트에서 소비·영속화하지 않는다.
 - **종목무관 전제 — bounded assumption + 검증 게이트**: `nrcvb_buy_amt`가 종목/단가 무관한 계좌수준 현금값이라는 전제는 본 계약의 load-bearing 가정이나, #2384 모의 단일 실측(`nrcvb_buy_amt=9998235.0`, `nrcvb_buy_qty=59.0`)만으로는 종목 불변성을 입증하지 못한다. 라이브 검증 전 **bounded assumption**으로 lock하며, **구현 전 모의 다종목 A/B 검증 게이트**(고가 `005930` vs 저가주, `ORD_UNPR='0'` vs 지정가)로 `nrcvb_buy_amt`/`ord_psbl_cash`의 종목 불변성을 확인한다. 검증 실패(종목별 상이) 시 `purchasable_amount` SSOT를 `ord_psbl_cash`(주문가능현금, 종목 의존성 최소)로 폴백한다(known-limitation 사전 선언).
-- **ORD_DVSN 허용값 고정**: inquire-psbl-order가 ORD_DVSN 시장가 코드를 매수가능 산정용으로 받아들이는지는 공식 샘플로 미확정이므로, order-cash `_map_order_type`('market'→'01')을 무검증 재사용하지 않고 **구현 전 모의 preflight로 ORD_DVSN/ORD_UNPR 조합을 실측 고정**하여 본 섹션 출처에 기록한다(어떤 조합으로 `nrcvb_buy_amt=9998235.0`을 얻었는지 포함).
+- **ORD_DVSN/ORD_UNPR 고정 — 공식 샘플 확정**: KIS 공식 샘플(`inquire_psbl_order.py`)이 `pdno="005930"`, `ord_unpr="55000"`, `ord_dvsn="01"`로 호출한다. 따라서 inquire-psbl-order 시장가 probe는 `ORD_DVSN='01'`(order-cash `_map_order_type`('market'→'01') 재사용)이며 `ORD_UNPR`은 실제 1주당 가격이다('0'/빈값 아님). 시장가/`price=None`이면 `get_current_price(symbol)`로 조회한 현재가를 `ORD_UNPR`로 전달한다. 남은 경험적 항목(`nrcvb_buy_amt` 종목 불변성)은 구현 후 oracle A/B 검증 대기(검증 실패 시 `ord_psbl_cash` 폴백 — 코드의 필드 SSOT 상수 한 곳 교체).
 - **Rate-limit 분리(모의 5req/min)**: 매수가능 조회는 잔고조회(`get_account_balance`)·포지션조회(`get_positions`)와 **별도 메서드로 분리**해 호출 빈도를 호출처가 독립 제어한다. Treasury Live 동기화는 cycle당 1회만 호출한다(04-treasury-interface 참조). 단기 TTL 캐시는 허용하며 TTL 값은 구현 결정(bounded known-limitation).
 - **`psbl_sbst_amt`(대용가능금액)와의 구분**: 기존 `inquire-balance`의 `psbl_sbst_amt`(예수금 대용가능금액 = 대용증권 평가 기반)는 현금-only 모의계좌에서 정상적으로 0이며 주문가능액과 의미가 다르다. 이는 `get_account_balance()`의 별도 키 `substitute_amount`로 보존하고 `purchasable_amount`로 덮어쓰지 않는다(04-broker-adapter-interface 참조). 실전 대용증권 보유 계좌는 `psbl_sbst_amt>0`일 수 있어 별도 키 보존이 의미를 가진다.
 - **결제일(T+2) 비반영**: 본 계약은 `account/11-scope-out.md:11`의 결제일 반영 매수가능금액을 **포함하지 않는다**. 결제일 미반영 단순 주문가능액(`nrcvb_buy_amt`)만 노출한다.
 
-> 출처: [KIS open-trading-api `inquire_psbl_order.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_psbl_order/inquire_psbl_order.py) — 매수가능조회[v1_국내주식-007]. `nrcvb_buy_amt`(미수 미사용 매수가능금액)·`max_buy_amt`(최대)·요청 파라미터(CANO/ACNT_PRDT_CD/PDNO/ORD_UNPR/ORD_DVSN/CMA_EVLU_AMT_ICLD_YN/OVRS_ICLD_YN) 확인. + 이슈 #2384 KIS 모의 direct preflight 실측 1건(`nrcvb_buy_amt=9998235.0`, `nrcvb_buy_qty=59.0` — 단일종목 단일관측, 종목무관성 미입증). **종목 불변성·ORD_DVSN 허용값은 구현 전 모의 다종목 A/B로 확정**한다.
+> 출처: [KIS open-trading-api `inquire_psbl_order.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_psbl_order/inquire_psbl_order.py) — 매수가능조회[v1_국내주식-007]. `nrcvb_buy_amt`(미수 미사용 매수가능금액)·`max_buy_amt`(최대)·요청 파라미터(CANO/ACNT_PRDT_CD/PDNO/ORD_UNPR/ORD_DVSN/CMA_EVLU_AMT_ICLD_YN/OVRS_ICLD_YN) 확인. **공식 샘플이 `pdno="005930"`, `ord_unpr="55000"`, `ord_dvsn="01"`로 호출하므로 시장가 probe의 `ORD_DVSN='01'` + `ORD_UNPR=실가(대표종목 현재가)`를 확정한다('0'/빈값 아님)** — 잠정 `ORD_UNPR='0'` 문구를 supersede(#2384 G0). + 이슈 #2384 KIS 모의 direct preflight 실측 1건(`nrcvb_buy_amt=9998235.0`, `nrcvb_buy_qty=59.0` — 단일종목 단일관측, 종목무관성 미입증). **남은 경험적 항목인 `nrcvb_buy_amt` 종목 불변성은 구현 후 사용자 oracle A/B로 검증**한다(검증 실패 시 `ord_psbl_cash` 폴백).
 
 ### KIS 주문 유형 매핑
 

@@ -143,6 +143,28 @@ class MockBrokerAdapter(BrokerAdapter):
         """현재가 조회."""
         return self._get_price(symbol)
 
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict[str, float]:
+        """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정 (#2384).
+
+        브로커 호출 없이 보유 현금으로 산정한다. 시장가/``price=None``이면 내부
+        현재가를 단가로 사용하며, 단가 0이면 수량은 0.0이다.
+        """
+        cash = self._cash
+        unit_price = price if price is not None else self._get_price(symbol)
+        qty = float(int(cash // unit_price)) if unit_price > 0 else 0.0
+        return {
+            "order_buyable_amount": cash,
+            "max_buyable_amount": cash,
+            "order_cash": cash,
+            "order_buyable_qty": qty,
+            "max_buyable_qty": qty,
+        }
+
     # ── 주문 ──────────────────────────────────────────
 
     async def place_order(
