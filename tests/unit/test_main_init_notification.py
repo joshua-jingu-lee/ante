@@ -246,6 +246,12 @@ async def test_enabled_with_secrets_initializes_service(
     sentinel_treasury_manager = object()
     s.treasury_manager = sentinel_treasury_manager  # type: ignore[assignment]
 
+    # #2385: `_init_notification`이 TelegramCommandReceiver에 instrument_service를
+    # 주입하는지 회귀 가드(#2378 동형). 주입 누락 시 `/stop` 보유종목이 런타임에서
+    # 항상 종목코드만 표기하는 버그가 발생한다(format_label SSOT 미적용).
+    sentinel_instrument_service = object()
+    s.instrument_service = sentinel_instrument_service  # type: ignore[assignment]
+
     try:
         await _init_notification(s)
     finally:
@@ -257,4 +263,7 @@ async def test_enabled_with_secrets_initializes_service(
     assert len(captured_kwargs) == 1, "TelegramCommandReceiver 생성자 호출 누락"
     assert captured_kwargs[0]["treasury_manager"] is s.treasury_manager, (
         "TelegramCommandReceiver에 s.treasury_manager가 주입되어야 한다"
+    )
+    assert captured_kwargs[0]["instrument_service"] is s.instrument_service, (
+        "TelegramCommandReceiver에 s.instrument_service가 주입되어야 한다 (#2385)"
     )
