@@ -801,11 +801,11 @@ TREASURY_CONTRACTS: tuple[CliCommandContract, ...] = (
         # total_allocated, total_reserved, unallocated, bot_count}``). text 는
         # click.echo 8 줄.
         # purchasable_amount 의미(#2384): KIS inquire-psbl-order
-        # nrcvb_buy_amt(주문가능액 SSOT). 키 셋 자체는 불변(raw_legacy
-        # passthrough) — 본 변경은 산출출처 정렬. Treasury 측 구조 테스트
-        # tests/unit/test_treasury_sync.py:172 test_purchasable_amount_in_kis
-        # (get_account_balance 에 purchasable_amount 키 존재 가정)는 키
-        # 제거로 갱신 필요 — 구현 #2384 에서 처리.
+        # nrcvb_buy_amt(주문가능액 SSOT, get_buyable). treasury status summary
+        # 키 셋 자체는 불변(raw_legacy passthrough) — 본 변경은 산출출처 정렬
+        # (Live 동기화 시 get_buyable의 order_buyable_amount를 주입). 한편
+        # get_account_balance(broker balance)는 purchasable_amount 키를 제거하고
+        # substitute_amount(=psbl_sbst_amt)를 노출하도록 갱신됨(#2384).
         output=OutputContract(kind="raw", envelope="raw_legacy"),
         execution="offline",
     ),

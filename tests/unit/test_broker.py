@@ -59,6 +59,12 @@ class TestBrokerAdapterABC:
             async def get_account_balance(self) -> dict[str, float]: ...
             async def get_positions(self) -> list[dict[str, Any]]: ...
             async def get_current_price(self, symbol: str) -> float: ...
+            async def get_buyable(
+                self,
+                symbol: str,
+                price: float | None = None,
+                order_type: str = "market",
+            ) -> dict[str, float]: ...
             async def place_order(
                 self,
                 symbol: str,
@@ -94,6 +100,12 @@ class TestBrokerAdapterABC:
             async def get_account_balance(self) -> dict[str, float]: ...
             async def get_positions(self) -> list[dict[str, Any]]: ...
             async def get_current_price(self, symbol: str) -> float: ...
+            async def get_buyable(
+                self,
+                symbol: str,
+                price: float | None = None,
+                order_type: str = "market",
+            ) -> dict[str, float]: ...
             async def place_order(
                 self,
                 symbol: str,
@@ -227,7 +239,11 @@ class TestKISAdapterAPI:
         return resp
 
     async def test_get_account_balance(self, adapter):
-        """계좌 잔고 조회."""
+        """계좌 잔고 조회.
+
+        #2384: psbl_sbst_amt(예수금 대용가능금액)는 substitute_amount 키로
+        보존하고, purchasable_amount(주문가능액) 키는 반환 dict에서 제거된다.
+        """
         mock_resp = self._mock_response(
             {
                 "rt_cd": "0",
@@ -238,6 +254,7 @@ class TestKISAdapterAPI:
                         "pchs_amt_smtl_amt": "4500000",
                         "evlu_amt_smtl_amt": "5500000",
                         "evlu_pfls_smtl_amt": "1000000",
+                        "psbl_sbst_amt": "123000",
                     }
                 ],
             }
@@ -249,6 +266,10 @@ class TestKISAdapterAPI:
         balance = await adapter.get_account_balance()
         assert balance["cash"] == 5_000_000.0
         assert balance["total_assets"] == 10_000_000.0
+        # psbl_sbst_amt → substitute_amount (#2384)
+        assert balance["substitute_amount"] == 123_000.0
+        # purchasable_amount(주문가능액) 키는 제거 — get_buyable이 SSOT (#2384)
+        assert "purchasable_amount" not in balance
 
     async def test_get_positions(self, adapter):
         """포지션 조회."""
@@ -288,6 +309,105 @@ class TestKISAdapterAPI:
         assert len(positions) == 1
         assert positions[0]["symbol"] == "005930"
         assert positions[0]["quantity"] == 100.0
+
+    # ── get_buyable (inquire-psbl-order, #2384) ──────────────
+
+    _PSBL_ORDER_OUTPUT = {
+        "nrcvb_buy_amt": "9998235",
+        "max_buy_amt": "9998235",
+        "ord_psbl_cash": "10000000",
+        "nrcvb_buy_qty": "59",
+        "max_buy_qty": "59",
+    }
+
+    async def test_get_buyable_mapping(self, adapter):
+        """inquire-psbl-order 5필드 → get_buyable 반환 dict 매핑 (#2384)."""
+        mock_resp = self._mock_response(
+            {"rt_cd": "0", "output": dict(self._PSBL_ORDER_OUTPUT)}
+        )
+        session = MagicMock()
+        session.get = MagicMock(return_value=mock_resp)
+        adapter._session = session
+
+        # 지정가(price 명시)는 get_current_price를 호출하지 않는다.
+        result = await adapter.get_buyable("069500", price=170000.0, order_type="limit")
+        assert result == {
+            "order_buyable_amount": 9_998_235.0,  # ← nrcvb_buy_amt (SSOT)
+            "max_buyable_amount": 9_998_235.0,  # ← max_buy_amt
+            "order_cash": 10_000_000.0,  # ← ord_psbl_cash
+            "order_buyable_qty": 59.0,  # ← nrcvb_buy_qty
+            "max_buyable_qty": 59.0,  # ← max_buy_qty
+        }
+
+    async def test_get_buyable_paper_live_tr_id(self, adapter):
+        """모의/실전 tr_id 분기 (VTTC8908R / TTTC8908R) (#2384)."""
+        captured: dict[str, Any] = {}
+
+        async def fake_request(method, url, tr_id, **kwargs):
+            captured["tr_id"] = tr_id
+            captured["params"] = kwargs.get("params")
+            return {"rt_cd": "0", "output": dict(self._PSBL_ORDER_OUTPUT)}
+
+        # 모의 (is_paper=True 기본)
+        adapter._request = fake_request  # type: ignore[method-assign]
+        await adapter.get_buyable("005930", price=70000.0)
+        assert captured["tr_id"] == "VTTC8908R"
+
+        # 실전
+        live = KISAdapter({**KIS_CONFIG, "is_paper": False})
+        live._request = fake_request  # type: ignore[method-assign]
+        await live.get_buyable("005930", price=70000.0)
+        assert captured["tr_id"] == "TTTC8908R"
+
+    async def test_get_buyable_market_uses_current_price(self, adapter):
+        """시장가 probe: ORD_DVSN='01' + ORD_UNPR=현재가(get_current_price) (#2384)."""
+        captured: dict[str, Any] = {}
+
+        async def fake_request(method, url, tr_id, **kwargs):
+            if "inquire-price" in url:
+                return {"rt_cd": "0", "output": {"stck_prpr": "55000"}}
+            captured["params"] = kwargs.get("params")
+            return {"rt_cd": "0", "output": dict(self._PSBL_ORDER_OUTPUT)}
+
+        adapter._request = fake_request  # type: ignore[method-assign]
+        # price=None → 시장가, get_current_price로 ORD_UNPR 보충.
+        await adapter.get_buyable("005930", price=None, order_type="market")
+        params = captured["params"]
+        assert params["ORD_DVSN"] == "01"  # 시장가 — KIS 공식 샘플 확정
+        assert params["ORD_UNPR"] == "55000"  # 현재가 → 실가('0' 아님)
+        assert params["PDNO"] == "005930"
+        assert params["CMA_EVLU_AMT_ICLD_YN"] == "N"
+        assert params["OVRS_ICLD_YN"] == "N"
+        assert params["CANO"] == "12345678"
+        assert params["ACNT_PRDT_CD"] == "01"
+
+    async def test_get_buyable_fallback_on_missing(self, adapter):
+        """nrcvb_buy_amt missing → ord_psbl_cash 폴백 (#2384 G6)."""
+
+        async def fake_request(method, url, tr_id, **kwargs):
+            return {
+                "rt_cd": "0",
+                "output": {"max_buy_amt": "5000000", "ord_psbl_cash": "7000000"},
+            }
+
+        adapter._request = fake_request  # type: ignore[method-assign]
+        result = await adapter.get_buyable("005930", price=70000.0)
+        # nrcvb_buy_amt 부재 → ord_psbl_cash로 폴백
+        assert result["order_buyable_amount"] == 7_000_000.0
+
+    async def test_get_buyable_value_zero_no_fallback(self, adapter):
+        """nrcvb_buy_amt==0 은 정상값 — 폴백하지 않는다 (#2384 G6)."""
+
+        async def fake_request(method, url, tr_id, **kwargs):
+            return {
+                "rt_cd": "0",
+                "output": {"nrcvb_buy_amt": "0", "ord_psbl_cash": "7000000"},
+            }
+
+        adapter._request = fake_request  # type: ignore[method-assign]
+        result = await adapter.get_buyable("005930", price=70000.0)
+        # 0은 정상값이므로 ord_psbl_cash로 폴백 금지 → 0.0 그대로
+        assert result["order_buyable_amount"] == 0.0
 
     async def test_place_order(self, adapter):
         """주문 접수."""

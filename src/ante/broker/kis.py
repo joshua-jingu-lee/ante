@@ -103,6 +103,23 @@ _CCLD_TR_ID_BEFORE_LIVE = "CTSC9215R"
 # ante 가 정책을 소유한다(#2349). KST 오늘 기준 달력 3개월 전 동일 일자가 cutoff.
 _CCLD_BOUNDARY_MONTHS = 3
 
+# inquire-psbl-order(매수가능 조회) TR ID 매핑 (#2384).
+# 출처: KIS open-trading-api examples_llm/domestic_stock/inquire_psbl_order.
+_PSBL_ORDER_TR_ID_PAPER = "VTTC8908R"
+_PSBL_ORDER_TR_ID_LIVE = "TTTC8908R"
+
+# inquire-psbl-order 응답 필드 → get_buyable() 반환 키 SSOT 매핑 (#2384).
+# purchasable_amount(주문가능액)의 SSOT는 order_buyable_amount←nrcvb_buy_amt다
+# (미수 미사용 매수가능금액, 보수값). nrcvb_buy_amt 종목 불변성 가정이 oracle
+# 검증에서 깨지면 ord_psbl_cash(주문가능현금, 종목 의존성 최소) 폴백으로 전환
+# 가능하도록 필드명을 한 곳에 모은다. 폴백은 missing/parse-failure 또는 명시적
+# config 전환에 한정하며 value==0 은 정상값이라 폴백 트리거가 아니다(#2384 G6).
+_PSBL_ORDER_FIELD_BUYABLE_AMOUNT = "nrcvb_buy_amt"  # purchasable_amount SSOT
+_PSBL_ORDER_FIELD_MAX_BUYABLE_AMOUNT = "max_buy_amt"
+_PSBL_ORDER_FIELD_ORDER_CASH = "ord_psbl_cash"  # 종목무관 폴백 SSOT 후보
+_PSBL_ORDER_FIELD_BUYABLE_QTY = "nrcvb_buy_qty"
+_PSBL_ORDER_FIELD_MAX_BUYABLE_QTY = "max_buy_qty"
+
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
 
@@ -134,6 +151,36 @@ def _ccld_three_month_cutoff(today_kst: str) -> str:
     last_day = calendar.monthrange(target_year, target_month)[1]
     target_day = min(day, last_day)
     return f"{target_year:04d}{target_month:02d}{target_day:02d}"
+
+
+def _to_float(value: Any) -> float:
+    """KIS 응답 값을 float 으로 안전 변환 (missing/parse-failure → 0.0)."""
+    if value is None:
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _parse_psbl_amount(
+    output: dict[str, Any],
+    primary_field: str,
+    fallback_field: str,
+) -> float:
+    """inquire-psbl-order 금액 필드 파싱 (#2384, primary missing/parse 시만 폴백).
+
+    ``primary_field``(``nrcvb_buy_amt``)가 응답에 없거나 float 변환에 실패할 때만
+    ``fallback_field``(``ord_psbl_cash``)로 폴백한다. ``primary_field`` 값이
+    ``0``으로 정상 파싱되면 그대로 ``0.0``을 반환한다 — ``0``은 정상값일 수
+    있으므로 폴백 트리거가 아니다(#2384 G6).
+    """
+    if primary_field in output:
+        try:
+            return float(output[primary_field])
+        except (TypeError, ValueError):
+            pass
+    return _to_float(output.get(fallback_field))
 
 
 class KISErrorClassifier:
@@ -729,6 +776,16 @@ class KISBaseAdapter(BrokerAdapter):
         ...
 
     @abstractmethod
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict[str, float]:
+        """매수가능 조회 (KIS ``inquire-psbl-order``)."""
+        ...
+
+    @abstractmethod
     async def place_order(
         self,
         symbol: str,
@@ -854,13 +911,18 @@ class KISDomesticAdapter(KISBaseAdapter):
         result = await self._request("GET", url, tr_id, params=self._balance_params())
 
         info = result["output2"][0] if result.get("output2") else {}
+        # purchasable_amount(주문가능액)는 종목 컨텍스트가 필요해 무인자 잔고조회가
+        # 산출할 수 없으므로 이 dict에 포함하지 않는다(#2384). psbl_sbst_amt는
+        # 예수금 대용가능금액(대용증권 평가 기반)이라 주문가능액과 의미가 다르며
+        # 현금-only 계좌에서 정상적으로 0이므로 substitute_amount 키로 보존한다.
+        # 주문가능액 SSOT는 get_buyable()의 order_buyable_amount다.
         return {
             "cash": float(info.get("dnca_tot_amt", 0)),
             "total_assets": float(info.get("tot_evlu_amt", 0)),
             "purchase_amount": float(info.get("pchs_amt_smtl_amt", 0)),
             "eval_amount": float(info.get("evlu_amt_smtl_amt", 0)),
             "total_profit_loss": float(info.get("evlu_pfls_smtl_amt", 0)),
-            "purchasable_amount": float(info.get("psbl_sbst_amt", 0)),
+            "substitute_amount": float(info.get("psbl_sbst_amt", 0)),
         }
 
     async def get_positions(self) -> list[dict[str, Any]]:
@@ -899,6 +961,65 @@ class KISDomesticAdapter(KISBaseAdapter):
         }
         result = await self._request("GET", url, tr_id, params=params)
         return float(result["output"]["stck_prpr"])
+
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict[str, float]:
+        """매수가능 조회 (KIS ``inquire-psbl-order``, #2384).
+
+        ``purchasable_amount``(주문가능액)의 SSOT다. 무인자 ``get_account_balance``
+        (``inquire-balance``)는 종목 컨텍스트가 없어 주문가능액을 산출할 수 없으므로
+        종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다. 모의
+        rate-limit(5req/min) 안전을 위해 ``get_account_balance``와 분리한다.
+
+        ORD_DVSN/ORD_UNPR: KIS 공식 샘플(`inquire_psbl_order.py`: pdno=005930,
+        ord_unpr='55000', ord_dvsn='01')대로 시장가는 ``ORD_DVSN='01'``이며
+        ``ORD_UNPR``은 실제 1주당 가격(필수, '0' 아님)이다. 시장가/``price=None``
+        이면 ``get_current_price(symbol)``를 1회 호출해 단가로 사용한다.
+        """
+        tr_id = _PSBL_ORDER_TR_ID_PAPER if self.is_paper else _PSBL_ORDER_TR_ID_LIVE
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
+
+        # ORD_UNPR은 [필수] 실제 1주당 가격이다(KIS 공식 샘플 확정). 시장가/미지정
+        # 이면 현재가를 단가로 사용한다(Treasury 등 호출처에 별도 조회를 추가하지
+        # 않고 get_buyable 내부에서 1회 조회).
+        unit_price = price
+        if unit_price is None:
+            unit_price = await self.get_current_price(symbol)
+
+        params = {
+            "CANO": self.account_no[:8],
+            "ACNT_PRDT_CD": self.account_no[8:10],
+            "PDNO": self.normalize_symbol(symbol),
+            "ORD_UNPR": str(int(unit_price)),
+            "ORD_DVSN": self._map_order_type(order_type),
+            "CMA_EVLU_AMT_ICLD_YN": "N",
+            "OVRS_ICLD_YN": "N",
+        }
+        result = await self._request("GET", url, tr_id, params=params)
+        output = result.get("output") or {}
+
+        # nrcvb_buy_amt(미수 미사용 매수가능금액)가 order_buyable_amount=
+        # purchasable_amount SSOT다. missing/parse-failure 시에만 ord_psbl_cash
+        # (주문가능현금)로 폴백한다. nrcvb_buy_amt==0 은 정상값이라 폴백 트리거가
+        # 아니다(#2384 G6).
+        order_buyable_amount = _parse_psbl_amount(
+            output,
+            primary_field=_PSBL_ORDER_FIELD_BUYABLE_AMOUNT,
+            fallback_field=_PSBL_ORDER_FIELD_ORDER_CASH,
+        )
+        return {
+            "order_buyable_amount": order_buyable_amount,
+            "max_buyable_amount": _to_float(
+                output.get(_PSBL_ORDER_FIELD_MAX_BUYABLE_AMOUNT)
+            ),
+            "order_cash": _to_float(output.get(_PSBL_ORDER_FIELD_ORDER_CASH)),
+            "order_buyable_qty": _to_float(output.get(_PSBL_ORDER_FIELD_BUYABLE_QTY)),
+            "max_buyable_qty": _to_float(output.get(_PSBL_ORDER_FIELD_MAX_BUYABLE_QTY)),
+        }
 
     # ── 주문 처리 ──────────────────────────────────
 

@@ -282,6 +282,28 @@ class TestBrokerAdapter(BrokerAdapter):
             "stock_value": total_stock_value,
         }
 
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict[str, float]:
+        """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정 (#2384).
+
+        브로커 호출 없이 보유 현금으로 산정한다. 시장가/``price=None``이면 내부
+        시뮬레이션 가격을 단가로 사용하며, 단가 0이면 수량은 0.0이다.
+        """
+        cash = self._cash
+        unit_price = price if price is not None else self._simulator.get_price(symbol)
+        qty = float(int(cash // unit_price)) if unit_price > 0 else 0.0
+        return {
+            "order_buyable_amount": cash,
+            "max_buyable_amount": cash,
+            "order_cash": cash,
+            "order_buyable_qty": qty,
+            "max_buyable_qty": qty,
+        }
+
     async def get_positions(self) -> list[dict[str, Any]]:
         """보유 포지션 조회 — 현재 시뮬레이션 가격으로 평가손익 계산."""
         return [

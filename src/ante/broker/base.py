@@ -60,6 +60,38 @@ class BrokerAdapter(ABC):
         ...
 
     @abstractmethod
+    async def get_buyable(
+        self,
+        symbol: str,
+        price: float | None = None,
+        order_type: str = "market",
+    ) -> dict[str, float]:
+        """매수가능 조회 (KIS ``inquire-psbl-order``).
+
+        ``purchasable_amount`` (주문가능액)의 SSOT다. 무인자
+        ``get_account_balance()``는 종목 컨텍스트가 없어 주문가능액을 산출할 수
+        없으므로, 종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다
+        (#2384). 모의 rate-limit(5req/min)을 위해 ``get_account_balance()``와
+        분리되어 호출처가 빈도를 독립 제어한다.
+
+        Args:
+            symbol: 종목코드
+            price: 지정가 단가. 시장가/``None``이면 구현이 현재가 등으로 대체한다.
+            order_type: "market" | "limit" 등 주문구분
+
+        Returns:
+            {"order_buyable_amount": float, "max_buyable_amount": float,
+             "order_cash": float, "order_buyable_qty": float,
+             "max_buyable_qty": float}
+            - ``order_buyable_amount``: 미수 미사용 매수가능금액
+              (**purchasable_amount SSOT** — 보수값)
+            - ``max_buyable_amount``: 미수 포함 최대 매수가능금액
+            - ``order_cash``: 주문가능현금 (종목 의존성 최소)
+            - ``order_buyable_qty`` / ``max_buyable_qty``: 종목/단가 의존 수량
+        """
+        ...
+
+    @abstractmethod
     async def place_order(
         self,
         symbol: str,

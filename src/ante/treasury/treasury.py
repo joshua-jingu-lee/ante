@@ -144,6 +144,12 @@ _SNAPSHOT_MIGRATION_COLUMNS = [
 # 5년 초과 스냅샷 자동 삭제 기준
 _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
+# 계좌 대표 매수가능액 probe 종목 (#2384).
+# Live 동기화는 종목 무관한 미수없는 매수가능금액(nrcvb_buy_amt)을 얻기 위해
+# 항시 거래되는 유효 국내 종목 코드로 get_buyable(시장가) probe를 cycle당 1회
+# 호출한다. config override는 향후 옵션(기본 하드코딩).
+_PURCHASABLE_PROBE_SYMBOL = "005930"
+
 
 class Treasury:
     """계좌별 중앙 자금(예산) 관리자.
@@ -1462,6 +1468,19 @@ class Treasury:
         balance_data = await broker.get_account_balance()
         await self.sync_balance(balance_data)
 
+        # 1-1) 계좌 대표 매수가능액 주입 (#2384).
+        # purchasable_amount(주문가능액)의 SSOT는 get_buyable의 order_buyable_amount
+        # (inquire-psbl-order의 nrcvb_buy_amt)다. 대표 종목을 시장가로 cycle당 1회만
+        # probe해(모의 5req/min rate-limit 안전) _purchasable_amount에 단일 주입한다
+        # (BalanceSyncedEvent 발행 전). 실패 시 이전값을 0으로 덮지 않고 그대로
+        # 유지하며, 잘못된 매수가능액으로 BalanceSyncedEvent를 발행하지 않도록
+        # 예외를 재전파해 이번 cycle을 중단한다(상위 _run 루프가 "이전 값 유지"로
+        # 처리하고 다음 interval에 재시도)(#2384 G7).
+        buyable = await broker.get_buyable(_PURCHASABLE_PROBE_SYMBOL)
+        self._purchasable_amount = buyable.get(
+            "order_buyable_amount", self._purchasable_amount
+        )
+
         # 2) KIS 보유종목 (output1) + Trade 내부 포지션 대조
         # 자기 계좌 포지션만 조회: 단일 계좌 바인딩 인스턴스에서 cross-account
         # 데이터가 섞이지 않도록 명시적으로 account_id 필터를 전달한다 (#1240).
@@ -1567,11 +1586,15 @@ class Treasury:
         )
 
     async def sync_balance(self, balance_data: dict[str, float]) -> None:
-        """KIS 잔고 데이터로 Treasury 상태 동기화."""
+        """KIS 잔고 데이터로 Treasury 상태 동기화.
+
+        ``purchasable_amount``(주문가능액)는 무인자 ``get_account_balance``
+        (``inquire-balance``)가 산출할 수 없어 반환 dict에 더 이상 없으므로(#2384),
+        ``sync_balance``는 이를 **읽지 않는다**. 주문가능액은 ``_do_sync``가
+        ``BrokerAdapter.get_buyable`` 결과로 별도 주입한다(매수가능액 동기화 규약,
+        treasury/04-treasury-interface 참조).
+        """
         self._account_balance = balance_data.get("cash", self._account_balance)
-        self._purchasable_amount = balance_data.get(
-            "purchasable_amount", self._purchasable_amount
-        )
         self._total_evaluation = balance_data.get(
             "total_assets", self._total_evaluation
         )

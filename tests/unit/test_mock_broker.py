@@ -220,6 +220,36 @@ async def test_initial_balance(broker: MockBrokerAdapter) -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_buyable_cash_based(broker: MockBrokerAdapter) -> None:
+    """get_buyable: 보유 현금 기반 산정 — 금액=cash, 수량=floor(cash/단가) (#2384)."""
+    # default_price=50_000, cash=10_000_000 → qty=200
+    result = await broker.get_buyable("005930")
+    assert result["order_buyable_amount"] == 10_000_000.0
+    assert result["max_buyable_amount"] == 10_000_000.0
+    assert result["order_cash"] == 10_000_000.0
+    assert result["order_buyable_qty"] == 200.0
+    assert result["max_buyable_qty"] == 200.0
+
+
+@pytest.mark.asyncio
+async def test_get_buyable_explicit_price(broker: MockBrokerAdapter) -> None:
+    """get_buyable: price 명시 시 그 단가로 수량 계산 (#2384)."""
+    # cash=10_000_000, price=70_000 → qty=floor(142.85...)=142
+    result = await broker.get_buyable("005930", price=70_000)
+    assert result["order_buyable_qty"] == 142.0
+
+
+@pytest.mark.asyncio
+async def test_get_buyable_zero_price_qty_zero() -> None:
+    """get_buyable: 단가 0이면 수량 0.0 (division-by-zero 방지) (#2384)."""
+    b = MockBrokerAdapter({"initial_cash": 10_000_000, "default_price": 0})
+    result = await b.get_buyable("999999")
+    assert result["order_buyable_qty"] == 0.0
+    assert result["max_buyable_qty"] == 0.0
+    assert result["order_buyable_amount"] == 10_000_000.0
+
+
+@pytest.mark.asyncio
 async def test_balance_after_trades(broker: MockBrokerAdapter) -> None:
     """매매 후 total_assets가 수수료만큼 감소한다."""
     initial = await broker.get_account_balance()
