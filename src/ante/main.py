@@ -1039,12 +1039,28 @@ async def _init_stream_integration(
 
 
 async def _sync_instruments(s: Services, accounts: list) -> None:
-    """종목 마스터 동기화 (연결된 첫 번째 Broker 사용)."""
+    """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
+
+    #2385: 과거에는 첫 번째 성공 broker 에서 ``return`` 했으나, 계좌 순서가
+    ``test``(TEST) → ``oracle-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
+    종목 마스터 적재를 선점해 종목명 병기(#2377)가 전부 symbol-only 로
+    폴백되는 회귀가 있었다. 이제 전 계좌를 순회하되 이미 동기화한 exchange
+    는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.
+    빈 결과(``get_instruments() == []``)는 synced 처리하지 않고 ``continue`` 하여
+    같은 exchange 의 후속 계좌가 여전히 동기화를 시도할 수 있게 한다.
+    ``bulk_upsert`` 성공 시에만 exchange 를 synced 로 표시한다. 전 계좌 순회
+    후 아무 것도 동기화하지 못하면 기존 경고를 유지한다.
+    """
+    synced_exchanges: set[str] = set()
     for account in accounts:
+        if account.exchange in synced_exchanges:
+            continue
         try:
             broker = await s.account_service.get_broker(account.account_id)
             raw_instruments = await broker.get_instruments()
             if not raw_instruments:
+                # 빈 결과는 synced 처리하지 않는다 — 같은 exchange 의 다른
+                # 계좌가 여전히 동기화를 시도할 수 있어야 한다.
                 continue
             from ante.instrument.models import Instrument
 
@@ -1060,19 +1076,21 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
                 for item in raw_instruments
             ]
             count = await s.instrument_service.bulk_upsert(instruments_to_upsert)
+            synced_exchanges.add(account.exchange)
             logger.info(
-                "종목 동기화 완료: account=%s, %d건 갱신",
+                "종목 동기화 완료: account=%s, exchange=%s, %d건 갱신",
                 account.account_id,
+                account.exchange,
                 count,
             )
-            return  # 첫 번째 성공한 Broker로 동기화
         except Exception:
             logger.warning(
                 "종목 동기화 실패: account=%s — 다음 계좌 시도",
                 account.account_id,
                 exc_info=True,
             )
-    logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영")
+    if not synced_exchanges:
+        logger.warning("종목 동기화 실패 — 기존 캐시 데이터로 운영")
 
 
 def _init_context_factory(s: Services) -> None:
@@ -1822,6 +1840,7 @@ async def _init_notification(s: Services) -> None:
             treasury_manager=s.treasury_manager,
             account_service=s.account_service,
             approval_service=s.approval_service,
+            instrument_service=s.instrument_service,
         )
         s.telegram_receiver.start()
         logger.info("TelegramCommandReceiver 시작 (chat_id=%s)", chat_id)

@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ante.account.service import AccountService
     from ante.approval.service import ApprovalService
     from ante.bot.manager import BotManager
+    from ante.instrument.service import InstrumentService
     from ante.notification.telegram import TelegramAdapter
     from ante.treasury.manager import TreasuryManager
 
@@ -37,6 +38,7 @@ class TelegramCommandReceiver:
         treasury_manager: TreasuryManager | None = None,
         account_service: AccountService | None = None,
         approval_service: ApprovalService | None = None,
+        instrument_service: InstrumentService | None = None,
     ) -> None:
         self._adapter = adapter
         self._allowed_user_ids = set(allowed_user_ids or [])
@@ -46,6 +48,7 @@ class TelegramCommandReceiver:
         self._treasury_manager = treasury_manager
         self._account_service = account_service
         self._approval_service = approval_service
+        self._instrument_service = instrument_service
 
         self._offset: int = 0
         self._task: asyncio.Task[None] | None = None
@@ -576,16 +579,51 @@ class TelegramCommandReceiver:
         # amount 부재로 0원 오표시였으므로, 건수 표시가 의미상 정확한 정정이다.
         pending_count = len(open_orders)
 
+        # #2385: 보유종목 표기를 InstrumentService.format_label SSOT로 단일화한다
+        # (#2377 "전 지점 종목명 병기"). instrument_service 미주입이면 기존
+        # symbol-only 경로를 유지한다(graceful fallback). _reply 는 parse_mode 를
+        # 설정하지 않는 plain transport 이므로 markdown=False 로 포맷한다.
+        held_line = await self._format_held_symbols(bot, symbols)
+
         lines = [
             header,
             "",
             f"⚠️ 보유 종목 {len(symbols)}개가 유지됩니다.",
             "중지 후 포지션을 직접 관리해야 합니다.",
             "",
-            f"보유: {', '.join(symbols)}",
+            f"보유: {held_line}",
             f"체결대기 주문: {pending_count}건",
         ]
         return "\n".join(lines)
+
+    async def _format_held_symbols(self, bot: Any, symbols: list[str]) -> str:
+        """보유종목 표기 라인을 구성한다 (#2385).
+
+        ``instrument_service`` 미주입 시 기존 ``', '.join(symbols)`` 를 유지한다.
+        주입 시 ``format_label(symbol, exchange, markdown=False)`` 로 종목명을
+        병기한다. exchange 해석(``bot.config.account_id`` → ``account_service.get``)
+        은 try/except 로 감싸 계좌 조회 실패가 stop 성공 후 reply 실패로 번지지
+        않게 하며, 실패/미주입 시 기본 ``"KRX"`` 로 폴백한다.
+        """
+        if self._instrument_service is None:
+            return ", ".join(symbols)
+
+        exchange = "KRX"
+        try:
+            account_id = bot.config.account_id
+            if account_id and self._account_service is not None:
+                account = await self._account_service.get(account_id)
+                exchange = account.exchange
+        except Exception:
+            logger.warning(
+                "보유종목 exchange 해석 실패 — KRX 기본값 사용", exc_info=True
+            )
+            exchange = "KRX"
+
+        return ", ".join(
+            self._instrument_service.format_label(symbol, exchange, markdown=False)
+            for symbol in symbols
+        )
 
     # ── 유틸 ────────────────────────────────────────
 

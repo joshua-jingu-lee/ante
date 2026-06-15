@@ -26,6 +26,7 @@ def _make_running_bot(
     name: str = "테스트봇",
     positions: dict | None = None,
     open_orders: list | None = None,
+    account_id: str = "test",
 ):
     """RUNNING 상태의 Bot mock 생성 헬퍼."""
     from ante.bot.config import BotStatus
@@ -34,6 +35,7 @@ def _make_running_bot(
     bot.bot_id = bot_id
     bot.status = BotStatus.RUNNING
     bot.config.name = name
+    bot.config.account_id = account_id
     bot._ctx.get_positions.return_value = positions or {}
     bot._ctx.get_open_orders.return_value = open_orders or []
     return bot
@@ -106,11 +108,41 @@ def account_service():
             }
         ]
     )
+    # #2385: /stop exchange 해석용 — account.exchange 기본 KRX.
+    mock.get = AsyncMock(
+        return_value=SimpleNamespace(account_id="test", exchange="KRX")
+    )
     return mock
 
 
 @pytest.fixture
-def receiver(adapter, bot_manager, treasury_manager, account_service):
+def instrument_service():
+    """InstrumentService mock — format_label SSOT (#2385).
+
+    KRX 캐시에 005930/035720 만 존재. 다른 (symbol, exchange) 는 symbol-only
+    폴백을 흉내낸다(실제 ``format_label`` 의 캐시 미스 계약과 동형).
+    """
+    names = {
+        ("005930", "KRX"): "삼성전자",
+        ("035720", "KRX"): "카카오",
+    }
+
+    def _format_label(symbol: str, exchange: str = "KRX", *, markdown: bool = False):
+        base = f"`{symbol}`" if markdown else symbol
+        name = names.get((symbol, exchange))
+        if not name or name == symbol:
+            return base
+        return f"{base} ({name})"
+
+    mock = MagicMock()
+    mock.format_label.side_effect = _format_label
+    return mock
+
+
+@pytest.fixture
+def receiver(
+    adapter, bot_manager, treasury_manager, account_service, instrument_service
+):
     return TelegramCommandReceiver(
         adapter=adapter,
         allowed_user_ids=[12345],
@@ -119,6 +151,7 @@ def receiver(adapter, bot_manager, treasury_manager, account_service):
         bot_manager=bot_manager,
         treasury_manager=treasury_manager,
         account_service=account_service,
+        instrument_service=instrument_service,
     )
 
 
@@ -406,9 +439,79 @@ class TestCommands:
         assert "봇 중지" in result
         assert "보유 종목 2개가 유지됩니다" in result
         assert "포지션을 직접 관리" in result
-        assert "005930" in result
-        assert "035720" in result
+        # #2385: format_label SSOT 로 종목명 병기 (plain transport).
+        assert "005930 (삼성전자)" in result
+        assert "035720 (카카오)" in result
         assert "체결대기 주문: 2건" in result
+
+    async def test_stop_bot_label_uses_account_exchange(
+        self, receiver, bot_manager, account_service, instrument_service
+    ):
+        """#2385: exchange 는 bot.config.account_id → account.exchange 로 해석."""
+        account_service.get.return_value = SimpleNamespace(
+            account_id="oracle-paper", exchange="KRX"
+        )
+        bot = _make_running_bot(
+            account_id="oracle-paper",
+            positions={
+                "005930": {"symbol": "005930", "quantity": 1, "avg_entry_price": 70000},
+            },
+        )
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "005930 (삼성전자)" in result
+        # bot.config.account_id 로 계좌를 조회해 exchange 를 얻는다.
+        account_service.get.assert_awaited_once_with("oracle-paper")
+        instrument_service.format_label.assert_any_call("005930", "KRX", markdown=False)
+
+    async def test_stop_bot_label_cache_miss_no_name(self, receiver, bot_manager):
+        """#2385: TEST/non-KRX(캐시 미스) → 이름 누락·오표기 없이 symbol-only."""
+        bot = _make_running_bot(
+            positions={
+                # 캐시에 없는 TEST 더미 종목 → 종목명 병기 없이 코드만.
+                "000001": {"symbol": "000001", "quantity": 1, "avg_entry_price": 1000},
+            },
+        )
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "보유: 000001" in result
+        # 괄호 종목명 병기가 붙지 않아야 한다 (오표기 금지).
+        assert "000001 (" not in result
+
+    async def test_stop_bot_label_exchange_lookup_failure_falls_back_to_krx(
+        self, receiver, bot_manager, account_service, instrument_service
+    ):
+        """#2385: account 조회 실패 → KRX 폴백, stop 성공이 reply 실패로 번지지 않음."""
+        account_service.get.side_effect = RuntimeError("account lookup down")
+        bot = _make_running_bot(
+            positions={
+                "005930": {"symbol": "005930", "quantity": 1, "avg_entry_price": 70000},
+            },
+        )
+        bot_manager.get_bot.return_value = bot
+        # 예외 없이 응답을 구성해야 한다.
+        result = await receiver._cmd_stop(["bot-1"])
+        assert "봇 중지" in result
+        # KRX 폴백으로 종목명 병기 성공.
+        assert "005930 (삼성전자)" in result
+        instrument_service.format_label.assert_any_call("005930", "KRX", markdown=False)
+
+    async def test_stop_bot_label_no_instrument_service_fallback(
+        self, receiver, bot_manager
+    ):
+        """#2385: instrument_service=None → 기존 ', '.join(symbols) fallback 회귀."""
+        receiver._instrument_service = None
+        bot = _make_running_bot(
+            positions={
+                "005930": {"symbol": "005930", "quantity": 1, "avg_entry_price": 70000},
+                "035720": {"symbol": "035720", "quantity": 5, "avg_entry_price": 50000},
+            },
+        )
+        bot_manager.get_bot.return_value = bot
+        result = await receiver._cmd_stop(["bot-1"])
+        # 종목명 병기 없이 코드만 콤마 결합.
+        assert "보유: 005930, 035720" in result
+        assert "(삼성전자)" not in result
 
     async def test_stop_bot_already_stopped(self, receiver, bot_manager):
         """이미 중지된 봇은 안내 메시지 반환."""
