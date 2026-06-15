@@ -206,3 +206,165 @@ async def test_main_removes_marker_on_init_failure(
     config = Config.load(config_dir=tmp_path)
     assert not main_module._starting_marker_path(config).exists()
     assert not config.runtime_pid_path().exists()
+
+
+# ── #2385: _sync_instruments 전 계좌 unique exchange 동기화 ────────────────
+
+
+def _make_sync_account(account_id: str, exchange: str) -> Any:
+    """``account_id``/``exchange`` property 만 갖는 Account 더블."""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(account_id=account_id, exchange=exchange)
+
+
+def _make_sync_services(broker_instruments: dict[str, Any]) -> tuple[Any, list[Any]]:
+    """``_sync_instruments`` 용 Services 더블 + bulk_upsert 호출 기록.
+
+    ``broker_instruments`` 는 account_id → broker.get_instruments() 반환값
+    (list[dict] 또는 raise 할 Exception 인스턴스) 매핑이다.
+    """
+    from unittest.mock import AsyncMock
+
+    import ante.main as main_module
+
+    s = main_module.Services()
+
+    upsert_calls: list[Any] = []
+
+    async def _bulk_upsert(instruments: list[Any]) -> int:
+        upsert_calls.append(instruments)
+        return len(instruments)
+
+    instrument_service = AsyncMock()
+    instrument_service.bulk_upsert = AsyncMock(side_effect=_bulk_upsert)
+    s.instrument_service = instrument_service  # type: ignore[assignment]
+
+    async def _get_broker(account_id: str) -> Any:
+        result = broker_instruments[account_id]
+        broker = AsyncMock()
+
+        async def _get_instruments() -> Any:
+            if isinstance(result, Exception):
+                raise result
+            return result
+
+        broker.get_instruments = AsyncMock(side_effect=_get_instruments)
+        return broker
+
+    account_service = AsyncMock()
+    account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    s.account_service = account_service  # type: ignore[assignment]
+
+    return s, upsert_calls
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_does_not_stop_at_first_broker() -> None:
+    """(a) [test(TEST), oracle-paper(KRX)] 순서에서 KRX 069500 이 적재된다.
+
+    과거 첫 성공 broker `return` 구조에서는 TEST 더미가 KRX 마스터 적재를
+    선점했다(#2385 회귀). 첫 broker return 제거를 잠근다.
+    """
+    import ante.main as main_module
+
+    accounts = [
+        _make_sync_account("test", "TEST"),
+        _make_sync_account("oracle-paper", "KRX"),
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "test": [{"symbol": "000001", "name": "알파전자"}],
+            "oracle-paper": [{"symbol": "069500", "name": "KODEX 200"}],
+        }
+    )
+
+    await main_module._sync_instruments(s, accounts)
+
+    # 두 exchange 모두 동기화되어야 한다 (첫 broker return 제거).
+    assert len(upsert_calls) == 2
+    upserted = {inst.symbol: inst for batch in upsert_calls for inst in batch}
+    assert "069500" in upserted, "KRX 069500 마스터가 적재되어야 한다"
+    krx = upserted["069500"]
+    assert krx.exchange == "KRX"
+    assert krx.name == "KODEX 200"
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_dedupes_same_exchange() -> None:
+    """(b) 동일 exchange 2계좌 → 해당 exchange 는 1회만 sync."""
+    import ante.main as main_module
+
+    accounts = [
+        _make_sync_account("kis-1", "KRX"),
+        _make_sync_account("kis-2", "KRX"),
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "kis-1": [{"symbol": "069500", "name": "KODEX 200"}],
+            "kis-2": [{"symbol": "102110", "name": "TIGER 200"}],
+        }
+    )
+
+    await main_module._sync_instruments(s, accounts)
+
+    # 첫 계좌가 KRX 를 동기화했으므로 둘째 계좌는 skip → bulk_upsert 1회.
+    assert len(upsert_calls) == 1
+    # 둘째 계좌의 broker 는 조회조차 되지 않아야 한다.
+    s.account_service.get_broker.assert_awaited_once_with("kis-1")
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_empty_result_not_marked_synced() -> None:
+    """(c) 빈 결과 → synced 처리 금지(같은 exchange 후속 계좌가 여전히 sync)."""
+    import ante.main as main_module
+
+    accounts = [
+        _make_sync_account("kis-empty", "KRX"),
+        _make_sync_account("kis-real", "KRX"),
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "kis-empty": [],  # 빈 결과 → continue, synced 처리 금지
+            "kis-real": [{"symbol": "069500", "name": "KODEX 200"}],
+        }
+    )
+
+    await main_module._sync_instruments(s, accounts)
+
+    # 빈 결과는 synced 처리되지 않아 후속 계좌가 KRX 를 동기화해야 한다.
+    assert len(upsert_calls) == 1
+    upserted = {inst.symbol for batch in upsert_calls for inst in batch}
+    assert "069500" in upserted
+    # 두 계좌 모두 broker 조회됨 (빈 결과 계좌가 KRX 를 점유하지 않음).
+    assert s.account_service.get_broker.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_all_fail_keeps_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """(d) 전 계좌 실패 → "종목 동기화 실패 — 기존 캐시 데이터로 운영" 경고 보존."""
+    import logging
+
+    import ante.main as main_module
+
+    accounts = [
+        _make_sync_account("kis-1", "KRX"),
+        _make_sync_account("kis-2", "KOSDAQ"),
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "kis-1": RuntimeError("broker down"),
+            "kis-2": RuntimeError("broker down"),
+        }
+    )
+
+    with caplog.at_level(logging.WARNING, logger="ante.main"):
+        await main_module._sync_instruments(s, accounts)
+
+    assert len(upsert_calls) == 0
+    assert any(
+        "종목 동기화 실패 — 기존 캐시 데이터로 운영" in rec.message
+        for rec in caplog.records
+    ), "전 계좌 실패 시 기존 경고가 보존되어야 한다"

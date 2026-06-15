@@ -150,6 +150,7 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `treasury_manager` | TreasuryManager \| None | None | 자금 현황 조회용 (전 계좌) |
 | `account_service` | AccountService \| None | None | 계좌 상태 제어용 |
 | `approval_service` | ApprovalService \| None | None | 결재 승인/거절 처리용 |
+| `instrument_service` | InstrumentService \| None | None | `/stop` 보유종목 종목명 병기용 (#2385) |
 
 **지원 명령:**
 
@@ -165,6 +166,8 @@ CRITICAL 알림은 `telegram_enabled=false`, `min_level`, `quiet_hours`, dedup�
 | `/confirm` | 위험 명령 확인 | - |
 
 **2단계 확인**: `halt`, `clear_halt`, `stop` 명령은 `_DANGEROUS_COMMANDS`로 분류되며, `/confirm` 입력 후 `confirm_timeout` 내에서만 실행된다. `/clear_halt`는 계좌 상태만 ACTIVE로 복구하며 봇을 자동 재시작하지 않는다.
+
+**`/stop` 보유종목 출력 (#2385)**: 봇 중지 후 유지되는 보유종목을 표기할 때 종목코드만 나열하지 않고 `InstrumentService.format_label` SSOT(`docs/specs/instrument/instrument.md` 참조)를 따라 `{symbol} (종목명)`을 병기한다. `_reply()`는 `parse_mode`를 설정하지 않는 **plain transport**이므로 `format_label(symbol, exchange, markdown=False)`로 호출한다. exchange는 `bot.config.account_id` → `account_service.get(...).exchange`로 해석하되 실패/미주입 시 `KRX`로 폴백한다. `instrument_service` 미주입 시 종목코드만 표기하는 기존 경로를 유지한다(graceful fallback). plain 모드도 종목명을 escape하므로 특수문자를 포함한 종목명은 백슬래시가 리터럴로 보일 수 있으나, 이는 bounded known-limitation으로 수용한다(`_reply` transport 및 `format_label` escape 계약은 multi-consumer 표면이라 본 범위 비목표).
 
 **결재 처리**: 결재 승인/거절은 텍스트 명령이 아니라 결재 요청 알림에 첨부된 인라인 [승인]/[거절] 버튼 callback으로만 처리한다 (아래 [결재 인라인 버튼](#결재-인라인-버튼) 참조). 텔레그램 텍스트 명령 `/approve`·`/reject`는 지원하지 않는다.
 

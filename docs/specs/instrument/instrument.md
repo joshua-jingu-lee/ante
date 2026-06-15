@@ -148,5 +148,6 @@ CSV/JSON 파일에서 종목 데이터를 일괄 등록/갱신한다. 파일 확
 ## 타 모듈 설계 시 참고
 
 - **Notification**: 종목코드를 직접 포맷하는 **알림 발행자**(`TradeRecorder`·`PositionReconciler`·`FillReconcileScheduler`·`RuleEngine` 등)에 `instrument_service`를 선택 주입(`instrument_service: InstrumentService | None = None`)하고, 발행 지점에서 `format_label`로 `{symbol} (종목명)`을 병기한다. 표기 SSOT는 `format_label` 한 곳이며, 각 발행자가 `get_name`을 개별 조합하지 않는다. 미주입(`None`)이면 종목코드만 표기하는 기존 경로를 유지한다(`NotificationService` 자체가 아니라 발행자 측 주입 — #2377).
+  - **직접 reply consumer (`TelegramCommandReceiver` `/stop`)**: 위 발행자들은 `NotificationEvent`를 `parse_mode="Markdown"`으로 전송하므로 `format_label`을 `markdown=True`로 호출하지만, `TelegramCommandReceiver`는 `/stop` 보유종목 응답을 `_reply()`로 **직접 전송**하며 `parse_mode`를 설정하지 않는 **plain transport**다. 따라서 `format_label(symbol, exchange, markdown=False)`(plain 모드)로 호출한다(#2385). exchange는 `bot.config.account_id` → `account_service.get(...).exchange`로 해석하되 실패/미주입 시 `KRX`로 폴백하고, `instrument_service` 미주입 시 종목코드만 표기하는 기존 경로를 유지한다. plain 모드도 종목명을 Markdown 특수문자 escape 처리하므로(발행자 측 plain 라벨이 `NotificationEvent` Markdown 전송에 삽입되는 경로의 발송 실패 방지 계약 공유), 특수문자를 포함한 종목명은 plain reply에서 백슬래시가 리터럴로 보일 수 있다(bounded known-limitation — KRX 주식/ETF 종목명은 실무상 `_ * [` 백틱을 쓰지 않으며 종목코드는 항상 정확).
 - **Data Pipeline**: 시세 데이터 수집 시 종목 메타데이터도 함께 갱신하는 설계 고려
 - **CLI**: 종목 검색/조회 명령은 InstrumentService를 통해 구현한다.
