@@ -37,6 +37,9 @@ class KISDomesticAdapter(KISBaseAdapter):
 | 주문 접수 | `/uapi/domestic-stock/v1/trading/order-cash` | POST |
 | 주문 취소/정정 | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
 | 미체결 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl` | GET |
+| 매수가능 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-order` | GET |
+
+> **매수가능 조회 행은 구현 #2384 merge 후 실행 가능**하다. 본 행은 계약(spec) 선반영이며, `inquire-balance`(잔고/평가/보유)와 `inquire-psbl-order`(주문가능)는 KIS가 공식적으로 분리한 두 엔드포인트다(아래 §inquire-psbl-order 계약 참조).
 
 ### order-cash TR ID 매핑
 
@@ -109,6 +112,46 @@ class KISDomesticAdapter(KISBaseAdapter):
 - **신 tr_id 효과 (모의 한정)**: 레거시 `VTTC8001R`은 모의 당일 체결을 반환하지 못하나(0행), 신 `VTTC0081R`은 **모의** 당일 체결을 반환함이 모의 라이브(#2317 A/B + #2353 측정)로 확인됐다 — **모의 한정 관측이며 KIS 공식 보증이 아니다**. 실전 `TTTC0081R`의 당일 반영은 **미검증**이며, KIS 공식 일별 원장 지연 경고는 tr_id 세대 무관 잔존한다(`docs/specs/broker-adapter/18-fill-recovery.md` §2.1/§11.6/§11.7).
 
 > 출처: [KIS open-trading-api `inquire_daily_ccld.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_daily_ccld/inquire_daily_ccld.py)(공식 예제가 inner/before별 4코드와 조건부 `EXCG_ID_DVSN_CD` append를 정의) + #2314 근본원인 조사 + #2317 라이브 측정.
+
+### inquire-psbl-order TR ID·바디·응답 계약 (#2384)
+
+매수가능 조회(`inquire-psbl-order`, `get_buyable`)는 `is_paper` 조합으로 아래 KIS 공식 현행 TR ID를 전송한다. **inquire-psbl-order 한정**이며, order-cash·취소·inquire-balance·현재가 등 다른 엔드포인트 TR ID는 이 표의 범위 밖이다. 본 계약은 **구현 #2384 merge 후 실행 가능**하다.
+
+| 환경 | TR ID |
+|------|-------|
+| 모의 | `VTTC8908R` |
+| 실전 | `TTTC8908R` |
+
+**요청 파라미터**(GET query):
+
+| 필드 | 값 | 설명 |
+|------|------|------|
+| `CANO` | `account_no[:8]` | 종합계좌번호 |
+| `ACNT_PRDT_CD` | `account_no[8:10]` | 계좌상품코드 |
+| `PDNO` | `normalize_symbol(symbol)` (6자리) | 종목코드 |
+| `ORD_UNPR` | 시장가 `잠정 '0'` (#2384 preflight A/B로 확정 후 본 섹션 출처에 기록) / 지정가 `str(int(price))` | 주문단가 |
+| `ORD_DVSN` | `order_type` 매핑(기존 `_map_order_type` 재사용 후보) | 주문구분 |
+| `CMA_EVLU_AMT_ICLD_YN` | `'N'` | CMA평가금액포함여부 |
+| `OVRS_ICLD_YN` | `'N'` | 해외포함여부 |
+
+**응답 필드 → `get_buyable()` 반환 dict 키 매핑**(전부 float):
+
+| 응답 필드 | dict 키 | 설명 |
+|-----------|---------|------|
+| `nrcvb_buy_amt` | `order_buyable_amount` | 미수 미사용 매수가능금액(계좌 현금 기반, **purchasable_amount SSOT — 보수값**) |
+| `max_buy_amt` | `max_buyable_amount` | 미수 포함 최대 매수가능금액 |
+| `ord_psbl_cash` | `order_cash` | 주문가능현금(종목 의존성 최소 — 종목무관 폴백 SSOT 후보) |
+| `nrcvb_buy_qty` | `order_buyable_qty` | 미수 미사용 매수가능수량(**종목/단가 의존** — 시장가 probe에서는 계좌수준 의미 없음) |
+| `max_buy_qty` | `max_buyable_qty` | 최대 매수가능수량(**종목/단가 의존** — 동일) |
+
+- **계좌 대표 매수가능액 입력 규약**: 계좌 대표 매수가능액은 종목 무관한 미수없는 매수가능금액(`nrcvb_buy_amt`)을 얻기 위한 probe다. 대표 종목은 항시 거래되는 유효 국내 종목 코드(기본 하드코딩 `005930`, config override는 구현 옵션)를 시장가(`ORD_UNPR='0'` — 잠정, #2384 preflight로 확정)로 전송한다. 시장가 probe 호출에서 반환되는 종목/단가 의존 수량 값(`order_buyable_qty`/`max_buyable_qty`)은 '대표종목을 현재가로 살 때의 수량'이라는 **종목 종속 값이라 계좌수준 의미가 없다**. Treasury 동기화 경로는 금액 필드(`order_buyable_amount`)만 소비하고 수량 필드는 계좌 대표 컨텍스트에서 소비·영속화하지 않는다.
+- **종목무관 전제 — bounded assumption + 검증 게이트**: `nrcvb_buy_amt`가 종목/단가 무관한 계좌수준 현금값이라는 전제는 본 계약의 load-bearing 가정이나, #2384 모의 단일 실측(`nrcvb_buy_amt=9998235.0`, `nrcvb_buy_qty=59.0`)만으로는 종목 불변성을 입증하지 못한다. 라이브 검증 전 **bounded assumption**으로 lock하며, **구현 전 모의 다종목 A/B 검증 게이트**(고가 `005930` vs 저가주, `ORD_UNPR='0'` vs 지정가)로 `nrcvb_buy_amt`/`ord_psbl_cash`의 종목 불변성을 확인한다. 검증 실패(종목별 상이) 시 `purchasable_amount` SSOT를 `ord_psbl_cash`(주문가능현금, 종목 의존성 최소)로 폴백한다(known-limitation 사전 선언).
+- **ORD_DVSN 허용값 고정**: inquire-psbl-order가 ORD_DVSN 시장가 코드를 매수가능 산정용으로 받아들이는지는 공식 샘플로 미확정이므로, order-cash `_map_order_type`('market'→'01')을 무검증 재사용하지 않고 **구현 전 모의 preflight로 ORD_DVSN/ORD_UNPR 조합을 실측 고정**하여 본 섹션 출처에 기록한다(어떤 조합으로 `nrcvb_buy_amt=9998235.0`을 얻었는지 포함).
+- **Rate-limit 분리(모의 5req/min)**: 매수가능 조회는 잔고조회(`get_account_balance`)·포지션조회(`get_positions`)와 **별도 메서드로 분리**해 호출 빈도를 호출처가 독립 제어한다. Treasury Live 동기화는 cycle당 1회만 호출한다(04-treasury-interface 참조). 단기 TTL 캐시는 허용하며 TTL 값은 구현 결정(bounded known-limitation).
+- **`psbl_sbst_amt`(대용가능금액)와의 구분**: 기존 `inquire-balance`의 `psbl_sbst_amt`(예수금 대용가능금액 = 대용증권 평가 기반)는 현금-only 모의계좌에서 정상적으로 0이며 주문가능액과 의미가 다르다. 이는 `get_account_balance()`의 별도 키 `substitute_amount`로 보존하고 `purchasable_amount`로 덮어쓰지 않는다(04-broker-adapter-interface 참조). 실전 대용증권 보유 계좌는 `psbl_sbst_amt>0`일 수 있어 별도 키 보존이 의미를 가진다.
+- **결제일(T+2) 비반영**: 본 계약은 `account/11-scope-out.md:11`의 결제일 반영 매수가능금액을 **포함하지 않는다**. 결제일 미반영 단순 주문가능액(`nrcvb_buy_amt`)만 노출한다.
+
+> 출처: [KIS open-trading-api `inquire_psbl_order.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/inquire_psbl_order/inquire_psbl_order.py) — 매수가능조회[v1_국내주식-007]. `nrcvb_buy_amt`(미수 미사용 매수가능금액)·`max_buy_amt`(최대)·요청 파라미터(CANO/ACNT_PRDT_CD/PDNO/ORD_UNPR/ORD_DVSN/CMA_EVLU_AMT_ICLD_YN/OVRS_ICLD_YN) 확인. + 이슈 #2384 KIS 모의 direct preflight 실측 1건(`nrcvb_buy_amt=9998235.0`, `nrcvb_buy_qty=59.0` — 단일종목 단일관측, 종목무관성 미입증). **종목 불변성·ORD_DVSN 허용값은 구현 전 모의 다종목 A/B로 확정**한다.
 
 ### KIS 주문 유형 매핑
 
