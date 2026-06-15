@@ -395,7 +395,7 @@ Bot.on_signal()
 
 | 이벤트 타입 | 발행자 | 구독자 | 핵심 필드 |
 |------------|--------|--------|----------|
-| `BalanceSyncedEvent` | Treasury | — | `account_id`, `account_balance`, `purchasable_amount`, `total_evaluation`, `external_purchase_amount`, `external_eval_amount` |
+| `BalanceSyncedEvent` | Treasury | — | `account_id`, `account_balance`, `purchasable_amount`(주문가능액 SSOT = KIS `inquire-psbl-order` `nrcvb_buy_amt`, #2384), `total_evaluation`, `external_purchase_amount`, `external_eval_amount` |
 
 #### 일일 리포트 (DailyReport)
 

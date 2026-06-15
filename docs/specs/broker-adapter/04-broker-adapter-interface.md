@@ -31,7 +31,8 @@ BrokerAdapter는 증권사 API 어댑터의 추상 기본 클래스다. 생성 �
 |----------|----------|--------|------|
 | `connect()` | — | `None` | API 연결 및 인증 |
 | `disconnect()` | — | `None` | 연결 해제 |
-| `get_account_balance()` | — | `Dict[str, float]` | 계좌 잔고 조회 (현금 + 주식 평가금액) |
+| `get_account_balance()` | — | `Dict[str, float]` | 계좌 잔고 조회 (현금 + 주식 평가금액). KIS 반환 키: `cash`, `total_assets`, `purchase_amount`, `eval_amount`, `total_profit_loss`, `substitute_amount`(예수금 대용가능금액=대용증권 평가 기반). **`purchasable_amount`(주문가능액)는 종목 컨텍스트가 필요해 이 메서드가 산출하지 않으며 반환 dict에 포함하지 않는다 — `get_buyable()` 참조** (#2384) |
+| `get_buyable()` | `symbol: str`, `price: Optional[float] = None`, `order_type: str = 'market'` | `Dict[str, float]` | 매수가능 조회 (KIS `inquire-psbl-order`, `@abstractmethod`). 반환 키: `order_buyable_amount`(미수없는 매수가능금액·**purchasable_amount SSOT**), `max_buyable_amount`, `order_cash`, `order_buyable_qty`, `max_buyable_qty`. **구현 #2384 merge 후 실행 가능** |
 | `get_positions()` | — | `List[Dict]` | 보유 포지션 조회 |
 | `get_current_price()` | `symbol: str` | `float` | 현재가 조회 |
 | `place_order()` | `symbol: str`, `side: str`, `quantity: float`, `order_type: str = 'market'`, `price: Optional[float] = None`, `stop_price: Optional[float] = None` | `str` | 주문 접수 (주문번호 반환) |
@@ -59,3 +60,10 @@ BrokerAdapter는 증권사 API 어댑터의 추상 기본 클래스다. 생성 �
 **`get_account_positions()` 참고사항**: `get_positions()`와 동일한 API를 호출하되, 대사 전용으로 명시적으로 분리하여 용도를 명확히 한다. 반환 형식: `[{"symbol": "005930", "quantity": 900, "avg_price": 1000.0}, ...]`
 
 **`get_order_history()` 반환 형식**: `[{"order_id": "...", "symbol": "005930", "side": "buy", "quantity": 100, "filled_quantity": 100, "price": 1000.0, "status": "filled", "timestamp": "..."}, ...]`
+
+**`get_account_balance()` vs `get_buyable()` 분리 (#2384)**: `purchasable_amount`(주문가능액)의 SSOT는 `get_buyable()`이 반환하는 `order_buyable_amount`(KIS `inquire-psbl-order`의 `nrcvb_buy_amt` — 미수 미사용 매수가능금액, 보수값)다. 무인자 `get_account_balance()`(`inquire-balance`)는 종목 컨텍스트가 없어 주문가능액을 산출할 수 없고, `inquire-balance`의 `psbl_sbst_amt`(예수금 대용가능금액=대용증권 평가 기반)는 현금-only 계좌에서 정상적으로 0이므로 주문가능액과 의미가 다르다(#2384 근본원인). 따라서 `psbl_sbst_amt`는 `get_account_balance()`의 `substitute_amount` 키로 보존하고 `purchasable_amount`로 덮어쓰지 않으며, `get_account_balance()` 반환 dict에서 `purchasable_amount` 키는 **제거**한다(무인자 메서드가 못 구하므로 '없는 게 진실'; CLI/Treasury는 `.get()`/별도 주입으로 처리). 주문가능액은 종목/단가/주문구분을 입력으로 받는 별도 `@abstractmethod` `get_buyable()`로 조회한다. 모의 rate-limit(5req/min)을 위해 두 호출은 분리되어 호출처가 빈도를 독립 제어한다. **결제일(T+2) 반영 매수가능금액은 본 계약 범위 밖이다**(`account/11-scope-out.md:11` 연기 유지 — 결제일 미반영 단순 주문가능액만). 본 계약은 **구현 #2384 merge 후 실행 가능**하다.
+
+**`get_buyable()` 어댑터별 반환 정책 (#2384)**: `get_buyable()`는 `BrokerAdapter` ABC의 `@abstractmethod`이므로 모든 어댑터가 구현해야 한다(미구현 시 인스턴스화 불가). 어댑터별 규약은 다음과 같다.
+- **KIS 어댑터**(`KISBaseAdapter` `@abstractmethod` → `KISDomesticAdapter` impl, `get_account_balance`과 동형 레이어): `inquire-psbl-order`를 호출해 위 키를 채운다(08-kis-domestic-adapter §inquire-psbl-order 참조).
+- **가상 어댑터**(`MockBrokerAdapter`/`TestBrokerAdapter`): 브로커 호출 없이 보유 현금(`cash`) 기반으로 산정한다 — `order_buyable_amount = order_cash = cash`, `max_buyable_amount = cash`, `order_buyable_qty = max_buyable_qty = floor(cash / 단가)`(시장가/`price=None`이면 내부 현재가로 단가 대체, 단가 0이면 수량 0.0). 이 가상 구현으로 ABC 인스턴스화·테스트 경로가 깨지지 않으며 Virtual 모드에서 합리적 값을 반환한다.
+- **KISOverseasAdapter**: 1.1 범위(구현체 미존재)로 본 계약의 대상이 아니다(`account/11-scope-out.md:7`).

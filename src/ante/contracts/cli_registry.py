@@ -800,6 +800,12 @@ TREASURY_CONTRACTS: tuple[CliCommandContract, ...] = (
         # purchasable_amount, total_evaluation, total_profit_loss,
         # total_allocated, total_reserved, unallocated, bot_count}``). text 는
         # click.echo 8 줄.
+        # purchasable_amount 의미(#2384): KIS inquire-psbl-order
+        # nrcvb_buy_amt(주문가능액 SSOT). 키 셋 자체는 불변(raw_legacy
+        # passthrough) — 본 변경은 산출출처 정렬. Treasury 측 구조 테스트
+        # tests/unit/test_treasury_sync.py:172 test_purchasable_amount_in_kis
+        # (get_account_balance 에 purchasable_amount 키 존재 가정)는 키
+        # 제거로 갱신 필요 — 구현 #2384 에서 처리.
         output=OutputContract(kind="raw", envelope="raw_legacy"),
         execution="offline",
     ),
@@ -1272,6 +1278,12 @@ BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
         # (broker.py:220). 키 셋은 broker adapter 가 반환하는 그대로 (IPC
         # 분기는 server BrokerAdapter response 의 평면 dict, fallback 분기는
         # KIS/Mock adapter 의 ``get_account_balance()`` 반환값).
+        # get_account_balance() 반환 키 셋(#2384): cash, total_assets,
+        # purchase_amount, eval_amount, total_profit_loss,
+        # substitute_amount(=psbl_sbst_amt 대용가능금액). purchasable_amount
+        # 키는 더 이상 포함하지 않음(주문가능액은 별도 get_buyable() 경로).
+        # raw_legacy passthrough 라 키 셋 자체는 enforce 안 함(drift fixture
+        # 미파괴) — 구현 #2384 merge 후 실행 가능.
         output=OutputContract(kind="raw", envelope="raw_legacy"),
         execution="runtime_ipc",
         ipc_command="broker.balance",

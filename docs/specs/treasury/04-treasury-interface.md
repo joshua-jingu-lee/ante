@@ -148,6 +148,14 @@ external_*      = 0
 
 상세 배경은 [09-virtual-asset-sync.md](09-virtual-asset-sync.md)를 참조한다.
 
+**매수가능액 동기화 규약 / write-path (#2384)**: Live 모드 잔고 동기화(`_do_sync`)는 `purchasable_amount`를 다음 단일 write-path로 갱신한다.
+
+1. `get_account_balance()`를 호출하고 그 결과를 `sync_balance()`로 반영한다. `get_account_balance()` 반환 dict에는 `purchasable_amount` 키가 더 이상 없으므로(#2384, broker-adapter 참조), `sync_balance()`는 `purchasable_amount`를 **읽지 않는다**(기존 stale-fallback `balance_data.get('purchasable_amount', self._purchasable_amount)` 라인 제거).
+2. 이어서 계좌 대표 매수가능액 산출을 위해 `BrokerAdapter.get_buyable(대표 종목, 시장가)`를 **cycle당 1회만** 호출하고, 그 `order_buyable_amount`를 `self._purchasable_amount`에 **단일 주입**한다(`BalanceSyncedEvent` 발행 전). 종목별 N회 조회·종목별 수량 소비는 하지 않는다(모의 5req/min rate-limit 안전; 시장가 probe의 수량 필드는 계좌수준 의미 없음).
+3. `get_positions()` 등 나머지 동기화 단계는 기존과 동일하다.
+
+Virtual 모드(`_do_sync_virtual`)는 브로커 호출이 없으므로 `purchasable_amount`는 직전 동기화 값/0을 유지한다(get_buyable 미호출). 본 규약은 **구현 #2384 merge 후 실행 가능**하다.
+
 ### 프로퍼티
 
 | 프로퍼티 | 타입 | 설명 |
@@ -163,7 +171,7 @@ external_*      = 0
 |----|------|
 | `currency` | 통화 단위 (예: "KRW", "USD") |
 | `account_balance` | 계좌 예수금 |
-| `purchasable_amount` | 매수 가능 금액 |
+| `purchasable_amount` | 매수 가능 금액 — KIS `inquire-psbl-order`의 `nrcvb_buy_amt`(미수 미사용 매수가능금액, 보수값) 기준. Live 동기화 시 `BrokerAdapter.get_buyable(대표 종목, 시장가)`로 산출하며, `inquire-balance`의 `psbl_sbst_amt`(대용가능금액)와는 다른 값이다(#2384). 결제일(T+2) 미반영. **구현 #2384 merge 후 정확값 반영** |
 | `total_evaluation` | 총 자산 평가액 |
 | `purchase_amount` | 총 매입 금액 |
 | `eval_amount` | 총 평가 금액 |

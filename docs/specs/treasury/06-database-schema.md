@@ -62,6 +62,8 @@ CREATE INDEX idx_treasury_transactions_account
     ON treasury_transactions(account_id);
 ```
 
+> **`purchasable_amount` 컬럼 의미 (#2384)**: 이 컬럼이 보관하는 매수가능액의 SSOT 출처는 KIS `inquire-psbl-order`의 `nrcvb_buy_amt`(미수 미사용 매수가능금액, 보수값)다. `inquire-balance`의 `psbl_sbst_amt`(대용가능금액)와는 다른 값이며, **컬럼 셋·DDL은 변경되지 않는다**(의미만 재지정). `substitute_amount`(대용가능금액)는 broker-balance dict 전용으로 Treasury가 영속화하지 않으므로 신규 컬럼을 추가하지 않는다. 따라서 `docs/architecture/generated/db-schema.md`는 재생성이 불필요하다(treasury_state 6컬럼 동일: `account_id`/`account_balance`/`purchasable_amount`/`total_evaluation`/`currency`/`last_synced_at`).
+
 > **마이그레이션**: 1.0 이전 fresh schema 기준으로 Treasury DB는 fallback
 > account 값을 생성하지 않는다. 기존 invalid dev DB 데이터의 자동 보존/변환은
 > 이 계약의 범위가 아니다.
