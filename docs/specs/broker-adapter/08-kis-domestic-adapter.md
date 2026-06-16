@@ -35,11 +35,13 @@ class KISDomesticAdapter(KISBaseAdapter):
 | 잔고 조회 | `/uapi/domestic-stock/v1/trading/inquire-balance` | GET |
 | 현재가 조회 | `/uapi/domestic-stock/v1/quotations/inquire-price` | GET |
 | 주문 접수 | `/uapi/domestic-stock/v1/trading/order-cash` | POST |
-| 주문 취소/정정 | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
+| 주문 취소 (정정 미구현) | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
 | 미체결 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl` | GET |
 | 매수가능 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-order` | GET |
 
 > **매수가능 조회 행은 구현 #2384 merge 후 실행 가능**하다. 본 행은 계약(spec) 선반영이며, `inquire-balance`(잔고/평가/보유)와 `inquire-psbl-order`(주문가능)는 KIS가 공식적으로 분리한 두 엔드포인트다(아래 §inquire-psbl-order 계약 참조).
+
+> **`order-rvsecncl`은 KIS API 레벨에서는 정정·취소를 모두 지원**하지만, Ante 어댑터는 현재 **취소(`cancel_order`)만 구현**하고 **정정(modify)은 미구현(deferred)**이다(아래 §order-rvsecncl 취소 바디 계약은 취소 한정). 따라서 상위 계층의 정정 요청은 broker까지 전달되지 않고 Gateway가 `modify_not_implemented`로 즉시 거부한다. 실 KIS 정정(`RVSE_CNCL_DVSN_CD='01'`) 분기 구현은 후속 작업(#2391)으로 분리되어 있다.
 
 ### order-cash TR ID 매핑
 
