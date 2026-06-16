@@ -129,8 +129,11 @@
 스탑 알림에서:
 
 - `order_id`에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를
-  맞춘다 (전략이 후속 `cancel/modify`에 그대로 사용 가능). `stop_order_id`
-  키도 명시 식별자로 함께 노출한다.
+  맞춘다 (전략이 후속 `cancel`에 그대로 사용 가능). `stop_order_id`
+  키도 명시 식별자로 함께 노출한다. 식별자 자체는 `modify`에도 그대로 쓸 수
+  있으나, **`modify`(정정) 실행은 현재 broker-level 미구현(deferred)**이라
+  Gateway가 즉시 `modify_rejected`(`reason="modify_not_implemented"`)로
+  거부하므로, 정정이 필요하면 `cancel` 후 재주문으로 대체한다 (실 정정 연동은 #2391).
 - 발동(`stop_triggered`) 알림은 변환된 일반 주문이 자체 라이프사이클 이벤트
   (`OrderSubmittedEvent` 등)를 별도로 발행하므로, 스탑 식별 단위로 받고 싶은
   경우 본 알림으로 분기한다.

@@ -115,8 +115,8 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 |------------|--------|--------|----------|
 | `OrderRequestEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `order_type`, `price?`, `stop_price?`, `reason`, `exchange` |
 | `OrderCancelEvent` | Bot | APIGateway | `account_id`, `bot_id`, `strategy_id`, `order_id`, `reason` |
-| `OrderModifyEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `order_id`, `symbol`, `side`, `quantity`, `price?`, `reason` |
-| `OrderModifyRejectedEvent` | RuleEngine | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `reason` |
+| `OrderModifyEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `order_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. **vocabulary 표면**: broker-level 정정은 현재 미구현(deferred)이라 성공 이벤트(`OrderModifyExecutedEvent` 등)는 존재하지 않으며, 룰 통과 시에도 Gateway가 `OrderModifyRejectedEvent`(`modify_not_implemented`)로만 종결한다 (실 정정 연동은 #2391) |
+| `OrderModifyRejectedEvent` | RuleEngine / APIGateway | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. 정정 경로의 유일한 terminal 이벤트 (룰 거부 사유 또는 `modify_not_implemented`) |
 | `OrderValidatedEvent` | RuleEngine | Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reason`, `exchange` |
 | `OrderRejectedEvent` | RuleEngine / Treasury | Bot, Notification | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `reason`, `exchange` |
 | `OrderApprovedEvent` | Treasury | APIGateway | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reserved_amount`, `exchange` |

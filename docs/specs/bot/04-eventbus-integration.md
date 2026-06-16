@@ -15,7 +15,7 @@
 | `BotRestartExhaustedEvent` | `bot_id, account_id, restart_attempts, last_error` | 재시작 한도 소진 시 |
 | `OrderRequestEvent` | `bot_id, account_id, strategy_id, symbol, side, quantity, order_type, price, stop_price, reason, exchange` | 전략 Signal → 신규 주문 요청. `exchange`는 Account에서 주입 |
 | `OrderCancelEvent` | `bot_id, account_id, order_id, reason` | 전략 `ctx.cancel_order()` → 주문 취소 요청 |
-| `OrderModifyEvent` | `bot_id, account_id, order_id, quantity, price, reason` | 전략 `ctx.modify_order()` → 주문 정정 요청 |
+| `OrderModifyEvent` | `bot_id, account_id, order_id, quantity, price, reason` | 전략 `ctx.modify_order()` → 주문 정정 요청. Bot은 이벤트를 발행하나 **broker-level 정정은 현재 미구현(deferred)**이라 Gateway가 즉시 `OrderModifyRejectedEvent`(`modify_not_implemented`)로 거부 (실 정정 연동은 #2391) |
 | `NotificationEvent` | `level, title, message, category="bot"` | 봇 시작/중지/에러/재시작 한도 소진 시 |
 
 ### BotStepCompletedEvent
