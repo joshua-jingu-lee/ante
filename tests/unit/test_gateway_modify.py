@@ -521,3 +521,50 @@ async def test_rule_pass_then_gateway_executes(
     assert rejected == []
     assert len(executed) == 1
     assert executed[0].price == 45000.0
+
+
+# ── Gateway 단독 — 리뷰 보강 회귀(terminal 보장 / 수량 finite) ──
+
+
+@pytest.mark.parametrize("bad_qty", [float("nan"), float("inf"), None, "10"])
+async def test_gateway_non_finite_quantity_rejected(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    broker: AsyncMock,
+    bad_qty: object,
+) -> None:
+    """비숫자/비유한(NaN/Inf)/None quantity → ``modify_invalid_args`` + broker 미호출.
+
+    NaN 은 ``<0``·``>0`` 모두 false 라 검증 없이는 price-only 로 브로커까지 통과하고,
+    str/None 은 비교에서 TypeError → terminal 이벤트 소실되므로 비교 전 fail-closed.
+    """
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    event = _make_modify_event(quantity=bad_qty, price=45000.0)
+    await gateway._on_order_modify(event)
+
+    assert len(rejected) == 1
+    assert rejected[0].reason == "modify_invalid_args"
+    broker.modify_order.assert_not_awaited()
+
+
+async def test_gateway_broker_lookup_failure_rejects(
+    account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
+) -> None:
+    """broker 미캐시·connect/auth 실패로 ``_get_broker`` 가 예외를 던져도 terminal
+    ``OrderModifyRejectedEvent`` 가 반드시 발행되어야 한다(EventBus 핸들러 에러로
+    소실 금지 — 정정은 성공/거부 중 하나의 terminal update 보장)."""
+    account_service.get_broker.side_effect = ConnectionError("broker down")
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    event = _make_modify_event(quantity=0.0, price=45000.0)
+    await gateway._on_order_modify(event)
+
+    assert len(rejected) == 1  # terminal 보장 — 소실 금지.
+    broker.modify_order.assert_not_awaited()

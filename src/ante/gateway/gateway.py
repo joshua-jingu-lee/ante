@@ -545,10 +545,19 @@ class APIGateway:
             await _reject("modify_invalid_args")
             return
 
-        # (b) 수량 sentinel 판정 — quantity<0 무효.
-        if event.quantity < 0:
+        # (b) 수량 finite 검증 + sentinel — 비숫자/bool/비유한(NaN/Inf)/음수 무효.
+        # (가격과 동형. NaN 은 <0·>0 모두 false 라 검증 없이는 price-only 로
+        # 브로커까지 통과하고, str/None 은 비교에서 TypeError → terminal 이벤트
+        # 소실되므로 비교 전에 fail-closed.)
+        new_qty = event.quantity
+        if (
+            not isinstance(new_qty, (int, float))
+            or isinstance(new_qty, bool)
+            or not math.isfinite(new_qty)
+            or new_qty < 0
+        ):
             logger.warning(
-                "주문 정정 거부(무효 수량): %s — %r", event.order_id, event.quantity
+                "주문 정정 거부(무효 수량): %s — %r", event.order_id, new_qty
             )
             await _reject("modify_invalid_args")
             return
@@ -610,10 +619,14 @@ class APIGateway:
                 return
 
         # broker 위임 — ordered_qty 불변(price-only), order_type="limit".
-        rate_limiter = self._get_rate_limiter(account_id)
-        await rate_limiter.acquire()
-        broker = await self._get_broker(account_id)
+        # broker 조회/레이트리밋 대기도 try 안에 둔다 — broker 미캐시·connect/auth
+        # 실패 예외가 핸들러 밖으로 새면 EventBus 가 에러만 로깅하고 전략에
+        # terminal(OrderModifyRejectedEvent)이 전달되지 않으므로(정정은 성공/거부
+        # 중 하나의 terminal update 보장 필요).
         try:
+            rate_limiter = self._get_rate_limiter(account_id)
+            await rate_limiter.acquire()
+            broker = await self._get_broker(account_id)
             ok = await broker.modify_order(
                 record.broker_order_id,
                 quantity=record.ordered_qty,
