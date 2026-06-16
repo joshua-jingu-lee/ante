@@ -506,6 +506,30 @@ class APIGateway:
             OrderModifyRejectedEvent,
         )
 
+        def _is_finite_number(x: object) -> bool:
+            """비-bool 유한 숫자 여부 — 예외 무전파(terminal 보장).
+
+            비숫자·bool·NaN/Inf 는 False. float 로 표현 불가한 큰 정수
+            (``math.isfinite`` 가 ``OverflowError`` raise — #1412 P2-2 동형)도
+            예외를 삼켜 False 로 본다(핸들러 예외로 terminal update 가 소실되지
+            않도록 fail-closed).
+            """
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                return False
+            try:
+                return math.isfinite(x)
+            except (OverflowError, TypeError, ValueError):
+                return False
+
+        def _safe_repr(x: object) -> str:
+            """로그용 안전 repr — 거대 정수 repr 시 ValueError(int→str 4300자
+            한도) 등을 삼키고 타입명으로 대체(로깅이 terminal 거부를 깨지 않도록)."""
+            try:
+                r = repr(x)
+            except (ValueError, OverflowError):
+                return f"<{type(x).__name__}>"
+            return r if len(r) <= 80 else r[:77] + "..."
+
         if not isinstance(event, OrderModifyEvent):
             return
 
@@ -531,33 +555,28 @@ class APIGateway:
             )
 
         # (a) 신규 가격 finite & 양수 — broker 호출 전 fail-closed.
+        # (_is_finite_number 가 비숫자·NaN/Inf·큰 정수 OverflowError 를 예외 없이
+        # False 로 처리 → terminal 보장.)
         new_price = event.price
-        if (
-            new_price is None
-            or not isinstance(new_price, (int, float))
-            or isinstance(new_price, bool)
-            or not math.isfinite(new_price)
-            or new_price <= 0
-        ):
+        if new_price is None or not _is_finite_number(new_price) or new_price <= 0:
             logger.warning(
-                "주문 정정 거부(무효 가격): %s — %r", event.order_id, new_price
+                "주문 정정 거부(무효 가격): %s — %s",
+                event.order_id,
+                _safe_repr(new_price),
             )
             await _reject("modify_invalid_args")
             return
 
         # (b) 수량 finite 검증 + sentinel — 비숫자/bool/비유한(NaN/Inf)/음수 무효.
-        # (가격과 동형. NaN 은 <0·>0 모두 false 라 검증 없이는 price-only 로
-        # 브로커까지 통과하고, str/None 은 비교에서 TypeError → terminal 이벤트
-        # 소실되므로 비교 전에 fail-closed.)
+        # NaN 은 <0·>0 모두 false 라 검증 없이는 price-only 로 브로커까지 통과하고,
+        # str/None 은 비교에서 TypeError, 큰 정수는 OverflowError → terminal 이벤트
+        # 소실되므로 비교 전에 _is_finite_number 로 fail-closed.
         new_qty = event.quantity
-        if (
-            not isinstance(new_qty, (int, float))
-            or isinstance(new_qty, bool)
-            or not math.isfinite(new_qty)
-            or new_qty < 0
-        ):
+        if not _is_finite_number(new_qty) or new_qty < 0:
             logger.warning(
-                "주문 정정 거부(무효 수량): %s — %r", event.order_id, new_qty
+                "주문 정정 거부(무효 수량): %s — %s",
+                event.order_id,
+                _safe_repr(new_qty),
             )
             await _reject("modify_invalid_args")
             return

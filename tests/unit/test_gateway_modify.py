@@ -247,7 +247,17 @@ async def test_gateway_quantity_unchanged_explicit_executes(
 # ── Gateway 단독 — v1 fail-closed (broker 미호출) ─────────
 
 
-@pytest.mark.parametrize("bad_price", [0.0, -100.0, None, float("nan"), float("inf")])
+@pytest.mark.parametrize(
+    "bad_price",
+    [
+        0.0,
+        -100.0,
+        None,
+        float("nan"),
+        float("inf"),
+        pytest.param(10**10000, id="huge_int"),
+    ],
+)
 async def test_gateway_invalid_price_rejected(
     account_service: AsyncMock,
     eventbus: EventBus,
@@ -526,7 +536,10 @@ async def test_rule_pass_then_gateway_executes(
 # ── Gateway 단독 — 리뷰 보강 회귀(terminal 보장 / 수량 finite) ──
 
 
-@pytest.mark.parametrize("bad_qty", [float("nan"), float("inf"), None, "10"])
+@pytest.mark.parametrize(
+    "bad_qty",
+    [float("nan"), float("inf"), None, "10", pytest.param(10**10000, id="huge_int")],
+)
 async def test_gateway_non_finite_quantity_rejected(
     account_service: AsyncMock,
     eventbus: EventBus,
