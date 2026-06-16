@@ -59,16 +59,18 @@ def _make_record(
     ordered_qty: float = 10.0,
     order_price: float | None = 50000.0,
     broker_order_id: str = "brk-1",
+    bot_id: str = "bot1",
+    order_type: str = "limit",
 ) -> OrderTrackerRecord:
     return OrderTrackerRecord(
         order_id=order_id,
         account_id=account_id,
-        bot_id="bot1",
+        bot_id=bot_id,
         strategy_id="strat-2391",
         broker_order_id=broker_order_id,
         symbol=symbol,
         side=side,
-        order_type="limit",
+        order_type=order_type,
         ordered_qty=ordered_qty,
         recorded_filled_qty=0.0,
         avg_fill_price=0.0,
@@ -580,4 +582,41 @@ async def test_gateway_broker_lookup_failure_rejects(
     await gateway._on_order_modify(event)
 
     assert len(rejected) == 1  # terminal 보장 — 소실 금지.
+    broker.modify_order.assert_not_awaited()
+
+
+async def test_gateway_other_bot_order_rejected(
+    account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
+) -> None:
+    """같은 계좌 내 타 봇 주문 정정 → ``modify_not_owner`` + broker 미호출(봇 격리)."""
+    record = _make_record(side="buy", order_price=50000.0, bot_id="other-bot")
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    event = _make_modify_event(bot_id="bot1", quantity=0.0, price=45000.0)
+    await gateway._on_order_modify(event)
+
+    assert len(rejected) == 1
+    assert rejected[0].reason == "modify_not_owner"
+    broker.modify_order.assert_not_awaited()
+
+
+async def test_gateway_non_limit_order_rejected(
+    account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
+) -> None:
+    """비지정가(market 등) 주문 정정 → ``modify_unsupported_order_type``
+
+    + broker 미호출.
+    """
+    record = _make_record(side="buy", order_price=50000.0, order_type="market")
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    event = _make_modify_event(quantity=0.0, price=45000.0)
+    await gateway._on_order_modify(event)
+
+    assert len(rejected) == 1
+    assert rejected[0].reason == "modify_unsupported_order_type"
     broker.modify_order.assert_not_awaited()

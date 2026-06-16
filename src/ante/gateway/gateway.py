@@ -603,6 +603,19 @@ class APIGateway:
 
         sym, sd = record.symbol, record.side
 
+        # (b0) 봇 소유권 — 같은 계좌 내 타 봇 주문 정정 차단(봇 격리). 성공 시
+        # 요청 봇/전략으로 기록·이벤트가 남으므로, record 의 bot_id 가 이벤트와
+        # 다르면 broker 호출 전에 fail-closed.
+        if record.bot_id != event.bot_id:
+            logger.warning(
+                "주문 정정 거부(봇 소유권 불일치): %s — record_bot=%s req_bot=%s",
+                event.order_id,
+                record.bot_id,
+                event.bot_id,
+            )
+            await _reject("modify_not_owner", symbol=sym, side=sd)
+            return
+
         # (b') 수량 변경(미지정 0.0 제외) → #2393 deferred.
         if event.quantity > 0 and event.quantity != record.ordered_qty:
             logger.warning(
@@ -622,6 +635,17 @@ class APIGateway:
                 record.status,
             )
             await _reject("modify_partial_or_terminal_unsupported", symbol=sym, side=sd)
+            return
+
+        # (c') v1 은 지정가(limit) price-only 정정만 — 비지정가(market 등) 주문은
+        # 정정 시 order_type="limit" 강제로 주문구분이 바뀌므로 fail-closed(#2393).
+        if record.order_type != "limit":
+            logger.warning(
+                "주문 정정 거부(비지정가 주문): %s — order_type=%s",
+                event.order_id,
+                record.order_type,
+            )
+            await _reject("modify_unsupported_order_type", symbol=sym, side=sd)
             return
 
         # (d) buy 예산 증가 차단 — 신규가격 ≤ 원주문가격. order_price 부재 시 buy
