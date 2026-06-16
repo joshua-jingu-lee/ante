@@ -301,7 +301,7 @@ def _validate_config(self, config: dict[str, Any]) -> BacktestConfig:
 | `get_balance() → dict[str, float]` | 가용 자금 현황 |
 | `get_open_orders() → list[dict]` | 미체결 주문 (백테스트에서는 항상 빈 리스트) |
 | `cancel_order(order_id, reason) → None` | 주문 취소 (백테스트에서는 무시) |
-| `modify_order(order_id, quantity, price, reason) → None` | 주문 정정 (백테스트에서는 noop. 라이브에서도 broker-level 정정은 현재 미구현(deferred)이라 즉시 `modify_rejected`(`modify_not_implemented`)로 거부 — 실 정정 연동은 #2391) |
+| `modify_order(order_id, quantity, price, reason) → None` | 주문 정정 (백테스트에서는 noop. 라이브에서도 broker-level 정정은 현재 미구현(deferred)이라 룰 통과 시 Gateway가 `modify_rejected`(`modify_not_implemented`)로 거부 — 실 정정 연동은 #2391) |
 | `load_file(path) → bytes` | 전략 전용 파일 읽기 (바이너리). 라이브와 동일하게 `strategies/` 하위만 허용하고 절대경로/탈출/symlink escape는 `StrategyFileAccessError`로 거부 (#2083) |
 | `load_text(path, encoding="utf-8") → str` | 전략 전용 파일 읽기 (텍스트). `load_file` 위임 후 디코딩 (#2083) |
 | `log(message, level) → None` | 전략 로그 출력 |

@@ -73,7 +73,7 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 3. **OrderAction → EventBus 이벤트 변환 (`_publish_actions`)**
    - `_run_loop()`에서 매 스텝 후 `StrategyContext._drain_actions()`로 주문 취소/정정 액션을 수집
    - `action == "cancel"` → `OrderCancelEvent`, `action == "modify"` → `OrderModifyEvent`로 변환하여 발행
-   - **caveat**: Bot은 `OrderModifyEvent`를 발행만 한다. **broker-level 주문 정정은 현재 미구현(deferred)**이라 Gateway가 즉시 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 거부하므로, 정정이 필요한 전략은 `cancel` 후 재주문으로 대체한다 (실 정정 연동은 #2391).
+   - **caveat**: Bot은 `OrderModifyEvent`를 발행만 한다. **broker-level 주문 정정은 현재 미구현(deferred)**이라 룰 통과 시 Gateway가 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 거부하므로, 정정이 필요한 전략은 `cancel` 후 재주문으로 대체한다 (실 정정 연동은 #2391).
 
 4. **체결 통보 전달 (`on_order_filled`)**
    - Bot이 EventBus에서 OrderFilledEvent를 구독

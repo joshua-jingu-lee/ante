@@ -18,4 +18,4 @@
 - Signal(신규 주문)과 OrderAction(기존 주문 관리)을 분리 — 역할이 다르므로 타입도 분리
 - 전략이 `ctx.cancel_order()` / `ctx.modify_order()` 호출 시 내부 큐에 쌓이고, Bot이 on_step() 종료 후 일괄 처리
 - 취소/정정도 EventBus를 통해 RuleEngine 검증을 거침
-- **`action="modify"` deferred caveat**: 정정 액션은 필드 스키마로 존재하나 **broker-level 정정이 현재 미구현(deferred)**이다. 룰 통과 여부와 무관하게 Gateway가 즉시 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 terminal reject 처리하므로, 정정이 필요하면 `cancel` 후 재주문으로 대체한다. 실 KIS 정정취소(`order-rvsecncl`) 연동은 후속 작업(#2391).
+- **`action="modify"` deferred caveat**: 정정 액션은 필드 스키마로 존재하나 **broker-level 정정이 현재 미구현(deferred)**이다. 룰 위반 시에는 RuleEngine(priority=100)이 룰 사유로 먼저 거부(`_consumed` 설정)하고, 룰 통과 시에만 Gateway(priority=50)가 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 terminal reject 처리하므로, 정정이 필요하면 `cancel` 후 재주문으로 대체한다. 실 KIS 정정취소(`order-rvsecncl`) 연동은 후속 작업(#2391).
