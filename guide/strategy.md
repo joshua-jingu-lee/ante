@@ -86,7 +86,7 @@ history = await self.ctx.get_trade_history(symbol="005930", limit=50)
 self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 ```
 
-> **주문 정정(`modify_order`)은 현재 broker-level 미구현(deferred)입니다.** `self.ctx.modify_order(...)`를 호출하면 룰 통과 여부와 무관하게 Gateway가 즉시 `modify_rejected`(`error_code="modify_not_implemented"`)로 거부하며, 정정 주문은 브로커까지 전달되지 않습니다. 미체결 주문의 가격·수량을 바꾸려면 **`cancel_order()`로 취소한 뒤 새 주문을 다시 제출**하세요. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있습니다.
+> **주문 정정(`modify_order`)은 현재 broker-level 미구현(deferred)입니다.** `self.ctx.modify_order(...)`를 호출하면 정정 주문은 브로커까지 전달되지 않고 `modify_rejected` 상태로 거부되며, `on_order_update` 알림의 **`reason` 필드**로 사유가 전달됩니다(룰 통과 시 `reason="modify_not_implemented"`, 룰 위반 시에는 룰 사유). 미체결 주문의 가격·수량을 바꾸려면 **`cancel_order()`로 취소한 뒤 새 주문을 다시 제출**하세요. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있습니다.
 
 **기술 지표:** `get_indicator()`로 기술 지표를 사용할 수 있습니다. 내부적으로 [pandas-ta](https://github.com/twopirllc/pandas-ta)를 사용하며, pandas-ta가 지원하는 130+ 지표를 모두 사용할 수 있습니다.
 

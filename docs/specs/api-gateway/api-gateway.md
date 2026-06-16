@@ -152,7 +152,7 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
     order_id = await broker.place_order(...)
 ```
 
-**취소/정정 설계 근거**: 취소·정정은 리스크를 줄이는 행위이므로 RuleEngine 경유 불필요. `OrderCancelEvent` 수신 시 `event.account_id`로 브로커를 선택하여 직접 전달한다. **단, `OrderModifyEvent`(주문 정정)는 현재 broker-level 미구현(deferred)이다.** Gateway는 룰 검증·브로커 전달 없이 즉시 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)를 발행해 terminal reject 처리한다. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있다.
+**취소/정정 설계 근거**: 취소는 리스크를 줄이는 행위이므로 RuleEngine 경유 불필요 — `OrderCancelEvent` 수신 시 `event.account_id`로 브로커를 선택하여 직접 전달한다. **단, `OrderModifyEvent`(주문 정정)는 현재 broker-level 미구현(deferred)이다.** `OrderModifyEvent`는 EventBus 우선순위상 RuleEngine(priority=100)이 먼저 처리하며, 룰 위반·룰 평가 예외 시 RuleEngine이 룰 사유의 `OrderModifyRejectedEvent`를 발행하고 `_consumed` 마커를 설정한다(이 경우 Gateway는 발행하지 않는다). 룰을 통과한 경우에만 Gateway(priority=50)가 브로커 전달 없이 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)를 발행해 terminal reject 처리한다. 즉 `modify_not_implemented`는 룰 통과 후 Gateway 경로에 한정된다. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있다.
 
 **Stop Order 라우팅**: `OrderApprovedEvent`의 `order_type`이 `stop` 또는 `stop_limit`이면 `StopOrderManager.register()`로 라우팅한다. `StopOrderManager`가 설정되지 않은 상태에서는 일반 주문으로 처리.
 
@@ -164,7 +164,7 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
 |--------|------|
 | `OrderApprovedEvent` | Treasury 자금 확보 후 주문 실행. `event.account_id`로 브로커 라우팅 |
 | `OrderCancelEvent` | 주문 취소 요청 → `event.account_id`로 브로커 선택 후 전달 (룰 검증 생략) |
-| `OrderModifyEvent` | 주문 정정 요청 → **broker-level 미구현(deferred)**. 브로커 전달 없이 즉시 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`) 발행 (실 정정은 #2391) |
+| `OrderModifyEvent` | 주문 정정 요청 → **broker-level 미구현(deferred)**. RuleEngine(priority=100) 선처리 — 룰 위반 시 룰 사유로 거부(`_consumed` 설정), 룰 통과 시에만 Gateway(priority=50)가 브로커 전달 없이 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`) 발행 (실 정정은 #2391) |
 | `OrderFilledEvent` | 체결 시 해당 `account_id` 범위 내 캐시 무효화 (`{account_id}:balance`, `{account_id}:positions`, `{account_id}:price:{symbol}`) |
 
 **발행하는 이벤트**:
