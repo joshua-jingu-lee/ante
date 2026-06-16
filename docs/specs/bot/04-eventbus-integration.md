@@ -15,7 +15,7 @@
 | `BotRestartExhaustedEvent` | `bot_id, account_id, restart_attempts, last_error` | 재시작 한도 소진 시 |
 | `OrderRequestEvent` | `bot_id, account_id, strategy_id, symbol, side, quantity, order_type, price, stop_price, reason, exchange` | 전략 Signal → 신규 주문 요청. `exchange`는 Account에서 주입 |
 | `OrderCancelEvent` | `bot_id, account_id, order_id, reason` | 전략 `ctx.cancel_order()` → 주문 취소 요청 |
-| `OrderModifyEvent` | `bot_id, account_id, order_id, quantity, price, reason` | 전략 `ctx.modify_order()` → 주문 정정 요청. Bot은 이벤트를 발행하나 **broker-level 정정은 현재 미구현(deferred)**이라 룰 통과 시 Gateway가 `OrderModifyRejectedEvent`(`modify_not_implemented`)로 거부 (실 정정 연동은 #2391) |
+| `OrderModifyEvent` | `bot_id, account_id, order_id, quantity, price, reason` | 전략 `ctx.modify_order()` → 주문 정정 요청. **v1=price-only 지원(#2391)**: 룰/Gateway fail-closed 통과 시 broker 위임 → `OrderModifyExecutedEvent`. 고급 케이스(수량변경 등)는 사유별 `OrderModifyRejectedEvent`로 거부(#2393) |
 | `NotificationEvent` | `level, title, message, category="bot"` | 봇 시작/중지/에러/재시작 한도 소진 시 |
 
 ### BotStepCompletedEvent
@@ -54,6 +54,7 @@ class BotStepCompletedEvent(Event):
 | `OrderCancelledEvent` | 주문 취소 통보 | `on_order_update()` (status="cancelled") |
 | `OrderFailedEvent` | 주문 실패 통보 | `on_order_update()` (status="failed") |
 | `OrderCancelFailedEvent` | 주문 취소 실패 통보 | `on_order_update()` (status="cancel_failed") |
+| `OrderModifyExecutedEvent` | 주문 정정 완료 통보 (v1=price-only, #2391) | `on_order_update()` (status="modified") |
 | `OrderModifyRejectedEvent` | 주문 정정 거부 통보 (#1331) | `on_order_update()` (status="modify_rejected") |
 | `StopOrderRegisteredEvent` | 스탑 주문 등록 통보 (#1336) | `on_order_update()` (status="stop_registered") |
 | `StopOrderTriggeredEvent` | 스탑 주문 발동 통보 (#1336) | `on_order_update()` (status="stop_triggered") |
@@ -66,7 +67,7 @@ class BotStepCompletedEvent(Event):
 
 ### 데몬-side SignalChannel 구독 (`signal.connect`, #2334)
 
-`ante signal connect`(데몬-위임 스트리밍, #2334)가 활성화되면, 위 `OrderFilledEvent` 및 9종 `order_update` 이벤트(`OrderSubmittedEvent`/`OrderRejectedEvent`/`OrderCancelledEvent`/`OrderFailedEvent`/`OrderCancelFailedEvent`/`OrderModifyRejectedEvent`/`StopOrderRegisteredEvent`/`StopOrderTriggeredEvent`/`StopOrderExpiredEvent`)는 **데몬-resident `SignalChannel`이 동일한 `svc.eventbus` 인스턴스에서 추가로 구독**하여 connect된 외부 AI Agent에게 outbound 프레임(`fill`/`order_update`)으로 중계한다. 봇 본체의 전략 콜백(`on_fill()`/`on_order_update()`) 구독과 **같은 단일 데몬 EventBus** 위에서 병렬로 동작하며, 구독 위치만 데몬-side로 명시될 뿐 **이벤트 vocab·`order_update` 9종 status·`ExternalSignalEvent` flow는 변경 없다**(SSOT 재확인).
+`ante signal connect`(데몬-위임 스트리밍, #2334)가 활성화되면, 위 `OrderFilledEvent` 및 10종 `order_update` 이벤트(`OrderSubmittedEvent`/`OrderRejectedEvent`/`OrderCancelledEvent`/`OrderFailedEvent`/`OrderCancelFailedEvent`/`OrderModifyExecutedEvent`/`OrderModifyRejectedEvent`/`StopOrderRegisteredEvent`/`StopOrderTriggeredEvent`/`StopOrderExpiredEvent`)는 **데몬-resident `SignalChannel`이 동일한 `svc.eventbus` 인스턴스에서 추가로 구독**하여 connect된 외부 AI Agent에게 outbound 프레임(`fill`/`order_update`)으로 중계한다. 봇 본체의 전략 콜백(`on_fill()`/`on_order_update()`) 구독과 **같은 단일 데몬 EventBus** 위에서 병렬로 동작하며, 구독 위치만 데몬-side로 명시될 뿐 **이벤트 vocab·`order_update` 10종 status(정정 완료 `modified` 추가, #2391)·`ExternalSignalEvent` flow는 동일 패턴 유지**(SSOT 재확인).
 
 - 구독 대상(불변): `OrderFilledEvent → fill`, 9종 `order_update`(status vocab `submitted｜rejected｜cancelled｜failed｜cancel_failed｜modify_rejected｜stop_registered｜stop_triggered｜stop_expired`). `event.bot_id`가 connect된 봇과 일치하는 프레임만 중계.
 - 인바운드 `ExternalSignalEvent`(위 표 참조)는 데몬 `svc.eventbus`에 publish되어 `bot.on_external_signal` → `strategy.on_data` 경로로 동일하게 처리된다.

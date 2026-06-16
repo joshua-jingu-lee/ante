@@ -37,6 +37,7 @@ BrokerAdapter는 증권사 API 어댑터의 추상 기본 클래스다. 생성 �
 | `get_current_price()` | `symbol: str` | `float` | 현재가 조회 |
 | `place_order()` | `symbol: str`, `side: str`, `quantity: float`, `order_type: str = 'market'`, `price: Optional[float] = None`, `stop_price: Optional[float] = None` | `str` | 주문 접수 (주문번호 반환) |
 | `cancel_order()` | `order_id: str` | `bool` | 주문 취소 |
+| `modify_order()` | `order_id: str`, `*`, `quantity: Optional[float] = None`, `price: Optional[float] = None`, `order_type: str = 'limit'` | `bool` | 주문 정정 (`@abstractmethod`, #2391). **v1 = price-only**: `open` 주문의 가격 정정만 지원하며 수량은 불변(`quantity`는 #2393 forward-compat). KIS는 `order-rvsecncl`(`RVSE_CNCL_DVSN_CD='01'`) 공유. 수량 변경·예산증가 buy·부분체결/터미널·동시성은 Gateway가 broker 호출 전 fail-closed로 거부(고급=#2393) |
 | `get_order_status()` | `order_id: str` | `Dict` | 주문 상태 조회 |
 | `get_pending_orders()` | — | `List[Dict]` | 미체결 주문 목록 조회 |
 | ~~`realtime_price_stream()`~~ | — | — | *스펙 아웃* — 오픈 시점 미포함 |

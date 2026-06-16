@@ -367,6 +367,9 @@ class APIGateway:
                     side=event.side,
                     quantity=event.quantity,
                     order_type=event.order_type,
+                    # #2391: 원주문 지정가 단가를 전파 → OrderTracker.order_price seed.
+                    # market/미지정 주문은 None(OrderApprovedEvent.price 그대로).
+                    price=event.price,
                     exchange=event.exchange,
                 )
             )
@@ -466,44 +469,241 @@ class APIGateway:
             )
 
     async def _on_order_modify(self, event: object) -> None:
-        """주문 정정 요청 → 미구현이므로 즉시 거부 이벤트 발행 (#1331).
+        """주문 정정 요청 → broker 위임 (#2391, v1=price-only).
 
         RuleEngine이 이미 정정 요청을 거부하면 ``_consumed=True`` transient
-        marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우
-        추가 terminal event를 발행하지 않고 바로 반환하여, 동일 정정 요청에
-        대해 ``OrderModifyRejectedEvent``가 중복 발행되지 않도록 한다.
+        marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우 추가
+        terminal event를 발행하지 않고 바로 반환하여, 동일 정정 요청에 대해
+        terminal event가 중복 발행되지 않도록 한다 (#1331).
 
-        그 외 흐름(rule pass / rule이 marker를 set하지 않음)에서는
-        정정이 아직 broker-level로 구현되지 않았음을 전략에 명시 전달하기
-        위해 ``OrderModifyRejectedEvent(reason="modify_not_implemented")``를
-        발행한다. 기존 ``logger.warning`` 트레이스는 유지하여 운영 가시성을
-        보존한다.
+        v1(price-only) 정정 흐름 (broker 호출 **전** fail-closed):
+
+        (a) finite ``price > 0`` 아니면 ``modify_invalid_args``.
+        (b) 수량 변경 판정 — Bot이 ``action.quantity or 0.0`` 로 접으므로
+            (``bot.py``) ``event.quantity == 0.0`` 은 미지정(price-only 허용),
+            ``> 0 && != record.ordered_qty`` 는 수량 변경 →
+            ``modify_qty_change_unsupported`` (#2393), ``< 0`` 은 무효
+            → ``modify_invalid_args``.
+        (c) OrderTracker record status가 ``open`` 이 아니면(부분체결/터미널/미발견)
+            ``modify_partial_or_terminal_unsupported``.
+        (d) buy면 ``new_price <= record.order_price`` 가 아니면(예산 증가)
+            ``modify_budget_increase_unsupported`` (``order_price`` 부재/None
+            시 buy fail-closed). sell은 통과.
+        (e) ``ModifyOrgnoUnavailableError`` → ``modify_orgno_unavailable``.
+
+        broker 성공 → ``OrderModifyExecutedEvent``(quantity=record.ordered_qty
+        유지, price=신규). broker False → ``modify_failed``. 기타 예외 → str(e).
+        OrderTracker ``ordered_qty`` 는 변경하지 않는다(price-only).
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
         """
-        from ante.eventbus.events import OrderModifyEvent, OrderModifyRejectedEvent
+        import math
+
+        from ante.broker.exceptions import ModifyOrgnoUnavailableError
+        from ante.eventbus.events import (
+            OrderModifyEvent,
+            OrderModifyExecutedEvent,
+            OrderModifyRejectedEvent,
+        )
+
+        def _is_finite_number(x: object) -> bool:
+            """비-bool 유한 숫자 여부 — 예외 무전파(terminal 보장).
+
+            비숫자·bool·NaN/Inf 는 False. float 로 표현 불가한 큰 정수
+            (``math.isfinite`` 가 ``OverflowError`` raise — #1412 P2-2 동형)도
+            예외를 삼켜 False 로 본다(핸들러 예외로 terminal update 가 소실되지
+            않도록 fail-closed).
+            """
+            if isinstance(x, bool) or not isinstance(x, (int, float)):
+                return False
+            try:
+                return math.isfinite(x)
+            except (OverflowError, TypeError, ValueError):
+                return False
+
+        def _safe_repr(x: object) -> str:
+            """로그용 안전 repr — 거대 정수 repr 시 ValueError(int→str 4300자
+            한도) 등을 삼키고 타입명으로 대체(로깅이 terminal 거부를 깨지 않도록)."""
+            try:
+                r = repr(x)
+            except (ValueError, OverflowError):
+                return f"<{type(x).__name__}>"
+            return r if len(r) <= 80 else r[:77] + "..."
 
         if not isinstance(event, OrderModifyEvent):
             return
 
-        # rule engine 거부 흐름이 이미 terminal event를 발행했으면 skip.
-        # ``_consumed`` 는 dataclass field가 아닌 transient marker이므로
-        # ``getattr`` default False로 안전하게 확인한다 (#1331).
+        # rule engine 거부 흐름이 이미 terminal event를 발행했으면 skip (#1331).
         if getattr(event, "_consumed", False):
             return
 
-        logger.warning("주문 정정은 추후 구현: %s", event.order_id)
+        account_id = event.account_id
+
+        async def _reject(reason: str, *, symbol: str = "", side: str = "") -> None:
+            await self._eventbus.publish(
+                OrderModifyRejectedEvent(
+                    account_id=account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=symbol or event.symbol,
+                    side=side or event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    reason=reason,
+                )
+            )
+
+        # (a) 신규 가격 finite & 양수 — broker 호출 전 fail-closed.
+        # (_is_finite_number 가 비숫자·NaN/Inf·큰 정수 OverflowError 를 예외 없이
+        # False 로 처리 → terminal 보장.)
+        new_price = event.price
+        if new_price is None or not _is_finite_number(new_price) or new_price <= 0:
+            logger.warning(
+                "주문 정정 거부(무효 가격): %s — %s",
+                event.order_id,
+                _safe_repr(new_price),
+            )
+            await _reject("modify_invalid_args")
+            return
+
+        # (b) 수량 finite 검증 + sentinel — 비숫자/bool/비유한(NaN/Inf)/음수 무효.
+        # NaN 은 <0·>0 모두 false 라 검증 없이는 price-only 로 브로커까지 통과하고,
+        # str/None 은 비교에서 TypeError, 큰 정수는 OverflowError → terminal 이벤트
+        # 소실되므로 비교 전에 _is_finite_number 로 fail-closed.
+        new_qty = event.quantity
+        if not _is_finite_number(new_qty) or new_qty < 0:
+            logger.warning(
+                "주문 정정 거부(무효 수량): %s — %s",
+                event.order_id,
+                _safe_repr(new_qty),
+            )
+            await _reject("modify_invalid_args")
+            return
+
+        # OrderTracker record 조회 — broker_order_id 변환 + status/order_price 판정.
+        if self._order_tracker is None:
+            logger.error(
+                "order_tracker 미주입 — 주문 정정 차단 (order_id=%s, account=%s)",
+                event.order_id,
+                account_id,
+            )
+            await _reject("modify_partial_or_terminal_unsupported")
+            return
+
+        record = await self._order_tracker.get(event.order_id)
+        if record is None or record.account_id != account_id:
+            logger.warning(
+                "주문 정정 거부(record 미발견/cross-account): %s (account=%s)",
+                event.order_id,
+                account_id,
+            )
+            await _reject("modify_partial_or_terminal_unsupported")
+            return
+
+        sym, sd = record.symbol, record.side
+
+        # (b0) 봇 소유권 — 같은 계좌 내 타 봇 주문 정정 차단(봇 격리). 성공 시
+        # 요청 봇/전략으로 기록·이벤트가 남으므로, record 의 bot_id 가 이벤트와
+        # 다르면 broker 호출 전에 fail-closed.
+        if record.bot_id != event.bot_id:
+            logger.warning(
+                "주문 정정 거부(봇 소유권 불일치): %s — record_bot=%s req_bot=%s",
+                event.order_id,
+                record.bot_id,
+                event.bot_id,
+            )
+            await _reject("modify_not_owner", symbol=sym, side=sd)
+            return
+
+        # (b') 수량 변경(미지정 0.0 제외) → #2393 deferred.
+        if event.quantity > 0 and event.quantity != record.ordered_qty:
+            logger.warning(
+                "주문 정정 거부(수량 변경 미지원): %s — req=%s ordered=%s",
+                event.order_id,
+                event.quantity,
+                record.ordered_qty,
+            )
+            await _reject("modify_qty_change_unsupported", symbol=sym, side=sd)
+            return
+
+        # (c) open 상태만 정정 허용 (부분체결/터미널 미지원).
+        if record.status != "open":
+            logger.warning(
+                "주문 정정 거부(부분체결/터미널): %s — status=%s",
+                event.order_id,
+                record.status,
+            )
+            await _reject("modify_partial_or_terminal_unsupported", symbol=sym, side=sd)
+            return
+
+        # (c') v1 은 지정가(limit) price-only 정정만 — 비지정가(market 등) 주문은
+        # 정정 시 order_type="limit" 강제로 주문구분이 바뀌므로 fail-closed(#2393).
+        if record.order_type != "limit":
+            logger.warning(
+                "주문 정정 거부(비지정가 주문): %s — order_type=%s",
+                event.order_id,
+                record.order_type,
+            )
+            await _reject("modify_unsupported_order_type", symbol=sym, side=sd)
+            return
+
+        # (d) buy 예산 증가 차단 — 신규가격 ≤ 원주문가격. order_price 부재 시 buy
+        # fail-closed. sell 은 reserve 없음 → 통과.
+        if record.side == "buy":
+            if record.order_price is None or new_price > record.order_price:
+                logger.warning(
+                    "주문 정정 거부(예산 증가 buy): %s — new=%s order=%s",
+                    event.order_id,
+                    new_price,
+                    record.order_price,
+                )
+                await _reject("modify_budget_increase_unsupported", symbol=sym, side=sd)
+                return
+
+        # broker 위임 — ordered_qty 불변(price-only), order_type="limit".
+        # broker 조회/레이트리밋 대기도 try 안에 둔다 — broker 미캐시·connect/auth
+        # 실패 예외가 핸들러 밖으로 새면 EventBus 가 에러만 로깅하고 전략에
+        # terminal(OrderModifyRejectedEvent)이 전달되지 않으므로(정정은 성공/거부
+        # 중 하나의 terminal update 보장 필요).
+        try:
+            rate_limiter = self._get_rate_limiter(account_id)
+            await rate_limiter.acquire()
+            broker = await self._get_broker(account_id)
+            ok = await broker.modify_order(
+                record.broker_order_id,
+                quantity=record.ordered_qty,
+                price=new_price,
+                order_type="limit",
+            )
+        except ModifyOrgnoUnavailableError as e:
+            logger.warning("주문 정정 거부(orgno 미상): %s — %s", event.order_id, e)
+            await _reject("modify_orgno_unavailable", symbol=sym, side=sd)
+            return
+        except Exception as e:
+            logger.error("주문 정정 실패: %s — %s", event.order_id, e)
+            await _reject(str(e), symbol=sym, side=sd)
+            return
+
+        if not ok:
+            logger.warning("주문 정정 실패(broker False 반환): %s", event.order_id)
+            await _reject("modify_failed", symbol=sym, side=sd)
+            return
+
+        # broker 성공 → 정정 완료 이벤트. quantity=record.ordered_qty(불변),
+        # price=신규. OrderTracker ordered_qty 는 변경하지 않는다(price-only).
+        logger.info("주문 정정 완료: %s → 신규가격 %s", event.order_id, new_price)
         await self._eventbus.publish(
-            OrderModifyRejectedEvent(
-                account_id=event.account_id,
+            OrderModifyExecutedEvent(
+                account_id=account_id,
                 order_id=event.order_id,
                 bot_id=event.bot_id,
                 strategy_id=event.strategy_id,
-                symbol=event.symbol,
-                side=event.side,
-                quantity=event.quantity,
-                price=event.price,
-                reason="modify_not_implemented",
+                symbol=sym,
+                side=sd,
+                quantity=record.ordered_qty,
+                price=new_price,
+                reason=event.reason,
             )
         )
 

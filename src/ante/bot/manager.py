@@ -1460,6 +1460,7 @@ class BotManager:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -1470,8 +1471,9 @@ class BotManager:
 
         self._eventbus.subscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.subscribe(ExternalSignalEvent, bot.on_external_signal)
+        # ``OrderModifyExecutedEvent`` — 정정 완료(#2391) 통보,
         # ``OrderModifyRejectedEvent`` — rule reject / rule exception /
-        # gateway not-implemented 통보가 ``Bot.on_order_update`` 를 거쳐
+        # gateway fail-closed 통보가 ``Bot.on_order_update`` 를 거쳐
         # ``strategy.on_order_update`` 까지 전달되도록 한다.
         # ``StopOrderRegistered/Triggered/ExpiredEvent`` — stop / stop_limit
         # 주문 등록·발동·만료 통보를 일반 주문 통보 채널과 동일한
@@ -1482,6 +1484,7 @@ class BotManager:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             StopOrderRegisteredEvent,
             StopOrderTriggeredEvent,
@@ -1497,6 +1500,7 @@ class BotManager:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -1507,14 +1511,15 @@ class BotManager:
 
         self._eventbus.unsubscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.unsubscribe(ExternalSignalEvent, bot.on_external_signal)
-        # 등록과 동일하게 ``OrderModifyRejectedEvent`` 와 stop 이벤트 3종
-        # 해지.
+        # 등록과 동일하게 ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent``
+        # 와 stop 이벤트 3종 해지.
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             StopOrderRegisteredEvent,
             StopOrderTriggeredEvent,

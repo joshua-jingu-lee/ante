@@ -152,7 +152,7 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
     order_id = await broker.place_order(...)
 ```
 
-**취소/정정 설계 근거**: 취소는 리스크를 줄이는 행위이므로 RuleEngine 경유 불필요 — `OrderCancelEvent` 수신 시 `event.account_id`로 브로커를 선택하여 직접 전달한다. **단, `OrderModifyEvent`(주문 정정)는 현재 broker-level 미구현(deferred)이다.** `OrderModifyEvent`는 EventBus 우선순위상 RuleEngine(priority=100)이 먼저 처리하며, 룰 위반·룰 평가 예외 시 RuleEngine이 룰 사유의 `OrderModifyRejectedEvent`를 발행하고 `_consumed` 마커를 설정한다(이 경우 Gateway는 발행하지 않는다). 룰을 통과한 경우에만 Gateway(priority=50)가 브로커 전달 없이 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)를 발행해 terminal reject 처리한다. 즉 `modify_not_implemented`는 룰 통과 후 Gateway 경로에 한정된다. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있다.
+**취소/정정 설계 근거**: 취소는 리스크를 줄이는 행위이므로 RuleEngine 경유 불필요 — `OrderCancelEvent` 수신 시 `event.account_id`로 브로커를 선택하여 직접 전달한다. **`OrderModifyEvent`(주문 정정)는 v1=price-only로 지원한다(#2391).** `OrderModifyEvent`는 EventBus 우선순위상 RuleEngine(priority=100)이 먼저 처리하며, 룰 위반·룰 평가 예외·v1 가격 preflight 실패(`modify_invalid_args`) 시 RuleEngine이 사유 `OrderModifyRejectedEvent`를 발행하고 `_consumed` 마커를 설정한다(이 경우 Gateway는 발행하지 않는다). 룰을 통과하면 Gateway(priority=50)가 OrderTracker로 `order_id → broker_order_id`를 변환하고 **broker 호출 전 fail-closed 게이트**를 적용한다: (a) finite `price>0` 아니면 `modify_invalid_args`; (b0) `record.bot_id != event.bot_id`(같은 계좌 내 타 봇 주문)=`modify_not_owner`(봇 격리); (b) `event.quantity==0.0`=price-only(허용), `>0 && != ordered_qty`=`modify_qty_change_unsupported`(#2393), `<0`=`modify_invalid_args`; (c) record status≠`open`(부분체결/터미널/미발견)=`modify_partial_or_terminal_unsupported`; (c') `record.order_type != "limit"`(비지정가/시장가 주문)=`modify_unsupported_order_type`(#2393); (d) buy면 신규가 `≤ order_price` 아니면(예산 증가) `modify_budget_increase_unsupported`(`order_price` 부재 시 buy fail-closed), sell 통과; (e) broker `ModifyOrgnoUnavailableError`=`modify_orgno_unavailable`. 게이트 통과 시 `broker.modify_order(order_id, quantity=ordered_qty, price=new_price, order_type="limit")`(수량 불변) 위임 → 성공 시 `OrderModifyExecutedEvent`(quantity=원주문 수량, price=신규), broker `False`=`modify_failed`, 기타 예외=`str(e)`. OrderTracker `ordered_qty`는 변경하지 않는다(price-only). 수량 변경·예산증가 buy·부분체결·동시성 등 고급 케이스는 후속(#2393). 실 KIS 정정(`order-rvsecncl` `RVSE_CNCL_DVSN_CD='01'`) live A/B 검증은 사용자 oracle 후속(pending).
 
 **Stop Order 라우팅**: `OrderApprovedEvent`의 `order_type`이 `stop` 또는 `stop_limit`이면 `StopOrderManager.register()`로 라우팅한다. `StopOrderManager`가 설정되지 않은 상태에서는 일반 주문으로 처리.
 
@@ -164,17 +164,19 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
 |--------|------|
 | `OrderApprovedEvent` | Treasury 자금 확보 후 주문 실행. `event.account_id`로 브로커 라우팅 |
 | `OrderCancelEvent` | 주문 취소 요청 → `event.account_id`로 브로커 선택 후 전달 (룰 검증 생략) |
-| `OrderModifyEvent` | 주문 정정 요청 → **broker-level 미구현(deferred)**. RuleEngine(priority=100) 선처리 — 룰 위반 시 룰 사유로 거부(`_consumed` 설정), 룰 통과 시에만 Gateway(priority=50)가 브로커 전달 없이 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`) 발행 (실 정정은 #2391) |
+| `OrderModifyEvent` | 주문 정정 요청 → **v1=price-only 지원(#2391)**. RuleEngine(priority=100) 선처리(룰 위반/예외/`modify_invalid_args` 시 `_consumed` 설정), 룰 통과 시 Gateway(priority=50)가 fail-closed 게이트 후 broker 위임 → `OrderModifyExecutedEvent`(price-only 성공) 또는 거부 사유별 `OrderModifyRejectedEvent`. 고급(수량변경 등)=#2393 |
 | `OrderFilledEvent` | 체결 시 해당 `account_id` 범위 내 캐시 무효화 (`{account_id}:balance`, `{account_id}:positions`, `{account_id}:price:{symbol}`) |
 
 **발행하는 이벤트**:
 
 | 이벤트 | 설명 |
 |--------|------|
-| `OrderSubmittedEvent` | 증권사에 주문 전송 완료 |
+| `OrderSubmittedEvent` | 증권사에 주문 전송 완료 (원주문 지정가 단가 `price?` 포함 — OrderTracker `order_price` seed, #2391) |
 | `OrderFailedEvent` | 주문 제출 실패 또는 스탑 주문 등록 실패 |
 | `OrderCancelledEvent` | 주문 취소 완료 |
 | `OrderCancelFailedEvent` | 주문 취소 실패 |
+| `OrderModifyExecutedEvent` | 주문 정정 완료 (v1=price-only, broker 위임 성공, #2391) |
+| `OrderModifyRejectedEvent` | 주문 정정 거부 (v1 fail-closed 사유별, #2391) |
 
 ## DataProvider — 전략에 노출되는 데이터 접근 계층
 
@@ -245,13 +247,13 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 | 시점 | 발행 이벤트 | `Bot.on_order_update` 변환 status | 비고 |
 |------|-------------|-----------------------------------|------|
-| 등록 (`StopOrderManager.register`) | `StopOrderRegisteredEvent` | `"stop_registered"` | dict에 `stop_order_id`, `stop_price`, `limit_price` 포함. 전략은 이 시점에 후속 취소에 쓸 식별자를 획득(식별자 획득 자체는 유효). 단, 정정(`modify`) 실행은 현재 broker-level 미구현(deferred, #2391)이라 취소만 가능. |
+| 등록 (`StopOrderManager.register`) | `StopOrderRegisteredEvent` | `"stop_registered"` | dict에 `stop_order_id`, `stop_price`, `limit_price` 포함. 전략은 이 시점에 후속 취소에 쓸 식별자를 획득(식별자 획득 자체는 유효). 단, **stop 주문 자체의 정정(`modify`)은 미지원**(아직 broker에 접수되지 않아 `broker_order_id`/OrderTracker record가 없음)이라 취소만 가능. broker-level 정정 v1(price-only, #2391)은 이미 접수된 `open` 일반 주문에만 적용된다(고급=#2393). |
 | 발동 (`_trigger_order`) | `StopOrderTriggeredEvent` (+ 별도 `OrderRequestEvent`) | `"stop_triggered"` | 변환된 일반 주문은 자체 라이프사이클(`OrderSubmittedEvent` 등)을 별도로 통보한다. `StopOrderTriggeredEvent`는 stop 식별 단위(`stop_order_id`, `trigger_price`, `converted_order_type`)를 보존한다. |
 | 만료 (`_expire_order`) | `StopOrderExpiredEvent` | `"stop_expired"` | `reason` 허용 값: `"session_ended"` (세션 종료) / `"manager_stopped"` (매니저 stop). |
 
 **dict shape 호환**:
 
-- 스탑 알림에서 `order_id` 키에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를 맞춘다 (외부 채널 / 전략의 후속 cancel 호환). `stop_order_id` 키도 명시 식별자로 함께 노출한다. 식별자 획득·dict shape 호환 자체는 `cancel`/`modify` 모두에 유효하나, **`modify` 실행은 현재 broker-level 미구현(deferred, #2391)**이므로 후속 정정은 취소(`cancel`) 후 재주문으로 대체한다.
+- 스탑 알림에서 `order_id` 키에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를 맞춘다 (외부 채널 / 전략의 후속 cancel 호환). `stop_order_id` 키도 명시 식별자로 함께 노출한다. 식별자 획득·dict shape 호환 자체는 `cancel`/`modify` 모두에 유효하나, **stop 주문 자체의 `modify` 실행은 미지원**(broker 미접수 — record 없음)이므로 후속 정정은 취소(`cancel`) 후 재주문으로 대체한다. (이미 접수된 `open` 일반 주문의 가격 정정은 broker-level v1=price-only로 지원, #2391.)
 - `SignalChannel`도 외부 채널에 동일한 `{type:"order_update", order_id, status, reason}` 메시지로 전달한다 — `type` 값을 새로 만들지 않아 외부 소비자(stdin/stdout 기반 에이전트)의 파싱 분기를 추가 강제하지 않는다.
 
 **비포함 정보** (#1337 정책 직교):

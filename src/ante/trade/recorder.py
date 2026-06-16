@@ -82,6 +82,7 @@ class TradeRecorder:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyExecutedEvent,
             OrderRejectedEvent,
         )
 
@@ -91,6 +92,7 @@ class TradeRecorder:
         eventbus.subscribe(OrderFailedEvent, self._on_failed, priority=10)
         eventbus.subscribe(OrderCancelledEvent, self._on_cancelled, priority=10)
         eventbus.subscribe(OrderCancelFailedEvent, self._on_cancel_failed, priority=10)
+        eventbus.subscribe(OrderModifyExecutedEvent, self._on_modified, priority=10)
 
     async def _on_filled(self, event: object) -> None:
         """체결 이벤트 → 체결 알림 발행.
@@ -233,6 +235,35 @@ class TradeRecorder:
             quantity=event.quantity,
             price=0.0,
             status=TradeStatus.CANCELLED,
+            order_type="",
+            reason=event.reason,
+            timestamp=event.timestamp,
+            order_id=event.order_id,
+            account_id=event.account_id,
+        )
+        await self._save(record)
+
+    async def _on_modified(self, event: object) -> None:
+        """정정 완료 이벤트 → 정정 기록 저장 (#2391, v1=price-only).
+
+        ``OrderModifyExecutedEvent.price`` 는 신규 정정 가격이며, ``quantity`` 는
+        원주문 수량(불변)이다. ``event_id`` 를 trade_id PK 로 써 멱등(INSERT OR
+        IGNORE)하게 별도 row 를 남긴다(취소 기록 _on_cancelled 와 동형).
+        """
+        from ante.eventbus.events import OrderModifyExecutedEvent
+
+        if not isinstance(event, OrderModifyExecutedEvent):
+            return
+
+        record = TradeRecord(
+            trade_id=event.event_id,
+            bot_id=event.bot_id,
+            strategy_id=event.strategy_id,
+            symbol=event.symbol,
+            side=event.side,
+            quantity=event.quantity,
+            price=event.price or 0.0,
+            status=TradeStatus.MODIFIED,
             order_type="",
             reason=event.reason,
             timestamp=event.timestamp,

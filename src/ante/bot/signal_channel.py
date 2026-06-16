@@ -278,6 +278,7 @@ class SignalChannel:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -287,9 +288,9 @@ class SignalChannel:
         )
 
         self._eventbus.subscribe(OrderFilledEvent, self._on_fill)
-        # ``OrderModifyRejectedEvent`` — 외부 채널 구독자에게도 정정 거부/
-        # 미구현 통보를 ``order_update`` 메시지로 전달한다.
-        # stop 주문 등록·발동·만료도 외부 채널에 동일한 ``{type:
+        # ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent`` — 외부 채널
+        # 구독자에게도 정정 완료(#2391)/거부 통보를 ``order_update`` 메시지로
+        # 전달한다. stop 주문 등록·발동·만료도 외부 채널에 동일한 ``{type:
         # "order_update", ...}`` shape 로 전달한다 (외부 소비자 파싱 분기
         # 추가 부담 회피).
         for evt in (
@@ -298,6 +299,7 @@ class SignalChannel:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             StopOrderRegisteredEvent,
             StopOrderTriggeredEvent,
@@ -312,6 +314,7 @@ class SignalChannel:
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderFilledEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -321,14 +324,15 @@ class SignalChannel:
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, self._on_fill)
-        # 등록과 동일하게 ``OrderModifyRejectedEvent`` 와 stop 이벤트 3종
-        # 해지.
+        # 등록과 동일하게 ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent``
+        # 와 stop 이벤트 3종 해지.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
             OrderCancelFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             StopOrderRegisteredEvent,
             StopOrderTriggeredEvent,
@@ -404,6 +408,7 @@ class SignalChannel:
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -431,12 +436,17 @@ class SignalChannel:
         elif isinstance(event, OrderCancelFailedEvent):
             status = "cancel_failed"
             reason = event.error_message
+        elif isinstance(event, OrderModifyExecutedEvent):
+            # 정정 완료(#2391, v1=price-only) 통보. 외부 dict shape 는 기존
+            # ``{type:"order_update", ...}`` 패턴을 그대로 유지한다.
+            status = "modified"
+            reason = event.reason
         elif isinstance(event, OrderModifyRejectedEvent):
-            # 정정 거부/미구현 통보를 status 로 잠그고, 외부 dict shape 는
-            # 기존 ``{type:"order_update", ...}`` 패턴을 그대로 유지한다.
-            # ``type`` 을 ``"modify_rejected"`` 같은 새 형태로 바꾸면 외부
-            # 소비자(stdin/stdout 기반 에이전트) 가 파싱 분기를 추가해야
-            # 하므로 의도적으로 잠갔다.
+            # 정정 거부 통보를 status 로 잠그고, 외부 dict shape 는 기존
+            # ``{type:"order_update", ...}`` 패턴을 그대로 유지한다. ``type`` 을
+            # ``"modify_rejected"`` 같은 새 형태로 바꾸면 외부 소비자
+            # (stdin/stdout 기반 에이전트) 가 파싱 분기를 추가해야 하므로
+            # 의도적으로 잠갔다.
             status = "modify_rejected"
             reason = event.reason
         elif isinstance(event, StopOrderRegisteredEvent):

@@ -25,6 +25,7 @@ class TradeStatus(StrEnum):
     REJECTED = "rejected"
     FAILED = "failed"
     ADJUSTED = "adjusted"
+    MODIFIED = "modified"  # #2391: 주문 정정 완료(v1=price-only) 별도 row.
 
 
 @dataclass

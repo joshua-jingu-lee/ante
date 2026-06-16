@@ -86,7 +86,7 @@ history = await self.ctx.get_trade_history(symbol="005930", limit=50)
 self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 ```
 
-> **주문 정정(`modify_order`)은 현재 broker-level 미구현(deferred)입니다.** `self.ctx.modify_order(...)`를 호출하면 정정 주문은 브로커까지 전달되지 않고 `modify_rejected` 상태로 거부되며, `on_order_update` 알림의 **`reason` 필드**로 사유가 전달됩니다(룰 통과 시 `reason="modify_not_implemented"`, 룰 위반 시에는 룰 사유). 미체결 주문의 가격·수량을 바꾸려면 **`cancel_order()`로 취소한 뒤 새 주문을 다시 제출**하세요. 실 KIS 국내주식 정정취소(`order-rvsecncl`) API 연동은 후속 작업(#2391)으로 분리되어 있습니다.
+> **주문 정정(`modify_order`)은 v1=가격 정정만 지원합니다(price-only, #2391).** `self.ctx.modify_order(order_id, price=신규가격, reason=...)`로 **미체결(`open`) 지정가 주문의 가격을 정정**할 수 있습니다(매수는 신규가 ≤ 원주문가, 매도는 가격 정정). 성공하면 `on_order_update` 알림에 `status="modified"`로 통보됩니다. **다음 경우는 거부되며**(`on_order_update`의 `reason` 필드로 사유 전달), 이때는 **`cancel_order()`로 취소한 뒤 새 주문을 다시 제출**하세요: 수량 변경(`modify_qty_change_unsupported`), 매수 가격 인상(`modify_budget_increase_unsupported`), 부분체결/종료 주문(`modify_partial_or_terminal_unsupported`), 다른 봇의 주문(`modify_not_owner`), 비지정가(시장가) 주문(`modify_unsupported_order_type`), 무효 가격(`modify_invalid_args`). 수량 변경 등 고급 정정과 실전 KIS 정정 검증은 후속 작업(#2393, oracle)으로 분리되어 있습니다.
 
 **기술 지표:** `get_indicator()`로 기술 지표를 사용할 수 있습니다. 내부적으로 [pandas-ta](https://github.com/twopirllc/pandas-ta)를 사용하며, pandas-ta가 지원하는 130+ 지표를 모두 사용할 수 있습니다.
 
@@ -121,7 +121,7 @@ self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 | `on_start()` | 봇 시작 시 1회 | — |
 | `on_stop()` | 봇 중지 시 1회 | — |
 | `on_fill(fill)` | 주문 체결 시 | `list[Signal]` (후속 주문 가능) |
-| `on_order_update(update)` | 주문 상태 변경 시 (접수/거부/취소/정정거부) | — |
+| `on_order_update(update)` | 주문 상태 변경 시 (접수/거부/취소/정정완료/정정거부) | — |
 | `on_data(data)` | 외부 시그널 수신 시 (`accepts_external_signals=True`) | `list[Signal]` |
 | `get_rules()` | 전략별 거래 룰 반환 | `dict` |
 | `get_params()` | 백테스트 최적화 파라미터 | `dict` |
@@ -388,7 +388,7 @@ ante signal connect --key sk_a1b2c3d4e5f6...
 |------|------|
 | `ack` | 시그널 접수 확인 |
 | `fill` | 주문 체결 통보 (종목, 수량, 체결가, 수수료) |
-| `order_update` | 주문 상태 변경 (접수, 거부, 취소, 정정거부, 실패) |
+| `order_update` | 주문 상태 변경 (접수, 거부, 취소, 정정완료, 정정거부, 실패) |
 | `result` | query 응답 |
 | `pong` | ping 응답 |
 

@@ -107,3 +107,18 @@ class CircuitOpenError(BrokerError):
     """
 
     code: str = "BROKER_CIRCUIT_OPEN"
+
+
+class ModifyOrgnoUnavailableError(BrokerError):
+    """주문 정정 KRX_FWDG_ORD_ORGNO 미상 — 정정 요청 전송 불가 (#2391).
+
+    KIS 국내주식 정정(order-rvsecncl)은 원주문별 ``KRX_FWDG_ORD_ORGNO``
+    (한국거래소전송주문조직번호)를 요구한다. 이 값은 place_order(order-cash) 성공
+    응답에서 캡처해 둔 인메모리 캐시(``_krx_fwdg_orgno_cache``)에서만 가져오며,
+    캐시 miss(재기동 등으로 소실) 또는 제출 영업일 불일치(odno 재사용) 시에는
+    오값 전송을 막기 위해 본 예외를 raise 한다(전송 금지, fail-closed). Gateway 는
+    이를 ``modify_orgno_unavailable`` 거부 사유로 매핑한다. taxonomy
+    ``execution`` 카테고리 (정정 전송 전제조건 미충족).
+    """
+
+    code: str = "BROKER_MODIFY_ORGNO_UNAVAILABLE"

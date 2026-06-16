@@ -10,6 +10,7 @@
 | 구독 | `OrderRejectedEvent` | 룰 검증 실패 → 거부 기록 |
 | 구독 | `OrderFailedEvent` | 주문 실행 실패 → 실패 기록 |
 | 구독 | `OrderCancelledEvent` | 주문 취소 완료 → 취소 기록 |
+| 구독 | `OrderModifyExecutedEvent` | 주문 정정 완료(v1=price-only, #2391) → `MODIFIED` 별도 row 기록(trade_id PK 멱등, price=신규 정정가, quantity=원주문 수량) |
 | 발행 | `DailyReportEvent` | 장 마감 후 매일 무조건 발행 — Treasury 스냅샷, Rule Engine 일별 집계 트리거 |
 | 발행 | `NotificationEvent` | 매수/매도 체결, 주문 취소 실패, 일일 성과 요약 시 (category: "trade") |
 

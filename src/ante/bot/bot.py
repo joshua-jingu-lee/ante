@@ -349,6 +349,7 @@ class Bot:
             OrderCancelFailedEvent,
             OrderCancelledEvent,
             OrderFailedEvent,
+            OrderModifyExecutedEvent,
             OrderModifyRejectedEvent,
             OrderRejectedEvent,
             OrderSubmittedEvent,
@@ -401,11 +402,22 @@ class Bot:
                 "side": event.side,
                 "reason": event.error_message,
             }
+        elif isinstance(event, OrderModifyExecutedEvent):
+            # 정정 완료 (#2391, v1=price-only) 통보를 전략에 전달. status 는
+            # 신규 키 ``"modified"`` 로 분리한다. quantity 는 원주문 수량 유지
+            # (price-only), 신규 가격은 전략이 ``get_open_orders`` 등으로 재조회.
+            update = {
+                "order_id": event.order_id,
+                "status": "modified",
+                "symbol": event.symbol,
+                "side": event.side,
+                "quantity": event.quantity,
+                "reason": event.reason,
+            }
         elif isinstance(event, OrderModifyRejectedEvent):
-            # 정정 거부 (rule reject / rule exception / gateway
-            # not-implemented) 통보를 전략에 전달. status 는 신규 키
-            # ``"modify_rejected"`` 로 분리하여 기존 ``"rejected"`` (신규
-            # 주문 거부) 와 충돌하지 않도록 한다.
+            # 정정 거부 (rule reject / rule exception / gateway fail-closed)
+            # 통보를 전략에 전달. status 는 신규 키 ``"modify_rejected"`` 로
+            # 분리하여 기존 ``"rejected"`` (신규 주문 거부) 와 충돌하지 않도록 한다.
             update = {
                 "order_id": event.order_id,
                 "status": "modify_rejected",

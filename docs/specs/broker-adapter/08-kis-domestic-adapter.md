@@ -35,13 +35,13 @@ class KISDomesticAdapter(KISBaseAdapter):
 | 잔고 조회 | `/uapi/domestic-stock/v1/trading/inquire-balance` | GET |
 | 현재가 조회 | `/uapi/domestic-stock/v1/quotations/inquire-price` | GET |
 | 주문 접수 | `/uapi/domestic-stock/v1/trading/order-cash` | POST |
-| 주문 취소 (정정 미구현) | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
+| 주문 취소·정정 (정정 v1=price-only, #2391) | `/uapi/domestic-stock/v1/trading/order-rvsecncl` | POST |
 | 미체결 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-rvsecncl` | GET |
 | 매수가능 조회 | `/uapi/domestic-stock/v1/trading/inquire-psbl-order` | GET |
 
 > **매수가능 조회 행은 구현 #2384 merge 후 실행 가능**하다. 본 행은 계약(spec) 선반영이며, `inquire-balance`(잔고/평가/보유)와 `inquire-psbl-order`(주문가능)는 KIS가 공식적으로 분리한 두 엔드포인트다(아래 §inquire-psbl-order 계약 참조).
 
-> **`order-rvsecncl`은 KIS API 레벨에서는 정정·취소를 모두 지원**하지만, Ante 어댑터는 현재 **취소(`cancel_order`)만 구현**하고 **정정(modify)은 미구현(deferred)**이다(아래 §order-rvsecncl 취소 바디 계약은 취소 한정). 따라서 상위 계층의 정정 요청은 broker까지 전달되지 않고 Gateway가 `modify_not_implemented`로 즉시 거부한다. 실 KIS 정정(`RVSE_CNCL_DVSN_CD='01'`) 분기 구현은 후속 작업(#2391)으로 분리되어 있다.
+> **`order-rvsecncl`은 KIS API 레벨에서 정정·취소를 모두 지원**하며, Ante 어댑터는 **취소(`cancel_order`, `RVSE_CNCL_DVSN_CD='02'`)와 정정 v1(`modify_order`, `RVSE_CNCL_DVSN_CD='01'`, price-only, #2391)을 모두 구현**한다(아래 §order-rvsecncl 취소/정정 바디 계약 참조). 정정 v1은 `open` 주문의 가격 정정(수량 불변)만 지원하며, 수량 변경·예산증가 buy·부분체결/터미널·동시성 등 고급 케이스는 Gateway가 broker 호출 전 fail-closed로 거부한다(후속 #2393). **live A/B(실전 KIS) 정정 분기 검증은 사용자 oracle 후속(pending)** — 현재는 mock+모의 매핑/분기만 검증된 상태다.
 
 ### order-cash TR ID 매핑
 
@@ -98,6 +98,28 @@ class KISDomesticAdapter(KISBaseAdapter):
 - **bounded / known-limitation**: 캐시는 `OrderedDict` + maxlen으로 무한 증가·stale 누적을 막는다. **in-process 한정**이라 재기동 시 캐시가 소실되며, 그 경우 miss로 처리되어 필드를 생략한다(추정값을 전송하지 않으므로 안전). cross-process/외부주문 취소의 원천 확보는 영속화(Option A) 또는 검증된 조회 원천을 별도 이슈로 다룬다.
 
 > 출처: [KIS open-trading-api `order_rvsecncl.py`](https://github.com/koreainvestment/open-trading-api/blob/main/examples_llm/domestic_stock/order_rvsecncl/order_rvsecncl.py)의 demo 분기가 `VTTC0013U`(실전 `TTTC0013U`)를 사용하고 신세대 body에서 `EXCG_ID_DVSN_CD`를 `[필수]`로 가드한다. `KRX_FWDG_ORD_ORGNO`는 레거시였던 `VTTC0803U`/`TTTC0803U` 시절부터 원주문별 값으로 전송하던 필드로, 신세대 0013U body에서도 동일하게 사용한다. 취소 tr_id `0803U→0013U` 마이그레이션과 `EXCG_ID_DVSN_CD` 동반은 2026-06-12 라이브 A/B(both_ok — (A) 레거시 `0803U` 정상 / (B) 신세대 `0013U + EXCG_ID_DVSN_CD=KRX` 정상)로 검증해 단일 신세대 경로를 채택했다(#2346 — 레거시 fallback 이중화는 YAGNI 기각).
+
+### order-rvsecncl 정정 바디 계약 (#2391, v1=price-only)
+
+주문 정정(`order-rvsecncl`, `modify_order`)은 취소와 **동일 엔드포인트**를 공유하며, 신세대 TR ID `VTTC0013U`(모의)/`TTTC0013U`(실전)로 아래 바디를 전송한다. 취소와의 유일한 의미 차이는 `RVSE_CNCL_DVSN_CD='01'`(정정)이며, **v1은 가격 정정(price-only)만** 지원한다(수량 불변).
+
+| 필드 | 값 | 설명 |
+|------|------|------|
+| `CANO` | `account_no[:8]` | 종합계좌번호 |
+| `ACNT_PRDT_CD` | `account_no[8:10]` | 계좌상품코드 |
+| `KRX_FWDG_ORD_ORGNO` | 원주문 캡처값(필수) | 한국거래소전송주문조직번호 |
+| `ORGN_ODNO` | `order_id` | 원주문번호(ODNO) |
+| `ORD_DVSN` | `'00'` | 주문구분(`_map_order_type("limit")` — 지정가) |
+| `RVSE_CNCL_DVSN_CD` | `'01'` | 정정취소구분(01=정정) |
+| `ORD_QTY` | `str(int(quantity))` | 원주문 수량(불변 — Gateway가 `record.ordered_qty` 전달) |
+| `ORD_UNPR` | `str(int(price))` | 신규 정정 가격(Gateway가 finite `price>0` 보장) |
+| `QTY_ALL_ORD_YN` | `'Y'` | 잔량전부주문여부(전량·수량 불변) |
+| `EXCG_ID_DVSN_CD` | `'KRX'` | 거래소ID구분코드(신세대 필수·국내 KRX 기본) |
+
+- **`CNDT_PRIC`(조건가) 미전송**: v1 지정가 정정은 조건가를 사용하지 않는다.
+- **`KRX_FWDG_ORD_ORGNO` fail-closed**: 정정은 취소와 달리 캐시 miss/영업일 불일치(stale) 시 필드를 생략하지 않고 **`ModifyOrgnoUnavailableError`를 raise해 전송을 차단**한다(오값 전송 금지). Gateway가 이를 `modify_orgno_unavailable` 거부 사유로 매핑한다. 캐시 원천·scope·bounded 규칙은 취소(§위)와 동일하다(`order-cash` 응답 캡처, 계좌+영업일 키, in-process 한정).
+- **수량 불변 invariant**: v1은 `ORD_QTY`를 원주문 수량으로 고정하고 `QTY_ALL_ORD_YN='Y'`로 전량 유지한다. 수량 변경 정정은 Gateway가 broker 호출 전 `modify_qty_change_unsupported`로 거부(후속 #2393).
+- **live A/B pending caveat**: 정정(`RVSE_CNCL_DVSN_CD='01'`) 분기의 실전 KIS A/B 검증은 **사용자 oracle 후속(pending)**이다. 현재는 mock+모의 매핑/분기(RVSE_CNCL_DVSN_CD='01'·ORD_UNPR·QTY_ALL_ORD_YN='Y'·orgno hit/miss typed error)만 검증됐다. tr_id·EXCG·KRX_FWDG 호환은 취소(0013U) 라이브 검증(2026-06-12)과 동일 패밀리이나, 정정 고유의 응답 코드(예: `40650000` 정정 완료)는 oracle에서 확인 예정이다.
 
 ### inquire-daily-ccld TR ID 매핑 (#2349)
 

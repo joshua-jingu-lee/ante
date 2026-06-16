@@ -31,7 +31,7 @@ invariant([03-05-sqlite-schema.md](03-05-sqlite-schema.md))를 따른다.
 1. **이벤트 구독 방식 (EventBus 자동 기록)**
    - Bot이 직접 기록하지 않음 — 관심사 분리
    - Bot은 전략 실행에 집중, 기록은 TradeRecorder가 전담
-   - 체결뿐 아니라 거부/실패/취소도 기록 — 전략 효과 분석에 "시도했으나 실패한" 주문도 필요
+   - 체결뿐 아니라 거부/실패/취소/정정완료도 기록 — 전략 효과 분석에 "시도했으나 실패한" 주문도 필요. 정정 완료(`OrderModifyExecutedEvent`, v1=price-only)는 `MODIFIED` 별도 row(`_on_modified`, trade_id PK 멱등, price=신규 정정가)로 기록한다(#2391)
 
 2. **priority=10 (낮은 우선순위)**
    - 주문 흐름 핸들러(RuleEngine, Treasury 등)보다 낮은 우선순위

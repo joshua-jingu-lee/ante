@@ -179,7 +179,13 @@ class OrderApprovedEvent(Event):
 
 @dataclass(frozen=True)
 class OrderSubmittedEvent(Event):
-    """APIGateway → EventBus: 증권사에 주문 전송됨."""
+    """APIGateway → EventBus: 증권사에 주문 전송됨.
+
+    Refs #2391: ``price`` 는 원주문 가격(지정가 단가)이며, OrderTracker 의
+    ``order_price`` seed 출처다. 주문 정정(modify) v1(price-only)에서 buy 가격↓
+    fail-closed 판정(``new_price ≤ order_price``)에 쓰인다. market/미지정 주문은
+    ``None`` 이며, gateway 가 publish 시 ``OrderApprovedEvent.price`` 로 채운다.
+    """
 
     _requires_account_id: ClassVar[bool] = True
 
@@ -192,6 +198,7 @@ class OrderSubmittedEvent(Event):
     side: str = ""
     quantity: float = 0.0
     order_type: str = ""
+    price: float | None = None
     exchange: str = "KRX"
 
 
@@ -242,6 +249,35 @@ class OrderCancelledEvent(Event):
     side: str = ""
     quantity: float = 0.0
     price: float = 0.0
+    reason: str = ""
+    exchange: str = "KRX"
+
+
+@dataclass(frozen=True)
+class OrderModifyExecutedEvent(Event):
+    """BrokerAdapter/APIGateway → EventBus: 주문 정정 완료 (#2391, v1=price-only).
+
+    ``OrderCancelledEvent`` 를 미러링하되 정정 신규 ``price`` 를 추가로 보유한다.
+    v1 은 가격 정정(수량 불변)만 지원하므로 ``quantity`` 는 원주문 수량
+    (``OrderTrackerRecord.ordered_qty``)을 그대로 유지하고, ``price`` 는 신규 정정
+    가격이다. ``broker_order_id`` 는 의도적으로 포함하지 않는다(OrderCancelledEvent
+    와 동일 — 전략/소비자는 내부 ``order_id`` 로 식별). 고급 케이스(수량 변경 등)는
+    #2393 deferred.
+
+    소비자: ``Bot.on_order_update`` / ``SignalChannel._on_order_update``
+    (``status="modified"``) + ``TradeRecorder`` (``TradeStatus.MODIFIED`` 별도 row).
+    """
+
+    _requires_account_id: ClassVar[bool] = True
+
+    account_id: str = ""
+    order_id: str = ""
+    bot_id: str = ""
+    strategy_id: str = ""
+    symbol: str = ""
+    side: str = ""
+    quantity: float = 0.0
+    price: float | None = None
     reason: str = ""
     exchange: str = "KRX"
 

@@ -400,6 +400,8 @@ def _subscribe_order_tracker(eventbus: Any, order_tracker: Any) -> None:
             ordered_qty=event.quantity,
             submitted_date=business_date_kst(event.timestamp),
             submitted_at=event.timestamp.isoformat() if event.timestamp else None,
+            # #2391: 원주문 지정가 단가. 주문 정정 v1 buy 가격↓ 판정 출처.
+            order_price=event.price,
         )
 
     async def _on_terminal(event: object) -> None:

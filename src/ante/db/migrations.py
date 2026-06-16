@@ -32,6 +32,7 @@ from ante.db.versions import (
     v003_broker_config,
     v004_strategy_status_simplify,
     v005_trades_timestamp_isoformat,
+    v006_order_tracker_order_price,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,7 @@ MIGRATIONS: list[tuple[int, str, MigrateFn]] = [
     (3, "0.8.0", v003_broker_config.migrate),
     (4, "0.8.0", v004_strategy_status_simplify.migrate),
     (5, "0.10.1", v005_trades_timestamp_isoformat.migrate),
+    (6, "0.11.0", v006_order_tracker_order_price.migrate),
 ]
 
 

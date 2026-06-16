@@ -198,6 +198,40 @@ async def test_cancel_nonexistent_order_raises(broker: MockBrokerAdapter) -> Non
 
 
 @pytest.mark.asyncio
+async def test_modify_pending_order_updates_price(
+    partial_broker: MockBrokerAdapter,
+) -> None:
+    """#2391: 미체결 주문 정정 → 가격 갱신 + True 반환."""
+    order_id = await partial_broker.place_order(
+        "005930", "buy", 10, "limit", price=50000
+    )
+
+    result = await partial_broker.modify_order(
+        order_id, quantity=10, price=45000, order_type="limit"
+    )
+    assert result is True
+
+    status = await partial_broker.get_order_status(order_id)
+    assert status["price"] == 45000
+
+
+@pytest.mark.asyncio
+async def test_modify_filled_order_returns_false(broker: MockBrokerAdapter) -> None:
+    """#2391: 이미 체결된 주문 정정 시 False."""
+    order_id = await broker.place_order("005930", "buy", 10, "limit", price=50000)
+
+    result = await broker.modify_order(order_id, price=45000)
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_modify_nonexistent_order_raises(broker: MockBrokerAdapter) -> None:
+    """#2391: 존재하지 않는 주문 정정 시 OrderNotFoundError."""
+    with pytest.raises(OrderNotFoundError):
+        await broker.modify_order("nonexistent", price=45000)
+
+
+@pytest.mark.asyncio
 async def test_get_pending_orders(partial_broker: MockBrokerAdapter) -> None:
     """미체결 주문 목록을 조회할 수 있다."""
     await partial_broker.place_order("005930", "buy", 10)

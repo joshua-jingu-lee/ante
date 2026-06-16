@@ -126,6 +126,34 @@ class BrokerAdapter(ABC):
         ...
 
     @abstractmethod
+    async def modify_order(
+        self,
+        order_id: str,
+        *,
+        quantity: float | None = None,
+        price: float | None = None,
+        order_type: str = "limit",
+    ) -> bool:
+        """주문 정정 (#2391, v1=price-only).
+
+        v1 은 ``open`` 상태 주문의 **가격 정정**만 지원한다(수량 불변). 수량 변경
+        (``quantity``)·예산 증가 buy 가격↑·부분체결/터미널·동시성은 Gateway 가
+        broker 호출 **전** fail-closed 로 거부하므로 broker 까지 내려오지 않는다
+        (고급 케이스는 #2393 deferred). ``quantity`` 는 #2393 forward-compat 파라미터다.
+
+        Args:
+            order_id: 증권사 주문번호 (broker_order_id). Gateway 가 내부 order_id 를
+                OrderTracker 로 변환해 전달한다.
+            quantity: 원주문 수량(v1 은 불변값 전달). ``None`` 이면 미지정.
+            price: 신규 정정 가격. v1 은 Gateway 가 finite ``price>0`` 을 보장한다.
+            order_type: 주문구분. v1 은 ``"limit"`` 고정.
+
+        Returns:
+            성공 여부
+        """
+        ...
+
+    @abstractmethod
     async def get_order_status(self, order_id: str) -> dict[str, Any]:
         """주문 상태 조회.
 
