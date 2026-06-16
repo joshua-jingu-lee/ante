@@ -20,7 +20,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ante.bot.signal_channel import SignalChannel
-from ante.eventbus.events import OrderModifyRejectedEvent
+from ante.eventbus.events import OrderModifyExecutedEvent, OrderModifyRejectedEvent
 
 
 @pytest.fixture
@@ -91,6 +91,33 @@ async def test_modify_rejected_forwarded_keeps_order_update_shape(
     assert resp["status"] == "modify_rejected"
     assert resp["order_id"] == "ord-mod-1"
     assert resp["reason"] == "modify_not_implemented"
+
+
+async def test_modify_executed_forwarded_keeps_order_update_shape(
+    channel: SignalChannel, output: io.StringIO
+) -> None:
+    """#2391: ``OrderModifyExecutedEvent`` → ``order_update`` shape, status=modified."""
+    event = OrderModifyExecutedEvent(
+        account_id="acc-test",
+        order_id="ord-mod-exec",
+        bot_id="bot-1331",
+        strategy_id="strat-1331",
+        symbol="005930",
+        side="buy",
+        quantity=10.0,
+        price=45000.0,
+        reason="adjust",
+    )
+
+    await channel._on_order_update(event)
+
+    payload = output.getvalue().strip()
+    assert payload, "외부 채널에 메시지가 기록되어야 한다"
+    resp = json.loads(payload)
+    assert resp["type"] == "order_update"
+    assert resp["status"] == "modified"
+    assert resp["order_id"] == "ord-mod-exec"
+    assert resp["reason"] == "adjust"
 
 
 async def test_modify_rejected_other_bot_ignored(

@@ -331,6 +331,35 @@ class TestCancelOrder:
             await connected_broker.cancel_order("nonexistent")
 
 
+class TestModifyOrder:
+    """modify_order() 동작 검증 (#2391, v1=price-only)."""
+
+    @pytest.mark.asyncio
+    async def test_modify_pending_order_updates_price(
+        self, connected_broker: TestBrokerAdapter
+    ) -> None:
+        """미체결 지정가 주문 정정 → 가격 갱신 + True."""
+        order_id = await connected_broker.place_order(
+            "000001", "buy", 10, order_type="limit", price=1_000.0
+        )
+        status = await connected_broker.get_order_status(order_id)
+        if status["status"] != "filled":
+            result = await connected_broker.modify_order(
+                order_id, quantity=10, price=900.0, order_type="limit"
+            )
+            assert result is True
+            updated = await connected_broker.get_order_status(order_id)
+            assert updated["price"] == 900.0
+
+    @pytest.mark.asyncio
+    async def test_modify_nonexistent_order_raises(
+        self, connected_broker: TestBrokerAdapter
+    ) -> None:
+        """존재하지 않는 주문 정정 시 OrderNotFoundError."""
+        with pytest.raises(OrderNotFoundError):
+            await connected_broker.modify_order("nonexistent", price=900.0)
+
+
 # ── 주문 상태/이력 ───────────────────────────────────────────
 
 

@@ -33,7 +33,7 @@ Bot이 생성하여 전략에 주입하는 제한된 시스템 API이다. 전략
    - 취소/정정: ctx.cancel_order() / ctx.modify_order() → 내부 큐 → Bot이 일괄 처리
    - 두 경로 모두 EventBus를 통해 RuleEngine 검증을 거침
    - NautilusTrader는 submit/cancel/modify 모두 전략 메서드로 직접 호출 — Ante도 취소/정정은 메서드 방식 채택 (기존 order_id를 참조해야 하므로 Signal 반환보다 자연스러움)
-   - **caveat (deferred)**: `ctx.modify_order()`는 API 표면으로 존재하나 **broker-level 정정은 현재 미구현(deferred)**이다. 룰 위반 시에는 RuleEngine이 룰 사유로 먼저 거부하고, 룰 통과 시에만 Gateway가 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 거부하므로, 정정이 필요하면 `ctx.cancel_order()` 후 재주문 패턴을 사용한다. 실 KIS 정정취소(`order-rvsecncl`) 연동은 후속 작업(#2391).
+   - **v1=price-only (#2391)**: `ctx.modify_order()`는 **`open` 주문의 가격 정정(수량 불변)을 지원**한다. 룰 위반·v1 가격 preflight 실패 시 RuleEngine이 사유로 먼저 거부하고, 룰 통과 시 Gateway가 fail-closed 게이트 후 broker 위임 → 성공 시 `OrderModifyExecutedEvent`(`on_order_update` status=`modified`), 고급 케이스(수량변경·예산증가 buy·부분체결/터미널·무효 인자·orgno 미상)는 사유별 `OrderModifyRejectedEvent`로 거부한다(후속 #2393). 고급 정정이 필요하면 `ctx.cancel_order()` 후 재주문 패턴을 사용한다. 실 KIS 정정(`order-rvsecncl`) live A/B 검증은 사용자 oracle 후속(pending).
 
 3. **DataProvider 추상화**
    - 라이브 모드: API Gateway를 통한 실시간 데이터

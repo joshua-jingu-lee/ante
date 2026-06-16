@@ -27,7 +27,11 @@ import pytest
 
 from ante.account.models import Account, AccountStatus
 from ante.eventbus import EventBus
-from ante.eventbus.events import OrderModifyEvent, OrderModifyRejectedEvent
+from ante.eventbus.events import (
+    OrderModifyEvent,
+    OrderModifyExecutedEvent,
+    OrderModifyRejectedEvent,
+)
 from ante.gateway import APIGateway, RateLimitConfig
 from ante.rule import RuleEngine, RuleEngineManager
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
@@ -60,6 +64,7 @@ def _make_record(
     account_id: str = "domestic",
     symbol: str = "005930",
     side: str = "buy",
+    order_price: float | None = 80000.0,
 ) -> OrderTrackerRecord:
     return OrderTrackerRecord(
         order_id=order_id,
@@ -76,6 +81,7 @@ def _make_record(
         status="open",
         submitted_at=None,
         submitted_date="2026-06-01",
+        order_price=order_price,
     )
 
 
@@ -182,36 +188,57 @@ async def test_rule_exception_enriches_symbol_side(
     assert received[0].side == "sell"
 
 
-# ── (c) rule 통과 → Gateway not-implemented 거부도 enriched ─────────
+# ── (c) rule 통과 → Gateway 정정 완료 이벤트도 enriched ──────────────
 
 
-async def test_rule_pass_then_gateway_enriched_passthrough(
+async def test_rule_pass_then_gateway_enriched_executed(
     mock_account_service: AsyncMock,
 ) -> None:
-    """RuleEngine이 동일 인스턴스를 enrich → Gateway 거부도 채워진 값을 본다."""
+    """RuleEngine이 동일 인스턴스를 enrich → Gateway 정정 완료도 채워진 값을 본다.
+
+    #2391 v1: rule 통과 + price-only(buy 가격↓) → Gateway 가 broker 위임 후
+    ``OrderModifyExecutedEvent`` 를 발행하고, symbol/side 는 RuleEngine enrich
+    값을 그대로 본다(동일 인스턴스 공유).
+    """
     eventbus = EventBus()
-    record = _make_record(symbol="035720", side="buy")
-    engine = _make_engine(mock_account_service, eventbus, _make_tracker(record))
+    record = _make_record(symbol="035720", side="buy", order_price=80000.0)
+    tracker = _make_tracker(record)
+    engine = _make_engine(mock_account_service, eventbus, tracker)
+
+    broker = AsyncMock()
+    broker.modify_order = AsyncMock(return_value=True)
+    mock_account_service.get_broker = AsyncMock(return_value=broker)
 
     gateway = APIGateway(
         account_service=mock_account_service,
         eventbus=eventbus,
         rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
+        order_tracker=tracker,
     )
     gateway.start()
 
-    received: list[OrderModifyRejectedEvent] = []
-    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
+    executed: list[OrderModifyExecutedEvent] = []
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
 
-    event = _make_modify_event()
+    # price-only: quantity 미지정(0.0), 신규가격 ≤ 원주문가격(80000).
+    event = _make_modify_event(quantity=0.0, price=70000.0)
     # RuleEngine(p100) → Gateway(p50) 순서를 동일 인스턴스로 시뮬레이션.
     await engine._on_order_modify(event)
     await gateway._on_order_modify(event)
 
-    assert len(received) == 1
-    assert received[0].reason == "modify_not_implemented"
-    assert received[0].symbol == "035720"
-    assert received[0].side == "buy"
+    assert rejected == []
+    assert len(executed) == 1
+    assert executed[0].symbol == "035720"
+    assert executed[0].side == "buy"
+    # price-only: ordered_qty 유지, 신규 가격 반영.
+    assert executed[0].quantity == 10.0
+    assert executed[0].price == 70000.0
+    # broker 에 원주문수량(불변) + 신규가격 + limit 으로 위임.
+    broker.modify_order.assert_awaited_once_with(
+        "brk-1", quantity=10.0, price=70000.0, order_type="limit"
+    )
 
 
 # ── (d) order_tracker 미주입 → "" graceful (무회귀) ─────────────────

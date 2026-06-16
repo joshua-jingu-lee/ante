@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS order_tracker (
     side                TEXT NOT NULL,
     order_type          TEXT NOT NULL DEFAULT '',
     ordered_qty         REAL NOT NULL DEFAULT 0.0,
+    order_price         REAL,
     recorded_filled_qty REAL NOT NULL DEFAULT 0.0,
     avg_fill_price      REAL NOT NULL DEFAULT 0.0,
     status              TEXT NOT NULL DEFAULT 'open',
@@ -101,9 +102,14 @@ class OrderTrackerRecord:
     status: str
     submitted_at: str | None
     submitted_date: str
+    # #2391: 원주문 지정가 단가(OrderSubmittedEvent.price seed). 주문 정정 v1
+    # (price-only)에서 buy 가격↓ fail-closed 판정(new_price ≤ order_price)에 쓰인다.
+    # market/미지정 주문 또는 마이그레이션 이전 legacy row 는 None.
+    order_price: float | None = None
 
     @classmethod
     def from_row(cls, row: dict) -> OrderTrackerRecord:
+        raw_price = row.get("order_price")
         return cls(
             order_id=row["order_id"],
             account_id=row["account_id"],
@@ -119,6 +125,7 @@ class OrderTrackerRecord:
             status=row["status"],
             submitted_at=row.get("submitted_at"),
             submitted_date=row["submitted_date"],
+            order_price=float(raw_price) if raw_price is not None else None,
         )
 
     def to_open_order_dict(self) -> dict[str, object]:
@@ -230,6 +237,7 @@ class OrderTracker:
         ordered_qty: float,
         submitted_date: str,
         submitted_at: str | None = None,
+        order_price: float | None = None,
     ) -> None:
         """``OrderSubmittedEvent`` 로 추적 주문 seed.
 
@@ -247,9 +255,10 @@ class OrderTracker:
         inserted = await self._db.execute_fetch_one(
             """INSERT INTO order_tracker
                    (order_id, account_id, bot_id, strategy_id, broker_order_id,
-                    symbol, side, order_type, ordered_qty, recorded_filled_qty,
-                    avg_fill_price, status, submitted_at, submitted_date)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 'open', ?, ?)
+                    symbol, side, order_type, ordered_qty, order_price,
+                    recorded_filled_qty, avg_fill_price, status, submitted_at,
+                    submitted_date)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 'open', ?, ?)
                ON CONFLICT DO NOTHING
                RETURNING order_id""",
             (
@@ -262,6 +271,7 @@ class OrderTracker:
                 side,
                 order_type,
                 ordered_qty,
+                order_price,
                 submitted_at,
                 submitted_date,
             ),
@@ -283,6 +293,7 @@ class OrderTracker:
                 status="open",
                 submitted_at=submitted_at,
                 submitted_date=submitted_date,
+                order_price=order_price,
             )
             self._open_cache[self._cache_key(record)] = record
         logger.debug(
@@ -422,6 +433,7 @@ class OrderTracker:
                 status=new_status or record.status,
                 submitted_at=record.submitted_at,
                 submitted_date=record.submitted_date,
+                order_price=record.order_price,
             )
             return
 

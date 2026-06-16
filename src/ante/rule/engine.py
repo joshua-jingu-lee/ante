@@ -1335,6 +1335,35 @@ class RuleEngine:
                 object.__setattr__(event, "symbol", record.symbol)
                 object.__setattr__(event, "side", record.side)
 
+        # #2391 (v1=price-only): 정정 가격 finite/양수 preflight. 정정은 신규
+        # 가격이 항상 필수이며(price-only), finite 양수가 아니면 Gateway 위임
+        # 이전에 fail-closed 로 거부한다(``modify_invalid_args``). 기존
+        # ``event.price or 0.0`` 추론(아래 RuleContext)으로 0/None 가격이 조용히
+        # market 으로 전락하던 모호함을 제거한다. ``_is_finite_quantity`` 는
+        # 비-number/bool/NaN/inf/거대정수를 모두 잠그고, 추가로 ``> 0`` 을 강제한다.
+        if not _is_finite_quantity(event.price) or event.price <= 0:
+            logger.warning(
+                "주문 정정 거부(무효 가격): order=%s — %s",
+                event.order_id,
+                _safe_repr(event.price),
+            )
+            await self._eventbus.publish(
+                OrderModifyRejectedEvent(
+                    account_id=event.account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    reason="modify_invalid_args",
+                )
+            )
+            # 후속 Gateway 가 추가 terminal event 를 발행하지 않도록 소비 마커 set.
+            object.__setattr__(event, "_consumed", True)
+            return
+
         # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
@@ -1357,8 +1386,9 @@ class RuleEngine:
         # Treasury 데이터 조회
         treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
-        # 미실현 손익 조회
-        modify_price = event.price or 0.0
+        # 미실현 손익 조회. #2391: 위 preflight 로 event.price 는 finite 양수가
+        # 보장되므로(price-only), ``event.price or 0.0`` 추론 없이 그대로 쓴다.
+        modify_price = float(event.price)
         unrealized_pnl = await self._calculate_bot_unrealized_pnl(
             bot_id=event.bot_id,
             current_price=modify_price,
@@ -1372,7 +1402,9 @@ class RuleEngine:
             symbol=event.symbol,
             side=event.side,
             quantity=event.quantity,
-            order_type="limit" if event.price else "market",
+            # #2391: 정정은 항상 지정가(price-only). preflight 가 finite 양수
+            # price 를 보장하므로 order_type 은 "limit" 고정.
+            order_type="limit",
             price=event.price,
             current_price=modify_price,
             account_status=account_status,

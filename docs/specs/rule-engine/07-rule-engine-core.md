@@ -36,7 +36,7 @@ RuleEngine(
 ### 이벤트 구독
 
 - `OrderRequestEvent` (priority=100): 주문 평가 — `event.account_id` 필터링 → **OrderRequestEvent preflight** (아래 소절 참조) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행
-- `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 거부 시 `OrderModifyRejectedEvent` 발행. **caveat**: 룰을 통과하더라도 broker-level 정정은 현재 미구현(deferred)이라 Gateway가 즉시 `OrderModifyRejectedEvent`(`reason="modify_not_implemented"`)로 terminal reject 처리한다 (실 정정 연동은 #2391).
+- `OrderModifyEvent` (priority=100): 주문 정정 평가 — `event.account_id` 필터링 → symbol/side enrich → **v1 가격 preflight**(finite `price>0` 아니면 `modify_invalid_args` 거부 + `_consumed` 설정; #2391 — 기존 `event.price or 0.0` 추론 제거, 정정은 항상 지정가이므로 `order_type="limit"` 고정) → RuleContext 생성 → 계좌/전략별 룰 평가 → 결과 이벤트 발행. 룰 거부 시 `OrderModifyRejectedEvent` + `_consumed`. **룰 통과 시**: broker-level 정정 v1(price-only)이 지원되므로 Gateway(priority=50)가 fail-closed 게이트 후 broker 위임 → `OrderModifyExecutedEvent`(성공) 또는 사유별 `OrderModifyRejectedEvent`. 고급 케이스(수량변경 등)=#2393.
 - `ConfigChangedEvent`: 룰 설정 변경 감지. `category="rule"` + `key="accounts.{account_id}.rules"`이면 해당 계좌 엔진만 계좌 룰을 재로드하고, `category="strategy_rule"`이면 해당 전략 룰을 재로드한다.
 
 ### 룰 레지스트리

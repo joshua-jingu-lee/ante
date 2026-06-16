@@ -33,6 +33,7 @@ from ante.broker.exceptions import (
     APIError,
     AuthenticationError,
     CircuitOpenError,
+    ModifyOrgnoUnavailableError,
     OrderNotFoundError,
     RateLimitError,
 )
@@ -804,6 +805,18 @@ class KISBaseAdapter(BrokerAdapter):
         ...
 
     @abstractmethod
+    async def modify_order(
+        self,
+        order_id: str,
+        *,
+        quantity: float | None = None,
+        price: float | None = None,
+        order_type: str = "limit",
+    ) -> bool:
+        """주문 정정 (#2391, v1=price-only)."""
+        ...
+
+    @abstractmethod
     async def get_order_status(self, order_id: str) -> dict[str, Any]:
         """주문 상태 조회."""
         ...
@@ -1168,6 +1181,73 @@ class KISDomesticAdapter(KISBaseAdapter):
             )
         await self._request("POST", url, tr_id, json_data=cancel_data)
         logger.info("주문 취소 성공: %s", order_id)
+        return True
+
+    async def modify_order(
+        self,
+        order_id: str,
+        *,
+        quantity: float | None = None,
+        price: float | None = None,
+        order_type: str = "limit",
+    ) -> bool:
+        """주문 정정 (#2391, v1=price-only). cancel_order 미러링.
+
+        정정(order-rvsecncl)은 취소와 **동일 엔드포인트**를 공유한다. 신세대 tr_id
+        ``VTTC0013U``(모의)/``TTTC0013U``(실전)로 전송하며, 취소(``"02"``)와 달리
+        ``RVSE_CNCL_DVSN_CD="01"``(정정)을 보낸다. v1 은 가격 정정(수량 불변)만
+        지원하므로:
+
+        - ``ORD_QTY`` = 원주문 수량(Gateway 가 ``record.ordered_qty`` 를 ``quantity``
+          로 전달, 불변).
+        - ``ORD_UNPR`` = 신규 정정 가격(``str(int(price))``). Gateway 가 finite
+          ``price>0`` 을 보장한다.
+        - ``QTY_ALL_ORD_YN="Y"`` (전량·수량 불변).
+        - ``ORD_DVSN`` = ``_map_order_type("limit")`` ("00").
+        - ``EXCG_ID_DVSN_CD`` = 공유 상수 ``DEFAULT_EXCG_ID_DVSN_CD``.
+        - ``CNDT_PRIC`` (조건가) 미전송 (v1 지정가 정정 비대상).
+
+        ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)는 cancel 과 동일하게
+        place_order(order-cash) 응답 캡처 캐시(``_krx_fwdg_orgno_cache``)에서 가져온다.
+        취소는 miss 시 필드를 생략(전송)하지만, 정정은 oracle 검증 전이라 보수적으로
+        **miss/stale → :class:`ModifyOrgnoUnavailableError` raise(전송 금지)** 한다.
+        Gateway 가 이를 ``modify_orgno_unavailable`` 거부로 매핑한다.
+
+        live A/B(실전 KIS) 검증은 사용자 oracle 후속이며, 현재는 mock+모의 매핑/분기
+        만 검증한다(pending caveat).
+        """
+        tr_id = "VTTC0013U" if self.is_paper else "TTTC0013U"
+        url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
+
+        cached = self._krx_fwdg_orgno_cache.get(order_id)
+        if cached is None or cached[1] != business_date_kst():
+            # 오값 전송 금지 — orgno 미상이면 정정 요청을 보내지 않는다(fail-closed).
+            logger.warning(
+                "정정 KRX_FWDG_ORD_ORGNO 미상: %s (cache=%s) — 전송 차단",
+                order_id,
+                "miss" if cached is None else "stale-date",
+            )
+            raise ModifyOrgnoUnavailableError(
+                f"주문 정정 KRX_FWDG_ORD_ORGNO 미상: {order_id}"
+            )
+
+        modify_data = {
+            "CANO": self.account_no[:8],
+            "ACNT_PRDT_CD": self.account_no[8:10],
+            "KRX_FWDG_ORD_ORGNO": cached[0],
+            "ORGN_ODNO": order_id,
+            "ORD_DVSN": self._map_order_type(order_type),
+            "RVSE_CNCL_DVSN_CD": "01",
+            "ORD_QTY": str(int(quantity or 0)),
+            "ORD_UNPR": str(int(price or 0)),
+            "QTY_ALL_ORD_YN": "Y",
+            # 신세대(0013U) 필수 필드 — 공유 상수 재사용("KRX" 리터럴 금지, #2344).
+            "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
+        }
+        await self._request("POST", url, tr_id, json_data=modify_data)
+        logger.info(
+            "주문 정정 성공: %s → 신규가격 %s", order_id, modify_data["ORD_UNPR"]
+        )
         return True
 
     async def get_order_status(self, order_id: str) -> dict[str, Any]:

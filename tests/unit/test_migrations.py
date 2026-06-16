@@ -19,7 +19,30 @@ from ante.db.versions import (
     v001_baseline,
     v002_parquet_migration,
     v005_trades_timestamp_isoformat,
+    v006_order_tracker_order_price,
 )
+
+# v006 마이그레이션 테스트용 — order_price 컬럼이 없는 legacy order_tracker DDL.
+_LEGACY_ORDER_TRACKER_DDL = """
+CREATE TABLE order_tracker (
+    order_id            TEXT PRIMARY KEY,
+    account_id          TEXT NOT NULL,
+    bot_id              TEXT NOT NULL,
+    strategy_id         TEXT NOT NULL,
+    broker_order_id     TEXT NOT NULL,
+    symbol              TEXT NOT NULL,
+    side                TEXT NOT NULL,
+    order_type          TEXT NOT NULL DEFAULT '',
+    ordered_qty         REAL NOT NULL DEFAULT 0.0,
+    recorded_filled_qty REAL NOT NULL DEFAULT 0.0,
+    avg_fill_price      REAL NOT NULL DEFAULT 0.0,
+    status              TEXT NOT NULL DEFAULT 'open',
+    submitted_at        TEXT,
+    submitted_date      TEXT NOT NULL,
+    last_polled_at      TEXT,
+    terminal_at         TEXT
+)
+"""
 
 
 @pytest.fixture
@@ -454,3 +477,73 @@ class TestV005TradesTimestampIsoformat:
 
         applied_seqs = await get_applied_seqs(db)
         assert 5 in applied_seqs
+
+
+async def _order_tracker_columns(db: Database) -> set[str]:
+    rows = await db.fetch_all("PRAGMA table_info(order_tracker)")
+    return {row["name"] for row in rows}
+
+
+class TestV006OrderTrackerOrderPrice:
+    """#2391: v006 — order_tracker 에 order_price 컬럼 추가."""
+
+    async def test_registered_in_migrations(self):
+        """v006 가 MIGRATIONS 리스트에 등록되어 있다."""
+        seqs = [seq for seq, _, _ in MIGRATIONS]
+        fns = [fn for _, _, fn in MIGRATIONS]
+        assert 6 in seqs
+        assert v006_order_tracker_order_price.migrate in fns
+
+    async def test_adds_column_to_existing_table(self, db: Database):
+        """기존(legacy) order_tracker 테이블에 order_price 컬럼을 ALTER 추가한다."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+        # 기존 row(원주문 가격 미상) 삽입.
+        await db.execute(
+            """INSERT INTO order_tracker
+                   (order_id, account_id, bot_id, strategy_id, broker_order_id,
+                    symbol, side, submitted_date)
+               VALUES ('ord-legacy', 'acct-A', 'bot-1', 'strat-1', '0001',
+                       '005930', 'buy', '20260601')""",
+        )
+        assert "order_price" not in await _order_tracker_columns(db)
+
+        await v006_order_tracker_order_price.migrate(db)
+
+        cols = await _order_tracker_columns(db)
+        assert "order_price" in cols
+        # 기존 row 는 NULL 로 남는다.
+        row = await db.fetch_one(
+            "SELECT order_price FROM order_tracker WHERE order_id = 'ord-legacy'"
+        )
+        assert row is not None
+        assert row["order_price"] is None
+
+    async def test_idempotent_rerun(self, db: Database):
+        """컬럼이 이미 있으면 재실행 no-op (멱등)."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+        await v006_order_tracker_order_price.migrate(db)
+        # 재실행 — 예외 없이 통과.
+        await v006_order_tracker_order_price.migrate(db)
+        cols = await _order_tracker_columns(db)
+        assert "order_price" in cols
+
+    async def test_no_table_noop(self, db: Database):
+        """order_tracker 테이블 부재 DB 에서 no-op 통과(fresh install 가드)."""
+        row = await db.fetch_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='order_tracker'"
+        )
+        assert row is None
+        await v006_order_tracker_order_price.migrate(db)
+
+    async def test_run_migrations_applies_v006(self, db: Database):
+        """run_migrations 전체 실행이 기존 order_tracker 에 컬럼을 추가한다."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+
+        applied = await run_migrations(db)
+        assert "006_0.11.0" in applied
+
+        cols = await _order_tracker_columns(db)
+        assert "order_price" in cols
+
+        applied_seqs = await get_applied_seqs(db)
+        assert 6 in applied_seqs

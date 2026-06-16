@@ -23,6 +23,7 @@
 | `REJECTED` | 거부됨 (룰 위반 등) |
 | `FAILED` | 실행 실패 |
 | `ADJUSTED` | 대사 보정으로 추가된 기록 |
+| `MODIFIED` | 주문 정정 완료 (v1=price-only, `OrderModifyExecutedEvent` → 별도 row, #2391) |
 
 #### TradeRecord 필드
 

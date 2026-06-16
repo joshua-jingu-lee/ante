@@ -425,7 +425,10 @@ connection-upgrade(hijack)로 long-lived 양방향 스트림을 운반하는 유
 (`ack`/`result`/`fill`/`order_update`/`pong`/`error`/`closed`) JSON-Lines 메시지
 vocab과 shape의 SSOT는 bot 모듈 스펙([bot/04-eventbus-integration.md](../bot/04-eventbus-integration.md),
 [bot/03-design-decisions.md](../bot/03-design-decisions.md))이다. 본 절은 IPC 전송
-계층의 3-phase·framing·timeout·종료 계약만 기술한다.
+계층의 3-phase·framing·timeout·종료 계약만 기술한다. `order_update` 프레임의
+`status` vocab은 bot 스펙을 따르며, 주문 정정 v1(price-only, #2391)이 `modified`
+status를 추가했다(전송 계층 framing/shape는 무변경 — `{type:"order_update", order_id,
+status, reason}`).
 
 > 본 절은 계약(스펙)이며, 실제 streaming 실행은 구현 PR 머지 후(동기 버그 #2333
 > unblock) 가능하다.

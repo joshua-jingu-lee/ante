@@ -453,6 +453,24 @@ class TestBrokerAdapter(BrokerAdapter):
         order.status = "cancelled"
         return True
 
+    async def modify_order(
+        self,
+        order_id: str,
+        *,
+        quantity: float | None = None,
+        price: float | None = None,
+        order_type: str = "limit",
+    ) -> bool:
+        """주문 정정 (#2391, v1=price-only). 미체결 주문 가격만 갱신."""
+        order = self._orders.get(order_id)
+        if order is None:
+            raise OrderNotFoundError(f"주문을 찾을 수 없음: {order_id}")
+        if order.status in ("filled", "cancelled"):
+            return False
+        if price is not None:
+            order.price = price
+        return True
+
     async def get_order_status(self, order_id: str) -> dict[str, Any]:
         """주문 상태 조회."""
         order = self._orders.get(order_id)

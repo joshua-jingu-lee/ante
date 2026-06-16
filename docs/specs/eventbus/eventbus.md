@@ -115,18 +115,19 @@ D-005에서 정의한 EventBus 대상 이벤트. 모든 이벤트는 `Event`를 
 |------------|--------|--------|----------|
 | `OrderRequestEvent` | Bot | RuleEngine | `account_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `order_type`, `price?`, `stop_price?`, `reason`, `exchange` |
 | `OrderCancelEvent` | Bot | APIGateway | `account_id`, `bot_id`, `strategy_id`, `order_id`, `reason` |
-| `OrderModifyEvent` | Bot | RuleEngine, APIGateway | `account_id`, `bot_id`, `strategy_id`, `order_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. **vocabulary 표면**: broker-level 정정은 현재 미구현(deferred)이라 성공 이벤트(`OrderModifyExecutedEvent` 등)는 존재하지 않으며, 룰 통과 시에도 Gateway가 `OrderModifyRejectedEvent`(`modify_not_implemented`)로만 종결한다 (실 정정 연동은 #2391) |
-| `OrderModifyRejectedEvent` | RuleEngine / APIGateway | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. 정정 경로의 유일한 terminal 이벤트 (룰 거부 사유 또는 `modify_not_implemented`) |
+| `OrderModifyEvent` | Bot | RuleEngine, APIGateway | `account_id`, `bot_id`, `strategy_id`, `order_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. **v1=price-only 지원(#2391)**: `open` 주문의 가격 정정(buy 가격↓/sell, 수량 불변) 시 Gateway가 broker 위임 후 `OrderModifyExecutedEvent` 발행. 수량 변경·예산증가 buy·부분체결/터미널·무효 인자·orgno 미상은 Gateway가 broker 호출 전 fail-closed `OrderModifyRejectedEvent`로 거부(고급=#2393) |
+| `OrderModifyExecutedEvent` | APIGateway(broker 위임 성공) | Bot, Trade | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`(원주문 수량 유지), `price?`(신규 정정가), `reason`, `exchange`. **v1=price-only(#2391)**: `OrderCancelledEvent` 미러 + `price`. `broker_order_id`는 OMIT(취소 이벤트와 동일 — 소비자는 내부 `order_id`로 식별). 전략 `on_order_update` status=`"modified"`, TradeRecorder `MODIFIED` row |
+| `OrderModifyRejectedEvent` | RuleEngine / APIGateway | Bot | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `reason`. 정정 거부 이벤트 (룰 거부 사유 또는 v1 fail-closed: `modify_invalid_args`/`modify_qty_change_unsupported`/`modify_budget_increase_unsupported`/`modify_partial_or_terminal_unsupported`/`modify_orgno_unavailable`/`modify_failed`) |
 | `OrderValidatedEvent` | RuleEngine | Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reason`, `exchange` |
 | `OrderRejectedEvent` | RuleEngine / Treasury | Bot, Notification | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `reason`, `exchange` |
 | `OrderApprovedEvent` | Treasury | APIGateway | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price?`, `order_type`, `stop_price?`, `reserved_amount`, `exchange` |
-| `OrderSubmittedEvent` | APIGateway | Bot, Trade | `account_id`, `order_id`, `bot_id`, `strategy_id`, `broker_order_id`, `symbol`, `side`, `quantity`, `order_type`, `exchange` |
+| `OrderSubmittedEvent` | APIGateway | Bot, Trade | `account_id`, `order_id`, `bot_id`, `strategy_id`, `broker_order_id`, `symbol`, `side`, `quantity`, `order_type`, `price?`(원주문 지정가 단가 — OrderTracker `order_price` seed 출처, 주문 정정 v1 buy 가격↓ 판정용, #2391), `exchange` |
 | `OrderFilledEvent` | BrokerAdapter / FillApplier(outbox) | Bot, Treasury, Trade, Notification | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `requested_quantity`, `remaining_quantity`, `commission`, `order_type`, `reason`, `exchange`, `fill_dedup_key` |
 | `OrderCancelledEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `broker_order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `reason`, `exchange` |
 | `OrderFailedEvent` | BrokerAdapter | Bot, Treasury | `account_id`, `order_id`, `bot_id`, `strategy_id`, `symbol`, `side`, `quantity`, `price`, `order_type`, `error_message`, `error_code`, `exchange` |
 
-**참고**: `OrderUpdateEvent`는 EventBus 발행 대상이 아닌, Bot 내부에서 `OrderSubmitted/Rejected/Cancelled/Failed` 이벤트를 전략의 `on_order_update()`에 통합 전달하기 위한 변환용 데이터 클래스이다.
-핵심 필드: `order_id`, `bot_id`, `strategy_id`, `status` (`"submitted"` / `"rejected"` / `"cancelled"` / `"failed"`), `symbol`, `side`, `order_type`, `quantity`, `reason`, `exchange`.
+**참고**: `OrderUpdateEvent`는 EventBus 발행 대상이 아닌, Bot 내부에서 `OrderSubmitted/Rejected/Cancelled/Failed/ModifyExecuted/ModifyRejected` 이벤트를 전략의 `on_order_update()`에 통합 전달하기 위한 변환용 데이터 클래스이다.
+핵심 필드: `order_id`, `bot_id`, `strategy_id`, `status` (`"submitted"` / `"rejected"` / `"cancelled"` / `"failed"` / `"modified"`(정정 완료, v1=price-only #2391) / `"modify_rejected"`), `symbol`, `side`, `order_type`, `quantity`, `reason`, `exchange`.
 
 #### 시스템 이벤트 (System)
 
@@ -303,9 +304,10 @@ crash하면 이벤트가 유실된다. 체결(`OrderFilledEvent`)은 Treasury �
 
 `OrderModifyEvent`의 정정 라이프사이클에서 RuleEngine이 거부 결정을 내린 뒤
 같은 이벤트를 후속 `APIGateway._on_order_modify`(priority=50)가 다시 처리하면
-동일 정정 요청에 대해 `OrderModifyRejectedEvent`가 두 번(룰 거부 사유 +
-`"modify_not_implemented"`) 발행되어 audit trail이 깨진다. 이를 막기 위해
-RuleEngine은 거부/예외 경로에서 다음 marker를 set한다.
+동일 정정 요청에 대해 terminal 이벤트가 두 번(룰 거부 사유 + Gateway의 broker
+위임 결과) 발행되어 audit trail이 깨진다. 이를 막기 위해 RuleEngine은 거부/예외
+경로(룰 거부, 룰 평가 예외, #2391 v1 가격 preflight `modify_invalid_args`)에서
+다음 marker를 set한다.
 
 ```python
 object.__setattr__(event, "_consumed", True)

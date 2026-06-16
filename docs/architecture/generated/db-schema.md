@@ -4,7 +4,7 @@ Ante 시스템의 전체 데이터베이스 스키마를 정리한 문서입니�
 
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-> 마지막 갱신: 2026-06-03
+> 마지막 갱신: 2026-06-17
 
 - 테이블: **24**개
 - 인덱스: **32**개
@@ -57,7 +57,7 @@ erDiagram
 | 13 | [reports](#reports) | `report` | 전략 리포트 | 21 |
 | 14 | [strategies](#strategies) | `strategy` | 전략 등록 정보 | 12 |
 | 15 | [fill_outbox](#fill_outbox) | `trade` | 체결 이벤트 transactional outbox (#1949) | 6 |
-| 16 | [order_tracker](#order_tracker) | `trade` |  | 16 |
+| 16 | [order_tracker](#order_tracker) | `trade` |  | 17 |
 | 17 | [positions](#positions) | `trade` | 현재 포지션 | 7 |
 | 18 | [position_history](#position_history) | `trade` | 포지션 변동 이력 | 12 |
 | 19 | [trades](#trades) | `trade` | 체결 기록 | 17 |
@@ -422,6 +422,7 @@ CREATE TABLE IF NOT EXISTS order_tracker (
     side                TEXT NOT NULL,
     order_type          TEXT NOT NULL DEFAULT '',
     ordered_qty         REAL NOT NULL DEFAULT 0.0,
+    order_price         REAL,
     recorded_filled_qty REAL NOT NULL DEFAULT 0.0,
     avg_fill_price      REAL NOT NULL DEFAULT 0.0,
     status              TEXT NOT NULL DEFAULT 'open',

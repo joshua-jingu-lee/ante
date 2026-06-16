@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-12 (KST)
+> 마지막 생성 시점: 2026-06-17 (KST)
 
 ## 최상위 구조
 
@@ -278,7 +278,8 @@ src/ante/
 │   │   ├── v002_parquet_migration.py
 │   │   ├── v003_broker_config.py
 │   │   ├── v004_strategy_status_simplify.py
-│   │   └── v005_trades_timestamp_isoformat.py
+│   │   ├── v005_trades_timestamp_isoformat.py
+│   │   └── v006_order_tracker_order_price.py
 │   ├── __init__.py
 │   ├── backup.py
 │   └── migrations.py
@@ -722,7 +723,10 @@ tests/
 │   ├── test_signal_channel_registry.py
 │   ├── test_signal_connect_audit.py
 │   ├── test_signal_connect_busy.py
-│   └── test_kis_error_codes_40910000.py
+│   ├── test_kis_error_codes_40910000.py
+│   ├── test_kis_modify_order.py
+│   ├── test_order_tracker_order_price.py
+│   └── test_recorder_modified.py
 ├── __init__.py
 └── integration/
     ├── __init__.py

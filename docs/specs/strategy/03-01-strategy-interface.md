@@ -111,7 +111,8 @@
 | `cancelled` | 주문 취소 완료 | `OrderCancelledEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
 | `failed` | 주문 발행 실패 (네트워크/시스템 오류) | `OrderFailedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
 | `cancel_failed` | 취소 실패 | `OrderCancelFailedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
-| `modify_rejected` | 정정 거부 (룰 거부 / 룰 예외 / 미구현) | `OrderModifyRejectedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
+| `modified` | 정정 완료 (v1=price-only, broker 위임 성공, #2391) | `OrderModifyExecutedEvent` | `order_id`, `status`, `symbol`, `side`, `quantity`(원주문 수량 유지), `reason` |
+| `modify_rejected` | 정정 거부 (룰 거부 / 룰 예외 / v1 fail-closed 사유) | `OrderModifyRejectedEvent` | `order_id`, `status`, `symbol`, `side`, `reason` |
 
 ##### 스탑 주문 상태값 (#1336)
 
@@ -131,9 +132,10 @@
 - `order_id`에는 `stop_order_id`를 그대로 채워 일반 주문 알림과 dict shape를
   맞춘다 (전략이 후속 `cancel`에 그대로 사용 가능). `stop_order_id`
   키도 명시 식별자로 함께 노출한다. 식별자 자체는 `modify`에도 그대로 쓸 수
-  있으나, **`modify`(정정) 실행은 현재 broker-level 미구현(deferred)**이라
-  Gateway가 즉시 `modify_rejected`(`reason="modify_not_implemented"`)로
-  거부하므로, 정정이 필요하면 `cancel` 후 재주문으로 대체한다 (실 정정 연동은 #2391).
+  있으나, **stop 주문 자체의 `modify`(정정)는 미지원**(아직 broker에 접수되지
+  않아 OrderTracker record가 없음)이라 Gateway가 `modify_rejected`로 거부하므로,
+  stop 정정이 필요하면 `cancel` 후 재등록으로 대체한다. (이미 접수된 `open`
+  일반 주문의 가격 정정은 broker-level v1=price-only로 지원 — #2391, 고급=#2393.)
 - 발동(`stop_triggered`) 알림은 변환된 일반 주문이 자체 라이프사이클 이벤트
   (`OrderSubmittedEvent` 등)를 별도로 발행하므로, 스탑 식별 단위로 받고 싶은
   경우 본 알림으로 분기한다.

@@ -16,7 +16,7 @@ import pytest
 from ante.bot import BotConfig, BotManager
 from ante.core import Database
 from ante.eventbus import EventBus
-from ante.eventbus.events import OrderModifyRejectedEvent
+from ante.eventbus.events import OrderModifyExecutedEvent, OrderModifyRejectedEvent
 from ante.strategy import (
     DataProvider,
     OrderView,
@@ -146,6 +146,41 @@ async def test_modify_rejected_reaches_strategy(
     assert update["symbol"] == "005930"
     assert update["side"] == "buy"
     assert update["reason"] == "modify_not_implemented"
+
+
+async def test_modify_executed_reaches_strategy(
+    manager: BotManager, ctx: StrategyContext, eventbus: EventBus
+) -> None:
+    """#2391: ``OrderModifyExecutedEvent`` 발행 → 전략 status=modified 통보."""
+    config = BotConfig(
+        bot_id="bot-1331",
+        strategy_id="strat-1331",
+        account_id="acc-test",
+    )
+    bot = await manager.create_bot(config, _CapturingStrategy, ctx)
+    strategy = _CapturingStrategy(ctx=ctx)
+    bot.strategy = strategy
+
+    event = OrderModifyExecutedEvent(
+        account_id="acc-test",
+        order_id="ord-1331",
+        bot_id="bot-1331",
+        strategy_id="strat-1331",
+        symbol="005930",
+        side="buy",
+        quantity=10.0,
+        price=45000.0,
+        reason="adjust",
+    )
+    await eventbus.publish(event)
+
+    assert len(strategy.updates) == 1
+    update = strategy.updates[0]
+    assert update["status"] == "modified"
+    assert update["order_id"] == "ord-1331"
+    assert update["symbol"] == "005930"
+    assert update["side"] == "buy"
+    assert update["quantity"] == 10.0
 
 
 async def test_modify_rejected_other_bot_ignored(
