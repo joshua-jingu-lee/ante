@@ -211,11 +211,31 @@ async def test_main_removes_marker_on_init_failure(
 # ── #2385: _sync_instruments 전 계좌 unique exchange 동기화 ────────────────
 
 
-def _make_sync_account(account_id: str, exchange: str) -> Any:
-    """``account_id``/``exchange`` property 만 갖는 Account 더블."""
+def _make_sync_account(
+    account_id: str,
+    exchange: str,
+    *,
+    broker_type: str = "kis-domestic",
+    trading_mode: Any = None,
+) -> Any:
+    """``account_id``/``exchange``/(broker_type, trading_mode) 를 갖는 Account 더블.
+
+    #2397 R1: ``_sync_instruments`` 는 non-exempt(LIVE) connected 계좌만 순회한다.
+    디폴트는 ``kis-domestic``/``LIVE``(비면제)로 둬 #2385 멀티-계좌 동기화 invariant
+    를 그대로 유지한다. 면제(virtual/test) 회귀는 별도 테스트에서 명시 구성한다.
+    """
     from types import SimpleNamespace
 
-    return SimpleNamespace(account_id=account_id, exchange=exchange)
+    from ante.account.models import TradingMode
+
+    if trading_mode is None:
+        trading_mode = TradingMode.LIVE
+    return SimpleNamespace(
+        account_id=account_id,
+        exchange=exchange,
+        broker_type=broker_type,
+        trading_mode=trading_mode,
+    )
 
 
 def _make_sync_services(broker_instruments: dict[str, Any]) -> tuple[Any, list[Any]]:
@@ -261,20 +281,21 @@ def _make_sync_services(broker_instruments: dict[str, Any]) -> tuple[Any, list[A
 
 @pytest.mark.asyncio
 async def test_sync_instruments_does_not_stop_at_first_broker() -> None:
-    """(a) [test(TEST), oracle-paper(KRX)] 순서에서 KRX 069500 이 적재된다.
+    """(a) LIVE 2계좌(다른 exchange) 순서에서 둘째 exchange 도 적재된다.
 
-    과거 첫 성공 broker `return` 구조에서는 TEST 더미가 KRX 마스터 적재를
-    선점했다(#2385 회귀). 첫 broker return 제거를 잠근다.
+    과거 첫 성공 broker `return` 구조에서는 첫 broker 가 둘째 exchange 마스터
+    적재를 선점했다(#2385 회귀). 첫 broker return 제거를 잠근다. (#2397 R1 이후
+    면제 계좌는 순회 대상에서 빠지므로 비면제 LIVE 2계좌로 invariant 를 유지한다.)
     """
     import ante.main as main_module
 
     accounts = [
-        _make_sync_account("test", "TEST"),
+        _make_sync_account("kospi", "KOSPI"),
         _make_sync_account("oracle-paper", "KRX"),
     ]
     s, upsert_calls = _make_sync_services(
         {
-            "test": [{"symbol": "000001", "name": "알파전자"}],
+            "kospi": [{"symbol": "000001", "name": "알파전자"}],
             "oracle-paper": [{"symbol": "069500", "name": "KODEX 200"}],
         }
     )
@@ -288,6 +309,49 @@ async def test_sync_instruments_does_not_stop_at_first_broker() -> None:
     krx = upserted["069500"]
     assert krx.exchange == "KRX"
     assert krx.name == "KODEX 200"
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_skips_exempt_accounts() -> None:
+    """#2397 R1: 면제(virtual/test) 계좌는 get_broker 미호출·순회 제외.
+
+    면제 계좌의 dummy exchange 가 실 exchange 마스터 적재를 선점하던 #2385
+    회귀를 broker_ready 면제로 차단한다(KIS 재노출 방지와 동일 메커니즘).
+    """
+    import ante.main as main_module
+    from ante.account.models import TradingMode
+
+    accounts = [
+        # 면제: test/virtual → 순회 제외(get_broker 미호출).
+        _make_sync_account(
+            "test", "TEST", broker_type="test", trading_mode=TradingMode.VIRTUAL
+        ),
+        # 면제: kis-domestic/virtual → 순회 제외.
+        _make_sync_account(
+            "kis-virtual",
+            "KRX",
+            broker_type="kis-domestic",
+            trading_mode=TradingMode.VIRTUAL,
+        ),
+        # 비면제: kis-domestic/live → 순회 대상.
+        _make_sync_account("kis-live", "KRX", trading_mode=TradingMode.LIVE),
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "test": [{"symbol": "000001", "name": "더미"}],
+            "kis-virtual": [{"symbol": "111111", "name": "가상"}],
+            "kis-live": [{"symbol": "069500", "name": "KODEX 200"}],
+        }
+    )
+
+    await main_module._sync_instruments(s, accounts)
+
+    # 면제 계좌의 broker 는 조회조차 되지 않아야 한다(KIS 재노출 차단).
+    s.account_service.get_broker.assert_awaited_once_with("kis-live")
+    # LIVE 계좌의 실 마스터만 적재.
+    assert len(upsert_calls) == 1
+    upserted = {inst.symbol for batch in upsert_calls for inst in batch}
+    assert upserted == {"069500"}
 
 
 @pytest.mark.asyncio
