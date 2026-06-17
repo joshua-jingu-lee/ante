@@ -25,6 +25,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ante.account.models import TradingMode
+from ante.account.readiness import (
+    ReadinessFlag,
+    RuntimeReadinessRegistry,
+    is_flag_exempt,
+)
 from ante.config import Config, DynamicConfigService
 from ante.core import Database
 from ante.eventbus import EventBus, EventHistoryStore
@@ -179,6 +185,15 @@ class Services:
     # ReconcileScheduler 는 기동 즉시 대사에서 "외부 매수" 분류를 건너뛰어
     # (skip_initial_external_buy), 미복구 ante 체결을 외부 매수로 오분류하지 않는다.
     fill_catch_up_failed_accounts: set[str] = field(default_factory=set)
+    # #2397 D-ACC-09: per-account runtime readiness SSOT. main(등록자)이 _init_*
+    # 에서 mark 하고, reader(#2398 gateway/RuleEngine/Treasury)가 동일 인스턴스를
+    # 주입받아 active_trading_ready 만 조회한다. 본 PR 은 채우기만 한다(관측-only).
+    runtime_readiness: RuntimeReadinessRegistry = field(
+        default_factory=RuntimeReadinessRegistry
+    )
+    # #2397 D-ACC-09 R5: broker not_ready 계좌를 무기한 재시도하는 self-healing
+    # background retry loop 핸들. shutdown 에서 scheduler dict 정리 전 cancel 한다.
+    readiness_self_healing_task: asyncio.Task | None = None  # type: ignore[type-arg]
     daily_report_scheduler: Any = None
     data_provider: Any = None
     parquet_store: Any = None
@@ -192,6 +207,74 @@ class Services:
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
     _cleanup_tasks: list[str] = field(default_factory=list)
+
+
+# ── #2397 D-ACC-09 runtime readiness mark helpers ─────────────────────────
+
+
+def _account_trading_mode(account: Any) -> TradingMode:
+    """Account 의 trading_mode 를 안전하게 추출(미설정 시 VIRTUAL 디폴트)."""
+    return getattr(account, "trading_mode", TradingMode.VIRTUAL)
+
+
+def _flag_exempt_for_account(flag: ReadinessFlag, account: Any) -> bool:
+    """면제 매트릭스 적용 — ``account`` 의 (broker_type, trading_mode) 기준."""
+    return is_flag_exempt(
+        flag,
+        broker_type=getattr(account, "broker_type", "test"),
+        trading_mode=_account_trading_mode(account),
+    )
+
+
+def _broker_ready_exempt(account: Any) -> bool:
+    """broker_ready 면제 계좌(virtual/test)인지 — connect 시도 전 분기."""
+    return _flag_exempt_for_account(ReadinessFlag.BROKER, account)
+
+
+def _mark_runtime_ready(s: Services, account_id: str, flag: ReadinessFlag) -> None:
+    """registry ready mark. registry 미주입 환경(partial wiring)에서는 no-op."""
+    if s.runtime_readiness is not None:
+        s.runtime_readiness.mark_ready(account_id, flag)
+
+
+def _mark_runtime_not_ready(
+    s: Services, account_id: str, flag: ReadinessFlag, reason: str
+) -> None:
+    """registry not_ready mark. registry 미주입 환경에서는 no-op."""
+    if s.runtime_readiness is not None:
+        s.runtime_readiness.mark_not_ready(account_id, flag, reason)
+
+
+def _mark_fill_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
+    """전역 fill skip(connected_count==0 등) 시 면제 우선 mark (이중 실패모드 a).
+
+    면제(virtual/test) 계좌는 broker-backed 스케줄러가 없어도 정상이므로 no-op
+    ready 를, 비면제(LIVE) 계좌는 ``mark_not_ready(reason)`` 한다.
+    """
+    for account in accounts:
+        if _flag_exempt_for_account(ReadinessFlag.FILL_RECONCILE, account):
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.FILL_RECONCILE)
+        else:
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.FILL_RECONCILE,
+                "fill_init_skipped_no_broker",
+            )
+
+
+def _mark_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
+    """전역 reconcile skip 시 면제 우선 mark (이중 실패모드 a)."""
+    for account in accounts:
+        if _flag_exempt_for_account(ReadinessFlag.RECONCILE, account):
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.RECONCILE)
+        else:
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.RECONCILE,
+                "reconcile_init_skipped_no_broker",
+            )
 
 
 async def _init_core(s: Services) -> None:
@@ -624,16 +707,35 @@ async def _init_gateway(s: Services) -> None:
     accounts = await s.account_service.list()
     connected_count = 0
     for account in accounts:
+        # #2397 D-ACC-09 R1: broker_ready 면제 계좌(virtual/test)는 connect/
+        # get_broker 시도 **전** registry no-op ready mark 후 skip 한다 — 가상은
+        # broker API 를 미호출하므로(VirtualExecutor 가상 체결) broker readiness 가
+        # 무의미하고, get_broker 를 호출하면 virtual 을 KIS 토큰/connect 실패에
+        # 재노출하기 때문이다.
+        if _broker_ready_exempt(account):
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.BROKER)
+            continue
         try:
             broker = await s.account_service.get_broker(account.account_id)
             await broker.connect()
             connected_count += 1
+            # #2397 broker_ready = connect 성공 시점 mark([must_fix F] —
+            # get_cached_broker live-poll 아님). #2372 connect-후-캐시 정합.
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.BROKER)
             logger.info(
                 "Broker 연결: account=%s, type=%s",
                 account.account_id,
                 account.broker_type,
             )
         except Exception:
+            # #2397 startup 실패 → broker_ready not_ready(reason). self-healing
+            # background loop 가 회복을 무기한 재시도한다.
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.BROKER,
+                "connect_failed",
+            )
             logger.warning(
                 "Broker 연결 실패: account=%s — 건너뜀",
                 account.account_id,
@@ -733,6 +835,12 @@ async def _init_gateway(s: Services) -> None:
     # reconciler 가 미복구 ante 체결을 "외부 매수" 로 오분류하지 않는다.
     if connected_count and s.fill_applier and s.order_tracker:
         await _init_fill_recovery_schedulers(s, accounts)
+    else:
+        # #2397 D-ACC-09 이중 실패모드 (a): 전역 connected_count==0(또는 fill
+        # 의존성 부재)으로 _init_fill_recovery_schedulers 가 미호출 → 전 계좌 키가
+        # 부재한다. 면제 매트릭스를 **먼저** 적용해 LIVE 비면제만 mark_not_ready,
+        # virtual/test 면제는 no-op ready mark 한다(D-ACC-09 면제 계약 보존).
+        _mark_fill_reconcile_global_skip(s, accounts)
 
     # #1949: 체결 catch-up(위)이 만든 outbox row + commit-후-crash 로 미발행된
     # row 를 publisher 가 기동 재전달한 뒤 주기 드레인 루프를 시작한다. 소비자는
@@ -744,6 +852,14 @@ async def _init_gateway(s: Services) -> None:
     # ReconcileScheduler 초기화 (fill 복구 barrier 이후)
     if connected_count and s.trade_service:
         await _init_reconcile_scheduler(s)
+    else:
+        # #2397 D-ACC-09 이중 실패모드 (a): reconcile 도 전역 skip 시 동일 처리.
+        _mark_reconcile_global_skip(s, accounts)
+
+    # #2397 D-ACC-09 R5: self-healing background retry loop 를 startup init
+    # 완료(_init_* 전부) 후에 시작한다. broker not_ready 계좌를 무기한 재시도하고
+    # 회복 시 스케줄러를 idempotent 재등록한 뒤 ready 로 전이한다.
+    _start_readiness_self_healing(s, accounts)
 
     # DailyReportScheduler 초기화
     if s.performance_tracker and s.trade_recorder and s.position_history:
@@ -764,57 +880,15 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
     external-buy 분류를 건너뛰게 한다(#1946 Finding 1 — startup 폴 실패를
     "0건 성공" 으로 삼켜 barrier 를 우회하던 결함 수정).
     """
-    from ante.broker.fill_scheduler import FillReconcileScheduler
-
-    # #2314·#2316 §11.6: position-derived fallback 마스터 disable flag. KIS paper
-    # 기본 활성(True)을 두되 config 로 rollback 가능. 실제 적용은 추가로
-    # broker.is_paper 가 true 여야 한다(scheduler 내부 gate).
-    fallback_enabled = (
-        bool(s.config.get("system.fill_position_fallback_enabled", True))
-        if s.config is not None
-        else True
-    )
-
     s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
-        try:
-            broker = await s.account_service.get_broker(account.account_id)
-        except Exception:
+        # #2397 D-ACC-09 R2: fill_reconcile 면제 계좌(virtual/test)는 get_broker
+        # 호출 **없이** registry no-op ready mark + broker-backed 등록 skip 한다
+        # (virtual 을 KIS connect 실패에 재노출 차단). LIVE 비면제만 등록 시도.
+        if _flag_exempt_for_account(ReadinessFlag.FILL_RECONCILE, account):
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.FILL_RECONCILE)
             continue
-
-        scheduler = FillReconcileScheduler(
-            broker=broker,
-            order_tracker=s.order_tracker,
-            fill_applier=s.fill_applier,
-            account_id=account.account_id,
-            # #2314·#2316 §11: 잔고 역도출 fallback 의 internal_account_qty 조회
-            # 의존성(§11.1) + late-ccld over-attribution alert(§11.4) 발행 경로.
-            trade_service=s.trade_service,
-            eventbus=s.eventbus,
-            fallback_enabled=fallback_enabled,
-            # #2377: over-attribution 의심 알림 종목명 병기 소스.
-            instrument_service=s.instrument_service,
-        )
-        # 기동 카치업 — barrier. reconcile 보다 반드시 선행.
-        # CatchUpResult.succeeded 로 폴 실패와 "정상 0건/open-없음" 을 구분한다.
-        result = await scheduler.catch_up_once()
-        if not result.succeeded:
-            # 폴 미성공 — 미복구 체결이 남아 있을 수 있다. 이 계좌의 기동
-            # reconcile external-buy 분류를 연기해 오분류를 막는다.
-            s.fill_catch_up_failed_accounts.add(account.account_id)
-            logger.warning(
-                "기동 체결 카치업 미성공: account=%s — reconcile external-buy "
-                "분류를 연기한다(barrier 유지)",
-                account.account_id,
-            )
-        elif result.applied:
-            logger.info(
-                "기동 체결 카치업: account=%s, %d건 반영",
-                account.account_id,
-                result.applied,
-            )
-        await scheduler.start()
-        s.fill_schedulers[account.account_id] = scheduler
+        await _register_fill_scheduler_for_account(s, account)
 
     if s.fill_schedulers:
         logger.info(
@@ -822,6 +896,101 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
             len(s.fill_schedulers),
             ", ".join(s.fill_schedulers),
         )
+
+
+async def _register_fill_scheduler_for_account(s: Services, account: Any) -> bool:
+    """단일 LIVE 계좌의 FillReconcileScheduler 등록 (startup + self-healing 공용).
+
+    멱등 재등록(self-healing): 기존 dict 항목이 있으면 새 scheduler 로 덮어쓰기
+    전 기존 task 를 stop 해 orphan task 를 방지한다. **per-account barrier 만**
+    갱신하고 전역 ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
+    (타 계좌의 #1946 barrier 보존).
+
+    Returns:
+        등록 성공(scheduler start 완료) 여부. ``catch_up_once`` 폴 실패여도
+        scheduler 는 start 하지만 readiness 는 false 로 분리한다(R4).
+    """
+    from ante.broker.fill_scheduler import FillReconcileScheduler
+
+    account_id = account.account_id
+
+    # #2314·#2316 §11.6: position-derived fallback 마스터 disable flag.
+    fallback_enabled = (
+        bool(s.config.get("system.fill_position_fallback_enabled", True))
+        if s.config is not None
+        else True
+    )
+
+    try:
+        broker = await s.account_service.get_broker(account_id)
+    except Exception:
+        # #2397 D-ACC-09 이중 실패모드 (b): per-account continue 지점에서
+        # mark_not_ready(reason) 명시(조용한 skip 제거).
+        _mark_runtime_not_ready(
+            s, account_id, ReadinessFlag.FILL_RECONCILE, "get_broker_failed"
+        )
+        return False
+
+    # 멱등 재등록: 기존 scheduler 가 있으면 교체 전 stop(orphan 방지).
+    existing = s.fill_schedulers.pop(account_id, None)
+    if existing is not None:
+        try:
+            await existing.stop()
+        except Exception:
+            logger.warning(
+                "기존 FillReconcileScheduler 정리 실패(재등록): account=%s",
+                account_id,
+                exc_info=True,
+            )
+
+    scheduler = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=s.order_tracker,
+        fill_applier=s.fill_applier,
+        account_id=account_id,
+        # #2314·#2316 §11: 잔고 역도출 fallback 의 internal_account_qty 조회
+        # 의존성(§11.1) + late-ccld over-attribution alert(§11.4) 발행 경로.
+        trade_service=s.trade_service,
+        eventbus=s.eventbus,
+        fallback_enabled=fallback_enabled,
+        # #2377: over-attribution 의심 알림 종목명 병기 소스.
+        instrument_service=s.instrument_service,
+    )
+    # 기동 카치업 — barrier. reconcile 보다 반드시 선행.
+    # CatchUpResult.succeeded 로 폴 실패와 "정상 0건/open-없음" 을 구분한다.
+    result = await scheduler.catch_up_once()
+    if not result.succeeded:
+        # 폴 미성공 — 미복구 체결이 남아 있을 수 있다. 이 계좌의 기동
+        # reconcile external-buy 분류를 연기해 오분류를 막는다. (per-account
+        # barrier 만 갱신 — 전역 clear 금지로 타 계좌 barrier 보존.)
+        s.fill_catch_up_failed_accounts.add(account_id)
+        logger.warning(
+            "기동 체결 카치업 미성공: account=%s — reconcile external-buy "
+            "분류를 연기한다(barrier 유지)",
+            account_id,
+        )
+    else:
+        # 폴 성공 — 이 계좌의 barrier 항목만 해제(전역 clear 아님).
+        s.fill_catch_up_failed_accounts.discard(account_id)
+        if result.applied:
+            logger.info(
+                "기동 체결 카치업: account=%s, %d건 반영",
+                account_id,
+                result.applied,
+            )
+    await scheduler.start()
+    s.fill_schedulers[account_id] = scheduler
+
+    # #2397 R4: catch_up_once 폴 실패(succeeded==False)면 scheduler 를 start
+    # 하더라도 fill_reconcile_ready=false 로 분리한다(스펙 "catch_up_once + start
+    # 성공" 조건). 폴 성공이어야 ready 로 mark 한다.
+    if result.succeeded:
+        _mark_runtime_ready(s, account_id, ReadinessFlag.FILL_RECONCILE)
+    else:
+        _mark_runtime_not_ready(
+            s, account_id, ReadinessFlag.FILL_RECONCILE, "catch_up_poll_failed"
+        )
+    return result.succeeded
 
 
 async def _init_fill_outbox_publisher(s: Services) -> None:
@@ -854,16 +1023,22 @@ async def _init_reconcile_scheduler(s: Services) -> None:
     """
     assert s.eventbus is not None
 
-    from ante.broker.scheduler import ReconcileScheduler
     from ante.trade.reconciler import PositionReconciler
 
     reconcile_config = s.config.get("reconcile", {})
     if not isinstance(reconcile_config, dict):
         reconcile_config = {}
 
+    accounts = await s.account_service.list()
+
     enabled = reconcile_config.get("enabled", True)
     if not enabled:
         logger.info("ReconcileScheduler 비활성화 (reconcile.enabled=false)")
+        # #2397: 운영자가 reconcile 을 명시 opt-out 했으므로 reconcile_ready 요구를
+        # 면제한다(전 계좌 no-op ready) — disabled 가 readiness 실패로 오기록되어
+        # gate(#2398) 도입 후 정상 주문이 막히지 않도록.
+        for account in accounts:
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.RECONCILE)
         return
 
     interval = reconcile_config.get("interval_seconds", 1800)
@@ -879,40 +1054,17 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         instrument_service=s.instrument_service,
     )
 
-    accounts = await s.account_service.list()
     started: list[str] = []
     for account in accounts:
-        try:
-            broker = await s.account_service.get_broker(account.account_id)
-        except Exception:
+        # #2397 D-ACC-09 R3: reconcile 면제 계좌(virtual/test)는 get_broker 호출
+        # 없이 registry no-op ready mark + broker-backed 등록 skip. LIVE 만 등록.
+        if _flag_exempt_for_account(ReadinessFlag.RECONCILE, account):
+            _mark_runtime_ready(s, account.account_id, ReadinessFlag.RECONCILE)
             continue
-
-        # #1946 barrier: fill 카치업 미성공 계좌는 기동 즉시 대사에서 external-buy
-        # 분류를 연기한다(미복구 ante 체결 오분류 방지). 이후 주기 대사는 fill 폴
-        # 루프가 복구를 진행하므로 정상 처리한다.
-        skip_initial_external_buy = (
-            account.account_id in s.fill_catch_up_failed_accounts
-        )
-        scheduler = ReconcileScheduler(
-            reconciler=reconciler,
-            broker=broker,
-            bot_manager=s.bot_manager,
-            eventbus=s.eventbus,
-            broker_account_id=account.account_id,
-            interval_seconds=interval,
-            skip_initial_external_buy=skip_initial_external_buy,
-        )
-        try:
-            await scheduler.start()
-        except Exception:
-            logger.warning(
-                "ReconcileScheduler 시작 실패: account=%s",
-                account.account_id,
-                exc_info=True,
-            )
-            continue
-        s.reconcile_schedulers[account.account_id] = scheduler
-        started.append(account.account_id)
+        if await _register_reconcile_scheduler_for_account(
+            s, account, reconciler, interval
+        ):
+            started.append(account.account_id)
 
     if not started:
         logger.info("ReconcileScheduler 건너뜀 — 연결된 Broker 없음")
@@ -924,6 +1076,203 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         ", ".join(started),
         interval,
     )
+
+
+def _build_reconciler(s: Services) -> Any:
+    """PositionReconciler 1개 생성 (startup + self-healing 공용)."""
+    assert s.eventbus is not None
+    from ante.trade.reconciler import PositionReconciler
+
+    return PositionReconciler(
+        trade_service=s.trade_service,
+        eventbus=s.eventbus,
+        order_tracker=s.order_tracker,
+        instrument_service=s.instrument_service,
+    )
+
+
+async def _register_reconcile_scheduler_for_account(
+    s: Services, account: Any, reconciler: Any, interval: int
+) -> bool:
+    """단일 LIVE 계좌의 ReconcileScheduler 등록 (startup + self-healing 공용).
+
+    멱등 재등록: 기존 dict 항목이 있으면 새 scheduler 로 교체 전 기존 task 를
+    stop 한다(orphan 방지).
+
+    Returns:
+        등록 성공(start 완료) 여부.
+    """
+    assert s.eventbus is not None
+    from ante.broker.scheduler import ReconcileScheduler
+
+    account_id = account.account_id
+    try:
+        broker = await s.account_service.get_broker(account_id)
+    except Exception:
+        # #2397 D-ACC-09 이중 실패모드 (b): per-account continue 지점 명시 mark.
+        _mark_runtime_not_ready(
+            s, account_id, ReadinessFlag.RECONCILE, "get_broker_failed"
+        )
+        return False
+
+    # #1946 barrier: fill 카치업 미성공 계좌는 기동 즉시 대사에서 external-buy
+    # 분류를 연기한다(미복구 ante 체결 오분류 방지). 이후 주기 대사는 fill 폴
+    # 루프가 복구를 진행하므로 정상 처리한다.
+    skip_initial_external_buy = account_id in s.fill_catch_up_failed_accounts
+
+    # 멱등 재등록: 기존 scheduler 가 있으면 교체 전 stop(orphan 방지).
+    existing = s.reconcile_schedulers.pop(account_id, None)
+    if existing is not None:
+        try:
+            await existing.stop()
+        except Exception:
+            logger.warning(
+                "기존 ReconcileScheduler 정리 실패(재등록): account=%s",
+                account_id,
+                exc_info=True,
+            )
+
+    scheduler = ReconcileScheduler(
+        reconciler=reconciler,
+        broker=broker,
+        bot_manager=s.bot_manager,
+        eventbus=s.eventbus,
+        broker_account_id=account_id,
+        interval_seconds=interval,
+        skip_initial_external_buy=skip_initial_external_buy,
+    )
+    try:
+        await scheduler.start()
+    except Exception:
+        logger.warning(
+            "ReconcileScheduler 시작 실패: account=%s",
+            account_id,
+            exc_info=True,
+        )
+        _mark_runtime_not_ready(
+            s, account_id, ReadinessFlag.RECONCILE, "scheduler_start_failed"
+        )
+        return False
+    s.reconcile_schedulers[account_id] = scheduler
+    _mark_runtime_ready(s, account_id, ReadinessFlag.RECONCILE)
+    return True
+
+
+# ── #2397 D-ACC-09 R5: self-healing background retry loop ──────────────────
+
+
+def _self_healing_targets(accounts: list[Any]) -> list[Any]:
+    """self-healing 대상 계좌 — broker_ready 가 요구되는 LIVE(비면제) 계좌만.
+
+    면제(virtual/test) 계좌는 broker readiness 가 무의미하므로 대상에서 제외한다.
+    """
+    return [a for a in accounts if not _broker_ready_exempt(a)]
+
+
+def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
+    """self-healing background retry loop 시작 (startup init 완료 후).
+
+    broker_ready 가 요구되는 LIVE 계좌가 하나도 없으면(전부 면제) 루프를 띄우지
+    않는다. 이미 task 가 있으면 재시작하지 않는다(멱등).
+    """
+    if s.readiness_self_healing_task is not None:
+        return
+    targets = _self_healing_targets(accounts)
+    if not targets:
+        return
+    s.readiness_self_healing_task = asyncio.create_task(
+        _readiness_self_healing_loop(s, targets),
+        name="readiness-self-healing",
+    )
+    logger.info("Readiness self-healing loop 시작: 대상 LIVE 계좌 %d개", len(targets))
+
+
+async def _self_healing_recover_account(s: Services, account: Any) -> bool:
+    """단일 not_ready broker 계좌의 1회 회복 시도(connect → idempotent 재등록).
+
+    회복(connect 성공) 시:
+    1. ``broker_ready`` 를 ready 로 전이.
+    2. fill_recovery + reconcile + treasury_sync 를 **idempotent re-register**
+       (기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
+       barrier ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
+       (타 계좌 #1946 barrier 보존).
+
+    Returns:
+        broker connect 성공(broker_ready 전이) 여부.
+    """
+    account_id = account.account_id
+
+    # broker_ready 가 이미 ready 면 회복 불필요.
+    if s.runtime_readiness is not None and s.runtime_readiness.is_ready(
+        account_id, ReadinessFlag.BROKER
+    ):
+        return True
+
+    try:
+        broker = await s.account_service.get_broker(account_id)
+        await broker.connect()
+    except Exception:
+        # 회복 미성공 — not_ready 유지. 다음 burst 에서 재시도(liveness).
+        _mark_runtime_not_ready(s, account_id, ReadinessFlag.BROKER, "reconnect_failed")
+        return False
+
+    _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
+    logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
+
+    # broker 회복 후 의존 스케줄러를 idempotent 재등록한다.
+    if s.fill_applier is not None and s.order_tracker is not None:
+        await _register_fill_scheduler_for_account(s, account)
+    if s.trade_service is not None:
+        reconciler = _build_reconciler(s)
+        interval = 1800
+        if s.config is not None:
+            reconcile_config = s.config.get("reconcile", {})
+            if isinstance(reconcile_config, dict):
+                interval = reconcile_config.get("interval_seconds", 1800)
+        await _register_reconcile_scheduler_for_account(
+            s, account, reconciler, interval
+        )
+    # treasury_sync 재시작(면제 없음). 멱등 — Treasury.start_sync 가 기존 sync 를
+    # 교체한다.
+    await _init_treasury_sync(s, [account])
+    return True
+
+
+async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
+    """not_ready broker 계좌를 **무기한 재시도**하는 background loop (liveness).
+
+    liveness invariant: broker 회복이 가능한 한 not_ready 계좌는 유한시간 내
+    ready 로 전이한다. ``max_attempts`` 는 **per-burst(연결시도 단위)에만** 적용
+    하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되어
+    #2395 를 역회귀로 재생산하지 않도록. shutdown 에서 task cancel 로 종료한다.
+    """
+    interval = 60
+    max_per_burst = 5
+    if s.config is not None:
+        interval = int(s.config.get("readiness.self_healing_interval_seconds", 60))
+        max_per_burst = int(
+            s.config.get("readiness.self_healing_max_attempts_per_burst", 5)
+        )
+
+    try:
+        while True:
+            pending = [
+                a
+                for a in targets
+                if s.runtime_readiness is not None
+                and not s.runtime_readiness.is_ready(a.account_id, ReadinessFlag.BROKER)
+            ]
+            for account in pending:
+                # per-burst bounded 재시도(계좌 lifetime 은 무제한).
+                for _attempt in range(max_per_burst):
+                    if await _self_healing_recover_account(s, account):
+                        break
+            # 다음 burst 까지 대기(EGW00133 ~60s 토큰 cooldown 정렬). 회복 여부와
+            # 무관하게 루프는 계속 돌며 잔여 not_ready 계좌를 무기한 재시도한다.
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        logger.info("Readiness self-healing loop 취소(shutdown)")
+        raise
 
 
 async def _init_daily_report_scheduler(s: Services) -> None:
@@ -1052,9 +1401,19 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
     같은 exchange 의 후속 계좌가 여전히 동기화를 시도할 수 있게 한다.
     ``bulk_upsert`` 성공 시에만 exchange 를 synced 로 표시한다. 전 계좌 순회
     후 아무 것도 동기화하지 못하면 기존 경고를 유지한다.
+
+    #2397 D-ACC-09 R1: broker_ready 면제 계좌(virtual/test)는 connect 단계에서
+    이미 skip 되어 broker 가 미연결이다. 여기서도 ``get_broker`` 를 호출하면 그
+    면제 계좌를 KIS 토큰/connect 실패에 **재노출**하므로(readiness 분리 전제
+    붕괴), 면제 계좌는 순회 대상에서 제외한다(non-exempt/live connected 계좌만
+    대상). 면제 계좌의 dummy exchange 가 KRX 등 실 exchange 마스터 적재를
+    선점하던 #2385 회귀도 동일하게 차단된다.
     """
     synced_exchanges: set[str] = set()
     for account in accounts:
+        if _broker_ready_exempt(account):
+            # 면제(virtual/test) 계좌는 broker 미연결 — get_broker 재노출 차단.
+            continue
         if account.exchange in synced_exchanges:
             continue
         try:
@@ -1168,8 +1527,6 @@ class _NullDataProvider:
 
 async def _init_treasury_sync(s: Services, accounts: list) -> None:
     """각 계좌의 Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
-    from ante.account.models import TradingMode
-
     sync_interval = s.config.get("treasury.sync_interval_seconds", 300)
 
     for account in accounts:
@@ -1205,6 +1562,9 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                     trading_mode="virtual",
                     price_resolver=price_resolver,
                 )
+                # #2397 treasury_sync_ready: VIRTUAL 도 sync 시작 성공 시 mark
+                # (treasury_sync 는 면제 없음 — broker 없이 Trade-DB sync).
+                _mark_runtime_ready(s, account.account_id, ReadinessFlag.TREASURY_SYNC)
                 logger.info(
                     "Treasury Virtual 동기화 시작: account=%s (주기: %d초)",
                     account.account_id,
@@ -1232,12 +1592,22 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                     interval_seconds=sync_interval,
                     trading_mode="live",
                 )
+                # #2397 treasury_sync_ready: LIVE sync 시작 성공 시 mark.
+                _mark_runtime_ready(s, account.account_id, ReadinessFlag.TREASURY_SYNC)
                 logger.info(
                     "Treasury Live 동기화 시작: account=%s (주기: %d초)",
                     account.account_id,
                     sync_interval,
                 )
         except Exception:
+            # #2397 treasury_sync_ready: 시작 실패 → not_ready(reason). treasury_sync
+            # 은 면제 없음(VIRTUAL/LIVE 양쪽 요구)이므로 항상 명시 mark.
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.TREASURY_SYNC,
+                "treasury_sync_failed",
+            )
             logger.warning(
                 "Treasury 동기화 시작 실패: account=%s — 건너뜀",
                 account.account_id,
@@ -2019,6 +2389,19 @@ async def _shutdown(s: Services) -> None:
     if s.daily_report_scheduler:
         await s.daily_report_scheduler.stop()
         logger.info("DailyReportScheduler 종료")
+
+    # #2397 D-ACC-09 R5: self-healing loop 를 scheduler dict 정리 **전**에
+    # cancel 한다 — 루프가 종료 중 scheduler 를 재등록(orphan task)하지 못하도록.
+    if (
+        s.readiness_self_healing_task is not None
+        and not s.readiness_self_healing_task.done()
+    ):
+        s.readiness_self_healing_task.cancel()
+        try:
+            await s.readiness_self_healing_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Readiness self-healing loop 종료")
 
     # SPLIT-3 (#1242): multi-broker ReconcileScheduler pool 정리
     for sched_account_id, scheduler in list(s.reconcile_schedulers.items()):
