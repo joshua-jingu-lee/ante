@@ -566,6 +566,108 @@ async def test_self_healing_recover_disabled_reconcile_marks_ready() -> None:
     assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.RECONCILE)
 
 
+@pytest.mark.asyncio
+async def test_self_healing_recover_treasury_only_no_scheduler_churn() -> None:
+    """Codex P2 attempt-3 회귀: treasury_sync 만 not_ready 인 LIVE 계좌의 회복은
+    건강한 fill/reconcile 스케줄러를 재등록(stop/start)하지 않는다(churn 방지).
+
+    broker/fill/reconcile 가 모두 ready 이고 treasury 만 not_ready → recover 는
+    treasury 만 재동기화하고, fill/reconcile 인스턴스는 그대로 유지(stop 미호출).
+    (이전 회귀: 매 attempt 마다 건강한 스케줄러 stop/재시작 → KIS 호출·폴링 공백.)
+    """
+    s = _services()
+    account = _account("live-1")
+    # fill + reconcile 사전 등록(ready).
+    await main_module._register_fill_scheduler_for_account(s, account)
+    await main_module._register_reconcile_scheduler_for_account(
+        s, account, object(), 1800
+    )
+    first_fill = s.fill_schedulers["live-1"]
+    first_reconcile = s.reconcile_schedulers["live-1"]
+    # broker ready, treasury 만 not_ready.
+    s.runtime_readiness.mark_ready("live-1", ReadinessFlag.BROKER)
+    s.runtime_readiness.mark_not_ready(
+        "live-1", ReadinessFlag.TREASURY_SYNC, "treasury_sync_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    # 건강한 fill/reconcile 스케줄러는 churn 되지 않는다(동일 인스턴스·stop 미호출).
+    assert s.fill_schedulers["live-1"] is first_fill
+    assert s.reconcile_schedulers["live-1"] is first_reconcile
+    assert first_fill.stopped is False
+    assert first_reconcile.stopped is False
+    # treasury 만 재동기화 → ready.
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.TREASURY_SYNC)
+
+
+@pytest.mark.asyncio
+async def test_self_healing_recover_rebinds_schedulers_on_broker_recovery() -> None:
+    """broker 가 방금 재연결되면 fill/reconcile 스케줄러를 재등록(rebind)한다 —
+    이미 ready 여도 stale broker 핸들 교체를 위해(churn 게이트의 broker_just_recovered
+    경로). treasury_only churn 방지와 대칭되는 정상 rebind 경로 회귀 락."""
+    s = _services()
+    account = _account("live-1")
+    await main_module._register_fill_scheduler_for_account(s, account)
+    await main_module._register_reconcile_scheduler_for_account(
+        s, account, object(), 1800
+    )
+    first_fill = s.fill_schedulers["live-1"]
+    first_reconcile = s.reconcile_schedulers["live-1"]
+    # broker not_ready → 회복 시 broker_just_recovered=True 로 rebind 유도.
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    await main_module._self_healing_recover_account(s, account)
+
+    # broker 재연결 → 기존 스케줄러 stop 후 새 인스턴스로 교체.
+    assert first_fill.stopped is True
+    assert first_reconcile.stopped is True
+    assert s.fill_schedulers["live-1"] is not first_fill
+    assert s.reconcile_schedulers["live-1"] is not first_reconcile
+
+
+@pytest.mark.asyncio
+async def test_self_healing_burst_backoff_is_exponential_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codex P2 회귀(행위): burst 내 attempt 간 backoff 가 base*2^attempt 로
+    지수 증가하고 max 로 capped 된다. 마지막 attempt 뒤에는 backoff 하지 않는다.
+
+    asyncio.sleep 을 가로채 실제 대기 없이 duration 시퀀스를 검증한다.
+    base=5, max=15, max_per_burst=4 → backoff [5, 10, 15(capped from 20)].
+    """
+    s = _services(brokers={"live-1": RuntimeError("EGW00133")})
+    s.config = SimpleNamespace(
+        get=lambda key, default=None: {
+            "readiness.self_healing_interval_seconds": 0,
+            "readiness.self_healing_max_attempts_per_burst": 4,
+            "readiness.self_healing_backoff_base_seconds": 5,
+            "readiness.self_healing_backoff_max_seconds": 15,
+        }.get(key, default)
+    )
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    durations: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def _fake_sleep(delay: float) -> None:
+        durations.append(delay)
+        # backoff 3회(attempt 0,1,2) 수집 후 루프 종료(인터럽트).
+        if len(durations) >= 3:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+    account = _account("live-1")
+
+    with pytest.raises(asyncio.CancelledError):
+        await main_module._readiness_self_healing_loop(s, [account])
+
+    # base*2^0=5, base*2^1=10, min(base*2^2=20, max=15)=15. 마지막 attempt(3)는 skip.
+    assert durations[:3] == [5, 10, 15]
+
+
 def test_self_healing_loop_backs_off_between_attempts() -> None:
     """Codex P2 회귀: burst 내 attempt 간 지수 backoff(토큰 cooldown 정렬).
 

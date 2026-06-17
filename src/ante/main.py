@@ -1193,15 +1193,17 @@ def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
 async def _self_healing_recover_account(s: Services, account: Any) -> bool:
     """단일 not_ready broker 계좌의 1회 회복 시도(connect → idempotent 재등록).
 
-    회복(connect 성공) 시:
-    1. ``broker_ready`` 를 ready 로 전이.
-    2. fill_recovery + reconcile + treasury_sync 를 **idempotent re-register**
-       (기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
+    회복 시:
+    1. broker 가 비면제·not_ready 이면 connect 재시도 → 성공 시 ``broker_ready``
+       전이(``broker_just_recovered``).
+    2. 의존 스케줄러(fill_recovery/reconcile/treasury_sync)는 **해당 플래그가 실제
+       not_ready 이거나 broker 가 방금 재연결된 경우에만** idempotent re-register
+       한다(기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
        barrier ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
        (타 계좌 #1946 barrier 보존).
 
     Returns:
-        broker connect 성공(broker_ready 전이) 여부.
+        모든 비면제 플래그 ready(active_trading_ready) 여부.
     """
     account_id = account.account_id
 
@@ -1215,6 +1217,7 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
         broker_type=account.broker_type,
         trading_mode=account.trading_mode,
     )
+    broker_just_recovered = False
     if not broker_exempt and not s.runtime_readiness.is_ready(
         account_id, ReadinessFlag.BROKER
     ):
@@ -1228,27 +1231,49 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
             )
             return False
         _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
+        broker_just_recovered = True
         logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
 
-    # 의존 스케줄러 재시도 — **플래그별 면제 인식**(Codex P2). broker 면제 계좌
-    # (virtual/test)는 fill/reconcile 도 면제(startup no-op ready)이므로 broker-backed
-    # 재등록을 건너뛰어 get_broker 재노출을 막고, 비면제 플래그만 재시도한다.
-    # treasury_sync 는 면제 없음 → 전 계좌 재시도(broker 면제 계좌의 일시 treasury
-    # 실패도 회복). broker 외 readiness 실패도 active_trading_ready 까지 회복한다
-    # (Codex P1: broker_ready 만 보면 일시 실패가 #2398 gate 에서 영구 차단 고착).
+    # 의존 스케줄러 재시도 — **재등록 churn 방지**(Codex P2 attempt-3): 각 플래그는
+    # 실제 not_ready 이거나 broker 가 방금 재연결된 경우에만 재등록한다. treasury 만
+    # not_ready 인 LIVE 계좌에서 건강한 fill/reconcile 스케줄러를 매 attempt 마다
+    # stop/재시작해 불필요한 KIS 호출·폴링 공백을 만들던 회귀를 차단한다. broker 가
+    # 방금 회복되면 fill/reconcile/treasury(LIVE) 가 묶인 broker 핸들이 재연결됐으므로
+    # rebind 위해 재등록한다.
+    # **플래그별 면제 인식**(Codex P2 attempt-2): broker 면제 계좌(virtual/test)는
+    # fill/reconcile 도 면제(startup no-op ready)이므로 broker-backed 재등록을 건너뛰어
+    # get_broker 재노출을 막고, treasury_sync(면제 없음)만 재시도한다. broker 외
+    # readiness 실패도 active_trading_ready 까지 회복한다(Codex P1: broker_ready 만
+    # 보면 일시 실패가 #2398 gate 에서 영구 차단 고착).
     fill_exempt = is_flag_exempt(
         ReadinessFlag.FILL_RECONCILE,
         broker_type=account.broker_type,
         trading_mode=account.trading_mode,
     )
-    if not fill_exempt and s.fill_applier is not None and s.order_tracker is not None:
+    fill_needs_register = broker_just_recovered or not s.runtime_readiness.is_ready(
+        account_id, ReadinessFlag.FILL_RECONCILE
+    )
+    if (
+        not fill_exempt
+        and fill_needs_register
+        and s.fill_applier is not None
+        and s.order_tracker is not None
+    ):
         await _register_fill_scheduler_for_account(s, account)
     reconcile_exempt = is_flag_exempt(
         ReadinessFlag.RECONCILE,
         broker_type=account.broker_type,
         trading_mode=account.trading_mode,
     )
-    if not reconcile_exempt and s.trade_service is not None:
+    reconcile_needs_register = (
+        broker_just_recovered
+        or not s.runtime_readiness.is_ready(account_id, ReadinessFlag.RECONCILE)
+    )
+    if (
+        not reconcile_exempt
+        and reconcile_needs_register
+        and s.trade_service is not None
+    ):
         reconcile_enabled = True
         interval = 1800
         if s.config is not None:
@@ -1267,9 +1292,12 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
             # (Codex P2: 비활성 reconcile 비면제 계좌가 영구 not_ready 로 고착되어
             # active_trading_ready 가 영영 False 가 되는 회귀 차단.)
             _mark_runtime_ready(s, account_id, ReadinessFlag.RECONCILE)
-    # treasury_sync 재시작(면제 없음 — 전 계좌). 멱등 — Treasury.start_sync 가
-    # 기존 sync 교체.
-    await _init_treasury_sync(s, [account])
+    # treasury_sync(면제 없음) — not_ready 이거나 broker 재연결(LIVE 는 broker 핸들에
+    # 묶임) 시에만 재동기화. 멱등 — Treasury.start_sync 가 기존 sync 교체.
+    if broker_just_recovered or not s.runtime_readiness.is_ready(
+        account_id, ReadinessFlag.TREASURY_SYNC
+    ):
+        await _init_treasury_sync(s, [account])
     # 모든 비면제 플래그가 ready 여야 회복 완료(active_trading_ready 기준).
     return s.runtime_readiness.active_trading_ready(
         account_id,
