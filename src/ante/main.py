@@ -1293,7 +1293,8 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
             # active_trading_ready 가 영영 False 가 되는 회귀 차단.)
             _mark_runtime_ready(s, account_id, ReadinessFlag.RECONCILE)
     # treasury_sync(면제 없음) — not_ready 이거나 broker 재연결(LIVE 는 broker 핸들에
-    # 묶임) 시에만 재동기화. 멱등 — Treasury.start_sync 가 기존 sync 교체.
+    # 묶임) 시에만 재동기화. _init_treasury_sync 가 stop_sync 선행으로 idempotent
+    # replace 하므로 stale broker sync 가 새 broker 로 교체된다(Codex P2 attempt-4).
     if broker_just_recovered or not s.runtime_readiness.is_ready(
         account_id, ReadinessFlag.TREASURY_SYNC
     ):
@@ -1621,6 +1622,11 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
     for account in accounts:
         try:
             treasury = s.treasury_manager.get(account.account_id)
+            # 기존 sync 를 먼저 중지(idempotent replace) — Treasury.start_sync 는
+            # 실행 중 task 가 있으면 경고 후 no-op 이므로, broker 회복 시 stale broker
+            # 로 도는 sync 를 새 broker 로 교체하려면 stop_sync 선행이 필수다
+            # (Codex P2 attempt-4). startup 초기 호출에서는 task 가 없어 no-op.
+            await treasury.stop_sync()
             trading_mode = getattr(account, "trading_mode", TradingMode.VIRTUAL)
             is_virtual = trading_mode == TradingMode.VIRTUAL
 

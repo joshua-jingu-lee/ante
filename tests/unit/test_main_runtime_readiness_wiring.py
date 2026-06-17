@@ -118,9 +118,14 @@ def _services(
     s.api_gateway = None
     s.config = SimpleNamespace(get=lambda key, default=None: default)
 
-    # treasury_manager 더블 — start_sync/set_account_info 추적(self-healing 재sync).
+    # treasury_manager 더블 — start_sync/stop_sync/set_account_info 추적
+    # (self-healing 재sync 는 stop_sync 선행 idempotent replace).
+    async def _treasury_stop_sync() -> None:
+        return None
+
     treasury = SimpleNamespace(
         start_sync=lambda **kwargs: None,
+        stop_sync=_treasury_stop_sync,
         set_account_info=lambda **kwargs: None,
     )
     s.treasury_manager = SimpleNamespace(get=lambda account_id: treasury)
@@ -625,6 +630,65 @@ async def test_self_healing_recover_rebinds_schedulers_on_broker_recovery() -> N
     assert first_reconcile.stopped is True
     assert s.fill_schedulers["live-1"] is not first_fill
     assert s.reconcile_schedulers["live-1"] is not first_reconcile
+
+
+@pytest.mark.asyncio
+async def test_self_healing_recover_restarts_treasury_on_broker_recovery() -> None:
+    """Codex P2 attempt-4 회귀: broker 회복 시 Treasury sync 를 stop 후 재시작해
+    stale broker 를 새 broker 로 교체한다.
+
+    Treasury.start_sync 는 실행 중 task 가 있으면 no-op 이므로, _init_treasury_sync
+    가 stop_sync 를 선행해야 한다. broker_just_recovered LIVE 경로에서 stop→start
+    순서를 잠근다(이전 회귀: start_sync no-op → treasury_sync_ready 만 ready 인데
+    잔고 동기화는 stale broker 유지).
+    """
+    s = _services()
+    account = _account("live-1")
+    calls: list[str] = []
+
+    async def _stop_sync() -> None:
+        calls.append("stop")
+
+    treasury = SimpleNamespace(
+        start_sync=lambda **kwargs: calls.append("start"),
+        stop_sync=_stop_sync,
+        set_account_info=lambda **kwargs: None,
+    )
+    s.treasury_manager = SimpleNamespace(get=lambda account_id: treasury)
+    # broker not_ready → 회복 시 broker_just_recovered=True → treasury 재바인딩.
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    await main_module._self_healing_recover_account(s, account)
+
+    # stale broker sync 교체: stop 선행 후 start(no-op 회피).
+    assert calls == ["stop", "start"]
+
+
+@pytest.mark.asyncio
+async def test_init_treasury_sync_stops_before_start_idempotent() -> None:
+    """_init_treasury_sync 는 stop_sync 선행 후 start_sync 한다(idempotent replace).
+
+    startup 재진입·self-healing 재sync 모두 stale sync 를 새 broker 로 교체하도록
+    stop→start 순서를 직접 잠근다(Codex P2 attempt-4).
+    """
+    s = _services()
+    account = _account("live-1")
+    calls: list[str] = []
+
+    async def _stop_sync() -> None:
+        calls.append("stop")
+
+    treasury = SimpleNamespace(
+        start_sync=lambda **kwargs: calls.append("start"),
+        stop_sync=_stop_sync,
+        set_account_info=lambda **kwargs: None,
+    )
+    s.treasury_manager = SimpleNamespace(get=lambda account_id: treasury)
+
+    await main_module._init_treasury_sync(s, [account])
+
+    assert calls == ["stop", "start"]
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.TREASURY_SYNC)
 
 
 @pytest.mark.asyncio
