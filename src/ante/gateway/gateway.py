@@ -9,6 +9,7 @@ from ante.gateway.cache import ResponseCache
 from ante.gateway.rate_limiter import RateLimitConfig, RateLimiter
 
 if TYPE_CHECKING:
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.account.service import AccountService
     from ante.broker.base import BrokerAdapter
     from ante.eventbus.bus import EventBus
@@ -48,6 +49,7 @@ class APIGateway:
         rate_config: RateLimitConfig | None = None,
         stop_order_manager: Any | None = None,
         order_tracker: Any | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
     ) -> None:
         self._account_service = account_service
         self._eventbus = eventbus
@@ -59,10 +61,136 @@ class APIGateway:
         self._running = False
         self._stop_order_manager = stop_order_manager
         self._order_tracker = order_tracker
+        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층3, 최후보루)
+        # reader. 미주입(None)이면 fail-closed — submit_order 가 차단한다(G2).
+        # main(s.runtime_readiness) pass-through.
+        self._runtime_readiness = runtime_readiness
 
     async def _get_broker(self, account_id: str) -> BrokerAdapter:
         """AccountService에서 브로커 인스턴스를 획득한다."""
         return await self._account_service.get_broker(account_id)
+
+    async def _get_account(self, account_id: str) -> tuple[Any | None, bool]:
+        """account_id 의 Account 메타 조회 — ``(account, fetch_failed)`` 반환.
+
+        ``_on_order_approved`` 가 non-LIVE silent skip 라우팅 판정으로 호출한다.
+        ``AccountService.get`` 은 ``AccountNotFoundError`` 를 raise 하므로 예외를
+        흡수하되, **조회 실패 여부**(``fetch_failed``)를 별도로 반환해 호출자/계층3
+        gate 가 "조회 예외(검증 불가)"와 "정상 None"을 구별할 수 있게 한다(G7 status
+        축 STATUS_UNAVAILABLE 도출에 필요). 예외 = fail-closed(virtual fall-open
+        금지, G2).
+        """
+        get = getattr(self._account_service, "get", None)
+        if get is None:
+            return None, False
+        try:
+            return await get(account_id), False
+        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2)·검증 불가.
+            return None, True
+
+    async def _readiness_gate(self, account_id: str, *, side: object) -> None:
+        """계층3 active-order gate — ``broker.place_order`` **직전** 단일 재확인.
+
+        **위치(#2398 attempt4-a, P1)**: ``rate_limiter.acquire()``(최대 ~60s await)
+        + ``_get_broker()`` await **이후**, ``place_order`` 직전에 호출된다(spec
+        broker-adapter/11-order-flow.md). acquire/get_broker 대기 중 ``mark_not_ready``/
+        suspend 가 끼어도 그 직후 단일 재확인으로 TOCTOU 윈도우를 닫는다(재확인
+        직후 ``place_order`` 가 동기 시작하므로 각 await 후 중복 체크 불요).
+
+        **단일 fresh fetch(중복 get 금지)**: 이 gate 가 **한 번** account 를 fetch
+        해(``_get_account``) readiness(broker_type/trading_mode) + status(SUSPENDED)
+        **둘 다** 평가한다. routing 단계(``_on_order_approved``)의 fetch 를 재사용하지
+        **않고** 여기서 fresh fetch 하는 이유는, status 가 런타임 가변 kill-switch 라
+        acquire/get_broker await 중 in-flight suspend 를 잡으려면 await **이후** 최신
+        status 를 읽어야 하기 때문이다(stale routing 스냅샷 금지).
+
+        평가 축(둘 중 하나라도 막으면 거부 — D-ACC-09 §8 effect 일관성):
+
+        - **status 축(Fix 2, in-flight kill-switch backstop)**: verified SUSPENDED →
+          ``account_suspended``; ``STATUS_UNAVAILABLE``(소스 present + 조회 예외/미상)
+          → ``account_status_unavailable`` fail-closed; ``None``(소스 미구성)/verified
+          non-SUSPENDED → status 축 통과. 계층1 통과 후 await 중 발생한 suspend 를
+          계층3 final backstop 이 잡는다(D-ACC-09 §8 계층1 primary + 계층3 backstop).
+        - **readiness 축**: account 메타 미상/non-LIVE/registry 미주입/not_ready →
+          ``account_not_ready``(missing-flag suffix). non-LIVE fail-closed 는 직접
+          ``submit_order`` 호출 경로의 virtual 주문이 실 broker 로 새는 것을 막는다.
+
+        차단 시 G6 운영자 알림(error/system) 정확히 1회 + ``APIError`` raise →
+        ``_on_order_approved`` except → OrderFailedEvent(reserve 정확 해제, G3).
+        OrderApprovedEvent 는 ``reason`` 필드가 없어 청산 marker 미운반(generic 문구).
+        매 주문 시점 registry/status 조회(상태 캐시 금지, G5).
+        """
+        from ante.account.gate import (
+            ACCOUNT_NOT_READY_REASON,
+            ACCOUNT_STATUS_UNAVAILABLE_REASON,
+            ACCOUNT_SUSPENDED_REASON,
+            STATUS_UNAVAILABLE,
+            active_trading_blocked,
+            build_not_ready_notification,
+            derive_account_status,
+            not_ready_reason,
+        )
+        from ante.account.models import AccountStatus, TradingMode
+        from ante.broker.exceptions import APIError
+
+        # 단일 fresh fetch(await 이후 최신 status 확보 — in-flight suspend 검출).
+        account, fetch_failed = await self._get_account(account_id)
+
+        # status 축(Fix 2) — kill-switch in-flight backstop. account_service 는
+        # gateway 생성자 필수 인자라 소스가 항상 present → status 축 활성.
+        status = derive_account_status(
+            self._account_service, account, fetch_failed=fetch_failed
+        )
+        reason: str | None = None
+        if status == AccountStatus.SUSPENDED:
+            reason = ACCOUNT_SUSPENDED_REASON
+        elif status is STATUS_UNAVAILABLE:
+            # 소스 present + 조회 예외/미상 = 검증 불가 → fail-closed(in-flight
+            # suspend 를 stale 통과시키지 않는다). account=None(조회 실패)도 여기로
+            # 귀결돼 readiness 축의 account_metadata_unavailable 보다 우선 차단한다.
+            reason = ACCOUNT_STATUS_UNAVAILABLE_REASON
+
+        # readiness 축 — status 축이 통과했을 때만 평가(둘 중 하나라도 막으면 거부).
+        if reason is None:
+            broker_type = getattr(account, "broker_type", "")
+            trading_mode = getattr(account, "trading_mode", None)
+            if not isinstance(broker_type, str) or trading_mode is None:
+                reason = f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable"
+            elif trading_mode != TradingMode.LIVE:
+                # 안전장치(G2): non-LIVE 가 마커 skip 을 뚫고 여기까지 도달하면
+                # 실 broker.place_order 호출 직전이다 — fail-closed 차단한다.
+                reason = f"{ACCOUNT_NOT_READY_REASON}: non_live_broker_call_blocked"
+            elif active_trading_blocked(
+                self._runtime_readiness,
+                account_id,
+                broker_type=broker_type,
+                trading_mode=trading_mode,
+            ):
+                reason = not_ready_reason(
+                    self._runtime_readiness,
+                    account_id,
+                    broker_type=broker_type,
+                    trading_mode=trading_mode,
+                )
+
+        if reason is None:
+            return
+        # G6: 계층3 운영자 가시성 — generic 문구(청산 marker 미운반). 정확히 1회.
+        await self._eventbus.publish(
+            build_not_ready_notification(
+                account_id=account_id,
+                reason=reason,
+                side=side,
+                is_liquidation=False,
+            )
+        )
+        # error_code 는 status 축이면 해당 토큰, readiness 축이면 account_not_ready.
+        error_code = (
+            reason
+            if reason in (ACCOUNT_SUSPENDED_REASON, ACCOUNT_STATUS_UNAVAILABLE_REASON)
+            else ACCOUNT_NOT_READY_REASON
+        )
+        raise APIError(reason, error_code=error_code)
 
     def _get_rate_limiter(self, account_id: str) -> RateLimiter:
         """계좌별 독립 Rate Limiter를 반환한다."""
@@ -221,9 +349,29 @@ class APIGateway:
 
         require_account_id(account_id, context="gateway.submit_order")
 
+        # ── #2398 계층3: active-order gate — rate-limit/broker 획득 **이후**, ──
+        # ``place_order`` **직전** 단일 재확인(attempt4-a, P1).
+        #
+        # **위치(spec 11-order-flow.md)**: ``rate_limiter.acquire()``(최대 ~60s
+        # await) + ``_get_broker()`` await **뒤**, ``place_order`` 직전. gate 를
+        # 이 await 들 **앞**에 두면 대기 중 ``mark_not_ready``/suspend 가 끼어
+        # stale 통과로 실 주문이 나가므로(TOCTOU), 비가역 시점 직전 단일 재확인으로
+        # 윈도우를 닫는다. 재확인 직후 ``place_order`` 가 동기 시작한다.
+        #
+        # not_ready/suspended/status-unavailable 면 broker 를 호출하지 않고
+        # ``APIError`` 를 raise → 호출자 ``_on_order_approved`` 의 except 가
+        # OrderFailedEvent(bot_id/order_id/account_id 보존)로 변환 → Treasury
+        # ``_on_order_failed`` → ``release_reservation`` 정확 해제(G3, [must_fix I]).
+        #
+        # **G3 critical**: 이 gate 를 ``_on_order_approved`` 의 isinstance 직후에서
+        # raise 하면 EventBus(bus.py:96)가 예외를 swallow 하여 OrderFailedEvent 가
+        # 미발행되고 reserve 가 영구 고착된다. 따라서 gate 는 반드시
+        # ``submit_order`` 내부에서 실행해 실패가 except→OrderFailedEvent 로
+        # 귀결되게 한다.
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)
+        await self._readiness_gate(account_id, side=side)
         broker_order_id = await broker.place_order(
             symbol=symbol,
             side=side,
@@ -345,6 +493,59 @@ class APIGateway:
                     )
                 )
                 return
+
+        # ── #2398 Virtual 라우팅: account 메타 기반 non-LIVE silent skip(Fix A) ──
+        # 위치: stop/stop_limit StopOrderManager 분기 **뒤**, submit try **前**
+        # (spec api-gateway.md:161 normative).
+        #
+        # **메타 기반 결정적 라우팅(구독 순서 비의존)**: gateway 는 account 메타를
+        # **단일** fetch 해(``_get_account``) ``trading_mode`` 로 routing 을
+        # **결정적으로** 판정한다 — main 의 EventBus 구독 순서에 의존하지 않는다.
+        # 과거 attempt1 의 ``_virtual_handled`` 마커-only skip 은 VirtualExecutor 가
+        # gateway 보다 먼저 구독됐다는 가정에 의존했고, gateway 가 먼저 실행되면
+        # 마커 미설정 상태로 virtual 주문이 ``submit_order``→``_readiness_gate`` 의
+        # ``trading_mode != LIVE`` 분기로 들어가 ``non_live_broker_call_blocked``
+        # OrderFailedEvent 를 발행 → 뒤이어 VirtualExecutor 가 같은 주문을 체결/실패
+        # 처리해 동일 order_id terminal 이 중복됐다(finding 1). 메타 기반 silent
+        # skip 으로 이 race 를 봉쇄한다.
+        #
+        # - 메타 성공 + ``trading_mode != LIVE`` → **silent skip**(terminal 발행
+        #   없음). virtual 주문은 VirtualExecutor 가 소유 처리(체결/실패 종결).
+        # - 메타 성공 + LIVE → ``submit_order``. 내부 계층3 gate 가 ``place_order``
+        #   직전 단일 fresh fetch 로 readiness + status(SUSPENDED) 재확인 후 broker
+        #   호출(routing fetch 재사용 금지 — in-flight suspend 검출 위해 await 이후
+        #   최신 status 필요, attempt4-a/b).
+        # - 메타 **실패**(None) → fail-closed. 단 ``_virtual_handled`` 마커가 set
+        #   이면 skip(VirtualExecutor 가 소유 처리 — finding 1 메타 실패 잔여
+        #   코너의 중복 terminal 봉쇄, defense-in-depth). 마커 미설정이면 live
+        #   경로로 보고 ``submit_order``→계층3 gate 가 메타 실패를 G6 알림
+        #   + APIError 로 처리 → except → OrderFailedEvent(alert 누락 방지).
+        from ante.account.models import TradingMode
+
+        account, _ = await self._get_account(event.account_id)
+        if account is not None:
+            trading_mode = getattr(account, "trading_mode", None)
+            is_non_live = (
+                isinstance(trading_mode, TradingMode)
+                and trading_mode != TradingMode.LIVE
+            )
+            if is_non_live:
+                # 메타 결정적 non-LIVE(VIRTUAL) → broker.place_order 경로 silent
+                # skip. virtual 주문은 VirtualExecutor 가 소유 처리(terminal 없음).
+                # trading_mode 가 None/비-TradingMode(메타 손상)면 silent skip 하지
+                # 않고 아래 live 경로로 떨어뜨려 ``_readiness_gate`` 가 fail-closed
+                # (account_metadata_unavailable) 차단하게 한다(G2 — 손상 메타를
+                # virtual 로 오인해 fall-open 하지 않는다).
+                return
+        elif getattr(event, "_virtual_handled", False):
+            # 메타 실패 잔여 코너 — VirtualExecutor 가 소유 마커를 set 했으므로
+            # (priority 60 > gateway 50, 구독 순서 비의존) virtual 주문이다 →
+            # VirtualExecutor 가 체결/실패 종결한다. gateway 는 skip 하여 동일
+            # order_id terminal 중복(finding 1)을 막는다.
+            return
+        # 메타 성공+LIVE 또는 메타 실패(마커 미설정)=live 경로. 계층3 gate 가
+        # ``place_order`` 직전 fresh fetch 로 readiness + status 를 재확인한다(routing
+        # 의 stale account 를 재사용하지 않음 — in-flight suspend/저하 검출).
 
         try:
             broker_order_id = await self.submit_order(

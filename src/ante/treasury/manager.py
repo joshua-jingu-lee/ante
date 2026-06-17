@@ -10,6 +10,7 @@ from ante.treasury.treasury import Treasury
 
 if TYPE_CHECKING:
     from ante.account.models import Account
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.trade.order_tracker import OrderTracker
@@ -26,12 +27,17 @@ class TreasuryManager:
         eventbus: EventBus,
         *,
         order_tracker: OrderTracker | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
         # #1947: 부분체결 비례 정산용 OrderTracker 를 각 Treasury 에 주입한다.
         # 단일 인스턴스(account-agnostic — PK 가 전역 유일 order_id)를 공유한다.
         self._order_tracker = order_tracker
+        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층2) reader 를 각
+        # Treasury 에 pass-through 한다. broker_type/trading_mode 는 account 메타
+        # (immutable)에서 per-Treasury 주입한다. main(s.runtime_readiness) 경유.
+        self._runtime_readiness = runtime_readiness
         self._treasuries: dict[str, Treasury] = {}
 
     async def create_treasury(self, account: Account) -> Treasury:
@@ -53,6 +59,10 @@ class TreasuryManager:
             sell_commission_rate=float(account.sell_commission_rate),
             market_order_reserve_buffer_rate=account.market_order_reserve_buffer_rate,
             order_tracker=self._order_tracker,
+            # #2398: 계층2 gate reader + 면제 매트릭스 판정용 account 메타(immutable).
+            runtime_readiness=self._runtime_readiness,
+            broker_type=account.broker_type,
+            trading_mode=account.trading_mode,
         )
         await treasury.initialize()
         self._treasuries[account.account_id] = treasury

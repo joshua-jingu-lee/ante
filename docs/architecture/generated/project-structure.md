@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-17 (KST)
+> 마지막 생성 시점: 2026-06-18 (KST)
 
 ## 최상위 구조
 
@@ -271,7 +271,8 @@ src/ante/
 │   ├── scoping.py
 │   ├── service.py
 │   ├── timezone.py
-│   └── readiness.py
+│   ├── readiness.py
+│   └── gate.py
 ├── db/
 │   ├── versions/
 │   │   ├── __init__.py
@@ -729,7 +730,9 @@ tests/
 │   ├── test_order_tracker_order_price.py
 │   ├── test_recorder_modified.py
 │   ├── test_account_runtime_readiness.py
-│   └── test_main_runtime_readiness_wiring.py
+│   ├── test_main_runtime_readiness_wiring.py
+│   ├── _readiness_gate_helpers.py
+│   └── test_active_order_readiness_gate.py
 ├── __init__.py
 └── integration/
     ├── __init__.py

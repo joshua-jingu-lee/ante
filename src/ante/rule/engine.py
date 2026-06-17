@@ -29,6 +29,7 @@ from ante.rule.strategy_rules import (
 
 if TYPE_CHECKING:
     from ante.account.models import Account
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.instrument.service import InstrumentService
@@ -272,6 +273,7 @@ class RuleEngine:
         unrecovered_buy_guard_min_age: float = 60.0,
         allow_unrecovered_buy_overlap: bool = False,
         instrument_service: InstrumentService | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
     ) -> None:
         from ante.account.scoping import require_account_id
 
@@ -296,6 +298,10 @@ class RuleEngine:
         # #2377: Rule violation NOTIFY 알림 종목명 병기용. 미주입(None)이면
         # 종목코드만 표기하는 기존 경로를 유지한다(CLI 생성 경로는 미주입).
         self._instrument_service = instrument_service
+        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층1) reader.
+        # 미주입(None)이면 fail-closed — gate 가 active-order 를 차단한다(G2).
+        # RuleEngineManager → main(s.runtime_readiness) pass-through.
+        self._runtime_readiness = runtime_readiness
 
         # #2315: 미복구 self-order 반복 매수 가드 설정.
         # ``unrecovered_buy_guard_min_age``는 미복구 outstanding buy 주문이 차단
@@ -743,6 +749,54 @@ class RuleEngine:
 
     # ── EventBus 핸들러 ──────────────────────────────
 
+    async def _resolve_account_meta(self) -> tuple[str, Any] | None:
+        """gate 용 ``(broker_type, trading_mode)`` 취득 — fail-closed.
+
+        우선 ``self._account`` 스냅샷을 쓰고, 없으면 ``account_service.get`` 으로
+        조회한다. 둘 다 실패하면 ``None`` 을 반환해 호출자가 fail-closed 차단하게
+        한다(G2). status 는 별도 ``_resolve_account_status`` 가 조회한다.
+        """
+        from ante.account.models import TradingMode
+
+        account = self._account
+        if account is not None:
+            broker_type = getattr(account, "broker_type", None)
+            trading_mode = getattr(account, "trading_mode", None)
+            if isinstance(broker_type, str) and trading_mode is not None:
+                return broker_type, trading_mode
+        if self._account_service is None:
+            return None
+        try:
+            fetched = await self._account_service.get(self._account_id)
+        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed 차단(G2).
+            return None
+        broker_type = getattr(fetched, "broker_type", None)
+        trading_mode = getattr(fetched, "trading_mode", None)
+        if not isinstance(broker_type, str) or trading_mode is None:
+            return None
+        # mypy: TradingMode 참조 유지(런타임 import 비용 없음).
+        _ = TradingMode
+        return broker_type, trading_mode
+
+    async def _resolve_account_status(self) -> Any | None:
+        """G7 — live ``AccountStatus`` 3-state 조회(``RuleContext.account_status`` 는
+        dead field). 공유 SSOT 헬퍼 ``ante.account.gate.resolve_account_status`` 에
+        위임한다 — 계층1(여기)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가해
+        중복 구현을 막는다(메타리뷰 followup).
+
+        status 는 런타임 가변 kill-switch(``account suspend`` IPC)라 반드시 **live**
+        조회하며, ``self._account`` 생성시점 스냅샷으로 fallback 하지 않는다(#2398 P1
+        — stale ACTIVE 통과 시 suspended 계좌가 kill-switch 를 우회). 3-state:
+
+        - ``account_service is None`` → ``None``(status 축 비활성, 비게이트 레거시).
+        - 소스 present + ``get`` 예외/None/status 미상 → ``STATUS_UNAVAILABLE``
+          (검증 불가 → 호출자 fail-closed, spec 07:88).
+        - 소스 present + 조회 성공 + status present → verified status.
+        """
+        from ante.account.gate import resolve_account_status
+
+        return await resolve_account_status(self._account_service, self._account_id)
+
     async def _on_order_request(self, event: object) -> None:
         """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행.
 
@@ -773,6 +827,101 @@ class RuleEngine:
             return
 
         try:
+            # ── #2398 계층1: active-order readiness gate (D-ACC-09 축 ii) ──────
+            # 위치: account_id 필터 직후, 도메인 preflight(side 검증 등)·RuleContext
+            # 생성·Treasury 조회 **前**(spec 07:85). reserve 이전이라 거부는
+            # OrderRejectedEvent 로 종결하면 누수가 없다(G3). 매 이벤트 시점 registry
+            # 조회(상태 캐시 금지, G5). fail-closed(G2): account 메타 취득 실패·
+            # registry 미주입·조회 예외 = 차단.
+            #
+            # G7(kill-switch 합성): readiness 가 ready 여도 AccountStatus.SUSPENDED
+            # 면 차단한다(StopOrderManager 변환 OrderRequestEvent 등 BotManager 중지
+            # 우회 경로의 kill-switch 우회를 계층1에서 봉쇄, spec 07:86).
+            from ante.account.gate import (
+                ACCOUNT_NOT_READY_REASON,
+                ACCOUNT_STATUS_UNAVAILABLE_REASON,
+                ACCOUNT_SUSPENDED_REASON,
+                STATUS_UNAVAILABLE,
+                active_trading_blocked,
+                build_not_ready_notification,
+                is_liquidation_reason,
+                not_ready_reason,
+            )
+            from ante.account.models import AccountStatus
+
+            is_liquidation = is_liquidation_reason(getattr(event, "reason", ""))
+
+            # G7 kill-switch(SUSPENDED) + status 검증불가 fail-closed(#2398 P1).
+            # status 는 런타임 가변 kill-switch 라 stale 스냅샷으로 통과시키지
+            # 않는다. ``STATUS_UNAVAILABLE`` sentinel(소스 present + 조회 예외/미상)
+            # 은 fail-closed 거부, ``None``(소스 미구성)·verified non-SUSPENDED 는
+            # status 축 통과(readiness 메타 gate 로 진행).
+            account_status = await self._resolve_account_status()
+            status_reason: str | None = None
+            if account_status == AccountStatus.SUSPENDED:
+                status_reason = ACCOUNT_SUSPENDED_REASON
+            elif account_status is STATUS_UNAVAILABLE:
+                # live status 조회 실패/미상 = 검증 불가 → fail-closed(spec 07:88).
+                # stale ACTIVE 스냅샷으로 SUSPENDED 우회되던 회귀를 차단(P1).
+                status_reason = ACCOUNT_STATUS_UNAVAILABLE_REASON
+            if status_reason is not None:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=status_reason,
+                    )
+                )
+                await self._eventbus.publish(
+                    build_not_ready_notification(
+                        account_id=self._account_id,
+                        reason=status_reason,
+                        side=getattr(event, "side", ""),
+                        is_liquidation=is_liquidation,
+                    )
+                )
+                return
+
+            meta = await self._resolve_account_meta()
+            if meta is None:
+                # account 메타 취득 실패 = fail-closed 차단(G2). broker_type/
+                # trading_mode 미상이라 면제 매트릭스를 적용할 수 없으므로 bare
+                # 토큰 + 메타 미상 suffix 로 거부한다.
+                meta_blocked, meta_reason = (
+                    True,
+                    f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable",
+                )
+            else:
+                meta_blocked = active_trading_blocked(
+                    self._runtime_readiness,
+                    self._account_id,
+                    broker_type=meta[0],
+                    trading_mode=meta[1],
+                )
+                meta_reason = not_ready_reason(
+                    self._runtime_readiness,
+                    self._account_id,
+                    broker_type=meta[0],
+                    trading_mode=meta[1],
+                )
+            if meta_blocked:
+                await self._eventbus.publish(
+                    _build_safe_rejected_event(
+                        account_id=self._account_id,
+                        event=event,
+                        reason=meta_reason,
+                    )
+                )
+                await self._eventbus.publish(
+                    build_not_ready_notification(
+                        account_id=self._account_id,
+                        reason=meta_reason,
+                        side=getattr(event, "side", ""),
+                        is_liquidation=is_liquidation,
+                    )
+                )
+                return
+
             # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
             # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
             # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.

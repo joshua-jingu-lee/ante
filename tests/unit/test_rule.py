@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ante.account.models import Account, AccountStatus
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
     OrderRejectedEvent,
@@ -69,6 +70,13 @@ def mock_account_service():
     service.get = AsyncMock(return_value=account)
     service.suspend = AsyncMock()
     return service
+
+
+def _gate_ready_registry(account_id: str = "domestic") -> RuntimeReadinessRegistry:
+    """#2398 계층1 gate 통과용 ready registry((test, virtual) → treasury_sync)."""
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(account_id, ReadinessFlag.TREASURY_SYNC)
+    return reg
 
 
 # ── RuleResult / RuleEvaluation ──────────────────
@@ -730,6 +738,8 @@ class TestRuleEngineEventBus:
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
+            # #2398: 계층1 gate 통과(기존 order-request 동작 보존).
+            runtime_readiness=_gate_ready_registry(),
         )
         engine.start()
         return engine
@@ -4820,6 +4830,8 @@ class TestRuleEngineConfigReload:
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
+            # #2398: 계층1 gate 통과(기존 order-request 동작 보존).
+            runtime_readiness=_gate_ready_registry(),
         )
         engine.start()
         return engine
@@ -5521,6 +5533,8 @@ class TestRuleEngineUnrealizedPnl:
             account_id="domestic",
             account_service=mock_account_service,
             trade_service=mock_trade_service,
+            # #2398: 계층1 gate 통과(미실현 손익 주입 동작만 검증).
+            runtime_readiness=_gate_ready_registry(),
         )
 
     @pytest.mark.asyncio
@@ -5864,6 +5878,8 @@ class TestRuleEngineWarnEventBus:
             eventbus=eventbus,
             account_id="domestic",
             account_service=mock_account_service,
+            # #2398: 계층1 gate 통과(WARN 경로 동작만 검증).
+            runtime_readiness=_gate_ready_registry(),
         )
         engine.add_account_rule(_WarnRule("w1", {"name": "Warn1"}))
         engine.start()

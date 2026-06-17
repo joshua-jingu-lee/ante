@@ -970,6 +970,7 @@ class BotManager:
             )
             return
 
+        from ante.account.gate import LIQUIDATION_REASON_PREFIX
         from ante.eventbus.events import OrderRequestEvent
 
         account_id = bot.config.account_id
@@ -1012,7 +1013,10 @@ class BotManager:
                 side="sell",
                 quantity=pos.quantity,
                 order_type="market",
-                reason=f"봇 삭제 청산 (bot={bot.bot_id})",
+                # #2398 청산 marker: gate(계층1/2)가 readiness not_ready 청산 SELL
+                # 을 "청산 차단: 수동 청산 필요" 전용 문구로 거부하도록 machine-
+                # readable ASCII prefix 를 부착한다(한국어 reason 매칭 금지, G6).
+                reason=f"{LIQUIDATION_REASON_PREFIX} 봇 삭제 청산 (bot={bot.bot_id})",
                 exchange=getattr(pos, "exchange", "KRX"),
             )
             await self._eventbus.publish(event)

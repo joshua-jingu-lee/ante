@@ -12,6 +12,7 @@ from ante.eventbus.events import (
     OrderSubmittedEvent,
 )
 from ante.gateway.gateway import APIGateway
+from tests.unit._readiness_gate_helpers import make_account, ready_registry
 
 
 @pytest.fixture
@@ -27,6 +28,8 @@ def account_service(broker: MagicMock) -> MagicMock:
     """AccountService mock."""
     svc = MagicMock()
     svc.get_broker = AsyncMock(return_value=broker)
+    # #2398: gate/virtual 라우팅이 broker_type/trading_mode 를 조회한다(LIVE).
+    svc.get = AsyncMock(return_value=make_account("acc-test"))
     return svc
 
 
@@ -56,13 +59,19 @@ def gateway(
         account_service=account_service,
         eventbus=eventbus,
         stop_order_manager=stop_manager,
+        # #2398: 계층3 gate — ready registry 로 기존 통과 동작 보존.
+        runtime_readiness=ready_registry("acc-test"),
     )
 
 
 @pytest.fixture
 def gateway_no_stop(account_service: MagicMock, eventbus: MagicMock) -> APIGateway:
     """APIGateway without StopOrderManager."""
-    return APIGateway(account_service=account_service, eventbus=eventbus)
+    return APIGateway(
+        account_service=account_service,
+        eventbus=eventbus,
+        runtime_readiness=ready_registry("acc-test"),
+    )
 
 
 class TestStopOrderRouting:

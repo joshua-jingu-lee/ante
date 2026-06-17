@@ -593,7 +593,11 @@ async def _init_trading(s: Services) -> None:
     # Treasury 가 buy fill 에서 order_id 로 ordered_qty/recorded_filled_qty 를
     # 조회해 terminal(전량 체결) 판정 후에만 잔여 예약을 회수한다.
     s.treasury_manager = TreasuryManager(
-        db=s.db, eventbus=s.eventbus, order_tracker=s.order_tracker
+        db=s.db,
+        eventbus=s.eventbus,
+        order_tracker=s.order_tracker,
+        # #2398 D-ACC-09 축 ii: 계층2 gate reader pass-through(동일 인스턴스).
+        runtime_readiness=s.runtime_readiness,
     )
     accounts = await s.account_service.list()
     await s.treasury_manager.initialize_all(accounts)
@@ -613,6 +617,8 @@ async def _init_trading(s: Services) -> None:
         # #2377: 생성하는 모든 RuleEngine 에 Rule violation 알림 종목명 병기
         # 소스를 pass-through 한다(L297 에서 생성·워밍 완료).
         instrument_service=s.instrument_service,
+        # #2398 D-ACC-09 축 ii: 계층1 gate reader pass-through(동일 인스턴스).
+        runtime_readiness=s.runtime_readiness,
     )
     await s.rule_engine_manager.initialize_all(
         accounts, config=s.config, dynamic_config=s.dynamic_config
@@ -628,6 +634,10 @@ async def _init_trading(s: Services) -> None:
     s.virtual_executor = VirtualExecutor(
         eventbus=s.eventbus,
         gateway=None,  # APIGateway 연결 후 설정
+        # #2398 G9: virtual 경로 계층3-equivalent backstop. readiness reader +
+        # account 메타(broker_type/trading_mode) 조회용 account_service 주입.
+        runtime_readiness=s.runtime_readiness,
+        account_service=s.account_service,
     )
     s.virtual_executor.subscribe()
 
@@ -699,6 +709,8 @@ async def _init_gateway(s: Services) -> None:
         eventbus=s.eventbus,
         stop_order_manager=stop_order_manager,
         order_tracker=s.order_tracker,
+        # #2398 D-ACC-09 축 ii: 계층3 gate reader pass-through(동일 인스턴스).
+        runtime_readiness=s.runtime_readiness,
     )
     s.api_gateway.start()
     logger.info("APIGateway 시작 완료")
