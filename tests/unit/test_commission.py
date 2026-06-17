@@ -2,13 +2,36 @@
 
 import pytest
 
+from ante.account.models import TradingMode
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.broker.models import CommissionInfo
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import OrderFilledEvent
 from ante.treasury import Treasury
+from tests.unit._readiness_gate_helpers import make_account
 
 # ── US-1: CommissionInfo 모델 ─────────────────────
+
+
+def _gate_ready_registry(account_id: str) -> RuntimeReadinessRegistry:
+    """#2398 gate 통과용 ready registry((test, virtual) → treasury_sync)."""
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(account_id, ReadinessFlag.TREASURY_SYNC)
+    return reg
+
+
+def _gate_account_service(account_id: str):
+    """#2398 G9 backstop 용 account_service stub((test, virtual))."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    svc = MagicMock()
+    svc.get = AsyncMock(
+        return_value=make_account(
+            account_id, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        )
+    )
+    return svc
 
 
 class TestCommissionInfo:
@@ -109,6 +132,9 @@ class TestVirtualExecutorCommission:
             eventbus=eventbus,
             commission_rate=0.00015,
             sell_tax_rate=0.0023,
+            # #2398: G9 backstop 통과(수수료 계산만 검증).
+            runtime_readiness=_gate_ready_registry("acct1"),
+            account_service=_gate_account_service("acct1"),
         )
 
         portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
@@ -147,6 +173,9 @@ class TestVirtualExecutorCommission:
             eventbus=eventbus,
             commission_rate=0.00015,
             sell_tax_rate=0.0023,
+            # #2398: G9 backstop 통과(수수료 계산만 검증).
+            runtime_readiness=_gate_ready_registry("acct1"),
+            account_service=_gate_account_service("acct1"),
         )
 
         portfolio = VirtualPortfolioView(bot_id="bot1", initial_balance=10_000_000.0)
@@ -256,6 +285,8 @@ class TestTreasuryCommission:
             buy_commission_rate=0.001,  # 높은 수수료율로 테스트
             sell_commission_rate=0.002,
             account_id="acc-test",
+            # #2398: 계층2 gate 통과(예약 수수료율 검증).
+            runtime_readiness=_gate_ready_registry("acc-test"),
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)

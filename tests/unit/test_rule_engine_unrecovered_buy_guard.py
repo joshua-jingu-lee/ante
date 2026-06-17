@@ -25,6 +25,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from ante.account.models import Account, AccountStatus, TradingMode
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
     OrderRejectedEvent,
@@ -36,6 +38,26 @@ from ante.rule import RuleEngine
 ACCOUNT = "domestic"
 BOT = "bot1"
 SYMBOL = "005930"
+
+
+def _gate_account() -> Account:
+    """#2398 계층1 gate 용 (test, virtual) account snapshot."""
+    return Account(
+        account_id=ACCOUNT,
+        name=ACCOUNT,
+        exchange="KRX",
+        currency="KRW",
+        broker_type="test",
+        trading_mode=TradingMode.VIRTUAL,
+        status=AccountStatus.ACTIVE,
+    )
+
+
+def _gate_ready_registry() -> RuntimeReadinessRegistry:
+    """(test, virtual) → treasury_sync 만 비면제이므로 ready mark."""
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(ACCOUNT, ReadinessFlag.TREASURY_SYNC)
+    return reg
 
 
 @dataclass
@@ -159,6 +181,9 @@ def _build_engine(
         order_tracker=order_tracker,
         unrecovered_buy_guard_min_age=min_age,
         allow_unrecovered_buy_overlap=allow_overlap,
+        # #2398: 계층1 gate 통과(미복구 매수 가드 동작만 검증하도록 readiness 통과).
+        account=_gate_account(),
+        runtime_readiness=_gate_ready_registry(),
     )
 
 

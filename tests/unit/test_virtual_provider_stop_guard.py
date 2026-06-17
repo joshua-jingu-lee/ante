@@ -8,11 +8,34 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from ante.account.models import TradingMode
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
 from ante.eventbus import EventBus
 from ante.eventbus.events import OrderApprovedEvent, OrderFilledEvent
+from tests.unit._readiness_gate_helpers import make_account
+
+ACCOUNT = "acct1"
+
+
+def _gate_kwargs() -> dict:
+    """#2398 G9 backstop 통과용 ready registry + account_service.
+
+    (test, virtual) → treasury_sync 만 비면제이므로 ready mark.
+    """
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(ACCOUNT, ReadinessFlag.TREASURY_SYNC)
+    svc = MagicMock()
+    svc.get = AsyncMock(
+        return_value=make_account(
+            ACCOUNT, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        )
+    )
+    return {"runtime_readiness": reg, "account_service": svc}
 
 
 @pytest.fixture
@@ -23,7 +46,9 @@ def eventbus():
 class TestVirtualProviderStopGuard:
     async def test_virtual_provider_skips_stop_orders(self, eventbus):
         """Virtual 계좌의 buy stop OrderApprovedEvent는 즉시 체결되지 않는다."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -59,7 +84,9 @@ class TestVirtualProviderStopGuard:
 
     async def test_virtual_provider_skips_stop_limit_orders(self, eventbus):
         """stop_limit도 동일하게 등록 단계에서 가상 체결되지 않는다."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -90,7 +117,9 @@ class TestVirtualProviderStopGuard:
 
     async def test_virtual_provider_processes_trigger_converted_market(self, eventbus):
         """StopOrderManager가 trigger 시 발행하는 변환 market 주문은 정상 체결된다."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -127,7 +156,9 @@ class TestVirtualProviderStopGuard:
 
     async def test_virtual_provider_processes_trigger_converted_limit(self, eventbus):
         """stop_limit trigger 변환 limit 주문도 정상 체결된다."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -168,7 +199,9 @@ class TestVirtualProviderFillDedupKeyPolicy:
     """
 
     async def test_virtual_fill_has_empty_dedup_key(self, eventbus):
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )

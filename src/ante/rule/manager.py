@@ -10,6 +10,7 @@ from ante.rule.engine import RuleEngine
 
 if TYPE_CHECKING:
     from ante.account.models import Account
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.instrument.service import InstrumentService
@@ -33,6 +34,7 @@ class RuleEngineManager:
         unrecovered_buy_guard_min_age: float = 60.0,
         allow_unrecovered_buy_overlap: bool = False,
         instrument_service: InstrumentService | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._account_service = account_service
@@ -50,6 +52,9 @@ class RuleEngineManager:
         # #2377: 생성하는 모든 RuleEngine 에 Rule violation 알림 종목명 병기
         # 소스를 pass-through 한다. None 이면 종목코드만 표기(하위 호환).
         self._instrument_service = instrument_service
+        # #2398 D-ACC-09 축 ii: 생성하는 모든 RuleEngine 에 계층1 gate reader 를
+        # pass-through 한다. None 이면 fail-closed(gate 가 차단). main 경유.
+        self._runtime_readiness = runtime_readiness
         self._engines: dict[str, RuleEngine] = {}
 
     def create_engine(
@@ -92,6 +97,7 @@ class RuleEngineManager:
             unrecovered_buy_guard_min_age=self._unrecovered_buy_guard_min_age,
             allow_unrecovered_buy_overlap=self._allow_unrecovered_buy_overlap,
             instrument_service=self._instrument_service,
+            runtime_readiness=self._runtime_readiness,
         )
 
         if rule_configs:

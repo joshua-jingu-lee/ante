@@ -15,6 +15,8 @@ from ante.account.scoping import require_account_id
 from ante.treasury.models import BotBudget
 
 if TYPE_CHECKING:
+    from ante.account.models import TradingMode
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.broker.base import BrokerAdapter
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -171,6 +173,9 @@ class Treasury:
         order_reserve_price_resolver: Callable[[str], Awaitable[float]] | None = None,
         bot_status_checker: Callable[[str], str] | None = None,
         order_tracker: OrderTracker | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
+        broker_type: str = "test",
+        trading_mode: TradingMode | None = None,
     ) -> None:
         self._db = db
         self._eventbus = eventbus
@@ -195,6 +200,18 @@ class Treasury:
         # None 이면(미주입 또는 VirtualProvider 직접 full-fill 등 tracker 부재
         # 주문) buy 정산은 기존 full-fill pop-once semantics 로 fallback 한다.
         self._order_tracker = order_tracker
+        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층2) reader.
+        # 미주입(None)이면 fail-closed — gate 가 reserve 직전 active-order 를
+        # 차단한다(G2). broker_type/trading_mode 는 TreasuryManager 가 account
+        # 메타에서 주입한다(면제 매트릭스 판정용). trading_mode 미주입(None)이면
+        # VIRTUAL 디폴트로 본다.
+        self._runtime_readiness = runtime_readiness
+        self._gate_broker_type = broker_type
+        if trading_mode is None:
+            from ante.account.models import TradingMode as _TradingMode
+
+            trading_mode = _TradingMode.VIRTUAL
+        self._gate_trading_mode = trading_mode
 
         self._account_balance: float = 0.0
         self._purchasable_amount: float = 0.0
@@ -746,6 +763,58 @@ class Treasury:
             return
 
         if not self._is_my_event(event):
+            return
+
+        # ── #2398 계층2: active-order readiness gate (reserve 직전) ────────────
+        # 위치: ``_is_my_event`` 직후, stop/stop_limit 면제 분기 **前**(spec
+        # 05-treasury-manager.md:66). 계층1(RuleEngine) 통과 후 reserve 사이의
+        # 회복/저하 race 에서 reserve 를 보호한다. not_ready 면 ``reserve_for_order``
+        # 를 호출하지 않고 OrderRejectedEvent 종결 — reserve 미실행이라 누수 없음
+        # (G3). 매 이벤트 시점 registry 조회(상태 캐시 금지, G5). fail-closed(G2):
+        # registry 미주입·조회 예외 = 차단. SELL 도 차단 + G6 NotificationEvent
+        # 1회(spec 05:73, BUY/SELL 무관).
+        from ante.account.gate import (
+            active_trading_blocked,
+            build_not_ready_notification,
+            is_liquidation_reason,
+            not_ready_reason,
+        )
+
+        if active_trading_blocked(
+            self._runtime_readiness,
+            self._account_id,
+            broker_type=self._gate_broker_type,
+            trading_mode=self._gate_trading_mode,
+        ):
+            reason = not_ready_reason(
+                self._runtime_readiness,
+                self._account_id,
+                broker_type=self._gate_broker_type,
+                trading_mode=self._gate_trading_mode,
+            )
+            await self._eventbus.publish(
+                OrderRejectedEvent(
+                    account_id=self._account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price,
+                    order_type=event.order_type,
+                    reason=reason,
+                    exchange=event.exchange,
+                )
+            )
+            await self._eventbus.publish(
+                build_not_ready_notification(
+                    account_id=self._account_id,
+                    reason=reason,
+                    side=event.side,
+                    is_liquidation=is_liquidation_reason(getattr(event, "reason", "")),
+                )
+            )
             return
 
         # 매수 stop / stop_limit 주문은 등록 시점에 자금을 잠그지 않는다 (#1337).

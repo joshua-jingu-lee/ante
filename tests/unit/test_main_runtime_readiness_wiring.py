@@ -929,35 +929,78 @@ async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) 
     assert "test" not in connect_ids
 
 
-# ── observe-only 회귀: gate reader 부재(주문 동작 불변) ─────────────────────
+# ── #2398 gate reader allowlist + SSOT-위반 금지 ───────────────────────────
 
 
-def test_observe_only_no_gate_reader_in_consumers() -> None:
-    """#2397 은 gate reader 를 추가하지 않는다(gate=#2398) — 주문 동작 불변.
+def test_gate_reader_allowlist_and_no_ssot_violation() -> None:
+    """#2398 active-order gate reader 를 허용 allowlist 로만 한정하고, SSOT
+    위반(스케줄러 dict 직접 read / is_ready raw flag 로 active gate 판단)을 금지한다.
 
-    Treasury/RuleEngine/gateway/broker 등 소비자 모듈이 ``active_trading_ready``
-    /``runtime_readiness`` 를 조회하지 않음을 소스 레벨로 잠근다. 본 PR 은 registry
-    를 채우기만(main 등록자)·관측만 노출한다.
+    (#2397 의 ``test_observe_only_no_gate_reader_in_consumers`` 를 gate 도입에
+    맞춰 전환한 회귀 락.)
+
+    허용 consumer = 3계층(+G9 backstop) gate + gate 헬퍼 SSOT + manager/main
+    pass-through:
+      - ``account/gate.py`` (gate 헬퍼 SSOT), ``account/readiness.py`` (registry
+        정의), ``account/__init__.py`` (re-export)
+      - ``rule/engine.py`` (계층1), ``treasury/treasury.py`` (계층2),
+        ``gateway/gateway.py`` (계층3), ``bot/providers/virtual.py`` (G9 backstop)
+      - ``rule/manager.py``·``treasury/manager.py``·``main.py`` (pass-through)
+
+    금지:
+      - 허용 외 consumer 가 ``active_trading_ready`` / ``runtime_readiness`` /
+        ``active_trading_blocked`` 를 직접 조회.
+      - **어떤 consumer 든** ``fill_schedulers`` / ``reconcile_schedulers`` 를
+        직접 read 하여 active gate 판단(registry SSOT 우회 — D-ACC-09 §1).
     """
     import pathlib
 
     src_root = pathlib.Path(main_module.__file__).resolve().parent
-    # readiness 정의 모듈·등록자(main)·account 패키지 re-export 는 제외.
-    allowed = {
+
+    allowed_readers = {
+        src_root / "account" / "gate.py",
         src_root / "account" / "readiness.py",
         src_root / "account" / "__init__.py",
         src_root / "main.py",
+        src_root / "rule" / "engine.py",
+        src_root / "rule" / "manager.py",
+        src_root / "treasury" / "treasury.py",
+        src_root / "treasury" / "manager.py",
+        src_root / "gateway" / "gateway.py",
+        src_root / "bot" / "providers" / "virtual.py",
     }
-    offenders: list[str] = []
+
+    reader_tokens = (
+        "active_trading_ready",
+        "active_trading_blocked",
+        "runtime_readiness",
+    )
+    # SSOT 우회 금지: 스케줄러 dict 를 직접 read 해 active gate 를 판단하는 consumer.
+    # registry(account/readiness.py) 와 등록자(main.py) 만 이 dict 들을 만진다.
+    scheduler_dict_owners = {
+        src_root / "account" / "readiness.py",
+        src_root / "main.py",
+    }
+    scheduler_dict_tokens = ("fill_schedulers", "reconcile_schedulers")
+
+    reader_offenders: list[str] = []
+    scheduler_offenders: list[str] = []
     for py in src_root.rglob("*.py"):
-        if py in allowed:
-            continue
         text = py.read_text(encoding="utf-8")
-        if "active_trading_ready" in text or "runtime_readiness" in text:
-            offenders.append(str(py.relative_to(src_root)))
-    assert offenders == [], (
-        "observe-only 위반 — 다음 소비자가 readiness 를 조회한다(gate=#2398): "
-        f"{offenders}"
+        if py not in allowed_readers and any(t in text for t in reader_tokens):
+            reader_offenders.append(str(py.relative_to(src_root)))
+        if py not in scheduler_dict_owners and any(
+            t in text for t in scheduler_dict_tokens
+        ):
+            scheduler_offenders.append(str(py.relative_to(src_root)))
+
+    assert reader_offenders == [], (
+        "gate reader allowlist 위반 — 허용 외 모듈이 readiness 를 직접 조회한다: "
+        f"{reader_offenders}"
+    )
+    assert scheduler_offenders == [], (
+        "SSOT 위반 — consumer 가 스케줄러 dict 를 직접 read 한다(registry 우회): "
+        f"{scheduler_offenders}"
     )
 
 

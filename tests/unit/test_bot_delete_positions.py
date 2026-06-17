@@ -222,6 +222,34 @@ class TestDeleteBotHandlePositions:
         assert qty_map["005930"] == 50
         assert qty_map["035420"] == 15
 
+    async def test_liquidate_orders_carry_machine_readable_marker(
+        self, manager, ctx, eventbus, trade_service
+    ):
+        """#2398: 청산 SELL OrderRequestEvent 는 machine-readable ``liquidation:``
+        ASCII prefix 를 reason 에 실어, gate(계층1/2)가 한국어 매칭 없이 청산을
+        식별해 "청산 차단" 전용 문구를 쓸 수 있게 한다(G6)."""
+        from ante.account.gate import (
+            LIQUIDATION_REASON_PREFIX,
+            is_liquidation_reason,
+        )
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="test")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        trade_service._positions["bot1"] = [
+            FakePositionSnapshot("bot1", "005930", 50),
+        ]
+
+        published: list[OrderRequestEvent] = []
+        eventbus.subscribe(OrderRequestEvent, lambda e: published.append(e))
+
+        await manager.delete_bot("bot1", handle_positions="liquidate")
+
+        assert len(published) == 1
+        assert published[0].reason.startswith(LIQUIDATION_REASON_PREFIX)
+        assert is_liquidation_reason(published[0].reason)
+        # 봇 삭제는 진행된다(미청산 포지션은 운영자 노출 정책).
+        assert manager.get_bot("bot1") is None
+
     async def test_liquidate_skips_zero_quantity(
         self, manager, ctx, eventbus, trade_service
     ):

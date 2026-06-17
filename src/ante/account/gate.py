@@ -1,0 +1,152 @@
+"""Active-order readiness gate helpers (D-ACC-09 축 ii, #2398).
+
+3계층 defense-in-depth(RuleEngine 계층1 / Treasury 계층2 / APIGateway 계층3 +
+VirtualExecutor G9 backstop)가 공유하는 SSOT 헬퍼다. 각 계층은
+``RuntimeReadinessRegistry``(축 i, #2397)를 **매 이벤트 시점** 조회(상태 캐시 금지,
+G5 liveness)하고, fail-closed(registry 미주입·조회 예외·account 메타 취득 실패 =
+차단, G2)로 동작한다.
+
+본 모듈은 reader(gateway/RuleEngine/Treasury/VirtualExecutor)가 공통으로 쓰는:
+
+- ``account_not_ready`` reason 토큰 SSOT(broker-adapter/11-order-flow.md:82) +
+  missing-flag suffix 산출(``not_ready_reason``).
+- ``account_suspended`` reason 토큰(G7 — 계층1 kill-switch 합성).
+- 운영자 가시성 ``NotificationEvent(level=error, category=system)`` 빌더(G6 — 전
+  계층 통일 1회, BUY/SELL 무관). 청산(liquidation) SELL marker 검출 시 전용 문구
+  (rule-engine/07:91~95, treasury/05:73).
+- 청산 marker(machine-readable ASCII prefix — 한국어 reason 매칭 금지)
+  부착/검출 헬퍼(``LIQUIDATION_REASON_PREFIX``, ``is_liquidation_reason``).
+- fail-closed readiness 평가(``active_trading_blocked``).
+
+scope: 이 헬퍼는 active-order gate reader 전용이다. registry 를 채우는 단일 mark
+경로는 ``main._init_*`` 단독이다(D-ACC-09 §3).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from ante.account.readiness import ALL_FLAGS, is_flag_exempt
+
+if TYPE_CHECKING:
+    from ante.account.models import TradingMode
+    from ante.account.readiness import RuntimeReadinessRegistry
+    from ante.eventbus.events import NotificationEvent
+
+# reason 토큰 SSOT (broker-adapter/11-order-flow.md:82). 세 계층 모두 동일 토큰을
+# 쓰고, 상세는 missing-flag suffix 로 붙인다.
+ACCOUNT_NOT_READY_REASON = "account_not_ready"
+
+# G7 — 계층1 kill-switch 합성(AccountStatus.SUSPENDED). readiness 가 ready 여도
+# suspended 면 계층1 이 이 reason 으로 차단한다.
+ACCOUNT_SUSPENDED_REASON = "account_suspended"
+
+# 청산(liquidation/exit SELL) machine-readable marker. ``_liquidate_positions``
+# (bot/manager.py)가 청산 OrderRequestEvent.reason 에 이 ASCII prefix 를 부착하고,
+# gate 가 marker 를 검출해 "청산 차단" 전용 문구를 쓴다. 한국어 reason 문자열
+# 매칭은 금지(G6 — locale/문구 변경에 깨지지 않는 machine-readable 계약).
+LIQUIDATION_REASON_PREFIX = "liquidation:"
+
+
+def is_liquidation_reason(reason: object) -> bool:
+    """``reason`` 이 청산 marker(``liquidation:`` ASCII prefix)를 갖는가."""
+    return isinstance(reason, str) and reason.startswith(LIQUIDATION_REASON_PREFIX)
+
+
+@dataclass(frozen=True)
+class GateDecision:
+    """readiness gate 평가 결과.
+
+    - ``blocked``: True 면 active-order 거부(fail-closed 포함).
+    - ``reason``: 거부 사유 토큰(``account_not_ready: <missing>`` |
+      ``account_suspended``). ``blocked`` False 면 ``""``.
+    """
+
+    blocked: bool
+    reason: str
+
+
+def not_ready_reason(
+    registry: RuntimeReadinessRegistry | None,
+    account_id: str,
+    *,
+    broker_type: str,
+    trading_mode: TradingMode,
+) -> str:
+    """``account_not_ready`` reason + missing-flag suffix 를 산출한다.
+
+    면제 플래그는 제외하고(매트릭스), 비면제이면서 not_ready(또는 registry 미주입)
+    인 플래그만 suffix 로 나열한다. registry 가 None 이면(fail-closed) 비면제 전
+    플래그를 missing 으로 표기한다.
+    """
+    missing: list[str] = []
+    for flag in ALL_FLAGS:
+        if is_flag_exempt(flag, broker_type=broker_type, trading_mode=trading_mode):
+            continue
+        if registry is None or not registry.is_ready(account_id, flag):
+            missing.append(flag.value)
+    if missing:
+        return f"{ACCOUNT_NOT_READY_REASON}: {', '.join(missing)}"
+    return ACCOUNT_NOT_READY_REASON
+
+
+def active_trading_blocked(
+    registry: RuntimeReadinessRegistry | None,
+    account_id: str,
+    *,
+    broker_type: str,
+    trading_mode: TradingMode,
+) -> bool:
+    """active-trading 차단 여부(fail-closed, G1/G2).
+
+    - registry 미주입(None) → 차단(fall-open 금지).
+    - ``active_trading_ready`` 조회 예외 → 차단.
+    - 면제 매트릭스 적용 후 비면제 플래그가 not_ready → 차단.
+    """
+    if registry is None:
+        return True
+    try:
+        return not registry.active_trading_ready(
+            account_id, broker_type=broker_type, trading_mode=trading_mode
+        )
+    except Exception:  # noqa: BLE001 — 조회 예외도 fail-closed 차단(G2).
+        return True
+
+
+def build_not_ready_notification(
+    *,
+    account_id: str,
+    reason: str,
+    side: object = "",
+    is_liquidation: bool = False,
+) -> NotificationEvent:
+    """not_ready 거부 시 운영자 가시성 ``NotificationEvent`` 빌더(G6).
+
+    전 계층(1/2/3 + G9) 통일 — ``level=error, category=system`` 으로 정확히 1회
+    발행한다(BUY/SELL 무관). 청산(liquidation) SELL marker 가 검출되면 "청산 차단"
+    전용 문구를 쓰고(rule-engine/07:91~95), 그 외 일반 거부는 generic 문구를 쓴다.
+    """
+    from ante.eventbus.events import NotificationEvent
+
+    side_str = side if isinstance(side, str) else ""
+    if is_liquidation:
+        title = "청산 차단: account not_ready — 수동 청산 필요"
+        message = (
+            f"계좌 {account_id} 의 봇 삭제 청산(SELL) 주문이 readiness not_ready 로 "
+            f"거부되었습니다. 봇 삭제는 진행되며 미청산 포지션이 남습니다. "
+            f"수동 청산이 필요합니다. (사유: {reason})"
+        )
+    else:
+        side_label = side_str.upper() if side_str else "주문"
+        title = "주문 차단: account not_ready"
+        message = (
+            f"계좌 {account_id} 의 active-order({side_label}) 주문이 readiness "
+            f"not_ready 로 거부되었습니다. (사유: {reason})"
+        )
+    return NotificationEvent(
+        level="error",
+        title=title,
+        message=message,
+        category="system",
+    )

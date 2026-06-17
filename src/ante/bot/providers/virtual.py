@@ -13,6 +13,8 @@ from ante.broker.models import CommissionInfo
 from ante.strategy.base import OrderView, PortfolioView
 
 if TYPE_CHECKING:
+    from ante.account.readiness import RuntimeReadinessRegistry
+    from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.gateway.gateway import APIGateway
 
@@ -153,6 +155,8 @@ class VirtualExecutor:
         commission_rate: float = 0.00015,
         sell_tax_rate: float = 0.0023,
         slippage_rate: float = 0.0,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
+        account_service: AccountService | None = None,
     ) -> None:
         self._eventbus = eventbus
         self._gateway = gateway
@@ -163,6 +167,15 @@ class VirtualExecutor:
         self._slippage_rate = slippage_rate
         self._portfolios: dict[str, VirtualPortfolioView] = {}
         self._bot_configs: dict[str, Any] = {}
+        # #2398 G9: virtual 경로 계층3-equivalent backstop. VirtualExecutor 와
+        # APIGateway 는 둘 다 OrderApprovedEvent priority=50 구독이고 gateway 는
+        # virtual 을 skip 하므로, not_ready virtual approval 이 (상류 우회/직접
+        # 발행으로) 들어오면 gateway 차단을 우회해 VirtualExecutor 가 체결할 수
+        # 있다. D-ACC-09 "단일 chokepoint 가정 금지" 원칙상 VirtualExecutor 가
+        # virtual 경로를 독립 게이트한다. 미주입(None)이면 fail-closed(G2). 매
+        # 이벤트 시점 registry 조회(상태 캐시 금지, G5).
+        self._runtime_readiness = runtime_readiness
+        self._account_service = account_service
 
     def register_bot(self, bot_id: str, portfolio: VirtualPortfolioView) -> None:
         """Virtual 계좌 봇의 PortfolioView 등록."""
@@ -182,6 +195,79 @@ class VirtualExecutor:
             OrderApprovedEvent, self._on_order_approved, priority=50
         )
         logger.info("VirtualExecutor 구독 완료")
+
+    async def _readiness_blocked(self, account_id: str) -> bool:
+        """G9 — virtual 경로 readiness 차단 여부(fail-closed).
+
+        registry/account_service 미주입·account 메타 취득 실패·조회 예외 = 차단
+        (G2). account_service.get 으로 broker_type/trading_mode 를 조회해 면제
+        매트릭스를 적용한 active_trading_ready 의 부정을 반환한다.
+        """
+        from ante.account.gate import active_trading_blocked
+
+        if self._runtime_readiness is None or self._account_service is None:
+            return True
+        try:
+            account = await self._account_service.get(account_id)
+        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2).
+            return True
+        broker_type = getattr(account, "broker_type", None)
+        trading_mode = getattr(account, "trading_mode", None)
+        if not isinstance(broker_type, str) or trading_mode is None:
+            return True
+        return active_trading_blocked(
+            self._runtime_readiness,
+            account_id,
+            broker_type=broker_type,
+            trading_mode=trading_mode,
+        )
+
+    async def _fail_order(self, event: Any, *, error_message: str) -> None:
+        """virtual 주문을 OrderFailedEvent 로 종결한다(fill 금지).
+
+        bot_id/order_id/account_id 를 보존해 Treasury ``_on_order_failed`` →
+        ``release_reservation`` 정확 해제(시장가 매수 reserve 고착 방지, G3/G8).
+        not_ready(account_not_ready) 종결이면 G6 운영자 알림 1회를 함께 발행한다
+        (G9 도 G6 상속, BUY/SELL 무관, 청산 marker 면 "청산 차단" 문구).
+        """
+        from ante.account.gate import (
+            ACCOUNT_NOT_READY_REASON,
+            build_not_ready_notification,
+            is_liquidation_reason,
+        )
+        from ante.eventbus.events import OrderFailedEvent
+
+        is_not_ready = error_message == ACCOUNT_NOT_READY_REASON
+        await self._eventbus.publish(
+            OrderFailedEvent(
+                account_id=event.account_id,
+                order_id=event.order_id,
+                bot_id=event.bot_id,
+                strategy_id=event.strategy_id,
+                symbol=event.symbol,
+                side=event.side,
+                quantity=event.quantity,
+                # G8: 0원 체결 금지의 짝 — 실패 종결 OrderFailedEvent.price 는
+                # 체결가가 아니라 known 명시가(없으면 0.0)일 뿐, fill 은 발생하지
+                # 않는다.
+                price=event.price or 0.0,
+                order_type=event.order_type,
+                error_message=error_message,
+                error_code=(ACCOUNT_NOT_READY_REASON if is_not_ready else ""),
+                exchange=event.exchange,
+            )
+        )
+        if is_not_ready:
+            await self._eventbus.publish(
+                build_not_ready_notification(
+                    account_id=event.account_id,
+                    reason=ACCOUNT_NOT_READY_REASON,
+                    side=getattr(event, "side", ""),
+                    # OrderApprovedEvent 는 reason 필드가 없어 청산 marker 를
+                    # 운반하지 못하므로 generic 문구다(청산은 상류 계층1 차단).
+                    is_liquidation=is_liquidation_reason(getattr(event, "reason", "")),
+                )
+            )
 
     async def _on_order_approved(self, event: object) -> None:
         """OrderApprovedEvent 처리. virtual 계좌 봇의 주문만 처리."""
@@ -211,23 +297,50 @@ class VirtualExecutor:
         quantity = event.quantity
         order_type = event.order_type
 
+        # ── #2398 G9: virtual 경로 계층3-equivalent readiness backstop ─────────
+        # 위치: stop/stop_limit·portfolio 필터 직후. not_ready 면 OrderFailedEvent
+        # (bot_id/order_id/account_id 보존) 종결 + fill 금지(apply_fill/
+        # OrderFilledEvent 도달 차단). fail-closed(G2): registry/account_service
+        # 미주입·조회 예외 = 차단. 매 이벤트 시점 registry 조회(상태 캐시 금지, G5).
+        if await self._readiness_blocked(account_id):
+            await self._fail_order(event, error_message="account_not_ready")
+            return
+
         # 체결가 계산
         if order_type == "limit" and event.price is not None:
             fill_price = event.price
         else:
-            # market 주문: 현재가 기반 + 슬리피지
-            # APIGateway.get_current_price 가 account_id 를 required 로 받으
-            # 므로 OrderApprovedEvent.account_id 를 명시 전달.
+            # market 주문: 현재가 기반 + 슬리피지.
+            # #2398 G8: broker 장애 중 가격 조회 실패가 0원 체결로 이어지지 않도록
+            # ``event.price or 0.0`` 폴백을 제거한다. 가격 조회 실패 또는 gateway
+            # 부재 + event.price 부재 시 OrderFailedEvent 로 종결한다(0원 체결 금지).
+            # 이 지점은 OrderApprovedEvent 이후라 시장가 매수 reserve 가 잡혀 있을
+            # 수 있고 Treasury 는 reserve 를 **OrderFailedEvent 로만** 해제하므로,
+            # OrderRejectedEvent/예외로 끝내면 reserve 가 고착된다(계층3 정합 동일).
+            current_price: float | None = None
             if self._gateway:
                 try:
                     current_price = await self._gateway.get_current_price(
                         symbol, account_id=account_id
                     )
                 except Exception:
-                    logger.warning("현재가 조회 실패: %s, 기본가 사용", symbol)
-                    current_price = event.price or 0.0
-            else:
-                current_price = event.price or 0.0
+                    logger.warning("현재가 조회 실패: %s — 주문 실패 종결", symbol)
+                    current_price = None
+            elif event.price is not None:
+                # gateway 부재이지만 명시 가격이 있으면(예: limit 외 명시) 그대로 사용.
+                current_price = event.price
+
+            if current_price is None or current_price <= 0:
+                logger.error(
+                    "Virtual 시장가 체결가 미상 — 0원 체결 금지, 주문 실패 종결 "
+                    "(order_id=%s, symbol=%s)",
+                    order_id,
+                    symbol,
+                )
+                await self._fail_order(
+                    event, error_message="virtual_market_price_unavailable"
+                )
+                return
 
             if self._slippage_rate > 0:
                 if side == "buy":

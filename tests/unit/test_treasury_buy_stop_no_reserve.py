@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -21,6 +22,13 @@ from ante.treasury import Treasury
 
 ACCOUNT_ID = "domestic"
 CURRENCY = "KRW"
+
+
+def _gate_ready_registry(account_id: str = ACCOUNT_ID) -> RuntimeReadinessRegistry:
+    """#2398 계층2 gate 통과용 ready registry((test, virtual) → treasury_sync)."""
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(account_id, ReadinessFlag.TREASURY_SYNC)
+    return reg
 
 
 @pytest.fixture
@@ -45,6 +53,8 @@ async def treasury(db, eventbus):
         currency=CURRENCY,
         buy_commission_rate=0.00015,
         sell_commission_rate=0.00195,
+        # #2398: 계층2 gate 통과(기존 stop no-reserve 동작 보존).
+        runtime_readiness=_gate_ready_registry(),
     )
     await t.initialize()
     await t.set_account_balance(10_000_000.0)

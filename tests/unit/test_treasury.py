@@ -3,6 +3,7 @@
 import pytest
 
 from ante.account.errors import InvalidAccountIdError
+from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry
 from ante.core import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (
@@ -20,6 +21,17 @@ from ante.treasury import BotBudget, Treasury
 
 ACCOUNT_ID = "domestic"
 CURRENCY = "KRW"
+
+
+def _gate_ready_registry(account_id: str = ACCOUNT_ID) -> RuntimeReadinessRegistry:
+    """#2398 계층2 gate 통과용 ready registry.
+
+    Treasury 기본 (broker_type=test, trading_mode=VIRTUAL) 에서는 treasury_sync
+    만 비면제이므로 그 플래그를 ready 로 mark 한다.
+    """
+    reg = RuntimeReadinessRegistry()
+    reg.mark_ready(account_id, ReadinessFlag.TREASURY_SYNC)
+    return reg
 
 
 @pytest.fixture
@@ -44,6 +56,8 @@ async def treasury(db, eventbus):
         currency=CURRENCY,
         buy_commission_rate=0.00015,
         sell_commission_rate=0.00195,
+        # #2398: 계층2 gate 통과(기존 _on_order_validated 동작 보존).
+        runtime_readiness=_gate_ready_registry(),
     )
     await t.initialize()
     await t.set_account_balance(10_000_000.0)
@@ -1075,6 +1089,8 @@ class TestMarketBuyQuoteResolver:
             sell_commission_rate=0.00195,
             market_order_reserve_buffer_rate=_Decimal(buffer),
             order_reserve_price_resolver=resolver,
+            # #2398: 계층2 gate 통과(기존 동작 보존).
+            runtime_readiness=_gate_ready_registry(),
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)
@@ -1410,6 +1426,8 @@ class TestMarketOrderReserveShortfall:
             sell_commission_rate=0.00195,
             market_order_reserve_buffer_rate=_Decimal("0"),
             order_reserve_price_resolver=resolver,
+            # #2398: 계층2 gate 통과(기존 동작 보존).
+            runtime_readiness=_gate_ready_registry(),
         )
         await t.initialize()
         await t.set_account_balance(10_000_000.0)

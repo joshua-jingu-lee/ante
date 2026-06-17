@@ -9,6 +9,7 @@ from ante.gateway.cache import ResponseCache
 from ante.gateway.rate_limiter import RateLimitConfig, RateLimiter
 
 if TYPE_CHECKING:
+    from ante.account.readiness import RuntimeReadinessRegistry
     from ante.account.service import AccountService
     from ante.broker.base import BrokerAdapter
     from ante.eventbus.bus import EventBus
@@ -48,6 +49,7 @@ class APIGateway:
         rate_config: RateLimitConfig | None = None,
         stop_order_manager: Any | None = None,
         order_tracker: Any | None = None,
+        runtime_readiness: RuntimeReadinessRegistry | None = None,
     ) -> None:
         self._account_service = account_service
         self._eventbus = eventbus
@@ -59,10 +61,83 @@ class APIGateway:
         self._running = False
         self._stop_order_manager = stop_order_manager
         self._order_tracker = order_tracker
+        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층3, 최후보루)
+        # reader. 미주입(None)이면 fail-closed — submit_order 가 차단한다(G2).
+        # main(s.runtime_readiness) pass-through.
+        self._runtime_readiness = runtime_readiness
 
     async def _get_broker(self, account_id: str) -> BrokerAdapter:
         """AccountService에서 브로커 인스턴스를 획득한다."""
         return await self._account_service.get_broker(account_id)
+
+    async def _get_account(self, account_id: str) -> Any | None:
+        """account_id 의 Account 메타 조회 — 실패 시 ``None``(fail-closed).
+
+        ``submit_order`` gate(계층3)와 ``_on_order_approved`` virtual 라우팅 skip
+        판정에서 broker_type/trading_mode 를 얻는다. ``AccountService.get`` 은
+        ``AccountNotFoundError`` 를 raise 하므로 예외를 ``None`` 으로 흡수해
+        호출자가 fail-closed 차단(virtual fall-open 금지, G2)하게 한다.
+        """
+        get = getattr(self._account_service, "get", None)
+        if get is None:
+            return None
+        try:
+            return await get(account_id)
+        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2).
+            return None
+
+    async def _readiness_gate(self, account_id: str, *, side: object) -> None:
+        """계층3 readiness gate — not_ready 면 ``APIError`` raise + G6 알림 1회.
+
+        fail-closed(G2): registry 미주입·account 메타 취득 실패·조회 예외 = 차단.
+        매 주문 시점 registry 조회(상태 캐시 금지, G5). OrderApprovedEvent 는
+        ``reason`` 필드가 없어 청산 marker 를 운반하지 못하므로(계층3 은 generic
+        문구), 청산 SELL 은 상류 계층1(RuleEngine, OrderRequestEvent.reason 보유)
+        에서 차단된다.
+        """
+        from ante.account.gate import (
+            ACCOUNT_NOT_READY_REASON,
+            active_trading_blocked,
+            build_not_ready_notification,
+            not_ready_reason,
+        )
+        from ante.broker.exceptions import APIError
+
+        account = await self._get_account(account_id)
+        if account is None:
+            reason = f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable"
+            blocked = True
+        else:
+            broker_type = getattr(account, "broker_type", "")
+            trading_mode = getattr(account, "trading_mode", None)
+            if not isinstance(broker_type, str) or trading_mode is None:
+                reason = f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable"
+                blocked = True
+            else:
+                blocked = active_trading_blocked(
+                    self._runtime_readiness,
+                    account_id,
+                    broker_type=broker_type,
+                    trading_mode=trading_mode,
+                )
+                reason = not_ready_reason(
+                    self._runtime_readiness,
+                    account_id,
+                    broker_type=broker_type,
+                    trading_mode=trading_mode,
+                )
+        if not blocked:
+            return
+        # G6: 계층3 운영자 가시성 — generic 문구(청산 marker 미운반). 정확히 1회.
+        await self._eventbus.publish(
+            build_not_ready_notification(
+                account_id=account_id,
+                reason=reason,
+                side=side,
+                is_liquidation=False,
+            )
+        )
+        raise APIError(reason, error_code=ACCOUNT_NOT_READY_REASON)
 
     def _get_rate_limiter(self, account_id: str) -> RateLimiter:
         """계좌별 독립 Rate Limiter를 반환한다."""
@@ -221,6 +296,20 @@ class APIGateway:
 
         require_account_id(account_id, context="gateway.submit_order")
 
+        # ── #2398 계층3: active-order readiness gate (최후보루, fail-closed) ──
+        # 위치: ``_get_broker`` 直前(spec 11-order-flow.md:67). not_ready 면
+        # broker 를 호출하지 않고 ``APIError(error_code="account_not_ready")`` 를
+        # raise 한다 → 호출자 ``_on_order_approved`` 의 except 가 OrderFailedEvent
+        # (bot_id/order_id/account_id 보존)로 변환 → Treasury ``_on_order_failed``
+        # → ``release_reservation`` 정확 해제(G3, [must_fix I]).
+        #
+        # **G3 critical**: 이 gate 를 ``_on_order_approved`` 의 isinstance 직후에서
+        # raise 하면 EventBus(bus.py:96)가 예외를 swallow 하여 OrderFailedEvent 가
+        # 미발행되고 reserve 가 영구 고착된다. 따라서 gate 는 반드시
+        # ``submit_order`` 내부(또는 submit try 내부)에서 실행해 실패가 except→
+        # OrderFailedEvent 로 귀결되게 한다.
+        await self._readiness_gate(account_id, side=side)
+
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)
@@ -345,6 +434,44 @@ class APIGateway:
                     )
                 )
                 return
+
+        # ── #2398 Virtual 라우팅: LIVE 계좌만 broker.place_order ───────────────
+        # 위치: stop/stop_limit StopOrderManager 분기 **뒤**, submit try **前**
+        # (spec api-gateway.md:161). ``trading_mode != LIVE`` 면 broker.place_order
+        # 경로를 deterministic 하게 skip 하고 return 한다 — virtual 주문은
+        # VirtualExecutor(priority=50, gateway 보다 먼저 구독)가 즉시 가상 체결한다.
+        # OrderFailedEvent 를 발행하지 않는다(skip 만, 실패 아님). 단 account 메타
+        # 취득 실패는 fail-closed(virtual fall-open 금지, G2) → OrderFailedEvent.
+        from ante.account.models import TradingMode
+
+        account = await self._get_account(event.account_id)
+        if account is None or getattr(account, "trading_mode", None) is None:
+            logger.error(
+                "주문 라우팅 메타 취득 실패 — fail-closed 차단 (order_id=%s, "
+                "account=%s)",
+                event.order_id,
+                event.account_id,
+            )
+            await self._eventbus.publish(
+                OrderFailedEvent(
+                    account_id=event.account_id,
+                    order_id=event.order_id,
+                    bot_id=event.bot_id,
+                    strategy_id=event.strategy_id,
+                    symbol=event.symbol,
+                    side=event.side,
+                    quantity=event.quantity,
+                    price=event.price or 0.0,
+                    order_type=event.order_type,
+                    error_message="account_metadata_unavailable",
+                    error_code="account_not_ready",
+                    exchange=event.exchange,
+                )
+            )
+            return
+        if getattr(account, "trading_mode", None) != TradingMode.LIVE:
+            # virtual 주문 → VirtualExecutor 가 처리(체결). gateway 는 skip.
+            return
 
         try:
             broker_order_id = await self.submit_order(

@@ -22,8 +22,45 @@ from ante.strategy.base import DataProvider
 from ante.strategy.context import StrategyContext
 from ante.trade.position import PositionHistory
 from ante.treasury.treasury import Treasury
+from tests.unit._readiness_gate_helpers import (
+    make_account,
+    ready_registry,
+)
 
 # ── Fake/Stub 구현체 ─────────────────────────────
+
+
+def _gate_account_service(account_id: str = "acct1"):
+    """#2398 G9 backstop 용 account_service stub((test, virtual))."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ante.account.models import TradingMode
+
+    svc = MagicMock()
+    svc.get = AsyncMock(
+        return_value=make_account(
+            account_id, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        )
+    )
+    return svc
+
+
+def _virtual_executor(*, eventbus, account_id: str = "acct1", **kwargs):
+    """#2398 G9 backstop 통과(ready)용 VirtualExecutor 빌더.
+
+    runtime_readiness 미명시면 (test, virtual) ready registry 를, account_service
+    미명시면 virtual account stub 을 주입한다. 기존 fill 동작을 보존한다.
+    """
+    from ante.account.models import TradingMode
+
+    kwargs.setdefault(
+        "runtime_readiness",
+        ready_registry(
+            account_id, broker_type="test", trading_mode=TradingMode.VIRTUAL
+        ),
+    )
+    kwargs.setdefault("account_service", _gate_account_service(account_id))
+    return VirtualExecutor(eventbus=eventbus, **kwargs)
 
 
 class FakeDataProvider(DataProvider):
@@ -314,7 +351,7 @@ class TestVirtualOrderView:
 class TestVirtualExecutor:
     async def test_virtual_fill_buy(self, eventbus):
         """Virtual 계좌 봇의 매수 주문 → 가상 체결."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = _virtual_executor(eventbus=eventbus, commission_rate=0.00015)
 
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
@@ -354,7 +391,7 @@ class TestVirtualExecutor:
 
     async def test_virtual_fill_sell(self, eventbus):
         """Virtual 계좌 봇의 매도 주문 → 가상 체결."""
-        executor = VirtualExecutor(eventbus=eventbus, commission_rate=0.00015)
+        executor = _virtual_executor(eventbus=eventbus, commission_rate=0.00015)
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -401,7 +438,7 @@ class TestVirtualExecutor:
 
     async def test_ignores_live_bot(self, eventbus):
         """live 봇의 주문은 무시."""
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         executor.subscribe()
 
         filled = []
@@ -425,7 +462,7 @@ class TestVirtualExecutor:
 
     async def test_commission_calculation(self, eventbus):
         """수수료 계산 검증."""
-        executor = VirtualExecutor(
+        executor = _virtual_executor(
             eventbus=eventbus,
             commission_rate=0.001,  # 0.1%
         )
@@ -456,7 +493,7 @@ class TestVirtualExecutor:
 
     async def test_slippage_buy(self, eventbus):
         """매수 슬리피지: 체결가 = 현재가 × (1 + slippage_rate)."""
-        executor = VirtualExecutor(eventbus=eventbus, slippage_rate=0.001)
+        executor = _virtual_executor(eventbus=eventbus, slippage_rate=0.001)
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -485,7 +522,7 @@ class TestVirtualExecutor:
 
     async def test_slippage_sell(self, eventbus):
         """매도 슬리피지: 체결가 = 현재가 × (1 - slippage_rate)."""
-        executor = VirtualExecutor(eventbus=eventbus, slippage_rate=0.001)
+        executor = _virtual_executor(eventbus=eventbus, slippage_rate=0.001)
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -516,7 +553,7 @@ class TestVirtualExecutor:
 
     async def test_limit_order_no_slippage(self, eventbus):
         """지정가 주문: 슬리피지 없이 지정가 그대로 체결."""
-        executor = VirtualExecutor(
+        executor = _virtual_executor(
             eventbus=eventbus,
             slippage_rate=0.01,  # 1% 슬리피지 설정해도
         )
@@ -547,7 +584,7 @@ class TestVirtualExecutor:
 
     async def test_unregister_bot(self, eventbus):
         """봇 등록 해제 후 주문 무시."""
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         portfolio = VirtualPortfolioView(
             bot_id="virtual1", initial_balance=10_000_000.0
         )
@@ -582,7 +619,7 @@ class TestVirtualExecutor:
 class TestStrategyContextFactory:
     def test_create_virtual_context(self, eventbus):
         """Virtual 계좌 봇 StrategyContext 생성."""
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
             virtual_executor=executor,
@@ -749,7 +786,7 @@ class TestStrategyContextFactory:
             def get(self, account_id):
                 return FakeTreasury()
 
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
             virtual_executor=executor,
@@ -769,7 +806,7 @@ class TestStrategyContextFactory:
             def get(self, account_id):
                 raise KeyError(account_id)
 
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
             virtual_executor=executor,
@@ -828,7 +865,7 @@ class TestBotManagerWithFactory:
             async def on_step(self, context):
                 return []
 
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
             virtual_executor=executor,
@@ -897,7 +934,7 @@ class TestBotManagerWithFactory:
             async def on_step(self, context):
                 return []
 
-        executor = VirtualExecutor(eventbus=eventbus)
+        executor = _virtual_executor(eventbus=eventbus)
         factory = StrategyContextFactory(
             data_provider=FakeDataProvider(),
             virtual_executor=executor,

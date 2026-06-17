@@ -27,6 +27,7 @@ from ante.gateway import (
     RequestQueue,
     ResponseCache,
 )
+from tests.unit._readiness_gate_helpers import make_account, ready_registry
 
 # ── RateLimiter ────────────────────────────────────
 
@@ -208,6 +209,8 @@ class TestAPIGateway:
     def account_service(self, broker):
         svc = AsyncMock()
         svc.get_broker = AsyncMock(return_value=broker)
+        # #2398: gate/virtual 라우팅이 broker_type/trading_mode 를 조회한다.
+        svc.get = AsyncMock(return_value=make_account("acc-001"))
         return svc
 
     @pytest.fixture
@@ -236,6 +239,8 @@ class TestAPIGateway:
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
             order_tracker=order_tracker,
+            # #2398: 계층3 gate — ready registry 로 기존 통과 동작 보존.
+            runtime_readiness=ready_registry("acc-001"),
         )
         gw.start()
         return gw
@@ -425,6 +430,8 @@ class TestAPIGatewayEvents:
     def account_service(self, broker):
         svc = AsyncMock()
         svc.get_broker = AsyncMock(return_value=broker)
+        # #2398: gate/virtual 라우팅이 broker_type/trading_mode 를 조회한다.
+        svc.get = AsyncMock(return_value=make_account("acc-001"))
         return svc
 
     @pytest.fixture
@@ -449,6 +456,8 @@ class TestAPIGatewayEvents:
             eventbus=eventbus,
             rate_config=RateLimitConfig(max_requests=100, window_seconds=60),
             order_tracker=order_tracker,
+            # #2398: 계층3 gate — ready registry 로 기존 통과 동작 보존.
+            runtime_readiness=ready_registry("acc-001"),
         )
         gw.start()
         return gw
