@@ -187,12 +187,30 @@ class VirtualExecutor:
         self._portfolios.pop(bot_id, None)
         logger.info("VirtualExecutor: 봇 해제 %s", bot_id)
 
+    # #2398 priority invariant: VirtualExecutor 의 OrderApprovedEvent 구독
+    # priority 는 APIGateway(``_on_order_approved`` priority=50)보다 **반드시
+    # 높아야** 한다. EventBus.publish 는 priority 내림차순(높은 priority 먼저)으로
+    # 핸들러를 디스패치하므로(bus.py:46 reverse=True), 이 invariant 가 있으면
+    # **구독(subscribe) 삽입 순서와 무관하게** VirtualExecutor 가 항상 gateway 보다
+    # 먼저 실행돼 자신이 소유한 virtual 주문에 ``_virtual_handled`` 마커를 set 한다.
+    # Fix A(gateway 메타 기반 non-LIVE silent skip)가 공통 케이스의 라우팅을 이미
+    # 순서 무관으로 만들고, 이 priority 는 메타 실패 잔여 코너에서 gateway 가
+    # 마커를 신뢰할 수 있게 하는 defense-in-depth 다(구독 순서 race 봉쇄).
+    _ORDER_APPROVED_PRIORITY = 60
+
     def subscribe(self) -> None:
-        """EventBus에 OrderApprovedEvent 구독."""
+        """EventBus에 OrderApprovedEvent 구독.
+
+        #2398: priority 는 ``_ORDER_APPROVED_PRIORITY``(=60)로 APIGateway(=50)보다
+        높게 둔다 — 구독 삽입 순서와 무관하게 gateway 보다 먼저 실행돼
+        ``_virtual_handled`` 마커를 set 한다(위 invariant 주석 참조).
+        """
         from ante.eventbus.events import OrderApprovedEvent
 
         self._eventbus.subscribe(
-            OrderApprovedEvent, self._on_order_approved, priority=50
+            OrderApprovedEvent,
+            self._on_order_approved,
+            priority=self._ORDER_APPROVED_PRIORITY,
         )
         logger.info("VirtualExecutor 구독 완료")
 
@@ -290,18 +308,19 @@ class VirtualExecutor:
         if portfolio is None:
             return  # live 봇의 주문 → 무시 (APIGateway가 처리)
 
-        # ── #2398 deterministic virtual-routing 마커(P2: gateway 중복 terminal 방지) ─
-        # VirtualExecutor 는 OrderApprovedEvent priority=50 구독이고 main 배선상
-        # gateway(_subscribe_events)보다 **먼저** subscribe 된다(main.py:
-        # virtual_executor.subscribe() → api_gateway.start()). EventBus 는 동일
-        # 우선순위 핸들러를 subscribe 순서(stable sort)대로 같은 이벤트 인스턴스에
-        # 순차 디스패치하므로, 자신이 **소유**(portfolio 존재 = virtual 봇)한 주문에
-        # 마커를 set 하면 후속 gateway 핸들러가 이를 보고 deterministic skip 한다
-        # (#1331 ``_consumed`` 선례 = frozen dataclass 에 ``object.__setattr__``).
-        # account_service.get 일시 실패로 G9/G8 실패 종결이 나도 이 마커가 먼저
-        # set 되므로, gateway 가 별도 메타 fetch 없이 skip 하여 동일 order_id 에
-        # 대한 terminal 중복(strategy on_order_update / TradeRecorder 이중 처리)이
-        # 방지된다. stop/stop_limit 은 위에서 marker 없이 early-return 하여 gateway
+        # ── #2398 deterministic virtual-routing 마커(메타 실패 코너 defense-in-depth) ─
+        # VirtualExecutor 는 OrderApprovedEvent 를 ``_ORDER_APPROVED_PRIORITY``(=60)
+        # 로 구독해 gateway(priority=50)보다 **구독 순서와 무관하게 항상 먼저**
+        # 실행된다(EventBus priority 내림차순 디스패치, bus.py:46). 자신이
+        # **소유**(portfolio 존재 = virtual 봇)한 주문에 마커를 set 하면 후속 gateway
+        # 핸들러가 이를 신뢰할 수 있다(#1331 ``_consumed`` 선례 = frozen dataclass 에
+        # ``object.__setattr__``). gateway 의 공통 라우팅은 account 메타 기반
+        # non-LIVE silent skip 이지만(Fix A), gateway 의 메타 fetch 가 실패하는
+        # 잔여 코너에서 gateway 는 이 마커를 보고 skip 하여 동일 order_id 에 대한
+        # terminal 중복(strategy on_order_update / TradeRecorder 이중 처리)을 막는다.
+        # account_service.get 일시 실패로 G9/G8 실패 종결이 나도 마커가 먼저 set
+        # 되므로 gateway 메타 실패 fail-closed 경로와 겹쳐 중복 terminal 이 나지
+        # 않는다. stop/stop_limit 은 위에서 marker 없이 early-return 하여 gateway
         # StopOrderManager 라우팅을 그대로 보존한다(virtual stop 경로 불변).
         object.__setattr__(event, "_virtual_handled", True)
 

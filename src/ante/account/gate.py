@@ -79,13 +79,26 @@ def not_ready_reason(
     면제 플래그는 제외하고(매트릭스), 비면제이면서 not_ready(또는 registry 미주입)
     인 플래그만 suffix 로 나열한다. registry 가 None 이면(fail-closed) 비면제 전
     플래그를 missing 으로 표기한다.
+
+    **fail-closed reason(finding 2)**: ``registry.is_ready``(또는 면제 평가)가
+    예외를 던지면 suffix 를 비우고 bare ``account_not_ready`` 를 반환한다 — 예외를
+    호출자로 **전파하지 않는다**. ``active_trading_blocked`` 가 이미 예외=차단
+    (fail-closed, G2)으로 끝나는데, 이어지는 reason 산출이 같은 예외(``is_ready``
+    재호출)를 흘리면 차단 분기에서 reason 을 만들다 예외가 핸들러 밖으로 새어,
+    계층1/2(특히 Treasury)에서 EventBus(bus.py:96)가 그 예외를 swallow 해
+    OrderRejectedEvent/NotificationEvent 가 미발행되고 주문이 terminal 없이
+    사라진다. reason 도 동일하게 안전값(bare reason)으로 끝내 차단 경로의 terminal
+    발행을 보장한다(G2 fail-closed·G6 알림 1회).
     """
-    missing: list[str] = []
-    for flag in ALL_FLAGS:
-        if is_flag_exempt(flag, broker_type=broker_type, trading_mode=trading_mode):
-            continue
-        if registry is None or not registry.is_ready(account_id, flag):
-            missing.append(flag.value)
+    try:
+        missing: list[str] = []
+        for flag in ALL_FLAGS:
+            if is_flag_exempt(flag, broker_type=broker_type, trading_mode=trading_mode):
+                continue
+            if registry is None or not registry.is_ready(account_id, flag):
+                missing.append(flag.value)
+    except Exception:  # noqa: BLE001 — reason 산출 예외도 fail-closed(bare reason).
+        return ACCOUNT_NOT_READY_REASON
     if missing:
         return f"{ACCOUNT_NOT_READY_REASON}: {', '.join(missing)}"
     return ACCOUNT_NOT_READY_REASON
