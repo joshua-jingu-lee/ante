@@ -58,3 +58,18 @@ Treasury는 아래 이벤트를 구독하여 자금 정산을 수행한다 (prio
 | BotStoppedEvent | 80 | 봇 중지 시 해당 봇의 각 주문 **잔여 예약** 일괄 회수 (기체결분 보존) |
 
 > 매수 부분체결 비례 정산(per-fill 차감 · terminal 잔여 회수 · `OrderTracker` terminal 판정 · tracker 부재 시 full-fill fallback)의 상세 의미는 [03-treasury-model.md](03-treasury-model.md) "매수 부분체결 비례 정산"을 따른다. buy 한정 — 매도는 예약 부재로 per-fill 누적 가산이 이미 정확하다(#1947, D5).
+
+### Active-order readiness gate (계층 2, #2396)
+
+> 계약 확정: #2396. 실제 동작은 구현 #2397(축 i readiness 모델, 선행) + #2398(축 ii active-order gate) 머지 후. 본 절은 스펙 계약만 정의한다.
+
+Treasury는 `OrderValidatedEvent` 처리(`_on_order_validated`)에서 `reserve_for_order` **직전**에 active-order readiness gate(계층 2)를 적용한다. 이는 [account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다)의 3계층 defense-in-depth 중 중류다.
+
+- **위치**: `reserve_for_order` 호출 직전 `runtime_readiness.active_trading_ready(account_id)`를 **재확인**한다(RuleEngine 계층1 통과 후 reserve 사이의 회복/저하 race — 체크 후 저하 — 에서 reserve 보호).
+- **거부**: `not_ready`면 `reserve_for_order`를 호출하지 않고 `OrderRejectedEvent(reason="account_not_ready")`를 발행한다.
+- **reserve 누수 없음**: Treasury는 `OrderRejectedEvent`를 구독하지 않으므로 여기서 거부 시 **reserve가 미실행**되어 해제가 불요하다(누수 없음).
+- **fail-closed**: registry 미주입 / 조회 예외도 `not_ready`로 취급해 차단한다.
+
+**reserve 없는 SELL 경로 거부 가시성 ([must_fix D])**: `amount <= 0`이라 `reserve_for_order`가 `False`인 SELL 경로(매도는 reserve 부재)도 계층2에서 거부될 수 있다. release는 불필요하나(잠근 게 없으므로) 거부 **가시성**(`NotificationEvent(level=error, category=system)`)은 필요하다([rule-engine/07-rule-engine-core.md](../rule-engine/07-rule-engine-core.md) "청산 SELL 비대칭 정책" 참조).
+
+reason 토큰은 `account_not_ready`로 통일한다([broker-adapter/11-order-flow.md](../broker-adapter/11-order-flow.md) "active-order readiness gate" 참조).

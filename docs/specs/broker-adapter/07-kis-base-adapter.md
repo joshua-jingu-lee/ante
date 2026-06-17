@@ -53,3 +53,56 @@ KIS API는 broker-side business failure(예: 원주문번호 오류, 잘못된 �
 5. **메시지 비공백 보장 (#2324)**: business error 승격 시 `msg1`이 빈 문자열/공백이면 `get_error_message(msg_cd)`로 폴백해 `APIError`의 error_message가 절대 비어 있으면 안 된다. 미등록 코드도 `알 수 없는 에러 ({msg_cd})`로 코드가 보존된 triage-able 메시지가 된다. (generic `HTTP <status>: <text>` fallback 경로는 해당 없음.)
 
 HTTP 200 + `rt_cd != "0"` 경로는 기존 동작을 유지하며 별도로 `error_code = msg_cd`만 설정한다 (status_code 미설정).
+
+### OAuth2 인증 — single-flight + shared cache + EGW00133 backoff (#2396)
+
+> 계약 확정: #2396. 실제 동작은 구현 #2399(축 iii KIS token, 독립) 머지 후. 본 절은 스펙 계약만 정의한다.
+
+**배경 (#2395)**: 현재 토큰 발급은 per-adapter라, 동일 APP KEY를 공유하는 여러 adapter(KIS 국내/해외 분리 [D-ACC-02](../account/02-design-decisions.md#d-acc-02-kis-국내해외가-같은-계좌번호인데-왜-분리하는가), 같은 app_key)가 동시에 토큰을 발급하면 KIS가 `EGW00133`(접근토큰 발급 1분 1회)을 돌려준다. startup race에서 이 압박이 broker connect 실패로 이어진다.
+
+#### (1) single-flight (app_key 단위, in-process)
+
+`_authenticate`(`src/ante/broker/kis.py`)를 **app_key별 `asyncio.Lock`**으로 직렬화하고 double-check를 적용한다.
+
+- lock key = **app_key** (account_id 아님). 동일 app_key를 쓰는 다중 adapter(국내/해외)가 같은 lock으로 수렴해야 동시 발급(→ `EGW00133`)을 막을 수 있다. lock key를 account_id로 잡으면 동일 app_key 다중 adapter가 미수렴하여 `EGW00133`이 잔존한다(회귀 테스트 필수).
+
+#### (2) shared 토큰 캐시 (v1 = in-process)
+
+권고 v1은 **in-process module-level 캐시** `{app_key: (token, expires_at)}` + `asyncio.Lock`이다. adapter `_ensure_authenticated`가 캐시를 우선 조회한다.
+
+#### (3) `_authenticate` msg_cd 파싱 ([must_fix K])
+
+scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_handle_response`). **`_authenticate`(토큰 발급 경로)만** `msg_cd`를 미파싱한다(현재 `access_token`만 읽고, 실패 시 raw text로 `AuthenticationError`). 토큰 발급 응답에서 `msg_cd`를 파싱하도록 보강한다.
+
+- 토큰 응답 형태 가정을 명시한다: HTTP 200 + error 바디 vs non-200. `status != 200` 분기 위치를 결정해 파싱 위치를 고정한다(구현 왕복 방지).
+
+#### (4) `EGW00133` ~60s backoff (별도 분기)
+
+`EGW00133` 감지 시 **~60s backoff**(KIS 공식 "토큰 발급 1분 1회", 토큰 24h 유효) 후 재시도한다. 일반 지수 backoff와 **별도 분기**다.
+
+#### (5) connect-path retry (readiness 연동)
+
+`connect` → `_authenticate` 실패가 `EGW00133`이면 즉시 예외 전파 대신 backoff 후 `max_retries_auth`([10-commission-info.md](10-commission-info.md) 인증 재시도 기본값) 내 재시도한다(startup race 완화). 단 startup 전체 타임아웃 초과 시 해당 계좌를 `not_ready`로 떨어뜨려 readiness 축([account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다))과 연동한다(이 계좌 active 주문 차단).
+
+#### (6) classify 불변 invariant ([must_fix J], normative)
+
+`EGW00133` backoff는 `connect()` / `_authenticate` **내부 단독**으로 적용한다. `KISErrorClassifier.classify`의 `AuthenticationError = (retryable=False, record_cb=False)` 분류는 **불변**이다 — gateway 재시도 핸들러가 이중 적용하지 않도록 차단한다. (classify를 손대면 connect-path backoff와 gateway 재시도 핸들러가 이중 적용되거나, `EGW00133`이 즉시 비재시도 전파되는 회귀가 발생한다.)
+
+#### (7) known-limitation (normative)
+
+멀티프로세스(8 CLI site가 각각 fresh `AccountService`를 생성) 토큰 공유는 **v1 미해결**이다. in-process single-flight + 캐시는 **단일 서버 런타임 + 동일 프로세스 내 다중 adapter**만 수렴한다(서버 hot-path 해결). 토큰은 24h 유효하나, CLI cold-path 다발 동시 실행 시 `EGW00133`이 잔존할 수 있다.
+
+영속(파일/DB) 토큰스토어는 멀티프로세스 공유가 가능하나 파일 lock / 동시쓰기 / 만료 경합 / 보안(secret 파일) 복잡도가 커서 **v1 범위 밖(YAGNI)**이며 known-limitation으로 명시하고 **후속 후보**로 anchor한다.
+
+### `EGW00133` / `EGW00201` 에러 코드 등록 (#2396)
+
+> 계약 확정: #2396. 실제 동작은 구현 #2399 머지 후.
+
+`error_codes.py`([10-commission-info.md — 에러 코드 분류](10-commission-info.md#에러-코드-분류))에 등록한다(현재 0건 실측). **`EGW00201`만 `TRANSIENT_MSG_CODES`에 추가**한다(일반 지수 backoff). **`EGW00133`은 `TRANSIENT_MSG_CODES`에 넣지 않는다** — 이 set은 `_handle_response`가 `APIError.retryable=True`를 세팅해 일반 `KISRetryHandler` 지수 backoff로 보내는 전역 SSOT이므로, EGW00133을 넣으면 전용 ~60s token-only backoff가 아니라 generic/이중 retry를 탄다. `EGW00133`은 `KIS_ERROR_MESSAGES` 한글 등록 + **토큰 발급 경로 전용 분류(별도 set/상수)**로만 두고 `_authenticate`/`connect` 내부 ~60s backoff(위 (4))에서만 소비한다. 두 코드 모두 `KIS_ERROR_MESSAGES`에 한글 메시지 등록.
+
+| msg_cd | 분류 | 한글 메시지 | 처리 |
+|---|---|---|---|
+| `EGW00133` | **auth-only(토큰경로 전용, TRANSIENT_MSG_CODES 제외)** | 접근토큰 발급은 1분당 1회만 허용 | **토큰 발급 전용 ~60s backoff 분기** (위 (4)) |
+| `EGW00201` | transient | 초당 거래 건수 초과 | 일반 TRANSIENT 지수 backoff |
+
+`EGW00133`은 일반 TRANSIENT 지수 backoff가 아니라 **토큰 발급 전용 ~60s backoff 분기**임을 명시한다(위 (4)·(6) invariant). `EGW00201`은 일반 TRANSIENT 지수 backoff를 따른다.

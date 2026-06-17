@@ -129,6 +129,82 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 #1218 (Read query / edge resolver), #1219 (DB schema/index)
 에서 반영한다.
 
+### D-ACC-09: Runtime readiness 축은 AccountStatus와 직교한다
+
+> 계약 확정: #2396. 실제 동작은 구현 #2397(축 i readiness 모델)·#2398(축 ii active-order gate) 머지 후. 본 절은 스펙 계약만 정의한다.
+
+**배경 (#2395)**: KIS 토큰 압박(`EGW00133`) + timeout으로 startup 중 일부 계좌의 broker / treasury / fill / reconcile 스케줄러가 건너뛰어진 채 기동되었으나, 이후 전략 경로가 별도 broker로 실주문·체결했다. fill scheduler가 부재해 **체결 DB 누락·미추적 포지션**이 발생했다. 근본 원인은 **active 주문 경로와 fill/treasury/reconcile readiness의 디커플링**이다. 주문 가능 여부가 service-health(스케줄러 등록 성공)와 분리되어 있었기 때문이다.
+
+**결정**: `AccountStatus`(user kill-switch 축)와 **직교하는** 별도의 service-health 자동축으로 **per-account runtime readiness**를 도입한다. SSOT는 신규 `RuntimeReadinessRegistry`다.
+
+#### (1) SSOT = `RuntimeReadinessRegistry` (registry-owned)
+
+readiness 권위는 신규 `RuntimeReadinessRegistry` **단독**이다. `Services` 필드 `s.runtime_readiness`로 1개 인스턴스를 만들어 main(등록자)과 gateway / RuleEngine / Treasury(reader)에 **동일 인스턴스**를 주입한다.
+
+- readiness를 `account_service`에 두면 broker 캐시 유무와 다시 결합되어 #2372(포지션 소유·broker 캐시 분리) 의도가 무너진다. authority는 broker 캐시가 아니라 **스케줄러 등록 성공/실패**다.
+- `Services`의 `fill_schedulers` / `reconcile_schedulers` / `fill_catch_up_failed_accounts` dict는 **스케줄러 인스턴스 보관용**일 뿐이다. reader가 이 dict들을 직접 보면 state drift가 생기므로, registry가 이들을 **derivation source로 흡수**해 SSOT를 하나로 모은다. reader(gateway / RuleEngine / Treasury)는 registry만 조회한다.
+
+#### (2) 4 플래그 (per-account, 디폴트 = not_ready)
+
+per-account 4개 플래그를 둔다. 디폴트 초기값은 `not_ready`이며, 명시 `mark_ready` 이전에는 차단한다(**fail-closed**).
+
+| 플래그 | ready 조건 | 비고 |
+|---|---|---|
+| `broker_ready` | `_init_gateway` connect 성공 시점 mark | get_cached_broker live-poll 아님([must_fix F]) |
+| `treasury_sync_ready` | `_init_treasury_sync`가 해당 계좌 `treasury.start_sync` 성공 | VIRTUAL은 broker 없이 Trade-DB sync 시작 가능 |
+| `fill_reconcile_ready` | `id in s.fill_schedulers` (catch_up_once + start 성공) | 등록 시점 registry mark |
+| `reconcile_ready` | `id in s.reconcile_schedulers` (start 성공) | 등록 시점 registry mark |
+
+`active_trading_ready(id)`는 **필요 플래그 전부의 AND**를 계산하는 단일 derive 함수로 정의하며, reader는 이 함수만 호출한다. 4 readiness(broker / treasury_sync / fill_reconcile / reconcile)는 전부 active-trading 전제이므로, 면제 매트릭스로 면제된 플래그를 `true`로 취급한 뒤 AND한다.
+
+#### (3) 단일 mark 경로 ([must_fix F])
+
+4 플래그 전부 등록자(`main._init_*`)가 connect / start **성공·실패 시점**에 `mark_ready(id, flag)` / `mark_not_ready(id, flag, reason)`로 명시 기록하는 단일 경로로 정의한다. main의 `_init_*`은 스케줄러 등록과 **동시에**(등록 직후 1:1, 별도 mirror·지연 동기화 아님) registry를 mark한다.
+
+- `broker_ready`도 `get_cached_broker` live-poll이 아니라 `_init_gateway` connect 성공/실패 mark로 일원화한다. `get_cached_broker`는 per-account lock 조회라 active-order hot-path(매 주문 평가)에 부적합하다([must_fix F]).
+
+#### (4) 면제 매트릭스 ([must_fix A], normative)
+
+면제 키는 코드 실제 분기축에 정렬한다. `broker_type ∈ {test, kis-domestic}`이며 `virtual`은 `broker_type`이 아니라 `TradingMode` 값이다. `treasury_sync_ready`의 분기축은 `trading_mode`(VIRTUAL → broker=None Trade-DB sync / LIVE → get_broker 의존)이고, broker / fill / reconcile_ready의 분기축은 connect 성공 여부다.
+
+| broker_type | trading_mode | broker_ready | treasury_sync_ready | fill_reconcile_ready | reconcile_ready |
+|---|---|---|---|---|---|
+| test | virtual | 면제(항상 ready) | 요구 | 면제 | 면제 |
+| kis-domestic | virtual | 면제 | 요구 | 면제 | 면제 |
+| kis-domestic | live | 요구 | 요구 | 요구 | 요구 |
+
+- virtual은 broker API를 미호출하므로(주문은 `VirtualExecutor`가 가상 체결, [api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅" 참조) broker / fill / reconcile이 무의미하다. test도 동일하다. **단, virtual broker_ready 면제는 VirtualExecutor의 시장가 가격 안전(가격 조회 실패 시 0원 체결 금지·terminal reject, api-gateway.md 참조)과 짝을 이룬다** — broker 장애 중 virtual 시장가 0원 체결 회귀 방지(#2398). **virtual / test fill·reconcile은 broker-backed 스케줄러를 등록하지 않고 registry에 no-op으로 ready mark(면제)한다([must_fix H] 재정의 / R2 정합)** — broker-backed 등록을 유지하면 `_init_fill_recovery`/`_init_reconcile`이 `get_broker`를 호출해 virtual을 KIS 토큰/connect 실패에 **재노출**하여 readiness 분리 전제가 붕괴되기 때문이다. readiness SSOT는 registry 단독이므로 broker-backed dict에 virtual key가 없어도 drift가 없다(registry no-op mark가 단일 권위). LIVE 계좌만 broker-backed 스케줄러 등록 → registry mark.
+- `BROKER_REGISTRY` 미래 타입의 default 정책은 **fail-closed**다(매트릭스에 미지정인 `(broker_type, trading_mode)` pair는 모든 플래그를 요구로 취급).
+
+#### (5) 자동전이 ([must_fix B], normative)
+
+- **startup 실패** (`get_broker` / `connect` / `start` 예외 → continue): 해당 플래그 `mark_not_ready(reason=EGW00133 / timeout / ...)`.
+- **회복 전이원**: `_reconnect_broker`는 `update()` 가드(`mark_runtime_started` 후 차단)로 런타임 unreachable이라 회복 경로로 쓸 수 없다. 회복 전이원은 (a) `get_broker()` lazy cache-miss connect 성공 hook, 또는 (b) **신규 self-healing background retry loop**(net-new)다.
+- **회복 시 self-healing 재등록**: broker 회복 후 fill_recovery + reconcile + treasury_sync를 **idempotent re-register**한 뒤 전부 성공 시 플래그를 ready로 전이한다. `catch_up_once`는 멱등(#1946 barrier `s.fill_catch_up_failed_accounts` 보존)이라 재등록이 안전하다.
+
+#### (6) self-healing liveness invariant ([must_fix C], R3, normative)
+
+self-healing background retry loop는 broker가 `not_ready`인 동안 **무기한 재시도**를 지속한다(bounded backoff / cooldown, `EGW00133` ~60s에 정렬). `max attempts`는 **계좌 lifetime이 아니라 per-burst / 연결시도 단위에만** 적용한다. 일시 토큰 압박이 영구 `not_ready`로 고착되어서는 안 된다.
+
+> **liveness invariant (normative)**: broker 회복이 가능한 한, `not_ready` 계좌는 **유한시간 내 ready로 전이**한다. 이 invariant가 깨지면 transient 실패가 permanent로 역회귀하여 gate(축 ii) 도입 후 정상 주문이 영구 거부되어 #2395를 다른 형태로 재생산한다. gate soundness(축 ii)는 self-healing liveness(축 i)에 종속하므로, 구현 #2397의 liveness invariant가 구현 #2398 머지 전 검증되어야 한다.
+
+self-healing backoff 주기 / 최대 시도 / startup 타임아웃은 config로 노출한다.
+
+#### (7) 런타임 저하 백스톱 ([must_fix E])
+
+`broker_ready`는 startup snapshot mark다. 런타임 중 broker가 저하(토큰 만료·세션 단절)되어도 `is_connected`가 토글되지 않을 수 있다. 이 경우는 (a) 별도 `mark_not_ready` 경로, 또는 (b) 계층 3 fail-closed 백스톱([11-order-flow.md](../broker-adapter/11-order-flow.md) 참조)이 안전망 역할을 한다.
+
+#### (8) AccountStatus.SUSPENDED와 직교 (normative)
+
+두 축은 **직교**한다.
+
+- `AccountStatus.SUSPENDED`: user-initiated kill-switch([05-eventbus-integration.md](05-eventbus-integration.md), BotManager가 소속 봇 중지).
+- runtime readiness: service-health 자동축. readiness `not_ready`는 봇을 stop하지 않고 active-order만 gate한다.
+
+active-trading 차단 효과는 **일관**한다(둘 중 하나라도 막으면 거부). 단 readiness는 `AccountStatus`를 변경하지 **않는다**(SUSPENDED 자동 전이 금지 — user 결정 침해 방지). `RuleContext.account_status` dead field는 readiness gate와 별개로 유지하며, 정리(제거 vs 유지)는 별 PR로 권고한다(open question; [rule-engine/05-rule-context.md](../rule-engine/05-rule-context.md) caveat 참조).
+
+> **구현 분할 anchor**: 구현 #2397(축 i readiness 모델·SSOT·self-healing, 선행 없음·독립)이 registry를 채운다(이 PR은 gate를 켜지 않음 — 관측-only, 주문 동작 불변). 구현 #2398(축 ii active-order gate)은 **#2397 필수 선행**이다. 구현 #2399(축 iii KIS token single-flight)는 독립이다.
+
 ### D-ACC-07: Account lifecycle cold-path contract
 
 **결정**: 계좌 구조 변경은 서버 정지 상태에서만 허용한다. 서버 실행 중에는

@@ -45,3 +45,29 @@ ante system clear-halt              # 전역 정지 해제 (모든 SUSPENDED 계
 
 재시작은 운영자가 명시적으로 `ante bot start <bot_id>` CLI로 수행한다. 런타임 중에는
 IPC가 같은 BotManager 인스턴스를 통해 검증·실행·이벤트·감사 경로를 사용한다.
+
+### Runtime readiness 자동축 vs SUSPENDED user축 (직교)
+
+> 계약 확정: #2396. 실제 동작은 구현 #2397(축 i readiness 모델)·#2398(축 ii active-order gate) 머지 후. 본 절은 스펙 계약만 정의한다.
+
+Kill Switch(`AccountStatus.SUSPENDED`)는 **user-initiated 축**이고, runtime readiness(`RuntimeReadinessRegistry`, [02-design-decisions.md — D-ACC-09](02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다))는 **service-health 자동축**이다. 두 축은 직교하며 효과만 일관한다.
+
+| 항목 | SUSPENDED (user축) | runtime readiness (자동축) |
+|---|---|---|
+| 트리거 | `ante account suspend` / `system halt` (운영자) | startup 스케줄러 등록 실패 / 런타임 broker 저하 (자동) |
+| SSOT | `Account.status` | `RuntimeReadinessRegistry` |
+| 봇 영향 | `AccountSuspendedEvent` → BotManager 봇 중지 | **봇 stop 안 함** — active-order만 gate |
+| active-order 효과 | 차단 | 차단 (둘 중 하나라도 막으면 거부) |
+| `AccountStatus` 변경 | 직접 변경(SUSPENDED) | **변경 금지** (SUSPENDED 자동 전이 금지 — user 결정 침해 방지) |
+| 회복 | `ante account activate` / `system clear-halt` (운영자) | self-healing background retry loop 유한시간 ready 전이 |
+
+readiness `not_ready`는 SUSPENDED와 달리 봇을 stop하지 않는다. 봇은 계속 신호를 생성할 수 있으나 active-order만 gate(거부)된다([rule-engine/07-rule-engine-core.md](../rule-engine/07-rule-engine-core.md) "account readiness gate" 참조).
+
+### Readiness SSOT 이중 실패모드 ([must_fix G], normative)
+
+readiness `mark_not_ready`는 **두 실패모드 양쪽**에서 명시 호출한다 — `dict key 부재`만으로 not_ready를 표상하던 모호성을 제거한다.
+
+1. **전역 gate**: `connected_count == 0`이면 `_init_fill_recovery` / `_init_reconcile`가 미호출되어 **전 계좌 키가 부재**한다. 이 경우 **면제 매트릭스를 먼저 적용**해 비면제(broker-backed, 즉 LIVE) 플래그에 한해 `mark_not_ready(id, flag, reason)`를 호출한다 — virtual/test fill·reconcile 면제 pair는 broker-backed 스케줄러가 없어도 정상이므로 no-op ready mark를 유지한다(connected_count==0 virtual-only/test 시작에서 면제 플래그가 not_ready로 오기록되어 D-ACC-09 면제 계약과 충돌하지 않도록).
+2. **per-account continue**: 개별 계좌의 `get_broker` 실패로 그 계좌만 continue될 때, 해당 계좌에 대해 `mark_not_ready(id, flag, reason)`를 명시 호출한다.
+
+readiness 전이 알림 방식(`RuntimeReadinessChangedEvent` 신설 vs registry 내부 + `NotificationEvent`만)은 open question으로 둔다(v1 미포함).
