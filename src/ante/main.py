@@ -1162,18 +1162,21 @@ async def _register_reconcile_scheduler_for_account(
 
 
 def _self_healing_targets(accounts: list[Any]) -> list[Any]:
-    """self-healing 대상 계좌 — broker_ready 가 요구되는 LIVE(비면제) 계좌만.
+    """self-healing 대상 — **전 계좌**.
 
-    면제(virtual/test) 계좌는 broker readiness 가 무의미하므로 대상에서 제외한다.
+    ``treasury_sync`` 는 broker_type/trading_mode 무관 항상 요구(면제 없음)이므로,
+    broker 면제(virtual/test) 계좌도 treasury 일시 실패의 회복 대상이다(Codex P2).
+    회복 시 각 플래그는 면제 여부에 따라 개별 처리된다(broker/fill/reconcile 은
+    면제 계좌에서 skip, treasury 는 전 계좌 재시도).
     """
-    return [a for a in accounts if not _broker_ready_exempt(a)]
+    return list(accounts)
 
 
 def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
     """self-healing background retry loop 시작 (startup init 완료 후).
 
-    broker_ready 가 요구되는 LIVE 계좌가 하나도 없으면(전부 면제) 루프를 띄우지
-    않는다. 이미 task 가 있으면 재시작하지 않는다(멱등).
+    대상 계좌(전 계좌 — treasury_sync 는 면제 없음)가 하나도 없으면 루프를
+    띄우지 않는다. 이미 task 가 있으면 재시작하지 않는다(멱등).
     """
     if s.readiness_self_healing_task is not None:
         return
@@ -1184,7 +1187,7 @@ def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
         _readiness_self_healing_loop(s, targets),
         name="readiness-self-healing",
     )
-    logger.info("Readiness self-healing loop 시작: 대상 LIVE 계좌 %d개", len(targets))
+    logger.info("Readiness self-healing loop 시작: 대상 계좌 %d개", len(targets))
 
 
 async def _self_healing_recover_account(s: Services, account: Any) -> bool:
@@ -1227,14 +1230,25 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
         _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
         logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
 
-    # 의존 스케줄러 idempotent 재등록 — broker 외 readiness(fill/reconcile/treasury)
-    # 실패도 재시도해 active_trading_ready 까지 회복한다(Codex P1: broker_ready 만
-    # 보면 일시 fill/reconcile/treasury 실패가 #2398 gate 에서 영구 차단으로 고착).
-    if s.fill_applier is not None and s.order_tracker is not None:
+    # 의존 스케줄러 재시도 — **플래그별 면제 인식**(Codex P2). broker 면제 계좌
+    # (virtual/test)는 fill/reconcile 도 면제(startup no-op ready)이므로 broker-backed
+    # 재등록을 건너뛰어 get_broker 재노출을 막고, 비면제 플래그만 재시도한다.
+    # treasury_sync 는 면제 없음 → 전 계좌 재시도(broker 면제 계좌의 일시 treasury
+    # 실패도 회복). broker 외 readiness 실패도 active_trading_ready 까지 회복한다
+    # (Codex P1: broker_ready 만 보면 일시 실패가 #2398 gate 에서 영구 차단 고착).
+    fill_exempt = is_flag_exempt(
+        ReadinessFlag.FILL_RECONCILE,
+        broker_type=account.broker_type,
+        trading_mode=account.trading_mode,
+    )
+    if not fill_exempt and s.fill_applier is not None and s.order_tracker is not None:
         await _register_fill_scheduler_for_account(s, account)
-    if s.trade_service is not None:
-        # reconcile.enabled=false 면 _init_reconcile_scheduler 와 동일하게 재등록하지
-        # 않는다 — 운영자가 끈 reconcile 을 회복 시 다시 켜지 않도록(Codex P2).
+    reconcile_exempt = is_flag_exempt(
+        ReadinessFlag.RECONCILE,
+        broker_type=account.broker_type,
+        trading_mode=account.trading_mode,
+    )
+    if not reconcile_exempt and s.trade_service is not None:
         reconcile_enabled = True
         interval = 1800
         if s.config is not None:
@@ -1247,7 +1261,14 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
             await _register_reconcile_scheduler_for_account(
                 s, account, reconciler, interval
             )
-    # treasury_sync 재시작(면제 없음). 멱등 — Treasury.start_sync 가 기존 sync 교체.
+        else:
+            # reconcile.enabled=false(운영자 결정) — startup 의 disabled no-op ready
+            # 와 동일하게 회복 경로에서도 reconcile_ready 를 ready 로 mark 한다.
+            # (Codex P2: 비활성 reconcile 비면제 계좌가 영구 not_ready 로 고착되어
+            # active_trading_ready 가 영영 False 가 되는 회귀 차단.)
+            _mark_runtime_ready(s, account_id, ReadinessFlag.RECONCILE)
+    # treasury_sync 재시작(면제 없음 — 전 계좌). 멱등 — Treasury.start_sync 가
+    # 기존 sync 교체.
     await _init_treasury_sync(s, [account])
     # 모든 비면제 플래그가 ready 여야 회복 완료(active_trading_ready 기준).
     return s.runtime_readiness.active_trading_ready(
@@ -1267,10 +1288,18 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
     """
     interval = 60
     max_per_burst = 5
+    backoff_base = 5
+    backoff_max = 60
     if s.config is not None:
         interval = int(s.config.get("readiness.self_healing_interval_seconds", 60))
         max_per_burst = int(
             s.config.get("readiness.self_healing_max_attempts_per_burst", 5)
+        )
+        backoff_base = int(
+            s.config.get("readiness.self_healing_backoff_base_seconds", 5)
+        )
+        backoff_max = int(
+            s.config.get("readiness.self_healing_backoff_max_seconds", 60)
         )
 
     try:
@@ -1289,9 +1318,16 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
             ]
             for account in pending:
                 # per-burst bounded 재시도(계좌 lifetime 은 무제한).
-                for _attempt in range(max_per_burst):
+                for attempt in range(max_per_burst):
                     if await _self_healing_recover_account(s, account):
                         break
+                    # attempt 간 지수 backoff(EGW00133 ~1/min 토큰 cooldown 정렬,
+                    # Codex P2). 즉시 재인증을 몰아넣어 KIS 토큰 압박을 악화시키지
+                    # 않도록 한다. 마지막 attempt 뒤에는 burst interval 이 대신한다.
+                    if attempt < max_per_burst - 1:
+                        await asyncio.sleep(
+                            min(backoff_base * (2**attempt), backoff_max)
+                        )
             # 다음 burst 까지 대기(EGW00133 ~60s 토큰 cooldown 정렬). 회복 여부와
             # 무관하게 루프는 계속 돌며 잔여 not_ready 계좌를 무기한 재시도한다.
             await asyncio.sleep(interval)

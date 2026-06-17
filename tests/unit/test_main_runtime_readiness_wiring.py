@@ -419,6 +419,10 @@ async def test_self_healing_retries_indefinitely_until_recover() -> None:
         get=lambda key, default=None: {
             "readiness.self_healing_interval_seconds": 0,
             "readiness.self_healing_max_attempts_per_burst": 2,
+            # backoff 를 0 으로 무력화 — liveness 검증이 실시간 sleep 에 의존하지
+            # 않게 한다(기본 5s backoff 면 폴링 윈도우 초과).
+            "readiness.self_healing_backoff_base_seconds": 0,
+            "readiness.self_healing_backoff_max_seconds": 0,
         }.get(key, default)
     )
 
@@ -478,15 +482,118 @@ async def test_self_healing_loop_cancel_on_shutdown() -> None:
     assert task.cancelled() or task.done()
 
 
-def test_start_self_healing_skipped_when_all_exempt() -> None:
-    """대상 LIVE 계좌가 없으면(전부 면제) self-healing loop 를 띄우지 않는다."""
+@pytest.mark.asyncio
+async def test_start_self_healing_started_for_virtual_treasury_targets() -> None:
+    """Codex P2 회귀: treasury_sync 는 면제 없음(전 계좌 요구)이므로 virtual/test
+    전용 구성도 self-healing 대상이다 — 루프를 띄워 treasury 일시 실패를 회복한다.
+
+    (이전 회귀: targets 가 broker 비면제 LIVE 계좌만이라 virtual treasury 실패가
+    영구 not_ready 로 고착.)
+    """
     s = _services()
     accounts = [
         _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
         _account("kv", trading_mode=TradingMode.VIRTUAL),
     ]
     main_module._start_readiness_self_healing(s, accounts)
+    assert s.readiness_self_healing_task is not None
+    # cleanup: 띄운 task 취소.
+    task = s.readiness_self_healing_task
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+
+def test_start_self_healing_skipped_when_no_accounts() -> None:
+    """계좌가 하나도 없으면 self-healing loop 를 띄우지 않는다."""
+    s = _services()
+    main_module._start_readiness_self_healing(s, [])
     assert s.readiness_self_healing_task is None
+
+
+@pytest.mark.asyncio
+async def test_self_healing_recover_virtual_retries_treasury_without_get_broker() -> (
+    None
+):
+    """Codex P2 회귀: broker 면제(virtual) 계좌의 회복은 treasury_sync(면제 없음)
+    만 재시도하고, broker/fill/reconcile 은 면제(no-op ready)이므로 get_broker
+    재노출 없이 skip 한다.
+
+    virtual kis-domestic: broker/fill/reconcile 면제 → active_trading_ready 는
+    treasury 만 요구. treasury not_ready → 회복 retry 로 ready 전이 → True.
+    """
+    s = _services()
+    account = _account("kv", trading_mode=TradingMode.VIRTUAL)
+    # treasury 만 not_ready(나머지는 면제 → active_trading_ready 가 ready 취급).
+    s.runtime_readiness.mark_not_ready(
+        "kv", ReadinessFlag.TREASURY_SYNC, "treasury_sync_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert s.runtime_readiness.is_ready("kv", ReadinessFlag.TREASURY_SYNC)
+    # 면제 계좌이므로 broker/fill/reconcile 재등록(get_broker) 미발생.
+    assert s.account_service.get_broker.await_count == 0
+    assert "kv" not in s.fill_schedulers
+    assert "kv" not in s.reconcile_schedulers
+
+
+@pytest.mark.asyncio
+async def test_self_healing_recover_disabled_reconcile_marks_ready() -> None:
+    """Codex P2 회귀: reconcile.enabled=false 인 비면제(LIVE) 계좌의 회복은
+    reconcile_ready 를 ready 로 no-op mark 해 영구 not_ready 고착을 막는다
+    (startup 의 disabled no-op ready 와 동일). 회복 완료(active_trading_ready)."""
+    s = _services()
+    # reconcile 비활성 config.
+    s.config = SimpleNamespace(
+        get=lambda key, default=None: (
+            {"enabled": False} if key == "reconcile" else default
+        )
+    )
+    account = _account("live-1")
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.FILL_RECONCILE)
+    # reconcile 비활성 → scheduler 미등록이지만 reconcile_ready 는 no-op ready.
+    assert "live-1" not in s.reconcile_schedulers
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.RECONCILE)
+
+
+def test_self_healing_loop_backs_off_between_attempts() -> None:
+    """Codex P2 회귀: burst 내 attempt 간 지수 backoff(토큰 cooldown 정렬).
+
+    소스 계약 락: ``_readiness_self_healing_loop`` 가 backoff base/max 설정을 읽고
+    attempt 간 ``asyncio.sleep`` 으로 backoff 한다(즉시 재인증 몰림 방지).
+    """
+    import pathlib
+
+    main_src = pathlib.Path(main_module.__file__).resolve()
+    lines = main_src.read_text(encoding="utf-8").splitlines()
+    start = next(
+        i
+        for i, ln in enumerate(lines)
+        if "_readiness_self_healing_loop" in ln
+        and ln.lstrip().startswith(("def ", "async def "))
+    )
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith(("def ", "async def "))
+        ),
+        len(lines),
+    )
+    body = "\n".join(lines[start:end])
+    assert "self_healing_backoff_base_seconds" in body
+    assert "self_healing_backoff_max_seconds" in body
+    assert "2**attempt" in body or "2 ** attempt" in body
 
 
 # ── broker_ready connect 시점 mark (init_gateway 발췌 경로) ─────────────────
