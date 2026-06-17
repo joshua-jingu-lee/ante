@@ -203,6 +203,8 @@ self-healing backoff 주기 / 최대 시도 / startup 타임아웃은 config로 
 
 active-trading 차단 효과는 **일관**한다(둘 중 하나라도 막으면 거부). 단 readiness는 `AccountStatus`를 변경하지 **않는다**(SUSPENDED 자동 전이 금지 — user 결정 침해 방지). `RuleContext.account_status` dead field는 readiness gate와 별개로 유지하며, 정리(제거 vs 유지)는 별 PR로 권고한다(open question; [rule-engine/05-rule-context.md](../rule-engine/05-rule-context.md) caveat 참조).
 
+**SUSPENDED kill-switch 적용 지점 (normative, #2398 attempt4-b)**: SUSPENDED는 **계층1 primary + 계층3 final backstop(in-flight)** 로 적용한다(단일 chokepoint 금지·"둘 중 하나라도 막으면 거부" defense-in-depth와 정합). 계층1(`RuleEngine`)이 1차로 차단하지만, 계층1 통과 후 Treasury(계층2) reserve·rate-limit·broker 획득 await 중 user가 `account suspend`를 실행하면 그 in-flight 주문은 계층1 시점 status를 이미 통과한 상태다. 따라서 계층3(`gateway.submit_order`)이 `broker.place_order` **직전** 단일 재확인 지점에서 **readiness AND status(SUSPENDED)** 를 함께 재평가해 in-flight suspend를 잡는다. 계층3의 status는 **단일 fresh fetch**(await 이후 최신값)로 보며 routing 스냅샷을 재사용하지 않는다(stale 통과 금지). status 3-state(verified / `STATUS_UNAVAILABLE` 검증불가 fail-closed / `None` 소스미구성) 도출은 계층1·계층3가 **동일 공유 헬퍼**(`ante.account.gate.resolve_account_status` / `derive_account_status`)를 써 중복 구현을 금지한다(SSOT). 계층3 status 차단 reason은 `account_suspended` / `account_status_unavailable`이며 `OrderFailedEvent`로 귀결돼 reserve를 정확 해제한다([broker-adapter/11-order-flow.md](../broker-adapter/11-order-flow.md) 계층3 census 참조).
+
 > **구현 분할 anchor**: 구현 #2397(축 i readiness 모델·SSOT·self-healing, 선행 없음·독립)이 registry를 채운다(이 PR은 gate를 켜지 않음 — 관측-only, 주문 동작 불변). 구현 #2398(축 ii active-order gate)은 **#2397 필수 선행**이다. 구현 #2399(축 iii KIS token single-flight)는 독립이다.
 
 ### D-ACC-07: Account lifecycle cold-path contract

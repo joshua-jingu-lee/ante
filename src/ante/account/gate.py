@@ -25,7 +25,7 @@ scope: 이 헬퍼는 active-order gate reader 전용이다. registry 를 채우�
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.account.readiness import ALL_FLAGS, is_flag_exempt
 
@@ -51,11 +51,81 @@ ACCOUNT_SUSPENDED_REASON = "account_suspended"
 # status 축 비활성(과차단 회피).
 ACCOUNT_STATUS_UNAVAILABLE_REASON = "account_status_unavailable"
 
-# status 검증 불가 sentinel(#2398 P1). ``_resolve_account_status`` 가 status 소스
+# status 검증 불가 sentinel(#2398 P1). ``resolve_account_status`` 가 status 소스
 # 는 present 인데 live 조회 예외/status 미상으로 **검증 불가**임을 호출자에게
 # 명시적으로 전달한다. ``None``(소스 미구성, status 축 비활성)·verified status
 # (SUSPENDED/ACTIVE 등)와 3-state 로 구별돼야 stale 스냅샷 통과를 막을 수 있다.
 STATUS_UNAVAILABLE = object()
+
+
+def derive_account_status(
+    account_service: Any | None,
+    fetched: Any | None,
+    *,
+    fetch_failed: bool,
+) -> Any | None:
+    """이미 fetch 한 account 로부터 G7 kill-switch status 3-state 를 도출한다(I/O 없음).
+
+    status 는 런타임 가변 kill-switch(``account suspend`` IPC)라 생성시점 스냅샷을
+    신뢰하면 안 된다(#2398 P1). 계층1(RuleEngine)·계층3(APIGateway)가 **동일** 도출
+    로직을 공유하도록(중복 구현 금지, 메타리뷰 followup) 순수 함수로 추출한다.
+
+    - ``account_service is None``(status 소스 미구성, 비게이트 레거시) → ``None``
+      (status 축 비활성, 과차단 회피 — 기존 비게이트 동작 보존).
+    - 소스 present + ``fetch_failed``(live 조회 예외) 또는 fetched None/status 미상
+      → ``STATUS_UNAVAILABLE`` sentinel(**검증 불가** — 스냅샷 fallback 금지, 호출자
+      fail-closed 거부).
+    - 소스 present + 조회 성공 + status present → **verified status**(SUSPENDED/
+      ACTIVE 등) 그대로.
+
+    스냅샷 fallback 은 절대 금지한다 — live 조회 실패 시 stale ACTIVE 로 통과하면
+    suspended 계좌가 kill-switch 를 우회한다(spec rule-engine/07:88 "조회 예외도
+    차단").
+    """
+    if account_service is None:
+        # status 소스 미구성(비게이트 레거시) — status 축 비활성.
+        return None
+    if fetch_failed or fetched is None:
+        # live 조회 실패/미발견 = 검증 불가(스냅샷 fallback 금지).
+        return STATUS_UNAVAILABLE
+    status = getattr(fetched, "status", None)
+    if status is None:
+        return STATUS_UNAVAILABLE
+    return status
+
+
+async def resolve_account_status(
+    account_service: Any | None,
+    account_id: str,
+) -> Any | None:
+    """G7 — live ``AccountStatus`` 3-state 를 조회·도출한다(공유 SSOT 헬퍼).
+
+    계층1(RuleEngine)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가한다
+    (중복 구현 금지). status 는 런타임 가변 kill-switch 라 반드시 **live**
+    ``account_service.get`` 로 본다 — 생성시점 스냅샷 fallback 금지(#2398 P1).
+
+    반환 3-state 는 ``derive_account_status`` 와 동일하다:
+
+    - ``account_service is None`` → ``None``(status 축 비활성).
+    - 소스 present + ``get`` 예외/None/status 미상 → ``STATUS_UNAVAILABLE``.
+    - 소스 present + 조회 성공 + status present → verified status.
+
+    호출자는 SUSPENDED → ``account_suspended`` 차단, ``STATUS_UNAVAILABLE`` →
+    ``account_status_unavailable`` fail-closed, ``None``/verified non-SUSPENDED →
+    status 축 통과로 처리한다.
+    """
+    if account_service is None:
+        return None
+    get = getattr(account_service, "get", None)
+    if get is None:
+        # 소스는 present 인데 조회 API 부재 = 검증 불가(fail-closed).
+        return STATUS_UNAVAILABLE
+    try:
+        fetched = await get(account_id)
+    except Exception:  # noqa: BLE001 — live 실패 = 검증 불가(fail-closed).
+        return derive_account_status(account_service, None, fetch_failed=True)
+    return derive_account_status(account_service, fetched, fetch_failed=False)
+
 
 # 청산(liquidation/exit SELL) machine-readable marker. ``_liquidate_positions``
 # (bot/manager.py)가 청산 OrderRequestEvent.reason 에 이 ASCII prefix 를 부착하고,

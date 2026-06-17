@@ -779,43 +779,23 @@ class RuleEngine:
         return broker_type, trading_mode
 
     async def _resolve_account_status(self) -> Any | None:
-        """G7 — ``AccountStatus`` 직접 조회(``RuleContext.account_status`` 는 dead
-        field). status 는 런타임 가변 kill-switch 라 **반드시 live**
-        ``account_service.get`` 로 본다. kill-switch(SUSPENDED)는 런타임 IPC
-        (``account suspend``)로 변하지만 ``self._account`` 스냅샷은 엔진 생성 시점
-        고정(stale)이므로, live 조회 실패 시 그 스냅샷으로 fallback 하면 suspended
-        계좌 주문이 stale ACTIVE 로 통과해 kill-switch 가 우회된다(#2398 P1).
+        """G7 — live ``AccountStatus`` 3-state 조회(``RuleContext.account_status`` 는
+        dead field). 공유 SSOT 헬퍼 ``ante.account.gate.resolve_account_status`` 에
+        위임한다 — 계층1(여기)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가해
+        중복 구현을 막는다(메타리뷰 followup).
 
-        따라서 **스냅샷 fallback 을 제거**하고 3-state 로 구분 반환한다:
+        status 는 런타임 가변 kill-switch(``account suspend`` IPC)라 반드시 **live**
+        조회하며, ``self._account`` 생성시점 스냅샷으로 fallback 하지 않는다(#2398 P1
+        — stale ACTIVE 통과 시 suspended 계좌가 kill-switch 를 우회). 3-state:
 
-        - ``account_service`` present + ``get`` 성공 + status present →
-          **verified status**(SUSPENDED/ACTIVE 등) 그대로.
-        - ``account_service`` present + ``get`` 예외 또는 status 미상 →
-          ``STATUS_UNAVAILABLE`` sentinel(**검증 불가** — 스냅샷 fallback 금지).
-          호출자가 fail-closed 거부한다(spec 07:88 "조회 예외도 차단").
-        - ``account_service is None``(status 소스 미구성, 비게이트 레거시) →
-          ``None``(status 축 비활성, 과차단 회피 — 기존 비게이트 동작 보존).
-
-        호출자(``_on_order_request``)는 SUSPENDED → ``account_suspended`` 차단,
-        ``STATUS_UNAVAILABLE`` → ``account_status_unavailable`` fail-closed,
-        ``None``/verified non-SUSPENDED → status 축 통과(readiness 메타 gate 로
-        진행)로 처리한다.
+        - ``account_service is None`` → ``None``(status 축 비활성, 비게이트 레거시).
+        - 소스 present + ``get`` 예외/None/status 미상 → ``STATUS_UNAVAILABLE``
+          (검증 불가 → 호출자 fail-closed, spec 07:88).
+        - 소스 present + 조회 성공 + status present → verified status.
         """
-        from ante.account.gate import STATUS_UNAVAILABLE
+        from ante.account.gate import resolve_account_status
 
-        if self._account_service is None:
-            # status 소스 미구성(비게이트 레거시) — status 축 비활성.
-            return None
-        try:
-            fetched = await self._account_service.get(self._account_id)
-        except Exception:  # noqa: BLE001 — live 실패 = 검증 불가(fail-closed).
-            return STATUS_UNAVAILABLE
-        if fetched is None:
-            return STATUS_UNAVAILABLE
-        status = getattr(fetched, "status", None)
-        if status is None:
-            return STATUS_UNAVAILABLE
-        return status
+        return await resolve_account_status(self._account_service, self._account_id)
 
     async def _on_order_request(self, event: object) -> None:
         """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행.

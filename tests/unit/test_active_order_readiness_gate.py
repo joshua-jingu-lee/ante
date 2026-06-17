@@ -537,7 +537,7 @@ class TestLayer3Gateway:
         assert call.args[0] == BOT and call.args[1] == "ord-1"
 
     async def test_ready_passes_to_broker(self) -> None:
-        """G5: ready LIVE → broker.place_order + OrderSubmittedEvent."""
+        """G5: ready LIVE + verified ACTIVE → broker.place_order 1회 + G6 0회."""
         bus = EventBus()
         cap = _capture(bus)
         broker = self._broker()
@@ -548,6 +548,7 @@ class TestLayer3Gateway:
         broker.place_order.assert_called_once()
         assert len(cap.submitted) == 1
         assert cap.failed == []
+        assert _notif_count(cap) == 0  # 정상 통과는 G6 알림 없음.
 
     async def test_approved_payload_preserved_on_block(self) -> None:
         """계층3 OrderApprovedEvent payload bot/order/account 보존(OrderFailedEvent)."""
@@ -563,12 +564,16 @@ class TestLayer3Gateway:
         assert cap.failed[0].symbol == SYMBOL
 
     async def test_fail_closed_meta_unavailable(self) -> None:
-        """G2 + #2398 P2-B: LIVE 주문 account_service.get 실패 → fail-closed.
+        """G2 + #2398 P2-B/attempt4-b: LIVE 주문 account_service.get 실패 →
+        fail-closed.
 
-        ``submit_order`` 의 ``_readiness_gate`` 가 메타 취득 실패를 G6 알림 +
-        APIError(account_not_ready)로 일관 처리 → except 가 OrderFailedEvent 로
-        변환. 과거 bare OrderFailedEvent(알림 누락) early-return 을 대체한다.
-        OrderFailedEvent 1회 + NotificationEvent(error/system) 1회(누락 없음)."""
+        계층3 gate 가 ``place_order`` 직전 fresh fetch 로 메타/status 를 본다. get
+        예외 = status 검증 불가(``STATUS_UNAVAILABLE``)이므로 status 축이 먼저
+        ``account_status_unavailable`` fail-closed(attempt4-b SSOT — 계층1과 동일
+        3-state) 로 G6 알림 + APIError → except 가 OrderFailedEvent 로 변환. 과거
+        bare OrderFailedEvent(알림 누락) early-return 을 대체한다. OrderFailedEvent
+        1회 + NotificationEvent(error/system) 1회(누락 없음). G3: error_code 무관
+        하게 Treasury 가 bot_id/order_id 로 release."""
         bus = EventBus()
         cap = _capture(bus)
         broker = self._broker()
@@ -583,9 +588,280 @@ class TestLayer3Gateway:
         await gw._on_order_approved(_approved())
 
         assert len(cap.failed) == 1
-        assert cap.failed[0].error_code == "account_not_ready"
+        # get 예외 = 검증 불가 → status 축 account_status_unavailable(계층1 동형).
+        assert cap.failed[0].error_code == "account_status_unavailable"
         broker.place_order.assert_not_called()
         assert _notif_count(cap) == 1  # P2-B: 알림 누락 없음.
+
+
+# ── attempt4 (P1×2 + 메타 감사): place_order 직전 단일 재확인 + in-flight backstop ─
+
+
+class _CallbackRateLimiter:
+    """``acquire()`` await 중 콜백을 실행하는 테스트용 rate limiter.
+
+    Fix 1(attempt4-a) TOCTOU 모사 — gate 평가가 ``acquire()`` **뒤**(place_order
+    직전)로 이동했으므로, ``acquire()`` 대기 중 readiness/status 가 전환되면 gate 가
+    그 변화를 보고 차단해야 한다(이동 전이라면 stale 통과).
+    """
+
+    def __init__(self, on_acquire) -> None:
+        self._on_acquire = on_acquire
+        self.acquired = 0
+
+    async def acquire(self) -> None:
+        self.acquired += 1
+        res = self._on_acquire()
+        if res is not None and hasattr(res, "__await__"):
+            await res
+
+
+class TestLayer3GatePositionAndBackstop:
+    """attempt4-a(P1): gate 가 ``rate_limiter.acquire()``+``_get_broker()`` **이후**,
+    ``place_order`` **직전**에 단일 재확인하므로 await 대기 중 발생한 not_ready/
+    suspend 를 잡는다. attempt4-b(adjudicated): 계층3 가 status(SUSPENDED)도 함께
+    재확인하는 in-flight kill-switch backstop."""
+
+    def _broker(self) -> MagicMock:
+        b = MagicMock()
+        b.place_order = AsyncMock(return_value="BRK-1")
+        return b
+
+    def _gateway(
+        self,
+        bus: EventBus,
+        *,
+        registry: RuntimeReadinessRegistry,
+        svc: MagicMock,
+        broker: MagicMock,
+    ) -> APIGateway:
+        svc.get_broker = AsyncMock(return_value=broker)
+        return APIGateway(account_service=svc, eventbus=bus, runtime_readiness=registry)
+
+    async def test_fix1_not_ready_during_acquire_blocks_before_place_order(
+        self,
+    ) -> None:
+        """Fix 1(attempt4-a): ready 로 진입했으나 ``acquire()`` 대기 중
+        ``mark_not_ready`` → place_order **미호출** + OrderFailedEvent
+        (account_not_ready) + G6 1회. gate 가 acquire 앞에 있었다면 stale 통과해
+        실주문이 나갔을 회귀를 lock 한다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        registry = ready_registry(ACCOUNT)
+        svc = _account_service(make_account(ACCOUNT, status=AccountStatus.ACTIVE))
+        gw = self._gateway(bus, registry=registry, svc=svc, broker=broker)
+
+        # acquire() 대기 중 readiness 가 not_ready 로 전환되도록 콜백 주입.
+        def _flip() -> None:
+            registry.mark_not_ready(
+                ACCOUNT, ReadinessFlag.FILL_RECONCILE, "in-flight degrade"
+            )
+
+        gw._rate_limiters[ACCOUNT] = _CallbackRateLimiter(_flip)  # type: ignore[assignment]
+
+        await gw._on_order_approved(_approved(order_type="limit"))
+
+        broker.place_order.assert_not_called()  # acquire 후 재확인이 차단(P1 lock).
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
+        assert _notif_count(cap) == 1  # G6: 단일 재확인 지점 → 정확히 1회.
+
+    async def test_fix2_suspended_during_acquire_blocked_by_layer3(self) -> None:
+        """Fix 2(attempt4-b, in-flight kill-switch backstop): 계층1 통과 후
+        ``acquire()`` 대기 중 account suspend → 계층3 가 place_order 직전 status
+        재확인으로 차단(account_suspended) + G6 1회, place_order 미호출.
+
+        fresh fetch 모사 — routing fetch 는 ACTIVE, gate fetch 는 SUSPENDED 를
+        반환하도록 ``get`` 을 순차 응답으로 구성한다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        registry = ready_registry(ACCOUNT)
+        active = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        suspended = make_account(ACCOUNT, status=AccountStatus.SUSPENDED)
+        svc = MagicMock()
+        # 1st get(routing) → ACTIVE, 2nd get(gate, acquire 이후 fresh) → SUSPENDED.
+        svc.get = AsyncMock(side_effect=[active, suspended])
+        gw = self._gateway(bus, registry=registry, svc=svc, broker=broker)
+
+        await gw._on_order_approved(_approved(order_type="limit"))
+
+        broker.place_order.assert_not_called()
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_suspended"
+        assert _notif_count(cap) == 1  # G6 1회.
+
+    async def test_fix2_status_unavailable_during_gate_fail_closed(self) -> None:
+        """Fix 2: gate fresh fetch 시 ``get`` 예외(STATUS_UNAVAILABLE) →
+        account_status_unavailable fail-closed + place_order 미호출 + G6 1회.
+
+        routing fetch 는 ACTIVE 성공, gate fetch(2nd get)만 예외로 만들어 status
+        검증 불가를 격리 검증한다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        registry = ready_registry(ACCOUNT)
+        active = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=[active, RuntimeError("db locked")])
+        gw = self._gateway(bus, registry=registry, svc=svc, broker=broker)
+
+        await gw._on_order_approved(_approved(order_type="limit"))
+
+        broker.place_order.assert_not_called()
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_status_unavailable"
+        assert _notif_count(cap) == 1
+
+    async def test_direct_submit_suspended_raises_account_suspended(self) -> None:
+        """계층3 직접 submit_order: verified SUSPENDED → APIError(account_suspended)
+        + broker 미호출 + G6 1회(단일 재확인 지점)."""
+        from ante.broker.exceptions import APIError
+
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        registry = ready_registry(ACCOUNT)
+        svc = _account_service(make_account(ACCOUNT, status=AccountStatus.SUSPENDED))
+        gw = self._gateway(bus, registry=registry, svc=svc, broker=broker)
+
+        with pytest.raises(APIError) as exc:
+            await gw.submit_order(
+                bot_id=BOT,
+                symbol=SYMBOL,
+                side="buy",
+                quantity=10.0,
+                account_id=ACCOUNT,
+            )
+        assert exc.value.error_code == "account_suspended"
+        broker.place_order.assert_not_called()
+        assert _notif_count(cap) == 1
+
+    async def test_g6_exactly_once_per_order_single_recheck(self) -> None:
+        """G6: 단일 재확인 지점이므로 동일 order 에 대해 not_ready 알림이 정확히
+        1회(중복 평가 없음)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        svc = _account_service(make_account(ACCOUNT, status=AccountStatus.ACTIVE))
+        gw = self._gateway(
+            bus, registry=not_ready_registry(ACCOUNT), svc=svc, broker=broker
+        )
+
+        await gw._on_order_approved(_approved(order_type="limit"))
+
+        assert _notif_count(cap) == 1
+        broker.place_order.assert_not_called()
+
+
+# ── attempt4 메타리뷰: SSOT 공유 헬퍼 resolve_account_status (3-state) ──────────
+
+
+class TestResolveAccountStatusSSOT:
+    """``ante.account.gate.resolve_account_status`` 3-state 단위 테스트 + 계층1/계층3
+    가 동일 헬퍼를 쓰는지(중복 구현 금지) 검증한다."""
+
+    async def test_none_when_no_account_service(self) -> None:
+        """account_service None → None(status 축 비활성, 비게이트 레거시)."""
+        from ante.account.gate import resolve_account_status
+
+        assert await resolve_account_status(None, ACCOUNT) is None
+
+    async def test_verified_status_passthrough(self) -> None:
+        """소스 present + get 성공 + status present → verified status 그대로."""
+        from ante.account.gate import resolve_account_status
+
+        svc = _account_service(make_account(ACCOUNT, status=AccountStatus.SUSPENDED))
+        assert await resolve_account_status(svc, ACCOUNT) == AccountStatus.SUSPENDED
+
+        svc2 = _account_service(make_account(ACCOUNT, status=AccountStatus.ACTIVE))
+        assert await resolve_account_status(svc2, ACCOUNT) == AccountStatus.ACTIVE
+
+    async def test_status_unavailable_on_get_exception(self) -> None:
+        """소스 present + get 예외 → STATUS_UNAVAILABLE(검증 불가, 스냅샷 fallback
+        금지)."""
+        from ante.account.gate import STATUS_UNAVAILABLE, resolve_account_status
+
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=RuntimeError("db locked"))
+        assert await resolve_account_status(svc, ACCOUNT) is STATUS_UNAVAILABLE
+
+    async def test_status_unavailable_on_none_or_missing_status(self) -> None:
+        """소스 present + get None/status 미상 → STATUS_UNAVAILABLE."""
+        from ante.account.gate import STATUS_UNAVAILABLE, resolve_account_status
+
+        svc_none = MagicMock()
+        svc_none.get = AsyncMock(return_value=None)
+        assert await resolve_account_status(svc_none, ACCOUNT) is STATUS_UNAVAILABLE
+
+        no_status = MagicMock()
+        no_status.status = None
+        svc_no_status = MagicMock()
+        svc_no_status.get = AsyncMock(return_value=no_status)
+        assert (
+            await resolve_account_status(svc_no_status, ACCOUNT) is STATUS_UNAVAILABLE
+        )
+
+    async def test_derive_account_status_3state(self) -> None:
+        """derive_account_status(I/O 없는 순수 도출) 3-state."""
+        from ante.account.gate import STATUS_UNAVAILABLE, derive_account_status
+
+        # 소스 None → None.
+        assert derive_account_status(None, None, fetch_failed=False) is None
+        # 소스 present + fetch_failed → STATUS_UNAVAILABLE.
+        svc = MagicMock()
+        assert derive_account_status(svc, None, fetch_failed=True) is STATUS_UNAVAILABLE
+        # 소스 present + fetched None → STATUS_UNAVAILABLE.
+        assert (
+            derive_account_status(svc, None, fetch_failed=False) is STATUS_UNAVAILABLE
+        )
+        # 소스 present + verified status → 그대로.
+        acc = make_account(ACCOUNT, status=AccountStatus.SUSPENDED)
+        assert (
+            derive_account_status(svc, acc, fetch_failed=False)
+            == AccountStatus.SUSPENDED
+        )
+
+    async def test_layer1_uses_shared_helper(self) -> None:
+        """계층1(RuleEngine._resolve_account_status)이 공유 헬퍼에 위임한다
+        (중복 구현 금지) — 헬퍼를 패치하면 계층1 결과가 바뀐다."""
+        from unittest.mock import patch
+
+        from ante.account.gate import STATUS_UNAVAILABLE
+
+        engine = RuleEngine(
+            eventbus=EventBus(),
+            account_id=ACCOUNT,
+            account_service=_account_service(make_account(ACCOUNT)),
+            account=make_account(ACCOUNT),
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        with patch(
+            "ante.account.gate.resolve_account_status",
+            new=AsyncMock(return_value=STATUS_UNAVAILABLE),
+        ) as helper:
+            result = await engine._resolve_account_status()
+        helper.assert_awaited_once()
+        assert result is STATUS_UNAVAILABLE
+
+    async def test_layer3_uses_shared_derive_helper(self) -> None:
+        """계층3(APIGateway._readiness_gate)이 공유 derive_account_status 로 status
+        축을 평가한다 — verified SUSPENDED 면 account_suspended 차단."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = MagicMock()
+        broker.place_order = AsyncMock(return_value="BRK-1")
+        svc = _account_service(make_account(ACCOUNT, status=AccountStatus.SUSPENDED))
+        svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=svc, eventbus=bus, runtime_readiness=ready_registry(ACCOUNT)
+        )
+        await gw._on_order_approved(_approved(order_type="limit"))
+
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_suspended"
+        broker.place_order.assert_not_called()
 
 
 # ── Virtual 라우팅 + G8 + G9 (VirtualExecutor / gateway skip) ────────────────
@@ -883,11 +1159,13 @@ class TestVirtualRoutingMarkerP2:
         assert _notif_count(cap) == 1  # G6 알림 1회(VirtualExecutor 발행).
 
     async def test_live_meta_failure_failed_and_alert(self) -> None:
-        """P2-B: LIVE 주문 + 메타 실패 → OrderFailedEvent + 알림 정확히 1회.
+        """P2-B/attempt4-b: LIVE 주문 + 메타 실패 → OrderFailedEvent + 알림 정확히
+        1회.
 
         VirtualExecutor 는 portfolio 미소유(live 봇) early-return(마커 미설정) →
-        gateway 가 submit_order → _readiness_gate 가 메타 실패를 G6 알림 + APIError
-        로 처리 → except → OrderFailedEvent(누락 없음)."""
+        gateway 가 submit_order → 계층3 gate 가 place_order 직전 fresh fetch. get
+        예외 = status 검증 불가 → status 축 account_status_unavailable fail-closed →
+        G6 알림 + APIError → except → OrderFailedEvent(누락 없음)."""
         bus = EventBus()
         cap = _capture(bus)
         broker = self._broker()
@@ -914,7 +1192,8 @@ class TestVirtualRoutingMarkerP2:
         await bus.publish(_approved())
 
         assert len(cap.failed) == 1
-        assert cap.failed[0].error_code == "account_not_ready"
+        # get 예외 = 검증 불가 → status 축 account_status_unavailable(계층1 동형).
+        assert cap.failed[0].error_code == "account_status_unavailable"
         assert _notif_count(cap) == 1  # P2-B: 알림 누락 없음.
         broker.place_order.assert_not_called()
         assert cap.filled == []

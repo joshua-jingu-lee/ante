@@ -62,9 +62,14 @@ Bot → OrderRequestEvent (stop/stop_limit)
 
 > 계약 확정: #2396. 실제 동작은 구현 #2397(축 i readiness 모델, 선행) + #2398(축 ii active-order gate) 머지 후. 본 절은 스펙 계약만 정의한다.
 
-`gateway.submit_order`(`_on_order_approved` 경로)는 active-order readiness gate(계층 3, fail-closed)를 적용한다. 이는 [account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다)의 3계층 defense-in-depth 중 최후보루다.
+`gateway.submit_order`(`_on_order_approved` 경로)는 active-order gate(계층 3, fail-closed)를 적용한다. 이는 [account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다)의 3계층 defense-in-depth 중 최후보루다.
 
-- **위치**: `_get_broker` 직전 `runtime_readiness.active_trading_ready(account_id)`를 체크한다. `not_ready`면 broker를 호출하지 않는다.
+- **위치 (#2398 attempt4-a, P1)**: `broker.place_order` **직전**(즉 `rate_limiter.acquire()`·`_get_broker()` await **이후**) 단일 지점에서 재확인한다. gate를 `acquire()`(최대 ~60s await)·`_get_broker()` **앞**에 두면 그 대기 중 `mark_not_ready`/suspend가 끼어 **stale 통과**로 실주문이 나가므로(TOCTOU), 가장 늦은 비가역 시점 직전에 단일 재확인한다. 재확인 직후 `place_order`가 동기 시작하므로 각 await 후 중복 체크는 불요하다. `not_ready`면 broker를 호출하지 않는다.
+- **평가 축 (둘 중 하나라도 막으면 거부)**: 이 단일 재확인 지점에서 **readiness(`runtime_readiness.active_trading_ready`) AND status(SUSPENDED)** 를 함께 본다(in-flight 런타임 저하·kill-switch의 최종 backstop). status 축은 **단일 fresh fetch**(`broker.place_order` 직전 account 1회 조회)로 readiness(broker_type/trading_mode)와 함께 평가하며(중복 fetch 금지), routing 단계의 stale 스냅샷을 재사용하지 않는다 — status는 런타임 가변 kill-switch라 await **이후** 최신값을 읽어야 in-flight suspend를 잡는다.
+  - verified `SUSPENDED` → `account_suspended`(G7 in-flight backstop).
+  - `STATUS_UNAVAILABLE`(account_service present인데 live 조회 예외/status 미상) → `account_status_unavailable` fail-closed(스냅샷 fallback 금지).
+  - `None`(account_service 미구성) 또는 verified non-SUSPENDED → status 축 통과(readiness 축으로 진행).
+  - status 3-state 도출은 계층1(`RuleEngine`)과 **동일 공유 헬퍼**(`ante.account.gate.resolve_account_status` / `derive_account_status`)를 쓴다(중복 구현 금지, SSOT).
 - **fail-closed**: registry 미주입 / 조회 예외도 `not_ready`로 취급해 차단한다. 런타임 저하(토큰 만료·세션 단절, `is_connected` 미토글)는 계층3 fail-closed가 백스톱이다([must_fix E]).
 
 **reserve 해제 정합 (load-bearing invariant, [must_fix I], normative)**: 계층 3 시점엔 이미 Treasury reserve가 잡혀 있다(계층1·2를 통과한 후 `OrderApprovedEvent`가 발행됐기 때문). 따라서 계층3 거부는 **반드시** `OrderApprovedEvent` payload의 `bot_id` + `order_id` + `account_id`를 보존한 `OrderFailedEvent`로 귀결되어야 한다. Treasury `_on_order_failed`가 이 이벤트를 구독해 `release_reservation(bot_id, order_id)` + `_is_my_event(account_id)`로 reserve를 정확 해제한다(`reserved_amount`는 해제 키가 아니다 — 내부 ledger 조회).
@@ -73,10 +78,10 @@ Bot → OrderRequestEvent (stop/stop_limit)
 
 **defense-in-depth 3계층 census (단일 EventBus 파이프라인)**:
 
-| 계층 | 위치 | 발행 이벤트 | reserve 상태 |
-|---|---|---|---|
-| 계층1 | `RuleEngine._on_order_request` (account_id 필터 직후) | `OrderRejectedEvent` | reserve 이전 — 누수 없음 |
-| 계층2 | `Treasury._on_order_validated` (reserve 직전) | `OrderRejectedEvent` | reserve 미실행 — 해제 불요 |
-| 계층3 | `gateway.submit_order` (`_get_broker` 직전) | `OrderFailedEvent` | reserve 잡힘 — 정확 해제 트리거 |
+| 계층 | 위치 | 평가 축 | 발행 이벤트 | reserve 상태 |
+|---|---|---|---|---|
+| 계층1 | `RuleEngine._on_order_request` (account_id 필터 직후) | status(SUSPENDED) primary + readiness | `OrderRejectedEvent` | reserve 이전 — 누수 없음 |
+| 계층2 | `Treasury._on_order_validated` (reserve 직전) | readiness | `OrderRejectedEvent` | reserve 미실행 — 해제 불요 |
+| 계층3 | `gateway.submit_order` (`broker.place_order` 직전 — `acquire`/`_get_broker` await **이후**) | readiness AND status(SUSPENDED) in-flight backstop | `OrderFailedEvent` | reserve 잡힘 — 정확 해제 트리거 |
 
-reason 토큰은 `account_not_ready`로 통일(SSOT)하고, 상세는 missing flag 목록 suffix로 붙인다. 세 계층 모두 `NotificationEvent(level=error, category=system)`를 1회 발행해 운영자 가시성을 보장한다.
+readiness reason 토큰은 `account_not_ready`로 통일(SSOT)하고, 상세는 missing flag 목록 suffix로 붙인다. status 축 reason은 `account_suspended`(verified SUSPENDED) / `account_status_unavailable`(검증 불가 fail-closed)다. 세 계층 모두 `NotificationEvent(level=error, category=system)`를 1회 발행해 운영자 가시성을 보장한다. 계층3은 `place_order` 직전 단일 재확인 지점이므로 동일 주문에 알림은 정확히 1회다.
