@@ -98,11 +98,11 @@ scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_
 
 > 계약 확정: #2396. 실제 동작은 구현 #2399 머지 후.
 
-`error_codes.py`([10-commission-info.md — 에러 코드 분류](10-commission-info.md#에러-코드-분류))에 다음 두 코드를 transient로 등록한다(현재 0건 실측). `TRANSIENT_MSG_CODES` set에 추가하고 `KIS_ERROR_MESSAGES`에 한글 메시지를 등록한다.
+`error_codes.py`([10-commission-info.md — 에러 코드 분류](10-commission-info.md#에러-코드-분류))에 등록한다(현재 0건 실측). **`EGW00201`만 `TRANSIENT_MSG_CODES`에 추가**한다(일반 지수 backoff). **`EGW00133`은 `TRANSIENT_MSG_CODES`에 넣지 않는다** — 이 set은 `_handle_response`가 `APIError.retryable=True`를 세팅해 일반 `KISRetryHandler` 지수 backoff로 보내는 전역 SSOT이므로, EGW00133을 넣으면 전용 ~60s token-only backoff가 아니라 generic/이중 retry를 탄다. `EGW00133`은 `KIS_ERROR_MESSAGES` 한글 등록 + **토큰 발급 경로 전용 분류(별도 set/상수)**로만 두고 `_authenticate`/`connect` 내부 ~60s backoff(위 (4))에서만 소비한다. 두 코드 모두 `KIS_ERROR_MESSAGES`에 한글 메시지 등록.
 
 | msg_cd | 분류 | 한글 메시지 | 처리 |
 |---|---|---|---|
-| `EGW00133` | transient | 접근토큰 발급은 1분당 1회만 허용 | **토큰 발급 전용 ~60s backoff 분기** (위 (4)) |
+| `EGW00133` | **auth-only(토큰경로 전용, TRANSIENT_MSG_CODES 제외)** | 접근토큰 발급은 1분당 1회만 허용 | **토큰 발급 전용 ~60s backoff 분기** (위 (4)) |
 | `EGW00201` | transient | 초당 거래 건수 초과 | 일반 TRANSIENT 지수 backoff |
 
 `EGW00133`은 일반 TRANSIENT 지수 backoff가 아니라 **토큰 발급 전용 ~60s backoff 분기**임을 명시한다(위 (4)·(6) invariant). `EGW00201`은 일반 TRANSIENT 지수 backoff를 따른다.

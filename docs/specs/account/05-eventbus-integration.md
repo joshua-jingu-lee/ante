@@ -67,7 +67,7 @@ readiness `not_ready`는 SUSPENDED와 달리 봇을 stop하지 않는다. 봇은
 
 readiness `mark_not_ready`는 **두 실패모드 양쪽**에서 명시 호출한다 — `dict key 부재`만으로 not_ready를 표상하던 모호성을 제거한다.
 
-1. **전역 gate**: `connected_count == 0`이면 `_init_fill_recovery` / `_init_reconcile`가 미호출되어 **전 계좌 키가 부재**한다. 이 경우 전 계좌에 대해 `mark_not_ready(id, flag, reason)`를 명시 호출한다.
+1. **전역 gate**: `connected_count == 0`이면 `_init_fill_recovery` / `_init_reconcile`가 미호출되어 **전 계좌 키가 부재**한다. 이 경우 **면제 매트릭스를 먼저 적용**해 비면제(broker-backed, 즉 LIVE) 플래그에 한해 `mark_not_ready(id, flag, reason)`를 호출한다 — virtual/test fill·reconcile 면제 pair는 broker-backed 스케줄러가 없어도 정상이므로 no-op ready mark를 유지한다(connected_count==0 virtual-only/test 시작에서 면제 플래그가 not_ready로 오기록되어 D-ACC-09 면제 계약과 충돌하지 않도록).
 2. **per-account continue**: 개별 계좌의 `get_broker` 실패로 그 계좌만 continue될 때, 해당 계좌에 대해 `mark_not_ready(id, flag, reason)`를 명시 호출한다.
 
 readiness 전이 알림 방식(`RuntimeReadinessChangedEvent` 신설 vs registry 내부 + `NotificationEvent`만)은 open question으로 둔다(v1 미포함).
