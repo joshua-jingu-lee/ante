@@ -1037,6 +1037,194 @@ class TestVirtualRouting:
         assert cap.filled == []
         assert len(cap.failed) == 1
 
+    # ── #2398 attempt5 P2: virtual SUSPENDED in-flight backstop 대칭 ──────────
+
+    @pytest.mark.parametrize("side", ["buy", "sell"])
+    async def test_g7_virtual_suspended_backstop(self, side: str) -> None:
+        """attempt5 P2: readiness ready 여도 AccountStatus.SUSPENDED → fill 미실행 +
+        OrderFailedEvent(account_suspended) + G6 1회(live 계층3 와 대칭, BUY/SELL 무관).
+
+        APIGateway 가 virtual 을 silent skip 하므로 SUSPENDED in-flight 차단의 최종
+        backstop 은 VirtualExecutor 다(D-ACC-09 §8). readiness 는 ready 인데도
+        status 축이 막아야 한다(둘 중 하나라도 막으면 거부).
+        """
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        suspended = make_account(
+            ACCOUNT,
+            trading_mode=TradingMode.VIRTUAL,
+            status=AccountStatus.SUSPENDED,
+        )
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+            account=suspended,
+        )
+        await executor._on_order_approved(_approved(side=side))
+
+        assert cap.filled == []  # SUSPENDED → fill 미실행(0원 체결도 없음, G8).
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_suspended"  # live 와 대칭.
+        assert _notif_count(cap) == 1  # G6 알림 정확히 1회.
+
+    async def test_g7_virtual_status_unavailable_fail_closed(self) -> None:
+        """attempt5 P2: account_service.get 예외(검증 불가) → fail-closed. fill 미실행
+        + OrderFailedEvent(account_status_unavailable) + G6 1회.
+
+        status 소스(account_service)는 present 인데 live 조회가 예외라 스냅샷 통과
+        금지(in-flight suspend stale 통과 차단). readiness 가 ready 여도 status 축이
+        먼저 fail-closed 거부한다(계층3 동형).
+        """
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        from ante.bot.providers.virtual import (
+            VirtualExecutor,
+            VirtualPortfolioView,
+        )
+
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=RuntimeError("account store down"))
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        await executor._on_order_approved(_approved())
+
+        assert cap.filled == []
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_status_unavailable"
+        assert _notif_count(cap) == 1  # G6 알림 1회.
+
+    async def test_g7_virtual_active_ready_fills_normally(self) -> None:
+        """attempt5 P2 회귀: verified ACTIVE + ready → 정상 체결(OrderFilledEvent),
+        OrderFailedEvent/G6 없음(status 축이 정상 경로를 막지 않음)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        active = make_account(
+            ACCOUNT,
+            trading_mode=TradingMode.VIRTUAL,
+            status=AccountStatus.ACTIVE,
+        )
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+            account=active,
+        )
+        await executor._on_order_approved(_approved())
+
+        assert len(cap.filled) == 1  # 정상 fill.
+        assert cap.failed == []
+        assert _notif_count(cap) == 0  # 정상 통과는 G6 알림 없음.
+
+    async def test_status_axis_inactive_when_no_account_service(self) -> None:
+        """attempt5 P2: account_service None(비게이트) → status 축이 virtual fill 을
+        막지 않는다(기존 동작 보존). registry 만으로 readiness 평가.
+
+        account_service 미구성이면 derive_account_status → None(status 축 비활성,
+        과차단 회피)이므로 account_suspended/account_status_unavailable 거부가 없고,
+        ready registry 면 정상 체결한다.
+        """
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        from ante.bot.providers.virtual import (
+            VirtualExecutor,
+            VirtualPortfolioView,
+        )
+
+        # account_service=None → status 축 비활성. 단 readiness 축은 registry 로 평가.
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=None,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        await executor._on_order_approved(_approved())
+
+        # account_service None 은 G2 fail-closed(account_not_ready) — status 축이
+        # virtual fill 을 막은 게 아니라 readiness 축 fail-closed 다(기존 동작 보존).
+        assert cap.filled == []
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
+
+    async def test_g7_virtual_backstop_uses_shared_helper(self, monkeypatch) -> None:
+        """공유 헬퍼 사용 락: VirtualExecutor 가 gate.py ``derive_account_status`` 로
+        status 축을 평가한다(중복 구현 금지, 계층1/계층3 와 SSOT 공유)."""
+        import ante.bot.providers.virtual as virtual_mod
+        from ante.account import gate
+
+        calls: list[bool] = []
+        original = gate.derive_account_status
+
+        def _spy(account_service, fetched, *, fetch_failed):
+            calls.append(fetch_failed)
+            return original(account_service, fetched, fetch_failed=fetch_failed)
+
+        # virtual 은 gate 를 함수 내부에서 import 하므로 gate 모듈 심볼을 패치한다.
+        monkeypatch.setattr(gate, "derive_account_status", _spy)
+        assert virtual_mod  # import 보장(린트).
+
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        suspended = make_account(
+            ACCOUNT,
+            trading_mode=TradingMode.VIRTUAL,
+            status=AccountStatus.SUSPENDED,
+        )
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+            account=suspended,
+        )
+        await executor._on_order_approved(_approved())
+
+        assert calls == [False]  # 공유 헬퍼 1회 호출(단일 fetch, fetch_failed=False).
+        assert cap.failed[0].error_code == "account_suspended"
+
+    async def test_g7_virtual_single_fetch_no_duplicate_get(self) -> None:
+        """단일 fetch 락: VirtualExecutor 가 status + readiness 를 **한 번의**
+        account_service.get 으로 평가한다(중복 get 금지)."""
+        bus = EventBus()
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        active = make_account(
+            ACCOUNT,
+            trading_mode=TradingMode.VIRTUAL,
+            status=AccountStatus.ACTIVE,
+        )
+        svc = _account_service(active)
+        from ante.bot.providers.virtual import (
+            VirtualExecutor,
+            VirtualPortfolioView,
+        )
+
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        await executor._on_order_approved(_approved())
+
+        svc.get.assert_awaited_once()  # 단일 fetch(status+readiness 공동 평가).
+
 
 # ── #2398 P2 attempt1: deterministic virtual-routing 마커(중복 terminal/알림 누락) ─
 
@@ -1122,11 +1310,16 @@ class TestVirtualRoutingMarkerP2:
         """finding 1 메타 실패 잔여 코너(구독 순서 비의존): virtual 봇 주문 +
         양쪽 account_service.get 일시 실패.
 
-        VirtualExecutor(priority 60)가 구독 순서와 무관하게 먼저 실행돼 G9
-        fail-closed OrderFailedEvent 를 발행하고 ``_virtual_handled`` 마커를 set
-        한다. gateway 는 메타 fetch 가 실패(None)해도 마커를 보고 skip
-        (defense-in-depth) → 동일 order_id 에 대해 OrderFailedEvent **정확히 1회**
-        (gateway 중복 없음). ``gateway_first`` 양쪽 다 동일 결과여야 한다."""
+        VirtualExecutor(priority 60)가 구독 순서와 무관하게 먼저 실행돼 fail-closed
+        OrderFailedEvent 를 발행하고 ``_virtual_handled`` 마커를 set 한다. gateway 는
+        메타 fetch 가 실패(None)해도 마커를 보고 skip(defense-in-depth) → 동일
+        order_id 에 대해 OrderFailedEvent **정확히 1회**(gateway 중복 없음).
+        ``gateway_first`` 양쪽 다 동일 결과여야 한다.
+
+        attempt5 P2: get 예외는 status 축에서 ``STATUS_UNAVAILABLE``(검증 불가)로
+        귀결돼 error_code 는 ``account_status_unavailable`` 다 — live 경로
+        (``test_live_meta_failure_failed_and_alert``)의 메타 실패와 **대칭**이다(과거
+        G9 readiness-only fail-closed 의 ``account_not_ready`` 를 대체)."""
         bus = EventBus()
         cap = _capture(bus)
         broker = self._broker()
@@ -1152,7 +1345,8 @@ class TestVirtualRoutingMarkerP2:
 
         # OrderFailedEvent 정확히 1회 — gateway 중복 발행 없음(finding 1).
         assert len(cap.failed) == 1
-        assert cap.failed[0].error_code == "account_not_ready"
+        # get 예외 = status 검증 불가 → account_status_unavailable(live 와 대칭).
+        assert cap.failed[0].error_code == "account_status_unavailable"
         # gateway 는 메타 실패(None)+마커를 보고 skip → broker 미호출.
         broker.place_order.assert_not_called()
         assert cap.filled == []  # fill 금지(G9).

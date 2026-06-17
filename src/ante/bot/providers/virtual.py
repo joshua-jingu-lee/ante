@@ -214,48 +214,111 @@ class VirtualExecutor:
         )
         logger.info("VirtualExecutor 구독 완료")
 
-    async def _readiness_blocked(self, account_id: str) -> bool:
-        """G9 — virtual 경로 readiness 차단 여부(fail-closed).
+    async def _gate_blocked_reason(self, account_id: str) -> str | None:
+        """G9 + G7 backstop — virtual 경로 최종 차단 사유 토큰(fail-closed).
 
-        registry/account_service 미주입·account 메타 취득 실패·조회 예외 = 차단
-        (G2). account_service.get 으로 broker_type/trading_mode 를 조회해 면제
-        매트릭스를 적용한 active_trading_ready 의 부정을 반환한다.
+        #2398 attempt5: VirtualExecutor 는 virtual 경로의 **유일한 최종 backstop**
+        이다(APIGateway 는 virtual 주문을 silent skip 하므로 gateway 계층3 의
+        ``account_suspended`` 차단이 virtual 에는 적용되지 않는다). 따라서 계층1
+        통과 후 Treasury/VirtualExecutor 처리 중 ``account suspend`` 가 끼어들거나
+        ``OrderApprovedEvent`` 가 직접 유입되면, gateway 계층3 와 **대칭**으로
+        VirtualExecutor 가 status(SUSPENDED)도 함께 재확인해야 한다(D-ACC-09 §8 —
+        live=gateway 계층3, virtual=VirtualExecutor 최종 backstop).
+
+        **단일 fetch 공유(중복 get 금지)**: account 를 **한 번** fetch 해
+        status(SUSPENDED) + readiness(broker_type/trading_mode) 를 함께 평가한다.
+        status 3-state 도출은 계층1/계층3 와 **동일 공유 헬퍼**
+        (``derive_account_status``)를 써 중복 구현을 금지한다(SSOT).
+
+        평가 축(둘 중 하나라도 막으면 차단 — D-ACC-09 §8 effect 일관성):
+
+        - **status 축(G7 in-flight kill-switch backstop)**: verified SUSPENDED →
+          ``account_suspended``; ``STATUS_UNAVAILABLE``(소스 present + 조회 예외/미상)
+          → ``account_status_unavailable`` fail-closed; ``None``(소스 미구성)/verified
+          non-SUSPENDED → status 축 통과.
+        - **readiness 축(G9)**: registry/account_service 미주입·account 메타 취득
+          실패 = 차단(G2). 면제 매트릭스 적용 후 not_ready → ``account_not_ready``.
+
+        반환: 차단 사유 토큰(``account_suspended`` | ``account_status_unavailable`` |
+        ``account_not_ready``) 또는 통과 시 ``None``. 매 이벤트 시점 fresh fetch +
+        registry/status 조회(상태 캐시 금지, G5 liveness).
         """
-        from ante.account.gate import active_trading_blocked
+        from ante.account.gate import (
+            ACCOUNT_NOT_READY_REASON,
+            ACCOUNT_STATUS_UNAVAILABLE_REASON,
+            ACCOUNT_SUSPENDED_REASON,
+            STATUS_UNAVAILABLE,
+            active_trading_blocked,
+            derive_account_status,
+        )
+        from ante.account.models import AccountStatus
 
+        # registry 미주입 = fail-closed(G2). account_service 미주입은 status 축
+        # 비활성(derive_account_status → None)이지만 readiness 축이 차단한다.
         if self._runtime_readiness is None or self._account_service is None:
-            return True
+            return ACCOUNT_NOT_READY_REASON
+
+        # ── 단일 fresh fetch(중복 get 금지) — status + readiness 공동 평가 ──────
+        fetched: Any | None = None
+        fetch_failed = False
         try:
-            account = await self._account_service.get(account_id)
-        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2).
-            return True
-        broker_type = getattr(account, "broker_type", None)
-        trading_mode = getattr(account, "trading_mode", None)
+            fetched = await self._account_service.get(account_id)
+        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2)·검증 불가.
+            fetch_failed = True
+
+        # status 축(G7) — gateway 계층3 와 동일 3-state 도출(공유 헬퍼 SSOT).
+        # account_service 는 위에서 not-None 확인됨 → status 축 활성.
+        status = derive_account_status(
+            self._account_service, fetched, fetch_failed=fetch_failed
+        )
+        if status == AccountStatus.SUSPENDED:
+            return ACCOUNT_SUSPENDED_REASON
+        if status is STATUS_UNAVAILABLE:
+            # 소스 present + 조회 예외/미상 = 검증 불가 → fail-closed(in-flight
+            # suspend 를 stale 통과시키지 않는다). fetch 실패(fetched None)도 여기로
+            # 귀결돼 readiness 축의 메타 미상 차단보다 우선한다(계층3 동형).
+            return ACCOUNT_STATUS_UNAVAILABLE_REASON
+
+        # readiness 축(G9) — status 축 통과 시에만 평가(둘 중 하나라도 막으면 차단).
+        broker_type = getattr(fetched, "broker_type", None)
+        trading_mode = getattr(fetched, "trading_mode", None)
         if not isinstance(broker_type, str) or trading_mode is None:
-            return True
-        return active_trading_blocked(
+            return ACCOUNT_NOT_READY_REASON
+        if active_trading_blocked(
             self._runtime_readiness,
             account_id,
             broker_type=broker_type,
             trading_mode=trading_mode,
-        )
+        ):
+            return ACCOUNT_NOT_READY_REASON
+        return None
 
     async def _fail_order(self, event: Any, *, error_message: str) -> None:
         """virtual 주문을 OrderFailedEvent 로 종결한다(fill 금지).
 
         bot_id/order_id/account_id 를 보존해 Treasury ``_on_order_failed`` →
         ``release_reservation`` 정확 해제(시장가 매수 reserve 고착 방지, G3/G8).
-        not_ready(account_not_ready) 종결이면 G6 운영자 알림 1회를 함께 발행한다
-        (G9 도 G6 상속, BUY/SELL 무관, 청산 marker 면 "청산 차단" 문구).
+        gate 차단 사유(``account_not_ready`` / ``account_suspended`` /
+        ``account_status_unavailable``)면 G6 운영자 알림 1회를 함께 발행한다(G9 도
+        G6 상속, BUY/SELL 무관, 청산 marker 면 "청산 차단" 문구). gateway 계층3 와
+        대칭으로 status 차단(suspended/unavailable)도 동일 generic 알림 1회를 낸다.
         """
         from ante.account.gate import (
             ACCOUNT_NOT_READY_REASON,
+            ACCOUNT_STATUS_UNAVAILABLE_REASON,
+            ACCOUNT_SUSPENDED_REASON,
             build_not_ready_notification,
             is_liquidation_reason,
         )
         from ante.eventbus.events import OrderFailedEvent
 
-        is_not_ready = error_message == ACCOUNT_NOT_READY_REASON
+        # G6 발행 + error_code 부여 대상 gate 차단 사유(전 계층 통일 토큰 SSOT).
+        gate_reasons = (
+            ACCOUNT_NOT_READY_REASON,
+            ACCOUNT_SUSPENDED_REASON,
+            ACCOUNT_STATUS_UNAVAILABLE_REASON,
+        )
+        is_gate_block = error_message in gate_reasons
         await self._eventbus.publish(
             OrderFailedEvent(
                 account_id=event.account_id,
@@ -271,15 +334,17 @@ class VirtualExecutor:
                 price=event.price or 0.0,
                 order_type=event.order_type,
                 error_message=error_message,
-                error_code=(ACCOUNT_NOT_READY_REASON if is_not_ready else ""),
+                # gate 차단(not_ready/suspended/status_unavailable)이면 해당 토큰을
+                # error_code 로 보존한다(gateway 계층3 error_code 와 대칭).
+                error_code=(error_message if is_gate_block else ""),
                 exchange=event.exchange,
             )
         )
-        if is_not_ready:
+        if is_gate_block:
             await self._eventbus.publish(
                 build_not_ready_notification(
                     account_id=event.account_id,
-                    reason=ACCOUNT_NOT_READY_REASON,
+                    reason=error_message,
                     side=getattr(event, "side", ""),
                     # OrderApprovedEvent 는 reason 필드가 없어 청산 marker 를
                     # 운반하지 못하므로 generic 문구다(청산은 상류 계층1 차단).
@@ -331,13 +396,18 @@ class VirtualExecutor:
         quantity = event.quantity
         order_type = event.order_type
 
-        # ── #2398 G9: virtual 경로 계층3-equivalent readiness backstop ─────────
-        # 위치: stop/stop_limit·portfolio 필터 직후. not_ready 면 OrderFailedEvent
-        # (bot_id/order_id/account_id 보존) 종결 + fill 금지(apply_fill/
-        # OrderFilledEvent 도달 차단). fail-closed(G2): registry/account_service
-        # 미주입·조회 예외 = 차단. 매 이벤트 시점 registry 조회(상태 캐시 금지, G5).
-        if await self._readiness_blocked(account_id):
-            await self._fail_order(event, error_message="account_not_ready")
+        # ── #2398 G9 + G7: virtual 경로 계층3-equivalent 최종 backstop ─────────
+        # 위치: stop/stop_limit·portfolio 필터·마커 set 직후. gateway 계층3 와
+        # **대칭**으로 단일 fresh fetch 에서 status(SUSPENDED) + readiness 를 함께
+        # 재확인한다(attempt5). 차단 사유(account_suspended/account_status_unavailable/
+        # account_not_ready)면 OrderFailedEvent(bot_id/order_id/account_id 보존) 종결
+        # + fill 금지(apply_fill/OrderFilledEvent 도달 차단) + G6 알림 1회. APIGateway
+        # 가 virtual 을 silent skip 하므로 SUSPENDED in-flight 차단의 최종 backstop 은
+        # 여기다(D-ACC-09 §8). fail-closed(G2): registry/account_service 미주입·조회
+        # 예외 = 차단. 매 이벤트 시점 fetch/registry 조회(상태 캐시 금지, G5).
+        blocked_reason = await self._gate_blocked_reason(account_id)
+        if blocked_reason is not None:
+            await self._fail_order(event, error_message=blocked_reason)
             return
 
         # 체결가 계산
