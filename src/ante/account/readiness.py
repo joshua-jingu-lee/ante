@@ -70,9 +70,15 @@ def is_flag_exempt(
         # treasury_sync 는 VIRTUAL/LIVE 양쪽에서 항상 요구다(면제 없음).
         return False
 
-    # broker/fill_reconcile/reconcile: VIRTUAL 만 면제. LIVE(및 미지정 fail-closed)
-    # 는 요구. VIRTUAL 은 broker_type(test/kis-domestic) 무관 면제다.
-    return trading_mode == TradingMode.VIRTUAL
+    # broker/fill_reconcile/reconcile: **명시된 면제 pair만** 면제(fail-closed).
+    # (test, virtual)·(kis-domestic, virtual) 만 면제하고, 미지정 (broker_type,
+    # trading_mode) pair(신규 broker 타입 포함)는 요구로 fail-closed 한다
+    # ([must_fix A], Codex P2 — trading_mode 만 보면 신규 broker+virtual 이
+    # fail-open 으로 broker/fill/reconcile readiness 를 기본 면제받는 회귀).
+    return trading_mode == TradingMode.VIRTUAL and broker_type in {
+        "test",
+        "kis-domestic",
+    }
 
 
 @dataclass

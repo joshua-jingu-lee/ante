@@ -1202,40 +1202,59 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
     """
     account_id = account.account_id
 
-    # broker_ready 가 이미 ready 면 회복 불필요.
-    if s.runtime_readiness is not None and s.runtime_readiness.is_ready(
-        account_id, ReadinessFlag.BROKER
-    ):
+    if s.runtime_readiness is None:
         return True
 
-    try:
-        broker = await s.account_service.get_broker(account_id)
-        await broker.connect()
-    except Exception:
-        # 회복 미성공 — not_ready 유지. 다음 burst 에서 재시도(liveness).
-        _mark_runtime_not_ready(s, account_id, ReadinessFlag.BROKER, "reconnect_failed")
-        return False
+    # broker 재연결: broker_ready 가 **비면제**이고 아직 not_ready 일 때만.
+    # (broker 면제 계좌[virtual/test]는 connect 불요 — no-op ready 유지.)
+    broker_exempt = is_flag_exempt(
+        ReadinessFlag.BROKER,
+        broker_type=account.broker_type,
+        trading_mode=account.trading_mode,
+    )
+    if not broker_exempt and not s.runtime_readiness.is_ready(
+        account_id, ReadinessFlag.BROKER
+    ):
+        try:
+            broker = await s.account_service.get_broker(account_id)
+            await broker.connect()
+        except Exception:
+            # 회복 미성공 — not_ready 유지. 다음 burst 에서 재시도(liveness).
+            _mark_runtime_not_ready(
+                s, account_id, ReadinessFlag.BROKER, "reconnect_failed"
+            )
+            return False
+        _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
+        logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
 
-    _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
-    logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
-
-    # broker 회복 후 의존 스케줄러를 idempotent 재등록한다.
+    # 의존 스케줄러 idempotent 재등록 — broker 외 readiness(fill/reconcile/treasury)
+    # 실패도 재시도해 active_trading_ready 까지 회복한다(Codex P1: broker_ready 만
+    # 보면 일시 fill/reconcile/treasury 실패가 #2398 gate 에서 영구 차단으로 고착).
     if s.fill_applier is not None and s.order_tracker is not None:
         await _register_fill_scheduler_for_account(s, account)
     if s.trade_service is not None:
-        reconciler = _build_reconciler(s)
+        # reconcile.enabled=false 면 _init_reconcile_scheduler 와 동일하게 재등록하지
+        # 않는다 — 운영자가 끈 reconcile 을 회복 시 다시 켜지 않도록(Codex P2).
+        reconcile_enabled = True
         interval = 1800
         if s.config is not None:
             reconcile_config = s.config.get("reconcile", {})
             if isinstance(reconcile_config, dict):
+                reconcile_enabled = reconcile_config.get("enabled", True)
                 interval = reconcile_config.get("interval_seconds", 1800)
-        await _register_reconcile_scheduler_for_account(
-            s, account, reconciler, interval
-        )
-    # treasury_sync 재시작(면제 없음). 멱등 — Treasury.start_sync 가 기존 sync 를
-    # 교체한다.
+        if reconcile_enabled:
+            reconciler = _build_reconciler(s)
+            await _register_reconcile_scheduler_for_account(
+                s, account, reconciler, interval
+            )
+    # treasury_sync 재시작(면제 없음). 멱등 — Treasury.start_sync 가 기존 sync 교체.
     await _init_treasury_sync(s, [account])
-    return True
+    # 모든 비면제 플래그가 ready 여야 회복 완료(active_trading_ready 기준).
+    return s.runtime_readiness.active_trading_ready(
+        account_id,
+        broker_type=account.broker_type,
+        trading_mode=account.trading_mode,
+    )
 
 
 async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
@@ -1256,11 +1275,17 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
 
     try:
         while True:
+            # active_trading_ready(비면제 전 플래그 AND) 기준 — broker 회복 후에도
+            # fill/reconcile/treasury 가 not_ready면 계속 재시도(Codex P1 liveness).
             pending = [
                 a
                 for a in targets
                 if s.runtime_readiness is not None
-                and not s.runtime_readiness.is_ready(a.account_id, ReadinessFlag.BROKER)
+                and not s.runtime_readiness.active_trading_ready(
+                    a.account_id,
+                    broker_type=a.broker_type,
+                    trading_mode=a.trading_mode,
+                )
             ]
             for account in pending:
                 # per-burst bounded 재시도(계좌 lifetime 은 무제한).

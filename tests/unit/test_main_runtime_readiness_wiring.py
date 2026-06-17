@@ -597,11 +597,94 @@ def test_observe_only_no_gate_reader_in_consumers() -> None:
     )
 
 
-def test_main_does_not_call_active_trading_ready() -> None:
-    """main 은 readiness 를 mark 만 하고 active_trading_ready 로 gate 하지 않는다."""
+def test_main_active_trading_ready_only_in_self_healing() -> None:
+    """observe-only — main 은 readiness 를 mark 하고, ``active_trading_ready`` 는
+    **self-healing retry-targeting 에만** 쓴다(주문 차단 gate 아님). 주문 경로
+    consumer(gateway/rule/treasury) gate 부재는
+    ``test_observe_only_no_gate_reader_in_consumers`` 가 잠근다.
+    """
     import pathlib
 
     main_src = pathlib.Path(main_module.__file__).resolve()
-    text = main_src.read_text(encoding="utf-8")
-    # 호출 형태(``.active_trading_ready(``)는 없어야 한다(주석 언급은 허용).
-    assert ".active_trading_ready(" not in text
+    lines = main_src.read_text(encoding="utf-8").splitlines()
+    def_idx = [
+        i
+        for i, ln in enumerate(lines)
+        if ln.startswith("def ") or ln.startswith("async def ")
+    ]
+
+    def enclosing_def(idx: int) -> str:
+        prev = [d for d in def_idx if d <= idx]
+        return lines[prev[-1]] if prev else ""
+
+    # ``.active_trading_ready(`` 호출이 있다면 전부 self-healing 함수 내부여야 한다.
+    for i, line in enumerate(lines):
+        if ".active_trading_ready(" in line:
+            enc = enclosing_def(i)
+            assert (
+                "_self_healing_recover_account" in enc
+                or "_readiness_self_healing_loop" in enc
+            ), f"active_trading_ready outside self-healing: {enc!r}"
+
+
+def test_self_healing_loop_targets_non_broker_readiness() -> None:
+    """Codex P1 회귀: self-healing pending 필터가 broker_ready 만이 아니라
+    active_trading_ready(비면제 전 플래그) 기준이어야, broker 회복 후 fill/
+    reconcile/treasury 실패 계좌가 burst 대상에서 빠지지 않는다(영구 차단 방지).
+
+    소스 계약 락: ``_readiness_self_healing_loop`` 의 pending 필터는
+    ``active_trading_ready`` 를 호출하고 ``is_ready(.., BROKER)`` 단독으로
+    필터하지 않는다.
+    """
+    import pathlib
+
+    main_src = pathlib.Path(main_module.__file__).resolve()
+    lines = main_src.read_text(encoding="utf-8").splitlines()
+    start = next(
+        i
+        for i, ln in enumerate(lines)
+        if "_readiness_self_healing_loop" in ln
+        and ln.lstrip().startswith(("def ", "async def "))
+    )
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith(("def ", "async def "))
+        ),
+        len(lines),
+    )
+    body = "\n".join(lines[start:end])
+    assert "active_trading_ready" in body, (
+        "self-healing pending 필터가 active_trading_ready 기준이어야 함(Codex P1)"
+    )
+
+
+def test_self_healing_recover_respects_disabled_reconcile() -> None:
+    """Codex P2 회귀: self-healing 회복 경로(_self_healing_recover_account)는
+    reconcile.enabled=false 를 존중해, 운영자가 끈 reconcile 을 회복 시 다시
+    켜지 않는다(reconcile_enabled 분기 + _register_reconcile_scheduler_for_account
+    조건부 호출).
+    """
+    import pathlib
+
+    main_src = pathlib.Path(main_module.__file__).resolve()
+    lines = main_src.read_text(encoding="utf-8").splitlines()
+    start = next(
+        i
+        for i, ln in enumerate(lines)
+        if "_self_healing_recover_account" in ln
+        and ln.lstrip().startswith(("def ", "async def "))
+    )
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if lines[i].startswith(("def ", "async def "))
+        ),
+        len(lines),
+    )
+    body = "\n".join(lines[start:end])
+    assert "reconcile_enabled" in body, (
+        "회복 경로가 reconcile.enabled 를 존중해야 함(Codex P2)"
+    )
