@@ -173,7 +173,7 @@ per-account 4개 플래그를 둔다. 디폴트 초기값은 `not_ready`이며, 
 | kis-domestic | virtual | 면제 | 요구 | 면제 | 면제 |
 | kis-domestic | live | 요구 | 요구 | 요구 | 요구 |
 
-- virtual은 broker API를 미호출하므로(주문은 `VirtualExecutor`가 가상 체결, [api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅" 참조) broker / fill / reconcile이 무의미하다. test도 동일하다. **단, virtual broker_ready 면제는 VirtualExecutor의 시장가 가격 안전(가격 조회 실패 시 0원 체결 금지·terminal reject, api-gateway.md 참조)과 짝을 이룬다** — broker 장애 중 virtual 시장가 0원 체결 회귀 방지(#2398). **virtual / test fill·reconcile은 스케줄러 등록을 스킵하지 않고 등록을 유지하되 readiness eval에서만 면제한다([must_fix H], R2 확정)** — dict-key와 registry 이중 표상 drift를 막기 위함이다(등록 시 registry mark가 단일 경로).
+- virtual은 broker API를 미호출하므로(주문은 `VirtualExecutor`가 가상 체결, [api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅" 참조) broker / fill / reconcile이 무의미하다. test도 동일하다. **단, virtual broker_ready 면제는 VirtualExecutor의 시장가 가격 안전(가격 조회 실패 시 0원 체결 금지·terminal reject, api-gateway.md 참조)과 짝을 이룬다** — broker 장애 중 virtual 시장가 0원 체결 회귀 방지(#2398). **virtual / test fill·reconcile은 broker-backed 스케줄러를 등록하지 않고 registry에 no-op으로 ready mark(면제)한다([must_fix H] 재정의 / R2 정합)** — broker-backed 등록을 유지하면 `_init_fill_recovery`/`_init_reconcile`이 `get_broker`를 호출해 virtual을 KIS 토큰/connect 실패에 **재노출**하여 readiness 분리 전제가 붕괴되기 때문이다. readiness SSOT는 registry 단독이므로 broker-backed dict에 virtual key가 없어도 drift가 없다(registry no-op mark가 단일 권위). LIVE 계좌만 broker-backed 스케줄러 등록 → registry mark.
 - `BROKER_REGISTRY` 미래 타입의 default 정책은 **fail-closed**다(매트릭스에 미지정인 `(broker_type, trading_mode)` pair는 모든 플래그를 요구로 취급).
 
 #### (5) 자동전이 ([must_fix B], normative)

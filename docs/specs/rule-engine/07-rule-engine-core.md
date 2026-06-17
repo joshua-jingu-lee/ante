@@ -83,7 +83,7 @@ RuleEngine(
 RuleEngine은 `OrderRequestEvent` 처리 시 active-order readiness gate(계층 1)를 적용한다. 이는 [account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다)의 3계층 defense-in-depth(단일 EventBus 파이프라인이지만 단일 chokepoint 가정을 금지) 중 가장 상류다.
 
 - **위치**: `account_id` 필터(`event.account_id != self._account_id`) 직후, 기존 preflight 게이트 군(#1297~#1318)과 동형 위치에서 `runtime_readiness.active_trading_ready(account_id)`를 체크한다(아래 OrderRequestEvent preflight 도메인 검증보다 먼저, RuleContext 생성·Treasury 조회 이전).
-- **거부**: `not_ready`면 `_build_safe_rejected_event(reason="account_not_ready: <missing_flags>")`를 발행하고 return한다. 이미 try/catch-all + safe-builder 패턴이 있어 audit trail이 보장된다.
+- **거부**: `not_ready`이거나 **`AccountStatus.SUSPENDED`(user kill-switch)**면 `_build_safe_rejected_event(reason="account_not_ready: <missing_flags>" | "account_suspended")`를 발행하고 return한다(try/catch-all + safe-builder로 audit trail 보장). **SUSPENDED 동반 조회 필수(P1)**: `StopOrderManager._trigger_order` 변환 `OrderRequestEvent` 등 봇 상태(BotManager 중지)를 우회하는 경로가 있어, readiness가 ready여도 suspended 계좌 주문이 승인되는 kill-switch 우회를 계층1에서 차단한다(`RuleContext.account_status`는 dead field라 `account_service`에서 직접 status 조회).
 - **효과**: Treasury `reserve_for_order` 이전 차단이라 reserve 누수가 없다(가장 깨끗한 차단).
 - **fail-closed**: registry 미주입 / 조회 예외도 `not_ready`로 취급해 차단한다. 멀티계좌 중 1개만 ready면 그 계좌만 통과한다.
 - **stop order 재진입**: `_trigger_order` → 변환 `OrderRequestEvent`도 계층1을 통과하므로 트리거 시점 readiness로 재평가된다(별도 처리 불요).
