@@ -188,11 +188,22 @@ class TestLayer1RuleEngine:
         assert cap.validated == []
 
     async def test_fail_closed_meta_unavailable(self) -> None:
-        """G2: account 메타 취득 실패(snapshot 없음 + service.get 예외) → 차단."""
+        """G2: account 메타 미상 → 차단(account_metadata_unavailable).
+
+        status 축은 verified(ACTIVE)로 통과시키고 broker_type/trading_mode 만
+        미상으로 만들어 meta 축 fail-closed 를 격리 검증한다. (status 조회 예외는
+        status 축이 먼저 account_status_unavailable 로 차단하므로 별도 테스트로
+        분리.)
+        """
         bus = EventBus()
         cap = _capture(bus)
+        # status 는 verified ACTIVE 이되 broker_type/trading_mode 가 미상인 메타.
+        meta_unavailable = MagicMock()
+        meta_unavailable.status = AccountStatus.ACTIVE
+        meta_unavailable.broker_type = None
+        meta_unavailable.trading_mode = None
         svc = MagicMock()
-        svc.get = AsyncMock(side_effect=RuntimeError("boom"))
+        svc.get = AsyncMock(return_value=meta_unavailable)
         engine = RuleEngine(
             eventbus=bus,
             account_id=ACCOUNT,
@@ -238,6 +249,85 @@ class TestLayer1RuleEngine:
 
         assert len(cap.rejected) == 1
         assert cap.rejected[0].reason == "account_suspended"
+
+    async def test_g7_live_status_failure_no_stale_snapshot_passthrough(self) -> None:
+        """G7 P1(#2398 attempt3): live status 조회 예외 + stale ACTIVE 스냅샷 +
+        (실제로는 suspended) → stale ACTIVE 로 통과하지 않고 fail-closed 거부.
+
+        status 는 런타임 가변 kill-switch 이므로 live 조회 실패를 생성시점 스냅샷
+        으로 fallback 하면 suspended 계좌 주문이 OrderValidatedEvent 까지 통과해
+        kill-switch 가 우회된다(P1 회귀). live 실패 = account_status_unavailable
+        fail-closed 거부 + G6 알림 1회, OrderValidatedEvent 미발행이어야 한다.
+        """
+        bus = EventBus()
+        cap = _capture(bus)
+        # 엔진 생성시점 스냅샷은 ACTIVE(실제로는 그 사이 suspend 됐다고 가정).
+        stale_active = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        svc = MagicMock()
+        # live status 조회가 DB 잠김/일시 오류로 실패.
+        svc.get = AsyncMock(side_effect=RuntimeError("db locked"))
+        engine = RuleEngine(
+            eventbus=bus,
+            account_id=ACCOUNT,
+            account_service=svc,
+            account=stale_active,
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        await engine._on_order_request(_request(order_type="limit"))
+
+        assert len(cap.rejected) == 1
+        assert cap.rejected[0].reason == "account_status_unavailable"
+        assert cap.validated == []  # OrderValidatedEvent 통과 금지(P1 lock).
+        assert _notif_count(cap) == 1  # G6: 정확히 1회.
+
+    async def test_g7_live_status_none_returns_fail_closed(self) -> None:
+        """G7 P1: live status 가 None(status 미상)이어도 fail-closed 거부.
+
+        account_service.get 은 성공하지만 status 속성이 미상이면 verified 가
+        아니므로 스냅샷으로 fallback 하지 않고 account_status_unavailable 거부.
+        """
+        bus = EventBus()
+        cap = _capture(bus)
+        stale_active = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        live_status_unknown = MagicMock()
+        live_status_unknown.status = None
+        live_status_unknown.broker_type = "kis-domestic"
+        live_status_unknown.trading_mode = TradingMode.LIVE
+        svc = MagicMock()
+        svc.get = AsyncMock(return_value=live_status_unknown)
+        engine = RuleEngine(
+            eventbus=bus,
+            account_id=ACCOUNT,
+            account_service=svc,
+            account=stale_active,
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        await engine._on_order_request(_request(order_type="limit"))
+
+        assert len(cap.rejected) == 1
+        assert cap.rejected[0].reason == "account_status_unavailable"
+        assert cap.validated == []
+
+    async def test_status_axis_inactive_when_no_account_service(self) -> None:
+        """비게이트 레거시(account_service is None): status 축이 주문을 차단하지
+        않는다(과차단 회피). meta 는 self._account 스냅샷으로 verified, registry
+        ready → 통과(OrderValidatedEvent 발행)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        account = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        engine = RuleEngine(
+            eventbus=bus,
+            account_id=ACCOUNT,
+            account_service=None,  # status 소스 미구성 — status 축 비활성.
+            account=account,
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        await engine._on_order_request(_request(order_type="limit"))
+
+        # status 축이 차단하지 않으므로(None) account_status_unavailable/
+        # account_suspended 거부가 없고, readiness ready 라 통과한다.
+        assert cap.rejected == []
+        assert len(cap.validated) == 1
 
     async def test_liquidation_marker_uses_dedicated_phrasing(self) -> None:
         """G6 청산: not_ready 청산 SELL marker → "청산 차단" 전용 문구."""

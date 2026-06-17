@@ -14,8 +14,10 @@ from ante.account.errors import (
 )
 from ante.account.gate import (
     ACCOUNT_NOT_READY_REASON,
+    ACCOUNT_STATUS_UNAVAILABLE_REASON,
     ACCOUNT_SUSPENDED_REASON,
     LIQUIDATION_REASON_PREFIX,
+    STATUS_UNAVAILABLE,
     active_trading_blocked,
     build_not_ready_notification,
     is_liquidation_reason,
@@ -42,6 +44,7 @@ from ante.account.service import AccountService
 __all__ = [
     "ACCOUNT_ID_PATTERN",
     "ACCOUNT_NOT_READY_REASON",
+    "ACCOUNT_STATUS_UNAVAILABLE_REASON",
     "ACCOUNT_SUSPENDED_REASON",
     "ALL_FLAGS",
     "Account",
@@ -62,6 +65,7 @@ __all__ = [
     "LIQUIDATION_REASON_PREFIX",
     "MissingCredentialsError",
     "RESTRICTED_NEW_ACCOUNT_IDS",
+    "STATUS_UNAVAILABLE",
     "ReadinessFlag",
     "RuntimeReadinessRegistry",
     "TradingMode",

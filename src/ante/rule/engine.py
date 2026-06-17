@@ -780,28 +780,42 @@ class RuleEngine:
 
     async def _resolve_account_status(self) -> Any | None:
         """G7 — ``AccountStatus`` 직접 조회(``RuleContext.account_status`` 는 dead
-        field). **live ``account_service.get`` 우선** — kill-switch(SUSPENDED)는
-        런타임 IPC(``account suspend``)로 변하지만 ``self._account`` 스냅샷은 엔진
-        생성 시점 고정이라 stale 하므로, suspended 계좌 주문 우회를 막으려면 live
-        status 를 본다(spec 07:86). live 조회 실패 시에만 스냅샷으로 fallback 한다.
+        field). status 는 런타임 가변 kill-switch 라 **반드시 live**
+        ``account_service.get`` 로 본다. kill-switch(SUSPENDED)는 런타임 IPC
+        (``account suspend``)로 변하지만 ``self._account`` 스냅샷은 엔진 생성 시점
+        고정(stale)이므로, live 조회 실패 시 그 스냅샷으로 fallback 하면 suspended
+        계좌 주문이 stale ACTIVE 로 통과해 kill-switch 가 우회된다(#2398 P1).
 
-        둘 다 미상이면 ``None`` 을 반환한다. 호출자는 SUSPENDED 만 별도 차단하고,
-        not_ready(readiness) 축은 ``_resolve_account_meta`` + gate 가 fail-closed
-        로 처리하므로 status 미상은 SUSPENDED 차단을 트리거하지 않는다(직교).
+        따라서 **스냅샷 fallback 을 제거**하고 3-state 로 구분 반환한다:
+
+        - ``account_service`` present + ``get`` 성공 + status present →
+          **verified status**(SUSPENDED/ACTIVE 등) 그대로.
+        - ``account_service`` present + ``get`` 예외 또는 status 미상 →
+          ``STATUS_UNAVAILABLE`` sentinel(**검증 불가** — 스냅샷 fallback 금지).
+          호출자가 fail-closed 거부한다(spec 07:88 "조회 예외도 차단").
+        - ``account_service is None``(status 소스 미구성, 비게이트 레거시) →
+          ``None``(status 축 비활성, 과차단 회피 — 기존 비게이트 동작 보존).
+
+        호출자(``_on_order_request``)는 SUSPENDED → ``account_suspended`` 차단,
+        ``STATUS_UNAVAILABLE`` → ``account_status_unavailable`` fail-closed,
+        ``None``/verified non-SUSPENDED → status 축 통과(readiness 메타 gate 로
+        진행)로 처리한다.
         """
-        if self._account_service is not None:
-            try:
-                fetched = await self._account_service.get(self._account_id)
-            except Exception:  # noqa: BLE001 — live 실패 시 스냅샷 fallback.
-                fetched = None
-            if fetched is not None:
-                status = getattr(fetched, "status", None)
-                if status is not None:
-                    return status
-        account = self._account
-        if account is not None:
-            return getattr(account, "status", None)
-        return None
+        from ante.account.gate import STATUS_UNAVAILABLE
+
+        if self._account_service is None:
+            # status 소스 미구성(비게이트 레거시) — status 축 비활성.
+            return None
+        try:
+            fetched = await self._account_service.get(self._account_id)
+        except Exception:  # noqa: BLE001 — live 실패 = 검증 불가(fail-closed).
+            return STATUS_UNAVAILABLE
+        if fetched is None:
+            return STATUS_UNAVAILABLE
+        status = getattr(fetched, "status", None)
+        if status is None:
+            return STATUS_UNAVAILABLE
+        return status
 
     async def _on_order_request(self, event: object) -> None:
         """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행.
@@ -845,7 +859,9 @@ class RuleEngine:
             # 우회 경로의 kill-switch 우회를 계층1에서 봉쇄, spec 07:86).
             from ante.account.gate import (
                 ACCOUNT_NOT_READY_REASON,
+                ACCOUNT_STATUS_UNAVAILABLE_REASON,
                 ACCOUNT_SUSPENDED_REASON,
+                STATUS_UNAVAILABLE,
                 active_trading_blocked,
                 build_not_ready_notification,
                 is_liquidation_reason,
@@ -855,19 +871,31 @@ class RuleEngine:
 
             is_liquidation = is_liquidation_reason(getattr(event, "reason", ""))
 
+            # G7 kill-switch(SUSPENDED) + status 검증불가 fail-closed(#2398 P1).
+            # status 는 런타임 가변 kill-switch 라 stale 스냅샷으로 통과시키지
+            # 않는다. ``STATUS_UNAVAILABLE`` sentinel(소스 present + 조회 예외/미상)
+            # 은 fail-closed 거부, ``None``(소스 미구성)·verified non-SUSPENDED 는
+            # status 축 통과(readiness 메타 gate 로 진행).
             account_status = await self._resolve_account_status()
+            status_reason: str | None = None
             if account_status == AccountStatus.SUSPENDED:
+                status_reason = ACCOUNT_SUSPENDED_REASON
+            elif account_status is STATUS_UNAVAILABLE:
+                # live status 조회 실패/미상 = 검증 불가 → fail-closed(spec 07:88).
+                # stale ACTIVE 스냅샷으로 SUSPENDED 우회되던 회귀를 차단(P1).
+                status_reason = ACCOUNT_STATUS_UNAVAILABLE_REASON
+            if status_reason is not None:
                 await self._eventbus.publish(
                     _build_safe_rejected_event(
                         account_id=self._account_id,
                         event=event,
-                        reason=ACCOUNT_SUSPENDED_REASON,
+                        reason=status_reason,
                     )
                 )
                 await self._eventbus.publish(
                     build_not_ready_notification(
                         account_id=self._account_id,
-                        reason=ACCOUNT_SUSPENDED_REASON,
+                        reason=status_reason,
                         side=getattr(event, "side", ""),
                         is_liquidation=is_liquidation,
                     )
