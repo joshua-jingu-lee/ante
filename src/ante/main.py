@@ -231,6 +231,32 @@ def _broker_ready_exempt(account: Any) -> bool:
     return _flag_exempt_for_account(ReadinessFlag.BROKER, account)
 
 
+def _broker_not_ready_live(s: Services, account: Any) -> bool:
+    """startup connect 에서 broker not_ready 가 된 **비면제(LIVE)** 계좌인지.
+
+    #2399 Codex P2(attempt 2) — 후속 broker-backed startup init 가드: startup
+    connect 루프(``_init_gateway``)에서 EGW00133 bounded retry 가 소진되거나 기타
+    실패로 ``broker_ready`` 가 not_ready 가 된 LIVE 계좌는, 그 뒤 같은 startup 의
+    broker-backed 초기화 단계(stream·treasury LIVE sync·fill recovery·reconcile)
+    에서 ``get_broker`` 를 **다시 호출하면 안 된다**. 그 추가 호출이 EGW00133 계좌의
+    KIS 토큰 1/min 제한을 startup 단일 cadence(T4) 밖에서 또 두드리기 때문이다.
+
+    True 인 계좌는 후속 단계가 skip 하고, broker 회복은 self-healing(#2397/#2398)
+    이 60s interval 로 이어받아 fill/reconcile/treasury 를 재등록한다.
+
+    - broker_ready 면제(virtual/test) 계좌는 항상 False — broker 무관 단계
+      (예: treasury VIRTUAL sync, broker=None)는 영향 없이 계속 처리한다.
+    - registry 미주입(partial wiring) 환경에서는 ``is_ready`` 가 항상 False 라
+      모든 LIVE 계좌를 skip 하게 되므로, registry 가 없으면 False 를 반환해
+      기존 동작(전 계좌 처리)을 보존한다.
+    """
+    if s.runtime_readiness is None:
+        return False
+    if _broker_ready_exempt(account):
+        return False
+    return not s.runtime_readiness.is_ready(account.account_id, ReadinessFlag.BROKER)
+
+
 def _mark_runtime_ready(s: Services, account_id: str, flag: ReadinessFlag) -> None:
     """registry ready mark. registry 미주입 환경(partial wiring)에서는 no-op."""
     if s.runtime_readiness is not None:
@@ -275,6 +301,51 @@ def _mark_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
                 ReadinessFlag.RECONCILE,
                 "reconcile_init_skipped_no_broker",
             )
+
+
+def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
+    """후속 broker-backed startup init 에 넘길 계좌 — broker not_ready LIVE 제외.
+
+    #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가 된 LIVE
+    계좌(``_broker_not_ready_live`` True)를 제외한다. 제외된 계좌는 후속 단계
+    (treasury LIVE sync·fill recovery·reconcile)가 ``get_broker`` 를 다시 호출하지
+    않아 EGW00133 토큰 1/min 재타격을 피한다(T4 단일 cadence). 제외된 LIVE 계좌의
+    treasury_sync·fill_reconcile·reconcile 플래그는 ``mark_not_ready`` 로 명시
+    표시해, self-healing(#2397/#2398)이 broker 회복 시 픽업·재등록한다.
+
+    면제(virtual/test) 계좌와 broker_ready 성공 LIVE 계좌는 그대로 유지된다
+    (treasury VIRTUAL sync 등 broker 무관 처리 보존).
+    """
+    kept: list[Any] = []
+    for account in accounts:
+        if _broker_not_ready_live(s, account):
+            # 후속 flag 를 명시 not_ready(reason) — fail-closed + self-healing 픽업.
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.TREASURY_SYNC,
+                "broker_not_ready_startup",
+            )
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.FILL_RECONCILE,
+                "broker_not_ready_startup",
+            )
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.RECONCILE,
+                "broker_not_ready_startup",
+            )
+            logger.info(
+                "후속 broker-backed init skip: account=%s — broker not_ready"
+                "(treasury/fill/reconcile self-healing 위임)",
+                account.account_id,
+            )
+            continue
+        kept.append(account)
+    return kept
 
 
 async def _init_core(s: Services) -> None:
@@ -844,6 +915,18 @@ async def _init_gateway(s: Services) -> None:
     # KIS 브로커 계좌의 StreamIntegration 초기화
     for account in accounts:
         if account.broker_type == "kis":
+            # #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가
+            # 된 LIVE 계좌는 여기서 get_broker 를 재호출하지 않는다(EGW00133 토큰
+            # 1/min 재타격 방지 — T4 단일 cadence). self-healing 이 broker 회복 시
+            # 이어받는다(stream 은 broker 회복 후 별도 재초기화 경로 불필요 —
+            # active-trading gate 와 무관, broker 미연결이면 stream 도 무의미).
+            if _broker_not_ready_live(s, account):
+                logger.info(
+                    "StreamIntegration 초기화 skip: account=%s — broker not_ready"
+                    "(self-healing 위임)",
+                    account.account_id,
+                )
+                continue
             try:
                 # broker 연결을 보장(cache-hit no-op / cache-miss connect+cache)한 뒤
                 # StreamIntegration 을 초기화한다. 반환 adapter 자체는 stream init 이
@@ -912,15 +995,22 @@ async def _init_gateway(s: Services) -> None:
                     account.account_id,
                 )
 
+    # #2399 Codex P2(attempt 2): 후속 broker-backed init 는 broker not_ready 가
+    # 된 LIVE 계좌를 제외한 계좌 집합에만 적용한다(EGW00133 토큰 1/min 재타격 방지
+    # — T4 단일 cadence). 제외된 LIVE 계좌의 후속 flag 는 helper 가 명시
+    # mark_not_ready 하고, broker 회복은 self-healing 이 이어받는다. 면제(virtual/
+    # test)·broker_ready 성공 LIVE 계좌는 그대로 포함된다.
+    broker_init_accounts = _broker_ready_init_accounts(s, accounts)
+
     # Treasury 잔고 동기화 (Broker 연결 이후)
-    await _init_treasury_sync(s, accounts)
+    await _init_treasury_sync(s, broker_init_accounts)
 
     # #1946 hard barrier: 각 계좌의 FillReconcileScheduler.catch_up_once() 를
     # await 완료한 뒤에만 ReconcileScheduler.start()(즉시 run_once 로 position
     # 대사) 를 시작한다. fill 복구가 position reconcile 보다 반드시 선행해야
     # reconciler 가 미복구 ante 체결을 "외부 매수" 로 오분류하지 않는다.
     if connected_count and s.fill_applier and s.order_tracker:
-        await _init_fill_recovery_schedulers(s, accounts)
+        await _init_fill_recovery_schedulers(s, broker_init_accounts)
     else:
         # #2397 D-ACC-09 이중 실패모드 (a): 전역 connected_count==0(또는 fill
         # 의존성 부재)으로 _init_fill_recovery_schedulers 가 미호출 → 전 계좌 키가
@@ -1146,6 +1236,12 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         # 없이 registry no-op ready mark + broker-backed 등록 skip. LIVE 만 등록.
         if _flag_exempt_for_account(ReadinessFlag.RECONCILE, account):
             _mark_runtime_ready(s, account.account_id, ReadinessFlag.RECONCILE)
+            continue
+        # #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가 된
+        # LIVE 계좌는 get_broker 재호출 없이 skip(EGW00133 토큰 1/min 재타격 방지
+        # — T4). RECONCILE not_ready 는 _broker_ready_init_accounts 가 이미 mark
+        # 했고, broker 회복 시 self-healing 이 재등록한다.
+        if _broker_not_ready_live(s, account):
             continue
         if await _register_reconcile_scheduler_for_account(
             s, account, reconciler, interval
