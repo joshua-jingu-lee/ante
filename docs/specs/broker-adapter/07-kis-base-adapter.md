@@ -76,17 +76,22 @@ scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_
 
 - 토큰 응답 형태 가정을 명시한다: HTTP 200 + error 바디 vs non-200. `status != 200` 분기 위치를 결정해 파싱 위치를 고정한다(구현 왕복 방지).
 
-#### (4) `EGW00133` ~60s backoff (별도 분기)
+#### (4) `EGW00133` ~60s backoff (단일 cadence 레이어, normative)
 
-`EGW00133` 감지 시 **~60s backoff**(KIS 공식 "토큰 발급 1분 1회", 토큰 24h 유효) 후 재시도한다. 일반 지수 backoff와 **별도 분기**다.
+> **정정 (#2399 adjudicated, rev4)**: 이전 문안은 "`connect`/`_authenticate` 내부 backoff"를 요구했으나, self-healing 의 반복 `connect` 호출과 곱해져 nested-backoff(최악 5×120s)를 유발하는 잠재 버그가 있다. 아래 **단일 cadence** 정의가 정본이다(additive 안전/정확성 개선).
+
+`EGW00133`(KIS 공식 "토큰 발급 1분 1회", 토큰 24h 유효)의 ~60s backoff 는 **정확히 한 cadence 레이어**에만 둬서 곱해지지 않게 한다. 일반 지수 backoff(TRANSIENT)와도 **별도 분기**다.
+
+- **`_authenticate` 는 EGW00133 시 즉시 `TokenRateLimitError`(`AuthenticationError` 서브클래스, `error_code="EGW00133"`)를 raise** 한다 — **내부 sleep/retry 루프 없음**(곱셈 원천 제거). 어떤 caller 루프 안에서도 60s 가 곱해지지 않는다. `connect()` 도 이 예외를 내부 재시도 없이 그대로 전파한다.
+- ~60s backoff cadence 는 호출부 **단일 레이어**가 분담한다: (a) **startup**(`main._init_gateway` connect 루프)의 bounded retry(`DEFAULT_MAX_RETRIES_AUTH` × ~60s, 부팅 1회 경로), **또는** (b) **self-healing** loop 의 `interval`(60s) — EGW00133 시 그 계좌 burst 남은 attempt 를 break 하고 다음 interval 에 위임(burst 당 connect 시도 ≤1회).
 
 #### (5) connect-path retry (readiness 연동)
 
-`connect` → `_authenticate` 실패가 `EGW00133`이면 즉시 예외 전파 대신 backoff 후 `max_retries_auth`([10-commission-info.md](10-commission-info.md) 인증 재시도 기본값) 내 재시도한다(startup race 완화). 단 startup 전체 타임아웃 초과 시 해당 계좌를 `not_ready`로 떨어뜨려 readiness 축([account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다))과 연동한다(이 계좌 active 주문 차단).
+`connect` → `_authenticate` 가 `EGW00133`(`TokenRateLimitError`)을 전파하면, **startup** 경로(`_init_gateway`)는 ~60s backoff 후 `max_retries_auth`([10-commission-info.md](10-commission-info.md) 인증 재시도 기본값) 내 흡수 재시도한다(startup race 완화 — 위 (4)(a) 단일 cadence). 소진 시 해당 계좌를 `not_ready(reason="EGW00133")`로 떨어뜨려 readiness 축([account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다))과 연동한다(이 계좌 active 주문 차단). 런타임 회복은 self-healing loop 의 interval(60s) cadence 가 무기한 위임받는다(위 (4)(b)). reason 의 `EGW00133` 은 `AuthenticationError.error_code` 에서 **구조적으로** 추출한다(문자열 grep 금지).
 
 #### (6) classify 불변 invariant ([must_fix J], normative)
 
-`EGW00133` backoff는 `connect()` / `_authenticate` **내부 단독**으로 적용한다. `KISErrorClassifier.classify`의 `AuthenticationError = (retryable=False, record_cb=False)` 분류는 **불변**이다 — gateway 재시도 핸들러가 이중 적용하지 않도록 차단한다. (classify를 손대면 connect-path backoff와 gateway 재시도 핸들러가 이중 적용되거나, `EGW00133`이 즉시 비재시도 전파되는 회귀가 발생한다.)
+`EGW00133` backoff 는 위 (4) **단일 cadence 레이어**(startup wrapper / self-healing interval)에만 있고 `_authenticate` 는 즉시 raise 하므로, gateway 재시도 핸들러·`_request_with_cont` 재시도 루프가 이중 적용하지 않는다. `KISErrorClassifier.classify`의 `AuthenticationError = (retryable=False, record_cb=False)` 분류는 **불변**이다(`TokenRateLimitError` 서브클래스도 동일 분류). classify 를 손대면 connect-path backoff 와 gateway 재시도 핸들러가 이중 적용되거나 `EGW00133`이 즉시 비재시도 전파되는 회귀가 발생한다.
 
 #### (7) known-limitation (normative)
 
@@ -98,11 +103,11 @@ scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_
 
 > 계약 확정: #2396. 실제 동작은 구현 #2399 머지 후.
 
-`error_codes.py`([10-commission-info.md — 에러 코드 분류](10-commission-info.md#에러-코드-분류))에 등록한다(현재 0건 실측). **`EGW00201`만 `TRANSIENT_MSG_CODES`에 추가**한다(일반 지수 backoff). **`EGW00133`은 `TRANSIENT_MSG_CODES`에 넣지 않는다** — 이 set은 `_handle_response`가 `APIError.retryable=True`를 세팅해 일반 `KISRetryHandler` 지수 backoff로 보내는 전역 SSOT이므로, EGW00133을 넣으면 전용 ~60s token-only backoff가 아니라 generic/이중 retry를 탄다. `EGW00133`은 `KIS_ERROR_MESSAGES` 한글 등록 + **토큰 발급 경로 전용 분류(별도 set/상수)**로만 두고 `_authenticate`/`connect` 내부 ~60s backoff(위 (4))에서만 소비한다. 두 코드 모두 `KIS_ERROR_MESSAGES`에 한글 메시지 등록.
+`error_codes.py`([10-commission-info.md — 에러 코드 분류](10-commission-info.md#에러-코드-분류))에 등록한다(현재 0건 실측). **`EGW00201`만 `TRANSIENT_MSG_CODES`에 추가**한다(일반 지수 backoff). **`EGW00133`은 `TRANSIENT_MSG_CODES`에 넣지 않는다** — 이 set은 `_handle_response`가 `APIError.retryable=True`를 세팅해 일반 `KISRetryHandler` 지수 backoff로 보내는 전역 SSOT이므로, EGW00133을 넣으면 전용 ~60s token-only backoff가 아니라 generic/이중 retry를 탄다. `EGW00133`은 `KIS_ERROR_MESSAGES` 한글 등록 + **토큰 발급 경로 전용 분류(별도 상수 `TOKEN_RATE_LIMIT_MSG_CODE`)**로만 두고, `_authenticate` 가 감지 시 `TokenRateLimitError` 를 즉시 raise 한다(위 (4)). ~60s backoff 는 startup wrapper / self-healing interval 단일 cadence 가 소비한다. 두 코드 모두 `KIS_ERROR_MESSAGES`에 한글 메시지 등록.
 
 | msg_cd | 분류 | 한글 메시지 | 처리 |
 |---|---|---|---|
-| `EGW00133` | **auth-only(토큰경로 전용, TRANSIENT_MSG_CODES 제외)** | 접근토큰 발급은 1분당 1회만 허용 | **토큰 발급 전용 ~60s backoff 분기** (위 (4)) |
+| `EGW00133` | **auth-only(토큰경로 전용, TRANSIENT_MSG_CODES 제외)** | 접근토큰 발급은 1분당 1회만 허용 | `_authenticate` 즉시 `TokenRateLimitError` raise → **단일 cadence ~60s backoff**(startup wrapper / self-healing interval, 위 (4)) |
 | `EGW00201` | transient | 초당 거래 건수 초과 | 일반 TRANSIENT 지수 backoff |
 
-`EGW00133`은 일반 TRANSIENT 지수 backoff가 아니라 **토큰 발급 전용 ~60s backoff 분기**임을 명시한다(위 (4)·(6) invariant). `EGW00201`은 일반 TRANSIENT 지수 backoff를 따른다.
+`EGW00133`은 일반 TRANSIENT 지수 backoff가 아니라 **단일 cadence ~60s backoff**(startup wrapper / self-healing interval)임을 명시한다(위 (4)·(6) invariant). `EGW00201`은 일반 TRANSIENT 지수 backoff를 따른다.

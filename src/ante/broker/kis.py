@@ -18,12 +18,13 @@ import logging
 from abc import abstractmethod
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from ante.broker.base import BrokerAdapter
 from ante.broker.circuit_breaker import CircuitBreaker
 from ante.broker.error_codes import (
     PERMANENT_MSG_CODES,
+    TOKEN_RATE_LIMIT_MSG_CODE,
     TRANSIENT_MSG_CODES,
     get_error_message,
     is_retryable_http_status,
@@ -36,6 +37,7 @@ from ante.broker.exceptions import (
     ModifyOrgnoUnavailableError,
     OrderNotFoundError,
     RateLimitError,
+    TokenRateLimitError,
 )
 from ante.broker.fill_scheduler import business_date_kst
 from ante.broker.models import CommissionInfo
@@ -59,6 +61,20 @@ DEFAULT_TIMEOUT_AUTH = 10
 
 # Backoff
 DEFAULT_BACKOFF_BASE = 1.0
+
+# 토큰 발급 빈도 제한(EGW00133) 흡수용 backoff 초 (#2399).
+# KIS 공식 "접근토큰 발급 1분 1회". startup connect 루프(main._init_gateway)가
+# 부팅 1회 경로에서만 이 backoff 를 소비한다(단일 cadence — adapter._authenticate 는
+# 즉시 raise, self-healing 은 interval 60s 위임). config 노출하지 않는 adapter-local
+# 상수다(global defaults 변경 금지 — test_kis_error_handling.py:268 가 broker retry
+# key 부재를 잠금).
+TOKEN_AUTH_BACKOFF_SECONDS = 60.0
+
+# 토큰 cache hit 시 near-expiry 재발급 여유(분). ``_ensure_authenticated`` 의 "만료
+# 5분 전 재발급" 기준(아래 ``_ensure_authenticated``)과 **동일**해야 한다 — shared
+# 캐시 hit 판정도 near-expiry 토큰을 miss 로 보고 재발급한다(near-expiry 재사용 회귀
+# 방지, #2399 T2).
+_TOKEN_EXPIRY_MARGIN_MINUTES = 5
 
 # Circuit Breaker
 DEFAULT_CB_FAILURE_THRESHOLD = 5
@@ -123,6 +139,62 @@ _PSBL_ORDER_FIELD_MAX_BUYABLE_QTY = "max_buy_qty"
 
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
+
+
+# ── OAuth2 토큰 single-flight + in-process shared 캐시 (#2399) ──────────
+#
+# 동일 ``app_key`` 를 공유하는 다중 adapter(KIS 국내/해외 분리 D-ACC-02, 같은
+# app_key)가 동시에 토큰을 발급하면 KIS 가 ``EGW00133`` (접근토큰 발급 1분 1회)을
+# 돌려준다. 이를 막기 위해 토큰 캐시와 발급 lock 을 **module-level(프로세스 전역)**
+# 으로 공유하고, 발급을 **app_key 단위** asyncio.Lock 으로 직렬화한다.
+#
+# - lock key = **app_key** (account_id 아님!). account_id 로 잡으면 동일 app_key
+#   다중 adapter 가 미수렴하여 ``EGW00133`` 이 잔존한다(회귀 락 — T1).
+# - 캐시 hit 시 발급 skip, double-check 로 대기 중 타 코루틴이 발급한 토큰 재사용.
+#
+# known-limitation (T7, v1): 본 캐시/lock 은 **in-process(단일 프로세스)** 한정이다.
+# 멀티프로세스(CLI 8 site 가 각각 fresh AccountService 생성) 토큰 공유는 v1 미해결 —
+# CLI cold-path 다발 동시 실행 시 ``EGW00133`` 잔존 가능. 영속(파일/DB) 토큰 스토어는
+# 후속 후보(YAGNI, spec 07 OAuth2 §(7) anchor).
+_token_cache: dict[str, tuple[str, datetime]] = {}
+"""app_key → (access_token, expires_at) in-process shared 캐시 (#2399 T2)."""
+
+_token_locks: dict[str, asyncio.Lock] = {}
+"""app_key → 발급 직렬화 Lock (#2399 T1, lock key=app_key)."""
+
+
+# lock dict 의 lazy 생성 경합(첫 Lock 생성 race)을 막는 동기 guard.
+# ``_get_token_lock`` 이 ``setdefault`` 로 원자적으로 Lock 을 보장한다 — 동기 구간
+# 이라 코루틴 yield 가 없어 race 가 없으나, 의도를 명시한다(T1 lock dict race).
+def _get_token_lock(app_key: str) -> asyncio.Lock:
+    """app_key 별 발급 Lock 을 lazy 생성/반환 (동기 구간, race-free).
+
+    ``dict.setdefault`` 는 GIL 하 단일 bytecode 로 원자적이고 await 가 없어 코루틴
+    yield 가 발생하지 않으므로, 동시 호출에서도 동일 app_key 는 **하나의** Lock 으로
+    수렴한다(#2399 T1 lock dict 생성 race 원자화).
+    """
+    return _token_locks.setdefault(app_key, asyncio.Lock())
+
+
+def _reset_token_cache() -> None:
+    """module-level 토큰 캐시/lock dict 초기화 (#2399, 테스트 격리용).
+
+    pytest-asyncio auto mode 에서 이전 테스트의 closed event loop 에 묶인 Lock 이
+    재사용되는 위험(T1 closed-loop)을 차단하기 위해, autouse fixture 가 매 테스트
+    전후로 본 helper 를 호출한다. 프로덕션 경로는 호출하지 않는다.
+    """
+    _token_cache.clear()
+    _token_locks.clear()
+
+
+def _is_cached_token_fresh(expires_at: datetime, *, now: datetime) -> bool:
+    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (#2399 T2).
+
+    ``_ensure_authenticated`` 의 "만료 5분 전 재발급" 기준과 **동일**하다 —
+    near-expiry 토큰은 hit 이 아니라 miss 로 보고 재발급한다.
+    """
+    return now < expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
+
 
 # 취소(order-rvsecncl) 시 전송할 KRX_FWDG_ORD_ORGNO 캐시 상한.
 # 어댑터 인스턴스(=계좌)당 미체결 주문 수를 넉넉히 덮으면서 무한 증가를 막는다.
@@ -401,7 +473,68 @@ class KISBaseAdapter(BrokerAdapter):
     # ── 인증 ───────────────────────────────────────
 
     async def _authenticate(self) -> None:
-        """OAuth2 접근 토큰 발급."""
+        """OAuth2 접근 토큰 발급 — single-flight + in-process shared 캐시 (#2399).
+
+        절차 (T1/T2):
+        1. **캐시 read**: module-level ``_token_cache`` 에 본 app_key 의 신선한 토큰
+           (near-expiry 5분 여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환.
+        2. **app_key lock** 획득(account_id 아님 — 동일 app_key 다중 adapter 수렴).
+        3. **double-check**: lock 대기 중 타 코루틴이 이미 발급했으면 재사용(발급 skip).
+        4. **발급 1회**: HTTP 호출 → 캐시 populate → 인스턴스 hydrate.
+
+        EGW00133 (T4): 발급 응답에서 ``EGW00133`` 감지 시 ``TokenRateLimitError`` 를
+        **즉시 raise** 한다 — **내부 sleep/retry 루프 없음**(곱셈 원천 제거). ~60s
+        backoff cadence 는 호출부 단일 레이어(startup wrapper / self-healing
+        interval)가 분담한다.
+        """
+        # (1) 캐시 read — lock 없이 fast-path. 신선하면 발급 skip.
+        if self._hydrate_from_cache():
+            return
+
+        # (2) app_key 단위 lock 으로 발급 직렬화 (T1).
+        lock = _get_token_lock(self.app_key)
+        async with lock:
+            # (3) double-check — 대기 중 타 코루틴이 발급했으면 재사용.
+            if self._hydrate_from_cache():
+                return
+            # (4) 발급 1회 → 캐시 populate → 인스턴스 hydrate.
+            token, expires_at = await self._issue_token()
+            _token_cache[self.app_key] = (token, expires_at)
+            self.access_token = token
+            self.token_expires_at = expires_at
+            logger.info("KIS 토큰 발급 완료")
+
+    def _hydrate_from_cache(self) -> bool:
+        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (#2399 T2).
+
+        near-expiry(만료 5분 전) 토큰은 miss 로 보고 ``False`` 반환(재발급 유도).
+        """
+        cached = _token_cache.get(self.app_key)
+        if cached is None:
+            return False
+        token, expires_at = cached
+        if not _is_cached_token_fresh(expires_at, now=datetime.now(UTC)):
+            return False
+        self.access_token = token
+        self.token_expires_at = expires_at
+        return True
+
+    async def _issue_token(self) -> tuple[str, datetime]:
+        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (#2399 T3/T4).
+
+        토큰 발급 응답에서 KIS 에러코드를 파싱한다. alias 방어 (T3): 코드는
+        ``msg_cd``/``error_code``, 메시지는 ``msg1``/``error_description`` 양쪽 키를
+        모두 본다(KIS 토큰 엔드포인트 실제 형태 미확정). 응답 형태는 **HTTP 200 +
+        error 바디(rt_cd≠"0" 또는 access_token 부재)** 와 **non-200** 양 분기 모두
+        에러코드를 추출한다. (일반 API 응답 파싱은 ``_handle_response`` 가 담당 —
+        본 메서드는 토큰 발급 경로 **한정**.)
+
+        ``EGW00133`` 감지 시 ``TokenRateLimitError`` 즉시 raise(내부 sleep 없음).
+        그 외 에러는 ``AuthenticationError`` 로 raise(코드가 있으면 보존).
+
+        Returns:
+            (access_token, expires_at) — 발급 성공 시.
+        """
         url = f"{self.base_url}/oauth2/tokenP"
         data = {
             "grant_type": "client_credentials",
@@ -415,22 +548,68 @@ class KISBaseAdapter(BrokerAdapter):
                 url, json=data, headers={"content-type": "application/json"}
             ) as response:
                 if response.status != 200:
-                    text = await response.text()
-                    raise AuthenticationError(
-                        f"인증 실패 (HTTP {response.status}): {text}"
-                    )
+                    # non-200 분기: JSON body 에서 에러코드 추출 시도(실패 시 text).
+                    body = await self._read_token_error_body(response)
+                    self._raise_token_error(response.status, body)
 
                 result = await response.json()
-                self.access_token = result["access_token"]
-                self.token_expires_at = datetime.now(UTC) + timedelta(hours=24)
-                logger.info("KIS 토큰 발급 완료")
+                token = result.get("access_token")
+                if not token:
+                    # HTTP 200 + error 바디 분기(rt_cd≠"0" 또는 토큰 부재).
+                    self._raise_token_error(response.status, result)
+
+                expires_at = datetime.now(UTC) + timedelta(hours=24)
+                return token, expires_at
+
+    @staticmethod
+    async def _read_token_error_body(response: Any) -> dict[str, Any] | str:
+        """non-200 토큰 응답 body 를 dict(가능 시) 또는 raw text 로 반환 (#2399 T3)."""
+        text = await response.text()
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            return text
+        if isinstance(parsed, dict):
+            return parsed
+        return text
+
+    @staticmethod
+    def _raise_token_error(status: int, body: dict[str, Any] | str) -> NoReturn:
+        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (#2399 T3/T4).
+
+        alias 처리(T3): 코드는 ``msg_cd``/``error_code``, 메시지는 ``msg1``/
+        ``error_description`` 키를 순서대로 본다.
+        """
+        code = ""
+        detail = ""
+        if isinstance(body, dict):
+            code = str(body.get("msg_cd") or body.get("error_code") or "")
+            detail = str(body.get("msg1") or body.get("error_description") or "")
+        text = body if isinstance(body, str) else (detail or json.dumps(body))
+
+        if code == TOKEN_RATE_LIMIT_MSG_CODE:
+            msg = get_error_message(TOKEN_RATE_LIMIT_MSG_CODE)
+            raise TokenRateLimitError(
+                f"토큰 발급 빈도 제한 ({TOKEN_RATE_LIMIT_MSG_CODE}): {msg}",
+                error_code=TOKEN_RATE_LIMIT_MSG_CODE,
+            )
+        raise AuthenticationError(
+            f"인증 실패 (HTTP {status}): {text}",
+            error_code=code,
+        )
 
     async def _ensure_authenticated(self) -> None:
-        """토큰 유효성 확인 및 재발급."""
+        """토큰 유효성 확인 및 재발급 (#2399: 재발급도 single-flight/캐시 적용).
+
+        매 API 호출 전 진입점이므로, 캐시 hit 시 ``_authenticate`` 가 발급을 skip
+        한다(공유 캐시 fast-path). near-expiry(만료 5분 전) 토큰은 miss 로 보고
+        재발급한다 — 본 판정 기준이 ``_is_cached_token_fresh`` 와 동일하다(T2).
+        """
         if (
             not self.access_token
             or not self.token_expires_at
-            or datetime.now(UTC) >= self.token_expires_at - timedelta(minutes=5)
+            or datetime.now(UTC)
+            >= self.token_expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
         ):
             await self._authenticate()
 

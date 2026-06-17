@@ -692,6 +692,57 @@ async def _init_trading(s: Services) -> None:
     logger.info("BotManager 초기화 완료")
 
 
+def _connect_failure_reason(exc: BaseException, default: str) -> str:
+    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (#2399 T6).
+
+    ``AuthenticationError.error_code`` (KIS 원천 ``msg_cd``, 예: ``EGW00133``)을
+    문자열 grep 이 아니라 ``getattr`` 로 추출한다. 코드가 있으면 reason 으로 쓰고,
+    없으면 ``default`` (startup="connect_failed", self-healing="reconnect_failed").
+    D-ACC-09 readiness reason 연동(startup §181 + self-healing).
+    """
+    code = getattr(exc, "error_code", None)
+    if code:
+        return str(code)
+    return default
+
+
+async def _connect_broker_with_auth_retry(broker: Any) -> None:
+    """broker.connect() 를 EGW00133 흡수용 bounded retry 로 감싼다 (#2399 T4 (c)).
+
+    **단일 cadence 레이어의 startup 한 곳**(부팅 1회 경로, 곱셈 없음). EGW00133
+    (``TokenRateLimitError``)을 만나면 ~60s backoff 후 ``DEFAULT_MAX_RETRIES_AUTH``
+    내 재시도해 startup token race 를 흡수한다. ``_authenticate`` 자체는 즉시 raise
+    (내부 sleep 없음)이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 소진 시
+    마지막 ``TokenRateLimitError`` 를 전파해 호출부가 not_ready(reason=EGW00133).
+    EGW00133 외 예외는 즉시 전파(기존 동작 유지).
+
+    최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ``TOKEN_AUTH_BACKOFF_SECONDS``
+    (=2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
+    """
+    from ante.broker.exceptions import TokenRateLimitError
+    from ante.broker.kis import (
+        DEFAULT_MAX_RETRIES_AUTH,
+        TOKEN_AUTH_BACKOFF_SECONDS,
+    )
+
+    attempt = 0
+    while True:
+        try:
+            await broker.connect()
+            return
+        except TokenRateLimitError:
+            if attempt >= DEFAULT_MAX_RETRIES_AUTH:
+                raise
+            attempt += 1
+            logger.warning(
+                "Broker connect EGW00133(토큰 발급 빈도 제한) — %.0f초 후 재시도 %d/%d",
+                TOKEN_AUTH_BACKOFF_SECONDS,
+                attempt,
+                DEFAULT_MAX_RETRIES_AUTH,
+            )
+            await asyncio.sleep(TOKEN_AUTH_BACKOFF_SECONDS)
+
+
 async def _init_gateway(s: Services) -> None:
     """APIGateway(account_service 주입), StreamIntegration, 종목 동기화."""
     assert s.eventbus is not None
@@ -729,7 +780,9 @@ async def _init_gateway(s: Services) -> None:
             continue
         try:
             broker = await s.account_service.get_broker(account.account_id)
-            await broker.connect()
+            # #2399 T4 (c): startup 단일 cadence — EGW00133 흡수용 bounded retry
+            # (~60s backoff × DEFAULT_MAX_RETRIES_AUTH)를 여기 한 곳에만 둔다.
+            await _connect_broker_with_auth_retry(broker)
             connected_count += 1
             # #2397 broker_ready = connect 성공 시점 mark([must_fix F] —
             # get_cached_broker live-poll 아님). #2372 connect-후-캐시 정합.
@@ -739,14 +792,15 @@ async def _init_gateway(s: Services) -> None:
                 account.account_id,
                 account.broker_type,
             )
-        except Exception:
+        except Exception as e:
             # #2397 startup 실패 → broker_ready not_ready(reason). self-healing
             # background loop 가 회복을 무기한 재시도한다.
+            # #2399 T6: EGW00133 은 reason 에 구조적 보존(getattr error_code).
             _mark_runtime_not_ready(
                 s,
                 account.account_id,
                 ReadinessFlag.BROKER,
-                "connect_failed",
+                _connect_failure_reason(e, "connect_failed"),
             )
             logger.warning(
                 "Broker 연결 실패: account=%s — 건너뜀",
@@ -1250,11 +1304,24 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
         try:
             broker = await s.account_service.get_broker(account_id)
             await broker.connect()
-        except Exception:
+        except Exception as e:
             # 회복 미성공 — not_ready 유지. 다음 burst 에서 재시도(liveness).
+            # #2399 T6: EGW00133 은 reason 에 구조적 보존(getattr error_code).
             _mark_runtime_not_ready(
-                s, account_id, ReadinessFlag.BROKER, "reconnect_failed"
+                s,
+                account_id,
+                ReadinessFlag.BROKER,
+                _connect_failure_reason(e, "reconnect_failed"),
             )
+            # #2399 T4 (b): EGW00133(TokenRateLimitError)은 현재 burst 의 남은
+            # attempt 를 중단(re-raise)하고 다음 interval(60s 토큰 cooldown)에
+            # 위임한다 — burst 당 connect 시도 ≤1회(per-attempt backoff 누적 금지,
+            # 단일 cadence nested-backoff 차단). 다른 transient 는 False 반환으로
+            # 기존 per-attempt backoff 재시도 유지.
+            from ante.broker.exceptions import TokenRateLimitError
+
+            if isinstance(e, TokenRateLimitError):
+                raise
             return False
         # broker connect 성공 — 단, broker_ready mark 는 의존 스케줄러 rebind 를 모두
         # 마친 **뒤**로 지연한다(메타리뷰 P2). 여기서 먼저 mark 하면 아래 rebind await
@@ -1382,6 +1449,8 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                     trading_mode=a.trading_mode,
                 )
             ]
+            from ante.broker.exceptions import TokenRateLimitError
+
             for account in pending:
                 # per-burst bounded 재시도(계좌 lifetime 은 무제한).
                 for attempt in range(max_per_burst):
@@ -1389,6 +1458,19 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                         recovered = await _self_healing_recover_account(s, account)
                     except asyncio.CancelledError:
                         raise
+                    except TokenRateLimitError:
+                        # #2399 T4 (b): EGW00133 — 이 계좌의 현재 burst 남은 attempt 를
+                        # 중단(break)하고 다음 interval(60s 토큰 cooldown)에 위임한다.
+                        # per-attempt backoff 를 누적하지 않아 burst 당 connect 시도
+                        # ≤1회 → startup wrapper(단일 cadence)와 곱해지지 않는다
+                        # (5×120s 누적 차단). 다음 burst 에서 자연히 재시도(liveness).
+                        logger.info(
+                            "Readiness self-healing EGW00133 — account=%s, "
+                            "다음 interval(%ds)에 위임(burst break)",
+                            account.account_id,
+                            interval,
+                        )
+                        break
                     except Exception:
                         # 회복 시도 중 예기치 못한 예외(스케줄러 생성자·config 접근·
                         # reconciler 빌드 등 try 밖 경로)가 background loop 를 영구
@@ -1402,9 +1484,10 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                         recovered = False
                     if recovered:
                         break
-                    # attempt 간 지수 backoff(EGW00133 ~1/min 토큰 cooldown 정렬,
-                    # Codex P2). 즉시 재인증을 몰아넣어 KIS 토큰 압박을 악화시키지
-                    # 않도록 한다. 마지막 attempt 뒤에는 burst interval 이 대신한다.
+                    # attempt 간 지수 backoff(다른 transient 실패용). EGW00133 은 위
+                    # break 로 여기 도달하지 않는다(#2399 T4 (b)). 즉시 재인증을
+                    # 몰아넣어 KIS 압박을 악화시키지 않도록 한다. 마지막 attempt
+                    # 뒤에는 burst interval 이 대신한다.
                     if attempt < max_per_burst - 1:
                         await asyncio.sleep(
                             min(backoff_base * (2**attempt), backoff_max)

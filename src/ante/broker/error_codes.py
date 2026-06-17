@@ -35,13 +35,29 @@ PERMANENT_MSG_CODES: frozenset[str] = frozenset(
 
 # ── 재시도 가능 (transient) KIS msg_cd ──────────────────
 # 서버 과부하, 일시적 지연 등 재시도 시 성공할 수 있는 에러
+#
+# 주의 (#2399): 이 set 은 ``_handle_response`` 가 ``APIError.retryable=True`` 로
+# 승격해 일반 ``KISRetryHandler`` 지수 backoff 로 보내는 **전역 SSOT** 다. 토큰
+# 발급 1분 1회 제한(``EGW00133``)을 여기에 넣으면 일반 재시도가 토큰 cooldown 에
+# 몰리므로 **금지**한다. ``EGW00133`` 은 아래 ``TOKEN_RATE_LIMIT_MSG_CODE`` 로 따로
+# 두고 토큰 발급 경로 전용 ~60s backoff(spec 07 OAuth2 §(4))에서만 소비한다.
 TRANSIENT_MSG_CODES: frozenset[str] = frozenset(
     {
         "APBK0600",  # 서버 과부하
         "APBK0601",  # 처리 지연
         "APBK0602",  # 일시적 서비스 불가
+        "EGW00201",  # 초당 거래 건수 초과 (#2399, 일반 지수 backoff)
     }
 )
+
+# ── 토큰 발급 빈도 제한 (auth-only, #2399) ──────────────
+# KIS ``EGW00133`` (접근토큰 발급 1분 1회)은 일반 TRANSIENT 지수 backoff 가 아니라
+# **토큰 발급 경로 전용 ~60s backoff**(spec 07 OAuth2 §(4)(5)(6))로만 처리한다.
+# 따라서 ``TRANSIENT_MSG_CODES`` 에 넣지 **않고** auth-only 별도 상수로 둔다.
+# ``_authenticate`` 가 이 코드를 감지하면 ``TokenRateLimitError`` 를 즉시 raise 하고
+# (내부 sleep 없음), startup wrapper / self-healing interval 단일 cadence 가 backoff
+# 를 분담한다([must_fix J] classify 불변 / nested-backoff 차단).
+TOKEN_RATE_LIMIT_MSG_CODE = "EGW00133"
 
 # ── 재시도 가능 HTTP 상태 코드 ──────────────────────────
 RETRYABLE_HTTP_STATUS_CODES: frozenset[int] = frozenset({500, 502, 503, 429})
@@ -68,11 +84,20 @@ KIS_ERROR_MESSAGES: dict[str, str] = {
     "40240000": "모의투자 잔고내역 없음 (매도가능 잔고 없음)",
     "40910000": "모의투자 주문 불가 계좌 (모의 자격/신청 상태 확인 필요)",
     "IGW00022": "원주문번호 오류 또는 처리 불가",
+    "EGW00133": "접근토큰 발급은 1분당 1회만 허용",  # auth-only (#2399)
+    "EGW00201": "초당 거래 건수 초과",  # transient (#2399)
 }
 
 
 def is_retryable_msg_code(msg_cd: str) -> bool:
-    """KIS msg_cd가 재시도 가능한지 판별."""
+    """KIS msg_cd가 일반 재시도(``KISRetryHandler``) 경로에서 재시도 가능한지 판별.
+
+    ``EGW00133`` (#2399)은 토큰 발급 경로 전용 ~60s backoff 로만 처리하므로 일반
+    재시도 경로에서는 **non-retryable** 로 본다(혹시 ``_authenticate`` 외 경로로
+    누수돼도 일반 지수 backoff 에 몰리지 않게 방어).
+    """
+    if msg_cd == TOKEN_RATE_LIMIT_MSG_CODE:
+        return False
     if msg_cd in PERMANENT_MSG_CODES:
         return False
     if msg_cd in TRANSIENT_MSG_CODES:
