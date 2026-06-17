@@ -76,14 +76,17 @@ scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_
 
 - 토큰 응답 형태 가정을 명시한다: HTTP 200 + error 바디 vs non-200. `status != 200` 분기 위치를 결정해 파싱 위치를 고정한다(구현 왕복 방지).
 
-#### (4) `EGW00133` ~60s backoff (단일 cadence 레이어, normative)
+#### (4) `EGW00133` ~60s backoff (단일 cadence 레이어 + source cooldown, normative)
 
 > **정정 (#2399 adjudicated, rev4)**: 이전 문안은 "`connect`/`_authenticate` 내부 backoff"를 요구했으나, self-healing 의 반복 `connect` 호출과 곱해져 nested-backoff(최악 5×120s)를 유발하는 잠재 버그가 있다. 아래 **단일 cadence** 정의가 정본이다(additive 안전/정확성 개선).
 
-`EGW00133`(KIS 공식 "토큰 발급 1분 1회", 토큰 24h 유효)의 ~60s backoff 는 **정확히 한 cadence 레이어**에만 둬서 곱해지지 않게 한다. 일반 지수 backoff(TRANSIENT)와도 **별도 분기**다.
+> **보강 (#2399 attempt3 + 메타 감사, per-app_key cooldown at source)**: 단일-cadence 를 per-call-site **필터**(B 설계)로만 구현하면 "`get_broker`→토큰 재타격" 결함이 호출 경로(startup retry / treasury·fill·reconcile / instrument sync / self-healing burst / runtime / IPC)마다 라운드별로 재생산된다. 이를 막기 위해 단일 cadence 메커니즘을 **(A) per-app_key cooldown at source**(발급 레이어 단일 chokepoint)로 명문화한다(additive). 모든 발급 경로가 cooldown 을 자동 존중하므로 per-call-site 필터는 불필요(있어도 defense-in-depth 로 무해)하다.
+
+`EGW00133`(KIS 공식 "토큰 발급 1분 1회", 토큰 24h 유효)의 ~60s backoff 는 **정확히 한 cadence 레이어**에만 둬서 곱해지지 않게 하고, **발급 차단 자체는 source cooldown 이 보장**한다. 일반 지수 backoff(TRANSIENT)와도 **별도 분기**다.
 
 - **`_authenticate` 는 EGW00133 시 즉시 `TokenRateLimitError`(`AuthenticationError` 서브클래스, `error_code="EGW00133"`)를 raise** 한다 — **내부 sleep/retry 루프 없음**(곱셈 원천 제거). 어떤 caller 루프 안에서도 60s 가 곱해지지 않는다. `connect()` 도 이 예외를 내부 재시도 없이 그대로 전파한다.
-- ~60s backoff cadence 는 호출부 **단일 레이어**가 분담한다: (a) **startup**(`main._init_gateway` connect 루프)의 bounded retry(`DEFAULT_MAX_RETRIES_AUTH` × ~60s, 부팅 1회 경로), **또는** (b) **self-healing** loop 의 `interval`(60s) — EGW00133 시 그 계좌 burst 남은 attempt 를 break 하고 다음 interval 에 위임(burst 당 connect 시도 ≤1회).
+- **per-app_key cooldown at source (A)**: 발급 레이어가 module-level `_token_cooldowns: {app_key → cooldown_until}` 를 둔다. EGW00133 수신 시 `TokenRateLimitError` raise **직전** `_token_cooldowns[app_key] = now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`(=60s, module 상수)를 기록한다. `_authenticate` 는 — **순서 중요** — (1) **유효 캐시 hydrate 를 먼저** 시도(hit 면 cooldown 무영향, T2: 유효 캐시 read 는 절대 막지 않음), (2) cache miss 면 **lock 밖 fast-path** 에서 `now(UTC) ≥ cooldown_until` 아니면(=cooldown 내) **HTTP 미호출·즉시 `TokenRateLimitError` raise**, (3) lock 획득→double-check(캐시)→**lock 안 cooldown 재확인**(대기 중 타 코루틴이 기록했을 수 있음)→발급. 그래서 EGW00133 1회면 같은 app_key 의 모든 발급 경로(startup / treasury·fill·reconcile / instrument sync / self-healing burst / runtime / IPC)가 cooldown 동안 토큰을 **재타격하지 않는다**(T4 단일 cadence 의 근본 보장).
+- ~60s backoff cadence(대기 후 재시도)는 호출부 **단일 레이어**가 분담한다: (a) **startup**(`main._init_gateway` connect 루프)의 bounded retry(`DEFAULT_MAX_RETRIES_AUTH` × ~60s, 부팅 1회 경로) — 고정 60s 가 아니라 `TokenRateLimitError.cooldown_until` 의 **잔여 cooldown**(`cooldown_until - now`)만큼 sleep 해 cooldown 경계에서 재시도가 무력화되지 않게 한다, **또는** (b) **self-healing** loop 의 `interval`(60s) — EGW00133 시 그 계좌 burst 남은 attempt 를 break 하고 다음 interval 에 위임(burst 당 connect 시도 ≤1회). self-healing `interval`(60s) ≥ cooldown(60s) 이라 다음 burst 에서 cooldown 이 만료돼 발급이 정상 재개된다(정합).
 
 #### (5) connect-path retry (readiness 연동)
 
@@ -91,11 +94,11 @@ scope 정정: 일반 `_request` 경로는 이미 `msg_cd`를 파싱한다(위 `_
 
 #### (6) classify 불변 invariant ([must_fix J], normative)
 
-`EGW00133` backoff 는 위 (4) **단일 cadence 레이어**(startup wrapper / self-healing interval)에만 있고 `_authenticate` 는 즉시 raise 하므로, gateway 재시도 핸들러·`_request_with_cont` 재시도 루프가 이중 적용하지 않는다. `KISErrorClassifier.classify`의 `AuthenticationError = (retryable=False, record_cb=False)` 분류는 **불변**이다(`TokenRateLimitError` 서브클래스도 동일 분류). classify 를 손대면 connect-path backoff 와 gateway 재시도 핸들러가 이중 적용되거나 `EGW00133`이 즉시 비재시도 전파되는 회귀가 발생한다.
+`EGW00133` backoff 는 위 (4) **단일 cadence 레이어**(startup wrapper / self-healing interval) + source cooldown 에만 있고 `_authenticate` 는 즉시 raise 하므로, gateway 재시도 핸들러·`_request_with_cont` 재시도 루프가 이중 적용하지 않는다. `KISErrorClassifier.classify`의 `AuthenticationError = (retryable=False, record_cb=False)` 분류는 **불변**이다(`TokenRateLimitError` 서브클래스도 동일 분류 — cooldown 도입은 classify 를 손대지 않는다). classify 를 손대면 connect-path backoff 와 gateway 재시도 핸들러가 이중 적용되거나 `EGW00133`이 즉시 비재시도 전파되는 회귀가 발생한다.
 
 #### (7) known-limitation (normative)
 
-멀티프로세스(8 CLI site가 각각 fresh `AccountService`를 생성) 토큰 공유는 **v1 미해결**이다. in-process single-flight + 캐시는 **단일 서버 런타임 + 동일 프로세스 내 다중 adapter**만 수렴한다(서버 hot-path 해결). 토큰은 24h 유효하나, CLI cold-path 다발 동시 실행 시 `EGW00133`이 잔존할 수 있다.
+멀티프로세스(8 CLI site가 각각 fresh `AccountService`를 생성) 토큰 공유는 **v1 미해결**이다. in-process single-flight + 캐시 + cooldown 은 **단일 서버 런타임 + 동일 프로세스 내 다중 adapter**만 수렴한다(서버 hot-path 해결). `_token_cooldowns` 도 module-level **in-process** 상태라 프로세스 경계를 넘지 않는다. 토큰은 24h 유효하나, CLI cold-path 다발 동시 실행 시 `EGW00133`이 잔존할 수 있다.
 
 영속(파일/DB) 토큰스토어는 멀티프로세스 공유가 가능하나 파일 lock / 동시쓰기 / 만료 경합 / 보안(secret 파일) 복잡도가 커서 **v1 범위 밖(YAGNI)**이며 known-limitation으로 명시하고 **후속 후보**로 anchor한다.
 

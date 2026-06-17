@@ -803,9 +803,19 @@ async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> 
     wrapper 한 곳에만 둔다(self-healing 이 get_broker 를 반복 호출 → nested backoff
     곱셈 재발 차단, T4).
 
-    최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ``TOKEN_AUTH_BACKOFF_SECONDS``
-    (=2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
+    **잔여 cooldown sleep (#2399 attempt3, per-app_key cooldown at source):** EGW00133
+    수신 시 발급 레이어(``kis._raise_token_rate_limit``)가 app_key cooldown 을 기록하고
+    예외에 ``cooldown_until`` 을 실어 보낸다. 본 wrapper 는 고정 60s 대신 **잔여
+    cooldown**(``cooldown_until - now``)만큼 sleep 한다. 그래야 다음 재시도가 cooldown
+    만료 직후에 단 1회 발급으로 떨어지고, 고정 60s 가 cooldown 경계를 넘겨 재시도가
+    또 cooldown 에 막히는 무력화를 피한다. cooldown_until 미동봉(이론상 경합 만료)이면
+    안전상 ``TOKEN_AUTH_BACKOFF_SECONDS`` 고정값으로 폴백한다.
+
+    최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ~``TOKEN_AUTH_BACKOFF_SECONDS``
+    (≈2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
     """
+    from datetime import UTC, datetime
+
     from ante.broker.exceptions import TokenRateLimitError
     from ante.broker.kis import (
         DEFAULT_MAX_RETRIES_AUTH,
@@ -816,17 +826,26 @@ async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> 
     while True:
         try:
             return await account_service.get_broker(account_id)
-        except TokenRateLimitError:
+        except TokenRateLimitError as e:
             if attempt >= DEFAULT_MAX_RETRIES_AUTH:
                 raise
             attempt += 1
+            # 잔여 cooldown 만큼 sleep(고정 60s 아님) — cooldown 경계 무력화 방지.
+            # cooldown_until 미동봉/이미 만료면 안전 폴백(고정 backoff).
+            cooldown_until = getattr(e, "cooldown_until", None)
+            if cooldown_until is not None:
+                remaining = (cooldown_until - datetime.now(UTC)).total_seconds()
+                sleep_seconds = max(0.0, remaining)
+            else:
+                sleep_seconds = TOKEN_AUTH_BACKOFF_SECONDS
             logger.warning(
-                "Broker connect EGW00133(토큰 발급 빈도 제한) — %.0f초 후 재시도 %d/%d",
-                TOKEN_AUTH_BACKOFF_SECONDS,
+                "Broker connect EGW00133(토큰 발급 빈도 제한) — %.0f초(잔여 cooldown) "
+                "후 재시도 %d/%d",
+                sleep_seconds,
                 attempt,
                 DEFAULT_MAX_RETRIES_AUTH,
             )
-            await asyncio.sleep(TOKEN_AUTH_BACKOFF_SECONDS)
+            await asyncio.sleep(sleep_seconds)
 
 
 async def _init_gateway(s: Services) -> None:
@@ -1534,6 +1553,14 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
     ready 로 전이한다. ``max_attempts`` 는 **per-burst(연결시도 단위)에만** 적용
     하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되어
     #2395 를 역회귀로 재생산하지 않도록. shutdown 에서 task cancel 로 종료한다.
+
+    #2399 Codex attempt3-b (per-app_key cooldown at source): 같은 app_key 의 여러
+    계좌가 pending 이면, 첫 계좌의 connect 가 EGW00133 으로 cooldown 을 기록한 뒤
+    같은 burst 의 두 번째 계좌 connect 는 cooldown 내라 발급 레이어가 **HTTP 미호출·
+    즉시 ``TokenRateLimitError``** 로 raise → 아래 ``except TokenRateLimitError`` 가
+    그 계좌의 burst 도 break 한다(토큰 1/min 재타격 없음). interval(60s, defaults.py)
+    ≥ cooldown(``TOKEN_RATE_LIMIT_COOLDOWN_SECONDS``=60s)이라 다음 burst 시점에는
+    cooldown 이 만료돼 발급이 정상 재개된다(self-healing 정상 동작과 정합).
     """
     interval = 60
     max_per_burst = 5
@@ -1749,11 +1776,27 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
     붕괴), 면제 계좌는 순회 대상에서 제외한다(non-exempt/live connected 계좌만
     대상). 면제 계좌의 dummy exchange 가 KRX 등 실 exchange 마스터 적재를
     선점하던 #2385 회귀도 동일하게 차단된다.
+
+    #2399 Codex attempt3-a: startup connect 에서 broker not_ready 가 된 비면제
+    (LIVE) 계좌도 순회 대상에서 제외한다(``_broker_not_ready_live``). 그 계좌에
+    ``get_broker`` 를 다시 호출하면 EGW00133 계좌의 KIS 토큰 1/min 제한을 startup
+    단일 cadence(T4) 밖에서 또 두드리기 때문이다. (A) per-app_key cooldown 이
+    최종 안전망으로 그 재타격을 source 에서 즉시 raise 로 막지만, 불필요한 발급
+    시도 자체를 줄이는 본 필터를 함께 둬 defense-in-depth 로 한다. per-account
+    try/except 가 not_ready 계좌의 예외도 흡수하므로 전체 sync 를 깨지 않는다.
     """
     synced_exchanges: set[str] = set()
     for account in accounts:
         if _broker_ready_exempt(account):
             # 면제(virtual/test) 계좌는 broker 미연결 — get_broker 재노출 차단.
+            continue
+        if _broker_not_ready_live(s, account):
+            # broker not_ready LIVE — get_broker 재타격 차단(EGW00133 토큰 1/min).
+            # cooldown(A) 가 최종 안전망이나 불필요 발급 시도 자체를 줄인다(T4).
+            logger.info(
+                "종목 동기화 skip: account=%s — broker not_ready(self-healing 위임)",
+                account.account_id,
+            )
             continue
         if account.exchange in synced_exchanges:
             continue

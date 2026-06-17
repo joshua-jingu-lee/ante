@@ -243,12 +243,21 @@ def _make_sync_services(broker_instruments: dict[str, Any]) -> tuple[Any, list[A
 
     ``broker_instruments`` 는 account_id → broker.get_instruments() 반환값
     (list[dict] 또는 raise 할 Exception 인스턴스) 매핑이다.
+
+    #2399 attempt3-a: ``_sync_instruments`` 는 startup connect 성공(broker_ready)
+    계좌만 순회한다(``_broker_not_ready_live`` 필터). 프로덕션 흐름에서 connect
+    루프가 broker_ready 를 마킹한 상태를 반영해, ``broker_instruments`` 의 모든
+    account_id 를 기본 broker_ready 로 마킹한다. not_ready skip 회귀를 검증하는
+    테스트는 helper 호출 **후** 해당 계좌를 명시 ``mark_not_ready`` 로 덮는다.
     """
     from unittest.mock import AsyncMock
 
     import ante.main as main_module
+    from ante.account.readiness import ReadinessFlag
 
     s = main_module.Services()
+    for account_id in broker_instruments:
+        s.runtime_readiness.mark_ready(account_id, ReadinessFlag.BROKER)
 
     upsert_calls: list[Any] = []
 
@@ -349,6 +358,40 @@ async def test_sync_instruments_skips_exempt_accounts() -> None:
     # 면제 계좌의 broker 는 조회조차 되지 않아야 한다(KIS 재노출 차단).
     s.account_service.get_broker.assert_awaited_once_with("kis-live")
     # LIVE 계좌의 실 마스터만 적재.
+    assert len(upsert_calls) == 1
+    upserted = {inst.symbol for batch in upsert_calls for inst in batch}
+    assert upserted == {"069500"}
+
+
+@pytest.mark.asyncio
+async def test_sync_instruments_skips_broker_not_ready_live() -> None:
+    """#2399 attempt3-a: startup broker not_ready LIVE 계좌는 get_broker 미호출.
+
+    not_ready LIVE 계좌가 있어도 instrument sync 가 그 계좌에 토큰을 재타격하지
+    않는다(EGW00133 1/min). ready LIVE 계좌만 동기화되고, not_ready 계좌의
+    get_broker 는 조회조차 되지 않는다(필터). per-account try/except 와 무관하게
+    전체 sync 가 깨지지 않는다.
+    """
+    import ante.main as main_module
+    from ante.account.readiness import ReadinessFlag
+
+    accounts = [
+        _make_sync_account("kis-down", "KOSPI"),  # broker not_ready LIVE → skip.
+        _make_sync_account("kis-ok", "KRX"),  # broker ready LIVE → 동기화.
+    ]
+    s, upsert_calls = _make_sync_services(
+        {
+            "kis-down": [{"symbol": "000001", "name": "내려간계좌"}],
+            "kis-ok": [{"symbol": "069500", "name": "KODEX 200"}],
+        }
+    )
+    # helper 가 둘 다 broker_ready 로 마킹했으므로 kis-down 만 not_ready 로 덮는다.
+    s.runtime_readiness.mark_not_ready("kis-down", ReadinessFlag.BROKER, "EGW00133")
+
+    await main_module._sync_instruments(s, accounts)
+
+    # not_ready 계좌는 get_broker 미호출, ready 계좌만 1회 조회.
+    s.account_service.get_broker.assert_awaited_once_with("kis-ok")
     assert len(upsert_calls) == 1
     upserted = {inst.symbol for batch in upsert_calls for inst in batch}
     assert upserted == {"069500"}

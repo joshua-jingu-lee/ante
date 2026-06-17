@@ -124,6 +124,64 @@ class TestStartupAuthRetryWrapper:
         assert account_service.get_broker.await_count == 1
         assert _no_real_sleep == []  # backoff 없음
 
+    async def test_sleeps_residual_cooldown_not_fixed(
+        self, _no_real_sleep: list[float]
+    ) -> None:
+        """#2399 attempt3: 잔여 cooldown(cooldown_until-now)만큼 sleep(고정 60s 아님).
+
+        cooldown_until 을 now+25s 로 동봉한 EGW00133 → wrapper 가 ~25s sleep 해
+        cooldown 경계 무력화를 피한다. 고정 60s 가 아님을 검증한다.
+        """
+        from datetime import UTC, datetime, timedelta
+
+        from ante.broker.kis import TOKEN_AUTH_BACKOFF_SECONDS
+
+        connected_broker = AsyncMock()
+        cooldown_until = datetime.now(UTC) + timedelta(seconds=25)
+        state = {"fails": 1}
+
+        async def _get_broker(account_id: str) -> Any:
+            if state["fails"] > 0:
+                state["fails"] -= 1
+                raise TokenRateLimitError(
+                    "x", error_code="EGW00133", cooldown_until=cooldown_until
+                )
+            return connected_broker
+
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(side_effect=_get_broker)
+
+        result = await main_module._get_broker_with_auth_retry(
+            account_service, "live-1"
+        )
+        assert result is connected_broker
+        assert len(_no_real_sleep) == 1
+        # 잔여 cooldown(~25s)만큼 sleep — 고정 60s 가 아니다.
+        assert _no_real_sleep[0] < TOKEN_AUTH_BACKOFF_SECONDS
+        assert 20 <= _no_real_sleep[0] <= 25
+
+    async def test_sleeps_fixed_backoff_when_no_cooldown_until(
+        self, _no_real_sleep: list[float]
+    ) -> None:
+        """cooldown_until 미동봉(이론상 경합 만료) → 고정 backoff 폴백."""
+        from ante.broker.kis import TOKEN_AUTH_BACKOFF_SECONDS
+
+        connected_broker = AsyncMock()
+        state = {"fails": 1}
+
+        async def _get_broker(account_id: str) -> Any:
+            if state["fails"] > 0:
+                state["fails"] -= 1
+                # cooldown_until 미동봉(None) 케이스.
+                raise TokenRateLimitError("x", error_code="EGW00133")
+            return connected_broker
+
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(side_effect=_get_broker)
+
+        await main_module._get_broker_with_auth_retry(account_service, "live-1")
+        assert _no_real_sleep == [TOKEN_AUTH_BACKOFF_SECONDS]
+
 
 # ── T6: startup connect 루프 reason 보존 ───────────────────
 

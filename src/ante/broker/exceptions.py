@@ -20,6 +20,13 @@ member/approval/bot/treasury 동형).
   경로는 본 필드를 surface 하지 않는다.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from datetime import datetime
+
 
 class BrokerError(Exception):
     """Broker 기본 예외.
@@ -66,9 +73,25 @@ class TokenRateLimitError(AuthenticationError):
     ``AuthenticationError`` 서브클래스이므로 ``KISErrorClassifier.classify`` 는
     여전히 ``(retryable=False, record_cb=False)`` 로 분류한다([must_fix J] 불변 —
     gateway 재시도 핸들러 이중 적용 차단).
+
+    ``cooldown_until`` (#2399 attempt3, source-level cooldown): EGW00133 수신 시
+    기록된 app_key cooldown 만료시각(UTC ``datetime`` 또는 ``None``)을 선택적으로
+    실어 보낸다. startup wrapper(``main._get_broker_with_auth_retry``)가 고정 60s
+    대신 **잔여 cooldown**(``cooldown_until - now``)만큼 sleep 해 cooldown 경계에서
+    재시도가 무력화되지 않게 한다. 기본값 ``None`` 이라 미기재 호출부는 무영향이다.
     """
 
     code: str = "BROKER_AUTH_FAILED"
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        error_code: str = "",
+        cooldown_until: datetime | None = None,
+    ) -> None:
+        super().__init__(message, error_code=error_code)
+        self.cooldown_until = cooldown_until
 
 
 class APIError(BrokerError):
