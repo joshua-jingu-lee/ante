@@ -706,15 +706,31 @@ def _connect_failure_reason(exc: BaseException, default: str) -> str:
     return default
 
 
-async def _connect_broker_with_auth_retry(broker: Any) -> None:
-    """broker.connect() 를 EGW00133 흡수용 bounded retry 로 감싼다 (#2399 T4 (c)).
+async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> Any:
+    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (#2399 T4 c).
 
     **단일 cadence 레이어의 startup 한 곳**(부팅 1회 경로, 곱셈 없음). EGW00133
     (``TokenRateLimitError``)을 만나면 ~60s backoff 후 ``DEFAULT_MAX_RETRIES_AUTH``
-    내 재시도해 startup token race 를 흡수한다. ``_authenticate`` 자체는 즉시 raise
-    (내부 sleep 없음)이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 소진 시
-    마지막 ``TokenRateLimitError`` 를 전파해 호출부가 not_ready(reason=EGW00133).
-    EGW00133 외 예외는 즉시 전파(기존 동작 유지).
+    내 재시도해 startup token race 를 흡수한다.
+
+    **재배치 사유(#2399 Codex P1):** ``AccountService.get_broker`` 는 cache-miss 시
+    내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다(#2372). 따라서
+    새 프로세스 cache-miss startup 의 첫 인증이 EGW00133 을 반환하면 그 예외가
+    ``get_broker()`` 호출 자체에서 전파된다. retry 가 ``broker.connect()`` 만
+    감쌌다면 ``get_broker()`` 가 먼저 raise 해 wrapper 에 도달하지 못하므로 bounded
+    retry 가 무효였다. 따라서 retry 는 **``get_broker()`` 호출 전체**를 감싼다.
+
+    ``get_broker`` 는 connect 실패 시 캐시 미기록 + 세션 cleanup(#2368/#2372)하므로,
+    EGW00133 재시도 시 ``get_broker`` 재호출이 새 adapter build+connect 를 안전하게
+    재수행한다(세션 누수 없음). ``_authenticate`` 자체는 즉시 raise(내부 sleep 없음)
+    이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 성공 시 반환되는 broker 는
+    connect+cache 가 완료된 상태다. 소진 시 마지막 ``TokenRateLimitError`` 를 전파해
+    호출부가 not_ready(reason=EGW00133). EGW00133 외 예외는 즉시 전파(기존 동작 유지).
+
+    ``get_broker`` 의 계약(connect-성공-후-캐시, #2372)은 self-healing 등 전 caller
+    공유이므로 **변경하지 않는다**. retry 는 get_broker 내부가 아니라 본 startup
+    wrapper 한 곳에만 둔다(self-healing 이 get_broker 를 반복 호출 → nested backoff
+    곱셈 재발 차단, T4).
 
     최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ``TOKEN_AUTH_BACKOFF_SECONDS``
     (=2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
@@ -728,8 +744,7 @@ async def _connect_broker_with_auth_retry(broker: Any) -> None:
     attempt = 0
     while True:
         try:
-            await broker.connect()
-            return
+            return await account_service.get_broker(account_id)
         except TokenRateLimitError:
             if attempt >= DEFAULT_MAX_RETRIES_AUTH:
                 raise
@@ -779,10 +794,12 @@ async def _init_gateway(s: Services) -> None:
             _mark_runtime_ready(s, account.account_id, ReadinessFlag.BROKER)
             continue
         try:
-            broker = await s.account_service.get_broker(account.account_id)
             # #2399 T4 (c): startup 단일 cadence — EGW00133 흡수용 bounded retry
             # (~60s backoff × DEFAULT_MAX_RETRIES_AUTH)를 여기 한 곳에만 둔다.
-            await _connect_broker_with_auth_retry(broker)
+            # get_broker 는 cache-miss 시 내부에서 connect 후 성공 시에만 캐시(#2372)
+            # 하므로, EGW00133 은 connect 가 아니라 get_broker 호출 자체에서 전파된다.
+            # 따라서 retry 는 get_broker 호출 전체를 감싼다(#2399 Codex P1).
+            await _get_broker_with_auth_retry(s.account_service, account.account_id)
             connected_count += 1
             # #2397 broker_ready = connect 성공 시점 mark([must_fix F] —
             # get_cached_broker live-poll 아님). #2372 connect-후-캐시 정합.
@@ -828,7 +845,10 @@ async def _init_gateway(s: Services) -> None:
     for account in accounts:
         if account.broker_type == "kis":
             try:
-                broker = await s.account_service.get_broker(account.account_id)
+                # broker 연결을 보장(cache-hit no-op / cache-miss connect+cache)한 뒤
+                # StreamIntegration 을 초기화한다. 반환 adapter 자체는 stream init 이
+                # broker_config 로 별도 클라이언트를 구성하므로 사용하지 않는다.
+                await s.account_service.get_broker(account.account_id)
                 broker_config = {**account.credentials, **account.broker_config}
                 await _init_stream_integration(
                     s,

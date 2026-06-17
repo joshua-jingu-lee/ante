@@ -856,20 +856,9 @@ def test_self_healing_loop_backs_off_between_attempts() -> None:
 # ── broker_ready connect 시점 mark (init_gateway 발췌 경로) ─────────────────
 
 
-@pytest.mark.asyncio
-async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_init_gateway connect 루프: LIVE 성공→broker_ready, virtual→면제 no-op ready,
-    LIVE 실패→not_ready + get_broker 미호출(virtual)."""
-    s = _services(brokers={"live-fail": RuntimeError("EGW00133")})
+def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_init_gateway connect 루프만 검증하도록 후속 단계·게이트웨이 더블을 깐다."""
 
-    accounts = [
-        _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
-        _account("live-ok"),
-        _account("live-fail"),
-    ]
-    s.account_service.list = AsyncMock(return_value=accounts)
-
-    # _init_gateway 의 connect 루프만 검증하기 위해 후속 단계를 무력화.
     async def _noop(*a: Any, **k: Any) -> None:
         return None
 
@@ -912,6 +901,21 @@ async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) 
     s.virtual_executor = SimpleNamespace(_gateway=None)
     s.bot_manager = SimpleNamespace(_context_factory=None)
 
+
+@pytest.mark.asyncio
+async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_init_gateway connect 루프: LIVE 성공→broker_ready, virtual→면제 no-op ready,
+    LIVE 실패→not_ready + get_broker 미호출(virtual)."""
+    s = _services(brokers={"live-fail": RuntimeError("conn refused")})
+
+    accounts = [
+        _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
+        _account("live-ok"),
+        _account("live-fail"),
+    ]
+    s.account_service.list = AsyncMock(return_value=accounts)
+    _stub_init_gateway_followups(s, monkeypatch)
+
     await main_module._init_gateway(s)
 
     # virtual/test: 면제 no-op ready, get_broker 미호출(KIS 재노출 차단).
@@ -927,6 +931,85 @@ async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) 
     # 면제 계좌 broker 는 connect 단계에서 조회되지 않아야 한다.
     connect_ids = {c.args[0] for c in s.account_service.get_broker.call_args_list}
     assert "test" not in connect_ids
+
+
+# ── #2399 Codex P1: startup get_broker EGW00133 bounded retry 회귀 락 ────────
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_get_broker_egw00133_exhausts_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P1 회귀 락: startup 의 get_broker() 가 (내부 connect 로)
+    EGW00133 을 던지면 _init_gateway 가 get_broker 를 **bounded retry**(~60s backoff
+    × DEFAULT_MAX_RETRIES_AUTH)한 뒤, 소진 시 not_ready(reason="EGW00133").
+
+    이전엔 retry 가 broker.connect() 만 감싸 get_broker() 가 먼저 raise → retry
+    미적용으로 즉시 not_ready 였다. retry 가 get_broker 호출 전체를 감싸야 한다."""
+    from ante.broker.exceptions import TokenRateLimitError
+    from ante.broker.kis import DEFAULT_MAX_RETRIES_AUTH
+
+    s = _services(brokers={"live-1": TokenRateLimitError("x", error_code="EGW00133")})
+    s.account_service.list = AsyncMock(return_value=[_account("live-1")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    await main_module._init_gateway(s)
+
+    # bounded retry: 최초 1 + 재시도 DEFAULT_MAX_RETRIES_AUTH 회 get_broker 호출.
+    assert s.account_service.get_broker.await_count == DEFAULT_MAX_RETRIES_AUTH + 1
+    # ~60s backoff 가 재시도 횟수만큼 관측(단일 cadence, startup 한 곳).
+    assert len(slept) == DEFAULT_MAX_RETRIES_AUTH
+    assert all(d == 60 for d in slept)
+    # 소진 → not_ready + reason 에 EGW00133 구조적 보존(T6).
+    assert not s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+    assert s.runtime_readiness.get_reason("live-1", ReadinessFlag.BROKER) == "EGW00133"
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_get_broker_egw00133_retry_then_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P1: startup get_broker 가 2번째 attempt 에서 성공하면 broker_ready.
+
+    첫 attempt EGW00133 흡수(~60s backoff 1회) 후 둘째 attempt 에서 get_broker 성공."""
+    from ante.broker.exceptions import TokenRateLimitError
+
+    connected_broker = AsyncMock()
+    connected_broker.connect = AsyncMock()
+    state = {"fails": 1}
+
+    async def _get_broker(account_id: str) -> Any:
+        if state["fails"] > 0:
+            state["fails"] -= 1
+            raise TokenRateLimitError("x", error_code="EGW00133")
+        return connected_broker
+
+    s = _services()
+    s.account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    s.account_service.list = AsyncMock(return_value=[_account("live-1")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    await main_module._init_gateway(s)
+
+    # 1 실패 + 1 성공 = get_broker 2회, backoff 1회.
+    assert s.account_service.get_broker.await_count == 2
+    assert slept == [60]
+    # 둘째 attempt 성공 → broker_ready.
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
 
 
 # ── #2398 gate reader allowlist + SSOT-위반 금지 ───────────────────────────

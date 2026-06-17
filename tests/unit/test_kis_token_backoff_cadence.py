@@ -1,9 +1,12 @@
 """EGW00133 단일 cadence backoff + readiness reason 보존 테스트 (#2399 T4/T6).
 
 검증:
-- startup wrapper(``_connect_broker_with_auth_retry``): EGW00133 흡수 bounded retry
-  (≤DEFAULT_MAX_RETRIES_AUTH), 소진 시 TokenRateLimitError 전파, 비-EGW00133 즉시 전파.
-- startup connect 루프: 소진 시 not_ready(reason="EGW00133") 구조적 보존(T6).
+- startup wrapper(``_get_broker_with_auth_retry``): get_broker() 호출 전체를 EGW00133
+  흡수 bounded retry(≤DEFAULT_MAX_RETRIES_AUTH)로 감싼다. get_broker 가 내부 connect 로
+  EGW00133 을 던지면 retry, 소진 시 TokenRateLimitError 전파, 비-EGW00133 즉시 전파.
+  (#2399 Codex P1: connect 가 get_broker 내부 → retry 는 get_broker 를 감싸야 함.)
+- startup connect 루프: get_broker EGW00133 → bounded retry 후 소진 시
+  not_ready(reason="EGW00133") 구조적 보존(T6). 2번째 attempt 성공 시 broker_ready.
 - self-healing recover: EGW00133 시 not_ready(reason="EGW00133") + TokenRateLimitError
   re-raise(burst break 신호).
 - self-healing burst loop: persistent EGW00133 burst 당 connect ≤1회(nested bound,
@@ -49,44 +52,60 @@ def _no_real_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     return slept
 
 
-# ── T4 (c): startup wrapper bounded retry ──────────────────
+# ── T4 (c): startup wrapper bounded retry (get_broker 전체를 감쌈) ──────────
 
 
 class TestStartupAuthRetryWrapper:
+    """#2399 Codex P1 회귀 락: retry 는 ``broker.connect()`` 가 아니라
+    ``account_service.get_broker()`` 호출 **전체**를 감싼다. get_broker 가
+    cache-miss 에서 내부 connect 로 EGW00133 을 던지면(#2372 connect-후-캐시)
+    그 예외를 wrapper 가 흡수해 bounded retry 해야 한다(이전엔 connect 만
+    감싸 get_broker 가 먼저 raise → retry 미적용 회귀)."""
+
     async def test_egw00133_absorbed_then_success(
         self, _no_real_sleep: list[float]
     ) -> None:
-        """EGW00133 흡수 후 성공 — bounded retry 내 회복."""
-        broker = AsyncMock()
+        """get_broker EGW00133 흡수 후 성공 — bounded retry 내 회복."""
+        connected_broker = AsyncMock()
         state = {"fails": 1}
 
-        async def _connect() -> None:
+        async def _get_broker(account_id: str) -> Any:
+            # get_broker 내부 connect 가 EGW00133 을 던지는 상황을 모사:
+            # 첫 호출은 raise(캐시 미기록·세션 cleanup), 둘째 호출은 성공 broker 반환.
             if state["fails"] > 0:
                 state["fails"] -= 1
                 raise TokenRateLimitError("x", error_code="EGW00133")
+            return connected_broker
 
-        broker.connect = AsyncMock(side_effect=_connect)
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(side_effect=_get_broker)
 
-        await main_module._connect_broker_with_auth_retry(broker)
+        result = await main_module._get_broker_with_auth_retry(
+            account_service, "live-1"
+        )
 
-        assert broker.connect.await_count == 2  # 1 실패 + 1 성공
+        assert result is connected_broker
+        assert account_service.get_broker.await_count == 2  # 1 실패 + 1 성공
         # backoff sleep 1회(흡수).
         assert len(_no_real_sleep) == 1
+        # get_broker 는 매 attempt 마다 동일 account_id 로 재호출(새 build+connect).
+        for call in account_service.get_broker.call_args_list:
+            assert call.args == ("live-1",)
 
     async def test_egw00133_exhausts_max_retries_then_raises(
         self, _no_real_sleep: list[float]
     ) -> None:
-        """persistent EGW00133 → DEFAULT_MAX_RETRIES_AUTH 소진 후 전파."""
-        broker = AsyncMock()
-        broker.connect = AsyncMock(
+        """persistent get_broker EGW00133 → DEFAULT_MAX_RETRIES_AUTH 소진 후 전파."""
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(
             side_effect=TokenRateLimitError("x", error_code="EGW00133")
         )
 
         with pytest.raises(TokenRateLimitError):
-            await main_module._connect_broker_with_auth_retry(broker)
+            await main_module._get_broker_with_auth_retry(account_service, "live-1")
 
         # 최초 1 + 재시도 DEFAULT_MAX_RETRIES_AUTH 회.
-        assert broker.connect.await_count == DEFAULT_MAX_RETRIES_AUTH + 1
+        assert account_service.get_broker.await_count == DEFAULT_MAX_RETRIES_AUTH + 1
         # backoff sleep = 재시도 횟수만큼(소진 직전까지). startup 한 곳만(곱셈 없음).
         assert len(_no_real_sleep) == DEFAULT_MAX_RETRIES_AUTH
 
@@ -94,15 +113,15 @@ class TestStartupAuthRetryWrapper:
         self, _no_real_sleep: list[float]
     ) -> None:
         """비-EGW00133 예외는 흡수 retry 없이 즉시 전파(기존 동작 유지)."""
-        broker = AsyncMock()
-        broker.connect = AsyncMock(
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(
             side_effect=AuthenticationError("bad key", error_code="EGW00121")
         )
 
         with pytest.raises(AuthenticationError):
-            await main_module._connect_broker_with_auth_retry(broker)
+            await main_module._get_broker_with_auth_retry(account_service, "live-1")
 
-        assert broker.connect.await_count == 1
+        assert account_service.get_broker.await_count == 1
         assert _no_real_sleep == []  # backoff 없음
 
 
@@ -170,6 +189,41 @@ class TestSelfHealingEGW00133:
             await main_module._self_healing_recover_account(s, account)
 
         # T6: reason 에 EGW00133 보존.
+        assert (
+            s.runtime_readiness.get_reason("live-1", ReadinessFlag.BROKER) == "EGW00133"
+        )
+
+    async def test_recover_get_broker_egw00133_reraises_and_preserves_reason(
+        self,
+    ) -> None:
+        """#2399 Codex P1 point 3: cache-miss self-healing 에서 get_broker() 자체가
+        (내부 connect 로) EGW00133 을 던져도 connect 단계와 동일하게 reason 보존 +
+        TokenRateLimitError re-raise(burst break 신호)로 처리한다."""
+        s = main_module.Services()
+        s.runtime_readiness = RuntimeReadinessRegistry()
+        s.order_tracker = None
+        s.fill_applier = None
+        s.trade_service = None
+        s.eventbus = AsyncMock()
+        s.instrument_service = object()
+        s.bot_manager = object()
+        s.treasury_manager = None
+        s.config = SimpleNamespace(get=lambda key, default=None: default)
+        account_service = AsyncMock()
+        # connect 이 아니라 get_broker 호출 자체가 EGW00133 을 전파(#2372 cache-miss).
+        account_service.get_broker = AsyncMock(
+            side_effect=TokenRateLimitError("x", error_code="EGW00133")
+        )
+        s.account_service = account_service  # type: ignore[assignment]
+        account = _account()
+        s.runtime_readiness.mark_not_ready(
+            "live-1", ReadinessFlag.BROKER, "connect_failed"
+        )
+
+        with pytest.raises(TokenRateLimitError):
+            await main_module._self_healing_recover_account(s, account)
+
+        # T6: reason 에 EGW00133 보존(get_broker 단계도 동일).
         assert (
             s.runtime_readiness.get_reason("live-1", ReadinessFlag.BROKER) == "EGW00133"
         )
