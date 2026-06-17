@@ -73,8 +73,11 @@ class APIGateway:
     async def _get_account(self, account_id: str) -> Any | None:
         """account_id 의 Account 메타 조회 — 실패 시 ``None``(fail-closed).
 
-        ``submit_order`` gate(계층3)와 ``_on_order_approved`` virtual 라우팅 skip
-        판정에서 broker_type/trading_mode 를 얻는다. ``AccountService.get`` 은
+        ``submit_order`` 의 ``_readiness_gate``(계층3)가 broker_type/trading_mode 를
+        얻어 readiness 판정 + non-LIVE broker 호출 fail-closed 안전장치에 쓴다(단일
+        fetch). ``_on_order_approved`` 의 virtual 라우팅은 #2398 P2 attempt1 수정
+        으로 별도 메타 fetch 대신 deterministic ``_virtual_handled`` 마커 skip 을
+        쓰므로 이 헬퍼를 호출하지 않는다. ``AccountService.get`` 은
         ``AccountNotFoundError`` 를 raise 하므로 예외를 ``None`` 으로 흡수해
         호출자가 fail-closed 차단(virtual fall-open 금지, G2)하게 한다.
         """
@@ -94,6 +97,13 @@ class APIGateway:
         ``reason`` 필드가 없어 청산 marker 를 운반하지 못하므로(계층3 은 generic
         문구), 청산 SELL 은 상류 계층1(RuleEngine, OrderRequestEvent.reason 보유)
         에서 차단된다.
+
+        #2398 P2 attempt1 안전장치: ``_on_order_approved`` 의 deterministic 마커
+        skip(``_virtual_handled``)이 virtual 주문을 걸러내지만, VirtualExecutor 가
+        마커를 못 단 edge(예: portfolio 미등록 virtual 봇)가 ``submit_order`` 로
+        흘러 실 ``broker.place_order`` 에 도달하면 안 된다(virtual 이 실 broker 호출).
+        이 gate 가 라우팅용으로 **이미 가져온 단일 account 메타**(중복 fetch 금지)로
+        ``trading_mode != LIVE`` 를 fail-closed 차단한다(broker 호출 전).
         """
         from ante.account.gate import (
             ACCOUNT_NOT_READY_REASON,
@@ -101,6 +111,7 @@ class APIGateway:
             build_not_ready_notification,
             not_ready_reason,
         )
+        from ante.account.models import TradingMode
         from ante.broker.exceptions import APIError
 
         account = await self._get_account(account_id)
@@ -112,6 +123,11 @@ class APIGateway:
             trading_mode = getattr(account, "trading_mode", None)
             if not isinstance(broker_type, str) or trading_mode is None:
                 reason = f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable"
+                blocked = True
+            elif trading_mode != TradingMode.LIVE:
+                # 안전장치(G2): non-LIVE 가 마커 skip 을 뚫고 여기까지 도달하면
+                # 실 broker.place_order 호출 직전이다 — fail-closed 차단한다.
+                reason = f"{ACCOUNT_NOT_READY_REASON}: non_live_broker_call_blocked"
                 blocked = True
             else:
                 blocked = active_trading_blocked(
@@ -435,42 +451,33 @@ class APIGateway:
                 )
                 return
 
-        # ── #2398 Virtual 라우팅: LIVE 계좌만 broker.place_order ───────────────
+        # ── #2398 Virtual 라우팅: deterministic 마커 skip(P2 attempt1 수정) ──────
         # 위치: stop/stop_limit StopOrderManager 분기 **뒤**, submit try **前**
-        # (spec api-gateway.md:161). ``trading_mode != LIVE`` 면 broker.place_order
-        # 경로를 deterministic 하게 skip 하고 return 한다 — virtual 주문은
-        # VirtualExecutor(priority=50, gateway 보다 먼저 구독)가 즉시 가상 체결한다.
-        # OrderFailedEvent 를 발행하지 않는다(skip 만, 실패 아님). 단 account 메타
-        # 취득 실패는 fail-closed(virtual fall-open 금지, G2) → OrderFailedEvent.
-        from ante.account.models import TradingMode
-
-        account = await self._get_account(event.account_id)
-        if account is None or getattr(account, "trading_mode", None) is None:
-            logger.error(
-                "주문 라우팅 메타 취득 실패 — fail-closed 차단 (order_id=%s, "
-                "account=%s)",
-                event.order_id,
-                event.account_id,
-            )
-            await self._eventbus.publish(
-                OrderFailedEvent(
-                    account_id=event.account_id,
-                    order_id=event.order_id,
-                    bot_id=event.bot_id,
-                    strategy_id=event.strategy_id,
-                    symbol=event.symbol,
-                    side=event.side,
-                    quantity=event.quantity,
-                    price=event.price or 0.0,
-                    order_type=event.order_type,
-                    error_message="account_metadata_unavailable",
-                    error_code="account_not_ready",
-                    exchange=event.exchange,
-                )
-            )
-            return
-        if getattr(account, "trading_mode", None) != TradingMode.LIVE:
-            # virtual 주문 → VirtualExecutor 가 처리(체결). gateway 는 skip.
+        # (spec api-gateway.md:161). VirtualExecutor 가 자신이 소유한 virtual 봇
+        # 주문에 ``_virtual_handled`` 마커를 set 하므로(priority=50, gateway 보다
+        # 먼저 구독·동일 인스턴스 디스패치), 마커가 있으면 broker 경로를
+        # deterministic 하게 skip 한다.
+        #
+        # **P2-A(중복 terminal) 수정**: 과거에는 gateway 가 라우팅 판정을 위해
+        # 별도 ``_get_account`` 메타 fetch 를 했고, ``account_service.get`` 일시
+        # 실패 시 자체 fail-closed OrderFailedEvent 를 발행했다. 이 경로가 동일
+        # virtual 주문에 대해 VirtualExecutor 의 G9/G8 OrderFailedEvent 와 겹쳐
+        # 동일 order_id 에 terminal 이 **두 번** 발행됐다(strategy on_order_update /
+        # TradeRecorder 이중 처리). 이제 별도 메타 fetch 없이 마커만 보고 skip 하여
+        # account_service 상태와 무관하게 중복이 발생하지 않는다.
+        #
+        # **P2-B(LIVE 알림 누락) 수정**: live 주문은 마커가 없어 ``submit_order`` 로
+        # 진행하고, 그 내부 ``_readiness_gate`` 가 메타 취득 실패를 G6 알림 + APIError
+        # (account_not_ready)로 일관 처리한다 → 아래 except 가 OrderFailedEvent 로
+        # 변환. 더 이상 bare OrderFailedEvent(알림 없음)로 early-return 하지 않는다.
+        #
+        # **안전장치(G2)**: 마커 미설정 + virtual 계좌(VirtualExecutor 가 마커를
+        # 못 단 edge — portfolio 미등록 등)는 ``submit_order`` 의 ``_readiness_gate``
+        # 가 이미 가져온 account 메타로 ``trading_mode != LIVE`` 를 fail-closed
+        # 차단하므로(중복 fetch 없음) virtual 이 실 broker.place_order 에 도달하지
+        # 않는다.
+        if getattr(event, "_virtual_handled", False):
+            # virtual 주문 → VirtualExecutor 가 처리(체결/실패 종결). gateway skip.
             return
 
         try:

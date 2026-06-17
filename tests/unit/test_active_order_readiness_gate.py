@@ -473,8 +473,12 @@ class TestLayer3Gateway:
         assert cap.failed[0].symbol == SYMBOL
 
     async def test_fail_closed_meta_unavailable(self) -> None:
-        """G2: account_service.get 실패 → fail-closed OrderFailedEvent(virtual
-        fall-open 금지)."""
+        """G2 + #2398 P2-B: LIVE 주문 account_service.get 실패 → fail-closed.
+
+        ``submit_order`` 의 ``_readiness_gate`` 가 메타 취득 실패를 G6 알림 +
+        APIError(account_not_ready)로 일관 처리 → except 가 OrderFailedEvent 로
+        변환. 과거 bare OrderFailedEvent(알림 누락) early-return 을 대체한다.
+        OrderFailedEvent 1회 + NotificationEvent(error/system) 1회(누락 없음)."""
         bus = EventBus()
         cap = _capture(bus)
         broker = self._broker()
@@ -489,7 +493,9 @@ class TestLayer3Gateway:
         await gw._on_order_approved(_approved())
 
         assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
         broker.place_order.assert_not_called()
+        assert _notif_count(cap) == 1  # P2-B: 알림 누락 없음.
 
 
 # ── Virtual 라우팅 + G8 + G9 (VirtualExecutor / gateway skip) ────────────────
@@ -520,8 +526,9 @@ class TestVirtualRouting:
         executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
         return executor
 
-    async def test_gateway_skips_place_order_for_virtual(self) -> None:
-        """G3 라우팅: kis-domestic + virtual 주문은 broker.place_order 미호출."""
+    async def test_gateway_skips_place_order_for_marked_virtual(self) -> None:
+        """#2398 P2-A: ``_virtual_handled`` 마커가 set 된 주문은 gateway 가
+        deterministic skip — broker.place_order 미호출(메타 fetch 무관)."""
         bus = EventBus()
         cap = _capture(bus)
         broker = MagicMock()
@@ -538,11 +545,16 @@ class TestVirtualRouting:
                 ACCOUNT, broker_type="kis-domestic", trading_mode=TradingMode.VIRTUAL
             ),
         )
-        await gw._on_order_approved(_approved())
+        ev = _approved()
+        # VirtualExecutor 가 소유 주문에 마커를 set 한 상태를 모사.
+        object.__setattr__(ev, "_virtual_handled", True)
+        await gw._on_order_approved(ev)
 
         broker.place_order.assert_not_called()
         assert cap.failed == []  # skip 은 실패가 아님.
         assert cap.submitted == []
+        # 마커 skip 은 account_service 를 호출하지 않는다(별도 메타 fetch 제거).
+        svc.get.assert_not_called()
 
     async def test_virtual_stop_preserves_stop_manager(self) -> None:
         """virtual + stop → StopOrderManager 등록 보존(skip 통째 금지)."""
@@ -658,6 +670,233 @@ class TestVirtualRouting:
 
         assert cap.filled == []
         assert len(cap.failed) == 1
+
+
+# ── #2398 P2 attempt1: deterministic virtual-routing 마커(중복 terminal/알림 누락) ─
+
+
+class TestVirtualRoutingMarkerP2:
+    """VirtualExecutor + APIGateway 를 같은 EventBus 에 **프로덕션 구독 순서**
+    (VirtualExecutor 먼저, gateway 나중 — main.py 배선)로 배선해, 동일
+    OrderApprovedEvent 인스턴스에 대한 deterministic ``_virtual_handled`` 마커
+    라우팅이 중복 terminal(P2-A)·LIVE 알림 누락(P2-B)·non-LIVE broker 호출(안전장치)
+    을 모두 막는지 검증한다(Codex 브랜치 리뷰 attempt1 P2 2건).
+    """
+
+    def _broker(self) -> MagicMock:
+        b = MagicMock()
+        b.place_order = AsyncMock(return_value="BRK-1")
+        return b
+
+    def _wire(
+        self,
+        bus: EventBus,
+        *,
+        account: object,
+        registry: RuntimeReadinessRegistry | None,
+        broker: MagicMock,
+        gateway_account_service: MagicMock | None = None,
+    ):
+        """프로덕션 구독 순서로 VirtualExecutor → gateway 를 배선한다.
+
+        EventBus 는 동일 priority(=50) 핸들러를 subscribe 순서대로 같은 인스턴스에
+        디스패치하므로(stable sort), VirtualExecutor 를 먼저 subscribe 해야
+        마커가 gateway 핸들러 실행 전에 set 된다(main.py: virtual_executor.subscribe()
+        → api_gateway.start()).
+        """
+        from ante.bot.providers.virtual import (
+            VirtualExecutor,
+            VirtualPortfolioView,
+        )
+
+        vexec_svc = _account_service(account)
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=None,
+            runtime_readiness=registry,
+            account_service=vexec_svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        executor.subscribe()  # 먼저 구독(priority=50).
+
+        gw_svc = gateway_account_service or _account_service(account)
+        gw_svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=gw_svc,
+            eventbus=bus,
+            runtime_readiness=registry,
+        )
+        gw.start()  # 나중 구독(priority=50) → 마커를 본다.
+        # VirtualExecutor 가 시장가 체결가를 gateway.get_current_price 로 조회하므로
+        # gateway 를 가격 소스로 연결한다(가상 체결 경로 완결).
+        executor._gateway = gw
+        return executor, gw, vexec_svc
+
+    async def test_virtual_meta_failure_single_terminal(self) -> None:
+        """P2-A: virtual 봇 주문 + account_service.get 일시 실패.
+
+        VirtualExecutor 가 G9 fail-closed 로 OrderFailedEvent 를 발행하고 마커를
+        set → gateway 는 별도 메타 fetch 없이 skip → 동일 order_id 에 대해
+        OrderFailedEvent **정확히 1회**(gateway 중복 없음)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        # registry=None 이면 VirtualExecutor 가 fail-closed(account_service.get 도
+        # 도달 전 차단)이므로, 메타 fetch 일시 실패를 정확히 모사하려면
+        # registry 는 ready 로 두고 account_service.get 만 예외로 만든다.
+        account = make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        registry = ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        # VirtualExecutor 의 account_service.get 을 일시 실패시킨다(G9 fail-closed).
+        executor, gw, vexec_svc = self._wire(
+            bus, account=account, registry=registry, broker=broker
+        )
+        vexec_svc.get = AsyncMock(side_effect=RuntimeError("meta boom"))
+        # gateway 의 account_service.get 도 같은 일시 실패라고 가정(중복 fetch 시
+        # 중복 terminal 이 나는지 검증) — 마커 skip 이면 호출조차 되지 않아야 한다.
+        gw._account_service.get = AsyncMock(side_effect=RuntimeError("meta boom"))  # type: ignore[attr-defined]
+
+        await bus.publish(_approved())
+
+        # OrderFailedEvent 정확히 1회 — gateway 중복 발행 없음(P2-A).
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
+        # gateway 는 마커를 보고 skip → broker/메타 fetch 미호출.
+        broker.place_order.assert_not_called()
+        gw._account_service.get.assert_not_called()  # type: ignore[attr-defined]
+        assert cap.filled == []  # fill 금지(G9).
+        assert _notif_count(cap) == 1  # G6 알림 1회(VirtualExecutor 발행).
+
+    async def test_live_meta_failure_failed_and_alert(self) -> None:
+        """P2-B: LIVE 주문 + 메타 실패 → OrderFailedEvent + 알림 정확히 1회.
+
+        VirtualExecutor 는 portfolio 미소유(live 봇) early-return(마커 미설정) →
+        gateway 가 submit_order → _readiness_gate 가 메타 실패를 G6 알림 + APIError
+        로 처리 → except → OrderFailedEvent(누락 없음)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        live_account = make_account(ACCOUNT, trading_mode=TradingMode.LIVE)
+        registry = ready_registry(ACCOUNT)
+        # live 봇은 VirtualExecutor 에 register 하지 않는다(portfolio 미소유).
+        from ante.bot.providers.virtual import VirtualExecutor
+
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=None,
+            runtime_readiness=registry,
+            account_service=_account_service(live_account),
+        )
+        executor.subscribe()
+        gw_svc = MagicMock()
+        gw_svc.get = AsyncMock(side_effect=RuntimeError("meta boom"))
+        gw_svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=gw_svc, eventbus=bus, runtime_readiness=registry
+        )
+        gw.start()
+
+        await bus.publish(_approved())
+
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
+        assert _notif_count(cap) == 1  # P2-B: 알림 누락 없음.
+        broker.place_order.assert_not_called()
+        assert cap.filled == []
+
+    async def test_live_normal_order_places_once(self) -> None:
+        """LIVE 정상 주문 → place_order 1회(마커 미설정 → gateway 처리)."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        live_account = make_account(ACCOUNT, trading_mode=TradingMode.LIVE)
+        registry = ready_registry(ACCOUNT)
+        from ante.bot.providers.virtual import VirtualExecutor
+
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=None,
+            runtime_readiness=registry,
+            account_service=_account_service(live_account),
+        )
+        executor.subscribe()
+        gw_svc = _account_service(live_account)
+        gw_svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=gw_svc, eventbus=bus, runtime_readiness=registry
+        )
+        gw.start()
+
+        await bus.publish(_approved(order_type="limit"))
+
+        broker.place_order.assert_called_once()
+        assert len(cap.submitted) == 1
+        assert cap.failed == []
+        assert cap.filled == []  # live 는 가상 체결 없음.
+
+    async def test_virtual_normal_order_fills_gateway_skips(self) -> None:
+        """virtual 정상 주문 → VirtualExecutor 체결 + gateway place_order 미호출."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        virtual_account = make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        registry = ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        executor, gw, _ = self._wire(
+            bus, account=virtual_account, registry=registry, broker=broker
+        )
+
+        ev = OrderApprovedEvent(
+            account_id=ACCOUNT,
+            order_id="ord-1",
+            bot_id=BOT,
+            strategy_id="s1",
+            symbol=SYMBOL,
+            side="buy",
+            quantity=10.0,
+            price=50000.0,
+            order_type="limit",
+            reserved_amount=500000.0,
+        )
+        await bus.publish(ev)
+
+        assert len(cap.filled) == 1  # VirtualExecutor 체결.
+        broker.place_order.assert_not_called()  # gateway 마커 skip.
+        assert cap.failed == []
+        assert cap.submitted == []
+
+    async def test_unmarked_non_live_blocks_broker(self) -> None:
+        """안전장치: 마커 미설정 + trading_mode != LIVE(edge) → broker.place_order
+        미호출(_readiness_gate non-LIVE fail-closed). VirtualExecutor 가 마커를
+        못 단 virtual 계좌 주문이 실 broker 호출로 새지 않는다."""
+        from ante.broker.exceptions import APIError
+
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        virtual_account = make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        svc = _account_service(virtual_account)
+        svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=svc,
+            eventbus=bus,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+        )
+        # 마커 미설정 주문을 gateway 핸들러에 직접 전달(VirtualExecutor 미배선 edge).
+        await gw._on_order_approved(_approved())
+
+        broker.place_order.assert_not_called()  # fail-closed.
+        assert len(cap.failed) == 1  # except → OrderFailedEvent.
+        assert "non_live_broker_call_blocked" in cap.failed[0].error_message
+
+        # submit_order 직접 호출도 non-LIVE fail-closed(APIError) 보장.
+        with pytest.raises(APIError) as exc:
+            await gw.submit_order(
+                bot_id=BOT,
+                symbol=SYMBOL,
+                side="buy",
+                quantity=10.0,
+                account_id=ACCOUNT,
+            )
+        assert exc.value.error_code == "account_not_ready"
 
 
 # ── 통합: #2395 회귀 락 + G5 liveness (full layer1→2→3 파이프라인) ─────────────

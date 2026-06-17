@@ -290,6 +290,21 @@ class VirtualExecutor:
         if portfolio is None:
             return  # live 봇의 주문 → 무시 (APIGateway가 처리)
 
+        # ── #2398 deterministic virtual-routing 마커(P2: gateway 중복 terminal 방지) ─
+        # VirtualExecutor 는 OrderApprovedEvent priority=50 구독이고 main 배선상
+        # gateway(_subscribe_events)보다 **먼저** subscribe 된다(main.py:
+        # virtual_executor.subscribe() → api_gateway.start()). EventBus 는 동일
+        # 우선순위 핸들러를 subscribe 순서(stable sort)대로 같은 이벤트 인스턴스에
+        # 순차 디스패치하므로, 자신이 **소유**(portfolio 존재 = virtual 봇)한 주문에
+        # 마커를 set 하면 후속 gateway 핸들러가 이를 보고 deterministic skip 한다
+        # (#1331 ``_consumed`` 선례 = frozen dataclass 에 ``object.__setattr__``).
+        # account_service.get 일시 실패로 G9/G8 실패 종결이 나도 이 마커가 먼저
+        # set 되므로, gateway 가 별도 메타 fetch 없이 skip 하여 동일 order_id 에
+        # 대한 terminal 중복(strategy on_order_update / TradeRecorder 이중 처리)이
+        # 방지된다. stop/stop_limit 은 위에서 marker 없이 early-return 하여 gateway
+        # StopOrderManager 라우팅을 그대로 보존한다(virtual stop 경로 불변).
+        object.__setattr__(event, "_virtual_handled", True)
+
         order_id = event.order_id
         account_id = event.account_id
         symbol = event.symbol
