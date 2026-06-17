@@ -611,7 +611,12 @@ async def test_self_healing_recover_treasury_only_no_scheduler_churn() -> None:
 async def test_self_healing_recover_rebinds_schedulers_on_broker_recovery() -> None:
     """broker 가 방금 재연결되면 fill/reconcile 스케줄러를 재등록(rebind)한다 —
     이미 ready 여도 stale broker 핸들 교체를 위해(churn 게이트의 broker_just_recovered
-    경로). treasury_only churn 방지와 대칭되는 정상 rebind 경로 회귀 락."""
+    경로). treasury_only churn 방지와 대칭되는 정상 rebind 경로 회귀 락.
+
+    주의(메타리뷰 P3): "broker not_ready 인데 교체할 기존 스케줄러 존재" 조합은
+    startup connect 실패 시 스케줄러가 생성되지 않아 현 PR 에서 production-도달
+    불가한 방어 경로다 — 이 테스트는 broker_ready 강등 도입 전까지 인위적 상태로만
+    이 분기를 검증한다(broker_just_recovered rebind 정합성 락)."""
     s = _services()
     account = _account("live-1")
     await main_module._register_fill_scheduler_for_account(s, account)
@@ -630,6 +635,92 @@ async def test_self_healing_recover_rebinds_schedulers_on_broker_recovery() -> N
     assert first_reconcile.stopped is True
     assert s.fill_schedulers["live-1"] is not first_fill
     assert s.reconcile_schedulers["live-1"] is not first_reconcile
+
+
+@pytest.mark.asyncio
+async def test_self_healing_loop_survives_recover_exception(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """메타리뷰 P1 회귀: _self_healing_recover_account 가 예기치 못한 예외를 던져도
+    background loop 가 사멸하지 않고 다음 계좌/burst 로 계속한다(liveness 방어).
+
+    한 계좌(boom)가 매번 raise 해도 다른 계좌(ok)는 유한시간 내 회복되어야 한다
+    (단일 예외가 전 계좌 회복을 멈추면 #2395 영구 not_ready 역회귀).
+    """
+    s = _services()
+    a1 = _account("boom")
+    a2 = _account("ok")
+    s.runtime_readiness.mark_not_ready("boom", ReadinessFlag.BROKER, "connect_failed")
+    s.runtime_readiness.mark_not_ready("ok", ReadinessFlag.BROKER, "connect_failed")
+    s.config = SimpleNamespace(
+        get=lambda key, default=None: {
+            "readiness.self_healing_interval_seconds": 0,
+            "readiness.self_healing_max_attempts_per_burst": 1,
+            "readiness.self_healing_backoff_base_seconds": 0,
+            "readiness.self_healing_backoff_max_seconds": 0,
+        }.get(key, default)
+    )
+
+    real_recover = main_module._self_healing_recover_account
+    calls: list[str] = []
+
+    async def _recover(svc: Any, acc: Any) -> bool:
+        calls.append(acc.account_id)
+        if acc.account_id == "boom":
+            raise RuntimeError("unexpected recover failure")
+        return await real_recover(svc, acc)
+
+    monkeypatch.setattr(main_module, "_self_healing_recover_account", _recover)
+
+    task = asyncio.create_task(main_module._readiness_self_healing_loop(s, [a1, a2]))
+    try:
+        for _ in range(500):
+            if s.runtime_readiness.is_ready("ok", ReadinessFlag.BROKER):
+                break
+            await asyncio.sleep(0)
+        # boom 의 반복 예외에도 loop 가 살아 ok 를 회복시킨다.
+        assert s.runtime_readiness.is_ready("ok", ReadinessFlag.BROKER)
+        assert "boom" in calls and "ok" in calls
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+async def test_self_healing_marks_broker_ready_after_dependent_rebind(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """메타리뷰 P2 회귀: broker_ready 는 의존 스케줄러 rebind 를 마친 **뒤** mark 한다
+    (stale-broker false-ready 창 제거). fill rebind 시점에 BROKER 가 아직 not_ready
+    임을 잠근다 — 먼저 mark 하면 rebind await 사이에 active_trading_ready 가 stale
+    상태와 함께 True 로 관측될 수 있다.
+    """
+    s = _services()
+    account = _account("live-1")
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    observed: dict[str, bool] = {}
+    real_register = main_module._register_fill_scheduler_for_account
+
+    async def _spy_register(svc: Any, acc: Any) -> bool:
+        observed["broker_ready_during_rebind"] = svc.runtime_readiness.is_ready(
+            acc.account_id, ReadinessFlag.BROKER
+        )
+        return await real_register(svc, acc)
+
+    monkeypatch.setattr(
+        main_module, "_register_fill_scheduler_for_account", _spy_register
+    )
+
+    await main_module._self_healing_recover_account(s, account)
+
+    # rebind 진행 중에는 broker_ready 가 아직 not_ready(지연 mark).
+    assert observed["broker_ready_during_rebind"] is False
+    # 회복 완료 후에는 broker_ready 가 ready.
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
 
 
 @pytest.mark.asyncio

@@ -1201,6 +1201,20 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
        한다(기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
        barrier ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
        (타 계좌 #1946 barrier 보존).
+    3. ``broker_ready`` 는 의존 rebind 를 모두 마친 **뒤** mark 한다(stale-broker
+       false-ready 창 제거).
+
+    Known limitations (bounded — 메타리뷰, follow-up 후보):
+    - 비-broker flag(fill/treasury) 반복 실패는 broker 캐시 세션을 건강하다고
+      **신뢰**한다. 본 PR 은 ``broker_ready`` 강등 경로가 없어 "broker_ready=True
+      이나 세션 사망" 조합이 발생하지 않는다. 강등 도입(#2398 reader live-poll 등)
+      시 회복 경로의 broker 캐시 무효화 재검토가 필요하다.
+    - ``broker_just_recovered`` rebind(기존 스케줄러 교체) 분기는 startup connect
+      실패 시 스케줄러가 애초에 생성되지 않으므로 현 PR 에서 production-도달 불가한
+      방어 경로다(broker_ready 강등 도입 시 live 化).
+    - 다계좌 pending 의 burst backoff 는 계좌별 순차 직렬이라 한 영구실패 계좌가
+      뒤 계좌 회복을 bounded 지연시킨다(liveness 무손상). app_key 단위 backoff
+      그룹화는 follow-up.
 
     Returns:
         모든 비면제 플래그 ready(active_trading_ready) 여부.
@@ -1230,9 +1244,13 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
                 s, account_id, ReadinessFlag.BROKER, "reconnect_failed"
             )
             return False
-        _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
+        # broker connect 성공 — 단, broker_ready mark 는 의존 스케줄러 rebind 를 모두
+        # 마친 **뒤**로 지연한다(메타리뷰 P2). 여기서 먼저 mark 하면 아래 rebind await
+        # 사이에 broker_ready=True 이면서 fill/reconcile/treasury 는 아직 stale·미rebind
+        # 인 상태가 active_trading_ready=True 로 관측될 수 있어, #2398 active-order gate
+        # 도입 시 stale broker 로 주문이 통과하는 창이 생긴다. 마지막에 mark 하면 회복이
+        # reader 관점에서 원자적으로 보인다(rebind 동안 broker_ready=not_ready → 차단).
         broker_just_recovered = True
-        logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
 
     # 의존 스케줄러 재시도 — **재등록 churn 방지**(Codex P2 attempt-3): 각 플래그는
     # 실제 not_ready 이거나 broker 가 방금 재연결된 경우에만 재등록한다. treasury 만
@@ -1299,6 +1317,13 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
         account_id, ReadinessFlag.TREASURY_SYNC
     ):
         await _init_treasury_sync(s, [account])
+    # broker_ready 를 **마지막에** mark(메타리뷰 P2: stale-broker false-ready 창 제거).
+    # broker_just_recovered 일 때만 mark — 이미 ready 였던 계좌는 재mark 불요(broker
+    # reconnect churn 방지). 의존 rebind 가 모두 끝난 뒤이므로 이 시점에 broker_ready
+    # 가 True 가 되어도 active_trading_ready 는 stale 상태를 ready 로 오인하지 않는다.
+    if broker_just_recovered:
+        _mark_runtime_ready(s, account_id, ReadinessFlag.BROKER)
+        logger.info("Readiness self-healing: broker 회복 — account=%s", account_id)
     # 모든 비면제 플래그가 ready 여야 회복 완료(active_trading_ready 기준).
     return s.runtime_readiness.active_trading_ready(
         account_id,
@@ -1348,7 +1373,22 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
             for account in pending:
                 # per-burst bounded 재시도(계좌 lifetime 은 무제한).
                 for attempt in range(max_per_burst):
-                    if await _self_healing_recover_account(s, account):
+                    try:
+                        recovered = await _self_healing_recover_account(s, account)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        # 회복 시도 중 예기치 못한 예외(스케줄러 생성자·config 접근·
+                        # reconciler 빌드 등 try 밖 경로)가 background loop 를 영구
+                        # 사멸시키지 않도록 격리한다(메타리뷰 P1: liveness invariant
+                        # 방어 — 한 계좌의 예외가 전 계좌 회복을 멈추면 #2395 역회귀).
+                        # 다음 attempt/계좌/burst 로 계속한다.
+                        logger.exception(
+                            "Readiness self-healing 회복 예외 — account=%s (루프 유지)",
+                            account.account_id,
+                        )
+                        recovered = False
+                    if recovered:
                         break
                     # attempt 간 지수 backoff(EGW00133 ~1/min 토큰 cooldown 정렬,
                     # Codex P2). 즉시 재인증을 몰아넣어 KIS 토큰 압박을 악화시키지
