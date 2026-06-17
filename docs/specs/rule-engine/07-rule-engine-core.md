@@ -76,6 +76,26 @@ RuleEngine(
 - **조치 실행**: `NOTIFY` → NotificationEvent, `STOP_BOT` → BotStopEvent, `HALT_ACCOUNT` → `AccountService.suspend(account_id)` 호출
 - **에러 처리**: 평가 중 예외 발생 시 안전하게 `OrderRejectedEvent` 발행 (fail-closed)
 
+### Account readiness gate (계층 1, #2396)
+
+> 계약 확정: #2396. 실제 동작은 구현 #2397(축 i readiness 모델, 선행) + #2398(축 ii active-order gate) 머지 후. 구현 #2397만 머지된 중간 상태에서는 registry만 채워질 뿐 gate가 켜지지 않아 기존 주문 동작이 불변이다.
+
+RuleEngine은 `OrderRequestEvent` 처리 시 active-order readiness gate(계층 1)를 적용한다. 이는 [account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다)의 3계층 defense-in-depth(단일 EventBus 파이프라인이지만 단일 chokepoint 가정을 금지) 중 가장 상류다.
+
+- **위치**: `account_id` 필터(`event.account_id != self._account_id`) 직후, 기존 preflight 게이트 군(#1297~#1318)과 동형 위치에서 `runtime_readiness.active_trading_ready(account_id)`를 체크한다(아래 OrderRequestEvent preflight 도메인 검증보다 먼저, RuleContext 생성·Treasury 조회 이전).
+- **거부**: `not_ready`면 `_build_safe_rejected_event(reason="account_not_ready: <missing_flags>")`를 발행하고 return한다. 이미 try/catch-all + safe-builder 패턴이 있어 audit trail이 보장된다.
+- **효과**: Treasury `reserve_for_order` 이전 차단이라 reserve 누수가 없다(가장 깨끗한 차단).
+- **fail-closed**: registry 미주입 / 조회 예외도 `not_ready`로 취급해 차단한다. 멀티계좌 중 1개만 ready면 그 계좌만 통과한다.
+- **stop order 재진입**: `_trigger_order` → 변환 `OrderRequestEvent`도 계층1을 통과하므로 트리거 시점 readiness로 재평가된다(별도 처리 불요).
+
+**청산 SELL 비대칭 정책 ([must_fix D], R4 확정, normative)**: 봇 삭제 시 `_liquidate_positions`(시장가 매도)도 계층1을 통과한다. broker `not_ready` 시 청산 SELL은 **거부**한다 — 체결 추적이 불가하면 #2395와 동일 위험이므로 SELL을 면제하지 않는다. 단 반드시 다음을 보장한다.
+
+1. terminal update(계층별 `OrderRejectedEvent` 등) 발행.
+2. 운영자 alert: `NotificationEvent(level=error, category=system, "청산 차단: account not_ready — 수동 청산 필요")`.
+3. 봇 삭제 / 포지션 state semantics 보존: 봇 삭제는 **진행**하되 **미청산 포지션을 운영자에게 명시 노출**한다.
+
+reserve를 사용하지 않는 SELL이므로 release는 불요하나, 거부 가시성은 필수다(BUY 차단은 안전, SELL 차단은 미청산 포지션 잔존 리스크 — 비대칭을 normative로 명시).
+
 ### OrderRequestEvent preflight
 
 RuleEngine은 RuleContext 생성과 룰 평가 이전에 `OrderRequestEvent` payload의 도메인 invariant를 검증한다. invalid payload는 Treasury 예약 호출 이전에 `OrderRejectedEvent`로 fail-closed 거부되며, 룰 평가/Treasury 조회는 호출되지 않는다.

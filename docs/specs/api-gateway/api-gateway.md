@@ -142,7 +142,7 @@ def _get_broker(self, account_id: str) -> BrokerAdapter:
 | `submit_order(bot_id, symbol, side, quantity, order_type, price, account_id) → str` | 주문 제출. 캐시 미사용, rate limit만 적용 |
 | `cancel_order(order_id, account_id) → bool` | 주문 취소. account_id로 브로커 라우팅 |
 
-**주문 처리 라우팅**: `OrderApprovedEvent` 수신 시 `event.account_id`로 올바른 BrokerAdapter를 조회한 뒤 주문을 실행한다.
+**주문 처리 라우팅**: `OrderApprovedEvent` 수신 시 `event.account_id`로 올바른 BrokerAdapter를 조회한 뒤 주문을 실행한다. 단 **LIVE 계좌만** broker.place_order 경로를 탄다(아래 "Virtual 주문 라우팅" 참조).
 
 ```python
 async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
@@ -151,6 +151,16 @@ async def _on_order_approved(self, event: OrderApprovedEvent) -> None:
     await rate_limiter.acquire()
     order_id = await broker.place_order(...)
 ```
+
+### Virtual 주문 라우팅 — broker 미경유 (#2396 R1, normative)
+
+> 계약 확정: #2396. 라우팅 정합 구현은 #2398(축 ii). 본 절은 스펙 계약만 정의한다.
+
+가상(`trading_mode=VIRTUAL`) 계좌 주문은 **`VirtualExecutor`**(`src/ante/bot/providers/virtual.py`)가 `OrderApprovedEvent`를 priority=50으로 구독해 **즉시 가상 체결**한다(`broker.place_order` 미경유). APIGateway는 **LIVE 계좌만** broker.place_order를 호출하고, virtual은 `VirtualExecutor` 경로로 처리되어야 한다.
+
+- `_on_order_approved`는 `trading_mode=VIRTUAL`이면 broker 라우팅을 skip한다(또는 `VirtualExecutor`가 consume하는 정합을 보장한다). 현 gateway가 virtual approval도 `place_order`를 호출하는 라우팅 불일치가 있으면 그 정합도 함께 해소한다(#2398 요구).
+- 이 라우팅 덕분에 runtime readiness 면제 매트릭스([account/02-design-decisions.md — D-ACC-09](../account/02-design-decisions.md#d-acc-09-runtime-readiness-축은-accountstatus와-직교한다))에서 virtual의 broker / fill / reconcile 면제가 정합적이다 — 가상 체결은 broker backstop이 불요하다.
+- **#2398 회귀 락**: `kis-domestic + virtual` 주문이 `broker.place_order`를 미호출함을 회귀 테스트로 보장한다.
 
 **취소/정정 설계 근거**: 취소는 리스크를 줄이는 행위이므로 RuleEngine 경유 불필요 — `OrderCancelEvent` 수신 시 `event.account_id`로 브로커를 선택하여 직접 전달한다. **`OrderModifyEvent`(주문 정정)는 v1=price-only로 지원한다(#2391).** `OrderModifyEvent`는 EventBus 우선순위상 RuleEngine(priority=100)이 먼저 처리하며, 룰 위반·룰 평가 예외·v1 가격 preflight 실패(`modify_invalid_args`) 시 RuleEngine이 사유 `OrderModifyRejectedEvent`를 발행하고 `_consumed` 마커를 설정한다(이 경우 Gateway는 발행하지 않는다). 룰을 통과하면 Gateway(priority=50)가 OrderTracker로 `order_id → broker_order_id`를 변환하고 **broker 호출 전 fail-closed 게이트**를 적용한다: (a) finite `price>0` 아니면 `modify_invalid_args`; (b0) `record.bot_id != event.bot_id`(같은 계좌 내 타 봇 주문)=`modify_not_owner`(봇 격리); (b) `event.quantity==0.0`=price-only(허용), `>0 && != ordered_qty`=`modify_qty_change_unsupported`(#2393), `<0`=`modify_invalid_args`; (c) record status≠`open`(부분체결/터미널/미발견)=`modify_partial_or_terminal_unsupported`; (c') `record.order_type != "limit"`(비지정가/시장가 주문)=`modify_unsupported_order_type`(#2393); (d) buy면 신규가 `≤ order_price` 아니면(예산 증가) `modify_budget_increase_unsupported`(`order_price` 부재 시 buy fail-closed), sell 통과; (e) broker `ModifyOrgnoUnavailableError`=`modify_orgno_unavailable`. 게이트 통과 시 `broker.modify_order(order_id, quantity=ordered_qty, price=new_price, order_type="limit")`(수량 불변) 위임 → 성공 시 `OrderModifyExecutedEvent`(quantity=원주문 수량, price=신규), broker `False`=`modify_failed`, 기타 예외=`str(e)`. OrderTracker `ordered_qty`는 변경하지 않는다(price-only). 수량 변경·예산증가 buy·부분체결·동시성 등 고급 케이스는 후속(#2393). 실 KIS 정정(`order-rvsecncl` `RVSE_CNCL_DVSN_CD='01'`) live A/B 검증은 사용자 oracle 후속(pending).
 
