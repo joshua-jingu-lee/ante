@@ -9,6 +9,7 @@ from ante.broker.exceptions import (
     CircuitOpenError,
     OrderNotFoundError,
     RateLimitError,
+    TokenRateLimitError,
 )
 from ante.broker.fill_scheduler import FillReconcileScheduler, business_date_kst
 from ante.broker.kis import KISAdapter, KISBaseAdapter, KISDomesticAdapter
@@ -47,5 +48,6 @@ __all__ = [
     "RateLimitError",
     "ReconcileScheduler",
     "TestBrokerAdapter",
+    "TokenRateLimitError",
     "get_broker_class",
 ]

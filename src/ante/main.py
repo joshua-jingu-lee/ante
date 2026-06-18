@@ -231,6 +231,32 @@ def _broker_ready_exempt(account: Any) -> bool:
     return _flag_exempt_for_account(ReadinessFlag.BROKER, account)
 
 
+def _broker_not_ready_live(s: Services, account: Any) -> bool:
+    """startup connect 에서 broker not_ready 가 된 **비면제(LIVE)** 계좌인지.
+
+    #2399 Codex P2(attempt 2) — 후속 broker-backed startup init 가드: startup
+    connect 루프(``_init_gateway``)에서 EGW00133 bounded retry 가 소진되거나 기타
+    실패로 ``broker_ready`` 가 not_ready 가 된 LIVE 계좌는, 그 뒤 같은 startup 의
+    broker-backed 초기화 단계(stream·treasury LIVE sync·fill recovery·reconcile)
+    에서 ``get_broker`` 를 **다시 호출하면 안 된다**. 그 추가 호출이 EGW00133 계좌의
+    KIS 토큰 1/min 제한을 startup 단일 cadence(T4) 밖에서 또 두드리기 때문이다.
+
+    True 인 계좌는 후속 단계가 skip 하고, broker 회복은 self-healing(#2397/#2398)
+    이 60s interval 로 이어받아 fill/reconcile/treasury 를 재등록한다.
+
+    - broker_ready 면제(virtual/test) 계좌는 항상 False — broker 무관 단계
+      (예: treasury VIRTUAL sync, broker=None)는 영향 없이 계속 처리한다.
+    - registry 미주입(partial wiring) 환경에서는 ``is_ready`` 가 항상 False 라
+      모든 LIVE 계좌를 skip 하게 되므로, registry 가 없으면 False 를 반환해
+      기존 동작(전 계좌 처리)을 보존한다.
+    """
+    if s.runtime_readiness is None:
+        return False
+    if _broker_ready_exempt(account):
+        return False
+    return not s.runtime_readiness.is_ready(account.account_id, ReadinessFlag.BROKER)
+
+
 def _mark_runtime_ready(s: Services, account_id: str, flag: ReadinessFlag) -> None:
     """registry ready mark. registry 미주입 환경(partial wiring)에서는 no-op."""
     if s.runtime_readiness is not None:
@@ -275,6 +301,51 @@ def _mark_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
                 ReadinessFlag.RECONCILE,
                 "reconcile_init_skipped_no_broker",
             )
+
+
+def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
+    """후속 broker-backed startup init 에 넘길 계좌 — broker not_ready LIVE 제외.
+
+    #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가 된 LIVE
+    계좌(``_broker_not_ready_live`` True)를 제외한다. 제외된 계좌는 후속 단계
+    (treasury LIVE sync·fill recovery·reconcile)가 ``get_broker`` 를 다시 호출하지
+    않아 EGW00133 토큰 1/min 재타격을 피한다(T4 단일 cadence). 제외된 LIVE 계좌의
+    treasury_sync·fill_reconcile·reconcile 플래그는 ``mark_not_ready`` 로 명시
+    표시해, self-healing(#2397/#2398)이 broker 회복 시 픽업·재등록한다.
+
+    면제(virtual/test) 계좌와 broker_ready 성공 LIVE 계좌는 그대로 유지된다
+    (treasury VIRTUAL sync 등 broker 무관 처리 보존).
+    """
+    kept: list[Any] = []
+    for account in accounts:
+        if _broker_not_ready_live(s, account):
+            # 후속 flag 를 명시 not_ready(reason) — fail-closed + self-healing 픽업.
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.TREASURY_SYNC,
+                "broker_not_ready_startup",
+            )
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.FILL_RECONCILE,
+                "broker_not_ready_startup",
+            )
+            _mark_runtime_not_ready(
+                s,
+                account.account_id,
+                ReadinessFlag.RECONCILE,
+                "broker_not_ready_startup",
+            )
+            logger.info(
+                "후속 broker-backed init skip: account=%s — broker not_ready"
+                "(treasury/fill/reconcile self-healing 위임)",
+                account.account_id,
+            )
+            continue
+        kept.append(account)
+    return kept
 
 
 async def _init_core(s: Services) -> None:
@@ -692,6 +763,91 @@ async def _init_trading(s: Services) -> None:
     logger.info("BotManager 초기화 완료")
 
 
+def _connect_failure_reason(exc: BaseException, default: str) -> str:
+    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (#2399 T6).
+
+    ``AuthenticationError.error_code`` (KIS 원천 ``msg_cd``, 예: ``EGW00133``)을
+    문자열 grep 이 아니라 ``getattr`` 로 추출한다. 코드가 있으면 reason 으로 쓰고,
+    없으면 ``default`` (startup="connect_failed", self-healing="reconnect_failed").
+    D-ACC-09 readiness reason 연동(startup §181 + self-healing).
+    """
+    code = getattr(exc, "error_code", None)
+    if code:
+        return str(code)
+    return default
+
+
+async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> Any:
+    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (#2399 T4 c).
+
+    **단일 cadence 레이어의 startup 한 곳**(부팅 1회 경로, 곱셈 없음). EGW00133
+    (``TokenRateLimitError``)을 만나면 ~60s backoff 후 ``DEFAULT_MAX_RETRIES_AUTH``
+    내 재시도해 startup token race 를 흡수한다.
+
+    **재배치 사유(#2399 Codex P1):** ``AccountService.get_broker`` 는 cache-miss 시
+    내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다(#2372). 따라서
+    새 프로세스 cache-miss startup 의 첫 인증이 EGW00133 을 반환하면 그 예외가
+    ``get_broker()`` 호출 자체에서 전파된다. retry 가 ``broker.connect()`` 만
+    감쌌다면 ``get_broker()`` 가 먼저 raise 해 wrapper 에 도달하지 못하므로 bounded
+    retry 가 무효였다. 따라서 retry 는 **``get_broker()`` 호출 전체**를 감싼다.
+
+    ``get_broker`` 는 connect 실패 시 캐시 미기록 + 세션 cleanup(#2368/#2372)하므로,
+    EGW00133 재시도 시 ``get_broker`` 재호출이 새 adapter build+connect 를 안전하게
+    재수행한다(세션 누수 없음). ``_authenticate`` 자체는 즉시 raise(내부 sleep 없음)
+    이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 성공 시 반환되는 broker 는
+    connect+cache 가 완료된 상태다. 소진 시 마지막 ``TokenRateLimitError`` 를 전파해
+    호출부가 not_ready(reason=EGW00133). EGW00133 외 예외는 즉시 전파(기존 동작 유지).
+
+    ``get_broker`` 의 계약(connect-성공-후-캐시, #2372)은 self-healing 등 전 caller
+    공유이므로 **변경하지 않는다**. retry 는 get_broker 내부가 아니라 본 startup
+    wrapper 한 곳에만 둔다(self-healing 이 get_broker 를 반복 호출 → nested backoff
+    곱셈 재발 차단, T4).
+
+    **잔여 cooldown sleep (#2399 attempt3, per-app_key cooldown at source):** EGW00133
+    수신 시 발급 레이어(``kis._raise_token_rate_limit``)가 app_key cooldown 을 기록하고
+    예외에 ``cooldown_until`` 을 실어 보낸다. 본 wrapper 는 고정 60s 대신 **잔여
+    cooldown**(``cooldown_until - now``)만큼 sleep 한다. 그래야 다음 재시도가 cooldown
+    만료 직후에 단 1회 발급으로 떨어지고, 고정 60s 가 cooldown 경계를 넘겨 재시도가
+    또 cooldown 에 막히는 무력화를 피한다. cooldown_until 미동봉(이론상 경합 만료)이면
+    안전상 ``TOKEN_AUTH_BACKOFF_SECONDS`` 고정값으로 폴백한다.
+
+    최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ~``TOKEN_AUTH_BACKOFF_SECONDS``
+    (≈2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
+    """
+    from datetime import UTC, datetime
+
+    from ante.broker.exceptions import TokenRateLimitError
+    from ante.broker.kis import (
+        DEFAULT_MAX_RETRIES_AUTH,
+        TOKEN_AUTH_BACKOFF_SECONDS,
+    )
+
+    attempt = 0
+    while True:
+        try:
+            return await account_service.get_broker(account_id)
+        except TokenRateLimitError as e:
+            if attempt >= DEFAULT_MAX_RETRIES_AUTH:
+                raise
+            attempt += 1
+            # 잔여 cooldown 만큼 sleep(고정 60s 아님) — cooldown 경계 무력화 방지.
+            # cooldown_until 미동봉/이미 만료면 안전 폴백(고정 backoff).
+            cooldown_until = getattr(e, "cooldown_until", None)
+            if cooldown_until is not None:
+                remaining = (cooldown_until - datetime.now(UTC)).total_seconds()
+                sleep_seconds = max(0.0, remaining)
+            else:
+                sleep_seconds = TOKEN_AUTH_BACKOFF_SECONDS
+            logger.warning(
+                "Broker connect EGW00133(토큰 발급 빈도 제한) — %.0f초(잔여 cooldown) "
+                "후 재시도 %d/%d",
+                sleep_seconds,
+                attempt,
+                DEFAULT_MAX_RETRIES_AUTH,
+            )
+            await asyncio.sleep(sleep_seconds)
+
+
 async def _init_gateway(s: Services) -> None:
     """APIGateway(account_service 주입), StreamIntegration, 종목 동기화."""
     assert s.eventbus is not None
@@ -728,8 +884,12 @@ async def _init_gateway(s: Services) -> None:
             _mark_runtime_ready(s, account.account_id, ReadinessFlag.BROKER)
             continue
         try:
-            broker = await s.account_service.get_broker(account.account_id)
-            await broker.connect()
+            # #2399 T4 (c): startup 단일 cadence — EGW00133 흡수용 bounded retry
+            # (~60s backoff × DEFAULT_MAX_RETRIES_AUTH)를 여기 한 곳에만 둔다.
+            # get_broker 는 cache-miss 시 내부에서 connect 후 성공 시에만 캐시(#2372)
+            # 하므로, EGW00133 은 connect 가 아니라 get_broker 호출 자체에서 전파된다.
+            # 따라서 retry 는 get_broker 호출 전체를 감싼다(#2399 Codex P1).
+            await _get_broker_with_auth_retry(s.account_service, account.account_id)
             connected_count += 1
             # #2397 broker_ready = connect 성공 시점 mark([must_fix F] —
             # get_cached_broker live-poll 아님). #2372 connect-후-캐시 정합.
@@ -739,14 +899,15 @@ async def _init_gateway(s: Services) -> None:
                 account.account_id,
                 account.broker_type,
             )
-        except Exception:
+        except Exception as e:
             # #2397 startup 실패 → broker_ready not_ready(reason). self-healing
             # background loop 가 회복을 무기한 재시도한다.
+            # #2399 T6: EGW00133 은 reason 에 구조적 보존(getattr error_code).
             _mark_runtime_not_ready(
                 s,
                 account.account_id,
                 ReadinessFlag.BROKER,
-                "connect_failed",
+                _connect_failure_reason(e, "connect_failed"),
             )
             logger.warning(
                 "Broker 연결 실패: account=%s — 건너뜀",
@@ -773,8 +934,23 @@ async def _init_gateway(s: Services) -> None:
     # KIS 브로커 계좌의 StreamIntegration 초기화
     for account in accounts:
         if account.broker_type == "kis":
+            # #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가
+            # 된 LIVE 계좌는 여기서 get_broker 를 재호출하지 않는다(EGW00133 토큰
+            # 1/min 재타격 방지 — T4 단일 cadence). self-healing 이 broker 회복 시
+            # 이어받는다(stream 은 broker 회복 후 별도 재초기화 경로 불필요 —
+            # active-trading gate 와 무관, broker 미연결이면 stream 도 무의미).
+            if _broker_not_ready_live(s, account):
+                logger.info(
+                    "StreamIntegration 초기화 skip: account=%s — broker not_ready"
+                    "(self-healing 위임)",
+                    account.account_id,
+                )
+                continue
             try:
-                broker = await s.account_service.get_broker(account.account_id)
+                # broker 연결을 보장(cache-hit no-op / cache-miss connect+cache)한 뒤
+                # StreamIntegration 을 초기화한다. 반환 adapter 자체는 stream init 이
+                # broker_config 로 별도 클라이언트를 구성하므로 사용하지 않는다.
+                await s.account_service.get_broker(account.account_id)
                 broker_config = {**account.credentials, **account.broker_config}
                 await _init_stream_integration(
                     s,
@@ -838,15 +1014,22 @@ async def _init_gateway(s: Services) -> None:
                     account.account_id,
                 )
 
+    # #2399 Codex P2(attempt 2): 후속 broker-backed init 는 broker not_ready 가
+    # 된 LIVE 계좌를 제외한 계좌 집합에만 적용한다(EGW00133 토큰 1/min 재타격 방지
+    # — T4 단일 cadence). 제외된 LIVE 계좌의 후속 flag 는 helper 가 명시
+    # mark_not_ready 하고, broker 회복은 self-healing 이 이어받는다. 면제(virtual/
+    # test)·broker_ready 성공 LIVE 계좌는 그대로 포함된다.
+    broker_init_accounts = _broker_ready_init_accounts(s, accounts)
+
     # Treasury 잔고 동기화 (Broker 연결 이후)
-    await _init_treasury_sync(s, accounts)
+    await _init_treasury_sync(s, broker_init_accounts)
 
     # #1946 hard barrier: 각 계좌의 FillReconcileScheduler.catch_up_once() 를
     # await 완료한 뒤에만 ReconcileScheduler.start()(즉시 run_once 로 position
     # 대사) 를 시작한다. fill 복구가 position reconcile 보다 반드시 선행해야
     # reconciler 가 미복구 ante 체결을 "외부 매수" 로 오분류하지 않는다.
     if connected_count and s.fill_applier and s.order_tracker:
-        await _init_fill_recovery_schedulers(s, accounts)
+        await _init_fill_recovery_schedulers(s, broker_init_accounts)
     else:
         # #2397 D-ACC-09 이중 실패모드 (a): 전역 connected_count==0(또는 fill
         # 의존성 부재)으로 _init_fill_recovery_schedulers 가 미호출 → 전 계좌 키가
@@ -1073,6 +1256,12 @@ async def _init_reconcile_scheduler(s: Services) -> None:
         if _flag_exempt_for_account(ReadinessFlag.RECONCILE, account):
             _mark_runtime_ready(s, account.account_id, ReadinessFlag.RECONCILE)
             continue
+        # #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가 된
+        # LIVE 계좌는 get_broker 재호출 없이 skip(EGW00133 토큰 1/min 재타격 방지
+        # — T4). RECONCILE not_ready 는 _broker_ready_init_accounts 가 이미 mark
+        # 했고, broker 회복 시 self-healing 이 재등록한다.
+        if _broker_not_ready_live(s, account):
+            continue
         if await _register_reconcile_scheduler_for_account(
             s, account, reconciler, interval
         ):
@@ -1250,11 +1439,24 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
         try:
             broker = await s.account_service.get_broker(account_id)
             await broker.connect()
-        except Exception:
+        except Exception as e:
             # 회복 미성공 — not_ready 유지. 다음 burst 에서 재시도(liveness).
+            # #2399 T6: EGW00133 은 reason 에 구조적 보존(getattr error_code).
             _mark_runtime_not_ready(
-                s, account_id, ReadinessFlag.BROKER, "reconnect_failed"
+                s,
+                account_id,
+                ReadinessFlag.BROKER,
+                _connect_failure_reason(e, "reconnect_failed"),
             )
+            # #2399 T4 (b): EGW00133(TokenRateLimitError)은 현재 burst 의 남은
+            # attempt 를 중단(re-raise)하고 다음 interval(60s 토큰 cooldown)에
+            # 위임한다 — burst 당 connect 시도 ≤1회(per-attempt backoff 누적 금지,
+            # 단일 cadence nested-backoff 차단). 다른 transient 는 False 반환으로
+            # 기존 per-attempt backoff 재시도 유지.
+            from ante.broker.exceptions import TokenRateLimitError
+
+            if isinstance(e, TokenRateLimitError):
+                raise
             return False
         # broker connect 성공 — 단, broker_ready mark 는 의존 스케줄러 rebind 를 모두
         # 마친 **뒤**로 지연한다(메타리뷰 P2). 여기서 먼저 mark 하면 아래 rebind await
@@ -1351,6 +1553,14 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
     ready 로 전이한다. ``max_attempts`` 는 **per-burst(연결시도 단위)에만** 적용
     하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되어
     #2395 를 역회귀로 재생산하지 않도록. shutdown 에서 task cancel 로 종료한다.
+
+    #2399 Codex attempt3-b (per-app_key cooldown at source): 같은 app_key 의 여러
+    계좌가 pending 이면, 첫 계좌의 connect 가 EGW00133 으로 cooldown 을 기록한 뒤
+    같은 burst 의 두 번째 계좌 connect 는 cooldown 내라 발급 레이어가 **HTTP 미호출·
+    즉시 ``TokenRateLimitError``** 로 raise → 아래 ``except TokenRateLimitError`` 가
+    그 계좌의 burst 도 break 한다(토큰 1/min 재타격 없음). interval(60s, defaults.py)
+    ≥ cooldown(``TOKEN_RATE_LIMIT_COOLDOWN_SECONDS``=60s)이라 다음 burst 시점에는
+    cooldown 이 만료돼 발급이 정상 재개된다(self-healing 정상 동작과 정합).
     """
     interval = 60
     max_per_burst = 5
@@ -1382,6 +1592,8 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                     trading_mode=a.trading_mode,
                 )
             ]
+            from ante.broker.exceptions import TokenRateLimitError
+
             for account in pending:
                 # per-burst bounded 재시도(계좌 lifetime 은 무제한).
                 for attempt in range(max_per_burst):
@@ -1389,6 +1601,19 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                         recovered = await _self_healing_recover_account(s, account)
                     except asyncio.CancelledError:
                         raise
+                    except TokenRateLimitError:
+                        # #2399 T4 (b): EGW00133 — 이 계좌의 현재 burst 남은 attempt 를
+                        # 중단(break)하고 다음 interval(60s 토큰 cooldown)에 위임한다.
+                        # per-attempt backoff 를 누적하지 않아 burst 당 connect 시도
+                        # ≤1회 → startup wrapper(단일 cadence)와 곱해지지 않는다
+                        # (5×120s 누적 차단). 다음 burst 에서 자연히 재시도(liveness).
+                        logger.info(
+                            "Readiness self-healing EGW00133 — account=%s, "
+                            "다음 interval(%ds)에 위임(burst break)",
+                            account.account_id,
+                            interval,
+                        )
+                        break
                     except Exception:
                         # 회복 시도 중 예기치 못한 예외(스케줄러 생성자·config 접근·
                         # reconciler 빌드 등 try 밖 경로)가 background loop 를 영구
@@ -1402,9 +1627,10 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
                         recovered = False
                     if recovered:
                         break
-                    # attempt 간 지수 backoff(EGW00133 ~1/min 토큰 cooldown 정렬,
-                    # Codex P2). 즉시 재인증을 몰아넣어 KIS 토큰 압박을 악화시키지
-                    # 않도록 한다. 마지막 attempt 뒤에는 burst interval 이 대신한다.
+                    # attempt 간 지수 backoff(다른 transient 실패용). EGW00133 은 위
+                    # break 로 여기 도달하지 않는다(#2399 T4 (b)). 즉시 재인증을
+                    # 몰아넣어 KIS 압박을 악화시키지 않도록 한다. 마지막 attempt
+                    # 뒤에는 burst interval 이 대신한다.
                     if attempt < max_per_burst - 1:
                         await asyncio.sleep(
                             min(backoff_base * (2**attempt), backoff_max)
@@ -1550,11 +1776,27 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
     붕괴), 면제 계좌는 순회 대상에서 제외한다(non-exempt/live connected 계좌만
     대상). 면제 계좌의 dummy exchange 가 KRX 등 실 exchange 마스터 적재를
     선점하던 #2385 회귀도 동일하게 차단된다.
+
+    #2399 Codex attempt3-a: startup connect 에서 broker not_ready 가 된 비면제
+    (LIVE) 계좌도 순회 대상에서 제외한다(``_broker_not_ready_live``). 그 계좌에
+    ``get_broker`` 를 다시 호출하면 EGW00133 계좌의 KIS 토큰 1/min 제한을 startup
+    단일 cadence(T4) 밖에서 또 두드리기 때문이다. (A) per-app_key cooldown 이
+    최종 안전망으로 그 재타격을 source 에서 즉시 raise 로 막지만, 불필요한 발급
+    시도 자체를 줄이는 본 필터를 함께 둬 defense-in-depth 로 한다. per-account
+    try/except 가 not_ready 계좌의 예외도 흡수하므로 전체 sync 를 깨지 않는다.
     """
     synced_exchanges: set[str] = set()
     for account in accounts:
         if _broker_ready_exempt(account):
             # 면제(virtual/test) 계좌는 broker 미연결 — get_broker 재노출 차단.
+            continue
+        if _broker_not_ready_live(s, account):
+            # broker not_ready LIVE — get_broker 재타격 차단(EGW00133 토큰 1/min).
+            # cooldown(A) 가 최종 안전망이나 불필요 발급 시도 자체를 줄인다(T4).
+            logger.info(
+                "종목 동기화 skip: account=%s — broker not_ready(self-healing 위임)",
+                account.account_id,
+            )
             continue
         if account.exchange in synced_exchanges:
             continue

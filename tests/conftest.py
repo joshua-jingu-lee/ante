@@ -47,6 +47,26 @@ def _set_encryption_key():
 
 
 @pytest.fixture(autouse=True)
+def _reset_kis_token_state():
+    """매 테스트 전후 KIS module-level 토큰 캐시/lock/cooldown 초기화 (#2399).
+
+    글로벌 격리(메타 P2): EGW00133 ``_token_cooldowns`` 상태가 테스트 간 누출되면
+    KIS 토큰을 건드리는 후속 테스트의 발급이 cooldown 내로 오판돼 flaky 가 된다.
+    기존엔 토큰 single-flight/backoff 테스트 2개 파일에만 reset autouse fixture 가
+    있어 cross-test 오염 위험이 있었으므로, 전 테스트가 공유하는 본 글로벌 conftest
+    autouse fixture 로 승격해 ``_token_cache``/``_token_locks``/``_token_cooldowns``
+    를 매 테스트 경계에서 초기화한다. closed event loop 에 묶인 Lock 재사용(T1
+    closed-loop) 방지도 겸한다. ``ante.broker.kis`` 는 import 가드 안에서 안전하게
+    lazy import 한다(collection 시 부작용 회피).
+    """
+    from ante.broker.kis import _reset_token_cache
+
+    _reset_token_cache()
+    yield
+    _reset_token_cache()
+
+
+@pytest.fixture(autouse=True)
 def _sync_boundary_cleanup():
     """모든 테스트(sync + async) 경계에서 ``patch.stopall`` 보장.
 

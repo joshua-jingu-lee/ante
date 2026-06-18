@@ -856,20 +856,9 @@ def test_self_healing_loop_backs_off_between_attempts() -> None:
 # ── broker_ready connect 시점 mark (init_gateway 발췌 경로) ─────────────────
 
 
-@pytest.mark.asyncio
-async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """_init_gateway connect 루프: LIVE 성공→broker_ready, virtual→면제 no-op ready,
-    LIVE 실패→not_ready + get_broker 미호출(virtual)."""
-    s = _services(brokers={"live-fail": RuntimeError("EGW00133")})
+def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """_init_gateway connect 루프만 검증하도록 후속 단계·게이트웨이 더블을 깐다."""
 
-    accounts = [
-        _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
-        _account("live-ok"),
-        _account("live-fail"),
-    ]
-    s.account_service.list = AsyncMock(return_value=accounts)
-
-    # _init_gateway 의 connect 루프만 검증하기 위해 후속 단계를 무력화.
     async def _noop(*a: Any, **k: Any) -> None:
         return None
 
@@ -912,6 +901,21 @@ async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) 
     s.virtual_executor = SimpleNamespace(_gateway=None)
     s.bot_manager = SimpleNamespace(_context_factory=None)
 
+
+@pytest.mark.asyncio
+async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_init_gateway connect 루프: LIVE 성공→broker_ready, virtual→면제 no-op ready,
+    LIVE 실패→not_ready + get_broker 미호출(virtual)."""
+    s = _services(brokers={"live-fail": RuntimeError("conn refused")})
+
+    accounts = [
+        _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL),
+        _account("live-ok"),
+        _account("live-fail"),
+    ]
+    s.account_service.list = AsyncMock(return_value=accounts)
+    _stub_init_gateway_followups(s, monkeypatch)
+
     await main_module._init_gateway(s)
 
     # virtual/test: 면제 no-op ready, get_broker 미호출(KIS 재노출 차단).
@@ -927,6 +931,350 @@ async def test_init_gateway_broker_ready_marks(monkeypatch: pytest.MonkeyPatch) 
     # 면제 계좌 broker 는 connect 단계에서 조회되지 않아야 한다.
     connect_ids = {c.args[0] for c in s.account_service.get_broker.call_args_list}
     assert "test" not in connect_ids
+
+
+# ── #2399 Codex P1: startup get_broker EGW00133 bounded retry 회귀 락 ────────
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_get_broker_egw00133_exhausts_not_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P1 회귀 락: startup 의 get_broker() 가 (내부 connect 로)
+    EGW00133 을 던지면 _init_gateway 가 get_broker 를 **bounded retry**(~60s backoff
+    × DEFAULT_MAX_RETRIES_AUTH)한 뒤, 소진 시 not_ready(reason="EGW00133").
+
+    이전엔 retry 가 broker.connect() 만 감싸 get_broker() 가 먼저 raise → retry
+    미적용으로 즉시 not_ready 였다. retry 가 get_broker 호출 전체를 감싸야 한다."""
+    from ante.broker.exceptions import TokenRateLimitError
+    from ante.broker.kis import DEFAULT_MAX_RETRIES_AUTH
+
+    s = _services(brokers={"live-1": TokenRateLimitError("x", error_code="EGW00133")})
+    s.account_service.list = AsyncMock(return_value=[_account("live-1")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    await main_module._init_gateway(s)
+
+    # bounded retry: 최초 1 + 재시도 DEFAULT_MAX_RETRIES_AUTH 회 get_broker 호출.
+    assert s.account_service.get_broker.await_count == DEFAULT_MAX_RETRIES_AUTH + 1
+    # ~60s backoff 가 재시도 횟수만큼 관측(단일 cadence, startup 한 곳).
+    assert len(slept) == DEFAULT_MAX_RETRIES_AUTH
+    assert all(d == 60 for d in slept)
+    # 소진 → not_ready + reason 에 EGW00133 구조적 보존(T6).
+    assert not s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+    assert s.runtime_readiness.get_reason("live-1", ReadinessFlag.BROKER) == "EGW00133"
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_get_broker_egw00133_retry_then_ready(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P1: startup get_broker 가 2번째 attempt 에서 성공하면 broker_ready.
+
+    첫 attempt EGW00133 흡수(~60s backoff 1회) 후 둘째 attempt 에서 get_broker 성공."""
+    from ante.broker.exceptions import TokenRateLimitError
+
+    connected_broker = AsyncMock()
+    connected_broker.connect = AsyncMock()
+    state = {"fails": 1}
+
+    async def _get_broker(account_id: str) -> Any:
+        if state["fails"] > 0:
+            state["fails"] -= 1
+            raise TokenRateLimitError("x", error_code="EGW00133")
+        return connected_broker
+
+    s = _services()
+    s.account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    s.account_service.list = AsyncMock(return_value=[_account("live-1")])
+    _stub_init_gateway_followups(s, monkeypatch)
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    await main_module._init_gateway(s)
+
+    # 1 실패 + 1 성공 = get_broker 2회, backoff 1회.
+    assert s.account_service.get_broker.await_count == 2
+    assert slept == [60]
+    # 둘째 attempt 성공 → broker_ready.
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+
+
+# ── #2399 Codex P2(attempt 2): 후속 broker-backed init 에서 not_ready 계좌 skip ─
+
+
+def test_broker_ready_init_accounts_excludes_not_ready_live() -> None:
+    """broker not_ready LIVE 계좌는 후속 init 대상에서 제외되고, 후속 flag 가
+    mark_not_ready(self-healing 픽업)된다. 면제·broker_ready LIVE 는 유지."""
+    s = _services()
+    not_ready_live = _account("live-down")
+    ready_live = _account("live-ok")
+    virtual = _account("kv", trading_mode=TradingMode.VIRTUAL)
+    test_acc = _account("test", broker_type="test", trading_mode=TradingMode.VIRTUAL)
+    # connect 단계 결과 모사: live-down 만 broker not_ready, live-ok 는 ready.
+    s.runtime_readiness.mark_not_ready("live-down", ReadinessFlag.BROKER, "EGW00133")
+    s.runtime_readiness.mark_ready("live-ok", ReadinessFlag.BROKER)
+    # virtual/test 는 broker 면제(no-op ready).
+    s.runtime_readiness.mark_ready("kv", ReadinessFlag.BROKER)
+    s.runtime_readiness.mark_ready("test", ReadinessFlag.BROKER)
+
+    kept = main_module._broker_ready_init_accounts(
+        s, [not_ready_live, ready_live, virtual, test_acc]
+    )
+
+    kept_ids = [a.account_id for a in kept]
+    # broker not_ready LIVE 만 제외, 나머지(broker_ready LIVE·virtual·test) 유지.
+    assert kept_ids == ["live-ok", "kv", "test"]
+    # 제외된 LIVE 의 후속 flag 는 명시 not_ready(self-healing 픽업·fail-closed).
+    for flag in (
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.FILL_RECONCILE,
+        ReadinessFlag.RECONCILE,
+    ):
+        assert not s.runtime_readiness.is_ready("live-down", flag)
+        assert (
+            s.runtime_readiness.get_reason("live-down", flag)
+            == "broker_not_ready_startup"
+        )
+
+
+def test_broker_not_ready_live_helper_semantics() -> None:
+    """_broker_not_ready_live: broker not_ready LIVE 만 True, virtual/test·
+    broker_ready LIVE 는 False. registry 미주입이면 항상 False(기존 동작 보존)."""
+    s = _services()
+    s.runtime_readiness.mark_not_ready("live-down", ReadinessFlag.BROKER, "EGW00133")
+    s.runtime_readiness.mark_ready("live-ok", ReadinessFlag.BROKER)
+
+    assert main_module._broker_not_ready_live(s, _account("live-down")) is True
+    assert main_module._broker_not_ready_live(s, _account("live-ok")) is False
+    # virtual/test 는 broker 면제 → 항상 False(broker 무관 단계 보존).
+    assert (
+        main_module._broker_not_ready_live(
+            s, _account("kv", trading_mode=TradingMode.VIRTUAL)
+        )
+        is False
+    )
+    assert (
+        main_module._broker_not_ready_live(
+            s, _account("t", broker_type="test", trading_mode=TradingMode.VIRTUAL)
+        )
+        is False
+    )
+    # registry 미주입(partial wiring) → False(전 계좌 처리 보존).
+    s.runtime_readiness = None
+    assert main_module._broker_not_ready_live(s, _account("live-down")) is False
+
+
+def _stub_init_gateway_infra_only(s: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """treasury/fill/reconcile 는 **실제 실행**하고, 주변 인프라(stream·instruments·
+    context·outbox·daily·self-healing)만 noop 으로 깐다. P2 회귀(후속 broker-backed
+    init 의 get_broker 추가 호출 여부)를 end-to-end 로 관측하기 위함."""
+
+    async def _noop(*a: Any, **k: Any) -> None:
+        return None
+
+    def _noop_sync(*a: Any, **k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(main_module, "_sync_instruments", _noop)
+    monkeypatch.setattr(main_module, "_init_stream_integration", _noop)
+    monkeypatch.setattr(main_module, "_init_context_factory", _noop_sync)
+    monkeypatch.setattr(main_module, "_init_fill_outbox_publisher", _noop)
+    monkeypatch.setattr(main_module, "_init_daily_report_scheduler", _noop)
+    monkeypatch.setattr(main_module, "_start_readiness_self_healing", _noop_sync)
+
+    class _FakeStopOrderManager:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    class _FakeGateway:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            pass
+
+    import ante.gateway as gateway_mod
+    import ante.gateway.stop_order as stop_order_mod
+
+    monkeypatch.setattr(gateway_mod, "APIGateway", _FakeGateway)
+    monkeypatch.setattr(stop_order_mod, "StopOrderManager", _FakeStopOrderManager)
+    s.performance_tracker = None
+    s.trade_recorder = None
+    s.position_history = None
+    s.fill_outbox_publisher = None
+    s.virtual_executor = SimpleNamespace(_gateway=None)
+    s.bot_manager = SimpleNamespace(_context_factory=None)
+    # treasury 는 실제 _init_treasury_sync 가 쓰므로 reserve-price-resolver 주입
+    # 블록(_init_gateway 후반)도 통과하도록 더블에 메서드를 추가한다.
+    existing_treasury = s.treasury_manager
+    s.treasury_manager = SimpleNamespace(
+        get=existing_treasury.get,
+        set_order_reserve_price_resolver=lambda account_id, resolver: None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_not_ready_live_no_extra_get_broker_in_followups(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P2(attempt 2) 핵심 회귀 락: startup connect 에서 EGW00133 소진으로
+    broker not_ready 가 된 LIVE 계좌는, 후속 broker-backed init(treasury LIVE sync·
+    fill recovery·reconcile·stream)에서 ``get_broker`` 를 **추가 호출하지 않는다**.
+
+    startup 전체에서 그 계좌 get_broker 시도는 connect 단계 bounded retry 횟수뿐
+    (후속 0). 이전엔 후속 단계가 또 get_broker 를 호출해 EGW00133 1/min 제한을
+    재타격했다(T4 단일 cadence 위반).
+
+    connected_count>0 을 만들기 위해 정상 LIVE(live-ok)도 1개 둔다(이게 있어야
+    fill/reconcile init 의 connected_count 가드가 통과해 후속 단계가 실행된다).
+    """
+    from ante.broker.exceptions import TokenRateLimitError
+    from ante.broker.kis import DEFAULT_MAX_RETRIES_AUTH
+
+    ok_broker = AsyncMock()
+    ok_broker.connect = AsyncMock()
+
+    async def _get_broker(account_id: str) -> Any:
+        if account_id == "live-down":
+            raise TokenRateLimitError("x", error_code="EGW00133")
+        return ok_broker
+
+    s = _services()
+    s.account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    s.account_service.list = AsyncMock(
+        return_value=[_account("live-ok"), _account("live-down")]
+    )
+    _stub_init_gateway_infra_only(s, monkeypatch)
+
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    await main_module._init_gateway(s)
+
+    # live-down get_broker 호출 = connect 단계 bounded retry(1 + MAX_RETRIES)뿐.
+    # 후속 단계(treasury/fill/reconcile/stream)는 추가 호출 0(P2 핵심).
+    down_calls = [
+        c
+        for c in s.account_service.get_broker.call_args_list
+        if c.args[0] == "live-down"
+    ]
+    assert len(down_calls) == DEFAULT_MAX_RETRIES_AUTH + 1, (
+        f"live-down get_broker 후속 추가 호출 발생(T4 위반): {len(down_calls)}건"
+    )
+    # backoff 도 단일 cadence(connect 단계)뿐.
+    assert len(slept) == DEFAULT_MAX_RETRIES_AUTH
+    # live-down 은 broker not_ready 유지 + 후속 flag 도 not_ready(self-healing 위임).
+    assert not s.runtime_readiness.is_ready("live-down", ReadinessFlag.BROKER)
+    assert not s.runtime_readiness.is_ready("live-down", ReadinessFlag.TREASURY_SYNC)
+    assert not s.runtime_readiness.is_ready("live-down", ReadinessFlag.FILL_RECONCILE)
+    assert not s.runtime_readiness.is_ready("live-down", ReadinessFlag.RECONCILE)
+    # not_ready LIVE 는 broker-backed 스케줄러 미등록(self-healing 이 회복 시 등록).
+    assert "live-down" not in s.fill_schedulers
+    assert "live-down" not in s.reconcile_schedulers
+
+    # broker_ready 성공 LIVE(live-ok)는 후속 init 정상 처리(skip 아님).
+    assert s.runtime_readiness.is_ready("live-ok", ReadinessFlag.BROKER)
+    assert s.runtime_readiness.is_ready("live-ok", ReadinessFlag.TREASURY_SYNC)
+    assert s.runtime_readiness.is_ready("live-ok", ReadinessFlag.FILL_RECONCILE)
+    assert s.runtime_readiness.is_ready("live-ok", ReadinessFlag.RECONCILE)
+    assert "live-ok" in s.fill_schedulers
+    assert "live-ok" in s.reconcile_schedulers
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_virtual_treasury_unaffected_by_not_ready_live(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P2: broker not_ready LIVE 계좌가 있어도 virtual 계좌의 treasury
+    sync(broker=None)는 영향 없이 계속 처리된다(면제 계좌는 _broker_not_ready_live
+    가 항상 False → 후속 init 대상 유지)."""
+    from ante.broker.exceptions import TokenRateLimitError
+
+    async def _get_broker(account_id: str) -> Any:
+        if account_id == "live-down":
+            raise TokenRateLimitError("x", error_code="EGW00133")
+        broker = AsyncMock()
+        broker.connect = AsyncMock()
+        return broker
+
+    s = _services()
+    s.account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    s.account_service.list = AsyncMock(
+        return_value=[
+            _account("live-ok"),
+            _account("live-down"),
+            _account("kv", trading_mode=TradingMode.VIRTUAL),
+        ]
+    )
+    _stub_init_gateway_infra_only(s, monkeypatch)
+    monkeypatch.setattr(main_module.asyncio, "sleep", AsyncMock())
+
+    await main_module._init_gateway(s)
+
+    # virtual 계좌 treasury sync 는 정상(broker 무관, not_ready LIVE 영향 없음).
+    assert s.runtime_readiness.is_ready("kv", ReadinessFlag.TREASURY_SYNC)
+    # virtual 은 broker 면제 get_broker 미호출(treasury VIRTUAL 분기는 broker=None).
+    kv_calls = [
+        c for c in s.account_service.get_broker.call_args_list if c.args[0] == "kv"
+    ]
+    assert kv_calls == []
+
+
+@pytest.mark.asyncio
+async def test_init_gateway_not_ready_live_picked_up_by_self_healing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#2399 Codex P2: startup 에서 skip 된 not_ready LIVE 계좌를 self-healing 이
+    broker 회복 시 픽업해 treasury/fill/reconcile 을 재등록한다(#2398 경로 정합).
+
+    startup 직후 상태(broker/treasury/fill/reconcile 모두 not_ready)에서
+    _self_healing_recover_account 를 직접 구동(broker 회복 성공)하면 전 flag 가
+    ready 로 전이하고 스케줄러가 등록됨을 잠근다.
+    """
+    s = _services()  # 기본 get_broker = connect 성공 broker(회복 가능).
+    account = _account("live-down")
+    # startup skip 결과 상태 재현: 후속 flag 까지 모두 not_ready.
+    s.runtime_readiness.mark_not_ready("live-down", ReadinessFlag.BROKER, "EGW00133")
+    s.runtime_readiness.mark_not_ready(
+        "live-down", ReadinessFlag.TREASURY_SYNC, "broker_not_ready_startup"
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-down", ReadinessFlag.FILL_RECONCILE, "broker_not_ready_startup"
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-down", ReadinessFlag.RECONCILE, "broker_not_ready_startup"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    # broker 회복 → 전 flag ready 전이 + 스케줄러 등록(#2398 재등록 경로).
+    assert s.runtime_readiness.is_ready("live-down", ReadinessFlag.BROKER)
+    assert s.runtime_readiness.is_ready("live-down", ReadinessFlag.TREASURY_SYNC)
+    assert s.runtime_readiness.is_ready("live-down", ReadinessFlag.FILL_RECONCILE)
+    assert s.runtime_readiness.is_ready("live-down", ReadinessFlag.RECONCILE)
+    assert "live-down" in s.fill_schedulers
+    assert "live-down" in s.reconcile_schedulers
 
 
 # ── #2398 gate reader allowlist + SSOT-위반 금지 ───────────────────────────

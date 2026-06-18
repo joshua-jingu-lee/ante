@@ -18,12 +18,13 @@ import logging
 from abc import abstractmethod
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 
 from ante.broker.base import BrokerAdapter
 from ante.broker.circuit_breaker import CircuitBreaker
 from ante.broker.error_codes import (
     PERMANENT_MSG_CODES,
+    TOKEN_RATE_LIMIT_MSG_CODE,
     TRANSIENT_MSG_CODES,
     get_error_message,
     is_retryable_http_status,
@@ -36,6 +37,7 @@ from ante.broker.exceptions import (
     ModifyOrgnoUnavailableError,
     OrderNotFoundError,
     RateLimitError,
+    TokenRateLimitError,
 )
 from ante.broker.fill_scheduler import business_date_kst
 from ante.broker.models import CommissionInfo
@@ -59,6 +61,30 @@ DEFAULT_TIMEOUT_AUTH = 10
 
 # Backoff
 DEFAULT_BACKOFF_BASE = 1.0
+
+# 토큰 발급 빈도 제한(EGW00133) 흡수용 backoff 초 (#2399).
+# KIS 공식 "접근토큰 발급 1분 1회". startup connect 루프(main._init_gateway)가
+# 부팅 1회 경로에서만 이 backoff 를 소비한다(단일 cadence — adapter._authenticate 는
+# 즉시 raise, self-healing 은 interval 60s 위임). config 노출하지 않는 adapter-local
+# 상수다(global defaults 변경 금지 — test_kis_error_handling.py:268 가 broker retry
+# key 부재를 잠금).
+TOKEN_AUTH_BACKOFF_SECONDS = 60.0
+
+# EGW00133 수신 시 해당 app_key 의 토큰 발급을 차단하는 cooldown 초
+# (#2399 attempt3 + 메타 감사 — per-app_key cooldown at source).
+# KIS 공식 "접근토큰 발급 1분 1회"에 정렬한 source-level cooldown 이다. EGW00133 을
+# 한 번 받으면 그 app_key 의 발급 경로(startup/self-healing/runtime/IPC) 전부가 이
+# cooldown 동안 **HTTP 미호출**로 즉시 ``TokenRateLimitError`` 를 raise 한다 —
+# get_broker→토큰 재타격을 per-call-site 필터가 아니라 발급 레이어 단일 chokepoint
+# 에서 닫는다(단일 cadence T4 의 근본 보장). self-healing interval(60s) ≥ 본
+# cooldown(60s) 이라 self-healing 정상 동작과도 정합한다(다음 burst 에서 만료).
+TOKEN_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
+
+# 토큰 cache hit 시 near-expiry 재발급 여유(분). ``_ensure_authenticated`` 의 "만료
+# 5분 전 재발급" 기준(아래 ``_ensure_authenticated``)과 **동일**해야 한다 — shared
+# 캐시 hit 판정도 near-expiry 토큰을 miss 로 보고 재발급한다(near-expiry 재사용 회귀
+# 방지, #2399 T2).
+_TOKEN_EXPIRY_MARGIN_MINUTES = 5
 
 # Circuit Breaker
 DEFAULT_CB_FAILURE_THRESHOLD = 5
@@ -123,6 +149,151 @@ _PSBL_ORDER_FIELD_MAX_BUYABLE_QTY = "max_buy_qty"
 
 # 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
+
+
+# ── OAuth2 토큰 single-flight + in-process shared 캐시 (#2399) ──────────
+#
+# 동일 ``app_key`` 를 공유하는 다중 adapter(KIS 국내/해외 분리 D-ACC-02, 같은
+# app_key)가 동시에 토큰을 발급하면 KIS 가 ``EGW00133`` (접근토큰 발급 1분 1회)을
+# 돌려준다. 이를 막기 위해 토큰 캐시와 발급 lock 을 **module-level(프로세스 전역)**
+# 으로 공유하고, 발급을 **app_key 단위** asyncio.Lock 으로 직렬화한다.
+#
+# - lock key = **app_key** (account_id 아님!). account_id 로 잡으면 동일 app_key
+#   다중 adapter 가 미수렴하여 ``EGW00133`` 이 잔존한다(회귀 락 — T1).
+# - 캐시 hit 시 발급 skip, double-check 로 대기 중 타 코루틴이 발급한 토큰 재사용.
+#
+# known-limitation (T7, v1): 본 캐시/lock 은 **in-process(단일 프로세스)** 한정이다.
+# 멀티프로세스(CLI 8 site 가 각각 fresh AccountService 생성) 토큰 공유는 v1 미해결 —
+# CLI cold-path 다발 동시 실행 시 ``EGW00133`` 잔존 가능. 영속(파일/DB) 토큰 스토어는
+# 후속 후보(YAGNI, spec 07 OAuth2 §(7) anchor).
+#
+# 캐시 키 vs lock/cooldown 키 분리 (#2399 attempt4 P2 — config fingerprint):
+# - ``_token_cache`` 키 = **(app_key, app_secret, env)** config fingerprint.
+#   credentials(app_secret)/환경(모의 vs 실전 base_url)이 바뀌면 다른 키 → cache
+#   miss → ``connect()``/``_authenticate()`` 가 새 토큰을 **실제 발급**하여 새 설정을
+#   검증한다. 같은 app_key 기존 토큰을 hydrate 해 잘못된 secret/환경 전환을 성공한
+#   재연결로 오판하던 회귀를 차단한다(``AccountService._reconnect_broker`` 가
+#   변경된 ``credentials``/``broker_config`` 로 새 어댑터 ``connect()`` 를 호출하는
+#   경로 보호). **동일 config(같은 app_key+secret+env) 공유 어댑터(국내/해외)는 같은
+#   키 → single-flight 수렴·토큰 공유**(원래 #2399 목표 보존).
+# - ``_token_locks`` / ``_token_cooldowns`` 키 = **app_key 유지**. single-flight
+#   직렬화와 EGW00133(접근토큰 발급 1분 1회) cooldown 은 KIS rate-limit 단위인
+#   **app_key 당**이라 secret/환경 무관하다. config fingerprint 로 좁히면 같은
+#   app_key·다른 config 동시 발급이 rate-limit 을 공유하지 못해 EGW00133 잔존
+#   위험이 생긴다(T1 lock=app_key / T4 cooldown=app_key 회귀 락).
+_TokenCacheKey = tuple[str, str, str]
+"""(app_key, app_secret, env) config fingerprint — ``_token_cache`` 키 타입."""
+
+_token_cache: dict[_TokenCacheKey, tuple[str, datetime]] = {}
+"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (#2399 T2).
+
+키는 ``(app_key, app_secret, env)`` 다(``env`` = 모의/실전 구분). 같은 config 는 같은
+키로 single-flight 수렴·토큰 공유, 다른 secret/환경은 다른 키로 cache miss → 재발급
+(config 변경 재검증, attempt4 P2)."""
+
+_token_locks: dict[str, asyncio.Lock] = {}
+"""app_key → 발급 직렬화 Lock (#2399 T1, lock key=app_key — rate-limit 단위)."""
+
+_token_cooldowns: dict[str, datetime] = {}
+"""app_key → cooldown_until (UTC) — EGW00133 source-level cooldown (#2399).
+
+EGW00133(접근토큰 발급 1분 1회)을 받으면 ``_raise_token_error`` 가 ``app_key`` 에
+``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_authenticate`` 는
+유효 캐시 hit(T2)이 아닌 발급 경로에서 lock 밖 fast-path + lock 안 double-check 로
+cooldown 을 확인해, cooldown 내면 **HTTP 미호출·즉시 ``TokenRateLimitError``** 를
+raise 한다. 모든 get_broker→토큰 발급 경로(startup/self-healing/runtime/IPC)가 이
+단일 chokepoint 를 존중하므로 per-call-site 필터 없이 단일 cadence(T4)가 보장된다.
+T2 불변: 유효 캐시 토큰 read 는 cooldown 과 무관(hydrate 먼저)하다."""
+
+
+# lock dict 의 lazy 생성 경합(첫 Lock 생성 race)을 막는 동기 guard.
+# ``_get_token_lock`` 이 ``setdefault`` 로 원자적으로 Lock 을 보장한다 — 동기 구간
+# 이라 코루틴 yield 가 없어 race 가 없으나, 의도를 명시한다(T1 lock dict race).
+def _get_token_lock(app_key: str) -> asyncio.Lock:
+    """app_key 별 발급 Lock 을 lazy 생성/반환 (동기 구간, race-free).
+
+    ``dict.setdefault`` 는 GIL 하 단일 bytecode 로 원자적이고 await 가 없어 코루틴
+    yield 가 발생하지 않으므로, 동시 호출에서도 동일 app_key 는 **하나의** Lock 으로
+    수렴한다(#2399 T1 lock dict 생성 race 원자화).
+    """
+    return _token_locks.setdefault(app_key, asyncio.Lock())
+
+
+def _reset_token_cache() -> None:
+    """module-level 토큰 캐시/lock/cooldown dict 초기화 (#2399, 테스트 격리용).
+
+    pytest-asyncio auto mode 에서 이전 테스트의 closed event loop 에 묶인 Lock 이
+    재사용되는 위험(T1 closed-loop)을 차단하기 위해, autouse fixture 가 매 테스트
+    전후로 본 helper 를 호출한다. 프로덕션 경로는 호출하지 않는다.
+
+    #2399 attempt3/메타: ``_token_cooldowns`` 도 함께 clear 한다. EGW00133 cooldown
+    상태가 테스트 간 누출되면 후속 테스트의 발급이 cooldown 내로 오판돼 flaky 가
+    되므로, 글로벌 conftest autouse fixture 가 본 helper 로 cooldown 까지 초기화한다.
+    """
+    _token_cache.clear()
+    _token_locks.clear()
+    _token_cooldowns.clear()
+
+
+def _token_cooldown_until(app_key: str) -> datetime | None:
+    """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None`` (#2399 attempt3).
+
+    startup wrapper(``main._get_broker_with_auth_retry``)가 잔여 cooldown
+    (``cooldown_until - now``)만큼 sleep 하기 위해 조회한다. 만료된 cooldown 은
+    ``None`` 으로 보고(자동 만료) 다음 발급을 허용한다.
+    """
+    until = _token_cooldowns.get(app_key)
+    if until is None:
+        return None
+    if datetime.now(UTC) >= until:
+        return None
+    return until
+
+
+def _record_token_cooldown(app_key: str) -> datetime:
+    """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환 (#2399 attempt3).
+
+    ``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_raise_token_error``
+    가 ``TokenRateLimitError`` raise **직전** 호출한다. cooldown 내 차단 경로
+    (``_authenticate`` fast-path/double-check)는 기존 cooldown 을 **연장하지 않고**
+    그대로 둔다(아래 ``_raise_token_rate_limit`` 참조).
+    """
+    until = datetime.now(UTC) + timedelta(seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
+    _token_cooldowns[app_key] = until
+    return until
+
+
+def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
+    """EGW00133 ``TokenRateLimitError`` raise (#2399 attempt3, cooldown_until 동봉).
+
+    HTTP 발급에서 EGW00133 을 받은 경로(``_raise_token_error``, ``record=True`` —
+    새 cooldown 기록)와 cooldown 내 발급 차단 경로(``_authenticate`` fast-path/
+    double-check, ``record=False`` — 기존 cooldown 존중·연장 금지)가 동일한 raise
+    동작을 공유한다(source-level 단일 chokepoint). 예외에 잔여 cooldown 만료시각
+    (``cooldown_until``)을 실어 startup wrapper 가 잔여만큼 sleep 하게 한다.
+    """
+    if record:
+        until: datetime | None = _record_token_cooldown(app_key)
+    else:
+        # cooldown 내 차단 — 기존 만료시각을 그대로 노출(연장 금지). 경합으로 이미
+        # 만료됐으면(드묾) 새로 기록하지 않고 None 을 실어 보낸다(다음 발급 허용).
+        until = _token_cooldown_until(app_key)
+    msg = get_error_message(TOKEN_RATE_LIMIT_MSG_CODE)
+    raise TokenRateLimitError(
+        f"토큰 발급 빈도 제한 ({TOKEN_RATE_LIMIT_MSG_CODE}): {msg}",
+        error_code=TOKEN_RATE_LIMIT_MSG_CODE,
+        cooldown_until=until,
+    )
+
+
+def _is_cached_token_fresh(expires_at: datetime, *, now: datetime) -> bool:
+    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (#2399 T2).
+
+    ``_ensure_authenticated`` 의 "만료 5분 전 재발급" 기준과 **동일**하다 —
+    near-expiry 토큰은 hit 이 아니라 miss 로 보고 재발급한다.
+    """
+    return now < expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
+
 
 # 취소(order-rvsecncl) 시 전송할 KRX_FWDG_ORD_ORGNO 캐시 상한.
 # 어댑터 인스턴스(=계좌)당 미체결 주문 수를 넉넉히 덮으면서 무한 증가를 막는다.
@@ -401,7 +572,105 @@ class KISBaseAdapter(BrokerAdapter):
     # ── 인증 ───────────────────────────────────────
 
     async def _authenticate(self) -> None:
-        """OAuth2 접근 토큰 발급."""
+        """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown (#2399).
+
+        절차 (T1/T2/T4 source-level cooldown):
+        1. **캐시 read**: module-level ``_token_cache`` 에 본 어댑터의 config
+           fingerprint(app_key+secret+env, attempt4 P2) 신선한 토큰(near-expiry 5분
+           여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환. config 가 바뀐
+           재연결은 다른 키라 cache miss → 새 발급으로 새 설정을 검증한다.
+           **유효 캐시 read 는 cooldown 무영향**(T2 — hydrate 를 cooldown 체크보다
+           먼저 둔다).
+        2. **cooldown fast-path(lock 밖)**: cache miss 면 ``_token_cooldowns`` 를
+           확인해 cooldown 내면 **HTTP 미호출·즉시 ``TokenRateLimitError``** raise
+           (get_broker→토큰 재타격 source-level 차단, T4 단일 cadence).
+        3. **app_key lock** 획득(account_id 아님 — 동일 app_key 다중 adapter 수렴).
+        4. **double-check(캐시)**: lock 대기 중 타 코루틴이 발급했으면 재사용(skip).
+        5. **cooldown double-check(lock 안)**: lock 대기 중 타 코루틴이 EGW00133 으로
+           cooldown 을 기록했을 수 있으므로 한 번 더 확인 → cooldown 내면 즉시 raise.
+        6. **발급 1회**: HTTP 호출 → 캐시 populate → 인스턴스 hydrate. 발급이
+           EGW00133 이면 ``_issue_token``→``_raise_token_error`` 가 cooldown 기록 후
+           ``TokenRateLimitError`` 를 **즉시 raise** 한다(내부 sleep/retry 없음).
+
+        ~60s backoff cadence 는 호출부 단일 레이어(startup wrapper / self-healing
+        interval)가 분담하고, 발급 차단 자체는 본 cooldown 이 source 에서 보장한다.
+        """
+        # (1) 캐시 read — lock 없이 fast-path. 신선하면 발급 skip(cooldown 무영향, T2).
+        if self._hydrate_from_cache():
+            return
+
+        # (2) cooldown fast-path(lock 밖) — cooldown 내면 HTTP 미호출·즉시 raise (T4).
+        # record=False: 기존 cooldown 존중(연장 금지, source 기록은 EGW00133 수신 시만).
+        if _token_cooldown_until(self.app_key) is not None:
+            _raise_token_rate_limit(self.app_key, record=False)
+
+        # (3) app_key 단위 lock 으로 발급 직렬화 (T1).
+        lock = _get_token_lock(self.app_key)
+        async with lock:
+            # (4) double-check(캐시) — 대기 중 타 코루틴이 발급했으면 재사용.
+            if self._hydrate_from_cache():
+                return
+            # (5) cooldown double-check(lock 안) — 대기 중 타 코루틴이 EGW00133 으로
+            # cooldown 을 기록했을 수 있다. cooldown 내면 즉시 raise(HTTP 미호출).
+            if _token_cooldown_until(self.app_key) is not None:
+                _raise_token_rate_limit(self.app_key, record=False)
+            # (6) 발급 1회 → 캐시 populate → 인스턴스 hydrate. EGW00133 이면
+            # _issue_token 이 cooldown 기록 후 TokenRateLimitError 를 즉시 raise.
+            # 캐시 key 는 config fingerprint(attempt4 P2) — 같은 config 공유 어댑터는
+            # 같은 키로 토큰 공유, 다른 secret/환경은 별도 키로 격리 발급된다.
+            token, expires_at = await self._issue_token()
+            _token_cache[self._token_cache_key()] = (token, expires_at)
+            self.access_token = token
+            self.token_expires_at = expires_at
+            logger.info("KIS 토큰 발급 완료")
+
+    def _token_cache_key(self) -> _TokenCacheKey:
+        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env) (#2399).
+
+        attempt4 P2: 캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
+        app_key 라도 credentials/환경이 바뀌면 다른 키로 cache miss → 새 토큰 발급으로
+        새 설정을 검증한다(``AccountService._reconnect_broker`` 의 secret/환경 전환
+        재검증). 환경 구분은 ``is_paper`` (base_url 도출 출처)를 그대로 쓴다 — 모의
+        ``openapivts``/실전 ``openapi`` base_url 이 ``is_paper`` 로 1:1 결정되므로
+        ``is_paper`` 가 환경의 SSOT 다. lock/cooldown 키(app_key)와 달리 본 키만
+        config-specific 으로 좁힌다.
+        """
+        env = "paper" if self.is_paper else "live"
+        return (self.app_key, self.app_secret, env)
+
+    def _hydrate_from_cache(self) -> bool:
+        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (#2399 T2).
+
+        near-expiry(만료 5분 전) 토큰은 miss 로 보고 ``False`` 반환(재발급 유도).
+        캐시 key 는 config fingerprint(app_key+secret+env)라, config 가 바뀐 어댑터는
+        같은 app_key 라도 cache miss → 재발급(attempt4 P2 config 변경 재검증).
+        """
+        cached = _token_cache.get(self._token_cache_key())
+        if cached is None:
+            return False
+        token, expires_at = cached
+        if not _is_cached_token_fresh(expires_at, now=datetime.now(UTC)):
+            return False
+        self.access_token = token
+        self.token_expires_at = expires_at
+        return True
+
+    async def _issue_token(self) -> tuple[str, datetime]:
+        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (#2399 T3/T4).
+
+        토큰 발급 응답에서 KIS 에러코드를 파싱한다. alias 방어 (T3): 코드는
+        ``msg_cd``/``error_code``, 메시지는 ``msg1``/``error_description`` 양쪽 키를
+        모두 본다(KIS 토큰 엔드포인트 실제 형태 미확정). 응답 형태는 **HTTP 200 +
+        error 바디(rt_cd≠"0" 또는 access_token 부재)** 와 **non-200** 양 분기 모두
+        에러코드를 추출한다. (일반 API 응답 파싱은 ``_handle_response`` 가 담당 —
+        본 메서드는 토큰 발급 경로 **한정**.)
+
+        ``EGW00133`` 감지 시 ``TokenRateLimitError`` 즉시 raise(내부 sleep 없음).
+        그 외 에러는 ``AuthenticationError`` 로 raise(코드가 있으면 보존).
+
+        Returns:
+            (access_token, expires_at) — 발급 성공 시.
+        """
         url = f"{self.base_url}/oauth2/tokenP"
         data = {
             "grant_type": "client_credentials",
@@ -415,22 +684,68 @@ class KISBaseAdapter(BrokerAdapter):
                 url, json=data, headers={"content-type": "application/json"}
             ) as response:
                 if response.status != 200:
-                    text = await response.text()
-                    raise AuthenticationError(
-                        f"인증 실패 (HTTP {response.status}): {text}"
-                    )
+                    # non-200 분기: JSON body 에서 에러코드 추출 시도(실패 시 text).
+                    body = await self._read_token_error_body(response)
+                    self._raise_token_error(response.status, body)
 
                 result = await response.json()
-                self.access_token = result["access_token"]
-                self.token_expires_at = datetime.now(UTC) + timedelta(hours=24)
-                logger.info("KIS 토큰 발급 완료")
+                token = result.get("access_token")
+                if not token:
+                    # HTTP 200 + error 바디 분기(rt_cd≠"0" 또는 토큰 부재).
+                    self._raise_token_error(response.status, result)
+
+                expires_at = datetime.now(UTC) + timedelta(hours=24)
+                return token, expires_at
+
+    @staticmethod
+    async def _read_token_error_body(response: Any) -> dict[str, Any] | str:
+        """non-200 토큰 응답 body 를 dict(가능 시) 또는 raw text 로 반환 (#2399 T3)."""
+        text = await response.text()
+        try:
+            parsed = json.loads(text)
+        except (ValueError, TypeError):
+            return text
+        if isinstance(parsed, dict):
+            return parsed
+        return text
+
+    def _raise_token_error(self, status: int, body: dict[str, Any] | str) -> NoReturn:
+        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (#2399 T3/T4).
+
+        alias 처리(T3): 코드는 ``msg_cd``/``error_code``, 메시지는 ``msg1``/
+        ``error_description`` 키를 순서대로 본다.
+
+        #2399 attempt3: EGW00133 감지 시 ``TokenRateLimitError`` raise **직전**
+        본 adapter 의 ``app_key`` cooldown 을 기록한다(source-level cooldown).
+        """
+        code = ""
+        detail = ""
+        if isinstance(body, dict):
+            code = str(body.get("msg_cd") or body.get("error_code") or "")
+            detail = str(body.get("msg1") or body.get("error_description") or "")
+        text = body if isinstance(body, str) else (detail or json.dumps(body))
+
+        if code == TOKEN_RATE_LIMIT_MSG_CODE:
+            # cooldown 기록 후 raise — 같은 app_key 후속 발급(다른 adapter/account
+            # 포함)이 cooldown 내 HTTP 미호출·즉시 raise 되도록 (T4 단일 cadence).
+            _raise_token_rate_limit(self.app_key)
+        raise AuthenticationError(
+            f"인증 실패 (HTTP {status}): {text}",
+            error_code=code,
+        )
 
     async def _ensure_authenticated(self) -> None:
-        """토큰 유효성 확인 및 재발급."""
+        """토큰 유효성 확인 및 재발급 (#2399: 재발급도 single-flight/캐시 적용).
+
+        매 API 호출 전 진입점이므로, 캐시 hit 시 ``_authenticate`` 가 발급을 skip
+        한다(공유 캐시 fast-path). near-expiry(만료 5분 전) 토큰은 miss 로 보고
+        재발급한다 — 본 판정 기준이 ``_is_cached_token_fresh`` 와 동일하다(T2).
+        """
         if (
             not self.access_token
             or not self.token_expires_at
-            or datetime.now(UTC) >= self.token_expires_at - timedelta(minutes=5)
+            or datetime.now(UTC)
+            >= self.token_expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
         ):
             await self._authenticate()
 
