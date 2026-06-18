@@ -166,11 +166,33 @@ _AUTH_PATH = "/oauth2/tokenP"
 # 멀티프로세스(CLI 8 site 가 각각 fresh AccountService 생성) 토큰 공유는 v1 미해결 —
 # CLI cold-path 다발 동시 실행 시 ``EGW00133`` 잔존 가능. 영속(파일/DB) 토큰 스토어는
 # 후속 후보(YAGNI, spec 07 OAuth2 §(7) anchor).
-_token_cache: dict[str, tuple[str, datetime]] = {}
-"""app_key → (access_token, expires_at) in-process shared 캐시 (#2399 T2)."""
+#
+# 캐시 키 vs lock/cooldown 키 분리 (#2399 attempt4 P2 — config fingerprint):
+# - ``_token_cache`` 키 = **(app_key, app_secret, env)** config fingerprint.
+#   credentials(app_secret)/환경(모의 vs 실전 base_url)이 바뀌면 다른 키 → cache
+#   miss → ``connect()``/``_authenticate()`` 가 새 토큰을 **실제 발급**하여 새 설정을
+#   검증한다. 같은 app_key 기존 토큰을 hydrate 해 잘못된 secret/환경 전환을 성공한
+#   재연결로 오판하던 회귀를 차단한다(``AccountService._reconnect_broker`` 가
+#   변경된 ``credentials``/``broker_config`` 로 새 어댑터 ``connect()`` 를 호출하는
+#   경로 보호). **동일 config(같은 app_key+secret+env) 공유 어댑터(국내/해외)는 같은
+#   키 → single-flight 수렴·토큰 공유**(원래 #2399 목표 보존).
+# - ``_token_locks`` / ``_token_cooldowns`` 키 = **app_key 유지**. single-flight
+#   직렬화와 EGW00133(접근토큰 발급 1분 1회) cooldown 은 KIS rate-limit 단위인
+#   **app_key 당**이라 secret/환경 무관하다. config fingerprint 로 좁히면 같은
+#   app_key·다른 config 동시 발급이 rate-limit 을 공유하지 못해 EGW00133 잔존
+#   위험이 생긴다(T1 lock=app_key / T4 cooldown=app_key 회귀 락).
+_TokenCacheKey = tuple[str, str, str]
+"""(app_key, app_secret, env) config fingerprint — ``_token_cache`` 키 타입."""
+
+_token_cache: dict[_TokenCacheKey, tuple[str, datetime]] = {}
+"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (#2399 T2).
+
+키는 ``(app_key, app_secret, env)`` 다(``env`` = 모의/실전 구분). 같은 config 는 같은
+키로 single-flight 수렴·토큰 공유, 다른 secret/환경은 다른 키로 cache miss → 재발급
+(config 변경 재검증, attempt4 P2)."""
 
 _token_locks: dict[str, asyncio.Lock] = {}
-"""app_key → 발급 직렬화 Lock (#2399 T1, lock key=app_key)."""
+"""app_key → 발급 직렬화 Lock (#2399 T1, lock key=app_key — rate-limit 단위)."""
 
 _token_cooldowns: dict[str, datetime] = {}
 """app_key → cooldown_until (UTC) — EGW00133 source-level cooldown (#2399).
@@ -553,8 +575,10 @@ class KISBaseAdapter(BrokerAdapter):
         """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown (#2399).
 
         절차 (T1/T2/T4 source-level cooldown):
-        1. **캐시 read**: module-level ``_token_cache`` 에 본 app_key 의 신선한 토큰
-           (near-expiry 5분 여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환.
+        1. **캐시 read**: module-level ``_token_cache`` 에 본 어댑터의 config
+           fingerprint(app_key+secret+env, attempt4 P2) 신선한 토큰(near-expiry 5분
+           여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환. config 가 바뀐
+           재연결은 다른 키라 cache miss → 새 발급으로 새 설정을 검증한다.
            **유효 캐시 read 는 cooldown 무영향**(T2 — hydrate 를 cooldown 체크보다
            먼저 둔다).
         2. **cooldown fast-path(lock 밖)**: cache miss 면 ``_token_cooldowns`` 를
@@ -592,18 +616,36 @@ class KISBaseAdapter(BrokerAdapter):
                 _raise_token_rate_limit(self.app_key, record=False)
             # (6) 발급 1회 → 캐시 populate → 인스턴스 hydrate. EGW00133 이면
             # _issue_token 이 cooldown 기록 후 TokenRateLimitError 를 즉시 raise.
+            # 캐시 key 는 config fingerprint(attempt4 P2) — 같은 config 공유 어댑터는
+            # 같은 키로 토큰 공유, 다른 secret/환경은 별도 키로 격리 발급된다.
             token, expires_at = await self._issue_token()
-            _token_cache[self.app_key] = (token, expires_at)
+            _token_cache[self._token_cache_key()] = (token, expires_at)
             self.access_token = token
             self.token_expires_at = expires_at
             logger.info("KIS 토큰 발급 완료")
+
+    def _token_cache_key(self) -> _TokenCacheKey:
+        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env) (#2399).
+
+        attempt4 P2: 캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
+        app_key 라도 credentials/환경이 바뀌면 다른 키로 cache miss → 새 토큰 발급으로
+        새 설정을 검증한다(``AccountService._reconnect_broker`` 의 secret/환경 전환
+        재검증). 환경 구분은 ``is_paper`` (base_url 도출 출처)를 그대로 쓴다 — 모의
+        ``openapivts``/실전 ``openapi`` base_url 이 ``is_paper`` 로 1:1 결정되므로
+        ``is_paper`` 가 환경의 SSOT 다. lock/cooldown 키(app_key)와 달리 본 키만
+        config-specific 으로 좁힌다.
+        """
+        env = "paper" if self.is_paper else "live"
+        return (self.app_key, self.app_secret, env)
 
     def _hydrate_from_cache(self) -> bool:
         """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (#2399 T2).
 
         near-expiry(만료 5분 전) 토큰은 miss 로 보고 ``False`` 반환(재발급 유도).
+        캐시 key 는 config fingerprint(app_key+secret+env)라, config 가 바뀐 어댑터는
+        같은 app_key 라도 cache miss → 재발급(attempt4 P2 config 변경 재검증).
         """
-        cached = _token_cache.get(self.app_key)
+        cached = _token_cache.get(self._token_cache_key())
         if cached is None:
             return False
         token, expires_at = cached

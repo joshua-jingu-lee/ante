@@ -105,6 +105,11 @@ def _success_response(token: str = "tok-1") -> _FakeResponse:
     return _FakeResponse(status=200, json_body={"access_token": token})
 
 
+# attempt4 P2: ``_token_cache`` 키는 config fingerprint (app_key, app_secret, env)다.
+# 기본 _make_adapter config(secret_a, is_paper=True)의 fingerprint.
+_DEFAULT_CACHE_KEY = ("shared_key", "secret_a", "paper")
+
+
 # ── cooldown 핵심: EGW00133 1회 → 후속 발급 차단(HTTP 미호출) ────────────
 
 
@@ -174,7 +179,7 @@ class TestCooldownDoesNotBlockValidCache:
     async def test_valid_cache_used_during_cooldown(self) -> None:
         """cooldown 중에도 유효 캐시 토큰 보유 adapter 는 정상 사용(발급 없음, T2)."""
         # 유효(신선) 캐시 토큰 + cooldown 동시 존재.
-        _token_cache["shared_key"] = (
+        _token_cache[_DEFAULT_CACHE_KEY] = (
             "tok-cached",
             datetime.now(UTC) + timedelta(hours=1),
         )
@@ -189,7 +194,7 @@ class TestCooldownDoesNotBlockValidCache:
 
     async def test_ensure_authenticated_valid_cache_during_cooldown(self) -> None:
         """_ensure_authenticated 도 cooldown 중 유효 캐시 hit 시 발급 skip(T2)."""
-        _token_cache["shared_key"] = (
+        _token_cache[_DEFAULT_CACHE_KEY] = (
             "tok-cached",
             datetime.now(UTC) + timedelta(hours=1),
         )
@@ -283,7 +288,7 @@ class TestResetClearsCooldown:
     def test_reset_clears_cooldown(self) -> None:
         """_reset_token_cache 가 _token_cooldowns 도 clear (글로벌 conftest 격리)."""
         _record_token_cooldown("shared_key")
-        _token_cache["shared_key"] = ("t", datetime.now(UTC) + timedelta(hours=1))
+        _token_cache[_DEFAULT_CACHE_KEY] = ("t", datetime.now(UTC) + timedelta(hours=1))
         assert _token_cooldowns
         _reset_token_cache()
         assert _token_cooldowns == {}
