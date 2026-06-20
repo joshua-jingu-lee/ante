@@ -206,6 +206,13 @@ class Services:
     ipc_server: Any = None
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    # #2405: stop 주문 세션 만료 스케줄러 핸들 + manager 참조. stop_order_manager
+    # 는 api_gateway._stop_order_manager 와 **동일 인스턴스**다(_init_gateway 에서
+    # 둘 다 같은 객체로 주입). shutdown 에서 task cancel 후 manager.stop() 으로
+    # 활성 주문을 manager_stopped 로 일괄 정리하기 위해 main 이 직접 참조를 보유한다
+    # (APIGateway.stop() 은 sync 라 async manager.stop() 위임을 main 이 소유).
+    stop_session_expiry_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    stop_order_manager: Any = None
     _cleanup_tasks: list[str] = field(default_factory=list)
 
 
@@ -858,6 +865,17 @@ async def _init_gateway(s: Services) -> None:
     # StopOrderManager 초기화
     stop_order_manager = StopOrderManager(eventbus=s.eventbus)
     stop_order_manager.start()
+
+    # #2405: 세션 만료 자동 처리 배선. APIGateway 에 주입하는 것과 **동일
+    # 인스턴스**를 Services 에 보관하고, _approval_expire_loop 동형의 주기 루프를
+    # 생성한다. 이 배선이 없으면 check_session_expiry() 의 production caller 가
+    # 0개라 session_ended 경로가 영영 발행되지 않는다.
+    s.stop_order_manager = stop_order_manager
+    s.stop_session_expiry_task = asyncio.create_task(
+        _stop_session_expiry_loop(stop_order_manager),
+        name="stop-session-expiry",
+    )
+    logger.info("스탑 주문 세션 만료 스케줄러 시작 (주기: 60초)")
 
     # APIGateway — AccountService 기반 계좌별 라우팅
     s.api_gateway = APIGateway(
@@ -2491,6 +2509,25 @@ async def _approval_expire_loop(
             logger.exception("결재 만료 스케줄러 오류")
 
 
+async def _stop_session_expiry_loop(
+    stop_order_manager: Any,
+    interval: float = 60.0,
+) -> None:
+    """#2405: 거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리.
+
+    ``_approval_expire_loop`` 동형. interval=60s 는 세션 경계(분 단위)를
+    충분히 정밀하게 포착한다(A2 의미론이라 짧은 interval 의 과만료 부작용 없음).
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await stop_order_manager.check_session_expiry()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("스탑 주문 세션 만료 스케줄러 오류")
+
+
 async def _init_notification(s: Services) -> None:
     """NotificationService, TelegramCommandReceiver 초기화.
 
@@ -2754,6 +2791,22 @@ async def _shutdown(s: Services) -> None:
         except asyncio.CancelledError:
             pass
         logger.info("결재 만료 스케줄러 종료")
+
+    # #2405: 순서 고정 — ① 세션 만료 task cancel → ② manager.stop().
+    # 먼저 sweep 루프를 멈춘 뒤(orphan task 방지) manager.stop() 으로 활성
+    # 주문을 manager_stopped 로 일괄 정리한다(동시 sweep 경합 제거). APIGateway.
+    # stop()(sync)은 manager.stop() 을 위임하지 않으므로 main 이 직접 호출한다.
+    if s.stop_session_expiry_task is not None and not s.stop_session_expiry_task.done():
+        s.stop_session_expiry_task.cancel()
+        try:
+            await s.stop_session_expiry_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("스탑 주문 세션 만료 스케줄러 종료")
+
+    if s.stop_order_manager is not None:
+        await s.stop_order_manager.stop()
+        logger.info("StopOrderManager 종료 — 활성 스탑 주문 manager_stopped 정리")
 
     # Refs #1159/#1184: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
     # stop_accepting() 시작 시 IPCServer state가 SHUTTING_DOWN으로 바뀌어

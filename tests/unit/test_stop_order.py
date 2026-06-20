@@ -308,6 +308,147 @@ class TestExpiry:
         assert event.reason == "manager_stopped"
 
 
+class TestSessionExpiryA2:
+    """#2405 (A2): 세션에 진입했던 주문만 session_ended 로 만료된다.
+
+    시간 의존은 ``_is_in_session`` patch 로 결정화한다(기존 패턴 재사용).
+    """
+
+    async def test_entered_then_left_session_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션 내 진입(entered_session=True) 주문이 세션 종료 후 만료된다."""
+        manager.start()
+
+        # 세션 안에서 등록 → register 가 entered_session=True 로 마킹
+        with patch.object(StopOrderManager, "_is_in_session", return_value=True):
+            stop_id = await manager.register(
+                order_id="ord-in",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        order = manager.get_order(stop_id)
+        assert order is not None
+        assert order.entered_session is True
+
+        eventbus.publish.reset_mock()
+
+        # 세션 종료 후 sweep
+        with patch.object(StopOrderManager, "_is_in_session", return_value=False):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 1
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StopOrderExpiredEvent)
+        assert event.reason == "session_ended"
+        assert len(manager.active_orders) == 0
+
+    async def test_never_entered_session_not_expired(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션에 한 번도 안 들어간 주문(장 전 등록)은 만료 안 됨(A1 회귀 방지)."""
+        manager.start()
+
+        # 세션 밖에서 등록 → entered_session=False 유지
+        with patch.object(StopOrderManager, "_is_in_session", return_value=False):
+            stop_id = await manager.register(
+                order_id="ord-pre",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is False
+
+            eventbus.publish.reset_mock()
+            await manager.check_session_expiry()
+
+        # 한 번도 세션에 안 들어갔으므로 만료 안 됨
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+    async def test_sweep_marks_in_session_entry(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """sweep 이 in-session 진입을 먼저 마킹한 뒤, 다음 세션 종료에 만료된다."""
+        manager.start()
+
+        # 세션 밖 등록(entered_session=False)
+        with patch.object(StopOrderManager, "_is_in_session", return_value=False):
+            stop_id = await manager.register(
+                order_id="ord-late",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        order = manager.get_order(stop_id)
+        assert order is not None
+        assert order.entered_session is False
+
+        # 세션 진입 후 sweep → entered_session 마킹, 만료 없음
+        eventbus.publish.reset_mock()
+        with patch.object(StopOrderManager, "_is_in_session", return_value=True):
+            await manager.check_session_expiry()
+        assert order.entered_session is True
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+        # 세션 종료 후 sweep → 만료
+        with patch.object(StopOrderManager, "_is_in_session", return_value=False):
+            await manager.check_session_expiry()
+        assert eventbus.publish.call_count == 1
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StopOrderExpiredEvent)
+        assert event.reason == "session_ended"
+
+    async def test_session_expiry_idempotent(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 S4: 만료된 주문은 active_orders 에서 빠져 중복 sweep 무해."""
+        manager.start()
+
+        with patch.object(StopOrderManager, "_is_in_session", return_value=True):
+            await manager.register(
+                order_id="ord-idem",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        eventbus.publish.reset_mock()
+        with patch.object(StopOrderManager, "_is_in_session", return_value=False):
+            await manager.check_session_expiry()
+            await manager.check_session_expiry()  # 두 번째 sweep
+
+        # 첫 sweep 만 발행(active_orders not-expired 필터)
+        assert eventbus.publish.call_count == 1
+
+
 class TestBotOrders:
     """봇별 주문 조회 테스트."""
 

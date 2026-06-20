@@ -50,6 +50,13 @@ class StopOrder:
     triggered: bool = False
     expired: bool = False
     exchange: str = "KRX"
+    # #2405 (A2 세션만료): 이 주문이 거래 세션 안에 한 번이라도 진입했는지 여부.
+    # ``check_session_expiry`` sweep 은 ``entered_session AND not _is_in_session``
+    # 인 주문만 ``session_ended`` 로 만료한다. 세션에 한 번도 안 들어간 주문(예:
+    # 장 전 미리 등록분)은 만료되지 않아, "세션 외 등록 즉시 만료"(A1) 부작용을
+    # 제거한다. register 시 in-session 이면 즉시 True 로 set 한다(세션 마감 직전
+    # 등록분이 sweep 한 번 놓치고 영구 비만료 되는 것을 방지).
+    entered_session: bool = False
 
     def __post_init__(self) -> None:
         from ante.account.scoping import require_account_id
@@ -132,6 +139,10 @@ class StopOrderManager:
             exchange=exchange,
             account_id=account_id,
         )
+        # #2405 (A2): 등록 시점에 이미 세션 안이면 즉시 마킹한다. sweep(최대
+        # interval 지연) 전에 세션이 마감돼도 entered_session 이 남아 정상 만료된다.
+        if self._is_in_session(order):
+            order.entered_session = True
         self._orders[stop_order_id] = order
 
         logger.info(
@@ -220,9 +231,18 @@ class StopOrderManager:
                 await self._trigger_order(order, price)
 
     async def check_session_expiry(self) -> None:
-        """세션 종료 시 미트리거 주문 만료 처리."""
+        """세션 종료 시 미트리거 주문 만료 처리.
+
+        #2405 (A2 의미론): sweep 이 in-session 진입을 먼저 마킹하고
+        (``entered_session = True``), **세션에 한 번이라도 진입했고 현재
+        세션 밖**인 주문만 ``session_ended`` 로 만료한다. 세션에 한 번도
+        들어간 적 없는 주문(예: 장 전 미리 등록분)은 만료되지 않는다 —
+        "세션 외 등록 stop 즉시 만료"(A1) 신규 행위 변화를 제거한다.
+        """
         for order in self.active_orders:
-            if not self._is_in_session(order):
+            if self._is_in_session(order):
+                order.entered_session = True
+            elif order.entered_session:
                 await self._expire_order(order, "session_ended")
 
     def _should_trigger(self, order: StopOrder, price: float) -> bool:
