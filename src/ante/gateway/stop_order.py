@@ -54,8 +54,16 @@ class StopOrder:
     # ``check_session_expiry`` sweep 은 ``entered_session AND not _is_in_session``
     # 인 주문만 ``session_ended`` 로 만료한다. 세션에 한 번도 안 들어간 주문(예:
     # 장 전 미리 등록분)은 만료되지 않아, "세션 외 등록 즉시 만료"(A1) 부작용을
-    # 제거한다. register 시 in-session 이면 즉시 True 로 set 한다(세션 마감 직전
-    # 등록분이 sweep 한 번 놓치고 영구 비만료 되는 것을 방지).
+    # 제거한다.
+    #
+    # #2405 (attempt1 P2-1): 마킹 신호를 **실제 시장 활동(price-update 틱)** 으로
+    # 잡는다. src/ante 에 거래일/휴장일 캘린더가 없어서 ``_is_in_session`` 은
+    # 시각(09:00–15:30 KST)만 보므로, sweep/register 에서 시각만으로 마킹하면
+    # 주말·공휴일의 "시장 시간대"에도 entered_session=True 가 되어 사전 등록분이
+    # session_ended 로 오만료(월요일 개장 전 사망)된다. 실제 틱은 거래일 개장
+    # 중에만 흐르므로, ``on_price_update`` 의 in-session 경로에서만 True 로
+    # 마킹한다(휴장일엔 무틱 → 미마킹 → 비만료). register/sweep 은 더 이상
+    # 마킹하지 않는다.
     entered_session: bool = False
 
     def __post_init__(self) -> None:
@@ -121,7 +129,34 @@ class StopOrderManager:
 
         Returns:
             stop_order_id
+
+        Raises:
+            InvalidAccountIdError: account_id 가 invalid 일 때.
+
+        #2405 (attempt1 P2-2): 매니저가 stopped(``_running=False``) 상태면
+        등록을 거부한다(빈 문자열 반환). shutdown 진행 중 in-flight IPC/봇이
+        OrderApprovedEvent 로 stop 주문을 보내도, 그 주문은 manager_stopped
+        sweep 을 이미 놓쳤고 이후 price update 도 ``_running=False`` 라 무시되어
+        영구 inert 로 남는다. 따라서 stopped 상태에서는 받지 않는다(등록 거부,
+        StopOrderRegisteredEvent 미발행, _orders 미추가). shutdown 순서와 무관하게
+        결정적.
         """
+        # account_id invalid 는 stopped 가드보다 먼저 거부한다(StopOrder
+        # __post_init__ 의 require_account_id 와 동형 — invalid 입력은 stopped
+        # 여부와 무관하게 거부되어야 한다).
+        from ante.account.scoping import require_account_id
+
+        require_account_id(account_id, context="stop_order.register")
+
+        if not self._running:
+            logger.warning(
+                "StopOrderManager stopped 상태 — stop 주문 등록 거부: %s %s stop=%.0f",
+                side,
+                symbol,
+                stop_price,
+            )
+            return ""
+
         stop_order_id = f"stop-{uuid4().hex[:12]}"
 
         order = StopOrder(
@@ -139,10 +174,9 @@ class StopOrderManager:
             exchange=exchange,
             account_id=account_id,
         )
-        # #2405 (A2): 등록 시점에 이미 세션 안이면 즉시 마킹한다. sweep(최대
-        # interval 지연) 전에 세션이 마감돼도 entered_session 이 남아 정상 만료된다.
-        if self._is_in_session(order):
-            order.entered_session = True
+        # #2405 (attempt1 P2-1): register-time 마킹 제거. 휴장일 시장 시간대
+        # 등록도 마킹되는 오만료를 방지하기 위해, entered_session 은 첫 in-session
+        # **틱**(on_price_update)에서만 set 한다. 등록은 항상 False 로 시작한다.
         self._orders[stop_order_id] = order
 
         logger.info(
@@ -227,22 +261,31 @@ class StopOrderManager:
         ]
 
         for order in active_for_symbol:
+            # #2405 (attempt1 P2-1): 실제 틱 + in-session = 시장이 실제로 개장한
+            # 신호다(휴장일엔 틱이 흐르지 않아 마킹되지 않는다). 이 마킹이
+            # check_session_expiry sweep 의 session_ended 만료 자격 게이트가 된다.
+            order.entered_session = True
             if self._should_trigger(order, price):
                 await self._trigger_order(order, price)
 
     async def check_session_expiry(self) -> None:
         """세션 종료 시 미트리거 주문 만료 처리.
 
-        #2405 (A2 의미론): sweep 이 in-session 진입을 먼저 마킹하고
-        (``entered_session = True``), **세션에 한 번이라도 진입했고 현재
-        세션 밖**인 주문만 ``session_ended`` 로 만료한다. 세션에 한 번도
-        들어간 적 없는 주문(예: 장 전 미리 등록분)은 만료되지 않는다 —
-        "세션 외 등록 stop 즉시 만료"(A1) 신규 행위 변화를 제거한다.
+        #2405 (A2 의미론): **세션에 한 번이라도 진입했고**(``entered_session``)
+        **현재 세션 밖**(``not _is_in_session``)인 주문만 ``session_ended`` 로
+        만료한다. 세션에 한 번도 들어간 적 없는 주문(예: 장 전 미리 등록분)은
+        만료되지 않는다 — "세션 외 등록 stop 즉시 만료"(A1) 부작용을 제거한다.
+
+        #2405 (attempt1 P2-1): sweep 은 더 이상 ``entered_session`` 을 마킹하지
+        않는다(만료만 수행). 시각만 보는 ``_is_in_session`` 으로 마킹하면 휴장일
+        시장 시간대에도 마킹되어 사전 등록분이 오만료되기 때문이다. 마킹은
+        실제 시장 틱(``on_price_update`` in-session 경로)에서만 일어난다.
+        결과적으로 휴장일(무틱)에는 ``entered_session=False`` 가 유지되어 사전
+        등록 stop 이 보존되고, 거래일에는 in-session 틱으로 마킹된 뒤 세션 종료
+        sweep 에서 정상 만료된다.
         """
         for order in self.active_orders:
-            if self._is_in_session(order):
-                order.entered_session = True
-            elif order.entered_session:
+            if order.entered_session and not self._is_in_session(order):
                 await self._expire_order(order, "session_ended")
 
     def _should_trigger(self, order: StopOrder, price: float) -> bool:

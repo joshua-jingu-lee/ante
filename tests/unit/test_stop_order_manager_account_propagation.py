@@ -36,6 +36,7 @@ class TestRegisterPropagation:
     async def test_register_preserves_account_id(
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
+        manager.start()
         await manager.register(
             order_id="ord-001",
             bot_id="bot-1",
@@ -57,6 +58,7 @@ class TestRegisterPropagation:
     async def test_register_preserves_distinct_account_ids(
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
+        manager.start()
         await manager.register(
             order_id="ord-1",
             bot_id="bot-1",
@@ -157,7 +159,9 @@ class TestExpiryPropagation:
         eventbus: MagicMock,
     ) -> None:
         manager.start()
-        # _is_in_session True 강제 후 register, 이후 False 로 expiry 검증.
+        # #2405 (attempt1 P2-1): entered_session 마킹은 in-session **틱**에서만
+        # 일어난다. _is_in_session True 강제 후 register + in-session 틱으로
+        # 마킹, 이후 False(세션 종료) sweep 으로 expiry 검증.
         with patch.object(StopOrderManager, "_is_in_session", return_value=True):
             await manager.register(
                 order_id="ord-1",
@@ -170,6 +174,8 @@ class TestExpiryPropagation:
                 stop_price=49000.0,
                 account_id="acc-test",
             )
+            # in-session 틱(트리거 미달 가격) → entered_session 마킹.
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
 
         eventbus.publish.reset_mock()
         await manager.check_session_expiry()
