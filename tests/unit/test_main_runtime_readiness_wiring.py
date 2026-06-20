@@ -873,6 +873,11 @@ def _stub_init_gateway_followups(s: Any, monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(main_module, "_init_reconcile_scheduler", _noop)
     monkeypatch.setattr(main_module, "_init_daily_report_scheduler", _noop)
     monkeypatch.setattr(main_module, "_start_readiness_self_healing", _noop_sync)
+    # #2405: _init_gateway 가 create_task 로 띄우는 세션 만료 루프를 중립화한다.
+    # 실루프는 ``while True: await asyncio.sleep(60)`` 이라 prod 에선 정상이나,
+    # EGW00133 backoff 검증을 위해 asyncio.sleep 을 patch 하는 테스트에서는
+    # no-op sleep + check_session_expiry 미보유 더블이 tight spin 을 만든다.
+    monkeypatch.setattr(main_module, "_stop_session_expiry_loop", _noop)
 
     class _FakeStopOrderManager:
         def __init__(self, **kwargs: Any) -> None:
@@ -1094,6 +1099,11 @@ def _stub_init_gateway_infra_only(s: Any, monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(main_module, "_init_fill_outbox_publisher", _noop)
     monkeypatch.setattr(main_module, "_init_daily_report_scheduler", _noop)
     monkeypatch.setattr(main_module, "_start_readiness_self_healing", _noop_sync)
+    # #2405: _init_gateway 가 create_task 로 띄우는 세션 만료 루프를 중립화한다.
+    # 실루프는 ``while True: await asyncio.sleep(60)`` 이라 prod 에선 정상이나,
+    # EGW00133 backoff 검증을 위해 asyncio.sleep 을 patch 하는 테스트에서는
+    # no-op sleep + check_session_expiry 미보유 더블이 tight spin 을 만든다.
+    monkeypatch.setattr(main_module, "_stop_session_expiry_loop", _noop)
 
     class _FakeStopOrderManager:
         def __init__(self, **kwargs: Any) -> None:
