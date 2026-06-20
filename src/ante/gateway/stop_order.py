@@ -248,7 +248,12 @@ class StopOrderManager:
         return [o for o in self.active_orders if o.account_id == account_id]
 
     async def on_price_update(
-        self, symbol: str, price: float, *, account_id: str
+        self,
+        symbol: str,
+        price: float,
+        *,
+        account_id: str,
+        is_exchange_tick: bool = True,
     ) -> None:
         """실시간 시세 수신 시 트리거 판단.
 
@@ -260,6 +265,15 @@ class StopOrderManager:
         인스턴스를 가지므로, tick 이 들어온 stream 의 ``account_id`` 만
         매칭되는 stop order 를 평가한다. 다른 계좌의 stop order 는 같은
         symbol 이라도 무시된다.
+
+        #2405 (A2 source chokepoint, attempt5 P2): ``is_exchange_tick`` 은
+        이 가격이 **실 WebSocket 틱**(``True``)인지 **REST fallback poll**
+        (``False``)인지 호출자가 구분해 전달한다. 거래일 멤버십 마킹은
+        ``is_exchange_tick=True`` 일 때만 수행한다 — KIS ``inquire-price`` 는
+        휴장일에도 직전 종가를 성공 반환하므로, 스트림 끊김 중 휴장일의
+        시계상 세션 시간에 fallback poll 이 성공해도 그것이 거래일을
+        보증하지 못한다(휴장일 사전등록 stop 의 오만료 차단). 반면 트리거
+        평가는 출처와 무관하게 항상 수행한다(아래 ``active_for_symbol``).
         """
         from ante.account.scoping import require_account_id
 
@@ -268,17 +282,29 @@ class StopOrderManager:
         if not self._running:
             return
 
-        # #2405 (A2 세션만료, attempt3 P1/P2): market-wide per-order 마킹. 실제
-        # 틱이 흐른다는 것은 거래일 개장 중이라는 신호다(휴장일엔 무틱). 이 틱의
-        # 종목·계좌와 **무관하게**, 그 시점 자신의 세션 안에 있는 **모든** active
-        # order 의 ``entered_session`` 을 True 로 표시한다 — 이 틱이 들어온
-        # 종목뿐 아니라 같은 세션의 무틱 종목까지 세션 멤버십을 부여한다(아래
-        # 트리거용 ``active_for_symbol`` 루프는 per-symbol 그대로). per-order
+        # #2405 (A2 세션만료, attempt3 P1/P2 · attempt5 P2 source chokepoint):
+        # market-wide per-order 마킹. **실 WebSocket 틱**(``is_exchange_tick=
+        # True``)이 흐른다는 것만을 거래일 개장 중 신호로 신뢰한다(휴장일엔
+        # 실 틱 무수신). REST fallback poll(``is_exchange_tick=False``)은 KIS
+        # ``inquire-price`` 가 휴장일에도 직전 종가를 성공 반환하므로 거래일을
+        # 보증하지 못해 마킹을 유발하지 않는다 — 이 게이트가 없으면 휴장일
+        # 시계상 세션 시간의 fallback 성공이 사전등록 stop 을 마킹해 장종료
+        # sweep 에서 오만료시킨다. 실 틱이면 이 틱의 종목·계좌와 **무관하게**,
+        # 그 시점 자신의 세션 안에 있는 **모든** active order 의
+        # ``entered_session`` 을 True 로 표시한다 — 이 틱이 들어온 종목뿐 아니라
+        # 같은 세션의 무틱 종목까지 세션 멤버십을 부여한다(아래 트리거용
+        # ``active_for_symbol`` 루프는 per-symbol·출처 무관 그대로). per-order
         # 멤버십이라 세션 경계 race·세션 종료 후 등록의 오만료 엣지가 없다.
-        for order in self.active_orders:
-            if self._is_in_session(order):
-                order.entered_session = True
+        if is_exchange_tick:
+            for order in self.active_orders:
+                if self._is_in_session(order):
+                    order.entered_session = True
 
+        # #2405 (attempt5 P2): 트리거 평가는 출처(실 틱/fallback poll)와
+        # **무관하게** 항상 수행한다. 스트림 hiccup 중에도 실거래일이면
+        # fallback 가격으로 stop 이 발동돼야 하므로 게이트하지 않는다(#2405
+        # scope=만료, 트리거 아님). fallback poll 가격의 거래일 staleness 는
+        # bounded known-limitation 으로 api-gateway.md 에 명시.
         active_for_symbol = [
             o
             for o in self.active_orders

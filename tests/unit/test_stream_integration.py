@@ -378,6 +378,76 @@ async def test_fallback_polls_prices(
         await integration.stop()
 
 
+@pytest.mark.asyncio
+async def test_fallback_poll_passes_is_exchange_tick_false(
+    integration: StreamIntegration,
+    eventbus: EventBus,
+    stop_order_manager: StopOrderManager,
+) -> None:
+    """#2405 (attempt5 P2): fallback poll 은 ``is_exchange_tick=False`` 로 전달한다.
+
+    KIS ``inquire-price`` 가 휴장일에도 직전 종가를 성공 반환하므로 fallback
+    가격은 거래일을 보증하지 못한다 — 거래일 멤버십 마킹을 유발하지 않도록
+    출처를 ``is_exchange_tick=False`` 로 명시 전달하는지 kwarg 로 검증한다.
+    """
+    await stop_order_manager.register(
+        order_id="ord-1",
+        bot_id="bot-1",
+        strategy_id="stg-1",
+        symbol="005930",
+        side="sell",
+        quantity=10.0,
+        order_type="stop",
+        stop_price=60000.0,
+        account_id="acc-001",
+    )
+
+    spy = AsyncMock()
+    with patch.object(stop_order_manager, "on_price_update", spy):
+        await integration.start()
+        try:
+            await eventbus.publish(
+                StreamDisconnectedEvent(
+                    account_id="acc-001", broker="kis", reason="test"
+                )
+            )
+            await asyncio.sleep(0.3)
+        finally:
+            await integration.stop()
+
+    assert spy.await_count >= 1
+    # 모든 fallback poll 호출이 is_exchange_tick=False 로 전달돼야 한다.
+    for call in spy.await_args_list:
+        assert call.kwargs.get("is_exchange_tick") is False
+        assert call.kwargs.get("account_id") == "acc-001"
+
+
+@pytest.mark.asyncio
+async def test_real_ws_tick_passes_is_exchange_tick_true(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    stop_order_manager: StopOrderManager,
+) -> None:
+    """#2405 (attempt5 P2): 실 WS 틱은 ``is_exchange_tick=True`` 로 전달한다.
+
+    ``_on_price`` (실 WebSocket 콜백) 경로가 ``on_price_update`` 를
+    ``is_exchange_tick=True`` (거래일 멤버십 마킹 유발)로 호출하는지 검증한다.
+    """
+    spy = AsyncMock()
+    with patch.object(stop_order_manager, "on_price_update", spy):
+        await integration.start()
+        try:
+            await stream_client.fire_price("005930", 71000.0)
+        finally:
+            await integration.stop()
+
+    assert spy.await_count == 1
+    call = spy.await_args
+    assert call is not None
+    assert call.kwargs.get("is_exchange_tick") is True
+    assert call.kwargs.get("account_id") == "acc-001"
+
+
 # ── 종목 구독 동기화 테스트 ──────────────────────────
 
 

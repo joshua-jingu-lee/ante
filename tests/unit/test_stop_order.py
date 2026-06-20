@@ -1256,3 +1256,175 @@ class TestCrossAccountIsolation:
         assert len(order_events) == 2
         accounts = sorted(e.account_id for e in order_events)
         assert accounts == ["acc-1", "acc-2"]
+
+
+class TestExchangeTickSourceChokepoint:
+    """#2405 (attempt5 P2): 거래일 멤버십 마킹은 실 WS 틱(``is_exchange_tick=True``)
+    에 한정한다.
+
+    REST fallback poll(``is_exchange_tick=False``)은 KIS ``inquire-price`` 가
+    휴장일에도 직전 종가를 성공 반환하므로 거래일을 보증하지 못해 ``entered_session``
+    마킹을 유발하지 않는다. 단, 트리거 평가는 출처와 무관하게 항상 수행한다(분리 락).
+    """
+
+    async def test_fallback_poll_no_marking_no_expiry(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """휴장일 fallback → 무마킹 → 무만료.
+
+        in-session 시각에 등록 후 ``is_exchange_tick=False`` 가격을 받아도
+        ``entered_session`` 은 False 로 남아, 세션 종료 sweep 에서 보존된다.
+        (휴장일/주말의 시계상 세션 시간에 fallback poll 이 성공해 last-close 를
+        반환하는 시나리오 — 마킹되면 장종료 sweep 에서 오만료된다.)
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-fallback",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is False
+
+            # fallback poll 가격(트리거 미달) → is_exchange_tick=False → 무마킹.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=False
+            )
+            assert order.entered_session is False
+            assert eventbus.publish.call_count == 0
+
+        # 세션 종료 sweep → 멤버십 없으므로 보존(not expired).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+        assert order.entered_session is False
+
+    async def test_exchange_tick_marks_and_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """실 WS 틱 → 마킹 → 만료(비회귀).
+
+        ``is_exchange_tick=True``(또는 default) 틱은 거래일 멤버십을 마킹하므로
+        세션 종료 시 ``session_ended`` 로 만료된다(기존 동작 유지 회귀 락).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-ws",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 실 WS 틱(트리거 미달) → 마킹.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+            assert order.entered_session is True
+
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 1
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StopOrderExpiredEvent)
+        assert event.reason == "session_ended"
+        assert len(manager.active_orders) == 0
+
+    async def test_exchange_tick_default_marks(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """기본 인자(default ``is_exchange_tick=True``)도 마킹한다(하위호환 락)."""
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-default",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 키워드 미지정 → default True → 마킹.
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            assert order.entered_session is True
+
+    async def test_fallback_poll_triggers_without_marking(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """fallback 트리거 유지 + 무마킹(분리 락).
+
+        ``is_exchange_tick=False`` 라도 stop 조건을 충족하는 가격이면 트리거
+        이벤트가 발행돼야 한다(스트림 hiccup 중 실거래일 stop 발동). 동시에
+        ``entered_session`` 은 마킹되지 않아야 한다(만료와 트리거의 분리).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-fb-trig",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 트리거 조건 충족 가격(매도 stop: 현재가 <= stop_price) + fallback 출처.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 48500.0, account_id="acc-test", is_exchange_tick=False
+            )
+
+        # 트리거 이벤트 발행(StopOrderTriggeredEvent + OrderRequestEvent).
+        published = [call.args[0] for call in eventbus.publish.call_args_list]
+        assert any(isinstance(e, StopOrderTriggeredEvent) for e in published)
+        assert any(isinstance(e, OrderRequestEvent) for e in published)
+        # 트리거됐지만 fallback 출처라 세션 멤버십은 미마킹(분리 락).
+        assert order.entered_session is False

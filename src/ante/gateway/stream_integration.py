@@ -167,8 +167,13 @@ class StreamIntegration:
         # tick 의 account_id 는 stream 인스턴스의 ``self._account_id`` 와 동일하다.
         if self._stop_order_manager:
             try:
+                # #2405 (attempt5 P2): 실 WebSocket 틱은 거래일 개장 신호이므로
+                # ``is_exchange_tick=True`` (default 이나 대칭·가독성 위해 명시).
                 await self._stop_order_manager.on_price_update(
-                    symbol, price, account_id=self._account_id
+                    symbol,
+                    price,
+                    account_id=self._account_id,
+                    is_exchange_tick=True,
                 )
             except Exception:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
@@ -327,8 +332,16 @@ class StreamIntegration:
                         self._cache.set(cache_key, price, ttl=5)
 
                         if self._stop_order_manager:
+                            # #2405 (attempt5 P2): REST fallback poll 은 KIS
+                            # ``inquire-price`` 가 휴장일에도 직전 종가를 성공
+                            # 반환하므로 거래일을 보증하지 못한다 →
+                            # ``is_exchange_tick=False`` 로 거래일 멤버십 마킹을
+                            # 유발하지 않게 한다(트리거 평가는 그대로 수행).
                             await self._stop_order_manager.on_price_update(
-                                symbol, price, account_id=self._account_id
+                                symbol,
+                                price,
+                                account_id=self._account_id,
+                                is_exchange_tick=False,
                             )
                     except Exception:
                         logger.warning("REST 폴링 실패: %s", symbol, exc_info=True)
