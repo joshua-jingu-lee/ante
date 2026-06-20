@@ -157,8 +157,37 @@ LOOP_BACKOFF_MULTIPLIER_CAP = 8
 
 # 연속 DB 손상 실패가 이 임계에 도달하면 escalation(ERROR/CRITICAL 승격 +
 # NotificationEvent) 을 정확히 1회 수행한다(#2407 이슈 제안값). 카운터가 0 으로
-# reset(드레인 성공/비-DB 예외)되기 전까지 재발행하지 않아 알림 spam 을 막는다.
+# reset(드레인 성공/비-손상 예외)되기 전까지 재발행하지 않아 알림 spam 을 막는다.
 _ESCALATE_THRESHOLD = 10
+
+# DB **손상**(reconnect 로 회복 불가) 시그니처. database.py:20-23 의 SSOT 재전파
+# 시그니처(``database disk image is malformed`` / ``file is not a database``)와
+# 정합한다. ``sqlite3.DatabaseError`` **타입만으로 손상을 판정하면 안 된다**(#2407
+# Codex P2): 같은 타입 계층에 ``OperationalError: database is locked`` (외부 프로세스
+# /긴 트랜잭션 — transient, 곧 회복)·``no such table``·``sqlite3.ProgrammingError``
+# (내부 버그류) 등 비-손상 오류가 섞여 있다. 이들을 손상으로 오분류하면 손상 카운터
+# 누적 → backoff 로 notify 가 막혀 체결 이벤트 전달이 지연되고, 임계 후 잘못된 DB 손상
+# 알림까지 발행된다. 메시지 소문자화 후 substring 매칭으로 표현 변형에 견고하게,
+# 손상 시그니처가 포함된 예외만 좁혀 잡는다.
+_DB_CORRUPTION_SIGNATURES: tuple[str, ...] = (
+    "malformed",
+    "file is not a database",
+)
+
+
+def _is_db_corruption(exc: BaseException) -> bool:
+    """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다 (#2407 Codex P2).
+
+    ``sqlite3.DatabaseError`` 타입만으로 판정하지 않는다. transient(``database is
+    locked``)·내부 버그(``no such table``/``ProgrammingError``)는 손상이 아니므로
+    backoff·카운터·escalation 경로에서 제외해야 한다. database.py:20-23 SSOT 손상
+    시그니처가 메시지에 포함될 때만 True 를 반환한다(소문자화 후 substring, 표현
+    변형 견고). 비-손상 ``DatabaseError`` 는 비-DB 예외와 같은 reset 경로로 흐른다.
+    """
+    if not isinstance(exc, sqlite3.DatabaseError):
+        return False
+    message = str(exc).lower()
+    return any(sig in message for sig in _DB_CORRUPTION_SIGNATURES)
 
 
 class FillOutboxPublisher:
@@ -322,36 +351,47 @@ class FillOutboxPublisher:
                 await self._drain()
             except asyncio.CancelledError:
                 raise
-            except sqlite3.DatabaseError as exc:
-                # malformed/not-a-database 등 DB 손상(database.py:21-23 SSOT 로 재전파).
-                # reconnect 로 회복 불가하므로 backoff 로 hammer 를 막고, 연속 실패를
-                # 누적해 임계 도달 시 escalation(O2) 한다. _running 은 유지(O3 liveness)
-                # — 외부 DB 복구 시 다음 사이클에 자동 재개·멱등 드레인(O4).
-                self._consecutive_failures += 1
-                delay = self._backoff_delay()
-                next_drain_at = loop.time() + delay
-                if self._consecutive_failures >= _ESCALATE_THRESHOLD:
-                    await self._escalate(exc)
+            except Exception as exc:
+                if _is_db_corruption(exc):
+                    # malformed/file is not a database 등 DB **손상**(database.py
+                    # :20-23 SSOT 로 재전파). reconnect 로 회복 불가하므로 backoff 로
+                    # hammer 를 막고, 연속 실패를 누적해 임계 도달 시 escalation(O2)
+                    # 한다. _running 은 유지(O3 liveness) — 외부 DB 복구 시 다음
+                    # 사이클에 자동 재개·멱등 드레인(O4). 비-손상 ``DatabaseError``
+                    # (``database is locked`` 같은 transient·``no such table``/
+                    # ``ProgrammingError`` 같은 내부 버그)는 이 손상 경로로 들어오지
+                    # 않는다(#2407 Codex P2: 손상 오분류 차단).
+                    self._consecutive_failures += 1
+                    delay = self._backoff_delay()
+                    next_drain_at = loop.time() + delay
+                    if self._consecutive_failures >= _ESCALATE_THRESHOLD:
+                        await self._escalate(exc)
+                    else:
+                        logger.warning(
+                            "FillOutboxPublisher DB 손상 드레인 실패 (연속 %d회) — "
+                            "%.0fs 후 재시도: %s",
+                            self._consecutive_failures,
+                            delay,
+                            exc,
+                            exc_info=True,
+                        )
                 else:
+                    # 비-손상 예외(transient ``database is locked``·내부 버그류
+                    # ``no such table``/``ProgrammingError``·비-DB 예외)는 backoff 로
+                    # 은폐하지 않는다(#2350 dual-branch 미러). 선행 손상 실패로
+                    # backoff·escalation latch 가 올라가 있었다면 카운터·latch 를 reset
+                    # 해 다음 사이클이 base drain_interval 로 복귀하게 한다(은폐 금지).
+                    # 이후 기존대로 WARNING + 즉시 다음 주기 재시도(즉시재시도 경로).
+                    # 주의: ``database is locked`` 는 transient 라 즉시재시도가 hammer
+                    # 가 될 수 있으나, 본 이슈(#2407) 범위는 손상 escalation 이다.
+                    # locked 전용 backoff 는 범위 밖(기존 WARNING 경로 유지) — 필요 시
+                    # follow-up.
+                    self._reset_failures()
+                    next_drain_at = loop.time()
                     logger.warning(
-                        "FillOutboxPublisher DB 손상 드레인 실패 (연속 %d회) — "
-                        "%.0fs 후 재시도: %s",
-                        self._consecutive_failures,
-                        delay,
-                        exc,
+                        "FillOutboxPublisher 드레인 오류(비-손상) — 다음 사이클 재시도",
                         exc_info=True,
                     )
-            except Exception:
-                # 비-DB 예외(내부 버그류)는 backoff 로 은폐하지 않는다. 선행 DB 실패로
-                # backoff·escalation latch 가 올라가 있었다면 카운터·latch 를 reset 해
-                # 다음 사이클이 base drain_interval 로 복귀하게 한다(은폐 금지, #2350
-                # dual-branch 미러). 이후 기존대로 WARNING + 즉시 다음 주기 재시도.
-                self._reset_failures()
-                next_drain_at = loop.time()
-                logger.warning(
-                    "FillOutboxPublisher 드레인 오류 — 다음 사이클 재시도",
-                    exc_info=True,
-                )
             else:
                 # 정상 드레인 — 카운터·escalation latch reset, base 주기로 복귀(O1).
                 self._reset_failures()

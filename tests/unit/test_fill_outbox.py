@@ -24,10 +24,12 @@ from ante.eventbus import EventBus
 from ante.eventbus.events import NotificationEvent, OrderFilledEvent
 from ante.trade.fill_applier import FillApplier
 from ante.trade.fill_outbox import (
+    _DB_CORRUPTION_SIGNATURES,
     _ESCALATE_THRESHOLD,
     LOOP_BACKOFF_MULTIPLIER_CAP,
     FillOutbox,
     FillOutboxPublisher,
+    _is_db_corruption,
     canonical_cumulative,
     make_fill_dedup_key,
 )
@@ -608,3 +610,138 @@ async def test_loop_non_db_exception_resets_counter(eventbus, monkeypatch):
     # (비-DB 가 직전 DB 실패 backoff 로 은폐되지 않고 카운터·backoff 해제 — #2350 미러)
     last_interval = harness.drain_times[-1] - harness.drain_times[-2]
     assert last_interval == publisher._drain_interval
+
+
+# ── _is_db_corruption predicate (#2407 Codex P2) ─────
+#
+# 손상(reconnect 회복 불가) 시그니처만 backoff/escalation 경로에 태우고, 비-손상
+# DatabaseError(transient locked·내부 버그류)는 reset 경로로 보내기 위한 판별기.
+
+
+def test_is_db_corruption_matches_only_corruption_signatures():
+    """손상 시그니처만 True, transient/내부버그/비-DB 는 False.
+
+    ``sqlite3.DatabaseError`` 타입 게이트 + 메시지 substring 매칭을 모두 락한다
+    (타입만으로 손상을 판정하지 않는다).
+    """
+    # database.py:20-23 SSOT 손상 시그니처 → True (대소문자/표현 변형 견고).
+    assert _is_db_corruption(
+        sqlite3.OperationalError("database disk image is malformed")
+    )
+    assert _is_db_corruption(sqlite3.DatabaseError("file is not a database"))
+    assert _is_db_corruption(sqlite3.OperationalError("FILE IS NOT A DATABASE"))
+    assert _is_db_corruption(sqlite3.DatabaseError("MALFORMED database image"))
+
+    # 비-손상 transient (외부 lock — 곧 회복) → False (손상 카운터/backoff 제외).
+    assert not _is_db_corruption(sqlite3.OperationalError("database is locked"))
+    # 내부 버그류(스키마/쿼리 결함) → False (backoff 로 은폐 금지).
+    assert not _is_db_corruption(sqlite3.OperationalError("no such table: fill_outbox"))
+    assert not _is_db_corruption(sqlite3.ProgrammingError("bad SQL"))
+    # 비-DatabaseError → False (타입 게이트: 메시지에 손상 문구가 있어도 무시).
+    assert not _is_db_corruption(RuntimeError("malformed"))
+    assert not _is_db_corruption(ValueError("file is not a database"))
+
+
+def test_db_corruption_signatures_align_with_database_ssot():
+    """손상 시그니처가 database.py SSOT 재전파 문구(소문자)와 정합한다.
+
+    database.py:20-23 은 ``database disk image is malformed`` / ``file is not a
+    database`` 를 무결성 문제로 재전파한다. 본 predicate 시그니처가 그 문구의
+    부분집합(소문자)이어야 손상을 정확히 좁혀 잡는다.
+    """
+    assert "malformed" in _DB_CORRUPTION_SIGNATURES
+    assert "file is not a database" in _DB_CORRUPTION_SIGNATURES
+    # database.py SSOT 재전파 문구가 각 시그니처를 포함한다(정합 락).
+    assert "malformed" in "database disk image is malformed".lower()
+    assert "file is not a database" in "file is not a database".lower()
+
+
+async def test_loop_transient_locked_not_treated_as_corruption(eventbus, monkeypatch):
+    """비-손상 transient ``database is locked`` → 손상 카운터 미누적·backoff 미발생.
+
+    **이번 P2 회귀 락**: 이전에는 모든 ``sqlite3.DatabaseError`` 를 손상으로
+    오분류해 ``database is locked``(외부 프로세스/긴 트랜잭션 — transient) 가
+    손상 카운터를 누적시키고 backoff 로 notify 를 막았다. 이제 손상 predicate 로
+    좁혀, locked 는 비-손상 reset 경로(즉시재시도)로 흘러 notify 즉시성이 보존된다.
+    """
+    notifications: list[NotificationEvent] = []
+
+    async def _on_notify(event):
+        if isinstance(event, NotificationEvent):
+            notifications.append(event)
+
+    eventbus.subscribe(NotificationEvent, _on_notify)
+
+    ob = object.__new__(FillOutbox)
+    publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
+
+    harness = _LoopHarness(publisher, monkeypatch)
+    # locked 를 임계(10) 초과로 반복해도 손상 카운터가 누적되지 않아야 한다.
+    harness.drain_outcomes = [
+        sqlite3.OperationalError("database is locked")
+        for _ in range(_ESCALATE_THRESHOLD + 3)
+    ]
+    harness.install()
+    await harness.run()
+
+    # 손상 카운터 누적 안 됨 + escalation latch 미설정.
+    assert publisher._consecutive_failures == 0
+    assert publisher._escalated is False
+    # 잘못된 DB 손상 알림이 발행되지 않았다.
+    assert notifications == []
+    # 매 사이클 base 주기(drain_interval)로 즉시 재시도 — backoff escalation 미발생.
+    # (notify 즉시성 보존: 손상 backoff 게이팅에 들어가지 않음)
+    intervals = [
+        harness.drain_times[i + 1] - harness.drain_times[i]
+        for i in range(len(harness.drain_times) - 1)
+    ]
+    assert all(iv == publisher._drain_interval for iv in intervals)
+
+
+async def test_loop_internal_bug_db_error_resets_counter(eventbus, monkeypatch):
+    """내부 버그류 ``no such table``/``ProgrammingError`` → 카운터 reset(은폐 금지).
+
+    비-손상 ``DatabaseError`` 도 backoff/escalation 으로 은폐하지 않고, 선행 손상
+    실패 backoff 가 있었다면 reset 해 base 주기로 복귀한다(#2350 dual-branch 미러).
+    """
+    notifications: list[NotificationEvent] = []
+
+    async def _on_notify(event):
+        if isinstance(event, NotificationEvent):
+            notifications.append(event)
+
+    eventbus.subscribe(NotificationEvent, _on_notify)
+
+    ob = object.__new__(FillOutbox)
+    publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
+
+    harness = _LoopHarness(publisher, monkeypatch)
+    # 손상 2회로 카운터·backoff 가 올라간 뒤, 내부 버그류 DatabaseError(no such table,
+    # ProgrammingError) → 카운터 reset, 그 다음 정상 드레인 1회(base 주기 복귀 관측).
+    harness.drain_outcomes = [
+        sqlite3.OperationalError("database disk image is malformed"),
+        sqlite3.OperationalError("file is not a database"),
+        sqlite3.OperationalError("no such table: fill_outbox"),
+        sqlite3.ProgrammingError("syntax error near SELEKT"),
+        None,
+    ]
+    harness.install()
+    await harness.run()
+
+    # 내부 버그류에서 손상 카운터가 0 으로 reset 됐다(은폐 안 함). 최종 성공으로 0 유지.
+    assert publisher._consecutive_failures == 0
+    assert publisher._escalated is False
+    # escalation 미발생(잘못된 손상 알림 없음).
+    assert notifications == []
+    # 내부 버그류 직후 드레인은 base 주기(drain_interval)로 복귀(backoff 해제 — #2350).
+    # drain_times: [손상1, 손상2, nosuchtable, programming, 성공]
+    intervals = [
+        harness.drain_times[i + 1] - harness.drain_times[i]
+        for i in range(len(harness.drain_times) - 1)
+    ]
+    # 손상1→손상2 = ×2 backoff(2.0), 손상2→nosuchtable = ×4 backoff(4.0, 손상2 시점
+    # next_drain_at 기준). nosuchtable·programming 은 reset 후라 매번 base 로 복귀.
+    assert intervals[0] == 2.0
+    assert intervals[1] == 4.0
+    assert intervals[2] == publisher._drain_interval
+    assert intervals[3] == publisher._drain_interval
