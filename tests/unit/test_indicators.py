@@ -285,6 +285,53 @@ def test_compute_stoch(ohlcv_arrays: dict[str, np.ndarray]):
     assert set(result.keys()) == {"slowk", "slowd"}
 
 
+# ── bbands 밴드폭 파라미터 실효 (#2404) ──
+#
+# pandas-ta 0.4.71b0 `bbands`는 `std` 인자가 없어 silent-drop되고,
+# `lower_std`/`upper_std`만 밴드폭에 반영된다. 레지스트리가 `std`를 등록했던
+# 회귀를 차단한다.
+
+
+def test_compute_bbands_std_override_changes_bands(
+    ohlcv_arrays: dict[str, np.ndarray],
+):
+    """bbands lower_std/upper_std 변경 시 밴드폭(lower/upper)이 실제로 변한다."""
+    base = IndicatorCalculator.compute("bbands", ohlcv_arrays, length=20)
+    wide = IndicatorCalculator.compute(
+        "bbands", ohlcv_arrays, length=20, lower_std=5.0, upper_std=5.0
+    )
+    # middle(중심선)은 std와 무관하게 동일해야 한다.
+    np.testing.assert_allclose(base["middle"], wide["middle"], equal_nan=True)
+    # lower/upper 밴드는 std=5.0에서 더 멀어져야 한다 (silent-drop이면 동일).
+    valid = ~np.isnan(base["upper"]) & ~np.isnan(wide["upper"])
+    assert valid.any(), "유효한 밴드 값이 없음 (데이터 부족)"
+    assert not np.allclose(base["upper"][valid], wide["upper"][valid]), (
+        "upper 밴드가 std override에 반영되지 않음 — silent-drop 회귀"
+    )
+    assert not np.allclose(base["lower"][valid], wide["lower"][valid]), (
+        "lower 밴드가 std override에 반영되지 않음 — silent-drop 회귀"
+    )
+    # 밴드폭이 실제로 넓어졌는지 확인 (방향성).
+    base_width = base["upper"][valid] - base["lower"][valid]
+    wide_width = wide["upper"][valid] - wide["lower"][valid]
+    assert np.all(wide_width >= base_width - 1e-9), (
+        "std=5.0이 std=2.0보다 밴드폭이 넓어야 한다"
+    )
+
+
+def test_compute_bbands_default_params_are_pandas_ta_keys():
+    """bbands 레지스트리 기본 파라미터가 pandas-ta 정식 키만 사용한다."""
+    params = INDICATOR_REGISTRY["bbands"]["params"]
+    assert set(params) == {"length", "lower_std", "upper_std"}
+    assert "std" not in params, "std는 pandas-ta bbands에 없는 silent-drop 키"
+
+
+def test_compute_legacy_key_raises(ohlcv_arrays: dict[str, np.ndarray]):
+    """legacy 키(timeperiod) 전달 시 정정 힌트를 담은 ValueError를 발생시킨다."""
+    with pytest.raises(ValueError, match="length"):
+        IndicatorCalculator.compute("rsi", ohlcv_arrays, timeperiod=14)
+
+
 # ── None 결과 가드 (#2323) ──
 #
 # pandas-ta는 데이터 부족 시 None을 반환할 수 있다. compute()가 이를 방어하지
