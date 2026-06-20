@@ -29,7 +29,7 @@ INDICATOR_REGISTRY: dict[str, dict[str, Any]] = {
     "bbands": {
         "func": "bbands",
         "input": "close",
-        "params": {"length": 20, "std": 2.0},
+        "params": {"length": 20, "lower_std": 2.0, "upper_std": 2.0},
     },
     "atr": {"func": "atr", "input": "hlc", "params": {"length": 14}},
     "stoch": {
@@ -56,6 +56,28 @@ _MULTI_OUTPUT: dict[str, list[str]] = {
     "macd": ["macd", "signal", "hist"],
     "bbands": ["lower", "middle", "upper"],
     "stoch": ["slowk", "slowd"],
+}
+
+# legacy/오명명 파라미터 키 블랙리스트 (#2404).
+#
+# pandas-ta 도입 이전 TA-Lib 규약의 키(timeperiod, nbdev, fastk/slowk/slowd)는
+# pandas-ta 함수 시그니처에 존재하지 않아 `**kwargs`로 흡수된 뒤 조용히 무시된다
+# (silent-drop). 사용자가 정식 키 대신 이 키를 전달하면 의도한 파라미터가
+# 반영되지 않으므로, compute()가 pandas-ta 호출 전에 명시적으로 거부한다.
+#
+# 블랙리스트 방식 채택 근거: pandas-ta 15개 함수가 전부 `**kwargs`를 보유하고
+# 일부 정당 파라미터(예: macd/rsi의 signal_indicators)가 named param이 아닌
+# `kwargs.pop()`으로 처리되므로, allowlist는 정당 입력을 false-reject한다.
+# 아래 키는 현재 15개 지표 어디에서도 유효하지 않아 전역 거부가 안전하다.
+#
+# 값: 정정 키 힌트 (에러 메시지에 노출).
+_LEGACY_PARAM_KEYS: dict[str, str] = {
+    "timeperiod": "length",
+    "nbdev": "lower_std/upper_std (bbands)",
+    "std": "lower_std/upper_std (bbands)",
+    "fastk": "k (stoch)",
+    "slowk": "smooth_k (stoch)",
+    "slowd": "d (stoch)",
 }
 
 
@@ -100,12 +122,25 @@ class IndicatorCalculator:
             데이터 부족 등으로 계산 불가 시(pandas-ta가 None 반환) 빈 dict ``{}``.
 
         Raises:
-            ValueError: 미지원 지표 또는 필수 입력 누락.
+            ValueError: 미지원 지표, 필수 입력 누락, 또는 legacy/미인식
+                파라미터 키(예: ``timeperiod``) 전달 (#2404 silent-drop 차단).
         """
         name_lower = name.lower()
         if name_lower not in INDICATOR_REGISTRY:
             supported = ", ".join(sorted(INDICATOR_REGISTRY.keys()))
             raise ValueError(f"Unknown indicator: {name}. Supported: {supported}")
+
+        # legacy-key 블랙리스트 가드 (#2404): 사용자 전달 params에 pandas-ta가
+        # 조용히 무시하는 TA-Lib 규약 키가 있으면 silent-drop 전에 거부한다.
+        # 레지스트리 기본값(spec["params"])은 전부 정식 키이므로 검사 대상 아님.
+        legacy = [key for key in params if key in _LEGACY_PARAM_KEYS]
+        if legacy:
+            hints = ", ".join(f"{key} -> {_LEGACY_PARAM_KEYS[key]}" for key in legacy)
+            raise ValueError(
+                f"Unrecognized indicator parameter key(s) for '{name}': "
+                f"{', '.join(legacy)}. These keys are silently ignored by "
+                f"pandas-ta. Use the correct key(s): {hints}."
+            )
 
         spec = INDICATOR_REGISTRY[name_lower]
         merged_params = {**spec["params"], **params}

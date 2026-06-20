@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-18 (KST)
+> 마지막 생성 시점: 2026-06-20 (KST)
 
 ## 최상위 구조
 
@@ -644,7 +644,8 @@ tests/
 │   │   ├── docs_drift_allowlist.yaml
 │   │   ├── test_cli_registry_docs_drift.py
 │   │   ├── test_cli_registry_guide_sync.py
-│   │   └── test_signal_connect_codes.py
+│   │   ├── test_signal_connect_codes.py
+│   │   └── test_indicator_param_drift.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -732,7 +733,10 @@ tests/
 │   ├── test_account_runtime_readiness.py
 │   ├── test_main_runtime_readiness_wiring.py
 │   ├── _readiness_gate_helpers.py
-│   └── test_active_order_readiness_gate.py
+│   ├── test_active_order_readiness_gate.py
+│   ├── test_kis_token_backoff_cadence.py
+│   ├── test_kis_token_cooldown.py
+│   └── test_kis_token_single_flight.py
 ├── __init__.py
 └── integration/
     ├── __init__.py

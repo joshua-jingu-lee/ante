@@ -68,7 +68,7 @@ class MyStrategy(Strategy):
 ```python
 ohlcv = await self.ctx.get_ohlcv("005930", timeframe="1d", limit=100)
 price = await self.ctx.get_current_price("005930")
-indicator = await self.ctx.get_indicator("005930", "rsi", {"timeperiod": 14})
+indicator = await self.ctx.get_indicator("005930", "rsi", {"length": 14})
 ```
 
 **포트폴리오 조회:**
@@ -88,29 +88,29 @@ self.ctx.cancel_order(order_id="ORD-001", reason="전략 조건 변경")
 
 > **주문 정정(`modify_order`)은 v1=가격 정정만 지원합니다(price-only, #2391).** `self.ctx.modify_order(order_id, price=신규가격, reason=...)`로 **미체결(`open`) 지정가 주문의 가격을 정정**할 수 있습니다(매수는 신규가 ≤ 원주문가, 매도는 가격 정정). 성공하면 `on_order_update` 알림에 `status="modified"`로 통보됩니다. **다음 경우는 거부되며**(`on_order_update`의 `reason` 필드로 사유 전달), 이때는 **`cancel_order()`로 취소한 뒤 새 주문을 다시 제출**하세요: 수량 변경(`modify_qty_change_unsupported`), 매수 가격 인상(`modify_budget_increase_unsupported`), 부분체결/종료 주문(`modify_partial_or_terminal_unsupported`), 다른 봇의 주문(`modify_not_owner`), 비지정가(시장가) 주문(`modify_unsupported_order_type`), 무효 가격(`modify_invalid_args`). 수량 변경 등 고급 정정과 실전 KIS 정정 검증은 후속 작업(#2393, oracle)으로 분리되어 있습니다.
 
-**기술 지표:** `get_indicator()`로 기술 지표를 사용할 수 있습니다. 내부적으로 [pandas-ta](https://github.com/twopirllc/pandas-ta)를 사용하며, pandas-ta가 지원하는 130+ 지표를 모두 사용할 수 있습니다.
+**기술 지표:** `get_indicator()`로 기술 지표를 사용할 수 있습니다. 내부적으로 [pandas-ta](https://github.com/twopirllc/pandas-ta)를 사용하며, **아래 15종**을 지원합니다. 파라미터 키는 pandas-ta 규약(`length` 등)을 따르며, 등록되지 않은 지표 이름은 `ValueError: Unknown indicator`로 거부됩니다.
 
-자주 사용되는 지표:
+지원 지표(15종):
 
 | 지표 | 이름 | 주요 파라미터 |
 |------|------|-------------|
-| SMA | 단순이동평균 | `timeperiod` |
-| EMA | 지수이동평균 | `timeperiod` |
-| RSI | 상대강도지수 | `timeperiod` |
+| SMA | 단순이동평균 | `length` |
+| EMA | 지수이동평균 | `length` |
+| RSI | 상대강도지수 | `length` |
 | MACD | 이동평균수렴확산 | `fast`, `slow`, `signal` |
-| BBANDS | 볼린저밴드 | `timeperiod`, `nbdev` |
-| ATR | 평균진폭 | `timeperiod` |
-| STOCH | 스토캐스틱 | `fastk`, `slowk`, `slowd` |
-| ADX | 평균방향지수 | `timeperiod` |
-| CCI | 상품채널지수 | `timeperiod` |
+| BBANDS | 볼린저밴드 | `length`, `lower_std`, `upper_std` |
+| ATR | 평균진폭 | `length` |
+| STOCH | 스토캐스틱 | `k`, `d`, `smooth_k` |
+| ADX | 평균방향지수 | `length` |
+| CCI | 상품채널지수 | `length` |
 | OBV | 거래량잔고 | — |
-| VWAP | 거래량가중평균가 | — |
-| Ichimoku | 일목균형표 | `tenkan`, `kijun`, `senkou` |
-| Supertrend | 슈퍼트렌드 | `length`, `multiplier` |
-| ROC | 변화율 | `timeperiod` |
-| CMF | 차이킨자금흐름 | `timeperiod` |
+| WMA | 가중이동평균 | `length` |
+| DEMA | 이중지수이동평균 | `length` |
+| TEMA | 삼중지수이동평균 | `length` |
+| WILLR | 윌리엄스 %R | `length` |
+| MFI | 자금흐름지수 | `length` |
 
-> 전체 지표 목록은 [pandas-ta 문서](https://github.com/twopirllc/pandas-ta#indicators-by-category)를 참조하세요.
+> TA-Lib 규약 키(`timeperiod`, `nbdev`, `fastk`/`slowk`/`slowd`)는 pandas-ta가 조용히 무시하므로 `get_indicator()`가 `ValueError`로 거부합니다. 위 표의 정식 키를 사용하세요. VWAP·Ichimoku·Supertrend·ROC·CMF 등 위 15종에 없는 지표는 현재 미지원입니다.
 
 ### 라이프사이클 메서드
 
@@ -222,7 +222,7 @@ class MomentumBreakout(Strategy):
 
     async def on_step(self, context: dict) -> list[Signal]:
         ohlcv = await self.ctx.get_ohlcv("005930", limit=20)
-        rsi = await self.ctx.get_indicator("005930", "rsi", {"timeperiod": 14})
+        rsi = await self.ctx.get_indicator("005930", "rsi", {"length": 14})
         positions = self.ctx.get_positions()
 
         current_close = ohlcv.iloc[-1]["close"]
