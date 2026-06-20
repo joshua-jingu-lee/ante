@@ -7,6 +7,7 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로,
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -97,6 +98,21 @@ class StopOrderManager:
         self._eventbus = eventbus
         self._orders: dict[str, StopOrder] = {}
         self._running = False
+        # #2405 (attempt6 P2-B): 거래일 확인된(실 WS 틱이 흐른) 세션을
+        # ``{거래일}:{세션종류}`` epoch 키로 기록한다. ``on_price_update``
+        # (실 틱)가 add 하고 ``register`` 가 같은 헬퍼(``_session_epoch_key``)로
+        # 조회해, 거래일 확인된 세션에 늦게 등록(+이후 무틱)된 주문도 등록
+        # 시점에 ``entered_session=True`` 로 마킹한다. 이게 없으면 늦은 등록분이
+        # market-wide 마킹 루프(다음 틱)를 못 받아 ``entered_session=False`` 로
+        # 잔존해 장종료 sweep 에서 미만료된다(다음 세션 생존, A2 위반).
+        self._session_tick_marked: set[str] = set()
+        # #2405 (attempt6 P2-A): in-flight ``_do_expire_order`` 태스크 보관.
+        # shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep 의
+        # ``await publish`` 도중에 닿아도, shield 된 inner task 가 background
+        # 에서 terminal(``StopOrderExpiredEvent``) 을 완주하고, ``stop()`` 이
+        # loop teardown 전에 이를 await 해 in-flight terminal 유실을 막는다
+        # (signal_channel.py 의 shield+inflight 패턴 미러).
+        self._inflight_expires: set[asyncio.Task[None]] = set()
 
     @property
     def active_orders(self) -> list[StopOrder]:
@@ -114,10 +130,24 @@ class StopOrderManager:
         logger.info("StopOrderManager 시작")
 
     async def stop(self) -> None:
-        """매니저 중지. 활성 주문 모두 만료 처리."""
+        """매니저 중지. 활성 주문 모두 만료 처리.
+
+        #2405 (attempt6 P2-A): ``active_orders`` 의 manager_stopped 정리 후,
+        shutdown 중 sweep cancel 로 background 에 남은 in-flight
+        ``_do_expire_order`` task 들을 loop teardown 전에 await 해 in-flight
+        terminal(session_ended) 유실을 막는다. half-expired order 는 이미
+        ``expired=True`` 라 ``active_orders`` 에서 빠져 manager_stopped 가
+        재발행되지 않으므로 terminal 이 이중 발행되지 않는다.
+        """
         self._running = False
         for order in self.active_orders:
             await self._expire_order(order, "manager_stopped")
+        # in-flight terminal(shield 된 inner task) 완료 보장 — loop 가 살아
+        # 있는 이 시점에 await 해야 background task 가 안전히 완주한다.
+        if self._inflight_expires:
+            await asyncio.gather(*list(self._inflight_expires), return_exceptions=True)
+        # #2405 (attempt6 P2-B, bounded growth): epoch set 정리.
+        self._session_tick_marked.clear()
         logger.info("StopOrderManager 중지")
 
     async def register(
@@ -194,6 +224,20 @@ class StopOrderManager:
             account_id=account_id,
         )
         self._orders[stop_order_id] = order
+
+        # #2405 (attempt6 P2-B): 거래일 확인된 세션에 늦게 등록된 주문 마킹.
+        # ``_is_in_session(order)`` 게이트로 현재 시각이 이 주문의 세션 윈도우
+        # 안일 때만, 그리고 그 세션이 이미 실 틱으로 거래일 확인됐을 때만
+        # (epoch 키 존재) 등록 시점에 ``entered_session=True`` 로 표시한다.
+        # 게이트 덕에 세션 종료 후 등록·휴장일 사전 등록(실 틱 없어 epoch 키
+        # 부재 또는 _is_in_session=False)은 여기서 걸러져 마킹되지 않는다
+        # (A2 보존). per-order ``entered_session`` 이 최종 만료 권위이며,
+        # epoch set 은 register-time 마킹 게이트로만 쓰인다(attempt3 불변).
+        if self._is_in_session(order):
+            if self._session_epoch_key(order.trading_session) in (
+                self._session_tick_marked
+            ):
+                order.entered_session = True
 
         logger.info(
             "스탑 주문 등록: %s %s %s stop=%.0f",
@@ -299,6 +343,18 @@ class StopOrderManager:
             for order in self.active_orders:
                 if self._is_in_session(order):
                     order.entered_session = True
+            # #2405 (attempt6 P2-B): 실 틱이 흐르는 그 시점 활성 세션종류들을
+            # epoch 키로 마킹한다. 이후 같은 세션에 늦게 등록된 주문은
+            # ``register`` 에서 이 키를 보고 등록 시점에 ``entered_session=
+            # True`` 로 마킹된다(이후 무틱이어도 장종료 sweep 에 만료). 활성
+            # 세션종류 판정은 SESSION_TYPES SSOT 에 ``_is_session_type_active_now``
+            # 를 재사용한다 — active order 유무와 무관하게(빈 시점 등록 후
+            # 무틱 케이스 포함) 마킹되도록 SESSION_TYPES 전체를 검사한다.
+            # is_exchange_tick=False(fallback poll)는 이 블록에 진입하지 않아
+            # epoch 를 더럽히지 않는다(source chokepoint 보존).
+            for session_type in SESSION_TYPES:
+                if self._is_session_type_active_now(session_type):
+                    self._session_tick_marked.add(self._session_epoch_key(session_type))
 
         # #2405 (attempt5 P2): 트리거 평가는 출처(실 틱/fallback poll)와
         # **무관하게** 항상 수행한다. 스트림 hiccup 중에도 실거래일이면
@@ -345,7 +401,21 @@ class StopOrderManager:
         없으므로 "거래일인데 전 모니터 종목이 세션 내내 무틱"(전종목 거래정지 등)
         이면 어떤 주문도 마킹되지 않아 미만료된다(다음 세션 생존). 캘린더
         부재의 구조적 하한 — api-gateway.md normative 선언.
+
+        #2405 (attempt6 P2-B, bounded growth): ``_session_tick_marked`` 의
+        stale epoch(현재 business_date 가 아닌 거래일 키)를 매 sweep 1회
+        prune 한다 — 거래일마다 새 키가 쌓여도 set 이 무한 증가하지 않게 한다.
+        prune 시점은 sweep(분 단위 주기 호출)이라 현재 거래일 키는 보존되고
+        과거 거래일 키만 제거된다(register-time 마킹 게이트는 같은 거래일에서만
+        쓰이므로 무해).
         """
+        from ante.broker.fill_scheduler import business_date_kst
+
+        today = business_date_kst()
+        self._session_tick_marked = {
+            key for key in self._session_tick_marked if key.split(":", 1)[0] == today
+        }
+
         for order in self.active_orders:
             if order.entered_session and not self._is_in_session(order):
                 await self._expire_order(order, "session_ended")
@@ -360,6 +430,24 @@ class StopOrderManager:
     def _is_in_session(self, order: StopOrder) -> bool:
         """현재 시각이 주문의 거래 세션 시간 내인지 확인."""
         return self._is_session_type_active_now(order.trading_session)
+
+    def _session_epoch_key(self, session_type: str) -> str:
+        """거래일 멤버십 마킹 epoch 키 SSOT(``{거래일}:{세션종류}``).
+
+        #2405 (attempt6 P2-B): ``on_price_update``(실 틱 add)와
+        ``register``(조회)가 **같은 헬퍼**로 키를 생성해 drift 를 막는다.
+
+        ``business_date_kst()`` 는 휴장일/주말/시간외를 backward-roll 하지
+        **않고** 순수 KST 캘린더 날짜(``YYYYMMDD``)를 반환한다(fill_scheduler.
+        py:88). 따라서 금요일 틱과 토요일은 서로 다른 키가 되며, epoch 키에
+        raw calendar date 를 별도로 덧붙일 필요가 없다(``business_date_kst``
+        자체가 이미 raw calendar date 다). 이 날짜 분리가 epoch 휴장일
+        안전성의 핵심이다 — 1일차 epoch 가 2일차로 누설돼 2일차 신규 주문을
+        오마킹하지 않는다(주말이 사이에 끼어도 다른 키).
+        """
+        from ante.broker.fill_scheduler import business_date_kst
+
+        return f"{business_date_kst()}:{session_type}"
 
     def _is_session_type_active_now(self, session_type: str) -> bool:
         """현재 시각이 주어진 세션 종류의 윈도우 안인지(시각 기준)."""
@@ -433,7 +521,42 @@ class StopOrderManager:
         )
 
     async def _expire_order(self, order: StopOrder, reason: str) -> None:
-        """스탑 주문 만료 처리."""
+        """스탑 주문 만료 처리(shield 보장).
+
+        #2405 (attempt6 P2-A): terminal(``StopOrderExpiredEvent``) 발행을
+        ``asyncio.shield`` 로 감싼 별도 task(``_do_expire_order``)에 위임한다.
+        shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep
+        (``check_session_expiry``)의 ``await`` 지점에 닿아도, shield 된 inner
+        task 는 CancelledError 로 중단되지 않고 background 에서 terminal 을
+        완주한다. 만약 shield 없이 ``order.expired=True`` 직후 publish 도중
+        cancel 되면, 그 주문은 이미 ``active_orders`` 에서 빠져(expired) 이후
+        ``manager.stop()`` 의 manager_stopped sweep 도 그것을 못 봐 terminal
+        이 영구 유실된다(봇/SignalChannel 의 stop_expired 통보 미수신).
+
+        ``_do_expire_order`` 가 ``order.expired=True`` 를 먼저 set 하므로
+        half-expired order 는 ``manager.stop()`` 의 ``active_orders`` 에서
+        제외되어 manager_stopped 가 재발행되지 않는다 + shield 로 session_ended
+        는 정확히 1회 → terminal 정확히 1회(이중 발행 없음).
+
+        signal_channel.py 의 shield+inflight 보관/await 패턴을 미러한다.
+        """
+        inner = asyncio.ensure_future(self._do_expire_order(order, reason))
+        self._inflight_expires.add(inner)
+        try:
+            # shield: sweep task 가 cancel 돼도 inner(별도 task)는 background
+            # 에서 terminal publish 를 완주한다.
+            await asyncio.shield(inner)
+        finally:
+            # inner 가 아직 진행 중(shield 가 CancelledError 를 re-raise 한
+            # 경우)이면 set 에 남겨, ``stop()`` 의 gather 가 await 한다.
+            # 정상 완료면 done callback 으로 이미 discard 됐다.
+            if inner.done():
+                self._inflight_expires.discard(inner)
+            else:
+                inner.add_done_callback(self._inflight_expires.discard)
+
+    async def _do_expire_order(self, order: StopOrder, reason: str) -> None:
+        """스탑 주문 만료 terminal 발행(shield 된 inner)."""
         order.expired = True
 
         logger.info(
