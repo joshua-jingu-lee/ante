@@ -251,7 +251,17 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 **세션 관리**: 정규 세션(09:00-15:30 KST), 확장 세션(08:30-18:00 KST). 세션 외 시간에는 트리거하지 않음.
 
+#### 세션 만료 의미론 (A2, #2405) — normative
+
+`check_session_expiry()`는 **그 세션에 진입했던 미트리거 주문만** 세션 종료 시 `session_ended`로 만료한다. 세션에 한 번도 진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분)은 **만료되지 않고 보존**된다 — 세션 외 시각에 등록한 stop 이 다음 sweep 에서 즉시 만료되던 부작용(A1)을 제거한다.
+
+**틱-거래일 근사 (tick-as-trading-day-proxy)**: `src/ante`에는 거래일/휴장일 캘린더가 없고 `_is_in_session`은 시각(09:00–15:30 KST 등)만 본다. 시각만으로는 거래일과 휴장일의 "시장 시간대"를 구분할 수 없으므로, **실시간 시세 틱(`on_price_update`)을 거래일 개장의 신호로 근사한다**. `StopOrderManager`는 manager-level 세션활동 플래그(`_session_active`, 세션 종류별 `regular`/`extended`)를 두고, **종목·계좌 무관하게** 틱이 흐른 시각이 속한 세션을 market-wide 로 active 표시한다. 한 종목이라도 틱이 흐르면 그 세션의 **모든** 미트리거 주문(그 세션 동안 한 번도 틱이 들어오지 않은 무틱 종목 포함)이 세션 종료 시 만료된다. 만료 sweep 직후, 윈도우 밖으로 끝난 세션의 플래그는 reset 되어 다음 거래일 첫 틱이 다시 active 로 표시한다(재만료 사이클). 휴장일에는 전종목 무틱이라 플래그가 active 되지 않아 사전 등록분이 보존된다.
+
+**bounded known-limitation (캘린더 부재의 구조적 하한)**: "거래일인데 모니터 대상 전 종목이 세션 내내 무틱"(예: 전종목 거래정지)인 경우, 그 세션이 active 표시되지 않아 해당 주문이 그 세션에는 만료되지 않는다(다음 세션 생존). 이는 거래일/휴장일 캘린더 부재에서 비롯된 의도된 하한이며, 거래일 캘린더 도입 시 해소된다.
+
 **발행 이벤트**: `StopOrderRegisteredEvent`, `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`. 트리거 시 변환된 `OrderRequestEvent`를 발행하여 기존 주문 흐름에 주입. 세 이벤트 모두 account-scoped (`account_id` 필드 + `_requires_account_id` 마커, #1336) 이며, 발행 시 `StopOrderManager`가 `account_id`를 명시 채운다.
+
+**등록 거부 (Fix A, #2405)**: 매니저가 stopped(`_running=False`, shutdown 진행 중 또는 start 전) 상태에서 `register`가 호출되면 `StopOrderManagerStoppedError`를 raise 한다(이전의 빈 문자열 반환은 호출자가 인지하지 못하는 silent loss 였다). 호출자(`APIGateway._on_order_approved`)는 이 예외를 잡아 `OrderFailedEvent`(`bot_id`/`order_id`/`account_id` 보존)로 terminal 종결하므로(:187 참조), in-flight 주문이 terminal 이벤트 없이 inert 로 남지 않는다. `account_id` invalid 거부(`InvalidAccountIdError`)는 이 가드보다 **먼저** 적용된다.
 
 ### StopOrderManager — 전략 통보 정책 (#1336)
 
