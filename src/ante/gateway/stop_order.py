@@ -24,8 +24,7 @@ REGULAR_SESSION_END = (6, 30)  # 15:30 KST = 06:30 UTC
 EXTENDED_SESSION_START = (23, 30)  # 08:30 KST (전일 23:30 UTC)
 EXTENDED_SESSION_END = (9, 0)  # 18:00 KST = 09:00 UTC
 
-# #2405 (A2 세션만료): 세션 종류 SSOT. ``_session_active`` 플래그 키이자
-# ``StopOrder.trading_session`` 의 허용 값이다.
+# #2405 (A2 세션만료): 세션 종류 SSOT. ``StopOrder.trading_session`` 의 허용 값.
 SESSION_TYPES = ("regular", "extended")
 
 
@@ -70,6 +69,13 @@ class StopOrder:
     triggered: bool = False
     expired: bool = False
     exchange: str = "KRX"
+    # #2405 (A2 세션만료, attempt3 P1/P2): 이 주문이 자신의 거래 세션 안에서
+    # 한 번이라도 in-session 틱(``on_price_update``)을 받은 적이 있는지. tick 은
+    # 거래일 개장의 proxy 이므로(휴장일엔 무틱), 이 플래그가 True 인 주문만 세션
+    # 종료 시 ``session_ended`` 로 만료된다. per-order 멤버십이라 세션 경계
+    # race(일부 주문이 한 sweep 에서 미만료)·세션 종료 후 등록(in-session 틱
+    # 부재)의 오만료를 구조적으로 배제한다(manager-level 플래그의 타이밍 엣지 교정).
+    entered_session: bool = False
 
     def __post_init__(self) -> None:
         from ante.account.scoping import require_account_id
@@ -91,14 +97,6 @@ class StopOrderManager:
         self._eventbus = eventbus
         self._orders: dict[str, StopOrder] = {}
         self._running = False
-        # #2405 (attempt2 P2): manager-level 세션활동 플래그. src/ante 에
-        # 거래일/휴장일 캘린더가 없어서 ``_is_in_session`` 은 시각만 본다. 실제
-        # 시장 틱(``on_price_update``)을 "거래일 개장 중" 의 proxy 로 삼아,
-        # 종목·계좌 무관하게 현재 시각이 속한 세션을 market-wide 로 active 표시한다.
-        # ``check_session_expiry`` 는 그 세션의 모든 미트리거 주문(무틱 종목 포함)을
-        # 세션 종료 시 만료한다 — per-order ``entered_session`` 의 "무틱 종목 미만료"
-        # 결함을 닫는다.
-        self._session_active: dict[str, bool] = {s: False for s in SESSION_TYPES}
 
     @property
     def active_orders(self) -> list[StopOrder]:
@@ -270,12 +268,16 @@ class StopOrderManager:
         if not self._running:
             return
 
-        # #2405 (attempt2 P2): manager-level 세션활동 마킹. 실제 틱이 흐른다는
-        # 것은 거래일 개장 중이라는 신호다(휴장일엔 무틱). 종목·계좌 무관하게
-        # 현재 시각이 속한 세션을 market-wide 로 active 표시한다 — 이 틱이 들어온
-        # 종목뿐 아니라 같은 세션의 무틱 종목까지 세션 종료 시 만료 자격을 얻는다.
-        for session_type in self._current_session_types():
-            self._session_active[session_type] = True
+        # #2405 (A2 세션만료, attempt3 P1/P2): market-wide per-order 마킹. 실제
+        # 틱이 흐른다는 것은 거래일 개장 중이라는 신호다(휴장일엔 무틱). 이 틱의
+        # 종목·계좌와 **무관하게**, 그 시점 자신의 세션 안에 있는 **모든** active
+        # order 의 ``entered_session`` 을 True 로 표시한다 — 이 틱이 들어온
+        # 종목뿐 아니라 같은 세션의 무틱 종목까지 세션 멤버십을 부여한다(아래
+        # 트리거용 ``active_for_symbol`` 루프는 per-symbol 그대로). per-order
+        # 멤버십이라 세션 경계 race·세션 종료 후 등록의 오만료 엣지가 없다.
+        for order in self.active_orders:
+            if self._is_in_session(order):
+                order.entered_session = True
 
         active_for_symbol = [
             o
@@ -292,39 +294,35 @@ class StopOrderManager:
     async def check_session_expiry(self) -> None:
         """세션 종료 시 미트리거 주문 만료 처리.
 
-        #2405 (A2 의미론): **세션에 진입했던**(``_session_active[s]``) 미트리거
-        주문만 그 세션 종료 시 ``session_ended`` 로 만료한다. 세션에 한 번도
-        진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분)은
-        만료되지 않는다 — "세션 외 등록 stop 즉시 만료"(A1) 부작용을 제거한다.
+        #2405 (A2 의미론): **자신의 세션에 진입했던**(``entered_session``)
+        미트리거 주문만 그 세션 종료 시 ``session_ended`` 로 만료한다. 세션에 한
+        번도 진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분,
+        세션 종료 후 등록분)은 만료되지 않는다 — "세션 외 등록 stop 즉시
+        만료"(A1) 부작용을 제거한다.
 
-        #2405 (attempt2 P2): 마킹을 per-order ``entered_session`` 에서
-        manager-level ``_session_active`` 로 옮겼다. 거래일에 한 종목이라도 틱이
-        흐르면(``on_price_update``) 그 세션이 market-wide 로 active 표시되고,
-        세션 종료 시 그 세션의 **모든** 미트리거 주문(틱이 한 번도 안 들어온
-        무틱 종목 포함)을 만료한다 — per-order 마킹의 "무틱 종목 영구 미만료"
-        결함을 닫는다.
+        #2405 (attempt3 P1/P2): 멤버십을 per-order ``entered_session`` 으로
+        추적한다. ``on_price_update`` 가 market-wide(틱의 종목·계좌 무관)로 그
+        시점 in-session 인 **모든** active order 를 마킹하므로, 거래일에 한
+        종목이라도 틱이 흐르면 그 세션의 무틱 종목까지 멤버십을 얻어 함께
+        만료된다. ``entered_session`` 은 per-order 1회 set 이고 ``_expire_order``
+        가 만료 주문을 ``active_orders`` 에서 제외(소비)하므로 별도 reset 이
+        필요 없다. 이 per-order 멤버십이 manager-level 플래그의 타이밍 엣지를
+        교정한다:
 
-        만료 sweep 직후, 윈도우 밖으로 끝난 세션의 플래그를 reset 한다(같은
-        sweep 에 응집). 다음 거래일 첫 틱이 다시 active 로 set 하여 재만료
-        사이클을 형성한다.
+        - 세션 경계 race: 한 sweep 에서 경계 통과로 미만료된 주문도
+          ``entered_session=True`` 를 유지하므로 다음(완전 세션 밖) sweep 에서
+          만료된다(누락 없음).
+        - 세션 종료 후 등록: 세션 밖에 등록된 주문엔 in-session 틱이 오지 않아
+          ``entered_session=False`` → 미만료(보존). 사전 등록분도 동일 보존.
 
         #2405 (bounded known-limitation): src/ante 에 거래일/휴장일 캘린더가
         없으므로 "거래일인데 전 모니터 종목이 세션 내내 무틱"(전종목 거래정지 등)
-        이면 그 세션이 active 표시되지 않아 미만료된다(다음 세션 생존). 캘린더
+        이면 어떤 주문도 마킹되지 않아 미만료된다(다음 세션 생존). 캘린더
         부재의 구조적 하한 — api-gateway.md normative 선언.
         """
         for order in self.active_orders:
-            if self._session_active[order.trading_session] and not self._is_in_session(
-                order
-            ):
+            if order.entered_session and not self._is_in_session(order):
                 await self._expire_order(order, "session_ended")
-
-        # 만료 sweep 직후 — 윈도우 밖으로 끝난 세션의 플래그를 닫는다(다음
-        # 거래일 첫 틱이 다시 set). reset 과 만료를 같은 sweep 에 응집.
-        current = self._current_session_types()
-        for session_type in SESSION_TYPES:
-            if self._session_active[session_type] and session_type not in current:
-                self._session_active[session_type] = False
 
     def _should_trigger(self, order: StopOrder, price: float) -> bool:
         """트리거 조건 판단."""
@@ -354,15 +352,6 @@ class StopOrderManager:
             start = REGULAR_SESSION_START[0] * 60 + REGULAR_SESSION_START[1]
             end = REGULAR_SESSION_END[0] * 60 + REGULAR_SESSION_END[1]
             return start <= current_minutes < end
-
-    def _current_session_types(self) -> set[str]:
-        """현재 시각이 윈도우 안에 드는 세션 종류 집합(시각 기준).
-
-        #2405 (attempt2 P2): ``on_price_update`` 의 market-wide 마킹과
-        ``check_session_expiry`` 의 reset 판정에서 공유한다. regular/extended
-        윈도우가 겹치는 시간대(예: 09:00–15:30 KST)에서는 둘 다 반환될 수 있다.
-        """
-        return {s for s in SESSION_TYPES if self._is_session_type_active_now(s)}
 
     async def _trigger_order(self, order: StopOrder, trigger_price: float) -> None:
         """스탑 주문 트리거 → 시장가/지정가 주문으로 변환."""
