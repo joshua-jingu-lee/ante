@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch  # noqa: F811
 
 import pytest
@@ -36,6 +37,7 @@ class TestRegister:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """스탑 주문 등록."""
+        manager.start()
         stop_id = await manager.register(
             order_id="ord-001",
             bot_id="bot-001",
@@ -62,6 +64,7 @@ class TestRegister:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """스탑 리밋 주문 등록."""
+        manager.start()
         stop_id = await manager.register(
             order_id="ord-002",
             bot_id="bot-001",
@@ -228,8 +231,14 @@ class TestTrigger:
     async def test_not_running_ignores_price(
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
-        """매니저 미시작 상태에서 시세 무시."""
-        await manager.register(
+        """매니저 정지 상태(_running=False)에서 시세 무시.
+
+        #2405 (attempt2 P2): register 는 stopped 상태에서 raise 하므로(silent
+        loss 제거), 먼저 start→등록 후 _running 을 False 로 내려 on_price_update
+        의 정지 가드를 검증한다.
+        """
+        manager.start()
+        stop_id = await manager.register(
             order_id="ord-006",
             bot_id="bot-001",
             strategy_id="stg-001",
@@ -241,11 +250,16 @@ class TestTrigger:
             account_id="acc-test",
         )
 
+        # 등록 후 정지 상태로 전환(stop() 은 만료 이벤트를 내므로 직접 플래그만 내림).
+        manager._running = False
         eventbus.publish.reset_mock()
         await manager.on_price_update("005930", 48000.0, account_id="acc-test")
 
-        # running=False이므로 무시
+        # running=False이므로 무시(트리거·세션 멤버십 마킹 모두 없음)
         assert eventbus.publish.call_count == 0
+        order = manager.get_order(stop_id)
+        assert order is not None
+        assert order.entered_session is False
 
 
 class TestCancel:
@@ -255,6 +269,7 @@ class TestCancel:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """활성 주문 취소."""
+        manager.start()
         stop_id = await manager.register(
             order_id="ord-001",
             bot_id="bot-001",
@@ -308,6 +323,917 @@ class TestExpiry:
         assert event.reason == "manager_stopped"
 
 
+class TestSessionExpiryA2:
+    """#2405 (A2): 자신의 세션에 진입했던 미트리거 주문만 session_ended 로 만료된다.
+
+    #2405 (attempt3 P1/P2): 멤버십을 per-order ``StopOrder.entered_session`` 으로
+    추적한다. ``on_price_update`` 가 틱의 종목·계좌와 **무관하게(market-wide)** 그
+    시점 in-session 인 **모든** active 주문을 마킹하므로, 거래일에 한 종목이라도
+    틱이 흐르면 그 세션의 무틱 종목까지 멤버십을 얻어 함께 만료된다. ``_expire_order``
+    가 만료 주문을 ``active_orders`` 에서 소비하므로 별도 reset 이 없다. 휴장일
+    (전종목 무틱)에는 어떤 주문도 마킹되지 않아 사전 등록분이 보존된다. 시간
+    의존은 ``_is_session_type_active_now`` patch 로 결정화한다(``_is_in_session``
+    이 이 헬퍼에 위임하므로 한 번의 patch 로 일관 제어).
+    """
+
+    async def test_entered_then_left_session_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """거래일 정상: in-session 틱으로 멤버십을 얻은 뒤 세션 종료 시 만료된다."""
+        manager.start()
+
+        # 세션 안에서 등록 + in-session 틱 → order.entered_session=True.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-in",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+            order = manager.get_order(stop_id)
+            assert order is not None
+            # register 시점엔 세션 멤버십 미마킹.
+            assert order.entered_session is False
+
+            # in-session 틱(트리거 조건 미달 가격) → 세션 멤버십 마킹.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            assert order.entered_session is True
+            # 트리거 조건 미달이라 이벤트 미발행.
+            assert eventbus.publish.call_count == 0
+
+        eventbus.publish.reset_mock()
+
+        # 세션 종료 후 sweep → 멤버십이 있었으므로 만료.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 1
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StopOrderExpiredEvent)
+        assert event.reason == "session_ended"
+        assert len(manager.active_orders) == 0
+
+    async def test_never_entered_session_not_expired(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션 멤버십 없는(장 전 등록·무틱) 주문은 만료 안 됨(A1 회귀 방지)."""
+        manager.start()
+
+        # 세션 밖에서 등록, 틱 없음 → entered_session=False 유지.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            stop_id = await manager.register(
+                order_id="ord-pre",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is False
+
+            eventbus.publish.reset_mock()
+            await manager.check_session_expiry()
+
+        # 세션에 한 번도 진입 안 했으므로 만료 안 됨.
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+    async def test_holiday_no_tick_pre_registered_not_expired(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 휴장일 안전: 무틱이면 사전 등록 stop 이 만료되지 않는다.
+
+        시나리오: 사전 등록 후 ``on_price_update`` 를 **호출하지 않고**(무틱),
+        out-of-session 시각이 아니라 **in-session 시각**(주말·공휴일의 '시장
+        시간대')에 sweep 을 돌린다. 틱이 없었으므로 entered_session=False →
+        sweep 비만료. (시각만으로 마킹하던 옛 설계라면 여기서 마킹돼 다음 세션
+        종료에 오만료됐다 — 월요일 개장 전 사망.)
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            stop_id = await manager.register(
+                order_id="ord-holiday",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        order = manager.get_order(stop_id)
+        assert order is not None
+        assert order.entered_session is False
+
+        eventbus.publish.reset_mock()
+
+        # 휴장일 '시장 시간대' sweep: 시각상 in-session 이지만 무틱 → 미마킹.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            await manager.check_session_expiry()
+        assert order.entered_session is False
+        assert eventbus.publish.call_count == 0
+
+        # 이후 '세션 종료' sweep 에서도 멤버십 없어 만료 안 됨.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+    async def test_no_tick_symbol_expires_market_wide(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 핵심 회귀: 무틱 종목도 market-wide 마킹으로 만료된다.
+
+        종목A 틱이 종목B(무틱) 포함 그 시점 in-session 전 active order 를
+        마킹 → 세션 종료 시 **모두** 만료된다. (per-symbol 마킹이라면 종목B 가
+        entered_session=False 로 남아 영구 미만료됐다 — 이 회귀 락.)
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            # 종목A — 틱이 들어올 종목.
+            stop_a = await manager.register(
+                order_id="ord-A",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            # 종목B — 세션 내내 무틱 종목.
+            stop_b = await manager.register(
+                order_id="ord-B",
+                bot_id="bot-002",
+                strategy_id="stg-002",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+
+            # 종목A 만 틱(트리거 미달 가격) → market-wide 멤버십 마킹.
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            order_a = manager.get_order(stop_a)
+            order_b = manager.get_order(stop_b)
+            assert order_a is not None and order_b is not None
+            # 무틱 종목B 도 market-wide 로 마킹됨.
+            assert order_a.entered_session is True
+            assert order_b.entered_session is True
+
+        assert len(manager.active_orders) == 2
+        eventbus.publish.reset_mock()
+
+        # 세션 종료 sweep → 종목A·종목B 둘 다 만료(무틱 종목 포함).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert len(manager.active_orders) == 0
+        # 두 주문 모두 session_ended 로 만료 이벤트 발행.
+        assert eventbus.publish.call_count == 2
+        reasons = {call.args[0].reason for call in eventbus.publish.call_args_list}
+        assert reasons == {"session_ended"}
+        symbols = {call.args[0].symbol for call in eventbus.publish.call_args_list}
+        assert symbols == {"005930", "000660"}
+
+    async def test_boundary_race_partial_unexpired_then_next_sweep_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt3 P1) 경계 race 회귀 락.
+
+        sweep 시점 일부 주문이 아직 윈도우 안(``_is_in_session`` True)이라 한
+        sweep 에서 미만료돼도, entered_session 은 유지되므로 이후 완전 세션 밖
+        sweep 에서 만료된다(누락 없음). (manager-level reset 설계에서는 첫 sweep
+        의 reset 이 플래그를 내려 다음 sweep 도 대상에서 제외 → 다음 거래일까지
+        생존하는 결함이 있었다.)
+        """
+        manager.start()
+
+        # in-session 등록 + 틱 → 두 주문 모두 entered_session=True.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_1 = await manager.register(
+                order_id="ord-1",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            stop_2 = await manager.register(
+                order_id="ord-2",
+                bot_id="bot-002",
+                strategy_id="stg-002",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            order_1 = manager.get_order(stop_1)
+            order_2 = manager.get_order(stop_2)
+            assert order_1 is not None and order_2 is not None
+            assert order_1.entered_session is True
+            assert order_2.entered_session is True
+
+        eventbus.publish.reset_mock()
+
+        # 경계 sweep: 아직 윈도우 안이라 만료 없음(하지만 entered_session 유지).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            await manager.check_session_expiry()
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 2
+        assert order_1.entered_session is True
+        assert order_2.entered_session is True
+
+        # 다음 sweep: 완전 세션 밖 → 두 주문 모두 만료(누락 없음).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+        assert len(manager.active_orders) == 0
+        assert eventbus.publish.call_count == 2
+        reasons = {call.args[0].reason for call in eventbus.publish.call_args_list}
+        assert reasons == {"session_ended"}
+
+    async def test_post_session_register_not_expired(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt3 P2) 종료후 등록 오만료 회귀 락.
+
+        세션 중 다른 주문이 in-session 틱을 받아 entered_session=True 가 된
+        상태에서, 세션 종료 후 **새 주문을 register** 한다. 새 주문은 세션 밖이라
+        in-session 틱을 받지 못하므로 entered_session=False → check_session_expiry
+        에서 만료되지 않는다(A2 사전등록 보존). (manager-level 플래그 설계에서는
+        앞 주문이 _session_active[regular]=True 로 올려둔 상태라, 종료 직후 등록한
+        주문이 진입한 적 없는데도 즉시 session_ended 로 오만료됐다.)
+        """
+        manager.start()
+
+        # 세션 중: 주문1 등록 + 틱 → entered_session=True.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_existing = await manager.register(
+                order_id="ord-existing",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            existing = manager.get_order(stop_existing)
+            assert existing is not None
+            assert existing.entered_session is True
+
+        # 세션 종료 후: 새 주문2 등록(세션 밖, in-session 틱 못 받음).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            stop_new = await manager.register(
+                order_id="ord-new",
+                bot_id="bot-002",
+                strategy_id="stg-002",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+            new_order = manager.get_order(stop_new)
+            assert new_order is not None
+            assert new_order.entered_session is False
+
+            # register 이벤트 발행 후 reset → check_session_expiry 만료만 관찰.
+            eventbus.publish.reset_mock()
+            await manager.check_session_expiry()
+
+        # 주문1(멤버십 O)만 만료, 새 주문2(멤버십 X)는 보존.
+        assert eventbus.publish.call_count == 1
+        expired_event = eventbus.publish.call_args[0][0]
+        assert isinstance(expired_event, StopOrderExpiredEvent)
+        assert expired_event.reason == "session_ended"
+        assert expired_event.symbol == "005930"
+        remaining = manager.active_orders
+        assert len(remaining) == 1
+        assert remaining[0].order_id == "ord-new"
+
+    async def test_session_reactivate_cycle(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405: 1일차 만료 후 2일차 신규 주문도 첫 틱으로 멤버십을 얻어 재만료된다.
+
+        per-order 멤버십은 reset 이 없어도 만료가 active_orders 소비로 닫히고,
+        다음 거래일 신규 주문은 entered_session=False 로 시작해 그날 첫 틱에
+        다시 마킹된다(재만료 사이클).
+        """
+        manager.start()
+
+        # 1일차: 틱 마킹 → 세션 종료 만료.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            await manager.register(
+                order_id="ord-day1",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+        assert len(manager.active_orders) == 0
+
+        # 2일차: 새 주문 등록 → 첫 틱이 다시 마킹 → 재만료.
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_day2 = await manager.register(
+                order_id="ord-day2",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            order_day2 = manager.get_order(stop_day2)
+            assert order_day2 is not None
+            assert order_day2.entered_session is True
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+        # 2일차 주문도 만료.
+        assert len(manager.active_orders) == 0
+
+    async def test_sweep_in_session_does_not_expire(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405: 세션이 아직 진행 중이면(윈도우 안) sweep 이 만료하지 않는다.
+
+        entered_session 은 유지되지만 ``not _is_in_session`` 조건이 False 라
+        만료되지 않는다(무틱 sweep 호출이어도 안전).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-mid",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is True
+
+            # 세션 진행 중 sweep → 윈도우 안이라 만료 없음.
+            eventbus.publish.reset_mock()
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 0
+        assert order.entered_session is True
+        assert len(manager.active_orders) == 1
+
+    async def test_session_expiry_idempotent(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 S4: 만료된 주문은 active_orders 에서 빠져 중복 sweep 무해."""
+        manager.start()
+
+        # in-session 틱으로 멤버십 마킹.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            await manager.register(
+                order_id="ord-idem",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+            await manager.check_session_expiry()  # 두 번째 sweep
+
+        # 첫 sweep 만 발행(active_orders not-expired 필터가 소비된 주문 제외).
+        assert eventbus.publish.call_count == 1
+
+    async def test_late_register_in_confirmed_session_marked_then_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt6 P2-B) 갭 락: 거래일 확인 세션 늦은 등록 + 이후 무틱.
+
+        실 틱(is_exchange_tick=True)으로 세션이 거래일 확인된 뒤, 같은 세션에
+        새 stop 을 등록하고 **이후 무틱**이면, market-wide 마킹 루프(다음 틱)가
+        신규 주문을 못 보지만 register-time epoch 마킹이 등록 시점에
+        entered_session=True 로 표시한다 → 장종료 sweep 에서 함께 만료된다.
+        (수정 전: order2.entered_session=False 잔존 → 미만료 → 다음 세션 생존.)
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            # order1 등록 + 실 틱 → order1 마킹 + 세션 epoch 마킹.
+            stop1 = await manager.register(
+                order_id="ord-1",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order1 = manager.get_order(stop1)
+            assert order1 is not None
+            assert order1.entered_session is False
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+            assert order1.entered_session is True
+
+            # 이후 **무틱**으로 order2 등록 → register-time epoch 마킹.
+            stop2 = await manager.register(
+                order_id="ord-2",
+                bot_id="bot-002",
+                strategy_id="stg-002",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+            order2 = manager.get_order(stop2)
+            assert order2 is not None
+            # 갭 락: 수정 전에는 여기서 False 였다.
+            assert order2.entered_session is True
+
+        # 세션 종료 sweep → 두 주문 모두 session_ended.
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert len(manager.active_orders) == 0
+        reasons = {
+            call.args[0].reason
+            for call in eventbus.publish.call_args_list
+            if isinstance(call.args[0], StopOrderExpiredEvent)
+        }
+        assert reasons == {"session_ended"}
+        assert eventbus.publish.call_count == 2
+
+    async def test_unconfirmed_session_register_not_marked(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt6 P2-B): 실 틱 0건 세션의 등록은 마킹되지 않는다.
+
+        세션 시각이지만 실 틱이 한 번도 흐르지 않은(epoch 미확인) 상태에서
+        등록하면 epoch 키가 set 에 없어 entered_session=False → 미만료(보존).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-noconfirm",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+            # 실 틱이 없었으므로 epoch 미확인 → 미마킹.
+            assert order.entered_session is False
+
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+    async def test_fallback_poll_then_register_not_marked(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt5×attempt6 교차): 휴장일 fallback poll 후 등록 보존.
+
+        스트림 끊김 휴장일 '시장 시간대'에 fallback poll(is_exchange_tick=
+        False)만 들어온 뒤 등록하면, fallback 은 epoch set 에 진입하지 않으므로
+        (source chokepoint) 등록 주문이 마킹되지 않아 보존된다.
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            # fallback poll 만(실 틱 없음) → epoch 미진입.
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=False
+            )
+            stop_id = await manager.register(
+                order_id="ord-holiday-fallback",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is False
+
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+
+    async def test_session_reactivate_epoch_isolation(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """#2405 (attempt6 P2-B): 1일차 epoch 가 2일차 신규 주문을 오마킹 안 함.
+
+        epoch 키에 business_date 가 포함되므로, 1일차 실 틱으로 마킹된 epoch
+        키는 2일차(다른 business_date)에는 매칭되지 않는다. 2일차 신규 주문은
+        실 틱이 흐르기 전 등록 시 entered_session=False 로 시작한다(1일차
+        epoch 누설로 오마킹되면 안 됨). business_date_kst 를 patch 해 거래일
+        전환을 모사한다(``_session_epoch_key``/``check_session_expiry`` 의
+        함수-로컬 import 대상인 ``ante.broker.fill_scheduler.business_date_kst``
+        를 patch).
+        """
+        manager.start()
+
+        # 1일차: 실 틱으로 epoch 마킹.
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+
+        # 2일차(다른 business_date): 신규 주문 등록(실 틱 전).
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260620",
+            ),
+        ):
+            stop_day2 = await manager.register(
+                order_id="ord-day2",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+            order_day2 = manager.get_order(stop_day2)
+            assert order_day2 is not None
+            # 1일차 epoch(20260619)는 2일차 키(20260620)와 다르므로 미마킹.
+            assert order_day2.entered_session is False
+
+
+class TestExpireShield:
+    """#2405 (attempt6 P2-A): shutdown cancel race 의 in-flight terminal 보존.
+
+    shutdown 이 stop_session_expiry_task 를 cancel 할 때 sweep 이
+    StopOrderExpiredEvent(session_ended) publish 도중이면, _expire_order 의
+    asyncio.shield 가 inner(_do_expire_order)를 background 에서 완주시켜
+    terminal 유실을 막는다. half-expired order 는 manager.stop() 이
+    manager_stopped 를 재발행하지 않아 terminal 이 정확히 1회다.
+    """
+
+    async def test_expire_terminal_survives_sweep_cancel(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """publish 도중 sweep task cancel → session_ended terminal 결국 발행."""
+        manager.start()
+
+        # in-session 등록 + 실 틱 마킹.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-shield",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+
+        order = manager.get_order(stop_id)
+        assert order is not None
+
+        # publish 를 await 가능한 gate 로 막아 "publish 도중" 상태를 만든다.
+        publish_entered = asyncio.Event()
+        release_publish = asyncio.Event()
+        published: list[StopOrderExpiredEvent] = []
+
+        async def _slow_publish(event: object) -> None:
+            if isinstance(event, StopOrderExpiredEvent):
+                publish_entered.set()
+                await release_publish.wait()
+                published.append(event)
+
+        eventbus.publish = AsyncMock(side_effect=_slow_publish)
+
+        # 세션 종료 sweep 을 task 로 실행 → publish 진입까지 대기 → task cancel.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            sweep_task = asyncio.create_task(manager.check_session_expiry())
+            await asyncio.wait_for(publish_entered.wait(), timeout=1.0)
+
+            # half-expired: publish 도중이라 expired=True 이미 set.
+            assert order.expired is True
+            # active_orders 에서 빠졌다.
+            assert len(manager.active_orders) == 0
+
+            sweep_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await sweep_task
+
+            # shield 된 inner 는 아직 살아 있다(inflight set 보관).
+            assert len(manager._inflight_expires) == 1
+
+            # publish 해제 → inner 완주 → terminal 발행.
+            release_publish.set()
+            await asyncio.gather(
+                *list(manager._inflight_expires), return_exceptions=True
+            )
+
+        # session_ended terminal 이 결국 발행됐다(shield 보장).
+        assert len(published) == 1
+        assert published[0].reason == "session_ended"
+        assert published[0].stop_order_id == stop_id
+
+    async def test_half_expired_order_no_double_terminal_on_stop(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """half-expired order: manager.stop() 이 manager_stopped 재발행 안 함.
+
+        sweep cancel 로 session_ended 가 in-flight 인 order 를 manager.stop()
+        이 처리할 때, order.expired=True 라 active_orders 에서 빠져
+        manager_stopped 가 발행되지 않는다 + session_ended 는 shield 로 1회 →
+        terminal 정확히 1회.
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-half",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+
+        publish_entered = asyncio.Event()
+        release_publish = asyncio.Event()
+        published: list[StopOrderExpiredEvent] = []
+
+        async def _slow_publish(event: object) -> None:
+            if isinstance(event, StopOrderExpiredEvent):
+                publish_entered.set()
+                await release_publish.wait()
+                published.append(event)
+
+        eventbus.publish = AsyncMock(side_effect=_slow_publish)
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            sweep_task = asyncio.create_task(manager.check_session_expiry())
+            await asyncio.wait_for(publish_entered.wait(), timeout=1.0)
+            sweep_task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await sweep_task
+
+            # manager.stop() 은 half-expired order 를 active_orders 에서 못 봐
+            # manager_stopped 를 발행하지 않고, in-flight session_ended 를 await.
+            release_publish.set()
+            await manager.stop()
+
+        # terminal 정확히 1회 — session_ended 만, manager_stopped 없음.
+        assert len(published) == 1
+        assert published[0].reason == "session_ended"
+        assert published[0].stop_order_id == stop_id
+        # 만료 완료 후 inflight set 비었다.
+        assert len(manager._inflight_expires) == 0
+
+
+class TestRegisterStoppedGuard:
+    """#2405 (attempt2 P2): stopped(_running=False) 상태에서 register 는
+    StopOrderManagerStoppedError 로 거부된다(silent loss 제거)."""
+
+    async def test_register_raises_when_stopped(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """stop() 후 register() 는 raise(이벤트 미발행, _orders 미추가)."""
+        from ante.gateway.stop_order import StopOrderManagerStoppedError
+
+        manager.start()
+        await manager.stop()  # _running=False
+        assert manager._running is False
+
+        eventbus.publish.reset_mock()
+
+        with pytest.raises(StopOrderManagerStoppedError):
+            await manager.register(
+                order_id="ord-late",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        # 등록 거부 — 주문 미추가, 이벤트 미발행.
+        assert len(manager.active_orders) == 0
+        assert manager.get_orders_for_account("acc-test") == []
+        assert eventbus.publish.call_count == 0
+
+    async def test_register_raises_before_start(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """start() 호출 전(_running=False)에도 register 는 raise(결정적)."""
+        from ante.gateway.stop_order import StopOrderManagerStoppedError
+
+        assert manager._running is False
+
+        with pytest.raises(StopOrderManagerStoppedError):
+            await manager.register(
+                order_id="ord-pre-start",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+
+        assert len(manager._orders) == 0
+        assert eventbus.publish.call_count == 0
+
+    async def test_register_stopped_still_rejects_invalid_account(
+        self, manager: StopOrderManager
+    ) -> None:
+        """stopped 상태라도 invalid account_id 는 stopped 가드보다 먼저 거부된다.
+
+        InvalidAccountIdError 가 StopOrderManagerStoppedError 보다 먼저 발생한다
+        (account 검증이 가드 앞 — invalid 입력은 stopped 여부와 무관하게 거부).
+        """
+        from ante.account.errors import InvalidAccountIdError
+
+        manager.start()
+        await manager.stop()
+
+        with pytest.raises(InvalidAccountIdError):
+            await manager.register(
+                order_id="ord-bad",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="",
+            )
+
+
 class TestBotOrders:
     """봇별 주문 조회 테스트."""
 
@@ -315,6 +1241,7 @@ class TestBotOrders:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """봇별 활성 주문 필터링."""
+        manager.start()
         await manager.register(
             order_id="ord-001",
             bot_id="bot-001",
@@ -354,6 +1281,7 @@ class TestAccountOrders:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """여러 계좌 등록 시 해당 계좌 활성 주문만 반환 (타 계좌 격리)."""
+        manager.start()
         await manager.register(
             order_id="ord-a1",
             bot_id="bot-001",
@@ -470,6 +1398,7 @@ class TestAccountOrders:
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
         """get_orders_for_bot 과 교차 정합 — 같은 active set 의 부분집합."""
+        manager.start()
         await manager.register(
             order_id="ord-1",
             bot_id="bot-001",
@@ -677,3 +1606,175 @@ class TestCrossAccountIsolation:
         assert len(order_events) == 2
         accounts = sorted(e.account_id for e in order_events)
         assert accounts == ["acc-1", "acc-2"]
+
+
+class TestExchangeTickSourceChokepoint:
+    """#2405 (attempt5 P2): 거래일 멤버십 마킹은 실 WS 틱(``is_exchange_tick=True``)
+    에 한정한다.
+
+    REST fallback poll(``is_exchange_tick=False``)은 KIS ``inquire-price`` 가
+    휴장일에도 직전 종가를 성공 반환하므로 거래일을 보증하지 못해 ``entered_session``
+    마킹을 유발하지 않는다. 단, 트리거 평가는 출처와 무관하게 항상 수행한다(분리 락).
+    """
+
+    async def test_fallback_poll_no_marking_no_expiry(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """휴장일 fallback → 무마킹 → 무만료.
+
+        in-session 시각에 등록 후 ``is_exchange_tick=False`` 가격을 받아도
+        ``entered_session`` 은 False 로 남아, 세션 종료 sweep 에서 보존된다.
+        (휴장일/주말의 시계상 세션 시간에 fallback poll 이 성공해 last-close 를
+        반환하는 시나리오 — 마킹되면 장종료 sweep 에서 오만료된다.)
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-fallback",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is False
+
+            # fallback poll 가격(트리거 미달) → is_exchange_tick=False → 무마킹.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=False
+            )
+            assert order.entered_session is False
+            assert eventbus.publish.call_count == 0
+
+        # 세션 종료 sweep → 멤버십 없으므로 보존(not expired).
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 0
+        assert len(manager.active_orders) == 1
+        assert order.entered_session is False
+
+    async def test_exchange_tick_marks_and_expires(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """실 WS 틱 → 마킹 → 만료(비회귀).
+
+        ``is_exchange_tick=True``(또는 default) 틱은 거래일 멤버십을 마킹하므로
+        세션 종료 시 ``session_ended`` 로 만료된다(기존 동작 유지 회귀 락).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-ws",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 실 WS 틱(트리거 미달) → 마킹.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+            assert order.entered_session is True
+
+        eventbus.publish.reset_mock()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
+
+        assert eventbus.publish.call_count == 1
+        event = eventbus.publish.call_args[0][0]
+        assert isinstance(event, StopOrderExpiredEvent)
+        assert event.reason == "session_ended"
+        assert len(manager.active_orders) == 0
+
+    async def test_exchange_tick_default_marks(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """기본 인자(default ``is_exchange_tick=True``)도 마킹한다(하위호환 락)."""
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-default",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 키워드 미지정 → default True → 마킹.
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
+            assert order.entered_session is True
+
+    async def test_fallback_poll_triggers_without_marking(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """fallback 트리거 유지 + 무마킹(분리 락).
+
+        ``is_exchange_tick=False`` 라도 stop 조건을 충족하는 가격이면 트리거
+        이벤트가 발행돼야 한다(스트림 hiccup 중 실거래일 stop 발동). 동시에
+        ``entered_session`` 은 마킹되지 않아야 한다(만료와 트리거의 분리).
+        """
+        manager.start()
+
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            stop_id = await manager.register(
+                order_id="ord-fb-trig",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+
+            # 트리거 조건 충족 가격(매도 stop: 현재가 <= stop_price) + fallback 출처.
+            eventbus.publish.reset_mock()
+            await manager.on_price_update(
+                "005930", 48500.0, account_id="acc-test", is_exchange_tick=False
+            )
+
+        # 트리거 이벤트 발행(StopOrderTriggeredEvent + OrderRequestEvent).
+        published = [call.args[0] for call in eventbus.publish.call_args_list]
+        assert any(isinstance(e, StopOrderTriggeredEvent) for e in published)
+        assert any(isinstance(e, OrderRequestEvent) for e in published)
+        # 트리거됐지만 fallback 출처라 세션 멤버십은 미마킹(분리 락).
+        assert order.entered_session is False

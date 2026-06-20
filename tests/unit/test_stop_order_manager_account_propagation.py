@@ -36,6 +36,7 @@ class TestRegisterPropagation:
     async def test_register_preserves_account_id(
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
+        manager.start()
         await manager.register(
             order_id="ord-001",
             bot_id="bot-1",
@@ -57,6 +58,7 @@ class TestRegisterPropagation:
     async def test_register_preserves_distinct_account_ids(
         self, manager: StopOrderManager, eventbus: MagicMock
     ) -> None:
+        manager.start()
         await manager.register(
             order_id="ord-1",
             bot_id="bot-1",
@@ -149,16 +151,18 @@ class TestExpiryPropagation:
         assert event.account_id == "acc-test"
         assert event.reason == "manager_stopped"
 
-    @patch.object(StopOrderManager, "_is_in_session", return_value=False)
     async def test_session_expiry_propagates_account_id(
         self,
-        _mock_session: MagicMock,
         manager: StopOrderManager,
         eventbus: MagicMock,
     ) -> None:
         manager.start()
-        # _is_in_session True 강제 후 register, 이후 False 로 expiry 검증.
-        with patch.object(StopOrderManager, "_is_in_session", return_value=True):
+        # #2405 (attempt2 P2): 세션활동 마킹은 manager-level 이며 in-session **틱**
+        # 에서만 일어난다. 시각 강제(True)로 register + in-session 틱으로 세션을
+        # active 표시, 이후 False(세션 종료) sweep 으로 expiry 검증.
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
             await manager.register(
                 order_id="ord-1",
                 bot_id="bot-1",
@@ -170,9 +174,14 @@ class TestExpiryPropagation:
                 stop_price=49000.0,
                 account_id="acc-test",
             )
+            # in-session 틱(트리거 미달 가격) → 세션 active 마킹.
+            await manager.on_price_update("005930", 50000.0, account_id="acc-test")
 
         eventbus.publish.reset_mock()
-        await manager.check_session_expiry()
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await manager.check_session_expiry()
 
         assert eventbus.publish.call_count == 1
         event = eventbus.publish.call_args[0][0]

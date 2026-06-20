@@ -206,6 +206,13 @@ class Services:
     ipc_server: Any = None
     approval_expire_task: asyncio.Task | None = None  # type: ignore[type-arg]
     audit_cleanup_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    # #2405: stop 주문 세션 만료 스케줄러 핸들 + manager 참조. stop_order_manager
+    # 는 api_gateway._stop_order_manager 와 **동일 인스턴스**다(_init_gateway 에서
+    # 둘 다 같은 객체로 주입). shutdown 에서 task cancel 후 manager.stop() 으로
+    # 활성 주문을 manager_stopped 로 일괄 정리하기 위해 main 이 직접 참조를 보유한다
+    # (APIGateway.stop() 은 sync 라 async manager.stop() 위임을 main 이 소유).
+    stop_session_expiry_task: asyncio.Task | None = None  # type: ignore[type-arg]
+    stop_order_manager: Any = None
     _cleanup_tasks: list[str] = field(default_factory=list)
 
 
@@ -858,6 +865,17 @@ async def _init_gateway(s: Services) -> None:
     # StopOrderManager 초기화
     stop_order_manager = StopOrderManager(eventbus=s.eventbus)
     stop_order_manager.start()
+
+    # #2405: 세션 만료 자동 처리 배선. APIGateway 에 주입하는 것과 **동일
+    # 인스턴스**를 Services 에 보관하고, _approval_expire_loop 동형의 주기 루프를
+    # 생성한다. 이 배선이 없으면 check_session_expiry() 의 production caller 가
+    # 0개라 session_ended 경로가 영영 발행되지 않는다.
+    s.stop_order_manager = stop_order_manager
+    s.stop_session_expiry_task = asyncio.create_task(
+        _stop_session_expiry_loop(stop_order_manager),
+        name="stop-session-expiry",
+    )
+    logger.info("스탑 주문 세션 만료 스케줄러 시작 (주기: 60초)")
 
     # APIGateway — AccountService 기반 계좌별 라우팅
     s.api_gateway = APIGateway(
@@ -2491,6 +2509,25 @@ async def _approval_expire_loop(
             logger.exception("결재 만료 스케줄러 오류")
 
 
+async def _stop_session_expiry_loop(
+    stop_order_manager: Any,
+    interval: float = 60.0,
+) -> None:
+    """#2405: 거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리.
+
+    ``_approval_expire_loop`` 동형. interval=60s 는 세션 경계(분 단위)를
+    충분히 정밀하게 포착한다(A2 의미론이라 짧은 interval 의 과만료 부작용 없음).
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await stop_order_manager.check_session_expiry()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("스탑 주문 세션 만료 스케줄러 오류")
+
+
 async def _init_notification(s: Services) -> None:
     """NotificationService, TelegramCommandReceiver 초기화.
 
@@ -2705,19 +2742,24 @@ async def _shutdown(s: Services) -> None:
 
     종료 순서 (Refs #1159 — cold-path race window 차단):
     1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
+       (감사/결재 만료, **스탑 주문 세션 만료 sweep task** 포함 — #2405).
     2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
        이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
        active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
-    3. DailyReportScheduler, ReconcileScheduler 종료
-    4. 각 계좌의 Treasury sync 중지
-    5. BotManager 전체 봇 중지
-    6. StreamIntegration 종료
-    7. APIGateway 종료
-    8. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
+    3. **StopOrderManager.stop()** (#2405 attempt4 P2) — 활성 스탑 주문을
+       `manager_stopped`로 일괄 만료. IPC gate(2) **뒤**·BotManager(6) **앞**에
+       두어, manager.stop() 소요와 무관하게 mutating IPC를 차단하면서도
+       `StopOrderExpiredEvent` 소비자(SignalChannel)가 생존한다.
+    4. DailyReportScheduler, ReconcileScheduler 종료
+    5. 각 계좌의 Treasury sync 중지
+    6. BotManager 전체 봇 중지
+    7. StreamIntegration 종료
+    8. APIGateway 종료
+    9. BrokerAdapter/DB 종료 직전 **IPCServer.stop_dispatching()** — active
         connection의 read-only dispatch까지 `SERVICE_UNAVAILABLE`로 거부.
-    9. 각 계좌의 BrokerAdapter disconnect
-    10. Database 종료
-    11. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
+    10. 각 계좌의 BrokerAdapter disconnect
+    11. Database 종료
+    12. **IPCServer.drain_connections() + unlink_socket()** — 소켓 파일 제거.
         cold-path guard(`PID alive AND socket exists`)가 이 시점부터 'active 아님'
         판정.
     """
@@ -2755,14 +2797,41 @@ async def _shutdown(s: Services) -> None:
             pass
         logger.info("결재 만료 스케줄러 종료")
 
+    # #2405 (attempt4 P2): 순서 고정 — ① 세션 만료 task cancel(빠름) →
+    # ② ipc_server.stop_accepting()(IPC gate 먼저) → ③ manager.stop()(느린 만료).
+    # 먼저 sweep 루프를 멈춰(orphan task 방지) 이후 manager.stop() 의 일괄 정리와
+    # 동시 sweep 경합을 제거한다. task cancel 은 빠르므로 IPC gate 앞에 둔다.
+    if s.stop_session_expiry_task is not None and not s.stop_session_expiry_task.done():
+        s.stop_session_expiry_task.cancel()
+        try:
+            await s.stop_session_expiry_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("스탑 주문 세션 만료 스케줄러 종료")
+
     # Refs #1159/#1184: 새 IPC 연결만 차단하고 소켓 파일은 유지한다.
     # stop_accepting() 시작 시 IPCServer state가 SHUTTING_DOWN으로 바뀌어
     # 이후 active connection의 mutating command는 SERVICE_UNAVAILABLE로 거부된다.
     # cold-path guard(`PID alive AND socket exists`)가 BotManager/DB 종료 전까지
     # 'active runtime'으로 판정하도록 unlink_socket()은 lifecycle 마지막에서 호출.
+    #
+    # #2405 (attempt4 P2): IPC gate 를 manager.stop() **앞**에 세운다. 활성 stop
+    # 주문이 많거나 StopOrderExpiredEvent 핸들러가 느려 manager.stop() 이 오래
+    # 걸려도, stop_accepting() 이 이미 SHUTTING_DOWN 으로 전환해 그 사이 mutating
+    # IPC command 가 dispatch 되어 SERVICE_UNAVAILABLE 계약을 우회하지 못한다.
     if s.ipc_server:
         await s.ipc_server.stop_accepting()
         logger.info("IPCServer 새 연결 수락 중지")
+
+    # #2405 (attempt4 P2): manager.stop() 은 IPC gate 직후·BotManager.stop_all()
+    # **앞**에서 호출한다. StopOrderExpiredEvent(manager_stopped) 소비자(SignalChannel)
+    # 가 bot_manager.stop_all() 전까지 생존하므로 이벤트가 정상 소비된다. APIGateway.
+    # stop()(sync) 은 manager.stop() 을 위임하지 않으므로 main 이 직접 호출한다.
+    # manager.stop() 이후 bot 이 register 하는 race 는 Fix A(register stopped →
+    # StopOrderManagerStoppedError → gateway except → OrderFailedEvent)가 처리한다.
+    if s.stop_order_manager is not None:
+        await s.stop_order_manager.stop()
+        logger.info("StopOrderManager 종료 — 활성 스탑 주문 manager_stopped 정리")
 
     # Refs #2337: signal.connect 채널 sweep. stop_accepting 직후·stop_all/
     # db.close **앞**(channels-before-bots-before-db). **freeze 먼저**(새

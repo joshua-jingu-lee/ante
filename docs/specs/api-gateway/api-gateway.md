@@ -251,7 +251,27 @@ KRX는 네이티브 스탑 주문을 지원하지 않으므로, 실시간 시세
 
 **세션 관리**: 정규 세션(09:00-15:30 KST), 확장 세션(08:30-18:00 KST). 세션 외 시간에는 트리거하지 않음.
 
+#### 세션 만료 의미론 (A2, #2405) — normative
+
+`check_session_expiry()`는 **그 세션에 진입했던 미트리거 주문만** 세션 종료 시 `session_ended`로 만료한다. 세션에 한 번도 진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분)은 **만료되지 않고 보존**된다 — 세션 외 시각에 등록한 stop 이 다음 sweep 에서 즉시 만료되던 부작용(A1)을 제거한다.
+
+**틱-거래일 근사 (tick-as-trading-day-proxy)**: `src/ante`에는 거래일/휴장일 캘린더가 없고 `_is_in_session`은 시각(09:00–15:30 KST 등)만 본다. 시각만으로는 거래일과 휴장일의 "시장 시간대"를 구분할 수 없으므로, **실시간 시세 틱(`on_price_update`)을 거래일 개장의 신호로 근사한다**. `StopOrder`는 per-order 세션 멤버십 플래그 `entered_session`(기본 `False`)을 가진다. `on_price_update`는 틱의 **종목·계좌와 무관하게(market-wide)** 그 시점 자신의 세션 안에 있는 **모든** active 주문의 `entered_session`을 `True`로 표시한다(트리거 판단은 종래대로 틱이 들어온 종목·계좌 한정). 따라서 한 종목이라도 틱이 흐르면 그 세션의 무틱 종목까지 멤버십을 얻어, 세션 종료 시 함께 `session_ended`로 만료된다. `entered_session`은 주문당 한 번 set 되고, `_expire_order`가 만료 주문을 `active_orders`에서 제외(소비)하므로 별도 reset 이 없다(다음 거래일 신규 주문은 `entered_session=False`로 시작해 그날 첫 틱에 다시 마킹). 휴장일에는 전종목 무틱이라 어떤 주문도 마킹되지 않아 사전 등록분이 보존된다. per-order 멤버십이라 세션 경계 race(일부 주문이 한 sweep 에서 미만료돼도 다음 sweep 에서 만료)·세션 종료 후 등록(in-session 틱 부재로 보존)의 타이밍 엣지가 없다.
+
+**마킹 신호 출처 한정 (source chokepoint, attempt5 P2)**: 거래일 멤버십 마킹은 **실 WebSocket 틱(`is_exchange_tick=True`)에 한정**한다. `on_price_update`는 keyword-only `is_exchange_tick: bool = True` 파라미터로 호출자가 가격 출처를 구분해 전달하며, 마킹 루프는 `is_exchange_tick=True`일 때만 수행한다. 스트림 해제 시 동작하는 **REST fallback poll(`is_exchange_tick=False`)**은 KIS `inquire-price`가 휴장일에도 직전 종가를 **성공 반환**하므로 거래일을 보증하지 못한다 — 만약 fallback poll 가격이 마킹을 유발하면, 스트림 끊김 상태에서 휴장일/주말의 **시계상 세션 시간**에 fallback 성공이 사전 등록 stop 을 `entered_session=True`로 마킹하고 장종료 sweep 에서 `session_ended`로 오만료시켜 A2 가 보존하려던 무틱 휴장일 주문이 사라진다. 따라서 fallback poll 은 마킹을 **유발하지 않는다**. 반면 **트리거 평가(`_should_trigger`/`_trigger_order`)는 출처와 무관하게 항상 수행한다** — 스트림 hiccup 중에도 실거래일이면 fallback 가격으로 stop 이 발동돼야 한다(#2405 scope=만료, 트리거 아님). 호출부: `StreamIntegration._on_price`(실 WS) → `is_exchange_tick=True`, `StreamIntegration._fallback_poll_loop`(REST poll) → `is_exchange_tick=False`.
+
+**거래일 확인 세션의 늦은 등록 마킹 (register-time marking, attempt6 P2-B)**: 마킹 신호는 (a) 실 WebSocket 틱이 흐른 그 시점 in-session 인 모든 active 주문(위 market-wide 루프)에 더해, (b) **이미 실 틱으로 거래일이 확인된 세션에 등록되는 주문은 등록 시점에 마킹**한다. 실 틱이 흐르는 그 시점의 활성 세션종류를 `{거래일}:{세션종류}` epoch 키(`business_date_kst()` + `trading_session`)로 `_session_tick_marked` set 에 기록하고, `register`는 `_is_in_session(order)`이 참이면서 그 주문 세션의 epoch 키가 set 에 있을 때 `entered_session=True`로 표시한다. epoch 키 생성은 `on_price_update`(add)와 `register`(조회)가 **같은 헬퍼**(`_session_epoch_key`)를 써 drift 를 막는다. 이 (b)가 없으면 거래일 확인 후 같은 세션에 새 stop 을 등록하고 **이후 무틱**이면, 신규 주문이 market-wide 마킹 루프를 못 받아 `entered_session=False`로 잔존해 장종료 sweep 에서 미만료되고 다음 세션까지 생존한다(A2 위반). 마킹 신호는 (b)로 확장되나 **트리거 평가는 출처 무관**(기존)이며, epoch 마킹은 `is_exchange_tick=True`일 때만 set 에 add 되므로 fallback poll(`is_exchange_tick=False`)은 register-time 마킹을 유발하지 않는다(source chokepoint 보존). `business_date_kst()`는 휴장일/주말을 backward-roll 하지 않아 1일차 epoch 가 2일차 신규 주문을 오마킹하지 않는다(거래일이 다르면 키가 다름).
+
+**in-flight terminal 보존 (shutdown shield, attempt6 P2-A)**: shutdown 이 `stop_session_expiry_task`를 cancel 할 때 sweep(`check_session_expiry` → `_expire_order`)이 `StopOrderExpiredEvent(session_ended)` publish 도중이면, `_expire_order`가 terminal 발행을 `asyncio.shield` 된 별도 task(`_do_expire_order`)에 위임하므로 CancelledError 로 중단되지 않고 background 에서 완주한다(in-flight terminal 유실 금지). `StopOrderManager.stop()`은 loop teardown 전에 in-flight task 들을 await(`asyncio.gather`)해 완료를 보장한다. half-expired 주문은 `_do_expire_order`가 `expired=True`를 먼저 set 해 `active_orders`에서 빠지므로 `manager.stop()`이 `manager_stopped`를 재발행하지 않는다 — session_ended 는 shield 로 1회, manager_stopped 미발행 → terminal 정확히 1회(이중 발행 없음). shield 는 shutdown 순서(task cancel → IPC gate → manager.stop, attempt4 P2)를 바꾸지 않고 in-flight terminal 유실만 메운다.
+
+**bounded known-limitation (캘린더 부재의 구조적 하한)**: "거래일인데 모니터 대상 전 종목이 세션 내내 무틱"(예: 전종목 거래정지)인 경우, 어떤 주문도 `entered_session`이 표시되지 않아 해당 주문이 그 세션에는 만료되지 않는다(다음 세션 생존). 이는 거래일/휴장일 캘린더 부재에서 비롯된 의도된 하한이며, 거래일 캘린더 도입 시 해소된다.
+
+**epoch set bounded growth (attempt6 P2-B)**: register-time 마킹용 `_session_tick_marked` set 은 거래일마다 새 `{거래일}:{세션종류}` 키가 쌓이지만 무한 증가하지 않는다 — `check_session_expiry`(분 단위 sweep)가 매 호출 1회 현재 `business_date_kst()`가 아닌 stale epoch 키를 prune 하고, `StopOrderManager.stop()`이 set 을 clear 한다. 현재 거래일 키는 보존되어 같은 거래일의 늦은 등록 마킹 게이트가 유효하다.
+
+**bounded known-limitation (fallback poll 트리거의 거래일 staleness, 비목표)**: 트리거 평가는 출처와 무관하게 수행되므로, 스트림 끊김 상태의 REST fallback poll 이 휴장일/주말의 시계상 세션 시간에 반환한 직전 종가(last-close)가 우연히 stop 조건을 충족하면 stop 이 트리거될 수 있다. 이는 트리거 경로에 거래일 캘린더가 없는 데서 비롯된 의도된 하한으로 **#2405 비목표**이며, 거래일 캘린더 도입 또는 별도 이슈에서 다룬다. fallback 가격 트리거 자체를 게이트하는 것은 스트림 hiccup 중 실거래일 stop 발동을 막아 더 큰 위험(미발동)을 만들므로 채택하지 않는다.
+
 **발행 이벤트**: `StopOrderRegisteredEvent`, `StopOrderTriggeredEvent`, `StopOrderExpiredEvent`. 트리거 시 변환된 `OrderRequestEvent`를 발행하여 기존 주문 흐름에 주입. 세 이벤트 모두 account-scoped (`account_id` 필드 + `_requires_account_id` 마커, #1336) 이며, 발행 시 `StopOrderManager`가 `account_id`를 명시 채운다.
+
+**등록 거부 (Fix A, #2405)**: 매니저가 stopped(`_running=False`, shutdown 진행 중 또는 start 전) 상태에서 `register`가 호출되면 `StopOrderManagerStoppedError`를 raise 한다(이전의 빈 문자열 반환은 호출자가 인지하지 못하는 silent loss 였다). 호출자(`APIGateway._on_order_approved`)는 이 예외를 잡아 `OrderFailedEvent`(`bot_id`/`order_id`/`account_id` 보존)로 terminal 종결하므로(:187 참조), in-flight 주문이 terminal 이벤트 없이 inert 로 남지 않는다. `account_id` invalid 거부(`InvalidAccountIdError`)는 이 가드보다 **먼저** 적용된다.
 
 ### StopOrderManager — 전략 통보 정책 (#1336)
 

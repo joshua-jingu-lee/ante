@@ -5,7 +5,7 @@ from ante.gateway.data_provider import LiveDataProvider
 from ante.gateway.gateway import APIGateway
 from ante.gateway.queue import APIRequest, RequestPriority, RequestQueue
 from ante.gateway.rate_limiter import RateLimitConfig, RateLimiter
-from ante.gateway.stop_order import StopOrderManager
+from ante.gateway.stop_order import StopOrderManager, StopOrderManagerStoppedError
 from ante.gateway.stream_integration import StreamIntegration
 
 __all__ = [
@@ -18,5 +18,6 @@ __all__ = [
     "RequestPriority",
     "APIRequest",
     "StopOrderManager",
+    "StopOrderManagerStoppedError",
     "StreamIntegration",
 ]
