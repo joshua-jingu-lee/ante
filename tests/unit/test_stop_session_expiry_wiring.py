@@ -193,7 +193,11 @@ async def test_loop_swallows_check_session_expiry_exception(
 
 @pytest.mark.asyncio
 async def test_shutdown_cancels_task_then_stops_manager() -> None:
-    """_shutdown 이 ① task cancel → ② manager.stop() 순서로 정리한다."""
+    """_shutdown 이 ① task cancel → ② manager.stop() 순서로 정리한다.
+
+    ipc_server 가 없는(None) 환경: IPC gate 가 끼어들지 않으므로 순수
+    task cancel → manager.stop() 순서만 본다.
+    """
     events: list[str] = []
 
     async def _loop() -> None:
@@ -218,6 +222,69 @@ async def test_shutdown_cancels_task_then_stops_manager() -> None:
 
     assert events == ["task_cancelled", "manager_stop"], f"events={events}"
     # orphan 없음 — task done.
+    assert s.stop_session_expiry_task is not None
+    assert s.stop_session_expiry_task.done()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_ipc_gate_before_manager_stop() -> None:
+    """#2405 attempt4 P2: IPC gate(stop_accepting)가 manager.stop() **앞**에서
+    호출된다.
+
+    활성 stop 주문이 많거나 StopOrderExpiredEvent 핸들러가 느려 manager.stop()
+    이 오래 걸려도, IPC 가 RUNNING 으로 남아 mutating IPC 가 SHUTTING_DOWN →
+    SERVICE_UNAVAILABLE 계약을 우회하지 못하도록, stop_accepting() 이 먼저
+    SHUTTING_DOWN 으로 전환되어야 한다.
+    """
+    events: list[str] = []
+
+    async def _loop() -> None:
+        try:
+            while True:
+                await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            events.append("task_cancelled")
+            raise
+
+    class _FakeManager:
+        async def stop(self) -> None:
+            events.append("manager_stop")
+
+    class _FakeIPCServer:
+        async def stop_accepting(self) -> None:
+            events.append("ipc_stop_accepting")
+
+        def stop_dispatching(self) -> None:
+            events.append("ipc_stop_dispatching")
+
+        async def drain_connections(self, timeout: float = 5.0) -> None:
+            events.append("ipc_drain")
+
+        def unlink_socket(self) -> None:
+            events.append("ipc_unlink_socket")
+
+    s = Services(
+        stop_session_expiry_task=asyncio.create_task(_loop()),
+        stop_order_manager=_FakeManager(),
+        ipc_server=_FakeIPCServer(),
+    )
+    await asyncio.sleep(0)  # loop 진입
+
+    await _shutdown(s)
+
+    # 순서: ① task cancel → ② ipc gate(stop_accepting) → ③ manager.stop().
+    assert "ipc_stop_accepting" in events, f"events={events}"
+    assert "manager_stop" in events, f"events={events}"
+    idx_task = events.index("task_cancelled")
+    idx_gate = events.index("ipc_stop_accepting")
+    idx_manager = events.index("manager_stop")
+    assert idx_task < idx_gate, f"task cancel 이 IPC gate 앞; events={events}"
+    assert idx_gate < idx_manager, (
+        f"IPC gate(stop_accepting)가 manager.stop() 앞이어야 한다; events={events}"
+    )
+    # IPC drain/unlink 은 manager.stop() 보다 뒤(lifecycle 마지막).
+    idx_unlink = events.index("ipc_unlink_socket")
+    assert idx_manager < idx_unlink, f"manager.stop()<unlink; events={events}"
     assert s.stop_session_expiry_task is not None
     assert s.stop_session_expiry_task.done()
 
