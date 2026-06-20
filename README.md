@@ -60,6 +60,8 @@ ante backtest run strategies/my_strategy.py \
 
 이 프로젝트는 실제 자금을 다루는 시스템입니다. 충분한 테스트(백테스트·모의투자) 후 사용하세요. Ante는 완벽하지 않습니다 — [보안 주의사항](guide/security.md)을 먼저 확인하세요.
 
+KIS 신세대 REST 계약(주문/취소/체결조회)은 **모의투자 환경에서만 검증**됐습니다. 실전투자 경로(체결조회 `TTTC0081R`·정정취소 `TTTC0013U`·`CTSC9215R`)는 미검증이며, 실전 전환 전 사용자 oracle A/B 검증이 필요합니다. 상세·전환 체크리스트: `docs/specs/broker-adapter/18-fill-recovery.md` §11.6/§11.7.
+
 ## 라이선스
 
 [MIT](LICENSE)
