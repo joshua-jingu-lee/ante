@@ -84,8 +84,13 @@ git log {last-tag}..origin/main --oneline
 - 로컬 `main`과 `origin/main`이 다르면 `git pull --ff-only` 또는 push/pull 필요 상태를 보고하고 중단한다.
 
 ```bash
-git show-ref --verify --quiet refs/heads/release/vX.Y.Z && echo "로컬 release/vX.Y.Z 존재 — 중단" && exit 1
+if git show-ref --verify --quiet refs/heads/release/vX.Y.Z; then
+  echo "로컬 release/vX.Y.Z 브랜치가 이미 존재한다 — 이전 prepare 잔재 확인(회수 또는 git branch -D) 후 재시도" >&2
+  exit 1
+fi
 ```
+
+브랜치가 없는 정상 경로에서는 `exit 0`으로 통과한다.
 
 ### 3. 릴리스 메타데이터 스탬핑과 release 브랜치 생성
 
@@ -129,7 +134,7 @@ docker build -t ante:release-vX.Y.Z .
 
 CI에서도 `release/*` PR이면 Docker build 검증을 수행한다. 이 단계에서는 registry push를 하지 않는다.
 
-스탬핑(3단계)부터 커밋(5단계) 직전까지 워킹 트리가 더러운 것은 의도된 상태다. 버전 불일치·검증 실패·사용자 거부 등 스탬핑 이후 모든 중도 종료의 정리는 하나로 통일한다. 더러운 워킹 트리는 release 브랜치에 있으므로 `main`으로 강제 전환하며 브랜치를 지우면 원상 복구된다.
+스탬핑(3단계)부터 커밋(5단계) 직전까지 워킹 트리가 더러운 것은 의도된 상태다. release 브랜치 생성(3단계 `git switch -c`) **이후**의 중도 종료(버전 불일치·검증 실패·사용자 거부)는 아래 하나로 정리한다. 더러운 워킹 트리는 release 브랜치에 있으므로 `main`으로 강제 전환하며 브랜치를 지우면 원상 복구된다. (스탬핑~`git switch -c` 사이 구간의 복구는 3단계에 규정된 `git restore --staged --worktree --source=HEAD pyproject.toml CHANGELOG.md`가 담당한다 — 이 구간은 release 브랜치가 아직 없어 `git branch -D`가 실패한다.)
 
 ```bash
 git switch -f main && git branch -D release/vX.Y.Z
@@ -240,9 +245,9 @@ gh workflow run publish.yml
 
 ## 중단 조건
 
-- 현재 브랜치가 `main`이 아니거나, release prepare 중 `release/vX.Y.Z`가 아님
+- 현재 브랜치가 `main`이 아니거나, release prepare 중 `release/vX.Y.Z`가 아님 — 4단계 이후 구간에만 적용한다. 3단계까지의 prepare는 의도적으로 `main`에서 진행한다.
 - 워킹 트리가 깨끗하지 않음 — prepare 시작 시점(2단계)과 publish 경로에만 적용한다. prepare 3단계 스탬핑부터 5단계 커밋 직전까지 워킹 트리가 더러운 것은 의도된 상태이며 중단 사유가 아니다.
-- 로컬 `HEAD`와 `origin/main`이 다름
+- 로컬 `HEAD`와 `origin/main`이 다름 — prepare 시작 시점(2단계)과 publish 경로에만 적용한다. 5단계 릴리스 커밋 이후 release 브랜치 HEAD 전진은 의도된 상태다.
 - open release PR이 이미 있음
 - publish 대상 release PR이 최신 main HEAD가 아님
 - 최신 main 필수 CI가 실패했거나 확인 불가한데 사용자가 진행을 승인하지 않음
