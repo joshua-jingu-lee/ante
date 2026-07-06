@@ -58,16 +58,10 @@ mkdir -p "$WORKTREE_ROOT"
 
 4a. **Plan Preflight 구현계획 작성/정비**: 구현 전에 이슈 본문에 실행 가능한 구현계획이 있는지 확인하고, 없거나 부족하거나 stale하면 `/plan-preflight #{번호}`를 먼저 실행한다.
 
-- Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
-- Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`다.
+- Plan Preflight 절차와 `plan-preflight:started`/`plan-preflight:done` 라벨·verdict 수명주기의 SSOT는 `.agent/commands/plan-preflight.md`다. 이 커맨드는 그 수명주기를 재정의하지 않고 따른다.
 - 코드 수정, 브랜치 생성, PR 생성은 Plan Preflight 단계에서 하지 않는다.
-- 이슈 본문의 구현계획에는 파일 맵, 작업 순서, risk flags, 구현 체크리스트, 검증 체크리스트, stop conditions, 비목표를 포함한다.
 - 이슈에 `plan-preflight:done` 라벨이 있으면 기존 구현계획을 우선 재사용하되, 이슈 본문/스펙/선행 조건 변경으로 stale하지 않은지 확인한다.
-- Plan Preflight를 시작하거나 stale 계획을 재정비할 때는 `plan-preflight:started`를 붙이고 `plan-preflight:done`을 제거한다.
 - Plan Preflight 결과가 `needs-rewrite`, `needs-spec-first`, `blocked`이면 구현을 시작하지 않는다.
-- `needs-rewrite`, `needs-spec-first`, `blocked`이거나 stale한 구현계획이면 `plan-preflight:done` 라벨을 제거한다.
-- 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
-- Codex Plan Review가 `approve-implement` 또는 `narrow-scope`를 반환하면 이슈 본문 구현계획을 최신화한 뒤 `plan-preflight:started`를 제거하고 `plan-preflight:done`을 붙인다.
 - `plan-preflight:done`은 구현계획까지 확정됐다는 뜻이며, 이슈 본문이 canonical plan이다.
 - 작은 이슈라도 `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있어야 구현을 시작한다.
 

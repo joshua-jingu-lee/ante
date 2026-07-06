@@ -145,15 +145,9 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### Plan Preflight 병렬 lane
 
 - 현재 활성 이슈가 구현, 브랜치 리뷰, CI, merge-gate 또는 merge 대기 중이면 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
-- Plan Preflight는 `superpowers:writing-plans` 원칙에 따라 이슈 본문을 실행 가능한 계획으로 보강한다.
-- Plan Preflight 절차의 SSOT는 `.agent/commands/plan-preflight.md`이며, autopilot은 직접 다른 절차를 만들지 않고 `/plan-preflight #{번호}`를 호출한다.
-- Plan Preflight를 시작하면 `plan-preflight:started` 라벨을 붙이고 `plan-preflight:done`은 제거한다.
-- Plan Preflight는 Codex Plan Review를 요청하고, `approve-implement` 또는 `narrow-scope` 피드백을 이슈 본문 구현계획에 반영한 뒤에만 완료된다.
-- 완료 시 `plan-preflight:started`를 제거하고 `plan-preflight:done` 라벨을 붙여 다음 `/autopilot` 또는 `/implement-issue`가 확정 계획으로 재사용할 수 있게 한다.
+- Plan Preflight 절차와 `plan-preflight:started`/`plan-preflight:done` 라벨·verdict 수명주기의 SSOT는 `.agent/commands/plan-preflight.md`다. autopilot은 직접 다른 절차를 만들지 않고 `/plan-preflight #{번호}`를 호출하며 그 수명주기를 따른다.
+- 완료된 `plan-preflight:done` 계획은 다음 `/autopilot` 또는 `/implement-issue`가 확정 계획으로 재사용한다. 이미 `plan-preflight:done`이고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않는다.
 - `needs-rewrite`, `needs-spec-first`, `blocked`가 나오면 같은 배치에서 구현 대상으로 넘기지 않는다.
-- `needs-rewrite`, `needs-spec-first`, `blocked` 또는 stale 계획이면 `plan-preflight:done` 라벨을 제거한다.
-- 보류나 사람 판단으로 Plan Preflight를 중단하면 `plan-preflight:started`도 제거하고, 중단 사유를 이슈 코멘트에 남긴다.
-- 이미 `plan-preflight:done` 라벨이 있고 이슈 본문/스펙/선행 조건이 stale하지 않으면 Plan Preflight를 반복하지 않고 확정 계획으로 재사용한다.
 - 같은 이슈 또는 같은 open PR에 대해서는 implementation lane과 Plan Preflight lane을 병렬로 돌리지 않는다.
 
 ### 구현 전 점검 기준
