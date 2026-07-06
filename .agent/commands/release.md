@@ -80,25 +80,20 @@ git log {last-tag}..origin/main --oneline
 - 로컬 워킹 트리가 깨끗하지 않으면 중단한다.
 - 로컬 `main`과 `origin/main`이 다르면 `git pull --ff-only` 또는 push/pull 필요 상태를 보고하고 중단한다.
 
-### 3. release 브랜치 생성
+### 3. 릴리스 메타데이터 생성
+
+semantic-release는 최신 `main`에서만 실행하고, tag나 main push는 만들지 않는다.
+PSR 기본 release group은 `main`/`master`만 매칭하므로 `release/*` 브랜치에서 실행하면 no-op이 된다(스탬핑이 일어나지 않는다). 따라서 스탬핑은 `main`에서 먼저 수행하고, release 브랜치는 4단계에서 만든다.
 
 ```bash
 git switch main
 git pull --ff-only origin main
-git switch -c release/vX.Y.Z origin/main
-```
-
-브랜치가 이미 존재하는 경우에는 무조건 재사용하지 말고, 해당 브랜치가 같은 release PR의 최신 작업인지 확인한다.
-
-### 4. 릴리스 메타데이터 생성
-
-semantic-release는 로컬 release 브랜치에서만 실행하고, tag나 main push는 만들지 않는다.
-
-```bash
 semantic-release version --no-commit --no-tag --no-push --no-vcs-release
 ```
 
-`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다.
+`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다.
+
+스탬핑 이후 커밋(6단계) 전까지 워킹 트리가 더러운 것은 의도된 상태다. "워킹 트리가 깨끗하지 않으면 중단" 조건은 prepare 시작 시점(2단계) 판정에만 적용한다.
 
 예상 변경:
 
@@ -106,7 +101,17 @@ semantic-release version --no-commit --no-tag --no-push --no-vcs-release
 - `CHANGELOG.md`
 - 필요 시 릴리스 노트 초안
 
-생성된 버전이 `vX.Y.Z`와 다르면 중단하고 브랜치를 정리한다.
+생성된 버전이 예상 `vX.Y.Z`와 다르면 중단하고 스탬핑 변경을 되돌린다.
+
+### 4. release 브랜치 생성
+
+3단계에서 스탬핑된 워킹 트리를 그대로 새 브랜치로 옮긴다. `git switch -c`의 start-point(`origin/main`)가 현재 HEAD(`main`)와 동일하므로 워킹 트리 변경이 새 브랜치로 따라온다.
+
+```bash
+git switch -c release/vX.Y.Z origin/main
+```
+
+브랜치가 이미 존재하는 경우에는 무조건 재사용하지 말고, 해당 브랜치가 같은 release PR의 최신 작업인지 확인한다.
 
 ### 5. 검증
 
