@@ -108,6 +108,8 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 
 실행은 `/release prepare --declare-major`로 하며, `.agent/commands/release.md`의 prepare 라이프사이클을 그대로 재사용하되 3단계 스탬핑 명령에만 `--major`를 추가한다(`semantic-release version --major --no-commit --no-tag --no-push --no-vcs-release`, dry-run은 `semantic-release version --major --print`). 선행조건 확인·즉시 switch·단일 정리 규칙은 일반 prepare와 동일하다.
 
+publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태그 이력 기준으로 버전을 재계산하므로, 메이저 선언 릴리스는 `gh workflow run semantic-release.yml -f declare_major=true`로 dispatch한다(전달하지 않으면 선언된 `X.0.0` 대신 자동 계산값이 태그·배포된다). 기본값 `declare_major=false`에서는 기존 자동 계산 경로가 그대로 동작한다.
+
 ### 선언 체크리스트
 
 1.0.0 선언 시점에 아래 대면 문서를 함께 갱신한다. 각 항목은 **선언 시점의 별도 작업**이며, 본 절차는 갱신 대상을 명문화하는 데까지다(내용 수정은 이 런북 범위 밖).

@@ -69,10 +69,10 @@ git log {last-tag}..origin/main --oneline
 
 - `feat` → minor
 - `fix`, `perf` → patch
-- `feat!`, `BREAKING CHANGE:` → major
+- `feat!`, `BREAKING CHANGE:` → 0.x 구간은 minor(`major_on_zero = false`), ≥1.0.0부터 major (구간 상세는 `docs/runbooks/06-release.md` §5)
 - `docs`, `test`, `refactor`, `ci`, `chore`, `style`, `build` → 기본적으로 릴리스 없음
 
-릴리스 대상 커밋이 없으면 release PR을 만들지 않는다.
+릴리스 대상 커밋이 없으면 release PR을 만들지 않는다. 단 `--declare-major`는 예외다 — forced-level(`--major`)이라 커밋 이력과 무관하게 유효하므로, 마지막 태그 이후 릴리스 대상 커밋이 0건이어도 진행한다(1.0.0 산출).
 
 ### 2. 충돌 방지 확인
 
@@ -183,6 +183,7 @@ publish 조건:
 - `pyproject.toml` version이 publish 대상 버전과 일치함
 - `vX.Y.Z` git tag가 아직 없음
 - GHCR `vX.Y.Z` image tag와 PyPI `X.Y.Z` 버전이 아직 배포되지 않았음
+- 메이저 선언 릴리스인지 확인한다: release PR이 `--declare-major` 산출물이면(`pyproject.toml` version이 메이저 경계 `X.0.0`) publish도 `declare_major=true`로 dispatch해야 한다. semantic-release.yml은 태그 이력 기준으로 **재계산**하므로 `--major`를 전달하지 않으면 선언된 `X.0.0` 대신 자동 계산값이 태그·배포된다(§3 참고).
 
 release PR merge 이후 main에 다른 커밋이 추가되었으면 publish하지 않는다. 새 커밋을 포함한 release PR을 다시 준비한다.
 
@@ -203,6 +204,12 @@ release PR merge 이후 main에 다른 커밋이 추가되었으면 publish하�
 
 ```bash
 gh workflow run semantic-release.yml -f dry_run={true|false}
+```
+
+메이저 선언 릴리스(`--declare-major`로 준비한 release PR)는 `declare_major=true`를 함께 전달한다. 이 입력이 없으면 워크플로우가 `--major` 없이 재계산해 선언된 `X.0.0`이 아닌 자동 계산값을 태그·배포한다.
+
+```bash
+gh workflow run semantic-release.yml -f dry_run={true|false} -f declare_major=true
 ```
 
 실행 직후 최신 run을 조회하고, 완료될 때까지 모니터링한다.

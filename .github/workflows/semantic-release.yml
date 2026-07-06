@@ -7,6 +7,10 @@ on:
         description: "Dry run (릴리스 없이 버전만 확인)"
         type: boolean
         default: false
+      declare_major:
+        description: "1.0.0 등 메이저 선언 릴리스 (forced --major)"
+        type: boolean
+        default: false
 
 jobs:
   release:
@@ -42,16 +46,26 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # dry_run=true: 커밋·태그·push 없이 버전 계산만 수행한다 (#2416).
-          # dry_run=false(실 릴리스) 경로 명령은 기존과 바이트 동일하게 유지하므로 재들여쓰기하지 않는다.
+          # declare_major=true: forced --major로 1.0.0 등 메이저 선언 릴리스 (#2417).
+          #   FORCE는 boolean input이라 셸 인젝션 위험이 없고, 기본값 false에서 FORCE=""가 되어
+          #   `semantic-release version --no-vcs-release`(기존 경로)와 동작이 동일하다.
+          FORCE=""
+          if [ "${{ inputs.declare_major }}" = "true" ]; then
+            FORCE="--major"
+          fi
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            OUTPUT=$(semantic-release version --no-commit --no-tag --no-push --no-vcs-release 2>&1) || true
+            OUTPUT=$(semantic-release version $FORCE --no-commit --no-tag --no-push --no-vcs-release 2>&1) || true
           else
-          OUTPUT=$(semantic-release version --no-vcs-release 2>&1) || true
+            OUTPUT=$(semantic-release version $FORCE --no-vcs-release 2>&1) || true
           fi
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "No release will be made"; then
             echo "released=false" >> "$GITHUB_OUTPUT"
           else
+            # --print-tag는 방금 생성된 실제 태그를 읽으므로 $FORCE를 붙이지 않는다.
+            # (실 릴리스 후 --major를 붙이면 다음 메이저 v(N+1).0.0을 계산해 오답이 된다.)
+            # dry_run+declare_major에서는 태그가 없어 version/tag가 자동 계산값으로 나오지만,
+            # dry_run에서는 Build/Release가 게이트돼 이 output을 소비하지 않는다(위 echo 로그가 선언 버전을 보여줌).
             VERSION=$(semantic-release version --print-tag 2>/dev/null || echo "")
             echo "released=true" >> "$GITHUB_OUTPUT"
             echo "version=${VERSION#v}" >> "$GITHUB_OUTPUT"
