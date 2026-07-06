@@ -27,11 +27,11 @@
   │     ├── 마지막 태그 이후 릴리스 대상 커밋 확인
   │     └── 예상 버전 산정
   │
-  ├── release/vX.Y.Z 브랜치 생성 (origin/main 기준)
-  │
-  ├── 릴리스 메타데이터 갱신
+  ├── 릴리스 메타데이터 스탬핑 (main, PSR 기본 release group)
   │     ├── pyproject.toml version
   │     └── CHANGELOG.md
+  │
+  ├── release/vX.Y.Z 브랜치 생성 (origin/main 기준, 스탬핑 변경 이관)
   │
   ├── release PR 검증
   │     ├── lint/test

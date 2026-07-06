@@ -75,49 +75,52 @@ git log {last-tag}..origin/main --oneline
 
 ### 2. 충돌 방지 확인
 
+아래 선행조건은 모두 스탬핑(3단계) 이전에 통과해야 한다.
+
 - open release PR이 있으면 새 PR을 만들지 않는다.
 - `release/vX.Y.Z` 원격 브랜치가 이미 있으면 덮어쓰지 않는다.
+- 로컬 `release/vX.Y.Z` 브랜치가 이미 있으면 중단한다.
 - 로컬 워킹 트리가 깨끗하지 않으면 중단한다.
 - 로컬 `main`과 `origin/main`이 다르면 `git pull --ff-only` 또는 push/pull 필요 상태를 보고하고 중단한다.
 
-### 3. 릴리스 메타데이터 생성
+```bash
+git show-ref --verify --quiet refs/heads/release/vX.Y.Z && echo "로컬 release/vX.Y.Z 존재 — 중단" && exit 1
+```
 
-semantic-release는 최신 `main`에서만 실행하고, tag나 main push는 만들지 않는다.
-PSR 기본 release group은 `main`/`master`만 매칭하므로 `release/*` 브랜치에서 실행하면 no-op이 된다(스탬핑이 일어나지 않는다). 따라서 스탬핑은 `main`에서 먼저 수행하고, release 브랜치는 4단계에서 만든다.
+### 3. 릴리스 메타데이터 스탬핑과 release 브랜치 생성
+
+`prepare --dry-run`은 스탬핑하지 않고 예상 버전만 계산한다. 2단계까지 통과한 최신 `main`에서 실행한다.
+
+```bash
+semantic-release version --print       # 예상 버전 (예: 0.12.0)
+semantic-release version --print-tag   # 예상 태그 (예: v0.12.0)
+```
+
+`--print`/`--print-tag`는 파일 기록·브랜치 생성·커밋이 없어 부작용이 없다. 따라서 정리 규칙이 원천 불필요하며, dry-run은 이후 4·5단계를 수행하지 않는다.
+
+실제 prepare에서는 최신 `main`에서 스탬핑한 직후 곧바로 release 브랜치로 옮긴다. PSR 기본 release group은 `main`/`master`만 매칭하므로 `release/*` 브랜치에서 스탬핑하면 no-op이 된다(스탬핑이 일어나지 않는다). 스탬핑 직후 커밋 없이 `git switch -c`로 브랜치를 만들면 워킹 트리 변경이 새 브랜치로 따라온다(start-point `origin/main`이 현재 HEAD와 동일).
 
 ```bash
 git switch main
 git pull --ff-only origin main
 semantic-release version --no-commit --no-tag --no-push --no-vcs-release
-```
-
-`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다.
-
-스탬핑 이후 커밋(6단계) 전까지 워킹 트리가 더러운 것은 의도된 상태다. "워킹 트리가 깨끗하지 않으면 중단" 조건은 prepare 시작 시점(2단계) 판정에만 적용한다.
-
-예상 변경:
-
-- `pyproject.toml` version
-- `CHANGELOG.md`
-- 필요 시 릴리스 노트 초안
-
-생성된 버전이 예상 `vX.Y.Z`와 다르면 중단하고 스탬핑 변경을 되돌린다.
-
-### 4. release 브랜치 생성
-
-3단계에서 스탬핑된 워킹 트리를 그대로 새 브랜치로 옮긴다. `git switch -c`의 start-point(`origin/main`)가 현재 HEAD(`main`)와 동일하므로 워킹 트리 변경이 새 브랜치로 따라온다.
-
-```bash
 git switch -c release/vX.Y.Z origin/main
 ```
 
-브랜치가 이미 존재하는 경우에는 무조건 재사용하지 말고, 해당 브랜치가 같은 release PR의 최신 작업인지 확인한다.
+`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다. 예상 변경은 `pyproject.toml` version, `CHANGELOG.md`, 필요 시 릴리스 노트 초안이다.
 
-### 5. 검증
-
-release PR에는 최소 검증 결과를 포함한다.
+스탬핑과 `git switch -c`는 한 명령 간격이다. 이 사이 크래시로 `main`이 더러워지면 다음 prepare의 2단계 clean-tree 가드가 검출해 중단한다. 수동 복구는 아래와 같다. PSR이 스테이징까지 하므로 `--staged --worktree`가 모두 필요하다(worktree-only `git restore`는 인덱스의 스탬핑 값으로 되돌려 무음 no-op이 된다).
 
 ```bash
+git restore --staged --worktree --source=HEAD pyproject.toml CHANGELOG.md
+```
+
+### 4. 버전 확인과 검증
+
+release 브랜치에서 스탬핑된 버전이 예상 `vX.Y.Z`와 일치하는지 확인하고 검증을 수행한다. 검증 결과는 release PR에 포함한다.
+
+```bash
+grep '^version' pyproject.toml           # 예상 vX.Y.Z와 일치 확인
 ruff check src/ tests/
 ruff format --check src/ tests/
 pytest tests/unit/ -x -n auto --tb=short -q
@@ -126,7 +129,13 @@ docker build -t ante:release-vX.Y.Z .
 
 CI에서도 `release/*` PR이면 Docker build 검증을 수행한다. 이 단계에서는 registry push를 하지 않는다.
 
-### 6. release commit과 PR
+스탬핑(3단계)부터 커밋(5단계) 직전까지 워킹 트리가 더러운 것은 의도된 상태다. 버전 불일치·검증 실패·사용자 거부 등 스탬핑 이후 모든 중도 종료의 정리는 하나로 통일한다. 더러운 워킹 트리는 release 브랜치에 있으므로 `main`으로 강제 전환하며 브랜치를 지우면 원상 복구된다.
+
+```bash
+git switch -f main && git branch -D release/vX.Y.Z
+```
+
+### 5. release commit과 PR
 
 ```bash
 git add pyproject.toml CHANGELOG.md
@@ -232,7 +241,7 @@ gh workflow run publish.yml
 ## 중단 조건
 
 - 현재 브랜치가 `main`이 아니거나, release prepare 중 `release/vX.Y.Z`가 아님
-- 워킹 트리가 깨끗하지 않음
+- 워킹 트리가 깨끗하지 않음 — prepare 시작 시점(2단계)과 publish 경로에만 적용한다. prepare 3단계 스탬핑부터 5단계 커밋 직전까지 워킹 트리가 더러운 것은 의도된 상태이며 중단 사유가 아니다.
 - 로컬 `HEAD`와 `origin/main`이 다름
 - open release PR이 이미 있음
 - publish 대상 release PR이 최신 main HEAD가 아님
