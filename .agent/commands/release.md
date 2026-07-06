@@ -261,7 +261,7 @@ gh workflow run publish.yml
 - open release PR이 이미 있음
 - publish 대상 release PR이 최신 main HEAD가 아님
 - 최신 main 필수 CI가 실패했거나 확인 불가한데 사용자가 진행을 승인하지 않음
-- 릴리스 대상 커밋이 없음
+- 릴리스 대상 커밋이 없음 — 일반 prepare/publish에만 적용한다. `--declare-major`는 forced-level(`--major`)이라 릴리스 대상 커밋이 없어도 진행한다(1단계 예외 참조).
 - PyPI에 같은 버전이 이미 존재함
 - GHCR에 같은 Docker image tag가 이미 존재함
 - GitHub 인증 또는 workflow 권한이 없음
