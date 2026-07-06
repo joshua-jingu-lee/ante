@@ -32,7 +32,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # dry_run=true: 커밋·태그·push 없이 버전 계산만 수행한다 (#2416).
+          # dry_run=false(실 릴리스) 경로 명령은 기존과 바이트 동일하게 유지하므로 재들여쓰기하지 않는다.
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            OUTPUT=$(semantic-release version --no-commit --no-tag --no-push --no-vcs-release 2>&1) || true
+          else
           OUTPUT=$(semantic-release version --no-vcs-release 2>&1) || true
+          fi
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "No release will be made"; then
             echo "released=false" >> "$GITHUB_OUTPUT"

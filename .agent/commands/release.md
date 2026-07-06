@@ -10,7 +10,7 @@ $ARGUMENTS — 릴리스 모드와 선택 인자
 - `prepare --dry-run`: PR 생성 없이 사전 점검, 예상 버전, Docker build 가능성만 확인한다.
 - `publish`: merge된 최신 release PR 기준으로 실제 배포 workflow를 실행한다.
 - `publish vX.Y.Z`: 특정 버전이 main 최신 release PR과 일치하는지 확인하고 배포한다.
-- `publish --dry-run`: 실제 GitHub Release, PyPI, Docker push 없이 build-only 검증을 실행한다.
+- `publish --dry-run`: 커밋·태그·push 없이 예상 버전 계산만 수행한다. Python build도 스킵되므로 build 검증은 `publish.yml` 수동 dispatch 경로에서 별도로 수행한다.
 - 인자가 없으면 `prepare` 기준으로 사전 점검을 수행하되, 실제 push/PR 생성 전 사용자 확인을 받는다.
 
 ## 원칙
@@ -95,8 +95,10 @@ git switch -c release/vX.Y.Z origin/main
 semantic-release는 로컬 release 브랜치에서만 실행하고, tag나 main push는 만들지 않는다.
 
 ```bash
-semantic-release version --no-vcs-release
+semantic-release version --no-commit --no-tag --no-push --no-vcs-release
 ```
+
+`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다.
 
 예상 변경:
 
