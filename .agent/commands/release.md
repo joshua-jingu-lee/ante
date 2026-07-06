@@ -7,7 +7,7 @@
 $ARGUMENTS — 릴리스 모드와 선택 인자
 
 - `prepare`: 릴리스 PR을 만든다.
-- `prepare --dry-run`: PR 생성 없이 사전 점검, 예상 버전, Docker build 가능성만 확인한다.
+- `prepare --dry-run`: 스탬핑·브랜치 생성·커밋 없이 예상 버전 계산만 수행한다(`semantic-release version --print`). Docker build 검증은 포함하지 않는다 — build 검증은 실 prepare 4단계(또는 `publish.yml` 수동 dispatch)에서 수행된다.
 - `publish`: merge된 최신 release PR 기준으로 실제 배포 workflow를 실행한다.
 - `publish vX.Y.Z`: 특정 버전이 main 최신 release PR과 일치하는지 확인하고 배포한다.
 - `publish --dry-run`: 커밋·태그·push 없이 예상 버전 계산만 수행한다. Python build도 스킵되므로 build 검증은 `publish.yml` 수동 dispatch 경로에서 별도로 수행한다.
@@ -107,7 +107,7 @@ semantic-release version --no-commit --no-tag --no-push --no-vcs-release
 git switch -c release/vX.Y.Z origin/main
 ```
 
-`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다. 예상 변경은 `pyproject.toml` version, `CHANGELOG.md`, 필요 시 릴리스 노트 초안이다.
+`--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다. 예상 변경은 `pyproject.toml` version과 `CHANGELOG.md`뿐이며, 둘 다 tracked이므로 아래 정리 규칙으로 완전히 되돌릴 수 있다(별도 untracked 산출물 없음).
 
 스탬핑과 `git switch -c`는 한 명령 간격이다. 이 사이 크래시로 `main`이 더러워지면 다음 prepare의 2단계 clean-tree 가드가 검출해 중단한다. 수동 복구는 아래와 같다. PSR이 스테이징까지 하므로 `--staged --worktree`가 모두 필요하다(worktree-only `git restore`는 인덱스의 스탬핑 값으로 되돌려 무음 no-op이 된다).
 
@@ -120,7 +120,7 @@ git restore --staged --worktree --source=HEAD pyproject.toml CHANGELOG.md
 release 브랜치에서 스탬핑된 버전이 예상 `vX.Y.Z`와 일치하는지 확인하고 검증을 수행한다. 검증 결과는 release PR에 포함한다.
 
 ```bash
-grep '^version' pyproject.toml           # 예상 vX.Y.Z와 일치 확인
+grep '^version = ' pyproject.toml         # 예상 vX.Y.Z와 일치 확인
 ruff check src/ tests/
 ruff format --check src/ tests/
 pytest tests/unit/ -x -n auto --tb=short -q
