@@ -84,16 +84,44 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 
 ## 5. 버전 범프 규칙
 
-| 커밋 타입 | 범프 | 예시 |
-|-----------|------|------|
-| `feat` | minor | 0.7.0 → 0.8.0 |
-| `fix`, `perf` | patch | 0.7.0 → 0.7.1 |
-| `feat!`, `BREAKING CHANGE:` | major | 0.7.0 → 1.0.0 |
-| `refactor`, `test`, `docs`, `ci`, `chore` | 없음 | — |
+범프는 현재 버전 구간에 따라 달라진다. `pyproject.toml`의 `major_on_zero = false` 때문에 0.x 구간에서는 `feat!`/`BREAKING CHANGE:`도 minor로만 범프된다 — 즉 1.0.0은 자동으로 산출되지 않는다. 1.0.0 선언은 §6 「메이저 선언 릴리스」의 명시적 절차로만 수행한다.
+
+| 커밋 타입 | 0.x 구간 범프 | ≥1.0.0 구간 범프 | 예시 |
+|-----------|--------------|-----------------|------|
+| `feat` | minor | minor | 0.7.0 → 0.8.0 |
+| `fix`, `perf` | patch | patch | 0.7.0 → 0.7.1 |
+| `feat!`, `BREAKING CHANGE:` | minor (`major_on_zero = false`) | major | 0.x: 0.7.0 → 0.8.0 / ≥1.0.0: 1.2.0 → 2.0.0 |
+| `refactor`, `test`, `docs`, `ci`, `chore` | 없음 | 없음 | — |
 
 > 상세: [03-git-workflow.md §2](03-git-workflow.md#2-커밋-컨벤션)
 
-## 6. Docker image 정책
+## 6. 메이저 선언 릴리스
+
+1.0.0 같은 메이저 선언은 커밋 이력 기반 자동 계산이 아니라 **대표의 명시적 결정**이다. `major_on_zero = false`라 0.x에서 `feat!`/`BREAKING CHANGE:`가 쌓여도 자동으로 1.0.0이 나오지 않으므로, 메이저 선언은 아래 강제 범프 경로로만 수행한다.
+
+### 강제 범프 경로
+
+`semantic-release version`의 `--major` 플래그로 다음 메이저를 강제한다. forced-level 플래그는 `major_on_zero`/`allow_zero_version` 설정을 우회하므로 0.x에서도 1.0.0을 산출한다.
+
+- **채택 근거**: `--major`는 일회성 CLI 플래그라 `pyproject.toml` 설정을 변이시키지 않는다. 따라서 1.0.0 선언 이후의 마이너/패치는 별도 조치 없이 §5 자동 계산 경로로 자연 복귀한다(설정 변이 없음).
+- **대안 기각**: (b) `major_on_zero`를 `true`로 플립하면 `feat!` 커밋 하나로 1.0.0이 우발적으로 자동 산출될 위험이 있다. (c) prepare 단계 수동 버전 기입은 재현성이 부족하다.
+
+실행은 `/release prepare --declare-major`로 하며, `.agent/commands/release.md`의 prepare 라이프사이클을 그대로 재사용하되 3단계 스탬핑 명령에만 `--major`를 추가한다(`semantic-release version --major --no-commit --no-tag --no-push --no-vcs-release`, dry-run은 `semantic-release version --major --print`). 선행조건 확인·즉시 switch·단일 정리 규칙은 일반 prepare와 동일하다.
+
+### 선언 체크리스트
+
+1.0.0 선언 시점에 아래 대면 문서를 함께 갱신한다. 각 항목은 **선언 시점의 별도 작업**이며, 본 절차는 갱신 대상을 명문화하는 데까지다(내용 수정은 이 런북 범위 밖).
+
+- [ ] `README.md`의 베타 배지(`status-beta-yellow`)를 안정 릴리스 상태로 갱신
+- [ ] `guide/getting-started.md`의 베타 단계 WARNING 갱신 또는 제거
+- [ ] `llms.txt`의 현재 범위 서술 갱신
+- [ ] 공개 API 표면 선언 문서(semver 보장 범위)의 존재 확인 — 없으면 선언 전 별도 이슈로 작성(본 이슈 스코프 밖)
+
+### 1.0.0 이후 흐름
+
+`--major`는 설정을 바꾸지 않으므로 1.0.0 이후 `feat`→minor(1.1.0), `fix`/`perf`→patch(1.0.1)는 §5 자동 계산으로 복귀한다. 1.0.0 이상 구간에서는 `major_on_zero`와 무관하게 `feat!`/`BREAKING CHANGE:`가 자동으로 major(2.0.0)를 범프한다.
+
+## 7. Docker image 정책
 
 릴리스 Docker image는 GHCR에 배포한다.
 
@@ -109,7 +137,7 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 - 같은 버전 tag를 덮어쓰지 않는다.
 - Docker image build 실패는 PyPI 성공 여부와 별개로 릴리스 실패로 기록한다.
 
-## 7. PyPI 배포 인증
+## 8. PyPI 배포 인증
 
 | 단계 | 인증 방식 | 비고 |
 |------|-----------|------|
@@ -118,7 +146,7 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 
 전환 시: `publish.yml`에서 `password:` 라인 제거 → OIDC 자동 적용.
 
-## 8. 트러블슈팅
+## 9. 트러블슈팅
 
 ### semantic-release가 "No release will be made"
 

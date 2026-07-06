@@ -8,6 +8,7 @@ $ARGUMENTS — 릴리스 모드와 선택 인자
 
 - `prepare`: 릴리스 PR을 만든다.
 - `prepare --dry-run`: 스탬핑·브랜치 생성·커밋 없이 예상 버전 계산만 수행한다(`semantic-release version --print`). Docker build 검증은 포함하지 않는다 — build 검증은 실 prepare 4단계(또는 `publish.yml` 수동 dispatch)에서 수행된다.
+- `prepare --declare-major`: 1.0.0 같은 메이저 선언 릴리스. 3단계 스탬핑 명령에 `--major`를 더하는 것 외에는 일반 `prepare`와 동일하다(라이프사이클·정리 규칙 동일). 자동 계산이 아닌 명시적 결정이며, 선언 절차·체크리스트는 `docs/runbooks/06-release.md` §6을 따른다. `--dry-run`과 조합하면 `semantic-release version --major --print`로 예상 버전만 확인한다.
 - `publish`: merge된 최신 release PR 기준으로 실제 배포 workflow를 실행한다.
 - `publish vX.Y.Z`: 특정 버전이 main 최신 release PR과 일치하는지 확인하고 배포한다.
 - `publish --dry-run`: 커밋·태그·push 없이 예상 버전 계산만 수행한다. Python build도 스킵되므로 build 검증은 `publish.yml` 수동 dispatch 경로에서 별도로 수행한다.
@@ -113,6 +114,8 @@ git switch -c release/vX.Y.Z origin/main
 ```
 
 `--no-commit --no-tag --no-push`로 파일 변경(`pyproject.toml`/`CHANGELOG.md`)은 워킹 트리에 남고 — PSR이 스테이징까지 수행 — 커밋·태그·push는 발생하지 않는다. `--no-vcs-release`는 GitHub Release 생성을 끈다. 예상 변경은 `pyproject.toml` version과 `CHANGELOG.md`뿐이며, 둘 다 tracked이므로 아래 정리 규칙으로 완전히 되돌릴 수 있다(별도 untracked 산출물 없음).
+
+메이저 선언(`prepare --declare-major`, `docs/runbooks/06-release.md` §6)에서는 이 스탬핑 명령에 `--major`만 더한다: `semantic-release version --major --no-commit --no-tag --no-push --no-vcs-release`(dry-run은 `semantic-release version --major --print`). forced-level 플래그가 `major_on_zero = false`를 우회해 0.x에서도 1.0.0을 산출한다. 선행조건·즉시 switch·정리 규칙은 위와 동일하며, `--major`는 일회성 플래그라 설정을 바꾸지 않으므로 1.0.0 이후 자동 계산으로 복귀한다.
 
 스탬핑과 `git switch -c`는 한 명령 간격이다. 이 사이 크래시로 `main`이 더러워지면 다음 prepare의 2단계 clean-tree 가드가 검출해 중단한다. 수동 복구는 아래와 같다. PSR이 스테이징까지 하므로 `--staged --worktree`가 모두 필요하다(worktree-only `git restore`는 인덱스의 스탬핑 값으로 되돌려 무음 no-op이 된다).
 
