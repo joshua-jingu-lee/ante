@@ -71,7 +71,7 @@
 | Docker | PR에서는 build 검증만 수행하고 push 금지 |
 
 release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR은 stale로 본다.
-이 경우 `origin/main`으로 rebase하고 버전/CHANGELOG를 다시 계산하거나, 기존 release PR을 닫고 새 release PR을 만든다.
+이 경우 rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 삭제한 뒤(`git push origin --delete release/vX.Y.Z` + 로컬 `git branch -D release/vX.Y.Z`) `/release prepare`를 처음부터 재실행해 최신 `origin/main` 기준으로 다시 스탬핑한다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR 기본 release group이 `main`/`master` 한정이라 무음 no-op).
 
 ## 4. 충돌 방지 규칙
 
@@ -128,8 +128,8 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 ### release PR이 stale
 
 - release PR 생성 후 main에 다른 PR이 merge된 상태다.
-- `origin/main`으로 rebase한 뒤 버전/CHANGELOG를 다시 계산한다.
-- 예상 버전이 달라지면 기존 release PR을 닫고 새 `release/vX.Y.Z` PR을 만든다.
+- rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 삭제한다: `git push origin --delete release/vX.Y.Z` + 로컬 `git branch -D release/vX.Y.Z`.
+- `/release prepare`를 처음부터 재실행해 최신 main 기준으로 다시 스탬핑한다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR release group이 `main`/`master` 한정).
 
 ### publish.yml 실패
 
