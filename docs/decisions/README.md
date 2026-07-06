@@ -25,6 +25,7 @@
 | [D-016](D-016-canonical-exchange-vocabulary.md) | canonical exchange vocabulary | 2026-05-15 | Ante 전역 canonical exchange 집합·wildcard·legacy 호환 계약 SSOT |
 | [D-017](D-017-canonical-symbol-timeframe-vocabulary.md) | canonical symbol/timeframe vocabulary | 2026-05-16 | symbol/timeframe canonical 집합·다축 구분·legacy 호환 계약 SSOT |
 | [D-018](D-018-core-interface-cli-ipc.md) | Core Interface CLI/IPC 중심화 | 2026-05-22 | React/HTTP 런타임 제거, CLI/IPC를 활성 운영 인터페이스로 고정 |
+| [D-019](D-019-review-gate-redesign.md) | 리뷰 게이트 재설계 | 2026-07-06 | Codex 의존 제거 — @plan-reviewer·/code-review 재배선, 이슈 검증 @issue-reviewer 신설 |
 
 ## 사용 규칙
 
