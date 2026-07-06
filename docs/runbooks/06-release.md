@@ -71,7 +71,7 @@
 | Docker | PR에서는 build 검증만 수행하고 push 금지 |
 
 release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR은 stale로 본다.
-이 경우 rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 삭제한 뒤(`git push origin --delete release/vX.Y.Z` + 로컬 `git branch -D release/vX.Y.Z`) `/release prepare`를 처음부터 재실행해 최신 `origin/main` 기준으로 다시 스탬핑한다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR 기본 release group이 `main`/`master` 한정이라 무음 no-op).
+이 경우 rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 정리한 뒤(로컬 `git switch -f main && git branch -D release/vX.Y.Z`, 원격 `git push origin --delete release/vX.Y.Z`) `/release prepare`를 처음부터 재실행해 최신 `origin/main` 기준으로 다시 스탬핑한다. 로컬 정리는 release.md 4단계 통일 정리 규칙과 동일하다 — prepare 종료 시 release 브랜치에 체크아웃돼 있어 `git switch -f main`으로 먼저 벗어나야 `git branch -D`가 실패하지 않는다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR 기본 release group이 `main`/`master` 한정이라 무음 no-op).
 
 ## 4. 충돌 방지 규칙
 
@@ -128,7 +128,7 @@ release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR
 ### release PR이 stale
 
 - release PR 생성 후 main에 다른 PR이 merge된 상태다.
-- rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 삭제한다: `git push origin --delete release/vX.Y.Z` + 로컬 `git branch -D release/vX.Y.Z`.
+- rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 정리한다: 로컬 `git switch -f main && git branch -D release/vX.Y.Z`, 원격 `git push origin --delete release/vX.Y.Z`. (로컬 정리는 release.md 4단계 규칙과 동일 — release 브랜치 체크아웃 상태에서 `git switch -f main` 없이 `git branch -D`하면 실패한다.)
 - `/release prepare`를 처음부터 재실행해 최신 main 기준으로 다시 스탬핑한다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR release group이 `main`/`master` 한정).
 
 ### publish.yml 실패
