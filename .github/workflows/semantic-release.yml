@@ -14,6 +14,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      # step-level if는 Actions expression 평가라 셸 보간이 없어 ref 이름 인젝션을 원천 차단하고,
+      # checkout/pip 이전에 fail-fast한다. 비-main ref는 PSR 소문자 no-release 메시지로
+      # case-sensitive grep 판정이 빗나가 released 오보고를 낼 수 있어 차단한다 (#2416).
+      - name: Guard main-only (#2416)
+        if: github.ref_name != 'main'
+        run: |
+          echo "이 워크플로우는 main ref 전용이다 (#2416)." >&2
+          exit 1
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -32,7 +41,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # dry_run=true: 커밋·태그·push 없이 버전 계산만 수행한다 (#2416).
+          # dry_run=false(실 릴리스) 경로 명령은 기존과 바이트 동일하게 유지하므로 재들여쓰기하지 않는다.
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            OUTPUT=$(semantic-release version --no-commit --no-tag --no-push --no-vcs-release 2>&1) || true
+          else
           OUTPUT=$(semantic-release version --no-vcs-release 2>&1) || true
+          fi
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "No release will be made"; then
             echo "released=false" >> "$GITHUB_OUTPUT"
