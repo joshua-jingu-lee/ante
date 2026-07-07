@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-06-20 (KST)
+> 마지막 생성 시점: 2026-07-07 (KST)
 
 ## 최상위 구조
 
@@ -736,7 +736,8 @@ tests/
 │   ├── test_active_order_readiness_gate.py
 │   ├── test_kis_token_backoff_cadence.py
 │   ├── test_kis_token_cooldown.py
-│   └── test_kis_token_single_flight.py
+│   ├── test_kis_token_single_flight.py
+│   └── test_stop_session_expiry_wiring.py
 ├── __init__.py
 └── integration/
     ├── __init__.py
@@ -772,11 +773,8 @@ scripts/
 ├── install-service.sh                # OS 감지 후 systemd/launchd 서비스 설치
 ├── uninstall-service.sh              # 서비스 제거
 ├── verify-install.py                 # 설치 검증 스크립트
-├── ai_review.py
 ├── generate_db_schema.py             # DB 스키마 문서 자동 생성
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
-├── run_ai_review.sh
-├── setup_actions_runners.sh
 ├── check_import_path.py              # 현재 worktree import sanity check
 └── scan_create_services_anti_pattern.py
 ```
@@ -811,7 +809,8 @@ docs/
 │   ├── D-015-default-deny-auth-gate.md
 │   ├── D-016-canonical-exchange-vocabulary.md
 │   ├── D-017-canonical-symbol-timeframe-vocabulary.md
-│   └── D-018-core-interface-cli-ipc.md
+│   ├── D-018-core-interface-cli-ipc.md
+│   └── D-019-review-gate-redesign.md
 ├── references/                       # 외부 참조 문서
 │   └── external-apis/
 │       ├── dart-openapi.md

@@ -38,7 +38,7 @@ release/v0.9.0
 | `epic` | `epic` | `epic/` |
 | `release` | 릴리스 PR | `release/` |
 
-일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/codex:review --base <ref>` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
+일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/code-review` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
 `release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다.
 
 ### 1.3 에픽 하위 브랜치 최신화
@@ -100,25 +100,25 @@ BREAKING CHANGE: BrokerAdapter 인터페이스가 변경되었습니다.
 
 ## 3. 브랜치 리뷰 규칙
 
-PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰를 통과해야 한다.
+PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리뷰(`/code-review`)를 통과해야 한다.
 
 ### 3.1 브랜치 리뷰 트리거
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- 실행: `openai/codex-plugin-cc`의 `/codex:review --base <main 또는 epic/...>`
-- 증적: 이슈 코멘트 `Codex 브랜치 리뷰`
+- 실행: Claude Code 빌트인 `/code-review` 스킬 — 현재 브랜치 diff를 default 브랜치(main) 대비 리뷰한다. base 인자를 받지 않으며 effort(예: high) 지정 가능. PR을 요구하는 `code-review` 플러그인과 다르다.
+- 증적: 이슈 코멘트 `브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
 
-- `/codex:review = PASS`
+- `/code-review = PASS`
   - 브랜치 push 후 PR 생성 가능
-- `/codex:review = FAIL`
+- `/code-review = FAIL`
   - Claude가 같은 워크트리에서 수정 후 재검토
 - 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다.
 - 실패 횟수는 이슈 코멘트로 누적 관리한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 대상으로 본다.
-- 실패가 10회 누적되면 이슈에 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다.
+- 실패가 10회 누적되면 이슈에 `blocked:review-loop` 라벨을 붙이고 자동 브랜치 리뷰를 중단한다(반복 실패 임계값 SSOT: [04-ci-cd.md](04-ci-cd.md)).
 
 ### 3.3 Stale Base / Duplicate Commit / Merge Conflict 대응
 
@@ -145,7 +145,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 - **release PR 예외**: release PR은 연결 이슈가 없어도 되며, 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차를 남긴다.
 - **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
-- **전제 조건**: 최신 branch HEAD의 `/codex:review --base <base>`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
+- **전제 조건**: 최신 branch HEAD의 `/code-review`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
 - **release PR 전제 조건**: release PR은 이슈 코멘트 기반 브랜치 리뷰 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 PR 본문에 남기고, 일반 PR 승인 게이트를 통과한다.
 
 ### 4.2 PR 머지 조건
@@ -159,7 +159,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 Codex 사전 리뷰�
 
 ### 4.3 PR 후 추가 변경 처리
 
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 머지를 진행한다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
 - 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.

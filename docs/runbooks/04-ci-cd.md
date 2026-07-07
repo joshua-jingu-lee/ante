@@ -1,6 +1,6 @@
 # 04. CI/CD와 리뷰 게이트
 
-> GitHub Actions 기반 CI/CD와 내부 Codex 브랜치 리뷰, merge gate 정책을 정의한다.
+> GitHub Actions 기반 CI/CD와 내부 브랜치 리뷰(`/code-review`), merge gate 정책을 정의한다.
 > 에이전트의 실제 실행 절차는 `.agent/commands/`가 SSOT이며, 이 문서는 게이트와 상태 체크의 정책 기준만 둔다.
 
 ---
@@ -12,7 +12,7 @@ Claude 구현 준비
   │
   ├── Plan Preflight (이슈 계획 작성/보강)
   │
-  ├──▶ [Gate 0] codex-plan-review ─────── 실패 → Plan Preflight가 이슈 본문 재정비
+  ├──▶ [Gate 0] plan-review (@plan-reviewer) ── 실패 → Plan Preflight가 이슈 본문 재정비
   │
   ▼
 Claude 구현 (worktree 격리)
@@ -21,7 +21,7 @@ Claude 구현 (worktree 격리)
   │
   ├── 로컬 커밋
   │
-  ├──▶ [Gate A] /codex:review --base ───── 실패 → Claude가 수정 후 재검토
+  ├──▶ [Gate A] /code-review ───────────── 실패 → Claude가 수정 후 재검토
   │
   ├── 브랜치 push
   │
@@ -41,35 +41,35 @@ post-merge automation
 
 ## 2. Gate 상세
 
-### Gate 0 — Codex Plan Review
+### Gate 0 — Plan Review
 
-**목적**: 구현 전 계획을 외부 Codex가 공격적으로 검토하는 게이트
+**목적**: 구현 전 계획을 별도 컨텍스트의 계획 리뷰어가 공격적으로 검토하는 게이트
 
 - **트리거**: Plan Preflight가 `plan-preflight:started` 상태에서 이슈 본문 구현계획 초안을 정리한 시점
-- **실행**: `openai/codex-plugin-cc`의 `/codex:adversarial-review`
-- **결과**: 이슈 코멘트 `codex-plan-review`
+- **실행**: 별도 컨텍스트 서브에이전트 `@plan-reviewer`(`.agent/agents/plan-reviewer.md`) 동기 호출
+- **결과**: 오케스트레이터가 이슈 코멘트 `Plan Review`로 verdict 기록 (`reviewer:` 필드에 수행 주체; `@plan-reviewer`는 read-only, GitHub 쓰기 없음)
 - **성공 시**: Plan Preflight가 이슈 본문 구현계획을 최신화하고 `plan-preflight:done` 라벨로 확정
 - **실패 시**: Plan Preflight가 `plan-preflight:started` 상태를 유지한 채 이슈 본문 구현계획을 보강하고 재요청
-- **해석 주의**: 이 단계는 Claude 내부 계획 검토가 아니라 외부 read-only Codex 리뷰다. 코드 수정, 브랜치 생성, PR 생성은 하지 않는다.
+- **해석 주의**: 이 단계는 구현 세션과 격리된 read-only 계획 리뷰다. 코드 수정, 브랜치 생성, PR 생성은 하지 않는다. verdict 어휘(`approve-implement`/`narrow-scope`/`revise-plan`/`split-issue`/`invoke-human`)와 라벨 상태 기계는 리뷰 주체와 무관하게 유지한다.
 
 이 게이트는 보호 브랜치의 required status check가 아니라, **구현 착수 전 필수 이슈 증적**이다.
 
-### Gate A — Codex 브랜치 리뷰
+### Gate A — 브랜치 리뷰
 
 **목적**: PR 전 코드 품질 게이트
 
 - **트리거**: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- **실행**: `openai/codex-plugin-cc`의 `/codex:review --base <main 또는 epic/...>`
-- **결과**: 이슈 코멘트 `Codex 브랜치 리뷰`
+- **실행**: Claude Code 빌트인 `/code-review` 스킬 — 현재 브랜치 diff를 default 브랜치(main) 대비 리뷰한다. base 인자를 받지 않으며 effort(예: high) 지정 가능. PR을 요구하는 `code-review` 플러그인과 다르다.
+- **결과**: 이슈 코멘트 `브랜치 리뷰` (`reviewer:` 필드에 `/code-review` 기록)
 - **성공 시**: 브랜치 push 후 PR 생성
-- **실패 시**: Claude가 같은 워크트리에서 수정 후 `/codex:review --base <base>` 재실행
-- **반복 실패**: 같은 blocking finding 제목이 반복되면 escalation 신호로 보고, 같은 `risk class`가 2회 반복되면 Meta Review를 우선한다.
-- **해석 주의**: 이 단계는 GitHub Actions workflow가 아니라 Claude 세션 안에서 돌아가는 read-only Codex 리뷰다. 코드 수정은 Claude 개발 에이전트가 수행한다.
+- **실패 시**: Claude가 같은 워크트리에서 수정 후 `/code-review` 재실행
+- **반복 실패**: 같은 blocking finding 제목이 반복되면 escalation 신호로 보고, 같은 `risk class`가 2회 반복되면 Meta Review를 우선한다. **반복 실패 임계값은 10회이며, 이 임계값의 SSOT는 본 문서다.** 실패가 10회 누적되면 `blocked:review-loop` 라벨로 자동 브랜치 리뷰를 중단한다.
+- **해석 주의**: 이 단계는 GitHub Actions workflow가 아니라 Claude 세션 안에서 돌아가는 read-only 리뷰다. 코드 수정은 Claude 개발 에이전트가 수행한다.
 
 이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
-동일 HEAD SHA에서 `/codex:review` FAIL이 남아 있으면 PR을 열지 않는다.
+동일 HEAD SHA에서 `/code-review` FAIL이 남아 있으면 PR을 열지 않는다.
 
-PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 머지를 진행한다. PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
+PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
 
 ### Gate B — CI
 
@@ -159,7 +159,7 @@ merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR �
 ### 3.1 현재 저장소와 목표 상태
 
 - **현재 존재**: `ci.yml`, `pr-approvals.yml`, `post-merge.yml`, `semantic-release.yml`, `publish.yml`
-- `pr-approvals.yml`은 과거 PR 단계 Claude/Codex 승인 워커와 자동 재수정 워커를 포함했으나, 현재는 `merge-gate` 잡만 유지한다. 파일명 변경(`merge-gate.yml`)은 비목표.
+- `pr-approvals.yml`은 과거 PR 단계 자동 AI 승인 워커와 자동 재수정 워커를 포함했으나, 현재는 `merge-gate` 잡만 유지한다. 파일명 변경(`merge-gate.yml`)은 비목표.
 - **운영 과제**:
   - 반복 `risk class` 에스컬레이션 자동화 고도화
   - 필요 시 architecture gate 도입
@@ -218,7 +218,7 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 ### 3.5 Legacy 정리 후보
 
 - 저장소 변수 `AI_REVIEW_ENABLED`는 더 이상 어떤 워크플로우에서도 참조하지 않는다. repo owner가 수동으로 삭제할 수 있으나, 본 SSOT는 변수 존재 여부에 의존하지 않는다.
-- self-hosted runner label `claude-review`, `codex-review`는 PR 단계 워크플로우에서 더 이상 필요하지 않다. 폐기 여부는 본 SSOT 범위 밖이다.
+- self-hosted runner label `claude-review`와 과거 외부 리뷰용 러너 라벨은 PR 단계 워크플로우에서 더 이상 필요하지 않다. 폐기 여부는 본 SSOT 범위 밖이다.
 
 ## 4. 로컬 개발 시 사전 검증
 
@@ -230,7 +230,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/ante/
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 ```
 
-내부 Codex 브랜치 리뷰 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
+내부 브랜치 리뷰(`/code-review`) 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
 
 ## 5. CI/머지 게이트 실패 시 복구
 
@@ -240,18 +240,18 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 | 실패 게이트 | 성격 | 머지 차단 여부 | 주 원인 | 복구 담당 |
 |------------|-----|---------------|--------|----------|
-| `/codex:review` | PR 전 사전 게이트 | PR 생성 차단 (이슈 증적) | 설계/코드 품질 문제 | Claude 개발 에이전트 |
+| `/code-review` | PR 전 사전 게이트 | PR 생성 차단 (이슈 증적) | 설계/코드 품질 문제 | Claude 개발 에이전트 |
 | `ci` / `lint` / `test` | required status checks (집합은 [§3.2](#32-저장소-설정-권장값) SSOT) | 차단 | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
 | `merge-gate` | 정책 집행 | 차단 | 충돌, 대화 미해결, auto-merge 비활성화 상태 | Claude 오케스트레이터 또는 사람 |
 
-내부 `/codex:review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
+내부 `/code-review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회(임계값 SSOT는 §2 Gate A) 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
 
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 
 ### 5.1 머지 게이트 수동 복구 순서
 
 1. required status check(`ci` / `lint` / `test` 등 [§3.2](#32-저장소-설정-권장값) 권장 집합) 중 하나가 일시적 환경 문제로 실패한 것으로 보이면 `gh run rerun`을 우선한다.
-2. PR 코드 자체에 문제가 있으면 Claude 개발 에이전트가 같은 브랜치를 수정한 뒤 새 커밋을 push한다. push 전에는 `/codex:review --base <ref>`를 새 head SHA에서 다시 통과시킨다.
+2. PR 코드 자체에 문제가 있으면 Claude 개발 에이전트가 같은 브랜치를 수정한 뒤 새 커밋을 push한다. push 전에는 `/code-review`를 새 head SHA에서 다시 통과시킨다.
 3. `pull_request` 이벤트 누락으로 `merge-gate`가 다시 시작되지 않을 때만 PR `close → reopen`을 예외적으로 사용한다.
 4. 수동 복구를 실행한 경우 PR 코멘트에 복구 이유, 사용한 방식, 새 run 링크를 남긴다.
 
