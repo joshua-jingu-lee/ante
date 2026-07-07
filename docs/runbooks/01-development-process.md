@@ -100,7 +100,7 @@ Plan Review의 verdict는 다음 중 하나다.
 브랜치 prefix, PR 전제 조건, 에픽 브랜치 정렬 규칙의 SSOT는 [03-git-workflow.md](03-git-workflow.md)다.
 이 문서에서는 원칙만 둔다.
 
-- 독립 이슈는 `{branch-prefix}/#{issue번호}-{짧은설명}` 브랜치에서 작업하고 `main`으로 PR을 낸다.
+- 독립 이슈는 `{branch-prefix}/{issue번호}-{짧은설명}` 브랜치에서 작업하고 `main`으로 PR을 낸다.
 - 에픽은 통합용 `epic/*` 브랜치와 하위 이슈별 작업 브랜치를 분리한다.
 - 장기 기능은 장기 브랜치 대신 keystone 방식을 우선한다 — 상세는 [03-git-workflow.md §1.5](03-git-workflow.md#15-장기-기능-개발-keystone-우선).
 - PR 생성 전 최신 HEAD는 내부 `/code-review` PASS 증적을 가져야 한다.

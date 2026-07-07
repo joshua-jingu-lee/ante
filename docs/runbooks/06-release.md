@@ -167,7 +167,7 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 릴리스해도 무방)면 핫픽스도 일반 릴리스와 같다.
 
 1. 수정을 일반 이슈/PR로 main에 머지한다(`fix:` 커밋).
-2. `/release prepare` → `/release publish`로 패치 버전(`vX.Y.(Z+1)`)을 릴리스한다.
+2. `/release prepare` → `/release publish`로 §5 규칙대로 커밋 구성에 따라 산출된 버전(`fix`만이면 patch, `feat`가 섞였으면 minor)으로 정규 릴리스한다.
 
 별도 절차 없이 §1~§4를 그대로 따른다.
 
@@ -181,17 +181,36 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 2. **운영 태그에서 라인 브랜치를 수동 절단한다.** `git switch -c release/1.0 v1.0.3` — 이 브랜치는 `/release prepare`가 만들지 않는다(핫픽스 한정 예외, [03-git-workflow.md §1.4](03-git-workflow.md#14-release-브랜치)). 이름은 패치 자리가 없는 `release/X.Y`라 정규 `release/vX.Y.Z` 및 prepare 가드와 겹치지 않는다.
 3. **수정 커밋을 cherry-pick한다.** `git cherry-pick <main의 수정 커밋>`.
 4. **`pyproject.toml`을 수동 범프한다.** 핫픽스는 semantic-release를 우회하므로(`gh release create` 직접 호출) 버전 스탬핑이 자동으로 일어나지 않는다. `pyproject.toml`의 `version`을 `1.0.4`로 직접 올려 커밋한다.
-5. **자가검증 (태그 생성 직전).** 핫픽스는 `/release publish`의 가드레일이 돌지 않으므로(gh release create 직접 호출) 그 수동 등가물을 직접 확인한다:
+5. **기능 검증 (태그 생성 전 필수).** `release/X.Y`는 어떤 CI도 타지 않는다(`ci.yml`은 `main`/`epic`을 base로 하는 PR만 검증하며, 라인 브랜치는 PR을 열지 않는다). 따라서 라인 브랜치를 체크아웃한 상태에서 prepare 4단계와 동일한 검증 세트를 로컬로 돌린다:
+   ```bash
+   ruff check src/ tests/
+   ruff format --check src/ tests/
+   pytest tests/unit/ -x -n auto --tb=short -q
+   docker build -t ante:hotfix-v1.0.4 .
+   ```
+   하나라도 실패하면 태그를 만들지 않고 정리 규칙(9단계)으로 중단한다.
+6. **자가검증 (태그 생성 직전).** 핫픽스는 `/release publish`의 가드레일이 돌지 않으므로(gh release create 직접 호출) 그 수동 등가물을 직접 확인한다:
    - (i) `grep '^version = ' pyproject.toml` 값이 대상 버전(`1.0.4`)과 일치
    - (ii) `v1.0.4` git tag·PyPI `1.0.4`·GHCR `:v1.0.4` image가 아직 배포되지 않음
-6. **annotated 태그 + GitHub Release 생성.** `git tag -a v1.0.4 -m "..."`(lightweight 아님)로 만든 뒤 push하고 `gh release create v1.0.4 --generate-notes`로 릴리스를 만든다.
+7. **annotated 태그 + GitHub Release 생성.** `git tag -a v1.0.4 -m "..."`(lightweight 아님)로 만든 뒤 push하고 `gh release create v1.0.4 --generate-notes`로 릴리스를 만든다. 핫픽스 태그가 최고 semver가 아니면(더 높은 릴리스가 이미 존재하면) `--latest=false`를 함께 지정한다(아래 `:latest` 취급 참조).
    - CHANGELOG.md는 **수동 갱신하지 않는다.** GitHub Release 노트(`--generate-notes`)로 갈음한다. 수정 커밋은 upstream-first로 이미 main에 있으므로, 다음 정규 릴리스의 semantic-release CHANGELOG 재생성에 자연 포함된다.
-7. **publish.yml이 태그 ref를 빌드한다.** `gh release create`의 `release: published` 이벤트가 `publish.yml`을 트리거하고, 그 워크플로우가 릴리스 태그(`v1.0.4`) 커밋을 체크아웃해 PyPI·GHCR로 배포한다 — 정규 파이프라인을 그대로 재사용한다.
-8. **종료 후 라인 브랜치를 삭제한다(태그는 보존).** 배포가 끝나면 `release/1.0`을 지운다(`git branch -D release/1.0`, 원격에 push했다면 `git push origin --delete release/1.0`). 다시 필요하면 태그에서 lazy하게 다시 만든다. `v1.0.4` 태그와 릴리스는 남긴다.
+8. **publish.yml이 태그 ref를 빌드한다.** `gh release create`의 `release: published` 이벤트가 `publish.yml`을 트리거하고, 그 워크플로우가 릴리스 태그(`v1.0.4`) 커밋을 체크아웃해 PyPI·GHCR로 배포한다 — 정규 파이프라인을 그대로 재사용한다.
+9. **종료 후 라인 브랜치를 삭제한다(태그는 보존).** 배포가 끝나면 정리 규칙과 동일하게 `git switch -f main && git branch -D release/1.0`으로 지운다(원격에 push했다면 `git push origin --delete release/1.0`). 라인 브랜치를 체크아웃한 상태에서 `git switch -f main` 없이 `git branch -D`하면 실패한다. 다시 필요하면 태그에서 lazy하게 다시 만든다. `v1.0.4` 태그와 릴리스는 남긴다.
 
-#### `:latest` 주의
+#### 핫픽스 태그와 정규 릴리스 버전 불변식
 
-`publish.yml`은 모든 release에 무조건 `:latest`를 push한다([publish.yml](../../.github/workflows/publish.yml)). 따라서 **과거 라인**에 핫픽스하면(main은 이미 1.1.x인데 1.0.4를 배포) GHCR `:latest`가 1.0.4로 **역행**한다. 핫픽스 후 GHCR에서 `:latest`를 최신 버전으로 **수동 재지정**해야 한다. semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 분리 예정이다(publish.yml checkout이 depth=1·tags 미fetch라 fetch-depth 변경+실증이 필요해 격리 리뷰가 마땅하다). 버전별 태그(`:v1.0.4`)는 §7대로 절대 덮어쓰지 않으며, 부동 태그인 `:latest`만 재지정 대상이다.
+lazy-branch 경로를 쓰는 전제 자체가 **"main에 minor 이상 범프를 유발할 커밋(`feat`)이 쌓여 지금 릴리스할 수 없다"**는 상태다(그렇지 않으면 기본 경로 = main 패치를 쓴다). 따라서 다음 정규 릴리스의 산정 버전은 `vX.(Y+1).0` 이상이 되어, main에서 비도달(unreachable)인 핫픽스 태그 `vX.Y.(Z+1)`과 충돌하지 않는다. 이것이 lazy-branch가 성립하는 불변식이다.
+
+- 안전망: 다음 정규 `/release prepare`에서 산정된 버전이 기존 태그(`git tag -l` 전역)와 충돌하면 — lazy-branch를 잘못된 전제(main이 실제로는 patch 커밋만 쌓인 상태)로 사용했다는 신호다 — prepare를 중단하고 대표 판단을 요청한다.
+
+#### `:latest` 취급 (조건부)
+
+`publish.yml`은 모든 release에 무조건 `:latest`를 push한다([publish.yml](../../.github/workflows/publish.yml)). 하지만 재지정이 필요한 경우는 **핫픽스 태그보다 높은 릴리스가 이미 존재할 때뿐이다**.
+
+- **핫픽스 태그가 최고 semver인 경우(일반적 — 예: 1.1 미릴리스 상태에서 1.0.4가 곧 최고 태그)**: `:latest`가 핫픽스 버전으로 전진하는 것이 정상이다. 아무 재지정도 하지 않는다(7단계 `--latest=false`도 붙이지 않는다).
+- **핫픽스 태그보다 높은 릴리스가 이미 있는 경우(과거 라인 핫픽스 — 예: main이 이미 1.1.x로 릴리스됨)**: `:latest`가 핫픽스 버전으로 **역행**한다. 이를 막으려면 (i) 7단계 `gh release create`에 `--latest=false`를 지정해 GitHub Latest 마커 역행을 막고, (ii) GHCR `:latest`를 최신 정규 버전으로 **수동 재지정**한다.
+
+semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 분리 예정이다(publish.yml checkout이 depth=1·tags 미fetch라 fetch-depth 변경+실증이 필요해 격리 리뷰가 마땅하다). 버전별 태그(`:v1.0.4`)는 §7대로 절대 덮어쓰지 않으며, 부동 태그인 `:latest`만 재지정 대상이다.
 
 #### release PR을 열지 않는다
 
@@ -233,8 +252,9 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 ### 운영 버전에 긴급 수정이 필요한데 main이 릴리스 불가
 
 - main이 릴리스 가능한 상태면 일반 패치 릴리스(`fix:` → `/release prepare`/`publish`)로 처리한다 — [§10 핫픽스 릴리스 · 기본 경로](#10-핫픽스-릴리스).
-- 1.1 개발 커밋 등이 쌓여 main을 지금 릴리스할 수 없으면 라인 브랜치(lazy-branch) 예외 경로를 쓴다 — [§10 · 예외 경로](#10-핫픽스-릴리스). 과거 라인에 배포하면 `:latest`가 역행하니 GHCR `:latest` 수동 재지정을 잊지 않는다.
+- 1.1 개발 커밋 등이 쌓여 main을 지금 릴리스할 수 없으면 라인 브랜치(lazy-branch) 예외 경로를 쓴다 — [§10 · 예외 경로](#10-핫픽스-릴리스). 핫픽스 태그보다 높은 릴리스가 이미 있는 과거 라인 핫픽스에서만 `:latest` 역행이 발생하니, 그 경우에 한해 `--latest=false`와 GHCR `:latest` 수동 재지정을 잊지 않는다.
 
 ### 핫픽스 후 GHCR `:latest`가 과거 버전을 가리킴
 
-- `publish.yml`이 모든 release에 `:latest`를 무조건 push하므로, 과거 라인 핫픽스 뒤에는 `:latest`가 그 핫픽스 버전으로 역행한다. GHCR에서 `:latest`를 최신 정규 버전으로 수동 재지정한다([§10 `:latest` 주의](#10-핫픽스-릴리스)).
+- `:latest` 역행은 **핫픽스 태그보다 높은 릴리스가 이미 존재할 때만** 발생한다(과거 라인 핫픽스). 핫픽스 태그가 최고 semver면 `:latest` 전진이 정상이므로 아무 조치도 하지 않는다.
+- 역행하는 경우에만 (i) `gh release create --latest=false`로 GitHub Latest 마커 역행을 막고, (ii) GHCR `:latest`를 최신 정규 버전으로 수동 재지정한다([§10 `:latest` 취급 (조건부)](#10-핫픽스-릴리스)).

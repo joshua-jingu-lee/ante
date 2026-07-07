@@ -22,7 +22,7 @@ $ARGUMENTS — 릴리스 모드와 선택 인자
 - 동시에 열린 release PR은 하나만 허용한다. 이미 열린 release PR이 있으면 새 브랜치를 만들지 않고 기존 PR을 보고한다.
 - release PR에는 버전, changelog, 릴리스 노트 같은 릴리스 메타데이터만 포함한다. 기능 수정, 버그 수정, 스펙 변경은 별도 이슈/PR로 분리한다.
 - release PR에서는 Docker image를 push하지 않는다. `docker build` 검증만 수행한다.
-- 실제 PyPI 업로드와 Docker image push는 release PR이 머지된 main에서 `/release publish`가 실행한 GitHub Release `published` 이벤트 이후에만 수행한다.
+- 실제 PyPI 업로드와 Docker image push는 release PR이 머지된 main에서 `/release publish`가 실행한 GitHub Release `published` 이벤트 이후에만 수행한다(핫픽스 릴리스는 예외 — `docs/runbooks/06-release.md` §10의 수동 `gh release create` 경로이며, 태그 전 기능 검증·자가검증이 필수다).
 - main에 직접 release commit을 push하지 않는다. 릴리스 커밋은 release PR로만 main에 들어간다.
 - publish 전에 release PR merge commit 이후 main에 새 커밋이 추가되었으면 중단하고 `/release prepare`를 다시 수행한다.
 - 이미 배포된 PyPI 버전이나 Docker tag는 재사용하지 않는다.

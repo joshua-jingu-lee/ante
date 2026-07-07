@@ -48,8 +48,8 @@ release/v0.9.0
 - 에픽 하위 이슈 브랜치는 PR 생성 전 최신 `origin/epic/*`를 기준으로 해야 한다.
 - sibling PR이 `epic/*`에 머지되면 다음 확인을 수행한다.
   - `git fetch origin`
-  - `git rebase origin/epic/#{에픽번호}-{짧은설명}` 또는 필요 시 새 브랜치 재생성
-  - `git cherry -v origin/epic/#{에픽번호}-{짧은설명} HEAD`
+  - `git rebase origin/epic/{에픽번호}-{짧은설명}` 또는 필요 시 새 브랜치 재생성
+  - `git cherry -v origin/epic/{에픽번호}-{짧은설명} HEAD`
   - 히스토리 정리 전후 검증이 필요하면 `git range-diff <정리 전 브랜치> <정리 후 브랜치>`
 - stale base, duplicate commit, base regression이 보이면 PR 생성/수정보다 히스토리 정리를 먼저 한다.
 
@@ -60,7 +60,7 @@ release/v0.9.0
 - release 브랜치는 항상 최신 `origin/main`에서 분기한다. **예외**: 핫픽스 라인 브랜치는 main이 릴리스 불가 상태일 때 운영 태그(`vX.Y.Z`)에서 절단한다. 수정 자체는 upstream-first로 main에 먼저 머지하고, 라인 브랜치는 빌드 소스로만 쓴다.
 - open release PR은 한 번에 하나만 허용한다.
 - release PR merge 후 publish 전에 main에 새 커밋이 추가되면 publish하지 않고 `/release prepare`를 다시 수행한다.
-- release 브랜치에는 릴리스 메타데이터만 포함하고, 기능/버그/스펙 변경을 섞지 않는다.
+- release 브랜치에는 릴리스 메타데이터만 포함하고, 기능/버그/스펙 변경을 섞지 않는다(핫픽스 라인 브랜치 `release/X.Y`는 예외 — cherry-pick된 수정 커밋을 포함한다, [06-release.md §10](06-release.md#10-핫픽스-릴리스)).
 - 핫픽스 라인 브랜치는 main으로 release PR을 열지 않는다. 수정은 upstream-first로 main에 이미 들어가 있고, `release/X.Y`는 태그·빌드 소스일 뿐이다(→ `release/*` CI glob과 release PR 규칙 오작동 차단). 상세는 [06-release.md §10](06-release.md#10-핫픽스-릴리스).
 
 ### 1.5 장기 기능 개발 (keystone 우선)
