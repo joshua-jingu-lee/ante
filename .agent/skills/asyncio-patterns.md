@@ -92,7 +92,7 @@ async def _run_bot(self, bot_id: str, bot: Bot) -> None:
         # 이벤트는 typed dataclass로 발행한다 (범용 payload dict 아님).
         # 실제 이벤트 타입: src/ante/eventbus/events.py (BotErrorEvent 등).
         await self._eventbus.publish(BotErrorEvent(
-            account_id=bot.account_id,
+            account_id=bot.config.account_id,
             bot_id=bot_id,
             error_message=str(exc),
         ))
