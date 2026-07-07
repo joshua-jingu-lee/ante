@@ -2,7 +2,7 @@
 
 > 관련 이슈: #1417 (epic), #1465 (write path 차단, close), #1466 (auth read-path guard, close), #1468 (본 runbook)
 > SSOT: `src/ante/member/models.py:16` `MemberRole` enum / `src/ante/member/auth_service.py:27` `_VALID_MEMBER_ROLES`
-> 인덱스: [README.md](README.md)
+> 인덱스: [README.md](../README.md)
 
 ## 목적
 
