@@ -14,29 +14,28 @@
 
 ## 2. 테스트 구조
 
+테스트는 `tests/` 아래에 단위(`unit/`), 통합(`integration/`), 공용 픽스처
+(`fixtures/`)로 구성된다. `unit/`은 규모가 커지면서 도메인별 서브패키지로도 나뉜다.
+
 ```
 tests/
-├── conftest.py              # 공통 fixture
-├── unit/                    # 단위 테스트 (pytest)
-│   ├── test_eventbus.py
-│   ├── test_config.py
-│   ├── test_bot.py
-│   ├── test_strategy.py
-│   ├── test_rule.py
-│   ├── test_treasury.py
-│   ├── test_broker.py
-│   ├── test_gateway.py
-│   ├── test_data.py
-│   ├── test_backtest.py
-│   ├── test_trade.py
-│   ├── test_report.py
-│   ├── test_notification.py
-│   └── test_cli.py
-├── integration/             # 통합 테스트 (pytest)
-│   ├── test_order_flow.py
-│   ├── test_bot_lifecycle.py
-│   └── test_backtest_e2e.py
+├── conftest.py       # 공통 fixture
+├── fixtures/         # 공용 테스트 픽스처
+├── unit/             # 단위 테스트 (pytest + pytest-asyncio)
+│   ├── cli/          # CLI 커맨드 단위 테스트
+│   ├── contracts/    # 계약/레지스트리 테스트
+│   ├── feed/         # 실시간 피드 테스트
+│   ├── ipc/          # IPC 서버/핸들러 테스트
+│   ├── specs/        # 스펙 기반 테스트
+│   ├── strategy/     # 전략 테스트
+│   └── test_*.py     # 모듈별 평면 단위 테스트
+└── integration/      # 통합 테스트 (EventBus 연동 흐름)
 ```
+
+> 파일 단위 최신 목록은 생성 문서
+> [`docs/architecture/generated/project-structure.md`](../architecture/generated/project-structure.md)의
+> `tests/` 절을 참조한다 — 개별 파일명을 이 문서에 고정하면 드리프트하므로 나열하지
+> 않는다. 재생성: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`.
 
 ## 3. 테스트 유형별 가이드
 
@@ -50,6 +49,7 @@ tests/
 # tests/unit/test_eventbus.py 예시
 import pytest
 from ante.eventbus import EventBus
+from ante.eventbus.events import ConfigChangedEvent
 
 @pytest.mark.asyncio
 async def test_publish_subscribe():
@@ -59,8 +59,9 @@ async def test_publish_subscribe():
     async def handler(event):
         received.append(event)
 
-    bus.subscribe("OrderRequest", handler)
-    await bus.publish("OrderRequest", {"symbol": "005930"})
+    # EventBus는 이벤트 타입 클래스로 구독한다 (문자열 토픽/이벤트 enum 아님).
+    bus.subscribe(ConfigChangedEvent, handler)
+    await bus.publish(ConfigChangedEvent(category="risk", key="max_position"))
 
     assert len(received) == 1
 ```
@@ -71,7 +72,7 @@ async def test_publish_subscribe():
 - 실제 SQLite(임시 DB) 사용, 외부 API는 mock
 
 ```python
-# tests/integration/test_order_flow.py 예시
+# tests/integration/ 통합 흐름 예시
 @pytest.mark.asyncio
 async def test_order_request_to_fill():
     """주문 요청 → 룰 검증 → 자금 확인 → 체결까지의 전체 흐름"""
