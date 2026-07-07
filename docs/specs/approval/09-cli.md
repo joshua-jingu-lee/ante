@@ -89,7 +89,7 @@ ante approval audit-types \
 
 출력 컬럼: id, type, status, requester, created_at, expires_at.
 
-cleanup runbook 사용 예시는 [docs/runbooks/08-legacy-invalid-approval-cleanup.md](../../../docs/runbooks/08-legacy-invalid-approval-cleanup.md) 참고.
+cleanup runbook 사용 예시는 [docs/runbooks/archive/08-legacy-invalid-approval-cleanup.md](../../../docs/runbooks/archive/08-legacy-invalid-approval-cleanup.md) 참고.
 
 ### `ante approval cancel-invalid <id>` (#1472 SPLIT-D)
 

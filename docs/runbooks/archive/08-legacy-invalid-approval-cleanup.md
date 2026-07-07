@@ -2,7 +2,7 @@
 
 > 관련 이슈: #1418 (epic), #1469 (write path 차단, close), #1470 (approve guard, close), #1472 (본 runbook)
 > SSOT: `src/ante/approval/service.py` `_VALID_APPROVAL_TYPES = frozenset(t.value for t in ApprovalType)` / `src/ante/approval/models.py` `ApprovalType` enum
-> 인덱스: [README.md](README.md)
+> 인덱스: [README.md](../README.md)
 
 ## 목적
 
@@ -168,7 +168,7 @@ AuditLogger 기록은 다음 둘 중 하나의 경로로 확인한다:
 - #1469 — CLI/서비스 write path 가드 (close).
 - #1470 — `approve()`/`_execute_approved()` 가드 (close).
 - 본 runbook (#1472) — operator cleanup 절차.
-- spec: [docs/specs/approval/08-approval-service.md](../specs/approval/08-approval-service.md) Administrative cancellation 절.
-- spec: [docs/specs/approval/09-cli.md](../specs/approval/09-cli.md) `audit-types` / `cancel-invalid` 절.
-- spec: [docs/specs/cli/03-commands.md](../specs/cli/03-commands.md) 실행 분류 표.
-- spec: [docs/specs/ipc/ipc.md](../specs/ipc/ipc.md) `approval.cancel_invalid` mutating IPC.
+- spec: [docs/specs/approval/08-approval-service.md](../../specs/approval/08-approval-service.md) Administrative cancellation 절.
+- spec: [docs/specs/approval/09-cli.md](../../specs/approval/09-cli.md) `audit-types` / `cancel-invalid` 절.
+- spec: [docs/specs/cli/03-commands.md](../../specs/cli/03-commands.md) 실행 분류 표.
+- spec: [docs/specs/ipc/ipc.md](../../specs/ipc/ipc.md) `approval.cancel_invalid` mutating IPC.

@@ -16,8 +16,16 @@
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/머지 게이트, 저장소 설정 |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |
 | [06-release.md](06-release.md) | 릴리스 운영 (release PR, 버전 관리, PyPI/Docker 배포) |
-| [07-member-invalid-role-cleanup.md](07-member-invalid-role-cleanup.md) | `MemberRole` enum 외 role 을 가진 legacy member row 의 식별 → 검토 → revoke 운영 절차 (#1417/#1465/#1466/#1468) |
-| [08-legacy-invalid-approval-cleanup.md](08-legacy-invalid-approval-cleanup.md) | `ApprovalType` enum 외 `type` 을 가진 legacy approval row 의 식별 → 검토 → administrative cancel 운영 절차 (#1418/#1469/#1470/#1472) |
+
+## 보관 문서 (archive/)
+
+일회성 데이터 정리 등 개발 프로세스·배포 정책에 해당하지 않는 문서는 `archive/`에 보관한다.
+이 디렉토리 목적(개발 프로세스·배포 정책)에 맞지 않는 문서는 앞으로 루트에 넘버링하지 않는다.
+
+| 보관 문서 | 설명 |
+|---------|------|
+| [archive/07-member-invalid-role-cleanup.md](archive/07-member-invalid-role-cleanup.md) | `MemberRole` enum 외 role 을 가진 legacy member row 의 식별 → 검토 → revoke 운영 절차 (#1417/#1465/#1466/#1468) |
+| [archive/08-legacy-invalid-approval-cleanup.md](archive/08-legacy-invalid-approval-cleanup.md) | `ApprovalType` enum 외 `type` 을 가진 legacy approval row 의 식별 → 검토 → administrative cancel 운영 절차 (#1418/#1469/#1470/#1472) |
 
 ## 에이전트 커맨드 (작업 절차 SSOT)
 

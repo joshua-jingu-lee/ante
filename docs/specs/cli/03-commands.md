@@ -742,7 +742,7 @@ maintenance fallback을 허용한다.
 분리해 보여준다. 운영자는 `actionable` row를 `ante member revoke <member_id> --yes`로
 cleanup한다. `token_hash`는 모든 출력 모드에서 표시되지 않으며, 토큰 존재 여부는
 `has_token: bool`로만 노출된다. 자세한 절차는
-[runbook 07](../../runbooks/07-member-invalid-role-cleanup.md)에 정의되어 있다.
+[runbook 07](../../runbooks/archive/07-member-invalid-role-cleanup.md)에 정의되어 있다.
 
 ### `ante instrument` — 종목 관리
 

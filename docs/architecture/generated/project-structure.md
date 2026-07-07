@@ -825,8 +825,9 @@ docs/
 │   ├── 05-testing.md
 │   ├── 06-release.md                 # 릴리스 정책
 │   ├── README.md
-│   ├── 07-member-invalid-role-cleanup.md
-│   └── 08-legacy-invalid-approval-cleanup.md
+│   └── archive/
+│       ├── 07-member-invalid-role-cleanup.md
+│       └── 08-legacy-invalid-approval-cleanup.md
 ├── specs/                            # 모듈별 세부 설계
 │   ├── README.md
 │   ├── account/
