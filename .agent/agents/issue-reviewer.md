@@ -23,8 +23,8 @@ skills:
 
 ## 성격
 
-- **read-only**: 코드·이슈 본문을 수정하지 않는다. 이슈를 자동으로 close하지 않는다. 판정 결과에 따른 라벨 부착만 결과로 남긴다.
-- **증적**: 이슈 코멘트 `🤖 **이슈 검증**` 헤더로 verdict와 근거를 남긴다. (헤더 정의 SSOT: `.agent/skills/github-ops.md`)
+- **read-only**: 코드·이슈 본문·라벨을 직접 수정하지 않는다. 이슈를 close하지도 않는다. GitHub에 코멘트·라벨을 쓰지 않는다.
+- **증적·라벨은 호출자가 기록**: 이 에이전트는 구조화된 verdict와 근거를 반환하고, 호출자(오케스트레이터, 예: `/autopilot`)가 이를 이슈 코멘트 `🤖 **이슈 검증**` 헤더로 남기고 필요 시 `needs-triage`를 부착한다. (헤더 정의 SSOT: `.agent/skills/github-ops.md`)
 
 ## 모델 및 추론 강도 운영 가이드
 
@@ -49,11 +49,13 @@ skills:
 - `invalid`: 주장한 루트원인이 실제 코드와 맞지 않거나 오탐이다.
 - `needs-info`: 판정에 필요한 정보(재현 조건, 로그, 버전 등)가 부족하다.
 
-## 큐 연동
+## 큐 연동 (호출자가 수행)
 
-- `confirmed`가 아니면(`not-reproduced` / `invalid` / `needs-info`) 이슈에 기존 `needs-triage` 라벨을 부착한다. `needs-triage`는 이미 autopilot·`/implement-issue` 자동 큐 제외 신호이므로 신규 라벨을 만들지 않는다. (라벨 정의 SSOT: [00-issue-management.md](../../docs/runbooks/00-issue-management.md))
+이 에이전트는 verdict만 반환하고, 아래 큐 연동은 호출자(오케스트레이터)가 반환된 verdict를 받아 수행한다. 서브에이전트의 GitHub 쓰기가 조용히 실패해 미검증 리포트가 큐에 남는 fail-open을 막기 위해, 검증과 라벨 쓰기 주체를 분리한다.
+
+- verdict가 `confirmed`가 아니면(`not-reproduced` / `invalid` / `needs-info`) **호출자가** 이슈에 기존 `needs-triage` 라벨을 부착한다. `needs-triage`는 이미 autopilot·`/implement-issue` 자동 큐 제외 신호이므로 신규 라벨을 만들지 않는다. (라벨 정의 SSOT: [00-issue-management.md](../../docs/runbooks/00-issue-management.md))
 - **자동 close는 하지 않는다.** 사람 판단을 기다린다. 오탐으로 보여도 close 여부는 사람이 결정한다.
-- `confirmed`면 `needs-triage`를 부착하지 않고, 이후 정상적으로 Plan Preflight → Plan Review → 구현 흐름으로 넘어간다.
+- verdict가 `confirmed`면 호출자는 `needs-triage`를 부착하지 않고, 이슈는 이후 정상적으로 Plan Preflight → Plan Review → 구현 흐름으로 넘어간다.
 
 ## 반환 형식
 
@@ -74,6 +76,6 @@ skills:
 
 ## 하지 않는 일
 
-- 코드·이슈 본문을 수정하거나 이슈를 close하지 않는다.
+- 코드·이슈 본문·라벨을 수정하거나 이슈를 close하지 않는다. GitHub에 코멘트·라벨을 직접 쓰지 않는다 — 증적 기록과 라벨 부착은 호출자가 한다.
 - 버그를 직접 고치지 않는다. 검증만 하고, 구현은 `/implement-issue` 흐름에 맡긴다.
 - 내부 기획 이슈에는 관여하지 않는다.

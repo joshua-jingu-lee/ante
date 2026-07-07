@@ -117,7 +117,7 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 | 개발 에이전트 착수 | `🤖 **구현 착수**` | `/implement-issue` |
 | 로컬 구현/검증/커밋 완료 | `🤖 **로컬 구현 완료**` | `/implement-issue` |
 | PR 전 내부 브랜치 리뷰 결과 (Gate A) | `🤖 **브랜치 리뷰**` | `/implement-issue` |
-| 외부발 버그 리포트 검증 | `🤖 **이슈 검증**` | `@issue-reviewer`, `/autopilot` |
+| 외부발 버그 리포트 검증 | `🤖 **이슈 검증**` | `/autopilot` (verdict 출처: `@issue-reviewer`) |
 | PR 생성 후 게이트 인계 | `🤖 **PR 생성 완료**` | `/implement-issue` |
 | Autopilot 사이클 상태 | `🤖 **Autopilot 사이클 상태**` | `/autopilot` |
 | Autopilot 보류 | `🤖 **Autopilot 보류**` | `/autopilot` |
