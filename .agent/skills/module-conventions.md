@@ -16,19 +16,18 @@ src/ante/{모듈}/
 └── {구현체}.py      # 외부 연동 구현체 (예: kis.py, telegram.py)
 ```
 
+> 일부 모듈은 관례상 파일명이 다르다. 예: `eventbus`는 `models.py` 대신
+> `events.py`(이벤트 dataclass)와 `bus.py`(구현)를 쓴다. 이 경우에도
+> "인터페이스/모델/구현 분리" 원칙은 동일하다.
+
 ### __init__.py 패턴
 
-```python
-"""EventBus — 이벤트 발행/구독 관리."""
+- public API만 re-export하고, 내부 구현 상세는 노출하지 않는다.
+- 실제 예시: `src/ante/eventbus/__init__.py` (`Event`, `EventBus`,
+  `EventHistoryStore`, `FillDedupGuard` 를 re-export).
 
-from ante.eventbus.base import EventBus
-from ante.eventbus.models import Event, EventType
-
-__all__ = ["EventBus", "Event", "EventType"]
-```
-
-- public API만 re-export
-- 내부 구현 상세는 노출하지 않음
+**red flag**: 실제 모듈에 없는 심볼(과거 문서가 쓰던 이벤트 enum 등)이나
+`service`/`bus` 같은 내부 구현 모듈 경로를 `__all__`에 넣는 것.
 
 ## 2. 인터페이스 정의 (base.py)
 
@@ -59,35 +58,23 @@ class BrokerAdapter(ABC):
 
 ## 3. 데이터 모델 (models.py)
 
-```python
-"""EventBus 데이터 모델."""
+- `dataclass(frozen=True)` 기본 사용 (불변 객체). 가변 필요 시 `frozen=False` 명시.
+- 기본값·`field(default_factory=...)`로 안전한 초기값을 제공한다.
+- Enum은 `enum.StrEnum` 상속 (직렬화 용이). `class X(str, Enum)`은 쓰지 않는다.
+- 타임스탬프는 `datetime` (UTC 권장).
+- 모델은 순수 데이터 구조로, 비즈니스 로직을 담지 않는다.
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
+**실제 예시**:
+- `src/ante/broker/models.py` — `CommissionInfo` frozen dataclass (models.py 규약 준수 모듈).
+- `src/ante/trade/models.py` — `TradeType`/`TradeStatus` `StrEnum` + dataclass 모델.
+- `src/ante/eventbus/events.py` — 이벤트 dataclass. eventbus는 `models.py` 대신
+  `events.py`를 쓰는 예외 모듈이며, 이벤트 종류는 **enum이 아니라 dataclass 타입
+  자체**로 구분한다(모든 이벤트가 frozen `Event`를 상속하는 typed subclass;
+  이벤트 enum 타입은 존재하지 않는다).
 
-
-class EventType(str, Enum):
-    """이벤트 타입."""
-    ORDER_REQUEST = "order_request"
-    ORDER_FILLED = "order_filled"
-    BOT_STARTED = "bot_started"
-    BOT_STOPPED = "bot_stopped"
-
-
-@dataclass(frozen=True)
-class Event:
-    """이벤트 기본 구조."""
-    event_type: EventType
-    payload: dict
-    timestamp: datetime = field(default_factory=datetime.now)
-    source: str = ""
-```
-
-- `dataclass(frozen=True)` 기본 사용 (불변 객체)
-- 가변 필요 시 `frozen=False` 명시
-- Enum은 `str, Enum` 상속 (직렬화 용이)
-- 타임스탬프는 `datetime` (UTC 권장)
+**red flag**: 이벤트 종류를 `str` 기반 enum 상수로 두고
+`Event(event_type=..., payload=dict)` 형태의 범용 payload 이벤트를 쓰는 것 — 실제
+EventBus는 타입별 dataclass(`OrderRequestEvent` 등)를 쓴다.
 
 ## 4. 에러 처리
 
@@ -181,9 +168,10 @@ logger = logging.getLogger(__name__)
 
 class EventBus:
     async def publish(self, event: Event) -> None:
-        logger.debug("이벤트 발행: %s", event.event_type)
+        # typed 이벤트에는 event_type 필드가 없으므로 클래스명으로 로깅한다.
+        logger.debug("이벤트 발행: %s", type(event).__name__)
         # ...
-        logger.info("이벤트 처리 완료: %s (%d 핸들러)", event.event_type, count)
+        logger.info("이벤트 처리 완료: %s (%d 핸들러)", type(event).__name__, count)
 ```
 
 - `logging.getLogger(__name__)` 사용
@@ -194,39 +182,15 @@ class EventBus:
 
 ## 8. 테스트 패턴
 
-```python
-"""tests/unit/test_eventbus.py"""
-
-import pytest
-from ante.eventbus import EventBus, Event, EventType
-
-
-@pytest.fixture
-def eventbus():
-    """EventBus 인스턴스."""
-    return EventBus()
-
-
-@pytest.mark.asyncio
-async def test_publish_subscribe(eventbus):
-    """이벤트 발행 시 구독자가 수신한다."""
-    received = []
-
-    async def handler(event: Event) -> None:
-        received.append(event)
-
-    eventbus.subscribe(EventType.ORDER_REQUEST, handler)
-    event = Event(event_type=EventType.ORDER_REQUEST, payload={"symbol": "005930"})
-    await eventbus.publish(event)
-
-    assert len(received) == 1
-    assert received[0].payload["symbol"] == "005930"
-```
-
 - 테스트 함수명: `test_{동작}_{조건}` 또는 `test_{동작}`
 - fixture로 모듈 인스턴스 생성
 - 한 테스트에 한 가지만 검증
 - mock은 외부 의존성(DB, API)에만 사용, 내부 로직은 실제 객체로 테스트
+
+**실제 예시**: `tests/unit/test_eventbus.py`. EventBus는 **이벤트 타입 클래스**로
+구독한다 — `bus.subscribe(OrderRequestEvent, handler)` 후 `await bus.publish(event)`.
+(이벤트 enum이나 문자열 토픽으로 구독하지 않는다 — 실제 API는
+`src/ante/eventbus/bus.py`, 이벤트 타입은 `src/ante/eventbus/events.py` 참조.)
 
 ## 9. 타입 힌트
 
@@ -235,8 +199,8 @@ async def test_publish_subscribe(eventbus):
 async def get_balance(self, bot_id: str) -> float:
     ...
 
-# 컬렉션은 구체적 타입 사용
-def get_handlers(self, event_type: EventType) -> list[EventHandler]:
+# 컬렉션은 구체적 타입 사용 (실제: src/ante/eventbus/bus.py::get_handlers)
+def get_handlers(self, event_type: type[Event]) -> list[tuple[int, EventHandler]]:
     ...
 
 # Optional은 명시적으로
