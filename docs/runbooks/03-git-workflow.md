@@ -18,6 +18,8 @@ epic/#300-datafeed
 release/v0.9.0
 ```
 
+표준 표기는 이슈 번호에 `#`를 붙이지 않는 `type/이슈번호-슬러그`다(예: `feat/42-symbol-validation`). 위 예시의 `#` 포함 표기도 통용되나 신규 브랜치는 `#` 없이 만든다.
+
 ### 1.1 이슈와 브랜치 대응 원칙
 
 - 기본 원칙은 **한 이슈 = 한 작업 브랜치**다.
@@ -39,7 +41,7 @@ release/v0.9.0
 | `release` | 릴리스 PR | `release/` |
 
 일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/code-review` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
-`release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다.
+`release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다. 단, 핫픽스 라인 브랜치 `release/X.Y`(패치 자리 없음, 예: `release/1.0`)는 예외로 운영 태그에서 수동 절단하며 `/release prepare`를 거치지 않는다([06-release.md §10 핫픽스 릴리스](06-release.md#10-핫픽스-릴리스)).
 
 ### 1.3 에픽 하위 브랜치 최신화
 
@@ -53,12 +55,23 @@ release/v0.9.0
 
 ### 1.4 Release 브랜치
 
-- release 브랜치는 `/release prepare`만 생성한다.
-- 브랜치 이름은 `release/vX.Y.Z`로 고정한다.
-- release 브랜치는 항상 최신 `origin/main`에서 분기한다.
+- release 브랜치는 `/release prepare`만 생성한다. **예외**: 핫픽스 라인 브랜치는 `/release prepare` 경로 밖에서 수동 생성한다([06-release.md §10 핫픽스 릴리스](06-release.md#10-핫픽스-릴리스)).
+- 브랜치 이름은 `release/vX.Y.Z`로 고정한다. **예외**: 핫픽스 라인 브랜치는 패치 자리가 없는 `release/X.Y`(예: `release/1.0`)를 쓴다 — `release/vX.Y.Z` 정규 브랜치와 이름이 겹치지 않으므로 prepare 가드와 충돌하지 않는다.
+- release 브랜치는 항상 최신 `origin/main`에서 분기한다. **예외**: 핫픽스 라인 브랜치는 main이 릴리스 불가 상태일 때 운영 태그(`vX.Y.Z`)에서 절단한다. 수정 자체는 upstream-first로 main에 먼저 머지하고, 라인 브랜치는 빌드 소스로만 쓴다.
 - open release PR은 한 번에 하나만 허용한다.
 - release PR merge 후 publish 전에 main에 새 커밋이 추가되면 publish하지 않고 `/release prepare`를 다시 수행한다.
 - release 브랜치에는 릴리스 메타데이터만 포함하고, 기능/버그/스펙 변경을 섞지 않는다.
+- 핫픽스 라인 브랜치는 main으로 release PR을 열지 않는다. 수정은 upstream-first로 main에 이미 들어가 있고, `release/X.Y`는 태그·빌드 소스일 뿐이다(→ `release/*` CI glob과 release PR 규칙 오작동 차단). 상세는 [06-release.md §10](06-release.md#10-핫픽스-릴리스).
+
+### 1.5 장기 기능 개발 (keystone 우선)
+
+수 주에 걸치는 장기 기능(예: 1.1 미국장 지원)은 장기 유지 브랜치 대신 **keystone 인터페이스** 방식(Martin Fowler)을 우선한다. 장기 브랜치는 main과의 격차가 벌어질수록 리베이스 비용과 base regression 위험이 커지므로, 기본은 trunk-based를 유지한 채 다음 규칙으로 병합한다.
+
+- **하위 모듈을 작은 PR로 계속 병합한다.** 기능을 구성하는 하위 모듈(예: 브로커 어댑터·거래 캘린더·통화 처리)을 이슈 단위 작은 PR로 main에 지속 병합한다. 각 PR은 테스트를 포함하되 **기본 비활성** 상태로 들어가 운영 동작을 바꾸지 않는다.
+- **진입점 배선은 마지막 PR에서만 한다.** 하위 모듈을 실제로 이어 붙여 기능을 켜는 keystone(진입점 배선)은 모든 하위 모듈이 병합·검증된 뒤 마지막 PR로 추가한다.
+- **게이트는 부팅 시 설정 게이트 수준만 허용한다.** 미완성 기능을 숨기는 게이트는 부팅 시점에 읽는 설정 게이트까지만 둔다. 요청마다 분기하는 런타임 플래그 서비스는 도입하지 않는다(YAGNI — 관측·정리 비용이 이득을 넘어선다).
+- **게이트는 제거 기한을 이슈로 등록한다.** 설정 게이트를 도입하면, 해당 기능이 릴리스된 뒤 게이트를 제거하는 후속 이슈를 함께 등록해 임시 게이트가 영구 잔존하지 않게 한다.
+- **epic/\* 대비 keystone을 우선한다.** 통합용 `epic/*` 장기 브랜치(§1.1·§1.3)는 현재 휴면 상태이며, 브랜치 리뷰 스코프 한계가 있다(참고: [#2418](https://github.com/joshua-jingu-lee/ante/issues/2418)). 장기 기능은 keystone을 기본으로 하고, `epic/*`는 keystone으로 나누기 어려운 통합이 실제로 필요할 때만 예외적으로 쓴다.
 
 ## 2. 커밋 컨벤션
 

@@ -18,7 +18,7 @@ $ARGUMENTS — 릴리스 모드와 선택 인자
 
 - 릴리스는 항상 수동으로만 시작한다. `main` 머지, `/autopilot`, `/implement-issue`는 릴리스를 자동 시작하지 않는다.
 - release PR은 `release/vX.Y.Z` 브랜치에서 `main`으로만 연다.
-- release 브랜치는 항상 최신 `origin/main`에서 만들고, stale한 로컬 `main`이나 작업 브랜치에서 분기하지 않는다.
+- release 브랜치는 항상 최신 `origin/main`에서 만들고, stale한 로컬 `main`이나 작업 브랜치에서 분기하지 않는다. 예외: 핫픽스 라인 브랜치 `release/X.Y`는 `/release prepare` 경로 밖에서 운영 태그(`vX.Y.Z`)로부터 수동 절단한다(`docs/runbooks/06-release.md` §10 핫픽스 릴리스). 이 커맨드의 prepare/publish 절차는 핫픽스를 다루지 않는다.
 - 동시에 열린 release PR은 하나만 허용한다. 이미 열린 release PR이 있으면 새 브랜치를 만들지 않고 기존 PR을 보고한다.
 - release PR에는 버전, changelog, 릴리스 노트 같은 릴리스 메타데이터만 포함한다. 기능 수정, 버그 수정, 스펙 변경은 별도 이슈/PR로 분리한다.
 - release PR에서는 Docker image를 push하지 않는다. `docker build` 검증만 수행한다.

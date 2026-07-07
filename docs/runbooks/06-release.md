@@ -63,7 +63,7 @@
 |------|------|
 | 브랜치 | `release/vX.Y.Z` |
 | base | `main` |
-| 생성 기준 | 최신 `origin/main` |
+| 생성 기준 | 최신 `origin/main` (핫픽스 라인 브랜치는 예외 — 운영 태그에서 절단, [§10](#10-핫픽스-릴리스)) |
 | 커밋 | `chore(release): vX.Y.Z` |
 | 허용 변경 | `pyproject.toml`, `CHANGELOG.md`, 릴리스 노트 등 릴리스 메타데이터 |
 | 금지 변경 | 기능 수정, 버그 수정, 스펙 변경, unrelated workflow 변경 |
@@ -148,7 +148,64 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 
 전환 시: `publish.yml`에서 `password:` 라인 제거 → OIDC 자동 적용.
 
-## 9. 트러블슈팅
+## 9. 운영 배포 결합 규약
+
+핫픽스 경로(§10)가 성립하려면 **"운영 중 버전 = git tag `vX.Y.Z`"** 등식이 항상 유지되어야 한다. 지금 운영에 올라간 버전이 태그로 특정되어야, 그 태그에서 라인 브랜치를 절단해 핫픽스할 수 있기 때문이다.
+
+- 운영 배포는 **GHCR 고정 태그 이미지**(`ghcr.io/{owner}/{repo}:vX.Y.Z`) 또는 **PyPI 휠**(`ante==X.Y.Z`)로만 한다. 둘 다 릴리스 태그에 1:1로 대응한다.
+- `docker-compose.yml`의 `build: .`는 **개발용 로컬 빌드**다. 운영에서 로컬 소스를 빌드해 올리면 "운영 버전 = 태그" 등식이 깨지므로 운영에 쓰지 않는다.
+- `:latest`는 부동 태그라 운영 고정 참조로 쓰지 않는다(§7·§10의 `:latest` 주의 참조).
+
+> compose를 GHCR 이미지 소비로 실제 전환하는 것(운영용 override 파일 등)은 별도 이슈 후보다. 본 절은 결합 규약만 성문화한다.
+
+## 10. 핫픽스 릴리스
+
+운영 중인 버전에 긴급 수정이 필요할 때의 경로다. **기본은 main 패치 릴리스**이고, main이 릴리스 불가 상태일 때만 **예외로 라인 브랜치(lazy-branch)** 경로를 쓴다.
+
+### 기본 경로 — main 패치 릴리스
+
+main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 릴리스해도 무방)면 핫픽스도 일반 릴리스와 같다.
+
+1. 수정을 일반 이슈/PR로 main에 머지한다(`fix:` 커밋).
+2. `/release prepare` → `/release publish`로 패치 버전(`vX.Y.(Z+1)`)을 릴리스한다.
+
+별도 절차 없이 §1~§4를 그대로 따른다.
+
+### 예외 경로 — 라인 브랜치(lazy-branch)
+
+1.1 개발 커밋이 main에 쌓여 main을 지금 릴리스할 수 없는데 운영 중인 1.0.x에 버그가 났다면, 운영 태그에서 라인 브랜치를 사후 절단한다. `hotfix` 상시 브랜치를 미리 두지 않고 **필요할 때만 만들어(lazy) 쓰고 지운다**. 표준 패턴(trunkbaseddevelopment.com의 branch-for-release + GitLab upstream-first)을 따른다.
+
+절차(예: 운영 `v1.0.3`에 핫픽스 → `v1.0.4`):
+
+1. **upstream-first — 수정을 main에 먼저 머지한다.** 일반 이슈/PR로 수정을 main에 반영한다(`fix:`). 수정은 항상 main → 라인 방향으로만 흐른다(역방향 금지).
+2. **운영 태그에서 라인 브랜치를 수동 절단한다.** `git switch -c release/1.0 v1.0.3` — 이 브랜치는 `/release prepare`가 만들지 않는다(핫픽스 한정 예외, [03-git-workflow.md §1.4](03-git-workflow.md#14-release-브랜치)). 이름은 패치 자리가 없는 `release/X.Y`라 정규 `release/vX.Y.Z` 및 prepare 가드와 겹치지 않는다.
+3. **수정 커밋을 cherry-pick한다.** `git cherry-pick <main의 수정 커밋>`.
+4. **`pyproject.toml`을 수동 범프한다.** 핫픽스는 semantic-release를 우회하므로(`gh release create` 직접 호출) 버전 스탬핑이 자동으로 일어나지 않는다. `pyproject.toml`의 `version`을 `1.0.4`로 직접 올려 커밋한다.
+5. **자가검증 (태그 생성 직전).** 핫픽스는 `/release publish`의 가드레일이 돌지 않으므로(gh release create 직접 호출) 그 수동 등가물을 직접 확인한다:
+   - (i) `grep '^version = ' pyproject.toml` 값이 대상 버전(`1.0.4`)과 일치
+   - (ii) `v1.0.4` git tag·PyPI `1.0.4`·GHCR `:v1.0.4` image가 아직 배포되지 않음
+6. **annotated 태그 + GitHub Release 생성.** `git tag -a v1.0.4 -m "..."`(lightweight 아님)로 만든 뒤 push하고 `gh release create v1.0.4 --generate-notes`로 릴리스를 만든다.
+   - CHANGELOG.md는 **수동 갱신하지 않는다.** GitHub Release 노트(`--generate-notes`)로 갈음한다. 수정 커밋은 upstream-first로 이미 main에 있으므로, 다음 정규 릴리스의 semantic-release CHANGELOG 재생성에 자연 포함된다.
+7. **publish.yml이 태그 ref를 빌드한다.** `gh release create`의 `release: published` 이벤트가 `publish.yml`을 트리거하고, 그 워크플로우가 릴리스 태그(`v1.0.4`) 커밋을 체크아웃해 PyPI·GHCR로 배포한다 — 정규 파이프라인을 그대로 재사용한다.
+8. **종료 후 라인 브랜치를 삭제한다(태그는 보존).** 배포가 끝나면 `release/1.0`을 지운다(`git branch -D release/1.0`, 원격에 push했다면 `git push origin --delete release/1.0`). 다시 필요하면 태그에서 lazy하게 다시 만든다. `v1.0.4` 태그와 릴리스는 남긴다.
+
+#### `:latest` 주의
+
+`publish.yml`은 모든 release에 무조건 `:latest`를 push한다([publish.yml](../../.github/workflows/publish.yml)). 따라서 **과거 라인**에 핫픽스하면(main은 이미 1.1.x인데 1.0.4를 배포) GHCR `:latest`가 1.0.4로 **역행**한다. 핫픽스 후 GHCR에서 `:latest`를 최신 버전으로 **수동 재지정**해야 한다. semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 분리 예정이다(publish.yml checkout이 depth=1·tags 미fetch라 fetch-depth 변경+실증이 필요해 격리 리뷰가 마땅하다). 버전별 태그(`:v1.0.4`)는 §7대로 절대 덮어쓰지 않으며, 부동 태그인 `:latest`만 재지정 대상이다.
+
+#### release PR을 열지 않는다
+
+라인 브랜치는 main으로 **release PR을 열지 않는다**. 수정은 이미 upstream-first로 main에 있고, `release/X.Y`는 태그·빌드 소스일 뿐이다. release PR을 열면 `release/*` CI glob([04-ci-cd.md §Gate B](04-ci-cd.md#gate-b--ci))과 release PR 규칙(§3)이 오작동한다.
+
+#### prepare 라이프사이클과의 관계
+
+핫픽스의 `release/X.Y`는 [§2 릴리스 흐름](#2-릴리스-흐름)·`.agent/commands/release.md`의 prepare 경로 **밖**이다. main 전용 스탬핑, 2단계의 로컬 `release/vX.Y.Z` 가드, 단일 정리 규칙은 모두 정규 prepare 전용이며 핫픽스에는 적용되지 않는다. 이름을 `release/X.Y`(패치 자리 없음)로 구분해 prepare 가드와의 충돌을 원천 회피한다.
+
+#### 상시 maintenance 브랜치를 두지 않는 이유
+
+라인 브랜치는 필요할 때만 만들고 지운다(lazy). 상시 `hotfix`/`maintenance` 브랜치는 YAGNI로 두지 않는다. 재도입 트리거만 남긴다: **1.1 개발이 수개월 지속되며 main이 릴리스 불가 상태로 자주 머무는 것이 실측되면** 해당 minor에 한해 상시 라인 브랜치 도입을 재검토한다.
+
+## 11. 트러블슈팅
 
 ### semantic-release가 "No release will be made"
 
@@ -172,3 +229,12 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 - PyPI에 이미 올라간 버전은 재업로드할 수 없다.
 - 이미 존재하는 git tag나 Docker image tag는 덮어쓰지 않는다.
 - 잘못 생성된 GitHub Release/tag 정리는 사람 확인 후 수동으로만 수행한다.
+
+### 운영 버전에 긴급 수정이 필요한데 main이 릴리스 불가
+
+- main이 릴리스 가능한 상태면 일반 패치 릴리스(`fix:` → `/release prepare`/`publish`)로 처리한다 — [§10 핫픽스 릴리스 · 기본 경로](#10-핫픽스-릴리스).
+- 1.1 개발 커밋 등이 쌓여 main을 지금 릴리스할 수 없으면 라인 브랜치(lazy-branch) 예외 경로를 쓴다 — [§10 · 예외 경로](#10-핫픽스-릴리스). 과거 라인에 배포하면 `:latest`가 역행하니 GHCR `:latest` 수동 재지정을 잊지 않는다.
+
+### 핫픽스 후 GHCR `:latest`가 과거 버전을 가리킴
+
+- `publish.yml`이 모든 release에 `:latest`를 무조건 push하므로, 과거 라인 핫픽스 뒤에는 `:latest`가 그 핫픽스 버전으로 역행한다. GHCR에서 `:latest`를 최신 정규 버전으로 수동 재지정한다([§10 `:latest` 주의](#10-핫픽스-릴리스)).

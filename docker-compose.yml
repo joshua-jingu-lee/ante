@@ -1,5 +1,6 @@
 services:
   ante:
+    # 개발용 로컬 빌드다. 운영은 GHCR 고정 태그 이미지 또는 PyPI 휠을 소비한다(운영 중 버전 = git tag vX.Y.Z 규약, docs/runbooks/06-release.md §9 참조).
     build: .
     volumes:
       - ./config:/app/config
