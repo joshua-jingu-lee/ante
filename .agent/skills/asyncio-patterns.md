@@ -87,11 +87,14 @@ async def _run_bot(self, bot_id: str, bot: Bot) -> None:
     except asyncio.CancelledError:
         logger.info("봇 정상 중지: %s", bot_id)
         raise  # CancelledError는 반드시 re-raise
-    except Exception:
+    except Exception as exc:
         logger.exception("봇 오류로 중지: %s", bot_id)
-        await self._eventbus.publish(Event(
-            event_type=EventType.BOT_ERROR,
-            payload={"bot_id": bot_id},
+        # 이벤트는 typed dataclass로 발행한다 (범용 payload dict 아님).
+        # 실제 이벤트 타입: src/ante/eventbus/events.py (BotErrorEvent 등).
+        await self._eventbus.publish(BotErrorEvent(
+            account_id=bot.config.account_id,
+            bot_id=bot_id,
+            error_message=str(exc),
         ))
     finally:
         self._tasks.pop(bot_id, None)
@@ -171,7 +174,7 @@ async def run_backtest(strategy_path: str, config: dict) -> BacktestResult:
         stderr=asyncio.subprocess.PIPE,
     )
 
-    stdout, stderr = await asyncio.communicate()
+    stdout, stderr = await proc.communicate()
 
     if proc.returncode != 0:
         raise BacktestError(f"백테스트 실패: {stderr.decode()}")

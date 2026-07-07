@@ -28,7 +28,8 @@ class Database:
 
     def __init__(self, db_path: str) -> None:
         self._db_path = db_path
-        self._conn: aiosqlite.Connection | None = None
+        self._writer: aiosqlite.Connection | None = None
+        self._reader: aiosqlite.Connection | None = None
 
     async def _init_conn(self) -> aiosqlite.Connection:
         """공통 PRAGMA 설정으로 연결 초기화."""
@@ -38,8 +39,6 @@ class Database:
         await conn.execute("PRAGMA temp_store=MEMORY")
         await conn.execute("PRAGMA foreign_keys=ON")
         await conn.execute("PRAGMA busy_timeout=5000")
-        await conn.execute("PRAGMA mmap_size=268435456")  # 256MB
-        await conn.execute("PRAGMA cache_size=-32000")     # 32MB
         conn.row_factory = aiosqlite.Row
         return conn
 
@@ -71,64 +70,36 @@ class Database:
 **주의**:
 - 연결 풀 불필요 (단일 프로세스, 단일 writer)
 - `PRAGMA synchronous=NORMAL`은 WAL 모드에서 안전하면서 성능 향상
-- `mmap_size`는 N100 VM 메모리에 맞게 조정 (256MB 권장, RAM 부족 시 줄이기)
+- 위 PRAGMA 집합은 실제 코드와 일치한다 — SSOT는 `src/ante/core/database.py`
+  (`_init_conn`). 실제 `Database`는 writer/reader 이중 연결, writer 직렬화 lock,
+  read-only(`mode=ro`) 모드까지 포함하므로 새 연결 로직은 그 파일을 기준으로 한다.
+- 메모리 매핑·페이지 캐시 관련 PRAGMA는 현재 **설정하지 않는다**(SQLite 기본값
+  사용). N100 환경에서 추가 최적화가 필요하면 실측 후 별도 이슈로 도입한다.
 
-## 3. 스키마 마이그레이션 — 간단한 버전 관리
+## 3. 스키마 마이그레이션 — 중앙 러너 + 버전 모듈
 
-```python
-MIGRATIONS = [
-    # v1: 초기 스키마
-    """
-    CREATE TABLE IF NOT EXISTS trades (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        bot_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        side TEXT NOT NULL,
-        quantity REAL NOT NULL,
-        price REAL NOT NULL,
-        executed_at TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_trades_bot ON trades(bot_id);
-    """,
-    # v2: 포지션 테이블 추가
-    """
-    CREATE TABLE IF NOT EXISTS positions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        bot_id TEXT NOT NULL,
-        symbol TEXT NOT NULL,
-        quantity REAL NOT NULL DEFAULT 0.0,
-        avg_price REAL NOT NULL DEFAULT 0.0,
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    """,
-]
+Ante는 SQLite 내장 버전 카운터(PRAGMA)가 아니라 **`schema_version` 테이블**로 적용
+이력을 추적하고, 각 마이그레이션을 `src/ante/db/versions/vNNN_*.py` 모듈의 async
+`migrate(db)` 함수로 작성한다.
 
+- 등록부: `src/ante/db/migrations.py`의
+  `MIGRATIONS: list[tuple[int, str, MigrateFn]]` — `(seq, version, migrate_fn)`.
+- 러너: `run_migrations(db)`가 미적용 seq만 골라 각 마이그레이션을
+  `db.transaction()` 안에서 실행하고 `schema_version` INSERT와 원자 커밋한다.
+- 실행 전 자동 백업: 미적용 항목이 있으면 `backup_db(...)`로 1회 백업한다.
 
-async def migrate(db: Database) -> int:
-    """순차적으로 마이그레이션 실행. PRAGMA user_version으로 추적."""
-    conn = db.writer
+**작성 규칙** (상세: `src/ante/db/migrations.py` 모듈 docstring, #2365):
+- 마이그레이션은 추가만 한다 (기존 마이그레이션/버전 모듈 수정 금지).
+- 각 마이그레이션은 멱등이어야 한다 (`IF NOT EXISTS`, `PRAGMA table_info` 가드 등).
+  실제 예: `src/ante/db/versions/v006_order_tracker_order_price.py`.
+- **트랜잭션 owner 태스크 안에서는 `execute_script` 금지** — Python `executescript`는
+  열린 트랜잭션을 암묵 COMMIT하므로 원자성이 깨진다. DDL은 `db.execute(...)`로
+  문장 단위 실행한다.
+- ORM 사용하지 않음 — raw SQL + Row factory.
 
-    # 현재 버전 확인 (별도 메타 테이블 불필요)
-    async with conn.execute("PRAGMA user_version") as cursor:
-        row = await cursor.fetchone()
-        current = row[0]
-
-    if current >= len(MIGRATIONS):
-        return current
-
-    for version, sql in enumerate(MIGRATIONS[current:], start=current + 1):
-        await conn.executescript(sql)
-        await conn.execute(f"PRAGMA user_version = {version}")
-        await conn.commit()
-
-    return len(MIGRATIONS)
-```
-
-**규칙**:
-- 마이그레이션은 추가만 (기존 마이그레이션 수정 금지)
-- 각 마이그레이션은 멱등성 보장 (`IF NOT EXISTS`)
-- ORM 사용하지 않음 — raw SQL + Row factory
+**red flag**: `MIGRATIONS = ["CREATE TABLE ..."]`(SQL 문자열 리스트) + SQLite 내장
+버전 카운터(PRAGMA) 추적. 실제 구조는 `(seq, version, fn)` 튜플 + `schema_version`
+테이블이며 내장 버전 카운터는 쓰지 않는다.
 
 ## 4. 트랜잭션 패턴
 
@@ -195,32 +166,32 @@ async with conn.execute("SELECT price, quantity FROM trades WHERE id = ?", (trad
 
 ## 6. 온라인 백업
 
-```python
-import sqlite3
+운영 중 DB 백업은 `sqlite3.Connection.backup()`으로 수행한다. aiosqlite 내부
+연결의 private sqlite3 핸들에 직접 접근하지 않고 **별도 동기 `sqlite3.connect`**로
+원본을 열어 백업한다.
 
-async def backup_database(db: Database, backup_path: str) -> None:
-    """운영 중 DB 백업 (online backup API)."""
-    source_conn = db.conn._conn  # aiosqlite 내부 sqlite3 연결
-    dest_conn = sqlite3.connect(backup_path)
-    try:
-        source_conn.backup(dest_conn, pages=100)  # 100페이지씩 점진적 복사
-    finally:
-        dest_conn.close()
-```
+- 실제 구현: `src/ante/db/backup.py`의 `backup_db(src_path, version)` — 원본/대상을
+  각각 `sqlite3.connect`로 열고 `src_conn.backup(dst_conn)` 후 최근 `MAX_BACKUPS`개만
+  유지한다.
+- 호출 지점: `run_migrations`가 미적용 마이그레이션 실행 전에 1회 호출한다.
 
-**주의**: aiosqlite의 내부 연결에 접근하므로, 가능하면 별도 동기 연결로 백업 수행
+**red flag**: aiosqlite 객체의 내부 sqlite3 핸들(private 속성)에 직접 접근해
+백업하는 것 — 실제 백업 경로는 별도 동기 연결을 연다.
 
-## 7. N100 환경 최적화 PRAGMA 요약
+## 7. N100 환경 PRAGMA 요약
+
+실제 적용 집합 (SSOT: `src/ante/core/database.py` `_init_conn`):
 
 ```sql
 PRAGMA journal_mode = WAL;          -- 읽기/쓰기 동시성 향상
 PRAGMA synchronous = NORMAL;        -- WAL 모드에서 안전하면서 빠름
 PRAGMA temp_store = MEMORY;         -- 임시 테이블을 메모리에
-PRAGMA mmap_size = 268435456;       -- 256MB 메모리 매핑
-PRAGMA cache_size = -16000;         -- 16MB 페이지 캐시
 PRAGMA foreign_keys = ON;           -- 외래키 제약 활성화
 PRAGMA busy_timeout = 5000;         -- SQLITE_BUSY 시 5초 대기 후 재시도
 ```
+
+메모리 매핑·페이지 캐시 관련 PRAGMA는 현재 설정하지 않는다(SQLite 기본값). 추가
+최적화가 필요하면 실측 후 별도 이슈로 도입한다.
 
 ## 8. 공통 주의사항
 

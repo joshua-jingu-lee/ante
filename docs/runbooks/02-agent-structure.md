@@ -115,7 +115,6 @@
 ├── settings.json
 ├── settings.local.json
 ├── settings.local.example.json
-├── hooks/
 ├── agents -> ../.agent/agents
 ├── commands -> ../.agent/commands
 └── skills -> ../.agent/skills
@@ -170,10 +169,14 @@
 Plan Review는 `.agent/skills/`가 아니라 `.agent/agents/plan-reviewer.md` 서브에이전트로 수행한다.
 `code-reviewer.md`는 구조 리스크 메타 리뷰 정의다.
 
-### 2.5 권한 및 Hooks (settings.json)
+### 2.5 권한 (settings.json)
 
-- **permissions**: Claude 측 에이전트가 실행 가능한 도구와 명령을 제한
-- **hooks**: 파일 수정 시 자동 포맷팅(`auto-format.sh`), 보호 파일 검사(`protect-files.sh`)
+- **permissions.deny**: 보호 파일 쓰기를 차단한다. 현재 `CLAUDE.md`/`AGENTS.md`
+  (및 `**/CLAUDE.md`·`**/AGENTS.md`)에 대한 `Edit`/`Write`를 deny로 막는다.
+- **permissions.allow**: Claude 측 에이전트가 실행 가능한 도구·Bash 명령을
+  allowlist로 제한한다.
+- hooks(auto-format/protect-files)와 `.claude/hooks/` 디렉토리는 현재 사용하지
+  않는다 — 파일 보호는 위 `permissions.deny`로 구현한다.
 
 ## 3. 운영 상 주의사항
 
