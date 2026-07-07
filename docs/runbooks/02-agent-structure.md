@@ -74,7 +74,7 @@
 **담당**: 외부발 버그 리포트의 진실성·재현 가능성 검증
 
 - 외부에서 들어온 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)에 한해, 구현 착수 전 루트원인이 실제 코드와 일치하는지와 재현 가능성을 read-only로 검토한다. 상시 게이트가 아니며 내부 기획 이슈에는 적용하지 않는다.
-- verdict(`confirmed` / `not-reproduced` / `invalid` / `needs-info`)를 `이슈 검증` 이슈 코멘트로 남긴다. `confirmed`가 아니면 `needs-triage`를 부착하고 자동 close는 하지 않는다. 정의는 `.agent/agents/issue-reviewer.md`.
+- `@issue-reviewer`는 read-only로 verdict(`confirmed` / `not-reproduced` / `invalid` / `needs-info`)와 근거를 반환하고, 오케스트레이터가 그 verdict에 따라 `이슈 검증` 이슈 코멘트를 남기고 `confirmed`가 아니면 `needs-triage`를 부착한다(자동 close 없음). `@issue-reviewer` 자신은 코드·이슈 본문·라벨을 직접 수정하지 않는다. 정의는 `.agent/agents/issue-reviewer.md`.
 
 ### 1.8 브랜치 리뷰와 머지 게이트
 

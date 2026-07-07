@@ -29,7 +29,7 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 |------|------|-----------|-------------|
 | 이슈/스펙 분석 | 오케스트레이터 | Claude 메인 세션 | 시작/보류 이슈 코멘트 |
 | 이슈 본문 구현계획 작성/정비 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 계획 정비 완료 이슈 코멘트 |
-| 계획 검증 (Gate 0) | `@plan-reviewer` | 별도 컨텍스트 서브에이전트 | Plan Review 이슈 코멘트 |
+| 계획 검증 (Gate 0) | `@plan-reviewer` (verdict 반환, read-only) | 별도 컨텍스트 서브에이전트 | verdict → 오케스트레이터가 Plan Review 이슈 코멘트 기록 |
 | 피드백 반영/라벨 확정 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 라벨 + 완료/보류 이슈 코멘트 |
 
 ## 실행 절차
@@ -159,8 +159,8 @@ verdict(approve-implement | narrow-scope | revise-plan | split-issue | invoke-hu
 )
 ```
 
-`@plan-reviewer`는 동기 호출로 verdict와 근거를 반환한다.
-결과는 이슈 코멘트에 `Plan Review`로 남기고, `reviewer:` 필드에 리뷰 수행 주체를 기록한다.
+`@plan-reviewer`는 동기 호출로 verdict와 근거를 반환한다(read-only, GitHub 쓰기 없음).
+반환된 verdict를 오케스트레이터가 이슈 코멘트에 `Plan Review`로 남기고, `reviewer:` 필드에 리뷰 수행 주체를 기록한다.
 
 ```bash
 gh issue comment #{번호} --body "🤖 **Plan Review**

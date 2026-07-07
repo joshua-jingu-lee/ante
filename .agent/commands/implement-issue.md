@@ -31,7 +31,7 @@ mkdir -p "$WORKTREE_ROOT"
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 구현 분석 완료 또는 스킵 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
-| 4b (Plan Review 요청/대기, Gate 0) | `@plan-reviewer` | 별도 컨텍스트 서브에이전트 | 이슈 코멘트 |
+| 4b (Plan Review 요청/대기, Gate 0) | `@plan-reviewer` (verdict 반환, read-only) | 별도 컨텍스트 서브에이전트 | verdict → 오케스트레이터가 Plan Review 이슈 코멘트 기록 |
 | 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
 | 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 + 로컬 구현 완료 이슈 코멘트 |
 | 10~11 (브랜치 리뷰 루프, Gate A) | `/code-review` + Claude 개발 에이전트 | 네이티브 리뷰 + Claude 개발 에이전트 | 이슈 코멘트 |
@@ -70,7 +70,7 @@ mkdir -p "$WORKTREE_ROOT"
 - 실행 주체는 `@plan-reviewer`(`.agent/agents/plan-reviewer.md`)이며, 동기 호출로 verdict와 근거를 반환한다.
 - 입력에는 이슈 번호, 스펙 경로, 이슈 본문 Implementation Plan, 중점 검토 위험을 포함한다.
 - 이 단계는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
-- 결과는 이슈 코멘트에 `Plan Review`로 남기고 `reviewer:` 필드에 수행 주체를 기록한다.
+- 반환된 verdict를 오케스트레이터가 이슈 코멘트에 `Plan Review`로 남기고 `reviewer:` 필드에 수행 주체를 기록한다. `@plan-reviewer`는 GitHub에 쓰지 않는다.
 
 예시:
 
@@ -281,7 +281,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 - 브랜치 push
 - PR 생성 (`base=epic/#{에픽번호}-{설명}`)
 
-빌트인 `/code-review`는 base 인자 없이 항상 main 대비로 리뷰한다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 이 경우 리뷰어와 PASS/FAIL 판정은 **이 하위 이슈가 실제 변경한 파일**에 finding을 한정한다(형제 코드 finding은 무시).
+빌트인 `/code-review`는 base 인자 없이 항상 main 대비로 리뷰한다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 `/code-review`의 main 대비 diff로는 완벽히 분리되지 않는다(네이티브 도구가 base 지정을 지원하지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다). 현재 epic 워크플로는 휴면 상태이며, 재개 시 이 스코핑을 재설계한다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
 
 ### E4. 에픽 PR 생성
 

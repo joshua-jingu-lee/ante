@@ -33,7 +33,7 @@
 각 단계의 실제 절차는 `.agent/commands/`가 SSOT다. 여기서는 이슈 하나가 거치는 단계와 소유 커맨드·게이트만 요약한다.
 
 1. **분석** (오케스트레이터, `AGENTS.md` + `docs/specs/*` + `docs/architecture/*` 기준): 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단. 증적은 `구현 분석 완료` 또는 보류 사유 이슈 코멘트.
-2. **Plan Preflight + Plan Review (Gate 0)** — `/plan-preflight`: `plan-preflight:started` 부착 → 이슈 본문 Implementation Plan(파일 맵/작업 순서/risk flags/검증/stop conditions/비목표) 작성·정비 → 별도 컨텍스트 `@plan-reviewer`가 계획을 검토하고 verdict를 `Plan Review` 코멘트로 남김. `approve-implement`/`narrow-scope`면 `plan-preflight:started` 제거 후 `plan-preflight:done` 확정, `revise-plan`이면 보강 후 재요청, `split-issue`/`invoke-human`/`needs-spec-first`/`blocked`이면 구현 중단.
+2. **Plan Preflight + Plan Review (Gate 0)** — `/plan-preflight`: `plan-preflight:started` 부착 → 이슈 본문 Implementation Plan(파일 맵/작업 순서/risk flags/검증/stop conditions/비목표) 작성·정비 → 별도 컨텍스트 `@plan-reviewer`가 계획을 read-only로 검토해 verdict를 반환하고, 오케스트레이터가 이를 `Plan Review` 코멘트로 남김. `approve-implement`/`narrow-scope`면 `plan-preflight:started` 제거 후 `plan-preflight:done` 확정, `revise-plan`이면 보강 후 재요청, `split-issue`/`invoke-human`/`needs-spec-first`/`blocked`이면 구현 중단.
 3. **구현 + 브랜치 리뷰 (Gate A)** — `/implement-issue`: `plan-preflight:done`과 최신 계획 확인 → 개발 에이전트(`@backend-dev`/`@devops`/`@strategy-dev`)가 worktree 격리 후 구현·로컬 lint/test·커밋 → 네이티브 `/code-review`로 PR 전 브랜치 리뷰(PASS까지 내부 반복, FAIL은 같은 worktree에서 수정, 반복 risk class는 `@code-reviewer` 메타 리뷰) → PASS 시 브랜치 push + PR 생성(`Closes #이슈`). 각 전환은 이슈 코멘트로 남긴다.
 4. **PR 게이트** (GitHub Actions): required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`가 충돌 없음·대화 해결·auto-merge 가능 상태에서 auto-merge를 활성화하고, 직전에 `post-merge.yml`을 dispatch한다. `/autopilot` 실행 중이면 사이클 상태 코멘트를 갱신한다.
 5. **post-merge automation**: 이슈 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
@@ -81,7 +81,7 @@ Plan Preflight가 이슈 본문에 구현계획을 작성하거나 정비한 뒤
 - 실행 주체는 `@plan-reviewer` 서브에이전트이며, 동기 호출로 verdict와 근거를 반환한다.
 - 입력에는 이슈 번호, 스펙 경로, 이슈 본문 Implementation Plan, 중점 검토 위험을 포함한다.
 - 이 단계는 코드를 수정하지 않고, 브랜치나 PR도 만들지 않는다.
-- 결과는 이슈 코멘트에 `Plan Review`로 남기고 `reviewer:` 필드에 수행 주체를 기록하며, 필요하면 이슈 본문 구현계획을 갱신한다.
+- 반환된 verdict를 오케스트레이터가 이슈 코멘트에 `Plan Review`로 남기고 `reviewer:` 필드에 수행 주체를 기록하며, 필요하면 이슈 본문 구현계획을 갱신한다. `@plan-reviewer`는 GitHub에 쓰지 않는다.
 
 Plan Review의 verdict는 다음 중 하나다.
 

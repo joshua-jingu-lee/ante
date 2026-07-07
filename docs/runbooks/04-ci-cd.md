@@ -47,7 +47,7 @@ post-merge automation
 
 - **트리거**: Plan Preflight가 `plan-preflight:started` 상태에서 이슈 본문 구현계획 초안을 정리한 시점
 - **실행**: 별도 컨텍스트 서브에이전트 `@plan-reviewer`(`.agent/agents/plan-reviewer.md`) 동기 호출
-- **결과**: 이슈 코멘트 `Plan Review` (`reviewer:` 필드에 수행 주체 기록)
+- **결과**: 오케스트레이터가 이슈 코멘트 `Plan Review`로 verdict 기록 (`reviewer:` 필드에 수행 주체; `@plan-reviewer`는 read-only, GitHub 쓰기 없음)
 - **성공 시**: Plan Preflight가 이슈 본문 구현계획을 최신화하고 `plan-preflight:done` 라벨로 확정
 - **실패 시**: Plan Preflight가 `plan-preflight:started` 상태를 유지한 채 이슈 본문 구현계획을 보강하고 재요청
 - **해석 주의**: 이 단계는 구현 세션과 격리된 read-only 계획 리뷰다. 코드 수정, 브랜치 생성, PR 생성은 하지 않는다. verdict 어휘(`approve-implement`/`narrow-scope`/`revise-plan`/`split-issue`/`invoke-human`)와 라벨 상태 기계는 리뷰 주체와 무관하게 유지한다.
