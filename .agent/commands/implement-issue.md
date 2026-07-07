@@ -166,7 +166,7 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 ### 브랜치 리뷰 루프 (Gate A)
 
-10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 base 브랜치({main 또는 epic/...}) 기준으로 Claude Code 네이티브 `/code-review`로 검토한다.
+10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 이 스킬은 **현재 브랜치 diff를 default 브랜치(main) 대비** 리뷰하며 base 인자를 받지 않는다(effort는 지정 가능, 예: high). PR을 요구하는 `code-review` 플러그인과 혼동하지 않는다 — Gate A는 PR 생성 전 브랜치 리뷰다.
 
 ```text
 /code-review
@@ -182,7 +182,7 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 - verdict: {PASS | FAIL}
 - reviewer: /code-review
-- base: {main 또는 epic/...}
+- review-scope: main 대비 현재 브랜치 diff
 - head: {SHA7}
 - attempt: {N}
 - blocking findings: {없음 | finding 요약}
@@ -277,16 +277,18 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 
 - 구현
 - 로컬 커밋
-- `/code-review` (base epic/#{에픽번호}-{설명}) 통과
+- `/code-review` 통과
 - 브랜치 push
 - PR 생성 (`base=epic/#{에픽번호}-{설명}`)
+
+빌트인 `/code-review`는 base 인자 없이 항상 main 대비로 리뷰한다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 이 경우 리뷰어와 PASS/FAIL 판정은 **이 하위 이슈가 실제 변경한 파일**에 finding을 한정한다(형제 코드 finding은 무시).
 
 ### E4. 에픽 PR 생성
 
 모든 하위 이슈가 에픽 브랜치에 반영되면, 에픽 브랜치도 동일한 규칙을 따른다.
 
 1. 에픽 브랜치 최신화 및 로컬 검증
-2. `/code-review` (base main) 통과
+2. `/code-review` 통과 (main 대비 — 에픽 브랜치가 main으로 머지되므로 스코프가 정확)
 3. `epic/* -> main` PR 생성
 4. `ci` 통과 후 `merge-gate`가 auto-merge 활성화
 

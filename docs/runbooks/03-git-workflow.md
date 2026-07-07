@@ -106,7 +106,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- 실행: Claude Code 네이티브 `/code-review` (base `<main 또는 epic/...>`)
+- 실행: Claude Code 빌트인 `/code-review` 스킬 — 현재 브랜치 diff를 default 브랜치(main) 대비 리뷰한다. base 인자를 받지 않으며 effort(예: high) 지정 가능. PR을 요구하는 `code-review` 플러그인과 다르다.
 - 증적: 이슈 코멘트 `브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
