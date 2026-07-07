@@ -25,17 +25,20 @@
    - 예:
      - `🤖 **Plan Preflight 시작**`
      - `🤖 **Plan Preflight 계획 정비 완료**`
-     - `🤖 **Codex Plan Review**`
+     - `🤖 **Plan Review**` (legacy 읽기 호환: `🤖 **Codex Plan Review**`)
      - `🤖 **Plan Preflight 완료**`
      - `🤖 **Plan Preflight 보류**`
      - `🤖 **구현 분석 완료**`
      - `🤖 **구현 착수**`
      - `🤖 **로컬 구현 완료**`
-     - `🤖 **Codex 브랜치 리뷰**`
+     - `🤖 **브랜치 리뷰**` (legacy 읽기 호환: `🤖 **Codex 브랜치 리뷰**`)
+     - `🤖 **이슈 검증**`
      - `🤖 **PR 생성 완료**`
      - `🤖 **Autopilot 사이클 상태**`
      - `🤖 **Autopilot 보류**`
      - `🤖 **Post-merge 정리 완료**`
+
+     위 두 legacy 항목은 과거 이슈 코멘트에 남은 구 헤더의 읽기 호환용이다. 신 헤더가 구 헤더의 substring이 아니라 선언만으로는 과거 증적 검색이 이어지지 않으므로, 구 헤더 문자열 자체를 이 목록에 유지한다. 새 코멘트는 신 헤더로만 남긴다.
 
 3. **조회와 쓰기의 목적을 분리한다**
    - 조회: `gh issue list/view`, `gh pr list/view/diff`, `gh run list/view`
@@ -107,23 +110,30 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 |--------|------|--------------------|
 | Plan Preflight 시작 | `🤖 **Plan Preflight 시작**` | `/plan-preflight` |
 | 이슈 본문 구현계획 정비 완료 | `🤖 **Plan Preflight 계획 정비 완료**` | `/plan-preflight` |
-| 구현계획 외부 검증 결과 | `🤖 **Codex Plan Review**` | `/plan-preflight`, `/implement-issue` |
+| 구현계획 계획 리뷰 결과 (Gate 0) | `🤖 **Plan Review**` | `/plan-preflight`, `/implement-issue` |
 | Plan Preflight 완료 | `🤖 **Plan Preflight 완료**` | `/plan-preflight` |
 | Plan Preflight 보류/중단 | `🤖 **Plan Preflight 보류**` | `/plan-preflight`, `/autopilot` |
 | 구현 전 분석 완료 | `🤖 **구현 분석 완료**` | `/implement-issue` |
 | 개발 에이전트 착수 | `🤖 **구현 착수**` | `/implement-issue` |
 | 로컬 구현/검증/커밋 완료 | `🤖 **로컬 구현 완료**` | `/implement-issue` |
-| PR 전 내부 브랜치 리뷰 결과 | `🤖 **Codex 브랜치 리뷰**` | `/implement-issue` |
+| PR 전 내부 브랜치 리뷰 결과 (Gate A) | `🤖 **브랜치 리뷰**` | `/implement-issue` |
+| 외부발 버그 리포트 검증 | `🤖 **이슈 검증**` | `@issue-reviewer`, `/autopilot` |
 | PR 생성 후 게이트 인계 | `🤖 **PR 생성 완료**` | `/implement-issue` |
 | Autopilot 사이클 상태 | `🤖 **Autopilot 사이클 상태**` | `/autopilot` |
 | Autopilot 보류 | `🤖 **Autopilot 보류**` | `/autopilot` |
 | merge 후 이슈 정리 완료 | `🤖 **Post-merge 정리 완료**` | `post-merge.yml` |
 
+리뷰 증적 코멘트(`Plan Review`, `브랜치 리뷰`, `이슈 검증`)는 헤더 아래 `reviewer:` 필드에 리뷰 수행 주체를 함께 기록한다. 리뷰 주체는 도구 중립 헤더와 분리해 이 필드로만 남긴다 (D-019).
+
+- `Plan Review`(Gate 0) → `reviewer: @plan-reviewer`
+- `브랜치 리뷰`(Gate A) → `reviewer: /code-review`
+- `이슈 검증` → `reviewer: @issue-reviewer`
+
 ### 5. PR 생성/조회
 
 PR 생성 전 확인:
 
-- 최신 내부 branch review (`/codex:review --base <ref>`) PASS 여부
+- 최신 내부 branch review (`/code-review`) PASS 여부
 - open PR 중복 여부
 - base 브랜치 적합성
 - release PR은 예외적으로 이슈 코멘트 기반 branch review 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 확인한다.
@@ -151,10 +161,11 @@ gh pr create --base {base} --title "{title}" --body "{body}"
 - `/plan-preflight`
   - 시작 라벨 변경과 동시에 `Plan Preflight 시작` 코멘트를 남김
   - 이슈 본문 Implementation Plan 정비 후 `Plan Preflight 계획 정비 완료` 코멘트를 남김
-  - Codex Plan Review 결과를 `Codex Plan Review` 코멘트로 남김
+  - Plan Review 결과를 `Plan Review` 코멘트로 남김
   - 완료 시 `Plan Preflight 완료`, 중단 시 `Plan Preflight 보류` 코멘트를 남김
 - `/autopilot`
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
+  - 외부발 버그 리포트는 큐 편입 전 `@issue-reviewer` 검증 결과(`이슈 검증` 코멘트)를 선행 확인
   - 활성 이슈의 최신 `Autopilot 사이클 상태` 코멘트를 유지하고 merge/post-merge 완료까지 갱신
 - `/implement-issue`
   - 이슈 조회, 구현 분석 완료 코멘트, 구현 착수 코멘트, 로컬 구현 완료 코멘트, 리뷰 요청/결과 코멘트, PR 생성, PR 생성 완료 코멘트

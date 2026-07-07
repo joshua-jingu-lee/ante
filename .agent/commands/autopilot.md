@@ -33,7 +33,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 1. **Plan Preflight 사이클**
    - `plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성을 확인한다.
-   - 필요하면 `/plan-preflight #{번호}`로 구현계획과 Codex Plan Review 피드백을 확정한다.
+   - 필요하면 `/plan-preflight #{번호}`로 구현계획과 Plan Review 피드백을 확정한다.
 2. **개별 이슈 실행 사이클**
    - `/implement-issue #{번호}`를 호출해 실제 수정, 검증, PR 생성까지 진행한다.
    - Plan Preflight의 tasks, verification, risk flags, stop conditions는 구현 프롬프트에 강제 반영할 항목이다.
@@ -44,7 +44,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 별도 선행 작업:
 
 - implementation lane이 바쁠 때 다른 후보 이슈의 Plan Preflight를 수행할 수 있다.
-- 이 선행 작업은 `/plan-preflight #{번호}`로 수행하며, 이슈 본문 구현계획 작성/보강, Codex Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지만 허용한다.
+- 이 선행 작업은 `/plan-preflight #{번호}`로 수행하며, 이슈 본문 구현계획 작성/보강, Plan Review 요청/결과 반영, `plan-preflight:*` 라벨 관리까지만 허용한다.
 - Plan Preflight를 시작하면 `plan-preflight:started`를 붙이고, 구현계획이 확정되면 이슈 본문을 최신화한 뒤 `plan-preflight:done`으로 교체한다.
 - `/plan-preflight`가 남기는 시작/계획 정비/리뷰/완료 코멘트는 Autopilot 상태 코멘트와 별개로 유지한다.
 - 코드 수정, 브랜치 생성, PR 생성은 현재 implementation lane이 종료된 뒤 해당 이슈가 실제 처리 대상으로 선택될 때 수행한다.
@@ -124,6 +124,14 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 선행 의존 이슈가 아직 close되지 않은 이슈
 
 새 이슈는 배치 시작 시점에 snapshot으로 고정한다. 배치 도중 새로 등록된 이슈나 follow-up 이슈는 다음 실행으로 넘긴다.
+
+### 외부발 버그 리포트 검증 선행
+
+외부에서 들어온 버그 리포트(예: `source:ante-oracle` 라벨이 붙은 자동 리포트, 외부 제보)는 루트원인 추정이 부정확할 수 있어, 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다.
+
+- 이슈에 `이슈 검증` 코멘트의 `confirmed` 증적이 이미 있으면 그대로 큐에 편입한다.
+- `confirmed` 증적이 없으면 `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 read-only로 호출해 진실성·재현 가능성을 검증한다.
+- verdict가 `confirmed`가 아니면(`not-reproduced` / `invalid` / `needs-info`) `@issue-reviewer`가 `needs-triage` 라벨을 부착한다. 이 이슈는 위 `기본 제외 대상`의 `needs-triage` 규칙에 따라 자동으로 큐에서 빠지며, 사람 판단을 기다린다. 자동 close는 하지 않는다.
 
 ## 정렬 규칙
 
@@ -230,7 +238,7 @@ Plan Preflight 결과가 구현 불가 상태면 이슈 코멘트에 다음을 �
 
 `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있는 이슈만 `/implement-issue #{번호}`로 넘긴다.
 
-- `/implement-issue`는 이슈 본문 Implementation Plan과 Codex Plan Review 결과를 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 포함한다.
+- `/implement-issue`는 이슈 본문 Implementation Plan과 Plan Review 결과를 읽고 구현 착수 코멘트와 개발 에이전트 프롬프트에 포함한다.
 - Plan Preflight의 tasks, verification, risk flags, stop conditions는 **선택 메모가 아니라 Done criteria**다.
 - 확정 계획을 반영한 실제 수정, 테스트, PR 생성이 확인될 때까지 같은 이슈를 유지한다.
 - 이 단계에 진입하면 상태 코멘트를 `review-state=done`, `implement-state=running`, `current-cycle=implement`로 갱신한다.
@@ -249,7 +257,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 모니터링 규칙:
 
 - 같은 head SHA에서 `ci`/`merge-gate`가 인프라 이슈로 멈추면 `gh run rerun`을 우선하고, 복구되지 않으면 `retry-later-infra`로 종료한다.
-- PR 후 추가 코드 변경이 필요해 보이면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 `ci` 결과를 다시 확인한다.
+- PR 후 추가 코드 변경이 필요해 보이면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 `ci` 결과를 다시 확인한다.
 - 상태 변화 없이 장시간 대기하거나 `--time-budget`이 소진되면 현재 이슈를 `deferred-merge-monitoring`으로 기록하고 배치를 종료한다.
 - `--handoff-only`일 때만 PR 생성 직후 모니터링을 생략하고 `handed-off`로 기록한다.
 - PR이 생성되는 즉시 상태 코멘트를 `implement-state=done`, `merge-monitor-state=running`, `current-cycle=merge-monitor`로 갱신하고 `pr`/`head`를 채운다.
@@ -300,7 +308,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `### 개선 포인트`
   - 예: 라벨 규칙 보강, Plan Preflight 조건 조정, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
 
-공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 Codex 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/codex:review --base <ref>` PASS/FAIL 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
+공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/code-review` PASS/FAIL 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
 
 ## 중단 규칙
 

@@ -1,7 +1,7 @@
 # 02. 에이전트 구조 및 `.agent/` 디렉토리
 
 > Claude 측 역할 정의와 `.agent/` 디렉토리 구성을 정의한다.
-> Codex는 `.agent/` 내부 에이전트가 아니라 GitHub 이벤트 또는 Codex plugin 명령에 반응하는 외부 리뷰 워커로 취급한다.
+> 계획 리뷰(`@plan-reviewer`)와 이슈 검증(`@issue-reviewer`)은 `.agent/agents/`의 Claude 서브에이전트이고, PR 전 브랜치 리뷰는 Claude Code 네이티브 `/code-review`가 담당한다.
 
 ---
 
@@ -18,11 +18,11 @@
 
 **역할**:
 - 작업 분석과 분해
-- Plan Preflight 산출물 확인, `plan-preflight:started`/`plan-preflight:done` 라벨 관리, Codex Plan Review 요청/결과 조율
+- Plan Preflight 산출물 확인, `plan-preflight:started`/`plan-preflight:done` 라벨 관리, Plan Review(`@plan-reviewer`) 요청/결과 조율
 - 야간 `/autopilot` 배치에서 이슈 큐 snapshot, Plan Preflight, 구현 위임, merge 모니터링 조율
 - 적절한 Claude 서브에이전트 위임
 - 이슈/브랜치/PR GitHub 기록 관리
-- Codex 브랜치 리뷰 결과를 받아 수정 루프 조율
+- 브랜치 리뷰(`/code-review`) 결과를 받아 수정 루프 조율
 - PR 생성 후 최종 상태를 사용자에게 보고
 
 **하지 않는 일**:
@@ -35,8 +35,8 @@
 **담당**: Python 백엔드 구현
 
 - `docs/specs/` 설계 문서를 따라 구현, 테스트 작성, 로컬 검증, 브랜치 push까지 수행
-- Codex Plan Review verdict가 나기 전까지 구현을 시작하지 않음
-- Codex 브랜치 리뷰 실패 시 같은 브랜치에서 수정
+- Plan Review verdict가 나기 전까지 구현을 시작하지 않음
+- 브랜치 리뷰(`/code-review`) 실패 시 같은 브랜치에서 수정
 
 ### 1.3 DevOps 엔지니어 (`@devops`)
 
@@ -61,16 +61,25 @@
   - 같은 `risk class` failure가 2회 반복
   - 다음 시도 전에 "무엇을 먼저 검증해야 하는지"가 불명확
 
-### 1.6 Codex 외부 워커
+### 1.6 계획 리뷰어 (`@plan-reviewer`)
 
-Codex는 `.agent/` 내부 에이전트가 아니라 외부 Codex plugin 명령으로 호출되는 read-only 리뷰 워커다.
+**담당**: 구현 착수 전 Plan Review (Gate 0)
 
-| 역할 | 트리거 | 책임 |
-|------|--------|------|
-| **Codex Plan Review 워커** | `plan-preflight:started` 라벨 또는 구현 전 계획 검증 필요 | `/codex:adversarial-review`로 구현계획의 가정, 위험, 대안을 검토하고 이슈 코멘트에 verdict 기록 |
-| **Codex 브랜치 리뷰어** | `/implement-issue`의 PR 생성 전 내부 `/codex:review --base <ref>` 실행, 또는 PR 후 추가 변경에 대한 수동 재검증 | 코드 품질 게이트로서 blocking issue 식별, 이슈/PR 코멘트에 PASS/FAIL 기록 |
+- 구현 세션과 격리된 별도 컨텍스트에서 이슈 본문 Implementation Plan을 read-only로 검토한다.
+- verdict(`approve-implement` / `narrow-scope` / `revise-plan` / `split-issue` / `invoke-human`)와 근거를 반환하고, 오케스트레이터가 `Plan Review` 이슈 코멘트로 증적을 남긴다.
+- 명시적 반려 권한을 가지지만 코드·이슈 본문·라벨을 직접 수정하지 않는다. 정의는 `.agent/agents/plan-reviewer.md`.
 
-PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-approve`, `claude-pr-fix`)는 운영하지 않는다. 머지 게이트는 required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT)와 `merge-gate`만 본다.
+### 1.7 이슈 검증 에이전트 (`@issue-reviewer`)
+
+**담당**: 외부발 버그 리포트의 진실성·재현 가능성 검증
+
+- 외부에서 들어온 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)에 한해, 구현 착수 전 루트원인이 실제 코드와 일치하는지와 재현 가능성을 read-only로 검토한다. 상시 게이트가 아니며 내부 기획 이슈에는 적용하지 않는다.
+- verdict(`confirmed` / `not-reproduced` / `invalid` / `needs-info`)를 `이슈 검증` 이슈 코멘트로 남긴다. `confirmed`가 아니면 `needs-triage`를 부착하고 자동 close는 하지 않는다. 정의는 `.agent/agents/issue-reviewer.md`.
+
+### 1.8 브랜치 리뷰와 머지 게이트
+
+- PR 전 브랜치 리뷰(Gate A)는 `.agent/` 에이전트가 아니라 Claude Code 네이티브 `/code-review`로 수행한다. `/implement-issue`의 PR 생성 전 내부 루프로 돌며, PASS/FAIL 판정·시도 횟수 누적·반복 실패 시 `blocked:review-loop` 차단 계약을 그대로 유지한다. PR 후 추가 변경은 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
+- PR 단계의 자동 AI 승인/재수정 워커(과거 운영하던 PR 승인·자동 수정 봇)는 운영하지 않는다. 머지 게이트는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT)와 `merge-gate`만 본다.
 
 ## 2. `.agent/` 및 `.claude/` 디렉토리 구조
 
@@ -82,7 +91,9 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 │   ├── backend-dev.md         # @backend-dev
 │   ├── devops.md              # @devops
 │   ├── strategy-dev.md        # @strategy-dev
-│   └── code-reviewer.md       # @code-reviewer — 구조 리스크 메타 리뷰
+│   ├── code-reviewer.md       # @code-reviewer — 구조 리스크 메타 리뷰
+│   ├── plan-reviewer.md       # @plan-reviewer — 구현 전 Plan Review (Gate 0)
+│   └── issue-reviewer.md      # @issue-reviewer — 외부발 버그 리포트 검증
 ├── commands/              # 커스텀 슬래시 명령어 (작업 절차 SSOT)
 │   ├── plan-preflight.md      # /plan-preflight
 │   ├── implement-issue.md     # /implement-issue
@@ -112,7 +123,7 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 
 ### 2.2 에이전트 정의 (agents/)
 
-`.agent/agents/*.md`는 Claude 서브에이전트 정의의 SSOT이다. Codex 워커는 Codex plugin 명령 또는 GitHub 이벤트에 반응하는 외부 워커이므로 이 디렉토리에 포함하지 않는다.
+`.agent/agents/*.md`는 Claude 서브에이전트 정의의 SSOT이며, `@plan-reviewer`·`@issue-reviewer`도 여기 포함된다. PR 전 브랜치 리뷰는 에이전트가 아니라 Claude Code 네이티브 `/code-review` 커맨드이므로 이 디렉토리에 정의하지 않는다.
 
 ### 2.2.1 모델 및 추론 강도 정책
 
@@ -124,7 +135,7 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 
 | 에이전트 | 기본 effort | 높여야 하는 경우 | 낮춰도 되는 경우 |
 |------|------|------|------|
-| `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, Codex Plan Review 고위험 판정 | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
+| `@backend-dev` | `high` | 캐시/세션/연결/설정 변경, 계약 rename, 2개 이상 모듈 소비자 영향, Plan Review 고위험 판정 | 리뷰 finding이 매우 구체적이고 1~2파일 follow-up인 경우 |
 | `@devops` | `high` | CI/CD, 인증, secret, release, merge automation, 운영 스크립트 변경 | 문서성 변경, 작은 경로 수정 |
 | `@strategy-dev` | `xhigh` (`max`) | 새 전략 설계, 파라미터 탐색, 지표 해석, 백테스트 결과 비교 | 단순 validation rerun, 리포트 포맷 정리 |
 | `@code-reviewer` | `xhigh` (`max`) | 반복 risk class failure, lifecycle/contract drift, 범위 축소/이슈 분할/사람 에스컬레이션 판단 | finding이 매우 국소적인 경우 |
@@ -136,8 +147,8 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
 
 반복적인 개발 작업을 슬래시 명령으로 정의한다:
 
-- `/plan-preflight #{번호}` — 이슈 본문 구현계획 작성/정비 → Codex Plan Review → `plan-preflight:done` 확정
-- `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Codex Plan Review → 구현 → Codex 브랜치 리뷰 → PR 생성
+- `/plan-preflight #{번호}` — 이슈 본문 구현계획 작성/정비 → Plan Review → `plan-preflight:done` 확정
+- `/implement-issue #{번호}` — 분석 → Plan Preflight 확인 → Plan Review → 구현 → 브랜치 리뷰 → PR 생성
 - `/autopilot` — 오픈 이슈 큐 snapshot → 필요 시 Plan Preflight → `/implement-issue` → merge/post-merge 순차 모니터링
 - `/release` — prepare로 release PR 생성, publish로 GitHub Release/PyPI/Docker image 배포
 
@@ -155,8 +166,8 @@ PR 단계의 자동 AI 승인 워커(과거 `claude-pr-approve`, `codex-pr-appro
   - `contract-drift-review`
   - `generated-artifact-sync`
 
-`review-pr.md`는 수동 PR 검토와 Codex 브랜치 리뷰가 공유하는 체크리스트 계약 문서다.
-Codex Plan Review는 `.agent/skills/`가 아니라 `openai/codex-plugin-cc`의 `/codex:adversarial-review` 외부 명령으로 수행한다.
+`review-pr.md`는 수동 PR 검토와 브랜치 리뷰(`/code-review`)가 공유하는 체크리스트 계약 문서다.
+Plan Review는 `.agent/skills/`가 아니라 `.agent/agents/plan-reviewer.md` 서브에이전트로 수행한다.
 `code-reviewer.md`는 구조 리스크 메타 리뷰 정의다.
 
 ### 2.5 권한 및 Hooks (settings.json)
@@ -166,12 +177,12 @@ Codex Plan Review는 `.agent/skills/`가 아니라 `openai/codex-plugin-cc`의 `
 
 ## 3. 운영 상 주의사항
 
-- Codex는 PR 전 코드 품질 게이트(브랜치 리뷰)와 구현 전 계획 검증(Plan Review)을 담당한다.
-  - PR 전 브랜치 리뷰는 GitHub Actions가 아니라 Claude 세션의 `/codex:review --base <ref>` 내부 루프로 수행한다.
-  - Codex Plan Review는 `/codex:adversarial-review`로 호출하는 외부 read-only 리뷰다.
+- 리뷰 게이트: PR 전 코드 품질 게이트(브랜치 리뷰, Gate A)는 네이티브 `/code-review`가, 구현 전 계획 검증(Plan Review, Gate 0)은 `@plan-reviewer`가 담당한다.
+  - PR 전 브랜치 리뷰는 GitHub Actions가 아니라 Claude 세션의 `/code-review` 내부 루프로 수행한다.
+  - Plan Review는 구현 세션과 격리된 별도 컨텍스트 `@plan-reviewer` 서브에이전트로 호출하는 read-only 리뷰다.
 - PR 후 자동 AI 승인/감사 워커는 운영하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
 - `@code-reviewer`는 자동 PR 승인 워커가 아니라 반복 failure와 구조 리스크에 대한 메타 리뷰를 담당한다.
 - 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
-- 로컬 worktree 정리는 Codex가 아니라 Claude 측 구현 머신이 담당한다.
+- 로컬 worktree 정리는 리뷰 게이트가 아니라 Claude 측 구현 머신이 담당한다.
 - 고위험 변경에서는 diff만 읽고 끝내지 않는다.
   - 생성자, 팩토리, 캐시 저장소, 소비자, 생성 산출물까지 넓혀 본다.

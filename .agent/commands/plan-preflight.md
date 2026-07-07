@@ -1,4 +1,4 @@
-GitHub 이슈 본문을 구현 가능한 실행계획으로 정비하고, Codex Plan Review 피드백까지 반영해 Plan Preflight를 완료한다.
+GitHub 이슈 본문을 구현 가능한 실행계획으로 정비하고, Plan Review 피드백까지 반영해 Plan Preflight를 완료한다.
 
 GitHub 조회/코멘트/이슈 본문 수정 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
 
@@ -19,8 +19,8 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 완료 조건:
 
 - 이슈 본문에 구현계획이 최신 상태로 정리되어 있음
-- Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`
-- Codex Plan Review 피드백이 이슈 본문 구현계획에 반영되어 있음
+- Plan Review verdict가 `approve-implement` 또는 `narrow-scope`
+- Plan Review 피드백이 이슈 본문 구현계획에 반영되어 있음
 - `plan-preflight:started` 라벨이 제거되고 `plan-preflight:done` 라벨이 붙어 있음
 
 ## 역할 분담
@@ -29,7 +29,7 @@ $ARGUMENTS — GitHub 이슈 번호와 옵션
 |------|------|-----------|-------------|
 | 이슈/스펙 분석 | 오케스트레이터 | Claude 메인 세션 | 시작/보류 이슈 코멘트 |
 | 이슈 본문 구현계획 작성/정비 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 계획 정비 완료 이슈 코멘트 |
-| 계획 검증 | Codex | `/codex:adversarial-review` | Codex Plan Review 이슈 코멘트 |
+| 계획 검증 (Gate 0) | `@plan-reviewer` | 별도 컨텍스트 서브에이전트 | Plan Review 이슈 코멘트 |
 | 피드백 반영/라벨 확정 | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 + 라벨 + 완료/보류 이슈 코멘트 |
 
 ## 실행 절차
@@ -64,7 +64,7 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
 - status: started
 - mode: {default | refresh}
 - spec-path: {1A Spec-First | 1B Issue-First Bundled | pending}
-- next: 이슈 본문 Implementation Plan 작성/정비 후 Codex Plan Review 요청"
+- next: 이슈 본문 Implementation Plan 작성/정비 후 Plan Review 요청"
 ```
 
 `--dry-run`이면 라벨을 바꾸지 않고 필요한 라벨 변경만 보고한다.
@@ -105,7 +105,8 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
 ### Non-Goals
 - ...
 
-### Codex Plan Review
+### Plan Review
+- reviewer:
 - verdict:
 - feedback reflected:
 - scope decision:
@@ -134,24 +135,37 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 계획 정비 완료**
 - spec-path: {1A Spec-First | 1B Issue-First Bundled}
 - ssot: {docs/specs/...}
 - risk flags: {none | lifecycle | contract-drift | generated-artifact-sync | mutable-config | health-path | multi-consumer}
-- next: Codex Plan Review 요청"
+- next: Plan Review 요청"
 ```
 
-### 5단계: Codex Plan Review 요청
+### 5단계: Plan Review 요청 (Gate 0)
 
-정비된 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
+정비된 구현계획을 별도 컨텍스트의 계획 리뷰 서브에이전트 `@plan-reviewer`로 넘긴다.
+구현 세션과 격리된 read-only 리뷰이며, 이 단계는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
+`@plan-reviewer` 정의는 `.agent/agents/plan-reviewer.md`다.
 
 ```text
-/codex:adversarial-review --background \
-  issue #{번호} implementation plan: challenge assumptions, scope fit, missing consumers, generated artifacts, rollback/test gaps
+Agent(
+  subagent_type="plan-reviewer",
+  prompt="""
+이슈 #{번호}의 본문 Implementation Plan을 검토하라.
+가정, 범위 적합성, 누락된 소비자, 생성 산출물, 롤백/테스트 공백을 공격적으로 확인하라.
+
+## 이슈 본문 Implementation Plan
+{Spec Path / File Map / Tasks / Verification / Risk Flags / Stop Conditions / Non-Goals}
+
+verdict(approve-implement | narrow-scope | revise-plan | split-issue | invoke-human)와 근거를 반환하라.
+"""
+)
 ```
 
-긴 리뷰는 `/codex:status`, `/codex:result`로 결과를 회수한다.
-결과는 이슈 코멘트에 `Codex Plan Review`로 남긴다.
+`@plan-reviewer`는 동기 호출로 verdict와 근거를 반환한다.
+결과는 이슈 코멘트에 `Plan Review`로 남기고, `reviewer:` 필드에 리뷰 수행 주체를 기록한다.
 
 ```bash
-gh issue comment #{번호} --body "🤖 **Codex Plan Review**
+gh issue comment #{번호} --body "🤖 **Plan Review**
 - verdict: {approve-implement | narrow-scope | revise-plan | split-issue | invoke-human}
+- reviewer: @plan-reviewer
 - reviewed-plan: 이슈 본문 Implementation Plan
 - feedback summary: {요약}
 - required changes: {없음 | 이슈 본문에 반영할 항목}
@@ -170,7 +184,7 @@ Verdict:
 
 - `approve-implement`: 현재 구현계획을 확정한다.
 - `narrow-scope`: 축소 범위, 제외 범위, 후속 이슈 후보를 이슈 본문에 반영한 뒤 확정한다.
-- `revise-plan`: `plan-preflight:started` 상태를 유지하고 이슈 본문을 보강한 뒤 `Codex Plan Review` 코멘트에 재요청 사유를 남기고 다시 요청한다.
+- `revise-plan`: `plan-preflight:started` 상태를 유지하고 이슈 본문을 보강한 뒤 `Plan Review` 코멘트에 재요청 사유를 남기고 다시 요청한다.
 - `split-issue`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 아래 형식의 분리안을 남긴다. 하위 이슈 생성, 라벨 조작, 큐 편입, 부모 이슈 close 자동화는 하지 않는다.
 - `invoke-human`: 구현계획 확정을 중단하고 `Plan Preflight 보류` 코멘트에 사람 판단이 필요한 질문을 남긴다.
 
@@ -260,7 +274,7 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 보류**
 - issue: #123
 - status: `done | needs-rewrite | needs-spec-first | blocked | split-issue | invoke-human`
 - labels: `plan-preflight:started | plan-preflight:done | n-a`
-- Codex Plan Review: `approve-implement | narrow-scope | revise-plan | split-issue | invoke-human`
+- Plan Review: `approve-implement | narrow-scope | revise-plan | split-issue | invoke-human`
 - 구현 인계 가능 여부:
 - 주요 risk flags:
 ```

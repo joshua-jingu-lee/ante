@@ -1,4 +1,4 @@
-GitHub 이슈의 유저스토리를 기반으로 구현하고, 내부 Codex 브랜치 리뷰를 통과한 뒤 PR을 생성한다.
+GitHub 이슈의 유저스토리를 기반으로 구현하고, 내부 브랜치 리뷰(`/code-review`)를 통과한 뒤 PR을 생성한다.
 
 GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
 
@@ -23,7 +23,7 @@ mkdir -p "$WORKTREE_ROOT"
 
 ## 에이전트 역할 분담
 
-이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. 구현 전 Codex Plan Review와 PR 전 브랜치 리뷰는 Codex가 수행한다. Codex Plan Review는 Claude 내부 단계가 아니라 `openai/codex-plugin-cc`의 `/codex:adversarial-review`로 실행하는 외부 read-only 게이트다. PR 전 브랜치 리뷰는 GitHub Actions가 아니라 같은 Claude 세션에서 `/codex:review --base <ref>`를 실행해 내부 반복한다.
+이 커맨드는 Claude 오케스트레이터로서 작업을 분석하고, 구현은 Claude 개발 에이전트에 위임한다. 구현 전 Plan Review(Gate 0)는 별도 컨텍스트 서브에이전트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 수행한다. Plan Review는 구현 세션과 격리된 read-only 계획 리뷰다. PR 전 브랜치 리뷰는 GitHub Actions가 아니라 같은 Claude 세션에서 `/code-review`를 실행해 내부 반복한다.
 
 구조 리스크가 높거나 반복 failure가 나오면 Claude `@code-reviewer`가 메타 리뷰를 수행한다.
 
@@ -31,10 +31,10 @@ mkdir -p "$WORKTREE_ROOT"
 |------|------|-----------|-------------|
 | 1~4 (분석) | 오케스트레이터 | Claude 메인 세션 | 구현 분석 완료 또는 스킵 이슈 코멘트 |
 | 4a (Plan Preflight 구현계획 작성/정비) | 오케스트레이터 | Claude 메인 세션 | 이슈 본문 |
-| 4b (Codex Plan Review 요청/대기) | Codex | `/codex:adversarial-review` | 이슈 코멘트 |
+| 4b (Plan Review 요청/대기, Gate 0) | `@plan-reviewer` | 별도 컨텍스트 서브에이전트 | 이슈 코멘트 |
 | 5 (착수 기록) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 이슈 코멘트 |
 | 6~9 (구현 + 로컬 검증) | 개발 에이전트 | `@backend-dev` / `@devops` / `@strategy-dev` | 로컬 커밋 + 로컬 구현 완료 이슈 코멘트 |
-| 10~11 (사전 리뷰 루프) | Codex + Claude | `/codex:review --base <ref>` + Claude 개발 에이전트 | 이슈 코멘트 |
+| 10~11 (브랜치 리뷰 루프, Gate A) | `/code-review` + Claude 개발 에이전트 | 네이티브 리뷰 + Claude 개발 에이전트 | 이슈 코멘트 |
 | 11a (메타 리뷰) | Claude | `@code-reviewer` | 필요 시 이슈/PR 코멘트 |
 | 12 (PR 생성) | 오케스트레이터 | Claude 메인 세션 | PR 생성 (`Closes #이슈`) |
 | 13 (최종 머지) | GitHub automation + `/autopilot` | `merge-gate` + auto-merge | PR checks + 이슈 상태/post-merge 코멘트 |
@@ -65,22 +65,23 @@ mkdir -p "$WORKTREE_ROOT"
 - `plan-preflight:done`은 구현계획까지 확정됐다는 뜻이며, 이슈 본문이 canonical plan이다.
 - 작은 이슈라도 `plan-preflight:done` 라벨과 최신 이슈 본문 구현계획이 있어야 구현을 시작한다.
 
-4b. **Codex Plan Review 요청/대기**: Plan Preflight가 정비한 구현계획을 Codex plugin 외부 리뷰 게이트로 넘긴다.
+4b. **Plan Review 요청/대기 (Gate 0)**: Plan Preflight가 정비한 구현계획을 별도 컨텍스트의 계획 리뷰 서브에이전트 `@plan-reviewer`로 넘긴다.
 
-- 실행 명령은 `/codex:adversarial-review`다.
-- 긴 리뷰는 `/codex:adversarial-review --background`로 시작하고 `/codex:status`, `/codex:result`로 결과를 회수한다.
-- focus text에는 이슈 번호, 스펙 경로, 구현계획 요약, 중점 검토 위험을 포함한다.
+- 실행 주체는 `@plan-reviewer`(`.agent/agents/plan-reviewer.md`)이며, 동기 호출로 verdict와 근거를 반환한다.
+- 입력에는 이슈 번호, 스펙 경로, 이슈 본문 Implementation Plan, 중점 검토 위험을 포함한다.
 - 이 단계는 코드 수정, 브랜치 생성, PR 생성을 하지 않는다.
-- 결과는 이슈 코멘트에 `Codex Plan Review`로 남긴다.
+- 결과는 이슈 코멘트에 `Plan Review`로 남기고 `reviewer:` 필드에 수행 주체를 기록한다.
 
 예시:
 
 ```text
-/codex:adversarial-review --background \
-  issue #{번호} implementation plan: challenge assumptions, scope fit, missing consumers, generated artifacts, rollback/test gaps
+Agent(
+  subagent_type="plan-reviewer",
+  prompt="이슈 #{번호} 본문 Implementation Plan 검토: 가정, 범위 적합성, 누락된 소비자, 생성 산출물, 롤백/테스트 공백을 확인하고 verdict를 반환하라."
+)
 ```
 
-Codex Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 `plan-preflight:started` 상태를 유지하고, Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Codex Plan Review를 요청한다.
+Plan Review verdict가 `approve-implement` 또는 `narrow-scope`가 아니면 6단계 구현으로 넘어가지 않는다. `revise-plan`이면 `plan-preflight:started` 상태를 유지하고, Plan Preflight가 피드백을 반영해 이슈 본문 구현계획을 보강한 뒤 다시 Plan Review를 요청한다.
 
 4c. **구현 분석 완료 코멘트**: 구현에 넘길 수 있는 상태가 확인되면 오케스트레이터가 이슈에 분석 완료 코멘트를 남긴다. 이 코멘트는 개발 에이전트의 착수 기록을 대체하지 않고, 어떤 계획과 기준으로 구현을 위임하는지 고정한다.
 
@@ -89,7 +90,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
 - status: ready-to-implement
 - spec-path: {1A Spec-First | 1B Issue-First Bundled}
 - plan-preflight: done
-- Codex Plan Review: {approve-implement | narrow-scope}
+- Plan Review: {approve-implement | narrow-scope}
 - target agent: @{에이전트명}
 - base branch: {main 또는 epic/#{에픽번호}-{설명}}
 - next: 개발 에이전트가 구현 착수 코멘트를 남기고 worktree 격리 후 작업"
@@ -100,15 +101,15 @@ gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
 5. **이슈에 착수 코멘트**:
 
 착수 코멘트는 `/implement-issue` 과정에서 선택된 개발 에이전트가 첫 작업으로 남긴다.
-오케스트레이터는 이슈 본문 구현계획과 Codex Plan Review 결과를 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
-착수 코멘트는 `plan-preflight:done` 라벨이 있고, 이슈 본문 구현계획이 최신 Codex Plan Review verdict를 반영한 뒤에만 남긴다.
+오케스트레이터는 이슈 본문 구현계획과 Plan Review 결과를 개발 에이전트 프롬프트에 넘기되, 착수 기록을 대신 작성하지 않는다.
+착수 코멘트는 `plan-preflight:done` 라벨이 있고, 이슈 본문 구현계획이 최신 Plan Review verdict를 반영한 뒤에만 남긴다.
 
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
 - 변경 대상: {src/ante/xxx, docs/xxx, scripts/xxx 등}
 - base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
-- Codex Plan Review: {approve-implement | narrow-scope}
+- Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
 - 구현계획: 이슈 본문 Implementation Plan 기준"
 ```
@@ -138,7 +139,7 @@ Agent(
 ## Plan Preflight
 {이슈 본문 또는 이슈 코멘트의 실행계획 요약}
 
-## Codex Plan Review
+## Plan Review
 {verdict, feedback, implementation checklist, verification checklist, stop conditions}
 
 ## 구현 필수 체크리스트
@@ -160,28 +161,27 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 - head: {SHA7}
 - checks: {ruff check | ruff format | pytest | 기타 명령과 결과}
 - implementation plan: 이슈 본문 체크리스트 기준
-- next: Codex 브랜치 리뷰 요청"
+- next: 브랜치 리뷰 요청"
 ```
 
-### Codex 브랜치 리뷰 루프
+### 브랜치 리뷰 루프 (Gate A)
 
-10. **Codex 사전 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 기준으로 `/codex:review --base {base}`를 실행한다.
+10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 base 브랜치({main 또는 epic/...}) 기준으로 Claude Code 네이티브 `/code-review`로 검토한다.
 
 ```text
-/codex:review --base {main 또는 epic/...} --background
-/codex:status
-/codex:result
+/code-review
 ```
 
-- 결과는 이슈 코멘트에 `Codex 브랜치 리뷰`로 남긴다.
+- 결과는 이슈 코멘트에 `브랜치 리뷰`로 남긴다.
 - `PASS`:
   - 브랜치를 push하고 PR 생성 단계로 진행
 - `FAIL`:
-  - Codex가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
+  - 리뷰가 남긴 blocking finding을 `.agent/skills/receive-review.md` 규칙으로 정리한 뒤 Claude 개발 에이전트에 수정 위임
 
 ```bash
-gh issue comment #{이슈번호} --body "🤖 **Codex 브랜치 리뷰**
+gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 - verdict: {PASS | FAIL}
+- reviewer: /code-review
 - base: {main 또는 epic/...}
 - head: {SHA7}
 - attempt: {N}
@@ -189,20 +189,20 @@ gh issue comment #{이슈번호} --body "🤖 **Codex 브랜치 리뷰**
 - next: {브랜치 push 후 PR 생성 | 같은 worktree에서 수정 후 재검토}"
 ```
 
-11. **수정 루프**: `/codex:review --base {base}`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
+11. **수정 루프**: `/code-review`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
 
 ```text
-while /codex:review verdict != PASS:
+while /code-review verdict != PASS:
   Claude 개발 에이전트가 같은 브랜치에서 수정
   새 로컬 커밋 생성
-  /codex:review --base {base} 재실행
+  /code-review 재실행
 ```
 
 - 실패 횟수는 이슈 코멘트 기준으로 누적한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
 - 자동 수정 전에 finding을 곧바로 patch로 번역하지 말고 `.agent/skills/receive-review.md` 규칙으로 사실/추론/영향 범위를 먼저 다시 정리한다.
 - 같은 `risk class`가 2회 반복되면 `@code-reviewer`를 호출해 구조 리스크와 계획 편차를 먼저 정리한다.
-- 반복 실패가 10회 이상이면 `blocked:review-loop` 라벨이 붙고 Codex 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
+- 반복 실패가 임계값(10회, SSOT: [04-ci-cd.md](../../docs/runbooks/04-ci-cd.md)) 이상이면 `blocked:review-loop` 라벨이 붙고 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
 - 이 상태에서는 사용자가 개입해 원인을 정리하거나 라벨을 해제하기 전까지 같은 이슈를 계속 밀어붙이지 않는다.
 
 11a. **메타 리뷰 호출 조건**: 아래에 해당하면 PR을 만들기 전에 Claude `@code-reviewer`를 다시 호출한다.
@@ -214,7 +214,7 @@ while /codex:review verdict != PASS:
 
 ### PR 생성
 
-12. **PR 생성**: 최신 HEAD SHA의 `/codex:review --base {base}`가 PASS한 뒤에만 브랜치를 push하고 PR을 만든다.
+12. **PR 생성**: 최신 HEAD SHA의 `/code-review`가 PASS한 뒤에만 브랜치를 push하고 PR을 만든다.
 
 ```bash
 gh pr create \
@@ -235,7 +235,7 @@ PR 생성 후 이슈에 코멘트를 남긴다:
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - PR: #{PR번호}
-- branch-review: `/codex:review --base {base}` PASS
+- branch-review: `/code-review` PASS
 - 이후 단계: ci required + merge-gate + auto-merge"
 ```
 
@@ -245,7 +245,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 
 - `ci` 통과는 머지 차단 게이트다. (required status check)
 - PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/codex:review --base <ref>`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다.
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
 - `merge-gate`는 auto-merge 활성화 직전에 `post-merge.yml`을 PR head ref 기준으로 dispatch한다.
@@ -277,7 +277,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 
 - 구현
 - 로컬 커밋
-- `/codex:review --base epic/#{에픽번호}-{설명}` 통과
+- `/code-review` (base epic/#{에픽번호}-{설명}) 통과
 - 브랜치 push
 - PR 생성 (`base=epic/#{에픽번호}-{설명}`)
 
@@ -286,7 +286,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 모든 하위 이슈가 에픽 브랜치에 반영되면, 에픽 브랜치도 동일한 규칙을 따른다.
 
 1. 에픽 브랜치 최신화 및 로컬 검증
-2. `/codex:review --base main` 통과
+2. `/code-review` (base main) 통과
 3. `epic/* -> main` PR 생성
 4. `ci` 통과 후 `merge-gate`가 auto-merge 활성화
 
