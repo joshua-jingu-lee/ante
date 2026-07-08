@@ -23,6 +23,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # release 이벤트의 checkout ref는 태그 커밋이고 checkout@v5 기본 depth=1이라
+      # 도달/동일-커밋 태그만 보인다. :latest semver 가드(아래)가 전역 최고 태그를 정확히
+      # 판정하려면 전역 태그를 명시적으로 가져와야 한다 (#2430). fetch-tags:true는 depth=1에서
+      # 전역 태그 리프스펙을 추가하지 않아(도달/동일-커밋 태그만 확보) 과거 라인 핫픽스 태그가
+      # IS_HIGHEST를 오판 → :latest 역행을 재생산하므로 명시 fetch를 쓴다.
+      - name: Fetch all tags for :latest semver guard
+        shell: bash
+        run: git fetch --tags --force origin
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -58,6 +67,41 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
+      # :latest semver 가드 (#2430): 릴리스 태그가 전역 최고 semver일 때만 :latest를 포함해,
+      # 과거 라인 핫픽스(예: v0.11.0 운영 중 v0.10.2 릴리스) 시 :latest 역행을 차단한다.
+      # 조건부 태그 목록을 heredoc 멀티라인 output(tags)으로 구성해 build-push의 tags 입력으로
+      # 넘긴다(인라인 표현식 조건으로 빈 줄을 남기지 않는 docker/metadata-action 표준 패턴).
+      - name: Resolve Docker tags (:latest semver guard)
+        id: docker_tags
+        shell: bash
+        run: |
+          IMAGE="${{ steps.image.outputs.image }}"
+          TAG="${{ steps.image.outputs.tag }}"
+          VERSION="${{ steps.image.outputs.version }}"
+          # 전역 semver 태그만 앵커드 정규식(^v[0-9]+\.[0-9]+\.[0-9]+$)으로 필터해 최고를 구한다.
+          # 앵커링으로 프리릴리스·노이즈(vX.Y.Z-rc1, nightly 등)를 배제 → sort -V 프리릴리스 취약성도 무력화.
+          HIGHEST=$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          # 릴리스 태그가 전역 최고와 문자열 등가일 때만 :latest 포함.
+          # HIGHEST 공백(전역 semver 태그 0개)이면 이 릴리스가 유일 최고이므로 포함.
+          # dry-run(TAG=dry-run)은 HIGHEST(비공백)와 불일치 → 자연히 제외(push도 안 함).
+          if [ -z "$HIGHEST" ] || [ "$TAG" = "$HIGHEST" ]; then
+            INCLUDE_LATEST=true
+          else
+            INCLUDE_LATEST=false
+          fi
+          echo "Release tag: ${TAG}"
+          echo "Highest global semver tag: ${HIGHEST:-<none>}"
+          echo "Include :latest -> ${INCLUDE_LATEST}"
+          {
+            echo "tags<<EOF"
+            echo "${IMAGE}:${TAG}"
+            echo "${IMAGE}:${VERSION}"
+            if [ "$INCLUDE_LATEST" = "true" ]; then
+              echo "${IMAGE}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
@@ -73,10 +117,7 @@ jobs:
         with:
           context: .
           push: ${{ github.event_name == 'release' }}
-          tags: |
-            ${{ steps.image.outputs.image }}:${{ steps.image.outputs.tag }}
-            ${{ steps.image.outputs.image }}:${{ steps.image.outputs.version }}
-            ${{ steps.image.outputs.image }}:latest
+          tags: ${{ steps.docker_tags.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
