@@ -53,7 +53,7 @@
   │
   └── 결과 보고
         ├── GitHub Release
-        ├── PyPI package
+        ├── PyPI package (+ OIDC 첫 실증 확인: password-less 업로드 성공 여부 — §8)
         └── GHCR image tags
 ```
 
@@ -141,12 +141,16 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 
 ## 8. PyPI 배포 인증
 
-| 단계 | 인증 방식 | 비고 |
-|------|-----------|------|
-| 현재 (private repo) | API 토큰 (`PYPI_API_TOKEN` secret) | GitHub environment: `pypi` |
-| 공개 후 | Trusted Publisher (OIDC) | pending publisher 등록 완료 |
+리포는 PUBLIC이며, PyPI 업로드는 **Trusted Publishing(OIDC)**을 기본 경로로 쓴다(#2436). `publish.yml`의 pypa/gh-action-pypi-publish 스텝은 `password:` 입력 없이 `id-token: write` + `environment: pypi`만으로 OIDC 인증을 자동 진입한다(핀된 v1.14.0 README: "authentication to PyPI **without a manually configured API token or username/password**", "`id-token: write` permission and **without** an explicit username or password").
 
-전환 시: `publish.yml`에서 `password:` 라인 제거 → OIDC 자동 적용.
+| 인증 방식 | 상태 | 비고 |
+|-----------|------|------|
+| Trusted Publishing (OIDC) | 기본 (현행) | `id-token: write` + `environment: pypi`, `password:` 없음 |
+| API 토큰 (`PYPI_API_TOKEN` secret) | 폴백 (시크릿 보존) | OIDC 실패 시 임시 복구용 — [§11 OIDC 인증 실패](#oidc-인증-실패-pypi-업로드-403인증-오류) |
+
+**사용자 사전조건 (검증 불가 외부 전제)**: ante는 이미 PyPI에 존재하는 프로젝트다(0.7.0~0.11.0 업로드됨). **pending publisher는 미존재 프로젝트 예약용이라 기존 프로젝트를 커버하지 못한다** — "pending publisher 등록 완료"를 OIDC 동작 증거로 삼지 않는다. 소유자가 프로젝트 설정 `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·워크플로우(`publish.yml`)·environment(`pypi`)를 가리키는 **trusted publisher를 직접 등록**해야 한다(pypa README: "your project's publisher must already be configured on PyPI"). 이 등록 상태는 CLI로 검증할 수 없고 소유자 확인이 필요하므로, 첫 password-less 릴리스 전에 활성 여부를 확인한다.
+
+**한계 (정직 명시)**: OIDC 동작의 최종 실증은 다음 실 릴리스에서만 가능하다(pypa README: "Trusted Publishing cannot be tested in CI"). 본 전환의 정적 검증은 워크플로우·문서 정합까지이며, 첫 실증 확인 항목은 [§2 릴리스 흐름](#2-릴리스-흐름)의 `/release publish` 결과 보고에 고정돼 있다. 첫 OIDC publish가 실패해도 인증은 업로드 이전 단계라 버전을 소모하지 않는다(§11).
 
 ## 9. 운영 배포 결합 규약
 
@@ -243,9 +247,18 @@ semver 최고 태그만 `:latest`로 push하는 CI 가드는 `publish.yml`에 �
 
 ### publish.yml 실패
 
-- PyPI 토큰 만료 시 GitHub Secrets에서 `PYPI_API_TOKEN`을 갱신한다.
 - Docker login 실패 시 `GITHUB_TOKEN`의 `packages: write` 권한과 repository package 설정을 확인한다.
 - Docker build 실패 시 release PR의 Docker build 검증과 실제 publish 환경 차이를 비교한다.
+- PyPI 인증 실패는 아래 「OIDC 인증 실패」를 따른다(현행은 OIDC 기본, 토큰은 폴백 — §8).
+
+### OIDC 인증 실패 (PyPI 업로드 403/인증 오류)
+
+password-less OIDC 전환(#2436) 후 PyPI 업로드가 실패하면 아래 순서로 진단한다.
+
+- **1순위 — trusted publisher 등록 확인**: ante는 기존 PyPI 프로젝트라 **pending publisher가 아니라** 프로젝트 설정에 등록된 trusted publisher가 필요하다. `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·`publish.yml`·environment `pypi`를 가리키는 publisher가 활성인지 확인한다. 미등록/불일치면 업로드가 **403**(`invalid-publisher`/`trusted publisher` 계열 메시지)으로 거부된다 — 전환 직후 가장 흔한 원인이다.
+- **후순위 — environment/permissions**: `id-token: write`(`publish.yml`)·`environment: pypi`는 정적 전제로 이미 정상 확인됐다. publisher 등록이 맞는데도 실패하면 이 둘과 environment 보호 규칙(승인 대기 등)을 점검한다.
+- **버전 미소모 — 재실행 안전**: OIDC 인증은 dist 업로드 **이전** 단계다. 인증 실패는 PyPI에 어떤 버전도 올리지 않으므로 「이미 릴리스된 버전」의 재업로드 불가 충돌 없이 재실행해도 안전하다.
+- **재트리거(임시 복구)**: `workflow_dispatch`는 Publish to PyPI 스텝의 `if: github.event_name == 'release'` 게이트 때문에 업로드를 재실행하지 못한다(dispatch는 build-only). 따라서 둘 중 하나로 재실행한다 — (1) publisher 등록을 고친 뒤 `release:published`를 **재발화**한다: 이미 생성된 릴리스의 `edited` 이벤트는 `publish.yml`을 발화하지 않으므로, 릴리스를 삭제 후 재생성해야 한다. (2) 즉시 배포가 급하면 `publish.yml`의 pypa 스텝에 `with:`/`password: ${{ secrets.PYPI_API_TOKEN }}`을 임시로 되돌려(시크릿은 삭제하지 않아 보존됨 — §8 폴백) 토큰 경로로 배포한 뒤, publisher 등록을 정리하고 다시 `password`를 제거해 OIDC로 복귀한다.
 
 ### 이미 릴리스된 버전
 
