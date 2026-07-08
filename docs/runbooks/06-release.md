@@ -250,15 +250,29 @@ semver 최고 태그만 `:latest`로 push하는 CI 가드는 `publish.yml`에 �
 - Docker login 실패 시 `GITHUB_TOKEN`의 `packages: write` 권한과 repository package 설정을 확인한다.
 - Docker build 실패 시 release PR의 Docker build 검증과 실제 publish 환경 차이를 비교한다.
 - PyPI 인증 실패는 아래 「OIDC 인증 실패」를 따른다(현행은 OIDC 기본, 토큰은 폴백 — §8).
+- 폴백용 `PYPI_API_TOKEN` 시크릿은 만료 시 GitHub Secrets에서 갱신한다 — 토큰 폴백 경로(§8·아래)를 살려두려면 유효성을 유지해야 한다.
 
 ### OIDC 인증 실패 (PyPI 업로드 403/인증 오류)
 
-password-less OIDC 전환(#2436) 후 PyPI 업로드가 실패하면 아래 순서로 진단한다.
+password-less OIDC 전환(#2436) 후 PyPI 업로드가 실패하면 아래 순서로 진단·복구한다.
+
+**진단**
 
 - **1순위 — trusted publisher 등록 확인**: ante는 기존 PyPI 프로젝트라 **pending publisher가 아니라** 프로젝트 설정에 등록된 trusted publisher가 필요하다. `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·`publish.yml`·environment `pypi`를 가리키는 publisher가 활성인지 확인한다. 미등록/불일치면 업로드가 **403**(`invalid-publisher`/`trusted publisher` 계열 메시지)으로 거부된다 — 전환 직후 가장 흔한 원인이다.
 - **후순위 — environment/permissions**: `id-token: write`(`publish.yml`)·`environment: pypi`는 정적 전제로 이미 정상 확인됐다. publisher 등록이 맞는데도 실패하면 이 둘과 environment 보호 규칙(승인 대기 등)을 점검한다.
-- **버전 미소모 — 재실행 안전**: OIDC 인증은 dist 업로드 **이전** 단계다. 인증 실패는 PyPI에 어떤 버전도 올리지 않으므로 「이미 릴리스된 버전」의 재업로드 불가 충돌 없이 재실행해도 안전하다.
-- **재트리거(임시 복구)**: `workflow_dispatch`는 Publish to PyPI 스텝의 `if: github.event_name == 'release'` 게이트 때문에 업로드를 재실행하지 못한다(dispatch는 build-only). 따라서 둘 중 하나로 재실행한다 — (1) publisher 등록을 고친 뒤 `release:published`를 **재발화**한다: 이미 생성된 릴리스의 `edited` 이벤트는 `publish.yml`을 발화하지 않으므로, 릴리스를 삭제 후 재생성해야 한다. (2) 즉시 배포가 급하면 `publish.yml`의 pypa 스텝에 `with:`/`password: ${{ secrets.PYPI_API_TOKEN }}`을 임시로 되돌려(시크릿은 삭제하지 않아 보존됨 — §8 폴백) 토큰 경로로 배포한 뒤, publisher 등록을 정리하고 다시 `password`를 제거해 OIDC로 복귀한다.
+
+**1차(표준) 복구 — 비파괴 rerun**
+
+OIDC 인증은 dist 업로드 **이전** 단계라 실패해도 PyPI에 어떤 버전도 올라가지 않는다(버전 미소모 → 「이미 릴리스된 버전」 충돌 없음). 유력 원인인 trusted publisher 미등록/불일치는 **PyPI 프로젝트 설정에서만 정정하면 워크플로우·릴리스·태그를 전혀 건드릴 필요가 없다**.
+
+1. 위 진단대로 PyPI 프로젝트 설정에서 trusted publisher 등록을 정정한다.
+2. 실패한 run을 `gh run rerun --failed <run-id>`로 재실행한다. **같은 `release: published` 이벤트·같은 태그 SHA로 다시 돌아** OIDC가 성공하며, 릴리스·dist 자산·노트가 모두 보존된다(비파괴).
+
+> `workflow_dispatch` 재실행은 Publish to PyPI 스텝의 `if: github.event_name == 'release'` 게이트로 업로드하지 못하므로(dispatch는 build-only), 현 릴리스 재실행은 위 `gh run rerun`이 유일 경로다. **릴리스를 삭제·재생성하지 않는다** — semantic-release가 첨부한 dist 자산이 유실되는 파괴 경로다.
+
+**토큰 폴백은 현 릴리스에 소급되지 않는다 (구조적 한계)**
+
+`release` 이벤트는 **태그 커밋 시점의 `publish.yml`**을 실행한다. 따라서 main에 `password:`를 복원해도 이미 만들어진 태그의 재실행에는 반영되지 않고(같은 OIDC 경로로 재실패), 태그를 새 커밋으로 다시 만드는 것은 「이미 릴리스된 버전」의 태그 불변 규칙 위반이다. 즉 **토큰 폴백으로는 현 릴리스를 구제할 수 없다** — 현 릴리스는 위 1차 복구(rerun)로 처리한다. 토큰 경로는 OIDC를 구조적 이유로 포기하고 **다음 릴리스부터** 되돌아갈 때만 유효하다: `publish.yml` pypa 스텝에 `with:`/`password: ${{ secrets.PYPI_API_TOKEN }}`을 복원한다(시크릿은 삭제하지 않아 보존됨 — §8 폴백, 만료 시 갱신은 「publish.yml 실패」 참조).
 
 ### 이미 릴리스된 버전
 
