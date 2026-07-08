@@ -205,7 +205,7 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 - **(b) main에 minor 이상 유발 커밋이 없는 경우(범프 미유발 커밋만, 또는 `fix`/`perf` 등 patch 유발 커밋만 쌓인 경우 포함)**: upstream-first로 넣은 `fix:` 커밋과 합쳐져 다음 정규 산정 버전이 핫픽스 태그(`vX.Y.(Z+1)`)와 **충돌할 수 있다**. 이는 규정을 정확히 따른 결과이며 사용 오류가 아니다. (a)/(b)는 "minor 이상 유발 커밋 유무"로 갈리는 상호 배타·전수 구분이다.
 - **(c) 해소 절차**: 충돌은 다음 정규 `/release prepare` 2단계의 전역 태그 검사(`git tag -l 'vX.Y.Z'`)에서 감지된다(`git describe`는 도달 가능 태그만 보므로 여기서만 잡힌다). 감지되면 prepare를 중단하고 대표에게 보고한다. 해소 경로는 두 가지다.
   - **(i) 자연 해소(권장)**: main에 minor 이상 유발 커밋(`feat`)이 곧 머지될 예정이면 그것을 기다려 정규 minor 릴리스(`vX.(Y+1).0`)로 충돌을 벗어난다.
-  - **(ii) 즉시 릴리스가 필요한 경우**: `semantic-release.yml`에는 forced-minor 전파 입력이 없다(현재 `declare_major`만 §6 경로로 전파된다). 따라서 자동 해소 경로가 아직 없으며, §6 declare-major와 동일 패턴의 forced-minor 입력 추가를 별도 이슈로 등록해 CI를 확장한 뒤 진행한다.
+  - **(ii) 즉시 릴리스가 필요한 경우**: `semantic-release.yml`에는 forced-minor 전파 입력이 없다(현재 `declare_major`만 §6 경로로 전파된다). 따라서 자동 해소 경로가 아직 없으며, §6 declare-major와 동일 패턴으로 **prepare 계약(`release.md`의 forced-minor 인자)과 CI(`semantic-release.yml` 전파 입력)를 함께** 확장하는 이슈를 등록해 반영한 뒤 진행한다 — CI만 확장하면 prepare의 버전 산정·전역 태그 가드에서 다시 막힌다.
 
 #### `:latest` 취급 (조건부)
 
