@@ -6,10 +6,11 @@ on:
   workflow_dispatch: {}
 
 # concurrency 미적용(#2428): concurrency 그룹은 pending run을 최대 1개만 유지하고
-# 새 run이 큐잉되면 기존 pending run을 무음 취소(failure 아님)한다. 릴리스 발행이
-# 겹치면 뒤 릴리스의 PyPI/GHCR 배포가 조용히 누락되어, 막으려던 :latest 경합(희귀)보다
+# 새 run이 큐잉되면 기존 pending run을 무음 취소(failure 아님)한다. run이 겹치면
+# (실행 1 + pending 1 상태에서 세 번째 트리거) pending 중이던 릴리스의 run이 새 run으로
+# 대체·무음 취소되어 해당 릴리스의 PyPI/GHCR 배포가 누락되고, 막으려던 :latest 경합(희귀)보다
 # 나쁜 실패 모드가 된다. 릴리스는 수동·순차(사용자 확인 포함)라 겹침이 실질적으로 없어
-# 직렬화 이득도 없다. (semantic-release.yml은 취소돼도 무해한 재계산이라 concurrency 유지)
+# 직렬화 이득도 없다. (semantic-release.yml concurrency는 유지 — 상세·주의는 런북 04 §7)
 
 jobs:
   publish:

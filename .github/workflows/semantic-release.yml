@@ -14,7 +14,9 @@ on:
 
 # 정적 그룹으로 릴리스를 직렬화한다 (#2428). 이중 dispatch 시 동시 릴리스가
 # 태그/버전 계산을 경합하지 않도록 한 번에 하나만 실행한다.
-# cancel-in-progress: false — 진행 중 릴리스는 취소하지 않고 큐잉한다.
+# cancel-in-progress: false — 진행 중 릴리스는 취소하지 않고 큐잉한다. 단 pending run은
+# 1개만 유지되어 세 번째 dispatch 시 무음 취소되므로, 입력이 다른 declare_major dispatch는
+# 다른 release run이 없는 상태에서만 실행한다 (상세는 런북 04 §7).
 concurrency:
   group: semantic-release
   cancel-in-progress: false
