@@ -18,11 +18,11 @@ $ARGUMENTS — 릴리스 모드와 선택 인자
 
 - 릴리스는 항상 수동으로만 시작한다. `main` 머지, `/autopilot`, `/implement-issue`는 릴리스를 자동 시작하지 않는다.
 - release PR은 `release/vX.Y.Z` 브랜치에서 `main`으로만 연다.
-- release 브랜치는 항상 최신 `origin/main`에서 만들고, stale한 로컬 `main`이나 작업 브랜치에서 분기하지 않는다.
+- release 브랜치는 항상 최신 `origin/main`에서 만들고, stale한 로컬 `main`이나 작업 브랜치에서 분기하지 않는다. 예외: 핫픽스 라인 브랜치 `release/X.Y`는 `/release prepare` 경로 밖에서 운영 태그(`vX.Y.Z`)로부터 수동 절단한다(`docs/runbooks/06-release.md` §10 핫픽스 릴리스). 이 커맨드의 prepare/publish 절차는 핫픽스를 다루지 않는다.
 - 동시에 열린 release PR은 하나만 허용한다. 이미 열린 release PR이 있으면 새 브랜치를 만들지 않고 기존 PR을 보고한다.
 - release PR에는 버전, changelog, 릴리스 노트 같은 릴리스 메타데이터만 포함한다. 기능 수정, 버그 수정, 스펙 변경은 별도 이슈/PR로 분리한다.
 - release PR에서는 Docker image를 push하지 않는다. `docker build` 검증만 수행한다.
-- 실제 PyPI 업로드와 Docker image push는 release PR이 머지된 main에서 `/release publish`가 실행한 GitHub Release `published` 이벤트 이후에만 수행한다.
+- 실제 PyPI 업로드와 Docker image push는 release PR이 머지된 main에서 `/release publish`가 실행한 GitHub Release `published` 이벤트 이후에만 수행한다(핫픽스 릴리스는 예외 — `docs/runbooks/06-release.md` §10의 수동 `gh release create` 경로이며, 태그 전 기능 검증·자가검증이 필수다).
 - main에 직접 release commit을 push하지 않는다. 릴리스 커밋은 release PR로만 main에 들어간다.
 - publish 전에 release PR merge commit 이후 main에 새 커밋이 추가되었으면 중단하고 `/release prepare`를 다시 수행한다.
 - 이미 배포된 PyPI 버전이나 Docker tag는 재사용하지 않는다.
@@ -83,15 +83,20 @@ git log {last-tag}..origin/main --oneline
 - 로컬 `release/vX.Y.Z` 브랜치가 이미 있으면 중단한다.
 - 로컬 워킹 트리가 깨끗하지 않으면 중단한다.
 - 로컬 `main`과 `origin/main`이 다르면 `git pull --ff-only` 또는 push/pull 필요 상태를 보고하고 중단한다.
+- 산정한 예상 버전 `vX.Y.Z`가 전역 태그 목록에 이미 존재하면(`git tag -l 'vX.Y.Z'`가 비어 있지 않으면) 중단한다 — `git describe`(1단계)는 도달 가능 태그만 보므로, main 비도달 핫픽스 태그(`docs/runbooks/06-release.md` §10)와의 충돌은 이 전역 검사로만 잡힌다. 충돌 시 §10 불변식의 해소 절차(자연 해소 대기 또는 forced-minor 확장 이슈 등록)를 따르며, prepare를 그대로 재시도하지 않는다.
 
 ```bash
 if git show-ref --verify --quiet refs/heads/release/vX.Y.Z; then
   echo "로컬 release/vX.Y.Z 브랜치가 이미 존재한다 — 이전 prepare 잔재 확인(회수 또는 git branch -D) 후 재시도" >&2
   exit 1
 fi
+if [ -n "$(git tag -l "vX.Y.Z")" ]; then
+  echo "예상 버전 태그 vX.Y.Z가 전역에 이미 존재한다 — main 비도달 핫픽스 태그와의 충돌 신호. 06 §10 불변식 해소 절차(자연 해소 대기 또는 forced-minor 확장 이슈 등록) 참조 — prepare를 그대로 재시도하지 않는다" >&2
+  exit 1
+fi
 ```
 
-브랜치가 없는 정상 경로에서는 `exit 0`으로 통과한다.
+브랜치와 충돌 태그가 모두 없는 정상 경로에서는 `exit 0`으로 통과한다.
 
 ### 3. 릴리스 메타데이터 스탬핑과 release 브랜치 생성
 
@@ -264,4 +269,5 @@ gh workflow run publish.yml
 - 릴리스 대상 커밋이 없음 — 일반 prepare/publish에만 적용한다. `--declare-major`는 forced-level(`--major`)이라 릴리스 대상 커밋이 없어도 진행한다(1단계 예외 참조).
 - PyPI에 같은 버전이 이미 존재함
 - GHCR에 같은 Docker image tag가 이미 존재함
+- 산정한 예상 버전 `vX.Y.Z` 태그가 전역 태그 목록에 이미 존재함(`git tag -l 'vX.Y.Z'` 비어있지 않음) — main 비도달 핫픽스 태그와의 충돌 신호. `docs/runbooks/06-release.md` §10 불변식의 해소 절차(자연 해소 대기 또는 forced-minor 확장 이슈 등록)를 따른다. prepare를 그대로 재시도하지 않는다.
 - GitHub 인증 또는 workflow 권한이 없음

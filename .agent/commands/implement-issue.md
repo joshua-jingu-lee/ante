@@ -92,7 +92,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
 - plan-preflight: done
 - Plan Review: {approve-implement | narrow-scope}
 - target agent: @{에이전트명}
-- base branch: {main 또는 epic/#{에픽번호}-{설명}}
+- base branch: {main 또는 epic/{에픽번호}-{설명}}
 - next: 개발 에이전트가 구현 착수 코멘트를 남기고 worktree 격리 후 작업"
 ```
 
@@ -108,7 +108,7 @@ gh issue comment #{이슈번호} --body "🤖 **구현 분석 완료**
 gh issue comment #{이슈번호} --body "🤖 **구현 착수**
 - 담당 에이전트: @{에이전트명}
 - 변경 대상: {src/ante/xxx, docs/xxx, scripts/xxx 등}
-- base 브랜치: {main 또는 epic/#{에픽번호}-{설명}}
+- base 브랜치: {main 또는 epic/{에픽번호}-{설명}}
 - Plan Review: {approve-implement | narrow-scope}
 - risk flags: {없음 또는 쉼표 구분 목록}
 - 구현계획: 이슈 본문 Implementation Plan 기준"
@@ -262,8 +262,8 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 ### E1. 에픽 통합 브랜치 생성
 
 ```bash
-git branch epic/#{에픽번호}-{짧은설명} main
-git push -u origin epic/#{에픽번호}-{짧은설명}
+git branch epic/{에픽번호}-{짧은설명} main
+git push -u origin epic/{에픽번호}-{짧은설명}
 ```
 
 ### E2. 하위 이슈 정렬
@@ -279,7 +279,7 @@ git push -u origin epic/#{에픽번호}-{짧은설명}
 - 로컬 커밋
 - `/code-review` 통과
 - 브랜치 push
-- PR 생성 (`base=epic/#{에픽번호}-{설명}`)
+- PR 생성 (`base=epic/{에픽번호}-{설명}`)
 
 빌트인 `/code-review`는 base 인자 없이 항상 main 대비로 리뷰한다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 `/code-review`의 main 대비 diff로는 완벽히 분리되지 않는다(네이티브 도구가 base 지정을 지원하지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다). 현재 epic 워크플로는 휴면 상태이며, 재개 시 이 스코핑을 재설계한다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
 
