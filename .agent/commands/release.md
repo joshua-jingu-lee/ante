@@ -83,10 +83,15 @@ git log {last-tag}..origin/main --oneline
 - 로컬 `release/vX.Y.Z` 브랜치가 이미 있으면 중단한다.
 - 로컬 워킹 트리가 깨끗하지 않으면 중단한다.
 - 로컬 `main`과 `origin/main`이 다르면 `git pull --ff-only` 또는 push/pull 필요 상태를 보고하고 중단한다.
+- 산정한 예상 버전 `vX.Y.Z`가 전역 태그 목록에 이미 존재하면(`git tag -l 'vX.Y.Z'`가 비어 있지 않으면) 중단한다 — `git describe`(1단계)는 도달 가능 태그만 보므로, main 비도달 핫픽스 태그(`docs/runbooks/06-release.md` §10)와의 충돌은 이 전역 검사로만 잡힌다. 충돌 시 §10 불변식의 해소 절차(다음 정규 릴리스를 forced `--minor`로 올림)를 따른다.
 
 ```bash
 if git show-ref --verify --quiet refs/heads/release/vX.Y.Z; then
   echo "로컬 release/vX.Y.Z 브랜치가 이미 존재한다 — 이전 prepare 잔재 확인(회수 또는 git branch -D) 후 재시도" >&2
+  exit 1
+fi
+if [ -n "$(git tag -l "vX.Y.Z")" ]; then
+  echo "예상 버전 태그 vX.Y.Z가 전역에 이미 존재한다 — main 비도달 핫픽스 태그와의 충돌 신호. 06 §10 불변식 해소(다음 정규 릴리스 forced --minor) 또는 대표 판단 후 재시도" >&2
   exit 1
 fi
 ```
@@ -264,4 +269,5 @@ gh workflow run publish.yml
 - 릴리스 대상 커밋이 없음 — 일반 prepare/publish에만 적용한다. `--declare-major`는 forced-level(`--major`)이라 릴리스 대상 커밋이 없어도 진행한다(1단계 예외 참조).
 - PyPI에 같은 버전이 이미 존재함
 - GHCR에 같은 Docker image tag가 이미 존재함
+- 산정한 예상 버전 `vX.Y.Z` 태그가 전역 태그 목록에 이미 존재함(`git tag -l 'vX.Y.Z'` 비어있지 않음) — main 비도달 핫픽스 태그와의 충돌 신호. `docs/runbooks/06-release.md` §10 불변식의 해소 절차(다음 정규 릴리스 forced `--minor`)를 따르거나, 애매하면 대표 판단을 요청한다.
 - GitHub 인증 또는 workflow 권한이 없음

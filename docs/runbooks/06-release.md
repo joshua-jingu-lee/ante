@@ -199,9 +199,11 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 
 #### 핫픽스 태그와 정규 릴리스 버전 불변식
 
-lazy-branch 경로를 쓰는 전제 자체가 **"main에 minor 이상 범프를 유발할 커밋(`feat`)이 쌓여 지금 릴리스할 수 없다"**는 상태다(그렇지 않으면 기본 경로 = main 패치를 쓴다). 따라서 다음 정규 릴리스의 산정 버전은 `vX.(Y+1).0` 이상이 되어, main에서 비도달(unreachable)인 핫픽스 태그 `vX.Y.(Z+1)`과 충돌하지 않는다. 이것이 lazy-branch가 성립하는 불변식이다.
+예외 경로 진입 조건은 "main이 지금 릴리스 불가"다. 핫픽스 태그 `vX.Y.(Z+1)`은 main에서 비도달(unreachable)이므로, 다음 정규 릴리스가 이 버전을 재산정하면 태그 충돌로 publish가 막힌다. main에 쌓인 커밋 종류에 따라 두 경우로 나뉜다.
 
-- 안전망: 다음 정규 `/release prepare`에서 산정된 버전이 기존 태그(`git tag -l` 전역)와 충돌하면 — lazy-branch를 잘못된 전제(main이 실제로는 patch 커밋만 쌓인 상태)로 사용했다는 신호다 — prepare를 중단하고 대표 판단을 요청한다.
+- **(a) 일반적 — main에 minor 이상 범프를 유발할 커밋(`feat`)이 쌓인 경우**: 다음 정규 릴리스의 산정 버전은 `vX.(Y+1).0` 이상이라 핫픽스 태그와 충돌하지 않는다.
+- **(b) 범프 미유발 커밋(`refactor` 등)만으로 릴리스 불가였던 경우**: upstream-first로 넣은 `fix:` 커밋이 patch 범프를 유발하므로, 다음 정규 산정 버전이 핫픽스 태그(`vX.Y.(Z+1)`)와 **충돌할 수 있다**. 이는 규정을 정확히 따른 결과이며 사용 오류가 아니다.
+- **(c) 해소 절차**: 충돌은 다음 정규 `/release prepare` 2단계의 전역 태그 검사(`git tag -l 'vX.Y.Z'`)에서 감지된다(`git describe`는 도달 가능 태그만 보므로 여기서만 잡힌다). 감지되면 다음 정규 릴리스를 forced 범프로 한 단계 올려 해소한다 — §6 declare-major와 동일한 forced-level 메커니즘으로 `--minor`를 쓴다(`semantic-release version --minor --no-commit --no-tag --no-push --no-vcs-release`). 핫픽스 태그가 그 patch 버전(`vX.Y.(Z+1)`)을 이미 소비했으므로 semver상 건너뜀(→ `vX.(Y+1).0`)은 정당하다. forced `--minor` 해소가 애매한 경우(예: 그 minor마저 이미 소비됨)에만 대표 판단을 요청한다.
 
 #### `:latest` 취급 (조건부)
 
@@ -257,4 +259,5 @@ semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 �
 ### 핫픽스 후 GHCR `:latest`가 과거 버전을 가리킴
 
 - `:latest` 역행은 **핫픽스 태그보다 높은 릴리스가 이미 존재할 때만** 발생한다(과거 라인 핫픽스). 핫픽스 태그가 최고 semver면 `:latest` 전진이 정상이므로 아무 조치도 하지 않는다.
-- 역행하는 경우에만 (i) `gh release create --latest=false`로 GitHub Latest 마커 역행을 막고, (ii) GHCR `:latest`를 최신 정규 버전으로 수동 재지정한다([§10 `:latest` 취급 (조건부)](#10-핫픽스-릴리스)).
+- 이미 역행이 발생한 사후 복구: (i) GitHub Latest 마커 복원 — 최신 정규 릴리스 태그를 대상으로 `gh release edit vX.Y.Z --latest`(이미 생성된 릴리스라 `--latest=false`는 쓸 수 없다), (ii) GHCR `:latest`를 최신 정규 버전으로 수동 재지정.
+- 사전 예방(태그 생성 시점)은 [§10 7단계](#10-핫픽스-릴리스)의 `--latest=false`를 참조.
