@@ -30,7 +30,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -52,7 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
@@ -73,7 +73,7 @@ jobs:
         if: ${{ !startsWith(github.head_ref, 'release/') }}
         run: echo "Docker build is only required for release PRs."
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: ${{ startsWith(github.head_ref, 'release/') }}
 
       - name: Build Docker image
