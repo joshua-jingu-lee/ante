@@ -209,12 +209,12 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 
 #### `:latest` 취급 (조건부)
 
-`publish.yml`은 모든 release에 무조건 `:latest`를 push한다([publish.yml](../../.github/workflows/publish.yml)). 하지만 재지정이 필요한 경우는 **핫픽스 태그보다 높은 릴리스가 이미 존재할 때뿐이다**.
+`publish.yml`은 릴리스 태그가 **전역 최고 semver일 때만** GHCR `:latest`를 push한다([publish.yml](../../.github/workflows/publish.yml)의 `:latest` semver 가드, #2430). 따라서 GHCR `:latest`는 과거 라인 핫픽스에서도 자동으로 역행하지 않는다. 두 경우로 나뉜다.
 
 - **핫픽스 태그가 최고 semver인 경우(일반적 — 예: 1.1 미릴리스 상태에서 1.0.4가 곧 최고 태그)**: `:latest`가 핫픽스 버전으로 전진하는 것이 정상이다. 아무 재지정도 하지 않는다(7단계 `--latest=false`도 붙이지 않는다).
-- **핫픽스 태그보다 높은 릴리스가 이미 있는 경우(과거 라인 핫픽스 — 예: main이 이미 1.1.x로 릴리스됨)**: `:latest`가 핫픽스 버전으로 **역행**한다. 이를 막으려면 (i) 7단계 `gh release create`에 `--latest=false`를 지정해 GitHub Latest 마커 역행을 막고, (ii) GHCR `:latest`를 최신 정규 버전으로 **수동 재지정**한다.
+- **핫픽스 태그보다 높은 릴리스가 이미 있는 경우(과거 라인 핫픽스 — 예: main이 이미 1.1.x로 릴리스됨)**: (i) **GHCR `:latest`는 `publish.yml`의 semver 가드(#2430)가 자동으로 역행을 막는다** — 릴리스 태그가 전역 최고가 아니면 `:latest`를 아예 push하지 않으므로 정상적으로는 수동 재지정이 필요 없다. 가드가 어떤 이유로 동작하지 않아 역행이 실제로 발생했을 때만 폴백으로 GHCR `:latest`를 최신 정규 버전으로 수동 재지정한다(§11). (ii) **GitHub Release 'Latest' 마커는 가드 범위 밖(Docker `:latest`와 별개)이므로** 7단계 `gh release create`에 `--latest=false`를 지정해 마커 역행을 수동으로 막는다.
 
-semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 분리 예정이다(publish.yml checkout이 depth=1·tags 미fetch라 fetch-depth 변경+실증이 필요해 격리 리뷰가 마땅하다). 버전별 태그(`:v1.0.4`)는 §7대로 절대 덮어쓰지 않으며, 부동 태그인 `:latest`만 재지정 대상이다.
+semver 최고 태그만 `:latest`로 push하는 CI 가드는 `publish.yml`에 구현돼 있다(#2430 — checkout 후 `git fetch --tags --force origin`으로 전역 태그를 확보하고, 릴리스 태그가 전역 최고 semver와 문자열 등가일 때만 조건부 태그 목록에 `:latest`를 포함). 버전별 태그(`:v1.0.4`)는 §7대로 절대 덮어쓰지 않으며, 부동 태그인 `:latest`만 가드·재지정 대상이다.
 
 #### release PR을 열지 않는다
 
@@ -256,10 +256,10 @@ semver 최고 태그만 `:latest`로 push하는 CI 가드는 별도 이슈로 �
 ### 운영 버전에 긴급 수정이 필요한데 main이 릴리스 불가
 
 - main이 릴리스 가능한 상태면 일반 패치 릴리스(`fix:` → `/release prepare`/`publish`)로 처리한다 — [§10 핫픽스 릴리스 · 기본 경로](#10-핫픽스-릴리스).
-- 1.1 개발 커밋 등이 쌓여 main을 지금 릴리스할 수 없으면 라인 브랜치(lazy-branch) 예외 경로를 쓴다 — [§10 · 예외 경로](#10-핫픽스-릴리스). 핫픽스 태그보다 높은 릴리스가 이미 있는 과거 라인 핫픽스에서만 `:latest` 역행이 발생하니, 그 경우에 한해 `--latest=false`와 GHCR `:latest` 수동 재지정을 잊지 않는다.
+- 1.1 개발 커밋 등이 쌓여 main을 지금 릴리스할 수 없으면 라인 브랜치(lazy-branch) 예외 경로를 쓴다 — [§10 · 예외 경로](#10-핫픽스-릴리스). 핫픽스 태그보다 높은 릴리스가 이미 있는 과거 라인 핫픽스에서만 `:latest` 역행이 문제되는데, GHCR `:latest`는 `publish.yml` semver 가드(#2430)가 자동으로 막으므로 별도 조치가 필요 없고([§10 · `:latest` 취급](#10-핫픽스-릴리스)), GitHub Release 'Latest' 마커만 7단계 `--latest=false`로 수동 관리한다.
 
 ### 핫픽스 후 GHCR `:latest`가 과거 버전을 가리킴
 
-- `:latest` 역행은 **핫픽스 태그보다 높은 릴리스가 이미 존재할 때만** 발생한다(과거 라인 핫픽스). 핫픽스 태그가 최고 semver면 `:latest` 전진이 정상이므로 아무 조치도 하지 않는다.
-- 이미 역행이 발생한 사후 복구: (i) GitHub Latest 마커 복원 — 최신 정규 릴리스 태그를 대상으로 `gh release edit vX.Y.Z --latest`(이미 생성된 릴리스라 `--latest=false`는 쓸 수 없다), (ii) GHCR `:latest`를 최신 정규 버전으로 수동 재지정.
-- 사전 예방(태그 생성 시점)은 [§10 7단계](#10-핫픽스-릴리스)의 `--latest=false`를 참조.
+- **GHCR `:latest` 역행은 `publish.yml`의 semver 가드(#2430)가 자동으로 막는다** — 릴리스 태그가 전역 최고 semver가 아니면 `:latest`를 push하지 않으므로, 정상적으로는 이 증상이 GHCR에서 발생하지 않는다. 핫픽스 태그가 최고 semver면 `:latest` 전진이 정상이다.
+- 가드가 어떤 이유로 동작하지 않아 역행이 실제로 발생한 경우의 사후 복구: (i) GitHub Latest 마커 복원(가드 범위 밖 — Docker `:latest`와 별개) — 최신 정규 릴리스 태그를 대상으로 `gh release edit vX.Y.Z --latest`(이미 생성된 릴리스라 `--latest=false`는 쓸 수 없다), (ii) 폴백으로 GHCR `:latest`를 최신 정규 버전으로 수동 재지정.
+- 사전 예방: GHCR `:latest`는 위 자동 가드가 처리하고, GitHub Release 'Latest' 마커는 [§10 7단계](#10-핫픽스-릴리스)의 `--latest=false`(태그 생성 시점)로 관리한다.
