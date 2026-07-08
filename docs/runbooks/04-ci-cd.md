@@ -75,9 +75,10 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-
 
 **목적**: 정적 분석 + 자동 테스트
 
-- **트리거**: `pull_request`
+- **트리거**: `pull_request`(사전 게이트) + `push: [main]`(머지 결과물 사후 검증)
 - **결과**: status checks `ci`, `lint`, `test` (집계 진입점은 `ci`, defense-in-depth 근거는 [§3.2.1](#321-rationale--머지-안전망-defense-in-depth))
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
+- **main push CI(조합 회귀 사후 검증)**: base가 뒤처진 PR들이 각자 green으로 순차 auto-merge되면 조합 회귀가 main에 들어가도 사전 게이트만으로는 놓칠 수 있다. main HEAD에서 `lint`·`test`를 재실행해 이를 사후 검출한다. 이미 머지된 결과물에 대한 run이라 머지를 차단하지 않으며(사전 게이트가 아님), required status checks 집합·의미론은 불변이다. `push`(`refs/heads/main`)와 `pull_request`(`refs/pull/N/merge`)는 concurrency 그룹 키(`ci-${{ github.ref }}`)가 분리되어 서로 취소하지 않는다.
 
 branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
 
@@ -212,6 +213,9 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 
 ### 3.4 워크플로우 의존성 유지보수
 
+- **서드파티 액션은 full-length commit SHA로 핀한다(필수)**: 배포·릴리스 권한을 가진 워크플로우(`publish.yml`, `semantic-release.yml`)가 참조하는 서드파티 액션(`pypa/*`, `softprops/*`, `docker/*`)은 이동 가능한 태그 대신 40자 commit SHA로 고정하고 곁 주석(`# vX.Y.Z`)에 릴리스 태그를 남긴다. 태그는 이동 가능해 액션 저장소 탈취 시 임의 코드 실행(supply chain) 위험이 있으므로 서드파티는 SHA 핀을 필수로 한다.
+- **공식 `actions/*`는 메이저 태그를 유지한다**: GitHub 소유 액션(`actions/checkout`, `actions/setup-python`, `actions/github-script`)은 SHA 핀 대상이 아니며 메이저 태그로 보안 패치를 받는다. 메이저 업데이트 시 런타임 노드 버전·breaking change를 릴리스 노트로 확인한 뒤 적용한다.
+- `.github/dependabot.yml`의 `github-actions` ecosystem(주간)이 SHA 핀·태그 갱신 PR을 자동 생성해 유지비를 낮춘다. 곁 주석 semver가 dependabot의 추적 기준이다.
 - `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact` 등 GitHub-hosted action의 런타임 deprecation 공지는 정기적으로 점검한다.
 - Node 런타임 deprecation warning은 저장소 Python 코드 실패와 분리해서 추적한다.
 
