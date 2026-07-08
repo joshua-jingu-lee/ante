@@ -5,6 +5,13 @@ on:
     types: [published]
   workflow_dispatch: {}
 
+# concurrency 미적용(#2428): concurrency 그룹은 pending run을 최대 1개만 유지하고
+# 새 run이 큐잉되면 기존 pending run을 무음 취소(failure 아님)한다. run이 겹치면
+# (실행 1 + pending 1 상태에서 세 번째 트리거) pending 중이던 릴리스의 run이 새 run으로
+# 대체·무음 취소되어 해당 릴리스의 PyPI/GHCR 배포가 누락되고, 막으려던 :latest 경합(희귀)보다
+# 나쁜 실패 모드가 된다. 릴리스는 수동·순차(사용자 확인 포함)라 겹침이 실질적으로 없어
+# 직렬화 이득도 없다. (semantic-release.yml concurrency는 유지 — 상세·주의는 런북 04 §7)
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -14,9 +21,9 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -32,7 +39,7 @@ jobs:
 
       - name: Publish to PyPI
         if: github.event_name == 'release'
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
 
@@ -51,18 +58,18 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to GHCR
         if: github.event_name == 'release'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish Docker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           push: ${{ github.event_name == 'release' }}

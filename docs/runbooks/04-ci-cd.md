@@ -75,9 +75,10 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-
 
 **목적**: 정적 분석 + 자동 테스트
 
-- **트리거**: `pull_request`
+- **트리거**: `pull_request`(사전 게이트) + `push: [main]`(머지 결과물 사후 검증)
 - **결과**: status checks `ci`, `lint`, `test` (집계 진입점은 `ci`, defense-in-depth 근거는 [§3.2.1](#321-rationale--머지-안전망-defense-in-depth))
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
+- **main push CI(조합 회귀 사후 검증)**: 목적은 base가 뒤처진 PR들이 각자 green으로 순차 머지될 때 main에 들어온 조합 회귀를 main HEAD의 `lint`·`test` 재실행으로 사후 검출하는 것이다. 이미 머지된 결과물에 대한 run이라 머지를 차단하지 않으며(사전 게이트가 아님), required status checks 집합·의미론은 불변이다. **현행 발화 조건 주의**: 표준 머지 경로는 `pr-approvals.yml`이 `GITHUB_TOKEN`으로 enable한 auto-merge이고, `GITHUB_TOKEN`이 유발한 `push`·`pull_request` 등 **자동 이벤트**는 워크플로우 run을 만들지 않으므로([§5.2](#52-post-merge-실패-모드와-복구)와 동일 메커니즘 — 단 `workflow_dispatch`·`repository_dispatch`는 예외로, Gate C의 post-merge dispatch가 `GITHUB_TOKEN`으로도 동작하는 이유다) push CI는 이 경로에서 **트리거되지 않는다**. 현재는 사람이 main에 직접 push하는 예외 경로에서만 동작한다. auto-merge 토큰이 PAT/App으로 전환되면(post-merge 폴링 해체 이슈) 전체 머지 경로에서 자동 활성화된다. 트리거는 비용 0·무해라 그 전환을 위해 미리 둔다. `push`(`refs/heads/main`)와 `pull_request`(`refs/pull/N/merge`)는 concurrency 그룹 키(`ci-${{ github.ref }}`)가 분리되어 서로 취소하지 않는다.
 
 branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
 
@@ -212,6 +213,9 @@ GitHub branch protection에서 required status checks를 사용할 경우, 각 j
 
 ### 3.4 워크플로우 의존성 유지보수
 
+- **서드파티 액션은 full-length commit SHA로 핀한다(필수)**: 배포·릴리스 권한을 가진 워크플로우(`publish.yml`, `semantic-release.yml`)가 참조하는 서드파티 액션(`pypa/*`, `softprops/*`, `docker/*`)은 이동 가능한 태그 대신 40자 commit SHA로 고정하고 곁 주석(`# vX.Y.Z`)에 릴리스 태그를 남긴다. 태그는 이동 가능해 액션 저장소 탈취 시 임의 코드 실행(supply chain) 위험이 있으므로 서드파티는 SHA 핀을 필수로 한다.
+- **공식 `actions/*`는 메이저 태그를 유지한다**: GitHub 소유 액션(`actions/checkout`, `actions/setup-python`, `actions/github-script`)은 SHA 핀 대상이 아니며 메이저 태그로 보안 패치를 받는다. 메이저 업데이트 시 런타임 노드 버전·breaking change를 릴리스 노트로 확인한 뒤 적용한다.
+- `.github/dependabot.yml`의 `github-actions` ecosystem(주간)이 SHA 핀·태그 갱신 PR을 자동 생성해 유지비를 낮춘다. 곁 주석 semver가 dependabot의 추적 기준이다.
 - `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact` 등 GitHub-hosted action의 런타임 deprecation 공지는 정기적으로 점검한다.
 - Node 런타임 deprecation warning은 저장소 Python 코드 실패와 분리해서 추적한다.
 
@@ -319,3 +323,5 @@ publish.yml
 
 main에 머지되었다고 자동 릴리스되지는 않는다.
 release PR에서는 Docker build 검증만 수행하고, registry push는 GitHub Release가 published 된 뒤 `publish.yml`에서만 수행한다.
+
+**릴리스 워크플로우 concurrency 비대칭(#2428)**: `semantic-release.yml`에는 정적 concurrency 그룹을 두어 이중 dispatch 시 동시 태그/버전 계산 경합을 막는다. 입력이 동일한 dispatch 간에는 취소돼도 다음 run이 같은 계산을 하므로 무해하다. 단 입력이 다른 dispatch(예: `semantic-release.yml`의 `declare_major` 선언 릴리스, #2417)가 pending 중 무음 취소되면 그 선언이 소실될 수 있으므로, `declare_major` dispatch는 다른 release run이 없는 상태에서만 실행한다. `publish.yml`에는 concurrency를 **두지 않는다** — concurrency 그룹은 pending run을 최대 1개만 유지하고 새 run이 큐잉되면 기존 pending run을 무음 취소하므로, run이 겹치면(실행 1 + pending 1 상태에서 세 번째 트리거) pending 중이던 릴리스의 run이 새 run으로 대체·무음 취소되어 해당 릴리스의 PyPI/GHCR 배포가 누락된다. 이는 막으려던 `:latest` push 경합(희귀)보다 나쁜 실패 모드다. 릴리스는 수동·순차라 겹침 자체가 실질적으로 없어 직렬화 이득도 없다.

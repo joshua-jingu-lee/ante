@@ -1,0 +1,9 @@
+# Dependabot — 서드파티 액션 SHA 핀 유지비 자동화 (#2428).
+# SHA로 핀된 서드파티 액션은 곁 주석(# vX.Y.Z)의 semver로 갱신을 추적한다.
+# 공식 actions/* 는 메이저 태그를 유지하며 semver 업데이트를 받는다.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

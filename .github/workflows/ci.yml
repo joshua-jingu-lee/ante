@@ -10,8 +10,19 @@ on:
     branches:
       - main
       - 'epic/**'
+  # 머지 결과물(main HEAD)에서 lint/test를 재실행해 base가 뒤처진 PR들의
+  # 순차 auto-merge로 생긴 조합 회귀를 사후 검출한다 (#2428).
+  push:
+    branches:
+      - main
+
+# 기본 권한을 read-only로 최소화한다 (#2428). CI는 저장소 읽기만 필요하다.
+permissions:
+  contents: read
 
 concurrency:
+  # push(refs/heads/main)와 pull_request(refs/pull/N/merge)는 github.ref가 달라
+  # 그룹 키가 분리되므로 PR CI와 main push CI가 서로 취소하지 않는다 (#2428).
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
@@ -19,8 +30,8 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: "pip"
@@ -41,8 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
           cache: "pip"
@@ -62,7 +73,7 @@ jobs:
         if: ${{ !startsWith(github.head_ref, 'release/') }}
         run: echo "Docker build is only required for release PRs."
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: ${{ startsWith(github.head_ref, 'release/') }}
 
       - name: Build Docker image

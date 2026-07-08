@@ -12,6 +12,15 @@ on:
         type: boolean
         default: false
 
+# 정적 그룹으로 릴리스를 직렬화한다 (#2428). 이중 dispatch 시 동시 릴리스가
+# 태그/버전 계산을 경합하지 않도록 한 번에 하나만 실행한다.
+# cancel-in-progress: false — 진행 중 릴리스는 취소하지 않고 큐잉한다. 단 pending run은
+# 1개만 유지되어 세 번째 dispatch 시 무음 취소되므로, 입력이 다른 declare_major dispatch는
+# 다른 release run이 없는 상태에서만 실행한다 (상세는 런북 04 §7).
+concurrency:
+  group: semantic-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -27,12 +36,12 @@ jobs:
           echo "이 워크플로우는 main ref 전용이다 (#2416)." >&2
           exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
@@ -81,7 +90,7 @@ jobs:
       # 3. GitHub Release 생성
       - name: Create GitHub Release
         if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ steps.semrel.outputs.tag }}
           files: dist/*
