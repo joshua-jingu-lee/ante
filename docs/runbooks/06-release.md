@@ -276,10 +276,12 @@ GitHub run 재실행은 초기 실행 후 ~30일 제한이라 창이 지나면 r
 
 ```bash
 gh release download vX.Y.Z -D dist-rescue/
-TWINE_USERNAME=__token__ TWINE_PASSWORD="$PYPI_API_TOKEN" twine upload dist-rescue/*  # 보존된 PYPI_API_TOKEN(§8·만료 시 갱신)
+TWINE_USERNAME=__token__ TWINE_PASSWORD="<PyPI API 토큰>" twine upload dist-rescue/*
 ```
 
-PyPI 산출물만 복구된다. GHCR 이미지는 태그 커밋 체크아웃에서 `docker build`·push로 별도 수동 복구한다(§7 태그 정책 — 같은 버전 태그 덮어쓰기 금지 준수).
+토큰은 **구조 시점에 PyPI 계정에서 새로 발급**한다(pypi.org/manage/account/token/) — GitHub Actions 시크릿은 write-only라 로컬로 읽어올 수 없으므로 "보존된 시크릿"이 자격증명 출처가 될 수 없다(시크릿 보존은 워크플로우 토큰 경로 복귀용 — 아래). 발급한 토큰으로 시크릿도 함께 갱신해 두면 좋다.
+
+PyPI 산출물만 복구된다. GHCR 이미지는 태그 커밋 체크아웃에서 `docker build`·push로 별도 수동 복구한다 — **버전 태그(vX.Y.Z·X.Y.Z)만 push**하고, `:latest`는 이 태그가 전역 최고 semver일 때만 push한다(§10 :latest 가드 규칙의 수동 적용 — 수동 경로는 publish.yml 가드를 우회하므로 직접 판정). §7 태그 정책(같은 버전 태그 덮어쓰기 금지) 준수.
 
 **토큰 폴백(워크플로우 config)은 현 릴리스에 소급되지 않는다 (구조적 한계)**
 
