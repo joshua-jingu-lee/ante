@@ -80,7 +80,10 @@ jobs:
           VERSION="${{ steps.image.outputs.version }}"
           # 전역 semver 태그만 앵커드 정규식(^v[0-9]+\.[0-9]+\.[0-9]+$)으로 필터해 최고를 구한다.
           # 앵커링으로 프리릴리스·노이즈(vX.Y.Z-rc1, nightly 등)를 배제 → sort -V 프리릴리스 취약성도 무력화.
-          HIGHEST=$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+          # || true: GHA `shell: bash`는 `-eo pipefail`로 돌아, grep 무매치(clean semver 태그 0개
+          # /노이즈만) 시 파이프라인이 exit 1 → errexit로 스텝이 즉사한다. 무매치를 흡수해야
+          # HIGHEST가 빈 문자열이 되어 아래 [ -z "$HIGHEST" ] 첫 릴리스 분기가 도달 가능해진다.
+          HIGHEST=$(git tag -l | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
           # 릴리스 태그가 전역 최고와 문자열 등가일 때만 :latest 포함.
           # HIGHEST 공백(전역 semver 태그 0개)이면 이 릴리스가 유일 최고이므로 포함.
           # dry-run(TAG=dry-run)은 HIGHEST(비공백)와 불일치 → 자연히 제외(push도 안 함).
