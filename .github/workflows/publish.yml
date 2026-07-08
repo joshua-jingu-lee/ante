@@ -5,12 +5,11 @@ on:
     types: [published]
   workflow_dispatch: {}
 
-# 정적 그룹 `publish`로 전체 직렬화한다 (#2428). per-tag 키를 쓰면 서로 다른
-# 태그 릴리스가 `:latest` push를 경합하므로, 릴리스 발행은 한 번에 하나만 진행한다.
-# cancel-in-progress: false — 진행 중 배포를 취소하지 않고 큐잉한다.
-concurrency:
-  group: publish
-  cancel-in-progress: false
+# concurrency 미적용(#2428): concurrency 그룹은 pending run을 최대 1개만 유지하고
+# 새 run이 큐잉되면 기존 pending run을 무음 취소(failure 아님)한다. 릴리스 발행이
+# 겹치면 뒤 릴리스의 PyPI/GHCR 배포가 조용히 누락되어, 막으려던 :latest 경합(희귀)보다
+# 나쁜 실패 모드가 된다. 릴리스는 수동·순차(사용자 확인 포함)라 겹침이 실질적으로 없어
+# 직렬화 이득도 없다. (semantic-release.yml은 취소돼도 무해한 재계산이라 concurrency 유지)
 
 jobs:
   publish:
