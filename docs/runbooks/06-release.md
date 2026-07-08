@@ -201,9 +201,11 @@ main이 릴리스 가능한 상태(운영 태그 이후 쌓인 커밋을 모두 
 
 예외 경로 진입 조건은 "main이 지금 릴리스 불가"다. 핫픽스 태그 `vX.Y.(Z+1)`은 main에서 비도달(unreachable)이므로, 다음 정규 릴리스가 이 버전을 재산정하면 태그 충돌로 publish가 막힌다. main에 쌓인 커밋 종류에 따라 두 경우로 나뉜다.
 
-- **(a) 일반적 — main에 minor 이상 범프를 유발할 커밋(`feat`)이 쌓인 경우**: 다음 정규 릴리스의 산정 버전은 `vX.(Y+1).0` 이상이라 핫픽스 태그와 충돌하지 않는다.
-- **(b) 범프 미유발 커밋(`refactor` 등)만으로 릴리스 불가였던 경우**: upstream-first로 넣은 `fix:` 커밋이 patch 범프를 유발하므로, 다음 정규 산정 버전이 핫픽스 태그(`vX.Y.(Z+1)`)와 **충돌할 수 있다**. 이는 규정을 정확히 따른 결과이며 사용 오류가 아니다.
-- **(c) 해소 절차**: 충돌은 다음 정규 `/release prepare` 2단계의 전역 태그 검사(`git tag -l 'vX.Y.Z'`)에서 감지된다(`git describe`는 도달 가능 태그만 보므로 여기서만 잡힌다). 감지되면 다음 정규 릴리스를 forced 범프로 한 단계 올려 해소한다 — §6 declare-major와 동일한 forced-level 메커니즘으로 `--minor`를 쓴다(`semantic-release version --minor --no-commit --no-tag --no-push --no-vcs-release`). 핫픽스 태그가 그 patch 버전(`vX.Y.(Z+1)`)을 이미 소비했으므로 semver상 건너뜀(→ `vX.(Y+1).0`)은 정당하다. forced `--minor` 해소가 애매한 경우(예: 그 minor마저 이미 소비됨)에만 대표 판단을 요청한다.
+- **(a) main에 minor 이상 범프를 유발할 커밋(`feat`)이 있는 경우(일반적)**: 다음 정규 릴리스의 산정 버전은 `vX.(Y+1).0` 이상이라 핫픽스 태그와 충돌하지 않는다.
+- **(b) main에 minor 이상 유발 커밋이 없는 경우(범프 미유발 커밋만, 또는 `fix`/`perf` 등 patch 유발 커밋만 쌓인 경우 포함)**: upstream-first로 넣은 `fix:` 커밋과 합쳐져 다음 정규 산정 버전이 핫픽스 태그(`vX.Y.(Z+1)`)와 **충돌할 수 있다**. 이는 규정을 정확히 따른 결과이며 사용 오류가 아니다. (a)/(b)는 "minor 이상 유발 커밋 유무"로 갈리는 상호 배타·전수 구분이다.
+- **(c) 해소 절차**: 충돌은 다음 정규 `/release prepare` 2단계의 전역 태그 검사(`git tag -l 'vX.Y.Z'`)에서 감지된다(`git describe`는 도달 가능 태그만 보므로 여기서만 잡힌다). 감지되면 prepare를 중단하고 대표에게 보고한다. 해소 경로는 두 가지다.
+  - **(i) 자연 해소(권장)**: main에 minor 이상 유발 커밋(`feat`)이 곧 머지될 예정이면 그것을 기다려 정규 minor 릴리스(`vX.(Y+1).0`)로 충돌을 벗어난다.
+  - **(ii) 즉시 릴리스가 필요한 경우**: `semantic-release.yml`에는 forced-minor 전파 입력이 없다(현재 `declare_major`만 §6 경로로 전파된다). 따라서 자동 해소 경로가 아직 없으며, §6 declare-major와 동일 패턴의 forced-minor 입력 추가를 별도 이슈로 등록해 CI를 확장한 뒤 진행한다.
 
 #### `:latest` 취급 (조건부)
 
