@@ -31,11 +31,11 @@ Claude 구현 (worktree 격리)
   │
   ├──▶ [Meta] code-reviewer ───────────── 고위험 변경 / 반복 risk class 시 원인 분석 (수동/오케스트레이터 호출)
   │
-  ├──▶ [Gate C] merge-gate ────────────── required status checks(§3.2) 통과 + 충돌 없음 + 대화 해결 시 auto-merge
+  ├──▶ [Gate C] merge-gate ────────────── required status checks(§3.2) 통과 + 충돌 없음 + 대화 해결 시 AUTOMERGE_TOKEN(PAT)으로 auto-merge
   │
   ▼
-post-merge automation
-  ├── 이슈 체크박스 갱신 + close
+post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 트리거)
+  ├── 이슈 체크박스 갱신 + close (+ 에픽 동기화·close)
   └── 원격 head branch 삭제 (GitHub 설정)
 ```
 
@@ -78,7 +78,7 @@ PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-
 - **트리거**: `pull_request`(사전 게이트) + `push: [main]`(머지 결과물 사후 검증)
 - **결과**: status checks `ci`, `lint`, `test` (집계 진입점은 `ci`, defense-in-depth 근거는 [§3.2.1](#321-rationale--머지-안전망-defense-in-depth))
 - **release PR 추가 검증**: head branch가 `release/*`이면 Docker image build를 함께 검증한다. 이 단계에서는 registry push를 하지 않는다.
-- **main push CI(조합 회귀 사후 검증)**: 목적은 base가 뒤처진 PR들이 각자 green으로 순차 머지될 때 main에 들어온 조합 회귀를 main HEAD의 `lint`·`test` 재실행으로 사후 검출하는 것이다. 이미 머지된 결과물에 대한 run이라 머지를 차단하지 않으며(사전 게이트가 아님), required status checks 집합·의미론은 불변이다. **현행 발화 조건 주의**: 표준 머지 경로는 `pr-approvals.yml`이 `GITHUB_TOKEN`으로 enable한 auto-merge이고, `GITHUB_TOKEN`이 유발한 `push`·`pull_request` 등 **자동 이벤트**는 워크플로우 run을 만들지 않으므로([§5.2](#52-post-merge-실패-모드와-복구)와 동일 메커니즘 — 단 `workflow_dispatch`·`repository_dispatch`는 예외로, Gate C의 post-merge dispatch가 `GITHUB_TOKEN`으로도 동작하는 이유다) push CI는 이 경로에서 **트리거되지 않는다**. 현재는 사람이 main에 직접 push하는 예외 경로에서만 동작한다. auto-merge 토큰이 PAT/App으로 전환되면(post-merge 폴링 해체 이슈) 전체 머지 경로에서 자동 활성화된다. 트리거는 비용 0·무해라 그 전환을 위해 미리 둔다. `push`(`refs/heads/main`)와 `pull_request`(`refs/pull/N/merge`)는 concurrency 그룹 키(`ci-${{ github.ref }}`)가 분리되어 서로 취소하지 않는다.
+- **main push CI(조합 회귀 사후 검증)**: 목적은 base가 뒤처진 PR들이 각자 green으로 순차 머지될 때 main에 들어온 조합 회귀를 main HEAD의 `lint`·`test` 재실행으로 사후 검출하는 것이다. 이미 머지된 결과물에 대한 run이라 머지를 차단하지 않으며(사전 게이트가 아님), required status checks 집합·의미론은 불변이다. **발화 조건**: 표준 머지 경로는 `pr-approvals.yml`이 **`AUTOMERGE_TOKEN`(PAT)**으로 enable한 auto-merge다(#2437). PAT 머지가 유발한 `push` 이벤트는 `GITHUB_TOKEN`과 달리 GitHub 재귀 방지 규칙에 걸리지 않아 워크플로우를 발화하므로, main push CI는 **전 머지 경로에서 활성화된다**(이전의 GITHUB_TOKEN auto-merge 시절 '미발화' 단서는 #2437 전환으로 해제됨). `push`(`refs/heads/main`)와 `pull_request`(`refs/pull/N/merge`)는 concurrency 그룹 키(`ci-${{ github.ref }}`)가 분리되어 서로 취소하지 않는다.
 
 branch protection repository setting은 이 저장소 밖 운영 설정이므로 워크플로우가 직접 수정하지 않는다.
 
@@ -123,10 +123,9 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR 단계의 자동 AI 승인/감사 워커는 운영하지 않는다.
 
 출력:
-- auto-merge 활성화 또는 유지
-- auto-merge 활성화 전에 PR head ref 기준 `workflow_dispatch`로 `post-merge.yml` 호출
-- `post-merge.yml`은 별도 workflow run 안에서 PR의 실제 merged 상태를 기다린 뒤 후처리를 수행하고, 장기 대기 시 handoff 직전에 PR 상태를 다시 확인한 뒤 자기 자신을 다시 dispatch해 대기를 넘겨받는다
-- 장기 대기 handoff에는 고정 횟수 제한을 두지 않고 merged 상태까지 자동 경로를 유지한다
+- auto-merge 활성화 또는 유지 — **`AUTOMERGE_TOKEN`(fine-grained PAT)으로 enable**한다(#2437). 머지 actor가 PAT 소유자가 되어 머지가 `pull_request: closed` 이벤트를 정상 발화하고, 그 이벤트가 `post-merge.yml`을 트리거한다.
+- **fail-closed**: `AUTOMERGE_TOKEN`이 없으면 merge-gate가 명시 실패해 auto-merge를 걸지 않는다. `GITHUB_TOKEN` 폴백은 금지 — 그 머지는 closed 이벤트를 발화하지 않아 post-merge 정리가 조용히 소실된다(§5.2).
+- merge-gate는 `post-merge.yml`을 dispatch하지 않는다(폴링·handoff 제거, #2437). 머지가 만든 closed 이벤트가 정상 트리거 경로이며, 누락 시 `workflow_dispatch(issue_numbers)`로 수동 복구한다(§5.2).
 - 머지 불가 시 대기
 
 **원칙**: merge gate는 코드 리뷰어가 아니라 **정책 집행자**다.
@@ -151,8 +150,8 @@ merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR �
 .github/
 └── workflows/
     ├── ci.yml                    # Gate B: lint + test
-    ├── pr-approvals.yml          # Gate C: merge-gate (auto-merge + post-merge dispatch)
-    ├── post-merge.yml            # 머지 후 이슈 정리, 후처리 (closed event + workflow_dispatch)
+    ├── pr-approvals.yml          # Gate C: merge-gate (AUTOMERGE_TOKEN PAT로 auto-merge, fail-closed)
+    ├── post-merge.yml            # 머지 후 이슈 정리 (pull_request:closed 이벤트 + workflow_dispatch(issue_numbers) 수동 복구)
     ├── semantic-release.yml      # 수동 릴리스
     └── publish.yml               # Release 기반 PyPI/Docker 배포
 ```
@@ -261,18 +260,15 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 ### 5.2 Post-merge 실패 모드와 복구
 
+`post-merge.yml`은 PR 머지가 만든 `pull_request: closed`(`merged == true`) 이벤트로 트리거된다(#2437 — 폴링·handoff 제거). 이 이벤트는 auto-merge를 **`AUTOMERGE_TOKEN`(PAT)**으로 enable했기에 발화한다(머지 actor = PAT 소유자). 정리 작업은 멱등이다(`hasPostMergeComment` 가드가 같은 PR/이슈에 중복 코멘트를 만들지 않으므로 재실행이 안전하다).
+
 - 알려진 실패 모드:
-  - GitHub Actions의 `GITHUB_TOKEN`으로 수행한 auto-merge는 후속 workflow run을 자동으로 만들지 않아 `pull_request.closed` 후처리가 누락될 수 있음
-  - `workflow_dispatch`를 default branch 기준으로 실행하면, 머지 전에는 최신 PR 브랜치의 `post-merge.yml` 변경이 반영되지 않음
-  - `workflow_dispatch`를 auto-merge 뒤에 호출하면, head branch 자동 삭제와 경쟁해 PR head ref를 찾지 못할 수 있음
-  - merge actor나 이벤트 경로 차이로 `pull_request.closed` 후처리가 기대대로 실행되지 않음
-  - auto-merge 전에 별도 `post-merge` run을 시작해도, 실제 merged 상태가 늦게 반영될 수 있어 workflow 내부 대기와 handoff 재-dispatch가 필요함
-  - `workflow_dispatch` 입력 파싱 실패
-  - GitHub 기본 auto-close는 되었지만 체크박스/에픽 동기화가 누락됨
+  - **`AUTOMERGE_TOKEN` 미등록**: merge-gate가 fail-closed로 명시 실패한다(가시적 미머지). 이때 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
+  - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
 - 복구 순서:
-  1. `post-merge`를 PR 번호 기준으로 수동 실행
-  2. 필요 시 이슈 번호 기준 reconciliation/close 수행
-  3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남김
+  1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 `AUTOMERGE_TOKEN` 시크릿으로 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다.
+  2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다(멱등이라 중복 실행도 안전). `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
+  3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
 
 ## 6. 설계 적합성 검증 (선택 Gate)
 

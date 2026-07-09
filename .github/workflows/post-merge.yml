@@ -1,21 +1,18 @@
 name: Post Merge
 
 on:
+  # PAT(AUTOMERGE_TOKEN)로 enable한 auto-merge의 머지 actor는 PAT 소유자라
+  # pull_request:closed 이벤트가 정상 발화한다(#2437). GITHUB_TOKEN 머지는
+  # 재귀 방지 규칙으로 이 이벤트를 만들지 않으므로 pr-approvals.yml이 fail-closed다.
   pull_request:
     types:
       - closed
+  # 수동 복구 진입점: 머지된 PR은 재오픈 불가라 closed 이벤트를 재발화할 수 없다.
+  # 정리가 누락되면 issue_numbers로 직접 reconcile한다 (00 §6 close 규칙·04 §5.2 복구 계약).
   workflow_dispatch:
     inputs:
-      pr_number:
-        description: Merged PR number to reconcile linked issues
-        required: false
-        type: string
       issue_numbers:
-        description: Comma-separated issue numbers to reconcile directly
-        required: false
-        type: string
-      handoff_depth:
-        description: Internal retry depth for long-running merge waits
+        description: Comma-separated issue numbers to reconcile directly (manual recovery)
         required: false
         type: string
 
@@ -24,23 +21,18 @@ jobs:
     name: post-merge
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true }}
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 10
     permissions:
-      actions: write
       contents: read
       issues: write
-      pull-requests: read
     steps:
       - name: Update linked issues
         uses: actions/github-script@v9
-        env:
-          WORKFLOW_REF: ${{ github.ref_name }}
         with:
           script: |
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const eventName = context.eventName;
-            const workflowRef = process.env.WORKFLOW_REF || "";
             const closingPattern =
               /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/gi;
 
@@ -48,128 +40,12 @@ jobs:
               return [...(text || "").matchAll(closingPattern)].map((match) => Number(match[1]));
             }
 
-            async function fetchPullRequest(pullNumber) {
-              return (
-                await github.rest.pulls.get({
-                  owner,
-                  repo,
-                  pull_number: pullNumber,
-                })
-              ).data;
-            }
-
-            async function dispatchPostMergeHandoff(pullNumber, nextDepth) {
-              if (!workflowRef) {
-                core.setFailed("Missing workflow ref for post-merge handoff dispatch.");
-                return false;
-              }
-
-              await github.rest.actions.createWorkflowDispatch({
-                owner,
-                repo,
-                workflow_id: "post-merge.yml",
-                ref: workflowRef,
-                inputs: {
-                  pr_number: String(pullNumber),
-                  handoff_depth: String(nextDepth),
-                },
-              });
-
-              core.warning(
-                `PR #${pullNumber} is still waiting to merge. ` +
-                `Dispatched a follow-up post-merge run on ref ${workflowRef} (handoff depth ${nextDepth}).`,
-              );
-              return true;
-            }
-
-            async function waitForMergedPullRequest(pullNumber, handoffDepth) {
-              const delayMs = 30_000;
-              const maxAttempts = 660;
-              let attempt = 0;
-
-              while (attempt < maxAttempts) {
-                attempt += 1;
-                const current = await fetchPullRequest(pullNumber);
-
-                if (current.merged_at) {
-                  core.info(`PR #${pullNumber} merged at ${current.merged_at}.`);
-                  return { type: "merged", pr: current };
-                }
-
-                if (current.state === "closed") {
-                  core.setFailed(`PR #${pullNumber} was closed without merge.`);
-                  return { type: "closed" };
-                }
-
-                if (attempt === 1 || attempt % 5 === 0) {
-                  core.info(
-                    `PR #${pullNumber} is not merged yet ` +
-                    `(attempt ${attempt}, state=${current.state}). Waiting ${delayMs / 1000}s...`,
-                  );
-                }
-
-                await new Promise((resolve) => setTimeout(resolve, delayMs));
-              }
-
-              const latest = await fetchPullRequest(pullNumber);
-
-              if (latest.merged_at) {
-                core.info(`PR #${pullNumber} merged at ${latest.merged_at} during handoff boundary.`);
-                return { type: "merged", pr: latest };
-              }
-
-              if (latest.state === "closed") {
-                core.setFailed(`PR #${pullNumber} was closed without merge.`);
-                return { type: "closed" };
-              }
-
-              try {
-                const dispatched = await dispatchPostMergeHandoff(pullNumber, handoffDepth + 1);
-                return dispatched ? { type: "handoff" } : { type: "dispatch_failed" };
-              } catch (error) {
-                const afterDispatchFailure = await fetchPullRequest(pullNumber);
-
-                if (afterDispatchFailure.merged_at) {
-                  core.info(
-                    `PR #${pullNumber} merged at ${afterDispatchFailure.merged_at} ` +
-                    `while dispatching handoff; continuing in the current run.`,
-                  );
-                  return { type: "merged", pr: afterDispatchFailure };
-                }
-
-                if (afterDispatchFailure.state === "closed") {
-                  core.setFailed(`PR #${pullNumber} was closed without merge.`);
-                  return { type: "closed" };
-                }
-
-                throw error;
-              }
-            }
-
             let pr = null;
             let issueNumbers = [];
 
             if (eventName === "workflow_dispatch") {
               const workflowInputs = context.payload.inputs || {};
-              const prNumberInput = String(workflowInputs.pr_number || "").trim();
               const issueNumbersInput = String(workflowInputs.issue_numbers || "").trim();
-              const handoffDepth = Number.parseInt(String(workflowInputs.handoff_depth || "0"), 10);
-              const normalizedHandoffDepth =
-                Number.isInteger(handoffDepth) && handoffDepth >= 0 ? handoffDepth : 0;
-
-              if (prNumberInput) {
-                pr = await fetchPullRequest(Number(prNumberInput));
-
-                if (!pr.merged_at) {
-                  const waitResult = await waitForMergedPullRequest(pr.number, normalizedHandoffDepth);
-                  if (waitResult.type !== "merged") {
-                    return;
-                  }
-                  pr = waitResult.pr;
-                }
-
-                issueNumbers.push(...parseIssueNumbers(pr.body || ""));
-              }
 
               if (issueNumbersInput) {
                 issueNumbers.push(
@@ -180,8 +56,8 @@ jobs:
                 );
               }
 
-              if (!pr && issueNumbers.length === 0) {
-                core.setFailed("workflow_dispatch requires pr_number or issue_numbers.");
+              if (issueNumbers.length === 0) {
+                core.setFailed("workflow_dispatch requires issue_numbers.");
                 return;
               }
             } else {
