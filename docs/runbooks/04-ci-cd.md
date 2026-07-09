@@ -262,7 +262,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 `post-merge.yml`은 PR 머지가 만든 `pull_request: closed`(`merged == true`) 이벤트로 트리거된다(#2437 — 폴링·handoff 제거). 이 이벤트는 auto-merge를 **`AUTOMERGE_TOKEN`(PAT)**으로 enable했기에 발화한다(머지 actor = PAT 소유자).
 
-**`AUTOMERGE_TOKEN`은 Actions·Dependabot 두 시크릿 저장소에 모두 등록한다.** GitHub는 `dependabot[bot]`이 트리거한 run의 `secrets` 컨텍스트를 **Dependabot secrets** 저장소로 해석한다(Actions secrets가 아님). 한쪽만 등록하면 dependabot PR의 merge-gate가 빈 토큰으로 상시 fail-closed되어 dependabot auto-merge 레인이 영구 파괴된다. `Settings → Secrets and variables → Actions`와 `→ Dependabot` 양쪽에 같은 PAT를 등록한다.
+**`AUTOMERGE_TOKEN`은 Actions·Dependabot 두 시크릿 저장소에 모두 등록한다.** GitHub는 `dependabot[bot]`이 트리거한 run의 `secrets` 컨텍스트를 **Dependabot secrets** 저장소로 해석한다(Actions secrets가 아님). Actions에만 등록하면 **dependabot PR**이, Dependabot에만 등록하면 **일반 PR**이 각각 빈 토큰으로 상시 fail-closed된다(아래 실패 모드 참조). `Settings → Secrets and variables → Actions`와 `→ Dependabot` 양쪽에 같은 PAT를 등록한다.
 
 - 알려진 실패 모드:
   - **`AUTOMERGE_TOKEN` 미등록(Actions)**: 일반 PR의 merge-gate가 fail-closed로 명시 실패한다(가시적 미머지).
