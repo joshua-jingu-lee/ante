@@ -146,7 +146,7 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 | 인증 방식 | 상태 | 비고 |
 |-----------|------|------|
 | Trusted Publishing (OIDC) | 기본 (현행) | `id-token: write` + `environment: pypi`, `password:` 없음 |
-| API 토큰 (`PYPI_API_TOKEN` secret) | 폴백 (시크릿 보존) | ① 구조적 OIDC 포기 시 **다음 릴리스부터** 토큰 경로 복귀(현 릴리스 소급 불가) ② rerun 창 경과 시 수동 twine 업로드 — [§11 OIDC 인증 실패](#oidc-인증-실패-pypi-업로드-403인증-오류) |
+| API 토큰 (`PYPI_API_TOKEN` secret) | 폴백 (시크릿 보존 — 워크플로우 경로 전용) | 구조적 OIDC 포기 시 **다음 릴리스부터** 토큰 경로 복귀(현 릴리스 소급 불가). 시크릿은 write-only라 수동 twine의 자격증명 출처는 아님 — rerun 창 경과 시 수동 구조는 새 토큰 발급으로([§11 OIDC 인증 실패](#oidc-인증-실패-pypi-업로드-403인증-오류)) |
 
 **사용자 사전조건 (검증 불가 외부 전제)**: ante는 이미 PyPI에 존재하는 프로젝트다(0.7.0~0.11.0 업로드됨). **pending publisher는 미존재 프로젝트 예약용이라 기존 프로젝트를 커버하지 못한다** — "pending publisher 등록 완료"를 OIDC 동작 증거로 삼지 않는다. 소유자가 프로젝트 설정 `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·워크플로우(`publish.yml`)·environment(`pypi`)를 가리키는 **trusted publisher를 직접 등록**해야 한다(pypa README: "your project's publisher must already be configured on PyPI"). 이 등록 상태는 CLI로 검증할 수 없고 소유자 확인이 필요하므로, 첫 password-less 릴리스 전에 활성 여부를 확인한다.
 
@@ -272,7 +272,7 @@ OIDC 인증은 dist 업로드 **이전** 단계라 실패해도 PyPI에 어떤 �
 
 **rerun 창(~30일) 경과 시 최후 수단 — 수동 twine 업로드**
 
-GitHub run 재실행은 초기 실행 후 ~30일 제한이라 창이 지나면 rerun이 불가하다. 이때는 릴리스에 첨부된 dist 자산(semantic-release가 업로드)을 받아 보존된 토큰으로 직접 업로드한다.
+GitHub run 재실행은 초기 실행 후 ~30일 제한이라 창이 지나면 rerun이 불가하다. 이때는 릴리스에 첨부된 dist 자산(semantic-release가 업로드)을 받아, 구조 시점에 새로 발급한 PyPI API 토큰으로 직접 업로드한다(아래 — 보존된 시크릿은 읽기 불가라 출처가 될 수 없음).
 
 ```bash
 gh release download vX.Y.Z -D dist-rescue/
