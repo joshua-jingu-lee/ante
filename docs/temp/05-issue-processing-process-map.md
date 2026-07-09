@@ -432,7 +432,7 @@ Merge gate는 새 리뷰어가 아니라 상태 집행자다.
 
 1. PR 본문의 `Closes #N`로 GitHub auto-close를 우선 사용한다.
 2. `post-merge` automation이 이슈 체크박스와 에픽 상태를 동기화한다.
-3. 누락 시 workflow 수동 실행으로 PR 번호 또는 이슈 번호 기준 복구한다.
+3. 누락 시 workflow 수동 실행(`issue_numbers` 입력)으로 이슈 번호 기준 복구한다 — `pr_number` 입력은 #2437에서 제거됨.
 4. 복구 시 자동 경로가 왜 실패했는지와 어떤 방식으로 복구했는지 코멘트로 남긴다.
 
 `/autopilot`은 merge/post-merge 확인 전에는 다음 이슈로 넘어가지 않는다.

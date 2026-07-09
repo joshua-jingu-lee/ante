@@ -257,7 +257,7 @@ autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/
 - **PR 본문에는 `Closes #N`를 기본으로 사용한다.** `Fixes #N`, `Resolves #N`도 허용하지만, runbook과 예시는 `Closes #N`으로 통일한다.
 - 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge` automation은 체크박스와 에픽 상태를 동기화한다.
 - 에픽 이슈는 모든 하위 이슈가 close된 후에 close한다.
-- `post-merge`가 누락되면 workflow 수동 실행으로 PR 번호 또는 이슈 번호를 넣어 복구한다.
+- `post-merge`가 누락되면 `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 `issue_numbers`에 이슈 번호를 넣어 복구한다(머지된 PR은 재오픈 불가라 이것이 유일 재실행 경로 — `pr_number`/폴링 dispatch는 #2437로 제거, [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구)).
 
 ## 7. 에이전트의 이슈 등록
 

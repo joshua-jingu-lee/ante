@@ -21,19 +21,28 @@ jobs:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     permissions:
-      actions: write
       contents: write
       pull-requests: write
     steps:
-      - name: Dispatch post-merge reconciliation
+      # auto-merge를 PAT(AUTOMERGE_TOKEN)로 enable한다 (#2437). 머지 actor가 PAT 소유자가
+      # 되어 머지가 pull_request:closed 이벤트를 정상 발화 → post-merge.yml이 폴링 없이 동작한다.
+      # fail-closed: 시크릿 부재 시 명시 실패한다. GITHUB_TOKEN 폴백은 금지 — 그 머지는
+      # closed 이벤트를 만들지 않아(재귀 방지 규칙) 폴링도 없는 지금은 정리가 조용히 소실된다
+      # (이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
+      # AUTOMERGE_TOKEN은 Actions·Dependabot 두 시크릿 저장소에 모두 등록해야 한다:
+      # dependabot[bot]이 트리거한 run의 secrets 컨텍스트는 Dependabot secrets만 읽으므로,
+      # Actions에만 등록하면 dependabot PR의 merge-gate가 상시 fail-closed된다(레인 파괴).
+      - name: Enable auto-merge (PAT — fail-closed)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh workflow run post-merge.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF" -f pr_number="$PR_NUMBER"
-
-      - name: Enable auto-merge
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::AUTOMERGE_TOKEN 시크릿이 없어 auto-merge를 걸 수 없습니다 (fail-closed, #2437)." >&2
+            echo "GITHUB_TOKEN 폴백은 금지됩니다: 그 머지는 pull_request:closed 이벤트를 발화하지 않아 post-merge 정리가 조용히 소실됩니다." >&2
+            echo "복구: fine-grained PAT(Contents RW + Pull requests RW)를 AUTOMERGE_TOKEN으로 Settings→Secrets and variables→Actions 와 Dependabot 양쪽에 등록하세요." >&2
+            echo "  (dependabot run은 Dependabot secrets만 읽습니다 — Actions에만 등록하면 dependabot PR이, Dependabot에만 등록하면 일반 PR이 fail-closed됩니다.)" >&2
+            echo "  등록 후 이 PR을 재트리거(close→reopen)하세요." >&2
+            exit 1
+          fi
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash

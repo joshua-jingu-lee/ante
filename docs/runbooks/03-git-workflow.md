@@ -180,7 +180,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 ### 4.4 머지 방식
 
 - 기본 머지 방식은 **squash merge**
-- merge 실행 주체는 GitHub auto-merge
+- merge 실행 주체는 GitHub auto-merge이며, `merge-gate`가 **`AUTOMERGE_TOKEN`(fine-grained PAT)**으로 enable한다(#2437). 머지 actor는 GitHub 봇이 아니라 PAT 소유자이므로, 머지가 `pull_request: closed` 이벤트를 정상 발화해 `post-merge.yml` 정리가 동작한다(`GITHUB_TOKEN` enable은 재귀 방지로 이 이벤트를 만들지 못해 폴백 금지 — [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구))
 - head branch 삭제는 GitHub의 **Automatically delete head branches** 설정 사용
 - head branch 자동 삭제가 필요하면 repository ruleset / branch protection이 모든 브랜치 삭제를 막지 않도록 확인한다
 - `main` 보호는 `main` branch protection의 `allow_deletions=false`를 기준으로 두고, 전 브랜치 공통 ruleset에 `deletion`을 넣지 않는다
