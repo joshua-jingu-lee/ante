@@ -29,6 +29,9 @@ jobs:
       # fail-closed: 시크릿 부재 시 명시 실패한다. GITHUB_TOKEN 폴백은 금지 — 그 머지는
       # closed 이벤트를 만들지 않아(재귀 방지 규칙) 폴링도 없는 지금은 정리가 조용히 소실된다
       # (이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
+      # AUTOMERGE_TOKEN은 Actions·Dependabot 두 시크릿 저장소에 모두 등록해야 한다:
+      # dependabot[bot]이 트리거한 run의 secrets 컨텍스트는 Dependabot secrets만 읽으므로,
+      # Actions에만 등록하면 dependabot PR의 merge-gate가 상시 fail-closed된다(레인 파괴).
       - name: Enable auto-merge (PAT — fail-closed)
         env:
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
@@ -37,7 +40,9 @@ jobs:
           if [ -z "$GH_TOKEN" ]; then
             echo "::error::AUTOMERGE_TOKEN 시크릿이 없어 auto-merge를 걸 수 없습니다 (fail-closed, #2437)." >&2
             echo "GITHUB_TOKEN 폴백은 금지됩니다: 그 머지는 pull_request:closed 이벤트를 발화하지 않아 post-merge 정리가 조용히 소실됩니다." >&2
-            echo "복구: 저장소에 fine-grained PAT(Contents RW + Pull requests RW)를 AUTOMERGE_TOKEN 시크릿으로 등록한 뒤 이 PR을 재트리거(close→reopen)하세요." >&2
+            echo "복구: fine-grained PAT(Contents RW + Pull requests RW)를 AUTOMERGE_TOKEN으로 Settings→Secrets and variables→Actions 와 Dependabot 양쪽에 등록하세요." >&2
+            echo "  (dependabot[bot]이 트리거한 run은 Actions secrets가 아니라 Dependabot secrets만 읽으므로, 한쪽만 등록하면 dependabot PR의 merge-gate가 상시 fail-closed됩니다.)" >&2
+            echo "  등록 후 이 PR을 재트리거(close→reopen)하세요." >&2
             exit 1
           fi
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --auto --squash

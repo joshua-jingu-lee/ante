@@ -123,7 +123,7 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR 단계의 자동 AI 승인/감사 워커는 운영하지 않는다.
 
 출력:
-- auto-merge 활성화 또는 유지 — **`AUTOMERGE_TOKEN`(fine-grained PAT)으로 enable**한다(#2437). 머지 actor가 PAT 소유자가 되어 머지가 `pull_request: closed` 이벤트를 정상 발화하고, 그 이벤트가 `post-merge.yml`을 트리거한다.
+- auto-merge 활성화 또는 유지 — **`AUTOMERGE_TOKEN`(fine-grained PAT)으로 enable**한다(#2437; Actions·Dependabot 양쪽 시크릿 저장소에 등록 — §5.2). 머지 actor가 PAT 소유자가 되어 머지가 `pull_request: closed` 이벤트를 정상 발화하고, 그 이벤트가 `post-merge.yml`을 트리거한다.
 - **fail-closed**: `AUTOMERGE_TOKEN`이 없으면 merge-gate가 명시 실패해 auto-merge를 걸지 않는다. `GITHUB_TOKEN` 폴백은 금지 — 그 머지는 closed 이벤트를 발화하지 않아 post-merge 정리가 조용히 소실된다(§5.2).
 - merge-gate는 `post-merge.yml`을 dispatch하지 않는다(폴링·handoff 제거, #2437). 머지가 만든 closed 이벤트가 정상 트리거 경로이며, 누락 시 `workflow_dispatch(issue_numbers)`로 수동 복구한다(§5.2).
 - 머지 불가 시 대기
@@ -260,15 +260,21 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 ### 5.2 Post-merge 실패 모드와 복구
 
-`post-merge.yml`은 PR 머지가 만든 `pull_request: closed`(`merged == true`) 이벤트로 트리거된다(#2437 — 폴링·handoff 제거). 이 이벤트는 auto-merge를 **`AUTOMERGE_TOKEN`(PAT)**으로 enable했기에 발화한다(머지 actor = PAT 소유자). 정리 작업은 멱등이다(`hasPostMergeComment` 가드가 같은 PR/이슈에 중복 코멘트를 만들지 않으므로 재실행이 안전하다).
+`post-merge.yml`은 PR 머지가 만든 `pull_request: closed`(`merged == true`) 이벤트로 트리거된다(#2437 — 폴링·handoff 제거). 이 이벤트는 auto-merge를 **`AUTOMERGE_TOKEN`(PAT)**으로 enable했기에 발화한다(머지 actor = PAT 소유자).
+
+**`AUTOMERGE_TOKEN`은 Actions·Dependabot 두 시크릿 저장소에 모두 등록한다.** GitHub는 `dependabot[bot]`이 트리거한 run의 `secrets` 컨텍스트를 **Dependabot secrets** 저장소로 해석한다(Actions secrets가 아님). 한쪽만 등록하면 dependabot PR의 merge-gate가 빈 토큰으로 상시 fail-closed되어 dependabot auto-merge 레인이 영구 파괴된다. `Settings → Secrets and variables → Actions`와 `→ Dependabot` 양쪽에 같은 PAT를 등록한다.
 
 - 알려진 실패 모드:
-  - **`AUTOMERGE_TOKEN` 미등록**: merge-gate가 fail-closed로 명시 실패한다(가시적 미머지). 이때 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
+  - **`AUTOMERGE_TOKEN` 미등록(Actions)**: 일반 PR의 merge-gate가 fail-closed로 명시 실패한다(가시적 미머지).
+  - **`AUTOMERGE_TOKEN` 미등록(Dependabot)**: **dependabot PR에서만** merge-gate가 fail-closed된다 — 일반 PR은 정상인데 dependabot PR만 auto-merge가 안 걸리면 Dependabot 저장소 등록 누락이 원인이다.
+  - 어느 경우든 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
   - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
 - 복구 순서:
-  1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 `AUTOMERGE_TOKEN` 시크릿으로 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다.
-  2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다(멱등이라 중복 실행도 안전). `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
+  1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 Actions·Dependabot 양쪽 시크릿에 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다. dependabot PR에서만 실패했다면 Dependabot 저장소 등록을 확인한다.
+  2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다. `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
   3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
+
+**멱등성**: 이슈 상태·체크박스·에픽 동기화는 멱등이라 중복 실행이 안전하다(이미 `[x]`/closed면 무해 — 원본 보존 원칙). 단 수동 복구(`issue_numbers`) 경로는 `pr` 컨텍스트가 없어 post-merge 코멘트의 중복 판정 needle이 `- PR: n-a`인데 closed run이 남긴 코멘트는 `- PR: #N`이라 서로 매치되지 않는다 — 이미 closed run이 정리한 이슈에 수동 복구를 돌리면 `정리 완료` 코멘트가 **중복 게시**될 수 있다(무해). 중복을 피하려면 아직 정리되지 않은 이슈 번호만 지정한다.
 
 ## 6. 설계 적합성 검증 (선택 Gate)
 
