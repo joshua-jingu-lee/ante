@@ -46,11 +46,13 @@ jobs:
           pip install dist/*.whl
           python -c "import ante; print('OK')"
 
+      # Trusted Publishing(OIDC) (#2436): 명시적 자격증명 입력(username/토큰)을 주지 않으면
+      # pypa v1.14.0이 id-token:write + environment:pypi로 OIDC 인증을 자동 진입한다(README ref=v1.14.0).
+      # PYPI_API_TOKEN 시크릿은 삭제하지 않고 폴백용으로 보존한다 — OIDC 실패 시 06 §11 절차.
+      # 사전조건: PyPI 프로젝트(ante)에 trusted publisher가 직접 등록돼 있어야 한다(06 §8).
       - name: Publish to PyPI
         if: github.event_name == 'release'
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-        with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
 
       - name: Derive Docker image metadata
         id: image
