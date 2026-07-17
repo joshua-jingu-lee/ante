@@ -1189,21 +1189,32 @@ class TestAvailableDateEndToEnd:
 # ── store_merge 게이트(#1993 Finding 2): DART checkpoint 미전진 ───────────────
 
 
-def _corrupt_partition(store: ParquetStore, symbol: str, month: str) -> Path:
-    """해당 fundamental 파티션 월에 손상(읽기 불가) 파일을 사전 배치한다.
+def _merge_fail_partition(store: ParquetStore, symbol: str, month: str) -> Path:
+    """해당 fundamental 파티션 월에 결합-불가(non-coercible·읽기 가능) 파일을 배치한다.
 
-    다음 ``store.write`` 가 이 파일과 merge를 시도하면 ParquetStore는 기존
-    파일을 덮어쓰지 않고 ``store_merge`` 경고만 ``_pending_warnings`` 에 적재한다
-    (net_delta=0, 기존 파일 보존). 실제 ParquetStore의 merge-실패 경로를
-    결정적으로 재현한다(test_daily_runner_store_merge_drain 동형).
+    공유키 컬럼 ``revenue`` 를 List로 두면, 다음 ``store.write``(scalar
+    ``revenue``)가 이 파일을 읽은 뒤 ``pl.concat(how="diagonal_relaxed")`` 하려다
+    supertype 결정 실패로 raise한다. ParquetStore는 기존 파일을 덮어쓰지 않고
+    ``store_merge`` 경고만 ``_pending_warnings`` 에 적재한다(net_delta=0, 기존
+    보존). read는 성공하고 concat만 실패하는 genuine merge-fail이므로 #2413
+    self-heal(읽기 불가 → store_recovered) 대상이 아니라 store_merge **게이트**
+    경로를 결정적으로 재현한다(checkpoint 미전진 회귀 보존).
 
     Returns:
-        배치한 손상 파일 경로.
+        배치한 파일 경로.
     """
     part_dir = store.base_path / "fundamental" / "KRX" / symbol
     part_dir.mkdir(parents=True, exist_ok=True)
     filepath = part_dir / f"{month}.parquet"
-    filepath.write_bytes(b"corrupt-not-parquet")
+    year, mon = (int(x) for x in month.split("-"))
+    pl.DataFrame(
+        {
+            "date": [date(year, mon, 1)],
+            "symbol": [symbol],
+            "revenue": [[1, 2, 3]],  # List → scalar revenue와 concat 불가
+            "source": ["dart"],
+        }
+    ).write_parquet(str(filepath))
     return filepath
 
 
@@ -1214,8 +1225,8 @@ class TestStorePendingMergeFailureCountPeek:
         """store_merge 경고만 세고, 호출 후에도 drain_warnings가 동일 경고 반환."""
         store = ParquetStore(base_path=tmp_path / "data")
 
-        # 손상 파티션 위로 write → store_merge 경고 1건 적재(net_delta=0).
-        _corrupt_partition(store, "005930", "2015-12")
+        # 결합-불가 파티션 위로 write → store_merge 경고 1건 적재(net_delta=0).
+        _merge_fail_partition(store, "005930", "2015-12")
         df = _stored_df_quarter("2015", 12)
         net_delta = store.write("005930", "krx", df, data_type="fundamental")
         assert net_delta == 0
@@ -1257,15 +1268,17 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         """backfill 경로: trailing 분기 merge 실패 → checkpoint 그 분기 미전진.
 
         2015 단일 연도 4분기를 distinct 월에 저장하되, 마지막 분기 Q4(2015-12)
-        파티션을 손상시켜 merge 실패를 유발한다. Q1~Q3는 정상 저장되어 Q3까지
-        전진하지만, trailing Q4는 store-merge 실패로 미전진한다(checkpoint=Q3,
-        다음 run에 Q4부터 재시도). store-merge는 halt가 아니므로 Q1~Q3 전진은
-        기존대로 유지되고 손상된 trailing 분기만 막힌다.
+        파티션을 결합-불가(non-coercible·읽기 가능)로 배치해 merge 실패를
+        유발한다. Q1~Q3는 정상 저장되어 Q3까지 전진하지만, trailing Q4는
+        store-merge 실패로 미전진한다(checkpoint=Q3, 다음 run에 Q4부터 재시도).
+        store-merge는 halt가 아니므로 Q1~Q3 전진은 기존대로 유지되고 결합-불가
+        trailing 분기만 막힌다. 대상 월(Q4)에만 배치하므로 전역 concat
+        monkeypatch 없이 per-quarter 선택성이 보존된다.
 
         주의: store-merge는 halt를 세우지 않으므로(지침), 내부(non-trailing)
         분기가 막히면 후속 데이터 분기의 save가 checkpoint를 jump 전진시킨다.
         따라서 단일 분기 미전진을 결정적으로 검증하려면 trailing 분기를
-        손상시킨다(daily 경로의 단일 분기 케이스와 동형).
+        결합-불가로 만든다(daily 경로의 단일 분기 케이스와 동형).
         """
         behaviors: dict[tuple[str, str], object] = {
             ("2015", "11013"): [_raw_item("2015", "11013")],
@@ -1283,8 +1296,9 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
             tmp_path, behaviors, norm_results
         )
 
-        # trailing Q4(2015-12) 파티션 손상 → 이 분기 write가 merge 실패(net_delta=0).
-        _corrupt_partition(store, "005930", "2015-12")
+        # trailing Q4(2015-12) 결합-불가 → 이 분기 write가 merge 실패(net_delta=0).
+        # 대상 월에만 배치 → Q1~Q3 선택 전진 유지(전역 concat monkeypatch 금지).
+        _merge_fail_partition(store, "005930", "2015-12")
 
         net_delta, stored_ok, syms, warns = await collector._collect_quarters(
             {"00126380": "005930"},
@@ -1312,8 +1326,8 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         """backfill 경로(단일 collectable 분기): merge 실패 → checkpoint 미전진.
 
         end_year=start_year에 last_checkpoint를 Q3로 두어 Q4 한 분기만
-        collectable하게 만든다. 그 단일 분기를 손상시키면 QuarterStatus는 OK여도
-        checkpoint가 Q3에서 전진하지 못한다(store_merge_failed 게이트).
+        collectable하게 만든다. 그 단일 분기를 결합-불가로 배치하면 QuarterStatus는
+        OK여도 checkpoint가 Q3에서 전진하지 못한다(store_merge_failed 게이트).
         """
         behaviors: dict[tuple[str, str], object] = {
             ("2015", "11011"): [_raw_item("2015", "11011")],  # Q4만 데이터
@@ -1323,8 +1337,8 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
             tmp_path, behaviors, norm_results
         )
 
-        # Q4(2015-12) 손상 → merge 실패.
-        _corrupt_partition(store, "005930", "2015-12")
+        # Q4(2015-12) 결합-불가 → merge 실패.
+        _merge_fail_partition(store, "005930", "2015-12")
 
         # 사전 checkpoint=Q3(Q1~Q3 완료 상태). last_checkpoint=Q3 → Q4만 순회.
         checkpoint.save("2015-Q3")
@@ -1350,7 +1364,7 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
     ) -> None:
         """회귀 가드: store_merge 없는 재수집 분기(net_delta=0)는 전진(#1993 무회귀).
 
-        손상 파티션 없이 2회 collect한다. 2차는 dedup으로 net_delta=0이지만
+        결합-불가 파티션 없이 2회 collect한다. 2차는 dedup으로 net_delta=0이지만
         store_merge 경고가 없으므로 checkpoint가 정상 전진해야 한다(Finding 2
         게이트가 정상 재수집을 막지 않음을 확인).
         """
@@ -1393,7 +1407,8 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
 
         ``_collect_latest_quarter`` 도 backfill과 동일하게 store_merge_failed를
         게이트한다. today=2026-05-29 → 최신 2026-Q1(period_end 3/31, 파티션
-        2026-03). 그 파티션을 손상시켜 merge 실패를 유발하면 checkpoint 미전진.
+        2026-03). 그 파티션을 결합-불가로 배치해 merge 실패를 유발하면 checkpoint
+        미전진.
         """
         import ante.feed.pipeline.dart_collector as dc
 
@@ -1404,8 +1419,8 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         store = ParquetStore(base_path=tmp_path / "data")
         checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
 
-        # 최신 분기(2026-Q1, period_end 3/31 → 파티션 2026-03)를 손상시킨다.
-        _corrupt_partition(store, "005930", "2026-03")
+        # 최신 분기(2026-Q1, period_end 3/31 → 파티션 2026-03)를 결합-불가로 배치한다.
+        _merge_fail_partition(store, "005930", "2026-03")
 
         behaviors: dict[tuple[str, str], object] = {
             ("2026", "11013"): [_raw_item("2026", "11013")],

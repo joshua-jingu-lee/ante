@@ -144,11 +144,59 @@ def test_multi_partition_sums_deltas(tmp_path) -> None:
     assert net == 2  # 2026-03(1) + 2026-04(1)
 
 
-# ── (e) merge 실패(손상 파티션 보존) → delta == 0 + store_merge 경고 ──────────
+# ── (e1) genuine merge 실패(read 성공·concat 불가) → delta 0 + store_merge ────
 
 
-def test_merge_failure_returns_zero_and_warns(tmp_path) -> None:
-    """기존 파티션이 손상이면 merge 실패 → 기존 보존 + net-new 0 + store_merge 경고."""
+def test_genuine_merge_failure_returns_zero_and_warns(tmp_path) -> None:
+    """유효하나 결합-불가(non-coercible) 기존 파티션 → 기존 보존 + net 0 + store_merge.
+
+    read는 성공하나 `pl.concat(how="diagonal_relaxed")`가 supertype 결정 실패로
+    raise하는 경로(#1964/#2028 store_merge 게이트 회귀). #2413 self-heal 도입이
+    **읽을 수 있는** 결합-불가 파티션을 파괴하지 않음을 잠근다.
+    """
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "fundamental" / "KRX" / "005930"
+    part_dir.mkdir(parents=True)
+    # 공유키 컬럼 market_cap을 List로 배치 → 다음 scalar write와 concat 불가.
+    noncoercible = pl.DataFrame(
+        {
+            "date": [date(2026, 3, 10)],
+            "symbol": ["005930"],
+            "market_cap": [[1, 2, 3]],
+            "source": ["data_go_kr"],
+        }
+    )
+    noncoercible.write_parquet(str(part_dir / "2026-03.parquet"))
+    before = (part_dir / "2026-03.parquet").read_bytes()
+
+    new = pl.DataFrame(
+        {
+            "date": [date(2026, 3, 31)],
+            "symbol": ["005930"],
+            "market_cap": [200],
+            "source": ["data_go_kr"],
+        }
+    )
+    net = store.write("005930", "krx", new, data_type="fundamental")
+
+    assert net == 0  # 저장 반영 없음(기존 파일 보존)
+    warnings = store.drain_warnings()
+    assert any(w.get("type") == "store_merge" for w in warnings)
+    assert all(w.get("type") != "store_recovered" for w in warnings)
+    # 유효한 결합-불가 파티션은 self-heal 대상이 아니라 무손상 보존.
+    assert (part_dir / "2026-03.parquet").read_bytes() == before
+    assert not (part_dir / "2026-03.corrupted").exists()
+
+
+# ── (e2) 손상(읽기 불가) 파티션 → self-heal(delta == len(group)) + store_recovered ─
+
+
+def test_self_heal_returns_group_len_and_recovers(tmp_path) -> None:
+    """읽기 불가 기존 파티션 → 격리 + 재생성(self-heal) → net == 신규 group 행 수.
+
+    중단이 남긴 손상/0바이트 파티션(#2413)은 read 실패이므로 store_merge가 아니라
+    store_recovered로 처리되어 데이터가 채워지고 net-new는 신규 파티션과 동일하다.
+    """
     store = ParquetStore(base_path=tmp_path)
     part_dir = tmp_path / "fundamental" / "KRX" / "005930"
     part_dir.mkdir(parents=True)
@@ -164,11 +212,15 @@ def test_merge_failure_returns_zero_and_warns(tmp_path) -> None:
     )
     net = store.write("005930", "krx", new, data_type="fundamental")
 
-    assert net == 0  # 저장 반영 없음(기존 파일 보존)
+    # 신규 파티션 경로와 동일: dedup 후 행 수 = net-new.
+    assert net == 1
     warnings = store.drain_warnings()
-    assert any(w.get("type") == "store_merge" for w in warnings)
-    # 손상 파일은 보존(데이터 손실 방지).
-    assert (part_dir / "2026-03.parquet").read_bytes() == b"corrupt-not-parquet"
+    assert any(w.get("type") == "store_recovered" for w in warnings)
+    assert all(w.get("type") != "store_merge" for w in warnings)
+    # 손상 파일은 `.corrupted`로 격리되고 파티션은 신규 데이터로 재생성된다.
+    assert (part_dir / "2026-03.corrupted").read_bytes() == b"corrupt-not-parquet"
+    healed = pl.read_parquet(part_dir / "2026-03.parquet")
+    assert len(healed) == 1
 
 
 # ── (j) collector rows_written == store 실제 저장 합(재수집 0) ────────────────

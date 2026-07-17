@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -268,7 +269,17 @@ class ParquetStore:
 
         Returns:
             누적 경고 목록의 복사본. 각 항목은
-            `{"type": "store_merge", "path": str, "message": str}` 형태.
+            `{"type": str, "path": str, "message": str}` 형태이며 ``type`` 은
+            둘 중 하나다:
+            - ``"store_merge"``: read 성공 후 concat/schema 실패로 이번 write를
+              건너뛰고 **기존 파일을 보존**했다. checkpoint 전진 게이트다(소비자
+              ``backfill_runner._drain_store_warnings`` /
+              ``pending_merge_failure_count`` 가 이 타입만 필터해 checkpoint를
+              미전진시킨다).
+            - ``"store_recovered"``: read 실패(손상/0바이트/미완성)로 파일을
+              ``.corrupted`` 로 격리하고 현재 group으로 **재생성(self-heal)** 했다
+              (#2413). 위 게이트 소비자는 이 타입을 세지 않으므로 by-construction
+              **비게이트**다(checkpoint 전진 허용 → loud-stuck 해소).
         """
         drained = list(self._pending_warnings)
         self._pending_warnings.clear()
@@ -609,19 +620,123 @@ class ParquetStore:
             for day_val in data_with_day["_day"].unique().to_list()
         ]
 
+    def _atomic_write_parquet(self, df: pl.DataFrame, filepath: Path) -> None:
+        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-rename, #2413).
+
+        checkpoint.save()(`feed/pipeline/checkpoint.py`)와 동일 패턴이다: 같은
+        디렉토리에 임시 파일을 만들어 write한 뒤 ``Path.replace`` 로 원자 교체한다.
+        write 도중 중단(OOM/kill/전원 손실)이 있어도 최종 경로에는 0바이트/부분
+        parquet이 남지 않는다(중단 시 tmp만 잔존 → 즉시 cleanup).
+
+        Args:
+            df: 기록할 DataFrame.
+            filepath: 최종 파티션 파일 경로.
+
+        Raises:
+            write/replace 실패 시 원 예외를 그대로 재-raise한다(임시 파일 정리 후).
+        """
+        filepath.parent.mkdir(parents=True, exist_ok=True)
+        # mkstemp는 fd를 열어 반환한다. polars가 경로로 다시 열어 write하므로
+        # fd는 즉시 명시적으로 close/consume해 leak을 막는다(checkpoint.save 미러).
+        fd, tmp_path = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
+        os.close(fd)
+        try:
+            df.write_parquet(tmp_path, compression=self._compression)
+            Path(tmp_path).replace(filepath)
+        except BaseException:
+            # 실패 시(예외/취소 포함) 임시 파일 정리 후 재-raise. 최종 경로는
+            # 손대지 않았으므로 기존 상태(부재 또는 이전 유효본)가 보존된다.
+            Path(tmp_path).unlink(missing_ok=True)
+            raise
+
+    def _quarantine_corrupt(self, filepath: Path) -> Path:
+        """읽기 불가 파티션을 ``.corrupted`` 로 격리(rename)하고 격리 경로를 반환.
+
+        `validate(fix)`(`with_suffix(".corrupted")`)의 격리 패턴을 재사용하되,
+        동명 ``.corrupted`` 가 이미 있으면 **덮어쓰지 않고** uniquifier
+        (``.corrupted.<n>``)로 회피한다. validate는 덮어쓰므로 이는 "일관"이
+        아니라 반복 손상 시 이전 증적을 보존하기 위한 **의도적 divergence**다(#2413).
+        """
+        target = filepath.with_suffix(".corrupted")
+        n = 1
+        while target.exists():
+            target = filepath.with_name(f"{filepath.stem}.corrupted.{n}")
+            n += 1
+        filepath.rename(target)
+        return target
+
+    def _self_heal_partition(
+        self,
+        filepath: Path,
+        group: pl.DataFrame,
+        key: list[str],
+        read_exc: BaseException,
+    ) -> int:
+        """읽기 불가(손상/0바이트/미완성) 파티션을 격리하고 현재 group으로 재생성.
+
+        중단 write가 남긴 손상 파티션을 영구 보존(loud-stuck)하는 대신, 파일을
+        ``.corrupted`` 로 격리한 뒤 신규 group을 fresh 원자 write한다(self-heal).
+        corrupt 파일엔 보존할 유효 데이터가 없으므로 #1964의 무손실 취지를
+        위반하지 않는다. ``store_recovered`` 경고를 적재하되 ``store_merge`` 와는
+        **별개 타입**이라 checkpoint 전진 게이트를 유발하지 않는다(→ stuck 해소).
+
+        Returns:
+            재생성한 파티션의 net-new 행 수(신규 파티션 경로와 동일 = dedup 후 len).
+        """
+        quarantined = self._quarantine_corrupt(filepath)
+        if key:
+            present = [c for c in key if c in group.columns]
+            if present:
+                group = group.unique(subset=present, keep="last").sort(present)
+        self._atomic_write_parquet(group, filepath)
+
+        message = (
+            f"손상/미완성 파티션을 격리(.corrupted)하고 현재 수집분으로 재생성"
+            f"했습니다(self-heal, 원 예외: {read_exc}). "
+            f"주의: 격리된 파티션에 이전 데이터가 있었다면 이번 재생성은 현재 "
+            f"수집 group만 담으므로 checkpoint 이전 구간이 유실될 수 있습니다"
+            f"(forward-only 침묵 공백). 완전 복구는 명시 range 재backfill로만 "
+            f"가능합니다."
+        )
+        logger.warning(
+            "Parquet 파티션 self-heal: %s — 손상 파일을 %s 로 격리하고 재생성 "
+            "(원 예외: %s). 이전 데이터가 있었다면 forward-only 공백 가능 — "
+            "range 재backfill 필요.",
+            filepath,
+            quarantined,
+            read_exc,
+        )
+        self._pending_warnings.append(
+            {
+                "type": "store_recovered",
+                "path": str(filepath),
+                "message": message,
+            }
+        )
+        # 신규 파티션 경로와 동일하게 dedup 후 결과 행 수가 net-new 저장 행 수.
+        return len(group)
+
     def _persist_partition(
         self, filepath: Path, group: pl.DataFrame, key: list[str]
     ) -> int:
         """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge.
 
+        원자성(#2413): 모든 파티션 write는 `_atomic_write_parquet`(임시 파일 +
+        원자 rename)로 수행한다. write 중단 시 최종 경로에 0바이트/부분 parquet이
+        남지 않는다(checkpoint.save durability 불변과 정합).
+
         merge 전략(#1964):
-        - 기존 파일이 있으면 `pl.concat(how="diagonal_relaxed")`로
-          컬럼 합집합 + null-fill + supertype 강제 결합한다(이종 스키마 무손실).
+        - 기존 파일 **읽기**(`pl.read_parquet`)와 **결합**(`pl.concat`)을 분리한다:
+          * read 실패(손상/0바이트/미완성) → 손상 파일을 `.corrupted`로 격리하고
+            현재 group으로 재생성(**self-heal**, `store_recovered`). corrupt 파일엔
+            보존할 유효 데이터가 없으므로 #1964의 무손실 취지를 위반하지 않으며,
+            읽기 불가 파티션의 영구 stuck(#2413)을 해소한다.
+          * read 성공 후 `pl.concat(how="diagonal_relaxed")`가 (방어적으로)
+            여전히 raise하는 결합-불가(유효하나 non-coercible 스키마) →
+            **기존 파일을 덮어쓰지 않고** `store_merge` 경고만 기록(현행 보존).
+            기존 데이터 보존을 신규 반영보다 우선한다.
         - natural key가 있으면 `unique(subset=key, keep="last")`로 신규 write
           우선 dedup 후 key로 정렬한다(멱등성).
-        - **silent overwrite 금지**: concat이 (방어적으로) 여전히 raise하면
-          기존 파일을 덮어쓰지 않고 store 이상 경고만 기록한 뒤 반환한다.
-          기존 데이터 보존을 데이터 신규 반영보다 우선한다.
 
         Args:
             filepath: 대상 파티션 파일 경로.
@@ -630,15 +745,21 @@ class ParquetStore:
 
         Returns:
             이 파티션에 **새로 저장된 net-new 행 수**(#1993):
-            ``max(0, len(merged) - len(existing))``. 기존 파일이 없으면 dedup
-            결과 행 수(신규 전량). 재write/dedup으로 merged 행 수가 늘지 않으면 0.
-            legacy 중복 정리로 merged < existing이면(행이 줄어들면) 0으로 clamp
-            한다. merge 실패(기존 파일 보존)는 저장 반영이 없으므로 0.
+            ``max(0, len(merged) - len(existing))``. 기존 파일이 없거나 self-heal
+            재생성이면 dedup 결과 행 수(신규 전량). 재write/dedup으로 merged 행 수가
+            늘지 않으면 0. legacy 중복 정리로 merged < existing이면(행이 줄어들면)
+            0으로 clamp한다. merge 실패(기존 파일 보존)는 저장 반영이 없으므로 0.
         """
         if filepath.exists():
             try:
                 existing = pl.read_parquet(filepath)
-                existing_len = len(existing)
+            except Exception as read_exc:
+                # read 실패(손상/0바이트/미완성): 격리 후 self-heal(store_recovered).
+                # concat 실패(store_merge)와 분리해 읽기 불가 파티션 stuck을 해소.
+                return self._self_heal_partition(filepath, group, key, read_exc)
+
+            existing_len = len(existing)
+            try:
                 merged = pl.concat([existing, group], how="diagonal_relaxed")
                 if key:
                     present = [c for c in key if c in merged.columns]
@@ -646,14 +767,15 @@ class ParquetStore:
                         merged = merged.unique(subset=present, keep="last").sort(
                             present
                         )
-                merged.write_parquet(str(filepath), compression=self._compression)
+                self._atomic_write_parquet(merged, filepath)
                 # net-new = merged 행 수 - 기존 행 수. dedup으로 그대로면 0,
                 # legacy 중복 정리로 줄면 음수 → 0으로 clamp(과대/음수 방지).
                 return max(0, len(merged) - existing_len)
             except Exception as exc:
-                # 방어: diagonal_relaxed로도 결합 불가한 케이스. 기존 파일을
-                # 절대 덮어쓰지 않고(데이터 손실 방지) 이상만 기록한다. 저장
-                # 반영이 없으므로 net-new는 0이다.
+                # read는 성공했으나 diagonal_relaxed로도 결합 불가(유효하나
+                # non-coercible 스키마)하거나 원자 write가 실패한 케이스. 기존
+                # 파일을 절대 덮어쓰지 않고(원자 write라 기존본 무손상) 이상만
+                # 기록한다. 저장 반영이 없으므로 net-new는 0이다.
                 logger.warning(
                     "Parquet 파티션 merge 실패: %s — 기존 파일 보존, write 건너뜀 (%s)",
                     filepath,
@@ -675,7 +797,7 @@ class ParquetStore:
             present = [c for c in key if c in group.columns]
             if present:
                 group = group.unique(subset=present, keep="last").sort(present)
-        group.write_parquet(str(filepath), compression=self._compression)
+        self._atomic_write_parquet(group, filepath)
         # 신규 파티션: dedup 후 결과 행 수가 곧 net-new 저장 행 수.
         return len(group)
 

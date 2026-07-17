@@ -228,7 +228,7 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `async read` | symbol: str, timeframe: str, start: str \| None, end: str \| None, limit: int \| None, data_type: str = "ohlcv", exchange: str = "KRX" | pl.DataFrame | 데이터 읽기. `data_type`으로 스키마 자동 판별 |
-| `async write` | symbol: str, timeframe: str, data: pl.DataFrame, data_type: str = "ohlcv", exchange: str = "KRX" | None | 파티션 단위 **merge** (월별 파티셔닝, 중복 제거 후 정렬). 기존 파일이 있으면 concat → unique → sort |
+| `async write` | symbol: str, timeframe: str, data: pl.DataFrame, data_type: str = "ohlcv", exchange: str = "KRX" | int | 파티션 단위 **merge** (월별 파티셔닝, 중복 제거 후 정렬). 기존 파일이 있으면 concat → unique → sort. 반환은 이번 write로 실제 새로 저장된 **net-new 행 수**(파티션별 `max(0, len(merged) - len(existing))`의 합, #1993). 모든 파티션 write는 임시파일 + 원자 rename으로 수행한다(중단 시 손상 파일 미잔존, #2413). |
 | `async append` | symbol: str, timeframe: str, rows: list[dict], data_type: str = "ohlcv", exchange: str = "KRX" | None | 내부적으로 `write()`에 위임. Collector 전용 |
 | `list_symbols` | timeframe: str = "1d", data_type: str = "ohlcv", exchange: str = "KRX" | list[str] | 보유 데이터의 종목 목록 |
 | `get_date_range` | symbol: str, timeframe: str, data_type: str = "ohlcv", exchange: str = "KRX" | tuple[str, str] \| None | 종목의 데이터 기간 조회 |
@@ -251,6 +251,40 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 > 다룬다(현재 코드/스펙 drift).
 
 소스: `src/ante/data/store.py`
+
+#### 파티션 저장 원자성 및 손상 파티션 self-heal (#2413)
+
+파티션 persist(`_persist_partition`)는 durability 불변을 다음과 같이 보장한다. 이는
+checkpoint JSON/secrets 저장이 이미 적용하고 있던 write-then-rename 원자성
+([data-feed/10-checkpoints-and-reports.md](../data-feed/10-checkpoints-and-reports.md))을
+파티션 write에도 확장한 것이며, 새 durability 계약을 도입하는 것이 아니다.
+
+- **원자적 write**: 모든 파티션 write(신규 파티션·merge 결과)는 같은 디렉토리의
+  임시 파일에 기록한 뒤 원자 rename(`os.replace`)으로 교체한다. write 도중
+  프로세스가 중단(OOM/`kill`/전원 손실)되어도 최종 경로에는 0바이트/부분 parquet이
+  남지 않으며, 실패 시 임시 파일은 즉시 정리된다. 기존 유효 파티션은 rename 전까지
+  손대지 않으므로 write 중단이 기존 데이터를 손상시키지 않는다.
+- **read/concat 실패 분리와 self-heal**: merge 시 기존 파일 **읽기**와 신규 group과의
+  **결합**을 분리해 처리한다.
+  - **읽기 실패**(손상/0바이트/미완성 = 중단 write의 잔재): 손상 파일을 `.corrupted`
+    확장자로 격리(동명 존재 시 `.corrupted.<n>` uniquifier로 증적 보존 — validate(fix)의
+    덮어쓰기와는 **의도적 divergence**)한 뒤, 현재 group을 fresh 원자 write로 재생성한다
+    (**self-heal**). corrupt 파일에는 보존할 유효 데이터가 없으므로 무손실 보존 취지를
+    위반하지 않으며, 읽기 불가 파티션이 영구히 반영 불가(loud-stuck)로 방치되던 문제를
+    해소한다.
+  - **읽기 성공 후 결합 실패**(유효하나 non-coercible 스키마로 `pl.concat(how="diagonal_relaxed")`가
+    여전히 raise): 기존 파일을 덮어쓰지 않고 보존한 뒤 경고만 기록한다(silent overwrite 금지,
+    기존 계약 유지).
+- **경고 타입 분리**: 위 두 경로는 서로 다른 store 경고 타입으로 표면화된다.
+  `drain_warnings()`가 반환하는 항목의 `type`은 `store_merge`(결합 실패 → 기존 보존) 또는
+  `store_recovered`(읽기 실패 → 격리 후 self-heal)다. checkpoint 전진 게이트는
+  `store_merge`만 소비하므로, self-heal(`store_recovered`)은 게이트를 유발하지 않고
+  checkpoint를 전진시켜 stuck을 해소한다.
+- **known-limitation**: checkpoint 재개 실행에서 손상 파티션을 self-heal하면, 재생성은
+  현재 group(증분 경로에선 해당 실행분)만 담으므로 동일 파티션의 pre-checkpoint 구간은
+  재수집되지 않아 forward-only 침묵 공백이 남을 수 있다. 이 사실은 self-heal 경고/로그로
+  표면화하며, 완전 복구는 명시 range 재backfill(`ante feed run backfill --start … --end …`
+  또는 `ante data validate --fix` 후 재수집)로 수행한다.
 
 ### 데이터 보존 정책
 
