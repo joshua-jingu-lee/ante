@@ -151,7 +151,7 @@ def test_genuine_merge_failure_returns_zero_and_warns(tmp_path) -> None:
     """유효하나 결합-불가(non-coercible) 기존 파티션 → 기존 보존 + net 0 + store_merge.
 
     read는 성공하나 `pl.concat(how="diagonal_relaxed")`가 supertype 결정 실패로
-    raise하는 경로(#1964/#2028 store_merge 게이트 회귀). #2413 self-heal 도입이
+    raise하는 경로(#1964/#2028 store_merge 게이트 회귀). #2413 0바이트 자동복구가
     **읽을 수 있는** 결합-불가 파티션을 파괴하지 않음을 잠근다.
     """
     store = ParquetStore(base_path=tmp_path)
@@ -183,24 +183,25 @@ def test_genuine_merge_failure_returns_zero_and_warns(tmp_path) -> None:
     warnings = store.drain_warnings()
     assert any(w.get("type") == "store_merge" for w in warnings)
     assert all(w.get("type") != "store_recovered" for w in warnings)
-    # 유효한 결합-불가 파티션은 self-heal 대상이 아니라 무손상 보존.
+    # 유효한 결합-불가 파티션은 0바이트 자동복구 대상이 아니라 무손상 보존.
     assert (part_dir / "2026-03.parquet").read_bytes() == before
     assert not (part_dir / "2026-03.corrupted").exists()
 
 
-# ── (e2) 손상(읽기 불가) 파티션 → self-heal(delta == len(group)) + store_recovered ─
+# ── (e2) 0바이트 파티션 → 자동복구(delta == len(group)) + store_recovered ────────
 
 
-def test_self_heal_returns_group_len_and_recovers(tmp_path) -> None:
-    """읽기 불가 기존 파티션 → 격리 + 재생성(self-heal) → net == 신규 group 행 수.
+def test_zero_byte_recovery_returns_group_len(tmp_path) -> None:
+    """0바이트 기존 파티션 → 자동복구 → net == 신규 group 행 수.
 
-    중단이 남긴 손상/0바이트 파티션(#2413)은 read 실패이므로 store_merge가 아니라
-    store_recovered로 처리되어 데이터가 채워지고 net-new는 신규 파티션과 동일하다.
+    중단이 남긴 0바이트 파티션(#2413)은 부재로 간주되어 store_merge가 아니라
+    store_recovered로 처리되고 데이터가 채워진다(net-new는 신규 파티션과 동일).
+    비-0바이트 손상은 보존+store_merge로 net 0이다(위 e1 참고).
     """
     store = ParquetStore(base_path=tmp_path)
     part_dir = tmp_path / "fundamental" / "KRX" / "005930"
     part_dir.mkdir(parents=True)
-    (part_dir / "2026-03.parquet").write_bytes(b"corrupt-not-parquet")
+    (part_dir / "2026-03.parquet").write_bytes(b"")  # 0바이트 잔재
 
     new = pl.DataFrame(
         {
@@ -217,8 +218,8 @@ def test_self_heal_returns_group_len_and_recovers(tmp_path) -> None:
     warnings = store.drain_warnings()
     assert any(w.get("type") == "store_recovered" for w in warnings)
     assert all(w.get("type") != "store_merge" for w in warnings)
-    # 손상 파일은 `.corrupted`로 격리되고 파티션은 신규 데이터로 재생성된다.
-    assert (part_dir / "2026-03.corrupted").read_bytes() == b"corrupt-not-parquet"
+    # 파티션은 신규 데이터로 재생성된다(격리 파일 없음).
+    assert not (part_dir / "2026-03.corrupted").exists()
     healed = pl.read_parquet(part_dir / "2026-03.parquet")
     assert len(healed) == 1
 

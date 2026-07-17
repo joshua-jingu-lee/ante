@@ -563,8 +563,8 @@ class _AnomalyDataGoKrCollector:
     `.collect()`가 호출되면, 사전에 배치해 둔 결합-불가(non-coercible·읽기 가능)
     파티션 위로 fundamental write를 시도한다. ParquetStore는 기존 파일을 덮어쓰지
     않고 `store_merge` 이상 경고만 버퍼에 적재한다(#1964 silent-overwrite 제거).
-    ※ #2413 이후 store_merge는 **읽기 가능한** 결합-불가 파티션에서만 발생한다
-    (읽기 불가 손상 파티션은 self-heal → store_recovered 경로).
+    ※ #2413 이후 store_merge는 **읽기 가능한** 결합-불가 파티션(또는 비-0바이트
+    손상)에서 발생한다(0바이트 파티션은 자동복구 → store_recovered 경로).
     """
 
     async def collect(
@@ -642,7 +642,7 @@ class TestBackfillReportSurfacesStoreMergeWarning:
         )
         assert "2025-09.parquet" in store_merge_warnings[0]["path"]
 
-        # 유효한 결합-불가 파티션은 보존됨(self-heal 대상 아님, 데이터 손실 방지).
+        # 유효한 결합-불가 파티션은 보존됨(자동복구 대상 아님, 데이터 손실 방지).
         assert filepath.read_bytes() == before
 
 
