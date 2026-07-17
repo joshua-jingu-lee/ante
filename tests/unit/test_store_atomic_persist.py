@@ -404,18 +404,41 @@ def test_zero_byte_partition_self_heals(tmp_path) -> None:
     assert all(w.get("type") != "store_merge" for w in warnings)
 
 
-# ── (F) self-heal 재생성 write 실패 → 격리 복원 + store_merge + 루프 지속(리뷰 [3]) ─
+# ── (F) Class A: self-heal never raise + never file-less + 나머지 월 저장(리뷰 [777]) ─
 
 
-def test_self_heal_write_failure_restores_and_saves_other_partitions(
+def _fail_write_for_month(monkeypatch, fail_month: int):
+    """`pl.DataFrame.write_parquet`를 특정 월 데이터에서만 raise하도록 monkeypatch.
+
+    self-heal 재생성 write(대상 월 group)만 실패시키고 다른 월(정상 파티션) write는
+    통과시켜, 단일 write() 안에서 한 파티션 self-heal 실패가 나머지 파티션 저장을
+    막지 않음을 검증한다.
+    """
+    real_write = pl.DataFrame.write_parquet
+
+    def _fake(self, file, *args, **kwargs):
+        months = (
+            set(self.get_column("timestamp").dt.month().to_list())
+            if "timestamp" in self.columns
+            else set()
+        )
+        if months == {fail_month}:
+            raise RuntimeError("disk full during self-heal recreate")
+        return real_write(self, file, *args, **kwargs)
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", _fake)
+    return real_write
+
+
+def test_self_heal_write_failure_never_raises_and_saves_other_partitions(
     tmp_path, monkeypatch
 ) -> None:
-    """corrupt 파티션 self-heal write 실패 → 격리 파일 원위치 복원 + 나머지 월 저장.
+    """corrupt self-heal write 실패 → never raise + 손상본 유지 + 나머지 월 저장.
 
-    격리(rename)→재생성 write가 실패(디스크 full/IO)하면, 예외가 write() 밖으로
-    전파되어 파티션이 file-less가 되고 같은 DataFrame의 나머지 월도 저장되지 않던
-    회귀를 잠근다(리뷰 [3]). 손상 파일을 원위치 복원 + store_merge(게이트) + 루프
-    지속으로 처리한다.
+    Class A 불변식(리뷰 [777]): self-heal의 어떤 단계(격리·재생성 write·replace)가
+    실패해도 예외가 write() 밖으로 전파되지 않고(크래시 방지), target이 file-less가
+    되지 않으며(replace 전 실패라 손상본 유지), 같은 DataFrame의 나머지 월 파티션은
+    정상 저장된다. store_merge(게이트)로 다음 run 재시도.
     """
     store = ParquetStore(base_path=tmp_path)
     part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
@@ -423,30 +446,24 @@ def test_self_heal_write_failure_restores_and_saves_other_partitions(
     corrupt = part_dir / "2025-11.parquet"
     corrupt.write_bytes(b"corrupt-not-parquet")
 
-    orig_atomic = store._atomic_write_parquet
+    # 2025-11 self-heal 재생성 write만 실패(디스크 full 모사), 2025-12는 정상.
+    _fail_write_for_month(monkeypatch, fail_month=11)
 
-    def _fail_only_nov(df, filepath):
-        if filepath.name == "2025-11.parquet":
-            raise RuntimeError("disk full during self-heal recreate")
-        return orig_atomic(df, filepath)
-
-    monkeypatch.setattr(store, "_atomic_write_parquet", _fail_only_nov)
-
-    # 2025-11(corrupt, self-heal write 실패) + 2025-12(정상) 2개월 데이터.
     df = pl.concat(
         [_ohlcv_df("005930", [3, 4], month=11), _ohlcv_df("005930", [5], month=12)]
     )
-    # 예외가 전파되지 않아야 한다(루프 지속).
+    # 예외가 전파되지 않아야 한다(never raise → 루프 지속).
     net = store.write("005930", "1d", df, data_type="ohlcv")
 
-    monkeypatch.setattr(store, "_atomic_write_parquet", orig_atomic)
+    monkeypatch.undo()
 
-    # 2025-11: 손상 파일이 원위치 복원(파티션 file-less 금지) + .corrupted 잔재 없음.
+    # 2025-11: replace 전 write 실패라 target은 손상본 그대로(file-less 아님).
     assert corrupt.exists()
     assert corrupt.read_bytes() == b"corrupt-not-parquet"
+    # write 단계에서 실패 → best-effort 격리(copy)는 실행 전이라 .corrupted 없음.
     assert not corrupt.with_suffix(".corrupted").exists()
 
-    # 2025-12: 정상 파티션은 저장됨(나머지 월 저장 중단 금지).
+    # 2025-12: 정상 파티션은 저장됨(한 파티션 실패가 나머지 저장을 막지 않음).
     dec = part_dir / "2025-12.parquet"
     assert dec.exists()
     assert len(pl.read_parquet(dec)) == 1
@@ -456,7 +473,70 @@ def test_self_heal_write_failure_restores_and_saves_other_partitions(
     warnings = store.drain_warnings()
     assert any(w.get("type") == "store_merge" for w in warnings)
     assert all(w.get("type") != "store_recovered" for w in warnings)
-    # tmp 잔재 없음.
+    # tmp 잔재 없음(실패 경로도 cleanup + sweep).
+    assert list(part_dir.glob("*.tmp")) == []
+
+
+def test_self_heal_quarantine_failure_still_heals_and_never_raises(
+    tmp_path, monkeypatch
+) -> None:
+    """증적 격리(copy) 실패해도 healed 데이터가 landing되고 예외 미전파(리뷰 Class A).
+
+    best-effort 격리이므로 copy 실패는 무시하고 healing을 우선한다. target은 tmp
+    replace로 healed가 된다(격리 실패해도 landing).
+    """
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+    part_dir.mkdir(parents=True)
+    corrupt = part_dir / "2025-11.parquet"
+    corrupt.write_bytes(b"corrupt-not-parquet")
+
+    # 증적 격리(copy)만 실패시킨다.
+    def _raise_copy(src, dst, *args, **kwargs):
+        raise OSError("copy failed (read-only .corrupted target)")
+
+    monkeypatch.setattr("ante.data.store.shutil.copyfile", _raise_copy)
+
+    net = store.write("005930", "1d", _ohlcv_df("005930", [3, 4], month=11))
+
+    monkeypatch.undo()
+
+    # 격리 실패해도 healed 데이터가 landing(never raise).
+    assert net == 2
+    assert len(pl.read_parquet(corrupt)) == 2
+    warnings = store.drain_warnings()
+    assert any(w.get("type") == "store_recovered" for w in warnings)
+    assert list(part_dir.glob("*.tmp")) == []
+
+
+def test_self_heal_never_uses_rename_outside_try(tmp_path, monkeypatch) -> None:
+    """`Path.rename`이 실패해도 self-heal은 crash하지 않는다(리뷰 [777] 구조 회귀 가드).
+
+    이전 구현은 격리 rename(`_quarantine_corrupt`)을 try 밖에서 먼저 호출해, rename
+    실패(EROFS/EACCES/동시삭제)가 write() 루프로 전파돼 backfill/DART 전체를 크래시
+    시켰다. self-heal은 이제 파괴적 rename을 쓰지 않고(best-effort copy + 원자 replace)
+    healing을 완료해야 한다 — rename이 아예 불가해도 never raise.
+    """
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+    part_dir.mkdir(parents=True)
+    corrupt = part_dir / "2025-11.parquet"
+    corrupt.write_bytes(b"corrupt-not-parquet")
+
+    def _rename_unavailable(self, target):
+        raise OSError("rename unavailable (EROFS)")
+
+    monkeypatch.setattr(Path, "rename", _rename_unavailable)
+
+    # rename이 불가해도 예외가 전파되지 않고 healed가 landing해야 한다.
+    net = store.write("005930", "1d", _ohlcv_df("005930", [3, 4], month=11))
+
+    monkeypatch.undo()
+
+    assert net == 2
+    assert len(pl.read_parquet(corrupt)) == 2
+    warnings = store.drain_warnings()
+    assert any(w.get("type") == "store_recovered" for w in warnings)
     assert list(part_dir.glob("*.tmp")) == []
 
 
@@ -464,7 +544,7 @@ def test_self_heal_write_failure_restores_and_saves_other_partitions(
 
 
 def test_atomic_write_respects_umask_permissions(tmp_path) -> None:
-    """원자 write 파티션 mode == umask 존중값(0o666 & ~umask), owner-only 금지.
+    """신규 파티션 mode == umask 존중값(0o666 & ~umask), owner-only 금지.
 
     mkstemp(0o600)+replace가 그대로면 파티션이 owner-only-readable이 되어 분리된
     reader 계정/그룹이 EACCES. df.write_parquet(umask 존중)과 동일 권한을 잠근다.
@@ -476,21 +556,131 @@ def test_atomic_write_respects_umask_permissions(tmp_path) -> None:
     store = ParquetStore(base_path=tmp_path)
     part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
 
-    # 신규 파티션 write.
+    # 신규 파티션 write → umask 기본.
     store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
     new_mode = (part_dir / "2025-11.parquet").stat().st_mode & 0o777
     assert new_mode == expected, f"신규 파티션 mode={oct(new_mode)} != {oct(expected)}"
 
-    # merge write도 동일 권한.
-    store.write("005930", "1d", _ohlcv_df("005930", [4], month=11))
-    merge_mode = (part_dir / "2025-11.parquet").stat().st_mode & 0o777
-    assert merge_mode == expected, f"merge mode={oct(merge_mode)} != {oct(expected)}"
-
-    # self-heal 재생성 파티션도 동일 권한.
+    # self-heal 재생성 파티션도 owner-only가 아니어야 한다(신규 손상본 mode 보존).
     store2 = ParquetStore(base_path=tmp_path)
     heal_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "000660"
     heal_dir.mkdir(parents=True)
     (heal_dir / "2025-11.parquet").write_bytes(b"corrupt-not-parquet")
     store2.write("000660", "1d", _ohlcv_df("000660", [3], month=11))
     heal_mode = (heal_dir / "2025-11.parquet").stat().st_mode & 0o777
-    assert heal_mode == expected, f"self-heal mode={oct(heal_mode)} != {oct(expected)}"
+    assert heal_mode & 0o044, (
+        f"self-heal mode={oct(heal_mode)} owner-only(그룹/other 불가)"
+    )
+
+
+def test_merge_preserves_existing_operator_mode(tmp_path) -> None:
+    """기존 target이 있으면 그 operator mode를 보존한다(0o600 등, 리뷰 [668]).
+
+    매 merge write가 기존 파티션 mode를 umask 기본(0o644)으로 폐기하지 않도록 잠근다.
+    """
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+
+    # 기존 파티션을 operator가 0o600으로 잠근 상태를 모사.
+    store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
+    filepath = part_dir / "2025-11.parquet"
+    os.chmod(filepath, 0o600)
+
+    # merge write → 기존 mode(0o600) 보존.
+    store.write("005930", "1d", _ohlcv_df("005930", [4], month=11))
+    merge_mode = filepath.stat().st_mode & 0o777
+    assert merge_mode == 0o600, f"merge가 operator mode 폐기: {oct(merge_mode)}"
+
+
+# ── (H) Class B: corruption 판정은 확정 마커에만(오분류=silent loss, 리뷰 [721]) ──
+
+
+def test_is_corrupt_parquet_marker_and_zero_byte(tmp_path) -> None:
+    """`_is_corrupt_parquet`: 정확한 마커/0바이트만 True, 그 외 False(보수적)."""
+    valid = tmp_path / "valid.parquet"
+    pl.DataFrame({"a": [1]}).write_parquet(str(valid))
+    zero = tmp_path / "zero.parquet"
+    zero.write_bytes(b"")
+    missing = tmp_path / "missing.parquet"
+
+    ce_corrupt = pl.exceptions.ComputeError(
+        "parquet: File out of specification: The file must end with PAR1"
+    )
+    ce_io = pl.exceptions.ComputeError("parquet: generic I/O error while reading")
+
+    # (1) ComputeError + 정확 마커 → corrupt(파일 상태 무관).
+    assert ParquetStore._is_corrupt_parquet(valid, ce_corrupt) is True
+    # (2) ComputeError지만 비-마커(I/O 등) + 유효 파일 → preserve(오분류 금지).
+    assert ParquetStore._is_corrupt_parquet(valid, ce_io) is False
+    # (3) 0바이트 → corrupt(마커 없어도 stat으로 확정).
+    assert ParquetStore._is_corrupt_parquet(zero, OSError("x")) is True
+    # (4) 일시적/환경 오류(PermissionError/MemoryError) + 유효 파일 → preserve.
+    assert (
+        ParquetStore._is_corrupt_parquet(valid, PermissionError(13, "denied")) is False
+    )
+    assert ParquetStore._is_corrupt_parquet(valid, MemoryError("oom")) is False
+    # (5) stat 실패(파일 부재) + 비-마커 예외 → preserve(단정 금지).
+    assert ParquetStore._is_corrupt_parquet(missing, OSError("stale nfs")) is False
+    # (6) stat 실패라도 마커가 있으면 corrupt.
+    assert ParquetStore._is_corrupt_parquet(missing, ce_corrupt) is True
+
+
+def test_compute_error_non_corruption_message_preserves(tmp_path, monkeypatch) -> None:
+    """유효 파티션 비-corruption ComputeError(I/O) → self-heal 안 함 + 보존.
+
+    넓은 `startswith("parquet:")` 판정이 비손상 ComputeError까지 corruption으로
+    오분류해 유효 이력을 조용히 잃던 회귀를 잠근다(리뷰 [721]).
+    """
+    filepath = _valid_partition(tmp_path)
+    before = filepath.read_bytes()
+    store = ParquetStore(base_path=tmp_path)
+
+    real_read = pl.read_parquet
+
+    def _raise_io_ce(source, *args, **kwargs):
+        if str(source).endswith("2025-11.parquet"):
+            raise pl.exceptions.ComputeError("parquet: transient I/O read error")
+        return real_read(source, *args, **kwargs)
+
+    monkeypatch.setattr(pl, "read_parquet", _raise_io_ce)
+    net = store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
+    monkeypatch.undo()
+
+    assert net == 0
+    assert not filepath.with_suffix(".corrupted").exists()  # 격리 안 함
+    assert filepath.read_bytes() == before  # 유효 파티션 보존
+    assert store.pending_merge_failure_count() == 1  # store_merge(게이트)
+
+
+# ── (I) Class C: orphan .tmp 회수(리뷰 [661]) ─────────────────────────────────
+
+
+def test_orphan_tmp_swept_on_write(tmp_path) -> None:
+    """이전 크래시가 남긴 orphan *.tmp가 다음 write 진입 시 회수된다."""
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+    part_dir.mkdir(parents=True)
+    orphan = part_dir / "tmpDEADBEEF.tmp"
+    orphan.write_bytes(b"leftover-partial")
+
+    store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
+
+    # orphan .tmp 회수 + 정상 파티션 생성.
+    assert not orphan.exists()
+    assert list(part_dir.glob("*.tmp")) == []
+    assert (part_dir / "2025-11.parquet").exists()
+
+
+def test_validate_sweeps_and_reports_orphan_tmp(tmp_path) -> None:
+    """validate가 orphan *.tmp를 회수하고 stale_tmp_removed로 리포트한다(가시화)."""
+    store = ParquetStore(base_path=tmp_path)
+    store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+    (part_dir / "tmpAAA.tmp").write_bytes(b"x")
+    (part_dir / "tmpBBB.tmp").write_bytes(b"y")
+
+    result = store.validate("005930", "1d")
+
+    assert result["stale_tmp_removed"] == 2
+    assert list(part_dir.glob("*.tmp")) == []
+    assert result["valid"] == 1  # 정상 파티션은 그대로

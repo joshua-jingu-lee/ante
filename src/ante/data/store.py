@@ -255,6 +255,13 @@ class ParquetStore:
         # backfill_runner가 collector/indicator 호출 직후 drain하여
         # CollectionResult.warnings(→ report `warnings`)로 전파한다(#1964).
         self._pending_warnings: list[dict] = []
+        # 신규 파티션 파일 mode(umask 존중)를 **1회** 계산해 재사용한다(#2413
+        # 리뷰 [666]). hot-path마다 `os.umask(0)`/복원 probe를 돌리면 umask=0 창의
+        # thread-safety 문제와 불필요한 syscall이 반복된다. 기존 target이 있으면
+        # 그 mode를 보존하고(아래 `_apply_partition_mode`), 없을 때만 이 값을 쓴다.
+        _cur_umask = os.umask(0)
+        os.umask(_cur_umask)
+        self._default_file_mode = 0o666 & ~_cur_umask
 
     @property
     def base_path(self) -> Path:
@@ -632,20 +639,54 @@ class ParquetStore:
                 return df.unique(subset=present, keep="last").sort(present)
         return df
 
+    @staticmethod
+    def _sweep_stale_tmp(partition_dir: Path) -> int:
+        """대상 파티션 dir의 stale ``*.tmp`` (orphan)를 삭제하고 삭제 수를 반환.
+
+        원자 write의 임시 파일은 hard-kill/전원 손실 시 최종 rename 전에 orphan으로
+        남는다. ``*.tmp`` 는 read glob(``*.parquet``) 밖이라 무한 누적되므로
+        회수한다(#2413 리뷰 [661]). Ante는 **단일 writer**(02-write-ownership.md,
+        단일 asyncio·sync 파티션 write)이므로, 어떤 write 진입 시점에도 동시 진행
+        중인 live tmp가 없다 — 그때 존재하는 ``*.tmp`` 는 이전 크래시의 orphan이다.
+        (프로세스 시작 시점 전역 GC는 본 이슈 Known Limitations의 follow-up.)
+        """
+        removed = 0
+        try:
+            stale_files = list(partition_dir.glob("*.tmp"))
+        except OSError:
+            return 0
+        for stale in stale_files:
+            try:
+                stale.unlink()
+                removed += 1
+            except OSError:
+                pass
+        return removed
+
+    def _apply_partition_mode(self, tmp_path: str, target: Path) -> None:
+        """replace 전 tmp 파일 mode를 결정: 기존 target 보존 or umask 기본(#2413 [668]).
+
+        ``tempfile.mkstemp`` 는 항상 ``0o600`` 으로 tmp를 만들고 ``Path.replace`` 가
+        그 mode를 유지한다. 조정하지 않으면 모든 파티션이 owner-only-readable이 되어
+        분리된 reader 계정/그룹이 EACCES로 실패한다(LXC 배포). 따라서:
+
+        - 기존 ``target`` 이 있으면 **그 operator mode를 보존**(0o600 등 의도 존중).
+        - 없으면(신규 파티션) umask 존중 기본(`_default_file_mode`, 통상 0o644).
+        """
+        try:
+            mode = os.stat(target).st_mode & 0o777
+        except OSError:
+            mode = self._default_file_mode
+        os.chmod(tmp_path, mode)
+
     def _atomic_write_parquet(self, df: pl.DataFrame, filepath: Path) -> None:
-        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-rename, #2413).
+        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace, #2413).
 
         checkpoint.save()(`feed/pipeline/checkpoint.py`)와 동일 패턴이다: 같은
         디렉토리에 임시 파일을 만들어 write한 뒤 ``Path.replace`` 로 원자 교체한다.
         write 도중 중단(OOM/kill/전원 손실)이 있어도 최종 경로에는 0바이트/부분
-        parquet이 남지 않는다(중단 시 tmp만 잔존 → 즉시 cleanup).
-
-        권한(리뷰 #2413): ``tempfile.mkstemp`` 는 항상 ``0o600`` 으로 tmp를 만들고
-        ``Path.replace`` 가 그 mode를 유지한다. 그대로 두면 모든 파티션 parquet이
-        owner-only-readable이 되어, 분리된 reader 계정/그룹의 read/validate가
-        EACCES로 실패한다(LXC 배포). replace 전에 tmp mode를 umask 존중값
-        (``0o666 & ~umask``, 기본 umask 022 → ``0o644``)으로 조정해 이전
-        ``df.write_parquet``(umask 존중) 권한과 동일하게 맞춘다.
+        parquet이 남지 않는다(중단 시 tmp만 잔존 → 즉시 cleanup + 다음 write에서 회수).
+        권한은 `_apply_partition_mode`(기존 mode 보존 or umask 기본)를 따른다.
 
         Args:
             df: 기록할 DataFrame.
@@ -653,19 +694,17 @@ class ParquetStore:
 
         Raises:
             write/replace 실패 시 원 예외를 그대로 재-raise한다(임시 파일 정리 후).
+            (self-heal 경로는 이 raise를 삼켜 never-raise 불변을 강제한다.)
         """
+        # orphan tmp 회수(#2413 [661]). 파티션 dir은 write()가 이미 생성(#2413 [9]).
+        self._sweep_stale_tmp(filepath.parent)
         # mkstemp는 fd를 열어 반환한다. polars가 경로로 다시 열어 write하므로
         # fd는 즉시 명시적으로 close/consume해 leak을 막는다(checkpoint.save 미러).
-        # 파티션 dir은 write()가 이미 생성하므로(#2413 리뷰 [9]) mkdir을 반복하지
-        # 않는다(핫 경로 syscall 절감).
         fd, tmp_path = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
         os.close(fd)
         try:
             df.write_parquet(tmp_path, compression=self._compression)
-            # mkstemp(0o600) → umask 존중 mode로 조정(그룹/other 가독성 복원).
-            cur_umask = os.umask(0)
-            os.umask(cur_umask)
-            os.chmod(tmp_path, 0o666 & ~cur_umask)
+            self._apply_partition_mode(tmp_path, filepath)
             Path(tmp_path).replace(filepath)
         except BaseException:
             # 실패 시(예외/취소 포함) 임시 파일 정리 후 재-raise. 최종 경로는
@@ -674,52 +713,90 @@ class ParquetStore:
             raise
 
     def _quarantine_corrupt(self, filepath: Path) -> Path:
-        """손상 파티션을 ``.corrupted`` 로 격리(rename)하고 격리 경로를 반환.
+        """손상 파티션을 ``.corrupted`` 로 격리(**rename**)하고 격리 경로를 반환.
 
-        `validate(fix)` 와 self-heal이 **공유**하는 격리 헬퍼다. 기본 격리명은
-        ``with_suffix(".corrupted")`` 이되, 동명이 이미 있으면 **덮어쓰지 않고**
-        uniquifier(``.corrupted.<n>``)로 회피한다. 이는 반복 손상 시 이전 증적을
-        보존하고(POSIX 덮어쓰기 방지), Windows에서 대상 존재 시 ``rename`` 이
-        ``FileExistsError`` 를 던지는 문제를 피한다(#2413 리뷰 [10]).
+        `validate(fix)` 전용 격리 헬퍼다(target을 옮겨 치운다 — validate는 healed
+        대체본이 없으므로). 기본 격리명은 ``with_suffix(".corrupted")`` 이되, 동명이
+        이미 있으면 **덮어쓰지 않고** uniquifier(``.corrupted.<n>``)로 회피한다
+        (반복 손상 증적 보존·POSIX 덮어쓰기 방지·Windows ``FileExistsError`` 회피,
+        #2413 리뷰 [10]). self-heal은 target을 보존해야 하므로 rename이 아니라
+        `_best_effort_quarantine`(copy)를 쓴다.
         """
+        target = self._next_corrupted_path(filepath)
+        filepath.rename(target)
+        return target
+
+    @staticmethod
+    def _next_corrupted_path(filepath: Path) -> Path:
+        """충돌하지 않는 ``.corrupted``/``.corrupted.<n>`` 격리 경로를 계산한다."""
         target = filepath.with_suffix(".corrupted")
         n = 1
         while target.exists():
             target = filepath.with_name(f"{filepath.stem}.corrupted.{n}")
             n += 1
-        filepath.rename(target)
         return target
 
-    @staticmethod
-    def _is_corrupt_parquet(filepath: Path, exc: BaseException) -> bool:
-        """read 실패가 **진짜 parquet 손상**인지(self-heal 대상인지) 판정한다.
+    def _best_effort_quarantine(self, filepath: Path) -> Path | None:
+        """손상 target을 ``.corrupted`` 로 **copy**해 증적 보존(target은 그대로 둠).
 
-        읽기 실패를 무조건 corruption으로 간주하면, MemoryError/PermissionError
-        (EACCES)/stale-NFS OSError 같은 **일시적·환경 오류**가 유효 파티션(수개월치)
-        위에서 발생했을 때 그 파티션을 격리하고 현재 group만 남긴 채 checkpoint를
-        전진시켜 조용한 데이터 손실을 낸다(#2413 리뷰 [0]). 따라서 corruption
-        판정을 좁혀 **확실한 손상에만** self-heal을 발동한다:
+        self-heal 전용. rename이 아니라 copy이므로 target이 제거되지 않아, 뒤이은
+        ``replace(tmp → target)`` 가 실패해도 target이 file-less가 되지 않는다(#2413
+        리뷰 [777]/Class A). **best-effort** — 격리 copy 실패는 로그만 남기고 무시해
+        healing을 우선한다(격리 실패가 healing을 막지 않는다).
 
-        - ``st_size == 0`` (0바이트 = 중단 write가 남긴 미완성 파일), 또는
-        - polars의 parquet decode/format 오류(``ComputeError`` 이며 메시지가
-          ``parquet:``/``File out of specification`` 계열 = 0바이트·잘린·garbage
-          parquet에서 관찰). 이는 실측으로 좁힌 판정이다(0바이트/truncated/garbage
-          모두 ``ComputeError: parquet: File out of specification ...``).
-
-        그 외(MemoryError, PermissionError, 일반 OSError 등)는 corruption이 아니며
-        유효 파티션일 수 있으므로 **격리하지 않고** 기존 보존 + ``store_merge``
-        (게이트 → 다음 run 재시도) 경로로 처리한다(pre-PR 동작 보존).
+        Returns:
+            격리 copy 경로(성공) 또는 None(실패·무시).
         """
+        try:
+            target = self._next_corrupted_path(filepath)
+            shutil.copyfile(filepath, target)
+            return target
+        except OSError as exc:
+            logger.warning(
+                "손상 파티션 증적 격리(copy) 실패 — 무시하고 healing 진행: %s (%s)",
+                filepath,
+                exc,
+            )
+            return None
+
+    # polars가 truncated/garbage/0바이트 parquet에 내는 실측 corruption 마커.
+    # (관찰: `ComputeError: parquet: File out of specification: ...`.) 이 마커에만
+    # self-heal을 발동해 오분류(→ silent data loss)를 막는다(#2413 Class B).
+    _PARQUET_CORRUPT_MARKER = "File out of specification"
+
+    @classmethod
+    def _is_corrupt_parquet(cls, filepath: Path, exc: BaseException) -> bool:
+        """read 실패가 **genuine·확정 corruption**인지(self-heal 대상인지) 판정한다.
+
+        비용 비대칭이 판정의 핵심이다(#2413 Class B):
+        - false-negative(진짜 손상을 미healing) = **loud-stuck**(가시적, `validate
+          --fix` + 재backfill로 복구 가능).
+        - false-positive(유효 파일을 healing) = **silent data loss**(수개월치 격리 +
+          현재 group만 landing, 복구 불가).
+        따라서 **불확실하면 항상 False**(preserve + store_merge로 편향)한다.
+
+        확정 corruption 신호(둘 중 하나면 True):
+        1. ``pl.exceptions.ComputeError`` 이며 메시지에 정확한 corruption 마커
+           (``File out of specification``)가 포함(truncated/garbage/0바이트 실측).
+           넓은 ``startswith("parquet:")`` 는 비손상 ComputeError(I/O·압축·미지원)까지
+           오분류하므로 **쓰지 않는다**.
+        2. ``st_size == 0`` (0바이트 = 중단 write 잔재). 단 ``stat`` 이 실패하면
+           corrupt로 **단정하지 않는다**(preserve 편향) — 마커(1)로만 판정한다.
+
+        그 외(MemoryError/PermissionError/일반 OSError·기타 ComputeError)는
+        corruption이 아니며, 호출부가 격리 없이 기존 보존 + ``store_merge``
+        (게이트→재시도)로 처리한다.
+        """
+        if isinstance(
+            exc, pl.exceptions.ComputeError
+        ) and cls._PARQUET_CORRUPT_MARKER in str(exc):
+            return True
         try:
             if filepath.stat().st_size == 0:
                 return True
         except OSError:
-            # stat 자체 실패(권한/경로 오류)는 corruption 근거가 아니다.
+            # stat 실패: corrupt로 단정하지 않는다(preserve로 편향).
             return False
-        if isinstance(exc, pl.exceptions.ComputeError):
-            msg = str(exc)
-            if "File out of specification" in msg or msg.startswith("parquet:"):
-                return True
         return False
 
     def _record_merge_failure(
@@ -727,7 +804,7 @@ class ParquetStore:
     ) -> int:
         """기존 파일 보존 + ``store_merge`` 경고를 적재하고 net-new 0을 반환한다.
 
-        concat/schema 실패, 원자 write 실패, self-heal 불가(일시적 read 오류·
+        concat/schema 실패, 원자 write 실패, 일시적 read 오류, self-heal 불가(격리·
         재생성 write 실패)를 모두 동일하게 처리한다: 기존 데이터를 절대 덮어쓰지
         않고 checkpoint 전진 게이트(``store_merge``)로 표면화해 다음 run 재시도를
         유도한다(#2413 리뷰 [0]/[3]).
@@ -757,53 +834,61 @@ class ParquetStore:
         key: list[str],
         read_exc: BaseException,
     ) -> int:
-        """손상(0바이트/decode-fail) 파티션을 격리하고 현재 group으로 재생성.
+        """손상 파티션을 재생성한다. **never raise, never file-less**(Class A).
 
-        중단 write가 남긴 손상 파티션을 영구 보존(loud-stuck)하는 대신, 파일을
-        ``.corrupted`` 로 격리한 뒤 신규 group을 fresh 원자 write한다(self-heal).
-        corrupt 파일엔 보존할 유효 데이터가 없으므로 #1964의 무손실 취지를
-        위반하지 않는다. ``store_recovered`` 경고를 적재하되 ``store_merge`` 와는
-        **별개 타입**이라 checkpoint 전진 게이트를 유발하지 않는다(→ stuck 해소).
+        Class A 불변식(#2413 리뷰 [777]): self-heal을 결정한 순간부터 어떤 단계
+        (증적 격리·dedup·재생성 write·replace)가 실패해도 **예외를 호출부(write())로
+        전파하지 않으며**(항상 int 반환), 어떤 실패 경로에서도 **target 경로에 파일이
+        남는다**(file-less 금지 → backfill/DART 크래시 방지).
 
-        재생성 write 실패(디스크 full/IO/EACCES 등, #2413 리뷰 [3]): 격리한 파일을
-        원위치로 **복원**해 파티션이 file-less가 되지 않게 하고, ``store_merge``
-        (게이트 → 재시도)로 처리해 예외를 상위로 전파하지 않는다(같은 DataFrame의
-        나머지 월 파티션 저장이 중단되지 않도록).
+        강제 구조(파괴적 단계를 마지막에):
+        1. healed group을 tmp에 원자 준비(write + mode 조정).
+        2. 손상 target을 ``.corrupted`` 로 **best-effort copy 격리**(실패해도 무시,
+           target은 그대로 둠 → 증적만 확보, healing 차단 안 함).
+        3. ``Path(tmp).replace(target)`` 로 원자 덮어쓰기(격리 실패해도 healed landing).
+
+        어떤 단계라도 실패하면 tmp를 정리하고 target(기존 손상 내용)을 그대로 둔 채
+        ``store_merge`` (게이트→재시도) + return 0로 처리한다(target은 file-less가
+        아니라 손상본 유지 → 다음 run이 재-self-heal). 성공하면 ``store_recovered``
+        (비게이트)를 적재해 checkpoint 전진을 허용한다(→ loud-stuck 해소).
 
         Returns:
             재생성 성공 시 net-new 행 수(신규 파티션 경로와 동일 = dedup 후 len).
-            재생성 write 실패 시 0(기존 손상 파일 복원 + store_merge).
+            어떤 단계라도 실패 시 0(target 손상본 유지 + store_merge).
         """
-        quarantined = self._quarantine_corrupt(filepath)
         group = self._dedup_sort_by_key(group, key)
+        quarantined: Path | None = None
         try:
-            self._atomic_write_parquet(group, filepath)
-        except Exception as write_exc:
-            # 재생성 write 실패: 격리 파일을 원위치로 복원(파티션 file-less 방지).
-            restored = True
+            self._sweep_stale_tmp(filepath.parent)
+            fd, tmp_path = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
+            os.close(fd)
             try:
-                quarantined.replace(filepath)
-            except OSError:
-                restored = False
-                logger.error(
-                    "self-heal 재생성 write 실패 후 격리 파일 복원 실패: %s "
-                    "(격리본=%s)",
-                    filepath,
-                    quarantined,
-                )
+                # ① healed group을 tmp에 원자 준비(mode = 기존 손상본 mode 보존).
+                group.write_parquet(tmp_path, compression=self._compression)
+                self._apply_partition_mode(tmp_path, filepath)
+                # ② 손상 target 증적을 best-effort copy 격리(target 보존).
+                quarantined = self._best_effort_quarantine(filepath)
+                # ③ tmp → target 원자 덮어쓰기(격리 실패해도 healed landing).
+                Path(tmp_path).replace(filepath)
+            except BaseException:
+                Path(tmp_path).unlink(missing_ok=True)
+                raise
+        except Exception as heal_exc:
+            # never raise: 어떤 단계 실패라도 예외를 삼킨다. target은 손상 내용을
+            # 그대로 유지(replace 전이라 file-less 아님) → store_merge(게이트) 재시도.
+            # (KeyboardInterrupt/SystemExit 등 BaseException은 의도적으로 전파.)
             logger.warning(
-                "Parquet 파티션 self-heal 재생성 write 실패: %s (%s) — %s",
+                "Parquet 파티션 self-heal 실패: %s (%s) — 손상본 유지 + store_merge "
+                "재시도(파티션 file-less 아님).",
                 filepath,
-                write_exc,
-                "손상 파일 원위치 복원" if restored else "격리 상태 유지",
+                heal_exc,
             )
-            disposition = "손상 파일 원위치 복원" if restored else "격리 상태 유지"
             return self._record_merge_failure(
                 filepath,
-                write_exc,
+                heal_exc,
                 message=(
-                    f"손상 파티션 self-heal 재생성 write가 실패해 이번 write를 "
-                    f"건너뛰었습니다({disposition}): {write_exc}"
+                    f"손상 파티션 self-heal 재생성이 실패해 이번 write를 건너뛰었습니다"
+                    f"(손상본 유지, 다음 run 재시도): {heal_exc}"
                 ),
             )
 
@@ -820,7 +905,7 @@ class ParquetStore:
             "(원 예외: %s). 이전 데이터가 있었다면 forward-only 공백 가능 — "
             "range 재backfill 필요.",
             filepath,
-            quarantined,
+            quarantined if quarantined is not None else "(격리 실패·증적 없음)",
             read_exc,
         )
         self._pending_warnings.append(
@@ -844,14 +929,15 @@ class ParquetStore:
 
         merge 전략(#1964):
         - 기존 파일 **읽기**(`pl.read_parquet`)와 **결합**(`pl.concat`)을 분리한다:
-          * read 실패이며 **진짜 corruption**(`_is_corrupt_parquet`: 0바이트 또는
-            polars parquet decode/format 오류) → 손상 파일을 `.corrupted`로 격리하고
-            현재 group으로 재생성(**self-heal**, `store_recovered`). corrupt 파일엔
-            보존할 유효 데이터가 없으므로 #1964의 무손실 취지를 위반하지 않으며,
-            읽기 불가 파티션의 영구 stuck(#2413)을 해소한다.
-          * read 실패이나 **일시적·환경 오류**(MemoryError/PermissionError/OSError
-            등, corruption 아님) → 유효 파티션일 수 있으므로 **격리하지 않고** 기존
-            보존 + `store_merge`(게이트 → 재시도). pre-PR 동작 보존(#2413 리뷰 [0]).
+          * read 실패이며 **genuine·확정 corruption**(`_is_corrupt_parquet`: 0바이트
+            또는 정확한 corruption 마커 `File out of specification`) → self-heal로
+            현재 group을 landing(**never raise/never file-less**, `store_recovered`).
+            corrupt 파일엔 보존할 유효 데이터가 없으므로 #1964의 무손실 취지를
+            위반하지 않으며, 읽기 불가 파티션의 영구 stuck(#2413)을 해소한다.
+          * read 실패이나 **일시적·환경 오류**(MemoryError/PermissionError/OSError·
+            비-마커 ComputeError 등, corruption 아님) → 유효 파티션일 수 있으므로
+            **격리하지 않고** 기존 보존 + `store_merge`(게이트→재시도). 오분류=silent
+            data loss이므로 불확실하면 preserve로 편향한다(#2413 리뷰 [0]/[721]).
           * read 성공 후 `pl.concat(how="diagonal_relaxed")`가 (방어적으로)
             여전히 raise하는 결합-불가(유효하나 non-coercible 스키마) →
             **기존 파일을 덮어쓰지 않고** `store_merge` 경고만 기록(현행 보존).
@@ -1026,7 +1112,12 @@ class ParquetStore:
 
         Returns:
             {"symbol": str, "timeframe": str, "total": int,
-             "valid": int, "corrupted": int, "corrupted_files": list[str]}
+             "valid": int, "corrupted": int, "corrupted_files": list[str],
+             "stale_tmp_removed": int}
+
+            ``stale_tmp_removed`` 는 회수한 orphan ``*.tmp`` (이전 hard-kill 시 원자
+            write가 replace 전에 남긴 잔재) 수다(#2413 리뷰 [661]). read glob
+            (``*.parquet``) 밖이라 누적되므로 validate가 가시화·정리한다.
         """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         result: dict = {
@@ -1036,10 +1127,18 @@ class ParquetStore:
             "valid": 0,
             "corrupted": 0,
             "corrupted_files": [],
+            "stale_tmp_removed": 0,
         }
 
         if not path.exists():
             return result
+
+        # orphan *.tmp 회수(가시화·정리). 단일 writer라 validate 시점의 *.tmp는
+        # live가 아니라 이전 크래시 잔재다(#2413 리뷰 [661]).
+        stale_removed = self._sweep_stale_tmp(path)
+        result["stale_tmp_removed"] = stale_removed
+        if stale_removed:
+            logger.info("orphan .tmp %d개 회수: %s", stale_removed, path)
 
         files = sorted(path.glob("*.parquet"))
         result["total"] = len(files)

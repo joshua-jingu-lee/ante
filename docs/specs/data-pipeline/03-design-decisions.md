@@ -264,31 +264,51 @@ checkpoint JSON/secrets 저장이 이미 적용하고 있던 write-then-rename �
   프로세스가 중단(OOM/`kill`/전원 손실)되어도 최종 경로에는 0바이트/부분 parquet이
   남지 않으며, 실패 시 임시 파일은 즉시 정리된다. 기존 유효 파티션은 rename 전까지
   손대지 않으므로 write 중단이 기존 데이터를 손상시키지 않는다.
+  - **파일 권한**: `mkstemp`가 만든 tmp는 `0o600`이라 그대로 replace하면 파티션이
+    owner-only가 되어 분리된 reader 계정/그룹이 EACCES를 만난다(LXC 배포). 따라서
+    기존 target이 있으면 **그 operator mode를 보존**하고(0o600 등 의도 존중), 없으면
+    umask 존중 기본(통상 `0o644`)을 쓴다(umask는 인스턴스 생성 시 1회 계산).
+  - **orphan `.tmp` 회수**: hard-kill이 replace 전에 남긴 `*.tmp`는 read glob
+    (`*.parquet`) 밖이라 누적된다. 단일 writer(02-write-ownership.md) 전제에서
+    write 진입 시점의 `*.tmp`는 이전 크래시 잔재이므로 write 진입·`validate` 시
+    회수한다. `validate` 결과는 `stale_tmp_removed`로 이를 가시화한다.
 - **read/concat 실패 분리와 self-heal**: merge 시 기존 파일 **읽기**와 신규 group과의
   **결합**을 분리해 처리한다.
-  - **읽기 실패이며 진짜 corruption**(0바이트 또는 polars parquet decode/format 오류 =
-    중단 write의 잔재): 손상 파일을 `.corrupted` 확장자로 격리(동명 존재 시
-    `.corrupted.<n>` uniquifier로 증적 보존 — self-heal과 validate(fix)가 **공유**하는
-    격리 헬퍼)한 뒤, 현재 group을 fresh 원자 write로 재생성한다(**self-heal**). corrupt
-    파일에는 보존할 유효 데이터가 없으므로 무손실 보존 취지를 위반하지 않으며, 읽기 불가
-    파티션이 영구히 반영 불가(loud-stuck)로 방치되던 문제를 해소한다. 단, 읽기 실패가
-    **일시적·환경 오류**(MemoryError/PermissionError/OSError 등, corruption 아님)면
-    유효 파티션 손실을 막기 위해 **격리하지 않고** 아래 결합 실패와 동일하게 기존 보존 +
-    `store_merge`(게이트 → 재시도)로 처리한다. self-heal 재생성 write가 실패하면 격리한
-    파일을 원위치로 복원하고 `store_merge`로 처리해 파티션이 file-less가 되지 않게 한다.
+  - **읽기 실패이며 genuine·확정 corruption**: self-heal은 **확정 corruption에만**
+    발동한다. 비용 비대칭이 판정 기준이다 — false-negative(진짜 손상 미healing)=
+    loud-stuck(가시적, `validate --fix`+재backfill로 복구 가능), false-positive(유효
+    파일 healing)=silent data loss(복구 불가). 따라서 **불확실하면 항상 preserve**한다.
+    확정 신호는 (a) polars `ComputeError` 이며 메시지에 정확한 corruption 마커
+    (`File out of specification`)가 포함, 또는 (b) `st_size == 0`(0바이트, `stat` 실패
+    시엔 단정하지 않음)뿐이다. 넓은 접두사(`parquet:`) 매칭은 비손상 ComputeError
+    (I/O·압축·미지원)까지 오분류하므로 쓰지 않는다.
+    - self-heal 절차는 **never raise, never file-less**(Class A 불변)를 강제한다:
+      ① healed group을 tmp에 원자 준비 → ② 손상 target을 `.corrupted`로 **best-effort
+      copy 격리**(실패해도 무시·로그만, target 보존 → 동명 존재 시 `.corrupted.<n>`) →
+      ③ `replace(tmp → target)` 원자 덮어쓰기. 어떤 단계(격리·write·replace)가 실패해도
+      예외를 호출부로 전파하지 않고(같은 DataFrame의 나머지 월 저장·backfill/DART 지속
+      보장), target은 항상 파일을 유지한다(실패 시 손상본 그대로 → `store_merge` 게이트로
+      다음 run 재시도, file-less 금지). corrupt 파일에는 보존할 유효 데이터가 없으므로
+      무손실 취지를 위반하지 않으며 loud-stuck을 해소한다.
+  - **읽기 실패이나 일시적·환경 오류**(MemoryError/PermissionError/OSError·비-마커
+    ComputeError 등): 유효 파티션일 수 있으므로 **격리하지 않고** 기존 보존 +
+    `store_merge`(게이트 → 재시도)로 처리한다.
   - **읽기 성공 후 결합 실패**(유효하나 non-coercible 스키마로 `pl.concat(how="diagonal_relaxed")`가
     여전히 raise): 기존 파일을 덮어쓰지 않고 보존한 뒤 경고만 기록한다(silent overwrite 금지,
     기존 계약 유지).
-- **경고 타입 분리**: 위 두 경로는 서로 다른 store 경고 타입으로 표면화된다.
-  `drain_warnings()`가 반환하는 항목의 `type`은 `store_merge`(결합 실패 → 기존 보존) 또는
-  `store_recovered`(읽기 실패 → 격리 후 self-heal)다. checkpoint 전진 게이트는
-  `store_merge`만 소비하므로, self-heal(`store_recovered`)은 게이트를 유발하지 않고
-  checkpoint를 전진시켜 stuck을 해소한다.
-- **known-limitation**: checkpoint 재개 실행에서 손상 파티션을 self-heal하면, 재생성은
-  현재 group(증분 경로에선 해당 실행분)만 담으므로 동일 파티션의 pre-checkpoint 구간은
-  재수집되지 않아 forward-only 침묵 공백이 남을 수 있다. 이 사실은 self-heal 경고/로그로
-  표면화하며, 완전 복구는 명시 range 재backfill(`ante feed run backfill --start … --end …`
-  또는 `ante data validate --fix` 후 재수집)로 수행한다.
+- **경고 타입 분리**: 위 경로는 서로 다른 store 경고 타입으로 표면화된다.
+  `drain_warnings()`가 반환하는 항목의 `type`은 `store_merge`(결합 실패·일시적 read
+  오류·self-heal 불가 → 기존 보존) 또는 `store_recovered`(확정 corruption → self-heal)다.
+  checkpoint 전진 게이트는 `store_merge`만 소비하므로, self-heal(`store_recovered`)은
+  게이트를 유발하지 않고 checkpoint를 전진시켜 stuck을 해소한다.
+- **known-limitation**:
+  - checkpoint 재개 실행에서 손상 파티션을 self-heal하면, 재생성은 현재 group(증분
+    경로에선 해당 실행분)만 담으므로 동일 파티션의 pre-checkpoint 구간은 재수집되지 않아
+    forward-only 침묵 공백이 남을 수 있다. 이 사실은 self-heal 경고/로그로 표면화하며,
+    완전 복구는 명시 range 재backfill(`ante feed run backfill --start … --end …` 또는
+    `ante data validate --fix` 후 재수집)로 수행한다.
+  - orphan `.tmp` 회수는 write 진입·`validate` 시점의 대상 파티션 dir에 한정한다.
+    프로세스 시작 시 전역 GC(모든 파티션 dir 스윕)는 본 이슈 범위 밖 follow-up이다.
 
 ### 데이터 보존 정책
 
