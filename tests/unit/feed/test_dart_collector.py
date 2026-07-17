@@ -1218,6 +1218,25 @@ def _merge_fail_partition(store: ParquetStore, symbol: str, month: str) -> Path:
     return filepath
 
 
+def _corrupt_partition(store: ParquetStore, symbol: str, month: str) -> Path:
+    """해당 fundamental 파티션 월에 **진짜 손상**(읽기 불가) 파일을 배치한다.
+
+    중단 write가 남긴 0바이트/부분 parquet을 모사한다. 다음 ``store.write`` 가
+    이 파일을 읽으려다 실패(parquet decode-fail)하면 ParquetStore는 손상 파일을
+    ``.corrupted`` 로 격리하고 현재 group으로 재생성한다(#2413 self-heal,
+    ``store_recovered`` = 비게이트 → checkpoint 전진). ``_merge_fail_partition``
+    (읽기 가능·결합 불가 = store_merge 게이트)과 구분되는 경로다.
+
+    Returns:
+        배치한 손상 파일 경로.
+    """
+    part_dir = store.base_path / "fundamental" / "KRX" / symbol
+    part_dir.mkdir(parents=True, exist_ok=True)
+    filepath = part_dir / f"{month}.parquet"
+    filepath.write_bytes(b"corrupt-not-parquet")
+    return filepath
+
+
 class TestStorePendingMergeFailureCountPeek:
     """ParquetStore.pending_merge_failure_count는 비파괴적 peek다(#1993 Finding 2)."""
 
@@ -1503,3 +1522,127 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         assert checkpoint2.get_last_date() == "2026-Q1"  # store_merge 없음 → 전진
         assert all(w.get("type") != "store_merge" for w in warns2)
         assert store.pending_merge_failure_count() == 0
+
+
+class TestDartCorruptPartitionSelfHealVsTransient:
+    """#2413 리뷰 [5]: DART 게이트 경로에서 corrupt/일시적-read-오류/merge-fail 구분.
+
+    - (a) 진짜 corrupt(읽기 불가) 파티션 → self-heal(store_recovered 비게이트) →
+      checkpoint **전진**.
+    - (b) 일시적/환경 read 오류(PermissionError) → 격리 금지 + store_merge(게이트)
+      → checkpoint **미전진**(유효 파티션 손실 방지, 리뷰 [0] 정합).
+    - (c) merge-fail(non-coercible) → store_merge → 미전진(별도 게이트 테스트에서 커버).
+    """
+
+    async def test_backfill_corrupt_quarter_self_heals_and_advances(
+        self, tmp_path: Path
+    ) -> None:
+        """진짜 corrupt(읽기 불가) trailing 분기 → self-heal → checkpoint 전진.
+
+        merge-fail(차단)과 달리 corrupt는 store_recovered(비게이트)로 처리되어
+        stuck을 만들지 않고 Q4까지 전진한다. self-heal이 게이트되게 회귀하면 이
+        테스트가 깨진다.
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # trailing Q4(2015-12)를 진짜 손상(읽기 불가)으로 배치 → self-heal 대상.
+        _corrupt_partition(store, "005930", "2015-12")
+
+        net_delta, stored_ok, syms, warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        # self-heal(store_recovered 비게이트) → Q4까지 전진, stuck 없음.
+        assert checkpoint.get_last_date() == "2015-Q4"
+        assert stored_ok is True
+        assert syms == {"005930"}
+        # store_merge 게이트는 유발되지 않는다(self-heal이므로).
+        assert store.pending_merge_failure_count() == 0
+        assert net_delta > 0
+        # 손상 파일은 격리되고 파티션은 재생성된다.
+        part_dir = store.base_path / "fundamental" / "KRX" / "005930"
+        assert (part_dir / "2015-12.corrupted").exists()
+        assert (part_dir / "2015-12.parquet").exists()
+        # store_recovered 경고는 store 버퍼에 남아 runner가 drain한다.
+        drained = store.drain_warnings()
+        assert any(w.get("type") == "store_recovered" for w in drained)
+
+    async def test_backfill_transient_read_error_quarter_blocks_advance(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """일시적 read 오류(EACCES)로 실패한 trailing 분기 → 격리 금지 + 미전진.
+
+        유효 파티션 위에서 난 PermissionError를 corruption으로 오판해 self-heal하면
+        수개월치가 격리되고 checkpoint가 전진해 조용한 손실이 난다. 격리하지 않고
+        store_merge(게이트)로 미전진시켜 다음 run 재시도하도록 잠근다(리뷰 [0]).
+        """
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        # trailing Q4(2015-12)에 **유효한** 파티션을 배치(정상이면 merge 성공).
+        part_dir = store.base_path / "fundamental" / "KRX" / "005930"
+        part_dir.mkdir(parents=True, exist_ok=True)
+        valid_q4 = part_dir / "2015-12.parquet"
+        _stored_df_quarter("2015", 12).write_parquet(str(valid_q4))
+        before = valid_q4.read_bytes()
+
+        # 그 파티션 read만 PermissionError로 실패시킨다(일시적/환경 오류 모사).
+        real_read = pl.read_parquet
+
+        def _raise_eacces(source, *args, **kwargs):
+            if str(source).endswith("2015-12.parquet"):
+                raise PermissionError(13, "Permission denied")
+            return real_read(source, *args, **kwargs)
+
+        monkeypatch.setattr(pl, "read_parquet", _raise_eacces)
+
+        net_delta, stored_ok, syms, warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        monkeypatch.setattr(pl, "read_parquet", real_read)
+
+        # 일시적 오류 → 격리 금지 + store_merge(게이트) → Q4 미전진(checkpoint=Q3).
+        assert checkpoint.get_last_date() == "2015-Q3"
+        assert store.pending_merge_failure_count() >= 1
+        assert all(w.get("type") != "store_merge" for w in warns)
+        # 유효 파티션은 격리되지 않고 원본 보존.
+        assert not (part_dir / "2015-12.corrupted").exists()
+        assert valid_q4.read_bytes() == before

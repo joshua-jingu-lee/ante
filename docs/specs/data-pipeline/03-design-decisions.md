@@ -266,12 +266,16 @@ checkpoint JSON/secrets 저장이 이미 적용하고 있던 write-then-rename �
   손대지 않으므로 write 중단이 기존 데이터를 손상시키지 않는다.
 - **read/concat 실패 분리와 self-heal**: merge 시 기존 파일 **읽기**와 신규 group과의
   **결합**을 분리해 처리한다.
-  - **읽기 실패**(손상/0바이트/미완성 = 중단 write의 잔재): 손상 파일을 `.corrupted`
-    확장자로 격리(동명 존재 시 `.corrupted.<n>` uniquifier로 증적 보존 — validate(fix)의
-    덮어쓰기와는 **의도적 divergence**)한 뒤, 현재 group을 fresh 원자 write로 재생성한다
-    (**self-heal**). corrupt 파일에는 보존할 유효 데이터가 없으므로 무손실 보존 취지를
-    위반하지 않으며, 읽기 불가 파티션이 영구히 반영 불가(loud-stuck)로 방치되던 문제를
-    해소한다.
+  - **읽기 실패이며 진짜 corruption**(0바이트 또는 polars parquet decode/format 오류 =
+    중단 write의 잔재): 손상 파일을 `.corrupted` 확장자로 격리(동명 존재 시
+    `.corrupted.<n>` uniquifier로 증적 보존 — self-heal과 validate(fix)가 **공유**하는
+    격리 헬퍼)한 뒤, 현재 group을 fresh 원자 write로 재생성한다(**self-heal**). corrupt
+    파일에는 보존할 유효 데이터가 없으므로 무손실 보존 취지를 위반하지 않으며, 읽기 불가
+    파티션이 영구히 반영 불가(loud-stuck)로 방치되던 문제를 해소한다. 단, 읽기 실패가
+    **일시적·환경 오류**(MemoryError/PermissionError/OSError 등, corruption 아님)면
+    유효 파티션 손실을 막기 위해 **격리하지 않고** 아래 결합 실패와 동일하게 기존 보존 +
+    `store_merge`(게이트 → 재시도)로 처리한다. self-heal 재생성 write가 실패하면 격리한
+    파일을 원위치로 복원하고 `store_merge`로 처리해 파티션이 file-less가 되지 않게 한다.
   - **읽기 성공 후 결합 실패**(유효하나 non-coercible 스키마로 `pl.concat(how="diagonal_relaxed")`가
     여전히 raise): 기존 파일을 덮어쓰지 않고 보존한 뒤 경고만 기록한다(silent overwrite 금지,
     기존 계약 유지).
