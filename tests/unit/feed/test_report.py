@@ -560,9 +560,11 @@ class TestListReportsSortedByStartedAt:
 class _AnomalyDataGoKrCollector:
     """store merge 이상을 발생시키는 stub data.go.kr collector.
 
-    `.collect()`가 호출되면, 사전에 손상시켜 둔(읽기 불가) 파티션 위로
-    fundamental write를 시도한다. ParquetStore는 기존 파일을 덮어쓰지 않고
-    `store_merge` 이상 경고만 버퍼에 적재한다(#1964 silent-overwrite 제거).
+    `.collect()`가 호출되면, 사전에 배치해 둔 결합-불가(non-coercible·읽기 가능)
+    파티션 위로 fundamental write를 시도한다. ParquetStore는 기존 파일을 덮어쓰지
+    않고 `store_merge` 이상 경고만 버퍼에 적재한다(#1964 silent-overwrite 제거).
+    ※ #2413 이후 store_merge는 **읽기 가능한** 결합-불가 파티션(또는 비-0바이트
+    손상)에서 발생한다(0바이트 파티션은 자동복구 → store_recovered 경로).
     """
 
     async def collect(
@@ -601,10 +603,20 @@ class TestBackfillReportSurfacesStoreMergeWarning:
         feed_dir = data_path / ".feed"
         (feed_dir / "checkpoints").mkdir(parents=True)
 
-        # 손상된(읽기 불가) 파티션을 사전 배치 → 다음 write에서 merge 실패 유발.
+        # 결합-불가(읽기 가능) 파티션을 사전 배치 → 다음 write에서 merge 실패 유발.
+        # 공유키 컬럼 market_cap을 List로 두면 scalar write와 concat 불가(store_merge).
         part_dir = data_path / "fundamental" / "KRX" / "005930"
         part_dir.mkdir(parents=True)
-        (part_dir / "2025-09.parquet").write_bytes(b"corrupt-not-parquet")
+        filepath = part_dir / "2025-09.parquet"
+        pl.DataFrame(
+            {
+                "date": [date(2025, 9, 10)],
+                "symbol": ["005930"],
+                "market_cap": [[1, 2, 3]],
+                "source": ["data_go_kr"],
+            }
+        ).write_parquet(str(filepath))
+        before = filepath.read_bytes()
 
         store = ParquetStore(base_path=data_path)
         runner = BackfillRunner(
@@ -630,8 +642,8 @@ class TestBackfillReportSurfacesStoreMergeWarning:
         )
         assert "2025-09.parquet" in store_merge_warnings[0]["path"]
 
-        # 손상 파일은 보존됨(데이터 손실 방지).
-        assert (part_dir / "2025-09.parquet").read_bytes() == b"corrupt-not-parquet"
+        # 유효한 결합-불가 파티션은 보존됨(자동복구 대상 아님, 데이터 손실 방지).
+        assert filepath.read_bytes() == before
 
 
 class TestReportFailuresTotalSurfacesNonSymbolFailures:

@@ -228,7 +228,7 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `async read` | symbol: str, timeframe: str, start: str \| None, end: str \| None, limit: int \| None, data_type: str = "ohlcv", exchange: str = "KRX" | pl.DataFrame | 데이터 읽기. `data_type`으로 스키마 자동 판별 |
-| `async write` | symbol: str, timeframe: str, data: pl.DataFrame, data_type: str = "ohlcv", exchange: str = "KRX" | None | 파티션 단위 **merge** (월별 파티셔닝, 중복 제거 후 정렬). 기존 파일이 있으면 concat → unique → sort |
+| `async write` | symbol: str, timeframe: str, data: pl.DataFrame, data_type: str = "ohlcv", exchange: str = "KRX" | int | 파티션 단위 **merge** (월별 파티셔닝, 중복 제거 후 정렬). 기존 파일이 있으면 concat → unique → sort. 반환은 이번 write로 실제 새로 저장된 **net-new 행 수**(파티션별 `max(0, len(merged) - len(existing))`의 합, #1993). 모든 파티션 write는 임시파일 + 원자 rename으로 수행한다(중단 시 손상 파일 미잔존, #2413). |
 | `async append` | symbol: str, timeframe: str, rows: list[dict], data_type: str = "ohlcv", exchange: str = "KRX" | None | 내부적으로 `write()`에 위임. Collector 전용 |
 | `list_symbols` | timeframe: str = "1d", data_type: str = "ohlcv", exchange: str = "KRX" | list[str] | 보유 데이터의 종목 목록 |
 | `get_date_range` | symbol: str, timeframe: str, data_type: str = "ohlcv", exchange: str = "KRX" | tuple[str, str] \| None | 종목의 데이터 기간 조회 |
@@ -251,6 +251,55 @@ Parquet 파일 읽기/쓰기/관리를 담당한다. **모든 모듈이 Parquet�
 > 다룬다(현재 코드/스펙 drift).
 
 소스: `src/ante/data/store.py`
+
+#### 파티션 저장 원자성 및 0바이트 파티션 자동복구 (#2413)
+
+파티션 persist(`_persist_partition`)는 durability 불변을 다음과 같이 보장한다. 이는
+checkpoint JSON/secrets 저장이 이미 적용하고 있던 write-then-rename 원자성
+([data-feed/10-checkpoints-and-reports.md](../data-feed/10-checkpoints-and-reports.md))을
+파티션 write에도 확장한 것이며, 새 durability 계약을 도입하는 것이 아니다.
+
+- **원자적 write**: 모든 파티션 write(신규 파티션·merge 결과)는 같은 디렉토리의
+  임시 파일에 기록한 뒤 원자 `os.replace`로 교체한다. write 도중 프로세스가
+  중단(OOM/`kill`/전원 손실)되어도 최종 경로에는 부분 parquet이 남지 않으며, 실패 시
+  임시 파일은 즉시 정리된다. 기존 유효 파티션은 replace 전까지 손대지 않으므로 write
+  중단이 기존 데이터를 손상시키지 않는다.
+  - **파일 권한**: `mkstemp`가 만든 tmp는 `0o600`이라 그대로 replace하면 파티션이
+    owner-only가 되어 분리된 reader 계정/그룹이 EACCES를 만난다(LXC 배포). 따라서
+    기존 target이 있으면 **그 operator mode를 보존**하고(0o600 등 의도 존중), 없으면
+    `0o644` 고정을 쓴다(hot-path에서 umask probe 하지 않는다).
+- **기존 파일 처리(0바이트-only 자동복구)**: 원자성 도입 **이전** 비원자 write가
+  중단돼 남은 **0바이트** 파티션만 자동복구한다(관찰된 stuck의 원인). 그 외 손상은
+  자동 개입하지 않고 안전하게 보존한다.
+  - **0바이트 파티션** → 그 파일을 **부재로 간주**하고 신규 group을 그대로 write한다
+    (read/concat/격리 없음). `store_recovered`(비게이트) 경고로 "0바이트 손상 파티션
+    자동복구"를 표면화해 보고된 영구 stuck을 해소하고, 반환은 신규-파티션과 동일한
+    net-new다. (`stat`이 실패하면 0바이트로 단정하지 않고 아래 일반 경로로 보낸다.)
+  - **비어있지 않은 기존 파티션** → `read → concat(diagonal_relaxed) → dedup → 원자
+    write`. read(읽기 불가·권한/환경 오류) 또는 concat(non-coercible 스키마)이 raise하면
+    **기존 파일을 절대 덮어쓰지 않고** `store_merge`(게이트 → 재시도)만 기록하고 net-new
+    0을 반환한다(pre-#2413 보존 동작). **비-0바이트 unreadable은 자동복구하지 않는다**
+    (loud-stuck). 오분류=silent data loss이므로 자동 격리/self-heal 대신 preserve로
+    편향하며, 복구는 사용자가 `ante data validate --fix` + range 재backfill로 수행한다.
+  - **부재** → 신규 group 원자 write.
+- **경고 타입 분리**: `drain_warnings()`가 반환하는 항목의 `type`은 `store_merge`
+  (읽기/결합 실패 → 기존 보존) 또는 `store_recovered`(0바이트 자동복구)다. checkpoint
+  전진 게이트는 `store_merge`만 소비하므로, 0바이트 자동복구(`store_recovered`)는
+  게이트를 유발하지 않고 checkpoint를 전진시켜 stuck을 해소한다.
+- **known-limitation**:
+  - checkpoint 재개 실행에서 0바이트 파티션을 자동복구하면, 재생성은 현재 group(증분
+    경로에선 해당 실행분)만 담으므로 동일 파티션의 pre-checkpoint 구간은 재수집되지 않아
+    forward-only 침묵 공백이 남을 수 있다. 이 사실은 자동복구 경고/로그로 표면화하며,
+    완전 복구는 명시 range 재backfill(`ante feed run backfill --start … --end …` 또는
+    `ante data validate --fix` 후 재수집)로 수행한다.
+  - 비-0바이트 unreadable 파티션은 자동복구하지 않고 loud-stuck(`store_merge`)으로 남긴다
+    — `ante data validate --fix`(사용자 발동, `.corrupted`로 격리)로 치운 뒤 재backfill로
+    복구한다.
+  - hard-kill이 replace 전에 남긴 orphan `*.tmp`(read glob `*.parquet` 밖)는
+    **`validate(fix=True)`(사용자 발동, write-scoped)에서만** 회수하며 `stale_tmp_removed`
+    로 리포트한다. write hot-path·read-scoped 경로는 파일시스템을 변조하지 않는다.
+    프로세스 시작 시 전역 GC(모든 파티션 dir 스윕)와 `get_storage_usage`/read glob의
+    `.tmp` 비가시는 본 이슈 범위 밖 follow-up이다.
 
 ### 데이터 보존 정책
 
