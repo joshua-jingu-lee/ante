@@ -99,17 +99,58 @@ def test_zero_byte_recovery_does_not_gate_checkpoint(tmp_path) -> None:
     assert store.pending_merge_failure_count() == 0
 
 
-def test_zero_byte_recovery_preserves_readable_mode(tmp_path) -> None:
-    """0바이트 자동복구 파티션은 owner-only가 아니어야 한다(분리 reader 가독)."""
+def test_zero_byte_recovery_uses_0644_not_stub_mode(tmp_path) -> None:
+    """0바이트 복구본은 신규와 동일한 0o644 — pre-#2413 stub mode 보존 금지([670]).
+
+    restrictive umask(0o077)에서 만들어진 stub은 owner-only(0o600)일 수 있다. 복구가
+    stub mode를 보존하면 복구본도 owner-only가 되어 분리 reader가 EACCES. stub mode를
+    mode 소스로 쓰지 않고 0o644를 강제함을 잠근다(CI umask와 무관하게 결정적).
+    """
     store = ParquetStore(base_path=tmp_path)
     part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
     part_dir.mkdir(parents=True)
-    (part_dir / "2025-11.parquet").write_bytes(b"")
+    stub = part_dir / "2025-11.parquet"
+    stub.write_bytes(b"")
+    os.chmod(stub, 0o600)  # restrictive umask stub 모사(owner-only)
 
     store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
 
-    mode = (part_dir / "2025-11.parquet").stat().st_mode & 0o777
-    assert mode & 0o044, f"자동복구 파티션 mode={oct(mode)} owner-only(그룹/other 불가)"
+    mode = stub.stat().st_mode & 0o777
+    assert mode == 0o644, f"복구본이 stub mode 보존: {oct(mode)} (0o644이어야 함)"
+
+
+def test_zero_byte_recovery_warning_only_after_write_success(
+    tmp_path, monkeypatch
+) -> None:
+    """0바이트 복구 write가 raise하면 store_recovered 경고를 적재하지 않는다([828]).
+
+    경고를 write 전에 적재하면 write가 ENOSPC/EACCES/kill로 실패해도 "자동복구됨"
+    허위 성공 신호가 버퍼에 남는다. 경고는 write 성공 직후에만 적재해야 한다.
+    """
+    store = ParquetStore(base_path=tmp_path)
+    part_dir = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+    part_dir.mkdir(parents=True)
+    zero = part_dir / "2025-11.parquet"
+    zero.write_bytes(b"")
+
+    real_write = pl.DataFrame.write_parquet
+
+    def _raise_write(self, file, *args, **kwargs):
+        raise RuntimeError("disk full (ENOSPC) during recovery write")
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", _raise_write)
+
+    with pytest.raises(RuntimeError, match="disk full"):
+        store.write("005930", "1d", _ohlcv_df("005930", [3], month=11))
+
+    monkeypatch.setattr(pl.DataFrame, "write_parquet", real_write)
+
+    # write 실패 → 허위 store_recovered가 버퍼에 없어야 한다.
+    assert store.drain_warnings() == []
+    assert store.pending_merge_failure_count() == 0
+    # 파일은 여전히 0바이트(복구 안 됨) + tmp 잔재 없음.
+    assert zero.stat().st_size == 0
+    assert list(part_dir.glob("*.tmp")) == []
 
 
 # ── (B) 비-0바이트 unreadable → preserve + store_merge(loud-stuck, 자동복구 없음) ─

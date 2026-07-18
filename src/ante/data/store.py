@@ -271,15 +271,17 @@ class ParquetStore:
             누적 경고 목록의 복사본. 각 항목은
             `{"type": str, "path": str, "message": str}` 형태이며 ``type`` 은
             둘 중 하나다:
-            - ``"store_merge"``: read 성공 후 concat/schema 실패로 이번 write를
-              건너뛰고 **기존 파일을 보존**했다. checkpoint 전진 게이트다(소비자
-              ``backfill_runner._drain_store_warnings`` /
-              ``pending_merge_failure_count`` 가 이 타입만 필터해 checkpoint를
-              미전진시킨다).
-            - ``"store_recovered"``: read 실패(손상/0바이트/미완성)로 파일을
-              ``.corrupted`` 로 격리하고 현재 group으로 **재생성(self-heal)** 했다
-              (#2413). 위 게이트 소비자는 이 타입을 세지 않으므로 by-construction
-              **비게이트**다(checkpoint 전진 허용 → loud-stuck 해소).
+            - ``"store_merge"``: 기존(비-0바이트) 파티션의 read(읽기 불가) 또는
+              concat/schema 실패로 이번 write를 건너뛰고 **기존 파일을 보존**했다.
+              checkpoint 전진 게이트다(소비자 ``backfill_runner._drain_store_warnings``
+              / ``pending_merge_failure_count`` 가 이 타입만 필터해 checkpoint를
+              미전진시킨다). 비-0바이트 손상은 자동복구하지 않는 loud-stuck이며,
+              복구는 ``ante data validate --fix`` + range 재backfill로 수행한다.
+            - ``"store_recovered"``: **0바이트** 파티션(원자성 도입 전 중단 write
+              잔재)을 부재로 간주해 현재 수집분으로 **자동복구**했다(#2413, 0바이트-
+              only). ``.corrupted`` 격리 산출물은 만들지 않는다. 위 게이트 소비자는
+              이 타입을 세지 않으므로 by-construction **비게이트**다(checkpoint 전진
+              허용 → 보고된 stuck 해소).
         """
         drained = list(self._pending_warnings)
         self._pending_warnings.clear()
@@ -656,34 +658,50 @@ class ParquetStore:
         return removed
 
     @staticmethod
-    def _apply_partition_mode(tmp_path: str, target: Path) -> None:
-        """replace 전 tmp 파일 mode를 결정: 기존 target 보존 or 0o644(#2413 [668]).
+    def _apply_partition_mode(
+        tmp_path: str, target: Path, preserve_existing_mode: bool
+    ) -> None:
+        """replace 전 tmp 파일 mode를 결정한다(#2413 [668]/[670]).
 
         ``tempfile.mkstemp`` 는 항상 ``0o600`` 으로 tmp를 만들고 ``Path.replace`` 가
         그 mode를 유지한다. 조정하지 않으면 모든 파티션이 owner-only-readable이 되어
-        분리된 reader 계정/그룹이 EACCES로 실패한다(LXC 배포). 따라서:
+        분리된 reader 계정/그룹이 EACCES로 실패한다(LXC 배포). 규칙:
 
-        - 기존 ``target`` 이 있으면 **그 operator mode를 보존**(0o600 등 의도 존중).
-        - 없으면(신규 파티션) ``0o644`` 고정(hot-path에서 umask probe 하지 않는다).
+        - ``preserve_existing_mode=True`` 이고 기존 ``target`` 이 있으면 **그 operator
+          mode를 보존**(0o600 등 의도 존중). 비-0바이트 유효 기존 파일 merge 전용.
+        - 그 외(신규 파티션, **0바이트 복구**)는 ``0o644`` 고정. 0바이트 복구에서
+          기존 target은 pre-#2413 중단-write **stub**이므로 그 mode(restrictive umask
+          에서 0o600일 수 있음)를 보존하면 복구본이 owner-only가 된다 → stub mode를
+          mode 소스로 쓰지 않고 신규와 동일하게 0o644를 쓴다(#2413 리뷰 [670]).
         """
-        try:
-            mode = os.stat(target).st_mode & 0o777
-        except OSError:
-            mode = 0o644
+        mode = 0o644
+        if preserve_existing_mode:
+            try:
+                mode = os.stat(target).st_mode & 0o777
+            except OSError:
+                mode = 0o644
         os.chmod(tmp_path, mode)
 
-    def _atomic_write_parquet(self, df: pl.DataFrame, filepath: Path) -> None:
+    def _atomic_write_parquet(
+        self,
+        df: pl.DataFrame,
+        filepath: Path,
+        *,
+        preserve_existing_mode: bool = True,
+    ) -> None:
         """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace, #2413).
 
         checkpoint.save()(`feed/pipeline/checkpoint.py`)와 동일 패턴이다: 같은
         디렉토리에 임시 파일을 만들어 write한 뒤 ``Path.replace`` 로 원자 교체한다.
         write 도중 중단(OOM/kill/전원 손실)이 있어도 최종 경로에는 0바이트/부분
         parquet이 남지 않는다(중단 시 tmp만 잔존 → 즉시 cleanup). 권한은
-        `_apply_partition_mode`(기존 mode 보존 or 0o644)를 따른다.
+        `_apply_partition_mode`를 따른다.
 
         Args:
             df: 기록할 DataFrame.
             filepath: 최종 파티션 파일 경로.
+            preserve_existing_mode: True(기본)면 기존 target mode 보존(비-0바이트
+                merge). 0바이트 복구/신규는 False로 호출해 0o644를 강제한다([670]).
 
         Raises:
             write/replace 실패 시 원 예외를 그대로 재-raise한다(임시 파일 정리 후).
@@ -695,7 +713,7 @@ class ParquetStore:
         os.close(fd)
         try:
             df.write_parquet(tmp_path, compression=self._compression)
-            self._apply_partition_mode(tmp_path, filepath)
+            self._apply_partition_mode(tmp_path, filepath, preserve_existing_mode)
             Path(tmp_path).replace(filepath)
         except BaseException:
             # 실패 시(예외/취소 포함) 임시 파일 정리 후 재-raise.
@@ -816,10 +834,18 @@ class ParquetStore:
                 # validate --fix + 재backfill로 사용자 복구).
                 return self._record_merge_failure(filepath, exc)
 
-        if filepath.exists():
-            # 0바이트 파티션(원자성 도입 전 중단 write 잔재): 부재로 간주하고
-            # 신규 group으로 자동복구한다. store_recovered(비게이트)로 표면화해
-            # checkpoint 전진을 허용, 보고된 영구 stuck을 해소한다(#2413).
+        # 여기 도달 = 신규 파티션(부재) 또는 0바이트 파티션(존재). 둘 다 신규
+        # group을 그대로 write하며(read/concat/격리 없음), 권한은 0o644 고정이다
+        # (0바이트 복구에서 기존 stub mode를 보존하면 owner-only가 될 수 있으므로
+        # stub을 mode 소스로 쓰지 않는다, #2413 리뷰 [670]).
+        is_zero_byte_recovery = filepath.exists()
+        group = self._dedup_sort_by_key(group, key)
+        self._atomic_write_parquet(group, filepath, preserve_existing_mode=False)
+
+        if is_zero_byte_recovery:
+            # store_recovered는 **write 성공 직후**에만 적재한다(#2413 리뷰 [828]).
+            # write 이전에 적재하면 write가 raise(ENOSPC/EACCES/kill)했을 때 파일은
+            # 여전히 0바이트인데 "자동복구됨" 허위 성공 신호가 버퍼에 남는다.
             logger.warning(
                 "0바이트 손상 파티션 자동복구: %s — 신규 수집분으로 재생성. "
                 "이전 데이터가 있었다면 forward-only 공백 가능(range 재backfill 필요).",
@@ -839,8 +865,6 @@ class ParquetStore:
                 }
             )
 
-        group = self._dedup_sort_by_key(group, key)
-        self._atomic_write_parquet(group, filepath)
         # 신규 파티션(또는 0바이트 자동복구): dedup 후 결과 행 수가 net-new 저장 행 수.
         return len(group)
 
