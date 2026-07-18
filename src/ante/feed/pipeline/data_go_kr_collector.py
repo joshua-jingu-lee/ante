@@ -436,23 +436,50 @@ class DataGoKrCollector:
 
         path = store.base_path / ".feed" / "instruments.parquet"
         if path.exists():
+            # Check for zero-byte file
             try:
-                existing = pl.read_parquet(path)
-            except Exception as exc:
-                # 기존 파일 손상 시 신규 데이터로 덮어쓰지 않고 보존(데이터 손실 방지).
+                if path.stat().st_size == 0:
+                    logger.warning(
+                        "data.go.kr instruments: zero-byte file detected, removing for auto-recovery: %s",
+                        path,
+                    )
+                    try:
+                        path.unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.warning(
+                            "data.go.kr instruments: zero-byte file unlink failed — preserving: %s (%s)",
+                            path,
+                            exc,
+                        )
+                        return 0
+                    # Treat as missing: merged = new_df
+                    merged = new_df
+                else:
+                    try:
+                        existing = pl.read_parquet(path)
+                    except Exception as exc:
+                        # 기존 파일 손상 시 신규 데이터로 덮어쓰지 않고 보존(데이터 손실 방지).
+                        logger.warning(
+                            "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
+                            "write 건너뜀 (%s)",
+                            exc,
+                        )
+                        return 0
+                    merged = cls._merge_instruments(existing, new_df)
+            except OSError as exc:
                 logger.warning(
-                    "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
-                    "write 건너뜀 (%s)",
+                    "data.go.kr instruments: failed to check file size — preserving: %s (%s)",
+                    path,
                     exc,
                 )
                 return 0
-            merged = cls._merge_instruments(existing, new_df)
         else:
             merged = new_df
 
         merged = merged.select(list(cls._INSTRUMENTS_COLUMNS))
         path.parent.mkdir(parents=True, exist_ok=True)
-        merged.write_parquet(str(path))
+        # Use atomic write
+        store._atomic_write_parquet(merged, path)
         logger.info(
             "data.go.kr instruments 갱신: path=%s rows=%d",
             path,
