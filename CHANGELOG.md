@@ -2,6 +2,459 @@
 
 <!-- version list -->
 
+## v0.12.0 (2026-07-28)
+
+### Bug Fixes
+
+- **broker**: #2384 KIS 매수가능액을 inquire-psbl-order로 노출 — get_buyable 신설 + purchasable_amount SSOT 정렬
+  ([#2389](https://github.com/joshua-jingu-lee/ante/pull/2389),
+  [`d66a90a`](https://github.com/joshua-jingu-lee/ante/commit/d66a90a1491237aaaffe7961af41b5f24e228293))
+
+- **broker**: #2399 per-app_key cooldown at source — EGW00133 토큰 재타격 근본 차단
+  ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **broker**: #2399 startup get_broker EGW00133 bounded retry 재배치 — connect 가 get_broker 내부에 있어
+  wrapper 미도달 회귀 수정 ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **broker**: #2399 토큰 캐시 키 config fingerprint — secret/환경 전환 재검증
+  ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **broker**: #2399 후속 broker-backed startup init 에서 broker not_ready 계좌 skip — EGW00133 토큰 1/min
+  재타격 방지 ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **core**: #2397 리뷰 attempt-2 반영 — treasury 전계좌 self-healing + 면제별 회복 + burst backoff
+  ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2397 리뷰 attempt-3 반영 — self-healing 스케줄러 재등록 churn 방지
+  ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2397 리뷰 attempt-4 반영 — broker 회복 시 Treasury sync stale broker 교체
+  ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2397 리뷰 반영 — self-healing 비-broker readiness 재시도 + reconcile.enabled 존중 + 면제
+  fail-closed ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2397 메타리뷰 반영 — self-healing 루프 예외 격리 + broker_ready mark 지연
+  ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2398 active-order gate Codex attempt2 P2 2건 — 메타 기반 non-LIVE silent skip + reason
+  fail-closed ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **core**: #2398 active-order gate Codex attempt3 P1 — SUSPENDED kill-switch 우회 차단(status 스냅샷
+  fallback 제거) ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **core**: #2398 active-order gate Codex attempt4 P1×2 + 메타 감사 — place_order 직전 단일 재확인 + SUSPENDED
+  in-flight backstop ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **core**: #2398 active-order gate Codex attempt5 P2 — virtual SUSPENDED in-flight backstop 대칭
+  ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **core**: #2398 virtual-routing 메타 실패 P2 2건 — deterministic 마커 skip
+  ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **data**: #2413 0바이트 복구 경로 3건 국소 수정(mode/경고순서/docstring)
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **data**: #2413 code-review 반영 — corruption 판정 좁힘·self-heal write 가드·권한 복원
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **data**: #2413 parquet 파티션 원자 write + 0바이트 파티션 자동복구
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **data**: #2413 parquet 파티션 원자 write + 손상 파티션 self-heal
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **data**: #2413 self-heal 범위를 0바이트-only 자동복구로 축소(단순화)
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **data**: #2413 재리뷰 반영 — self-heal 클래스 불변식 source-level 강제
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **gateway**: #2391 리뷰 반영 — modify broker 조회 try 포함 + quantity finite 검증
+  ([#2394](https://github.com/joshua-jingu-lee/ante/pull/2394),
+  [`c69e9a6`](https://github.com/joshua-jingu-lee/ante/commit/c69e9a6edf204ea2c6d3e294a9738c1b100a3dad))
+
+- **gateway**: #2391 리뷰 반영(2) — modify 수량/가격 검증 OverflowError·로깅 안전화
+  ([#2394](https://github.com/joshua-jingu-lee/ante/pull/2394),
+  [`c69e9a6`](https://github.com/joshua-jingu-lee/ante/commit/c69e9a6edf204ea2c6d3e294a9738c1b100a3dad))
+
+- **gateway**: #2391 리뷰 반영(3) — modify 봇 소유권 + 비지정가 fail-closed
+  ([#2394](https://github.com/joshua-jingu-lee/ante/pull/2394),
+  [`c69e9a6`](https://github.com/joshua-jingu-lee/ante/commit/c69e9a6edf204ea2c6d3e294a9738c1b100a3dad))
+
+- **gateway**: #2405 fallback poll은 세션 멤버십 미마킹 — is_exchange_tick source chokepoint (attempt5 P2)
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 per-order entered_session + market-wide 마킹 (attempt3 P1+P2)
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 register raise + manager-level 세션활동 플래그 (attempt2 P2×2 + 메타 감사)
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 shutdown 순서 — manager.stop()을 IPC gate 뒤로 (attempt4 P2)
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 stop 주문 세션 만료(A2) 자동 배선
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 stop 주문 세션만료 자동 배선(A2) + manager_stopped 복구
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 거래일 확인 세션 늦은 등록 마킹 + expire shield (attempt6 P2-A/P2-B)
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **gateway**: #2405 틱 기반 entered_session 마킹 + register stopped 가드
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+- **notification**: #2385 KIS 실운용·/stop 종목명 병기 누락 수정 — _sync_instruments 전 계좌 동기화 +
+  TelegramCommandReceiver format_label ([#2386](https://github.com/joshua-jingu-lee/ante/pull/2386),
+  [`25953d4`](https://github.com/joshua-jingu-lee/ante/commit/25953d40ef31fee7e3f229c0369b0e9b67029a92))
+
+- **process**: #2418 리뷰 반영 rev3 — read-only 리뷰어 쓰기 주체 분리 전수 sweep + autopilot 게이트 배선 + epic 한계 정직화
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **process**: #2418 리뷰 반영 rev4 — @issue-reviewer 게이트 트리거를 confirmed 기준으로 정책과 동일화
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **process**: #2418 리뷰 반영 — @issue-reviewer read-only 통일 (검증·쓰기 주체 분리)
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **process**: #2418 리뷰 반영 — Gate A 빌트인 /code-review 명확화 + base 스코핑 표현 제거 (epic 한정 규칙)
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **release**: #2416 prepare/dry-run 경로 의도치 않은 태그 push 차단
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 리뷰 반영 rev4 — dry-run 계약 정합·유령 항목 제거·grep 정밀화
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 리뷰 반영 rev5 — 가드 exit code 수정 + 중단 조건 단계 한정
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 리뷰 반영 rev6 — stale release PR 복구를 폐기 후 재실행으로 교체
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 리뷰 반영 rev7 — stale 복구 명령을 통일 정리 규칙과 동일화
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 리뷰 반영 — prepare 순서 재구성 + main 전용 가드
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **release**: #2416 메타 리뷰 반영 — prepare 라이프사이클 재구조화 + step-level 가드
+  ([#2419](https://github.com/joshua-jingu-lee/ante/pull/2419),
+  [`44834a5`](https://github.com/joshua-jingu-lee/ante/commit/44834a5109966b8af4383059f35537fca8797215))
+
+- **strategy**: #2404 지표 파라미터 키 docs↔런타임 정합 + legacy-key 가드
+  ([#2408](https://github.com/joshua-jingu-lee/ante/pull/2408),
+  [`63ccb7a`](https://github.com/joshua-jingu-lee/ante/commit/63ccb7afda0f6ccc9b308e761b05db11245b34ce))
+
+- **trade**: #2407 DB 손상 predicate로 escalation/backoff 좁힘 — transient/내부버그 오분류 차단
+  ([#2410](https://github.com/joshua-jingu-lee/ante/pull/2410),
+  [`f860434`](https://github.com/joshua-jingu-lee/ante/commit/f8604342cc331e5c981a21c9997e5deb4d392222))
+
+- **trade**: #2407 FillOutboxPublisher DB 손상 escalation/backoff (국소)
+  ([#2410](https://github.com/joshua-jingu-lee/ante/pull/2410),
+  [`f860434`](https://github.com/joshua-jingu-lee/ante/commit/f8604342cc331e5c981a21c9997e5deb4d392222))
+
+- **trade**: #2407 FillOutboxPublisher._loop DB 손상 escalation/backoff
+  ([#2410](https://github.com/joshua-jingu-lee/ante/pull/2410),
+  [`f860434`](https://github.com/joshua-jingu-lee/ante/commit/f8604342cc331e5c981a21c9997e5deb4d392222))
+
+### Chores
+
+- #2418 미참조 AI 리뷰 게이트 잔재 스크립트 4종 삭제 + 생성물 갱신
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **deps**: Bump actions/checkout from 5 to 7
+  ([#2439](https://github.com/joshua-jingu-lee/ante/pull/2439),
+  [`c9e271b`](https://github.com/joshua-jingu-lee/ante/commit/c9e271b1d184fe0590bee50c0d515f54c301dafb))
+
+- **deps**: Bump actions/github-script from 8 to 9
+  ([#2432](https://github.com/joshua-jingu-lee/ante/pull/2432),
+  [`1b6f4b3`](https://github.com/joshua-jingu-lee/ante/commit/1b6f4b3babfe5f6db150c28bcc5b295702e18b55))
+
+- **deps**: Bump actions/setup-python from 6 to 7
+  ([#2446](https://github.com/joshua-jingu-lee/ante/pull/2446),
+  [`027904b`](https://github.com/joshua-jingu-lee/ante/commit/027904bd10a09acb5aa60135a584521fb748db45))
+
+- **deps**: Bump docker/build-push-action from 6.19.2 to 7.3.0
+  ([#2433](https://github.com/joshua-jingu-lee/ante/pull/2433),
+  [`0cc6193`](https://github.com/joshua-jingu-lee/ante/commit/0cc61938f859da814b4320bbb6f51a87e1a8166a))
+
+- **deps**: Bump docker/login-action from 3.7.0 to 4.4.0
+  ([#2431](https://github.com/joshua-jingu-lee/ante/pull/2431),
+  [`d30e310`](https://github.com/joshua-jingu-lee/ante/commit/d30e310cb27443fda38bd9f5669fa5847f047167))
+
+- **deps**: Bump docker/setup-buildx-action from 3.12.0 to 4.2.0
+  ([#2434](https://github.com/joshua-jingu-lee/ante/pull/2434),
+  [`5f47c9b`](https://github.com/joshua-jingu-lee/ante/commit/5f47c9b07e1bf1fa12e9e402cb37d9537f88069f))
+
+- **deps**: Bump pypa/gh-action-pypi-publish from 1.14.0 to 1.14.1
+  ([#2447](https://github.com/joshua-jingu-lee/ante/pull/2447),
+  [`3073c5b`](https://github.com/joshua-jingu-lee/ante/commit/3073c5b3389ebd7bc0467e097d29bc1759f5f7f9))
+
+- **deps**: Bump softprops/action-gh-release from 2.6.2 to 3.0.1
+  ([#2435](https://github.com/joshua-jingu-lee/ante/pull/2435),
+  [`54a774d`](https://github.com/joshua-jingu-lee/ante/commit/54a774d7c564eb89af903091fff6e402707721bd))
+
+- **deps**: Bump softprops/action-gh-release from 3.0.1 to 3.0.2
+  ([#2442](https://github.com/joshua-jingu-lee/ante/pull/2442),
+  [`8dfad6c`](https://github.com/joshua-jingu-lee/ante/commit/8dfad6c72c5673c227c5cbc939eecadc3b784680))
+
+### Continuous Integration
+
+- #2428 리뷰 반영 — publish concurrency 제거(무음 취소 함정)·main push CI 활성 조건 정직화
+  ([#2429](https://github.com/joshua-jingu-lee/ante/pull/2429),
+  [`976e26b`](https://github.com/joshua-jingu-lee/ante/commit/976e26b60fbdee59e34e2d1efb8f70526dfab57c))
+
+- #2428 워크플로우 위생 — 서드파티 SHA 핀·최소권한·concurrency·버전업 + main push CI
+  ([#2429](https://github.com/joshua-jingu-lee/ante/pull/2429),
+  [`976e26b`](https://github.com/joshua-jingu-lee/ante/commit/976e26b60fbdee59e34e2d1efb8f70526dfab57c))
+
+- #2428 워크플로우 위생 — 서드파티 SHA 핀·최소권한·버전업 + main push CI
+  ([#2429](https://github.com/joshua-jingu-lee/ante/pull/2429),
+  [`976e26b`](https://github.com/joshua-jingu-lee/ante/commit/976e26b60fbdee59e34e2d1efb8f70526dfab57c))
+
+- #2437 post-merge 폴링 해체 — pull_request:closed 이벤트 + PAT auto-merge
+  ([#2441](https://github.com/joshua-jingu-lee/ante/pull/2441),
+  [`e9e9c59`](https://github.com/joshua-jingu-lee/ante/commit/e9e9c59724f1ab5833f0fbd432d88b913715b987))
+
+- #2437 post-merge 폴링 해체 — pull_request:closed 이벤트 + PAT auto-merge(fail-closed)
+  ([#2441](https://github.com/joshua-jingu-lee/ante/pull/2441),
+  [`e9e9c59`](https://github.com/joshua-jingu-lee/ante/commit/e9e9c59724f1ab5833f0fbd432d88b913715b987))
+
+- #2437 리뷰 반영 rev3 — 시크릿 누락 방향별 진단 정확화 + docs/temp stale pr_number 참조 정정
+  ([#2441](https://github.com/joshua-jingu-lee/ante/pull/2441),
+  [`e9e9c59`](https://github.com/joshua-jingu-lee/ante/commit/e9e9c59724f1ab5833f0fbd432d88b913715b987))
+
+- #2437 리뷰 반영 — Dependabot secrets 병행 등록 안내 + 수동 복구 멱등 서술 정직화
+  ([#2441](https://github.com/joshua-jingu-lee/ante/pull/2441),
+  [`e9e9c59`](https://github.com/joshua-jingu-lee/ante/commit/e9e9c59724f1ab5833f0fbd432d88b913715b987))
+
+- **publish**: #2430 :latest semver 가드 — 과거 라인 핫픽스 시 latest 역행 차단
+  ([#2438](https://github.com/joshua-jingu-lee/ante/pull/2438),
+  [`54a0376`](https://github.com/joshua-jingu-lee/ante/commit/54a0376a2ea2bcfcffe67b2f8ebcb68cf3041e5b))
+
+- **publish**: #2430 리뷰 반영 — HIGHEST 파이프라인 grep 무매치 흡수 (pipefail 즉사 수정)
+  ([#2438](https://github.com/joshua-jingu-lee/ante/pull/2438),
+  [`54a0376`](https://github.com/joshua-jingu-lee/ante/commit/54a0376a2ea2bcfcffe67b2f8ebcb68cf3041e5b))
+
+- **publish**: #2436 PyPI Trusted Publishing(OIDC) 전환 — 장수명 토큰 제거
+  ([#2440](https://github.com/joshua-jingu-lee/ante/pull/2440),
+  [`8918b38`](https://github.com/joshua-jingu-lee/ante/commit/8918b38b0ba42c9640ce2ddf524f7c812898bf66))
+
+### Documentation
+
+- #2406 README 주의 섹션에 KIS 실전 REST 계약 모의 한정 고지
+  ([#2409](https://github.com/joshua-jingu-lee/ante/pull/2409),
+  [`a48a355`](https://github.com/joshua-jingu-lee/ante/commit/a48a3554534815ff5415c41be5b08c5870bda057))
+
+- 03-design-decisions.md self-heal 계약을 corruption 좁힘·일시적 오류
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- 03-design-decisions.md self-heal 서술을 0바이트-only 축소설계로 갱신
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- 03-design-decisions.md에 3개 클래스 불변식·마커 판정·권한/tmp·orphan
+  ([#2443](https://github.com/joshua-jingu-lee/ante/pull/2443),
+  [`9217bfb`](https://github.com/joshua-jingu-lee/ante/commit/9217bfb05b10df1faa62996f846e351d276ead8a))
+
+- **broker-adapter**: #2387 purchasable_amount KIS 주문가능액 스펙 확정 — inquire-psbl-order get_buyable 계약
+  (#2384 선행) ([#2388](https://github.com/joshua-jingu-lee/ante/pull/2388),
+  [`2eae297`](https://github.com/joshua-jingu-lee/ante/commit/2eae297af61ec0835a9e3a6d2930fff796cde7c1))
+
+- **ci**: #2428 리뷰 반영 rev3 — GITHUB_TOKEN 예외 단서·concurrency 근거·취소 방향 정밀화
+  ([#2429](https://github.com/joshua-jingu-lee/ante/pull/2429),
+  [`976e26b`](https://github.com/joshua-jingu-lee/ante/commit/976e26b60fbdee59e34e2d1efb8f70526dfab57c))
+
+- **core**: #2396 readiness gate 스펙 확정 — runtime readiness + active-order gate + KIS token
+  single-flight ([#2400](https://github.com/joshua-jingu-lee/ante/pull/2400),
+  [`2173606`](https://github.com/joshua-jingu-lee/ante/commit/217360634a936e6c74f74e8a746404197dc5bf92))
+
+- **core**: #2396 readiness gate 스펙 확정 — runtime readiness + active-order gate + KIS token
+  single-flight (구현 #2397/#2398/#2399) ([#2400](https://github.com/joshua-jingu-lee/ante/pull/2400),
+  [`2173606`](https://github.com/joshua-jingu-lee/ante/commit/217360634a936e6c74f74e8a746404197dc5bf92))
+
+- **core**: #2396 리뷰 반영 — virtual trading_mode deterministic skip + virtual 시장가 0원 체결 금지
+  ([#2400](https://github.com/joshua-jingu-lee/ante/pull/2400),
+  [`2173606`](https://github.com/joshua-jingu-lee/ante/commit/217360634a936e6c74f74e8a746404197dc5bf92))
+
+- **core**: #2396 리뷰 반영(2) — SUSPENDED kill-switch 계층1 차단 + virtual 가격실패 OrderFailedEvent + virtual
+  no-op registry mark ([#2400](https://github.com/joshua-jingu-lee/ante/pull/2400),
+  [`2173606`](https://github.com/joshua-jingu-lee/ante/commit/217360634a936e6c74f74e8a746404197dc5bf92))
+
+- **core**: #2396 리뷰 반영(3) — virtual stop StopOrderManager 보존 + EGW00133 generic transient 분리 + 전역
+  not_ready 면제 우선 ([#2400](https://github.com/joshua-jingu-lee/ante/pull/2400),
+  [`2173606`](https://github.com/joshua-jingu-lee/ante/commit/217360634a936e6c74f74e8a746404197dc5bf92))
+
+- **decisions**: D-019 리뷰 게이트 재설계 — Codex 의존 제거 ADR
+  ([#2415](https://github.com/joshua-jingu-lee/ante/pull/2415),
+  [`df7423f`](https://github.com/joshua-jingu-lee/ante/commit/df7423f488feb8c3ecdeafc2b03cede694392343))
+
+- **drift**: #2422 리뷰 반영 — BotErrorEvent 예제 account_id 접근을 실제 계약(bot.config.account_id)으로 수정
+  ([#2424](https://github.com/joshua-jingu-lee/ante/pull/2424),
+  [`7c1ec32`](https://github.com/joshua-jingu-lee/ante/commit/7c1ec32d2f1f9dd96832037a7b97f8ccfa188739))
+
+- **drift**: #2422 스킬 3종·런북 코드/구조 드리프트 정리
+  ([#2424](https://github.com/joshua-jingu-lee/ante/pull/2424),
+  [`7c1ec32`](https://github.com/joshua-jingu-lee/ante/commit/7c1ec32d2f1f9dd96832037a7b97f8ccfa188739))
+
+- **process**: #2418 D-019 이행 — 리뷰 게이트 재배선 및 Codex 참조 제거
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **process**: #2418 리뷰 게이트 재배선 — Codex→네이티브(@plan-reviewer, /code-review) + @issue-reviewer 신설
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+- **release**: #2417 1.0.0 메이저 선언 절차 정의 — major_on_zero 정합
+  ([#2420](https://github.com/joshua-jingu-lee/ante/pull/2420),
+  [`ff40dba`](https://github.com/joshua-jingu-lee/ante/commit/ff40dba1eab64f8c1973053b1807a93796dd57e5))
+
+- **release**: #2417 리뷰 반영 rev2 — publish 경로 declare_major 전파 + 범프 분류 정합 + 게이트 예외
+  ([#2420](https://github.com/joshua-jingu-lee/ante/pull/2420),
+  [`ff40dba`](https://github.com/joshua-jingu-lee/ante/commit/ff40dba1eab64f8c1973053b1807a93796dd57e5))
+
+- **release**: #2417 리뷰 반영 rev3 — 중단 조건에 declare-major forced-level 예외 반영
+  ([#2420](https://github.com/joshua-jingu-lee/ante/pull/2420),
+  [`ff40dba`](https://github.com/joshua-jingu-lee/ante/commit/ff40dba1eab64f8c1973053b1807a93796dd57e5))
+
+- **release**: #2426 리뷰 반영 rev3 — 태그 충돌 안전망 배선·불변식 정합·:latest 사후 복구
+  ([#2427](https://github.com/joshua-jingu-lee/ante/pull/2427),
+  [`f0dc909`](https://github.com/joshua-jingu-lee/ante/commit/f0dc909ec9a8b43fca542278159c15cda51e957d))
+
+- **release**: #2426 리뷰 반영 rev4 — 태그 충돌 해소를 에스컬레이션으로 재서술 (미배선 forced-minor 제거)
+  ([#2427](https://github.com/joshua-jingu-lee/ante/pull/2427),
+  [`f0dc909`](https://github.com/joshua-jingu-lee/ante/commit/f0dc909ec9a8b43fca542278159c15cda51e957d))
+
+- **release**: #2426 리뷰 반영 rev5 — 확장 이슈 범위를 prepare 계약+CI 양측으로 완결
+  ([#2427](https://github.com/joshua-jingu-lee/ante/pull/2427),
+  [`f0dc909`](https://github.com/joshua-jingu-lee/ante/commit/f0dc909ec9a8b43fca542278159c15cda51e957d))
+
+- **release**: #2426 리뷰 반영 — 핫픽스 버전 불변식·검증 게이트·:latest 조건화·네이밍 화해 잔여
+  ([#2427](https://github.com/joshua-jingu-lee/ante/pull/2427),
+  [`f0dc909`](https://github.com/joshua-jingu-lee/ante/commit/f0dc909ec9a8b43fca542278159c15cda51e957d))
+
+- **release**: #2426 브랜치 전략 성문화 — 핫픽스 lazy-branch·keystone·운영 태그 결합
+  ([#2427](https://github.com/joshua-jingu-lee/ante/pull/2427),
+  [`f0dc909`](https://github.com/joshua-jingu-lee/ante/commit/f0dc909ec9a8b43fca542278159c15cda51e957d))
+
+- **release**: #2436 리뷰 반영 rev3 — §8 폴백 라벨 정합 + rerun 창 경과 시 수동 twine 최후 수단
+  ([#2440](https://github.com/joshua-jingu-lee/ante/pull/2440),
+  [`8918b38`](https://github.com/joshua-jingu-lee/ante/commit/8918b38b0ba42c9640ce2ddf524f7c812898bf66))
+
+- **release**: #2436 리뷰 반영 rev4 — 수동 twine 자격증명 출처 정정(시크릿 write-only)·수동 GHCR :latest 처분 명시
+  ([#2440](https://github.com/joshua-jingu-lee/ante/pull/2440),
+  [`8918b38`](https://github.com/joshua-jingu-lee/ante/commit/8918b38b0ba42c9640ce2ddf524f7c812898bf66))
+
+- **release**: #2436 리뷰 반영 rev5 — rev4 부분 정정 잔재 해소 (리드인·§8 표의 시크릿 출처 서술)
+  ([#2440](https://github.com/joshua-jingu-lee/ante/pull/2440),
+  [`8918b38`](https://github.com/joshua-jingu-lee/ante/commit/8918b38b0ba42c9640ce2ddf524f7c812898bf66))
+
+- **release**: #2436 리뷰 반영 — OIDC 실패 복구를 rerun 기반으로 재작성 (태그 시점 워크플로우 제약)
+  ([#2440](https://github.com/joshua-jingu-lee/ante/pull/2440),
+  [`8918b38`](https://github.com/joshua-jingu-lee/ante/commit/8918b38b0ba42c9640ce2ddf524f7c812898bf66))
+
+- **runbooks**: #2423 일회성 정리 런북 07·08 archive 이동
+  ([#2425](https://github.com/joshua-jingu-lee/ante/pull/2425),
+  [`7150d22`](https://github.com/joshua-jingu-lee/ante/commit/7150d22a37ccee8461ec890777d6c52b41de2cd6))
+
+- **strategy**: #2390 modify_order를 broker-level 미구현(deferred)로 SSOT 정렬 — guide·설계스펙·KIS 표 (#2391
+  follow-up) ([#2392](https://github.com/joshua-jingu-lee/ante/pull/2392),
+  [`c3e1b94`](https://github.com/joshua-jingu-lee/ante/commit/c3e1b94ecbe5dda5d920d06307b859b459d4d6b7))
+
+- **strategy**: #2390 리뷰 반영 — modify RuleEngine 선처리·reason 필드 정확화
+  ([#2392](https://github.com/joshua-jingu-lee/ante/pull/2392),
+  [`c3e1b94`](https://github.com/joshua-jingu-lee/ante/commit/c3e1b94ecbe5dda5d920d06307b859b459d4d6b7))
+
+- **strategy**: #2390 리뷰 반영(2) — modify 룰 선처리 정확화 전파 + eventbus 구독자 보강
+  ([#2392](https://github.com/joshua-jingu-lee/ante/pull/2392),
+  [`c3e1b94`](https://github.com/joshua-jingu-lee/ante/commit/c3e1b94ecbe5dda5d920d06307b859b459d4d6b7))
+
+### Features
+
+- **broker**: #2391 KIS 주문 정정 v1(price-only) — modify_order/order-rvsecncl 정정 + un-defer
+  ([#2394](https://github.com/joshua-jingu-lee/ante/pull/2394),
+  [`c69e9a6`](https://github.com/joshua-jingu-lee/ante/commit/c69e9a6edf204ea2c6d3e294a9738c1b100a3dad))
+
+- **broker**: #2399 KIS 토큰 single-flight + shared cache + EGW00133 per-app_key cooldown
+  ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **broker**: #2399 KIS 토큰 single-flight + shared cache + EGW00133 단일 cadence backoff
+  ([#2403](https://github.com/joshua-jingu-lee/ante/pull/2403),
+  [`ae6d8b3`](https://github.com/joshua-jingu-lee/ante/commit/ae6d8b37dd9f43d630b1ba52f0910c68c7cadd93))
+
+- **core**: #2397 RuntimeReadinessRegistry — per-account readiness + self-healing (observe-only)
+  ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2397 RuntimeReadinessRegistry — per-account readiness + self-healing (observe-only,
+  #2396) ([#2401](https://github.com/joshua-jingu-lee/ante/pull/2401),
+  [`7f38e85`](https://github.com/joshua-jingu-lee/ante/commit/7f38e853696c9ba77f555c329b0c3da6e55301a0))
+
+- **core**: #2398 active-order readiness gate — 3계층 defense-in-depth + in-flight kill-switch
+  backstop ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+- **core**: #2398 active-order readiness gate — 3계층 defense-in-depth(G1–G9)
+  ([#2402](https://github.com/joshua-jingu-lee/ante/pull/2402),
+  [`f2d02b8`](https://github.com/joshua-jingu-lee/ante/commit/f2d02b84cf2eff52534124823a823762ff5c46b5))
+
+### Refactoring
+
+- **docs**: #2418 리뷰 게이트 문서 중복 축약 (재배선 선행)
+  ([#2421](https://github.com/joshua-jingu-lee/ante/pull/2421),
+  [`7dc27e3`](https://github.com/joshua-jingu-lee/ante/commit/7dc27e32da3d11d0d63fca23230775425d285487))
+
+### Testing
+
+- **gateway**: #2405 _init_gateway stub에 _stop_session_expiry_loop 중립화 — full suite hang 해소
+  ([#2411](https://github.com/joshua-jingu-lee/ante/pull/2411),
+  [`68fd30e`](https://github.com/joshua-jingu-lee/ante/commit/68fd30e33b2933b77f92f77ca66465d90ab63ce8))
+
+
 ## v0.11.0 (2026-06-13)
 
 ### Bug Fixes
