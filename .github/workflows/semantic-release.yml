@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # publish.yml run 조회(baseline 캡처 + 발화 자기검증)에 필요하다 (#2449).
+      # permissions 블록을 명시하면 나머지 스코프가 none이 되므로 생략하면 run 조회가 403이다.
+      actions: read
     steps:
       # step-level if는 Actions expression 평가라 셸 보간이 없어 ref 이름 인젝션을 원천 차단하고,
       # checkout/pip 이전에 fail-fast한다. 비-main ref는 PSR 소문자 no-release 메시지로
@@ -35,6 +38,32 @@ jobs:
         run: |
           echo "이 워크플로우는 main ref 전용이다 (#2416)." >&2
           exit 1
+
+      # 릴리스 생성 토큰 fail-closed 가드 (#2449). GITHUB_TOKEN이 만든 이벤트는 다른 워크플로우를
+      # 트리거하지 않는 것이 GitHub 기본 동작(무한 재귀 방지)이라, GITHUB_TOKEN으로 만든 릴리스는
+      # publish.yml의 on: release(published)를 발화시키지 못한다 — v0.11.0·v0.12.0에서 PyPI/GHCR
+      # 배포가 2회 연속 통째로 누락됐다. 그래서 아래 Create GitHub Release는 PAT로 릴리스를 만든다.
+      # 이 가드가 필수인 이유: 시크릿이 비면 action-gh-release의 token 입력이 빈 문자열이 되는데,
+      # 아래 Create GitHub Release는 env로 GITHUB_TOKEN을 넘기지 않아 폴백 대상 자체가 없다.
+      # 그래서 액션은 **빈 토큰으로 401 하드 실패**하고, 그 시점은 PSR이 이미 태그를 push한 뒤라
+      # "태그는 있는데 릴리스가 없는" **고아 태그**(런북 06 §11)로 끝난다.
+      # 이 가드는 태그 생성 이전에 차단해 그 상태를 원천 방지한다.
+      # dry_run 여부와 무관하게 항상 실행한다 — dry-run은 실 릴리스 직전 점검이라 시크릿 결손을
+      # 그때 아는 것이 가장 싸고, 조건 분기가 없어야 가드 자체의 오작성 여지도 없다.
+      # 시크릿은 step-level if(Actions expression)에서 읽을 수 없어 run 내부에서 검사한다
+      # (#2437 pr-approvals.yml:35-48과 동일 패턴).
+      - name: Guard release token — AUTOMERGE_TOKEN fail-closed (#2449)
+        env:
+          RELEASE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
+        run: |
+          if [ -z "$RELEASE_TOKEN" ]; then
+            echo "::error::AUTOMERGE_TOKEN 시크릿이 없어 GitHub Release를 생성할 수 없습니다 (fail-closed, #2449)." >&2
+            echo "GITHUB_TOKEN으로 대체하지 않습니다: GITHUB_TOKEN이 만든 릴리스는 release:published 이벤트로 publish.yml을 트리거하지 않아 PyPI 업로드와 GHCR push가 조용히 누락됩니다." >&2
+            echo "복구: fine-grained PAT(Contents: Read and write)를 AUTOMERGE_TOKEN 이름으로 Settings → Secrets and variables → Actions 에 등록한 뒤 이 워크플로우를 다시 dispatch하세요." >&2
+            echo "  (이 가드는 릴리스 생성 이전에 실패하므로 태그가 만들어지지 않았고, 재dispatch가 정상 복구 경로입니다.)" >&2
+            echo "  (이 워크플로우는 사람이 수동 dispatch하므로 Dependabot 시크릿 저장소 등록은 필요 없습니다 — 상세는 런북 04 §5.2·§7.)" >&2
+            exit 1
+          fi
 
       - uses: actions/checkout@v7
         with:
@@ -82,16 +111,132 @@ jobs:
           fi
 
       # 이하 단계는 새 릴리스가 있고 dry_run이 아닐 때만 실행
+      # 1-1. publish.yml 발화 자기검증용 baseline 캡처 (#2449)
+      #   릴리스 생성 **이전** 시점의 최대 run id를 기록해, 아래 자기검증이 "이번 릴리스가 만든
+      #   신규 run"만 인정하도록 한다. publish.yml에는 push/tag 트리거가 없어(publish.yml:3-6)
+      #   방금 PSR이 push한 태그는 run을 만들지 않으므로 이 캡처와 릴리스 생성 사이에 신규 run이
+      #   끼어들 여지가 없다. run이 0건이면 0.
+      - name: Capture publish.yml run baseline (#2449)
+        id: publish_baseline
+        if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # 조회 실패(일시적 API 오류)에도 스텝을 죽이지 않는다. 여기서 죽으면 PSR이 이미 태그를
+          # push한 뒤라 "태그는 있는데 릴리스가 없는" 고아 태그(런북 06 §11)가 만들어진다.
+          # baseline이 0으로 퇴화해도 아래 자기검증의 event=release + 태그 커밋 headSha 조건은
+          # 그대로 살아 있으므로 판정이 무력화되지 않는다.
+          if ! BASELINE=$(gh run list -w publish.yml --repo "$GITHUB_REPOSITORY" -L 100 \
+            --json databaseId --jq 'map(.databaseId) | max // 0'); then
+            echo "::warning::publish.yml run 목록 조회 실패 — baseline을 0으로 두고 진행합니다 (#2449)."
+            BASELINE=0
+          fi
+          if ! [[ "$BASELINE" =~ ^[0-9]+$ ]]; then
+            BASELINE=0
+          fi
+          echo "publish.yml baseline run id: ${BASELINE}"
+          echo "baseline=${BASELINE}" >> "$GITHUB_OUTPUT"
+
       # 2. Python 패키지 빌드
       - name: Build Python package
         if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
         run: pip install build && python -m build
 
       # 3. GitHub Release 생성
+      #   token: PAT로 릴리스를 만들어야 published 이벤트가 publish.yml을 트리거한다 (#2449).
+      #   액션 기본값 github.token(= GITHUB_TOKEN)으로 만든 릴리스는 재귀 방지 규칙에 걸려
+      #   publish.yml을 발화시키지 못한다(#2437 머지 경로와 동일한 결함 클래스). 시크릿 부재 시
+      #   이 입력은 빈 문자열이 되고 이 스텝은 env로 GITHUB_TOKEN을 넘기지 않아 폴백 대상도
+      #   없으므로, 액션은 빈 토큰으로 401 하드 실패한다 — 태그는 이미 push된 뒤라 고아 태그
+      #   (런북 06 §11)가 남는다. 그래서 위 fail-closed 가드가 태그 생성 이전에 반드시 선행해야 한다.
       - name: Create GitHub Release
         if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
+          token: ${{ secrets.AUTOMERGE_TOKEN }}
           tag_name: ${{ steps.semrel.outputs.tag }}
           files: dist/*
           generate_release_notes: true
+
+      # 4. publish.yml 발화 자기검증 (#2449)
+      #   릴리스가 실제로 publish.yml을 발화시켰는지 확인하고, 아니면 명시 실패시킨다.
+      #   조용한 누락(semantic-release는 success인데 배포는 0)을 시끄러운 실패로 바꾸는 것이
+      #   이 스텝의 존재 이유다.
+      #   토큰은 GITHUB_TOKEN이다 — AUTOMERGE_TOKEN의 권장 grant(Contents RW + Pull requests RW)에는
+      #   Actions: read가 없어 정상 릴리스에서도 403 오탐 실패가 난다.
+      - name: Verify publish.yml was triggered (#2449)
+        if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.semrel.outputs.tag }}
+          BASELINE: ${{ steps.publish_baseline.outputs.baseline }}
+        run: |
+          # 태그 커밋 SHA는 태그 자체에서 구한다. github.sha(워크플로우를 트리거한 커밋)는
+          # 현행 흐름에서 우연히 일치할 뿐이라 판정 출처로 쓰지 않는다.
+          if ! TAG_SHA=$(git rev-parse "${TAG}^{commit}" 2>/dev/null); then
+            git fetch --tags --force origin
+            TAG_SHA=$(git rev-parse "${TAG}^{commit}")
+          fi
+          if ! [[ "$BASELINE" =~ ^[0-9]+$ ]]; then
+            BASELINE=0
+          fi
+          echo "tag=${TAG} / tag_commit=${TAG_SHA} / baseline_run_id=${BASELINE}"
+
+          # 판정식은 3조건 AND다. headSha만 보면 안 되는 이유:
+          # publish.yml의 workflow_dispatch build-only 실행은 정식 절차(런북 06 §7,
+          # release.md dry-run 절)라 실제 run이 존재하고, 그 headSha는 main HEAD다.
+          # 릴리스 태그는 바로 그 커밋 위에 찍히므로 headSha만으로는 릴리스 이전부터 있던
+          # run이 잡혀 즉시 거짓 통과한다 — 배포는 없는데 가드는 초록이 되어 이 스텝이
+          # 없애려는 실패 모드를 그대로 재생산한다.
+          #   1) event == 'release'      (dispatch build-only run 배제)
+          #   2) headSha == 태그 커밋 SHA (다른 커밋의 run 배제)
+          #   3) databaseId > baseline   (릴리스 이전 run 배제)
+          for attempt in $(seq 1 8); do
+            # 조회 실패는 다음 회차에서 재시도한다. 여기서 스텝을 죽이면 아래 복구 안내
+            # (draft 토글 · rerun/재dispatch 금지)를 출력하지 못한 채 끝난다.
+            if ! RUNS=$(gh run list -w publish.yml --repo "$GITHUB_REPOSITORY" -L 20 \
+              --json databaseId,event,headSha,url); then
+              echo "::warning::publish.yml run 목록 조회 실패 (attempt ${attempt}/8) — 재시도합니다."
+              RUNS='[]'
+            fi
+            # 파싱 실패도 조회 실패와 대칭으로 흡수한다. gh가 exit 0인데 비-JSON을 뱉으면
+            # jq가 실패하고 pipefail로 스텝이 즉사해, 아래 복구 안내를 출력하지 못한 채 끝난다.
+            if ! MATCH=$(printf '%s' "$RUNS" | jq -r --arg sha "$TAG_SHA" --argjson base "$BASELINE" \
+              '[.[] | select(.event == "release" and .headSha == $sha and .databaseId > $base)]
+               | first | .url // empty'); then
+              echo "::warning::publish.yml run 목록 파싱 실패 (attempt ${attempt}/8) — 재시도합니다."
+              MATCH=""
+            fi
+            if [ -n "$MATCH" ]; then
+              echo "publish.yml 발화 확인 (attempt ${attempt}/8): ${MATCH}"
+              exit 0
+            fi
+            echo "publish.yml run 미발견 (attempt ${attempt}/8)"
+            # 유한 폴링: 조회 8회, 그 사이 sleep은 7회뿐이라 대기 상한은 15초 × 7 = 105초.
+            # 무한 대기 금지.
+            # v0.12.0 실측 트리거 지연은 1초라 여유가 충분하다.
+            if [ "$attempt" -lt 8 ]; then
+              sleep 15
+            fi
+          done
+
+          echo "::error::publish.yml이 릴리스 ${TAG}에 대해 발화하지 않았습니다 (#2449)." >&2
+          cat >&2 <<EOF
+          릴리스 ${TAG} 자체는 생성됐고 태그·dist 자산·릴리스 노트는 정상입니다.
+          실패한 것은 publish.yml 트리거뿐이며, PyPI 업로드와 GHCR push가 누락된 상태입니다.
+
+          이 semantic-release.yml run을 rerun하지 말고, semantic-release.yml을 재dispatch하지도 마십시오.
+          둘 다 HEAD가 이미 태그된 상태라 semantic-release가 "No release will be made"를 반환하고,
+          released=false가 되어 Build / Create GitHub Release / 이 자기검증이 전부 skip됩니다.
+          그 run은 아무것도 검증하지 않은 채 초록으로 끝납니다 — 시끄러운 실패가 다시 조용해지는 경로입니다.
+
+          복구는 draft 토글 단일 경로입니다 (비파괴 — dist 자산·릴리스 노트·태그 모두 보존):
+            gh release edit ${TAG} --draft
+            gh release edit ${TAG} --draft=false --latest
+
+          원인 1순위는 AUTOMERGE_TOKEN 부재·권한 부족(Contents: Read and write)입니다.
+          상세 절차: docs/runbooks/06-release.md §11 「publish.yml 미트리거」
+          EOF
+          exit 1

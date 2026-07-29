@@ -262,6 +262,8 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
 `post-merge.yml`은 PR 머지가 만든 `pull_request: closed`(`merged == true`) 이벤트로 트리거된다(#2437 — 폴링·handoff 제거). 이 이벤트는 auto-merge를 **`AUTOMERGE_TOKEN`(PAT)**으로 enable했기에 발화한다(머지 actor = PAT 소유자).
 
+같은 재귀 방지 규칙이 **릴리스 → publish 경로**에도 그대로 작용하며(`GITHUB_TOKEN`이 만든 GitHub Release가 `publish.yml`을 트리거하지 않음, #2449), 거기서도 `AUTOMERGE_TOKEN`이 같은 역할을 한다 — [§7.1](#71-릴리스--publish-트리거는-pat에-의존한다-2449). 아래 등록 규칙은 두 경로 공통이지만, **Dependabot 이중 등록 요구는 머지 경로에만 해당**한다(릴리스 경로 비대칭은 §7.1 참조).
+
 **`AUTOMERGE_TOKEN`은 Actions·Dependabot 두 시크릿 저장소에 모두 등록한다.** GitHub는 `dependabot[bot]`이 트리거한 run의 `secrets` 컨텍스트를 **Dependabot secrets** 저장소로 해석한다(Actions secrets가 아님). Actions에만 등록하면 **dependabot PR**이, Dependabot에만 등록하면 **일반 PR**이 각각 빈 토큰으로 상시 fail-closed된다(아래 실패 모드 참조). `Settings → Secrets and variables → Actions`와 `→ Dependabot` 양쪽에 같은 PAT를 등록한다.
 
 - 알려진 실패 모드:
@@ -327,3 +329,14 @@ main에 머지되었다고 자동 릴리스되지는 않는다.
 release PR에서는 Docker build 검증만 수행하고, registry push는 GitHub Release가 published 된 뒤 `publish.yml`에서만 수행한다.
 
 **릴리스 워크플로우 concurrency 비대칭(#2428)**: `semantic-release.yml`에는 정적 concurrency 그룹을 두어 이중 dispatch 시 동시 태그/버전 계산 경합을 막는다. 입력이 동일한 dispatch 간에는 취소돼도 다음 run이 같은 계산을 하므로 무해하다. 단 입력이 다른 dispatch(예: `semantic-release.yml`의 `declare_major` 선언 릴리스, #2417)가 pending 중 무음 취소되면 그 선언이 소실될 수 있으므로, `declare_major` dispatch는 다른 release run이 없는 상태에서만 실행한다. `publish.yml`에는 concurrency를 **두지 않는다** — concurrency 그룹은 pending run을 최대 1개만 유지하고 새 run이 큐잉되면 기존 pending run을 무음 취소하므로, run이 겹치면(실행 1 + pending 1 상태에서 세 번째 트리거) pending 중이던 릴리스의 run이 새 run으로 대체·무음 취소되어 해당 릴리스의 PyPI/GHCR 배포가 누락된다. 이는 막으려던 `:latest` push 경합(희귀)보다 나쁜 실패 모드다. 릴리스는 수동·순차라 겹침 자체가 실질적으로 없어 직렬화 이득도 없다.
+
+### 7.1 릴리스 → publish 트리거는 PAT에 의존한다 (#2449)
+
+위 흐름도의 `semantic-release.yml → publish.yml` 화살표는 **자동으로 이어지지 않는다.** `GITHUB_TOKEN`이 만든 이벤트가 다른 워크플로우를 트리거하지 않는 GitHub 기본 동작(무한 재귀 방지) 때문에, 기본 토큰으로 만든 GitHub Release는 `publish.yml`의 `on: release(published)`를 발화시키지 못한다. 그러면 `semantic-release.yml`은 `success`인데 PyPI·GHCR 배포만 통째로 빠진 **조용한 누락**이 된다(v0.11.0·v0.12.0 2회 연속 실측).
+
+이는 [§5.2](#52-post-merge-실패-모드와-복구)가 이미 다루는 것과 **동일한 결함 클래스**다. `post-merge.yml`은 `GITHUB_TOKEN` 머지가 `pull_request: closed`를 발화시키지 않는 문제를 `AUTOMERGE_TOKEN`(PAT)으로 머지 actor를 실사용자로 바꿔 해소했고(#2437), 릴리스 경로도 같은 처방을 쓴다.
+
+- **`AUTOMERGE_TOKEN`의 용도는 두 가지다**: (i) auto-merge enable(`pr-approvals.yml`, §5.2) — 머지가 `closed` 이벤트를 발화시키기 위해, (ii) **GitHub Release 생성(`semantic-release.yml`) — 릴리스가 `published` 이벤트를 발화시키기 위해**. 이름은 머지 유래지만 두 용도의 목적은 같다: **GitHub 이벤트를 실사용자 주체로 발화시켜 후속 워크플로우를 잇는 것**. 필요 권한은 §5.2의 발급 권장치(`Contents RW` + `Pull requests RW`)가 그대로 커버한다(릴리스 생성은 `Contents: Read and write`).
+- **Dependabot 이중 등록은 릴리스 경로에 적용되지 않는다(비대칭)**: §5.2의 "Actions·Dependabot 양쪽 등록" 요구는 `dependabot[bot]`이 트리거한 run이 Dependabot secrets 저장소만 읽기 때문이다. `semantic-release.yml`은 **사람이 수동 `workflow_dispatch`로만 실행**하므로 `dependabot[bot]` 컨텍스트로 돌 일이 없고, **Actions 저장소 등록만으로 충분**하다. 양쪽 등록 요구는 여전히 머지 경로(§5.2) 때문에 유효하니 등록을 줄이지 않는다.
+- **3중 방어**: 시크릿 부재 → `semantic-release.yml`의 fail-closed 가드가 **태그 생성 이전에** 중단(가드가 없으면 `token` 입력이 빈 문자열이 되는데 릴리스 생성 스텝은 `env`로 `GITHUB_TOKEN`을 넘기지 않아 폴백 대상도 없다 — 액션이 빈 토큰으로 **401 하드 실패**하고, 그 시점은 PSR이 이미 태그를 push한 뒤라 **고아 태그**로 끝난다) / 권한 부족·만료 → 릴리스 생성 401·403(**고아 태그**) / 그 외 모든 원인 → 릴리스 직후 `Verify publish.yml was triggered` 자기검증 스텝이 `event=release` + 태그 커밋 `headSha` + baseline 초과 run id **3조건 AND**로 발화를 확인하고, 최대 105초(15초 간격, 조회 8회) 폴링 후에도 없으면 run을 실패시킨다.
+- 실패 시 복구(draft 토글)와 **`semantic-release.yml` rerun·재dispatch 금지 사유**는 [06-release.md §11](06-release.md#11-트러블슈팅)의 「`publish.yml` 미트리거」·「고아 태그」가 SSOT다. 그 금지는 `semantic-release.yml` 한정이며, `publish.yml` 실패에는 [06-release.md §11 「OIDC 인증 실패」](06-release.md#oidc-인증-실패-pypi-업로드-403인증-오류)·`github-ops.md`의 rerun-우선 원칙이 그대로 적용된다.
