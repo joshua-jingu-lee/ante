@@ -258,9 +258,9 @@ gh run list -w publish.yml -L 20 --json databaseId,event,headSha,status,conclusi
   | jq --arg sha "$TAG_SHA" '[.[] | select(.event == "release" and .headSha == $sha)]'
 ```
 
-빈 배열이면 미트리거다. `semantic-release.yml`의 `Verify publish.yml was triggered` 스텝(#2449)이 릴리스 직후 같은 판정을 2분간 폴링하므로, 정상 경로에서는 사람이 이 조회를 하기 전에 **워크플로우 run이 red로 먼저 알려준다**.
+빈 배열이면 미트리거다. `semantic-release.yml`의 `Verify publish.yml was triggered` 스텝(#2449)이 릴리스 직후 같은 판정을 최대 105초(15초 간격, 조회 8회) 폴링하므로, 정상 경로에서는 사람이 이 조회를 하기 전에 **워크플로우 run이 red로 먼저 알려준다**.
 
-**원인**: `GITHUB_TOKEN`이 만든 이벤트는 다른 워크플로우를 트리거하지 않는 GitHub 기본 동작(무한 재귀 방지)이다 — [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구)의 머지 경로와 동일한 결함 클래스. `semantic-release.yml`은 `AUTOMERGE_TOKEN`(PAT)으로 릴리스를 만들어 이를 피한다([04-ci-cd.md §7](04-ci-cd.md#7-릴리스-연계)). 따라서 실무 원인 1순위는 **`AUTOMERGE_TOKEN`의 만료·권한 부족(`Contents: Read and write` 필요)**이다. 시크릿이 아예 없으면 워크플로우 첫 스텝의 fail-closed 가드가 릴리스 생성 이전에 막는다.
+**원인**: `GITHUB_TOKEN`이 만든 이벤트는 다른 워크플로우를 트리거하지 않는 GitHub 기본 동작(무한 재귀 방지)이다 — [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구)의 머지 경로와 동일한 결함 클래스. `semantic-release.yml`은 `AUTOMERGE_TOKEN`(PAT)으로 릴리스를 만들어 이를 피한다([04-ci-cd.md §7](04-ci-cd.md#7-릴리스-연계)). 따라서 실무 원인 1순위는 **`AUTOMERGE_TOKEN`의 만료·권한 부족(`Contents: Read and write` 필요)**이다. 시크릿이 아예 없으면 워크플로우 앞단의 fail-closed 가드가 태그 생성 이전에 막는다(아래 「고아 태그」).
 
 **재실행 금지 (중요)**: **`semantic-release.yml`의 rerun과 재dispatch를 모두 하지 않는다.** 둘 다 HEAD가 이미 태그된 상태라 `semantic-release version`이 "No release will be made"를 반환하고, `released=false`가 되어 Build·Create GitHub Release·자기검증 스텝이 **전부 skip된 채 run이 초록으로 끝난다** — 시끄러운 실패가 다시 조용해지는 경로다. 이 금지는 `semantic-release.yml` 한정이며, 아래 「OIDC 인증 실패」가 권장하는 **`publish.yml`의 `gh run rerun`(표준 복구)과는 대상 워크플로우가 다르다.** `.agent/skills/github-ops.md`의 rerun-우선 규범도 `publish.yml`처럼 이벤트가 보존된 run에 적용된다.
 
