@@ -245,6 +245,55 @@ semver 최고 태그만 `:latest`로 push하는 CI 가드는 `publish.yml`에 �
 - rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 정리한다: 로컬 `git switch -f main && git branch -D release/vX.Y.Z`, 원격 `git push origin --delete release/vX.Y.Z`. (로컬 정리는 release.md 4단계 규칙과 동일 — release 브랜치 체크아웃 상태에서 `git switch -f main` 없이 `git branch -D`하면 실패한다.)
 - `/release prepare`를 처음부터 재실행해 최신 main 기준으로 다시 스탬핑한다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR release group이 `main`/`master` 한정).
 
+### publish.yml 미트리거 (릴리스는 생겼는데 배포가 없음)
+
+**증상**: `semantic-release.yml`이 `success`로 끝나고 GitHub Release도 dist 자산·노트까지 정상 생성됐는데, `publish.yml`이 **아예 실행되지 않아** PyPI 업로드와 GHCR push가 통째로 누락된다. 겉보기에는 릴리스가 성공한 것처럼 보이는 **조용한 누락**이 이 실패 모드의 본질이다(v0.11.0·v0.12.0 2회 연속 실측 — #2449).
+
+**판정**: **최신 run(`-L 1`)을 보면 안 된다.** 직전 릴리스의 성공 run이나 build-only `workflow_dispatch` run이 잡혀 거짓 성공으로 읽힌다(v0.12.0에서 실제로 오판). `event=release` **와** 이번 릴리스 태그 커밋 `headSha`를 함께 대조한다.
+
+```bash
+git fetch --tags --force origin
+TAG_SHA=$(git rev-parse "vX.Y.Z^{commit}")
+gh run list -w publish.yml -L 20 --json databaseId,event,headSha,status,conclusion,url \
+  | jq --arg sha "$TAG_SHA" '[.[] | select(.event == "release" and .headSha == $sha)]'
+```
+
+빈 배열이면 미트리거다. `semantic-release.yml`의 `Verify publish.yml was triggered` 스텝(#2449)이 릴리스 직후 같은 판정을 2분간 폴링하므로, 정상 경로에서는 사람이 이 조회를 하기 전에 **워크플로우 run이 red로 먼저 알려준다**.
+
+**원인**: `GITHUB_TOKEN`이 만든 이벤트는 다른 워크플로우를 트리거하지 않는 GitHub 기본 동작(무한 재귀 방지)이다 — [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구)의 머지 경로와 동일한 결함 클래스. `semantic-release.yml`은 `AUTOMERGE_TOKEN`(PAT)으로 릴리스를 만들어 이를 피한다([04-ci-cd.md §7](04-ci-cd.md#7-릴리스-연계)). 따라서 실무 원인 1순위는 **`AUTOMERGE_TOKEN`의 만료·권한 부족(`Contents: Read and write` 필요)**이다. 시크릿이 아예 없으면 워크플로우 첫 스텝의 fail-closed 가드가 릴리스 생성 이전에 막는다.
+
+**재실행 금지 (중요)**: **`semantic-release.yml`의 rerun과 재dispatch를 모두 하지 않는다.** 둘 다 HEAD가 이미 태그된 상태라 `semantic-release version`이 "No release will be made"를 반환하고, `released=false`가 되어 Build·Create GitHub Release·자기검증 스텝이 **전부 skip된 채 run이 초록으로 끝난다** — 시끄러운 실패가 다시 조용해지는 경로다. 이 금지는 `semantic-release.yml` 한정이며, 아래 「OIDC 인증 실패」가 권장하는 **`publish.yml`의 `gh run rerun`(표준 복구)과는 대상 워크플로우가 다르다.** `.agent/skills/github-ops.md`의 rerun-우선 규범도 `publish.yml`처럼 이벤트가 보존된 run에 적용된다.
+
+**복구 — draft 토글 단일 경로**: 실사용자 PAT 주체로 `published` 이벤트를 재발생시킨다.
+
+```bash
+source .github/local/github.env
+gh release edit vX.Y.Z --draft
+gh release edit vX.Y.Z --draft=false --latest
+```
+
+비파괴다 — dist 자산·릴리스 노트·annotated 태그가 모두 보존된다(v0.12.0 실측, 토글 직후 1초 내 `publish.yml` 발화). **릴리스를 삭제·재생성하지 않는다**(dist 자산이 유실되는 파괴 경로 — 「이미 릴리스된 버전」). 핫픽스 등으로 이 태그가 전역 최고 semver가 아니면 `--latest` 대신 `--latest=false`를 쓴다([§10 7단계](#10-핫픽스-릴리스)).
+
+복구 후에는 위 판정 명령으로 `event=release` run이 실제로 생겼는지 다시 확인하고, `/release publish` 4단계 모니터링을 이어간다.
+
+### 고아 태그 (태그는 있는데 릴리스가 없음)
+
+**증상**: `semantic-release.yml`이 `Create GitHub Release` 스텝에서 401/403으로 실패했다. PSR은 이미 `vX.Y.Z` 태그를 push한 뒤라 **태그는 원격에 있는데 GitHub Release가 없는** 부분 완료 상태가 된다. 릴리스가 없으니 `publish.yml`도 당연히 트리거되지 않는다.
+
+**원인**: `AUTOMERGE_TOKEN`의 권한 부족(`Contents: Read and write` 미보유) 또는 만료. 시크릿 자체가 없는 경우는 fail-closed 가드가 태그 생성 이전에 막으므로 이 상태가 되지 않는다.
+
+**복구**: 태그는 불변이므로 지우지 않는다. §10 핫픽스의 **수동 릴리스 경로를 그대로 재사용**해 릴리스만 사후 생성한다. 실사용자 주체의 `gh release create`라 `publish.yml`은 정상 트리거된다.
+
+```bash
+source .github/local/github.env
+git fetch --tags --force origin
+git switch --detach vX.Y.Z
+pip install build && python -m build      # 실패한 run의 dist는 남아 있지 않으므로 재빌드
+gh release create vX.Y.Z --generate-notes dist/*
+```
+
+`--latest` 취급은 [§10 7단계](#10-핫픽스-릴리스)와 동일하다(전역 최고 semver가 아니면 `--latest=false`). 근본 원인인 PAT 권한은 다음 릴리스 전에 반드시 정정한다 — 정정하지 않으면 매 릴리스가 이 상태로 떨어진다.
+
 ### publish.yml 실패
 
 - Docker login 실패 시 `GITHUB_TOKEN`의 `packages: write` 권한과 repository package 설정을 확인한다.

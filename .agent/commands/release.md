@@ -226,14 +226,27 @@ gh run view {run-id} --json status,conclusion,url,jobs
 
 semantic-release가 새 GitHub Release를 만들지 않았으면 그 이유를 보고하고 종료한다.
 
-### 4. PyPI와 Docker publish 모니터링
-
-GitHub Release가 생성되면 `publish.yml` 실행을 확인한다.
+run이 실패(red)했다면 **"릴리스 실패"로 단정하지 않는다.** 마지막 `Verify publish.yml was triggered` 스텝(#2449)에서 실패한 경우는 릴리스·태그·dist 자산이 모두 정상 생성됐고 `publish.yml` 트리거만 실패한 상태다. 이때는 `semantic-release.yml`을 rerun하거나 재dispatch하지 말고(HEAD가 이미 태그돼 있어 전 스텝이 skip된 채 거짓 초록으로 끝난다), draft 토글로 복구한 뒤 4단계를 이어간다(`docs/runbooks/06-release.md` §11 「`publish.yml` 미트리거」).
 
 ```bash
-gh run list -w publish.yml -L 1 --json status,conclusion,databaseId,headSha,createdAt
+gh release edit vX.Y.Z --draft
+gh release edit vX.Y.Z --draft=false --latest
+```
+
+### 4. PyPI와 Docker publish 모니터링
+
+GitHub Release가 생성되면 `publish.yml` 실행을 확인한다. 질문은 **"최신 run이 success인가"가 아니라 "이번 릴리스의 run이 존재하는가"**다. `-L 1`로 최신 run만 보면 직전 릴리스의 성공 run이나 build-only `workflow_dispatch` run이 잡혀 **배포가 통째로 누락됐는데도 성공으로 오판**한다(v0.11.0·v0.12.0 실측 — #2449). 따라서 `event=release` + 이번 릴리스 **태그 커밋 SHA** 대조로 판정한다.
+
+```bash
+git fetch --tags --force origin
+TAG_SHA=$(git rev-parse "vX.Y.Z^{commit}")
+
+gh run list -w publish.yml -L 20 --json databaseId,event,headSha,status,conclusion,createdAt,url \
+  | jq --arg sha "$TAG_SHA" '[.[] | select(.event == "release" and .headSha == $sha)]'
 gh run view {run-id} --json status,conclusion,url,jobs
 ```
+
+결과가 빈 배열이면 배포가 일어나지 않은 것이다 — `docs/runbooks/06-release.md` §11 「`publish.yml` 미트리거」의 draft 토글로 복구한다. (`semantic-release.yml`의 자기검증 스텝이 같은 판정을 워크플로우 안에서 이미 수행하므로, 3단계가 green이면 여기서도 매칭 run이 나온다. 이 조회는 보고용 run URL·결과 확인 겸 교차 확인이다.)
 
 `publish.yml`은 GitHub Release `published` 이벤트에서만 Python package를 PyPI에 올리고 Docker image를 GHCR에 push한다.
 수동 `workflow_dispatch`는 build-only 검증으로만 사용한다.
