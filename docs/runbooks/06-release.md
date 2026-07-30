@@ -150,13 +150,26 @@ publish도 강제 범프를 전파해야 한다. `semantic-release.yml`은 태�
 | Trusted Publishing (OIDC) | 기본 (현행 — 실증 완료) | `id-token: write` + `environment: pypi`, `password:` 없음. 실증 근거는 아래 「실증 기록」 |
 | API 토큰 (`PYPI_API_TOKEN` secret) | 폴백 (**장애 대응** — 시크릿 보존, 워크플로우 경로 전용) | 검증된 기본 경로가 막혔을 때의 장애 대응 수단이며 상시 전환 후보가 아니다. 구조적 OIDC 포기 시 **다음 릴리스부터** 토큰 경로 복귀(현 릴리스 소급 불가). 시크릿은 write-only라 수동 twine의 자격증명 출처는 아님 — rerun 창 경과 시 수동 구조는 새 토큰 발급으로([§11 OIDC 인증 실패](#oidc-인증-실패-pypi-업로드-403인증-오류)) |
 
-**사용자 사전조건 (소유자만 확인 가능한 외부 상태)**: ante는 이미 여러 버전이 게시된 기존 PyPI 프로젝트다. **pending publisher는 미존재 프로젝트 예약용이라 기존 프로젝트를 커버하지 못한다** — "pending publisher 등록 완료"를 OIDC 동작 증거로 삼지 않는다. 소유자가 프로젝트 설정 `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·워크플로우(`publish.yml`)·environment(`pypi`)를 가리키는 **trusted publisher를 직접 등록**해야 한다(pypa README: "your project's publisher must already be configured on PyPI"). 이 등록은 **v0.12.0 업로드 성공으로 활성 상태가 확인됐다**(아래 「실증 기록」). 등록 내용 자체는 여전히 CLI로 조회할 수 없으므로, 확인은 **재등록이 필요해지는 변경이 생길 때** 한다 — 워크플로우 파일명(`publish.yml`) 변경, environment 이름 변경, 리포 이동·개명. 업로드 성공은 "매칭되는 publisher가 존재했다"까지만 증명하고 등록 시 environment 필드가 어떻게 채워졌는지는 증명하지 않으므로, environment 이름을 바꾸는 변경은 **등록 불일치를 유발할 수 있다**고 보고 확인 대상에 넣는다. 등록은 소유자가 언제든 철회·변경할 수 있는 가변 상태라, 한 번 확인됐다고 진단 순위에서 내리지 않는다(§11 1순위 유지).
+**사용자 사전조건 (소유자만 확인 가능한 외부 상태)**: ante는 이미 여러 버전이 게시된 기존 PyPI 프로젝트다. **pending publisher는 미존재 프로젝트 예약용이라 기존 프로젝트를 커버하지 못한다** — "pending publisher 등록 완료"를 OIDC 동작 증거로 삼지 않는다. 소유자가 프로젝트 설정 `https://pypi.org/manage/project/ante/settings/publishing/`에서 이 리포·워크플로우(`publish.yml`)·environment(`pypi`)를 가리키는 **trusted publisher를 직접 등록**해야 한다(pypa README: "your project's publisher must already be configured on PyPI"). 이 등록은 **v0.12.0 업로드 성공으로 활성 상태가 확인됐다**(아래 「실증 기록」).
+
+등록 **내용**도 웹 UI 없이 읽을 수 있다. PyPI provenance 엔드포인트는 **인증 없이** 해당 업로드를 승인한 publisher의 `repository`·`workflow`·`environment`를 그대로 반환하므로, curl 한 번이면 된다(경로의 버전·휠 파일명을 가장 최근 게시 버전으로 바꿔 조회한다):
+
+```bash
+curl -s -H "Accept: application/vnd.pypi.integrity.v1+json" \
+  https://pypi.org/integrity/ante/0.12.0/ante-0.12.0-py3-none-any.whl/provenance \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['attestation_bundles'][0]['publisher'])"
+# {'environment': 'pypi', 'kind': 'GitHub', 'repository': 'joshua-jingu-lee/ante', 'workflow': 'publish.yml'}
+```
+
+여기서 `environment`는 업로드 측 토큰 claim이 아니라 **PyPI 등록 레코드의 값**이다 — warehouse는 attestation의 publisher identity를 등록 레코드(`GitHubPublisher`)에서 만들고, 그 레코드의 `environment` 컬럼을 그대로 싣는다(환경 제약이 있는 레코드를 우선 매칭하고, 없을 때만 무제약 레코드로 폴백한다 — 무제약 레코드가 매칭됐다면 이 필드는 값이 없다(null/누락)). 따라서 위 출력은 등록이 environment `pypi`로 **제약돼 있음**을 확인해 준다. 그래서 environment 이름을 바꾸면 확인된 이 등록은 매칭에서 벗어나고, **재등록 전까지 업로드는 403 `invalid-publisher`로 거부된다** — 워크플로우 파일명(`publish.yml`) 변경, 리포 이동·개명도 동일하다. 확인은 **재등록이 필요해지는 변경이 생길 때** 한다.
+
+남는 한계는 하나다: **provenance는 업로드 시점의 스냅샷이라 현재 등록 상태를 증명하지 않는다.** 등록은 소유자가 언제든 철회·변경할 수 있는 가변 상태라, 한 번 확인됐다고 진단 순위에서 내리지 않는다(§11 1순위 유지).
 
 **여전히 검증 불가인 전제**: 폴백용 `PYPI_API_TOKEN` 시크릿의 실재·유효성은 `gh secret list`가 403이라 확인할 수 없다. 폴백 경로(§11)를 실제로 쓰기 전에 소유자 확인이 필요하다.
 
 **실증 기록**: password-less OIDC 업로드는 **v0.12.0(2026-07-28)에서 실증됐다.** `publish.yml` run [30398415975](https://github.com/joshua-jingu-lee/ante/actions/runs/30398415975)의 `Publish to PyPI` 스텝이 `password:` 입력 없이 성공해 PyPI에 `ante 0.12.0`이 게시됐고, digital attestations 생성도 성공했다(attestation은 Trusted Publishing 업로드에만 허용되므로 OIDC 경로였음의 증거다). 새 venv에서 `pip install ante==0.12.0` → `import ante` / `ante --version`으로 사후 확인까지 마쳤다. 즉 OIDC는 **검증된 기본 경로**이며, 토큰 폴백은 그 경로의 장애 대응 수단이다 — 미검증 리스크를 이유로 폴백으로 전환할 근거는 없다.
 
-**사전 검증의 한계 (현행 구성 한정)**: 이 실증이 실 릴리스에서만 가능했던 것은 **현행 `publish.yml` 구성의 성질**이다. PyPI 업로드·GHCR login·GHCR push 세 스텝이 모두 `github.event_name == 'release'` 게이트를 달고 있어 `workflow_dispatch`는 OIDC 경로를 아예 실행하지 않는다(build-only). OIDC를 밟으려면 실제 `release` 이벤트가 필요하고, 그 이벤트는 동시에 **실 PyPI 업로드와 실 GHCR push를 낸다** — 검증용 임시 릴리스는 파괴적이다. 이는 "OIDC는 원리적으로 사전 검증이 불가하다"는 뜻이 **아니다**: 핀된 pypa 액션은 `repository-url: https://test.pypi.org/legacy/`로 TestPyPI 대상 업로드를 정식 지원하며, 현행 구성이 그 경로를 쓰지 않을 뿐이다. 한편 OIDC publish가 실패해도 인증은 dist 업로드 이전 단계라 버전을 소모하지 않는다(§11).
+**사전 검증의 한계 (현행 구성 한정)**: 이 실증이 실 릴리스에서만 가능했던 것은 **현행 `publish.yml` 구성의 성질**이다. PyPI 업로드·GHCR login·GHCR push 세 지점이 모두 `github.event_name == 'release'`에 걸려 있어 `workflow_dispatch`는 OIDC 경로를 아예 실행하지 않는다(build-only). 정확히는 **스텝 게이트 2개**(`Publish to PyPI`·`Log in to GHCR`의 `if:`)와 **입력 게이트 1개**(`Build and publish Docker image`의 `push:` — 이 스텝 자체는 dispatch에서도 실행되어 push 없이 빌드만 한다)이며, "dispatch는 OIDC를 밟지 않는다"는 결론은 `Publish to PyPI` 스텝 게이트 하나로 성립한다. OIDC를 밟으려면 실제 `release` 이벤트가 필요하고, 그 이벤트는 동시에 **실 PyPI 업로드와 실 GHCR push를 낸다** — 검증용 임시 릴리스는 파괴적이다. 이는 "OIDC는 원리적으로 사전 검증이 불가하다"는 뜻이 **아니다**: 핀된 pypa 액션은 `repository-url: https://test.pypi.org/legacy/`로 TestPyPI 대상 업로드를 정식 지원하며, 현행 구성이 그 경로를 쓰지 않을 뿐이다. 한편 OIDC publish가 실패해도 인증은 dist 업로드 이전 단계라 버전을 소모하지 않는다(§11).
 
 ## 9. 운영 배포 결합 규약
 
