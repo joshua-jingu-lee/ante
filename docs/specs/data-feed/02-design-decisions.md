@@ -30,6 +30,17 @@ date가 충돌할 수 있다. 따라서 natural key를 `date` 단독이 아닌 `
 null-fill(schema-union) 방식이며, merge가 (방어적으로) 실패해도 기존 파티션을
 덮어쓰지 않고 데이터 품질 경고(report `warnings`)로 표면화한다(데이터 무손실 우선).
 
+이 표면화는 리포트 경고 유계화(`type` 버킷별 상한 절단, #2414)와 다음과 같이
+상호작용한다 — 규범 SSOT는
+[10-checkpoints-and-reports.md `경고 유계화`](10-checkpoints-and-reports.md#경고-유계화-bounded-warnings)다.
+
+- **표면화 자체는 절단되지 않는다.** 발생 건수는 `summary.warnings_total` /
+  `summary.warnings_by_type.store_merge`에 **전수 정확**하게 남는다. 절단되는
+  것은 `warnings` 배열의 개별 항목(경로 등 상세)뿐이며, 그 상세도 로그로 남는다.
+- **checkpoint 전진 게이트는 절단과 무관하다.** merge 실패의 미전진 판정은
+  리포트 배열이 아니라 그 실행 단계의 drain 결과 전수에서 내려진다 — 상한을
+  넘겨 배열에서 잘린 `store_merge`도 동일하게 미전진을 유발한다.
+
 ### 쓰기 소유권
 
 DataFeed가 소유하는 데이터 영역:

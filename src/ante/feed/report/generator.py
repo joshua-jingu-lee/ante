@@ -56,6 +56,11 @@ class ReportGenerator:
                 # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed는
                 # 종목 귀속 실패만 세므로 symbols_failed=0이어도 >0일 수 있다(#2117).
                 "failures_total": len(result.failures),
+                # 경고는 type 버킷별로 유계 절단되므로(#2414) len(warnings)는
+                # 총계가 아니다 — 전수 정확 집계를 result에서 그대로 읽는다.
+                "warnings_total": result.warnings_total,
+                "warnings_by_type": dict(result.warnings_by_type),
+                "warnings_truncated": result.warnings_truncated,
                 "rows_written": result.rows_written,
                 "data_types": list(result.data_types),
             },

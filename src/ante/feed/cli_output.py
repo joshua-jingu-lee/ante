@@ -45,6 +45,12 @@ def _backfill_result_dict(result: CollectionResult) -> dict[str, Any]:
         # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed=0이어도
         # >0일 수 있다(#2117). 상세는 failures 배열.
         "failures_total": len(result.failures),
+        # 경고는 type 버킷별로 유계 절단되므로(#2414) len(warnings)는 총계가
+        # 아니다 — 전수 정확 집계를 result에서 그대로 읽는다. 리포트는 summary
+        # 하위에 중첩하지만 이 envelope는 failures_total과 동일하게 flat이다.
+        "warnings_total": result.warnings_total,
+        "warnings_by_type": dict(result.warnings_by_type),
+        "warnings_truncated": result.warnings_truncated,
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,
@@ -65,6 +71,12 @@ def _daily_result_dict(result: CollectionResult) -> dict[str, Any]:
         # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed=0이어도
         # >0일 수 있다(#2117). 상세는 failures 배열.
         "failures_total": len(result.failures),
+        # 경고는 type 버킷별로 유계 절단되므로(#2414) len(warnings)는 총계가
+        # 아니다 — 전수 정확 집계를 result에서 그대로 읽는다. 리포트는 summary
+        # 하위에 중첩하지만 이 envelope는 failures_total과 동일하게 flat이다.
+        "warnings_total": result.warnings_total,
+        "warnings_by_type": dict(result.warnings_by_type),
+        "warnings_truncated": result.warnings_truncated,
         "rows_written": result.rows_written,
         "data_types": result.data_types,
         "duration_seconds": result.duration_seconds,
