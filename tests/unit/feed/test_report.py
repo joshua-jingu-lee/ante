@@ -13,7 +13,11 @@ import pytest
 
 from ante.data.store import ParquetStore
 from ante.feed.models.result import CollectionResult
-from ante.feed.pipeline.backfill_runner import BackfillRunner
+from ante.feed.pipeline.backfill_runner import (
+    MAX_WARNINGS_PER_TYPE,
+    BackfillRunner,
+    _RunContext,
+)
 from ante.feed.report.generator import REPORTS_DIR, ReportGenerator
 
 
@@ -686,6 +690,146 @@ class TestReportFailuresTotalSurfacesNonSymbolFailures:
         # 그러나 failures_total로는 정직하게 표면화된다.
         assert summary["failures_total"] == 1
         assert len(report["failures"]) == 1
+
+
+class TestBoundedWarnings:
+    """경고 인메모리 누적이 `type` 버킷별로 유계인지 검증(#2414).
+
+    다년 backfill이 행 단위 경고를 상한 없이 누적해 프로세스 메모리를
+    소진시켰다. `_RunContext.add_warnings()` 단일 chokepoint가 버킷별
+    `MAX_WARNINGS_PER_TYPE` 건까지만 보존하고, 총계/타입별 집계는 절단과
+    무관하게 전수 정확해야 한다.
+    """
+
+    def test_single_bucket_is_capped_and_counts_stay_exact(
+        self, feed_dir: Path
+    ) -> None:
+        """단일 버킷 N×10건 → 샘플은 N건, 총계는 N×10, truncated=True."""
+        ctx = _RunContext()
+        overflow = MAX_WARNINGS_PER_TYPE * 10
+        ctx.add_warnings(
+            [
+                {"type": "business_rule", "message": f"low > close #{i}"}
+                for i in range(overflow)
+            ]
+        )
+
+        # 샘플은 상한까지만 보존된다(메모리 유계).
+        assert len(ctx.warnings) == MAX_WARNINGS_PER_TYPE
+        # 그러나 집계는 전수 정확하다(축소 보고 금지).
+        assert ctx.warnings_total == overflow
+        assert ctx.warnings_truncated is True
+
+        result = ctx.to_result("backfill", datetime.now(tz=UTC))
+        assert len(result.warnings) == MAX_WARNINGS_PER_TYPE
+        assert result.warnings_total == overflow
+        assert result.warnings_by_type == {"business_rule": overflow}
+        assert result.warnings_truncated is True
+
+        summary = ReportGenerator(feed_dir).generate(result)["summary"]
+        assert summary["warnings_total"] == overflow
+        assert summary["warnings_by_type"] == {"business_rule": overflow}
+        assert summary["warnings_truncated"] is True
+        # 리포트가 len(warnings)를 총계로 보고하면 축소 보고가 된다.
+        assert summary["warnings_total"] != len(result.warnings)
+
+    def test_buckets_are_capped_independently(self) -> None:
+        """서로 다른 type 2종이 각각 독립적으로 상한까지 보존된다."""
+        ctx = _RunContext()
+        excess = MAX_WARNINGS_PER_TYPE + 7
+        ctx.add_warnings(
+            [{"type": "business_rule", "message": f"b{i}"} for i in range(excess)]
+        )
+        ctx.add_warnings(
+            [{"type": "schema_validation", "message": f"s{i}"} for i in range(excess)]
+        )
+
+        result = ctx.to_result("backfill", datetime.now(tz=UTC))
+        kept_by_type: dict[str, int] = {}
+        for warn in result.warnings:
+            kept_by_type[warn["type"]] = kept_by_type.get(warn["type"], 0) + 1
+
+        assert kept_by_type == {
+            "business_rule": MAX_WARNINGS_PER_TYPE,
+            "schema_validation": MAX_WARNINGS_PER_TYPE,
+        }
+        assert result.warnings_total == excess * 2
+        assert result.warnings_by_type == {
+            "business_rule": excess,
+            "schema_validation": excess,
+        }
+
+    def test_warnings_by_type_is_sorted_by_bucket_name(self) -> None:
+        """warnings_by_type은 도착 순서가 아니라 버킷명 정렬로 직렬화된다."""
+        ctx = _RunContext()
+        ctx.add_warnings([{"type": "store_merge", "message": "z"}])
+        ctx.add_warnings([{"type": "business_rule", "message": "a"}])
+        ctx.add_warnings([{"message": "no type"}])
+
+        result = ctx.to_result("backfill", datetime.now(tz=UTC))
+        assert list(result.warnings_by_type) == [
+            "business_rule",
+            "store_merge",
+            "untyped",
+        ]
+
+    def test_untyped_warnings_bucket_without_null_key(self, feed_dir: Path) -> None:
+        """`type` 키 없는 경고(DART 형태)가 untyped 버킷으로 집계된다.
+
+        `w.get("type")`을 그대로 버킷 키로 쓰면 json.dumps({None: 3})가
+        `{"null": 3}`이 되어 리포트에 null 키가 샌다.
+        """
+        ctx = _RunContext()
+        # dart_collector가 내는 형태({source, year, reprt_code, message}).
+        ctx.add_warnings(
+            [
+                {
+                    "source": "dart",
+                    "year": "2025",
+                    "reprt_code": "11011",
+                    "message": "재무제표 응답 없음",
+                }
+            ]
+        )
+
+        result = ctx.to_result("backfill", datetime.now(tz=UTC))
+        assert result.warnings_by_type == {"untyped": 1}
+        assert result.warnings_total == 1
+
+        report = ReportGenerator(feed_dir).generate(result)
+        # json 직렬화에 `null` 키가 새지 않는다(w.get("type") 그대로 쓰면 샌다).
+        assert json.dumps(report["summary"]["warnings_by_type"]) == '{"untyped": 1}'
+        assert report["summary"]["warnings_total"] == 1
+        # 경고 객체 자체는 원래 shape를 유지한다(type 키를 주입하지 않는다).
+        assert "type" not in report["warnings"][0]
+
+    def test_add_warnings_does_not_mutate_input(self) -> None:
+        """add_warnings는 입력 리스트를 변형하지 않는다(결정 6).
+
+        `_drain_store_warnings` 호출자가 같은 리스트로 checkpoint 전진을
+        판단하므로 in-place clear/pop은 그 계약을 깬다.
+        """
+        ctx = _RunContext()
+        # 상한을 채워 절단이 확실히 일어나는 상태로 만든다.
+        ctx.add_warnings(
+            [
+                {"type": "store_merge", "message": f"pre{i}"}
+                for i in range(MAX_WARNINGS_PER_TYPE)
+            ]
+        )
+        drained = [
+            {"type": "store_merge", "path": "/p/2025-09.parquet", "message": "merge"}
+        ]
+        snapshot = [dict(w) for w in drained]
+
+        ctx.add_warnings(drained)
+
+        assert drained == snapshot
+        assert ctx.warnings_truncated is True
+        # 절단됐어도 store_merge 총계는 정확하다.
+        result = ctx.to_result("backfill", datetime.now(tz=UTC))
+        assert result.warnings_by_type == {"store_merge": MAX_WARNINGS_PER_TYPE + 1}
+        assert len(result.warnings) == MAX_WARNINGS_PER_TYPE
 
     def test_dart_source_failure_surfaces_in_failures_total(
         self, feed_dir: Path

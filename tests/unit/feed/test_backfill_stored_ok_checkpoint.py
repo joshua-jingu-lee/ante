@@ -22,7 +22,11 @@ from pathlib import Path
 
 import pytest
 
-from ante.feed.pipeline.backfill_runner import BackfillRunner, _RunContext
+from ante.feed.pipeline.backfill_runner import (
+    MAX_WARNINGS_PER_TYPE,
+    BackfillRunner,
+    _RunContext,
+)
 from ante.feed.pipeline.checkpoint import Checkpoint
 
 
@@ -68,10 +72,13 @@ class _ScriptedCollector:
         net_delta_by_date: dict[str, int],
         stored_ok_by_date: dict[str, bool],
         default_stored_ok: bool = True,
+        warns_per_date: int = 0,
     ) -> None:
         self._net = net_delta_by_date
         self._stored_ok = stored_ok_by_date
         self._default_stored_ok = default_stored_ok
+        # 날짜당 반환할 행 단위 business_rule 경고 건수(#2414 유계성 검증용).
+        self._warns_per_date = warns_per_date
         self.calls: list[str] = []
 
     async def collect(
@@ -84,7 +91,15 @@ class _ScriptedCollector:
         net = self._net.get(target_date, 0)
         stored_ok = self._stored_ok.get(target_date, self._default_stored_ok)
         syms = {f"SYM-{target_date[-2:]}"} if stored_ok else set()
-        return net, stored_ok, syms, []
+        warns = [
+            {
+                "type": "business_rule",
+                "date": target_date,
+                "message": f"low > close #{i}",
+            }
+            for i in range(self._warns_per_date)
+        ]
+        return net, stored_ok, syms, warns
 
 
 async def _run(
@@ -218,3 +233,112 @@ async def test_partial_multi_write_reflects_rows_but_blocks_checkpoint(
     # store_merge 실패가 같은 날짜에 있으므로 checkpoint 미전진(None).
     assert checkpoint.get_last_date() is None
     assert any(w.get("type") == "store_merge" for w in ctx.warnings)
+
+
+# ── (#2414) 경고 메모리가 날짜 범위와 무관하게 유계 ────────────────────────────
+
+# 관측 밀도(거래일당 약 600건, 이슈 #2414 실측 99,691/165)를 그대로 쓴다.
+_OBSERVED_WARNINGS_PER_DAY = 600
+
+
+def _dates(count: int) -> list[str]:
+    """연속 거래일 문자열 ``count`` 개(2026-01-02부터, 주말 무관 스텁용)."""
+    return [f"2026-01-{day:02d}" for day in range(2, 2 + count)]
+
+
+async def _run_with_warnings(tmp_path: Path, day_count: int) -> _RunContext:
+    """``day_count`` 일 × 관측 밀도 경고를 낸 뒤 ctx를 반환한다."""
+    dates = _dates(day_count)
+    collector = _ScriptedCollector(
+        net_delta_by_date=dict.fromkeys(dates, 1),
+        stored_ok_by_date=dict.fromkeys(dates, True),
+        warns_per_date=_OBSERVED_WARNINGS_PER_DAY,
+    )
+    store = _ScriptedStore(merge_fail_dates=set())
+    _checkpoint, ctx = await _run(tmp_path / ".feed", collector, store, dates)
+    return ctx
+
+
+@pytest.mark.asyncio
+async def test_warning_memory_is_independent_of_date_range(tmp_path: Path) -> None:
+    """거래일 수를 2배·4배로 늘려도 보존 경고 수가 증가하지 않는다(#2414 수용 기준).
+
+    이것이 "경고 메모리가 날짜 범위와 무관하게 유계"의 기계적 증명이다.
+    관측 밀도(600/거래일)면 2일=1200, 4일=2400으로 둘 다 상한(1000)을 넘으므로
+    1000+ 일자를 돌리지 않고도 범위 무관성이 드러난다.
+    """
+    ctx_2d = await _run_with_warnings(tmp_path / "d2", 2)
+    ctx_4d = await _run_with_warnings(tmp_path / "d4", 4)
+
+    # 날짜 수가 2배가 되어도 인메모리 보존량은 그대로다.
+    assert len(ctx_2d.warnings) == MAX_WARNINGS_PER_TYPE
+    assert len(ctx_4d.warnings) == len(ctx_2d.warnings)
+
+    # 반면 집계는 실제 발생량을 정확히 따라간다(정보 손실 없음).
+    assert ctx_2d.warnings_total == 2 * _OBSERVED_WARNINGS_PER_DAY
+    assert ctx_4d.warnings_total == 4 * _OBSERVED_WARNINGS_PER_DAY
+    assert ctx_2d.warnings_truncated is True
+    assert ctx_4d.warnings_truncated is True
+
+
+@pytest.mark.asyncio
+async def test_drain_store_warnings_return_value_survives_truncation(
+    tmp_path: Path,
+) -> None:
+    """store_merge가 절단 대상이어도 반환값(=checkpoint 미전진 신호)은 True다.
+
+    ``_drain_store_warnings`` 는 ``drained`` 전수를 먼저 검사한 뒤 ctx에
+    적재하므로, 상한을 넘겨 샘플에서 잘린 store_merge도 동일하게 미전진을
+    유발한다. 입력 리스트도 변형되지 않는다(결정 6).
+    """
+    ctx = _RunContext()
+    # store_merge 버킷을 상한까지 채워 다음 건이 반드시 절단되게 한다.
+    ctx.add_warnings(
+        [
+            {"type": "store_merge", "message": f"pre{i}"}
+            for i in range(MAX_WARNINGS_PER_TYPE)
+        ]
+    )
+    store = _ScriptedStore(merge_fail_dates={"2026-01-02"})
+    store.arm("2026-01-02")
+
+    assert BackfillRunner._drain_store_warnings(store, ctx) is True
+    assert ctx.warnings_truncated is True
+    assert ctx.warnings_total == MAX_WARNINGS_PER_TYPE + 1
+    # 절단분은 샘플에 들어가지 않는다(메모리 유계).
+    assert len(ctx.warnings) == MAX_WARNINGS_PER_TYPE
+
+
+@pytest.mark.asyncio
+async def test_truncated_store_merge_still_blocks_checkpoint(tmp_path: Path) -> None:
+    """상한 포화 상태에서도 store_merge 날짜는 checkpoint를 전진시키지 않는다."""
+    feed_dir = tmp_path / ".feed"
+    dates = ["2026-01-02"]
+    collector = _ScriptedCollector(
+        net_delta_by_date={"2026-01-02": 1},
+        stored_ok_by_date={"2026-01-02": True},
+    )
+    store = _ScriptedStore(merge_fail_dates={"2026-01-02"})
+
+    checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
+    runner = BackfillRunner(data_go_kr_collector=collector)
+    ctx = _RunContext()
+    ctx.add_warnings(
+        [
+            {"type": "store_merge", "message": f"pre{i}"}
+            for i in range(MAX_WARNINGS_PER_TYPE)
+        ]
+    )
+    await runner._collect_data_go_kr(
+        dates,
+        {},
+        store,
+        checkpoint,
+        ctx,
+        lambda _config, _date: False,
+        lambda _config: False,
+        None,
+    )
+
+    assert checkpoint.get_last_date() is None
+    assert ctx.warnings_truncated is True

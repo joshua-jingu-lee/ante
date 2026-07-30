@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +33,30 @@ from ante.feed.sources.data_go_kr import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
+
+# 경고 `type` 버킷별 인메모리 보존 상한 (#2414).
+#
+# 리포트 `warnings` 배열은 버킷당 이 건수까지만 보존하고 초과분은 **적재
+# 시점에** 절단한다(리포트 생성 시점에 자르면 인메모리 누적이 그대로 남아
+# OOM이 해소되지 않는다). 총계·타입별 집계는 절단과 무관하게 전수 정확하며,
+# 절단분 상세는 로그에서 회수한다(경고는 발생 시점에 전건 로깅) —
+# "규모는 리포트, 상세는 로그".
+#
+# 산출 근거: #2414 실측이 약 8개월(165 거래일) backfill에서 99,691건
+# → 거래일당 약 600건(99,691/165)이다. 1000이면 통상 단일 일자 물량을
+# 무손실 수용한다(daily 리포트 동작 불변 — 단, 전 종목 이상치 일자처럼
+# 통상 물량을 크게 넘는 날은 daily도 절단되며 warnings_truncated로 표면화).
+# 상한 = 버킷 8종 × 1000 × 약 302 B ≈ 2.4 MB로 **날짜 범위와 무관**하다
+# (11.6년 약 1.67M건 → 최대 8,000건 보존, 상주 약 500 MB → 약 2.4 MB).
+# config 노출은 YAGNI — 모듈 상수로 고정한다.
+MAX_WARNINGS_PER_TYPE = 1000
+
+# `type` 키가 없는 경고(DART 수집 경고 2종)를 담는 정적 fallback 버킷.
+# `w.get("type")`(=None)을 그대로 버킷 키로 쓰면 json 직렬화에서
+# `{"null": N}` 이 리포트로 새므로 반드시 이 값으로 정규화한다.
+# 경고 `type`이 유계 정적 집합이라는 규범은
+# docs/specs/data-feed/10-checkpoints-and-reports.md가 SSOT다.
+UNTYPED_WARNING_BUCKET = "untyped"
 
 # zero-padded YYYY-MM-DD만 허용. date.fromisoformat()은 3.11+에서
 # basic ISO(20260510)·ISO week date(2026-W19-1) 등 변형도 수락하므로
@@ -278,7 +302,7 @@ class BackfillRunner:
             is_trading_paused,
             stop_event,
         )
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
         await self._collect_dart(
             data_path,
             feed_dir,
@@ -287,9 +311,9 @@ class BackfillRunner:
             store,
             ctx,
         )
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
         self._compute_indicators(store, ctx)
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
 
         return ctx.to_result("backfill", started_at)
 
@@ -501,13 +525,19 @@ class BackfillRunner:
         날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
         실패 날짜가 이미 checkpoint를 전진시킨 뒤가 된다).
 
+        반환값은 ctx 측 경고 절단(#2414)과 **무관**하다 — ``drained`` 전수를
+        먼저 검사한 뒤 ctx에 적재하며, ``add_warnings`` 는 입력 리스트를
+        변형하지 않는다(결정 6). 절단된 ``store_merge`` 도 checkpoint 미전진을
+        정확히 유발한다.
+
         Returns:
             이번 drain에 ``type == "store_merge"`` 경고가 하나라도 있었으면 True.
         """
         drained = store.drain_warnings()
+        store_merge_failed = any(w.get("type") == "store_merge" for w in drained)
         if drained:
-            ctx.warnings.extend(drained)
-        return any(w.get("type") == "store_merge" for w in drained)
+            ctx.add_warnings(drained)
+        return store_merge_failed
 
     async def _wait_out_trading_pause(
         self,
@@ -663,25 +693,90 @@ class BackfillRunner:
             ctx.rows_written += written
         except Exception as exc:
             logger.error("파생 지표 계산 실패: %s", exc)
-            ctx.warnings.append(
-                {
-                    "type": "derived_indicators",
-                    "message": f"파생 지표 계산 실패: {exc}",
-                }
+            ctx.add_warnings(
+                [
+                    {
+                        "type": "derived_indicators",
+                        "message": f"파생 지표 계산 실패: {exc}",
+                    }
+                ]
             )
 
 
 class _RunContext:
-    """수집 실행 중 결과를 집계하는 컨텍스트."""
+    """수집 실행 중 결과를 집계하는 컨텍스트.
+
+    경고는 실행 시작~종료까지 상주하므로 날짜 범위에 비례해 무제한 증가했다
+    (#2414 — 다년 backfill에서 약 1.67M건 ≈ 500 MB). 내부 리스트를
+    ``_warnings`` 로 사유화하고 ``add_warnings()`` **단일 chokepoint**에서만
+    적재해 **버킷(``type``)별 ``MAX_WARNINGS_PER_TYPE`` 건**까지만 보존한다.
+    총계·타입별 집계는 절단과 무관하게 전수 정확하다.
+    """
 
     def __init__(self) -> None:
         self.failures: list[dict] = []
-        self.warnings: list[dict] = []
+        self._warnings: list[dict] = []
+        self._warnings_by_type: dict[str, int] = {}
+        self._warnings_truncated: bool = False
         self.config_errors: list[dict] = []
         self.total_symbols: set[str] = set()
         self.success_symbols: set[str] = set()
         self.rows_written: int = 0
         self.data_types: set[str] = set()
+
+    @property
+    def warnings(self) -> Sequence[dict]:
+        """보존된 경고 샘플 (버킷별 최대 ``MAX_WARNINGS_PER_TYPE`` 건).
+
+        반환 타입이 ``list[dict]`` 이 아니라 ``Sequence[dict]`` 인 것은
+        의도적이다 — ``list`` 로 노출하면 소비자가 반환된 리스트를 직접
+        변형(append/extend)해 chokepoint를 우회할 수 있고 mypy도 그것을
+        통과시킨다(막히는 것은 속성 재바인딩뿐). ``Sequence`` 로 두면 mypy가
+        ``attr-defined`` 로 append/extend/insert/슬라이스 대입을 전부
+        차단한다(#2414 결정 5).
+
+        **총 건수를 세는 용도로 쓰지 말 것** — 절단 시 ``len()`` 은 총계가
+        아니다. ``warnings_total`` 을 쓴다.
+        """
+        return self._warnings
+
+    @property
+    def warnings_total(self) -> int:
+        """**전수 정확** 경고 총 건수 (절단 무관)."""
+        return sum(self._warnings_by_type.values())
+
+    @property
+    def warnings_truncated(self) -> bool:
+        """버킷 상한으로 경고 샘플이 한 건이라도 절단되었는지 여부."""
+        return self._warnings_truncated
+
+    def add_warnings(self, warns: list[dict]) -> None:
+        """경고를 유계로 적재하는 **단일 chokepoint** (#2414).
+
+        동작:
+            1. 버킷을 ``w.get("type") or UNTYPED_WARNING_BUCKET`` 으로
+               정규화한다. DART 수집 경고 2종에는 ``type`` 키가 없어 대괄호
+               직접 인덱싱은 KeyError이고, ``w.get("type")`` 결과를 그대로
+               버킷 키로 쓰면 ``json.dumps({None: 3})`` = ``{"null": 3}`` 이
+               리포트로 샌다.
+            2. 카운터를 **절단 여부와 무관하게 먼저 전수 증가**시킨다
+               (``warnings_total``/``warnings_by_type`` 은 항상 정확).
+            3. 해당 버킷 보유량이 상한 미만일 때만 샘플에 보존하고, 한 건이라도
+               스킵하면 절단 플래그를 세운다.
+
+        **입력 리스트를 변형하지 않는다**(non-mutating, 결정 6).
+        ``_drain_store_warnings`` 호출자가 같은 리스트로 checkpoint 전진을
+        판단하므로 in-place clear/pop은 그 계약을 깬다.
+        """
+        for warn in warns:
+            bucket = warn.get("type") or UNTYPED_WARNING_BUCKET
+            # 절단 전 보유량 == min(누계, 상한)이므로 증가 전 누계로 판정한다.
+            seen = self._warnings_by_type.get(bucket, 0)
+            self._warnings_by_type[bucket] = seen + 1
+            if seen < MAX_WARNINGS_PER_TYPE:
+                self._warnings.append(warn)
+            else:
+                self._warnings_truncated = True
 
     def add_success(
         self,
@@ -699,7 +794,7 @@ class _RunContext:
         self.total_symbols.update(syms)
         self.success_symbols.update(syms)
         if warns:
-            self.warnings.extend(warns)
+            self.add_warnings(warns)
 
     def to_result(
         self,
@@ -719,7 +814,14 @@ class _RunContext:
             rows_written=self.rows_written,
             data_types=sorted(self.data_types),
             failures=self.failures,
-            warnings=self.warnings,
+            # Sequence[dict] → list[dict] 경계 변환(사유화한 내부 리스트를
+            # 그대로 넘기지 않는다).
+            warnings=list(self._warnings),
+            warnings_total=self.warnings_total,
+            # 버킷명 정렬 — dict 삽입 순서 = 경고 도착 순서라 실행마다 달라진다
+            # (바로 위 data_types=sorted(...)와 동일 지점에서 한 번만 정렬).
+            warnings_by_type=dict(sorted(self._warnings_by_type.items())),
+            warnings_truncated=self.warnings_truncated,
             config_errors=self.config_errors,
         )
 
@@ -735,11 +837,21 @@ def _make_result(
     data_types: list[str] | None = None,
     failures: list[dict] | None = None,
     warnings: list[dict] | None = None,
+    warnings_total: int | None = None,
+    warnings_by_type: dict[str, int] | None = None,
+    warnings_truncated: bool = False,
     config_errors: list[dict] | None = None,
 ) -> CollectionResult:
-    """CollectionResult를 생성한다."""
+    """CollectionResult를 생성한다.
+
+    ``warnings_total`` 기본값이 ``0`` 이 아니라 ``None`` 인 것은 의도적이다
+    (#2414). ``0`` 으로 두면 ``warnings`` 를 넘기고 총계를 생략한 호출이
+    "경고 N건 + 총계 0"이라는 **자기모순 리포트**를 만든다. ``None`` 이면
+    ``len(warnings)`` 로 파생해 절단이 없는 호출에서 항상 정합한다.
+    """
     finished_at = datetime.now(tz=UTC)
     duration = (finished_at - started_at).total_seconds()
+    warning_items = warnings or []
 
     return CollectionResult(
         mode=mode,
@@ -753,6 +865,11 @@ def _make_result(
         rows_written=rows_written,
         data_types=data_types or [],
         failures=failures or [],
-        warnings=warnings or [],
+        warnings=warning_items,
+        warnings_total=(
+            len(warning_items) if warnings_total is None else warnings_total
+        ),
+        warnings_by_type=warnings_by_type or {},
+        warnings_truncated=warnings_truncated,
         config_errors=config_errors or [],
     )

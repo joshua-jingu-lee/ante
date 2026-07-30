@@ -163,3 +163,61 @@ class TestDailyResultDict:
         assert d["failures"] == failures
         assert d["warnings"] == warnings
         assert d["config_errors"] == config_errors
+
+
+# ── 경고 유계화 envelope (#2414) ─────────────────────────────────────────────
+
+
+def _truncated_result(**overrides: object) -> CollectionResult:
+    """절단 리포트를 모사하는 CollectionResult.
+
+    ``warnings`` 샘플 1건 + 총계 99,691건이라 ``len(result.warnings)`` 로
+    파생한 오구현은 값 단정에서 즉시 드러난다.
+    """
+    base: dict[str, object] = {
+        "warnings": [{"type": "business_rule", "message": "low > close"}],
+        "warnings_total": 99691,
+        "warnings_by_type": {"business_rule": 99690, "untyped": 1},
+        "warnings_truncated": True,
+    }
+    base.update(overrides)
+    return _result(**base)
+
+
+class TestWarningsEnvelopeIsBounded:
+    """`ante feed run --json` envelope가 전수 정확 경고 집계를 flat으로 싣는지 검증.
+
+    키 존재만 단정하면 `len(result.warnings)` 오구현(=고치려던 축소 보고
+    버그의 재도입)이 게이트를 통과하므로 **절단 케이스의 값**을 단정한다.
+    """
+
+    def test_backfill_envelope_reports_total_not_sample_length(self) -> None:
+        d = _backfill_result_dict(_truncated_result())
+
+        assert d["warnings_total"] == 99691
+        assert d["warnings_by_type"] == {"business_rule": 99690, "untyped": 1}
+        assert d["warnings_truncated"] is True
+        # 샘플 배열 자체는 유계 절단된 상태로 전달된다.
+        assert len(d["warnings"]) == 1
+        assert d["warnings_total"] != len(d["warnings"])
+
+    def test_daily_envelope_reports_total_not_sample_length(self) -> None:
+        d = _daily_result_dict(
+            _truncated_result(mode="daily", target_date="2026-03-17")
+        )
+
+        assert d["warnings_total"] == 99691
+        assert d["warnings_by_type"] == {"business_rule": 99690, "untyped": 1}
+        assert d["warnings_truncated"] is True
+        assert len(d["warnings"]) == 1
+        assert d["warnings_total"] != len(d["warnings"])
+
+    def test_defaults_are_consistent_when_no_warnings(self) -> None:
+        """경고가 없으면 총계 0 / 빈 집계 / 절단 False."""
+        for d in (
+            _backfill_result_dict(_result()),
+            _daily_result_dict(_result(mode="daily", target_date="2026-03-17")),
+        ):
+            assert d["warnings_total"] == 0
+            assert d["warnings_by_type"] == {}
+            assert d["warnings_truncated"] is False

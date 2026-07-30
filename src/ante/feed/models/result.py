@@ -86,7 +86,25 @@ class CollectionResult:
     """수집 실패 상세 목록."""
 
     warnings: list[dict] = field(default_factory=list)
-    """데이터 품질 경고 목록."""
+    """데이터 품질 경고 **샘플** (#2414).
+
+    실행 전체 누적이 아니라 경고 ``type`` 버킷별로 유계 절단된 샘플이다
+    (다년 backfill이 행 단위 경고를 상한 없이 누적해 메모리를 소진시켰다).
+    **총 건수는 반드시 ``warnings_total`` 로 읽는다** — ``len(warnings)`` 는
+    절단이 발생하면 총계가 아니라 보존 샘플 수이며 축소 보고가 된다."""
+
+    warnings_total: int = 0
+    """**전수 정확** 경고 총 건수 (절단 무관, #2414)."""
+
+    warnings_by_type: dict[str, int] = field(default_factory=dict)
+    """경고 ``type`` 버킷별 **전수 정확** 건수 (`{버킷: 건수}`, #2414).
+
+    ``type`` 키가 없는 경고는 ``"untyped"`` 버킷으로 정규화되어 집계된다."""
+
+    warnings_truncated: bool = False
+    """``warnings`` 샘플이 버킷 상한으로 절단되었는지 여부 (#2414).
+
+    True이면 절단된 상세는 로그에서 회수한다(경고는 발생 시점에 전건 로깅)."""
 
     config_errors: list[dict] = field(default_factory=list)
     """설정 오류 목록."""

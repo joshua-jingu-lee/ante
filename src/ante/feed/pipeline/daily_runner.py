@@ -84,8 +84,11 @@ class DailyRunner:
         # backfill_runner.run()의 drain 지점(data.go.kr/DART/지표 후)을
         # 정확히 미러한다(#2002). collector 미주입(None) skip 경로에서도
         # drain은 빈 경고를 반환해 안전하다.
+        # 적재는 반드시 ctx.add_warnings() chokepoint를 경유한다(#2414) —
+        # 직접 extend하면 daily 리포트의 warnings 배열에는 store_merge가 있는데
+        # summary.warnings_by_type에는 없는 자기모순 리포트가 된다.
         await self._collect_data_go_kr(target_date, store, ctx)
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
         await self._collect_dart(
             data_path,
             feed_dir,
@@ -93,9 +96,9 @@ class DailyRunner:
             store,
             ctx,
         )
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
         self._compute_indicators(store, ctx)
-        ctx.warnings.extend(store.drain_warnings())
+        ctx.add_warnings(store.drain_warnings())
 
         return ctx.to_result("daily", started_at, target_date=target_date)
 
@@ -210,9 +213,11 @@ class DailyRunner:
             )
             ctx.rows_written += written
         except Exception as exc:
-            ctx.warnings.append(
-                {
-                    "type": "derived_indicators",
-                    "message": f"파생 지표 계산 실패: {exc}",
-                }
+            ctx.add_warnings(
+                [
+                    {
+                        "type": "derived_indicators",
+                        "message": f"파생 지표 계산 실패: {exc}",
+                    }
+                ]
             )

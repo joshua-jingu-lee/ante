@@ -286,6 +286,10 @@ checkpoint JSON/secrets 저장이 이미 적용하고 있던 write-then-rename �
   (읽기/결합 실패 → 기존 보존) 또는 `store_recovered`(0바이트 자동복구)다. checkpoint
   전진 게이트는 `store_merge`만 소비하므로, 0바이트 자동복구(`store_recovered`)는
   게이트를 유발하지 않고 checkpoint를 전진시켜 stuck을 해소한다.
+  두 값은 **정적 리터럴**이다 — 리포트 경고 `type`이 유계 정적 집합이어야 한다는
+  규범(및 그 위에 성립하는 리포트 경고 유계화)의 SSOT는
+  [data-feed/10-checkpoints-and-reports.md `경고 유계화`](../data-feed/10-checkpoints-and-reports.md#경고-유계화-bounded-warnings)다.
+  런타임 값(경로·메시지 등)으로 `type`을 동적 조립하지 않는다.
 - **known-limitation**:
   - checkpoint 재개 실행에서 0바이트 파티션을 자동복구하면, 재생성은 현재 group(증분
     경로에선 해당 실행분)만 담으므로 동일 파티션의 pre-checkpoint 구간은 재수집되지 않아
