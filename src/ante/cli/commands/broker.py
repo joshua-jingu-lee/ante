@@ -110,12 +110,17 @@ async def _ipc_broker_command(
     ``positions``)의 동작은 불변이다. ``reconcile`` 은 본 helper 를 경유하지
     않고 ``ipc_send`` 를 직접 호출하므로(payload ``{"fix", "account_id"}``)
     본 확장의 영향 범위 밖이다 — 통일은 별건 스코프다.
+
+    "additive" 는 주석이 아니라 **구조**로 보장한다: ``extra`` 를 먼저 펼치고
+    검증된 ``account_id`` 를 뒤에 두어, ``extra`` 가 ``account_id`` 키를
+    담고 있어도 검증된 값이 항상 이긴다. ``args.update(extra)`` 순서였다면
+    호출자가 실수로 ``account_id`` 를 넣는 순간 ingress 검증
+    (``reject_invalid_account_id``)을 통과한 값이 조용히 덮여 미검증 값이
+    IPC 로 나간다.
     """
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    args: dict = {"account_id": account_id}
-    if extra:
-        args.update(extra)
+    args: dict = {**(extra or {}), "account_id": account_id}
     return await ipc_send(command, args, actor=actor)
 
 
@@ -390,6 +395,13 @@ def order_history(
     if to_date is not None:
         extra["to_date"] = to_date
 
+    # ``actor`` 는 ``try`` **밖**에서 계산한다 (``bot signal-key``
+    # bot.py:581 과 1:1 미러). try 안에 두면 여기서 나는 ``ClickException``
+    # 이 아래 IPC except 분기에 잡혀 ``IPC_ERROR`` 로 오분류된다 — 현재
+    # ``get_member_id`` 는 raise 하지 않아 동작은 동일하지만, 오분류 가능
+    # 구조 자체를 남기지 않는다.
+    actor = get_member_id(ctx)
+
     # IPC 우선 시도. 폴백 트리거는 ``IPC_SERVER_NOT_RUNNING`` **단독** 이다
     # (``bot signal-key`` 패턴, bot.py:641-650). 형제 balance/positions 의
     # 통짜 ``except click.ClickException`` 은 서버 error envelope 까지 삼켜
@@ -397,7 +409,6 @@ def order_history(
     # (docs/specs/ipc/ipc.md 경고). IPC_TIMEOUT·server-error 는 폴백 없이
     # 원본 code/message 로 surface 한다.
     try:
-        actor = get_member_id(ctx)
         result = _run(
             _ipc_broker_command(
                 "broker.order_history", validated_account_id, actor, extra=extra

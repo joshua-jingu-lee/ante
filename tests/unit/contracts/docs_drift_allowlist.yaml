@@ -1,12 +1,12 @@
 # CLI registry ↔ docs command table drift baseline allowlist (#1848 Family A).
 #
-# `src/ante/contracts/cli_registry.py` 의 ``CLI_COMMAND_REGISTRY`` (94 entries)
+# `src/ante/contracts/cli_registry.py` 의 ``CLI_COMMAND_REGISTRY`` (95 entries)
 # 와 ``docs/specs/cli/03-commands.md`` 의 ``| ante ... |`` 표 행에서 추출한
 # command path 집합의 차집합을 baseline 으로 등록한다.
 #
 # 본 baseline 의 의도는 다음과 같다 (#1815 epic / #1844 leaf coverage 결과):
 #
-# - registry 94 entries 는 docs 표에 모두 등장한다 (registry → docs drift 0).
+# - registry 95 entries 는 docs 표에 모두 등장한다 (registry → docs drift 0).
 # - docs 표에는 registry 가 의도적으로 다루지 않는 group 또는 leaf path 가
 #   추가로 존재한다. 본 PR 시점에 식별된 잔여는 다음 3 카테고리.
 #

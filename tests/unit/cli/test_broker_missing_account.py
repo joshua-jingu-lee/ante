@@ -43,7 +43,10 @@ Refs #2412 (범위 확장):
     - ``_ipc_broker_command`` 의 ``extra`` 파라미터가 ``None`` 일 때 기존
       호출자 3곳(status/balance/positions) payload 가 **바이트 동일**함
       (multi-consumer 회귀 락), 그리고 ``reconcile`` 은 이 helper 를
-      경유하지 않음.
+      경유하지 않음. 나아가 ``extra`` 가 검증된 ``account_id`` 를 **덮지
+      못함**(병합 순서로 구조 보장).
+    - ``order-history`` **text 모드 성공 출력** — known-limitation 헤더
+      (결정 4 철회의 대체 완화조치) 와 빈 결과 문구 / ``fmt.table``.
     - CLI **직접 연결 폴백** 경로에서 ISO ``YYYY-MM-DD`` 가 어댑터 경계
       ``YYYYMMDD`` 로 변환됨 (IPC 핸들러를 거치지 않는 두 번째 변환 지점).
     - invalid ``account_id`` 가 IPC/``_get_broker`` 이전에 거부됨.
@@ -1134,6 +1137,37 @@ class TestIpcBrokerCommandExtraRegressionLock:
         assert call_args[0] == "broker.order_history"
         assert call_args[1] == {"account_id": "acc-a", "from_date": "2026-07-01"}
 
+    async def test_extra_cannot_override_validated_account_id(self) -> None:
+        """🔴 ``extra`` 는 검증된 ``account_id`` 를 덮지 못한다.
+
+        docstring 이 주장하는 "순수 additive" 불변을 **dict 병합 순서**로
+        구조 보장한다. ``args = {"account_id": ...}; args.update(extra)``
+        순서였다면 호출자가 ``account_id`` 키를 넣는 순간 CLI ingress
+        검증(``reject_invalid_account_id``)을 통과한 값이 조용히 덮여
+        미검증 값이 IPC 로 나간다 — 현재 호출자 3+1 곳은 안전하지만 구조가
+        보장하지 않으면 다음 호출자가 재개방한다.
+        """
+        from ante.cli.commands.broker import _ipc_broker_command
+
+        ipc_send = AsyncMock(return_value={})
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send):
+            await _ipc_broker_command(
+                "broker.order_history",
+                "acc-validated",
+                "member-1",
+                extra={"account_id": "acc-spoofed", "from_date": "2026-07-01"},
+            )
+
+        ipc_send.assert_awaited_once()
+        call_args, call_kwargs = ipc_send.await_args
+        assert call_args[1]["account_id"] == "acc-validated", (
+            f"extra 가 검증된 account_id 를 덮었다: {call_args[1]!r}"
+        )
+        # additive 부분은 그대로 살아있어야 한다 (덮어쓰기 방지가 extra 자체를
+        # 무시하는 것으로 퇴화하지 않도록 함께 lock).
+        assert call_args[1]["from_date"] == "2026-07-01", call_args[1]
+        assert call_kwargs == {"actor": "member-1"}
+
 
 class TestOrderHistoryFallbackDateConversion:
     """CLI 직접 연결 폴백 경로의 ISO→YYYYMMDD 변환 (#2412 결정 2)."""
@@ -1325,3 +1359,113 @@ class TestOrderHistoryAccountIdValidation:
 
         assert result.exit_code != 0, result.stdout
         ipc_send.assert_not_awaited()
+
+
+class TestOrderHistoryTextOutput:
+    """``order-history`` **text 모드 성공 출력** 경로 lock (#2412).
+
+    신규 CLI 테스트가 전부 ``--format json`` 이라 text 분기(빈 결과 문구 /
+    known-limitation 헤더 / ``fmt.table``)가 한 번도 실행되지 않았다.
+
+    특히 known-limitation 헤더는 "교차 구간 fail-closed 거부"(결정 4) 를
+    철회하면서 채택한 **대체 완화조치**다. 락이 없으면 향후 리팩터가 헤더를
+    지워도 아무 테스트도 실패하지 않고, 사용자는 취소 주문이 ``pending`` 으로
+    보이는 것을 경고 없이 사실로 받아들이게 된다.
+    """
+
+    # 헤더 문구의 wording 전체가 아니라 **의미 단위**를 단언한다. 줄바꿈/조사
+    # 다듬기는 허용하되 경고 항목 자체가 사라지면 실패하도록 한다.
+    LIMITATION_MARKERS = (
+        "취소 주문도 pending",
+        "체결가/주문가 혼합",
+        "영업일",
+    )
+    EMPTY_MESSAGE = "주문/체결 이력 없음"
+
+    @staticmethod
+    def _invoke_text(runner: CliRunner, orders: list[dict]) -> object:
+        """text 모드로 ``order-history`` 를 호출한다 (IPC 성공 응답 주입)."""
+        ipc_send = AsyncMock(return_value={"orders": orders})
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send):
+            return runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "text",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-a",
+                ],
+            )
+
+    def test_text_non_empty_prints_limitation_header_and_table(
+        self, runner: CliRunner
+    ) -> None:
+        """🔴 비어있지 않은 결과: known-limitation 헤더 + 정규화 8키 테이블."""
+        result = self._invoke_text(
+            runner,
+            [
+                {
+                    "order_id": "0000117057",
+                    "symbol": "005930",
+                    "side": "buy",
+                    "quantity": 10.0,
+                    "filled_quantity": 10.0,
+                    "price": 70100.0,
+                    "status": "filled",
+                    "timestamp": "20260701",
+                }
+            ],
+        )
+
+        assert result.exit_code == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        for marker in self.LIMITATION_MARKERS:
+            assert marker in result.stdout, (
+                f"known-limitation 헤더에서 {marker!r} 가 사라졌다 — 결정 4"
+                f"(교차 구간 fail-closed 거부) 철회의 대체 완화조치다. "
+                f"stdout={result.stdout!r}"
+            )
+        # ``fmt.table`` 이 정규화 8키를 컬럼으로 출력한다.
+        for column in (
+            "order_id",
+            "symbol",
+            "side",
+            "quantity",
+            "filled_quantity",
+            "price",
+            "status",
+            "timestamp",
+        ):
+            assert column in result.stdout, (
+                f"text 테이블에 컬럼 {column!r} 가 없다. stdout={result.stdout!r}"
+            )
+        assert "0000117057" in result.stdout, result.stdout
+        assert "005930" in result.stdout, result.stdout
+        # text 모드는 JSON envelope 을 그대로 뱉지 않는다 (passthrough 는 json 전용).
+        assert '"orders"' not in result.stdout, result.stdout
+
+    def test_text_empty_prints_empty_message_without_header(
+        self, runner: CliRunner
+    ) -> None:
+        """🔴 빈 결과: 전용 문구만 출력하고 헤더/테이블은 내지 않는다.
+
+        빈 결과에 (no data) 테이블만 나오면 사람이 "조회 실패" 와 "이력 없음"
+        을 구분할 수 없다. 반대로 헤더까지 붙으면 볼 행이 없는데 경고만
+        읽히므로, empty 는 ``return`` 으로 조기 종료하는 것이 계약이다.
+        """
+        result = self._invoke_text(runner, [])
+
+        assert result.exit_code == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert self.EMPTY_MESSAGE in result.stdout, result.stdout
+        for marker in self.LIMITATION_MARKERS:
+            assert marker not in result.stdout, (
+                f"빈 결과에 known-limitation 헤더가 붙었다 ({marker!r}). "
+                f"stdout={result.stdout!r}"
+            )
+        assert "order_id" not in result.stdout, result.stdout
+        assert "(no data)" not in result.stdout, result.stdout
