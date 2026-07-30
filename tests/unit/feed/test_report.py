@@ -691,6 +691,96 @@ class TestReportFailuresTotalSurfacesNonSymbolFailures:
         assert summary["failures_total"] == 1
         assert len(report["failures"]) == 1
 
+    def test_dart_source_failure_surfaces_in_failures_total(
+        self, feed_dir: Path
+    ) -> None:
+        """DART 소스 단위 실패는 symbols_failed=0이어도 failures_total>0."""
+        # backfill_runner가 기록하는 DART source failure 형태({source,reason}).
+        result = CollectionResult(
+            mode="backfill",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            symbols_total=0,
+            symbols_success=0,
+            symbols_failed=0,
+            rows_written=0,
+            data_types=[],
+            failures=[
+                {
+                    "source": "dart",
+                    "reason": "DART API 연결 실패",
+                },
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        assert summary["symbols_failed"] == 0
+        assert summary["failures_total"] == 1
+
+    def test_symbol_level_failure_keeps_symbols_failed_accurate(
+        self, feed_dir: Path
+    ) -> None:
+        """심볼 단위 성공/실패는 symbols_failed가 정확히 유지된다(부풀리지 않음)."""
+        result = CollectionResult(
+            mode="daily",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            target_date="2026-03-16",
+            symbols_total=3,
+            symbols_success=2,
+            symbols_failed=1,
+            rows_written=2,
+            data_types=["ohlcv"],
+            failures=[
+                {
+                    "symbol": "003920",
+                    "date": "2026-03-16",
+                    "source": "data_go_kr",
+                    "reason": "타임아웃",
+                },
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        # 심볼 귀속 실패는 그대로 symbols_failed에 잡히고 failures_total과 일치.
+        assert summary["symbols_failed"] == 1
+        assert summary["failures_total"] == 1
+
+    def test_mixed_symbol_and_date_failures(self, feed_dir: Path) -> None:
+        """심볼+날짜 단위 실패 혼재 시 failures_total > symbols_failed."""
+        result = CollectionResult(
+            mode="backfill",
+            started_at="2026-03-17T16:00:12Z",
+            finished_at="2026-03-17T16:05:34Z",
+            duration_seconds=10.0,
+            symbols_total=2,
+            symbols_success=1,
+            symbols_failed=1,
+            rows_written=1,
+            data_types=["ohlcv"],
+            failures=[
+                {"symbol": "003920", "reason": "심볼 단위 실패"},
+                {"date": "2026-03-15", "source": "data_go_kr", "reason": "날짜 실패"},
+                {"source": "dart", "reason": "소스 실패"},
+            ],
+        )
+
+        gen = ReportGenerator(feed_dir)
+        report = gen.generate(result)
+        summary = report["summary"]
+
+        # symbols_failed는 심볼 귀속분만(1), failures_total은 전체(3).
+        assert summary["symbols_failed"] == 1
+        assert summary["failures_total"] == 3
+
 
 class TestBoundedWarnings:
     """경고 인메모리 누적이 `type` 버킷별로 유계인지 검증(#2414).
@@ -830,96 +920,6 @@ class TestBoundedWarnings:
         result = ctx.to_result("backfill", datetime.now(tz=UTC))
         assert result.warnings_by_type == {"store_merge": MAX_WARNINGS_PER_TYPE + 1}
         assert len(result.warnings) == MAX_WARNINGS_PER_TYPE
-
-    def test_dart_source_failure_surfaces_in_failures_total(
-        self, feed_dir: Path
-    ) -> None:
-        """DART 소스 단위 실패는 symbols_failed=0이어도 failures_total>0."""
-        # backfill_runner가 기록하는 DART source failure 형태({source,reason}).
-        result = CollectionResult(
-            mode="backfill",
-            started_at="2026-03-17T16:00:12Z",
-            finished_at="2026-03-17T16:05:34Z",
-            duration_seconds=10.0,
-            symbols_total=0,
-            symbols_success=0,
-            symbols_failed=0,
-            rows_written=0,
-            data_types=[],
-            failures=[
-                {
-                    "source": "dart",
-                    "reason": "DART API 연결 실패",
-                },
-            ],
-        )
-
-        gen = ReportGenerator(feed_dir)
-        report = gen.generate(result)
-        summary = report["summary"]
-
-        assert summary["symbols_failed"] == 0
-        assert summary["failures_total"] == 1
-
-    def test_symbol_level_failure_keeps_symbols_failed_accurate(
-        self, feed_dir: Path
-    ) -> None:
-        """심볼 단위 성공/실패는 symbols_failed가 정확히 유지된다(부풀리지 않음)."""
-        result = CollectionResult(
-            mode="daily",
-            started_at="2026-03-17T16:00:12Z",
-            finished_at="2026-03-17T16:05:34Z",
-            duration_seconds=10.0,
-            target_date="2026-03-16",
-            symbols_total=3,
-            symbols_success=2,
-            symbols_failed=1,
-            rows_written=2,
-            data_types=["ohlcv"],
-            failures=[
-                {
-                    "symbol": "003920",
-                    "date": "2026-03-16",
-                    "source": "data_go_kr",
-                    "reason": "타임아웃",
-                },
-            ],
-        )
-
-        gen = ReportGenerator(feed_dir)
-        report = gen.generate(result)
-        summary = report["summary"]
-
-        # 심볼 귀속 실패는 그대로 symbols_failed에 잡히고 failures_total과 일치.
-        assert summary["symbols_failed"] == 1
-        assert summary["failures_total"] == 1
-
-    def test_mixed_symbol_and_date_failures(self, feed_dir: Path) -> None:
-        """심볼+날짜 단위 실패 혼재 시 failures_total > symbols_failed."""
-        result = CollectionResult(
-            mode="backfill",
-            started_at="2026-03-17T16:00:12Z",
-            finished_at="2026-03-17T16:05:34Z",
-            duration_seconds=10.0,
-            symbols_total=2,
-            symbols_success=1,
-            symbols_failed=1,
-            rows_written=1,
-            data_types=["ohlcv"],
-            failures=[
-                {"symbol": "003920", "reason": "심볼 단위 실패"},
-                {"date": "2026-03-15", "source": "data_go_kr", "reason": "날짜 실패"},
-                {"source": "dart", "reason": "소스 실패"},
-            ],
-        )
-
-        gen = ReportGenerator(feed_dir)
-        report = gen.generate(result)
-        summary = report["summary"]
-
-        # symbols_failed는 심볼 귀속분만(1), failures_total은 전체(3).
-        assert summary["symbols_failed"] == 1
-        assert summary["failures_total"] == 3
 
 
 _SPEC_DOC = (
