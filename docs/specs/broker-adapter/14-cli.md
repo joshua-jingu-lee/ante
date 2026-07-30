@@ -22,9 +22,23 @@ ante broker balance --account <account_id>
 # 포지션 조회
 ante broker positions --account <account_id>
 
+# 주문/체결 이력 조회 (read-only)
+ante broker order-history --account <account_id> [--from <YYYY-MM-DD>] [--to <YYYY-MM-DD>]
+
 # 포지션 대사
 ante broker reconcile --account <account_id> [--fix]
 ```
+
+`order-history`는 `BrokerAdapter.get_order_history()`를 노출하는 read-only 표면이다
+(#2412). 반환 row는 어댑터가 정규화한 8키(`order_id`/`symbol`/`side`/`quantity`/
+`filled_quantity`/`price`/`status`/`timestamp`)이며 증권사 원시 응답 필드는 어댑터
+경계를 넘지 않는다. `--from`/`--to`는 공개 표면 어휘인 ISO `YYYY-MM-DD`로 받고,
+어댑터가 요구하는 압축 `YYYYMMDD`로의 변환은 어댑터 호출 직전 **모든 경로**(런타임
+IPC 핸들러 / 서버 정지 시 직접 연결 폴백)가 공유하는 단일 헬퍼
+(`ante.core.time.iso_to_kis_date`)가 담당한다. 정규화 키의 표현력 한계와 KIS 3개월
+경계 교차 구간의 bounded known-limitation은
+[cli/03-commands.md](../cli/03-commands.md#broker-order-history--주문체결-이력-조회-read-only)에
+열거되어 있으며, 이 명령은 그것을 노출만 하고 해소하지 않는다.
 
 historical/public market data 조회는 `data` 또는 `feed` 계열 커맨드가 담당한다.
 

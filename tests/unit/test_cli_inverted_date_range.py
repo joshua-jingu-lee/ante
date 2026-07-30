@@ -10,6 +10,11 @@
 공유 헬퍼 ``reject_inverted_date_range``가 나머지 4곳에 동형으로 적용된
 결과를 검증한다.
 
+Refs #2412: date-range read family에 5번째 명령
+``broker order-history --from/--to``가 추가되었다. 신규 date-range read
+표면이 헬퍼 없이 들어오면 #1597이 닫은 drift class가 재개방되므로, 본
+매트릭스가 신규 표면까지 함께 lock한다.
+
 검증 축:
 
 - invalid-range(from > to): exit 1 + ``INVALID_DATE_RANGE``, 서비스/async
@@ -137,6 +142,19 @@ _INVALID_CASES = {
         "--end",
         "2026-01-01",
     ],
+    # Refs #2412: date-range read family 5번째. ``broker order-history`` 는
+    # IPC 우선 + 폴백 구조라 진입점이 ``broker._run`` 이며, invalid-range 는
+    # IPC 전송과 ``_get_broker`` 양쪽 이전에 차단되어야 한다.
+    "broker": [
+        "broker",
+        "order-history",
+        "--account",
+        "oracle-paper",
+        "--from",
+        "2026-02-01",
+        "--to",
+        "2026-01-01",
+    ],
 }
 
 # 각 명령의 async/service 진입점 — invalid-range 시 호출되면 안 됨.
@@ -145,6 +163,7 @@ _ASYNC_ENTRYPOINTS = {
     "trade": "ante.cli.commands.trade._run",
     "treasury": "ante.cli.commands.treasury._run",
     "report": "ante.cli.commands.report.asyncio.run",
+    "broker": "ante.cli.commands.broker._run",
 }
 
 

@@ -1,8 +1,9 @@
 """Broker CLI success output ↔ registry OutputContract drift lock (#1847 sub-PR 7).
 
 본 모듈은 :data:`ante.contracts.cli_registry.CLI_COMMAND_REGISTRY` 에 등록된
-broker 도메인 4 leaf 의 ``OutputContract`` 와 ``ante broker ... --format json``
-실제 출력 envelope shape 사이의 drift 를 lock 한다.
+broker 도메인 5 leaf (#1847 sub-PR 7 의 4 + #2412 ``order-history``) 의
+``OutputContract`` 와 ``ante broker ... --format json`` 실제 출력 envelope
+shape 사이의 drift 를 lock 한다.
 
 #1846 (account) / #1847 sub-PR 1 (member) / sub-PR 2 (bot) / sub-PR 3
 (approval) / sub-PR 4 (treasury) / sub-PR 5 (strategy) / sub-PR 6 (data /
@@ -23,10 +24,9 @@ broker.py 는 모든 4 leaf 가 IPC 우선 + cold_path fallback 구조 (``ipc_se
 는 IPC 분기를 강제로 success path 로 mock 해 success envelope 단언만 한다
 — fallback 분기의 drift 는 별도 covered 가 필요하면 후속 sub-PR 가 추가한다.
 
-8 시나리오 (4 leaf + registry sanity +1 + positions empty 분기 +1 +
-positions non-empty +1 + reconcile match 분기 +1):
+시나리오 (5 leaf + registry sanity +1 + 분기별 추가):
 
-0. registry sanity — broker 4 entries 의 envelope 이 ``standard`` /
+0. registry sanity — broker 5 entries 의 envelope 이 ``standard`` /
    ``raw_legacy`` 분류 범위 내.
 1. ``status`` → ``raw_legacy`` (``fmt.output(result)``)
 2. ``balance`` → ``raw_legacy`` (``fmt.output(result)``)
@@ -34,6 +34,9 @@ positions non-empty +1 + reconcile match 분기 +1):
 4. ``positions`` non-empty → ``raw_legacy`` (``{positions: [...]}``)
 5. ``reconcile`` (match) → ``raw_legacy`` (``{total_symbols, ..., match: True}``)
 6. ``reconcile`` --fix → ``raw_legacy`` (``{total_symbols, ..., fix_applied: True}``)
+7. ``order-history`` non-empty → ``raw_legacy`` (``{orders: [...]}``, #2412)
+8. ``order-history`` empty → ``raw_legacy`` (``{orders: []}`` — ``positions``
+   의 ``message`` 키 혼합을 따르지 않는 의도된 shape 분기, #2412)
 """
 
 from __future__ import annotations
@@ -89,11 +92,14 @@ def _is_raw_legacy_payload(payload: Any) -> bool:
 
 
 def test_registry_broker_entries_envelopes_classified() -> None:
-    """broker 4 entry 의 envelope 이 ``standard`` 또는 ``raw_legacy`` 만 사용.
+    """broker 5 entry 의 envelope 이 ``standard`` 또는 ``raw_legacy`` 만 사용.
 
-    본 단언은 본 모듈 fixture 의 envelope predicate 두 함수가 4 entry 를
+    본 단언은 본 모듈 fixture 의 envelope predicate 두 함수가 5 entry 를
     모두 분류할 수 있음을 lock 한다. envelope SSOT (#1821) 에 새 값이
     추가되면 본 분류기를 갱신해야 함을 표면화한다.
+
+    Refs #2412: ``order-history`` 추가로 4→5. 신규 entry 도 형제와 동일한
+    ``raw_legacy`` 를 쓴다 (broker 도메인 내부 shape 분화 방지).
     """
     accepted = {"standard", "raw_legacy"}
     broker_entries = [
@@ -101,8 +107,8 @@ def test_registry_broker_entries_envelopes_classified() -> None:
         for path, contract in CLI_COMMAND_REGISTRY.items()
         if path[:1] == ("broker",)
     ]
-    assert len(broker_entries) == 4, (
-        f"broker 4 entries 가 모두 등록되어야 한다. 실제: {len(broker_entries)}"
+    assert len(broker_entries) == 5, (
+        f"broker 5 entries 가 모두 등록되어야 한다. 실제: {len(broker_entries)}"
     )
     for path, contract in broker_entries:
         assert contract.output.envelope in accepted, (
@@ -416,3 +422,110 @@ def test_broker_reconcile_fix_envelope_matches_raw_legacy() -> None:
     assert payload["fix_applied"] is True
     assert payload["corrections"] == 1
     assert isinstance(payload["discrepancies"], list)
+
+
+# ── 7. order-history non-empty → raw_legacy (#2412) ────────────────────────
+
+
+def test_broker_order_history_non_empty_envelope_matches_raw_legacy() -> None:
+    """``broker order-history`` non-empty: ``{orders: [...]}`` 평면 passthrough.
+
+    JSON 모드는 IPC envelope 을 ``fmt.output(result)`` 로 그대로 통과시킨다
+    (``fmt.success`` 재래핑 금지 — 형제 4종과 동일 평면 shape). row 는
+    ``BrokerAdapter.get_order_history`` 정규화 8키다.
+    """
+    order_rows = [
+        {
+            "order_id": "0000117057",
+            "symbol": "005930",
+            "side": "buy",
+            "quantity": 10.0,
+            "filled_quantity": 10.0,
+            "price": 70100.0,
+            "status": "filled",
+            "timestamp": "20260701",
+        },
+        {
+            "order_id": "0000117058",
+            "symbol": "000660",
+            "side": "sell",
+            "quantity": 5.0,
+            "filled_quantity": 0.0,
+            "price": 120000.0,
+            "status": "pending",
+            "timestamp": "20260701",
+        },
+    ]
+    ipc_response = {"orders": order_rows}
+    with patch(
+        "ante.cli.commands.ipc_helpers.ipc_send",
+        new=AsyncMock(return_value=ipc_response),
+    ):
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "broker",
+                "order-history",
+                "--account",
+                "acct-001",
+            ]
+        )
+    assert result.exit_code == 0, result.output
+
+    payload = _load_json_payload(result.output)
+    assert _is_raw_legacy_payload(payload), (
+        f"broker order-history non-empty: standard envelope 아님. payload={payload!r}"
+    )
+    # 형제(positions) 와 동일한 평면 collection shape — 최상위 키는 하나뿐이다.
+    assert set(payload) == {"orders"}, payload
+    assert isinstance(payload["orders"], list)
+    assert len(payload["orders"]) == 2
+    assert set(payload["orders"][0]) == {
+        "order_id",
+        "symbol",
+        "side",
+        "quantity",
+        "filled_quantity",
+        "price",
+        "status",
+        "timestamp",
+    }
+
+
+# ── 8. order-history empty → raw_legacy, message 키 혼합 없음 (#2412) ──────
+
+
+def test_broker_order_history_empty_envelope_is_orders_only() -> None:
+    """``broker order-history`` empty: ``{"orders": []}`` 로 통일.
+
+    ``positions`` 의 empty 분기(``{message, positions: []}``) 처럼
+    ``message`` 키를 섞지 않는다 — 빈 결과와 비어있지 않은 결과의 JSON
+    shape 가 갈리면 agent 파서가 분기 처리를 강요받는다 (#2412 결정).
+    """
+    ipc_response: dict = {"orders": []}
+    with patch(
+        "ante.cli.commands.ipc_helpers.ipc_send",
+        new=AsyncMock(return_value=ipc_response),
+    ):
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "broker",
+                "order-history",
+                "--account",
+                "acct-001",
+            ]
+        )
+    assert result.exit_code == 0, result.output
+
+    payload = _load_json_payload(result.output)
+    assert _is_raw_legacy_payload(payload), (
+        f"broker order-history empty: standard envelope 아님. payload={payload!r}"
+    )
+    assert payload == {"orders": []}, payload
+    assert "message" not in payload, (
+        "빈 결과에 ``message`` 키를 섞으면 non-empty 응답과 shape 가 갈린다 "
+        "(positions 의 혼합 분기를 따르지 않는 것이 #2412 결정)."
+    )

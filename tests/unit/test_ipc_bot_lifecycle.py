@@ -652,12 +652,13 @@ class TestRegistryRegistration:
         assert spec.is_mutating is False
         assert spec.handler is _handle_bot_status
 
-    def test_total_command_count_is_41(self) -> None:
+    def test_total_command_count_is_42(self) -> None:
         """#1712 이후 CLI/IPC parity mutation 5개 + #2111
         ``bot.signal_key.rotate`` + #2112 ``bot.list`` / ``bot.info`` /
         ``bot.positions`` / ``bot.signal_key`` (read-only) 4건 (28→32) +
         #2113 member admin mutation 8건 (32→40) + #2334 (#2336 PR#1)
-        ``signal.connect`` (read-only) 1건 (40→41)을 포함한다."""
+        ``signal.connect`` (read-only) 1건 (40→41) + #2412
+        ``broker.order_history`` (read-only) 1건 (41→42)을 포함한다."""
         registry = CommandRegistry()
         register_all_handlers(registry)
-        assert len(registry.commands) == 41
+        assert len(registry.commands) == 42

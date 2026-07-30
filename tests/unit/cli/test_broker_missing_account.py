@@ -34,6 +34,22 @@
       ``{connected:false, healthy:false}`` envelope** 를 유지함(contract-drift
       회귀 가드)을 ``TestStatusAndReconcileFollowupScope`` 에서 검증한다.
 
+Refs #2412 (범위 확장):
+    ``broker order-history`` 신설과 함께 같은 ``_get_broker`` / IPC-우선 폴백
+    구조를 공유하는 인접 회귀를 본 모듈이 이어서 lock 한다. 본 파일이 이미
+    ``patch.object(broker_cmd, "_get_broker", ...)`` 로 폴백 어댑터를 주입하는
+    유일한 선례이기 때문이다:
+
+    - ``_ipc_broker_command`` 의 ``extra`` 파라미터가 ``None`` 일 때 기존
+      호출자 3곳(status/balance/positions) payload 가 **바이트 동일**함
+      (multi-consumer 회귀 락), 그리고 ``reconcile`` 은 이 helper 를
+      경유하지 않음.
+    - CLI **직접 연결 폴백** 경로에서 ISO ``YYYY-MM-DD`` 가 어댑터 경계
+      ``YYYYMMDD`` 로 변환됨 (IPC 핸들러를 거치지 않는 두 번째 변환 지점).
+    - invalid ``account_id`` 가 IPC/``_get_broker`` 이전에 거부됨.
+    - 폴백 트리거가 ``IPC_SERVER_NOT_RUNNING`` 단독임 (IPC_TIMEOUT /
+      server-error 는 폴백 없이 surface).
+
 SSOT 참조:
     - ``src/ante/cli/commands/broker.py`` (``_get_broker``, ``balance``,
       ``positions`` 의 except 분기).
@@ -1009,3 +1025,303 @@ class TestBrokerBalanceSubprocessNoHang:
         payload = _parse_json_line(completed.stdout)
         assert payload["status"] == "error", payload
         assert _NOT_FOUND_MESSAGE in str(payload["message"]), payload
+
+
+# ── #2412: order-history 신설에 딸린 broker CLI 인접 회귀 ────────────────────
+
+
+def _ipc_send_not_running() -> AsyncMock:
+    """``ipc_send`` mock — ``IPC_SERVER_NOT_RUNNING`` 부착 ClickException."""
+    exc = click.ClickException("서버가 실행 중이 아닙니다.")
+    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
+    return AsyncMock(side_effect=exc)
+
+
+def _ipc_send_with_code(code: str, message: str) -> AsyncMock:
+    """``ipc_send`` mock — 임의 IPC 코드가 부착된 ClickException."""
+    exc = click.ClickException(f"{code}: {message}")
+    exc.ipc_error_code = code  # type: ignore[attr-defined]
+    exc.ipc_error_message = message  # type: ignore[attr-defined]
+    return AsyncMock(side_effect=exc)
+
+
+class TestIpcBrokerCommandExtraRegressionLock:
+    """``_ipc_broker_command(extra=...)`` 확장의 multi-consumer 회귀 락 (#2412)."""
+
+    @pytest.mark.parametrize(
+        ("subcommand", "ipc_command"),
+        [
+            ("status", "broker.status"),
+            ("balance", "broker.balance"),
+            ("positions", "broker.positions"),
+        ],
+    )
+    def test_existing_callers_payload_is_byte_identical(
+        self, runner: CliRunner, subcommand: str, ipc_command: str
+    ) -> None:
+        """기존 호출자 3곳은 ``{"account_id": ...}`` 정확히 그대로 보낸다.
+
+        ``extra`` 는 순수 additive 확장이므로 ``None`` (미지정) 일 때 payload
+        가 종전과 **바이트 동일**해야 한다. 키가 하나라도 늘면 서버 handler
+        의 args 계약이 조용히 바뀐다.
+        """
+        ipc_send = AsyncMock(return_value={})
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send):
+            runner.invoke(
+                cli,
+                ["--format", "json", "broker", subcommand, "--account", "acc-a"],
+            )
+
+        ipc_send.assert_awaited_once()
+        call_args, call_kwargs = ipc_send.await_args
+        assert call_args[0] == ipc_command
+        assert call_args[1] == {"account_id": "acc-a"}, (
+            f"{subcommand}: payload 가 종전과 다르다 — extra=None 은 순수 "
+            f"additive 여야 한다. 실제: {call_args[1]!r}"
+        )
+        assert call_kwargs == {"actor": call_kwargs.get("actor")}
+
+    def test_reconcile_does_not_go_through_helper(self, runner: CliRunner) -> None:
+        """``reconcile`` 은 helper 비경유 — payload 에 ``fix`` 가 그대로 있다.
+
+        ``_ipc_broker_command`` 통일은 스코프 크립이자 동작 변경이므로 하지
+        않는다. 본 lock 이 그 경계를 명시한다.
+        """
+        ipc_send = AsyncMock(return_value={})
+        helper = AsyncMock(return_value={})
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send),
+            patch("ante.cli.commands.broker._ipc_broker_command", helper),
+        ):
+            runner.invoke(
+                cli,
+                ["--format", "json", "broker", "reconcile", "--account", "acc-a"],
+            )
+
+        helper.assert_not_awaited()
+        ipc_send.assert_awaited_once()
+        call_args, _ = ipc_send.await_args
+        assert call_args[0] == "broker.reconcile"
+        assert call_args[1] == {"fix": False, "account_id": "acc-a"}
+
+    def test_order_history_passes_iso_dates_through_extra(
+        self, runner: CliRunner
+    ) -> None:
+        """``order-history`` 는 ISO 날짜를 ``extra`` 로 실어 보낸다.
+
+        IPC 경계 위 어휘는 ISO 다 (변환은 서버 handler 가 어댑터 직전에
+        수행). 미지정 옵션은 payload 에 키 자체를 넣지 않는다.
+        """
+        ipc_send = AsyncMock(return_value={"orders": []})
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send):
+            runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-a",
+                    "--from",
+                    "2026-07-01",
+                ],
+            )
+
+        ipc_send.assert_awaited_once()
+        call_args, _ = ipc_send.await_args
+        assert call_args[0] == "broker.order_history"
+        assert call_args[1] == {"account_id": "acc-a", "from_date": "2026-07-01"}
+
+
+class TestOrderHistoryFallbackDateConversion:
+    """CLI 직접 연결 폴백 경로의 ISO→YYYYMMDD 변환 (#2412 결정 2)."""
+
+    @staticmethod
+    def _invoke_fallback(
+        runner: CliRunner,
+        *,
+        extra_args: list[str],
+        orders: list[dict] | None = None,
+    ) -> tuple[object, AsyncMock]:
+        """IPC 미기동을 강제하고 ``_get_broker`` 를 mock adapter 로 주입한다."""
+        from ante.broker.base import BrokerAdapter
+        from ante.cli.commands import broker as broker_cmd
+
+        mock_adapter = MagicMock(spec=BrokerAdapter)
+        mock_adapter.get_order_history = AsyncMock(
+            return_value=orders if orders is not None else []
+        )
+        mock_adapter.disconnect = AsyncMock(return_value=None)
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return mock_adapter, None
+
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", _ipc_send_not_running()),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-a",
+                    *extra_args,
+                ],
+            )
+        return result, mock_adapter.get_order_history
+
+    def test_fallback_converts_iso_to_compact_date(self, runner: CliRunner) -> None:
+        """🔴 폴백 경로도 어댑터에 ``YYYYMMDD`` 를 넘긴다.
+
+        폴백은 IPC 핸들러를 거치지 않으므로, 변환이 IPC 쪽에만 있으면 ISO 가
+        그대로 어댑터로 샌다. 그 경우 3개월 경계 판정(문자열 사전순 비교)이
+        무조건 before 를 고르고 malformed 값이 KIS 로 전송되는데 **예외도
+        경고도 없다**. 어댑터가 실제로 받은 값을 직접 단언한다.
+        """
+        result, get_order_history = self._invoke_fallback(
+            runner,
+            extra_args=["--from", "2026-07-01", "--to", "2026-07-31"],
+        )
+
+        assert result.exit_code == 0, (
+            f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        get_order_history.assert_awaited_once_with("20260701", "20260731")
+        args, _ = get_order_history.await_args
+        for value in args:
+            assert "-" not in value, (
+                f"폴백 경로에서 ISO 문자열이 어댑터로 샜다: {value!r}"
+            )
+
+    def test_fallback_without_dates_passes_none(self, runner: CliRunner) -> None:
+        """옵션 미지정은 ``None`` 그대로 — 어댑터 기본 구간 산출에 위임."""
+        result, get_order_history = self._invoke_fallback(runner, extra_args=[])
+
+        assert result.exit_code == 0, result.stdout
+        get_order_history.assert_awaited_once_with(None, None)
+
+    def test_fallback_empty_result_is_orders_only(self, runner: CliRunner) -> None:
+        """폴백 빈 결과도 IPC 경로와 동일한 ``{"orders": []}`` shape.
+
+        ``fmt.output`` 은 ``indent=2`` multi-line dump 라 line 단위
+        ``_parse_json_line`` 대신 stdout 전체를 파싱한다.
+        """
+        result, _ = self._invoke_fallback(runner, extra_args=[])
+
+        assert result.exit_code == 0, result.stdout
+        assert json.loads(result.stdout) == {"orders": []}
+
+
+class TestOrderHistoryFallbackTrigger:
+    """폴백 트리거는 ``IPC_SERVER_NOT_RUNNING`` 단독 (#2412 결정 5)."""
+
+    @pytest.mark.parametrize(
+        ("code", "message"),
+        [
+            ("IPC_TIMEOUT", "서버 응답 시간 초과"),
+            ("BROKER_RATE_LIMITED", "요청이 너무 많습니다"),
+            ("BROKER_CIRCUIT_OPEN", "차단기가 열려 있습니다"),
+            ("VALIDATION_ERROR", "계좌 ID가 올바르지 않습니다"),
+        ],
+    )
+    def test_non_server_down_errors_surface_without_fallback(
+        self, runner: CliRunner, code: str, message: str
+    ) -> None:
+        """server-error / timeout 은 직접 연결 폴백으로 은폐하지 않는다.
+
+        형제 balance/positions 의 통짜 ``except click.ClickException`` 을
+        따라하면 credentials / rate limit / circuit breaker 를 우회한다.
+        """
+        from ante.cli.commands import broker as broker_cmd
+
+        get_broker = AsyncMock()
+        with (
+            patch(
+                "ante.cli.commands.ipc_helpers.ipc_send",
+                _ipc_send_with_code(code, message),
+            ),
+            patch.object(broker_cmd, "_get_broker", new=get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-a",
+                ],
+            )
+
+        assert result.exit_code == 1, result.stdout
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == code, payload
+        assert payload["message"] == message, payload
+        get_broker.assert_not_awaited()
+
+
+class TestOrderHistoryAccountIdValidation:
+    """invalid ``account_id`` 는 IPC/``_get_broker`` 이전에 거부 (#2412)."""
+
+    @pytest.mark.parametrize("bad_account", ["default", "bad id!", " "])
+    def test_invalid_account_id_rejected_before_ipc(
+        self, runner: CliRunner, bad_account: str
+    ) -> None:
+        from ante.cli.commands import broker as broker_cmd
+
+        ipc_send = AsyncMock(return_value={"orders": []})
+        get_broker = AsyncMock()
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send),
+            patch.object(broker_cmd, "_get_broker", new=get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    bad_account,
+                ],
+            )
+
+        assert result.exit_code == 1, result.stdout
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "VALIDATION_ERROR", payload
+        ipc_send.assert_not_awaited()
+        get_broker.assert_not_awaited()
+
+    @pytest.mark.parametrize("bad_date", ["2026-13-01", "20260701", "2026-7-1"])
+    def test_invalid_iso_rejected_by_click_callback(
+        self, runner: CliRunner, bad_date: str
+    ) -> None:
+        """CLI ingress 의 invalid ISO 는 click 표준 경로에서 non-zero 종료."""
+        ipc_send = AsyncMock(return_value={"orders": []})
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", ipc_send):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-a",
+                    "--from",
+                    bad_date,
+                ],
+            )
+
+        assert result.exit_code != 0, result.stdout
+        ipc_send.assert_not_awaited()

@@ -53,6 +53,7 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante broker status](#ante-broker-status)
   - [ante broker balance](#ante-broker-balance)
   - [ante broker positions](#ante-broker-positions)
+  - [ante broker order-history](#ante-broker-order-history)
   - [ante broker reconcile](#ante-broker-reconcile)
 - [config — 설정 조회·변경.](#config-설정-조회변경)
   - [ante config get](#ante-config-get)
@@ -193,6 +194,7 @@ ante [OPTIONS] <command>
 | `ante broker status` | 증권사 연결 상태 조회. | `broker:read` | H·A |
 | `ante broker balance` | 증권사 계좌 잔고 조회. | `broker:read` | H·A |
 | `ante broker positions` | 증권사 보유 종목 조회. | `broker:read` | H·A |
+| `ante broker order-history` | 증권사 주문/체결 이력 조회 (read-only). | `broker:read` | H·A |
 | `ante broker reconcile` | 내부 데이터와 증권사 데이터 대사. | `broker:read` | H·A |
 | `ante config get` | 설정 조회. 키 없이 호출하면 전체 목록. | `config:read` | H·A |
 | `ante config set` | 동적 설정 변경. 정적 설정은 변경 불가. | `config:write` | H·A |
@@ -1163,6 +1165,47 @@ ante broker positions --account <ACCOUNT_ID>
 | 옵션 | 필수 | 타입 | 기본값 | 설명 |
 |------|------|------|--------|------|
 | `--account` | O | TEXT | — | 계좌 ID |
+
+
+### ante broker order-history
+
+증권사 주문/체결 이력 조회 (read-only).
+
+출력은 BrokerAdapter 가 정규화한 8키다: ``order_id`` / ``symbol`` /
+``side`` / ``quantity`` / ``filled_quantity`` / ``price`` / ``status`` /
+``timestamp``. KIS 원시 필드(``rvse_cncl_dvsn_nm``, ``ord_tmd`` 등)는
+어댑터 내부 fold 단계에서 이미 버려져 이 표면에 존재하지 않는다.
+
+알려진 한계 — 어댑터 계약 범위라 본 명령이 해소하지 않고 노출만 한다:
+
+- 취소된 주문도 ``status=pending`` 으로 보인다 (상태가 체결수량 기준 2값).
+
+- 정정/취소 구분과 원주문 번호가 소실되어 정정 행을 구별할 수 없다.
+
+- 주문 시각이 소실된다 (``timestamp`` 는 영업일 단위).
+
+- ``price`` 는 체결단가와 주문단가를 한 칸에 혼합한다 (구분 표시 없음).
+
+- ``timestamp`` 어휘가 어댑터마다 다르다 (KIS ``YYYYMMDD``, 그 외 ISO).
+
+- ``broker_type`` 이 ``test`` 인 계좌는 ``--from``/``--to`` 를 무시한다.
+
+- KIS 3개월 경계를 가로지르는 구간은 결과가 불완전할 수 있다.
+
+- **필요 scope**: `broker:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante broker order-history --account <ACCOUNT_ID> [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | O | TEXT | — | 계좌 ID |
+| `--from` | - | TEXT | — | 조회 시작일 (YYYY-MM-DD, 미지정 시 어댑터 기본 최근 7일) |
+| `--to` | - | TEXT | — | 조회 종료일 (YYYY-MM-DD, 미지정 시 어댑터 기본 오늘) |
 
 
 ### ante broker reconcile
