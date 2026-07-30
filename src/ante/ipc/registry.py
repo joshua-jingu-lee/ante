@@ -1468,6 +1468,39 @@ async def _handle_broker_positions(
     return {"positions": await broker.get_positions()}
 
 
+async def _handle_broker_order_history(
+    svc: ServiceRegistry, args: dict[str, Any], actor: str
+) -> dict:
+    """``broker.order_history`` — 주문/체결 이력 read-only 조회 (Refs #2412).
+
+    ``_handle_broker_positions`` 동형이며 ``{"orders": [...]}`` envelope 을
+    반환한다. 반환 row 는 ``BrokerAdapter.get_order_history`` 의 **정규화 8키**
+    (``order_id`` / ``symbol`` / ``side`` / ``quantity`` / ``filled_quantity`` /
+    ``price`` / ``status`` / ``timestamp``) 이며, KIS 원시 필드는 어댑터의
+    fold 단계에서 이미 버려져 이 경계에 존재하지 않는다.
+
+    **날짜 변환 chokepoint**: ``from_date``/``to_date`` 는 공개 표면 어휘인
+    ISO ``YYYY-MM-DD`` 로 받아 :func:`ante.core.time.iso_to_kis_date` 로
+    어댑터 경계 압축 ``YYYYMMDD`` 로 바꾼 뒤에만 전달한다. CLI click callback
+    (``validate_iso_date``)을 우회하는 직접 IPC 호출도 여기서 fail-closed 로
+    거부된다(``InvalidIsoDateError.code = "VALIDATION_ERROR"``).
+
+    검증 순서는 ``account_id`` 우선(#1636 broker handlers account_id-first)
+    이다 — invalid account_id 는 날짜 파싱보다 먼저 ``VALIDATION_ERROR`` 로
+    거부된다.
+    """
+    from ante.account.scoping import require_account_id
+    from ante.core.time import iso_to_kis_date
+
+    account_id = require_account_id(
+        args.get("account_id"), context="ipc.broker.order_history"
+    )
+    from_date = iso_to_kis_date(args.get("from_date"))
+    to_date = iso_to_kis_date(args.get("to_date"))
+    broker = await svc.account.get_broker(account_id)
+    return {"orders": await broker.get_order_history(from_date, to_date)}
+
+
 def _broker_reconcile_envelope(
     *,
     account_id: str,
@@ -1598,9 +1631,9 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """41개 런타임 커맨드 핸들러를 일괄 등록.
+    """42개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(9개)로 분류된다.
+    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(10개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
@@ -1667,6 +1700,13 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``;
     connect-audit 1회는 PR#2 #2337). read-only 8→9, 총 40→41. mutating 32 /
     audit 26 불변(signal.connect 는 비-mutating·비-audit).
+
+    Refs #2412: ``broker.order_history`` (read-only) 추가 — ``ante broker
+    order-history`` 의 runtime IPC 경로. ``broker.positions`` 1:1 미러
+    (``result_kind="collection"``, ``result_key="orders"``,
+    ``required_services={"account"}``, ``account_id_policy="required"``).
+    audit 없음(read-only). read-only 9→10, 총 41→42. mutating 32 / audit 26
+    불변.
     """
     # ── mutating (32개): 서버 상태/DB를 변경 ──────────
     # system.* — account_service의 suspend_all/activate_all (collective ops).
@@ -1993,10 +2033,11 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
     )
 
-    # ── read-only (8개): live 조회만 ──────────────────
+    # ── read-only (9개): live 조회만 ──────────────────
     # broker.* read-only — broker 객체 메서드 결과를 그대로 envelope에 surface.
     # status는 connected/healthy/exchange dict(entity), balance는 broker
-    # response dict 그대로(raw passthrough), positions는 list collection.
+    # response dict 그대로(raw passthrough), positions/order_history는 list
+    # collection (#2412: order_history 추가).
     registry.register(
         "broker.status",
         _handle_broker_status,
@@ -2019,6 +2060,20 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=False,
         result_kind="collection",
         result_key="positions",
+        required_services=frozenset({"account"}),
+        account_id_policy="required",
+    )
+    # Refs #2412: ``broker.order_history`` — ``ante broker order-history`` 의
+    # runtime IPC 경로. ``broker.positions`` 1:1 미러 (read-only collection,
+    # ``account`` 단일 의존, account_id required). ``audit_action`` 없음 —
+    # ``docs/specs/audit/audit.md:122`` 매핑이 ``broker reconcile --fix`` 만
+    # 감사 대상으로 두며 read-only 조회는 상태변경이 아니다.
+    registry.register(
+        "broker.order_history",
+        _handle_broker_order_history,
+        is_mutating=False,
+        result_kind="collection",
+        result_key="orders",
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )

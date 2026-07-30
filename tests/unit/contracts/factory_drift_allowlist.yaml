@@ -20,12 +20,16 @@ direct_database_construction:
   # BrokerAdapter + Database 를 생성하는 cold_path fallback 분기를 보유한다.
   # live broker state 와 Database lifecycle 이 같은 try/except 로 엮여 있어
   # 단순 `open_cli_db` async-context wrap 으로 동치 변환이 불가능하다 — broker
-  # 모듈 본문 주석 (broker.py:24-29) 의 invariant 와 일치.
+  # 모듈 본문 주석 (broker.py:25-28) 의 invariant 와 일치.
+  #
+  # Refs #2412: `order-history` 명령 삽입으로 두 callsite 의 **line 번호만**
+  # 이동했다 (34→35, 362→551). callsite 자체는 신규가 아니며 lifecycle 사유도
+  # 불변이다 — 본 anchor 는 line-based 라 코드 삽입 시 함께 갱신해야 한다.
   - path: src/ante/cli/commands/broker.py
-    line: 34
+    line: 35
     reason: "broker live state — _create_account_service factory body (runtime_ipc cold_path fallback)"
   - path: src/ante/cli/commands/broker.py
-    line: 362
+    line: 551
     reason: "broker reconcile — adapter_db fallback (runtime_ipc cold_path branch)"
 
   # signal connect — #2338 PR#3 에서 CLI `_run_connect` 를 thin IPC relay 로
@@ -59,7 +63,7 @@ direct_database_construction:
   # 동형).
 
   # init — root-level `ante init` bootstrap command. CLI registry 의
-  # 94 entries 외 follow-up set (`("init",)`). bootstrap 단계에서 DB 자체를
+  # 95 entries 외 follow-up set (`("init",)`). bootstrap 단계에서 DB 자체를
   # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
   # 가 부적절하다.
   - path: src/ante/cli/commands/init.py

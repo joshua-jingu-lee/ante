@@ -24,8 +24,8 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 6).
 * :data:`REPORT_CONTRACTS` — report 도메인 5 leaf contract tuple
   (#1847 sub-PR 6).
-* :data:`BROKER_CONTRACTS` — broker 도메인 4 leaf contract tuple
-  (#1847 sub-PR 7).
+* :data:`BROKER_CONTRACTS` — broker 도메인 5 leaf contract tuple
+  (#1847 sub-PR 7 + #2412 ``order-history``).
 * :data:`SYSTEM_CONTRACTS` — system 도메인 5 leaf contract tuple
   (#1847 sub-PR 7).
 * :data:`INSTRUMENT_CONTRACTS` — instrument 도메인 4 leaf contract tuple
@@ -44,9 +44,9 @@ execution 계약을 한 곳에서 관리하는 registry 다.
   (#1847 sub-PR 9 — final).
 * :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping. 본
   PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-  + strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument 4
-  + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
-  entries 가 채워져 있다.
+  + strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument 4
+  + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
+  entries 가 채워져 있다 (#2412 로 broker 4→5, 94→95).
 * :func:`get_contract` / :func:`all_contracts` — read-only accessor.
 
 본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
@@ -1218,19 +1218,22 @@ submit → list → performance → view) 와 시각적으로 일치하도록 �
 
 # ── #1847 sub-PR 7: broker domain OutputContract migration ──────────────
 #
-# broker 도메인 4 leaf 의 contract entry. ``src/ante/cli/commands/broker.py``
-# 의 ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
-# ``docs/specs/cli/03-commands.md:123-126`` (실행 분류) / ``449-463`` (커맨드
+# broker 도메인 5 leaf 의 contract entry (#1847 sub-PR 7 의 4 + #2412 의
+# ``order-history``). ``src/ante/cli/commands/broker.py`` 의
+# ``@require_scope`` marker 와 ``fmt.*`` 호출 패턴, 그리고
+# ``docs/specs/cli/03-commands.md:123-127`` (실행 분류) / ``450-464`` (커맨드
 # 표) 와 1:1 정합한다.
 #
-# raw_legacy 분류 (4 commands, 전체): ``status`` / ``balance`` / ``positions``
-# / ``reconcile`` 모두 JSON 모드에서 ``fmt.output(result)`` 또는 ``fmt.table(
-# pos_list, columns)`` 평면 dict / row list 를 그대로 dump 한다. 도메인
-# envelope (``{connected, healthy, exchange, ...}``, ``{현금/매수가능 평면}``,
-# ``{positions: [...]}``, ``{total_symbols, discrepancies, match, ...}``) 이며
-# standard envelope ``{status, message, data}`` 3 키 셋과는 다르다.
+# raw_legacy 분류 (5 commands, 전체): ``status`` / ``balance`` / ``positions``
+# / ``order-history`` / ``reconcile`` 모두 JSON 모드에서 ``fmt.output(result)``
+# 또는 ``fmt.table(pos_list, columns)`` 평면 dict / row list 를 그대로 dump
+# 한다. 도메인 envelope (``{connected, healthy, exchange, ...}``, ``{현금/
+# 매수가능 평면}``, ``{positions: [...]}``, ``{orders: [...]}``,
+# ``{total_symbols, discrepancies, match, ...}``) 이며 standard envelope
+# ``{status, message, data}`` 3 키 셋과는 다르다.
 # ``OutputContract(kind="raw", envelope="raw_legacy")`` 조합으로 표현해 lock
-# 만 한다 — broker.py 본문 변경 없음 (drift test 가 callsite 변경 시 FAIL).
+# 만 한다 — 기존 4 leaf 의 broker.py 본문 변경 없음 (drift test 가 callsite
+# 변경 시 FAIL).
 #
 # ``positions`` 는 분기 mixed: empty → ``fmt.output({"message": ...,
 # "positions": []})`` (broker.py:278), non-empty JSON → ``fmt.output({"positions":
@@ -1239,15 +1242,15 @@ submit → list → performance → view) 와 시각적으로 일치하도록 �
 # 분기 mixed 동형).
 #
 # scope 분류 (#1815 SSOT, broker.py @require_scope marker 와 1:1 정합):
-# - ``broker:read`` scope (4 개, 전체): ``status`` / ``balance`` /
-#   ``positions`` / ``reconcile``. ``reconcile --fix`` 는 mutating 분기이지만
-#   marker 는 ``broker:read`` 로 유지된다 (#1843 sub-PR 5 audit_actor scope
-#   결정 — write scope 분리 없음).
+# - ``broker:read`` scope (5 개, 전체): ``status`` / ``balance`` /
+#   ``positions`` / ``order-history`` / ``reconcile``. ``reconcile --fix`` 는
+#   mutating 분기이지만 marker 는 ``broker:read`` 로 유지된다 (#1843 sub-PR 5
+#   audit_actor scope 결정 — write scope 분리 없음).
 # - public allowlist: 없음 — broker 도메인은 ``_AUTH_EXEMPT_COMMAND_PATHS``
 #   에 등재된 leaf 가 0 개다.
 #
-# execution 분류 (``docs/specs/cli/03-commands.md:123-126`` SSOT):
-# - ``runtime_ipc`` (4 개, 전체): 모든 broker live 커맨드는 spec 상 서버가
+# execution 분류 (``docs/specs/cli/03-commands.md:123-127`` SSOT):
+# - ``runtime_ipc`` (5 개, 전체): 모든 broker live 커맨드는 spec 상 서버가
 #   시작 시 생성한 BrokerAdapter 를 통해 실행하는 런타임 IPC 커맨드다 (spec
 #   458-463 narrative). broker.py 의 실제 callsite 는 ``ipc_send(...)`` 우선
 #   + ``click.ClickException`` 발생 시 cold_path fallback (직접 BrokerAdapter
@@ -1260,7 +1263,8 @@ submit → list → performance → view) 와 시각적으로 일치하도록 �
 # 문자열 lock 이며 server-side IPC registry 와의 cross-ref drift test 는
 # #1819 의 책임이다 (account/member/bot/approval/treasury/strategy 동형 정책).
 # broker.py 호출 사이트의 IPC command name 과 그대로 일치한다 (``broker.status``
-# / ``broker.balance`` / ``broker.positions`` / ``broker.reconcile``).
+# / ``broker.balance`` / ``broker.positions`` / ``broker.order_history`` /
+# ``broker.reconcile``).
 BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("broker", "status"),
@@ -1301,6 +1305,22 @@ BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
         ipc_command="broker.positions",
     ),
     CliCommandContract(
+        path=("broker", "order-history"),
+        auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
+        # Refs #2412. JSON mode: ``fmt.output(result)`` 로 IPC envelope 을
+        # 그대로 passthrough 한 평면 dict (``{orders: [...]}``). 빈 결과도
+        # 동일 shape (``{"orders": []}``) — ``positions`` 의 empty 분기
+        # ``message`` 키 혼합은 따르지 않는다. text 는 known-limitation
+        # 헤더 1줄 + ``fmt.table(orders, 8 columns)``.
+        #
+        # 형제 4종과 동일한 ``kind="raw"`` / ``envelope="raw_legacy"`` 다 —
+        # ``collection`` 을 쓰면 broker 도메인 안에서 형제와 갈라진다
+        # (IPC 쪽 ``result_kind="collection"`` 은 별개 vocabulary 다).
+        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        execution="runtime_ipc",
+        ipc_command="broker.order_history",
+    ),
+    CliCommandContract(
         path=("broker", "reconcile"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"broker:read"})),
         # JSON mode: ``fmt.output(result)`` 평면 dict (``{total_symbols,
@@ -1312,11 +1332,12 @@ BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
         ipc_command="broker.reconcile",
     ),
 )
-"""Broker domain 4 leaf 의 contract tuple (#1847 sub-PR 7).
+"""Broker domain 5 leaf 의 contract tuple (#1847 sub-PR 7 + #2412).
 
-순서는 ``docs/specs/cli/03-commands.md:123-126`` 의 broker 실행 분류 표
-(status → balance → positions → reconcile) 와 시각적으로 일치하도록
-정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
+순서는 ``docs/specs/cli/03-commands.md:123-127`` 의 broker 실행 분류 표
+(status → balance → positions → order-history → reconcile) 와 시각적으로
+일치하도록 정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
+등록된다.
 """
 
 
@@ -1923,15 +1944,17 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
 """Leaf command path → contract mapping.
 
 본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury 9
-+ strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument 4
-+ config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
++ strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument 4
++ config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
 entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
 #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 /
-#1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9). #1847 sweep 은 본
-PR 로 완료되며 (sub-PR 9 = final), registry 미등록 leaf 가 FAIL 이어야
-하는 drift guard 는 `#1848` 가 활성화한다.
+#1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9 / #2412
+``broker order-history``). #1847 sweep 은 sub-PR 9 로 완료되었고
+(sub-PR 9 = final), registry 미등록 leaf 가 FAIL 이어야 하는 drift guard
+는 `#1848` 가 활성화한다. 이후 신규 leaf 는 도입 이슈가 직접 등록한다
+(#2412 로 broker 4→5, 94→95).
 
-미등록 잔여 leaf (94 / 실측 Click leaf count 비교): ``ante`` root 의
+미등록 잔여 leaf (95 / 실측 Click leaf count 비교): ``ante`` root 의
 init / update / notification group 은 leaf 가 없거나 (notification은
 0 leaf — spec 707-708 narrative), update 단일 leaf 는 root-level command
 로 본 registry sweep 범위 밖이다. 정확한 잔여 leaf 식별은
@@ -1956,10 +1979,11 @@ def all_contracts() -> Iterator[CliCommandContract]:
     """등록된 모든 contract 를 dict 순회 순서로 yield 한다.
 
     본 PR 시점에는 account 9 + member 12 + bot 11 + approval 10 + treasury
-    9 + strategy 7 + data 6 + report 5 + broker 4 + system 5 + instrument
-    4 + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 94
+    9 + strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument
+    4 + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
     entries 가 등록되어 있다 (#1846 / #1847 sub-PR 1 / #1847 sub-PR 2 /
     #1847 sub-PR 3 / #1847 sub-PR 4 / #1847 sub-PR 5 / #1847 sub-PR 6 /
-    #1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9).
+    #1847 sub-PR 7 / #1847 sub-PR 8 / #1847 sub-PR 9 / #2412
+    ``broker order-history``).
     """
     yield from CLI_COMMAND_REGISTRY.values()

@@ -7,6 +7,7 @@ import asyncio
 import click
 
 from ante.account.errors import AccountNotFoundError
+from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts import emit_cli_error
@@ -88,7 +89,12 @@ async def _get_broker(account_id: str | None = None):  # noqa: ANN202
         raise ValueError(msg)
 
 
-async def _ipc_broker_command(command: str, account_id: str, actor: str) -> dict:
+async def _ipc_broker_command(
+    command: str,
+    account_id: str,
+    actor: str,
+    extra: dict | None = None,
+) -> dict:
     """IPC를 통해 서버 브로커 인스턴스에 위임한다.
 
     ``account_id``는 호출자(``--account`` required CLI 옵션 + helper 통과)
@@ -96,10 +102,25 @@ async def _ipc_broker_command(command: str, account_id: str, actor: str) -> dict
     IPC 로 보내지 않는다.
 
     ServerNotRunningError, IPCTimeoutError 시 예외를 전파하여 호출자가 폴백 처리한다.
+
+    Refs #2412: ``extra`` 는 command 고유 인자(예 ``order-history`` 의
+    ``from_date``/``to_date``)를 payload 에 합치기 위한 **순수 additive**
+    확장이다. ``None``(또는 빈 dict)이면 payload 는 종전과 **바이트 동일**한
+    ``{"account_id": ...}`` 이며, 기존 호출자 3곳(``status`` / ``balance`` /
+    ``positions``)의 동작은 불변이다. ``reconcile`` 은 본 helper 를 경유하지
+    않고 ``ipc_send`` 를 직접 호출하므로(payload ``{"fix", "account_id"}``)
+    본 확장의 영향 범위 밖이다 — 통일은 별건 스코프다.
+
+    "additive" 는 주석이 아니라 **구조**로 보장한다: ``extra`` 를 먼저 펼치고
+    검증된 ``account_id`` 를 뒤에 두어, ``extra`` 가 ``account_id`` 키를
+    담고 있어도 검증된 값이 항상 이긴다. ``args.update(extra)`` 순서였다면
+    호출자가 실수로 ``account_id`` 를 넣는 순간 ingress 검증
+    (``reject_invalid_account_id``)을 통과한 값이 조용히 덮여 미검증 값이
+    IPC 로 나간다.
     """
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    args: dict = {"account_id": account_id}
+    args: dict = {**(extra or {}), "account_id": account_id}
     return await ipc_send(command, args, actor=actor)
 
 
@@ -295,6 +316,174 @@ def positions(ctx: click.Context, account_id: str) -> None:
     else:
         columns = ["symbol", "quantity", "avg_price", "eval_amount"]
         fmt.table(pos_list, columns)
+
+
+@broker.command("order-history")
+@click.option("--account", "account_id", required=True, help="계좌 ID")
+@click.option(
+    "--from",
+    "from_date",
+    default=None,
+    callback=validate_iso_date,
+    help="조회 시작일 (YYYY-MM-DD, 미지정 시 어댑터 기본 최근 7일)",
+)
+@click.option(
+    "--to",
+    "to_date",
+    default=None,
+    callback=validate_iso_date,
+    help="조회 종료일 (YYYY-MM-DD, 미지정 시 어댑터 기본 오늘)",
+)
+@click.pass_context
+@require_auth
+@require_scope("broker:read")
+def order_history(
+    ctx: click.Context,
+    account_id: str,
+    from_date: str | None,
+    to_date: str | None,
+) -> None:
+    """증권사 주문/체결 이력 조회 (read-only).
+
+    출력은 BrokerAdapter 가 정규화한 8키다: ``order_id`` / ``symbol`` /
+    ``side`` / ``quantity`` / ``filled_quantity`` / ``price`` / ``status`` /
+    ``timestamp``. KIS 원시 필드(``rvse_cncl_dvsn_nm``, ``ord_tmd`` 등)는
+    어댑터 내부 fold 단계에서 이미 버려져 이 표면에 존재하지 않는다.
+
+    알려진 한계 — 어댑터 계약 범위라 본 명령이 해소하지 않고 노출만 한다:
+
+    - 취소된 주문도 ``status=pending`` 으로 보인다 (상태가 체결수량 기준 2값).
+
+    - 정정/취소 구분과 원주문 번호가 소실되어 정정 행을 구별할 수 없다.
+
+    - 주문 시각이 소실된다 (``timestamp`` 는 영업일 단위).
+
+    - ``price`` 는 체결단가와 주문단가를 한 칸에 혼합한다 (구분 표시 없음).
+
+    - ``timestamp`` 어휘가 어댑터마다 다르다 (KIS ``YYYYMMDD``, 그 외 ISO).
+
+    - ``broker_type`` 이 ``test`` 인 계좌는 ``--from``/``--to`` 를 무시한다.
+
+    - KIS 3개월 경계를 가로지르는 구간은 결과가 불완전할 수 있다.
+    """
+    from ante.cli._validators import reject_invalid_account_id
+    from ante.cli.middleware import get_member_id
+
+    fmt = get_formatter(ctx)
+
+    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
+    # (fallback 금지, helper 재사용 — 형제 4종 동형).
+    validated_account_id = reject_invalid_account_id(
+        account_id, fmt, context="cli.broker.order-history"
+    )
+
+    # inverted date range(시작일 > 종료일) 거부: IPC/_get_broker 이전에
+    # 차단한다 (#1597 date-range read family 동형, INVALID_DATE_RANGE +
+    # exit 1). 이 helper 없이 추가하면 ``--from > --to`` 가 exit 0 빈 결과로
+    # 돌아가 오라클 #1597 이 닫은 drift class 가 재개방된다.
+    reject_inverted_date_range(
+        from_date,
+        to_date,
+        fmt,
+        from_label="조회 시작일",
+        to_label="조회 종료일",
+    )
+
+    extra: dict = {}
+    if from_date is not None:
+        extra["from_date"] = from_date
+    if to_date is not None:
+        extra["to_date"] = to_date
+
+    # ``actor`` 는 ``try`` **밖**에서 계산한다 (``bot signal-key``
+    # bot.py:581 과 1:1 미러). try 안에 두면 여기서 나는 ``ClickException``
+    # 이 아래 IPC except 분기에 잡혀 ``IPC_ERROR`` 로 오분류된다 — 현재
+    # ``get_member_id`` 는 raise 하지 않아 동작은 동일하지만, 오분류 가능
+    # 구조 자체를 남기지 않는다.
+    actor = get_member_id(ctx)
+
+    # IPC 우선 시도. 폴백 트리거는 ``IPC_SERVER_NOT_RUNNING`` **단독** 이다
+    # (``bot signal-key`` 패턴, bot.py:641-650). 형제 balance/positions 의
+    # 통짜 ``except click.ClickException`` 은 서버 error envelope 까지 삼켜
+    # credentials/rate limit/circuit breaker 를 우회하므로 따르지 않는다
+    # (docs/specs/ipc/ipc.md 경고). IPC_TIMEOUT·server-error 는 폴백 없이
+    # 원본 code/message 로 surface 한다.
+    try:
+        result = _run(
+            _ipc_broker_command(
+                "broker.order_history", validated_account_id, actor, extra=extra
+            )
+        )
+    except click.ClickException as e:
+        if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
+            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
+            message = getattr(e, "ipc_error_message", None) or e.message
+            # text 모드는 ``bot signal-key`` 형제와 동일한 ``{code}: {message}``
+            # prefix UX 를 유지하되, ``code=`` 인자를 함께 넘겨 error taxonomy
+            # drift(Family A: code 누락) allowlist 부채를 새로 만들지 않는다.
+            fmt.error(message if fmt.is_json else f"{code}: {message}", code=code)
+            raise SystemExit(1) from e
+
+        # 서버 미실행 — 직접 연결 폴백. 이 경로는 IPC 핸들러를 거치지 않으므로
+        # **여기서도** ISO→YYYYMMDD 변환을 반드시 수행해야 한다. ISO 가 그대로
+        # 어댑터로 새면 3개월 경계 판정(문자열 사전순 비교)이 항상 before 로
+        # 오선택되고 malformed 날짜가 KIS 로 전송된다 — 예외도 경고도 없다.
+        async def _run_order_history() -> list[dict]:
+            from ante.core.time import iso_to_kis_date
+
+            adapter, db = await _get_broker(validated_account_id)
+            try:
+                return await adapter.get_order_history(
+                    iso_to_kis_date(from_date),
+                    iso_to_kis_date(to_date),
+                )
+            finally:
+                await adapter.disconnect()
+                if db:
+                    await db.close()
+
+        try:
+            result = {"orders": _run(_run_order_history())}
+        except AccountNotFoundError as exc:
+            fmt.error(str(exc), code="ACCOUNT_NOT_FOUND")
+            raise SystemExit(1) from exc
+        except Exception as exc:
+            # emit_cli_error 로 broker typed exception 안정 코드 surface
+            # (형제 표면 동일 정책). ``InvalidIsoDateError`` 는 class-level
+            # ``code="VALIDATION_ERROR"`` 로 접힌다.
+            emit_cli_error(fmt, exc)
+
+    orders = result.get("orders", [])
+
+    if fmt.is_json:
+        # IPC envelope passthrough — ``fmt.success`` 재래핑 금지(형제 shape
+        # 불일치 방지). 빈 결과도 ``{"orders": []}`` 로 통일하며 positions 의
+        # ``message`` 키 혼합(broker.py 의 empty 분기)은 따르지 않는다.
+        fmt.output(result)
+        return
+
+    if not orders:
+        click.echo("  주문/체결 이력 없음")
+        return
+
+    click.echo(
+        "  ※ status 는 체결수량 기준 2값(filled/pending)이라 "
+        "취소 주문도 pending 으로 보입니다. price 는 체결가/주문가 혼합, "
+        "timestamp 는 영업일(일자)까지입니다."
+    )
+    fmt.table(
+        orders,
+        [
+            "order_id",
+            "symbol",
+            "side",
+            "quantity",
+            "filled_quantity",
+            "price",
+            "status",
+            "timestamp",
+        ],
+    )
 
 
 @broker.command()

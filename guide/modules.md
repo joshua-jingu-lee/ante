@@ -111,7 +111,7 @@ Scope는 `도메인:권한` 형식입니다. 예를 들어 `strategy:write`는 �
   *제어:* 잔고 요약, 자금 배정·회수, 거래 내역, 일별 자산 스냅샷. · *이어짐:* 주문 승인 직전 자금 게이트, Trade 체결 기록. · *명령:* `ante treasury status / allocate / deallocate / budgets / snapshot`
 
 - **Broker Adapter (증권사 어댑터)** — KIS 같은 증권사 API를 Ante의 공통 인터페이스로 감싸는 모듈이다.
-  *제어:* live 연결 상태, 외부 잔고·포지션 조회, 내부 기록과 외부 상태 대사. · *이어짐:* Account 인증정보, API Gateway, Trade reconciliation. · *명령:* `ante broker status / balance / positions / reconcile`
+  *제어:* live 연결 상태, 외부 잔고·포지션 조회, 주문/체결 이력 조회, 내부 기록과 외부 상태 대사. · *이어짐:* Account 인증정보, API Gateway, Trade reconciliation. · *명령:* `ante broker status / balance / positions / order-history / reconcile`
 
 - **API Gateway** — 여러 봇의 외부 API 호출을 큐잉·캐싱·rate limit 처리하는 내부 모듈이다.
   *제어:* 별도 공개 CLI 표면은 없다. · *이어짐:* Treasury 통과 후 Broker Adapter 앞단. · *명령:* 공개 명령 없음

@@ -1761,8 +1761,11 @@ class KISDomesticAdapter(KISBaseAdapter):
         조회 시작일(``INQR_STRT_DT``)이 KST 오늘 기준 3개월 전 cutoff 이상이면
         inner(``*0081R``), 미만이면 before(``*9215R``)다(start-date 단독 기준).
         교차 구간(``from < cutoff <= to``)은 split query 없이 start-date 기준
-        before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다
-        (현행 호출자 FillReconcileScheduler 는 항상 ≤7일 창이라 inner 고정).
+        before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다.
+        자동 호출자 FillReconcileScheduler 는 항상 ≤7일 창이라 inner 고정이지만,
+        사용자 표면 ``ante broker order-history`` (#2412) 는 임의 ``--from`` 을
+        받으므로 before 분기와 교차 구간이 실제로 도달 가능하다 — 한계는 CLI
+        ``--help`` / 스펙으로 노출하며 여기서 거부하지 않는다(정책 무변경).
         """
         # 기본 날짜 산출은 UTC 현행 유지(기존 동작 invariant). KST 는 경계 판정에만.
         now = datetime.now(UTC)

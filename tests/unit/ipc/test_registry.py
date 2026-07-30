@@ -65,7 +65,7 @@ def test_commands_property(registry: CommandRegistry) -> None:
 
 
 def test_register_all_handlers() -> None:
-    """register_all_handlers가 41개 핸들러를 등록 (account.delete 제외).
+    """register_all_handlers가 42개 핸들러를 등록 (account.delete 제외).
 
     `account.delete`는 1.0 IPC 계약에서 제거되어 cold-path CLI에서 직접
     AccountService를 호출한다.
@@ -92,10 +92,13 @@ def test_register_all_handlers() -> None:
     ``member.revoke`` / ``member.rotate_token`` / ``member.reset_password`` /
     ``member.regenerate_recovery_key``) 추가 — ``member.update_scopes`` 동형
     runtime IPC 경로 (32→40).
+
+    Refs #2412: ``broker.order_history`` (read-only) 추가 — ``ante broker
+    order-history`` 의 runtime IPC 경로 (41→42).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
-    assert len(registry.commands) == 41
+    assert len(registry.commands) == 42
 
     expected = {
         "system.halt",
@@ -138,6 +141,7 @@ def test_register_all_handlers() -> None:
         "broker.status",
         "broker.balance",
         "broker.positions",
+        "broker.order_history",
         "broker.reconcile",
     }
     assert set(registry.commands) == expected
@@ -148,7 +152,7 @@ def test_register_all_handlers() -> None:
 
 
 def test_register_all_handlers_taxonomy() -> None:
-    """등록된 41개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
+    """등록된 42개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
     read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
@@ -161,6 +165,8 @@ def test_register_all_handlers_taxonomy() -> None:
     Refs #2113: member admin mutation 8건 추가 (mutating 24→32).
 
     Refs #2334 (#2336 PR#1): ``signal.connect`` read-only 추가 (read-only 8→9).
+
+    Refs #2412: ``broker.order_history`` read-only 추가 (read-only 9→10).
     """
     registry = CommandRegistry()
     register_all_handlers(registry)
@@ -203,6 +209,7 @@ def test_register_all_handlers_taxonomy() -> None:
         "broker.status",
         "broker.balance",
         "broker.positions",
+        "broker.order_history",
         "bot.status",
         "bot.list",
         "bot.info",
@@ -212,7 +219,7 @@ def test_register_all_handlers_taxonomy() -> None:
     }
 
     assert len(mutating) == 32
-    assert len(read_only) == 9
+    assert len(read_only) == 10
     assert mutating | read_only == set(registry.commands)
 
     for command in mutating:
@@ -502,6 +509,184 @@ class TestSystemKillSwitchHandlers:
         svc.bot_manager.start_bot.assert_not_called()
         svc.bot_manager.restart_bot.assert_not_called()
         svc.bot_manager.start_all.assert_not_called()
+
+
+# ── broker.order_history (#2412) ──────────────────────────────────────
+
+
+def _make_order_history_svc(*, orders: list[dict] | None = None):
+    """``broker.order_history`` 핸들러용 svc mock.
+
+    ``svc.account.get_broker(account_id)`` → ``get_order_history`` 를 가진
+    broker mock. adapter 가 실제로 받은 인자를 단언하기 위해 AsyncMock 을
+    그대로 반환한다.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    broker = AsyncMock()
+    broker.get_order_history = AsyncMock(
+        return_value=orders if orders is not None else []
+    )
+
+    account_svc = AsyncMock()
+    account_svc.get_broker = AsyncMock(return_value=broker)
+
+    svc = MagicMock()
+    svc.account = account_svc
+    return svc, broker
+
+
+class TestBrokerOrderHistoryHandler:
+    """``broker.order_history`` IPC 핸들러 (#2412)."""
+
+    async def test_returns_orders_envelope(self) -> None:
+        """``{"orders": [...]}`` envelope — ``broker.positions`` 동형 dict."""
+        from ante.ipc.registry import _handle_broker_order_history
+
+        rows = [
+            {
+                "order_id": "0000117057",
+                "symbol": "005930",
+                "side": "buy",
+                "quantity": 10.0,
+                "filled_quantity": 10.0,
+                "price": 70100.0,
+                "status": "filled",
+                "timestamp": "20260701",
+            }
+        ]
+        svc, broker = _make_order_history_svc(orders=rows)
+
+        result = await _handle_broker_order_history(svc, {"account_id": "acc-a"}, "cli")
+
+        assert result == {"orders": rows}
+        svc.account.get_broker.assert_awaited_once_with("acc-a")
+
+    async def test_iso_dates_converted_to_compact_before_adapter(self) -> None:
+        """🔴 ISO ``YYYY-MM-DD`` → 어댑터 경계 ``YYYYMMDD`` 변환 (IPC 경로).
+
+        변환이 빠지면 ``KISDomesticAdapter.get_order_history`` 의 3개월 경계
+        판정(``start_date >= cutoff`` 문자열 사전순 비교)이 무조건 False 가
+        되어 before 분기를 오선택하고 malformed 값을 KIS 로 보낸다 — 예외도
+        경고도 없다. 그래서 어댑터가 **받은 값**을 직접 단언한다.
+        """
+        from ante.ipc.registry import _handle_broker_order_history
+
+        svc, broker = _make_order_history_svc()
+
+        await _handle_broker_order_history(
+            svc,
+            {
+                "account_id": "acc-a",
+                "from_date": "2026-07-01",
+                "to_date": "2026-07-31",
+            },
+            "cli",
+        )
+
+        broker.get_order_history.assert_awaited_once_with("20260701", "20260731")
+        args, _kwargs = broker.get_order_history.await_args
+        for value in args:
+            assert "-" not in value, (
+                f"ISO 문자열이 어댑터 경계로 그대로 샜다: {value!r}. "
+                "사전순 비교 기반 3개월 경계 판정이 조용히 어긋난다."
+            )
+
+    async def test_missing_dates_stay_none(self) -> None:
+        """``from_date``/``to_date`` 미지정은 ``None`` 으로 어댑터 기본값 위임."""
+        from ante.ipc.registry import _handle_broker_order_history
+
+        svc, broker = _make_order_history_svc()
+
+        await _handle_broker_order_history(svc, {"account_id": "acc-a"}, "cli")
+
+        broker.get_order_history.assert_awaited_once_with(None, None)
+
+    @pytest.mark.parametrize(
+        "bad_date",
+        [
+            "2026-13-01",  # 존재하지 않는 달
+            "20260701",  # 압축형 우회 입력 (표면 어휘 이중화 차단)
+            "2026-7-1",  # non-zero-padded
+            "2026-02-30",  # 존재하지 않는 날
+            "2026/07/01",  # 잘못된 구분자
+            "not-a-date",
+            "",
+        ],
+    )
+    @pytest.mark.parametrize("field", ["from_date", "to_date"])
+    async def test_invalid_iso_rejected_fail_closed(
+        self, bad_date: str, field: str
+    ) -> None:
+        """CLI click callback 을 우회하는 직접 IPC 호출도 fail-closed 거부.
+
+        IPC ingress 독립 검증 — CLI ``validate_iso_date`` 에만 의존하면 IPC
+        직접 호출자가 invalid ISO 를 그대로 어댑터에 흘린다. 코드는
+        ``VALIDATION_ERROR`` (``InvalidAccountIdError`` 와 동일 SSOT 재사용).
+        """
+        from ante.core.time import InvalidIsoDateError
+        from ante.ipc.registry import _handle_broker_order_history
+
+        svc, broker = _make_order_history_svc()
+
+        with pytest.raises(InvalidIsoDateError) as exc_info:
+            await _handle_broker_order_history(
+                svc, {"account_id": "acc-a", field: bad_date}, "cli"
+            )
+
+        assert exc_info.value.code == "VALIDATION_ERROR"
+        # fail-closed: 어댑터에 도달하지 않는다.
+        broker.get_order_history.assert_not_awaited()
+
+    @pytest.mark.parametrize("bad_account", [None, "", "default", "bad id!"])
+    async def test_invalid_account_id_rejected_before_broker_lookup(
+        self, bad_account: str | None
+    ) -> None:
+        """invalid ``account_id`` 는 ``get_broker`` 이전에 VALIDATION_ERROR."""
+        from ante.account.errors import InvalidAccountIdError
+        from ante.ipc.registry import _handle_broker_order_history
+
+        svc, broker = _make_order_history_svc()
+
+        with pytest.raises(InvalidAccountIdError) as exc_info:
+            await _handle_broker_order_history(svc, {"account_id": bad_account}, "cli")
+
+        assert exc_info.value.code == "VALIDATION_ERROR"
+        svc.account.get_broker.assert_not_awaited()
+        broker.get_order_history.assert_not_awaited()
+
+    async def test_account_id_checked_before_date_parsing(self) -> None:
+        """account_id-first 정렬: 둘 다 invalid 면 account 오류가 먼저 난다.
+
+        #1636 broker handlers 의 account_id-first 계약을 신규 핸들러도 따른다
+        (invalid account 가 날짜 오류로 오분류되지 않는다).
+        """
+        from ante.account.errors import InvalidAccountIdError
+        from ante.ipc.registry import _handle_broker_order_history
+
+        svc, _broker = _make_order_history_svc()
+
+        with pytest.raises(InvalidAccountIdError):
+            await _handle_broker_order_history(
+                svc,
+                {"account_id": "default", "from_date": "2026-13-01"},
+                "cli",
+            )
+
+    def test_registered_spec_metadata(self) -> None:
+        """등록 메타데이터 lock — ``broker.positions`` 미러 + ``orders`` key."""
+        registry = CommandRegistry()
+        register_all_handlers(registry)
+
+        spec = registry.get("broker.order_history")
+        assert spec is not None
+        assert spec.is_mutating is False
+        assert spec.result_kind == "collection"
+        assert spec.result_key == "orders"
+        assert spec.required_services == frozenset({"account"})
+        assert spec.account_id_policy == "required"
+        # read-only 조회는 audit 대상이 아니다 (audit.md 는 reconcile --fix 만).
+        assert spec.audit_action is None
 
 
 # ── broker.reconcile account-level 재설계 (#2119/2121/2122/2118/2120) ──
@@ -1392,12 +1577,13 @@ class TestRegisteredCommandsMetadataCompleteness:
         for spec in loaded.iter_specs():
             assert spec.cross_validators == (), spec.name
 
-    def test_iter_specs_returns_all_41_specs(self, loaded: CommandRegistry) -> None:
-        """``iter_specs``가 41 commands 모두를 ``CommandSpec`` 인스턴스로
+    def test_iter_specs_returns_all_42_specs(self, loaded: CommandRegistry) -> None:
+        """``iter_specs``가 42 commands 모두를 ``CommandSpec`` 인스턴스로
         반환한다 (#2112: 28→32, bot.* read 4건; #2113: 32→40, member admin
-        mutation 8건 추가; #2334/#2336 PR#1: 40→41, ``signal.connect``)."""
+        mutation 8건 추가; #2334/#2336 PR#1: 40→41, ``signal.connect``;
+        #2412: 41→42, ``broker.order_history``)."""
         specs = loaded.iter_specs()
-        assert len(specs) == 41
+        assert len(specs) == 42
         assert all(isinstance(s, CommandSpec) for s in specs)
         # 등록 순서 보존(dict insertion order).
         assert [s.name for s in specs] == loaded.commands

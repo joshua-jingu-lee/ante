@@ -153,6 +153,7 @@ cold-path 삭제는 항상 keep 의미다.
 | `ante broker status` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
 | `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
 | `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
+| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다(#2412) |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
@@ -266,8 +267,9 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 41개가
-SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표를 함께 갱신해야 한다.
+현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 42개가
+SSOT다(mutating 32 / read-only 10). 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이
+표를 함께 갱신해야 한다.
 
 | IPC 커맨드 | taxonomy | 근거 |
 |-----------|----------|------|
@@ -306,6 +308,7 @@ SSOT다. 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이 표�
 | `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
 | `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
 | `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
+| `broker.order_history` | read-only | `BrokerAdapter.get_order_history()` live 조회. `{orders: [...]}` envelope. `from_date`/`to_date`는 ISO `YYYY-MM-DD`이며 핸들러가 압축 `YYYYMMDD`로 변환한다 — invalid ISO는 `VALIDATION_ERROR`로 fail-closed 거부(CLI 우회 직접 호출 방어). `audit_action` 없음(read-only) (#2412) |
 | `bot.status` | read-only | `BotManager.get_bot()` live 조회. `{bot: ...}` envelope (#1712) |
 | `bot.list` | read-only | `BotManager.list_bots()` live 조회. `--account` 필터 + CLI 6-key projection, `{bots: [...]}` envelope (#2112) |
 | `bot.info` | read-only | `BotManager.get_bot()` live 조회. `{bot: info}` envelope (#2112) |
