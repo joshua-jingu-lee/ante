@@ -30,9 +30,9 @@ release/v0.9.0
 
 | 이슈 타입 | 대응 라벨 | 브랜치 prefix |
 |-----------|-----------|---------------|
-| `feat` | `feature` | `feat/` |
+| `feat` | `enhancement` | `feat/` |
 | `fix` | `bug` | `fix/` |
-| `perf` | `feature` | `perf/` |
+| `perf` | `enhancement` | `perf/` |
 | `refactor` | `refactor` | `refactor/` |
 | `docs` | `docs` | `docs/` |
 | `test` | `test` | `test/` |

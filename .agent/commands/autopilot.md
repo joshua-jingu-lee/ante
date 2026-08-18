@@ -109,8 +109,10 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### 포함 대상
 
 - 상태가 `open`
-- 라벨이 `feature`, `bug`, `refactor`, `docs`, `test`, `chore` 중 하나
+- 라벨이 `enhancement`, `bug`, `refactor`, `docs`, `test`, `chore` 중 하나
 - 필요 시 `--label`로 좁힌 결과
+
+> `feature`는 2026-06-13 이전 legacy 라벨이다. 신규 이슈에 쓰지 않으며 큐 대상도 아니다. 라벨 정의는 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4가 SSOT다.
 
 ### 기본 제외 대상
 
@@ -138,8 +140,9 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ## 정렬 규칙
 
 1. 우선순위 `P0 → P1 → P2 → P3`
-2. 같은 우선순위 안에서는 선행 의존성이 없는 이슈 우선
-3. 같은 조건이면 오래 열린 이슈 우선
+2. 우선순위 라벨이 없는 이슈는 `P3` 뒤, 즉 큐의 맨 끝 구간에 둔다. 우선순위 라벨이 없다는 이유로 큐에서 제외하지는 않는다.
+3. 같은 우선순위 안에서는 선행 의존성이 없는 이슈 우선
+4. 같은 조건이면 오래 열린 이슈 우선. 우선순위 라벨이 없는 구간 안의 정렬도 이 규칙을 따른다.
 
 여러 이슈를 동시에 구현하지 않는다. 현재 활성 이슈가 merge/post-merge 완료 또는 명시적 보류 상태로 정리된 뒤에만 다음 이슈로 이동한다.
 
