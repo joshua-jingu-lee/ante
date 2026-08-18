@@ -59,7 +59,7 @@ post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 �
 **목적**: PR 전 코드 품질 게이트
 
 - **트리거**: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- **실행**: Claude Code 빌트인 `/code-review` 스킬 — 현재 브랜치 diff를 default 브랜치(main) 대비 리뷰한다. base 인자를 받지 않으며 effort(예: high) 지정 가능. PR을 요구하는 `code-review` 플러그인과 다르다.
+- **실행**: Claude Code 빌트인 `/code-review` 스킬 — 리뷰 대상(target)으로 PR 번호·브랜치·경로를 위치 인자로 문법상 받고, 생략하면 현재 브랜치 diff를 default 브랜치(main) 대비 리뷰한다. 비교 기준(base) 축은 인자 문법에 없으며 effort(예: high) 지정 가능. PR을 요구하는 `code-review` 플러그인과 다르다 — 플러그인은 PR이 필수이고 빌트인은 PR을 선택적으로 받는다. 인자 문법은 Claude Code CLI 버전에 종속된 관측이라 저장소에 회귀 lock이 없다.
 - **결과**: 이슈 코멘트 `브랜치 리뷰` (`reviewer:` 필드에 `/code-review` 기록)
 - **성공 시**: 브랜치 push 후 PR 생성
 - **실패 시**: Claude가 같은 워크트리에서 수정 후 `/code-review` 재실행

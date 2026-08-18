@@ -166,7 +166,7 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 ### 브랜치 리뷰 루프 (Gate A)
 
-10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 이 스킬은 **현재 브랜치 diff를 default 브랜치(main) 대비** 리뷰하며 base 인자를 받지 않는다(effort는 지정 가능, 예: high). PR을 요구하는 `code-review` 플러그인과 혼동하지 않는다 — Gate A는 PR 생성 전 브랜치 리뷰다.
+10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 이 스킬의 인자는 **리뷰 대상(target) 축과 비교 기준(base) 축을 나눠서** 읽는다. **target 축**: 리뷰 대상으로 PR 번호·브랜치·경로 중 하나를 위치 인자로 문법상 받는다. 생략하면 **현재 브랜치 diff를 default 브랜치(main) 대비** 리뷰한다. **base 축**: 무엇 대비로 diff를 뜰지 지정하는 수단은 인자 문법에 없다. effort는 첫 위치 인자로 지정 가능하다(예: high). 모드 플래그는 `--fix`·`--comment`·`--post`·`--no-post` 4종이 인자 문법에 존재한다 — 각 플래그의 실제 동작은 이 저장소에서 검증한 바 없으므로 문법에 있다는 사실 이상을 전제하지 않는다. 이 인자 문법은 Claude Code CLI 버전에 종속된 관측이라 저장소에 회귀 lock을 걸 수 없다. PR을 요구하는 `code-review` 플러그인과 혼동하지 않는다 — 플러그인은 PR을 필수로 요구하고 빌트인은 PR을 선택적으로 받으므로, 빌트인에 PR target을 넘길 수 있다는 점이 오히려 혼동 위험을 키운다. Gate A는 PR 생성 전 브랜치 리뷰다.
 
 ```text
 /code-review
@@ -182,7 +182,7 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 - verdict: {PASS | FAIL}
 - reviewer: /code-review
-- review-scope: main 대비 현재 브랜치 diff
+- review-scope: {리뷰 대상 — 예: main 대비 현재 브랜치 diff}
 - head: {SHA7}
 - attempt: {N}
 - blocking findings: {없음 | finding 요약}
@@ -281,7 +281,7 @@ git push -u origin epic/{에픽번호}-{짧은설명}
 - 브랜치 push
 - PR 생성 (`base=epic/{에픽번호}-{설명}`)
 
-빌트인 `/code-review`는 base 인자 없이 항상 main 대비로 리뷰한다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 `/code-review`의 main 대비 diff로는 완벽히 분리되지 않는다(네이티브 도구가 base 지정을 지원하지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다). 현재 epic 워크플로는 휴면 상태이며, 재개 시 이 스코핑을 재설계한다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
+빌트인 `/code-review`의 인자 문법에는 리뷰 대상(target)을 넘기는 위치 인자만 있고 **비교 기준(base) 축이 없다** — 즉 무엇 대비로 diff를 뜰지 인자로 바꿀 수단이 없다. epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로 main 대비 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞일 수 있다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 `/code-review`의 main 대비 diff로는 완벽히 분리되지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다. 이 문법은 Claude Code CLI 버전에 종속된 관측이라 저장소에 회귀 lock을 걸 수 없다 — epic 워크플로를 재개할 때 base 축이 생겼는지 인자 문법부터 다시 확인하고 이 스코핑을 재설계한다. 현재 epic 워크플로는 휴면 상태다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
 
 ### E4. 에픽 PR 생성
 
