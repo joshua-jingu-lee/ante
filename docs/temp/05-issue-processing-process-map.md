@@ -122,7 +122,7 @@ PR 필수 조건:
 
 1. GitHub Issue를 등록한다.
 2. 제목은 `[{type}] {간결한 설명}` 형식을 따른다.
-3. 라벨은 `enhancement`, `bug`, `refactor`, `docs`, `test`, `chore` 등을 붙인다.
+3. 라벨은 `feature`, `bug`, `refactor`, `docs`, `test`, `chore` 등을 붙인다.
 4. 본문에는 배경, 완료 조건, 영향받는 계약, 위험 신호, 검증 시나리오를 적는다.
 5. 에픽이면 하위 이슈와 실행 순서 의존성을 명시한다.
 
@@ -201,14 +201,12 @@ Plan Preflight 상태/판정:
 
 포함 대상:
 
-- `enhancement`
+- `feature`
 - `bug`
 - `refactor`
 - `docs`
 - `test`
 - `chore`
-
-> `feature`는 legacy 라벨이다. 2026-06-13부터 신규 이슈에 쓰지 않으며 큐 포함 대상도 아니다. 그 이전에는 `enhancement`와 수개월간 혼용됐다. 라벨 정의의 SSOT는 [00-issue-management.md](../runbooks/00-issue-management.md) §4다.
 
 제외 대상:
 
@@ -227,11 +225,7 @@ Plan Preflight 상태/판정:
 2. `P1 - High`
 3. `P2 - Medium`
 4. `P3 - Low`
-5. 우선순위 라벨이 없는 이슈는 `P3` 뒤, 즉 큐의 맨 끝 구간에 둔다. 우선순위 라벨이 없다는 이유로 큐에서 제외하지는 않는다.
-6. 같은 우선순위 안에서는 선행 의존성이 없는 이슈 우선. 우선순위 라벨이 없는 구간 안의 정렬도 이 규칙을 따른다.
-7. 같은 조건이면 오래 열린 이슈 우선. 우선순위 라벨이 없는 구간 안의 정렬도 이 규칙을 따른다.
-
-정렬 규칙의 SSOT는 [`.agent/commands/autopilot.md`](../../.agent/commands/autopilot.md)의 `정렬 규칙` 절이다.
+5. 같은 우선순위에서는 오래 열린 이슈 우선
 
 ## 6. Autopilot Lane 모델
 
