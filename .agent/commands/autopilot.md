@@ -112,7 +112,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 라벨이 `enhancement`, `bug`, `refactor`, `docs`, `test`, `chore` 중 하나
 - 필요 시 `--label`로 좁힌 결과
 
-> `feature`는 legacy 라벨이다. 신규 이슈에는 쓰지 않는다. 재정 근거와 반대 방향 근거, 사용 이력은 #2458에 있다. 이슈 type과 라벨의 매핑은 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §2, 타입 라벨의 목록과 용도는 같은 문서 §4가 SSOT다. 우선순위 라벨은 §5, `source:*` 같은 출처 라벨은 이 문서의 큐 선별 절이 다룬다.
+> `feature`는 legacy 라벨이다. 신규 이슈에는 쓰지 않는다. 큐 선별 라벨 집합과 GitHub 기본 `enhancement`가 갈라져 이슈 판정이 실행마다 달라진 것이 재정 사유이며, 근거와 반대 방향 근거는 #2458에 있다. 이슈 type과 라벨의 매핑은 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §2를 따른다.
 
 ### 기본 제외 대상
 

@@ -40,7 +40,7 @@ release/v0.9.0
 | `epic` | `epic` | `epic/` |
 | `release` | 릴리스 PR | `release/` |
 
-> 이 표의 `대응 라벨` 열에서 `feat`·`fix`·`refactor`·`perf`·`docs`·`test`·`chore` 행은 [00-issue-management.md](00-issue-management.md) §2의 사본이다. 이 7종 라벨을 바꿀 때는 §2를 먼저 고친다. `epic`·`release` 행은 §2에 대응이 없으며 이 표가 소유한다.
+> 이 표의 `대응 라벨` 열에서 `feat`·`fix`·`refactor`·`perf`·`docs`·`test`·`chore` 행은 [00-issue-management.md](00-issue-management.md) §2의 사본이다. 이 7종 라벨을 바꿀 때는 §2를 먼저 고친다.
 
 일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/code-review` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
 `release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다. 단, 핫픽스 라인 브랜치 `release/X.Y`(패치 자리 없음, 예: `release/1.0`)는 예외로 운영 태그에서 수동 절단하며 `/release prepare`를 거치지 않는다([06-release.md §10 핫픽스 릴리스](06-release.md#10-핫픽스-릴리스)).
