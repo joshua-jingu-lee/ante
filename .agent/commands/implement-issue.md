@@ -289,7 +289,7 @@ epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로, 브랜치 diff�
 모든 하위 이슈가 에픽 브랜치에 반영되면, 에픽 브랜치도 동일한 규칙을 따른다.
 
 1. 에픽 브랜치 최신화 및 로컬 검증
-2. `/code-review` 통과 (main 대비 — 에픽 브랜치가 main으로 머지되므로 스코프가 정확)
+2. `/code-review` 통과 (Gate A와 동일 규칙 — effort 명시 무인자 호출)
 3. `epic/* -> main` PR 생성
 4. `ci` 통과 후 `merge-gate`가 auto-merge 활성화
 
