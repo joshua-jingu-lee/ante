@@ -166,7 +166,24 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 ### 브랜치 리뷰 루프 (Gate A)
 
-10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. Gate A 호출은 **effort를 명시한 무인자 호출**로 고정한다(예: `/code-review high`). **위치 인자(PR 번호·브랜치·경로)를 넘기지 않는다** — 넘기면 리뷰 대상 범위가 그 인자에 좌우돼, 브랜치 전체를 전제한 이 게이트가 무력해진다. **effort는 반드시 명시한다** — 생략하면 스킬이 직전에 타이핑한 레벨을 전역에서 재사용하므로 게이트 강도가 비결정적이 된다. **`--fix` 금지** — 이 단계의 read-only 계약(`docs/runbooks/04-ci-cd.md`)과 「작업 브랜치 수정은 개발 서브에이전트에 위임」이라는 `CLAUDE.md` 규칙에 어긋난다. 무인자 호출의 기본 diff 범위(어느 base 대비인지)를 포함해 인자와 모드의 의미는 CLI 버전과 effort 레벨에 종속되므로 이 문서가 서술하지 않는다 — 필요하면 그 시점 스킬 설명을 직접 확인한다. PR을 요구하는 `code-review` 플러그인과 혼동하지 않는다 — Gate A는 PR 생성 전 브랜치 리뷰다.
+10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 아래 두 블록을 순서대로 읽는다 — 앞 블록은 이 저장소가 정하는 게이트 규범이고, 뒤 블록은 스킬이 노출하는 인자 문법 관측이다.
+
+**Gate A 호출 규범 (이 저장소가 정한다)**
+
+- **effort 레벨 토큰을 반드시 붙인다**(예: `/code-review high`). 스킬 설명은 레벨을 생략하면 직전에 입력한 레벨을 다시 쓴다고 적는다 — 생략하면 게이트 강도가 호출자의 입력 이력에 좌우된다. 어느 레벨을 쓸지는 변경 규모와 리스크를 보고 오케스트레이터가 정하고, 같은 이슈의 재호출은 첫 호출과 같은 레벨을 다시 붙인다.
+- **effort 레벨 토큰 외의 위치 인자는 넘기지 않는다.** 인자 힌트의 `[<pr#>|<branch>|<path>]` 자리를 비운 채 호출한다는 뜻이며, effort 레벨 토큰까지 생략하라는 뜻이 아니다. 그 자리에 넣은 토큰이 검토 대상을 고르는지 비교 기준(base)을 고르는지는 이 문서가 판정하지 않는다 — 어느 쪽이든 Gate A가 고정한 호출 형태를 벗어나므로 넘기지 않는다.
+- **모드 플래그는 넘기지 않는다** — 인자 문법에 열거된 `--fix`·`--comment`·`--post`·`--no-post` 중 어느 것도 붙이지 않는다.
+- 금지 근거는 이 게이트의 성질이다. Gate A는 read-only 리뷰 게이트이고([04-ci-cd.md](../../docs/runbooks/04-ci-cd.md) §2 Gate A) PR 생성(12번) 이전 단계다. 작업 브랜치 수정은 `CLAUDE.md`의 「직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@devops`, `@strategy-dev`)에게 위임한다」 규칙을 따르고, 외부에 남기는 기록은 아래 증적 규칙과 12번 이후 PR 절차만을 경로로 삼는다.
+- 따라서 Gate A가 허용하는 호출 형태는 `/code-review {effort 레벨}` 하나다. 인자 힌트에 새 인자나 플래그가 늘어나도 이 형태를 벗어나므로 Gate A 자동 루프에서 쓰지 않는다.
+- 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다. 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있다 — Gate A는 PR이 아직 없는 시점의 로컬 브랜치 리뷰이므로 빌트인 스킬로 실행한다.
+
+**스킬이 노출하는 인자 문법 (CLI 버전 종속 관측 — 규범을 넓히지 않는다)**
+
+- 인자 힌트: `[<level>] [--fix] [--comment] [<pr#>|<branch>|<path>]`
+- effort 레벨은 문법상 `low`·`medium`·`high`·`xhigh`·`max`가 열거돼 있고, 인자 힌트에는 조건부로 `ultra`가 더해진다. 여기의 레벨 토큰은 `/code-review` 호출에 쓰는 값이며, 서브에이전트에 지시하는 effort 어휘와는 별개 축이다.
+- 모드 플래그는 문법상 `--fix`·`--comment`·`--post`·`--no-post` 네 가지가 존재한다. 각 플래그가 무엇을 하는지는 이 문서가 서술하지 않는다.
+- 인자 힌트의 마지막 자리 `[<pr#>|<branch>|<path>]`는 파서에서 `target` 한 필드로 들어간다. 그 값이 리뷰 범위를 어떻게 정하는지도, 그 자리를 비웠을 때의 기본 비교 범위도 이 문서가 서술하지 않는다.
+- 이 블록은 CLI 버전에 종속된 관측이라 저장소에 회귀 lock을 걸지 않는다. 인자 문법이나 그 의미가 필요해지면 그 시점 스킬 설명을 직접 확인하고, 위 규범과 어긋나면 이 문서를 먼저 갱신한다.
 
 ```text
 /code-review high
@@ -182,8 +199,8 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 - verdict: {PASS | FAIL}
 - reviewer: /code-review
-- effort: {호출에 명시한 레벨 — 예: high}
-- review-scope: 무인자 /code-review 브랜치 diff
+- effort: {호출에 붙인 effort 레벨 토큰}
+- review-scope: {리뷰 출력이 밝힌 검토 범위를 그대로 옮긴다. 출력이 범위를 밝히지 않으면 미보고}
 - head: {SHA7}
 - attempt: {N}
 - blocking findings: {없음 | finding 요약}
@@ -193,10 +210,10 @@ gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 11. **수정 루프**: `/code-review`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
 
 ```text
-while /code-review verdict != PASS:
+while /code-review {effort 레벨} verdict != PASS:
   Claude 개발 에이전트가 같은 브랜치에서 수정
   새 로컬 커밋 생성
-  /code-review 재실행
+  /code-review {10번과 같은 effort 레벨} 재실행
 ```
 
 - 실패 횟수는 이슈 코멘트 기준으로 누적한다.
@@ -246,7 +263,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 
 - `ci` 통과는 머지 차단 게이트다. (required status check)
 - PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고(호출에는 effort 레벨 토큰을 붙인다) 결과를 PR 코멘트에 남긴다.
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
 - `merge-gate`는 `AUTOMERGE_TOKEN`(fine-grained PAT)으로 auto-merge를 활성화한다(#2437, fail-closed — 시크릿 부재 시 명시 실패). 머지가 발화한 `pull_request:closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음).
@@ -282,14 +299,14 @@ git push -u origin epic/{에픽번호}-{짧은설명}
 - 브랜치 push
 - PR 생성 (`base=epic/{에픽번호}-{설명}`)
 
-epic 하위 이슈 브랜치는 `epic/*`에서 분기하므로, 브랜치 diff에 이미 epic에 머지된 형제 하위 이슈 변경이 섞여 들어올 수 있다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 두 갈래가 Gate A 리뷰 스코프에서 완벽히 분리되지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다. 관측된 사실 하나만 적어 둔다 — `ultra` 경로는 위치 인자를 비교 기준 브랜치로 받는다(CLI가 「closer base branch」를 넘기라고 안내하는 에러 문구가 근거다). 단 이 경로는 Gate A 자동 루프에서 쓰지 않는다 — 상위 effort는 선택 경로이고 이 문서는 그 사용을 규정하지 않는다. 이 관측은 특정 Claude Code CLI 버전에서 얻은 것이라 저장소에 회귀 lock을 걸 수 없다 — epic 워크플로를 재개할 때 인자 문법과 그 의미를 그 시점 스킬 설명에서 다시 확인하고 이 스코핑을 재설계한다. 현재 epic 워크플로는 휴면 상태다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
+epic 하위 이슈 브랜치는 `epic/*`에서 분기하고, 분기 시점의 `epic/*`에는 먼저 머지된 형제 하위 이슈 변경이 이미 들어 있다. 분기 사실만으로 형제 변경이 리뷰 diff에 섞이는 것은 아니다 — 리뷰 기준이 형제 머지 이후의 `epic/*` 통합 지점이면 섞이지 않는다. 문제는 그 기준이 보장되지 않는다는 점이다. Gate A가 허용하는 호출 형태는 effort 레벨 토큰 하나뿐이고(§브랜치 리뷰 루프 10번), 인자를 비운 호출의 비교 범위를 이 문서는 서술하지 않으며, 인자 문법과 그 의미는 CLI 버전에 종속돼 저장소에 회귀 lock을 걸 수 없다. 리뷰 기준이 그 통합 지점보다 앞선 커밋이면 이미 epic에 머지된 형제 하위 이슈 변경이 브랜치 diff에 섞여 들어온다. 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 두 갈래가 Gate A 리뷰 스코프에서 완벽히 분리되지 않아, 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 남는다. 현재 epic 워크플로는 휴면 상태이므로([03-git-workflow.md](../../docs/runbooks/03-git-workflow.md) §1.5, [#2418](https://github.com/joshua-jingu-lee/ante/issues/2418)) 이 한계를 지금 닫지 않는다. epic 워크플로를 재개할 때 그 시점 스킬 설명에서 인자 문법과 그 의미를 다시 확인하고 이 스코핑을 재설계한다. 그 재설계가 끝나기 전까지는 리뷰어가 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인해 판정 근거로 삼고, 형제 코드에서 비롯한 finding은 제외한다.
 
 ### E4. 에픽 PR 생성
 
 모든 하위 이슈가 에픽 브랜치에 반영되면, 에픽 브랜치도 동일한 규칙을 따른다.
 
 1. 에픽 브랜치 최신화 및 로컬 검증
-2. `/code-review` 통과 (Gate A와 동일 규칙 — effort 명시 무인자 호출)
+2. `/code-review` 통과 (§브랜치 리뷰 루프 10번의 Gate A 호출 규범을 그대로 적용 — effort 레벨 토큰 하나만 붙이고 다른 위치 인자와 모드 플래그는 넘기지 않는다)
 3. `epic/* -> main` PR 생성
 4. `ci` 통과 후 `merge-gate`가 auto-merge 활성화
 

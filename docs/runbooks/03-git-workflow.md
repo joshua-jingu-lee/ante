@@ -121,7 +121,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- 실행: Claude Code 빌트인 `/code-review` 스킬 — effort를 명시한 무인자 호출로 고정한다(예: `/code-review high`). 위치 인자와 `--fix` 금지. 인자와 모드의 의미는 CLI 버전·effort 레벨에 종속이라 이 런북이 서술하지 않는다. PR을 요구하는 `code-review` 플러그인과 다르다.
+- 실행: Claude Code 빌트인 `/code-review` 스킬. Gate A가 허용하는 호출 형태는 effort 레벨 토큰 하나만 붙인 `/code-review {effort 레벨}`이고(예: `/code-review high`), 인자 힌트의 `[<pr#>|<branch>|<path>]` 자리는 비우며 모드 플래그는 붙이지 않는다. 인자 문법상 effort 레벨은 `low`·`medium`·`high`·`xhigh`·`max`가 열거돼 있고 조건부로 `ultra`가 더해지며, 모드 플래그는 `--fix`·`--comment`·`--post`·`--no-post` 네 가지가 존재한다. 각 인자·플래그의 의미와 인자를 비운 호출의 비교 범위는 CLI 버전 종속 관측이라 이 런북이 서술하지 않는다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다. 호출 규범 SSOT는 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번이다.
 - 증적: 이슈 코멘트 `브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
@@ -129,7 +129,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 - `/code-review = PASS`
   - 브랜치 push 후 PR 생성 가능
 - `/code-review = FAIL`
-  - Claude가 같은 워크트리에서 수정 후 재검토
+  - Claude가 같은 워크트리에서 수정한 뒤 §3.1의 호출 형태 그대로 재검토 — 첫 호출과 같은 effort 레벨 토큰을 다시 붙인다
 - 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다.
 - 실패 횟수는 이슈 코멘트로 누적 관리한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 대상으로 본다.
@@ -177,7 +177,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 - PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
-- 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
+- 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고(호출에는 effort 레벨 토큰을 붙인다), 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
 
 ### 4.4 머지 방식
 
