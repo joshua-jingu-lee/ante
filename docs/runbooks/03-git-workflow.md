@@ -121,7 +121,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- 실행: Claude Code 빌트인 `/code-review` 스킬. Gate A가 허용하는 호출 형태는 effort 레벨 토큰 하나만 붙인 `/code-review {effort 레벨}`이고(예: `/code-review high`), 인자 힌트의 `[<pr#>|<branch>|<path>]` 자리는 비우며 모드 플래그는 붙이지 않는다. 인자 문법상 effort 레벨은 `low`·`medium`·`high`·`xhigh`·`max`가 열거돼 있고 조건부로 `ultra`가 더해지며, 모드 플래그는 `--fix`·`--comment`·`--post`·`--no-post` 네 가지가 존재한다. 각 인자·플래그의 의미와 인자를 비운 호출의 비교 범위는 CLI 버전 종속 관측이라 이 런북이 서술하지 않는다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다. 호출 규범 SSOT는 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번이다.
+- 실행: Claude Code 빌트인 `/code-review` 스킬. Gate A가 허용하는 호출 형태는 `/code-review {effort 레벨}`이고(예: `/code-review high`), 대상 브랜치가 현재 작업 디렉터리에 체크아웃돼 있지 않을 때만 `[<pr#>|<branch>|<path>]` 자리에 그 브랜치명을 덧붙인다 — 범위를 좁히는 `<pr#>`·`<path>`와 모드 플래그는 붙이지 않는다. 인자 힌트에 열거된 레벨은 `low`·`medium`·`high`·`xhigh`·`max`이고 조건부로 `ultra`가 더해지며, 모드 플래그는 인자 힌트에 `--fix`·`--comment` 두 가지가 열거되고 파서는 `--post`·`--no-post`까지 네 가지를 받는다. 위 레벨·플래그 열거와 각 인자·플래그의 의미, 인자를 비운 호출의 비교 범위는 모두 CLI 버전 종속 관측이라 이 런북이 보증하지 않는다 — 필요하면 그 시점 스킬 설명을 직접 확인한다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다. 호출 규범 SSOT는 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번이다.
 - 증적: 이슈 코멘트 `브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
