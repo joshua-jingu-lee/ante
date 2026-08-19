@@ -69,7 +69,7 @@ post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 �
 이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
 동일 HEAD SHA에서 `/code-review` FAIL이 남아 있으면 PR을 열지 않는다.
 
-PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다(호출에는 effort 레벨 토큰을 붙인다).
+PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다(호출 형태는 위 「실행」의 Gate A 호출 규범을 그대로 따른다 — effort 레벨 토큰과 `{base}...{head}` range를 함께 붙이고 `{head}`를 새 커밋으로 갱신한다).
 
 ### Gate B — CI
 
