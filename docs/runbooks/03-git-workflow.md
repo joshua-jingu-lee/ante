@@ -121,7 +121,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 - 대상 브랜치: `feat/*`, `fix/*`, `perf/*`, `refactor/*`, `docs/*`, `test/*`, `chore/*`, `epic/*`
 - 트리거: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- 실행: Claude Code 빌트인 `/code-review` 스킬. Gate A가 허용하는 호출 형태는 `/code-review {effort 레벨} {base}...{head}` 하나이며, effort 레벨 하한과 인자·플래그 금지를 포함한 호출 규범 SSOT는 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번이다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다.
+- 실행: Claude Code 빌트인 `/code-review` 스킬. 스킬이 노출하는 인자 문법 관측은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번에 있다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다.
 - 증적: 이슈 코멘트 `브랜치 리뷰`
 
 ### 3.2 브랜치 리뷰 결과 처리
@@ -129,7 +129,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 - `/code-review = PASS`
   - 브랜치 push 후 PR 생성 가능
 - `/code-review = FAIL`
-  - Claude가 같은 워크트리에서 수정한 뒤 §3.1의 호출 형태 그대로 재검토 — 첫 호출과 같은 effort 레벨 토큰을 다시 붙이고 `{head}`만 새 커밋으로 갱신한다
+  - Claude가 같은 워크트리에서 수정 후 재검토
 - 동일 SHA에 실패한 상태에서 PR을 먼저 열지 않는다.
 - 실패 횟수는 이슈 코멘트로 누적 관리한다.
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 대상으로 본다.
@@ -177,7 +177,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 - PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
-- 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고(호출 형태는 §3.1의 Gate A 호출 규범을 그대로 따른다 — effort 레벨 토큰과 `{base}...{head}` range를 함께 붙이고 `{head}`를 새 커밋으로 갱신한다), 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
+- 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
 
 ### 4.4 머지 방식
 
