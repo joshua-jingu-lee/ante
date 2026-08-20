@@ -31,6 +31,7 @@
 2. 생성된 산출물과 소비자 코드/문서가 같은 계약을 쓰는지 확인한다.
 3. 리뷰 또는 CI 전에는 전용 check 명령을 실행한다.
 4. 전용 check가 없는 산출물은 generate 명령을 다시 실행한 뒤 `git diff --exit-code -- <산출물>`로 변경 없음 상태를 확인한다.
+   - 이 형태는 **regenerate-first**이므로 유효하다 — regenerate를 먼저 돌렸을 때만 stale 산출물이 rc=1로 잡힌다. regenerate를 건너뛰고 커밋 뒤 그냥 실행하면 워크트리 = 인덱스라 항상 rc=0이 되어 가드가 죽는다.
 
 ## red flags
 

@@ -107,6 +107,7 @@ gh pr diff #{PR번호}
 - 프로젝트 구조 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
 - DB DDL/schema 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
 - CLI reference처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
+  - 이 형태는 **regenerate-first**이므로 유효하다 — generate 실행이 앞선 경우에만 rc=1로 stale을 잡는다. regenerate 증거 없이 diff 명령만 실행한 기록은 항상 rc=0이므로 검증 증거로 인정하지 않는다.
 - 실행 증거가 없고 코드 독해로만 최신이라고 추론했다면 B3는 PASS가 아니라 FAIL 또는 follow-up으로 분리한다.
 
 #### C. 상태 전이 및 수명주기
