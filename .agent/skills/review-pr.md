@@ -107,7 +107,7 @@ gh pr diff #{PR번호}
 - 프로젝트 구조 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
 - DB DDL/schema 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
 - CLI reference처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
-  - 이 형태는 **regenerate-first**이므로 유효하다 — generate 실행이 앞선 경우에만 rc=1로 stale을 잡는다. regenerate 증거 없이 diff 명령만 실행한 기록은 **커밋 후 clean 워크트리에서는** 항상 rc=0이므로 그것만으로는 증거가 되지 않는다. 다만 생성기가 날짜 스탬프를 찍는 산출물은 **diff가 그 스탬프 줄만일 때 PASS로 본다** — `scripts/generate_project_structure.py`가 `--check` 모드에서 기존 스탬프를 재사용하는 것과 같은 취급이며, 스탬프 줄만 다른 rc=1 기록도 동기화 증거로 인정한다.
+  - 이 형태는 **regenerate-first**이므로 유효하다 — generate 실행이 앞선 경우에만 rc=1로 stale을 잡는다. regenerate 증거 없이 diff 명령만 실행한 기록은 **커밋 후 clean 워크트리에서는** 항상 rc=0이므로 그것만으로는 증거가 되지 않는다. 다만 생성기가 날짜 스탬프를 찍는 산출물은 **diff가 그 스탬프 줄만일 때 PASS로 본다** — `scripts/generate_project_structure.py`가 `--check` 모드에서 기존 스탬프를 재사용하는 것과 같은 취급이며, 스탬프 줄만 다른 rc=1 기록도 동기화 증거로 인정한다. **다만 이 예외는 리뷰어가 직접 generate를 돌리는 것을 전제하고, `scripts/generate_cli_reference.py`처럼 오늘 날짜를 무조건 기록하는 생성기는 regenerate만으로 워크트리를 변경 상태로 만든다.** 그대로 두면 clean 워크트리를 요구하는 회귀 락(미커밋 변경이 정확 파일 수 락을 직접 깬다)이 같은 워크트리에서 오탐하므로, **판정을 마치면 락을 돌리기 전에 `git checkout -- <산출물>`로 스탬프 변경을 되돌린 뒤 진행한다.**
 - 실행 증거가 없고 코드 독해로만 최신이라고 추론했다면 B3는 PASS가 아니라 FAIL 또는 follow-up으로 분리한다.
 
 #### C. 상태 전이 및 수명주기
