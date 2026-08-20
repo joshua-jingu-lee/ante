@@ -168,8 +168,6 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있다. Gate A는 PR이 아직 없는 시점의 로컬 브랜치 리뷰이므로 빌트인 스킬로 실행한다.
 
-이 게이트는 브랜치가 `main`에 더할 변경 전체가 리뷰 대상에 들어왔을 때만 PASS로 인정하며, 리뷰가 본 범위가 그보다 좁으면 통과로 보지 않는다.
-
 **스킬이 노출하는 인자 문법 (CLI 버전 종속 관측)**
 
 - 인자 힌트 리터럴: `[low|medium|high|xhigh|max] [--fix] [--comment] [<pr#>|<branch>|<path>]` — 첫 자리에는 레벨 토큰이 `|`로 이어져 열거되고, 조건부로 `ultra`가 그 열거에 더해진다. `<level>` 같은 자리표시 토큰은 이 리터럴에 없다.
@@ -181,10 +179,8 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 모드 플래그는 이 게이트에서는 쓰지 않는다(read-only 리뷰이며 PR 생성 이전이다). 규범 확정은 [#2469](https://github.com/joshua-jingu-lee/ante/issues/2469).
 
 ```text
-/code-review high
+/code-review
 ```
-
-위 스니펫 형태는 [#2469](https://github.com/joshua-jingu-lee/ante/issues/2469)가 이 게이트의 레벨 규범을 확정하기 전까지 쓰는 **잠정 기본값**이다. 확정되면 그 규범이 이 기본값을 대체한다.
 
 - 결과는 이슈 코멘트에 `브랜치 리뷰`로 남긴다.
 - `PASS`:
