@@ -180,7 +180,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
   - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
 - 전용 check 명령이 없는 생성 산출물은 generate 명령을 다시 실행한 뒤 `git diff --exit-code -- <산출물>`로 변경 없음 상태를 확인한다.
-  - 이 형태는 **regenerate-first**이므로 유효하다 — regenerate가 앞설 때만 stale 산출물이 rc=1로 실패한다. 순서를 뒤집으면 가드가 항상 통과하므로 generate → diff 순서를 지킨다.
+  - 이 형태는 **regenerate-first**이므로 유효하다 — regenerate가 앞설 때만 stale 산출물이 rc=1로 실패한다. 순서를 뒤집으면 가드가 항상 통과하므로 generate → diff 순서를 지킨다. 다만 생성기가 날짜 스탬프를 찍는 산출물은 **diff가 그 스탬프 줄만일 때 PASS로 본다** — `scripts/generate_project_structure.py`가 `--check` 모드에서 기존 스탬프를 재사용하는 것과 같은 취급이다.
 - 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
 - DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
 - 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
