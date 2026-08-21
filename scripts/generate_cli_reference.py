@@ -559,7 +559,10 @@ def main(argv: list[str] | None = None) -> int:
         "-o",
         type=Path,
         default=DEFAULT_OUTPUT,
-        help="출력 파일 경로 (기본: guide/cli.md)",
+        help=(
+            "출력 파일 경로. 상대 경로는 저장소 루트 기준으로 해석한다 "
+            "(기본: guide/cli.md)"
+        ),
     )
     parser.add_argument(
         "--stdout",

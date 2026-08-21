@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
-import os
-import re
-import subprocess
-import sys
 import types
 from pathlib import Path
 
@@ -777,17 +774,77 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # 목록을 하드코딩하지 않는다 — 하드코딩하면 새로 추가된 네 번째 생성기를
 # 놓쳐 아래 락이 무의미해진다.
-_GENERATOR_SCRIPTS = sorted((_REPO_ROOT / "scripts").glob("generate_*.py"))
+_GENERATOR_SOURCES = sorted((_REPO_ROOT / "scripts").glob("generate_*.py"))
 
-assert _GENERATOR_SCRIPTS, (
-    "scripts/generate_*.py 를 하나도 찾지 못했다 — glob 경로가 어긋나면 "
-    "TestAllGeneratorsProvideCheckMode 가 vacuous pass 한다 (#2472)."
+_MAIN_GUARD = 'if __name__ == "__main__":'
+
+
+def _module_ast(path: Path) -> ast.Module:
+    """생성기 소스를 **실행하지 않고** AST로만 읽는다."""
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _has_main_guard(tree: ast.Module) -> bool:
+    """모듈에 ``if __name__ == "__main__":`` 진입 가드가 있는가."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == "__main__"
+        ):
+            return True
+    return False
+
+
+def _registers_option(tree: ast.Module, option: str) -> bool:
+    """``<parser>.add_argument("<option>", ...)`` 호출이 AST에 있는가.
+
+    AST 노드 판정이므로 주석·docstring·``ArgumentParser(description=...)``
+    산문에 등장하는 같은 문자열에는 원리적으로 매치되지 않는다.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr != "add_argument":
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and arg.value == option:
+                return True
+    return False
+
+
+_GENERATOR_ASTS = {path: _module_ast(path) for path in _GENERATOR_SOURCES}
+_CLI_GENERATORS = [
+    path for path in _GENERATOR_SOURCES if _has_main_guard(_GENERATOR_ASTS[path])
+]
+_HELPER_SOURCES = [path for path in _GENERATOR_SOURCES if path not in _CLI_GENERATORS]
+
+_SELECTION_NOTE = (
+    "대상 선별 기준: `scripts/generate_*.py` 중 AST에 "
+    + _MAIN_GUARD
+    + " 진입 가드가 있는 파일. 가드가 없는 파일은 CLI 진입점이 아니라 공유 "
+    + "헬퍼로 보고 제외한다. "
+    + "glob 히트="
+    + str([path.name for path in _GENERATOR_SOURCES])
+    + " / 대상="
+    + str([path.name for path in _CLI_GENERATORS])
+    + " / 제외="
+    + str([path.name for path in _HELPER_SOURCES])
 )
 
-# argparse 옵션 목록의 **항목 줄**만 매치한다 (들여쓰기 정확히 두 칸).
-# 단순 부분문자열 검색은 description·다른 옵션의 설명문 같은 산문에 있는
-# "--check" 언급에 false-pass 한다 — 더미 생성기로 실측했다.
-_CHECK_OPTION_LINE_RE = re.compile(r"^  (?:-\w+,\s+)*--check(?![\w-])", re.MULTILINE)
+assert _CLI_GENERATORS, (
+    "생성기 CLI 진입점을 하나도 찾지 못했다 — 대상 선별이 어긋나면 아래 전수 "
+    "락이 vacuous pass 한다 (#2472). " + _SELECTION_NOTE
+)
 
 
 class TestAllGeneratorsProvideCheckMode:
@@ -801,17 +858,22 @@ class TestAllGeneratorsProvideCheckMode:
     네 번째 생성기가 ``--check`` 없이 추가되는 순간 그 전칭 규범이 조용히
     거짓이 되고 #2472가 없앤 실패 모드가 그대로 재발한다.
 
-    산출물의 실제 최신성까지는 보지 않는다 — 그것은 각 생성기 자신의 책임이고,
-    이 저장소의 ``project-structure.md``는 #2472와 무관한 선행 드리프트로
-    stale이다(#2472 Non-Goals). 여기서는 ``--check``가 각 생성기의 **알려진
-    옵션**인지만 확인하며, 두 축으로 본다.
+    **판정은 소스 AST로만 한다 — 생성기를 실행하지 않는다.** 실행 기반 판정은
+    이 락이 잡아야 할 바로 그 회귀(argv를 무시하는 생성기)에 대해 위험하다.
+    그런 생성기는 ``--check``든 ``--help``든 받으면 그냥 generate 모드로 돌아
+    **추적 산출물을 덮어쓴다** — 락이 워크트리를 오염시킨다(실측). AST 판정은
+    부작용이 0이고, ``PYTHONPATH`` 주입도 locale 의존도 없다. 덤으로 주석 ·
+    docstring · ``description`` 산문에 있는 ``--check`` 언급에 false-pass 하는
+    문자열 검색의 결함도 구조적으로 사라진다.
 
-    * ``--check``로 실행했을 때 argparse가 *unrecognized argument*로 거부하지
-      않는다 — 산문 언급에 속지 않는 의미론적 축이다. ``--check``는 어느
-      생성기에서도 파일을 쓰지 않으므로 부작용이 없고, 최신/stale에 따라
-      rc는 0 또는 1이라 그 값은 판정에 쓰지 않는다.
-    * ``--help``의 옵션 목록에 항목 줄로 등장한다 — argparse를 쓰지 않고 argv를
-      조용히 무시하는 생성기를 잡는 구조적 축이다.
+    대상은 ``scripts/generate_*.py`` 중 ``__main__`` 진입 가드를 가진 파일이다.
+    가드가 없는 공유 헬퍼(예: ``generate_common.py``)는 CLI가 아니므로 제외해
+    false FAIL을 막는다. 「argparse가 있는 파일만」으로 좁히지 않는다 — 그러면
+    정작 잡아야 할 *argparse 없는 생성기*가 빠져나간다.
+
+    산출물의 실제 최신성까지는 보지 않는다. 그것은 각 생성기 자신의 책임이고,
+    이 저장소의 ``project-structure.md``는 #2472와 무관한 선행 드리프트로
+    stale이다(#2472 Non-Goals).
 
     자리에 관하여: 저장소 전역 규범을 잠그므로 본래는
     ``tests/unit/contracts/``가 맞는 위치다. 다만 #2472는 변경 파일 집합을
@@ -820,52 +882,19 @@ class TestAllGeneratorsProvideCheckMode:
     고치게 된다. 그 제약이 풀리면 contract 테스트로 옮기는 것이 옳다.
     """
 
-    @staticmethod
-    def _run(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
-        env = dict(os.environ)
-        # 생성기 전부 main() 첫 줄에서 워크트리 import 가드를 돌리므로
-        # --help 조차 현재 워크트리 src 가 잡혀야 정상 종료한다.
-        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
-        return subprocess.run(
-            [sys.executable, str(script), *args],
-            cwd=_REPO_ROOT,
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-
     @pytest.mark.parametrize(
         "script",
-        _GENERATOR_SCRIPTS,
+        _CLI_GENERATORS,
         ids=lambda script: script.name,
     )
-    def test_generator_accepts_check_flag(self, script: Path) -> None:
-        """각 생성기가 ``--check``를 알려진 옵션으로 노출한다."""
-        violation = (
-            f"{script.name} 가 전용 --check 를 제공하지 않는다. #2472가 성문화한 "
+    def test_generator_registers_check_flag(self, script: Path) -> None:
+        """각 생성기가 ``--check``를 argparse 옵션으로 등록한다."""
+        assert _registers_option(_GENERATOR_ASTS[script], "--check"), (
+            f"{script.name} 가 전용 --check 를 등록하지 않는다. #2472가 성문화한 "
             "「모든 생성 산출물은 전용 --check를 제공한다」 규범 위반이다. "
             "새 생성기를 추가할 때는 커밋된 날짜 스탬프를 동결하는 --check를 "
-            "함께 만든다."
-        )
-
-        # (1) 의미론적 축 — argparse 가 --check 를 알고 있는가.
-        checked = self._run(script, "--check")
-        assert checked.returncode != 2, (
-            f"{violation}\n--check 실행이 argparse 사용법 오류(rc=2)로 거부됐다.\n"
-            f"stderr:\n{checked.stderr}"
-        )
-        assert "unrecognized argument" not in checked.stderr, (
-            f"{violation}\nstderr:\n{checked.stderr}"
-        )
-
-        # (2) 구조적 축 — 옵션 목록에 항목으로 등재돼 있는가.
-        helped = self._run(script, "--help")
-        assert helped.returncode == 0, (
-            f"{script.name} --help 가 rc={helped.returncode}로 실패했다.\n"
-            f"stdout:\n{helped.stdout}\nstderr:\n{helped.stderr}"
-        )
-        assert _CHECK_OPTION_LINE_RE.search(helped.stdout), (
-            f"{violation}\n--help 옵션 목록에 --check 항목이 없다.\n"
-            f"--help 출력:\n{helped.stdout}"
+            "함께 만든다. 이 파일이 생성기가 아니라 공유 헬퍼라면 "
+            + _MAIN_GUARD
+            + " 진입 가드를 두지 않으면 대상에서 빠진다.\n"
+            + _SELECTION_NOTE
         )
