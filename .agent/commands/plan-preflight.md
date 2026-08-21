@@ -169,19 +169,19 @@ Verification에 넣는 **회귀 락**(grep·diff 기반 기계적 검사)은 계
 
 - **락 명령은 이슈 본문 원문을 바이트 단위로 추출해 파일로 실행한다.** 셸 명령줄에 옮겨 적으면 인용이 깨지고, 실제로 실행된 것이 계획에 적힌 것과 달라진다.
 - **락 스크립트는 `bash <파일>`로 실행한다.** 프로세스 치환·배열 같은 bash 전용 문법이 쓰이므로 `sh`로 돌리면 문법 오류가 나고, 느슨한 하니스에서는 그 오류가 하니스 실패가 아니라 락 실패로 읽힌다. `#!/usr/bin/env bash` shebang은 **보조**다 — 하니스가 인터프리터를 명시해 호출하면 shebang은 읽히지도 않으므로 그것만으로는 이 함정을 막지 못한다. 스크립트 첫머리에 `set -euo pipefail`도 함께 둔다 — `-u`가 base 커밋 변수 같은 미설정 참조를 즉시 드러낸다(실측: `set -u` 아래 unset `"$B"` 참조가 `B: unbound variable`로 중단).
-- **판정은 정본 형태 하나로만 쓴다 — 긍정형과 부정형이 같은 모양이고 `test` 비교 연산자만 다르다.** **계수 grep은 패턴 종류로 매처를 고른다 — 리터럴 문자열을 세면 `grep -cF`, 정규식 형태를 잠그면 `grep -cE`이고, 매처 플래그 없는 `grep -c`(BRE)는 쓰지 않는다.** 패턴은 리터럴이거나 정규식이라 제3의 경우가 없고, 어느 한쪽을 기본값으로 두면 반대편이 조용히 깨진다 — `call foo(bar) here`에서 리터럴 `foo(bar)`를 `-cE`로 세면 0이라 부정형 락이 그 리터럴이 실제로 있는데 vacuous PASS이고(`-cF`는 1), `literal start|stop token`·`start alone`·`stop alone` 3줄에서 리터럴 `start|stop`을 `-cE`로 세면 3이라 출현 1줄을 3으로 부풀린다(`-cF`는 1). 이 문서의 락은 `$(git merge-base …)`·`grep -q`·`a|b` 같은 셸·CLI 리터럴을 일상적으로 세므로 두 방향이 다 밟힌다. 0건 rc=1이라는 계수 grep의 rc 시맨틱은 `-cF`·`-cE`가 같아 아래 `|| true` 근거가 양쪽에 그대로 적용된다.
+- **판정은 정본 형태 하나로만 쓴다 — 긍정형과 부정형이 같은 모양이고 `test` 비교 연산자만 다르다.** **계수 grep은 패턴 종류로 매처를 고른다 — 리터럴 문자열을 세면 `grep -cF`, 정규식 형태를 잠그면 `grep -cE`이고, 매처 플래그 없는 `grep -c`(BRE)는 쓰지 않는다.** 패턴은 리터럴이거나 정규식이라 제3의 경우가 없고, 어느 한쪽을 기본값으로 두면 반대편이 조용히 깨진다 — `call foo(bar) here`에서 리터럴 `foo(bar)`를 `-cE`로 세면 0이라 부정형 락이 그 리터럴이 실제로 있는데 vacuous PASS이고(`-cF`는 1), `literal start|stop token`·`start alone`·`stop alone` 3줄에서 리터럴 `start|stop`을 `-cE`로 세면 3이라 출현 1줄을 3으로 부풀린다(`-cF`는 1). 이 문서의 락은 `$(git merge-base …)`·`grep -q`·`a|b` 같은 셸·CLI 리터럴을 일상적으로 세므로 두 방향이 다 밟힌다. 0건 rc=1이라는 계수 grep의 rc 시맨틱은 `-cF`·`-cE`가 같아 아래 `|| true` 근거가 양쪽에 그대로 적용된다. **아래 코드블록은 이 선택을 `-c'<F|E>'` 자리표시자로 노출한다 — 어느 쪽도 기본값으로 굳지 않게 하려는 것이고, 고르지 않은 채 복사하면 `grep`이 `invalid option`으로 죽어 `N`이 비고 판정 줄이 그 자리에서 FAIL한다**(실측: `grep -c'<F|E>'`가 usage를 찍고 rc≠0, 이어서 `test "" -eq 0`이 `integer expression expected`로 FAIL 분기 → exit 1).
 
   ```bash
-  # 긍정형 — 있어야 한다 (PRODUCER = 판정 대상을 뽑는 명령)
+  # 긍정형 — 있어야 한다 (PRODUCER = 판정 대상을 뽑는 명령, <F|E> = 리터럴이면 F·정규식이면 E)
   S=$(PRODUCER || true)
   test -n "$S" || { echo "FAIL: 생산자 산출 없음 — 경로·앵커 확인"; exit 1; }
-  N=$(printf '%s\n' "$S" | grep -cE '<패턴>' || true)
+  N=$(printf '%s\n' "$S" | grep -c'<F|E>' '<패턴>' || true)
   test "$N" -ge 1 || { echo "FAIL: <무엇이 없다>"; exit 1; }
 
-  # 부정형 — 없어야 한다 (PRODUCER = 판정 대상을 뽑는 명령)
+  # 부정형 — 없어야 한다 (PRODUCER = 판정 대상을 뽑는 명령, <F|E> = 리터럴이면 F·정규식이면 E)
   S=$(PRODUCER || true)
   test -n "$S" || { echo "FAIL: 생산자 산출 없음 — 경로·앵커 확인"; exit 1; }
-  N=$(printf '%s\n' "$S" | grep -cE '<패턴>' || true)
+  N=$(printf '%s\n' "$S" | grep -c'<F|E>' '<패턴>' || true)
   test "$N" -eq 0 || { echo "FAIL: <무엇이 있다>"; exit 1; }
   ```
 
