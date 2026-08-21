@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import types
 from pathlib import Path
 
 import click
+import pytest
 
 # scripts/ 디렉토리는 패키지가 아니므로 importlib로 직접 로드
 _SCRIPT_PATH = (
@@ -582,3 +584,184 @@ class TestUsageLineRequiredOptionInline:
             usage == "ante treasury allocate <BOT_ID> <AMOUNT> --account <ACCOUNT_ID>"
         )
         assert "[OPTIONS]" not in usage
+
+
+# ── --check 모드 (#2472) ─────────────────────────────────────────────────────
+
+
+def _bypass_import_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main()``의 워크트리 import 가드를 무력화한다.
+
+    가드 자체는 :meth:`TestCheckMode.test_import_guard_failure_is_fail_loud`가
+    잠근다. 나머지 테스트는 실행 환경의 ``PYTHONPATH``에 의존하지 않도록
+    가드를 우회한다.
+    """
+    monkeypatch.setattr(_mod, "_assert_current_worktree_import_path", lambda: None)
+
+
+def _render(generated_at: str) -> str:
+    """주어진 스탬프로 CLI 레퍼런스 전문을 문자열로 만든다."""
+    buf = io.StringIO()
+    _mod.generate_cli_reference(buf, generated_at=generated_at)
+    return buf.getvalue()
+
+
+class TestCheckMode:
+    """``--check``가 형제 생성기(#2472)와 같은 계약을 지키는지 검증."""
+
+    def test_check_passes_on_up_to_date_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """산출물이 최신이면 0으로 종료한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        output.write_text(_render(_mod._today_kst()), encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 0
+        assert "is up to date." in capsys.readouterr().out
+
+    def test_check_fails_on_stale_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """본문이 어긋나면 1로 종료하고 재생성 명령을 안내한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        stale = _render("2020-01-01").replace("## 명령어 요약", "## 옛 명령어 요약")
+        output.write_text(stale, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        captured = capsys.readouterr().out
+        assert rc == 1
+        assert "is stale." in captured
+        assert "scripts/generate_cli_reference.py" in captured
+
+    def test_check_never_writes_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--check``는 산출물을 만들지도 고치지도 않는다."""
+        _bypass_import_guard(monkeypatch)
+        missing = tmp_path / "nested" / "cli.md"
+
+        rc_missing = _mod.main(["--check", "--output", str(missing)])
+
+        assert rc_missing == 1
+        assert not missing.exists()
+        assert not missing.parent.exists()
+
+        existing = tmp_path / "cli.md"
+        stale = _render("2020-01-01").replace("## 명령어 요약", "## 옛 명령어 요약")
+        existing.write_text(stale, encoding="utf-8")
+
+        rc_existing = _mod.main(["--check", "--output", str(existing)])
+
+        assert rc_existing == 1
+        assert existing.read_text(encoding="utf-8") == stale
+
+    def test_check_passes_when_committed_stamp_is_not_today(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """커밋된 스탬프가 오늘이 아니어도 본문이 같으면 0으로 종료한다 (#2472)."""
+        _bypass_import_guard(monkeypatch)
+        assert _mod._today_kst() != "2020-01-01"
+        output = tmp_path / "cli.md"
+        content = _render("2020-01-01")
+        assert "> 마지막 갱신: 2020-01-01" in content
+        output.write_text(content, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 0
+
+    def test_generate_still_writes_today_stamp(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """일반 generate는 기존대로 오늘 날짜 스탬프를 기록한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        output.write_text(_render("2020-01-01"), encoding="utf-8")
+
+        rc = _mod.main(["--output", str(output)])
+
+        assert rc == 0
+        assert f"> 마지막 갱신: {_mod._today_kst()}\n" in output.read_text(
+            encoding="utf-8"
+        )
+
+    def test_stdout_and_check_are_mutually_exclusive(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--stdout``과 ``--check``는 함께 쓸 수 없다."""
+        _bypass_import_guard(monkeypatch)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--stdout", "--check"])
+
+        assert excinfo.value.code == 2
+        assert "--stdout and --check cannot be used together" in capsys.readouterr().err
+
+    def test_relative_output_resolves_against_project_root(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """상대 ``--output``은 cwd가 아니라 ``PROJECT_ROOT`` 기준으로 해석된다."""
+        _bypass_import_guard(monkeypatch)
+        project_root = tmp_path / "root"
+        project_root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(_mod, "PROJECT_ROOT", project_root)
+        monkeypatch.chdir(elsewhere)
+
+        rc = _mod.main(["--output", "guide/cli.md"])
+
+        assert rc == 0
+        assert (project_root / "guide" / "cli.md").exists()
+        assert not (elsewhere / "guide").exists()
+
+    def test_import_guard_failure_is_fail_loud(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """워크트리 import 가드가 실패하면 ``main()``이 즉시 1로 종료한다."""
+
+        class _FakeImportPathCheckError(RuntimeError):
+            pass
+
+        def _raise(project_root: Path) -> None:
+            raise _FakeImportPathCheckError(
+                "Import path sanity check failed for package 'ante'."
+            )
+
+        monkeypatch.setattr(
+            _mod,
+            "_load_import_guard",
+            lambda: types.SimpleNamespace(
+                ImportPathCheckError=_FakeImportPathCheckError,
+                check_import_path=_raise,
+            ),
+        )
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--check"])
+
+        assert excinfo.value.code == 1
+        assert "Import path sanity check failed" in capsys.readouterr().err
