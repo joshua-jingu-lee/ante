@@ -100,7 +100,7 @@ gh pr diff #{PR번호}
 |---|---|---|
 | B1 | 스펙 문서 일치 | 구현이 `docs/specs/`와 일치하는가 |
 | B2 | 계약 표류 없음 | API/CLI/schema/field rename이 소비자와 함께 반영되었는가 |
-| B3 | 생성 산출물 동기화 | OpenAPI, generated types, 생성 문서가 함께 갱신되었고, 산출물별 전용 check 명령이 실제로 실행되었는가 |
+| B3 | 생성 산출물 동기화 | 생성 문서가 함께 갱신되었고, 산출물별 전용 check 명령이 실제로 실행되었는가 |
 
 생성 산출물 신호가 있으면 B3 판정 전에 `.agent/skills/generated-artifact-sync.md`를 읽고 아래 검증 증거를 확인한다.
 

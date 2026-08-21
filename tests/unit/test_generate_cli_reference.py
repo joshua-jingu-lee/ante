@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import os
+import re
+import subprocess
+import sys
 import types
 from pathlib import Path
 
@@ -765,3 +769,103 @@ class TestCheckMode:
 
         assert excinfo.value.code == 1
         assert "Import path sanity check failed" in capsys.readouterr().err
+
+
+# ── 생성기 전수 --check 규범 (#2472) ─────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# 목록을 하드코딩하지 않는다 — 하드코딩하면 새로 추가된 네 번째 생성기를
+# 놓쳐 아래 락이 무의미해진다.
+_GENERATOR_SCRIPTS = sorted((_REPO_ROOT / "scripts").glob("generate_*.py"))
+
+assert _GENERATOR_SCRIPTS, (
+    "scripts/generate_*.py 를 하나도 찾지 못했다 — glob 경로가 어긋나면 "
+    "TestAllGeneratorsProvideCheckMode 가 vacuous pass 한다 (#2472)."
+)
+
+# argparse 옵션 목록의 **항목 줄**만 매치한다 (들여쓰기 정확히 두 칸).
+# 단순 부분문자열 검색은 description·다른 옵션의 설명문 같은 산문에 있는
+# "--check" 언급에 false-pass 한다 — 더미 생성기로 실측했다.
+_CHECK_OPTION_LINE_RE = re.compile(r"^  (?:-\w+,\s+)*--check(?![\w-])", re.MULTILINE)
+
+
+class TestAllGeneratorsProvideCheckMode:
+    """``scripts/generate_*.py`` 전수가 전용 ``--check``를 제공하는지 잠근다.
+
+    #2472는 세 문서(``.agent/skills/generated-artifact-sync.md`` ·
+    ``.agent/skills/review-pr.md`` · ``docs/runbooks/01-development-process.md``)
+    에 「모든 생성 산출물은 전용 ``--check``를 제공한다. 새 산출물을 추가하면
+    커밋된 날짜 스탬프를 동결하는 ``--check``도 함께 만든다」를 성문화하면서,
+    전용 check가 없는 산출물용 fallback 절차를 제거했다. 집행 장치가 없으면
+    네 번째 생성기가 ``--check`` 없이 추가되는 순간 그 전칭 규범이 조용히
+    거짓이 되고 #2472가 없앤 실패 모드가 그대로 재발한다.
+
+    산출물의 실제 최신성까지는 보지 않는다 — 그것은 각 생성기 자신의 책임이고,
+    이 저장소의 ``project-structure.md``는 #2472와 무관한 선행 드리프트로
+    stale이다(#2472 Non-Goals). 여기서는 ``--check``가 각 생성기의 **알려진
+    옵션**인지만 확인하며, 두 축으로 본다.
+
+    * ``--check``로 실행했을 때 argparse가 *unrecognized argument*로 거부하지
+      않는다 — 산문 언급에 속지 않는 의미론적 축이다. ``--check``는 어느
+      생성기에서도 파일을 쓰지 않으므로 부작용이 없고, 최신/stale에 따라
+      rc는 0 또는 1이라 그 값은 판정에 쓰지 않는다.
+    * ``--help``의 옵션 목록에 항목 줄로 등장한다 — argparse를 쓰지 않고 argv를
+      조용히 무시하는 생성기를 잡는 구조적 축이다.
+
+    자리에 관하여: 저장소 전역 규범을 잠그므로 본래는
+    ``tests/unit/contracts/``가 맞는 위치다. 다만 #2472는 변경 파일 집합을
+    5개로 제한한다 — 신규 파일은 ``project-structure.md`` 재생성 축을 열고,
+    그 산출물은 base에서 이미 stale이라 이 PR이 무관한 드리프트를 조용히
+    고치게 된다. 그 제약이 풀리면 contract 테스트로 옮기는 것이 옳다.
+    """
+
+    @staticmethod
+    def _run(script: Path, *args: str) -> subprocess.CompletedProcess[str]:
+        env = dict(os.environ)
+        # 생성기 전부 main() 첫 줄에서 워크트리 import 가드를 돌리므로
+        # --help 조차 현재 워크트리 src 가 잡혀야 정상 종료한다.
+        env["PYTHONPATH"] = str(_REPO_ROOT / "src")
+        return subprocess.run(
+            [sys.executable, str(script), *args],
+            cwd=_REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    @pytest.mark.parametrize(
+        "script",
+        _GENERATOR_SCRIPTS,
+        ids=lambda script: script.name,
+    )
+    def test_generator_accepts_check_flag(self, script: Path) -> None:
+        """각 생성기가 ``--check``를 알려진 옵션으로 노출한다."""
+        violation = (
+            f"{script.name} 가 전용 --check 를 제공하지 않는다. #2472가 성문화한 "
+            "「모든 생성 산출물은 전용 --check를 제공한다」 규범 위반이다. "
+            "새 생성기를 추가할 때는 커밋된 날짜 스탬프를 동결하는 --check를 "
+            "함께 만든다."
+        )
+
+        # (1) 의미론적 축 — argparse 가 --check 를 알고 있는가.
+        checked = self._run(script, "--check")
+        assert checked.returncode != 2, (
+            f"{violation}\n--check 실행이 argparse 사용법 오류(rc=2)로 거부됐다.\n"
+            f"stderr:\n{checked.stderr}"
+        )
+        assert "unrecognized argument" not in checked.stderr, (
+            f"{violation}\nstderr:\n{checked.stderr}"
+        )
+
+        # (2) 구조적 축 — 옵션 목록에 항목으로 등재돼 있는가.
+        helped = self._run(script, "--help")
+        assert helped.returncode == 0, (
+            f"{script.name} --help 가 rc={helped.returncode}로 실패했다.\n"
+            f"stdout:\n{helped.stdout}\nstderr:\n{helped.stderr}"
+        )
+        assert _CHECK_OPTION_LINE_RE.search(helped.stdout), (
+            f"{violation}\n--help 옵션 목록에 --check 항목이 없다.\n"
+            f"--help 출력:\n{helped.stdout}"
+        )
