@@ -123,6 +123,7 @@ allowlist 후보에서 제거한다.
 | `ante broker status --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 상태 (`--account` 필수) |
 | `ante broker balance --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
 | `ante broker positions --account <account_id>` | `runtime IPC` | 서버 BrokerAdapter live 조회 (`--account` 필수) |
+| `ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]` | `runtime IPC` | 서버 BrokerAdapter 주문/체결 이력 live 조회 (`--account` 필수, read-only) |
 | `ante broker reconcile --account <account_id> [--fix]` | `runtime IPC` | 서버 PositionReconciler (`--account` 필수) |
 | `ante data list/schema/storage/validate/info/delete ...` | `offline` | canonical data root 또는 명시 data path 대상 |
 | `ante backtest run <strategy_path> ...` | `offline` | 서버와 분리된 백테스트 실행 |
@@ -486,6 +487,7 @@ ante rule update <rule_type> --account <account_id> [--enabled|--disabled] [--pa
 ante broker status --account <account_id>        # 증권사 연결 상태
 ante broker balance --account <account_id>       # 실제 증권사 잔고 조회
 ante broker positions --account <account_id>     # 실제 증권사 포지션 조회
+ante broker order-history --account <account_id> [--from <날짜>] [--to <날짜>]  # 주문/체결 이력 조회
 ante broker reconcile --account <account_id> [--fix]  # 시스템↔증권사 포지션 대사
 ```
 
@@ -495,6 +497,44 @@ ante broker reconcile --account <account_id> [--fix]  # 시스템↔증권사 �
 과거·공개 market data 조회는 `data`/`feed` 계열 커맨드로 다룬다. `broker order`와
 `broker stream prices`는 일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙
 없이는 제공하지 않는다.
+
+#### `broker order-history` — 주문/체결 이력 조회 (read-only)
+
+`--from`/`--to`는 공개 표면 어휘인 ISO `YYYY-MM-DD`로 받는다(`validate_iso_date`
+strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`로의 변환은
+**어댑터 호출 직전 모든 경로**(런타임 IPC 핸들러 / 서버 정지 시 직접 연결 폴백)가
+공유 헬퍼 하나(`ante.core.time.iso_to_kis_date`)를 통과해 수행한다. ISO 문자열이
+변환 없이 어댑터에 도달하면 KIS 3개월 경계 판정(문자열 사전순 비교)이 조용히
+어긋나므로, 변환 지점은 단일 chokepoint로 고정한다. 두 옵션 모두 생략 가능하며
+생략 시 어댑터 기본 구간(최근 7일)을 따른다.
+
+`--from`이 `--to`보다 뒤이면(inverted date range) 서비스/IPC 호출 이전에
+`INVALID_DATE_RANGE` 에러 코드와 exit code 1로 거부한다(빈 결과 반환 금지).
+한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
+`treasury snapshot`/`report performance`와 동일 계약이다.
+
+폴백 경계는 형제 명령과 다르다. 서버가 정지된 경우(`IPC_SERVER_NOT_RUNNING`)에만
+직접 연결 폴백으로 내려가고, `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본
+코드/메시지로 노출한다(credentials·rate limit·circuit breaker 우회 차단).
+
+출력은 BrokerAdapter가 정규화한 8키다: `order_id` / `symbol` / `side` /
+`quantity` / `filled_quantity` / `price` / `status` / `timestamp`. JSON 모드는
+IPC envelope을 그대로 통과시켜 항상 `{"orders": [...]}` 평면 shape이며, 빈 결과도
+`{"orders": []}`로 통일한다.
+
+다음은 어댑터 계약에서 비롯한 **알려진 한계**이며 본 명령이 해소하지 않는다.
+CLI `--help`와 사람용 출력 헤더로 노출해 오독만 줄인다.
+
+- 취소된 주문이 `status="pending"`으로 보인다. 조회 구분이 전체(`CCLD_DVSN="00"`)라
+  취소·미체결 행이 함께 오는데 상태는 체결수량 기준 2값으로만 접힌다.
+- 정정/취소 구분과 원주문 번호가 소실되어 정정 행을 원주문과 구별할 수 없다.
+- 주문 시각이 소실된다. `timestamp`는 영업일(일자)까지다.
+- `price`는 체결단가와 주문단가를 한 칸에 혼합한다(어느 쪽인지 표시 없음).
+- `timestamp` 어휘가 어댑터마다 다르다(KIS는 `YYYYMMDD`, 그 외는 ISO).
+- `broker_type`이 `test`인 계좌의 어댑터는 `--from`/`--to`를 무시한다.
+- KIS 3개월 경계를 가로지르는 구간은 split 조회 없이 시작일 기준 단일 쿼리로
+  처리되어 결과가 불완전할 수 있다(bounded known-limitation —
+  [08-kis-domestic-adapter.md](../broker-adapter/08-kis-domestic-adapter.md#inquire-daily-ccld-tr-id-매핑-2349)).
 
 ### account-scoped `account_id` 입력 표면 — 14-account-id-contract 참조
 

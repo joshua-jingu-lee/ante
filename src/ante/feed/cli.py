@@ -764,13 +764,20 @@ def _echo_report_section(latest_report: dict | None) -> None:
         failures_total = summary.get(
             "failures_total", len(latest_report.get("failures", []))
         )
+        # 총 경고 건수: summary.warnings_total(신규)을 우선한다. warnings 배열은
+        # type 버킷별로 유계 절단되므로(#2414) len()은 절단 시 총계가 아니라
+        # 보존 샘플 수이며 축소 보고가 된다. 구버전 리포트에는 이 필드가 없으므로
+        # 그때만 len() 폴백을 쓴다(#2117 failures_total 패턴 미러).
+        warnings_total = summary.get(
+            "warnings_total", len(latest_report.get("warnings", []))
+        )
         click.echo(f"  mode: {latest_report.get('mode', '?')}")
         click.echo(f"  date: {latest_report.get('target_date', '?')}")
         click.echo(
             f"  result: {summary.get('symbols_success', 0)} success"
             f" / {summary.get('symbols_failed', 0)} failed"
             f" / {failures_total} total failures"
-            f" / {len(latest_report.get('warnings', []))} warnings"
+            f" / {warnings_total} warnings"
         )
         click.echo(f"  rows: {summary.get('rows_written', 0)}")
     else:

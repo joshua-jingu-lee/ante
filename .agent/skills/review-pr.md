@@ -100,13 +100,13 @@ gh pr diff #{PR번호}
 |---|---|---|
 | B1 | 스펙 문서 일치 | 구현이 `docs/specs/`와 일치하는가 |
 | B2 | 계약 표류 없음 | API/CLI/schema/field rename이 소비자와 함께 반영되었는가 |
-| B3 | 생성 산출물 동기화 | OpenAPI, generated types, 생성 문서가 함께 갱신되었고, 산출물별 실제 check 명령 또는 generate 후 diff 확인이 실행되었는가 |
+| B3 | 생성 산출물 동기화 | 생성 문서가 함께 갱신되었고, 산출물별 전용 check 명령이 실제로 실행되었는가 |
 
 생성 산출물 신호가 있으면 B3 판정 전에 `.agent/skills/generated-artifact-sync.md`를 읽고 아래 검증 증거를 확인한다.
 
 - 프로젝트 구조 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`를 실행했는지 확인한다.
 - DB DDL/schema 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`를 실행했는지 확인한다.
-- CLI reference처럼 전용 check 명령이 없는 산출물은 대응 generate 명령 실행 후 `git diff --exit-code -- <산출물>` 결과가 검증 증거에 남았는지 확인한다.
+- CLI reference 변경: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py`로 regenerate했는지, 리뷰/CI 전 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check`를 실행했는지 확인한다.
 - 실행 증거가 없고 코드 독해로만 최신이라고 추론했다면 B3는 PASS가 아니라 FAIL 또는 follow-up으로 분리한다.
 
 #### C. 상태 전이 및 수명주기

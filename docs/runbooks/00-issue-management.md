@@ -27,10 +27,10 @@
 
 | Type | 설명 | 대응 라벨 |
 |------|------|-----------|
-| `feat` | 새 기능 추가 | `feature` |
+| `feat` | 새 기능 추가 | `enhancement` |
 | `fix` | 버그 수정 | `bug` |
 | `refactor` | 리팩토링 | `refactor` |
-| `perf` | 성능 개선 | `feature` |
+| `perf` | 성능 개선 | `enhancement` |
 | `docs` | 문서 작성/수정 | `docs` |
 | `test` | 테스트 추가/수정 | `test` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` |
@@ -179,7 +179,8 @@ A → D     (A 완료 후 B, D 병렬 가능)
 
 | 라벨 | 용도 | 색상 권장 |
 |------|------|-----------|
-| `feature` | 새 기능 | 녹색 |
+| `enhancement` | 새 기능·성능 개선 (§2의 `feat`·`perf`) | 하늘색 |
+| `feature` | (legacy) 신규 이슈에 쓰지 않는다. 재정 근거는 #2458. | 녹색 |
 | `bug` | 버그 수정 | 빨간색 |
 | `refactor` | 리팩터링 | 파란색 |
 | `docs` | 문서 | 보라색 |

@@ -113,7 +113,7 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
 | 표면 | 목표 노출 경로 | 목표 코드 |
 |---|---|---|
 | account-scoped CLI JSON error | ``require_account_id`` → :class:`InvalidAccountIdError` → CLI JSON error payload (담당 split 이 CLI 콜백의 ``except`` / non-Click 예외 변환을 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
-| IPC broker dispatch | ``broker.status`` / ``broker.balance`` / ``broker.positions`` / ``broker.reconcile`` handler 의 ``require_account_id`` → :class:`InvalidAccountIdError` → IPC server ``getattr(e, "code", "EXECUTION_ERROR")`` (담당 split 이 ``require_account_id`` 최우선화를 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
+| IPC broker dispatch | ``broker.status`` / ``broker.balance`` / ``broker.positions`` / ``broker.order_history`` / ``broker.reconcile`` handler 의 ``require_account_id`` → :class:`InvalidAccountIdError` → IPC server ``getattr(e, "code", "EXECUTION_ERROR")`` (담당 split 이 ``require_account_id`` 최우선화를 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
 | oracle host probe | ``ANTE_ORACLE_HOST_PROBE_MODE=cli_account_id_invalid_contract`` 가 기대하는 nonzero clean invalid account_id 응답 | ``VALIDATION_ERROR`` |
 
 근거 (목표 코드 = ``InvalidAccountIdError.code`` 재사용, 코드 상수와 정합):
@@ -281,6 +281,7 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 | `ante broker status --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.status` 경계; 정렬·확정은 #1636 probe 책임) |
 | `ante broker balance --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (#1623 probe `broker_balance_default` 대상) |
 | `ante broker positions --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.positions` 경계) |
+| `ante broker order-history --account <account_id>` | option | `VALIDATION_ERROR` | match | **정렬 완료 (#2412 도입 시 선반영)** — 명령 신설 시점부터 CLI 콜백이 `reject_invalid_account_id` (`src/ante/cli/_validators.py`) 를 IPC/`_get_broker` 이전에 호출하고, IPC 핸들러 `_handle_broker_order_history` 가 `require_account_id` 를 날짜 파싱보다 **먼저** 호출한다 (`account_id`-first). 즉 C(#1636) 가 status/balance/positions 에 도달시킨 목표 상태를 신설 시점에 이미 만족하므로 별도 정렬 split 대상이 아니다 |
 | `ante broker reconcile --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.reconcile`. **별도 행** — `_handle_broker_reconcile` 이 `args["bot_id"]` 를 `require_account_id` **이전**에 raw 로 읽는 ordering **구조** (`src/ante/ipc/registry.py:343`)이므로 invalid-account-only 정렬을 담당 split 이 `require_account_id` 우선화까지 포함해 맡는다. 목표=`VALIDATION_ERROR`, 정렬 담당=**#1636** (`require_account_id` 우선화 포함). status/balance/positions 와 진입 구조 다름 → 분리) |
 | `ante account suspend <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (AccountService mutation/lifecycle; #1623 probe 집합 아님 — #1634/35/36 임의 포함 금지) |
 | `ante account activate <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation) |

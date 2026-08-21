@@ -225,6 +225,16 @@ baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴
 ``EXCEPTION_TO_SPEC`` entry 는 helper 의 bare-``.code``→``internal`` wrap 을
 회피해 category 정확성을 lock 하는 load-bearing 이다.
 
+#2412 가 추가한 core 1 class lock:
+
+- ``InvalidIsoDateError`` → ``VALIDATION_ERROR`` / ``validation``. 공개 표면
+  ISO ``YYYY-MM-DD`` → broker 어댑터 경계 ``YYYYMMDD`` 변환 chokepoint
+  (``ante.core.time.iso_to_kis_date``) 의 입력 검증 실패다. 코드는 #1633 SSOT
+  (``InvalidAccountIdError.code``) 를 재사용하며 신 코드를 도입하지 않는다.
+  entry 를 두는 이유는 signal typed-3 와 동일하다 — class-level ``.code`` 만
+  있으면 helper 가 category 를 ``internal`` 로 wrap 해 validation 성격이
+  taxonomy 에서 소실된다.
+
 본 모듈은 helper-internal 로 취급한다 — ``ante.contracts.__init__`` 에서
 re-export 하지 않으며, 외부 소비자는 ``error_spec_for_exception(exc)`` 를
 호출한다.
@@ -277,6 +287,7 @@ from ante.broker.registry import (
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.errors import ErrorSpec
 from ante.core.database import ReadOnlyDatabaseError
+from ante.core.time import InvalidIsoDateError
 from ante.member.errors import (
     MemberAlreadyExistsError,
     MemberInvalidEmojiError,
@@ -826,6 +837,20 @@ _READ_ONLY_DATABASE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+# ── core 1 class lock (#2412) ────────────────────────────────────────────────
+#
+# ``InvalidIsoDateError`` 는 공개 표면 ISO ``YYYY-MM-DD`` → broker 어댑터 경계
+# 압축 ``YYYYMMDD`` 변환 chokepoint (``ante.core.time.iso_to_kis_date``) 의 입력
+# 검증 실패다. class-level ``.code`` 만으로도 안정 코드는 surface 되지만, helper
+# 의 bare-``.code`` 경로는 category 를 ``internal`` 로 wrap 하므로 validation
+# 성격이 taxonomy 에서 소실된다 — signal typed-3 (#2336) 와 동일한 사유로 entry
+# 를 명시 등록한다. 코드 값은 #1633 SSOT (``InvalidAccountIdError.code``) 재사용.
+_INVALID_ISO_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
+
 # ── fallback (registry miss + .code 도 없을 때) ──────────────────────────────
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -924,6 +949,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
     # ── #1974 R2 core 1 class (read-only Database write-guard) ────────────
     ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
+    # ── #2412 core 1 class (ISO→YYYYMMDD 변환 chokepoint 입력 검증) ───────
+    InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
 }
 """대표 fault lock registry (#1839 normative 4건).
 

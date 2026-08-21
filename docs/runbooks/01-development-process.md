@@ -176,12 +176,14 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - CLI, DB DDL, 프로젝트 구조처럼 생성 산출물의 입력이 바뀌면 해당 생성 문서도 같은 작업에서 갱신한다.
 - 스크립트로 생성되는 문서는 수동 편집하지 않는다.
 - 구현 단계에서 생성 산출물 입력이 바뀌면 먼저 대응하는 regenerate 명령을 실행한다.
-- 리뷰/CI 전에는 전용 check 명령이 있는 산출물을 실제 check 명령으로 검증한다.
+- 리뷰/CI 전에는 각 생성 산출물을 전용 check 명령으로 검증한다.
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
   - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
-- 전용 check 명령이 없는 생성 산출물은 generate 명령을 다시 실행한 뒤 `git diff --exit-code -- <산출물>`로 변경 없음 상태를 확인한다.
+  - CLI reference: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check`
+- 모든 생성 산출물은 전용 `--check`를 제공한다. 새 산출물을 추가하면 커밋된 날짜 스탬프를 동결하는 `--check`도 함께 만든다. 이 주장의 정의역은 `scripts/generate_*.py` 규약을 따르는 생성기이며, 다른 메커니즘으로 만들어지는 산출물을 도입하면 같은 규약으로 편입한다. 근거는 #2472다.
 - 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
 - DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
+- CLI reference regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py`다.
 - 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
 - Plan Preflight와 리뷰 단계에서 generated artifact sync 위험을 발견하면 구현 체크리스트와 검증 체크리스트에 regenerate/check 흐름을 함께 포함한다.
 

@@ -612,3 +612,85 @@ async def test_get_order_history_month_end_boundary_clamp(
     # cutoff 전일(02-27)은 before.
     await adapter.get_order_history(from_date="20260227", to_date="20260531")
     assert captured["tr_id"] == "VTSC9215R"
+
+
+# ── 공개 표면 ISO 입력 → chokepoint 변환 → tr_id 분기 (#2412) ──────────────
+#
+# ``ante broker order-history`` 는 사용자에게서 ISO ``YYYY-MM-DD`` 를 받는다.
+# 어댑터 경계 어휘는 압축 ``YYYYMMDD`` 이고 그 사이 변환은 공유 chokepoint
+# ``ante.core.time.iso_to_kis_date`` 가 담당한다. 아래 두 test 는 (1) 변환을
+# 통과한 ISO 가 올바른 inner/before 분기를 고르는지, (2) 변환을 건너뛰면
+# 어떤 조용한 오동작이 나는지를 함께 lock 한다.
+
+
+@pytest.mark.parametrize("is_paper", [True, False])
+@pytest.mark.parametrize(
+    ("iso_from", "expected_kind"),
+    [
+        ("2026-03-11", "inner"),  # cutoff 당일 포함
+        ("2026-03-12", "inner"),
+        ("2026-03-10", "before"),  # cutoff 전일
+    ],
+)
+async def test_get_order_history_iso_via_chokepoint_selects_correct_tr_id(
+    monkeypatch: pytest.MonkeyPatch,
+    is_paper: bool,
+    iso_from: str,
+    expected_kind: str,
+) -> None:
+    """ISO 입력이 chokepoint 변환을 거치면 4코드 분기가 정확히 재현된다.
+
+    KST today=2026-06-11 → cutoff=2026-03-11. CLI/IPC 두 소비자가 모두
+    ``iso_to_kis_date`` 를 통과시키므로, 본 test 는 그 조합의 최종 결과
+    (tr_id + ``INQR_STRT_DT`` 값)를 어댑터 경계에서 단언한다.
+    """
+    from ante.core.time import iso_to_kis_date
+
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
+    expected = {
+        ("inner", True): "VTTC0081R",
+        ("inner", False): "TTTC0081R",
+        ("before", True): "VTSC9215R",
+        ("before", False): "CTSC9215R",
+    }[(expected_kind, is_paper)]
+
+    adapter = _make_ccld_adapter(is_paper=is_paper)
+    captured = _capture_ccld_call(adapter)
+
+    await adapter.get_order_history(
+        from_date=iso_to_kis_date(iso_from),
+        to_date=iso_to_kis_date("2026-06-11"),
+    )
+
+    assert captured["tr_id"] == expected
+    assert captured["params"]["INQR_STRT_DT"] == iso_from.replace("-", "")
+    assert captured["params"]["INQR_END_DT"] == "20260611"
+
+
+async def test_unconverted_iso_missselects_branch_and_sends_malformed_date(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """negative control: 변환을 건너뛰면 조용히 오동작한다 (#2412 결정 2).
+
+    ``is_inner = start_date >= cutoff`` 는 **문자열 사전순 비교**다.
+    ``'2026-07-01'`` 의 5번째 문자 ``'-'``(0x2D)가 ``'20260311'`` 의
+    ``'3'``(0x33)보다 작아, 3개월 이내 구간인데도 판정이 무조건 False 가
+    되어 before 분기를 고르고 malformed ``INQR_STRT_DT`` 가 그대로 전송된다.
+    **예외도 경고도 발생하지 않는다.**
+
+    본 test 는 어댑터의 현재 계약(입력 형식 검증 없음)을 lock 하는 동시에,
+    변환 chokepoint 가 왜 어댑터 호출 직전 **모든 경로**에 있어야 하는지를
+    실행으로 문서화한다. 어댑터가 형식 검증을 갖게 되면(별건 계약 변경) 본
+    test 를 함께 갱신해야 한다.
+    """
+    monkeypatch.setattr("ante.broker.kis.business_date_kst", lambda *a, **k: "20260611")
+    adapter = _make_ccld_adapter(is_paper=True)
+    captured = _capture_ccld_call(adapter)
+
+    # 2026-07-01 은 cutoff(2026-03-11) 이후라 정상 변환 시 inner 여야 한다.
+    await adapter.get_order_history(from_date="2026-07-01", to_date="2026-07-31")
+
+    assert captured["tr_id"] == "VTSC9215R", (
+        "미변환 ISO 는 before 로 오선택된다 — 이 오동작이 바로 chokepoint 의 존재 이유"
+    )
+    assert captured["params"]["INQR_STRT_DT"] == "2026-07-01"

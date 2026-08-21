@@ -1,7 +1,7 @@
-"""DailyRunner의 store_merge 경고 drain 회귀 테스트(#2002).
+"""DailyRunner의 store_merge 경고 drain 회귀 테스트(#2002) + 유계화(#2414).
 
 backfill_runner는 각 store 쓰기 단계(data.go.kr/DART/지표) 직후
-``ctx.warnings.extend(store.drain_warnings())`` 를 호출해 store의 merge 이상
+``ctx.add_warnings(store.drain_warnings())`` 를 호출해 store의 merge 이상
 경고를 ``CollectionResult.warnings`` (→ daily report ``warnings``)로 표면화한다.
 daily_runner에는 이 drain 경로가 없어 store merge 경고가 store 내부
 ``_pending_warnings`` 버퍼에만 남고 ``.feed/reports/*-daily.json`` 에 안 나타났다.
@@ -10,6 +10,11 @@ daily_runner에는 이 drain 경로가 없어 store merge 경고가 store 내부
 (``test_report.py::TestBackfillReportSurfacesStoreMergeWarning``)와 동형으로,
 daily 경로에서도 store_merge 경고가 결과 warnings에 표면화되고 store pending이
 비워지는지를 잠근다.
+
+#2414 이후 적재는 리스트 직접 변형이 아니라
+``ctx.add_warnings(...)`` 단일 chokepoint를 경유한다(daily 4경로 전부). 이
+파일은 그 라우팅 뒤에도 표면화가 유지되고, 통상 단일 일자 물량에서는 절단이
+발생하지 않음(daily 동작 불변)을 함께 잠근다.
 """
 
 from __future__ import annotations
@@ -221,3 +226,55 @@ async def test_daily_run_no_store_warnings_when_clean(tmp_path: Path) -> None:
         w for w in result.warnings if w.get("type") == "store_merge"
     ]
     assert store_merge_warnings == []
+
+
+@pytest.mark.asyncio
+async def test_daily_typical_volume_is_not_truncated(tmp_path: Path) -> None:
+    """통상 단일 일자 물량(관측 밀도 약 600건)에서는 절단이 발생하지 않는다(#2414).
+
+    N=1000 결정의 직접 검증이다 — daily 리포트는 종전과 동일하게 그날 경고
+    전건을 담고 ``warnings_truncated`` 는 False로 남는다.
+    """
+    data_path = tmp_path / "data"
+    feed_dir = data_path / ".feed"
+    (feed_dir / "checkpoints").mkdir(parents=True)
+
+    # 이슈 #2414 실측 밀도(99,691건 / 165 거래일 ≈ 600건/거래일).
+    typical_volume = 600
+
+    class _WarningRichCollector:
+        async def collect(
+            self,
+            target_date: str,
+            store: ParquetStore,
+        ) -> tuple[int, bool, set[str], list[dict]]:
+            warns = [
+                {
+                    "type": "business_rule",
+                    "symbol": f"{i:06d}",
+                    "date": target_date,
+                    "message": f"low > close #{i}",
+                }
+                for i in range(typical_volume)
+            ]
+            return 0, True, {"005930"}, warns
+
+    runner = DailyRunner(
+        data_go_kr_collector=_WarningRichCollector(),
+        dart_collector=None,
+        store=ParquetStore(base_path=data_path),
+    )
+
+    result = await runner.run(
+        data_path=data_path,
+        config={},
+        feed_dir=feed_dir,
+        started_at=datetime.now(tz=UTC),
+        is_blocked=lambda config, target_date: False,
+        target_date="2025-09-30",
+    )
+
+    assert len(result.warnings) == typical_volume
+    assert result.warnings_total == typical_volume
+    assert result.warnings_by_type == {"business_rule": typical_volume}
+    assert result.warnings_truncated is False

@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-05-31
+> 마지막 갱신: 2026-07-30
 
 > 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. 명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.
 
@@ -53,6 +53,7 @@ Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명�
   - [ante broker status](#ante-broker-status)
   - [ante broker balance](#ante-broker-balance)
   - [ante broker positions](#ante-broker-positions)
+  - [ante broker order-history](#ante-broker-order-history)
   - [ante broker reconcile](#ante-broker-reconcile)
 - [config — 설정 조회·변경.](#config-설정-조회변경)
   - [ante config get](#ante-config-get)
@@ -193,6 +194,7 @@ ante [OPTIONS] <command>
 | `ante broker status` | 증권사 연결 상태 조회. | `broker:read` | H·A |
 | `ante broker balance` | 증권사 계좌 잔고 조회. | `broker:read` | H·A |
 | `ante broker positions` | 증권사 보유 종목 조회. | `broker:read` | H·A |
+| `ante broker order-history` | 증권사 주문/체결 이력 조회 (read-only). | `broker:read` | H·A |
 | `ante broker reconcile` | 내부 데이터와 증권사 데이터 대사. | `broker:read` | H·A |
 | `ante config get` | 설정 조회. 키 없이 호출하면 전체 목록. | `config:read` | H·A |
 | `ante config set` | 동적 설정 변경. 정적 설정은 변경 불가. | `config:write` | H·A |
@@ -202,7 +204,7 @@ ante [OPTIONS] <command>
 | `ante strategy list` | 등록된 전략 목록 조회. | `strategy:read` | H·A |
 | `ante strategy set-status` | 전략 상태 변경. | `strategy:write` | H·A |
 | `ante strategy info` | 전략 상세 정보 조회 (메타데이터 + 파라미터). | `strategy:read` | H·A |
-| `ante strategy summary` | 전략 기간별 성과 집계. | `strategy:read` | H·A |
+| `ante strategy summary` | 전략 기간별 성과 집계 (전략 전체 거래, absolute 지표). | `strategy:read` | H·A |
 | `ante strategy performance` | 전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용). | `strategy:read` | H·A |
 | `ante data list` | 보유 데이터셋 목록. | `data:read` | H·A |
 | `ante data info` | 데이터셋 상세 조회. | `data:read` | H·A |
@@ -256,7 +258,7 @@ ante [OPTIONS] <command>
 | `ante update` | ante를 최신 버전으로 업데이트합니다. | — | — |
 | `ante feed config set` | API 키를 .feed/.env 파일에 저장한다. | `data:write` | H·A |
 | `ante feed config list` | 등록된 API 키 목록을 마스킹하여 표시한다. | `data:read` | H·A |
-| `ante feed config check` | API 키 존재 여부를 확인한다. | `data:read` | H·A |
+| `ante feed config check` | API 키 존재 여부와 유효성을 확인한다. | `data:read` | H·A |
 | `ante feed run backfill` | 과거 데이터를 1회 수집한다 (backfill). | `data:write` | H·A |
 | `ante feed run daily` | 어제(또는 지정일) 데이터를 1회 수집한다 (daily). | `data:write` | H·A |
 | `ante feed start` | 내장 스케줄러로 backfill/daily를 자동 실행하는 상주 프로세스를 시작한다. | `data:write` | H·A |
@@ -926,6 +928,16 @@ ante bot remove <BOT_ID> [OPTIONS]
 
 봇 시그널 키 조회 또는 재발급.
 
+``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다 (#2111).
+서버가 정지되어 있으면 ``IPC_SERVER_NOT_RUNNING`` 으로 거부하며, cold-path
+DB mutation 으로 대체하지 않는다 (runtime 경계 / audit / live 상태 정합성
+보존).
+
+조회(rotate 미지정)는 runtime IPC (``bot.signal_key`` read) 우선 + 서버
+정지 시 snapshot DB fallback 이다 (#2112; ``--rotate`` 와 정반대로 서버
+정지 시 기존 직접 DB 경로를 보존한다 — 스펙: runtime IPC + snapshot
+fallback).
+
 - **필요 scope**: `bot:admin`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
 
@@ -1155,6 +1167,47 @@ ante broker positions --account <ACCOUNT_ID>
 | `--account` | O | TEXT | — | 계좌 ID |
 
 
+### ante broker order-history
+
+증권사 주문/체결 이력 조회 (read-only).
+
+출력은 BrokerAdapter 가 정규화한 8키다: ``order_id`` / ``symbol`` /
+``side`` / ``quantity`` / ``filled_quantity`` / ``price`` / ``status`` /
+``timestamp``. KIS 원시 필드(``rvse_cncl_dvsn_nm``, ``ord_tmd`` 등)는
+어댑터 내부 fold 단계에서 이미 버려져 이 표면에 존재하지 않는다.
+
+알려진 한계 — 어댑터 계약 범위라 본 명령이 해소하지 않고 노출만 한다:
+
+- 취소된 주문도 ``status=pending`` 으로 보인다 (상태가 체결수량 기준 2값).
+
+- 정정/취소 구분과 원주문 번호가 소실되어 정정 행을 구별할 수 없다.
+
+- 주문 시각이 소실된다 (``timestamp`` 는 영업일 단위).
+
+- ``price`` 는 체결단가와 주문단가를 한 칸에 혼합한다 (구분 표시 없음).
+
+- ``timestamp`` 어휘가 어댑터마다 다르다 (KIS ``YYYYMMDD``, 그 외 ISO).
+
+- ``broker_type`` 이 ``test`` 인 계좌는 ``--from``/``--to`` 를 무시한다.
+
+- KIS 3개월 경계를 가로지르는 구간은 결과가 불완전할 수 있다.
+
+- **필요 scope**: `broker:read`
+- **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
+
+```bash
+ante broker order-history --account <ACCOUNT_ID> [OPTIONS]
+```
+
+**Options:**
+
+| 옵션 | 필수 | 타입 | 기본값 | 설명 |
+|------|------|------|--------|------|
+| `--account` | O | TEXT | — | 계좌 ID |
+| `--from` | - | TEXT | — | 조회 시작일 (YYYY-MM-DD, 미지정 시 어댑터 기본 최근 7일) |
+| `--to` | - | TEXT | — | 조회 종료일 (YYYY-MM-DD, 미지정 시 어댑터 기본 오늘) |
+
+
 ### ante broker reconcile
 
 내부 데이터와 증권사 데이터 대사.
@@ -1362,7 +1415,17 @@ ante strategy info <NAME> [OPTIONS]
 
 ### ante strategy summary
 
-전략 기간별 성과 집계.
+전략 기간별 성과 집계 (전략 전체 거래, absolute 지표).
+
+전략의 ``trades.strategy_id`` (거래 시점 전략 귀속 durable key)로
+해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇/여러 계좌에서
+운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고 봇의 이후
+전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다 (#2144).
+
+지표는 ``realized_pnl``/``trade_count``/``win_rate`` 의 **기간별 절대
+집계**다. ``strategy performance`` (계좌별 portfolio-relative) 와 달리
+account-scoped 가 아니므로 여러 계좌·통화의 거래가 섞일 수 있다
+(다중 통화 운용 시 ``realized_pnl`` 은 통화가 혼합될 수 있다).
 
 - **필요 scope**: `strategy:read`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)
@@ -1579,7 +1642,7 @@ ante backtest run <STRATEGY_PATH> --start <START> --end <END> [OPTIONS]
 | `--end` | O | TEXT | — | 종료일 (YYYY-MM-DD) |
 | `--symbols` | - | TEXT | — | 종목 코드 (콤마 구분) |
 | `--balance` | - | FLOAT | 10000000 | 초기 자금 |
-| `--timeframe` | - | TEXT | 1d | 타임프레임 |
+| `--timeframe` | - | TEXT | — | 타임프레임 (미지정 시 전략 meta) |
 | `--exchange` | - | TEXT | KRX | 거래소 (기본: KRX) |
 | `--data-path` | - | TEXT | — | 데이터 디렉토리 경로 (미지정 시 config_dir 기반) |
 | `--db-path` | - | TEXT | — | DB 경로 (미지정 시 config_dir 기반) |
@@ -2622,7 +2685,11 @@ ante feed config list [OPTIONS]
 
 ### ante feed config check
 
-API 키 존재 여부를 확인한다.
+API 키 존재 여부와 유효성을 확인한다.
+
+설정된 키는 해당 API에 경량 요청을 보내 3-state로 검증한다:
+✓ 유효 / ✗ 인증 실패 / ? 검증 불가(네트워크). offline/타임아웃은
+검증 불가(unknown)로 graceful 처리한다.
 
 - **필요 scope**: `data:read`
 - **토큰**: 🔑 Human(무제한) / Agent(scope 필요)

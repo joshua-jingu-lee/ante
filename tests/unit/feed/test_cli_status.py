@@ -224,6 +224,43 @@ class TestFeedStatusWithReport:
 
         assert "1 total failures" in result.output
 
+    def test_warnings_count_uses_total_not_sample_length(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """절단 리포트에서도 총 경고 건수를 보고한다(#2414).
+
+        warnings 배열은 type 버킷별로 유계 절단되므로 len()으로 세면
+        99,691건이 "3"으로 조용히 축소 보고된다.
+        """
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="backfill",
+            target_date="2026-03-16",
+            warnings=3,
+            warnings_total=99691,
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "99691 warnings" in result.output
+        assert "3 warnings" not in result.output
+
+    def test_warnings_count_falls_back_to_warnings_len(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """구버전 리포트(summary.warnings_total 없음)는 warnings 길이로 폴백한다."""
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="daily",
+            target_date="2026-03-16",
+            warnings=3,
+            include_warnings_total=False,
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "3 warnings" in result.output
+
 
 class TestFeedStatusApiKeys:
     """API 키 상태 표시."""
@@ -280,12 +317,17 @@ def _create_report(
     warnings: int = 0,
     extra_failures: list[dict] | None = None,
     include_failures_total: bool = True,
+    include_warnings_total: bool = True,
+    warnings_total: int | None = None,
 ) -> None:
     """테스트용 리포트 파일을 생성한다.
 
     Args:
         extra_failures: 종목에 귀속되지 않는 날짜/소스 단위 실패(#2117 검증용).
         include_failures_total: summary에 failures_total을 넣을지(구버전 폴백 검증용).
+        include_warnings_total: summary에 warnings_total을 넣을지(구버전 폴백 검증용).
+        warnings_total: summary.warnings_total 값. None이면 warnings 배열 길이.
+            배열보다 큰 값을 주면 절단 리포트(#2414)를 모사한다.
     """
     reports_dir = Path(data_path) / ".feed" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -302,6 +344,10 @@ def _create_report(
     }
     if include_failures_total:
         summary["failures_total"] = len(failures)
+    if include_warnings_total:
+        summary["warnings_total"] = (
+            warnings if warnings_total is None else warnings_total
+        )
     report = {
         "mode": mode,
         "started_at": f"{target_date}T16:00:12Z",

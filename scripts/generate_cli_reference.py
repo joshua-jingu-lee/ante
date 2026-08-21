@@ -1,23 +1,65 @@
 #!/usr/bin/env python3
-"""Click introspection 기반 CLI 레퍼런스 문서 자동 생성.
+"""Click introspection 기반 CLI 레퍼런스 문서 자동 생성/check.
 
 ante CLI의 Click 명령어 트리를 순회하며 guide/cli.md를 생성한다.
 SSOT: Click 데코레이터 → guide/cli.md (자동 생성)
 
 사용법:
     python scripts/generate_cli_reference.py
-    python scripts/generate_cli_reference.py --output guide/cli.md
+    python scripts/generate_cli_reference.py --output <path>
+    python scripts/generate_cli_reference.py --stdout
+    python scripts/generate_cli_reference.py --check
+
+    <path> 기본값: guide/cli.md
 """
 
 from __future__ import annotations
 
 import argparse
+import difflib
+import importlib.util
+import io
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TextIO
 
 import click
+
+# ── 프로젝트 루트 ────────────────────────────────────────────────────────────
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_OUTPUT = PROJECT_ROOT / "guide" / "cli.md"
+KST = timezone(timedelta(hours=9))
+# 캡처를 ISO 날짜로 좁힌다. `.+`로 두면 손편집된 스탬프 값이 그대로 동결돼
+# `--check`가 rc=0을 내고, 산출물의 다른 모든 줄이 보호되는데 이 한 줄만
+# 무방비가 된다(#2472). 비-ISO 값은 매치 실패 → `_existing_or_today()`가
+# 오늘로 폴백 → 본문이 갈라져 정상적으로 stale 판정된다.
+LAST_UPDATED_RE = re.compile(
+    r"^> 마지막 갱신: (?P<value>\d{4}-\d{2}-\d{2})$", re.MULTILINE
+)
+
+
+def _load_import_guard():
+    guard_path = PROJECT_ROOT / "scripts" / "check_import_path.py"
+    spec = importlib.util.spec_from_file_location("check_import_path", guard_path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load import guard: {guard_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def _assert_current_worktree_import_path() -> None:
+    guard = _load_import_guard()
+    try:
+        guard.check_import_path(PROJECT_ROOT)
+    except guard.ImportPathCheckError as exc:
+        print(str(exc), file=sys.stderr)
+        raise SystemExit(1) from exc
+
 
 CLI_GENERATED_NOTICE = (
     "> 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. "
@@ -220,10 +262,9 @@ def _to_anchor(heading: str) -> str:
     return anchor
 
 
-def _write_header(out: TextIO) -> None:
+def _write_header(out: TextIO, *, generated_at: str | None = None) -> None:
     """문서 헤더를 출력한다."""
-    kst = timezone(timedelta(hours=9))
-    today = datetime.now(tz=kst).strftime("%Y-%m-%d")
+    today = generated_at or _today_kst()
     out.write("# Ante CLI Reference\n\n")
     out.write(
         "Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. "
@@ -408,7 +449,11 @@ def _group_by_top_level(
     return groups
 
 
-def generate_cli_reference(out: TextIO) -> int:
+def generate_cli_reference(
+    out: TextIO,
+    *,
+    generated_at: str | None = None,
+) -> int:
     """CLI 레퍼런스 문서를 생성하고 서브커맨드 수를 반환한다."""
     cli = get_cli()
 
@@ -417,7 +462,7 @@ def generate_cli_reference(out: TextIO) -> int:
 
     grouped = _group_by_top_level(commands)
 
-    _write_header(out)
+    _write_header(out, generated_at=generated_at)
     _write_toc(out, grouped)
     _write_global_options(out, cli)
     _write_summary_table(out, leaf_commands)
@@ -446,39 +491,127 @@ def generate_cli_reference(out: TextIO) -> int:
     return len(leaf_commands)
 
 
+# ── check 모드 헬퍼 ──────────────────────────────────────────────────────────
+
+
+def _today_kst() -> str:
+    return datetime.now(tz=KST).strftime("%Y-%m-%d")
+
+
+def _extract_generated_at(text: str) -> str | None:
+    match = LAST_UPDATED_RE.search(text)
+    if match is None:
+        return None
+    return match.group("value")
+
+
+def _existing_or_today(output_path: Path) -> str:
+    if output_path.exists():
+        existing = _extract_generated_at(output_path.read_text(encoding="utf-8"))
+        if existing:
+            return existing
+    return _today_kst()
+
+
+def _display_path(output_path: Path) -> Path:
+    try:
+        return output_path.relative_to(PROJECT_ROOT)
+    except ValueError:
+        return output_path
+
+
+def _print_diff_summary(current: str, expected: str, rel_output: Path) -> None:
+    diff = list(
+        difflib.unified_diff(
+            current.splitlines(),
+            expected.splitlines(),
+            fromfile=f"a/{rel_output}",
+            tofile=f"b/{rel_output}",
+            lineterm="",
+        )
+    )
+    max_lines = 120
+    for line in diff[:max_lines]:
+        print(line)
+    if len(diff) > max_lines:
+        print(f"... diff truncated ({len(diff) - max_lines} more lines)")
+
+
+def _check_output(output_path: Path, content: str) -> int:
+    current = output_path.read_text(encoding="utf-8") if output_path.exists() else ""
+    rel_output = _display_path(output_path)
+    if current == content:
+        print(f"{rel_output} is up to date.")
+        return 0
+
+    print(f"{rel_output} is stale.")
+    print("Run: PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py")
+    print()
+    _print_diff_summary(current, content, rel_output)
+    return 1
+
+
 # ── CLI entrypoint ───────────────────────────────────────────────────────────
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> int:
     """스크립트 진입점."""
     parser = argparse.ArgumentParser(
-        description="Click introspection 기반 CLI 레퍼런스 문서 자동 생성",
+        description="Click introspection 기반 CLI 레퍼런스 문서 자동 생성/check",
     )
     parser.add_argument(
         "--output",
         "-o",
-        default="guide/cli.md",
-        help="출력 파일 경로 (기본: guide/cli.md)",
+        type=Path,
+        default=DEFAULT_OUTPUT,
+        help=(
+            "출력 파일 경로. 상대 경로는 저장소 루트 기준으로 해석한다 "
+            "(기본: guide/cli.md)"
+        ),
     )
     parser.add_argument(
         "--stdout",
         action="store_true",
         help="파일 대신 stdout으로 출력",
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="파일을 수정하지 않고 generated 문서가 최신인지 확인",
+    )
+    args = parser.parse_args(argv)
+
+    # 워크트리 import 가드는 argparse 처리 **뒤**에 둔다. main() 첫 줄에 두면
+    # introspection이 필요 없는 `--help`까지 워크트리에서만 rc=1이 된다(#2472).
+    # 상호배타 검사보다는 **앞**이어야 `--stdout --check`의 종료 코드가 형제
+    # 생성기와 같은 순서를 유지한다.
+    _assert_current_worktree_import_path()
+
+    output_path = args.output
+    if not output_path.is_absolute():
+        output_path = PROJECT_ROOT / output_path
+
+    if args.stdout and args.check:
+        parser.error("--stdout and --check cannot be used together")
 
     if args.stdout:
         count = generate_cli_reference(sys.stdout)
         print(f"\n<!-- {count} subcommands documented -->", file=sys.stderr)
-    else:
-        output_path = Path(args.output)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        return 0
 
-        with output_path.open("w", encoding="utf-8") as f:
-            count = generate_cli_reference(f)
+    if args.check:
+        buf = io.StringIO()
+        generate_cli_reference(buf, generated_at=_existing_or_today(output_path))
+        return _check_output(output_path, buf.getvalue())
 
-        print(f"Generated {output_path} ({count} subcommands)")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with output_path.open("w", encoding="utf-8") as f:
+        count = generate_cli_reference(f)
+
+    print(f"Generated {_display_path(output_path)} ({count} subcommands)")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

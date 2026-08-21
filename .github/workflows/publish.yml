@@ -32,7 +32,7 @@ jobs:
         shell: bash
         run: git fetch --tags --force origin
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.13"
 
@@ -47,12 +47,15 @@ jobs:
           python -c "import ante; print('OK')"
 
       # Trusted Publishing(OIDC) (#2436): 명시적 자격증명 입력(username/토큰)을 주지 않으면
-      # pypa v1.14.0이 id-token:write + environment:pypi로 OIDC 인증을 자동 진입한다(README ref=v1.14.0).
+      # 아래에 핀된 pypa 액션이 id-token:write + environment:pypi로 OIDC 인증을 자동 진입한다
+      # (근거는 핀된 버전의 액션 README. 버전 SSOT는 아래 uses: 줄과 그 트레일링 주석이며,
+      #  dependabot이 주기적으로 범프하므로 문서·주석에 버전 숫자를 중복 기재하지 않는다 — #2450).
+      # v0.12.0 릴리스에서 password-less 업로드 성공으로 실증 완료(06 §8).
       # PYPI_API_TOKEN 시크릿은 삭제하지 않고 폴백용으로 보존한다 — OIDC 실패 시 06 §11 절차.
       # 사전조건: PyPI 프로젝트(ante)에 trusted publisher가 직접 등록돼 있어야 한다(06 §8).
       - name: Publish to PyPI
         if: github.event_name == 'release'
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
 
       - name: Derive Docker image metadata
         id: image
@@ -111,7 +114,7 @@ jobs:
 
       - name: Log in to GHCR
         if: github.event_name == 'release'
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}

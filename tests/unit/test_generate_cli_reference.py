@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import io
+import types
 from pathlib import Path
 
 import click
+import pytest
 
 # scripts/ 디렉토리는 패키지가 아니므로 importlib로 직접 로드
 _SCRIPT_PATH = (
@@ -582,3 +585,392 @@ class TestUsageLineRequiredOptionInline:
             usage == "ante treasury allocate <BOT_ID> <AMOUNT> --account <ACCOUNT_ID>"
         )
         assert "[OPTIONS]" not in usage
+
+
+# ── --check 모드 (#2472) ─────────────────────────────────────────────────────
+
+
+def _bypass_import_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main()``의 워크트리 import 가드를 무력화한다.
+
+    가드 자체는 :meth:`TestCheckMode.test_import_guard_failure_is_fail_loud`가
+    잠근다. 나머지 테스트는 실행 환경의 ``PYTHONPATH``에 의존하지 않도록
+    가드를 우회한다.
+    """
+    monkeypatch.setattr(_mod, "_assert_current_worktree_import_path", lambda: None)
+
+
+def _render(generated_at: str) -> str:
+    """주어진 스탬프로 CLI 레퍼런스 전문을 문자열로 만든다."""
+    buf = io.StringIO()
+    _mod.generate_cli_reference(buf, generated_at=generated_at)
+    return buf.getvalue()
+
+
+def _install_failing_import_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main()``의 워크트리 import 가드가 반드시 실패하도록 만든다.
+
+    실제 가드는 실행 환경의 ``PYTHONPATH``에 따라 통과/실패가 갈리므로
+    서브프로세스 없이 결정적으로 실패시킨다.
+    """
+
+    class _FakeImportPathCheckError(RuntimeError):
+        pass
+
+    def _raise(project_root: Path) -> None:
+        raise _FakeImportPathCheckError(
+            "Import path sanity check failed for package 'ante'."
+        )
+
+    monkeypatch.setattr(
+        _mod,
+        "_load_import_guard",
+        lambda: types.SimpleNamespace(
+            ImportPathCheckError=_FakeImportPathCheckError,
+            check_import_path=_raise,
+        ),
+    )
+
+
+class TestCheckMode:
+    """``--check``가 형제 생성기(#2472)와 같은 계약을 지키는지 검증."""
+
+    def test_check_passes_on_up_to_date_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """산출물이 최신이면 0으로 종료한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        output.write_text(_render(_mod._today_kst()), encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 0
+        assert "is up to date." in capsys.readouterr().out
+
+    def test_check_fails_on_stale_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """본문이 어긋나면 1로 종료하고 재생성 명령을 안내한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        stale = _render("2020-01-01").replace("## 명령어 요약", "## 옛 명령어 요약")
+        output.write_text(stale, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        captured = capsys.readouterr().out
+        assert rc == 1
+        assert "is stale." in captured
+        assert "scripts/generate_cli_reference.py" in captured
+
+    def test_check_never_writes_output(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``--check``는 산출물을 만들지도 고치지도 않는다."""
+        _bypass_import_guard(monkeypatch)
+        missing = tmp_path / "nested" / "cli.md"
+
+        rc_missing = _mod.main(["--check", "--output", str(missing)])
+
+        assert rc_missing == 1
+        assert not missing.exists()
+        assert not missing.parent.exists()
+
+        existing = tmp_path / "cli.md"
+        stale = _render("2020-01-01").replace("## 명령어 요약", "## 옛 명령어 요약")
+        existing.write_text(stale, encoding="utf-8")
+
+        rc_existing = _mod.main(["--check", "--output", str(existing)])
+
+        assert rc_existing == 1
+        assert existing.read_text(encoding="utf-8") == stale
+
+    def test_check_passes_when_committed_stamp_is_not_today(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """커밋된 스탬프가 오늘이 아니어도 본문이 같으면 0으로 종료한다 (#2472)."""
+        _bypass_import_guard(monkeypatch)
+        assert _mod._today_kst() != "2020-01-01"
+        output = tmp_path / "cli.md"
+        content = _render("2020-01-01")
+        assert "> 마지막 갱신: 2020-01-01" in content
+        output.write_text(content, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 0
+
+    def test_check_rejects_hand_edited_non_iso_stamp(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """손편집된 비-ISO 스탬프는 동결되지 않고 stale로 잡힌다 (#2472).
+
+        :meth:`test_check_passes_when_committed_stamp_is_not_today`(ISO 값은
+        동결 → rc=0)와 짝이다. 캡처가 ``.+``면 임의 문자열이 그대로 동결돼
+        rc=0이 나오고, 산출물의 다른 모든 줄이 보호되는데 스탬프 한 줄만
+        무방비가 된다 — 이 PR이 「``--check``가 수동 편집 금지 산출물을
+        덮는다」를 성문화했으므로 그 구멍을 남길 수 없다.
+        """
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        content = _render("2020-01-01").replace(
+            "> 마지막 갱신: 2020-01-01",
+            "> 마지막 갱신: 아무 문자열이나 (손편집)",
+        )
+        output.write_text(content, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 1
+
+    def test_extract_generated_at_accepts_only_iso_date(self) -> None:
+        """스탬프 추출은 ISO 날짜만 받아들인다 (#2472).
+
+        위 두 테스트가 잠그는 end-to-end 동작의 기전이다. 정규식이 다시
+        관대해지면 여기서 먼저 드러난다.
+        """
+        assert _mod._extract_generated_at("> 마지막 갱신: 2026-07-30") == "2026-07-30"
+        assert _mod._extract_generated_at("> 마지막 갱신: 아무 문자열이나") is None
+        assert _mod._extract_generated_at("> 마지막 갱신: 2026-07-30 (KST)") is None
+        assert _mod._extract_generated_at("> 마지막 갱신: ") is None
+
+    def test_generate_still_writes_today_stamp(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """일반 generate는 기존대로 오늘 날짜 스탬프를 기록한다."""
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        output.write_text(_render("2020-01-01"), encoding="utf-8")
+
+        rc = _mod.main(["--output", str(output)])
+
+        assert rc == 0
+        assert f"> 마지막 갱신: {_mod._today_kst()}\n" in output.read_text(
+            encoding="utf-8"
+        )
+
+    def test_stdout_and_check_are_mutually_exclusive(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--stdout``과 ``--check``는 함께 쓸 수 없다."""
+        _bypass_import_guard(monkeypatch)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--stdout", "--check"])
+
+        assert excinfo.value.code == 2
+        assert "--stdout and --check cannot be used together" in capsys.readouterr().err
+
+    def test_relative_output_resolves_against_project_root(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """상대 ``--output``은 cwd가 아니라 ``PROJECT_ROOT`` 기준으로 해석된다."""
+        _bypass_import_guard(monkeypatch)
+        project_root = tmp_path / "root"
+        project_root.mkdir()
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.setattr(_mod, "PROJECT_ROOT", project_root)
+        monkeypatch.chdir(elsewhere)
+
+        rc = _mod.main(["--output", "guide/cli.md"])
+
+        assert rc == 0
+        assert (project_root / "guide" / "cli.md").exists()
+        assert not (elsewhere / "guide").exists()
+
+    def test_import_guard_failure_is_fail_loud(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """워크트리 import 가드가 실패하면 ``main()``이 즉시 1로 종료한다."""
+        _install_failing_import_guard(monkeypatch)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--check"])
+
+        assert excinfo.value.code == 1
+        assert "Import path sanity check failed" in capsys.readouterr().err
+
+    def test_help_answers_before_import_guard(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--help``는 워크트리 import 가드와 무관하게 rc=0으로 답한다.
+
+        가드를 ``main()`` 첫 줄에 두면 introspection이 전혀 필요 없는
+        ``--help``까지 워크트리에서만 rc=1이 된다 — base ``5512e3cf``에서는
+        어디서든 rc=0이었으므로 그 배치는 이 저장소에 회귀다(#2472).
+        가드는 ``parse_args()`` 뒤에 있어야 한다. 이 락이 없으면 다음
+        미러링 변경이 조용히 되돌린다.
+        """
+        _install_failing_import_guard(monkeypatch)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--help"])
+
+        captured = capsys.readouterr()
+        assert excinfo.value.code == 0
+        assert "usage:" in captured.out
+        assert "Import path sanity check failed" not in captured.err
+
+
+# ── 생성기 전수 --check 규범 (#2472) ─────────────────────────────────────────
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# 목록을 하드코딩하지 않는다 — 하드코딩하면 새로 추가된 네 번째 생성기를
+# 놓쳐 아래 락이 무의미해진다.
+_GENERATOR_SOURCES = sorted((_REPO_ROOT / "scripts").glob("generate_*.py"))
+
+_MAIN_GUARD = 'if __name__ == "__main__":'
+
+
+def _module_ast(path: Path) -> ast.Module:
+    """생성기 소스를 **실행하지 않고** AST로만 읽는다."""
+    return ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+
+
+def _has_main_guard(tree: ast.Module) -> bool:
+    """모듈에 ``if __name__ == "__main__":`` 진입 가드가 있는가."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.If):
+            continue
+        test = node.test
+        if (
+            isinstance(test, ast.Compare)
+            and isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == "__main__"
+        ):
+            return True
+    return False
+
+
+def _registers_option(tree: ast.Module, option: str) -> bool:
+    """``<parser>.add_argument("<option>", ...)`` 호출이 AST에 있는가.
+
+    AST 노드 판정이므로 주석·docstring·``ArgumentParser(description=...)``
+    산문에 등장하는 같은 문자열에는 원리적으로 매치되지 않는다.
+    """
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not isinstance(func, ast.Attribute) or func.attr != "add_argument":
+            continue
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and arg.value == option:
+                return True
+    return False
+
+
+_GENERATOR_ASTS = {path: _module_ast(path) for path in _GENERATOR_SOURCES}
+_CLI_GENERATORS = [
+    path for path in _GENERATOR_SOURCES if _has_main_guard(_GENERATOR_ASTS[path])
+]
+_HELPER_SOURCES = [path for path in _GENERATOR_SOURCES if path not in _CLI_GENERATORS]
+
+_SELECTION_NOTE = (
+    "대상 선별 기준: `scripts/generate_*.py` 중 AST에 "
+    + _MAIN_GUARD
+    + " 진입 가드가 있는 파일. 가드가 없는 파일은 CLI 진입점이 아니라 공유 "
+    + "헬퍼로 보고 제외한다. "
+    + "glob 히트="
+    + str([path.name for path in _GENERATOR_SOURCES])
+    + " / 대상="
+    + str([path.name for path in _CLI_GENERATORS])
+    + " / 제외="
+    + str([path.name for path in _HELPER_SOURCES])
+)
+
+assert _CLI_GENERATORS, (
+    "생성기 CLI 진입점을 하나도 찾지 못했다 — 대상 선별이 어긋나면 아래 전수 "
+    "락이 vacuous pass 한다 (#2472). " + _SELECTION_NOTE
+)
+
+
+class TestAllGeneratorsProvideCheckMode:
+    """``scripts/generate_*.py`` 전수가 전용 ``--check``를 제공하는지 잠근다.
+
+    #2472는 세 문서(``.agent/skills/generated-artifact-sync.md`` ·
+    ``.agent/skills/review-pr.md`` · ``docs/runbooks/01-development-process.md``)
+    에 「모든 생성 산출물은 전용 ``--check``를 제공한다. 새 산출물을 추가하면
+    커밋된 날짜 스탬프를 동결하는 ``--check``도 함께 만든다」를 성문화하면서,
+    전용 check가 없는 산출물용 fallback 절차를 제거했다. 집행 장치가 없으면
+    네 번째 생성기가 ``--check`` 없이 추가되는 순간 그 전칭 규범이 조용히
+    거짓이 되고 #2472가 없앤 실패 모드가 그대로 재발한다.
+
+    **판정은 소스 AST로만 한다 — 생성기를 실행하지 않는다.** 실행 기반 판정은
+    이 락이 잡아야 할 바로 그 회귀(argv를 무시하는 생성기)에 대해 위험하다.
+    그런 생성기는 ``--check``든 ``--help``든 받으면 그냥 generate 모드로 돌아
+    **추적 산출물을 덮어쓴다** — 락이 워크트리를 오염시킨다(실측). AST 판정은
+    부작용이 0이고, ``PYTHONPATH`` 주입도 locale 의존도 없다. 덤으로 주석 ·
+    docstring · ``description`` 산문에 있는 ``--check`` 언급에 false-pass 하는
+    문자열 검색의 결함도 구조적으로 사라진다.
+
+    대상은 ``scripts/generate_*.py`` 중 ``__main__`` 진입 가드를 가진 파일이다.
+    가드가 없는 공유 헬퍼(예: ``generate_common.py``)는 CLI가 아니므로 제외해
+    false FAIL을 막는다. 「argparse가 있는 파일만」으로 좁히지 않는다 — 그러면
+    정작 잡아야 할 *argparse 없는 생성기*가 빠져나간다.
+
+    산출물의 실제 최신성까지는 보지 않는다. 그것은 각 생성기 자신의 책임이고,
+    이 저장소의 ``project-structure.md``는 #2472와 무관한 선행 드리프트로
+    stale이다(#2472 Non-Goals).
+
+    **플래그의 *동작*도 보지 않는다 — 등록 여부만 본다.** ``--check``를 등록해
+    놓고 ``args.check``를 무시한 채 산출물을 쓰는 생성기는 이 락을 통과한다.
+    동작은 각 생성기의 자기 테스트가 소유한다(이 저장소에서는
+    :class:`TestCheckMode`). AST 데이터플로우 분석까지 하는 것은 #2472 범위
+    밖이며 표면만 키운다 — 여기서는 유계로 선언만 한다.
+
+    자리에 관하여: 저장소 전역 규범을 잠그므로 본래는
+    ``tests/unit/contracts/``가 맞는 위치다. 다만 #2472는 변경 파일 집합을
+    5개로 제한한다 — 신규 파일은 ``project-structure.md`` 재생성 축을 열고,
+    그 산출물은 base에서 이미 stale이라 이 PR이 무관한 드리프트를 조용히
+    고치게 된다. 그 제약이 풀리면 contract 테스트로 옮기는 것이 옳다.
+    """
+
+    @pytest.mark.parametrize(
+        "script",
+        _CLI_GENERATORS,
+        ids=lambda script: script.name,
+    )
+    def test_generator_registers_check_flag(self, script: Path) -> None:
+        """각 생성기가 ``--check``를 argparse 옵션으로 등록한다."""
+        assert _registers_option(_GENERATOR_ASTS[script], "--check"), (
+            f"{script.name} 가 전용 --check 를 등록하지 않는다. #2472가 성문화한 "
+            "「모든 생성 산출물은 전용 --check를 제공한다」 규범 위반이다. "
+            "새 생성기를 추가할 때는 커밋된 날짜 스탬프를 동결하는 --check를 "
+            "함께 만든다. 이 파일이 실제로 CLI 진입점이 아닌 경우에 한해 "
+            + _MAIN_GUARD
+            + " 진입 가드가 없으면 공유 헬퍼로 분류돼 대상에서 빠진다. 이것은 "
+            "분류 기준이지 회피 수단이 아니다 — 실행 가능한 생성기에서 가드를 "
+            "떼어 이 락을 조용히 통과시키면 그 스크립트는 no-op 모듈이 된다.\n"
+            + _SELECTION_NOTE
+        )
