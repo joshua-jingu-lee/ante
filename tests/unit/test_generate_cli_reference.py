@@ -607,6 +607,31 @@ def _render(generated_at: str) -> str:
     return buf.getvalue()
 
 
+def _install_failing_import_guard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``main()``의 워크트리 import 가드가 반드시 실패하도록 만든다.
+
+    실제 가드는 실행 환경의 ``PYTHONPATH``에 따라 통과/실패가 갈리므로
+    서브프로세스 없이 결정적으로 실패시킨다.
+    """
+
+    class _FakeImportPathCheckError(RuntimeError):
+        pass
+
+    def _raise(project_root: Path) -> None:
+        raise _FakeImportPathCheckError(
+            "Import path sanity check failed for package 'ante'."
+        )
+
+    monkeypatch.setattr(
+        _mod,
+        "_load_import_guard",
+        lambda: types.SimpleNamespace(
+            ImportPathCheckError=_FakeImportPathCheckError,
+            check_import_path=_raise,
+        ),
+    )
+
+
 class TestCheckMode:
     """``--check``가 형제 생성기(#2472)와 같은 계약을 지키는지 검증."""
 
@@ -743,29 +768,36 @@ class TestCheckMode:
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         """워크트리 import 가드가 실패하면 ``main()``이 즉시 1로 종료한다."""
-
-        class _FakeImportPathCheckError(RuntimeError):
-            pass
-
-        def _raise(project_root: Path) -> None:
-            raise _FakeImportPathCheckError(
-                "Import path sanity check failed for package 'ante'."
-            )
-
-        monkeypatch.setattr(
-            _mod,
-            "_load_import_guard",
-            lambda: types.SimpleNamespace(
-                ImportPathCheckError=_FakeImportPathCheckError,
-                check_import_path=_raise,
-            ),
-        )
+        _install_failing_import_guard(monkeypatch)
 
         with pytest.raises(SystemExit) as excinfo:
             _mod.main(["--check"])
 
         assert excinfo.value.code == 1
         assert "Import path sanity check failed" in capsys.readouterr().err
+
+    def test_help_answers_before_import_guard(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """``--help``는 워크트리 import 가드와 무관하게 rc=0으로 답한다.
+
+        가드를 ``main()`` 첫 줄에 두면 introspection이 전혀 필요 없는
+        ``--help``까지 워크트리에서만 rc=1이 된다 — base ``5512e3cf``에서는
+        어디서든 rc=0이었으므로 그 배치는 이 저장소에 회귀다(#2472).
+        가드는 ``parse_args()`` 뒤에 있어야 한다. 이 락이 없으면 다음
+        미러링 변경이 조용히 되돌린다.
+        """
+        _install_failing_import_guard(monkeypatch)
+
+        with pytest.raises(SystemExit) as excinfo:
+            _mod.main(["--help"])
+
+        captured = capsys.readouterr()
+        assert excinfo.value.code == 0
+        assert "usage:" in captured.out
+        assert "Import path sanity check failed" not in captured.err
 
 
 # ── 생성기 전수 --check 규범 (#2472) ─────────────────────────────────────────

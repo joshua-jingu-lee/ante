@@ -550,7 +550,6 @@ def _check_output(output_path: Path, content: str) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     """스크립트 진입점."""
-    _assert_current_worktree_import_path()
     parser = argparse.ArgumentParser(
         description="Click introspection 기반 CLI 레퍼런스 문서 자동 생성/check",
     )
@@ -575,6 +574,12 @@ def main(argv: list[str] | None = None) -> int:
         help="파일을 수정하지 않고 generated 문서가 최신인지 확인",
     )
     args = parser.parse_args(argv)
+
+    # 워크트리 import 가드는 argparse 처리 **뒤**에 둔다. main() 첫 줄에 두면
+    # introspection이 필요 없는 `--help`까지 워크트리에서만 rc=1이 된다(#2472).
+    # 상호배타 검사보다는 **앞**이어야 `--stdout --check`의 종료 코드가 형제
+    # 생성기와 같은 순서를 유지한다.
+    _assert_current_worktree_import_path()
 
     output_path = args.output
     if not output_path.is_absolute():
