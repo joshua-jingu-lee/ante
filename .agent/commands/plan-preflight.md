@@ -93,6 +93,7 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
 - failing check:
 - passing check:
 - commands:
+- 집행 규칙 블록: 회귀 락이 있으면 아래 「회귀 락 설계 규칙」 §집행 규칙을 이 자리에 그대로 싣는다
 
 ### Risk Flags
 - `lifecycle | contract-drift | generated-artifact-sync | mutable-config | health-path | multi-consumer | none`
@@ -127,17 +128,6 @@ gh issue comment #{번호} --body "🤖 **Plan Preflight 시작**
   - Non-Goals로 둔 파일/경로를 건드리지 않으면 계획을 성립시킬 수 없다.
   - 선행/후속 관계가 있는 하위 작업을 한 이슈 안에서 동시에 구현해야 한다.
 
-쓰기 모드에서는 이슈 본문 정비 직후 계획 정비 완료 코멘트를 남긴다.
-
-```bash
-gh issue comment #{번호} --body "🤖 **Plan Preflight 계획 정비 완료**
-- status: plan-ready-for-review
-- spec-path: {1A Spec-First | 1B Issue-First Bundled}
-- ssot: {docs/specs/...}
-- risk flags: {none | lifecycle | contract-drift | generated-artifact-sync | mutable-config | health-path | multi-consumer}
-- next: Plan Review 요청"
-```
-
 #### 회귀 락 설계 규칙
 
 Verification에 넣는 **회귀 락**(grep·diff 기반 기계적 검사)은 계획이 의도한 변경만 통과시키는 게이트다.
@@ -150,11 +140,11 @@ Verification에 넣는 **회귀 락**(grep·diff 기반 기계적 검사)은 계
 ##### 작성 규칙 (패턴 설계)
 
 - **전역 grep 금지 — 섹션/행 스코프로 좁힌다.** 형제 이슈가 같은 파일에 텍스트를 더하면 전역 카운트·존재 검사는 아무것도 고치지 않아도 통과한다(vacuous pass). `awk '/^## 8\./,/^## 9\./' "$F" | grep …` 형태로 판정 범위를 절 안에 가둔다. awk 범위 연산자는 **양 끝점을 포함**하므로 종료 헤딩 줄이 판정 범위에 섞인다 — 형제 이슈가 `## 9.` 제목에 세는 토큰을 넣으면 §8을 아무것도 고치지 않아도 카운트가 충족된다. 종료 헤딩을 빼려면 배타형 `awk '/^## 8\./{f=1} /^## 9\./{f=0} f' "$F"`를 쓴다.
-- **diff base는 `$(git merge-base origin/main HEAD)`를 쓰고 2-dot `origin/main` 비교는 쓰지 않는다.** 형제 이슈가 먼저 머지되면 역방향 hunk가 잡혀 거짓 중단이 난다. `origin/main`은 로컬 remote-tracking ref라 **base를 잡기 전에 `git fetch origin main`으로 갱신하는 것이 idiom의 일부다.** 뒤처진 채로 두면 merge-base가 과거 커밋으로 밀려 그 사이 형제 커밋들의 파일까지 이 브랜치 변경으로 잡히고, 정확 파일 수 락이 FAIL해 「구현을 되돌린다」가 헛발동한다(실측: `origin/main`을 한 커밋 뒤로 둔 클론에서 `git diff --name-only "$B"`가 형제 파일까지 열거, `git fetch origin main` 뒤 사라짐).
+- **diff base는 `$(git merge-base origin/main HEAD)`를 쓰고 2-dot `origin/main` 비교는 쓰지 않는다.** 형제 이슈가 먼저 머지되면 역방향 hunk가 잡혀 거짓 중단이 난다. `origin/main`은 로컬 remote-tracking ref라 **base를 잡기 전에 `git fetch origin main`으로 갱신하는 것이 idiom의 일부다.** 뒤처진 채로 두면 merge-base가 과거 커밋으로 밀려 그 사이 형제 커밋들의 파일까지 이 브랜치 변경으로 잡히고, 정확 파일 수 락이 FAIL해 「구현을 되돌린다」가 헛발동한다(실측: `origin/main`을 한 커밋 뒤로 둔 클론에서 `git diff --name-only "$B"`가 형제 파일까지 열거, `git fetch origin main` 뒤 사라짐). **`git fetch origin main`과 base 대입도 집행 규칙의 생산자 규칙을 그대로 받는다** — `B=$(git merge-base origin/main HEAD)`를 맨몸으로 두면 `origin/main` ref가 prune된 스크래치 워크트리나 오프라인 실행에서 `set -euo pipefail` 아래 `FAIL:` 줄 없이 중단해 진짜 락 실패와 구분되지 않는다(실측: `B=$(git merge-base origin/nonexistent-main HEAD)`가 rc=128로 다음 줄에 도달하지 못함). `|| true`로 대입을 중화하고 `test -n "$B" || { echo 'FAIL: base 미확보'; exit 1; }` liveness로 받는다 — `set -u`는 미설정 참조만 덮지 **실패한 대입은 덮지 못한다.**
 - **diff에 경로 필터를 걸지 말고 전체 열거로 비교한다.** `git diff --name-only "$B" | sort` 결과를 정확한 파일 목록과 등가 비교해 집합을 닫는다. 경로 필터를 쓰는 락이 있다면 무필터 열거 락이 파일 집합을 닫고 있음을 계획에 함께 밝힌다. **이 생산자는 추적되는 파일만 보므로 락 실행 전 `git add -A`가 전제다.** 스테이징하지 않으면 계획에 없는 신규 파일이 untracked로 남아 집합이 닫히지 않는다(실측: `git status --porcelain`이 `?? sneaky.md`를 내놓는데 `git diff --name-only "$B"`는 열거하지 않아 정확 파일 수 락이 그대로 통과, `git add -A` 뒤에는 같은 생산자가 그 파일을 함께 열거).
 - **값을 하드코딩하지 말고 패턴을 잠근다.** 버전·라인 번호·SHA는 리뷰가 도는 동안 드리프트하는 표면이다. `# v1.14.1` 대신 `grep -E '@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+'`처럼 형태를 잠근다. **ERE 메타문자를 쓰면 `-E`를 붙인다.** bare `grep`은 basic regex라 ERE 문법이 리터럴로 해석돼 매치가 0건이 된다. 위험 문자를 몇 개 외우는 방식으로 판단하지 말고 **「ERE 문법을 쓰면 `-E`」로 닫는다** — 반복(`{n}`·`+`), 선택(`|`), **옵션 접미사(`?`), 그룹핑(`()`)** 이 모두 같은 함정이며(실측: `grep 'foo(bar)?'`는 `foo(bar)`도 `foobar`도 잡지 못해 0건, `grep -E`로 바꾸면 둘 다 잡는다), 그룹핑·선택 접미사는 이런 락에서 특히 흔하다. 매치 0건이 되면 긍정형 락은 false FAIL, 부정형 락은 조용한 vacuous PASS가 된다. 이 불릿은 **정규식을 쓰기로 정한 뒤**의 규칙이고, 패턴이 리터럴이냐 정규식이냐라는 상위 분기와 그에 따른 계수 매처 선택은 집행 규칙의 정본 형태 절이 정한다.
 - **앵커는 파일 안에서 고유한 접두사를 쓴다.** `head -1`로 첫 매치를 집는 방식은 쓰지 않는다. 매치가 늘어나면 조용히 다른 지점을 가리킨다.
-- **awk 범위 앵커는 시작 유일성과 종료 존재를 baseline에서 확인한다.** 시작 앵커가 두 번 나오면 범위가 재개방되고, 종료 앵커가 없으면 EOF까지 폭주한다. 시작 앵커 1회는 `grep -cE '^앵커'`를 **생산자로 삼아** 그 계수 산출 자체를 정본 형태로 판정한다. **범위 길이 상한은 `wc -l`을 생산자로 쓸 수 없다** — `wc -l` 산출은 범위가 몇 줄이든 한 줄이라 계수가 언제나 1이 된다(실측: `S=$(seq 1 5000 | wc -l)` 뒤 `N=$(printf '%s\n' "$S" | grep -cE '' || true)`가 `N=1`이라 `test "$N" -lt 200`이 실제 길이 5000에도 PASS). **생산자를 추출된 범위 자체로 두고 계수를 `grep -cE ''`로 세야** 같은 판정이 동작한다(실측: 같은 상한 락이 5000줄 범위에서 FAIL, 7줄 범위에서 PASS).
+- **awk 범위 앵커는 시작 유일성과 종료 존재를 baseline에서 확인한다.** 시작 앵커가 두 번 나오면 범위가 재개방되고, 종료 앵커가 없으면 EOF까지 폭주한다. 시작 앵커 1회는 `grep -cE '^앵커'`를 **생산자로 삼아** 그 계수 산출 자체를 정본 형태로 판정한다. **이때 판정 패턴은 앵커된 `-cE`로 쓴다(`^1$`).** 생산자 산출이 맨 숫자라 집행 규칙의 「리터럴이면 `-cF`」를 그대로 적용해 `-cF '1'`로 쓰면 부분 문자열이 매치된다(실측: 앵커가 10회 있어 생산자가 `10`을 낼 때 `grep -cF -e '1'`은 `N=1`이라 `-ge 1` 판정이 범위 재개방을 승인하고, `grep -cE -e '^1$'`는 `N=0`으로 올바르게 FAIL한다). 여기서 잠그는 것은 리터럴 토큰이 아니라 **계수값의 형태**라 정규식이 맞고, 계수값을 내는 다른 생산자도 같다. **범위 길이 상한은 `wc -l`을 생산자로 쓸 수 없다** — `wc -l` 산출은 범위가 몇 줄이든 한 줄이라 계수가 언제나 1이 된다(실측: `S=$(seq 1 5000 | wc -l)` 뒤 `N=$(printf '%s\n' "$S" | grep -cE '' || true)`가 `N=1`이라 `test "$N" -lt 200`이 실제 길이 5000에도 PASS). **생산자를 추출된 범위 자체로 두고 계수를 `grep -cE ''`로 세야** 같은 판정이 동작한다(실측: 같은 상한 락이 5000줄 범위에서 FAIL, 7줄 범위에서 PASS). **이 계수는 범위가 빈 줄로 끝나면 실제 줄 수보다 작다** — 명령 치환이 후행 개행을 전부 버리고 `printf '%s\n'`이 하나만 되붙이기 때문이다(실측: `printf 'a\n\n'`이 `wc -l`로 2, 같은 입력을 변수에 담아 `grep -cE ''`로 세면 1). 상한(`-lt`) 판정에는 무해하지만 **정확 길이(`-eq N`) 락은 그만큼 어긋나므로**, 길이를 정확히 잠글 계획이면 이 붕괴를 보정해 적는다.
 - **토큰 존재가 아니라 「그 문장이 주장하는 바」를 검사한다.** 소제목 개수·항목 수 같은 구조 assertion을 함께 걸어 내용 없는 스텁이 통과하지 못하게 한다.
 - **추가 방향 lock을 최소 1개 둔다.** 삭제·불변만 잠그면 아무것도 쓰지 않은 구현이 통과한다. 새 산문이 실제로 들어왔음을 판정하는 락이 하나는 있어야 한다.
 - **필터 체인은 검사 단위와 같은 입도로 분절한다.** 여러 판정을 파이프 하나에 몰면 어느 조건이 깨졌는지 알 수 없고, 과광범위 매치도 드러나지 않는다.
@@ -169,19 +159,19 @@ Verification에 넣는 **회귀 락**(grep·diff 기반 기계적 검사)은 계
 
 - **락 명령은 이슈 본문 원문을 바이트 단위로 추출해 파일로 실행한다.** 셸 명령줄에 옮겨 적으면 인용이 깨지고, 실제로 실행된 것이 계획에 적힌 것과 달라진다.
 - **락 스크립트는 `bash <파일>`로 실행한다.** 프로세스 치환·배열 같은 bash 전용 문법이 쓰이므로 `sh`로 돌리면 문법 오류가 나고, 느슨한 하니스에서는 그 오류가 하니스 실패가 아니라 락 실패로 읽힌다. `#!/usr/bin/env bash` shebang은 **보조**다 — 하니스가 인터프리터를 명시해 호출하면 shebang은 읽히지도 않으므로 그것만으로는 이 함정을 막지 못한다. 스크립트 첫머리에 `set -euo pipefail`도 함께 둔다 — `-u`가 base 커밋 변수 같은 미설정 참조를 즉시 드러낸다(실측: `set -u` 아래 unset `"$B"` 참조가 `B: unbound variable`로 중단).
-- **판정은 정본 형태 하나로만 쓴다 — 긍정형과 부정형이 같은 모양이고 `test` 비교 연산자만 다르다.** **계수 grep은 패턴 종류로 매처를 고른다 — 리터럴 문자열을 세면 `grep -cF`, 정규식 형태를 잠그면 `grep -cE`이고, 매처 플래그 없는 `grep -c`(BRE)는 쓰지 않는다.** 패턴은 리터럴이거나 정규식이라 제3의 경우가 없고, 어느 한쪽을 기본값으로 두면 반대편이 조용히 깨진다 — `call foo(bar) here`에서 리터럴 `foo(bar)`를 `-cE`로 세면 0이라 부정형 락이 그 리터럴이 실제로 있는데 vacuous PASS이고(`-cF`는 1), `literal start|stop token`·`start alone`·`stop alone` 3줄에서 리터럴 `start|stop`을 `-cE`로 세면 3이라 출현 1줄을 3으로 부풀린다(`-cF`는 1). 이 문서의 락은 `$(git merge-base …)`·`grep -q`·`a|b` 같은 셸·CLI 리터럴을 일상적으로 세므로 두 방향이 다 밟힌다. 0건 rc=1이라는 계수 grep의 rc 시맨틱은 `-cF`·`-cE`가 같아 아래 `|| true` 근거가 양쪽에 그대로 적용된다. **아래 코드블록은 이 선택을 `-c'<F|E>'` 자리표시자로 노출한다 — 어느 쪽도 기본값으로 굳지 않게 하려는 것이고, 고르지 않은 채 복사하면 `grep`이 `invalid option`으로 죽어 `N`이 비고 판정 줄이 그 자리에서 FAIL한다**(실측: `grep -c'<F|E>'`가 usage를 찍고 rc≠0, 이어서 `test "" -eq 0`이 `integer expression expected`로 FAIL 분기 → exit 1).
+- **판정은 정본 형태 하나로만 쓴다 — 긍정형과 부정형이 같은 모양이고 `test` 비교 연산자만 다르다.** **계수 grep은 패턴 종류로 매처를 고른다 — 리터럴 문자열을 세면 `grep -cF`, 정규식 형태를 잠그면 `grep -cE`이고, 매처 플래그 없는 `grep -c`(BRE)는 쓰지 않는다.** 패턴은 리터럴이거나 정규식이라 제3의 경우가 없고, 어느 한쪽을 기본값으로 두면 반대편이 조용히 깨진다 — `call foo(bar) here`에서 리터럴 `foo(bar)`를 `-cE`로 세면 0이라 부정형 락이 그 리터럴이 실제로 있는데 vacuous PASS이고(`-cF`는 1), `literal start|stop token`·`start alone`·`stop alone` 3줄에서 리터럴 `start|stop`을 `-cE`로 세면 3이라 출현 1줄을 3으로 부풀린다(`-cF`는 1). 이 문서의 락은 `$(git merge-base …)`·`grep -q`·`a|b` 같은 셸·CLI 리터럴을 일상적으로 세므로 두 방향이 다 밟힌다. 빈 패턴 `''`(모든 행 매치)은 이 이분법의 경계라 **정규식 쪽으로 배정한다** — 작성 규칙의 범위 길이 상한이 쓰는 `-cE ''`가 그 용례이고, `-cF ''`도 결과가 같아 이 배정이 판정을 가르지는 않는다. 0건 rc=1이라는 계수 grep의 rc 시맨틱은 `-cF`·`-cE`가 같아 아래 `|| true` 근거가 양쪽에 그대로 적용된다. **아래 코드블록은 이 선택을 `-c'<F|E>'` 자리표시자로 노출한다 — 어느 쪽도 기본값으로 굳지 않게 하려는 것이고, 고르지 않은 채 복사하면 `grep`이 `invalid option`으로 죽어 `N`이 비고 판정 줄이 그 자리에서 FAIL한다**(실측: `grep -c'<F|E>'`가 usage를 찍고 rc≠0, 이어서 `test "" -eq 0`이 `integer expression expected`로 FAIL 분기 → exit 1). **패턴은 맨 위치 인자가 아니라 `-e`로 넘긴다** — 정본이 일상적으로 세는 셸·CLI 리터럴은 `--exit-code`처럼 `-`로 시작하는 일이 잦고, 위치 인자로 넘기면 `grep`이 그것을 옵션으로 파싱해 죽는다(실측: `git diff --exit-code -- x` 한 줄을 대상으로 `grep -cF '--exit-code'`가 `unrecognized option`으로 rc≠0 → `N`이 빈 문자열 → 판정 줄이 `integer expression expected`로 FAIL 분기; `-e`를 붙이면 `N=1`로 정상 계수). 이 오파싱은 토큰이 실제로 있는데 없다고 보고하므로 검증 규칙의 「정확 파일 수 락이 FAIL하면 구현을 되돌린다」와 겹치면 **올바른 구현이 되돌려진다.** **자리표시자 미치환과 옵션 오파싱은 둘 다 `FAIL:` 문구로 표면화하지만 락 실패가 아니라 하니스 실패다** — 판정 줄 앞에 `grep: invalid option`·`unrecognized option` 줄이 찍혀 있으면 락이 아니라 하니스를 고친다.
 
   ```bash
   # 긍정형 — 있어야 한다 (PRODUCER = 판정 대상을 뽑는 명령, <F|E> = 리터럴이면 F·정규식이면 E)
   S=$(PRODUCER || true)
   test -n "$S" || { echo "FAIL: 생산자 산출 없음 — 경로·앵커 확인"; exit 1; }
-  N=$(printf '%s\n' "$S" | grep -c'<F|E>' '<패턴>' || true)
+  N=$(printf '%s\n' "$S" | grep -c'<F|E>' -e '<패턴>' || true)
   test "$N" -ge 1 || { echo "FAIL: <무엇이 없다>"; exit 1; }
 
   # 부정형 — 없어야 한다 (PRODUCER = 판정 대상을 뽑는 명령, <F|E> = 리터럴이면 F·정규식이면 E)
   S=$(PRODUCER || true)
   test -n "$S" || { echo "FAIL: 생산자 산출 없음 — 경로·앵커 확인"; exit 1; }
-  N=$(printf '%s\n' "$S" | grep -c'<F|E>' '<패턴>' || true)
+  N=$(printf '%s\n' "$S" | grep -c'<F|E>' -e '<패턴>' || true)
   test "$N" -eq 0 || { echo "FAIL: <무엇이 있다>"; exit 1; }
   ```
 
@@ -208,9 +198,20 @@ Verification에 넣는 **회귀 락**(grep·diff 기반 기계적 검사)은 계
 - **락을 양방향으로 확인한다.** 잡아야 할 것을 잡는가, 그리고 계획이 지시한 구현을 거부하지 않는가. 둘 중 하나라도 어긋나면 구현자가 지시받은 일을 했을 때 자기 게이트에 걸리는 자기모순이 된다.
 - **대조군 락을 명시하고 baseline에서 PASS임을 밝힌다.** 대조군은 기존 구조가 그대로임을 지키는 락이고, 구현 후 깨지면 과잉수정 신호다. 판별력 락과 대조군, 그리고 판별력이 없는 전제 검사를 대조표에서 구분해 적는다.
 - **정확 파일 수 락이 FAIL하면 락이 아니라 구현을 되돌린다.** 락을 구현에 맞춰 느슨하게 고치는 것은 게이트 무력화다. 미커밋 변경이 남은 워크트리도 이 락을 직접 깨므로 격리 워크트리를 clean 상태로 두고 시작한다.
-- **락이 덮을 표면 집합은 census로 닫는다.** 토큰 전수 census 표를 계획에 싣고 `히트 = 수정 + 명시 제외` 전건이 되게 한다. census 명령은 그대로 다시 돌려 같은 결과가 나오는 형태로 싣는다 — `grep -E`를 빼서 basic regex의 `|`가 리터럴이 되면 0건이 나오고, 재현되지 않는 census는 근거가 아니다.
+- **락이 덮을 표면 집합은 census로 닫는다.** 토큰 전수 census 표를 계획에 싣고 `히트 = 수정 + 명시 제외` 전건이 되게 한다. census 명령은 그대로 다시 돌려 같은 결과가 나오는 형태로 싣는다 — `grep -E`를 빼서 basic regex의 `|`가 리터럴이 되면 0건이 나오고, 재현되지 않는 census는 근거가 아니다. **`grep -c`는 매치된 줄 수이지 출현 수가 아니다** — 한 줄에 토큰이 두 번 나오면 1로 세어져 `히트 = 수정 + 명시 제외`를 닫았다고 믿는 census에서 표면이 조용히 빠진다(실측: 이 커맨드 문서 자신에 대고 `grep -q` 리터럴을 세면 줄 수보다 출현 수가 크다; 최소 재현은 같은 줄에 리터럴이 두 번 있는 입력에서 `grep -cF`가 1, `grep -oF`로 뽑아 센 출현이 2). 출현 전수가 필요한 계수는 `grep -o`로 출현을 한 줄씩 뽑은 뒤 그 산출을 정본 형태의 생산자로 넣는다.
 - **census는 서로 다른 탐색 양식 2종 이상으로 수행한다.** 개념 토큰 grep과 명령 형태 grep은 서로 다른 표면을 찾아낸다. 한 양식만 쓰면 다른 양식에만 보이는 표면이 통째로 빠지고, 그 사실조차 드러나지 않는다.
 - **pathspec 제외는 사각지대를 만든다.** `':!docs/temp'`처럼 경로를 통째로 빼면 그 경로에만 있는 표면은 census에 나타나지 않는다. 제외한 경로는 제외 사실과 사유를 census 표에 함께 적어 남은 사각지대를 계획에서 유계로 선언한다.
+
+쓰기 모드에서는 이슈 본문 정비 직후 계획 정비 완료 코멘트를 남긴다.
+
+```bash
+gh issue comment #{번호} --body "🤖 **Plan Preflight 계획 정비 완료**
+- status: plan-ready-for-review
+- spec-path: {1A Spec-First | 1B Issue-First Bundled}
+- ssot: {docs/specs/...}
+- risk flags: {none | lifecycle | contract-drift | generated-artifact-sync | mutable-config | health-path | multi-consumer}
+- next: Plan Review 요청"
+```
 
 ### 5단계: Plan Review 요청 (Gate 0)
 
