@@ -176,7 +176,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - CLI, DB DDL, 프로젝트 구조처럼 생성 산출물의 입력이 바뀌면 해당 생성 문서도 같은 작업에서 갱신한다.
 - 스크립트로 생성되는 문서는 수동 편집하지 않는다.
 - 구현 단계에서 생성 산출물 입력이 바뀌면 먼저 대응하는 regenerate 명령을 실행한다.
-- 리뷰/CI 전에는 전용 check 명령이 있는 산출물을 실제 check 명령으로 검증한다.
+- 리뷰/CI 전에는 각 생성 산출물을 전용 check 명령으로 검증한다.
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
   - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
   - CLI reference: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check`
