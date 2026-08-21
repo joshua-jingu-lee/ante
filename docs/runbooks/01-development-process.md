@@ -180,9 +180,6 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
   - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
 - 전용 check 명령이 없는 생성 산출물은 generate 명령을 다시 실행한 뒤 `git diff --exit-code -- <산출물>`로 변경 없음 상태를 확인한다.
-  - 이 형태는 **regenerate-first**이므로 유효하다 — regenerate가 앞설 때만 stale 산출물이 rc=1로 실패한다. 순서를 뒤집으면 가드가 항상 통과하므로 generate → diff 순서를 지킨다. 다만 생성기가 날짜 스탬프를 찍는 산출물은 **diff가 그 스탬프 줄만일 때 동기화된 것으로 본다** — `scripts/generate_project_structure.py`가 `--check` 모드에서 기존 스탬프를 재사용하는 것과 같은 취급이다. `scripts/generate_cli_reference.py`처럼 생성 시각을 무조건 기록하는 생성기는 regenerate만으로 산출물을 변경 상태로 만들어 `git diff --exit-code`가 **항상 rc=1**이 되므로, 「변경 없음」은 원리적으로 성립하지 않고 그 rc만으로는 stale을 가릴 수 없다.
-  - **범용 판정 스니펫은 여기 두지 않는다.** 스탬프 라벨과 산출물 형식이 생성기마다 제각각이고 diff 출력도 `color.ui` 설정에 좌우되므로, 한 산출물에 맞춘 필터 체인을 규범 문서에 두면 다른 산출물·다른 환경에서 조용히 뒤집힌다. 기계적으로 확인해야 하면 계획이 [`/plan-preflight`의 회귀 락 설계 규칙](../../.agent/commands/plan-preflight.md) 정본 형태로 그 산출물에 맞는 판정을 직접 쓴다.
-  - 스탬프 변경으로 워크트리가 dirty해졌다면 **동기화 확인(PASS)일 때만** `git checkout -- <산출물> 2>/dev/null || true`로 되돌려 후속 검증·회귀 락을 clean 워크트리에서 시작한다. 미커밋 변경이 남으면 clean 워크트리를 요구하는 회귀 락(정확 파일 수 락)이 같은 워크트리에서 오탐하기 때문이다. **stale로 판정된 경우에는 되돌리지 않는다** — regenerate 결과가 그 판정의 유일한 증거다. 산출물이 아직 untracked면 `git checkout --`가 `pathspec did not match`로 rc=1이므로 `2>/dev/null || true`로 흡수한다.
 - 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
 - DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
 - 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
