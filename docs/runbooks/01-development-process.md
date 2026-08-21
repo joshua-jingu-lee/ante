@@ -180,7 +180,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
   - DB schema: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check`
   - CLI reference: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check`
-- 모든 생성 산출물은 전용 `--check`를 제공한다. 새 산출물을 추가하면 커밋된 날짜 스탬프를 동결하는 `--check`도 함께 만든다. 근거는 #2472다.
+- 모든 생성 산출물은 전용 `--check`를 제공한다. 새 산출물을 추가하면 커밋된 날짜 스탬프를 동결하는 `--check`도 함께 만든다. 이 주장의 정의역은 `scripts/generate_*.py` 규약을 따르는 생성기이며, 다른 메커니즘으로 만들어지는 산출물을 도입하면 같은 규약으로 편입한다. 근거는 #2472다.
 - 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
 - DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
 - CLI reference regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py`다.

@@ -32,7 +32,13 @@ import click
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_OUTPUT = PROJECT_ROOT / "guide" / "cli.md"
 KST = timezone(timedelta(hours=9))
-LAST_UPDATED_RE = re.compile(r"^> 마지막 갱신: (?P<value>.+)$", re.MULTILINE)
+# 캡처를 ISO 날짜로 좁힌다. `.+`로 두면 손편집된 스탬프 값이 그대로 동결돼
+# `--check`가 rc=0을 내고, 산출물의 다른 모든 줄이 보호되는데 이 한 줄만
+# 무방비가 된다(#2472). 비-ISO 값은 매치 실패 → `_existing_or_today()`가
+# 오늘로 폴백 → 본문이 갈라져 정상적으로 stale 판정된다.
+LAST_UPDATED_RE = re.compile(
+    r"^> 마지막 갱신: (?P<value>\d{4}-\d{2}-\d{2})$", re.MULTILINE
+)
 
 
 def _load_import_guard():

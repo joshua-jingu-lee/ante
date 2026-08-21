@@ -711,6 +711,42 @@ class TestCheckMode:
 
         assert rc == 0
 
+    def test_check_rejects_hand_edited_non_iso_stamp(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """손편집된 비-ISO 스탬프는 동결되지 않고 stale로 잡힌다 (#2472).
+
+        :meth:`test_check_passes_when_committed_stamp_is_not_today`(ISO 값은
+        동결 → rc=0)와 짝이다. 캡처가 ``.+``면 임의 문자열이 그대로 동결돼
+        rc=0이 나오고, 산출물의 다른 모든 줄이 보호되는데 스탬프 한 줄만
+        무방비가 된다 — 이 PR이 「``--check``가 수동 편집 금지 산출물을
+        덮는다」를 성문화했으므로 그 구멍을 남길 수 없다.
+        """
+        _bypass_import_guard(monkeypatch)
+        output = tmp_path / "cli.md"
+        content = _render("2020-01-01").replace(
+            "> 마지막 갱신: 2020-01-01",
+            "> 마지막 갱신: 아무 문자열이나 (손편집)",
+        )
+        output.write_text(content, encoding="utf-8")
+
+        rc = _mod.main(["--check", "--output", str(output)])
+
+        assert rc == 1
+
+    def test_extract_generated_at_accepts_only_iso_date(self) -> None:
+        """스탬프 추출은 ISO 날짜만 받아들인다 (#2472).
+
+        위 두 테스트가 잠그는 end-to-end 동작의 기전이다. 정규식이 다시
+        관대해지면 여기서 먼저 드러난다.
+        """
+        assert _mod._extract_generated_at("> 마지막 갱신: 2026-07-30") == "2026-07-30"
+        assert _mod._extract_generated_at("> 마지막 갱신: 아무 문자열이나") is None
+        assert _mod._extract_generated_at("> 마지막 갱신: 2026-07-30 (KST)") is None
+        assert _mod._extract_generated_at("> 마지막 갱신: ") is None
+
     def test_generate_still_writes_today_stamp(
         self,
         tmp_path: Path,
@@ -907,6 +943,12 @@ class TestAllGeneratorsProvideCheckMode:
     이 저장소의 ``project-structure.md``는 #2472와 무관한 선행 드리프트로
     stale이다(#2472 Non-Goals).
 
+    **플래그의 *동작*도 보지 않는다 — 등록 여부만 본다.** ``--check``를 등록해
+    놓고 ``args.check``를 무시한 채 산출물을 쓰는 생성기는 이 락을 통과한다.
+    동작은 각 생성기의 자기 테스트가 소유한다(이 저장소에서는
+    :class:`TestCheckMode`). AST 데이터플로우 분석까지 하는 것은 #2472 범위
+    밖이며 표면만 키운다 — 여기서는 유계로 선언만 한다.
+
     자리에 관하여: 저장소 전역 규범을 잠그므로 본래는
     ``tests/unit/contracts/``가 맞는 위치다. 다만 #2472는 변경 파일 집합을
     5개로 제한한다 — 신규 파일은 ``project-structure.md`` 재생성 축을 열고,
@@ -925,8 +967,10 @@ class TestAllGeneratorsProvideCheckMode:
             f"{script.name} 가 전용 --check 를 등록하지 않는다. #2472가 성문화한 "
             "「모든 생성 산출물은 전용 --check를 제공한다」 규범 위반이다. "
             "새 생성기를 추가할 때는 커밋된 날짜 스탬프를 동결하는 --check를 "
-            "함께 만든다. 이 파일이 생성기가 아니라 공유 헬퍼라면 "
+            "함께 만든다. 이 파일이 실제로 CLI 진입점이 아닌 경우에 한해 "
             + _MAIN_GUARD
-            + " 진입 가드를 두지 않으면 대상에서 빠진다.\n"
+            + " 진입 가드가 없으면 공유 헬퍼로 분류돼 대상에서 빠진다. 이것은 "
+            "분류 기준이지 회피 수단이 아니다 — 실행 가능한 생성기에서 가드를 "
+            "떼어 이 락을 조용히 통과시키면 그 스크립트는 no-op 모듈이 된다.\n"
             + _SELECTION_NOTE
         )
