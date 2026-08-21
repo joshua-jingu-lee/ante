@@ -183,6 +183,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - 모든 생성 산출물은 전용 `--check`를 제공한다. 새 산출물을 추가하면 커밋된 날짜 스탬프를 동결하는 `--check`도 함께 만든다. 근거는 #2472다.
 - 프로젝트 구조 regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`다.
 - DB schema regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py`다.
+- CLI reference regenerate 명령은 `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py`다.
 - 로컬 검증 전에는 `PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py`로 현재 worktree의 `src/ante/__init__.py`가 import되는지 확인한다.
 - Plan Preflight와 리뷰 단계에서 generated artifact sync 위험을 발견하면 구현 체크리스트와 검증 체크리스트에 regenerate/check 흐름을 함께 포함한다.
 
