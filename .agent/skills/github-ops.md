@@ -117,7 +117,7 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 | 개발 에이전트 착수 | `🤖 **구현 착수**` | `/implement-issue` |
 | 로컬 구현/검증/커밋 완료 | `🤖 **로컬 구현 완료**` | `/implement-issue` |
 | PR 전 내부 브랜치 리뷰 결과 (Gate A) | `🤖 **브랜치 리뷰**` | `/implement-issue` |
-| 외부발 버그 리포트 검증 | `🤖 **이슈 검증**` | `/autopilot` (verdict 출처: `@issue-reviewer`) |
+| 내부 생성 미검증 버그 후보 검증 | `🤖 **이슈 검증**` | `/autopilot` (verdict 출처: `@issue-reviewer`) |
 | PR 생성 후 게이트 인계 | `🤖 **PR 생성 완료**` | `/implement-issue` |
 | Autopilot 사이클 상태 | `🤖 **Autopilot 사이클 상태**` | `/autopilot` |
 | Autopilot 보류 | `🤖 **Autopilot 보류**` | `/autopilot` |
@@ -165,7 +165,7 @@ gh pr create --base {base} --title "{title}" --body "{body}"
   - 완료 시 `Plan Preflight 완료`, 중단 시 `Plan Preflight 보류` 코멘트를 남김
 - `/autopilot`
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
-  - 외부발 버그 리포트는 큐 편입 전 `@issue-reviewer` 검증 결과(`이슈 검증` 코멘트)를 선행 확인
+  - 협업자 또는 내부 자동화가 등록한 미검증 버그 후보는 큐 편입 전 `@issue-reviewer` 검증 결과(`이슈 검증` 코멘트)를 선행 확인
   - 활성 이슈의 최신 `Autopilot 사이클 상태` 코멘트를 유지하고 merge/post-merge 완료까지 갱신
 - `/implement-issue`
   - 이슈 조회, 구현 분석 완료 코멘트, 구현 착수 코멘트, 로컬 구현 완료 코멘트, 리뷰 요청/결과 코멘트, PR 생성, PR 생성 완료 코멘트

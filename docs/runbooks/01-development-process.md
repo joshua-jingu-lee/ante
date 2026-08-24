@@ -1,10 +1,12 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
+> 이 문서의 전체 절차는 maintainer/collaborator의 내부 lane이다. Claude Code는 선택적 내부 adapter이며, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
 
 ---
 
 ## 1. 개발 철학
+
+외부 기여는 D-020에 따라 issue, Gate 0, Gate A 없이 fork PR → 공개 CI → maintainer 판단 경로를 따른다. 외부 공개 이슈는 받지 않는다.
 
 - 주 개발은 Claude Code가 담당한다.
 - 스펙 문서(`docs/specs/`)가 설계의 단일 출처(SSOT)다. 변경이 필요하면 **스펙 최신화 → 이슈 발행 → 코드 반영** 순서를 따른다.
@@ -25,7 +27,7 @@
 - **계획 리뷰어 (`@plan-reviewer`)**: 별도 컨텍스트에서 구현 전 계획의 가정, 위험, 대안을 read-only로 검토 (Gate 0)
 - **브랜치 리뷰 (`/code-review`)**: Claude Code 네이티브 리뷰로 PR 전 브랜치 단위 코드 품질 게이트 수행 (Gate A)
 - **Claude 코드 리뷰어 (`@code-reviewer`)**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석 (수동/오케스트레이터 호출)
-- **이슈 검증 (`@issue-reviewer`)**: 외부발 버그 리포트에 한해 구현 착수 전 루트원인 진실성·재현 가능성을 read-only로 검증 (상시 게이트 아님)
+- **이슈 검증 (`@issue-reviewer`)**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보에 한해 구현 착수 전 루트원인 진실성·재현 가능성을 read-only로 검증 (상시 게이트 아님)
 - **GitHub merge gate**: required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) 통과와 충돌 없음·대화 해결·auto-merge 활성화 가능 상태를 기준으로 auto-merge 집행
 
 ## 3. 상호작용 흐름
@@ -40,7 +42,7 @@
 6. **/autopilot side lane** (오케스트레이터): implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 병렬 수행한다(코드 수정·브랜치·PR 생성 금지). Plan Preflight 코멘트 + Autopilot 사이클 상태 코멘트를 남긴다.
 7. **/release** (수동 운영, 이슈 흐름 아님): prepare로 `release/vX.Y.Z` PR 생성 + Docker build 검증, publish로 release PR merge 후 GitHub Release + PyPI + Docker image 배포.
 
-외부에서 들어온 버그 리포트는 1 이전에 `이슈 검증`(`@issue-reviewer`, read-only)을 선행한다. 상시 게이트가 아니며, 세부 큐 연동은 [00-issue-management.md](00-issue-management.md)와 `.agent/commands/autopilot.md`를 따른다.
+협업자 또는 내부 자동화가 등록한 미검증 버그 후보는 1 이전에 `이슈 검증`(`@issue-reviewer`, read-only)을 선행한다. 상시 게이트가 아니며, 세부 큐 연동은 [00-issue-management.md](00-issue-management.md)와 `.agent/commands/autopilot.md`를 따른다.
 
 **핵심 차이**:
 - 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, `superpowers:writing-plans` 원칙으로 이슈 본문에 구현계획을 작성하거나 정비하고 Plan Review를 별도 컨텍스트 게이트(`@plan-reviewer`)로 요청한 뒤 피드백을 반영해 확정한다.

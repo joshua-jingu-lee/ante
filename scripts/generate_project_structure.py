@@ -72,9 +72,11 @@ ROOT_ENTRIES: tuple[str, ...] = (
     "docker-compose.yml",
     "AGENTS.md",
     "CHANGELOG.md",
+    "CONTRIBUTING.md",
     "README.md",
     "CLAUDE.md",
     "LICENSE",
+    "SECURITY.md",
 )
 
 DEFAULT_DESCRIPTIONS: dict[str, str] = {
@@ -84,9 +86,11 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "AGENTS.md": "개발 Agent 마스터 가이드",
     "CHANGELOG.md": "변경 이력",
     "CLAUDE.md": "Claude Code 호환 가이드",
+    "CONTRIBUTING.md": "외부 기여 계약",
     "Dockerfile": "프로덕션 Docker 이미지",
     "LICENSE": "라이선스",
     "README.md": "프로젝트 개요",
+    "SECURITY.md": "보안 취약점 신고 정책",
     "config": "런타임 설정 예시와 의존성 스냅샷",
     "deploy": "서비스 배포 파일 (systemd, launchd)",
     "docker-compose.yml": "프로덕션 Docker Compose",

@@ -49,12 +49,13 @@ Ante는 **개인의 홈서버 위에 존재하는 작은 투자 회사**다.
 
 
 ## 규칙
+- 외부 기여 계약의 SSOT는 [CONTRIBUTING.md](CONTRIBUTING.md)다. 외부 기여자는 fork PR만 제출하며, 내부 이슈·브랜치·Plan Preflight·AI 증적 규칙을 따를 필요가 없다.
 - 모든 대화는 **한국어**로 진행한다.
-- (깃허브) 이슈 등록 전에는 반드시 스펙 선반영 여부를 확인하고, 스펙에 없으면 반영 여부를 묻는다.
+- 내부 maintainer·collaborator lane에서 (깃허브) 이슈 등록 전에는 반드시 스펙 선반영 여부를 확인하고, 스펙에 없으면 반영 여부를 묻는다.
 - 메인 브랜치는 직접적인 허가가 없으면 절대 수정하지 않는다.
 - 사용자의 질문에 임의로 대답하지 않는다. 항상 스펙 문서를 확인 후 답변한다.
 - 사용자에 스펙을 제안할 때는 YAGNI가 아닌지 확인한다. 
 - .gitignore 에 등록된 파일은 커밋 여부를 묻지 않는다.
-- 설계·계획 단계 에이전트(`superpowers:writing-plans` 등 스펙/플래닝 스킬)는 **GitHub 이슈 등록까지만** 수행한다.
-- Claude 오케스트레이터와 `/autopilot`은 `/implement-issue`·`/autopilot` 커맨드 계약에 따라 Plan Preflight 조율, 이슈/브랜치/PR 코멘트, PR 생성, 상태 보고 같은 오케스트레이션을 수행할 수 있다. 자세한 분담은 [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)를 따른다.
-- 직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@devops`, `@strategy-dev`)에게 위임한다.
+- 내부 maintainer·collaborator lane에서 설계·계획 단계 에이전트(`superpowers:writing-plans` 등 스펙/플래닝 스킬)는 **GitHub 이슈 등록까지만** 수행한다.
+- 내부 maintainer·collaborator lane에서 선택 adapter(예: Claude 오케스트레이터)와 `/autopilot`은 `/implement-issue`·`/autopilot` 커맨드 계약에 따라 Plan Preflight 조율, 이슈/브랜치/PR 코멘트, PR 생성, 상태 보고 같은 오케스트레이션을 수행할 수 있다. 특정 AI 도구는 필수가 아니다. 자세한 분담은 [docs/runbooks/02-agent-structure.md](docs/runbooks/02-agent-structure.md)를 따른다.
+- 내부 maintainer·collaborator lane의 직접 코드 구현과 작업 브랜치 수정은 `/implement-issue` 흐름 안에서만 개발 서브에이전트(`@backend-dev`, `@devops`, `@strategy-dev`)에게 위임한다.

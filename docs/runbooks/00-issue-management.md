@@ -1,12 +1,14 @@
 # 00. 이슈 관리
 
-> GitHub Issues를 활용한 작업 등록, 분류, 추적 규칙을 정의한다.
+> GitHub Issues를 maintainer/collaborator의 내부 작업 목록으로 등록·분류·추적하는 규칙을 정의한다.
 
 ---
 
 ## 1. 이슈 등록 기준
 
-모든 코드 변경은 **GitHub Issue 등록 → 브랜치 → PR** 흐름을 따른다.
+모든 **내부 코드 변경**은 **GitHub Issue 등록 → 브랜치 → PR** 흐름을 따른다.
+
+외부 공개 이슈는 받지 않는다(D-020). 외부 기여는 [CONTRIBUTING](../../CONTRIBUTING.md)의 fork PR-only 경로를 따르며 사전 issue가 필요 없고, 지원 또는 일반 신고 창구는 제공하지 않는다.
 
 - 기능 추가
 - 버그 수정
@@ -202,7 +204,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - watcher, QA, 리뷰 후속 자동화처럼 에이전트가 새 이슈를 만들었지만 중복/우선순위/스펙 준비 상태를 아직 사람이 확인하지 않았을 때 사용한다.
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
-- 외부발 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
+- 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
 ### 4.2 `plan-preflight:*` 라벨
@@ -246,7 +248,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
 
-**외부발 버그 리포트 검증 단계**: 외부에서 들어온 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)는 Open 이후 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
+**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)는 Open 이후 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
 
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
@@ -262,12 +264,12 @@ autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/
 
 ## 7. 에이전트의 이슈 등록
 
-에이전트(외부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
+에이전트(내부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
 
 - 이 문서의 제목/본문 템플릿을 사용한다.
 - 스펙 준비 상태나 중복 여부가 불명확하면 `needs-triage`를 함께 붙인다.
 - review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 [01-development-process.md §5](01-development-process.md#5-실패-복구-루프)와 [04-ci-cd.md §5](04-ci-cd.md#5-ci승인-실패-시-복구)의 복구 원칙에 따라 원인 정리, 메타 리뷰, 사람 판단을 우선한다.
-- watcher, 외부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
+- watcher, 내부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
 
 ## 8. 이슈와 버전 관리의 연결
 
