@@ -55,6 +55,8 @@ ante backtest run strategies/my_strategy.py \
 - [에이전트 가이드](guide/agent.md) — 에이전트 등록·인증·활용
 - [CLI 레퍼런스](guide/cli.md) — 전체 명령어 (`--format json` 지원)
 - [보안](guide/security.md) — 보안 주의사항
+- [기여 가이드](CONTRIBUTING.md) — 외부 fork PR 기여 계약
+- [보안 정책](SECURITY.md) — 취약점 비공개 신고 절차
 
 ## ⚠️ 주의
 

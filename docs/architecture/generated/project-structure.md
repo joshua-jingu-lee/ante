@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-08-22 (KST)
+> 마지막 생성 시점: 2026-08-24 (KST)
 
 ## 최상위 구조
 
@@ -25,9 +25,11 @@ ante/
 ├── docker-compose.yml                # 프로덕션 Docker Compose (ante-logs named volume 포함)
 ├── AGENTS.md                         # 개발 Agent 마스터 가이드
 ├── CHANGELOG.md                      # 변경 이력
+├── CONTRIBUTING.md                   # 외부 기여 계약
 ├── README.md                         # 프로젝트 개요
 ├── CLAUDE.md                         # Claude Code 호환 가이드
-└── LICENSE                           # 라이선스
+├── LICENSE                           # 라이선스
+└── SECURITY.md                       # 보안 취약점 신고 정책
 ```
 
 ## src/ante/ — Python 백엔드

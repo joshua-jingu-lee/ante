@@ -127,9 +127,9 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 새 이슈는 배치 시작 시점에 snapshot으로 고정한다. 배치 도중 새로 등록된 이슈나 follow-up 이슈는 다음 실행으로 넘긴다.
 
-### 외부발 버그 리포트 검증 선행
+### 내부 생성 미검증 버그 후보 검증 선행
 
-외부에서 들어온 버그 리포트(예: `source:ante-oracle` 라벨이 붙은 자동 리포트, 외부 제보)는 루트원인 추정이 부정확할 수 있어, 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프 2번 항목이다. 이 절은 그 스텝의 정책 요약이다.
+협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 라벨이 붙은 자동 리포트)는 루트원인 추정이 부정확할 수 있어, 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프 2번 항목이다. 이 절은 그 스텝의 정책 요약이다.
 
 - 이슈에 `이슈 검증` 코멘트의 `confirmed` 증적이 이미 있으면 그대로 큐에 편입한다.
 - `confirmed` 증적이 없으면 `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** `@issue-reviewer`는 GitHub에 코멘트·라벨을 쓰지 않는다. 코멘트·라벨 쓰기는 오케스트레이터가 verdict를 받아 수행한다(검증과 쓰기 주체 분리 — 서브에이전트 gh 쓰기 실패로 인한 fail-open 방지).
@@ -211,7 +211,7 @@ done
 각 이슈마다 다음을 순서대로 수행한다.
 
 1. `needs-triage` 여부 재확인
-2. **외부발 버그 리포트 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 외부발(`source:ante-oracle` 라벨 또는 외부 제보)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
+2. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
 3. 선행 의존 이슈 close 여부 확인
 4. open PR 존재 여부 확인
 5. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인

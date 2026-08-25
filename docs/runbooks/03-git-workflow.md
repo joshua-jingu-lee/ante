@@ -2,6 +2,8 @@
 
 > 커밋 컨벤션, 브랜치 규칙, PR 생성/머지 규칙을 정의한다.
 
+> 이 문서의 브랜치 네이밍, 이슈 대응, `/code-review`, `Closes`, auto-merge 규칙은 **maintainer/collaborator 내부 lane**에만 적용한다. 외부 기여의 SSOT는 [CONTRIBUTING.md](../../CONTRIBUTING.md)다.
+
 ---
 
 ## 1. 브랜치 네이밍 규칙
@@ -113,7 +115,7 @@ BREAKING CHANGE: BrokerAdapter 인터페이스가 변경되었습니다.
 
 `eventbus`, `config`, `bot`, `strategy`, `rule`, `treasury`, `broker`, `gateway`, `data`, `feed`, `backtest`, `report`, `notification`, `web`, `cli`
 
-## 3. 브랜치 리뷰 규칙
+## 3. 브랜치 리뷰 규칙 (내부 lane)
 
 PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리뷰(`/code-review`)를 통과해야 한다.
 
@@ -153,33 +155,36 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 ## 4. PR 규칙
 
-### 4.1 PR 생성 시
+### 4.1 공통
+
+- **본문**: 목적, 범위, 검증, 스펙 영향을 명시한다.
+- 공개 required checks를 통과하고, 충돌과 미해결 대화를 해결한다. 최종 머지 여부는 maintainer가 판단한다.
+
+### 4.2 maintainer/collaborator 내부 lane
 
 - **제목**: 커밋 컨벤션과 동일한 형식 (70자 이내)
 - **본문**: Summary + Test Plan + `Closes #{번호}`
+- 기존 이슈 하나에 내부 작업 브랜치 하나를 대응한다.
 - **release PR 예외**: release PR은 연결 이슈가 없어도 되며, 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차를 남긴다.
 - **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
 - **전제 조건**: 최신 branch HEAD의 `/code-review`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
 - **release PR 전제 조건**: release PR은 이슈 코멘트 기반 브랜치 리뷰 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 PR 본문에 남기고, 일반 PR 승인 게이트를 통과한다.
+- same-repo PR은 `merge-gate`가 공개 required checks, 충돌, 대화 해결을 확인한 뒤 `AUTOMERGE_TOKEN`으로 auto-merge를 활성화한다.
 
-### 4.2 PR 머지 조건
+### 4.3 외부 fork lane
 
-1. required status checks(`ci`, `lint`, `test` — 집합은 [§5](#5-보호-규칙-권장값) 및 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) 모두 성공
-2. 충돌 없음
-3. 미해결 대화 없음
-4. auto-merge 활성화 가능 상태
+- 선행 이슈, `Closes`, 내부 브랜치 네이밍, AI 증적은 필요 없다.
+- 공개 CI 통과 후 maintainer가 일반 GitHub 경로로 **수동 squash merge**한다. fork PR에는 auto-merge를 사용하지 않는다.
 
-머지 조건 판정은 `merge-gate` job이 집행한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
-
-### 4.3 PR 후 추가 변경 처리
+### 4.4 내부 PR 후 추가 변경 처리
 
 - PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
 - 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
 
-### 4.4 머지 방식
+### 4.5 내부 머지 방식
 
 - 기본 머지 방식은 **squash merge**
 - merge 실행 주체는 GitHub auto-merge이며, `merge-gate`가 **`AUTOMERGE_TOKEN`(fine-grained PAT)**으로 enable한다(#2437). 머지 actor는 GitHub 봇이 아니라 PAT 소유자이므로, 머지가 `pull_request: closed` 이벤트를 정상 발화해 `post-merge.yml` 정리가 동작한다(`GITHUB_TOKEN` enable은 재귀 방지로 이 이벤트를 만들지 못해 폴백 금지 — [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구))
@@ -187,7 +192,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 - head branch 자동 삭제가 필요하면 repository ruleset / branch protection이 모든 브랜치 삭제를 막지 않도록 확인한다
 - `main` 보호는 `main` branch protection의 `allow_deletions=false`를 기준으로 두고, 전 브랜치 공통 ruleset에 `deletion`을 넣지 않는다
 
-### 4.5 PR 크기 가이드
+### 4.6 PR 크기 가이드
 
 - 모듈 1개 단위로 PR 생성
 - 300줄 이하 권장
@@ -196,13 +201,17 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 
 ## 5. 보호 규칙 권장값
 
-- required status checks:
-  - `ci`
-  - `lint`
-  - `test`
-- require conversation resolution
-- allow auto-merge
-- automatically delete head branches
+required status checks와 대화 해결은 내부 same-repo PR 및 외부 fork PR 두 경로에 공통으로 적용한다. auto-merge와 head branch 자동 삭제는 maintainer/collaborator 내부 same-repo 운영에만 적용한다.
+
+- 두 PR 경로 공통:
+  - required status checks:
+    - `ci`
+    - `lint`
+    - `test`
+  - require conversation resolution
+- 내부 same-repo 운영 전용:
+  - allow auto-merge
+  - automatically delete head branches
 
 브랜치 보호 규칙의 source of truth는 사람 승인 수가 아니라 **status checks**다.
 
