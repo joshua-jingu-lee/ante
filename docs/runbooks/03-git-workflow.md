@@ -204,10 +204,7 @@ PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리
 required status checks와 대화 해결은 내부 same-repo PR 및 외부 fork PR 두 경로에 공통으로 적용한다. auto-merge와 head branch 자동 삭제는 maintainer/collaborator 내부 same-repo 운영에만 적용한다.
 
 - 두 PR 경로 공통:
-  - required status checks:
-    - `ci`
-    - `lint`
-    - `test`
+  - required status checks: [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값)의 운영 기준을 따른다.
   - require conversation resolution
 - 내부 same-repo 운영 전용:
   - allow auto-merge
@@ -215,4 +212,4 @@ required status checks와 대화 해결은 내부 same-repo PR 및 외부 fork P
 
 브랜치 보호 규칙의 source of truth는 사람 승인 수가 아니라 **status checks**다.
 
-`lint`와 `test`를 `ci`와 함께 required에 등록하는 근거(defense-in-depth)와 비채택 옵션(enforcement_level everyone, auto-merge 라벨 트리거)에 대한 ADR-style Rationale은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값)가 SSOT다. 본 절은 cross-link이며, 권장값 집합이 변경되면 양쪽을 함께 갱신한다.
+required status check의 집합과 집계 안전 근거는 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값)가 SSOT다. 본 절은 두 lane의 적용 경계만 정의한다.

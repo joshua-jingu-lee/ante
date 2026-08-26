@@ -185,7 +185,7 @@ Plan Review는 `.agent/skills/`가 아니라 `.agent/agents/plan-reviewer.md` �
   - Plan Review는 구현 세션과 격리된 별도 컨텍스트 `@plan-reviewer` 서브에이전트로 호출하는 read-only 리뷰다.
 - PR 후 자동 AI 승인/감사 워커는 운영하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
 - `@code-reviewer`는 자동 PR 승인 워커가 아니라 반복 failure와 구조 리스크에 대한 메타 리뷰를 담당한다.
-- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
+- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
 - 로컬 worktree 정리는 리뷰 게이트가 아니라 Claude 측 구현 머신이 담당한다.
 - 고위험 변경에서는 diff만 읽고 끝내지 않는다.
   - 생성자, 팩토리, 캐시 저장소, 소비자, 생성 산출물까지 넓혀 본다.
