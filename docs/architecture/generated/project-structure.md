@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-08-24 (KST)
+> 마지막 생성 시점: 2026-08-27 (KST)
 
 ## 최상위 구조
 
@@ -1059,8 +1059,6 @@ docs/
 │       ├── README.md
 │       ├── error-taxonomy.md
 │       └── offline-factory.md
-├── temp/                             # 임시 작업 문서
-│   └── 05-issue-processing-process-map.md
 └── superpowers/
     └── specs/
         └── 2026-04-17-staging-environment-design.md
