@@ -203,6 +203,7 @@ done
 - snapshot은 100건 단일 조회가 아니라 **pagination으로 끝까지 수집한 전체 open issue 후보 집합**으로 고정한다.
 - 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다.
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
+- 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
 - `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
 
