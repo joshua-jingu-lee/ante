@@ -251,7 +251,7 @@ Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다�
 - stop conditions
 - 이번 PR에서 하지 말아야 할 확장
 
-이 단계에서 이슈를 이번 배치에서 제외할 때는 아래 코멘트를 남긴다. 예외 둘: open PR이 이미 있는 이슈는 6단계 `skipped-in-progress`로 분류하며 PR 자체가 증적이라 별도 보류 코멘트를 남기지 않고, `이슈 검증` verdict가 confirmed가 아닌 이슈는 `이슈 검증` 증적 코멘트와 `needs-triage` 부착이 증적이라 중복 코멘트를 남기지 않는다.
+이 단계에서 이슈를 이번 배치에서 제외할 때는 아래 코멘트를 남긴다. 예외 셋: open PR이 이미 있는 이슈는 6단계 `skipped-in-progress`로 분류하며 PR 자체가 증적이라 별도 보류 코멘트를 남기지 않고, `이슈 검증` verdict가 confirmed가 아닌 이슈는 `이슈 검증` 증적 코멘트와 `needs-triage` 부착이 증적이라 중복 코멘트를 남기지 않으며, 배치 예산 초과(`deferred-scope`)와 인프라 오류(`retry-later-infra`)로 인한 제외는 사유 enum이 다루는 판정이 아니므로 보류 코멘트 대신 상태 코멘트의 `result` 필드로 기록한다.
 
 ```markdown
 🤖 **Autopilot 보류**
