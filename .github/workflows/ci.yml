@@ -48,6 +48,12 @@ jobs:
       - name: MyPy type check
         run: mypy src/
 
+      - name: Generated artifact sync check
+        run: |
+          python scripts/generate_project_structure.py --check
+          python scripts/generate_cli_reference.py --check
+          python scripts/generate_db_schema.py --check
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -65,6 +71,11 @@ jobs:
         env:
           ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
         run: pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+
+      - name: Run integration tests
+        env:
+          ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
+        run: pytest tests/integration/ -x --tb=short -q
 
   docker-build:
     runs-on: ubuntu-latest

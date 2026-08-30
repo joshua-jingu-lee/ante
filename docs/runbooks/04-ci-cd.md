@@ -91,11 +91,14 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 예시:
 
 ```yaml
-- PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
 - PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
 - PYTHONPATH=$PWD/src .venv/bin/python -m ruff format --check src/ tests/
 - PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/
+- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check
+- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
+- PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
 - PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+- PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -x --tb=short -q
 - docker build -t ante:release-pr .  # release/* PR only
 ```
 
@@ -247,7 +250,11 @@ PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
 PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
 PYTHONPATH=$PWD/src .venv/bin/python -m ruff format src/ tests/
 PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/ante/
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
 ```
 
 내부 브랜치 리뷰(`/code-review`) 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
