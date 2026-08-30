@@ -245,7 +245,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | Open | 등록됨 | 분류, 스펙 경로 확인, Plan Preflight |
 | Preflight started | `plan-preflight:started` 라벨 존재 | 구현계획 작성 또는 Plan Review 피드백 반영 중 |
 | Preflight done | `plan-preflight:done` 라벨 존재 | 확정된 이슈 본문 구현계획을 기준으로 구현 착수 가능 |
-| Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거 |
+| Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거. 단, §4.1의 타입·area 라벨 부재 경로로 붙은 라벨은 §4.1을 따른다. |
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
 

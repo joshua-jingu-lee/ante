@@ -168,6 +168,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `--limit`에 `25`보다 큰 값이 들어오면 `25`로 고정하고, 그 사실을 리포트에 기록한다.
 - 현재 활성 이슈가 merge/post-merge까지 정리되지 않으면, 남은 한도와 무관하게 다음 이슈로 넘어가지 않는다.
 
+보류 판정으로 소모된 슬롯의 backfill과 한도 컷 아래 후보의 가시성은 #2491이 소유한다.
+
 ## Plan Preflight 규칙
 
 ### Plan Preflight 병렬 lane
@@ -232,7 +234,7 @@ done
 3. **open PR 존재 확인 (2단계 후행 검사의 재확인)**: 이슈에 open PR이 이미 연결되어 있으면 `needs-triage`를 부착하지 않고 보류 코멘트도 남기지 않으며, 6단계 `skipped-in-progress`로 분류하고 다음 이슈로 넘어간다.
 4. **타입·area 라벨 판정**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 편입/미편입 판정을 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
 5. 선행 의존 이슈 close 여부 확인 (2단계 후행 검사의 재확인)
-6. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
+6. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**(6단계 `deferred-triage`). `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
 7. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
 8. 필요 시 `/plan-preflight #{번호}` 실행
 
