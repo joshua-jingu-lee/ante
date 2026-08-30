@@ -221,7 +221,7 @@ done
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
-- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다. 타입·area 라벨 판정은 3단계 집행이므로 `--dry-run` 결과에는 반영되지 않는다(한계 — 예상 판정 포함은 #2491이 소유한다).
+- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다. feature 승계와 타입·area 라벨 판정은 3단계 집행이므로 `--dry-run` 결과에는 반영되지 않는다(한계 — 예상 판정 포함은 #2491이 소유한다).
 
 ### 3단계: Plan Preflight 사이클
 
@@ -247,8 +247,6 @@ Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다�
 - risk flags
 - stop conditions
 - 이번 PR에서 하지 말아야 할 확장
-
-`needs-triage`는 이미 2단계 server-side snapshot에서 제외되어 있어야 하며, 여기서는 stale snapshot이나 수동 개입 여부를 다시 확인하는 안전 검사를 수행한다.
 
 이 단계에서 이슈를 이번 배치에서 제외할 때는 아래 코멘트를 남긴다. 예외 둘: open PR이 이미 있는 이슈는 6단계 `skipped-in-progress`로 분류하며 PR 자체가 증적이라 별도 보류 코멘트를 남기지 않고, `이슈 검증` verdict가 confirmed가 아닌 이슈는 `이슈 검증` 증적 코멘트와 `needs-triage` 부착이 증적이라 중복 코멘트를 남기지 않는다.
 

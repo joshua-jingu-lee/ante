@@ -205,7 +205,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
 - 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
-- autopilot 큐 판정에서 타입 라벨과 area 라벨이 모두 없는 이슈에 오케스트레이터가 이 라벨을 부착한다. 판정 절차·라벨 집합의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이며, 이 경로로 붙은 라벨은 **사람이** 타입 또는 area 라벨을 부착해 분류한 뒤 제거한다.
+- autopilot 큐 판정에서 타입 라벨과 area 라벨이 모두 없는 이슈에 오케스트레이터가 이 라벨을 부착한다. 판정 절차·라벨 집합의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이며, 이 경로로 붙은 라벨은 **사람이** 타입 또는 area 라벨을 부착해 분류한 뒤 제거한다. **이 경로로 붙은 라벨에는 아래 일반 해제 규칙보다 이 규칙이 우선한다.**
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
 ### 4.2 `plan-preflight:*` 라벨
