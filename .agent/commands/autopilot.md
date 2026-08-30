@@ -133,13 +133,13 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 이 절이 라벨 판정의 정본이며, 실제 배치 집행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프 2번 항목이다.
 
+- reopen된 legacy `feature` 이슈에는 **이 절의 편입/미편입 판정 전에** [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 승계 후에는 타입 라벨 보유로 정상 편입된다.
 - 타입 라벨이 없어도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`) 중 하나가 있으면 큐에 정상 편입한다.
 - 타입 라벨과 area 라벨이 모두 없으면 큐에 편입하지 않는다.
 - 미편입 이슈에는 아래 `3단계: Plan Preflight 사이클`의 `🤖 **Autopilot 보류**` 코멘트를 사유 `타입 라벨 부재`로 남기고 `needs-triage`를 부착한다. 결과 분류는 기존 `deferred-triage`를 재사용한다.
 - 라벨 판정이 아래 `내부 생성 미검증 버그 후보 검증 선행`의 `이슈 검증` 게이트보다 먼저다. 큐 후보가 아닌 이슈에는 `@issue-reviewer`를 호출하지 않으며, 사람이 라벨을 정리해 재평가될 때 `이슈 검증`이 선행한다.
 - `needs-triage` 부착 후에는 자동 경로는 2단계 snapshot의 server-side 필터가, 수동 `/implement-issue`는 자체 거부 규칙이 걸러내 양쪽에서 보이지 않는다. 사람이 라벨을 정리할 때까지의 절충으로 수용한다.
 - 불변식: 탈락분은 snapshot에서 관측 가능해야 한다. 이 불변식을 지키는 집행 형태는 #2460이 소유한다.
-- reopen된 legacy `feature` 이슈에는 **이 절의 편입/미편입 판정 전에** [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 승계 후에는 타입 라벨 보유로 정상 편입된다.
 
 ### 내부 생성 미검증 버그 후보 검증 선행
 
@@ -228,7 +228,7 @@ done
 각 이슈마다 다음을 순서대로 수행한다.
 
 1. `needs-triage` 여부 재확인
-2. **타입·area 라벨 판정**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
+2. **feature 승계 및 타입·area 라벨 판정**: `feature` 라벨이 붙어 있으면(다른 라벨과의 병기 포함) [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 그 뒤 `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
 3. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
 4. 선행 의존 이슈 close 여부 확인
 5. open PR 존재 여부 확인
@@ -249,7 +249,7 @@ Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다�
 
 `needs-triage`는 이미 2단계 server-side snapshot에서 제외되어 있어야 하며, 여기서는 stale snapshot이나 수동 개입 여부를 다시 확인하는 안전 검사를 수행한다.
 
-이 단계에서 이슈를 이번 배치에서 제외할 때는 이슈 코멘트에 다음을 남기고 스킵한다.
+이 단계에서 이슈를 이번 배치에서 제외할 때는 아래 코멘트를 남긴다. 예외 둘: open PR이 이미 있는 이슈는 6단계 `skipped-in-progress`로 분류하며 PR 자체가 증적이라 별도 보류 코멘트를 남기지 않고, `이슈 검증` verdict가 confirmed가 아닌 이슈는 `이슈 검증` 증적 코멘트와 `needs-triage` 부착이 증적이라 중복 코멘트를 남기지 않는다.
 
 ```markdown
 🤖 **Autopilot 보류**
