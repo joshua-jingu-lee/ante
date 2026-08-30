@@ -176,11 +176,19 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 - 인자 힌트의 마지막 자리 `[<pr#>|<branch>|<path>]`는 파서에서 `target` 한 필드로 들어간다. 비교 기준(base)을 별도 인자나 플래그로 지정하는 문법은 인자 힌트에도 파서가 받는 플래그 목록에도 없다. 그 자리를 비운 호출의 기본 비교 범위는 이 문서가 서술하지 않는다.
 - 이 블록의 열거와 리터럴, 그 의미는 모두 CLI 버전에 종속된 관측이라 저장소에 회귀 lock을 걸지 않는다. 인자 문법이나 그 의미가 필요해지면 그 시점 스킬 설명을 직접 확인한다.
 
-모드 플래그는 이 게이트에서 쓰지 않는다. 사용 여부와 근거는 [#2469](https://github.com/joshua-jingu-lee/ante/issues/2469)가 확정한다.
+모드 플래그는 이 게이트에서 쓰지 않는다. 근거: (a) Gate A는 read-only 리뷰다 (b) 작업 브랜치 수정은 개발 서브에이전트 위임으로 한정된다 (c) PR 생성 전이라 코멘트 대상이 없다([#2469](https://github.com/joshua-jingu-lee/ante/issues/2469)).
+
+**정본 호출 형태**
 
 ```text
-/code-review
+/code-review {effort} {base}...{head}
 ```
+
+- effort는 `high`·`xhigh`·`max` 중 하나로 명시한다.
+- base는 `git merge-base origin/main {head}`로 잡되, epic/* 하위 이슈는 epic 브랜치와의 merge-base로 잡는다(base 산출 전 `origin/main` 갱신 전제).
+- `{base}...{head}` range를 항상 명시한다. range는 스킬 인자의 `target` 자리에 들어가는 문자열이며 스코프 고정은 도구가 보장하는 계약이 아니라 호출 관례다. range가 존중되면 리뷰 스코프는 그 범위로 고정되고, 존중되지 않는 경우의 스코프는 미상이며 이 규범에는 그것을 탐지하는 수단이 없다(known-limitation). clean worktree 전제는 미커밋 변경 혼입만 닫는다. 리뷰 출력이 range 밖 파일의 finding을 반환하는 관측이 나오면 그 시점에 후속 이슈로 등록한다.
+- 호출 직전 `git status --porcelain` 출력이 비어 있음을 확인한다.
+- 재호출은 직전 호출과 같은 레벨 이상으로 한다.
 
 - 결과는 이슈 코멘트에 `브랜치 리뷰`로 남긴다.
 - `PASS`:
@@ -192,13 +200,16 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
 - verdict: {PASS | FAIL}
 - reviewer: /code-review
+- effort: {high|xhigh|max}
+- scope: {base}...{head}
+- worktree: clean
 - head: {SHA7}
 - attempt: {N}
 - blocking findings: {없음 | finding 요약}
 - next: {브랜치 push 후 PR 생성 | 같은 worktree에서 수정 후 재검토}"
 ```
 
-리뷰 스코프를 이 증적에 어떤 필드로 어떻게 기록할지는 이 문서가 정하지 않는다 — 스코프 기록 계약은 [#2469](https://github.com/joshua-jingu-lee/ante/issues/2469)가 확정한다.
+리뷰 스코프는 위 증적의 `scope:` 필드에 `{base}...{head}`로 기록한다([#2469](https://github.com/joshua-jingu-lee/ante/issues/2469)).
 
 11. **수정 루프**: `/code-review`가 최신 HEAD SHA에서 `PASS`가 될 때까지 내부 반복한다.
 
@@ -256,7 +267,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 
 - `ci` 통과는 머지 차단 게이트다. (required status check)
 - PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다. 호출은 §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
 - `merge-gate`는 `AUTOMERGE_TOKEN`(fine-grained PAT)으로 auto-merge를 활성화한다(#2437, fail-closed — 시크릿 부재 시 명시 실패). 머지가 발화한 `pull_request:closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음).
@@ -292,7 +303,7 @@ git push -u origin epic/{에픽번호}-{짧은설명}
 - 브랜치 push
 - PR 생성 (`base=epic/{에픽번호}-{설명}`)
 
-epic 하위 이슈 브랜치는 `epic/*`에서 분기하고, 분기 시점의 `epic/*`에는 먼저 머지된 형제 하위 이슈 변경이 이미 들어 있다. `/code-review`가 노출하는 인자 문법 관측은 §브랜치 리뷰 루프 10번에 있고, 이 문서는 그중 어떤 호출 형태로 이 게이트의 비교 범위를 잡을지 정하지 않는다. **비교 범위가 형제 하위 이슈 변경까지 포함하면**, 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 있다. 두 갈래를 리뷰 스코프에서 분리하는 방법은 아직 정해지지 않았을 뿐이며, 이 문서가 어떤 경로를 막는다는 뜻은 아니다. 현재 epic 워크플로는 휴면 상태이며, 재개 시 이 스코핑을 재설계한다 — 그 시점의 스킬 설명을 다시 확인해 정한다. 이 관측은 CLI 버전에 종속되므로 저장소에 회귀 lock을 걸지 않는다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인하고, 그 델타 밖의 코드에서 비롯한 finding은 이 하위 이슈의 blocking으로 보지 않는다.
+epic 하위 이슈 브랜치는 `epic/*`에서 분기하고, 분기 시점의 `epic/*`에는 먼저 머지된 형제 하위 이슈 변경이 이미 들어 있다. `/code-review`가 노출하는 인자 문법 관측은 §브랜치 리뷰 루프 10번에 있고, 이 게이트의 호출도 그 절의 정본 형태를 따른다. **비교 범위가 형제 하위 이슈 변경까지 포함하면**, 형제 하위 이슈와 이 하위 이슈가 **같은 파일**을 수정한 경우 형제 라인에서 비롯한 잘못된 FAIL이나 실제 버그 누락 위험이 있다. 두 갈래의 분리는 §브랜치 리뷰 루프가 정한 epic base 분기(epic 브랜치와의 merge-base)가 제공한다. 현재 epic 워크플로는 휴면 상태이며, 재개 시 이 스코핑을 재설계한다 — 그 시점의 스킬 설명을 다시 확인해 정한다. 재설계 대상은 스코핑 전반이며, base 산출은 §브랜치 리뷰 루프가 소유한다. 이 관측은 CLI 버전에 종속되므로 저장소에 회귀 lock을 걸지 않는다. 그때까지 리뷰어는 `git diff <epic-base>...HEAD`로 이 하위 이슈 자체 델타를 확인하고, 그 델타 밖의 코드에서 비롯한 finding은 이 하위 이슈의 blocking으로 보지 않는다.
 
 ### E4. 에픽 PR 생성
 
