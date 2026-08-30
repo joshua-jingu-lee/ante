@@ -181,7 +181,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 
 ### 4.4 내부 PR 후 추가 변경 처리
 
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 implement-issue.md §브랜치 리뷰 루프의 정본 형태를 따른다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
 - 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.
