@@ -114,6 +114,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 > `feature`는 legacy 라벨이다. 신규 이슈에는 쓰지 않는다. 큐 선별 라벨 집합과 GitHub 기본 `enhancement`가 갈라져 이슈 판정이 실행마다 달라진 것이 재정 사유이며, 근거와 반대 방향 근거는 #2458에 있다. 이슈 type과 라벨의 매핑은 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §2를 따른다.
 
+위 라벨이 하나도 붙지 않은 이슈의 편입 판정은 아래 `타입 라벨이 없는 이슈` 절을 따른다.
+
 ### 기본 제외 대상
 
 - `needs-triage`
@@ -126,6 +128,16 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 선행 의존 이슈가 아직 close되지 않은 이슈
 
 새 이슈는 배치 시작 시점에 snapshot으로 고정한다. 배치 도중 새로 등록된 이슈나 follow-up 이슈는 다음 실행으로 넘긴다.
+
+### 타입 라벨이 없는 이슈
+
+- 타입 라벨이 없어도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`) 중 하나가 있으면 큐에 정상 편입한다.
+- 타입 라벨과 area 라벨이 모두 없으면 큐에 편입하지 않는다.
+- 미편입 이슈에는 아래 `3단계: Plan Preflight 사이클`의 `🤖 **Autopilot 보류**` 코멘트를 사유 `타입 라벨 부재`로 남기고 `needs-triage`를 부착한다. 결과 분류는 기존 `deferred-triage`를 재사용한다.
+- 라벨 판정이 아래 `내부 생성 미검증 버그 후보 검증 선행`의 `이슈 검증` 게이트보다 먼저다. 큐 후보가 아닌 이슈에는 `@issue-reviewer`를 호출하지 않으며, 사람이 라벨을 정리해 재평가될 때 `이슈 검증`이 선행한다.
+- `needs-triage` 부착 후에는 server-side 필터가 걸러내 자동·수동 양쪽에서 보이지 않는다. 사람이 라벨을 정리할 때까지의 절충으로 수용한다.
+- 불변식: 탈락분은 snapshot에서 관측 가능해야 한다. 이 불변식을 지키는 집행 형태는 #2460이 소유한다.
+- reopen된 legacy `feature` 이슈는 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 따른다.
 
 ### 내부 생성 미검증 버그 후보 검증 선행
 
@@ -140,9 +152,10 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ## 정렬 규칙
 
 1. 우선순위 `P0 → P1 → P2 → P3`
-2. 우선순위 라벨이 없는 이슈는 `P3` 뒤, 즉 큐의 맨 끝 구간에 둔다. 우선순위 라벨이 없다는 이유로 큐에서 제외하지 않으며, 아래 3·4번은 그 구간 안에서도 그대로 적용한다.
-3. 같은 우선순위 안에서는 선행 의존성이 없는 이슈 우선
-4. 같은 조건이면 오래 열린 이슈 우선
+2. 우선순위 라벨이 2개 이상 중복 부착된 이슈에는 그중 가장 높은 우선순위를 적용한다.
+3. 우선순위 라벨이 없는 이슈는 `P3` 뒤, 즉 큐의 맨 끝 구간에 둔다. 우선순위 라벨이 없다는 이유로 큐에서 제외하지 않으며, 아래 4·5번은 그 구간 안에서도 그대로 적용한다.
+4. 같은 우선순위 안에서는 선행 의존성이 없는 이슈 우선
+5. 같은 조건이면 오래 열린 이슈 우선
 
 여러 이슈를 동시에 구현하지 않는다. 현재 활성 이슈가 merge/post-merge 완료 또는 명시적 보류 상태로 정리된 뒤에만 다음 이슈로 이동한다.
 
@@ -237,7 +250,7 @@ Plan Preflight 결과가 구현 불가 상태면 이슈 코멘트에 다음을 �
 ```markdown
 🤖 **Autopilot 보류**
 - 이슈: #{번호}
-- 사유: {needs-triage | 선행 이슈 미완료 | plan-preflight blocked | needs-spec-first | split-issue | invoke-human}
+- 사유: {needs-triage | 타입 라벨 부재 | 선행 이슈 미완료 | plan-preflight blocked | needs-spec-first | split-issue | invoke-human}
 - 다음 단계: {triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 테스트 설계 보강}
 ```
 
