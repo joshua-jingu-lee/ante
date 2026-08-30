@@ -221,7 +221,7 @@ done
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
-- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
+- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다. 타입·area 라벨 판정은 3단계 집행이므로 `--dry-run` 결과에는 반영되지 않는다(한계 — 예상 판정 포함은 #2491이 소유한다).
 
 ### 3단계: Plan Preflight 사이클
 
