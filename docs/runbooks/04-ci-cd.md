@@ -254,6 +254,7 @@ PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --che
 PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
 PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
 ```
 
 내부 브랜치 리뷰(`/code-review`) 전 이 검증을 통과시켜야 사전 리뷰 루프가 짧아진다.
