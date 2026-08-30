@@ -250,6 +250,9 @@ PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
 PYTHONPATH=$PWD/src .venv/bin/python -m ruff check src/ tests/
 PYTHONPATH=$PWD/src .venv/bin/python -m ruff format src/ tests/
 PYTHONPATH=$PWD/src .venv/bin/python -m mypy src/ante/
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
+PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 ```
 
