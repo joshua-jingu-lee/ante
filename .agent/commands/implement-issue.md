@@ -184,11 +184,11 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 /code-review {effort} {base}...{head}
 ```
 
-- effort는 `high`·`xhigh`·`max` 중 하나로 명시한다(레벨 순서는 `high` < `xhigh` < `max`).
+- effort는 `high`·`xhigh`·`max` 중 하나로 명시한다(`/code-review` 레벨 토큰의 순서는 `high` < `xhigh` < `max`다 — 에이전트 정의 문서의 「xhigh (max)」 표기는 서브에이전트 기본 effort 축으로 별개다).
 - base는 `git merge-base origin/main {head}`로 잡되, epic/* 하위 이슈는 epic 브랜치와의 merge-base로 잡는다(base 산출 전 해당 base ref — `origin/main` 또는 `origin/epic/*` — 를 fetch로 갱신하는 것이 전제다).
 - `{base}...{head}` range를 항상 명시한다. range는 스킬 인자의 `target` 자리에 들어가는 문자열이며 스코프 고정은 도구가 보장하는 계약이 아니라 호출 관례다. range가 존중되면 리뷰 스코프는 그 범위로 고정되고, 존중되지 않는 경우의 스코프는 미상이며 이 규범에는 그것을 탐지하는 수단이 없다(known-limitation). clean worktree 전제는 미커밋 변경 혼입만 닫는다. 리뷰 출력이 range 밖 파일의 finding을 반환하는 관측이 나오면 그 시점에 후속 이슈로 등록한다.
-- 호출 직전 `git status --porcelain` 출력이 비어 있음을 확인한다. 비어 있지 않으면 미커밋 변경을 커밋하거나 제거해 비운 뒤 호출하며, 확인 결과가 증적의 `worktree:` 필드 값이다.
-- 재호출은 직전 호출과 같은 레벨 이상으로 한다.
+- 확인과 호출은 **리뷰 대상 브랜치가 체크아웃된 워크트리에서** 수행하며, 호출 직전 그 워크트리의 `git status --porcelain` 출력이 비어 있음을 확인한다. 비어 있지 않으면 미커밋 변경을 커밋하거나 제거해 비운 뒤 호출하며, 증적의 `worktree: clean`은 이 확인을 그 워크트리에서 수행했다는 기록이다.
+- 재호출은 **같은 이슈의** 직전 호출과 같은 레벨 이상으로 한다(증적은 이슈 코멘트에 누적된다).
 
 - 결과는 이슈 코멘트에 `브랜치 리뷰`로 남긴다.
 - `PASS`:
