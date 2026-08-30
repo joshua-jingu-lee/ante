@@ -216,21 +216,21 @@ done
 - 큐 snapshot은 "앞 100건만 가져온 뒤 로컬에서 후행 필터링"하지 않는다.
 - `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
 - snapshot은 100건 단일 조회가 아니라 **pagination으로 끝까지 수집한 전체 open issue 후보 집합**으로 고정한다.
-- 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다. 이 후행 검사가 해당 제외의 소유 단계다. 3단계 per-issue 루프의 needs-triage·open PR·선행 의존 항목은 배치 도중의 상태 변화를 잡는 stale snapshot 재확인이며, 결과 분류(`skipped-in-progress`·`deferred-dependency`)는 그 재확인에서 발견된 경우에 기록한다. 2단계 후행 검사로 제외된 이슈는 결과 분류 대신 7단계 리포트의 스킵/보류 상세에 열거한다.
+- 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다. 이 후행 검사가 해당 제외의 소유 단계이며, 3단계 per-issue 루프의 대응 항목은 배치 도중의 상태 변화를 잡는 stale snapshot 재확인이다.
 - 타입·area 라벨 판정(위 `타입 라벨이 없는 이슈`)은 server-side 필터가 아니라 3단계 per-issue 루프의 `타입·area 라벨 판정` 항목에서 집행한다. 판정 대상 이슈는 2단계 snapshot에 그대로 남는다.
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
-- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다. 이때 타입·area 라벨 판정의 예상 결과(편입/보류)를 리포트에 포함하되, 라벨 부착·코멘트 게시는 하지 않는다.
+- `--dry-run`이면 이 단계 결과를 리포트에 남기고 종료한다.
 
 ### 3단계: Plan Preflight 사이클
 
 각 이슈마다 다음을 순서대로 수행한다.
 
-1. **기본 제외 라벨 재확인 (2단계 server-side 필터의 재확인)**: `큐 선별 규칙` → `기본 제외 대상`의 라벨이 배치 도중 부착되지 않았는지 재확인한다.
+1. **`needs-triage` 여부 재확인 (2단계 server-side 필터의 재확인)**: 배치 도중 부착되지 않았는지 재확인한다.
 2. **feature 승계**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절 첫 불릿의 승계 규칙을 적용한다. 적용 조건과 범위는 그 불릿이 정본이다.
 3. **open PR 존재 확인 (2단계 후행 검사의 재확인)**: 이슈에 open PR이 이미 연결되어 있으면 라벨을 부착하지 않고 보류 코멘트도 남기지 않으며, 6단계 `skipped-in-progress`로 분류하고 다음 이슈로 넘어간다.
-4. **타입·area 라벨 판정**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 직전의 같은 사유(`타입 라벨 부재`) 보류 코멘트가 이미 있으면 새 코멘트를 중복 게시하지 않고 `needs-triage`만 재부착한다. 편입이면 정상 진행한다.
+4. **타입·area 라벨 판정**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
 5. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
 6. 선행 의존 이슈 close 여부 확인 (2단계 후행 검사의 재확인)
 7. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
@@ -256,7 +256,7 @@ Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다�
 🤖 **Autopilot 보류**
 - 이슈: #{번호}
 - 사유: {needs-triage | 타입 라벨 부재 | 선행 이슈 미완료 | plan-preflight blocked | plan-preflight needs-rewrite | needs-spec-first | split-issue | invoke-human}
-- 다음 단계: {triage 제거 | 타입/area 라벨 부착 후 needs-triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 테스트 설계 보강 | 후속 이슈 분리 | 사람 답변 대기}
+- 다음 단계: {triage 제거 | 타입/area 라벨 부착 후 needs-triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 계획 재작성 | 테스트 설계 보강 | 후속 이슈 분리 | 사람 답변 대기}
 ```
 
 ### 4단계: 개별 이슈 실행 사이클
