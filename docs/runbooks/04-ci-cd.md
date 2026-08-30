@@ -98,6 +98,7 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 - PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_cli_reference.py --check
 - PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_db_schema.py --check
 - PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -x -n auto --tb=short -q --cov=src/ante --cov-fail-under=80
+- PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -x --tb=short -q
 - docker build -t ante:release-pr .  # release/* PR only
 ```
 
