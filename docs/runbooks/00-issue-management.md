@@ -182,7 +182,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | 라벨 | 용도 | 색상 권장 |
 |------|------|-----------|
 | `enhancement` | 새 기능·성능 개선 (§2의 `feat`·`perf`) | 하늘색 |
-| `feature` | (legacy) 신규 이슈에 쓰지 않는다. 재정 근거는 #2458. 이 라벨이 붙은 이슈를 reopen하면 경로와 무관하게 `feature`를 떼고 `enhancement`로 교체한다. | 녹색 |
+| `feature` | (legacy) 신규 이슈에 쓰지 않는다. 재정 근거는 #2458. 이 라벨이 붙은 이슈를 reopen하면 경로와 무관하게 사용자 또는 오케스트레이터가 `feature`를 떼고, 다른 타입 라벨이 없으면 `enhancement`로 교체한다. | 녹색 |
 | `bug` | 버그 수정 | 빨간색 |
 | `refactor` | 리팩터링 | 파란색 |
 | `docs` | 문서 | 보라색 |
@@ -205,7 +205,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
 - 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
-- autopilot 큐 판정에서 타입 라벨(`enhancement`·`bug`·`refactor`·`docs`·`test`·`chore`)과 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)이 모두 없는 이슈를 만나면, 오케스트레이터가 보류 코멘트를 사유 `타입 라벨 부재`로 남긴 뒤 이 라벨을 부착한다. 큐 판정 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이다.
+- autopilot 큐 판정에서 타입 라벨과 area 라벨이 모두 없는 이슈를 만나면, 오케스트레이터가 보류 코멘트를 사유 `타입 라벨 부재`로 남긴 뒤 이 라벨을 부착한다. 두 라벨 집합의 정의와 큐 판정 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이며, 이 경로로 붙은 라벨은 타입 또는 area 라벨을 부착해 분류한 뒤 제거한다.
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
 ### 4.2 `plan-preflight:*` 라벨
@@ -249,7 +249,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
 
-**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)는 Open 이후 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
+**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)는 Open 이후 타입·area 라벨 판정을 통과하면 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
 
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
