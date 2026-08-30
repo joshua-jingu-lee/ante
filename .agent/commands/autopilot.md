@@ -253,7 +253,7 @@ Plan Preflight가 완료되면, autopilot은 이슈 본문 구현계획의 다�
 ```markdown
 🤖 **Autopilot 보류**
 - 이슈: #{번호}
-- 사유: {needs-triage | 타입 라벨 부재 | 선행 이슈 미완료 | plan-preflight blocked | plan-preflight needs-rewrite | revise-plan | needs-spec-first | split-issue | invoke-human}
+- 사유: {needs-triage | 타입 라벨 부재 | 선행 이슈 미완료 | plan-preflight blocked | plan-preflight needs-rewrite | needs-spec-first | split-issue | invoke-human}
 - 다음 단계: {triage 제거 | 타입/area 라벨 부착 후 needs-triage 제거 | 선행 이슈 완료 대기 | 스펙 정리 | 계획 재작성 | 테스트 설계 보강 | 후속 이슈 분리 | 사람 답변 대기}
 ```
 
