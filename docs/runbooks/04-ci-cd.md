@@ -68,10 +68,12 @@ post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 �
 - **반복 실패**: 같은 blocking finding 제목이 반복되면 escalation 신호로 보고, 같은 `risk class`가 2회 반복되면 Meta Review를 우선한다. **반복 실패 임계값은 10회이며, 이 임계값의 SSOT는 본 문서다.** 실패가 10회 누적되면 `blocked:review-loop` 라벨로 자동 브랜치 리뷰를 중단한다.
 - **해석 주의**: 이 단계는 GitHub Actions workflow가 아니라 Claude 세션 안에서 돌아가는 read-only 리뷰다. 코드 수정은 Claude 개발 에이전트가 수행한다.
 
+Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래그)의 정본은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프다.
+
 이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
 동일 HEAD SHA에서 `/code-review` FAIL이 남아 있으면 PR을 열지 않는다.
 
-PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
+PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다(호출은 정본 형태를 따른다). PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
 
 ### Gate B — 공개 CI (두 lane 공통)
 
@@ -269,7 +271,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 ### 5.1 머지 게이트 수동 복구 순서
 
 1. required status check `ci`가 일시적 환경 문제로 실패했거나 upstream `lint`·`test`·`docker-build`의 일시 실패를 집계한 것으로 보이면 `gh run rerun`을 우선한다.
-2. PR 코드 자체에 문제가 있으면 Claude 개발 에이전트가 같은 브랜치를 수정한 뒤 새 커밋을 push한다. push 전에는 `/code-review`를 새 head SHA에서 다시 통과시킨다.
+2. PR 코드 자체에 문제가 있으면 Claude 개발 에이전트가 같은 브랜치를 수정한 뒤 새 커밋을 push한다. push 전에는 `/code-review`를 새 head SHA에서 다시 통과시킨다(호출은 정본 형태를 따른다).
 3. `pull_request` 이벤트 누락으로 `merge-gate`가 다시 시작되지 않을 때만 PR `close → reopen`을 예외적으로 사용한다.
 4. 수동 복구를 실행한 경우 PR 코멘트에 복구 이유, 사용한 방식, 새 run 링크를 남긴다.
 
