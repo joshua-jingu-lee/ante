@@ -11,7 +11,7 @@ $ARGUMENTS — 옵션 (생략 가능)
 - `--label {라벨}`: 특정 라벨만 대상으로 제한
 - `--handoff-only`: 예외적으로 PR 생성 후 기존 게이트 인계까지만 처리하고 merge/post-merge 확인은 생략
 - `--strict-merge`: deprecated alias. 현재는 기본 동작과 동일하게 merge/post-merge까지 확인
-- `--dry-run`: 2단계 snapshot 수집·정렬·한도 컷까지만 계산하고 실제 구현은 시작하지 않음
+- `--dry-run`: 2단계 snapshot 수집·후행 검사·정렬·한도 컷까지만 계산하고 실제 구현은 시작하지 않음
 
 ## 목적
 
@@ -140,7 +140,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - 미편입 이슈에는 아래 `3단계: Plan Preflight 사이클`의 `🤖 **Autopilot 보류**` 코멘트를 사유 `타입 라벨 부재`로 남기고 `needs-triage`를 부착한다. 결과 분류는 기존 `deferred-triage`를 재사용한다.
 - 라벨 판정이 아래 `내부 생성 미검증 버그 후보 검증 선행`의 `이슈 검증` 게이트보다 먼저다. 큐 후보가 아닌 이슈에는 `@issue-reviewer`를 호출하지 않으며, 사람이 라벨을 정리해 재평가될 때 `이슈 검증`이 선행한다.
 - `needs-triage` 부착 후에는 자동 경로는 2단계 snapshot의 server-side 필터가, 수동 `/implement-issue`는 자체 거부 규칙이 걸러내 양쪽에서 보이지 않는다. 사람이 라벨을 정리할 때까지의 절충으로 수용한다.
-- 불변식: 탈락분은 snapshot에서 관측 가능해야 한다. 이 불변식을 지키는 집행 형태는 #2460이 소유한다.
+- 불변식: 탈락분은 그 배치의 snapshot에서 관측 가능해야 한다. 이 불변식을 지키는 집행 형태는 #2460이 소유한다.
 
 ### 내부 생성 미검증 버그 후보 검증 선행
 
