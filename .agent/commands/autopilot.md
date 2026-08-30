@@ -11,7 +11,7 @@ $ARGUMENTS — 옵션 (생략 가능)
 - `--label {라벨}`: 특정 라벨만 대상으로 제한
 - `--handoff-only`: 예외적으로 PR 생성 후 기존 게이트 인계까지만 처리하고 merge/post-merge 확인은 생략
 - `--strict-merge`: deprecated alias. 현재는 기본 동작과 동일하게 merge/post-merge까지 확인
-- `--dry-run`: 큐 선별만 계산하고 실제 구현은 시작하지 않음
+- `--dry-run`: 2단계 snapshot 수집·정렬·한도 컷까지만 계산하고 실제 구현은 시작하지 않음
 
 ## 목적
 
