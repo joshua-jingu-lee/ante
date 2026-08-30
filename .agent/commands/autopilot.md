@@ -114,7 +114,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 > `feature`는 legacy 라벨이다. 신규 이슈에는 쓰지 않는다. 큐 선별 라벨 집합과 GitHub 기본 `enhancement`가 갈라져 이슈 판정이 실행마다 달라진 것이 재정 사유이며, 근거와 반대 방향 근거는 #2458에 있다. 이슈 type과 라벨의 매핑은 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §2를 따른다.
 
-위 라벨이 하나도 붙지 않은 이슈의 편입 판정은 아래 `타입 라벨이 없는 이슈` 절을 따른다.
+위 라벨이 하나도 붙지 않은 이슈의 편입 판정과 legacy `feature` 승계는 아래 `타입 라벨이 없는 이슈` 절을 따른다.
 
 ### 기본 제외 대상
 
@@ -131,7 +131,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ### 타입 라벨이 없는 이슈
 
-이 절이 라벨 판정의 정본이며, 실제 배치 집행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프 3번 항목이다.
+이 절이 라벨 판정의 정본이며, 실제 배치 집행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프의 `feature 승계`·`타입·area 라벨 판정` 항목이다.
 
 - `feature` 라벨이 붙은 이슈에는(다른 라벨과의 병기 포함, reopen 여부 판별 불요) **이 절의 편입/미편입 판정 전에** [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 이 불릿은 타입 라벨을 이미 가진 이슈에도 적용하며, 승계 후에는 타입 라벨 보유로 정상 편입된다.
 - 타입 라벨이 없어도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`) 중 하나가 있으면 큐에 정상 편입한다.
@@ -143,7 +143,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ### 내부 생성 미검증 버그 후보 검증 선행
 
-협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 라벨이 붙은 자동 리포트)는 루트원인 추정이 부정확할 수 있어, 위 `타입 라벨이 없는 이슈` 판정을 통과한 뒤 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프 4번 항목이다. 이 절은 그 스텝의 정책 요약이다.
+협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 라벨이 붙은 자동 리포트)는 루트원인 추정이 부정확할 수 있어, 위 `타입 라벨이 없는 이슈` 판정을 통과한 뒤 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프의 `내부 생성 미검증 버그 후보 검증` 항목이다. 이 절은 그 스텝의 정책 요약이다.
 
 - 이슈에 `이슈 검증` 코멘트의 `confirmed` 증적이 이미 있으면 그대로 큐에 편입한다.
 - `confirmed` 증적이 없으면 `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** `@issue-reviewer`는 GitHub에 코멘트·라벨을 쓰지 않는다. 코멘트·라벨 쓰기는 오케스트레이터가 verdict를 받아 수행한다(검증과 쓰기 주체 분리 — 서브에이전트 gh 쓰기 실패로 인한 fail-open 방지).
@@ -216,8 +216,8 @@ done
 - 큐 snapshot은 "앞 100건만 가져온 뒤 로컬에서 후행 필터링"하지 않는다.
 - `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
 - snapshot은 100건 단일 조회가 아니라 **pagination으로 끝까지 수집한 전체 open issue 후보 집합**으로 고정한다.
-- 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다.
-- 타입·area 라벨 판정(위 `타입 라벨이 없는 이슈`)은 server-side 필터가 아니라 3단계 per-issue 루프 3번에서 집행한다. 판정 대상 이슈는 2단계 snapshot에 그대로 남는다.
+- 위 전체 snapshot에 대해서만 open PR 존재, 선행 의존 이슈 close 여부, `--label` 좁히기처럼 server-side로 표현하기 어려운 후행 검사를 적용한다. 이 후행 검사가 해당 제외의 소유 단계다. 3단계 per-issue 루프의 needs-triage·open PR·선행 의존 항목은 배치 도중의 상태 변화를 잡는 stale snapshot 재확인이며, 결과 분류(`skipped-in-progress`·`deferred-dependency`)는 그 재확인에서 발견된 경우에 기록한다.
+- 타입·area 라벨 판정(위 `타입 라벨이 없는 이슈`)은 server-side 필터가 아니라 3단계 per-issue 루프의 `타입·area 라벨 판정` 항목에서 집행한다. 판정 대상 이슈는 2단계 snapshot에 그대로 남는다.
 - snapshot 후 실제 처리 대상은 정렬 결과 상위 `min(limit, 25)`건으로 자른다.
 - 큐 snapshot이 1건 이상이면 `default`·`handoff-only`·`dry-run` 공통으로 첫 리포트를 쓰기 전에 `mkdir -p docs/temp`를 실행한다. `docs/temp/`는 gitignore 대상이므로 clean clone/worktree에 없을 수 있다.
 - 이번 배치 큐가 1건 이상이면 실행 모드와 관계없이 `docs/temp/autopilot-report-<YYYYMMDD-HHMM>.md` 리포트를 반드시 생성한다.
@@ -228,12 +228,13 @@ done
 각 이슈마다 다음을 순서대로 수행한다.
 
 1. `needs-triage` 여부 재확인
-2. **open PR 존재 확인**: 이슈에 open PR이 이미 연결되어 있으면 라벨을 부착하지 않고 보류 코멘트도 남기지 않으며, 6단계 `skipped-in-progress`로 분류하고 다음 이슈로 넘어간다.
-3. **feature 승계 및 타입·area 라벨 판정**: `feature` 라벨이 붙어 있으면(다른 라벨과의 병기 포함) [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 그 뒤 `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
-4. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
-5. 선행 의존 이슈 close 여부 확인
-6. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
-7. 필요 시 `/plan-preflight #{번호}` 실행
+2. **feature 승계**: `feature` 라벨이 붙어 있으면(다른 라벨과의 병기 포함) `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절 첫 불릿의 승계 규칙을 적용한다. 이슈 제외가 아니라 라벨 정정이므로 open PR 유무와 무관하게 적용한다.
+3. **open PR 존재 확인 (2단계 후행 검사의 재확인)**: 이슈에 open PR이 이미 연결되어 있으면 라벨을 부착하지 않고 보류 코멘트도 남기지 않으며, 6단계 `skipped-in-progress`로 분류하고 다음 이슈로 넘어간다.
+4. **타입·area 라벨 판정**: `큐 선별 규칙` → `타입 라벨이 없는 이슈` 절의 판정을 그 절이 정한 순서대로 적용한다. 미편입이면 그 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
+5. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(`source:ante-oracle` 라벨 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
+6. 선행 의존 이슈 close 여부 확인 (2단계 후행 검사의 재확인)
+7. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
+8. 필요 시 `/plan-preflight #{번호}` 실행
 
 `plan-preflight:done` 라벨이 없거나 stale이면 `/plan-preflight #{번호}`를 먼저 수행하고, 이슈 본문 구현계획이 확정되어 `plan-preflight:done`이 된 뒤에만 `/implement-issue`로 넘긴다.
 
