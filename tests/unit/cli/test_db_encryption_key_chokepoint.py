@@ -35,6 +35,7 @@ if TYPE_CHECKING:
 
 from ante.cli.main import cli
 from ante.cli.middleware import _ENCRYPTION_EXEMPT_COMMAND_PATHS
+from tests.unit.contracts.helpers import iter_click_leaf_commands
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -343,6 +344,18 @@ class TestEncryptionExemptPaths:
             ("member", "regenerate-recovery-key"),
             ("feed", "init"),
         }
+
+    def test_encryption_exempt_paths_resolve_to_real_leaves(self) -> None:
+        """면제 4 튜플 전건이 실제 Click leaf 로 존재한다.
+
+        ``_ENCRYPTION_EXEMPT_COMMAND_PATHS`` 는 문자열 literal 집합이라 CLI
+        트리 개편에 따라 drift 해도 정적으로는 잡히지 않는다. 실제 leaf
+        path 집합과 대조해 전건 실존을 검증한다.
+        """
+        leaf_paths = {leaf.path for leaf in iter_click_leaf_commands()}
+        assert _ENCRYPTION_EXEMPT_COMMAND_PATHS <= leaf_paths, (
+            _ENCRYPTION_EXEMPT_COMMAND_PATHS - leaf_paths
+        )
 
     def test_init_help_passes_without_key(
         self, runner: CliRunner, isolated_env: Path

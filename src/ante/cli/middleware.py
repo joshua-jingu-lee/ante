@@ -45,10 +45,6 @@ _AUTH_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
 #   credential decrypt 경로 없음.
 # - ``("feed", "init")``: ``FeedConfig.init()`` 만 호출, encryption 무관.
 #
-# 면제 정책 검증은 ``grep ANTE_DB_ENCRYPTION_KEY src/ante/cli/commands/{init,
-# member,feed}.py`` 로 chokepoint 변경 PR 안에서 재확인한다 (Bounded Scope
-# normative — `src/ante/main.py:292-295` 서버 init 경로 / `src/ante/ipc/registry.py
-# :768-770` IPC broker handler server-side 는 본 PR scope 외, follow-up 책임).
 _ENCRYPTION_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
     ("init",),
     ("member", "reset-password"),

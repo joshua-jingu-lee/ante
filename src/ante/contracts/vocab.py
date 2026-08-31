@@ -12,11 +12,10 @@ CLI command registry(#1815)와 IPC CommandSpec metadata(#1819) 양쪽이
 중요한 정렬:
 
 - ``raw_legacy``는 ``EnvelopeForm``에만 존재하며 ``ContractKind``에는
-  포함되지 않는다. legacy raw JSON 출력은 후속 #1815에서
+  포함되지 않는다. legacy raw JSON 출력은 CLI registry(#1815)가
   ``kind="raw"`` + ``envelope="raw_legacy"`` 조합으로 표현한다.
-- ``AuthMode``는 후속 #1815/#1819가 인증 요구사항을 같은 단어로
-  표현하기 위한 vocabulary이며, 본 모듈은 auth enforcement를 바꾸지
-  않는다.
+- ``AuthMode``는 CLI registry ``AuthContract.mode``(#1815)의 vocabulary이며,
+  본 모듈은 auth enforcement를 바꾸지 않는다.
 
 본 모듈은 runtime behavior를 가지지 않는다. enum/dataclass/helper/
 validator 추가는 의도적으로 제외한다 -- 필요해지면 별도 이슈로 분리한다.
