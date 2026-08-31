@@ -8,8 +8,7 @@ Spec / SSOT:
 - cleanup 패턴 선례: #1722 ``_create_account_service`` + #1755 ``except BaseException``
 
 본 helper는 반복되는 ``Database(get_db_path(...))`` + manual ``close()`` 패턴을
-async context manager로 캡슐화한다. 후속 callsite migration은 #1856/#1857
-에서 다룬다 — 본 PR scope는 helper 추가만이다.
+async context manager로 캡슐화한다.
 
 Codex Plan Review v2 lock:
 1. ``ctx``는 mandatory (None 명시 거부, legacy ``get_db_path()`` fallback 의존 안 함).

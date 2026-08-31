@@ -10,12 +10,9 @@ API 3종:
 - ``emit_cli_error(fmt, exc, ...)`` — CLI ``OutputFormatter.error`` callsite를
   taxonomy-정렬된 형태로 호출하는 helper. ``NoReturn`` 으로 click ``Exit`` 를
   raise 한다.
-- ``ipc_error_payload(exc)`` — IPC server.py:322 envelope ``{code, message}``
+- ``ipc_error_payload(exc)`` — IPC 서버 envelope ``{code, message}``
   shape 의 payload helper.
 
-본 PR(#1840) 범위에서는 helper 만 도입한다 — 기존 callsite (CLI middleware /
-formatter / commands, IPC server.py) 는 변경하지 않는다. callsite migration
-은 후속 PR(#1842/#1843) 책임이다.
 """
 
 from __future__ import annotations
@@ -143,9 +140,7 @@ def emit_cli_error(
 def ipc_error_payload(exc: BaseException) -> dict[str, str]:
     """``{"code", "message"}`` IPC error payload helper.
 
-    IPC server.py:322 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 패턴 대응
-    helper. 본 PR(#1840) 은 server.py callsite 를 변경하지 않으며, 본 helper 는
-    후속 #1842/#1843 callsite migration 에서 사용된다.
+    IPC 서버 ``getattr(e, "code", "EXECUTION_ERROR")`` 패턴 대응 helper.
 
     Args:
         exc: 직렬화할 exception.
