@@ -193,6 +193,7 @@ class TradeRecorder:
             reason=event.reason,
             timestamp=event.timestamp,
             account_id=event.account_id,
+            exchange=event.exchange,
         )
         await self._save(record)
 
@@ -216,6 +217,7 @@ class TradeRecorder:
             reason=event.error_message,
             timestamp=event.timestamp,
             account_id=event.account_id,
+            exchange=event.exchange,
         )
         await self._save(record)
 
@@ -240,6 +242,7 @@ class TradeRecorder:
             timestamp=event.timestamp,
             order_id=event.order_id,
             account_id=event.account_id,
+            exchange=event.exchange,
         )
         await self._save(record)
 
@@ -269,6 +272,7 @@ class TradeRecorder:
             timestamp=event.timestamp,
             order_id=event.order_id,
             account_id=event.account_id,
+            exchange=event.exchange,
         )
         await self._save(record)
 

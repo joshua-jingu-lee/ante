@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-08-27 (KST)
+> 마지막 생성 시점: 2026-09-01 (KST)
 
 ## 최상위 구조
 
@@ -283,7 +283,8 @@ src/ante/
 │   │   ├── v003_broker_config.py
 │   │   ├── v004_strategy_status_simplify.py
 │   │   ├── v005_trades_timestamp_isoformat.py
-│   │   └── v006_order_tracker_order_price.py
+│   │   ├── v006_order_tracker_order_price.py
+│   │   └── v007_order_tracker_exchange.py
 │   ├── __init__.py
 │   ├── backup.py
 │   └── migrations.py
