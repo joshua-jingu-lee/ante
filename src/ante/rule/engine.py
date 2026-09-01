@@ -1344,6 +1344,7 @@ class RuleEngine:
                         order_type=event.order_type,
                         stop_price=event.stop_price,
                         reason=event.reason,
+                        exchange=event.exchange,
                     )
                 )
                 if result.overall_result == RuleResult.WARN:
