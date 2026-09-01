@@ -131,14 +131,12 @@ class TradeRecorder:
             # #2377: 종목코드만 노출하던 라인에 종목명 병기. 미주입/조회 불가 시
             # symbol-only 로 폴백한다(format_label 이 폴백을 내장 — 무예외·무IO).
             #
-            # known-limitation(#2377): OrderFilledEvent.exchange 는 일부
-            # producer(durable fill 의 FillApplier._build_filled_payload,
-            # VirtualProvider)에서 기본값 KRX 로 들어올 수 있다. 이 경우 비-KRX
-            # 종목은 instrument cache((symbol, exchange) 키) 미스로 symbol-only
-            # 폴백된다(병기 누락이지 오표기 아님 — 다른 종목명 표기 안 함, #2377
-            # 불변식 보존). producer exchange 전파(account_id 기반 역추적)는
-            # plan 의 "schema 확장 금지"·"비-KRX 거래소 이름 소스 확장 비목표"에
-            # 따라 후속 이슈 영역.
+            # known-limitation(#2377 → #2487 로 축소): 생산자 전파는 #2487 이
+            # 닫았다(OrderTracker.exchange 단일 소스). 잔여는 v007 이전 legacy
+            # tracker row(exchange NULL)뿐이며, 그 체결은 "KRX" 로 폴백한다.
+            # 실제 거래소가 비-KRX 였다면 instrument cache((symbol, exchange)
+            # 키) 미스로 symbol-only 폴백된다(병기 누락이지 오표기 아님 —
+            # 다른 종목명을 표기하지 않으므로 #2377 불변식 보존).
             symbol_label = (
                 self._instrument_service.format_label(
                     event.symbol, event.exchange, markdown=True

@@ -648,7 +648,8 @@ tests/
 │   │   ├── test_cli_registry_docs_drift.py
 │   │   ├── test_cli_registry_guide_sync.py
 │   │   ├── test_signal_connect_codes.py
-│   │   └── test_indicator_param_drift.py
+│   │   ├── test_indicator_param_drift.py
+│   │   └── test_order_event_exchange_propagation.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py

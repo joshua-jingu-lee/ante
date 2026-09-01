@@ -20,9 +20,11 @@ from ante.db.versions import (
     v002_parquet_migration,
     v005_trades_timestamp_isoformat,
     v006_order_tracker_order_price,
+    v007_order_tracker_exchange,
 )
 
-# v006 마이그레이션 테스트용 — order_price 컬럼이 없는 legacy order_tracker DDL.
+# v006/v007 마이그레이션 테스트용 — order_price·exchange 컬럼이 모두 없는
+# legacy order_tracker DDL.
 _LEGACY_ORDER_TRACKER_DDL = """
 CREATE TABLE order_tracker (
     order_id            TEXT PRIMARY KEY,
@@ -547,3 +549,68 @@ class TestV006OrderTrackerOrderPrice:
 
         applied_seqs = await get_applied_seqs(db)
         assert 6 in applied_seqs
+
+
+class TestV007OrderTrackerExchange:
+    """#2487: v007 — order_tracker 에 exchange 컬럼 추가 (v006 1:1 미러)."""
+
+    async def test_registered_in_migrations(self):
+        """v007 이 MIGRATIONS 리스트에 등록되어 있다."""
+        seqs = [seq for seq, _, _ in MIGRATIONS]
+        fns = [fn for _, _, fn in MIGRATIONS]
+        assert 7 in seqs
+        assert v007_order_tracker_exchange.migrate in fns
+
+    async def test_adds_column_to_existing_table(self, db: Database):
+        """기존(legacy) order_tracker 테이블에 exchange 컬럼을 ALTER 추가한다."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+        # 기존 row(거래소 미상) 삽입.
+        await db.execute(
+            """INSERT INTO order_tracker
+                   (order_id, account_id, bot_id, strategy_id, broker_order_id,
+                    symbol, side, submitted_date)
+               VALUES ('ord-legacy', 'acct-A', 'bot-1', 'strat-1', '0001',
+                       '005930', 'buy', '20260601')""",
+        )
+        assert "exchange" not in await _order_tracker_columns(db)
+
+        await v007_order_tracker_exchange.migrate(db)
+
+        cols = await _order_tracker_columns(db)
+        assert "exchange" in cols
+        # 기존 row 는 NULL 로 남는다 (소비 측이 "KRX" 로 폴백).
+        row = await db.fetch_one(
+            "SELECT exchange FROM order_tracker WHERE order_id = 'ord-legacy'"
+        )
+        assert row is not None
+        assert row["exchange"] is None
+
+    async def test_idempotent_rerun(self, db: Database):
+        """컬럼이 이미 있으면 재실행 no-op (멱등)."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+        await v007_order_tracker_exchange.migrate(db)
+        # 재실행 — 예외 없이 통과.
+        await v007_order_tracker_exchange.migrate(db)
+        cols = await _order_tracker_columns(db)
+        assert "exchange" in cols
+
+    async def test_no_table_noop(self, db: Database):
+        """order_tracker 테이블 부재 DB 에서 no-op 통과(fresh install 가드)."""
+        row = await db.fetch_one(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='order_tracker'"
+        )
+        assert row is None
+        await v007_order_tracker_exchange.migrate(db)
+
+    async def test_run_migrations_applies_v007(self, db: Database):
+        """run_migrations 전체 실행이 기존 order_tracker 에 컬럼을 추가한다."""
+        await db.execute(_LEGACY_ORDER_TRACKER_DDL)
+
+        applied = await run_migrations(db)
+        assert "007_0.12.0" in applied
+
+        cols = await _order_tracker_columns(db)
+        assert "exchange" in cols
+
+        applied_seqs = await get_applied_seqs(db)
+        assert 7 in applied_seqs
