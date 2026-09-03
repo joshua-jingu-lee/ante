@@ -1,0 +1,59 @@
+name: "[chore] 빌드 / CI / 인프라"
+description: 빌드, CI/CD, 배포, 의존성, 운영 스크립트 등 잡무
+labels: ["chore"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 어떤 운영·빌드상의 불편이나 결함이 있는지.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 변경 범위
+      description: 손댈 파일·워크플로·스크립트 목록을 적어주세요.
+      value: |
+        - `.github/workflows/...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: consumers
+    attributes:
+      label: 영향 소비자
+      description: 이 변경이 닿는 CI job, 배포 경로, 로컬 개발 흐름, 릴리스 절차를 적어주세요.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: risk-flags
+    attributes:
+      label: 위험 신호
+      options:
+        - label: secret / 토큰 취급
+        - label: 릴리스 / 배포 경로 변경
+        - label: 의존성 추가·버전 변경
+        - label: 생성 산출물 동기화
+        - label: 되돌리기 어려운 인프라 변경
+
+  - type: textarea
+    id: verification
+    attributes:
+      label: 검증 방법
+      description: 변경이 동작함을 어떻게 확인할지 적어주세요 (실행할 명령, 관측할 CI job 등).
+    validations:
+      required: true
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 변경 적용
+        - [ ] 검증 방법 실행 및 결과 첨부
+        - [ ] 관련 문서 갱신 (해당 시)
+    validations:
+      required: true

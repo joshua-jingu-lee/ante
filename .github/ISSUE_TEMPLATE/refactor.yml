@@ -1,5 +1,5 @@
-name: "[refactor] 리팩터링 / 성능 개선"
-description: 코드 개선 또는 성능 최적화
+name: "[refactor] 리팩터링"
+description: 동작을 바꾸지 않는 코드 구조 개선
 labels: ["refactor"]
 body:
   - type: textarea
@@ -55,6 +55,5 @@ body:
       value: |
         - [ ] 리팩터링 완료
         - [ ] 기존 테스트 전체 통과
-        - [ ] 성능 개선 시: 개선 수치 측정
     validations:
       required: true

@@ -1,0 +1,54 @@
+name: "[docs] 문서 작성/수정"
+description: 문서 작성 또는 수정 요청
+labels: ["docs"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 지금 문서가 무엇을 잘못 말하고 있는지, 또는 어떤 서술이 비어 있는지.
+    validations:
+      required: true
+
+  - type: textarea
+    id: target-docs
+    attributes:
+      label: 대상 문서
+      description: 고칠 문서의 저장소 루트 상대 경로와 절 번호를 적어주세요.
+      value: |
+        - `docs/runbooks/00-issue-management.md` §2
+    validations:
+      required: true
+
+  - type: textarea
+    id: ssot-relation
+    attributes:
+      label: SSOT 관계
+      description: 이 서술의 정본이 어느 문서인지, 대상 문서가 정본인지 사본인지 적어주세요. 사본이면 정본을 먼저 고쳐야 합니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: consumers
+    attributes:
+      label: 읽어야 할 소비자
+      description: 이 서술을 참조하는 다른 문서·커맨드·에이전트 정의·CI 스크립트를 적어주세요. 수정 금지 표면이면 그렇게 표시해주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 인접하지만 이번 이슈에서 고치지 않을 문서·절을 적어주세요. 소유 이슈가 따로 있으면 번호를 적어주세요.
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 대상 문서 수정
+        - [ ] 사본 문서와의 정합 확인 (해당 시)
+        - [ ] 생성 산출물 재생성 (해당 시)
+    validations:
+      required: true

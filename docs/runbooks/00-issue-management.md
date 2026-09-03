@@ -27,18 +27,22 @@
 
 ### Type
 
-| Type | 설명 | 대응 라벨 |
-|------|------|-----------|
-| `feat` | 새 기능 추가 | `enhancement` |
-| `fix` | 버그 수정 | `bug` |
-| `refactor` | 리팩토링 | `refactor` |
-| `perf` | 성능 개선 | `enhancement` |
-| `docs` | 문서 작성/수정 | `docs` |
-| `test` | 테스트 추가/수정 | `test` |
-| `chore` | 빌드, CI, 인프라 등 | `chore` |
+| Type | 설명 | 대응 라벨 | 폼 템플릿 |
+|------|------|-----------|-----------|
+| `feat` | 새 기능 추가 | `enhancement` | `.github/ISSUE_TEMPLATE/feature.yml` |
+| `fix` | 버그 수정 | `bug` | `.github/ISSUE_TEMPLATE/bug.yml` |
+| `refactor` | 리팩토링 | `refactor` | `.github/ISSUE_TEMPLATE/refactor.yml` |
+| `perf` | 성능 개선 | `enhancement` | `.github/ISSUE_TEMPLATE/perf.yml` |
+| `docs` | 문서 작성/수정 | `docs` | `.github/ISSUE_TEMPLATE/docs.yml` |
+| `test` | 테스트 추가/수정 | `test` | `.github/ISSUE_TEMPLATE/test.yml` |
+| `chore` | 빌드, CI, 인프라 등 | `chore` | `.github/ISSUE_TEMPLATE/chore.yml` |
+
+`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — UI 경로로 만든 이슈는 타입 라벨을 반드시 하나 갖는다. 타입 라벨이 없는 채로 등록된 이슈는 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지므로, 타입에 맞는 폼을 골라 등록하는 것이 그 귀결을 피하는 정상 경로다.
+
+`epic`·`release`는 이 표의 Type이 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 둘 다 폼 템플릿 대상이 아니며, 브랜치 prefix 축에서의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
 
 브랜치 prefix 매핑과 PR 규칙은 [03-git-workflow.md](03-git-workflow.md)가 SSOT다.
-이 문서는 이슈 제목 타입과 라벨만 정의한다.
+이 문서는 이슈 제목 타입과 라벨, 그리고 그 타입의 폼 템플릿 파일만 정의한다.
 
 ### 예시
 
@@ -52,6 +56,8 @@
 ```
 
 ## 3. 이슈 본문 구조
+
+아래 §3.1–3.4는 `feat`·`fix`·`refactor`와 에픽 이슈의 본문 구조만 규정한다. 그 밖의 타입 — `perf`·`docs`·`test`·`chore` — 은 본문 구조를 여기에 중복 정의하지 않고, §2 `폼 템플릿` 열이 가리키는 파일의 필드 구성을 정본으로 삼는다. 해당 타입의 이슈를 손으로 작성할 때도 그 파일의 필드를 그대로 절 제목으로 옮겨 적는다.
 
 ### 3.1 기능 요청 (feat)
 
@@ -120,7 +126,7 @@ API / CLI / DB schema / generated type / runtime config 중 해당 항목.
 - [ ] 재현 시나리오 기반 테스트 추가
 ```
 
-### 3.3 리팩터링 / 성능 개선
+### 3.3 리팩터링
 
 ```markdown
 ## 배경
@@ -144,7 +150,6 @@ API / CLI / DB schema / generated type / runtime config 중 해당 항목.
 ## 완료 조건
 - [ ] 리팩터링 완료
 - [ ] 기존 테스트 전체 통과
-- [ ] 성능 개선 시: 개선 수치 측정
 ```
 
 ### 3.4 에픽 이슈

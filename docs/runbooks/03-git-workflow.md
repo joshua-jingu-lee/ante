@@ -47,6 +47,24 @@ release/v0.9.0
 일반 구현 이슈는 `/implement-issue`, `/autopilot`, 내부 `/code-review` 브랜치 리뷰가 이 매핑을 기준으로 정렬한다.
 `release/` 브랜치는 일반 구현 이슈가 아니라 `/release prepare`만 생성한다. 단, 핫픽스 라인 브랜치 `release/X.Y`(패치 자리 없음, 예: `release/1.0`)는 예외로 운영 태그에서 수동 절단하며 `/release prepare`를 거치지 않는다([06-release.md §10 핫픽스 릴리스](06-release.md#10-핫픽스-릴리스)).
 
+#### 타입 라벨이 없는 이슈의 prefix 결정
+
+위 표 `대응 라벨` 열의 `feat`~`chore` 7행에 나오는 라벨 6종(`enhancement`·`bug`·`refactor`·`docs`·`test`·`chore`)을 **하나도 갖지 않은 이슈**가 이 절의 정의역이다. 이 6종은 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」 → 「포함 대상」이 열거하는 라벨 집합과 같은 집합이다. 위 표의 `epic`·`release` 행은 타입 라벨 축이 아니므로 정의역 산정에서 제외한다. area 라벨만 붙은 채 큐에 편입된 이슈가 이 정의역의 대표 사례다.
+
+판정 전에 두 가지를 먼저 처리한다.
+
+- **`epic` 라벨이 붙은 이슈는 정의역에서 제외한다.** 그 이슈의 브랜치는 위 표 `epic` 행이 정본이고, 에픽 통합 브랜치와 하위 이슈 브랜치의 관계는 §1.1이 따로 정한다. 아래 갈래로 흘려보내지 않는다.
+- **`feature`(legacy) 라벨이 붙은 이슈는 [00-issue-management.md](00-issue-management.md) §4 `feature` 행의 승계 규칙(→ `enhancement`)을 먼저 적용한다.** 승계하면 타입 라벨을 가진 이슈가 되어 이 절의 정의역 밖으로 나가고, 위 표의 `enhancement` 행이 그대로 적용된다.
+
+그 뒤 이슈 제목으로 판정한다.
+
+1. 제목이 [00-issue-management.md](00-issue-management.md) §2의 `[{type}]` 규약을 따르고 그 `{type}`이 `feat`·`fix`·`refactor`·`perf`·`docs`·`test`·`chore` 7종 중 하나이면, 위 표에서 그 타입 행의 prefix를 쓴다.
+2. **그 외 전부**는 `chore/`를 쓴다. 타입 축이 아닌 토큰(`[epic]`·`[release]`), 표에 없는 미지 토큰, 제목이 `[{type}]` 규약을 따르지 않는 경우를 모두 포함한다.
+
+커밋 `<type>`은 이렇게 결정된 prefix와 같은 토큰을 쓴다(예: prefix가 `docs/`면 커밋은 `docs(...)`, 갈래 2로 결정됐으면 `chore(...)`). 갈래 1의 7종과 갈래 2의 `chore`는 모두 §2 커밋 타입 표에 실재하므로 별도 매핑이 필요 없다.
+
+두 갈래가 산출하는 prefix는 갈래 1의 7종과 `chore/`뿐이며 전부 §3.1 브랜치 리뷰 트리거 대상 글롭(`docs/*`·`chore/*` 등) 안에 떨어진다. 따라서 이 규칙으로 만든 브랜치는 Gate A가 정상 트리거되고, 라벨이 비어 있다는 이유로 사전 리뷰가 건너뛰어지지 않는다.
+
 ### 1.3 에픽 하위 브랜치 최신화
 
 - 에픽 하위 이슈 브랜치는 PR 생성 전 최신 `origin/epic/*`를 기준으로 해야 한다.

@@ -1,0 +1,64 @@
+name: "[perf] 성능 개선"
+description: 처리량, 지연, 메모리 등 성능 지표 개선
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 어떤 경로가 느리거나 무거운지, 그것이 왜 문제가 되는지.
+    validations:
+      required: true
+
+  - type: textarea
+    id: baseline
+    attributes:
+      label: 현재 측정값
+      description: 측정 방법과 함께 baseline 수치를 적어주세요. 측정 없이 시작하면 개선 여부를 판정할 수 없습니다.
+      value: |
+        - 측정 대상:
+        - 측정 방법:
+        - 측정값:
+    validations:
+      required: true
+
+  - type: textarea
+    id: target
+    attributes:
+      label: 목표 수치
+      description: 어디까지 줄이면 이 이슈가 닫히는지 수치로 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: 보존해야 할 동작 invariant
+      description: 최적화 후에도 절대 바뀌면 안 되는 동작을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: scope
+    attributes:
+      label: 변경 범위
+      description: 손댈 모듈·파일 목록과, 함께 건드리지 않을 인접 표면을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: approach
+    attributes:
+      label: 접근 방법
+      description: 어떤 방식으로 개선할 것인지 (구체적 전략). 선택 항목입니다.
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 개선 적용
+        - [ ] 같은 측정 방법으로 재측정하여 목표 수치 달성 확인
+        - [ ] 보존 invariant를 검증하는 기존 테스트 전체 통과
+    validations:
+      required: true

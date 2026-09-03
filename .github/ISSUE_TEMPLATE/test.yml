@@ -1,0 +1,54 @@
+name: "[test] 테스트 추가/수정"
+description: 테스트 추가 또는 보강 요청
+labels: ["test"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 어떤 동작이 지금 검증되지 않고 있는지, 왜 지금 필요한지.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-surface
+    attributes:
+      label: 대상 테스트 표면
+      description: 추가·보강할 테스트 파일 경로와 TC 카테고리(unit / integration / e2e)를 적어주세요.
+      value: |
+        - `tests/unit/...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: 잠글 불변식
+      description: 테스트가 고정해야 할 동작을 적어주세요. 열거가 아니라 정의로 닫을 수 있으면 그 정의를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: first-failing-check
+    attributes:
+      label: 첫 failing check
+      description: 새 테스트를 현재 코드에 대해 돌렸을 때 실패해야 하는 지점을 적어주세요. baseline에서 통과해버리면 판별력이 없는 테스트입니다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 함께 고치지 않을 프로덕션 코드 변경이나 인접 테스트 표면을 적어주세요.
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 테스트 추가/보강
+        - [ ] baseline에서 FAIL, 수정 후 PASS 확인
+        - [ ] 기존 테스트 전체 통과
+    validations:
+      required: true
