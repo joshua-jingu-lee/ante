@@ -1,5 +1,6 @@
 name: "[perf] 성능 개선"
 description: 처리량, 지연, 메모리 등 성능 지표 개선
+title: "[perf] "
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -14,8 +15,8 @@ body:
     id: baseline
     attributes:
       label: 현재 측정값
-      description: 측정 방법과 함께 baseline 수치를 적어주세요. 측정 없이 시작하면 개선 여부를 판정할 수 없습니다.
-      value: |
+      description: 측정 대상·측정 방법·측정값을 함께 적어주세요. 측정 없이 시작하면 개선 여부를 판정할 수 없습니다.
+      placeholder: |
         - 측정 대상:
         - 측정 방법:
         - 측정값:
@@ -42,7 +43,15 @@ body:
     id: scope
     attributes:
       label: 변경 범위
-      description: 손댈 모듈·파일 목록과, 함께 건드리지 않을 인접 표면을 적어주세요.
+      description: 손댈 모듈·파일 목록을 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 함께 손대지 않을 인접 경로와 최적화를 적어주세요. 소유 이슈가 따로 있으면 번호를 적어주세요.
     validations:
       required: true
 

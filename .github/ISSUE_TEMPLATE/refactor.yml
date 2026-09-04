@@ -1,5 +1,6 @@
 name: "[refactor] 리팩터링"
 description: 동작을 바꾸지 않는 코드 구조 개선
+title: "[refactor] "
 labels: ["refactor"]
 body:
   - type: textarea

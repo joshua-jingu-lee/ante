@@ -1,5 +1,6 @@
 name: "[chore] 빌드 / CI / 인프라"
 description: 빌드, CI/CD, 배포, 의존성, 운영 스크립트 등 잡무
+title: "[chore] "
 labels: ["chore"]
 body:
   - type: textarea
@@ -15,7 +16,7 @@ body:
     attributes:
       label: 변경 범위
       description: 손댈 파일·워크플로·스크립트 목록을 적어주세요.
-      value: |
+      placeholder: |
         - `.github/workflows/...`
     validations:
       required: true
@@ -25,6 +26,14 @@ body:
     attributes:
       label: 영향 소비자
       description: 이 변경이 닿는 CI job, 배포 경로, 로컬 개발 흐름, 릴리스 절차를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 함께 손대지 않을 워크플로·스크립트·운영 경로를 적어주세요. 소유 이슈가 따로 있으면 번호를 적어주세요.
     validations:
       required: true
 

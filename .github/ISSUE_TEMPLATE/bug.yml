@@ -1,5 +1,6 @@
 name: "[fix] 버그 리포트"
 description: 버그 수정 요청
+title: "[fix] "
 labels: ["bug"]
 body:
   - type: textarea
@@ -14,10 +15,11 @@ body:
     id: reproduce
     attributes:
       label: 재현 절차
-      value: |
-        1.
-        2.
-        3.
+      description: 어떤 순서로 조작하면 현상이 다시 나타나는지 번호 목록으로 적어주세요.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
     validations:
       required: true
 

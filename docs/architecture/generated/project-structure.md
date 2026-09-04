@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-09-01 (KST)
+> 마지막 생성 시점: 2026-09-04 (KST)
 
 ## 최상위 구조
 
@@ -742,7 +742,8 @@ tests/
 │   ├── test_kis_token_cooldown.py
 │   ├── test_kis_token_single_flight.py
 │   ├── test_stop_session_expiry_wiring.py
-│   └── test_store_atomic_persist.py
+│   ├── test_store_atomic_persist.py
+│   └── test_issue_templates.py
 ├── __init__.py
 └── integration/
     ├── __init__.py

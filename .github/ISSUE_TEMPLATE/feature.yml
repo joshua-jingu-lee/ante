@@ -1,5 +1,6 @@
 name: "[feat] 기능 요청"
 description: 새 기능 추가 요청
+title: "[feat] "
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -52,7 +53,7 @@ body:
     attributes:
       label: 검증 시나리오
       description: 기능이 제대로 동작함을 보여줄 2~4개 시나리오를 적어주세요.
-      value: |
+      placeholder: |
         - 시나리오 1:
         - 시나리오 2:
     validations:

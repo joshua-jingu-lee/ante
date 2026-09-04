@@ -37,7 +37,9 @@
 | `test` | 테스트 추가/수정 | `test` | `.github/ISSUE_TEMPLATE/test.yml` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` | `.github/ISSUE_TEMPLATE/chore.yml` |
 
-`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — UI 경로로 만든 이슈는 타입 라벨을 반드시 하나 갖는다. 타입 라벨이 없는 채로 등록된 이슈는 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지므로, 타입에 맞는 폼을 골라 등록하는 것이 그 귀결을 피하는 정상 경로다.
+`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — 폼 템플릿으로 만든 이슈는 그 행의 `대응 라벨`을 자동으로 받으므로 타입 라벨을 하나 갖는다. 타입 라벨도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)도 없는 이슈만 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지고, area 라벨만 있는 이슈는 큐에 정상 편입되되 브랜치 prefix는 [03-git-workflow.md](03-git-workflow.md) §1.2 「타입 라벨이 없는 이슈의 prefix 결정」이 정한다. 타입에 맞는 폼을 골라 등록하는 것이 그 두 갈래를 모두 피하는 정상 경로다.
+
+**한계** — `.github/ISSUE_TEMPLATE/config.yml`이 없어 GitHub 기본값 `blank_issues_enabled: true`가 적용되고, 저장소가 PUBLIC이고 issues가 켜져 있어 `New issue` 화면 하단에 `빈 이슈(blank issue)` 경로가 그대로 열려 있다. 그 경로로 만든 이슈는 라벨이 0개이므로, 폼 7종 커버리지가 「등록된 모든 이슈는 타입 라벨을 갖는다」를 전칭으로 보장하지는 못한다. 라벨이 비어 있는 그런 이슈는 위 문단이 적은 `needs-triage` 갈래로 흡수된다. 이 경로를 아예 막을지는 외부 공개 이슈를 받지 않는다는 §1의 D-020 계약과 함께 판단할 정책 결정이라 이 문서가 규정하지 않고, 결정과 집행은 후속 정책 이슈가 소유한다.
 
 `epic`·`release`는 이 표의 Type이 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 둘 다 폼 템플릿 대상이 아니며, 브랜치 prefix 축에서의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
 
@@ -52,12 +54,15 @@
 [refactor] Broker 어댑터 인터페이스 통일
 [perf] Parquet 읽기 시 컬럼 프루닝 적용
 [docs] API 엔드포인트 레퍼런스 문서 작성
+[test] 주문 재시도 경로 회귀 테스트 보강
 [chore] GitHub Actions 캐시 키 정책 정리
 ```
 
 ## 3. 이슈 본문 구조
 
 아래 §3.1–3.4는 `feat`·`fix`·`refactor`와 에픽 이슈의 본문 구조만 규정한다. 그 밖의 타입 — `perf`·`docs`·`test`·`chore` — 은 본문 구조를 여기에 중복 정의하지 않고, §2 `폼 템플릿` 열이 가리키는 파일의 필드 구성을 정본으로 삼는다. 해당 타입의 이슈를 손으로 작성할 때도 그 파일의 필드를 그대로 절 제목으로 옮겨 적는다.
+
+> §3.1–3.3의 본문 골격은 `.github/ISSUE_TEMPLATE/feature.yml`·`bug.yml`·`refactor.yml`의 필드 구성과 같은 내용을 이중 정의한다. **정본은 이 절**이고 폼 파일이 사본이다. 한쪽에서 필드를 더하거나 빼거나 이름을 바꿀 때는 다른 쪽을 같은 PR에서 함께 고친다.
 
 ### 3.1 기능 요청 (feat)
 

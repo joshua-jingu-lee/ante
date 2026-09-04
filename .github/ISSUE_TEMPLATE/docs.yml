@@ -1,5 +1,6 @@
 name: "[docs] 문서 작성/수정"
 description: 문서 작성 또는 수정 요청
+title: "[docs] "
 labels: ["docs"]
 body:
   - type: textarea
@@ -15,7 +16,7 @@ body:
     attributes:
       label: 대상 문서
       description: 고칠 문서의 저장소 루트 상대 경로와 절 번호를 적어주세요.
-      value: |
+      placeholder: |
         - `docs/runbooks/00-issue-management.md` §2
     validations:
       required: true
@@ -41,6 +42,8 @@ body:
     attributes:
       label: 비목표
       description: 인접하지만 이번 이슈에서 고치지 않을 문서·절을 적어주세요. 소유 이슈가 따로 있으면 번호를 적어주세요.
+    validations:
+      required: true
 
   - type: textarea
     id: done-criteria
