@@ -32,7 +32,7 @@ body:
   - type: textarea
     id: consumers
     attributes:
-      label: 읽어야 할 소비자
+      label: 영향 소비자
       description: 이 서술을 참조하는 다른 문서·커맨드·에이전트 정의·CI 스크립트를 적어주세요. 수정 금지 표면이면 그렇게 표시해주세요.
     validations:
       required: true
@@ -49,7 +49,7 @@ body:
     id: technical-notes
     attributes:
       label: 기술 노트
-      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 `- 선행: #번호`를 여기에 적는다. (선택)"
+      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. (선택)
 
   - type: textarea
     id: done-criteria

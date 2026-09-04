@@ -27,19 +27,15 @@
 
 ### Type
 
-| Type | 설명 | 대응 라벨 | 폼 템플릿 |
-|------|------|-----------|-----------|
-| `feat` | 새 기능 추가 | `enhancement` | `.github/ISSUE_TEMPLATE/feature.yml` |
-| `fix` | 버그 수정 | `bug` | `.github/ISSUE_TEMPLATE/bug.yml` |
-| `refactor` | 리팩토링 | `refactor` | `.github/ISSUE_TEMPLATE/refactor.yml` |
-| `perf` | 성능 개선 | `enhancement` | `.github/ISSUE_TEMPLATE/perf.yml` |
-| `docs` | 문서 작성/수정 | `docs` | `.github/ISSUE_TEMPLATE/docs.yml` |
-| `test` | 테스트 추가/수정 | `test` | `.github/ISSUE_TEMPLATE/test.yml` |
-| `chore` | 빌드, CI, 인프라 등 | `chore` | `.github/ISSUE_TEMPLATE/chore.yml` |
-
-`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 붙인다.
-
-`epic`·`release`는 이 표의 Type이 아니라 폼 템플릿 대상도 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 브랜치 prefix 축에서 두 값의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
+| Type | 설명 | 대응 라벨 |
+|------|------|-----------|
+| `feat` | 새 기능 추가 | `enhancement` |
+| `fix` | 버그 수정 | `bug` |
+| `refactor` | 리팩토링 | `refactor` |
+| `perf` | 성능 개선 | `enhancement` |
+| `docs` | 문서 작성/수정 | `docs` |
+| `test` | 테스트 추가/수정 | `test` |
+| `chore` | 빌드, CI, 인프라 등 | `chore` |
 
 브랜치 prefix 매핑과 PR 규칙은 [03-git-workflow.md](03-git-workflow.md)가 SSOT다.
 이 문서는 이슈 제목 타입과 라벨만 정의한다.
@@ -52,7 +48,6 @@
 [refactor] Broker 어댑터 인터페이스 통일
 [perf] Parquet 읽기 시 컬럼 프루닝 적용
 [docs] API 엔드포인트 레퍼런스 문서 작성
-[test] 주문 재시도 경로 회귀 테스트 보강
 [chore] GitHub Actions 캐시 키 정책 정리
 ```
 
@@ -125,7 +120,7 @@ API / CLI / DB schema / generated type / runtime config 중 해당 항목.
 - [ ] 재현 시나리오 기반 테스트 추가
 ```
 
-### 3.3 리팩터링
+### 3.3 리팩터링 / 성능 개선
 
 ```markdown
 ## 배경
@@ -143,12 +138,13 @@ API / CLI / DB schema / generated type / runtime config 중 해당 항목.
 ## 금지할 확장
 이번 이슈에서 같이 하지 않을 구조 변경.
 
-## 접근 방법 (선택)
+## 접근 방법
 어떻게 개선할 것인지 (구체적 전략).
 
 ## 완료 조건
 - [ ] 리팩터링 완료
 - [ ] 기존 테스트 전체 통과
+- [ ] 성능 개선 시: 개선 수치 측정
 ```
 
 ### 3.4 에픽 이슈

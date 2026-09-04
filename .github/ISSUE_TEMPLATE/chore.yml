@@ -37,17 +37,6 @@ body:
     validations:
       required: true
 
-  - type: checkboxes
-    id: risk-flags
-    attributes:
-      label: 위험 신호
-      options:
-        - label: secret / 토큰 취급
-        - label: 릴리스 / 배포 경로 변경
-        - label: 의존성 추가·버전 변경
-        - label: 생성 산출물 동기화
-        - label: 되돌리기 어려운 인프라 변경
-
   - type: textarea
     id: verification
     attributes:
@@ -60,7 +49,7 @@ body:
     id: technical-notes
     attributes:
       label: 기술 노트
-      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 `- 선행: #번호`를 여기에 적는다. (선택)"
+      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. (선택)
 
   - type: textarea
     id: done-criteria

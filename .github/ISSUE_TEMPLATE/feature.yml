@@ -1,6 +1,5 @@
 name: "[feat] 기능 요청"
 description: 새 기능 추가 요청
-title: "[feat] "
 labels: ["enhancement"]
 body:
   - type: textarea
@@ -16,7 +15,7 @@ body:
     attributes:
       label: 유저스토리
       description: 체크리스트 형태로 작성.
-      placeholder: |
+      value: |
         - [ ] {actor}는 {action}을 할 수 있다. 그래서 {benefit}.
     validations:
       required: true
@@ -53,7 +52,7 @@ body:
     attributes:
       label: 검증 시나리오
       description: 기능이 제대로 동작함을 보여줄 2~4개 시나리오를 적어주세요.
-      placeholder: |
+      value: |
         - 시나리오 1:
         - 시나리오 2:
     validations:
@@ -63,7 +62,7 @@ body:
     id: technical-notes
     attributes:
       label: 기술 노트
-      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. (선택)
+      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등.
 
   - type: textarea
     id: done-criteria
@@ -73,3 +72,5 @@ body:
         - [ ] 기능 구현
         - [ ] 단위 테스트 통과
         - [ ] 관련 문서 갱신 (해당 시)
+    validations:
+      required: true
