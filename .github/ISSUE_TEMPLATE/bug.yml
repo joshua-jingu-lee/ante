@@ -68,5 +68,3 @@ body:
       value: |
         - [ ] 버그 수정
         - [ ] 재현 시나리오 기반 테스트 추가
-    validations:
-      required: true

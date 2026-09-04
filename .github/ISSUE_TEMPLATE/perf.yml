@@ -43,7 +43,7 @@ body:
     id: scope
     attributes:
       label: 변경 범위
-      description: 손댈 모듈·파일 목록을 적어주세요.
+      description: 영향받는 모듈, 파일 목록을 적어주세요.
     validations:
       required: true
 
@@ -51,7 +51,7 @@ body:
     id: out-of-scope
     attributes:
       label: 비목표
-      description: 이번 이슈에서 함께 손대지 않을 인접 경로와 최적화를 적어주세요. 소유 이슈가 따로 있으면 번호를 적어주세요.
+      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
     validations:
       required: true
 
@@ -62,6 +62,20 @@ body:
       description: 어떤 방식으로 개선할 것인지 (구체적 전략). (선택)
 
   - type: textarea
+    id: consumers
+    attributes:
+      label: 영향 소비자
+      description: 이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: 기술 노트
+      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 `- 선행: #번호`를 여기에 적는다. (선택)"
+
+  - type: textarea
     id: done-criteria
     attributes:
       label: 완료 조건
@@ -69,5 +83,3 @@ body:
         - [ ] 개선 적용
         - [ ] 같은 측정 방법으로 재측정하여 목표 수치 달성 확인
         - [ ] 보존 invariant를 검증하는 기존 테스트 전체 통과
-    validations:
-      required: true

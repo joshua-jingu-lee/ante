@@ -56,5 +56,4 @@ body:
       value: |
         - [ ] 리팩터링 완료
         - [ ] 기존 테스트 전체 통과
-    validations:
-      required: true
+        - [ ] 처리량·지연을 개선한다고 주장하면 before/after 수치 측정 (그 축이 주가 되면 `[perf]` 폼으로 등록한다)

@@ -42,7 +42,7 @@
 `epic`·`release`는 이 표의 Type이 아니라 폼 템플릿 대상도 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 브랜치 prefix 축에서 두 값의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
 
 브랜치 prefix 매핑과 PR 규칙은 [03-git-workflow.md](03-git-workflow.md)가 SSOT다.
-이 문서는 이슈 제목 타입과 라벨, 그리고 그 타입의 폼 템플릿 파일만 정의한다.
+이 문서는 이슈 제목 타입과 라벨만 정의한다.
 
 ### 예시
 
