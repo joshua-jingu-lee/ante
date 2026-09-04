@@ -37,9 +37,9 @@
 | `test` | 테스트 추가/수정 | `test` | `.github/ISSUE_TEMPLATE/test.yml` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` | `.github/ISSUE_TEMPLATE/chore.yml` |
 
-`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — 폼 템플릿으로 만든 이슈는 그 행의 `대응 라벨`을 자동으로 받으므로 타입 라벨을 하나 갖는다. 타입 라벨도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)도 없는 이슈만 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지고, area 라벨만 있는 이슈는 큐에 정상 편입되되 브랜치 prefix는 [03-git-workflow.md](03-git-workflow.md) §1.2 「타입 라벨이 없는 이슈의 prefix 결정」이 정한다. 타입에 맞는 폼을 골라 등록하는 것이 그 두 갈래를 모두 피하는 정상 경로다.
+`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — 폼 템플릿으로 만든 이슈는 그 행의 `대응 라벨`을 자동으로 받으므로 타입 라벨을 하나 갖는다. 타입 라벨도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)도 없는 이슈는 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지고, area 라벨만 있는 이슈는 큐에 정상 편입되되 브랜치 prefix는 [03-git-workflow.md](03-git-workflow.md) §1.2 「타입 라벨이 없는 이슈의 prefix 결정」이 정한다. 타입에 맞는 폼을 골라 등록하는 것이 그 두 갈래를 모두 피하는 정상 경로다. **이것이 `needs-triage`가 붙는 유일한 경로는 아니다** — §4.1은 타입 라벨을 가진 이슈에도 붙는 경로들(미검증 버그 후보의 `이슈 검증` verdict가 `confirmed`가 아닌 경우 등)을 따로 정의한다.
 
-**한계** — `.github/ISSUE_TEMPLATE/config.yml`이 없어 GitHub 기본값 `blank_issues_enabled: true`가 적용되고, 저장소가 PUBLIC이고 issues가 켜져 있어 `New issue` 화면 하단에 `빈 이슈(blank issue)` 경로가 그대로 열려 있다. 그 경로로 만든 이슈는 라벨이 0개이므로, 폼 7종 커버리지가 「등록된 모든 이슈는 타입 라벨을 갖는다」를 전칭으로 보장하지는 못한다. 라벨이 비어 있는 그런 이슈는 위 문단이 적은 `needs-triage` 갈래로 흡수된다. 이 경로를 아예 막을지는 외부 공개 이슈를 받지 않는다는 §1의 D-020 계약과 함께 판단할 정책 결정이라 이 문서가 규정하지 않고, 결정과 집행은 후속 정책 이슈가 소유한다.
+**한계** — `.github/ISSUE_TEMPLATE/config.yml`이 없어 GitHub 기본값 `blank_issues_enabled: true`가 적용되고, 저장소가 PUBLIC이고 issues가 켜져 있어 `New issue` 화면 하단에 `빈 이슈(blank issue)` 경로가 그대로 열려 있다. 그 경로로 만든 이슈는 라벨이 0개이므로, 폼 7종 커버리지가 「등록된 모든 이슈는 타입 라벨을 갖는다」를 전칭으로 보장하지는 못한다. 라벨이 비어 있는 그런 이슈는 위 문단이 적은 `needs-triage` 갈래로 흡수된다. 이 경로를 아예 막을지는 외부 공개 이슈를 받지 않는다는 §1의 D-020 계약과 함께 판단할 정책 결정이라 이 문서가 규정하지 않고, 결정과 집행은 [#2502](https://github.com/joshua-jingu-lee/ante/issues/2502)가 소유한다.
 
 `epic`·`release`는 이 표의 Type이 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 둘 다 폼 템플릿 대상이 아니며, 브랜치 prefix 축에서의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
 
@@ -149,7 +149,7 @@ API / CLI / DB schema / generated type / runtime config 중 해당 항목.
 ## 금지할 확장
 이번 이슈에서 같이 하지 않을 구조 변경.
 
-## 접근 방법
+## 접근 방법 (선택)
 어떻게 개선할 것인지 (구체적 전략).
 
 ## 완료 조건
