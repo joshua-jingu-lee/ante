@@ -59,7 +59,7 @@ body:
     id: approach
     attributes:
       label: 접근 방법
-      description: 어떤 방식으로 개선할 것인지 (구체적 전략). 선택 항목입니다.
+      description: 어떤 방식으로 개선할 것인지 (구체적 전략). (선택)
 
   - type: textarea
     id: done-criteria

@@ -37,9 +37,11 @@
 | `test` | 테스트 추가/수정 | `test` | `.github/ISSUE_TEMPLATE/test.yml` |
 | `chore` | 빌드, CI, 인프라 등 | `chore` | `.github/ISSUE_TEMPLATE/chore.yml` |
 
-`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — 폼 템플릿으로 만든 이슈는 그 행의 `대응 라벨`을 자동으로 받으므로 타입 라벨을 하나 갖는다. 타입 라벨도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)도 없는 이슈는 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지고, area 라벨만 있는 이슈는 큐에 정상 편입되되 브랜치 prefix는 [03-git-workflow.md](03-git-workflow.md) §1.2 「타입 라벨이 없는 이슈의 prefix 결정」이 정한다. 타입에 맞는 폼을 골라 등록하는 것이 그 두 갈래를 모두 피하는 정상 경로다. **이것이 `needs-triage`가 붙는 유일한 경로는 아니다** — §4.1은 타입 라벨을 가진 이슈에도 붙는 경로들(미검증 버그 후보의 `이슈 검증` verdict가 `confirmed`가 아닌 경우 등)을 따로 정의한다.
+`폼 템플릿` 열은 GitHub UI(`Issues` → `New issue`)에서 그 타입의 이슈를 만들 때 고르는 폼 파일이고, 각 파일의 `labels:`가 같은 행의 `대응 라벨`을 자동으로 붙인다. **7행 전건에 폼 템플릿이 있다** — 폼 템플릿으로 만든 이슈는 그 행의 `대응 라벨`을 자동으로 받으므로 타입 라벨을 하나 갖는다. 타입 라벨도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`)도 없는 이슈는 autopilot 큐 판정에서 [§4.1 `needs-triage`](#41-needs-triage-라벨)가 붙어 자동 처리에서 빠지고, area 라벨만 있는 이슈는 큐에 정상 편입된다(그 이슈의 브랜치 prefix 해소는 [#2507](https://github.com/joshua-jingu-lee/ante/issues/2507)이 소유한다). 타입에 맞는 폼을 골라 등록하는 것이 그 두 갈래를 모두 피하는 정상 경로다. **이것이 `needs-triage`가 붙는 유일한 경로는 아니다** — §4.1은 타입 라벨을 가진 이슈에도 붙는 경로들(미검증 버그 후보의 `이슈 검증` verdict가 `confirmed`가 아닌 경우 등)을 따로 정의한다.
 
-**한계** — `.github/ISSUE_TEMPLATE/config.yml`이 없어 GitHub 기본값 `blank_issues_enabled: true`가 적용되고, 저장소가 PUBLIC이고 issues가 켜져 있어 `New issue` 화면 하단에 `빈 이슈(blank issue)` 경로가 그대로 열려 있다. 그 경로로 만든 이슈는 라벨이 0개이므로, 폼 7종 커버리지가 「등록된 모든 이슈는 타입 라벨을 갖는다」를 전칭으로 보장하지는 못한다. 라벨이 비어 있는 그런 이슈는 위 문단이 적은 `needs-triage` 갈래로 흡수된다. 이 경로를 아예 막을지는 외부 공개 이슈를 받지 않는다는 §1의 D-020 계약과 함께 판단할 정책 결정이라 이 문서가 규정하지 않고, 결정과 집행은 [#2502](https://github.com/joshua-jingu-lee/ante/issues/2502)가 소유한다.
+`.github/ISSUE_TEMPLATE/config.yml`이 `blank_issues_enabled: false`로 **`빈 이슈(blank issue)` 경로를 닫는다.** 이는 새 정책이 아니라 §1이 이미 확정한 D-020(외부 공개 이슈를 받지 않는다)의 집행이며, 같은 파일의 `contact_links`가 외부 기여를 [CONTRIBUTING.md](../../CONTRIBUTING.md)의 fork PR 경로로 보낸다.
+
+**한계 — UI 폼은 이슈 등록 경로의 하나일 뿐이다.** 위 전건 대응은 **UI 폼 경로**에만 성립한다. 이 저장소에서 실제로 더 많이 쓰이는 `gh issue create`(에이전트의 후속 이슈 등록, watcher 리포트, split 이슈)는 `.github/ISSUE_TEMPLATE/`를 거치지 않고 `--label`로 넘긴 것만 붙이므로, 타입 라벨 없는 이슈를 그대로 만들 수 있다. 실제로 그렇게 등록된 사례가 있다(`docs/temp/autopilot-report-20260517-1314.md`에 `--label` 미적용으로 area 라벨만 붙은 이슈가 기록돼 있다). 그런 이슈는 위 문단이 적은 `needs-triage` 갈래로 흡수된다. `gh issue create` 경로에 타입 라벨을 요구할지, 저장소 Issues 자체를 D-020대로 닫을지는 정책 결정이라 이 문서가 규정하지 않고 [#2502](https://github.com/joshua-jingu-lee/ante/issues/2502)가 소유한다.
 
 `epic`·`release`는 이 표의 Type이 아니다. `epic`은 [§3.4 에픽 이슈](#34-에픽-이슈)의 본문 구조와 `epic` 라벨을 따르고, `release`는 이슈가 아니라 릴리스 PR의 브랜치 축이다([06-release.md](06-release.md)). 둘 다 폼 템플릿 대상이 아니며, 브랜치 prefix 축에서의 대응은 [03-git-workflow.md](03-git-workflow.md) §1.2 표가 정본이다.
 
@@ -277,7 +279,7 @@ autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/
 
 에이전트(내부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
 
-- 이 문서의 제목/본문 템플릿을 사용한다.
+- 이 문서의 제목/본문 템플릿을 사용한다. §3.1–3.4가 다루지 않는 타입(`perf`·`docs`·`test`·`chore`)은 §3 서두가 정한 대로 §2 `폼 템플릿` 열이 가리키는 파일의 필드 구성을 본문 구조로 삼는다.
 - 스펙 준비 상태나 중복 여부가 불명확하면 `needs-triage`를 함께 붙인다.
 - review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 [01-development-process.md §5](01-development-process.md#5-실패-복구-루프)와 [04-ci-cd.md §5](04-ci-cd.md#5-ci승인-실패-시-복구)의 복구 원칙에 따라 원인 정리, 메타 리뷰, 사람 판단을 우선한다.
 - watcher, 내부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.

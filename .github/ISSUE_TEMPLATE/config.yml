@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 외부 기여
+    url: https://github.com/joshua-jingu-lee/ante/blob/main/CONTRIBUTING.md
+    about: 이 저장소는 외부 공개 이슈를 받지 않는다(D-020). 외부 기여는 fork PR로 제출하며 사전 이슈가 필요 없다.
