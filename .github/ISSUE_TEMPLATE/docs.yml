@@ -17,7 +17,7 @@ body:
       label: 대상 문서
       description: 고칠 문서의 저장소 루트 상대 경로와 절 번호를 적어주세요.
       value: |
-        - `docs/runbooks/00-issue-management.md` §2
+        - `docs/...` §
     validations:
       required: true
 
@@ -57,7 +57,7 @@ body:
     id: technical-notes
     attributes:
       label: 기술 노트
-      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. (선택)
+      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 00-issue-management.md §3.4가 정한 대로 `- 선행: #번호`를 여기에 적는다. (선택)"
 
   - type: textarea
     id: done-criteria
@@ -66,6 +66,8 @@ body:
       value: |
         - [ ] 대상 문서 수정
         - [ ] 사본 문서와의 정합 확인 (해당 시)
+        - [ ] 검증 방법 실행 및 결과 첨부
         - [ ] 생성 산출물 재생성 (해당 시)
+        - [ ] 기존 테스트 전체 통과
     validations:
       required: true

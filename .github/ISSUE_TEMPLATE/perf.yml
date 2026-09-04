@@ -73,7 +73,7 @@ body:
     id: technical-notes
     attributes:
       label: 기술 노트
-      description: 구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. (선택)
+      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 00-issue-management.md §3.4가 정한 대로 `- 선행: #번호`를 여기에 적는다. (선택)"
 
   - type: textarea
     id: done-criteria
@@ -82,6 +82,6 @@ body:
       value: |
         - [ ] 개선 적용
         - [ ] 같은 측정 방법으로 재측정하여 목표 수치 달성 확인
-        - [ ] 보존 invariant를 검증하는 기존 테스트 전체 통과
+        - [ ] 기존 테스트 전체 통과
     validations:
       required: true
