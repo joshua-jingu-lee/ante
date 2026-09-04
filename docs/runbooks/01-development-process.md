@@ -140,7 +140,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 
 - 같은 head SHA에서 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
 - `/code-review` 실패는 PR 생성 전에 같은 worktree에서 해소한다.
-- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
+- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - 같은 `risk class`가 반복되거나 구조 리스크가 넓어지면 얕은 자동 수정 대신 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - 반복 리스크가 구현계획 자체의 문제라면 `/plan-preflight`로 돌아가 이슈 본문 구현계획을 다시 정비하고 Plan Review를 재요청한다.
@@ -162,7 +162,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 > 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
 - **브랜치 리뷰 단계**: Claude Code 네이티브 `/code-review`가 수행한다. GitHub Actions가 아니라 `/code-review` 내부 루프로 도는 PR 전 코드 품질 게이트다.
-- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다.
+- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
 - **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
