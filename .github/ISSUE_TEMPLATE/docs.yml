@@ -16,7 +16,7 @@ body:
     attributes:
       label: 대상 문서
       description: 고칠 문서의 저장소 루트 상대 경로와 절 번호를 적어주세요.
-      placeholder: |
+      value: |
         - `docs/runbooks/00-issue-management.md` §2
     validations:
       required: true
@@ -46,6 +46,14 @@ body:
       required: true
 
   - type: textarea
+    id: verification
+    attributes:
+      label: 검증 방법
+      description: 고친 서술이 맞다는 것을 어떻게 확인할지 적어주세요 (재생성 명령, 대조할 사본 문서, 실행해 볼 절차 등).
+    validations:
+      required: true
+
+  - type: textarea
     id: technical-notes
     attributes:
       label: 기술 노트
@@ -59,3 +67,5 @@ body:
         - [ ] 대상 문서 수정
         - [ ] 사본 문서와의 정합 확인 (해당 시)
         - [ ] 생성 산출물 재생성 (해당 시)
+    validations:
+      required: true

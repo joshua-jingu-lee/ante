@@ -16,7 +16,7 @@ body:
     attributes:
       label: 현재 측정값
       description: 측정 대상·측정 방법·측정값을 함께 적어주세요. 측정 없이 시작하면 개선 여부를 판정할 수 없습니다.
-      placeholder: |
+      value: |
         - 측정 대상:
         - 측정 방법:
         - 측정값:
@@ -48,14 +48,6 @@ body:
       required: true
 
   - type: textarea
-    id: out-of-scope
-    attributes:
-      label: 비목표
-      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
-    validations:
-      required: true
-
-  - type: textarea
     id: approach
     attributes:
       label: 접근 방법
@@ -66,6 +58,14 @@ body:
     attributes:
       label: 영향 소비자
       description: 이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
     validations:
       required: true
 
@@ -83,3 +83,5 @@ body:
         - [ ] 개선 적용
         - [ ] 같은 측정 방법으로 재측정하여 목표 수치 달성 확인
         - [ ] 보존 invariant를 검증하는 기존 테스트 전체 통과
+    validations:
+      required: true

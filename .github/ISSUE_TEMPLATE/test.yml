@@ -16,7 +16,7 @@ body:
     attributes:
       label: 대상 테스트 표면
       description: 추가·보강할 테스트 파일 경로와 TC 카테고리(unit / integration / e2e)를 적어주세요.
-      placeholder: |
+      value: |
         - `tests/unit/...`
     validations:
       required: true
@@ -42,18 +42,18 @@ body:
       required: true
 
   - type: textarea
-    id: out-of-scope
-    attributes:
-      label: 비목표
-      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
-    validations:
-      required: true
-
-  - type: textarea
     id: consumers
     attributes:
       label: 영향 소비자
       description: 이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
     validations:
       required: true
 
@@ -71,3 +71,5 @@ body:
         - [ ] 테스트 추가/보강
         - [ ] 판별력 확인 (회귀 재현이면 baseline FAIL → 수정 후 PASS, 커버리지 보강이면 불변식을 뒤집었을 때 FAIL)
         - [ ] 기존 테스트 전체 통과
+    validations:
+      required: true

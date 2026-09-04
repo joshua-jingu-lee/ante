@@ -16,7 +16,7 @@ body:
     attributes:
       label: 변경 범위
       description: 영향받는 모듈, 파일 목록을 적어주세요.
-      placeholder: |
+      value: |
         - `.github/workflows/...`
     validations:
       required: true
@@ -58,4 +58,7 @@ body:
       value: |
         - [ ] 변경 적용
         - [ ] 검증 방법 실행 및 결과 첨부
+        - [ ] 기존 테스트 전체 통과
         - [ ] 관련 문서 갱신 (해당 시)
+    validations:
+      required: true
