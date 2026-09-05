@@ -165,7 +165,7 @@ gh pr create --base {base} --title "{title}" --body "{body}"
   - 완료 시 `Plan Preflight 완료`, 중단 시 `Plan Preflight 보류` 코멘트를 남김
 - `/autopilot`
   - 큐 snapshot, open PR 여부 확인, 보류 코멘트, Plan Preflight 상태 확인
-  - 협업자 또는 내부 자동화가 등록한 미검증 버그 후보는 큐 편입 전 `@issue-reviewer` 검증 결과(`이슈 검증` 코멘트)를 선행 확인
+  - 협업자 또는 내부 자동화가 등록한 미검증 버그 후보는 **타입·area 라벨 판정을 통과한 뒤** 구현 큐 편입 전 `@issue-reviewer` 검증 결과(`이슈 검증` 코멘트)를 선행 확인 (선후 정본: `.agent/commands/autopilot.md` 「큐 선별 규칙」)
   - 활성 이슈의 최신 `Autopilot 사이클 상태` 코멘트를 유지하고 merge/post-merge 완료까지 갱신
 - `/implement-issue`
   - 이슈 조회, 구현 분석 완료 코멘트, 구현 착수 코멘트, 로컬 구현 완료 코멘트, 리뷰 요청/결과 코멘트, PR 생성, PR 생성 완료 코멘트
