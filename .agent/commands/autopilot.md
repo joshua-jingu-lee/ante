@@ -123,8 +123,8 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 - `blocked`
 - `blocked:review-loop`
 - `blocked:pr-review-loop`
-- `epic`
 - `process`
+- `epic`
 - 이미 open PR이 연결된 이슈
 - 선행 의존 이슈가 아직 close되지 않은 이슈
 
