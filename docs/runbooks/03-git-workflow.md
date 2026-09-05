@@ -168,7 +168,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 - **본문**: Summary + Test Plan + `Closes #{번호}`
 - 기존 이슈 하나에 내부 작업 브랜치 하나를 대응한다.
 - **release PR 예외**: release PR은 연결 이슈가 없어도 되며, 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차를 남긴다.
-- **라벨**: `core`, `web`, `cli`, `docs`, `fix` 중 해당 항목
+- **라벨**: `core`, `cli`, `docs`, `fix` 중 해당 항목 (이 네 값은 이 절의 내부 lane PR에 쓰는 어휘이며 저장소 라벨 전체가 아니다. 저장소 라벨 등록부는 [00-issue-management.md](00-issue-management.md) §4다)
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
 - **전제 조건**: 최신 branch HEAD의 `/code-review`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
 - **release PR 전제 조건**: release PR은 이슈 코멘트 기반 브랜치 리뷰 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 PR 본문에 남기고, 일반 PR 승인 게이트를 통과한다.
