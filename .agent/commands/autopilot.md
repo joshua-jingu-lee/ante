@@ -134,7 +134,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 이 절이 타입·area 라벨 부재 판정의 정본이며, 실제 배치 집행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프의 `feature 승계`·`타입·area 라벨 판정` 항목이다.
 
 - `feature` 라벨이 붙은 이슈에는(다른 라벨과의 병기 포함, reopen 여부 판별 불요) **이 절의 편입/미편입 판정 전에** [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4 `feature` 행의 승계 규칙을 먼저 적용한다. 이 불릿은 타입 라벨을 이미 가진 이슈에도 적용하고, 이슈 제외가 아니라 라벨 정정이므로 루프에 진입한 이슈에는 open PR 유무와 무관하게 적용하며, 승계 후에는 타입 라벨 보유로 정상 편입된다. 2단계 후행 검사에서 제외된 이슈와 루프 1번에서 `needs-triage`로 제외된 이슈는 루프의 승계 항목에 진입하지 않으므로, 승계는 그 이슈가 다시 큐 후보가 되는 시점에 적용된다. 승계 규칙 자체의 정본은 §4 `feature` 행이고, 이 불릿은 autopilot 실행 경로에서의 적용 지점이다.
-- 타입 라벨이 없어도 area 라벨(`core`·`cli`·`api`·`e2e`·`dashboard`) 중 하나가 있으면 큐에 정상 편입한다.
+- 타입 라벨이 없어도 area 라벨 중 하나가 있으면 큐에 정상 편입한다. area 라벨 집합의 등록부는 [00-issue-management.md](../../docs/runbooks/00-issue-management.md) §4의 `(area)` 표기 행이다.
 - area 라벨만 있는 이슈의 브랜치 prefix·커밋 type 해소는 `03-git-workflow.md` §1.2가 타입 라벨 축만 매핑하므로 이 규칙이 다루지 않는다(한계 — 등록 시 타입 축 해소는 #2462가 소유한다).
 - 타입 라벨과 area 라벨이 모두 없으면 큐에 편입하지 않는다.
 - 미편입 이슈에는 아래 `3단계: Plan Preflight 사이클`의 `🤖 **Autopilot 보류**` 코멘트를 사유 `타입 라벨 부재`로 남기고 `needs-triage`를 부착한다. 결과 분류는 기존 `deferred-triage`를 재사용한다.
