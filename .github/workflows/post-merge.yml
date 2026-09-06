@@ -117,10 +117,36 @@ jobs:
               });
             }
 
+            // 체크박스 갱신은 `완료 조건` 절에만 적용한다(#2509). 본문 전체를
+            // 치환하면 이슈 폼의 `위험 신호`처럼 완료 조건이 아닌 체크박스까지
+            // 「해당함」으로 바뀌어 감사 기록이 거짓이 된다. 절은 `완료 조건`
+            // 헤딩 다음 줄부터 다음 헤딩 직전까지이며, 그 헤딩이 없으면
+            // 아무것도 갱신하지 않는다. 웹 편집이 만드는 CRLF 본문에서도
+            // 동작하도록 헤딩 판정 전에 행 끝 CR을 떼고 본다.
+            function checkDoneCriteria(body) {
+              const lines = body.split("\n");
+              let inDoneCriteria = false;
+
+              for (let index = 0; index < lines.length; index += 1) {
+                const heading = lines[index].replace(/\r$/, "").match(/^#{1,6}\s+(.*)$/);
+
+                if (heading) {
+                  inDoneCriteria = /^완료 조건(?:\s|$)/.test(heading[1].trim());
+                  continue;
+                }
+
+                if (inDoneCriteria) {
+                  lines[index] = lines[index].replace(/^- \[ \]/, "- [x]");
+                }
+              }
+
+              return lines.join("\n");
+            }
+
             async function markIssueDone(issueNumber) {
               const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
               const originalBody = issue.data.body || "";
-              const updatedBody = originalBody.replace(/^- \[ \]/gm, "- [x]");
+              const updatedBody = checkDoneCriteria(originalBody);
               const checkboxUpdated = updatedBody !== originalBody;
               let issueClosed = false;
 
