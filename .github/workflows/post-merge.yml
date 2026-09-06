@@ -135,7 +135,9 @@ jobs:
             //      `[done-criteria:*]` 접두를 단 경고를 낸다. 절을 이미 찾았으면
             //      둘 다 알리지 않고, 갱신할 미체크 항목이 없으면 헤딩 경고만
             //      알리지 않는다 — 항목까지 펜스에 삼켜진 본문은 펜스 경고로
-            //      원인을 알려야 한다. 조용한 무동작은
+            //      원인을 알려야 한다. 펜스 경고는 절을 못 찾았거나 절 안에서
+            //      펜스가 열린 채 끝났을 때 낸다 — 절이 끝난 뒤의 로그
+            //      붙여넣기는 가린 것이 없다. 조용한 무동작은
             //      성공과 구분되지 않고, 접두가 겹치면 로그 집계가 이중 계수한다.
             // 유계·반례·각 규칙의 근거는 #2509 본문이 소유한다.
             function checkDoneCriteria(body) {
@@ -144,6 +146,7 @@ jobs:
               let fenceMarker = null;
               let sawDoneCriteria = false;
               let sawUncheckedItem = false;
+              let fenceOpenedInSection = false;
 
               for (let index = 0; index < lines.length; index += 1) {
                 const line = lines[index].replace(/\r$/, "");
@@ -153,6 +156,10 @@ jobs:
                 if (fence && !(fence[1][0] === "`" && fence[2].includes("`"))) {
                   if (!fenceMarker) {
                     fenceMarker = fence[1];
+
+                    if (inDoneCriteria) {
+                      fenceOpenedInSection = true;
+                    }
                   } else if (
                     fence[1][0] === fenceMarker[0] &&
                     fence[1].length >= fenceMarker.length &&
@@ -194,10 +201,10 @@ jobs:
                 );
               }
 
-              if (!sawDoneCriteria && fenceMarker) {
+              if (fenceMarker && (!sawDoneCriteria || fenceOpenedInSection)) {
                 core.warning(
                   "[done-criteria:unterminated-fence] 코드 펜스가 열린 채 본문이 " +
-                  "끝나 `완료 조건` 절이 그 안에 가려졌을 수 있습니다.",
+                  "끝나 `완료 조건` 절이나 그 항목이 가려졌을 수 있습니다.",
                 );
               }
 
