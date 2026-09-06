@@ -130,9 +130,10 @@ jobs:
             //   3. 헤딩·펜스·체크박스가 같은 관용도를 쓴다 — 선행 공백 3칸까지,
             //      GFM 불릿 3종. 행 끝 CR은 판정에서만 무시하고 치환은 원문에
             //      해서 CR을 보존한다.
-            //   4. 갱신할 수 있었는데 절을 못 찾은 것과 펜스가 열린 채 끝난 것은
-            //      각각
-            //      `[done-criteria:*]` 접두를 단 경고를 낸다. 절을 이미 찾았으면
+            //   4. 갱신할 수 있었는데 절을 못 찾은 것과 펜스가 열린 채 끝난 것을
+            //      warnings로 돌려준다. 접두 `[done-criteria:*]`와 이슈 번호는
+            //      호출부가 붙인다 — 한 run이 여러 이슈를 처리하므로 번호가 없으면
+            //      어느 이슈인지 알 수 없다. 절을 이미 찾았으면
             //      둘 다 알리지 않고, 갱신할 미체크 항목이 없으면 헤딩 경고만
             //      알리지 않는다 — 항목까지 펜스에 삼켜진 본문은 펜스 경고로
             //      원인을 알려야 한다. 펜스 경고는 절을 못 찾았거나 절 안에서
@@ -141,7 +142,7 @@ jobs:
             //      닫힌 뒤의 로그 붙여넣기는 가린 것이 없다. 조용한 무동작은
             //      성공과 구분되지 않고, 접두가 겹치면 로그 집계가 이중 계수한다.
             // 유계·반례·각 규칙의 근거는 #2509 본문이 소유한다.
-            function checkDoneCriteria(body) {
+            function markDoneCriteriaChecked(body) {
               const lines = body.split("\n");
               let inDoneCriteria = false;
               let fenceMarker = null;
@@ -192,27 +193,38 @@ jobs:
                 }
               }
 
+              const warnings = [];
+
               if (!sawDoneCriteria && sawUncheckedItem) {
-                core.warning(
-                  "[done-criteria:heading-not-found] `완료 조건` 헤딩이 없어 " +
-                  "체크리스트를 갱신하지 않았습니다.",
-                );
+                warnings.push({
+                  tag: "heading-not-found",
+                  detail: "본문에 `완료 조건` 헤딩이 없어 체크리스트를 갱신하지 않았습니다.",
+                });
               }
 
               if (fenceMarker && (!sawDoneCriteria || fenceOpenedInSection)) {
-                core.warning(
-                  "[done-criteria:unterminated-fence] 코드 펜스가 열린 채 본문이 " +
-                  "끝나 `완료 조건` 절이나 그 항목이 가려졌을 수 있습니다.",
-                );
+                warnings.push({
+                  tag: "unterminated-fence",
+                  detail:
+                    "코드 펜스가 열린 채 본문이 끝나 `완료 조건` 절이나 그 항목이 " +
+                    "가려졌을 수 있습니다.",
+                });
               }
 
-              return lines.join("\n");
+              return { body: lines.join("\n"), warnings };
             }
 
             async function markIssueDone(issueNumber) {
               const issue = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
               const originalBody = issue.data.body || "";
-              const updatedBody = checkDoneCriteria(originalBody);
+              const doneCriteria = markDoneCriteriaChecked(originalBody);
+              const updatedBody = doneCriteria.body;
+
+              for (const warning of doneCriteria.warnings) {
+                core.warning(
+                  `[done-criteria:${warning.tag}] #${issueNumber} ${warning.detail}`,
+                );
+              }
               const checkboxUpdated = updatedBody !== originalBody;
               let issueClosed = false;
 

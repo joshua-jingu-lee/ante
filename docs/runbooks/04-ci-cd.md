@@ -295,10 +295,13 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
   - **`AUTOMERGE_TOKEN` 미등록(Dependabot)**: **dependabot PR에서만** merge-gate가 fail-closed된다 — 일반 PR은 정상인데 dependabot PR만 auto-merge가 안 걸리면 Dependabot 저장소 등록 누락이 원인이다.
   - 어느 경우든 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
   - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
+  - **`[done-criteria:heading-not-found] #N`**: 연결 이슈 본문에 `완료 조건` 헤딩이 없어 체크리스트를 갱신하지 않았다. 갱신할 미체크 항목이 없으면 알리지 않으므로, 이 경고는 「갱신할 것이 있었는데 절을 못 찾았다」를 뜻한다.
+  - **`[done-criteria:unterminated-fence] #N`**: 코드 펜스가 열린 채 본문이 끝나 `완료 조건` 절이나 그 항목이 그 안에 가려졌다.
 - 복구 순서:
   1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 Actions·Dependabot 양쪽 시크릿에 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다. dependabot PR에서만 실패했다면 Dependabot 저장소 등록을 확인한다.
   2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다. `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
-  3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
+  3. **`[done-criteria:*]` 경고면** 먼저 해당 이슈 본문을 고친다 — 펜스를 닫거나 `완료 조건` 헤딩을 바로잡은 뒤 2번을 다시 돌린다. 본문을 고치지 않으면 재실행도 같은 무동작이라, 아래 멱등성의 「이미 `[x]`면 무해」와 달리 반복해도 상태가 진전되지 않는다.
+  4. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
 
 **멱등성**: 이슈 상태·체크박스·에픽 동기화는 멱등이라 중복 실행이 안전하다(이미 `[x]`/closed면 무해 — 원본 보존 원칙). 단 수동 복구(`issue_numbers`) 경로는 `pr` 컨텍스트가 없어 post-merge 코멘트의 중복 판정 needle이 `- PR: n-a`인데 closed run이 남긴 코멘트는 `- PR: #N`이라 서로 매치되지 않는다 — 이미 closed run이 정리한 이슈에 수동 복구를 돌리면 `정리 완료` 코멘트가 **중복 게시**될 수 있다(무해). 중복을 피하려면 아직 정리되지 않은 이슈 번호만 지정한다.
 
