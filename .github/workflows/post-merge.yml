@@ -132,7 +132,9 @@ jobs:
             // 관용도가 갈리면 그 비대칭이 다음 변형의 씨앗이 된다. 체크박스도 같은
             // 관용도를 쓰고 GFM 불릿 3종을 받는다. 절을 못 찾았거나 펜스가 열린 채
             // 끝나면 core.warning으로 알린다 — 조용한 무동작이 성공과 구분되지 않으면
-            // 수동 복구(04-ci-cd.md §5.2)가 자기 실패를 감지할 수 없다.
+            // 수동 복구(04-ci-cd.md §5.2)가 자기 실패를 감지할 수 없다. 두 경고는
+            // 서로의 부분 문자열이 아닌 기계 판독 접두를 갖는다 — 로그 집계가
+            // 이중 계수하지 않게 한다.
             function checkDoneCriteria(body) {
               const lines = body.split("\n");
               let inDoneCriteria = false;
@@ -179,13 +181,13 @@ jobs:
 
               if (!sawDoneCriteria) {
                 core.warning(
-                  "`완료 조건` 헤딩을 찾지 못해 체크리스트를 갱신하지 않았습니다 — " +
-                  "본문 형태나 닫히지 않은 코드 펜스를 확인하세요.",
+                  "[done-criteria:heading-not-found] `완료 조건` 헤딩이 없어 " +
+                  "체크리스트를 갱신하지 않았습니다.",
                 );
               } else if (fenceMarker) {
                 core.warning(
-                  "코드 펜스가 닫히지 않은 채 본문이 끝났습니다 — " +
-                  "그 뒤 구간은 코드블록으로 보고 갱신하지 않았습니다.",
+                  "[done-criteria:unterminated-fence] 코드 펜스가 열린 채 본문이 " +
+                  "끝나 그 뒤 구간을 코드블록으로 보고 갱신하지 않았습니다.",
                 );
               }
 
