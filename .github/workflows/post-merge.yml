@@ -125,8 +125,9 @@ jobs:
             // 동작하도록 헤딩 판정 전에 행 끝 CR을 떼고 본다. 코드 펜스 안은
             // 헤딩으로도 체크박스로도 보지 않는다 — 런북 템플릿을 인용한 본문의
             // 예시 체크박스가 체크되면 그 자체가 거짓 기록이다. 펜스는 여는 것과
-            // 같은 문자로 같은 길이 이상일 때만 닫힌다(CommonMark) — 단순 토글은
-            // 4중 백틱이 3중 백틱을 감싼 인용에서 뒤집혀 오히려 오염을 만든다.
+            // 같은 문자로 같은 길이 이상이고 뒤에 다른 글자가 없을 때만 닫힌다
+            // (CommonMark). 펜스 안 줄은 헤딩 판정도 체크박스 치환도 건너뛴다 —
+            // 헤딩만 막으면 완료 조건 절 안에 인용한 예시 체크박스가 체크된다.
             function checkDoneCriteria(body) {
               const lines = body.split("\n");
               let inDoneCriteria = false;
@@ -135,21 +136,26 @@ jobs:
               for (let index = 0; index < lines.length; index += 1) {
                 const line = lines[index].replace(/\r$/, "");
 
-                const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+                const fence = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
 
                 if (fence) {
                   if (!fenceMarker) {
                     fenceMarker = fence[1];
                   } else if (
                     fence[1][0] === fenceMarker[0] &&
-                    fence[1].length >= fenceMarker.length
+                    fence[1].length >= fenceMarker.length &&
+                    fence[2].trim() === ""
                   ) {
                     fenceMarker = null;
                   }
                   continue;
                 }
 
-                const heading = fenceMarker ? null : line.match(/^#{1,6}\s+(.*)$/);
+                if (fenceMarker) {
+                  continue;
+                }
+
+                const heading = line.match(/^#{1,6}\s+(.*)$/);
 
                 if (heading) {
                   inDoneCriteria = /^완료 조건(?:\s|$)/.test(heading[1].trim());
