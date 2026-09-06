@@ -122,13 +122,23 @@ jobs:
             // 「해당함」으로 바뀌어 감사 기록이 거짓이 된다. 절은 `완료 조건`
             // 헤딩 다음 줄부터 다음 헤딩 직전까지이며, 그 헤딩이 없으면
             // 아무것도 갱신하지 않는다. 웹 편집이 만드는 CRLF 본문에서도
-            // 동작하도록 헤딩 판정 전에 행 끝 CR을 떼고 본다.
+            // 동작하도록 헤딩 판정 전에 행 끝 CR을 떼고 본다. 코드 펜스 안은
+            // 헤딩으로도 체크박스로도 보지 않는다 — 런북 템플릿을 인용한 본문의
+            // 예시 체크박스가 체크되면 그 자체가 거짓 기록이다.
             function checkDoneCriteria(body) {
               const lines = body.split("\n");
               let inDoneCriteria = false;
+              let inFence = false;
 
               for (let index = 0; index < lines.length; index += 1) {
-                const heading = lines[index].replace(/\r$/, "").match(/^#{1,6}\s+(.*)$/);
+                const line = lines[index].replace(/\r$/, "");
+
+                if (/^\s*(?:```|~~~)/.test(line)) {
+                  inFence = !inFence;
+                  continue;
+                }
+
+                const heading = inFence ? null : line.match(/^#{1,6}\s+(.*)$/);
 
                 if (heading) {
                   inDoneCriteria = /^완료 조건(?:\s|$)/.test(heading[1].trim());
