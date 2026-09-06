@@ -124,10 +124,11 @@ jobs:
             //      헤딩 판정은 접두 앵커+경계라 `## 전제 조건` 같은 인접 헤딩은
             //      켜지 않고 `## 완료 조건: 반영판`처럼 글자·숫자가 아닌 것으로
             //      이어진 것은 켠다.
-            //   2. 코드 펜스 안은 헤딩도 체크박스도 아니다. 펜스는 여는 것과 같은
+            //   2. 코드 펜스와 HTML 주석 안은 헤딩도 체크박스도 아니다. 펜스는 여는 것과 같은
             //      문자로 같은 길이 이상이고 뒤에 다른 글자가 없을 때만 닫히며,
             //      여는 백틱 펜스의 info string에 백틱이 있으면 펜스가 아니다.
-            //   3. 헤딩·펜스·체크박스가 같은 관용도를 쓴다 — 선행 공백 3칸까지,
+            //   3. 헤딩은 `#`만 있는 빈 것도 헤딩이라 절을 닫는다(CommonMark).
+            //      헤딩·펜스·체크박스가 같은 관용도를 쓴다 — 선행 공백 3칸까지,
             //      GFM 불릿 3종. 행 끝 CR은 판정에서만 무시하고 치환은 원문에
             //      해서 CR을 보존한다.
             //   4. 갱신할 수 있었는데 절을 못 찾은 것과 펜스가 열린 채 끝난 것을
@@ -149,6 +150,8 @@ jobs:
               let sawDoneCriteria = false;
               let sawUncheckedItem = false;
               let fenceOpenedInSection = false;
+              let inHtmlComment = false;
+              let sawLooseItem = false;
 
               for (let index = 0; index < lines.length; index += 1) {
                 const line = lines[index].replace(/\r$/, "");
@@ -173,10 +176,24 @@ jobs:
                   continue;
                 }
 
-                const heading = line.match(/^ {0,3}#{1,6}\s+(.*)$/);
+                if (inHtmlComment) {
+                  if (line.includes("-->")) {
+                    inHtmlComment = false;
+                  }
+                  continue;
+                }
+
+                const bare = line.replace(/<!--.*?-->/g, "");
+
+                if (bare.includes("<!--")) {
+                  inHtmlComment = true;
+                  continue;
+                }
+
+                const heading = bare.match(/^ {0,3}#{1,6}(?:[ \t]+(.*))?$/);
 
                 if (heading) {
-                  inDoneCriteria = /^완료 조건(?![\p{L}\p{N}])/u.test(heading[1].trim());
+                  inDoneCriteria = /^완료 조건(?![\p{L}\p{N}])/u.test((heading[1] || "").trim());
 
                   if (inDoneCriteria) {
                     sawDoneCriteria = true;
@@ -184,11 +201,17 @@ jobs:
                   continue;
                 }
 
-                if (/^ {0,3}[-*+] \[ \]/.test(line)) {
+                const strict = /^ {0,3}[-*+] \[ \]/.test(bare);
+
+                if (strict) {
                   sawUncheckedItem = true;
                 }
 
                 if (inDoneCriteria) {
+                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(bare)) {
+                    sawLooseItem = true;
+                  }
+
                   lines[index] = lines[index].replace(/^( {0,3}[-*+]) \[ \]/, "$1 [x]");
                 }
               }
@@ -208,6 +231,16 @@ jobs:
                   detail:
                     "코드 펜스가 열린 채 본문이 끝나 `완료 조건` 절이나 그 항목이 " +
                     "가려졌을 수 있습니다.",
+                });
+              }
+
+              if (sawLooseItem) {
+                warnings.push({
+                  tag: "item-not-matched",
+                  detail:
+                    "`완료 조건` 절에 이 구현이 인식하지 못하는 형태의 미체크 항목이 " +
+                    "있어 갱신에서 빠졌습니다(들여쓰기 4칸 이상·탭·번호 목록·불릿 뒤 " +
+                    "공백 2칸 이상).",
                 });
               }
 
