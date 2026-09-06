@@ -130,8 +130,10 @@ jobs:
             //   3. 헤딩·펜스·체크박스가 같은 관용도를 쓴다 — 선행 공백 3칸까지,
             //      GFM 불릿 3종. 행 끝 CR은 판정에서만 무시하고 치환은 원문에
             //      해서 CR을 보존한다.
-            //   4. 절을 못 찾은 것과 펜스가 열린 채 끝난 것은 독립 조건이라 각각
-            //      `[done-criteria:*]` 접두를 단 경고를 낸다. 조용한 무동작은
+            //   4. 갱신할 수 있었는데 절을 못 찾은 것과 펜스가 열린 채 끝난 것은
+            //      독립 조건이라 각각
+            //      `[done-criteria:*]` 접두를 단 경고를 낸다. 미체크 항목이 아예
+            //      없으면 갱신할 것이 없으므로 경고하지 않는다. 조용한 무동작은
             //      성공과 구분되지 않고, 접두가 겹치면 로그 집계가 이중 계수한다.
             // 유계·반례·각 규칙의 근거는 #2509 본문이 소유한다.
             function checkDoneCriteria(body) {
@@ -139,6 +141,7 @@ jobs:
               let inDoneCriteria = false;
               let fenceMarker = null;
               let sawDoneCriteria = false;
+              let sawUncheckedItem = false;
 
               for (let index = 0; index < lines.length; index += 1) {
                 const line = lines[index].replace(/\r$/, "");
@@ -173,12 +176,16 @@ jobs:
                   continue;
                 }
 
+                if (/^ {0,3}[-*+] \[ \]/.test(line)) {
+                  sawUncheckedItem = true;
+                }
+
                 if (inDoneCriteria) {
                   lines[index] = lines[index].replace(/^( {0,3}[-*+]) \[ \]/, "$1 [x]");
                 }
               }
 
-              if (!sawDoneCriteria) {
+              if (!sawDoneCriteria && sawUncheckedItem) {
                 core.warning(
                   "[done-criteria:heading-not-found] `완료 조건` 헤딩이 없어 " +
                   "체크리스트를 갱신하지 않았습니다.",
