@@ -195,7 +195,7 @@ jobs:
                 }
 
                 if (inDoneCriteria) {
-                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line)) {
+                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \](?=\s|$)/.test(line)) {
                     sawLooseItem = true;
                   }
 
