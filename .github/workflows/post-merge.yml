@@ -124,10 +124,12 @@ jobs:
             //      헤딩 판정은 접두 앵커+경계라 `## 전제 조건` 같은 인접 헤딩은
             //      켜지 않고 `## 완료 조건: 반영판`처럼 글자·숫자가 아닌 것으로
             //      이어진 것은 켠다.
-            //   2. 코드 펜스와 HTML 주석 안은 헤딩도 체크박스도 아니다. 펜스는 여는 것과 같은
+            //   2. 코드 펜스 안은 헤딩도 체크박스도 아니다. 펜스는 여는 것과 같은
             //      문자로 같은 길이 이상이고 뒤에 다른 글자가 없을 때만 닫히며,
             //      여는 백틱 펜스의 info string에 백틱이 있으면 펜스가 아니다.
             //   3. 헤딩은 `#`만 있는 빈 것도 헤딩이라 절을 닫는다(CommonMark).
+            //      체크박스는 `]` 뒤에 공백이나 행 끝이 와야 한다(GFM) — `- [ ]x`는
+            //      산문이라 건드리지 않는다.
             //      헤딩·펜스·체크박스가 같은 관용도를 쓴다 — 선행 공백 3칸까지,
             //      GFM 불릿 3종. 행 끝 CR은 판정에서만 무시하고 치환은 원문에
             //      해서 CR을 보존한다.
@@ -150,7 +152,6 @@ jobs:
               let sawDoneCriteria = false;
               let sawUncheckedItem = false;
               let fenceOpenedInSection = false;
-              let inHtmlComment = false;
               let sawLooseItem = false;
 
               for (let index = 0; index < lines.length; index += 1) {
@@ -176,21 +177,7 @@ jobs:
                   continue;
                 }
 
-                if (inHtmlComment) {
-                  if (line.includes("-->")) {
-                    inHtmlComment = false;
-                  }
-                  continue;
-                }
-
-                const bare = line.replace(/<!--.*?-->/g, "");
-
-                if (bare.includes("<!--")) {
-                  inHtmlComment = true;
-                  continue;
-                }
-
-                const heading = bare.match(/^ {0,3}#{1,6}(?:[ \t]+(.*))?$/);
+                const heading = line.match(/^ {0,3}#{1,6}(?:[ \t]+(.*))?$/);
 
                 if (heading) {
                   inDoneCriteria = /^완료 조건(?![\p{L}\p{N}])/u.test((heading[1] || "").trim());
@@ -201,18 +188,21 @@ jobs:
                   continue;
                 }
 
-                const strict = /^ {0,3}[-*+] \[ \]/.test(bare);
+                const strict = /^ {0,3}[-*+] \[ \](?=\s|$)/.test(line);
 
                 if (strict) {
                   sawUncheckedItem = true;
                 }
 
                 if (inDoneCriteria) {
-                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(bare)) {
+                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \]/.test(line)) {
                     sawLooseItem = true;
                   }
 
-                  lines[index] = lines[index].replace(/^( {0,3}[-*+]) \[ \]/, "$1 [x]");
+                  lines[index] = lines[index].replace(
+                    /^( {0,3}[-*+]) \[ \](?=\s|$)/,
+                    "$1 [x]",
+                  );
                 }
               }
 
