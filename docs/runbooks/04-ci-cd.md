@@ -295,7 +295,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
   - **`AUTOMERGE_TOKEN` 미등록(Dependabot)**: **dependabot PR에서만** merge-gate가 fail-closed된다 — 일반 PR은 정상인데 dependabot PR만 auto-merge가 안 걸리면 Dependabot 저장소 등록 누락이 원인이다.
   - 어느 경우든 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
   - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
-  - **`[done-criteria:*] #N`**: 연결 이슈 #N의 `완료 조건` 처리에서 관측된 이상이다. 태그가 무엇인지 가리킨다 — `heading-not-found`(절을 찾지 못함) · `unterminated-fence`(코드 펜스가 절이나 그 항목을 가림) · `item-not-matched`(절 안에 인식하지 못한 형태의 항목). 각 태그의 정확한 발화 조건은 `post-merge.yml`의 `markDoneCriteriaChecked`가 정본이고 이 줄은 그 요약이다.
+  - **`[done-criteria:*] #N`**: 연결 이슈 #N의 `완료 조건` 처리에서 관측된 이상이다. 태그가 무엇인지 가리킨다 — `heading-not-found`(절을 찾지 못함) · `unterminated-fence`(코드 펜스가 절이나 그 항목을 가림) · `item-not-matched`(절 안에 인식하지 못한 형태의 미체크 항목). 각 태그의 정확한 발화 조건은 `post-merge.yml`의 `markDoneCriteriaChecked`가 정본이고 이 줄은 그 요약이다.
 - 복구 순서:
   1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 Actions·Dependabot 양쪽 시크릿에 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다. dependabot PR에서만 실패했다면 Dependabot 저장소 등록을 확인한다.
   2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다. `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
