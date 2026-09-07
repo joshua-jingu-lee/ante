@@ -193,14 +193,14 @@ jobs:
                 }
 
                 if (inDoneCriteria) {
-                  if (!strict && /^\s*(?:[-*+]|\d+[.)])\s+\[ \](?=\s|$)/.test(line)) {
+                  if (strict) {
+                    lines[index] = lines[index].replace(
+                      /^( {0,3}[-*+]) \[ \](?=\s|$)/,
+                      "$1 [x]",
+                    );
+                  } else if (/^\s*(?:[-*+]|\d+[.)])\s+\[ \](?=\s|$)/.test(line)) {
                     sawLooseItem = true;
                   }
-
-                  lines[index] = lines[index].replace(
-                    /^( {0,3}[-*+]) \[ \](?=\s|$)/,
-                    "$1 [x]",
-                  );
                 }
               }
 
@@ -209,7 +209,9 @@ jobs:
               if (!sawDoneCriteria && sawUncheckedItem) {
                 warnings.push({
                   tag: "heading-not-found",
-                  detail: "본문에 `완료 조건` 헤딩이 없어 체크리스트를 갱신하지 않았습니다.",
+                  detail:
+                    "본문에서 `완료 조건` 헤딩을 찾지 못해 체크리스트를 갱신하지 " +
+                    "않았습니다.",
                 });
               }
 
