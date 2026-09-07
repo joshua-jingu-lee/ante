@@ -38,7 +38,7 @@
 2. **Plan Preflight + Plan Review (Gate 0)** — `/plan-preflight`: `plan-preflight:started` 부착 → 이슈 본문 Implementation Plan(파일 맵/작업 순서/risk flags/검증/stop conditions/비목표) 작성·정비 → 별도 컨텍스트 `@plan-reviewer`가 계획을 read-only로 검토해 verdict를 반환하고, 오케스트레이터가 이를 `Plan Review` 코멘트로 남김. `approve-implement`/`narrow-scope`면 `plan-preflight:started` 제거 후 `plan-preflight:done` 확정, `revise-plan`이면 보강 후 재요청, `split-issue`/`invoke-human`/`needs-spec-first`/`blocked`이면 구현 중단.
 3. **구현 + 브랜치 리뷰 (Gate A)** — `/implement-issue`: `plan-preflight:done`과 최신 계획 확인 → 개발 에이전트(`@backend-dev`/`@devops`/`@strategy-dev`)가 worktree 격리 후 구현·로컬 lint/test·커밋 → 네이티브 `/code-review`로 PR 전 브랜치 리뷰(PASS까지 내부 반복, FAIL은 같은 worktree에서 수정, 반복 risk class는 `@code-reviewer` 메타 리뷰) → PASS 시 브랜치 push + PR 생성(`Closes #이슈`). 각 전환은 이슈 코멘트로 남긴다.
 4. **PR 게이트** (GitHub Actions): required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`가 충돌 없음·대화 해결·auto-merge 가능 상태에서 **`AUTOMERGE_TOKEN`(PAT)로 auto-merge를 활성화**한다(#2437, fail-closed). 머지가 발화한 `pull_request: closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음). `/autopilot` 실행 중이면 사이클 상태 코멘트를 갱신한다.
-5. **post-merge automation**: 이슈 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
+5. **post-merge automation**: 이슈 `완료 조건` 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
 6. **/autopilot side lane** (오케스트레이터): implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 병렬 수행한다(코드 수정·브랜치·PR 생성 금지). Plan Preflight 코멘트 + Autopilot 사이클 상태 코멘트를 남긴다.
 7. **/release** (수동 운영, 이슈 흐름 아님): prepare로 `release/vX.Y.Z` PR 생성 + Docker build 검증, publish로 release PR merge 후 GitHub Release + PyPI + Docker image 배포.
 
@@ -166,7 +166,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
 - **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
-- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
+- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스(연결 이슈 본문의 `완료 조건` 절 한정)/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용
 - **로컬 worktree 정리**: Claude 측에서 후속 작업 시 `git worktree prune` 또는 명시적 remove
 

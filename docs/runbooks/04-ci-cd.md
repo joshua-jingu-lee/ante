@@ -37,7 +37,7 @@ Claude 구현 (worktree 격리)
   │
   ▼
 post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 트리거)
-  ├── 이슈 체크박스 갱신 + close (+ 에픽 동기화·close)
+  ├── 이슈 완료 조건 체크박스 갱신 + close (+ 에픽 동기화·close)
   └── 원격 head branch 삭제 (GitHub 설정)
 ```
 
@@ -147,10 +147,10 @@ merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR �
 | 내부 same-repo PR 머지 | GitHub auto-merge |
 | 외부 fork PR 머지 | 유지관리자의 수동 squash merge |
 | 내부 same-repo PR의 head branch 삭제 | GitHub repository setting |
-| 이슈 체크박스 갱신 + close | `post-merge.yml` |
+| 이슈 `완료 조건` 체크박스 갱신 + close | `post-merge.yml` |
 | 로컬 worktree 정리 | Claude 구현 머신 |
 
-이슈 close는 PR 본문의 `Closes #N`에 따른 GitHub 기본 auto-close를 우선 사용하고, `post-merge.yml`은 체크박스/에픽 상태 동기화와 누락 복구를 담당한다.
+이슈 close는 PR 본문의 `Closes #N`에 따른 GitHub 기본 auto-close를 우선 사용하고, `post-merge.yml`은 체크박스(연결 이슈 본문의 `완료 조건` 절 한정, [§5.2](#52-post-merge-실패-모드와-복구))/에픽 상태 동기화와 누락 복구를 담당한다.
 
 외부 fork PR의 post-merge는 PR 코드를 checkout하지 않으며, 연결 이슈가 없으면 정상 no-op로 끝난다.
 
@@ -295,10 +295,12 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
   - **`AUTOMERGE_TOKEN` 미등록(Dependabot)**: **dependabot PR에서만** merge-gate가 fail-closed된다 — 일반 PR은 정상인데 dependabot PR만 auto-merge가 안 걸리면 Dependabot 저장소 등록 누락이 원인이다.
   - 어느 경우든 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
   - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
+  - **`[done-criteria:*] #N`**: 연결 이슈 #N의 `완료 조건` 처리에서 관측된 이상이다. 태그가 무엇인지 가리킨다 — `heading-not-found`(절을 찾지 못함) · `unterminated-fence`(코드 펜스가 절이나 그 항목을 가림) · `item-not-matched`(절 안에 인식하지 못한 형태의 미체크 항목). 각 태그의 정확한 발화 조건은 `post-merge.yml`의 `markDoneCriteriaChecked`가 정본이고 이 줄은 그 요약이다.
 - 복구 순서:
   1. **`AUTOMERGE_TOKEN` 미등록이면** PAT(Contents RW + Pull requests RW)를 Actions·Dependabot 양쪽 시크릿에 등록한 뒤 PR을 재트리거(close→reopen)해 정상 경로로 머지·정리한다. dependabot PR에서만 실패했다면 Dependabot 저장소 등록을 확인한다.
   2. **정리만 누락됐으면** `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 **`issue_numbers`에 대상 이슈 번호를 콤마로 넣는다**. 머지된 PR은 재오픈이 불가해 closed 이벤트를 재발화할 수 없으므로 이것이 유일한 재실행 경로다. `pr_number`/폴링 기반 dispatch는 #2437로 제거됐다.
-  3. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
+  3. **`[done-criteria:*]` 경고면** 먼저 태그로 실제 누락인지 가린다. 누락이라도 **닫힌 이슈 본문을 손으로 고쳐 맞추지는 않는다** — 그 기록은 그대로 두고, 같은 형태가 반복되면 본문 작성 관행을 고친다.
+  4. 이슈 또는 PR 코멘트에 복구 run 링크와 최종 상태를 남긴다.
 
 **멱등성**: 이슈 상태·체크박스·에픽 동기화는 멱등이라 중복 실행이 안전하다(이미 `[x]`/closed면 무해 — 원본 보존 원칙). 단 수동 복구(`issue_numbers`) 경로는 `pr` 컨텍스트가 없어 post-merge 코멘트의 중복 판정 needle이 `- PR: n-a`인데 closed run이 남긴 코멘트는 `- PR: #N`이라 서로 매치되지 않는다 — 이미 closed run이 정리한 이슈에 수동 복구를 돌리면 `정리 완료` 코멘트가 **중복 게시**될 수 있다(무해). 중복을 피하려면 아직 정리되지 않은 이슈 번호만 지정한다.
 
