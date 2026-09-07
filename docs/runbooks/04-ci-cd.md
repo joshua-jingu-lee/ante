@@ -37,7 +37,7 @@ Claude 구현 (worktree 격리)
   │
   ▼
 post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 트리거)
-  ├── 이슈 체크박스 갱신 + close (+ 에픽 동기화·close)
+  ├── 이슈 `완료 조건` 체크박스 갱신 + close (+ 에픽 동기화·close)
   └── 원격 head branch 삭제 (GitHub 설정)
 ```
 
@@ -147,10 +147,10 @@ merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR �
 | 내부 same-repo PR 머지 | GitHub auto-merge |
 | 외부 fork PR 머지 | 유지관리자의 수동 squash merge |
 | 내부 same-repo PR의 head branch 삭제 | GitHub repository setting |
-| 이슈 체크박스 갱신 + close | `post-merge.yml` |
+| 이슈 `완료 조건` 체크박스 갱신 + close | `post-merge.yml` |
 | 로컬 worktree 정리 | Claude 구현 머신 |
 
-이슈 close는 PR 본문의 `Closes #N`에 따른 GitHub 기본 auto-close를 우선 사용하고, `post-merge.yml`은 체크박스/에픽 상태 동기화와 누락 복구를 담당한다.
+이슈 close는 PR 본문의 `Closes #N`에 따른 GitHub 기본 auto-close를 우선 사용하고, `post-merge.yml`은 체크박스(연결 이슈 본문의 `완료 조건` 절 한정, [§5.2](#52-post-merge-실패-모드와-복구))/에픽 상태 동기화와 누락 복구를 담당한다.
 
 외부 fork PR의 post-merge는 PR 코드를 checkout하지 않으며, 연결 이슈가 없으면 정상 no-op로 끝난다.
 
