@@ -295,7 +295,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
   - **`AUTOMERGE_TOKEN` 미등록(Dependabot)**: **dependabot PR에서만** merge-gate가 fail-closed된다 — 일반 PR은 정상인데 dependabot PR만 auto-merge가 안 걸리면 Dependabot 저장소 등록 누락이 원인이다.
   - 어느 경우든 `GITHUB_TOKEN`으로 우회 머지하지 않는다 — `GITHUB_TOKEN` 머지는 재귀 방지 규칙으로 `closed` 이벤트를 발화하지 않아, 폴링이 제거된 지금은 정리가 조용히 소실된다(이슈는 네이티브 auto-close로 닫혀 정상처럼 보이는 위장된 누락).
   - **closed 이벤트 정리 누락**: GitHub 기본 auto-close는 됐으나 체크박스/에픽 동기화가 누락된 경우(이벤트 유실 등). 아래 수동 복구를 쓴다.
-  - **`[done-criteria:heading-not-found] #N`**: 본문 어딘가에 `- [ ]` 형태의 미체크 항목이 있는데 `완료 조건` 헤딩을 찾지 못했다. 그 항목이 `위험 신호`처럼 완료 조건이 아닌 것뿐이면 갱신할 것이 애초에 없었다는 뜻이라 조치가 필요 없다.
+  - **`[done-criteria:heading-not-found] #N`**: 본문 어딘가에 불릿 미체크 항목(`-`·`*`·`+`, 선행 공백 3칸까지)이 있는데 `완료 조건` 헤딩을 찾지 못했다. 그 항목이 `위험 신호`처럼 완료 조건이 아닌 것뿐이면 갱신할 것이 애초에 없었다는 뜻이라 조치가 필요 없다.
   - **`[done-criteria:unterminated-fence] #N`**: 코드 펜스가 열린 채 본문이 끝나 `완료 조건` 절이나 그 항목이 그 안에 가려졌을 수 있다. 절을 정상 갱신했더라도 **그 절 안에서** 예시 블록이 닫히지 않았으면 발화하고, 절이 끝난 뒤 열린 펜스에는 발화하지 않는다.
   - **`[done-criteria:item-not-matched] #N`**: `완료 조건` 절은 찾았으나 인식하지 못하는 형태의 미체크 항목이 있어 갱신에서 빠졌다(예: 들여쓰기 4칸 이상·탭·번호 목록). **이 관측은 전수가 아니다** — 경고 없이 빠지는 형태도, 항목이 아닌데 잡히는 경우도 있다.
 - 복구 순서:
