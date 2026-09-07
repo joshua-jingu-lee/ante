@@ -271,7 +271,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
 - `merge-gate`는 `AUTOMERGE_TOKEN`(fine-grained PAT)으로 auto-merge를 활성화한다(#2437, fail-closed — 시크릿 부재 시 명시 실패). 머지가 발화한 `pull_request:closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음).
-- 머지 후 post-merge automation이 이슈 체크박스를 갱신하고 close.
+- 머지 후 post-merge automation이 이슈 본문의 `완료 조건` 체크박스를 갱신하고 close.
 - `/autopilot` 실행 중이면 최신 `🤖 **Autopilot 사이클 상태**` 이슈 코멘트를 `current-cycle=merge-monitor`에서 `completed`까지 갱신한다.
 - `post-merge.yml`은 연결 이슈에 `🤖 **Post-merge 정리 완료**` 코멘트를 남긴다.
 
