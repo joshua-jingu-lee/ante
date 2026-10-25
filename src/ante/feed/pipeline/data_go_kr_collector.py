@@ -435,51 +435,38 @@ class DataGoKrCollector:
             return 0
 
         path = store.base_path / ".feed" / "instruments.parquet"
-        if path.exists():
-            # Check for zero-byte file
+        is_zero_byte_recovery = store._is_zero_byte(path)
+        if not is_zero_byte_recovery:
             try:
-                if path.stat().st_size == 0:
-                    logger.warning(
-                        "data.go.kr instruments: zero-byte file detected, removing for auto-recovery: %s",
-                        path,
-                    )
-                    try:
-                        path.unlink(missing_ok=True)
-                    except OSError as exc:
-                        logger.warning(
-                            "data.go.kr instruments: zero-byte file unlink failed — preserving: %s (%s)",
-                            path,
-                            exc,
-                        )
-                        return 0
-                    # Treat as missing: merged = new_df
-                    merged = new_df
-                else:
-                    try:
-                        existing = pl.read_parquet(path)
-                    except Exception as exc:
-                        # 기존 파일 손상 시 신규 데이터로 덮어쓰지 않고 보존(데이터 손실 방지).
-                        logger.warning(
-                            "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
-                            "write 건너뜀 (%s)",
-                            exc,
-                        )
-                        return 0
-                    merged = cls._merge_instruments(existing, new_df)
-            except OSError as exc:
+                existing = pl.read_parquet(path)
+            except FileNotFoundError:
+                merged = new_df
+            except Exception as exc:
+                # 비어 있지 않은 기존 파일은 손상 시 보존하고 write를 건너뛴다.
                 logger.warning(
-                    "data.go.kr instruments: failed to check file size — preserving: %s (%s)",
-                    path,
+                    "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
+                    "write 건너뜀 (%s)",
                     exc,
                 )
                 return 0
+            else:
+                merged = cls._merge_instruments(existing, new_df)
         else:
             merged = new_df
 
         merged = merged.select(list(cls._INSTRUMENTS_COLUMNS))
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Use atomic write
-        store._atomic_write_parquet(merged, path)
+        store._atomic_write_parquet(
+            merged,
+            path,
+            preserve_existing_mode=not is_zero_byte_recovery,
+        )
+        if is_zero_byte_recovery:
+            # 성공한 교체 뒤에만 경고한다. write 실패 시 target은 0바이트 그대로다.
+            logger.warning(
+                "data.go.kr instruments: 0바이트 파일을 신규 수집분으로 복구: %s",
+                path,
+            )
         logger.info(
             "data.go.kr instruments 갱신: path=%s rows=%d",
             path,
