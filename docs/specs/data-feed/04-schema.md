@@ -24,7 +24,7 @@ DataFeed는 `ante.data.schemas`를 직접 import하여 사용한다. 스키마�
 > data.go.kr 수집 시 `srtnCd`(symbol), `itmsNm`(name), `mrktCtg`(market)를 함께 받아오므로 추가 호출 없이 갱신.
 > 수집 결과를 정규화하여 최신 종목 메타데이터 상태를 유지한다.
 
-`.feed/instruments.parquet`는 같은 디렉토리의 임시 파일을 완성한 뒤 원자적으로 교체한다. 확실히 0바이트인 legacy 파일은 없는 파일처럼 취급해 신규 수집분으로 복구하며, 이 경우 결과 파일 mode는 `0644`다. 유효한 기존 파일은 기존 mode를 보존한다. 비어 있지 않은 파일을 읽지 못하거나 파일 크기를 확인하지 못하면 원본을 그대로 두고 이번 갱신을 건너뛴다. 복구 경고는 교체가 성공한 뒤에만 기록한다.
+`.feed/instruments.parquet`는 같은 디렉토리의 임시 파일을 완성한 뒤 원자적으로 교체한다. 확실히 0바이트인 legacy 파일은 없는 파일처럼 취급해 신규 수집분으로 복구하며, 신규 파일과 복구본의 mode는 `0644`다. 유효한 기존 파일은 기존 mode를 보존한다. 파일 크기 확인에 실패해도 0바이트로 간주하지 않고 정상 읽기 경로를 따른다. 비어 있지 않은 파일을 읽지 못하면 원본을 그대로 두고 이번 갱신을 건너뛴다. 복구 경고는 교체가 성공한 뒤에만 기록한다.
 
 > canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
 > `exchange`(canonical 5종)와 `market`(`KOSPI`/`KOSDAQ`/`KONEX`, KRX 내부 시장구분)은 별개 차원이며

@@ -436,11 +436,13 @@ class DataGoKrCollector:
 
         path = store.base_path / ".feed" / "instruments.parquet"
         is_zero_byte_recovery = store._is_zero_byte(path)
+        preserve_existing_mode = not is_zero_byte_recovery
         if not is_zero_byte_recovery:
             try:
                 existing = pl.read_parquet(path)
             except FileNotFoundError:
                 merged = new_df
+                preserve_existing_mode = False
             except Exception as exc:
                 # 비어 있지 않은 기존 파일은 손상 시 보존하고 write를 건너뛴다.
                 logger.warning(
@@ -459,7 +461,7 @@ class DataGoKrCollector:
         store._atomic_write_parquet(
             merged,
             path,
-            preserve_existing_mode=not is_zero_byte_recovery,
+            preserve_existing_mode=preserve_existing_mode,
         )
         if is_zero_byte_recovery:
             # 성공한 교체 뒤에만 경고한다. write 실패 시 target은 0바이트 그대로다.
