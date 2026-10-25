@@ -2,6 +2,7 @@
 
 > Ante 설계 결정 기록.
 > 인덱스: [README.md](README.md)
+> 상태: [D-020](D-020-tool-neutral-contribution-governance.md)에서 특정 Claude Code 절차를 공통 필수 경로로 둔 부분과 외부 이슈 제보 전제를 대체함. `source:ante-oracle` 등 내부 생성 미검증 이슈의 검증은 유지함.
 
 **결정**: 개발 프로세스의 두 차단 게이트(구현 착수 전 Plan Review, PR 생성 전 브랜치 리뷰)에서 외부 Codex 플러그인(openai-codex) 의존을 제거하고, Claude Code 네이티브 수단으로 재배선한다.
 

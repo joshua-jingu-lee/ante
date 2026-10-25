@@ -866,6 +866,7 @@ class Treasury:
                         reason=(
                             "market_buy_quote_unavailable: resolver not configured"
                         ),
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -884,6 +885,7 @@ class Treasury:
                         order_type=event.order_type,
                         account_id=self._account_id,
                         reason=f"market_buy_quote_unavailable: {exc!s}",
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -912,6 +914,7 @@ class Treasury:
                             f"market_buy_quote_unavailable: "
                             f"non-finite or non-positive quote {quote!r}"
                         ),
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -933,6 +936,7 @@ class Treasury:
                             f"market_buy_quote_unavailable: "
                             f"invalid quote {quote!r}: {exc!s}"
                         ),
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -962,6 +966,7 @@ class Treasury:
                             f"quote={quote}, "
                             f"quantity={event.quantity}"
                         ),
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -988,6 +993,7 @@ class Treasury:
                                 f"need {total_reserve_market_buy:,.0f}, "
                                 f"available {available:,.0f}"
                             ),
+                            exchange=event.exchange,
                         )
                     )
                     return
@@ -1009,6 +1015,7 @@ class Treasury:
                         stop_price=event.stop_price,
                         reserved_amount=total_reserve_market_buy,
                         account_id=self._account_id,
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -1031,6 +1038,7 @@ class Treasury:
                         order_type=event.order_type,
                         account_id=self._account_id,
                         reason=f"reserve_failed: {exc!s}",
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -1062,6 +1070,7 @@ class Treasury:
                             f"price={event.price}, "
                             f"quantity={event.quantity}"
                         ),
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -1090,6 +1099,7 @@ class Treasury:
                                 f"insufficient_budget: need {total_reserve:,.0f}, "
                                 f"available {available:,.0f}"
                             ),
+                            exchange=event.exchange,
                         )
                     )
                     return
@@ -1107,6 +1117,7 @@ class Treasury:
                         stop_price=event.stop_price,
                         reserved_amount=total_reserve,
                         account_id=self._account_id,
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -1128,6 +1139,7 @@ class Treasury:
                         order_type=event.order_type,
                         account_id=self._account_id,
                         reason=f"reserve_failed: {exc!s}",
+                        exchange=event.exchange,
                     )
                 )
                 return
@@ -1146,6 +1158,7 @@ class Treasury:
                 stop_price=event.stop_price,
                 reserved_amount=0.0,
                 account_id=self._account_id,
+                exchange=event.exchange,
             )
         )
 

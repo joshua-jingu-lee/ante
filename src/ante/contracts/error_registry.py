@@ -421,7 +421,7 @@ _ACCOUNT_HAS_ACTIVE_BOTS_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 # master 검증 위반의 안정 코드. 본 PR 에서 class-level ``.code`` 신규 부여
 # (errors.py:31 PermissionDeniedError) 와 동시에 registry 도 정렬한다 — IPC
-# server.py:322 ``getattr(e, "code", ...)`` 와 helper registry-first 가 동일
+# server.py ``getattr(e, "code", ...)`` 와 helper registry-first 가 동일
 # ``PERMISSION_DENIED`` 코드를 surface 한다.
 _MEMBER_PERMISSION_DENIED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="PERMISSION_DENIED",
@@ -487,7 +487,7 @@ _MEMBER_MASTER_PROTECTED_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 # ``approve``/``reject`` 표면의 status flow 위반 (rejected → 재reject,
 # approved → 재approve 등). class-level ``.code = "APPROVAL_STATUS_CONFLICT"``
-# (#1813 Group Q sweep) 와 정렬 — IPC server.py:322 ``getattr(e, "code", ...)``
+# (#1813 Group Q sweep) 와 정렬 — IPC server.py ``getattr(e, "code", ...)``
 # 와 helper registry-first 가 동일 코드를 surface 한다.
 _APPROVAL_STATUS_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="APPROVAL_STATUS_CONFLICT",
@@ -511,7 +511,7 @@ _APPROVAL_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
 # 한다 — 본 PR 은 신규 5건만 추가한다 (account/member/approval sweep 1:1 동형).
 
 # ``bot start`` 표면의 ``app_key`` preflight 거부. 입력 계약/필수 정보
-# 누락이므로 taxonomy ``validation`` 카테고리. IPC server.py:322
+# 누락이므로 taxonomy ``validation`` 카테고리. IPC server.py
 # ``getattr(e, "code", ...)`` 와 helper registry-first 가 동일
 # ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` 코드를 surface 한다.
 _BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -808,14 +808,6 @@ _RULE_CONFIG_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
-# ── reserved entry (#1819 후속 도입) ─────────────────────────────────────────
-#
-# ``SERVICE_NOT_CONFIGURED`` 는 taxonomy SSOT 가 ``service_unavailable`` 카테고리
-# 안정 코드로 lock 한 값이다. 해당 fault를 raise하는 도메인 exception class는
-# #1819 IPC CommandSpec metadata epic 이 ``ServiceNotConfiguredError`` 로 도입할
-# 예정이다. 본 PR 은 ErrorSpec value 만 module-level constant 로 reserved 보존
-# 하며, exception class 는 import 하지 않는다 — 후속 PR 이 class 를 추가하면
-# ``EXCEPTION_TO_SPEC`` 에 한 줄 entry 를 더하는 것으로 연결할 수 있다.
 _SERVICE_NOT_CONFIGURED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="SERVICE_NOT_CONFIGURED",
     category="service_unavailable",

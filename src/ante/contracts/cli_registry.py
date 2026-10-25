@@ -68,7 +68,7 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 dataclass 시그니처가 그대로 강제한다.
 
 ``execution`` Literal 값과 ``docs/specs/cli/03-commands.md`` 표기는 다음과
-같이 1:1 대응한다 (normative — 후속 #1846/#1847 등록 시 동일 매핑 사용):
+같이 1:1 대응한다 (normative):
 
 ============================  ============================
 ``03-commands.md`` 표기        ``CliCommandContract.execution``
@@ -132,9 +132,7 @@ ExecutionClass = Literal[
 """CLI command 의 실행 모드 vocabulary.
 
 ``docs/specs/cli/03-commands.md`` 의 5 모드와 1:1 정합한다. ``external
-process`` 표기는 #1815 결정으로 ``"long_running"`` 에 흡수된다 — 후속
-spec 이 별도 모드로 분리할 필요가 생기면 vocab 을 늘리고 본 모듈을
-업데이트한다.
+process`` 표기는 #1815 결정으로 ``"long_running"`` 에 흡수된다.
 """
 
 
@@ -331,11 +329,7 @@ ACCOUNT_CONTRACTS: tuple[CliCommandContract, ...] = (
 # 외 9 commands 는 ``runtime IPC`` 다. ``ipc_command`` 필드는 stub 값만
 # 채운다 (예: ``"member.register"``); 단순 문자열 lock 이며 server-side IPC
 # registry 와의 cross-ref drift test 는 #1819 의 책임이다 (이슈 #1847 본문
-# v2 결정). 현재 member.py 에서 ``ipc_send`` 분기를 실제로 실행하는 것은
-# ``update-scopes`` 1 개 뿐이고 나머지 8 commands 는 cold_path 로 직접
-# ``MemberService`` 를 호출하지만, 본 PR 은 spec SSOT 분류만 등록한다 —
-# 실제 ``ipc_send`` 분기 추가는 #1819 또는 별도 후속 이슈가 책임진다
-# (callsite envelope shape 자체는 drift test 가 lock).
+# v2 결정).
 MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("member", "list"),

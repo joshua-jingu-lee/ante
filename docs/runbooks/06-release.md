@@ -67,7 +67,7 @@
 | 커밋 | `chore(release): vX.Y.Z` |
 | 허용 변경 | `pyproject.toml`, `CHANGELOG.md`, 릴리스 노트 등 릴리스 메타데이터 |
 | 금지 변경 | 기능 수정, 버그 수정, 스펙 변경, unrelated workflow 변경 |
-| PR 게이트 | 일반 PR과 동일: required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` (`AUTOMERGE_TOKEN` PAT로 auto-merge 활성화; 머지 후 `pull_request:closed` 이벤트로 post-merge 정리 — #2437) |
+| PR 게이트 | 일반 PR과 동일: required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` (`AUTOMERGE_TOKEN` PAT로 auto-merge 활성화; 머지 후 `pull_request:closed` 이벤트로 post-merge 정리 — #2437) |
 | Docker | PR에서는 build 검증만 수행하고 push 금지 |
 
 release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR은 stale로 본다.

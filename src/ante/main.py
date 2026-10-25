@@ -563,6 +563,9 @@ def _subscribe_order_tracker(eventbus: Any, order_tracker: Any) -> None:
             submitted_at=event.timestamp.isoformat() if event.timestamp else None,
             # #2391: 원주문 지정가 단가. 주문 정정 v1 buy 가격↓ 판정 출처.
             order_price=event.price,
+            # #2487: 주문 거래소. 체결 영속 계층(TradeRecord /
+            # OrderFilledEvent payload)이 exchange 를 얻는 단일 소스.
+            exchange=event.exchange,
         )
 
     async def _on_terminal(event: object) -> None:

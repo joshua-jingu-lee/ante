@@ -485,6 +485,7 @@ class VirtualExecutor:
                 order_type=order_type,
                 timestamp=datetime.now(UTC),
                 fill_dedup_key="",
+                exchange=event.exchange,
             )
         )
         logger.info(

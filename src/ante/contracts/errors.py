@@ -5,9 +5,6 @@
 socket) 표면이 같은 안정 에러 코드 taxonomy 를 공유하도록 helper
 (``ante.contracts.helpers``) 가 본 모듈의 dataclass 를 소비한다.
 
-본 PR(#1840) 은 helper 모듈만 도입한다 — 기존 ``src/ante/cli/middleware.py``,
-``src/ante/cli/formatter.py``, ``src/ante/cli/commands/*``, ``src/ante/ipc/server.py``
-는 변경하지 않는다. callsite migration 은 후속 PR(#1842/#1843) 책임이다.
 
 본 모듈은 runtime behavior 를 가지지 않는다 — Literal alias + frozen dataclass
 만 제공한다.

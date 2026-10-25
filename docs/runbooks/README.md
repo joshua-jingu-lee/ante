@@ -1,6 +1,6 @@
 # Ante Runbooks
 
-> 개발 프로세스 및 배포 가이드. 정책과 규칙을 정의한다.
+> 내부 maintainer·collaborator용 개발 프로세스 및 배포 런북. 정책과 규칙을 정의한다. 외부 기여자는 [CONTRIBUTING.md](../../CONTRIBUTING.md)를 따른다.
 > 에이전트의 구체적 작업 절차는 `.agent/commands/`가 단일 출처(SSOT).
 >
 > 마스터 문서: [AGENTS.md](../../AGENTS.md) | 아키텍처: [architecture.md](../architecture/README.md)
@@ -10,8 +10,8 @@
 | Runbook | 설명 |
 |---------|------|
 | [00-issue-management.md](00-issue-management.md) | GitHub Issues 등록, 분류, 추적 규칙 (이슈 템플릿, 라벨, 우선순위) |
-| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Plan Preflight/Plan Review(Gate 0), Claude 구현, 사전 브랜치 리뷰(Gate A `/code-review`), 메타 리뷰, merge gate |
-| [02-agent-structure.md](02-agent-structure.md) | Claude 역할 구조, 계획/브랜치/이슈 리뷰 게이트, Claude 메타 리뷰어, `.agent/`와 `.claude/` 레이어 |
+| [01-development-process.md](01-development-process.md) | 개발 프로세스 정책 — Plan Preflight/Plan Review(Gate 0), 선택 AI adapter 구현, 사전 브랜치 리뷰(Gate A `/code-review`), 메타 리뷰, merge gate |
+| [02-agent-structure.md](02-agent-structure.md) | 선택 AI adapter 역할 구조, 계획/브랜치/이슈 리뷰 게이트, 메타 리뷰어, `.agent/`와 adapter 레이어 |
 | [03-git-workflow.md](03-git-workflow.md) | 커밋 컨벤션 (+ 버전 범프), `Closes #N` 기반 PR 규칙 |
 | [04-ci-cd.md](04-ci-cd.md) | CI/CD 파이프라인, 리뷰/승인/머지 게이트, 저장소 설정 |
 | [05-testing.md](05-testing.md) | 테스트 전략 (단위/통합 테스트, 커버리지, 배포 이미지 시뮬레이션 테스트 방향) |

@@ -216,6 +216,9 @@ class FillApplier:
                 timestamp=datetime.now(UTC),
                 order_id=order_id,
                 account_id=account_id,
+                # #2487: 주문 거래소는 tracker record 가 단일 소스다. v007 이전
+                # legacy row(exchange NULL)는 "KRX" 폴백 — 종전 관측값과 동일.
+                exchange=record.exchange or "KRX",
             )
             await self._save_trade(trade)
             await self._position_history.on_trade(trade)
@@ -321,6 +324,8 @@ class FillApplier:
             "price": avg_price,
             "order_type": record.order_type,
             "fill_dedup_key": fill_dedup_key,
+            # #2487: legacy tracker row(exchange NULL)는 "KRX" 폴백.
+            "exchange": record.exchange or "KRX",
         }
 
     async def _publish_filled(
@@ -352,5 +357,7 @@ class FillApplier:
                 quantity=delta,
                 price=avg_price,
                 order_type=record.order_type,
+                # #2487: legacy tracker row(exchange NULL)는 "KRX" 폴백.
+                exchange=record.exchange or "KRX",
             )
         )

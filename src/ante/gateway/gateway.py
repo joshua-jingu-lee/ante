@@ -618,11 +618,20 @@ class APIGateway:
         # 방지를 위해 record.account_id == event.account_id 일 때만 채우고,
         # order_tracker 미주입 / record 미발견 / account 불일치 시에는 ""
         # 로 graceful 하게 비운다 (예외 없음).
+        #
+        # #2487: OrderCancelledEvent.exchange 의 유일한 값 소스도 같은 record 다
+        # (OrderCancelEvent 에는 exchange 필드가 없다). ``record`` 는 아래 블록
+        # 안에서만 바인딩되므로 ``sym, sd`` 와 동일하게 **블록 밖에서 선언**한다 —
+        # order_tracker 미주입 경로에서 unbound-name 크래시를 막는다. 폴백이 ""
+        # 가 아니라 "KRX" 인 이유: CANONICAL_EXCHANGES 에 빈 문자열이 없다
+        # (core/exchange.py, D-016).
         sym, sd = "", ""
+        exch = "KRX"
         if self._order_tracker is not None:
             record = await self._order_tracker.get(event.order_id)
             if record is not None and record.account_id == event.account_id:
                 sym, sd = record.symbol, record.side
+                exch = record.exchange or "KRX"
 
         try:
             ok = await self.cancel_order(event.order_id, account_id=event.account_id)
@@ -653,6 +662,7 @@ class APIGateway:
                     quantity=0.0,
                     price=0.0,
                     reason=event.reason,
+                    exchange=exch,
                 )
             )
         except Exception as e:
@@ -905,6 +915,10 @@ class APIGateway:
                 quantity=record.ordered_qty,
                 price=new_price,
                 reason=event.reason,
+                # #2487: OrderModifyEvent 에는 exchange 필드가 없다 — 값 소스는
+                # tracker record 다. record 비어있음/cross-account 는 위 가드가
+                # 이미 배제했다. legacy row(exchange NULL)는 "KRX" 폴백.
+                exchange=record.exchange or "KRX",
             )
         )
 

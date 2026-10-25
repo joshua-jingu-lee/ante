@@ -1,6 +1,6 @@
 # 02. 에이전트 구조 및 `.agent/` 디렉토리
 
-> Claude 측 역할 정의와 `.agent/` 디렉토리 구성을 정의한다.
+> 선택적 내부 adapter인 Claude 측 역할 정의와 `.agent/` 디렉토리 구성을 정의한다. `.agent/`와 `.claude/`는 maintainer/collaborator 내부 lane에서만 사용한다.
 > 계획 리뷰(`@plan-reviewer`)와 이슈 검증(`@issue-reviewer`)은 `.agent/agents/`의 Claude 서브에이전트이고, PR 전 브랜치 리뷰는 Claude Code 네이티브 `/code-review`가 담당한다.
 
 ---
@@ -71,9 +71,9 @@
 
 ### 1.7 이슈 검증 에이전트 (`@issue-reviewer`)
 
-**담당**: 외부발 버그 리포트의 진실성·재현 가능성 검증
+**담당**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보의 진실성·재현 가능성 검증
 
-- 외부에서 들어온 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)에 한해, 구현 착수 전 루트원인이 실제 코드와 일치하는지와 재현 가능성을 read-only로 검토한다. 상시 게이트가 아니며 내부 기획 이슈에는 적용하지 않는다.
+- 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)에 한해, 구현 착수 전 루트원인이 실제 코드와 일치하는지와 재현 가능성을 read-only로 검토한다. 상시 게이트가 아니며 내부 기획 이슈에는 적용하지 않는다.
 - `@issue-reviewer`는 read-only로 verdict(`confirmed` / `not-reproduced` / `invalid` / `needs-info`)와 근거를 반환하고, 오케스트레이터가 그 verdict에 따라 `이슈 검증` 이슈 코멘트를 남기고 `confirmed`가 아니면 `needs-triage`를 부착한다(자동 close 없음). `@issue-reviewer` 자신은 코드·이슈 본문·라벨을 직접 수정하지 않는다. 정의는 `.agent/agents/issue-reviewer.md`.
 
 ### 1.8 브랜치 리뷰와 머지 게이트
@@ -93,7 +93,7 @@
 │   ├── strategy-dev.md        # @strategy-dev
 │   ├── code-reviewer.md       # @code-reviewer — 구조 리스크 메타 리뷰
 │   ├── plan-reviewer.md       # @plan-reviewer — 구현 전 Plan Review (Gate 0)
-│   └── issue-reviewer.md      # @issue-reviewer — 외부발 버그 리포트 검증
+│   └── issue-reviewer.md      # @issue-reviewer — 내부 생성 미검증 버그 후보 검증
 ├── commands/              # 커스텀 슬래시 명령어 (작업 절차 SSOT)
 │   ├── plan-preflight.md      # /plan-preflight
 │   ├── implement-issue.md     # /implement-issue
@@ -185,7 +185,7 @@ Plan Review는 `.agent/skills/`가 아니라 `.agent/agents/plan-reviewer.md` �
   - Plan Review는 구현 세션과 격리된 별도 컨텍스트 `@plan-reviewer` 서브에이전트로 호출하는 read-only 리뷰다.
 - PR 후 자동 AI 승인/감사 워커는 운영하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
 - `@code-reviewer`는 자동 PR 승인 워커가 아니라 반복 failure와 구조 리스크에 대한 메타 리뷰를 담당한다.
-- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks(`ci`, `lint`, `test` — 집합은 [04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
+- 머지 게이트는 GitHub PR review나 AI status check가 아니라 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`** 결과를 기준으로 한다.
 - 로컬 worktree 정리는 리뷰 게이트가 아니라 Claude 측 구현 머신이 담당한다.
 - 고위험 변경에서는 diff만 읽고 끝내지 않는다.
   - 생성자, 팩토리, 캐시 저장소, 소비자, 생성 산출물까지 넓혀 본다.

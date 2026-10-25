@@ -1,12 +1,14 @@
 # 00. 이슈 관리
 
-> GitHub Issues를 활용한 작업 등록, 분류, 추적 규칙을 정의한다.
+> GitHub Issues를 maintainer/collaborator의 내부 작업 목록으로 등록·분류·추적하는 규칙을 정의한다.
 
 ---
 
 ## 1. 이슈 등록 기준
 
-모든 코드 변경은 **GitHub Issue 등록 → 브랜치 → PR** 흐름을 따른다.
+모든 **내부 코드 변경**은 **GitHub Issue 등록 → 브랜치 → PR** 흐름을 따른다.
+
+외부 공개 이슈는 받지 않는다(D-020). 외부 기여는 [CONTRIBUTING](../../CONTRIBUTING.md)의 fork PR-only 경로를 따르며 사전 issue가 필요 없고, 지원 또는 일반 신고 창구는 제공하지 않는다.
 
 - 기능 추가
 - 버그 수정
@@ -177,10 +179,18 @@ A → D     (A 완료 후 B, D 병렬 가능)
 
 ## 4. 라벨
 
+**이 표가 저장소 라벨의 등록부다.** `gh label list --limit 200`이 반환하는 라벨은 **전건이 이 표에 행으로 있어야 한다**(기본 `--limit`은 30이라 라벨이 그보다 많으면 전건을 내지 못한다). 반대로 이 표에만 있고 실재하지 않는 라벨을 두지 않는다.
+
+**이 표가 소유하는 것은 라벨의 이름과 용도다.** 설명·색 같은 메타데이터는 소유하지 않는다 — `색상 권장` 열은 기존 행의 이력이며 신규 등재는 비운다(`—`).
+
+등재 경로가 PR인 라벨은 같은 PR에서 등재한다. 다만 **Dependabot·GitHub 기본·저장소 밖 런타임이 만드는 라벨은 그 경로를 지나지 않아** 이 규범이 발화하지 않는다 — 그 갈래의 상시 대조는 이 표가 보증하지 않는다.
+
+행 접두는 여섯이다 — **무표기** · **`(area)`** · **`(운영)`** · **`(플랫폼 기본)`** · **`(Dependabot)`** · **`(legacy)`**. 접두는 그 행이 놓인 축을 가리키는 표기이며 라벨을 배타적으로 분할하지 않는다. 각 행의 뜻은 `용도` 열이 적는다. **`(area)`** 행은 모듈 축이고 **타입 라벨이 아니다**.
+
 | 라벨 | 용도 | 색상 권장 |
 |------|------|-----------|
 | `enhancement` | 새 기능·성능 개선 (§2의 `feat`·`perf`) | 하늘색 |
-| `feature` | (legacy) 신규 이슈에 쓰지 않는다. 재정 근거는 #2458. | 녹색 |
+| `feature` | (legacy) 신규 이슈에 쓰지 않는다. 재정 근거는 #2458. 이 라벨이 붙은 open 이슈를 발견하면(reopen된 경우 포함) 경로와 무관하게 사용자 또는 오케스트레이터가 `feature`를 떼고, 다른 타입 라벨이 없으면 `enhancement`로 교체한다. | 녹색 |
 | `bug` | 버그 수정 | 빨간색 |
 | `refactor` | 리팩터링 | 파란색 |
 | `docs` | 문서 | 보라색 |
@@ -195,6 +205,26 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | `blocked:review-loop` | 브랜치 리뷰 반복 실패로 자동 진행 중단 | 진한 빨간색 |
 | `blocked:pr-review-loop` | (legacy) 자동 큐 제외 신호. autopilot/구현 큐가 다루지 않는 사람 개입 대기 상태로만 사용한다. 자동 PR 재수정 루프 의미는 더 이상 없다. | 진한 빨간색 |
 | `good first issue` | 에이전트가 자율 처리 가능 | 연두색 |
+| `P0` | (운영) 우선순위 — 적용 기준은 §5 | — |
+| `P1` | (운영) 우선순위 — 적용 기준은 §5 | — |
+| `P2` | (운영) 우선순위 — 적용 기준은 §5 | — |
+| `P3` | (운영) 우선순위 — 적용 기준은 §5 | — |
+| `core` | (area) 코어 런타임 변경 — 타입 라벨이 아니다 | — |
+| `cli` | (area) CLI 변경 — 타입 라벨이 아니다 | — |
+| `api` | (area) REST API 엔드포인트 — 타입 라벨이 아니다 | — |
+| `e2e` | (area) E2E 테스트 — 타입 라벨이 아니다 | — |
+| `dashboard` | (area) 대시보드 프론트엔드 — 타입 라벨이 아니다 | — |
+| `source:ante-oracle` | (운영) ante-oracle 런타임이 등록한 미검증 버그 후보 표시. **§6 `이슈 검증` 게이트와 `autopilot.md` 「내부 생성 미검증 버그 후보 검증 선행」이 대상 예시로 이름을 드는 라벨이다** | — |
+| `ante-oracle` | (운영) `source:ante-oracle`와 설명·색이 **동일한 중복 별칭**이다. **§6과 `autopilot.md`의 `이슈 검증` 게이트 서술은 `source:ante-oracle`만 이름으로 들고 이 별칭은 들지 않는다.** 부착 생산자가 저장소 밖(ante-oracle 런타임)이라 이 표가 부착 동작을 정하지 않는다 | — |
+| `process` | (운영) 개발 프로세스를 정의하거나 집행하는 표면만 바꾸는 이슈: 에이전트 운영 문서·런북·프로세스 ADR·이슈 폼·merge-gate/post-merge 자동화·기여 정책·프로세스 규범을 집행하는 테스트와 락. 제품 계약·제품 코드와 제품 테스트·제품 CI/릴리스는 아니며, 운영 장치 변경이 강제하는 생성 산출물·생성기 갱신은 판정을 바꾸지 않는다. 타입 라벨이 아니다. `autopilot.md` 「기본 제외 대상」이 이름을 들어 **자동 큐에서만 제외**하며 수동 `/implement-issue`는 막지 않는다. 판정 예시·보정 사례는 #2521 | — |
+| `documentation` | (플랫폼 기본) `docs`와 의미가 겹친다. **§2 대응 라벨은 `docs`이므로 큐 선별의 타입 라벨 집합(`autopilot.md` 「포함 대상」)에 이 라벨은 없다** | — |
+| `fix` | (운영) `03-git-workflow.md` §4.2가 내부 lane PR 라벨로 열거한다. **§2 Type 표의 `fix` 행은 대응 라벨이 `bug`이므로 이 라벨은 이슈 타입 라벨이 아니다.** 큐 선별의 타입 라벨 집합에도 없다 | — |
+| `duplicate` | (플랫폼 기본) 중복 이슈. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
+| `invalid` | (플랫폼 기본) 유효하지 않은 이슈. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
+| `wontfix` | (플랫폼 기본) 처리하지 않기로 한 이슈. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
+| `help wanted` | (플랫폼 기본) 추가 관심 필요. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
+| `dependencies` | (Dependabot) 의존성 갱신 PR에 Dependabot이 부착한다. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
+| `github_actions` | (Dependabot) Actions 갱신 PR에 Dependabot이 부착한다. 큐 선별 규칙의 포함·제외 라벨 집합 어디에도 없다 | — |
 
 ### 4.1 `needs-triage` 라벨
 
@@ -202,7 +232,8 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - watcher, QA, 리뷰 후속 자동화처럼 에이전트가 새 이슈를 만들었지만 중복/우선순위/스펙 준비 상태를 아직 사람이 확인하지 않았을 때 사용한다.
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
-- 외부발 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
+- 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
+- autopilot 큐 판정에서 타입 라벨과 area 라벨이 모두 없는 이슈에 오케스트레이터가 이 라벨을 부착한다. **판정 절차**의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이고 **어떤 라벨이 실재하는지는 위 §4 등록부**가 정하며, 이 경로로 붙은 라벨은 **사람이** 타입 또는 area 라벨을 부착해 분류한 뒤 제거한다. **이 경로로 붙은 라벨에는 아래 일반 해제 규칙보다 이 규칙이 우선한다.**
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
 ### 4.2 `plan-preflight:*` 라벨
@@ -218,14 +249,14 @@ A → D     (A 완료 후 B, D 병렬 가능)
 
 ## 5. 우선순위
 
-GitHub 기본 라벨 또는 프로젝트 보드로 관리:
+우선순위는 §4에 등재된 `P0`~`P3` 라벨로 관리한다. **라벨명은 접두사·접미사 없는 `P0`·`P1`·`P2`·`P3`다.** §4가 라벨 등록부이고 이 절은 각 등급의 **적용 기준**만 정한다.
 
-| 우선순위 | 기준 |
+| 라벨 | 기준 |
 |---------|------|
-| `P0 - Critical` | 시스템 장애, 자금 관련 버그 — 즉시 처리 |
-| `P1 - High` | 핵심 기능 결함, 차단 이슈 — 당일 처리 |
-| `P2 - Medium` | 일반 기능/개선 — 스프린트 내 처리 |
-| `P3 - Low` | 편의 기능, 기술 부채 — 여유 시 처리 |
+| `P0` | 시스템 장애, 자금 관련 버그 — 즉시 처리 |
+| `P1` | 핵심 기능 결함, 차단 이슈 — 당일 처리 |
+| `P2` | 일반 기능/개선 — 스프린트 내 처리 |
+| `P3` | 편의 기능, 기술 부채 — 여유 시 처리 |
 
 ### 5.1 Autopilot과 우선순위
 
@@ -242,11 +273,11 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | Open | 등록됨 | 분류, 스펙 경로 확인, Plan Preflight |
 | Preflight started | `plan-preflight:started` 라벨 존재 | 구현계획 작성 또는 Plan Review 피드백 반영 중 |
 | Preflight done | `plan-preflight:done` 라벨 존재 | 확정된 이슈 본문 구현계획을 기준으로 구현 착수 가능 |
-| Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거 |
+| Needs triage | `needs-triage` 라벨 존재 | 사람/오케스트레이터가 범위와 처리 가치를 확인한 뒤 라벨 제거. 단, §4.1의 타입·area 라벨 부재 경로로 붙은 라벨은 §4.1을 따른다. |
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
 
-**외부발 버그 리포트 검증 단계**: 외부에서 들어온 버그 리포트(예: `source:ante-oracle` 자동 리포트, 외부 제보)는 Open 이후 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
+**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)는 Open 이후 타입·area 라벨 판정을 통과하면 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
 
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),
@@ -256,18 +287,19 @@ autopilot 배치 상태는 [.agent/commands/autopilot.md](../../.agent/commands/
 ### 이슈 close 규칙
 
 - **PR 본문에는 `Closes #N`를 기본으로 사용한다.** `Fixes #N`, `Resolves #N`도 허용하지만, runbook과 예시는 `Closes #N`으로 통일한다.
-- 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge` automation은 체크박스와 에픽 상태를 동기화한다.
+- 이슈 close는 GitHub 기본 auto-close를 우선 사용하고, `post-merge` automation은 체크박스와 에픽 상태를 동기화한다. **연결 이슈 본문**의 체크박스 갱신은 **`완료 조건` 헤딩 아래 절에만** 적용되며(절 경계는 `#` 헤딩으로 판정하고, 헤딩 제목은 이슈 폼이 만드는 `완료 조건`으로 시작하고, 뒤에 설명을 붙이려면 **공백으로 띄운 다음 낱말이나 숫자가 아닌 것**으로 시작해야 한다 — `완료 조건 (epic)`·`완료 조건 — 반영판`은 켜지고, `완료 조건 매핑`(낱말)·`완료 조건 2차`(숫자)·`완료 조건(epic)`(붙여 씀)은 켜지지 않는다), 이슈 폼의 `위험 신호`처럼 완료 조건이 아닌 체크박스는 건드리지 않는다. 에픽 본문 갱신은 이와 별개 경로다.
+- **본문 전체를 치환하던 시기(#2509 이전)에 close된 이슈의 체크박스 상태는 `완료 조건` 절 밖이면 근거로 쓰지 않는다**(`위험 신호`·`유저스토리`·계획 `Tasks` 등). 그 시기 자동화는 절도 코드 펜스도 가리지 않고 **행 첫머리의 `- [ ]`를 문자 그대로** 켰다. 위 세 절의 항목은 대개 그 형태라 그때 켜졌고, 들여쓴 항목·`*`·`+` 불릿·`- ` 뒤 공백이 둘 이상인 항목은 그때도 갱신되지 않았다. 원본은 GitHub 편집 이력에 남아 있으며, **그때 잘못 켜진 체크박스는** 소급 정정하지 않는다.
 - 에픽 이슈는 모든 하위 이슈가 close된 후에 close한다.
 - `post-merge`가 누락되면 `post-merge.yml`을 `workflow_dispatch`로 수동 실행하되 `issue_numbers`에 이슈 번호를 넣어 복구한다(머지된 PR은 재오픈 불가라 이것이 유일 재실행 경로 — `pr_number`/폴링 dispatch는 #2437로 제거, [04-ci-cd.md §5.2](04-ci-cd.md#52-post-merge-실패-모드와-복구)).
 
 ## 7. 에이전트의 이슈 등록
 
-에이전트(외부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
+에이전트(내부 검증, 리뷰 게이트 후속 수정 등)가 작업 중 새로운 이슈를 발견하면 직접 등록할 수 있다:
 
 - 이 문서의 제목/본문 템플릿을 사용한다.
 - 스펙 준비 상태나 중복 여부가 불명확하면 `needs-triage`를 함께 붙인다.
 - review-loop recovery 중에는 단발 follow-up을 즉시 양산하지 않고 [01-development-process.md §5](01-development-process.md#5-실패-복구-루프)와 [04-ci-cd.md §5](04-ci-cd.md#5-ci승인-실패-시-복구)의 복구 원칙에 따라 원인 정리, 메타 리뷰, 사람 판단을 우선한다.
-- watcher, 외부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
+- watcher, 내부 검증, 리뷰 후속 자동화가 만든 이슈도 분류 전이면 `needs-triage`로 시작한다.
 
 ## 8. 이슈와 버전 관리의 연결
 

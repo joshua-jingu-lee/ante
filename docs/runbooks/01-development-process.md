@@ -1,10 +1,12 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> Claude Code가 구현을 담당하고, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
+> 이 문서의 전체 절차는 maintainer/collaborator의 내부 lane이다. Claude Code는 선택적 내부 adapter이며, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
 
 ---
 
 ## 1. 개발 철학
+
+외부 기여는 D-020에 따라 issue, Gate 0, Gate A 없이 fork PR → 공개 CI → maintainer 판단 경로를 따른다. 외부 공개 이슈는 받지 않는다.
 
 - 주 개발은 Claude Code가 담당한다.
 - 스펙 문서(`docs/specs/`)가 설계의 단일 출처(SSOT)다. 변경이 필요하면 **스펙 최신화 → 이슈 발행 → 코드 반영** 순서를 따른다.
@@ -25,7 +27,7 @@
 - **계획 리뷰어 (`@plan-reviewer`)**: 별도 컨텍스트에서 구현 전 계획의 가정, 위험, 대안을 read-only로 검토 (Gate 0)
 - **브랜치 리뷰 (`/code-review`)**: Claude Code 네이티브 리뷰로 PR 전 브랜치 단위 코드 품질 게이트 수행 (Gate A)
 - **Claude 코드 리뷰어 (`@code-reviewer`)**: 구조 리스크 메타 리뷰, 반복 failure 원인 분석 (수동/오케스트레이터 호출)
-- **이슈 검증 (`@issue-reviewer`)**: 외부발 버그 리포트에 한해 구현 착수 전 루트원인 진실성·재현 가능성을 read-only로 검증 (상시 게이트 아님)
+- **이슈 검증 (`@issue-reviewer`)**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보에 한해 구현 착수 전 루트원인 진실성·재현 가능성을 read-only로 검증 (상시 게이트 아님)
 - **GitHub merge gate**: required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) 통과와 충돌 없음·대화 해결·auto-merge 활성화 가능 상태를 기준으로 auto-merge 집행
 
 ## 3. 상호작용 흐름
@@ -36,11 +38,11 @@
 2. **Plan Preflight + Plan Review (Gate 0)** — `/plan-preflight`: `plan-preflight:started` 부착 → 이슈 본문 Implementation Plan(파일 맵/작업 순서/risk flags/검증/stop conditions/비목표) 작성·정비 → 별도 컨텍스트 `@plan-reviewer`가 계획을 read-only로 검토해 verdict를 반환하고, 오케스트레이터가 이를 `Plan Review` 코멘트로 남김. `approve-implement`/`narrow-scope`면 `plan-preflight:started` 제거 후 `plan-preflight:done` 확정, `revise-plan`이면 보강 후 재요청, `split-issue`/`invoke-human`/`needs-spec-first`/`blocked`이면 구현 중단.
 3. **구현 + 브랜치 리뷰 (Gate A)** — `/implement-issue`: `plan-preflight:done`과 최신 계획 확인 → 개발 에이전트(`@backend-dev`/`@devops`/`@strategy-dev`)가 worktree 격리 후 구현·로컬 lint/test·커밋 → 네이티브 `/code-review`로 PR 전 브랜치 리뷰(PASS까지 내부 반복, FAIL은 같은 worktree에서 수정, 반복 risk class는 `@code-reviewer` 메타 리뷰) → PASS 시 브랜치 push + PR 생성(`Closes #이슈`). 각 전환은 이슈 코멘트로 남긴다.
 4. **PR 게이트** (GitHub Actions): required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`가 충돌 없음·대화 해결·auto-merge 가능 상태에서 **`AUTOMERGE_TOKEN`(PAT)로 auto-merge를 활성화**한다(#2437, fail-closed). 머지가 발화한 `pull_request: closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음). `/autopilot` 실행 중이면 사이클 상태 코멘트를 갱신한다.
-5. **post-merge automation**: 이슈 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
+5. **post-merge automation**: 이슈 `완료 조건` 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
 6. **/autopilot side lane** (오케스트레이터): implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 병렬 수행한다(코드 수정·브랜치·PR 생성 금지). Plan Preflight 코멘트 + Autopilot 사이클 상태 코멘트를 남긴다.
 7. **/release** (수동 운영, 이슈 흐름 아님): prepare로 `release/vX.Y.Z` PR 생성 + Docker build 검증, publish로 release PR merge 후 GitHub Release + PyPI + Docker image 배포.
 
-외부에서 들어온 버그 리포트는 1 이전에 `이슈 검증`(`@issue-reviewer`, read-only)을 선행한다. 상시 게이트가 아니며, 세부 큐 연동은 [00-issue-management.md](00-issue-management.md)와 `.agent/commands/autopilot.md`를 따른다.
+협업자 또는 내부 자동화가 등록한 미검증 버그 후보는 1 이전에 `이슈 검증`(`@issue-reviewer`, read-only)을 선행한다. 상시 게이트가 아니며, 세부 큐 연동은 [00-issue-management.md](00-issue-management.md)와 `.agent/commands/autopilot.md`를 따른다.
 
 **핵심 차이**:
 - 구현 전 Plan Preflight는 `/plan-preflight`가 담당하며, `superpowers:writing-plans` 원칙으로 이슈 본문에 구현계획을 작성하거나 정비하고 Plan Review를 별도 컨텍스트 게이트(`@plan-reviewer`)로 요청한 뒤 피드백을 반영해 확정한다.
@@ -138,7 +140,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 
 - 같은 head SHA에서 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
 - `/code-review` 실패는 PR 생성 전에 같은 worktree에서 해소한다.
-- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다.
+- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - 같은 `risk class`가 반복되거나 구조 리스크가 넓어지면 얕은 자동 수정 대신 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - 반복 리스크가 구현계획 자체의 문제라면 `/plan-preflight`로 돌아가 이슈 본문 구현계획을 다시 정비하고 Plan Review를 재요청한다.
@@ -160,11 +162,11 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 > 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
 - **브랜치 리뷰 단계**: Claude Code 네이티브 `/code-review`가 수행한다. GitHub Actions가 아니라 `/code-review` 내부 루프로 도는 PR 전 코드 품질 게이트다.
-- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다.
+- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
 - **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
-- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스/에픽 동기화와 수동 복구를 맡는다.
+- **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스(연결 이슈 본문의 `완료 조건` 절 한정)/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용
 - **로컬 worktree 정리**: Claude 측에서 후속 작업 시 `git worktree prune` 또는 명시적 remove
 

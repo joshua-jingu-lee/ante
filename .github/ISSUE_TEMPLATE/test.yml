@@ -1,0 +1,75 @@
+name: "[test] 테스트 추가/수정"
+description: 테스트 추가 또는 보강 요청
+title: "[test] "
+labels: ["test"]
+body:
+  - type: textarea
+    id: background
+    attributes:
+      label: 배경
+      description: 어떤 동작이 지금 검증되지 않고 있는지, 왜 지금 필요한지.
+    validations:
+      required: true
+
+  - type: textarea
+    id: test-surface
+    attributes:
+      label: 대상 테스트 표면
+      description: 추가·보강할 테스트 파일 경로와 TC 카테고리(unit / integration / e2e)를 적어주세요.
+      value: |
+        - `tests/unit/...`
+    validations:
+      required: true
+
+  - type: textarea
+    id: invariants
+    attributes:
+      label: 잠글 불변식
+      description: 테스트가 고정해야 할 동작을 적어주세요. 열거가 아니라 정의로 닫을 수 있으면 그 정의를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: discriminating-evidence
+    attributes:
+      label: 판별력 근거
+      description: |
+        이 테스트가 「통과만 하는 테스트」가 아님을 보이는 근거를 적어주세요. 아래 두 경우 중 해당하는 쪽만 채우면 됩니다.
+
+        - 회귀 재현: 현재 코드에서 실패하는 지점(로그·명령·assert)
+        - 커버리지 보강: baseline에서 통과하는 것이 정상이므로, 불변식을 뒤집었을 때(mutation, 역조건 입력) 이 테스트가 실패하는 것을 어떻게 확인했는지
+    validations:
+      required: true
+
+  - type: textarea
+    id: consumers
+    attributes:
+      label: 영향 소비자
+      description: 이 변경을 읽거나 호출하는 소비자, 생성 산출물, 운영 경로를 적어주세요.
+    validations:
+      required: true
+
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: 비목표
+      description: 이번 이슈에서 같이 하지 않을 변경을 적어주세요. 구현 단계가 「이번 PR에서 하지 말아야 할 확장」으로 소비한다.
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-notes
+    attributes:
+      label: 기술 노트
+      description: "구현 시 참고할 제약 조건, 관련 모듈, 설계 문서 링크 등. 에픽 하위 이슈면 00-issue-management.md §3.4가 정한 대로 `- 선행: #번호`를 여기에 적는다. (선택)"
+
+  - type: textarea
+    id: done-criteria
+    attributes:
+      label: 완료 조건
+      value: |
+        - [ ] 테스트 추가/보강
+        - [ ] 판별력 확인 (회귀 재현이면 baseline FAIL → 수정 후 PASS, 커버리지 보강이면 불변식을 뒤집었을 때 FAIL)
+        - [ ] 기존 테스트 전체 통과
+    validations:
+      required: true
