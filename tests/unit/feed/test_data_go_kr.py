@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import os
 from datetime import date
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import aiohttp
+import polars as pl
 import pytest
 from multidict import CIMultiDict
 from yarl import URL
@@ -1610,6 +1613,125 @@ class TestCollectorInstrumentsStore:
         path, df = _read_instruments(store)
         assert not path.exists()
         assert df is None
+
+    def test_instruments_zero_byte_recovered(self, tmp_path) -> None:
+        """0바이트 legacy stub → 새 종목 데이터가 담긴 readable Parquet로 복구된다."""
+        store = ParquetStore(base_path=tmp_path)
+        path = tmp_path / ".feed" / "instruments.parquet"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"")
+
+        written = DataGoKrCollector._store_instruments(
+            pl.DataFrame([_raw_inst("005930", "삼성전자", "KOSPI")]), store
+        )
+
+        assert written == 1
+        df = pl.read_parquet(path)
+        assert df.to_dicts() == [
+            {
+                "symbol": "005930",
+                "exchange": "KRX",
+                "name": "삼성전자",
+                "market": "KOSPI",
+            }
+        ]
+
+    def test_instruments_zero_byte_recovery_replaces_mode_with_0644(
+        self, tmp_path
+    ) -> None:
+        """0바이트 stub의 0600 mode를 복구본에 승계하지 않고 0644로 교체한다."""
+        store = ParquetStore(base_path=tmp_path)
+        path = tmp_path / ".feed" / "instruments.parquet"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"")
+        os.chmod(path, 0o600)
+
+        DataGoKrCollector._store_instruments(
+            pl.DataFrame([_raw_inst("005930", "삼성전자", "KOSPI")]), store
+        )
+
+        assert path.stat().st_mode & 0o777 == 0o644
+
+    def test_instruments_zero_byte_write_failure_preserves_target(
+        self, tmp_path, caplog
+    ) -> None:
+        """원자 write 실패 시 0바이트 target을 유지하고 temp를 남기지 않는다."""
+        store = ParquetStore(base_path=tmp_path)
+        path = tmp_path / ".feed" / "instruments.parquet"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"")
+        df = pl.DataFrame([_raw_inst("005930", "삼성전자", "KOSPI")])
+
+        with patch.object(
+            pl.DataFrame,
+            "write_parquet",
+            side_effect=OSError("disk full"),
+        ):
+            with pytest.raises(OSError, match="disk full"):
+                DataGoKrCollector._store_instruments(df, store)
+
+        assert path.exists()
+        assert path.read_bytes() == b""
+        assert list(path.parent.glob("*.tmp")) == []
+        assert not any("복구" in r.message for r in caplog.records)
+
+    def test_instruments_nonempty_unreadable_preserved_and_write_skipped(
+        self, tmp_path
+    ) -> None:
+        """비어 있지 않은 unreadable target은 unchanged로 보존하고 write를 건너뛴다."""
+        store = ParquetStore(base_path=tmp_path)
+        path = tmp_path / ".feed" / "instruments.parquet"
+        path.parent.mkdir(parents=True)
+        corrupt = b"corrupt-not-parquet"
+        path.write_bytes(corrupt)
+
+        written = DataGoKrCollector._store_instruments(
+            pl.DataFrame([_raw_inst("005930", "삼성전자", "KOSPI")]), store
+        )
+
+        assert written == 0
+        assert path.read_bytes() == corrupt
+        assert list(path.parent.glob("*.tmp")) == []
+
+    def test_instruments_stat_failure_uses_normal_preserve_path(
+        self, tmp_path, caplog, monkeypatch
+    ) -> None:
+        """stat 실패는 0바이트로 단정하지 않고 기존 target을 그대로 보존한다."""
+        store = ParquetStore(base_path=tmp_path)
+        path = tmp_path / ".feed" / "instruments.parquet"
+        path.parent.mkdir()
+        valid = pl.DataFrame(
+            [
+                {
+                    "symbol": "000660",
+                    "exchange": "KRX",
+                    "name": "기존종목",
+                    "market": "KOSPI",
+                }
+            ]
+        )
+        valid.write_parquet(path)
+
+        def _stat_failure(self, *, follow_symlinks=True):
+            if self != path:
+                return original_stat(self, follow_symlinks=follow_symlinks)
+            raise OSError("stat failed")
+
+        original_stat = Path.stat
+        monkeypatch.setattr(Path, "stat", _stat_failure)
+
+        written = DataGoKrCollector._store_instruments(
+            pl.DataFrame([_raw_inst("005930", "삼성전자", "KOSPI")]), store
+        )
+
+        monkeypatch.undo()
+        assert written == 2
+        assert set(pl.read_parquet(path)["symbol"].to_list()) == {
+            "000660",
+            "005930",
+        }
+        assert not any("복구" in r.message for r in caplog.records)
+        assert list(path.parent.glob("*.tmp")) == []
 
 
 # ── validate_credentials (#2046) ──────────────────────────────
