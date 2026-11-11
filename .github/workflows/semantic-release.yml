@@ -152,7 +152,7 @@ jobs:
       #   (런북 06 §11)가 남는다. 그래서 위 fail-closed 가드가 태그 생성 이전에 반드시 선행해야 한다.
       - name: Create GitHub Release
         if: steps.semrel.outputs.released == 'true' && inputs.dry_run == false
-        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           token: ${{ secrets.AUTOMERGE_TOKEN }}
           tag_name: ${{ steps.semrel.outputs.tag }}
