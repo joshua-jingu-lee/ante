@@ -199,24 +199,10 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### 2단계: 큐 snapshot 수집
 
 ```bash
-REPO="$(gh repo view --json nameWithOwner --jq '.nameWithOwner')"
-QUERY="repo:${REPO} is:issue is:open sort:created-asc \
-  -label:needs-triage \
-  -label:question \
-  -label:blocked \
-  -label:blocked:review-loop \
-  -label:blocked:pr-review-loop \
-  -label:process \
-  -label:epic"
-
-page=1
-while :; do
-  batch="$(gh api search/issues -f q="$QUERY" -f per_page=100 -f page="$page" --jq '.items')"
-  [[ "$batch" == "[]" ]] && break
-  printf '%s\n' "$batch"
-  page=$((page + 1))
-done
+python scripts/collect_autopilot_queue.py
 ```
+
+저장소 루트에서 실행하며 출력은 JSON 배열 하나다.
 
 - 큐 snapshot은 "앞 100건만 가져온 뒤 로컬에서 후행 필터링"하지 않는다.
 - `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
