@@ -123,9 +123,10 @@ def test_main_denies_piped_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
     assert decision["permissionDecision"] == "deny"
     reason = decision["permissionDecisionReason"]
     assert "passed" in reason
-    assert "> /tmp/pytest-out.txt 2>&1" in reason
-    assert "/tmp/" in reason
-    assert reason.endswith(ascii("pytest -q | tail -5"))
+    assert "mktemp" in reason
+    assert '> "$f" 2>&1' in reason
+    assert "/tmp/pytest-out.txt" not in reason
+    assert reason.endswith("pytest -q | tail -5")
 
 
 def test_main_decodes_utf8_regardless_of_locale(
@@ -139,8 +140,8 @@ def test_main_decodes_utf8_regardless_of_locale(
     decision = json.loads(out)["hookSpecificOutput"]
     assert decision["permissionDecision"] == "deny"
     reason = decision["permissionDecisionReason"]
-    assert reason.endswith(ascii(command))
-    assert "홍길동" not in reason  # the fragment itself is ascii()-escaped
+    assert reason.endswith(command)
+    assert "홍길동" in reason  # the fragment is kept verbatim, not escaped
 
 
 def test_main_allows_redirected_pytest(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -45,10 +45,10 @@ FRAGMENT_PREVIEW_CHARS = 120
 DENY_REASON = (
     "pytest 출력을 파이프로 넘기면 파이프가 pytest의 종료 코드를 삼킨다 "
     "(0건 실행이 통과로 보일 수 있다). "
-    "출력을 파일로 리다이렉트하고"
-    "(`pytest … > /tmp/pytest-out.txt 2>&1; echo exit=$?`) "
-    "종료 코드와 `N passed` 문자열"
-    "(예: `grep -E 'passed|failed' /tmp/pytest-out.txt`)로 판정하라. "
+    "출력을 mktemp로 만든 임시 파일로 리다이렉트하고 종료 코드와 `N passed` "
+    "문자열로 판정하되, 한 번의 Bash 호출 안에서 끝내라: "
+    '`f=$(mktemp); pytest … > "$f" 2>&1; echo exit=$?; '
+    "grep -E 'passed|failed' \"$f\"`. "
     "명령이 아니라 텍스트(heredoc이나 본문의 줄머리)에 이 형태가 들어 있어 걸린 "
     "것이면, 그 텍스트를 Bash heredoc이 아니라 파일 쓰기 도구로 파일에 쓴 뒤 "
     "`--body-file`·`-F` 같은 인자로 넘겨라."
@@ -56,9 +56,11 @@ DENY_REASON = (
 
 
 def deny_reason(fragment: str) -> str:
-    """Build the deny reason ending with an ASCII-escaped preview of the fragment."""
-    preview = ascii(fragment[:FRAGMENT_PREVIEW_CHARS])
-    return f"{DENY_REASON} 걸린 조각: {preview}"
+    """Build the deny reason ending with the raw first chars of the fragment.
+
+    stdout stays ASCII because ``json.dumps`` escapes non-ASCII by default.
+    """
+    return f"{DENY_REASON} 걸린 조각: {fragment[:FRAGMENT_PREVIEW_CHARS]}"
 
 
 def find_piped_pytest(command: str) -> str | None:
