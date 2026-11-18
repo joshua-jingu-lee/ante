@@ -68,7 +68,7 @@
 | 허용 변경 | `pyproject.toml`, `CHANGELOG.md`, 릴리스 노트 등 릴리스 메타데이터 |
 | 금지 변경 | 기능 수정, 버그 수정, 스펙 변경, unrelated workflow 변경 |
 | PR 게이트 | 일반 PR과 동일: required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` (`AUTOMERGE_TOKEN` PAT로 auto-merge 활성화; 머지 후 `pull_request:closed` 이벤트로 post-merge 정리 — #2437) |
-| Docker | PR에서는 build 검증만 수행하고 push 금지 |
+| Docker | PR에서는 build 검증만 수행 |
 
 release PR이 열려 있는 동안 main에 새 커밋이 들어오면 release PR은 stale로 본다.
 이 경우 rebase로 되살리지 않는다. release PR을 닫고 release 브랜치를 정리한 뒤(로컬 `git switch -f main && git branch -D release/vX.Y.Z`, 원격 `git push origin --delete release/vX.Y.Z`) `/release prepare`를 처음부터 재실행해 최신 `origin/main` 기준으로 다시 스탬핑한다. 로컬 정리는 release.md 4단계 통일 정리 규칙과 동일하다 — prepare 종료 시 release 브랜치에 체크아웃돼 있어 `git switch -f main`으로 먼저 벗어나야 `git branch -D`가 실패하지 않는다. `release/*` 브랜치에서는 `semantic-release` 재계산이 동작하지 않는다(PSR 기본 release group이 `main`/`master` 한정이라 무음 no-op).

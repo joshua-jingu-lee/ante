@@ -2,7 +2,7 @@
 
 > PR 전 브랜치 리뷰(Gate A, Claude Code 네이티브 `/code-review`)와 PR 후 사람/오케스트레이터의 수동 재검증이 공유하는 **코드 리뷰 체크리스트 계약**이다.
 > 반복 failure 메타 리뷰와 구조 리스크 재검토는 `.agent/agents/code-reviewer.md`가 담당한다.
-> PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 이 스킬은 GitHub Actions에서 호출되지 않으며, 사람 또는 `/code-review` 세션이 호출 주체다.
+> 이 스킬은 GitHub Actions에서 호출되지 않으며, 사람 또는 `/code-review` 세션이 호출 주체다.
 
 ## 트리거
 

@@ -233,7 +233,7 @@ while /code-review verdict != PASS:
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
 - 자동 수정 전에 finding을 곧바로 patch로 번역하지 말고 `.agent/skills/receive-review.md` 규칙으로 사실/추론/영향 범위를 먼저 다시 정리한다.
 - 같은 `risk class`가 2회 반복되면 `@code-reviewer`를 호출해 구조 리스크와 계획 편차를 먼저 정리한다.
-- 반복 실패가 임계값(10회, SSOT: [04-ci-cd.md](../../docs/runbooks/04-ci-cd.md)) 이상이면 `blocked:review-loop` 라벨이 붙고 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
+- 반복 실패가 임계값(SSOT: [04-ci-cd.md](../../docs/runbooks/04-ci-cd.md)) 이상이면 `blocked:review-loop` 라벨이 붙고 브랜치 리뷰를 더 이상 자동 실행하지 않는다.
 - 이 상태에서는 사용자가 개입해 원인을 정리하거나 라벨을 해제하기 전까지 같은 이슈를 계속 밀어붙이지 않는다.
 
 11a. **메타 리뷰 호출 조건**: 아래에 해당하면 PR을 만들기 전에 Claude `@code-reviewer`를 다시 호출한다.
@@ -275,7 +275,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 13. **최종 머지**: PR 생성 이후에는 GitHub automation이 다음을 수행한다.
 
 - `ci` 통과는 머지 차단 게이트다. (required status check)
-- PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
+- 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
 - PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review` PASS 또는 SKIP(04 §2 적용 범위)을 다시 받은 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다. 호출은 §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
