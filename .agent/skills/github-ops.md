@@ -126,14 +126,14 @@ gh issue view #{번호} --json comments --jq '.comments[].body'
 리뷰 증적 코멘트(`Plan Review`, `브랜치 리뷰`, `이슈 검증`)는 헤더 아래 `reviewer:` 필드에 리뷰 수행 주체를 함께 기록한다. 리뷰 주체는 도구 중립 헤더와 분리해 이 필드로만 남긴다 (D-019).
 
 - `Plan Review`(Gate 0) → `reviewer: @plan-reviewer`
-- `브랜치 리뷰`(Gate A) → `reviewer: /code-review`
+- `브랜치 리뷰`(Gate A) → `reviewer: /code-review` (SKIP이면 `scripts/check_review_scope.py`)
 - `이슈 검증` → `reviewer: @issue-reviewer`
 
 ### 5. PR 생성/조회
 
 PR 생성 전 확인:
 
-- 최신 내부 branch review (`/code-review`) PASS 여부
+- 최신 내부 branch review (`/code-review`) PASS 또는 SKIP(04 §2 적용 범위) 여부
 - open PR 중복 여부
 - base 브랜치 적합성
 - release PR은 예외적으로 이슈 코멘트 기반 branch review 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 확인한다.
