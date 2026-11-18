@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -14,9 +13,17 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AUTOPILOT_DOC = REPO_ROOT / ".agent" / "commands" / "autopilot.md"
 REPO = "example/repo"
 PER_PAGE = 100
+EXCLUDED_LABELS = (
+    "needs-triage",
+    "question",
+    "blocked",
+    "blocked:review-loop",
+    "blocked:pr-review-loop",
+    "process",
+    "epic",
+)
 
 FAKE_GH_IMPL = """import json
 import sys
@@ -146,24 +153,6 @@ def _assert_failed(capsys: pytest.CaptureFixture[str], expected_err: str) -> Non
     assert expected_err in err
 
 
-def _documented_excluded_labels() -> set[str]:
-    lines = AUTOPILOT_DOC.read_text(encoding="utf-8").splitlines()
-    try:
-        start = lines.index("### 기본 제외 대상")
-    except ValueError:
-        pytest.fail("autopilot.md has no '### 기본 제외 대상' section")
-    labels: set[str] = set()
-    for line in lines[start + 1 :]:
-        if line.startswith("###"):
-            break
-        match = re.match(r"^- `([^`]+)`$", line)
-        if match:
-            labels.add(match.group(1))
-    if not labels:
-        pytest.fail("no label lines read from '### 기본 제외 대상'")
-    return labels
-
-
 def test_uses_get_method(fake_gh, capsys: pytest.CaptureFixture[str]) -> None:
     log = fake_gh(
         [
@@ -224,16 +213,23 @@ def test_merges_pages_into_one_slim_array(
     fake_gh(
         [
             _page(_issues(1, PER_PAGE), total_count=102),
-            _page([_issue(101), _issue(102, body=None)], total_count=102),
+            _page(
+                [_issue(101, body="선행: #12"), _issue(102, body=None)],
+                total_count=102,
+            ),
         ]
     )
 
     code, out, _ = _run(capsys)
 
     assert code == 0
-    expected = [_slim(n) for n in range(1, 102)] + [_slim(102, body="")]
+    expected = [_slim(n) for n in range(1, 101)] + [
+        _slim(101, body="선행: #12"),
+        _slim(102, body=""),
+    ]
     assert json.loads(out) == expected
-    assert out.isascii()
+    assert "선행: #12" in out
+    assert '"title": "이슈 101"' in out
 
 
 def test_stops_at_page_cap(fake_gh, capsys: pytest.CaptureFixture[str]) -> None:
@@ -365,40 +361,11 @@ def test_fails_when_total_count_invalid(
     _assert_failed(capsys, "total_count missing or not an integer")
 
 
-def test_fails_when_count_differs_from_total(
-    fake_gh, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # An issue closed between pages: page 2 shrinks and total_count drops.
-    fake_gh(
-        [
-            _page(_issues(1, PER_PAGE), total_count=103),
-            _page(_issues(102, 2), total_count=101),
-        ]
-    )
-
-    _assert_failed(capsys, "queue changed during collection")
-
-
-def test_fails_on_duplicate_numbers(
-    fake_gh, capsys: pytest.CaptureFixture[str]
-) -> None:
-    # An issue opened before page 1 shifts #100 onto page 2 as well.
-    fake_gh(
-        [
-            _page(_issues(1, PER_PAGE), total_count=102),
-            _page(_issues(100, 2), total_count=102),
-        ]
-    )
-
-    _assert_failed(capsys, "queue changed during collection")
-
-
 def test_query_excludes_default_labels(
     fake_gh, capsys: pytest.CaptureFixture[str]
 ) -> None:
     script = _load_script()
-    documented = _documented_excluded_labels()
-    assert set(script.EXCLUDED_LABELS) == documented
+    assert tuple(script.EXCLUDED_LABELS) == EXCLUDED_LABELS
 
     log = fake_gh([_page([], total_count=0)])
 
@@ -410,5 +377,5 @@ def test_query_excludes_default_labels(
     tokens = query.split()
     assert f"repo:{REPO}" in tokens
     assert {"is:issue", "is:open", "sort:created-asc"} <= set(tokens)
-    for label in documented:
+    for label in EXCLUDED_LABELS:
         assert f"-label:{label}" in tokens

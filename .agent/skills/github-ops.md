@@ -74,7 +74,7 @@ gh issue view #{번호} --json number,title,body,labels,comments
 큐 조회:
 
 ```bash
-python3 scripts/collect_autopilot_queue.py
+gh issue list --state open --limit 100 --json number,title,labels,body,createdAt
 ```
 
 ### 3. 기존 증적 확인

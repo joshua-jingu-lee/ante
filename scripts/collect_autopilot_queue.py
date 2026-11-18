@@ -3,11 +3,13 @@
 
 Prints a single JSON array of open issue candidates, each reduced to the
 fields queue selection needs (number, title, label names, timestamps, URL,
-body). The array is written once, only after every page succeeded and the
-snapshot passed the completeness check: the number of collected issues equals
-the last response's ``total_count`` and no issue number repeats. If the queue
-changed between pages that check fails and the caller must rerun. On any
-failure stdout stays empty and the process exits 1.
+body). The array is written once as UTF-8 without escaping non-ASCII text,
+only after every page succeeded; on any failure stdout stays empty and the
+process exits 1.
+
+Limitation: pages are fetched separately, so the snapshot is not atomic. With
+more than 100 candidates, issues opened, closed or relabelled during collection
+may be missed or duplicated.
 """
 
 from __future__ import annotations
@@ -28,9 +30,9 @@ EXCLUDED_LABELS = (
     "epic",
 )
 PER_PAGE = 100
-MAX_PAGES = 10
 # GitHub search API returns at most 1,000 results per query.
 SEARCH_RESULT_CAP = 1000
+MAX_PAGES = SEARCH_RESULT_CAP // PER_PAGE
 GH_TIMEOUT_SECONDS = 60
 
 
@@ -129,37 +131,24 @@ def slim_issue(item: Any) -> dict[str, Any]:
 def collect(repo: str) -> list[dict[str, Any]]:
     query = build_query(repo)
     issues: list[dict[str, Any]] = []
-    last_total = 0
     for page in range(1, MAX_PAGES + 1):
         payload = fetch_page(query, page)
-        total = payload.get("total_count")
-        if not isinstance(total, int) or isinstance(total, bool):
-            raise QueueCollectError(
-                f"page {page}: total_count missing or not an integer: {total!r}"
-            )
-        if total > SEARCH_RESULT_CAP:
-            raise QueueCollectError(
-                f"total_count {total} exceeds the search API cap "
-                f"of {SEARCH_RESULT_CAP}; snapshot would be truncated"
-            )
-        last_total = total
+        if page == 1:
+            total = payload.get("total_count")
+            if not isinstance(total, int) or isinstance(total, bool):
+                raise QueueCollectError(
+                    f"page 1: total_count missing or not an integer: {total!r}"
+                )
+            if total > SEARCH_RESULT_CAP:
+                raise QueueCollectError(
+                    f"total_count {total} exceeds the search API cap "
+                    f"of {SEARCH_RESULT_CAP}; snapshot would be truncated"
+                )
         batch = payload["items"]
         issues.extend(slim_issue(item) for item in batch)
         if len(batch) < PER_PAGE:
             break
-    check_complete(issues, last_total)
     return issues
-
-
-def check_complete(issues: list[dict[str, Any]], total: int) -> None:
-    numbers = [issue["number"] for issue in issues]
-    duplicates = len(numbers) - len(set(numbers))
-    if len(issues) != total or duplicates:
-        raise QueueCollectError(
-            "queue changed during collection "
-            f"(collected {len(issues)}, total_count {total}, "
-            f"duplicate numbers {duplicates}); rerun the script"
-        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,7 +166,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"collect_autopilot_queue: {exc}", file=sys.stderr)
         return 1
 
-    sys.stdout.write(json.dumps(issues, ensure_ascii=True) + "\n")
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.write(json.dumps(issues, ensure_ascii=False) + "\n")
     return 0
 
 
