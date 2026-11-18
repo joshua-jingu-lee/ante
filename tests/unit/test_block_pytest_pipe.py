@@ -51,6 +51,8 @@ hook = _load_hook()
         "if pytest -q | tail; then echo; fi",
         "! pytest -q | tail",
         "(pytest -q 2>&1 | tail -5)",
+        "if a; then b; elif pytest -q | tail; then c; fi",
+        "pytest|tail",
     ],
 )
 def test_denies_piped_pytest(command: str) -> None:
@@ -87,6 +89,8 @@ def test_denies_piped_pytest(command: str) -> None:
             "gh issue comment 1 --body "
             '"- checks: ruff check | ruff format | pytest | 기타"'
         ),
+        "pytest: 31 passed | ruff: ok",
+        "./pytest/run.sh | tail",
     ],
 )
 def test_allows_other_commands(command: str) -> None:
@@ -119,7 +123,9 @@ def test_main_denies_piped_pytest(monkeypatch: pytest.MonkeyPatch) -> None:
     assert decision["permissionDecision"] == "deny"
     reason = decision["permissionDecisionReason"]
     assert "passed" in reason
-    assert "> out.txt 2>&1" in reason
+    assert "> /tmp/pytest-out.txt 2>&1" in reason
+    assert "/tmp/" in reason
+    assert reason.endswith(ascii("pytest -q | tail -5"))
 
 
 def test_main_decodes_utf8_regardless_of_locale(
@@ -129,7 +135,12 @@ def test_main_decodes_utf8_regardless_of_locale(
     payload = {"tool_name": "Bash", "tool_input": {"command": command}}
     rc, out = _run_main(monkeypatch, json.dumps(payload, ensure_ascii=False))
     assert rc == 0
-    assert json.loads(out)["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert out.isascii()
+    decision = json.loads(out)["hookSpecificOutput"]
+    assert decision["permissionDecision"] == "deny"
+    reason = decision["permissionDecisionReason"]
+    assert reason.endswith(ascii(command))
+    assert "홍길동" not in reason  # the fragment itself is ascii()-escaped
 
 
 def test_main_allows_redirected_pytest(monkeypatch: pytest.MonkeyPatch) -> None:

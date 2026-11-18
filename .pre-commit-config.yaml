@@ -8,9 +8,10 @@ repos:
       - id: ruff-format
   - repo: local
     hooks:
+      # 유지관리자 우회: SKIP=no-commit-to-branch git commit …
       - id: no-commit-to-branch
-        name: "main 직접 커밋 차단 (우회: SKIP=no-commit-to-branch git commit …)"
-        entry: bash -c 'test "$(git symbolic-ref --short -q HEAD)" != "main"'
+        name: "main 직접 커밋 차단 — 작업 브랜치에서 커밋하라"
+        entry: bash -c 'test "$(git symbolic-ref -q HEAD)" != "refs/heads/main"'
         language: system
         pass_filenames: false
         always_run: true
