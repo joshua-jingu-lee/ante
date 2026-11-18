@@ -199,7 +199,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### 2단계: 큐 snapshot 수집
 
 ```bash
-python3 scripts/collect_autopilot_queue.py > "$QUEUE_FILE"
+QUEUE_FILE="$(mktemp)"; python3 scripts/collect_autopilot_queue.py > "$QUEUE_FILE"
 ```
 
 저장소 루트에서 실행하며 출력은 JSON 배열 하나이고, 파일로 받아 필드 단위로 읽는다. 종료 코드가 0이 아니면 수집 실패이며 빈 큐로 취급하지 않고 배치를 시작하지 않는다.
