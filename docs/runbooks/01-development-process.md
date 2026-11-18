@@ -10,7 +10,7 @@
 
 - 주 개발은 Claude Code가 담당한다.
 - 스펙 문서(`docs/specs/`)가 설계의 단일 출처(SSOT)다. 변경이 필요하면 **스펙 최신화 → 이슈 발행 → 코드 반영** 순서를 따른다.
-- PR은 구현 완료 사실을 알리는 문서가 아니라, **이미 한 차례 사전 브랜치 리뷰(`/code-review`)를 통과한 변경**을 통합 후보로 올리는 단계다.
+- PR은 구현 완료 사실을 알리는 문서가 아니라, **이미 한 차례 사전 브랜치 리뷰(`/code-review`)를 통과했거나 SKIP(04 §2 적용 범위)으로 판정된 변경**을 통합 후보로 올리는 단계다.
 - 최종 머지 결정은 사람 감각이 아니라 **명시적인 게이트 상태**로 판단한다.
 - `docs/specs/`와 `docs/architecture/`는 코드보다 앞선 계약이며, 리뷰와 승인 단계 모두 이 문서를 기준으로 판정한다.
 - 구현 전 계획은 **Plan Preflight로 작성**하고, **Plan Review로 검증**한다.
@@ -36,7 +36,7 @@
 
 1. **분석** (오케스트레이터, `AGENTS.md` + `docs/specs/*` + `docs/architecture/*` 기준): 이슈 읽기 → 스펙 확인 → 스펙 경로(1A/1B) 판단. 증적은 `구현 분석 완료` 또는 보류 사유 이슈 코멘트.
 2. **Plan Preflight + Plan Review (Gate 0)** — `/plan-preflight`: `plan-preflight:started` 부착 → 이슈 본문 Implementation Plan(파일 맵/작업 순서/risk flags/검증/stop conditions/비목표) 작성·정비 → 별도 컨텍스트 `@plan-reviewer`가 계획을 read-only로 검토해 verdict를 반환하고, 오케스트레이터가 이를 `Plan Review` 코멘트로 남김. `approve-implement`/`narrow-scope`면 `plan-preflight:started` 제거 후 `plan-preflight:done` 확정, `revise-plan`이면 보강 후 재요청, `split-issue`/`invoke-human`/`needs-spec-first`/`blocked`이면 구현 중단.
-3. **구현 + 브랜치 리뷰 (Gate A)** — `/implement-issue`: `plan-preflight:done`과 최신 계획 확인 → 개발 에이전트(`@backend-dev`/`@devops`/`@strategy-dev`)가 worktree 격리 후 구현·로컬 lint/test·커밋 → 네이티브 `/code-review`로 PR 전 브랜치 리뷰(PASS까지 내부 반복, FAIL은 같은 worktree에서 수정, 반복 risk class는 `@code-reviewer` 메타 리뷰) → PASS 시 브랜치 push + PR 생성(`Closes #이슈`). 각 전환은 이슈 코멘트로 남긴다.
+3. **구현 + 브랜치 리뷰 (Gate A)** — `/implement-issue`: `plan-preflight:done`과 최신 계획 확인 → 개발 에이전트(`@backend-dev`/`@devops`/`@strategy-dev`)가 worktree 격리 후 구현·로컬 lint/test·커밋 → 네이티브 `/code-review`로 PR 전 브랜치 리뷰(PASS까지 내부 반복, FAIL은 같은 worktree에서 수정, 반복 risk class는 `@code-reviewer` 메타 리뷰) → PASS 또는 SKIP(04 §2 적용 범위) 시 브랜치 push + PR 생성(`Closes #이슈`). 각 전환은 이슈 코멘트로 남긴다.
 4. **PR 게이트** (GitHub Actions): required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate`가 충돌 없음·대화 해결·auto-merge 가능 상태에서 **`AUTOMERGE_TOKEN`(PAT)로 auto-merge를 활성화**한다(#2437, fail-closed). 머지가 발화한 `pull_request: closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음). `/autopilot` 실행 중이면 사이클 상태 코멘트를 갱신한다.
 5. **post-merge automation**: 이슈 `완료 조건` 체크박스 갱신 + close + `Post-merge 정리 완료` 코멘트, 원격 head branch 삭제(GitHub 설정).
 6. **/autopilot side lane** (오케스트레이터): implementation lane이 바쁠 때 다른 후보 이슈의 `/plan-preflight`만 병렬 수행한다(코드 수정·브랜치·PR 생성 금지). Plan Preflight 코멘트 + Autopilot 사이클 상태 코멘트를 남긴다.
@@ -105,7 +105,7 @@ Plan Review의 verdict는 다음 중 하나다.
 - 독립 이슈는 `{branch-prefix}/{issue번호}-{짧은설명}` 브랜치에서 작업하고 `main`으로 PR을 낸다.
 - 에픽은 통합용 `epic/*` 브랜치와 하위 이슈별 작업 브랜치를 분리한다.
 - 장기 기능은 장기 브랜치 대신 keystone 방식을 우선한다 — 상세는 [03-git-workflow.md §1.5](03-git-workflow.md#15-장기-기능-개발-keystone-우선).
-- PR 생성 전 최신 HEAD는 내부 `/code-review` PASS 증적을 가져야 한다.
+- PR 생성 전 최신 HEAD는 내부 `/code-review` PASS 또는 SKIP(04 §2 적용 범위) 증적을 가져야 한다.
 - stale base, duplicate commit, base regression이 보이면 PR 생성이나 리뷰 재시도보다 히스토리 정리를 먼저 한다.
 
 ### 4.3 Worktree 격리
@@ -140,7 +140,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 
 - 같은 head SHA에서 같은 실패를 반복 판정하지 않는다. 새 커밋이 만들어져야 새 시도로 본다.
 - `/code-review` 실패는 PR 생성 전에 같은 worktree에서 해소한다.
-- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
+- PR 후 추가 코드 변경이 있으면 새 head SHA에서 `/code-review` PASS 또는 SKIP(04 §2 적용 범위)을 다시 받은 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 수정 전에는 `.agent/skills/receive-review.md` 규칙으로 finding을 재서술하고 영향 범위를 다시 그린다.
 - 같은 `risk class`가 반복되거나 구조 리스크가 넓어지면 얕은 자동 수정 대신 `@code-reviewer` 메타 리뷰 또는 사람 확인을 우선한다.
 - 반복 리스크가 구현계획 자체의 문제라면 `/plan-preflight`로 돌아가 이슈 본문 구현계획을 다시 정비하고 Plan Review를 재요청한다.
@@ -151,7 +151,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 | 상황 | SSOT |
 |------|------|
 | Plan Preflight 재정비와 Plan Review 재요청 | `.agent/commands/plan-preflight.md` |
-| `/code-review` 브랜치 리뷰 반복, 실패 횟수, PR 생성 전 PASS 조건 | `.agent/commands/implement-issue.md`, [03-git-workflow.md](03-git-workflow.md) |
+| `/code-review` 브랜치 리뷰 반복, 실패 횟수, PR 생성 전 PASS 또는 SKIP 조건 | `.agent/commands/implement-issue.md`, [03-git-workflow.md](03-git-workflow.md) |
 | `merge-gate`, post-merge 복구 | [04-ci-cd.md](04-ci-cd.md) |
 | 리뷰 finding 수용, 영향 범위 재검토, 수정 전략 선택 | `.agent/skills/receive-review.md` |
 | `gh run rerun`, PR `close → reopen`, 수동 복구 코멘트 | `.agent/skills/github-ops.md` |
@@ -164,7 +164,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 - **브랜치 리뷰 단계**: Claude Code 네이티브 `/code-review`가 수행한다. GitHub Actions가 아니라 `/code-review` 내부 루프로 도는 PR 전 코드 품질 게이트다.
 - **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
-- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
+- **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 또는 SKIP(04 §2 적용 범위) 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
 - **이슈 close**: PR 본문의 `Closes #N`으로 GitHub 기본 auto-close를 우선 사용하고, `post-merge`가 체크박스(연결 이슈 본문의 `완료 조건` 절 한정)/에픽 동기화와 수동 복구를 맡는다.
 - **원격 브랜치 삭제**: GitHub의 "Automatically delete head branches" 기능 사용

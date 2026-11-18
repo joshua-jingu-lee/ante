@@ -1,4 +1,4 @@
-GitHub 이슈의 유저스토리를 기반으로 구현하고, 내부 브랜치 리뷰(`/code-review`)를 통과한 뒤 PR을 생성한다.
+GitHub 이슈의 유저스토리를 기반으로 구현하고, 내부 브랜치 리뷰(`/code-review`)를 통과(또는 04 §2 적용 범위에 따라 SKIP)한 뒤 PR을 생성한다.
 
 GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따르고, 쓰기 작업 전 인증은 `.agent/skills/github-auth.md`를 먼저 따른다.
 
@@ -166,6 +166,15 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 ### 브랜치 리뷰 루프 (Gate A)
 
+**적용 범위 판정** (04 §2 적용 범위): 리뷰 대상 워크트리의 `git status --porcelain`이 비어 있음을 먼저 확인한 뒤, 10번 정본 호출 규범으로 산출한 `{base}`와 `{head}`를 명시해 판정 스크립트를 실행한다.
+
+```bash
+python scripts/check_review_scope.py --base {base} --head {head}
+```
+
+- exit 0: `/code-review`를 실행하지 않는다. 아래 `브랜치 리뷰` 코멘트를 `verdict: SKIP`, `reviewer: scripts/check_review_scope.py`, `scope: {base}...{head}`, `head`, 판정 부류(스크립트 출력의 `verdict: SKIP (…)`)로 남기고 12번 PR 생성으로 간다.
+- exit 1 또는 exit 2: 10번부터 진행한다.
+
 10. **브랜치 리뷰 요청 및 대기**: PR 생성 전 최신 로컬 브랜치 HEAD를 Claude Code 빌트인 `/code-review` 스킬로 검토한다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있다. Gate A는 PR이 아직 없는 시점의 로컬 브랜치 리뷰이므로 빌트인 스킬로 실행한다.
 
 **스킬이 노출하는 인자 문법 (CLI 버전 종속 관측)**
@@ -198,8 +207,8 @@ gh issue comment #{이슈번호} --body "🤖 **로컬 구현 완료**
 
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **브랜치 리뷰**
-- verdict: {PASS | FAIL}
-- reviewer: /code-review
+- verdict: {PASS | FAIL | SKIP}
+- reviewer: {/code-review | scripts/check_review_scope.py}
 - effort: {high|xhigh|max}
 - scope: {base}...{head}
 - worktree: clean
@@ -220,7 +229,7 @@ while /code-review verdict != PASS:
   /code-review 재실행
 ```
 
-- 실패 횟수는 이슈 코멘트 기준으로 누적한다.
+- 실패 횟수는 이슈 코멘트 기준으로 누적한다(SKIP 증적은 세지 않는다).
 - 같은 blocking finding 제목이 2회 이상 연속 반복되면 escalation 신호로 보고 원인 파악을 우선한다.
 - 자동 수정 전에 finding을 곧바로 patch로 번역하지 말고 `.agent/skills/receive-review.md` 규칙으로 사실/추론/영향 범위를 먼저 다시 정리한다.
 - 같은 `risk class`가 2회 반복되면 `@code-reviewer`를 호출해 구조 리스크와 계획 편차를 먼저 정리한다.
@@ -236,7 +245,7 @@ while /code-review verdict != PASS:
 
 ### PR 생성
 
-12. **PR 생성**: 최신 HEAD SHA의 `/code-review`가 PASS한 뒤에만 브랜치를 push하고 PR을 만든다.
+12. **PR 생성**: 최신 HEAD SHA의 `/code-review` PASS 또는 SKIP 증적(04 §2 적용 범위)이 있을 때만 브랜치를 push하고 PR을 만든다.
 
 ```bash
 gh pr create \
@@ -257,7 +266,7 @@ PR 생성 후 이슈에 코멘트를 남긴다:
 ```bash
 gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 - PR: #{PR번호}
-- branch-review: `/code-review` PASS
+- branch-review: {`/code-review` PASS | `scripts/check_review_scope.py` SKIP}
 - 이후 단계: ci required + merge-gate + auto-merge"
 ```
 
@@ -267,7 +276,7 @@ gh issue comment #{이슈번호} --body "🤖 **PR 생성 완료**
 
 - `ci` 통과는 머지 차단 게이트다. (required status check)
 - PR 단계의 자동 AI 승인 워커는 운영하지 않는다. 머지 가능 여부 판정에 AI status check가 끼어들지 않는다.
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다. 호출은 §브랜치 리뷰 루프의 정본 형태를 따른다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review` PASS 또는 SKIP(04 §2 적용 범위)을 다시 받은 뒤 머지를 진행한다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고 결과를 PR 코멘트에 남긴다. 호출은 §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 구조 리스크가 반복되면 `@code-reviewer` 메타 리뷰 우선.
 - `ci` 통과 + 충돌 없음 + 대화 해결 완료 + auto-merge 활성화 가능 상태이면 `merge-gate`가 GitHub auto-merge를 활성화하고 squash merge가 수행된다.
 - `merge-gate`는 `AUTOMERGE_TOKEN`(fine-grained PAT)으로 auto-merge를 활성화한다(#2437, fail-closed — 시크릿 부재 시 명시 실패). 머지가 발화한 `pull_request:closed` 이벤트로 `post-merge.yml`이 트리거된다(dispatch·폴링 없음).

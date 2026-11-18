@@ -78,7 +78,7 @@
 
 ### 1.8 브랜치 리뷰와 머지 게이트
 
-- PR 전 브랜치 리뷰(Gate A)는 `.agent/` 에이전트가 아니라 Claude Code 네이티브 `/code-review`로 수행한다. `/implement-issue`의 PR 생성 전 내부 루프로 돌며, PASS/FAIL 판정·시도 횟수 누적·반복 실패 시 `blocked:review-loop` 차단 계약을 그대로 유지한다. PR 후 추가 변경은 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
+- PR 전 브랜치 리뷰(Gate A)는 `.agent/` 에이전트가 아니라 Claude Code 네이티브 `/code-review`로 수행한다. `/implement-issue`의 PR 생성 전 내부 루프로 돌며, PASS/FAIL 판정(04 §2 적용 범위에 들면 SKIP)·시도 횟수 누적·반복 실패 시 `blocked:review-loop` 차단 계약을 그대로 유지한다. PR 후 추가 변경은 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한다.
 - PR 단계의 자동 AI 승인/재수정 워커(과거 운영하던 PR 승인·자동 수정 봇)는 운영하지 않는다. 머지 게이트는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT)와 `merge-gate`만 본다.
 
 ## 2. `.agent/` 및 `.claude/` 디렉토리 구조
