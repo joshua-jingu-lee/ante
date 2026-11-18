@@ -52,5 +52,19 @@
       "Bash(docker:*)",
       "Bash(docker-compose:*)"
     ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=\"${CLAUDE_PROJECT_DIR}/.claude/hooks/block_pytest_pipe.py\"; [ -f \"$f\" ] || exit 0; python3 \"$f\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

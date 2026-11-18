@@ -115,6 +115,7 @@
 ├── settings.json
 ├── settings.local.json
 ├── settings.local.example.json
+├── hooks/
 ├── agents -> ../.agent/agents
 ├── commands -> ../.agent/commands
 └── skills -> ../.agent/skills
@@ -175,8 +176,7 @@ Plan Review는 `.agent/skills/`가 아니라 `.agent/agents/plan-reviewer.md` �
   (및 `**/CLAUDE.md`·`**/AGENTS.md`)에 대한 `Edit`/`Write`를 deny로 막는다.
 - **permissions.allow**: Claude 측 에이전트가 실행 가능한 도구·Bash 명령을
   allowlist로 제한한다.
-- hooks(auto-format/protect-files)와 `.claude/hooks/` 디렉토리는 현재 사용하지
-  않는다 — 파일 보호는 위 `permissions.deny`로 구현한다.
+- **hooks**: Bash용 PreToolUse 훅 하나를 쓰며 스크립트는 `.claude/hooks/`에 있다. 파일 보호는 위 `permissions.deny`가 한다.
 
 ## 3. 운영 상 주의사항
 
