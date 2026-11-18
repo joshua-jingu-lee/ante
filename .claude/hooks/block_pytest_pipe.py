@@ -5,14 +5,18 @@ A pipe swallows pytest's exit code, so a run that collected 0 tests can be
 reported as passing. Redirect output to a file and judge by exit code and the
 ``N passed`` line instead.
 
-The rule is a plain string rule. It does not interpret shell syntax (quotes,
-comments, heredocs, reserved words, variable expansion):
+The rule does not interpret shell syntax (quotes, comments, heredocs,
+variable expansion). It only looks at pytest in command position at the head
+of a fragment, favouring precision over recall:
 
 1. No ``pytest``/``py.test`` in the command -> allow.
 2. Backslash-newline becomes a space.
 3. Split into fragments on ``&&``, ``||``, ``;`` and newline.
-4. Deny if, inside a fragment, a pytest word is followed by a single pipe
-   (``|`` or ``|&``; ``||`` and ``>|`` are not pipes).
+4. Match HEAD_RE at the start of each fragment (optional reserved words and
+   grouping, ``NAME=value`` assignments, wrappers ``uv run``/``poetry run``/
+   ``env``/``time``/``nohup``/``timeout N``, then a pytest run).
+5. Deny if a single pipe (``|`` or ``|&``; ``||`` and ``>|`` are not pipes)
+   follows the matched head.
 
 Standard library only. Any error ends with exit 0 (fail-open) so a hook bug
 never blocks every Bash call. Denial is an ASCII JSON object on stdout plus
@@ -26,7 +30,12 @@ import re
 import sys
 
 FRAGMENT_SPLIT_RE = re.compile(r"&&|\|\||;|\n")
-PYTEST_WORD_RE = re.compile(r"(?<![\w.-])(?:pytest|py\.test)(?![\w.-])")
+HEAD_RE = re.compile(
+    r"^\s*(?:(?:do|then|else|if|while|until|!)\s+|[({]\s*)*(?:[A-Za-z_]\w*=\S*\s+)*"
+    r"(?:(?:(?:uv\s+run|poetry\s+run|env|time|nohup)(?:\s+-\S+)*"
+    r"|timeout(?:\s+-\S+)*\s+\S+)\s+(?:[A-Za-z_]\w*=\S*\s+)*)*"
+    r"(?:(?:\S*/)?(?:pytest|py\.test)|(?:\S*/)?python[\d.]*\s+-m\s*pytest)(?![\w.-])"
+)
 SINGLE_PIPE_RE = re.compile(r"(?<![|>])\|(?!\|)")
 
 DENY_REASON = (
@@ -34,10 +43,8 @@ DENY_REASON = (
     "(0건 실행이 통과로 보일 수 있다). "
     "출력을 파일로 리다이렉트하고(`pytest … > out.txt 2>&1; echo exit=$?`) "
     "종료 코드와 `N passed` 문자열(예: `grep -E 'passed|failed' out.txt`)로 판정하라. "
-    "명령이 아니라 텍스트(이슈 본문, heredoc)에 이 형태가 들어 있어 걸린 것이면 "
-    "그 텍스트를 파일로 써서 넘겨라. "
-    "검색 패턴으로 쓴 것이면 패턴을 `py[t]est`로 쓰거나 파이프 대신 "
-    "`-m N`·`-c` 옵션을 써라."
+    "명령이 아니라 텍스트(heredoc이나 본문의 줄머리)에 이 형태가 들어 있어 걸린 "
+    "것이면 그 텍스트를 파일로 써서 넘겨라."
 )
 
 
@@ -47,7 +54,7 @@ def find_piped_pytest(command: str) -> str | None:
         return None
     normalized = command.replace("\\\n", " ")
     for fragment in FRAGMENT_SPLIT_RE.split(normalized):
-        match = PYTEST_WORD_RE.search(fragment)
+        match = HEAD_RE.match(fragment)
         if match is None:
             continue
         if SINGLE_PIPE_RE.search(fragment, match.end()):

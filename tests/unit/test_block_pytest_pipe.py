@@ -35,7 +35,9 @@ hook = _load_hook()
         "PYTHONPATH=$PWD/src .venv/bin/pytest tests/unit -q 2>&1 | tail -5",
         "PYTHONPATH=src:tests pytest -q | tail",
         "python -m pytest -q | grep passed",
+        "python -mpytest -q | tail",
         "uv run pytest | head",
+        "uv run --frozen pytest | tail",
         "cd x && pytest -q |& tee out.txt",
         "pytest -q|&tee o",
         "timeout 600 pytest | cat",
@@ -49,7 +51,6 @@ hook = _load_hook()
         "if pytest -q | tail; then echo; fi",
         "! pytest -q | tail",
         "(pytest -q 2>&1 | tail -5)",
-        'bash -c "pytest -q | tail"',
     ],
 )
 def test_denies_piped_pytest(command: str) -> None:
@@ -63,6 +64,7 @@ def test_denies_piped_pytest(command: str) -> None:
         "pytest -q; echo exit=$?",
         "cat out.txt | grep passed",
         "ls | grep pytest",
+        "pip list | grep pytest",
         "pytest -q && echo ok | cat",
         "pytest -q > out.txt 2>&1\ngrep passed out.txt | tail",
         "pytest -q > out.txt 2>&1; grep passed out.txt | tail",
@@ -72,29 +74,23 @@ def test_denies_piped_pytest(command: str) -> None:
         "pip install pytest-xdist | tail",
         "cat pytest.ini | head",
         "ls tests/unit/test_pytest_x.py | head",
-        "pip list | grep pytest",
-        "grep -rn 'py[t]est' . | head",
         "echo ok",
+        "grep pytest notes.txt | head",
+        'grep -rn "pytest" . | head',
+        "rg pytest -l | wc -l",
+        "rg -n 'pytest|ruff' docs",
+        'echo "pytest | tail"',
+        "uv pip install pytest | tail",
+        "gh issue comment 1 --body '| pytest | 10 passed |'",
+        "git commit -m 'fix: pytest 0건 | tail 금지'",
+        (
+            "gh issue comment 1 --body "
+            '"- checks: ruff check | ruff format | pytest | 기타"'
+        ),
     ],
 )
 def test_allows_other_commands(command: str) -> None:
     assert hook.find_piped_pytest(command) is None
-
-
-@pytest.mark.parametrize(
-    "command",
-    [
-        "grep pytest notes.txt | head",
-        'echo "pytest | tail"',
-        "uv pip install pytest | tail",
-        "pytest --version | cat",
-        "rg pytest -l | wc -l",
-        'grep -rn "pytest" . | head',
-        "cat > x.md <<'EOF'\n# notes\npytest -q | tail -5\nEOF",
-    ],
-)
-def test_accepted_false_positives_are_denied(command: str) -> None:
-    assert hook.find_piped_pytest(command) is not None
 
 
 def _run_main(monkeypatch: pytest.MonkeyPatch, stdin_text: str) -> tuple[int, str]:
