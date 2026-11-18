@@ -65,7 +65,7 @@ post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 �
   - 문서 경로: `docs/**`, `.agent/**`, `guide/**`, 저장소 루트의 `*.md`
   - AST 불변 파일: `src/**/*.py` 중 base와 head 양쪽에 있고 독스트링 노드를 뺀 AST가 같은 파일(주석·독스트링만 고친 변경)
   - SKIP 증적은 `브랜치 리뷰` 코멘트에 `verdict: SKIP`, `reviewer: scripts/check_review_scope.py`로 남기며 반복 실패 누적에 세지 않는다.
-- **실행**: Claude Code 빌트인 `/code-review` 스킬. 스킬이 노출하는 인자 문법 관측은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번에 있다. 같은 이름의 마켓플레이스 플러그인 커맨드와 혼동하지 않는다 — 그 플러그인은 커맨드 설명이 PR 리뷰를 전제하고 허용 도구에 `gh pr` 계열이 열거돼 있으며, Gate A는 PR이 아직 없는 시점의 리뷰다.
+- **실행**: Claude Code 빌트인 `/code-review` 스킬. 스킬이 노출하는 인자 문법 관측은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번에 있다.
 - **결과**: 이슈 코멘트 `브랜치 리뷰` (`reviewer:` 필드에 `/code-review` 기록)
 - **성공 시**: 브랜치 push 후 PR 생성
 - **실패 시**: Claude가 같은 워크트리에서 수정 후 `/code-review` 재실행
@@ -77,7 +77,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 이 게이트는 보호 브랜치의 required status check가 아니며, **PR 생성 전 필수 이슈 증적**이다.
 동일 HEAD SHA에서 `/code-review` FAIL이 남아 있으면 PR을 열지 않는다.
 
-PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review` PASS 또는 SKIP(§2 적용 범위)을 다시 받은 뒤 머지를 진행한다(호출은 정본 형태를 따른다). PR 후 AI 감사 워크플로우는 운영하지 않으며, 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
+PR이 열린 뒤 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review` PASS 또는 SKIP(§2 적용 범위)을 다시 받은 뒤 머지를 진행한다(호출은 정본 형태를 따른다). 추가 검증이 필요하면 사람/오케스트레이터가 수동으로 같은 브랜치 리뷰를 다시 호출한다.
 
 ### Gate B — 공개 CI (두 lane 공통)
 
@@ -134,11 +134,9 @@ branch protection repository setting은 이 저장소 밖 운영 설정이므로
 - 대화 해결 완료
 - auto-merge 활성화 가능 상태
 
-merge gate는 AI 승인 워커의 출력을 입력으로 삼지 않는다. PR 단계의 자동 AI 승인/감사 워커는 운영하지 않는다.
-
 출력:
 - auto-merge 활성화 또는 유지 — **`AUTOMERGE_TOKEN`(fine-grained PAT)으로 enable**한다(#2437; Actions·Dependabot 양쪽 시크릿 저장소에 등록 — §5.2). 머지 actor가 PAT 소유자가 되어 머지가 `pull_request: closed` 이벤트를 정상 발화하고, 그 이벤트가 `post-merge.yml`을 트리거한다.
-- **fail-closed**: `AUTOMERGE_TOKEN`이 없으면 merge-gate가 명시 실패해 auto-merge를 걸지 않는다. `GITHUB_TOKEN` 폴백은 금지 — 그 머지는 closed 이벤트를 발화하지 않아 post-merge 정리가 조용히 소실된다(§5.2).
+- **fail-closed**: `AUTOMERGE_TOKEN`이 없으면 merge-gate가 명시 실패해 auto-merge를 걸지 않는다.
 - merge-gate는 `post-merge.yml`을 dispatch하지 않는다(폴링·handoff 제거, #2437). 머지가 만든 closed 이벤트가 정상 트리거 경로이며, 누락 시 `workflow_dispatch(issue_numbers)`로 수동 복구한다(§5.2).
 - 머지 불가 시 대기
 
@@ -277,7 +275,7 @@ PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
 | `ci` | required status check ([§3.2](#32-저장소-설정-권장값) SSOT; upstream `lint`·`test`·`docker-build` 집계) | 차단 | lint/test/type/CI 설정 | Claude 개발 에이전트 또는 `@devops` |
 | `merge-gate` | 정책 집행 | 차단 | 충돌, 대화 미해결, auto-merge 비활성화 상태 | Claude 오케스트레이터 또는 사람 |
 
-내부 `/code-review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 10회(임계값 SSOT는 §2 Gate A) 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
+내부 `/code-review` 브랜치 리뷰는 실패 이력을 이슈 코멘트에 누적하고, 같은 blocking finding 제목이 반복되면 escalation 신호를 남긴다. 실패가 임계값(SSOT는 §2 Gate A)까지 누적되면 `blocked:review-loop` 라벨을 붙이고 더 이상의 자동 브랜치 리뷰를 중단한다.
 
 `lifecycle`, `contract-drift`, `generated-artifact-sync` 같은 구조 리스크가 2회 반복되면 Meta Review를 먼저 수행한다.
 

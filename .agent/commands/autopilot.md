@@ -39,7 +39,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
    - Plan Preflight의 tasks, verification, risk flags, stop conditions는 구현 프롬프트에 강제 반영할 항목이다.
 3. **머지 모니터링 사이클**
    - 머지 조건은 `ci` + `merge-gate` + auto-merge + `post-merge`다.
-   - PR 단계의 자동 AI 승인 워커는 운영하지 않으므로 monitoring에 포함하지 않는다. 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한 결과를 PR 코멘트로 확인한다.
+   - 추가 검증이 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출한 결과를 PR 코멘트로 확인한다.
 
 별도 선행 작업:
 
@@ -332,7 +332,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - 시간 예산이 소진되면 현재 이슈 정리 후 종료한다.
 - 같은 이슈를 같은 배치에서 반복 재집지 않는다.
 - `blocked:review-loop` 또는 `blocked:pr-review-loop`가 붙은 이슈는 배치가 억지로 밀어붙이지 않는다.
-- `blocked:review-loop`는 브랜치 리뷰 10회 소진의 안전장치로 해석한다. `blocked:pr-review-loop`는 자동 PR 재수정 루프가 더 이상 운영되지 않는 환경에서도 큐 제외 / 사람 개입 대기 신호로 유지하며, autopilot은 해당 이슈를 보류하고 다음 이슈로 넘어간다.
+- `blocked:review-loop`는 브랜치 리뷰 반복 실패 임계값(04 §2) 소진의 안전장치로 해석한다. `blocked:pr-review-loop`는 자동 PR 재수정 루프가 더 이상 운영되지 않는 환경에서도 큐 제외 / 사람 개입 대기 신호로 유지하며, autopilot은 해당 이슈를 보류하고 다음 이슈로 넘어간다.
 - 현재 이슈가 merge/post-merge 확인 전 상태라면, 다음 이슈를 시작하지 않고 해당 이슈 상태를 먼저 확정한다.
 
 ## 원칙
