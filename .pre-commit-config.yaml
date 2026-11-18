@@ -5,3 +5,11 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+  - repo: local
+    hooks:
+      - id: no-commit-to-branch
+        name: "main 직접 커밋 차단 (우회: SKIP=no-commit-to-branch git commit …)"
+        entry: bash -c 'test "$(git symbolic-ref --short -q HEAD)" != "main"'
+        language: system
+        pass_filenames: false
+        always_run: true
