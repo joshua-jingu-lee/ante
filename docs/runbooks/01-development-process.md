@@ -1,6 +1,6 @@
 # 01. AI 에이전트 기반 개발 프로세스
 
-> 이 문서의 전체 절차는 maintainer/collaborator의 내부 lane이다. Claude Code는 선택적 내부 adapter이며, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. PR 단계의 자동 AI 승인 워커는 운영하지 않으며, 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
+> 이 문서의 전체 절차는 maintainer/collaborator의 내부 lane이다. Claude Code는 선택적 내부 adapter이며, 구현 전 계획 리뷰(Gate 0)는 별도 컨텍스트 `@plan-reviewer`가, PR 전 브랜치 리뷰(Gate A)는 Claude Code 네이티브 `/code-review`가 담당한다. 머지는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다.
 
 ---
 
@@ -53,7 +53,7 @@
 - `/autopilot`은 구현 병렬화를 열지 않고, 구현 lane이 바쁠 때 다른 이슈의 Plan Preflight만 병렬 수행할 수 있다.
 - 첫 계획 리뷰는 **구현 전 Plan Review(Gate 0)**이며, 첫 코드 리뷰는 **PR 전 브랜치 리뷰(Gate A)**다.
 - PR 전 브랜치 리뷰는 GitHub Actions가 아니라 `/implement-issue` 안에서 네이티브 `/code-review`로 반복하며, 이 단계가 코드 품질 게이트다.
-- PR 단계에서는 자동 AI 승인 워커가 동작하지 않는다. 머지 가능 여부는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다. 추가 AI 감사가 필요하면 별도 수동 절차로 분리한다.
+- 머지 가능 여부는 required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + `merge-gate` + 사람/오케스트레이터 판단으로 결정한다. 추가 AI 감사가 필요하면 별도 수동 절차로 분리한다.
 - 머지는 Claude 오케스트레이터가 직접 하지 않고, GitHub auto-merge가 수행한다.
 - 릴리스는 merge/post-merge와 분리된 수동 운영 lane이며, `/release prepare`가 release PR을 만들고 `/release publish`가 merge된 main에서 배포를 담당한다.
 
@@ -162,7 +162,7 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 > 상세 규칙: [04-ci-cd.md](04-ci-cd.md)
 
 - **브랜치 리뷰 단계**: Claude Code 네이티브 `/code-review`가 수행한다. GitHub Actions가 아니라 `/code-review` 내부 루프로 도는 PR 전 코드 품질 게이트다.
-- **PR 단계**: 자동 AI 승인 워커는 운영하지 않는다. PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
+- **PR 단계**: PR 후 추가 변경이 있으면 새 head SHA에서 `/code-review`를 사람/오케스트레이터가 다시 호출해 검증한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - **메타 리뷰 단계**: `@code-reviewer`는 상시 게이트가 아니라, 고위험 변경과 반복 failure에서만 호출한다.
 - **소스 오브 트루스**: 브랜치 리뷰는 이슈 코멘트의 최신 `/code-review` PASS 또는 SKIP(04 §2 적용 범위) 기록을 PR 생성 조건으로 삼고, merge gate는 **required status checks([04-ci-cd.md §3.2](04-ci-cd.md#32-저장소-설정-권장값) SSOT) + 충돌 없음 + 대화 해결**을 기준으로 삼는다.
 - **머지 담당**: GitHub auto-merge
@@ -176,7 +176,6 @@ release PR은 릴리스 메타데이터와 Docker build 검증만 포함하며, 
 이 문서에서는 원칙만 둔다.
 
 - CLI, DB DDL, 프로젝트 구조처럼 생성 산출물의 입력이 바뀌면 해당 생성 문서도 같은 작업에서 갱신한다.
-- 스크립트로 생성되는 문서는 수동 편집하지 않는다.
 - 구현 단계에서 생성 산출물 입력이 바뀌면 먼저 대응하는 regenerate 명령을 실행한다.
 - 리뷰/CI 전에는 각 생성 산출물을 전용 check 명령으로 검증한다.
   - 프로젝트 구조: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
