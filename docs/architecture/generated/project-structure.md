@@ -743,6 +743,8 @@ tests/
 │   ├── test_kis_token_single_flight.py
 │   ├── test_stop_session_expiry_wiring.py
 │   ├── test_store_atomic_persist.py
+│   ├── test_check_review_scope.py
+│   ├── test_check_prose_budget.py
 │   └── test_block_pytest_pipe.py
 ├── __init__.py
 └── integration/
@@ -782,7 +784,9 @@ scripts/
 ├── generate_db_schema.py             # DB 스키마 문서 자동 생성
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── check_import_path.py              # 현재 worktree import sanity check
-└── scan_create_services_anti_pattern.py
+├── scan_create_services_anti_pattern.py
+├── check_review_scope.py
+└── check_prose_budget.py
 ```
 
 ## docs/ — 설계 문서
@@ -817,7 +821,8 @@ docs/
 │   ├── D-017-canonical-symbol-timeframe-vocabulary.md
 │   ├── D-018-core-interface-cli-ipc.md
 │   ├── D-019-review-gate-redesign.md
-│   └── D-020-tool-neutral-contribution-governance.md
+│   ├── D-020-tool-neutral-contribution-governance.md
+│   └── D-021-trust-pyramid-governance.md
 ├── references/                       # 외부 참조 문서
 │   └── external-apis/
 │       ├── dart-openapi.md
