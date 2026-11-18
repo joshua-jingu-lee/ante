@@ -743,6 +743,8 @@ tests/
 │   ├── test_kis_token_single_flight.py
 │   ├── test_stop_session_expiry_wiring.py
 │   ├── test_store_atomic_persist.py
+│   ├── test_check_review_scope.py
+│   ├── test_check_prose_budget.py
 │   └── test_collect_autopilot_queue.py
 ├── __init__.py
 └── integration/
@@ -783,6 +785,8 @@ scripts/
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── check_import_path.py              # 현재 worktree import sanity check
 ├── scan_create_services_anti_pattern.py
+├── check_review_scope.py
+├── check_prose_budget.py
 └── collect_autopilot_queue.py
 ```
 
@@ -818,7 +822,8 @@ docs/
 │   ├── D-017-canonical-symbol-timeframe-vocabulary.md
 │   ├── D-018-core-interface-cli-ipc.md
 │   ├── D-019-review-gate-redesign.md
-│   └── D-020-tool-neutral-contribution-governance.md
+│   ├── D-020-tool-neutral-contribution-governance.md
+│   └── D-021-trust-pyramid-governance.md
 ├── references/                       # 외부 참조 문서
 │   └── external-apis/
 │       ├── dart-openapi.md

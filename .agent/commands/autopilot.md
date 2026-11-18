@@ -273,7 +273,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 모니터링 규칙:
 
 - 같은 head SHA에서 `ci`/`merge-gate`가 인프라 이슈로 멈추면 `gh run rerun`을 우선하고, 복구되지 않으면 `retry-later-infra`로 종료한다.
-- PR 후 추가 코드 변경이 필요해 보이면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 `ci` 결과를 다시 확인한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
+- PR 후 추가 코드 변경이 필요해 보이면 새 head SHA에서 `/code-review` PASS 또는 SKIP(04 §2 적용 범위)을 다시 받은 뒤 `ci` 결과를 다시 확인한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - 상태 변화 없이 장시간 대기하거나 `--time-budget`이 소진되면 현재 이슈를 `deferred-merge-monitoring`으로 기록하고 배치를 종료한다.
 - `--handoff-only`일 때만 PR 생성 직후 모니터링을 생략하고 `handed-off`로 기록한다.
 - PR이 생성되는 즉시 상태 코멘트를 `implement-state=done`, `merge-monitor-state=running`, `current-cycle=merge-monitor`로 갱신하고 `pr`/`head`를 채운다.
@@ -324,7 +324,7 @@ PR이 생성되면 autopilot은 같은 이슈에 머물며 아래를 순서대�
 - `### 개선 포인트`
   - 예: 라벨 규칙 보강, Plan Preflight 조건 조정, runner capacity 조정, 코멘트 템플릿 정리, 큐 정렬 규칙 수정
 
-공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/code-review` PASS/FAIL 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
+공식 증적은 GitHub 이슈/PR 코멘트와 PR status check다. PR 전 브랜치 리뷰는 status check가 아니라 이슈 코멘트의 `/code-review` PASS/FAIL 또는 SKIP(04 §2 적용 범위) 기록으로 확인한다. `docs/temp/autopilot-report-*.md`는 배치 전체를 한 번에 회고하는 운영 리포트다.
 
 ## 중단 규칙
 

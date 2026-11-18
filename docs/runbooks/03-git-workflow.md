@@ -117,7 +117,7 @@ BREAKING CHANGE: BrokerAdapter 인터페이스가 변경되었습니다.
 
 ## 3. 브랜치 리뷰 규칙 (내부 lane)
 
-PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리뷰(`/code-review`)를 통과해야 한다.
+PR을 열기 전, 최신 로컬 브랜치 HEAD는 반드시 사전 브랜치 리뷰(`/code-review`)를 통과하거나 SKIP(04 §2 적용 범위)으로 판정돼야 한다.
 
 Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래그)의 정본은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프다.
 
@@ -130,7 +130,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 
 ### 3.2 브랜치 리뷰 결과 처리
 
-- `/code-review = PASS`
+- `/code-review = PASS` 또는 SKIP(04 §2 적용 범위)
   - 브랜치 push 후 PR 생성 가능
 - `/code-review = FAIL`
   - Claude가 같은 워크트리에서 수정 후 재검토
@@ -170,7 +170,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 - **release PR 예외**: release PR은 연결 이슈가 없어도 되며, 본문에 마지막 태그, 대상 버전, 포함 커밋, Docker build 검증, `/release publish` 후속 절차를 남긴다.
 - **라벨**: `core`, `cli`, `docs`, `fix` 중 해당 항목 (이 네 값은 이 절의 내부 lane PR에 쓰는 어휘이며 저장소 라벨 전체가 아니다. 저장소 라벨 등록부는 [00-issue-management.md](00-issue-management.md) §4다)
 - **base 브랜치**: 에픽 하위 이슈는 에픽 브랜치, 그 외는 `main`
-- **전제 조건**: 최신 branch HEAD의 `/code-review`가 PASS이고, 그 결과가 이슈 코멘트에 남아 있음
+- **전제 조건**: 최신 branch HEAD의 `/code-review`가 PASS 또는 SKIP(04 §2 적용 범위)이고, 그 결과가 이슈 코멘트에 남아 있음
 - **release PR 전제 조건**: release PR은 이슈 코멘트 기반 브랜치 리뷰 대신 `/release prepare`의 릴리스 메타데이터 검증과 Docker build 검증을 PR 본문에 남기고, 일반 PR 승인 게이트를 통과한다.
 - same-repo PR은 `merge-gate`가 공개 required checks, 충돌, 대화 해결을 확인한 뒤 `AUTOMERGE_TOKEN`으로 auto-merge를 활성화한다.
 
@@ -181,7 +181,7 @@ Gate A 호출 규범(effort 하한·리뷰 범위·clean worktree·모드 플래
 
 ### 4.4 내부 PR 후 추가 변경 처리
 
-- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review`를 다시 통과시킨 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
+- PR 후 추가 코드 변경이 발생하면 새 head SHA에서 `/code-review` PASS 또는 SKIP(04 §2 적용 범위)을 다시 받은 뒤 머지를 진행한다. 호출은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프의 정본 형태를 따른다.
 - `merge-gate` 이슈로 보이면 같은 head SHA 재실행이 필요할 때만 `gh run rerun`을 우선한다.
 - `pull_request` 이벤트 자체를 다시 발생시켜야 할 때만 PR `close → reopen`을 예외적으로 허용하고, 재트리거 이유를 PR 코멘트에 남긴다.
 - 추가 AI 감사가 필요하면 사람/오케스트레이터가 같은 브랜치 리뷰를 수동으로 다시 호출하고, 그 결과를 PR 코멘트에 남긴다. 자동 PR 승인 워커는 더 이상 동작하지 않는다.

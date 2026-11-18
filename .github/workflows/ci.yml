@@ -54,6 +54,9 @@ jobs:
           python scripts/generate_cli_reference.py --check
           python scripts/generate_db_schema.py --check
 
+      - name: Prose budget check
+        run: python scripts/check_prose_budget.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
