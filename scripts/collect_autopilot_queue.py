@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Collect the /autopilot queue snapshot via the GitHub search API (#2538).
 
-Prints a single JSON array that merges the ``items`` of every search page.
+Prints a single JSON array of open issue candidates, each reduced to the
+fields queue selection needs (number, title, label names, timestamps, URL).
 The array is written once, only after every page succeeded; on any failure
 stdout stays empty and the process exits 1.
 """
@@ -39,39 +40,40 @@ def build_query(repo: str) -> str:
     return f"repo:{repo} is:issue is:open sort:created-asc {excluded}"
 
 
-def _run_gh(args: list[str]) -> str:
+def _run_gh(args: list[str], label: str) -> str:
     try:
         completed = subprocess.run(
             ["gh", *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=GH_TIMEOUT_SECONDS,
             check=False,
         )
-    except FileNotFoundError as exc:
-        raise QueueCollectError("gh executable not found on PATH") from exc
+    except OSError as exc:
+        raise QueueCollectError(f"{label}: cannot run gh: {exc}") from exc
     except subprocess.TimeoutExpired as exc:
-        raise QueueCollectError(f"gh {' '.join(args[:2])} timed out") from exc
+        raise QueueCollectError(f"{label}: timed out") from exc
     if completed.returncode != 0:
         detail = (completed.stderr or completed.stdout).strip()
-        raise QueueCollectError(
-            f"gh {' '.join(args[:2])} exited {completed.returncode}: {detail}"
-        )
+        raise QueueCollectError(f"{label}: gh exited {completed.returncode}: {detail}")
     return completed.stdout
 
 
 def resolve_repo() -> str:
-    output = _run_gh(["repo", "view", "--json", "nameWithOwner"])
+    label = "gh repo view"
+    output = _run_gh(["repo", "view", "--json", "nameWithOwner"], label)
     try:
         repo = json.loads(output)["nameWithOwner"]
     except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise QueueCollectError(f"unexpected gh repo view output: {output!r}") from exc
+        raise QueueCollectError(f"{label}: unexpected output: {output!r}") from exc
     if not isinstance(repo, str) or not repo:
-        raise QueueCollectError(f"unexpected gh repo view output: {output!r}")
+        raise QueueCollectError(f"{label}: unexpected output: {output!r}")
     return repo
 
 
 def fetch_page(query: str, page: int) -> dict[str, Any]:
+    label = f"gh api search/issues page {page}"
     output = _run_gh(
         [
             "api",
@@ -84,40 +86,63 @@ def fetch_page(query: str, page: int) -> dict[str, Any]:
             f"per_page={PER_PAGE}",
             "-f",
             f"page={page}",
-        ]
+        ],
+        label,
     )
     try:
         payload = json.loads(output)
     except json.JSONDecodeError as exc:
-        raise QueueCollectError(f"page {page}: response is not JSON") from exc
+        raise QueueCollectError(f"{label}: response is not JSON") from exc
     if not isinstance(payload, dict):
-        raise QueueCollectError(f"page {page}: response is not a JSON object")
+        raise QueueCollectError(f"{label}: response is not a JSON object")
     if "items" not in payload or not isinstance(payload["items"], list):
-        raise QueueCollectError(f"page {page}: response has no 'items' array")
+        raise QueueCollectError(f"{label}: response has no 'items' array")
     if payload.get("incomplete_results") is True:
         raise QueueCollectError(
-            f"page {page}: incomplete_results is true (search timed out)"
+            f"{label}: incomplete_results is true (search timed out)"
         )
     return payload
 
 
-def collect(repo: str) -> list[Any]:
+def slim_issue(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise QueueCollectError(f"search item is not an object: {item!r}")
+    try:
+        return {
+            "number": item["number"],
+            "title": item["title"],
+            "labels": [label["name"] for label in item["labels"]],
+            "created_at": item["created_at"],
+            "updated_at": item["updated_at"],
+            "html_url": item["html_url"],
+        }
+    except (KeyError, TypeError) as exc:
+        raise QueueCollectError(
+            f"search item #{item.get('number')} is missing field: {exc}"
+        ) from exc
+
+
+def collect(repo: str) -> list[dict[str, Any]]:
     query = build_query(repo)
-    items: list[Any] = []
+    issues: list[dict[str, Any]] = []
     for page in range(1, MAX_PAGES + 1):
         payload = fetch_page(query, page)
         if page == 1:
             total = payload.get("total_count")
-            if isinstance(total, int) and total > SEARCH_RESULT_CAP:
+            if not isinstance(total, int) or isinstance(total, bool):
+                raise QueueCollectError(
+                    f"page 1: total_count missing or not an integer: {total!r}"
+                )
+            if total > SEARCH_RESULT_CAP:
                 raise QueueCollectError(
                     f"total_count {total} exceeds the search API cap "
                     f"of {SEARCH_RESULT_CAP}; snapshot would be truncated"
                 )
         batch = payload["items"]
-        if not batch:
+        issues.extend(slim_issue(item) for item in batch)
+        if len(batch) < PER_PAGE:
             break
-        items.extend(batch)
-    return items
+    return issues
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,12 +155,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         repo = args.repo or resolve_repo()
-        items = collect(repo)
+        issues = collect(repo)
     except QueueCollectError as exc:
         print(f"collect_autopilot_queue: {exc}", file=sys.stderr)
         return 1
 
-    sys.stdout.write(json.dumps(items, ensure_ascii=False) + "\n")
+    sys.stdout.write(json.dumps(issues, ensure_ascii=True) + "\n")
     return 0
 
 

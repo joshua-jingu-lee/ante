@@ -199,10 +199,10 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 ### 2단계: 큐 snapshot 수집
 
 ```bash
-python scripts/collect_autopilot_queue.py
+python3 scripts/collect_autopilot_queue.py
 ```
 
-저장소 루트에서 실행하며 출력은 JSON 배열 하나다.
+저장소 루트에서 실행하며 출력은 이슈마다 `number`·`title`·`labels`(라벨 이름 배열)·`created_at`·`updated_at`·`html_url`만 담은 JSON 배열 하나다.
 
 - 큐 snapshot은 "앞 100건만 가져온 뒤 로컬에서 후행 필터링"하지 않는다.
 - `needs-triage`와 기본 제외 라벨은 **수집 단계에서 server-side search filter로 먼저 제외**한다.
