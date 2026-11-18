@@ -743,7 +743,8 @@ tests/
 │   ├── test_kis_token_single_flight.py
 │   ├── test_stop_session_expiry_wiring.py
 │   ├── test_store_atomic_persist.py
-│   └── test_check_review_scope.py
+│   ├── test_check_review_scope.py
+│   └── test_check_prose_budget.py
 ├── __init__.py
 └── integration/
     ├── __init__.py
@@ -783,7 +784,8 @@ scripts/
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── check_import_path.py              # 현재 worktree import sanity check
 ├── scan_create_services_anti_pattern.py
-└── check_review_scope.py
+├── check_review_scope.py
+└── check_prose_budget.py
 ```
 
 ## docs/ — 설계 문서
