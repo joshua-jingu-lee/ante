@@ -5339,7 +5339,7 @@ class TestRuleEngineManager:
             pass
 
         class _RaisingDynamicConfig:
-            async def get(self, key, default=None):  # noqa: ARG002
+            async def get(self, key, default=None):
                 raise _UnrelatedError("backend mismatch")
 
         class _FakeStaticConfig:

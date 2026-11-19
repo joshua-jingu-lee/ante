@@ -254,7 +254,7 @@ def test_file_handler_unrelated_exception_does_not_break_stdout(
     class _UnrelatedError(Exception):
         pass
 
-    def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
+    def _raise(*args, **kwargs):
         raise _UnrelatedError("unrelated")
 
     import ante.core.log.handlers as handlers_mod

@@ -1722,7 +1722,7 @@ class TestFailClosedOnUnrelatedExceptionType:
         from ante.account.gate import ACCOUNT_NOT_READY_REASON, not_ready_reason
 
         reason = not_ready_reason(
-            _UnrelatedErrorRegistry(),  # type: ignore[arg-type]
+            _UnrelatedErrorRegistry(),
             ACCOUNT,
             broker_type="kis-domestic",
             trading_mode=TradingMode.LIVE,
@@ -1734,7 +1734,7 @@ class TestFailClosedOnUnrelatedExceptionType:
 
         assert (
             active_trading_blocked(
-                _UnrelatedErrorRegistry(),  # type: ignore[arg-type]
+                _UnrelatedErrorRegistry(),
                 ACCOUNT,
                 broker_type="kis-domestic",
                 trading_mode=TradingMode.LIVE,

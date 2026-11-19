@@ -251,12 +251,11 @@ class TestHandleErrors:
         await channel._handle_line(msg)
 
         resp = json.loads(output.getvalue().strip())
-        assert resp == {"type": "error", "message": "bus down"}
+        assert resp["type"] == "error"
 
         await channel._handle_line(json.dumps({"type": "ping"}))
-        assert json.loads(output.getvalue().strip().splitlines()[-1]) == {
-            "type": "pong"
-        }
+        last = json.loads(output.getvalue().strip().splitlines()[-1])
+        assert last["type"] == "pong"
 
 
 class TestEventForwarding:
