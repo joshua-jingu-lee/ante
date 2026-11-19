@@ -205,6 +205,46 @@ class TestInvalidTokenJsonFormat:
         assert result.stdout.strip() == "", result.stdout
         assert "인증 실패" in result.stderr, result.stderr
 
+    def test_db_connect_unrelated_exception_emits_json_auth_failed(
+        self, runner: CliRunner, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """DB connect 가 sqlite/OS 계열 밖의 예외를 던져도 ``auth_failed``."""
+        from unittest.mock import AsyncMock
+
+        from ante.core.database import Database
+
+        class _UnrelatedError(Exception):
+            pass
+
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        custom_dir = tmp_path / "custom-config-unrelated"
+        custom_dir.mkdir()
+
+        connect = AsyncMock(side_effect=_UnrelatedError("unrelated"))
+        with patch.object(Database, "connect", connect):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(custom_dir),
+                    "bot",
+                    "list",
+                ],
+            )
+
+        assert result.exit_code == 1, (
+            f"expected exit 1, got {result.exit_code}\n"
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        connect.assert_awaited_once()
+        payload = _parse_json_line(result.stdout)
+        assert payload["status"] == "error", payload
+        assert payload["code"] == "auth_failed", payload
+        assert "DB 접근 불가" in str(payload["message"]), payload
+
 
 # ── auth DB connect 실패 시 aiosqlite traceback noise 부재 (#1965) ──────────
 

@@ -5330,6 +5330,59 @@ class TestRuleEngineManager:
             "dynamic이 비어 있으면 static config의 명시 비활성화가 유지되어야 한다"
         )
 
+    async def test_initialize_all_static_fallback_on_unrelated_dynamic_error(
+        self, manager
+    ):
+        """DynamicConfig 조회가 어떤 예외를 던져도 static config로 이어간다."""
+
+        class _UnrelatedError(Exception):
+            pass
+
+        class _RaisingDynamicConfig:
+            def __init__(self):
+                self.get_calls = 0
+
+            async def get(self, key, default=None):
+                self.get_calls += 1
+                raise _UnrelatedError("backend mismatch")
+
+        class _FakeStaticConfig:
+            def __init__(self, data):
+                self._data = data
+
+            def get(self, key, default=None):
+                return self._data.get(key, default)
+
+        accounts = [
+            Account(
+                account_id="domestic",
+                name="국내주식",
+                exchange="KRX",
+                currency="KRW",
+                broker_type="kis-domestic",
+            ),
+        ]
+        static_cfg = _FakeStaticConfig(
+            {
+                "accounts.domestic.rules": [
+                    {"type": "trading_hours", "enabled": False},
+                ]
+            }
+        )
+
+        dyn_cfg = _RaisingDynamicConfig()
+        await manager.initialize_all(
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
+        )
+
+        assert dyn_cfg.get_calls == 1
+        engine = manager.get("domestic")
+        trading_hours_rules = [
+            r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"
+        ]
+        assert len(trading_hours_rules) == 1
+        assert trading_hours_rules[0].enabled is False
+
     async def test_initialize_all_default_when_neither_static_nor_dynamic(
         self, manager
     ):

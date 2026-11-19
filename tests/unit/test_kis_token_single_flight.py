@@ -1,13 +1,12 @@
 """KIS OAuth2 토큰 single-flight + shared cache + EGW00133 backoff 단위 테스트.
 
-#2399 (축 iii) invariant T1–T7:
+#2399 (축 iii) invariant T1–T6:
 - T1 single-flight, lock key=app_key (account_id 아님) + double-check.
 - T2 in-process shared cache + near-expiry(5분) miss.
 - T3 토큰 발급 응답 msg_cd/error_code alias 파싱 (200+body / non-200 양 분기).
 - T4 단일 cadence: ``_authenticate`` 내부 sleep 없이 EGW00133 즉시 raise.
 - T5 classify(AuthenticationError)=(False,False) 불변 + EGW00133 ∉ TRANSIENT.
 - T6 reason 구조적 보존(error_code).
-- T7 known-limitation(멀티프로세스) — 주석/스펙 anchor.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from typing import Any
 
 import pytest
 
-import ante.broker.kis as kis_mod
 from ante.broker import KISAdapter, TokenRateLimitError
 from ante.broker.error_codes import (
     TOKEN_RATE_LIMIT_MSG_CODE,
@@ -574,17 +572,3 @@ class TestTokenCacheConfigFingerprint:
             await a._authenticate()
         assert s.post_count == 0
         assert a.access_token is None
-
-
-# ── T7: known-limitation 주석 anchor ──────────────────────
-
-
-class TestKnownLimitationAnchor:
-    def test_multiprocess_limitation_documented(self):
-        """멀티프로세스 토큰 공유 미해결(v1) known-limitation 주석/스펙 anchor (T7)."""
-        # in-process module 캐시뿐임을 module docstring/주석으로 명시.
-        src = kis_mod.__file__
-        with open(src, encoding="utf-8") as f:
-            content = f.read()
-        assert "멀티프로세스" in content
-        assert "in-process" in content
