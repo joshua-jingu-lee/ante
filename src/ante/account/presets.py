@@ -33,4 +33,19 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
         default_name="국내 주식",
         required_credentials=["app_key", "app_secret", "account_no"],
     ),
+    "mock": BrokerPreset(
+        exchange="TEST",
+        currency="KRW",
+        timezone="Asia/Seoul",
+        trading_hours_start="00:00",
+        trading_hours_end="23:59",
+        buy_commission_rate=Decimal("0"),
+        sell_commission_rate=Decimal("0"),
+        market_order_reserve_buffer_rate=Decimal("0"),
+        default_account_id="mock",
+        default_name="모의",
+        required_credentials=[],
+    ),
 }
+
+VIRTUAL_ONLY_BROKER_TYPES: frozenset[str] = frozenset({"mock"})

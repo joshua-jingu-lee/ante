@@ -311,7 +311,7 @@ class TestMockBrokerAdapterUpdate:
 
 
 class TestBrokerRegistry:
-    """BROKER_REGISTRY에 test, kis-domestic만 등록되어 있다."""
+    """BROKER_REGISTRY에 test, kis-domestic, mock만 등록되어 있다."""
 
     def test_registry_contains_test(self):
         """test 타입이 등록되어 있다."""
@@ -323,9 +323,13 @@ class TestBrokerRegistry:
         assert "kis-domestic" in BROKER_REGISTRY
         assert BROKER_REGISTRY["kis-domestic"] is KISDomesticAdapter
 
+    def test_registry_contains_mock(self):
+        """mock 타입이 등록되어 있다."""
+        assert BROKER_REGISTRY["mock"] is MockBrokerAdapter
+
     def test_registry_size(self):
-        """현재 2개만 등록."""
-        assert len(BROKER_REGISTRY) == 2
+        """test, kis-domestic, mock 세 개만 등록."""
+        assert set(BROKER_REGISTRY) == {"test", "kis-domestic", "mock"}
 
     def test_get_broker_class_test(self):
         """get_broker_class로 test 어댑터 조회."""

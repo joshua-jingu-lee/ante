@@ -6,18 +6,87 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from pathlib import Path
+from typing import Any, NoReturn
 
 from ante.broker.base import BrokerAdapter
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
 
 logger = logging.getLogger(__name__)
+
+_PRICES_FILE_KEYS = frozenset({"prices", "default_price"})
+
+
+def _reject_json_constant(name: str) -> NoReturn:
+    raise ValueError(f"허용하지 않는 JSON 상수: {name}")
+
+
+def _valid_price(value: object, where: str, prices_file: str) -> float:
+    price = math.nan
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        try:
+            price = float(value)
+        except OverflowError:
+            price = math.inf
+    if not math.isfinite(price) or price <= 0:
+        raise BrokerError(
+            f"Mock 가격 파일의 {where} 값은 0보다 큰 유한한 수여야 함: "
+            f"{value!r} ({prices_file})"
+        )
+    return price
+
+
+def _load_prices_file(config: dict[str, Any]) -> tuple[dict[str, float], float | None]:
+    conflicting = sorted(_PRICES_FILE_KEYS & config.keys())
+    if conflicting:
+        raise BrokerError(
+            f"prices_file과 {conflicting}를 함께 줄 수 없음. 가격은 파일에만 둔다"
+        )
+    prices_file = config["prices_file"]
+    if not isinstance(prices_file, str) or not Path(prices_file).is_absolute():
+        raise BrokerError(f"prices_file은 절대 경로 문자열이어야 함: {prices_file!r}")
+    try:
+        text = Path(prices_file).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as exc:
+        raise BrokerError(
+            f"Mock 가격 파일을 읽을 수 없음: {prices_file} ({exc})"
+        ) from exc
+    try:
+        data = json.loads(text, parse_constant=_reject_json_constant)
+    except ValueError as exc:
+        raise BrokerError(
+            f"Mock 가격 파일이 JSON이 아님: {prices_file} ({exc})"
+        ) from exc
+    if not isinstance(data, dict):
+        raise BrokerError(f"Mock 가격 파일은 JSON 객체여야 함: {prices_file}")
+    unknown = sorted(data.keys() - _PRICES_FILE_KEYS)
+    if unknown:
+        raise BrokerError(
+            f"Mock 가격 파일에 허용하지 않는 키: {unknown} ({prices_file})"
+        )
+    if "prices" not in data:
+        raise BrokerError(f"Mock 가격 파일에 prices 키가 없음: {prices_file}")
+    raw_prices = data["prices"]
+    if not isinstance(raw_prices, dict):
+        raise BrokerError(f"Mock 가격 파일의 prices는 JSON 객체여야 함: {prices_file}")
+    prices = {
+        symbol: _valid_price(value, f"prices[{symbol!r}]", prices_file)
+        for symbol, value in raw_prices.items()
+    }
+    default_price = (
+        _valid_price(data["default_price"], "default_price", prices_file)
+        if "default_price" in data
+        else None
+    )
+    return prices, default_price
 
 
 # ── 시뮬레이션 모드 ─────────────────────────────────────
@@ -59,16 +128,16 @@ class MockOrder:
 class MockBrokerAdapter(BrokerAdapter):
     """E2E 테스트용 가상 브로커 어댑터.
 
-    Note: BrokerAdapter 인터페이스 준수를 위해 async def를 유지한다.
-    내부적으로 await를 사용하지 않지만, 호출부에서 await로 사용된다.
+    Note: BrokerAdapter 인터페이스라 내부에 await가 없어도 async def다.
 
     설정 옵션:
         fill_mode: "immediate" | "partial" | "delayed" | "reject"
         partial_fill_ratio: 부분 체결 비율 (0.0~1.0, 기본 0.5)
         delay_seconds: 지연 체결 시 대기 시간 (기본 0.1)
         initial_cash: 초기 현금 (기본 100_000_000)
-        default_price: 종목 기본 현재가 (기본 50_000)
+        default_price: prices에 없는 종목의 현재가 (기본 50_000)
         prices: 종목별 현재가 딕셔너리 (예: {"005930": 70000})
+        prices_file: 가격 JSON 절대 경로. 있으면 위 두 키 대신 파일만 쓴다
     """
 
     broker_id: str = "mock"
@@ -89,8 +158,13 @@ class MockBrokerAdapter(BrokerAdapter):
         self._orders: dict[str, MockOrder] = {}
 
         # 종목별 현재가
-        self._prices: dict[str, float] = config.get("prices", {})
-        self._default_price: float = config.get("default_price", 50_000.0)
+        self._prices: dict[str, float]
+        self._default_price: float | None
+        if "prices_file" in config:
+            self._prices, self._default_price = _load_prices_file(config)
+        else:
+            self._prices = config.get("prices", {})
+            self._default_price = config.get("default_price", 50_000.0)
 
         self._commission = CommissionInfo(
             buy_commission_rate=config.get("buy_commission_rate", 0.00015),
@@ -325,7 +399,10 @@ class MockBrokerAdapter(BrokerAdapter):
 
     def _get_price(self, symbol: str) -> float:
         """종목 현재가 반환."""
-        return self._prices.get(symbol, self._default_price)
+        price = self._prices.get(symbol, self._default_price)
+        if price is None:
+            raise BrokerError(f"Mock 가격 파일에 종목 가격이 없음: {symbol}")
+        return price
 
     def set_price(self, symbol: str, price: float) -> None:
         """테스트용: 종목 현재가 설정."""

@@ -267,14 +267,14 @@ def _resolve_credentials(
     - file 부재/읽기 실패/공란 → ``ACCOUNT_CREDENTIAL_FILE_NOT_FOUND``
     - 누락된 required key → ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``
 
-    required_keys가 빈 리스트(예: 향후 broker preset)면 모든 입력이 unknown
+    required_keys가 빈 리스트(예: ``mock`` preset)면 모든 입력이 unknown
     이 되므로, 이 경우 credentials는 비어 있어야 한다(빈 dict 반환).
     """
     required_set = set(required_keys)
     seen: dict[str, str] = {}
 
     def _set_or_dup(key: str, value: str, channel: str) -> None:
-        if required_set and key not in required_set:
+        if key not in required_set:
             _exit_with_error(
                 fmt,
                 "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
@@ -1018,7 +1018,7 @@ def account_set_credentials(
             acct = await svc.get(validated_account_id)
             preset = BROKER_PRESETS.get(acct.broker_type)
             if not preset or not preset.required_credentials:
-                # broker preset이 credentials를 요구하지 않는 경우(예: 향후 broker)
+                # broker preset이 credentials를 요구하지 않는 경우(예: mock)
                 # 입력이 있으면 unknown으로 거부하고, 없으면 no-op으로 안내한다.
                 any_input = bool(
                     credentials_direct or credentials_env or credentials_file
