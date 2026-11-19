@@ -189,7 +189,7 @@
     "src/ante/broker/error_codes.py": 1,
     "src/ante/broker/exceptions.py": 8,
     "src/ante/broker/fill_scheduler.py": 27,
-    "src/ante/broker/kis.py": 34,
+    "src/ante/broker/kis.py": 38,
     "src/ante/broker/kis_stream.py": 2,
     "src/ante/broker/mock.py": 3,
     "src/ante/broker/registry.py": 1,
@@ -209,9 +209,9 @@
     "src/ante/config/dynamic.py": 16,
     "src/ante/config/exceptions.py": 2,
     "src/ante/contracts/__init__.py": 7,
-    "src/ante/contracts/cli_registry.py": 35,
-    "src/ante/contracts/error_registry.py": 57,
-    "src/ante/contracts/errors.py": 2,
+    "src/ante/contracts/cli_registry.py": 59,
+    "src/ante/contracts/error_registry.py": 60,
+    "src/ante/contracts/errors.py": 3,
     "src/ante/contracts/helpers.py": 4,
     "src/ante/contracts/vocab.py": 4,
     "src/ante/core/database.py": 15,
@@ -232,6 +232,7 @@
     "src/ante/feed/cli.py": 7,
     "src/ante/feed/cli_scheduler.py": 3,
     "src/ante/feed/config.py": 3,
+    "src/ante/feed/models/result.py": 5,
     "src/ante/feed/pipeline/backfill_runner.py": 13,
     "src/ante/feed/pipeline/daily_runner.py": 1,
     "src/ante/feed/pipeline/dart_collector.py": 17,
@@ -284,5 +285,5 @@
     "src/ante/treasury/treasury.py": 15,
     "src/ante/update/executor.py": 2
   },
-  "docstring_lines": 13615
+  "docstring_lines": 13825
 }

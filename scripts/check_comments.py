@@ -8,13 +8,16 @@ Measured per file in ``src/ante/**/*.py``:
 - docstring history: docstring source lines matching an issue number,
   ``Refs``, ``attempt N``, ``Codex``, ``Finding`` or ``SPLIT-N``.
 
-Measured in total: docstring source lines. A docstring is the first statement
-of a module, class or function body when it is a string constant.
+Measured in total: docstring source lines. A docstring here is any expression
+statement whose value is a string constant: the first statement of a module,
+class or function body, and also bare strings in the middle of a body or after
+a class attribute. This is wider than ``check_review_scope.py`` on purpose,
+because such strings can stand in for comments.
 
 Exit 0: all three values equal ``scripts/comment_baseline.json``.
 Exit 1: any value is above or below the baseline.
 Exit 2: Python is older than 3.13, the baseline is missing or malformed, or a
-source file cannot be tokenized or parsed.
+source file cannot be read, tokenized or parsed.
 """
 
 from __future__ import annotations
@@ -55,14 +58,14 @@ HISTORY_PATTERNS = tuple(
         r"\bSPLIT-\d+",
     )
 )
-DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
 
 ALTERNATIVES = (
     "새 주석 대신:\n"
     "  - 이름을 고치거나 함수로 추출한다\n"
     "  - 불변식은 타입·assert·테스트로 옮긴다\n"
-    "  - 이력은 커밋 메시지에 쓴다"
+    "  - 이력은 커밋 메시지에 쓴다\n"
+    "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
 )
 
 
@@ -99,17 +102,14 @@ def count_comments(data: bytes) -> int:
 def docstring_spans(tree: ast.AST) -> list[tuple[int, int]]:
     spans: list[tuple[int, int]] = []
     for node in ast.walk(tree):
-        if not isinstance(node, DOCSTRING_OWNERS) or not node.body:
-            continue
-        first = node.body[0]
         if (
-            isinstance(first, ast.Expr)
-            and isinstance(first.value, ast.Constant)
-            and isinstance(first.value.value, str)
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
         ):
-            end = first.end_lineno if first.end_lineno is not None else first.lineno
-            spans.append((first.lineno, end))
-    return spans
+            end = node.end_lineno if node.end_lineno is not None else node.lineno
+            spans.append((node.lineno, end))
+    return sorted(spans)
 
 
 def is_history_line(line: str) -> bool:
@@ -136,11 +136,19 @@ def measure(root: Path) -> Measurement:
     docstring_lines = 0
     for path in target_files(root):
         rel = path.relative_to(root).as_posix()
-        data = path.read_bytes()
+        try:
+            data = path.read_bytes()
+        except OSError as exc:
+            raise CheckError(f"cannot read {rel}: {exc}") from exc
         try:
             comment_count = count_comments(data)
             history_count, line_count = measure_docstrings(data)
-        except (tokenize.TokenError, SyntaxError, UnicodeDecodeError) as exc:
+        except (
+            tokenize.TokenError,
+            SyntaxError,
+            UnicodeDecodeError,
+            RecursionError,
+        ) as exc:
             raise CheckError(f"cannot tokenize or parse {rel}: {exc}") from exc
         if comment_count:
             comments[rel] = comment_count

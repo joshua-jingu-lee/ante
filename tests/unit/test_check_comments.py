@@ -167,14 +167,30 @@ def test_docstring_owners(owner: str) -> None:
     "source",
     [
         'x = "See #1234 and Refs and codex"\n',
-        'def f():\n    x = 1\n    """See #1234."""\n',
         'def f():\n    return "Finding attempt 2 SPLIT-3"\n',
+        'print("See #1234")\n',
+        'f"See #1234 {x}"\n',
+        'b"See #1234"\n',
         "# See #1234\nx = 1\n",
         'def f():\n    """No history in #12 or Refsheet or attempts."""\n',
     ],
 )
 def test_non_docstring_or_non_matching_text_is_not_history(source: str) -> None:
     assert _history(source) == 0
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'def f():\n    x = 1\n    """See #1234."""\n',
+        'class C:\n    x: int = 1\n    """See #1234."""\n',
+        'x = 1\n"""See #1234."""\n',
+        'if x:\n    """See #1234."""\n',
+    ],
+)
+def test_string_statement_in_body_is_counted_as_docstring(source: str) -> None:
+    assert _history(source) == 1
+    assert _docstring_lines(source) == 1
 
 
 def test_docstring_total_lines() -> None:
@@ -188,9 +204,11 @@ def test_docstring_total_lines() -> None:
         '        """Method\n'
         '        doc."""\n'
         "        x = 1\n"
-        '        """not a docstring"""\n'
+        '        """mid-body\n'
+        '        string."""\n'
+        '        y = "not a statement"\n'
     )
-    assert _docstring_lines(source) == 1 + 3 + 2
+    assert _docstring_lines(source) == 1 + 3 + 2 + 2
 
 
 def _tree(root: Path) -> dict[str, Any]:
@@ -241,6 +259,7 @@ def test_added_comment_fails_with_path_and_alternatives(
     assert "함수로 추출한다" in message
     assert "assert" in message
     assert "커밋 메시지" in message
+    assert "기준선의 키를 새 경로로 옮긴다" in message
 
 
 def test_comment_in_new_file_fails(tmp_path: Path, capsys: Capsys) -> None:
@@ -265,6 +284,7 @@ def test_removed_comment_without_baseline_update_fails(
     assert "src/ante/a.py: actual 1, baseline 2" in message
     assert "낮춘다" in message
     assert "함수로 추출한다" not in message
+    assert "새 경로로 옮긴다" not in message
 
 
 def test_file_dropping_to_zero_asks_to_remove_key(
@@ -398,11 +418,54 @@ def test_unparsable_source_exits_2(tmp_path: Path, capsys: Capsys) -> None:
     assert "src/ante/broken.py" in message
 
 
+def test_moved_file_asks_to_move_baseline_key(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _tree(tmp_path))
+    (tmp_path / "src/ante/sub/b.py").rename(tmp_path / "src/ante/sub/moved.py")
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "src/ante/sub/moved.py: actual 1, baseline 0" in message
+    assert "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다" in message
+
+
+def test_unreadable_source_exits_2(
+    tmp_path: Path, capsys: Capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _write_baseline(tmp_path, _tree(tmp_path))
+    target = tmp_path / "src/ante/sub/b.py"
+    real_read_bytes = Path.read_bytes
+
+    def read_bytes(self: Path) -> bytes:
+        if self == target:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 2
+    assert "src/ante/sub/b.py" in message
+
+
+def test_too_deep_source_exits_2(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _tree(tmp_path))
+    _write_source(
+        tmp_path, "src/ante/deep.py", "x = " + "+".join(["1"] * 200_000) + "\n"
+    )
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 2
+    assert "src/ante/deep.py" in message
+
+
 def test_old_python_exits_2(
     tmp_path: Path, capsys: Capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _write_baseline(tmp_path, _tree(tmp_path))
-    monkeypatch.setattr(checker.sys, "version_info", (3, 12, 9))
+    monkeypatch.setattr(checker, "MIN_PYTHON", (99, 0))
 
     code, _ = _run(tmp_path, capsys)
 
