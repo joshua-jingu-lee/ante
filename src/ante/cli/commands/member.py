@@ -61,13 +61,13 @@ def member() -> None:
     """멤버 등록·관리."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
 
 
 def _resolve_secret_non_interactive(
-    fmt,  # noqa: ANN001
+    fmt,
     *,
     env_name: str | None,
     file_path: str | None,
@@ -112,7 +112,7 @@ def _resolve_secret_non_interactive(
         return value.strip()
 
     # file_path is not None
-    assert file_path is not None  # noqa: S101 — 위 분기로 보장
+    assert file_path is not None
     path = Path(file_path)
     try:
         raw = path.read_text(encoding="utf-8")
@@ -335,7 +335,7 @@ def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
 
 
 def _invalid_role_row_dict(
-    m,  # noqa: ANN001
+    m,
     *,
     actionable: bool,
     config_dir: str | None = None,

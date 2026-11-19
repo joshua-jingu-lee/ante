@@ -507,7 +507,7 @@ class TestValidButAbsentNotMisclassified:
         async def _create(account_id=None, *, ctx=None):
             create_calls.append(account_id)
             raise AccountNotFoundError("계좌를 찾을 수 없습니다")
-            yield  # unreachable but required for asynccontextmanager  # noqa
+            yield  # unreachable but required for asynccontextmanager
 
         with patch(
             "ante.cli.commands.treasury._create_treasury",

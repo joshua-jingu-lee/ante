@@ -60,7 +60,7 @@ def account() -> None:
     """계좌 생성·조회·관리."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 

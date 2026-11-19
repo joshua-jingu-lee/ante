@@ -39,7 +39,7 @@ def bot() -> None:
     """봇 생성·시작·중지·조회."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 
@@ -96,7 +96,7 @@ async def _create_services(
         yield db, eventbus, manager, account_service
 
 
-async def _audit_log(db, **kwargs) -> None:  # noqa: ANN001
+async def _audit_log(db, **kwargs) -> None:
     """감사 로그 기록 (실패해도 주 동작에 영향 없음)."""
     try:
         from ante.audit import AuditLogger
@@ -310,7 +310,7 @@ def _parse_param(value: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
-def _resolve_account_non_interactive(accounts: list, fmt) -> str:  # noqa: ANN001
+def _resolve_account_non_interactive(accounts: list, fmt) -> str:
     """활성 계좌 목록에서 비대화형으로 계좌를 선택한다.
 
     - 활성 계좌가 정확히 1개면 자동 선택한다.

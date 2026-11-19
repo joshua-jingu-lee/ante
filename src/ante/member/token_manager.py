@@ -72,9 +72,7 @@ class TokenManager:
         if not member.token_expires_at:
             return None
 
-        expires = datetime.strptime(  # noqa: DTZ007
-            member.token_expires_at, "%Y-%m-%d %H:%M:%S"
-        )
+        expires = datetime.strptime(member.token_expires_at, "%Y-%m-%d %H:%M:%S")
         now = datetime.now(UTC).replace(tzinfo=None)
 
         if now > expires:

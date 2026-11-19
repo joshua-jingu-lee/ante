@@ -263,7 +263,7 @@ class VirtualExecutor:
         fetch_failed = False
         try:
             fetched = await self._account_service.get(account_id)
-        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2)·검증 불가.
+        except Exception:
             fetch_failed = True
 
         # status 축(G7) — gateway 계층3 와 동일 3-state 도출(공유 헬퍼 SSOT).

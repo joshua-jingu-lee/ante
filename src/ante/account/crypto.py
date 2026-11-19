@@ -68,7 +68,7 @@ def _validate_fernet_key(value: str | None) -> bool:
         return False
     try:
         Fernet(value.encode())
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     return True
 

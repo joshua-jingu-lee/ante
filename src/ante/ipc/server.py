@@ -886,7 +886,7 @@ class IPCServer:
                 await asyncio.wait_for(
                     asyncio.shield(inflight), timeout=SIGNAL_INFLIGHT_GRACE
                 )
-            except (TimeoutError, Exception):  # noqa: BLE001
+            except (TimeoutError, Exception):
                 # grace 초과/publish 예외 — publish 는 백그라운드 계속, 진행.
                 pass
 

@@ -89,7 +89,7 @@ def iso_to_kis_date(value: str | None) -> str | None:
         msg = f"{value!r}은(는) YYYY-MM-DD 형식이어야 합니다 (zero-padded)."
         raise InvalidIsoDateError(msg)
     try:
-        datetime.strptime(value, "%Y-%m-%d")  # noqa: DTZ007 — date-only 검증
+        datetime.strptime(value, "%Y-%m-%d")
     except ValueError as exc:
         msg = f"{value!r}은(는) 유효한 달력 날짜가 아닙니다."
         raise InvalidIsoDateError(msg) from exc

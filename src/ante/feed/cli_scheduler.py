@@ -82,7 +82,7 @@ def _validate_schedule_times(
 
 
 async def run_scheduler_loop(
-    orchestrator: Any,  # FeedOrchestrator  # noqa: ANN401
+    orchestrator: Any,  # FeedOrchestrator
     data_path: str,
     config: dict[str, Any],
     daily_at: str,
@@ -165,7 +165,7 @@ def _setup_signal_handlers() -> asyncio.Event:
 
 
 async def _run_daily_job(
-    orchestrator: Any,  # noqa: ANN401
+    orchestrator: Any,
     data_path: str,
     config: dict[str, Any],
     current_date: str,
@@ -191,7 +191,7 @@ async def _run_daily_job(
 
 
 async def _run_backfill_job(
-    orchestrator: Any,  # noqa: ANN401
+    orchestrator: Any,
     data_path: str,
     config: dict[str, Any],
     current_date: str,

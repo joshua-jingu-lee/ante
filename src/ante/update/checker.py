@@ -24,7 +24,7 @@ def get_latest_version() -> str | None:
     """PyPI에서 최신 버전을 조회한다. 실패 시 None."""
     try:
         req = urllib.request.Request(PYPI_URL, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310
+        with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
             return data["info"]["version"]
     except Exception as e:

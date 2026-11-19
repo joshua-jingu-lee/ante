@@ -399,7 +399,7 @@ def feed_run() -> None:
     """수집을 1회 실행한다 (backfill / daily)."""
 
 
-def _build_orchestrator(  # noqa: ANN001, ANN201
+def _build_orchestrator(
     cfg,  # FeedConfig
 ):  # -> FeedOrchestrator
     """FeedConfig의 API 키를 기반으로 FeedOrchestrator를 조립한다."""
@@ -426,7 +426,7 @@ def _build_orchestrator(  # noqa: ANN001, ANN201
     )
 
 
-def _ensure_initialized(  # noqa: ANN001, ANN201
+def _ensure_initialized(
     cfg,  # FeedConfig
     fmt,  # OutputFormatter
     data_path: str,
