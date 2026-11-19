@@ -78,6 +78,7 @@ def is_flag_exempt(
     return trading_mode == TradingMode.VIRTUAL and broker_type in {
         "test",
         "kis-domestic",
+        "mock",
     }
 
 

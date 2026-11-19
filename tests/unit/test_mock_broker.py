@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
@@ -313,6 +316,143 @@ async def test_default_price() -> None:
     """prices 딕셔너리에 없는 종목은 default_price를 반환한다."""
     b = MockBrokerAdapter({"default_price": 30_000})
     assert await b.get_current_price("999999") == 30_000
+
+
+@pytest.mark.asyncio
+async def test_default_price_without_config_is_50000() -> None:
+    """prices_file이 없고 default_price도 없으면 기본값 50,000이다."""
+    assert await MockBrokerAdapter({}).get_current_price("999999") == 50_000
+
+
+# ── 가격 파일 (prices_file) ──────────────────────────
+
+
+def _write_prices(tmp_path: Path, content: str) -> str:
+    path = tmp_path / "prices.json"
+    path.write_text(content, encoding="utf-8")
+    return str(path)
+
+
+@pytest.mark.asyncio
+async def test_prices_file_supplies_prices(tmp_path: Path) -> None:
+    """파일의 종목 가격이 조회된다."""
+    path = _write_prices(
+        tmp_path, json.dumps({"prices": {"000001": 72000, "000002": 160000.5}})
+    )
+    b = MockBrokerAdapter({"prices_file": path})
+    assert await b.get_current_price("000001") == 72000
+    assert await b.get_current_price("000002") == 160000.5
+
+
+@pytest.mark.asyncio
+async def test_prices_file_default_price_for_missing_symbol(tmp_path: Path) -> None:
+    """파일에 없는 종목은 파일의 default_price다."""
+    path = _write_prices(
+        tmp_path, json.dumps({"prices": {"000001": 72000}, "default_price": 1234})
+    )
+    b = MockBrokerAdapter({"prices_file": path})
+    assert await b.get_current_price("999999") == 1234
+
+
+@pytest.mark.asyncio
+async def test_prices_file_missing_symbol_without_default_raises(
+    tmp_path: Path,
+) -> None:
+    """파일에 없는 종목은 default_price가 없으면 조회가 BrokerError다."""
+    path = _write_prices(tmp_path, json.dumps({"prices": {"000001": 72000}}))
+    b = MockBrokerAdapter({"prices_file": path})
+    with pytest.raises(BrokerError):
+        await b.get_current_price("999999")
+
+
+@pytest.mark.asyncio
+async def test_prices_file_empty_prices_with_default_is_valid(tmp_path: Path) -> None:
+    """빈 prices와 default_price만 있는 파일은 유효하다."""
+    path = _write_prices(tmp_path, json.dumps({"prices": {}, "default_price": 1000}))
+    b = MockBrokerAdapter({"prices_file": path})
+    assert await b.get_current_price("000001") == 1000
+
+
+@pytest.mark.asyncio
+async def test_prices_file_read_once_at_construction(tmp_path: Path) -> None:
+    """파일은 생성 때 한 번 읽고 이후 바뀌어도 다시 읽지 않는다."""
+    path = _write_prices(tmp_path, json.dumps({"prices": {"000001": 72000}}))
+    b = MockBrokerAdapter({"prices_file": path})
+    _write_prices(tmp_path, json.dumps({"prices": {"000001": 1}}))
+    assert await b.get_current_price("000001") == 72000
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        pytest.param("not json", id="broken-json"),
+        pytest.param("", id="empty-file"),
+        pytest.param("[]", id="not-object"),
+        pytest.param('{"prices": {}, "extra": 1}', id="unknown-key"),
+        pytest.param('{"default_price": 1000}', id="missing-prices"),
+        pytest.param('{"prices": []}', id="prices-not-object"),
+        pytest.param('{"prices": {"000001": 0}}', id="zero"),
+        pytest.param('{"prices": {"000001": -1}}', id="negative"),
+        pytest.param('{"prices": {"000001": true}}', id="true"),
+        pytest.param('{"prices": {"000001": "100"}}', id="string"),
+        pytest.param('{"prices": {"000001": null}}', id="null"),
+        pytest.param('{"prices": {"000001": NaN}}', id="nan"),
+        pytest.param('{"prices": {"000001": Infinity}}', id="infinity"),
+        pytest.param('{"prices": {"000001": -Infinity}}', id="neg-infinity"),
+        pytest.param('{"prices": {"000001": 1e400}}', id="float-overflow"),
+        pytest.param('{"prices": {"000001": 1' + "0" * 400 + "}}", id="int-overflow"),
+        pytest.param('{"prices": {}, "default_price": 0}', id="default-zero"),
+        pytest.param('{"prices": {}, "default_price": false}', id="default-false"),
+        pytest.param('{"prices": {}, "default_price": NaN}', id="default-nan"),
+    ],
+)
+def test_prices_file_invalid_content_raises_on_construction(
+    tmp_path: Path, content: str
+) -> None:
+    """형식에 맞지 않는 가격 파일은 생성자의 BrokerError다."""
+    path = _write_prices(tmp_path, content)
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": path})
+
+
+def test_prices_file_relative_path_raises(tmp_path: Path) -> None:
+    """상대 경로는 생성자의 BrokerError다."""
+    _write_prices(tmp_path, json.dumps({"prices": {}}))
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": "prices.json"})
+
+
+def test_prices_file_not_found_raises(tmp_path: Path) -> None:
+    """없는 파일은 생성자의 BrokerError다."""
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": str(tmp_path / "absent.json")})
+
+
+def test_prices_file_directory_raises(tmp_path: Path) -> None:
+    """디렉토리 경로는 생성자의 BrokerError다."""
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": str(tmp_path)})
+
+
+@pytest.mark.parametrize("value", [None, 1, True], ids=["none", "int", "bool"])
+def test_prices_file_non_string_raises(value: object) -> None:
+    """문자열이 아닌 prices_file은 생성자의 BrokerError다."""
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": value})
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [{"prices": {"000001": 1}}, {"default_price": 1}, {"prices": {}}],
+    ids=["prices", "default_price", "empty-prices"],
+)
+def test_prices_file_with_config_prices_raises(
+    tmp_path: Path, extra: dict[str, object]
+) -> None:
+    """prices_file과 prices 또는 default_price를 함께 주면 BrokerError다."""
+    path = _write_prices(tmp_path, json.dumps({"prices": {"000001": 72000}}))
+    with pytest.raises(BrokerError):
+        MockBrokerAdapter({"prices_file": path, **extra})
 
 
 # ── 체결 모드 동적 변경 ──────────────────────────────

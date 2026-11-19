@@ -167,8 +167,6 @@ per-account 4개 플래그를 둔다. 디폴트 초기값은 `not_ready`이며, 
 
 면제 키는 코드 실제 분기축에 정렬한다. `broker_type ∈ {test, kis-domestic, mock}`이며 `virtual`은 `broker_type`이 아니라 `TradingMode` 값이다. `treasury_sync_ready`의 분기축은 `trading_mode`(VIRTUAL → broker=None Trade-DB sync / LIVE → get_broker 의존)이고, broker / fill / reconcile_ready의 분기축은 connect 성공 여부다.
 
-> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
-
 | broker_type | trading_mode | broker_ready | treasury_sync_ready | fill_reconcile_ready | reconcile_ready |
 |---|---|---|---|---|---|
 | test | virtual | 면제(항상 ready) | 요구 | 면제 | 면제 |

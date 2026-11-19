@@ -1348,3 +1348,118 @@ class TestAccountRepairTimezone:
         assert result.exit_code == 1
         assert "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER" in result.output
         mock_create.assert_not_called()
+
+
+@pytest.fixture
+def real_account_db(tmp_path):
+    """실제 AccountService를 임시 DB 위에 띄워 CLI에 주입한다."""
+    from contextlib import asynccontextmanager
+
+    from ante.account.service import AccountService
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+
+    db_path = str(tmp_path / "accounts.db")
+
+    @asynccontextmanager
+    async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+        db = Database(db_path)
+        await db.connect()
+        try:
+            svc = AccountService(db, EventBus())
+            await svc.initialize()
+            yield svc
+        finally:
+            await db.close()
+
+    with patch(
+        "ante.cli.commands.account._create_account_service", new=_create_service
+    ):
+        yield _create_service
+
+
+def _mock_create_args(
+    prices_file: str, *, trading_mode: str = "virtual", extra: list[str] | None = None
+) -> list[str]:
+    args = [
+        "--format",
+        "json",
+        "account",
+        "create",
+        "--broker-type",
+        "mock",
+        "--account-id",
+        "scenario",
+        "--name",
+        "시나리오",
+        "--trading-mode",
+        trading_mode,
+        "--broker-config",
+        f"prices_file={prices_file}",
+    ]
+    if extra:
+        args.extend(extra)
+    return args
+
+
+class TestAccountCreateMockBroker:
+    """``--broker-type mock`` 계좌 생성 CLI 경로."""
+
+    @pytest.fixture
+    def prices_file(self, tmp_path) -> str:
+        path = tmp_path / "prices.json"
+        path.write_text(json.dumps({"prices": {"000001": 72000}}), encoding="utf-8")
+        return str(path)
+
+    def test_virtual_create_succeeds_without_credentials(
+        self, real_account_db, offline_runtime, prices_file: str
+    ) -> None:
+        import asyncio
+
+        result = _invoke(_mock_create_args(prices_file))
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["status"] == "ok"
+        assert data["data"]["broker_type"] == "mock"
+        assert data["data"]["exchange"] == "TEST"
+
+        async def _load():
+            async with real_account_db() as svc:
+                return await svc.get("scenario")
+
+        account = asyncio.run(_load())
+        assert account.broker_type == "mock"
+        assert account.credentials == {}
+        assert account.broker_config == {"prices_file": prices_file}
+
+    def test_live_create_rejected_with_invalid_broker_type(
+        self, real_account_db, offline_runtime, prices_file: str
+    ) -> None:
+        result = _invoke(_mock_create_args(prices_file, trading_mode="live"))
+        assert result.exit_code == 1
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_INVALID_BROKER_TYPE"
+        assert "trading_mode" in data["message"]
+
+    @pytest.mark.parametrize(
+        "credential_args",
+        [
+            ["--credential", "app_key=K"],
+            ["--credential-env", "app_key=ANTE_TEST_MOCK_CRED"],
+        ],
+    )
+    def test_credential_input_rejected_with_unknown_key(
+        self,
+        real_account_db,
+        offline_runtime,
+        prices_file: str,
+        credential_args: list[str],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("ANTE_TEST_MOCK_CRED", "value")
+        result = _invoke(_mock_create_args(prices_file, extra=credential_args))
+        assert result.exit_code == 1
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_UNKNOWN_CREDENTIAL_KEY"

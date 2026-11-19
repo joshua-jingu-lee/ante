@@ -45,8 +45,6 @@ AccountService(db: Database, eventbus: EventBus)
 
 #### 가상 전용 브로커 타입
 
-> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
-
 `mock`은 가상 전용 브로커 타입이다. `(mock, live)` 조합은 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
 
 - **계좌 생성**: `_persist_account`(`create`와 seed가 공유하는 단일 지점)에서 거부한다. `trading_mode`와 `broker_type`은 불변 필드라 수정 경로는 따로 막지 않는다.

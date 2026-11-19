@@ -35,11 +35,13 @@ class InvalidBrokerTypeError(Exception):
 def _build_registry() -> dict[str, type[BrokerAdapter]]:
     """지연 import로 순환 의존을 방지하면서 레지스트리를 구축한다."""
     from ante.broker.kis import KISDomesticAdapter
+    from ante.broker.mock import MockBrokerAdapter
     from ante.broker.test import TestBrokerAdapter
 
     return {
         "test": TestBrokerAdapter,
         "kis-domestic": KISDomesticAdapter,
+        "mock": MockBrokerAdapter,
     }
 
 

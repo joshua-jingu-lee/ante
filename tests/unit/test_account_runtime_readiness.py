@@ -33,6 +33,14 @@ from ante.account.readiness import (
         ("kis-domestic", TradingMode.VIRTUAL, ReadinessFlag.FILL_RECONCILE, True),
         ("kis-domestic", TradingMode.VIRTUAL, ReadinessFlag.RECONCILE, True),
         ("kis-domestic", TradingMode.VIRTUAL, ReadinessFlag.TREASURY_SYNC, False),
+        ("mock", TradingMode.VIRTUAL, ReadinessFlag.BROKER, True),
+        ("mock", TradingMode.VIRTUAL, ReadinessFlag.FILL_RECONCILE, True),
+        ("mock", TradingMode.VIRTUAL, ReadinessFlag.RECONCILE, True),
+        ("mock", TradingMode.VIRTUAL, ReadinessFlag.TREASURY_SYNC, False),
+        ("mock", TradingMode.LIVE, ReadinessFlag.BROKER, False),
+        ("mock", TradingMode.LIVE, ReadinessFlag.FILL_RECONCILE, False),
+        ("mock", TradingMode.LIVE, ReadinessFlag.RECONCILE, False),
+        ("mock", TradingMode.LIVE, ReadinessFlag.TREASURY_SYNC, False),
         # kis-domestic/live: 전부 요구(면제 없음).
         ("kis-domestic", TradingMode.LIVE, ReadinessFlag.BROKER, False),
         ("kis-domestic", TradingMode.LIVE, ReadinessFlag.FILL_RECONCILE, False),
@@ -56,9 +64,9 @@ def test_exemption_matrix(
 def test_exemption_explicit_pairs_only_fail_closed() -> None:
     """broker/fill/reconcile 면제는 **명시 pair만**(fail-closed).
 
-    (test, virtual)·(kis-domestic, virtual) 만 면제. 미지정/신규 broker_type 은
-    virtual 이어도 비면제(요구) — trading_mode 만 보던 fail-open 회귀 방지
-    (Codex P2, [must_fix A]). 전 broker_type 의 live 도 비면제.
+    (test, virtual)·(kis-domestic, virtual)·(mock, virtual) 만 면제.
+    미지정/신규 broker_type 은 virtual 이어도 비면제(요구) — trading_mode 만 보던
+    fail-open 회귀 방지 (Codex P2, [must_fix A]). 전 broker_type 의 live 도 비면제.
     """
     bfr = (
         ReadinessFlag.BROKER,
@@ -73,12 +81,15 @@ def test_exemption_explicit_pairs_only_fail_closed() -> None:
         assert is_flag_exempt(
             flag, broker_type="kis-domestic", trading_mode=TradingMode.VIRTUAL
         )
+        assert is_flag_exempt(
+            flag, broker_type="mock", trading_mode=TradingMode.VIRTUAL
+        )
         # 미지정/신규 broker_type + virtual → fail-closed(비면제)
         assert not is_flag_exempt(
             flag, broker_type="future-broker", trading_mode=TradingMode.VIRTUAL
         )
         # 전 broker_type 의 live → 비면제(요구)
-        for bt in ("test", "kis-domestic", "future-broker"):
+        for bt in ("test", "kis-domestic", "mock", "future-broker"):
             assert not is_flag_exempt(
                 flag, broker_type=bt, trading_mode=TradingMode.LIVE
             )

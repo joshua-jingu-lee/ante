@@ -67,8 +67,6 @@ GBM 모델로 현실적 가격 변동을 시뮬레이션한다. 일별 변동성
 
 ## 브로커 타입 `mock`
 
-> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
-
 > 소스: [`src/ante/broker/mock.py`](../../../src/ante/broker/mock.py)
 
 `broker_type` `mock`은 `MockBrokerAdapter`를 만든다. 실행할 때마다 같은 가격을 내는 브로커로 가상 계좌의 시나리오를 검증하는 데 쓴다. 프리셋은 [06-broker-presets.md](06-broker-presets.md)를 따른다(거래소 `TEST`, 수수료 0, 필수 자격증명 없음).

@@ -24,7 +24,7 @@ from ante.account.errors import (
     MissingCredentialsError,
 )
 from ante.account.models import Account, AccountStatus, TradingMode
-from ante.account.presets import BROKER_PRESETS
+from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
@@ -93,10 +93,24 @@ def _register_brokers() -> None:
         return
 
     from ante.broker.kis import KISAdapter
+    from ante.broker.mock import MockBrokerAdapter
     from ante.broker.test import TestBrokerAdapter
 
     _BROKER_REGISTRY["test"] = TestBrokerAdapter
     _BROKER_REGISTRY["kis-domestic"] = KISAdapter
+    _BROKER_REGISTRY["mock"] = MockBrokerAdapter
+
+
+def _reject_virtual_only_broker_in_live(account: Account) -> None:
+    if (
+        account.broker_type in VIRTUAL_ONLY_BROKER_TYPES
+        and account.trading_mode != TradingMode.VIRTUAL
+    ):
+        raise InvalidBrokerTypeError(
+            f"broker_type '{account.broker_type}'은 가상 전용이라 "
+            f"trading_mode '{account.trading_mode.value}'와 함께 쓸 수 없습니다. "
+            "trading_mode 'virtual'로 만드세요."
+        )
 
 
 # Cold-path 전용 필드 (서버 실행 중에는 변경 불가).
@@ -406,6 +420,7 @@ class AccountService:
                 f"유효하지 않은 broker_type: '{account.broker_type}'. "
                 f"가능한 값: {list(BROKER_PRESETS.keys())}"
             )
+        _reject_virtual_only_broker_in_live(account)
 
         # credentials 필수 키 검증
         preset = BROKER_PRESETS[account.broker_type]
@@ -1111,6 +1126,7 @@ class AccountService:
         _register_brokers()
 
         account = await self.get(account_id)
+        _reject_virtual_only_broker_in_live(account)
         broker_cls = _BROKER_REGISTRY.get(account.broker_type)
         if broker_cls is None:
             raise InvalidBrokerTypeError(

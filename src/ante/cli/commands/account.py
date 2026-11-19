@@ -274,7 +274,7 @@ def _resolve_credentials(
     seen: dict[str, str] = {}
 
     def _set_or_dup(key: str, value: str, channel: str) -> None:
-        if required_set and key not in required_set:
+        if key not in required_set:
             _exit_with_error(
                 fmt,
                 "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",

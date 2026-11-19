@@ -138,8 +138,6 @@ class BrokerPreset:
 
 ### BROKER_PRESETS
 
-> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
-
 ```python
 BROKER_PRESETS: dict[str, BrokerPreset] = {
     "test": BrokerPreset(

@@ -1533,9 +1533,10 @@ async def test_db_persistence(db, eventbus):
 
 
 def test_broker_presets_defined():
-    """test, kis-domestic 프리셋이 정의되어 있음."""
+    """test, kis-domestic, mock 프리셋이 정의되어 있음."""
     assert "test" in BROKER_PRESETS
     assert "kis-domestic" in BROKER_PRESETS
+    assert "mock" in BROKER_PRESETS
 
 
 def test_broker_preset_test_values():
@@ -1560,6 +1561,22 @@ def test_broker_preset_kis_domestic_values():
     # #1333: market buy reserve buffer 기본값 0.5%.
     assert preset.market_order_reserve_buffer_rate == Decimal("0.005")
     assert "app_key" in preset.required_credentials
+
+
+def test_broker_preset_mock_values():
+    """mock 프리셋은 가상 전용 결정적 브로커의 기본값을 갖는다."""
+    preset = BROKER_PRESETS["mock"]
+    assert preset.exchange == "TEST"
+    assert preset.currency == "KRW"
+    assert preset.timezone == "Asia/Seoul"
+    assert preset.trading_hours_start == "00:00"
+    assert preset.trading_hours_end == "23:59"
+    assert preset.buy_commission_rate == Decimal("0")
+    assert preset.sell_commission_rate == Decimal("0")
+    assert preset.market_order_reserve_buffer_rate == Decimal("0")
+    assert preset.default_account_id == "mock"
+    assert preset.default_name == "모의"
+    assert preset.required_credentials == []
 
 
 # ── #1333: market_order_reserve_buffer_rate ──────────────
