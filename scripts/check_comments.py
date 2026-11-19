@@ -181,6 +181,11 @@ def read_baseline(root: Path) -> Measurement:
         raise CheckError(f"baseline file not found: {BASELINE_PATH}") from exc
     except (OSError, UnicodeDecodeError) as exc:
         raise CheckError(f"cannot read {BASELINE_PATH}: {exc}") from exc
+    return parse_baseline(text)
+
+
+def parse_baseline(text: str) -> Measurement:
+    """Validate baseline JSON text; raise ``CheckError`` when it is malformed."""
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
