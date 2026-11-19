@@ -244,6 +244,31 @@ def test_file_handler_mkdir_failure_does_not_break_stdout(
     assert not isinstance(root.handlers[0], TimedRotatingFileHandler)
 
 
+def test_file_handler_unrelated_exception_does_not_break_stdout(
+    monkeypatch: pytest.MonkeyPatch,
+    _cwd_tmp: Path,
+):
+    """OSError 계열 밖의 초기화 예외도 stdout 전용으로 흡수된다."""
+    monkeypatch.setenv("ANTE_LOG_JSONL", "1")
+
+    class _UnrelatedError(Exception):
+        pass
+
+    def _raise(*args, **kwargs):  # noqa: ANN002, ANN003
+        raise _UnrelatedError("unrelated")
+
+    import ante.core.log.handlers as handlers_mod
+
+    monkeypatch.setattr(handlers_mod, "DateNamedTimedRotatingFileHandler", _raise)
+
+    setup_logging(_StubConfig())
+
+    root = logging.getLogger()
+    assert len(root.handlers) == 1
+    assert isinstance(root.handlers[0], logging.StreamHandler)
+    assert not isinstance(root.handlers[0], TimedRotatingFileHandler)
+
+
 # ── 7. no-rename 회전 계약 검증 ─────────────────────────────
 
 # 회전 계약 (`docs/specs/logging/05-handlers-and-rotation.md`):

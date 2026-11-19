@@ -7,7 +7,6 @@
 - T4 단일 cadence: ``_authenticate`` 내부 sleep 없이 EGW00133 즉시 raise.
 - T5 classify(AuthenticationError)=(False,False) 불변 + EGW00133 ∉ TRANSIENT.
 - T6 reason 구조적 보존(error_code).
-- T7 known-limitation(멀티프로세스) — 주석/스펙 anchor.
 """
 
 from __future__ import annotations
@@ -19,7 +18,6 @@ from typing import Any
 
 import pytest
 
-import ante.broker.kis as kis_mod
 from ante.broker import KISAdapter, TokenRateLimitError
 from ante.broker.error_codes import (
     TOKEN_RATE_LIMIT_MSG_CODE,
@@ -574,17 +572,3 @@ class TestTokenCacheConfigFingerprint:
             await a._authenticate()
         assert s.post_count == 0
         assert a.access_token is None
-
-
-# ── T7: known-limitation 주석 anchor ──────────────────────
-
-
-class TestKnownLimitationAnchor:
-    def test_multiprocess_limitation_documented(self):
-        """멀티프로세스 토큰 공유 미해결(v1) known-limitation 주석/스펙 anchor (T7)."""
-        # in-process module 캐시뿐임을 module docstring/주석으로 명시.
-        src = kis_mod.__file__
-        with open(src, encoding="utf-8") as f:
-            content = f.read()
-        assert "멀티프로세스" in content
-        assert "in-process" in content

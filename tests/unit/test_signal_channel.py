@@ -237,6 +237,27 @@ class TestHandleErrors:
         await channel._handle_line("")
         await channel._handle_line("  ")
 
+    async def test_signal_handler_unrelated_exception_becomes_error_frame(
+        self, channel: SignalChannel, eventbus: MagicMock, output: io.StringIO
+    ) -> None:
+        """시그널 처리 중 어떤 예외도 error 프레임으로 끝나고 전파되지 않는다."""
+
+        class _UnrelatedError(Exception):
+            pass
+
+        eventbus.publish = AsyncMock(side_effect=_UnrelatedError("bus down"))
+        msg = json.dumps({"type": "signal", "symbol": "005930", "side": "buy"})
+
+        await channel._handle_line(msg)
+
+        resp = json.loads(output.getvalue().strip())
+        assert resp == {"type": "error", "message": "bus down"}
+
+        await channel._handle_line(json.dumps({"type": "ping"}))
+        assert json.loads(output.getvalue().strip().splitlines()[-1]) == {
+            "type": "pong"
+        }
+
 
 class TestEventForwarding:
     """Ante → 외부 이벤트 전달 테스트."""

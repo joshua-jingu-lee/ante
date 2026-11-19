@@ -1690,3 +1690,124 @@ class TestReasonFailClosed:
         assert cap.approved == []
         treasury.reserve_for_order.assert_not_called()  # reserve 누수 없음(G3).
         assert _notif_count(cap) == 1  # G6 알림 1회(누락 없음).
+
+
+class _UnrelatedError(Exception):
+    pass
+
+
+class _UnrelatedErrorRegistry:
+    def is_ready(self, account_id: str, flag: object) -> bool:
+        raise _UnrelatedError("unrelated")
+
+    def active_trading_ready(
+        self, account_id: str, *, broker_type: str, trading_mode: object
+    ) -> bool:
+        raise _UnrelatedError("unrelated")
+
+
+class TestFailClosedOnUnrelatedExceptionType:
+    """조회 경로가 어떤 ``Exception`` 하위 타입을 던져도 차단 쪽으로 끝난다."""
+
+    async def test_resolve_account_status_unavailable_on_unrelated_exception(
+        self,
+    ) -> None:
+        from ante.account.gate import STATUS_UNAVAILABLE, resolve_account_status
+
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=_UnrelatedError("unrelated"))
+        assert await resolve_account_status(svc, ACCOUNT) is STATUS_UNAVAILABLE
+
+    def test_not_ready_reason_bare_on_unrelated_exception(self) -> None:
+        from ante.account.gate import ACCOUNT_NOT_READY_REASON, not_ready_reason
+
+        reason = not_ready_reason(
+            _UnrelatedErrorRegistry(),  # type: ignore[arg-type]
+            ACCOUNT,
+            broker_type="kis-domestic",
+            trading_mode=TradingMode.LIVE,
+        )
+        assert reason == ACCOUNT_NOT_READY_REASON
+
+    def test_active_trading_blocked_on_unrelated_exception(self) -> None:
+        from ante.account.gate import active_trading_blocked
+
+        assert (
+            active_trading_blocked(
+                _UnrelatedErrorRegistry(),  # type: ignore[arg-type]
+                ACCOUNT,
+                broker_type="kis-domestic",
+                trading_mode=TradingMode.LIVE,
+            )
+            is True
+        )
+
+    async def test_rule_engine_meta_fetch_unrelated_exception_rejects(self) -> None:
+        bus = EventBus()
+        cap = _capture(bus)
+        active = make_account(ACCOUNT, status=AccountStatus.ACTIVE)
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=[active, _UnrelatedError("unrelated")])
+        engine = RuleEngine(
+            eventbus=bus,
+            account_id=ACCOUNT,
+            account_service=svc,
+            account=None,
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        await engine._on_order_request(_request(order_type="limit"))
+
+        assert svc.get.await_count == 2
+        assert len(cap.rejected) == 1
+        assert (
+            cap.rejected[0].reason == "account_not_ready: account_metadata_unavailable"
+        )
+        assert cap.validated == []
+        assert _notif_count(cap) == 1
+
+    async def test_gateway_account_fetch_unrelated_exception_fails_order(
+        self,
+    ) -> None:
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = MagicMock()
+        broker.place_order = AsyncMock(return_value="BRK-1")
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=_UnrelatedError("unrelated"))
+        svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(
+            account_service=svc,
+            eventbus=bus,
+            runtime_readiness=ready_registry(ACCOUNT),
+        )
+        await gw._on_order_approved(_approved())
+
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_status_unavailable"
+        broker.place_order.assert_not_called()
+        assert _notif_count(cap) == 1
+
+    async def test_virtual_executor_account_fetch_unrelated_exception_fails_order(
+        self,
+    ) -> None:
+        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=_UnrelatedError("unrelated"))
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+        await executor._on_order_approved(_approved())
+
+        assert cap.filled == []
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_status_unavailable"
+        assert _notif_count(cap) == 1
