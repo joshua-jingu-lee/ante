@@ -122,9 +122,7 @@ class NotificationService:
         """중복 방지 키 생성: level + message_hash."""
         import hashlib
 
-        msg_hash = hashlib.md5(  # noqa: S324
-            message.encode()
-        ).hexdigest()[:12]
+        msg_hash = hashlib.md5(message.encode()).hexdigest()[:12]
         return f"{level}:{msg_hash}"
 
     def _check_dedup(self, level: NotificationLevel, message: str) -> str | object:

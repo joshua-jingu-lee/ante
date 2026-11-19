@@ -36,7 +36,7 @@ def snapshot_dependencies(version: str, db_dir: Path | None = None) -> Path | No
         db_dir = Path("db")
     db_dir.mkdir(parents=True, exist_ok=True)
 
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "pip", "freeze"],
         capture_output=True,
         text=True,
@@ -58,7 +58,7 @@ def pip_upgrade(version: str | None = None) -> bool:
         cmd.append(f"ante=={version}")
     else:
         cmd.append("ante")
-    result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         logger.error("pip upgrade 실패: %s", result.stderr)
         return False
@@ -90,7 +90,7 @@ def run_post_update_migrations(
         env["ANTE_DB_PATH"] = db_path
     if data_path:
         env["ANTE_DATA_PATH"] = data_path
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "ante.db.migrations"],
         capture_output=True,
         text=True,
@@ -119,7 +119,7 @@ def rollback_update(
     success = True
 
     # pip 다운그레이드
-    result = subprocess.run(  # noqa: S603
+    result = subprocess.run(
         [sys.executable, "-m", "pip", "install", f"ante=={previous_version}"],
         capture_output=True,
         text=True,

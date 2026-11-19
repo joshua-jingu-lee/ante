@@ -26,7 +26,7 @@ def config() -> None:
     """설정 조회·변경."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 
@@ -76,7 +76,7 @@ async def _create_services(
         yield static_config, dynamic, db
 
 
-async def _resolve_single(key, static_config, dynamic) -> dict:  # noqa: ANN001
+async def _resolve_single(key, static_config, dynamic) -> dict:
     """단일 키 설정값 조회."""
     if await dynamic.exists(key):
         value = await dynamic.get(key)
@@ -87,7 +87,7 @@ async def _resolve_single(key, static_config, dynamic) -> dict:  # noqa: ANN001
     return {"key": key, "value": None, "source": "not_found"}
 
 
-async def _resolve_all(static_config, db) -> list[dict]:  # noqa: ANN001
+async def _resolve_all(static_config, db) -> list[dict]:
     """전체 설정 목록 조회."""
     from ante.config.defaults import DEFAULTS
 
@@ -110,7 +110,7 @@ async def _resolve_all(static_config, db) -> list[dict]:  # noqa: ANN001
     return results
 
 
-def _render_single(result: dict, fmt) -> None:  # noqa: ANN001
+def _render_single(result: dict, fmt) -> None:
     """단일 설정 결과 출력 (missing은 caller에서 처리).
 
     note: missing-resource (`source == "not_found"`) 분기는 caller(`config_get`)가
@@ -124,7 +124,7 @@ def _render_single(result: dict, fmt) -> None:  # noqa: ANN001
         )
 
 
-def _render_list(result: list[dict], fmt) -> None:  # noqa: ANN001
+def _render_list(result: list[dict], fmt) -> None:
     """설정 목록 출력."""
     if fmt.is_json:
         fmt.output({"configs": result})

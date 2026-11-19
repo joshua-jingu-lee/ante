@@ -18,11 +18,11 @@ def broker() -> None:
     """증권사 계좌 정보 조회."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 
-async def _create_account_service():  # noqa: ANN202
+async def _create_account_service():
     # broker live-state 경로 (adapter.connect 동반) 는 별도 epic scope.
     # live broker state 와 ``Database`` lifecycle 이 같은 try/except 로 엮여
     # 있어 단순 ``open_cli_db`` wrap 으로 동치 변환이 불가능하다 — 별도 spec
@@ -40,7 +40,7 @@ async def _create_account_service():  # noqa: ANN202
     return account_service, db
 
 
-async def _get_broker(account_id: str | None = None):  # noqa: ANN202
+async def _get_broker(account_id: str | None = None):
     """AccountService를 통해 브로커 어댑터를 획득한다.
 
     account_id가 None이면 기존 Config 기반 폴백을 사용한다.

@@ -66,7 +66,7 @@ def setup_logging(config: Any) -> None:
             )
             file_handler.setFormatter(JsonFormatter())
             root.addHandler(file_handler)
-        except Exception as err:  # noqa: BLE001 — 로깅 실패는 전체 흡수
+        except Exception as err:
             # 부팅 차단을 막기 위해 예외를 흡수하고 stdout 핸들러만 유지한다.
             logging.getLogger(__name__).warning(
                 "JSONL 파일 핸들러 초기화 실패 — stdout 전용으로 계속 진행: %s", err

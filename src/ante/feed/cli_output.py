@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 
 def format_backfill_result(
     result: CollectionResult,
-    fmt: Any,  # OutputFormatter  # noqa: ANN401
+    fmt: Any,  # OutputFormatter
 ) -> None:
     """Backfill 결과를 text 또는 JSON으로 출력한다."""
     if fmt.is_json:
@@ -26,7 +26,7 @@ def format_backfill_result(
 
 def format_daily_result(
     result: CollectionResult,
-    fmt: Any,  # OutputFormatter  # noqa: ANN401
+    fmt: Any,  # OutputFormatter
 ) -> None:
     """Daily 결과를 text 또는 JSON으로 출력한다."""
     if fmt.is_json:

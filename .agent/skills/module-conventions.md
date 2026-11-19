@@ -255,14 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_{테이블명}_name
 
 ### 보존 정책 (선택)
 
-보존 정책이 있는 테이블은 DDL 앞에 주석으로 명시:
-
-```sql
--- retention: 90d
-CREATE TABLE IF NOT EXISTS trade_logs (
-    ...
-);
-```
+보존 정책이 있는 테이블은 `scripts/generate_db_schema.py`의 `RETENTION_POLICIES`에 테이블명과 정책 문자열(예: `"30일 후 삭제"`)로 등록한다. 생성기가 이를 `db-schema.md`의 보존 정책 표로 내며, 등록하지 않은 테이블은 `영구 보존`으로 표기된다.
 
 ## 12. CLI/IPC 응답 규칙
 

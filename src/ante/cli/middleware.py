@@ -130,7 +130,7 @@ def _run_authenticate(token: str, db_path: str) -> Member:
         db = Database(db_path)
         try:
             await db.connect()
-        except Exception as e:  # noqa: BLE001 — sqlite/OS 오류 통일 처리
+        except Exception as e:
             # connect 실패 경로에서도 ``db.close()`` 를 보장한다. ``connect()`` 가
             # 부분적으로 성공(writer만 열림)한 뒤 raise되면 aiosqlite worker
             # thread가 leak되어, JSON envelope 출력 **이후** ``asyncio.run`` 종료

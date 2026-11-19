@@ -31,7 +31,7 @@ def system() -> None:
     """시스템 시작·중지·상태 확인."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 

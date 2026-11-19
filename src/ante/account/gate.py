@@ -122,7 +122,7 @@ async def resolve_account_status(
         return STATUS_UNAVAILABLE
     try:
         fetched = await get(account_id)
-    except Exception:  # noqa: BLE001 — live 실패 = 검증 불가(fail-closed).
+    except Exception:
         return derive_account_status(account_service, None, fetch_failed=True)
     return derive_account_status(account_service, fetched, fetch_failed=False)
 
@@ -182,7 +182,7 @@ def not_ready_reason(
                 continue
             if registry is None or not registry.is_ready(account_id, flag):
                 missing.append(flag.value)
-    except Exception:  # noqa: BLE001 — reason 산출 예외도 fail-closed(bare reason).
+    except Exception:
         return ACCOUNT_NOT_READY_REASON
     if missing:
         return f"{ACCOUNT_NOT_READY_REASON}: {', '.join(missing)}"
@@ -208,7 +208,7 @@ def active_trading_blocked(
         return not registry.active_trading_ready(
             account_id, broker_type=broker_type, trading_mode=trading_mode
         )
-    except Exception:  # noqa: BLE001 — 조회 예외도 fail-closed 차단(G2).
+    except Exception:
         return True
 
 

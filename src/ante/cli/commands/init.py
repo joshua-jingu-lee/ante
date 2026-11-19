@@ -289,7 +289,7 @@ def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
     return effective_key
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
 
@@ -358,7 +358,7 @@ async def _master_exists_in_db(db_path: str) -> bool:
     db = Database(db_path)
     try:
         await db.connect()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
     try:
         try:
@@ -366,7 +366,7 @@ async def _master_exists_in_db(db_path: str) -> bool:
                 "SELECT member_id FROM members WHERE role = ? LIMIT 1",
                 ("master",),
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             # members 테이블이 아직 없을 수 있음 (orphan DB)
             return False
         return row is not None
@@ -395,7 +395,7 @@ async def _test_account_state(
     db = Database(db_path)
     try:
         await db.connect()
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "missing"
     try:
         try:
@@ -403,7 +403,7 @@ async def _test_account_state(
                 "SELECT status FROM accounts WHERE account_id = ? LIMIT 1",
                 ("test",),
             )
-        except Exception:  # noqa: BLE001
+        except Exception:
             # accounts 테이블이 아직 없을 수 있음 (orphan DB)
             return "missing"
         if row is None:
@@ -635,7 +635,7 @@ def init(
     if not test_account_exists:
         try:
             test_account = _run(_create_test_account(str(db_path)))
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             if master_info:
                 # master는 이미 생성됐다. JSON 모드라면 stdout은 에러 payload가
                 # 쓰이므로 stderr에 복구용 이벤트를 1회 내보낸다. text 모드는

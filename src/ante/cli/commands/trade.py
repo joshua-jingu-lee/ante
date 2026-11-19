@@ -27,7 +27,7 @@ def trade() -> None:
     """거래 내역 조회."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 

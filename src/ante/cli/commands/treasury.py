@@ -40,7 +40,7 @@ def treasury() -> None:
     """자금 현황 조회·관리."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 
@@ -633,7 +633,7 @@ def portfolio() -> None:
     """포트폴리오 가치와 추이 조회."""
 
 
-def _portfolio_value_from_snapshot_or_summary(treasury_obj) -> dict:  # noqa: ANN001
+def _portfolio_value_from_snapshot_or_summary(treasury_obj) -> dict:
     async def _inner() -> dict:
         snapshot = await treasury_obj.get_latest_snapshot()
         if snapshot is not None:

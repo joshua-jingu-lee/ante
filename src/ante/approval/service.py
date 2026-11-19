@@ -710,7 +710,7 @@ class ApprovalService:
 
         where = " AND ".join(conditions) if conditions else "1=1"
         query = (
-            f"SELECT * FROM approvals WHERE {where}"  # noqa: S608
+            f"SELECT * FROM approvals WHERE {where}"
             " ORDER BY created_at DESC"
             " LIMIT ? OFFSET ?"
         )
@@ -741,7 +741,7 @@ class ApprovalService:
             params.extend([like_pattern, like_pattern])
 
         where = " AND ".join(conditions) if conditions else "1=1"
-        query = f"SELECT COUNT(*) AS cnt FROM approvals WHERE {where}"  # noqa: S608
+        query = f"SELECT COUNT(*) AS cnt FROM approvals WHERE {where}"
 
         row = await self._db.fetch_one(query, tuple(params))
         return row["cnt"] if row else 0
@@ -772,10 +772,7 @@ class ApprovalService:
             params.append(status)
 
         where = " AND ".join(conditions)
-        query = (
-            f"SELECT * FROM approvals WHERE {where} "  # noqa: S608
-            "ORDER BY created_at DESC"
-        )
+        query = f"SELECT * FROM approvals WHERE {where} ORDER BY created_at DESC"
 
         rows = await self._db.fetch_all(query, tuple(params))
         return [self._row_to_request(row) for row in rows]

@@ -180,7 +180,7 @@ class SignalChannel:
                 self._emit({"type": "pong"})
             else:
                 self._emit({"type": "error", "message": f"Unknown type: {msg_type}"})
-        except Exception as e:  # noqa: BLE001 — daemon read loop 비전파 격리.
+        except Exception as e:
             self._emit({"type": "error", "message": str(e)})
 
     async def _handle_signal(self, msg: dict[str, Any]) -> None:

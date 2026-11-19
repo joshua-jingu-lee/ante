@@ -746,7 +746,8 @@ tests/
 │   ├── test_check_review_scope.py
 │   ├── test_check_prose_budget.py
 │   ├── test_collect_autopilot_queue.py
-│   └── test_block_pytest_pipe.py
+│   ├── test_block_pytest_pipe.py
+│   └── test_check_comments.py
 ├── __init__.py
 └── integration/
     ├── __init__.py
@@ -788,7 +789,9 @@ scripts/
 ├── scan_create_services_anti_pattern.py
 ├── check_review_scope.py
 ├── check_prose_budget.py
-└── collect_autopilot_queue.py
+├── collect_autopilot_queue.py
+├── check_comments.py
+└── comment_baseline.json
 ```
 
 ## docs/ — 설계 문서

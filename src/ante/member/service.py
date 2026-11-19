@@ -223,7 +223,7 @@ class MemberService:
         for migration in (_EMOJI_MIGRATION, _TOKEN_EXPIRES_MIGRATION):
             try:
                 await self._db.execute(migration)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 pass  # 컬럼이 이미 존재하면 무시
         logger.info("MemberService 초기화 완료")
 
@@ -546,7 +546,7 @@ class MemberService:
         params.extend([limit, offset])
 
         rows = await self._db.fetch_all(
-            f"SELECT * FROM members{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",  # noqa: S608
+            f"SELECT * FROM members{where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
             tuple(params),
         )
         return [_row_to_member(row) for row in rows]
@@ -573,7 +573,7 @@ class MemberService:
 
         where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
         row = await self._db.fetch_one(
-            f"SELECT COUNT(*) AS cnt FROM members{where}",  # noqa: S608
+            f"SELECT COUNT(*) AS cnt FROM members{where}",
             tuple(params),
         )
         return row["cnt"] if row else 0
@@ -599,7 +599,7 @@ class MemberService:
         valid = tuple(member.value for member in MemberRole)
         placeholders = ",".join("?" for _ in valid)
         rows = await self._db.fetch_all(
-            "SELECT * FROM members "  # noqa: S608
+            "SELECT * FROM members "
             f"WHERE role NOT IN ({placeholders}) "
             "ORDER BY created_at ASC, member_id ASC",
             valid,

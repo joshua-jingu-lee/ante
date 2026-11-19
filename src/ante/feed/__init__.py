@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 __all__ = ["FeedConfig", "FeedInjector"]
 
 
-def __getattr__(name: str):  # noqa: ANN001, ANN202
+def __getattr__(name: str):
     if name == "FeedInjector":
         from ante.feed.injector import FeedInjector
 

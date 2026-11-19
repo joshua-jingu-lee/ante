@@ -17,7 +17,7 @@ def audit() -> None:
     """감사 로그 조회."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 

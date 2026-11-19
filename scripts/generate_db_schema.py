@@ -194,10 +194,6 @@ _REFERENCES_RE = re.compile(
     r"REFERENCES\s+(\w+)\s*\(\s*(\w+)\s*\)",
     re.IGNORECASE,
 )
-_RETENTION_COMMENT_RE = re.compile(
-    r"--\s*retention:\s*(\S+)",
-    re.IGNORECASE,
-)
 
 
 def _module_name_from_path(module_path: str) -> str:

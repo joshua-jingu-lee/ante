@@ -85,7 +85,7 @@ class APIGateway:
             return None, False
         try:
             return await get(account_id), False
-        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed(G2)·검증 불가.
+        except Exception:
             return None, True
 
     async def _readiness_gate(self, account_id: str, *, side: object) -> None:

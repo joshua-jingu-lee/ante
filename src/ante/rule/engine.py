@@ -156,7 +156,7 @@ def _safe_str(value: object) -> str:
         return value
     try:
         return repr(value)
-    except Exception:  # noqa: BLE001
+    except Exception:
         # 사용자 정의 ``__repr__``이 임의의 예외를 던질 수 있으므로
         # ``BaseException``을 제외한 모든 예외를 잡아 placeholder로 떨어뜨린다.
         # builder가 절대 raise하지 않는 invariant 유지.
@@ -176,7 +176,7 @@ def _safe_repr(value: object) -> str:
     """
     try:
         return repr(value)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return f"<unrenderable {type(value).__name__}>"
 
 
@@ -192,10 +192,10 @@ def _safe_order_id(value: object) -> str:
         return value
     try:
         return str(value)
-    except Exception:  # noqa: BLE001
+    except Exception:
         try:
             return repr(value)
-        except Exception:  # noqa: BLE001
+        except Exception:
             return f"<unrenderable {type(value).__name__}>"
 
 
@@ -768,7 +768,7 @@ class RuleEngine:
             return None
         try:
             fetched = await self._account_service.get(self._account_id)
-        except Exception:  # noqa: BLE001 — 조회 실패 = fail-closed 차단(G2).
+        except Exception:
             return None
         broker_type = getattr(fetched, "broker_type", None)
         trading_mode = getattr(fetched, "trading_mode", None)
@@ -1371,7 +1371,7 @@ class RuleEngine:
                 )
                 await self._execute_actions(result.actions, event)
 
-        except Exception:  # noqa: BLE001
+        except Exception:
             # catch-all (#1302 메타 리뷰 invariant): preflight 게이트나 evaluate
             # 단계 어디에서든 raise가 일어나도 audit trail이 fail-closed로
             # 잠기도록 generic reject를 강제 발행한다. builder는 절대 raise하지
@@ -1389,7 +1389,7 @@ class RuleEngine:
                         reason="OrderRequest preflight error (see logs)",
                     )
                 )
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception(
                     "Failed to publish safe-fallback OrderRejectedEvent: event_id=%s",
                     getattr(event, "event_id", "<unknown>"),

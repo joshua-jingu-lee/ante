@@ -156,7 +156,7 @@ class RuleEngineManager:
             if dynamic_config is not None:
                 try:
                     dyn_rules = await dynamic_config.get(key, default=None)
-                except Exception:  # noqa: BLE001 — DynamicConfig 백엔드 불일치 fallback
+                except Exception:
                     dyn_rules = None
                 if isinstance(dyn_rules, list):
                     stored_rules = dyn_rules

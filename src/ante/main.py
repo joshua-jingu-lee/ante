@@ -707,7 +707,7 @@ async def _init_trading(s: Services) -> None:
     logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(accounts))
 
     # BotManager
-    from ante.bot import BotManager  # noqa: F401
+    from ante.bot import BotManager
     from ante.bot.providers.virtual import VirtualExecutor
     from ante.bot.signal_key import SignalKeyManager
     from ante.strategy.snapshot import StrategySnapshot

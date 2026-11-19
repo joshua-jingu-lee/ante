@@ -31,7 +31,7 @@ def rule() -> None:
     """거래 룰 조회·관리."""
 
 
-def _run(coro):  # noqa: ANN001, ANN202
+def _run(coro):
     return asyncio.run(coro)
 
 
@@ -119,7 +119,7 @@ async def _create_rule_engine(
         yield engine, db
 
 
-def _load_rules_from_config(engine) -> None:  # noqa: ANN001
+def _load_rules_from_config(engine) -> None:
     """설정 파일에서 룰을 로딩."""
     from ante.cli.main import get_config_dir
     from ante.config.config import Config
@@ -135,7 +135,7 @@ def _load_rules_from_config(engine) -> None:  # noqa: ANN001
             engine.load_strategy_rules_from_config(strategy_id, rules)
 
 
-def _collect_rules(engine) -> list[dict]:  # noqa: ANN001
+def _collect_rules(engine) -> list[dict]:
     """엔진에서 전체 룰 목록 수집."""
     rules = []
     for r in engine._global_rules:
