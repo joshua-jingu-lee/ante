@@ -239,7 +239,7 @@ def baseline_lowered(old: bytes, new: bytes) -> bool:
             and _not_above(after.docstring_history, before.docstring_history)
             and after.docstring_lines <= before.docstring_lines
         )
-    except Exception:
+    except (Exception, SystemExit):
         return False
 
 

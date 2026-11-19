@@ -537,6 +537,33 @@ def test_baseline_parser_load_failure_is_not_lowered(
     assert not scope.baseline_lowered(BASE_BASELINE.encode(), EMPTY_BASELINE.encode())
 
 
+def test_baseline_parser_exit_zero_requires_review(repo: Repo, tmp_path: Path) -> None:
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "check_review_scope.py"
+    script.write_bytes(SCRIPT.read_bytes())
+    (tools / "check_comments.py").write_text(
+        "import sys\n\n\ndef parse_baseline(text):\n    sys.exit(0)\n",
+        encoding="utf-8",
+    )
+    repo.write(BASELINE, BASE_BASELINE)
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(BASELINE, EMPTY_BASELINE)
+    repo.commit("lower baseline")
+    result = subprocess.run(
+        [sys.executable, str(script), "--base", repo.base, "--head", "HEAD"],
+        cwd=repo.root,
+        env=repo.env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tM\t{BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
 def test_baseline_load_removes_its_module_name() -> None:
     assert scope.baseline_lowered(BASE_BASELINE.encode(), BASE_BASELINE.encode())
     assert "_check_review_scope_comments" not in sys.modules
