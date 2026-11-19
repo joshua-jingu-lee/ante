@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -392,3 +393,216 @@ def test_bad_ref_is_undecidable(repo: Repo) -> None:
     result = repo.check()
     assert result.returncode == 2
     assert "verdict: ERROR" in result.stderr
+
+
+# ── 기준선 감소 ──────────────────────────────────────────────
+
+BASELINE = "scripts/comment_baseline.json"
+
+
+def _baseline_json(
+    comments: dict[str, int] | None = None,
+    history: dict[str, int] | None = None,
+    lines: int = 10,
+) -> str:
+    return json.dumps(
+        {
+            "comments": {"src/ante/a.py": 3, "src/ante/b.py": 2}
+            if comments is None
+            else comments,
+            "docstring_history": {"src/ante/a.py": 1} if history is None else history,
+            "docstring_lines": lines,
+        },
+        indent=2,
+    )
+
+
+BASE_BASELINE = _baseline_json()
+EMPTY_BASELINE = _baseline_json(comments={}, history={}, lines=0)
+
+BASELINE_CASES = [
+    pytest.param(
+        _baseline_json(comments={"src/ante/a.py": 1, "src/ante/b.py": 2}),
+        True,
+        id="decrease",
+    ),
+    pytest.param(_baseline_json(comments={"src/ante/a.py": 3}), True, id="key-removed"),
+    pytest.param(EMPTY_BASELINE, True, id="emptied"),
+    pytest.param(BASE_BASELINE + "\n", True, id="values-equal"),
+    pytest.param(
+        _baseline_json(comments={"src/ante/a.py": 4, "src/ante/b.py": 1}),
+        False,
+        id="value-increase",
+    ),
+    pytest.param(
+        _baseline_json(history={"src/ante/a.py": 2}), False, id="history-increase"
+    ),
+    pytest.param(
+        _baseline_json(comments={"src/ante/a.py": 1, "src/ante/c.py": 1}),
+        False,
+        id="new-key",
+    ),
+    pytest.param(
+        _baseline_json(history={"src/ante/b.py": 1}), False, id="new-history-key"
+    ),
+    pytest.param(_baseline_json(lines=11), False, id="docstring-lines-increase"),
+    pytest.param("{not json", False, id="head-broken-json"),
+    pytest.param(
+        _baseline_json(comments={"src/ante/a.py": 0}), False, id="head-zero-value"
+    ),
+    pytest.param(
+        json.dumps({"comments": {}, "docstring_history": {}}),
+        False,
+        id="head-missing-key",
+    ),
+    pytest.param(
+        json.dumps(
+            {
+                "comments": {},
+                "docstring_history": {},
+                "docstring_lines": 0,
+                "extra": {},
+            }
+        ),
+        False,
+        id="head-extra-key",
+    ),
+]
+
+
+@pytest.mark.parametrize(("head", "lowered"), BASELINE_CASES)
+def test_baseline_lowered_in_process(head: str, lowered: bool) -> None:
+    assert scope.baseline_lowered(BASE_BASELINE.encode(), head.encode()) is lowered
+
+
+@pytest.mark.parametrize(("head", "lowered"), BASELINE_CASES)
+def test_baseline_lowered_subprocess(repo: Repo, head: str, lowered: bool) -> None:
+    repo.write(BASELINE, BASE_BASELINE)
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(BASELINE, head)
+    repo.commit("change baseline")
+    result = repo.check()
+    if lowered:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"baseline-lowered\tM\t{BASELINE}" in result.stdout
+        assert "verdict: SKIP (baseline-lowered)" in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"review\tM\t{BASELINE}" in result.stdout
+
+
+def test_baseline_path_matches_comment_checker() -> None:
+    checker_path = REPO_ROOT / "scripts" / "check_comments.py"
+    spec = importlib.util.spec_from_file_location("_baseline_path_probe", checker_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    assert module.BASELINE_PATH.as_posix() == scope.COMMENT_BASELINE_PATH == BASELINE
+    assert scope.CHECK_COMMENTS_PATH == checker_path
+
+
+@pytest.mark.parametrize(
+    "old",
+    [
+        pytest.param(b"{not json", id="base-broken-json"),
+        pytest.param(b'{"comments": {}}', id="base-missing-key"),
+        pytest.param("﻿".encode() + BASE_BASELINE.encode(), id="base-bom"),
+        pytest.param(b"\xff\xfe", id="base-not-utf8"),
+    ],
+)
+def test_malformed_base_baseline_is_not_lowered(old: bytes) -> None:
+    assert not scope.baseline_lowered(old, EMPTY_BASELINE.encode())
+
+
+def test_malformed_base_baseline_requires_review(repo: Repo) -> None:
+    repo.write(BASELINE, '{"comments": {}}')
+    repo.commit("bad baseline")
+    repo.mark_base()
+    repo.write(BASELINE, EMPTY_BASELINE)
+    repo.commit("fix baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{BASELINE}" in result.stdout
+
+
+def test_baseline_parser_load_failure_is_not_lowered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "CHECK_COMMENTS_PATH", tmp_path / "missing.py")
+    assert not scope.baseline_lowered(BASE_BASELINE.encode(), EMPTY_BASELINE.encode())
+
+
+def test_baseline_load_leaves_sys_modules_unchanged() -> None:
+    before = set(sys.modules)
+    assert scope.baseline_lowered(BASE_BASELINE.encode(), BASE_BASELINE.encode())
+    assert set(sys.modules) == before
+
+
+def test_baseline_added_or_deleted_requires_review(repo: Repo) -> None:
+    repo.write(BASELINE, BASE_BASELINE)
+    repo.commit("add baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tA\t{BASELINE}" in result.stdout
+
+    repo.mark_base()
+    repo.git("rm", "-q", BASELINE)
+    repo.commit("delete baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tD\t{BASELINE}" in result.stdout
+
+
+def test_baseline_mode_change_requires_review(repo: Repo) -> None:
+    repo.write(BASELINE, BASE_BASELINE)
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(BASELINE, EMPTY_BASELINE)
+    repo.git("add", BASELINE)
+    repo.git("update-index", "--chmod=+x", BASELINE)
+    repo.git("commit", "-q", "-m", "lower and chmod")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{BASELINE}" in result.stdout
+
+
+def test_baseline_elsewhere_requires_review(repo: Repo) -> None:
+    other = "scripts/sub/comment_baseline.json"
+    repo.write(other, BASE_BASELINE)
+    repo.commit("baseline copy")
+    repo.mark_base()
+    repo.write(other, EMPTY_BASELINE)
+    repo.commit("lower copy")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{other}" in result.stdout
+
+
+def test_comment_removal_with_lowered_baseline_skips(repo: Repo) -> None:
+    repo.write(BASELINE, _baseline_json(comments={"src/ante/m.py": 2}, history={}))
+    _with_src(repo)
+    repo.write("src/ante/m.py", SRC.replace("    # inline note\n", ""))
+    repo.write(BASELINE, _baseline_json(comments={"src/ante/m.py": 1}, history={}))
+    repo.commit("drop comment")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ast-identical\tM\tsrc/ante/m.py" in result.stdout
+    assert f"baseline-lowered\tM\t{BASELINE}" in result.stdout
+    assert "verdict: SKIP (ast-identical, baseline-lowered)" in result.stdout
+
+
+def test_comment_addition_with_raised_baseline_requires_review(repo: Repo) -> None:
+    repo.write(BASELINE, _baseline_json(comments={"src/ante/m.py": 2}, history={}))
+    _with_src(repo)
+    repo.write("src/ante/m.py", SRC.replace("return 1", "return 1  # new note"))
+    repo.write(BASELINE, _baseline_json(comments={"src/ante/m.py": 3}, history={}))
+    repo.commit("add comment")
+    result = repo.check()
+    assert result.returncode == 1
+    assert "ast-identical\tM\tsrc/ante/m.py" in result.stdout
+    assert f"review\tM\t{BASELINE}" in result.stdout

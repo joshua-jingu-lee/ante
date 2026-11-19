@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Decide whether a branch diff can skip Gate A (branch review).
 
-Exit 0: every changed file is a doc path or an AST-identical ``src/`` file.
+Exit 0: every changed file is a doc path, an AST-identical ``src/`` file, or
+the comment baseline with no value above base.
 Exit 1: at least one file needs review, or the diff is empty.
 Exit 2: the decision could not be made (git failure, bad ref).
 
@@ -12,20 +13,26 @@ from __future__ import annotations
 
 import argparse
 import ast
+import importlib.util
 import os
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
 DOC = "doc"
 AST_IDENTICAL = "ast-identical"
+BASELINE_LOWERED = "baseline-lowered"
 REVIEW = "review"
 
 DOC_PREFIXES = ("docs/", ".agent/", "guide/")
 REGULAR_MODES = frozenset({"100644", "100755"})
 ABSENT_MODE = "000000"
 DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+COMMENT_BASELINE_PATH = "scripts/comment_baseline.json"
+CHECK_COMMENTS_PATH = Path(__file__).with_name("check_comments.py")
 
 
 class ScopeError(RuntimeError):
@@ -159,13 +166,50 @@ def classify_without_content(change: Change) -> str | None:
         return DOC if _modes_ok_for_doc(change) else REVIEW
     if (
         change.status == "M"
-        and change.path.startswith("src/")
-        and change.path.endswith(".py")
+        and (
+            (change.path.startswith("src/") and change.path.endswith(".py"))
+            or change.path == COMMENT_BASELINE_PATH
+        )
         and change.old_mode == change.new_mode
         and change.new_mode in REGULAR_MODES
     ):
         return None
     return REVIEW
+
+
+def _load_baseline_parser() -> Callable[[str], Any]:
+    spec = importlib.util.spec_from_file_location(
+        "_check_review_scope_comments", CHECK_COMMENTS_PATH
+    )
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {CHECK_COMMENTS_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    parser: Callable[[str], Any] = module.parse_baseline
+    return parser
+
+
+def _not_above(head: dict[str, int], base: dict[str, int]) -> bool:
+    return all(path in base and count <= base[path] for path, count in head.items())
+
+
+def baseline_lowered(old: bytes, new: bytes) -> bool:
+    """True when both sides are valid baselines and no head value exceeds base."""
+    try:
+        parse = _load_baseline_parser()
+        before = parse(old.decode("utf-8"))
+        after = parse(new.decode("utf-8"))
+    except Exception:
+        return False
+    return (
+        _not_above(after.comments, before.comments)
+        and _not_above(after.docstring_history, before.docstring_history)
+        and after.docstring_lines <= before.docstring_lines
+    )
 
 
 def classify(change: Change) -> str:
@@ -174,6 +218,8 @@ def classify(change: Change) -> str:
         return decided
     old = _run_git(["cat-file", "blob", change.old_sha])
     new = _run_git(["cat-file", "blob", change.new_sha])
+    if change.path == COMMENT_BASELINE_PATH:
+        return BASELINE_LOWERED if baseline_lowered(old, new) else REVIEW
     return AST_IDENTICAL if ast_identical_without_docstrings(old, new) else REVIEW
 
 
@@ -206,7 +252,7 @@ def run(base: str, head: str) -> int:
     verdicts = [(classify(change), change) for change in changes]
     for kind, change in verdicts:
         print(f"{kind}\t{change.status}\t{_display(change)}")
-    if all(kind in (DOC, AST_IDENTICAL) for kind, _ in verdicts):
+    if all(kind in (DOC, AST_IDENTICAL, BASELINE_LOWERED) for kind, _ in verdicts):
         kinds = sorted({kind for kind, _ in verdicts})
         print(f"verdict: SKIP ({', '.join(kinds)})")
         return 0
