@@ -52,7 +52,7 @@ def is_flag_exempt(
     면제 매트릭스 (D-ACC-09 §4, normative). 열: broker / treasury_sync /
     fill_reconcile / reconcile.
 
-    - ``(test, virtual)``        → 면제 / 요구 / 면제 / 면제
+    - ``(test, virtual)``·``(mock, virtual)`` → 면제 / 요구 / 면제 / 면제
     - ``(kis-domestic, virtual)``→ 면제 / 요구 / 면제 / 면제
     - ``(kis-domestic, live)``   → 요구 / 요구 / 요구 / 요구
 
@@ -71,7 +71,7 @@ def is_flag_exempt(
         return False
 
     # broker/fill_reconcile/reconcile: **명시된 면제 pair만** 면제(fail-closed).
-    # (test, virtual)·(kis-domestic, virtual) 만 면제하고, 미지정 (broker_type,
+    # (test·kis-domestic·mock, virtual) 만 면제하고, 미지정 (broker_type,
     # trading_mode) pair(신규 broker 타입 포함)는 요구로 fail-closed 한다
     # ([must_fix A], Codex P2 — trading_mode 만 보면 신규 broker+virtual 이
     # fail-open 으로 broker/fill/reconcile readiness 를 기본 면제받는 회귀).

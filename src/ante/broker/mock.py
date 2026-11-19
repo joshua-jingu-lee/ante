@@ -128,16 +128,16 @@ class MockOrder:
 class MockBrokerAdapter(BrokerAdapter):
     """E2E 테스트용 가상 브로커 어댑터.
 
-    Note: BrokerAdapter 인터페이스 준수를 위해 async def를 유지한다.
-    내부적으로 await를 사용하지 않지만, 호출부에서 await로 사용된다.
+    Note: BrokerAdapter 인터페이스라 내부에 await가 없어도 async def다.
 
     설정 옵션:
         fill_mode: "immediate" | "partial" | "delayed" | "reject"
         partial_fill_ratio: 부분 체결 비율 (0.0~1.0, 기본 0.5)
         delay_seconds: 지연 체결 시 대기 시간 (기본 0.1)
         initial_cash: 초기 현금 (기본 100_000_000)
-        default_price: 종목 기본 현재가 (기본 50_000)
+        default_price: prices에 없는 종목의 현재가 (기본 50_000)
         prices: 종목별 현재가 딕셔너리 (예: {"005930": 70000})
+        prices_file: 가격 JSON 절대 경로. 있으면 위 두 키 대신 파일만 쓴다
     """
 
     broker_id: str = "mock"

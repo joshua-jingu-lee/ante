@@ -283,7 +283,7 @@ class AccountService:
                 ``RESTRICTED_NEW_ACCOUNT_IDS`` ( ``"test"`` ) /
                 ``INVALID_RUNTIME_ACCOUNT_IDS`` ( ``"default"`` ) 예약어와
                 일치하는 경우.
-            InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
+            InvalidBrokerTypeError: 프리셋에 없는 broker_type, 또는 가상 전용 타입+live.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
         # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
@@ -386,7 +386,7 @@ class AccountService:
                 (``ante.core.exchange.CANONICAL_EXCHANGES`` 5종)에 없음
                 (`*`/non-canonical). create + bootstrap seed 공유 chokepoint;
                 ``update()`` 는 exchange immutable 가드로 별도 불요.
-            InvalidBrokerTypeError: broker_type이 프리셋에 정의되지 않음.
+            InvalidBrokerTypeError: 프리셋에 없는 broker_type, 또는 가상 전용 타입+live.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
         if account.account_id in self._accounts:
@@ -1068,7 +1068,7 @@ class AccountService:
 
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
-            InvalidBrokerTypeError: broker_type이 BROKER_REGISTRY에 등록되지 않음.
+            InvalidBrokerTypeError: BROKER_REGISTRY 미등록, 또는 가상 전용 타입+live.
         """
         # lock-free fast path: cache-hit 면 lock 없이 즉시 반환.
         broker = self._brokers.get(account_id)
