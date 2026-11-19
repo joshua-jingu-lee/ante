@@ -206,6 +206,34 @@ class TestServerRunningRoutesToIpc:
         assert payload["bot_id"] == "bot-1"
         assert payload["status"] == "running"
 
+    def test_info_text_mode_tolerates_missing_created_at(self) -> None:
+        """live ``get_info()`` 결과에는 created_at 이 없다. text 출력이 실패하지
+        않고 나머지 필드를 출력한다."""
+        mock_send = AsyncMock(
+            return_value={
+                "bot": {
+                    "bot_id": "bot-1",
+                    "name": "B1",
+                    "status": "running",
+                    "account_id": "acc-a",
+                    "strategy_id": "s1",
+                }
+            }
+        )
+        result = _invoke(
+            ["bot", "info", "bot-1"],
+            patches=[
+                patch("ante.cli.commands.ipc_helpers.ipc_send", new=mock_send),
+                *_guard_direct_db(),
+            ],
+        )
+        assert mock_send.await_args.args[0] == "bot.info"
+        assert result.exception is None, result.exception
+        assert result.exit_code == 0, result.stdout + result.stderr
+        assert "bot-1" in result.stdout
+        assert "running" in result.stdout
+        assert "생성일" in result.stdout
+
     def test_positions_routes_to_ipc(self) -> None:
         mock_send = AsyncMock(
             return_value={

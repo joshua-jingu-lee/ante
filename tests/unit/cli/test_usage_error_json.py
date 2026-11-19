@@ -495,3 +495,62 @@ class TestBadArgumentUsageExplicit:
         assert payload["status"] == "error", payload
         assert payload["code"] == "CLI_USAGE_ERROR", payload
         assert "explicit BadArgumentUsage trigger" in str(payload["message"]), payload
+
+
+# ── UsageError 가 아닌 ClickException ───────────────────────────────────────
+
+
+class TestNonUsageClickExceptionJson:
+    """JSON 모드의 비-UsageError ``ClickException`` 은 ``{status, code, message}``
+    envelope 과 non-zero exit 로 끝난다. code 는 ``ipc_error_code`` 가 있으면 그
+    값, 없으면 ``IPC_ERROR`` 다."""
+
+    @staticmethod
+    def _synthetic_cli(exc: click.ClickException) -> click.Group:
+        @click.group(cls=AuthenticatedGroup)
+        @click.option(
+            "--format",
+            "output_format",
+            type=click.Choice(["text", "json"]),
+            default="text",
+        )
+        def synthetic_cli(output_format: str) -> None:  # noqa: ARG001
+            pass
+
+        @synthetic_cli.command()
+        def boom() -> None:
+            raise exc
+
+        return synthetic_cli
+
+    def test_without_ipc_error_code_falls_back_to_ipc_error(
+        self, runner: CliRunner
+    ) -> None:
+        exc = click.ClickException("plain click failure")
+        result = runner.invoke(self._synthetic_cli(exc), ["--format", "json", "boom"])
+
+        assert result.exit_code == 1, (
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = _parse_json_line(result.stdout)
+        assert payload == {
+            "status": "error",
+            "code": "IPC_ERROR",
+            "message": "plain click failure",
+        }
+
+    def test_ipc_error_code_takes_precedence(self, runner: CliRunner) -> None:
+        exc = click.ClickException("APPROVAL_NOT_FOUND: missing")
+        exc.ipc_error_code = "APPROVAL_NOT_FOUND"  # type: ignore[attr-defined]
+        exc.ipc_error_message = "missing"  # type: ignore[attr-defined]
+        result = runner.invoke(self._synthetic_cli(exc), ["--format", "json", "boom"])
+
+        assert result.exit_code == 1, (
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = _parse_json_line(result.stdout)
+        assert payload == {
+            "status": "error",
+            "code": "APPROVAL_NOT_FOUND",
+            "message": "missing",
+        }

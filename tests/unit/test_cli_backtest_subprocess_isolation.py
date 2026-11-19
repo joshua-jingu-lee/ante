@@ -122,6 +122,56 @@ class TestCliUsesSubprocessIsolation:
         assert payload["strategy"] == "momentum_v1.0.0"
 
 
+class TestTimeframeHandedToSubprocess:
+    """``--timeframe`` 생략 시 CLI 는 기본값을 채우지 않고 None 을 넘긴다."""
+
+    def _invoke_and_capture(self, tmp_path, *extra) -> tuple[object, list[dict]]:
+        strategy = tmp_path / "strat.py"
+        strategy.write_text("# dummy")
+        db_path = tmp_path / "ante.db"
+        runner = _make_runner()
+        configs: list[dict] = []
+
+        async def _fake_run_subprocess(self, config):  # noqa: ANN001, ANN202
+            configs.append(config)
+            return _envelope()
+
+        with (
+            patch(
+                "ante.backtest.service.BacktestService.run_subprocess",
+                new=_fake_run_subprocess,
+            ),
+            patch(
+                "ante.cli.commands.backtest._save_backtest_run",
+                new=AsyncMock(return_value="run-tf-1"),
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    *_run_args(strategy, "--db-path", str(db_path), *extra),
+                ],
+            )
+        return result, configs
+
+    def test_omitted_timeframe_passes_none(self, tmp_path):
+        result, configs = self._invoke_and_capture(tmp_path)
+
+        assert result.exit_code == 0, result.output
+        assert len(configs) == 1
+        assert "timeframe" in configs[0]
+        assert configs[0]["timeframe"] is None
+
+    def test_explicit_timeframe_passes_through(self, tmp_path):
+        result, configs = self._invoke_and_capture(tmp_path, "--timeframe", "5m")
+
+        assert result.exit_code == 0, result.output
+        assert len(configs) == 1
+        assert configs[0]["timeframe"] == "5m"
+
+
 # ── (b) envelope result_path → _save_backtest_run → store.save 전파 ───────
 
 

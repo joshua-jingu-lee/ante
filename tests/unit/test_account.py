@@ -1630,6 +1630,69 @@ async def test_market_order_reserve_buffer_rate_blocked_at_runtime_update(
         )
 
 
+_STRUCTURAL_UPDATE_VALUES: dict[str, object] = {
+    "credentials": {"app_key": "changed", "app_secret": "changed"},
+    "broker_config": {"changed": True},
+    "buy_commission_rate": Decimal("0.002"),
+    "sell_commission_rate": Decimal("0.003"),
+    "market_order_reserve_buffer_rate": Decimal("0.01"),
+    "broker_type": "kis-domestic",
+    "exchange": "KRX",
+    "currency": "USD",
+    "trading_mode": TradingMode.LIVE,
+}
+
+
+@pytest.mark.asyncio
+async def test_runtime_started_blocks_every_cold_path_mutation(
+    service, db, eventbus
+) -> None:
+    """mark_runtime_started() 뒤의 cold-path 변경은 모두 즉시 차단되고 DB 는
+    바뀌지 않는다: create, delete, repair_timezone, 그리고 STRUCTURAL_FIELDS
+    필드마다의 update."""
+    from ante.account.errors import (
+        AccountStructuralChangeRequiresStoppedServerError,
+    )
+    from ante.account.service import STRUCTURAL_FIELDS
+
+    assert set(_STRUCTURAL_UPDATE_VALUES) == set(STRUCTURAL_FIELDS)
+    await service.create(_make_account("main"))
+    service.mark_runtime_started()
+
+    calls = [
+        ("create", lambda: service.create(_make_account("fresh"))),
+        ("delete", lambda: service.delete("main", deleted_by="tester")),
+        ("repair_timezone", lambda: service.repair_timezone("main", "Asia/Tokyo")),
+    ]
+    for field_name, value in sorted(_STRUCTURAL_UPDATE_VALUES.items()):
+        calls.append(
+            (
+                f"update:{field_name}",
+                lambda f=field_name, v=value: service.update("main", **{f: v}),
+            )
+        )
+
+    not_blocked = []
+    for label, call in calls:
+        try:
+            await call()
+        except AccountStructuralChangeRequiresStoppedServerError:
+            continue
+        not_blocked.append(label)
+    assert not_blocked == []
+
+    reloaded = AccountService(db, eventbus)
+    await reloaded.initialize()
+    with pytest.raises(AccountNotFoundError):
+        await reloaded.get("fresh")
+    main = await reloaded.get("main")
+    assert main.status == AccountStatus.ACTIVE
+    assert main.timezone == _make_account("main").timezone
+    assert main.currency == "KRW"
+    assert main.exchange == "TEST"
+    assert main.broker_type == "test"
+
+
 @pytest.mark.asyncio
 async def test_create_default_test_account_uses_preset_buffer(service) -> None:
     """``create_default_test_account`` 가 BrokerPreset 의 buffer(0)를 그대로
