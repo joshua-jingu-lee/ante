@@ -1697,12 +1697,18 @@ class _UnrelatedError(Exception):
 
 
 class _UnrelatedErrorRegistry:
+    def __init__(self) -> None:
+        self.is_ready_calls = 0
+        self.active_trading_ready_calls = 0
+
     def is_ready(self, account_id: str, flag: object) -> bool:
+        self.is_ready_calls += 1
         raise _UnrelatedError("unrelated")
 
     def active_trading_ready(
         self, account_id: str, *, broker_type: str, trading_mode: object
     ) -> bool:
+        self.active_trading_ready_calls += 1
         raise _UnrelatedError("unrelated")
 
 
@@ -1717,30 +1723,35 @@ class TestFailClosedOnUnrelatedExceptionType:
         svc = MagicMock()
         svc.get = AsyncMock(side_effect=_UnrelatedError("unrelated"))
         assert await resolve_account_status(svc, ACCOUNT) is STATUS_UNAVAILABLE
+        svc.get.assert_awaited_once()
 
     def test_not_ready_reason_bare_on_unrelated_exception(self) -> None:
         from ante.account.gate import ACCOUNT_NOT_READY_REASON, not_ready_reason
 
+        registry = _UnrelatedErrorRegistry()
         reason = not_ready_reason(
-            _UnrelatedErrorRegistry(),
+            registry,
             ACCOUNT,
             broker_type="kis-domestic",
             trading_mode=TradingMode.LIVE,
         )
         assert reason == ACCOUNT_NOT_READY_REASON
+        assert registry.is_ready_calls >= 1
 
     def test_active_trading_blocked_on_unrelated_exception(self) -> None:
         from ante.account.gate import active_trading_blocked
 
+        registry = _UnrelatedErrorRegistry()
         assert (
             active_trading_blocked(
-                _UnrelatedErrorRegistry(),
+                registry,
                 ACCOUNT,
                 broker_type="kis-domestic",
                 trading_mode=TradingMode.LIVE,
             )
             is True
         )
+        assert registry.active_trading_ready_calls >= 1
 
     async def test_rule_engine_meta_fetch_unrelated_exception_rejects(self) -> None:
         bus = EventBus()
@@ -1782,6 +1793,7 @@ class TestFailClosedOnUnrelatedExceptionType:
         )
         await gw._on_order_approved(_approved())
 
+        svc.get.assert_awaited()
         assert len(cap.failed) == 1
         assert cap.failed[0].error_code == "account_status_unavailable"
         broker.place_order.assert_not_called()
@@ -1807,6 +1819,7 @@ class TestFailClosedOnUnrelatedExceptionType:
         executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
         await executor._on_order_approved(_approved())
 
+        svc.get.assert_awaited()
         assert cap.filled == []
         assert len(cap.failed) == 1
         assert cap.failed[0].error_code == "account_status_unavailable"

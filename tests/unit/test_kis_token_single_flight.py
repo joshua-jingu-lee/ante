@@ -1,6 +1,6 @@
 """KIS OAuth2 토큰 single-flight + shared cache + EGW00133 backoff 단위 테스트.
 
-#2399 (축 iii) invariant T1–T7:
+#2399 (축 iii) invariant T1–T6:
 - T1 single-flight, lock key=app_key (account_id 아님) + double-check.
 - T2 in-process shared cache + near-expiry(5분) miss.
 - T3 토큰 발급 응답 msg_cd/error_code alias 파싱 (200+body / non-200 양 분기).
