@@ -27,7 +27,7 @@
 | [D-018](D-018-core-interface-cli-ipc.md) | Core Interface CLI/IPC 중심화 | 2026-05-22 | React/HTTP 런타임 제거, CLI/IPC를 활성 운영 인터페이스로 고정 |
 | [D-019](D-019-review-gate-redesign.md) | 리뷰 게이트 재설계 | 2026-07-06 | Codex 의존 제거 — @plan-reviewer·/code-review 재배선, 이슈 검증 @issue-reviewer 신설 |
 | [D-020](D-020-tool-neutral-contribution-governance.md) | 도구 중립 개발·기여 원칙 | 2026-08-22 | 특정 AI 도구를 필수화하지 않고 내부 이슈·외부 PR 경로와 외부 코드 안전 경계를 단순하게 분리 |
-| [D-021](D-021-trust-pyramid-governance.md) | 신뢰 피라미드 기반 개발 거버넌스 | 2026-11-18 | 교정은 검사·구조로 남기고, 문서 전용·AST 불변 변경은 Gate A 미적용, 주석 금지·지침 산문 동결 |
+| [D-021](D-021-trust-pyramid-governance.md) | 신뢰 피라미드 기반 개발 거버넌스 | 2026-11-18 | 교정은 검사·구조로 남기고, 문서 전용·AST 불변·주석 기준선 값이 늘지 않은 변경은 Gate A 미적용, 주석 금지·지침 산문 동결 |
 
 ## 사용 규칙
 

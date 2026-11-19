@@ -4,21 +4,28 @@
 This docstring is the canonical definition of the skip classes. Each changed
 file (base = merge-base of ``--base`` and ``--head``) gets one class:
 
-- ``doc``: added, modified, deleted or renamed within ``docs/**``,
-  ``.agent/**``, ``guide/**`` or a ``*.md`` file at the repository root, as a
-  regular file whose mode does not change.
-- ``ast-identical``: a modified ``src/**/*.py`` file with the same regular
-  file mode whose AST is equal once the docstring (the first string statement
-  of the module, a class or a function) is dropped. Only comments and those
-  docstrings changed.
+A doc path is one under ``docs/``, ``.agent/`` or ``guide/``, or a ``*.md``
+file at the repository root. A regular file mode is ``100644`` or ``100755``.
+
+- ``doc``: a doc path that is added as a regular file, deleted from a regular
+  file, or modified with the same regular file mode before and after; or a
+  rename whose old and new paths are both doc paths, with the same regular
+  file mode before and after.
+- ``ast-identical``: a modified ``.py`` file under ``src/`` with the same
+  regular file mode before and after, whose base and head both parse and give
+  the same AST once every docstring is dropped. A docstring here is the first
+  statement of a module, class or function body when it is a ``str``
+  constant. Only comments and those docstrings changed.
 - ``baseline-lowered``: ``scripts/comment_baseline.json`` modified with the
-  same regular file mode, both sides passing ``parse_baseline`` of
-  ``check_comments.py`` (loaded by file path next to this script), every head
-  key of ``comments`` and ``docstring_history`` present in base with a value
-  not above base, and ``docstring_lines`` not above base. A removed key is a
-  decrease. A key missing from base, or a side that cannot be loaded or
-  validated, is ``review``.
-- ``review``: anything else.
+  same regular file mode before and after, both sides decoding as UTF-8 and
+  passing ``parse_baseline`` of ``check_comments.py`` (loaded by file path
+  next to this script), every head key of ``comments`` and
+  ``docstring_history`` present in base with a value not above base, and
+  ``docstring_lines`` not above base. Equal values qualify. A key removed in
+  head is a decrease. A head key missing from base, or a side that cannot be
+  loaded or validated, is ``review``.
+- ``review``: anything else, including copies, type changes, symlinks,
+  submodules and any rename outside doc paths.
 
 Known limits of ``baseline-lowered``: it compares per-file counts only, so a
 change that removes comments from a file and adds fewer new ones there, or
