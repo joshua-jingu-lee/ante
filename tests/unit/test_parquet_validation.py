@@ -109,6 +109,24 @@ class TestParquetValidate:
         assert not corrupted_path.exists()
         assert corrupted_path.with_suffix(".corrupted").exists()
 
+    def test_validate_fix_keeps_existing_quarantine(self, tmp_store, tmp_path):
+        """동명 ``.corrupted`` 가 이미 있으면 덮어쓰지 않고 ``.corrupted.<n>`` 으로
+        격리해 앞선 증적을 보존한다."""
+        partition = tmp_path / "ohlcv" / "1d" / "KRX" / "005930"
+        corrupted_path = partition / "2026-02.parquet"
+        _create_corrupted_parquet(corrupted_path)
+        earlier = corrupted_path.with_suffix(".corrupted")
+        earlier.write_bytes(b"EARLIER_EVIDENCE")
+
+        result = tmp_store.validate("005930", "1d", fix=True)
+
+        assert result["corrupted"] == 1
+        assert not corrupted_path.exists()
+        assert earlier.read_bytes() == b"EARLIER_EVIDENCE"
+        assert (partition / "2026-02.corrupted.1").read_bytes() == (
+            b"NOT_A_PARQUET_FILE"
+        )
+
     @pytest.mark.asyncio
     async def test_validate_no_data(self, tmp_store):
         result = tmp_store.validate("NONE", "1d")

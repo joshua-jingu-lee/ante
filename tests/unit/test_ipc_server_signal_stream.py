@@ -254,3 +254,53 @@ async def test_headless_no_registry_drives_and_eof() -> None:
     reader.feed_eof()
     await asyncio.wait_for(task, timeout=2.0)
     assert any(f.get("type") == "pong" for f in writer.frames())
+
+
+# ── bounded out_queue — 상한 초과 시 laggard close ────────────────────────
+
+
+async def test_out_queue_overflow_closes_stream_as_lagged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """outbound 프레임이 SIGNAL_OUT_QUEUE_MAX 를 넘게 쌓이면 스트림은
+    ``{closed, reason: lagged}`` 로 끝나고, 상한을 넘는 프레임은 내보내지 않는다."""
+    from ante.bot import signal_channel as signal_channel_module
+    from ante.ipc.server import SIGNAL_OUT_QUEUE_MAX
+
+    sinks: list = []
+
+    class _SinkCapturingChannel(signal_channel_module.SignalChannel):
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            super().__init__(*args, **kwargs)
+            sinks.append(kwargs["sink"])
+
+    monkeypatch.setattr(signal_channel_module, "SignalChannel", _SinkCapturingChannel)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    for _ in range(50):
+        await asyncio.sleep(0)
+        if handle.out_queue is not None:
+            break
+    assert len(sinks) == 1
+    sink = sinks[0]
+    for i in range(SIGNAL_OUT_QUEUE_MAX + 1):
+        sink({"type": "probe", "seq": i})
+    reader.feed_eof()
+    await asyncio.wait_for(task, timeout=2.0)
+
+    frames = writer.frames()
+    probes = [f for f in frames if f.get("type") == "probe"]
+    assert frames[-1] == {"type": "closed", "reason": "lagged"}
+    assert len(probes) < SIGNAL_OUT_QUEUE_MAX + 1
+    assert reg.has_active_session("bot-1") is False

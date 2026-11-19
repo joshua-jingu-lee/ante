@@ -154,3 +154,23 @@ async def test_modify_pass_does_not_mark_consumed(engine: RuleEngine) -> None:
     assert len(received) == 0
     # 룰 거부가 없었으므로 marker는 미세팅 (False default).
     assert getattr(event, "_consumed", False) is False
+
+
+@pytest.mark.parametrize(
+    "price",
+    [0, 0.0, -1.0, None, float("nan"), float("inf"), float("-inf"), True, "50000"],
+)
+async def test_modify_invalid_price_rejected_before_gateway(
+    engine: RuleEngine, price: object
+) -> None:
+    """정정 신규 가격이 finite 양수가 아니면 ``modify_invalid_args`` 로 거부하고
+    소비 마커를 set 해 Gateway 위임을 막는다."""
+    received: list[OrderModifyRejectedEvent] = []
+    engine._eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
+
+    event = _make_modify_event(price=price)
+    await engine._on_order_modify(event)
+
+    assert [e.reason for e in received] == ["modify_invalid_args"]
+    assert received[0].order_id == "ord-1331"
+    assert getattr(event, "_consumed", False) is True

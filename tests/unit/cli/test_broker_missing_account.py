@@ -682,6 +682,50 @@ class TestStatusFallbackDisconnectsAdapter:
         assert "health probe failed" in str(payload["error"]), payload
         disconnect.assert_awaited_once()
 
+    def test_status_fallback_disconnect_error_still_closes_db(
+        self, runner: CliRunner
+    ) -> None:
+        """disconnect 가 raise 해도 db.close() 는 실행되고, 결과는 기존
+        ``connected:False`` 변환으로 끝난다."""
+        import click
+
+        from ante.broker.base import BrokerAdapter
+        from ante.cli.commands import broker as broker_cmd
+
+        async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raise click.ClickException("server unavailable")
+
+        mock_adapter = MagicMock(spec=BrokerAdapter)
+        mock_adapter.is_connected = True
+        mock_adapter.exchange = "KRX"
+        mock_adapter.health_check = AsyncMock(return_value=True)
+        mock_adapter.disconnect = AsyncMock(
+            side_effect=RuntimeError("disconnect failed")
+        )
+        mock_db = MagicMock()
+        mock_db.close = AsyncMock()
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return mock_adapter, mock_db
+
+        with (
+            patch.object(broker_cmd, "_ipc_broker_command", new=_raise_click),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "broker", "status", "--account", "acc-1"],
+            )
+
+        mock_adapter.disconnect.assert_awaited_once()
+        mock_db.close.assert_awaited_once()
+        assert result.exit_code == 0, (
+            f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
+        )
+        payload = json.loads(result.stdout)
+        assert payload["connected"] is False, payload
+        assert "disconnect failed" in str(payload["error"]), payload
+
 
 # ── #1636 / #1623 Split C: invalid account_id ingress → VALIDATION_ERROR ────
 

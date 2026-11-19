@@ -3073,6 +3073,58 @@ class TestBacktestOnFillFollowUp:
         # 5주 누적 포지션.
         assert executor._positions["005930"]["quantity"] == 5
 
+    async def test_no_fill_follow_ups_do_not_consume_cap(self, store, monkeypatch):
+        """체결되지 않은 follow-up 은 cap 카운터를 올리지 않는다.
+
+        cap=3 에서 첫 체결의 follow-up 이 hold 3개 뒤에 buy 4개를 낸다. hold 는
+        체결되지 않으므로 buy 가 정확히 cap(3)개 체결된다.
+        """
+        import ante.backtest.executor as executor_mod
+
+        monkeypatch.setattr(executor_mod, "_MAX_FOLLOW_UP_FILLS_PER_STEP", 3)
+
+        provider = self._make_provider(store)
+
+        class HoldsThenBuys(Strategy):
+            meta = StrategyMeta(name="holds_then_buys", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._entered = False
+                self.on_fill_calls = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                if not self._entered:
+                    self._entered = True
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                return []
+
+            async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
+                self.on_fill_calls += 1
+                if self.on_fill_calls > 1:
+                    return []
+                holds = [
+                    Signal(symbol="005930", side="hold", quantity=1) for _ in range(3)
+                ]
+                buys = [
+                    Signal(symbol="005930", side="buy", quantity=1) for _ in range(4)
+                ]
+                return holds + buys
+
+        executor = BacktestExecutor(
+            strategy_cls=HoldsThenBuys,
+            data_provider=provider,
+            initial_balance=1_000_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert len(result.trades) == 1 + executor_mod._MAX_FOLLOW_UP_FILLS_PER_STEP
+        assert all(t.side == "buy" for t in result.trades)
+        assert executor._positions["005930"]["quantity"] == 4
+
 
 # ── 멀티심볼 통합 timeline / as-of 관측 / 체결 게이트 (#2098, #1992) ──
 

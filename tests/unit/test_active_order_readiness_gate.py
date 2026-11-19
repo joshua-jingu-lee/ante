@@ -512,6 +512,30 @@ class TestLayer3Gateway:
         assert failed.account_id == ACCOUNT
         broker.place_order.assert_not_called()
 
+    @pytest.mark.parametrize("corrupt_mode", [None, "virtual"])
+    async def test_corrupt_trading_mode_not_silently_skipped(
+        self, corrupt_mode: object
+    ) -> None:
+        """trading_mode 가 None/비-TradingMode 면 silent skip 하지 않고 live 경로의
+        gate 가 fail-closed 로 OrderFailedEvent 를 낸다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = self._broker()
+        meta = MagicMock()
+        meta.status = AccountStatus.ACTIVE
+        meta.broker_type = "kis-domestic"
+        meta.trading_mode = corrupt_mode
+        gw = self._gateway(
+            bus, registry=ready_registry(ACCOUNT), broker=broker, account=meta
+        )
+
+        await gw._on_order_approved(_approved())
+
+        assert len(cap.failed) == 1
+        assert cap.failed[0].order_id == "ord-1"
+        assert cap.failed[0].error_code == "account_not_ready"
+        broker.place_order.assert_not_called()
+
     async def test_g3_release_reservation_called_on_failed(self) -> None:
         """G3: 계층3 거부 OrderFailedEvent 를 Treasury 가 구독 → release_reservation
         실제 호출(reserve 해제). EventBus swallow 였다면 호출되지 않는다."""
@@ -1024,6 +1048,43 @@ class TestVirtualRouting:
         assert len(cap.failed) == 1
         assert cap.failed[0].error_code == "account_not_ready"
         assert _notif_count(cap) == 1
+
+    @pytest.mark.parametrize(
+        ("order_type", "price", "expected_price"),
+        [("limit", 50000.0, 50000.0), ("market", None, 0.0)],
+    )
+    async def test_g8_failed_event_carries_known_order_price(
+        self, order_type: str, price: float | None, expected_price: float
+    ) -> None:
+        """G8: 실패 종결 OrderFailedEvent.price 는 주문의 명시가(없으면 0.0)다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        executor = self._make_virtual_executor(
+            bus,
+            registry=not_ready_registry(
+                ACCOUNT,
+                trading_mode=TradingMode.VIRTUAL,
+                flag=ReadinessFlag.TREASURY_SYNC,
+            ),
+        )
+        ev = OrderApprovedEvent(
+            account_id=ACCOUNT,
+            order_id="ord-1",
+            bot_id=BOT,
+            strategy_id="s1",
+            symbol=SYMBOL,
+            side="buy",
+            quantity=10.0,
+            price=price,
+            order_type=order_type,
+            reserved_amount=500000.0,
+        )
+        await executor._on_order_approved(ev)
+
+        assert cap.filled == []
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_code == "account_not_ready"
+        assert cap.failed[0].price == expected_price
 
     async def test_g9_fail_closed_registry_none(self) -> None:
         """G2/G9: VirtualExecutor registry None → fail-closed(fill 금지 + 실패)."""

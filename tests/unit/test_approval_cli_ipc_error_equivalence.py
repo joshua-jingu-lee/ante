@@ -337,3 +337,53 @@ class TestApprovalValidationEquivalence:
     def test_ipc_envelope_validation(self) -> None:
         exc = ApprovalValidationError("strategy not adoptable")
         assert _ipc_envelope_code(exc) == "APPROVAL_VALIDATION_ERROR"
+
+    @pytest.mark.parametrize(
+        ("exc", "expected_code"),
+        [
+            (
+                ApprovalValidationError("strategy not adoptable"),
+                "APPROVAL_VALIDATION_ERROR",
+            ),
+            (
+                ApprovalStatusConflictError(
+                    approval_id="aaa",
+                    current_status="approved",
+                    requested_action="approve",
+                ),
+                "APPROVAL_STATUS_CONFLICT",
+            ),
+            (RuntimeError("unmapped failure"), "EXECUTION_ERROR"),
+        ],
+    )
+    def test_cli_request_non_click_exception_surfaces_typed_code(
+        self, runner: CliRunner, exc: Exception, expected_code: str
+    ) -> None:
+        """request 의 비-Click 예외는 그 예외의 public code 로, registry miss 만
+        EXECUTION_ERROR 로 surface 된다."""
+        raised: list[Exception] = []
+
+        async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
+            raised.append(exc)
+            raise exc
+
+        with patch("ante.cli.commands.ipc_helpers.ipc_send", new=_raise):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "approval",
+                    "request",
+                    "--type",
+                    "strategy_adopt",
+                    "--title",
+                    "test",
+                ],
+            )
+
+        assert raised == [exc]
+        assert result.exit_code != 0, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["status"] == "error"
+        assert payload["code"] == expected_code
