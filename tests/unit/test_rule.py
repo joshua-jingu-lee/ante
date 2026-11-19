@@ -5339,7 +5339,11 @@ class TestRuleEngineManager:
             pass
 
         class _RaisingDynamicConfig:
+            def __init__(self):
+                self.get_calls = 0
+
             async def get(self, key, default=None):
+                self.get_calls += 1
                 raise _UnrelatedError("backend mismatch")
 
         class _FakeStaticConfig:
@@ -5366,10 +5370,12 @@ class TestRuleEngineManager:
             }
         )
 
+        dyn_cfg = _RaisingDynamicConfig()
         await manager.initialize_all(
-            accounts, config=static_cfg, dynamic_config=_RaisingDynamicConfig()
+            accounts, config=static_cfg, dynamic_config=dyn_cfg
         )
 
+        assert dyn_cfg.get_calls == 1
         engine = manager.get("domestic")
         trading_hours_rules = [
             r for r in engine._account_rules if type(r).__name__ == "TradingHoursRule"

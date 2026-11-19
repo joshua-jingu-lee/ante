@@ -221,9 +221,8 @@ class TestInvalidTokenJsonFormat:
         custom_dir = tmp_path / "custom-config-unrelated"
         custom_dir.mkdir()
 
-        with patch.object(
-            Database, "connect", AsyncMock(side_effect=_UnrelatedError("unrelated"))
-        ):
+        connect = AsyncMock(side_effect=_UnrelatedError("unrelated"))
+        with patch.object(Database, "connect", connect):
             result = runner.invoke(
                 cli,
                 [
@@ -240,6 +239,7 @@ class TestInvalidTokenJsonFormat:
             f"expected exit 1, got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
+        connect.assert_awaited_once()
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
         assert payload["code"] == "auth_failed", payload

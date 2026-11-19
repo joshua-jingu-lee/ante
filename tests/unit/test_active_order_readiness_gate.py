@@ -1783,9 +1783,19 @@ class TestFailClosedOnUnrelatedExceptionType:
         cap = _capture(bus)
         broker = MagicMock()
         broker.place_order = AsyncMock(return_value="BRK-1")
+        calls: list[str] = []
+
+        async def _get(account_id: str) -> object:
+            calls.append("get")
+            raise _UnrelatedError("unrelated")
+
+        async def _get_broker(account_id: str) -> object:
+            calls.append("get_broker")
+            return broker
+
         svc = MagicMock()
-        svc.get = AsyncMock(side_effect=_UnrelatedError("unrelated"))
-        svc.get_broker = AsyncMock(return_value=broker)
+        svc.get = AsyncMock(side_effect=_get)
+        svc.get_broker = AsyncMock(side_effect=_get_broker)
         gw = APIGateway(
             account_service=svc,
             eventbus=bus,
@@ -1793,7 +1803,7 @@ class TestFailClosedOnUnrelatedExceptionType:
         )
         await gw._on_order_approved(_approved())
 
-        svc.get.assert_awaited()
+        assert calls == ["get", "get_broker", "get"]
         assert len(cap.failed) == 1
         assert cap.failed[0].error_code == "account_status_unavailable"
         broker.place_order.assert_not_called()

@@ -250,6 +250,7 @@ class TestHandleErrors:
 
         await channel._handle_line(msg)
 
+        eventbus.publish.assert_awaited_once()
         resp = json.loads(output.getvalue().strip())
         assert resp["type"] == "error"
 

@@ -254,7 +254,10 @@ def test_file_handler_unrelated_exception_does_not_break_stdout(
     class _UnrelatedError(Exception):
         pass
 
+    calls: list[object] = []
+
     def _raise(*args, **kwargs):
+        calls.append(args)
         raise _UnrelatedError("unrelated")
 
     import ante.core.log.handlers as handlers_mod
@@ -263,6 +266,7 @@ def test_file_handler_unrelated_exception_does_not_break_stdout(
 
     setup_logging(_StubConfig())
 
+    assert len(calls) == 1
     root = logging.getLogger()
     assert len(root.handlers) == 1
     assert isinstance(root.handlers[0], logging.StreamHandler)
