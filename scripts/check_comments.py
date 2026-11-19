@@ -15,9 +15,11 @@ a class attribute. This is wider than ``check_review_scope.py`` on purpose,
 because such strings can stand in for comments.
 
 Exit 0: all three values equal ``scripts/comment_baseline.json``.
-Exit 1: any value is above or below the baseline.
-Exit 2: Python is older than 3.13, the baseline is missing or malformed, or a
-source file cannot be read, tokenized or parsed.
+Exit 1: any value is above or below the baseline. Only the comparison
+produces this code.
+Exit 2: every other failure: Python older than 3.13, a missing or malformed
+baseline, a source file that cannot be read, tokenized or parsed, or any
+unexpected exception.
 """
 
 from __future__ import annotations
@@ -294,7 +296,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="repository root (default: the checkout containing this script)",
     )
     args = parser.parse_args(argv)
-    code, message = run(args.root)
+    try:
+        code, message = run(args.root)
+    except Exception as exc:
+        code = EXIT_ERROR
+        message = f"comment check error: {type(exc).__name__}: {exc}"
     stream = sys.stdout if code == EXIT_OK else sys.stderr
     print(message, file=stream)
     return code

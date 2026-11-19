@@ -483,7 +483,22 @@ def test_old_python_exits_2(
     assert code == 2
 
 
-def test_repository_baseline_matches_source(capsys: Capsys) -> None:
-    code, message = _run(REPO_ROOT, capsys)
+class _InjectedError(Exception):
+    pass
 
-    assert code == 0, message
+
+def _raise_injected(*_args: object) -> None:
+    raise _InjectedError("injected")
+
+
+@pytest.mark.parametrize("function", ["read_baseline", "measure"])
+def test_any_exception_exits_2(
+    tmp_path: Path, capsys: Capsys, monkeypatch: pytest.MonkeyPatch, function: str
+) -> None:
+    _write_baseline(tmp_path, _tree(tmp_path))
+    monkeypatch.setattr(checker, function, _raise_injected)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 2
+    assert "_InjectedError" in message
