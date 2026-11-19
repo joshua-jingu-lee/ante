@@ -21,12 +21,15 @@ class TestBrokerAdapter(BrokerAdapter):
 
 | 특성 | TestBrokerAdapter | MockBrokerAdapter |
 |------|-------------------|-------------------|
-| **용도** | 개발/검증 (현실적 시뮬레이션) | E2E 테스트 (제어 가능한 체결) |
-| **가격** | GBM 기반 랜덤 시뮬레이션 | 정적 가격 (수동 설정) |
+| **용도** | 개발/검증 (현실적 시뮬레이션) | 가상 계좌 시나리오 검증 (가격 고정) |
+| **브로커 타입** | `test` | `mock` (가상 계좌 전용) |
+| **가격** | GBM 기반 랜덤 시뮬레이션 (조회할 때마다 움직임) | 정적 가격. 가격 주입 파일(`prices_file`) 또는 생성자 `prices`·`default_price` |
 | **슬리피지** | 0.1~0.3% 자동 적용 | 없음 |
-| **부분 체결** | 확률적 (수량 ≥ 100 시 30% 확률) | FillMode enum으로 결정적 제어 |
-| **종목** | 가상 종목 6개 프리셋 | 하드코딩 2개 |
-| **재현성** | 시드 기반 동일 시퀀스 | 시드 불필요 |
+| **부분 체결** | 확률적 (수량 ≥ 100 시 30% 확률) | FillMode enum으로 결정적 제어. 가상 경로에서는 쓰이지 않음 (#2553) |
+| **종목** | 가상 종목 6개 프리셋 | `get_instruments`는 하드코딩 2개. 가격은 주입한 종목 코드 |
+| **재현성** | 시드 기반 동일 시퀀스 | 같은 가격 주입이면 같은 가격 |
+
+두 브로커 모두 가상 계좌에서는 체결을 하지 않는다. 가상 계좌의 주문은 `VirtualExecutor`가 게이트웨이 가격으로 체결하고 브로커로 보내지 않는다([api-gateway.md](../api-gateway/api-gateway.md) "Virtual 주문 라우팅"). 그래서 가상 경로에서 어댑터가 정하는 것은 사실상 `get_current_price`가 돌려주는 가격이고, 위 표의 슬리피지·부분 체결 행은 실전 경로에만 해당한다. `mock`의 체결 모드 주입과 실전 경로는 #2553에서 다룬다.
 
 ### 생성자 파라미터
 
@@ -61,3 +64,74 @@ GBM 모델로 현실적 가격 변동을 시뮬레이션한다. 일별 변동성
 - **지정가 주문**: 슬리피지 없이 지정 가격으로 체결
 - **부분 체결**: 수량 100주 이상 시 30% 확률로 발생 (체결 비율 30~90%)
 - **잔고 부족**: 매수 시 잔고 부족이면 주문 거부
+
+## 브로커 타입 `mock`
+
+> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
+
+> 소스: [`src/ante/broker/mock.py`](../../../src/ante/broker/mock.py)
+
+`broker_type` `mock`은 `MockBrokerAdapter`를 만든다. 실행할 때마다 같은 가격을 내는 브로커로 가상 계좌의 시나리오를 검증하는 데 쓴다. 프리셋은 [06-broker-presets.md](06-broker-presets.md)를 따른다(거래소 `TEST`, 수수료 0, 필수 자격증명 없음).
+
+### 가상 전용
+
+`mock`은 `trading_mode`가 `virtual`인 계좌에만 쓴다. `(mock, live)` 조합은 아래 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 오류 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
+
+| 지점 | 시점 | 비고 |
+|------|------|------|
+| `AccountService._persist_account` | 계좌 생성 (`create`와 seed가 공유하는 단일 지점) | `trading_mode`와 `broker_type`은 생성 뒤 바꿀 수 없으므로 수정 경로는 따로 막지 않는다 |
+| `AccountService._build_broker_adapter` | 어댑터 조립 | DB를 직접 고친 행에 대한 방어 |
+
+- 판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 판정에 쓰지 않는다.
+- 가상 전용 브로커 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다.
+- 런타임 준비 상태의 면제 매트릭스에는 `(mock, virtual)`만 둔다([account/02-design-decisions.md](../account/02-design-decisions.md) D-ACC-09).
+- 필수 자격증명이 빈 목록이므로 계좌 생성 때 credential을 넘기면 `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`로 거부된다([cli/03-commands.md](../cli/03-commands.md) `account create` 입력 계약).
+
+### 가격 주입 파일
+
+가격은 데몬 프로세스 밖에서 파일로 주입한다. 파일 경로는 `broker_config`의 `prices_file`(문자열, 절대 경로)로 넘긴다.
+
+```bash
+ante account create --broker-type mock --trading-mode virtual \
+  --broker-config prices_file=/abs/path/prices.json
+```
+
+파일은 JSON 객체다.
+
+```json
+{
+  "prices": {"000001": 72000, "000002": 160000},
+  "default_price": 50000
+}
+```
+
+| 키 | 필수 | 값 |
+|----|------|----|
+| `prices` | O | 종목 코드 → 가격. 빈 객체 가능 |
+| `default_price` | X | `prices`에 없는 종목의 가격 |
+
+- 가격은 불리언이 아닌 유한한 JSON 수이고 0보다 크다. `true`, `NaN`, `Infinity`는 거부한다.
+- 위 두 키 밖의 키는 허용하지 않는다.
+- `prices_file`이 있으면 파일이 유일한 가격 원천이다. 파일에 없는 종목은 파일의 `default_price`가 있으면 그 값이고, 없으면 가격 조회가 `BrokerError`다(50,000 기본값으로 떨어지지 않는다).
+
+**오류 조건**: 아래는 모두 생성자의 `BrokerError`다.
+
+- `prices_file`이 상대 경로이거나 파일이 없다
+- 내용이 JSON이 아니다
+- 허용하지 않는 키가 있거나 `prices`가 없다
+- 가격 값이 위 정의에 맞지 않는다
+- 같은 config에 `prices_file`과 함께 `prices`나 `default_price`가 있다
+
+**읽는 시점**: 어댑터를 만들 때 한 번 읽는다. 실행 중에는 다시 읽지 않으므로 가격을 바꾸려면 데몬을 다시 띄운다. 데몬이 꺼져 있을 때의 `ante broker …`는 CLI 프로세스에서 어댑터를 새로 만들므로 그때마다 파일을 읽는다.
+
+**검증 시점**: 계좌 생성이 아니라 어댑터가 처음 만들어질 때다. `broker_config`는 형식 없는 값이라 계좌 생성은 통과한다. 가상 계좌에서는 첫 가격 조회가 그 시점이고, 실패하면 시장가 주문이 `virtual_market_price_unavailable`로 끝난다.
+
+`prices_file`이 없으면 생성자 config의 `prices`, `default_price`를 쓴다(`default_price` 기본값 50,000). `set_price`는 메모리 값을 바꾸는 테스트 도우미다.
+
+### 전략 거래소 선언
+
+봇은 전략의 `exchange`가 계좌 거래소와 호환될 때만 만들 수 있다. `mock` 계좌(거래소 `TEST`)에 붙일 전략은 `exchange`를 `TEST`나 `*`로 선언한다. `test` 브로커도 같다.
+
+### 결정성의 범위
+
+같은 가격 주입으로 두 번 실행한 결과가 같다는 것은 식별자(`order_id`, `event_id` 등)와 시각 필드를 뺀 체결 필드(종목, 방향, 수량, 가격, 수수료)가 일치한다는 뜻이다. 식별자와 시각의 정규화는 #2542에서 정한다.

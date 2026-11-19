@@ -15,7 +15,7 @@ AccountService(db: Database, eventbus: EventBus)
 | 메서드 | 파라미터 | 반환값 | 설명 |
 |--------|----------|--------|------|
 | `initialize` | — | `None` | 스키마 생성 + DB에서 계좌 목록 로드 |
-| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). 우회 플래그를 노출하지 않으므로 외부 호출자는 RESTRICTED ( ``"test"`` ) 예약어를 신규 생성할 수 없다 (#1216 P2). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. seed 자동 생성은 :meth:`create_default_test_account` 가 private helper :meth:`_create_seed_account` 를 통해서만 수행한다 |
+| `create` | `account: Account` | `Account` | 계좌 생성. **cold-path 전용**. account_id 형식/정책 검증은 [`validate_new_account_id`](14-account-id-contract.md) helper에 위임 (``"test"``, ``"default"``, ``None``, ``""``, 패턴 위반 거부). 우회 플래그를 노출하지 않으므로 외부 호출자는 RESTRICTED ( ``"test"`` ) 예약어를 신규 생성할 수 없다 (#1216 P2). account_id 중복 시 `AccountAlreadyExistsError`. broker_type 유효성 검증. 가상 전용 브로커 타입(`mock`)을 `trading_mode=live`로 만들면 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`, 아래 「가상 전용 브로커 타입」). seed 자동 생성은 :meth:`create_default_test_account` 가 private helper :meth:`_create_seed_account` 를 통해서만 수행한다 |
 | `get` | `account_id: str` | `Account` | 계좌 조회. 없으면 `AccountNotFoundError`. DELETED 상태도 조회 가능 |
 | `get_sync` | `account_id: str` | `Account \| None` | 인메모리 캐시에서 동기적으로 계좌 조회. ContextFactory 등 동기 컨텍스트용. 없으면 `None` 반환 |
 | `list` | `status: AccountStatus \| None` | `list[Account]` | 계좌 목록 조회. status 필터 가능. DELETED 제외가 기본 |
@@ -42,6 +42,17 @@ AccountService(db: Database, eventbus: EventBus)
 **cached-only 조회**: `get_cached_broker()`는 이미 캐시된 어댑터만 반환하며(build/connect 없음), 미캐시면 `None`을 반환한다. 종료 루프처럼 "이미 연결된 어댑터만 끊으면 되는" 경로는 이 접근자를 사용해, 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를 피한다(미캐시 = 끊을 연결도 없음). 조회는 `get_broker()`/`_reconnect_broker()`와 동일한 per-account lock 안에서 수행하여 in-flight 초기 연결을 drain한 뒤 캐시를 재확인한다(async 메서드). 동기 즉시 조회였다면, 종료 중 cache-miss `get_broker()`가 lock을 쥔 채 `connect()`를 대기하는 in-flight 구간을 `None`으로 보고 skip하고, 그 connect가 직후 성공해 disconnect 루프 종료 뒤 캐시에 기록된 세션이 DB close 이후까지 잔존했다 — lock 대기로 connect 완료를 기다린 뒤 조회해 이 윈도를 닫는다(연결 성공 시 캐시된 어댑터 반환→disconnect, 실패 시 `None`).
 
 > **`trading_mode`와 `broker_config`의 분리**: `trading_mode`는 시스템이 브로커 API를 실제로 호출할지 결정한다 (VIRTUAL=가상거래, LIVE=실거래). `broker_config`는 브로커 내부 동작 설정을 담는다. 예를 들어 KIS 브로커의 `is_paper`는 모의투자/실전투자 엔드포인트를 결정하는 브로커 내부 관심사이므로 `broker_config`에 속한다. `get_broker()`는 `trading_mode`로부터 `is_paper`를 파생하지 않는다.
+
+#### 가상 전용 브로커 타입
+
+> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
+
+`mock`은 가상 전용 브로커 타입이다. `(mock, live)` 조합은 두 곳에서 `InvalidBrokerTypeError`(`ACCOUNT_INVALID_BROKER_TYPE`)로 거부한다. 메시지는 타입이 틀린 것이 아니라 `trading_mode`와의 조합이 허용되지 않는다는 것을 밝힌다.
+
+- **계좌 생성**: `_persist_account`(`create`와 seed가 공유하는 단일 지점)에서 거부한다. `trading_mode`와 `broker_type`은 불변 필드라 수정 경로는 따로 막지 않는다.
+- **어댑터 조립**: `_build_broker_adapter`가 같은 조합이면 같은 오류를 낸다. DB를 직접 고친 행에 대한 방어다.
+
+판정은 `Account.trading_mode`로 한다. 어댑터 config의 `trading_mode`는 `broker_config`가 덮어쓸 수 있으므로 쓰지 않는다. 가상 전용 타입의 집합은 한 곳에 두고 두 지점이 함께 쓴다. 상세는 [broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)를 따른다.
 
 ### 런타임 구조 변경 차단
 

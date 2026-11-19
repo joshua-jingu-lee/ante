@@ -138,6 +138,8 @@ class BrokerPreset:
 
 ### BROKER_PRESETS
 
+> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
+
 ```python
 BROKER_PRESETS: dict[str, BrokerPreset] = {
     "test": BrokerPreset(
@@ -156,6 +158,14 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
         default_account_id="domestic", default_name="국내 주식",
         required_credentials=["app_key", "app_secret", "account_no"],
     ),
+    "mock": BrokerPreset(
+        exchange="TEST", currency="KRW", timezone="Asia/Seoul",
+        trading_hours_start="00:00", trading_hours_end="23:59",
+        buy_commission_rate=Decimal("0"), sell_commission_rate=Decimal("0"),
+        market_order_reserve_buffer_rate=Decimal("0"),
+        default_account_id="mock", default_name="모의",
+        required_credentials=[],  # 가상 전용 (#2541)
+    ),
     # kis-overseas 프리셋은 1.0 BROKER_REGISTRY 가 미지원이므로 본 1.0 stage
     # 에서는 정의하지 않는다 (#1333). 1.1 KISOverseasAdapter 도입 시 함께
     # 추가하며, ``market_order_reserve_buffer_rate`` 는 그때 시장 사례에 맞춰
@@ -171,6 +181,9 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
 |-------------|----------|----------|----------|--------------|----------------|----------------|---------------------|
 | `test` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 | 0 |
 | `kis-domestic` | `KRX` | `KRW` | `Asia/Seoul` | 09:00–15:30 | 0.015% | 0.195% | 0.5% |
+| `mock` | `TEST` | `KRW` | `Asia/Seoul` | 00:00–23:59 | 0 | 0 | 0 |
+
+프리셋 수수료는 어댑터 config와 Treasury에만 쓰인다. 가상 계좌의 체결 수수료는 `VirtualExecutor`의 기본값이다([broker-adapter/06-broker-presets.md](../broker-adapter/06-broker-presets.md)).
 
 > **향후 지원**: `kis-overseas` 는 1.0 단계에서 BROKER_REGISTRY 가 미지원이므로
 > BROKER_PRESETS 에 정의하지 않는다. KISOverseasAdapter 구현, `BROKER_REGISTRY`
@@ -183,13 +196,17 @@ BROKER_PRESETS: dict[str, BrokerPreset] = {
 _BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {
     "test": TestBrokerAdapter,
     "kis-domestic": KISDomesticAdapter,
+    "mock": MockBrokerAdapter,
     # "kis-overseas": KISOverseasAdapter,  ← 1.1 에서 등록
 }
 ```
 
-`BROKER_PRESETS` 와 `BROKER_REGISTRY` 의 keys 가 일치해야 신규 계좌 생성이
-preset 기본값과 어댑터 클래스를 동시에 찾는다. 1.0 에서는 양쪽 모두
-`{"test", "kis-domestic"}` 만 노출한다 (#1333).
+`BROKER_PRESETS`, 이 `_BROKER_REGISTRY`, CLI의 `--broker-type` 검증에 쓰는
+`ante.broker.registry.BROKER_REGISTRY`([broker-adapter/05-broker-registry.md](../broker-adapter/05-broker-registry.md))
+세 곳의 keys 가 일치해야 신규 계좌 생성이 preset 기본값과 어댑터 클래스를 동시에
+찾는다. 세 곳 모두 `{"test", "kis-domestic", "mock"}` 만 노출한다 (#1333, #2541).
+`mock`은 가상 전용이다. `(mock, live)` 조합은 계좌 생성과 어댑터 조립에서
+`InvalidBrokerTypeError`로 거부한다([broker-adapter/12-test-broker-adapter.md](../broker-adapter/12-test-broker-adapter.md#브로커-타입-mock)).
 
 `AccountService.get_broker()`가 `broker_type`으로 이 레지스트리에서 어댑터 클래스를 조회한다. 등록되지 않은 `broker_type`으로 브로커 생성을 시도하면 `InvalidBrokerTypeError`가 발생한다.
 

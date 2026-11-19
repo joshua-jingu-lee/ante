@@ -173,7 +173,9 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 | `exchange` | `KRX`, `NYSE`, `NASDAQ`, `AMEX`, `TEST` | 거래소 (canonical vocabulary) | — |
 | market / category | `KOSPI`, `KOSDAQ`, `KONEX` | KRX 내부 시장구분 | **거래소가 아니다.** `exchange=KRX`의 하위 market. exchange 자리에 올 수 없다 |
 | `source` | `data_go_kr`, `dart`, `yahoo` | 데이터 출처 | exchange와 별개 차원. 검증·경로에서 교차하지 않는다 |
-| `broker_type` | `kis-domestic`, `test` | 브로커 어댑터 종류 | exchange와 별개 차원. preset이 broker_type→exchange를 매핑할 뿐 동일하지 않다 |
+| `broker_type` | `kis-domestic`, `test`, `mock` | 브로커 어댑터 종류 | exchange와 별개 차원. preset이 broker_type→exchange를 매핑할 뿐 동일하지 않다(`test`·`mock` → `TEST`) |
+
+> **구현 대기**: `mock` 브로커 타입의 구현은 #2541에서 하며, 그 전에는 `--broker-type mock`을 쓸 수 없다.
 
 `KOSPI`/`KOSDAQ`/`KONEX`는 `exchange` 값이 아니라 KRX 내부 market/category다(`docs/specs/data-feed/04-schema.md`의 `market` 필드 참조). broker adapter market code(`KOSPI`/`KOSDAQ`) 정규화는 1.0 비목표다.
 
