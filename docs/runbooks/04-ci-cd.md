@@ -61,9 +61,7 @@ post-merge automation (PR 머지가 발화한 pull_request:closed 이벤트로 �
 **목적**: PR 전 코드 품질 게이트
 
 - **트리거**: PR 생성 전 `/implement-issue` 내부 리뷰 루프
-- **적용 범위**: base 대비 변경 파일이 전부 아래 두 부류 중 하나면 Gate A를 적용하지 않는다(SKIP). 판정은 `scripts/check_review_scope.py --base {base} --head {head}`가 하며 exit 0이 SKIP이다. 하나라도 아니거나, diff가 비었거나(exit 1), 판정할 수 없으면(exit 2) Gate A를 실행한다.
-  - 문서 경로: `docs/**`, `.agent/**`, `guide/**`, 저장소 루트의 `*.md`
-  - AST 불변 파일: `src/**/*.py` 중 base와 head 양쪽에 있고 독스트링 노드를 뺀 AST가 같은 파일(주석·독스트링만 고친 변경)
+- **적용 범위**: base 대비 변경 파일이 전부 SKIP 부류면 Gate A를 적용하지 않는다. 부류의 정의는 `scripts/check_review_scope.py`의 모듈 독스트링에 있다. 판정은 `scripts/check_review_scope.py --base {base} --head {head}`가 하며 exit 0이 SKIP이다. 하나라도 아니거나, diff가 비었거나(exit 1), 판정할 수 없으면(exit 2) Gate A를 실행한다.
   - SKIP 증적은 `브랜치 리뷰` 코멘트에 `verdict: SKIP`, `reviewer: scripts/check_review_scope.py`로 남기며 반복 실패 누적에 세지 않는다.
 - **실행**: Claude Code 빌트인 `/code-review` 스킬. 스킬이 노출하는 인자 문법 관측은 `.agent/commands/implement-issue.md` §브랜치 리뷰 루프 10번에 있다.
 - **결과**: 이슈 코멘트 `브랜치 리뷰` (`reviewer:` 필드에 `/code-review` 기록)

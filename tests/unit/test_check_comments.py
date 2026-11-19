@@ -408,6 +408,36 @@ def test_baseline_not_an_object_exits_2(tmp_path: Path, capsys: Capsys) -> None:
     assert code == 2
 
 
+def test_parse_baseline_matches_read_baseline(tmp_path: Path) -> None:
+    baseline = _tree(tmp_path)
+    _write_baseline(tmp_path, baseline)
+    text = (tmp_path / "scripts" / "comment_baseline.json").read_text("utf-8")
+
+    parsed = checker.parse_baseline(text)
+
+    assert parsed == checker.read_baseline(tmp_path)
+    assert parsed == checker.Measurement(
+        baseline["comments"], baseline["docstring_history"], 1
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        pytest.param("{not json", id="broken-json"),
+        pytest.param("[1, 2]", id="not-object"),
+        pytest.param('{"comments": {}, "docstring_history": {}}', id="missing-key"),
+        pytest.param(
+            '{"comments": {"a": 0}, "docstring_history": {}, "docstring_lines": 0}',
+            id="zero-count",
+        ),
+    ],
+)
+def test_parse_baseline_rejects_malformed_text(text: str) -> None:
+    with pytest.raises(checker.CheckError):
+        checker.parse_baseline(text)
+
+
 def test_unparsable_source_exits_2(tmp_path: Path, capsys: Capsys) -> None:
     _write_baseline(tmp_path, _tree(tmp_path))
     _write_source(tmp_path, "src/ante/broken.py", "def f(:\n")
