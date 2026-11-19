@@ -255,7 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_{테이블명}_name
 
 ### 보존 정책 (선택)
 
-보존 정책이 있는 테이블은 DDL 앞에 주석으로 명시:
+보존 정책이 있는 테이블은 DDL 문자열 안에 SQL `-- retention:` 표식을 두고, `scripts/generate_db_schema.py`가 이를 읽는다:
 
 ```sql
 -- retention: 90d

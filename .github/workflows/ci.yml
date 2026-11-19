@@ -57,6 +57,9 @@ jobs:
       - name: Prose budget check
         run: python scripts/check_prose_budget.py
 
+      - name: Comment check
+        run: python scripts/check_comments.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45

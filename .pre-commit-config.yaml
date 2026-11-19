@@ -16,3 +16,9 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      - id: check-comments
+        name: "src/ante 주석·독스트링 이력 기준선 검사"
+        entry: python scripts/check_comments.py
+        language: system
+        pass_filenames: false
+        files: ^(src/ante/.*\.py|scripts/check_comments\.py|scripts/comment_baseline\.json)$
