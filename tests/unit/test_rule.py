@@ -372,6 +372,30 @@ class TestTradingHoursRule:
         assert result.metadata["bot_id"] == "bot-2"
         assert result.metadata["reject_code"] == "TRADING_HOURS_INVALID_TIMEZONE"
 
+    def test_trading_hours_unrelated_zoneinfo_error_propagates(
+        self, rule, base_context, monkeypatch
+    ):
+        """ZoneInfo 의 ZoneInfoNotFoundError·ValueError 외 예외는 timezone reject 로
+        바꾸지 않고 그대로 전파한다."""
+        import zoneinfo
+
+        class _UnrelatedZoneError(Exception):
+            pass
+
+        requested: list[str] = []
+
+        def _raising_zoneinfo(key: str) -> zoneinfo.ZoneInfo:
+            requested.append(key)
+            raise _UnrelatedZoneError(key)
+
+        monkeypatch.setattr(zoneinfo, "ZoneInfo", _raising_zoneinfo)
+        base_context.timezone = "Asia/Seoul"
+        assert "current_time" not in base_context.metadata
+
+        with pytest.raises(_UnrelatedZoneError):
+            rule.evaluate(base_context)
+        assert requested == ["Asia/Seoul"]
+
     def test_trading_hours_valid_timezone_unchanged(self, rule, base_context):
         """#1475: 기존 valid 패턴(Asia/Seoul + current_time 주입) 회귀 미파괴."""
         base_context.timezone = "Asia/Seoul"

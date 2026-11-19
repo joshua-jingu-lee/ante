@@ -735,6 +735,54 @@ class TestStrategyContextFactory:
         orders_b = ctx_b.get_open_orders()
         assert [o["order_id"] for o in orders_b] == ["ord-b"]
 
+    def test_create_live_context_uses_shared_order_view_without_tracker(self, eventbus):
+        """order_tracker 미주입이면 주입된 공유 live_order_view 의 미체결을 쓴다."""
+        from ante.account.models import Account, TradingMode
+        from ante.bot.providers.live import LivePortfolioView
+        from ante.strategy.base import OrderView
+
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+
+        class FakeLivePortfolio(LivePortfolioView):
+            def __init__(self):
+                pass
+
+            def get_positions(self, bot_id):
+                return {}
+
+            def get_balance(self, bot_id):
+                return {"allocated": 0.0, "available": 0.0, "reserved": 0.0}
+
+        class SharedOrders(OrderView):
+            def __init__(self):
+                self.calls: list[str] = []
+
+            def get_open_orders(self, bot_id):
+                self.calls.append(bot_id)
+                return [{"order_id": "shared-1", "bot_id": bot_id}]
+
+        shared = SharedOrders()
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
+            live_portfolio=FakeLivePortfolio(),
+            live_order_view=shared,
+        )
+        ctx = factory.create(
+            BotConfig(bot_id="live1", strategy_id="s1", account_id="live-acct")
+        )
+
+        assert ctx.get_open_orders() == [{"order_id": "shared-1", "bot_id": "live1"}]
+        assert shared.calls == ["live1"]
+
     def test_create_live_context_empty_order_view_fallback(self, eventbus):
         """order_tracker·live_order_view 모두 미주입이면 빈 결과 stub (회귀 방지)."""
         from ante.account.models import Account, TradingMode

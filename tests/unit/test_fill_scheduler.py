@@ -270,6 +270,54 @@ async def test_window_covers_prior_day_open_before_expire(tracker, applier):
     assert (await tracker.get("ord-prior")).status == "expired"
 
 
+class _WindowedBroker(FakeBroker):
+    """from_date 이전 영업일의 history 행은 돌려주지 않는 fake broker."""
+
+    async def get_order_history(self, from_date=None, to_date=None):
+        rows = await super().get_order_history(from_date, to_date)
+        return [r for r in rows if str(r["timestamp"]) >= str(from_date)]
+
+
+async def test_window_takes_earliest_date_across_open_orders(tracker, applier):
+    """open 이 여러 영업일에 걸치면 폴 window 는 가장 이른 날짜부터 덮는다."""
+    app, ph, _eb = applier
+    prior = "20200101"
+    await tracker.open(
+        order_id="ord-prior",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="005930",
+        side="buy",
+        order_type="market",
+        ordered_qty=10.0,
+        submitted_date=prior,
+    )
+    await _seed(tracker, order_id="ord-today", broker_order_id="0002", qty=10.0)
+    broker = _WindowedBroker(
+        history=[
+            {
+                "order_id": "0001",
+                "filled_quantity": 10.0,
+                "price": 1000.0,
+                "timestamp": prior,
+            }
+        ]
+    )
+    sched = FillReconcileScheduler(
+        broker=broker, order_tracker=tracker, fill_applier=app, account_id=ACCT
+    )
+
+    result = await sched.catch_up_once()
+
+    assert broker.call_count == 1
+    assert result.applied == 1
+    assert (await tracker.get("ord-prior")).status == "filled"
+    pos = await ph.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 10.0
+
+
 @pytest.fixture(autouse=True)
 def _fast_catch_up_backoff(monkeypatch):
     """카치업 backoff 를 0 으로 줄여 폴-실패 재시도 테스트를 빠르게 한다."""
@@ -1821,6 +1869,48 @@ async def test_get_positions_not_called_when_ccld_fills(fallback_applier, tracke
     assert broker.history_calls == 1
     assert broker.positions_calls == 0  # rate budget — 잔고 미호출.
     assert (await tracker.get("ord-fb")).recorded_filled_qty == 1.0
+
+
+async def test_fallback_skips_lone_partially_filled_buy(fallback_applier, tracker):
+    """recorded>0 인 open buy 는 유일하더라도 fallback 후보가 아니다.
+
+    잔고 excess 가 ordered_qty 와 같아도 적용하지 않고, 후보가 없으므로
+    get_positions 도 부르지 않는다(§11.2).
+    """
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-partial",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=DATE,
+    )
+    partial_delta = await app.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=1.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert partial_delta == 1.0
+    assert (await tracker.get("ord-partial")).status == "partially_filled"
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 3.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+
+    result = await sched.catch_up_once()
+
+    assert broker.history_calls == 1
+    assert result.applied == 0
+    assert broker.positions_calls == 0
+    rec = await tracker.get("ord-partial")
+    assert rec.recorded_filled_qty == 1.0
+    assert rec.status == "partially_filled"
+    assert sched._fallback_verify == {}
 
 
 async def test_get_positions_not_called_when_no_open_buy(fallback_applier, tracker):

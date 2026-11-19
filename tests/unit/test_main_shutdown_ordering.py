@@ -130,6 +130,68 @@ async def test_shutdown_keeps_ipc_socket_alive_until_db_closed(
 
 
 @pytest.mark.asyncio
+async def test_shutdown_sweeps_signal_channels_before_bots_and_db(
+    socket_path: str,
+) -> None:
+    """시그널 채널 sweep 은 stop_accepting 뒤, bot stop_all·db.close 앞이며
+    freeze 가 close_all('draining') 보다 먼저다."""
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
+
+    cmd_registry = CommandRegistry()
+    service_registry = _make_service_registry()
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+
+    events: list[str] = []
+    original_stop_accepting = server.stop_accepting
+
+    async def tracked_stop_accepting() -> None:
+        events.append("ipc_stop_accepting")
+        await original_stop_accepting()
+
+    server.stop_accepting = tracked_stop_accepting  # type: ignore[method-assign]
+
+    class _TrackedRegistry(SignalChannelRegistry):
+        def freeze(self) -> None:
+            events.append("signal_freeze")
+            super().freeze()
+
+        async def close_all(self, reason: str) -> None:
+            events.append(f"signal_close_all:{reason}")
+            await super().close_all(reason)
+
+    class _StubBotManager:
+        async def stop_all(self) -> None:
+            events.append("bot_stop_all")
+
+    class _StubDatabase:
+        async def close(self) -> None:
+            events.append("db_close")
+
+    s = Services(
+        ipc_server=server,
+        bot_manager=_StubBotManager(),
+        db=_StubDatabase(),
+        signal_channel_registry=_TrackedRegistry(),
+    )
+
+    try:
+        await _shutdown(s)
+    finally:
+        if Path(socket_path).exists():
+            Path(socket_path).unlink()
+
+    expected = [
+        "ipc_stop_accepting",
+        "signal_freeze",
+        "signal_close_all:draining",
+        "bot_stop_all",
+        "db_close",
+    ]
+    assert [e for e in events if e in expected] == expected, f"events: {events}"
+
+
+@pytest.mark.asyncio
 async def test_shutdown_socket_file_present_during_bot_and_db_phase(
     socket_path: str,
 ) -> None:

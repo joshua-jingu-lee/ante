@@ -339,6 +339,28 @@ def test_error_category_literal_covers_taxonomy_eight_values() -> None:
     assert set(get_args(ErrorCategory)) == expected
 
 
+# ── registry ↔ class ``.code`` 일치 ───────────────────────────────────────────
+
+_REGISTERED_WITHOUT_CODE = {"ReadOnlyDatabaseError"}
+
+
+def test_registry_spec_code_matches_class_code_for_every_entry() -> None:
+    """``EXCEPTION_TO_SPEC`` 의 모든 클래스에서 클래스 ``.code`` 는 spec 코드와
+    같다. ``.code`` 가 없는 클래스는 명시한 집합뿐이다."""
+    assert EXCEPTION_TO_SPEC
+    without_code: set[str] = set()
+    mismatched: dict[str, tuple[str, str]] = {}
+    for klass, spec in EXCEPTION_TO_SPEC.items():
+        class_code = getattr(klass, "code", None)
+        if class_code is None:
+            without_code.add(klass.__name__)
+        elif class_code != spec.code:
+            mismatched[klass.__name__] = (class_code, spec.code)
+
+    assert mismatched == {}
+    assert without_code == _REGISTERED_WITHOUT_CODE
+
+
 # ── module public surface ─────────────────────────────────────────────────────
 
 
