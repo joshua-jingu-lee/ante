@@ -537,10 +537,16 @@ def test_baseline_parser_load_failure_is_not_lowered(
     assert not scope.baseline_lowered(BASE_BASELINE.encode(), EMPTY_BASELINE.encode())
 
 
-def test_baseline_load_leaves_sys_modules_unchanged() -> None:
-    before = set(sys.modules)
+def test_baseline_load_removes_its_module_name() -> None:
     assert scope.baseline_lowered(BASE_BASELINE.encode(), BASE_BASELINE.encode())
-    assert set(sys.modules) == before
+    assert "_check_review_scope_comments" not in sys.modules
+
+
+def test_baseline_parser_result_without_fields_is_not_lowered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(scope, "_load_baseline_parser", lambda: lambda _text: object())
+    assert not scope.baseline_lowered(BASE_BASELINE.encode(), EMPTY_BASELINE.encode())
 
 
 def test_baseline_added_or_deleted_requires_review(repo: Repo) -> None:

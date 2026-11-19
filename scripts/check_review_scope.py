@@ -1,8 +1,32 @@
 #!/usr/bin/env python3
 """Decide whether a branch diff can skip Gate A (branch review).
 
-Exit 0: every changed file is a doc path, an AST-identical ``src/`` file, or
-the comment baseline with no value above base.
+This docstring is the canonical definition of the skip classes. Each changed
+file (base = merge-base of ``--base`` and ``--head``) gets one class:
+
+- ``doc``: added, modified, deleted or renamed within ``docs/**``,
+  ``.agent/**``, ``guide/**`` or a ``*.md`` file at the repository root, as a
+  regular file whose mode does not change.
+- ``ast-identical``: a modified ``src/**/*.py`` file with the same regular
+  file mode whose AST is equal once the docstring (the first string statement
+  of the module, a class or a function) is dropped. Only comments and those
+  docstrings changed.
+- ``baseline-lowered``: ``scripts/comment_baseline.json`` modified with the
+  same regular file mode, both sides passing ``parse_baseline`` of
+  ``check_comments.py`` (loaded by file path next to this script), every head
+  key of ``comments`` and ``docstring_history`` present in base with a value
+  not above base, and ``docstring_lines`` not above base. A removed key is a
+  decrease. A key missing from base, or a side that cannot be loaded or
+  validated, is ``review``.
+- ``review``: anything else.
+
+Known limits of ``baseline-lowered``: it compares per-file counts only, so a
+change that removes comments from a file and adds fewer new ones there, or
+rewrites docstrings without adding lines, still skips. When ``comments`` in
+the baseline is ``{}``, any added comment creates a new key and is ``review``.
+
+Exit 0: every changed file is ``doc``, ``ast-identical`` or
+``baseline-lowered``.
 Exit 1: at least one file needs review, or the diff is empty.
 Exit 2: the decision could not be made (git failure, bad ref).
 
@@ -203,13 +227,13 @@ def baseline_lowered(old: bytes, new: bytes) -> bool:
         parse = _load_baseline_parser()
         before = parse(old.decode("utf-8"))
         after = parse(new.decode("utf-8"))
+        return bool(
+            _not_above(after.comments, before.comments)
+            and _not_above(after.docstring_history, before.docstring_history)
+            and after.docstring_lines <= before.docstring_lines
+        )
     except Exception:
         return False
-    return (
-        _not_above(after.comments, before.comments)
-        and _not_above(after.docstring_history, before.docstring_history)
-        and after.docstring_lines <= before.docstring_lines
-    )
 
 
 def classify(change: Change) -> str:
