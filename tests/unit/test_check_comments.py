@@ -447,6 +447,7 @@ def test_unreadable_source_exits_2(
 
     assert code == 2
     assert "src/ante/sub/b.py" in message
+    assert "PermissionError" in message
 
 
 def test_too_deep_source_exits_2(tmp_path: Path, capsys: Capsys) -> None:
@@ -459,6 +460,16 @@ def test_too_deep_source_exits_2(tmp_path: Path, capsys: Capsys) -> None:
 
     assert code == 2
     assert "src/ante/deep.py" in message
+
+
+def test_parser_stack_overflow_exits_2(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _tree(tmp_path))
+    _write_source(tmp_path, "src/ante/stack.py", "x = " + "-" * 100_000 + "1\n")
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 2
+    assert "src/ante/stack.py" in message
 
 
 def test_old_python_exits_2(

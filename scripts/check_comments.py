@@ -138,18 +138,12 @@ def measure(root: Path) -> Measurement:
         rel = path.relative_to(root).as_posix()
         try:
             data = path.read_bytes()
-        except OSError as exc:
-            raise CheckError(f"cannot read {rel}: {exc}") from exc
-        try:
             comment_count = count_comments(data)
             history_count, line_count = measure_docstrings(data)
-        except (
-            tokenize.TokenError,
-            SyntaxError,
-            UnicodeDecodeError,
-            RecursionError,
-        ) as exc:
-            raise CheckError(f"cannot tokenize or parse {rel}: {exc}") from exc
+        except Exception as exc:
+            raise CheckError(
+                f"cannot read, tokenize or parse {rel}: {type(exc).__name__}: {exc}"
+            ) from exc
         if comment_count:
             comments[rel] = comment_count
         if history_count:
