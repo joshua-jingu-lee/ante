@@ -32,8 +32,12 @@ Measured per file in ``src/ante/**/*.py``:
 
 Measured in total: docstring source lines.
 
-Known limit of docstring excess: it is a per-file sum, so shortening one
+Known limits of docstring excess: it is a per-file sum, so shortening one
 docstring and lengthening another in the same file by as much still passes.
+The ``click`` test reads the attribute name only, so a function decorated with
+``.command`` or ``.group`` of a non-Click object has no limit, and a bare-name
+decorator (``@command()`` after ``from click import command``) is not
+``click``.
 
 Exit 0: all four values equal ``scripts/comment_baseline.json``.
 Exit 1: any value is above or below the baseline. Only the comparison
@@ -90,9 +94,9 @@ ALTERNATIVES = (
     "새 주석 대신:\n"
     "  - 이름을 고치거나 함수로 추출한다\n"
     "  - 불변식은 타입·assert·테스트로 옮긴다\n"
-    "  - 이력은 커밋 메시지에 쓴다\n"
-    "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
+    "  - 이력은 커밋 메시지에 쓴다"
 )
+MOVE_HINT = "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
 
 CLICK = "click"
 PRIVATE = "private"
@@ -119,8 +123,7 @@ EXCESS_ALTERNATIVES = (
     "그 밖의 문자열 문장 0줄, Click 명령은 없음.\n"
     "상한을 넘긴 독스트링 대신:\n"
     "  - 독스트링을 줄인다\n"
-    "  - 불변식은 테스트로 옮긴다\n"
-    "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
+    "  - 불변식은 테스트로 옮긴다"
 )
 
 
@@ -454,6 +457,8 @@ def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
                 for doc in actual.oversized.get(path, [])
             )
         parts.append(EXCESS_ALTERNATIVES)
+    if grew or excess_grew:
+        parts.append(MOVE_HINT)
     if docstring_grew:
         parts.append(
             f"독스트링 총 줄 수가 {got - want}줄 늘었다. 다른 독스트링을 그만큼 줄인다."

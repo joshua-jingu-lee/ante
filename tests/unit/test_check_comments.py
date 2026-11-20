@@ -628,6 +628,11 @@ def test_owner_limit_and_excess(case: str, lines: int) -> None:
         "@x.command",
         "@x.group",
         "@a.b.command(name='x', help='y')",
+        pytest.param("@functools.wraps(g)\n@cli.command()", id="click-not-first"),
+        pytest.param("@cli.command()\n@click.option('--x')", id="click-not-last"),
+        pytest.param(
+            "@staticmethod\n@cli.group()\n@click.pass_context", id="click-middle"
+        ),
     ],
 )
 @pytest.mark.parametrize("name", ["run", "_run"])
@@ -836,6 +841,7 @@ def test_private_docstring_growth_fails_and_lists_docstrings(
     assert "독스트링을 줄인다" in message
     assert "불변식은 테스트로 옮긴다" in message
     assert "함수로 추출한다" not in message
+    assert message.count("기준선의 키를 새 경로로 옮긴다") == 1
     assert "docstring_lines" not in message
 
 
@@ -858,6 +864,30 @@ def test_excess_growth_lists_every_oversized_docstring_of_the_file(
     assert "  src/ante/m.py:1 module <module> 5>3" in message
     assert "  src/ante/m.py:9 private _f 3>1" in message
     assert "  src/ante/m.py:15 class C 12>10" in message
+
+
+def test_comment_and_excess_growth_give_move_hint_once(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path, private_lines=1)
+    _write_source(
+        tmp_path,
+        "src/ante/m.py",
+        '"""Module."""\n\n\ndef _f():  # note\n'
+        + _doc(2)
+        + '\n\ndef g():\n    """G."""\n',
+    )
+    baseline["docstring_lines"] += 1
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "comments\tsrc/ante/m.py: actual 1, baseline 0 (+1)" in message
+    assert "docstring_excess\tsrc/ante/m.py: actual 1, baseline 0 (+1)" in message
+    assert "함수로 추출한다" in message
+    assert "독스트링을 줄인다" in message
+    assert message.count("기준선의 키를 새 경로로 옮긴다") == 1
 
 
 def test_shortened_docstring_without_lowering_baseline_fails(
