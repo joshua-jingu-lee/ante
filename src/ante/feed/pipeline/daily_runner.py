@@ -79,14 +79,6 @@ class DailyRunner:
         ctx = _RunContext()
         store = self._store or ParquetStore(base_path=data_path)
 
-        # 각 store 쓰기 단계 직후 store의 merge 이상 경고를 drain하여
-        # CollectionResult.warnings(→ daily report `warnings`)로 표면화한다.
-        # backfill_runner.run()의 drain 지점(data.go.kr/DART/지표 후)을
-        # 정확히 미러한다(#2002). collector 미주입(None) skip 경로에서도
-        # drain은 빈 경고를 반환해 안전하다.
-        # 적재는 반드시 ctx.add_warnings() chokepoint를 경유한다(#2414) —
-        # 직접 extend하면 daily 리포트의 warnings 배열에는 store_merge가 있는데
-        # summary.warnings_by_type에는 없는 자기모순 리포트가 된다.
         await self._collect_data_go_kr(target_date, store, ctx)
         ctx.add_warnings(store.drain_warnings())
         await self._collect_dart(
@@ -124,8 +116,6 @@ class DailyRunner:
                 store,
             )
             ctx.add_success(net_delta, syms, warns)
-            # data_types는 유효 데이터 store 반영 여부(stored_ok)로 표시한다 —
-            # 재수집(net_delta=0)이어도 데이터가 store에 있으므로 True(#1993).
             if stored_ok:
                 ctx.data_types.update(["ohlcv", "fundamental"])
         except (DataGoKrDailyLimitError, DataGoKrCriticalError) as exc:
@@ -164,10 +154,6 @@ class DailyRunner:
 
         checkpoint = Checkpoint(feed_dir, "dart", "fundamental")
         try:
-            # daily=True: DART는 분기 공시이므로 daily-equivalent은 "최신
-            # collectable 분기 1개"만 수집한다(#2101). backfill_since 전 분기를
-            # 순회하지 않는다. 과거 미충전 분기 보정은 backfill 모드 책임이며,
-            # daily는 최신 분기 증분만 담당한다.
             net_delta, stored_ok, syms, warns = await self._dart.collect(
                 data_path,
                 feed_dir,
@@ -177,7 +163,6 @@ class DailyRunner:
                 daily=True,
             )
             ctx.add_success(net_delta, syms, warns)
-            # data_types는 유효 분기 저장 여부(stored_ok)로 표시한다(#1993).
             if stored_ok:
                 ctx.data_types.add("fundamental")
         except (DARTDailyLimitError, DARTCriticalError) as exc:

@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 REPORTS_DIR = "reports"
 
-# started_at parse 실패 시 정렬 후순위로 밀기 위한 sentinel(UTC aware).
 _MIN_STARTED_AT = datetime.min.replace(tzinfo=UTC)
 
 
@@ -53,11 +52,7 @@ class ReportGenerator:
                 "symbols_total": result.symbols_total,
                 "symbols_success": result.symbols_success,
                 "symbols_failed": result.symbols_failed,
-                # 총 실패 건수(날짜/소스 단위 비-심볼 실패 포함). symbols_failed는
-                # 종목 귀속 실패만 세므로 symbols_failed=0이어도 >0일 수 있다(#2117).
                 "failures_total": len(result.failures),
-                # 경고는 type 버킷별로 유계 절단되므로(#2414) len(warnings)는
-                # 총계가 아니다 — 전수 정확 집계를 result에서 그대로 읽는다.
                 "warnings_total": result.warnings_total,
                 "warnings_by_type": dict(result.warnings_by_type),
                 "warnings_truncated": result.warnings_truncated,
@@ -90,15 +85,12 @@ class ReportGenerator:
             저장된 리포트 파일 경로.
         """
         started_at = report["started_at"]
-        # ISO started_at(예: '2026-03-17T16:00:12Z')의 초까지(YYYY-MM-DDTHH:MM:SS)
-        # 잘라 콜론을 제거 → '2026-03-17T160012' (fs-safe).
         timestamp = started_at[:19].replace(":", "")
 
         reports_dir = data_path / ".feed" / REPORTS_DIR
         reports_dir.mkdir(parents=True, exist_ok=True)
 
         file_path = reports_dir / f"{timestamp}-{mode}.json"
-        # 같은 초 rerun으로 파일명이 겹치면 suffix를 붙여 덮어쓰기 방지.
         collision = 0
         while file_path.exists():
             collision += 1
@@ -135,7 +127,6 @@ class ReportGenerator:
             return []
 
         files = list(reports_dir.glob("*.json"))
-        # started_at 내림차순, tie는 파일명 역순(둘 다 reverse=True와 정합).
         files.sort(
             key=lambda path: (self._started_at_key(path), path.name),
             reverse=True,

@@ -26,28 +26,21 @@ from ante.feed.sources.base import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-# -- API 상수 (API 스펙 종속, 하드코딩) --------------------------------
 
 BASE_URL = "https://opendart.fss.or.kr/api"
-TPS_LIMIT = 10.0  # 보수적 설정
+TPS_LIMIT = 10.0
 DAILY_LIMIT = 20_000
-BATCH_SIZE = 100  # fnlttMultiAcnt 최대 100개 회사
-REQUEST_TIMEOUT = 60  # 다중회사 응답이 커질 수 있으므로 넉넉하게
+BATCH_SIZE = 100
+REQUEST_TIMEOUT = 60
 
-# 재시도 불가 HTTP status (spec 09-failure-recovery: 즉시 스킵/실패 로그).
-# 재시도 가능(408/429/5xx/timeout/연결 오류)은 이 집합 밖이라 기존대로 재시도된다.
 _NON_RETRYABLE_HTTP_STATUS = frozenset({400, 401, 403, 404, 422})
 
-# 보고서 코드 매핑
 REPRT_CODES: dict[str, str] = {
     "11013": "1분기보고서",
     "11012": "반기보고서",
     "11014": "3분기보고서",
     "11011": "사업보고서",
 }
-
-
-# -- 에러 분류 ---------------------------------------------------------
 
 
 class ErrorAction(StrEnum):
@@ -64,27 +57,24 @@ class ErrorAction(StrEnum):
 
 _ERROR_CODE_MAP: dict[str, ErrorAction] = {
     "000": ErrorAction.OK,
-    "010": ErrorAction.CRITICAL,  # 등록되지 않은 키
-    "011": ErrorAction.CRITICAL,  # 사용할 수 없는 키
-    "012": ErrorAction.CRITICAL,  # 접근할 수 없는 IP
-    "013": ErrorAction.NO_DATA,  # 조회된 데이터 없음
-    "014": ErrorAction.SKIP,  # 파일 존재하지 않음
-    "020": ErrorAction.DAILY_LIMIT,  # 요청 제한 초과
-    "021": ErrorAction.SKIP,  # 조회 가능 회사 개수 초과 (구현 버그)
-    "100": ErrorAction.SKIP,  # 부적절한 필드 값
-    "101": ErrorAction.SKIP,  # 부적절한 접근
-    "800": ErrorAction.RETRY,  # 시스템 점검 중
-    "900": ErrorAction.RETRY_ONCE,  # 정의되지 않은 오류 (spec: 1회 재시도 후 스킵)
-    "901": ErrorAction.CRITICAL,  # 개인정보 보유기간 만료
+    "010": ErrorAction.CRITICAL,
+    "011": ErrorAction.CRITICAL,
+    "012": ErrorAction.CRITICAL,
+    "013": ErrorAction.NO_DATA,
+    "014": ErrorAction.SKIP,
+    "020": ErrorAction.DAILY_LIMIT,
+    "021": ErrorAction.SKIP,
+    "100": ErrorAction.SKIP,
+    "101": ErrorAction.SKIP,
+    "800": ErrorAction.RETRY,
+    "900": ErrorAction.RETRY_ONCE,
+    "901": ErrorAction.CRITICAL,
 }
 
 
 def classify_error(status: str) -> ErrorAction:
     """DART status 코드를 행동으로 분류한다."""
     return _ERROR_CODE_MAP.get(status, ErrorAction.RETRY)
-
-
-# -- 예외 --------------------------------------------------------------
 
 
 class DARTError(Exception):
@@ -103,9 +93,6 @@ class CriticalApiError(DARTError):
     """키 미등록/만료 등 복구 불가능 에러."""
 
     pass
-
-
-# -- DARTSource --------------------------------------------------------
 
 
 class DARTSource:
@@ -205,10 +192,6 @@ class DARTSource:
             if own_session:
                 await session.close()
 
-        # daily_count는 _download_corp_code_zip 내부에서 각 HTTP attempt마다
-        # 카운트된다 (#2106). 여기서 성공 후 별도 increment하지 않는다.
-
-        # ZIP 해제 및 XML 파싱
         corp_code_map = self._parse_corp_code_zip(zip_bytes)
 
         logger.info(
@@ -216,7 +199,6 @@ class DARTSource:
             len(corp_code_map),
         )
 
-        # 파일 저장
         if save_path is not None:
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_text(
@@ -256,7 +238,6 @@ class DARTSource:
         session = self._session or aiohttp.ClientSession()
 
         try:
-            # 100개씩 배치 분할
             for batch_start in range(0, len(corp_codes), BATCH_SIZE):
                 batch = corp_codes[batch_start : batch_start + BATCH_SIZE]
 
@@ -315,7 +296,6 @@ class DARTSource:
             (valid, reason) 튜플. valid는 True/False/None.
         """
         url = f"{self._base_url}/fnlttMultiAcnt.json"
-        # 인증 평가만을 위한 최소 더미 파라미터(키 검증이 우선 수행됨).
         params = {
             "crtfc_key": self._api_key,
             "corp_code": "00000000",
@@ -346,10 +326,7 @@ class DARTSource:
 
         if action == ErrorAction.CRITICAL:
             return False, f"인증 실패 (status={status}): {message}"
-        # OK / NO_DATA / 그 외(키는 수락됨) → 유효.
         return True, None
-
-    # -- 내부 메서드 ---------------------------------------------------
 
     async def _download_corp_code_zip(
         self,
@@ -370,12 +347,8 @@ class DARTSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
-            # 실제 HTTP 요청(session.get) 시도 직전에 카운트한다.
-            # 성공/실패와 무관하게 모든 attempt를 반영한다 (#2106).
-            # 1 attempt = 1 increment.
             self._rate_limiter.increment_daily()
 
-            # 이번 attempt의 JSON 에러 코드 분류(없으면 전송 오류 = RETRY 취급).
             action = ErrorAction.RETRY
 
             try:
@@ -383,11 +356,9 @@ class DARTSource:
                     async with session.get(url, params=params) as resp:
                         content_type = resp.content_type or ""
 
-                        # ZIP 바이너리 응답
                         if "zip" in content_type or "octet-stream" in content_type:
                             return await resp.read()
 
-                        # JSON 에러 응답 (키 오류 등)
                         if "json" in content_type or "text" in content_type:
                             body = await resp.text()
                             try:
@@ -417,8 +388,6 @@ class DARTSource:
                             return await resp.read()
 
             except (TimeoutError, aiohttp.ClientError) as exc:
-                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
-                # 처리한다 (spec 09-failure-recovery, #2026).
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
                     and exc.status in _NON_RETRYABLE_HTTP_STATUS
@@ -428,9 +397,6 @@ class DARTSource:
                     raise DARTError(msg) from exc
                 last_error = exc
 
-            # RETRY_ONCE(900 정의되지 않은 오류)는 최대 1회만 재시도한다
-            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
-            # 전송 오류/일반 RETRY는 기존 max_retries를 유지한다.
             retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
             if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
@@ -443,7 +409,6 @@ class DARTSource:
                 )
                 await asyncio.sleep(delay)
             elif action == ErrorAction.RETRY_ONCE:
-                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
                 break
 
         msg = "DART 고유번호 ZIP 다운로드 최종 실패"
@@ -465,7 +430,6 @@ class DARTSource:
         corp_code_map: dict[str, str] = {}
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
-            # ZIP 내 첫 번째 파일(XML) 읽기
             xml_name = zf.namelist()[0]
             with zf.open(xml_name) as xml_file:
                 tree = ElementTree.parse(xml_file)
@@ -475,7 +439,6 @@ class DARTSource:
                     corp_code = elem.findtext("corp_code", "").strip()
                     stock_code = elem.findtext("stock_code", "").strip()
 
-                    # 비상장사 필터링 (stock_code가 비어있거나 공백)
                     if corp_code and stock_code:
                         corp_code_map[corp_code] = stock_code
 
@@ -516,9 +479,6 @@ class DARTSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
-            # 실제 HTTP 요청 시도(_do_request) 직전에 카운트한다.
-            # 성공/실패와 무관하게 모든 attempt를 반영한다 (#2106).
-            # 1 attempt = 1 increment.
             self._rate_limiter.increment_daily()
 
             try:
@@ -527,9 +487,6 @@ class DARTSource:
                     timeout=REQUEST_TIMEOUT,
                 )
             except (TimeoutError, aiohttp.ClientError) as exc:
-                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
-                # 처리한다 (spec 09-failure-recovery, #2026). body 에러 코드의
-                # SKIP 액션과 동일하게 error 로그 + DARTError raise.
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
                     and exc.status in _NON_RETRYABLE_HTTP_STATUS
@@ -553,7 +510,6 @@ class DARTSource:
                 await asyncio.sleep(delay)
                 continue
 
-            # 에러 코드 처리
             status = str(data.get("status", "900"))
             message = str(data.get("message", ""))
             action = classify_error(status)
@@ -585,11 +541,7 @@ class DARTSource:
                 logger.error(msg)
                 raise DARTError(msg)
 
-            # RETRY / RETRY_ONCE
             last_error = DARTError(f"DART API 에러 (status={status}): {message}")
-            # RETRY_ONCE(900 정의되지 않은 오류)는 최대 1회만 재시도한다
-            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
-            # attempt>=1이면 더 이상 재시도하지 않고 최종 실패로 떨어진다.
             retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
             if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
@@ -603,7 +555,6 @@ class DARTSource:
                 )
                 await asyncio.sleep(delay)
             elif action == ErrorAction.RETRY_ONCE:
-                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
                 break
 
         msg = f"DART fnlttMultiAcnt 요청 최종 실패: year={year}, reprt={reprt_code}"

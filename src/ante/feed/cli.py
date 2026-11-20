@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# zero-padded YYYY-MM-DD만 허용. date.fromisoformat()은 3.11+/3.13에서
-# basic ISO(20260510)·ISO week date(2026-W19-1) 등 변형도 수락하므로
-# 형태를 정규식으로 먼저 고정한 뒤 캘린더 유효성만 검증한다.
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -41,7 +38,6 @@ def _validate_iso_date(value: str, option: str, fmt: object) -> None:
         raise SystemExit(1)
 
     try:
-        # regex로 형태를 고정했으므로 캘린더 유효성(예: 2026-13-01)만 확인.
         date.fromisoformat(value)
     except ValueError:
         fmt.error(  # type: ignore[attr-defined]
@@ -56,11 +52,7 @@ _SCOPE_DATA_WRITE = "data:write"
 _SCOPE_DATA_READ = "data:read"
 _SEPARATOR = "──────────────────────────────────────────────────"
 
-# `[general].log_level` 에 허용되는 logging 레벨명 (대문자). 스펙
-# (docs/specs/data-feed/02-design-decisions.md) 의 DEBUG/INFO/WARNING/ERROR 에
-# CRITICAL 을 더한 표준 logging 레벨 집합이다.
 _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
-# DataFeed 패키지 로거. log_level 은 root 가 아닌 이 로거에만 적용한다.
 _FEED_LOGGER_NAME = "ante.feed"
 
 
@@ -165,10 +157,6 @@ def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> N
     _validate_guard_config(config, fmt)
 
 
-# `[general].nice_value` 허용 범위. POSIX nice 값 규약(0=기본, 19=최저
-# 우선순위)을 따르며 스펙(docs/specs/data-feed/02-design-decisions.md)의
-# `nice_value = 10  # 0~19` 주석과 일치한다. 음수(우선순위 상승)는 root
-# 권한이 필요하고 수집 작업의 의도(양보)와 반대이므로 허용하지 않는다.
 _NICE_VALUE_MIN = 0
 _NICE_VALUE_MAX = 19
 _NICE_VALUE_DEFAULT = 10
@@ -187,8 +175,6 @@ def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
     """
     general = config.get("general", {})
     if not isinstance(general, dict):
-        # 방어적: 통상 _apply_log_level 이 먼저 거부하나, 호출 순서에
-        # 의존하지 않도록 여기서도 동일 코드로 거부한다.
         fmt.error(  # type: ignore[attr-defined]
             f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})",
             code="CONFIG_INVALID_GENERAL",
@@ -232,9 +218,6 @@ def _apply_process_nice(nice_value: int) -> None:
     try:
         os.setpriority(os.PRIO_PROCESS, 0, nice_value)  # type: ignore[attr-defined]
     except (PermissionError, OSError, AttributeError, ValueError) as exc:
-        # AttributeError: 비-POSIX(os.setpriority/PRIO_PROCESS 부재)
-        # PermissionError/OSError: 권한·플랫폼 제약. ValueError: 범위 밖
-        # (검증을 통과한 값이므로 통상 발생하지 않으나 방어).
         logger.warning(
             "프로세스 우선순위(nice=%d) 적용 실패 — 수집은 계속합니다: %s",
             nice_value,
@@ -274,9 +257,6 @@ def feed() -> None:
     """DataFeed — 시세·재무 데이터 수집 파이프라인."""
 
 
-# ── config 서브그룹 ──────────────────────────────────────────────────────────
-
-
 @feed.group("config")
 def feed_config() -> None:
     """DataFeed 설정 관리 (API 키 등)."""
@@ -308,8 +288,6 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str | None) 
     try:
         env_path = cfg.set_api_key(key, value)
     except ValueError as e:
-        # #2051: 개행 등 .env quoting 미지원으로 거부된 value는 구조화
-        # 에러로 표면화한다(파일 미변경). set_api_key가 쓰기 전 검증한다.
         fmt.error(str(e), code="CONFIG_INVALID_VALUE")
         raise SystemExit(1) from e
 
@@ -391,17 +369,14 @@ def config_check(ctx: click.Context, data_path: str | None) -> None:
         click.echo()
 
 
-# ── run 서브그룹 ──────────────────────────────────────────────────────────────
-
-
 @feed.group("run")
 def feed_run() -> None:
     """수집을 1회 실행한다 (backfill / daily)."""
 
 
 def _build_orchestrator(
-    cfg,  # FeedConfig
-):  # -> FeedOrchestrator
+    cfg,
+):
     """FeedConfig의 API 키를 기반으로 FeedOrchestrator를 조립한다."""
     from ante.feed.pipeline.orchestrator import FeedOrchestrator
     from ante.feed.sources.dart import DARTSource
@@ -427,8 +402,8 @@ def _build_orchestrator(
 
 
 def _ensure_initialized(
-    cfg,  # FeedConfig
-    fmt,  # OutputFormatter
+    cfg,
+    fmt,
     data_path: str,
 ) -> bool:
     """초기화 상태를 확인하고 미초기화 시 에러를 출력한다."""
@@ -476,10 +451,6 @@ def run_backfill(
     if since is not None:
         _validate_iso_date(since, "--since", fmt)
 
-    # `--since` strict parse 통과 이후 effective start가 미래이면
-    # orchestrator 호출 전에 INVALID_DATE_RANGE로 즉시 거부한다.
-    # malformed는 위 `_validate_iso_date`가 이미 CLI_INVALID_DATE로
-    # 처리했으므로 여기서는 future-check만 책임진다.
     if since is not None:
         _parsed, since_err = validate_backfill_since(since)
         if since_err is not None and since_err.get("code") == (
@@ -494,7 +465,6 @@ def run_backfill(
     config = cfg.load_config()
     _validate_and_apply_feed_config(config, fmt)
 
-    # CLI 옵션으로 schedule 오버라이드
     if since is not None:
         schedule = config.setdefault("schedule", {})
         if isinstance(schedule, dict):
@@ -509,10 +479,6 @@ def run_backfill(
         )
     )
 
-    # 수렴점(BackfillRunner)에서 coded date config_error를 담아왔다면
-    # 성공 result 출력 없이 단일 envelope + exit 1로 매핑한다. 기존
-    # 비날짜 config_errors(소스 누락·lock 경합·rate-limit 등)는 code
-    # 키가 없으므로 이 분기에 진입하지 않고 현행 출력 흐름을 유지한다.
     for entry in result.config_errors:
         if not isinstance(entry, dict):
             continue
@@ -559,11 +525,6 @@ def run_daily(
 
     orchestrator = _build_orchestrator(cfg)
 
-    # #1943: --date 값을 명시 파라미터로 chain 한다. 이전에는
-    # `scheduler.generate_daily_date` 모듈 속성을 monkey-patch 했으나
-    # daily_runner.py 가 import 시점에 함수 객체를 local 로 바인딩하므로
-    # 그 패치는 실제 호출 경로에 닿지 않아 --date 가 무시되었다.
-    # ``target_date=None`` 이면 DailyRunner 내부에서 기본 fallback(어제).
     result = asyncio.run(
         orchestrator.run_daily(
             data_path=Path(data_path),
@@ -573,9 +534,6 @@ def run_daily(
     )
 
     format_daily_result(result, fmt)
-
-
-# ── start (상주 스케줄러) ─────────────────────────────────────────────────────
 
 
 @feed.command("start")
@@ -599,8 +557,6 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
 
     config = cfg.load_config()
     _validate_and_apply_feed_config(config, fmt)
-    # #2029: nice_value 를 fail-loud 검증한 뒤 상주 루프 진입 전에 적용한다.
-    # feed start 한정(스펙) — feed run 일회성에는 적용하지 않는다.
     nice_value = _validate_nice_value(config, fmt)
     schedule = config.get("schedule", {})
     daily_at = (
@@ -612,14 +568,8 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
 
     orchestrator = _build_orchestrator(cfg)
 
-    # #2029: 상주 스케줄러 루프(run_scheduler_loop) 진입 전에 OS 우선순위를
-    # 낮춰 봇이 CPU 를 필요로 할 때 양보하도록 한다. best-effort.
     _apply_process_nice(nice_value)
 
-    # #2030/#2070: 스케줄러 진입 chokepoint 에서 시간 형식을 1회 fail-fast
-    # 검증해 non-padded("9:00") 등으로 인한 조용한 미실행을 차단한다.
-    # run_scheduler_loop 진입부에도 동일 가드가 있으나(defense-in-depth),
-    # CLI 에서는 traceback 대신 구조화 에러로 변환해 출력한다.
     try:
         asyncio.run(
             run_scheduler_loop(
@@ -638,9 +588,6 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
         click.echo("\nDataFeed 스케줄러 종료")
-
-
-# ── init ─────────────────────────────────────────────────────────────────────
 
 
 @feed.command("init")
@@ -667,9 +614,6 @@ def feed_init(ctx: click.Context, data_path: str | None) -> None:
         click.echo(_API_KEY_GUIDE)
 
 
-# ── status ────────────────────────────────────────────────────────────────────
-
-
 @feed.command("status")
 @click.option("--data-path", default=None, help=_DATA_PATH_HELP)
 @click.pass_context
@@ -693,14 +637,11 @@ def feed_status(ctx: click.Context, data_path: str | None) -> None:
             click.echo(f"초기화: ante feed init {data_path}")
         return
 
-    # 1. 체크포인트 로드
     checkpoints = _load_checkpoints(cfg.feed_dir)
 
-    # 2. 최근 리포트 1건 로드
     report_gen = ReportGenerator(cfg.feed_dir)
     latest_report = _load_latest_report(report_gen)
 
-    # 3. API 키 상태 확인
     api_keys = cfg.check_api_keys()
 
     if fmt.is_json:
@@ -718,7 +659,7 @@ def feed_status(ctx: click.Context, data_path: str | None) -> None:
 
 
 def _echo_status_text(
-    cfg: object,  # FeedConfig
+    cfg: object,
     checkpoints: list[dict[str, str]],
     latest_report: dict | None,
     api_keys: list[dict],
@@ -758,16 +699,9 @@ def _echo_report_section(latest_report: dict | None) -> None:
     click.echo(_SEPARATOR)
     if latest_report:
         summary = latest_report.get("summary", {})
-        # 총 실패 건수: summary.failures_total(신규)을 우선하되, 구버전 리포트엔
-        # 없으므로 failures 배열 길이로 폴백한다. 날짜/소스 단위 비-심볼 실패는
-        # symbols_failed에 잡히지 않으므로 별도 병기한다(#2117).
         failures_total = summary.get(
             "failures_total", len(latest_report.get("failures", []))
         )
-        # 총 경고 건수: summary.warnings_total(신규)을 우선한다. warnings 배열은
-        # type 버킷별로 유계 절단되므로(#2414) len()은 절단 시 총계가 아니라
-        # 보존 샘플 수이며 축소 보고가 된다. 구버전 리포트에는 이 필드가 없으므로
-        # 그때만 len() 폴백을 쓴다(#2117 failures_total 패턴 미러).
         warnings_total = summary.get(
             "warnings_total", len(latest_report.get("warnings", []))
         )
@@ -841,9 +775,6 @@ def _load_latest_report(
         return None
 
 
-# ── inject ───────────────────────────────────────────────────────────────────
-
-
 @feed.command("inject")
 @click.argument("path", type=click.Path(exists=True))
 @click.option("--symbol", required=True, help="종목 코드 (6자리)")
@@ -877,15 +808,6 @@ def feed_inject(
     fmt = get_formatter(ctx)
     filepath = _Path(path)
 
-    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, #1613 SSOT helper 위임).
-    # precedence: ① timeframe → ② KRX symbol shape. ParquetStore 생성·
-    # FeedInjector·injector.inject_csv·내부 store.write 이전이어야 invalid
-    # 입력이 비표준 parquet dataset을 생성하지 않는다(#1592 oracle 증상).
-    # ParquetStore.__init__은 디렉터리를 만들지 않고 store.write()만 mkdir
-    # 하므로 formatter 후·store 생성 전 배치하면 parquet 미생성을 보장한다.
-    # `feed inject`는 --exchange 옵션 없는 KRX-domain이라 symbol에
-    # is_krx_symbol을 직접 적용한다 (core.md `### KRX symbol shape` 정합 —
-    # 비-KRX 경로 부재). `--symbol`은 required이므로 None 케이스가 없다.
     if not is_valid_timeframe(timeframe):
         fmt.error(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
@@ -930,11 +852,6 @@ def feed_inject(
             }
         )
     else:
-        # #2050: 하드코딩된 경로(`ohlcv/krx/{tf}/{symbol}/`)는 실제
-        # ParquetStore 레이아웃(`ohlcv/{tf}/{exchange}/{symbol}/`)과 순서·
-        # 대소문자가 어긋났다. injector가 store.write를 default exchange="KRX"
-        # 로 호출하므로 동일 인자로 store.resolve_path를 호출해 실제 저장
-        # 경로를 그대로 출력한다(drift 방지). base 상대경로로 표시한다.
         written = store.resolve_path(symbol, timeframe, exchange="KRX")
         try:
             written_display = written.relative_to(_Path(data_path))

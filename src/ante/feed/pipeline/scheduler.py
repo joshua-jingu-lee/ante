@@ -8,9 +8,6 @@ from datetime import date, datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-# KST(UTC+9) 캘린더 기준. backfill_runner._KST / dart_collector._KST와
-# 동일 기준이어야 한다(repo 전반 KST 정합). feed 스케줄/검증은 모두 KST today를
-# 사용하므로 OS local TZ가 아닌 KST로 기본 날짜를 산출한다.
 _KST = timezone(timedelta(hours=9))
 
 
@@ -35,7 +32,6 @@ def generate_backfill_dates(
     start_date = date.fromisoformat(start)
     end_date = date.fromisoformat(end) if end else datetime.now(tz=_KST).date()
 
-    # 체크포인트가 있으면 그 다음 날부터 시작
     if last_checkpoint:
         checkpoint_date = date.fromisoformat(last_checkpoint)
         effective_start = checkpoint_date + timedelta(days=1)
@@ -87,5 +83,4 @@ def is_business_day(target: str) -> bool:
         영업일이면 True.
     """
     d = date.fromisoformat(target)
-    # weekday(): 0=월, 1=화, ..., 4=금, 5=토, 6=일
     return d.weekday() < 5

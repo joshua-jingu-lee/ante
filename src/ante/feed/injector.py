@@ -20,7 +20,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# inject 시 스키마 검증에 사용할 OHLCV 필수 필드
 _OHLCV_REQUIRED_FIELDS = ["timestamp", "open", "high", "low", "close", "volume"]
 
 
@@ -71,13 +70,11 @@ class FeedInjector:
             logger.warning("빈 CSV 파일: %s", path)
             return 0
 
-        # 정규화
         normalized = self._normalizer.normalize(
             df, source=source, format_hint=format_hint
         )
         normalized = normalized.with_columns(pl.lit(symbol).alias("symbol"))
 
-        # 4계층 검증 (스키마 + 비즈니스)
         self._validate(normalized)
 
         self._store.write(symbol, timeframe, normalized)
@@ -119,7 +116,6 @@ class FeedInjector:
         if "source" not in df.columns:
             df = df.with_columns(pl.lit(source).alias("source"))
 
-        # 4계층 검증 (스키마 + 비즈니스)
         self._validate(df)
 
         self._store.write(symbol, timeframe, df)
@@ -140,12 +136,10 @@ class FeedInjector:
         """
         records = df.to_dicts()
 
-        # 스키마 계층 검증
         schema_result = validate_schema(records, _OHLCV_REQUIRED_FIELDS)
         if not schema_result.passed:
             raise ValueError(f"스키마 검증 실패: {'; '.join(schema_result.errors)}")
 
-        # 비즈니스 계층 검증 (경고만, 저장은 허용)
         business_result = validate_business(records)
         for warning in business_result.warnings:
             logger.warning("비즈니스 검증 경고: %s", warning)

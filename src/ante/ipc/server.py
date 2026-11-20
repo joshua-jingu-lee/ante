@@ -29,17 +29,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Refs #2334 §14 (#2337): signal.connect outbound out_queue 의 bounded 상한.
-# 초과(laggard)면 disconnect-laggard 로 ``{closed,reason:lagged}`` 후 종료한다.
-# config 화는 §14 follow-up(본 PR 은 상수, known-limitation).
 SIGNAL_OUT_QUEUE_MAX = 512
-# Refs #2337 F2: daemon-initiated close 가 in-flight on_data publish 를 grace
-# 동안 await 한 뒤 read_task 를 cancel 한다(at-most-one trailing). 초과분은
-# 백그라운드 publish 계속 + read_task cancel(§14 tunable, known-limitation).
 SIGNAL_INFLIGHT_GRACE = 2.0
-# Refs #2337: signal.connect 핸드셰이크의 expected typed-validation 거부 코드.
-# ``_dispatch`` 가 이 집합의 코드는 traceback 없는 구조화 WARNING 으로 로깅해
-# 키/args 노출과 가짜 ERROR traceback 을 회피한다(그 외는 logger.exception).
 _EXPECTED_DISPATCH_REJECT_CODES = frozenset(
     {
         "INVALID_SIGNAL_KEY",
@@ -107,11 +98,7 @@ class IPCServer:
         self._service_registry = service_registry
         self._command_registry = command_registry
         self._server: asyncio.AbstractServer | None = None
-        # Refs #1159: stop_accepting()이 self._server를 None으로 비워도
-        # drain_connections()이 wait_closed()를 호출할 수 있도록
-        # closing reference를 별도 슬롯에 보존한다.
         self._closing_server: asyncio.AbstractServer | None = None
-        # Refs #1184: lifecycle state machine. 초기 상태는 STOPPED.
         self._state: IPCServerState = IPCServerState.STOPPED
 
     @property
@@ -143,13 +130,8 @@ class IPCServer:
         """
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        # Refs #2334 §보안 (#2337): runtime dir 0o700(소유자만 접근). umask
-        # 독립적으로 기존 dir 에도 재적용한다 — server.start 가 단독 0o700
-        # 소유자다(main.py 의 mkdir 은 chmod 하지 않음). socket 0o600 과 함께
-        # 외부 프로세스의 signal.connect UDS 접근면을 닫는다.
         os.chmod(path.parent, 0o700)
 
-        # 잔존 소켓 파일 정리
         if path.exists():
             path.unlink()
 
@@ -159,10 +141,8 @@ class IPCServer:
             cleanup_socket=False,
         )
 
-        # 소켓 파일 권한 설정 (소유자만 접근)
         os.chmod(self._socket_path, 0o600)
 
-        # Refs #1184: listener 준비 완료 후 RUNNING으로 전환.
         self._state = IPCServerState.RUNNING
 
         logger.info("IPCServer 시작: %s", self._socket_path)
@@ -183,12 +163,9 @@ class IPCServer:
         전환한다. 이래야 close 진행 중에 들어오는 dispatch도 mutating이라면
         ``SERVICE_UNAVAILABLE``로 거부된다.
         """
-        # Refs #1184: 즉시 SHUTTING_DOWN으로 전환 — close 호출 전에 dispatch
-        # gate가 활성화되어야 race window가 닫힌다.
         self._state = IPCServerState.SHUTTING_DOWN
 
         if self._server:
-            # drain_connections에서 wait_closed를 호출할 수 있도록 reference 보존
             self._closing_server = self._server
             self._server.close()
             self._server = None
@@ -234,7 +211,6 @@ class IPCServer:
         path = Path(self._socket_path)
         if path.exists():
             path.unlink()
-        # Refs #1184: 모든 cleanup 종료 후 STOPPED 전환.
         self._state = IPCServerState.STOPPED
         logger.info("IPCServer 소켓 파일 제거: %s", self._socket_path)
 
@@ -261,7 +237,6 @@ class IPCServer:
                 try:
                     request = await protocol.decode(reader)
                 except asyncio.IncompleteReadError:
-                    # 클라이언트 연결 종료
                     break
                 except MessageTooLargeError as e:
                     response = {
@@ -277,9 +252,6 @@ class IPCServer:
                     await writer.drain()
                     break
 
-                # Refs #2334 (#2336 PR#1): 첫 프레임이 JSON object 가 아니면
-                # (list/scalar 등) MALFORMED_REQUEST 1프레임 후 close. 비-dict 는
-                # usable id 가 없어 id=None (MESSAGE_TOO_LARGE 블록 미러).
                 if not isinstance(request, dict):
                     response = self._malformed_request("요청은 JSON object여야 합니다")
                     data = await protocol.encode(response)
@@ -289,26 +261,15 @@ class IPCServer:
 
                 response = await self._dispatch(request)
 
-                # Refs #2334 (#2336 PR#1): signal.connect 핸드셰이크 OK 응답이면
-                # 동일 연결을 long-lived 스트림으로 connection-upgrade 한다.
-                # 센티넬은 ``response["result"]["_stream"]`` (중첩) — 최상위로
-                # 읽으면 silent fall-through 로 센티넬이 누출된다.
                 result = response.get("result")
                 if (
                     response.get("status") == "ok"
                     and isinstance(result, dict)
                     and result.get("_stream") == "signal.connect"
                 ):
-                    # wire 전송 직전 센티넬 strip (절대 노출 안 됨).
                     result.pop("_stream", None)
                     session_id = result["session_id"]
                     bot_id = result["bot_id"]
-                    # #2337 F1+F4 (3): ack write/drain 실패 시 register 누수 차단.
-                    # register 는 핸드셰이크 핸들러(ack 전 happen-before)에서 이미
-                    # 성공했으나, ack write 실패 시 ``_run_signal_stream`` 미진입
-                    # → finally 부재 → handle 누수. 여기서 unregister(missing-key
-                    # no-op 라 stream finally 와 멱등)로 차단한 뒤 re-raise 해
-                    # ``_handle_connection`` finally 가 writer teardown 을 소유한다.
                     reg = getattr(
                         self._service_registry, "signal_channel_registry", None
                     )
@@ -321,8 +282,6 @@ class IPCServer:
                             reg.unregister(bot_id, session_id)
                         raise
                     await self._run_signal_stream(reader, writer, bot_id, session_id)
-                    # break 아님 — hijack 연결은 lockstep 재진입 금지. finally 가
-                    # teardown(writer close) 를 단일 소유한다.
                     return
 
                 data = await protocol.encode(response)
@@ -455,7 +414,6 @@ class IPCServer:
         args = request.get("args", {})
         actor = request.get("actor", "ipc")
 
-        # Refs #1184: 리소스 drain/종료 단계에서는 모든 명령을 즉시 거부.
         if self._state in {IPCServerState.DRAINING, IPCServerState.STOPPED}:
             message = (
                 "서버 리소스 종료 중입니다. IPC 명령을 받지 않습니다."
@@ -475,32 +433,17 @@ class IPCServer:
                 },
             }
 
-        # Refs #1184: SHUTTING_DOWN 단계에서는 mutating 명령만 거부.
-        # read-only는 통과 (BotManager/DB 아직 살아 있음).
         if self._state == IPCServerState.SHUTTING_DOWN and spec.is_mutating:
             return self._service_unavailable(
                 request_id,
                 "서버가 종료 중입니다. 변경 명령을 받지 않습니다.",
             )
 
-        # Refs #1850: required_services preflight — handler 호출 전에 검증.
-        # ServiceRegistry 는 dataclass 이며 optional service 는 default=None
-        # 이므로 ``getattr(..., None) is None`` 이면 부재로 판정한다.
         missing = self._missing_required_service(spec.required_services)
         if missing is not None:
             return self._service_not_configured(request_id, missing)
 
         try:
-            # Refs #1850: account_id_policy preflight — try 블록 내부에서
-            # ``require_account_id`` 를 호출해 ``InvalidAccountIdError``
-            # (``code="VALIDATION_ERROR"``) 가 아래 except 에서
-            # ``VALIDATION_ERROR`` envelope 으로 자동 변환되도록 한다.
-            # ``required``: account_id 가 반드시 존재해야 하므로 ``args.get``
-            # 결과(부재 시 ``None``) 를 그대로 require_account_id 에 넘긴다.
-            # ``optional_filter``: filter 인자로 사용되며 부재면 skip, 존재
-            # 하면 검증한다. ``none``: skip. handler 본문의 기존
-            # ``require_account_id`` 호출은 본 PR scope 외 — valid 값에서는
-            # 멱등하므로 중복 호출이어도 안전(#1852 후속에서 제거 가능).
             if spec.account_id_policy == "required":
                 from ante.account.scoping import require_account_id
 
@@ -513,15 +456,6 @@ class IPCServer:
                     require_account_id(account_id_arg, context=f"ipc.{command}")
 
             result = await spec.handler(self._service_registry, args, actor)
-            # Refs #1851: handler 정상 종료 후 audit_action 자동 발화.
-            # ``_audit_detail`` reserved key 는 ``pop`` 으로 envelope 노출
-            # 전에 strip 된다 (public payload 누출 invariant).
-            # ``audit_action`` 부여 commands(현재 10개 — #1852 / #1853 포함)는
-            # ``required_services`` 에 ``audit_logger`` 가 포함되어 있어
-            # preflight 단계에서 부재가 이미 차단됨 — 여기서는 ``getattr``
-            # safe-access 로 한 번 더 방어한다 (handler 가 dict 가 아닌 다른
-            # shape 을 반환하는 경우에도 strip 시도가 실패하지 않도록
-            # isinstance 가드).
             audit_detail: dict | None = None
             if isinstance(result, dict):
                 audit_detail = result.pop("_audit_detail", None)
@@ -530,13 +464,6 @@ class IPCServer:
                 if audit_logger is not None:
                     if audit_detail is None:
                         audit_detail = {}
-                    # Refs #2113: auth-exempt member 명령(reset_password /
-                    # regenerate_recovery_key)은 client 가 actor 를 임의로 보낼
-                    # 수 있으므로(스푸핑 가능) audit member_id 를 client actor 가
-                    # 아니라 handler 가 ``_audit_detail["member_id"]`` 로 고정한
-                    # sentinel 상수로 기록해야 한다. handler 가 member_id 를
-                    # 명시하지 않으면 기존 동작(``actor`` 사용)을 그대로 유지한다
-                    # (순수 additive override — 기존 audit_action 명령 회귀 없음).
                     audit_member_id = audit_detail.get("member_id") or actor
                     await audit_logger.log(
                         member_id=audit_member_id,
@@ -551,16 +478,7 @@ class IPCServer:
                 "result": result,
             }
         except Exception as e:
-            # 예외 인스턴스/클래스에 ``code`` 속성이 있으면 안정 코드로
-            # 노출한다 (#1144 invariant S5). 기존 예외(account.suspend/activate
-            # 등)는 ``code`` 속성이 없어 자동으로 ``EXECUTION_ERROR``로
-            # 폴백된다 — 회귀 없음. Refs #1850: ``InvalidAccountIdError``
-            # (``code="VALIDATION_ERROR"``) 도 본 경로로 envelope 변환된다.
             error_code = getattr(e, "code", "EXECUTION_ERROR")
-            # Refs #2337: signal.connect 핸드셰이크의 expected typed-validation
-            # 거부는 traceback/args 를 노출하지 않는 구조화 WARNING 으로 로깅한다
-            # (invalid-key caplog 에 ``sk_`` 부재, expected-exc ERROR traceback
-            # 부재). 그 외(internal/unexpected)는 기존 ``logger.exception`` 유지.
             if error_code in _EXPECTED_DISPATCH_REJECT_CODES:
                 logger.warning("IPC handshake rejected: %s (%s)", command, error_code)
             else:
@@ -616,8 +534,6 @@ class IPCServer:
         svc = self._service_registry
         bot = svc.bot_manager.get_bot(bot_id)
         if bot is None:
-            # 핸드셰이크와 stream 진입 사이에 봇이 사라진 극단 race — register
-            # 누수만 정리하고 종료(writer 는 _handle_connection finally 소유).
             if reg is not None:
                 reg.unregister(bot_id, session_id)
             return
@@ -625,10 +541,6 @@ class IPCServer:
         out_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=SIGNAL_OUT_QUEUE_MAX)
         write_lock = asyncio.Lock()
         flush_done = asyncio.Event()
-        # daemon-initiated close ↔ async teardown 브릿지(F2). handle.close(sync)
-        # 와 laggard 가 이 event 를 set 하고, supervisor 가 _initiate_close 를
-        # 실행한다. headless(reg=None)에서도 laggard teardown 이 동작하도록 항상
-        # 생성한다.
         closing_event = asyncio.Event()
 
         def _force_closed_frame(reason: str) -> None:
@@ -682,19 +594,12 @@ class IPCServer:
         )
         channel._subscribe_events()
 
-        # adopt (F1+F4 step 4) — placeholder handle 데이터플레인 채우기. handle.
-        # closing_event 를 stream-local event 와 동일 객체로 바인딩해 sync
-        # handle.close()가 supervisor 를 깨우게 한다.
         handle = reg.get(bot_id, session_id) if reg is not None else None
         if handle is not None:
             handle.out_queue = out_queue
             handle.on_closed = channel.mark_closed
             handle.closing_event = closing_event
 
-        # F4 self-close 재확인: adopt 직후 이미 닫혔거나(register 후 ack 전
-        # close_bot/rotate) generation 불일치(rotate-in-window)면 풀 루프 미진입.
-        # handle is not None ⇒ reg is not None(handle 은 reg.get 유래)이나 명시
-        # 가드로 mypy union-attr 을 좁힌다.
         if reg is not None and handle is not None:
             rotated = reg.current_generation(bot_id) != handle.generation
             if handle.closed or rotated:
@@ -720,7 +625,6 @@ class IPCServer:
                 handle,
             )
         finally:
-            # INV-OUT-9: 모든 종료 경로 정확히 1회.
             channel.mark_closed()
             channel._unsubscribe_events()
             if reg is not None:
@@ -781,7 +685,6 @@ class IPCServer:
                 try:
                     data = _encode_signal_frame(frame)
                 except MessageTooLargeError:
-                    # outbound >1MB 비치명: result_too_large 후 stream 유지.
                     try:
                         data = _encode_signal_frame(
                             {"type": "error", "message": "result_too_large"}
@@ -796,7 +699,6 @@ class IPCServer:
                     writer.write(data)
                     await writer.drain()
                 if frame.get("type") == "closed":
-                    # teardown frame write 완료 → grace supervisor 깨우고 종료.
                     flush_done.set()
                     return
 
@@ -805,9 +707,9 @@ class IPCServer:
                 try:
                     msg = await protocol.decode(reader)
                 except asyncio.IncompleteReadError:
-                    return  # EOF — graceful 종료.
+                    return
                 except MessageTooLargeError:
-                    return  # inbound >1MB — terminal close(framing desync 회피).
+                    return
                 await channel._handle_message(msg)  # type: ignore[attr-defined]
 
         read_task = asyncio.ensure_future(_reader_loop())
@@ -818,17 +720,11 @@ class IPCServer:
 
         closing_waiter = asyncio.ensure_future(closing_event.wait())
         try:
-            # read/writer 중 하나라도 종료하거나, daemon-initiated close(또는
-            # laggard)가 closing_event 를 set 하면 teardown 으로 진입한다.
             await asyncio.wait(
                 [read_task, writer_task, closing_waiter],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
-            # daemon-initiated close 여부: closing_event 가 set 됐으면(rotate/
-            # close_bot/shutdown/laggard — closed frame force-slot 됨) flush-
-            # before-cancel grace 순서, 아니면 자연 종료(EOF/writer-exit)라 즉시
-            # sibling cancel.
             daemon_close = closing_event.is_set()
             await self._initiate_close(
                 channel,
@@ -840,7 +736,6 @@ class IPCServer:
         finally:
             if not closing_waiter.done():
                 closing_waiter.cancel()
-            # 남은 task 강제 정리(중복 cancel/await 는 멱등).
             for task in (read_task, writer_task):
                 if not task.done():
                     task.cancel()
@@ -887,16 +782,12 @@ class IPCServer:
                     asyncio.shield(inflight), timeout=SIGNAL_INFLIGHT_GRACE
                 )
             except (TimeoutError, Exception):
-                # grace 초과/publish 예외 — publish 는 백그라운드 계속, 진행.
                 pass
 
         if not read_task.done():
             read_task.cancel()
 
         if daemon_close and not writer_task.done():
-            # closed frame flush-before-cancel(INV-OUT-8). flush_done 은 writer 가
-            # closed frame 을 write 한 직후 set 된다 — grace 안에 set 되면 join,
-            # 아니면(극단 stall) cancel.
             if flush_done.is_set():
                 with contextlib.suppress(Exception):
                     await writer_task
@@ -911,7 +802,6 @@ class IPCServer:
                 except TimeoutError:
                     writer_task.cancel()
         elif not writer_task.done():
-            # 자연 종료 — flush 할 frame 없음. 즉시 cancel.
             writer_task.cancel()
 
         with contextlib.suppress(asyncio.CancelledError, Exception):

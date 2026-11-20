@@ -10,7 +10,7 @@ import struct
 
 from ante.ipc.exceptions import MessageTooLargeError
 
-MAX_MESSAGE_SIZE = 1_048_576  # 1MB
+MAX_MESSAGE_SIZE = 1_048_576
 
 
 async def encode(data: dict) -> bytes:

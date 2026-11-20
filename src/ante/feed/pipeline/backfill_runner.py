@@ -34,55 +34,18 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_BACKFILL_SINCE = "2015-01-01"
 
-# 경고 `type` 버킷별 인메모리 보존 상한 (#2414).
-#
-# 리포트 `warnings` 배열은 버킷당 이 건수까지만 보존하고 초과분은 **적재
-# 시점에** 절단한다(리포트 생성 시점에 자르면 인메모리 누적이 그대로 남아
-# OOM이 해소되지 않는다). 총계·타입별 집계는 절단과 무관하게 전수 정확하며,
-# 절단분 상세는 로그에서 회수한다(경고는 발생 시점에 전건 로깅) —
-# "규모는 리포트, 상세는 로그".
-#
-# 산출 근거: #2414 실측이 약 8개월(165 거래일) backfill에서 99,691건
-# → 거래일당 약 600건(99,691/165)이다. 1000이면 통상 단일 일자 물량을
-# 무손실 수용한다(daily 리포트 동작 불변 — 단, 전 종목 이상치 일자처럼
-# 통상 물량을 크게 넘는 날은 daily도 절단되며 warnings_truncated로 표면화).
-# 상한 = 버킷 8종 × 1000 × 약 302 B ≈ 2.4 MB로 **날짜 범위와 무관**하다
-# (11.6년 약 1.67M건 → 최대 8,000건 보존, 상주 약 500 MB → 약 2.4 MB).
-# config 노출은 YAGNI — 모듈 상수로 고정한다.
 MAX_WARNINGS_PER_TYPE = 1000
 
-# `type` 키가 없는 경고(DART 수집 경고 2종)를 담는 정적 fallback 버킷.
-# `w.get("type")`(=None)을 그대로 버킷 키로 쓰면 json 직렬화에서
-# `{"null": N}` 이 리포트로 새므로 반드시 이 값으로 정규화한다.
-# 경고 `type`이 유계 정적 집합이라는 규범은
-# docs/specs/data-feed/10-checkpoints-and-reports.md가 SSOT다.
 UNTYPED_WARNING_BUCKET = "untyped"
 
-# zero-padded YYYY-MM-DD만 허용. date.fromisoformat()은 3.11+에서
-# basic ISO(20260510)·ISO week date(2026-W19-1) 등 변형도 수락하므로
-# 형태를 정규식으로 먼저 고정한 뒤 캘린더 유효성만 검증한다.
-# CLI `--since`(feed/cli.py::_validate_iso_date)와 동일한 strictness를
-# 사용해 두 진입 표면을 정합시킨다(이슈 #1674).
 _BACKFILL_ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
-# coded config_error 코드. CLI/scheduler가 이 코드를 관측해 분기하므로,
-# 기존 비날짜 config_errors(`code` 키 없는 dict)와 명확히 구분된다.
 CONFIG_ERROR_CODE_INVALID_DATE = "CLI_INVALID_DATE"
 CONFIG_ERROR_CODE_INVALID_DATE_RANGE = "INVALID_DATE_RANGE"
 
-# 거래시간 가드(`blocked_hours`+`pause_during_trading`) 대기 관련 coded
-# config_error 코드 (#1972). backfill 날짜별 루프가 거래시간 window 안에서
-# 대기하다가, 누적 대기가 상한(MAX_GUARD_WAIT_SECONDS)을 넘으면
-# ``GUARD_PERMANENTLY_BLOCKED`` 를, 상주 스케줄러 stop_event로 대기가
-# 중단되면 ``BACKFILL_STOP_REQUESTED`` 를 result.config_errors에 적재한다.
-# 둘 다 mid-range partial 종료를 관측 가능하게 만드는 마커이며
-# (clean-success 차단), BACKFILL_DATE_ERROR_CODES에 포함되어 CLI exit-1 /
-# daemon 차단 echo 경로를 그대로 탄다.
 CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED = "GUARD_PERMANENTLY_BLOCKED"
 CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED = "BACKFILL_STOP_REQUESTED"
 
-# 신설 coded config_errors의 코드 집합. CLI/scheduler에서 이 집합으로만
-# 새 envelope/차단 분기를 trigger한다 (기존 비날짜 entries 보존).
 BACKFILL_DATE_ERROR_CODES = frozenset(
     {
         CONFIG_ERROR_CODE_INVALID_DATE,
@@ -92,17 +55,9 @@ BACKFILL_DATE_ERROR_CODES = frozenset(
     }
 )
 
-# 거래시간 가드 대기 폴링 주기/상한 (초). 모듈 상수 — `[guard]` 스키마
-# 확장 없이 고정값으로 둔다(#1972 Non-Goal). 테스트는 이 상수들을
-# patch/주입해 시간 비의존(결정적)으로 검증한다.
 GUARD_WAIT_POLL_SECONDS = 60.0
-# 상한은 하루를 충분히 넘긴다(거래시간 window가 자정 안에 끝나면 그날
-# 안에 반드시 해제되므로, 정상 운영에서는 도달하지 않는다). 도달은
-# 설정 오류(예: 24시간 전체 차단)를 의미한다.
 MAX_GUARD_WAIT_SECONDS = 26 * 60 * 60.0
 
-# `today`는 KST 캘린더 기준으로 산출한다. backfill_since는 거래일 단위
-# 날짜이며 cli_scheduler도 KST(UTC+9)로 동작한다(see cli_scheduler.KST).
 _KST = timezone(timedelta(hours=9))
 
 
@@ -131,10 +86,6 @@ def _today_kst() -> date:
     return datetime.now(tz=_KST).date()
 
 
-# data.go.kr OHLCV는 영업일 D의 데이터가 다음 영업일 13:00 KST 이후에
-# 공개된다(스펙 docs/specs/data-feed/05-data-sources.md: "영업일 D+1,
-# 오후 1시 이후"). backfill 상한을 이 deadline이 지난 마지막 영업일로
-# capping해 미공개 날짜를 애초에 시도하지 않는다(quota 보호).
 _DATA_GO_KR_PUBLISH_HOUR_KST = 13
 
 
@@ -171,7 +122,6 @@ def _last_published_date(now_kst: datetime) -> date:
     """
     today = now_kst.date()
     candidate = today - timedelta(days=1)
-    # 14일 bound: 주말 + 비영업 구간을 덮는 안전 상한(무한 루프 방지).
     for _ in range(14):
         if is_business_day(candidate.isoformat()):
             deadline = datetime.combine(
@@ -264,8 +214,6 @@ class BackfillRunner:
         SIGTERM/SIGINT로 깨어나 체크포인트를 저장한 partial을 반환하며
         ``BACKFILL_STOP_REQUESTED`` 마커를 적재한다.
         """
-        # strict 날짜 검증을 가장 먼저 수행해 malformed/future config가
-        # checkpoint/소스/지표 어디에도 도달하지 않도록 한다.
         coded_date_error = self._validate_backfill_since(config)
         if coded_date_error is not None:
             logger.warning(
@@ -359,10 +307,6 @@ class BackfillRunner:
         ohlcv_checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
         last_date = ohlcv_checkpoint.get_last_date()
 
-        # 상한을 KST today 대신 "확실히 공개된 마지막 날짜"로 cap한다(#2015).
-        # 미공개 최근일(D+1 13:00 KST 미도래)을 빈 응답으로 시도해 quota를
-        # 낭비하는 것을 막는다. 데이터 무결성은 written>0 checkpoint guard가
-        # 보장하므로 cap은 보조적이다.
         published_end = _last_published_date(datetime.now(tz=_KST))
 
         return list(
@@ -437,7 +381,6 @@ class BackfillRunner:
         if self._data_go_kr is None:
             return
 
-        # 첫 transient 실패 이후 checkpoint 전진을 멈추는 플래그(#2078).
         halt = False
 
         for target_date in dates:
@@ -445,9 +388,6 @@ class BackfillRunner:
                 logger.debug("방어 가드(blocked_days): %s 스킵", target_date)
                 continue
 
-            # 거래시간 가드가 활성이면 풀릴 때까지 대기한다. 대기가 stop_event
-            # 또는 max-wait 상한으로 중단되면 체크포인트만 저장된 partial로
-            # 루프를 빠져나간다(관측 가능한 coded marker 적재).
             should_stop = await self._wait_out_trading_pause(
                 config,
                 is_trading_paused,
@@ -466,24 +406,8 @@ class BackfillRunner:
                 if stored_ok:
                     ctx.data_types.update(["ohlcv", "fundamental"])
 
-                # R1: store 경고를 checkpoint save 직전·이번 날짜 write 직후
-                # drain한다. store-merge 실패(기존 파일 보존)는 raise하지 않고
-                # 경고만 남기므로, 이번 날짜에 발생한 store_merge가 있으면
-                # checkpoint를 전진시키지 않는다(데이터 미반영 날짜 영구 skip 방지).
                 store_merge_failed = self._drain_store_warnings(store, ctx)
 
-                # checkpoint는 유효 데이터가 store에 반영된 날짜(stored_ok)에만
-                # 전진시킨다(#1993/#2015). 빈 응답/전 drop/validation 차단
-                # (stored_ok=False: 미공개/지연공개/캘린더 미인식 공휴일)에
-                # 전진하면 그 날짜가 다음 run에서 last_checkpoint 이전으로 간주되어
-                # 영구 skip된다(데이터 손실). 유효 재수집(net_delta=0)은 stored_ok로
-                # 정상 전진해 stall을 만들지 않는다.
-                # dates는 오름차순이므로 checkpoint = 마지막 stored_ok 날짜이며,
-                # 내부 빈 날짜는 다음 데이터 날짜에서 jump해 자연 커버(stall 없음),
-                # trailing 빈 날짜는 미전진 → 다음 실행에서 재시도(손실 없음).
-                #
-                # halt(#2078) 이후 또는 store-merge 실패 시에는 stored_ok여도
-                # 전진시키지 않는다(실패 날짜 너머 전진 → 영구 skip 방지).
                 if not halt and stored_ok and not store_merge_failed:
                     checkpoint.save(target_date)
 
@@ -509,9 +433,6 @@ class BackfillRunner:
                         "reason": str(exc),
                     }
                 )
-                # 이후 날짜 성공이 checkpoint를 실패 날짜 너머로 전진시키지
-                # 못하도록 halt한다(#2078). break는 도입하지 않고(best-effort
-                # 수집 계속) checkpoint.save만 위 success 경로에서 가드한다.
                 halt = True
 
     @staticmethod
@@ -567,7 +488,6 @@ class BackfillRunner:
         first_log = True
 
         while is_trading_paused(config):
-            # 대기 진입 직전에 stop이 이미 요청되었으면 즉시 중단한다.
             if stop_event is not None and stop_event.is_set():
                 logger.info("Backfill 중단 요청 수신, 거래시간 대기 종료")
                 ctx.config_errors.append(
@@ -602,19 +522,14 @@ class BackfillRunner:
                 first_log = False
 
             if stop_event is not None:
-                # stop set 시 즉시 깨어난다. 그 외에는 poll만큼 대기 후 재확인.
                 try:
                     await asyncio.wait_for(
                         stop_event.wait(),
                         timeout=GUARD_WAIT_POLL_SECONDS,
                     )
                 except TimeoutError:
-                    # poll 경과(stop 미수신) — window/상한을 루프 top에서 재확인.
                     waited += GUARD_WAIT_POLL_SECONDS
                     continue
-                # TimeoutError 아님 ⇒ wait 도중 stop_event가 set됨 ⇒ 즉시 중단.
-                # 같은 사이클에 거래시간 window가 동시에 풀려 while 재평가가
-                # False가 되더라도 그 race를 통과시키지 않고 stop을 우선한다.
                 logger.info("Backfill 중단 요청 수신, 거래시간 대기 종료")
                 ctx.config_errors.append(
                     {
@@ -625,7 +540,6 @@ class BackfillRunner:
                 )
                 return True
 
-            # one-shot: asyncio.run SIGINT가 이 sleep을 취소해 중단 가능.
             await asyncio.sleep(GUARD_WAIT_POLL_SECONDS)
             waited += GUARD_WAIT_POLL_SECONDS
 
@@ -653,8 +567,6 @@ class BackfillRunner:
                 store,
             )
             ctx.add_success(net_delta, syms, warns)
-            # data_types는 유효 분기 저장 여부(stored_ok)로 표시한다 — 재수집
-            # (net_delta=0)이어도 fundamental 데이터가 store에 있으므로 True(#1993).
             if stored_ok:
                 ctx.data_types.add("fundamental")
         except (DARTDailyLimitError, DARTCriticalError) as exc:
@@ -770,7 +682,6 @@ class _RunContext:
         """
         for warn in warns:
             bucket = warn.get("type") or UNTYPED_WARNING_BUCKET
-            # 절단 전 보유량 == min(누계, 상한)이므로 증가 전 누계로 판정한다.
             seen = self._warnings_by_type.get(bucket, 0)
             self._warnings_by_type[bucket] = seen + 1
             if seen < MAX_WARNINGS_PER_TYPE:
@@ -814,12 +725,8 @@ class _RunContext:
             rows_written=self.rows_written,
             data_types=sorted(self.data_types),
             failures=self.failures,
-            # Sequence[dict] → list[dict] 경계 변환(사유화한 내부 리스트를
-            # 그대로 넘기지 않는다).
             warnings=list(self._warnings),
             warnings_total=self.warnings_total,
-            # 버킷명 정렬 — dict 삽입 순서 = 경고 도착 순서라 실행마다 달라진다
-            # (바로 위 data_types=sorted(...)와 동일 지점에서 한 번만 정렬).
             warnings_by_type=dict(sorted(self._warnings_by_type.items())),
             warnings_truncated=self.warnings_truncated,
             config_errors=self.config_errors,

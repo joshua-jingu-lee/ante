@@ -65,9 +65,7 @@ class DataGoKrCollector:
 
         raw_items, symbol_warns = self._filter_invalid_symbols(raw_items, target_date)
 
-        # (a) schema 선필터: 필수 raw 필드 누락/null 레코드를 drop & 에러 로그.
         survivors, schema_warns = self._filter_schema_invalid(raw_items, target_date)
-        # (b) survivor 검증: business 경고 수집 + passed 게이트 판정.
         validation_passed, validation_warns = self._validate(survivors, target_date)
 
         warns = symbol_warns + schema_warns + validation_warns
@@ -77,9 +75,6 @@ class DataGoKrCollector:
             )
             return 0, False, set(), warns
 
-        # (c) 검증 게이트: survivor batch가 validate_all에서 passed=False면
-        # (transport status≠200, syntax, 또는 향후 schema 검사) 저장하지 않는다.
-        # spec(09-failure-recovery.md): schema 실패 레코드는 스킵(저장 금지).
         if not validation_passed:
             logger.warning(
                 "data.go.kr: date=%s survivor 검증 실패(passed=False)로 저장 차단 "
@@ -92,10 +87,6 @@ class DataGoKrCollector:
         df = pl.DataFrame(survivors)
         df = self._deduplicate(df)
 
-        # business 계층은 정규화 후 OHLCV(open/high/low/close/volume)에 적용해야
-        # 의미가 있다(#2222). raw `_validate`/validate_all의 business는 raw 컬럼명
-        # (mkp/hipr/...)이라 no-op이므로, 정규화 후 별도 검증 경고를 warns에 surface
-        # 한다. business는 비차단(경고)이므로 store는 진행한다(spec 09).
         net_delta, symbols = self._normalize_and_store(
             df,
             store,
@@ -103,16 +94,6 @@ class DataGoKrCollector:
             warns,
         )
 
-        # stored_ok는 하드코딩 True가 아니라 **실제 저장 심볼 존재(bool(symbols))**
-        # 에서 유도한다. `symbols`는 `_store_ohlcv`/`_store_fundamental`에서
-        # 실제 `store.write`가 호출된 심볼만 add되므로:
-        #   - 빈 응답/전 drop/validation 차단 → 위에서 stored_ok=False 조기 반환.
-        #   - survivor가 validation을 통과했더라도 정규화 단계에서 추가 drop돼
-        #     normalize_ohlcv·normalize_fundamental이 **둘 다** empty/no-symbol이면
-        #     symbols가 빈 set → stored_ok=False(미전진). 저장 0건인데 checkpoint를
-        #     전진시켜 데이터를 영구 skip하는 회귀를 막는다.
-        #   - 재수집(net_delta=0이지만 정규화 정상)은 symbols가 비어있지 않아
-        #     stored_ok=True(전진 유지). net_delta와 무관하게 저장 반영 여부만 본다.
         return net_delta, bool(symbols), symbols, warns
 
     @staticmethod
@@ -212,7 +193,6 @@ class DataGoKrCollector:
 
         validation = validate_all(raw_items, list(DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS))
 
-        # business 계층 경고 (저장 유지)
         for w in validation.warnings:
             warns.append(
                 {
@@ -223,8 +203,6 @@ class DataGoKrCollector:
                 }
             )
 
-        # 비-schema(transport/syntax 등) 실패는 무시하지 않고 surface한다.
-        # passed=False면 호출자가 batch 저장을 차단한다(저장 금지).
         for err in validation.errors:
             logger.error("data.go.kr: date=%s survivor 검증 실패: %s", target_date, err)
             warns.append(
@@ -270,11 +248,6 @@ class DataGoKrCollector:
         rows_written += self._store_ohlcv(df, store, symbols, target_date, warns)
         rows_written += self._store_fundamental(df, store, symbols)
 
-        # 종목 메타데이터(symbol/exchange/name/market)를 `.feed/instruments.parquet`에
-        # upsert한다(spec data-feed/04-schema.md INSTRUMENTS). ohlcv/fundamental과
-        # 의미가 다른(심볼 1행 마스터) 산출이라 rows_written에 합산하지 않고 별도
-        # 로그만 남긴다. 저장 실패가 ohlcv/fundamental 결과를 회귀시키지 않도록
-        # 호출은 ohlcv/fundamental 저장 뒤에 둔다.
         instruments_written = self._store_instruments(df, store)
 
         logger.info(
@@ -319,9 +292,6 @@ class DataGoKrCollector:
         if ohlcv_df.is_empty() or "symbol" not in ohlcv_df.columns:
             return 0
 
-        # 정규화 후 OHLCV에 business 검증(비차단 경고). 기존 구조화 컨벤션
-        # (source=data_go_kr / type=business_rule, line 216의 raw business_rule
-        # 채널과 동일)으로 wrap하여 collect warns에 surface한다(신규 타입 금지).
         business_result = validate_business(ohlcv_df.to_dicts())
         for w in business_result.warnings:
             warns.append(
@@ -363,7 +333,6 @@ class DataGoKrCollector:
             symbols.add(sym)
         return rows
 
-    # INSTRUMENTS 스키마 컬럼 순서(spec data-feed/04-schema.md).
     _INSTRUMENTS_COLUMNS = ("symbol", "exchange", "name", "market")
 
     @classmethod
@@ -389,11 +358,9 @@ class DataGoKrCollector:
         Returns:
             파일에 기록된 instrument 행 수. 미기록(빈 입력)이면 0.
         """
-        # df는 survivors raw DataFrame이므로 종목코드 컬럼은 `srtnCd`다.
         if "srtnCd" not in df.columns:
             return 0
 
-        # itmsNm/mrktCtg가 둘 다 없으면 메타데이터 전무 → 무가치 파일 생성 방지.
         if "itmsNm" not in df.columns and "mrktCtg" not in df.columns:
             logger.debug(
                 "data.go.kr instruments: 메타 컬럼(itmsNm/mrktCtg) 전무(rows=%d) "
@@ -417,12 +384,10 @@ class DataGoKrCollector:
             name_expr.alias("name"),
             market_expr.alias("market"),
         )
-        # null(누락 셀)은 빈 문자열로 정규화하여 보존 로직이 일관되게 동작하게 한다.
         new_df = new_df.with_columns(
             pl.col("name").fill_null(""),
             pl.col("market").fill_null(""),
         )
-        # 유효한 symbol만 유지(빈/null symbol drop) 후 symbol 기준 dedup(1행/심볼).
         new_df = new_df.filter(
             pl.col("symbol").is_not_null() & (pl.col("symbol") != "")
         ).unique(subset=["symbol"], keep="last")
@@ -444,7 +409,6 @@ class DataGoKrCollector:
                 merged = new_df
                 preserve_existing_mode = False
             except Exception as exc:
-                # 비어 있지 않은 기존 파일은 손상 시 보존하고 write를 건너뛴다.
                 logger.warning(
                     "data.go.kr instruments: 기존 파일 읽기 실패 — 보존, "
                     "write 건너뜀 (%s)",
@@ -464,7 +428,6 @@ class DataGoKrCollector:
             preserve_existing_mode=preserve_existing_mode,
         )
         if is_zero_byte_recovery:
-            # 성공한 교체 뒤에만 경고한다. write 실패 시 target은 0바이트 그대로다.
             logger.warning(
                 "data.go.kr instruments: 0바이트 파일을 신규 수집분으로 복구: %s",
                 path,
@@ -487,7 +450,6 @@ class DataGoKrCollector:
           non-empty 값을 보존한다(빈 신규값이 기존 값을 덮어쓰지 않게).
         - exchange는 항상 "KRX"로 유지한다.
         """
-        # 기존 프레임을 INSTRUMENTS 컬럼으로 정규화(누락 컬럼은 빈 문자열).
         existing = existing.with_columns(
             *[
                 pl.lit("").alias(col)
@@ -514,7 +476,6 @@ class DataGoKrCollector:
             if incoming is None:
                 merged_rows.append(row)
                 continue
-            # 신규값이 non-empty면 갱신, 빈 값이면 기존 보존.
             merged_rows.append(
                 {
                     "symbol": sym,
@@ -524,7 +485,6 @@ class DataGoKrCollector:
                 }
             )
 
-        # 기존에 없던 신규 symbol 추가.
         for sym, incoming in new_idx.items():
             if sym in existing_symbols:
                 continue

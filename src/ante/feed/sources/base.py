@@ -14,8 +14,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# KST(UTC+9) 캘린더 기준. cli_scheduler.KST / backfill_runner._today_kst()와
-# 동일 기준이어야 daily 한도 리셋의 "하루" 경계가 repo 전반과 정합한다.
 _KST = timezone(timedelta(hours=9))
 
 
@@ -86,8 +84,6 @@ class RateLimiter:
         self._now_date: Callable[[], date] = now_date or (
             lambda: datetime.now(tz=_KST).date()
         )
-        # 일일 카운터가 마지막으로 귀속된 날짜. None이면 아직 미관측 상태로,
-        # 첫 increment_daily / is_daily_limit_reached 시 현재 날짜로 baseline.
         self._daily_date: date | None = None
 
     async def acquire(self) -> None:
@@ -102,9 +98,6 @@ class RateLimiter:
                 wait_time = (1 - self._tokens) / self._rate
                 await asyncio.sleep(wait_time)
                 self._tokens = 0
-                # sleep 동안 흐른 시간을 다음 acquire의 elapsed로 재크레딧하면
-                # 설정 TPS의 약 2배가 허용된다(#2048). _last_refill을 sleep
-                # 종료 시점(now + wait_time)으로 명시 전진시켜 차단한다.
                 self._last_refill = now + wait_time
             else:
                 self._tokens -= 1

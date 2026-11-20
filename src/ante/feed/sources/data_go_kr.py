@@ -20,23 +20,17 @@ from ante.feed.sources.base import RateLimiter
 
 logger = logging.getLogger(__name__)
 
-# ── API 상수 (API 스펙 종속, 하드코딩) ─────────────────────
 
 BASE_URL = (
     "https://apis.data.go.kr/1160100/service"
     "/GetStockSecuritiesInfoService/getStockPriceInfo"
 )
-TPS_LIMIT = 25.0  # 실제 30 tps, 여유분 확보
+TPS_LIMIT = 25.0
 DAILY_LIMIT = 10_000
 NUM_OF_ROWS = 1000
-REQUEST_TIMEOUT = 30  # 초
+REQUEST_TIMEOUT = 30
 
-# 재시도 불가 HTTP status (spec 09-failure-recovery: 즉시 스킵/실패 로그).
-# 재시도 가능(408/429/5xx/timeout/연결 오류)은 이 집합 밖이라 기존대로 재시도된다.
 _NON_RETRYABLE_HTTP_STATUS = frozenset({400, 401, 403, 404, 422})
-
-
-# ── 에러 분류 ──────────────────────────────────────────────
 
 
 class ErrorAction(StrEnum):
@@ -50,27 +44,23 @@ class ErrorAction(StrEnum):
     CRITICAL = "critical"
 
 
-# data.go.kr resultCode → 행동 매핑
 _ERROR_CODE_MAP: dict[str, ErrorAction] = {
     "00": ErrorAction.OK,
-    "01": ErrorAction.RETRY,  # APPLICATION_ERROR
-    "10": ErrorAction.SKIP,  # INVALID_REQUEST_PARAMETER_ERROR
-    "12": ErrorAction.SKIP,  # NO_OPENAPI_SERVICE_ERROR
-    "20": ErrorAction.SKIP,  # SERVICE_ACCESS_DENIED_ERROR
-    "22": ErrorAction.DAILY_LIMIT,  # LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR
-    "30": ErrorAction.CRITICAL,  # SERVICE_KEY_IS_NOT_REGISTERED_ERROR
-    "31": ErrorAction.CRITICAL,  # DEADLINE_HAS_EXPIRED_ERROR
-    "32": ErrorAction.SKIP,  # UNREGISTERED_IP_ERROR
-    "99": ErrorAction.RETRY_ONCE,  # UNKNOWN_ERROR (spec: 1회 재시도 후 스킵)
+    "01": ErrorAction.RETRY,
+    "10": ErrorAction.SKIP,
+    "12": ErrorAction.SKIP,
+    "20": ErrorAction.SKIP,
+    "22": ErrorAction.DAILY_LIMIT,
+    "30": ErrorAction.CRITICAL,
+    "31": ErrorAction.CRITICAL,
+    "32": ErrorAction.SKIP,
+    "99": ErrorAction.RETRY_ONCE,
 }
 
 
 def classify_error(result_code: str) -> ErrorAction:
     """resultCode를 행동으로 분류한다."""
     return _ERROR_CODE_MAP.get(result_code, ErrorAction.RETRY)
-
-
-# ── 예외 ──────────────────────────────────────────────────
 
 
 class DataGoKrError(Exception):
@@ -89,9 +79,6 @@ class CriticalApiError(DataGoKrError):
     """서비스키 미등록/만료 등 복구 불가능 에러."""
 
     pass
-
-
-# ── DataGoKrSource ────────────────────────────────────────
 
 
 class DataGoKrSource:
@@ -161,7 +148,6 @@ class DataGoKrSource:
             CriticalApiError: 서비스키 미등록/만료 등 복구 불가능 에러.
             DataGoKrError: 빈 페이지인데 totalCount 미달(부분 수집) 시.
         """
-        # YYYY-MM-DD → YYYYMMDD (API 요청 형식)
         bas_dt = date.replace("-", "")
         all_items: list[dict] = []
         page_no = 1
@@ -171,7 +157,6 @@ class DataGoKrSource:
 
         try:
             while True:
-                # 일일 한도 확인
                 if self._rate_limiter.is_daily_limit_reached():
                     msg = (
                         f"일일 한도 90% 도달 "
@@ -191,11 +176,9 @@ class DataGoKrSource:
                     total_count,
                 )
 
-                # 페이지네이션 종료 조건
                 if len(all_items) >= total_count:
                     break
                 if len(items) == 0:
-                    # 빈 페이지인데 total_count 미달 → 부분 수집 이상 (fail-loud)
                     msg = (
                         f"부분 수집 감지: date={date} "
                         f"collected={len(all_items)} total={total_count} "
@@ -233,7 +216,6 @@ class DataGoKrSource:
         Returns:
             (valid, reason) 튜플. valid는 True/False/None.
         """
-        # 인증 평가만을 위한 최소 더미 파라미터(서비스키 검증이 우선 수행됨).
         params = {
             "serviceKey": self._api_key,
             "numOfRows": "1",
@@ -264,7 +246,6 @@ class DataGoKrSource:
 
         if action == ErrorAction.CRITICAL:
             return False, f"인증 실패 (code={result_code}): {result_msg}"
-        # OK / 그 외(키는 수락됨) → 유효.
         return True, None
 
     async def _fetch_page(
@@ -300,9 +281,6 @@ class DataGoKrSource:
 
         for attempt in range(self._max_retries):
             await self._rate_limiter.acquire()
-            # 실제 HTTP 요청 시도(_do_request) 직전에 카운트한다.
-            # 성공/실패와 무관하게 모든 attempt를 반영하여 일일 한도 추적이
-            # 실패·재시도 시도를 누락하지 않도록 한다 (#2106). 1 attempt = 1 increment.
             self._rate_limiter.increment_daily()
 
             try:
@@ -311,9 +289,6 @@ class DataGoKrSource:
                     timeout=REQUEST_TIMEOUT,
                 )
             except (TimeoutError, aiohttp.ClientError) as exc:
-                # 재시도 불가 HTTP status(400/401/403/404/422)는 즉시 실패
-                # 처리한다 (spec 09-failure-recovery, #2026). body 에러 코드의
-                # SKIP 액션과 동일하게 error 로그 + DataGoKrError raise.
                 if (
                     isinstance(exc, aiohttp.ClientResponseError)
                     and exc.status in _NON_RETRYABLE_HTTP_STATUS
@@ -336,7 +311,6 @@ class DataGoKrSource:
                 await asyncio.sleep(delay)
                 continue
 
-            # HTTP 200이지만 body에 에러 코드가 있을 수 있음
             result_code, result_msg = self._extract_result_code(data)
             action = classify_error(result_code)
 
@@ -358,11 +332,7 @@ class DataGoKrSource:
                 logger.error(msg)
                 raise DataGoKrError(msg)
 
-            # RETRY / RETRY_ONCE
             last_error = DataGoKrError(f"API 에러 (code={result_code}): {result_msg}")
-            # RETRY_ONCE(99 UNKNOWN_ERROR)는 최대 1회만 재시도한다
-            # (spec 05-data-sources: 1회 재시도 후 스킵 = 총 2회 호출, #2027).
-            # attempt>=1이면 더 이상 재시도하지 않고 최종 실패로 떨어진다.
             retry_cap = 1 if action == ErrorAction.RETRY_ONCE else self._max_retries - 1
             if attempt < retry_cap:
                 delay = self._backoff_delay(attempt)
@@ -377,10 +347,8 @@ class DataGoKrSource:
                 )
                 await asyncio.sleep(delay)
             elif action == ErrorAction.RETRY_ONCE:
-                # 1회 재시도 cap 도달 → 최종 실패로 즉시 종료(추가 attempt 생략).
                 break
 
-        # 재시도 소진
         msg = f"data.go.kr 요청 최종 실패: basDt={bas_dt}, pageNo={page_no}"
         logger.error(msg)
         raise DataGoKrError(msg) from last_error
@@ -428,7 +396,6 @@ class DataGoKrSource:
             return [], total_count
 
         items = items_wrapper.get("item", [])
-        # 단일 item인 경우 list로 감싸기
         if isinstance(items, dict):
             items = [items]
 

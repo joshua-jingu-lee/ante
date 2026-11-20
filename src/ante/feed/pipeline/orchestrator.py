@@ -48,7 +48,6 @@ class FeedOrchestrator:
         self._store = store
         self._report_generator = report_generator
 
-        # 하위 컬렉터 조립
         data_go_kr_collector = (
             DataGoKrCollector(data_go_kr_source, data_go_kr_normalizer)
             if data_go_kr_source
@@ -165,20 +164,6 @@ class FeedOrchestrator:
         finally:
             self._release_lock(feed_dir)
 
-    # ── 방어 가드 ─────────────────────────────────────────
-    #
-    # 가드는 의미가 다른 두 축으로 분리한다 (#1972):
-    #   - ``_is_blocked_day``  : ``blocked_days``. **target_date 기반**.
-    #     과거 특정 요일(예: 주말)은 데이터가 없어 영원히 채워지지 않으므로
-    #     backfill 루프는 해당 날짜를 **skip** 해야 한다(대기하면 그 날짜의
-    #     요일은 절대 안 바뀌어 무한 hang).
-    #   - ``_is_trading_paused`` : ``pause_during_trading`` + ``blocked_hours``.
-    #     **현재 시각(KST) 기반**. 거래시간 동안 API 부하를 피하려는 의도이며
-    #     window가 지나면 데이터는 존재하므로 backfill 루프는 **대기 후
-    #     resume** 해야 한다.
-    # ``_is_blocked`` 는 두 축의 OR 합성으로 동작을 보존한다 — daily_runner는
-    # 이 결합 술어를 그대로 사용한다(무변경).
-
     @staticmethod
     def _is_blocked_day(config: dict[str, Any], target_date: str) -> bool:
         """``blocked_days`` 가드 — target_date의 요일 기반.
@@ -233,8 +218,6 @@ class FeedOrchestrator:
             config
         )
 
-    # ── Lock 파일 관리 ────────────────────────────────────
-
     @staticmethod
     def _acquire_lock(feed_dir: Path) -> bool:
         """Lock 파일을 원자적으로 생성하여 동시 실행을 방지한다.
@@ -262,7 +245,6 @@ class FeedOrchestrator:
             try:
                 fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
             except FileExistsError:
-                # lock 이미 존재 → liveness 검사
                 try:
                     pid = int(lock_path.read_text().strip())
                 except (ValueError, OSError):
@@ -277,7 +259,6 @@ class FeedOrchestrator:
                     lock_path.unlink(missing_ok=True)
                     continue
                 except PermissionError:
-                    # 프로세스 존재(signal 권한 없음) → alive, 차단 (#2006)
                     logger.error(
                         "다른 수집 프로세스가 실행 중 (PID=%d, signal 권한 없음)", pid
                     )
@@ -286,8 +267,6 @@ class FeedOrchestrator:
                     logger.error("다른 수집 프로세스가 실행 중 (PID=%d)", pid)
                     return False
             else:
-                # 원자적 생성 성공 → 획득. 기존 write_text(str(pid)) 와 동일하게
-                # 십진 문자열 PID 를 기록한다(release/다른 reader 호환).
                 try:
                     os.write(fd, str(os.getpid()).encode())
                 finally:
@@ -302,8 +281,6 @@ class FeedOrchestrator:
         """Lock 파일을 제거한다."""
         lock_path = feed_dir / LOCK_FILE
         lock_path.unlink(missing_ok=True)
-
-    # ── 리포트 ────────────────────────────────────────────
 
     def _save_report(
         self,
