@@ -15,7 +15,7 @@ from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TIMEOUT = 30.0  # seconds
+DEFAULT_TIMEOUT = 30.0
 
 
 class IPCClient:

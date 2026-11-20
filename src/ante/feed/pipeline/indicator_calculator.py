@@ -54,59 +54,29 @@ from ante.data.store import ParquetStore
 
 logger = logging.getLogger(__name__)
 
-# source별 행 분리 기준 (normalizer가 부여하는 source 문자열 SSOT).
 _DAILY_SOURCE = "data_go_kr"
 _QUARTERLY_SOURCE = "dart"
 
-# 분기 프레임의 period-end(기말일) 컬럼. 일별 거래일 date와 동명이지만 의미가
-# 다르다(분기 행에서는 period_end, 일별 행에서는 거래일). as-of 결합은 더 이상
-# 이 컬럼을 직접 join 키로 쓰지 않는다(#2067 lookahead 제거).
 _PERIOD_END_KEY = "date"
 
-# DART 공시 접수일(point-in-time availability, #2010). nullable.
 _AVAILABLE_DATE_KEY = "available_date"
 
-# effective availability 키와 join_asof 양쪽 alias용 임시 컬럼명. write-back
-# 전 반드시 제거한다(FUNDAMENTAL 스키마 밖이므로 _FUNDAMENTAL_COLUMN_SET 필터로
-# 자연 제거되지만, 명시적으로도 drop한다).
 _EFFECTIVE_KEY = "_effective_available"
 _ASOF_KEY = "_asof_join_key"
 
-# 자본시장법 법정 제출기한(보수적 fallback). available_date가 없는 legacy 행에
-# 한해 period_end 월로 분류해 더한다:
-#   - 분기/반기/3분기 보고서(period_end 월 3/6/9) → 기말 후 45일
-#   - 사업(연간)보고서(period_end 월 12) → 기말 후 90일
-# 이 외(비표준) 월의 행은 분류 불가 → join 전 제거한다.
 _LAG_QUARTERLY_DAYS = 45
 _LAG_ANNUAL_DAYS = 90
 _QUARTERLY_PERIOD_END_MONTHS = (3, 6, 9)
 _ANNUAL_PERIOD_END_MONTH = 12
 
-# as-of join 키.
 _JOIN_KEY = "date"
 
-# DART 분기 행이 기여하는 재무 컬럼 — 6종 비율의 분자/분모 피연산자다
-# (net_income/total_equity/total_debt). as-of join 시 이 컬럼들만 분기
-# 프레임에서 일별 프레임으로 가져온다.
-#
-# 주의(#1968 핵심): `store.read`는 월별 이종 파티션을 `diagonal_relaxed`로
-# union하므로, source로 행을 분리해도 daily/quarterly **양쪽 sub-frame이
-# 동일한 컬럼 union**을 보유한다(상대 소스 컬럼은 null-fill). 따라서 "일별에
-# 없는 컬럼" 같은 동적 판별은 쓸 수 없다(모든 컬럼이 양쪽에 존재). 대신
-# 컬럼의 **provenance(소스 귀속)** 를 명시 상수로 고정해, 일별 프레임에서는
-# 이 재무 컬럼(일별 행에서는 null)을 **버리고**, 분기 프레임에서는 이
-# 컬럼만 join 키와 함께 **가져온다**. 이로써 (1) source/symbol 충돌(_right
-# 중복 누출) 차단, (2) 일별 행의 null 재무가 실제 분기 값을 덮어쓰는 사고
-# 방지.
 _QUARTERLY_FINANCIAL_COLUMNS: tuple[str, ...] = (
     "net_income",
     "total_equity",
     "total_debt",
 )
 
-# write-back 프레임은 FUNDAMENTAL 스키마 부분집합으로 유지한다. DART
-# normalizer가 내보내는 total_assets 등 스키마 밖 컬럼이 read union으로
-# 섞여 들어와도 write 전에 제거한다(스키마 일탈 방지).
 _FUNDAMENTAL_COLUMN_SET = frozenset(FUNDAMENTAL_COLUMNS)
 
 
@@ -194,10 +164,8 @@ class IndicatorCalculator:
             return 0
 
         updated = joined.with_columns(exprs)
-        # write-back 전 FUNDAMENTAL 스키마 밖 컬럼(total_assets 등) 제거.
         keep = [c for c in updated.columns if c in _FUNDAMENTAL_COLUMN_SET]
         updated = updated.select(keep)
-        # net-new 저장 행 수(#1993). in-place overwrite라 보통 0이다.
         return store.write(sym, "krx", updated, data_type="fundamental")
 
     @staticmethod
@@ -244,10 +212,8 @@ class IndicatorCalculator:
         if quarterly_eff.is_empty():
             return None
 
-        # 일별 프레임에서 분기 재무 컬럼(null-fill된 잔재)을 제거해 충돌 차단.
         daily_identity = daily.drop([c for c in financial_cols if c in daily.columns])
 
-        # 양쪽을 동일한 임시 join 키로 alias: 일별=거래일 date, 분기=effective.
         daily_keyed = daily_identity.with_columns(
             pl.col(_JOIN_KEY).alias(_ASOF_KEY),
         )
@@ -261,8 +227,6 @@ class IndicatorCalculator:
             on=_ASOF_KEY,
             strategy="backward",
         )
-        # 임시 join 키 제거(스키마 밖). _EFFECTIVE_KEY는 분기 프레임에만 있었고
-        # select로 가져오지 않았으므로 결합 결과엔 없다.
         return joined.drop(_ASOF_KEY)
 
     @staticmethod
@@ -284,7 +248,6 @@ class IndicatorCalculator:
             available = pl.lit(None, dtype=pl.Date)
 
         month = pl.col(_PERIOD_END_KEY).dt.month()
-        # period_end 월로 법정 제출기한(일수)을 분류. 비표준 월은 null.
         lag_days = (
             pl.when(month.is_in(list(_QUARTERLY_PERIOD_END_MONTHS)))
             .then(pl.lit(_LAG_QUARTERLY_DAYS))
@@ -292,14 +255,11 @@ class IndicatorCalculator:
             .then(pl.lit(_LAG_ANNUAL_DAYS))
             .otherwise(None)
         )
-        # period_end + statutory_lag (분류 불가 월이면 lag_days null → fallback도
-        # null로 전파).
         fallback = pl.col(_PERIOD_END_KEY) + pl.duration(days=lag_days)
 
         with_eff = quarterly.with_columns(
             pl.coalesce(available, fallback).cast(pl.Date).alias(_EFFECTIVE_KEY),
         )
-        # effective가 null인 행 제거(available_date 없고 + period_end 월도 비표준).
         return with_eff.filter(pl.col(_EFFECTIVE_KEY).is_not_null())
 
     @staticmethod

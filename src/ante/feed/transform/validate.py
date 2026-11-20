@@ -123,18 +123,15 @@ def validate_schema(
     for i, record in enumerate(records):
         record_keys = set(record.keys())
 
-        # 레코드별 필수 필드 존재 여부 확인
         missing = required_set - record_keys
         if missing:
             errors.append(f"레코드 {i}: 필수 필드 누락: {sorted(missing)}")
 
-        # 레코드별 필수 필드 non-null 확인 (#2103)
         present_required = required_set & record_keys
         null_required = sorted(f for f in present_required if record.get(f) is None)
         if null_required:
             errors.append(f"레코드 {i}: 필수 필드 null 값: {null_required}")
 
-        # 레코드별 숫자 필드 타입 변환 가능 여부 확인
         for field_name in numeric_fields & record_keys:
             value = record.get(field_name)
             if value is None:
@@ -194,7 +191,7 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
             logger.warning("비즈니스 검증 경고: %s", w)
 
     return ValidationResult(
-        passed=True,  # 비즈니스 규칙 위반은 경고이므로 passed=True
+        passed=True,
         warnings=warnings,
         errors=[],
     )
@@ -223,7 +220,7 @@ def _check_finite_values(
         try:
             num = float(str(value))
         except (ValueError, TypeError):
-            continue  # 숫자 변환 실패는 스키마 계층 소관
+            continue
         if not math.isfinite(num):
             warnings.append(
                 f"{symbol}: {field_name} 비정상 값(NaN/inf) ({field_name}={value})"
@@ -249,9 +246,9 @@ def _check_positive_prices(
         try:
             price = float(value)
         except (ValueError, TypeError, OverflowError):
-            continue  # 스키마 검증에서 이미 잡힘
+            continue
         if not math.isfinite(price):
-            continue  # NaN/inf는 _check_finite_values가 단독 관측
+            continue
         if price <= 0:
             warnings.append(f"{symbol}: {price_field} <= 0 ({price_field}={price})")
 
@@ -274,7 +271,7 @@ def _check_volume_non_negative(
     try:
         vol = int(float(str(volume_val)))
     except (ValueError, TypeError, OverflowError):
-        return  # NaN/inf(int 변환 OverflowError 포함)는 _check_finite_values가 관측
+        return
     if vol < 0:
         warnings.append(f"{symbol}: volume < 0 (volume={vol})")
 
@@ -297,13 +294,13 @@ def _check_ohlc_relationship(
         low_val = float(record["low"]) if "low" in record else None
         c = float(record["close"]) if "close" in record else None
     except (ValueError, TypeError, OverflowError):
-        return  # 숫자 변환 실패는 스키마 계층에서 처리
+        return
 
     if o is None or h is None or low_val is None or c is None:
         return
 
     if not all(math.isfinite(v) for v in (o, h, low_val, c)):
-        return  # NaN/inf는 _check_finite_values가 단독 관측 (관계 오탐 차단)
+        return
 
     if low_val > c:
         warnings.append(f"{symbol}: low > close (low={low_val}, close={c})")
@@ -330,9 +327,9 @@ def _check_temporal_parseable(
     for field_name in ("timestamp", "date"):
         value = record.get(field_name)
         if value is None:
-            continue  # null은 schema 계층 소관
+            continue
         if not isinstance(value, str):
-            continue  # 이미 datetime 등 비문자열이면 skip(오탐 방지)
+            continue
         if _try_parse_date(value) is None:
             warnings.append(f"{symbol}: {field_name} 파싱 불가 ({field_name}={value})")
 
@@ -346,12 +343,10 @@ def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) ->
         records: 검증할 레코드 목록.
         warnings: 경고를 추가할 목록.
     """
-    # timestamp 또는 date 필드로 시계열 확인
     date_field = "timestamp" if "timestamp" in records[0] else "date"
     if date_field not in records[0]:
         return
 
-    # 심볼별로 그룹핑하여 검증
     by_symbol: dict[str, list[str]] = {}
     for record in records:
         symbol = record.get("symbol", "unknown")
@@ -420,7 +415,6 @@ def _check_date_order(
         try:
             reversed_order = parsed_dates[j][0] < parsed_dates[j - 1][0]
         except TypeError:
-            # tz-aware와 naive datetime 혼재 → 순서 판정 불가, 해당 비교 skip.
             continue
         if reversed_order:
             warnings.append(
@@ -454,7 +448,6 @@ def _try_parse_date(value: str) -> datetime | None:
             return datetime.strptime(value, fmt)
         except ValueError:
             continue
-    # strptime 4형식 모두 실패 시 ISO 8601 (tz offset 포함) fallback.
     try:
         return datetime.fromisoformat(value)
     except ValueError:
@@ -479,22 +472,18 @@ def validate_all(
     Returns:
         통합 검증 결과.
     """
-    # 1. 전송 계층
     transport_result = validate_transport(status_code)
     if not transport_result.passed:
         return transport_result
 
-    # 2. 구문 계층 (records가 이미 파싱된 상태이므로 list 검증)
     syntax_result = validate_syntax(records)
     if not syntax_result.passed:
         return transport_result.merge(syntax_result)
 
-    # 3. 스키마 계층
     schema_result = validate_schema(records, required_fields)
     merged = transport_result.merge(syntax_result).merge(schema_result)
     if not merged.passed:
         return merged
 
-    # 4. 비즈니스 계층
     business_result = validate_business(records)
     return merged.merge(business_result)

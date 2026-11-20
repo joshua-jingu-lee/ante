@@ -19,10 +19,6 @@ logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
 
-# zero-padded ``HH:MM`` (24시간제) 만 허용. ``strptime("%H:%M")`` 은 ``"9:00"``
-# 같은 non-padded 입력도 수락하므로, 스케줄러의 사전식(``"09:00" >= "9:00"``)
-# 문자열 비교가 조용히 오동작(daily 영원히 미실행)하지 않도록 정규식으로
-# 형태를 고정한다. (#2030/#2070)
 _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
@@ -82,7 +78,7 @@ def _validate_schedule_times(
 
 
 async def run_scheduler_loop(
-    orchestrator: Any,  # FeedOrchestrator
+    orchestrator: Any,
     data_path: str,
     config: dict[str, Any],
     daily_at: str,
@@ -130,9 +126,6 @@ async def run_scheduler_loop(
             backfill_ran_today = False
         last_date = current_date
 
-        # spec(07-execution-modes): backfill 미완료 → backfill_at 실행 후
-        # daily_at → daily. 같은 틱에서 둘 다 도달하면 backfill 을 먼저
-        # 실행한다(#2031). 하루 1회 플래그 로직은 보존한다.
         if not backfill_ran_today and current_time >= str(backfill_at):
             await _run_backfill_job(
                 orchestrator, data_path, config, current_date, stop_event
@@ -173,9 +166,6 @@ async def _run_daily_job(
     """Daily 수집 작업을 1회 실행한다."""
     logger.info("Daily 수집 시작 (%s)", current_date)
     try:
-        # #1943: 스케줄러 호출은 generate_daily_date() (어제) fallback 유지.
-        # ``target_date=None`` 을 명시해 의도를 문서화하고, 추후 시그니처
-        # 변경이 있어도 keyword 의미를 명확히 보존한다.
         result = await orchestrator.run_daily(
             data_path=Path(data_path),
             config=config,
@@ -233,8 +223,6 @@ async def _run_backfill_job(
             for entry in coded_date_errors:
                 code = entry.get("code")
                 message = entry.get("error", "")
-                # stop_event 중단은 "중단", 그 외 coded error(미래/형식 오류·
-                # 가드 영구차단)는 "차단"으로 구분해 echo/log한다.
                 label = (
                     "중단"
                     if code == CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED

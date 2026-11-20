@@ -28,11 +28,8 @@ if TYPE_CHECKING:
 
 CommandHandler = Callable[["ServiceRegistry", dict, str], Awaitable[dict]]
 
-# Refs #1849 / Codex v2 condition 1: shutdown_behavior 한 타입 lock.
-# None인 경우 ``is_mutating``에서 derive(``block_on_mutating``).
 ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
 
-# Refs #1849: account_id 강제 정책 vocabulary.
 AccountIdPolicy = Literal["none", "required", "optional_filter"]
 
 logger = logging.getLogger(__name__)
@@ -165,9 +162,6 @@ class CommandRegistry:
         return list(self._specs.keys())
 
 
-# ── 핸들러 구현 ──────────────────────────────────────
-
-
 def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
     """Kill Switch IPC 응답 envelope.
 
@@ -288,15 +282,6 @@ async def _handle_bot_create(
     from ante.bot.config import BotConfig
     from ante.strategy.loader import StrategyLoader
 
-    # #1656 E bucket / #1633 finding: ``require_account_id``를 함수
-    # **최상단**(strategy_registry.get / StrategyLoader.load 이전)으로 둔다.
-    # 그래야 invalid/missing account_id direct-IPC payload가 strategy
-    # lookup/load 오류(ValueError / 파일 IO)나 늦은 검증에 가리지 않고
-    # ``InvalidAccountIdError``(code="VALIDATION_ERROR", #1633 SSOT)로 먼저
-    # raise되어 server.py:323 ``getattr(e, "code", ...)``를 거쳐
-    # VALIDATION_ERROR envelope이 된다. #1636 broker handlers(account_id-first)
-    # 1:1 동형. Refs #1217 → #1241 SPLIT-2: account_id fallback 제거 — IPC
-    # routing 진입점에서 ``ipc.bot.create`` context로 명시 검증한다.
     account_id = require_account_id(args.get("account_id"), context="ipc.bot.create")
 
     strategy_id = args["strategy_id"]
@@ -320,11 +305,6 @@ async def _handle_bot_create(
         strategy_cls=strategy_cls,
         source_path=Path(record.filepath),
     )
-    # Refs #2110 (audit.md:117): resource 는 **생성 결과** ``bot.bot_id`` 를
-    # 사용한다 — 요청 args 의 ``bot_id`` 는 빈 문자열일 수 있어(서버가 채움)
-    # 신뢰하지 않는다. audit 호출은 ``_dispatch`` wrapper 가
-    # ``CommandSpec.audit_action="bot.create"`` 기반으로 자동 발화하며 handler
-    # 는 ``_audit_detail`` 만 전달(wrapper 가 ``pop`` 으로 strip).
     return {
         "bot_id": bot.bot_id,
         "_audit_detail": {
@@ -426,7 +406,6 @@ async def _handle_bot_start(
     if bot is None:
         raise BotNotFoundError(bot_id)
 
-    # 계좌 인증정보 검증: app_key 가 없으면 봇 시작 거부.
     account = await svc.account.get(bot.config.account_id)
     if not account.credentials.get("app_key"):
         raise BotAccountCredentialsNotConfigured(
@@ -510,7 +489,6 @@ async def _handle_bot_status(
     if bot is None:
         raise BotNotFoundError(bot_id)
 
-    # 계좌별 Treasury resolve. manager 부재 또는 미등록 시 None.
     treasury_manager = getattr(svc, "treasury_manager", None)
     treasury_for_bot: Any | None = None
     if treasury_manager is not None:
@@ -519,9 +497,6 @@ async def _handle_bot_status(
         except KeyError:
             treasury_for_bot = None
 
-    # #2137: 포지션 보강을 봇 계좌로 스코핑한다. account_id 가 전달되면
-    # ``enrich_bot_info`` 가 ``get_positions(..., account_id=...)`` 로 조회해
-    # 타 계좌 stale/legacy 포지션 누출을 차단한다.
     info = await enrich_bot_info(
         bot,
         strategy_registry=getattr(svc, "strategy_registry", None),
@@ -532,10 +507,6 @@ async def _handle_bot_status(
     return {"bot": info}
 
 
-# CLI ``bot list`` 출력 6-key projection (SSOT: cli/commands/bot.py:bot_list).
-# live ``Bot.get_info()`` 에는 ``created_at`` 이 없으므로(persisted DB 컬럼) None
-# 기본값으로 채워 snapshot fallback 과 동일 shape 을 보장한다 (#2112 Codex
-# condition 1: list/info 후처리 전 ``created_at=None`` 기본값).
 _BOT_LIST_KEYS = (
     "bot_id",
     "name",
@@ -621,9 +592,6 @@ async def _handle_bot_positions(
 
     trade_service = getattr(svc, "trade_service", None)
     if trade_service is None:
-        # 서비스 미구성(legacy registry) — 봇은 존재하나 포지션 보강 경로 부재.
-        # 빈 포지션(0개) 과 동일 shape 이지만 의미상 "미구성" 이다. read-only
-        # 분류 정렬: 키 부재가 아니라 빈 collection 으로 graceful surface.
         return {"positions": []}
 
     positions = await trade_service.get_positions(
@@ -712,10 +680,6 @@ async def _handle_signal_connect(
         InvalidSignalKey,
     )
 
-    # 게이트① — signal key 검증. key 부재/비-str(``args={}`` 포함) 은
-    # ``args.get`` 으로 ``None`` → miss 와 동일하게 ``InvalidSignalKey``
-    # (``KeyError`` 아님). manager 미구성 시는 ``validate_signal_key`` 가
-    # ``SignalKeyManagerNotConfigured`` 를 raise 한다.
     key = args.get("key")
     if not isinstance(key, str):
         raise InvalidSignalKey()
@@ -723,22 +687,16 @@ async def _handle_signal_connect(
     if bot_id is None:
         raise InvalidSignalKey()
 
-    # 게이트② — 봇 존재.
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
 
-    # 게이트③ — 봇 RUNNING.
     if bot.status != BotStatus.RUNNING:
         raise BotNotRunning(bot_id, bot.status.value)
 
-    # 게이트④ — 외부 시그널 수용.
     if not bot.strategy or not bot.strategy.meta.accepts_external_signals:
         raise BotNotAcceptingSignals(f"Bot {bot_id} does not accept external signals")
 
-    # 단일 manual connect-audit 1회 (#2334 §8, #2337). actor sentinel ``"ipc"``.
-    # ``required_services`` 에 audit_logger 를 추가하지 않는다(headless 호환) —
-    # getattr None-guard 로 부재 시 no-op. 키/식별 토큰은 detail 에 싣지 않는다.
     audit_logger = getattr(svc, "audit_logger", None)
     if audit_logger is not None:
         await audit_logger.log(
@@ -749,8 +707,6 @@ async def _handle_signal_connect(
             ip="",
         )
 
-    # register happen-before ack (#2337 F1+F4). placeholder ChannelHandle 을
-    # generation 스냅샷과 함께 atomic 등록한다. busy/frozen 은 ack 전 raise.
     session_id = uuid4().hex
     reg = getattr(svc, "signal_channel_registry", None)
     if reg is not None:
@@ -811,37 +767,14 @@ async def _handle_treasury_allocate(
     from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
-    # #1656 E bucket / #1633 finding: ``require_account_id``를 함수 **첫
-    # 문장**으로(``args["bot_id"]``/``args["amount"]`` 이전) 둔다. raw
-    # ``args["account_id"]`` 직접 인덱싱은 account_id 키 생략 payload에서
-    # ``KeyError``가 먼저 터져 server.py:323 ``getattr(e, "code",
-    # "EXECUTION_ERROR")``로 오분류된다. ``args.get`` +
-    # ``require_account_id``로 invalid/missing 모두 ``InvalidAccountIdError``
-    # (code="VALIDATION_ERROR", #1633 SSOT)로 먼저 raise되어
-    # VALIDATION_ERROR envelope이 된다. #1636 broker handlers(args["bot_id"]
-    # 이전 require_account_id) 1:1 동형.
     account_id = require_account_id(
         args.get("account_id"), context="ipc.treasury.allocate"
     )
     bot_id = args["bot_id"]
     amount = args["amount"]
-    # #1792: missing bot id 로 호출해도 ``Treasury.allocate`` 가 cash 만 검증하고
-    # bot 존재 여부를 검사하지 않아 exit 0 + status=ok 가 반환되던 회귀를 차단.
-    # ``bot.start``/``bot.stop``/``bot.status``/``bot.update`` (registry.py:212/
-    # 256/297/326) 와 동일한 ``svc.bot_manager.get_bot`` + ``BotNotFoundError``
-    # (code="BOT_NOT_FOUND") 패턴을 사용한다. ``Treasury`` 서비스 자체는 단일
-    # 책임(현금/예산)을 유지하고 IPC handler 가 cross-module 존재 검증을 한다.
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
-    # #2128 (Refs #1240 P2-1 broker.reconcile 1:1 미러): 봇의 실제
-    # ``account_id`` 와 요청 payload 의 ``account_id`` 가 다르면 거부한다.
-    # 다른 계좌의 예산을 변경하는 cross-account corruption 을 차단하기 위함.
-    # ``BotNotFoundError`` 가드 직후라 ``bot`` 은 non-None — reconcile 의
-    # ``bot is not None`` 방어 분기는 불필요하나, ``and bot_account_id``
-    # None-safe 가드는 동형으로 유지(legacy bot.config.account_id=None 은
-    # 차단하지 않음). ``InvalidAccountIdError`` (code="VALIDATION_ERROR",
-    # #1633 SSOT) 가 server.py envelope 에서 VALIDATION_ERROR 로 surface.
     bot_account_id = getattr(bot.config, "account_id", None)
     if bot_account_id and bot_account_id != account_id:
         raise InvalidAccountIdError(
@@ -850,13 +783,6 @@ async def _handle_treasury_allocate(
             "다른 계좌의 예산을 변경할 수 없습니다."
         )
     treasury = svc.treasury_manager.get(account_id)
-    # #1809 (oracle A7 @ a5d8edf): ``Treasury.allocate`` 가 reject 시
-    # ``bool=False`` 대신 reject reason 별 typed exception 을 raise 한다
-    # (``TreasuryInvalidAmountError`` / ``TreasuryInsufficientUnallocatedError``).
-    # IPC server.py:322 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 가 stable
-    # ``SCREAMING_SNAKE_CASE`` envelope ``code`` 로 자동 surface 시키므로
-    # 명시 try/except 가 불필요하다 (handler 는 정상 경로만 성공 응답으로
-    # 마무리). 결과는 항상 성공 (``success=True``) — reject 는 예외 경로.
     await treasury.allocate(bot_id, amount)
     return {"account_id": account_id, "bot_id": bot_id, "success": True}
 
@@ -868,26 +794,14 @@ async def _handle_treasury_deallocate(
     from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
-    # #1656 E bucket / #1633 finding: ``_handle_treasury_allocate``와 동형 —
-    # ``require_account_id``를 첫 문장으로(``args["bot_id"]``/``args["amount"]``
-    # 이전, ``args.get``). 키 생략 payload의 ``KeyError`` →
-    # EXECUTION_ERROR 누수 차단, invalid/missing 모두 VALIDATION_ERROR.
     account_id = require_account_id(
         args.get("account_id"), context="ipc.treasury.deallocate"
     )
     bot_id = args["bot_id"]
     amount = args["amount"]
-    # #1792: allocate 와 동형 — bot 존재 검증을 ``Treasury.deallocate`` 호출
-    # 이전에 둔다. ``BotNotFoundError`` (code="BOT_NOT_FOUND") 가 raise 되며
-    # IPC server.py 의 ``getattr(e, "code", ...)`` envelope 으로 surface 된다.
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
-    # #2128 (Refs #1240 P2-1 broker.reconcile 1:1 미러): allocate 와 동형 —
-    # 봇의 실제 ``account_id`` 와 요청 ``account_id`` 가 다르면
-    # ``InvalidAccountIdError`` (code="VALIDATION_ERROR", #1633 SSOT) 로 거부.
-    # ``and bot_account_id`` None-safe 가드로 legacy(account_id=None) 는
-    # 차단하지 않는다.
     bot_account_id = getattr(bot.config, "account_id", None)
     if bot_account_id and bot_account_id != account_id:
         raise InvalidAccountIdError(
@@ -896,10 +810,6 @@ async def _handle_treasury_deallocate(
             "다른 계좌의 예산을 변경할 수 없습니다."
         )
     treasury = svc.treasury_manager.get(account_id)
-    # #1809 (oracle A7 @ a5d8edf): allocate 와 동형 — typed exception
-    # (``TreasuryInvalidAmountError`` / ``TreasuryBudgetNotFoundError`` /
-    # ``TreasuryDeallocateExceedsAvailableError``) 을 server.py:322 envelope
-    # 매핑으로 surface. 정상 경로는 항상 ``success=True``.
     await treasury.deallocate(bot_id, amount)
     return {"account_id": account_id, "bot_id": bot_id, "success": True}
 
@@ -1192,15 +1102,6 @@ async def _handle_member_rotate_token(
     }
 
 
-# Refs #2113: auth-exempt member 명령(reset_password / regenerate_recovery_key)
-# 의 audit member_id 는 client-supplied actor(스푸핑 가능) 를 절대 쓰지 않고
-# handler 가 고정한 sentinel 상수를 ``_audit_detail["member_id"]`` 로 전달한다.
-# ``_dispatch`` wrapper 는 이 override 가 있으면 actor 대신 사용한다.
-#
-# Refs #2295: sentinel 값을 ``"recovery"`` → ``"system:recovery"`` 로 변경한다.
-# 기존 ``system:kill_switch`` audit 네임스페이스 관례와 정합하며, 사용자/agent
-# member_id 와 충돌하지 않는 reserved ``system:`` prefix 네임스페이스에 둔다
-# (member register 가 ``system:`` prefix 등록을 거부 — defense-in-depth).
 _RECOVERY_AUDIT_MEMBER_ID = "system:recovery"
 
 
@@ -1522,7 +1423,6 @@ def _broker_reconcile_envelope(
         "bot_count": bot_count,
         "adjustments": adjustments,
         "mismatches": mismatches,
-        # ── legacy display 호환 (CLI passthrough / 기존 envelope shape) ──
         "total_symbols": len(mismatches),
         "discrepancies": mismatches,
         "match": len(mismatches) == 0,
@@ -1552,21 +1452,14 @@ async def _handle_broker_reconcile(
     """
     from ante.account.scoping import require_account_id
 
-    # #1623 Split C / #1633 finding 유지: ``require_account_id`` 가 함수 최상단.
-    # invalid-account-only direct-IPC probe 도 ``InvalidAccountIdError``
-    # (code="VALIDATION_ERROR", #1633 SSOT)로 먼저 raise 된다.
     account_id = require_account_id(
         args.get("account_id"), context="ipc.broker.reconcile"
     )
     fix = bool(args.get("fix", False))
 
-    # #2121: 서버 BrokerAdapter 가 계좌 총합을 직접 조회한다. caller-supplied
-    # broker_positions(args["broker_positions"]) 는 신뢰하지 않고 무시한다 —
-    # 빈 리스트나 조작된 값이 외부청산으로 오보정되는 것을 차단한다.
     broker = await svc.account.get_broker(account_id)
     broker_positions = await broker.get_account_positions()
 
-    # 계좌 봇 목록 (status 무관 count — #2119 ambiguity 판정 기준).
     bot_manager = getattr(svc, "bot_manager", None)
     account_bots: list[str] = []
     if bot_manager is not None:
@@ -1576,36 +1469,18 @@ async def _handle_broker_reconcile(
     bot_count = len(account_bots)
 
     if bot_count == 1:
-        # 단일봇 — 귀속 자명. 기존 reconcile 로직 그대로 위임(self-check/external
-        # 분류 무변경). fix=True 보정 / fix=False detect-only(dry_run).
         adjustments = await svc.reconciler.reconcile(
             account_bots[0],
             broker_positions,
             account_id=account_id,
             dry_run=not fix,
         )
-        # #2109: 실제 포지션 보정이 발생한 경우에만 조건부 audit. audit 원칙은
-        # 상태변경만 기록(docs/specs/.../audit.md L122 매핑 broker.reconcile →
-        # resource=account:{id}). detect-only(fix=False)나 보정 대상 없음
-        # (adjustments 빈)은 상태변경이 없어 기록하지 않는다. ``register`` 에는
-        # ``audit_action`` 을 부여하지 않으므로 ``_dispatch`` wrapper 의 무조건
-        # auto-fire 가 일어나지 않고, 조건부 발화 책임은 handler 가 소유한다.
-        # ``required_services`` 에 ``audit_logger`` 가 명시되어 preflight 에서
-        # 부재가 차단되므로(fail-closed) 여기서는 직접 호출한다 —
-        # unaudited correction 을 방지한다.
-        #
-        # 보정(상태변경) 직후 즉시 audit — 이후 post-processing
-        # (compute_account_diff) 실패가 audit 누락을 유발하지 않도록(#2109
-        # Codex). 상태변경(fix and adjustments)만 기록.
         if fix and adjustments:
             await svc.audit_logger.log(
                 member_id=actor,
                 action="broker.reconcile",
                 resource=f"account:{account_id}",
             )
-        # display(discrepancies)는 보정 **이후** 상태로 계좌 단위 합산 비교를
-        # 재계산한다(순수, 이벤트 無). fix=True 면 보정 후 0으로 수렴, dry_run
-        # 이면 미보정 불일치가 그대로 남는다.
         mismatches = await svc.reconciler.compute_account_diff(
             broker_positions, account_id=account_id
         )
@@ -1617,7 +1492,6 @@ async def _handle_broker_reconcile(
             mismatches=mismatches,
         )
 
-    # 2+봇 또는 0봇 — 귀속 ambiguous(#2270). detect-only(보정 없음).
     mismatches = await svc.reconciler.detect_account_level(
         broker_positions, account_id=account_id
     )
@@ -1708,12 +1582,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     audit 없음(read-only). read-only 9→10, 총 41→42. mutating 32 / audit 26
     불변.
     """
-    # ── mutating (32개): 서버 상태/DB를 변경 ──────────
-    # system.* — account_service의 suspend_all/activate_all (collective ops).
-    # Refs #2110 (audit.md:115/116): kill switch 토글은 audit 대상이다.
-    # audit_action 부여 + required_services 에 audit_logger 명시(account.suspend
-    # 동형) — wrapper 가 handler 성공 후 자동 발화하고 audit_logger 부재 시
-    # preflight 가 차단한다.
     registry.register(
         "system.halt",
         _handle_system_halt,
@@ -1730,11 +1598,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset({"account", "audit_logger"}),
         audit_action="system.clear_halt",
     )
-    # account.* — Refs #1852 (#1819 epic): account_id_policy="required" 로
-    # wrapper preflight 가 invalid/missing account_id 를 InvalidAccountIdError
-    # (VALIDATION_ERROR envelope) 로 거부한다. audit_action 부여 + handler 의
-    # ``_audit_detail`` 반환으로 wrapper 가 audit_logger.log 를 자동 발화한다.
-    # required_services 에 audit_logger 가 포함되어 부재 시 preflight 가 차단.
     registry.register(
         "account.suspend",
         _handle_account_suspend,
@@ -1753,10 +1616,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
         audit_action="account.activate",
     )
-    # bot.* — bot 객체 entity 반환. Refs #2110 (audit.md:117/120): create/remove
-    # 도 audit 대상이다. create 의 resource 는 생성 결과 bot.bot_id, remove 의
-    # audit action 은 command 이름과 달리 ``bot.delete`` 다(audit.md SSOT).
-    # audit_action 부여 → required_services 에 audit_logger 명시.
     registry.register(
         "bot.create",
         _handle_bot_create,
@@ -1777,11 +1636,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.delete",
     )
-    # bot.signal_key.rotate (#2111) — ``bot signal-key --rotate`` 의 runtime IPC
-    # 경로. ``rotated`` bool flag envelope 이므로 ``bot.remove`` 와 동형
-    # ``operation`` kind. audit_action 부여 → ``required_services`` 에
-    # ``audit_logger`` 명시 (#1849 등록 lock). read (``bot.signal_key`` 조회)
-    # 는 별개 command 로 #2112 가 소유한다.
     registry.register(
         "bot.signal_key.rotate",
         _handle_bot_signal_key_rotate,
@@ -1817,8 +1671,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.update",
     )
-    # treasury.* — allocate/deallocate는 success bool envelope(operation),
-    # set_balance는 entity(account_id+total_balance+updated_at).
     registry.register(
         "treasury.allocate",
         _handle_treasury_allocate,
@@ -1844,13 +1696,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         audit_action="treasury.set_balance",
         account_id_policy="required",
     )
-    # rule.update — update_account_rule_config helper 응답을 그대로 통과
-    # (envelope shape이 helper 내부 결정이므로 raw). Refs #1853 (#1819 epic):
-    # audit 호출을 wrapper 로 이전. handler 가 helper 에 ``audit_logger=None``
-    # 을 전달해 helper 내부 audit 발화를 끄고, wrapper 가
-    # ``audit_action="account.rule.update"`` (helper 의 기존 action 이름과 동일)
-    # 으로 자동 발화한다. CLI offline path 는 helper 의 audit_logger 인자를
-    # 그대로 사용해 기존 동작 보존.
     registry.register(
         "rule.update",
         _handle_rule_update,
@@ -1876,13 +1721,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.update_scopes",
     )
-    # member.* admin mutation (#2113) — ``member.update_scopes`` 와 동형. 서버
-    # MemberService 위임 + audit_action 자동 발화. ``register`` / ``rotate_token``
-    # 은 발급 토큰을, ``regenerate_recovery_key`` 는 새 recovery key 를 사용자
-    # 표시용 result 에만 담고 audit/log/envelope 에는 절대 노출하지 않는다.
-    # ``reset_password`` / ``regenerate_recovery_key`` 는 auth-exempt 라
-    # audit member_id 를 client actor 가 아닌 고정 sentinel 상수로 기록한다.
-    # register audit_action 은 audit.md SSOT 에 따라 ``member.register`` 다.
     registry.register(
         "member.register",
         _handle_member_register,
@@ -1954,12 +1792,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="operation",
         required_services=frozenset({"dynamic_config"}),
     )
-    # approval.* — request/reopen은 audit_logger 호출이 없고(서비스 내부 history
-    # append가 fallback). Refs #2110 (audit.md:112/113/114): approve/reject/
-    # cancel 은 audit 대상이다 — audit_action 부여 + required_services 에
-    # audit_logger 명시(resource="approval:{id}"). cancel_invalid 는 별개
-    # administrative path 로 ``approval.cancel_invalid`` audit를 남긴다
-    # (#1418 → #1472 SPLIT-D).
     registry.register(
         "approval.request",
         _handle_approval_request,
@@ -2006,22 +1838,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="entity",
         required_services=frozenset({"approval"}),
     )
-    # broker.reconcile은 account-level (#2119): 서버 BrokerAdapter
-    # (svc.account.get_broker)로 계좌 총합을 조회하고, 1봇-total 계좌면
-    # reconciler.reconcile(correct_position/이벤트 publish 가능)에 위임하며,
-    # 2+봇·0봇이면 detect_account_level(알림만)을 수행한다. fix=False(dry_run)
-    # 여도 broker 조회·이벤트 발행이 있으므로 일괄 mutating으로 분류한다.
-    # required_services: account(broker 조회) + reconciler + bot_manager(count)
-    # + audit_logger(#2109).
-    #
-    # Refs #2109: ``--fix`` 가 실제 포지션 보정을 일으키는 경우 audit 대상이나,
-    # detect-only(fix=False / 0봇·2+봇 / 불일치 없음) 는 상태변경이 없어
-    # 기록 대상이 아니다. 따라서 ``audit_action`` 을 부여하지 **않고**(부여 시
-    # ``_dispatch`` wrapper 가 detect-only 까지 무조건 auto-fire → 과잉감사)
-    # handler 가 실제 correction(1봇 + adjustments 비어있지 않음) 에만 직접
-    # ``svc.audit_logger.log`` 를 호출한다. ``audit_logger`` 는
-    # ``required_services`` 에만 추가해 fail-closed preflight(미주입 시 명령
-    # 거부) 로 unaudited correction 을 방지한다.
     registry.register(
         "broker.reconcile",
         _handle_broker_reconcile,
@@ -2033,11 +1849,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         account_id_policy="required",
     )
 
-    # ── read-only (9개): live 조회만 ──────────────────
-    # broker.* read-only — broker 객체 메서드 결과를 그대로 envelope에 surface.
-    # status는 connected/healthy/exchange dict(entity), balance는 broker
-    # response dict 그대로(raw passthrough), positions/order_history는 list
-    # collection (#2412: order_history 추가).
     registry.register(
         "broker.status",
         _handle_broker_status,
@@ -2063,11 +1874,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )
-    # Refs #2412: ``broker.order_history`` — ``ante broker order-history`` 의
-    # runtime IPC 경로. ``broker.positions`` 1:1 미러 (read-only collection,
-    # ``account`` 단일 의존, account_id required). ``audit_action`` 없음 —
-    # ``docs/specs/audit/audit.md:122`` 매핑이 ``broker reconcile --fix`` 만
-    # 감사 대상으로 두며 read-only 조회는 상태변경이 아니다.
     registry.register(
         "broker.order_history",
         _handle_broker_order_history,
@@ -2085,11 +1891,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_key="bot",
         required_services=frozenset({"bot_manager"}),
     )
-    # bot.* read-only (#2112) — ``bot list/info/positions/signal-key`` 의 runtime
-    # IPC 경로. ``bot.status`` 미러: is_mutating=False, audit_action 없음. CLI 가
-    # 서버 정지 시 ``IPC_SERVER_NOT_RUNNING`` 일 때만 기존 snapshot DB 경로로
-    # fallback 한다 (스펙: runtime IPC + snapshot fallback). bot.signal_key
-    # (read) 는 #2111 의 mutating ``bot.signal_key.rotate`` 와 별개 command 다.
     registry.register(
         "bot.list",
         _handle_bot_list,
@@ -2107,9 +1908,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_key="bot",
         required_services=frozenset({"bot_manager"}),
     )
-    # positions 는 ``trade_service`` optional(legacy registry None 가능)이라
-    # required_services 에서 제외하고 handler 가 graceful 처리한다. 봇 존재
-    # 확인은 ``bot_manager`` 로 수행하므로 required 에 포함.
     registry.register(
         "bot.positions",
         _handle_bot_positions,
@@ -2126,11 +1924,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_key="signal_key",
         required_services=frozenset({"bot_manager"}),
     )
-    # Refs #2334 (#2336 PR#1): signal.connect 핸드셰이크. read-only(4-게이트
-    # LIVE 검증만 수행, 상태 미변경) · ``result_kind="stream"`` (통과 시
-    # 동일 연결을 connection-upgrade) · ``audit_action`` 생략(=None, 자동 audit
-    # OFF — connect-audit 1회는 PR#2 #2337). ``account_id_policy="none"``:
-    # account_id 는 LIVE ``bot.config`` 에서만 취하고 args 는 무시한다.
     registry.register(
         "signal.connect",
         _handle_signal_connect,

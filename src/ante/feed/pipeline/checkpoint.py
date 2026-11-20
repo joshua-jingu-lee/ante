@@ -95,7 +95,6 @@ class Checkpoint:
             "updated_at": datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
-        # write-then-rename 패턴으로 원자성 보장
         fd, tmp_path = tempfile.mkstemp(
             dir=self._checkpoint_dir,
             suffix=".tmp",
@@ -105,7 +104,6 @@ class Checkpoint:
                 json.dump(data, f, indent=2, ensure_ascii=False)
             Path(tmp_path).replace(self._file_path)
         except BaseException:
-            # 실패 시 임시 파일 정리
             Path(tmp_path).unlink(missing_ok=True)
             raise
 

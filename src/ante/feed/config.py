@@ -10,7 +10,6 @@ FEED_DIR = ".feed"
 ENV_FILE = ".env"
 CONFIG_FILE = "config.toml"
 
-# Supported API keys
 API_KEYS = [
     "ANTE_DATAGOKR_API_KEY",
     "ANTE_DART_API_KEY",
@@ -107,7 +106,6 @@ class FeedConfig:
         env_values = self._load_env_file()
         result: dict[str, str | None] = {}
         for key in API_KEYS:
-            # 환경변수 우선
             env_val = os.environ.get(key)
             if env_val:
                 result[key] = env_val
@@ -137,7 +135,7 @@ class FeedConfig:
 
         lines = [f"{k}={v}\n" for k, v in env_values.items()]
         self.env_path.write_text("".join(lines))
-        self.env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)  # 0600
+        self.env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)
 
         return self.env_path
 
