@@ -362,3 +362,21 @@ class TestReconcileOfflineCliSumsBots:
         assert payload["match"] is False
         assert payload["fix_applied"] is False
         assert payload["corrections"] == 0
+
+        import asyncio
+
+        from ante.core.database import Database
+        from ante.trade.position import PositionHistory
+
+        async def _positions() -> list[tuple[str, str, float]]:
+            db = Database(str(tmp_path / "db" / "ante.db"))
+            await db.connect()
+            try:
+                ph = PositionHistory(db)
+                await ph.initialize()
+                snapshots = await ph.get_all_positions(account_id="acc-1")
+                return sorted((p.bot_id, p.symbol, p.quantity) for p in snapshots)
+            finally:
+                await db.close()
+
+        assert asyncio.run(_positions()) == [("bot-a", "005930", 3.0)]
