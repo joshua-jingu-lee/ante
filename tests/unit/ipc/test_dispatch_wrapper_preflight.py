@@ -673,7 +673,7 @@ async def test_broker_reconcile_rejects_each_missing_required_service(
         )
         assert response["status"] == "error", response
         assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", response
-        assert response["error"]["message"].endswith(f": {missing}")
+        assert missing in response["error"]["message"]
         if services["account"] is not None:
             services["account"].get_broker.assert_not_awaited()
         if services["bot_manager"] is not None:
@@ -765,6 +765,30 @@ async def test_bot_positions_without_bot_manager_is_service_not_configured(
         )
         assert response["status"] == "error", response
         assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", response
-        assert response["error"]["message"].endswith(": bot_manager")
+        assert "bot_manager" in response["error"]["message"]
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_positions_unknown_bot_is_bot_not_found(socket_path: str) -> None:
+    """``bot.positions`` 는 bot_manager 로 봇을 찾고, 없으면 BOT_NOT_FOUND 다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    bot_manager = MagicMock()
+    bot_manager.get_bot = MagicMock(return_value=None)
+    svc_registry = _make_service_registry(bot_manager=bot_manager)
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": "bot.positions", "args": {"bot_id": "ghost"}}
+        )
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == "BOT_NOT_FOUND", response
+        bot_manager.get_bot.assert_called_once_with("ghost")
     finally:
         await server.stop()

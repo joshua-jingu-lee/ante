@@ -306,9 +306,11 @@ async def test_daily_drains_store_warnings_right_after_each_write_stage(
     store_merge = {"type": "store_merge", "path": "fundamental/KRX/005930/2025-09"}
     dart_warning = {"type": "dart_collect", "message": "partial disclosure"}
 
+    received_stores: list[object] = []
+
     class _DataGoKr:
         async def collect(self, target_date: str, store_arg: object) -> tuple:
-            assert store_arg is store
+            received_stores.append(store_arg)
             store.pending.append(store_merge)
             return 0, False, {"005930"}, []
 
@@ -331,6 +333,7 @@ async def test_daily_drains_store_warnings_right_after_each_write_stage(
         target_date="2025-09-30",
     )
 
+    assert received_stores == [store]
     assert result.warnings == [store_merge, dart_warning]
     assert result.warnings_by_type == {"dart_collect": 1, "store_merge": 1}
     assert result.warnings_total == 2

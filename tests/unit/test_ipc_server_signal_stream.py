@@ -9,6 +9,7 @@ socket 은 integration(T4) 에서 검증. sleep 금지.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import struct
 from unittest.mock import MagicMock
@@ -394,12 +395,14 @@ async def test_daemon_close_waits_for_inflight_publish_before_ending(
         assert await _yield_until(entered.is_set)
 
         reg.close_bot("bot-1", "rotated")
-        await _yield_until(task.done)
-        assert not task.done()
+        reader.feed_data(_frame_bytes(_SIGNAL_FRAME))
+        assert not await _yield_until(task.done)
         assert outcome == []
 
         release.set()
         await asyncio.wait_for(task, timeout=5.0)
+        for _ in range(50):
+            await asyncio.sleep(0)
         assert outcome == ["completed"]
         assert reg.has_active_session("bot-1") is False
     finally:
@@ -562,7 +565,7 @@ async def test_daemon_close_flushes_closed_frame_behind_pending_drain(
         assert await _yield_until(lambda: writer.drain_calls == 1)
 
         reg.close_bot("bot-1", "rotated")
-        await _yield_until(task.done)
+        assert not await _yield_until(task.done)
         writer.gate.set()
         await asyncio.wait_for(task, timeout=5.0)
 
@@ -575,3 +578,36 @@ async def test_daemon_close_flushes_closed_frame_behind_pending_drain(
         writer.gate.set()
         reader.feed_eof()
         await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_natural_eof_ends_stream_without_grace_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """closing_event 없이 EOF 로 끝나면 grace 를 기다리지 않고 바로 정리한다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 3600.0)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: handle.out_queue is not None)
+        reader.feed_eof()
+        assert await _yield_until(task.done)
+        assert writer.frames() == []
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        reader.feed_eof()
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

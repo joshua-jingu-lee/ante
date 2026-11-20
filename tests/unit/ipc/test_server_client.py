@@ -661,29 +661,41 @@ async def test_drain_connections_waits_for_active_connection_after_stop_acceptin
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("umask", [0o022, 0o277])
 @pytest.mark.parametrize("existing_mode", [None, 0o755, 0o777])
 async def test_start_sets_runtime_dir_mode_0o700(
-    service_registry: ServiceRegistry, existing_mode: int | None
+    service_registry: ServiceRegistry, existing_mode: int | None, umask: int
 ) -> None:
     """start() 는 umask·기존 권한과 무관하게 소켓 부모 디렉터리를 0o700 으로 둔다."""
     import os
+    import shutil
     import stat
 
     base = Path(tempfile.mkdtemp(prefix="ipcdir", dir="/tmp"))
     run_dir = base / "run"
-    if existing_mode is not None:
-        run_dir.mkdir()
-        os.chmod(run_dir, existing_mode)
-        assert stat.S_IMODE(os.stat(run_dir).st_mode) == existing_mode
-    sock = str(run_dir / "t.sock")
+    server = IPCServer(str(run_dir / "t.sock"), service_registry, CommandRegistry())
+    started = False
+    try:
+        if existing_mode is not None:
+            run_dir.mkdir()
+            os.chmod(run_dir, existing_mode)
+            assert stat.S_IMODE(os.stat(run_dir).st_mode) == existing_mode
 
-    old_umask = os.umask(0o022)
-    try:
-        server = IPCServer(sock, service_registry, CommandRegistry())
-        await server.start()
-    finally:
-        os.umask(old_umask)
-    try:
+        start_error: OSError | None = None
+        old_umask = os.umask(umask)
+        try:
+            await server.start()
+            started = True
+        except OSError as exc:
+            start_error = exc
+        finally:
+            os.umask(old_umask)
+
         assert stat.S_IMODE(os.stat(run_dir).st_mode) == 0o700
+        assert start_error is None
     finally:
-        await server.stop()
+        if started:
+            await server.stop()
+        if run_dir.exists():
+            os.chmod(run_dir, 0o700)
+        shutil.rmtree(base, ignore_errors=True)

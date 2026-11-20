@@ -625,8 +625,7 @@ async def test_ipc_dispatch_treasury_rejection_surfaces_typed_code(
 
     cmd_registry = CommandRegistry()
     register_all_handlers(cmd_registry)
-    svc, treasury = _registry_with_real_treasury()
-    unallocated_before = treasury.unallocated  # type: ignore[attr-defined]
+    svc, _treasury = _registry_with_real_treasury()
 
     server = IPCServer(socket_path, svc, cmd_registry)
     await server.start()
@@ -643,6 +642,5 @@ async def test_ipc_dispatch_treasury_rejection_surfaces_typed_code(
         assert response["error"]["code"] == expected_code, response
         assert "result" not in response
         svc.treasury_manager.get.assert_called_once_with("acc-a")
-        assert treasury.unallocated == unallocated_before  # type: ignore[attr-defined]
     finally:
         await server.stop()

@@ -191,8 +191,9 @@ async def test_backfill_guard_wait_of_a_full_day_is_not_permanent_block(
 ) -> None:
     """실제 상수에서 하루 동안 이어진 가드는 GUARD_PERMANENTLY_BLOCKED 가 아니다.
 
-    폴링 주기·대기 상한을 patch 하지 않는다. 가드는 누적 대기가 24시간이 될 때까지
-    활성이고 그 뒤 풀린다. 대기 상한이 하루보다 길어야 그 날짜를 수집한다.
+    폴링 주기·대기 상한을 patch 하지 않는다. 가드는 누적 대기가 24시간에 이른
+    시점에도 아직 활성이어서 상한 검사가 그 시점에 한 번 더 돈다. 상한이 하루를
+    넘어야 그 날짜를 수집한다.
     """
     config = _config_with_window("00:00", "23:59", backfill_since="2024-01-01")
     target_dates = ["2024-01-01"]
@@ -205,7 +206,7 @@ async def test_backfill_guard_wait_of_a_full_day_is_not_permanent_block(
     sleep_calls: list[float] = []
 
     def _paused_for_one_day(_config: dict[str, Any]) -> bool:
-        return sum(sleep_calls) < one_day
+        return sum(sleep_calls) <= one_day
 
     async def _fake_sleep(delay: float) -> None:
         sleep_calls.append(delay)
@@ -225,7 +226,7 @@ async def test_backfill_guard_wait_of_a_full_day_is_not_permanent_block(
 
     codes = {e.get("code") for e in result.config_errors if isinstance(e, dict)}
     assert CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED not in codes
-    assert sum(sleep_calls) == one_day
+    assert sum(sleep_calls) > one_day
     assert _stored_dates(store) == {"2024-01-01"}
 
 

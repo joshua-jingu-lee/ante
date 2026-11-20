@@ -1559,6 +1559,38 @@ class TestCollectorInstrumentsStore:
         assert store.list_symbols(data_type="fundamental") == ["005930"]
 
     @pytest.mark.asyncio
+    async def test_instruments_rows_not_counted_in_rows_written(
+        self, tmp_path, caplog
+    ) -> None:
+        """rows_written 은 ohlcv/fundamental 만 세고 instruments 는 로그로 남긴다."""
+        import logging
+
+        store = ParquetStore(base_path=tmp_path)
+        collector = DataGoKrCollector(
+            source=_FakeSource(
+                [
+                    _raw_inst("005930", "삼성전자", "KOSPI"),
+                    _raw_inst("000660", "SK하이닉스", "KOSPI"),
+                ]
+            )
+        )
+
+        with caplog.at_level(
+            logging.INFO, logger="ante.feed.pipeline.data_go_kr_collector"
+        ):
+            rows, _stored_ok, _symbols, _ = await collector.collect("20260102", store)
+
+        _, instruments = _read_instruments(store)
+        assert instruments is not None and instruments.height == 2
+        stored_rows = sum(
+            store.read(sym, "1d", data_type=dt, exchange="KRX").height
+            for sym in ("005930", "000660")
+            for dt in ("ohlcv", "fundamental")
+        )
+        assert rows == stored_rows
+        assert any("instruments=2" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
     async def test_instruments_not_written_on_missing_meta_columns(
         self, tmp_path
     ) -> None:

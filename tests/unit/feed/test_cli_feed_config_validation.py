@@ -150,19 +150,20 @@ class TestLogLevelApply:
         finally:
             feed_logger.setLevel(original)
 
-    def test_critical_accepted_and_applied_to_feed_logger(
-        self, runner: CliRunner, tmp_path: Path
+    @pytest.mark.parametrize("level", ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"])
+    def test_each_allowed_level_accepted_and_applied_to_feed_logger(
+        self, runner: CliRunner, tmp_path: Path, level: str
     ) -> None:
-        """log_level=CRITICAL 도 거부되지 않고 ante.feed 로거에 적용된다."""
+        """DEBUG/INFO/WARNING/ERROR/CRITICAL 다섯 레벨은 거부되지 않고 적용된다."""
         feed_logger = logging.getLogger("ante.feed")
         original = feed_logger.level
         try:
-            feed_logger.setLevel(logging.WARNING)
-            data_path = _init_with_config(tmp_path, _config(log_level="CRITICAL"))
+            feed_logger.setLevel(logging.NOTSET)
+            data_path = _init_with_config(tmp_path, _config(log_level=level))
             result = _run_backfill(runner, data_path)
             assert result.exit_code == 0, result.output
             assert "CONFIG_INVALID_LOG_LEVEL" not in result.output
-            assert feed_logger.level == logging.CRITICAL
+            assert feed_logger.level == getattr(logging, level)
         finally:
             feed_logger.setLevel(original)
 

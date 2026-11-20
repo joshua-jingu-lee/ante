@@ -375,21 +375,42 @@ async def _start_registered_server(socket_path: str, svc: ServiceRegistry) -> IP
     return server
 
 
-@pytest.mark.parametrize("bad_key", [123, ["sk_x"], {"k": "sk_x"}])
+@pytest.mark.parametrize(
+    "args",
+    [{}, {"key": None}, {"key": 123}, {"key": ["sk_x"]}, {"key": {"k": "sk_x"}}],
+)
 async def test_non_str_key_rejected_as_invalid_signal_key(
-    socket_path: str, bad_key: object
+    socket_path: str, args: dict
 ) -> None:
-    """str 이 아닌 key 는 키 조회 결과와 무관하게 INVALID_SIGNAL_KEY 로 거부된다."""
+    """key 가 없거나 str 이 아니면 키 조회 결과와 무관하게 INVALID_SIGNAL_KEY 다."""
     bm = MagicMock()
     bm.validate_signal_key = AsyncMock(return_value="bot-1")
     bm.get_bot = MagicMock(return_value=_make_bot())
     server = await _start_registered_server(socket_path, _make_service_registry(bm))
     try:
         response = await server._dispatch(
-            {"id": "k1", "command": "signal.connect", "args": {"key": bad_key}}
+            {"id": "k1", "command": "signal.connect", "args": args}
         )
         assert response["status"] == "error"
         assert response["error"]["code"] == "INVALID_SIGNAL_KEY"
+    finally:
+        await server.stop()
+
+
+async def test_manager_not_configured_surfaces_service_not_configured(
+    socket_path: str,
+) -> None:
+    """키 관리자 미구성 예외는 핸들러가 바꾸지 않고 그 코드로 나간다."""
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(side_effect=SignalKeyManagerNotConfigured())
+    server = await _start_registered_server(socket_path, _make_service_registry(bm))
+    try:
+        response = await server._dispatch(
+            {"id": "k2", "command": "signal.connect", "args": {"key": "sk_x"}}
+        )
+        bm.validate_signal_key.assert_awaited_once_with("sk_x")
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED"
     finally:
         await server.stop()
 
@@ -438,7 +459,7 @@ async def test_expected_handshake_rejects_log_warning_without_traceback(
         caplog.set_level("DEBUG", logger="ante.ipc.server")
         caplog.clear()
         response = await server._dispatch(
-            {"id": "r1", "command": "signal.connect", "args": {"key": "sk_x"}}
+            {"id": "r1", "command": "signal.connect", "args": {"key": "sk_secret"}}
         )
         assert response["error"]["code"] == expected_code
 
@@ -447,7 +468,7 @@ async def test_expected_handshake_rejects_log_warning_without_traceback(
         ]
         assert [r.levelname for r in records] == ["WARNING"]
         assert records[0].exc_info is None
-        assert expected_code in records[0].getMessage()
+        assert "sk_" not in caplog.text
     finally:
         await server.stop()
 
@@ -477,7 +498,10 @@ async def test_unexpected_handshake_error_logs_exception_with_traceback(
         await server.stop()
 
 
-async def test_malformed_first_frame_closes_connection(socket_path: str) -> None:
+@pytest.mark.parametrize("first_frame", [[1, 2], 42, "text", None])
+async def test_malformed_first_frame_closes_connection(
+    socket_path: str, first_frame: object
+) -> None:
     """비-dict 첫 프레임에는 응답 1프레임 뒤 연결을 닫는다(다음 요청 미처리)."""
     bm = MagicMock()
     bm.validate_signal_key = AsyncMock()
@@ -485,8 +509,9 @@ async def test_malformed_first_frame_closes_connection(socket_path: str) -> None
 
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
-        await _write_json_frame(writer, [1, 2])
+        await _write_json_frame(writer, first_frame)
         resp = json.loads((await _read_frame(reader)).decode("utf-8"))
+        assert resp["id"] is None
         assert resp["error"]["code"] == "MALFORMED_REQUEST"
 
         try:
@@ -527,8 +552,10 @@ class _AckFailingWriter:
         return None
 
 
-async def test_ack_write_failure_unregisters_handle(socket_path: str) -> None:
-    """ack 전송이 실패하면 등록을 해제해 같은 봇의 재연결이 BUSY 로 막히지 않는다."""
+async def test_ack_write_failure_unregisters_handle(
+    socket_path: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """ack 전송이 실패하면 등록을 해제한 뒤 그 예외를 연결 처리로 다시 던진다."""
     from ante.bot.signal_channel_registry import SignalChannelRegistry
 
     bm = MagicMock()
@@ -546,6 +573,8 @@ async def test_ack_write_failure_unregisters_handle(socket_path: str) -> None:
         ).encode("utf-8")
         reader.feed_data(struct.pack("!I", len(payload)) + payload)
         writer = _AckFailingWriter()
+        caplog.set_level("DEBUG", logger="ante.ipc.server")
+        caplog.clear()
 
         await asyncio.wait_for(
             server._handle_connection(reader, writer),  # type: ignore[arg-type]
@@ -557,6 +586,14 @@ async def test_ack_write_failure_unregisters_handle(socket_path: str) -> None:
         assert ack["status"] == "ok"
         assert writer.closed is True
         assert channel_registry.has_active_session("bot-1") is False
+        errors = [
+            r
+            for r in caplog.records
+            if r.name == "ante.ipc.server" and r.levelname == "ERROR"
+        ]
+        assert len(errors) == 1
+        assert errors[0].exc_info is not None
+        assert isinstance(errors[0].exc_info[1], ConnectionResetError)
 
         retry = await server._dispatch(
             {"id": "a2", "command": "signal.connect", "args": {"key": "sk_x"}}

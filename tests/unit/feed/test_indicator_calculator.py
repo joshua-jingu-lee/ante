@@ -293,6 +293,53 @@ def test_indicator_legacy_fallback_statutory_lag_quarterly(store: ParquetStore) 
     assert abs(may20["per"] - 420_000_000_000_000 / 50_000_000_000_000) < 1e-6
 
 
+@pytest.mark.parametrize(
+    ("period_end", "before", "after"),
+    [
+        (date(2024, 6, 30), date(2024, 8, 13), date(2024, 8, 14)),
+        (date(2024, 9, 30), date(2024, 11, 13), date(2024, 11, 14)),
+    ],
+)
+def test_indicator_legacy_fallback_half_and_third_quarter_plus_45(
+    store: ParquetStore, period_end: date, before: date, after: date
+) -> None:
+    """반기(6월)·3분기(9월) legacy 행도 기말 후 45일부터 적용된다."""
+    _write_daily(
+        store,
+        [
+            {
+                "date": d,
+                "symbol": SYMBOL,
+                "market_cap": 420_000_000_000_000,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            }
+            for d in (before, after)
+        ],
+    )
+    _write_quarterly(
+        store,
+        [
+            {
+                "date": period_end,
+                "symbol": SYMBOL,
+                "net_income": 50_000_000_000_000,
+                "total_equity": 300_000_000_000_000,
+                "total_debt": 100_000_000_000_000,
+                "source": "dart",
+            },
+        ],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    daily = _daily_rows(store)
+    assert daily.filter(pl.col("date") == before).row(0, named=True).get("per") is None
+    applied = daily.filter(pl.col("date") == after).row(0, named=True)
+    assert applied.get("per") is not None
+    assert abs(applied["per"] - 420_000_000_000_000 / 50_000_000_000_000) < 1e-6
+
+
 def test_indicator_legacy_fallback_statutory_lag_annual(store: ParquetStore) -> None:
     """[#2067 연간 fallback] period_end 12/31, available null → 익년 3/31(+90일)."""
     _write_daily(
