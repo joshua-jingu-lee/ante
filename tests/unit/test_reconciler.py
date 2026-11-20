@@ -1330,6 +1330,39 @@ class TestReconcileEntryValidation:
         assert mismatch_events == []
         assert reconcile_events == []
 
+    @pytest.mark.parametrize("invalid", [None, "", "default"])
+    async def test_invalid_account_id_raises_before_position_lookup(
+        self, eventbus, invalid
+    ):
+        """invalid account_id 는 포지션 조회 전에 막혀 불일치가 없어도 raise 한다."""
+
+        class _RecordingTradeService:
+            def __init__(self) -> None:
+                self.calls: list[str] = []
+
+            async def get_positions(self, bot_id, include_closed=False, *, account_id):
+                self.calls.append("get_positions")
+                return []
+
+            async def correct_position(self, **kwargs):
+                self.calls.append("correct_position")
+                return kwargs
+
+        trade_service = _RecordingTradeService()
+        reconciler = PositionReconciler(
+            trade_service=trade_service,  # type: ignore[arg-type]
+            eventbus=eventbus,
+        )
+
+        with pytest.raises(InvalidAccountIdError):
+            await reconciler.reconcile(
+                bot_id="bot-1",
+                broker_positions=[],
+                account_id=invalid,  # type: ignore[arg-type]
+            )
+
+        assert trade_service.calls == []
+
 
 class TestReconcileEventsAccountScopedMarker:
     """#2058: 두 이벤트의 account-scoped marker 동작 (test_external_signals 동형)."""

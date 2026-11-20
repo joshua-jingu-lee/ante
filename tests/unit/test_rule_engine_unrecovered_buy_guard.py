@@ -528,3 +528,57 @@ class TestUnrecoveredBuyAgeHelper:
         """미래 timestamp(음수 age)는 0.0 으로 클램프되어 threshold 를 넘지 않는다."""
         future = (datetime.now(UTC) + timedelta(seconds=300)).isoformat()
         assert RuleEngine._unrecovered_buy_age_seconds(future) == 0.0
+
+
+class TestRuleEngineManagerPropagatesGuardConfig:
+    """RuleEngineManager가 만든 RuleEngine은 매니저에 준 가드 설정대로 판정한다."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("min_age", "allow_overlap", "blocked"),
+        [(60.0, False, True), (1e12, False, False), (60.0, True, False)],
+    )
+    async def test_manager_created_engine_uses_manager_guard_config(
+        self, eventbus: EventBus, min_age: float, allow_overlap: bool, blocked: bool
+    ) -> None:
+        from unittest.mock import AsyncMock, MagicMock
+
+        from ante.rule import RuleEngineManager
+
+        tracker = FakeOrderTracker(
+            {
+                (ACCOUNT, BOT, SYMBOL, "buy"): [
+                    FakeOrderRecord(
+                        order_id="o1",
+                        ordered_qty=1.0,
+                        recorded_filled_qty=0.0,
+                        status="open",
+                        submitted_at="2000-01-01T00:00:00+00:00",
+                    )
+                ]
+            }
+        )
+        trade = FakeTradeService({ACCOUNT: []})
+        account_service = MagicMock()
+        account_service.get = AsyncMock(return_value=_gate_account())
+        manager = RuleEngineManager(
+            eventbus=eventbus,
+            account_service=account_service,
+            trade_service=trade,  # type: ignore[arg-type]
+            order_tracker=tracker,  # type: ignore[arg-type]
+            unrecovered_buy_guard_min_age=min_age,
+            allow_unrecovered_buy_overlap=allow_overlap,
+            runtime_readiness=_gate_ready_registry(),
+        )
+        manager.create_engine(ACCOUNT, account=_gate_account())
+        cap = _capture(eventbus)
+
+        await eventbus.publish(_buy_order())
+
+        if blocked:
+            assert len(cap.rejected) == 1
+            assert cap.rejected[0].reason.startswith("Unrecovered buy guard")
+            assert cap.validated == []
+        else:
+            assert cap.rejected == []
+            assert len(cap.validated) == 1

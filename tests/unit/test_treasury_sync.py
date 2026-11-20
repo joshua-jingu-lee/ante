@@ -357,6 +357,32 @@ class TestSyncLoop:
         # 잘못된 매수가능액으로 이벤트를 발행하지 않는다.
         assert received == []
 
+    async def test_buyable_response_without_amount_keeps_previous_value(
+        self, treasury, eventbus
+    ):
+        """get_buyable 응답에 order_buyable_amount 가 없으면 직전 값을 유지한다."""
+
+        class _BuyableWithoutAmountBroker(FakeBroker):
+            async def get_buyable(
+                self,
+                symbol: str,
+                price: float | None = None,
+                order_type: str = "market",
+            ) -> dict:
+                self.buyable_call_count += 1
+                return {"order_cash": 5_000_000.0}
+
+        received: list[BalanceSyncedEvent] = []
+        eventbus.subscribe(BalanceSyncedEvent, lambda e: received.append(e))
+        pos_history = FakePositionHistory()
+
+        await treasury._do_sync(FakeBroker(buyable_amount=4_800_000.0), pos_history)
+        missing_amount_broker = _BuyableWithoutAmountBroker()
+        await treasury._do_sync(missing_amount_broker, pos_history)
+
+        assert missing_amount_broker.buyable_call_count == 1
+        assert [e.purchasable_amount for e in received] == [4_800_000.0, 4_800_000.0]
+
     async def test_double_start_ignored(self, treasury):
         """이미 동기화 실행 중이면 중복 시작 무시."""
         broker = FakeBroker()
