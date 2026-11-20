@@ -49,9 +49,6 @@ class Event:
                 )
 
 
-# ── 주문 흐름 (Order Flow) ────────────────────────
-
-
 @dataclass(frozen=True)
 class OrderRequestEvent(Event):
     """봇 → EventBus: 신규 주문 요청."""
@@ -322,9 +319,6 @@ class OrderUpdateEvent(Event):
     exchange: str = "KRX"
 
 
-# ── 시스템 이벤트 (System) ────────────────────────
-
-
 @dataclass(frozen=True)
 class BotStartedEvent(Event):
     """BotManager → EventBus: 봇 시작."""
@@ -420,9 +414,6 @@ class SystemShutdownEvent(Event):
     reason: str = ""
 
 
-# ── 알림 (Notification) ──────────────────────────
-
-
 @dataclass(frozen=True)
 class NotificationEvent(Event):
     """각 모듈 → EventBus: 알림 발송 트리거."""
@@ -434,9 +425,6 @@ class NotificationEvent(Event):
     buttons: list | None = None  # type: ignore[assignment]
 
 
-# ── 백테스트 (Backtest) ──────────────────────────
-
-
 @dataclass(frozen=True)
 class BacktestCompleteEvent(Event):
     """BacktestEngine → EventBus: 백테스트 완료."""
@@ -446,9 +434,6 @@ class BacktestCompleteEvent(Event):
     status: str = ""
     result_path: str = ""
     error_message: str = ""
-
-
-# ── 대사 (Reconciliation) ────────────────────────
 
 
 @dataclass(frozen=True)
@@ -497,9 +482,6 @@ class ReconcileEvent(Event):
     corrections: list = field(default_factory=list)  # type: ignore[assignment]
 
 
-# ── 외부 시그널 (External Signal) ─────────────────
-
-
 @dataclass(frozen=True)
 class ExternalSignalEvent(Event):
     """REST API → EventBus: 외부 AI Agent 시그널.
@@ -525,9 +507,6 @@ class ExternalSignalEvent(Event):
     exchange: str = "KRX"
 
 
-# ── 설정 변경 (Config) ───────────────────────────
-
-
 @dataclass(frozen=True)
 class ConfigChangedEvent(Event):
     """WebAPI/CLI → EventBus: 동적 설정 변경 알림."""
@@ -537,9 +516,6 @@ class ConfigChangedEvent(Event):
     old_value: str = ""
     new_value: str = ""
     changed_by: str = ""
-
-
-# ── 결재 (Approval) ───────────────────────────
 
 
 @dataclass(frozen=True)
@@ -561,9 +537,6 @@ class ApprovalResolvedEvent(Event):
     approval_type: str = ""
     resolution: str = ""
     resolved_by: str = ""
-
-
-# ── 멤버 (Member) ───────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -633,9 +606,6 @@ class MemberRecoveryKeyRegeneratedEvent(Event):
     regenerated_by: str = ""
 
 
-# ── 일일 리포트 (DailyReport) ──────────────────────
-
-
 @dataclass(frozen=True)
 class DailyReportEvent(Event):
     """DailyReportScheduler → EventBus: 일일 성과 리포트 발행."""
@@ -643,16 +613,13 @@ class DailyReportEvent(Event):
     _requires_account_id: ClassVar[bool] = True
 
     account_id: str = ""
-    report_date: str = ""  # YYYY-MM-DD
+    report_date: str = ""
     trade_count: int = 0
     has_trades: bool = False
     daily_pnl: float = 0.0
     daily_return: float = 0.0
     net_trade_amount: float = 0.0
     unrealized_pnl: float = 0.0
-
-
-# ── 잔고 동기화 (Treasury) ──────────────────────
 
 
 @dataclass(frozen=True)
@@ -669,9 +636,6 @@ class BalanceSyncedEvent(Event):
     external_eval_amount: float = 0.0
 
 
-# ── Circuit Breaker ──────────────────────────────
-
-
 @dataclass(frozen=True)
 class CircuitBreakerEvent(Event):
     """KIS API circuit breaker 상태 변경."""
@@ -681,9 +645,6 @@ class CircuitBreakerEvent(Event):
     new_state: str = ""
     failure_count: int = 0
     reason: str = ""
-
-
-# ── 주문 취소 실패 ──────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -705,9 +666,6 @@ class OrderCancelFailedEvent(Event):
     symbol: str = ""
     side: str = ""
     error_message: str = ""
-
-
-# ── Stop Order 이벤트 ──────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -789,9 +747,6 @@ class StopOrderExpiredEvent(Event):
     reason: str = ""
 
 
-# ── 실시간 스트림 이벤트 ─────────────────────────────
-
-
 @dataclass(frozen=True)
 class StreamConnectedEvent(Event):
     """KISStreamClient → EventBus: WebSocket 연결 성공.
@@ -825,9 +780,6 @@ class StreamDisconnectedEvent(Event):
     reason: str = ""
 
 
-# ── 계좌 (Account) ──────────────────────────────
-
-
 @dataclass(frozen=True)
 class AccountSuspendedEvent(Event):
     """AccountService → EventBus: 계좌 정지."""
@@ -847,10 +799,3 @@ class AccountActivatedEvent(Event):
 
     account_id: str = ""
     activated_by: str = ""
-
-
-# AccountDeletedEvent는 1.0 EventBus 계약에서 제거되었다 (#1139).
-# 계좌 삭제는 cold-path structural operation이며, 서버 실행 중 consumer
-# topology를 hot wiring하지 않는다. 정합 SSOT는
-# docs/specs/eventbus/eventbus.md 119-127줄과
-# docs/specs/account/05-eventbus-integration.md 8-17줄.

@@ -142,7 +142,6 @@ class PerformanceFeedback:
         if not trades:
             return []
 
-        # 일별 PnL 집계
         daily_pnl: dict[str, float] = {}
         for t in trades:
             if not t.timestamp:
@@ -152,7 +151,6 @@ class PerformanceFeedback:
             pnl -= t.commission
             daily_pnl[date_str] = daily_pnl.get(date_str, 0.0) + pnl
 
-        # 누적 자산 곡선
         curve = []
         equity = initial_balance
         for date_str in sorted(daily_pnl.keys()):

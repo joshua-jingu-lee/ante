@@ -34,27 +34,12 @@ if TYPE_CHECKING:
     from ante.account.readiness import RuntimeReadinessRegistry
     from ante.eventbus.events import NotificationEvent
 
-# reason 토큰 SSOT (broker-adapter/11-order-flow.md:82). 세 계층 모두 동일 토큰을
-# 쓰고, 상세는 missing-flag suffix 로 붙인다.
 ACCOUNT_NOT_READY_REASON = "account_not_ready"
 
-# G7 — 계층1 kill-switch 합성(AccountStatus.SUSPENDED). readiness 가 ready 여도
-# suspended 면 계층1 이 이 reason 으로 차단한다.
 ACCOUNT_SUSPENDED_REASON = "account_suspended"
 
-# G7 fail-closed(#2398 Codex attempt3 P1) — kill-switch status 는 런타임 가변
-# (account suspend IPC)이므로 엔진 생성시점 ``self._account`` 스냅샷을 신뢰하면
-# 안 된다. status 소스(account_service)가 구성돼 있는데 live 조회가 예외/미상으로
-# **검증 불가**면 stale ACTIVE 스냅샷으로 통과시키지 않고 이 reason 으로 fail-closed
-# 거부한다(transient 실패는 다음 주문/회복 시 재평가, G5 정합). status 소스 자체가
-# 미구성(account_service is None, 비게이트 레거시)인 경우와는 구별한다 — 후자는
-# status 축 비활성(과차단 회피).
 ACCOUNT_STATUS_UNAVAILABLE_REASON = "account_status_unavailable"
 
-# status 검증 불가 sentinel(#2398 P1). ``resolve_account_status`` 가 status 소스
-# 는 present 인데 live 조회 예외/status 미상으로 **검증 불가**임을 호출자에게
-# 명시적으로 전달한다. ``None``(소스 미구성, status 축 비활성)·verified status
-# (SUSPENDED/ACTIVE 등)와 3-state 로 구별돼야 stale 스냅샷 통과를 막을 수 있다.
 STATUS_UNAVAILABLE = object()
 
 
@@ -83,10 +68,8 @@ def derive_account_status(
     차단").
     """
     if account_service is None:
-        # status 소스 미구성(비게이트 레거시) — status 축 비활성.
         return None
     if fetch_failed or fetched is None:
-        # live 조회 실패/미발견 = 검증 불가(스냅샷 fallback 금지).
         return STATUS_UNAVAILABLE
     status = getattr(fetched, "status", None)
     if status is None:
@@ -118,7 +101,6 @@ async def resolve_account_status(
         return None
     get = getattr(account_service, "get", None)
     if get is None:
-        # 소스는 present 인데 조회 API 부재 = 검증 불가(fail-closed).
         return STATUS_UNAVAILABLE
     try:
         fetched = await get(account_id)
@@ -127,10 +109,6 @@ async def resolve_account_status(
     return derive_account_status(account_service, fetched, fetch_failed=False)
 
 
-# 청산(liquidation/exit SELL) machine-readable marker. ``_liquidate_positions``
-# (bot/manager.py)가 청산 OrderRequestEvent.reason 에 이 ASCII prefix 를 부착하고,
-# gate 가 marker 를 검출해 "청산 차단" 전용 문구를 쓴다. 한국어 reason 문자열
-# 매칭은 금지(G6 — locale/문구 변경에 깨지지 않는 machine-readable 계약).
 LIQUIDATION_REASON_PREFIX = "liquidation:"
 
 

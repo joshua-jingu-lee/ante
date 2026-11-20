@@ -48,9 +48,6 @@ CREATE INDEX IF NOT EXISTS idx_reports_status
     ON reports(status);
 """
 
-# 기존 reports 테이블(backtest_run_id 컬럼 없는 pre-#1999 DB)에 컬럼을 추가하는
-# 멱등 마이그레이션. ``CREATE TABLE`` 은 ``IF NOT EXISTS`` 라 기존 테이블에는
-# 신규 컬럼을 만들지 않으므로 ALTER 가 필요하다 (member/service.py 선례).
 _BACKTEST_RUN_ID_MIGRATION = (
     "ALTER TABLE reports ADD COLUMN backtest_run_id TEXT DEFAULT ''"
 )
@@ -65,10 +62,6 @@ class ReportStore:
     async def initialize(self) -> None:
         """스키마 생성 + 컬럼 마이그레이션."""
         await self._db.execute_script(REPORT_SCHEMA)
-        # backtest_run_id 컬럼 멱등 추가 (#1999). 컬럼이 이미 존재하면
-        # ``sqlite3.OperationalError: duplicate column name: backtest_run_id`` 가
-        # 발생하므로 그 메시지만 무시하고, 다른 ``OperationalError`` (예: disk
-        # I/O, locked, schema 손상)는 그대로 전파해 silent failure 를 막는다.
         try:
             await self._db.execute(_BACKTEST_RUN_ID_MIGRATION)
         except sqlite3.OperationalError as exc:
@@ -153,7 +146,6 @@ class ReportStore:
         )
 
         if existing:
-            # 기존 DRAFT 업데이트
             old_id = existing["report_id"]
             await self._db.execute(
                 """UPDATE reports
@@ -193,7 +185,6 @@ class ReportStore:
             )
             return old_id
 
-        # 신규 DRAFT 삽입
         return await self.submit(report)
 
     async def get(self, report_id: str) -> StrategyReport | None:

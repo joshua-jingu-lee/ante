@@ -39,10 +39,10 @@ async def migrate(db: Database) -> None:
         "SELECT name FROM sqlite_master WHERE type='table' AND name='order_tracker'"
     )
     if table is None:
-        return  # order_tracker 테이블이 없으면 스킵 (신규 설치 시 DDL에 이미 포함).
+        return
 
     cols = await db.fetch_all("PRAGMA table_info(order_tracker)")
     if any(row["name"] == "exchange" for row in cols):
-        return  # 이미 컬럼 존재 (재실행/신규 설치 후) → 멱등 no-op.
+        return
 
     await db.execute("ALTER TABLE order_tracker ADD COLUMN exchange TEXT")

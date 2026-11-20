@@ -11,10 +11,6 @@ from ante.data.store import ParquetStore
 
 logger = logging.getLogger(__name__)
 
-# OHLCV 타임프레임 집합 — retention key가 여기 속하면 data_type="ohlcv".
-# 코드 레벨 SSOT(`ante.core.market_data_vocab.TIMEFRAME_SET`)에 위임한다.
-# 값(canonical 5종 frozenset)·`_resolve_data_type()` 동작은 위임 전과
-# 완전히 동일하다(#1613 narrow-scope: behavior-preserving).
 _OHLCV_TIMEFRAMES: frozenset[str] = TIMEFRAME_SET
 
 
@@ -40,12 +36,12 @@ class RetentionPolicy:
     """
 
     DEFAULT_RETENTION: dict[str, int] = {
-        "1m": 365,  # 1분봉: 365일
-        "5m": 365,  # 5분봉: 365일
-        "15m": 365,  # 15분봉: 365일
-        "1h": 365,  # 1시간봉: 365일
-        "1d": 3650,  # 일봉: 10년
-        "fundamental": -1,  # 재무데이터: 무기한
+        "1m": 365,
+        "5m": 365,
+        "15m": 365,
+        "1h": 365,
+        "1d": 3650,
+        "fundamental": -1,
     }
 
     def __init__(
@@ -75,7 +71,6 @@ class RetentionPolicy:
         deleted: dict[str, int] = {}
 
         for key, max_days in self._retention.items():
-            # -1이면 무기한 보존 → 스킵
             if max_days < 0:
                 continue
 

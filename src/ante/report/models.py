@@ -79,10 +79,7 @@ class StrategyReport:
     submitted_at: datetime
     submitted_by: str = "agent"
 
-    # 백테스트 결과 요약
     backtest_period: str = ""
-    # 참조한 백테스트 run_id (CLI ``--run`` 또는 payload backtest_run_id).
-    # 빈 문자열은 "참조 없음"을 의미한다 (#1999).
     backtest_run_id: str = ""
     total_return_pct: float = 0.0
     total_trades: int = 0
@@ -90,16 +87,13 @@ class StrategyReport:
     max_drawdown_pct: float | None = None
     win_rate: float | None = None
 
-    # Agent 코멘트
     summary: str = ""
     rationale: str = ""
     risks: str = ""
     recommendations: str = ""
 
-    # 상세 데이터 (JSON)
     detail_json: str = "{}"
 
-    # 사용자 피드백
     user_notes: str = ""
     reviewed_at: datetime | None = None
 

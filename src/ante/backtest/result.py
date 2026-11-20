@@ -14,7 +14,7 @@ class BacktestTrade:
 
     timestamp: datetime
     symbol: str
-    side: str  # "buy" | "sell"
+    side: str
     quantity: float
     price: float
     commission: float
@@ -39,11 +39,6 @@ class BacktestResult:
     metrics: dict = field(default_factory=dict)
     config: BacktestConfig = field(default_factory=BacktestConfig)
     datasets: list[DatasetInfo] = field(default_factory=list)
-    # #1998: run() 이 결과 artifact 를 durable 하게 저장한 경로(메인 프로세스
-    # 런타임 메타데이터). BacktestCompleteEvent.result_path / backtest_runs.
-    # result_path 전파용. ``to_dict()`` 직렬화 계약에는 **포함하지 않는다** —
-    # artifact 파일 자체의 self-reference 를 막고, draft 소비 shape(result.
-    # to_dict)를 무변경으로 유지하기 위함이다. 저장 실패 시 "" fallback.
     result_path: str = ""
 
     def to_dict(self, *, resample_equity: bool = False) -> dict:
@@ -85,7 +80,6 @@ class BacktestResult:
         }
 
 
-# 포인트 수가 이 값 이하이면 리샘플링을 생략한다 (일봉 2년치 ~ 500).
 _RESAMPLE_THRESHOLD = 500
 
 
@@ -105,7 +99,6 @@ def resample_equity_curve_daily(
     if len(curve) <= threshold:
         return curve
 
-    # 동일 날짜의 마지막 포인트를 대표값으로 선택
     daily: dict[str, dict] = {}
     for point in curve:
         date_key = _extract_date(point)

@@ -8,7 +8,6 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# strategies/.running/{bot_id}/ 하위에 스냅샷 저장
 _RUNNING_DIR_NAME = ".running"
 
 
