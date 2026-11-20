@@ -618,6 +618,43 @@ def test_signal_entries_registered_after_1847_sub_pr_9() -> None:
     )
 
 
+# ── registry 내부 정합 ─────────────────────────────────────────────────────
+
+
+def test_non_scoped_entries_have_no_scopes() -> None:
+    """``auth.mode`` 가 ``"scoped"`` 가 아닌 모든 항목은 scope 가 비어 있다."""
+    non_scoped = {
+        path: contract
+        for path, contract in CLI_COMMAND_REGISTRY.items()
+        if contract.auth.mode != "scoped"
+    }
+    assert len(non_scoped) > 0
+
+    with_scopes = {
+        path: sorted(contract.auth.scopes)
+        for path, contract in non_scoped.items()
+        if contract.auth.scopes
+    }
+    assert with_scopes == {}
+
+
+def test_non_runtime_ipc_entries_have_no_ipc_command() -> None:
+    """``execution`` 이 ``"runtime_ipc"`` 가 아닌 항목은 ``ipc_command`` 가 없다."""
+    non_ipc = {
+        path: contract
+        for path, contract in CLI_COMMAND_REGISTRY.items()
+        if contract.execution != "runtime_ipc"
+    }
+    assert len(non_ipc) > 0
+
+    with_ipc_command = {
+        path: (contract.execution, contract.ipc_command)
+        for path, contract in non_ipc.items()
+        if contract.ipc_command is not None
+    }
+    assert with_ipc_command == {}
+
+
 # ── alias re-export from package __init__ ─────────────────────────────────
 
 
