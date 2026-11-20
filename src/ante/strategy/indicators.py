@@ -16,7 +16,6 @@ import pandas_ta as ta
 
 logger = logging.getLogger(__name__)
 
-# 지표별 pandas-ta 함수명, 입력 타입, 기본 파라미터
 INDICATOR_REGISTRY: dict[str, dict[str, Any]] = {
     "sma": {"func": "sma", "input": "close", "params": {"length": 20}},
     "ema": {"func": "ema", "input": "close", "params": {"length": 20}},
@@ -51,26 +50,12 @@ INDICATOR_REGISTRY: dict[str, dict[str, Any]] = {
     "mfi": {"func": "mfi", "input": "hlcv", "params": {"length": 14}},
 }
 
-# 다중 출력 지표의 결과 키 매핑
 _MULTI_OUTPUT: dict[str, list[str]] = {
     "macd": ["macd", "signal", "hist"],
     "bbands": ["lower", "middle", "upper"],
     "stoch": ["slowk", "slowd"],
 }
 
-# legacy/오명명 파라미터 키 블랙리스트 (#2404).
-#
-# pandas-ta 도입 이전 TA-Lib 규약의 키(timeperiod, nbdev, fastk/slowk/slowd)는
-# pandas-ta 함수 시그니처에 존재하지 않아 `**kwargs`로 흡수된 뒤 조용히 무시된다
-# (silent-drop). 사용자가 정식 키 대신 이 키를 전달하면 의도한 파라미터가
-# 반영되지 않으므로, compute()가 pandas-ta 호출 전에 명시적으로 거부한다.
-#
-# 블랙리스트 방식 채택 근거: pandas-ta 15개 함수가 전부 `**kwargs`를 보유하고
-# 일부 정당 파라미터(예: macd/rsi의 signal_indicators)가 named param이 아닌
-# `kwargs.pop()`으로 처리되므로, allowlist는 정당 입력을 false-reject한다.
-# 아래 키는 현재 15개 지표 어디에서도 유효하지 않아 전역 거부가 안전하다.
-#
-# 값: 정정 키 힌트 (에러 메시지에 노출).
 _LEGACY_PARAM_KEYS: dict[str, str] = {
     "timeperiod": "length",
     "nbdev": "lower_std/upper_std (bbands)",
@@ -130,9 +115,6 @@ class IndicatorCalculator:
             supported = ", ".join(sorted(INDICATOR_REGISTRY.keys()))
             raise ValueError(f"Unknown indicator: {name}. Supported: {supported}")
 
-        # legacy-key 블랙리스트 가드 (#2404): 사용자 전달 params에 pandas-ta가
-        # 조용히 무시하는 TA-Lib 규약 키가 있으면 silent-drop 전에 거부한다.
-        # 레지스트리 기본값(spec["params"])은 전부 정식 키이므로 검사 대상 아님.
         legacy = [key for key in params if key in _LEGACY_PARAM_KEYS]
         if legacy:
             hints = ", ".join(f"{key} -> {_LEGACY_PARAM_KEYS[key]}" for key in legacy)
@@ -148,7 +130,6 @@ class IndicatorCalculator:
         input_type = spec["input"]
         func = getattr(ta, spec["func"])
 
-        # pandas-ta 함수 호출
         if input_type == "close":
             close = pd.Series(ohlcv["close"], dtype=float)
             result = func(close, **merged_params)
@@ -170,14 +151,10 @@ class IndicatorCalculator:
         else:
             raise ValueError(f"Unknown input type: {input_type}")
 
-        # 데이터 부족 등으로 pandas-ta가 None을 반환하면 계산 불가 → 빈 dict.
-        # 이 가드가 다중/단일 출력 두 None 경우를 한 곳에서 처리한다
-        # (LiveDataProvider.get_indicator의 빈 OHLCV 동작과 동일 sentinel).
         if result is None:
             logger.warning("지표 계산 불가(데이터 부족/None 결과): %s", name_lower)
             return {}
 
-        # 결과 포맷팅
         if name_lower in _MULTI_OUTPUT:
             keys = _MULTI_OUTPUT[name_lower]
             if isinstance(result, pd.DataFrame):
@@ -186,7 +163,6 @@ class IndicatorCalculator:
             return dict(zip(keys, [np.asarray(r) for r in result]))
 
         if isinstance(result, pd.DataFrame):
-            # adx 등은 DataFrame으로 반환 — 첫 번째 컬럼 사용
             return {name_lower: result.iloc[:, 0].to_numpy()}
 
         if isinstance(result, pd.Series):
@@ -210,7 +186,6 @@ def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
     Raises:
         ValueError: 변환 불가한 데이터 형식 또는 빈 데이터.
     """
-    # pandas DataFrame
     if isinstance(data, pd.DataFrame):
         return {
             col: data[col].to_numpy().astype(float)
@@ -218,7 +193,6 @@ def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
             if col in data.columns
         }
 
-    # polars DataFrame
     try:
         import polars as pl
 
@@ -231,7 +205,6 @@ def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
     except ImportError:
         pass
 
-    # list[dict]
     if isinstance(data, list):
         if not data:
             raise ValueError("Empty OHLCV data")
@@ -246,5 +219,4 @@ def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
     )
 
 
-# 하위 호환성을 위한 별칭
 ohlcv_to_numpy = ohlcv_to_dataframe

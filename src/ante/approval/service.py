@@ -28,22 +28,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Refs #1217 → #1241 SPLIT-2: ``docs/specs/account/14-account-id-contract.md``
-# §6 ApprovalService 표 기준. account-scoped payload 가 필수인 결재 유형만
-# 포함한다. ``bot_stop``, ``bot_resume``, ``bot_delete``, ``bot_assign_strategy``,
-# ``bot_change_strategy`` 는 ``bot_id`` 로 봇/계좌가 결정되므로 제외하고,
-# ``strategy_adopt``/``strategy_retire`` 는 글로벌 결재이므로 제외한다.
 _ACCOUNT_SCOPED_APPROVAL_TYPES: frozenset[str] = frozenset(
     {"budget_change", "rule_change", "bot_create"}
 )
 
 
-# Refs #1418 → #1470 SPLIT-B: ApprovalType enum SSOT.
-# ``ApprovalType`` 의 모든 값을 frozenset 으로 보관한다. enum 멤버십 검증을
-# ``create()`` (#1469), ``approve()`` (#1470), ``_execute_approved()``
-# (#1470 defense-in-depth) 세 진입점에서 공유한다. 동치성: ``set(t.value for
-# t in ApprovalType)`` 와 항상 동일하므로 신규 ApprovalType 멤버 추가 시
-# 자동으로 반영된다.
 _VALID_APPROVAL_TYPES: frozenset[str] = frozenset(t.value for t in ApprovalType)
 
 
@@ -135,8 +124,6 @@ class ApprovalService:
         now = datetime.now(UTC).isoformat()
         params = params or {}
 
-        # ApprovalType SSOT 검증 — defense-in-depth (IPC handler 가 직접 호출,
-        # #1469). ``_validate_params`` 보다 먼저 실행되어야 한다.
         if type not in _VALID_APPROVAL_TYPES:
             msg = f"invalid approval type: {type!r}"
             raise ValueError(msg)
@@ -166,7 +153,6 @@ class ApprovalService:
             created_at=now,
         )
 
-        # 전결 평가
         auto_approved = await self._auto_approve.should_auto_approve(type, params)
         if auto_approved:
             request.status = ApprovalStatus.APPROVED
@@ -211,22 +197,12 @@ class ApprovalService:
             msg = f"결재 요청을 찾을 수 없음: {id}"
             raise ValueError(msg)
 
-        # Refs #1418 → #1470 SPLIT-B: legacy invalid approval type pending row
-        # 가 DB 에 남아있을 수 있다 (#1469 write-path 가드 이전 데이터). status
-        # transition 전에 enum 멤버십을 검증해 PENDING → APPROVED 전이를 차단한다.
-        # 차단된 경우 history/event/notification 발행이 모두 없으므로 silent
-        # success 가 발생하지 않는다.
         if request.type not in _VALID_APPROVAL_TYPES:
             msg = f"invalid approval type: {request.type!r}"
             raise ValueError(msg)
 
         approvable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
         if request.status not in approvable:
-            # #1813 Group Q sweep: status flow 위반은 typed
-            # ``ApprovalStatusConflictError`` 로 raise 해 IPC envelope 이
-            # ``APPROVAL_STATUS_CONFLICT`` 안정 코드를 surface 한다.
-            # ``ValueError`` 다중상속이라 기존 ``except ValueError`` caller
-            # (CLI ``approval approve`` line 629 generic fallback) 회귀 없음.
             raise ApprovalStatusConflictError(
                 id,
                 current_status=str(request.status),
@@ -280,11 +256,6 @@ class ApprovalService:
 
         rejectable = (ApprovalStatus.PENDING, ApprovalStatus.EXECUTION_FAILED)
         if request.status not in rejectable:
-            # #1813 Group Q sweep: status flow 위반은 typed
-            # ``ApprovalStatusConflictError`` 로 raise 해 IPC envelope 이
-            # ``APPROVAL_STATUS_CONFLICT`` 안정 코드를 surface 한다.
-            # ``ValueError`` 다중상속이라 기존 ``except ValueError`` caller
-            # (CLI ``approval reject`` line 662 generic fallback) 회귀 없음.
             raise ApprovalStatusConflictError(
                 id,
                 current_status=str(request.status),
@@ -357,37 +328,29 @@ class ApprovalService:
             msg = f"결재 요청을 찾을 수 없음: {id}"
             raise ValueError(msg)
 
-        # 상태 검증: rejected만 허용
         if request.status != ApprovalStatus.REJECTED:
             msg = f"rejected 상태에서만 reopen 가능 (현재: {request.status})"
             raise ValueError(msg)
 
-        # 권한 검증: 본인 요청만 reopen 가능
         if request.requester != requester:
             msg = f"본인 요청만 reopen 가능 (요청자: {request.requester})"
             raise ValueError(msg)
 
-        # body/params 갱신 (None이면 기존 값 유지)
         if body is not None:
             request.body = body
         if params is not None:
             request.params = params
 
-        # Refs #1217 → #1241 SPLIT-2: account-scoped 결재 유형 reopen 시
-        # 갱신된 params 에 대해 account_id 재검증. params 가 None 이면 기존
-        # request.params 가 이미 create() 단계에서 검증됐으므로 스킵한다.
         if params is not None and request.type in _ACCOUNT_SCOPED_APPROVAL_TYPES:
             require_account_id(
                 _extract_account_id(request.type, params),
                 context=f"approval.{request.type}.reopen",
             )
 
-        # 사전 검증(validator) 재실행
         now = datetime.now(UTC).isoformat()
         warn_reviews = await self._validate_params(request.type, request.params, now)
         request.reviews.extend(warn_reviews)
 
-        # 상태 전환 + 이력 기록
         request.status = ApprovalStatus.PENDING
         request.reject_reason = ""
         request.resolved_at = ""
@@ -409,7 +372,6 @@ class ApprovalService:
             }
         )
 
-        # DB 업데이트
         await self._db.execute(
             """UPDATE approvals
                SET status = ?, body = ?, params = ?, reviews = ?,
@@ -431,7 +393,6 @@ class ApprovalService:
 
         logger.info("결재 재상신: %s by %s", id, requester)
 
-        # ApprovalCreatedEvent 재발행 (알림 재발송)
         from ante.eventbus.events import ApprovalCreatedEvent
 
         await self._eventbus.publish(
@@ -746,10 +707,6 @@ class ApprovalService:
         row = await self._db.fetch_one(query, tuple(params))
         return row["cnt"] if row else 0
 
-    # Refs #1418 → #1472 SPLIT-D: legacy invalid-type approval cleanup.
-    # ``list_invalid_type_requests`` 와 ``cancel_invalid_type_request`` 는
-    # ``_VALID_APPROVAL_TYPES`` SSOT 에 없는 ``type`` 값을 가진 legacy row 만
-    # 다룬다. 정상 type row 는 두 메서드 모두에서 절대 처리되지 않는다.
     async def list_invalid_type_requests(
         self,
         *,
@@ -802,12 +759,6 @@ class ApprovalService:
         """
         request = await self.get(id)
         if not request:
-            # #1798: missing approval 은 typed ``ApprovalNotFoundError`` 로
-            # raise 해 IPC envelope 이 ``APPROVAL_NOT_FOUND`` typed code 를
-            # 보존하게 한다. 기존 ``except ValueError`` 핸들러가 있던 호출자
-            # (``cancel_invalid`` CLI 등) 는 ``ApprovalNotFoundError`` 가
-            # ``ApprovalError`` 의 sub 이지만 ``Exception`` 으로도 잡히므로
-            # 메시지 시그니처와 exit code 는 동일하게 유지된다.
             raise ApprovalNotFoundError(id)
 
         if request.type in _VALID_APPROVAL_TYPES:
@@ -1044,10 +995,6 @@ class ApprovalService:
                 )
                 logger.exception("결재 실행 실패: %s (%s)", request.id, request.type)
         else:
-            # enum 은 valid 하지만 dispatch executor 가 없는 경우. 이전에는
-            # silent 하게 ``ApprovalResolvedEvent`` 만 발행되어 호출자가
-            # 성공 처리한 것으로 오인했다. 명시적으로 EXECUTION_FAILED 로
-            # 마무리하고 history 에 ``no_executor`` 를 남긴다.
             request.status = ApprovalStatus.EXECUTION_FAILED
             request.history.append(
                 {

@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# SQL query fragments reused in daily/weekly/monthly summary methods
 _COND_STATUS_FILLED = "t.status = ?"
 _COND_SIDE_SELL = "t.side = 'sell'"
 _COND_BOT_ID = "t.bot_id = ?"
@@ -63,7 +62,6 @@ class PerformanceTracker:
         if not trades:
             return self._empty_metrics()
 
-        # 매도 거래 기준 승/패 판정
         sell_trades = [t for t in trades if t.side == "sell"]
         pnl_list = await self._calculate_pnl_per_trade(sell_trades, bot_id)
 
@@ -329,7 +327,6 @@ class PerformanceTracker:
         if not pnl_list:
             return 0.0, 0.0
 
-        # equity curve 구축: 할당 예산 + 누적 PnL
         equity: list[float] = []
         running = 0.0
         for pnl in pnl_list:
@@ -346,7 +343,6 @@ class PerformanceTracker:
             if drawdown > max_dd_amount:
                 max_dd_amount = drawdown
 
-        # MDD% = (Peak - Trough) / Peak; peak <= 0이면 비율 산출 불가
         max_dd_rate = max_dd_amount / peak if peak > 0 else 0.0
         return max_dd_rate, max_dd_amount
 
@@ -414,7 +410,6 @@ class PerformanceTracker:
         """
         pnl_list: list[float] = []
         for trade in sell_trades:
-            # position_history에서 trade_id 기반으로 pnl 조회
             try:
                 row = await self._db.fetch_one(
                     """SELECT pnl FROM position_history
@@ -427,7 +422,6 @@ class PerformanceTracker:
             if row:
                 pnl_list.append(float(row["pnl"]))
             else:
-                # fallback: 수수료 제외한 대략적 계산
                 pnl_list.append(-trade.commission if trade.commission else 0.0)
         return pnl_list
 

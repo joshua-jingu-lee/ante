@@ -352,6 +352,22 @@ class TestLayer1RuleEngine:
         assert _notif_count(cap) == 1
         assert "청산" not in cap.notifications[-1].title
 
+    async def test_korean_liquidation_text_without_marker_is_not_liquidation(
+        self,
+    ) -> None:
+        """G6: marker 없이 한국어 "청산" 만 든 reason 은 청산으로 보지 않는다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        engine = self._engine(bus, registry=not_ready_registry(ACCOUNT))
+        await engine._on_order_request(
+            _request(side="sell", order_type="limit", reason="봇 삭제 청산")
+        )
+
+        assert len(cap.rejected) == 1
+        assert cap.rejected[0].reason.startswith("account_not_ready")
+        assert _notif_count(cap) == 1
+        assert "청산 차단" not in cap.notifications[-1].title
+
     async def test_layer1_blocks_before_side_validation(self) -> None:
         """gate 가 side 검증 前 실행 — invalid side 라도 account_not_ready 우선."""
         bus = EventBus()
@@ -982,6 +998,27 @@ class TestVirtualRouting:
         await executor._on_order_approved(_approved())
 
         assert cap.filled == []  # 0원 체결 금지.
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_message == "virtual_market_price_unavailable"
+
+    @pytest.mark.parametrize("quote", [0.0, -1.0])
+    async def test_g8_virtual_market_non_positive_price_no_fill(
+        self, quote: float
+    ) -> None:
+        """G8: 시장가 체결가 조회가 0 이하를 돌려주면 체결 없이 OrderFailedEvent."""
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=quote)
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+        )
+        await executor._on_order_approved(_approved())
+
+        gateway.get_current_price.assert_awaited_once()
+        assert cap.filled == []
         assert len(cap.failed) == 1
         assert cap.failed[0].error_message == "virtual_market_price_unavailable"
 

@@ -9,16 +9,9 @@ from pathlib import Path
 from ante.core.exchange import STRATEGY_EXCHANGES
 from ante.core.market_data_vocab import is_krx_symbol
 
-# 코드 레벨 SSOT(`ante.core.exchange.STRATEGY_EXCHANGES` = canonical 5종 ∪
-# {`*`})에 위임한다. 이름·타입(`set[str]`)·값·검증 결과·에러 메시지는
-# 위임 전과 완전히 동일하게 보존한다(#1576 narrow-scope: zero-change).
 VALID_EXCHANGES: set[str] = set(STRATEGY_EXCHANGES)
 
 
-# #1675 — StrategyValidator source-read + AST-parse 단계 4클래스 정규화.
-# 두 상수는 인코딩명/`codec`/`null`/raw byte/source line/path 콘텐츠를 포함
-# 하지 않는 **고정 상수**다. 어떤 경우에도 `str(exception)`/예외 repr/codec명
-# /byte/문자/토큰/소스 라인 텍스트를 `errors[]`에 포함하지 않는다.
 _NOT_TEXT_SOURCE = "전략 파일을 텍스트 전략 소스로 읽을 수 없습니다."
 _FILE_NOT_READABLE = "전략 파일에 접근할 수 없습니다."
 
@@ -65,9 +58,6 @@ class _StrategyClassMatch:
 class StrategyValidator:
     """AST 기반 전략 파일 정적 검증."""
 
-    # #2040 — base.py에서 `async def`이고 런타임이 await하는 hook 집합.
-    # on_step=abstract async 필수, 나머지=async default(override 시 await됨).
-    # on_start/on_stop은 sync 계약이라 의도적으로 제외.
     ASYNC_HOOKS: set[str] = {
         "on_step",
         "on_fill",
@@ -117,12 +107,6 @@ class StrategyValidator:
         errors: list[str] = []
         warnings: list[str] = []
 
-        # 1. 파싱 — source-read + AST-parse 단계 4클래스 정규화 (#1675).
-        # 예외 순서: `SyntaxError → OSError → (UnicodeDecodeError, ValueError)`.
-        # 이 순서로 `IsADirectoryError`/`PermissionError`/`FileNotFoundError`가
-        # `OSError`에서 잡히고, `UnicodeDecodeError`(ValueError 서브)는 마지막
-        # 묶음에서 잡힌다. 어떤 경우에도 `str(e)`/예외 repr/codec명/byte/문자/
-        # 토큰/소스 라인 텍스트를 `errors[]`에 포함하지 않는다.
         try:
             source = filepath.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(filepath))
@@ -133,7 +117,6 @@ class StrategyValidator:
         except (UnicodeDecodeError, ValueError):
             return ValidationResult(valid=False, errors=[_NOT_TEXT_SOURCE])
 
-        # 2. Strategy 상속 클래스 존재
         strategy_classes = self._find_strategy_classes(tree)
         if len(strategy_classes) == 0:
             errors.append("No class inheriting from Strategy found")
@@ -143,13 +126,9 @@ class StrategyValidator:
                 f"{[c.name for c in strategy_classes]}"
             )
 
-        # 3. 필수 요소 검사
         if len(strategy_classes) == 1:
             match = strategy_classes[0]
             cls = match.node
-            # #2041: meta 부재 → error. 존재하지만 StrategyMeta(...) 호출이
-            # 아니면(dict/None/다른 호출 등) 타입 불일치 error. StrategyMeta 호출
-            # 여부는 클래스 정의 시점 import 바인딩 스냅샷으로 해석한다(#2042 일관).
             if not self._has_class_var(cls, "meta"):
                 errors.append("Missing 'meta' class variable (StrategyMeta)")
             elif not self._meta_is_strategy_meta_call(
@@ -159,11 +138,8 @@ class StrategyValidator:
             if not self._has_method(cls, "on_step"):
                 errors.append("Missing required method: on_step()")
 
-            # #2040: 런타임이 await하는 hook이 sync `def`면 await 시 TypeError.
-            # 정의된(클래스 body) async hook이 sync면 error.
             errors.extend(self._async_hook_violations(cls))
 
-            # accepts_external_signals=True인 전략에 on_data() 구현 여부 경고
             if self._has_accepts_external_signals(cls) and not self._has_method(
                 cls, "on_data"
             ):
@@ -172,7 +148,6 @@ class StrategyValidator:
                     "implement on_data() — external signals will use default handler"
                 )
 
-        # 4. exchange 유효성 검증
         if len(strategy_classes) == 1:
             module_consts = self._module_string_constants(tree)
             exchange_value = self._extract_meta_exchange(
@@ -184,12 +159,6 @@ class StrategyValidator:
                     f"Valid values: {sorted(VALID_EXCHANGES)}"
                 )
 
-            # 9. symbols ↔ exchange 일관성 경고 (#2017, spec 03-09 항목9).
-            # exchange == "KRX" 이고 symbols 가 정적 해석 가능한 literal list 인
-            # 경우에만, KRX 종목코드 형식(6자리 숫자)과 맞지 않는 심볼을 경고한다.
-            # warn-only — valid 는 그대로 유지(에러 아님). 비-KRX/wildcard/None
-            # exchange, 또는 symbols 가 비-literal/미지정/빈 list 면 skip
-            # (형식 정의 없음). 비-KRX 거래소 심볼 형식 검사는 1.0 비목표.
             if exchange_value == "KRX":
                 symbols = self._extract_meta_symbols(
                     strategy_classes[0].node, module_consts
@@ -202,18 +171,14 @@ class StrategyValidator:
                                 f"format (exchange=KRX)"
                             )
 
-        # 5. 금지 모듈 import
         forbidden = self._find_forbidden_imports(tree)
         for module in forbidden:
             errors.append(f"Forbidden import: {module}")
 
-        # 5. 금지된 내장 함수 호출 (에러)
         errors.extend(self._find_forbidden_builtins(tree))
 
-        # 6. 금지된 최상위 코드 (에러)
         errors.extend(self._find_forbidden_toplevel(tree))
 
-        # 7. 위험 패턴 경고
         warnings.extend(self._find_dangerous_patterns(tree))
 
         return ValidationResult(
@@ -222,8 +187,6 @@ class StrategyValidator:
             warnings=warnings,
         )
 
-    # ante.strategy / ante.strategy.base 에서 Strategy·StrategyMeta 를 export 하는
-    # 모듈 경로(둘은 동일 모듈에서 함께 export 된다 → module-alias 공용).
     _STRATEGY_MODULES: set[str] = {"ante.strategy", "ante.strategy.base"}
 
     def _find_strategy_classes(self, tree: ast.Module) -> list[_StrategyClassMatch]:
@@ -317,19 +280,14 @@ class StrategyValidator:
             Strategy(`name_binding`)·StrategyMeta(`strategymeta_binding`)·
             module-alias(`module_aliases`) 를 대칭으로 함께 무효화한다.
             """
-            # Strategy Name 바인딩: 이전이 무엇이든 ante 도 local 도 아닌 "other" 로.
             name_binding[name] = "other"
-            # StrategyMeta Name 바인딩: 재바인딩 시 키 제거(미바인딩으로 환원).
             strategymeta_binding.pop(name, None)
             _discard_module_aliases(name)
 
-        for node in tree.body:  # module-level 정의 순서 단일 패스 (loader 정합)
+        for node in tree.body:
             if isinstance(node, ast.ImportFrom):
-                # 1) 재import 도 재바인딩 → 기존 ante 바인딩/alias 먼저 무효화.
                 for alias in node.names:
                     _invalidate(alias.asname or alias.name)
-                # 2) ante.strategy/.base 에서 module-scope import 된 ``Strategy``/
-                #    ``StrategyMeta``(asname 포함)의 바인딩명을 (재)기록.
                 if node.module in self._STRATEGY_MODULES and node.level == 0:
                     for alias in node.names:
                         bound = alias.asname or alias.name
@@ -338,20 +296,12 @@ class StrategyValidator:
                         elif alias.name == "StrategyMeta":
                             strategymeta_binding[bound] = "ante_strategy_meta"
             elif isinstance(node, ast.Import):
-                # ante.strategy(및 .base) 모듈 별칭을 Attribute 경로 해석용으로 기록.
-                # ``import ante.strategy`` → "ante.strategy",
-                # ``import ante.strategy as astg`` → "astg".
                 for alias in node.names:
-                    # 재import 도 재바인딩 → 바인딩명을 먼저 무효화한 뒤
-                    # 해당 import 가 ante module 이면 alias 로 (재)등록.
                     bound = alias.asname or alias.name
                     _invalidate(bound)
                     if alias.name in self._STRATEGY_MODULES:
                         module_aliases.add(bound)
             elif isinstance(node, ast.ClassDef):
-                # 1) 현재 바인딩으로 base 해석 → Strategy subclass 여부 판정.
-                #    인정 시 그 시점의 StrategyMeta 바인딩·module-alias 스냅샷을
-                #    함께 캡처(meta 검사를 클래스 정의 시점 import 로 해석, #2042 일관).
                 for base in node.bases:
                     if self._base_is_strategy(base, name_binding, module_aliases):
                         result.append(
@@ -362,24 +312,17 @@ class StrategyValidator:
                             )
                         )
                         break
-                # 2) 그다음 이 클래스 이름을 로컬 클래스로 재바인딩(이후 shadow).
-                #    클래스 정의는 그 이름의 module-alias·StrategyMeta 바인딩도
-                #    무효화한다(대칭).
                 _discard_module_aliases(node.name)
                 strategymeta_binding.pop(node.name, None)
                 name_binding[node.name] = "local_class"
             elif isinstance(node, ast.Assign):
-                # 이름 재바인딩은 보수적으로 "other"(ante 도 local 도 아님) +
-                # module-alias 무효화(대칭).
                 for target in node.targets:
                     for name in self._assign_target_names(target):
                         _invalidate(name)
             elif isinstance(node, ast.AnnAssign):
-                # value 가 있는 AnnAssign 만 실제 바인딩 → 무효화.
                 if node.value is not None and isinstance(node.target, ast.Name):
                     _invalidate(node.target.id)
             elif isinstance(node, ast.Delete):
-                # `del astg` / `del Strategy` 도 바인딩 제거 → 무효화.
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         _invalidate(target.id)
@@ -416,12 +359,8 @@ class StrategyValidator:
 
         ``name_binding`` 은 클래스 정의 시점까지의 module-level 바인딩 상태다.
         """
-        # `class X(Strategy)` / `class X(S)` — 정의 시점에 그 이름이 ante
-        # Strategy 로 바인딩돼 있을 때만 인정. local_class/other/미바인딩이면 미인정.
         if isinstance(base, ast.Name):
             return name_binding.get(base.id) == "ante_strategy"
-        # `class X(astg.Strategy)` / `class X(ante.strategy.Strategy)` —
-        # value 가 module_aliases 로 해석되는 경우만.
         if isinstance(base, ast.Attribute) and base.attr == "Strategy":
             return self._attr_value_to_str(base.value) in module_aliases
         return False
@@ -556,12 +495,8 @@ class StrategyValidator:
         if not isinstance(last_value, ast.Call):
             return False
         func = last_value.func
-        # `meta = StrategyMeta(...)` / `meta = M(...)` — Name 이 클래스 정의
-        # 시점에 ante StrategyMeta 로 바인딩됐을 때만 통과.
         if isinstance(func, ast.Name):
             return strategymeta_binding.get(func.id) == "ante_strategy_meta"
-        # `meta = astg.StrategyMeta(...)` / `meta = ante.strategy.StrategyMeta(...)`
-        # — value 가 ante.strategy module-alias 로 해석되는 경우만 통과.
         if isinstance(func, ast.Attribute) and func.attr == "StrategyMeta":
             return self._attr_value_to_str(func.value) in module_aliases
         return False
@@ -570,7 +505,7 @@ class StrategyValidator:
     def _module_string_constants(tree: ast.Module) -> dict[str, str]:
         """모듈 레벨 `NAME = "literal"` 문자열 상수 map (정적 해석용)."""
         consts: dict[str, str] = {}
-        for node in tree.body:  # 모듈 레벨만
+        for node in tree.body:
             if (
                 isinstance(node, ast.Assign)
                 and isinstance(node.value, ast.Constant)
@@ -662,7 +597,6 @@ class StrategyValidator:
     def _has_accepts_external_signals(self, cls: ast.ClassDef) -> bool:
         """meta에 accepts_external_signals=True 설정 여부 탐지."""
         for node in cls.body:
-            # meta = StrategyMeta(..., accepts_external_signals=True)
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 target = (
                     node.targets[0] if isinstance(node, ast.Assign) else node.target
@@ -708,10 +642,8 @@ class StrategyValidator:
         return errors
 
     def _forbidden_builtin_name(self, func: ast.expr) -> str | None:
-        # 1) open(...) 직접 호출
         if isinstance(func, ast.Name) and func.id in self.FORBIDDEN_BUILTINS:
             return func.id
-        # 2) __builtins__["open"](...)
         if isinstance(func, ast.Subscript) and self._is_builtins_ref(func.value):
             key = func.slice
             if (
@@ -720,7 +652,6 @@ class StrategyValidator:
                 and key.value in self.FORBIDDEN_BUILTINS
             ):
                 return key.value
-        # 3) __builtins__.open(...)
         if isinstance(func, ast.Attribute) and self._is_builtins_ref(func.value):
             if func.attr in self.FORBIDDEN_BUILTINS:
                 return func.attr
@@ -741,13 +672,11 @@ class StrategyValidator:
             if isinstance(node, ast.Import | ast.ImportFrom):
                 continue
             if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
-                # #2032/#2033: decorator는 정의 시점(import-time) 실행 → 전부 금지
                 if node.decorator_list:
                     errors.append(
                         f"Forbidden top-level decorator at line {node.lineno}: "
                         f"{type(node).__name__}"
                     )
-                # #2033: 함수 default argument 식의 import-time call 금지
                 if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                     for default in [*node.args.defaults, *node.args.kw_defaults]:
                         if default is not None and self._contains_call(default):
@@ -760,24 +689,17 @@ class StrategyValidator:
             if isinstance(node, ast.Pass):
                 continue
             if isinstance(node, ast.If):
-                # #2018: if/elif/else body는 import-time 실행 → 동일 규칙 재귀.
-                # If.test 조건식은 범위 밖(eval/exec/금지 import는
-                # _find_forbidden_builtins/_find_forbidden_imports의 walk가 전역 탐지).
                 self._check_toplevel_body(node.body, errors)
                 self._check_toplevel_body(node.orelse, errors)
                 continue
-            # 모듈 docstring (문자열 리터럴 Expr)
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
                 continue
-            # 리터럴 상수 할당
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 value = node.value
                 if value is None:
-                    continue  # 타입 어노테이션만 (x: int)
+                    continue
                 if self._is_literal_assign_value(value):
-                    continue  # 리터럴/Name/리터럴 컬렉션 허용
-                # 비리터럴 실행식 (BinOp/Subscript/Comprehension/Call/...) →
-                # 아래 errors.append로
+                    continue
             errors.append(
                 f"Forbidden top-level code at line {node.lineno}: {type(node).__name__}"
             )
@@ -796,7 +718,7 @@ class StrategyValidator:
         if isinstance(node, ast.Constant):
             return True
         if isinstance(node, ast.Name):
-            return True  # 상수 참조(lookup) — 부작용 없음
+            return True
         if isinstance(node, ast.UnaryOp):
             return self._is_literal_assign_value(node.operand)
         if isinstance(node, ast.List | ast.Tuple | ast.Set):
@@ -813,7 +735,6 @@ class StrategyValidator:
     def _find_dangerous_patterns(self, tree: ast.Module) -> list[str]:
         """위험 패턴 탐지 (경고 수준)."""
         warnings: list[str] = []
-        # open()은 FORBIDDEN_BUILTINS로 승격되어 에러로 처리됨
         return warnings
 
 

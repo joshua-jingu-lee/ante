@@ -48,7 +48,6 @@ class RuleContext:
     검증된다.
     """
 
-    # 주문 정보
     bot_id: str = ""
     account_id: str = ""
     strategy_id: str = ""
@@ -60,16 +59,13 @@ class RuleContext:
     exchange: str = "KRX"
     currency: str = "KRW"
 
-    # 시장/포지션 정보
     current_price: float = 0.0
     current_position: float = 0.0
     available_balance: float = 0.0
     bot_allocated_budget: float = 0.0
 
-    # 봇 미실현 손익
     unrealized_pnl: float = 0.0
 
-    # 계좌 상태
     account_status: str = "active"
     daily_pnl: float = 0.0
     total_pnl: float = 0.0
@@ -77,12 +73,10 @@ class RuleContext:
     total_asset: float = 0.0
     total_exposure: float = 0.0
 
-    # 거래 시간 (Account에서 주입)
     trading_hours_start: str = "09:00"
     trading_hours_end: str = "15:30"
     timezone: str = "Asia/Seoul"
 
-    # 추가 메타데이터
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

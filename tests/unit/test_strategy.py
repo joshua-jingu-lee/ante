@@ -398,6 +398,105 @@ class TestStrategy(Strategy):
         assert not result.valid
         assert any("No class" in e for e in result.errors)
 
+    @pytest.mark.parametrize(
+        ("case", "expected"),
+        [
+            ("non_utf8", "전략 파일을 텍스트 전략 소스로 읽을 수 없습니다."),
+            ("directory", "전략 파일에 접근할 수 없습니다."),
+            ("missing", "전략 파일에 접근할 수 없습니다."),
+            ("syntax", "Syntax error (line 2, offset 16)"),
+        ],
+    )
+    def test_source_read_failures_use_fixed_messages(
+        self, validator, tmp_path, case, expected
+    ):
+        """읽기·파싱 실패는 고정 문구 하나로 보고하고 codec·byte·원문을 싣지 않는다."""
+        target = tmp_path / "bad_strategy.py"
+        if case == "non_utf8":
+            target.write_bytes(b"x = '\xff\xfe secret_token'\n")
+        elif case == "directory":
+            target.mkdir()
+        elif case == "syntax":
+            target.write_text("x = 1\nsecret_token = (\n", encoding="utf-8")
+
+        result = validator.validate(target)
+
+        assert result.valid is False
+        assert result.errors == [expected]
+        joined = " ".join(result.errors).lower()
+        for token in ("codec", "utf-8", "utf8", "0x", "\\x", "secret_token", "byte"):
+            assert token not in joined
+
+    def test_missing_meta_reports_missing_not_type_mismatch(self, validator, tmp_path):
+        """meta 가 없으면 'Missing meta' 이고 타입 불일치 오류는 내지 않는다."""
+        code = """
+from ante.strategy import Strategy
+
+class TestStrategy(Strategy):
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid is False
+        assert result.errors == ["Missing 'meta' class variable (StrategyMeta)"]
+
+    def test_strategymeta_rebound_after_class_uses_definition_time_binding(
+        self, validator, tmp_path
+    ):
+        """클래스 정의 뒤의 StrategyMeta 재바인딩은 그 클래스의 meta 판정과 무관하다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+
+StrategyMeta = dict
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.errors == []
+        assert result.valid is True
+
+    def test_class_named_strategymeta_shadows_import(self, validator, tmp_path):
+        """``class StrategyMeta`` 를 정의하면 그 뒤의 호출은 ante 의 것이 아니다."""
+        code = """
+from ante.strategy import Strategy, StrategyMeta
+
+class StrategyMeta:
+    def __init__(self, **kwargs):
+        pass
+
+class TestStrategy(Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid is False
+        assert result.errors == ["'meta' must be a StrategyMeta(...) instance"]
+
+    def test_class_named_module_alias_shadows_import(self, validator, tmp_path):
+        """``class astg`` 는 ``import ante.strategy as astg`` alias 를 무효화한다."""
+        code = """
+import ante.strategy as astg
+from ante.strategy import StrategyMeta
+
+class astg:
+    Strategy = object
+
+class TestStrategy(astg.Strategy):
+    meta = StrategyMeta(name="test", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return []
+"""
+        result = validator.validate(self._write_strategy(tmp_path, code))
+        assert result.valid is False
+        assert result.errors == ["No class inheriting from Strategy found"]
+
     def test_missing_meta(self, validator, tmp_path):
         """meta 클래스 변수가 없으면 실패."""
         code = """

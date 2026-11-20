@@ -1028,6 +1028,45 @@ class TestBacktestSignalValidation:
         assert result.equity_curve[-1]["balance"] == pytest.approx(10_000)
         assert executor._positions == {}
 
+    @pytest.mark.parametrize("side", ["BUY", "SELL", "Sell"])
+    async def test_side_is_case_sensitive(self, store, side):
+        """포지션 보유 중 대소문자가 다른 side 는 skip 되어 매수·매도되지 않는다."""
+        df = _make_ohlcv_df_with_closes([100.0, 100.0, 100.0, 100.0])
+        store.write("005930", "1d", df)
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("005930", "1d")
+
+        class BuyThenOddCase(Strategy):
+            meta = StrategyMeta(name="buy_then_odd", version="1.0", description="t")
+
+            def __init__(self, ctx: Any) -> None:
+                super().__init__(ctx)
+                self._step = 0
+
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
+                self._step += 1
+                if self._step == 1:
+                    return [Signal(symbol="005930", side="buy", quantity=1)]
+                if self._step == 2:
+                    return [Signal(symbol="005930", side=side, quantity=1)]
+                return []
+
+        executor = BacktestExecutor(
+            strategy_cls=BuyThenOddCase,
+            data_provider=provider,
+            initial_balance=10_000,
+            buy_commission_rate=0.0,
+            sell_commission_rate=0.0,
+            slippage_rate=0.0,
+        )
+        result = await executor.run()
+
+        assert [t.side for t in result.trades] == ["buy"]
+        assert executor._positions["005930"]["quantity"] == 1
+        assert result.equity_curve[-1]["balance"] == pytest.approx(9_900)
+
     async def test_hold_side_not_routed_to_sell(self, store):
         """포지션 보유 중 Signal(side="hold", quantity=1) → 매도되지 않음.
 
@@ -3270,6 +3309,24 @@ class TestMultiSymbolTimeline:
         provider.load("BBB001", "1d")
         # union = {01,02,03,04} = 4.
         assert provider.get_total_steps() == 4
+
+    async def test_load_after_timeline_built_rebuilds_union(self, store):
+        """timeline 을 만든 뒤 load() 하면 다음 접근에서 새 심볼까지 union 한다."""
+        store.write("AAA001", "1d", _make_ohlcv_df_on_dates([_d(1), _d(2)], "AAA001"))
+        store.write("BBB001", "1d", _make_ohlcv_df_on_dates([_d(3), _d(4)], "BBB001"))
+        provider = BacktestDataProvider(
+            store=store, start_date="2026-01-01", end_date="2026-12-31"
+        )
+        provider.load("AAA001", "1d")
+        assert provider.get_total_steps() == 2
+
+        provider.load("BBB001", "1d")
+
+        assert provider.get_total_steps() == 4
+        seen: list[datetime] = []
+        while provider.advance():
+            seen.append(provider.get_current_timestamp())
+        assert seen == [_d(1), _d(2), _d(3), _d(4)]
 
     async def test_get_current_bar_price_exact_match_and_gap(self, store):
         """get_current_bar_price는 current_ts 정확 일치 봉가, 없으면 None."""

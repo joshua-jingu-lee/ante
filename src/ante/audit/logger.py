@@ -137,7 +137,6 @@ class AuditLogger:
             "%Y-%m-%dT%H:%M:%S"
         )
 
-        # Database.execute()는 rowcount를 반환하지 않으므로 사전 카운트
         row = await self._db.fetch_one(
             "SELECT COUNT(*) as cnt FROM audit_log WHERE created_at < ?",
             (cutoff,),

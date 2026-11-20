@@ -89,16 +89,13 @@ def _load_prices_file(config: dict[str, Any]) -> tuple[dict[str, float], float |
     return prices, default_price
 
 
-# ── 시뮬레이션 모드 ─────────────────────────────────────
-
-
 class FillMode(StrEnum):
     """체결 시뮬레이션 모드."""
 
-    IMMEDIATE = "immediate"  # 즉시 전량 체결
-    PARTIAL = "partial"  # 부분 체결
-    DELAYED = "delayed"  # 지연 체결
-    REJECT = "reject"  # 주문 거부
+    IMMEDIATE = "immediate"
+    PARTIAL = "partial"
+    DELAYED = "delayed"
+    REJECT = "reject"
 
 
 @dataclass
@@ -121,7 +118,7 @@ class MockOrder:
     filled_quantity: float
     price: float
     order_type: str
-    status: str  # "pending" | "filled" | "partially_filled" | "cancelled" | "rejected"
+    status: str
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
@@ -152,12 +149,10 @@ class MockBrokerAdapter(BrokerAdapter):
         self._partial_fill_ratio: float = config.get("partial_fill_ratio", 0.5)
         self._delay_seconds: float = config.get("delay_seconds", 0.1)
 
-        # 가상 잔고
         self._cash: float = config.get("initial_cash", 100_000_000.0)
         self._positions: dict[str, MockPosition] = {}
         self._orders: dict[str, MockOrder] = {}
 
-        # 종목별 현재가
         self._prices: dict[str, float]
         self._default_price: float | None
         if "prices_file" in config:
@@ -171,8 +166,6 @@ class MockBrokerAdapter(BrokerAdapter):
             sell_commission_rate=config.get("sell_commission_rate", 0.00195),
         )
 
-    # ── 연결 ──────────────────────────────────────────
-
     async def connect(self) -> None:
         """Mock 연결 (항상 성공). 멱등(#2372): 이미 연결됐으면 no-op."""
         if self.is_connected:
@@ -184,8 +177,6 @@ class MockBrokerAdapter(BrokerAdapter):
         """Mock 연결 해제."""
         self.is_connected = False
         logger.info("Mock Broker 연결 해제")
-
-    # ── 조회 ──────────────────────────────────────────
 
     async def get_account_balance(self) -> dict[str, float]:
         """가상 계좌 잔고 조회."""
@@ -238,8 +229,6 @@ class MockBrokerAdapter(BrokerAdapter):
             "order_buyable_qty": qty,
             "max_buyable_qty": qty,
         }
-
-    # ── 주문 ──────────────────────────────────────────
 
     async def place_order(
         self,
@@ -340,8 +329,6 @@ class MockBrokerAdapter(BrokerAdapter):
                 results.append(await self.get_order_status(order.order_id))
         return results
 
-    # ── 대사(Reconciliation) 조회 ─────────────────────
-
     async def get_account_positions(self) -> list[dict[str, Any]]:
         """증권사 실제 보유 잔고 (대사용)."""
         return await self.get_positions()
@@ -368,8 +355,6 @@ class MockBrokerAdapter(BrokerAdapter):
             )
         return results
 
-    # ── 종목 마스터 ───────────────────────────────────
-
     async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
         """Mock 종목 마스터."""
         return [
@@ -389,13 +374,9 @@ class MockBrokerAdapter(BrokerAdapter):
             },
         ]
 
-    # ── 수수료 ────────────────────────────────────────
-
     def get_commission_info(self) -> CommissionInfo:
         """수수료율 정보."""
         return self._commission
-
-    # ── 내부 헬퍼 ─────────────────────────────────────
 
     def _get_price(self, symbol: str) -> float:
         """종목 현재가 반환."""
@@ -416,7 +397,7 @@ class MockBrokerAdapter(BrokerAdapter):
         """체결 모드에 따른 체결 수량 계산."""
         if self._fill_mode == FillMode.PARTIAL:
             return quantity * self._partial_fill_ratio
-        return quantity  # IMMEDIATE, DELAYED
+        return quantity
 
     def _execute_fill(
         self, order: MockOrder, fill_qty: float, exec_price: float
@@ -429,7 +410,7 @@ class MockBrokerAdapter(BrokerAdapter):
         if order.side == "buy":
             self._cash -= filled_value + commission
             self._update_position_buy(order.symbol, fill_qty, exec_price)
-        else:  # sell
+        else:
             self._cash += filled_value - commission
             self._update_position_sell(order.symbol, fill_qty)
 

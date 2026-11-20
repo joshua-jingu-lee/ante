@@ -31,11 +31,6 @@ logger = logging.getLogger(__name__)
 
 _VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
 
-# NotificationLevel enum 값 SSOT 미러 (ante.notification.base.NotificationLevel).
-# 소비자 ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
-# (service.py:90) case-sensitive lowercase 멤버와 정확 일치해야 한다. config →
-# notification 의존을 피하려고 하드코드하며, 두 집합의 정합성은 drift 테스트가
-# ``{level.value for level in NotificationLevel}`` 대조로 lock 한다 (#2132).
 _VALID_NOTIFICATION_MIN_LEVELS = {"critical", "error", "warning", "info"}
 
 
@@ -65,7 +60,6 @@ def _is_value_finite(value: Any) -> tuple[bool, Any]:
             return False, value
         return True, None
     if isinstance(value, int):
-        # int 는 항상 finite — math.isfinite OverflowError 회귀 방지 (#1412 P2-2).
         return True, None
     if isinstance(value, dict):
         for v in value.values():
@@ -74,14 +68,11 @@ def _is_value_finite(value: Any) -> tuple[bool, Any]:
                 return False, bad
         return True, None
     if isinstance(value, (list, tuple)):
-        # tuple 도 json.dumps 가 JSON array 로 직렬화하므로 동일 재귀 처리
-        # (#1412 P2-B).
         for v in value:
             ok, bad = _is_value_finite(v)
             if not ok:
                 return False, bad
         return True, None
-    # str, None, 그 외 → numeric 아님, 통과.
     return True, None
 
 
@@ -117,9 +108,6 @@ def validate_value(key: str, value: Any) -> None:
             노출한다 (#1673). 호출자(web/IPC/CLI)는 이를 도메인 응답으로
             변환한다.
     """
-    # Generic numeric finite 가드 (#1412). dict/list 내부까지 재귀 검사한다.
-    # 이 ValueError 는 별 multi-consumer 표면이므로 코드화하지 않는다 (#1673
-    # Non-Goal). 무변경.
     ok, bad = _is_value_finite(value)
     if not ok:
         raise ValueError(
@@ -129,17 +117,11 @@ def validate_value(key: str, value: Any) -> None:
 
     if key == "system.log_level":
         if not isinstance(value, str) or value not in _VALID_LOG_LEVELS:
-            # 메시지 문구·대소문자 정책 불변 (#1379 테스트 보존). 예외
-            # 타입만 ConfigValidationError(≤ValueError)로 승격해 CLI/IPC가
-            # CONFIG_VALIDATION_ERROR JSON envelope로 정리하도록 한다 (#1673).
             raise ConfigValidationError(
                 "system.log_level은 _VALID_LOG_LEVELS 멤버여야 합니다 (대소문자 구분)."
             )
 
     if key == "notification.min_level":
-        # system.log_level 분기와 동형. ConfigValidationError 동일 메커니즘
-        # (code=CONFIG_VALIDATION_ERROR)으로 CLI/IPC가 정리한다. NotificationLevel
-        # 값과 일치하는 case-sensitive lowercase 멤버만 통과("CRITICAL" 거부) (#2132).
         if not isinstance(value, str) or value not in _VALID_NOTIFICATION_MIN_LEVELS:
             raise ConfigValidationError(
                 "notification.min_level은 _VALID_NOTIFICATION_MIN_LEVELS "
@@ -243,7 +225,6 @@ class DynamicConfigService:
             try:
                 old_value = await self.get(key)
             except ConfigError:
-                # legacy non-finite numeric row — self-healing 경로 허용. (#1412)
                 old_value = None
 
         json_value = json.dumps(value)

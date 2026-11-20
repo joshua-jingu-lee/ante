@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INTERVAL_SECONDS = 1800  # 30분
+DEFAULT_INTERVAL_SECONDS = 1800
 
 
 class ReconcileScheduler:
@@ -79,9 +79,6 @@ class ReconcileScheduler:
             "ReconcileScheduler 시작 (주기: %d초)",
             int(self._interval),
         )
-        # 기동 즉시 대사. fill 카치업 미성공 계좌는 이 1회만 external-buy 분류를
-        # 연기한다(barrier). 이후 주기 루프(_loop)는 fill 복구가 진행되므로
-        # 정상 처리(skip 안 함).
         await self.run_once(skip_external_buy=self._skip_initial_external_buy)
         self._task = asyncio.create_task(
             self._loop(),
@@ -131,10 +128,6 @@ class ReconcileScheduler:
 
         bots = self._bot_manager.list_bots()
 
-        # 이 스케줄러는 단일 broker(self._broker_account_id)에 바인딩돼 있다.
-        # 다른 계좌의 봇에 이 broker의 positions를 적용하면 데이터 정합성이
-        # 깨지므로(SPLIT-1 가드) 자기 계좌 봇만 다룬다. SPLIT-3 multi-broker
-        # pool 도입 시 이 가드를 제거한다.
         account_id = self._broker_account_id
         account_bots = []
         for b in bots:
@@ -167,17 +160,12 @@ class ReconcileScheduler:
             logger.exception("대사 중 브로커 포지션 조회 실패")
             return all_corrections
 
-        # ambiguity 판정 = status 무관 봇 count(#2119). correction 실행 범위는
-        # 아래에서 running 봇으로 별도 한정(#2118 v4: stopped/error 단일봇
-        # 자동보정 금지 — 기존 lifecycle 범위 보존).
         bot_count = len(account_bots)
 
         if bot_count == 1:
             bot_info = account_bots[0]
             bot_id = bot_info["bot_id"]
             is_running = bot_info.get("status") == BotStatus.RUNNING
-            # 1봇-total + running 만 보정. stopped/error 면 dry_run detect-only
-            # (scheduler 가 비활성 봇을 자동 보정하지 않는다 — lifecycle 범위 보존).
             try:
                 corrections = await self._reconciler.reconcile(
                     bot_id=bot_id,
@@ -195,7 +183,6 @@ class ReconcileScheduler:
                     bot_id,
                 )
         else:
-            # 2+봇 — 귀속 ambiguous(#2270). detect-only(correct_position 미호출).
             try:
                 await self._reconciler.detect_account_level(
                     broker_positions,

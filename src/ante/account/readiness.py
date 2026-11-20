@@ -31,8 +31,6 @@ class ReadinessFlag(StrEnum):
     RECONCILE = "reconcile_ready"
 
 
-# active-trading 전제 플래그 전부. ``active_trading_ready`` 는 면제 매트릭스로
-# 면제된 플래그를 ``True`` 로 취급한 뒤 이 집합 전체를 AND 한다(D-ACC-09 §2).
 ALL_FLAGS: tuple[ReadinessFlag, ...] = (
     ReadinessFlag.BROKER,
     ReadinessFlag.TREASURY_SYNC,
@@ -67,14 +65,8 @@ def is_flag_exempt(
     trading_mode)`` pair 는 모든 플래그를 요구로 취급한다([must_fix A]).
     """
     if flag is ReadinessFlag.TREASURY_SYNC:
-        # treasury_sync 는 VIRTUAL/LIVE 양쪽에서 항상 요구다(면제 없음).
         return False
 
-    # broker/fill_reconcile/reconcile: **명시된 면제 pair만** 면제(fail-closed).
-    # (test·kis-domestic·mock, virtual) 만 면제하고, 미지정 (broker_type,
-    # trading_mode) pair(신규 broker 타입 포함)는 요구로 fail-closed 한다
-    # ([must_fix A], Codex P2 — trading_mode 만 보면 신규 broker+virtual 이
-    # fail-open 으로 broker/fill/reconcile readiness 를 기본 면제받는 회귀).
     return trading_mode == TradingMode.VIRTUAL and broker_type in {
         "test",
         "kis-domestic",
@@ -86,9 +78,7 @@ def is_flag_exempt(
 class _AccountReadiness:
     """단일 계좌의 readiness 상태. 디폴트는 전부 not_ready(fail-closed)."""
 
-    # 명시 ``mark_ready`` 이전에는 모두 not_ready 다(디폴트 fail-closed, §2).
     ready: dict[ReadinessFlag, bool] = field(default_factory=dict)
-    # 마지막 not_ready 사유(관측·알림용). flag 가 ready 면 제거된다.
     reasons: dict[ReadinessFlag, str] = field(default_factory=dict)
 
 

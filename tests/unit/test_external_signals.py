@@ -262,6 +262,37 @@ class TestBotExternalSignal:
         await bot.on_external_signal(event)
         bot._eventbus.publish.assert_not_called()
 
+    @pytest.mark.parametrize(
+        "status", [BotStatus.STOPPING, BotStatus.STOPPED, BotStatus.ERROR]
+    )
+    async def test_ignore_when_not_running(self, status: BotStatus) -> None:
+        """시그널 도착 시 봇이 RUNNING 이 아니면 on_data 를 부르지 않는다."""
+        bot = _make_bot(_OutsourcedStrategy)
+        bot.status = status
+        calls: list[dict] = []
+
+        async def _record(data: dict) -> list[Signal]:
+            calls.append(data)
+            return []
+
+        bot.strategy.on_data = _record
+
+        event = ExternalSignalEvent(
+            account_id="test",
+            bot_id="bot-001",
+            signal_id="sig-001",
+            symbol="005930",
+            action="buy",
+        )
+
+        await bot.on_external_signal(event)
+        assert calls == []
+        bot._eventbus.publish.assert_not_called()
+
+        bot.status = BotStatus.RUNNING
+        await bot.on_external_signal(event)
+        assert len(calls) == 1
+
 
 # ── #2146: ExternalSignalEvent account-scoped marker ────────
 

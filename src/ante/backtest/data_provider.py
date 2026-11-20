@@ -43,22 +43,9 @@ class BacktestDataProvider(DataProvider):
         self._start = start_date
         self._end = end_date
         self._exchange = exchange
-        # 이 run의 실행 timeframe(#2012). service가 load()로 적재한 캐시 키
-        # ``{symbol}:{timeframe}`` 와 일치시키기 위해, 내부 read 경로
-        # (get_current_price/get_indicator/get_current_bar_price)의 기본
-        # timeframe으로 쓴다. 기본 "1d" 로 두어 timeframe 미지정 생성(기존
-        # 테스트/backward-compat)은 종전과 동일하게 동작한다. get_ohlcv ABC
-        # 시그니처(timeframe="1d")는 불변으로 유지한다(전략-facing 계약).
         self._timeframe = timeframe
         self._cache: dict[str, pl.DataFrame] = {}
-        # 초기 커서는 첫 row 이전(-1)에 위치한다. 첫 advance()가 timeline 0으로
-        # 전진하여 첫 시각을 처리한다(#2061). pre-advance 상태(idx=-1)에서는
-        # OHLCV가 empty, current timestamp는 None, current price는 unavailable이다.
         self._current_idx: int = -1
-        # 전 캐시 DataFrame의 timestamp를 union·정렬·dedupe한 통합 시간축(#2098).
-        # 심볼마다 거래 달력이 다를 수 있으므로 공유 row-index 대신 wall-clock
-        # 시각을 SSOT로 삼아 as-of 관측을 한다. None이면 다음 접근 시 lazy-build.
-        # load()/reset()에서 무효화한다.
         self._timeline: list[datetime] | None = None
         self._loaded_datasets: list[DatasetInfo] = []
 
@@ -105,12 +92,8 @@ class BacktestDataProvider(DataProvider):
             raise BacktestDataError(
                 f"백테스트 데이터 로드 실패(손상 파티션): {symbol}: {e}"
             ) from e
-        # 무거래 zero-OHLC 행을 backtest view 한정으로 flat bar 정규화한다(#2071).
-        # 저장 raw(parquet)는 불변이며, 캐시 view에만 적용된다(데이터 무손실 우선).
         df = self._normalize_no_trade_bars(df)
         self._cache[key] = df
-        # 새 데이터가 캐시에 들어오면 통합 timeline을 무효화한다(#2098). 다음
-        # advance()/get_total_steps()/get_current_timestamp() 접근 시 lazy-build.
         self._timeline = None
 
         data_dir = self._store.resolve_path(symbol, timeframe, exchange=self._exchange)
@@ -225,8 +208,6 @@ class BacktestDataProvider(DataProvider):
 
         df = self._cache[key]
         current_ts = self.get_current_timestamp()
-        # 데이터가 없는 심볼은 store가 컬럼 없는 빈 df를 줄 수 있으므로,
-        # timestamp 컬럼 참조 전에 empty를 먼저 가드한다(존재하지 않는 심볼).
         if current_ts is None or df.is_empty():
             return df.head(0)
         visible = df.filter(pl.col("timestamp") <= current_ts)
@@ -282,7 +263,6 @@ class BacktestDataProvider(DataProvider):
         if current_ts is None:
             return None
         df = self._cache[key]
-        # 데이터가 없는 심볼은 timestamp 컬럼이 없는 빈 df일 수 있으므로 가드.
         if df.is_empty():
             return None
         match = df.filter(pl.col("timestamp") == current_ts)
@@ -327,8 +307,6 @@ class BacktestDataProvider(DataProvider):
     def get_current_timestamp(self) -> datetime | None:
         """현재 시뮬레이션 시각(통합 timeline의 current_idx 위치, #2098)."""
         if self._current_idx < 0:
-            # pre-advance 상태(첫 advance() 이전). 음수 인덱스로 마지막 행을
-            # 잘못 반환하지 않도록 명시적으로 None을 반환한다(#2061).
             return None
         if not self._cache:
             return None

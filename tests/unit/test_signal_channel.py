@@ -259,6 +259,157 @@ class TestHandleErrors:
         assert last["type"] == "pong"
 
 
+def _signal_with_metadata(metadata: dict) -> dict:
+    return {"type": "signal", "symbol": "005930", "side": "buy", **metadata}
+
+
+class TestSignalMetadataBound:
+    """외부 시그널 metadata 의 키 수(64)·크기(16KB) 상한."""
+
+    async def test_64_keys_accepted_65_rejected(
+        self, channel: SignalChannel, eventbus: MagicMock, output: io.StringIO
+    ) -> None:
+        at_limit = {f"k{i}": i for i in range(64)}
+        await channel._handle_message(_signal_with_metadata(at_limit))
+        eventbus.publish.assert_awaited_once()
+        assert eventbus.publish.call_args[0][0].metadata == at_limit
+
+        over = {f"k{i}": i for i in range(65)}
+        await channel._handle_message(_signal_with_metadata(over))
+        eventbus.publish.assert_awaited_once()
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        assert [f["type"] for f in frames] == ["ack", "error"]
+        assert frames[1]["message"] == "signal metadata too large"
+
+    async def test_16384_bytes_accepted_16385_rejected(
+        self, channel: SignalChannel, eventbus: MagicMock, output: io.StringIO
+    ) -> None:
+        overhead = len(json.dumps({"blob": ""}).encode("utf-8"))
+        at_limit = {"blob": "x" * (16_384 - overhead)}
+        assert len(json.dumps(at_limit).encode("utf-8")) == 16_384
+        await channel._handle_message(_signal_with_metadata(at_limit))
+        eventbus.publish.assert_awaited_once()
+
+        over = {"blob": "x" * (16_385 - overhead)}
+        await channel._handle_message(_signal_with_metadata(over))
+        eventbus.publish.assert_awaited_once()
+        frames = [json.loads(line) for line in output.getvalue().splitlines()]
+        assert [f["type"] for f in frames] == ["ack", "error"]
+        assert frames[1]["message"] == "signal metadata too large"
+
+
+class TestConstructorPositionalOrder:
+    async def test_fifth_positional_argument_is_output_stream(
+        self, bot: MagicMock, eventbus: MagicMock, ctx: MagicMock
+    ) -> None:
+        """위치 인자 순서는 (bot, eventbus, ctx, input_stream, output_stream)이다."""
+        input_stream = io.StringIO()
+        output_stream = io.StringIO()
+        ch = SignalChannel(bot, eventbus, ctx, input_stream, output_stream)
+
+        await ch._handle_message({"type": "query", "method": "balance"})
+
+        assert input_stream.getvalue() == ""
+        resp = json.loads(output_stream.getvalue().strip())
+        assert resp == {
+            "type": "result",
+            "method": "balance",
+            "data": {"available": 5000000.0},
+        }
+
+
+def _modify_and_stop_events() -> list[tuple[object, str]]:
+    from ante.eventbus.events import (
+        OrderModifyExecutedEvent,
+        OrderModifyRejectedEvent,
+        StopOrderExpiredEvent,
+        StopOrderRegisteredEvent,
+        StopOrderTriggeredEvent,
+    )
+
+    common = {"account_id": "acc-test", "bot_id": "bot-001", "strategy_id": "s1"}
+    return [
+        (
+            OrderModifyExecutedEvent(
+                **common,
+                order_id="ord-mod-exec",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                price=45000.0,
+                reason="adjust",
+            ),
+            "modified",
+        ),
+        (
+            OrderModifyRejectedEvent(
+                **common,
+                order_id="ord-mod-rej",
+                symbol="005930",
+                side="sell",
+                quantity=2.0,
+                price=51000.0,
+                reason="modify_not_implemented",
+            ),
+            "modify_rejected",
+        ),
+        (
+            StopOrderRegisteredEvent(
+                **common,
+                stop_order_id="stop-reg",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                order_type="stop",
+                stop_price=49000.0,
+            ),
+            "stop_registered",
+        ),
+        (
+            StopOrderTriggeredEvent(
+                **common,
+                stop_order_id="stop-trig",
+                symbol="005930",
+                side="sell",
+                quantity=10.0,
+                trigger_price=48500.0,
+                converted_order_type="market",
+            ),
+            "stop_triggered",
+        ),
+        (
+            StopOrderExpiredEvent(
+                **common,
+                stop_order_id="stop-exp",
+                symbol="005930",
+                reason="session_ended",
+            ),
+            "stop_expired",
+        ),
+    ]
+
+
+class TestModifyAndStopEventSubscription:
+    async def test_published_modify_and_stop_events_reach_channel(
+        self, bot: MagicMock, ctx: MagicMock
+    ) -> None:
+        """정정 완료·거부와 stop 등록·발동·만료가 order_update 로 나간다."""
+        from ante.eventbus import EventBus
+
+        bus = EventBus()
+        frames: list[dict] = []
+        ch = SignalChannel(bot, bus, ctx, sink=frames.append)
+        ch._subscribe_events()
+
+        expected = []
+        for event, status in _modify_and_stop_events():
+            await bus.publish(event)
+            expected.append(status)
+
+        assert [f["type"] for f in frames] == ["order_update"] * len(expected)
+        assert [f["status"] for f in frames] == expected
+
+
 class TestEventForwarding:
     """Ante → 외부 이벤트 전달 테스트."""
 

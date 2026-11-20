@@ -295,3 +295,109 @@ class TestBotStepCompletedFields:
         assert evt.signal_count == 0
         assert evt.duration_ms == 750
         assert evt.duration_ms > 0
+
+
+# ── duration_ms 의 측정 구간 ──────────────────────
+
+_real_sleep = asyncio.sleep
+
+
+class _Clock:
+    """``ante.bot.bot.monotonic`` 자리에 넣는 수동 시계."""
+
+    def __init__(self, start: float) -> None:
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+
+class _FailOnSecondPositions(FakePortfolioView):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def get_positions(self, bot_id):
+        self.calls += 1
+        if self.calls >= 2:
+            raise RuntimeError("positions down")
+        return {}
+
+
+class TestBotStepDurationWindow:
+    async def test_success_duration_excludes_signal_publish_time(
+        self, eventbus, ctx, monkeypatch
+    ):
+        """success 의 duration_ms 는 on_step 실행 시간만 잰다(시그널 발행 시간 제외)."""
+        from ante.eventbus.events import OrderRequestEvent
+
+        clock = _Clock(100.0)
+        monkeypatch.setattr("ante.bot.bot.monotonic", clock)
+
+        async def fake_sleep(delay):
+            await _real_sleep(0)
+
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", fake_sleep)
+        captured = _capture(eventbus)
+        published: list[OrderRequestEvent] = []
+
+        async def _slow_order_handler(event: OrderRequestEvent) -> None:
+            published.append(event)
+            clock.now += 2.0
+
+        eventbus.subscribe(OrderRequestEvent, _slow_order_handler)
+
+        class _TimedStrategy(Strategy):
+            meta = StrategyMeta(name="timed", version="1.0.0", description="test")
+
+            async def on_step(self, context) -> list[Signal]:
+                clock.now += 0.5
+                bot.status = BotStatus.STOPPED
+                return [_signal()]
+
+        bot = _make_bot(_TimedStrategy(ctx=ctx), eventbus, ctx)
+
+        await bot._run_loop()
+
+        assert len(published) == 1
+        success = [e for e in captured if e.result == "success"]
+        assert len(success) == 1
+        assert success[0].duration_ms == 500
+
+    async def test_error_before_on_step_reports_zero_duration(
+        self, eventbus, monkeypatch
+    ):
+        """앞 반복의 step 시작 시각이 다음 반복의 error duration_ms 에 새지 않는다."""
+        clock = _Clock(10.0)
+        monkeypatch.setattr("ante.bot.bot.monotonic", clock)
+
+        async def fake_sleep(delay):
+            clock.now += 30.0
+            await _real_sleep(0)
+
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", fake_sleep)
+        portfolio = _FailOnSecondPositions()
+        flaky_ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=portfolio,
+            order_view=FakeOrderView(),
+        )
+        captured = _capture(eventbus)
+
+        class _QuickStrategy(Strategy):
+            meta = StrategyMeta(name="quick", version="1.0.0", description="test")
+
+            async def on_step(self, context) -> list[Signal]:
+                clock.now += 0.5
+                return []
+
+        bot = _make_bot(_QuickStrategy(ctx=flaky_ctx), eventbus, flaky_ctx)
+
+        await bot._run_loop()
+
+        assert portfolio.calls == 2
+        assert bot.status == BotStatus.ERROR
+        assert [e.result for e in captured] == ["success", "error"]
+        error = captured[1]
+        assert error.message == "positions down"
+        assert error.duration_ms == 0

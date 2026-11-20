@@ -834,3 +834,90 @@ class TestReadHandlersUnit:
         )
         result = await _handle_bot_signal_key(svc, {"bot_id": "bot-1"}, "cli")
         assert result == {"bot_id": "bot-1", "signal_key": None}
+
+
+# ── 오류 표면의 모양: IPC 오류 code·message 복원, 정규화 범위 ────────────────
+
+
+class TestReadErrorSurfaceShape:
+    @pytest.mark.parametrize(
+        "args",
+        [
+            ["bot", "positions", "bot-1"],
+            ["bot", "signal-key", "bot-1"],
+        ],
+    )
+    def test_text_mode_server_error_prefixed_with_code(self, args: list[str]) -> None:
+        mock_send = AsyncMock(
+            side_effect=_server_error_exc("EXECUTION_ERROR", "서버 내부 오류")
+        )
+        result = _invoke(
+            args,
+            patches=[
+                patch("ante.cli.commands.ipc_helpers.ipc_send", new=mock_send),
+                *_guard_direct_db(),
+            ],
+        )
+        mock_send.assert_awaited_once()
+        assert result.exit_code == 1, result.stdout + result.stderr
+        assert "Error: EXECUTION_ERROR: 서버 내부 오류" in result.stderr.splitlines()
+
+    def test_signal_key_ipc_bot_not_found_uses_cli_missing_message(self) -> None:
+        mock_send = AsyncMock(
+            side_effect=_server_error_exc("BOT_NOT_FOUND", "server-side wording")
+        )
+        result = _invoke(
+            ["--format", "json", "bot", "signal-key", "missing"],
+            patches=[
+                patch("ante.cli.commands.ipc_helpers.ipc_send", new=mock_send),
+                *_guard_direct_db(),
+            ],
+        )
+        assert mock_send.await_args.args[0] == "bot.signal_key"
+        assert result.exit_code == 1, result.stdout + result.stderr
+        payload = _parse_json(result.stdout)
+        assert payload["code"] == "BOT_NOT_FOUND"
+        assert payload["message"] == "봇을 찾을 수 없습니다: missing"
+
+    def test_positions_fallback_no_such_table_is_bot_not_found(self) -> None:
+        import sqlite3
+
+        db = _make_db(
+            fetch_one=sqlite3.OperationalError("no such table: bots"),
+        )
+        result = _invoke(
+            ["--format", "json", "bot", "positions", "bot-db"],
+            patches=[
+                patch(
+                    "ante.cli.commands.ipc_helpers.ipc_send",
+                    new=AsyncMock(side_effect=_server_not_running_exc()),
+                ),
+                patch("ante.cli.commands.bot.open_cli_db", new=_open_cli_db_cm(db)),
+            ],
+        )
+        db.fetch_one.assert_awaited_once()
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        assert result.exit_code == 1, result.stdout + result.stderr
+        assert _parse_json(result.stdout)["code"] == "BOT_NOT_FOUND"
+
+    def test_positions_fallback_other_db_error_not_bot_not_found(self) -> None:
+        import sqlite3
+
+        db = _make_db(
+            fetch_one=sqlite3.OperationalError("database is locked"),
+        )
+        result = _invoke(
+            ["--format", "json", "bot", "positions", "bot-db"],
+            patches=[
+                patch(
+                    "ante.cli.commands.ipc_helpers.ipc_send",
+                    new=AsyncMock(side_effect=_server_not_running_exc()),
+                ),
+                patch("ante.cli.commands.bot.open_cli_db", new=_open_cli_db_cm(db)),
+            ],
+        )
+        db.fetch_one.assert_awaited_once()
+        assert result.exit_code != 0, result.stdout + result.stderr
+        assert "BOT_NOT_FOUND" not in result.stdout
+        surfaced = result.stdout + result.stderr + repr(result.exception)
+        assert "database is locked" in surfaced

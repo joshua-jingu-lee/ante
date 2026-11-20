@@ -200,3 +200,157 @@ async def test_close_all_closes_and_joins_to_completion() -> None:
 async def test_close_all_empty_registry_no_error() -> None:
     reg = SignalChannelRegistry()
     await asyncio.wait_for(reg.close_all("draining"), timeout=1.0)
+
+
+# ── BotManager 수명주기 → close_bot / bump_generation ─────────────────
+
+
+def _external_strategy_cls():
+    """accepts_external_signals=True 전략(시그널 키 자동 발급·rotate 허용)."""
+    from ante.strategy.base import Signal, Strategy, StrategyMeta
+
+    class ExternalStrategy(Strategy):
+        meta = StrategyMeta(
+            name="external",
+            version="1.0.0",
+            description="test",
+            accepts_external_signals=True,
+        )
+
+        async def on_step(self, context: dict) -> list[Signal]:
+            return []
+
+        async def on_data(self, data: dict) -> list[Signal]:
+            return []
+
+    return ExternalStrategy
+
+
+@pytest.fixture
+async def lifecycle(tmp_path):
+    """registry·SignalKeyManager 를 주입한 BotManager 와 등록된 placeholder 핸들."""
+    from unittest.mock import MagicMock
+
+    from ante.bot import BotConfig, BotManager
+    from ante.bot.signal_key import SignalKeyManager
+    from ante.core import Database
+    from ante.eventbus import EventBus
+    from ante.eventbus.events import BotStoppedEvent, NotificationEvent
+
+    db = Database(str(tmp_path / "lifecycle.db"))
+    await db.connect()
+    bus = EventBus()
+    keys = SignalKeyManager(db)
+    await keys.initialize()
+    reg = SignalChannelRegistry()
+    manager = BotManager(
+        eventbus=bus,
+        db=db,
+        signal_key_manager=keys,
+        signal_channel_registry=reg,
+    )
+    await manager.initialize()
+
+    notifications: list[NotificationEvent] = []
+    stopped: list[BotStoppedEvent] = []
+    bus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+    bus.subscribe(BotStoppedEvent, lambda e: stopped.append(e))
+
+    async def make_bot(*, auto_restart: bool = False):
+        ctx = MagicMock()
+        ctx.get_positions.return_value = {}
+        ctx.get_balance.return_value = {}
+        ctx._drain_actions.return_value = []
+        config = BotConfig(
+            bot_id="bot-1",
+            strategy_id="external",
+            account_id="acc-test",
+            interval_seconds=999,
+            auto_restart=auto_restart,
+        )
+        await manager.create_bot(config, _external_strategy_cls(), ctx)
+        handle = _handle(bot_id="bot-1")
+        reg.register(handle)
+        return handle
+
+    state = {
+        "manager": manager,
+        "bus": bus,
+        "reg": reg,
+        "keys": keys,
+        "make_bot": make_bot,
+        "notifications": notifications,
+        "stopped": stopped,
+    }
+    yield state
+    for task in list(manager._restart_tasks.values()):
+        task.cancel()
+    await asyncio.wait_for(manager.stop_all(), timeout=5.0)
+    await asyncio.wait_for(db.close(), timeout=5.0)
+
+
+async def test_delete_running_bot_closes_channel_as_deleted(lifecycle) -> None:
+    """delete_bot 은 정지보다 먼저 채널을 'deleted' 로 닫는다."""
+    manager = lifecycle["manager"]
+    handle = await lifecycle["make_bot"]()
+    await manager.start_bot("bot-1")
+
+    await manager.delete_bot("bot-1")
+
+    assert len(lifecycle["stopped"]) == 1
+    assert manager.get_bot("bot-1") is None
+    assert handle.closed is True
+    assert handle.close_reason == "deleted"
+    assert lifecycle["reg"].current_generation("bot-1") == 0
+
+
+async def test_suppressed_stop_still_closes_channel(lifecycle) -> None:
+    """알림을 억제한 정지도 채널을 'bot_stopped' 로 닫는다."""
+    manager = lifecycle["manager"]
+    handle = await lifecycle["make_bot"]()
+    await manager.start_bot("bot-1")
+
+    await manager.stop_bot("bot-1", suppress_notification=True)
+
+    assert len(lifecycle["stopped"]) == 1
+    assert [n.title for n in lifecycle["notifications"]] == ["봇 시작"]
+    assert handle.closed is True
+    assert handle.close_reason == "bot_stopped"
+
+
+@pytest.mark.parametrize("auto_restart", [False, True])
+async def test_bot_error_closes_channel_as_bot_stopped(
+    lifecycle, auto_restart: bool
+) -> None:
+    """BotErrorEvent 는 auto_restart 와 무관하게 채널을 'bot_stopped' 로 닫는다."""
+    from ante.eventbus.events import BotErrorEvent
+
+    manager = lifecycle["manager"]
+    handle = await lifecycle["make_bot"](auto_restart=auto_restart)
+
+    await lifecycle["bus"].publish(
+        BotErrorEvent(account_id="acc-test", bot_id="bot-1", error_message="boom")
+    )
+
+    assert [n.title for n in lifecycle["notifications"]] == ["봇 에러"]
+    assert manager.get_restart_count("bot-1") == (1 if auto_restart else 0)
+    assert handle.closed is True
+    assert handle.close_reason == "bot_stopped"
+
+
+async def test_rotate_bumps_generation_and_closes_channel_as_rotated(
+    lifecycle,
+) -> None:
+    """rotate 성공 뒤 generation 을 올리고 채널을 'rotated' 로 닫는다."""
+    manager = lifecycle["manager"]
+    handle = await lifecycle["make_bot"]()
+    old_key = await lifecycle["keys"].get_key("bot-1")
+    assert old_key is not None
+
+    new_key = await manager.rotate_signal_key("bot-1")
+
+    assert new_key != old_key
+    assert await lifecycle["keys"].get_key("bot-1") == new_key
+    assert lifecycle["reg"].current_generation("bot-1") == 1
+    assert handle.closed is True
+    assert handle.close_reason == "rotated"
