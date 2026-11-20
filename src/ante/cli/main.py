@@ -7,9 +7,6 @@ from pathlib import Path
 import click
 
 from ante.cli.formatter import OutputFormatter
-
-# ``authenticate_member`` is re-exported so existing tests can monkeypatch
-# ``ante.cli.main.authenticate_member`` (see ``__all__`` below for details).
 from ante.cli.middleware import (
     AuthenticatedGroup,
     _LeafPathMixin,
@@ -17,10 +14,6 @@ from ante.cli.middleware import (
 )
 from ante.config.config import Config, resolve_config_dir
 
-# Re-export for backwards compatibility with tests that patch this symbol on
-# ``ante.cli.main`` (#1404: leaf auth wrapping is invoked by ``AuthenticatedGroup``
-# in middleware.py, but the public function still lives in middleware and is
-# re-exported here so existing patches keep working).
 __all__ = ["cli", "LeafAwareGroup", "authenticate_member"]
 
 try:
@@ -174,7 +167,6 @@ def get_data_path(ctx: click.Context | None = None) -> str:
     return str(cfg.get("data.path", "data/"))
 
 
-# 서브커맨드 등록
 from ante.cli.commands.account import account  # noqa: E402
 from ante.cli.commands.approval import approval  # noqa: E402
 from ante.cli.commands.audit import audit  # noqa: E402

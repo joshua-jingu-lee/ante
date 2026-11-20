@@ -17,34 +17,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 인증 면제 커맨드 경로 목록 (루트부터 leaf까지의 전체 경로)
-# - ("init",): 최초 1회 실행이므로 토큰이 아직 없음
-# - ("member", "reset-password") / ("member", "regenerate-recovery-key"):
-#   인증 수단 분실 시 복구 경로
-#
-# NOTE: 전체 경로 tuple로 매칭한다. leaf 이름만 비교하면 `ante feed init`처럼
-# leaf 이름이 우연히 "init"인 다른 서브커맨드까지 면제 대상으로 오인된다.
-# (`ante feed init`은 `@require_auth` + `@require_scope("data:write")`로 반드시
-# 인증이 필요하다.)
 _AUTH_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
     ("init",),
     ("member", "reset-password"),
     ("member", "regenerate-recovery-key"),
 }
 
-# DB encryption key chokepoint 면제 커맨드 경로 목록.
-#
-# auth exempt와 의미가 다르므로 별도 정의한다. 면제 4 경로는 각자
-# ``ANTE_DB_ENCRYPTION_KEY`` 를 요구하지 않는 cold path이다:
-#
-# - ``("init",)``: 키 생성/주입 자체가 책임 (``commands/init.py`` 의
-#   ``_ensure_encryption_key_in_secrets_env``).
-# - ``("member", "reset-password")``: recovery key 인증, account credential
-#   decrypt 경로 없음.
-# - ``("member", "regenerate-recovery-key")``: 현재 패스워드 인증, account
-#   credential decrypt 경로 없음.
-# - ``("feed", "init")``: ``FeedConfig.init()`` 만 호출, encryption 무관.
-#
 _ENCRYPTION_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
     ("init",),
     ("member", "reset-password"),
@@ -84,9 +62,6 @@ def authenticate_member(ctx: click.Context) -> None:
     if ctx.resilient_parsing:
         return
 
-    # 면제 커맨드 판별 — 루트부터 leaf까지의 전체 커맨드 경로로 매칭한다.
-    # (`ante member reset-password` → ("member", "reset-password"))
-    # LeafAwareGroup(main.py)이 ctx.obj["_leaf_command_path"]에 tuple을 저장.
     path = _get_invoked_command_path(ctx)
     if path is not None and path in _AUTH_EXEMPT_COMMAND_PATHS:
         ctx.obj["member"] = None
@@ -131,18 +106,6 @@ def _run_authenticate(token: str, db_path: str) -> Member:
         try:
             await db.connect()
         except Exception as e:
-            # connect 실패 경로에서도 ``db.close()`` 를 보장한다. ``connect()`` 가
-            # 부분적으로 성공(writer만 열림)한 뒤 raise되면 aiosqlite worker
-            # thread가 leak되어, JSON envelope 출력 **이후** ``asyncio.run`` 종료
-            # 시 닫힌 이벤트 루프를 건드려 stderr에 ``RuntimeError: Event loop
-            # is closed`` traceback을 남긴다(#1965). 이는 ``--format json`` 의
-            # stderr 청결 계약을 위반한다. ``report.py`` / ``db_context.py`` 의
-            # ``except BaseException`` cleanup 패턴을 미러한다.
-            #
-            # NOTE: ``Database.connect()`` 자체도 부분 연결을 정리하므로
-            # (``core/database.py``) 통상 ``db.close()`` 는 no-op이지만, auth
-            # 표면에서도 동일 invariant를 이중 방어로 보장한다. ``close()`` 실패는
-            # 원본 ``PermissionError`` 를 가리지 않도록 swallow한다.
             try:
                 await db.close()
             except Exception:
@@ -211,7 +174,6 @@ def require_auth(fn: Callable) -> Callable:
 
     @functools.wraps(fn)
     def wrapper(*args: object, **kwargs: object) -> object:
-        # Click이 ctx를 첫 인자로 전달
         ctx = click.get_current_context()
         member = ctx.obj.get("member")
         if member is None:
@@ -275,7 +237,6 @@ def require_master(fn: Callable) -> Callable:
             )
             raise SystemExit(1)
 
-        # MemberType.HUMAN + role == MASTER 만 통과.
         member_type_value = getattr(member.type, "value", member.type)
         member_role_value = getattr(member.role, "value", member.role)
         if (
@@ -319,11 +280,9 @@ def require_scope(*scopes: str) -> Callable:
                 )
                 raise SystemExit(1)
 
-            # Human(master, admin)은 scope 무제한
             if member.type == MemberType.HUMAN:
                 return fn(*args, **kwargs)
 
-            # Agent는 scope 검증
             missing = [s for s in scopes if s not in member.scopes]
             if missing:
                 _emit_auth_error(
@@ -336,10 +295,6 @@ def require_scope(*scopes: str) -> Callable:
             return fn(*args, **kwargs)
 
         wrapper._required_scopes = scopes  # type: ignore[attr-defined]
-        # @require_scope wrapper도 member==None을 직접 검사한다.
-        # ``authenticated_group``이 leaf callback을 자동으로 ``require_auth``로
-        # wrapping할 때 같은 검사가 두 번 발화하지 않도록 sentinel marker로
-        # dedupe 신호를 남긴다.
         wrapper._require_auth_applied = True  # type: ignore[attr-defined]
         return wrapper
 
@@ -380,11 +335,9 @@ def enforce_scope(ctx: click.Context, *scopes: str) -> None:
         )
         raise SystemExit(1)
 
-    # Human(master, admin)은 scope 무제한 — require_scope 와 동일.
     if member.type == MemberType.HUMAN:
         return
 
-    # Agent는 scope 검증 — require_scope 와 동일 규칙/메시지.
     missing = [s for s in scopes if s not in member.scopes]
     if missing:
         _emit_auth_error(
@@ -498,7 +451,6 @@ class AuthenticatedGroup(_LeafPathMixin):
         ``click.Path(exists=True)`` 같은 parameter type validation이
         인증 검사 **이전에** 트리거되는 H2 invariant 위반을 막을 수 있다.
         """
-        # 1. _LeafPathMixin: 전체 커맨드 경로 tuple을 ctx.obj에 저장.
         ctx.ensure_object(dict)
         all_args = [*ctx.protected_args, *ctx.args]
         path = self._resolve_command_path(ctx, all_args)
@@ -506,35 +458,14 @@ class AuthenticatedGroup(_LeafPathMixin):
             ctx.obj["_leaf_command_path"] = path
             ctx.obj["_leaf_command"] = path[-1]
 
-        # 2. root callback의 글로벌 옵션을 ``ctx.obj``로 미리 미러링한다.
-        #    ``Group.invoke``는 ``super().invoke(ctx)`` 안에서 root callback을
-        #    실행하지만, 인증 게이트는 그보다 먼저 발화한다. ``--config-dir``
-        #    같이 인증 시점에 영향을 주는 옵션은 root callback 실행을 기다리지
-        #    않고 ``ctx.params`` 에서 직접 읽어 ``ctx.obj`` 에 반영해 두어야
-        #    ``authenticate_member`` 가 정확한 DB 경로를 본다.
         _mirror_root_globals_to_obj(ctx)
 
-        # 3. DB encryption key chokepoint.
-        #    invoke 단계 인증 게이트 직전에 ``ANTE_DB_ENCRYPTION_KEY`` 가 설정
-        #    되어 있고 Fernet canonical 형식을 만족하는지 단일 chokepoint에서
-        #    검증한다. 미설정/형식 위반 시 typed exception을 envelope error로
-        #    변환해 즉시 종료(traceback/timeout 방지). 면제 4 경로
-        #    (``_ENCRYPTION_EXEMPT_COMMAND_PATHS``) 는 우회한다.
-        #
-        #    ``Config.load`` 가 호출되는 시점은 leaf callback 진입 이후이지만,
-        #    본 chokepoint도 같은 fallback 정책을 그대로 적용한다: ``Config.
-        #    load(config_dir=get_config_dir(ctx))`` 를 먼저 호출해 ``secrets.env``
-        #    의 ``ANTE_DB_ENCRYPTION_KEY`` 행을 ``os.environ`` 으로 export시킨 뒤
-        #    검증한다. 환경변수 fallback이 정상 동작한 뒤에야 검증이 호출되는
-        #    invariant를 보장한다.
         if self._should_enforce_encryption_gate(ctx, all_args, path):
             self._enforce_db_encryption_key_gate(ctx)
 
-        # 4. invoke 단계 인증 게이트 — super().invoke(ctx) 호출 전에 발화.
         if self._should_invoke_auth_gate(ctx, all_args, path):
             self._enforce_invoke_auth_gate(ctx, path)
 
-        # 5. click의 정상 디스패치로 진행 (자식 make_context + invoke).
         return super(_LeafPathMixin, self).invoke(ctx)
 
     def _should_enforce_encryption_gate(
@@ -598,9 +529,6 @@ class AuthenticatedGroup(_LeafPathMixin):
            error`` 또는 텍스트 메시지로 envelope 출력 후 ``SystemExit(1)``.
         4. 검증 성공 시 ``ctx.obj["_db_encryption_key_validated"] = True`` marker.
         """
-        # 지연 import: crypto / config 모듈은 본 미들웨어가 import될 때마다
-        # eager로 끌어올리지 않는다. AuthenticatedGroup 자체는 cryptography
-        # 의존성과 무관해야 한다 (단위 테스트가 다른 경로로 import할 수 있음).
         import tomllib
 
         from ante.account.crypto import (
@@ -613,16 +541,6 @@ class AuthenticatedGroup(_LeafPathMixin):
         from ante.config.config import Config
         from ante.config.exceptions import ConfigError
 
-        # secrets.env → os.environ export fallback (``ante.config.config:110-140``).
-        # config_dir 미설정 시 ``resolve_config_dir()`` 기본값을 따른다.
-        #
-        # Config.load 가 raise 하는 경로 (예: 테스트 fixture 가 ``pathlib.Path.
-        # exists`` 를 전역 mock 한 상태에서 실제 system.toml 이 존재하지 않으면
-        # ``FileNotFoundError`` 가 발생) 는 env-only 검증으로 fallback 한다.
-        # env 에 valid key 가 있으면 통과하고, 없으면 다음 단계에서
-        # ``EncryptionKeyMissingError`` 로 envelope 라우팅된다. 어느 경우든
-        # 본 chokepoint 의 책임 (``DB_ENCRYPTION_KEY_*`` 두 코드의 envelope
-        # 라우팅) 은 유지된다.
         try:
             Config.load(config_dir=get_config_dir(ctx))
         except (OSError, tomllib.TOMLDecodeError, ConfigError) as exc:
@@ -661,26 +579,17 @@ class AuthenticatedGroup(_LeafPathMixin):
 
         skip 조건은 본 클래스 docstring의 (1) 항목 참조.
         """
-        # resilient parsing(shell completion 등)은 부작용 없는 파싱이므로 skip.
         if ctx.resilient_parsing:
             return False
 
-        # args 안에 메타 옵션(--help / -h)이 ``--`` 앞에 존재하면
-        # click이 callback에 도달하기 전에 ctx.exit()하므로 가드 skip.
-        # ``--version`` 은 root ``@click.version_option`` 에서만 면제되며,
-        # nested 위치(예: ``ante bot list --version``)는 인증 게이트가 발화해야
-        # parse error 응답이 인증 없이 노출되지 않는다.
         if _has_meta_help_before_dashdash(all_args):
             return False
 
-        # path가 비어 있거나 leaf까지 도달하지 못한 경우(=group으로 끝남)는
-        # click이 ``no_args_is_help`` 또는 ``Missing command``로 처리하므로 skip.
         if not path:
             return False
         if not self._path_resolves_to_leaf(ctx, path):
             return False
 
-        # 공개 명령 allowlist는 면제.
         if path in _AUTH_EXEMPT_COMMAND_PATHS:
             return False
 
@@ -728,7 +637,6 @@ class AuthenticatedGroup(_LeafPathMixin):
             )
             raise SystemExit(1)
 
-        # callback 단계 wrapper가 같은 가드를 다시 발화시키지 않도록 marker.
         ctx.obj["_auth_gate_invoked"] = True
 
     def add_command(self, cmd: click.Command, name: str | None = None) -> None:
@@ -775,10 +683,6 @@ class AuthenticatedGroup(_LeafPathMixin):
                 **extra,
             )
 
-        # JSON 모드: UsageError 를 직접 catch 해 envelope 출력 + exit 1.
-        # super().main(standalone_mode=False) 는 click ``ClickException`` /
-        # ``Abort`` 를 re-raise 하고, 정상/``Exit`` 케이스는 값을 반환한다
-        # (click core.py:1083-1120).
         try:
             rv = super().main(
                 args=args,
@@ -791,33 +695,11 @@ class AuthenticatedGroup(_LeafPathMixin):
             from ante.cli.formatter import OutputFormatter
 
             fmt = OutputFormatter("json")
-            # Click 의 ``UsageError.format_message()`` 는 메시지 본문만 반환
-            # (예: ``Missing argument 'VALUE'.``). ``CLI_USAGE_ERROR`` 코드는
-            # 스펙 ``02-design-decisions.md:84-87`` 의 ``CLI_*`` prefix 명명 규칙을
-            # 따른다 (코드 내부 상수, 스펙 정식 등재 없음).
             fmt.error(e.format_message(), code="CLI_USAGE_ERROR")
             import sys as _sys
 
             _sys.exit(1)
         except click.ClickException as e:
-            # IPC 미기동/타임아웃 등 비-``UsageError`` ``ClickException``
-            # 도 JSON 모드 구조화 에러 계약 (``{status, code, message}``
-            # envelope + exit non-zero, ``docs/specs/cli/02-design-decisions.md
-            # :78-81``) 을 만족해야 한다.
-            #
-            # ``UsageError`` 가 ``ClickException`` 의 subclass 이므로 Python
-            # ``except`` 순서 매칭상 본 분기는 ``UsageError`` 가 아닌 일반
-            # ``ClickException`` (예: ``ipc_send`` 가 raise 하는
-            # ``ServerNotRunningError`` / ``IPCTimeoutError`` 변환 + 서버 error
-            # envelope) 만 처리한다.
-            #
-            # ``ipc_send`` (``ante.cli.commands.ipc_helpers``) 는
-            # ``ClickException`` 인스턴스에 ``ipc_error_code`` /
-            # ``ipc_error_message`` 속성을 부착하므로 그 stable code 를 우선
-            # 사용하고, 없으면 ``IPC_ERROR`` fallback 으로 envelope 을 출력한다
-            # (``commands/bot.py``, ``commands/treasury.py``, ``commands/
-            # strategy.py``, ``commands/rule.py``, ``commands/member.py`` 의 호출
-            # 표면 try/except 매핑과 동형 fallback code).
             from ante.cli.formatter import OutputFormatter
 
             fmt = OutputFormatter("json")
@@ -829,8 +711,6 @@ class AuthenticatedGroup(_LeafPathMixin):
             exit_code = e.exit_code if isinstance(e.exit_code, int) else 1
             _sys.exit(exit_code if exit_code != 0 else 1)
         except click.exceptions.Abort:
-            # ``standalone_mode=True`` 호출자 호환을 위해 click 기본 Abort 동작
-            # (``Aborted!`` stderr + exit 1) 을 그대로 보존한다.
             if standalone_mode:
                 click.echo("Aborted!", err=True)
                 import sys as _sys
@@ -838,11 +718,6 @@ class AuthenticatedGroup(_LeafPathMixin):
                 _sys.exit(1)
             raise
 
-        # standalone_mode=True 호출자 호환: click 기본은 정상 ``ctx.exit(rv)``
-        # 또는 ``Exit`` 예외 시 ``sys.exit(rv)`` 를 호출한다 (core.py:1092,
-        # 1109-1110). 우리는 standalone_mode=False 로 호출했으므로 click 이
-        # sys.exit 를 부르지 않고 값을 반환한다. 호출 일관성을 위해 standalone
-        # 모드에서 우리도 명시적으로 sys.exit 를 호출한다.
         if standalone_mode:
             import sys as _sys
 
@@ -883,14 +758,6 @@ class AuthenticatedGroup(_LeafPathMixin):
         return result
 
 
-# click이 callback에 도달하기 전에 ``ctx.exit()`` 시키는 메타 옵션 토큰.
-# ``_has_meta_help_before_dashdash``가 사용한다.
-#
-# ``--version`` 은 ``@click.version_option`` 이 root 콜백 진입 **이전**에
-# ``ctx.exit()`` 시키므로 root 수준의 ``ante --version`` 은 이미 면제가
-# 보장된다. nested 위치 (``ante bot list --version`` 등) 에서는 Click parse
-# error 응답이 인증 없이 노출되는 부작용을 막아야 하므로 메타 면제 토큰에서
-# ``--version`` 을 제거하고 invoke 단계 가드가 정상적으로 발화하도록 한다.
 _META_HELP_TOKENS: frozenset[str] = frozenset({"--help", "-h"})
 
 
@@ -954,8 +821,6 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
             raw_config_dir if isinstance(raw_config_dir, Path) else Path(raw_config_dir)
         )
 
-    # output_format (--format) 사전 미러링. root callback이 실행되기 전에
-    # ``_emit_auth_error`` 가 ``ctx.obj["formatter"]`` 를 사용할 수 있어야 한다.
     if "formatter" not in ctx.obj:
         from ante.cli.formatter import OutputFormatter
 
@@ -1059,35 +924,20 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
     @functools.wraps(callback)
     def wrapper(*args: object, **kwargs: object) -> object:
         ctx = click.get_current_context()
-        # 1. resilient parsing은 부작용 없는 파싱 시도이므로 skip.
         if ctx.resilient_parsing:
             return callback(*args, **kwargs)
 
-        # 2. invoke 단계 가드가 이미 발화한 경우,
-        #    ``authenticate_member`` 중복 호출 비용을 피하기 위해 callback 단계는
-        #    skip한다. invoke 단계가 ``ctx.obj["_auth_gate_invoked"] = True``
-        #    marker를 남기므로 이를 확인. invoke 단계가 어떤 이유로든 발화하지
-        #    않은 경우(예: 자식 group이 직접 ``click.Group``으로 만들어진 경우)
-        #    에는 본 wrapper가 fallback으로 동작.
         if isinstance(ctx.obj, dict) and ctx.obj.get("_auth_gate_invoked"):
             return callback(*args, **kwargs)
 
-        # 3. allowlist 등재 명령은 인증 면제.
         path = _get_invoked_command_path(ctx)
         if path is not None and path in _AUTH_EXEMPT_COMMAND_PATHS:
             return callback(*args, **kwargs)
 
-        # 4. 토큰 검증 — 기존 테스트 다수가 ``ante.cli.main.authenticate_member``를
-        #    monkeypatch하므로(root callback이 그 심볼을 호출하던 시절의 패턴),
-        #    main 모듈의 최신 attribute를 호출 시점에 동적으로 lookup하여
-        #    backward compatibility를 보장한다.
         from ante.cli import main as _main
 
         _main.authenticate_member(ctx)
 
-        # 5. ``@require_auth`` / ``@require_scope`` 데코레이터가 이미 부착된
-        #    callback은 자체적으로 ``member is None`` 검사 + 메시지를 처리한다.
-        #    중복 호출 방지를 위해 None 검사를 위임.
         if not has_auth_decorator:
             member = ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
             if member is None:
@@ -1101,10 +951,6 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
         return callback(*args, **kwargs)
 
     wrapper._wrapped_by_authenticated_group = True  # type: ignore[attr-defined]
-    # 본 wrapper가 None 검사를 직접 수행한 경우에만 sentinel marker를 노출해야
-    # 한다(보호하지 않는 wrapper에 ``@require_auth`` dedupe marker를 붙이면
-    # 후속 wrap이 잘못 skip된다). ``has_auth_decorator``인 경우엔 이미 안쪽
-    # callback에 marker가 있으므로 굳이 새 marker를 노출할 필요 없다.
     if not has_auth_decorator:
         wrapper._require_auth_applied = True  # type: ignore[attr-defined]
     return wrapper

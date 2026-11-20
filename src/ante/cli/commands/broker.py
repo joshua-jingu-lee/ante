@@ -23,10 +23,6 @@ def _run(coro):
 
 
 async def _create_account_service():
-    # broker live-state 경로 (adapter.connect 동반) 는 별도 epic scope.
-    # live broker state 와 ``Database`` lifecycle 이 같은 try/except 로 엮여
-    # 있어 단순 ``open_cli_db`` wrap 으로 동치 변환이 불가능하다 — 별도 spec
-    # 정렬 PR (부모 epic #1818 follow-up) 에서 다룬다.
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
@@ -62,7 +58,6 @@ async def _get_broker(account_id: str | None = None):
             raise
         return adapter, db
 
-    # 폴백: 기존 Config 기반 브로커 생성
     from ante.cli.main import get_config_dir
     from ante.config.config import Config
 
@@ -136,22 +131,15 @@ def status(ctx: click.Context, account_id: str) -> None:
 
     fmt = get_formatter(ctx)
 
-    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, helper 재사용).
-    # ``InvalidAccountIdError``는 non-Click ``AccountError``라 기존
-    # ``except click.ClickException`` fallback이 잡지 못해 traceback이 났다.
-    # helper가 ``InvalidAccountIdError``→``fmt.error(code=VALIDATION_ERROR)``+
-    # ``SystemExit(1)``로 변환하고 검증된 account_id를 반환한다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.status"
     )
 
-    # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
         result = _run(_ipc_broker_command("broker.status", validated_account_id, actor))
     except click.ClickException:
-        # 서버 미실행 또는 타임아웃 — 기존 직접 연결 폴백
+
         async def _run_status() -> dict:
             try:
                 adapter, db = await _get_broker(validated_account_id)
@@ -163,11 +151,6 @@ def status(ctx: click.Context, account_id: str) -> None:
                         "exchange": adapter.exchange,
                     }
                 finally:
-                    # sibling(balance/positions/reconcile)과 대칭으로 connect 성공
-                    # 이후 adapter session 을 정리한다 (#2373). disconnect 가 raise
-                    # 해도 db.close() 가 실행되도록 내부 try/finally 로 중첩 —
-                    # aiosqlite 스레드 누수(hang) 방지를 disconnect 예외보다 우선
-                    # 보장한다.
                     try:
                         await adapter.disconnect()
                     finally:
@@ -213,20 +196,17 @@ def balance(ctx: click.Context, account_id: str) -> None:
 
     fmt = get_formatter(ctx)
 
-    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.balance"
     )
 
-    # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
         result = _run(
             _ipc_broker_command("broker.balance", validated_account_id, actor)
         )
     except click.ClickException:
-        # 서버 미실행 — 기존 직접 연결 폴백
+
         async def _run_balance() -> dict:
             adapter, db = await _get_broker(validated_account_id)
             try:
@@ -242,11 +222,6 @@ def balance(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
-            # broker typed exception (APIError / AuthenticationError /
-            # OrderNotFoundError / RateLimitError / CircuitOpenError) 은
-            # registry MRO lookup 으로 ``BROKER_*`` 안정 코드를 surface 하며,
-            # 미분류 fault 는 ``EXECUTION_ERROR`` fallback.
             emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -271,20 +246,17 @@ def positions(ctx: click.Context, account_id: str) -> None:
 
     fmt = get_formatter(ctx)
 
-    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.positions"
     )
 
-    # IPC 우선 시도
     try:
         actor = get_member_id(ctx)
         result = _run(
             _ipc_broker_command("broker.positions", validated_account_id, actor)
         )
     except click.ClickException:
-        # 서버 미실행 — 기존 직접 연결 폴백
+
         async def _run_positions() -> list[dict]:
             adapter, db = await _get_broker(validated_account_id)
             try:
@@ -301,8 +273,6 @@ def positions(ctx: click.Context, account_id: str) -> None:
             fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from e
         except Exception as e:
-            # emit_cli_error 로 broker typed exception 안정 코드 surface
-            # (positions 표면 동일 정책).
             emit_cli_error(fmt, e)
 
     pos_list = result.get("positions", [])
@@ -371,16 +341,10 @@ def order_history(
 
     fmt = get_formatter(ctx)
 
-    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, helper 재사용 — 형제 4종 동형).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.order-history"
     )
 
-    # inverted date range(시작일 > 종료일) 거부: IPC/_get_broker 이전에
-    # 차단한다 (#1597 date-range read family 동형, INVALID_DATE_RANGE +
-    # exit 1). 이 helper 없이 추가하면 ``--from > --to`` 가 exit 0 빈 결과로
-    # 돌아가 오라클 #1597 이 닫은 drift class 가 재개방된다.
     reject_inverted_date_range(
         from_date,
         to_date,
@@ -395,19 +359,8 @@ def order_history(
     if to_date is not None:
         extra["to_date"] = to_date
 
-    # ``actor`` 는 ``try`` **밖**에서 계산한다 (``bot signal-key``
-    # bot.py:581 과 1:1 미러). try 안에 두면 여기서 나는 ``ClickException``
-    # 이 아래 IPC except 분기에 잡혀 ``IPC_ERROR`` 로 오분류된다 — 현재
-    # ``get_member_id`` 는 raise 하지 않아 동작은 동일하지만, 오분류 가능
-    # 구조 자체를 남기지 않는다.
     actor = get_member_id(ctx)
 
-    # IPC 우선 시도. 폴백 트리거는 ``IPC_SERVER_NOT_RUNNING`` **단독** 이다
-    # (``bot signal-key`` 패턴, bot.py:641-650). 형제 balance/positions 의
-    # 통짜 ``except click.ClickException`` 은 서버 error envelope 까지 삼켜
-    # credentials/rate limit/circuit breaker 를 우회하므로 따르지 않는다
-    # (docs/specs/ipc/ipc.md 경고). IPC_TIMEOUT·server-error 는 폴백 없이
-    # 원본 code/message 로 surface 한다.
     try:
         result = _run(
             _ipc_broker_command(
@@ -418,16 +371,9 @@ def order_history(
         if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
             code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
             message = getattr(e, "ipc_error_message", None) or e.message
-            # text 모드는 ``bot signal-key`` 형제와 동일한 ``{code}: {message}``
-            # prefix UX 를 유지하되, ``code=`` 인자를 함께 넘겨 error taxonomy
-            # drift(Family A: code 누락) allowlist 부채를 새로 만들지 않는다.
             fmt.error(message if fmt.is_json else f"{code}: {message}", code=code)
             raise SystemExit(1) from e
 
-        # 서버 미실행 — 직접 연결 폴백. 이 경로는 IPC 핸들러를 거치지 않으므로
-        # **여기서도** ISO→YYYYMMDD 변환을 반드시 수행해야 한다. ISO 가 그대로
-        # 어댑터로 새면 3개월 경계 판정(문자열 사전순 비교)이 항상 before 로
-        # 오선택되고 malformed 날짜가 KIS 로 전송된다 — 예외도 경고도 없다.
         async def _run_order_history() -> list[dict]:
             from ante.core.time import iso_to_kis_date
 
@@ -448,17 +394,11 @@ def order_history(
             fmt.error(str(exc), code="ACCOUNT_NOT_FOUND")
             raise SystemExit(1) from exc
         except Exception as exc:
-            # emit_cli_error 로 broker typed exception 안정 코드 surface
-            # (형제 표면 동일 정책). ``InvalidIsoDateError`` 는 class-level
-            # ``code="VALIDATION_ERROR"`` 로 접힌다.
             emit_cli_error(fmt, exc)
 
     orders = result.get("orders", [])
 
     if fmt.is_json:
-        # IPC envelope passthrough — ``fmt.success`` 재래핑 금지(형제 shape
-        # 불일치 방지). 빈 결과도 ``{"orders": []}`` 로 통일하며 positions 의
-        # ``message`` 키 혼합(broker.py 의 empty 분기)은 따르지 않는다.
         fmt.output(result)
         return
 
@@ -501,13 +441,10 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
 
     fmt = get_formatter(ctx)
 
-    # CLI ingress에서 invalid account_id를 IPC/_get_broker 이전에 명시 거부
-    # (fallback 금지, helper 재사용).
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.broker.reconcile"
     )
 
-    # --fix 옵션이 있으면 IPC로 서버에 위임 (상태 변경)
     if fix:
         actor = get_member_id(ctx)
 
@@ -522,11 +459,8 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
         except click.ClickException:
             raise
         except Exception as e:
-            # emit_cli_error 로 broker typed exception 안정 코드 surface
-            # (reconcile --fix mutating path).
             emit_cli_error(fmt, e)
     else:
-        # 읽기 전용: IPC 우선, 폴백으로 오프라인 방식
         try:
             actor = get_member_id(ctx)
 
@@ -538,10 +472,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
 
             result = _run(_run_ipc_reconcile())
         except click.ClickException:
-            # 서버 미실행 — 기존 오프라인 방식 폴백.
-            # broker live-state (adapter + DB) 경로는 별도 spec 정렬 PR
-            # (#1818 follow-up) 에서 ``open_cli_db`` 와 adapter lifecycle 의
-            # 동치 변환 contract 를 정합한다.
+
             async def _run_reconcile() -> dict:
                 from ante.cli.main import get_db_path
                 from ante.core.database import Database
@@ -556,18 +487,10 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                     await position_history.initialize()
 
                     broker_positions = await adapter.get_account_positions()
-                    # 단일 계좌 reconcile은 해당 계좌 포지션끼리만 비교한다.
-                    # account_id 필터를 빼면 다른 계좌의 positions 가 false
-                    # discrepancy 로 잡힌다.
                     internal_positions = await position_history.get_all_positions(
                         account_id=validated_account_id
                     )
 
-                    # #2120: 같은 심볼을 보유한 다중봇 internal 을 **심볼별로
-                    # 합산**한다. ``{p.symbol: p}`` dict 컴프리헨션은 동일 심볼을
-                    # 덮어써 한 봇 수량만 비교 대상이 되어 다중봇 계좌를 false
-                    # discrepancy 로 오판했다(per-bot 오판). detect-only 경로이므로
-                    # 계좌 총합 broker vs 전 봇 합산 internal 을 비교한다.
                     broker_totals: dict[str, float] = {}
                     for bp in broker_positions:
                         b_qty = float(bp.get("quantity", 0) or 0)
@@ -614,9 +537,6 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                 fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
                 raise SystemExit(1) from e
             except Exception as e:
-                # emit_cli_error 로 broker typed exception (APIError 등)
-                # 안정 코드 surface. helper 의 registry MRO lookup +
-                # EXECUTION_ERROR fallback 으로 일관 정렬한다.
                 emit_cli_error(fmt, e)
 
     if fmt.is_json:

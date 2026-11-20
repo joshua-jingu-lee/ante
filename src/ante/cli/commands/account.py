@@ -41,12 +41,6 @@ from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
 
-# `AccountStatus` enum이 `--status` 필터의 SSOT다. `account list`는 DB 진입 전
-# preflight에서 invalid 값을 차단해야 하며, 이를 위해 함수 내부 import 대신
-# 모듈 상단 import을 사용한다. `ante.account.models`은 dataclass + StrEnum 만
-# 노출하는 light 모듈이라 `tests/unit/test_cli_dependency_isolation.py`가
-# 회귀를 차단한다.
-
 if TYPE_CHECKING:
     from ante.account.models import Account
     from ante.account.service import AccountService
@@ -64,11 +58,6 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-# ── cold-path active runtime guard ──────────────────────────────
-
-
-# Cold-path 차단 응답 코드. SSOT는 docs/specs/cli/03-commands.md 117-118줄,
-# docs/specs/account/09-cli.md 49-54줄.
 _COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 
@@ -79,8 +68,6 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     사용한다. 이 래퍼는 기존 account 테스트와 import 경로를 유지하기 위한
     호환 계층이다.
     """
-    # ``kill=os.kill``은 기존 테스트가 ``ante.cli.commands.account.os.kill``을
-    # monkeypatch하던 계약을 유지하기 위한 호환 주입점이다.
     assert_no_active_runtime(
         fmt,
         code=_COLD_PATH_BLOCKED_CODE,
@@ -127,14 +114,8 @@ async def _create_account_service(
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
 
-    # ctx fallback: 명시 전달이 없으면 현재 Click context 를 조회한다. 신규
-    # 호출은 항상 ctx 를 명시 전달해야 하지만, 회귀 테스트 R3 의 ctx-less
-    # ``await _create_account_service()`` invocation 과 다른 명령의 ``ctx``
-    # propagation 누락을 깨뜨리지 않도록 호환 path 를 둔다.
     resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)
     if resolved_ctx is None:
-        # fallback 도 실패 — Click context 가 전혀 활성화되지 않은 경로.
-        # ``open_cli_db`` 의 ValueError 와 동일 의미로 surface.
         raise ValueError(
             "_create_account_service requires a Click context "
             "(explicit ctx or active click.get_current_context)"
@@ -163,9 +144,6 @@ def _get_selectable_broker_types() -> list[str]:
     from ante.broker.registry import BROKER_REGISTRY
 
     return list(BROKER_REGISTRY.keys())
-
-
-# ── 비대화형 입력 helper ─────────────────────────────────────────
 
 
 def _exit_with_error(fmt: OutputFormatter, code: str, message: str) -> NoReturn:
@@ -232,16 +210,11 @@ def _parse_broker_config_value(raw: str) -> Any:
         return lowered == "true"
 
     text = raw.strip()
-    # int 우선 시도 (음수 포함). bool 다음 순서로 평가하여
-    # "0"/"1" 같은 값이 bool로 잘못 변환되는 회귀를 막는다.
     try:
         return int(text)
     except ValueError:
         pass
 
-    # Decimal로 파싱 가능하면 float 반환. Decimal로 일단 검증한 뒤
-    # ``float(text)``로 변환하여 KIS adapter의 `float` 소비 계약과
-    # `json.dumps`의 native JSON 타입 요구를 동시에 만족시킨다.
     try:
         Decimal(text)
     except InvalidOperation:
@@ -291,11 +264,6 @@ def _resolve_credentials(
 
     for raw in direct_pairs:
         key, value = _split_key_value(raw, fmt=fmt, option_label="--credential")
-        # 직접 채널도 env/file과 일관되게 빈 값(공란)을 거부한다.
-        # 빈 credential은 broker adapter 인증에 사용할 수 없는 unusable 값이며,
-        # `--credential app_key=` 같은 입력은 사용자 실수일 가능성이 매우 높다.
-        # SSOT: docs/specs/cli/02-design-decisions.md 표준 에러 코드 표 —
-        # ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``.
         if value == "":
             _exit_with_error(
                 fmt,
@@ -355,9 +323,6 @@ def _resolve_credentials(
                     f"파일을 읽을 수 없습니다 ({exc})."
                 ),
             )
-        # 파일 끝의 단일 개행은 제거하되, 그 외 공백·내용은 보존한다.
-        # (PEM/JSON 등 의미 있는 줄바꿈이 포함될 수 있음을 가정하지 않는다 —
-        # credential value는 단일 토큰이라는 1.0 가정.)
         value = content.rstrip("\r\n")
         if value == "":
             _exit_with_error(
@@ -423,9 +388,6 @@ def _validate_broker_type(fmt: OutputFormatter, broker_type: str) -> None:
                 f"허용 값: {sorted(selectable)}"
             ),
         )
-
-
-# ── create ──────────────────────────────────────
 
 
 @account.command("create")
@@ -522,13 +484,11 @@ def account_create(
     """
     fmt = get_formatter(ctx)
 
-    # cold-path: active runtime이 있으면 진입 직후 차단
     _assert_no_active_runtime(fmt)
 
     from ante.account.models import Account, TradingMode
     from ante.account.presets import BROKER_PRESETS
 
-    # 1) 필수 옵션 검증
     required_inputs: dict[str, str | None] = {
         "--broker-type": broker_type,
         "--account-id": account_id_opt,
@@ -543,38 +503,25 @@ def account_create(
             f"필수 옵션 누락: {missing}",
         )
 
-    # mypy: 위 검증으로 모두 not None
     assert broker_type is not None
     assert account_id_opt is not None
     assert name_opt is not None
     assert trading_mode_opt is not None
 
-    # 1-b) account_id ingress 검증 — invalid account_id (`default` RESTRICTED,
-    # pattern 위반 `bad_id`, ``""``) 를 ``AccountService.create`` SQL 진입
-    # 이전에 `VALIDATION_ERROR` + exit 1로 거부한다. 미적용 시 ``svc.create``
-    # 가 `EXECUTION_ERROR`/empty로 떨어져
-    # invalid ingress가 not-found 의미와 구별되지 않는다.
-    # ``validate_new_account_id``는 RESTRICTED-aware라 lookup-policy의
-    # ``require_account_id``와 달리 ``test`` 같은 bootstrap seed id도 거부한다.
     account_id_opt = reject_invalid_new_account_id(
         account_id_opt, fmt, context="cli.account.create"
     )
 
-    # 2) broker_type enum 검증 (BROKER_REGISTRY SSOT)
     _validate_broker_type(fmt, broker_type)
 
-    # 3) BrokerPreset 조회 — required_credentials의 SSOT
     preset = BROKER_PRESETS.get(broker_type)
     if preset is None:
-        # BROKER_REGISTRY에는 있지만 BROKER_PRESETS에 없는 경우 — 계약 불일치.
-        # 1.0 범위에서는 두 dict 모두 동일 keys를 가지지만, 방어적으로 가드한다.
         _exit_with_error(
             fmt,
             "CLI_MISSING_REQUIRED_INPUT",
             f"broker preset 미정의: {broker_type!r}",
         )
 
-    # 4) credential 해석
     credentials = _resolve_credentials(
         fmt=fmt,
         required_keys=list(preset.required_credentials),
@@ -583,24 +530,19 @@ def account_create(
         file_pairs=credentials_file,
     )
 
-    # 5) broker_config 해석 (free-form pass-through)
     broker_config = _resolve_broker_config(fmt=fmt, pairs=broker_config_pairs)
 
-    # 6) trading_mode 매핑
     trading_mode = (
         TradingMode.VIRTUAL
         if trading_mode_opt.lower() == "virtual"
         else TradingMode.LIVE
     )
 
-    # market_order_reserve_buffer_rate: 옵션 omit 시 preset 기본값을 그대로
-    # 사용하고, 명시된 경우 ``Decimal(str(...))``로 정밀도를 보존한다.
     if market_order_reserve_buffer_rate_opt is None:
         market_order_buffer = preset.market_order_reserve_buffer_rate
     else:
         market_order_buffer = Decimal(str(market_order_reserve_buffer_rate_opt))
 
-    # 7) Account 생성
     new_account = Account(
         account_id=account_id_opt,
         name=name_opt,
@@ -625,9 +567,6 @@ def account_create(
     try:
         created = _run(_do_create())
     except Exception as e:
-        # emit_cli_error 가 registry-first → ``.code`` fallback →
-        # EXECUTION_ERROR 순서로 ErrorSpec 을 resolve해 IPC envelope 와 동일한
-        # public code 를 surface 한다.
         emit_cli_error(fmt, e)
 
     fmt.success(
@@ -640,9 +579,6 @@ def account_create(
             "broker_type": created.broker_type,
         },
     )
-
-
-# ── list ──────────────────────────────────────
 
 
 @account.command("list")
@@ -660,9 +596,6 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     """계좌 목록 조회."""
     fmt = get_formatter(ctx)
 
-    # Preflight: invalid `--status`는 `_create_account_service()` (DB 접속) 전에
-    # 차단한다. `AccountStatus` enum이 SSOT이며 inline 비교한다.
-    # strategy.py 패턴과 동형이다.
     if status_filter is not None and status_filter not in {
         s.value for s in AccountStatus
     }:
@@ -682,7 +615,6 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     try:
         rows = _run(_do_list())
     except Exception as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if not rows:
@@ -698,9 +630,6 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
         )
 
 
-# ── info ──────────────────────────────────────
-
-
 @account.command("info")
 @click.argument("account_id")
 @format_option
@@ -711,12 +640,6 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     """계좌 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
-    # `svc.get(account_id)` lookup **이전** ingress 검증.
-    # invalid account_id(`default`/`""`/패턴 위반)를 not-found로 오분류하지
-    # 않고 `VALIDATION_ERROR` + exit 1로 거부한다. positional required arg라
-    # omitted가 없어 전 입력을 검증한다. helper가 `InvalidAccountIdError`를
-    # 명시 catch하므로 아래 generic `except Exception`(code 없음 → not-found
-    # 오분류)에 도달하지 않는다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.info"
     )
@@ -729,17 +652,12 @@ def account_info(ctx: click.Context, account_id: str) -> None:
     try:
         detail = _run(_do_info())
     except Exception as e:
-        # emit_cli_error 로 AccountNotFoundError 등 typed exception 의 IPC
-        # envelope code (ACCOUNT_NOT_FOUND) 와 동일하게 surface.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
         fmt.output(detail)
     else:
         _print_account_detail(detail)
-
-
-# ── suspend ──────────────────────────────────────
 
 
 @account.command("suspend")
@@ -755,12 +673,6 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
-    # IPC dispatch **이전** ingress 검증 (`account_info` 1:1 동형 미러).
-    # invalid account_id(`default`/`""`/패턴 위반)를 service/IPC 진입 전
-    # `VALIDATION_ERROR` + exit 1로 거부한다. positional required arg라
-    # omitted가 없어 전 입력을 검증한다. helper가 `InvalidAccountIdError`를
-    # 명시 catch하므로 아래 generic `except Exception` (code 없음 →
-    # traceback 누출) 에 도달하지 않는다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.suspend"
     )
@@ -776,14 +688,9 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # emit_cli_error 로 code-less fmt.error 를 taxonomy 정렬된 public
-        # code (IPC envelope 와 동일) 으로 surface 한다.
         emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 정지 완료')
-
-
-# ── activate ──────────────────────────────────────
 
 
 @account.command("activate")
@@ -798,12 +705,6 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
     fmt = get_formatter(ctx)
     member_id = get_member_id(ctx)
 
-    # IPC dispatch **이전** ingress 검증 (`account_info` 1:1 동형 미러).
-    # invalid account_id(`default`/`""`/패턴 위반)를 service/IPC 진입 전
-    # `VALIDATION_ERROR` + exit 1로 거부한다. positional required arg라
-    # omitted가 없어 전 입력을 검증한다. helper가 `InvalidAccountIdError`를
-    # 명시 catch하므로 아래 generic `except Exception` (code 없음 →
-    # traceback 누출) 에 도달하지 않는다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.activate"
     )
@@ -819,14 +720,9 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
     except click.ClickException:
         raise
     except Exception as e:
-        # emit_cli_error 로 code-less fmt.error 를 taxonomy 정렬된 public
-        # code (IPC envelope 와 동일) 으로 surface 한다.
         emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 활성화 완료')
-
-
-# ── delete ──────────────────────────────────────
 
 
 @account.command("delete")
@@ -859,15 +755,8 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
             f'계좌 "{account_id}" 삭제는 확인이 필요합니다. --yes를 명시해 주세요.',
         )
 
-    # cold-path: confirm 통과 직후 active runtime 차단
     _assert_no_active_runtime(fmt)
 
-    # ingress 검증 — invalid account_id (`default`/패턴 위반) 를
-    # ``AccountService.delete`` SQL 진입 이전에 `VALIDATION_ERROR` + exit 1로
-    # 거부한다. 미적용 시 ``svc.delete``가 ``AccountNotFoundError``로
-    # raise되어 invalid ingress가 not-found 의미와
-    # 구별되지 않는다. positional required arg라 omitted가 없어 전 입력을
-    # 검증한다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.delete"
     )
@@ -885,30 +774,20 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     try:
         _run(_do_delete())
     except AccountHasActiveBotsError as e:
-        # 메시지 본문은 errors.py에서 multi-step 복구 절차까지 포함해 빌드한다.
-        # 별도 wording을 만들지 말고 그대로 출력한다.
         fmt.error(str(e), code="ACCOUNT_HAS_ACTIVE_BOTS")
         raise SystemExit(1) from e
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except AccountDeletedError as e:
-        # CLI surface override (보존): registry default ACCOUNT_DELETED 대신
-        # account delete UX 의 already-deleted 의미 (ACCOUNT_ALREADY_DELETED)
-        # 를 surface 한다 (errors.py NOTE).
         fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
         raise SystemExit(1) from e
     except click.ClickException:
         raise
     except Exception as e:
-        # emit_cli_error 로 generic fallback 도 registry-first 로 IPC envelope
-        # 와 동일 public code 를 surface.
         emit_cli_error(fmt, e)
 
     fmt.success(f'계좌 "{validated_account_id}" 삭제 완료')
-
-
-# ── credentials ──────────────────────────────────────
 
 
 @account.command("credentials")
@@ -921,9 +800,6 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     """인증 정보 조회 (마스킹)."""
     fmt = get_formatter(ctx)
 
-    # `account info`와 동형 — `svc.get(account_id)` lookup **이전** ingress
-    # 검증. invalid account_id를 not-found로 오분류하지 않고
-    # `VALIDATION_ERROR` + exit 1로 거부한다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.credentials"
     )
@@ -936,7 +812,6 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     try:
         masked = _run(_do_credentials())
     except Exception as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if not masked:
@@ -950,9 +825,6 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
         click.echo("-" * 35)
         for key, value in masked.items():
             click.echo(f"  {key.upper():14s}: {value}")
-
-
-# ── set-credentials ──────────────────────────────────────
 
 
 @account.command("set-credentials")
@@ -999,14 +871,8 @@ def account_set_credentials(
     """
     fmt = get_formatter(ctx)
 
-    # cold-path: active runtime이 있으면 진입 직후 차단
     _assert_no_active_runtime(fmt)
 
-    # ingress 검증 — invalid account_id (`default`/패턴 위반) 를 ``svc.get``
-    # lookup 이전에 `VALIDATION_ERROR` + exit 1로 거부한다. 미적용 시
-    # ``svc.get``이 ``AccountNotFoundError``로 raise되어 invalid ingress가
-    # not-found 의미와 구별되지 않는다. positional
-    # required arg라 omitted가 없어 전 입력을 검증한다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.set-credentials"
     )
@@ -1018,8 +884,6 @@ def account_set_credentials(
             acct = await svc.get(validated_account_id)
             preset = BROKER_PRESETS.get(acct.broker_type)
             if not preset or not preset.required_credentials:
-                # broker preset이 credentials를 요구하지 않는 경우(예: mock)
-                # 입력이 있으면 unknown으로 거부하고, 없으면 no-op으로 안내한다.
                 any_input = bool(
                     credentials_direct or credentials_env or credentials_file
                 )
@@ -1036,7 +900,6 @@ def account_set_credentials(
                 fmt.output({"message": msg})
                 return
 
-            # credential 옵션 누락 검증: 채널 셋이 모두 비어 있으면 실패
             if not (credentials_direct or credentials_env or credentials_file):
                 required = list(preset.required_credentials)
                 _exit_with_error(
@@ -1065,14 +928,7 @@ def account_set_credentials(
     except SystemExit:
         raise
     except Exception as e:
-        # emit_cli_error 로 MissingCredentialsError /
-        # BrokerReconnectFailedError 등 typed exception 도 registry-first 로
-        # 정확한 public code (ACCOUNT_MISSING_CREDENTIALS / BROKER_RECONNECT_FAILED)
-        # 를 surface 한다.
         emit_cli_error(fmt, e)
-
-
-# ── repair-timezone ──────────────────────────────────────
 
 
 @account.command("repair-timezone")
@@ -1104,16 +960,8 @@ def account_repair_timezone(
     """
     fmt = get_formatter(ctx)
 
-    # cold-path: active runtime이 있으면 진입 직후 차단한다.
-    # ``_create_account_service`` 자체가 호출되지 않아야 한다.
     _assert_no_active_runtime(fmt)
 
-    # ingress 검증 — invalid account_id (`default`/패턴 위반) 를
-    # ``svc.repair_timezone`` 진입 이전에 `VALIDATION_ERROR` + exit 1로
-    # 거부한다. 미적용 시 service-layer가 ``AccountNotFoundError``로
-    # raise되어 invalid ingress가 not-found 의미와
-    # 구별되지 않는다. positional required arg라 omitted가 없어 전 입력을
-    # 검증한다.
     validated_account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.account.repair-timezone"
     )
@@ -1131,16 +979,12 @@ def account_repair_timezone(
     try:
         repaired = _run(_do_repair())
     except ValueError as e:
-        # validate_iana_timezone 위임 실패. invalid IANA key 만 본 경로로
-        # 들어온다 (account_id 형식 검증은 ``update`` 가 별도 코드로 raise
-        # 하지 않으므로 ValueError 만 invalid timezone 으로 매핑한다).
         _exit_with_error(
             fmt,
             "ACCOUNT_INVALID_TIMEZONE",
             f"invalid IANA timezone: {new_timezone!r} — {e}",
         )
     except AccountStructuralChangeRequiresStoppedServerError as e:
-        # service-layer defense-in-depth (CLI guard 우회 시).
         fmt.error(
             str(e),
             code="ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER",
@@ -1150,15 +994,11 @@ def account_repair_timezone(
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
     except AccountDeletedError as e:
-        # CLI surface override (보존): registry default ACCOUNT_DELETED 대신
-        # repair-timezone 표면에서 already-deleted 의미 (ACCOUNT_ALREADY_DELETED)
-        # 를 surface 한다 (account_delete 와 동일 정책).
         fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
         raise SystemExit(1) from e
     except click.ClickException:
         raise
     except Exception as e:
-        # emit_cli_error 로 registry-first IPC envelope 동일 surface.
         emit_cli_error(fmt, e)
 
     fmt.success(
@@ -1170,9 +1010,6 @@ def account_repair_timezone(
             "timezone_invalid": repaired.timezone_invalid,
         },
     )
-
-
-# ── 유틸리티 ──────────────────────────────────────
 
 
 def _account_to_row(acct: Account) -> dict:

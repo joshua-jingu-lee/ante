@@ -47,12 +47,6 @@ from ante.member.scopes import InvalidScopeError
 
 logger = logging.getLogger(__name__)
 
-# CLI 핸들러에서 master guard 위반을 사용자 친화 메시지로 종료하기 위한 메시지.
-# ``MemberService._assert_master``가 raise하는 ``PermissionDeniedError``는 Python
-# 내장 ``PermissionError``와 별개 계열(``MemberError`` → ``Exception``)이라
-# ``except (ValueError, PermissionError)``로는 잡히지 않고 traceback이 노출된다.
-# suspend / reactivate / revoke / rotate-token 등 master 검증이 추가된 모든 CLI
-# 핸들러에서 동일 메시지로 종료한다.
 _MASTER_REQUIRED_MESSAGE = "권한이 없습니다: master만 수행할 수 있습니다."
 
 
@@ -111,7 +105,6 @@ def _resolve_secret_non_interactive(
             raise SystemExit(1)
         return value.strip()
 
-    # file_path is not None
     assert file_path is not None
     path = Path(file_path)
     try:
@@ -312,8 +305,6 @@ def _explicit_config_dir(ctx: click.Context) -> str | None:
     raw = obj.get("config_dir")
     if raw is None:
         return None
-    # 절대 경로로 정규화 — payload 를 다른 CWD 에서 실행해도 같은 인스턴스를
-    # 가리키도록 한다.
     return str(Path(raw).expanduser().resolve())
 
 
@@ -410,9 +401,6 @@ def member_list_invalid_roles(
     """
     fmt = get_formatter(ctx)
     valid_roles = [member.value for member in MemberRole]
-    # 루트 ``--config-dir`` 이 명시되어 있으면 payload 의 revoke_command 에
-    # 동일 값을 보존한다. default 이면 None 이 돌아오고 ``--config-dir`` 인자는
-    # 생략된다.
     config_dir_override = _explicit_config_dir(ctx)
 
     async def _run_scan() -> tuple[list[dict], list[dict]]:
@@ -434,7 +422,6 @@ def member_list_invalid_roles(
 
     actionable_rows, legacy_rows = _run(_run_scan())
 
-    # structured log: 운영자가 invocation 시점마다 count 흐름을 추적한다.
     logger.info(
         "MEMBER_INVALID_ROLE_FOUND actionable=%d legacy_revoked=%d",
         len(actionable_rows),
@@ -454,7 +441,6 @@ def member_list_invalid_roles(
         fmt.output(payload)
         return
 
-    # text 모드 — 두 섹션 분리.
     click.echo(f"  recommended_action : {payload['recommended_action']}")
     click.echo(f"  valid_roles        : {', '.join(valid_roles)}")
     click.echo(f"  actionable         : {payload['actionable_count']}건")
@@ -512,9 +498,6 @@ def member_register(
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
-            # IPC-first: 서버 실행 중이면 runtime IPC 로 위임한다. handler 가
-            # token 을 result 에 담아 반환하므로 동일 shape (fields + token) 으로
-            # 분리해 cold-path 출력 parity 를 보존한다 (#2113).
             payload = await ipc_send(
                 "member.register",
                 {
@@ -555,35 +538,20 @@ def member_register(
     try:
         result, token = _run(_run_register())
     except click.ClickException as e:
-        # IPC error envelope (서버 미기동/타임아웃 또는 server-side 거부) 를
-        # stable code 로 surface 한다 (secret 비노출 — message 는 envelope 의
-        # code/message 만 사용).
         code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
         message = getattr(e, "ipc_error_message", None) or e.message
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 — master 검증 위반의 안정 코드.
-        # CLI surface override 보존: 사용자 친화 한국어 문구
-        # (``_MASTER_REQUIRED_MESSAGE``) 를 envelope message 로 surface 한다.
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberAlreadyExistsError as e:
-        # duplicate member_id 는 안정 코드 ``MEMBER_ALREADY_EXISTS`` 로
-        # surface (typed.code 직접 사용). ValueError 다중상속이라 generic
-        # 분기보다 먼저 둬야 typed 분기를 우선 매칭한다 (Python except 순서
-        # 의존).
         fmt.error(str(e), code=MemberAlreadyExistsError.code)
         raise SystemExit(1) from None
     except InvalidScopeError as e:
-        # SCOPE_VOCABULARY 위반은 ``ValueError`` 서브클래스이지만 CLI direct
-        # path 회귀를 위해 비-0 exit code 로 명시 종료한다.
-        # 다음 분기의 ``except (ValueError, ...)`` 가 먼저 매칭되면 ``return``
-        # 으로 빠져 exit code 0 이 되므로 별도 분기로 둔다.
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -628,13 +596,9 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except MemberNotFoundError:
-        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
-        # (CLI/IPC 일관성: ``MemberNotFoundError.code`` 와 동형, ``member
-        # info`` 형제 패턴 1:1 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except ValueError as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
@@ -688,15 +652,12 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 — master 검증 위반.
-        # CLI surface override 보존 (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except InvalidScopeError as e:
         fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -738,23 +699,15 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
-        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except MemberStateConflictError as e:
-        # state-conflict (이미 SUSPENDED 등) 는 안정 코드
-        # ``MEMBER_STATE_CONFLICT`` 로 surface 한다. ``ValueError`` 다중상속
-        # 이라 아래 ``except (ValueError, PermissionError)`` generic fallback
-        # 보다 typed 분기를 먼저 매칭한다 (Python MRO 보장).
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 정지 완료: {member_id}", result)
@@ -793,23 +746,15 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
-        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except MemberStateConflictError as e:
-        # state-conflict (이미 ACTIVE 등) 는 안정 코드
-        # ``MEMBER_STATE_CONFLICT`` 로 surface 한다 (``member suspend`` 1:1
-        # 미러). ``ValueError`` 다중상속이라 아래 generic fallback 보다
-        # typed 분기를 먼저 매칭한다.
         fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
         raise SystemExit(1) from e
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 재활성화 완료: {member_id}", result)
@@ -866,16 +811,12 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
-        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
@@ -896,8 +837,6 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
-            # handler 가 token 을 result 에 담아 반환 — cold-path 출력 parity
-            # ({member_id} fields + token) 를 위해 분리한다 (#2113).
             payload = await ipc_send(
                 "member.rotate_token",
                 {"member_id": member_id},
@@ -919,16 +858,12 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except PermissionDeniedError:
-        # PERMISSION_DENIED code 명시 + CLI surface override (한국어 친화 문구).
         fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
         raise SystemExit(1) from None
     except MemberNotFoundError:
-        # missing member 는 안정 코드 ``MEMBER_NOT_FOUND`` 로 surface 한다
-        # (CLI/IPC 일관성: ``member info`` 형제 패턴 미러).
         fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:
@@ -982,9 +917,6 @@ def member_reset_password(
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
-            # auth-exempt: client 는 secret 만 보내고 master-lookup 은 서버
-            # handler(chokepoint)가 수행한다. actor 는 audit member_id 로
-            # 신뢰되지 않으며 handler 가 고정 sentinel 로 기록한다 (#2113).
             await ipc_send(
                 "member.reset_password",
                 {"recovery_key": recovery_key, "new_password": new_password},
@@ -1002,20 +934,14 @@ def member_reset_password(
     try:
         _run(_run_reset())
     except click.ClickException as e:
-        # IPC error envelope 만 surface — recovery_key/new_password 는 절대
-        # message 에 싣지 않는다 (secret 비노출).
         code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
         message = getattr(e, "ipc_error_message", None) or e.message
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except MemberInvalidRecoveryCredentialError as e:
-        # invalid recovery credential 은 안정 코드
-        # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
-        # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     fmt.success("패스워드가 변경되었습니다.")
@@ -1062,9 +988,6 @@ def member_regenerate_recovery_key(
         from ante.cli.commands.ipc_helpers import ipc_send
 
         if is_active_runtime():
-            # auth-exempt: client 는 secret(password) 만 보내고 master-lookup 은
-            # 서버 handler 가 수행한다. 새 recovery key 는 result 로만 surface
-            # 한다 (audit/log/envelope 비노출) (#2113).
             payload = await ipc_send(
                 "member.regenerate_recovery_key",
                 {"password": password},
@@ -1082,20 +1005,14 @@ def member_regenerate_recovery_key(
     try:
         new_key = _run(_run_regen())
     except click.ClickException as e:
-        # IPC error envelope 만 surface — password/new recovery key 는 절대
-        # message 에 싣지 않는다 (secret 비노출).
         code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
         message = getattr(e, "ipc_error_message", None) or e.message
         fmt.error(message, code=code)
         raise SystemExit(1) from e
     except MemberInvalidRecoveryCredentialError as e:
-        # invalid 현재 패스워드는 안정 코드
-        # ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` 로 surface. ValueError
-        # 다중상속이라 generic 분기보다 먼저 둬야 typed 우선 매칭.
         fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
         raise SystemExit(1) from None
     except (ValueError, PermissionError) as e:
-        # emit_cli_error 로 CLI/IPC 동일 public code surface 정렬.
         emit_cli_error(fmt, e)
 
     if fmt.is_json:

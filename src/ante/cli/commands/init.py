@@ -114,20 +114,15 @@ def _resolve_effective_key(
     file_present_invalid = (file_value is not None) and (not file_valid)
 
     if env_valid:
-        assert env_value is not None  # narrow type for mypy
+        assert env_value is not None
         if file_valid and file_value == env_value:
-            # NOP — file already in sync with env.
             return env_value, False, False
-        # env-wins: file을 env value로 동기화.
-        # 백업은 invalid 라인 교체 시에만(valid→valid 교체는 백업 없음).
         return env_value, file_present_invalid, True
 
-    # env invalid/없음.
     if file_valid:
-        assert file_value is not None  # narrow type for mypy
+        assert file_value is not None
         return file_value, False, False
 
-    # env invalid/없음 + file invalid/없음 → 신규 키 생성.
     new_key = _generate_db_encryption_key()
     return new_key, file_present_invalid, True
 
@@ -212,7 +207,6 @@ def _write_encryption_key_into_secrets_env(
 
     existing = secrets_env_path.read_text()
     lines = existing.splitlines()
-    # 마지막 ANTE_DB_ENCRYPTION_KEY 라인 인덱스 탐색 (last-wins 일관).
     last_idx: int | None = None
     for i, raw_line in enumerate(lines):
         stripped = raw_line.strip()
@@ -272,7 +266,6 @@ def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
         _resolve_effective_key(env_value, file_value)
     )
 
-    # 빈 문자열은 backup 대상이 아니다 — invalid 분류이지만 보호할 데이터가 없음.
     needs_backup = file_was_invalid_replaced and bool(file_value)
     needs_write = file_was_synced_from_env or (
         not _validate_fernet_key(file_value)
@@ -367,7 +360,6 @@ async def _master_exists_in_db(db_path: str) -> bool:
                 ("master",),
             )
         except Exception:
-            # members 테이블이 아직 없을 수 있음 (orphan DB)
             return False
         return row is not None
     finally:
@@ -404,7 +396,6 @@ async def _test_account_state(
                 ("test",),
             )
         except Exception:
-            # accounts 테이블이 아직 없을 수 있음 (orphan DB)
             return "missing"
         if row is None:
             return "missing"
@@ -552,7 +543,6 @@ def init(
     db_path = artifacts["db/ante.db"]
     db_file_exists = db_path.exists()
 
-    # DB 레코드 상태 조회 (DB 파일이 있을 때만)
     master_exists = False
     test_account_status: Literal["active", "inactive", "missing"] = "missing"
     if db_file_exists:
@@ -560,9 +550,6 @@ def init(
         test_account_status = _run(_test_account_state(str(db_path)))
     test_account_exists = test_account_status == "active"
 
-    # test account가 suspended/deleted 등 비활성 상태면 명시적 에러로 안내한다.
-    # AccountService.create_default_test_account()가 account_id='test' 중복으로
-    # 예외를 던지므로 묵시적 skip/재생성을 시도하면 init 자체가 실패한다.
     if test_account_status == "inactive":
         _fail(
             fmt,
@@ -572,7 +559,6 @@ def init(
             code="ACCOUNT_TEST_INACTIVE",
         )
 
-    # state 1: 모든 상태 완료 → 거부
     if all_files_exist and master_exists and test_account_exists:
         _fail(
             fmt,
@@ -581,29 +567,11 @@ def init(
             code="CLI_ALREADY_INITIALIZED",
         )
 
-    # 1. 디렉토리 생성 및 누락 파일 보충 (state 2/3/4/5 공통)
     config_path.mkdir(parents=True, exist_ok=True)
-    # db.path는 스펙(`docs/specs/config/03-design-decisions.md:203`)에 따라
-    # **상대 경로 기본값**(`db/ante.db`)으로 기록한다 — "ante init은 상대 경로
-    # 기본값을 기록하고, resolver가 절대 경로로 정규화한다". 절대 경로를
-    # baking하면 config 디렉토리를 다른 위치로 복사·마운트(`--config-dir`/
-    # `ANTE_CONFIG_DIR`)했을 때 baked된 원본 절대 경로를 계속 가리켜
-    # relocatable하지 않다 (#1965).
-    #
-    # cwd 독립성은 상대 경로로도 유지된다: `Config.load`는 항상 config_dir를
-    # arg/env/`~/.config/ante`/`./config`에서 확정해 기억하고(`config.py`
-    # `resolve_config_dir`), `resolve_path`가 상대 경로를 그 config_dir 기준으로
-    # 결합하기 때문이다(cwd 무관). 서버(`main.py`)·CLI(`get_db_path`)·IPC·
-    # cold-path 모두 동일한 config_dir resolution을 공유한다.
     system_toml_content = SYSTEM_TOML_TEMPLATE.format(db_path=_DB_FILENAME)
     _ensure_file(artifacts["system.toml"], system_toml_content)
-    # secrets.env는 ANTE_DB_ENCRYPTION_KEY를 보장하기 위해 별도 helper로 처리한다.
-    # 이미 존재하는 파일은 내용을 보존하면서 키 라인만 갱신/추가하며, 신규
-    # 생성 시에는 SECRETS_ENV_TEMPLATE을 사용해 만든다.
     effective_key = _ensure_encryption_key_in_secrets_env(artifacts["secrets.env"])
     artifacts["secrets.env"].chmod(0o600)
-    # in-process os.environ 설정: 현재 환경변수가 invalid/empty/unset일 때만
-    # override하고, non-empty valid env는 그대로 보존한다(env-wins).
     if not _validate_fernet_key(os.environ.get(_ENCRYPTION_KEY_NAME)):
         os.environ[_ENCRYPTION_KEY_NAME] = effective_key
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -615,7 +583,6 @@ def init(
     test_account: dict = {}
     master_already_existed = master_exists
 
-    # 2. master bootstrap — master row 없을 때만 (state 4/5)
     if not master_exists:
         password = generate_password()
         try:
@@ -624,22 +591,14 @@ def init(
             )
         except ValueError as e:
             _fail(fmt, str(e), code="ACCOUNT_MASTER_BOOTSTRAP_FAILED")
-        # text 모드는 여기서 비밀값을 1회 노출 (completion 블록은 재출력 금지).
-        # JSON 성공 경로는 stdout payload로 1회 노출되므로 여기서 stderr 이벤트를
-        # 내보내지 않는다 (중복 노출 방지). JSON 실패 경로만 아래 except에서
-        # stderr 이벤트로 복구 수단을 유지한다.
         if not fmt.is_json:
             _emit_master_credentials_text(master_info, password, token, recovery_key)
 
-    # 3. test account 생성 — test account row 없을 때만 (state 3/4/5)
     if not test_account_exists:
         try:
             test_account = _run(_create_test_account(str(db_path)))
         except Exception as e:
             if master_info:
-                # master는 이미 생성됐다. JSON 모드라면 stdout은 에러 payload가
-                # 쓰이므로 stderr에 복구용 이벤트를 1회 내보낸다. text 모드는
-                # 위에서 이미 블록을 출력했다.
                 if fmt.is_json:
                     _emit_master_credentials_json_stderr(
                         master_info, password, token, recovery_key, config_path
@@ -670,8 +629,6 @@ def init(
         fmt.output(payload)
         return
 
-    # text completion — 비밀값은 위 _emit_master_credentials_text 블록에서 1회
-    # 노출되었으므로 여기서는 요약 + 다음 단계 안내만 출력한다 (1회 노출 불변식).
     click.echo("\n── 완료 ────────────────────────────────────────")
     click.echo(f"  설정 디렉토리: {config_path}")
     if master_info:

@@ -17,7 +17,6 @@ from ante.cli.formatter import OutputFormatter, format_option
 from ante.cli.middleware import get_member_id, require_auth
 from ante.ipc import protocol
 
-# ``ipc_helpers.py:81`` SSOT verbatim — 서버 미기동/소켓 부재 시 사용자 메시지.
 _SERVER_DOWN_MSG = "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
 
 
@@ -59,12 +58,9 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
     try:
         reader, writer = await asyncio.open_unix_connection(socket_path)
     except (ConnectionRefusedError, OSError):
-        # ``FileNotFoundError`` ⊂ ``OSError`` — 소켓 파일 부재/연결 거부 모두
-        # 서버 미기동으로 매핑한다.
         _fail(fmt, _SERVER_DOWN_MSG, "IPC_SERVER_NOT_RUNNING")
 
     try:
-        # Phase A — 핸드셰이크 요청 (key 는 args.key 에만, actor 동봉).
         req = {
             "id": str(uuid4()),
             "command": "signal.connect",
@@ -74,49 +70,32 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
         writer.write(await protocol.encode(req))
         await writer.drain()
 
-        # Phase B — 핸드셰이크 응답. handshake decode 에만 30s bounded timeout.
         try:
             resp = await asyncio.wait_for(protocol.decode(reader), timeout=30.0)
         except TimeoutError:
-            # py3.11+: ``asyncio.TimeoutError`` 는 builtin ``TimeoutError`` alias.
             _fail(fmt, "서버 응답 시간 초과", "IPC_TIMEOUT")
         except asyncio.IncompleteReadError:
-            # 핸드셰이크 중 데몬이 연결을 닫음.
             _fail(fmt, _SERVER_DOWN_MSG, "IPC_SERVER_NOT_RUNNING")
 
         if resp.get("status") == "error":
-            # 데몬 nested envelope ``{id,status:error,error:{code,message}}`` 를
-            # #1705 flattened surface 로 추출 후 ``_fail`` 라우팅(raw echo 금지).
             err = resp["error"]
             _fail(fmt, err["message"], err["code"])
 
-        # OK — 동일 연결을 Phase C 스트림으로 전환. informational stderr 2줄을
-        # handshake OK **이후** 방출한다.
         bot_id = resp["result"]["bot_id"]
         _err(f"Connected to bot {bot_id}")
         _err("Ready for JSON Lines communication on stdin/stdout")
 
-        # Phase C — 양방향 relay. teardown 은 **비대칭** 이다(plain gather 는 idle
-        # stdin readline 에서 영구 hang, 대칭 cancel 은 잔여 프레임 drain 을 끊음).
         pump_in = asyncio.ensure_future(_pump_in(writer))
         pump_out = asyncio.ensure_future(_pump_out(reader))
         done, _pending = await asyncio.wait(
             {pump_in, pump_out}, return_when=asyncio.FIRST_COMPLETED
         )
         if pump_out in done:
-            # ``_pump_out`` 이 먼저 종료(daemon closed 프레임 또는 socket EOF) →
-            # idle stdin 무한 대기 방지를 위해 ``_pump_in`` 을 cancel 한다.
             pump_in.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pump_in
         else:
-            # stdin EOF(``write_eof`` half-close) 로 ``_pump_in`` 이 먼저 종료 →
-            # ``_pump_out`` 을 cancel 하지 **않고** await 하여 데몬의 잔여 ack/
-            # closed 프레임을 socket EOF 까지 drain 한 뒤 종료한다.
             await pump_out
-        # ``_pump_in``/``_pump_out`` 은 write/read 예외를 내부에서 이미 swallow
-        # (BrokenPipe/OSError/IncompleteReadError → 정상 return)하므로 정상 경로에서
-        # 추가 예외는 없다. ``await pump_out`` 도 동일 swallow 로 예외 없이 종료한다.
     finally:
         writer.close()
         with contextlib.suppress(Exception):
@@ -137,10 +116,6 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
     try:
         transport, _ = await loop.connect_read_pipe(lambda: stdin_protocol, sys.stdin)
     except (ValueError, OSError):
-        # stdin 이 실제 파이프/터미널이 아니거나(테스트 하니스 등) read pipe 로
-        # 등록할 수 없는 경우, inbound relay 를 비활성화하고 ``_pump_out`` 이
-        # 종료를 주도하도록 영구 대기한다(취소될 때까지). 데몬→stdout 단방향
-        # relay 는 그대로 유지된다.
         await asyncio.Event().wait()
         return
 
@@ -148,7 +123,6 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
         while True:
             line = await reader.readline()
             if not line:
-                # stdin EOF → half-close. socket→stdout pump 는 계속 동작.
                 with contextlib.suppress(
                     BrokenPipeError, ConnectionResetError, OSError
                 ):
@@ -161,7 +135,6 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
             try:
                 msg = json.loads(text)
             except json.JSONDecodeError:
-                # relay 투명성 — 비-JSON 줄은 그대로 무시한다.
                 continue
 
             try:
@@ -170,8 +143,6 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
     finally:
-        # cancel/return 양 경로 모두에서 stdin read transport 를 닫아 fd 누수와
-        # ResourceWarning 을 방지한다.
         with contextlib.suppress(Exception):
             transport.close()
 
@@ -189,11 +160,9 @@ async def _pump_out(reader: asyncio.StreamReader) -> None:
         try:
             frame = await protocol.decode(reader)
         except asyncio.IncompleteReadError:
-            # socket EOF — 정상 종료.
             return
 
         try:
-            # 데몬 프레임은 embedded newline 0 — stdout 에서 ``\n`` 정확히 1회.
             sys.stdout.write(json.dumps(frame) + "\n")
             sys.stdout.flush()
         except (BrokenPipeError, OSError):
