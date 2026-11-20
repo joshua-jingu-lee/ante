@@ -1895,3 +1895,85 @@ class TestFailClosedOnUnrelatedExceptionType:
         assert len(cap.failed) == 1
         assert cap.failed[0].error_code == "account_status_unavailable"
         assert _notif_count(cap) == 1
+
+
+class TestRegistryNonePerLayer:
+    """registry 미주입(None)이면 계층 2·3이 각자 차단한다."""
+
+    async def test_layer2_treasury_blocks_sell_with_registry_none(self) -> None:
+        bus = EventBus()
+        cap = _capture(bus)
+        treasury = Treasury(
+            db=MagicMock(),
+            eventbus=bus,
+            account_id=ACCOUNT,
+            runtime_readiness=None,
+            broker_type="kis-domestic",
+            trading_mode=TradingMode.LIVE,
+        )
+        await treasury._on_order_validated(_validated(side="sell"))
+
+        assert cap.approved == []
+        assert len(cap.rejected) == 1
+        assert cap.rejected[0].reason.startswith("account_not_ready")
+        assert _notif_count(cap) == 1
+
+    async def test_layer3_gateway_blocks_submit_with_registry_none(self) -> None:
+        from ante.broker.exceptions import APIError
+
+        bus = EventBus()
+        cap = _capture(bus)
+        broker = MagicMock()
+        broker.place_order = AsyncMock(return_value="BRK-1")
+        svc = _account_service(make_account(ACCOUNT))
+        svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(account_service=svc, eventbus=bus, runtime_readiness=None)
+
+        with pytest.raises(APIError) as exc:
+            await gw.submit_order(
+                bot_id=BOT,
+                symbol=SYMBOL,
+                side="buy",
+                quantity=10.0,
+                account_id=ACCOUNT,
+            )
+
+        assert exc.value.error_code == "account_not_ready"
+        broker.place_order.assert_not_called()
+        assert _notif_count(cap) == 1
+
+
+class TestTreasuryManagerPassesRegistry:
+    """TreasuryManager가 만든 Treasury의 계층2 gate는 매니저에 준 registry를 읽는다."""
+
+    @pytest.mark.parametrize(
+        ("registry_factory", "approved"),
+        [(ready_registry, True), (not_ready_registry, False)],
+    )
+    async def test_created_treasury_gate_follows_manager_registry(
+        self, tmp_path, registry_factory, approved: bool
+    ) -> None:
+        from ante.core import Database
+        from ante.treasury import TreasuryManager
+
+        db = Database(str(tmp_path / "manager.db"))
+        await db.connect()
+        try:
+            bus = EventBus()
+            cap = _capture(bus)
+            manager = TreasuryManager(
+                db=db, eventbus=bus, runtime_readiness=registry_factory(ACCOUNT)
+            )
+            await manager.create_treasury(make_account(ACCOUNT))
+
+            await bus.publish(_validated(side="sell"))
+
+            if approved:
+                assert cap.rejected == []
+                assert len(cap.approved) == 1
+            else:
+                assert cap.approved == []
+                assert len(cap.rejected) == 1
+                assert cap.rejected[0].reason.startswith("account_not_ready")
+        finally:
+            await db.close()

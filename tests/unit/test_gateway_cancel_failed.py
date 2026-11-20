@@ -434,3 +434,56 @@ def test_cancel_failed_event_symbol_side_default_blank() -> None:
     )
     assert evt.symbol == ""
     assert evt.side == ""
+
+
+def _cancel_gateway(tracker: AsyncMock) -> tuple[APIGateway, EventBus]:
+    eventbus = EventBus()
+    mock_broker = AsyncMock()
+    mock_broker.cancel_order = AsyncMock(return_value=True)
+    mock_account_service = AsyncMock()
+    mock_account_service.get_broker = AsyncMock(return_value=mock_broker)
+    gw = APIGateway(
+        account_service=mock_account_service,
+        eventbus=eventbus,
+        order_tracker=tracker,
+    )
+    gw.start()
+    return gw, eventbus
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("record_exchange", "expected"), [(None, "KRX"), ("NASDAQ", "NASDAQ")]
+)
+async def test_cancel_success_exchange_from_record_with_krx_fallback(
+    record_exchange: str | None, expected: str
+) -> None:
+    """취소 완료 이벤트의 exchange 는 record 값, record 가 NULL 이면 "KRX"."""
+    tracker = _order_tracker_mock(account_id="acc-test")
+    tracker.get.return_value.exchange = record_exchange
+    gw, eventbus = _cancel_gateway(tracker)
+
+    cancelled, failed = await _publish_cancel(gw, eventbus)
+
+    assert failed == []
+    assert len(cancelled) == 1
+    assert cancelled[0].exchange == expected
+
+
+@pytest.mark.asyncio
+async def test_cancel_success_without_enrich_record_uses_krx_default() -> None:
+    """핸들러의 record 조회가 비어도 취소가 성공하면 exchange 는 "KRX" 이다."""
+    tracker = _order_tracker_mock(account_id="acc-test")
+    record = tracker.get.return_value
+    record.exchange = "NASDAQ"
+    tracker.get = AsyncMock(side_effect=[None, record])
+    gw, eventbus = _cancel_gateway(tracker)
+
+    cancelled, failed = await _publish_cancel(gw, eventbus)
+
+    assert tracker.get.await_count == 2
+    assert failed == []
+    assert len(cancelled) == 1
+    assert cancelled[0].symbol == ""
+    assert cancelled[0].side == ""
+    assert cancelled[0].exchange == "KRX"

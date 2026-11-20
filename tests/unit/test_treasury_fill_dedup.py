@@ -378,6 +378,42 @@ class TestTreasuryAtomicityRollback:
         assert budget.available == pytest.approx(1_000_000.0)
         assert await _fill_dedup_count(db, key) == 0
 
+    async def test_rollback_removes_reservation_created_during_settlement(
+        self, treasury, db
+    ):
+        """정산 도중 생긴 reservation 은 rollback 이 지운다(진입 전에 없던 엔트리)."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        assert "ord-sell" not in treasury.get_reservations("bot1")
+
+        seen_during_settlement: list[dict[str, float]] = []
+
+        async def _reserve_then_fail(*args, **kwargs):
+            await treasury.reserve_for_order("bot1", "ord-sell", 1_000.0)
+            seen_during_settlement.append(dict(treasury.get_reservations("bot1")))
+            raise RuntimeError("boom")
+
+        key = "ord-sell:10.0"
+        event = _sell_fill_event(
+            order_id="ord-sell",
+            bot_id="bot1",
+            quantity=10.0,
+            price=55_000.0,
+            commission=82.5,
+            fill_dedup_key=key,
+        )
+
+        with patch.object(treasury, "_log_transaction", side_effect=_reserve_then_fail):
+            with pytest.raises(RuntimeError, match="boom"):
+                await treasury._on_order_filled(event)
+
+        assert seen_during_settlement == [{"ord-sell": 1_000.0}]
+        assert "ord-sell" not in treasury.get_reservations("bot1")
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == pytest.approx(0.0)
+        assert budget.available == pytest.approx(1_000_000.0)
+        _assert_invariant(treasury, "bot1")
+
 
 class TestTreasuryEmptyKeyNotDeduped:
     async def test_empty_key_settles_twice(self, treasury, db):
