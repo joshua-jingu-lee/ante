@@ -43,8 +43,8 @@ category 정확화):
 member domain 5 sub-class lock
 (실측 ``.code`` mirror, ``InvalidScopeError`` 는 lock 그대로 보존):
 
-- ``PermissionDeniedError`` → ``PERMISSION_DENIED`` / ``permission`` (본
-  PR 에서 ``.code`` 신규 부여 — master 검증 위반 fault 의 안정 코드)
+- ``PermissionDeniedError`` → ``PERMISSION_DENIED`` / ``permission``
+  (master 검증 위반 fault 의 안정 코드)
 - ``MemberNotFoundError`` → ``MEMBER_NOT_FOUND`` / ``not_found``
 - ``MemberStateConflictError`` → ``MEMBER_STATE_CONFLICT`` /
   ``state_conflict``
@@ -84,8 +84,7 @@ approval domain 2 sub-class lock
 - ``ApprovalValidationError`` → ``APPROVAL_VALIDATION_ERROR`` /
   ``validation`` (``ApprovalService.create`` 사전검증 ``fail`` grade 거부;
   CLI ``approval request`` 의 ``--params`` / ``--type`` / ``--expires-in``
-  ingress validation 과 동일한 안정 코드 surface — 본 PR 에서 class-level
-  ``.code`` 신규 부여)
+  ingress validation 과 동일한 안정 코드 surface)
 
 ``ApprovalError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
 ``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
@@ -133,10 +132,10 @@ treasury domain 7 sub-class lock
   ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE`` / ``validation``
   (over-deallocate)
 - ``InsufficientFundsError`` → ``TREASURY_INSUFFICIENT_FUNDS`` / ``validation``
-  (본 PR 신규 부여; ``update_budget`` caller-facing wrap fault —
+  (``update_budget`` caller-facing wrap fault —
   ``TREASURY_INSUFFICIENT_BALANCE`` 와 의미 분리)
 - ``BotNotStoppedError`` → ``TREASURY_BOT_NOT_STOPPED`` / ``state_conflict``
-  (본 PR 신규 부여; running 상태 봇의 예산 변경 거부)
+  (running 상태 봇의 예산 변경 거부)
 - ``TreasuryNotConfiguredError`` → ``TREASURY_NOT_CONFIGURED`` /
   ``service_unavailable`` (``TreasuryManager`` 미주입
   / 등록된 Treasury 부재)
@@ -214,10 +213,10 @@ signal.connect 핸드셰이크 4코드:
 - ``MALFORMED_REQUEST`` (validation) — server.py 가 비-dict 첫 프레임에 inline
   envelope 으로 발화. typed exception 없음 → 상수-only(entry 미등록).
 - ``BOT_SIGNAL_CHANNEL_BUSY`` (state_conflict) — bot_id 당 단일 connect 거부.
-  raiser 는 ``SignalChannelRegistry.register`` 이며,
-  ``BotSignalChannelBusy`` typed entry 다.
+  raiser 는 ``SignalChannelRegistry.register`` 이고, ``BotSignalChannelBusy``
+  typed entry 를 둔다.
 
-즉 PR#2 머지 후 typed-3(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``/
+즉 typed-3(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``/
 ``BOT_SIGNAL_CHANNEL_BUSY``) + inline-1(``MALFORMED_REQUEST``) split. typed-3 의
 ``EXCEPTION_TO_SPEC`` entry 는 helper 의 bare-``.code``→``internal`` wrap 을
 회피해 category 정확성을 lock 하는 load-bearing 이다.

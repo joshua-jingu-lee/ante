@@ -83,8 +83,8 @@ class RuntimeReadinessRegistry:
     """per-account runtime readiness SSOT (D-ACC-09).
 
     registry-owned 권위: ``main._init_*`` 등록자가 스케줄러 등록과 **동시에**
-    ``mark_ready``/``mark_not_ready(reason)`` 로 명시 기록하는 단일 mark 경로다.
-    reader(gateway/RuleEngine/Treasury)는
+    ``mark_ready``/``mark_not_ready(reason)`` 로 명시 기록하는 단일 mark 경로다
+    ([must_fix F]). reader(gateway/RuleEngine/Treasury)는
     ``active_trading_ready`` 만 호출한다.
 
     면제 매트릭스는 ``active_trading_ready`` derive 시점에 적용한다 — 면제 플래그는

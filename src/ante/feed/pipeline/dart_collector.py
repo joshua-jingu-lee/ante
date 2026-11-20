@@ -390,7 +390,8 @@ class DARTCollector:
               (미전진 + 이후 분기 동결, 다음 run 재시도)
             - ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시 가능) →
               ``QuarterStatus.SKIP_EMPTY``(미전진하되 halt 미설정; 후속 분기
-              처리는 계속).
+              처리는 계속). ``ok=True``로 checkpoint를 전진시키면 빈
+              분기를 "완료"로 오인하고 이후 공시를 누락한다.
             - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
               warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
             - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)

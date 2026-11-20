@@ -25,7 +25,6 @@ class ReconcileScheduler:
     """주기적으로 모든 활성 봇의 포지션 대사를 수행한다.
 
     이 스케줄러 인스턴스는 단일 broker(``broker_account_id``)에만 바인딩된다.
-    multi-account broker pool이 도입되지 않으므로,
     다른 계좌의 봇이 같은 스케줄러에 잡히는 경우 잘못된 broker positions가
     적용되지 않도록 ``run_once()`` 안에서 명시적으로 skip한다.
 

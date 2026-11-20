@@ -109,7 +109,7 @@ class StopOrderManager:
     async def stop(self) -> None:
         """매니저 중지. 활성 주문 모두 만료 처리.
 
-        ``active_orders`` 의 manager_stopped 정리 후,
+        P2-A: ``active_orders`` 의 manager_stopped 정리 후,
         shutdown 중 sweep cancel 로 background 에 남은 in-flight
         ``_do_expire_order`` task 들을 loop teardown 전에 await 해 in-flight
         terminal(session_ended) 유실을 막는다. half-expired order 는 이미
@@ -336,7 +336,7 @@ class StopOrderManager:
         이면 어떤 주문도 마킹되지 않아 미만료된다(다음 세션 생존). 캘린더
         부재의 구조적 하한 — api-gateway.md normative 선언.
 
-        bounded growth: ``_session_tick_marked`` 의
+        bounded growth (P2-B): ``_session_tick_marked`` 의
         stale epoch(현재 business_date 가 아닌 거래일 키)를 매 sweep 1회
         prune 한다 — 거래일마다 새 키가 쌓여도 set 이 무한 증가하지 않게 한다.
         prune 시점은 sweep(분 단위 주기 호출)이라 현재 거래일 키는 보존되고
@@ -368,7 +368,7 @@ class StopOrderManager:
     def _session_epoch_key(self, session_type: str) -> str:
         """거래일 멤버십 마킹 epoch 키 SSOT(``{거래일}:{세션종류}``).
 
-        ``on_price_update``(실 틱 add)와
+        P2-B: ``on_price_update``(실 틱 add)와
         ``register``(조회)가 **같은 헬퍼**로 키를 생성해 drift 를 막는다.
 
         ``business_date_kst()`` 는 휴장일/주말/시간외를 backward-roll 하지
@@ -449,7 +449,7 @@ class StopOrderManager:
     async def _expire_order(self, order: StopOrder, reason: str) -> None:
         """스탑 주문 만료 처리(shield 보장).
 
-        terminal(``StopOrderExpiredEvent``) 발행을
+        P2-A: terminal(``StopOrderExpiredEvent``) 발행을
         ``asyncio.shield`` 로 감싼 별도 task(``_do_expire_order``)에 위임한다.
         shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep
         (``check_session_expiry``)의 ``await`` 지점에 닿아도, shield 된 inner

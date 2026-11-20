@@ -92,6 +92,8 @@ def _coerce_finite_quantity(value: object) -> float:
 def _coerce_finite_optional_price(value: object) -> float | None:
     """``OrderRejectedEvent.price`` payload용 안전한 ``float | None`` 정규화.
 
+    회귀(P2 #4): ``_build_safe_rejected_event``가
+    ``price=getattr(event, "price", None)``로 원본 값을 그대로 전파하면,
     ``price=float("nan")`` / ``inf``, 또는 ``list``/``dict``/``str``/``bool``
     같은 비-number truthy 값이 들어오면 ``TradeRecorder``의 ``event.price or
     0.0`` 처리(NaN과 비빈 list는 truthy)에서 그대로 sqlite ``trades.price
@@ -195,7 +197,7 @@ def _build_safe_rejected_event(
     - ``price``: ``_coerce_finite_optional_price``로 finite ``float | None``
       정규화 (NaN/inf/비-number/large-int 모두 ``None``). ``trades.price``
       sqlite REAL 컬럼(nullable) 호환 + ``TradeRecorder``의 ``event.price
-      or 0.0`` 처리에서도 NaN/비-number bind를 차단한다.
+      or 0.0`` 처리에서도 NaN/비-number bind를 차단한다 (P2 #4).
     - ``order_id``: ``getattr``+``_safe_str`` (``event_id``가 없거나 raise하는
       pathological 상황 대응).
     - ``reason``: 호출자가 미리 만든 문자열. 호출자도 ``_safe_str`` 사용 권장.

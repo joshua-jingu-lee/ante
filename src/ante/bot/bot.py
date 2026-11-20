@@ -421,7 +421,7 @@ class Bot:
 
         accepts_external_signals=False인 전략은 시그널을 무시한다.
 
-        직렬화: ``on_data`` + ``_publish_signals(follow_up)`` span 을
+        F3 직렬화: ``on_data`` + ``_publish_signals(follow_up)`` span 을
         ``self._signal_lock`` 으로 감싼다. 같은 lock 이 ``_run_loop`` 의 on_step
         drain span 도 감싸므로, on_step() 과 external on_data() 가 동시에
         ``_ctx._pending_actions`` 를 만지는(append↔copy+clear) 인터리브가

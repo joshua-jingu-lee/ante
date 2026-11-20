@@ -621,7 +621,8 @@ class AccountService:
         즉시 새 설정을 사용하지만, 이미 시작된 consumer는 참조를 통해 구
         어댑터를 계속 사용한다. 구 어댑터를 세션 레벨까지 끊어버리면 주기
         대사/잔고 동기화가 바로 깨지므로, 구 어댑터는 자연스러운 GC와 서비스
-        재시작 시점까지 살려둔다.
+        재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
+        기반 경로는 범위 밖이다.
         """
         async with self._broker_lock_for(account_id):
             if account_id not in self._brokers:

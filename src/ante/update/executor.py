@@ -1,8 +1,7 @@
 """업데이트 실행기 — pip 업그레이드, 마이그레이션, 롤백.
 
 DB 경로는 상위 레이어(`ante.cli.commands.update`)가 `get_db_path(ctx)`로
-계산해 전달한다. 이 모듈은 `db/ante.db` 같은 CWD 기준 하드코딩을
-사용하지 않는다.
+계산해 전달한다.
 """
 
 from __future__ import annotations

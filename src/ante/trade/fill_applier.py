@@ -13,6 +13,7 @@ crash 원자성: ``recorded_filled_qty`` advance(CAS) + ``TradeRecord`` insert +
 ``OrderFilledEvent`` payload 를 ``fill_outbox`` 에 INSERT 한다. commit 성공 =
 이벤트 영속 보장이므로, commit↔publish 사이 crash window 가 닫힌다(이벤트 무손실).
 실제 발행은 ``FillOutboxPublisher`` 워커가 트랜잭션 밖에서 at-least-once 로 한다.
+(소비자 멱등화는 별도다. outbox 는 무손실 전달 + 결정적 키 제공까지.)
 
 ``asyncio.Lock`` 은 read → delta → txn(outbox insert 포함) 전체를 감싸 프로세스
 내 동시 관측을 직렬화한다.

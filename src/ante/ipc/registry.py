@@ -40,8 +40,7 @@ class CommandSpec:
     lifecycle state machine과 결합하여 shutdown 중
     mutating 명령을 거부하기 위한 taxonomy를 보유한다.
 
-    contract metadata 7 필드를 보유한다. dispatch wrapper의 실제 활용은
-    required_services 자동 검증 / audit_action 자동 발화다.
+    contract metadata 7 필드를 보유한다.
 
     Attributes:
         name: 커맨드 식별자 (예: ``"system.halt"``).
@@ -654,7 +653,7 @@ async def _handle_signal_connect(
     통과 후 단일 manual connect-audit 를 직접 1회 발화한다(actor sentinel
     ``"ipc"``). 키는 로깅/반환에 노출하지 않는다.
 
-    register happen-before ack: gate-4 통과 후 ``_stream``
+    register happen-before ack (F1+F4): gate-4 통과 후 ``_stream``
     반환 **전** ``SignalChannelRegistry.register`` 를 atomic check-and-insert
     로 호출한다(``BotSignalChannelBusy``/``SignalChannelRegistryFrozen`` 둘 다
     ack write **전** raise → Phase-B envelope, stream 미진입). 이 시점의
@@ -1508,6 +1507,8 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
 
+    ``approval.cancel_invalid`` (mutating).
+
     ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
     (read-only): ``bot.start`` 는 ``app_key`` preflight + audit
     ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``, ``bot.status`` 는
@@ -1524,7 +1525,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     ``None`` 으로 전달하고, wrapper 가 ``audit_action="account.rule.update"``
     를 자동 발화한다.
 
-    audit.md:112-120 이 audit 대상으로 정의한 상태변경 명령 7개에
+    audit.md:112-120 이 audit 대상으로 정의한 상태변경 명령 가운데 다음 7개에
     ``audit_action`` + ``audit_logger`` required 를 wiring 한다 —
     ``system.halt`` (action ``system.halt``) / ``system.clear_halt`` /
     ``bot.create`` (resource 는 생성 결과 ``bot.bot_id``) / ``bot.remove``
@@ -1561,7 +1562,8 @@ def register_all_handlers(registry: CommandRegistry) -> None:
 
     ``signal.connect`` (read-only): daemon-위임
     signal.connect 핸드셰이크의 4-게이트 LIVE 검증 경로. 통과 시 동일 연결을
-    connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``).
+    connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``;
+    connect-audit 1회는 handler 가 직접 발화).
 
     ``broker.order_history`` (read-only): ``ante broker
     order-history`` 의 runtime IPC 경로. ``broker.positions`` 1:1 미러

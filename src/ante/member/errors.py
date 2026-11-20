@@ -30,6 +30,8 @@ envelope 이 각각 ``"MEMBER_INVALID_EMOJI"`` / ``"MEMBER_MASTER_PROTECTED"``
 패턴 1:1 미러 — 기존 ``except (ValueError,
 PermissionError)`` generic fallback 분기 (CLI ``set-emoji`` /
 ``suspend`` / ``revoke``) 가 회귀 없이 동일하게 잡히도록 한다.
+emoji 중복 (``_validate_emoji_unique``) 와 타입-역할 invariant
+(``_assert_type_role``) 는 별도 표면이다.
 """
 
 
@@ -232,6 +234,7 @@ class MemberInvalidEmojiError(MemberError, ValueError):
     lookup 이 본 typed exception 을 받아 안정 코드를 surface 한다 (Python
     MRO 보장).
 
+    ``_validate_emoji_unique`` (emoji 중복 거부) 는 별도 표면이다.
     ``register`` / ``bootstrap_master``
     가 호출하는 형식 검증도 동일 typed exception 으로 자동 정렬된다.
 
@@ -255,6 +258,8 @@ class MemberMasterProtectedError(MemberError, PermissionError):
     ``pytest.raises(PermissionError, match="master는 ...")`` 단언) 가 회귀
     없이 동일하게 잡히도록 한다. ``emit_cli_error`` registry-first lookup
     이 본 typed exception 을 받아 안정 코드를 surface 한다 (Python MRO 보장).
+
+    ``_assert_type_role`` (타입-역할 invariant 거부) 는 별도 표면이다.
 
     ``PermissionDeniedError`` 와의 분리: ``PermissionDeniedError`` 는 비-master
     호출자의 master-only operation 시도 (``@require_master`` decorator) 를 의미

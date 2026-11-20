@@ -61,8 +61,7 @@ class RecoveryKeyManager:
         잘못된 recovery key 는
         ``MemberInvalidRecoveryCredentialError`` (.code=
         ``MEMBER_INVALID_RECOVERY_CREDENTIAL``, ``ValueError`` 다중상속)
-        로 raise 한다.
-        CLI envelope 안정 코드 surface 한다. ``ValueError`` 다중상속이라
+        로 raise 해 CLI envelope 안정 코드 surface 한다. ``ValueError`` 다중상속이라
         기존 ``except (ValueError, PermissionError)`` fallback 회귀 없음.
         """
         self._assert_human(member, "reset_password")
@@ -89,8 +88,8 @@ class RecoveryKeyManager:
         잘못된 현재 패스워드는
         ``MemberInvalidRecoveryCredentialError`` (.code=
         ``MEMBER_INVALID_RECOVERY_CREDENTIAL``, ``ValueError`` 다중상속)
-        로 raise 한다.
-        CLI envelope 안정 코드 surface 한다.
+        로 raise 해 CLI envelope 안정 코드 surface 한다.
+        ``change_password`` 의 동일 메시지 ``PermissionError`` 는 별도 표면이다.
         """
         self._assert_human(member, "regenerate_recovery_key")
         self._assert_active(member, "regenerate_recovery_key")

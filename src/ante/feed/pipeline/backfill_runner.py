@@ -439,7 +439,7 @@ class BackfillRunner:
         """store의 pending 경고를 즉시 drain해 ctx.warnings로 옮기고,
 
         이번 drain에 ``store_merge`` (파티션 merge 실패 → 기존 파일 보존, 데이터
-        미반영) 경고가 있었는지 반환한다.
+        미반영) 경고가 있었는지 반환한다(R1).
 
         checkpoint save 직전에 호출해야 한다 — collect/write 직후 drain해야 이번
         날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
@@ -617,8 +617,8 @@ class BackfillRunner:
 class _RunContext:
     """수집 실행 중 결과를 집계하는 컨텍스트.
 
-    경고는 실행 시작~종료까지 상주하므로 날짜 범위에 비례해 증가한다
-    (다년 backfill에서 약 1.67M건 ≈ 500 MB). 내부 리스트를
+    경고는 실행 시작~종료까지 상주하므로 절단하지 않으면 날짜 범위에 비례해
+    무제한 증가한다(다년 backfill에서 약 1.67M건 ≈ 500 MB). 내부 리스트를
     ``_warnings`` 로 사유화하고 ``add_warnings()`` **단일 chokepoint**에서만
     적재해 **버킷(``type``)별 ``MAX_WARNINGS_PER_TYPE`` 건**까지만 보존한다.
     총계·타입별 집계는 절단과 무관하게 전수 정확하다.

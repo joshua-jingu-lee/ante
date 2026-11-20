@@ -256,7 +256,7 @@ def _parse_psbl_amount(
     ``primary_field``(``nrcvb_buy_amt``)가 응답에 없거나 float 변환에 실패할 때만
     ``fallback_field``(``ord_psbl_cash``)로 폴백한다. ``primary_field`` 값이
     ``0``으로 정상 파싱되면 그대로 ``0.0``을 반환한다 — ``0``은 정상값일 수
-    있으므로 폴백 트리거가 아니다.
+    있으므로 폴백 트리거가 아니다(G6).
     """
     if primary_field in output:
         try:
@@ -1610,7 +1610,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         """inquire-daily-ccld ``output1`` 행을 (odno, 영업일)별로 fold.
 
         KIS ``output1`` 은 조회 구분에 따라 주문별 누적 1행 또는 부분체결별 다행이
-        올 수 있다. 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
+        올 수 있다 (R1-4). 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
 
         - ``filled_quantity`` = 누적 체결수량 ``tot_ccld_qty`` 의 **max**
           (누적 행이면 마지막 값, 부분체결 행이면 단조 증가하므로 max 가 안전).

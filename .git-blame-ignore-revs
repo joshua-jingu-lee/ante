@@ -1,4 +1,5 @@
-# #2540: src/ante의 주석과 독스트링 이력 참조를 지운 커밋. 동작은 바뀌지 않았다.
+# #2540: src/ante의 주석과 독스트링의 이력 참조를 지운 커밋. src/의 코드(AST)는 그대로다.
+# (#2581은 줄 번호가 밀려 tests/의 줄 번호 허용목록도 함께 맞췄다.)
 # 사용: git blame --ignore-revs-file .git-blame-ignore-revs <파일>
 #       또는 git config blame.ignoreRevsFile .git-blame-ignore-revs
 

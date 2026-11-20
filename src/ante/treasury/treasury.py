@@ -1214,7 +1214,7 @@ class Treasury:
     def _settle_buy_full_fill(
         self, event: Any, budget: BotBudget, actual_cost: float
     ) -> None:
-        """tracker 부재 매수 full-fill pop-once 정산 (fallback).
+        """tracker 부재 매수 full-fill pop-once 정산 (R1-2 fallback).
 
         VirtualProvider 처럼 단일 full-fill 이벤트만 발행하고 OrderTracker 에
         seed 되지 않는 주문은 전액 pop + surplus/shortfall

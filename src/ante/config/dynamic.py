@@ -49,7 +49,7 @@ def _is_value_finite(value: Any) -> tuple[bool, Any]:
         - ``float`` 만 ``math.isfinite`` 로 검사.
         - ``dict`` 는 values 를, ``list``/``tuple`` 은 elements 를 재귀 검사.
           ``tuple`` 도 ``json.dumps`` 가 JSON array 로 직렬화하므로 ``list`` 와
-          동일하게 다룬다. 그렇지 않으면 ``(NaN,)`` 같은 값이
+          동일하게 다룬다 (P2-B). 그렇지 않으면 ``(NaN,)`` 같은 값이
           write 경계를 통과해 ``[NaN]`` 으로 저장되고 read guard 가 깨진다.
         - ``str``/``None``/그 외 타입은 numeric 이 아니므로 통과.
     """
@@ -312,7 +312,7 @@ class DynamicConfigService:
         """기본값 등록. 이미 값이 존재하면 무시한다.
 
         ``set`` 과 마찬가지로 ``validate_value`` 를 통과시켜 startup default
-        경로가 finite invariant 를 우회하지 못하도록 보장한다.
+        경로가 finite invariant 를 우회하지 못하도록 보장한다 (P2-A).
         그렇지 않으면 ``register_default(key, float('nan'), ...)`` 같은 값이
         그대로 저장되고 이후 ``get`` 의 read guard 가 ``ConfigError`` 로 깨진다.
         """

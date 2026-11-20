@@ -627,7 +627,7 @@ class APIGateway:
             """비-bool 유한 숫자 여부 — 예외 무전파(terminal 보장).
 
             비숫자·bool·NaN/Inf 는 False. float 로 표현 불가한 큰 정수
-            (``math.isfinite`` 가 ``OverflowError`` raise)도
+            (``math.isfinite`` 가 ``OverflowError`` raise — P2-2 동형)도
             예외를 삼켜 False 로 본다(핸들러 예외로 terminal update 가 소실되지
             않도록 fail-closed).
             """

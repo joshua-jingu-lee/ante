@@ -37,9 +37,9 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 
 * output payload migration (raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다).
-* drift test guard 완전 활성화.
+* drift test guard 완전 활성화 — 미등록 leaf FAIL 은 별도 drift test 의 책임.
 * IPC server-side metadata. ``ipc_command`` 필드는 stub 값만
-  채운다.
+  채우며 cross-ref drift test 는 별도다.
 * auth enforcement / error taxonomy 변경.
 
 `AuthMode` / `ContractKind` / `EnvelopeForm` vocabulary 는
@@ -1007,6 +1007,7 @@ account 9 + member 12 + bot 11 + approval 10 + treasury 9
 + strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument 4
 + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
 entries 가 등록되어 있다.
+registry 미등록 leaf 는 drift guard 에서 FAIL 이다(아래 잔여 leaf 제외).
 
 미등록 잔여 leaf (95 / 실측 Click leaf count 비교): ``ante`` root 의
 init / update / notification group 은 leaf 가 없거나 (notification은

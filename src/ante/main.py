@@ -677,7 +677,7 @@ async def _init_trading(s: Services) -> None:
 
 
 def _connect_failure_reason(exc: BaseException, default: str) -> str:
-    """connect 실패 예외에서 readiness reason 을 구조적으로 도출.
+    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (T6).
 
     ``AuthenticationError.error_code`` (KIS 원천 ``msg_cd``, 예: ``EGW00133``)을
     문자열 grep 이 아니라 ``getattr`` 로 추출한다. 코드가 있으면 reason 으로 쓰고,
@@ -930,7 +930,8 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
     시작하므로(hard barrier), position reconcile 이 미복구 체결을 "외부 매수"로
     오분류하지 않는다. 카치업이 **성공하지 못한**(폴 실패) 계좌는
     ``s.fill_catch_up_failed_accounts`` 에 기록해, 그 계좌의 기동 reconcile 이
-    external-buy 분류를 건너뛰게 한다.
+    external-buy 분류를 건너뛰게 한다(startup 폴 실패를
+    "0건 성공" 으로 삼키면 barrier 를 우회한다).
     """
     s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
@@ -1220,13 +1221,13 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
     3. ``broker_ready`` 는 의존 rebind 를 모두 마친 **뒤** mark 한다(stale-broker
        false-ready 창 제거).
 
-    Known limitations (bounded — 메타리뷰, follow-up 후보):
+    Known limitations (bounded):
     - 비-broker flag(fill/treasury) 반복 실패는 broker 캐시 세션을 건강하다고
-      **신뢰**한다. 본 PR 은 ``broker_ready`` 강등 경로가 없어 "broker_ready=True
+      **신뢰**한다. ``broker_ready`` 강등 경로가 없어 "broker_ready=True
       이나 세션 사망" 조합이 발생하지 않는다. 강등 도입(reader live-poll 등)
       시 회복 경로의 broker 캐시 무효화 재검토가 필요하다.
     - ``broker_just_recovered`` rebind(기존 스케줄러 교체) 분기는 startup connect
-      실패 시 스케줄러가 애초에 생성되지 않으므로 현 PR 에서 production-도달 불가한
+      실패 시 스케줄러가 애초에 생성되지 않으므로 production-도달 불가한
       방어 경로다(broker_ready 강등 도입 시 live 化).
     - 다계좌 pending 의 burst backoff 는 계좌별 순차 직렬이라 한 영구실패 계좌가
       뒤 계좌 회복을 bounded 지연시킨다(liveness 무손상). app_key 단위 backoff
@@ -1457,6 +1458,9 @@ async def _init_stream_integration(
     ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
     의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
     ``StreamDisconnectedEvent`` 의 account_id marker (C2) 와 함께 작동한다.
+
+    ``s.stream_integration`` 단일 슬롯에 덮어쓰면 두 번째
+    KIS 계좌 등록 시 첫 인스턴스를 silently leak 시킨다.
     """
     assert s.eventbus is not None
     from ante.account.scoping import require_account_id
@@ -1511,7 +1515,10 @@ async def _init_stream_integration(
 async def _sync_instruments(s: Services, accounts: list) -> None:
     """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
 
-    전 계좌를 순회하되 이미 동기화한 exchange
+    첫 번째 성공 broker 에서 ``return`` 하면, 계좌 순서가
+    ``test``(TEST) → ``oracle-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
+    종목 마스터 적재를 선점해 종목명 병기가 전부 symbol-only 로
+    폴백된다. 전 계좌를 순회하되 이미 동기화한 exchange
     는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.
     빈 결과(``get_instruments() == []``)는 synced 처리하지 않고 ``continue`` 하여
     같은 exchange 의 후속 계좌가 여전히 동기화를 시도할 수 있게 한다.
@@ -1788,6 +1795,7 @@ async def _init_feed(s: Services) -> None:
 def _approval_account_id(params: dict, *, context: str) -> str:
     """approval params 에서 검증된 account_id 를 추출.
 
+    ``params.get("account_id", "test")`` fallback 은 두지 않는다.
     ``ApprovalService`` 가 create()/reopen() 진입점에서 이미 동일한
     검증을 수행하지만, executor / validator 가 main.py 외부에서도 호출될 수
     있으므로 진입점 단위로 한 번 더 명시 검증한다.
@@ -2078,6 +2086,7 @@ async def _init_approval(s: Services) -> None:
     def _validate_budget_change(params: dict) -> list[ValidationResult]:
         """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn).
 
+        ``params.get("account_id", "test")`` fallback 은 두지 않는다.
         invalid account_id 는 ``ValidationResult("fail", ...)``
         으로 변환해 ``ApprovalService`` 가 ``ApprovalValidationError`` 로
         변환하도록 한다 (validator 계약: raise 대신 fail 반환).

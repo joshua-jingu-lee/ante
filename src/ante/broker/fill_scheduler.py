@@ -16,8 +16,8 @@ rate budget 보호:
 
 position-derived bounded fallback (§11):
 - KIS 모의 ``inquire-daily-ccld``(``get_order_history``)는 일별 결제기준 원장이라
-  당일 체결을 지연 반영할 수 있다. tr_id ``VTTC0081R``은 당일 체결을 반환한다
-  (백스톱 지연/유실에 무관히 fallback 은 멱등 백업으로 유지).
+  당일 체결을 지연 반영할 수 있다. tr_id ``VTTC0081R``은 당일 체결을 반환함이
+  라이브로 확인됐다(백스톱 지연/유실에 무관히 fallback 은 멱등 백업으로 유지).
   반면 잔고(``get_positions``)는 체결기준 즉시반영이다. 백스톱이 당일 0건을 줄 때
   잔고 증분(``broker_qty - internal_account_qty``)에서 self-submitted 체결을
   **보수적 역도출**해

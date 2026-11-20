@@ -230,7 +230,8 @@ class FeedOrchestrator:
         liveness 분류:
           - ``ProcessLookupError`` → 프로세스 없음(stale) → 제거 후 재시도
           - ``PermissionError`` → 프로세스 존재(signal 권한 없음) → **alive**,
-            차단(return False).
+            차단(return False). stale 제거 except 에 묶으면
+            살아있는 프로세스의 lock 을 삭제하고 획득하는 오판이 된다.
           - PID 파싱/읽기 실패(``ValueError``/``OSError``) → malformed=stale →
             제거 후 재시도
 

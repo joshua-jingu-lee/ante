@@ -165,7 +165,7 @@ class SignalChannel:
     async def _handle_signal(self, msg: dict[str, Any]) -> None:
         """외부 시그널 → ExternalSignalEvent 발행.
 
-        rotate shield: publish 를 ``_inflight`` task 로 분리하고
+        F2(rotate shield): publish 를 ``_inflight`` task 로 분리하고
         read_task 는 ``asyncio.shield`` 로 await 한다. read_task 가 close
         오케스트레이터에 의해 cancel 돼도 in-flight publish(별도 task)는 shield
         로 보호되어 백그라운드 완료한다 — ``strategy.on_data`` 체인에 cancellation

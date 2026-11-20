@@ -69,7 +69,7 @@ class PositionReconciler:
                 오분류하는 것을 막기 위한 barrier 안전장치다.
                 다른 분류(외부 청산·일부 매도)는 영향받지 않는다.
 
-                **self-submitted 분류와는 직교한다**: self-check 는
+                **self-submitted 분류와는 직교한다(R1-1)**: self-check 는
                 `skip_external_buy` 와 무관하게 항상 수행되며, 이 플래그는 분류
                 결과 중 "외부 매수" 보정만 억제하는 별도 계층이다. 주기
                 reconcile(`skip_external_buy=False`)에서도 self 는 보정되지 않는다.
