@@ -44,43 +44,43 @@
 # (table/output/echo) 를 그대로 보존하므로 추가 fmt.error anchor 영향 없음.
 intended_no_code:
   - path: src/ante/cli/commands/bot.py
-    line: 212
+    line: 193
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot list read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 273
+    line: 244
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot info read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 569
+    line: 482
     snippet_sha1: "03fce6e088b7"
     reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
   - path: src/ante/cli/commands/bot.py
-    line: 664
+    line: 538
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot positions read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 817
+    line: 638
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot signal-key read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 1084
+    line: 885
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 1120
+    line: 919
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 1154
+    line: 953
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
-    line: 212
+    line: 197
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
-    line: 215
+    line: 200
     snippet_sha1: "1b05e8ebf6bd"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
 

@@ -26,10 +26,10 @@ direct_database_construction:
   # 이동했다 (34→35, 362→551). callsite 자체는 신규가 아니며 lifecycle 사유도
   # 불변이다 — 본 anchor 는 line-based 라 코드 삽입 시 함께 갱신해야 한다.
   - path: src/ante/cli/commands/broker.py
-    line: 35
+    line: 31
     reason: "broker live state — _create_account_service factory body (runtime_ipc cold_path fallback)"
   - path: src/ante/cli/commands/broker.py
-    line: 551
+    line: 482
     reason: "broker reconcile — adapter_db fallback (runtime_ipc cold_path branch)"
 
   # signal connect — #2338 PR#3 에서 CLI `_run_connect` 를 thin IPC relay 로
@@ -43,7 +43,7 @@ direct_database_construction:
   # #1984 동형). `report submit` 은 write 명령(INSERT)이라 read-only 대상이
   # 아니며 직접 Database 생성을 유지한다 — 단일 엔트리 잔존.
   - path: src/ante/cli/commands/report.py
-    line: 131
+    line: 98
     reason: "report submit — offline write (INSERT), read-only 비대상; deferred migration"
 
   # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (subprocess
@@ -54,7 +54,7 @@ direct_database_construction:
   # `backtest history` 는 `offline` 이며 #1974 에서 `open_cli_db` (read_only)
   # 로 마이그레이션되어 직접 Database 생성 callsite 가 사라졌다 — 엔트리 제거.
   - path: src/ante/cli/commands/backtest.py
-    line: 242
+    line: 207
     reason: "backtest run — long_running (subprocess 격리 D-004), write INSERT; deferred migration"
 
   # data domain — `data list` 는 `offline` 이며 #1984 에서 `open_cli_db`
@@ -67,14 +67,14 @@ direct_database_construction:
   # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
   # 가 부적절하다.
   - path: src/ante/cli/commands/init.py
-    line: 358
+    line: 351
     reason: "ante init — bootstrap, fresh DB creation lifecycle (out of registry scope)"
   - path: src/ante/cli/commands/init.py
-    line: 395
+    line: 387
     reason: "ante init — bootstrap, encryption key init path"
   - path: src/ante/cli/commands/init.py
-    line: 425
+    line: 416
     reason: "ante init — bootstrap, migration / schema apply path"
   - path: src/ante/cli/commands/init.py
-    line: 456
+    line: 447
     reason: "ante init — bootstrap, post-init verification path"

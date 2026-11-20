@@ -160,8 +160,8 @@ class TestGetDbPathWithoutCtxLegacyCountReport:
     # FAIL 하지 않고 report 만 한다.
     _KNOWN_LEGACY_CALLSITES = frozenset(
         {
-            ("src/ante/cli/commands/broker.py", 34),
-            ("src/ante/cli/commands/broker.py", 354),
+            ("src/ante/cli/commands/broker.py", 31),
+            ("src/ante/cli/commands/broker.py", 482),
         }
     )
 
