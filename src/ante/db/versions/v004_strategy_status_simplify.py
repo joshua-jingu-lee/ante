@@ -14,7 +14,7 @@ async def migrate(db: Database) -> None:
         "SELECT name FROM sqlite_master WHERE type='table' AND name='strategies'"
     )
     if row is None:
-        return  # strategies 테이블이 없으면 스킵 (신규 설치 시 DDL에 이미 포함)
+        return
 
     await db.execute("UPDATE strategies SET status = 'adopted' WHERE status = 'active'")
     await db.execute(

@@ -52,9 +52,6 @@ class InvalidIsoDateError(ValueError):
     code = "VALIDATION_ERROR"
 
 
-# strict ``YYYY-MM-DD`` (zero-padded 10자). ``ante.cli._validators._ISO_DATE_RE``
-# 와 동일 정책 — CLI click callback 이 이미 거른 값이 정상 경로지만, 본 helper
-# 는 CLI 를 우회하는 IPC 직접 호출에도 같은 strictness 를 적용한다.
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 

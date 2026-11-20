@@ -42,9 +42,6 @@ class BacktestStrategyContext:
         self._portfolio = portfolio
         self._actions: list[OrderAction] = []
         self.logger = logging.getLogger(f"backtest.strategy.{bot_id}")
-        # 라이브 StrategyContext 와 동일한 strategies/ 샌드박스 기본값을 쓴다.
-        # 보안 경계 SSOT 는 ante.strategy.file_access 가 단일 소유한다(#2083).
-        # ante.strategy.context._STRATEGIES_ROOT 를 직접 import 하지 않는다.
         self._strategies_dir = (
             strategies_dir.resolve() if strategies_dir else STRATEGIES_ROOT.resolve()
         )

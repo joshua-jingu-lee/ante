@@ -11,7 +11,7 @@ class Instrument:
     exchange: str
     name: str = ""
     name_en: str = ""
-    instrument_type: str = ""  # "stock" | "etf" | "etn" | ...
+    instrument_type: str = ""
     logo_url: str = ""
     listed: bool = True
     updated_at: str = ""

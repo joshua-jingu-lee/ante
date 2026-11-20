@@ -18,9 +18,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 확인이 필요한 위험 명령
-# SSOT: docs/specs/notification/notification.md (위험 명령 표).
-# `/halt`, `/clear_halt`, `/stop`은 모두 2단계 확인 대상이다.
 _DANGEROUS_COMMANDS = {"halt", "clear_halt", "stop"}
 
 
@@ -54,10 +51,7 @@ class TelegramCommandReceiver:
         self._task: asyncio.Task[None] | None = None
         self._running = False
 
-        # 2단계 확인 대기 상태: {user_id: (command, args, timestamp)}
         self._pending_confirm: dict[int, tuple[str, list[str], float]] = {}
-
-    # ── 생명주기 ────────────────────────────────────
 
     def start(self) -> None:
         """폴링 루프 시작."""
@@ -81,8 +75,6 @@ class TelegramCommandReceiver:
                 pass
         self._task = None
         logger.info("텔레그램 명령 수신 중지")
-
-    # ── 폴링 루프 ───────────────────────────────────
 
     async def _poll_loop(self) -> None:
         """getUpdates 폴링 루프."""
@@ -129,11 +121,8 @@ class TelegramCommandReceiver:
             logger.warning("getUpdates 호출 실패", exc_info=True)
             return []
 
-    # ── 메시지 처리 ─────────────────────────────────
-
     async def _handle_update(self, update: dict[str, Any]) -> None:
         """개별 업데이트 처리."""
-        # callback_query (인라인 버튼) 처리
         if "callback_query" in update:
             await self._handle_callback_query(update["callback_query"])
             return
@@ -150,7 +139,6 @@ class TelegramCommandReceiver:
         user_id = user.get("id", 0)
         chat_id = message.get("chat", {}).get("id")
 
-        # 인증 확인
         if not self._is_authorized(user_id):
             logger.warning(
                 "미인가 텔레그램 명령 시도: user_id=%d, text=%s",
@@ -159,12 +147,10 @@ class TelegramCommandReceiver:
             )
             return
 
-        # 명령어 파싱
         parts = text.split()
-        command = parts[0][1:].lower()  # /command → command
+        command = parts[0][1:].lower()
         args = parts[1:]
 
-        # 실행
         reply = await self._execute(command, args, user_id, chat_id)
         if reply:
             await self._reply(chat_id, reply)
@@ -188,7 +174,6 @@ class TelegramCommandReceiver:
             )
             return
 
-        # data 형식: "approve:{id}" 또는 "reject:{id}"
         if ":" not in data:
             await self._adapter.answer_callback_query(callback_id, "잘못된 요청입니다.")
             return
@@ -256,8 +241,6 @@ class TelegramCommandReceiver:
         """화이트리스트 인증 확인."""
         return user_id in self._allowed_user_ids
 
-    # ── 명령 실행 ───────────────────────────────────
-
     async def _execute(
         self,
         command: str,
@@ -266,11 +249,9 @@ class TelegramCommandReceiver:
         chat_id: int | None,
     ) -> str:
         """명령 실행 후 결과 문자열 반환."""
-        # /confirm 처리
         if command == "confirm":
             return await self._handle_confirm(user_id)
 
-        # 위험 명령 → 확인 절차 (이미 해당 상태이면 즉시 반환)
         if command in _DANGEROUS_COMMANDS:
             if command == "halt" and self._account_service:
                 all_suspended = await self._all_accounts_suspended()
@@ -282,9 +263,6 @@ class TelegramCommandReceiver:
                     return "이미 거래가 활성 상태입니다."
             return self._request_confirmation(command, args, user_id)
 
-        # 즉시 실행 명령
-        # 결재 승인/거절은 인라인 버튼 callback(approve:{id}/reject:{id}) 전용이다
-        # (#2379). 텍스트 명령 /approve·/reject는 스펙아웃되어 unknown으로 폴스루한다.
         handlers: dict[str, Any] = {
             "help": self._cmd_help,
             "status": self._cmd_status,
@@ -300,8 +278,6 @@ class TelegramCommandReceiver:
             return result
 
         return "알 수 없는 명령입니다. /help를 입력해 주세요."
-
-    # ── 확인 절차 ───────────────────────────────────
 
     def _request_confirmation(self, command: str, args: list[str], user_id: int) -> str:
         """위험 명령에 대한 확인 요청."""
@@ -336,7 +312,6 @@ class TelegramCommandReceiver:
         if elapsed > self._confirm_timeout:
             return "확인 시간이 초과되었습니다."
 
-        # 실제 실행
         if command == "halt":
             return await self._cmd_halt(args)
         if command == "clear_halt":
@@ -345,8 +320,6 @@ class TelegramCommandReceiver:
             return await self._cmd_stop(args)
 
         return "알 수 없는 명령입니다."
-
-    # ── 헬퍼 ───────────────────────────────────────
 
     async def _all_accounts_suspended(self) -> bool:
         """모든 계좌가 SUSPENDED 상태인지 확인."""
@@ -369,8 +342,6 @@ class TelegramCommandReceiver:
         if not accounts:
             return False
         return all(a.status == AccountStatus.ACTIVE for a in accounts)
-
-    # ── 명령 핸들러 ─────────────────────────────────
 
     def _cmd_help(self, args: list[str]) -> str:
         """사용 가능한 명령어 목록."""
@@ -477,12 +448,11 @@ class TelegramCommandReceiver:
         unallocated = summary.get("unallocated", 0)
         bot_count = summary.get("bot_count", 0)
 
-        # 손익 부호 및 이모지
         if ante_pl > 0:
             pl_sign = "+"
             pl_emoji = "📈"
         elif ante_pl < 0:
-            pl_sign = ""  # 음수는 자동으로 - 붙음
+            pl_sign = ""
             pl_emoji = "📉"
         else:
             pl_sign = ""
@@ -493,7 +463,6 @@ class TelegramCommandReceiver:
             f"매수 가능: {purchasable:,.0f}원",
         ]
 
-        # Ante 관리 종목 (매입금이 있을 때만 표시)
         if ante_purchase > 0:
             lines.append("")
             lines.append(
@@ -560,7 +529,6 @@ class TelegramCommandReceiver:
         if bot.status != BotStatus.RUNNING:
             return f"이미 중지된 봇입니다: {bot_id}"
 
-        # 중지 전 포지션·미체결 주문 조회
         positions = bot._ctx.get_positions()
         open_orders = bot._ctx.get_open_orders()
 
@@ -572,17 +540,9 @@ class TelegramCommandReceiver:
         if not positions:
             return f"{header}\n\n미체결 주문은 자동 취소되지 않습니다."
 
-        # 보유 종목 있음 — 메시지 B
         symbols = sorted(positions.keys())
-        # #1948: 통일 OpenOrder dict 스키마는 amount(예약 금액)를 담지 않는다
-        # (Treasury 도메인). 미체결 가시성은 주문 건수로 표시한다. live 봇은 과거
-        # amount 부재로 0원 오표시였으므로, 건수 표시가 의미상 정확한 정정이다.
         pending_count = len(open_orders)
 
-        # #2385: 보유종목 표기를 InstrumentService.format_label SSOT로 단일화한다
-        # (#2377 "전 지점 종목명 병기"). instrument_service 미주입이면 기존
-        # symbol-only 경로를 유지한다(graceful fallback). _reply 는 parse_mode 를
-        # 설정하지 않는 plain transport 이므로 markdown=False 로 포맷한다.
         held_line = await self._format_held_symbols(bot, symbols)
 
         lines = [
@@ -624,8 +584,6 @@ class TelegramCommandReceiver:
             self._instrument_service.format_label(symbol, exchange, markdown=False)
             for symbol in symbols
         )
-
-    # ── 유틸 ────────────────────────────────────────
 
     async def _reply(self, chat_id: int | None, text: str) -> None:
         """메시지 회신."""

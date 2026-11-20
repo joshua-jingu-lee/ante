@@ -187,6 +187,26 @@ class TestResolvePathSymlinkContainment:
         path = store._resolve_path("005930", "1d", data_type="ohlcv")
         assert path.resolve().is_relative_to(base.resolve())
 
+    @pytest.mark.parametrize(
+        "target_parts", [("ohlcv",), ("ohlcv", "1d"), ("ohlcv", "1d", "KRX", "a", "b")]
+    )
+    def test_leaf_symlink_inside_base_but_not_direct_child_rejected(
+        self, tmp_path, target_parts
+    ):
+        """symbol-leaf 가 base 안이지만 expected parent 의 직하위가 아닌 곳을
+        가리키면 거부한다(base 안의 더 넓은 디렉토리가 삭제 대상이 되지 않게)."""
+        base = tmp_path / "data"
+        krx = base / "ohlcv" / "1d" / "KRX"
+        krx.mkdir(parents=True)
+        target = base.joinpath(*target_parts)
+        target.mkdir(parents=True, exist_ok=True)
+        (krx / "EVIL01").symlink_to(target, target_is_directory=True)
+        assert (krx / "EVIL01").resolve().is_relative_to(base.resolve())
+
+        store = ParquetStore(base_path=base)
+        with pytest.raises(ValueError, match="예상 위치를 벗어남"):
+            store.resolve_path("EVIL01", "1d")
+
 
 class TestLegacyMigrationUnaffected:
     """legacy migration(store.py:73-101)이 _resolve_path 미경유 — 무영향."""

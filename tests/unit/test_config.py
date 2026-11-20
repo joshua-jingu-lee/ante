@@ -62,6 +62,15 @@ class TestConfigGet:
         for key, expected in DEFAULTS.items():
             assert config.get(key) == expected
 
+    def test_readiness_self_healing_defaults(self) -> None:
+        """self-healing backoff 상한은 ~60s 토큰 cooldown 에 맞춘 60초다."""
+        config = Config(static={}, secrets={})
+
+        assert config.get("readiness.self_healing_backoff_max_seconds") == 60
+        assert config.get("readiness.self_healing_backoff_base_seconds") == 5
+        assert config.get("readiness.self_healing_interval_seconds") == 60
+        assert config.get("readiness.self_healing_max_attempts_per_burst") == 5
+
     def test_toml_overrides_defaults(self) -> None:
         """TOML 값이 기본값보다 우선한다."""
         config = Config(

@@ -58,38 +58,23 @@ def _is_safe_path_segment(seg: str) -> bool:
         return False
     if os.path.isabs(seg):
         return False
-    # Windows 드라이브/UNC(`C:`, `\\\\host`) 방어. POSIX에서는 no-op.
     if os.path.splitdrive(seg)[0]:
         return False
     return True
 
 
-# write_parquet compression 타입
 CompressionType = Literal["lz4", "uncompressed", "snappy", "gzip", "brotli", "zstd"]
 
-# data_type별 시간 컬럼명
 _TIME_COLUMN: dict[str, str] = {
     "ohlcv": "timestamp",
     "fundamental": "date",
     "tick": "timestamp",
 }
 
-# `read(end=...)`에서 엄격 date-only(`YYYY-MM-DD`)를 식별하는 정규식.
-# 시간 성분/timezone suffix/basic ISO 등 그 외 형식은 매치하지 않으며
-# 기존 `<= end`(정확 instant) 경로로 처리된다(#2081).
 _DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
-# subminute 파티셔닝 해상도 집합(04-schema.md 파일 규격, core.md 축 B 명시값).
-# OHLCV 중 이 timeframe은 월별이 아니라 **일별**(`YYYY-MM-DD.parquet`)로
-# 파티셔닝한다. OHLCV bar timeframe vocabulary(축 A,
-# `CANONICAL_TIMEFRAMES`)와는 별개 축이며, 여기에 값을 추가/재정의하지
-# 않는다(#2115).
 _SUBMINUTE_TIMEFRAMES: frozenset[str] = frozenset({"10s", "30s"})
 
-# legacy 월별 파일(`YYYY-MM.parquet`)만 매치하는 glob 패턴. 일별 파일
-# (`YYYY-MM-DD.parquet` = `????-??-??.parquet`)은 segment 수가 달라
-# 미매치다. subminute dir이 이미 월별로 채워져 있는지(coexistence 방지)
-# 판정하는 데만 쓴다(#2115).
 _LEGACY_MONTHLY_GLOB = "????-??.parquet"
 
 
@@ -126,7 +111,6 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
         if "date" in cols:
             return ["date"]
         return []
-    # ohlcv/tick 및 default: 단일 timestamp 키
     if "timestamp" in cols:
         return ["timestamp"]
     return []
@@ -139,22 +123,8 @@ def _date_str(value: object) -> str:
     return str(value)[:10]
 
 
-# 알려진 거래소 이름 — 마이그레이션 시 이미 exchange 디렉토리인지 판별용.
-# 코드 레벨 SSOT(`ante.core.exchange.CANONICAL_EXCHANGES`)에 위임한다.
-# 값(canonical 5종 frozenset)·`migrate_parquet_paths()` 동작은 위임
-# 전과 완전히 동일하다(#1576 narrow-scope: zero-change).
 _KNOWN_EXCHANGES: frozenset[str] = CANONICAL_EXCHANGES
 
-# legacy parquet path migration 판별용 KRX 심볼 형식: 6자리 숫자.
-# **신규 입력 ASCII 검증과 별개 축이다**(core.md
-# ``### symbol/timeframe 축 구분`` 축 E · ``### Legacy out-of-vocabulary
-# 호환 정책``). `\d` 는 Unicode digit까지 매치하며, 이는 6자리 Unicode-digit
-# legacy dir이 `migrate_parquet_paths()` 로 `KRX/` 하위로 이동되던 기존
-# 동작을 보존하기 위해 **의도적으로** 유지된다. 신규 입력 KRX symbol
-# 검증(`ante.core.market_data_vocab._KRX_SYMBOL_REGEX`, ASCII `[0-9]`,
-# fullmatch)으로 위임·대체·강화하지 않는다 — 위임 시 Unicode-digit
-# legacy dir migration이 silent 회귀한다(#1613 narrow-scope: legacy 무손상
-# 보존, 축 E 분리).
 _LEGACY_KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
 
 
@@ -182,27 +152,16 @@ def migrate_parquet_paths(data_path: Path) -> int:
     """
     moved = 0
 
-    # ohlcv 디렉토리 마이그레이션
     ohlcv_path = data_path / "ohlcv"
     if ohlcv_path.exists():
-        # 불변식(#1613 R1-F2): timeframe dir 순회는 `TIMEFRAME_SET`/canonical
-        # 필터를 적용하지 않는다. 어떤 set 검사도 없이 모든 timeframe dir의
-        # legacy symbol dir을 `KRX/` 하위로 이동한다. 필터를 추가하면
-        # `ohlcv/<non-canonical_tf>/<6digit>/`(예: `ohlcv/2h/005930/`)가
-        # exchange-less 위치에 잔존해 `read(symbol,<tf>,exchange='KRX')`
-        # 에서 silent 비가시가 된다(legacy non-canonical timeframe migration
-        # 동작 보존 — core.md ``### Legacy out-of-vocabulary 호환 정책``).
         for timeframe_dir in ohlcv_path.iterdir():
             if not timeframe_dir.is_dir():
                 continue
             for symbol_dir in list(timeframe_dir.iterdir()):
                 if not symbol_dir.is_dir():
                     continue
-                # 이미 exchange 디렉토리면 스킵
                 if symbol_dir.name in _KNOWN_EXCHANGES:
                     continue
-                # KRX 심볼은 6자리 숫자 형식 검증 (legacy `\d` Unicode 판별,
-                # 신규 입력 ASCII 검증과 별개 축 — 위 상수 주석 참조)
                 if not _LEGACY_KRX_SYMBOL_PATTERN.match(symbol_dir.name):
                     logger.warning(
                         "마이그레이션 스킵: %s — KRX 심볼 형식(6자리 숫자)이 아님",
@@ -215,7 +174,6 @@ def migrate_parquet_paths(data_path: Path) -> int:
                 moved += 1
                 logger.info("마이그레이션: %s → %s", symbol_dir, target)
 
-    # fundamental/tick 디렉토리 마이그레이션 (krx → KRX)
     for dtype in ("fundamental", "tick"):
         dtype_path = data_path / dtype
         if not dtype_path.exists():
@@ -223,12 +181,9 @@ def migrate_parquet_paths(data_path: Path) -> int:
         krx_lower = dtype_path / "krx"
         if not krx_lower.exists():
             continue
-        # case-insensitive FS에서는 krx == KRX이므로 실제 이름 확인
         actual_name = _get_actual_dir_name(dtype_path, "krx")
         if actual_name == "KRX":
-            # 이미 대문자 → 스킵
             continue
-        # case-sensitive FS에서 krx → KRX 이동
         target = dtype_path / "KRX"
         if not target.exists():
             shutil.move(str(krx_lower), str(target))
@@ -251,9 +206,6 @@ class ParquetStore:
     ) -> None:
         self._base = Path(base_path)
         self._compression = compression
-        # merge 이상(데이터 손실 가능성이 있던 케이스)을 구조화 경고로 버퍼링.
-        # backfill_runner가 collector/indicator 호출 직후 drain하여
-        # CollectionResult.warnings(→ report `warnings`)로 전파한다(#1964).
         self._pending_warnings: list[dict] = []
 
     @property
@@ -345,8 +297,6 @@ class ParquetStore:
             expected_parent = self._base / data_type / timeframe / exchange
             used_segments = (data_type, timeframe, exchange, symbol)
 
-        # data_type별 expected-parent 검증: 경로에 사용되지 않는 segment
-        # (fundamental/tick의 `timeframe=""`)는 검사 대상에서 제외한다.
         for seg in used_segments:
             if not _is_safe_path_segment(seg):
                 raise ValueError(
@@ -354,13 +304,6 @@ class ParquetStore:
                     f"(data_type={data_type})"
                 )
 
-        # resolved(symlink 해소) containment 단언. lexical 검사만으로는
-        # 중간 디렉토리(`ohlcv/{tf}/{exchange}` 등)가 base 밖을 가리키는
-        # symlink면 통과해 `shutil.rmtree` 등이 base 밖으로 탈출할 수
-        # 있다. base/expected_parent/candidate를 동일하게 resolve한 뒤
-        # candidate가 expected_parent 직하위이며 base 하위인지 확인한다.
-        # data root 전체가 symlink인 정상 deployment는 base/candidate가
-        # 동일 resolve되어 통과한다(거부 대상은 resolved 후 base 밖 탈출).
         resolved_base = self._base.resolve()
         resolved_parent = expected_parent.resolve()
         resolved_candidate = candidate.resolve()
@@ -445,9 +388,6 @@ class ParquetStore:
         if not dfs:
             return pl.DataFrame()
 
-        # 월별 파티션은 소스/시기에 따라 이종 스키마일 수 있다
-        # (data.go.kr-only, DART-only, 지표 보강 후 등). diagonal_relaxed로
-        # 컬럼 합집합 + null-fill + supertype 강제 결합하여 raise 없이 읽는다.
         df = pl.concat(dfs, how="diagonal_relaxed")
         time_col = _TIME_COLUMN.get(data_type, "timestamp")
 
@@ -456,17 +396,6 @@ class ParquetStore:
                 pl.col(time_col) >= pl.lit(start).str.to_datetime(time_zone="UTC")
             )
         if end and time_col in df.columns:
-            # date-only end(`YYYY-MM-DD`)는 whole-day inclusive로 해석한다.
-            # `<= 2026-01-02 00:00 UTC`로 파싱하면 intraday(1m/5m/1h) 당일
-            # 장중 row(09:01, 15:30 등)가 모두 제외된다(#2081). 따라서
-            # date-only일 때는 자정 instant가 아니라 그 날 전체를 포함하도록
-            # `< (end_date + 1 day)`(당일 23:59:59.999까지)로 필터한다.
-            # 1d(daily) bar는 00:00이라 +1day exclusive로도 당일 bar가
-            # 그대로 포함되어 기존 동작과 동일하다(회귀 없음).
-            #
-            # 시간 성분이 있는 end(datetime, timezone suffix, basic ISO 등
-            # date-only가 아닌 모든 형식)는 기존 `<= end`(정확 instant)를
-            # 유지한다.
             if _DATE_ONLY_RE.match(end):
                 df = df.filter(
                     pl.col(time_col)
@@ -521,8 +450,6 @@ class ParquetStore:
         read/`_resolve_path`/`migrate_parquet_paths` 등 기존·legacy 조회
         표면에는 검증을 추가하지 않는다(Legacy out-of-vocabulary read 면제).
         """
-        # 비문자열은 frozenset membership에서 unhashable TypeError를
-        # 유발할 수 있으므로 isinstance 선검사 후 거부(#1577 교훈).
         if not isinstance(exchange, str) or not is_canonical(exchange):
             raise ValueError(
                 f"유효하지 않은 exchange: '{exchange}'. "
@@ -544,9 +471,6 @@ class ParquetStore:
 
         key = _natural_key(data_type, data.columns)
 
-        # 파티셔닝 해상도 결정(#2115). subminute OHLCV는 일별이 기본이나,
-        # 이미 legacy 월별 파일이 있는 dir은 월별을 유지해 coexistence(월별+
-        # 일별 혼재 → read 중복 timestamp)를 만들지 않는다.
         use_daily = data_type == "ohlcv" and timeframe in _SUBMINUTE_TIMEFRAMES
         if use_daily and next(path.glob(_LEGACY_MONTHLY_GLOB), None) is not None:
             use_daily = False
@@ -707,8 +631,6 @@ class ParquetStore:
             write/replace 실패 시 원 예외를 그대로 재-raise한다(임시 파일 정리 후).
             최종 경로는 손대지 않으므로 기존 상태(부재 또는 이전 유효본)가 보존된다.
         """
-        # mkstemp는 fd를 열어 반환한다. polars가 경로로 다시 열어 write하므로
-        # fd는 즉시 명시적으로 close/consume해 leak을 막는다(checkpoint.save 미러).
         fd, tmp_path = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
         os.close(fd)
         try:
@@ -716,7 +638,6 @@ class ParquetStore:
             self._apply_partition_mode(tmp_path, filepath, preserve_existing_mode)
             Path(tmp_path).replace(filepath)
         except BaseException:
-            # 실패 시(예외/취소 포함) 임시 파일 정리 후 재-raise.
             Path(tmp_path).unlink(missing_ok=True)
             raise
 
@@ -817,35 +738,21 @@ class ParquetStore:
             0으로 clamp한다. merge 실패(기존 파일 보존)는 저장 반영이 없으므로 0.
         """
         if filepath.exists() and not self._is_zero_byte(filepath):
-            # 비어있지 않은 기존 파티션: read → concat → dedup → 원자 write.
             try:
                 existing = pl.read_parquet(filepath)
                 existing_len = len(existing)
                 merged = pl.concat([existing, group], how="diagonal_relaxed")
                 merged = self._dedup_sort_by_key(merged, key)
                 self._atomic_write_parquet(merged, filepath)
-                # net-new = merged 행 수 - 기존 행 수. dedup으로 그대로면 0,
-                # legacy 중복 정리로 줄면 음수 → 0으로 clamp(과대/음수 방지).
                 return max(0, len(merged) - existing_len)
             except Exception as exc:
-                # read(읽기 불가) 또는 concat(non-coercible 스키마) 실패: 기존
-                # 파일을 절대 덮어쓰지 않고(원자 write라 기존본 무손상) 이상만
-                # 기록한다. 저장 반영이 없으므로 net-new는 0이다(loud-stuck →
-                # validate --fix + 재backfill로 사용자 복구).
                 return self._record_merge_failure(filepath, exc)
 
-        # 여기 도달 = 신규 파티션(부재) 또는 0바이트 파티션(존재). 둘 다 신규
-        # group을 그대로 write하며(read/concat/격리 없음), 권한은 0o644 고정이다
-        # (0바이트 복구에서 기존 stub mode를 보존하면 owner-only가 될 수 있으므로
-        # stub을 mode 소스로 쓰지 않는다, #2413 리뷰 [670]).
         is_zero_byte_recovery = filepath.exists()
         group = self._dedup_sort_by_key(group, key)
         self._atomic_write_parquet(group, filepath, preserve_existing_mode=False)
 
         if is_zero_byte_recovery:
-            # store_recovered는 **write 성공 직후**에만 적재한다(#2413 리뷰 [828]).
-            # write 이전에 적재하면 write가 raise(ENOSPC/EACCES/kill)했을 때 파일은
-            # 여전히 0바이트인데 "자동복구됨" 허위 성공 신호가 버퍼에 남는다.
             logger.warning(
                 "0바이트 손상 파티션 자동복구: %s — 신규 수집분으로 재생성. "
                 "이전 데이터가 있었다면 forward-only 공백 가능(range 재backfill 필요).",
@@ -865,7 +772,6 @@ class ParquetStore:
                 }
             )
 
-        # 신규 파티션(또는 0바이트 자동복구): dedup 후 결과 행 수가 net-new 저장 행 수.
         return len(group)
 
     def append(
@@ -878,8 +784,6 @@ class ParquetStore:
     ) -> None:
         """버퍼 데이터를 기존 Parquet에 추가."""
         df = pl.DataFrame(rows)
-        # exchange canonical 검증은 write()로 위임되어 자동 커버된다
-        # (별도 guard 불요 — 단일 chokepoint 유지).
         self.write(symbol, timeframe, df, data_type=data_type, exchange=exchange)
 
     def list_symbols(
@@ -949,14 +853,12 @@ class ParquetStore:
     def get_storage_usage(self) -> dict[str, int]:
         """저장 용량 현황 (바이트). 데이터 타입/타임프레임별 합산."""
         usage: dict[str, int] = {}
-        # ohlcv: timeframe별
         ohlcv_path = self._base / "ohlcv"
         if ohlcv_path.exists():
             for tf_dir in ohlcv_path.iterdir():
                 if tf_dir.is_dir():
                     size = sum(f.stat().st_size for f in tf_dir.rglob("*.parquet"))
                     usage[tf_dir.name] = size
-        # fundamental, tick
         for dtype in ("fundamental", "tick"):
             dtype_path = self._base / dtype
             if dtype_path.exists():
@@ -1006,8 +908,6 @@ class ParquetStore:
         if not path.exists():
             return result
 
-        # orphan *.tmp 회수는 **fix=True(사용자 발동, write-scoped)에서만** 수행한다.
-        # fix=False(read-scoped)는 파일시스템을 변조하지 않는다(#2413).
         if fix:
             stale_removed = self._sweep_stale_tmp(path)
             result["stale_tmp_removed"] = stale_removed
@@ -1026,9 +926,6 @@ class ParquetStore:
                 result["corrupted"] += 1
                 result["corrupted_files"].append(str(f))
                 if fix:
-                    # 손상 파일을 uniquifier 격리 헬퍼로 이동한다(사용자 발동).
-                    # 동명 `.corrupted` 존재 시 덮어쓰지 않고 `.corrupted.<n>`으로
-                    # 증적을 보존한다(#2413 리뷰 [10], Windows FileExistsError 방지).
                     corrupted_path = self._quarantine_corrupt(f)
                     logger.info("손상 파일 이동: %s → %s", f, corrupted_path)
 

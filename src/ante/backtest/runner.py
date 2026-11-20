@@ -44,8 +44,6 @@ async def run_backtest(config: dict) -> dict:
     if output_path:
         from pathlib import Path
 
-        # 파일 아티팩트는 to_dict() 그대로 유지(envelope 아님 — artifact 소비
-        # shape 무변경). stdout envelope 와 의도적으로 형식을 분리한다.
         Path(output_path).write_text(json.dumps(payload, indent=2, default=str))
 
     return {

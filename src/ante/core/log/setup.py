@@ -29,28 +29,21 @@ def setup_logging(config: Any) -> None:
       ``AnteLogger`` 를 전역 Logger 클래스로 설치한다
       (스펙 ``03-json-schema.md`` §예약어 처리).
     """
-    # 예약 키 KeyError 방지 — 반드시 핸들러 구성 이전에 수행.
     install_safe_logger()
 
     root = logging.getLogger()
     log_level = config.get("system.log_level", "INFO")
     root.setLevel(getattr(logging, log_level))
 
-    # 기존 핸들러 제거 (재호출 시 중복 방지)
     for h in list(root.handlers):
         root.removeHandler(h)
 
-    # stdout 핸들러 (기존 포맷 유지 — 사람 관찰용).
-    # 파일 핸들러 초기화 이전에 등록해 이후 실패 시에도 stdout 로깅이 살아있다.
     stdout_handler = logging.StreamHandler(sys.stdout)
     stdout_handler.setFormatter(
         logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
     )
     root.addHandler(stdout_handler)
 
-    # JSONL 파일 핸들러 (환경변수 게이트)
-    # 게이트-off 경로에서 불필요한 import 비용 및 ZoneInfo(tzdata) 의존을 피하기 위해
-    # formatter/handlers 모듈 import 는 게이트 블록 내부로 지연한다.
     if os.environ.get("ANTE_LOG_JSONL") == "1":
         try:
             from .formatter import JsonFormatter
@@ -67,7 +60,6 @@ def setup_logging(config: Any) -> None:
             file_handler.setFormatter(JsonFormatter())
             root.addHandler(file_handler)
         except Exception as err:
-            # 부팅 차단을 막기 위해 예외를 흡수하고 stdout 핸들러만 유지한다.
             logging.getLogger(__name__).warning(
                 "JSONL 파일 핸들러 초기화 실패 — stdout 전용으로 계속 진행: %s", err
             )

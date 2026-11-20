@@ -70,5 +70,4 @@ async def check_update_on_startup() -> None:
     try:
         await loop.run_in_executor(None, _check_and_log)
     except Exception:
-        # 네트워크 오류 등 어떤 예외든 서버 시작을 방해하지 않는다
         logger.debug("시작 시 버전 확인 실패 (무시)", exc_info=True)
