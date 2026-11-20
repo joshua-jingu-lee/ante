@@ -493,14 +493,14 @@ def test_indicator_nonstandard_month_row_never_becomes_asof_source(
 ) -> None:
     """비표준 월 legacy 행은 표준 행보다 늦게 공시된 셈이 되는 자리에서도 안 쓰인다.
 
-    비표준 행(4/30)에 +45일을 붙이면 6/14 로 표준 Q1 행(공시 5/15)보다 늦다.
-    거래일 6/20 의 as-of 결과가 Q1 값이면 비표준 행은 join 전에 제거된 것이다.
+    비표준 행(4/30)에 +45일(6/14)이나 +90일(7/29)을 붙이면 표준 Q1 행(공시 5/15)보다
+    늦다. 거래일 8/1 의 as-of 결과가 Q1 값이면 비표준 행은 join 전에 제거된 것이다.
     """
     _write_daily(
         store,
         [
             {
-                "date": date(2024, 6, 20),
+                "date": date(2024, 8, 1),
                 "symbol": SYMBOL,
                 "market_cap": 420_000_000_000_000,
                 "shares_listed": 5_969_782_550,
