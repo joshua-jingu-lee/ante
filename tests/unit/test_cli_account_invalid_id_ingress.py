@@ -274,6 +274,18 @@ class TestInvalidAccountIdRejected:
         mock_account_service.repair_timezone.assert_not_called()
 
 
+def test_create_rejects_bootstrap_seed_id_before_service(
+    mock_account_service: AsyncMock, offline_runtime: Any, tmp_path: Any
+) -> None:
+    """조회에는 쓸 수 있는 seed id ``test``도 ``account create``는 거부한다."""
+    mock_account_service.create.return_value = _mock_account_obj("test")
+    result = _invoke(["--config-dir", str(tmp_path), *_argv_create("test")])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.output.strip().splitlines()[-1])
+    assert payload["code"] == "VALIDATION_ERROR"
+    mock_account_service.create.assert_not_called()
+
+
 # ── 축 2: R9 — valid format / absent → ACCOUNT_NOT_FOUND 보존 ────────
 
 

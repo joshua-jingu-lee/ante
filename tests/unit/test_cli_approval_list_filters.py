@@ -245,3 +245,140 @@ class TestApprovalListValidFilters:
             )
         assert result.exit_code == 0, result.output
         service.list_approvals.assert_awaited_once_with(status=None, type=None)
+
+
+@pytest.fixture
+def split_runner() -> CliRunner:
+    """stderr 를 stdout 에 섞지 않는 인증 우회 CliRunner."""
+    r = CliRunner(mix_stderr=False)
+    original_invoke = r.invoke
+
+    def _invoke_with_auth(cli_cmd, args=None, **kwargs):  # noqa: ANN001, ANN202
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+
+            def _set_member(ctx):  # noqa: ANN001
+                ctx.obj = ctx.obj or {}
+                ctx.obj["member"] = _MOCK_MASTER
+
+            mock_auth.side_effect = _set_member
+            return original_invoke(cli_cmd, args, **kwargs)
+
+    r.invoke = _invoke_with_auth
+    return r
+
+
+class _ListQueryError(Exception):
+    """테스트 전용: 조회 단계의 임의 실패."""
+
+
+class TestApprovalListClosesDatabase:
+    """``approval list`` 는 정상·예외 경로 모두에서 연 ``Database`` 를 닫는다."""
+
+    @pytest.mark.parametrize("fails", [False, True], ids=["normal", "query-raises"])
+    def test_database_closed(self, split_runner, tmp_path, fails: bool) -> None:
+        db_cls, service_cls, service = _mock_service_layer([])
+        if fails:
+            service.list_approvals = AsyncMock(side_effect=_ListQueryError("boom"))
+        with (
+            patch("ante.core.database.Database", db_cls),
+            patch("ante.approval.ApprovalService", service_cls),
+        ):
+            result = split_runner.invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "approval",
+                    "list",
+                    "--db-path",
+                    str(tmp_path / "approval.db"),
+                ],
+            )
+        service.list_approvals.assert_awaited_once()
+        db_cls.return_value.connect.assert_awaited_once()
+        assert db_cls.return_value.close.await_count == 1, result.output
+
+
+class TestApprovalListRealDatabase:
+    """실제 DB 파일로 `--db-path` 전달과 스키마 초기화를 확인한다."""
+
+    @staticmethod
+    async def _seed(db_path: str, title: str) -> None:
+        from ante.approval import ApprovalService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db = Database(db_path)
+        await db.connect()
+        try:
+            service = ApprovalService(db=db, eventbus=EventBus())
+            await service.initialize()
+            await service.create(
+                type="strategy_retire", requester="agent-x", title=title
+            )
+        finally:
+            await db.close()
+
+    @staticmethod
+    def _tables(db_path: str) -> set[str]:
+        import sqlite3
+
+        conn = sqlite3.connect(db_path)
+        try:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {r[0] for r in rows}
+
+    def test_db_path_option_overrides_config_dir_db(
+        self, split_runner, tmp_path
+    ) -> None:
+        """`--db-path`로 준 파일의 결재가 보이고 config_dir 의 DB는 쓰지 않는다."""
+        import asyncio
+
+        config_dir = tmp_path / "cfg"
+        (config_dir / "db").mkdir(parents=True)
+        asyncio.run(self._seed(str(config_dir / "db" / "ante.db"), "config-dir-row"))
+        override = tmp_path / "override.db"
+        asyncio.run(self._seed(str(override), "override-row"))
+
+        result = split_runner.invoke(
+            cli,
+            [
+                "--config-dir",
+                str(config_dir),
+                "--format",
+                "json",
+                "approval",
+                "list",
+                "--db-path",
+                str(override),
+            ],
+        )
+        rows = json.loads(result.stdout)
+        assert [r["title"] for r in rows] == ["override-row"]
+
+    def test_list_initializes_schema_on_fresh_db(self, split_runner, tmp_path) -> None:
+        """테이블이 없는 새 DB에서도 list 는 스키마를 만들고 빈 목록으로 끝난다."""
+        config_dir = tmp_path / "cfg"
+        (config_dir / "db").mkdir(parents=True)
+        fresh = tmp_path / "fresh.db"
+
+        result = split_runner.invoke(
+            cli,
+            [
+                "--config-dir",
+                str(config_dir),
+                "--format",
+                "json",
+                "approval",
+                "list",
+                "--db-path",
+                str(fresh),
+            ],
+        )
+        assert "approvals" in self._tables(str(fresh)), result.output
