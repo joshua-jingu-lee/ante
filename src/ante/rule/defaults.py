@@ -26,12 +26,9 @@ if TYPE_CHECKING:
     from ante.account.models import Account
 
 
-# broker_type → list of default rule config dicts.
-# rule config 스키마는 RuleEngine._create_rule이 받는 형태와 동일하다
-# (``type`` 필수, 나머지는 Rule 서브클래스 ``__init__`` config로 전달).
 _DEFAULT_RULES_BY_BROKER_TYPE: dict[str, list[dict[str, Any]]] = {
     "kis-domestic": [{"type": "trading_hours", "enabled": True}],
-    "test": [],  # test broker는 24h 거래
+    "test": [],
 }
 
 

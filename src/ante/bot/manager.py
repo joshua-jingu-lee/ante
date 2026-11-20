@@ -59,9 +59,6 @@ CREATE TABLE IF NOT EXISTS bots (
 CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
 """
 
-# ``BotConfig`` 직렬화 / 복원 라운드트립 대상 필드. ``interval_seconds`` 와
-# runtime control 5개. ``BotConfig`` dataclass field default 가 SSOT
-# (하드코딩 금지).
 _PERSISTED_BOT_CONFIG_FIELDS: tuple[str, ...] = (
     "interval_seconds",
     "auto_restart",
@@ -153,25 +150,13 @@ class BotManager:
         self._account_service = account_service
         self._treasury_manager = treasury_manager
         self._trade_service = trade_service
-        # #2337: signal.connect lifecycle 권위 레지스트리(rotate/delete/bot-stopped
-        # teardown 의 close_bot 대상). main.py 가 ServiceRegistry·IPCServer 와
-        # 동일 인스턴스를 주입한다. 테스트/headless 는 ``None`` 이며 teardown
-        # hook 은 None-guard no-op.
         self._signal_channel_registry = signal_channel_registry
         self._bots: dict[str, Bot] = {}
         self._suppress_notification_bot_ids: set[str] = set()
         self._restart_counts: dict[str, int] = {}
         self._restart_tasks: dict[str, asyncio.Task[None]] = {}
         self._restart_reset_tasks: dict[str, asyncio.Task[None]] = {}
-        # 같은 ``bot_id`` 에 대한 ``update_bot`` 동시 호출을 직렬화하기
-        # 위한 per-bot asyncio.Lock 저장소. lazy init helper
-        # ``_get_update_lock`` 으로만 노출하여 외부에서 직접 dict 를 만지지
-        # 않도록 한다.
         self._bot_update_locks: dict[str, asyncio.Lock] = {}
-        # #2337 F3: per-bot 직렬화 lock 저장소. on_step()+drain span(``_run_loop``)
-        # 과 on_external_signal span(on_data+_publish_signals)을 같은 lock 으로
-        # 직렬화해 ``_ctx._pending_actions`` 인터리브를 차단한다. stable bot_id
-        # 키라 restart 를 생존하며 ``create_bot`` 이 Bot 에 주입한다.
         self._bot_signal_locks: dict[str, asyncio.Lock] = {}
 
     def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
@@ -219,14 +204,12 @@ class BotManager:
         from ante.account.errors import InvalidAccountIdError
         from ante.strategy.base import Signal, Strategy, StrategyMeta
 
-        # NullStrategy: 실제 전략 실행 없이 봇 인스턴스만 생성하기 위한 스텁
         class _NullStrategy(Strategy):
             meta = StrategyMeta(name="null", version="0.0.0", description="test stub")
 
             async def on_step(self, context: dict) -> list[Signal]:  # type: ignore[override]
                 return []
 
-        # NullContext: StrategyContext 없이 Bot을 생성하기 위한 스텁
         class _NullContext:
             def __init__(self, bot_id: str) -> None:
                 self.bot_id = bot_id
@@ -239,22 +222,11 @@ class BotManager:
         )
 
         for row in rows:
-            # ``json.loads`` 는 try 블록 밖에서 실행한다.
-            # ``JSONDecodeError`` 는 ``ValueError`` 의 서브클래스이므로 try
-            # 안에 들어가면 아래 ``except ValueError`` 가 이를 silent 하게
-            # 흡수해 다른 종류의 corruption 까지 묻혀버린다. JSON 파싱
-            # 실패는 별도 issue 로 다루어야 하므로 의도적으로 try 범위에
-            # 포함하지 않는다.
             config_data = json.loads(row["config_json"]) if row["config_json"] else {}
-            # bot_type, exchange 키는 무시 (BotConfig에서 제거됨)
             config_data.pop("bot_type", None)
             config_data.pop("exchange", None)
             account_id = row.get("account_id") or ""
             try:
-                # ``interval_seconds`` 와 4 runtime control + ``auto_restart``
-                # 를 helper 로 복원한다. helper 는 missing key 일 때
-                # ``BotConfig`` dataclass default 로 fallback 하고, explicit
-                # null 일 때 ``ValueError`` 를 raise 한다.
                 config = BotConfig(
                     bot_id=row["bot_id"],
                     strategy_id=row["strategy_id"],
@@ -280,8 +252,6 @@ class BotManager:
                     ),
                 )
             except InvalidAccountIdError as e:
-                # invalid account_id row 는 skip + warning. legacy
-                # 마이그레이션이 완료되기 전까지 read 경로 안전망.
                 logger.warning(
                     "BotManager.load_from_db: invalid account_id row skip"
                     " (legacy migration 필요): bot_id=%s account_id=%r — %s",
@@ -291,13 +261,6 @@ class BotManager:
                 )
                 continue
             except ValueError as e:
-                # invalid runtime control / invalid interval_seconds /
-                # explicit null persisted row 는 raise 없이 skip + warning.
-                # ``BotConfig.__post_init__`` (validate_interval /
-                # validate_runtime_controls) 와 ``_pick_persisted_runtime_control``
-                # 의 explicit-null guard 가 ``ValueError`` 를 raise 한다.
-                # try 범위는 ``BotConfig(...)`` 호출로만 좁혀져 있으므로
-                # 다른 라이브러리 호출의 ValueError 가 흡수될 위험이 없다.
                 logger.warning(
                     "BotManager.load_from_db: invalid bot config row skip"
                     " (legacy migration 필요): bot_id=%s config=%r — %s",
@@ -312,7 +275,6 @@ class BotManager:
                 ctx=_NullContext(config.bot_id),  # type: ignore[arg-type]
                 eventbus=self._eventbus,
             )
-            # DB에 저장된 상태로 복원
             status_str = row["status"]
             try:
                 bot.status = BotStatus(status_str)
@@ -353,11 +315,6 @@ class BotManager:
         ctx가 주입되면 그대로 사용하고, None이면 context_factory로 자동 생성한다.
         source_path가 주어지면 전략 파일을 스냅샷으로 복사하여 보호한다.
         """
-        # Defense-in-depth: BotConfig.__post_init__의 invariant를 service
-        # boundary 에서 mirror. attribute mutation 으로 invariant 를 우회한
-        # 객체가 들어와도 여기서 차단한다. 호출 순서는
-        # BotConfig.__post_init__ 과 동일하게 account_id → interval →
-        # runtime controls.
         config.account_id = require_account_id(
             config.account_id, context="BotManager.create_bot"
         )
@@ -370,27 +327,20 @@ class BotManager:
         )
 
         if config.bot_id in self._bots:
-            # 동일 bot_id 중복 등록은 ``BotAlreadyExistsError`` (code=
-            # ``"BOT_ALREADY_EXISTS"``) 로 typed raise — IPC envelope 이
-            # 일반 ``EXECUTION_ERROR`` 가 아닌 안정 코드를 surface 한다.
             raise BotAlreadyExistsError(f"Bot already exists: {config.bot_id}")
 
-        # 1전략 1봇 정책: 실행 중인 봇이 사용 중인 전략 중복 차단
         active_statuses = {BotStatus.RUNNING, BotStatus.STOPPING}
         for existing_bot in self._bots.values():
             if (
                 existing_bot.config.strategy_id == config.strategy_id
                 and existing_bot.status in active_statuses
             ):
-                # 1전략 1봇 정책 위반은 ``BotStrategyAlreadyRunningError``
-                # (code=``"BOT_STRATEGY_ALREADY_RUNNING"``) 로 typed raise.
                 raise BotStrategyAlreadyRunningError(
                     f"전략 '{config.strategy_id}'은(는) 이미 봇 "
                     f"'{existing_bot.bot_id}'에서 사용 중입니다. "
                     f"파라미터가 다른 전략은 별도 파일로 작성하세요."
                 )
 
-        # 계좌 상태 검증 (strategy meta 유무와 무관하게 독립 실행)
         account = None
         if self._account_service:
             from ante.account.errors import (
@@ -410,7 +360,6 @@ class BotManager:
                     f"정지된 계좌 '{config.account_id}'에는 봇을 생성할 수 없습니다."
                 )
 
-        # exchange 호환성 검증 (strategy meta 필요)
         if account and hasattr(strategy_cls, "meta"):
             strategy_exchange = getattr(strategy_cls.meta, "exchange", "KRX")
             strategy_name = getattr(strategy_cls.meta, "name", config.strategy_id)
@@ -424,7 +373,6 @@ class BotManager:
                 account_name=account.name,
             )
 
-        # 전략 파일 스냅샷 생성
         if self._snapshot and source_path:
             from ante.strategy.loader import StrategyLoader
 
@@ -450,7 +398,6 @@ class BotManager:
             exchange=account.exchange if account else "",
             trading_mode=account.trading_mode.value if account else "",
             currency=account.currency if account else "",
-            # #2337 F3: on_step ↔ on_external_signal 직렬화 lock 주입(stable key).
             signal_lock=self._get_signal_lock(config.bot_id),
         )
 
@@ -458,7 +405,6 @@ class BotManager:
         self._bots[config.bot_id] = bot
         await self._save_bot_config(config)
 
-        # accepts_external_signals=True이면 시그널 키 자동 발급
         if (
             self._signal_key_manager
             and hasattr(strategy_cls, "meta")
@@ -490,15 +436,7 @@ class BotManager:
         Raises:
             BotError: 봇이 중지 상태가 아닌 경우.
         """
-        # 같은 bot_id 에 대한 update_bot 동시 호출을 직렬화한다. lock 획득
-        # 전에는 ``bot.config`` 가 다른 update_bot 에 의해 임의로 교체될 수
-        # 있으므로 존재 확인과 상태 검증, ``old_config`` 캡처, ``new_config``
-        # 재생성, save, budget 처리, rollback 모두 lock 안에서 수행한다.
-        # rollback 의 conditional skip 가드는 lock 이 race 를 차단하더라도
-        # 안전망으로 그대로 유지한다.
         async with self._get_update_lock(bot_id):
-            # bot 존재/상태 검증을 lock 안에서 (재)수행. lock 획득 전 다른
-            # 코루틴이 봇을 삭제했을 수도 있다.
             bot = self._get_bot(bot_id)
             allowed_statuses = {
                 BotStatus.CREATED,
@@ -511,27 +449,13 @@ class BotManager:
                     f"(현재: {bot.status})"
                 )
 
-            # budget은 BotConfig 필드가 아니므로 별도 처리
             new_budget = kwargs.pop("budget", None)
 
-            # None이 아닌 값만 필터
             updates = {k: v for k, v in kwargs.items() if v is not None}
 
             if not updates and new_budget is None:
                 return bot
 
-            # account_id 불변 가드 (#2282).
-            # ``account_id`` 는 treasury 예산(옛 account 할당)·broker
-            # credential(옛 account 바인딩)·포지션 격리가 모두 **account-bound**
-            # 라, ``update_bot`` 으로 바꾸면 옛 account 아래 예산/credential/
-            # 포지션이 새 account 로 재배치되지 않아 불일치가 발생한다 (#2274 가
-            # account_id 컬럼 drift 를 고치며 변경이 실제 persist 되도록 만들면서
-            # 표면화). 복잡한 re-isolation 대신 ``account_id`` 를 불변 필드로
-            # 제약하고 변경 시 typed error 로 거부한다 (Account.update 의
-            # ``AccountImmutableFieldError`` 선례 미러). 같은 값(no-op)·미포함은
-            # 통과한다. 가드는 status 검증 직후, effective_account_id 로 strategy
-            # 검증/BotConfig 재생성 이전에 둔다 — 다른 필드(name/budget/
-            # strategy_id 등) 변경은 영향받지 않는다.
             new_account_id = updates.get("account_id")
             if new_account_id is not None and new_account_id != bot.config.account_id:
                 raise BotImmutableFieldError(
@@ -541,20 +465,6 @@ class BotManager:
                     f"(현재: {bot.config.account_id}, 요청: {new_account_id})"
                 )
 
-            # strategy_id 변경 검증 (#2129).
-            # ``bot.config`` 교체 + DB 저장(``_save_bot_config``) 전에
-            # StrategyRegistry 존재 + 계좌 exchange 호환을 검증한다. 미등록/
-            # 비호환이면 ``StrategyNotFoundError`` / ``IncompatibleExchangeError``
-            # 로 raise 하여 stale·invalid strategy_id 가 컬럼/``config_json``
-            # 에 commit 되지 않도록 막는다 (create_bot L390-402 선례 재사용).
-            #
-            # account_id 는 update_bot kwargs (``updates``) 로 함께 변경될 수
-            # 있다 (아래 ``config_fields.update(updates)`` 가 account_id 컬럼을
-            # 덮어쓴다). 한 요청이 account_id 와 strategy_id 를 동시에 바꾸면
-            # 새 전략의 exchange 호환은 **옛 계좌가 아니라 새(effective) 계좌**
-            # 로 검증해야 한다. 그렇지 않으면 새 계좌에 비호환 전략이 commit
-            # 될 수 있다. effective account_id = 요청이 account_id 를 바꾸면 그
-            # 새 값, 아니면 ``old_config.account_id``.
             old_config = bot.config
             effective_account_id = updates.get("account_id", old_config.account_id)
             new_strategy_id = updates.get("strategy_id")
@@ -567,7 +477,6 @@ class BotManager:
                     strategy_id=new_strategy_id,
                 )
 
-            # BotConfig 재생성
             config_fields = {
                 "bot_id": old_config.bot_id,
                 "strategy_id": old_config.strategy_id,
@@ -584,35 +493,10 @@ class BotManager:
             new_config = BotConfig(**config_fields)  # type: ignore[arg-type]
             bot.config = new_config
 
-            # rollback eq 가드용 commit-time snapshot. ``bot.config`` 와
-            # ``new_config`` 는 같은 객체이므로 같은 lock 을 쓰지 않는 다른
-            # mutator (예: ``change_strategy``) 가 ``bot.config.<field> = ...``
-            # in-place mutation 을 하면 ``new_config`` 의 필드도 함께 바뀌어
-            # ``bot.config == new_config`` 는 자명하게 True 가 된다. 따라서
-            # commit 시점의 필드값을 별도 객체로 떠두고 rollback 가드에서
-            # 그 snapshot 과 ``bot.config`` 를 비교한다. ``dataclasses.replace``
-            # 는 shallow copy 라서 raise 가능성이 거의 없는 단순 작업이다
-            # (``BotConfig.__post_init__`` 의 검증은 동일 필드 값으로
-            # 재호출되므로 통과한다).
             committed_snapshot = dataclasses.replace(new_config)
 
-            # DB 갱신
             await self._save_bot_config(new_config)
 
-            # budget 변경 시 Treasury 연동.
-            # budget 배정 의도가 있는 경우(``new_budget is not None``)에는
-            # ``TreasuryManager`` 부재 / account 미등록을 silent 하게 흘려
-            # 보내지 않고 ``TreasuryNotConfiguredError`` 를 raise 하여 라우트
-            # 계층이 422 로 매핑할 수 있도록 한다. ``new_budget is None`` 인
-            # 단순 update 경로는 무영향(no-op)이다.
-            #
-            # budget 처리 실패 시 update_bot 전체가 atomic 하도록 runtime
-            # control 변경(memory + DB) 을 ``old_config`` 로 rollback 한다.
-            # TreasuryManager 미주입, account 미등록, treasury.update_budget
-            # 내부 예외, asyncio.CancelledError(요청 취소) 모두 동일하게
-            # rollback 경로를 탄다. ``treasury.update_budget`` 내부 allocate/
-            # deallocate side effect(예산 부분 commit) 까지는 atomic 보장
-            # 하지 않는다.
             if new_budget is not None:
                 try:
                     from ante.treasury.exceptions import TreasuryNotConfiguredError
@@ -630,64 +514,12 @@ class BotManager:
                         ) from ke
                     await treasury.update_budget(bot_id, new_budget)
                 except (Exception, asyncio.CancelledError):
-                    # Atomicity: budget 실패 시 runtime control 변경을 memory
-                    # + DB 둘 다 ``old_config`` 로 rollback. memory rollback
-                    # 은 단순 대입이라 raise 가능성이 없으므로 먼저 수행하여
-                    # DB rollback 실패와 무관하게 최소한 메모리 상태는
-                    # 일관되게 만든다.
-                    #
-                    # Atomicity scope: 본 rollback 은 같은 ``update_bot``
-                    # 호출 내부의 budget 실패 시 ``BotConfig`` memory/DB 를
-                    # 원자적으로 되돌린다. 다른 mutator (``change_strategy``
-                    # / ``assign_strategy`` / ``delete_bot`` / ``create_bot``)
-                    # 와의 직렬화는 본 가드 범위 밖이며, 별도 BotManager
-                    # 동시성 모델 이슈에서 다룬다. 본 가드는 다중 safety net
-                    # 으로 구성된다:
-                    # - per-bot Lock: 같은 ``update_bot`` 호출들의 직렬화.
-                    # - identity check (``bot.config is new_config``): 다른
-                    #   ``update_bot`` 이 끼어들어 ``bot.config`` 를 다른 객체로
-                    #   교체했으면 skip.
-                    # - instance check (``self._bots.get(bot_id) is bot``):
-                    #   ``delete_bot`` (hard) / ``delete_bot`` → ``create_bot``
-                    #   race 시 DB rollback save 를 skip.
-                    # - eq check (``bot.config == committed_snapshot``): 같은
-                    #   lock 을 쓰지 않는 다른 mutator 가 ``bot.config`` 를
-                    #   in-place mutation (예: ``bot.config.strategy_id = "x"``)
-                    #   한 경우, identity 가드는 그대로 True 라서 rollback 이
-                    #   그 변경을 덮어쓸 수 있다. ``bot.config`` 와
-                    #   ``new_config`` 는 같은 객체이므로 ``new_config`` 와의
-                    #   eq 는 자명하게 True 가 되어 in-place 변경을 감지할 수
-                    #   없다. commit 직후에 떠둔 별도 snapshot 객체와의
-                    #   dataclass eq 로 모든 필드가 동등할 때만 rollback 한다.
                     if bot.config is new_config and bot.config == committed_snapshot:
                         bot.config = old_config
-                        # DB rollback save 직전에 manager 의 ``_bots`` 메모리
-                        # 맵에 이 ``bot_id`` 가 여전히 우리가 잡고 있는 같은
-                        # ``bot`` 인스턴스로 등록되어 있는지 한 번 더 확인
-                        # 한다. ``update_bot`` 의 per-bot
-                        # lock 은 ``update_bot`` 들 사이에서만 직렬화하므로,
-                        # ``treasury.update_budget`` await 동안 같은 ``bot_id``
-                        # 에 대해 ``delete_bot`` (hard delete 포함) 이나
-                        # ``delete_bot`` → ``create_bot`` (재생성) 이 끼어들면:
-                        # - hard delete 후라면 ``_save_bot_config(old_config)`` 가
-                        #   삭제된 row 를 다시 INSERT 하여 좀비 row 가 부활한다.
-                        # - delete+create 후라면 새 봇의 row 를 우리의 옛 설정으로
-                        #   덮어써 데이터 오염이 발생한다.
-                        # 따라서 메모리 맵의 ``bot_id`` 가 더 이상 우리 ``bot``
-                        # 인스턴스를 가리키지 않으면 DB rollback save 는 스킵한다.
-                        # 광범위한 동시성 모델 (delete/create + 같은 lock 공유)
-                        # 변경은 별도 이슈로 다룬다. memory rollback (단순 대입)
-                        # 은 위에서 이미 수행했으므로 caller 가 들고 있는 ``bot``
-                        # 객체의 in-memory 일관성은 유지된다.
                         if self._bots.get(bot_id) is bot:
                             try:
                                 await self._save_bot_config(old_config)
                             except Exception:
-                                # nested rollback failure: 원래 budget 예외를
-                                # 덮지 않도록 rollback 실패는 ``logger.exception``
-                                # 으로 남기고 bare raise 로 원래 예외를 propagate
-                                # 한다. memory 는 이미 rollback 된 상태이므로
-                                # in-memory 일관성은 유지된다.
                                 logger.exception(
                                     "update_bot rollback DB save failed for "
                                     "bot_id=%s; memory was rolled back but DB "
@@ -702,11 +534,6 @@ class BotManager:
                                 bot_id,
                             )
                     elif bot.config is not new_config:
-                        # ``bot.config`` 가 외부에 의해 다른 객체로 교체된
-                        # 비정상 경로. 이 요청의 old_config 로 rollback 하면
-                        # 그 변경을 덮어쓰므로 memory/DB rollback 모두 스킵
-                        # 하고 원래 budget 예외만 propagate. lock 도입 후
-                        # 정상 경로에서는 발생하지 않는 안전망.
                         logger.warning(
                             "update_bot rollback skipped for bot_id=%s: "
                             "concurrent update detected (bot.config is not "
@@ -714,13 +541,6 @@ class BotManager:
                             bot_id,
                         )
                     else:
-                        # identity 는 같지만 eq 는 다른 경로 (attempt 4):
-                        # ``treasury.update_budget`` await 동안 같은 lock 을
-                        # 쓰지 않는 다른 mutator 가 ``bot.config`` 를 in-place
-                        # mutation 한 케이스 (예: ``change_strategy`` /
-                        # ``assign_strategy`` 가 ``bot.config.strategy_id =
-                        # "new"``). 이 요청의 ``old_config`` 로 되돌리면 그
-                        # 변경을 덮어쓰므로 memory/DB rollback 모두 스킵.
                         logger.warning(
                             "rollback skipped: bot.config mutated in-place "
                             "after commit (bot_id=%s).",
@@ -751,8 +571,6 @@ class BotManager:
             self._remove_strategy_rules(bot.config.strategy_id)
 
         bot.config.strategy_id = strategy_id
-        # 컬럼만 갱신하던 ``_update_bot_strategy`` 대신 ``_save_bot_config`` 로
-        # 컬럼 + ``config_json.strategy_id`` 를 함께 persist 한다 (#2130).
         await self._save_bot_config(bot.config)
 
         if was_running:
@@ -780,8 +598,6 @@ class BotManager:
             )
 
         bot.config.strategy_id = strategy_id
-        # 컬럼 + ``config_json.strategy_id`` 를 함께 persist 하여 일관성 유지
-        # (#2130).
         await self._save_bot_config(bot.config)
 
         logger.info("전략 교체: bot=%s strategy=%s", bot_id, strategy_id)
@@ -799,7 +615,6 @@ class BotManager:
         if bot.status not in (BotStatus.STOPPED, BotStatus.ERROR):
             raise BotError(f"재개할 수 없는 상태입니다: {bot_id} (현재: {bot.status})")
 
-        # 에러 카운터 리셋
         self._restart_counts.pop(bot_id, None)
         bot.error_message = None
 
@@ -882,35 +697,26 @@ class BotManager:
             )
 
         bot = self._get_bot(bot_id)
-        # #2337: signal 채널 teardown 을 **bot.stop() 앞** 에 둔다(순서 BUG 수정,
-        # first-close-wins). delete 가 stop 보다 먼저 'deleted' 로 닫아야 후속
-        # BotStoppedEvent 의 'bot_stopped' close_bot 이 멱등 no-op(이미 closed)
-        # 가 되어 closed.reason='deleted' 가 보존된다. 동기·비-raise.
         reg = self._signal_channel_registry
         if reg is not None:
             reg.close_bot(bot_id, "deleted")
         if bot.status == BotStatus.RUNNING:
             await bot.stop()
 
-        # liquidate: 보유 포지션 시장가 매도 주문 발행
         if handle_positions == "liquidate":
             await self._liquidate_positions(bot)
 
         self._unregister_bot_events(bot)
 
-        # VirtualExecutor 등록 해제 (봇이 등록되어 있는 경우)
         if self._context_factory and self._context_factory._virtual_executor:
             self._context_factory._virtual_executor.unregister_bot(bot_id)
 
-        # 시그널 키 폐기
         if self._signal_key_manager:
             await self._signal_key_manager.revoke(bot_id)
 
-        # 전략 스냅샷 정리
         if self._snapshot:
             self._snapshot.cleanup(bot_id)
 
-        # Treasury budget 환수
         if self._treasury_manager:
             released = 0.0
             try:
@@ -919,8 +725,6 @@ class BotManager:
             except KeyError:
                 pass
             if released == 0.0:
-                # 봇 account_id 와 예산의 account_id 가 다를 수 있음 — 모든
-                # Treasury 에서 해당 봇의 budget 을 찾아 환수.
                 for t in self._treasury_manager.list_all():
                     released = await t.release_budget(bot_id)
                     if released > 0:
@@ -974,15 +778,10 @@ class BotManager:
         from ante.eventbus.events import OrderRequestEvent
 
         account_id = bot.config.account_id
-        # 1차 방어: 봇 계좌로 조회 범위를 한정한다 (account_id=None이면 타 계좌
-        # 포지션까지 섞여 반환되므로 반드시 봇 계좌를 지정).
         positions = await self._trade_service.get_positions(
             bot_id=bot.bot_id, account_id=account_id
         )
 
-        # 2차 방어 (fail-closed): 조회 결과가 비정상적으로 혼입되더라도, 봇 계좌와
-        # 엄격히 일치하는 포지션만 청산한다. 불일치/None/""/누락(falsy/missing)은
-        # 모두 제외하고 경고 로그를 남긴다 (truthy 비교가 아니라 엄격 동등 비교).
         open_positions: list[Any] = []
         for p in positions:
             if p.quantity <= 0:
@@ -1013,9 +812,6 @@ class BotManager:
                 side="sell",
                 quantity=pos.quantity,
                 order_type="market",
-                # #2398 청산 marker: gate(계층1/2)가 readiness not_ready 청산 SELL
-                # 을 "청산 차단: 수동 청산 필요" 전용 문구로 거부하도록 machine-
-                # readable ASCII prefix 를 부착한다(한국어 reason 매칭 금지, G6).
                 reason=f"{LIQUIDATION_REASON_PREFIX} 봇 삭제 청산 (bot={bot.bot_id})",
                 exchange=getattr(pos, "exchange", "KRX"),
             )
@@ -1035,7 +831,6 @@ class BotManager:
 
     async def stop_all(self) -> None:
         """모든 봇 중지."""
-        # 재시작 태스크 취소
         for task in list(self._restart_tasks.values()):
             task.cancel()
         for task in list(self._restart_reset_tasks.values()):
@@ -1097,8 +892,6 @@ class BotManager:
 
             raise StrategyNotFoundError(f"전략 미발견: {strategy_id}")
 
-        # account_service 미주입 시 exchange 검증은 skip (create_bot 과 동일하게
-        # account 정보가 없으면 호환성 검증을 수행하지 않는다).
         if self._account_service is None:
             return
 
@@ -1121,8 +914,6 @@ class BotManager:
             account_name=account.name,
         )
 
-    # ── 전략별 룰 관리 ─────────────────────────────────
-
     def _load_strategy_rules(self, strategy_id: str) -> None:
         """설정에서 전략별 룰을 RuleEngine에 로드."""
         if not self._rule_engine:
@@ -1139,8 +930,6 @@ class BotManager:
         if not self._rule_engine:
             return
         self._rule_engine.remove_strategy_rules(strategy_id)
-
-    # ── EventBus 핸들러 ──────────────────────────────
 
     async def _on_bot_stop_request(self, event: object) -> None:
         """BotStopEvent 수신 시 해당 봇 중지.
@@ -1210,10 +999,6 @@ class BotManager:
 
         if not isinstance(event, BotStoppedEvent):
             return
-        # #2337 teardown 커버리지(lifecycle BLOCKER): 봇 중지 시 signal 채널을
-        # close_bot 한다. **suppress early-return 앞** 에 둬야 흔한 managed-stop
-        # 봇도 silent leak 하지 않는다. close_bot 은 동기·비-raise 라 bus swallow
-        # 로 notify 가 미실행되지 않는다.
         reg = self._signal_channel_registry
         if reg is not None:
             reg.close_bot(event.bot_id, "bot_stopped")
@@ -1236,12 +1021,6 @@ class BotManager:
         if not isinstance(event, BotErrorEvent):
             return
 
-        # #2337 teardown 커버리지(lifecycle BLOCKER): 자율 ERROR 전이는
-        # BotStoppedEvent 를 발화하지 않으므로 ``_on_bot_stopped`` 가 커버하지
-        # 못한다. **NotificationEvent publish·auto_restart early-return 앞** 에
-        # close_bot 을 둬 non-restart-error 봇의 channel leak 을 차단한다.
-        # reason 은 ``bot_stopped`` (closed.reason vocab; ERROR 도 동일 종료
-        # 시맨틱). 동기·비-raise.
         reg = self._signal_channel_registry
         if reg is not None:
             reg.close_bot(event.bot_id, "bot_stopped")
@@ -1406,12 +1185,8 @@ class BotManager:
         """
         if not self._signal_key_manager:
             raise BotError("SignalKeyManager가 설정되지 않았습니다")
-        bot = self._get_bot(bot_id)  # 존재 확인
+        bot = self._get_bot(bot_id)
 
-        # accepts_external_signals 게이트.
-        # ``Bot.__init__`` 가 ``_strategy_cls`` 를 보관하므로 ``start()``
-        # 이전(``bot.strategy is None``)에도 메타를 조회할 수 있다. fallback
-        # 으로는 registry+loader 를 사용해 cold-path 호출자에서도 동작한다.
         meta = None
         strategy = getattr(bot, "strategy", None)
         if strategy is not None:
@@ -1438,11 +1213,6 @@ class BotManager:
                 f"bot_id={bot_id}, strategy_id={bot.config.strategy_id}"
             )
 
-        # #2337: rotate 성공 **후** signal 채널 teardown. ROLLBACK(rotate raise)
-        # 경로는 여기 도달 전 예외라 bump/close_bot 안 함(옛 키 채널 유지).
-        # ``bump_generation`` 으로 rotate-in-window 핸드셰이크를 adopt-time
-        # re-check self-close 시키고, ``close_bot('rotated')`` 로 활성 세션을
-        # 닫는다. teardown 은 SignalKeyManager.rotate 가 아니라 여기서만 한다.
         new_key = await self._signal_key_manager.rotate(bot_id)
         reg = self._signal_channel_registry
         if reg is not None:
@@ -1453,8 +1223,6 @@ class BotManager:
     def get_restart_count(self, bot_id: str) -> int:
         """봇의 현재 재시작 시도 횟수."""
         return self._restart_counts.get(bot_id, 0)
-
-    # ── 봇 이벤트 구독 관리 ──────────────────────────
 
     def _register_bot_events(self, bot: Bot) -> None:
         """봇의 이벤트 핸들러 등록."""
@@ -1475,13 +1243,6 @@ class BotManager:
 
         self._eventbus.subscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.subscribe(ExternalSignalEvent, bot.on_external_signal)
-        # ``OrderModifyExecutedEvent`` — 정정 완료(#2391) 통보,
-        # ``OrderModifyRejectedEvent`` — rule reject / rule exception /
-        # gateway fail-closed 통보가 ``Bot.on_order_update`` 를 거쳐
-        # ``strategy.on_order_update`` 까지 전달되도록 한다.
-        # ``StopOrderRegistered/Triggered/ExpiredEvent`` — stop / stop_limit
-        # 주문 등록·발동·만료 통보를 일반 주문 통보 채널과 동일한
-        # ``on_order_update`` 로 변환한다 (별도 콜백 신설 금지 정책).
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -1515,8 +1276,6 @@ class BotManager:
 
         self._eventbus.unsubscribe(OrderFilledEvent, bot.on_order_filled)
         self._eventbus.unsubscribe(ExternalSignalEvent, bot.on_external_signal)
-        # 등록과 동일하게 ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent``
-        # 와 stop 이벤트 3종 해지.
         for event_type in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -1530,8 +1289,6 @@ class BotManager:
             StopOrderExpiredEvent,
         ):
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
-
-    # ── DB ───────────────────────────────────────────
 
     async def _save_bot_config(self, config: BotConfig) -> None:
         """봇 설정 DB 저장.

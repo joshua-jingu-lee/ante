@@ -50,32 +50,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# KIS 주문/체결 이력은 KST(UTC+9) 영업일(ord_dt, YYYYMMDD)을 기준으로 한다.
 _KST = timezone(timedelta(hours=9))
 
-# 최소 폴 cadence. rate budget(paper 5/min·live 20/min, 제출/가격/대사 공유)을
-# 보호하기 위해 60s 미만으로 내려가지 않는다.
 MIN_POLL_INTERVAL = 60.0
 DEFAULT_POLL_INTERVAL = 60.0
 
-# 기동 카치업 bounded backoff. startup 폴이 CB/rate/network 로 실패하면 짧게
-# 재시도해 일시 장애를 흡수한다. 모두 실패하면 succeeded=False 로 보고해 barrier
-# 가 reconcile external-buy 분류를 건너뛰게 한다(미복구 체결 오분류 방지, #1946).
 CATCH_UP_MAX_ATTEMPTS = 3
 CATCH_UP_BACKOFF_BASE = 1.0
 
-# steady-state 폴 루프(_loop) 연속 실패 cooldown 상한 배수 (#2350).
-# n번째 연속 실패 직후 sleep = poll_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)
-# (첫 실패 ×2, 이후 ×4, ×8 cap). 기본 poll 60s 기준 상한 480s — CB
-# recovery_timeout(60s)·reconciler 주기(1800s)보다 짧아 복구 관측을 놓치지 않으면서
-# late-ccld 타임아웃 연타로 차단기 OPEN 을 60s 주기로 갱신·연장하지 않게 한다. fill
-# 반영 지연 상한도 480s 로 bounded. catch_up_once 의 bounded backoff 와는 비간섭.
 LOOP_BACKOFF_MULTIPLIER_CAP = 8
 
-# steady-state cooldown 집계 대상 broker-transient 예외(#2350). 이 부류만 연속 실패
-# 카운터에 누적해 cooldown 을 연장한다. 그 외 예외(내부 버그류)는 backoff 로 은폐하지
-# 않고 카운터를 0 으로 리셋해 기존대로 즉시 다음 주기 + 경고 로그를 유지한다(현행
-# 동작 보존, #2350 Codex R1 P2).
 _LOOP_BACKOFF_EXCEPTIONS: tuple[type[Exception], ...] = (
     TimeoutError,
     CircuitOpenError,
@@ -111,14 +95,12 @@ def _normalize_history_date(raw: str) -> str:
         반환해 호출부가 ``to_date`` fallback 을 적용하게 한다.
     """
     if re.fullmatch(r"\d{8}", raw):
-        # YYYYMMDD passthrough (KIS ord_dt).
         return raw
     try:
         dt = datetime.fromisoformat(raw)
     except ValueError:
         return ""
     if dt.tzinfo is None:
-        # naive ISO 는 UTC 로 가정한 뒤 KST 영업일로 환산한다.
         dt = dt.replace(tzinfo=UTC)
     return business_date_kst(dt)
 
@@ -216,16 +198,9 @@ class FillReconcileScheduler:
         self._trade_service = trade_service
         self._eventbus = eventbus
         self._fallback_enabled = fallback_enabled
-        # #2377: over-attribution 의심 알림 종목명 병기용. 미주입(None)이면
-        # 종목코드만 표기하는 기존 경로를 유지한다.
         self._instrument_service = instrument_service
         self._task: asyncio.Task[None] | None = None
         self._running = False
-        # #2318 Finding ②: fallback 이 filled(terminal)로 올린 주문의 사후 ccld
-        # 검증 set(broker_order_id → 검증 항목). fallback 이 open 을 비우면
-        # _poll_and_apply 폴 게이트가 막혀 §11.4 alert 가 도달 불가(dead code)가
-        # 되므로, 이 set 이 비어있지 않으면 ccld 를 계속 폴한다. in-memory 보조
-        # 상태일 뿐(§11.8 OrderTracker/positions/trades/outbox 직접 수정 금지).
         self._fallback_verify: dict[str, _FallbackVerifyEntry] = {}
 
     @property
@@ -253,7 +228,7 @@ class FillReconcileScheduler:
         for attempt in range(1, CATCH_UP_MAX_ATTEMPTS + 1):
             try:
                 applied = await self._poll_and_apply()
-            except Exception as exc:  # CB open·rate·network — bounded 재시도.
+            except Exception as exc:
                 last_exc = exc
                 if attempt < CATCH_UP_MAX_ATTEMPTS:
                     backoff = CATCH_UP_BACKOFF_BASE * attempt
@@ -271,7 +246,6 @@ class FillReconcileScheduler:
             else:
                 return CatchUpResult(succeeded=True, applied=applied)
 
-        # 모든 시도 실패 — startup 폴 미성공. barrier 가 external-buy 분류를 연기.
         logger.error(
             "기동 카치업 폴 %d회 모두 실패 (account=%s) — reconcile external-buy "
             "분류를 연기한다",
@@ -323,8 +297,6 @@ class FillReconcileScheduler:
         """
         consecutive_transient_failures = 0
         while self._running:
-            # 연속 broker-transient 실패가 있으면 sleep 을 늘려 OPEN 갱신/타임아웃
-            # 연타를 흡수한다. 0 이면 기존 poll_interval 고정 주기(성공 경로 불변).
             if consecutive_transient_failures > 0:
                 multiplier = min(
                     2**consecutive_transient_failures, LOOP_BACKOFF_MULTIPLIER_CAP
@@ -340,9 +312,6 @@ class FillReconcileScheduler:
             except asyncio.CancelledError:
                 raise
             except _LOOP_BACKOFF_EXCEPTIONS:
-                # broker-transient 폴 실패(CB open/rate/network/타임아웃)를 삼키고
-                # 다음 사이클에 멱등 재시도하되, 연속 실패 카운터를 올려 cooldown 을
-                # 연장한다(#2350). (startup 카치업과 달리 barrier 영향 없음.)
                 consecutive_transient_failures += 1
                 logger.warning(
                     "FillReconcileScheduler 폴 오류 (account=%s, 연속실패=%d) — "
@@ -357,11 +326,6 @@ class FillReconcileScheduler:
                     exc_info=True,
                 )
             except Exception:
-                # broker-transient 가 아닌 예외(내부 버그류)는 cooldown 으로 은폐하지
-                # 않는다. 선행 transient 실패로 backoff 가 올라가 있었다면 카운터를 0
-                # 으로 리셋해 다음 사이클이 base poll_interval 로 복귀하게 한다(내부
-                # 결함을 이전 backoff 로 계속 잠재우지 않음, #2350 Codex R1 P2).
-                # 이후 경고 로그를 남기고 기존대로 즉시 다음 주기에 멱등 재시도한다.
                 consecutive_transient_failures = 0
                 logger.warning(
                     "FillReconcileScheduler 폴 오류 (account=%s) — 다음 사이클 재시도",
@@ -369,7 +333,6 @@ class FillReconcileScheduler:
                     exc_info=True,
                 )
             else:
-                # 정상 완료 — cooldown 카운터 리셋, poll_interval 고정 주기 복귀.
                 consecutive_transient_failures = 0
 
     async def _poll_and_apply(self) -> int:
@@ -425,29 +388,15 @@ class FillReconcileScheduler:
         """
         today = business_date_kst()
 
-        # 1) 만료 **전에** open 을 읽어 폴 window 를 잡는다. 전일 open(다운타임
-        #    체결 가능)도 이 시점엔 살아 있어 from_date 를 거슬러 덮는다(I8).
         open_orders = await self._tracker.get_open_orders(self._account_id)
-        # #2318 Finding ②: fallback 이 filled 로 올려 open 이 비어도 verify set 이
-        # 비어있지 않으면 ccld 를 계속 폴해 §11.4 late-ccld alert 를 reachable 하게
-        # 한다. open·verify 가 **둘 다 없으면** 폴하지 않는다(§11.2 rate budget).
         if not open_orders and not self._fallback_verify:
-            # event-gated: 추적 open·verify 가 모두 없으면 폴하지 않는다 (0콜).
-            # 만료시킬 open 도 없으므로 expire_stale 도 생략한다.
             return 0
 
-        # from_date 는 open 의 가장 이른 submitted_date 와 verify 항목의 가장 이른
-        # submitted_date 중 더 이른 쪽으로 잡아(I8), verify-only 사이클에서도 ccld
-        # 가 fallback 적용 주문을 관측할 수 있게 한다(#2318 Finding ②).
         candidate_dates = [o.submitted_date for o in open_orders]
         candidate_dates.extend(e.submitted_date for e in self._fallback_verify.values())
         from_date = min(candidate_dates)
         to_date = today
 
-        # 2) 사이클당 1콜로 history 를 폴해 다운타임 체결을 **먼저** 복구한다.
-        #    (브로커 어댑터가 pagination 을 내부에서 처리.) 실패는 호출자에게
-        #    전파한다(주기 루프는 삼키고, catch_up 은 재시도/보고) — 이때 아래
-        #    expire 는 실행되지 않아 미복구 체결분이 영구 만료되지 않는다(I7).
         history = await self._broker.get_order_history(
             from_date=from_date, to_date=to_date
         )
@@ -461,23 +410,9 @@ class FillReconcileScheduler:
             if cumulative <= 0:
                 continue
             avg_price = float(item.get("price", 0.0) or 0.0)
-            # ISO timestamp(Test/Mock) 는 KST 영업일 YYYYMMDD 로 정규화한다.
-            # tracker 의 submitted_date(<=) 매칭 전제와 맞춰 복구 no-op 을
-            # 방지한다(#2004). KIS ord_dt(YYYYMMDD)는 그대로 통과. 빈/파싱불가
-            # 는 to_date(오늘 KST) 로 fallback.
             item_date = (
                 _normalize_history_date(str(item.get("timestamp", ""))) or to_date
             )
-            # #2316 §11.4 / #2318 Finding ②: fallback 이 full fill 로 올린 주문이
-            # _fallback_verify 에 등록돼 있으면, ccld 절대 누적이 fallback 이
-            # advance 한 recorded 보다 **낮은** 양수면 over-attribution alert 를
-            # 발행하고(비가역·CAS no-op) verify 에서 제거한다. 동일/높으면(정상)
-            # 조용히 제거한다. 이 검증을 거쳐야 §11.4 alert 가 실제 poll 경로에서
-            # 도달 가능하다. #2318 Codex 리뷰: KIS odno(broker_order_id)는 영업일
-            # 재사용 가능하므로(§4.1 유일키 = (account, odno, submitted_date)),
-            # ccld 행을 verify 항목과 매칭할 때 **(odno, item_date)** 쌍으로 비교해
-            # 폴 window 에 섞여 든 다른 날짜 재사용 odno 가 verify 항목을 잘못
-            # 매칭/alert/pop 하지 않게 한다(정확매칭, §11.3).
             await self._verify_fallback_against_ccld(
                 broker_order_id=broker_order_id,
                 observed_cumulative=cumulative,
@@ -493,19 +428,9 @@ class FillReconcileScheduler:
             if delta > 0:
                 applied += 1
 
-        # 3) **(신규 #2314·#2316 §11)** ccld 가 채우지 못한 미복구 open buy 가
-        #    남아 있을 때만 잔고-역도출 fallback 을 적용한다. open 을 ccld 적용
-        #    **후** 재조회해 advance 된 recorded_filled_qty 를 반영한다.
         applied += await self._apply_position_fallback()
 
-        # 4) fallback 이 끝난 **뒤에** EOD 경과 + 체결 미관측(genuinely-dead) open
-        #    만 만료한다. 위 폴/fallback 으로 체결된 주문은 이미 filled/
-        #    partially_filled 로 전이돼 expire_stale 의 만료 대상(genuinely-dead
-        #    open)에서 자동 제외된다(I2·§11.5).
         await self._tracker.expire_stale(self._account_id, before_date=today)
-        # #2318 Finding ②: verify set 의 D-1 이전 항목을 영업일 경계에서 정리해
-        # 무한 누적을 막는다(§11.5 EOD 정리). 당일 항목은 그날의 late-ccld 검증을
-        # 위해 유지한다.
         self._expire_stale_fallback_verify(before_date=today)
         return applied
 
@@ -572,14 +497,9 @@ class FillReconcileScheduler:
         entry = self._fallback_verify.get(broker_order_id)
         if entry is None:
             return
-        # #2318 Codex 리뷰: date-scope 정확매칭. ccld 행의 영업일(item_date)이 verify
-        # 항목의 submitted_date 와 다르면 다른 날짜 재사용 odno 이므로 이 항목에 대해
-        # 무시한다(검증/alert/pop 안 함). 같은 날짜 ccld 만 그 항목을 검증·확정한다.
         if entry.submitted_date != item_date:
             return
         recorded = entry.recorded
-        # ccld 가 0 이거나 fallback recorded 이상이면 정상 경로(멱등 advance/no-op).
-        # recorded 보다 **낮은 양수** 누적일 때만 over-attribution 의심.
         if 0 < observed_cumulative < recorded:
             await self._emit_late_ccld_alert(
                 broker_order_id=broker_order_id,
@@ -587,7 +507,6 @@ class FillReconcileScheduler:
                 observed_cumulative=observed_cumulative,
                 submitted_date=entry.submitted_date,
             )
-        # ccld 가 한 번 관측됐으므로 검증 완료 — verify 에서 제거(bounded).
         self._fallback_verify.pop(broker_order_id, None)
 
     async def _emit_late_ccld_alert(
@@ -642,10 +561,6 @@ class FillReconcileScheduler:
                 ),
             )
         )
-        # #2377: 자연 문장(``... {symbol} 주문(odno=...)을 ...``) 안에 종목코드가
-        # 임베딩된 지점이므로, 문장 흐름을 깨는 백틱 monospace 대신 plain 병기
-        # (``069500 (KODEX 200)``)를 사용한다. exchange 는 alert payload 에 없어
-        # KRX 기본값. 미주입/조회 불가 시 symbol-only 로 폴백한다.
         symbol_label = (
             self._instrument_service.format_label(record.symbol)
             if self._instrument_service is not None
@@ -697,38 +612,24 @@ class FillReconcileScheduler:
         """
         if not (self._fallback_enabled and self._trade_service is not None):
             return 0
-        # §11.6 KIS paper 한정. base BrokerAdapter 에 is_paper 가 없으므로 안전
-        # getattr(미정의/실전이면 비활성).
         if not getattr(self._broker, "is_paper", False):
             return 0
 
-        # ccld 적용 **후** open 을 재조회해 advance 된 recorded 를 반영한다.
         open_orders = await self._tracker.get_open_orders(self._account_id)
-        # #2318 Finding ①: 유일성 판정은 그 symbol 의 **모든 non-terminal(open/
-        # partially_filled) buy** 총수로 한다. recorded>0 인 partially_filled open
-        # buy 가 unrecovered(recorded==0) buy 와 공존하면, 미복구만 세서 len==1 로
-        # 통과시키면 §11.3-1("그 symbol 의 추적 open buy 가 **정확히 하나**")를
-        # 위반한다. 모든 non-terminal open buy 를 symbol 별로 센다.
         open_buy_count_by_symbol: dict[str, int] = {}
         for o in open_orders:
             if o.side == "buy":
                 open_buy_count_by_symbol[o.symbol] = (
                     open_buy_count_by_symbol.get(o.symbol, 0) + 1
                 )
-        # 미복구(recorded==0) open **buy** 만 적용 후보. ccld 가 부분이라도 반영한
-        # 주문(recorded>0)은 §11.3-2 위반이라 후보에서 제외. 이 후보가 없으면 잔고
-        # 콜 생략(§11.2 rate budget).
         unrecovered_buys = [
             o
             for o in open_orders
             if o.side == "buy" and o.recorded_filled_qty == 0 and o.ordered_qty > 0
         ]
         if not unrecovered_buys:
-            # §11.2 rate budget: 미복구 open buy 가 없으면 get_positions 미호출.
             return 0
 
-        # 후보가 있을 때만 잔고 1콜. (symbol 별로 유일 매칭만 적용하므로 한 번에
-        # 전 symbol 잔고를 받아 in-memory 매칭한다.)
         broker_positions = await self._broker.get_positions()
         broker_qty_by_symbol: dict[str, float] = {}
         avg_price_by_symbol: dict[str, float] = {}
@@ -738,12 +639,9 @@ class FillReconcileScheduler:
                 continue
             qty = float(bp.get("quantity", 0.0) or 0.0)
             broker_qty_by_symbol[symbol] = broker_qty_by_symbol.get(symbol, 0.0) + qty
-            # 잔고 평단(§11.4 avg_price 근거). 동일 symbol 다중 row 는 드무나,
-            # 첫 양수 평단을 유지한다(잔고가 제공하는 유일 가격 정보).
             if symbol not in avg_price_by_symbol:
                 avg_price_by_symbol[symbol] = float(bp.get("avg_price", 0.0) or 0.0)
 
-        # §11.1 internal_account_qty = 계좌 전 bot 포지션 합(특정 bot 아님).
         internal_positions = await self._trade_service.get_all_positions(
             account_id=self._account_id
         )
@@ -754,20 +652,12 @@ class FillReconcileScheduler:
                     internal_qty_by_symbol.get(p.symbol, 0.0) + p.quantity
                 )
 
-        # symbol 별 미복구 open buy 그룹(적용 후보). 유일성 판정은 아래에서 그
-        # symbol 의 **모든 non-terminal open buy 총수**(open_buy_count_by_symbol)로
-        # 한다 — 미복구 후보 그룹 크기가 아니다(#2318 Finding ①).
         buys_by_symbol: dict[str, list[OrderTrackerRecord]] = {}
         for o in unrecovered_buys:
             buys_by_symbol.setdefault(o.symbol, []).append(o)
 
         applied = 0
         for symbol, orders in buys_by_symbol.items():
-            # §11.3-1 유일성: 그 symbol 의 **모든 non-terminal open buy 총수**가
-            # 정확히 1 이어야 한다(#2318 Finding ①). partially_filled open buy
-            # (recorded>0)가 공존하면 총수≥2 라 미적용 — 미복구 후보만 세서 통과
-            # 시키는 결함을 닫는다. (미복구 후보 자체가 같은 symbol 에 둘 이상이면
-            # 총수도 자동 ≥2 라 이 게이트가 함께 막는다.)
             if open_buy_count_by_symbol.get(symbol, 0) != 1:
                 logger.debug(
                     "fallback 미적용(다중 non-terminal open buy): account=%s "
@@ -777,16 +667,12 @@ class FillReconcileScheduler:
                     open_buy_count_by_symbol.get(symbol, 0),
                 )
                 continue
-            # 유일 open buy 총수==1 이고 미복구 후보가 정확히 그 주문일 때만 진입.
-            # (unrecovered_buys 에서 온 orders 는 recorded==0 임이 보장된다.)
             order = orders[0]
             broker_qty = broker_qty_by_symbol.get(symbol, 0.0)
             internal_qty = internal_qty_by_symbol.get(symbol, 0.0)
             excess = broker_qty - internal_qty
-            # §11.1 excess <= 0 → 대상 없음(no-op).
             if excess <= 0:
                 continue
-            # §11.3-3 full-fill 정확매칭: excess == ordered_qty 일 때만 적용.
             if excess != order.ordered_qty:
                 logger.debug(
                     "fallback 미적용(partial/모호 excess): account=%s symbol=%s "
@@ -797,7 +683,6 @@ class FillReconcileScheduler:
                     order.ordered_qty,
                 )
                 continue
-            # §11.3·§11.8: full fill 절대 누적을 FillApplier **만** 호출해 수렴.
             avg_price = avg_price_by_symbol.get(symbol, order.avg_fill_price)
             delta = await self._applier.apply_cumulative(
                 account_id=self._account_id,
@@ -808,11 +693,6 @@ class FillReconcileScheduler:
             )
             if delta > 0:
                 applied += 1
-                # #2318 Finding ②: fallback 이 full fill 로 advance 했으므로
-                # verify set 에 등록한다. 이후 사이클의 ccld 가 더 낮은 절대 누적을
-                # 주면 §11.4 over-attribution alert 가 실제 poll 경로에서 발행된다
-                # (fallback 이 주문을 filled 로 올려 open 이 비어도 verify 가
-                # 폴 게이트를 열어 ccld 가 도달한다).
                 self._fallback_verify[order.broker_order_id] = _FallbackVerifyEntry(
                     recorded=order.ordered_qty,
                     submitted_date=order.submitted_date,

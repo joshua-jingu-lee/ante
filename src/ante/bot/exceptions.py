@@ -15,15 +15,8 @@ BOT_NOT_ACCEPTING_SIGNALS_CODE = "BOT_NOT_ACCEPTING_SIGNALS"
 BOT_ALREADY_EXISTS_CODE = "BOT_ALREADY_EXISTS"
 BOT_STRATEGY_ALREADY_RUNNING_CODE = "BOT_STRATEGY_ALREADY_RUNNING"
 BOT_IMMUTABLE_FIELD_CODE = "BOT_IMMUTABLE_FIELD"
-# Refs #2334 / #2336 (PR#1): signal.connect 핸드셰이크 4-게이트 stable code.
-# ``SignalKeyManagerNotConfigured`` 는 전용 코드를 발명하지 않고 taxonomy
-# SSOT(error-taxonomy.md) 의 공통 ``SERVICE_NOT_CONFIGURED`` 를 재사용한다.
 INVALID_SIGNAL_KEY_CODE = "INVALID_SIGNAL_KEY"
 BOT_NOT_RUNNING_CODE = "BOT_NOT_RUNNING"
-# Refs #2334 / #2337 (PR#2): bot_id 당 단일 connect 정책. 같은 봇에 이미 active
-# session 이 있을 때 두 번째 핸드셰이크를 거부하는 stable code. PR#1 은 상수-only
-# 로 ErrorSpec 만 등록했고, raiser(``SignalChannelRegistry.register``)와
-# ``EXCEPTION_TO_SPEC`` typed entry 는 본 PR 에서 추가한다.
 BOT_SIGNAL_CHANNEL_BUSY_CODE = "BOT_SIGNAL_CHANNEL_BUSY"
 
 

@@ -19,7 +19,6 @@ CREATE TABLE IF NOT EXISTS signal_keys (
 );
 """
 
-# 키 형식: sk_ + 32자 hex (128-bit entropy)
 _KEY_PREFIX = "sk_"
 _KEY_BYTES = 16
 

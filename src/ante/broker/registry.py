@@ -45,7 +45,6 @@ def _build_registry() -> dict[str, type[BrokerAdapter]]:
     }
 
 
-# 모듈 로드 시 레지스트리 초기화
 BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = _build_registry()
 
 

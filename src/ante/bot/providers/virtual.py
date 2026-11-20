@@ -167,13 +167,6 @@ class VirtualExecutor:
         self._slippage_rate = slippage_rate
         self._portfolios: dict[str, VirtualPortfolioView] = {}
         self._bot_configs: dict[str, Any] = {}
-        # #2398 G9: virtual 경로 계층3-equivalent backstop. VirtualExecutor 와
-        # APIGateway 는 둘 다 OrderApprovedEvent priority=50 구독이고 gateway 는
-        # virtual 을 skip 하므로, not_ready virtual approval 이 (상류 우회/직접
-        # 발행으로) 들어오면 gateway 차단을 우회해 VirtualExecutor 가 체결할 수
-        # 있다. D-ACC-09 "단일 chokepoint 가정 금지" 원칙상 VirtualExecutor 가
-        # virtual 경로를 독립 게이트한다. 미주입(None)이면 fail-closed(G2). 매
-        # 이벤트 시점 registry 조회(상태 캐시 금지, G5).
         self._runtime_readiness = runtime_readiness
         self._account_service = account_service
 
@@ -187,15 +180,6 @@ class VirtualExecutor:
         self._portfolios.pop(bot_id, None)
         logger.info("VirtualExecutor: 봇 해제 %s", bot_id)
 
-    # #2398 priority invariant: VirtualExecutor 의 OrderApprovedEvent 구독
-    # priority 는 APIGateway(``_on_order_approved`` priority=50)보다 **반드시
-    # 높아야** 한다. EventBus.publish 는 priority 내림차순(높은 priority 먼저)으로
-    # 핸들러를 디스패치하므로(bus.py:46 reverse=True), 이 invariant 가 있으면
-    # **구독(subscribe) 삽입 순서와 무관하게** VirtualExecutor 가 항상 gateway 보다
-    # 먼저 실행돼 자신이 소유한 virtual 주문에 ``_virtual_handled`` 마커를 set 한다.
-    # Fix A(gateway 메타 기반 non-LIVE silent skip)가 공통 케이스의 라우팅을 이미
-    # 순서 무관으로 만들고, 이 priority 는 메타 실패 잔여 코너에서 gateway 가
-    # 마커를 신뢰할 수 있게 하는 defense-in-depth 다(구독 순서 race 봉쇄).
     _ORDER_APPROVED_PRIORITY = 60
 
     def subscribe(self) -> None:
@@ -253,12 +237,9 @@ class VirtualExecutor:
         )
         from ante.account.models import AccountStatus
 
-        # registry 미주입 = fail-closed(G2). account_service 미주입은 status 축
-        # 비활성(derive_account_status → None)이지만 readiness 축이 차단한다.
         if self._runtime_readiness is None or self._account_service is None:
             return ACCOUNT_NOT_READY_REASON
 
-        # ── 단일 fresh fetch(중복 get 금지) — status + readiness 공동 평가 ──────
         fetched: Any | None = None
         fetch_failed = False
         try:
@@ -266,20 +247,14 @@ class VirtualExecutor:
         except Exception:
             fetch_failed = True
 
-        # status 축(G7) — gateway 계층3 와 동일 3-state 도출(공유 헬퍼 SSOT).
-        # account_service 는 위에서 not-None 확인됨 → status 축 활성.
         status = derive_account_status(
             self._account_service, fetched, fetch_failed=fetch_failed
         )
         if status == AccountStatus.SUSPENDED:
             return ACCOUNT_SUSPENDED_REASON
         if status is STATUS_UNAVAILABLE:
-            # 소스 present + 조회 예외/미상 = 검증 불가 → fail-closed(in-flight
-            # suspend 를 stale 통과시키지 않는다). fetch 실패(fetched None)도 여기로
-            # 귀결돼 readiness 축의 메타 미상 차단보다 우선한다(계층3 동형).
             return ACCOUNT_STATUS_UNAVAILABLE_REASON
 
-        # readiness 축(G9) — status 축 통과 시에만 평가(둘 중 하나라도 막으면 차단).
         broker_type = getattr(fetched, "broker_type", None)
         trading_mode = getattr(fetched, "trading_mode", None)
         if not isinstance(broker_type, str) or trading_mode is None:
@@ -312,7 +287,6 @@ class VirtualExecutor:
         )
         from ante.eventbus.events import OrderFailedEvent
 
-        # G6 발행 + error_code 부여 대상 gate 차단 사유(전 계층 통일 토큰 SSOT).
         gate_reasons = (
             ACCOUNT_NOT_READY_REASON,
             ACCOUNT_SUSPENDED_REASON,
@@ -328,14 +302,9 @@ class VirtualExecutor:
                 symbol=event.symbol,
                 side=event.side,
                 quantity=event.quantity,
-                # G8: 0원 체결 금지의 짝 — 실패 종결 OrderFailedEvent.price 는
-                # 체결가가 아니라 known 명시가(없으면 0.0)일 뿐, fill 은 발생하지
-                # 않는다.
                 price=event.price or 0.0,
                 order_type=event.order_type,
                 error_message=error_message,
-                # gate 차단(not_ready/suspended/status_unavailable)이면 해당 토큰을
-                # error_code 로 보존한다(gateway 계층3 error_code 와 대칭).
                 error_code=(error_message if is_gate_block else ""),
                 exchange=event.exchange,
             )
@@ -346,8 +315,6 @@ class VirtualExecutor:
                     account_id=event.account_id,
                     reason=error_message,
                     side=getattr(event, "side", ""),
-                    # OrderApprovedEvent 는 reason 필드가 없어 청산 marker 를
-                    # 운반하지 못하므로 generic 문구다(청산은 상류 계층1 차단).
                     is_liquidation=is_liquidation_reason(getattr(event, "reason", "")),
                 )
             )
@@ -362,31 +329,13 @@ class VirtualExecutor:
         if not isinstance(event, OrderApprovedEvent):
             return
 
-        # 등록 단계의 stop / stop_limit 주문은 가상 체결하지 않는다.
-        # StopOrderManager가 trigger 시 변환된 OrderRequestEvent를 발행하면
-        # 그 변환 주문이 일반 limit/market로 다시 RuleEngine → Treasury →
-        # OrderApprovedEvent 경로를 타고 들어와 정상 체결된다.
         if event.order_type in ("stop", "stop_limit"):
             return
 
         portfolio = self._portfolios.get(event.bot_id)
         if portfolio is None:
-            return  # live 봇의 주문 → 무시 (APIGateway가 처리)
+            return
 
-        # ── #2398 deterministic virtual-routing 마커(메타 실패 코너 defense-in-depth) ─
-        # VirtualExecutor 는 OrderApprovedEvent 를 ``_ORDER_APPROVED_PRIORITY``(=60)
-        # 로 구독해 gateway(priority=50)보다 **구독 순서와 무관하게 항상 먼저**
-        # 실행된다(EventBus priority 내림차순 디스패치, bus.py:46). 자신이
-        # **소유**(portfolio 존재 = virtual 봇)한 주문에 마커를 set 하면 후속 gateway
-        # 핸들러가 이를 신뢰할 수 있다(#1331 ``_consumed`` 선례 = frozen dataclass 에
-        # ``object.__setattr__``). gateway 의 공통 라우팅은 account 메타 기반
-        # non-LIVE silent skip 이지만(Fix A), gateway 의 메타 fetch 가 실패하는
-        # 잔여 코너에서 gateway 는 이 마커를 보고 skip 하여 동일 order_id 에 대한
-        # terminal 중복(strategy on_order_update / TradeRecorder 이중 처리)을 막는다.
-        # account_service.get 일시 실패로 G9/G8 실패 종결이 나도 마커가 먼저 set
-        # 되므로 gateway 메타 실패 fail-closed 경로와 겹쳐 중복 terminal 이 나지
-        # 않는다. stop/stop_limit 은 위에서 marker 없이 early-return 하여 gateway
-        # StopOrderManager 라우팅을 그대로 보존한다(virtual stop 경로 불변).
         object.__setattr__(event, "_virtual_handled", True)
 
         order_id = event.order_id
@@ -396,31 +345,14 @@ class VirtualExecutor:
         quantity = event.quantity
         order_type = event.order_type
 
-        # ── #2398 G9 + G7: virtual 경로 계층3-equivalent 최종 backstop ─────────
-        # 위치: stop/stop_limit·portfolio 필터·마커 set 직후. gateway 계층3 와
-        # **대칭**으로 단일 fresh fetch 에서 status(SUSPENDED) + readiness 를 함께
-        # 재확인한다(attempt5). 차단 사유(account_suspended/account_status_unavailable/
-        # account_not_ready)면 OrderFailedEvent(bot_id/order_id/account_id 보존) 종결
-        # + fill 금지(apply_fill/OrderFilledEvent 도달 차단) + G6 알림 1회. APIGateway
-        # 가 virtual 을 silent skip 하므로 SUSPENDED in-flight 차단의 최종 backstop 은
-        # 여기다(D-ACC-09 §8). fail-closed(G2): registry/account_service 미주입·조회
-        # 예외 = 차단. 매 이벤트 시점 fetch/registry 조회(상태 캐시 금지, G5).
         blocked_reason = await self._gate_blocked_reason(account_id)
         if blocked_reason is not None:
             await self._fail_order(event, error_message=blocked_reason)
             return
 
-        # 체결가 계산
         if order_type == "limit" and event.price is not None:
             fill_price = event.price
         else:
-            # market 주문: 현재가 기반 + 슬리피지.
-            # #2398 G8: broker 장애 중 가격 조회 실패가 0원 체결로 이어지지 않도록
-            # ``event.price or 0.0`` 폴백을 제거한다. 가격 조회 실패 또는 gateway
-            # 부재 + event.price 부재 시 OrderFailedEvent 로 종결한다(0원 체결 금지).
-            # 이 지점은 OrderApprovedEvent 이후라 시장가 매수 reserve 가 잡혀 있을
-            # 수 있고 Treasury 는 reserve 를 **OrderFailedEvent 로만** 해제하므로,
-            # OrderRejectedEvent/예외로 끝내면 reserve 가 고착된다(계층3 정합 동일).
             current_price: float | None = None
             if self._gateway:
                 try:
@@ -431,7 +363,6 @@ class VirtualExecutor:
                     logger.warning("현재가 조회 실패: %s — 주문 실패 종결", symbol)
                     current_price = None
             elif event.price is not None:
-                # gateway 부재이지만 명시 가격이 있으면(예: limit 외 명시) 그대로 사용.
                 current_price = event.price
 
             if current_price is None or current_price <= 0:
@@ -454,22 +385,11 @@ class VirtualExecutor:
             else:
                 fill_price = current_price
 
-        # 수수료 계산
         trade_amount = fill_price * quantity
         commission = self._commission_info.calculate(side, trade_amount)
 
-        # 가상 체결: 포지션/잔고 업데이트
         portfolio.apply_fill(symbol, side, quantity, fill_price, commission)
 
-        # OrderFilledEvent 발행.
-        #
-        # #1949 fill_dedup_key 빈키 정책: VirtualProvider 는 가상 체결을 즉시 1회
-        # 직접 발행하는 경로로, FillApplier/OrderTracker(CAS) 와 outbox 를 거치지
-        # 않는다. 따라서 결정적 fill_dedup_key(= order_id:confirmed_cumulative)의
-        # 산출 기반(CAS 확정 누적값)이 없다. at-least-once 재전달도 없으므로(outbox
-        # 미경유, 단발 in-memory 발행) dedup 대상이 아니다 → fill_dedup_key 는
-        # **빈키("")** 로 둔다. (default 이므로 명시 생략 가능하나, 정책을 코드로
-        # 못박기 위해 명시한다.) 소비자(#1957)는 빈키를 "dedup 비대상" 으로 본다.
         await self._eventbus.publish(
             OrderFilledEvent(
                 order_id=order_id,

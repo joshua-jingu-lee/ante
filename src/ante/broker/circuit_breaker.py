@@ -137,7 +137,6 @@ class CircuitBreaker:
             loop = asyncio.get_running_loop()
             loop.create_task(self._eventbus.publish(event))  # type: ignore[union-attr]
 
-            # 서킷 브레이커 차단/복구 알림
             if new_state == CircuitState.OPEN:
                 notification = NotificationEvent(
                     level="error",
@@ -161,5 +160,4 @@ class CircuitBreaker:
                 )
                 loop.create_task(self._eventbus.publish(notification))  # type: ignore[union-attr]
         except RuntimeError:
-            # 이벤트 루프가 없는 경우 (테스트 등) 무시
             pass

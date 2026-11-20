@@ -671,6 +671,47 @@ class TestParquetStore:
         assert dg_row["available_date"][0] is None
         assert dart_row["available_date"][0] == date(2025, 11, 14)
 
+    async def test_store_read_coerces_dtype_mismatch_across_partitions(
+        self, store, data_dir
+    ):
+        """같은 컬럼의 dtype 이 파티션마다 달라도(Int64 / Float64) raise 없이
+        supertype 으로 결합해 읽는다."""
+        from datetime import date
+
+        int_part = pl.DataFrame(
+            {
+                "date": [date(2025, 8, 14)],
+                "symbol": ["005930"],
+                "market_cap": pl.Series([480000000000], dtype=pl.Int64),
+                "source": ["data_go_kr"],
+            }
+        )
+        float_part = pl.DataFrame(
+            {
+                "date": [date(2025, 9, 30)],
+                "symbol": ["005930"],
+                "market_cap": pl.Series([490000000000.5], dtype=pl.Float64),
+                "source": ["data_go_kr"],
+            }
+        )
+        store.write("005930", "krx", int_part, data_type="fundamental")
+        store.write("005930", "krx", float_part, data_type="fundamental")
+
+        files = sorted(
+            store.resolve_path("005930", "krx", data_type="fundamental").glob(
+                "*.parquet"
+            )
+        )
+        dtypes = {pl.read_parquet(f).schema["market_cap"] for f in files}
+        assert dtypes == {pl.Int64, pl.Float64}
+
+        result = store.read("005930", "krx", data_type="fundamental")
+        assert result.schema["market_cap"] == pl.Float64
+        assert sorted(result["market_cap"].to_list()) == [
+            480000000000.0,
+            490000000000.5,
+        ]
+
     async def test_read_strict_raises_on_corrupt_partition(self, store, data_dir):
         """strict=True면 손상 파티션을 만나는 즉시 ParquetReadError를 raise(#2095).
 

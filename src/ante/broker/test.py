@@ -22,14 +22,12 @@ from ante.broker.models import CommissionInfo
 
 logger = logging.getLogger(__name__)
 
-# KRX 하루 거래 시간: 09:00~15:30 = 6.5시간 = 23,400초
 KRX_TRADING_SECONDS = 23_400
 
-# ── 슬리피지/부분 체결 기본값 ────────────────────────────────
-_SLIPPAGE_MIN = 0.001  # 0.1%
-_SLIPPAGE_MAX = 0.003  # 0.3%
-_PARTIAL_FILL_THRESHOLD = 100  # 이 수량 이상이면 부분 체결 확률 적용
-_PARTIAL_FILL_PROBABILITY = 0.3  # 부분 체결 발생 확률
+_SLIPPAGE_MIN = 0.001
+_SLIPPAGE_MAX = 0.003
+_PARTIAL_FILL_THRESHOLD = 100
+_PARTIAL_FILL_PROBABILITY = 0.3
 _PARTIAL_FILL_RATIO_MIN = 0.3
 _PARTIAL_FILL_RATIO_MAX = 0.9
 
@@ -41,10 +39,9 @@ class StockPreset:
     symbol: str
     name: str
     base_price: float
-    daily_vol: float  # 일별 변동성 (0.018 = 1.8%)
+    daily_vol: float
 
 
-# 가상 종목 프리셋 6종
 VIRTUAL_STOCK_PRESETS: dict[str, StockPreset] = {
     "000001": StockPreset("000001", "알파전자", 72_000, 0.018),
     "000002": StockPreset("000002", "베타반도체", 160_000, 0.025),
@@ -133,12 +130,10 @@ class PriceSimulator:
         current = self._prices[symbol]
         sigma = self._tick_vols[symbol]
 
-        # GBM: dS = S * σ * dW  (drift ≈ 0 for tick-level)
         z = self._rng.gauss(0, 1)
         log_return = sigma * z
         new_price = current * math.exp(log_return)
 
-        # 최소 가격 보장 (1 호가 단위 이상)
         new_price = max(new_price, _tick_size(new_price))
 
         rounded = tick_round(new_price)
@@ -173,9 +168,6 @@ class PriceSimulator:
         return dict(self._presets)
 
 
-# ── TestBrokerAdapter 내부 모델 ──────────────────────────────
-
-
 @dataclass
 class _TestPosition:
     """인메모리 가상 포지션."""
@@ -196,11 +188,8 @@ class _TestOrder:
     filled_quantity: float
     price: float
     order_type: str
-    status: str  # "pending" | "filled" | "partially_filled" | "cancelled"
+    status: str
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-# ── TestBrokerAdapter ────────────────────────────────────────
 
 
 class TestBrokerAdapter(BrokerAdapter):
@@ -229,22 +218,17 @@ class TestBrokerAdapter(BrokerAdapter):
         self._initial_cash: float = config.get("initial_cash", 100_000_000.0)
         self._tick_interval: float = config.get("tick_interval", 1.0)
 
-        # 시뮬레이터
         self._simulator = PriceSimulator(seed=self._seed)
         self._rng = random.Random(self._seed)
 
-        # 인메모리 상태
         self._cash: float = self._initial_cash
         self._positions: dict[str, _TestPosition] = {}
         self._orders: dict[str, _TestOrder] = {}
 
-        # 수수료 (buy/sell 분리)
         self._commission = CommissionInfo(
             buy_commission_rate=config.get("buy_commission_rate", 0.0),
             sell_commission_rate=config.get("sell_commission_rate", 0.0),
         )
-
-    # ── 연결 ──────────────────────────────────────────────
 
     async def connect(self) -> None:
         """Test 브로커 연결 (항상 성공). 멱등(#2372): 이미 연결됐으면 no-op."""
@@ -262,13 +246,9 @@ class TestBrokerAdapter(BrokerAdapter):
         self.is_connected = False
         logger.info("Test Broker 연결 해제")
 
-    # ── 시세 조회 ─────────────────────────────────────────
-
     async def get_current_price(self, symbol: str) -> float:
         """현재가 조회 — 매 호출마다 GBM 변동 적용."""
         return self._simulator.tick(symbol)
-
-    # ── 계좌/포지션 ───────────────────────────────────────
 
     async def get_account_balance(self) -> dict[str, float]:
         """가상 계좌 잔고 조회."""
@@ -323,8 +303,6 @@ class TestBrokerAdapter(BrokerAdapter):
         """증권사 실제 보유 잔고 (대사용) — get_positions() 위임."""
         return await self.get_positions()
 
-    # ── 주문/체결 ─────────────────────────────────────────
-
     async def place_order(
         self,
         symbol: str,
@@ -347,11 +325,8 @@ class TestBrokerAdapter(BrokerAdapter):
         order_id = str(uuid.uuid4())[:8]
         current_price = self._simulator.get_price(symbol)
 
-        # 체결 가격 결정
         if order_type == "limit" and price is not None:
-            # 지정가: 매수 시 현재가 <= 지정가여야 체결, 매도 시 현재가 >= 지정가
             if side == "buy" and current_price > price:
-                # 지정가 미도달 → 미체결 보류
                 order = _TestOrder(
                     order_id=order_id,
                     symbol=symbol,
@@ -397,13 +372,10 @@ class TestBrokerAdapter(BrokerAdapter):
                 return order_id
             exec_price = tick_round(price)
         else:
-            # 시장가: 슬리피지 적용
             exec_price = self._apply_slippage(current_price, side)
 
-        # 체결 수량 결정 (부분 체결 확률)
         fill_qty = self._calculate_fill_quantity(quantity)
 
-        # 잔고 검증
         if side == "buy":
             required = fill_qty * exec_price
             if required > self._cash:
@@ -416,7 +388,6 @@ class TestBrokerAdapter(BrokerAdapter):
                 msg = f"보유 수량 부족: {symbol} (보유: {available}, 매도: {fill_qty})"
                 raise BrokerError(msg)
 
-        # 주문 생성
         order = _TestOrder(
             order_id=order_id,
             symbol=symbol,
@@ -429,7 +400,6 @@ class TestBrokerAdapter(BrokerAdapter):
         )
         self._orders[order_id] = order
 
-        # 체결 실행
         self._execute_fill(order, fill_qty, exec_price)
 
         logger.info(
@@ -496,8 +466,6 @@ class TestBrokerAdapter(BrokerAdapter):
                 results.append(await self.get_order_status(order.order_id))
         return results
 
-    # ── 이력/마스터 ───────────────────────────────────────
-
     async def get_order_history(
         self,
         from_date: str | None = None,
@@ -533,13 +501,9 @@ class TestBrokerAdapter(BrokerAdapter):
             for preset in self._simulator.presets.values()
         ]
 
-    # ── 수수료 ────────────────────────────────────────────
-
     def get_commission_info(self) -> CommissionInfo:
         """수수료율 정보 (KIS 동일: 0.015%, 매도세 0.23%)."""
         return self._commission
-
-    # ── 내부 헬퍼 ─────────────────────────────────────────
 
     def _apply_slippage(self, price: float, side: str) -> float:
         """슬리피지 적용 — 매수 +0.1~0.3%, 매도 -0.1~0.3%."""
@@ -574,7 +538,7 @@ class TestBrokerAdapter(BrokerAdapter):
         if order.side == "buy":
             self._cash -= filled_value + commission
             self._update_position_buy(order.symbol, fill_qty, exec_price)
-        else:  # sell
+        else:
             self._cash += filled_value - commission
             self._update_position_sell(order.symbol, fill_qty)
 

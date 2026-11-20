@@ -25,20 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Treasury transaction type vocabulary (code SSOT).
-#
-# 5-value vocabulary, drift-checked against:
-#   - docs/specs/treasury/06-database-schema.md transaction_type 주석
-#
-# 의미:
-#   - allocate            : 봇에 예산 할당 (Treasury.allocate)
-#   - deallocate          : 봇에서 예산 회수 (Treasury.deallocate)
-#   - release             : 봇 삭제 시 할당 예산 전액 환수 (Treasury.release_budget)
-#   - fill                : 주문 체결로 인한 자금 이동 기록 (_on_order_filled)
-#   - bot_stopped_release : 봇 중지 시 잔여 예약 자금 환수 (_on_bot_stopped)
-#
-# 새 값 추가 시 spec 동시 갱신과 drift regression 테스트
-# (tests/unit/test_treasury_transaction_vocabulary.py) 통과가 필요하다.
 TransactionType = Literal[
     "allocate",
     "deallocate",
@@ -112,7 +98,6 @@ CREATE INDEX IF NOT EXISTS idx_treasury_transactions_account
     ON treasury_transactions(account_id);
 """
 
-# Legacy compatibility: old dev DB may lack account_id. Do not add fallback default.
 TREASURY_MIGRATION_V2 = """
 ALTER TABLE bot_budgets ADD COLUMN account_id TEXT;
 """
@@ -121,7 +106,6 @@ TREASURY_TRANSACTIONS_MIGRATION = """
 ALTER TABLE treasury_transactions ADD COLUMN account_id TEXT;
 """
 
-# treasury_state에 평가액/매입액 필드 추가 마이그레이션
 _STATE_MIGRATION_COLUMNS = [
     ("purchase_amount", "REAL NOT NULL DEFAULT 0"),
     ("eval_amount", "REAL NOT NULL DEFAULT 0"),
@@ -130,7 +114,6 @@ _STATE_MIGRATION_COLUMNS = [
     ("external_eval_amount", "REAL NOT NULL DEFAULT 0"),
 ]
 
-# daily_snapshots 성과 필드 추가 마이그레이션
 _SNAPSHOT_MIGRATION_COLUMNS = [
     ("total_asset", "REAL NOT NULL DEFAULT 0"),
     ("unallocated", "REAL NOT NULL DEFAULT 0"),
@@ -143,13 +126,8 @@ _SNAPSHOT_MIGRATION_COLUMNS = [
     ("unrealized_pnl", "REAL DEFAULT 0.0"),
 ]
 
-# 5년 초과 스냅샷 자동 삭제 기준
 _SNAPSHOT_RETENTION_DAYS = 365 * 5
 
-# 계좌 대표 매수가능액 probe 종목 (#2384).
-# Live 동기화는 종목 무관한 미수없는 매수가능금액(nrcvb_buy_amt)을 얻기 위해
-# 항시 거래되는 유효 국내 종목 코드로 get_buyable(시장가) probe를 cycle당 1회
-# 호출한다. config override는 향후 옵션(기본 하드코딩).
 _PURCHASABLE_PROBE_SYMBOL = "005930"
 
 
@@ -183,28 +161,10 @@ class Treasury:
         self._currency = currency
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
-        # 시장가 매수 reserve buffer (#1333). Account-level Treasury reserve
-        # policy로, broker_config가 아니라 ``Account.market_order_reserve_buffer_rate``
-        # 에서 주입된다. ``_on_order_validated``의 market buy + price=None
-        # 분기에서만 사용한다.
         self._market_order_reserve_buffer_rate = market_order_reserve_buffer_rate
-        # 시장가 매수 reserve estimate를 위한 account-scoped 현재가 resolver
-        # (#1333). 기존 ``start_sync(price_resolver=...)``의 자산 평가 sync
-        # resolver와 **별도** 객체이며, ``_init_gateway()`` 끝에서
-        # ``set_order_reserve_price_resolver``로 후속 주입된다.
         self._order_reserve_price_resolver = order_reserve_price_resolver
         self._bot_status_checker = bot_status_checker
-        # #1947: 부분체결 비례 정산을 위한 OrderTracker 참조 (read-only 조회).
-        # ``_on_order_filled`` buy 분기에서 order_id 로 ordered_qty /
-        # recorded_filled_qty 를 조회해 terminal(전량 체결) 판정을 한다.
-        # None 이면(미주입 또는 VirtualProvider 직접 full-fill 등 tracker 부재
-        # 주문) buy 정산은 기존 full-fill pop-once semantics 로 fallback 한다.
         self._order_tracker = order_tracker
-        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층2) reader.
-        # 미주입(None)이면 fail-closed — gate 가 reserve 직전 active-order 를
-        # 차단한다(G2). broker_type/trading_mode 는 TreasuryManager 가 account
-        # 메타에서 주입한다(면제 매트릭스 판정용). trading_mode 미주입(None)이면
-        # VIRTUAL 디폴트로 본다.
         self._runtime_readiness = runtime_readiness
         self._gate_broker_type = broker_type
         if trading_mode is None:
@@ -223,15 +183,9 @@ class Treasury:
         self._external_eval_amount: float = 0.0
         self._budgets: dict[str, BotBudget] = {}
         self._unallocated: float = 0.0
-        # order_id -> (bot_id, remaining_reserved).
-        # #1947: 두번째 항은 주문의 **잔여 예약**(아직 정산되지 않은 예약 자금)이다.
-        # ``reserve_for_order`` 에서 예약 총액 R 로 초기화되고, 매수 부분체결마다
-        # 그 fill 이 커버한 만큼 감소한다. 주문이 terminal(전량 체결/취소/실패/봇중지)
-        # 에 도달하면 잔여 예약을 budget 으로 회수하고 entry 를 제거한다.
         self._reservations: dict[str, tuple[str, float]] = {}
         self._sync_task: asyncio.Task[None] | None = None
 
-        # KIS 계좌 메타 정보 (broker 연결 후 set_account_info로 설정)
         self._account_number: str = ""
         self._is_demo_trading: bool = False
         self._last_synced_at: datetime | None = None
@@ -256,28 +210,24 @@ class Treasury:
         """DB 스키마 생성 및 마이그레이션."""
         await self._db.execute_script(TREASURY_SCHEMA)
 
-        # 마이그레이션: bot_budgets에 account_id 컬럼 추가
         try:
             await self._db.execute_script(TREASURY_MIGRATION_V2)
         except Exception:
-            pass  # 이미 컬럼이 존재하면 무시
+            pass
 
-        # 마이그레이션: treasury_transactions에 account_id 컬럼 추가
         try:
             await self._db.execute_script(TREASURY_TRANSACTIONS_MIGRATION)
         except Exception:
-            pass  # 이미 컬럼이 존재하면 무시
+            pass
 
-        # 마이그레이션: treasury_state 평가액/매입액 필드 추가
         for col_name, col_def in _STATE_MIGRATION_COLUMNS:
             try:
                 await self._db.execute_script(
                     f"ALTER TABLE treasury_state ADD COLUMN {col_name} {col_def};"
                 )
             except Exception:
-                pass  # 이미 컬럼이 존재하면 무시
+                pass
 
-        # 마이그레이션: daily_snapshots 성과 필드 추가
         for col_name, col_def in _SNAPSHOT_MIGRATION_COLUMNS:
             try:
                 await self._db.execute_script(
@@ -285,7 +235,7 @@ class Treasury:
                     f"ADD COLUMN {col_name} {col_def};"
                 )
             except Exception:
-                pass  # 이미 컬럼이 존재하면 무시
+                pass
 
     def _subscribe_events(self) -> None:
         """EventBus 이벤트 구독."""
@@ -308,8 +258,6 @@ class Treasury:
         self._eventbus.subscribe(OrderFailedEvent, self._on_order_failed, priority=80)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_stopped, priority=80)
         self._eventbus.subscribe(DailyReportEvent, self._on_daily_report, priority=80)
-
-    # -- 계좌 잔고 -----------------------------------------------
 
     async def set_account_balance(self, balance: float) -> None:
         """계좌 잔고 설정. 미할당 자금을 자동 재계산.
@@ -418,8 +366,6 @@ class Treasury:
             sell_commission_rate,
         )
 
-    # -- 예산 조회 -----------------------------------------------
-
     def get_available(self, bot_id: str) -> float:
         """봇의 가용 예산 조회."""
         budget = self._budgets.get(bot_id)
@@ -432,8 +378,6 @@ class Treasury:
     def get_budget_sync(self, bot_id: str) -> BotBudget | None:
         """봇의 예산 상태 동기 조회 (인메모리). PortfolioView용."""
         return self._budgets.get(bot_id)
-
-    # -- 예산 할당/회수 ------------------------------------------
 
     def _check_bot_stopped(self, bot_id: str) -> None:
         """봇이 중지 상태인지 확인. 운용 중이면 BotNotStoppedError."""
@@ -557,10 +501,6 @@ class Treasury:
         """
         budget = self._budgets.pop(bot_id, None)
         if not budget:
-            # 인메모리에 없으면 DB에서 직접 조회 (서버 재시작 후 또는
-            # 봇 account_id와 Treasury account_id가 달라 로드되지 않은 경우)
-            # WAL 모드에서는 writer commit 후 reader가 즉시 볼 수 있으므로
-            # public API인 fetch_one(reader 커넥션)을 사용한다.
             row = await self._db.fetch_one(
                 "SELECT * FROM bot_budgets WHERE bot_id = ? AND account_id = ?",
                 (bot_id, self._account_id),
@@ -582,7 +522,6 @@ class Treasury:
         released = budget.allocated
         self._unallocated += released
 
-        # DB에서 budget 레코드 삭제
         await self._db.execute(
             "DELETE FROM bot_budgets WHERE bot_id = ?",
             (bot_id,),
@@ -592,7 +531,6 @@ class Treasury:
             bot_id, "release", released, "봇 삭제에 의한 예산 전액 환수"
         )
 
-        # 해당 봇의 미체결 예약도 정리
         pending_orders = [
             oid for oid, (bid, _) in self._reservations.items() if bid == bot_id
         ]
@@ -638,18 +576,10 @@ class Treasury:
             return
 
         if diff > 0:
-            # 증액
             if self._unallocated < diff:
                 raise InsufficientFundsError(
                     f"미할당 잔액 부족: 필요 {diff:,.0f}, 가용 {self._unallocated:,.0f}"
                 )
-            # #1809: ``Treasury.allocate`` 가 reject 시 typed exception 을
-            # raise 하도록 변경되었다(``bool=False`` → typed raise). 기존
-            # ``update_budget`` 호출자 (예: ``BotManager.update_budget`` /
-            # CLI ``bot update`` budget 변경) 가 의존하는 ``InsufficientFunds
-            # Error`` 메시지/타입 계약은 그대로 유지하기 위해 typed reject
-            # exception 을 catch 해서 동일 ``InsufficientFundsError`` 로 변환
-            # 한다 (behavior-preserving — 외부 caller invariant 보존).
             try:
                 await self.allocate(bot_id, diff)
             except TreasuryError as exc:
@@ -657,7 +587,6 @@ class Treasury:
                     f"예산 할당 실패: bot_id={bot_id}, amount={diff} ({exc})"
                 ) from exc
         else:
-            # 감액
             decrease = abs(diff)
             try:
                 await self.deallocate(bot_id, decrease)
@@ -677,8 +606,6 @@ class Treasury:
             f"{diff:,.0f}",
         )
 
-    # -- 주문 자금 예약/해제 -------------------------------------
-
     async def reserve_for_order(
         self, bot_id: str, order_id: str, amount: float
     ) -> bool:
@@ -693,8 +620,6 @@ class Treasury:
         budget.available -= amount
         budget.reserved += amount
         budget.last_updated = datetime.now(UTC)
-        # #1947: 잔여 예약(remaining_reserved)을 예약 총액 R(=amount)로 초기화한다.
-        # 이후 매수 부분체결마다 그 fill 의 covered 만큼 감소한다.
         self._reservations[order_id] = (bot_id, amount)
 
         await self._save_budget(budget)
@@ -732,8 +657,6 @@ class Treasury:
             oid: amt for oid, (bid, amt) in self._reservations.items() if bid == bot_id
         }
 
-    # -- 이벤트 핸들러 -------------------------------------------
-
     def _is_my_event(self, event: object) -> bool:
         """이벤트가 이 Treasury의 계좌에 해당하는지 확인.
 
@@ -765,14 +688,6 @@ class Treasury:
         if not self._is_my_event(event):
             return
 
-        # ── #2398 계층2: active-order readiness gate (reserve 직전) ────────────
-        # 위치: ``_is_my_event`` 직후, stop/stop_limit 면제 분기 **前**(spec
-        # 05-treasury-manager.md:66). 계층1(RuleEngine) 통과 후 reserve 사이의
-        # 회복/저하 race 에서 reserve 를 보호한다. not_ready 면 ``reserve_for_order``
-        # 를 호출하지 않고 OrderRejectedEvent 종결 — reserve 미실행이라 누수 없음
-        # (G3). 매 이벤트 시점 registry 조회(상태 캐시 금지, G5). fail-closed(G2):
-        # registry 미주입·조회 예외 = 차단. SELL 도 차단 + G6 NotificationEvent
-        # 1회(spec 05:73, BUY/SELL 무관).
         from ante.account.gate import (
             active_trading_blocked,
             build_not_ready_notification,
@@ -817,12 +732,6 @@ class Treasury:
             )
             return
 
-        # 매수 stop / stop_limit 주문은 등록 시점에 자금을 잠그지 않는다 (#1337).
-        # 정책: 한국 증권사 예약주문 표준과 동일하게, 트리거가 발동되어 일반
-        # 매수 주문(market/limit)으로 변환된 시점에야 비로소 정상 reserve 절차를
-        # 거친다. 등록 단계에서는 가격 조건만 StopOrderManager에 등록되고,
-        # 자금은 사용자가 같은 자금으로 다른 매수 주문을 자유롭게 걸 수 있도록
-        # 잠그지 않는다. 취소/만료 시에도 잠근 게 없으므로 별도 해제 불필요.
         if event.side == "buy" and event.order_type in ("stop", "stop_limit"):
             await self._eventbus.publish(
                 OrderApprovedEvent(
@@ -842,13 +751,6 @@ class Treasury:
             )
             return
 
-        # #1333: 매수 + 시장가 + price 부재 시그니처는 즉시 실행 주문이므로
-        # 제출 전에 자금을 잠가야 한다 (stop처럼 trigger 대기 X). resolver 가
-        # 주입돼 있으면 현재가를 조회해 reserve estimate 를 산정하고, 실패
-        # (resolver 미주입/예외)는 terminal ``market_buy_quote_unavailable``
-        # 거부로 종료한다 — 사용자 정책 사전 승인 + Plan v4.
-        # 분기 우선순위: #1337 (직전 stop/stop_limit) > #1333 (이 분기) >
-        # 기존 limit / market(price 있음) 분기.
         if event.side == "buy" and event.order_type == "market" and event.price is None:
             resolver = self._order_reserve_price_resolver
             if resolver is None:
@@ -890,12 +792,6 @@ class Treasury:
                 )
                 return
 
-            # Decimal 정밀도로 reserve 산정. ``OrderApprovedEvent.reserved_amount``
-            # 와 Treasury budget 의 float 경계에서만 ``float`` 로 변환한다 — 기존
-            # commission/budget float 계약과 일관됨.
-            #
-            # NaN/Inf/non-positive quote 는 ``Decimal(str(quote))`` 가 예외를 내지
-            # 않으므로 명시 거부 (#1333 P2 — Codex 브랜치 리뷰).
             if not (
                 isinstance(quote, int | float) and math.isfinite(quote) and quote > 0
             ):
@@ -998,10 +894,6 @@ class Treasury:
                     )
                     return
 
-                # Stop Condition: resolved quote 를 OrderApprovedEvent.price 에
-                # 절대 넣지 않는다 — quote 는 reserve estimate 이지 주문가가
-                # 아니다. price=None 그대로 유지해 broker adapter 가 시장가
-                # 주문으로 제출하게 한다.
                 await self._eventbus.publish(
                     OrderApprovedEvent(
                         order_id=event.order_id,
@@ -1049,9 +941,6 @@ class Treasury:
         total_reserve = estimated_cost + commission_estimate
 
         if event.side == "buy":
-            # Guard 2: quote는 있으나 reserve 금액이 비양수인 경계 케이스
-            # (예: quantity=0). reserve_for_order는 amount > 0을 요구하므로
-            # ValueError로 빠지지 않도록 사전에 거부한다.
             if total_reserve <= 0:
                 await self._eventbus.publish(
                     OrderRejectedEvent(
@@ -1075,9 +964,6 @@ class Treasury:
                 )
                 return
 
-            # 안전망: reserve_for_order 또는 후속 publish에서 예외가 나도
-            # terminal OrderRejectedEvent로 변환한다. EventBus.publish는
-            # 핸들러 예외를 swallow하므로 핸들러 안에서 막아야 한다.
             try:
                 success = await self.reserve_for_order(
                     event.bot_id, event.order_id, total_reserve
@@ -1144,7 +1030,6 @@ class Treasury:
                 )
                 return
 
-        # Sell-side: 자금 예약 없이 즉시 승인.
         await self._eventbus.publish(
             OrderApprovedEvent(
                 order_id=event.order_id,
@@ -1184,19 +1069,10 @@ class Treasury:
         if not budget:
             return
 
-        # 빈키: dedup 비대상 — 현행 정산 그대로 (트랜잭션·snapshot 없이).
         if not event.fill_dedup_key:
             await self._apply_fill_settlement(event, budget)
             return
 
-        # 비빈키: dedup-insert + 정산을 단일 트랜잭션으로 원자 결합.
-        #
-        # split-brain 방지(R1-2): settle 본문(``_settle_buy_fill`` 등)이
-        # ``_budgets[bot_id]``/``_reservations[order_id]`` 를 **즉시 mutate**
-        # 하므로, 트랜잭션 rollback 시 DB 는 원복돼도 메모리만 변경되는 split 이
-        # 생긴다. 진입 **전**에 이 이벤트가 touch 하는 항목(단일 bot budget +
-        # 매수 시 단일 order reservation)을 snapshot(값 copy + 존재 플래그)하고,
-        # rollback 경로에서 복원한다.
         bot_id = event.bot_id
         order_id = event.order_id
         budget_snapshot = replace(budget)
@@ -1207,10 +1083,6 @@ class Treasury:
 
         try:
             async with self._db.transaction():
-                # dedup-insert 를 **가장 먼저** (R1-3): RETURNING 으로 신규 삽입
-                # 여부를 원자적으로 판정한다. ``OR IGNORE`` 충돌(이미 처리됨)이면
-                # 행이 반환되지 않아 settle 을 호출하지 않고 early-return →
-                # terminal 재전달의 예약 회수/정산 재실행 차단.
                 inserted = await self._db.execute_fetch_one(
                     """INSERT OR IGNORE INTO treasury_fill_dedup
                        (fill_dedup_key, bot_id, account_id)
@@ -1219,21 +1091,13 @@ class Treasury:
                     (event.fill_dedup_key, bot_id, self._account_id),
                 )
                 if inserted is None:
-                    # 이미 처리된 fill — 정산 0회 추가. 메모리 미변경이라 복원
-                    # 불필요(COMMIT 으로 dedup row no-op 확정).
                     return
-                # 신규 키: 정산 본문(메모리 + DB write)을 같은 트랜잭션에서.
                 await self._apply_fill_settlement(event, budget)
         except BaseException:
-            # rollback 발생 — 트랜잭션 진입 후 변경된 메모리를 snapshot 으로 복원.
-            # ``_apply_fill_settlement`` 가 부분 진행 후 예외를 던졌을 수 있으므로
-            # budget 값과 reservation 존재 여부를 진입 전 상태로 되돌린다.
             self._restore_budget(budget, budget_snapshot)
             if reservation_present:
-                # 기존 엔트리: 값 복원 (정산이 갱신/제거했을 수 있음).
                 self._reservations[order_id] = reservation_snapshot  # type: ignore[assignment]
             else:
-                # 원래 없던 엔트리: pop 으로 제거 (partial-restore hole 방지).
                 self._reservations.pop(order_id, None)
             raise
 
@@ -1316,11 +1180,9 @@ class Treasury:
             record = await self._order_tracker.get(order_id)
 
         if record is None:
-            # Fallback (R1-2): tracker 부재 주문 — 단일 full-fill 가정 pop-once.
             self._settle_buy_full_fill(event, budget, actual_cost)
             return
 
-        # Per-fill 비례 정산 (R1-1).
         entry = self._reservations.get(order_id)
         remaining = entry[1] if entry else 0.0
 
@@ -1331,9 +1193,6 @@ class Treasury:
 
         shortfall = actual_cost - covered
         if shortfall > 0:
-            # 체결가가 잔여 예약분을 초과 (시장가 가격 변동 등). 초과분을
-            # available 에서 추가 차감한다 (#1333 동작 보존). available 이 음수가
-            # 될 수 있으나 정상 상태가 아니며 후속 reserve 거부로 자연 수렴한다.
             budget.available -= shortfall
             logger.warning(
                 "market_order_reserve_shortfall: bot=%s order=%s "
@@ -1348,13 +1207,11 @@ class Treasury:
             record.recorded_filled_qty >= record.ordered_qty
         )
         if terminal:
-            # 전량 체결 — 잔여 예약(미체결분 버퍼)을 available 로 회수.
             if remaining > 0:
                 budget.reserved = max(0.0, budget.reserved - remaining)
                 budget.available += remaining
             self._reservations.pop(order_id, None)
         elif entry is not None:
-            # 중간 partial — 잔여 예약을 갱신해 다음 fill 정산에 이월.
             self._reservations[order_id] = (entry[0], remaining)
 
     def _settle_buy_full_fill(
@@ -1372,12 +1229,8 @@ class Treasury:
         budget.spent += actual_cost
         surplus = reserved_amount - actual_cost
         if surplus > 0:
-            # 체결가가 reserve 보다 낮음 — 잔여 reserve 를 available 로 환수.
             budget.available += surplus
         elif surplus < 0:
-            # 체결가가 reserve 보다 높음 (시장가 매수의 가격 변동 등).
-            # 초과분을 available 에서 추가 차감한다 (#1333). available 이 음수가
-            # 될 수 있으나 정상 상태가 아니며 후속 reserve 거부로 자연 수렴한다.
             extra_cost = -surplus
             budget.available -= extra_cost
             logger.warning(
@@ -1460,8 +1313,6 @@ class Treasury:
             len(pending),
             f"{total_released:,.0f}",
         )
-
-    # -- 잔고 동기화 ---------------------------------------------
 
     def start_sync(
         self,
@@ -1546,26 +1397,14 @@ class Treasury:
         """한 번의 잔고 동기화 수행 (Live 모드)."""
         from ante.eventbus.events import BalanceSyncedEvent
 
-        # 1) KIS 계좌 잔고 (output2)
         balance_data = await broker.get_account_balance()
         await self.sync_balance(balance_data)
 
-        # 1-1) 계좌 대표 매수가능액 주입 (#2384).
-        # purchasable_amount(주문가능액)의 SSOT는 get_buyable의 order_buyable_amount
-        # (inquire-psbl-order의 nrcvb_buy_amt)다. 대표 종목을 시장가로 cycle당 1회만
-        # probe해(모의 5req/min rate-limit 안전) _purchasable_amount에 단일 주입한다
-        # (BalanceSyncedEvent 발행 전). 실패 시 이전값을 0으로 덮지 않고 그대로
-        # 유지하며, 잘못된 매수가능액으로 BalanceSyncedEvent를 발행하지 않도록
-        # 예외를 재전파해 이번 cycle을 중단한다(상위 _run 루프가 "이전 값 유지"로
-        # 처리하고 다음 interval에 재시도)(#2384 G7).
         buyable = await broker.get_buyable(_PURCHASABLE_PROBE_SYMBOL)
         self._purchasable_amount = buyable.get(
             "order_buyable_amount", self._purchasable_amount
         )
 
-        # 2) KIS 보유종목 (output1) + Trade 내부 포지션 대조
-        # 자기 계좌 포지션만 조회: 단일 계좌 바인딩 인스턴스에서 cross-account
-        # 데이터가 섞이지 않도록 명시적으로 account_id 필터를 전달한다 (#1240).
         broker_positions = await broker.get_positions()
         internal_positions = await position_history.get_all_positions(
             account_id=self._account_id
@@ -1587,7 +1426,6 @@ class Treasury:
 
         self._last_synced_at = datetime.now(UTC)
 
-        # 3) 이벤트 발행
         await self._eventbus.publish(
             BalanceSyncedEvent(
                 account_id=self._account_id,
@@ -1618,7 +1456,6 @@ class Treasury:
         """
         from ante.eventbus.events import BalanceSyncedEvent
 
-        # 자기 계좌 포지션만 조회 (#1240).
         positions = await position_history.get_all_positions(
             account_id=self._account_id
         )
@@ -1648,7 +1485,6 @@ class Treasury:
 
         self._last_synced_at = datetime.now(UTC)
 
-        # 이벤트 발행
         await self._eventbus.publish(
             BalanceSyncedEvent(
                 account_id=self._account_id,
@@ -1688,13 +1524,10 @@ class Treasury:
             "total_profit_loss", self._total_profit_loss
         )
 
-        # 미할당 재계산
         total_allocated = sum(b.allocated for b in self._budgets.values())
         self._unallocated = self._account_balance - total_allocated
 
         await self._save_state()
-
-    # -- 모니터링 -------------------------------------------------
 
     def list_budgets(self) -> list[BotBudget]:
         """전체 봇 예산 목록 반환."""
@@ -1738,8 +1571,6 @@ class Treasury:
             "last_sync_time": self.last_sync_time,
         }
 
-    # -- DB 영속화 -----------------------------------------------
-
     async def load_from_db(self) -> None:
         """DB에서 자금 상태 복원 (테스트용 리로드 포함).
 
@@ -1751,7 +1582,6 @@ class Treasury:
 
     async def _load_from_db(self) -> None:
         """DB에서 자금 상태 복원."""
-        # 계좌별 상태 로드
         rows = await self._db.fetch_all(
             "SELECT * FROM treasury_state WHERE account_id = ?",
             (self._account_id,),
@@ -1771,7 +1601,6 @@ class Treasury:
                 datetime.fromisoformat(last_synced) if last_synced else None
             )
 
-        # 봇 예산 (계좌별 필터링)
         rows = await self._db.fetch_all(
             "SELECT * FROM bot_budgets WHERE account_id = ?",
             (self._account_id,),
@@ -1788,7 +1617,6 @@ class Treasury:
                 last_updated=datetime.fromisoformat(r["last_updated"]),
             )
 
-        # 미할당 재계산
         total_allocated = sum(b.allocated for b in self._budgets.values())
         self._unallocated = self._account_balance - total_allocated
 
@@ -1965,7 +1793,6 @@ class Treasury:
             ),
         )
 
-        # 오래된 스냅샷 자동 삭제
         await self._cleanup_old_snapshots()
 
         logger.info(

@@ -853,6 +853,176 @@ class TestBot:
             )
 
 
+# ── on_step ↔ on_external_signal 직렬화 lock ─────────
+
+_real_sleep = asyncio.sleep
+
+
+async def _spin(times: int = 20) -> None:
+    """이벤트 루프를 시간 경과 없이 ``times`` 번 양보한다."""
+    for _ in range(times):
+        await _real_sleep(0)
+
+
+class _LockProbeStrategy(Strategy):
+    """on_step/on_data 호출을 기록하고, on_data 는 gate 가 열릴 때까지 붙잡는다."""
+
+    meta = StrategyMeta(
+        name="lock_probe",
+        version="1.0.0",
+        description="test",
+        accepts_external_signals=True,
+    )
+    steps: list[object] = []
+    data_calls: list[object] = []
+    stepped: asyncio.Event | None = None
+    data_entered: asyncio.Event | None = None
+    data_gate: asyncio.Event | None = None
+
+    @classmethod
+    def reset(cls) -> None:
+        cls.steps = []
+        cls.data_calls = []
+        cls.stepped = asyncio.Event()
+        cls.data_entered = asyncio.Event()
+        cls.data_gate = asyncio.Event()
+        cls.data_gate.set()
+
+    async def on_step(self, context):
+        type(self).steps.append(self)
+        assert type(self).stepped is not None
+        type(self).stepped.set()
+        return []
+
+    async def on_data(self, data):
+        type(self).data_calls.append(self)
+        assert type(self).data_entered is not None
+        assert type(self).data_gate is not None
+        type(self).data_entered.set()
+        await type(self).data_gate.wait()
+        return []
+
+
+def _external_signal(bot_id: str = "bot1") -> object:
+    from ante.eventbus.events import ExternalSignalEvent
+
+    return ExternalSignalEvent(
+        account_id="acc-test",
+        bot_id=bot_id,
+        signal_id="sig-1",
+        symbol="005930",
+        action="buy",
+    )
+
+
+def _lock_probe_config() -> BotConfig:
+    return BotConfig(
+        bot_id="bot1",
+        strategy_id="lock_probe_v1.0.0",
+        interval_seconds=10,
+        account_id="acc-test",
+    )
+
+
+class TestBotSignalLock:
+    async def test_external_signal_waits_for_injected_lock(self, eventbus, ctx):
+        """주입된 signal_lock 이 잡혀 있으면 on_data 는 풀릴 때까지 기다린다."""
+        _LockProbeStrategy.reset()
+        shared = asyncio.Lock()
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=_LockProbeStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+            signal_lock=shared,
+        )
+        bot.strategy = _LockProbeStrategy(ctx=ctx)
+        bot.status = BotStatus.RUNNING
+
+        await shared.acquire()
+        task = asyncio.create_task(bot.on_external_signal(_external_signal()))
+        await _spin()
+        assert _LockProbeStrategy.data_calls == []
+        assert not task.done()
+
+        shared.release()
+        await asyncio.wait_for(task, timeout=5.0)
+        assert len(_LockProbeStrategy.data_calls) == 1
+
+    async def test_run_loop_step_waits_for_injected_lock(
+        self, eventbus, ctx, monkeypatch
+    ):
+        """on_step 은 signal_lock 안에서만 호출된다(lock 보유 중엔 시작하지 않는다)."""
+        _LockProbeStrategy.reset()
+
+        async def fake_sleep(delay):
+            if delay == 10:
+                bot.status = BotStatus.STOPPED
+            await _real_sleep(0)
+
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", fake_sleep)
+        shared = asyncio.Lock()
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=_LockProbeStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+            signal_lock=shared,
+        )
+        bot.strategy = _LockProbeStrategy(ctx=ctx)
+        bot.status = BotStatus.RUNNING
+
+        await shared.acquire()
+        loop_task = asyncio.create_task(bot._run_loop())
+        await _spin()
+        assert _LockProbeStrategy.steps == []
+
+        shared.release()
+        await asyncio.wait_for(loop_task, timeout=5.0)
+        assert len(_LockProbeStrategy.steps) == 1
+
+    async def test_interval_sleep_does_not_hold_lock(self, eventbus, ctx, monkeypatch):
+        """step 사이 interval 대기 중에는 lock 을 놓아 외부 시그널이 처리된다."""
+        _LockProbeStrategy.reset()
+        sleeping = asyncio.Event()
+        wake = asyncio.Event()
+        intervals: list[float] = []
+
+        async def fake_sleep(delay):
+            if delay == 10:
+                intervals.append(delay)
+                sleeping.set()
+                await wake.wait()
+                return
+            await _real_sleep(delay)
+
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", fake_sleep)
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=_LockProbeStrategy,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        bot.strategy = _LockProbeStrategy(ctx=ctx)
+        bot.status = BotStatus.RUNNING
+
+        loop_task = asyncio.create_task(bot._run_loop())
+        await asyncio.wait_for(sleeping.wait(), timeout=5.0)
+        assert len(_LockProbeStrategy.steps) == 1
+        assert intervals == [10]
+
+        signal_task = asyncio.create_task(bot.on_external_signal(_external_signal()))
+        await _spin()
+        try:
+            assert len(_LockProbeStrategy.data_calls) == 1
+            assert signal_task.done()
+        finally:
+            bot.status = BotStatus.STOPPED
+            wake.set()
+            await asyncio.wait_for(loop_task, timeout=5.0)
+            await asyncio.wait_for(signal_task, timeout=5.0)
+
+
 # ── BotManager ───────────────────────────────────
 
 
@@ -1371,6 +1541,82 @@ class TestBotManager:
 
         assert len(received) >= 1
         assert received[0].account_id == "acct-1"
+
+    async def test_duplicate_bot_id_raises_bot_already_exists(
+        self, manager, eventbus, ctx
+    ):
+        """같은 bot_id 로 다시 만들면 BotAlreadyExistsError(BOT_ALREADY_EXISTS)."""
+        from ante.bot.exceptions import BotAlreadyExistsError
+
+        config = BotConfig(bot_id="bot1", strategy_id="s1", account_id="acc-test")
+        await manager.create_bot(config, SimpleStrategy, ctx)
+        again = BotConfig(bot_id="bot1", strategy_id="s2", account_id="acc-test")
+        with pytest.raises(BotAlreadyExistsError) as exc_info:
+            await manager.create_bot(again, SimpleStrategy, ctx)
+        assert exc_info.value.code == "BOT_ALREADY_EXISTS"
+
+    async def test_load_from_db_propagates_corrupt_config_json(
+        self, manager, eventbus, db
+    ):
+        """config_json 파싱 실패는 행 건너뛰기로 삼키지 않고 그대로 전파된다."""
+        import json
+
+        await db.execute(
+            """INSERT INTO bots
+               (bot_id, name, strategy_id, account_id, config_json, status)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            ("corrupt-bot", "corrupt", "s1", "acc-test", "{not json", "created"),
+        )
+        manager2 = BotManager(eventbus=eventbus, db=db)
+        await manager2.initialize()
+        with pytest.raises(json.JSONDecodeError):
+            await manager2.load_from_db()
+
+    async def test_recreated_bot_shares_signal_lock_with_previous_instance(
+        self, manager, eventbus, ctx
+    ):
+        """같은 bot_id 로 다시 만든 봇은 이전 인스턴스와 같은 signal lock 을 쓴다.
+
+        이전 봇의 외부 시그널 처리(on_data)가 끝나기 전에는 새 봇의 on_step 이
+        시작하지 않는다.
+        """
+        _LockProbeStrategy.reset()
+        config = BotConfig(
+            bot_id="bot1",
+            strategy_id="lock_probe",
+            interval_seconds=999,
+            account_id="acc-test",
+        )
+        old = await manager.create_bot(config, _LockProbeStrategy, ctx)
+        await manager.start_bot("bot1")
+        assert _LockProbeStrategy.stepped is not None
+        await asyncio.wait_for(_LockProbeStrategy.stepped.wait(), timeout=5.0)
+        old_strategy = old.strategy
+
+        assert _LockProbeStrategy.data_gate is not None
+        assert _LockProbeStrategy.data_entered is not None
+        _LockProbeStrategy.data_gate.clear()
+        signal_task = asyncio.create_task(old.on_external_signal(_external_signal()))
+        await asyncio.wait_for(_LockProbeStrategy.data_entered.wait(), timeout=5.0)
+
+        await manager.delete_bot("bot1")
+        _LockProbeStrategy.stepped.clear()
+        new_config = BotConfig(
+            bot_id="bot1",
+            strategy_id="lock_probe",
+            interval_seconds=999,
+            account_id="acc-test",
+        )
+        new = await manager.create_bot(new_config, _LockProbeStrategy, ctx)
+        assert new is not old
+        await manager.start_bot("bot1")
+        await _spin()
+        assert [s for s in _LockProbeStrategy.steps if s is not old_strategy] == []
+
+        _LockProbeStrategy.data_gate.set()
+        await asyncio.wait_for(signal_task, timeout=5.0)
+        await asyncio.wait_for(_LockProbeStrategy.stepped.wait(), timeout=5.0)
+        assert [s for s in _LockProbeStrategy.steps if s is new.strategy] != []
 
 
 # ── Exchange 호환성 검증 (BotManager) ───────────────

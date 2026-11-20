@@ -24,10 +24,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Refs #2334 §14 (#2337): ExternalSignal metadata bound (비치명 drop). 외부
-# 에이전트가 거대 metadata 를 실어 publish 파이프라인을 부풀리는 경로를 막는다.
-# key-count/size 둘 중 하나라도 초과하면 ``{type:error}`` 후 publish 하지 않고
-# drop 한다(known-limitation — 정밀 byte 산정이 아닌 보수적 상한).
 SIGNAL_METADATA_MAX_KEYS = 64
 SIGNAL_METADATA_MAX_BYTES = 16_384
 
@@ -52,35 +48,19 @@ class SignalChannel:
         is_full: Callable[[], bool] | None = None,
         on_lagged: Callable[[], None] | None = None,
     ) -> None:
-        # 기존 위치/이름 인자(bot/eventbus/ctx/input_stream/output_stream)는
-        # 불변이다(4 테스트 + cli/commands/signal.py 의존). 신규 데몬 데이터플레인
-        # seam 은 keyword-only-with-default 로만 추가한다(#2337 백워드 호환).
         self._bot = bot
         self._eventbus = eventbus
         self._ctx = ctx
         self._input = input_stream or sys.stdin
         self._output = output_stream or sys.stdout
         self._running = False
-        # #1957: 체결 이벤트 bounded 멱등 가드. outbox at-least-once 재전달 시
-        # 같은 fill 의 중복 JSON write 를 억제한다(best-effort — 재기동/maxlen
-        # 초과는 known-limitation). 외부 에이전트는 payload 의 fill_dedup_key 로
-        # 자체 dedup 도 가능하다.
         self._fill_dedup_guard = FillDedupGuard()
 
-        # #2337 데몬 데이터플레인 seam:
-        # - ``_sink``: newline 없는 dict enqueue 콜백(데몬 writer_task 가 framing).
-        #   ``None`` 이면 legacy ``_write``(stdin/stdout, ``+'\n'``) 로 폴백한다.
-        # - ``_is_full``: out_queue full 여부(disconnect-laggard 게이트).
-        # - ``_on_lagged``: laggard 감지 시 teardown 트리거(call_soon 위임).
         self._sink = sink
         self._is_full = is_full
         self._on_lagged = on_lagged
-        # 데몬-위임 종료/회전 가드. ``_closed`` 는 stale-publish layer2(첫 줄
-        # no-op), ``_accepting`` 은 rotate admit-gate(``_handle_message``).
         self._closed = False
         self._accepting = True
-        # F2: read_task 가 실행 중인 in-flight publish task. close 오케스트레이터가
-        # grace 동안 await 후 read_task 만 cancel 하기 위해 추적한다.
         self._inflight: asyncio.Task[Any] | None = None
 
     def _write(self, data: dict[str, Any]) -> None:
@@ -202,7 +182,6 @@ class SignalChannel:
             for k, v in msg.items()
             if k not in ("type", "symbol", "side", "action", "reason", "confidence")
         }
-        # metadata bound(§14): key-count/size 초과 시 비치명 drop(publish 안 함).
         if len(metadata) > SIGNAL_METADATA_MAX_KEYS or (
             len(json.dumps(metadata, default=str).encode("utf-8"))
             > SIGNAL_METADATA_MAX_BYTES
@@ -228,11 +207,8 @@ class SignalChannel:
 
         self._inflight = asyncio.ensure_future(self._eventbus.publish(event))
         try:
-            # shield: read_task 가 cancel 돼도 inflight publish 는 계속 진행한다.
             await asyncio.shield(self._inflight)
         except asyncio.CancelledError:
-            # read_task cancel 이 여기로 전파돼도 inflight(별도 task)는 shield 로
-            # 보호되어 백그라운드 완료한다 — at-most-one trailing 보장.
             raise
         finally:
             self._inflight = None
@@ -269,8 +245,6 @@ class SignalChannel:
         except Exception as e:
             self._emit({"type": "error", "message": str(e)})
 
-    # ── EventBus 구독 (Ante → 외부 이벤트 전달) ──────
-
     def _subscribe_events(self) -> None:
         """체결/주문 상태 이벤트 구독."""
         from ante.eventbus.events import (
@@ -288,11 +262,6 @@ class SignalChannel:
         )
 
         self._eventbus.subscribe(OrderFilledEvent, self._on_fill)
-        # ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent`` — 외부 채널
-        # 구독자에게도 정정 완료(#2391)/거부 통보를 ``order_update`` 메시지로
-        # 전달한다. stop 주문 등록·발동·만료도 외부 채널에 동일한 ``{type:
-        # "order_update", ...}`` shape 로 전달한다 (외부 소비자 파싱 분기
-        # 추가 부담 회피).
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -324,8 +293,6 @@ class SignalChannel:
         )
 
         self._eventbus.unsubscribe(OrderFilledEvent, self._on_fill)
-        # 등록과 동일하게 ``OrderModifyExecutedEvent``/``OrderModifyRejectedEvent``
-        # 와 stop 이벤트 3종 해지.
         for evt in (
             OrderSubmittedEvent,
             OrderRejectedEvent,
@@ -352,20 +319,13 @@ class SignalChannel:
         """
         from ante.eventbus.events import OrderFilledEvent
 
-        # #2337 단일 await-free 임계구역. dedup-mark-after-enqueue(INV-OUT-4):
-        # read-only ``__contains__`` 게이트 → ``_emit`` → ``seen_or_add`` 커밋.
-        # full-drop 시 미마킹(재전달 보존). bus 핸들러 inline 이라 socket await
-        # 0(INV-OUT-2).
-        # ① stale-publish layer2 — close 가 await 전 ``_closed`` set(첫 줄 no-op).
         if self._closed:
             return
-        # ② isinstance + bot_id 필터.
         if not isinstance(event, OrderFilledEvent):
             return
         if event.bot_id != self._bot.bot_id:
             return
 
-        # ③ payload 구성(byte-identical).
         key = event.fill_dedup_key
         payload = {
             "type": "fill",
@@ -378,17 +338,12 @@ class SignalChannel:
             "timestamp": event.timestamp,
             "fill_dedup_key": key,
         }
-        # ④ 비빈키 read-only dedup 게이트(non-committing). 이미 처리된 키면 skip.
         if key and key in self._fill_dedup_guard:
             return
-        # ⑤ disconnect-laggard — full 이면 schedule_lagged + return(seen 미마킹,
-        #    재전달 보존). legacy(sink=None, is_full=None)는 skip → 항상 성공.
         if self._is_full is not None and self._is_full():
             self._schedule_lagged()
             return
-        # ⑥ enqueue.
         self._emit(payload)
-        # ⑦ enqueue 성공 **후** dedup 커밋(full-drop 시 미마킹).
         if key:
             self._fill_dedup_guard.seen_or_add(key)
 
@@ -397,7 +352,6 @@ class SignalChannel:
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
         """
-        # #2337 ① stale-publish layer2(첫 줄 no-op) → ② bot_id 필터.
         if self._closed:
             return
         bot_id = getattr(event, "bot_id", None)
@@ -419,8 +373,6 @@ class SignalChannel:
 
         status = ""
         reason = ""
-        # 외부 dict shape 호환을 위해 ``order_id`` 는 일반 주문이면 그대로
-        # ``event.order_id``, stop 이벤트면 ``stop_order_id`` 를 사용한다.
         order_id = getattr(event, "order_id", "")
         if isinstance(event, OrderSubmittedEvent):
             status = "submitted"
@@ -437,38 +389,23 @@ class SignalChannel:
             status = "cancel_failed"
             reason = event.error_message
         elif isinstance(event, OrderModifyExecutedEvent):
-            # 정정 완료(#2391, v1=price-only) 통보. 외부 dict shape 는 기존
-            # ``{type:"order_update", ...}`` 패턴을 그대로 유지한다.
             status = "modified"
             reason = event.reason
         elif isinstance(event, OrderModifyRejectedEvent):
-            # 정정 거부 통보를 status 로 잠그고, 외부 dict shape 는 기존
-            # ``{type:"order_update", ...}`` 패턴을 그대로 유지한다. ``type`` 을
-            # ``"modify_rejected"`` 같은 새 형태로 바꾸면 외부 소비자
-            # (stdin/stdout 기반 에이전트) 가 파싱 분기를 추가해야 하므로
-            # 의도적으로 잠갔다.
             status = "modify_rejected"
             reason = event.reason
         elif isinstance(event, StopOrderRegisteredEvent):
-            # stop 등록 통보. 외부 채널에는 식별 핵심인 stop_order_id 만
-            # ``order_id`` 키로 전달하고, dict shape 는 기존 ``{type:
-            # "order_update", order_id, status, reason}`` 그대로 유지.
             status = "stop_registered"
             order_id = event.stop_order_id
         elif isinstance(event, StopOrderTriggeredEvent):
-            # stop 트리거 통보.
             status = "stop_triggered"
             order_id = event.stop_order_id
         elif isinstance(event, StopOrderExpiredEvent):
-            # stop 만료 통보. ``reason`` 은 ``"session_ended"`` |
-            # ``"manager_stopped"``.
             status = "stop_expired"
             order_id = event.stop_order_id
             reason = event.reason
 
         if status:
-            # disconnect-laggard — full 이면 schedule_lagged + return(dedup 없음).
-            # legacy(is_full=None)는 skip → 항상 _emit.
             if self._is_full is not None and self._is_full():
                 self._schedule_lagged()
                 return

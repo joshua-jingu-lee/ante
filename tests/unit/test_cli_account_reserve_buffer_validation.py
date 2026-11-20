@@ -241,3 +241,72 @@ class TestValidValuesAccepted:
         # ``Decimal(str(1e-300))`` == ``Decimal("1e-300")``.
         assert new_account.market_order_reserve_buffer_rate == Decimal("1e-300")
         assert isinstance(new_account.market_order_reserve_buffer_rate, Decimal)
+
+
+class TestOmittedBufferUsesPreset:
+    """옵션을 생략하면 broker preset 의 buffer 가 생성 계좌의 초기값이 된다."""
+
+    def test_kis_domestic_create_stores_preset_buffer(
+        self, tmp_path, offline_runtime
+    ) -> None:
+        import asyncio
+        from contextlib import asynccontextmanager
+
+        from ante.account.service import AccountService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        db_path = str(tmp_path / "cli_account.db")
+        opened: list[str] = []
+
+        @asynccontextmanager
+        async def _real_service(ctx=None):  # noqa: ANN001, ANN202
+            database = Database(db_path)
+            await database.connect()
+            try:
+                svc = AccountService(database, EventBus())
+                await svc.initialize()
+                opened.append(db_path)
+                yield svc
+            finally:
+                await database.close()
+
+        with patch(
+            "ante.cli.commands.account._create_account_service", new=_real_service
+        ):
+            result = _invoke(
+                [
+                    "--format",
+                    "json",
+                    "account",
+                    "create",
+                    "--broker-type",
+                    "kis-domestic",
+                    "--account-id",
+                    "kis-main",
+                    "--name",
+                    "KIS",
+                    "--trading-mode",
+                    "virtual",
+                    "--credential",
+                    "app_key=K",
+                    "--credential",
+                    "app_secret=S",
+                    "--credential",
+                    "account_no=12345678-01",
+                ]
+            )
+        assert result.exit_code == 0, result.output
+        assert opened == [db_path]
+
+        async def _load() -> Decimal:
+            database = Database(db_path)
+            await database.connect()
+            try:
+                svc = AccountService(database, EventBus())
+                await svc.initialize()
+                return (await svc.get("kis-main")).market_order_reserve_buffer_rate
+            finally:
+                await database.close()
+
+        assert asyncio.run(_load()) == Decimal("0.005")
