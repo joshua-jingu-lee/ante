@@ -18,16 +18,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 라이브 preflight가 허용하는 side vocabulary. RuleEngine이 OrderRequestEvent를
-# 검증할 때와 동일하게 case-sensitive로 buy/sell만 허용한다(#1991).
 _ALLOWED_SIDES = ("buy", "sell")
 
-# 한 step 안에서 처리할 on_fill follow-up 체결 수 상한. on_fill이 follow-up
-# Signal을 발행하고 그 follow-up이 다시 체결되어 또 follow-up을 발행하는
-# 연쇄(BFS)가 무한히 도는 것을 막는 안전 cap이다. **on_step 신호 체결에는
-# 적용하지 않고 follow-up 연쇄에만 적용한다**(전략이 한 step에 1000개를 초과하는
-# on_step 신호를 정상 반환하는 기존 backtest 동작을 회귀시키지 않기 위함). 한도
-# 초과 시 해당 step의 나머지 follow-up을 truncate하고 경고를 남긴다(#2073).
 _MAX_FOLLOW_UP_FILLS_PER_STEP = 1000
 
 
@@ -74,35 +66,20 @@ class BacktestExecutor:
         symbols: list[str] | None = None,
     ) -> None:
         self._strategy_cls = strategy_cls
-        # 구체 BacktestDataProvider로 어노테이트한다(#2098). 체결가 게이트
-        # get_current_bar_price는 backtest 전용이라 base DataProvider ABC에는
-        # 없으므로, 호출이 mypy에 잡히지 않도록 구체 타입으로 좁힌다.
         self._data: BacktestDataProvider = data_provider
-        # config.symbols universe. 거래(체결) 대상 종목 집합이다(#2072).
-        # 비어 있으면(None/[]) universe 미설정으로 보고 거부하지 않는다
-        # (현 동작 유지 — 빈 universe/symbols 기본값 정책은 #2060 범위).
         self._allowed_symbols: frozenset[str] = frozenset(symbols or [])
         self._initial_balance = initial_balance
         self._buy_commission_rate = buy_commission_rate
         self._sell_commission_rate = sell_commission_rate
         self._slippage_rate = slippage_rate
         self._exchange = exchange
-        # 전략 파일 접근 샌드박스 루트. None 이면 BacktestStrategyContext 가
-        # 라이브와 동일한 기본 strategies/ 루트를 쓴다(#2083).
         self._strategies_dir = strategies_dir
 
         self._balance = initial_balance
         self._positions: dict[str, dict[str, float]] = {}
         self._trades: list[BacktestTrade] = []
         self._equity_curve: list[dict] = []
-        # 현재 step 시점의 보유 심볼별 현재가 스냅샷. run 루프가 매 step
-        # 보유 심볼 기준으로 새로 구성하고, get_positions()는 provider를
-        # 재호출하지 않고 이 캐시만 읽어 PortfolioView 스키마의 current_price/
-        # unrealized_pnl을 합성한다(#2074). step 사이에 stale/lookahead 가격이
-        # 남지 않도록 매 step 새로 채운다.
         self._current_prices: dict[str, float] = {}
-        # 체결마다 1씩 증가하는 결정적 order_id 시퀀스. on_fill(fill) dict의
-        # order_id로 라이브 OrderFilledEvent.order_id 자리를 채운다(#2073).
         self._order_seq = 0
 
     def _next_order_id(self) -> str:
@@ -136,10 +113,6 @@ class BacktestExecutor:
             if timestamp is None:
                 break
 
-            # 현재 봉 시점의 현재가 스냅샷을 보유 심볼 기준으로 새로 구성한다.
-            # get_positions()가 이 캐시만 읽으므로, context(portfolio) 생성 이전에
-            # 갱신해야 PortfolioView의 current_price/unrealized_pnl이 현재 봉을
-            # 반영한다(#2074). 매 step 새로 채워 stale/lookahead를 막는다.
             await self._refresh_current_prices()
 
             context = {
@@ -150,18 +123,6 @@ class BacktestExecutor:
 
             signals = await strategy.on_step(context)
 
-            # 체결된 fill마다 strategy.on_fill(fill)을 호출해 follow-up Signal을
-            # 같은 step에서 연쇄 체결한다(라이브 bot이 OrderFilledEvent→on_fill→
-            # follow_up을 처리하는 것과 parity, #2073). base.Strategy.on_fill 기본은
-            # [] 이므로 override하지 않은 전략은 추가 체결이 없다.
-            #
-            # cap(_MAX_FOLLOW_UP_FILLS_PER_STEP)은 **follow-up 연쇄에만** 적용한다.
-            # on_step 신호 자체는 cap 없이 전부 체결해야 한다. 그렇지 않으면 한
-            # step에 1000개를 초과하는 on_step 신호를 정상 반환하는 전략이 조용히
-            # truncate되어 기존 backtest 동작이 회귀한다(#2073 리뷰 지적).
-
-            # Phase 1: on_step 신호는 cap 없이 전부 체결(기존 동작 보존). 각 체결
-            #          마다 on_fill을 호출하고 그 follow-up은 phase 2 큐로 모은다.
             follow_up_queue: deque[Signal] = deque()
             for sig in signals:
                 fill = await self._execute_signal(sig, timestamp)
@@ -171,10 +132,6 @@ class BacktestExecutor:
                 if follow_ups:
                     follow_up_queue.extend(follow_ups)
 
-            # Phase 2: on_fill follow-up 연쇄(BFS)는 cap으로 bounded해 무한 연쇄를
-            #          막는다. cap 검사는 다음 체결을 실행하기 전에 한다(>= 선검사)
-            #          이므로 정확히 cap개의 follow-up만 체결된다. no-fill(None)은
-            #          follow_up_fills를 증가시키지 않는다.
             follow_up_fills = 0
             while follow_up_queue:
                 if follow_up_fills >= _MAX_FOLLOW_UP_FILLS_PER_STEP:
@@ -207,10 +164,6 @@ class BacktestExecutor:
 
         strategy.on_stop()
 
-        # 루프 종료 후 advance()가 커서를 1칸 더 올린 상태이므로
-        # 여기서 _calculate_equity()/get_current_price()를 재호출하면
-        # 다음 봉(미래) 가격을 보는 lookahead가 된다. 마지막 시뮬레이션 봉의
-        # equity를 재사용한다.
         final_equity = (
             self._equity_curve[-1]["equity"] if self._equity_curve else self._balance
         )
@@ -287,10 +240,6 @@ class BacktestExecutor:
           봉에서 stop 트리거 + limit 충족이 동시에 만족**되는 단일-봉 conjunction
           으로 근사한다. cross-bar triggered-then-resting 상태는 미모델링한다.
         """
-        # ── Signal 검증 (가격 조회/분기 이전) ──────────────────────────
-        # side 검증: case-sensitive로 buy/sell만 허용. hold/unknown은 skip하여
-        # sell 분기 라우팅을 차단한다. 진단 로그는 hold(전략 작성 가이드)와
-        # unknown side(잘못된 값 경고)를 문구로 구분한다.
         if signal.side not in _ALLOWED_SIDES:
             if signal.side == "hold":
                 logger.warning(
@@ -310,9 +259,6 @@ class BacktestExecutor:
                 )
             return None
 
-        # quantity 검증: finite numeric이 아니거나(NaN/inf/non-number/bool/거대
-        # 정수) <= 0(음수/0)이면 skip. 음수 buy는 cost가 음수가 되어 잔고
-        # 검사를 통과하므로 여기서 fail-closed로 막는다.
         if not _is_valid_quantity(signal.quantity) or signal.quantity <= 0:
             logger.warning(
                 "Signal skip(invalid quantity): symbol=%s side=%r quantity=%r — "
@@ -323,12 +269,6 @@ class BacktestExecutor:
             )
             return None
 
-        # ── universe 검사 (가격 조회/분기 이전, #2072) ───────────────────
-        # config.symbols universe가 설정된 경우, 그 목록 밖의 symbol은 거래하지
-        # 않는다(미체결). 가격조회(get_current_bar_price)보다 앞에 두어 universe
-        # 밖 종목은 on-demand load/가격조회도 거래도 발생하지 않는다.
-        # self._allowed_symbols가 비어 있으면(universe 미설정) 거부하지 않는다
-        # (현 동작 유지 — 빈 universe/symbols 기본값 정책은 #2060 범위).
         if self._allowed_symbols and signal.symbol not in self._allowed_symbols:
             logger.warning(
                 "Signal skip(symbol not in backtest universe): symbol=%s side=%r — "
@@ -339,10 +279,6 @@ class BacktestExecutor:
             )
             return None
 
-        # 체결가는 현재 봉(current_ts 정확 일치) 종가로 게이트한다(#2098).
-        # as-of(get_current_price)는 gap day에 이전 봉가를 반환하므로 그 가격으로
-        # 비거래일 체결을 하면 lookahead/stale 체결이 된다. None이면(심볼이 이
-        # step에 봉이 없음 = gap day/미시작) 미체결로 skip한다.
         price = self._data.get_current_bar_price(signal.symbol)
         if price is None:
             logger.warning(
@@ -355,10 +291,6 @@ class BacktestExecutor:
             )
             return None
 
-        # ── order_type 트리거 게이트 (side 분기 이전) ───────────────────
-        # limit/stop/stop_limit이 현재 봉가로 조건을 충족하지 않으면 미체결로
-        # skip한다(#1994). market(기본)은 항상 True라 기존 시장가 체결 동작이
-        # 보존된다(회귀 방지). #2073 fill dict|None 계약과 일관되게 return None.
         if not self._order_triggered(signal, price):
             return None
 
@@ -396,9 +328,6 @@ class BacktestExecutor:
             )
         )
 
-        # 라이브 bot.py가 strategy.on_fill에 넘기는 dict와 동일 shape(#2073).
-        # backtest는 단발 체결이라 dedup이 불필요하므로 fill_dedup_key는 빈
-        # 문자열로 둔다(라이브는 OrderFilledEvent.fill_dedup_key 사용).
         return {
             "order_id": self._next_order_id(),
             "symbol": signal.symbol,
@@ -569,7 +498,6 @@ class BacktestExecutor:
                     exc_info=True,
                 )
             prices[symbol] = mark_price
-        # 매 step 통째로 교체해 이전 봉/청산 심볼 가격이 남지 않게 한다.
         self._current_prices = prices
 
     async def _calculate_equity(self) -> float:
@@ -627,7 +555,6 @@ class BacktestExecutor:
             final_balance=final_equity,
         )
 
-        # 기존 호환 필드 추가
         metrics["buy_trades"] = sum(1 for t in self._trades if t.side == "buy")
         metrics["sell_trades"] = sum(1 for t in self._trades if t.side == "sell")
         metrics["total_slippage"] = round(sum(t.slippage for t in self._trades), 2)
@@ -688,8 +615,6 @@ class BacktestExecutor:
         - ``timestamp`` 는 ``datetime`` 이면 ``.isoformat()``, ``str`` 이면 그대로,
           ``None`` 이면 ``None`` (backtest timestamp 소스가 datetime/str 혼재 가능).
         """
-        # 원본 인덱스를 보존한 채 최신순(역순)으로 정렬한다. enumerate를 정렬
-        # 전에 수행해 정렬/필터 후에도 trade_id가 결정적으로 유지되게 한다.
         indexed = list(enumerate(self._trades))
         indexed.reverse()
 

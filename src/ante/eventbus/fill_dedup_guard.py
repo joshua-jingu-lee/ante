@@ -20,8 +20,6 @@ from __future__ import annotations
 
 from collections import deque
 
-# bounded 윈도우 크기. catch_up 재전달 윈도우는 미발행 outbox 누적분으로 작아
-# 기본 512 로 충분하다(#1957 설계 결정 4). 초과 시 가장 오래된 키부터 evict 된다.
 DEFAULT_FILL_DEDUP_MAXLEN = 512
 
 
@@ -63,8 +61,6 @@ class FillDedupGuard:
         """
         if key in self._seen:
             return True
-        # maxlen 초과 시 deque 가 좌측(가장 오래된) 키를 자동 evict 하므로,
-        # append 전에 evict 될 키를 미리 계산해 set 미러를 동기화한다.
         if self._order.maxlen is not None and len(self._order) >= self._order.maxlen:
             evicted = self._order[0]
             self._seen.discard(evicted)

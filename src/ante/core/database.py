@@ -11,16 +11,6 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
-# read-only(``mode=ro``) probe(``PRAGMA schema_version``) 가 아래 메시지 계열
-# ``sqlite3.OperationalError`` 로 실패하면 ``immutable=1`` 로 재연결 fallback 한다
-# (offline-factory.md §2 옵션 A). WAL DB 를 실제 read-only 파일시스템에서 ro 로
-# 열면 SQLite 가 ``-wal``/``-shm`` 을 생성/쓰기 시도하다 실패하는데, 그 표면
-# 메시지는 환경(권한·잔여 WAL artifact)에 따라 아래 중 하나로 나타난다.
-#
-# 반대로 ``no such table`` (테이블 부재 — query 시점에 발생, connect probe 단계
-# 아님), ``database disk image is malformed``, ``file is not a database`` 는
-# 데이터 무결성/스키마 문제이지 WAL/권한 문제가 아니므로 fallback 하지 않고
-# 재전파한다(blanket OperationalError fallback 금지 — 메시지 allowlist 로만 좁힘).
 _RO_IMMUTABLE_FALLBACK_SIGNATURES: tuple[str, ...] = (
     "attempt to write a readonly database",
     "unable to open database file",
@@ -63,19 +53,6 @@ class Database:
         self._read_only = read_only
         self._writer: aiosqlite.Connection | None = None
         self._reader: aiosqlite.Connection | None = None
-        # writer 직렬화 + 트랜잭션 소유 태스크 추적(#2365).
-        #
-        # 단일 writer 연결을 여러 asyncio 태스크가 공유하면, ``execute*()`` 의
-        # implicit BEGIN(``conn.execute(sql)``)과 ``conn.commit()`` 사이 await
-        # 경계에서 태스크가 전환돼 두 종류의 race 가 난다:
-        #   - race A: 다른 태스크가 이미 열린 SQLite 트랜잭션 위에서
-        #     ``transaction()`` 의 ``BEGIN`` 을 실행 → "cannot start a
-        #     transaction within a transaction".
-        #   - race B: standalone ``execute()`` 가 진행 중인 트랜잭션에 합류 →
-        #     owner rollback 시 무관한 쓰기가 조용히 소실.
-        # ``_write_lock`` 으로 모든 writer 쓰기/트랜잭션을 태스크 간 직렬화하고,
-        # ``_txn_owner`` 로 현재 트랜잭션을 소유한 태스크를 추적해 그 태스크의
-        # 쓰기만 트랜잭션에 합류(commit skip)시킨다.
         self._write_lock = asyncio.Lock()
         self._txn_owner: asyncio.Task | None = None
 
@@ -202,8 +179,6 @@ class Database:
             await self._probe_ro_conn(conn)
         except sqlite3.OperationalError as exc:
             if not _is_ro_fallback_error(exc):
-                # no such table / malformed / not a database 등은 fallback 대상이
-                # 아니다 — 연결을 정리하고 원본 예외를 재전파한다.
                 await self._drain_failed_conn(conn)
                 raise
             logger.debug(
@@ -278,8 +253,6 @@ class Database:
         하지 않는다.
         """
         if self._read_only:
-            # reader 단일 mode=ro 연결만. probe/fallback 실패 시 _init_ro_conn 이
-            # 이미 worker thread 를 drain 하므로 여기서 추가 정리는 불필요하다.
             self._reader = await self._init_ro_conn()
             return
         try:
@@ -329,7 +302,6 @@ class Database:
         try:
             await conn.execute("ROLLBACK")
         except BaseException:
-            # rollback 실패도 swallow — 원본 예외 보존이 우선.
             pass
 
     async def execute(self, sql: str, params: tuple = ()) -> None:
@@ -348,9 +320,6 @@ class Database:
                 await conn.execute(sql, params)
                 await conn.commit()
             except BaseException:
-                # cancellation 등으로 commit 전에 중단되면 implicit 트랜잭션이
-                # 잔존해 다음 lock holder 의 BEGIN 을 깨뜨린다 — best-effort
-                # ROLLBACK 으로 정리(직전 suspension 없이 곧바로 진입).
                 await self._best_effort_rollback(conn)
                 raise
 
@@ -478,8 +447,6 @@ class Database:
         **전** RuntimeError 로 차단 — 재획득 deadlock 방지). savepoint는 본
         구현 범위 외.
         """
-        # 같은 태스크 재진입 = 중첩 트랜잭션. lock 획득 전에 검사해야 자기 자신이
-        # 보유한 lock 을 재획득하려다 deadlock 하는 일을 막는다.
         if self._txn_owner is asyncio.current_task():
             raise RuntimeError("중첩 트랜잭션은 지원하지 않습니다")
         conn = self._get_writer()
@@ -488,17 +455,11 @@ class Database:
             try:
                 await conn.execute("BEGIN")
                 yield self
-                # COMMIT 결과를 관찰한 뒤 정상 반환한다(enqueue 만 하고 결과를
-                # 버리지 않는다 — r2-①). 비취소 예외/취소 모두 아래 except 로.
                 await conn.execute("COMMIT")
             except BaseException:
-                # cancellation 포함 모든 경로에서 cleanup ROLLBACK 을 무조건
-                # 시도한다 — 진입 직후 suspension 없이 곧바로 ROLLBACK await
-                # 에 도달한다(직전 cancellation-safety invariant 참조).
                 try:
                     await conn.execute("ROLLBACK")
                 except BaseException:
-                    # rollback 실패도 swallow — 원본 예외 보존이 우선
                     pass
                 raise
             finally:

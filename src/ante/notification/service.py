@@ -29,7 +29,7 @@ def parse_quiet_hours(value: str) -> tuple[time, time] | None:
         return None
 
 
-_SUPPRESSED = object()  # 중복 억제 센티널
+_SUPPRESSED = object()
 
 
 class NotificationService:
@@ -57,7 +57,6 @@ class NotificationService:
         self._quiet_end = quiet_end
         self._dedup_window = dedup_window
         self._telegram_enabled = telegram_enabled
-        # {dedup_key: (last_sent_timestamp, suppressed_count)}
         self._dedup_cache: dict[str, tuple[float, int]] = {}
 
     def subscribe(self) -> None:
@@ -147,7 +146,6 @@ class NotificationService:
                 self._dedup_cache[key] = (last_sent, suppressed + 1)
                 return _SUPPRESSED
 
-        # 발송 허용
         suffix = ""
         if key in self._dedup_cache:
             _, suppressed = self._dedup_cache[key]
@@ -217,14 +215,11 @@ class NotificationService:
         if dedup_result:
             body = (body or "") + str(dedup_result)
 
-        # 어댑터가 send_with_buttons를 지원하는 경우 사용, 아니면 send_rich fallback
         try:
             if hasattr(self._adapter, "send_with_buttons"):
-                # 버튼 포함 발송 시 title + body를 합쳐서 메시지로 전달
                 message = f"*{title}*\n{body}" if body else f"*{title}*"
                 return await self._adapter.send_with_buttons(level, message, buttons)
             else:
-                # 버튼 미지원 어댑터 — send_rich fallback
                 return await self._adapter.send_rich(
                     level=level, title=title, body=body
                 )

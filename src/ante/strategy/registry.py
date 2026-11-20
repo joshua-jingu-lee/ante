@@ -104,7 +104,6 @@ class StrategyRegistry:
 
     async def initialize(self) -> None:
         """스키마 생성 및 마이그레이션."""
-        # 기존 테이블이 있으면 author 컬럼 존재 여부를 확인하여 마이그레이션
         if await self._needs_author_migration():
             logger.info(
                 "strategies 테이블 author → author_name/author_id 마이그레이션 실행"
@@ -124,7 +123,6 @@ class StrategyRegistry:
         if row is None:
             return False
         ddl = row.get("sql", "") or ""
-        # author 컬럼이 있고 author_name 컬럼이 없으면 마이그레이션 필요
         return "author" in ddl and "author_name" not in ddl
 
     async def register(

@@ -25,16 +25,10 @@ import re
 
 from ante.account.errors import InvalidAccountIdError
 
-# Account ID 형식: 영문/숫자/하이픈, 3~30자.
 ACCOUNT_ID_PATTERN: re.Pattern[str] = re.compile(r"^[a-zA-Z0-9\-]{3,30}$")
 
-# Runtime invalid: account-scoped 데이터/이벤트는 절대 가질 수 없는 값.
-# ``"default"``는 fallback 예약어로 어떤 시점에도 유효하지 않다.
 INVALID_RUNTIME_ACCOUNT_IDS: frozenset[str] = frozenset({"default"})
 
-# 신규 계좌 생성에서만 거부: bootstrap seed로만 허용한다.
-# ``"test"``는 ``ante init`` → ``create_default_test_account`` 경로로만
-# 생성되며, 사용자/Agent가 명시적으로 새로 만들 수는 없다.
 RESTRICTED_NEW_ACCOUNT_IDS: frozenset[str] = frozenset({"test"})
 
 

@@ -29,54 +29,35 @@ __all__ = [
 ]
 
 
-# spec ``docs/specs/member/02-design-decisions.md`` 권한 범위 매트릭스(L177-194)
-# 의 "—" 가 아닌 모든 cell. 도메인 가나다순(매트릭스 순서)으로 나열하고 같은
-# 도메인 안에서는 read → write → admin → run 순서로 정렬한다.
 SCOPE_VOCABULARY: frozenset[str] = frozenset(
     {
-        # account
         "account:read",
         "account:write",
-        # strategy
         "strategy:read",
         "strategy:write",
-        # data
         "data:read",
         "data:write",
-        # report
         "report:read",
         "report:write",
-        # config
         "config:read",
         "config:write",
-        # approval
         "approval:read",
         "approval:write",
         "approval:admin",
-        # bot
         "bot:read",
         "bot:admin",
-        # trade
         "trade:read",
-        # treasury
         "treasury:read",
         "treasury:admin",
-        # member
         "member:read",
         "member:admin",
-        # system
         "system:read",
         "system:admin",
-        # rule
         "rule:read",
         "rule:admin",
-        # broker
         "broker:read",
-        # audit
         "audit:read",
-        # notification
         "notification:read",
-        # backtest
         "backtest:run",
     }
 )

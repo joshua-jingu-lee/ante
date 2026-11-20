@@ -10,9 +10,6 @@ if TYPE_CHECKING:
     import polars as pl
 
 
-# ── 메타데이터 ────────────────────────────────────
-
-
 class StrategyMeta:
     """전략 메타데이터. 모든 전략이 클래스 변수로 선언해야 함.
 
@@ -55,7 +52,6 @@ class StrategyMeta:
         exchange: str = "KRX",
         accepts_external_signals: bool = False,
     ) -> None:
-        # 하위 호환: author → author_name / author_id 매핑
         if author is not None:
             if author_name == "agent":
                 author_name = author
@@ -98,35 +94,29 @@ class StrategyMeta:
         return f"StrategyMeta({fields})"
 
 
-# ── 시그널 / 주문 액션 ────────────────────────────
-
-
 @dataclass(frozen=True)
 class Signal:
     """전략이 생성하는 매매 시그널."""
 
     symbol: str
-    side: str  # "buy" | "sell"
+    side: str
     quantity: float
     order_type: str = "market"
     price: float | None = None
     stop_price: float | None = None
     reason: str = ""
-    trading_session: str = "regular"  # "regular" | "extended"
+    trading_session: str = "regular"
 
 
 @dataclass(frozen=True)
 class OrderAction:
     """전략이 요청하는 주문 관리 액션 (취소/정정)."""
 
-    action: str  # "cancel" | "modify"
+    action: str
     order_id: str
     quantity: float | None = None
     price: float | None = None
     reason: str = ""
-
-
-# ── Provider ABCs ─────────────────────────────────
 
 
 class DataProvider(ABC):
@@ -199,9 +189,6 @@ class TradeHistoryView(ABC):
         ...
 
 
-# ── Strategy ABC ──────────────────────────────────
-
-
 class Strategy(ABC):
     """모든 전략의 기본 클래스."""
 
@@ -210,23 +197,16 @@ class Strategy(ABC):
     def __init__(self, ctx: Any) -> None:
         self.ctx = ctx
 
-    # ── 라이프사이클 ──
-
     def on_start(self) -> None:
         """봇 시작 시 1회 호출."""
 
     def on_stop(self) -> None:
         """봇 중지 시 1회 호출."""
 
-    # ── 시그널 생성 (핵심) ──
-
     @abstractmethod
     async def on_step(self, context: dict[str, Any]) -> list[Signal]:
         """주기적으로 호출되어 매매 시그널을 반환."""
         ...
-
-    # ── 이벤트 핸들러 (선택) ──
-    # 서브클래스에서 override하여 async 작업을 수행할 수 있으므로 async def 유지
 
     async def on_fill(self, fill: dict[str, Any]) -> list[Signal]:
         """주문 체결 통보."""
@@ -241,8 +221,6 @@ class Strategy(ABC):
 
     async def on_position_corrected(self, correction: dict[str, Any]) -> None:
         """대사에 의한 포지션 보정 통보."""
-
-    # ── 전략별 룰 / 파라미터 (선택) ──
 
     def get_rules(self) -> dict[str, Any]:
         """전략별 거래 룰 반환."""
