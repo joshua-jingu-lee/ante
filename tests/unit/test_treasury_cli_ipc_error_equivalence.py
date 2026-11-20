@@ -374,6 +374,20 @@ class TestTreasuryNotConfiguredEquivalence:
 # ── 직접 경로의 등록 예외 → 그 예외의 코드 ─────────────────────────────────
 
 
+class _NotConfiguredSubError(TreasuryNotConfiguredError):
+    """테스트 전용: 등록된 treasury 예외의 하위 클래스."""
+
+
+class _CodedError(Exception):
+    """테스트 전용: 레지스트리에 없고 ``.code`` 만 있는 예외."""
+
+    code = "CUSTOM_TEST_CODE"
+
+
+class _PlainError(Exception):
+    """테스트 전용: 레지스트리에도 없고 ``.code`` 도 없는 예외."""
+
+
 @pytest.mark.parametrize(
     "args",
     [
@@ -387,10 +401,27 @@ class TestTreasuryNotConfiguredEquivalence:
         ),
     ],
 )
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        pytest.param(
+            TreasuryNotConfiguredError("treasury 미구성"),
+            "TREASURY_NOT_CONFIGURED",
+            id="registered",
+        ),
+        pytest.param(
+            _NotConfiguredSubError("sub"),
+            "TREASURY_NOT_CONFIGURED",
+            id="registered-subclass",
+        ),
+        pytest.param(_CodedError("coded"), "CUSTOM_TEST_CODE", id="code-attribute"),
+        pytest.param(_PlainError("plain"), "EXECUTION_ERROR", id="fallback"),
+    ],
+)
 def test_direct_path_registered_exception_code(
-    runner: CliRunner, args: list[str], tmp_path
+    runner: CliRunner, args: list[str], tmp_path, exc: Exception, expected: str
 ) -> None:
-    """서버 정지 직접 경로에서 등록된 예외는 ``EXECUTION_ERROR`` 가 아닌 그 코드다."""
+    """직접 경로 예외 코드는 registry → ``.code`` → EXECUTION_ERROR, exit 1."""
     from contextlib import asynccontextmanager
 
     entered: list[str] = []
@@ -398,7 +429,7 @@ def test_direct_path_registered_exception_code(
     @asynccontextmanager
     async def _raising_treasury(account_id=None, *, ctx=None):  # noqa: ANN001, ANN202
         entered.append(account_id)
-        raise TreasuryNotConfiguredError("treasury 미구성")
+        raise exc
         yield  # pragma: no cover
 
     with (
@@ -413,4 +444,4 @@ def test_direct_path_registered_exception_code(
     assert entered == ["acc-1"]
     assert result.exit_code == 1, result.output
     payload = _cli_envelope_payload(result.output)
-    assert payload["code"] == "TREASURY_NOT_CONFIGURED"
+    assert payload["code"] == expected

@@ -311,16 +311,51 @@ class TestColdPathFallback:
         assert suspend.await_args.kwargs["suspended_by"] == "master"
 
 
+def _register_ipc_failures():  # noqa: ANN202
+    from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
+
+    error_envelope = {
+        "status": "error",
+        "error": {"code": "MEMBER_ALREADY_EXISTS", "message": "dup exists"},
+    }
+    return [
+        pytest.param(
+            {"return_value": error_envelope},
+            "MEMBER_ALREADY_EXISTS",
+            "dup exists",
+            id="server-side-rejection",
+        ),
+        pytest.param(
+            {"side_effect": ServerNotRunningError("down")},
+            "IPC_SERVER_NOT_RUNNING",
+            "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요.",
+            id="server-not-running",
+        ),
+        pytest.param(
+            {"side_effect": IPCTimeoutError("slow")},
+            "IPC_TIMEOUT",
+            "서버 응답 시간 초과",
+            id="timeout",
+        ),
+    ]
+
+
 class TestRegisterIpcErrorCode:
-    def test_server_side_rejection_surfaces_envelope_code(self, tmp_path) -> None:
-        """register 의 서버 거부 봉투는 그 코드·메시지를 그대로 낸다."""
-        exc = click.ClickException("MEMBER_ALREADY_EXISTS: dup exists")
-        exc.ipc_error_code = "MEMBER_ALREADY_EXISTS"  # type: ignore[attr-defined]
-        exc.ipc_error_message = "dup exists"  # type: ignore[attr-defined]
-        ipc_send = AsyncMock(side_effect=exc)
+    @pytest.mark.parametrize("send_kwargs,code,message", _register_ipc_failures())
+    def test_ipc_failure_surfaces_envelope_code_and_message(
+        self, tmp_path, send_kwargs: dict, code: str, message: str
+    ) -> None:
+        """register 의 IPC 실패는 envelope 의 code·message 를 그대로 낸다."""
+        from unittest.mock import MagicMock
+
+        client = AsyncMock()
+        client.send = AsyncMock(**send_kwargs)
         with (
             patch("ante.cli.cold_path.is_active_runtime", return_value=True),
-            patch("ante.cli.commands.ipc_helpers.ipc_send", new=ipc_send),
+            patch(
+                "ante.cli.commands.ipc_helpers.IPCClient",
+                MagicMock(return_value=client),
+            ),
         ):
             result = _invoke(
                 [
@@ -336,7 +371,7 @@ class TestRegisterIpcErrorCode:
                     "agent",
                 ]
             )
-        ipc_send.assert_awaited_once()
+        client.send.assert_awaited_once()
         payload = json.loads(result.output)
-        assert payload["code"] == "MEMBER_ALREADY_EXISTS"
-        assert payload["message"] == "dup exists"
+        assert payload["code"] == code
+        assert payload["message"] == message

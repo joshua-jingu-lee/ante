@@ -607,7 +607,7 @@ async def _immediate_timeout(coro, timeout):  # noqa: ANN001, ANN202
 # ──────────────────────────────────────────────────────────────
 
 
-class _StdoutGoneError(BrokenPipeError):
+class _StdoutGoneError(OSError):
     """테스트 전용: stdout 소비자가 사라진 상태."""
 
 
@@ -716,16 +716,20 @@ class TestSignalRelaySwallowsIoErrors:
         assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
 
 
-async def test_pump_in_swallows_socket_write_error() -> None:
-    """``_pump_in`` 은 socket write 실패를 삼키고 정상 반환한다."""
+def _pipe_stdin(data: bytes):  # noqa: ANN202
     import os
 
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, data)
+    os.close(write_fd)
+    return os.fdopen(read_fd, "rb")
+
+
+async def test_pump_in_swallows_socket_write_error() -> None:
+    """``_pump_in`` 은 socket write 실패를 삼키고 그 자리에서 정상 반환한다."""
     from ante.cli.commands.signal import _pump_in
 
-    read_fd, write_fd = os.pipe()
-    os.write(write_fd, b'{"type": "signal"}\n')
-    os.close(write_fd)
-    stdin = os.fdopen(read_fd, "rb")
+    stdin = _pipe_stdin(b'{"type": "signal", "n": 1}\n{"type": "signal", "n": 2}\n')
 
     class _FailingWriter(FakeWriter):
         attempts = 0
@@ -736,7 +740,30 @@ async def test_pump_in_swallows_socket_write_error() -> None:
 
     try:
         with patch("ante.cli.commands.signal.sys.stdin", stdin):
-            assert await _pump_in(_FailingWriter()) is None
+            returned = await asyncio.wait_for(_pump_in(_FailingWriter()), timeout=5)
     finally:
         stdin.close()
+    assert returned is None
     assert _FailingWriter.attempts == 1
+
+
+async def test_pump_in_swallows_write_eof_error() -> None:
+    """stdin EOF 의 half-close 실패도 삼키고 정상 반환한다."""
+    from ante.cli.commands.signal import _pump_in
+
+    stdin = _pipe_stdin(b"")
+
+    class _EofFailingWriter(FakeWriter):
+        eof_attempts = 0
+
+        def write_eof(self) -> None:
+            type(self).eof_attempts += 1
+            raise _SocketGoneError("socket closed")
+
+    try:
+        with patch("ante.cli.commands.signal.sys.stdin", stdin):
+            returned = await asyncio.wait_for(_pump_in(_EofFailingWriter()), timeout=5)
+    finally:
+        stdin.close()
+    assert returned is None
+    assert _EofFailingWriter.eof_attempts == 1

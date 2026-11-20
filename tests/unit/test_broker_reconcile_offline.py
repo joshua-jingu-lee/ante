@@ -250,86 +250,115 @@ class TestReconcileOfflineSourceSums:
         assert "{p.symbol: p for p in internal_positions}" not in _BROKER_SOURCE
 
 
+def _run_offline_reconcile(
+    tmp_path: Path, internal: list[tuple[str, float]], broker_rows: list[dict]
+) -> tuple[dict, AsyncMock]:
+    """서버 정지 상태에서 ``broker reconcile`` 을 실제 DB 위에 실행한다."""
+    import asyncio
+    import json
+
+    import click
+    from click.testing import CliRunner
+
+    from ante.cli.commands import broker as broker_cmd
+    from ante.cli.main import cli
+    from ante.core.database import Database
+    from ante.member.models import Member, MemberRole, MemberType
+    from ante.trade.position import PositionHistory
+
+    db_path = tmp_path / "db" / "ante.db"
+    db_path.parent.mkdir()
+
+    async def _seed() -> None:
+        db = Database(str(db_path))
+        await db.connect()
+        try:
+            ph = PositionHistory(db)
+            await ph.initialize()
+            for bot_id, qty in internal:
+                await ph.force_update(
+                    bot_id, "005930", qty, 70000.0, account_id="acc-1"
+                )
+        finally:
+            await db.close()
+
+    asyncio.run(_seed())
+
+    adapter = AsyncMock()
+    adapter.get_account_positions = AsyncMock(return_value=broker_rows)
+    adapter.disconnect = AsyncMock()
+
+    async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+        return adapter, None
+
+    exc = click.ClickException("server down")
+    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+    master = Member(
+        member_id="m",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="m",
+        status="active",
+        scopes=[],
+    )
+    with (
+        patch("ante.cli.main.authenticate_member") as mock_auth,
+        patch(
+            "ante.cli.commands.ipc_helpers.ipc_send",
+            new=AsyncMock(side_effect=exc),
+        ),
+        patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+    ):
+        mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
+        result = CliRunner(mix_stderr=False).invoke(
+            cli,
+            [
+                "--config-dir",
+                str(tmp_path),
+                "--format",
+                "json",
+                "broker",
+                "reconcile",
+                "--account",
+                "acc-1",
+            ],
+        )
+    return json.loads(result.stdout), adapter
+
+
 class TestReconcileOfflineCliSumsBots:
-    """CLI 오프라인 폴백이 같은 종목의 여러 봇 수량을 합산해 대조한다."""
+    """CLI 오프라인 폴백이 계좌 총합 broker 와 전 봇 합산 internal 을 비교한다."""
 
     def test_two_bots_same_symbol_match_broker_total(self, tmp_path: Path) -> None:
-        import asyncio
-        import json
-
-        import click
-        from click.testing import CliRunner
-
-        from ante.cli.commands import broker as broker_cmd
-        from ante.cli.main import cli
-        from ante.core.database import Database
-        from ante.member.models import Member, MemberRole, MemberType
-        from ante.trade.position import PositionHistory
-
-        db_path = tmp_path / "db" / "ante.db"
-        db_path.parent.mkdir()
-
-        async def _seed() -> None:
-            db = Database(str(db_path))
-            await db.connect()
-            try:
-                ph = PositionHistory(db)
-                await ph.initialize()
-                await ph.force_update(
-                    "bot-a", "005930", 6.0, 70000.0, account_id="acc-1"
-                )
-                await ph.force_update(
-                    "bot-b", "005930", 4.0, 71000.0, account_id="acc-1"
-                )
-            finally:
-                await db.close()
-
-        asyncio.run(_seed())
-
-        adapter = AsyncMock()
-        adapter.get_account_positions = AsyncMock(
-            return_value=[{"symbol": "005930", "quantity": "10"}]
+        payload, adapter = _run_offline_reconcile(
+            tmp_path,
+            [("bot-a", 6.0), ("bot-b", 4.0)],
+            [{"symbol": "005930", "quantity": "10"}],
         )
-        adapter.disconnect = AsyncMock()
-
-        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
-            return adapter, None
-
-        exc = click.ClickException("server down")
-        exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-        master = Member(
-            member_id="m",
-            type=MemberType.HUMAN,
-            role=MemberRole.MASTER,
-            org="default",
-            name="m",
-            status="active",
-            scopes=[],
-        )
-        with (
-            patch("ante.cli.main.authenticate_member") as mock_auth,
-            patch(
-                "ante.cli.commands.ipc_helpers.ipc_send",
-                new=AsyncMock(side_effect=exc),
-            ),
-            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
-        ):
-            mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
-            result = CliRunner().invoke(
-                cli,
-                [
-                    "--config-dir",
-                    str(tmp_path),
-                    "--format",
-                    "json",
-                    "broker",
-                    "reconcile",
-                    "--account",
-                    "acc-1",
-                ],
-            )
-
         adapter.get_account_positions.assert_awaited_once()
-        payload = json.loads(result.output)
         assert payload["discrepancies"] == []
         assert payload["match"] is True
+
+    def test_broker_rows_summed_per_symbol(self, tmp_path: Path) -> None:
+        payload, adapter = _run_offline_reconcile(
+            tmp_path,
+            [("bot-a", 10.0)],
+            [
+                {"symbol": "005930", "quantity": "6"},
+                {"symbol": "005930", "quantity": "4"},
+            ],
+        )
+        adapter.get_account_positions.assert_awaited_once()
+        assert payload["discrepancies"] == []
+        assert payload["match"] is True
+
+    def test_offline_path_is_detect_only(self, tmp_path: Path) -> None:
+        payload, _ = _run_offline_reconcile(
+            tmp_path,
+            [("bot-a", 3.0)],
+            [{"symbol": "005930", "quantity": "10"}],
+        )
+        assert payload["match"] is False
+        assert payload["fix_applied"] is False
+        assert payload["corrections"] == 0

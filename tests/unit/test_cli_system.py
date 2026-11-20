@@ -220,6 +220,22 @@ class TestSystemStop:
         assert str(root_dir / "run" / "ante.pid") in data["message"]
         assert str(env_dir) not in data["message"]
 
+    def test_stop_honors_runtime_pid_path_override(self, runner, tmp_path):
+        """PID 경로는 ``runtime.pid_path`` resolver 를 따른다(system.toml override)."""
+        root_dir = tmp_path / "root"
+        root_dir.mkdir()
+        (root_dir / "system.toml").write_text(
+            '[runtime]\npid_path = "custom/runtime.pid"\n', encoding="utf-8"
+        )
+
+        result = runner.invoke(
+            cli, ["--config-dir", str(root_dir), "--format", "json", "system", "stop"]
+        )
+
+        data = json.loads(result.output)
+        assert data["code"] == "PID_NOT_FOUND"
+        assert str(root_dir / "custom" / "runtime.pid") in data["message"]
+
     def test_stop_returns_pid_not_found_when_only_legacy_pid_present(
         self, runner, tmp_path, monkeypatch
     ):

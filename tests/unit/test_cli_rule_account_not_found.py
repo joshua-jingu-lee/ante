@@ -397,9 +397,15 @@ def _invoke_rule_in_process(config_dir: Path, args: list[str]):  # noqa: ANN202
     )
     with patch("ante.cli.main.authenticate_member") as mock_auth:
         mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
-        return CliRunner().invoke(
+        return CliRunner(mix_stderr=False).invoke(
             cli, ["--config-dir", str(config_dir), "--format", "json", *args]
         )
+
+
+def _last_json(result) -> dict:  # noqa: ANN001
+    lines = [ln for ln in result.stdout.splitlines() if ln.startswith("{")]
+    assert lines, (result.stdout, result.exception)
+    return json.loads(lines[-1])
 
 
 _RULE_READ_ARGS = [
@@ -407,21 +413,116 @@ _RULE_READ_ARGS = [
     pytest.param(["rule", "info", "some-rule", "--account", "acc-1"], id="info"),
 ]
 
+_ROWLESS_ACCOUNTS_DDL = "CREATE TABLE accounts (account_id TEXT, status TEXT)"
+
 
 class TestRuleAccountsTableAbsence:
     @pytest.mark.parametrize("args", _RULE_READ_ARGS)
     def test_missing_accounts_table_is_account_not_found(
         self, tmp_path: Path, args: list[str]
     ) -> None:
-        """accounts 테이블이 없는 DB는 계좌 미존재로 정규화한다."""
+        """accounts 테이블 부재는 행이 없을 때와 같은 봉투로 끝난다."""
+        absent_dir = tmp_path / "absent"
+        _make_db(absent_dir, None)
+        rowless_dir = tmp_path / "rowless"
+        _make_db(rowless_dir, _ROWLESS_ACCOUNTS_DDL)
+
+        absent = _last_json(_invoke_rule_in_process(absent_dir, args))
+        rowless = _last_json(_invoke_rule_in_process(rowless_dir, args))
+
+        assert absent["code"] == "ACCOUNT_NOT_FOUND"
+        assert rowless["code"] == "ACCOUNT_NOT_FOUND"
+        assert absent["message"] == rowless["message"]
+
+    @pytest.mark.parametrize("args", _RULE_READ_ARGS)
+    def test_rowless_message_matches_account_service_get(
+        self, tmp_path: Path, args: list[str]
+    ) -> None:
+        """행이 없을 때의 메시지는 ``AccountService.get`` 의 미존재 메시지와 같다."""
+        import asyncio
+
+        from ante.account.errors import AccountNotFoundError
+        from ante.account.service import AccountService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
         config_dir = tmp_path / "cfg"
         _make_db(config_dir, None)
 
-        result = _invoke_rule_in_process(config_dir, args)
+        async def _service_message() -> str:
+            db = Database(str(config_dir / "db" / "ante.db"))
+            await db.connect()
+            try:
+                svc = AccountService(db, EventBus())
+                await svc.initialize()
+                with pytest.raises(AccountNotFoundError) as excinfo:
+                    await svc.get("acc-1")
+                return str(excinfo.value)
+            finally:
+                await db.close()
 
-        assert '"ACCOUNT_NOT_FOUND"' in result.output, (result.output, result.exception)
-        payload = json.loads(result.output.strip().splitlines()[-1])
+        expected = asyncio.run(_service_message())
+        payload = _last_json(_invoke_rule_in_process(config_dir, args))
+
         assert payload["code"] == "ACCOUNT_NOT_FOUND"
+        assert payload["message"] == expected
+
+    def test_deleted_account_row_counts_as_existing(self, tmp_path: Path) -> None:
+        """존재 쿼리는 status 로 거르지 않는다: 삭제 상태 행도 존재로 본다."""
+        config_dir = tmp_path / "cfg"
+        _make_db(config_dir, _ROWLESS_ACCOUNTS_DDL)
+        import sqlite3
+
+        conn = sqlite3.connect(config_dir / "db" / "ante.db")
+        try:
+            conn.execute("INSERT INTO accounts VALUES ('acc-1', 'deleted')")
+            conn.commit()
+        finally:
+            conn.close()
+
+        listed = _invoke_rule_in_process(
+            config_dir, ["rule", "list", "--account", "acc-1"]
+        )
+        info = _last_json(
+            _invoke_rule_in_process(
+                config_dir, ["rule", "info", "some-rule", "--account", "acc-1"]
+            )
+        )
+
+        assert listed.exit_code == 0, (listed.stdout, listed.exception)
+        assert info["code"] == "RULE_NOT_FOUND"
+
+    def test_other_accounts_credentials_are_not_decrypted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """존재 확인은 credentials 를 복호화하지 않는다(키가 달라도 된다)."""
+        import asyncio
+
+        from ante.account.service import AccountService
+        from ante.core.database import Database
+        from ante.eventbus.bus import EventBus
+
+        config_dir = tmp_path / "cfg"
+        _make_db(config_dir, None)
+
+        async def _seed() -> None:
+            db = Database(str(config_dir / "db" / "ante.db"))
+            await db.connect()
+            try:
+                svc = AccountService(db, EventBus())
+                await svc.initialize()
+                await svc.create_default_test_account()
+            finally:
+                await db.close()
+
+        asyncio.run(_seed())
+        monkeypatch.setenv("ANTE_DB_ENCRYPTION_KEY", Fernet.generate_key().decode())
+
+        result = _invoke_rule_in_process(
+            config_dir, ["rule", "list", "--account", "test"]
+        )
+
+        assert result.exit_code == 0, (result.stdout, result.exception)
 
     @pytest.mark.parametrize("args", _RULE_READ_ARGS)
     def test_other_operational_error_is_not_normalized(
@@ -433,6 +534,6 @@ class TestRuleAccountsTableAbsence:
 
         result = _invoke_rule_in_process(config_dir, args)
 
-        assert "no such column" in result.output + repr(result.exception)
+        assert "no such column" in result.stdout + repr(result.exception)
         assert result.exit_code != 0
         assert "ACCOUNT_NOT_FOUND" not in result.output

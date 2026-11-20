@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -411,8 +412,18 @@ class TestAuditListCli:
             conn.close()
         assert "audit_log" in tables, result.output
 
-    def test_database_closed_when_query_raises(self, tmp_path) -> None:
-        """조회가 실패해도 열린 ``Database`` 를 한 번 닫는다."""
+    @pytest.mark.parametrize(
+        "failing_step,error",
+        [
+            pytest.param("initialize", _AuditQueryError, id="initialize-raises"),
+            pytest.param("query", _AuditQueryError, id="query-raises"),
+            pytest.param("query", asyncio.CancelledError, id="query-cancelled"),
+        ],
+    )
+    def test_database_closed_once_on_failure(
+        self, tmp_path, failing_step: str, error: type[BaseException]
+    ) -> None:
+        """initialize·query 의 예외와 취소에서도 열린 ``Database`` 를 한 번 닫는다."""
         from unittest.mock import AsyncMock, MagicMock, patch
 
         db = MagicMock()
@@ -421,16 +432,21 @@ class TestAuditListCli:
         db_cls = MagicMock(return_value=db)
         logger = MagicMock()
         logger.initialize = AsyncMock()
-        logger.query = AsyncMock(side_effect=_AuditQueryError("query failed"))
+        logger.query = AsyncMock(return_value=[])
+        failing = AsyncMock(side_effect=error("failed"))
+        setattr(logger, failing_step, failing)
 
         with (
             patch("ante.core.database.Database", db_cls),
             patch("ante.audit.AuditLogger", MagicMock(return_value=logger)),
         ):
-            result = _invoke_audit_list(
-                ["--config-dir", str(tmp_path), "--format", "json", "audit", "list"]
-            )
+            try:
+                _invoke_audit_list(
+                    ["--config-dir", str(tmp_path), "--format", "json", "audit", "list"]
+                )
+            except asyncio.CancelledError:
+                pass
 
-        logger.query.assert_awaited_once()
+        failing.assert_awaited_once()
         db.connect.assert_awaited_once()
-        assert db.close.await_count == 1, result.output
+        assert db.close.await_count == 1

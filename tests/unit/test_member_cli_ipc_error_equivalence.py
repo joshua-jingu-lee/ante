@@ -663,3 +663,27 @@ class TestMemberDirectPathExplicitCodes:
         svc.update_emoji.assert_awaited_once()
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "MEMBER_NOT_FOUND"
+
+    def test_set_emoji_missing_member_mirrors_member_info(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """set-emoji 의 미존재 봉투는 ``member info`` 의 미존재 봉투와 같다."""
+        emoji_svc = AsyncMock()
+        emoji_svc.update_emoji.side_effect = MemberNotFoundError("no such member")
+        info_svc = AsyncMock()
+        info_svc.get.return_value = None
+
+        emoji = _cli_envelope_payload(
+            self._invoke_with_service(
+                runner, emoji_svc, ["set-emoji", "ghost", "🤖"], tmp_path
+            ).output
+        )
+        info = _cli_envelope_payload(
+            self._invoke_with_service(
+                runner, info_svc, ["info", "ghost"], tmp_path
+            ).output
+        )
+
+        emoji_svc.update_emoji.assert_awaited_once()
+        info_svc.get.assert_awaited_once()
+        assert emoji == info

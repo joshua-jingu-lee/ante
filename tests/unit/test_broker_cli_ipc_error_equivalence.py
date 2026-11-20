@@ -449,16 +449,42 @@ class TestOrderHistoryErrorSurface:
         assert payload["code"] == "BROKER_API_ERROR"
 
 
+class _KisSubError(APIError):
+    """테스트 전용: 등록된 ``APIError`` 의 하위 클래스."""
+
+
+class _UnregisteredError(Exception):
+    """테스트 전용: 레지스트리에 없고 ``.code`` 도 없는 예외."""
+
+
 class TestReconcileOfflineErrorSurface:
     """``broker reconcile`` 서버 정지 폴백의 등록 예외 코드."""
 
+    @pytest.mark.parametrize(
+        "exc,expected",
+        [
+            pytest.param(
+                APIError("KIS API Error", status_code=500),
+                "BROKER_API_ERROR",
+                id="registered",
+            ),
+            pytest.param(
+                _KisSubError("sub", status_code=500),
+                "BROKER_API_ERROR",
+                id="registered-subclass",
+            ),
+            pytest.param(
+                _UnregisteredError("boom"), "EXECUTION_ERROR", id="unregistered"
+            ),
+        ],
+    )
     def test_offline_registered_exception_code(
-        self, runner: CliRunner, tmp_path
+        self, runner: CliRunner, tmp_path, exc: Exception, expected: str
     ) -> None:
         from ante.cli.commands import broker as broker_cmd
 
         (tmp_path / "db").mkdir()
-        adapter = _raising_adapter(APIError("KIS API Error", status_code=500))
+        adapter = _raising_adapter(exc)
 
         async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
             return adapter, None
@@ -484,4 +510,4 @@ class TestReconcileOfflineErrorSurface:
 
         adapter.get_account_positions.assert_awaited_once()
         payload = _cli_envelope_payload(result.output)
-        assert payload["code"] == "BROKER_API_ERROR"
+        assert payload["code"] == expected
