@@ -731,6 +731,22 @@ class TestTradeListToEndOfDayBoundary:
             f"보정 행이 --from/--to {adj_date} 당일 경계에 포함돼야 한다. ids={ids}"
         )
 
+    def test_from_keeps_naive_midnight_row(self, runner, tmp_path, _seed_db_path):
+        """``--from D`` 하한은 naive 라 tz 없이 저장된 당일 자정 행을 포함한다."""
+        asyncio.run(
+            _seed_trades_db(
+                _seed_db_path,
+                [
+                    {
+                        "trade_id": "99999999-9999-9999-9999-999999999999",
+                        "timestamp": "2026-06-12T00:00:00",
+                    }
+                ],
+            )
+        )
+        ids = _trade_list_ids(runner, tmp_path, "--from", "2026-06-12")
+        assert ids == ["99999999-9999-9999-9999-999999999999"], ids
+
     def test_from_only_returns_same_day_intraday(self, runner, tmp_path, _seed_db_path):
         """``--from`` 만 지정 시 당일 장중 isoformat 행 반환(기존 동작 보존)."""
         asyncio.run(
