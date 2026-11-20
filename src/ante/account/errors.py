@@ -12,7 +12,7 @@ class AccountNotFoundError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_NOT_FOUND"``를 노출하도록 한다 (#1795). CLI
+    ``"ACCOUNT_NOT_FOUND"``를 노출하도록 한다. CLI
     ``account suspend``/``account activate`` 등이 IPC error envelope 의
     typed code 를 그대로 surface 해 not-found 의미가 일반
     ``EXECUTION_ERROR`` 로 분실되지 않게 한다.
@@ -151,7 +151,7 @@ class BrokerReconnectFailedError(AccountError):
 
 
 class AccountStructuralChangeRequiresStoppedServerError(AccountError):
-    """런타임에 계좌 structural 필드/메서드 변경을 시도했을 때 raise (#1144).
+    """런타임에 계좌 structural 필드/메서드 변경을 시도했을 때 raise.
 
     AccountService는 boot/cold-path/runtime을 구분하는 ``_runtime_started``
     플래그를 갖는다. 서버 부팅이 완료된 뒤 이 플래그가 활성화되면 ``create()``,
@@ -173,7 +173,7 @@ class AccountStructuralChangeRequiresStoppedServerError(AccountError):
 
 
 class AccountHasActiveBotsError(AccountError):
-    """delete() 시 해당 계좌에 활성(non-deleted) 봇이 남아 있음 (#1139).
+    """delete() 시 해당 계좌에 활성(non-deleted) 봇이 남아 있음.
 
     cold-path AccountService.delete()는 status mutation 전에 ``bots`` 테이블을
     조회하여 동일 ``account_id``의 활성 봇이 있으면 삭제를 거부한다. 이는

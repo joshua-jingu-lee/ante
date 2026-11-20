@@ -40,7 +40,7 @@ class DataGoKrCollector:
         """특정 날짜의 전종목 데이터를 수집한다.
 
         Returns:
-            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)`` (#1993):
+            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)``:
 
             - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**
               (= ``store.write`` 반환 합, rows_written). 재수집(dedup)이면 0이며,
@@ -240,7 +240,7 @@ class DataGoKrCollector:
 
         Returns:
             ``(net_delta, symbols)``. net_delta는 ohlcv/fundamental ``store.write``
-            반환(실제 net-new 저장 행 수)의 합이다(#1993). 재수집/dedup이면 0.
+            반환(실제 net-new 저장 행 수)의 합이다. 재수집/dedup이면 0.
         """
         rows_written = 0
         symbols: set[str] = set()
@@ -270,7 +270,7 @@ class DataGoKrCollector:
         """OHLCV 데이터를 정규화하여 심볼별로 저장한다.
 
         정규화 직후 business 계층 검증(`validate_business`)을 정규화 OHLCV
-        (open/high/low/close/volume) 값에 적용한다(#2222). raw `_validate`의
+        (open/high/low/close/volume) 값에 적용한다. raw `_validate`의
         business는 raw 컬럼명(mkp/hipr/...)이라 no-op이므로, 의미 있는 OHLC 정합성
         (`low<=open/close<=high`)·price>0·volume>=0 anomaly 경고를 여기서 발행한다.
         business는 비차단(경고)이므로 위반이 있어도 저장은 진행한다(spec 09:
@@ -285,7 +285,7 @@ class DataGoKrCollector:
             warns: business 경고를 누적할 목록(collect의 warns로 surface).
 
         Returns:
-            ``store.write`` 반환(net-new 저장 행 수)의 합(#1993). 입력 len이
+            ``store.write`` 반환(net-new 저장 행 수)의 합. 입력 len이
             아니라 실제 저장 delta다(재수집/dedup이면 0).
         """
         ohlcv_df = self._normalizer.normalize_ohlcv(df)
@@ -319,7 +319,7 @@ class DataGoKrCollector:
         """fundamental 데이터를 정규화하여 심볼별로 저장한다.
 
         Returns:
-            ``store.write`` 반환(net-new 저장 행 수)의 합(#1993). 입력 len이
+            ``store.write`` 반환(net-new 저장 행 수)의 합. 입력 len이
             아니라 실제 저장 delta다(재수집/dedup이면 0).
         """
         fund_df = self._normalizer.normalize_fundamental(df)

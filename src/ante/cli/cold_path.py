@@ -20,7 +20,7 @@ def is_active_runtime(
 ) -> bool:
     """Return True when the canonical PID/socket pair marks an active runtime.
 
-    Refs #1157/#1160/#1161. The guard uses the current CLI ``config_dir`` and
+    The guard uses the current CLI ``config_dir`` and
     treats a matching startup marker as active while the IPC socket is still
     being created. Local imports preserve existing tests that monkeypatch
     ``ante.main.read_pid_file`` and ``ante.cli.commands.ipc_helpers.get_socket_path``.

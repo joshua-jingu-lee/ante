@@ -1,4 +1,4 @@
-"""Domain exception → ErrorSpec mapping registry (#1840).
+"""Domain exception → ErrorSpec mapping registry.
 
 본 모듈은 ``docs/specs/contracts/error-taxonomy.md`` 가 lock 한 **대표 fault
 lock** 4 건을 코드로 mapping 한다. helper
@@ -46,17 +46,17 @@ Non-Goals).
 
 - ``PermissionDeniedError`` → ``PERMISSION_DENIED`` / ``permission`` (본
   PR 에서 ``.code`` 신규 부여 — master 검증 위반 fault 의 안정 코드)
-- ``MemberNotFoundError`` → ``MEMBER_NOT_FOUND`` / ``not_found`` (#1817)
+- ``MemberNotFoundError`` → ``MEMBER_NOT_FOUND`` / ``not_found``
 - ``MemberStateConflictError`` → ``MEMBER_STATE_CONFLICT`` /
-  ``state_conflict`` (#1825)
+  ``state_conflict``
 - ``MemberAlreadyExistsError`` → ``MEMBER_ALREADY_EXISTS`` /
-  ``state_conflict`` (#1826)
+  ``state_conflict``
 - ``ReservedMemberIdError`` → ``MEMBER_ID_RESERVED`` / ``validation``
   (#2295; ``register`` 의 ``system:`` reserved-prefix guard — duplicate
   와 별개 fault, existing-member 조회 이전 거부. ``ValueError`` 다중상속
   으로 기존 generic fallback 회귀 없음.)
 - ``MemberInvalidRecoveryCredentialError`` →
-  ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth`` (#1826)
+  ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth``
 
 #1915 member domain 2 sub-class 추가 (실측 ``.code`` mirror, #1843 sub-PR 1
 1:1 미러):

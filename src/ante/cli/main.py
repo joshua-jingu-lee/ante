@@ -72,7 +72,7 @@ def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
     """Ante — AI-Native Trading Engine CLI.
 
     인증은 ``AuthenticatedGroup``이 leaf 명령 callback 호출 직전에
-    default-deny 게이트로 강제한다(#1404). root callback에서 직접
+    default-deny 게이트로 강제한다. root callback에서 직접
     ``authenticate_member(ctx)``를 호출하지 않는다.
     """
     ctx.ensure_object(dict)

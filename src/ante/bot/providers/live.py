@@ -26,7 +26,7 @@ class LivePortfolioView(PortfolioView):
     ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
     로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_positions`` 는
     ``PositionHistory`` 인메모리 캐시를 ``(account_id, bot_id)`` 스코프로 조회해
-    타 계좌 포지션이 전략 컨텍스트에 누출되지 않게 한다(#2139).
+    타 계좌 포지션이 전략 컨텍스트에 누출되지 않게 한다.
     """
 
     def __init__(
@@ -67,7 +67,7 @@ class LivePortfolioView(PortfolioView):
 
 
 class LiveOrderView(OrderView):
-    """Live 봇용 OrderView. OrderTracker(ante 제출 미체결 SSOT) 경유 (#1948).
+    """Live 봇용 OrderView. OrderTracker(ante 제출 미체결 SSOT) 경유.
 
     ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
     로 binding 한다(``LiveDataProvider`` 패턴 미러). ``get_open_orders`` 는
@@ -98,7 +98,7 @@ class LiveTradeHistoryView(TradeHistoryView):
     ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
     로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_trade_history`` 는
     ``get_trades`` 호출을 ``(account_id, bot_id)`` 스코프로 좁혀 타 계좌 거래
-    이력이 전략 컨텍스트에 누출되지 않게 한다(#2139).
+    이력이 전략 컨텍스트에 누출되지 않게 한다.
     """
 
     def __init__(self, trade_recorder: TradeRecorder, account_id: str) -> None:

@@ -2,7 +2,7 @@
 
 각 커맨드 핸들러는 (ServiceRegistry, args: dict, actor: str) -> dict 시그니처를 따른다.
 
-Refs #1184: 각 등록 핸들러는 ``CommandSpec``으로 wrap되어 ``is_mutating``
+각 등록 핸들러는 ``CommandSpec``으로 wrap되어 ``is_mutating``
 taxonomy를 함께 보유한다. ``IPCServer._dispatch``는 lifecycle state가
 ``SHUTTING_DOWN``일 때 mutating 핸들러를 ``SERVICE_UNAVAILABLE``로 거부하기
 위해 이 정보를 사용한다.
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class CommandSpec:
     """IPC 커맨드의 메타데이터.
 
-    Refs #1184: lifecycle state machine과 결합하여 shutdown 중
+    lifecycle state machine과 결합하여 shutdown 중
     mutating 명령을 거부하기 위한 taxonomy를 보유한다.
 
     Refs #1849 (#1819 부모 epic): contract metadata 7 신규 필드를 보유한다.
@@ -54,11 +54,11 @@ class CommandSpec:
             (live 조회) 면 False.
         result_kind: handler 반환 result의 shape 종류
             (``entity``/``operation``/``collection``/``raw``/``stream``).
-            ``ContractKind`` vocabulary(#1822)를 그대로 사용한다.
+            ``ContractKind`` vocabulary를 그대로 사용한다.
         result_key: handler 반환 dict의 주 키(예: ``"bot"``, ``"positions"``).
             ``None``이면 result가 dict 그 자체이거나 주 키가 없음.
         required_services: handler가 의존하는 ``ServiceRegistry`` attribute
-            이름의 frozenset. dispatch wrapper의 service preflight(#1850)에서
+            이름의 frozenset. dispatch wrapper의 service preflight에서
             사용된다.
         audit_action: ``audit_logger.log(action=...)`` 인자. 실제로 audit
             기록을 남기는 명령만 값을 가지고, 그 외에는 ``None``.
@@ -151,7 +151,7 @@ class CommandRegistry:
     def iter_specs(self) -> list[CommandSpec]:
         """등록된 모든 ``CommandSpec`` 목록.
 
-        Refs #1849: registry metadata 완전성 단언/감사 시 사용. 반환 순서는
+        registry metadata 완전성 단언/감사 시 사용. 반환 순서는
         등록 순서를 따른다(Python 3.7+ dict insertion order).
         """
         return list(self._specs.values())
@@ -383,13 +383,13 @@ async def _handle_bot_start(
 ) -> dict:
     """봇 시작 IPC handler.
 
-    Refs #1712: bot 부재 / app_key 부재 / BotError를 stable coded exception으로
+    bot 부재 / app_key 부재 / BotError를 stable coded exception으로
     raise 한다. IPC
     ``server.py:323`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope
     이 ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
     ``BOT_STATE_CONFLICT`` 로 변환한다.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "bot.start"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
     reserved key 로 ``resource`` 만 전달하며, wrapper 가 ``pop`` 으로
     public envelope 진입 전에 strip 한다.
@@ -432,10 +432,10 @@ async def _handle_bot_stop(
 ) -> dict:
     """봇 중지 IPC handler.
 
-    Refs #1712: bot 부재 / BotError를 stable coded exception으로 매핑한다.
+    bot 부재 / BotError를 stable coded exception으로 매핑한다.
     ``app_key`` preflight 는 stop 경로에 없다.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "bot.stop"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
     reserved key 로 ``resource`` 만 전달한다.
     """
@@ -470,7 +470,7 @@ async def _handle_bot_status(
 ) -> dict:
     """봇 상태 조회 IPC handler.
 
-    Refs #1712: read-only handler. ``enrich_bot_info`` 로 strategy/budget/
+    read-only handler. ``enrich_bot_info`` 로 strategy/budget/
     positions 보강 결과를 ``{"bot": info}`` envelope 으로 반환한다.
 
     의존성은 모두 ``getattr`` safe-access 로 optional 처리한다:
@@ -732,7 +732,7 @@ async def _handle_bot_update(
 ) -> dict:
     """봇 업데이트 IPC handler.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "bot.update"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
     reserved key 로 ``resource`` 와 ``detail`` (변경 필드 목록) 을 전달한다.
     """
@@ -819,7 +819,7 @@ async def _handle_treasury_set_balance(
 ) -> dict:
     """Treasury balance 설정 IPC handler.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "treasury.set_balance"`` 기반으로 자동 발화한다. handler 는
     ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (설정된
     balance) 을 전달한다.
@@ -889,7 +889,7 @@ async def _handle_strategy_set_status(
 ) -> dict:
     """전략 상태 변경 IPC handler.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "strategy.set_status"`` 기반으로 자동 발화한다. handler 는
     ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (status) 을
     전달한다.
@@ -916,7 +916,7 @@ async def _handle_member_update_scopes(
 ) -> dict:
     """멤버 scope 업데이트 IPC handler.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "member.update_scopes"`` 기반으로 자동 발화한다. handler 는
     ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (scopes 목록) 을
     전달한다.
@@ -945,7 +945,7 @@ async def _handle_member_register(
 ) -> dict:
     """멤버 등록 IPC handler.
 
-    Refs #2113: ``member.update_scopes`` 미러. ``registered_by=actor`` 로
+    ``member.update_scopes`` 미러. ``registered_by=actor`` 로
     서버 측 master 게이트(``MemberService.register`` 내부 검증)를 보존한다.
 
     secret 비노출: 발급 토큰은 사용자 표시용 result(``token``) 에만 담고,
@@ -984,7 +984,7 @@ async def _handle_member_set_emoji(
 ) -> dict:
     """멤버 emoji 설정 IPC handler.
 
-    Refs #2113: CLI ``member set-emoji`` → ``MemberService.update_emoji``
+    CLI ``member set-emoji`` → ``MemberService.update_emoji``
     (``set_emoji`` 메서드는 없음). ``updated_by=actor`` 로 호출한다.
     """
     member_id = args["member_id"]
@@ -1009,7 +1009,7 @@ async def _handle_member_suspend(
 ) -> dict:
     """멤버 일시 정지 IPC handler.
 
-    Refs #2113: ``suspended_by=actor`` 로 ``MemberService.suspend`` 내부의
+    ``suspended_by=actor`` 로 ``MemberService.suspend`` 내부의
     master 게이트(``_assert_master(actor)``)를 보존한다.
     """
     member_id = args["member_id"]
@@ -1033,7 +1033,7 @@ async def _handle_member_reactivate(
 ) -> dict:
     """멤버 재활성화 IPC handler.
 
-    Refs #2113: ``reactivated_by=actor`` 로 master 게이트를 보존한다.
+    ``reactivated_by=actor`` 로 master 게이트를 보존한다.
     """
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
@@ -1056,7 +1056,7 @@ async def _handle_member_revoke(
 ) -> dict:
     """멤버 영구 폐기 IPC handler.
 
-    Refs #2113: ``revoked_by=actor`` 로 master 게이트를 보존한다. CLI
+    ``revoked_by=actor`` 로 master 게이트를 보존한다. CLI
     ``--yes`` 게이트는 라우팅 이전 CLI 단에서 검사한다.
     """
     member_id = args["member_id"]
@@ -1080,7 +1080,7 @@ async def _handle_member_rotate_token(
 ) -> dict:
     """토큰 재발급 IPC handler.
 
-    Refs #2113: ``rotated_by=actor`` 로 master 게이트를 보존한다.
+    ``rotated_by=actor`` 로 master 게이트를 보존한다.
 
     secret 비노출: 새 토큰은 사용자 표시용 result(``token``) 에만 담고
     ``_audit_detail`` / server logger / IPC error envelope 어디에도 넘기지
@@ -1108,7 +1108,7 @@ _RECOVERY_AUDIT_MEMBER_ID = "system:recovery"
 async def _resolve_master_member_id(member: Any) -> str:
     """master(human) 멤버 ID 를 서버 측에서 해석한다.
 
-    Refs #2113: reset_password / regenerate_recovery_key 는 auth-exempt 라
+    reset_password / regenerate_recovery_key 는 auth-exempt 라
     client 가 대상 member_id 를 보내지 않는다. master-lookup 을 CLI 가 아니라
     서버 chokepoint(handler)에서 수행해 단일 경로로 일관 적용한다.
     """
@@ -1125,7 +1125,7 @@ async def _handle_member_reset_password(
 ) -> dict:
     """recovery key 로 패스워드 리셋 IPC handler (auth-exempt).
 
-    Refs #2113: args 는 secret(``recovery_key`` / ``new_password``) 만 받는다.
+    args 는 secret(``recovery_key`` / ``new_password``) 만 받는다.
     대상 master member_id 는 서버 chokepoint 에서 ``list_members`` +
     role filter 로 해석한다(client actor 신뢰 금지).
 
@@ -1159,7 +1159,7 @@ async def _handle_member_regenerate_recovery_key(
 ) -> dict:
     """recovery key 재발급 IPC handler (auth-exempt).
 
-    Refs #2113: args 는 secret(``password``) 만 받는다. 대상 master member_id 는
+    args 는 secret(``password``) 만 받는다. 대상 master member_id 는
     서버 chokepoint 에서 해석한다(client actor 신뢰 금지).
 
     secret 비노출: 입력 ``password`` 와 재발급된 ``recovery_key`` 는
@@ -1295,7 +1295,7 @@ async def _handle_approval_cancel_invalid(
     테이블에 기록을 남기며, 서비스의 ``history`` append 가 fallback 추적
     경로다.
 
-    Refs #1851: audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
+    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
     = "approval.cancel_invalid"`` 기반으로 자동 발화한다. handler 는
     ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (request.type)
     을 전달한다.
@@ -1372,7 +1372,7 @@ async def _handle_broker_positions(
 async def _handle_broker_order_history(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """``broker.order_history`` — 주문/체결 이력 read-only 조회 (Refs #2412).
+    """``broker.order_history`` — 주문/체결 이력 read-only 조회.
 
     ``_handle_broker_positions`` 동형이며 ``{"orders": [...]}`` envelope 을
     반환한다. 반환 row 는 ``BrokerAdapter.get_order_history`` 의 **정규화 8키**
@@ -1434,11 +1434,11 @@ def _broker_reconcile_envelope(
 async def _handle_broker_reconcile(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """``broker.reconcile`` — **account-level** 대사 (#2119/#2121/#2122/#2118/#2120).
+    """``broker.reconcile`` — **account-level** 대사.
 
     account_id 만으로 동작한다(bot_id 불요 #2119). 서버 BrokerAdapter 가 계좌
     총합을 직접 조회하며(caller-supplied broker_positions 무시 #2121), ``fix``
-    플래그를 준수한다(#2122). 잘못된 ``correct_position`` 이 실거래 포지션을
+    플래그를 준수한다. 잘못된 ``correct_position`` 이 실거래 포지션을
     손상시키지 않도록 **correction 은 봇이 정확히 1개인 계좌에서만** 기존
     ``reconcile`` 로직에 위임하고, 그 외(2+봇·0봇)는 detect-only 다.
 
@@ -1507,12 +1507,12 @@ async def _handle_broker_reconcile(
 def register_all_handlers(registry: CommandRegistry) -> None:
     """42개 런타임 커맨드 핸들러를 일괄 등록.
 
-    Refs #1184: 각 핸들러는 mutating(32개) 또는 read-only(10개)로 분류된다.
+    각 핸들러는 mutating(32개) 또는 read-only(10개)로 분류된다.
     분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
     한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
     ``SERVICE_UNAVAILABLE``로 거부된다.
 
-    `account.delete`는 1.0 IPC 계약에서 제외되었다 (#1139). cold-path CLI에서
+    `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
 
     Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` (mutating) 추가.

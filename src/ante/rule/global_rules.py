@@ -11,7 +11,7 @@ from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleRe
 def _is_finite_numeric(value: Any) -> bool:
     """``value`` 가 finite int/float 인지 판정 (bool 명시 제외).
 
-    이중 방어 layer (#1380): RuleUpdateRequest 단에서 NaN/Inf 가 거부되지만,
+    이중 방어 layer: RuleUpdateRequest 단에서 NaN/Inf 가 거부되지만,
     DynamicConfig load 등 다른 경로에서 invalid value 가 들어와도 RULE_REGISTRY
     가 fail-closed 로 막아야 한다. ``bool`` 은 numeric 흉내 방지를 위해 명시
     제외한다 (``isinstance(True, int) == True``). 거대 ``int`` 는 ``float``

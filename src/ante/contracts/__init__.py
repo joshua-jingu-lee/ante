@@ -1,18 +1,18 @@
 """Contract SSOT 공통 인프라.
 
-이 package는 CLI(#1815)/IPC(#1819) 계열 contract surface가
+이 package는 CLI/IPC 계열 contract surface가
 공유할 vocabulary 등 공통 정의의 SSOT 위치다.
 
 본 패키지에 등록된 SSOT:
 
 - ``ante.contracts.vocab`` — ``ContractKind`` / ``EnvelopeForm`` / ``AuthMode``
-  vocabulary (#1822). alias re-export 없음 — 소비자는 명시 import 한다.
+  vocabulary. alias re-export 없음 — 소비자는 명시 import 한다.
 - ``ante.contracts.errors`` — ``ErrorCategory`` Literal + ``ErrorSpec`` dataclass
   (#1839/#1840 normative).
-- ``ante.contracts.error_registry`` — 대표 fault lock mapping (#1840).
+- ``ante.contracts.error_registry`` — 대표 fault lock mapping.
   helper-internal — 외부 소비자는 ``error_spec_for_exception`` 을 호출한다.
 - ``ante.contracts.helpers`` — ``error_spec_for_exception`` / ``emit_cli_error`` /
-  ``ipc_error_payload`` CLI·IPC error helper (#1840).
+  ``ipc_error_payload`` CLI·IPC error helper.
 - ``ante.contracts.cli_registry`` — CLI command contract registry shell
   (#1844, `#1815` epic). ``AuthContract`` / ``OutputContract`` /
   ``CliCommandContract`` dataclass + ``CLI_COMMAND_REGISTRY`` (빈 dict) +

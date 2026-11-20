@@ -2,7 +2,7 @@
 
 Ante가 제공하는 모든 CLI 명령어를 정리한 문서입니다. 각 명령어의 사용법, 옵션, 필수 권한(scope)을 확인할 수 있습니다.
 
-> 마지막 갱신: 2026-07-30
+> 마지막 갱신: 2026-11-20
 
 > 이 문서는 `scripts/generate_cli_reference.py`로 자동 생성됩니다. 명령어 상세를 직접 편집하지 말고 Click 데코레이터나 생성 스크립트를 수정한 뒤 재생성하세요.
 
@@ -928,7 +928,7 @@ ante bot remove <BOT_ID> [OPTIONS]
 
 봇 시그널 키 조회 또는 재발급.
 
-``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다 (#2111).
+``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다.
 서버가 정지되어 있으면 ``IPC_SERVER_NOT_RUNNING`` 으로 거부하며, cold-path
 DB mutation 으로 대체하지 않는다 (runtime 경계 / audit / live 상태 정합성
 보존).
@@ -1420,7 +1420,7 @@ ante strategy info <NAME> [OPTIONS]
 전략의 ``trades.strategy_id`` (거래 시점 전략 귀속 durable key)로
 해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇/여러 계좌에서
 운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고 봇의 이후
-전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다 (#2144).
+전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다.
 
 지표는 ``realized_pnl``/``trade_count``/``win_rate`` 의 **기간별 절대
 집계**다. ``strategy performance`` (계좌별 portfolio-relative) 와 달리

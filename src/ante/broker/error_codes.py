@@ -71,7 +71,7 @@ KIS_ERROR_MESSAGES: dict[str, str] = {
 def is_retryable_msg_code(msg_cd: str) -> bool:
     """KIS msg_cd가 일반 재시도(``KISRetryHandler``) 경로에서 재시도 가능한지 판별.
 
-    ``EGW00133`` (#2399)은 토큰 발급 경로 전용 ~60s backoff 로만 처리하므로 일반
+    ``EGW00133``은 토큰 발급 경로 전용 ~60s backoff 로만 처리하므로 일반
     재시도 경로에서는 **non-retryable** 로 본다(혹시 ``_authenticate`` 외 경로로
     누수돼도 일반 지수 backoff 에 몰리지 않게 방어).
     """

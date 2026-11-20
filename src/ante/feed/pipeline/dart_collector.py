@@ -37,14 +37,14 @@ DEFAULT_BACKFILL_SINCE = "2015-01-01"
 
 
 class QuarterStatus(Enum):
-    """단일 분기 수집 결과의 3-상태(#2028).
+    """단일 분기 수집 결과의 3-상태.
 
     ``_fetch_quarter``가 반환하며, ``_collect_quarters``의 checkpoint 전진/
     halt 결정을 구동한다. 기존 2-값 bool(ok)을 대체한다.
 
     - ``OK``: 정상 저장(written>0). checkpoint 전진 자격.
     - ``HALT``: transient 예외 / raw-present no-storable(written==0). 데이터
-      손실 가능성을 surface하고 이 run의 checkpoint 전진을 동결한다(#2054).
+      손실 가능성을 surface하고 이 run의 checkpoint 전진을 동결한다.
     - ``SKIP_EMPTY``: ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시
       가능). checkpoint를 전진시키지 않으면서 halt도 세우지 않아, 오름차순
       순회에서 후속 분기 처리를 계속한다(#2028).
@@ -108,7 +108,7 @@ class DARTCollector:
 
         Args:
             daily: ``True``면 daily-incremental 모드로, ``backfill_since`` 범위를
-                순회하지 않고 **최신 collectable 분기 1개만** 수집한다(#2101).
+                순회하지 않고 **최신 collectable 분기 1개만** 수집한다.
                 spec 07-execution-modes의 Daily Incremental("날짜 1개")에 대응하는
                 DART daily-equivalent다. DART는 분기 단위 공시이므로 daily 실행은
                 "오늘 기준 가장 최근에 공시 가능한 분기"만 확인한다. ``False``(기본,
@@ -121,7 +121,7 @@ class DARTCollector:
                 최신 분기 증분만 담당한다.
 
         Returns:
-            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)`` (#1993):
+            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)``:
 
             - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**(rows_written).
               재수집(dedup)이면 0이다.
@@ -130,7 +130,7 @@ class DARTCollector:
               무관하다 — 재수집으로 net_delta=0이어도 OK 분기가 있으면 True다.
               빈 매핑/전 분기 SKIP_EMPTY/no-storable HALT 등 저장 반영이 전무하면
               False다. DART checkpoint 전진은 내부 ``QuarterStatus`` 로직이 분기별로
-              자체 관리하므로(#2028/#2054), 이 stored_ok는 runner의
+              자체 관리하므로, 이 stored_ok는 runner의
               ``data_types`` 반영용이다(checkpoint 가드 아님).
         """
         corp_code_map = await self._load_corp_codes(feed_dir)
@@ -192,7 +192,7 @@ class DARTCollector:
         """설정에서 수집 연도 범위를 결정한다.
 
         end_year는 KST 기준 현재 연도이며, 분기 단위 미래 컷오프는
-        `_collect_quarters`의 period-end(KST) 비교가 담당한다(#1964).
+        `_collect_quarters`의 period-end(KST) 비교가 담당한다.
         """
         schedule = config.get("schedule", {})
         backfill_since = schedule.get("backfill_since", DEFAULT_BACKFILL_SINCE)
@@ -221,7 +221,7 @@ class DARTCollector:
         """연도/분기를 순회하며 재무제표를 수집한다.
 
         Returns:
-            ``(net_delta, stored_ok, symbols, warns)`` (#1993). net_delta는
+            ``(net_delta, stored_ok, symbols, warns)``. net_delta는
             ``_fetch_quarter`` 가 반환한 rows_written(net-new 저장 행 수)의 합이며,
             stored_ok는 한 분기라도 ``QuarterStatus.OK`` (storable 저장)였는지다.
         """
@@ -313,18 +313,18 @@ class DARTCollector:
         checkpoint: Checkpoint,
         last_checkpoint: str | None,
     ) -> tuple[int, bool, set[str], list[dict]]:
-        """daily 모드: 최신 collectable 분기 1개만 수집한다(#2101).
+        """daily 모드: 최신 collectable 분기 1개만 수집한다.
 
         ``backfill_since`` 범위를 순회하지 않고, today(KST) 기준 가장 최근에
         공시 가능한 분기 1개에 대해서만 ``_fetch_quarter``를 수행한다. 단일
         분기지만 checkpoint 전진/halt/SKIP_EMPTY 판정은 backfill 경로와 동일한
-        ``_fetch_quarter``/``QuarterStatus`` 로직을 그대로 재사용한다(#2028/#2054).
+        ``_fetch_quarter``/``QuarterStatus`` 로직을 그대로 재사용한다.
 
         운영 전제: 이 경로는 최신 분기만 본다. 과거 미충전 분기는 backfill
         모드로 채워야 하며, daily가 과거 누락을 보정하지 않는다.
 
         Returns:
-            ``(net_delta, stored_ok, symbols, warns)`` (#1993). stored_ok는
+            ``(net_delta, stored_ok, symbols, warns)``. stored_ok는
             최신 분기가 ``QuarterStatus.OK`` (storable 저장)인지다.
         """
         corp_codes_list = list(corp_code_map.keys())
@@ -383,7 +383,7 @@ class DARTCollector:
             (기록 행 수, 수집된 심볼 집합, status, store_merge_failed).
 
             ``status``는 이 분기에 대한 checkpoint 전진/halt 결정을 구동하는
-            3-상태다(#2028, #2054). **storable_rows 기준으로만 판정**하며
+            3-상태다. **storable_rows 기준으로만 판정**하며
             store-merge 실패를 절대 섞지 않는다(#2028 의미 보존):
 
             - transient 예외(warn 추가) → ``QuarterStatus.HALT``
@@ -398,7 +398,7 @@ class DARTCollector:
 
             ``store_merge_failed``는 이번 분기 ``store.write`` 가 파티션 merge
             실패(기존 파일 보존 + ``store_merge`` 경고 적재, net_delta=0)를
-            일으켰는지다(#1993). data.go.kr는 runner R1이 store 경고 drain으로
+            일으켰는지다. data.go.kr는 runner R1이 store 경고 drain으로
             checkpoint를 가드하지만 DART는 checkpoint.save를 collector 내부에서
             하므로(``_collect_quarters``/``_collect_latest_quarter``) 호출자가 이
             bool로 checkpoint 전진을 게이트한다. QuarterStatus는 storable 기준

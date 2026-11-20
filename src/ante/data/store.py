@@ -24,7 +24,7 @@ class ParquetReadError(Exception):
     경로(`strict=False`, 기본)는 손상 파티션을 logger.warning + continue로
     skip하므로 이 예외를 발생시키지 않는다(feed/CLI 회귀 방지). strict
     경로(backtest data 로드 등)는 손상 파티션을 만나면 부분 데이터로
-    silent 성공하지 않고 이 예외로 즉시 실패한다(#2095).
+    silent 성공하지 않고 이 예외로 즉시 실패한다.
 
     메시지에 손상 파일 경로와 원인 예외를 포함하며, `raise ... from exc`
     로 원인 예외 체인을 보존한다.
@@ -88,7 +88,7 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
       DART 재무제표 date는 분기말일(3/31·6/30·9/30·12/31)이라
       data.go.kr의 같은 거래일 일별 fundamental과 같은 월 파티션에서
       date가 충돌할 수 있다. `source`까지 키에 포함하면 두 소스의
-      서로 다른(null-complementary) 행을 **모두 보존**한다(#1964).
+      서로 다른(null-complementary) 행을 **모두 보존**한다.
       `available_date`(point-in-time 공시 접수일, #2010)는 논리 행을
       식별하는 키가 아니라 **value 속성**이므로 natural key에 넣지 않는다.
       key는 period_end(`date`)+`source`로 한 분기·소스당 한 논리 행을
@@ -246,7 +246,7 @@ class ParquetStore:
         DART collector처럼 checkpoint.save를 자체적으로 수행하는 호출자가
         ``store.write`` 직전/직후 이 값을 비교해 이번 단계에서 발생한
         store-merge 실패(파티션 merge 실패 → 기존 파일 보존, 데이터 미반영)를
-        감지하는 데 쓴다(#1993). 누적 카운트이므로 **직전/직후 증가분**으로
+        감지하는 데 쓴다. 누적 카운트이므로 **직전/직후 증가분**으로
         이번 단계의 실패를 판정해야 한다(이전 단계 경고가 아직 runner에 의해
         drain되지 않았을 수 있음).
 
@@ -272,7 +272,7 @@ class ParquetStore:
         - fundamental: {base}/fundamental/{exchange}/{symbol}/
         - tick: {base}/tick/{exchange}/{symbol}/
 
-        path traversal 방어(#1631): 경로에 **실제로 사용되는** 각 segment
+        path traversal 방어: 경로에 **실제로 사용되는** 각 segment
         (`symbol`/`exchange`/`data_type`, ohlcv 계열은 `timeframe`)를
         `_is_safe_path_segment`로 검증하고, resolved(`.resolve()` symlink
         해소) 기준으로 candidate가 정확히 expected parent 직하위이며 base
@@ -348,12 +348,12 @@ class ParquetStore:
             start: 시작 시간 (ISO 형식, inclusive)
             end: 종료 시간 (ISO 형식, inclusive). date-only(`YYYY-MM-DD`)는
                 해당 날짜 whole-day inclusive(당일 23:59:59.999까지)로
-                해석되어 intraday 당일 장중 데이터가 포함된다(#2081).
+                해석되어 intraday 당일 장중 데이터가 포함된다.
                 시간 성분이 있는 형식은 그 정확 instant까지 inclusive다.
             limit: 최근 N건만 반환
             data_type: 데이터 타입 (ohlcv, fundamental, tick)
             exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
-            strict: 손상 파티션 처리 정책(#2095).
+            strict: 손상 파티션 처리 정책.
                 - False(기본): tolerant. 손상 파티션을 logger.warning 후
                   skip하고 나머지로 부분 DataFrame을 반환한다(feed/CLI 등
                   부분-허용 공용 경로의 기존 동작 보존).
@@ -563,7 +563,7 @@ class ParquetStore:
         """대상 파티션 dir의 stale ``*.tmp`` (orphan)를 삭제하고 삭제 수를 반환.
 
         원자 write의 임시 파일은 hard-kill/전원 손실 시 최종 replace 전에 orphan으로
-        남는다. ``*.tmp`` 는 read glob(``*.parquet``) 밖이라 누적되므로 정리한다(#2413).
+        남는다. ``*.tmp`` 는 read glob(``*.parquet``) 밖이라 누적되므로 정리한다.
         **`validate(fix=True)`(사용자 발동, write-scoped)에서만** 호출한다 — write
         hot-path나 read-scoped 경로에서는 파일시스템을 변조하지 않는다. 프로세스
         시작 시점 전역 GC는 본 이슈 Known Limitations의 follow-up이다.
@@ -688,7 +688,7 @@ class ParquetStore:
 
     @staticmethod
     def _is_zero_byte(filepath: Path) -> bool:
-        """target이 **확실히 0바이트**인지 판정(#2413). stat 실패 시 False(단정 금지).
+        """target이 **확실히 0바이트**인지 판정. stat 실패 시 False(단정 금지).
 
         0바이트 파일은 원자성 도입 전 비원자 write가 중단돼 남은 미완성 파티션이다
         (관찰된 stuck의 원인). stat이 실패(권한/경로 race)하면 0바이트로 단정하지
@@ -704,7 +704,7 @@ class ParquetStore:
     ) -> int:
         """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge.
 
-        원자성(#2413): 모든 파티션 write는 `_atomic_write_parquet`(임시 파일 +
+        원자성: 모든 파티션 write는 `_atomic_write_parquet`(임시 파일 +
         원자 replace)로 수행한다. write 중단 시 최종 경로에 0바이트/부분 parquet이
         남지 않는다(checkpoint.save durability 불변과 정합).
 
@@ -731,7 +731,7 @@ class ParquetStore:
             key: natural key 컬럼 목록. 비어 있으면 dedup/sort 생략.
 
         Returns:
-            이 파티션에 **새로 저장된 net-new 행 수**(#1993):
+            이 파티션에 **새로 저장된 net-new 행 수**:
             ``max(0, len(merged) - len(existing))``. 기존 파일이 없거나 0바이트
             자동복구면 dedup 결과 행 수(신규 전량). 재write/dedup으로 merged 행 수가
             늘지 않으면 0. legacy 중복 정리로 merged < existing이면(행이 줄어들면)
@@ -890,7 +890,7 @@ class ParquetStore:
              "stale_tmp_removed": int}
 
             ``stale_tmp_removed`` 는 회수한 orphan ``*.tmp`` (이전 hard-kill 시 원자
-            write가 replace 전에 남긴 잔재) 수다(#2413). read glob(``*.parquet``)
+            write가 replace 전에 남긴 잔재) 수다. read glob(``*.parquet``)
             밖이라 누적되므로 **사용자 발동 fix=True에서만** 정리한다. fix=False는
             read-scoped라 파일시스템을 변조하지 않는다(0으로 리포트).
         """

@@ -1,4 +1,4 @@
-"""v005: trades.timestamp 공백 구분 포맷 → UTC-aware isoformat 정규화 (#2371).
+"""v005: trades.timestamp 공백 구분 포맷 → UTC-aware isoformat 정규화.
 
 과거 ``save_adjustment`` 가 SQLite ``datetime('now')`` 로 저장한 보정 행의
 ``timestamp`` 는 공백 구분 포맷(``YYYY-MM-DD HH:MM:SS``, UTC, 19자)이다. 나머지

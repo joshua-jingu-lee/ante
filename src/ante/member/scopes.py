@@ -1,4 +1,4 @@
-"""Member scope vocabulary SSOT (#1439).
+"""Member scope vocabulary SSOT.
 
 본 모듈은 Ante 시스템 전반에서 사용하는 scope 문자열 vocabulary 의 단일 진실
 저장소(SSOT)다. 인증 후 권한 판정에 사용되는 모든 scope 토큰은 본 모듈의
@@ -86,7 +86,7 @@ class InvalidScopeError(ValueError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"MEMBER_INVALID_SCOPE"`` 를 노출하도록 한다 (#1797). CLI 표면은 이미
+    ``"MEMBER_INVALID_SCOPE"`` 를 노출하도록 한다. CLI 표면은 이미
     ``code="MEMBER_INVALID_SCOPE"`` 로 명시 매핑하고 있어 envelope 일관성
     회귀가 없다.
     """

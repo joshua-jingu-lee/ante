@@ -56,7 +56,7 @@ def _write_pid_file(config: Config) -> None:
 def _starting_marker_path(config: Config) -> Path:
     """booting marker 경로를 반환한다.
 
-    Refs #1160: PID 파일과 같은 디렉토리의 ``.starting`` 파일을 사용한다.
+    PID 파일과 같은 디렉토리의 ``.starting`` 파일을 사용한다.
     ``runtime.pid_path`` resolver에서 파생하므로 #1157의 single-canonical
     runtime path 정책과 자동으로 정합된다.
     """
@@ -92,7 +92,7 @@ def _remove_starting_marker(config: Config) -> None:
 def _remove_pid_file(config: Config) -> None:
     """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다.
 
-    Refs #1157: ``read_pid_file``은 canonical만 보지만, legacy cwd-relative
+    ``read_pid_file``은 canonical만 보지만, legacy cwd-relative
     ``db/ante.pid``가 과거 환경에서 남아 있을 수 있으므로 cleanup은 양쪽을
     ``unlink(missing_ok=True)`` 처리해 transitional 환경에서 stale 잔여를
     제거한다 (best-effort). 이 책임은 ``read_pid_file``의 single-canonical
@@ -289,7 +289,7 @@ def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
     (treasury LIVE sync·fill recovery·reconcile)가 ``get_broker`` 를 다시 호출하지
     않아 EGW00133 토큰 1/min 재타격을 피한다(T4 단일 cadence). 제외된 LIVE 계좌의
     treasury_sync·fill_reconcile·reconcile 플래그는 ``mark_not_ready`` 로 명시
-    표시해, self-healing(#2397/#2398)이 broker 회복 시 픽업·재등록한다.
+    표시해, self-healing이 broker 회복 시 픽업·재등록한다.
 
     면제(virtual/test) 계좌와 broker_ready 성공 LIVE 계좌는 그대로 유지된다
     (treasury VIRTUAL sync 등 broker 무관 처리 보존).
@@ -476,7 +476,7 @@ async def _migrate_is_paper_to_broker_config(s: Services) -> None:
 
 
 def _subscribe_order_tracker(eventbus: Any, order_tracker: Any) -> None:
-    """OrderTracker 를 주문 lifecycle 이벤트에 구독시킨다 (#1946).
+    """OrderTracker 를 주문 lifecycle 이벤트에 구독시킨다.
 
     - ``OrderSubmittedEvent`` → ``open`` seed (order_id PK, broker_order_id,
       account/bot/strategy 정체성, KST 영업일).
@@ -698,13 +698,13 @@ async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> 
     내 재시도해 startup token race 를 흡수한다.
 
     **재배치 사유(#2399 Codex P1):** ``AccountService.get_broker`` 는 cache-miss 시
-    내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다(#2372). 따라서
+    내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다. 따라서
     새 프로세스 cache-miss startup 의 첫 인증이 EGW00133 을 반환하면 그 예외가
     ``get_broker()`` 호출 자체에서 전파된다. retry 가 ``broker.connect()`` 만
     감쌌다면 ``get_broker()`` 가 먼저 raise 해 wrapper 에 도달하지 못하므로 bounded
     retry 가 무효였다. 따라서 retry 는 **``get_broker()`` 호출 전체**를 감싼다.
 
-    ``get_broker`` 는 connect 실패 시 캐시 미기록 + 세션 cleanup(#2368/#2372)하므로,
+    ``get_broker`` 는 connect 실패 시 캐시 미기록 + 세션 cleanup하므로,
     EGW00133 재시도 시 ``get_broker`` 재호출이 새 adapter build+connect 를 안전하게
     재수행한다(세션 누수 없음). ``_authenticate`` 자체는 즉시 raise(내부 sleep 없음)
     이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 성공 시 반환되는 broker 는
@@ -920,7 +920,7 @@ async def _init_gateway(s: Services) -> None:
 
 
 async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> None:
-    """FillReconcileScheduler 생성 + 기동 카치업(barrier) + 주기 폴 시작 (#1946).
+    """FillReconcileScheduler 생성 + 기동 카치업(barrier) + 주기 폴 시작.
 
     각 활성 broker 계좌마다 ``FillReconcileScheduler`` 를 만들고:
     1. ``catch_up_once()`` 를 **await** 해 다운타임 중 체결을 멱등 따라잡는다.
@@ -1028,7 +1028,7 @@ async def _register_fill_scheduler_for_account(s: Services, account: Any) -> boo
 
 
 async def _init_fill_outbox_publisher(s: Services) -> None:
-    """FillOutboxPublisher 기동 재전달(catch_up) + 주기 드레인 루프 시작 (#1949).
+    """FillOutboxPublisher 기동 재전달(catch_up) + 주기 드레인 루프 시작.
 
     1. ``catch_up_once()`` 를 **await** 해, 직전 FillReconcileScheduler 카치업이
        만든 outbox row 와 이전 실행의 commit-후-crash 로 미발행된 row 를 재전달
@@ -1050,7 +1050,7 @@ async def _init_fill_outbox_publisher(s: Services) -> None:
 async def _init_reconcile_scheduler(s: Services) -> None:
     """ReconcileScheduler 생성 및 시작.
 
-    SPLIT-3 (#1242): 활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
+    활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
     를 만들어 ``s.reconcile_schedulers`` dict 에 등록한다 (multi-broker pool).
     이전 SPLIT-1 패턴은 첫 번째 broker 만 골라 다른 계좌의 봇 reconcile 을
     건너뛰었다 (가드만 존재). 본 SPLIT 에서 dispatch 까지 분리한다.
@@ -1455,7 +1455,7 @@ async def _init_stream_integration(
 ) -> None:
     """KISStreamClient + StreamIntegration 초기화.
 
-    SPLIT-3 (#1242): KIS multi-account 환경에서 활성 계좌마다 별도의
+    KIS multi-account 환경에서 활성 계좌마다 별도의
     StreamIntegration 인스턴스를 만들어 ``s.stream_integrations`` dict 에
     ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
     의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
@@ -1520,7 +1520,7 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
 
     #2385: 과거에는 첫 번째 성공 broker 에서 ``return`` 했으나, 계좌 순서가
     ``test``(TEST) → ``oracle-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
-    종목 마스터 적재를 선점해 종목명 병기(#2377)가 전부 symbol-only 로
+    종목 마스터 적재를 선점해 종목명 병기가 전부 symbol-only 로
     폴백되는 회귀가 있었다. 이제 전 계좌를 순회하되 이미 동기화한 exchange
     는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.
     빈 결과(``get_instruments() == []``)는 synced 처리하지 않고 ``continue`` 하여
@@ -1594,7 +1594,7 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
 def _init_context_factory(s: Services) -> None:
     """StrategyContextFactory 완성 (Gateway 연결 이후).
 
-    SPLIT-3 (#1242): ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
+    ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
     가 생성한다 (per-bot account binding). ``s.data_provider`` 는 API gateway
     가 없는 (virtual-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
     설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
@@ -1624,7 +1624,7 @@ def _init_context_factory(s: Services) -> None:
 
 
 class _NullDataProvider:
-    """SPLIT-3 (#1242): API gateway 가 없는 환경에서 사용되는 no-op
+    """API gateway 가 없는 환경에서 사용되는 no-op
     DataProvider. strategy 인터페이스 호환을 위해 빈 결과를 반환한다."""
 
     async def get_ohlcv(
@@ -2216,7 +2216,7 @@ async def _stop_session_expiry_loop(
     stop_order_manager: Any,
     interval: float = 60.0,
 ) -> None:
-    """#2405: 거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리.
+    """거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리.
 
     ``_approval_expire_loop`` 동형. interval=60s 는 세션 경계(분 단위)를
     충분히 정밀하게 포착한다(A2 의미론이라 짧은 interval 의 과만료 부작용 없음).
@@ -2234,7 +2234,7 @@ async def _stop_session_expiry_loop(
 async def _init_notification(s: Services) -> None:
     """NotificationService, TelegramCommandReceiver 초기화.
 
-    부팅 계약 (#1118):
+    부팅 계약:
 
     - ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_CHAT_ID`` 시크릿이 누락(``ConfigError``)
       되거나 공란이면 NotificationService 를 생성하지 않고 부팅을 계속한다.

@@ -1,4 +1,4 @@
-"""OrderTracker — 추적 주문 영속 + 누적 체결 단조 advance (#1946).
+"""OrderTracker — 추적 주문 영속 + 누적 체결 단조 advance.
 
 체결 반영(fill-recovery) 경로의 권위 있는 추적 저장소.
 ``OrderSubmittedEvent`` 로 추적 주문을 seed하고, 스트림/폴이 관측한 누적 체결량을
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_order_tracker_open
 
 @dataclass(frozen=True, slots=True)
 class RecordFillResult:
-    """``record_fill`` CAS 결과 (#1949).
+    """``record_fill`` CAS 결과.
 
     Attributes:
         delta: 적용된 증분(``new_cumulative - 이전 recorded``). no-op이면 0.
@@ -128,7 +128,7 @@ class OrderTrackerRecord:
         )
 
     def to_open_order_dict(self) -> dict[str, object]:
-        """통일 OpenOrder dict 스키마로 매핑 (#1948).
+        """통일 OpenOrder dict 스키마로 매핑.
 
         OrderView ``get_open_orders`` 의 SSOT 스키마. 전략/telegram/IPC 소비자가
         공통으로 의존한다. ``remaining_qty = ordered_qty - recorded_filled_qty``
@@ -156,7 +156,7 @@ class OrderTracker:
     ``record_fill`` 은 ``FillApplier`` 의 단일 트랜잭션 + ``asyncio.Lock`` 안에서만
     호출되어야 한다 (멱등·crash 원자성은 FillApplier 가 보장).
 
-    인메모리 open 캐시 (#1948): LIVE ``ctx.get_open_orders()`` 의 sync 백엔드.
+    인메모리 open 캐시: LIVE ``ctx.get_open_orders()`` 의 sync 백엔드.
     캐시는 **commit 된 DB 상태의 미러**일 뿐 진리원이 아니다(DB 가 SSOT).
     캐시 키 = ``(account_id, bot_id, order_id)`` — 단일계좌 다중봇에서 타-봇 누출
     방지. 캐시 진입 경로는 4개뿐이며 모두 **DB commit 확정 이후** 반영한다:
@@ -243,7 +243,7 @@ class OrderTracker:
         같은 ``(account_id, broker_order_id, submitted_date)`` UNIQUE 충돌도
         동일하게 무시되어 seed 멱등성을 보장한다.
 
-        #1948: ``RETURNING`` 으로 **실제 INSERT 가 일어났을 때에만** open 캐시에
+        ``RETURNING`` 으로 **실제 INSERT 가 일어났을 때에만** open 캐시에
         upsert 한다. 중복 OrderSubmittedEvent(ON CONFLICT DO NOTHING — row 미반환)
         는 캐시를 건드리지 않아, 이후 advance 된 캐시 상태를 blind 하게 덮어쓰지
         않는다. **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
@@ -318,7 +318,7 @@ class OrderTracker:
         ``delta <= 0`` 이면 ``delta=0`` no-op(직전 recorded 를 confirmed 로 반영).
         ``delta > 0`` 이면 recorded 를 new_cumulative 로 갱신하고 status 를
         부분/완료로 전이한 뒤, **CAS ``RETURNING recorded_filled_qty`` 로 확정된
-        누적값**을 ``confirmed_cumulative`` 로 반환한다(#1949).
+        누적값**을 ``confirmed_cumulative`` 로 반환한다.
 
         ``confirmed_cumulative`` 는 outbox/이벤트의 결정적 ``fill_dedup_key`` 산출
         기준이다. 입력 ``new_cumulative`` 가 아니라 DB 가 RETURNING 으로 돌려준
@@ -435,7 +435,7 @@ class OrderTracker:
 
         이미 ``filled`` 인 주문은 덮어쓰지 않는다 (체결 완료가 우선).
 
-        #1948: DB write 후 ``_evict_open_cache`` 로 캐시에서 제거(terminal 은 open
+        DB write 후 ``_evict_open_cache`` 로 캐시에서 제거(terminal 은 open
         이 아니므로). **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
         소유)**. 이미 ``filled`` 였던 주문은 캐시에 없으므로 evict 가 no-op 이고,
         non-terminal 이었던 주문만 제거된다.
@@ -453,7 +453,7 @@ class OrderTracker:
     def get_open_orders_for_bot_sync(
         self, account_id: str, bot_id: str
     ) -> list[OrderTrackerRecord]:
-        """``(account_id, bot_id)`` 의 non-terminal 주문 sync 조회 (#1948).
+        """``(account_id, bot_id)`` 의 non-terminal 주문 sync 조회.
 
         LIVE ``ctx.get_open_orders()`` 의 백엔드. 이벤트 루프 스레드 위 await 된
         코루틴 내부에서 전략이 sync 호출하므로 **DB I/O 없이 인메모리 캐시만** 읽는다.
@@ -493,7 +493,7 @@ class OrderTracker:
         symbol: str,
         side: str,
     ) -> list[OrderTrackerRecord]:
-        """``(account_id, bot_id, symbol, side)`` 의 non-terminal 주문 (#1950).
+        """``(account_id, bot_id, symbol, side)`` 의 non-terminal 주문.
 
         PositionReconciler 의 self-submitted fill 분류(reconciler self-check)에
         쓰인다. ``open``/``partially_filled`` 인 주문만 반환하므로, FillApplier 가

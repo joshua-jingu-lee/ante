@@ -203,7 +203,7 @@ class BackfillRunner:
         가장 먼저 수행한다. malformed/future일 때는 체크포인트·소스
         접근 없이 coded config_error만 담은 result를 즉시 반환한다.
 
-        가드는 두 술어로 분리되어 주입된다 (#1972):
+        가드는 두 술어로 분리되어 주입된다:
             ``is_blocked_day(config, target_date)`` — ``blocked_days``
             (target_date 요일). 해당 날짜는 데이터가 없어 **skip**.
             ``is_trading_paused(config)`` — ``blocked_hours`` +
@@ -347,7 +347,7 @@ class BackfillRunner:
     ) -> None:
         """data.go.kr 날짜별 수집을 실행한다.
 
-        가드 분리 (#1972):
+        가드 분리:
             - ``is_blocked_day`` 가 True인 비거래 요일은 **skip**한다
               (그 과거 날짜는 데이터가 없어 대기해도 영원히 안 채워짐).
             - 그 외 날짜는 ``is_trading_paused`` 가 풀릴 때까지 **대기한 뒤**
@@ -446,7 +446,7 @@ class BackfillRunner:
         날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
         실패 날짜가 이미 checkpoint를 전진시킨 뒤가 된다).
 
-        반환값은 ctx 측 경고 절단(#2414)과 **무관**하다 — ``drained`` 전수를
+        반환값은 ctx 측 경고 절단과 **무관**하다 — ``drained`` 전수를
         먼저 검사한 뒤 ctx에 적재하며, ``add_warnings`` 는 입력 리스트를
         변형하지 않는다(결정 6). 절단된 ``store_merge`` 도 checkpoint 미전진을
         정확히 유발한다.
@@ -663,7 +663,7 @@ class _RunContext:
         return self._warnings_truncated
 
     def add_warnings(self, warns: list[dict]) -> None:
-        """경고를 유계로 적재하는 **단일 chokepoint** (#2414).
+        """경고를 유계로 적재하는 **단일 chokepoint**.
 
         동작:
             1. 버킷을 ``w.get("type") or UNTYPED_WARNING_BUCKET`` 으로

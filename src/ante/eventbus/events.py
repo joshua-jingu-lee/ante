@@ -178,7 +178,7 @@ class OrderApprovedEvent(Event):
 class OrderSubmittedEvent(Event):
     """APIGateway → EventBus: 증권사에 주문 전송됨.
 
-    Refs #2391: ``price`` 는 원주문 가격(지정가 단가)이며, OrderTracker 의
+    ``price`` 는 원주문 가격(지정가 단가)이며, OrderTracker 의
     ``order_price`` seed 출처다. 주문 정정(modify) v1(price-only)에서 buy 가격↓
     fail-closed 판정(``new_price ≤ order_price``)에 쓰인다. market/미지정 주문은
     ``None`` 이며, gateway 가 publish 시 ``OrderApprovedEvent.price`` 로 채운다.
@@ -203,7 +203,7 @@ class OrderSubmittedEvent(Event):
 class OrderFilledEvent(Event):
     """BrokerAdapter → EventBus: 체결 완료.
 
-    ``fill_dedup_key`` (#1949): 동일 체결을 결정적으로 식별하는 키.
+    ``fill_dedup_key``: 동일 체결을 결정적으로 식별하는 키.
     FillApplier 경로는 ``f"{order_id}:{canonical(confirmed_cumulative)}"``
     (CAS RETURNING 확정 누적값 기준)로 채운다. outbox at-least-once 재전달 시
     소비자가 이중처리를 식별·억제하는 데 쓰인다(소비는 #1957). default ``""`` 로
@@ -333,7 +333,7 @@ class BotStartedEvent(Event):
 class BotStopEvent(Event):
     """RuleEngine/사용자 → EventBus: 봇 중지 요청.
 
-    Refs #2145: ``BotStopEvent`` 는 봇 계좌(``RuleEngine._account_id``)에
+    ``BotStopEvent`` 는 봇 계좌(``RuleEngine._account_id``)에
     귀속되는 account-scoped 이벤트다. 다른 봇 lifecycle 이벤트
     (``BotStartedEvent``/``BotStoppedEvent``/``BotErrorEvent``) 와 동일한
     컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
@@ -440,7 +440,7 @@ class BacktestCompleteEvent(Event):
 class PositionMismatchEvent(Event):
     """포지션 불일치 감지.
 
-    Refs #2058: ``PositionMismatchEvent`` 는 대사(reconcile) 대상 계좌에
+    ``PositionMismatchEvent`` 는 대사(reconcile) 대상 계좌에
     귀속되는 account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한
     컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
     ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
@@ -464,7 +464,7 @@ class PositionMismatchEvent(Event):
 class ReconcileEvent(Event):
     """Reconciler → EventBus: 대사 보정 완료.
 
-    Refs #2058: ``ReconcileEvent`` 는 대사(reconcile) 대상 계좌에 귀속되는
+    ``ReconcileEvent`` 는 대사(reconcile) 대상 계좌에 귀속되는
     account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한 컨벤션으로
     ``account_id`` 를 첫 데이터 필드로 배치하고, ``_requires_account_id``
     마커로 invalid fallback (``""``, ``None``, ``"default"``, 형식 위반) 을
@@ -486,7 +486,7 @@ class ReconcileEvent(Event):
 class ExternalSignalEvent(Event):
     """REST API → EventBus: 외부 AI Agent 시그널.
 
-    Refs #2146: ``ExternalSignalEvent`` 는 봇 계좌(``bot.config.account_id``)에
+    ``ExternalSignalEvent`` 는 봇 계좌(``bot.config.account_id``)에
     귀속되는 account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한
     컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
     ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
@@ -651,7 +651,7 @@ class CircuitBreakerEvent(Event):
 class OrderCancelFailedEvent(Event):
     """주문 취소 실패.
 
-    Refs #2044: 전략 ``on_order_update(status="cancel_failed")`` 스펙의
+    전략 ``on_order_update(status="cancel_failed")`` 스펙의
     필수 키 ``symbol``/``side`` 를 채우기 위해 ``OrderCancelledEvent`` 와
     동형으로 필드를 보유한다. default 빈값으로 하위호환을 유지하며,
     Gateway 핸들러가 OrderTracker record 에서 채운다.
@@ -672,7 +672,7 @@ class OrderCancelFailedEvent(Event):
 class StopOrderRegisteredEvent(Event):
     """StopOrderManager → EventBus: 스탑 주문 등록.
 
-    Refs #1336: 본 이벤트는 ``BotManager`` / ``Bot.on_order_update`` /
+    본 이벤트는 ``BotManager`` / ``Bot.on_order_update`` /
     ``SignalChannel._on_order_update`` 가 구독하여 전략 ``on_order_update``
     콜백 ``status="stop_registered"`` 로 변환한다. 다른 account-scoped
     주문 이벤트와 같은 컨벤션으로 ``account_id`` 를 첫 데이터 필드로
@@ -698,7 +698,7 @@ class StopOrderRegisteredEvent(Event):
 class StopOrderTriggeredEvent(Event):
     """StopOrderManager → EventBus: 스탑 주문 트리거.
 
-    Refs #1336: 변환된 일반 주문(``OrderRequestEvent``)이 자체 라이프사이클
+    변환된 일반 주문(``OrderRequestEvent``)이 자체 라이프사이클
     이벤트를 발행하지만, stop_order_id 등 stop 식별 단위가 다르므로 본
     이벤트를 별도로 발행하여 전략 ``on_order_update``
     (``status="stop_triggered"``) 로 통보한다. ``account_id`` 는 다른
@@ -722,7 +722,7 @@ class StopOrderTriggeredEvent(Event):
 class StopOrderExpiredEvent(Event):
     """StopOrderManager → EventBus: 스탑 주문 만료.
 
-    Refs #1336: 등록된 stop 주문이 트리거되지 않은 채 자동 해제될 때
+    등록된 stop 주문이 트리거되지 않은 채 자동 해제될 때
     발행된다. ``reason`` 허용 값 (현재 코드 기준):
 
     - ``"session_ended"``: ``check_session_expiry()`` 가 거래 세션 종료를
@@ -751,7 +751,7 @@ class StopOrderExpiredEvent(Event):
 class StreamConnectedEvent(Event):
     """KISStreamClient → EventBus: WebSocket 연결 성공.
 
-    SPLIT-3 (#1242): KIS multi-account 환경에서 각 계좌마다 별도의
+    KIS multi-account 환경에서 각 계좌마다 별도의
     ``KISStreamClient`` 인스턴스가 생성되며, 발행자는 자신의
     ``account_id`` 를 명시 전달해야 한다. ``StreamIntegration`` 의
     fallback toggle 이 다른 계좌 stream 의 disconnect 로 잘못 켜지지
@@ -769,7 +769,7 @@ class StreamConnectedEvent(Event):
 class StreamDisconnectedEvent(Event):
     """KISStreamClient → EventBus: WebSocket 연결 해제.
 
-    SPLIT-3 (#1242): account-scoped marker 적용. 자세한 내용은
+    account-scoped marker 적용. 자세한 내용은
     :class:`StreamConnectedEvent` 를 참조한다.
     """
 

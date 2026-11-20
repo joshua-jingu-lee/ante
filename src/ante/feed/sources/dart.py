@@ -275,7 +275,7 @@ class DARTSource:
         return all_items
 
     async def validate_credentials(self) -> tuple[bool | None, str | None]:
-        """API 키 유효성을 경량 요청 1회로 검증한다 (#2046).
+        """API 키 유효성을 경량 요청 1회로 검증한다.
 
         가장 싼 기존 요청 패턴(fnlttMultiAcnt.json)을 더미 파라미터로 1회
         호출한다. DART는 인증키를 파라미터 유효성보다 먼저 평가하므로,

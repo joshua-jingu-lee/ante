@@ -167,7 +167,7 @@ class MockBrokerAdapter(BrokerAdapter):
         )
 
     async def connect(self) -> None:
-        """Mock 연결 (항상 성공). 멱등(#2372): 이미 연결됐으면 no-op."""
+        """Mock 연결 (항상 성공). 멱등: 이미 연결됐으면 no-op."""
         if self.is_connected:
             return
         self.is_connected = True
@@ -214,7 +214,7 @@ class MockBrokerAdapter(BrokerAdapter):
         price: float | None = None,
         order_type: str = "market",
     ) -> dict[str, float]:
-        """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정 (#2384).
+        """매수가능 조회 — 보유 현금(``cash``) 기반 가상 산정.
 
         브로커 호출 없이 보유 현금으로 산정한다. 시장가/``price=None``이면 내부
         현재가를 단가로 사용하며, 단가 0이면 수량은 0.0이다.

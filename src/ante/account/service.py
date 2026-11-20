@@ -126,7 +126,7 @@ def _load_persisted_timezone(stored_tz: str, account_id: str) -> tuple[str, bool
     invalid 이면 **fallback 으로 덮어쓰지 않고** stored value 를 그대로
     반환하면서 marker 를 ``True`` 로 세팅한다. 이는 후속
     ``AccountService.update`` 의 전체 row UPDATE 가 stored invalid 값을
-    silent 하게 default 로 rewrite 하는 회귀를 막기 위한 것이다 (#1474).
+    silent 하게 default 로 rewrite 하는 회귀를 막기 위한 것이다.
 
     invalid 일 때 ``ACCOUNT_INVALID_TIMEZONE_LEGACY`` 검색 가능 코드를
     포함한 structured warning 을 한 번 남기고, 운영자에게 cold-path repair
@@ -590,7 +590,7 @@ class AccountService:
         불린 적 없는 구간)에는 의미가 없고, 다음 `get_broker()` 호출이 새
         설정으로 lazy init한다.
 
-        **동시성 (#2372):** 캐시 부재 조기 반환 검사를 포함한 본문 전체를
+        **동시성:** 캐시 부재 조기 반환 검사를 포함한 본문 전체를
         ``get_broker()`` 와 **동일한 per-account lock**
         (:meth:`_broker_lock_for`) 안에서 수행한다. lock 없이 조기 반환하면,
         초기 ``get_broker()`` 가 lock 을 쥐고 ``connect()`` 를 대기하는 동안
@@ -925,7 +925,7 @@ class AccountService:
 
         최초 호출 시 어댑터를 생성하고 ``connect()`` 를 수행하며, **연결에
         성공한 경우에만** 캐시에 기록한 뒤 반환한다. connect 가 실패하면
-        캐시에 남기지 않고 예외를 전파하므로(#2372), 일시적 인증/네트워크
+        캐시에 남기지 않고 예외를 전파하므로, 일시적 인증/네트워크
         오류로 미연결 adapter 가 캐시에 잔존해 후속 소비자가 재사용하는 일이
         없다. 이는 재연결 경로(:meth:`_reconnect_broker`)의 connect-성공-후-캐시
         원칙과 동일하다 — 초기 경로의 비대칭을 제거한다.

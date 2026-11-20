@@ -90,7 +90,7 @@ class TradeRecorder:
     async def _on_filled(self, event: object) -> None:
         """체결 이벤트 → 체결 알림 발행.
 
-        #1946: fill 의 durable 적용(trades insert + ``positions``)은 **FillApplier
+        fill 의 durable 적용(trades insert + ``positions``)은 **FillApplier
         단일 권위자**가 단일 트랜잭션으로 수행한다. ``OrderFilledEvent`` 는 commit
         이후 발행되므로, 본 핸들러(priority=10, 가장 늦게 실행)가 호출될 때는 이미
         trades/positions 가 반영된 상태다. 따라서 TradeRecorder 는 fill 경로에서
@@ -98,7 +98,7 @@ class TradeRecorder:
         포지션을 읽어 체결 알림만 발행한다. rejected/failed/cancelled 등 비-fill
         상태 기록은 별도 핸들러에서 유지한다.
 
-        #1957: trades insert(``_save``, INSERT OR IGNORE) 는 DB-멱등이지만 아래
+        trades insert(``_save``, INSERT OR IGNORE) 는 DB-멱등이지만 아래
         ``NotificationEvent`` publish 는 effect 비멱등이다(NotificationService 의
         60s in-memory content dedup 만 거쳐 재기동/catch_up 재전달 시 중복 알림).
         따라서 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 **early-return** 해

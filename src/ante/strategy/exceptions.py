@@ -25,7 +25,7 @@ class StrategyError(Exception):
 
 
 class StrategyNotFoundError(StrategyError):
-    """전략을 찾을 수 없음 (#1796).
+    """전략을 찾을 수 없음.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드

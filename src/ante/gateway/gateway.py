@@ -225,7 +225,7 @@ class APIGateway:
         OHLCV 캐시 키는 exchange 기반을 유지한다 (동일 거래소 데이터 공유).
         BrokerAdapter.get_ohlcv()가 미구현이면 빈 리스트를 반환한다.
 
-        SPLIT-3 (#1242): ``account_id`` 는 broker 라우팅과 rate limiter
+        ``account_id`` 는 broker 라우팅과 rate limiter
         bucket 결정에 사용되므로 fallback 금지 (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
@@ -254,7 +254,7 @@ class APIGateway:
     ) -> float:
         """현재가 조회 (캐시 우선). account_id로 브로커 라우팅.
 
-        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
@@ -275,7 +275,7 @@ class APIGateway:
     async def get_positions(self, *, account_id: str) -> list[dict[str, Any]]:
         """포지션 조회 (캐시 우선). account_id로 브로커 라우팅.
 
-        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
@@ -296,7 +296,7 @@ class APIGateway:
     async def get_account_balance(self, *, account_id: str) -> dict[str, float]:
         """잔고 조회 (캐시 우선). account_id로 브로커 라우팅.
 
-        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
@@ -327,7 +327,7 @@ class APIGateway:
     ) -> str:
         """주문 제출. 캐시 없이 rate limit만 적용. account_id로 브로커 라우팅.
 
-        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
@@ -365,7 +365,7 @@ class APIGateway:
         broker 를 호출하지 않는다 (내부 order_id 를 broker 로 passthrough 하지
         않는다 — P1 재발 방지).
 
-        SPLIT-3 (#1242): ``account_id`` required (``require_account_id``).
+        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 
@@ -591,7 +591,7 @@ class APIGateway:
         RuleEngine이 이미 정정 요청을 거부하면 ``_consumed=True`` transient
         marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우 추가
         terminal event를 발행하지 않고 바로 반환하여, 동일 정정 요청에 대해
-        terminal event가 중복 발행되지 않도록 한다 (#1331).
+        terminal event가 중복 발행되지 않도록 한다.
 
         v1(price-only) 정정 흐름 (broker 호출 **전** fail-closed):
 
@@ -599,7 +599,7 @@ class APIGateway:
         (b) 수량 변경 판정 — Bot이 ``action.quantity or 0.0`` 로 접으므로
             (``bot.py``) ``event.quantity == 0.0`` 은 미지정(price-only 허용),
             ``> 0 && != record.ordered_qty`` 는 수량 변경 →
-            ``modify_qty_change_unsupported`` (#2393), ``< 0`` 은 무효
+            ``modify_qty_change_unsupported``, ``< 0`` 은 무효
             → ``modify_invalid_args``.
         (c) OrderTracker record status가 ``open`` 이 아니면(부분체결/터미널/미발견)
             ``modify_partial_or_terminal_unsupported``.

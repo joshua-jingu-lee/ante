@@ -3,7 +3,7 @@
 CollectionResult를 JSON 파일로 변환하여 .feed/reports/ 에 저장한다.
 파일명 형식: {YYYY-MM-DDTHHMMSS}-{mode}.json (started_at의 초까지 포함, 콜론 제거).
 동일 started_at(같은 초) rerun으로 파일명이 충돌하면 -1, -2 ... suffix를 붙여
-기존 이력을 덮어쓰지 않는다(#2123).
+기존 이력을 덮어쓰지 않는다.
 """
 
 from __future__ import annotations
@@ -71,7 +71,7 @@ class ReportGenerator:
         경로: {data_path}/.feed/reports/{YYYY-MM-DDTHHMMSS}-{mode}.json
         파일명의 타임스탬프는 report의 started_at에서 추출한다(초까지 포함,
         콜론은 fs-safe하게 제거). 같은 날 다른 시각의 rerun은 서로 다른 파일명을
-        얻어 기존 리포트를 덮어쓰지 않는다(#2123).
+        얻어 기존 리포트를 덮어쓰지 않는다.
 
         같은 초의 started_at으로 rerun되어 파일명이 이미 존재하면, ``-1``,
         ``-2`` ... 충돌 suffix를 붙여 어떤 기존 이력도 덮어쓰지 않는다(소실 0).
@@ -110,7 +110,7 @@ class ReportGenerator:
         각 리포트 JSON의 ``started_at``을 datetime으로 파싱한 값을 기준으로
         내림차순(최신 우선) 정렬한다. 파일명(``{date}-{mode}.json``)은 같은
         날짜의 daily/backfill 순서를 사전식으로 오판하므로 정렬 키로 쓰지
-        않는다(#2047).
+        않는다.
 
         ``started_at`` 누락·파싱 실패·파일 읽기 실패 시 해당 파일은 목록에서
         제외하지 않고 정렬 키를 최소값으로 두어 뒤로 보낸다(전체 실패 방지).

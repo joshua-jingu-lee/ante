@@ -122,7 +122,7 @@ class StrategyContextFactory:
         raise ValueError(msg)
 
     def _resolve_live_order_view(self, config: BotConfig) -> OrderView:
-        """봇별 LiveOrderView 를 결정 (#1948).
+        """봇별 LiveOrderView 를 결정.
 
         ``order_tracker`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
         binding 한 **봇별** ``LiveOrderView`` 를 생성한다(``LiveDataProvider`` 패턴
@@ -142,7 +142,7 @@ class StrategyContextFactory:
         return _EmptyOrderView()
 
     def _resolve_live_trade_history(self, config: BotConfig) -> TradeHistoryView | None:
-        """봇별 LiveTradeHistoryView 를 결정 (#2139).
+        """봇별 LiveTradeHistoryView 를 결정.
 
         ``trade_recorder`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
         binding 한 **봇별** ``LiveTradeHistoryView`` 를 생성한다(``LiveOrderView``
@@ -168,7 +168,7 @@ class StrategyContextFactory:
         그 외 환경에서는 공유 ``self._data_provider`` 를 그대로 사용한다.
 
         OrderView 도 동일하게 ``order_tracker`` 주입 시 봇별 ``LiveOrderView`` 를
-        생성해 ``account_id`` 를 closure 로 격리한다(#1948).
+        생성해 ``account_id`` 를 closure 로 격리한다.
         """
         portfolio = self._get_live_portfolio(config)
         order_view = self._resolve_live_order_view(config)

@@ -428,7 +428,7 @@ class KISBaseAdapter(BrokerAdapter):
     async def connect(self) -> None:
         """KIS API 연결 및 인증.
 
-        멱등(#2372): 이미 연결된 상태(``is_connected`` 이고 활성 session 보유)면
+        멱등: 이미 연결된 상태(``is_connected`` 이고 활성 session 보유)면
         새 session 을 만들지 않고 즉시 반환한다. ``get_broker`` 가 connect-성공-후
         -캐시하므로, 호출자(CLI ``_get_broker``·runtime startup)가 캐시된
         어댑터에 connect 를 재호출해도 기존 session 교체로 인한 누수가 없다.
@@ -463,7 +463,7 @@ class KISBaseAdapter(BrokerAdapter):
         logger.info("KIS API 연결 해제")
 
     async def _authenticate(self) -> None:
-        """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown (#2399).
+        """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown.
 
         절차 (T1/T2/T4 source-level cooldown):
         1. **캐시 read**: module-level ``_token_cache`` 에 본 어댑터의 config
@@ -505,7 +505,7 @@ class KISBaseAdapter(BrokerAdapter):
             logger.info("KIS 토큰 발급 완료")
 
     def _token_cache_key(self) -> _TokenCacheKey:
-        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env) (#2399).
+        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env).
 
         attempt4 P2: 캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
         app_key 라도 credentials/환경이 바뀌면 다른 키로 cache miss → 새 토큰 발급으로
@@ -672,7 +672,7 @@ class KISBaseAdapter(BrokerAdapter):
         ``msg_cd``)가 함께 들어오는 경우 broker business error로 승격해
         ``APIError.error_code``에 ``msg_cd``를 보존한다.
 
-        retryable 우선순위 (#1338):
+        retryable 우선순위:
             1. ``msg_cd`` ∈ ``PERMANENT_MSG_CODES`` → ``False`` (강제).
             2. HTTP status가 non-retryable(401/403/404/422 등) → ``False`` (강제).
             3. ``msg_cd`` ∈ ``TRANSIENT_MSG_CODES`` → ``True``.
@@ -776,7 +776,7 @@ class KISBaseAdapter(BrokerAdapter):
         조회 요청 헤더 ``tr_cont`` 값("" 최초 / "N" 다음)이며, 반환 두 번째
         값은 응답 헤더 ``tr_cont`` ("F"/"M"=다음 있음 / "D"/"E"=마지막)이다.
 
-        ``cb_exempt_timeout`` 은 **호출측 차단기 회계 opt-out** 이다(#2350).
+        ``cb_exempt_timeout`` 은 **호출측 차단기 회계 opt-out** 이다.
         ``True`` 면 ``TimeoutError`` 계열(aiohttp timeout 포함, ``TimeoutError``
         하위)의 실패를 ``CircuitBreaker.record_failure()`` 에 **기록하지 않는다**.
         late-ccld(``get_order_history``) 조회 타임아웃이 어댑터 전역 단일 차단기를
@@ -868,7 +868,7 @@ class KISBaseAdapter(BrokerAdapter):
         ``output2`` 같은 summary/metadata 는 누적하지 않는다.
 
         ``cb_exempt_timeout`` 은 ``_request_with_cont`` 로 그대로 전파되는 차단기
-        회계 opt-out 이다(#2350). late-ccld(``get_order_history``) 폴 경로만
+        회계 opt-out 이다. late-ccld(``get_order_history``) 폴 경로만
         ``True`` 로 호출해 조회 타임아웃이 어댑터 전역 단일 차단기를 OPEN 시키지
         않게 한다. 다른 호출자는 기본값 ``False`` 로 무변경이다.
 
@@ -1210,7 +1210,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         return broker_order_id
 
     def _cache_krx_fwdg_orgno(self, broker_order_id: str, orgno: str | None) -> None:
-        """order-cash 응답의 KRX_FWDG_ORD_ORGNO 를 제출 영업일과 함께 캐시 (#2345).
+        """order-cash 응답의 KRX_FWDG_ORD_ORGNO 를 제출 영업일과 함께 캐시.
 
         non-empty 값만 저장한다. broker_order_id(ODNO) 키로 (값, 제출 KST 영업일)
         을 매핑하며, bounded(OrderedDict + maxlen)로 무한 증가를 막는다.
@@ -1278,7 +1278,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         2026-06-12).
 
         body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)를
-        조건부로 전송한다(#2345). 값은 place_order 시 order-cash 응답에서 캡처해
+        조건부로 전송한다. 값은 place_order 시 order-cash 응답에서 캡처해
         둔 인메모리 캐시에서 가져오며, 순수 dict 조회로 네트워크/추가 조회를 하지
         않는다. 캐시 miss 또는 제출 영업일 불일치(odno 재사용 등) 시에는 필드를
         생략한다(기존 동작 유지).
@@ -1558,13 +1558,13 @@ class KISDomesticAdapter(KISBaseAdapter):
     ) -> list[dict[str, Any]]:
         """주문/체결 이력 조회 (CTX_AREA 연속조회로 전 페이지 누적 후 fold).
 
-        tr_id 는 KST 3개월 경계(inner/before) × 모의/실전 4코드로 분기한다(#2349).
+        tr_id 는 KST 3개월 경계(inner/before) × 모의/실전 4코드로 분기한다.
         조회 시작일(``INQR_STRT_DT``)이 KST 오늘 기준 3개월 전 cutoff 이상이면
         inner(``*0081R``), 미만이면 before(``*9215R``)다(start-date 단독 기준).
         교차 구간(``from < cutoff <= to``)은 split query 없이 start-date 기준
         before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다.
         자동 호출자 FillReconcileScheduler 는 항상 ≤7일 창이라 inner 고정이지만,
-        사용자 표면 ``ante broker order-history`` (#2412) 는 임의 ``--from`` 을
+        사용자 표면 ``ante broker order-history`` 는 임의 ``--from`` 을
         받으므로 before 분기와 교차 구간이 실제로 도달 가능하다 — 한계는 CLI
         ``--help`` / 스펙으로 노출하며 여기서 거부하지 않는다(정책 무변경).
         """

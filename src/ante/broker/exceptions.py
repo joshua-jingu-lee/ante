@@ -47,7 +47,7 @@ class AuthenticationError(BrokerError):
     KIS OAuth 토큰 발급/갱신 실패 (HTTP 401/403, 잘못된 app_key/app_secret
     등). taxonomy ``auth`` 카테고리.
 
-    ``error_code`` (#2399): KIS 원천 ``msg_cd`` (예: ``EGW00133``)를 **구조적으로**
+    ``error_code``: KIS 원천 ``msg_cd`` (예: ``EGW00133``)를 **구조적으로**
     보존한다. ``main`` 의 startup / self-healing connect 실패 경로가 reason 에
     ``EGW00133`` 을 문자열 grep 이 아니라 ``getattr(e, "error_code", None)`` /
     isinstance 로 추출하기 위함이다(D-ACC-09 readiness reason 연동). 기본값은 빈
@@ -160,7 +160,7 @@ class CircuitOpenError(BrokerError):
 
 
 class ModifyOrgnoUnavailableError(BrokerError):
-    """주문 정정 KRX_FWDG_ORD_ORGNO 미상 — 정정 요청 전송 불가 (#2391).
+    """주문 정정 KRX_FWDG_ORD_ORGNO 미상 — 정정 요청 전송 불가.
 
     KIS 국내주식 정정(order-rvsecncl)은 원주문별 ``KRX_FWDG_ORD_ORGNO``
     (한국거래소전송주문조직번호)를 요구한다. 이 값은 place_order(order-cash) 성공

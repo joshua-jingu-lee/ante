@@ -1,4 +1,4 @@
-"""CLI/IPC error helper functions (#1840).
+"""CLI/IPC error helper functions.
 
 본 모듈은 ``docs/specs/contracts/error-taxonomy.md`` 가 normative 로 lock 한
 ``ErrorSpec`` taxonomy 를 CLI direct path 와 IPC path 가 공통으로 사용할 수

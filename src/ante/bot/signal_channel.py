@@ -312,7 +312,7 @@ class SignalChannel:
 
         Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
 
-        #1957: outbox at-least-once 재전달 시 같은 fill 의 중복 write 를 bounded
+        outbox at-least-once 재전달 시 같은 fill 의 중복 write 를 bounded
         dedup 한다. 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 write skip. 빈키
         (재전달 없는 단발 경로)는 가드 비대상으로 항상 write. payload 에
         ``fill_dedup_key`` 를 실어 외부 에이전트의 자체 dedup 도 지원한다.

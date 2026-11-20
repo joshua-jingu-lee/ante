@@ -79,7 +79,7 @@ def _coerce_finite_quantity(value: object) -> float:
     비-number, ``bool``, ``NaN``, ``inf``, 그리고 ``float`` 변환 시
     ``OverflowError``를 유발하는 거대 ``int`` (#1302 P2)는 ``0.0``으로
     정규화한다. ``trades.quantity REAL NOT NULL`` 컬럼 호환을 보장하여,
-    임의의 cross-field invalid payload (#1297/#1298/#1299/#1300/#1301)에서
+    임의의 cross-field invalid payload에서
     quantity 자리에 비-finite 값이 함께 실려도 audit trail이 깨지지 않는다.
 
     판정은 ``_is_finite_quantity``에 위임하여 단일 진입점을 유지한다.
@@ -317,7 +317,7 @@ class RuleEngine:
         self._bot_strategy_resolver = resolver
 
     def set_unrecovered_buy_overlap(self, bot_id: str, allow: bool) -> None:
-        """봇 단위 ``allow_unrecovered_buy_overlap`` opt-out 등록 (#2315).
+        """봇 단위 ``allow_unrecovered_buy_overlap`` opt-out 등록.
 
         의도적으로 미복구 outstanding self-buy와 중첩되는 다중 주문을 내는 전략은
         ``allow=True``로 등록하여 미복구 매수 가드를 면제받는다. 미등록 봇은 계좌
@@ -566,7 +566,7 @@ class RuleEngine:
 
     @staticmethod
     def _unrecovered_buy_age_seconds(submitted_at: str | None) -> float | None:
-        """``submitted_at`` ISO 문자열의 age(초)를 계산. 산정 불가면 ``None`` (#2315).
+        """``submitted_at`` ISO 문자열의 age(초)를 계산. 산정 불가면 ``None``.
 
         ``submitted_at``은 ``OrderSubmittedEvent.timestamp.isoformat()`` (tz-aware
         UTC)로 seed되지만 nullable이고 형식이 깨질 수 있다. ``None``/비문자열/파싱

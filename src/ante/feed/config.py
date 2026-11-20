@@ -122,7 +122,7 @@ class FeedConfig:
             ValueError: value에 개행 문자(`\\n` 또는 `\\r`)가 포함된 경우.
                 _load_env_file은 quoting/escaping을 지원하지 않으므로
                 개행이 포함된 value는 후속 라인을 별도 `KEY=VALUE`로
-                재해석하게 만들어 다른 API 키를 주입할 수 있다(#2051).
+                재해석하게 만들어 다른 API 키를 주입할 수 있다.
                 escaping 대신 reject하며, 파일은 변경하지 않는다.
         """
         if "\n" in value or "\r" in value:
@@ -198,7 +198,7 @@ class FeedConfig:
     async def check_api_keys_with_validation(
         self,
     ) -> list[dict[str, str | bool | None]]:
-        """API 키 존재 여부 + 네트워크 유효성을 확인한다 (#2046).
+        """API 키 존재 여부 + 네트워크 유효성을 확인한다.
 
         존재여부는 :meth:`check_api_keys` 와 동일하게 판정하고, 설정된
         키에 한해 해당 source의 경량 요청으로 유효성을 검증한다.
@@ -236,7 +236,7 @@ class FeedConfig:
 
     @staticmethod
     async def _validate_key(key: str, value: str) -> tuple[bool | None, str | None]:
-        """단일 API 키를 해당 source의 경량 검증으로 평가한다 (#2046).
+        """단일 API 키를 해당 source의 경량 검증으로 평가한다.
 
         지원하지 않는 키는 검증을 생략한다(unknown=None). source의
         validate_credentials는 네트워크 예외를 unknown으로 흡수하므로

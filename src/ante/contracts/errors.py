@@ -1,4 +1,4 @@
-"""Stable error taxonomy mapper data model (#1840).
+"""Stable error taxonomy mapper data model.
 
 이 모듈은 ``docs/specs/contracts/error-taxonomy.md`` 가 normative 로 lock 한
 ``ErrorSpec`` shape 의 코드 SSOT 다. CLI (``--format json``) 와 IPC (Unix domain
@@ -38,7 +38,7 @@ ErrorCategory = Literal[
 
 @dataclass(frozen=True)
 class ErrorSpec:
-    """안정 에러 코드 한 건의 normative spec (#1839/#1840).
+    """안정 에러 코드 한 건의 normative spec.
 
     Attributes:
         code: SCREAMING_SNAKE_CASE 안정 코드. envelope의 ``code``/``error.code``에

@@ -4,7 +4,7 @@ Refs #1805: ``MemberNotFoundError`` 를 신규 도입해 service 의 missing-mem
 경로가 ``ValueError`` 대신 typed exception 을 raise 한다. CLI 6 mutation
 surface (set-emoji/suspend/reactivate/revoke/rotate-token, register 는 not-found
 경로 부재) 가 envelope 코드 ``"MEMBER_NOT_FOUND"`` 를 stable 하게 surface 한다.
-``ApprovalNotFoundError`` (#1798) 와 동형 패턴이다.
+``ApprovalNotFoundError`` 와 동형 패턴이다.
 
 Refs #1814 (Group Q sweep): ``MemberStateConflictError`` 를 신규 도입해
 ``suspend``/``reactivate`` 표면의 state 위반 (이미 SUSPENDED 인 멤버
@@ -60,7 +60,7 @@ class PermissionDeniedError(MemberError):
 
 
 class MemberNotFoundError(MemberError, ValueError):
-    """멤버를 찾을 수 없음 (#1805).
+    """멤버를 찾을 수 없음.
 
     클래스 레벨 ``code`` 속성은 CLI/IPC envelope 이 안정 코드
     ``"MEMBER_NOT_FOUND"`` 로 surface 하도록 한다.
@@ -152,7 +152,7 @@ class MemberAlreadyExistsError(MemberError, ValueError):
 
 
 class ReservedMemberIdError(MemberError, ValueError):
-    """reserved ``system:`` prefix member_id 등록 거부 (#2295).
+    """reserved ``system:`` prefix member_id 등록 거부.
 
     ``register`` 가 ``member_id.startswith("system:")`` 등록 요청을 받았을 때
     raise 한다. ``system:`` 는 system audit sentinel 네임스페이스
@@ -226,7 +226,7 @@ class MemberInvalidRecoveryCredentialError(MemberError, ValueError, PermissionEr
 
 
 class MemberInvalidEmojiError(MemberError, ValueError):
-    """emoji 형식 검증 거부 (#1915).
+    """emoji 형식 검증 거부.
 
     ``MemberService._validate_emoji_format`` 이 단일 이모지가 아닌 입력을
     받았을 때 raise 한다. 빈 문자열은 허용되며, 그 외 입력은 ``emoji_pkg``
@@ -252,7 +252,7 @@ class MemberInvalidEmojiError(MemberError, ValueError):
 
 
 class MemberMasterProtectedError(MemberError, PermissionError):
-    """master 보호 위반 (#1915).
+    """master 보호 위반.
 
     ``MemberService._assert_not_master`` 가 master role 멤버에 대한
     ``suspend`` / ``revoke`` 요청을 거부할 때 raise 한다. master 보호 동작

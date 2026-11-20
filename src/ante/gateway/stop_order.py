@@ -36,7 +36,7 @@ class StopOrderManagerStoppedError(RuntimeError):
     영구 inert 로 남지 않는다.
 
     class-level ``code`` 로 안정 fault code 를 부여한다 — error taxonomy drift
-    guard(#1841) 가 모든 ``*Error`` 에 code/registry/allowlist 중 하나를
+    guard 가 모든 ``*Error`` 에 code/registry/allowlist 중 하나를
     요구하며, 본 예외는 internal lifecycle 가드라 class-level code 가 적합하다.
     """
 
@@ -47,7 +47,7 @@ class StopOrderManagerStoppedError(RuntimeError):
 class StopOrder:
     """스탑 주문 내부 표현.
 
-    SPLIT-3 (#1242): ``account_id`` 는 runtime 시점부터 ``require_account_id``
+    ``account_id`` 는 runtime 시점부터 ``require_account_id``
     로 검증된다. multi-account 환경에서 같은 종목의 stop order 가 다른
     계좌의 시세 tick 으로 잘못 trigger 되지 않도록 격리한다.
     """
@@ -265,7 +265,7 @@ class StopOrderManager:
         매수 스탑: 현재가 >= stop_price → 트리거
         매도 스탑: 현재가 <= stop_price → 트리거
 
-        SPLIT-3 (#1242): ``account_id`` 는 호출자가 명시 전달해야 한다.
+        ``account_id`` 는 호출자가 명시 전달해야 한다.
         multi-account 환경에서는 각 계좌마다 별도의 ``KISStreamClient``
         인스턴스를 가지므로, tick 이 들어온 stream 의 ``account_id`` 만
         매칭되는 stop order 를 평가한다. 다른 계좌의 stop order 는 같은

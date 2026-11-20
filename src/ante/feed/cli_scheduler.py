@@ -87,14 +87,14 @@ async def run_scheduler_loop(
     """스케줄 루프: daily_at / backfill_at 시각에 수집을 실행한다.
 
     진입 시 ``daily_at`` / ``backfill_at`` (및 config 의 ``blocked_hours``)
-    형식을 1회 fail-fast 검증한다(#2030/#2070). 모든 ``feed start`` 경로가
+    형식을 1회 fail-fast 검증한다. 모든 ``feed start`` 경로가
     거치는 단일 chokepoint 이므로, non-padded("9:00") 등으로 인한 조용한
     미실행을 진입 시점에 ``ValueError`` 로 차단한다. 루프 내부에서는 재검증
     하지 않는다.
 
     루프 내 순서는 spec(07-execution-modes)을 따라 backfill_at 체크를
     daily_at 보다 먼저 평가한다 — 같은 틱에서 둘 다 도달하면 미완료 backfill
-    을 먼저 실행한 뒤 daily 로 넘어간다(#2031).
+    을 먼저 실행한 뒤 daily 로 넘어간다.
     """
     guard = config.get("guard") if isinstance(config, dict) else None
     blocked_hours = guard.get("blocked_hours") if isinstance(guard, dict) else None
@@ -198,7 +198,7 @@ async def _run_backfill_job(
 
     ``stop_event`` 는 상주 스케줄러 루프가 보유한 종료 이벤트로, 거래시간
     가드 대기 중 SIGTERM/SIGINT 수신 시 backfill 루프를 깨워 안전 종료
-    시키기 위해 ``orchestrator.run_backfill`` 로 전파한다(#1972). 직접
+    시키기 위해 ``orchestrator.run_backfill`` 로 전파한다. 직접
     호출(테스트 등)에서는 ``None`` 이며 one-shot 의미로 동작한다.
     """
     from ante.feed.pipeline.backfill_runner import (

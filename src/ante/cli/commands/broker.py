@@ -98,7 +98,7 @@ async def _ipc_broker_command(
 
     ServerNotRunningError, IPCTimeoutError 시 예외를 전파하여 호출자가 폴백 처리한다.
 
-    Refs #2412: ``extra`` 는 command 고유 인자(예 ``order-history`` 의
+    ``extra`` 는 command 고유 인자(예 ``order-history`` 의
     ``from_date``/``to_date``)를 payload 에 합치기 위한 **순수 additive**
     확장이다. ``None``(또는 빈 dict)이면 payload 는 종전과 **바이트 동일**한
     ``{"account_id": ...}`` 이며, 기존 호출자 3곳(``status`` / ``balance`` /

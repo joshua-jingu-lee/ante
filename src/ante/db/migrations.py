@@ -3,7 +3,7 @@
 schema_version 테이블을 관리하며, 등록된 마이그레이션을 순차 실행한다.
 DB 마이그레이션과 Parquet 데이터 마이그레이션을 모두 지원한다.
 
-마이그레이션 작성 규칙 (#2365)
+마이그레이션 작성 규칙
 ------------------------------
 각 마이그레이션은 ``run_migrations`` 의 ``async with db.transaction():`` 블록
 안에서 실행되어 schema_version INSERT 와 원자 커밋된다. **마이그레이션 본문에서

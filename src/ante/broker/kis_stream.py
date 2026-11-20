@@ -388,7 +388,7 @@ class KISStreamClient:
     async def _publish_connected(self) -> None:
         """연결 이벤트 발행.
 
-        SPLIT-3 (#1242): ``StreamConnectedEvent`` 는 account-scoped marker 를
+        ``StreamConnectedEvent`` 는 account-scoped marker 를
         가진다. 발행 시 ``self._account_id`` 를 명시 전달한다.
         """
         if self._eventbus:
@@ -405,7 +405,7 @@ class KISStreamClient:
     async def _publish_disconnected(self, reason: str) -> None:
         """연결 해제 이벤트 발행.
 
-        SPLIT-3 (#1242): ``StreamDisconnectedEvent`` 는 account-scoped marker
+        ``StreamDisconnectedEvent`` 는 account-scoped marker
         를 가진다. 자세한 내용은 :meth:`_publish_connected` 참조.
         """
         if self._eventbus:

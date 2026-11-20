@@ -13,7 +13,7 @@ from ante.backtest.service import BACKTEST_RESULT_SENTINEL
 
 
 async def run_backtest(config: dict) -> dict:
-    """백테스트 실행 후 결과를 additive envelope dict로 반환 (#2001).
+    """백테스트 실행 후 결과를 additive envelope dict로 반환.
 
     반환 dict 는 ``result.to_dict()`` 의 모든 키를 보존하는 superset 이며,
     ``to_dict()`` 가 (artifact self-reference 회피 + draft 소비 shape 유지를

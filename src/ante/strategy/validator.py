@@ -355,7 +355,7 @@ class StrategyValidator:
         name_binding: dict[str, str],
         module_aliases: set[str],
     ) -> bool:
-        """base 표현식이 (정의 시점 바인딩 기준) 실제 ante Strategy 인지 판정 (#2042).
+        """base 표현식이 (정의 시점 바인딩 기준) 실제 ante Strategy 인지 판정.
 
         ``name_binding`` 은 클래스 정의 시점까지의 module-level 바인딩 상태다.
         """
@@ -402,7 +402,7 @@ class StrategyValidator:
         return False
 
     def _method_is_async(self, cls: ast.ClassDef, name: str) -> bool | None:
-        """클래스 body 에 정의된 메서드의 async 여부 (#2040).
+        """클래스 body 에 정의된 메서드의 async 여부.
 
         Returns:
             정의돼 있고 ``async def`` → True,
@@ -418,7 +418,7 @@ class StrategyValidator:
         return result
 
     def _async_hook_violations(self, cls: ast.ClassDef) -> list[str]:
-        """런타임 await hook 이 sync ``def`` 로 정의된 위반 목록 (#2040).
+        """런타임 await hook 이 sync ``def`` 로 정의된 위반 목록.
 
         ``ASYNC_HOOKS`` 중 클래스에 정의된 hook 이 sync 면 await 시 TypeError
         가 나므로 error. 정의되지 않은 hook(base default 상속)은 검사하지

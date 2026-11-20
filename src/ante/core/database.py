@@ -73,7 +73,7 @@ class Database:
     async def _drain_failed_conn(conn: aiosqlite.Connection) -> None:
         """실패한 aiosqlite 연결의 background worker thread를 결정적으로 정리한다.
 
-        근본 배경(#1965): ``await aiosqlite.connect(...)`` 의 ``__await__`` 는
+        근본 배경: ``await aiosqlite.connect(...)`` 의 ``__await__`` 는
         먼저 worker thread를 ``start()`` 한 뒤 실제 ``sqlite3.connect`` 를 큐에
         넣는다. 파일을 열 수 없으면(예: ``unable to open database file``)
         aiosqlite 의 ``_connect`` 가 내부적으로 ``stop()`` 을 호출해 종료
@@ -120,7 +120,7 @@ class Database:
         이미 ``start()`` 된 worker thread가 leak된다(``connect()`` 가
         ``self._writer``/``self._reader`` 에 할당하기 **전**에 raise되므로
         ``Database.close()`` 로도 회수할 수 없다). 이 경우 :meth:`_drain_failed_conn`
-        으로 worker thread를 결정적으로 정리한 뒤 원본 예외를 재전파한다(#1965).
+        으로 worker thread를 결정적으로 정리한 뒤 원본 예외를 재전파한다.
 
         ``aiosqlite.connect(...)`` 는 ``await`` 전에 ``Connection`` 객체를
         반환하므로, ``await`` 자체가 실패하더라도 그 객체 핸들을 잡아 thread를
@@ -172,7 +172,7 @@ class Database:
         ``temp_store``/``row_factory`` 만 적용한다.
 
         연결 실패 시 :meth:`_init_conn` 과 동일하게 :meth:`_drain_failed_conn`
-        으로 worker thread 를 결정적으로 정리한다(#1965/#1970).
+        으로 worker thread 를 결정적으로 정리한다.
         """
         conn = await self._open_ro_conn(immutable=False)
         try:
@@ -224,7 +224,7 @@ class Database:
         ``read_only=True`` 면 reader 단일 ``mode=ro`` 연결만 열고 ``_writer`` 는
         미개방한다(write 경로는 :class:`ReadOnlyDatabaseError`). probe/fallback
         실패 시에도 :meth:`_init_ro_conn` 이 worker thread 를 drain 하므로 leak
-        없이 정리된다(#1965/#1970).
+        없이 정리된다.
 
         ``read_only=False`` 면 기존 baseline 그대로 writer + reader 두 연결을
         생성한다(아래 docstring 의 partial-failure drain 보존).
@@ -234,9 +234,9 @@ class Database:
         ``connect()`` 가 부분적으로 성공한 상태(예: writer만 열림)에서 raise되면
         호출자가 받은 ``Database`` 핸들에 leak된 aiosqlite worker thread가 남아,
         ``asyncio.run`` 종료 시 닫힌 이벤트 루프를 건드려 stderr noise를
-        유발하기 때문이다(#1965).
+        유발하기 때문이다.
 
-        주의(#1970): 일반 ``close()`` 는 ``await conn.close()`` 만 호출하는데
+        주의: 일반 ``close()`` 는 ``await conn.close()`` 만 호출하는데
         aiosqlite ``Connection.close()`` 는 worker thread 루프에 종료
         신호(``_running=False``)만 보내고 **``thread.join`` 을 하지 않는다**.
         따라서 ``close()`` 반환 직후에도 worker ``_connection_worker_thread`` 가
@@ -401,7 +401,7 @@ class Database:
         **트랜잭션 안에서 호출 금지**: Python ``executescript`` 는 실행 전에
         열린 트랜잭션을 암묵 COMMIT 하므로, ``transaction()`` owner 태스크가
         호출하면 진행 중인 트랜잭션을 의도치 않게 커밋해 원자성을 깨뜨린다.
-        owner 태스크 호출은 ``RuntimeError`` 로 차단한다(#2365). schema 부트
+        owner 태스크 호출은 ``RuntimeError`` 로 차단한다. schema 부트
         스트랩/마이그레이션은 트랜잭션 밖에서만 호출한다 — ``db/migrations.py``
         모듈 docstring 의 작성 규칙 참조.
 
@@ -425,14 +425,14 @@ class Database:
         ``_write_lock`` 안에서 현재 태스크를 ``_txn_owner`` 로 등록하고
         ``BEGIN`` → yield → ``COMMIT`` 한다. owner 태스크의 ``execute*()`` 만
         commit 을 skip 하고 트랜잭션에 합류하며, 다른 태스크의 writer 쓰기는
-        lock 에서 대기해 직렬화된다(#2365).
+        lock 에서 대기해 직렬화된다.
 
         asyncio.CancelledError / KeyboardInterrupt / SystemExit 포함 모든
         BaseException 경로에서 ROLLBACK을 시도한 뒤 원본 예외를 재전파한다.
         ROLLBACK 자체 실패는 swallow하여 원본 예외(특히 CancelledError) 보존을
         우선한다.
 
-        cancellation-safety invariant(#2365): cleanup ROLLBACK 은 ``except
+        cancellation-safety invariant: cleanup ROLLBACK 은 ``except
         BaseException`` 진입 **직후 suspension 없이** 곧바로 ``await
         conn.execute("ROLLBACK")`` 에 도달한다. asyncio cancellation 은
         suspension point 에서만 전달되고, aiosqlite ``Connection.execute`` 는
