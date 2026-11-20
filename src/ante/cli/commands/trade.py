@@ -102,9 +102,6 @@ def trade_list(
     """거래 목록 조회."""
     fmt = get_formatter(ctx)
 
-    # inverted date range(시작일 > 종료일) 거부: _create_trade_service/DB
-    # 생성 및 _run_list 내부 datetime.fromisoformat 이전에 차단한다
-    # (backtest.py:72-77 동형, INVALID_DATE_RANGE + exit 1).
     reject_inverted_date_range(
         from_date,
         to_date,
@@ -114,25 +111,8 @@ def trade_list(
     )
 
     async def _run_list() -> list[dict]:
-        # ``_create_trade_service`` async context manager lifecycle.
         async with _create_trade_service(ctx=ctx) as (service, _):
-            # ``--from`` 은 naive ``T00:00:00`` 하한을 그대로 유지한다(비변경).
-            #   - aware fd 로 바꾸면, 자정 정각에 저장된 naive isoformat 행
-            #     (``'D'`` prefix-shorter)이 lexical 비교에서 의도치 않게
-            #     제외되는 반례가 생긴다.
-            #   - 공백 구분 포맷(``save_adjustment`` 의 ``'D HH:MM:SS'``)의 당일
-            #     ``--from`` 경계 제외(``' '(0x20) < 'T'(0x54)``)는 main 기존재
-            #     known-limitation 이며 본 수정은 도입·악화하지 않는다
-            #     (#2367 Non-Goals — 저장 포맷 정규화 follow-up).
             fd = datetime.fromisoformat(from_date) if from_date else None
-            # ``--to D`` 는 date-only 일 때 당일 end-of-day(``23:59:59.999999``)
-            # UTC-aware 상한으로 변환한다. date-only 를 ``fromisoformat`` 으로
-            # 그대로 넘기면 ``T00:00:00`` 이 되어 당일 장중 거래가
-            # ``timestamp <= ?`` 에서 전부 제외된다(#2367). ``bot.py:941``
-            # (``_parse_log_datetime`` end-of-day)의 ``time.max, tzinfo=UTC``
-            # 선례를 1:1 미러한다. isoformat aware 저장(당일 마지막 microsecond
-            # equal 포함, 다음날 제외) / 공백 포맷 저장(``' ' < 'T'`` 포함, 다음날
-            # 날짜 prefix 제외) 두 포맷 모두 lexical 상한이 정확하다.
             td = (
                 datetime.combine(date.fromisoformat(to_date), time.max, tzinfo=UTC)
                 if to_date
@@ -195,15 +175,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     fmt = get_formatter(ctx)
 
     async def _run_info() -> dict | None:
-        # ``open_cli_db`` 헬퍼 lifecycle (cleanup invariant — 예외/cancellation
-        # 시에도 ``Database.close()`` 1회 보장).
         async with open_cli_db(ctx) as db:
-            # fresh DB 에서는 `trades` 테이블이 아직 생성되지 않은 상태일 수
-            # 있다. (`_create_trade_service` 경로와 달리 `trade info` 는
-            # raw db 핸들만 쓰고 `TradeRecorder.initialize` 를 거치지 않는다.)
-            # 정의상 테이블 부재는 해당 trade 미존재와 동치이므로 not-found 로
-            # 정규화한다. malformed DB 같은 다른 OperationalError 까지
-            # 삼키지 않도록 "no such table" 메시지로만 좁힌다.
             try:
                 row = await db.fetch_one(
                     "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
@@ -214,8 +186,6 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
                 raise
             return dict(row) if row else None
 
-    # 호출 표면 try/except: 위 _run_info 에서 흡수하지 못한 비정상 예외는
-    # TRADE_ERROR 로 분류해 raw traceback 노출을 차단한다.
     try:
         result = _run(_run_info())
     except Exception as e:

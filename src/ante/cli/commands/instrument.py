@@ -12,17 +12,9 @@ from ante.cli.middleware import require_auth, require_scope
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 from ante.core.market_data_vocab import is_krx_symbol
 
-# 비-canonical exchange 공통 거부 (list/sync/import 3 ingress).
 _INVALID_EXCHANGE_CODE = "INSTRUMENT_INVALID_EXCHANGE"
-# exchange == KRX 행의 비6자리 symbol 거부 (import row 경계 한정,
-# core.md ``### KRX symbol shape``). market_data_vocab.is_krx_symbol
-# SSOT 위임 — instrument.py에 private KRX regex를 두지 않는다.
 _INVALID_KRX_SYMBOL_CODE = "INSTRUMENT_INVALID_SYMBOL"
-# canonical이나 현재 sync source(KIS domestic/KRX)가 미지원 (sync 전용, 축 B).
 _SYNC_SOURCE_UNSUPPORTED_CODE = "INSTRUMENT_SYNC_SOURCE_UNSUPPORTED"
-# KIS sync source(KISDomesticAdapter=domestic-stock/KOSPI/KOSDAQ master)가
-# 지원하는 canonical exchange. KRX 도메인 전용 계약 근거 (broker/kis.py
-# ``KISAdapter = KISDomesticAdapter``). 나머지 canonical은 source 미지원.
 _SYNC_SUPPORTED_EXCHANGES: frozenset[str] = frozenset({"KRX"})
 
 
@@ -58,8 +50,6 @@ def instrument_list(
 
     fmt = get_formatter(ctx)
 
-    # Axis 1 — ingress 옵션 검증: exchange 사용 전 canonical 검증.
-    # `*` 도 비-canonical이라 거부됨 (StrategyMeta 전용 wildcard).
     if not is_canonical(exchange):
         fmt.error(
             f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
@@ -68,9 +58,6 @@ def instrument_list(
         ctx.exit(1)
 
     async def _run() -> list[dict]:
-        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
-        # ``db_path_override`` 로 전달 — offline-factory.md §1.1 caller 산출
-        # 경로 패턴.
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
@@ -128,8 +115,6 @@ def sync(
     fmt = get_formatter(ctx)
     resolved_config_dir = get_config_dir(ctx)
 
-    # Axis 1 — ingress 옵션 검증: 비-canonical exchange 거부 (KISAdapter
-    # 호출 전). `*` 도 비-canonical이라 거부됨.
     if not is_canonical(exchange):
         fmt.error(
             f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
@@ -137,11 +122,6 @@ def sync(
         )
         ctx.exit(1)
 
-    # Axis 3 — sync source-binding (축 B): canonical 검증 통과 후,
-    # 현재 sync source(KIS domestic/KRX)가 미지원하는 canonical
-    # exchange (= CANONICAL_EXCHANGES - {"KRX"}, 즉 NYSE/NASDAQ/AMEX/TEST)
-    # 이면 invalid과 구분되는 별도 에러로 거부한다. canonical을 invalid로
-    # 거부하지 않는다 (축 A/B 불변식).
     if exchange not in _SYNC_SUPPORTED_EXCHANGES:
         supported = ", ".join(sorted(_SYNC_SUPPORTED_EXCHANGES))
         fmt.error(
@@ -153,8 +133,6 @@ def sync(
         ctx.exit(1)
 
     async def _run() -> dict:
-        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
-        # ``db_path_override`` 로 전달.
         config = Config.load(config_dir=resolved_config_dir)
         broker_config = config.get("broker", {})
         if not broker_config.get("app_key"):
@@ -164,7 +142,6 @@ def sync(
             svc = InstrumentService(db)
             await svc.initialize()
 
-            # 동기화 전 기존 종목 수
             old_rows = await db.fetch_all(
                 "SELECT symbol, listed FROM instruments WHERE exchange = ?",
                 (exchange,),
@@ -196,7 +173,6 @@ def sync(
                 for item in raw
             ]
 
-            # 상폐 처리: 기존에 listed였지만 새 목록에 없는 종목
             delisted = old_listed - new_symbols
             for sym in delisted:
                 await db.execute(
@@ -257,8 +233,6 @@ def search(
     fmt = get_formatter(ctx)
 
     async def _run() -> list[dict]:
-        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
-        # ``db_path_override`` 로 전달.
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
@@ -310,8 +284,6 @@ def instrument_import(
     path = Path(file_path)
     ext = path.suffix.lower()
 
-    # 파일 형식 확인 (try 블록 밖에서 분기 — ctx.exit(1)이 같은 try의
-    # except Exception에 잡혀 swallow되는 것을 방지)
     if ext not in (".csv", ".json"):
         fmt.error(
             f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)",
@@ -319,7 +291,6 @@ def instrument_import(
         )
         ctx.exit(1)
 
-    # 파일 읽기
     try:
         if ext == ".csv":
             import csv
@@ -327,13 +298,10 @@ def instrument_import(
             with open(path, newline="", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 records = list(reader)
-        else:  # ".json"
+        else:
             with open(path, encoding="utf-8") as f:
                 records = json.load(f)
     except Exception as e:
-        # 파일 읽기 I/O 실패(directory-with-csv-suffix, 권한 등)는 안정 코드
-        # ``INSTRUMENT_IO_ERROR`` 로 surface 한다. 자동화/오라클이 메시지
-        # 텍스트 파싱 없이 I/O 실패를 분류할 수 있게 한다.
         fmt.error(f"파일 읽기 실패: {e}", code="INSTRUMENT_IO_ERROR")
         ctx.exit(1)
 
@@ -348,31 +316,16 @@ def instrument_import(
         fmt.error("파일에 데이터가 없습니다.", code="INSTRUMENT_EMPTY_FILE")
         ctx.exit(1)
 
-    # 필수 컬럼 확인
     first = records[0]
     if "symbol" not in first or "exchange" not in first:
-        # 필수 컬럼 누락은 안정 코드 ``INSTRUMENT_MISSING_COLUMNS`` 로
-        # surface 한다. 형제 코드 ``INSTRUMENT_INVALID_JSON_SHAPE`` /
-        # ``INSTRUMENT_EMPTY_FILE`` / ``INSTRUMENT_INVALID_FILE_FORMAT`` 와
-        # 동형 envelope 일관성.
         fmt.error(
             "필수 컬럼 누락: symbol, exchange가 필요합니다.",
             code="INSTRUMENT_MISSING_COLUMNS",
         )
         ctx.exit(1)
 
-    # Axis 2 — import 행별 검증: dry-run preview/실저장 전, 각 행
-    # exchange를 canonical 검증한다. 하나라도 비-canonical이면 해당 행
-    # (symbol/exchange) 식별 포함 에러로 거부한다. 유효 입력의 --dry-run은
-    # 이 검증을 통과하므로 exit 0이 회귀 보존된다.
     for idx, r in enumerate(records):
         row_exchange = r.get("exchange", "")
-        # JSON import 행은 비문자열 exchange(list/dict/number/None 등)를
-        # 가질 수 있다. is_canonical()의 frozenset membership은 unhashable
-        # 값에 TypeError를 던지므로, 호출 전 isinstance(str) 가드로 차단해
-        # 비-canonical과 동일한 구조화 invalid-exchange 경로로 보낸다
-        # (CSV는 항상 str, CLI --exchange는 click이 str 보장 — import
-        # 행 경로만 해당).
         if not isinstance(row_exchange, str) or not is_canonical(row_exchange):
             row_symbol = r.get("symbol", "")
             fmt.error(
@@ -383,14 +336,6 @@ def instrument_import(
             )
             ctx.exit(1)
 
-        # exchange == KRX 행은 symbol이 6자리 ASCII digit이어야 한다
-        # (core.md ``### KRX symbol shape`` — exchange == KRX 신규 입력
-        # 경계 한정). 비-KRX canonical(NYSE/NASDAQ/AMEX/TEST)은
-        # symbol-shape 검증 미적용 (1.0 비목표). is_krx_symbol은
-        # 비문자열 symbol(JSON list/dict/number/None 등)도 isinstance
-        # 가드로 False → KRX 행이면 동일 INVALID_SYMBOL 경로로 거부.
-        # 이 검증은 instruments build/dry-run preview/실저장 이전이므로
-        # --dry-run·실 import 양쪽에서 동일하게 차단된다.
         if isinstance(row_exchange, str) and row_exchange == "KRX":
             row_symbol = r.get("symbol", "")
             if not is_krx_symbol(row_symbol):
@@ -441,8 +386,6 @@ def instrument_import(
         return
 
     async def _import() -> int:
-        # ``open_cli_db`` 헬퍼 lifecycle. ``--db-path`` override 는
-        # ``db_path_override`` 로 전달.
         from ante.instrument.service import InstrumentService
 
         async with open_cli_db(ctx, db_path_override=db_path) as db:

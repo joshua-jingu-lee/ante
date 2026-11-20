@@ -53,8 +53,6 @@ def audit_list(
     """감사 로그 목록 조회."""
     fmt = get_formatter(ctx)
 
-    # inverted date range(시작일 > 종료일) 거부: DB/AuditLogger.query 진입
-    # 이전에 차단한다 (backtest.py:72-77 동형, INVALID_DATE_RANGE + exit 1).
     reject_inverted_date_range(
         from_date,
         to_date,
@@ -64,10 +62,6 @@ def audit_list(
     )
 
     async def _run_list() -> list[dict]:
-        # ``open_cli_db`` 헬퍼가 ``AuditLogger.initialize()`` / ``query()`` 의
-        # 예외 / cancellation 까지 ``Database.close()`` 1회 호출을 보장한다
-        # (cleanup invariant). ``AuditLogger.initialize()`` 는 read-only 명시
-        # 예외(`docs/specs/audit/` §4.2) — 그대로 보존한다.
         from ante.audit import AuditLogger
 
         async with open_cli_db(ctx) as db:

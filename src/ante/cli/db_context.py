@@ -34,14 +34,8 @@ from contextlib import asynccontextmanager
 
 import click
 
-# ``Database`` 는 ``open_cli_db`` 내부에서 lazy import 되며, 동시에 본 모듈에
-# 속성으로 노출되어야 한다 (#1856 ``patch("ante.cli.db_context.Database")``
-# 테스트 호환). lazy lookup 은 ``open_cli_db`` 가 매 호출마다
-# ``ante.core.database.Database`` 를 다시 가져오도록 한다.
 from ante.core.database import Database
 
-# import-time binding 사본. lazy lookup 에서 ``globals()['Database']`` 가
-# 원본인지 patch 된 mock 인지 식별하는 reference 다.
 _ORIGINAL_DATABASE = Database
 
 __all__ = ["open_cli_db", "Database"]
@@ -93,23 +87,12 @@ async def open_cli_db(
         raise ValueError(
             "open_cli_db requires explicit Click context (legacy fallback deprecated)"
         )
-    # #1857: lazy module-attribute access for ``get_db_path`` /
-    # ``Database`` to honor test patches of either:
-    #   - ``ante.cli.main.get_db_path`` (callsite import binding)
-    #   - ``ante.cli.db_context.Database`` (#1856 db_path_override 테스트)
-    #   - ``ante.core.database.Database`` (constructor patch — #1857 호환)
     from ante.cli import main as _cli_main
     from ante.core import database as _core_db
 
     db_path = (
         db_path_override if db_path_override is not None else _cli_main.get_db_path(ctx)
     )
-    # patch 우선순위 (둘 다 동시에 patch 되는 경우는 없다고 가정):
-    #   1) ``ante.cli.db_context.Database`` 가 patch 된 경우 (#1856 테스트):
-    #      ``globals()['Database']`` 가 ``_ORIGINAL_DATABASE`` 와 다른 객체.
-    #   2) ``ante.core.database.Database`` 가 patch 된 경우 (#1857 회귀
-    #      테스트): ``_core_db.Database`` 가 ``_ORIGINAL_DATABASE`` 와 다름.
-    #   3) 둘 다 미patch: 원본 ``Database`` 사용.
     _local_db_cls = globals().get("Database", _ORIGINAL_DATABASE)
     _module_db_cls = _core_db.Database
     if _local_db_cls is not _ORIGINAL_DATABASE:
@@ -118,9 +101,6 @@ async def open_cli_db(
         _db_cls = _module_db_cls
     else:
         _db_cls = _ORIGINAL_DATABASE
-    # #1974: ``read_only=True`` 일 때만 ``read_only`` kwarg 를 전달한다. False
-    # 경로는 기존 ``_db_cls(db_path)`` 호출을 byte-for-byte 유지해 모든 write
-    # 소비자·#1856/#1857 patch(mock) 호환을 보존한다 (offline-factory.md §2 옵션 A).
     if read_only:
         db = _db_cls(db_path, read_only=True)
     else:
@@ -129,9 +109,6 @@ async def open_cli_db(
     try:
         yield db
     except BaseException:
-        # ``close()`` 실패가 원래 예외(BaseException 포함, CancelledError 등)를
-        # 가리지 않도록 inner try/except로 swallow한다. close 실패는 lifecycle
-        # leak이지만 caller에게 surface해야 할 것은 body의 원래 예외다.
         try:
             await db.close()
         except Exception:

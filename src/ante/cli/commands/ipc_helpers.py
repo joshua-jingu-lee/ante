@@ -31,7 +31,6 @@ def get_socket_path(config_dir: Path | None = None) -> str:
     from ante.config import Config
 
     if config_dir is None:
-        # 호출자가 명시하지 않으면 현재 Click 컨텍스트에서 자동 추출
         from ante.cli.main import get_config_dir
 
         config_dir = get_config_dir()
@@ -40,7 +39,6 @@ def get_socket_path(config_dir: Path | None = None) -> str:
     return str(config.runtime_socket_path())
 
 
-# _ipc.py 호환 별칭
 _get_socket_path = get_socket_path
 
 
@@ -71,12 +69,6 @@ async def ipc_send(
         client = IPCClient(socket_path=get_socket_path(config_dir=config_dir))
         response = await client.send(command, args, actor)
     except ServerNotRunningError:
-        # middleware ClickException fallback 이 IPC 미기동/타임아웃 케이스를
-        # stable code 로 매핑할 수 있도록 ``ipc_error_code`` /
-        # ``ipc_error_message`` 속성을 부착한다. ``raise`` 시그니처와 메시지
-        # 본문은 기존 호출자(__str__ 가 그대로 사용자 메시지를 반환)와의
-        # 호환을 위해 변경하지 않는다 (서버 error envelope 경로 attrs 부착과
-        # 동형 패턴).
         exc = click.ClickException(
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
         )
@@ -89,21 +81,13 @@ async def ipc_send(
         exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
         raise exc
 
-    # 서버 응답에서 에러 상태 처리
     if response.get("status") == "error":
         error = response.get("error", {})
         code = error.get("code", "UNKNOWN")
         message = error.get("message", "알 수 없는 오류")
-        # 기존 소비자 호환: ``str(exc)`` 는 종전과 동일하게
-        # ``"{code}: {message}"`` 를 반환한다(동작 불변, 순수 additive).
-        # config set 처럼 JSON envelope를 직접 만들어야 하는 호출자가
-        # 원본 code/message 를 split 없이 복원할 수 있도록 속성을
-        # 부착한다 (ipc_send 변경이 다수 명령에 회귀를 유발하지 않도록
-        # raise 문자열·시그니처는 그대로 둔다).
         exc = click.ClickException(f"{code}: {message}")
         exc.ipc_error_code = code  # type: ignore[attr-defined]
         exc.ipc_error_message = message  # type: ignore[attr-defined]
         raise exc
 
-    # "result" 키가 있으면 inner result만, 없으면 전체 응답 반환
     return response.get("result", response)
