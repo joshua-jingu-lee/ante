@@ -14,6 +14,8 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
                   ↘ ERROR           ↗
 ```
 
+**RUNNING 이탈과 잠금을 기다리던 작업**: 봇이 RUNNING을 떠나면(정지, ERROR, 삭제, 계좌 정지) `_signal_lock`을 기다리던 외부 시그널은 잠금을 얻은 뒤 버려지고 `on_data`가 불리지 않는다. 시그널이 봇의 핸들러(`on_external_signal`)에 들어온 뒤 봇이 다시 시작됐으면(재개, `assign_strategy`, 자동 재시작) 상태가 RUNNING이어도 버려진다. `start()`는 봇을 RUNNING으로 바꿀 때마다 세대 번호를 올린다. 외부 시그널은 봇의 핸들러에 들어올 때, 실행 루프는 시작할 때의 세대를 적어 둔다. 이전 세대의 실행 루프는 간격 대기에서 깨어나거나 잠금을 얻었을 때 스텝을 실행하지 않고 끝난다. 이렇게 끝날 때와 이전 세대의 루프가 예외로 끝날 때에는 봇의 상태와 실행 태스크를 바꾸지 않고 이벤트도 발행하지 않는다(예외는 경고 로그로만 남긴다). 옛 실행 루프에 대한 이 서술은 루프가 끝나는 지점만 다룬다.
+
 **근거**:
 - NautilusTrader는 INITIALIZED/RUNNING/STOPPED/DEGRADED/FAULTING/DISPOSED 6단계
 - Ante는 6단계 — DELETED 상태를 추가하여 삭제된 봇의 상태를 명시적으로 구분
@@ -284,9 +286,11 @@ ante signal connect --key sk_a1b2c3d4
 Bot이 ExternalSignalEvent를 수신하면:
 1. `event.bot_id`가 자기 것인지 확인
 2. 전략의 `meta.accepts_external_signals` 확인 (이중 검증)
-3. `strategy.on_data(event.data)` 호출
-4. 반환된 Signal을 `_publish_signals()`로 발행
-5. 체결/상태 변경 시 채널을 통해 외부에 통보
+3. 봇이 RUNNING인지 확인. 아니면 「외부 시그널 거부」 경고 로그를 남기고 버린다
+4. `_signal_lock`을 얻은 뒤 다시 확인. 봇이 RUNNING이 아니거나 시그널이 이 핸들러에 들어온 뒤 다시 시작됐으면(세대 번호가 다르면) 같은 경고 로그를 남기고 버린다
+5. `strategy.on_data(event.data)` 호출
+6. 반환된 Signal을 `_publish_signals()`로 발행
+7. 체결/상태 변경 시 채널을 통해 외부에 통보
 
 ### 채널 teardown enforcement (#2334)
 
@@ -314,7 +318,7 @@ Bot이 ExternalSignalEvent를 수신하면:
 
 1. teardown은 먼저 `accepting=False`를 set하여 이후 inbound signal admit을 거부한다.
 2. in-flight publish/`on_data` span은 shield되어 완료된다(mid-chain cancel 금지).
-3. 결과 보장 = **"커밋 후 NEW signal은 admit되지 않으며, 옛 키로 진입한 in-flight signal은 최대 1개(at-most-one)까지 정상 완료된다"** — **"in-flight signal abort"가 아니다.** 즉 rotate/delete 직후 새 주문을 유발하는 신규 시그널 주입은 불가능하고, 옛 키로 이미 진입한 trailing signal 1개와 그에 따른 trailing fill만 관측될 수 있다.
+3. 결과 보장 = **"커밋 후 NEW signal은 admit되지 않으며, 옛 키로 진입한 in-flight signal은 최대 1개(at-most-one)까지 정상 완료된다"** — **"in-flight signal abort"가 아니다.** 즉 rotate/delete 직후 새 주문을 유발하는 신규 시그널 주입은 불가능하고, 옛 키로 이미 진입한 trailing signal 1개와 그에 따른 trailing fill만 관측될 수 있다. 정상 완료되는 1건은 이미 `on_data`를 시작한 시그널이다. `_signal_lock`을 기다리던 시그널은 봇이 RUNNING을 떠났거나 다시 시작됐으면 버려진다(위 「봇 상태 머신」). 송신자가 받는 ack는 처리 여부를 뜻하지 않는다.
 
 이 enforcement는 "직접 DB 수정으로 봇 status/signal key를 바꾸면 `_bots`·실행 task·EventBus 구독·외부 signal channel이 어긋나므로 허용하지 않는다"는 본 문서의 런타임 IPC 위임 원칙(위 참조)과 정합한다.
 

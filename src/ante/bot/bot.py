@@ -57,6 +57,7 @@ class Bot:
         self._consecutive_failures: int = 0
         self._max_consecutive_failures: int = 3
         self._fill_dedup_guard = FillDedupGuard()
+        self._generation: int = 0
 
     async def start(self) -> None:
         """봇 시작. 전략 인스턴스화 + 실행 루프 Task 생성."""
@@ -65,6 +66,7 @@ class Bot:
         self.strategy = self._strategy_cls(ctx=self._ctx)
         self.strategy.on_start()
 
+        self._generation += 1
         self.status = BotStatus.RUNNING
         self.started_at = datetime.now(UTC)
         self._task = asyncio.create_task(
@@ -108,9 +110,10 @@ class Bot:
         """메인 실행 루프."""
         from ante.eventbus.events import BotErrorEvent, BotStepCompletedEvent
 
+        generation = self._generation
         step_start: float | None = None
         try:
-            while self.status == BotStatus.RUNNING:
+            while self.status == BotStatus.RUNNING and self._generation == generation:
                 step_start = None
                 should_sleep = False
                 should_return = False
@@ -121,70 +124,30 @@ class Bot:
                 }
 
                 async with self._signal_lock:
-                    try:
-                        step_start = monotonic()
-                        signals = await asyncio.wait_for(
-                            self.strategy.on_step(step_context),  # type: ignore[union-attr]
-                            timeout=self.config.step_timeout_seconds,
-                        )
-                        step_duration_ms = int((monotonic() - step_start) * 1000)
-                    except TimeoutError:
-                        assert step_start is not None
-                        timeout_duration_ms = int((monotonic() - step_start) * 1000)
-                        self._consecutive_failures += 1
-                        timeout_msg = (
-                            f"on_step timeout "
-                            f"({self._consecutive_failures}/{self._max_consecutive_failures})"
-                        )
-                        logger.warning(
-                            "on_step 타임아웃: %s (%d/%d)",
-                            self.bot_id,
-                            self._consecutive_failures,
-                            self._max_consecutive_failures,
-                        )
-                        await self._eventbus.publish(
-                            BotStepCompletedEvent(
-                                bot_id=self.bot_id,
-                                account_id=self.config.account_id,
-                                result="timeout",
-                                message=timeout_msg,
-                                signal_count=0,
-                                duration_ms=timeout_duration_ms,
+                    if (
+                        self.status != BotStatus.RUNNING
+                        or self._generation != generation
+                    ):
+                        should_return = True
+                    else:
+                        try:
+                            step_start = monotonic()
+                            signals = await asyncio.wait_for(
+                                self.strategy.on_step(step_context),  # type: ignore[union-attr]
+                                timeout=self.config.step_timeout_seconds,
                             )
-                        )
-                        if self._consecutive_failures >= self._max_consecutive_failures:
-                            msg = (
-                                f"연속 타임아웃 한도 초과 "
+                            step_duration_ms = int((monotonic() - step_start) * 1000)
+                        except TimeoutError:
+                            assert step_start is not None
+                            timeout_duration_ms = int((monotonic() - step_start) * 1000)
+                            self._consecutive_failures += 1
+                            timeout_msg = (
+                                f"on_step timeout "
                                 f"({self._consecutive_failures}/{self._max_consecutive_failures})"
                             )
-                            logger.error(
-                                "연속 타임아웃 한도 초과 — 봇 ERROR 전이: %s",
-                                self.bot_id,
-                            )
-                            self.status = BotStatus.ERROR
-                            self.error_message = msg
-                            await self._eventbus.publish(
-                                BotErrorEvent(
-                                    bot_id=self.bot_id,
-                                    account_id=self.config.account_id,
-                                    error_message=msg,
-                                )
-                            )
-                            should_return = True
-                        else:
-                            should_sleep = True
-                    else:
-                        max_signals = self.config.max_signals_per_step
-                        if len(signals) > max_signals:
-                            self._consecutive_failures += 1
-                            overflow_msg = (
-                                f"Signal count exceeded: {len(signals)} > {max_signals}"
-                            )
                             logger.warning(
-                                "Signal 수 초과: %s (%d > %d, 연속 %d/%d)",
+                                "on_step 타임아웃: %s (%d/%d)",
                                 self.bot_id,
-                                len(signals),
-                                max_signals,
                                 self._consecutive_failures,
                                 self._max_consecutive_failures,
                             )
@@ -192,50 +155,100 @@ class Bot:
                                 BotStepCompletedEvent(
                                     bot_id=self.bot_id,
                                     account_id=self.config.account_id,
-                                    result="signal_overflow",
-                                    message=overflow_msg,
-                                    signal_count=len(signals),
-                                    duration_ms=step_duration_ms,
-                                )
-                            )
-                            await self._eventbus.publish(
-                                BotErrorEvent(
-                                    bot_id=self.bot_id,
-                                    account_id=self.config.account_id,
-                                    error_message=overflow_msg,
+                                    result="timeout",
+                                    message=timeout_msg,
+                                    signal_count=0,
+                                    duration_ms=timeout_duration_ms,
                                 )
                             )
                             if (
                                 self._consecutive_failures
                                 >= self._max_consecutive_failures
                             ):
+                                msg = (
+                                    f"연속 타임아웃 한도 초과 "
+                                    f"({self._consecutive_failures}/{self._max_consecutive_failures})"
+                                )
                                 logger.error(
-                                    "연속 Signal 초과 한도 — 봇 중지: %s",
+                                    "연속 타임아웃 한도 초과 — 봇 ERROR 전이: %s",
                                     self.bot_id,
                                 )
-                                await self.stop()
+                                self.status = BotStatus.ERROR
+                                self.error_message = msg
+                                await self._eventbus.publish(
+                                    BotErrorEvent(
+                                        bot_id=self.bot_id,
+                                        account_id=self.config.account_id,
+                                        error_message=msg,
+                                    )
+                                )
                                 should_return = True
                             else:
                                 should_sleep = True
                         else:
-                            self._consecutive_failures = 0
-
-                            await self._publish_signals(signals)
-
-                            actions = self._ctx._drain_actions()
-                            await self._publish_actions(actions)
-
-                            await self._eventbus.publish(
-                                BotStepCompletedEvent(
-                                    bot_id=self.bot_id,
-                                    account_id=self.config.account_id,
-                                    result="success",
-                                    message=f"signals={len(signals)}",
-                                    signal_count=len(signals),
-                                    duration_ms=step_duration_ms,
+                            max_signals = self.config.max_signals_per_step
+                            if len(signals) > max_signals:
+                                self._consecutive_failures += 1
+                                overflow_msg = (
+                                    "Signal count exceeded: "
+                                    f"{len(signals)} > {max_signals}"
                                 )
-                            )
-                            should_sleep = True
+                                logger.warning(
+                                    "Signal 수 초과: %s (%d > %d, 연속 %d/%d)",
+                                    self.bot_id,
+                                    len(signals),
+                                    max_signals,
+                                    self._consecutive_failures,
+                                    self._max_consecutive_failures,
+                                )
+                                await self._eventbus.publish(
+                                    BotStepCompletedEvent(
+                                        bot_id=self.bot_id,
+                                        account_id=self.config.account_id,
+                                        result="signal_overflow",
+                                        message=overflow_msg,
+                                        signal_count=len(signals),
+                                        duration_ms=step_duration_ms,
+                                    )
+                                )
+                                await self._eventbus.publish(
+                                    BotErrorEvent(
+                                        bot_id=self.bot_id,
+                                        account_id=self.config.account_id,
+                                        error_message=overflow_msg,
+                                    )
+                                )
+                                if (
+                                    self._consecutive_failures
+                                    >= self._max_consecutive_failures
+                                ):
+                                    logger.error(
+                                        "연속 Signal 초과 한도 — 봇 중지: %s",
+                                        self.bot_id,
+                                    )
+                                    await self.stop()
+                                    should_return = True
+                                else:
+                                    should_sleep = True
+                            else:
+                                self._consecutive_failures = 0
+
+                                await self._publish_signals(signals)
+
+                                actions = self._ctx._drain_actions()
+                                await self._publish_actions(actions)
+
+                                await self._eventbus.publish(
+                                    BotStepCompletedEvent(
+                                        bot_id=self.bot_id,
+                                        account_id=self.config.account_id,
+                                        result="success",
+                                        message=f"signals={len(signals)}",
+                                        signal_count=len(signals),
+                                        duration_ms=step_duration_ms,
+                                    )
+                                )
+                                should_sleep = True
 
                 if should_return:
                     return
@@ -246,6 +259,16 @@ class Bot:
         except asyncio.CancelledError:
             raise
         except Exception as e:
+            if self._generation != generation:
+                logger.warning(
+                    "옛 세대 루프 예외 무시: 봇 %s 세대 %d → %d — %s",
+                    self.bot_id,
+                    generation,
+                    self._generation,
+                    e,
+                    exc_info=True,
+                )
+                return
             self.status = BotStatus.ERROR
             self.error_message = str(e)
             logger.exception("봇 오류: %s", self.bot_id)
@@ -431,33 +454,56 @@ class Bot:
         **non-reentrancy 감사(asyncio.Lock 은 non-reentrant)**: lock 보유 중
         ``_publish_signals`` 가 publish 하는 ``OrderRequestEvent`` 의 핸들러가
         동일 bot ``ExternalSignalEvent`` 를 재발행하지 않는다(재발행하면
-        deadlock). ``ExternalSignalEvent`` 는 오직 IPC ``_handle_signal`` 에서만
-        publish 된다(grep invariant).
+        deadlock). ``ExternalSignalEvent`` 는 ``SignalChannel._handle_signal``
+        에서만 publish 된다(grep invariant).
         """
         from ante.eventbus.events import ExternalSignalEvent
 
         if not isinstance(event, ExternalSignalEvent):
             return
+        generation = self._generation
         if not self.strategy or event.bot_id != self.bot_id:
             return
 
         if not self.strategy.meta.accepts_external_signals:
             logger.warning(
-                "외부 시그널 거부: 봇 %s 전략 %s — accepts_external_signals=False",
+                "외부 시그널 거부: 봇 %s 전략 %s — accepts_external_signals=False"
+                " signal_id=%s",
                 self.bot_id,
                 self.strategy.meta.name,
+                event.signal_id,
             )
             return
 
         if self.status != BotStatus.RUNNING:
             logger.warning(
-                "외부 시그널 거부: 봇 %s 상태 %s (RUNNING 아님)",
+                "외부 시그널 거부: 봇 %s 상태 %s (RUNNING 아님) signal_id=%s",
                 self.bot_id,
                 self.status.value,
+                event.signal_id,
             )
             return
 
         async with self._signal_lock:
+            if self.status != BotStatus.RUNNING:
+                logger.warning(
+                    "외부 시그널 거부: 봇 %s 상태 %s (잠금 대기 중 RUNNING 이탈)"
+                    " signal_id=%s",
+                    self.bot_id,
+                    self.status.value,
+                    event.signal_id,
+                )
+                return
+            if self._generation != generation:
+                logger.warning(
+                    "외부 시그널 거부: 봇 %s 세대 %d → %d (잠금 대기 중 재시작)"
+                    " signal_id=%s",
+                    self.bot_id,
+                    generation,
+                    self._generation,
+                    event.signal_id,
+                )
+                return
             follow_up = await self.strategy.on_data(
                 {
                     "signal_id": event.signal_id,
