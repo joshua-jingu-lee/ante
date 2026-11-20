@@ -19,14 +19,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# KIS WebSocket 채널
-CHANNEL_PRICE = "H0STCNT0"  # 실시간 시세
-CHANNEL_EXECUTION = "H0STCNI0"  # 실시간 체결 통보
+CHANNEL_PRICE = "H0STCNT0"
+CHANNEL_EXECUTION = "H0STCNI0"
 
-# 최대 구독 종목 수
 MAX_SUBSCRIPTIONS = 40
 
-# 재연결 설정
 DEFAULT_RECONNECT_DELAY = 1.0
 DEFAULT_MAX_RECONNECT_DELAY = 60.0
 DEFAULT_PING_INTERVAL = 30.0
@@ -62,9 +59,6 @@ class KISStreamClient:
         self._approval_key = approval_key
         self._eventbus = eventbus
         self._ping_interval = ping_interval
-        # SPLIT-3 (#1242): 각 KIS 계좌마다 별도 인스턴스를 만들고 account_id 를
-        # 명시 전달한다. StreamConnectedEvent / StreamDisconnectedEvent 발행 시
-        # 이 값을 그대로 실어 보낸다.
         self._account_id = account_id
 
         self._ws: Any = None
@@ -72,11 +66,9 @@ class KISStreamClient:
         self._recv_task: asyncio.Task[None] | None = None
         self._subscribed_symbols: set[str] = set()
 
-        # 콜백
         self._price_callbacks: list[PriceCallback] = []
         self._execution_callbacks: list[ExecutionCallback] = []
 
-        # 재연결 상태
         self._reconnect_delay = DEFAULT_RECONNECT_DELAY
 
     @property
@@ -148,7 +140,6 @@ class KISStreamClient:
             logger.info("종목 구독: %s (총 %d)", symbol, len(self._subscribed_symbols))
             return True
 
-        # 연결 전이면 목록에만 추가 (연결 후 자동 구독)
         self._subscribed_symbols.add(symbol)
         return True
 
@@ -182,8 +173,6 @@ class KISStreamClient:
             }
             await self._ws.send(json.dumps(msg))
             logger.info("체결 통보 구독 시작")
-
-    # ── 내부 메서드 ──────────────────────────────────
 
     async def _connection_loop(self) -> None:
         """WebSocket 연결 유지 루프 (자동 재연결)."""
@@ -224,10 +213,8 @@ class KISStreamClient:
             logger.info("KIS WebSocket 연결 완료")
             await self._publish_connected()
 
-            # 기존 구독 복구
             await self._resubscribe_all()
 
-            # 수신 루프
             async for message in ws:
                 if not self._running:
                     break
@@ -243,7 +230,7 @@ class KISStreamClient:
         symbols = list(self._subscribed_symbols)
         for symbol in symbols:
             await self._send_subscribe(symbol, CHANNEL_PRICE, "1")
-            await asyncio.sleep(0.1)  # rate limit 방지
+            await asyncio.sleep(0.1)
 
     async def _send_subscribe(self, symbol: str, tr_id: str, tr_type: str) -> None:
         """구독/해제 메시지 전송."""
@@ -254,7 +241,7 @@ class KISStreamClient:
             "header": {
                 "approval_key": self._approval_key,
                 "custtype": "P",
-                "tr_type": tr_type,  # 1: 구독, 2: 해제
+                "tr_type": tr_type,
                 "content-type": "utf-8",
             },
             "body": {
@@ -271,7 +258,6 @@ class KISStreamClient:
         if isinstance(raw, bytes):
             raw = raw.decode("utf-8")
 
-        # JSON 응답 (구독 확인 등)
         if raw.startswith("{"):
             data = json.loads(raw)
             header = data.get("header", {})
@@ -280,7 +266,6 @@ class KISStreamClient:
                 await self._handle_execution_json(data)
             return
 
-        # 파이프 구분 데이터 (실시간 시세)
         await self._handle_pipe_data(raw)
 
     async def _handle_pipe_data(self, raw: str) -> None:
@@ -371,7 +356,6 @@ class KISStreamClient:
         except ImportError as e:
             raise ImportError("aiohttp 패키지가 필요합니다: pip install aiohttp") from e
 
-        # WebSocket URL에서 REST URL 유추
         if "31000" in self._url:
             rest_url = "https://openapivts.koreainvestment.com:29443"
         else:

@@ -61,9 +61,6 @@ class APIGateway:
         self._running = False
         self._stop_order_manager = stop_order_manager
         self._order_tracker = order_tracker
-        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층3, 최후보루)
-        # reader. 미주입(None)이면 fail-closed — submit_order 가 차단한다(G2).
-        # main(s.runtime_readiness) pass-through.
         self._runtime_readiness = runtime_readiness
 
     async def _get_broker(self, account_id: str) -> BrokerAdapter:
@@ -133,11 +130,8 @@ class APIGateway:
         from ante.account.models import AccountStatus, TradingMode
         from ante.broker.exceptions import APIError
 
-        # 단일 fresh fetch(await 이후 최신 status 확보 — in-flight suspend 검출).
         account, fetch_failed = await self._get_account(account_id)
 
-        # status 축(Fix 2) — kill-switch in-flight backstop. account_service 는
-        # gateway 생성자 필수 인자라 소스가 항상 present → status 축 활성.
         status = derive_account_status(
             self._account_service, account, fetch_failed=fetch_failed
         )
@@ -145,20 +139,14 @@ class APIGateway:
         if status == AccountStatus.SUSPENDED:
             reason = ACCOUNT_SUSPENDED_REASON
         elif status is STATUS_UNAVAILABLE:
-            # 소스 present + 조회 예외/미상 = 검증 불가 → fail-closed(in-flight
-            # suspend 를 stale 통과시키지 않는다). account=None(조회 실패)도 여기로
-            # 귀결돼 readiness 축의 account_metadata_unavailable 보다 우선 차단한다.
             reason = ACCOUNT_STATUS_UNAVAILABLE_REASON
 
-        # readiness 축 — status 축이 통과했을 때만 평가(둘 중 하나라도 막으면 거부).
         if reason is None:
             broker_type = getattr(account, "broker_type", "")
             trading_mode = getattr(account, "trading_mode", None)
             if not isinstance(broker_type, str) or trading_mode is None:
                 reason = f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable"
             elif trading_mode != TradingMode.LIVE:
-                # 안전장치(G2): non-LIVE 가 마커 skip 을 뚫고 여기까지 도달하면
-                # 실 broker.place_order 호출 직전이다 — fail-closed 차단한다.
                 reason = f"{ACCOUNT_NOT_READY_REASON}: non_live_broker_call_blocked"
             elif active_trading_blocked(
                 self._runtime_readiness,
@@ -175,7 +163,6 @@ class APIGateway:
 
         if reason is None:
             return
-        # G6: 계층3 운영자 가시성 — generic 문구(청산 marker 미운반). 정확히 1회.
         await self._eventbus.publish(
             build_not_ready_notification(
                 account_id=account_id,
@@ -184,7 +171,6 @@ class APIGateway:
                 is_liquidation=False,
             )
         )
-        # error_code 는 status 축이면 해당 토큰, readiness 축이면 account_not_ready.
         error_code = (
             reason
             if reason in (ACCOUNT_SUSPENDED_REASON, ACCOUNT_STATUS_UNAVAILABLE_REASON)
@@ -224,8 +210,6 @@ class APIGateway:
         self._eventbus.subscribe(OrderCancelEvent, self._on_order_cancel, priority=50)
         self._eventbus.subscribe(OrderModifyEvent, self._on_order_modify, priority=50)
         self._eventbus.subscribe(OrderFilledEvent, self._on_order_filled)
-
-    # ── 공개 API ──────────────────────────────────
 
     async def get_ohlcv(
         self,
@@ -349,25 +333,6 @@ class APIGateway:
 
         require_account_id(account_id, context="gateway.submit_order")
 
-        # ── #2398 계층3: active-order gate — rate-limit/broker 획득 **이후**, ──
-        # ``place_order`` **직전** 단일 재확인(attempt4-a, P1).
-        #
-        # **위치(spec 11-order-flow.md)**: ``rate_limiter.acquire()``(최대 ~60s
-        # await) + ``_get_broker()`` await **뒤**, ``place_order`` 직전. gate 를
-        # 이 await 들 **앞**에 두면 대기 중 ``mark_not_ready``/suspend 가 끼어
-        # stale 통과로 실 주문이 나가므로(TOCTOU), 비가역 시점 직전 단일 재확인으로
-        # 윈도우를 닫는다. 재확인 직후 ``place_order`` 가 동기 시작한다.
-        #
-        # not_ready/suspended/status-unavailable 면 broker 를 호출하지 않고
-        # ``APIError`` 를 raise → 호출자 ``_on_order_approved`` 의 except 가
-        # OrderFailedEvent(bot_id/order_id/account_id 보존)로 변환 → Treasury
-        # ``_on_order_failed`` → ``release_reservation`` 정확 해제(G3, [must_fix I]).
-        #
-        # **G3 critical**: 이 gate 를 ``_on_order_approved`` 의 isinstance 직후에서
-        # raise 하면 EventBus(bus.py:96)가 예외를 swallow 하여 OrderFailedEvent 가
-        # 미발행되고 reserve 가 영구 고착된다. 따라서 gate 는 반드시
-        # ``submit_order`` 내부에서 실행해 실패가 except→OrderFailedEvent 로
-        # 귀결되게 한다.
         rate_limiter = self._get_rate_limiter(account_id)
         await rate_limiter.acquire()
         broker = await self._get_broker(account_id)
@@ -406,7 +371,6 @@ class APIGateway:
 
         require_account_id(account_id, context="gateway.cancel_order")
 
-        # #2134: fail-closed broker_order_id 변환 — broker 호출 전에 검증.
         if self._order_tracker is None:
             logger.error(
                 "order_tracker 미주입 — broker_order_id 변환 불가, 취소 차단 "
@@ -441,8 +405,6 @@ class APIGateway:
         broker = await self._get_broker(account_id)
         return await broker.cancel_order(record.broker_order_id)
 
-    # ── EventBus 핸들러 ──────────────────────────────
-
     async def _on_order_approved(self, event: object) -> None:
         """Treasury 자금 확보 완료 → 증권사에 주문 제출.
 
@@ -458,7 +420,6 @@ class APIGateway:
         if not isinstance(event, OrderApprovedEvent):
             return
 
-        # stop/stop_limit → StopOrderManager로 라우팅
         if event.order_type in ("stop", "stop_limit") and self._stop_order_manager:
             try:
                 await self._stop_order_manager.register(
@@ -494,32 +455,6 @@ class APIGateway:
                 )
                 return
 
-        # ── #2398 Virtual 라우팅: account 메타 기반 non-LIVE silent skip(Fix A) ──
-        # 위치: stop/stop_limit StopOrderManager 분기 **뒤**, submit try **前**
-        # (spec api-gateway.md:161 normative).
-        #
-        # **메타 기반 결정적 라우팅(구독 순서 비의존)**: gateway 는 account 메타를
-        # **단일** fetch 해(``_get_account``) ``trading_mode`` 로 routing 을
-        # **결정적으로** 판정한다 — main 의 EventBus 구독 순서에 의존하지 않는다.
-        # 과거 attempt1 의 ``_virtual_handled`` 마커-only skip 은 VirtualExecutor 가
-        # gateway 보다 먼저 구독됐다는 가정에 의존했고, gateway 가 먼저 실행되면
-        # 마커 미설정 상태로 virtual 주문이 ``submit_order``→``_readiness_gate`` 의
-        # ``trading_mode != LIVE`` 분기로 들어가 ``non_live_broker_call_blocked``
-        # OrderFailedEvent 를 발행 → 뒤이어 VirtualExecutor 가 같은 주문을 체결/실패
-        # 처리해 동일 order_id terminal 이 중복됐다(finding 1). 메타 기반 silent
-        # skip 으로 이 race 를 봉쇄한다.
-        #
-        # - 메타 성공 + ``trading_mode != LIVE`` → **silent skip**(terminal 발행
-        #   없음). virtual 주문은 VirtualExecutor 가 소유 처리(체결/실패 종결).
-        # - 메타 성공 + LIVE → ``submit_order``. 내부 계층3 gate 가 ``place_order``
-        #   직전 단일 fresh fetch 로 readiness + status(SUSPENDED) 재확인 후 broker
-        #   호출(routing fetch 재사용 금지 — in-flight suspend 검출 위해 await 이후
-        #   최신 status 필요, attempt4-a/b).
-        # - 메타 **실패**(None) → fail-closed. 단 ``_virtual_handled`` 마커가 set
-        #   이면 skip(VirtualExecutor 가 소유 처리 — finding 1 메타 실패 잔여
-        #   코너의 중복 terminal 봉쇄, defense-in-depth). 마커 미설정이면 live
-        #   경로로 보고 ``submit_order``→계층3 gate 가 메타 실패를 G6 알림
-        #   + APIError 로 처리 → except → OrderFailedEvent(alert 누락 방지).
         from ante.account.models import TradingMode
 
         account, _ = await self._get_account(event.account_id)
@@ -530,22 +465,9 @@ class APIGateway:
                 and trading_mode != TradingMode.LIVE
             )
             if is_non_live:
-                # 메타 결정적 non-LIVE(VIRTUAL) → broker.place_order 경로 silent
-                # skip. virtual 주문은 VirtualExecutor 가 소유 처리(terminal 없음).
-                # trading_mode 가 None/비-TradingMode(메타 손상)면 silent skip 하지
-                # 않고 아래 live 경로로 떨어뜨려 ``_readiness_gate`` 가 fail-closed
-                # (account_metadata_unavailable) 차단하게 한다(G2 — 손상 메타를
-                # virtual 로 오인해 fall-open 하지 않는다).
                 return
         elif getattr(event, "_virtual_handled", False):
-            # 메타 실패 잔여 코너 — VirtualExecutor 가 소유 마커를 set 했으므로
-            # (priority 60 > gateway 50, 구독 순서 비의존) virtual 주문이다 →
-            # VirtualExecutor 가 체결/실패 종결한다. gateway 는 skip 하여 동일
-            # order_id terminal 중복(finding 1)을 막는다.
             return
-        # 메타 성공+LIVE 또는 메타 실패(마커 미설정)=live 경로. 계층3 gate 가
-        # ``place_order`` 직전 fresh fetch 로 readiness + status 를 재확인한다(routing
-        # 의 stale account 를 재사용하지 않음 — in-flight suspend/저하 검출).
 
         try:
             broker_order_id = await self.submit_order(
@@ -568,8 +490,6 @@ class APIGateway:
                     side=event.side,
                     quantity=event.quantity,
                     order_type=event.order_type,
-                    # #2391: 원주문 지정가 단가를 전파 → OrderTracker.order_price seed.
-                    # market/미지정 주문은 None(OrderApprovedEvent.price 그대로).
                     price=event.price,
                     exchange=event.exchange,
                 )
@@ -613,18 +533,6 @@ class APIGateway:
         if not isinstance(event, OrderCancelEvent):
             return
 
-        # #2044: 전략 on_order_update(cancelled/cancel_failed) 스펙의 필수 키
-        # symbol/side 를 OrderTracker record 에서 채운다. cross-account leak
-        # 방지를 위해 record.account_id == event.account_id 일 때만 채우고,
-        # order_tracker 미주입 / record 미발견 / account 불일치 시에는 ""
-        # 로 graceful 하게 비운다 (예외 없음).
-        #
-        # #2487: OrderCancelledEvent.exchange 의 유일한 값 소스도 같은 record 다
-        # (OrderCancelEvent 에는 exchange 필드가 없다). ``record`` 는 아래 블록
-        # 안에서만 바인딩되므로 ``sym, sd`` 와 동일하게 **블록 밖에서 선언**한다 —
-        # order_tracker 미주입 경로에서 unbound-name 크래시를 막는다. 폴백이 ""
-        # 가 아니라 "KRX" 인 이유: CANONICAL_EXCHANGES 에 빈 문자열이 없다
-        # (core/exchange.py, D-016).
         sym, sd = "", ""
         exch = "KRX"
         if self._order_tracker is not None:
@@ -636,8 +544,6 @@ class APIGateway:
         try:
             ok = await self.cancel_order(event.order_id, account_id=event.account_id)
             if not ok:
-                # 브로커가 예외 없이 False(취소 실패)를 반환한 경우.
-                # 성공 이벤트를 발행하지 않고 실패 이벤트로 전환한다 (#2142).
                 logger.warning("주문 취소 실패(broker False 반환): %s", event.order_id)
                 await self._eventbus.publish(
                     OrderCancelFailedEvent(
@@ -744,7 +650,6 @@ class APIGateway:
         if not isinstance(event, OrderModifyEvent):
             return
 
-        # rule engine 거부 흐름이 이미 terminal event를 발행했으면 skip (#1331).
         if getattr(event, "_consumed", False):
             return
 
@@ -765,9 +670,6 @@ class APIGateway:
                 )
             )
 
-        # (a) 신규 가격 finite & 양수 — broker 호출 전 fail-closed.
-        # (_is_finite_number 가 비숫자·NaN/Inf·큰 정수 OverflowError 를 예외 없이
-        # False 로 처리 → terminal 보장.)
         new_price = event.price
         if new_price is None or not _is_finite_number(new_price) or new_price <= 0:
             logger.warning(
@@ -778,10 +680,6 @@ class APIGateway:
             await _reject("modify_invalid_args")
             return
 
-        # (b) 수량 finite 검증 + sentinel — 비숫자/bool/비유한(NaN/Inf)/음수 무효.
-        # NaN 은 <0·>0 모두 false 라 검증 없이는 price-only 로 브로커까지 통과하고,
-        # str/None 은 비교에서 TypeError, 큰 정수는 OverflowError → terminal 이벤트
-        # 소실되므로 비교 전에 _is_finite_number 로 fail-closed.
         new_qty = event.quantity
         if not _is_finite_number(new_qty) or new_qty < 0:
             logger.warning(
@@ -792,7 +690,6 @@ class APIGateway:
             await _reject("modify_invalid_args")
             return
 
-        # OrderTracker record 조회 — broker_order_id 변환 + status/order_price 판정.
         if self._order_tracker is None:
             logger.error(
                 "order_tracker 미주입 — 주문 정정 차단 (order_id=%s, account=%s)",
@@ -814,9 +711,6 @@ class APIGateway:
 
         sym, sd = record.symbol, record.side
 
-        # (b0) 봇 소유권 — 같은 계좌 내 타 봇 주문 정정 차단(봇 격리). 성공 시
-        # 요청 봇/전략으로 기록·이벤트가 남으므로, record 의 bot_id 가 이벤트와
-        # 다르면 broker 호출 전에 fail-closed.
         if record.bot_id != event.bot_id:
             logger.warning(
                 "주문 정정 거부(봇 소유권 불일치): %s — record_bot=%s req_bot=%s",
@@ -827,7 +721,6 @@ class APIGateway:
             await _reject("modify_not_owner", symbol=sym, side=sd)
             return
 
-        # (b') 수량 변경(미지정 0.0 제외) → #2393 deferred.
         if event.quantity > 0 and event.quantity != record.ordered_qty:
             logger.warning(
                 "주문 정정 거부(수량 변경 미지원): %s — req=%s ordered=%s",
@@ -838,7 +731,6 @@ class APIGateway:
             await _reject("modify_qty_change_unsupported", symbol=sym, side=sd)
             return
 
-        # (c) open 상태만 정정 허용 (부분체결/터미널 미지원).
         if record.status != "open":
             logger.warning(
                 "주문 정정 거부(부분체결/터미널): %s — status=%s",
@@ -848,8 +740,6 @@ class APIGateway:
             await _reject("modify_partial_or_terminal_unsupported", symbol=sym, side=sd)
             return
 
-        # (c') v1 은 지정가(limit) price-only 정정만 — 비지정가(market 등) 주문은
-        # 정정 시 order_type="limit" 강제로 주문구분이 바뀌므로 fail-closed(#2393).
         if record.order_type != "limit":
             logger.warning(
                 "주문 정정 거부(비지정가 주문): %s — order_type=%s",
@@ -859,8 +749,6 @@ class APIGateway:
             await _reject("modify_unsupported_order_type", symbol=sym, side=sd)
             return
 
-        # (d) buy 예산 증가 차단 — 신규가격 ≤ 원주문가격. order_price 부재 시 buy
-        # fail-closed. sell 은 reserve 없음 → 통과.
         if record.side == "buy":
             if record.order_price is None or new_price > record.order_price:
                 logger.warning(
@@ -872,11 +760,6 @@ class APIGateway:
                 await _reject("modify_budget_increase_unsupported", symbol=sym, side=sd)
                 return
 
-        # broker 위임 — ordered_qty 불변(price-only), order_type="limit".
-        # broker 조회/레이트리밋 대기도 try 안에 둔다 — broker 미캐시·connect/auth
-        # 실패 예외가 핸들러 밖으로 새면 EventBus 가 에러만 로깅하고 전략에
-        # terminal(OrderModifyRejectedEvent)이 전달되지 않으므로(정정은 성공/거부
-        # 중 하나의 terminal update 보장 필요).
         try:
             rate_limiter = self._get_rate_limiter(account_id)
             await rate_limiter.acquire()
@@ -901,8 +784,6 @@ class APIGateway:
             await _reject("modify_failed", symbol=sym, side=sd)
             return
 
-        # broker 성공 → 정정 완료 이벤트. quantity=record.ordered_qty(불변),
-        # price=신규. OrderTracker ordered_qty 는 변경하지 않는다(price-only).
         logger.info("주문 정정 완료: %s → 신규가격 %s", event.order_id, new_price)
         await self._eventbus.publish(
             OrderModifyExecutedEvent(
@@ -915,9 +796,6 @@ class APIGateway:
                 quantity=record.ordered_qty,
                 price=new_price,
                 reason=event.reason,
-                # #2487: OrderModifyEvent 에는 exchange 필드가 없다 — 값 소스는
-                # tracker record 다. record 비어있음/cross-account 는 위 가드가
-                # 이미 배제했다. legacy row(exchange NULL)는 "KRX" 폴백.
                 exchange=record.exchange or "KRX",
             )
         )

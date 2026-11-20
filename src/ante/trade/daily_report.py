@@ -22,9 +22,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 KST = timezone(timedelta(hours=9))
-DEFAULT_REPORT_TIME = time(16, 0)  # 16:00 KST
+DEFAULT_REPORT_TIME = time(16, 0)
 
-# 통화 기호 매핑
 _CURRENCY_SYMBOLS: dict[str, str] = {
     "KRW": "원",
     "USD": "$",
@@ -153,9 +152,6 @@ class DailyReportScheduler:
         yesterday = today - timedelta(days=1)
         yesterday_str = yesterday.isoformat()
 
-        # 1) Query today's filled trades
-        # 자기 계좌 거래만 집계 — 단일 계좌 바인딩된 스케줄러가
-        # cross-account 거래를 끌어오지 않도록 명시 필터 (#1240).
         from ante.trade.models import TradeStatus
 
         trades = await self._recorder.get_trades(
@@ -171,7 +167,6 @@ class DailyReportScheduler:
         buy_count = sum(1 for t in trades if t.side == "buy")
         sell_count = sum(1 for t in trades if t.side == "sell")
 
-        # 2) Compute performance metrics
         net_trade_amount = 0.0
         for t in trades:
             if t.side == "buy":
@@ -179,7 +174,6 @@ class DailyReportScheduler:
             else:
                 net_trade_amount -= t.price * t.quantity
 
-        # Get today's ante_eval_amount from Treasury
         today_ante_eval = 0.0
         ante_purchase_amount = 0.0
         yesterday_ante_eval = 0.0
@@ -189,25 +183,19 @@ class DailyReportScheduler:
             today_ante_eval = summary.get("ante_eval_amount", 0.0)
             ante_purchase_amount = summary.get("ante_purchase_amount", 0.0)
 
-            # Get yesterday's snapshot
             prev_snapshot = await self._treasury.get_daily_snapshot(yesterday_str)
             if prev_snapshot:
                 yesterday_ante_eval = prev_snapshot["ante_eval_amount"]
 
-        # daily_pnl = today_eval - net_trade_amount - yesterday_eval
         daily_pnl = today_ante_eval - net_trade_amount - yesterday_ante_eval
-        # daily_return = daily_pnl / yesterday_eval (0 if no prev)
         daily_return = (
             daily_pnl / yesterday_ante_eval if yesterday_ante_eval != 0 else 0.0
         )
-        # unrealized_pnl = ante_eval_amount - ante_purchase_amount
         unrealized_pnl = today_ante_eval - ante_purchase_amount
 
-        # 3) Save today's snapshot for tomorrow's reference
         if self._treasury:
             await self._treasury.save_daily_snapshot(today_str)
 
-        # 4) Always publish DailyReportEvent
         from ante.eventbus.events import DailyReportEvent
 
         await self._eventbus.publish(
@@ -223,7 +211,6 @@ class DailyReportScheduler:
             )
         )
 
-        # 5) Publish NotificationEvent only when trades exist
         if not has_trades:
             logger.debug(
                 "DailyReport: no trades on %s — DailyReportEvent only",
@@ -231,8 +218,6 @@ class DailyReportScheduler:
             )
             return False
 
-        # Realized PnL from performance tracker (existing logic)
-        # 자기 계좌 성과만 집계 (#1240).
         summaries = await self._performance.get_daily_summary(
             start_date=today_str,
             end_date=today_str,
@@ -240,7 +225,6 @@ class DailyReportScheduler:
         )
         realized_pnl = summaries[0].realized_pnl if summaries else 0.0
 
-        # Position count — 자기 계좌 포지션만 집계 (#1240).
         all_positions = await self._positions.get_all_positions(
             account_id=self._account_id
         )

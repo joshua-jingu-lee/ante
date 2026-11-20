@@ -59,15 +59,8 @@ class TradeRecorder:
     ) -> None:
         self._db = db
         self._position_history = position_history
-        # #2377: 체결 알림 종목명 병기용. 미주입(None)이면 종목코드만 표기하는
-        # 기존 경로를 유지한다(CLI 생성 경로는 미주입 — 알림 미발행).
         self._instrument_service = instrument_service
         self._eventbus: EventBus | None = None
-        # #1957: 체결 이벤트 bounded 멱등 가드. trades 는 INSERT OR IGNORE 로
-        # 이미 DB-멱등이나, NotificationEvent 재발행은 effect 비멱등이라 outbox
-        # at-least-once 재전달 시 중복 알림이 난다. 비빈키 재전달을 가드로
-        # early-return 해 중복 알림을 차단한다(best-effort — 재기동/maxlen 초과는
-        # known-limitation).
         self._fill_dedup_guard = FillDedupGuard()
 
     async def initialize(self) -> None:
@@ -117,7 +110,6 @@ class TradeRecorder:
         if not isinstance(event, OrderFilledEvent):
             return
 
-        # 비빈키만 dedup. seen_or_add 는 await 없는 동기 원자 구간(#1957).
         if event.fill_dedup_key and self._fill_dedup_guard.seen_or_add(
             event.fill_dedup_key
         ):
@@ -128,15 +120,6 @@ class TradeRecorder:
             position = await self._position_history.get_current(
                 event.bot_id, event.symbol, account_id=event.account_id
             )
-            # #2377: 종목코드만 노출하던 라인에 종목명 병기. 미주입/조회 불가 시
-            # symbol-only 로 폴백한다(format_label 이 폴백을 내장 — 무예외·무IO).
-            #
-            # known-limitation(#2377 → #2487 로 축소): 생산자 전파는 #2487 이
-            # 닫았다(OrderTracker.exchange 단일 소스). 잔여는 v007 이전 legacy
-            # tracker row(exchange NULL)뿐이며, 그 체결은 "KRX" 로 폴백한다.
-            # 실제 거래소가 비-KRX 였다면 instrument cache((symbol, exchange)
-            # 키) 미스로 symbol-only 폴백된다(병기 누락이지 오표기 아님 —
-            # 다른 종목명을 표기하지 않으므로 #2377 불변식 보존).
             symbol_label = (
                 self._instrument_service.format_label(
                     event.symbol, event.exchange, markdown=True
@@ -345,10 +328,6 @@ class TradeRecorder:
         account_id = require_account_id(
             account_id, context="trade_recorder.save_adjustment"
         )
-        # #2371: timestamp 는 save_trade/_save_trade 와 동일한 UTC-aware isoformat 으로
-        # 저장한다(과거 SQLite ``datetime('now')`` 공백 구분 포맷 금지). lexical
-        # 비교에서 공백(0x20) < 'T'(0x54) 라 ``trade list --from`` 당일 경계에서
-        # 보정 행이 누락되던 단일-포맷 invariant 위반을 닫는다.
         timestamp = datetime.now(UTC).isoformat()
         await self._db.execute(
             """INSERT INTO trades
@@ -390,11 +369,6 @@ class TradeRecorder:
                 account_id, context="trade_recorder.get_trades"
             )
 
-        # Refs #1240 review (P2-3): legacy invalid account_id row를 SQL 단계에서
-        # 제외해야 LIMIT/OFFSET 페이지네이션이 정확해진다. Python 단계 skip만으로는
-        # legacy default row가 첫 페이지를 가득 채울 때 유효 거래가 다음 페이지에
-        # 묻혀 underflow 가 발생한다. SSOT (``INVALID_RUNTIME_ACCOUNT_IDS``) 와
-        # 빈 문자열/NULL을 함께 제외한다.
         invalid_ids = sorted(INVALID_RUNTIME_ACCOUNT_IDS)
         invalid_placeholders = ", ".join("?" for _ in invalid_ids)
         conditions.append(

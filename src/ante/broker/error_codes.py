@@ -7,62 +7,41 @@ KIS msg_cd는 ``APBK*`` 형식 또는 numeric business code(예: ``40580000``)
 ``TRANSIENT_MSG_CODES`` set에 등록한다.
 """
 
-# ── 재시도 불가 (permanent) KIS msg_cd ─────────────────
-# 잘못된 요청, 비즈니스 에러 등 재시도해도 결과가 동일한 에러
 PERMANENT_MSG_CODES: frozenset[str] = frozenset(
     {
-        "APBK0013",  # 잘못된 종목코드
-        "APBK0014",  # 매매 불가 종목
-        "APBK0919",  # 잔고 부족
-        "APBK0920",  # 매도 가능 수량 초과
-        "APBK0921",  # 주문 수량 제한 초과
-        "APBK1000",  # 호가 범위 초과
-        "APBK1001",  # 최소 주문 금액 미달
-        "APBK1002",  # 시장 마감
-        "APBK1003",  # 주문 불가 시간
-        "APBK0501",  # 잘못된 계좌번호
-        "APBK0502",  # 잘못된 비밀번호
-        "APBK0503",  # 잘못된 주문 유형
-        "40580000",  # 장종료 또는 주문불가 시간 (#1296: A7 oracle 회귀)
-        "40570000",  # 장시작전 (#1317: A7 oracle 회귀)
-        "40240000",  # 모의투자 잔고내역 없음 = 매도가능 잔고 없음 (#1951: #1945 회귀)
-        # 모의투자 주문이 불가한 계좌 = 계좌 자격/모의 신청 상태 거절
-        # (#2361: 3세션 일관 관측, 조사 #2360)
+        "APBK0013",
+        "APBK0014",
+        "APBK0919",
+        "APBK0920",
+        "APBK0921",
+        "APBK1000",
+        "APBK1001",
+        "APBK1002",
+        "APBK1003",
+        "APBK0501",
+        "APBK0502",
+        "APBK0503",
+        "40580000",
+        "40570000",
+        "40240000",
         "40910000",
-        "IGW00022",  # 원주문번호 오류 또는 처리 불가 (#1338: A7 oracle 회귀)
+        "IGW00022",
     }
 )
 
-# ── 재시도 가능 (transient) KIS msg_cd ──────────────────
-# 서버 과부하, 일시적 지연 등 재시도 시 성공할 수 있는 에러
-#
-# 주의 (#2399): 이 set 은 ``_handle_response`` 가 ``APIError.retryable=True`` 로
-# 승격해 일반 ``KISRetryHandler`` 지수 backoff 로 보내는 **전역 SSOT** 다. 토큰
-# 발급 1분 1회 제한(``EGW00133``)을 여기에 넣으면 일반 재시도가 토큰 cooldown 에
-# 몰리므로 **금지**한다. ``EGW00133`` 은 아래 ``TOKEN_RATE_LIMIT_MSG_CODE`` 로 따로
-# 두고 토큰 발급 경로 전용 ~60s backoff(spec 07 OAuth2 §(4))에서만 소비한다.
 TRANSIENT_MSG_CODES: frozenset[str] = frozenset(
     {
-        "APBK0600",  # 서버 과부하
-        "APBK0601",  # 처리 지연
-        "APBK0602",  # 일시적 서비스 불가
-        "EGW00201",  # 초당 거래 건수 초과 (#2399, 일반 지수 backoff)
+        "APBK0600",
+        "APBK0601",
+        "APBK0602",
+        "EGW00201",
     }
 )
 
-# ── 토큰 발급 빈도 제한 (auth-only, #2399) ──────────────
-# KIS ``EGW00133`` (접근토큰 발급 1분 1회)은 일반 TRANSIENT 지수 backoff 가 아니라
-# **토큰 발급 경로 전용 ~60s backoff**(spec 07 OAuth2 §(4)(5)(6))로만 처리한다.
-# 따라서 ``TRANSIENT_MSG_CODES`` 에 넣지 **않고** auth-only 별도 상수로 둔다.
-# ``_authenticate`` 가 이 코드를 감지하면 ``TokenRateLimitError`` 를 즉시 raise 하고
-# (내부 sleep 없음), startup wrapper / self-healing interval 단일 cadence 가 backoff
-# 를 분담한다([must_fix J] classify 불변 / nested-backoff 차단).
 TOKEN_RATE_LIMIT_MSG_CODE = "EGW00133"
 
-# ── 재시도 가능 HTTP 상태 코드 ──────────────────────────
 RETRYABLE_HTTP_STATUS_CODES: frozenset[int] = frozenset({500, 502, 503, 429})
 
-# ── KIS 에러 한글 메시지 매핑 ──────────────────────────
 KIS_ERROR_MESSAGES: dict[str, str] = {
     "APBK0013": "잘못된 종목코드",
     "APBK0014": "매매 불가 종목",
@@ -84,8 +63,8 @@ KIS_ERROR_MESSAGES: dict[str, str] = {
     "40240000": "모의투자 잔고내역 없음 (매도가능 잔고 없음)",
     "40910000": "모의투자 주문 불가 계좌 (모의 자격/신청 상태 확인 필요)",
     "IGW00022": "원주문번호 오류 또는 처리 불가",
-    "EGW00133": "접근토큰 발급은 1분당 1회만 허용",  # auth-only (#2399)
-    "EGW00201": "초당 거래 건수 초과",  # transient (#2399)
+    "EGW00133": "접근토큰 발급은 1분당 1회만 허용",
+    "EGW00201": "초당 거래 건수 초과",
 }
 
 
@@ -102,7 +81,6 @@ def is_retryable_msg_code(msg_cd: str) -> bool:
         return False
     if msg_cd in TRANSIENT_MSG_CODES:
         return True
-    # 알 수 없는 코드는 재시도 가능으로 취급 (보수적)
     return True
 
 
@@ -111,8 +89,7 @@ def is_retryable_http_status(status_code: int) -> bool:
     return status_code in RETRYABLE_HTTP_STATUS_CODES
 
 
-# ── 예수금 부족 관련 에러 코드 ────────────────────────────
-INSUFFICIENT_DEPOSIT_CODE = "APBK0919"  # 잔고(예수금) 부족
+INSUFFICIENT_DEPOSIT_CODE = "APBK0919"
 
 
 def is_insufficient_deposit(msg_cd: str) -> bool:
