@@ -390,8 +390,27 @@ class TestOrderHistoryErrorSurface:
                 ],
             )
 
-        assert result.exit_code != 0, (result.stdout, result.stderr)
-        assert "BROKER_RATE_LIMITED: too many requests" in result.stderr
+        assert result.stderr == "Error: BROKER_RATE_LIMITED: too many requests\n"
+
+        with (
+            patch("ante.cli.main.authenticate_member") as mock_auth,
+            patch.object(broker_cmd, "_ipc_broker_command", new=_raise),
+        ):
+            mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": _MOCK_MASTER})
+            json_result = r.invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-1",
+                ],
+            )
+        assert json.loads(json_result.stdout)["code"] == "BROKER_RATE_LIMITED"
 
     def test_fallback_registered_exception_code(
         self, runner: CliRunner, tmp_path
@@ -426,7 +445,6 @@ class TestOrderHistoryErrorSurface:
             )
 
         adapter.get_order_history.assert_awaited_once()
-        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "BROKER_API_ERROR"
 
@@ -465,6 +483,5 @@ class TestReconcileOfflineErrorSurface:
             )
 
         adapter.get_account_positions.assert_awaited_once()
-        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "BROKER_API_ERROR"

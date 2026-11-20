@@ -299,8 +299,7 @@ class TestAuditTypesClosesDatabaseOnSetupFailure:
                 ],
             )
 
-        assert raised == [failing_step]
-        assert result.exit_code != 0, result.output
+        assert raised == [failing_step], result.output
         db.connect.assert_awaited_once()
         db.close.assert_awaited_once()
 

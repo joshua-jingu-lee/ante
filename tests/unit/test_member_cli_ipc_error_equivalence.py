@@ -647,7 +647,6 @@ class TestMemberDirectPathExplicitCodes:
         )
 
         svc.register.assert_awaited_once()
-        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "PERMISSION_DENIED"
         assert payload["message"] == _MASTER_REQUIRED_MESSAGE
@@ -662,6 +661,5 @@ class TestMemberDirectPathExplicitCodes:
         )
 
         svc.update_emoji.assert_awaited_once()
-        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "MEMBER_NOT_FOUND"

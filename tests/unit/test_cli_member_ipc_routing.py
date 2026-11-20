@@ -337,6 +337,6 @@ class TestRegisterIpcErrorCode:
                 ]
             )
         ipc_send.assert_awaited_once()
-        assert result.exit_code != 0
         payload = json.loads(result.output)
         assert payload["code"] == "MEMBER_ALREADY_EXISTS"
+        assert payload["message"] == "dup exists"

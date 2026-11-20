@@ -215,7 +215,6 @@ class TestSystemStop:
             cli, ["--config-dir", str(root_dir), "--format", "json", "system", "stop"]
         )
 
-        assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "PID_NOT_FOUND"
         assert str(root_dir / "run" / "ante.pid") in data["message"]

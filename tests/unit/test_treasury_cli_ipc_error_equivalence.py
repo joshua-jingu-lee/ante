@@ -411,6 +411,6 @@ def test_direct_path_registered_exception_code(
         )
 
     assert entered == ["acc-1"]
-    assert result.exit_code != 0, result.output
+    assert result.exit_code == 1, result.output
     payload = _cli_envelope_payload(result.output)
     assert payload["code"] == "TREASURY_NOT_CONFIGURED"

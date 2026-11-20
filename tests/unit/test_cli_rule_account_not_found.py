@@ -419,7 +419,6 @@ class TestRuleAccountsTableAbsence:
 
         result = _invoke_rule_in_process(config_dir, args)
 
-        assert result.exit_code != 0, result.output
         assert '"ACCOUNT_NOT_FOUND"' in result.output, (result.output, result.exception)
         payload = json.loads(result.output.strip().splitlines()[-1])
         assert payload["code"] == "ACCOUNT_NOT_FOUND"

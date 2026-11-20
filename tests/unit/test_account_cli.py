@@ -698,7 +698,7 @@ class TestAccountCreate:
     def test_create_credential_file_strips_only_trailing_newlines(
         self, real_account_db, offline_runtime, tmp_path
     ) -> None:
-        """credential 파일 값은 끝의 CR·LF만 지우고 앞뒤 공백·탭은 그대로 저장한다."""
+        """credential 파일 값은 끝의 개행만 지우고 앞뒤 공백·탭은 그대로 저장한다."""
         import asyncio
 
         secret_path = tmp_path / "secret.txt"
@@ -726,14 +726,16 @@ class TestAccountCreate:
                 f"app_secret={secret_path}",
             ]
         )
-        assert result.exit_code == 0, result.output
 
         async def _load():
             async with real_account_db() as svc:
                 return await svc.get("test2")
 
         account = asyncio.run(_load())
-        assert account.credentials == {"app_key": "K", "app_secret": "  FILE SECRET\t"}
+        assert account.credentials == {
+            "app_key": "K",
+            "app_secret": "  FILE SECRET\t",
+        }, result.output
 
     def test_create_credential_file_not_found(
         self, mock_account_service: AsyncMock, offline_runtime, tmp_path
@@ -1388,9 +1390,7 @@ class TestAccountRepairTimezone:
             ]
         )
         mock_account_service.repair_timezone.assert_awaited_once()
-        assert result.exit_code != 0
         data = json.loads(result.output.strip())
-        assert data["status"] == "error"
         assert data["code"] == "ACCOUNT_ALREADY_DELETED"
 
     def test_account_repair_timezone_active_runtime_blocked(

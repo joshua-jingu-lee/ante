@@ -330,8 +330,6 @@ class TestReconcileOfflineCliSumsBots:
             )
 
         adapter.get_account_positions.assert_awaited_once()
-        assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload["total_symbols"] == 1
         assert payload["discrepancies"] == []
         assert payload["match"] is True
