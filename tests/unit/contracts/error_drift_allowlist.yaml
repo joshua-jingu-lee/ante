@@ -38,9 +38,9 @@
 # #2112 bot list/info/positions/signal-key(read) runtime IPC 라우팅 전환:
 # 4 read 명령에 동일 ``ipc_send`` ClickException text-mode 분기(동일 UX prefix
 # 패턴, sha 3dc4008c3fb0) 신규 추가 + start/stop/status/rotate 분기가 아래로
-# 이동. 현재 bot.py code-less text-mode fmt.error 8건: list(212)/info(273)/
-# positions(664)/signal-key-read(817)/start(1084)/stop(1120)/status(1154) +
-# rotate(569, sha 03fce6e088b7). 각 4 read 분기의 성공 출력은 기존 contract
+# 이동. 현재 bot.py code-less text-mode fmt.error 8건: list/info/
+# positions/signal-key-read/start/stop/status +
+# rotate(sha 03fce6e088b7). 각 4 read 분기의 성공 출력은 기존 contract
 # (table/output/echo) 를 그대로 보존하므로 추가 fmt.error anchor 영향 없음.
 intended_no_code:
   - path: src/ante/cli/commands/bot.py
@@ -85,29 +85,29 @@ intended_no_code:
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
 
 known_drift_fmt_error_no_code:
-  # #1842: account.py line 762/804 entries 제거 — emit_cli_error 정렬 완료
+  # #1842: account.py entries 2건 제거 — emit_cli_error 정렬 완료
   # (CLI direct path 가 IPC envelope 와 동일 public code surface).
   #
-  # #1843 sub-PR 3: bot.py line 384/499 entries 제거 — line 384 ("봇을 찾을
-  # 수 없습니다" sentinel) 는 ``code="BOT_NOT_FOUND"`` 명시 부여로 정렬,
-  # line 499 (non-table-missing OperationalError fallback) 는 emit_cli_error
+  # #1843 sub-PR 3: bot.py entries 2건 제거 — "봇을 찾을
+  # 수 없습니다" sentinel 은 ``code="BOT_NOT_FOUND"`` 명시 부여로 정렬,
+  # non-table-missing OperationalError fallback 은 emit_cli_error
   # 로 ``EXECUTION_ERROR`` (registry miss fallback) surface 로 정렬.
   #
-  # #1870 옵션 3: bot.py 931/967/1001 + config.py 214/217 entries 를
+  # #1870 옵션 3: bot.py 3건 + config.py 2건 entries 를
   # ``intended_no_code`` 로 영구 이동 — text-mode ``{code}: {message}``
   # prefix UX lock 은 의도된 계약이며 deferred 가 아니다.
   #
-  # #1843 sub-PR 5: broker.py line 211/266/318 entries 제거 — emit_cli_error
+  # #1843 sub-PR 5: broker.py entries 3건 제거 — emit_cli_error
   # 정렬 완료 (broker typed exception 5 sub-class 가 ``BROKER_*`` 안정 코드를
   # registry MRO lookup 으로 surface, 미분류 fault 는 ``EXECUTION_ERROR``
   # fallback).
   #
-  # #1843 sub-PR 6: strategy.py 149/173/258 + update.py 135/196/256 entries
-  # 제거 — strategy.py 149 는 ``code="STRATEGY_VALIDATION_ERROR"`` 명시
-  # 부여 (ValidationResult 객체이므로 typed exception 경로 아님), 173/258
+  # #1843 sub-PR 6: strategy.py 3건 + update.py 3건 entries
+  # 제거 — strategy.py 의 ValidationResult 분기는 ``code="STRATEGY_VALIDATION_ERROR"`` 명시
+  # 부여 (ValidationResult 객체이므로 typed exception 경로 아님), 나머지 2건
   # 은 ``emit_cli_error(fmt, e)`` 정렬 (StrategyLoadError/StrategyError
-  # MRO lookup 으로 typed 코드 surface). update.py 135/196 은
-  # ``code="UPDATE_CHECK_FAILED"`` 명시 부여, 256 은
+  # MRO lookup 으로 typed 코드 surface). update.py 의 확인 실패 2건은
+  # ``code="UPDATE_CHECK_FAILED"`` 명시 부여, 설치 실패 1건은
   # ``code="UPDATE_INSTALL_FAILED"`` 명시 부여 (typed exception 없는
   # bool 반환 함수의 실패 surface).
   #
@@ -116,8 +116,8 @@ known_drift_fmt_error_no_code:
   # _MASTER_REQUIRED_MESSAGE override 보존하는 typed except 는 code 인자
   # 명시 (``code="PERMISSION_DENIED"``) 로 정렬했다.
   #
-  # 본 section 은 현재 비어 있다 — #1870 이 마지막 5건 (bot.py 931/967/1001
-  # + config.py 214/217) 을 ``intended_no_code`` 로 영구 이동하면서 baseline
+  # 본 section 은 현재 비어 있다 — #1870 이 마지막 5건 (bot.py 3건
+  # + config.py 2건) 을 ``intended_no_code`` 로 영구 이동하면서 baseline
   # 잔여분이 모두 해소되었다. 향후 신규 deferred drift 가 등장하면 본 section
   # 에 재등록한다.
 
