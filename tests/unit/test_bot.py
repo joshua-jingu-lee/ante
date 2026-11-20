@@ -12,6 +12,7 @@ from ante.eventbus.events import (
     AccountSuspendedEvent,
     BotErrorEvent,
     BotStartedEvent,
+    BotStepCompletedEvent,
     BotStopEvent,
     BotStoppedEvent,
     OrderCancelEvent,
@@ -1734,3 +1735,740 @@ class TestBotManagerExchangeValidation:
         # account_service가 없으므로 검증 스킵, 정상 생성
         bot = await manager.create_bot(config, SimpleStrategy, ctx)
         assert bot.status == BotStatus.CREATED
+
+
+# ── 정지·재시작을 건넌 외부 시그널과 옛 실행 루프 ─────────
+
+
+class _ProbeLock(asyncio.Lock):
+    """``acquire`` 에 들어온 태스크를 차례로 기록하는 계측용 잠금."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered: list[object] = []
+        self._entry = asyncio.Event()
+
+    async def acquire(self) -> bool:
+        self.entered.append(asyncio.current_task())
+        self._entry.set()
+        return await super().acquire()
+
+    async def wait_entered(self, task: object) -> None:
+        async def until() -> None:
+            while task not in self.entered:
+                self._entry.clear()
+                await self._entry.wait()
+
+        await asyncio.wait_for(until(), timeout=5.0)
+
+    async def wait_entries(self, count: int) -> None:
+        async def until() -> None:
+            while len(self.entered) < count:
+                self._entry.clear()
+                await self._entry.wait()
+
+        await asyncio.wait_for(until(), timeout=5.0)
+
+
+class _IntervalGate:
+    """``interval_seconds`` 대기를 태스크마다 ``asyncio.Event`` 로 여닫는 가짜 sleep.
+
+    깨어난 뒤에도 반드시 한 번 양보하고, 호출 횟수에 상한을 둔다.
+    """
+
+    def __init__(self, interval: float) -> None:
+        self.interval = interval
+        self.sleeping: dict[object, asyncio.Event] = {}
+        self.calls = 0
+        self._changed = asyncio.Event()
+
+    async def sleep(self, delay: float) -> None:
+        if delay != self.interval:
+            await _real_sleep(delay)
+            return
+        self.calls += 1
+        if self.calls > 50:
+            raise RuntimeError("interval sleep cap exceeded")
+        task = asyncio.current_task()
+        wake = asyncio.Event()
+        self.sleeping[task] = wake
+        self._changed.set()
+        try:
+            await wake.wait()
+        finally:
+            self.sleeping.pop(task, None)
+        await _real_sleep(0)
+
+    async def wait_sleeping(self, task: object) -> None:
+        async def until() -> None:
+            while task not in self.sleeping:
+                self._changed.clear()
+                await self._changed.wait()
+
+        await asyncio.wait_for(until(), timeout=5.0)
+
+    async def settle(self, task: object) -> None:
+        """``task`` 가 끝나거나 간격 대기에 들어갈 때까지 기다린다(취소하지 않는다)."""
+        assert isinstance(task, asyncio.Task)
+        sleeper = asyncio.create_task(self.wait_sleeping(task))
+        try:
+            await asyncio.wait(
+                {task, sleeper}, timeout=5.0, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            sleeper.cancel()
+            await asyncio.gather(sleeper, return_exceptions=True)
+
+    def wake(self, task: object) -> None:
+        self.sleeping[task].set()
+
+
+class _RecordingPortfolio(FakePortfolioView):
+    """조회한 태스크를 기록하고, ``raise_for`` 태스크의 조회는 실패시킨다."""
+
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+        self.raise_for: object = None
+
+    def get_positions(self, bot_id):
+        task = asyncio.current_task()
+        self.calls.append(task)
+        if task is self.raise_for:
+            raise RuntimeError("portfolio lookup failed")
+        return {}
+
+
+class _RecorderBase(Strategy):
+    """호출한 인스턴스·태스크·signal_id 를 기록하고, 지정한 지점에서 붙잡힌다."""
+
+    meta = StrategyMeta(
+        name="gen_probe",
+        version="1.0.0",
+        description="test",
+        accepts_external_signals=True,
+    )
+    steps: list[tuple[Strategy, object]]
+    data_calls: list[tuple[Strategy, str]]
+    stepped: asyncio.Event
+    data_entered: asyncio.Event
+    hold_step: asyncio.Event | None
+    fail_held_step: bool
+    hold_data: dict[str, asyncio.Event]
+
+    @staticmethod
+    def step_signals(count: int) -> list:
+        return []
+
+    async def on_step(self, context):
+        cls = type(self)
+        cls.steps.append((self, asyncio.current_task()))
+        cls.stepped.set()
+        if cls.hold_step is not None and len(cls.steps) == 1:
+            await cls.hold_step.wait()
+            if cls.fail_held_step:
+                raise RuntimeError("on_step failed")
+        return cls.step_signals(len(cls.steps))
+
+    async def on_data(self, data):
+        cls = type(self)
+        signal_id = data["signal_id"]
+        cls.data_calls.append((self, signal_id))
+        gate = cls.hold_data.get(signal_id)
+        if gate is not None:
+            cls.data_entered.set()
+            await gate.wait()
+        return [Signal(symbol="005930", side="buy", quantity=1.0, reason=signal_id)]
+
+    @classmethod
+    async def wait_steps(cls, count: int) -> None:
+        async def until() -> None:
+            while len(cls.steps) < count:
+                cls.stepped.clear()
+                await cls.stepped.wait()
+
+        await asyncio.wait_for(until(), timeout=5.0)
+
+
+def _recorder(**attrs: object) -> type[_RecorderBase]:
+    namespace: dict[str, object] = {
+        "steps": [],
+        "data_calls": [],
+        "stepped": asyncio.Event(),
+        "data_entered": asyncio.Event(),
+        "hold_step": None,
+        "fail_held_step": False,
+        "hold_data": {},
+    }
+    namespace.update(attrs)
+    return type("_Recorder", (_RecorderBase,), namespace)
+
+
+def _gen_signal(signal_id: str) -> object:
+    from ante.eventbus.events import ExternalSignalEvent
+
+    return ExternalSignalEvent(
+        account_id="acc-test",
+        bot_id="bot1",
+        signal_id=signal_id,
+        symbol="005930",
+        action="buy",
+    )
+
+
+def _gen_config(**overrides: object) -> BotConfig:
+    values: dict = {
+        "bot_id": "bot1",
+        "strategy_id": "gen_probe",
+        "interval_seconds": 999,
+        "account_id": "acc-test",
+    }
+    values.update(overrides)
+    return BotConfig(**values)
+
+
+def _collect(eventbus: EventBus, *event_types: type) -> list[tuple[object, object]]:
+    seen: list[tuple[object, object]] = []
+    for event_type in event_types:
+        eventbus.subscribe(
+            event_type,
+            lambda e: seen.append((e, asyncio.current_task())),
+            priority=1000,
+        )
+    return seen
+
+
+def _rejections(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == "ante.bot.bot" and r.getMessage().startswith("외부 시그널 거부")
+    ]
+
+
+class TestBotSignalAcrossStopAndRestart:
+    """잠금을 기다리던 외부 시그널과 옛 실행 루프는 정지·재시작을 건너지 못한다."""
+
+    @pytest.fixture
+    async def db(self, tmp_path):
+        database = Database(str(tmp_path / "test.db"))
+        await database.connect()
+        yield database
+        await asyncio.wait_for(database.close(), timeout=5.0)
+
+    @pytest.fixture
+    async def pending(self):
+        tasks: list[asyncio.Task] = []
+        yield tasks
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(*tasks, return_exceptions=True), timeout=5.0
+        )
+
+    @pytest.fixture
+    async def manager(self, eventbus, db):
+        m = BotManager(eventbus=eventbus, db=db)
+        await m.initialize()
+        m._bot_signal_locks["bot1"] = _ProbeLock()
+        yield m
+        loops = [b._task for b in m._bots.values() if b._task and not b._task.done()]
+        await asyncio.wait_for(m.stop_all(), timeout=5.0)
+        for task in loops:
+            task.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(*loops, return_exceptions=True), timeout=5.0
+        )
+
+    @staticmethod
+    def _probe(manager: BotManager) -> _ProbeLock:
+        lock = manager._bot_signal_locks["bot1"]
+        assert isinstance(lock, _ProbeLock)
+        return lock
+
+    async def test_waiting_signal_is_dropped_after_stop(
+        self, manager, eventbus, ctx, pending, caplog
+    ):
+        """on_step 이 쥔 잠금을 기다리던 시그널은 stop_bot 뒤 실행되지 않는다."""
+        strategy_cls = _recorder(hold_step=asyncio.Event())
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        assert probe.locked()
+
+        publisher = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher)
+        await probe.wait_entered(publisher)
+
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+            await asyncio.wait_for(publisher, timeout=5.0)
+
+        assert bot.status == BotStatus.STOPPED
+        assert strategy_cls.data_calls == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+        assert any("bot1" in m for m in _rejections(caplog))
+
+    @staticmethod
+    async def _stop_then_resume(manager: BotManager) -> None:
+        await manager.stop_bot("bot1")
+        await manager.resume_bot("bot1")
+
+    @staticmethod
+    async def _assign_strategy(manager: BotManager) -> None:
+        await manager.assign_strategy("bot1", "gen_probe_v2")
+
+    @staticmethod
+    async def _stop_then_resume_twice(manager: BotManager) -> None:
+        for _ in range(2):
+            await manager.stop_bot("bot1")
+            await manager.resume_bot("bot1")
+
+    @pytest.mark.parametrize(
+        "restart",
+        ["_stop_then_resume", "_assign_strategy", "_stop_then_resume_twice"],
+    )
+    async def test_waiting_signal_is_dropped_after_restart(
+        self, manager, eventbus, ctx, pending, caplog, restart
+    ):
+        """다른 on_data 의 잠금을 기다리던 시그널은 재시작 뒤 새 전략에 닿지 않는다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        first = bot.strategy
+
+        publisher_a = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher_a)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        assert probe.locked()
+        publisher_b = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher_b)
+        await probe.wait_entered(publisher_b)
+
+        await asyncio.wait_for(getattr(self, restart)(manager), timeout=5.0)
+        assert bot.status == BotStatus.RUNNING
+        second = bot.strategy
+        assert second is not first
+
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            strategy_cls.hold_data["sig-A"].set()
+            await asyncio.wait_for(publisher_a, timeout=5.0)
+            await asyncio.wait_for(publisher_b, timeout=5.0)
+
+        assert [s for s, _ in strategy_cls.data_calls if s is second] == []
+        assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+        assert any("bot1" in m for m in _rejections(caplog))
+        assert bot.status == BotStatus.RUNNING
+
+    async def test_waiting_signal_is_dropped_after_error(
+        self, manager, eventbus, ctx, pending
+    ):
+        """on_step 예외로 ERROR 가 되는 동안 기다리던 시그널은 실행되지 않는다."""
+        strategy_cls = _recorder(hold_step=asyncio.Event(), fail_held_step=True)
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(
+            _gen_config(auto_restart=False), strategy_cls, ctx
+        )
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+
+        publisher = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher)
+        await probe.wait_entered(publisher)
+
+        assert strategy_cls.hold_step is not None
+        strategy_cls.hold_step.set()
+        await asyncio.wait_for(publisher, timeout=5.0)
+
+        assert bot.status == BotStatus.ERROR
+        assert strategy_cls.data_calls == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+
+    async def test_waiting_signal_is_dropped_after_delete(
+        self, manager, eventbus, ctx, pending
+    ):
+        """잠금을 쥔 on_data 를 기다리던 시그널은 delete_bot 뒤 실행되지 않는다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+
+        publisher_a = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher_a)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        publisher_b = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher_b)
+        await probe.wait_entered(publisher_b)
+
+        await asyncio.wait_for(manager.delete_bot("bot1"), timeout=5.0)
+        assert bot.status == BotStatus.DELETED
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(publisher_a, timeout=5.0)
+        await asyncio.wait_for(publisher_b, timeout=5.0)
+
+        assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+
+    async def test_waiting_signal_is_dropped_after_account_suspended(
+        self, manager, eventbus, ctx, pending
+    ):
+        """잠금을 쥔 on_data 를 기다리던 시그널은 계좌 정지 뒤 실행되지 않는다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+
+        publisher_a = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher_a)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        publisher_b = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher_b)
+        await probe.wait_entered(publisher_b)
+
+        await asyncio.wait_for(
+            eventbus.publish(
+                AccountSuspendedEvent(
+                    account_id="acc-test", reason="test", suspended_by="test"
+                )
+            ),
+            timeout=5.0,
+        )
+        assert bot.status == BotStatus.STOPPED
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(publisher_a, timeout=5.0)
+        await asyncio.wait_for(publisher_b, timeout=5.0)
+
+        assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+
+    @staticmethod
+    async def _orphan_loop_after_in_chain_stop(
+        manager: BotManager, eventbus: EventBus, monkeypatch: pytest.MonkeyPatch
+    ) -> tuple[type[_RecorderBase], _IntervalGate, _RecordingPortfolio, Bot]:
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        portfolio = _RecordingPortfolio()
+        ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=portfolio,
+            order_view=FakeOrderView(),
+        )
+
+        def first_step_stops(count: int) -> list:
+            if count == 1:
+                return [
+                    Signal(symbol="005930", side="buy", quantity=1.0, reason="stop")
+                ]
+            return []
+
+        strategy_cls = _recorder(step_signals=staticmethod(first_step_stops))
+
+        async def stop_in_chain(event: object) -> None:
+            if isinstance(event, OrderRequestEvent) and event.reason == "stop":
+                await eventbus.publish(
+                    BotStopEvent(account_id="acc-test", bot_id="bot1", reason="rule")
+                )
+
+        eventbus.subscribe(OrderRequestEvent, stop_in_chain)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        old_loop = strategy_cls.steps[0][1]
+        await gate.wait_sleeping(old_loop)
+        assert bot.status == BotStatus.STOPPED
+        assert isinstance(old_loop, asyncio.Task)
+        assert not old_loop.done()
+        return strategy_cls, gate, portfolio, bot
+
+    async def test_old_loop_after_in_chain_stop_ends_without_touching_new_generation(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """사슬 안 정지로 남은 옛 루프는 재개 뒤 깨어나도 아무것도 하지 않고 끝난다."""
+        (
+            strategy_cls,
+            gate,
+            portfolio,
+            bot,
+        ) = await self._orphan_loop_after_in_chain_stop(manager, eventbus, monkeypatch)
+        old_loop = strategy_cls.steps[0][1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+
+        await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
+        await strategy_cls.wait_steps(2)
+        new_loop = strategy_cls.steps[1][1]
+        assert new_loop is not old_loop
+        await gate.wait_sleeping(new_loop)
+        lookups_before = portfolio.calls.count(old_loop)
+
+        gate.wake(old_loop)
+        await gate.settle(old_loop)
+
+        assert [t for _, t in strategy_cls.steps if t is old_loop] == [old_loop]
+        assert portfolio.calls.count(old_loop) == lookups_before
+        assert [e for e, t in lifecycle if t is old_loop] == []
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert bot.status == BotStatus.RUNNING
+        assert set(gate.sleeping) == {new_loop}
+
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+        assert isinstance(new_loop, asyncio.Task)
+        assert new_loop.done()
+
+    async def test_old_loop_failing_before_lock_does_not_error_new_generation(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """옛 루프가 잠금 전에 실패해도 새 세대는 ERROR 가 되지 않는다."""
+        (
+            strategy_cls,
+            gate,
+            portfolio,
+            bot,
+        ) = await self._orphan_loop_after_in_chain_stop(manager, eventbus, monkeypatch)
+        old_loop = strategy_cls.steps[0][1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+        errors = _collect(eventbus, BotErrorEvent)
+
+        await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
+        await strategy_cls.wait_steps(2)
+        new_loop = strategy_cls.steps[1][1]
+        await gate.wait_sleeping(new_loop)
+
+        portfolio.raise_for = old_loop
+        gate.wake(old_loop)
+        await gate.settle(old_loop)
+
+        assert bot.status == BotStatus.RUNNING
+        assert bot.error_message is None
+        assert errors == []
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert set(gate.sleeping) == {new_loop}
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+
+    async def test_old_loop_failing_after_mid_step_restart_keeps_new_generation(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """스텝 도중 정지·재개된 뒤 옛 루프가 예외로 끝나도 새 세대는 그대로다."""
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        resumed = asyncio.Event()
+        stopped = asyncio.Event()
+
+        def stop_then_broken_signal(count: int) -> list:
+            if count == 1:
+                return [
+                    Signal(symbol="005930", side="buy", quantity=1.0, reason="stop"),
+                    None,
+                ]
+            return []
+
+        strategy_cls = _recorder(step_signals=staticmethod(stop_then_broken_signal))
+
+        async def stop_and_wait_for_resume(event: object) -> None:
+            if isinstance(event, OrderRequestEvent) and event.reason == "stop":
+                await eventbus.publish(
+                    BotStopEvent(account_id="acc-test", bot_id="bot1", reason="rule")
+                )
+                stopped.set()
+                await resumed.wait()
+
+        eventbus.subscribe(OrderRequestEvent, stop_and_wait_for_resume)
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await asyncio.wait_for(stopped.wait(), timeout=5.0)
+        old_loop = strategy_cls.steps[0][1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+        assert bot.status == BotStatus.STOPPED
+
+        await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
+        resumed.set()
+        await gate.settle(old_loop)
+
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert bot.status == BotStatus.RUNNING
+        assert bot.error_message is None
+        assert [e for e, t in lifecycle if t is old_loop] == []
+
+        await strategy_cls.wait_steps(2)
+        new_loop = strategy_cls.steps[1][1]
+        assert new_loop is not old_loop
+        await gate.wait_sleeping(new_loop)
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+
+    async def test_loop_waiting_on_lock_skips_step_when_not_running(
+        self, eventbus, ctx, monkeypatch, pending
+    ):
+        """잠금을 기다리던 루프는 잠금을 얻은 뒤 RUNNING 이 아니면 on_step 없이 끝난다.
+
+        정지가 잠금을 기다리는 구조(PR-2)를 위한 선제 검사다.
+        """
+        gate = _IntervalGate(10)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        strategy_cls = _recorder()
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        probe = _ProbeLock()
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=strategy_cls,
+            ctx=ctx,
+            eventbus=eventbus,
+            signal_lock=probe,
+        )
+        await probe.acquire()
+        await bot.start()
+        await probe.wait_entries(2)
+        old_loop = probe.entered[1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+
+        bot.status = BotStatus.STOPPED
+        probe.release()
+        await gate.settle(old_loop)
+
+        assert strategy_cls.steps == []
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert bot.status == BotStatus.STOPPED
+        assert lifecycle == []
+
+    async def test_loop_waiting_on_lock_skips_step_after_restart(
+        self, eventbus, ctx, monkeypatch, pending
+    ):
+        """잠금을 기다리던 루프는 그 사이 봇이 다시 시작됐으면 on_step 없이 끝난다.
+
+        정지가 잠금을 기다리는 구조(PR-2)를 위한 선제 검사다.
+        """
+        gate = _IntervalGate(10)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        strategy_cls = _recorder()
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        probe = _ProbeLock()
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=strategy_cls,
+            ctx=ctx,
+            eventbus=eventbus,
+            signal_lock=probe,
+        )
+        await probe.acquire()
+        await bot.start()
+        await probe.wait_entries(2)
+        old_loop = probe.entered[1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+
+        bot.status = BotStatus.STOPPED
+        await bot.start()
+        await probe.wait_entries(3)
+        new_loop = probe.entered[2]
+        assert new_loop is not old_loop
+
+        probe.release()
+        await gate.settle(old_loop)
+        await gate.settle(new_loop)
+
+        assert [t for _, t in strategy_cls.steps] == [new_loop]
+        assert [e for e, t in lifecycle if t is old_loop] == []
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert bot.status == BotStatus.RUNNING
+
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+        assert isinstance(new_loop, asyncio.Task)
+        assert new_loop.done()
+
+    async def test_waiting_signal_runs_while_bot_keeps_running(
+        self, manager, eventbus, ctx, pending
+    ):
+        """실행 중인 봇에서 잠금을 기다리던 시그널은 잠금을 얻은 뒤 처리된다."""
+        strategy_cls = _recorder(hold_step=asyncio.Event())
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+
+        publisher = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher)
+        await probe.wait_entered(publisher)
+
+        assert strategy_cls.hold_step is not None
+        strategy_cls.hold_step.set()
+        await asyncio.wait_for(publisher, timeout=5.0)
+
+        assert strategy_cls.data_calls == [(bot.strategy, "sig-B")]
+        assert [e.reason for e, _ in orders] == ["sig-B"]
+        assert bot.status == BotStatus.RUNNING
+
+    async def test_signal_to_stopped_bot_is_rejected_with_log(
+        self, manager, eventbus, ctx, caplog
+    ):
+        """정지된 봇에 온 시그널은 on_data 없이 「외부 시그널 거부」 로그를 남긴다."""
+        strategy_cls = _recorder()
+        await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            await asyncio.wait_for(eventbus.publish(_gen_signal("sig-B")), timeout=5.0)
+
+        assert strategy_cls.data_calls == []
+        assert any("bot1" in m for m in _rejections(caplog))
+
+    async def test_bot_without_start_still_runs_loop_and_signal(
+        self, eventbus, ctx, monkeypatch
+    ):
+        """start() 없이 상태만 RUNNING 인 봇에서도 루프와 시그널이 동작한다."""
+        gate = _IntervalGate(10)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        strategy_cls = _recorder()
+        bot = Bot(
+            config=_lock_probe_config(),
+            strategy_cls=strategy_cls,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        bot.strategy = strategy_cls(ctx=ctx)
+        bot.status = BotStatus.RUNNING
+
+        await asyncio.wait_for(
+            bot.on_external_signal(_gen_signal("sig-B")), timeout=5.0
+        )
+        assert strategy_cls.data_calls == [(bot.strategy, "sig-B")]
+
+        loop_task = asyncio.create_task(bot._run_loop())
+        await strategy_cls.wait_steps(1)
+        await gate.wait_sleeping(loop_task)
+        assert [t for _, t in strategy_cls.steps] == [loop_task]
+
+        bot.status = BotStatus.STOPPED
+        gate.wake(loop_task)
+        assert await asyncio.wait_for(loop_task, timeout=5.0) is None
