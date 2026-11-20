@@ -803,6 +803,43 @@ class TestBotSignalKeyMissingBotExit:
         assert "봇을 찾을 수 없습니다" not in result.stderr
         mock_skm.get_key.assert_not_awaited()
 
+    def test_db_error_json_code_is_execution_error(self, runner: CliRunner) -> None:
+        import sqlite3
+
+        mock_db = AsyncMock()
+        mock_db.close = AsyncMock()
+        mock_db.fetch_one = AsyncMock(
+            side_effect=sqlite3.OperationalError("database is locked")
+        )
+        mock_skm = self._missing_skm()
+        not_running = click.ClickException("서버가 실행 중이 아닙니다.")
+        not_running.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+        not_running.ipc_error_message = not_running.message  # type: ignore[attr-defined]
+        mock_send = AsyncMock(side_effect=not_running)
+
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=mock_send),
+            patch(
+                "ante.cli.commands.bot._create_services",
+                new=_acm_factory((mock_db, None, None, None)),
+            ),
+            patch(
+                "ante.bot.signal_key.SignalKeyManager",
+                return_value=mock_skm,
+            ),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "bot", "signal-key", "some-bot"],
+            )
+
+        assert mock_send.await_args.args[0] == "bot.signal_key"
+        mock_db.fetch_one.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.stdout)
+        assert payload["code"] == "EXECUTION_ERROR"
+        assert "database is locked" in payload["message"]
+
 
 class TestBotSignalKeySoftDeletedBotExit:
     """soft-deleted bot 은 운영상 미존재로 거부 (#1596 attempt2).

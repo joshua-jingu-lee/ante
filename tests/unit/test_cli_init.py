@@ -992,6 +992,38 @@ class TestInitCredentialsSingleEmission:
         assert result.stderr.count(_MOCK_TOKEN) == 1
         assert result.stderr.count(_MOCK_RECOVERY_KEY) == 1
 
+    def test_text_failure_does_not_emit_json_recovery_event(self, runner, tmp_path):
+        target = tmp_path / "config"
+        runner_split = _split_stderr_runner()
+
+        create_acc_mock = AsyncMock(side_effect=RuntimeError("DB lock"))
+
+        with (
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=AsyncMock(side_effect=_mock_bootstrap),
+            ),
+            patch("ante.cli.commands.init._create_test_account", new=create_acc_mock),
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
+            ),
+            patch("ante.cli.main.authenticate_member"),
+        ):
+            result = runner_split.invoke(cli, ["init", "--dir", str(target)])
+
+        create_acc_mock.assert_awaited_once()
+        assert result.exit_code == 1
+        assert "테스트 계좌 생성 실패: DB lock" in result.stderr
+        assert "master_bootstrap_complete" not in result.stderr
+        combined = result.stdout + result.stderr
+        assert combined.count(_MOCK_TOKEN) == 1
+        assert combined.count(_MOCK_RECOVERY_KEY) == 1
+
 
 class TestInitTestAccountDetectionNarrowed:
     """Codex 5차 리뷰 Finding 2 회귀 — test account 판정은 default 조건만 매치."""

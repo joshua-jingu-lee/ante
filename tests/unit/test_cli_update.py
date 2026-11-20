@@ -710,3 +710,96 @@ class TestUpdateGatePrecedence:
 
         assert text_result.exit_code != 0
         assert "서버가 실행 중입니다" in text_result.output
+
+
+class TestUpdateFailureCodesAndPaths:
+    """실패 경로의 안정 코드와 하위 호출에 넘기는 경로."""
+
+    def test_check_pypi_failure_code(self, runner: CliRunner) -> None:
+        with (
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value=None
+            ) as mock_latest,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update", "--check"])
+
+        mock_latest.assert_called_once()
+        assert result.exit_code == 1
+        assert json.loads(result.output)["code"] == "UPDATE_CHECK_FAILED"
+
+    def test_update_pypi_failure_code(self, runner: CliRunner) -> None:
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=False),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch(
+                "ante.update.checker.get_latest_version", return_value=None
+            ) as mock_latest,
+            patch("ante.update.executor.pip_upgrade") as mock_pip_upgrade,
+        ):
+            result = runner.invoke(cli, ["--format", "json", "update", "--yes"])
+
+        mock_latest.assert_called_once()
+        mock_pip_upgrade.assert_not_called()
+        assert result.exit_code == 1
+        assert json.loads(result.output)["code"] == "UPDATE_CHECK_FAILED"
+
+    def _invoke_real_update(self, runner: CliRunner, config_dir, *, pip_ok: bool):
+        with (
+            patch("ante.cli.commands.update.check_server_running", return_value=False),
+            patch("ante.update.checker.get_current_version", return_value="1.0.0"),
+            patch("ante.update.checker.get_latest_version", return_value="2.0.0"),
+            patch("ante.cli.commands.update.check_disk_space", return_value=(True, "")),
+            patch("ante.db.backup.backup_db"),
+            patch(
+                "ante.update.executor.snapshot_dependencies", return_value=None
+            ) as mock_snapshot,
+            patch(
+                "ante.update.executor.pip_upgrade", return_value=pip_ok
+            ) as mock_pip_upgrade,
+            patch(
+                "ante.update.executor.run_post_update_migrations", return_value=True
+            ) as mock_migrate,
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "--config-dir",
+                    str(config_dir),
+                    "update",
+                    "--yes",
+                ],
+            )
+        return result, mock_snapshot, mock_pip_upgrade, mock_migrate
+
+    def test_pip_failure_code(self, runner: CliRunner, tmp_path) -> None:
+        result, _, mock_pip_upgrade, mock_migrate = self._invoke_real_update(
+            runner, tmp_path, pip_ok=False
+        )
+
+        mock_pip_upgrade.assert_called_once()
+        mock_migrate.assert_not_called()
+        assert result.exit_code == 1
+        assert json.loads(result.output)["code"] == "UPDATE_INSTALL_FAILED"
+
+    def test_snapshot_and_migration_use_config_dir_db_path(
+        self, runner: CliRunner, tmp_path
+    ) -> None:
+        from pathlib import Path
+
+        result, mock_snapshot, _, mock_migrate = self._invoke_real_update(
+            runner, tmp_path, pip_ok=True
+        )
+
+        assert result.exit_code == 0, result.output
+        expected_db = (tmp_path / "db" / "ante.db").resolve()
+        mock_snapshot.assert_called_once()
+        snapshot_dir = mock_snapshot.call_args.kwargs["db_dir"]
+        assert snapshot_dir is not None
+        assert Path(snapshot_dir).resolve() == expected_db.parent
+        mock_migrate.assert_called_once()
+        migrate_db = mock_migrate.call_args.args[0]
+        assert migrate_db is not None
+        assert Path(migrate_db).resolve() == expected_db
