@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 import sys
@@ -48,10 +49,12 @@ def _baseline(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
     lines: int = 0,
+    excess: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     return {
         "comments": comments or {},
         "docstring_history": history or {},
+        "docstring_excess": excess or {},
         "docstring_lines": lines,
     }
 
@@ -385,6 +388,27 @@ def test_broken_json_exits_2(tmp_path: Path, capsys: Capsys) -> None:
         pytest.param(lambda d: d.update(docstring_lines=-1), id="lines-negative"),
         pytest.param(lambda d: d.update(docstring_lines=True), id="lines-bool"),
         pytest.param(lambda d: d.update(docstring_lines=1.0), id="lines-float"),
+        pytest.param(lambda d: d.update(docstring_excess=[]), id="excess-not-object"),
+        pytest.param(
+            lambda d: d["docstring_excess"].update({"src/ante/a.py": 0}),
+            id="excess-zero",
+        ),
+        pytest.param(
+            lambda d: d["docstring_excess"].update({"src/ante/a.py": -1}),
+            id="excess-neg",
+        ),
+        pytest.param(
+            lambda d: d["docstring_excess"].update({"src/ante/a.py": 1.0}),
+            id="excess-float",
+        ),
+        pytest.param(
+            lambda d: d["docstring_excess"].update({"src/ante/a.py": "1"}),
+            id="excess-string",
+        ),
+        pytest.param(
+            lambda d: d["docstring_excess"].update({"src/ante/a.py": True}),
+            id="excess-bool",
+        ),
     ],
 )
 def test_malformed_baseline_exits_2(
@@ -417,7 +441,7 @@ def test_parse_baseline_matches_read_baseline(tmp_path: Path) -> None:
 
     assert parsed == checker.read_baseline(tmp_path)
     assert parsed == checker.Measurement(
-        baseline["comments"], baseline["docstring_history"], 1
+        baseline["comments"], baseline["docstring_history"], {}, 1
     )
 
 
@@ -428,7 +452,8 @@ def test_parse_baseline_matches_read_baseline(tmp_path: Path) -> None:
         pytest.param("[1, 2]", id="not-object"),
         pytest.param('{"comments": {}, "docstring_history": {}}', id="missing-key"),
         pytest.param(
-            '{"comments": {"a": 0}, "docstring_history": {}, "docstring_lines": 0}',
+            '{"comments": {"a": 0}, "docstring_history": {}, '
+            '"docstring_excess": {}, "docstring_lines": 0}',
             id="zero-count",
         ),
     ],
@@ -532,3 +557,375 @@ def test_any_exception_exits_2(
 
     assert code == 2
     assert "_InjectedError" in message
+
+
+def _doc(lines: int, indent: str = "    ") -> str:
+    if lines == 1:
+        return f'{indent}"""Doc."""\n'
+    body = "".join(f"{indent}line {i}\n" for i in range(lines - 2))
+    return f'{indent}"""Doc.\n{body}{indent}"""\n'
+
+
+def _last(source: str) -> Any:
+    return checker.classify_docstrings(ast.parse(source))[-1]
+
+
+OWNER_SOURCES: dict[str, Callable[[int], str]] = {
+    "private": lambda n: "def _f():\n" + _doc(n),
+    "public": lambda n: "def f():\n" + _doc(n),
+    "async-public": lambda n: "async def f():\n" + _doc(n),
+    "class": lambda n: "class C:\n" + _doc(n),
+    "module": lambda n: _doc(n, ""),
+    "module-attribute": lambda n: '"""M."""\nx = 1\n' + _doc(n, ""),
+    "module-annotated-attribute": lambda n: '"""M."""\nx: int\n' + _doc(n, ""),
+    "class-attribute": lambda n: 'class C:\n    """C."""\n    x: int = 1\n' + _doc(n),
+    "function-after-assign": lambda n: 'def f():\n    """F."""\n    x = 1\n' + _doc(n),
+    "module-not-after-assign": lambda n: '"""M."""\nimport os\n' + _doc(n, ""),
+    "class-not-after-assign": lambda n: (
+        'class C:\n    """C."""\n    def m(self):\n        """M."""\n' + _doc(n)
+    ),
+}
+OWNER_EXPECTED = {
+    "private": ("private", 1),
+    "public": ("public", 10),
+    "async-public": ("public", 10),
+    "class": ("class", 10),
+    "module": ("module", 3),
+    "module-attribute": ("attribute", 3),
+    "module-annotated-attribute": ("attribute", 3),
+    "class-attribute": ("attribute", 3),
+    "function-after-assign": ("other", 0),
+    "module-not-after-assign": ("other", 0),
+    "class-not-after-assign": ("other", 0),
+}
+LIMIT_CASES = [
+    pytest.param(case, n, id=f"{case}-{n}")
+    for case, (_, limit) in OWNER_EXPECTED.items()
+    for n in (limit - 1, limit, limit + 1, limit + 3)
+    if n >= 1
+]
+
+
+@pytest.mark.parametrize(("case", "lines"), LIMIT_CASES)
+def test_owner_limit_and_excess(case: str, lines: int) -> None:
+    owner, limit = OWNER_EXPECTED[case]
+    source = OWNER_SOURCES[case](lines)
+
+    doc = _last(source)
+
+    assert (doc.owner, doc.limit, doc.lines) == (owner, limit, lines)
+    assert doc.excess == max(0, lines - limit)
+    oversized = checker.oversized_docstrings(source.encode())
+    assert sum(d.excess for d in oversized) == max(0, lines - limit)
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    [
+        "@cli.command()",
+        '@group.command("name")',
+        "@click.group()",
+        "@x.command",
+        "@x.group",
+        "@a.b.command(name='x', help='y')",
+        pytest.param("@functools.wraps(g)\n@cli.command()", id="click-not-first"),
+        pytest.param("@cli.command()\n@click.option('--x')", id="click-not-last"),
+        pytest.param(
+            "@staticmethod\n@cli.group()\n@click.pass_context", id="click-middle"
+        ),
+    ],
+)
+@pytest.mark.parametrize("name", ["run", "_run"])
+def test_click_command_has_no_limit(decorator: str, name: str) -> None:
+    source = f"{decorator}\ndef {name}():\n" + _doc(40)
+
+    doc = _last(source)
+
+    assert (doc.owner, doc.limit, doc.lines, doc.excess) == ("click", None, 40, 0)
+    assert checker.oversized_docstrings(source.encode()) == []
+
+
+@pytest.mark.parametrize(
+    "decorator",
+    ["@command", "@command()", "@cli.commands()", "@functools.wraps(g)"],
+)
+def test_non_click_decorator_keeps_function_owner(decorator: str) -> None:
+    assert _last(f"{decorator}\ndef _run():\n" + _doc(1)).owner == "private"
+    assert _last(f"{decorator}\ndef run():\n" + _doc(1)).owner == "public"
+
+
+@pytest.mark.parametrize(
+    ("source", "owner", "name", "excess"),
+    [
+        pytest.param(
+            "class C:\n    def __init__(self):\n" + _doc(11, "        "),
+            "public",
+            "C.__init__",
+            1,
+            id="dunder-is-public",
+        ),
+        pytest.param(
+            "def __getattr__(name):\n" + _doc(11),
+            "public",
+            "__getattr__",
+            1,
+            id="module-dunder-is-public",
+        ),
+        pytest.param(
+            "class C:\n    def _private(self):\n" + _doc(2, "        "),
+            "private",
+            "C._private",
+            1,
+            id="private-method",
+        ),
+        pytest.param(
+            "class C:\n    def __mangled(self):\n" + _doc(2, "        "),
+            "private",
+            "C.__mangled",
+            1,
+            id="name-mangled-is-private",
+        ),
+        pytest.param(
+            'def f():\n    """F."""\n    def _inner():\n' + _doc(2, "        "),
+            "private",
+            "f._inner",
+            1,
+            id="nested-private",
+        ),
+        pytest.param(
+            'def f():\n    """F."""\n    def inner():\n' + _doc(11, "        "),
+            "public",
+            "f.inner",
+            1,
+            id="nested-public",
+        ),
+        pytest.param(
+            'class _P:\n    """P."""\n    def m(self):\n' + _doc(11, "        "),
+            "public",
+            "_P.m",
+            1,
+            id="private-class-public-method",
+        ),
+        pytest.param(
+            "class _P:\n" + _doc(11),
+            "class",
+            "_P",
+            1,
+            id="private-class",
+        ),
+        pytest.param(
+            'class C:\n    """C."""\n    x, y = 1, 2\n' + _doc(4),
+            "attribute",
+            "C.(x,y)",
+            1,
+            id="attribute-name",
+        ),
+    ],
+)
+def test_owner_and_name(source: str, owner: str, name: str, excess: int) -> None:
+    doc = _last(source)
+
+    assert (doc.owner, doc.name, doc.excess) == (owner, name, excess)
+
+
+NESTED_BODIES = (
+    '"""M."""\n'
+    "x = 1\n"
+    '"""attr."""\n'
+    "if x:\n"
+    '    """if."""\n'
+    "    y = 1\n"
+    '    """after assign in if."""\n'
+    "else:\n"
+    '    """else."""\n'
+    "for i in x:\n"
+    '    """for."""\n'
+    "while x:\n"
+    '    """while."""\n'
+    "with x:\n"
+    '    """with."""\n'
+    "try:\n"
+    '    """try."""\n'
+    "except E:\n"
+    '    """except."""\n'
+    "finally:\n"
+    '    """finally."""\n'
+    "match x:\n"
+    "    case 1:\n"
+    '        """case."""\n'
+    "def f():\n"
+    "    class D:\n"
+    '        """D."""\n'
+    "        z = 1\n"
+    '        """D.z."""\n'
+)
+
+
+def test_every_string_statement_gets_an_owner() -> None:
+    tree = ast.parse(NESTED_BODIES)
+
+    docs = checker.classify_docstrings(tree)
+
+    assert [(d.start, d.end) for d in docs] == checker.docstring_spans(tree)
+    assert [d.owner for d in docs] == [
+        "module",
+        "attribute",
+        *["other"] * 10,
+        "class",
+        "attribute",
+    ]
+    assert [d.name for d in docs][-2:] == ["f.D", "f.D.z"]
+
+
+def test_classification_covers_repository_docstrings() -> None:
+    files = checker.target_files(REPO_ROOT)
+    assert files
+    for path in files:
+        tree = ast.parse(path.read_bytes())
+        spans = [(d.start, d.end) for d in checker.classify_docstrings(tree)]
+        assert spans == checker.docstring_spans(tree), path
+
+
+def _excess_tree(root: Path, private_lines: int = 3) -> dict[str, Any]:
+    _write_source(
+        root,
+        "src/ante/m.py",
+        '"""Module."""\n\n\ndef _f():\n'
+        + _doc(private_lines)
+        + '\n\ndef g():\n    """G."""\n',
+    )
+    _write_source(root, "src/ante/other.py", "def _h():\n" + _doc(2))
+    measured = checker.measure(root)
+    return _baseline(lines=measured.docstring_lines, excess=measured.docstring_excess)
+
+
+def test_measure_sums_excess_per_file(tmp_path: Path) -> None:
+    _excess_tree(tmp_path, private_lines=4)
+    _write_source(tmp_path, "src/ante/clean.py", 'def _ok():\n    """Ok."""\n')
+
+    result = checker.measure(tmp_path)
+
+    assert result.docstring_excess == {"src/ante/m.py": 3, "src/ante/other.py": 1}
+    assert [(d.start, d.owner, d.name) for d in result.oversized["src/ante/m.py"]] == [
+        (5, "private", "_f")
+    ]
+
+
+def test_equal_excess_passes(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _excess_tree(tmp_path))
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 0, message
+    assert "3 docstring excess lines" in message
+
+
+def test_private_docstring_growth_fails_and_lists_docstrings(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path, private_lines=1)
+    _write_source(
+        tmp_path,
+        "src/ante/m.py",
+        '"""Module."""\n\n\ndef _f():\n' + _doc(2) + '\n\ndef g():\n    """G."""\n',
+    )
+    baseline["docstring_lines"] += 1
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "docstring_excess\tsrc/ante/m.py: actual 1, baseline 0 (+1)" in message
+    assert "  src/ante/m.py:5 private _f 2>1" in message
+    assert "src/ante/other.py:" not in message
+    assert "독스트링을 줄인다" in message
+    assert "불변식은 테스트로 옮긴다" in message
+    assert "함수로 추출한다" not in message
+    assert message.count("기준선의 키를 새 경로로 옮긴다") == 1
+    assert "docstring_lines" not in message
+
+
+def test_excess_growth_lists_every_oversized_docstring_of_the_file(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path)
+    _write_source(
+        tmp_path,
+        "src/ante/m.py",
+        _doc(5, "") + "\n\ndef _f():\n" + _doc(3) + "\n\nclass C:\n" + _doc(12),
+    )
+    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "docstring_excess\tsrc/ante/m.py: actual 6, baseline 2 (+4)" in message
+    assert "  src/ante/m.py:1 module <module> 5>3" in message
+    assert "  src/ante/m.py:9 private _f 3>1" in message
+    assert "  src/ante/m.py:15 class C 12>10" in message
+
+
+def test_comment_and_excess_growth_give_move_hint_once(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path, private_lines=1)
+    _write_source(
+        tmp_path,
+        "src/ante/m.py",
+        '"""Module."""\n\n\ndef _f():  # note\n'
+        + _doc(2)
+        + '\n\ndef g():\n    """G."""\n',
+    )
+    baseline["docstring_lines"] += 1
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "comments\tsrc/ante/m.py: actual 1, baseline 0 (+1)" in message
+    assert "docstring_excess\tsrc/ante/m.py: actual 1, baseline 0 (+1)" in message
+    assert "함수로 추출한다" in message
+    assert "독스트링을 줄인다" in message
+    assert message.count("기준선의 키를 새 경로로 옮긴다") == 1
+
+
+def test_shortened_docstring_without_lowering_baseline_fails(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path, private_lines=4)
+    _write_source(tmp_path, "src/ante/m.py", '"""Module."""\n\n\ndef _f():\n' + _doc(3))
+    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "docstring_excess\tsrc/ante/m.py: actual 2, baseline 3 (-1)" in message
+    assert "docstring_excess['src/ante/m.py']를 2로 낮춘다" in message
+    assert "상한을 넘는 독스트링" not in message
+
+
+def test_docstring_within_limit_asks_to_remove_key(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    baseline = _excess_tree(tmp_path)
+    _write_source(tmp_path, "src/ante/other.py", 'def _h():\n    """H."""\n')
+    baseline["docstring_lines"] = checker.measure(tmp_path).docstring_lines
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 1
+    assert "docstring_excess에서 'src/ante/other.py' 키를 지운다" in message
+
+
+def test_baseline_without_excess_key_exits_2(tmp_path: Path, capsys: Capsys) -> None:
+    baseline = _tree(tmp_path)
+    del baseline["docstring_excess"]
+    _write_baseline(tmp_path, baseline)
+
+    code, message = _run(tmp_path, capsys)
+
+    assert code == 2
+    assert "missing ['docstring_excess']" in message

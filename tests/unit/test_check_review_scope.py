@@ -400,25 +400,42 @@ def test_bad_ref_is_undecidable(repo: Repo) -> None:
 BASELINE = "scripts/comment_baseline.json"
 
 
+def _baseline_dict(
+    comments: dict[str, int] | None = None,
+    history: dict[str, int] | None = None,
+    lines: int = 10,
+    excess: dict[str, int] | None = None,
+) -> dict[str, object]:
+    return {
+        "comments": {"src/ante/a.py": 3, "src/ante/b.py": 2}
+        if comments is None
+        else comments,
+        "docstring_history": {"src/ante/a.py": 1} if history is None else history,
+        "docstring_excess": {"src/ante/a.py": 4, "src/ante/b.py": 2}
+        if excess is None
+        else excess,
+        "docstring_lines": lines,
+    }
+
+
 def _baseline_json(
     comments: dict[str, int] | None = None,
     history: dict[str, int] | None = None,
     lines: int = 10,
+    excess: dict[str, int] | None = None,
 ) -> str:
-    return json.dumps(
-        {
-            "comments": {"src/ante/a.py": 3, "src/ante/b.py": 2}
-            if comments is None
-            else comments,
-            "docstring_history": {"src/ante/a.py": 1} if history is None else history,
-            "docstring_lines": lines,
-        },
-        indent=2,
-    )
+    return json.dumps(_baseline_dict(comments, history, lines, excess), indent=2)
+
+
+def _without_excess(text: str) -> str:
+    data = json.loads(text)
+    del data["docstring_excess"]
+    return json.dumps(data, indent=2)
 
 
 BASE_BASELINE = _baseline_json()
-EMPTY_BASELINE = _baseline_json(comments={}, history={}, lines=0)
+EMPTY_BASELINE = _baseline_json(comments={}, history={}, lines=0, excess={})
+OLD_SHAPE_BASE_BASELINE = _without_excess(BASE_BASELINE)
 
 BASELINE_CASES = [
     pytest.param(
@@ -446,6 +463,25 @@ BASELINE_CASES = [
         _baseline_json(history={"src/ante/b.py": 1}), False, id="new-history-key"
     ),
     pytest.param(_baseline_json(lines=11), False, id="docstring-lines-increase"),
+    pytest.param(
+        _baseline_json(excess={"src/ante/a.py": 1, "src/ante/b.py": 2}),
+        True,
+        id="excess-decrease",
+    ),
+    pytest.param(
+        _baseline_json(excess={"src/ante/a.py": 4}), True, id="excess-key-removed"
+    ),
+    pytest.param(
+        _baseline_json(excess={"src/ante/a.py": 5, "src/ante/b.py": 1}),
+        False,
+        id="excess-increase",
+    ),
+    pytest.param(
+        _baseline_json(excess={"src/ante/a.py": 1, "src/ante/c.py": 1}),
+        False,
+        id="excess-new-key",
+    ),
+    pytest.param(_without_excess(EMPTY_BASELINE), False, id="head-without-excess-key"),
     pytest.param("{not json", False, id="head-broken-json"),
     pytest.param(
         _baseline_json(comments={"src/ante/a.py": 0}), False, id="head-zero-value"
@@ -460,6 +496,7 @@ BASELINE_CASES = [
             {
                 "comments": {},
                 "docstring_history": {},
+                "docstring_excess": {},
                 "docstring_lines": 0,
                 "extra": {},
             }
@@ -513,6 +550,7 @@ def test_baseline_path_matches_comment_checker() -> None:
         pytest.param(b'{"comments": {}}', id="base-missing-key"),
         pytest.param("﻿".encode() + BASE_BASELINE.encode(), id="base-bom"),
         pytest.param(b"\xff\xfe", id="base-not-utf8"),
+        pytest.param(OLD_SHAPE_BASE_BASELINE.encode(), id="base-without-excess-key"),
     ],
 )
 def test_malformed_base_baseline_is_not_lowered(old: bytes) -> None:
@@ -528,6 +566,26 @@ def test_malformed_base_baseline_requires_review(repo: Repo) -> None:
     result = repo.check()
     assert result.returncode == 1
     assert f"review\tM\t{BASELINE}" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        pytest.param(EMPTY_BASELINE, id="lowered"),
+        pytest.param(_without_excess(BASE_BASELINE) + "\n", id="same-old-shape"),
+        pytest.param(BASE_BASELINE, id="values-kept"),
+    ],
+)
+def test_base_with_other_key_set_requires_review(repo: Repo, head: str) -> None:
+    repo.write(BASELINE, OLD_SHAPE_BASE_BASELINE)
+    repo.commit("old-shape baseline")
+    repo.mark_base()
+    repo.write(BASELINE, head)
+    repo.commit("new-shape baseline")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tM\t{BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
 
 
 def test_baseline_parser_load_failure_is_not_lowered(
