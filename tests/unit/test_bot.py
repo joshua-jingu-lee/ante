@@ -2623,6 +2623,22 @@ class _OverflowThenFailingStop(Strategy):
         raise RuntimeError("on_stop failed")
 
 
+class _UnprintableError(Exception):
+    """문자열로 바꾸는 순간 다시 예외를 내는 예외."""
+
+    def __str__(self) -> str:
+        raise ValueError("unprintable")
+
+
+class _UnprintableFailingPortfolio(_RecordingPortfolio):
+    """``raise_for`` 태스크의 조회에서 ``_UnprintableError`` 를 낸다."""
+
+    def get_positions(self, bot_id):
+        if asyncio.current_task() is self.raise_for:
+            raise _UnprintableError()
+        return super().get_positions(bot_id)
+
+
 class TestBotOrderGateAfterStop:
     """정지가 시작된 봇의 on_step·on_data 시그널은 주문 요청으로 발행되지 않는다."""
 
@@ -3053,6 +3069,325 @@ class TestBotOrderGateAfterStop:
         assert publisher.done()
         assert orders == []
         await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+    async def test_failed_restart_on_start_keeps_orders_closed(
+        self, eventbus, ctx, pending
+    ):
+        """재시작의 on_start 가 실패하면 실행 중이던 on_data 의 시그널은 버려진다."""
+        started: list[object] = []
+
+        def on_start(self) -> None:
+            started.append(self)
+            if len(started) == 2:
+                raise RuntimeError("on_start failed")
+
+        strategy_cls = _recorder(
+            hold_data={"sig-A": asyncio.Event()}, on_start=on_start
+        )
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        publisher = asyncio.create_task(bot.on_external_signal(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+        with pytest.raises(RuntimeError, match="on_start failed"):
+            await asyncio.wait_for(bot.start(), timeout=5.0)
+        assert bot.status == BotStatus.STOPPED
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(publisher, timeout=5.0)
+        assert orders == []
+
+    async def test_failing_on_stop_keeps_orders_closed(self, eventbus, ctx, pending):
+        """정지의 on_stop 이 실패해도 실행 중이던 on_data 의 시그널은 버려진다."""
+
+        def on_stop(self) -> None:
+            raise RuntimeError("on_stop failed")
+
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()}, on_stop=on_stop)
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        publisher = asyncio.create_task(bot.on_external_signal(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+
+        with pytest.raises(RuntimeError, match="on_stop failed"):
+            await asyncio.wait_for(bot.stop(), timeout=5.0)
+        assert bot.status == BotStatus.STOPPING
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(publisher, timeout=5.0)
+        assert orders == []
+
+    async def test_on_data_finishing_while_error_is_published_is_dropped(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """루프가 ERROR 를 알리는 동안 끝난 on_data 의 시그널은 버려진다."""
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        portfolio = _RecordingPortfolio()
+        ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=portfolio,
+            order_view=FakeOrderView(),
+        )
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        await manager.create_bot(_gen_config(auto_restart=False), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        loop = strategy_cls.steps[0][1]
+        await gate.wait_sleeping(loop)
+
+        publisher = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+
+        async def release_while_reporting(event: object) -> None:
+            if isinstance(event, BotStepCompletedEvent) and event.result == "error":
+                strategy_cls.hold_data["sig-A"].set()
+                await asyncio.wait_for(publisher, timeout=5.0)
+
+        eventbus.subscribe(
+            BotStepCompletedEvent, release_while_reporting, priority=1000
+        )
+        portfolio.raise_for = loop
+        gate.wake(loop)
+        await gate.settle(loop)
+
+        assert publisher.done()
+        assert orders == []
+
+    async def test_bot_deleted_during_in_chain_stop_is_not_overwritten_by_error(
+        self, manager, eventbus, monkeypatch, caplog
+    ):
+        """사슬 안 정지 뒤 삭제된 봇은 꼬리의 예외로 ERROR 가 되지 않는다."""
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        ctx = _ActionFailingContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        strategy_cls = _recorder(step_signals=_first_step_signals("stop", "after"))
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        stopped = asyncio.Event()
+        release = asyncio.Event()
+
+        async def stop_and_hold(event: object) -> None:
+            if isinstance(event, OrderRequestEvent) and event.reason == "stop":
+                await eventbus.publish(
+                    BotStopEvent(account_id="acc-test", bot_id="bot1", reason="rule")
+                )
+                stopped.set()
+                await release.wait()
+                ctx.fail = True
+
+        eventbus.subscribe(OrderRequestEvent, stop_and_hold)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await asyncio.wait_for(stopped.wait(), timeout=5.0)
+        loop = strategy_cls.steps[0][1]
+        assert isinstance(loop, asyncio.Task)
+        assert bot.status == BotStatus.STOPPED
+
+        await asyncio.wait_for(manager.delete_bot("bot1"), timeout=5.0)
+        assert bot.status == BotStatus.DELETED
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            release.set()
+            await gate.settle(loop)
+
+        assert loop.done()
+        assert loop.result() is None
+        assert bot.status == BotStatus.DELETED
+        assert bot.error_message is None
+        assert lifecycle == []
+        ignored = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "ante.bot.bot" and r.getMessage().startswith("루프 예외 무시")
+        ]
+        assert len(ignored) == 1
+        assert "deleted" in ignored[0]
+
+    async def test_malformed_signal_after_in_chain_stop_is_dropped_without_error(
+        self, manager, eventbus, ctx, monkeypatch, caplog
+    ):
+        """정지 뒤 남은 형식이 깨진 시그널은 읽지 않고 버려진다.
+
+        예외 분기로 가지 않는다.
+        """
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+
+        def stop_then_malformed(count: int) -> list:
+            if count != 1:
+                return []
+            return [
+                Signal(symbol="005930", side="buy", quantity=1.0, reason="stop"),
+                None,
+            ]
+
+        strategy_cls = _recorder(step_signals=staticmethod(stop_then_malformed))
+        orders = _collect(eventbus, OrderRequestEvent)
+
+        async def stop_in_chain(event: object) -> None:
+            if isinstance(event, OrderRequestEvent) and event.reason == "stop":
+                await eventbus.publish(
+                    BotStopEvent(account_id="acc-test", bot_id="bot1", reason="rule")
+                )
+
+        eventbus.subscribe(OrderRequestEvent, stop_in_chain)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            await manager.start_bot("bot1")
+            await strategy_cls.wait_steps(1)
+            await gate.settle(strategy_cls.steps[0][1])
+
+        assert bot.status == BotStatus.STOPPED
+        assert [e.reason for e, _ in orders] == ["stop"]
+        dropped = _dropped_logs(caplog)
+        assert len(dropped) == 1 and "1건" in dropped[0]
+        assert [
+            r
+            for r in caplog.records
+            if r.name == "ante.bot.bot" and "예외 무시" in r.getMessage()
+        ] == []
+
+    async def test_on_step_that_restarts_the_bot_has_its_signals_dropped(
+        self, manager, eventbus, ctx, monkeypatch
+    ):
+        """on_step 안에서 봇이 정지·재개되면 그 on_step 이 돌려준 시그널은 버려진다."""
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        orders = _collect(eventbus, OrderRequestEvent)
+
+        class RestartingStrategy(_recorder()):  # type: ignore[misc]
+            async def on_step(self, context):
+                await super().on_step(context)
+                if len(type(self).steps) == 1:
+                    await manager.stop_bot("bot1")
+                    await manager.resume_bot("bot1")
+                    return [
+                        Signal(symbol="005930", side="buy", quantity=1.0, reason="old")
+                    ]
+                return []
+
+        bot = await manager.create_bot(_gen_config(), RestartingStrategy, ctx)
+        await manager.start_bot("bot1")
+        await RestartingStrategy.wait_steps(2)
+        old_loop = RestartingStrategy.steps[0][1]
+        new_loop = RestartingStrategy.steps[1][1]
+        await gate.settle(old_loop)
+        await gate.settle(new_loop)
+
+        assert orders == []
+        assert isinstance(old_loop, asyncio.Task)
+        assert old_loop.done()
+        assert bot.status == BotStatus.RUNNING
+
+    async def test_old_generation_exception_while_stopped_is_logged_as_old_generation(
+        self, manager, eventbus, monkeypatch, caplog
+    ):
+        """옛 세대 루프의 예외는 봇이 정지돼 있어도 옛 세대 쪽 로그로 남는다.
+
+        발행 경로를 바꿔 끼워 그 상태를 직접 만드는 선제 검사다.
+        """
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        strategy_cls = _recorder(step_signals=_first_step_signals("stop", "after"))
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=FakePortfolioView(),
+            order_view=FakeOrderView(),
+        )
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        original_publish = bot._publish_signals
+        restarted: list[object] = []
+
+        async def restart_stop_then_fail(signals: list, **kwargs: object) -> None:
+            if not restarted:
+                restarted.append(asyncio.current_task())
+                await manager.stop_bot("bot1")
+                await manager.resume_bot("bot1")
+                await manager.stop_bot("bot1")
+                raise RuntimeError("publish failed")
+            await original_publish(signals, **kwargs)
+
+        monkeypatch.setattr(bot, "_publish_signals", restart_stop_then_fail)
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            await manager.start_bot("bot1")
+            await strategy_cls.wait_steps(1)
+            old_loop = strategy_cls.steps[0][1]
+            await gate.settle(old_loop)
+
+        assert isinstance(old_loop, asyncio.Task)
+        assert old_loop.done()
+        assert bot.status == BotStatus.STOPPED
+        assert [e for e, t in lifecycle if t is old_loop] == []
+        messages = [r.getMessage() for r in caplog.records if r.name == "ante.bot.bot"]
+        assert len([m for m in messages if m.startswith("옛 세대 루프 예외 무시")]) == 1
+        assert [m for m in messages if m.startswith("루프 예외 무시")] == []
+
+    async def test_orders_close_before_error_message_is_built(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """ERROR 전이에서 예외를 문자열로 바꾸다 실패해도 주문은 이미 닫혀 있다."""
+        gate = _IntervalGate(999)
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
+        portfolio = _UnprintableFailingPortfolio()
+        ctx = StrategyContext(
+            bot_id="bot1",
+            data_provider=FakeDataProvider(),
+            portfolio=portfolio,
+            order_view=FakeOrderView(),
+        )
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = await manager.create_bot(
+            _gen_config(auto_restart=False), strategy_cls, ctx
+        )
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+        loop = strategy_cls.steps[0][1]
+        assert isinstance(loop, asyncio.Task)
+        await gate.wait_sleeping(loop)
+
+        publisher = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+
+        portfolio.raise_for = loop
+        gate.wake(loop)
+        await gate.settle(loop)
+        assert loop.done()
+        assert isinstance(loop.exception(), ValueError)
+        assert bot.status == BotStatus.ERROR
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(publisher, timeout=5.0)
+        assert orders == []
+
+    def test_publish_signals_generation_is_keyword_only_without_default(self):
+        """발행 경로의 generation 은 기본값 없는 키워드 전용 인자다."""
+        import inspect
+
+        parameter = inspect.signature(Bot._publish_signals).parameters["generation"]
+        assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+        assert parameter.default is inspect.Parameter.empty
 
     async def test_running_bot_publishes_step_and_data_signals(
         self, manager, eventbus, ctx, monkeypatch
