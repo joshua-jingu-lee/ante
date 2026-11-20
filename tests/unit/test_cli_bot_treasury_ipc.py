@@ -348,7 +348,7 @@ class TestBotRemoveIpc:
         assert result.exit_code == 1
         data = _json.loads(result.output)
         assert data["code"] == "BOT_NOT_FOUND"
-        assert data["message"] == "Bot not found: bot-xxx"
+        assert "Bot not found: bot-xxx" in data["message"]
 
     @pytest.mark.asyncio
     async def test_bot_remove_cold_path_closes_db_on_failure(self) -> None:

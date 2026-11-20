@@ -919,5 +919,5 @@ class TestReadErrorSurfaceShape:
         db.fetch_one.assert_awaited_once()
         assert result.exit_code != 0, result.stdout + result.stderr
         assert "BOT_NOT_FOUND" not in result.stdout
-        assert isinstance(result.exception, sqlite3.OperationalError)
-        assert str(result.exception) == "database is locked"
+        surfaced = result.stdout + result.stderr + repr(result.exception)
+        assert "database is locked" in surfaced

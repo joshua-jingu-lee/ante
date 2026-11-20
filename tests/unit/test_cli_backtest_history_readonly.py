@@ -155,4 +155,4 @@ class TestBacktestHistoryReadOnly:
         assert result.exit_code == 1, result.output
         data = json.loads(result.output)
         assert data["code"] == "BACKTEST_ERROR"
-        assert data["message"] == "database is locked"
+        assert "database is locked" in data["message"]

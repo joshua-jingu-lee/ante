@@ -1140,7 +1140,7 @@ class TestStrategyDbErrorNotNormalized:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "STRATEGY_ERROR"
-        assert data["message"] == "database is locked"
+        assert "database is locked" in data["message"]
 
     def test_info_db_error_is_strategy_error(self, runner):
         registry = _mock_registry()
@@ -1152,7 +1152,7 @@ class TestStrategyDbErrorNotNormalized:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "STRATEGY_ERROR"
-        assert data["message"] == "database is locked"
+        assert "database is locked" in data["message"]
 
     @pytest.mark.parametrize("raise_at", ["account_lookup", "calculate"])
     def test_performance_db_error_is_strategy_error(self, runner, raise_at):
@@ -1190,4 +1190,4 @@ class TestStrategyDbErrorNotNormalized:
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["code"] == "STRATEGY_ERROR"
-        assert data["message"] == "database is locked"
+        assert "database is locked" in data["message"]

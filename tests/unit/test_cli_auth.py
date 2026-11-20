@@ -326,6 +326,56 @@ class TestLeafNameCollisionNotExempt:
         assert fake_auth.call_args.args[0] == "sk_valid_token"
         assert data_dir.is_dir()
 
+    def test_root_init_with_stale_token_skips_authentication(
+        self, runner, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("ANTE_MEMBER_TOKEN", "sk_stale_invalid")
+        monkeypatch.setenv("ANTE_TOKEN_FILE", str(tmp_path / "no-such-token"))
+        target = tmp_path / "config"
+        with (
+            patch(
+                "ante.cli.middleware._run_authenticate",
+                side_effect=PermissionError("stale token"),
+            ) as fake_auth,
+            patch(
+                "ante.cli.commands.init._bootstrap_master",
+                new=AsyncMock(
+                    return_value=(
+                        {"member_id": "owner", "name": "Owner", "role": "master"},
+                        "tok",
+                        "rk",
+                    )
+                ),
+            ),
+            patch(
+                "ante.cli.commands.init._create_test_account",
+                new=AsyncMock(
+                    return_value={
+                        "account_id": "test",
+                        "broker_type": "test",
+                        "exchange": "TEST",
+                    }
+                ),
+            ) as fake_create,
+            patch(
+                "ante.cli.commands.init._master_exists_in_db",
+                new=AsyncMock(return_value=False),
+            ),
+            patch(
+                "ante.cli.commands.init._test_account_state",
+                new=AsyncMock(return_value="missing"),
+            ),
+        ):
+            result = runner.invoke(
+                cli, ["--format", "json", "init", "--dir", str(target)]
+            )
+
+        assert "auth_failed" not in result.output
+        assert "auth_required" not in result.output
+        fake_auth.assert_not_called()
+        assert result.exit_code == 0, result.output
+        fake_create.assert_awaited_once()
+
     def test_feed_init_verifies_token_once(self, runner, monkeypatch, tmp_path):
         result, fake_auth, _ = self._invoke_feed_init_with_valid_token(
             runner, monkeypatch, tmp_path
