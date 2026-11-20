@@ -748,7 +748,8 @@ tests/
 │   ├── test_collect_autopilot_queue.py
 │   ├── test_block_pytest_pipe.py
 │   ├── test_check_comments.py
-│   └── test_mock_broker_account.py
+│   ├── test_mock_broker_account.py
+│   └── test_main_wiring.py
 ├── __init__.py
 └── integration/
     ├── __init__.py

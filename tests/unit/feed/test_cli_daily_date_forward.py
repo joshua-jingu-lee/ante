@@ -136,3 +136,24 @@ def test_cli_without_date_forwards_none(
     mock_orch.run_daily.assert_awaited_once()
     kwargs = mock_orch.run_daily.await_args.kwargs
     assert kwargs.get("target_date") is None
+
+
+def test_resident_scheduler_daily_job_passes_none_not_scheduler_date(
+    initialized_data_path: str,
+) -> None:
+    """상주 스케줄러의 daily 작업은 오늘 날짜 대신 ``target_date=None`` 을 넘긴다."""
+    import asyncio
+
+    from ante.feed import cli_scheduler
+
+    mock_orch = AsyncMock()
+    mock_orch.run_daily = AsyncMock(return_value=_result_for("2026-05-27"))
+
+    asyncio.run(
+        cli_scheduler._run_daily_job(mock_orch, initialized_data_path, {}, "2026-05-28")
+    )
+
+    mock_orch.run_daily.assert_awaited_once()
+    kwargs = mock_orch.run_daily.await_args.kwargs
+    assert "target_date" in kwargs
+    assert kwargs["target_date"] is None

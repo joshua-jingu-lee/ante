@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -613,3 +614,88 @@ async def test_stop_facade_runs_all_phases(
         "unlink_socket",
     ]
     assert not Path(socket_path).exists()
+
+
+@pytest.mark.asyncio
+async def test_drain_connections_waits_for_active_connection_after_stop_accepting(
+    socket_path: str, service_registry: ServiceRegistry
+) -> None:
+    """stop_accepting() 뒤의 drain_connections() 는 열린 연결이 닫힐 때까지 기다린다."""
+    server = IPCServer(socket_path, service_registry, CommandRegistry())
+    await server.start()
+
+    reader, writer = await asyncio.open_unix_connection(socket_path)
+    underlying = server._server
+    assert underlying is not None
+    server_side_transports: list = []
+    for _ in range(50):
+        server_side_transports = _capture_server_side_transports(underlying)
+        if server_side_transports:
+            break
+        await asyncio.sleep(0)
+
+    drain_task: asyncio.Task | None = None
+    try:
+        assert server_side_transports
+        await server.stop_accepting()
+        drain_task = asyncio.ensure_future(server.drain_connections(timeout=3600.0))
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert not drain_task.done()
+
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except Exception:
+            pass
+        await asyncio.wait_for(drain_task, timeout=5.0)
+        assert drain_task.exception() is None
+    finally:
+        writer.close()
+        if drain_task is not None and not drain_task.done():
+            drain_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await drain_task
+        await _settle_server_side_transports(server_side_transports)
+        server.unlink_socket()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("umask", [0o022, 0o277])
+@pytest.mark.parametrize("existing_mode", [None, 0o755, 0o777])
+async def test_start_sets_runtime_dir_mode_0o700(
+    service_registry: ServiceRegistry, existing_mode: int | None, umask: int
+) -> None:
+    """start() 는 umask·기존 권한과 무관하게 소켓 부모 디렉터리를 0o700 으로 둔다."""
+    import os
+    import shutil
+    import stat
+
+    base = Path(tempfile.mkdtemp(prefix="ipcdir", dir="/tmp"))
+    run_dir = base / "run"
+    server = IPCServer(str(run_dir / "t.sock"), service_registry, CommandRegistry())
+    started = False
+    try:
+        if existing_mode is not None:
+            run_dir.mkdir()
+            os.chmod(run_dir, existing_mode)
+            assert stat.S_IMODE(os.stat(run_dir).st_mode) == existing_mode
+
+        start_error: OSError | None = None
+        old_umask = os.umask(umask)
+        try:
+            await server.start()
+            started = True
+        except OSError as exc:
+            start_error = exc
+        finally:
+            os.umask(old_umask)
+
+        assert start_error is None
+        assert stat.S_IMODE(os.stat(run_dir).st_mode) == 0o700
+    finally:
+        if started:
+            await server.stop()
+        if run_dir.exists():
+            os.chmod(run_dir, 0o700)
+        shutil.rmtree(base, ignore_errors=True)

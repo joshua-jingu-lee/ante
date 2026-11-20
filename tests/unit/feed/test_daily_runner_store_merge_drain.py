@@ -278,3 +278,89 @@ async def test_daily_typical_volume_is_not_truncated(tmp_path: Path) -> None:
     assert result.warnings_total == typical_volume
     assert result.warnings_by_type == {"business_rule": typical_volume}
     assert result.warnings_truncated is False
+
+
+class _PendingWarningStore:
+    """store 쓰기 경고를 쌓아 두었다가 ``drain_warnings`` 로 비우는 가짜 store."""
+
+    def __init__(self) -> None:
+        self.pending: list[dict] = []
+        self.drained: list[list[dict]] = []
+
+    def drain_warnings(self) -> list[dict]:
+        drained, self.pending = self.pending, []
+        self.drained.append(list(drained))
+        return drained
+
+
+@pytest.mark.asyncio
+async def test_daily_drains_store_warnings_right_after_each_write_stage(
+    tmp_path: Path,
+) -> None:
+    """data.go.kr·DART·지표 단계의 store 경고는 각 단계 직후 drain 된다."""
+    data_path = tmp_path / "data"
+    feed_dir = data_path / ".feed"
+    (feed_dir / "checkpoints").mkdir(parents=True)
+
+    store = _PendingWarningStore()
+    store_merge = {"type": "store_merge", "path": "fundamental/KRX/005930/2025-09"}
+    dart_warning = {"type": "dart_collect", "message": "partial disclosure"}
+    dart_store_warning = {"type": "store_recovered", "path": "fundamental/2025-06"}
+    indicator_store_warning = {"type": "store_merge", "path": "fundamental/2025-03"}
+
+    received_stores: list[object] = []
+    computed: list[list[str]] = []
+
+    class _DataGoKr:
+        async def collect(self, target_date: str, store_arg: object) -> tuple:
+            received_stores.append(store_arg)
+            store.pending.append(store_merge)
+            return 0, True, {"005930"}, []
+
+    class _Dart:
+        async def collect(self, *args: object, **kwargs: object) -> tuple:
+            store.pending.append(dart_store_warning)
+            return 0, False, set(), [dart_warning]
+
+    class _Indicator:
+        def compute(self, store_arg: object, symbols: list[str]) -> int:
+            computed.append(list(symbols))
+            store.pending.append(indicator_store_warning)
+            return 0
+
+    runner = DailyRunner(
+        data_go_kr_collector=_DataGoKr(),
+        dart_collector=_Dart(),
+        indicator_calculator=_Indicator(),  # type: ignore[arg-type]
+        store=store,  # type: ignore[arg-type]
+    )
+
+    result = await runner.run(
+        data_path=data_path,
+        config={},
+        feed_dir=feed_dir,
+        started_at=datetime.now(tz=UTC),
+        is_blocked=lambda config, target_date: False,
+        target_date="2025-09-30",
+    )
+
+    assert received_stores == [store]
+    assert computed == [["005930"]]
+    assert store.drained == [
+        [store_merge],
+        [dart_store_warning],
+        [indicator_store_warning],
+    ]
+    assert result.warnings == [
+        store_merge,
+        dart_warning,
+        dart_store_warning,
+        indicator_store_warning,
+    ]
+    assert result.warnings_by_type == {
+        "dart_collect": 1,
+        "store_merge": 2,
+        "store_recovered": 1,
+    }
+    assert result.warnings_total == 4
+    assert store.pending == []
