@@ -205,5 +205,4 @@ class AccountHasActiveBotsError(AccountError):
         )
 
 
-# 하위 호환용 별칭
 AccountDeletedException = AccountDeletedError

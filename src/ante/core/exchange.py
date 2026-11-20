@@ -19,19 +19,12 @@
 
 from __future__ import annotations
 
-# canonical exchange — 대문자 고정 5종 (core.md ``### Canonical set``).
-# 신규 입력 검증 vocabulary 전체이며 불변이다.
 CANONICAL_EXCHANGES: frozenset[str] = frozenset(
     {"KRX", "NYSE", "NASDAQ", "AMEX", "TEST"}
 )
 
-# `*` 는 실제 exchange가 아니라 ``StrategyMeta.exchange`` 전용 wildcard다
-# (core.md ``### Wildcard 정책``). 다른 어떤 표면에서도 허용되지 않는다.
 STRATEGY_WILDCARD: str = "*"
 
-# strategy 표면(``StrategyMeta.exchange``)이 허용하는 집합:
-# canonical 5종 ∪ {`*`}. account/instrument/data 표면은 wildcard를
-# 제외한 ``CANONICAL_EXCHANGES`` 만 허용한다.
 STRATEGY_EXCHANGES: frozenset[str] = CANONICAL_EXCHANGES | {STRATEGY_WILDCARD}
 
 

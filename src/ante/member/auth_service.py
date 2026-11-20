@@ -17,13 +17,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# auth principal role SSOT 동치 캐시 (#1466 — split #1417/B).
-#
-# ``MemberRole`` enum 이 허용 role 의 SSOT 이지만, 호출 경로마다 ``{r.value
-# for r in MemberRole}`` 를 재계산하면 drift 가능성이 커지므로 모듈 수준에서
-# 한 번만 캐시한다. ``MemberRole`` 가 갱신되면 본 frozenset 도 자동으로 동기화
-# 되어야 하며, ``test_member_auth_invalid_role`` 의 동치성 회귀 테스트가 이를
-# 잠근다.
 _VALID_MEMBER_ROLES: frozenset[str] = frozenset(r.value for r in MemberRole)
 
 
@@ -40,7 +33,6 @@ class AuthService:
         self._db = db
         self._eventbus = eventbus
         self._token_manager = token_manager
-        # get_member는 MemberService.get을 주입받음
         self._get_member = get_member
 
     async def authenticate(self, token: str) -> Member:
@@ -79,7 +71,6 @@ class AuthService:
             msg = f"비활성 멤버: {member.status}"
             raise PermissionError(msg)
 
-        # 토큰 만료 체크
         expiry_status = TokenManager.check_token_expiry(member)
         if expiry_status == "expired":
             await self._publish_auth_failed(member.member_id, "토큰 만료")
@@ -92,10 +83,6 @@ class AuthService:
                 member.token_expires_at,
             )
 
-        # legacy invalid-role 차단 (#1466 — split #1417/B). #1465 가 write
-        # path 를 막은 뒤에도 이미 DB 에 남은 invalid-role row 가 token 인증
-        # 경로로 principal 이 되면 안 된다. status/type/expiry 검증을 모두
-        # 통과한 뒤 마지막 게이트로 호출한다.
         await self._assert_member_role_known(member)
 
         return member
@@ -125,8 +112,6 @@ class AuthService:
             msg = "인증 실패"
             raise PermissionError(msg)
 
-        # legacy invalid-role 차단 (#1466 — split #1417/B). 패스워드 매치
-        # 직후, return 직전에 token 경로와 동일한 게이트를 적용한다.
         await self._assert_member_role_known(member)
 
         return member

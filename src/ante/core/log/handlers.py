@@ -25,9 +25,6 @@ from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
 
-# 회전 자정 경계의 단일 기준 (스펙 §회전 규칙). Asia/Seoul 고정.
-# ``ANTE_LOG_JSONL`` 미설정 게이트-off 경로에서 이 모듈이 단순 import 되더라도
-# tzdata 부재 환경이 부팅을 깨뜨리지 않도록 첫 핸들러 생성 시까지 지연 로드한다.
 _KST: ZoneInfo | None = None
 
 
@@ -65,9 +62,6 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         super().__init__(
             self._make_filename(),
             when="midnight",
-            # utc= 은 stdlib 내부 computeRollover/파일명 구현에서만 참조된다.
-            # 본 클래스는 두 메서드를 모두 오버라이드해 KST 를 강제하므로
-            # 부모 클래스에 넘기는 값은 의미가 없다. False 로 명시한다.
             utc=False,
             backupCount=backup_count,
             encoding=encoding,
@@ -84,7 +78,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         date_str = self._now_kst().strftime("%Y-%m-%d")
         return str(self._log_dir / f"{self._prefix}-{date_str}{self._file_suffix}")
 
-    def computeRollover(self, currentTime: float) -> int:  # noqa: N802,N803 — stdlib 시그니처
+    def computeRollover(self, currentTime: float) -> int:  # noqa: N802,N803
         """다음 Asia/Seoul 자정(Unix epoch 초) 을 반환한다.
 
         stdlib 구현은 ``utc`` 플래그에 따라 UTC 또는 local TZ 자정을 계산한다.
@@ -97,7 +91,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         )
         return int(next_midnight.timestamp())
 
-    def doRollover(self) -> None:  # noqa: N802 — stdlib 메서드 오버라이드
+    def doRollover(self) -> None:  # noqa: N802
         """자정 회전: 기존 파일은 유지하고 새 날짜 파일을 연다.
 
         표준 구현과 달리 ``baseFilename`` 을 rename 하지 않는다. 파일명 자체에
@@ -112,27 +106,23 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         if not self.delay:
             self.stream = self._open()
 
-        # 다음 자정 회전 시각 계산 (KST 기준, 위 computeRollover 오버라이드 경유)
         current_time = int(time.time())
         new_rollover_at = self.computeRollover(current_time)
         while new_rollover_at <= current_time:
             new_rollover_at += self.interval
         self.rolloverAt = new_rollover_at
 
-        # backupCount 초과 시 오래된 파일 삭제
         if self.backupCount > 0:
             for path in self._files_to_delete():
                 try:
                     os.remove(path)
                 except OSError:
-                    # 로깅 내부 실패는 무시 (스펙 §실패 처리)
                     pass
 
     def _files_to_delete(self) -> list[str]:
         """``backupCount`` 초과분 중 가장 오래된 파일 경로를 반환한다."""
         pattern = f"{self._prefix}-*{self._file_suffix}"
         candidates = sorted(self._log_dir.glob(pattern))
-        # 현재 활성 파일은 제외
         try:
             current = Path(self.baseFilename).resolve()
         except OSError:
@@ -149,6 +139,5 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
 
         if len(filtered) <= self.backupCount:
             return []
-        # 가장 오래된 것부터 초과분 반환
         excess = len(filtered) - self.backupCount
         return [str(p) for p in filtered[:excess]]

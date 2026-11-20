@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# strategies/ 디렉토리 기준 경로 (프로젝트 루트 기준).
-# 보안 경계 SSOT 는 ``ante.strategy.file_access.STRATEGIES_ROOT`` 로 이동했다.
-# 기존 ``_STRATEGIES_ROOT`` 이름을 참조하던 코드 호환을 위해 alias 로 재노출한다.
 _STRATEGIES_ROOT = STRATEGIES_ROOT
 
 
@@ -50,8 +47,6 @@ class StrategyContext:
         self._strategies_dir = (
             strategies_dir.resolve() if strategies_dir else _STRATEGIES_ROOT.resolve()
         )
-
-    # ── 데이터 조회 ──
 
     async def get_ohlcv(
         self,
@@ -95,8 +90,6 @@ class StrategyContext:
         arrays = ohlcv_to_dataframe(ohlcv_data)
         return IndicatorCalculator.compute(indicator, arrays, **(params or {}))
 
-    # ── 포트폴리오 조회 ──
-
     def get_positions(self) -> dict[str, Any]:
         """현재 보유 포지션 조회."""
         return self._portfolio.get_positions(self.bot_id)
@@ -104,8 +97,6 @@ class StrategyContext:
     def get_balance(self) -> dict[str, float]:
         """봇 할당 자금 현황 조회."""
         return self._portfolio.get_balance(self.bot_id)
-
-    # ── 거래 이력 ──
 
     async def get_trade_history(
         self,
@@ -118,8 +109,6 @@ class StrategyContext:
         return await self._trade_history.get_trade_history(
             self.bot_id, symbol=symbol, limit=limit
         )
-
-    # ── 주문 관리 ──
 
     def get_open_orders(self) -> list[dict[str, Any]]:
         """미체결 주문 목록 조회."""
@@ -155,8 +144,6 @@ class StrategyContext:
         self._pending_actions.clear()
         return actions
 
-    # ── 파일 접근 ──
-
     def _resolve_strategy_path(self, path: str) -> Path:
         """전략 파일 경로를 검증하고 절대 경로로 변환.
 
@@ -189,8 +176,6 @@ class StrategyContext:
         """
         data = self.load_file(path)
         return data.decode(encoding)
-
-    # ── 로깅 ──
 
     def log(self, message: str, level: str = "info") -> None:
         """전략 로그 기록."""

@@ -44,8 +44,6 @@ def resolve_data_path(ctx: click.Context | None, override: str | None) -> str:
     """
     if override is not None and override != "":
         return override
-    # Lazy import: ante.cli.main 은 본 모듈을 사용하는 commands 모듈을
-    # import 하므로 top-level import 로 두면 순환 import 가 된다.
     from ante.cli.main import get_config_dir
 
     cfg = Config.load(config_dir=get_config_dir(ctx))

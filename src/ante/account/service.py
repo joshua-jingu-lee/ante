@@ -36,12 +36,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 브로커 어댑터 레지스트리 — broker_type → 어댑터 클래스
 _BROKER_REGISTRY: dict[str, type[BrokerAdapter]] = {}
 
-# AccountService.list 메서드명이 클래스 내부 후속 메서드의 ``list[...]`` 어노테이션과
-# mypy 평가 시점에 충돌하므로(``Function "AccountService.list" is not valid as a type``)
-# 모듈 스코프에서 builtin ``list``를 캡처한 alias를 사용한다.
 _AccountStatusReport = list[dict[str, Any]]
 
 _CREATE_TABLE_SQL = """\
@@ -68,12 +64,6 @@ CREATE TABLE IF NOT EXISTS accounts (
 );
 """
 
-# Migration: legacy 데이터베이스에 ``market_order_reserve_buffer_rate`` 컬럼을
-# 추가한다. 한 번 ALTER한 뒤 broker_type별 backfill을 수행한다 (#1333).
-# DDL의 default(0.005)는 신규 column 추가 시 모든 row에 적용되며, ``test``
-# broker의 결정적 거동을 위해 backfill로 0으로 정정한다. ``kis-overseas``는
-# 1.0 BROKER_REGISTRY가 지원하지 않지만 legacy row가 있을 가능성에 대비해
-# default 0.005를 유지한다.
 _ACCOUNTS_BUFFER_MIGRATION = (
     "ALTER TABLE accounts "
     "ADD COLUMN market_order_reserve_buffer_rate REAL NOT NULL DEFAULT 0.005;"
@@ -113,18 +103,6 @@ def _reject_virtual_only_broker_in_live(account: Account) -> None:
         )
 
 
-# Cold-path 전용 필드 (서버 실행 중에는 변경 불가).
-# SSOT:
-#   - docs/specs/account/04-account-service.md (9개 cold-path 필드)
-#
-# - credentials, broker_config, buy_commission_rate, sell_commission_rate,
-#   market_order_reserve_buffer_rate:
-#   broker adapter / Treasury reserve 정책에 영향을 주는 필드.
-# - exchange, currency, trading_mode, broker_type:
-#   계좌 생성 후 불변 필드 (구조 변경 시 모든 소비자 재구성 필요).
-#
-# 두 set이 어긋나면 contract-drift이므로 cross-import 테스트
-# (test_account_runtime_guard.test_structural_fields_match_route_constant)로 강제한다.
 STRUCTURAL_FIELDS: frozenset[str] = frozenset(
     {
         "credentials",
@@ -181,15 +159,7 @@ class AccountService:
         self._eventbus = eventbus
         self._accounts: dict[str, Account] = {}
         self._brokers: dict[str, BrokerAdapter] = {}
-        # cache-miss 직렬화용 per-account lock (#2372). 동시 miss 가 각각
-        # build+connect 해 세션을 누수하고 마지막만 캐시되는 race 를 차단한다.
-        # lock dict 항목 생성은 await 없는 동기 구간이라 그 자체로 race-free.
         self._broker_locks: dict[str, asyncio.Lock] = {}
-        # 런타임 인지 플래그(#1144 invariant S1).
-        # boot mutation 종료 직후(``main._init_account`` 마지막)
-        # ``mark_runtime_started()``로 True가 되며, 이후 cold-path 전용 메서드/필드
-        # 변경 요청을 ``AccountStructuralChangeRequiresStoppedServerError``로
-        # 즉시 차단한다.
         self._runtime_started: bool = False
 
     def mark_runtime_started(self) -> None:
@@ -203,33 +173,19 @@ class AccountService:
         """
         self._runtime_started = True
 
-    # ── 초기화 ──────────────────────────────────────────
-
     async def initialize(self) -> None:
         """스키마 생성 + DB에서 계좌 목록 로드."""
         await self._db.execute_script(_CREATE_TABLE_SQL)
-        # Migration: legacy DB에 ``market_order_reserve_buffer_rate``가 없으면
-        # 추가하고 broker_type별 backfill을 적용한다 (#1333). 신규 DB는
-        # ``CREATE TABLE``에서 default 값으로 컬럼이 만들어지므로 ALTER가
-        # ``OperationalError(duplicate column name)``로 실패한다.
-        # backfill은 **ALTER가 실제로 성공한 1회성 마이그레이션 경로에서만**
-        # 실행한다. 이미 컬럼이 있는 경우 backfill을 다시 돌리면 운영자가
-        # CLI로 직접 지정한 ``test`` 계좌의 buffer 값을 0으로 덮어쓰는
-        # idempotency 위반이 된다 — Plan v4의 backfill 정책은 첫 마이그레이션
-        # 시점만을 의미한다.
         migrated = False
         try:
             await self._db.execute_script(_ACCOUNTS_BUFFER_MIGRATION)
             migrated = True
         except Exception:
-            # 이미 컬럼이 존재 → 1회성 마이그레이션 완료 상태.
             pass
         if migrated:
             try:
                 await self._db.execute(_ACCOUNTS_BUFFER_BACKFILL_TEST)
             except Exception:
-                # backfill 실패는 운영을 막지 않는다 (테이블이 비어 있거나 권한
-                # 이슈 등의 환경 차이). DDL default(0.005)가 신규 row 안전망.
                 logger.debug(
                     "market_order_reserve_buffer_rate backfill 무시.",
                     exc_info=True,
@@ -245,18 +201,12 @@ class AccountService:
                 invalid_timezone_account_ids.append(account.account_id)
             self._accounts[account.account_id] = account
         logger.info("AccountService 초기화 완료: %d개 계좌 로드", len(self._accounts))
-        # legacy invalid timezone row 누적 요약 (#1474). load loop 가 끝난 뒤
-        # 한 줄로만 남겨 운영자가 ``rg ACCOUNT_INVALID_TIMEZONE_LEGACY summary``
-        # 같은 grep 으로 회수할 수 있게 한다. count 가 0 일 때는 noise 회피를
-        # 위해 출력하지 않는다.
         if invalid_timezone_account_ids:
             logger.warning(
                 "ACCOUNT_INVALID_TIMEZONE_LEGACY summary: count=%d, account_ids=%s",
                 len(invalid_timezone_account_ids),
                 sorted(invalid_timezone_account_ids),
             )
-
-    # ── CRUD ──────────────────────────────────────────
 
     async def create(self, account: Account) -> Account:
         """계좌 생성. **cold-path 전용**.
@@ -286,21 +236,10 @@ class AccountService:
             InvalidBrokerTypeError: 프리셋에 없는 broker_type, 또는 가상 전용 타입+live.
             MissingCredentialsError: 필수 credentials 키 누락.
         """
-        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
         self._guard_cold_path_create()
 
-        # account_id 형식 + 정책 검증.
-        # public 경로는 validate_new_account_id로 형식 + RESTRICTED + fallback
-        # 거부를 모두 강제한다. seed bootstrap은 _create_seed_account를 통해서만
-        # 가능하며 그 helper가 별도의 (broker_type, default_account_id) pair
-        # 가드를 적용한다 (#1216 P2).
-        # docs/specs/account/14-account-id-contract.md 참조.
         validate_new_account_id(account.account_id)
 
-        # IANA timezone defense-in-depth (#1473 split #1419/A).
-        # HTTP ingress (AccountCreateRequest) 와 동일 의미론으로 ``""`` 는
-        # default 보존을 위해 통과, non-empty 만 검증한다. 비-HTTP caller
-        # (CLI/IPC) 로부터의 invalid timezone persist 를 차단한다.
         if account.timezone:
             validate_iana_timezone(account.timezone)
 
@@ -331,11 +270,8 @@ class AccountService:
             AccountAlreadyExistsError, InvalidBrokerTypeError,
             MissingCredentialsError: :meth:`_persist_account` 와 동일.
         """
-        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
         self._guard_cold_path_create()
 
-        # (broker_type, default_account_id) pair 가드 — RESTRICTED 예약어가
-        # 다른 preset의 broker_type 아래로 새는 것을 차단한다 (#1216 P2).
         preset = BROKER_PRESETS.get(account.broker_type)
         if preset is None or preset.default_account_id != account.account_id:
             valid_pairs = [
@@ -346,14 +282,8 @@ class AccountService:
                 f"허용합니다: got broker_type={account.broker_type!r}, "
                 f"account_id={account.account_id!r}; valid pairs={valid_pairs}"
             )
-        # pair 일치해도 형식 검증은 그대로
-        # (BROKER_PRESETS가 잘못 변경되더라도 가드).
         require_account_id(account.account_id, context="bootstrap_seed")
 
-        # IANA timezone defense-in-depth (#1473 split #1419/A).
-        # seed 경로도 public ``create()`` 와 동일 의미론으로 ``""`` 통과 +
-        # non-empty 검증을 적용한다. BROKER_PRESETS 가 잘못된 timezone 으로
-        # 변경되는 경우의 가드.
         if account.timezone:
             validate_iana_timezone(account.timezone)
 
@@ -394,7 +324,6 @@ class AccountService:
                 f"계좌 '{account.account_id}'가 이미 존재합니다."
             )
 
-        # DB에서 soft-delete된 동일 ID 존재 여부 확인
         deleted = await self._db.fetch_one(
             "SELECT account_id FROM accounts WHERE account_id = ? AND status = ?",
             (account.account_id, AccountStatus.DELETED),
@@ -404,17 +333,12 @@ class AccountService:
                 f"계좌 '{account.account_id}'가 이미 존재합니다 (삭제 상태)."
             )
 
-        # exchange canonical 검증 — ante.core.exchange SSOT (core.md 축 A).
-        # canonical 5종만 허용; `*`(StrategyMeta 전용 wildcard)/non-canonical
-        # 거부. create()/_create_seed_account() 공유 단일 chokepoint이며,
-        # update()는 exchange immutable 가드라 별도 검증 불요.
         if not is_canonical(account.exchange):
             raise InvalidExchangeError(
                 f"유효하지 않은 exchange: '{account.exchange}'. "
                 f"가능한 값: {sorted(CANONICAL_EXCHANGES)}"
             )
 
-        # broker_type 유효성 검증 (프리셋에 정의된 것만 허용)
         if account.broker_type not in BROKER_PRESETS:
             raise InvalidBrokerTypeError(
                 f"유효하지 않은 broker_type: '{account.broker_type}'. "
@@ -422,7 +346,6 @@ class AccountService:
             )
         _reject_virtual_only_broker_in_live(account)
 
-        # credentials 필수 키 검증
         preset = BROKER_PRESETS[account.broker_type]
         missing = [
             k for k in preset.required_credentials if k not in account.credentials
@@ -483,11 +406,9 @@ class AccountService:
         Raises:
             AccountNotFoundError: 계좌를 찾을 수 없음.
         """
-        # 메모리 캐시에서 먼저 검색
         if account_id in self._accounts:
             return self._accounts[account_id]
 
-        # DELETED 계좌는 메모리에 없으므로 DB에서 검색
         row = await self._db.fetch_one(
             "SELECT * FROM accounts WHERE account_id = ?",
             (account_id,),
@@ -507,17 +428,14 @@ class AccountService:
         """계좌 목록 조회. DELETED 제외가 기본."""
         if status is not None:
             if status == AccountStatus.DELETED:
-                # DELETED는 DB에서 직접 조회
                 rows = await self._db.fetch_all(
                     "SELECT * FROM accounts WHERE status = ?",
                     (AccountStatus.DELETED,),
                 )
                 return [_row_to_account(row) for row in rows]
             return [a for a in self._accounts.values() if a.status == status]
-        # 기본: DELETED 제외 (메모리 캐시에는 DELETED가 없음)
         return list(self._accounts.values())
 
-    # 생성 후 변경 불가능한 필드
     IMMUTABLE_FIELDS: frozenset[str] = frozenset(
         {"exchange", "currency", "trading_mode", "broker_type"}
     )
@@ -540,8 +458,6 @@ class AccountService:
             AccountDeletedException: DELETED 계좌는 수정 불가.
             AccountImmutableFieldError: 불변 필드 수정 시도.
         """
-        # 런타임 cold-path 가드(invariant S2): get()/DELETED/IMMUTABLE 검사보다
-        # 먼저 평가한다. raw kwargs 키만 보고 값(None 포함)은 무관하다.
         if self._runtime_started:
             structural_hits = sorted(set(fields) & STRUCTURAL_FIELDS)
             if structural_hits:
@@ -555,7 +471,6 @@ class AccountService:
                 f"삭제된 계좌 '{account_id}'는 수정할 수 없습니다."
             )
 
-        # 불변 필드 수정 시도 차단
         attempted_immutable = set(fields.keys()) & self.IMMUTABLE_FIELDS
         if attempted_immutable:
             raise AccountImmutableFieldError(
@@ -577,10 +492,6 @@ class AccountService:
         if unrecognized:
             raise ValueError(f"인식할 수 없는 필드입니다: {sorted(unrecognized)}")
 
-        # IANA timezone defense-in-depth (#1473 split #1419/A).
-        # HTTP ingress (AccountUpdateRequest) 와 동일 의미론으로 ``None`` 만
-        # 통과, ``""`` 포함 non-None 은 검증한다. 비-HTTP caller (CLI/IPC)
-        # 로부터의 invalid timezone persist 를 차단한다.
         timezone_update = fields.get("timezone")
         if timezone_update is not None:
             validate_iana_timezone(timezone_update)
@@ -591,11 +502,6 @@ class AccountService:
             "sell_commission_rate",
         }
         invalidate_broker = bool(set(fields.keys()) & broker_invalidating)
-        # ``timezone`` 키가 fields 에 **명시적으로** 들어왔을 때만 marker 를
-        # 리셋한다. 다른 필드만 수정되는 경우에는 stored marker (그리고
-        # stored invalid timezone 자체) 를 그대로 보존해야 silent data
-        # rewrite 가 일어나지 않는다 (#1474). ``timezone_update is None``
-        # (key 자체가 없는 경우) 은 정상 시나리오로 marker 보존.
         timezone_explicit_update = "timezone" in fields and timezone_update is not None
         for key, value in fields.items():
             if key not in updatable:
@@ -665,15 +571,11 @@ class AccountService:
             AccountNotFoundError, AccountDeletedException: ``update()`` 와
                 동일.
         """
-        # cold-path guard: server runtime 중에는 직접 DB 수정을 차단.
-        # AccountService.update 는 timezone 을 updatable 로 허용하므로 본
-        # 메서드 책임으로 cold-path 의미론을 보장한다 (#1474).
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "account.repair_timezone is a cold-path operation; "
                 "stop the server before invoking this command."
             )
-        # ingress 검증과 DB/캐시 UPDATE 는 update() 위임 (중복 구현 금지).
         return await self.update(account_id, timezone=new_timezone)
 
     async def _reconnect_broker(self, account_id: str) -> None:
@@ -723,9 +625,6 @@ class AccountService:
         기반 경로는 후속 작업으로 분리한다 (#1100의 범위를 넘어선다).
         """
         async with self._broker_lock_for(account_id):
-            # in-flight 초기 connect 가 있으면 이 lock 대기로 직렬화된다. 캐시
-            # 부재 검사를 lock 안에서 수행해야, 구-설정 adapter 가 캐시된 뒤에
-            # reconnect 가 진입해 신-설정으로 rebuild + swap 한다 (#2372).
             if account_id not in self._brokers:
                 return
 
@@ -753,11 +652,7 @@ class AccountService:
                     f"계좌 '{account_id}'의 새 브로커 connect()에 실패했습니다."
                 ) from exc
 
-            # connect 성공 후에만 캐시를 원자적으로 교체한다.
-            # 이전 어댑터는 의도적으로 disconnect하지 않는다 (docstring 참고).
             self._brokers[account_id] = new_broker
-
-    # ── 상태 전이 ──────────────────────────────────────
 
     async def suspend(self, account_id: str, reason: str, suspended_by: str) -> None:
         """계좌 정지 (status -> SUSPENDED).
@@ -794,13 +689,6 @@ class AccountService:
                 suspended_by=suspended_by,
             )
         )
-        # 킬 스위치 CRITICAL 알림 wiring (#2131): notification.md 트리거 표가
-        # "거래 상태 변경(킬 스위치)" 담당을 AccountService·레벨 CRITICAL·
-        # category system 으로 명시한다. producer 직접 발행 패턴
-        # (approval ``_publish_created``·member ``suspend`` 동형).
-        # suspend_all 은 본 메서드를 계좌별로 호출하므로 계좌별 CRITICAL 이
-        # 자동 커버된다. NotificationService 가 NotificationEvent 를 이미
-        # 구독하므로 추가 wiring 불필요.
         await self._eventbus.publish(
             NotificationEvent(
                 level="critical",
@@ -852,9 +740,6 @@ class AccountService:
                 activated_by=activated_by,
             )
         )
-        # 킬 스위치 해제 INFO 알림 wiring (#2131): suspend CRITICAL 의 짝.
-        # 재활성은 비긴급이므로 INFO 를 유지한다(스펙 비목표: CRITICAL 승격
-        # 금지). activate_all 은 본 메서드를 계좌별로 호출하므로 자동 커버.
         await self._eventbus.publish(
             NotificationEvent(
                 level="info",
@@ -885,7 +770,6 @@ class AccountService:
             AccountDeletedException: 이미 삭제된 계좌.
             AccountHasActiveBotsError: 활성(non-deleted) 봇이 남아 있음.
         """
-        # 런타임 cold-path 가드(invariant S2): 다른 어떤 검사보다 먼저 평가.
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "계좌 삭제는 cold-path 전용입니다. "
@@ -896,18 +780,12 @@ class AccountService:
         if account.status == AccountStatus.DELETED:
             raise AccountDeletedException(f"이미 삭제된 계좌입니다: '{account_id}'")
 
-        # cold-path preflight: orphan bot 무결성 검사.
-        # bots 테이블이 없으면 active 봇이 없는 것으로 간주.
         active_bot_count = await self._count_active_bots(account_id)
         if active_bot_count > 0:
             raise AccountHasActiveBotsError(
                 account_id=account_id, bot_count=active_bot_count
             )
 
-        # 소속 봇 중지 트리거 (이미 SUSPENDED/DELETED면 스킵).
-        # 봇이 없는 정상 흐름에서는 사실상 no-op이지만, 봇 중지 시점과 cold-path
-        # delete 사이의 race로 잔존 ACTIVE 상태 consumer가 있을 가능성에 대비해
-        # 유지한다.
         if account.status not in (AccountStatus.SUSPENDED, AccountStatus.DELETED):
             from ante.eventbus.events import AccountSuspendedEvent
 
@@ -927,9 +805,7 @@ class AccountService:
             (AccountStatus.DELETED, account.updated_at.isoformat(), account_id),
         )
 
-        # 메모리 캐시에서 제거
         self._accounts.pop(account_id, None)
-        # 브로커 캐시에서도 제거
         self._brokers.pop(account_id, None)
 
         logger.info("계좌 삭제: %s (요청자: %s)", account_id, deleted_by)
@@ -948,15 +824,12 @@ class AccountService:
                 (account_id, "deleted"),
             )
         except Exception:
-            # bots 테이블 부재 등 → active 봇 없음으로 간주
             return 0
 
         if row is None:
             return 0
         cnt = row.get("cnt", 0) if isinstance(row, dict) else row[0]
         return int(cnt or 0)
-
-    # ── 일괄 상태 전이 ──────────────────────────────────
 
     async def suspend_all(self, reason: str, suspended_by: str) -> _AccountStatusReport:
         """모든 ACTIVE 계좌를 SUSPENDED로 전환. DELETED 계좌는 후보 제외.
@@ -1035,8 +908,6 @@ class AccountService:
         logger.info("전체 계좌 활성화: %d개", changed_count)
         return results
 
-    # ── 브로커 인스턴스 ──────────────────────────────────
-
     def _broker_lock_for(self, account_id: str) -> asyncio.Lock:
         """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성, #2372).
 
@@ -1070,23 +941,16 @@ class AccountService:
             AccountNotFoundError: 계좌를 찾을 수 없음.
             InvalidBrokerTypeError: BROKER_REGISTRY 미등록, 또는 가상 전용 타입+live.
         """
-        # lock-free fast path: cache-hit 면 lock 없이 즉시 반환.
         broker = self._brokers.get(account_id)
         if broker is not None:
             return broker
 
-        # per-account lock 으로 miss 경로 직렬화. _reconnect_broker 와 **동일한**
-        # lock 인스턴스를 재사용해(``_broker_lock_for``) in-flight 초기 connect 와
-        # 설정 변경 reconnect 가 서로 직렬화되도록 한다 (#2372).
         async with self._broker_lock_for(account_id):
-            # double-checked: lock 대기 중 선행 태스크가 캐시했으면 재사용.
             broker = self._brokers.get(account_id)
             if broker is not None:
                 return broker
 
             broker = await self._build_broker_adapter(account_id)
-            # connect 성공 후에만 캐시에 기록한다. 실패 시 캐시 미기록 +
-            # 예외 전파(connect 내부에서 session cleanup 수행, #2368).
             await broker.connect()
             self._brokers[account_id] = broker
             return broker
@@ -1151,8 +1015,6 @@ class AccountService:
         )
         return broker
 
-    # ── 기본 테스트 계좌 ──────────────────────────────────
-
     async def create_default_test_account(self) -> Account:
         """테스트 계좌 자동 생성. 이미 존재하면 기존 계좌 반환.
 
@@ -1184,9 +1046,6 @@ class AccountService:
         return await self._create_seed_account(account)
 
 
-# ── 유틸리티 ──────────────────────────────────────────
-
-
 def _row_to_account(row: dict[str, Any]) -> Account:
     """DB 행을 Account 객체로 변환."""
     credentials_raw = row.get("credentials", "{}")
@@ -1202,17 +1061,9 @@ def _row_to_account(row: dict[str, Any]) -> Account:
         else (broker_config_raw or {})
     )
 
-    # legacy DB는 ``market_order_reserve_buffer_rate`` 컬럼이 없을 수 있다.
-    # ``initialize()``의 ALTER + backfill이 정상 경로지만, 마이그레이션 직전
-    # ``_row_to_account``를 통해 fetch하는 환경(예: 단위 테스트의 짧은
-    # in-memory DB lifecycle)에서도 안전하게 fallback한다.
     buffer_raw = row.get("market_order_reserve_buffer_rate", "0")
     buffer_value = Decimal("0") if buffer_raw is None else Decimal(str(buffer_raw))
 
-    # legacy DB row 의 invalid IANA timezone 을 tolerant load 한다 (#1474).
-    # stored value 는 그대로 보존하고 marker 만 세팅한다. fallback 으로
-    # 덮어쓰면 후속 ``AccountService.update`` 의 전체 row UPDATE 가 silent
-    # data rewrite 를 일으킨다.
     tz_value, tz_invalid = _load_persisted_timezone(row["timezone"], row["account_id"])
 
     return Account(

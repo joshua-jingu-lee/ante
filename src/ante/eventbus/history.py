@@ -122,8 +122,6 @@ class EventHistoryStore:
             params.append(until.isoformat())
         if payload_filter:
             for key, value in payload_filter.items():
-                # SQLite JSON1 ``json_extract``를 사용한 payload JSON path 필터.
-                # ``$.{key}``로 top-level 필드만 지원 (현재 use case로 충분).
                 sql += " AND json_extract(payload, ?) = ?"
                 params.append(f"$.{key}")
                 params.append(value)

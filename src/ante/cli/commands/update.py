@@ -11,7 +11,6 @@ import click
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 
-# pip 다운로드 등 임시 파일을 위한 최소 여유 공간
 _MIN_FREE_MB = 100
 
 
@@ -64,7 +63,7 @@ def check_server_running() -> bool:
     if pid is None:
         return False
     try:
-        os.kill(pid, 0)  # 프로세스 존재 확인
+        os.kill(pid, 0)
         return True
     except (ProcessLookupError, PermissionError):
         return False
@@ -116,25 +115,11 @@ def update(
 
     current = get_current_version()
 
-    # 게이트 평가 우선순위 (SSOT: docs/specs/cli/02-design-decisions.md
-    # "위험 명령 확인 방식" — precedence normative 규칙):
-    #   `--check` → `--yes` confirmation(``CLI_CONFIRMATION_REQUIRED``)
-    #   → server-running/`--force`(``UPDATE_SERVER_RUNNING``) → 실제 update
-    # `--check`은 dry-run으로 `--yes`/server-running과 무관(최우선,
-    # 충돌 정책: `--check` 우선). 그 외 실제 update 호출은 server 상태·
-    # side-effect 검사 **이전에** `--yes` 누락을 먼저 거부한다.
-
-    # 1) `--check`: PyPI 버전 조회만 수행하는 dry-run. `--yes`/server-running
-    #    상태와 무관하며 부수 효과가 없으므로 최우선으로 처리하고 반환한다
-    #    (`--check`+`--yes` 동시 사용 시에도 `--check` 우선 — 충돌 정책).
     if check:
         if not fmt.is_json:
             click.echo(f"현재 버전: {current}")
         latest = get_latest_version()
         if latest is None:
-            # PyPI 조회 실패 (네트워크/HTTP 오류) 안정 코드.
-            # ``UPDATE_CHECK_FAILED`` 는 ``--check`` dry-run 경로의 외부
-            # 의존성 실패 surface (taxonomy ``external`` 카테고리 의미).
             fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
             raise SystemExit(1)
         available = is_update_available(current, latest)
@@ -152,18 +137,6 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
-    # 2) 비대화형 입력 계약: `--check`이 아닌 실제 업데이트 실행 호출에는
-    #    `--yes`가 반드시 필요하다. 이 게이트는 server 상태 검사
-    #    (`check_server_running()`)와 PyPI 조회 (`get_latest_version()`)
-    #    **앞에** 위치해야 한다 — 그래야:
-    #    (a) 서버 실행 환경에서도 `--yes` 누락 호출이 server-running 안내가
-    #        아닌 ``CLI_CONFIRMATION_REQUIRED``로 거절된다 (spec precedence:
-    #        confirmation gate가 server 상태보다 우선).
-    #    (b) 네트워크 느림/실패 환경에서도 PyPI 실패가 아닌 동일한 구조화
-    #        에러 코드로 거절된다.
-    #    자동화는 server/네트워크 상태와 무관하게 동일한 코드를 받는다.
-    #    게이트 통과 전이므로 server 상태 검사/PyPI 조회/backup/pip upgrade/
-    #    migration 등 부수 효과는 일체 발생하지 않는다.
     if not yes:
         fmt.error(
             f"업데이트 실행에는 --yes가 필요합니다 (현재 {current}). "
@@ -172,16 +145,10 @@ def update(
         )
         raise SystemExit(1)
 
-    # 3) 서버 실행 중 확인 — `--yes` 게이트 통과 후, 실제 update 부수 효과
-    #    이전에 평가한다. `--force` 없이 서버가 실행 중이면
-    #    ``UPDATE_SERVER_RUNNING`` (SSOT: docs/specs/cli/02-design-decisions.md,
-    #    03-commands.md) 으로 거절한다. `--force` 시 가드를 우회한다(현
-    #    graceful shutdown은 미구현 TODO).
     if check_server_running():
         if force:
             if not fmt.is_json:
                 click.echo("서버를 중지합니다...")
-            # TODO: graceful shutdown
         else:
             fmt.error(
                 "서버가 실행 중입니다. "
@@ -193,12 +160,8 @@ def update(
     if not fmt.is_json:
         click.echo(f"현재 버전: {current}")
 
-    # 업데이트 실행 — `--yes` 게이트 통과 후에만 PyPI를 조회한다.
     latest = target_version or get_latest_version()
     if latest is None:
-        # 실제 업데이트 경로 PyPI 조회 실패 동일 안정 코드.
-        # ``--check`` dry-run 경로와 동일 ``UPDATE_CHECK_FAILED`` SSOT —
-        # 두 경로의 외부 의존성 실패 surface 일치.
         fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
         raise SystemExit(1)
 
@@ -215,20 +178,14 @@ def update(
             click.echo("이미 최신 버전입니다")
         return
 
-    # 디스크 공간 사전 검사
     from ante.cli.main import get_data_path, get_db_path
 
     db_path = Path(get_db_path(ctx))
-    # 마이그레이션 서브프로세스에 넘길 데이터 루트.
-    # 런타임이 `data.path` 로 보는 경로와 동일해야 v002 Parquet 마이그레이션이
-    # 실제 데이터 트리에 적용된다.
     data_path = get_data_path(ctx)
     ok, msg = check_disk_space(db_path)
     if not ok:
         click.echo(msg, err=True)
         raise SystemExit(1)
-
-    # Phase A: 백업 + pip upgrade
 
     from ante.db.backup import backup_db
     from ante.update.executor import (
@@ -243,9 +200,6 @@ def update(
             click.echo("DB 백업 중...")
         backup_db(db_path, current)
 
-    # 의존성 스냅샷 저장 — 스냅샷은 DB 디렉터리 옆에 저장해 백업과 위치를
-    # 통일한다. `get_db_path(ctx)` 결과의 부모 디렉터리를 그대로 전달해
-    # 과거 `./db` CWD 폴백이 남기던 유령 파일을 없앤다.
     if not fmt.is_json:
         click.echo("의존성 스냅샷 저장 중...")
     snapshot_path = snapshot_dependencies(current, db_dir=db_path.parent)
@@ -259,16 +213,9 @@ def update(
     if not fmt.is_json:
         click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
-        # pip install 실패의 안정 코드. ``UPDATE_INSTALL_FAILED`` 는 pip
-        # subprocess 비정상 종료 surface (taxonomy ``external`` 카테고리 의미
-        # — pip/PyPI 인프라 의존성 실패).
         fmt.error("업데이트 실패", code="UPDATE_INSTALL_FAILED")
         raise SystemExit(1)
 
-    # Phase B: 마이그레이션 — executor 가 서브프로세스로 `python -m
-    # ante.db.migrations` 를 호출한다. config_dir 로 계산한 DB 경로와
-    # `data.path` 로 계산한 데이터 루트를 환경변수로 함께 전달해, 서브프로세스가
-    # 런타임과 동일한 DB·데이터 트리에 마이그레이션을 적용한다.
     if not fmt.is_json:
         click.echo("DB 마이그레이션 실행 중...")
     if not run_post_update_migrations(str(db_path), data_path=data_path):

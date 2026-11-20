@@ -12,6 +12,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from ante.strategy.exceptions import IncompatibleExchangeError, StrategyError
 from ante.strategy.registry import StrategyRecord, StrategyStatus
 from ante.trade.models import PerformanceMetrics
 from tests.unit._async_test_utils import asyncio_run_returning
@@ -1066,3 +1067,127 @@ class TestStrategySubmit:
             data = json.loads(result.output)
             assert data["submitted"] is False
             assert data["stage"] == "register"
+
+    def test_submit_load_failure_text_keeps_load_test_failed_wording(
+        self, runner, strategy_file
+    ):
+        from ante.strategy.exceptions import StrategyLoadError
+
+        with patch(
+            "ante.strategy.loader.StrategyLoader.load",
+            side_effect=StrategyLoadError("Cannot load"),
+        ) as mock_load:
+            result = runner.invoke(cli, ["strategy", "submit", strategy_file])
+
+        mock_load.assert_called_once()
+        assert result.exit_code == 1
+        assert "Error: Load test failed: Cannot load" in result.output.splitlines()
+
+    @pytest.mark.parametrize(
+        ("exc_cls", "expected_code"),
+        [
+            (IncompatibleExchangeError, "STRATEGY_INCOMPATIBLE_EXCHANGE"),
+            (StrategyError, "STRATEGY_ERROR"),
+        ],
+    )
+    def test_submit_register_failure_json_code_from_exception(
+        self, runner, strategy_file, exc_cls, expected_code
+    ):
+        db = _mock_db()
+        registry = MagicMock()
+        registry.initialize = AsyncMock()
+        registry.register = AsyncMock(side_effect=exc_cls("register failed"))
+
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new=_acm_factory((registry, db)),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "strategy", "submit", strategy_file],
+            )
+
+        registry.register.assert_awaited_once()
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["stage"] == "register"
+        assert data["code"] == expected_code
+
+
+class TestStrategyDbErrorNotNormalized:
+    """no such table 밖의 DB 오류는 빈 결과·not-found로 바뀌지 않는다."""
+
+    @staticmethod
+    def _locked():
+        import sqlite3
+
+        return sqlite3.OperationalError("database is locked")
+
+    def _invoke_with_registry(self, runner, registry, args):
+        with patch(
+            "ante.cli.commands.strategy._create_registry",
+            new=_acm_factory((registry, _mock_db())),
+        ):
+            return runner.invoke(cli, ["--format", "json", "strategy", *args])
+
+    def test_list_db_error_is_strategy_error(self, runner):
+        registry = _mock_registry()
+        registry.list_strategies = AsyncMock(side_effect=self._locked())
+
+        result = self._invoke_with_registry(runner, registry, ["list"])
+
+        registry.list_strategies.assert_awaited_once()
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "STRATEGY_ERROR"
+        assert "database is locked" in data["message"]
+
+    def test_info_db_error_is_strategy_error(self, runner):
+        registry = _mock_registry()
+        registry.get_by_name = AsyncMock(side_effect=self._locked())
+
+        result = self._invoke_with_registry(runner, registry, ["info", "momentum"])
+
+        registry.get_by_name.assert_awaited_once()
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "STRATEGY_ERROR"
+        assert "database is locked" in data["message"]
+
+    @pytest.mark.parametrize("raise_at", ["account_lookup", "calculate"])
+    def test_performance_db_error_is_strategy_error(self, runner, raise_at):
+        p_db, p_path, p_reg, p_track, db, tracker = (
+            TestStrategyPerformance._patch_perf_internals(
+                records=[_SAMPLE_RECORD],
+                account_row={"1": 1},
+                fetch_one_side_effect=(
+                    self._locked() if raise_at == "account_lookup" else None
+                ),
+            )
+        )
+        if raise_at == "calculate":
+            tracker.calculate = AsyncMock(side_effect=self._locked())
+
+        with p_db, p_path, p_reg, p_track:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "strategy",
+                    "performance",
+                    "momentum",
+                    "--account-id",
+                    "acc-test",
+                ],
+            )
+
+        db.fetch_one.assert_awaited_once()
+        if raise_at == "calculate":
+            tracker.calculate.assert_awaited_once()
+        else:
+            tracker.calculate.assert_not_called()
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "STRATEGY_ERROR"
+        assert "database is locked" in data["message"]

@@ -369,3 +369,79 @@ class TestTreasuryNotConfiguredEquivalence:
             "account 'acc-1' 에 Treasury 가 구성되지 않았습니다"
         )
         assert _ipc_envelope_code(exc) == "TREASURY_NOT_CONFIGURED"
+
+
+# ── 직접 경로의 등록 예외 → 그 예외의 코드 ─────────────────────────────────
+
+
+class _NotConfiguredSubError(TreasuryNotConfiguredError):
+    """테스트 전용: 등록된 treasury 예외의 하위 클래스."""
+
+
+class _CodedError(Exception):
+    """테스트 전용: 레지스트리에 없고 ``.code`` 만 있는 예외."""
+
+    code = "CUSTOM_TEST_CODE"
+
+
+class _PlainError(Exception):
+    """테스트 전용: 레지스트리에도 없고 ``.code`` 도 없는 예외."""
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["budgets", "--account", "acc-1"], id="budgets"),
+        pytest.param(["set-balance", "1000", "--account", "acc-1"], id="set-balance"),
+        pytest.param(
+            ["portfolio", "value", "--account", "acc-1"], id="portfolio-value"
+        ),
+        pytest.param(
+            ["portfolio", "history", "--account", "acc-1"], id="portfolio-history"
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "exc,expected",
+    [
+        pytest.param(
+            TreasuryNotConfiguredError("treasury 미구성"),
+            "TREASURY_NOT_CONFIGURED",
+            id="registered",
+        ),
+        pytest.param(
+            _NotConfiguredSubError("sub"),
+            "TREASURY_NOT_CONFIGURED",
+            id="registered-subclass",
+        ),
+        pytest.param(_CodedError("coded"), "CUSTOM_TEST_CODE", id="code-attribute"),
+        pytest.param(_PlainError("plain"), "EXECUTION_ERROR", id="fallback"),
+    ],
+)
+def test_direct_path_registered_exception_code(
+    runner: CliRunner, args: list[str], tmp_path, exc: Exception, expected: str
+) -> None:
+    """직접 경로 예외 코드는 registry → ``.code`` → EXECUTION_ERROR, exit 1."""
+    from contextlib import asynccontextmanager
+
+    entered: list[str] = []
+
+    @asynccontextmanager
+    async def _raising_treasury(account_id=None, *, ctx=None):  # noqa: ANN001, ANN202
+        entered.append(account_id)
+        raise exc
+        yield  # pragma: no cover
+
+    with (
+        patch("ante.cli.cold_path.is_active_runtime", return_value=False),
+        patch("ante.cli.commands.treasury._create_treasury", new=_raising_treasury),
+    ):
+        result = runner.invoke(
+            cli,
+            ["--config-dir", str(tmp_path), "--format", "json", "treasury", *args],
+        )
+
+    assert entered == ["acc-1"]
+    assert result.exit_code == 1, result.output
+    payload = _cli_envelope_payload(result.output)
+    assert payload["code"] == expected

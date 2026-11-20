@@ -38,9 +38,6 @@ from ante.db.versions import (
 
 logger = logging.getLogger(__name__)
 
-# 마이그레이션 함수 시그니처:
-#   async def migrate(db: Database) -> None                          (DB 전용)
-#   async def migrate(db: Database, *, data_path: Path | None) -> None  (DB + 데이터)
 MigrateFn = Callable[..., Coroutine[Any, Any, None]]
 
 MIGRATIONS: list[tuple[int, str, MigrateFn]] = [
@@ -142,9 +139,6 @@ if __name__ == "__main__":
     import asyncio
     import os
 
-    # `ante update` 서브프로세스 호출이 `--db-path` 또는 `ANTE_DB_PATH`
-    # 환경변수로 실제 DB 경로를 전달한다. 둘 다 없으면 과거 동작과 동일한
-    # `db/ante.db` CWD 폴백을 사용한다 (하위 호환; Refs #1125).
     parser = argparse.ArgumentParser(
         description="Ante 마이그레이션 러너 (ante.db.migrations)"
     )

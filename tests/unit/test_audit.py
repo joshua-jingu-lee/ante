@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -351,3 +352,101 @@ class TestAuditCleanup:
         deleted = await audit_logger.cleanup(retention_days=90)
         assert deleted == 5
         assert await audit_logger.count() == 1
+
+
+# ── CLI ``ante audit list`` ─────────────────────────
+
+
+class _AuditQueryError(Exception):
+    """테스트 전용: 조회 단계의 임의 실패."""
+
+
+def _invoke_audit_list(args: list[str]):  # noqa: ANN202
+    from unittest.mock import patch
+
+    from click.testing import CliRunner
+
+    from ante.cli.main import cli
+    from ante.member.models import Member, MemberRole, MemberType
+
+    master = Member(
+        member_id="test-master",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="Test Master",
+        status="active",
+        scopes=[],
+    )
+
+    def _set_member(ctx) -> None:  # noqa: ANN001
+        ctx.obj = ctx.obj or {}
+        ctx.obj["member"] = master
+
+    with patch("ante.cli.main.authenticate_member", side_effect=_set_member):
+        return CliRunner().invoke(cli, args)
+
+
+class TestAuditListCli:
+    """``audit list`` 의 DB 수명과 스키마 초기화."""
+
+    def test_list_initializes_schema_on_fresh_db(self, tmp_path) -> None:
+        """테이블이 없는 새 DB에서도 스키마를 만들고 빈 결과로 끝난다."""
+        import sqlite3
+
+        config_dir = tmp_path / "cfg"
+        (config_dir / "db").mkdir(parents=True)
+
+        result = _invoke_audit_list(
+            ["--config-dir", str(config_dir), "--format", "json", "audit", "list"]
+        )
+        conn = sqlite3.connect(config_dir / "db" / "ante.db")
+        try:
+            tables = {
+                r[0]
+                for r in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+        finally:
+            conn.close()
+        assert "audit_log" in tables, result.output
+
+    @pytest.mark.parametrize(
+        "failing_step,error",
+        [
+            pytest.param("initialize", _AuditQueryError, id="initialize-raises"),
+            pytest.param("query", _AuditQueryError, id="query-raises"),
+            pytest.param("query", asyncio.CancelledError, id="query-cancelled"),
+        ],
+    )
+    def test_database_closed_once_on_failure(
+        self, tmp_path, failing_step: str, error: type[BaseException]
+    ) -> None:
+        """initialize·query 의 예외와 취소에서도 열린 ``Database`` 를 한 번 닫는다."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        db = MagicMock()
+        db.connect = AsyncMock()
+        db.close = AsyncMock()
+        db_cls = MagicMock(return_value=db)
+        logger = MagicMock()
+        logger.initialize = AsyncMock()
+        logger.query = AsyncMock(return_value=[])
+        failing = AsyncMock(side_effect=error("failed"))
+        setattr(logger, failing_step, failing)
+
+        with (
+            patch("ante.core.database.Database", db_cls),
+            patch("ante.audit.AuditLogger", MagicMock(return_value=logger)),
+        ):
+            try:
+                _invoke_audit_list(
+                    ["--config-dir", str(tmp_path), "--format", "json", "audit", "list"]
+                )
+            except asyncio.CancelledError:
+                pass
+
+        failing.assert_awaited_once()
+        db.connect.assert_awaited_once()
+        assert db.close.await_count == 1

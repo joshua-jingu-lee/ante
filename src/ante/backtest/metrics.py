@@ -27,7 +27,6 @@ def calculate_metrics(
     """
     metrics: dict[str, Any] = {}
 
-    # ── 수익률 ────────────────────────────────────────
     total_return = (
         (final_balance - initial_balance) / initial_balance * 100
         if initial_balance > 0
@@ -35,33 +34,21 @@ def calculate_metrics(
     )
     metrics["total_return"] = round(total_return, 4)
 
-    # ── Equity Curve 기반 지표 ────────────────────────
-    # annual_return / Sharpe는 "일(day)" 단위가 전제이므로, 봉 개수가 아닌
-    # 캘린더 날짜 기준으로 한 번 일별 리샘플한 뒤 헬퍼에 전달한다.
-    # (intraday 백테스트에서 bar 개수를 일수로 오인하던 왜곡 수정 — #2013)
-    # threshold=0: 비어있지 않은 모든 curve를 일별로 접는다. 기본 500은 짧은
-    # intraday(<500 bar)를 리샘플하지 않아 버그가 잔존하므로 반드시 0을 사용.
     daily_curve = resample_equity_curve_daily(equity_curve, threshold=0)
 
-    # 연환산 수익률 (일별 리샘플된 distinct 날짜 수를 일수로 사용)
     metrics["annual_return"] = round(_annual_return(daily_curve, total_return), 4)
 
-    # Sharpe: 일별 리샘플(날짜당 마지막 equity) 기준 일간 수익률
     daily_equities = [e["equity"] for e in daily_curve]
     sharpe = _sharpe_ratio(daily_equities)
     metrics["sharpe_ratio"] = round(sharpe, 4) if sharpe is not None else None
 
-    # max_drawdown은 raw equity(전체 봉) 기준으로 유지한다.
-    # intraday 낙폭(peak-to-trough)은 일별 리샘플로 약화되어선 안 된다.
     equities = [e["equity"] for e in equity_curve] if equity_curve else []
     mdd, mdd_duration = _max_drawdown(equities)
     metrics["max_drawdown"] = round(mdd, 4)
     metrics["max_drawdown_duration"] = mdd_duration
 
-    # ── 거래 기반 지표 ────────────────────────────────
     sell_trades = [t for t in trades if t.side == "sell"]
 
-    # 매도 거래별 손익 추정 (간이: 동일 종목 buy-sell 매칭)
     pnl_list = _estimate_trade_pnl(trades)
 
     winning = [p for p in pnl_list if p > 0]
@@ -108,7 +95,6 @@ def _annual_return(equity_curve: list[dict], total_return: float) -> float:
     if days <= 0:
         return total_return
 
-    # (1 + r) ^ (252/days) - 1
     r = total_return / 100
     if r <= -1:
         return -100.0
@@ -173,7 +159,6 @@ def _max_drawdown(
             if dd > max_dd:
                 max_dd = dd
 
-    # 끝까지 drawdown 상태인 경우
     if in_drawdown:
         duration = len(equities) - current_dd_start
         if duration > max_dd_duration:
@@ -187,7 +172,6 @@ def _estimate_trade_pnl(trades: list[Any]) -> list[float]:
 
     FIFO 방식: 종목별 buy 평균 단가 → sell 시 손익 계산.
     """
-    # 종목별 buy 평균 단가 추적
     positions: dict[str, dict[str, float]] = {}
     pnl_list: list[float] = []
 
@@ -198,8 +182,6 @@ def _estimate_trade_pnl(trades: list[Any]) -> list[float]:
                 positions[symbol] = {"quantity": 0, "total_cost": 0.0}
             pos = positions[symbol]
             pos["quantity"] += trade.quantity
-            # 매수 수수료를 원가(cost basis)에 포함한다. avg_cost가 주당으로
-            # amortize되어 부분 매도에서도 일관되게 반영된다 (#1990).
             pos["total_cost"] += trade.price * trade.quantity + trade.commission
         elif trade.side == "sell":
             pos = positions.get(symbol) or {}

@@ -63,15 +63,6 @@ class BacktestService:
 
         validated = self._validate_config(config)
 
-        # #2039: StrategyLoader.load(import)가 전략 파일을 실행하기 전에
-        #        StrategyValidator로 정적(AST) 안전성 검증을 수행한다.
-        #        validate 자체는 ast.parse 기반이라 전략 코드를 실행하지
-        #        않으므로, 금지 모듈/builtin/top-level 코드가 import 시점에
-        #        실행되는 것을 차단한다. backtest run은 public CLI에서 파일
-        #        경로를 직접 받아 in-process/subprocess 양쪽 모두 이
-        #        service.run 을 거치므로, load 직전 검증으로 모든 경로에서
-        #        우회를 막는다. valid=False면 load를 호출하지 않고 즉시
-        #        raise 하여 금지 코드가 실행되지 않는다(warnings는 비차단).
         strategy_path = Path(validated.strategy_path)
         val_result = StrategyValidator().validate(strategy_path)
         if not val_result.valid:
@@ -80,29 +71,14 @@ class BacktestService:
 
         strategy_cls = StrategyLoader.load(strategy_path)
 
-        # #2060: CLI ``--symbols``/``--timeframe`` 생략 시 ``StrategyMeta``
-        # 로 fallback 한다. ``_validate_config`` 는 load 전이라 meta 를 모르므로
-        # 여기(load 후)에서 effective 값을 resolve·재검증한다.
-        #   - symbols: 명시(validated.symbols) 우선, 비면 meta.symbols
-        #   - timeframe: 명시(config["timeframe"] 비-None) 우선, 생략(None)이면
-        #     meta.timeframe (None 은 _validate_config 가 early 검증을 deferred
-        #     했으므로 여기서 effective 값으로 재검증)
-        # meta 가 invalid timeframe/symbol 을 선언했어도 effective 재검증으로
-        # 차단한다(전략 meta 도 vocab SSOT 를 우회 못함).
         meta = strategy_cls.meta
         eff_symbols = validated.symbols or list(meta.symbols or [])
         cfg_timeframe = config.get("timeframe", "1d")
         eff_timeframe = cfg_timeframe if cfg_timeframe is not None else meta.timeframe
 
-        # effective 값 vocab 재검증 (early 검증과 동일 helper 공유). meta
-        # 선언 invalid 도 BacktestConfigError 로 차단. exchange 는 validated
-        # (이미 canonical 검증 통과) 기준으로 KRX-shape 적용.
         self._validate_timeframe_vocab(eff_timeframe)
         self._validate_symbols_vocab(eff_symbols, validated.exchange)
 
-        # downstream(provider/executor/data load/result.config)에는 None 이
-        # 새지 않는 effective ``BacktestConfig`` 만 흘린다(Codex 제약). validated
-        # 를 effective symbols/timeframe 으로 치환한 사본을 구성한다.
         effective = replace(
             validated,
             symbols=eff_symbols,
@@ -110,8 +86,6 @@ class BacktestService:
         )
 
         if not effective.symbols:
-            # CLI+meta 모두 symbols 없음 → executor universe 빈 상태로 0-step
-            # 성공이 silent 하게 끝나던 사유(#2060)를 명시 기록한다.
             logger.warning(
                 "백테스트 대상 종목이 없습니다(CLI --symbols 생략 + "
                 "StrategyMeta.symbols 미설정 '%s'): 데이터셋 0개·0-step 으로 "
@@ -127,10 +101,6 @@ class BacktestService:
             start_date=effective.start_date,
             end_date=effective.end_date,
             exchange=effective.exchange,
-            # run timeframe을 provider에 인지시켜, 내부 read 경로
-            # (체결가/equity/지표)가 ``{symbol}:{timeframe}`` 캐시 키를
-            # 조회하도록 한다(#2012). 미전달 시 1d로 떨어져 비-1d run의
-            # 체결가가 1d 종가로 새는 버그가 생긴다.
             timeframe=effective.timeframe,
         )
 
@@ -145,9 +115,6 @@ class BacktestService:
             sell_commission_rate=effective.sell_commission_rate,
             slippage_rate=effective.slippage_rate,
             exchange=effective.exchange,
-            # config.symbols universe를 executor에 전달해, 전략이 universe 밖
-            # Signal.symbol을 반환해도 거래(체결)하지 않게 한다(#2072). 빈
-            # symbols(universe 미설정)는 frozenset()이 되어 거부하지 않는다.
             symbols=effective.symbols,
         )
 
@@ -155,15 +122,8 @@ class BacktestService:
         result.config = effective
         result.datasets = data_provider.loaded_datasets
 
-        # #1998: 결과를 durable artifact(JSON)로 저장하고 경로를 result 에 기록한다.
-        # 이 경로가 BacktestCompleteEvent.result_path / backtest_runs.result_path
-        # 로 전파되어 ReportDraftGenerator 가 자동 리포트 초안을 생성한다. 저장
-        # 디렉토리는 effective.data_paths[0] (항상 채워짐) 하위 ``.backtest/results``
-        # 를 anchor 로 쓴다. BacktestResult 에 wall-clock timestamp 필드가 없어
-        # UUID 로 충돌 없이 네이밍한다.
         result.result_path = self._save_result_artifact(result, effective)
 
-        # BacktestCompleteEvent 발행
         await self._publish_complete_event(result)
 
         return result
@@ -262,8 +222,6 @@ class BacktestService:
             backtest_id=strategy_id,
             strategy_id=strategy_id,
             status="completed",
-            # #1998: run() 이 저장한 durable artifact 경로(저장 실패 시 ""). 빈
-            # 경로면 ReportDraftGenerator 가 자동 초안을 skip 한다(무회귀).
             result_path=result.result_path,
         )
         await self._eventbus.publish(event)
@@ -307,9 +265,6 @@ class BacktestService:
             msg = f"Invalid symbols (empty/blank segment): {shown!r}"
             raise BacktestConfigError(msg)
         if exchange == "KRX":
-            # resolved exchange == KRX 신규 입력 한정 (core.md
-            # ``### KRX symbol shape``). 비-KRX exchange의 symbol shape은
-            # 미검증 (NYSE+AAPL 비거부).
             for s in symbols:
                 if not is_krx_symbol(s):
                     msg = (
@@ -326,12 +281,6 @@ class BacktestService:
             msg = f"Missing required config keys: {missing}"
             raise BacktestConfigError(msg)
 
-        # date vocabulary 검증 (#2035). required 검사가 start_date/
-        # end_date 존재를 보장하므로 여기서는 ISO-8601(YYYY-MM-DD) shape·
-        # 실재성·순서(start <= end)만 검증한다. ``_ISO_DATE_RE`` 는
-        # ``20260510`` /``2026-W19-1`` 같은 non-canonical shape을 먼저
-        # 거부하고, ``date.fromisoformat`` 가 ``2026-13-40`` 같은 비실재
-        # 날짜를 거부한다. non-str(임의 타입)은 fullmatch 전에 차단.
         for label in ("start_date", "end_date"):
             value = config[label]
             if not isinstance(value, str) or _ISO_DATE_RE.fullmatch(value) is None:
@@ -351,37 +300,13 @@ class BacktestService:
             )
             raise BacktestConfigError(msg)
 
-        # symbol/timeframe vocabulary 검증 (#1604, core.md ``## Canonical
-        # Symbol/Timeframe Vocabulary``:286 — programmatic API 행이
-        # "검증 에러"를 normative로 요구). CLI(#1603)는 Click이 타입을
-        # 협소화하지만 programmatic ``dict[str, Any]`` 는 임의 타입이
-        # 유입되므로 모든 분기에 명시적 타입 경계를 두어 invalid를
-        # ``TypeError`` 가 아닌 ``BacktestConfigError`` 로 early-fail
-        # 시킨다. SSOT(`is_krx_symbol`)의 non-str→False 가드를
-        # 우회하지 않도록 ``str()`` 캐스팅은 쓰지 않는다.
-        # precedence: required-key → ① timeframe → ② symbols 정규화/
-        # 구조/빈 → ③ KRX shape.
-        #
-        # #2060: ``timeframe`` 이 ``None`` (CLI ``--timeframe`` 생략 신호)
-        # 이면 early vocab 검증을 deferred 한다 — load 후 ``run()`` 이
-        # ``StrategyMeta.timeframe`` 로 fallback 하여 effective 값을
-        # 재검증한다. 명시적(비-None) timeframe 은 기존대로 early 검증·거부.
         timeframe = config.get("timeframe", "1d")
         if timeframe is not None:
             self._validate_timeframe_vocab(timeframe)
 
         symbols_raw = config.get("symbols", [])
-        # None/누락/[] → [] (no-symbols backtest 정상, 미거부). 명시적
-        # ``{"symbols": None}`` 도 여기서 ``[]`` 로 정규화하여 build
-        # 라인이 ``BacktestConfig.symbols=None`` 으로 새지 않게 한다.
         normalized_symbols = [] if symbols_raw is None else symbols_raw
 
-        # exchange canonical 검증 (#2034, core.md ``## Canonical Exchange
-        # Vocabulary`` / D-016). CLI(#1576)는 ingress에서 거부하지만
-        # programmatic dict는 임의 값이 유입되므로 KRX-shape 블록이
-        # exchange를 읽기 **전에** canonical 5종(SSOT ``is_canonical``)을
-        # 강제한다. ``*`` 는 ``StrategyMeta.exchange`` 전용 wildcard라
-        # ``is_canonical("*") is False`` → 거부. non-str도 거부.
         exchange = config.get("exchange", "KRX")
         if not isinstance(exchange, str) or not is_canonical(exchange):
             msg = (
@@ -390,16 +315,8 @@ class BacktestService:
             )
             raise BacktestConfigError(msg)
 
-        # symbols 구조/빈/KRX-shape 검증 (단일 helper — #2060 effective
-        # 재검증과 동일 로직 공유). exchange == KRX 일 때만 shape 검증.
         self._validate_symbols_vocab(normalized_symbols, exchange, raw=symbols_raw)
 
-        # numeric 검증 (#2036). config에 **존재하는** 숫자 키만 검사하고
-        # 미존재는 BacktestConfig 기본값(valid)을 따른다. bool은 int의
-        # subclass라 명시적으로 제외한다. initial_balance는 양수·유한,
-        # 각 rate는 음수가 아닌 유한값이어야 한다 (CLI
-        # validate_positive_finite_amount/validate_nonnegative_finite_amount
-        # 와 동형).
         def _check_number(label: str, value: object, *, allow_zero: bool) -> None:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 msg = f"Invalid {label} (expected number): {value!r}"
@@ -427,12 +344,6 @@ class BacktestService:
             [config.get("data_path", self._data_path)],
         )
 
-        # #2060: timeframe 이 None (CLI 생략 신호) 이면 BacktestConfig.timeframe
-        # (타입 ``str``) 에 None 이 새지 않도록 placeholder "1d" 로 채운다.
-        # 실제 effective timeframe 은 ``run()`` 이 load 후 ``StrategyMeta``
-        # 로 resolve·재검증하여 downstream(provider/executor/result.config)
-        # 에 흘릴 effective ``BacktestConfig`` 를 다시 구성한다. None 은
-        # ``run()`` 로컬에서만 "생략" 신호로 쓰이고 dataclass 로는 새지 않는다.
         cfg_timeframe = config.get("timeframe", "1d")
         return BacktestConfig(
             strategy_path=config["strategy_path"],

@@ -36,7 +36,7 @@ class DataCollector:
     ) -> None:
         self._store = store
         self._eventbus = eventbus
-        self._buffer: dict[str, list[dict]] = {}  # "symbol:timeframe" → rows
+        self._buffer: dict[str, list[dict]] = {}
         self._buffer_size = buffer_size
         self._flush_interval = flush_interval
         self._collect_interval = collect_interval
@@ -117,7 +117,6 @@ class DataCollector:
             self._flush_task.cancel()
             self._flush_task = None
 
-        # 남은 데이터 flush
         self.flush_all()
         logger.info("DataCollector stopped")
 
@@ -208,10 +207,6 @@ class DataCollector:
         drop 하여 out-of-vocab ``ohlcv/<bad>/`` 경로를 만들지 않고
         ``flush_all``/``stop`` 을 중단시키지 않는다.
         """
-        # ``key`` 는 public ``buffer`` 직접 주입으로 non-str 일 수 있어
-        # ``object`` 로 받는다. ``dict.pop`` 은 hashable key 면 안전하며
-        # (정상 경로는 항상 str key), non-str 우회 주입분은 아래
-        # ``isinstance`` guard 가 drop 한다. cast 는 런타임 무동작.
         buffer = cast("dict[object, list[dict]]", self._buffer)
         rows = buffer.pop(key, [])
         if not rows:
@@ -242,7 +237,6 @@ class DataCollector:
             return len(rows)
         except Exception as e:
             logger.error("Failed to flush data for %s/%s: %s", symbol, tf, e)
-            # 실패 시 버퍼에 다시 넣기 (rows 미유실 — 다음 flush 재시도)
             if key not in self._buffer:
                 self._buffer[key] = []
             self._buffer[key] = rows + self._buffer[key]

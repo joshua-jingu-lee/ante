@@ -28,23 +28,10 @@ from __future__ import annotations
 
 import re
 
-# canonical OHLCV bar timeframe — 고정 집합·고정 순서 5종
-# (core.md ``### Canonical timeframe set``). 표기 순서
-# (`1m → 5m → 15m → 1h → 1d`)는 순서 의존 소비자(예:
-# `src/ante/cli/commands/data.py`의 iteration)를 위해 계약상 고정한다.
-# 따라서 순서가 의미를 갖는 tuple로 둔다 — 신규 입력 검증 vocabulary
-# 전체이며 불변이다.
 CANONICAL_TIMEFRAMES: tuple[str, ...] = ("1m", "5m", "15m", "1h", "1d")
 
-# 멤버십(in) 검증용 집합. 값은 ``CANONICAL_TIMEFRAMES`` 와 동일하며
-# 순서 비의존 소비자(예: `retention.py`)가 위임한다.
 TIMEFRAME_SET: frozenset[str] = frozenset(CANONICAL_TIMEFRAMES)
 
-# 신규 입력 KRX symbol shape: 6자리 ASCII digit (core.md
-# ``### KRX symbol shape`` — exchange == KRX 신규 입력 경계 한정).
-# ``\A...\Z`` 앵커 + ``fullmatch`` 는 trailing ``\n`` 까지 거부한다
-# (``re.match(r"^[0-9]{6}$", "123456\n")`` 는 True이므로 ``^...$``+
-# ``match`` 로는 #1299 fail-closed 회귀. fullmatch 엄격도 유지).
 _KRX_SYMBOL_REGEX: re.Pattern[str] = re.compile(r"\A[0-9]{6}\Z")
 
 

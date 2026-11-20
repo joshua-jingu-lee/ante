@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from click.testing import CliRunner
 
 
@@ -503,3 +504,31 @@ class TestBotStatus:
         data = _json.loads(result.output)
         assert data["status"] == "error"
         assert data["code"] == "BOT_NOT_FOUND"
+
+
+class TestBotLifecycleIpcErrorRestored:
+    @pytest.mark.parametrize("leaf", ["start", "stop", "status"])
+    @patch(
+        "ante.cli.commands.ipc_helpers.get_socket_path", return_value="/tmp/test.sock"
+    )
+    @patch("ante.cli.commands.ipc_helpers.IPCClient")
+    def test_json_message_is_server_message_without_code_prefix(
+        self, mock_ipc_cls, mock_socket, leaf: str
+    ) -> None:
+        import json as _json
+
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {
+            "id": "req-1",
+            "status": "error",
+            "error": {"code": "BOT_STATE_CONFLICT", "message": "상태 충돌: bot-x"},
+        }
+        mock_ipc_cls.return_value = mock_client
+
+        result = _invoke_cli(["--format", "json", "bot", leaf, "bot-x"])
+
+        assert mock_client.send.await_args.args[0] == f"bot.{leaf}"
+        assert result.exit_code == 1
+        data = _json.loads(result.output)
+        assert data["code"] == "BOT_STATE_CONFLICT"
+        assert data["message"] == "상태 충돌: bot-x"
