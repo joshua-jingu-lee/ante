@@ -58,7 +58,6 @@ async def enrich_bot_info(
     """
     info: dict[str, Any] = bot.get_info()
 
-    # 전략 정보 추가 — strategy_id 미존재(빈 문자열) 시 lookup 자체를 skip.
     if strategy_registry is not None:
         record = await strategy_registry.get(info.get("strategy_id", ""))
         if record:
@@ -73,7 +72,6 @@ async def enrich_bot_info(
                 "description": record.description,
             }
 
-    # 예산 정보 추가 — Treasury.get_budget 은 sync, 부재 시 None.
     if treasury is not None:
         budget = treasury.get_budget(bot.bot_id)
         if budget:
@@ -84,10 +82,6 @@ async def enrich_bot_info(
                 "available": budget.available,
             }
 
-    # 포지션 정보 추가 — include_closed=True 보존.
-    # account_id 가 주어지면(#2137) 봇 계좌로 스코핑해 타 계좌 stale/legacy
-    # 포지션 누출을 차단한다. None 이면 기존 call shape 를 그대로 유지한다
-    # (legacy stub / 미전달 호출처 회귀 lock).
     if trade_service is not None:
         if account_id is not None:
             positions = await trade_service.get_positions(

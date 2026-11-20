@@ -47,140 +47,61 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── API 유형별 설정 ───────────────────────────────────
 
-# 최대 재시도 횟수
 DEFAULT_MAX_RETRIES_ORDER = 3
 DEFAULT_MAX_RETRIES_QUERY = 2
 DEFAULT_MAX_RETRIES_AUTH = 2
 
-# 타임아웃 (초)
 DEFAULT_TIMEOUT_ORDER = 10
 DEFAULT_TIMEOUT_QUERY = 5
 DEFAULT_TIMEOUT_AUTH = 10
 
-# Backoff
 DEFAULT_BACKOFF_BASE = 1.0
 
-# 토큰 발급 빈도 제한(EGW00133) 흡수용 backoff 초 (#2399).
-# KIS 공식 "접근토큰 발급 1분 1회". startup connect 루프(main._init_gateway)가
-# 부팅 1회 경로에서만 이 backoff 를 소비한다(단일 cadence — adapter._authenticate 는
-# 즉시 raise, self-healing 은 interval 60s 위임). config 노출하지 않는 adapter-local
-# 상수다(global defaults 변경 금지 — test_kis_error_handling.py:268 가 broker retry
-# key 부재를 잠금).
 TOKEN_AUTH_BACKOFF_SECONDS = 60.0
 
-# EGW00133 수신 시 해당 app_key 의 토큰 발급을 차단하는 cooldown 초
-# (#2399 attempt3 + 메타 감사 — per-app_key cooldown at source).
-# KIS 공식 "접근토큰 발급 1분 1회"에 정렬한 source-level cooldown 이다. EGW00133 을
-# 한 번 받으면 그 app_key 의 발급 경로(startup/self-healing/runtime/IPC) 전부가 이
-# cooldown 동안 **HTTP 미호출**로 즉시 ``TokenRateLimitError`` 를 raise 한다 —
-# get_broker→토큰 재타격을 per-call-site 필터가 아니라 발급 레이어 단일 chokepoint
-# 에서 닫는다(단일 cadence T4 의 근본 보장). self-healing interval(60s) ≥ 본
-# cooldown(60s) 이라 self-healing 정상 동작과도 정합한다(다음 burst 에서 만료).
 TOKEN_RATE_LIMIT_COOLDOWN_SECONDS = 60.0
 
-# 토큰 cache hit 시 near-expiry 재발급 여유(분). ``_ensure_authenticated`` 의 "만료
-# 5분 전 재발급" 기준(아래 ``_ensure_authenticated``)과 **동일**해야 한다 — shared
-# 캐시 hit 판정도 near-expiry 토큰을 miss 로 보고 재발급한다(near-expiry 재사용 회귀
-# 방지, #2399 T2).
 _TOKEN_EXPIRY_MARGIN_MINUTES = 5
 
-# Circuit Breaker
 DEFAULT_CB_FAILURE_THRESHOLD = 5
 DEFAULT_CB_RECOVERY_TIMEOUT = 60
 
-# KIS 연속조회(CTX_AREA) 페이지네이션
-# 응답 헤더 tr_cont 값: "F"/"M" = 다음 페이지 있음, "D"/"E" = 마지막 페이지.
 _TR_CONT_HAS_NEXT = frozenset({"F", "M"})
-# 무한 루프 방지용 최대 페이지 수 안전 상한.
 DEFAULT_MAX_PAGINATION_PAGES = 100
 
-# 주문 관련 tr_id (재시도 횟수 분류용)
 _ORDER_TR_IDS = frozenset(
     {
         "VTTC0012U",
-        "TTTC0012U",  # 매수
+        "TTTC0012U",
         "VTTC0011U",
-        "TTTC0011U",  # 매도
+        "TTTC0011U",
         "VTTC0013U",
-        "TTTC0013U",  # 취소 (#2346 라이브 A/B both_ok 2026-06-12, 신세대 0013U)
+        "TTTC0013U",
     }
 )
 
-# 거래소ID구분코드(EXCG_ID_DVSN_CD) 기본값.
-# 에픽 #2354 일관성 목표의 공유 단일 출처 — order-cash(#2344) 외 후속 이슈
-# (inquire-daily-ccld #2349 등)가 재사용할 예정이다. 국내 KRX 주문 기본값으로,
-# NXT/SOR 등 다른 거래소 라우팅은 현재 미지원(요구 발생 시 config 표면화는 후속).
 DEFAULT_EXCG_ID_DVSN_CD = "KRX"
 
-# inquire-daily-ccld(주문/체결 이력) TR ID 매핑 (#2349).
-# KIS 공식 현행은 3개월 경계(inner/before) × 모의/실전 4코드로 분기한다. 레거시
-# 단일 코드(`*8001R` 세대)와 레거시 before(`*9115R` 세대)는 비채택.
-# 출처: KIS open-trading-api examples_llm/domestic_stock/inquire_daily_ccld.
-#   - inner(조회 기준일로부터 3개월 이내): 모의 VTTC0081R / 실전 TTTC0081R
-#   - before(3개월 이전): 모의 VTSC9215R / 실전 CTSC9215R
 _CCLD_TR_ID_INNER_PAPER = "VTTC0081R"
 _CCLD_TR_ID_INNER_LIVE = "TTTC0081R"
 _CCLD_TR_ID_BEFORE_PAPER = "VTSC9215R"
 _CCLD_TR_ID_BEFORE_LIVE = "CTSC9215R"
 
-# inquire-daily-ccld inner/before 판정의 3개월 경계(ante 로컬 normative 정책).
-# 공식 예제는 pd_dv=inner|before 를 호출자 인자로 받을 뿐 경계를 계산하지 않으므로
-# ante 가 정책을 소유한다(#2349). KST 오늘 기준 달력 3개월 전 동일 일자가 cutoff.
 _CCLD_BOUNDARY_MONTHS = 3
 
-# inquire-psbl-order(매수가능 조회) TR ID 매핑 (#2384).
-# 출처: KIS open-trading-api examples_llm/domestic_stock/inquire_psbl_order.
 _PSBL_ORDER_TR_ID_PAPER = "VTTC8908R"
 _PSBL_ORDER_TR_ID_LIVE = "TTTC8908R"
 
-# inquire-psbl-order 응답 필드 → get_buyable() 반환 키 SSOT 매핑 (#2384).
-# purchasable_amount(주문가능액)의 SSOT는 order_buyable_amount←nrcvb_buy_amt다
-# (미수 미사용 매수가능금액, 보수값). nrcvb_buy_amt 종목 불변성 가정이 oracle
-# 검증에서 깨지면 ord_psbl_cash(주문가능현금, 종목 의존성 최소) 폴백으로 전환
-# 가능하도록 필드명을 한 곳에 모은다. 폴백은 missing/parse-failure 또는 명시적
-# config 전환에 한정하며 value==0 은 정상값이라 폴백 트리거가 아니다(#2384 G6).
-_PSBL_ORDER_FIELD_BUYABLE_AMOUNT = "nrcvb_buy_amt"  # purchasable_amount SSOT
+_PSBL_ORDER_FIELD_BUYABLE_AMOUNT = "nrcvb_buy_amt"
 _PSBL_ORDER_FIELD_MAX_BUYABLE_AMOUNT = "max_buy_amt"
-_PSBL_ORDER_FIELD_ORDER_CASH = "ord_psbl_cash"  # 종목무관 폴백 SSOT 후보
+_PSBL_ORDER_FIELD_ORDER_CASH = "ord_psbl_cash"
 _PSBL_ORDER_FIELD_BUYABLE_QTY = "nrcvb_buy_qty"
 _PSBL_ORDER_FIELD_MAX_BUYABLE_QTY = "max_buy_qty"
 
-# 인증 경로
 _AUTH_PATH = "/oauth2/tokenP"
 
 
-# ── OAuth2 토큰 single-flight + in-process shared 캐시 (#2399) ──────────
-#
-# 동일 ``app_key`` 를 공유하는 다중 adapter(KIS 국내/해외 분리 D-ACC-02, 같은
-# app_key)가 동시에 토큰을 발급하면 KIS 가 ``EGW00133`` (접근토큰 발급 1분 1회)을
-# 돌려준다. 이를 막기 위해 토큰 캐시와 발급 lock 을 **module-level(프로세스 전역)**
-# 으로 공유하고, 발급을 **app_key 단위** asyncio.Lock 으로 직렬화한다.
-#
-# - lock key = **app_key** (account_id 아님!). account_id 로 잡으면 동일 app_key
-#   다중 adapter 가 미수렴하여 ``EGW00133`` 이 잔존한다(회귀 락 — T1).
-# - 캐시 hit 시 발급 skip, double-check 로 대기 중 타 코루틴이 발급한 토큰 재사용.
-#
-# known-limitation (T7, v1): 본 캐시/lock 은 **in-process(단일 프로세스)** 한정이다.
-# 멀티프로세스(CLI 8 site 가 각각 fresh AccountService 생성) 토큰 공유는 v1 미해결 —
-# CLI cold-path 다발 동시 실행 시 ``EGW00133`` 잔존 가능. 영속(파일/DB) 토큰 스토어는
-# 후속 후보(YAGNI, spec 07 OAuth2 §(7) anchor).
-#
-# 캐시 키 vs lock/cooldown 키 분리 (#2399 attempt4 P2 — config fingerprint):
-# - ``_token_cache`` 키 = **(app_key, app_secret, env)** config fingerprint.
-#   credentials(app_secret)/환경(모의 vs 실전 base_url)이 바뀌면 다른 키 → cache
-#   miss → ``connect()``/``_authenticate()`` 가 새 토큰을 **실제 발급**하여 새 설정을
-#   검증한다. 같은 app_key 기존 토큰을 hydrate 해 잘못된 secret/환경 전환을 성공한
-#   재연결로 오판하던 회귀를 차단한다(``AccountService._reconnect_broker`` 가
-#   변경된 ``credentials``/``broker_config`` 로 새 어댑터 ``connect()`` 를 호출하는
-#   경로 보호). **동일 config(같은 app_key+secret+env) 공유 어댑터(국내/해외)는 같은
-#   키 → single-flight 수렴·토큰 공유**(원래 #2399 목표 보존).
-# - ``_token_locks`` / ``_token_cooldowns`` 키 = **app_key 유지**. single-flight
-#   직렬화와 EGW00133(접근토큰 발급 1분 1회) cooldown 은 KIS rate-limit 단위인
-#   **app_key 당**이라 secret/환경 무관하다. config fingerprint 로 좁히면 같은
-#   app_key·다른 config 동시 발급이 rate-limit 을 공유하지 못해 EGW00133 잔존
-#   위험이 생긴다(T1 lock=app_key / T4 cooldown=app_key 회귀 락).
 _TokenCacheKey = tuple[str, str, str]
 """(app_key, app_secret, env) config fingerprint — ``_token_cache`` 키 타입."""
 
@@ -206,9 +127,6 @@ raise 한다. 모든 get_broker→토큰 발급 경로(startup/self-healing/runt
 T2 불변: 유효 캐시 토큰 read 는 cooldown 과 무관(hydrate 먼저)하다."""
 
 
-# lock dict 의 lazy 생성 경합(첫 Lock 생성 race)을 막는 동기 guard.
-# ``_get_token_lock`` 이 ``setdefault`` 로 원자적으로 Lock 을 보장한다 — 동기 구간
-# 이라 코루틴 yield 가 없어 race 가 없으나, 의도를 명시한다(T1 lock dict race).
 def _get_token_lock(app_key: str) -> asyncio.Lock:
     """app_key 별 발급 Lock 을 lazy 생성/반환 (동기 구간, race-free).
 
@@ -275,8 +193,6 @@ def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
     if record:
         until: datetime | None = _record_token_cooldown(app_key)
     else:
-        # cooldown 내 차단 — 기존 만료시각을 그대로 노출(연장 금지). 경합으로 이미
-        # 만료됐으면(드묾) 새로 기록하지 않고 None 을 실어 보낸다(다음 발급 허용).
         until = _token_cooldown_until(app_key)
     msg = get_error_message(TOKEN_RATE_LIMIT_MSG_CODE)
     raise TokenRateLimitError(
@@ -295,9 +211,6 @@ def _is_cached_token_fresh(expires_at: datetime, *, now: datetime) -> bool:
     return now < expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
 
 
-# 취소(order-rvsecncl) 시 전송할 KRX_FWDG_ORD_ORGNO 캐시 상한.
-# 어댑터 인스턴스(=계좌)당 미체결 주문 수를 넉넉히 덮으면서 무한 증가를 막는다.
-# 초과 시 가장 오래된 항목부터 제거(LRU 근사: insertion-order eviction).
 _KRX_FWDG_ORGNO_CACHE_MAXLEN = 1024
 
 
@@ -315,11 +228,9 @@ def _ccld_three_month_cutoff(today_kst: str) -> str:
     year = int(today_kst[:4])
     month = int(today_kst[4:6])
     day = int(today_kst[6:8])
-    # 달력 3개월 전 (year, month) 산출.
     total = (year * 12 + (month - 1)) - _CCLD_BOUNDARY_MONTHS
     target_year, target_month = divmod(total, 12)
     target_month += 1
-    # 말일 보정: 대상 월에 동일 일자가 없으면 그 월 말일로 clamp.
     last_day = calendar.monthrange(target_year, target_month)[1]
     target_day = min(day, last_day)
     return f"{target_year:04d}{target_month:02d}{target_day:02d}"
@@ -378,7 +289,6 @@ class KISErrorClassifier:
             if not error.retryable:
                 return False, False
             return True, True
-        # 알 수 없는 에러는 재시도하지 않음
         return False, False
 
     @staticmethod
@@ -443,9 +353,6 @@ class KISRetryHandler:
         await asyncio.sleep(wait)
 
 
-# ── KISBaseAdapter — KIS 공통 레이어 ─────────────────────
-
-
 class KISBaseAdapter(BrokerAdapter):
     """KIS Open API 공통 레이어 (인증, HTTP, 에러 처리, 재시도, 서킷브레이커).
 
@@ -466,7 +373,6 @@ class KISBaseAdapter(BrokerAdapter):
         self.is_paper: bool = config.get("is_paper", True)
         self._eventbus = eventbus
 
-        # API 엔드포인트
         if self.is_paper:
             self.base_url = "https://openapivts.koreainvestment.com:29443"
             self.websocket_url = "ws://ops.koreainvestment.com:31000"
@@ -474,18 +380,14 @@ class KISBaseAdapter(BrokerAdapter):
             self.base_url = "https://openapi.koreainvestment.com:9443"
             self.websocket_url = "ws://ops.koreainvestment.com:21000"
 
-        # 인증
         self.access_token: str | None = None
         self.token_expires_at: datetime | None = None
 
-        # HTTP 세션
         self._session: Any = None
 
-        # Rate limiting
         self._request_times: list[datetime] = []
         self._rate_limit_per_minute: int = 5 if self.is_paper else 20
 
-        # ── 재시도 설정 ────────────────────────────────
         self._max_retries_order: int = config.get(
             "retry.max_retries_order", DEFAULT_MAX_RETRIES_ORDER
         )
@@ -499,12 +401,10 @@ class KISBaseAdapter(BrokerAdapter):
             "retry.backoff_base_seconds", DEFAULT_BACKOFF_BASE
         )
 
-        # ── 타임아웃 설정 ──────────────────────────────
         self._timeout_order: float = config.get("timeout.order", DEFAULT_TIMEOUT_ORDER)
         self._timeout_query: float = config.get("timeout.query", DEFAULT_TIMEOUT_QUERY)
         self._timeout_auth: float = config.get("timeout.auth", DEFAULT_TIMEOUT_AUTH)
 
-        # ── Circuit Breaker ────────────────────────────
         cb_threshold = config.get(
             "circuit_breaker.failure_threshold", DEFAULT_CB_FAILURE_THRESHOLD
         )
@@ -518,15 +418,12 @@ class KISBaseAdapter(BrokerAdapter):
             name="kis",
         )
 
-        # ── 재시도 핸들러 ─────────────────────────────
         self._retry_handler = KISRetryHandler(backoff_base=self._backoff_base)
 
     @property
     def circuit_breaker(self) -> CircuitBreaker:
         """Circuit breaker 접근자."""
         return self._circuit_breaker
-
-    # ── 연결 ───────────────────────────────────────
 
     async def connect(self) -> None:
         """KIS API 연결 및 인증.
@@ -548,15 +445,11 @@ class KISBaseAdapter(BrokerAdapter):
         try:
             await self._authenticate()
         except BaseException:
-            # 인증 실패/취소 시 connect()가 소유한 session을 닫는다 (#2368).
-            # connect() 성공 전까지 session은 connect()가 소유하므로,
-            # 모든 호출자(CLI _get_broker/account service/runtime)가 공통으로
-            # aiohttp Unclosed 경고/리소스 누수에서 벗어난다.
             session, self._session = self._session, None
             try:
                 await session.close()
             except Exception:
-                pass  # close 실패 swallow — 원본 예외 보존
+                pass
             raise
         self.is_connected = True
         logger.info("KIS API 연결 완료 (모의투자: %s)", self.is_paper)
@@ -568,8 +461,6 @@ class KISBaseAdapter(BrokerAdapter):
             self._session = None
         self.is_connected = False
         logger.info("KIS API 연결 해제")
-
-    # ── 인증 ───────────────────────────────────────
 
     async def _authenticate(self) -> None:
         """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown (#2399).
@@ -595,29 +486,18 @@ class KISBaseAdapter(BrokerAdapter):
         ~60s backoff cadence 는 호출부 단일 레이어(startup wrapper / self-healing
         interval)가 분담하고, 발급 차단 자체는 본 cooldown 이 source 에서 보장한다.
         """
-        # (1) 캐시 read — lock 없이 fast-path. 신선하면 발급 skip(cooldown 무영향, T2).
         if self._hydrate_from_cache():
             return
 
-        # (2) cooldown fast-path(lock 밖) — cooldown 내면 HTTP 미호출·즉시 raise (T4).
-        # record=False: 기존 cooldown 존중(연장 금지, source 기록은 EGW00133 수신 시만).
         if _token_cooldown_until(self.app_key) is not None:
             _raise_token_rate_limit(self.app_key, record=False)
 
-        # (3) app_key 단위 lock 으로 발급 직렬화 (T1).
         lock = _get_token_lock(self.app_key)
         async with lock:
-            # (4) double-check(캐시) — 대기 중 타 코루틴이 발급했으면 재사용.
             if self._hydrate_from_cache():
                 return
-            # (5) cooldown double-check(lock 안) — 대기 중 타 코루틴이 EGW00133 으로
-            # cooldown 을 기록했을 수 있다. cooldown 내면 즉시 raise(HTTP 미호출).
             if _token_cooldown_until(self.app_key) is not None:
                 _raise_token_rate_limit(self.app_key, record=False)
-            # (6) 발급 1회 → 캐시 populate → 인스턴스 hydrate. EGW00133 이면
-            # _issue_token 이 cooldown 기록 후 TokenRateLimitError 를 즉시 raise.
-            # 캐시 key 는 config fingerprint(attempt4 P2) — 같은 config 공유 어댑터는
-            # 같은 키로 토큰 공유, 다른 secret/환경은 별도 키로 격리 발급된다.
             token, expires_at = await self._issue_token()
             _token_cache[self._token_cache_key()] = (token, expires_at)
             self.access_token = token
@@ -684,14 +564,12 @@ class KISBaseAdapter(BrokerAdapter):
                 url, json=data, headers={"content-type": "application/json"}
             ) as response:
                 if response.status != 200:
-                    # non-200 분기: JSON body 에서 에러코드 추출 시도(실패 시 text).
                     body = await self._read_token_error_body(response)
                     self._raise_token_error(response.status, body)
 
                 result = await response.json()
                 token = result.get("access_token")
                 if not token:
-                    # HTTP 200 + error 바디 분기(rt_cd≠"0" 또는 토큰 부재).
                     self._raise_token_error(response.status, result)
 
                 expires_at = datetime.now(UTC) + timedelta(hours=24)
@@ -726,8 +604,6 @@ class KISBaseAdapter(BrokerAdapter):
         text = body if isinstance(body, str) else (detail or json.dumps(body))
 
         if code == TOKEN_RATE_LIMIT_MSG_CODE:
-            # cooldown 기록 후 raise — 같은 app_key 후속 발급(다른 adapter/account
-            # 포함)이 cooldown 내 HTTP 미호출·즉시 raise 되도록 (T4 단일 cadence).
             _raise_token_rate_limit(self.app_key)
         raise AuthenticationError(
             f"인증 실패 (HTTP {status}): {text}",
@@ -749,8 +625,6 @@ class KISBaseAdapter(BrokerAdapter):
         ):
             await self._authenticate()
 
-    # ── Rate Limiting ──────────────────────────────
-
     async def _rate_limit_wait(self) -> None:
         """Rate limit 준수 대기."""
         now = datetime.now(UTC)
@@ -766,13 +640,11 @@ class KISBaseAdapter(BrokerAdapter):
 
         self._request_times.append(now)
 
-    # ── 타임아웃 / 재시도 설정 ─────────────────────
-
     def _get_timeout(self, url: str) -> float:
         """URL 기반 타임아웃 결정."""
         if _AUTH_PATH in url:
             return self._timeout_auth
-        return self._timeout_order  # 주문/조회 기본값
+        return self._timeout_order
 
     def _get_max_retries(self, url: str, tr_id: str) -> int:
         """API 유형별 최대 재시도 횟수."""
@@ -781,8 +653,6 @@ class KISBaseAdapter(BrokerAdapter):
         if tr_id in _ORDER_TR_IDS:
             return self._max_retries_order
         return self._max_retries_query
-
-    # ── 헤더/응답 처리 ─────────────────────────────
 
     def _get_headers(self, tr_id: str = "") -> dict[str, str]:
         """API 요청 헤더 구성."""
@@ -829,24 +699,15 @@ class KISBaseAdapter(BrokerAdapter):
             except (ValueError, TypeError):
                 pass
             if msg_cd:
-                # msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
-                # error_message가 비어 있지 않도록 보장한다 (#2324). 이 분기는
-                # msg_cd truthy일 때만 실행되므로 폴백은 항상 의미 있는 값이다.
                 msg1 = str(payload.get("msg1") or "").strip()
                 if not msg1:
                     msg1 = get_error_message(msg_cd)
-                # retryable 우선순위 (#1338, Codex Plan Review v2):
-                # 1. PERMANENT_MSG_CODES → false 강제.
-                # 2. HTTP non-retryable (auth/client) → false 강제.
-                # 3. TRANSIENT_MSG_CODES → true.
-                # 4. 기본은 HTTP retryable.
                 if msg_cd in PERMANENT_MSG_CODES:
                     retryable = False
                 elif not is_retryable_http_status(response.status):
                     retryable = False
                 elif msg_cd in TRANSIENT_MSG_CODES:
                     retryable = True
-                # else: HTTP 기준 retryable 유지
                 raise APIError(
                     f"KIS API Error [{msg_cd}]: {msg1}",
                     error_code=msg_cd,
@@ -863,8 +724,6 @@ class KISBaseAdapter(BrokerAdapter):
         rt_cd = result.get("rt_cd", "")
         if rt_cd != "0":
             msg_cd = result.get("msg_cd", "")
-            # msg1이 빈 문자열/공백이면 get_error_message(msg_cd)로 폴백해
-            # error_message가 비어 있지 않도록 보장한다 (#2324).
             msg1 = str(result.get("msg1") or "").strip()
             if not msg1:
                 msg1 = get_error_message(msg_cd)
@@ -949,10 +808,6 @@ class KISBaseAdapter(BrokerAdapter):
                 retryable, record_failure = KISErrorClassifier.classify(e)
                 if not retryable:
                     raise
-                # #2350: 차단기 회계 판정은 to_api_error() 변환 **전** raw 예외 e
-                # 기준이다. cb_exempt_timeout 이면서 raw 예외가 TimeoutError 계열
-                # (aiohttp timeout 포함 — TimeoutError 하위)일 때만 회계에서 제외하고,
-                # 그 외 실패(HTTP 5xx/APIError 등)는 기존대로 기록한다.
                 last_error = KISErrorClassifier.to_api_error(e, timeout)
                 if record_failure and not (
                     cb_exempt_timeout and isinstance(e, TimeoutError)
@@ -1047,7 +902,6 @@ class KISBaseAdapter(BrokerAdapter):
             rows.extend(page_rows)
 
             if tr_cont not in _TR_CONT_HAS_NEXT:
-                # "D"/"E" 또는 헤더 부재 → 마지막 페이지.
                 break
 
             next_fk = str(body.get("ctx_area_fk100", "") or "").strip()
@@ -1073,8 +927,6 @@ class KISBaseAdapter(BrokerAdapter):
             )
 
         return rows
-
-    # ── 서브클래스 확장 포인트 ──────────────────────
 
     @abstractmethod
     async def get_account_balance(self) -> dict[str, float]:
@@ -1166,9 +1018,6 @@ class KISBaseAdapter(BrokerAdapter):
         ...
 
 
-# ── KISDomesticAdapter — 국내주식 전용 ────────────────────
-
-
 class KISDomesticAdapter(KISBaseAdapter):
     """한국투자증권 국내주식 전용 어댑터.
 
@@ -1189,32 +1038,17 @@ class KISDomesticAdapter(KISBaseAdapter):
         config.setdefault("currency", "KRW")
         super().__init__(config, eventbus)
 
-        # 수수료율 (buy/sell 분리)
         self._buy_commission_rate: float = config.get(
             "buy_commission_rate",
             config.get("commission_rate", 0.00015),
         )
         self._sell_commission_rate: float = config.get(
             "sell_commission_rate",
-            # 하위호환: commission_rate + sell_tax_rate
             config.get("commission_rate", 0.00015)
             + config.get("sell_tax_rate", 0.0018),
         )
 
-        # order-cash 응답에서 캡처한 KRX_FWDG_ORD_ORGNO 캐시 (#2345).
-        # 취소(order-rvsecncl)는 원주문별 한국거래소전송주문조직번호를 전송해야
-        # 한다. place_order 성공 응답의 output.KRX_FWDG_ORD_ORGNO(non-empty)를
-        # (값, 제출 KST 영업일)로 broker_order_id(ODNO)에 매핑해 둔다. cancel_order
-        # 는 순수 dict 조회(네트워크 없음)로 이를 주입한다.
-        #
-        # scope: 어댑터 인스턴스(=계좌, gateway._get_broker(account_id))당 분리.
-        #   추가로 KIS odno 는 영업일 재사용 가능(OrderTracker 문서)하므로 캐시
-        #   값에 제출 영업일을 함께 두고 취소 시 영업일 불일치면 miss 로 처리한다.
-        # bounded: OrderedDict + maxlen 으로 무한 증가/stale 누적을 막는다.
-        # known-limitation: in-process 한정(재기동 시 소실 → miss=필드 생략, 안전).
         self._krx_fwdg_orgno_cache: OrderedDict[str, tuple[str, str]] = OrderedDict()
-
-    # ── 계좌 정보 조회 ─────────────────────────────
 
     def _balance_params(self) -> dict[str, str]:
         """잔고 조회 공통 파라미터."""
@@ -1239,11 +1073,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         result = await self._request("GET", url, tr_id, params=self._balance_params())
 
         info = result["output2"][0] if result.get("output2") else {}
-        # purchasable_amount(주문가능액)는 종목 컨텍스트가 필요해 무인자 잔고조회가
-        # 산출할 수 없으므로 이 dict에 포함하지 않는다(#2384). psbl_sbst_amt는
-        # 예수금 대용가능금액(대용증권 평가 기반)이라 주문가능액과 의미가 다르며
-        # 현금-only 계좌에서 정상적으로 0이므로 substitute_amount 키로 보존한다.
-        # 주문가능액 SSOT는 get_buyable()의 order_buyable_amount다.
         return {
             "cash": float(info.get("dnca_tot_amt", 0)),
             "total_assets": float(info.get("tot_evlu_amt", 0)),
@@ -1311,9 +1140,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         tr_id = _PSBL_ORDER_TR_ID_PAPER if self.is_paper else _PSBL_ORDER_TR_ID_LIVE
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
 
-        # ORD_UNPR은 [필수] 실제 1주당 가격이다(KIS 공식 샘플 확정). 시장가/미지정
-        # 이면 현재가를 단가로 사용한다(Treasury 등 호출처에 별도 조회를 추가하지
-        # 않고 get_buyable 내부에서 1회 조회).
         unit_price = price
         if unit_price is None:
             unit_price = await self.get_current_price(symbol)
@@ -1330,10 +1156,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         result = await self._request("GET", url, tr_id, params=params)
         output = result.get("output") or {}
 
-        # nrcvb_buy_amt(미수 미사용 매수가능금액)가 order_buyable_amount=
-        # purchasable_amount SSOT다. missing/parse-failure 시에만 ord_psbl_cash
-        # (주문가능현금)로 폴백한다. nrcvb_buy_amt==0 은 정상값이라 폴백 트리거가
-        # 아니다(#2384 G6).
         order_buyable_amount = _parse_psbl_amount(
             output,
             primary_field=_PSBL_ORDER_FIELD_BUYABLE_AMOUNT,
@@ -1348,8 +1170,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             "order_buyable_qty": _to_float(output.get(_PSBL_ORDER_FIELD_BUYABLE_QTY)),
             "max_buyable_qty": _to_float(output.get(_PSBL_ORDER_FIELD_MAX_BUYABLE_QTY)),
         }
-
-    # ── 주문 처리 ──────────────────────────────────
 
     async def place_order(
         self,
@@ -1378,10 +1198,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         result = await self._request("POST", url, tr_id, json_data=order_data)
         output = result["output"]
         broker_order_id = output["ODNO"]
-        # 취소 시 전송할 KRX_FWDG_ORD_ORGNO 를 order-cash 응답에서 직접 캡처한다
-        # (#2345). 공식 order-cash 결과 컬럼(chk_order_cash.py)에 ODNO/ORD_TMD 와
-        # 함께 KRX_FWDG_ORD_ORGNO 가 정의되어 있다. 응답 구조 변동에 방어적으로
-        # 대응하기 위해 .get() 으로 읽고, non-empty 일 때만 캐시한다(오값 전송 금지).
         self._cache_krx_fwdg_orgno(broker_order_id, output.get("KRX_FWDG_ORD_ORGNO"))
         logger.info(
             "주문 접수: %s %s %s %.0f주 → %s",
@@ -1401,7 +1217,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         취소 시 cancel_order 가 영업일 일치 여부까지 확인해 주입한다.
         """
         if not orgno:
-            # 응답에 필드가 없거나 빈 값이면 캐시하지 않는다 → 취소 시 miss(생략).
             return
         cache = self._krx_fwdg_orgno_cache
         cache[broker_order_id] = (orgno, business_date_kst())
@@ -1425,9 +1240,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_DVSN": self._map_order_type(order_type),
             "ORD_QTY": str(int(quantity)),
             "ORD_UNPR": "0",
-            # 거래소ID구분코드 — KIS 공식 order-cash 현행 계약의 필수 필드(#2344).
-            # 공식 order_cash.py 가 excg_id_dvsn_cd 누락 시 ValueError 로 가드한다.
-            # market/limit·side 무관 공통(국내 KRX 기본).
             "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
         }
         if order_type == "limit" and price is not None:
@@ -1482,7 +1294,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_QTY": "0",
             "ORD_UNPR": "0",
             "QTY_ALL_ORD_YN": "Y",
-            # 신세대(0013U) 필수 필드 — 공유 상수 재사용("KRX" 리터럴 금지, #2344).
             "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
         }
         cached = self._krx_fwdg_orgno_cache.get(order_id)
@@ -1536,7 +1347,6 @@ class KISDomesticAdapter(KISBaseAdapter):
 
         cached = self._krx_fwdg_orgno_cache.get(order_id)
         if cached is None or cached[1] != business_date_kst():
-            # 오값 전송 금지 — orgno 미상이면 정정 요청을 보내지 않는다(fail-closed).
             logger.warning(
                 "정정 KRX_FWDG_ORD_ORGNO 미상: %s (cache=%s) — 전송 차단",
                 order_id,
@@ -1556,7 +1366,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ORD_QTY": str(int(quantity or 0)),
             "ORD_UNPR": str(int(price or 0)),
             "QTY_ALL_ORD_YN": "Y",
-            # 신세대(0013U) 필수 필드 — 공유 상수 재사용("KRX" 리터럴 금지, #2344).
             "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
         }
         await self._request("POST", url, tr_id, json_data=modify_data)
@@ -1628,13 +1437,10 @@ class KISDomesticAdapter(KISBaseAdapter):
             )
         return orders
 
-    # ── 종목 마스터 ────────────────────────────────────
-
     async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
         """KIS API에서 종목 마스터 데이터 조회 (코스피 + 코스닥)."""
         instruments: list[dict[str, Any]] = []
 
-        # 코스피(J) + 코스닥(Q)
         market_codes = [("J", "KOSPI"), ("Q", "KOSDAQ")]
         for mrkt_code, market_name in market_codes:
             try:
@@ -1660,7 +1466,6 @@ class KISDomesticAdapter(KISBaseAdapter):
 
         return instruments
 
-    # 마스터 파일 다운로드 설정 (KIS 공식 방식)
     _MASTER_FILES: dict[str, dict[str, str | int]] = {
         "J": {
             "url": "https://new.real.download.dws.co.kr/common/master/kospi_code.mst.zip",
@@ -1727,16 +1532,12 @@ class KISDomesticAdapter(KISBaseAdapter):
             return "etn"
         return "stock"
 
-    # ── 수수료 ────────────────────────────────────────
-
     def get_commission_info(self) -> CommissionInfo:
         """KIS 국내 수수료율 정보 반환."""
         return CommissionInfo(
             buy_commission_rate=self._buy_commission_rate,
             sell_commission_rate=self._sell_commission_rate,
         )
-
-    # ── 대사용 조회 ────────────────────────────────
 
     async def get_account_positions(self) -> list[dict[str, Any]]:
         """대사용 보유 잔고 조회."""
@@ -1767,12 +1568,10 @@ class KISDomesticAdapter(KISBaseAdapter):
         받으므로 before 분기와 교차 구간이 실제로 도달 가능하다 — 한계는 CLI
         ``--help`` / 스펙으로 노출하며 여기서 거부하지 않는다(정책 무변경).
         """
-        # 기본 날짜 산출은 UTC 현행 유지(기존 동작 invariant). KST 는 경계 판정에만.
         now = datetime.now(UTC)
         start_date = from_date or (now - timedelta(days=7)).strftime("%Y%m%d")
         end_date = to_date or now.strftime("%Y%m%d")
 
-        # 3개월 경계 판정: KST 오늘 기준 cutoff 와 start_date 비교(start-date 단독).
         cutoff = _ccld_three_month_cutoff(business_date_kst())
         is_inner = start_date >= cutoff
         if is_inner:
@@ -1797,19 +1596,11 @@ class KISDomesticAdapter(KISBaseAdapter):
             "ODNO": "",
             "INQR_DVSN_3": "00",
             "INQR_DVSN_1": "",
-            # 거래소ID구분코드 hygiene(#2349). order-cash(#2344)의 40910000
-            # 거절-fix 와 달리 이 엔드포인트는 hard-required 가 아니며, 데이터
-            # 완전성(NXT 누락 방지)을 위한 optional 주입이다(공식 조건부 append).
             "EXCG_ID_DVSN_CD": DEFAULT_EXCG_ID_DVSN_CD,
             "CTX_AREA_FK100": "",
             "CTX_AREA_NK100": "",
         }
 
-        # #2350: late-ccld 조회 타임아웃은 차단기 회계에서 제외한다. 체결이력 폴이
-        # 반복 타임아웃해도 어댑터 전역 단일 차단기가 OPEN 되지 않아, 같은 어댑터를
-        # 공유하는 treasury 잔고/포지션 동기화·주문 경로가 broker-wide 로 차단되지
-        # 않는다. 회계 제외는 TimeoutError 에 한정되며 5xx/APIError 등은 그대로
-        # 기록된다(주문 경로 보호 무변경).
         rows = await self._request_paginated(
             "GET", url, tr_id, params, row_key="output1", cb_exempt_timeout=True
         )
@@ -1843,7 +1634,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             ccld_amt = float(item.get("tot_ccld_amt", 0) or 0)
             avg_prvs = float(item.get("avg_prvs", 0) or 0)
             ord_unpr = float(item.get("ord_unpr", 0) or 0)
-            # 실체결가 우선순위: 체결금액/체결수량 → 평균체결가 → 주문가.
             if cum_qty > 0 and ccld_amt > 0:
                 fill_price = ccld_amt / cum_qty
             elif avg_prvs > 0:
@@ -1854,7 +1644,6 @@ class KISDomesticAdapter(KISBaseAdapter):
             key = (odno, ord_dt)
             existing = folded.get(key)
             if existing is None or cum_qty >= existing["filled_quantity"]:
-                # 누적 체결qty 가 더 크거나 같은(최신) 행으로 갱신.
                 folded[key] = {
                     "order_id": odno,
                     "symbol": item.get("pdno", ""),
@@ -1868,6 +1657,4 @@ class KISDomesticAdapter(KISBaseAdapter):
         return list(folded.values())
 
 
-# ── 하위호환 별칭 ─────────────────────────────────────
-# 기존 코드에서 KISAdapter를 참조하는 곳이 있으므로 별칭을 유지한다.
 KISAdapter = KISDomesticAdapter

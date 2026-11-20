@@ -27,7 +27,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# non-terminal status — 폴/스트림 매핑 및 EOD 만료 대상.
 OPEN_STATUSES: frozenset[str] = frozenset({"open", "partially_filled"})
 TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"filled", "cancelled", "rejected", "failed", "expired"}
@@ -103,13 +102,7 @@ class OrderTrackerRecord:
     status: str
     submitted_at: str | None
     submitted_date: str
-    # #2391: 원주문 지정가 단가(OrderSubmittedEvent.price seed). 주문 정정 v1
-    # (price-only)에서 buy 가격↓ fail-closed 판정(new_price ≤ order_price)에 쓰인다.
-    # market/미지정 주문 또는 마이그레이션 이전 legacy row 는 None.
     order_price: float | None = None
-    # #2487: 주문 거래소(OrderSubmittedEvent.exchange seed). 체결 영속 계층
-    # (TradeRecord / OrderFilledEvent payload)이 exchange 를 얻는 단일 소스다.
-    # v007 마이그레이션 이전 legacy row 는 None → 소비 측이 "KRX" 로 폴백한다.
     exchange: str | None = None
 
     @classmethod
@@ -186,8 +179,6 @@ class OrderTracker:
 
     def __init__(self, db: Database) -> None:
         self._db = db
-        # 인메모리 open 캐시. key=(account_id, bot_id, order_id) → 레코드.
-        # commit 된 open/partially_filled 만 보관(terminal 은 evict).
         self._open_cache: dict[tuple[str, str, str], OrderTrackerRecord] = {}
 
     async def initialize(self) -> None:
@@ -285,7 +276,6 @@ class OrderTracker:
             ),
         )
         if inserted is not None:
-            # DB write 확정 — 캐시 upsert (open, recorded=0).
             record = OrderTrackerRecord(
                 order_id=order_id,
                 account_id=validated,
@@ -358,15 +348,12 @@ class OrderTracker:
         ordered = float(row["ordered_qty"] or 0.0)
         delta = new_cumulative - prev
         if delta <= 0:
-            # 관측 역전 또는 이미 반영됨 — 단조성 유지, no-op. 확정값은 직전 recorded.
             return RecordFillResult(
                 delta=0.0,
                 confirmed_cumulative=prev,
                 new_status=str(row["status"]),
             )
 
-        # terminal(취소/거부/실패/만료) 이후에도 잔여 체결이 관측되면 부분/완료로
-        # 되돌린다. CAS WHERE 절은 단조성(recorded < :c)만 강제한다.
         new_status = (
             "filled"
             if ordered > 0 and new_cumulative >= ordered
@@ -392,12 +379,9 @@ class OrderTracker:
             ),
         )
         if updated is None:
-            # 동시 advance 로 다른 호출이 먼저 recorded 를 올림 — 단조성 보존, no-op.
-            # (단일 Lock 경로에선 발생하지 않으나 방어적으로 처리.)
             return RecordFillResult(
                 delta=0.0, confirmed_cumulative=prev, new_status=str(row["status"])
             )
-        # CAS RETURNING 으로 확정된 누적값. fill_dedup_key 의 결정적 기준.
         confirmed = float(updated["recorded_filled_qty"] or 0.0)
         return RecordFillResult(
             delta=delta, confirmed_cumulative=confirmed, new_status=new_status
@@ -424,7 +408,6 @@ class OrderTracker:
             if key[2] != order_id:
                 continue
             if new_status == "filled" or new_status in TERMINAL_STATUSES:
-                # 완료/종료 — open window 종료, evict.
                 del self._open_cache[key]
                 return
             self._open_cache[key] = OrderTrackerRecord(
@@ -622,14 +605,6 @@ class OrderTracker:
         체결분을 영구 만료/오분류하지 않는다(I7). 만료 건수를 반환한다.
         """
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
-        # #1948: 단일 원자 UPDATE ... RETURNING. 사전 SELECT 를 두면 SELECT↔UPDATE
-        # 사이에 다른 코루틴(FillApplier)이 fill 을 commit 해 open→partially_filled/
-        # filled 로 전이시킬 때, UPDATE(WHERE status='open')는 그 주문을 건드리지
-        # 않는데도 pre-SELECT 결과로 evict 해 여전히 open(또는 partial)인 주문이
-        # 캐시에서 사라진다(캐시=commit 된 DB open 미러 invariant 위반). UPDATE 가
-        # 실제로 expired 한 order_id 만 RETURNING 으로 받아 그 ID 들만 evict 하면
-        # TOCTOU race 자체가 구조적으로 사라진다. writer 연결 단일 호출이라
-        # 읽기↔쓰기 분리도 없다.
         expired = await self._db.execute_fetch_all(
             """UPDATE order_tracker
                    SET status = 'expired', terminal_at = datetime('now')

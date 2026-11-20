@@ -376,6 +376,52 @@ async def test_catch_up_poll_failure_bounded_retries(tracker, applier):
     assert broker.call_count == fill_scheduler_module.CATCH_UP_MAX_ATTEMPTS
 
 
+class _FailThenEmptyBroker(FakeBroker):
+    """처음 ``failures`` 번은 실패하고 그 뒤로는 빈 history 를 돌려준다."""
+
+    def __init__(self, failures: int) -> None:
+        super().__init__(history=[])
+        self._failures = failures
+
+    async def get_order_history(self, from_date=None, to_date=None):
+        rows = await super().get_order_history(from_date, to_date)
+        if self.call_count <= self._failures:
+            raise RuntimeError("circuit open")
+        return rows
+
+
+async def test_catch_up_gives_up_after_exactly_three_attempts(tracker, applier):
+    """카치업 폴이 계속 실패하면 정확히 3번 시도하고 succeeded=False 로 끝난다."""
+    app, _ph, _eb = applier
+    await _seed(tracker)
+    broker = BoomBroker()
+    sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=tracker,
+        fill_applier=app,
+        account_id=ACCT,
+    )
+    result = await sched.catch_up_once()
+    assert result.succeeded is False
+    assert broker.call_count == 3
+
+
+async def test_catch_up_succeeds_on_third_attempt(tracker, applier):
+    """두 번 실패하고 세 번째에 성공하면 succeeded=True 다."""
+    app, _ph, _eb = applier
+    await _seed(tracker)
+    broker = _FailThenEmptyBroker(failures=2)
+    sched = FillReconcileScheduler(
+        broker=broker,  # type: ignore[arg-type]
+        order_tracker=tracker,
+        fill_applier=app,
+        account_id=ACCT,
+    )
+    result = await sched.catch_up_once()
+    assert broker.call_count == 3
+    assert result.succeeded is True
+
+
 async def test_periodic_loop_swallows_poll_failure(tracker, applier):
     """주기 루프는 폴 실패를 삼키고 crash 하지 않는다 (다음 사이클 멱등 재시도).
 
@@ -541,6 +587,20 @@ async def test_loop_api_error_counts_as_transient(monkeypatch) -> None:
     base = MIN_POLL_INTERVAL
     assert sleeps[0] == base
     assert sleeps[1] == base * 2
+
+
+async def test_loop_os_error_counts_as_transient(monkeypatch) -> None:
+    """OSError(소켓·I/O) 도 broker-transient 로 cooldown 카운트된다."""
+    sched = _cooldown_sched()
+    outcomes: list[BaseException | None] = [
+        OSError(5, "io error"),
+        OSError(5, "io error"),
+    ]
+    sleeps = await _drive_loop(sched, poll_outcomes=outcomes, monkeypatch=monkeypatch)
+    base = MIN_POLL_INTERVAL
+    assert sleeps[0] == base
+    assert sleeps[1] == base * 2
+    assert sleeps[2] == base * 4
 
 
 async def test_loop_non_transient_exception_does_not_extend_cooldown(
@@ -1019,6 +1079,38 @@ async def test_fallback_recovers_full_fill_from_balance(fallback_applier, tracke
     # OrderFilledEvent 1회 발행 (시나리오 2 의 일부).
     assert len(events) == 1
     assert events[0].quantity == 1.0
+
+
+async def test_prior_day_open_filled_by_fallback_is_not_expired(
+    fallback_applier, tracker
+):
+    """전일 open buy 가 fallback 으로 체결되면 EOD 만료 대상이 되지 않는다."""
+    app, ph, eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-prior-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date="20200101",
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0, 9500.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+
+    result = await sched.catch_up_once()
+
+    assert result.succeeded is True
+    assert result.applied == 1
+    assert broker.positions_calls == 1
+    rec = await tracker.get("ord-prior-fb")
+    assert rec.status == "filled"
+    assert rec.recorded_filled_qty == 1.0
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 1.0
 
 
 # ── 시나리오 2: OrderFilledEvent 1회 + outbox fill_dedup_key 결정성 ──

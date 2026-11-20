@@ -39,28 +39,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Signal.side 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준
 _VALID_ORDER_SIDES: frozenset[str] = frozenset({"buy", "sell"})
 
-# Signal.order_type 허용값 — docs/specs/strategy/03-02-signal-fields.md 기준.
-# "trail" 등 미지원 order_type은 broker adapter 단계에서 4건 누적 실패를
-# 일으킨 회귀이므로(#1298), 룰 평가 이전에 fail-closed로 거부한다.
 _VALID_ORDER_TYPES: frozenset[str] = frozenset(
     {"market", "limit", "stop", "stop_limit"}
 )
-
-# 현재 Ante KIS-domestic contract: 6자리 숫자 PDNO. KRX 전체 단축코드 SSOT 아님.
-# docs/specs/data-feed/04-schema.md 와
-# docs/specs/broker-adapter/08-kis-domestic-adapter.md 기준으로 KRX 주문 경로는
-# 6자리 numeric 단축코드를 가정한다. "INVALID" 같은 비수치 symbol이 RuleEngine을
-# 통과하면 KIS 40070000(매매불가 종목)을 유발하므로(#1299 A7 oracle 회귀), 룰 평가
-# 이전에 fail-closed로 거부한다.
-#
-# 형태 검증은 코드 레벨 SSOT(`ante.core.market_data_vocab.is_krx_symbol`)에
-# 위임한다. `is_krx_symbol` 은 `\A[0-9]{6}\Z` + `fullmatch` + non-str
-# 선검사로 구현되어 위임 전 `_KRX_NUMERIC_SYMBOL_PATTERN.fullmatch` 와
-# 엄격도가 동일하다 — `123456\n`·leading/trailing whitespace·비문자열은
-# 위임 전후 모두 fail-closed로 거부된다(#1613 narrow-scope: #1299 동작 불변).
 
 
 def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
@@ -157,9 +140,6 @@ def _safe_str(value: object) -> str:
     try:
         return repr(value)
     except Exception:
-        # 사용자 정의 ``__repr__``이 임의의 예외를 던질 수 있으므로
-        # ``BaseException``을 제외한 모든 예외를 잡아 placeholder로 떨어뜨린다.
-        # builder가 절대 raise하지 않는 invariant 유지.
         return f"<unrenderable {type(value).__name__}>"
 
 
@@ -239,7 +219,6 @@ def _build_safe_rejected_event(
     )
 
 
-# 룰 타입 → 클래스 매핑
 RULE_REGISTRY: dict[str, type[Rule]] = {
     "daily_loss_limit": DailyLossLimitRule,
     "total_exposure_limit": TotalExposureLimitRule,
@@ -285,31 +264,11 @@ class RuleEngine:
         self._bot_strategy_resolver = bot_strategy_resolver
         self._treasury = treasury
         self._trade_service = trade_service
-        # #2045: 권위 주문 메타(symbol/side) 복원용. ``ctx.modify_order()`` 경로는
-        # ``OrderAction``/``OrderModifyEvent``에 symbol/side를 채우지 못하므로
-        # ``_on_order_modify``에서 order_id 기준으로 enrich한다. optional default
-        # None — 미주입이면 graceful degrade(symbol/side "" 유지, 기존 동작).
         self._order_tracker = order_tracker
-        # Account snapshot — reload 경로(``_on_config_changed``)에서 broker_type별
-        # default를 다시 merge할 때 참조한다. 생명주기 동안 broker_type 불변 가정.
-        # 기존 호출자(테스트 fixture 등) 호환을 위해 ``None`` 허용 — None일 때
-        # reload 경로는 helper를 우회하여 stored 그대로 적용한다 (#1296).
         self._account = account
-        # #2377: Rule violation NOTIFY 알림 종목명 병기용. 미주입(None)이면
-        # 종목코드만 표기하는 기존 경로를 유지한다(CLI 생성 경로는 미주입).
         self._instrument_service = instrument_service
-        # #2398 D-ACC-09 축 ii: active-order readiness gate(계층1) reader.
-        # 미주입(None)이면 fail-closed — gate 가 active-order 를 차단한다(G2).
-        # RuleEngineManager → main(s.runtime_readiness) pass-through.
         self._runtime_readiness = runtime_readiness
 
-        # #2315: 미복구 self-order 반복 매수 가드 설정.
-        # ``unrecovered_buy_guard_min_age``는 미복구 outstanding buy 주문이 차단
-        # 대상이 되기까지 경과해야 하는 최소 age(초)다. 기본 60.0 =
-        # max(fill_poll_interval 60s, 60s) — fill-recovery 폴이 최소 1회 미복구
-        # 잔량을 복구할 기회를 보장한 뒤에만 차단한다(빠른 연속 분할매수 비차단).
-        # ``allow_unrecovered_buy_overlap``은 계좌 기본 opt-out이며, 봇/전략 단위
-        # override는 ``set_unrecovered_buy_overlap``로 등록한다.
         self._unrecovered_buy_guard_min_age = unrecovered_buy_guard_min_age
         self._allow_unrecovered_buy_overlap_default = allow_unrecovered_buy_overlap
         self._allow_unrecovered_buy_overlap_by_bot: dict[str, bool] = {}
@@ -336,8 +295,6 @@ class RuleEngine:
         self._eventbus.subscribe(OrderModifyEvent, self._on_order_modify, priority=100)
         self._eventbus.subscribe(ConfigChangedEvent, self._on_config_changed)
         logger.info("RuleEngine 시작: account=%s", self._account_id)
-
-    # ── 룰 관리 ─────────────────────────────────────
 
     def add_account_rule(self, rule: Rule) -> None:
         """계좌 룰 추가."""
@@ -449,29 +406,22 @@ class RuleEngine:
         rule_id: str = config.get("id", rule_type)  # type: ignore[assignment]
         return rule_class(rule_id, config)
 
-    # ── 하위 호환 프로퍼티 ──────────────────────────────
-
     @property
     def _global_rules(self) -> list[Rule]:
         """하위 호환: _global_rules → _account_rules."""
         return self._account_rules
 
-    # ── 룰 평가 ─────────────────────────────────────
-
     def evaluate(self, context: RuleContext) -> EvaluationResult:
         """주문에 대한 룰 평가. 계좌 룰 → 전략별 순서로 평가."""
         all_evaluations: list[RuleEvaluation] = []
 
-        # 계좌 룰 평가
         for rule in self._account_rules:
             if rule.is_applicable(context):
                 evaluation = rule.evaluate(context)
                 all_evaluations.append(evaluation)
-                # BLOCK/REJECT 시 즉시 중단
                 if evaluation.result in (RuleResult.BLOCK, RuleResult.REJECT):
                     break
 
-        # 계좌 룰에서 차단되지 않았으면 전략별 룰 평가
         if not any(
             e.result in (RuleResult.BLOCK, RuleResult.REJECT) for e in all_evaluations
         ):
@@ -486,7 +436,6 @@ class RuleEngine:
                     ):
                         break
 
-        # 결과 종합
         overall, reason, actions = self._aggregate_results(all_evaluations)
 
         return EvaluationResult(
@@ -526,8 +475,6 @@ class RuleEngine:
 
         return overall, reason, actions
 
-    # ── Treasury 조회 ──────────────────────────────
-
     async def _query_treasury_data(self, bot_id: str = "") -> dict[str, float]:
         """Treasury에서 자산/손익 데이터를 조회한다.
 
@@ -550,7 +497,6 @@ class RuleEngine:
         if self._treasury is None:
             return result
 
-        # get_summary()는 동기 메서드
         try:
             summary = self._treasury.get_summary()
             result["total_pnl"] = summary.get("total_profit_loss", 0.0)
@@ -559,7 +505,6 @@ class RuleEngine:
         except Exception:
             logger.warning("Treasury summary 조회 실패: %s", self._account_id)
 
-        # 봇 할당 예산 조회
         if bot_id:
             try:
                 budget = self._treasury.get_budget(bot_id)
@@ -568,7 +513,6 @@ class RuleEngine:
             except Exception:
                 logger.warning("Treasury 봇 예산 조회 실패: bot=%s", bot_id)
 
-        # get_daily_snapshot()은 비동기 메서드
         try:
             from datetime import date, timedelta
 
@@ -579,7 +523,6 @@ class RuleEngine:
         except Exception:
             logger.warning("Treasury 전일 스냅샷 조회 실패: %s", self._account_id)
 
-        # daily_pnl: 최신 스냅샷에서 조회
         try:
             latest = await self._treasury.get_latest_snapshot()
             if latest is not None:
@@ -588,8 +531,6 @@ class RuleEngine:
             logger.warning("Treasury 최신 스냅샷 조회 실패: %s", self._account_id)
 
         return result
-
-    # ── Trade 조회 ─────────────────────────────────
 
     async def _calculate_bot_unrealized_pnl(
         self, bot_id: str, current_price: float, order_symbol: str
@@ -611,18 +552,13 @@ class RuleEngine:
             return 0.0
 
         try:
-            # account_id 스코핑(#2140): RuleEngine은 계좌별 인스턴스이므로,
-            # 같은 bot_id를 공유하는 타 계좌 포지션이 미실현 손익에 혼입되어
-            # UnrealizedLossLimitRule이 오판하지 않도록 자기 계좌로 한정한다.
             positions = await self._trade_service.get_positions(
                 bot_id, account_id=self._account_id
             )
             total = 0.0
             for pos in positions:
                 if pos.symbol == order_symbol:
-                    # 주문 대상 종목: current_price로 미실현 손익 계산
                     total += (current_price - pos.avg_entry_price) * pos.quantity
-                # 그 외 종목: 시세 정보 없으므로 미실현 손익 0으로 근사
             return total
         except Exception:
             logger.warning("미실현 손익 계산 실패: bot=%s", bot_id)
@@ -648,8 +584,6 @@ class RuleEngine:
         except (ValueError, TypeError):
             return None
         if parsed.tzinfo is None:
-            # naive datetime은 UTC↔KST 등 오프셋 모호성으로 age를 신뢰할 수 없으므로
-            # 산정 불가로 처리한다(차단하지 않음).
             return None
         age = (datetime.now(UTC) - parsed).total_seconds()
         return max(age, 0.0)
@@ -683,7 +617,6 @@ class RuleEngine:
         으로 reject되지만(과도 거부 trade-off), #2314 캐스케이드(반복매수→예산
         소진→외부매수 오분류→재매도) 회피를 우선한다.
         """
-        # 조건①의 선결: side="buy"만 대상. tracker 미주입이면 가드 비활성(허용).
         if self._order_tracker is None or self._trade_service is None:
             return None
         if getattr(event, "side", None) != "buy":
@@ -692,16 +625,12 @@ class RuleEngine:
         bot_id = getattr(event, "bot_id", "")
         symbol = getattr(event, "symbol", "")
 
-        # opt-out(조건④): 봇 override → 계좌 기본. true면 가드 면제(허용).
         allow_overlap = self._allow_unrecovered_buy_overlap_by_bot.get(
             bot_id, self._allow_unrecovered_buy_overlap_default
         )
         if allow_overlap:
             return None
 
-        # 조건①: non-terminal self-buy 중 remaining > 0인 주문 존재.
-        # NOTE(#2315 fail-closed): get_open_orders_for 예외는 여기서 잡지 않고
-        # _on_order_request catch-all로 전파시켜 fail-closed reject한다.
         open_orders = await self._order_tracker.get_open_orders_for(
             account_id=self._account_id,
             bot_id=bot_id,
@@ -714,8 +643,6 @@ class RuleEngine:
         if not unrecovered:
             return None
 
-        # 조건②: 미복구 주문 중 age ≥ threshold인 주문이 하나라도 존재.
-        # age 산정 불가(None)는 미충족으로 보아 해당 주문을 무시한다(과대차단 회피).
         threshold = self._unrecovered_buy_guard_min_age
         aged = [
             o
@@ -726,8 +653,6 @@ class RuleEngine:
         if not aged:
             return None
 
-        # 조건③: 해당 symbol 내부 position 수량 == 0.
-        # NOTE(#2315 fail-closed): get_positions 예외도 catch-all로 전파한다.
         positions = await self._trade_service.get_positions(
             bot_id, account_id=self._account_id
         )
@@ -735,7 +660,6 @@ class RuleEngine:
         if held_qty != 0:
             return None
 
-        # 4조건 AND 성립 → 차단. audit trail용 reason 조립(_safe_str로 안전화).
         oldest = aged[0]
         remaining = oldest.ordered_qty - oldest.recorded_filled_qty
         return (
@@ -746,8 +670,6 @@ class RuleEngine:
             f"— blocking duplicate buy to prevent #2314 cascade "
             f"(set allow_unrecovered_buy_overlap to opt out)"
         )
-
-    # ── EventBus 핸들러 ──────────────────────────────
 
     async def _resolve_account_meta(self) -> tuple[str, Any] | None:
         """gate 용 ``(broker_type, trading_mode)`` 취득 — fail-closed.
@@ -774,7 +696,6 @@ class RuleEngine:
         trading_mode = getattr(fetched, "trading_mode", None)
         if not isinstance(broker_type, str) or trading_mode is None:
             return None
-        # mypy: TradingMode 참조 유지(런타임 import 비용 없음).
         _ = TradingMode
         return broker_type, trading_mode
 
@@ -822,21 +743,10 @@ class RuleEngine:
         if not isinstance(event, OrderRequestEvent):
             return
 
-        # account_id 필터링: 자기 계좌 이벤트만 처리
         if event.account_id != self._account_id:
             return
 
         try:
-            # ── #2398 계층1: active-order readiness gate (D-ACC-09 축 ii) ──────
-            # 위치: account_id 필터 직후, 도메인 preflight(side 검증 등)·RuleContext
-            # 생성·Treasury 조회 **前**(spec 07:85). reserve 이전이라 거부는
-            # OrderRejectedEvent 로 종결하면 누수가 없다(G3). 매 이벤트 시점 registry
-            # 조회(상태 캐시 금지, G5). fail-closed(G2): account 메타 취득 실패·
-            # registry 미주입·조회 예외 = 차단.
-            #
-            # G7(kill-switch 합성): readiness 가 ready 여도 AccountStatus.SUSPENDED
-            # 면 차단한다(StopOrderManager 변환 OrderRequestEvent 등 BotManager 중지
-            # 우회 경로의 kill-switch 우회를 계층1에서 봉쇄, spec 07:86).
             from ante.account.gate import (
                 ACCOUNT_NOT_READY_REASON,
                 ACCOUNT_STATUS_UNAVAILABLE_REASON,
@@ -851,18 +761,11 @@ class RuleEngine:
 
             is_liquidation = is_liquidation_reason(getattr(event, "reason", ""))
 
-            # G7 kill-switch(SUSPENDED) + status 검증불가 fail-closed(#2398 P1).
-            # status 는 런타임 가변 kill-switch 라 stale 스냅샷으로 통과시키지
-            # 않는다. ``STATUS_UNAVAILABLE`` sentinel(소스 present + 조회 예외/미상)
-            # 은 fail-closed 거부, ``None``(소스 미구성)·verified non-SUSPENDED 는
-            # status 축 통과(readiness 메타 gate 로 진행).
             account_status = await self._resolve_account_status()
             status_reason: str | None = None
             if account_status == AccountStatus.SUSPENDED:
                 status_reason = ACCOUNT_SUSPENDED_REASON
             elif account_status is STATUS_UNAVAILABLE:
-                # live status 조회 실패/미상 = 검증 불가 → fail-closed(spec 07:88).
-                # stale ACTIVE 스냅샷으로 SUSPENDED 우회되던 회귀를 차단(P1).
                 status_reason = ACCOUNT_STATUS_UNAVAILABLE_REASON
             if status_reason is not None:
                 await self._eventbus.publish(
@@ -884,9 +787,6 @@ class RuleEngine:
 
             meta = await self._resolve_account_meta()
             if meta is None:
-                # account 메타 취득 실패 = fail-closed 차단(G2). broker_type/
-                # trading_mode 미상이라 면제 매트릭스를 적용할 수 없으므로 bare
-                # 토큰 + 메타 미상 suffix 로 거부한다.
                 meta_blocked, meta_reason = (
                     True,
                     f"{ACCOUNT_NOT_READY_REASON}: account_metadata_unavailable",
@@ -922,15 +822,7 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: Signal.side 허용값 검증.
-            # docs/specs/strategy/03-02-signal-fields.md — side ∈ {"buy", "sell"}.
-            # 룰 평가/Treasury 조회 이전에 거부하여 사이드이펙트(예약/주문) 차단.
-            # `isinstance(..., str)` 가드로 list/dict 같은 unhashable 값이 들어와도
-            # frozenset membership 검사가 TypeError를 raise하지 않도록 한다.
             if not isinstance(event.side, str) or event.side not in _VALID_ORDER_SIDES:
-                # cross-field 보강(#1297/#1298/#1299): side만 invalid해도 동시에
-                # order_type/symbol까지 비문자열이면 reject 이벤트가 broken되므로
-                # builder가 모든 sqlite TEXT NOT NULL 필드를 _safe_str로 정규화.
                 reason = (
                     f"Invalid signal side: {_safe_repr(event.side)} "
                     f"(allowed: buy, sell)"
@@ -944,12 +836,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: Signal.order_type 허용값 검증.
-            # docs/specs/strategy/03-02-signal-fields.md —
-            # order_type ∈ {"market", "limit", "stop", "stop_limit"}.
-            # 회귀(#1298): order_type="trail" 등 미지원 값이 RuleEngine을 통과해
-            # Treasury 예약 → broker adapter 호출까지 진행되어 broker 실패 4건이
-            # 누적되었다. 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다.
             if (
                 not isinstance(event.order_type, str)
                 or event.order_type not in _VALID_ORDER_TYPES
@@ -967,13 +853,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: KRX numeric symbol 검증.
-            # 회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol="INVALID",
-            # exchange="KRX" 주문이 RuleEngine→Treasury→broker까지 진행되어
-            # KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
-            # 6자리 숫자 PDNO(예: "005930", "069500")만 가정하므로, 그 형식을
-            # 만족하지 않는 KRX symbol은 룰 평가/Treasury 조회 이전에 fail-closed로
-            # 거부한다. 비-KRX exchange는 broker adapter에 위임한다.
             if event.exchange == "KRX" and not is_krx_symbol(event.symbol):
                 reason = (
                     f"Invalid KRX numeric symbol: {_safe_repr(event.symbol)} "
@@ -989,14 +868,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: limit / stop_limit price 필수.
-            # 회귀(#1300): A7 oracle이 검출한 버그 — order_type="limit", side="sell",
-            # price=None 주문이 RuleEngine→Treasury→broker까지 진행되어 KIS 호출
-            # 단계에서 HTTP 500이 발생했다. limit / stop_limit는 가격 지정이
-            # invariant이므로, price=None이면 룰 평가/Treasury 조회 이전에
-            # fail-closed로 거부한다.
-            # market의 price=None은 스펙상 옵션이므로 통과시키며, 0/음수/NaN/비-number
-            # price 검증은 본 PR 범위 밖(#1303)이다.
             if event.order_type in ("limit", "stop_limit") and event.price is None:
                 reason = (
                     f"Missing price for {_safe_str(event.order_type)} order: "
@@ -1011,14 +882,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: stop / stop_limit stop_price 필수.
-            # 회귀(#1301): A7 oracle이 검출한 버그 — order_type="stop", side="sell",
-            # stop_price=None 주문이 RuleEngine→OrderApproved→StopOrderRegistered까지
-            # 진행되어 terminal event(체결/거부)가 누락되었다. stop / stop_limit는
-            # 트리거 가격(stop_price) 지정이 invariant이므로, stop_price=None이면
-            # 룰 평가/Treasury 조회 이전에 fail-closed로 거부한다. OrderRejectedEvent
-            # 스키마에 stop_price 필드가 없으므로 reason 문자열에만 명시한다.
-            # 0/음수/NaN stop_price 검증은 본 PR 범위 밖(별도 후속 이슈)이다.
             if event.order_type in ("stop", "stop_limit") and event.stop_price is None:
                 reason = (
                     f"Missing stop_price for {_safe_str(event.order_type)} order: "
@@ -1033,16 +896,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: stop_price 값이 있으면 finite number.
-            # 회귀(#1319 #1321 #1324): A7 oracle이 검출한 버그 —
-            # Signal.stop_price=NaN/inf 또는 음수가 RuleEngine→OrderValidatedEvent까지
-            # 진행되어 broker terminal_event 누락 또는 Treasury 거부로 누적됐다.
-            # NaN/inf/non-number stop_price는 Treasury/Gateway 호출 이전에
-            # fail-closed로 거부한다.
-            #
-            # _is_finite_quantity는 비-number/bool/NaN/inf 및 거대 정수
-            # (float 변환 시 OverflowError)를 모두 함께 잠근다. None은 정상 흐름이며
-            # 위 #1301 게이트가 None을 별도 처리한다.
             if event.stop_price is not None and not _is_finite_quantity(
                 event.stop_price
             ):
@@ -1059,14 +912,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: stop_price는 양수여야 한다.
-            # 회귀(#1319 #1322): A7 oracle 회귀 — 음수 stop_price가 Treasury 예약/주문
-            # 호출 이전에 fail-closed로 거부되어야 한다. stop_price는 위 finite 게이트로
-            # 잠금됐으므로 < 0 비교는 안전하다. 0 stop_price 검증은 #1320 별도 이슈.
-            #
-            # OrderRejectedEvent 스키마에 stop_price 필드가 없으므로 reason 문자열에만
-            # 음수 stop_price가 등장한다 (audit trail). _build_safe_rejected_event는
-            # stop_price를 싣지 않으므로 변경하지 않는다 (선례 #1301 docstring).
             if event.stop_price is not None and event.stop_price < 0:
                 reason = (
                     f"Negative stop_price: {event.stop_price} "
@@ -1081,16 +926,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: stop_price는 0이 아니어야 한다.
-            # 회귀(#1320 #1323): A7 oracle이 검출한 버그 — Signal.stop_price=0
-            # 주문이 RuleEngine→OrderValidatedEvent까지 진행되어 broker terminal_event
-            # 누락 또는 Treasury 거부로 누적됐다. 0 stop_price는 무의미한 트리거이므로
-            # Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
-            #
-            # stop_price는 #1319 finite 게이트에서 finite int|float로 잠금됐고, #1319
-            # negative 게이트에서 음수가 거부됐으므로 본 게이트의 비교 대상은
-            # 0, 0.0, -0.0이다. Python에서 0 == 0.0 == -0.0이 True이므로 == 0으로
-            # 모두 잠근다 (선례 #1305/#1318 패턴). reason은 f-string으로 부호 보존.
             if event.stop_price is not None and event.stop_price == 0:
                 reason = (
                     f"Zero stop_price: {event.stop_price} (stop_price must be positive)"
@@ -1104,19 +939,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: quantity는 finite number여야 한다.
-            # 회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN,
-            # side='buy', order_type='limit', price=1000 주문이 RuleEngine→
-            # OrderValidatedEvent→Treasury 진입 후 sqlite
-            # `bot_budgets.available NOT NULL` 위반으로 실패했다.
-            # NaN/inf/non-number quantity는 Treasury 예약/주문 호출 이전에 fail-closed
-            # 로 거부한다. 0/음수 quantity, NaN price 검증은 본 PR 범위 밖
-            # (#1304/#1305/#1303)이다.
-            #
-            # _is_finite_quantity는 비-number/bool/NaN/inf뿐 아니라 ``10**10000``
-            # 같은 거대 정수 (float 변환 시 ``OverflowError``)도 함께 잠근다 (#1302 P2).
-            # 본 게이트가 outer try 블록 안에 있으므로 reason 조립의 ``_safe_str``
-            # 가 raise해도 catch-all이 receive해 generic reject를 발행한다.
             if not _is_finite_quantity(event.quantity):
                 reason = (
                     f"Invalid quantity: {_safe_repr(event.quantity)} "
@@ -1131,20 +953,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: price 값이 있으면 finite number.
-            # 회귀(#1303): A7 oracle이 검출한 버그 — Signal.price=NaN, side='buy',
-            # order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
-            # Treasury 진입 후 sqlite NOT NULL 위반으로 실패했다. NaN/inf/non-number
-            # price는 Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
-            #
-            # ``price=None``은 정상 흐름이다 — market 주문은 None이 옵션이며,
-            # limit/stop_limit의 price=None은 #1300 게이트가 별도 처리한다. 본
-            # 게이트는 price 값이 있을 때만 finite numeric을 강제한다.
-            #
-            # ``_is_finite_quantity``는 비-number/bool/NaN/inf 및 ``10**400`` 같은
-            # 거대 정수 (float 변환 시 ``OverflowError``)를 모두 함께 잠근다.
-            # 0/음수 price 검증, NaN stop_price, OrderModifyEvent price 검증은
-            # 본 PR 범위 밖(별도 후속 이슈)이다.
             if event.price is not None and not _is_finite_quantity(event.price):
                 reason = (
                     f"Invalid price: {_safe_repr(event.price)} "
@@ -1159,22 +967,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: price 값이 있으면 양수여야 한다.
-            # 회귀(#1316): A7 oracle이 검출한 버그 — Signal.price=-1000, side='buy',
-            # order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
-            # Treasury까지 진행되어 ``reserve_amount_invalid`` 거부 + 음수 reserve
-            # 시도가 발생했다. 음수 price는 Treasury 예약/주문 호출 이전에
-            # fail-closed로 거부한다.
-            #
-            # price는 #1303 게이트에서 finite ``int|float``로 잠금됐으므로
-            # ``< 0`` 비교는 안전하다. market 옵션의 ``price=None``은 본 게이트
-            # 진입 전에 통과되어 영향 없다. limit/stop_limit ``price=None``은
-            # #1300 게이트가 별도 처리한다. 0/NaN price 검증은 본 PR 범위 밖
-            # (#1303 finite는 NaN을 잠그고, 0은 #1318 별도 이슈).
-            #
-            # _build_safe_rejected_event는 invalid finite price를 보존하므로
-            # ev.price 페이로드에는 음수 그대로 실린다 (audit-trail invariant 동일,
-            # 선례 #1304 negative quantity와 일관).
             if event.price is not None and event.price < 0:
                 reason = f"Negative price: {event.price} (price must be positive)"
                 await self._eventbus.publish(
@@ -1186,17 +978,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: price는 0이 아니어야 한다.
-            # 회귀(#1318): A7 oracle이 검출한 버그 — Signal.price=0 주문이 RuleEngine→
-            # OrderValidatedEvent→Treasury까지 진행되어 reserve_amount_invalid
-            # (total_reserve=0) 거부가 발생했다. 0 price는 무의미한 주문이므로
-            # Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
-            #
-            # price는 #1303 게이트에서 finite int|float로 잠금됐고, #1316 게이트에서
-            # 음수가 거부됐으므로 본 게이트의 비교 대상은 0, 0.0, -0.0이다.
-            # Python에서 0 == 0.0 == -0.0이 True이므로 ``== 0``으로 모두 잠근다
-            # (선례 #1305 zero quantity). reason은 f-string으로 실제 값을 보존하여
-            # audit trail에서 0/0.0/-0.0를 구분한다.
             if event.price is not None and event.price == 0:
                 reason = f"Zero price: {event.price} (price must be positive)"
                 await self._eventbus.publish(
@@ -1208,17 +989,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: quantity는 양수여야 한다.
-            # 회귀(#1304): A7 oracle이 검출한 버그 — Signal.quantity=-1, side='buy',
-            # order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
-            # Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=-1000.15)
-            # 거부 + 음수 예약 시도가 발생했다. 음수 quantity는 Treasury 예약/주문
-            # 호출 이전에 fail-closed로 거부한다.
-            #
-            # quantity는 #1302 게이트에서 finite ``int|float``로 잠금됐으므로
-            # ``< 0`` 비교는 안전하다. 도메인 가드를 분리하여 NaN/inf/non-number
-            # (#1302) 와 음수(#1304)의 책임 영역을 명확히 한다. 0 quantity는
-            # #1305 별도 이슈에서 처리된다.
             if event.quantity < 0:
                 reason = (
                     f"Negative quantity: {event.quantity} (quantity must be positive)"
@@ -1232,19 +1002,6 @@ class RuleEngine:
                 )
                 return
 
-            # OrderRequestEvent 계약 preflight: quantity는 0이 아니어야 한다.
-            # 회귀(#1305): A7 oracle이 검출한 버그 — Signal.quantity=0 주문이
-            # RuleEngine→OrderValidatedEvent→Treasury까지 진행되어
-            # ``reserve_amount_invalid``(total_reserve=0.0) 거부가 발생했다.
-            # 0 quantity는 no-op 주문이므로 Treasury 예약/주문 호출 이전에
-            # fail-closed로 거부한다.
-            #
-            # quantity는 #1302 게이트에서 finite ``int|float``로 잠금됐고,
-            # #1304 게이트에서 ``< 0``이 거부됐으므로 본 게이트의 비교 대상은
-            # ``0``, ``0.0``, ``-0.0`` 등이다. Python에서
-            # ``0 == 0.0 == -0.0``이 True이므로 ``== 0``으로 모두 잠근다.
-            # reason은 f-string으로 실제 값을 보존하여 audit trail에서
-            # ``0``/``0.0``/``-0.0``를 구분할 수 있게 한다.
             if event.quantity == 0:
                 reason = f"Zero quantity: {event.quantity} (quantity must be positive)"
                 await self._eventbus.publish(
@@ -1256,13 +1013,6 @@ class RuleEngine:
                 )
                 return
 
-            # 미복구 self-order 반복 매수 가드 (#2315 — #2314 캐스케이드 방어).
-            # side/order_type/symbol/quantity 계약 검증 이후, RuleContext 생성/룰
-            # evaluate 이전에 둔다. 4조건 AND(미복구 outstanding self-buy + age≥
-            # threshold + 내부 position==0 + opt-out=false) 성립 시에만 차단한다.
-            # tracker/trade_service 미주입이면 비활성(허용). 가드 내부의 OrderTracker/
-            # get_positions 조회 예외는 silent-pass하지 않고 본 try의 catch-all로
-            # 전파되어 fail-closed generic reject로 audit trail을 잠근다(#1302 보존).
             guard_reason = await self._check_unrecovered_buy_guard(event)
             if guard_reason is not None:
                 await self._eventbus.publish(
@@ -1274,7 +1024,6 @@ class RuleEngine:
                 )
                 return
 
-            # 계좌 상태 조회
             account_status = "active"
             currency = "KRW"
             trading_hours_start = "09:00"
@@ -1293,10 +1042,8 @@ class RuleEngine:
                         "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                     )
 
-            # Treasury 데이터 조회
             treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
-            # 미실현 손익 조회
             current_price = event.price or 0.0
             unrealized_pnl = await self._calculate_bot_unrealized_pnl(
                 bot_id=event.bot_id,
@@ -1358,10 +1105,6 @@ class RuleEngine:
                                 )
                             )
             else:
-                # 정상 흐름의 OrderValidatedEvent는 RuleEngine 내부 검증을
-                # 통과한 OrderRequest에서만 가므로 quantity는 이미 finite로
-                # 보장되지만, defensive 차원에서 builder를 적용해 audit
-                # trail의 finite-float 불변성을 일관되게 잠근다 (#1302).
                 await self._eventbus.publish(
                     _build_safe_rejected_event(
                         account_id=self._account_id,
@@ -1372,11 +1115,6 @@ class RuleEngine:
                 await self._execute_actions(result.actions, event)
 
         except Exception:
-            # catch-all (#1302 메타 리뷰 invariant): preflight 게이트나 evaluate
-            # 단계 어디에서든 raise가 일어나도 audit trail이 fail-closed로
-            # 잠기도록 generic reject를 강제 발행한다. builder는 절대 raise하지
-            # 않으며, 만약 publish 자체가 raise해도 안쪽 try가 다시 잡아
-            # logger.exception으로만 남긴다.
             logger.exception(
                 "OrderRequest preflight unexpected failure: event_id=%s",
                 getattr(event, "event_id", "<unknown>"),
@@ -1408,10 +1146,6 @@ class RuleEngine:
 
         for action in actions:
             if action == RuleAction.NOTIFY:
-                # #2377: Rule violation 메시지의 종목코드에 종목명 병기. 백틱 없는
-                # plain 메시지 형식이므로 plain label(``069500 (KODEX 200)``)을
-                # 사용한다. OrderRequestEvent 는 exchange 를 보유하므로 명시
-                # 전달한다. 미주입/조회 불가 시 symbol-only 로 폴백한다.
                 symbol_label = (
                     self._instrument_service.format_label(event.symbol, event.exchange)
                     if self._instrument_service is not None
@@ -1456,22 +1190,9 @@ class RuleEngine:
         if not isinstance(event, OrderModifyEvent):
             return
 
-        # account_id 필터링
         if event.account_id != self._account_id:
             return
 
-        # #2045: modify_rejected 계약(symbol/side 필수키) 충족 — 단일 chokepoint.
-        # ``ctx.modify_order()`` 경로의 ``OrderModifyEvent``는 symbol/side가 빈
-        # 값이다(OrderAction에 없음). RuleEngine은 EventBus 첫 핸들러(priority
-        # 100)이고 EventBus가 동일 event 인스턴스를 후속 구독자(Gateway,
-        # priority 50)에 그대로 전달하므로(#1331 ``_consumed`` 선례가 동일
-        # 인스턴스 공유를 증명), 여기서 한 번 enrich하면 RuleEngine 거부 +
-        # 통과 후 Gateway not-implemented 거부가 모두 채워진 symbol/side를 본다.
-        # account_id 필터 직후이므로 record는 동일 계좌로 scope된다(cross-account
-        # leak 없음). order_tracker 미주입 / record 미발견 / account 불일치는
-        # graceful degrade(symbol/side "" 유지). EventBus가 copy/fanout으로
-        # 바뀌면 이 same-instance mutation이 Gateway에 전파되지 않으므로 회귀
-        # (``_consumed``와 동일 가정).
         if self._order_tracker is not None and not event.symbol and not event.side:
             try:
                 record = await self._order_tracker.get(event.order_id)
@@ -1485,12 +1206,6 @@ class RuleEngine:
                 object.__setattr__(event, "symbol", record.symbol)
                 object.__setattr__(event, "side", record.side)
 
-        # #2391 (v1=price-only): 정정 가격 finite/양수 preflight. 정정은 신규
-        # 가격이 항상 필수이며(price-only), finite 양수가 아니면 Gateway 위임
-        # 이전에 fail-closed 로 거부한다(``modify_invalid_args``). 기존
-        # ``event.price or 0.0`` 추론(아래 RuleContext)으로 0/None 가격이 조용히
-        # market 으로 전락하던 모호함을 제거한다. ``_is_finite_quantity`` 는
-        # 비-number/bool/NaN/inf/거대정수를 모두 잠그고, 추가로 ``> 0`` 을 강제한다.
         if not _is_finite_quantity(event.price) or event.price <= 0:
             logger.warning(
                 "주문 정정 거부(무효 가격): order=%s — %s",
@@ -1510,11 +1225,9 @@ class RuleEngine:
                     reason="modify_invalid_args",
                 )
             )
-            # 후속 Gateway 가 추가 terminal event 를 발행하지 않도록 소비 마커 set.
             object.__setattr__(event, "_consumed", True)
             return
 
-        # 계좌 상태 조회
         account_status = "active"
         currency = "KRW"
         trading_hours_start = "09:00"
@@ -1533,11 +1246,8 @@ class RuleEngine:
                     "계좌 상태 조회 실패: %s — 기본값 사용", self._account_id
                 )
 
-        # Treasury 데이터 조회
         treasury_data = await self._query_treasury_data(bot_id=event.bot_id)
 
-        # 미실현 손익 조회. #2391: 위 preflight 로 event.price 는 finite 양수가
-        # 보장되므로(price-only), ``event.price or 0.0`` 추론 없이 그대로 쓴다.
         modify_price = float(event.price)
         unrealized_pnl = await self._calculate_bot_unrealized_pnl(
             bot_id=event.bot_id,
@@ -1552,8 +1262,6 @@ class RuleEngine:
             symbol=event.symbol,
             side=event.side,
             quantity=event.quantity,
-            # #2391: 정정은 항상 지정가(price-only). preflight 가 finite 양수
-            # price 를 보장하므로 order_type 은 "limit" 고정.
             order_type="limit",
             price=event.price,
             current_price=modify_price,
@@ -1597,13 +1305,6 @@ class RuleEngine:
                         reason=result.rejection_reason,
                     )
                 )
-                # 거부 시 이벤트 소비 — 후속 핸들러(Gateway)가 추가 terminal
-                # event를 발행하지 않도록 transient marker를 set한다 (#1331).
-                # ``OrderModifyEvent``는 ``_consumed`` 필드를 정의하지 않은
-                # frozen dataclass이므로 ``hasattr`` guard를 두면 항상 False가
-                # 되어 marker가 전혀 set되지 않는다 (dead code). 가드를 제거하고
-                # ``object.__setattr__``로 직접 주입한다. dataclass 필드가
-                # 아니므로 영속 history 직렬화에는 노출되지 않는다.
                 object.__setattr__(event, "_consumed", True)
 
         except Exception:
@@ -1621,11 +1322,6 @@ class RuleEngine:
                     reason="Rule evaluation error",
                 )
             )
-            # 룰 평가 예외 경로도 후속 Gateway가 추가 terminal event를 발행하지
-            # 못하도록 transient marker를 set한다 (#1331). reason은 이미
-            # ``"Rule evaluation error"``로 강제됐으므로 Gateway의
-            # ``"modify_not_implemented"``가 같은 정정 요청에 중첩 발행되면
-            # audit trail이 깨진다.
             object.__setattr__(event, "_consumed", True)
 
     async def _on_config_changed(self, event: object) -> None:
@@ -1645,11 +1341,6 @@ class RuleEngine:
         if event.category not in ("rule", "global_rule", "strategy_rule"):
             return
 
-        # 다중 계좌 환경에서 ConfigChangedEvent는 모든 RuleEngine subscriber에게
-        # broadcast된다. category="rule"은 계좌별 룰(`accounts.{account_id}.rules`)
-        # 변경을 의미하므로, 자기 계좌 키가 아니면 무시해야 한다. 그렇지 않으면
-        # 다른 계좌의 stored rules가 자기 effective rules로 잘못 merge되어
-        # 계좌간 default rule(예: trading_hours)이 cross-contamination 된다 (#1296).
         if event.category == "rule":
             expected_key = f"accounts.{self._account_id}.rules"
             if event.key != expected_key:
@@ -1669,9 +1360,6 @@ class RuleEngine:
 
         if event.category in ("rule", "global_rule"):
             self._account_rules.clear()
-            # account snapshot이 있으면 broker_type별 default를 다시 merge하여
-            # reload 후에도 effective rule 집합이 유지되도록 한다 (#1296).
-            # account가 없는 호출자(테스트 fixture 등)에서는 기존 동작 유지.
             if self._account is not None:
                 from ante.rule.defaults import resolve_effective_rules
 
@@ -1681,7 +1369,6 @@ class RuleEngine:
                 self.load_rules_from_config(new_rules)
             logger.info("계좌 룰 재로드 완료: %d건", len(self._account_rules))
         elif event.category == "strategy_rule":
-            # key 형식: "rules.strategy.<strategy_id>" 또는 strategy_id 직접
             parts = event.key.rsplit(".", 1)
             strategy_id = parts[-1] if len(parts) > 1 else event.key
             self.load_strategy_rules_from_config(strategy_id, new_rules)

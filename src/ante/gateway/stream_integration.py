@@ -26,10 +26,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# REST 폴링 폴백 주기 (초)
 DEFAULT_FALLBACK_POLL_INTERVAL = 5.0
 
-# 종목 구독 동기화 주기 (초)
 DEFAULT_SYNC_INTERVAL = 10.0
 
 
@@ -56,10 +54,6 @@ class StreamIntegration:
         fallback_poll_interval: float = DEFAULT_FALLBACK_POLL_INTERVAL,
         sync_interval: float = DEFAULT_SYNC_INTERVAL,
     ) -> None:
-        # SPLIT-3 (#1242): multi-account StreamIntegration pool 의 핵심 계약 —
-        # 인스턴스마다 단일 KIS 계좌 lifecycle 에 묶이며, fallback / 캐시
-        # 네임스페이스 / stop_order trigger 격리 모두 self._account_id 에 의존
-        # 한다. fallback 금지 (``require_account_id``).
         from ante.account.scoping import require_account_id
 
         require_account_id(account_id, context="stream_integration.__init__")
@@ -97,27 +91,22 @@ class StreamIntegration:
 
         self._running = True
 
-        # 콜백 등록
         self._stream.on_price(self._on_price)
         self._stream.on_execution(self._on_execution)
 
-        # 이벤트 구독 (연결/해제 감지)
         from ante.eventbus.events import StreamConnectedEvent, StreamDisconnectedEvent
 
         self._eventbus.subscribe(StreamConnectedEvent, self._on_stream_connected)
         self._eventbus.subscribe(StreamDisconnectedEvent, self._on_stream_disconnected)
 
-        # 봇 시작/종료 이벤트 구독 (종목 구독 동기화용)
         from ante.eventbus.events import BotStartedEvent, BotStoppedEvent
 
         self._eventbus.subscribe(BotStartedEvent, self._on_bot_changed)
         self._eventbus.subscribe(BotStoppedEvent, self._on_bot_changed)
 
-        # 스트림 연결
         await self._stream.connect()
         await self._stream.subscribe_execution()
 
-        # 종목 구독 동기화 태스크 시작
         self._sync_task = asyncio.create_task(
             self._subscription_sync_loop(),
             name="stream-subscription-sync",
@@ -132,10 +121,8 @@ class StreamIntegration:
 
         self._running = False
 
-        # 폴백 태스크 정리
         await self._stop_fallback()
 
-        # 동기화 태스크 정리
         if self._sync_task and not self._sync_task.done():
             self._sync_task.cancel()
             try:
@@ -144,12 +131,9 @@ class StreamIntegration:
                 pass
             self._sync_task = None
 
-        # 스트림 해제
         await self._stream.disconnect()
 
         logger.info("StreamIntegration 중지")
-
-    # ── 시세 콜백 ──────────────────────────────────
 
     async def _on_price(self, symbol: str, price: float) -> None:
         """실시간 시세 수신 콜백.
@@ -158,17 +142,11 @@ class StreamIntegration:
             +-> ResponseCache.set("{account_id}:price:{symbol}", ...)
             +-> StopOrderManager.on_price_update(symbol, price)
         """
-        # 캐시 적재 (account_id 기반 네임스페이스)
         cache_key = f"{self._account_id}:price:{symbol}"
         self._cache.set(cache_key, price, ttl=5)
 
-        # StopOrderManager 시세 전달
-        # SPLIT-3 (#1242): 각 KISStreamClient 는 단일 계좌 lifecycle 에 묶인다.
-        # tick 의 account_id 는 stream 인스턴스의 ``self._account_id`` 와 동일하다.
         if self._stop_order_manager:
             try:
-                # #2405 (attempt5 P2): 실 WebSocket 틱은 거래일 개장 신호이므로
-                # ``is_exchange_tick=True`` (default 이나 대칭·가독성 위해 명시).
                 await self._stop_order_manager.on_price_update(
                     symbol,
                     price,
@@ -177,8 +155,6 @@ class StreamIntegration:
                 )
             except Exception:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
-
-    # ── 체결 콜백 ──────────────────────────────────
 
     async def _on_execution(self, execution: dict[str, Any]) -> None:
         """실시간 체결 통보 콜백 (빠른 경로 — #1946).
@@ -201,16 +177,12 @@ class StreamIntegration:
         symbol = execution.get("symbol", "")
         account_id = execution.get("account_id", "") or self._account_id
 
-        # 캐시 무효화: account_id 범위 내 balance, positions, 해당 종목 시세
-        # account_id 가 비어 있으면 무효화 키가 의미 없으므로 skip.
         if account_id:
             self._cache.invalidate(f"{account_id}:balance")
             self._cache.invalidate(f"{account_id}:positions")
             if symbol:
                 self._cache.invalidate(f"{account_id}:price:{symbol}")
 
-        # account_id 가 비어 있으면 FillApplier 라우팅(account-scoped 조회)이
-        # 불가능하다. 백스톱 폴이 복구하므로 skip + WARNING.
         if not account_id:
             logger.warning(
                 "체결 통보에 account_id가 없어 FillApplier 라우팅을 skip합니다: "
@@ -221,7 +193,6 @@ class StreamIntegration:
             )
             return
 
-        # FillApplier 미주입(REST 전용 모드 등)이면 백스톱 폴에 일임.
         if self._fill_applier is None:
             logger.debug(
                 "FillApplier 미설정 — 스트림 체결은 백스톱 폴이 복구: %s %s",
@@ -257,8 +228,6 @@ class StreamIntegration:
 
         logger.debug("체결 통보 처리: %s %s", symbol, execution.get("side", ""))
 
-    # ── 스트림 연결/해제 이벤트 ──────────────────────
-
     async def _on_stream_connected(self, event: object) -> None:
         """스트림 연결 성공 시 폴백 중지.
 
@@ -285,8 +254,6 @@ class StreamIntegration:
             return
         await self._start_fallback()
         logger.warning("스트림 연결 해제 — REST 폴링 폴백 시작")
-
-    # ── REST 폴링 폴백 ──────────────────────────────
 
     async def _start_fallback(self) -> None:
         """REST 폴링 폴백 시작."""
@@ -332,11 +299,6 @@ class StreamIntegration:
                         self._cache.set(cache_key, price, ttl=5)
 
                         if self._stop_order_manager:
-                            # #2405 (attempt5 P2): REST fallback poll 은 KIS
-                            # ``inquire-price`` 가 휴장일에도 직전 종가를 성공
-                            # 반환하므로 거래일을 보증하지 못한다 →
-                            # ``is_exchange_tick=False`` 로 거래일 멤버십 마킹을
-                            # 유발하지 않게 한다(트리거 평가는 그대로 수행).
                             await self._stop_order_manager.on_price_update(
                                 symbol,
                                 price,
@@ -352,8 +314,6 @@ class StreamIntegration:
             except Exception:
                 logger.exception("REST 폴링 폴백 루프 오류")
                 await asyncio.sleep(self._fallback_poll_interval)
-
-    # ── 종목 구독 동기화 ──────────────────────────────
 
     async def _on_bot_changed(self, event: object) -> None:
         """봇 시작/종료 시 종목 구독 즉시 동기화."""
@@ -375,9 +335,7 @@ class StreamIntegration:
         desired = self._get_monitored_symbols()
         current = self._stream.subscribed_symbols
 
-        # 새로 구독해야 할 종목
         to_subscribe = desired - current
-        # 해제해야 할 종목
         to_unsubscribe = current - desired
 
         for symbol in to_subscribe:
@@ -399,7 +357,6 @@ class StreamIntegration:
         """
         symbols: set[str] = set()
 
-        # 활성 봇의 종목: 봇 config 의 account_id 가 일치하는 것만.
         if self._bot_manager:
             for bot_info in self._bot_manager.list_bots():
                 if bot_info.get("status") != "running":
@@ -416,7 +373,6 @@ class StreamIntegration:
                 if hasattr(bot, "monitored_symbols"):
                     symbols.update(bot.monitored_symbols)
 
-        # StopOrderManager의 모니터링 종목 — account_id 매칭만.
         if self._stop_order_manager:
             for order in self._stop_order_manager.active_orders:
                 if order.account_id == self._account_id:

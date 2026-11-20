@@ -1001,6 +1001,27 @@ class TestVirtualRouting:
         assert len(cap.failed) == 1
         assert cap.failed[0].error_message == "virtual_market_price_unavailable"
 
+    @pytest.mark.parametrize("quote", [0.0, -1.0])
+    async def test_g8_virtual_market_non_positive_price_no_fill(
+        self, quote: float
+    ) -> None:
+        """G8: 시장가 체결가 조회가 0 이하를 돌려주면 체결 없이 OrderFailedEvent."""
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=quote)
+        executor = self._make_virtual_executor(
+            bus,
+            registry=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            gateway=gateway,
+        )
+        await executor._on_order_approved(_approved())
+
+        gateway.get_current_price.assert_awaited_once()
+        assert cap.filled == []
+        assert len(cap.failed) == 1
+        assert cap.failed[0].error_message == "virtual_market_price_unavailable"
+
     async def test_g8_no_gateway_market_no_price_fails(self) -> None:
         """G8: gateway None + event.price None 시장가 → 0원 체결 없음 + 실패."""
         bus = EventBus()

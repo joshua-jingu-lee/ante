@@ -19,13 +19,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 거래 세션 시간 (한국 시간 기준, UTC+9)
-REGULAR_SESSION_START = (0, 0)  # 09:00 KST = 00:00 UTC
-REGULAR_SESSION_END = (6, 30)  # 15:30 KST = 06:30 UTC
-EXTENDED_SESSION_START = (23, 30)  # 08:30 KST (전일 23:30 UTC)
-EXTENDED_SESSION_END = (9, 0)  # 18:00 KST = 09:00 UTC
+REGULAR_SESSION_START = (0, 0)
+REGULAR_SESSION_END = (6, 30)
+EXTENDED_SESSION_START = (23, 30)
+EXTENDED_SESSION_END = (9, 0)
 
-# #2405 (A2 세션만료): 세션 종류 SSOT. ``StopOrder.trading_session`` 의 허용 값.
 SESSION_TYPES = ("regular", "extended")
 
 
@@ -61,28 +59,20 @@ class StopOrder:
     symbol: str
     side: str
     quantity: float
-    order_type: str  # "stop" | "stop_limit"
+    order_type: str
     stop_price: float
     limit_price: float | None
-    trading_session: str  # "regular" | "extended"
-    account_id: str  # required — trigger 시 OrderRequestEvent에 전파
+    trading_session: str
+    account_id: str
     registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     triggered: bool = False
     expired: bool = False
     exchange: str = "KRX"
-    # #2405 (A2 세션만료, attempt3 P1/P2): 이 주문이 자신의 거래 세션 안에서
-    # 한 번이라도 in-session 틱(``on_price_update``)을 받은 적이 있는지. tick 은
-    # 거래일 개장의 proxy 이므로(휴장일엔 무틱), 이 플래그가 True 인 주문만 세션
-    # 종료 시 ``session_ended`` 로 만료된다. per-order 멤버십이라 세션 경계
-    # race(일부 주문이 한 sweep 에서 미만료)·세션 종료 후 등록(in-session 틱
-    # 부재)의 오만료를 구조적으로 배제한다(manager-level 플래그의 타이밍 엣지 교정).
     entered_session: bool = False
 
     def __post_init__(self) -> None:
         from ante.account.scoping import require_account_id
 
-        # SPLIT-3 (#1242): account_id fallback 차단. invalid 값으로
-        # StopOrder 가 만들어지면 이후 OrderRequestEvent 발행 시 실패한다.
         require_account_id(self.account_id, context="stop_order.register")
 
 
@@ -98,20 +88,7 @@ class StopOrderManager:
         self._eventbus = eventbus
         self._orders: dict[str, StopOrder] = {}
         self._running = False
-        # #2405 (attempt6 P2-B): 거래일 확인된(실 WS 틱이 흐른) 세션을
-        # ``{거래일}:{세션종류}`` epoch 키로 기록한다. ``on_price_update``
-        # (실 틱)가 add 하고 ``register`` 가 같은 헬퍼(``_session_epoch_key``)로
-        # 조회해, 거래일 확인된 세션에 늦게 등록(+이후 무틱)된 주문도 등록
-        # 시점에 ``entered_session=True`` 로 마킹한다. 이게 없으면 늦은 등록분이
-        # market-wide 마킹 루프(다음 틱)를 못 받아 ``entered_session=False`` 로
-        # 잔존해 장종료 sweep 에서 미만료된다(다음 세션 생존, A2 위반).
         self._session_tick_marked: set[str] = set()
-        # #2405 (attempt6 P2-A): in-flight ``_do_expire_order`` 태스크 보관.
-        # shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep 의
-        # ``await publish`` 도중에 닿아도, shield 된 inner task 가 background
-        # 에서 terminal(``StopOrderExpiredEvent``) 을 완주하고, ``stop()`` 이
-        # loop teardown 전에 이를 await 해 in-flight terminal 유실을 막는다
-        # (signal_channel.py 의 shield+inflight 패턴 미러).
         self._inflight_expires: set[asyncio.Task[None]] = set()
 
     @property
@@ -142,11 +119,8 @@ class StopOrderManager:
         self._running = False
         for order in self.active_orders:
             await self._expire_order(order, "manager_stopped")
-        # in-flight terminal(shield 된 inner task) 완료 보장 — loop 가 살아
-        # 있는 이 시점에 await 해야 background task 가 안전히 완주한다.
         if self._inflight_expires:
             await asyncio.gather(*list(self._inflight_expires), return_exceptions=True)
-        # #2405 (attempt6 P2-B, bounded growth): epoch set 정리.
         self._session_tick_marked.clear()
         logger.info("StopOrderManager 중지")
 
@@ -187,9 +161,6 @@ class StopOrderManager:
         ``OrderFailedEvent`` 로 결정적 종결한다(api-gateway.md:187 정합). shutdown
         순서와 무관하게 결정적.
         """
-        # account_id invalid 는 stopped 가드보다 먼저 거부한다(StopOrder
-        # __post_init__ 의 require_account_id 와 동형 — invalid 입력은 stopped
-        # 여부와 무관하게 거부되어야 한다).
         from ante.account.scoping import require_account_id
 
         require_account_id(account_id, context="stop_order.register")
@@ -225,14 +196,6 @@ class StopOrderManager:
         )
         self._orders[stop_order_id] = order
 
-        # #2405 (attempt6 P2-B): 거래일 확인된 세션에 늦게 등록된 주문 마킹.
-        # ``_is_in_session(order)`` 게이트로 현재 시각이 이 주문의 세션 윈도우
-        # 안일 때만, 그리고 그 세션이 이미 실 틱으로 거래일 확인됐을 때만
-        # (epoch 키 존재) 등록 시점에 ``entered_session=True`` 로 표시한다.
-        # 게이트 덕에 세션 종료 후 등록·휴장일 사전 등록(실 틱 없어 epoch 키
-        # 부재 또는 _is_in_session=False)은 여기서 걸러져 마킹되지 않는다
-        # (A2 보존). per-order ``entered_session`` 이 최종 만료 권위이며,
-        # epoch set 은 register-time 마킹 게이트로만 쓰인다(attempt3 불변).
         if self._is_in_session(order):
             if self._session_epoch_key(order.trading_session) in (
                 self._session_tick_marked
@@ -249,8 +212,6 @@ class StopOrderManager:
 
         from ante.eventbus.events import StopOrderRegisteredEvent
 
-        # Refs #1336: ``account_id`` 를 명시 전달하여 BotManager /
-        # SignalChannel 이 account-scoped 통보 경로로 전달할 수 있도록 한다.
         await self._eventbus.publish(
             StopOrderRegisteredEvent(
                 account_id=account_id,
@@ -326,41 +287,14 @@ class StopOrderManager:
         if not self._running:
             return
 
-        # #2405 (A2 세션만료, attempt3 P1/P2 · attempt5 P2 source chokepoint):
-        # market-wide per-order 마킹. **실 WebSocket 틱**(``is_exchange_tick=
-        # True``)이 흐른다는 것만을 거래일 개장 중 신호로 신뢰한다(휴장일엔
-        # 실 틱 무수신). REST fallback poll(``is_exchange_tick=False``)은 KIS
-        # ``inquire-price`` 가 휴장일에도 직전 종가를 성공 반환하므로 거래일을
-        # 보증하지 못해 마킹을 유발하지 않는다 — 이 게이트가 없으면 휴장일
-        # 시계상 세션 시간의 fallback 성공이 사전등록 stop 을 마킹해 장종료
-        # sweep 에서 오만료시킨다. 실 틱이면 이 틱의 종목·계좌와 **무관하게**,
-        # 그 시점 자신의 세션 안에 있는 **모든** active order 의
-        # ``entered_session`` 을 True 로 표시한다 — 이 틱이 들어온 종목뿐 아니라
-        # 같은 세션의 무틱 종목까지 세션 멤버십을 부여한다(아래 트리거용
-        # ``active_for_symbol`` 루프는 per-symbol·출처 무관 그대로). per-order
-        # 멤버십이라 세션 경계 race·세션 종료 후 등록의 오만료 엣지가 없다.
         if is_exchange_tick:
             for order in self.active_orders:
                 if self._is_in_session(order):
                     order.entered_session = True
-            # #2405 (attempt6 P2-B): 실 틱이 흐르는 그 시점 활성 세션종류들을
-            # epoch 키로 마킹한다. 이후 같은 세션에 늦게 등록된 주문은
-            # ``register`` 에서 이 키를 보고 등록 시점에 ``entered_session=
-            # True`` 로 마킹된다(이후 무틱이어도 장종료 sweep 에 만료). 활성
-            # 세션종류 판정은 SESSION_TYPES SSOT 에 ``_is_session_type_active_now``
-            # 를 재사용한다 — active order 유무와 무관하게(빈 시점 등록 후
-            # 무틱 케이스 포함) 마킹되도록 SESSION_TYPES 전체를 검사한다.
-            # is_exchange_tick=False(fallback poll)는 이 블록에 진입하지 않아
-            # epoch 를 더럽히지 않는다(source chokepoint 보존).
             for session_type in SESSION_TYPES:
                 if self._is_session_type_active_now(session_type):
                     self._session_tick_marked.add(self._session_epoch_key(session_type))
 
-        # #2405 (attempt5 P2): 트리거 평가는 출처(실 틱/fallback poll)와
-        # **무관하게** 항상 수행한다. 스트림 hiccup 중에도 실거래일이면
-        # fallback 가격으로 stop 이 발동돼야 하므로 게이트하지 않는다(#2405
-        # scope=만료, 트리거 아님). fallback poll 가격의 거래일 staleness 는
-        # bounded known-limitation 으로 api-gateway.md 에 명시.
         active_for_symbol = [
             o
             for o in self.active_orders
@@ -424,7 +358,7 @@ class StopOrderManager:
         """트리거 조건 판단."""
         if order.side == "buy":
             return price >= order.stop_price
-        else:  # sell
+        else:
             return price <= order.stop_price
 
     def _is_in_session(self, order: StopOrder) -> bool:
@@ -455,14 +389,12 @@ class StopOrderManager:
         current_minutes = now.hour * 60 + now.minute
 
         if session_type == "extended":
-            # 확장 세션: 08:30-18:00 KST (23:30-09:00 UTC, 자정 걸침)
             start = EXTENDED_SESSION_START[0] * 60 + EXTENDED_SESSION_START[1]
             end = EXTENDED_SESSION_END[0] * 60 + EXTENDED_SESSION_END[1]
-            if start > end:  # 자정 걸침
+            if start > end:
                 return current_minutes >= start or current_minutes < end
             return start <= current_minutes < end
         else:
-            # 정규 세션: 09:00-15:30 KST (00:00-06:30 UTC)
             start = REGULAR_SESSION_START[0] * 60 + REGULAR_SESSION_START[1]
             end = REGULAR_SESSION_END[0] * 60 + REGULAR_SESSION_END[1]
             return start <= current_minutes < end
@@ -471,7 +403,6 @@ class StopOrderManager:
         """스탑 주문 트리거 → 시장가/지정가 주문으로 변환."""
         order.triggered = True
 
-        # stop → market, stop_limit → limit
         converted_type = "limit" if order.order_type == "stop_limit" else "market"
         converted_price = order.limit_price if converted_type == "limit" else None
 
@@ -486,10 +417,6 @@ class StopOrderManager:
 
         from ante.eventbus.events import OrderRequestEvent, StopOrderTriggeredEvent
 
-        # 트리거 이벤트 발행
-        # Refs #1336: ``account_id`` 보존. 변환된 ``OrderRequestEvent`` 는
-        # 자체 라이프사이클 이벤트를 발행하지만, stop 식별 단위 (stop_order_id)
-        # 가 다르므로 stop 트리거 통보를 별도로 보존한다.
         await self._eventbus.publish(
             StopOrderTriggeredEvent(
                 account_id=order.account_id,
@@ -504,7 +431,6 @@ class StopOrderManager:
             )
         )
 
-        # 변환된 주문을 기존 흐름에 주입
         await self._eventbus.publish(
             OrderRequestEvent(
                 account_id=order.account_id,
@@ -543,13 +469,8 @@ class StopOrderManager:
         inner = asyncio.ensure_future(self._do_expire_order(order, reason))
         self._inflight_expires.add(inner)
         try:
-            # shield: sweep task 가 cancel 돼도 inner(별도 task)는 background
-            # 에서 terminal publish 를 완주한다.
             await asyncio.shield(inner)
         finally:
-            # inner 가 아직 진행 중(shield 가 CancelledError 를 re-raise 한
-            # 경우)이면 set 에 남겨, ``stop()`` 의 gather 가 await 한다.
-            # 정상 완료면 done callback 으로 이미 discard 됐다.
             if inner.done():
                 self._inflight_expires.discard(inner)
             else:
@@ -567,9 +488,6 @@ class StopOrderManager:
 
         from ante.eventbus.events import StopOrderExpiredEvent
 
-        # Refs #1336: ``account_id`` 보존. ``reason`` 은 호출 위치에서
-        # ``"session_ended"`` (세션 종료) 또는 ``"manager_stopped"``
-        # (매니저 stop()) 로 분류되어 들어온다.
         await self._eventbus.publish(
             StopOrderExpiredEvent(
                 account_id=order.account_id,

@@ -19,12 +19,9 @@ class BotStatus(StrEnum):
     DELETED = "deleted"
 
 
-# 실행 간격 제한
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
 
-# Runtime control 허용 범위 (본 파일의 ``MIN_*``/``MAX_*`` 상수가 SSOT).
-# 범위 밖 값은 ``BotConfig`` 직접 생성 단계에서 ``ValueError`` 로 거부된다.
 MIN_MAX_RESTART_ATTEMPTS = 1
 MAX_MAX_RESTART_ATTEMPTS = 10
 MIN_RESTART_COOLDOWN_SECONDS = 10
@@ -62,8 +59,6 @@ class BotConfig:
     max_signals_per_step: int = 50
 
     def __post_init__(self) -> None:
-        # account-scoped 봇 진입점: invalid account_id를 차단.
-        # ``InvalidAccountIdError`` 가 raise 되어 호출자에 전달된다.
         self.account_id = require_account_id(self.account_id, context="BotConfig")
         validate_interval(self.interval_seconds)
         validate_runtime_controls(
