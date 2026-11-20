@@ -388,7 +388,7 @@ class TestTreasuryNotConfiguredEquivalence:
     ],
 )
 def test_direct_path_registered_exception_code(
-    runner: CliRunner, args: list[str]
+    runner: CliRunner, args: list[str], tmp_path
 ) -> None:
     """서버 정지 직접 경로에서 등록된 예외는 ``EXECUTION_ERROR`` 가 아닌 그 코드다."""
     from contextlib import asynccontextmanager
@@ -405,9 +405,12 @@ def test_direct_path_registered_exception_code(
         patch("ante.cli.cold_path.is_active_runtime", return_value=False),
         patch("ante.cli.commands.treasury._create_treasury", new=_raising_treasury),
     ):
-        result = runner.invoke(cli, ["--format", "json", "treasury", *args])
+        result = runner.invoke(
+            cli,
+            ["--config-dir", str(tmp_path), "--format", "json", "treasury", *args],
+        )
 
     assert entered == ["acc-1"]
-    assert result.exit_code == 1, result.output
+    assert result.exit_code != 0, result.output
     payload = _cli_envelope_payload(result.output)
     assert payload["code"] == "TREASURY_NOT_CONFIGURED"

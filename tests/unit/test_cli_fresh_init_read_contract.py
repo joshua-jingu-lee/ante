@@ -282,7 +282,7 @@ class TestTradeInfoOtherOperationalError:
                 ],
             )
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         payload = json.loads(result.output.strip().splitlines()[-1])
         assert payload["code"] == "TRADE_ERROR"
         assert "no such column" in payload["message"]

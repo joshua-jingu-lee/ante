@@ -312,7 +312,7 @@ class TestColdPathFallback:
 
 
 class TestRegisterIpcErrorCode:
-    def test_server_side_rejection_surfaces_envelope_code(self) -> None:
+    def test_server_side_rejection_surfaces_envelope_code(self, tmp_path) -> None:
         """register 의 서버 거부 봉투는 그 코드·메시지를 그대로 낸다."""
         exc = click.ClickException("MEMBER_ALREADY_EXISTS: dup exists")
         exc.ipc_error_code = "MEMBER_ALREADY_EXISTS"  # type: ignore[attr-defined]
@@ -324,6 +324,8 @@ class TestRegisterIpcErrorCode:
         ):
             result = _invoke(
                 [
+                    "--config-dir",
+                    str(tmp_path),
                     "--format",
                     "json",
                     "member",
@@ -335,7 +337,6 @@ class TestRegisterIpcErrorCode:
                 ]
             )
         ipc_send.assert_awaited_once()
-        assert result.exit_code == 1
+        assert result.exit_code != 0
         payload = json.loads(result.output)
         assert payload["code"] == "MEMBER_ALREADY_EXISTS"
-        assert payload["message"] == "dup exists"

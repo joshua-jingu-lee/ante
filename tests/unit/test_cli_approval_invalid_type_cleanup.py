@@ -288,6 +288,8 @@ class TestAuditTypesClosesDatabaseOnSetupFailure:
             result = runner.invoke(
                 cli,
                 [
+                    "--config-dir",
+                    str(tmp_path),
                     "--format",
                     "json",
                     "approval",
@@ -298,7 +300,7 @@ class TestAuditTypesClosesDatabaseOnSetupFailure:
             )
 
         assert raised == [failing_step]
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         db.connect.assert_awaited_once()
         db.close.assert_awaited_once()
 

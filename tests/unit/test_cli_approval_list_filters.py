@@ -309,11 +309,22 @@ class TestApprovalListRealDatabase:
 
     def test_list_initializes_schema_on_fresh_db(self, runner, tmp_path) -> None:
         """테이블이 없는 새 DB에서도 list 는 스키마를 만들고 빈 목록으로 끝난다."""
+        config_dir = tmp_path / "cfg"
+        (config_dir / "db").mkdir(parents=True)
         fresh = tmp_path / "fresh.db"
 
         result = runner.invoke(
             cli,
-            ["--format", "json", "approval", "list", "--db-path", str(fresh)],
+            [
+                "--config-dir",
+                str(config_dir),
+                "--format",
+                "json",
+                "approval",
+                "list",
+                "--db-path",
+                str(fresh),
+            ],
         )
         assert result.exit_code == 0, result.output
         assert json.loads(result.stdout) == []

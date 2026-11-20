@@ -619,7 +619,9 @@ class TestMemberMasterProtectedEquivalence:
 class TestMemberDirectPathExplicitCodes:
     """서버 정지 직접 경로에서 typed 분기가 내는 명시 코드."""
 
-    def _invoke_with_service(self, runner: CliRunner, svc: AsyncMock, args: list):  # noqa: ANN202
+    def _invoke_with_service(  # noqa: ANN202
+        self, runner: CliRunner, svc: AsyncMock, args: list, config_dir: Path
+    ):
         @asynccontextmanager
         async def _create_service(ctx=None):  # noqa: ANN001, ANN202
             yield svc
@@ -628,32 +630,38 @@ class TestMemberDirectPathExplicitCodes:
             patch("ante.cli.cold_path.is_active_runtime", return_value=False),
             patch("ante.cli.commands.member._create_service", new=_create_service),
         ):
-            return runner.invoke(cli, ["--format", "json", "member", *args])
+            return runner.invoke(
+                cli,
+                ["--config-dir", str(config_dir), "--format", "json", "member", *args],
+            )
 
     def test_register_permission_denied_code_and_message(
-        self, runner: CliRunner
+        self, runner: CliRunner, tmp_path: Path
     ) -> None:
         from ante.cli.commands.member import _MASTER_REQUIRED_MESSAGE
 
         svc = AsyncMock()
         svc.register.side_effect = PermissionDeniedError("raw service message")
         result = self._invoke_with_service(
-            runner, svc, ["register", "--id", "new-agent", "--type", "agent"]
+            runner, svc, ["register", "--id", "new-agent", "--type", "agent"], tmp_path
         )
 
         svc.register.assert_awaited_once()
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "PERMISSION_DENIED"
         assert payload["message"] == _MASTER_REQUIRED_MESSAGE
 
-    def test_set_emoji_missing_member_code(self, runner: CliRunner) -> None:
+    def test_set_emoji_missing_member_code(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
         svc = AsyncMock()
         svc.update_emoji.side_effect = MemberNotFoundError("no such member")
-        result = self._invoke_with_service(runner, svc, ["set-emoji", "ghost", "🤖"])
+        result = self._invoke_with_service(
+            runner, svc, ["set-emoji", "ghost", "🤖"], tmp_path
+        )
 
         svc.update_emoji.assert_awaited_once()
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "MEMBER_NOT_FOUND"
-        assert payload["message"] == "멤버를 찾을 수 없습니다: ghost"

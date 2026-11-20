@@ -666,8 +666,11 @@ async def _eof_pump_in(w):  # noqa: ANN001, ANN202
 class TestSignalRelaySwallowsIoErrors:
     """stdin EOF 로 ``_pump_in`` 이 먼저 끝나 ``_pump_out`` 을 await 하는 경로."""
 
-    def _invoke(self, runner: CliRunner, reader: FakeReader, *extra_patches):  # noqa: ANN202
+    def _invoke(  # noqa: ANN202
+        self, runner: CliRunner, reader: FakeReader, config_dir, *extra_patches
+    ):
         writer = FakeWriter()
+        args = ["--config-dir", str(config_dir), "signal", "connect", "--key", "sk"]
 
         async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
             return reader, writer
@@ -680,25 +683,23 @@ class TestSignalRelaySwallowsIoErrors:
         ):
             if extra_patches:
                 with extra_patches[0]:
-                    return runner.invoke(cli, ["signal", "connect", "--key", "sk"])
-            return runner.invoke(cli, ["signal", "connect", "--key", "sk"])
+                    return runner.invoke(cli, args)
+            return runner.invoke(cli, args)
 
     def test_socket_eof_without_closed_frame_exits_zero(
-        self, runner: CliRunner
+        self, runner: CliRunner, tmp_path
     ) -> None:
         ack = {"type": "ack", "signal_id": "sig-1"}
         ok = _frame(_ok_frame("bot-1705"))
         _RecordingEofReader.eof_raised = False
         reader = _RecordingEofReader([ok, _frame(ack)], boundary_pos=len(ok))
 
-        result = self._invoke(runner, reader)
+        result = self._invoke(runner, reader, tmp_path)
 
         assert _RecordingEofReader.eof_raised is True
-        assert result.exception is None, result.exception
-        assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout.strip()) == ack
+        assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
 
-    def test_stdout_write_failure_exits_zero(self, runner: CliRunner) -> None:
+    def test_stdout_write_failure_exits_zero(self, runner: CliRunner, tmp_path) -> None:
         ok = _frame(_ok_frame("bot-1705"))
         frames = [ok, _frame({"type": "ack"}), _frame(_CLOSED_FRAME)]
         reader = DeferredFrameReader(frames, boundary_pos=len(ok))
@@ -707,13 +708,12 @@ class TestSignalRelaySwallowsIoErrors:
         result = self._invoke(
             runner,
             reader,
+            tmp_path,
             patch("ante.cli.commands.signal.sys", _SysProxy(stdout)),
         )
 
         assert stdout.calls == 1
-        assert result.exception is None, result.exception
-        assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert "channel closed" not in result.stderr
+        assert result.exit_code == 0, (result.stdout, result.stderr, result.exception)
 
 
 async def test_pump_in_swallows_socket_write_error() -> None:

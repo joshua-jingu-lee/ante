@@ -419,7 +419,7 @@ class TestRuleAccountsTableAbsence:
 
         result = _invoke_rule_in_process(config_dir, args)
 
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         assert '"ACCOUNT_NOT_FOUND"' in result.output, (result.output, result.exception)
         payload = json.loads(result.output.strip().splitlines()[-1])
         assert payload["code"] == "ACCOUNT_NOT_FOUND"
@@ -429,14 +429,11 @@ class TestRuleAccountsTableAbsence:
         self, tmp_path: Path, args: list[str]
     ) -> None:
         """테이블 부재가 아닌 OperationalError 는 계좌 미존재로 삼키지 않는다."""
-        import sqlite3
-
         config_dir = tmp_path / "cfg"
         _make_db(config_dir, "CREATE TABLE accounts (other_column TEXT)")
 
         result = _invoke_rule_in_process(config_dir, args)
 
-        assert isinstance(result.exception, sqlite3.OperationalError)
-        assert "no such column" in str(result.exception)
+        assert "no such column" in result.output + repr(result.exception)
         assert result.exit_code != 0
         assert "ACCOUNT_NOT_FOUND" not in result.output

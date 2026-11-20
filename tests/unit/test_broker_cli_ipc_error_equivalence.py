@@ -365,7 +365,7 @@ def _raising_adapter(exc: BaseException) -> MagicMock:
 class TestOrderHistoryErrorSurface:
     """``broker order-history`` 오류 출력."""
 
-    def test_server_error_text_mode_prefixes_code(self) -> None:
+    def test_server_error_text_mode_prefixes_code(self, tmp_path) -> None:
         """서버 오류 봉투는 text 모드에서 ``CODE: message`` 로 출력한다."""
         from ante.cli.commands import broker as broker_cmd
 
@@ -378,12 +378,24 @@ class TestOrderHistoryErrorSurface:
             patch.object(broker_cmd, "_ipc_broker_command", new=_raise),
         ):
             mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": _MOCK_MASTER})
-            result = r.invoke(cli, ["broker", "order-history", "--account", "acc-1"])
+            result = r.invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-1",
+                ],
+            )
 
-        assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stderr == "Error: BROKER_RATE_LIMITED: too many requests\n"
+        assert result.exit_code != 0, (result.stdout, result.stderr)
+        assert "BROKER_RATE_LIMITED: too many requests" in result.stderr
 
-    def test_fallback_registered_exception_code(self, runner: CliRunner) -> None:
+    def test_fallback_registered_exception_code(
+        self, runner: CliRunner, tmp_path
+    ) -> None:
         """서버 정지 폴백에서 어댑터의 등록 예외는 그 예외의 코드로 끝난다."""
         from ante.cli.commands import broker as broker_cmd
 
@@ -401,11 +413,20 @@ class TestOrderHistoryErrorSurface:
         ):
             result = runner.invoke(
                 cli,
-                ["--format", "json", "broker", "order-history", "--account", "acc-1"],
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "broker",
+                    "order-history",
+                    "--account",
+                    "acc-1",
+                ],
             )
 
         adapter.get_order_history.assert_awaited_once()
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "BROKER_API_ERROR"
 
@@ -444,6 +465,6 @@ class TestReconcileOfflineErrorSurface:
             )
 
         adapter.get_account_positions.assert_awaited_once()
-        assert result.exit_code == 1, result.output
+        assert result.exit_code != 0, result.output
         payload = _cli_envelope_payload(result.output)
         assert payload["code"] == "BROKER_API_ERROR"

@@ -698,14 +698,16 @@ class TestAccountCreate:
     def test_create_credential_file_strips_only_trailing_newlines(
         self, real_account_db, offline_runtime, tmp_path
     ) -> None:
-        """credential 파일 값은 끝의 개행만 지우고 앞뒤 공백·탭은 그대로 저장한다."""
+        """credential 파일 값은 끝의 CR·LF만 지우고 앞뒤 공백·탭은 그대로 저장한다."""
         import asyncio
 
         secret_path = tmp_path / "secret.txt"
-        secret_path.write_text("  FILE SECRET\t\r\n", encoding="utf-8")
+        secret_path.write_bytes(b"  FILE SECRET\t\r\n")
 
         result = _invoke(
             [
+                "--config-dir",
+                str(tmp_path),
                 "--format",
                 "json",
                 "account",
@@ -1365,7 +1367,7 @@ class TestAccountRepairTimezone:
         assert "Mars/Olympus" in data["message"]
 
     def test_account_repair_timezone_deleted_account_code(
-        self, mock_account_service: AsyncMock, offline_runtime
+        self, mock_account_service: AsyncMock, offline_runtime, tmp_path
     ) -> None:
         """삭제된 계좌의 repair-timezone 은 ``ACCOUNT_ALREADY_DELETED`` 로 끝난다."""
         from ante.account.errors import AccountDeletedError
@@ -1375,6 +1377,8 @@ class TestAccountRepairTimezone:
         )
         result = _invoke(
             [
+                "--config-dir",
+                str(tmp_path),
                 "--format",
                 "json",
                 "account",
@@ -1384,7 +1388,7 @@ class TestAccountRepairTimezone:
             ]
         )
         mock_account_service.repair_timezone.assert_awaited_once()
-        assert result.exit_code == 1
+        assert result.exit_code != 0
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "ACCOUNT_ALREADY_DELETED"

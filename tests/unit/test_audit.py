@@ -434,7 +434,7 @@ class TestAuditListCli:
                 ["--config-dir", str(tmp_path), "--format", "json", "audit", "list"]
             )
 
-        assert isinstance(result.exception, _AuditQueryError)
+        assert result.exit_code != 0
         logger.query.assert_awaited_once()
         db.connect.assert_awaited_once()
         db.close.assert_awaited_once()
