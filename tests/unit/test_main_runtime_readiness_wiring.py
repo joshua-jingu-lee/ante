@@ -1522,6 +1522,34 @@ async def test_self_healing_reregisters_fill_when_only_fill_not_ready() -> None:
 
 
 @pytest.mark.asyncio
+async def test_self_healing_reregisters_reconcile_when_only_reconcile_not_ready() -> (
+    None
+):
+    """broker 는 ready 이고 reconcile 만 not_ready 여도 회복이 reconcile 스케줄러를
+    다시 등록해 계좌를 ready 로 되돌린다."""
+    s = _services()
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.BROKER,
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.FILL_RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-1", ReadinessFlag.RECONCILE, "scheduler_start_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.RECONCILE)
+    assert [r.account_id for r in _FakeReconcileScheduler.instances] == ["live-1"]
+    assert _FakeReconcileScheduler.instances[0].started is True
+    assert _FakeFillScheduler.instances == []
+
+
+@pytest.mark.asyncio
 async def test_self_healing_resyncs_ready_treasury_on_broker_recovery() -> None:
     """treasury_sync 가 ready 여도 broker 가 방금 회복되면 새 broker 로 재동기화한다."""
     broker = _live_broker()
@@ -1601,16 +1629,16 @@ def _burst_config(*, interval: int, attempts: int) -> Any:
 
 
 def _sleep_until_interval(
-    monkeypatch: pytest.MonkeyPatch, interval: int
+    monkeypatch: pytest.MonkeyPatch, interval: int, *, bursts: int = 1
 ) -> list[float]:
     """asyncio.sleep 을 기록하는 가짜로 바꾼다. 실제로 이벤트 루프에 양보하고,
-    burst 사이 대기(``interval``)에 이르면 루프를 끝낸다."""
+    burst 사이 대기(``interval``)를 ``bursts`` 번째 만나면 루프를 끝낸다."""
     delays: list[float] = []
     real_sleep = asyncio.sleep
 
     async def _fake_sleep(delay: float) -> None:
         delays.append(delay)
-        if delay == interval:
+        if delays.count(interval) >= bursts:
             raise asyncio.CancelledError
         await real_sleep(0)
 
@@ -1622,19 +1650,20 @@ def _sleep_until_interval(
 async def test_self_healing_egw00133_ends_burst_after_one_connect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """EGW00133 이면 그 계좌의 burst 를 끊어 burst 당 connect 시도가 1회다."""
+    """EGW00133 이면 그 계좌의 burst 를 끊어(backoff 없이) burst 당 connect 시도가
+    1회이고, 다음 burst 에서 다시 시도한다."""
     from ante.broker.exceptions import TokenRateLimitError
 
     s = _services(brokers={"live-1": TokenRateLimitError("x", error_code="EGW00133")})
     s.config = _burst_config(interval=77, attempts=5)
     s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "EGW00133")
-    delays = _sleep_until_interval(monkeypatch, 77)
+    delays = _sleep_until_interval(monkeypatch, 77, bursts=2)
 
     with pytest.raises(asyncio.CancelledError):
         await main_module._readiness_self_healing_loop(s, [_account("live-1")])
 
-    assert s.account_service.get_broker.await_count == 1
-    assert delays == [77]
+    assert s.account_service.get_broker.await_count == 2
+    assert delays == [77, 77]
 
 
 @pytest.mark.asyncio

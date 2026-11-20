@@ -1,10 +1,20 @@
 """main 의 조립 함수(_init_*)가 실제로 만든 배선을 동작으로 확인한다 (#2540 S3).
 
-각 테스트는 실제 ``_init_core`` → ``_init_services`` → ``_init_account`` →
-``_init_trading`` → ``_init_gateway`` → ``_init_ipc`` 를 임시 config_dir 위에서
-돌린다. 협력 객체 중 broker 어댑터, 체결 카치업 스케줄러, 포지션 대사의 1회 실행만
-가짜로 둔다. 단언은 조립 결과로 만들어진 객체들의 동작(이벤트, 저장 상태, IPC 응답)
-으로 한다.
+``assemble`` fixture 를 쓰는 테스트는 실제 ``_init_core`` → ``_init_services`` →
+``_init_account`` → ``_init_trading`` → ``_init_gateway`` → ``_init_ipc`` 를 /tmp
+아래 임시 config_dir 에서 돌리고 실제 ``_shutdown`` 으로 닫는다. ``_init_core`` 의
+경로·Config 재사용을 보는 두 테스트는 ``_init_core`` 만 돈다.
+
+가짜로 두는 것: broker 어댑터(``AccountService._build_broker_adapter``),
+``FillReconcileScheduler``(카치업 성공 여부), ``ReconcileScheduler.run_once``(기동
+대사 모드 기록), ``FillOutboxPublisher`` 의 주기 드레인 간격(1시간),
+``setup_logging``(root 핸들러 보존). kis-domestic 기본 룰(거래시간)은 static
+config 로 끈다. 일부 테스트는 그 테스트에서만 조립 함수나 인스턴스 메서드를 원본을
+부르는 기록 래퍼로 감싸거나(순서 기록), 세션 판정·현재가 조회·봇 조회를 가짜로
+바꾼다.
+
+단언은 조립 결과로 만들어진 객체들의 동작(이벤트, 저장 상태, IPC 응답)과, 제약이
+순서일 때 호출 순서로 한다.
 """
 
 from __future__ import annotations
@@ -33,6 +43,7 @@ from ante.config import Config
 from ante.db.migrations import run_migrations
 from ante.eventbus.events import (
     BotStoppedEvent,
+    NotificationEvent,
     OrderApprovedEvent,
     OrderFailedEvent,
     OrderFilledEvent,
@@ -257,10 +268,73 @@ async def assemble(
 
     yield _assemble
 
+    failures: list[BaseException] = []
     for asm in built:
-        if not asm.shut_down and asm.s.db is not None:
-            await main_module._shutdown(asm.s)
-        shutil.rmtree(asm.config_dir, ignore_errors=True)
+        try:
+            if not asm.shut_down and asm.s.db is not None:
+                try:
+                    await asyncio.wait_for(main_module._shutdown(asm.s), timeout=30.0)
+                except Exception as exc:
+                    failures.append(exc)
+                    await _force_close(asm.s)
+        finally:
+            shutil.rmtree(asm.config_dir, ignore_errors=True)
+    if failures:
+        raise failures[0]
+
+
+async def _shutdown_in_test(asm: _Assembly) -> None:
+    """테스트 본문에서 실제 ``_shutdown`` 을 부른다.
+
+    실패하면 남은 자원을 닫고 다시 던진다."""
+    asm.shut_down = True
+    try:
+        await asyncio.wait_for(main_module._shutdown(asm.s), timeout=30.0)
+    except BaseException:
+        await _force_close(asm.s)
+        raise
+
+
+async def _best_effort(action: Callable[[], Any]) -> None:
+    try:
+        result = action()
+        if inspect.isawaitable(result):
+            await asyncio.wait_for(result, timeout=5.0)
+    except BaseException:  # noqa: BLE001 — 정리 실패는 다음 자원 정리를 막지 않는다
+        pass
+
+
+async def _force_close(s: main_module.Services) -> None:
+    """``_shutdown`` 이 실패했을 때 남은 태스크·IPC 서버·DB 를 닫는다.
+
+    DB 연결(aiosqlite 스레드)과 IPC 서버가 남으면 pytest 프로세스가 끝나지 않는다.
+    """
+    for task in (
+        s.readiness_self_healing_task,
+        s.stop_session_expiry_task,
+        s.audit_cleanup_task,
+        s.approval_expire_task,
+    ):
+        if task is not None and not task.done():
+            task.cancel()
+            await _best_effort(lambda task=task: asyncio.gather(task))
+    for scheduler in [*s.reconcile_schedulers.values(), *s.fill_schedulers.values()]:
+        await _best_effort(scheduler.stop)
+    if s.fill_outbox_publisher is not None:
+        await _best_effort(s.fill_outbox_publisher.stop)
+    if s.daily_report_scheduler is not None:
+        await _best_effort(s.daily_report_scheduler.stop)
+    if s.treasury_manager is not None:
+        for treasury in s.treasury_manager.list_all():
+            await _best_effort(treasury.stop_sync)
+    if s.stop_order_manager is not None:
+        await _best_effort(s.stop_order_manager.stop)
+    if s.ipc_server is not None:
+        await _best_effort(s.ipc_server.stop_accepting)
+        await _best_effort(lambda: s.ipc_server.drain_connections(timeout=1.0))
+        await _best_effort(s.ipc_server.unlink_socket)
+    if s.db is not None:
+        await _best_effort(s.db.close)
 
 
 @dataclass
@@ -379,7 +453,11 @@ async def _submit_live_buy(
 
 
 async def _apply_fill(
-    asm: _Assembly, submitted: OrderSubmittedEvent, cumulative: float
+    asm: _Assembly,
+    submitted: OrderSubmittedEvent,
+    cumulative: float,
+    *,
+    avg_price: float = 100.0,
 ) -> float:
     s = asm.s
     record = await s.order_tracker.get(submitted.order_id)
@@ -388,7 +466,7 @@ async def _apply_fill(
         account_id=submitted.account_id,
         broker_order_id=submitted.broker_order_id,
         observed_cumulative=cumulative,
-        avg_price=100.0,
+        avg_price=avg_price,
         submitted_date=record.submitted_date,
     )
 
@@ -435,7 +513,7 @@ async def test_fill_event_is_published_on_enqueue_without_waiting_for_drain(
     await _apply_fill(asm, submitted, 10.0)
     await _wait_for(lambda: bool(cap.of(OrderFilledEvent)), guard=5.0)
 
-    assert [e.order_id for e in cap.of(OrderFilledEvent)] == [submitted.order_id]
+    assert {e.order_id for e in cap.of(OrderFilledEvent)} == {submitted.order_id}
 
 
 async def test_partial_buy_fill_keeps_reservation_for_unfilled_quantity(
@@ -456,6 +534,21 @@ async def test_partial_buy_fill_keeps_reservation_for_unfilled_quantity(
     assert budget is not None
     assert budget.reserved == 600.0
     assert budget.spent == 400.0
+
+    # 나머지가 예약보다 싸게 체결돼 전량 체결(terminal)이 되면 남은 예약이 회수된다.
+    # 발행은 at-least-once 라 같은 체결이 두 번 올 수 있으므로 누적 10주 체결의
+    # 도착을 키로 기다린다.
+    await _apply_fill(asm, submitted, 10.0, avg_price=90.0)
+    await _wait_for(
+        lambda: any(
+            e.fill_dedup_key.endswith(":10.0") for e in cap.of(OrderFilledEvent)
+        ),
+        guard=5.0,
+    )
+    budget = treasury.get_budget("bot-1")
+    assert budget is not None
+    assert budget.reserved == 0.0
+    assert 400.0 < budget.spent < 1000.0
 
 
 async def test_ipc_bot_positions_reports_filled_position(
@@ -486,12 +579,51 @@ async def test_ipc_bot_positions_reports_filled_position(
 async def test_ipc_signal_connect_channel_is_closed_by_bot_manager(
     assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """IPC signal.connect 로 연 채널은 main 이 보관한 레지스트리에 있고,
-    BotManager 가 봇 중지 이벤트에서 그 채널을 닫는다."""
-    from ante.bot.config import BotStatus
-
+    """IPC signal.connect 로 연 채널은 main 이 보관한 레지스트리에 있고, 같은 봇의
+    두 번째 connect 는 거부되며, BotManager 가 봇 중지 이벤트에서 그 채널을 닫는다."""
     asm = await assemble([])
     s = asm.s
+    _running_signal_bot(asm, monkeypatch)
+
+    response = await _signal_connect(asm)
+    assert response["status"] == "ok", response
+    session_id = response["result"]["session_id"]
+    handle = s.signal_channel_registry.get("bot-1", session_id)
+    assert handle is not None
+    assert handle.closed is False
+    second = await _signal_connect(asm)
+    assert second["status"] == "error"
+    assert second["error"]["code"] == "BOT_SIGNAL_CHANNEL_BUSY"
+
+    await s.eventbus.publish(BotStoppedEvent(account_id="test", bot_id="bot-1"))
+
+    assert handle.closed is True
+    assert handle.close_reason == "bot_stopped"
+
+
+async def test_shutdown_sweeps_signal_channel_opened_over_ipc(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """종료 sweep 은 IPC 로 연 시그널 채널을 'draining' 으로 닫는다."""
+    asm = await assemble([])
+    _running_signal_bot(asm, monkeypatch)
+    response = await _signal_connect(asm)
+    assert response["status"] == "ok", response
+    handle = asm.s.signal_channel_registry.get(
+        "bot-1", response["result"]["session_id"]
+    )
+    assert handle is not None
+
+    await _shutdown_in_test(asm)
+
+    assert handle.closed is True
+    assert handle.close_reason == "draining"
+
+
+def _running_signal_bot(asm: _Assembly, monkeypatch: pytest.MonkeyPatch) -> None:
+    """외부 시그널을 받는 RUNNING 봇 하나를 BotManager 조회에 보이게 한다."""
+    from ante.bot.config import BotStatus
+
     bot = SimpleNamespace(
         status=BotStatus.RUNNING,
         strategy=SimpleNamespace(meta=SimpleNamespace(accepts_external_signals=True)),
@@ -501,14 +633,16 @@ async def test_ipc_signal_connect_channel_is_closed_by_bot_manager(
     async def _validate(key: str) -> str | None:
         return "bot-1" if key == "signal-key" else None
 
-    monkeypatch.setattr(s.bot_manager, "validate_signal_key", _validate)
+    monkeypatch.setattr(asm.s.bot_manager, "validate_signal_key", _validate)
     monkeypatch.setattr(
-        s.bot_manager,
+        asm.s.bot_manager,
         "get_bot",
         lambda bot_id: bot if bot_id == "bot-1" else None,
     )
 
-    response = await s.ipc_server._dispatch(
+
+async def _signal_connect(asm: _Assembly) -> dict[str, Any]:
+    response: dict[str, Any] = await asm.s.ipc_server._dispatch(
         {
             "id": "c1",
             "command": "signal.connect",
@@ -516,16 +650,7 @@ async def test_ipc_signal_connect_channel_is_closed_by_bot_manager(
             "actor": "agent",
         }
     )
-    assert response["status"] == "ok", response
-    session_id = response["result"]["session_id"]
-    handle = s.signal_channel_registry.get("bot-1", session_id)
-    assert handle is not None
-    assert handle.closed is False
-
-    await s.eventbus.publish(BotStoppedEvent(account_id="test", bot_id="bot-1"))
-
-    assert handle.closed is True
-    assert handle.close_reason == "bot_stopped"
+    return response
 
 
 async def test_stop_order_held_by_gateway_expires_in_session_expiry_loop(
@@ -616,23 +741,28 @@ async def test_market_buy_reserve_uses_price_of_own_account(
 async def test_init_core_places_relative_db_path_under_config_dir(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """상대 db.path 는 cwd 가 아니라 config_dir 기준으로 풀린다."""
+    """상대 db.path 는 cwd 가 아니라 config_dir 기준으로 풀려, cold-path CLI 가
+    보는 DB 와 같은 파일을 연다."""
+    import click
+
+    from ante.cli.main import cli, get_db_path
+
     monkeypatch.setattr(core_log_mod, "setup_logging", lambda config: None)
+    monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
     config_dir = tmp_path / "config"
     elsewhere = tmp_path / "cwd"
     config_dir.mkdir()
     elsewhere.mkdir()
+    (config_dir / "system.toml").write_text('[db]\npath = "var/ante.db"\n')
     monkeypatch.chdir(elsewhere)
-    s = main_module.Services(
-        config=Config(
-            static={"db": {"path": "db/ante.db"}}, secrets={}, config_dir=config_dir
-        )
-    )
+    s = main_module.Services(config=Config.load(config_dir=config_dir))
 
     await main_module._init_core(s)
     try:
-        assert (config_dir / "db" / "ante.db").exists()
-        assert not (elsewhere / "db").exists()
+        cli_db = get_db_path(click.Context(cli, obj={"config_dir": config_dir}))
+        assert cli_db == str(config_dir / "var" / "ante.db")
+        assert Path(cli_db).exists()
+        assert not (elsewhere / "var").exists()
     finally:
         assert s.db is not None
         await s.db.close()
@@ -667,15 +797,39 @@ async def test_init_core_reuses_config_loaded_by_main(
 async def test_ipc_server_listens_on_runtime_socket_path(
     assemble: AssembleFn,
 ) -> None:
-    """IPC 서버는 runtime.socket_path 에서 요청을 받는다."""
-    asm = await assemble([])
-    socket_path = asm.s.config.runtime_socket_path()
-    assert socket_path == asm.config_dir / "run" / "ante.sock"
+    """IPC 서버는 기본값 ``<config_dir>/run/ante.sock`` 에서 요청을 받고, CLI 의
+    소켓 resolver 도 같은 경로를 낸다."""
+    from ante.cli.commands.ipc_helpers import get_socket_path
 
-    client = IPCClient(str(socket_path), timeout=5.0)
+    asm = await assemble([])
+    socket_path = get_socket_path(asm.config_dir)
+    assert socket_path == str(asm.config_dir / "run" / "ante.sock")
+
+    client = IPCClient(socket_path, timeout=5.0)
     response = await client.send("bot.positions", {"bot_id": "missing"})
 
     assert response["status"] == "error"
+    assert response["error"]["code"] == "BOT_NOT_FOUND"
+
+
+async def test_ipc_server_listens_on_overridden_socket_path(
+    assemble: AssembleFn,
+) -> None:
+    """``[runtime] socket_path`` override 가 있으면 IPC 서버는 그 경로에서 요청을
+    받고, CLI 의 소켓 resolver 도 같은 경로를 낸다."""
+    from ante.cli.commands.ipc_helpers import get_socket_path
+
+    asm = await assemble([], static={"runtime": {"socket_path": "sock/alt.sock"}})
+    (asm.config_dir / "system.toml").write_text(
+        '[runtime]\nsocket_path = "sock/alt.sock"\n'
+    )
+    socket_path = get_socket_path(asm.config_dir)
+    assert socket_path == str(asm.config_dir / "sock" / "alt.sock")
+    assert not (asm.config_dir / "run" / "ante.sock").exists()
+
+    client = IPCClient(socket_path, timeout=5.0)
+    response = await client.send("bot.positions", {"bot_id": "missing"})
+
     assert response["error"]["code"] == "BOT_NOT_FOUND"
 
 
@@ -732,12 +886,15 @@ async def test_global_fill_skip_marks_exempt_ready_and_live_not_ready(
 async def test_outbox_rows_left_unpublished_are_redelivered_without_broker(
     assemble: AssembleFn,
 ) -> None:
-    """연결된 broker 가 없어도 기동 시 미발행 outbox 행이 재전달된다."""
+    """연결된 broker 가 없어도 기동 시 미발행 outbox 행이 재전달되고, 이미 구독된
+    시스템 소비자(TradeRecorder 의 체결 알림)가 그 이벤트를 받는다."""
     seen: list[OrderFilledEvent] = []
+    notes: list[NotificationEvent] = []
 
     async def _seed(asm: _Assembly) -> None:
         assert asm.s.eventbus is not None
         asm.s.eventbus.subscribe(OrderFilledEvent, seen.append, priority=-1000)
+        asm.s.eventbus.subscribe(NotificationEvent, notes.append, priority=-1000)
         await asm.s.fill_outbox.enqueue(
             fill_dedup_key="seed-order:1.0",
             payload={
@@ -756,6 +913,9 @@ async def test_outbox_rows_left_unpublished_are_redelivered_without_broker(
     await assemble([], before_gateway=_seed)
 
     assert [e.order_id for e in seen] == ["seed-order"]
+    fill_notes = [n for n in notes if n.category == "trade"]
+    assert [n.title for n in fill_notes] == ["체결 완료 (매수)"]
+    assert "bot-1" in fill_notes[0].message
 
 
 async def test_outbox_publisher_redelivers_before_starting_drain_loop(
@@ -820,14 +980,15 @@ async def test_self_healing_starts_after_every_startup_init_step(
     asm = await assemble([_kis_account("live-a")])
 
     assert asm.s.readiness_self_healing_task is not None
-    startup = order[: order.index("_start_readiness_self_healing") + 1]
-    assert startup == [
+    assert "_start_readiness_self_healing" in order, order
+    started_at = order.index("_start_readiness_self_healing")
+    for step in (
         "_init_treasury_sync",
         "_init_fill_recovery_schedulers",
         "_init_fill_outbox_publisher",
         "_init_reconcile_scheduler",
-        "_start_readiness_self_healing",
-    ]
+    ):
+        assert step in order[:started_at], (step, order)
 
 
 async def test_account_down_at_startup_recovers_after_broker_returns(
@@ -848,44 +1009,62 @@ async def test_account_down_at_startup_recovers_after_broker_returns(
     )
     readiness = asm.s.runtime_readiness
     assert not readiness.is_ready("live-a", ReadinessFlag.BROKER)
-    connects_while_down = asm.brokers["live-a"].connects
+    down = asm.brokers["live-a"]
+    connects_at_startup = down.connects
+    # 내려가 있는 동안 루프가 다시 연결을 시도한다.
+    await _wait_for(lambda: down.connects > connects_at_startup)
+    assert not readiness.is_ready("live-a", ReadinessFlag.BROKER)
 
-    asm.brokers["live-a"].connect_error = None
+    down.connect_error = None
     await _wait_for(
         lambda: readiness.active_trading_ready(
             "live-a", broker_type="kis-domestic", trading_mode=TradingMode.LIVE
         )
     )
 
-    assert connects_while_down > 0
     assert readiness.is_ready("live-a", ReadinessFlag.BROKER)
 
 
-async def test_reconcile_disabled_still_lets_live_order_through(
-    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+async def test_reconcile_disabled_lets_orders_through_on_every_account(
+    assemble: AssembleFn,
 ) -> None:
-    """reconcile.enabled=false 면 기동이 끝난 시점부터 대사 미기동이 주문 게이트를
-    막지 않는다.
+    """reconcile.enabled=false 면 기동이 전 계좌의 reconcile 요구를 면제해, 기동이
+    끝난 시점부터 모든 LIVE 계좌의 주문이 게이트를 지난다.
 
-    self-healing 도 not_ready 인 reconcile 을 같은 이유로 ready 로 바꾼다. 기동의
-    표시만 보도록 self-healing 루프는 아무것도 하지 않는 루프로 둔다.
+    self-healing 도 not_ready 인 reconcile 을 ready 로 바꾸지만, 앞 계좌(live-a)가
+    내려가 있고 backoff 가 1시간이면 루프는 그 계좌에서 기다린다. 그 동안 뒤 계좌
+    (live-b, live-c)의 주문은 기동의 표시로만 통과한다.
     """
-    healing_started: list[bool] = []
-
-    async def _idle_loop(s: Any, targets: list[Any]) -> None:
-        healing_started.append(True)
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(main_module, "_readiness_self_healing_loop", _idle_loop)
     asm = await assemble(
-        [_kis_account("live-a")], static={"reconcile": {"enabled": False}}
+        [_kis_account("live-a"), _kis_account("live-b"), _kis_account("live-c")],
+        static={
+            "reconcile": {"enabled": False},
+            "readiness": {
+                "self_healing_interval_seconds": 3600,
+                "self_healing_backoff_base_seconds": 3600,
+                "self_healing_backoff_max_seconds": 3600,
+            },
+        },
+        connect_errors={"live-a": RuntimeError("connect refused")},
     )
+    assert [a.account_id for a in await asm.s.account_service.list()] == [
+        "live-a",
+        "live-b",
+        "live-c",
+    ]
+    # 기동의 connect 1회 뒤 self-healing 이 live-a 를 한 번 더 시도하고 backoff 에
+    # 들어갈 때까지 기다린다.
+    down = asm.brokers["live-a"]
+    await _wait_for(lambda: down.connects >= 2)
 
     assert asm.reconcile_runs == []
-    await _wait_for(lambda: bool(healing_started), guard=5.0)
-    submitted = await _submit_live_buy(asm, "live-a")
-
-    assert submitted.account_id == "live-a"
+    # 내려간 계좌(live-a)도 reconcile 요구는 면제된다(그 계좌 주문은 broker 로 막힌다).
+    readiness = asm.s.runtime_readiness
+    assert readiness.is_ready("live-a", ReadinessFlag.RECONCILE)
+    assert not readiness.is_ready("live-a", ReadinessFlag.BROKER)
+    for account_id in ("live-b", "live-c"):
+        submitted = await _submit_live_buy(asm, account_id)
+        assert submitted.account_id == account_id
 
 
 # ── _shutdown 의 정리 순서 ────────────────────────────────────────────────────
@@ -912,8 +1091,7 @@ async def test_shutdown_stops_stop_order_manager_between_ipc_gate_and_bots(
     _track(s.stop_order_manager, "stop")
     _track(s.bot_manager, "stop_all")
 
-    asm.shut_down = True
-    await main_module._shutdown(s)
+    await _shutdown_in_test(asm)
 
     assert order == ["stop_accepting", "stop", "stop_all"]
 
@@ -940,8 +1118,59 @@ async def test_shutdown_disconnects_only_already_connected_brokers(
     down.connect_error = None
     connects_before = down.connects
 
-    asm.shut_down = True
-    await main_module._shutdown(asm.s)
+    await _shutdown_in_test(asm)
 
     assert connected[0].disconnected is True
     assert down.connects == connects_before
+
+
+async def test_shutdown_stops_fill_outbox_publisher(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """종료는 FillOutboxPublisher 를 멈춘다(graceful stop 을 shutdown 이 맡는다)."""
+    asm = await assemble([])
+    s = asm.s
+    stops: list[bool] = []
+    real_stop = s.fill_outbox_publisher.stop
+
+    async def _stop() -> None:
+        stops.append(True)
+        await real_stop()
+
+    monkeypatch.setattr(s.fill_outbox_publisher, "stop", _stop)
+
+    await _shutdown_in_test(asm)
+
+    assert stops == [True]
+
+
+async def test_ipc_bot_status_enriches_positions(
+    assemble: AssembleFn, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """IPC bot.status 는 trade_service 로 봇 포지션을 보강한다."""
+    asm = await assemble([_kis_account("live-a")])
+    submitted = await _submit_live_buy(asm, "live-a")
+    cap = _capture(asm.s, OrderFilledEvent)
+    await _apply_fill(asm, submitted, 10.0)
+    await _wait_for(lambda: bool(cap.of(OrderFilledEvent)), guard=5.0)
+    bot = SimpleNamespace(
+        bot_id="bot-1",
+        config=SimpleNamespace(account_id="live-a"),
+        get_info=lambda: {
+            "bot_id": "bot-1",
+            "strategy_id": "strategy-1",
+            "account_id": "live-a",
+        },
+    )
+    monkeypatch.setattr(
+        asm.s.bot_manager,
+        "get_bot",
+        lambda bot_id: bot if bot_id == "bot-1" else None,
+    )
+
+    client = IPCClient(str(asm.s.config.runtime_socket_path()), timeout=5.0)
+    response = await client.send("bot.status", {"bot_id": "bot-1"})
+
+    assert response["status"] == "ok", response
+    positions = response["result"]["bot"]["positions"]
+    assert [(p["symbol"], p["quantity"]) for p in positions] == [("005930", 10.0)]
