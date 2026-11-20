@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 class BrokerAdapter(ABC):
     """증권사 API 어댑터 추상 기본 클래스."""
 
-    # 서브클래스에서 오버라이드하는 브로커 메타정보
     broker_id: str = "unknown"
     broker_name: str = "Unknown Broker"
     broker_short_name: str = "UNK"
@@ -167,8 +166,6 @@ class BrokerAdapter(ABC):
         """미체결 주문 목록 조회."""
         ...
 
-    # ── 대사(Reconciliation)용 조회 ────────────────────
-
     @abstractmethod
     async def get_account_positions(self) -> list[dict[str, Any]]:
         """증권사 실제 보유 잔고 조회 (대사용).
@@ -193,8 +190,6 @@ class BrokerAdapter(ABC):
         """
         ...
 
-    # ── 종목 마스터 ────────────────────────────────────
-
     @abstractmethod
     async def get_instruments(self, exchange: str = "KRX") -> list[dict[str, Any]]:
         """종목 마스터 데이터 조회.
@@ -205,14 +200,10 @@ class BrokerAdapter(ABC):
         """
         ...
 
-    # ── 수수료 ────────────────────────────────────────
-
     @abstractmethod
     def get_commission_info(self) -> CommissionInfo:
         """증권사별 수수료율 정보 반환."""
         ...
-
-    # ── 헬퍼 메서드 ─────────────────────────────────
 
     def normalize_symbol(self, symbol: str) -> str:
         """종목코드 표준화 (예: '5930' → '005930')."""

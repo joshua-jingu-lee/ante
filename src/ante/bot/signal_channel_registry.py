@@ -84,22 +84,15 @@ class ChannelHandle:
         self.closed = True
         self.close_reason = reason
 
-        # channel 의 _closed/_accepting set (stale-publish layer2 + admit-gate).
-        # on_closed 는 await-free 동기 콜백(channel.mark_closed) 이다.
         if self.on_closed is not None:
             self.on_closed()
 
         out_queue = self.out_queue
         if out_queue is not None:
-            # adopted: closed frame 을 force-slot 으로 넣는다. QueueFull 이면
-            # 가장 오래된 1개를 drop 하고 재시도 — teardown frame 은 반드시
-            # 전달되어야 한다(INV-OUT-8 teardown frame 보장).
             self._force_enqueue(out_queue, {"type": "closed", "reason": reason})
             if self.closing_event is not None:
-                # stream supervisor 의 async teardown 을 깨운다.
                 self.closing_event.set()
         else:
-            # placeholder: reason 만 래치 → adopt 가 감지해 self-close.
             self._pending_close_reason = reason
         return True
 
@@ -117,11 +110,8 @@ class ChannelHandle:
             try:
                 queue.put_nowait(frame)
             except asyncio.QueueFull:
-                # 동시 producer 와의 극단 race — best-effort 로 포기(다음
-                # supervisor tick 이 closing_event 로 teardown 을 진행한다).
                 logger.warning("closed frame force-slot 실패: bot=%s", self.bot_id)
 
-    # close_all join 이 supervisor 의 flush-before-cancel 를 양보하는 grace.
     JOIN_GRACE_SECONDS = 3.0
 
     async def join(self) -> None:
@@ -140,7 +130,6 @@ class ChannelHandle:
         tasks = [t for t in (self.read_task, self.writer_task) if t is not None]
         if not tasks:
             return
-        # supervisor 의 flush-before-cancel 를 grace 동안 양보.
         try:
             await asyncio.wait_for(
                 asyncio.shield(asyncio.gather(*tasks, return_exceptions=True)),
@@ -149,7 +138,6 @@ class ChannelHandle:
             return
         except TimeoutError:
             pass
-        # grace 초과 — 직접 cancel 후 await(deadlock 회피).
         for task in tasks:
             if not task.done():
                 task.cancel()
@@ -175,8 +163,6 @@ class SignalChannelRegistry:
         self._generations: dict[str, int] = {}
         self._frozen = False
 
-    # ── 단일-connect atomic 게이트 (await 금지) ──────────────────────────
-
     def register(self, handle: ChannelHandle) -> None:
         """핸들을 atomic check-and-insert 로 등록한다.
 
@@ -191,7 +177,6 @@ class SignalChannelRegistry:
             )
         bot_sessions = self._sessions.get(handle.bot_id)
         if bot_sessions:
-            # 이미 active session 존재 → 단일-connect 거부.
             raise BotSignalChannelBusy()
         self._sessions[handle.bot_id] = {handle.session_id: handle}
 
@@ -220,8 +205,6 @@ class SignalChannelRegistry:
         if not bot_sessions:
             self._sessions.pop(bot_id, None)
 
-    # ── generation (rotate-in-window 감지) ───────────────────────────────
-
     def current_generation(self, bot_id: str) -> int:
         """현재 generation. register 가 스냅샷하고 adopt 가 re-check 한다."""
         return self._generations.get(bot_id, 0)
@@ -229,8 +212,6 @@ class SignalChannelRegistry:
     def bump_generation(self, bot_id: str) -> None:
         """generation 을 1 증가 — rotate teardown 이 adopt-time self-close 유도."""
         self._generations[bot_id] = self._generations.get(bot_id, 0) + 1
-
-    # ── teardown (snapshot 순회·idempotent·unregister 안 함) ──────────────
 
     def close_bot(self, bot_id: str, reason: str) -> int:
         """봇의 모든 active session 을 닫는다. 닫은(first-close) 개수 반환.

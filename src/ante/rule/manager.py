@@ -40,20 +40,10 @@ class RuleEngineManager:
         self._account_service = account_service
         self._treasury_manager = treasury_manager
         self._trade_service = trade_service
-        # #2045: 생성하는 RuleEngine에 주입할 권위 주문 메타 소스. optional
-        # default None — 기존 호출자/테스트 무회귀. None이면 RuleEngine은 modify
-        # event의 symbol/side를 보강하지 않고 "" graceful degrade한다.
         self._order_tracker = order_tracker
-        # #2315: 미복구 self-order 반복 매수 가드 설정을 생성하는 모든 RuleEngine에
-        # 전파한다. 봇/전략 단위 opt-out은 RuleEngine.set_unrecovered_buy_overlap
-        # 로 별도 등록한다.
         self._unrecovered_buy_guard_min_age = unrecovered_buy_guard_min_age
         self._allow_unrecovered_buy_overlap = allow_unrecovered_buy_overlap
-        # #2377: 생성하는 모든 RuleEngine 에 Rule violation 알림 종목명 병기
-        # 소스를 pass-through 한다. None 이면 종목코드만 표기(하위 호환).
         self._instrument_service = instrument_service
-        # #2398 D-ACC-09 축 ii: 생성하는 모든 RuleEngine 에 계층1 gate reader 를
-        # pass-through 한다. None 이면 fail-closed(gate 가 차단). main 경유.
         self._runtime_readiness = runtime_readiness
         self._engines: dict[str, RuleEngine] = {}
 
@@ -151,8 +141,6 @@ class RuleEngineManager:
             key = f"accounts.{account.account_id}.rules"
             stored_rules: list[dict[str, Any]] | None = None
 
-            # 1순위: DynamicConfig (런타임 override). API PUT으로 저장된 명시
-            # 비활성화가 재시작 후에도 살아 있도록 static보다 먼저 본다 (#1296).
             if dynamic_config is not None:
                 try:
                     dyn_rules = await dynamic_config.get(key, default=None)
@@ -161,18 +149,13 @@ class RuleEngineManager:
                 if isinstance(dyn_rules, list):
                     stored_rules = dyn_rules
 
-            # 2순위: 정적 config fallback.
             if stored_rules is None and config is not None and hasattr(config, "get"):
                 account_rules = config.get(key, None)
                 if isinstance(account_rules, list):
                     stored_rules = account_rules
 
-            # broker_type별 default + stored override를 merge하여 effective rules 산출.
-            # KIS domestic 계좌는 stored가 비어 있어도 ``trading_hours`` default가
-            # 자동 주입된다 (스펙 09-rule-management.md L43, #1296 회귀).
             rule_configs = resolve_effective_rules(account, stored_rules)
 
-            # account snapshot을 함께 전달하여 reload 경로에서도 default merge 유지.
             self.create_engine(account.account_id, rule_configs, account=account)
 
         logger.info("RuleEngineManager 초기화 완료: %d개 계좌", len(self._engines))

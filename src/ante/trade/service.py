@@ -35,8 +35,6 @@ class TradeService:
         self._position_history = position_history
         self._performance = performance
 
-    # ── 거래 기록 조회 ────────────────────────────────
-
     async def get_trades(
         self,
         account_id: str | None = None,
@@ -61,8 +59,6 @@ class TradeService:
             limit=limit,
             offset=offset,
         )
-
-    # ── 포지션 조회 ──────────────────────────────────
 
     async def get_positions(
         self,
@@ -98,8 +94,6 @@ class TradeService:
             account_id=account_id,
         )
 
-    # ── 성과 지표 ────────────────────────────────────
-
     async def get_performance(
         self,
         account_id: str,
@@ -117,8 +111,6 @@ class TradeService:
             to_date=to_date,
         )
 
-    # ── 요약 ──────────────────────────────────────
-
     async def get_summary(self, bot_id: str, account_id: str) -> dict:
         """봇 요약 정보."""
         positions = await self.get_positions(bot_id, account_id=account_id)
@@ -132,8 +124,6 @@ class TradeService:
             "performance": performance,
             "recent_trades": recent_trades,
         }
-
-    # ── 대사(Reconciliation) 보정 ────────────────────
 
     async def correct_position(
         self,

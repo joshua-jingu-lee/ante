@@ -71,14 +71,7 @@ class StrategyContextFactory:
         self._position_history = position_history
         self._api_gateway = api_gateway
         self._parquet_store = parquet_store
-        # #1948: 주입되면 봇별 LiveOrderView 를 account_id closure 로 생성해
-        # OrderTracker sync 캐시에서 미체결을 조회한다. 미주입(virtual-only/legacy)
-        # 이면 공유 fallback ``live_order_view`` (없으면 빈 결과 stub)를 쓴다.
         self._order_tracker = order_tracker
-        # #2139: 주입되면 봇별 LiveTradeHistoryView 를 account_id closure 로 생성해
-        # TradeRecorder 조회를 봇 계좌 스코프로 좁힌다(LiveOrderView 패턴 미러).
-        # 미주입(virtual-only/legacy/test)이면 공유 fallback
-        # ``live_trade_history`` 를 그대로 쓴다.
         self._trade_recorder = trade_recorder
 
     def create(self, config: BotConfig) -> StrategyContext:
@@ -214,7 +207,6 @@ class StrategyContextFactory:
         )
         virtual_order_view = VirtualOrderView(portfolio=virtual_portfolio)
 
-        # VirtualExecutor에 봇 등록
         if self._virtual_executor:
             self._virtual_executor.register_bot(config.bot_id, virtual_portfolio)
 

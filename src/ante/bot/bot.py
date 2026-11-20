@@ -46,12 +46,6 @@ class Bot:
         self._strategy_cls = strategy_cls
         self._ctx = ctx
         self._eventbus = eventbus
-        # #2337 F3: on_step()+drain span 과 on_external_signal span 을 직렬화하는
-        # per-bot lock. ``BotManager.create_bot`` 이 stable bot_id 키로 주입하고,
-        # 직접 생성 테스트(~10곳)는 ``None`` → 자체 ``asyncio.Lock`` 으로 폴백한다
-        # (백워드 호환). non-reentrant 이므로 lock 보유 중 cross-publish 가 동일
-        # bot ``ExternalSignalEvent`` 를 재발행하면 deadlock — 아래 두 span 의
-        # 감사 주석으로 불변을 명시 lock 한다.
         self._signal_lock = signal_lock or asyncio.Lock()
 
         self.status = BotStatus.CREATED
@@ -62,9 +56,6 @@ class Bot:
         self.error_message: str | None = None
         self._consecutive_failures: int = 0
         self._max_consecutive_failures: int = 3
-        # #1957: 체결 이벤트 bounded 멱등 가드. outbox at-least-once 재전달 시
-        # 같은 fill 의 전략 follow-up 중복 발행을 억제한다(best-effort —
-        # 재기동/maxlen 초과는 known-limitation).
         self._fill_dedup_guard = FillDedupGuard()
 
     async def start(self) -> None:
@@ -117,28 +108,10 @@ class Bot:
         """메인 실행 루프."""
         from ante.eventbus.events import BotErrorEvent, BotStepCompletedEvent
 
-        # 이전 반복의 stale step_start 가 후속 error emit 에 새지 않도록
-        # 매 while 반복 시작에서 None 으로 재설정한다.
-        #
-        # #2337 F3 직렬화: on_step 호출부터 drain/publish_actions/BotStepCompleted
-        # 까지 전 span 을 ``self._signal_lock`` 으로 감싼다. 같은 lock 이
-        # ``on_external_signal`` span 도 감싸 ``_ctx._pending_actions`` 인터리브를
-        # 차단한다. **interval sleep 은 lock 밖**(starvation 회피) — timeout/
-        # overflow 분기의 continue 도 ``should_sleep`` 플래그를 set 하고 ``async
-        # with`` 를 탈출한 뒤 sleep+continue 한다(lock 보유 중 sleep 금지).
-        #
-        # **non-reentrancy 감사(asyncio.Lock non-reentrant)**: lock 보유 중
-        # publish 되는 ``OrderRequestEvent``/``OrderCancelEvent``/
-        # ``OrderModifyEvent``/``BotStepCompletedEvent``/``BotErrorEvent`` 의
-        # 핸들러가 동일 bot ``ExternalSignalEvent`` 를 재발행하지 않는다(재발행
-        # 시 deadlock). ``ExternalSignalEvent`` 는 오직 IPC ``_handle_signal``
-        # 에서만 publish(grep invariant). ``_on_fill``/``_on_order_update`` 는
-        # ``_signal_lock`` 미취득(put_nowait 만).
         step_start: float | None = None
         try:
             while self.status == BotStatus.RUNNING:
                 step_start = None
-                # continue/return 제어를 lock 밖으로 hoist 하기 위한 플래그.
                 should_sleep = False
                 should_return = False
                 step_context = {
@@ -148,20 +121,14 @@ class Bot:
                 }
 
                 async with self._signal_lock:
-                    # on_step 타임아웃 적용
                     try:
                         step_start = monotonic()
                         signals = await asyncio.wait_for(
                             self.strategy.on_step(step_context),  # type: ignore[union-attr]
                             timeout=self.config.step_timeout_seconds,
                         )
-                        # wait_for 정상 반환 직후 1 회 계산 — 시그널/action 발행
-                        # 시간을 제외한 on_step 순수 실행 시간. success 와
-                        # signal_overflow 발행에 공통 사용한다.
                         step_duration_ms = int((monotonic() - step_start) * 1000)
                     except TimeoutError:
-                        # step_start 는 wait_for 직전에 set 되므로 timeout 진입
-                        # 시점엔 항상 float (assert 로 narrow — mypy guard).
                         assert step_start is not None
                         timeout_duration_ms = int((monotonic() - step_start) * 1000)
                         self._consecutive_failures += 1
@@ -207,7 +174,6 @@ class Bot:
                         else:
                             should_sleep = True
                     else:
-                        # Signal 수 상한 검증
                         max_signals = self.config.max_signals_per_step
                         if len(signals) > max_signals:
                             self._consecutive_failures += 1
@@ -252,7 +218,6 @@ class Bot:
                             else:
                                 should_sleep = True
                         else:
-                            # 정상 실행 — 카운터 리셋
                             self._consecutive_failures = 0
 
                             await self._publish_signals(signals)
@@ -272,7 +237,6 @@ class Bot:
                             )
                             should_sleep = True
 
-                # lock 밖 — interval sleep(starvation 회피) + 제어 흐름.
                 if should_return:
                     return
                 if should_sleep:
@@ -324,7 +288,6 @@ class Bot:
         if not self.strategy or event.bot_id != self.bot_id:
             return
 
-        # 비빈키만 dedup. seen_or_add 는 await 없는 동기 원자 구간(#1957).
         if event.fill_dedup_key and self._fill_dedup_guard.seen_or_add(
             event.fill_dedup_key
         ):
@@ -403,9 +366,6 @@ class Bot:
                 "reason": event.error_message,
             }
         elif isinstance(event, OrderModifyExecutedEvent):
-            # 정정 완료 (#2391, v1=price-only) 통보를 전략에 전달. status 는
-            # 신규 키 ``"modified"`` 로 분리한다. quantity 는 원주문 수량 유지
-            # (price-only), 신규 가격은 전략이 ``get_open_orders`` 등으로 재조회.
             update = {
                 "order_id": event.order_id,
                 "status": "modified",
@@ -415,9 +375,6 @@ class Bot:
                 "reason": event.reason,
             }
         elif isinstance(event, OrderModifyRejectedEvent):
-            # 정정 거부 (rule reject / rule exception / gateway fail-closed)
-            # 통보를 전략에 전달. status 는 신규 키 ``"modify_rejected"`` 로
-            # 분리하여 기존 ``"rejected"`` (신규 주문 거부) 와 충돌하지 않도록 한다.
             update = {
                 "order_id": event.order_id,
                 "status": "modify_rejected",
@@ -426,10 +383,6 @@ class Bot:
                 "reason": event.reason,
             }
         elif isinstance(event, StopOrderRegisteredEvent):
-            # stop / stop_limit 주문 등록 통보. 기존 ``order_id`` 키와의
-            # 호환을 위해 ``stop_order_id`` 를 그대로 ``order_id`` 에도
-            # 채운다 (전략이 후속 ``cancel/modify`` 에 그대로 사용 가능).
-            # ``stop_order_id`` 키는 명시 식별자로 별도 노출.
             update = {
                 "order_id": event.stop_order_id,
                 "stop_order_id": event.stop_order_id,
@@ -441,9 +394,6 @@ class Bot:
                 "limit_price": event.limit_price,
             }
         elif isinstance(event, StopOrderTriggeredEvent):
-            # stop 트리거 통보. 변환된 일반 주문은 자체
-            # ``OrderSubmittedEvent`` 로 별도 통보되며, 본 dict 는 stop
-            # 식별 단위 (stop_order_id, trigger_price) 를 보존한다.
             update = {
                 "order_id": event.stop_order_id,
                 "stop_order_id": event.stop_order_id,
@@ -455,10 +405,6 @@ class Bot:
                 "converted_order_type": event.converted_order_type,
             }
         elif isinstance(event, StopOrderExpiredEvent):
-            # stop 만료 통보. ``reason`` 은 ``"session_ended"`` |
-            # ``"manager_stopped"``. ``StopOrderExpiredEvent`` 자체에
-            # side/quantity/stop_price 가 없으므로 dict 도 누락한 채
-            # 노출한다.
             update = {
                 "order_id": event.stop_order_id,
                 "stop_order_id": event.stop_order_id,
@@ -503,9 +449,6 @@ class Bot:
             )
             return
 
-        # 상태 재검증(#2333/#2337): 핸드셰이크와 시그널 도착 사이에 봇이
-        # RUNNING 을 벗어났으면(STOPPING/STOPPED/ERROR) on_data 를 발화하지
-        # 않는다 — 종료 중 전략에 시그널이 새는 경로 차단.
         if self.status != BotStatus.RUNNING:
             logger.warning(
                 "외부 시그널 거부: 봇 %s 상태 %s (RUNNING 아님)",
@@ -555,10 +498,6 @@ class Bot:
 
         for action in actions:
             if action.action == "cancel":
-                # ``strategy_id`` 보강 — 룰 평가/리포팅/외부 채널이 strategy
-                # 단위로 식별할 수 있도록 한다. symbol/side 는 ``OrderAction``
-                # 입력에 없고 ``OrderView`` 가 보장하지 않으므로 본 이벤트에는
-                # 포함하지 않는다.
                 await self._eventbus.publish(
                     OrderCancelEvent(
                         bot_id=self.bot_id,
@@ -569,7 +508,6 @@ class Bot:
                     )
                 )
             elif action.action == "modify":
-                # ``strategy_id`` 보강. 동일 사유.
                 await self._eventbus.publish(
                     OrderModifyEvent(
                         bot_id=self.bot_id,

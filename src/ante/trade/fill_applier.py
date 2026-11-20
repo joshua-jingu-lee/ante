@@ -61,10 +61,6 @@ class FillApplier:
         self._tracker = order_tracker
         self._position_history = position_history
         self._eventbus = eventbus
-        # #1949: outbox 가 주입되면 체결 적용 txn 안에서 이벤트 payload 를 함께
-        # 커밋하고(durability), publisher 워커가 commit↔publish crash window 밖에서
-        # at-least-once 로 발행한다. 미주입(legacy/단위 테스트 partial wiring)이면
-        # 기존처럼 commit 직후 직접 발행(crash window 잔존 — 본 이슈 이전 동작).
         self._outbox = outbox
         self._publisher = publisher
         self._lock = asyncio.Lock()
@@ -95,8 +91,6 @@ class FillApplier:
                 validated, broker_order_id, submitted_date
             )
             if order_id is None:
-                # 추적되지 않는 주문 — self/external 경계. 진짜 외부 포지션은
-                # reconciler 영역. 멱등하게 무시한다.
                 logger.debug(
                     "추적되지 않는 체결 무시: account=%s odno=%s date=%s",
                     validated,
@@ -216,15 +210,12 @@ class FillApplier:
                 timestamp=datetime.now(UTC),
                 order_id=order_id,
                 account_id=account_id,
-                # #2487: 주문 거래소는 tracker record 가 단일 소스다. v007 이전
-                # legacy row(exchange NULL)는 "KRX" 폴백 — 종전 관측값과 동일.
                 exchange=record.exchange or "KRX",
             )
             await self._save_trade(trade)
             await self._position_history.on_trade(trade)
 
             if self._outbox is not None:
-                # 결정적 키는 CAS RETURNING 확정 누적값으로 산출(입력값 아님).
                 fill_dedup_key = make_fill_dedup_key(
                     order_id, result.confirmed_cumulative
                 )
@@ -235,18 +226,12 @@ class FillApplier:
                     fill_dedup_key=fill_dedup_key, payload=payload
                 )
 
-        # commit 성공 (rollback 시 이 지점 미도달). #1948: LIVE get_open_orders 의
-        # sync open 캐시를 CAS 확정값(confirmed_cumulative)/확정 status 로 미러링.
-        # delta>0 경로만 도달하므로 항상 유효한 advance 다.
         self._tracker.mirror_fill_to_cache(
             order_id, result.confirmed_cumulative, result.new_status
         )
 
-        # outbox 경유면 워커가 발행(crash window 닫힘), 미주입이면
-        # 기존처럼 commit 직후 직접 발행한다.
         if self._outbox is not None:
             if self._publisher is not None:
-                # enqueue 직후 즉시 드레인 트리거. 누락돼도 워커 주기 백스톱.
                 self._publisher.notify()
         else:
             await self._publish_filled(record, order_id, delta, avg_price)
@@ -324,7 +309,6 @@ class FillApplier:
             "price": avg_price,
             "order_type": record.order_type,
             "fill_dedup_key": fill_dedup_key,
-            # #2487: legacy tracker row(exchange NULL)는 "KRX" 폴백.
             "exchange": record.exchange or "KRX",
         }
 
@@ -357,7 +341,6 @@ class FillApplier:
                 quantity=delta,
                 price=avg_price,
                 order_type=record.order_type,
-                # #2487: legacy tracker row(exchange NULL)는 "KRX" 폴백.
                 exchange=record.exchange or "KRX",
             )
         )

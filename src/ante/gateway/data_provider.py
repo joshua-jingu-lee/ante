@@ -15,7 +15,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# OHLCV DataFrame 표준 컬럼 (DataProvider 프로토콜)
 _OHLCV_COLUMNS = ("timestamp", "open", "high", "low", "close", "volume")
 
 

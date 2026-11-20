@@ -31,10 +31,9 @@ def _is_finite_numeric(value: Any) -> bool:
 class DailyLossLimitRule(Rule):
     """일일 손실 한도 초과 시 계좌 중지."""
 
-    # 키 이름 → 상한값 매핑 (비율 0~1 vs 퍼센트 0~100)
     _PARAM_LIMITS: dict[str, float] = {
-        "max_daily_loss_percent": 1,  # 0.0 ~ 1.0 (비율)
-        "max_loss_pct": 100,  # 0.0 ~ 100.0 (퍼센트)
+        "max_daily_loss_percent": 1,
+        "max_loss_pct": 100,
     }
 
     @classmethod
@@ -58,7 +57,6 @@ class DailyLossLimitRule(Rule):
             daily_loss_percent = abs(context.daily_pnl) / context.prev_day_total_asset
 
             if daily_loss_percent > max_daily_loss:
-                # 매도(손절)는 항상 허용 — 포지션 정리를 차단하면 안 됨
                 if context.side == "sell":
                     return RuleEvaluation(
                         rule_id=self.rule_id,
@@ -128,7 +126,6 @@ class TotalExposureLimitRule(Rule):
         return errors
 
     def evaluate(self, context: RuleContext) -> RuleEvaluation:
-        # 매도(손절)는 항상 허용 — 포지션 정리를 차단하면 안 됨
         if context.side == "sell":
             return RuleEvaluation(
                 rule_id=self.rule_id,
@@ -215,7 +212,6 @@ class TradingHoursRule(Rule):
         from datetime import datetime, time
         from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-        # context 필드가 기본값이 아니면 context 우선, 그렇지 않으면 config fallback
         _default_start, _default_end = "09:00", "15:30"
         context_overridden = (
             context.trading_hours_start != _default_start
@@ -226,7 +222,6 @@ class TradingHoursRule(Rule):
             start_str = context.trading_hours_start
             end_str = context.trading_hours_end
         else:
-            # 하위 호환: config의 allowed_hours 파싱
             allowed_hours_cfg = self.config.get("allowed_hours", "")
             if allowed_hours_cfg:
                 parts = allowed_hours_cfg.split("-")
@@ -238,16 +233,8 @@ class TradingHoursRule(Rule):
 
         timezone_str = context.timezone or self.config.get("timezone", "Asia/Seoul")
 
-        # 테스트 주입 또는 실제 시각
         now = context.metadata.get("current_time")
         if now is None:
-            # #1475: legacy invalid IANA timezone (e.g. `_load_persisted_timezone`
-            # tolerant load) 가 runtime 경로에 도달하면 ``ZoneInfo``는
-            # ``ZoneInfoNotFoundError`` 또는 (path-escape 형식 등에서) ``ValueError``
-            # 를 raise한다. 이를 RuleEngine까지 전파시키지 않고 명시적인 reject로
-            # graceful하게 처리한다. 일반 ``Exception`` catch는 silent fault swallow
-            # 위험이 있으므로 두 예외만 좁게 잡는다. ``time.fromisoformat`` 실패는
-            # 거래시간 형식 문제이며 별도 처리 대상이라 감싸지 않는다.
             try:
                 tz = ZoneInfo(timezone_str)
             except (ZoneInfoNotFoundError, ValueError):

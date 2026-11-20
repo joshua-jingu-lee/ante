@@ -310,7 +310,6 @@ class PositionHistory:
                  updated_at = excluded.updated_at""",
             (bot_id, symbol, quantity, avg_entry_price, validated_account_id),
         )
-        # 인메모리 캐시 갱신
         self._update_cache(
             bot_id, symbol, quantity, avg_entry_price, account_id=validated_account_id
         )
@@ -383,7 +382,6 @@ class PositionHistory:
                 validated_account_id,
             ),
         )
-        # 인메모리 캐시 갱신
         self._update_cache(
             bot_id,
             symbol,

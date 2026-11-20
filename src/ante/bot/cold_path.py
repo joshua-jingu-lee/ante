@@ -46,10 +46,6 @@ async def _release_treasury_budget(
     if released > 0:
         return released
 
-    # Legacy rows created before account-scoped budgets may have the migration
-    # default ``account_id=''``. Treat those as belonging to the bot row's
-    # account before falling back to the cross-account scan, otherwise the blank
-    # row can survive a cold-path delete.
     await db.execute(
         "UPDATE bot_budgets SET account_id = ? WHERE bot_id = ? AND account_id = ''",
         (preferred_account_id, bot_id),
@@ -104,9 +100,6 @@ async def cold_path_remove_bot(
     if row is None:
         raise BotNotFoundError(bot_id)
 
-    # account_id fallback (`or "test"`) 금지. invalid 값은
-    # ``InvalidAccountIdError`` 로 즉시 거부되어 잘못된 account 의 Treasury
-    # 환수 / 잘못된 계좌 cleanup 경로가 실행되지 않는다.
     account_id = require_account_id(
         row.get("account_id"), context="cold_path_remove_bot"
     )
