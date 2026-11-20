@@ -47,7 +47,7 @@ async def enrich_bot_info(
             이면 ``positions`` 키가 추가되지 않는다 (회귀 lock — cold-path
             / legacy 환경 호환).
         account_id: 봇 소속 계좌(``bot.config.account_id``). ``None`` 이 아니면
-            (#2137) ``trade_service.get_positions(...)`` 호출에 ``account_id=``
+            ``trade_service.get_positions(...)`` 호출에 ``account_id=``
             kwarg 를 추가해 포지션 조회를 봇 계좌로 스코핑한다(타 계좌 stale
             /legacy 포지션 누출 차단). ``None`` 이면 기존 ``get_positions(bot_id=
             ..., include_closed=True)`` call shape 를 그대로 보존한다(legacy

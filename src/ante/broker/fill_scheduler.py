@@ -1,4 +1,4 @@
-"""FillReconcileScheduler — 계좌별 event-gated 체결 백스톱 폴러 (#1946).
+"""FillReconcileScheduler — 계좌별 event-gated 체결 백스톱 폴러.
 
 REST ``get_order_history`` 를 백스톱으로 폴해 추적 주문의 체결을 ``FillApplier`` 로
 멱등 반영한다. 실시간 체결 통보 스트림 유무·paper/live 무관하게 정합성을 보증한다.
@@ -84,7 +84,7 @@ def _normalize_history_date(raw: str) -> str:
     Test/Mock 어댑터의 ``get_order_history`` 는 ``created_at.isoformat()`` (ISO
     8601) 을 ``timestamp`` 로 내보내므로, 정규화 없이 그대로 넘기면 ISO 문자열이
     ``YYYYMMDD`` 와의 문자열 비교에서 항상 큰 값이 되어 매핑이 누락되고 복구가
-    no-op(applied=0)이 된다(#2004). KIS 어댑터는 이미 ``ord_dt`` (YYYYMMDD) 를
+    no-op(applied=0)이 된다. KIS 어댑터는 이미 ``ord_dt`` (YYYYMMDD) 를
     내보내므로 그대로 통과시킨다.
 
     Args:
@@ -288,7 +288,7 @@ class FillReconcileScheduler:
         CircuitOpenError/APIError/Connection/OSError)가 **연속**되면 sleep 을
         ``poll_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)`` 로 늘려(첫 실패 ×2,
         이후 ×4, ×8 cap) late-ccld 타임아웃 연타로 차단기 OPEN 을 60s 주기로
-        갱신·연장하지 않게 한다(#2350). 정상 완료 시 카운터를 0 으로 리셋해
+        갱신·연장하지 않게 한다. 정상 완료 시 카운터를 0 으로 리셋해
         ``poll_interval`` 고정 주기로 복귀한다. broker-transient 가 아닌 예외(내부
         버그류)는 backoff 로 은폐하지 않는다 — 연속 실패 카운터를 0 으로 리셋해(선행
         transient 로 올라간 backoff 가 있으면 함께 해제) 즉시 다음 주기 + 경고 로그를

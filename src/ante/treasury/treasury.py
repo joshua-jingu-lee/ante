@@ -327,7 +327,7 @@ class Treasury:
         self._bot_status_checker = checker
 
     def set_order_tracker(self, order_tracker: OrderTracker) -> None:
-        """부분체결 비례 정산용 OrderTracker 참조 주입 (#1947).
+        """부분체결 비례 정산용 OrderTracker 참조 주입.
 
         생성자 주입 대신 부팅 순서상 OrderTracker 가 Treasury 보다 먼저
         준비될 수 없는 partial wiring 경로(테스트 등)를 위한 후속 주입 경로다.
@@ -339,7 +339,7 @@ class Treasury:
     def set_order_reserve_price_resolver(
         self, resolver: Callable[[str], Awaitable[float]]
     ) -> None:
-        """시장가 매수 reserve estimate 용 현재가 resolver 주입 (#1333).
+        """시장가 매수 reserve estimate 용 현재가 resolver 주입.
 
         ``_init_gateway()`` 끝에서 account-scoped wrapper로 주입한다. 기존
         ``start_sync(price_resolver=...)``의 자산 평가 sync resolver와는
@@ -626,7 +626,7 @@ class Treasury:
         return True
 
     async def release_reservation(self, bot_id: str, order_id: str) -> None:
-        """주문 취소/실패 시 **잔여 예약**만 해제 (#1947).
+        """주문 취소/실패 시 **잔여 예약**만 해제.
 
         ``self._reservations[order_id][1]`` 은 잔여 예약(``remaining_reserved``)
         이다. 부분체결 후 취소/실패라면 이미 체결된 분은 ``_on_order_filled`` 에서
@@ -1148,7 +1148,7 @@ class Treasury:
     async def _settle_buy_fill(
         self, event: Any, budget: BotBudget, fill_value: float, commission: float
     ) -> None:
-        """매수 체결 정산 — 부분체결 비례 정산 + terminal 잔여 회수 (#1947).
+        """매수 체결 정산 — 부분체결 비례 정산 + terminal 잔여 회수.
 
         per-fill 회계(R1-1):
           - ``actual_cost = quantity*price + commission``
@@ -1269,7 +1269,7 @@ class Treasury:
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수 (#1947).
+        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수.
 
         ``get_reservations`` 가 주문별 잔여 예약(``remaining_reserved``)을
         반환하므로, 부분체결된 주문이라도 이미 체결된 분은 ``_on_order_filled``

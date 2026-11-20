@@ -4,7 +4,7 @@ SSOT: Python ``zoneinfo.ZoneInfo`` / IANA timezone database.
 
 이 모듈은 ``Account.timezone`` 입력이 유효한 IANA timezone key인지 확인하는
 경량 헬퍼만 제공한다. stdlib ``zoneinfo``만 의존하여 :mod:`ante.account.service`
-의 crypto/errors/models/presets/scoping 의존성과 격리한다 (#1473).
+의 crypto/errors/models/presets/scoping 의존성과 격리한다.
 
 caller 책임:
 

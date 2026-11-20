@@ -83,7 +83,7 @@ class BacktestExecutor:
         self._order_seq = 0
 
     def _next_order_id(self) -> str:
-        """체결마다 증가하는 결정적 order_id(``bt-{n}``)를 발급한다(#2073)."""
+        """체결마다 증가하는 결정적 order_id(``bt-{n}``)를 발급한다."""
         self._order_seq += 1
         return f"bt-{self._order_seq}"
 
@@ -191,7 +191,7 @@ class BacktestExecutor:
 
         체결 시 라이브 bot의 ``strategy.on_fill(fill)`` dict와 동일한 shape
         (``order_id``/``symbol``/``side``/``quantity``/``price``/``timestamp``/
-        ``fill_dedup_key``)의 fill dict를 반환한다(#2073). 체결되지 않은 모든
+        ``fill_dedup_key``)의 fill dict를 반환한다. 체결되지 않은 모든
         경로(side invalid/hold, quantity invalid, **현재 봉 없음(gap day/미시작)**,
         buy 잔고 부족, sell 보유 없음)는 ``None`` 을 반환해 호출부가 follow-up
         (on_fill) 경로로 진입하지 않게 한다.
@@ -205,7 +205,7 @@ class BacktestExecutor:
         체결 수량(``executed_qty``)을 분기별로 먼저 확정한 뒤, 수수료/슬리피지/
         거래 기록을 모두 체결 수량 기준으로 계산한다. 보유 수량을 초과하는 매도는
         보유분만 체결되므로, 초과 요청 수량이 수수료·슬리피지·거래 수량에
-        반영되지 않는다(#1989).
+        반영되지 않는다.
 
         가격 조회/분기 이전에 Signal을 검증한다(#1991, #2066 포괄). 라이브
         ``RuleEngine`` preflight와 동일하게 ``side ∈ {"buy","sell"}`` 와 finite
@@ -215,13 +215,13 @@ class BacktestExecutor:
         라우팅하지 않는다**(unknown side가 매도로 처리되던 회귀 차단).
 
         side/quantity 검증 통과 후 **가격 조회(``get_current_bar_price``) 이전에**
-        config.symbols universe 검사를 한다(#2072). ``symbols`` 가 설정된 경우
+        config.symbols universe 검사를 한다. ``symbols`` 가 설정된 경우
         그 목록 밖의 ``signal.symbol`` 은 거래하지 않고 skip(``return None``)해
         가격조회(on-demand load)도 거래도 발생하지 않는다. ``symbols`` 가 비어
         있으면(universe 미설정) 거부하지 않는다(현 동작 유지, #2060 범위).
 
         가격 게이트 통과 후 **side 체결 분기 이전에** ``signal.order_type`` 트리거
-        게이트(``_order_triggered``)를 적용한다(#1994). limit/stop/stop_limit이
+        게이트(``_order_triggered``)를 적용한다. limit/stop/stop_limit이
         현재 봉가로 조건을 충족하지 않으면 미체결로 skip(``return None``)해, 기존에
         order_type을 무시하고 모든 주문을 즉시 시장가로 체결하던 버그를 차단한다.
         market(기본)은 항상 트리거되어 기존 시장가 체결 동작을 보존한다(회귀 방지).
@@ -339,7 +339,7 @@ class BacktestExecutor:
         }
 
     def _order_triggered(self, signal: Signal, price: float) -> bool:
-        """``signal.order_type`` 트리거가 현재 봉가(*price*)로 충족되는지 판정(#1994).
+        """``signal.order_type`` 트리거가 현재 봉가(*price*)로 충족되는지 판정.
 
         side 체결 분기 이전에 호출한다. ``True`` 면 체결 진행, ``False`` 면 호출부가
         미체결로 skip한다. 필수 가격 필드 누락/알 수 없는 order_type은 fail-closed로
@@ -421,7 +421,7 @@ class BacktestExecutor:
         return triggered
 
     def _apply_slippage_cap(self, signal: Signal, price: float, side: str) -> float:
-        """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다(#1994).
+        """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다.
 
         - ``market``/``stop``(트리거→시장가): 기존대로 슬리피지만 적용한
           ``price * (1 ± slippage_rate)``.
@@ -460,7 +460,7 @@ class BacktestExecutor:
                 del self._positions[symbol]
 
     async def _refresh_current_prices(self) -> None:
-        """현재 봉 시점의 보유 심볼별 현재가 스냅샷을 새로 구성한다(#2074).
+        """현재 봉 시점의 보유 심볼별 현재가 스냅샷을 새로 구성한다.
 
         ``get_positions()`` 가 PortfolioView 스키마(current_price/unrealized_pnl)를
         제공할 때 읽는 캐시다. provider를 재호출하지 않는 sync get_positions를
@@ -544,7 +544,7 @@ class BacktestExecutor:
         equity_curve에서도 div-by-zero/NaN/inf 없이 core 13지표를 산출하며
         (거래 기반 지표는 0/None, equity 기반 지표는 equity_curve 기준),
         compat 필드(buy_trades/sell_trades/total_slippage)는 빈 거래에서 자연히
-        0이 된다. 무거래 result에서도 지표 키가 안정적으로 존재하도록 한다(#2125).
+        0이 된다. 무거래 result에서도 지표 키가 안정적으로 존재하도록 한다.
         """
         from ante.backtest.metrics import calculate_metrics
 
@@ -566,7 +566,7 @@ class BacktestExecutor:
 
         spec ``03-04-provider-and-views.md`` L29 PortfolioView 스키마대로
         ``{symbol: {"quantity","avg_price","current_price","unrealized_pnl"}}`` 를
-        반환해 라이브와 parity를 맞춘다(#2074).
+        반환해 라이브와 parity를 맞춘다.
 
         provider를 재호출하지 않고 run 루프가 매 step 미리 채운
         ``self._current_prices`` 캐시만 읽는다(sync 유지). 캐시에 심볼이 없으면
@@ -603,7 +603,7 @@ class BacktestExecutor:
         라이브 ``StrategyContext.get_trade_history`` 와 동일한 full dict shape
         (``trade_id``/``symbol``/``side``/``quantity``/``price``/``status``/
         ``order_type``/``reason``/``commission``/``timestamp``)를 제공해, 같은
-        전략 코드가 라이브/백테스트에서 동일하게 동작하도록 parity를 맞춘다(#2075).
+        전략 코드가 라이브/백테스트에서 동일하게 동작하도록 parity를 맞춘다.
 
         - ``self._trades`` (append 순 = 시간순)를 최신순(역순)으로 정렬한다.
         - *symbol* 이 주어지면 해당 symbol만 남긴 뒤 *limit* 개로 자른다

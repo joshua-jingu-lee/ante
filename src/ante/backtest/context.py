@@ -88,7 +88,7 @@ class BacktestStrategyContext:
         """거래 이력 조회. 최신순 반환.
 
         라이브 ``StrategyContext.get_trade_history`` 와 동일한 시그니처/shape를
-        제공한다. 백테스트 실행 중 누적된 가상 거래 이력을 위임한다(#2075).
+        제공한다. 백테스트 실행 중 누적된 가상 거래 이력을 위임한다.
         """
         return self._portfolio.get_trade_history(symbol, limit)
 
@@ -113,7 +113,7 @@ class BacktestStrategyContext:
 
         라이브 ``StrategyContext.load_file`` 과 동일한 보안 경계(strategies/
         하위만 허용, 절대경로/탈출/symlink escape 차단, 미존재 거부)를 공용
-        helper 위임으로 제공한다(#2083).
+        helper 위임으로 제공한다.
         """
         return load_strategy_file(self._strategies_dir, path)
 
@@ -121,7 +121,7 @@ class BacktestStrategyContext:
         """전략 전용 파일 읽기 (텍스트).
 
         라이브 ``StrategyContext.load_text`` 과 동일한 보안 경계를 공용 helper
-        위임으로 제공한다(#2083).
+        위임으로 제공한다.
         """
         return load_strategy_text(self._strategies_dir, path, encoding)
 

@@ -37,7 +37,7 @@ class PositionReconciler:
         self._instrument_service = instrument_service
 
     def _symbol_label(self, symbol: str) -> str:
-        """#2377: 알림 메시지용 ``\\`{symbol}\\` (종목명)`` 병기 라벨(markdown).
+        """알림 메시지용 ``\\`{symbol}\\` (종목명)`` 병기 라벨(markdown).
 
         미주입/조회 불가 시 backtick symbol-only 로 폴백한다(format_label 폴백
         내장 — sync·무예외·무IO). reconciler payload 에 exchange 가 없어 KRX
@@ -286,7 +286,7 @@ class PositionReconciler:
         """계좌 총합(broker) vs 전 봇 internal 합산 비교 — **순수(side-effect 無)**.
 
         broker 는 계좌 **총합**만 주므로 per-bot/per-symbol 귀속이 근본적으로
-        ambiguous하다(#2270). 이 메서드는 이벤트/보정 없이 **읽기 전용으로**
+        ambiguous하다. 이 메서드는 이벤트/보정 없이 **읽기 전용으로**
         계좌 단위 심볼별 불일치만 계산한다(display/detect 공용).
 
         비교 기준:
@@ -428,7 +428,7 @@ class PositionReconciler:
         b_qty: float,
     ) -> None:
         """self-submitted 분기 공통 이벤트 발행 — `PositionMismatchEvent` +
-        info `NotificationEvent`. buy-side(#1950)·sell-side(#2351) 동일 계층.
+        info `NotificationEvent`. buy-side·sell-side 동일 계층.
 
         reason 은 방향 중립 ``REASON_SELF_SUBMITTED`` 를 재사용한다. 방향은
         ``internal_qty``/``broker_qty`` 대소(buy=broker>internal, sell=
@@ -477,9 +477,9 @@ class PositionReconciler:
         미체결 잔량 합(capacity = Σ(ordered_qty − recorded_filled_qty)) 과 ``excess``
         를 비교한다.
 
-        - ``side="buy"`` (#1950): ``excess = broker_qty - internal_qty`` — 외부 매수
+        - ``side="buy"``: ``excess = broker_qty - internal_qty`` — 외부 매수
           후보. 매칭되는 미반영 self 매수로 설명 가능한지 판정.
-        - ``side="sell"`` (#2351): ``excess = internal_qty - broker_qty``(deficit) —
+        - ``side="sell"``: ``excess = internal_qty - broker_qty``(deficit) —
           외부 청산/일부 매도 후보. 매칭되는 미반영 self 매도로 설명 가능한지 판정.
           KIS 모의 ccld 지연창(잔고는 매도 즉시 감소·ccld 당일 0건)에서 FillApplier 가
           아직 기록 못 한 self 매도가 정확히 non-terminal sell capacity 에 든다.
@@ -532,7 +532,7 @@ class PositionReconciler:
         account_id: str,
         symbol: str,
     ) -> bool:
-        """미귀속 보유(carryover) 시그니처인지 판정 (#2352).
+        """미귀속 보유(carryover) 시그니처인지 판정.
 
         ``b_qty > i_qty`` 분기에서 self-check(``_is_self_submitted_fill``)가
         미매칭(False)으로 떨어진 뒤, ``internal_qty == 0`` 인 보유가 그 봇이

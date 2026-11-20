@@ -1,4 +1,4 @@
-"""FillApplier — 단일 멱등 choke point (#1946).
+"""FillApplier — 단일 멱등 choke point.
 
 빠른 경로(실시간 체결 통보 스트림)와 백스톱 경로(REST ``get_order_history`` 폴)가
 모두 ``apply_cumulative`` 로 수렴한다. 같은 체결을 몇 번 관측하든 포지션은 정확히
@@ -9,7 +9,7 @@ crash 원자성: ``recorded_filled_qty`` advance(CAS) + ``TradeRecord`` insert +
 적용 도중 crash 하면 rollback 되어 recorded 가 advance 되지 않고, 재기동 후 다음
 폴이 동일 delta 를 재적용한다 → positions/trades crash-safe exactly-once.
 
-이벤트 durability (#1949): outbox 가 주입되면 같은 트랜잭션 안에서
+이벤트 durability: outbox 가 주입되면 같은 트랜잭션 안에서
 ``OrderFilledEvent`` payload 를 ``fill_outbox`` 에 INSERT 한다. commit 성공 =
 이벤트 영속 보장이므로, commit↔publish 사이 crash window 가 닫힌다(이벤트 무손실).
 실제 발행은 ``FillOutboxPublisher`` 워커가 트랜잭션 밖에서 at-least-once 로 한다.
@@ -78,7 +78,7 @@ class FillApplier:
 
         1. ``lookup_order_id`` 로 추적 주문 확인 — 없으면 무시(self/external 경계).
         2. 단일 트랜잭션: CAS advance → delta>0 이면 TradeRecord + position 적용 +
-           (#1949) OrderFilledEvent payload 를 outbox 에 INSERT(동일 원자 커밋).
+           OrderFilledEvent payload 를 outbox 에 INSERT(동일 원자 커밋).
         3. commit 이후 publisher 워커가 outbox 미발행분을 at-least-once 발행한다
            (outbox 미주입 fallback 경로는 commit 직후 직접 1회 발행).
         """
@@ -287,7 +287,7 @@ class FillApplier:
         avg_price: float,
         fill_dedup_key: str,
     ) -> dict[str, object]:
-        """outbox 에 저장할 ``OrderFilledEvent`` 생성자 인자 payload (#1949).
+        """outbox 에 저장할 ``OrderFilledEvent`` 생성자 인자 payload.
 
         ``event_id``/``timestamp`` 는 발행 시점에 새로 생성되도록 제외한다(재전달
         시 새 event_id 가 부여돼도 dedup 은 결정적 ``fill_dedup_key`` 로 한다).

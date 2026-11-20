@@ -557,7 +557,7 @@ class TelegramCommandReceiver:
         return "\n".join(lines)
 
     async def _format_held_symbols(self, bot: Any, symbols: list[str]) -> str:
-        """보유종목 표기 라인을 구성한다 (#2385).
+        """보유종목 표기 라인을 구성한다.
 
         ``instrument_service`` 미주입 시 기존 ``', '.join(symbols)`` 를 유지한다.
         주입 시 ``format_label(symbol, exchange, markdown=False)`` 로 종목명을

@@ -215,7 +215,7 @@ class StrategyRegistry:
 
         Missing strategy 는 ``StrategyNotFoundError`` (code=
         ``"STRATEGY_NOT_FOUND"``) 로 raise 해 CLI/IPC 표면이 typed code 를
-        보존하게 한다 (#1796).
+        보존하게 한다.
         """
         record = await self.get(strategy_id)
         if record is None:

@@ -32,7 +32,7 @@ __all__ = [
 
 @dataclass
 class InvalidRoleScan:
-    """``MemberService.find_invalid_role_members`` 결과 컨테이너 (#1468).
+    """``MemberService.find_invalid_role_members`` 결과 컨테이너.
 
     ``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 두 카테고리로
     분리한다. 운영자는 ``actionable`` 만 ``ante member revoke`` 로 cleanup 하고,
@@ -367,7 +367,7 @@ class MemberService:
         """멤버 등록 + 토큰 반환.
 
         ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
-        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI direct
+        한다. 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI direct
         path 와 내부 caller 가 본 메소드를 직접 호출할 수 있으므로 service
         계층에서 방어한다(defense-in-depth).
 
@@ -640,7 +640,7 @@ class MemberService:
     async def reactivate(self, member_id: str, reactivated_by: str = "") -> Member:
         """멤버 재활성화.
 
-        ``reactivated_by``는 master 권한 caller여야 한다(#1351).
+        ``reactivated_by``는 master 권한 caller여야 한다.
 
         state 위반 (이미 ACTIVE 등) 은 #1814 Group Q sweep 에 따라 typed
         ``MemberStateConflictError`` 로 raise 한다 (``suspend`` 1:1 미러).
@@ -677,7 +677,7 @@ class MemberService:
     async def revoke(self, member_id: str, revoked_by: str = "") -> Member:
         """멤버 영구 폐기. 토큰 해시 삭제.
 
-        ``revoked_by``는 master 권한 caller여야 한다(#1351).
+        ``revoked_by``는 master 권한 caller여야 한다.
         """
         await self._assert_master(revoked_by, "revoke")
         member = await self._get_or_raise(member_id)
@@ -722,7 +722,7 @@ class MemberService:
     ) -> tuple[Member, str]:
         """토큰 재발급. 기존 토큰 즉시 무효화.
 
-        ``rotated_by``는 master 권한 caller여야 한다(#1351). 인증 없는 token
+        ``rotated_by``는 master 권한 caller여야 한다. 인증 없는 token
         재발급 표면을 제거한다.
         """
         await self._assert_master(rotated_by, "rotate_token")
@@ -796,7 +796,7 @@ class MemberService:
         본 가드를 제거해 빈 caller도 거부한다.
 
         ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
-        한다(#1439). 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI 직접
+        한다. 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI 직접
         호출과 내부 caller 를 위해 service 계층에서 방어한다.
         """
         await self._assert_master(updated_by, "update_scopes")
@@ -831,13 +831,13 @@ class MemberService:
             )
 
     async def _get_or_raise(self, member_id: str) -> Member:
-        """멤버 조회. 없으면 ``MemberNotFoundError`` (#1805).
+        """멤버 조회. 없으면 ``MemberNotFoundError``.
 
         이전에는 ``ValueError("존재하지 않는 멤버: ...")`` 를 raise 했으나,
         CLI/IPC envelope 이 안정 코드 ``"MEMBER_NOT_FOUND"`` 를 surface
         하도록 typed exception (``MemberError`` 서브) 으로 변경한다. 메시지
         시그니처와 회귀 케이스(``test_member.py:582`` 등) 호환을 위해
-        문자열은 동일하게 유지한다. ``ApprovalNotFoundError`` (#1798) 와
+        문자열은 동일하게 유지한다. ``ApprovalNotFoundError`` 와
         동형 패턴.
         """
         from ante.member.errors import MemberNotFoundError
@@ -853,7 +853,7 @@ class MemberService:
 
         위반 시 첫 invalid scope 를 인자로 ``InvalidScopeError`` 를 raise 한다.
         ``InvalidScopeError`` 는 ``ValueError`` 서브클래스이므로 기존
-        ``except ValueError`` 핸들러도 동일하게 처리된다(#1439).
+        ``except ValueError`` 핸들러도 동일하게 처리된다.
 
         빈 리스트는 통과시킨다. ``None`` 은 caller(``register`` /
         ``update_scopes``) 에서 빈 리스트로 정규화한 뒤 본 헬퍼를 호출한다.
@@ -864,7 +864,7 @@ class MemberService:
 
     @staticmethod
     def _assert_reserved_member_id(member_id: str) -> None:
-        """reserved ``system:`` prefix 점유 여부를 검증한다 (#2295).
+        """reserved ``system:`` prefix 점유 여부를 검증한다.
 
         ``system:`` 는 system audit sentinel 네임스페이스 (``system:kill_switch``
         / ``system:recovery``) 전용이다. 사용자/agent 등록 member_id 가 이 prefix
@@ -885,7 +885,7 @@ class MemberService:
 
     @staticmethod
     def _assert_role_enum(role: str) -> None:
-        """``role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다 (#1465).
+        """``role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다.
 
         CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
         있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
@@ -903,7 +903,7 @@ class MemberService:
 
     @staticmethod
     def _assert_type_enum(member_type: str) -> None:
-        """``member_type`` 이 ``MemberType`` enum SSOT 의 멤버인지 검증한다 (#1628).
+        """``member_type`` 이 ``MemberType`` enum SSOT 의 멤버인지 검증한다.
 
         CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
         있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층

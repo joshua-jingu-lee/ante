@@ -133,7 +133,7 @@ class BacktestService:
         result: BacktestResult,
         effective: BacktestConfig,
     ) -> str:
-        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다 (#1998).
+        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다.
 
         저장 실패(read-only/ephemeral data dir 등)는 backtest 자체를 실패시키지
         않는다 — warning 을 남기고 ``""`` 를 반환하여 빈 result_path 로 이벤트가
@@ -165,7 +165,7 @@ class BacktestService:
     async def run_subprocess(self, config: dict[str, Any]) -> dict:
         """백테스트를 subprocess로 격리 실행 (D-004).
 
-        ``ante backtest run`` CLI 의 격리 실행 경로다(#2001). ``python -m
+        ``ante backtest run`` CLI 의 격리 실행 경로다. ``python -m
         ante.backtest.runner`` 자식 프로세스를 띄워 stdin 으로 JSON config 를
         전달하고, stdout 의 ``BACKTEST_RESULT_SENTINEL`` 라인만 파싱한 dict 를
         반환한다. returncode≠0 또는 sentinel 라인 부재는 ``BacktestError`` 다.
@@ -175,7 +175,7 @@ class BacktestService:
         ``strategy_name`` / ``strategy_version`` 를 포함한다. 자식 프로세스의
         ``run()`` 이 durable artifact 를 저장하고 그 경로를 ``result_path`` 로
         surface 하므로, CLI ``_save_backtest_run`` 이 이를
-        ``backtest_runs.result_path`` 로 영속해 추적성을 전파한다(#1998).
+        ``backtest_runs.result_path`` 로 영속해 추적성을 전파한다.
 
         이 경로는 부모 프로세스에서 ``BacktestCompleteEvent`` 를 발행하지 않는다
         (격리된 자식 프로세스에는 eventbus 가 없다). ``to_dict()`` 직렬화 계약은
@@ -228,7 +228,7 @@ class BacktestService:
         logger.info("BacktestCompleteEvent 발행: %s", strategy_id)
 
     def _validate_timeframe_vocab(self, timeframe: object) -> None:
-        """timeframe vocabulary 검증 (#1604). invalid → BacktestConfigError.
+        """timeframe vocabulary 검증. invalid → BacktestConfigError.
 
         early(_validate_config)와 effective(run, #2060) 양쪽이 공유하는 단일
         helper. ``str()`` 캐스팅 없이 non-str 도 ``is_valid_timeframe`` 의

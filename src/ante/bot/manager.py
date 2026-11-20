@@ -863,7 +863,7 @@ class BotManager:
     async def _validate_strategy_change(
         self, *, account_id: str, strategy_id: str
     ) -> None:
-        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다 (#2129).
+        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다.
 
         ``create_bot`` (L390-402) 의 검증 선례를 ``update_bot`` 컨텍스트에서
         재사용한다. ``create_bot`` 은 ``strategy_cls`` 를 직접 받지만
@@ -1299,7 +1299,7 @@ class BotManager:
         되돌아가는 회귀가 발생한다.
 
         ``ON CONFLICT DO UPDATE`` 에서 ``strategy_id`` 컬럼과 ``account_id``
-        컬럼도 함께 갱신한다 (#2129/#2130/#2274). ``config_json`` 에는
+        컬럼도 함께 갱신한다. ``config_json`` 에는
         ``strategy_id`` / ``account_id`` 가 항상 포함되어 있었으나 과거에는
         UPDATE SET 에서 두 컬럼이 제외되어 ``update_bot(strategy_id=...)`` /
         ``update_bot(account_id=...)`` 경로에서 컬럼이 stale 해졌다 (재시작 시

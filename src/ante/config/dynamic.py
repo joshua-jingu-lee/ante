@@ -96,7 +96,7 @@ def validate_value(key: str, value: Any) -> None:
     `notification.min_level` 도 대소문자 구분으로 거부한다. 소비자
     ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
     ``_VALID_NOTIFICATION_MIN_LEVELS`` 멤버(전부 소문자)와 정확 일치해야 하고,
-    ``"CRITICAL"`` 같은 대문자 입력은 거부된다 (#2132).
+    ``"CRITICAL"`` 같은 대문자 입력은 거부된다.
 
     Raises:
         ValueError: numeric finite invariant 를 위반한 경우 (#1412, generic
@@ -105,7 +105,7 @@ def validate_value(key: str, value: Any) -> None:
             같은 키별 enum invariant 를 위반한 경우. ``ValueError`` 서브클래스
             이므로 web 글로벌 핸들러는 그대로 422로 변환하고, IPC 서버는
             ``.code`` 속성으로 ``CONFIG_VALIDATION_ERROR`` 안정코드를 envelope에
-            노출한다 (#1673). 호출자(web/IPC/CLI)는 이를 도메인 응답으로
+            노출한다. 호출자(web/IPC/CLI)는 이를 도메인 응답으로
             변환한다.
     """
     ok, bad = _is_value_finite(value)
@@ -370,7 +370,7 @@ def _on_log_level_changed(event: Any) -> None:
     """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다.
 
     서비스 경계에서 ``validate_value`` 가 invalid 값을 차단하므로 이 callback
-    까지 invalid 값이 도달하는 일은 정상 경로에서는 발생하지 않는다(#1379).
+    까지 invalid 값이 도달하는 일은 정상 경로에서는 발생하지 않는다.
     그래도 startup hook 이 historical persisted bad-value 를 publish 하거나
     구독자 순서가 바뀌는 경우를 대비해 silent-drop 을 defense-in-depth 로
     유지한다.

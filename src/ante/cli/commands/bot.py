@@ -448,7 +448,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
 def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     """봇 시그널 키 조회 또는 재발급.
 
-    ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다 (#2111).
+    ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다.
     서버가 정지되어 있으면 ``IPC_SERVER_NOT_RUNNING`` 으로 거부하며, cold-path
     DB mutation 으로 대체하지 않는다 (runtime 경계 / audit / live 상태 정합성
     보존).

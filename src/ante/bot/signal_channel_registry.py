@@ -1,4 +1,4 @@
-"""SignalChannelRegistry — signal.connect 채널 생명주기 권위 레지스트리 (#2334/#2337).
+"""SignalChannelRegistry — signal.connect 채널 생명주기 권위 레지스트리.
 
 bot_id 당 단일 connect 정책과 daemon-위임 teardown 을 강제하는 동기 코어다.
 
@@ -145,7 +145,7 @@ class ChannelHandle:
 
 
 class SignalChannelRegistry:
-    """bot_id 당 단일 connect + daemon-위임 teardown 의 단일 권위 레지스트리 (#2337).
+    """bot_id 당 단일 connect + daemon-위임 teardown 의 단일 권위 레지스트리.
 
     ``_sessions``: ``{bot_id: {session_id: ChannelHandle}}``. 단일-connect 정책상
     inner dict 는 최대 1개의 active handle 만 갖지만, unregister race 멱등성을 위해

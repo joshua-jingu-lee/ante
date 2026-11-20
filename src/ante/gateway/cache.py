@@ -55,7 +55,7 @@ class ResponseCache:
     def invalidate(self, pattern: str = "") -> None:
         """``pattern`` 으로 시작하는 캐시 key 무효화. 빈 문자열이면 전체 초기화.
 
-        SPLIT-3 (#1242): substring match → prefix-exact match. multi-account
+        substring match → prefix-exact match. multi-account
         환경에서 ``"balance"`` 같은 substring 으로 다른 namespace 의 cache 가
         함께 지워지는 cross-account leakage 를 차단한다. 호출 사이트
         (``stream_integration._on_execution``,

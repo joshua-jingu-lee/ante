@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 async def migrate(db: Database) -> None:
     """기존 ``order_tracker`` 테이블에 ``order_price REAL`` 컬럼을 추가한다.
 
-    트랜잭션 owner 태스크 안에서 ``execute_script`` 금지(#2365) — DDL 은
+    트랜잭션 owner 태스크 안에서 ``execute_script`` 금지 — DDL 은
     ``db.execute(...)`` 로 문장 단위 실행한다.
     """
     table = await db.fetch_one(

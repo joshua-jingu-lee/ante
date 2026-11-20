@@ -96,7 +96,7 @@ class BotStrategyAlreadyRunningError(BotError):
 
 
 class BotImmutableFieldError(BotError):
-    """봇 생성 후 변경할 수 없는 불변 필드 수정 시도 (#2282).
+    """봇 생성 후 변경할 수 없는 불변 필드 수정 시도.
 
     ``account_id`` 는 봇이 참조하는 treasury 예산·broker credential·포지션
     격리가 모두 **account-bound** 라, ``update_bot`` 으로 변경하면 옛 account
@@ -116,7 +116,7 @@ class BotImmutableFieldError(BotError):
 
 
 class InvalidSignalKey(BotError):  # noqa: N818
-    """``signal.connect`` 핸드셰이크 게이트① — signal key 검증 실패 (#2334/#2336).
+    """``signal.connect`` 핸드셰이크 게이트① — signal key 검증 실패.
 
     ``validate_signal_key`` 가 ``None`` 을 반환한 경우(미발급/회전/오타 키)
     핸들러가 raise 한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가
@@ -134,7 +134,7 @@ class InvalidSignalKey(BotError):  # noqa: N818
 
 
 class BotNotRunning(BotError):  # noqa: N818
-    """``signal.connect`` 핸드셰이크 게이트③ — 봇이 RUNNING 아님 (#2334/#2336).
+    """``signal.connect`` 핸드셰이크 게이트③ — 봇이 RUNNING 아님.
 
     handshake 시점에 ``bot.status != BotStatus.RUNNING`` 이면 핸들러가 raise
     한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가 안정 코드
@@ -154,7 +154,7 @@ class BotNotRunning(BotError):  # noqa: N818
 
 
 class SignalKeyManagerNotConfigured(BotError):  # noqa: N818
-    """``signal.connect`` 키 검증에 필요한 ``SignalKeyManager`` 가 부재 (#2334/#2336).
+    """``signal.connect`` 키 검증에 필요한 ``SignalKeyManager`` 가 부재.
 
     ``BotManager.validate_signal_key`` 가 ``_signal_key_manager is None`` 일 때
     raise 한다. ``rotate_signal_key`` 의 generic ``BotError``(EXECUTION_ERROR
@@ -171,7 +171,7 @@ class SignalKeyManagerNotConfigured(BotError):  # noqa: N818
 
 
 class BotSignalChannelBusy(BotError):  # noqa: N818
-    """``signal.connect`` 단일-connect 정책 — active session 존재 (#2334/#2337).
+    """``signal.connect`` 단일-connect 정책 — active session 존재.
 
     ``SignalChannelRegistry.register`` 가 같은 ``bot_id`` 에 대해 두 번째
     핸드셰이크를 atomic check-and-insert 로 거부할 때 raise 한다. ack write
@@ -192,7 +192,7 @@ class BotSignalChannelBusy(BotError):  # noqa: N818
 
 
 class SignalChannelRegistryFrozen(BotError):  # noqa: N818
-    """``SignalChannelRegistry`` 가 freeze 된 후 register 시도 (#2334/#2337).
+    """``SignalChannelRegistry`` 가 freeze 된 후 register 시도.
 
     shutdown sweep(``freeze()`` → ``close_all('draining')``) 진입 후 들어온
     핸드셰이크가 새 session 을 등록하려 할 때 ``register`` 가 raise 한다.

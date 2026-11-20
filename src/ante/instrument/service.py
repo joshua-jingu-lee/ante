@@ -49,7 +49,7 @@ class InstrumentService:
         logger.info("InstrumentService 초기화 완료 (캐시: %d건)", len(self._cache))
 
     async def load_readonly(self) -> None:
-        """read-only DB 에서 schema DDL 없이 캐시만 워밍한다 (#1984).
+        """read-only DB 에서 schema DDL 없이 캐시만 워밍한다.
 
         ``initialize()`` 와 달리 ``CREATE TABLE IF NOT EXISTS instruments`` DDL
         (writer 경로) 을 발화하지 않는다. read-only DB artifact (``data list
@@ -118,7 +118,7 @@ class InstrumentService:
     def format_label(
         self, symbol: str, exchange: str = "KRX", *, markdown: bool = False
     ) -> str:
-        """알림용 ``{symbol} (종목명)`` 병기 라벨을 동기 반환한다 (#2377).
+        """알림용 ``{symbol} (종목명)`` 병기 라벨을 동기 반환한다.
 
         텔레그램 알림에서 종목코드만 노출되는 지점들이 각자 ``get_name`` 을
         조합하지 않고 이 헬퍼만 사용해 표기를 SSOT 로 단일화한다. 발행자가

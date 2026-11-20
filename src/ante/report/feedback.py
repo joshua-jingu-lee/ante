@@ -83,7 +83,7 @@ class PerformanceFeedback:
 
         Raises:
             BotNotFoundError: 봇 미발견 시. ``get_bot_performance`` 와 동일하게
-                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다 (#2136).
+                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다.
         """
         from ante.bot.exceptions import BotNotFoundError
 
@@ -124,7 +124,7 @@ class PerformanceFeedback:
 
         Raises:
             BotNotFoundError: 봇 미발견 시. ``get_bot_performance`` 와 동일하게
-                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다 (#2136).
+                봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다.
         """
         from ante.bot.exceptions import BotNotFoundError
         from ante.trade.recorder import TradeStatus

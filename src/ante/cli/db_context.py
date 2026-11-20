@@ -2,7 +2,7 @@
 
 Spec / SSOT:
 - 부모 에픽: #1818 (CLI offline command factory)
-- 선행 contract: docs/specs/contracts/offline-factory.md (#1854)
+- 선행 contract: docs/specs/contracts/offline-factory.md
 - DB path resolver: :func:`ante.cli.main.get_db_path`
 - Database lifecycle: :class:`ante.core.database.Database`
 - cleanup 패턴 선례: #1722 ``_create_account_service`` + #1755 ``except BaseException``

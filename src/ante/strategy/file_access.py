@@ -1,4 +1,4 @@
-"""전략 파일 접근 보안 경계 공용 helper (#2083).
+"""전략 파일 접근 보안 경계 공용 helper.
 
 라이브 ``StrategyContext`` 와 ``BacktestStrategyContext`` 가 동일한 전략 파일
 접근 시맨틱(strategies/ 디렉터리 샌드박스)을 공유하도록, 보안 경계 로직을 이

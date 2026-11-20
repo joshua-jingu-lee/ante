@@ -196,7 +196,7 @@ class DataGoKrSource:
         return all_items
 
     async def validate_credentials(self) -> tuple[bool | None, str | None]:
-        """서비스키 유효성을 경량 요청 1회로 검증한다 (#2046).
+        """서비스키 유효성을 경량 요청 1회로 검증한다.
 
         가장 싼 기존 요청 패턴(getStockPriceInfo 1페이지, numOfRows=1)을
         더미 기준일자로 1회 호출한다. data.go.kr은 서비스키를 우선

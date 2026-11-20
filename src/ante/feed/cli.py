@@ -57,7 +57,7 @@ _FEED_LOGGER_NAME = "ante.feed"
 
 
 def _apply_log_level(config: dict[str, object], fmt: object) -> None:
-    """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다 (#2038).
+    """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다.
 
     유효한 레벨명(DEBUG/INFO/WARNING/ERROR/CRITICAL)이 아니면 INFO fallback
     없이 구조화 에러(``CONFIG_INVALID_LOG_LEVEL``)로 거부하고 ``SystemExit(1)``
@@ -85,7 +85,7 @@ def _apply_log_level(config: dict[str, object], fmt: object) -> None:
 
 
 def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
-    """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다 (#2037).
+    """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다.
 
     - ``guard`` 는 table(dict) 이어야 한다.
     - ``blocked_days`` 가 있으면 ``list`` 이고 각 원소는 ``str`` 이어야 한다.
@@ -146,11 +146,11 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
 
 
 def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> None:
-    """feed 커맨드 공통 진입 검증/적용 (#2037 + #2038).
+    """feed 커맨드 공통 진입 검증/적용.
 
     ``feed run backfill`` / ``feed run daily`` / ``feed start`` 가 config 로드
     직후 호출하는 단일 chokepoint 다. ``[general].log_level`` 을 ``ante.feed``
-    로거에 적용(#2038)하고 ``[guard]`` 타입을 검증(#2037)한다. 무효 입력은
+    로거에 적용하고 ``[guard]`` 타입을 검증한다. 무효 입력은
     구조화 에러 + ``SystemExit(1)`` 로 fail-loud 처리한다.
     """
     _apply_log_level(config, fmt)
@@ -163,7 +163,7 @@ _NICE_VALUE_DEFAULT = 10
 
 
 def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
-    """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다 (#2029).
+    """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다.
 
     ``feed start`` 진입 시 1회 fail-loud 검증한다. ``[general]`` 섹션은
     ``_apply_log_level`` 이 이미 table 임을 보장하므로 여기서는 nice_value
@@ -202,7 +202,7 @@ def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
 
 
 def _apply_process_nice(nice_value: int) -> None:
-    """현재 프로세스의 nice 값을 ``nice_value`` 절대값으로 설정한다 (#2029).
+    """현재 프로세스의 nice 값을 ``nice_value`` 절대값으로 설정한다.
 
     스펙(docs/specs/data-feed/08-resource-protection.md)의 "시작 시 프로세스
     우선순위를 낮춘다" 계약을 ``feed start`` 상주 루프 진입 **전에** 적용한다.

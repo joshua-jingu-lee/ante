@@ -108,7 +108,7 @@ class VirtualPortfolioView(PortfolioView):
 class VirtualOrderView(OrderView):
     """Virtual 계좌 봇용 OrderView. VirtualPortfolioView의 미체결 주문 추적.
 
-    #1948: VirtualExecutor 는 ``OrderApprovedEvent`` 를 즉시 가상 체결하고
+    VirtualExecutor 는 ``OrderApprovedEvent`` 를 즉시 가상 체결하고
     ``OrderSubmittedEvent`` 를 발행하지 않으므로(발행처는 live gateway 단독),
     virtual 주문은 OrderTracker 에 들어가지 않는다 → OrderTracker 백엔드 미사용.
     virtual 은 즉시 체결로 open window 가 사실상 없어
@@ -185,7 +185,7 @@ class VirtualExecutor:
     def subscribe(self) -> None:
         """EventBus에 OrderApprovedEvent 구독.
 
-        #2398: priority 는 ``_ORDER_APPROVED_PRIORITY``(=60)로 APIGateway(=50)보다
+        priority 는 ``_ORDER_APPROVED_PRIORITY``(=60)로 APIGateway(=50)보다
         높게 둔다 — 구독 삽입 순서와 무관하게 gateway 보다 먼저 실행돼
         ``_virtual_handled`` 마커를 set 한다(위 invariant 주석 참조).
         """

@@ -1,4 +1,4 @@
-"""FillDedupGuard — 인메모리 bounded 체결 멱등 가드 (#1957).
+"""FillDedupGuard — 인메모리 bounded 체결 멱등 가드.
 
 #1949 outbox 가 ``OrderFilledEvent`` 를 at-least-once(무손실) 로 재전달하고
 결정적 ``fill_dedup_key`` 를 제공한다. EventBus 는 fire-and-forget(핸들러 예외

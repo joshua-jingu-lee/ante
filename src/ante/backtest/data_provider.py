@@ -69,7 +69,7 @@ class BacktestDataProvider(DataProvider):
     def load(self, symbol: str, timeframe: str) -> int:
         """데이터를 캐시에 로드. 로드된 행 수 반환.
 
-        손상 파티션은 `strict=True`로 fail-closed 처리한다(#2095). store가
+        손상 파티션은 `strict=True`로 fail-closed 처리한다. store가
         손상 파티션을 silent skip하고 부분 데이터를 반환하면 백테스트가 일부
         기간을 빠뜨린 채 성공할 수 있으므로, `ParquetReadError`를
         `BacktestDataError`로 wrap해 loud 실패시킨다. get_ohlcv() 등의
@@ -112,7 +112,7 @@ class BacktestDataProvider(DataProvider):
         return len(df)
 
     def _normalize_no_trade_bars(self, df: pl.DataFrame) -> pl.DataFrame:
-        """data.go.kr 무거래 zero-OHLC 행을 flat bar(O=H=L=C)로 정규화한다(#2071).
+        """data.go.kr 무거래 zero-OHLC 행을 flat bar(O=H=L=C)로 정규화한다.
 
         data.go.kr 원본은 거래정지/무거래일을 ``open==high==low==0 & close>0 &
         volume==0`` (amount 컬럼 존재 시 ``amount==0`` 까지) 시그니처로 표현한다.
@@ -172,7 +172,7 @@ class BacktestDataProvider(DataProvider):
 
         심볼마다 거래 달력이 달라도 모든 심볼이 동일한 wall-clock 시각 기준으로
         전진하도록, 캐시된 모든 timestamp 컬럼을 합쳐 중복 제거 후 정렬한다.
-        tz-aware datetime을 그대로 유지한다(#2098).
+        tz-aware datetime을 그대로 유지한다.
         """
         if not self._cache:
             return []
@@ -186,7 +186,7 @@ class BacktestDataProvider(DataProvider):
         return sorted(seen)
 
     def _ensure_timeline(self) -> list[datetime]:
-        """timeline이 무효화(None)되어 있으면 lazy-build 후 반환한다(#2098)."""
+        """timeline이 무효화(None)되어 있으면 lazy-build 후 반환한다."""
         if self._timeline is None:
             self._timeline = self._build_timeline()
         return self._timeline
@@ -222,9 +222,9 @@ class BacktestDataProvider(DataProvider):
         BacktestDataError를 raise한다.
 
         체결 가능 가격은 ``get_current_bar_price``(현재 봉 정확 일치)를 별도로
-        쓴다. 이 메서드의 as-of 가격으로 비거래일에 체결하면 안 된다(#2098).
+        쓴다. 이 메서드의 as-of 가격으로 비거래일에 체결하면 안 된다.
 
-        조회 timeframe은 run timeframe(``self._timeframe``)이다(#2012). 이를
+        조회 timeframe은 run timeframe(``self._timeframe``)이다. 이를
         명시하지 않으면 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져 비-1d run에서
         ``{symbol}:1d`` 캐시 미스 → 1d lazy-load → 1d 종가가 현재가로 새는
         버그가 생긴다. get_ohlcv 자체가 current_ts ≤ 필터를 적용하므로
@@ -249,7 +249,7 @@ class BacktestDataProvider(DataProvider):
         None을 "이번 step에 거래 불가"로 해석해 체결을 skip해야 한다.
 
         *timeframe* 이 None(기본)이면 run timeframe(``self._timeframe``)을
-        쓴다(#2012). 비-1d run에서 기본값이 ``"1d"`` 이면 체결가가 1d 종가로
+        쓴다. 비-1d run에서 기본값이 ``"1d"`` 이면 체결가가 1d 종가로
         새므로, 실행 timeframe 캐시 키 ``{symbol}:{run_tf}`` 를 조회한다.
         명시 *timeframe* 을 주면 그 키를 쓴다(exact-current_ts 매칭은 동일).
         backtest 전용 메서드라 ABC 시그니처 제약이 없다.
@@ -282,7 +282,7 @@ class BacktestDataProvider(DataProvider):
         라이브(StrategyContext)와 동일한 로직을 사용하여
         백테스트-라이브 패리티를 보장한다.
 
-        조회 timeframe은 run timeframe(``self._timeframe``)이다(#2012). 명시
+        조회 timeframe은 run timeframe(``self._timeframe``)이다. 명시
         하지 않으면 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져 비-1d run에서 1d
         봉으로 지표가 계산되는 오류가 생긴다.
         """
@@ -295,7 +295,7 @@ class BacktestDataProvider(DataProvider):
     def advance(self) -> bool:
         """시뮬레이션 1스텝 전진. False면 데이터 끝.
 
-        통합 timeline(전 심볼 timestamp union) 위에서 전진한다(#2098). 캐시가
+        통합 timeline(전 심볼 timestamp union) 위에서 전진한다. 캐시가
         비어 있으면 False. 그 외에는 다음 timeline 인덱스가 범위 안인지로 판정.
         """
         self._current_idx += 1
@@ -324,7 +324,7 @@ class BacktestDataProvider(DataProvider):
     def reset(self) -> None:
         """인덱스 초기화. 커서를 첫 row 이전(-1)으로 되돌린다.
 
-        통합 timeline도 무효화해 다음 접근 시 재빌드한다(#2098).
+        통합 timeline도 무효화해 다음 접근 시 재빌드한다.
         """
         self._current_idx = -1
         self._timeline = None

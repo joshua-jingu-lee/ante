@@ -1,6 +1,6 @@
 """IndicatorCalculator — PER/PBR/EPS/BPS/ROE/부채비율 파생 지표 계산.
 
-fundamental 데이터는 cadence가 다른 두 소스로 구성된다(#1964):
+fundamental 데이터는 cadence가 다른 두 소스로 구성된다:
 
 - data.go.kr(``source == "data_go_kr"``): **일별** ``market_cap`` / ``shares_listed``
   (DART 재무 컬럼은 null).
@@ -20,7 +20,7 @@ semantic(#1968, PR 명문화):
     (``_ratio_expr`` 가드 유지). 지표는 가격 기반 지표의 자연 단위인 **일별
     행**(data.go.kr 행)에 부여하여 write-back한다.
 
-lookahead 제거(#2067):
+lookahead 제거:
     as-of join 키를 분기 **period_end(date)** 가 아니라 그 재무가 실제로
     **공시되어 알 수 있게 된 시점**(availability)로 바꾼다. period_end부터
     분기 값을 적용하면, 예컨대 Q1(3/31) 재무가 공시(5월 중순)되기 전인 4월
@@ -134,7 +134,7 @@ class IndicatorCalculator:
         source/date 컬럼이 없으면 0을 반환한다(graceful).
 
         Returns:
-            ``store.write`` 가 반환한 **net-new 저장 행 수**(#1993). 비율 컬럼만
+            ``store.write`` 가 반환한 **net-new 저장 행 수**. 비율 컬럼만
             채운 in-place overwrite(같은 natural key)라 행 수가 늘지 않으므로
             보통 0이다(과대계상 방지). 계산 불가(graceful 0) 시에도 0.
         """
@@ -183,11 +183,11 @@ class IndicatorCalculator:
           **버려** join 후 분기 값이 null로 덮이지 않게 한다.
         - 분기 프레임에서는 그 재무 컬럼만 **availability 키**와 함께 가져온다.
 
-        as-of 키는 분기 period_end가 아니라 effective availability다(#2067):
+        as-of 키는 분기 period_end가 아니라 effective availability다:
 
             effective = coalesce(available_date, period_end + statutory_lag)
 
-        - ``available_date``(#2010)가 있으면 그대로(point-in-time).
+        - ``available_date``가 있으면 그대로(point-in-time).
         - 없으면 period_end 월로 법정 제출기한을 도출:
           {3,6,9} → +45일, 12 → +90일.
         - 비표준 period_end 월(위 4개월이 아님) 또는 effective가 끝내 null인

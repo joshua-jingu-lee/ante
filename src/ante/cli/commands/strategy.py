@@ -551,7 +551,7 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     전략의 ``trades.strategy_id`` (거래 시점 전략 귀속 durable key)로
     해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇/여러 계좌에서
     운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고 봇의 이후
-    전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다 (#2144).
+    전략 변경으로 다른 전략에 귀속된 거래는 오염되지 않는다.
 
     지표는 ``realized_pnl``/``trade_count``/``win_rate`` 의 **기간별 절대
     집계**다. ``strategy performance`` (계좌별 portfolio-relative) 와 달리

@@ -31,7 +31,7 @@ class LiveDataProvider(DataProvider):
     과거 봉 데이터는 ParquetStore에서 읽고, 현재가는 APIGateway 캐시를 활용한다.
     ParquetStore에 데이터가 없으면 APIGateway 경유로 폴백한다.
 
-    SPLIT-3 (#1242): 봇별 인스턴스 (per-bot account binding) 로 사용된다.
+    봇별 인스턴스 (per-bot account binding) 로 사용된다.
     ``account_id`` 는 kw-only required 이며, 내부 ``_gateway.get_*`` 호출 시
     명시 전달된다. strategy 인터페이스 (``StrategyContext.get_ohlcv``) 는
     변경되지 않으며, ``StrategyContextFactory.create()`` 가 봇별로 새

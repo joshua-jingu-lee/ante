@@ -1,4 +1,4 @@
-"""FillOutbox — 체결 이벤트 transactional outbox (#1949).
+"""FillOutbox — 체결 이벤트 transactional outbox.
 
 #1946 이후 ``recorded_filled_qty`` advance + ``TradeRecord`` insert +
 ``PositionHistory.on_trade`` 는 단일 ``Database.transaction()`` 으로 묶여

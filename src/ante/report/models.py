@@ -26,7 +26,7 @@ def validate_strategy_report_metrics(
     sharpe_ratio: float | None,
     max_drawdown_pct: float | None,
 ) -> None:
-    """``StrategyReport`` metric invariant 명시 검증 (#1415).
+    """``StrategyReport`` metric invariant 명시 검증.
 
     저장 경로 (CLI submit 등 새 값을 DB에 쓰는 경계)에서만 호출한다.
     DB read path (``ReportStore._row_to_report``)는 **legacy invalid row**를 허용하기

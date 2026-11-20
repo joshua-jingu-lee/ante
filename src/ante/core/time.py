@@ -1,9 +1,9 @@
 """UTC ISO 8601 직렬화 / 압축 날짜 변환 helper.
 
 Python ``datetime.isoformat()``은 UTC offset을 ``+00:00``으로 직렬화하므로,
-응답 표면에서는 본 helper로 ``Z`` suffix로 통일한다 (Refs #1360).
+응답 표면에서는 본 helper로 ``Z`` suffix로 통일한다.
 
-Refs #2412: 공개 표면(CLI 옵션 / IPC args)의 ISO ``YYYY-MM-DD`` 를 broker
+공개 표면(CLI 옵션 / IPC args)의 ISO ``YYYY-MM-DD`` 를 broker
 어댑터 경계의 압축 ``YYYYMMDD`` 로 바꾸는 :func:`iso_to_kis_date` 를 함께
 보유한다. CLI(`ante.cli.commands.broker`)와 IPC(`ante.ipc.registry`) 두
 소비자가 **동일 함수 하나**를 호출하는 source chokepoint 이며, 어느 한쪽
@@ -39,7 +39,7 @@ def format_utc(dt: datetime) -> str:
 
 
 class InvalidIsoDateError(ValueError):
-    """ISO ``YYYY-MM-DD`` 형식/캘린더 위반 (Refs #2412).
+    """ISO ``YYYY-MM-DD`` 형식/캘린더 위반.
 
     ``code`` class attribute 로 안정 코드를 보유한다. IPC server 의
     ``getattr(e, "code", "EXECUTION_ERROR")`` (``src/ante/ipc/server.py:559``)
@@ -56,7 +56,7 @@ _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def iso_to_kis_date(value: str | None) -> str | None:
-    """공개 표면 ISO ``YYYY-MM-DD`` → broker 경계 압축 ``YYYYMMDD`` (Refs #2412).
+    """공개 표면 ISO ``YYYY-MM-DD`` → broker 경계 압축 ``YYYYMMDD``.
 
     **왜 chokepoint 인가**: ``KISDomesticAdapter.get_order_history``
     (``src/ante/broker/kis.py``)의 3개월 경계 판정은

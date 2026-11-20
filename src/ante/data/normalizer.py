@@ -299,10 +299,10 @@ class DARTNormalizer:
             포함: date, available_date, symbol, revenue, net_income,
             total_equity, total_debt, total_assets, source.
 
-        ``available_date``는 point-in-time 공시 접수일(#2010)이다. DART 응답의
+        ``available_date``는 point-in-time 공시 접수일이다. DART 응답의
         ``rcept_no``(14자리, 앞 8자리=접수일자 ``YYYYMMDD``)에서 추출한다.
         ``date``(period_end=분기말일)와 의미가 다른 **별도 value 컬럼**이며,
-        lookahead bias를 피하려는 소비자(#2067)가 as-of join 키로 쓸 수 있다.
+        lookahead bias를 피하려는 소비자가 as-of join 키로 쓸 수 있다.
         ``rcept_no``가 없거나 접수일 파싱이 실패하면 null로 강등한다(graceful).
         """
         from ante.data.schemas import FUNDAMENTAL_COLUMNS
@@ -463,7 +463,7 @@ class DARTNormalizer:
         return df.filter(pl.col("date").is_not_null())
 
     def _derive_available_date(self, df: pl.DataFrame) -> pl.DataFrame:
-        """rcept_no → available_date(공시 접수일) 컬럼 파생(#2010).
+        """rcept_no → available_date(공시 접수일) 컬럼 파생.
 
         DART 응답의 ``rcept_no``는 14자리 접수번호이며 **앞 8자리가 접수일자
         ``YYYYMMDD``** 다(05-data-sources.md L84·dart-openapi.md). 이 앞 8자리를

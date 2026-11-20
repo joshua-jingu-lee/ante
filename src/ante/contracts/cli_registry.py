@@ -9,7 +9,7 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 * :class:`OutputContract` — result shape + envelope + data slot.
 * :class:`CliCommandContract` — root-to-leaf command path + 3 sub-contract +
   execution class + (optional) IPC command name.
-* :data:`ACCOUNT_CONTRACTS` — account 도메인 9 leaf contract tuple (#1846).
+* :data:`ACCOUNT_CONTRACTS` — account 도메인 9 leaf contract tuple.
 * :data:`MEMBER_CONTRACTS` — member 도메인 12 leaf contract tuple
   (#1847 sub-PR 1).
 * :data:`BOT_CONTRACTS` — bot 도메인 11 leaf contract tuple
@@ -54,12 +54,12 @@ execution 계약을 한 곳에서 관리하는 registry 다.
 * output payload migration (`#1846` / `#1847` 는 raw_legacy 를 *문서화*
   만 하며 fmt callsite 를 바꾸지 않는다 — diff guard 가 본 PR 의 invariant).
 * drift test guard 완전 활성화 — 미등록 leaf FAIL 은 `#1848` 의 책임.
-* IPC server-side metadata (`#1819`). ``ipc_command`` 필드는 stub 값만
+* IPC server-side metadata. ``ipc_command`` 필드는 stub 값만
   채우며 cross-ref drift test 는 `#1819` 가 담당한다.
 * auth enforcement / error taxonomy 변경.
 
 `AuthMode` / `ContractKind` / `EnvelopeForm` vocabulary 는
-:mod:`ante.contracts.vocab` 의 Literal SSOT (`#1822`) 를 그대로 가져온다.
+:mod:`ante.contracts.vocab` 의 Literal SSOT 를 그대로 가져온다.
 별도 alias 를 만들거나 string literal 을 중복 정의하지 않는다.
 
 `raw_legacy` 응답은 ``OutputContract(kind="raw", envelope="raw_legacy")``

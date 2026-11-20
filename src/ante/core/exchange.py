@@ -11,7 +11,7 @@
     - 본 모듈은 **축 A — exchange-vocabulary 유효성** (canonical 5종 + `*`
       정책) 의 값 집합·검증 헬퍼만 정의한다.
     - surface별 enforcement·에러 계층·preset/broker 가용성(축 B)·신규
-      표면 validation 추가는 본 모듈의 범위가 아니다 (#1577/#1578).
+      표면 validation 추가는 본 모듈의 범위가 아니다.
     - 대소문자 정규화·별칭(alias)·사용자 정의 exchange set은 1.0 비목표다
       (core.md ``### Canonical set``). 입력은 아래 canonical 리터럴과
       **정확히 일치**해야 한다 — 본 모듈의 헬퍼는 어떤 변환도 하지 않는다.

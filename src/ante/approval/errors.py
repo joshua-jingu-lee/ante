@@ -26,7 +26,7 @@ class ApprovalError(Exception):
 
 
 class ApprovalNotFoundError(ApprovalError):
-    """결재 요청을 찾을 수 없음 (#1798).
+    """결재 요청을 찾을 수 없음.
 
     클래스 레벨 ``code`` 속성은 IPC 서버 envelope 이 안정 코드
     ``"APPROVAL_NOT_FOUND"`` 로 surface 하도록 한다. ``ValueError`` 와

@@ -43,7 +43,7 @@ _EXPECTED_DISPATCH_REJECT_CODES = frozenset(
 
 
 def _encode_signal_frame(frame: dict) -> bytes:
-    """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화 (#2337).
+    """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화.
 
     ``protocol.encode`` 와 동일한 ``[4바이트 빅엔디안 길이][JSON]`` framing 이되,
     legacy ``SignalChannel._write`` 와 byte-identical 한 페이로드를 위해
@@ -63,7 +63,7 @@ def _encode_signal_frame(frame: dict) -> bytes:
 class IPCServerState(Enum):
     """IPCServer lifecycle state.
 
-    Refs #1184: shutdown 중 mutating 명령을 reject하기 위한 명시적 상태 기계.
+    shutdown 중 mutating 명령을 reject하기 위한 명시적 상태 기계.
 
     State 전이:
 
@@ -113,20 +113,20 @@ class IPCServer:
     async def start(self) -> None:
         """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
 
-        Refs #1159: socket 파일 lifecycle은 ``unlink_socket()``이 단독으로
+        socket 파일 lifecycle은 ``unlink_socket()``이 단독으로
         책임진다 — cold-path guard가 shutdown 동안 'PID alive AND socket
         exists'로 active runtime을 판정해야 race window를 회피할 수 있기
         때문이다.
 
-        Refs #1184: 메서드 종료 시 state를 ``RUNNING``으로 전환한다.
+        메서드 종료 시 state를 ``RUNNING``으로 전환한다.
 
-        Refs #1185, #1187: Ante는 Python 3.13 단일 런타임을 공식 계약으로 한다.
+        Ante는 Python 3.13 단일 런타임을 공식 계약으로 한다.
         Python 3.13의 ``asyncio.start_unix_server``는 ``cleanup_socket`` 인자를
         받으며 기본값이 ``True``이다. 본 메서드는 ``cleanup_socket=False``를
         명시적으로 전달해 ``server.close()`` 시 socket 파일이 자동 unlink되지
         않게 만든다 — 이로써 cold-path guard(``PID alive AND socket exists``)가
         shutdown 동안에도 'active runtime'을 정확히 판정할 수 있는 race window
-        차단 의도가 유지된다 (Refs #1159).
+        차단 의도가 유지된다.
         """
         path = Path(self._socket_path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -159,7 +159,7 @@ class IPCServer:
         'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이
         호출되기 전까지 유지된다.
 
-        Refs #1184: listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로
+        listener close 호출 **전**에 state를 ``SHUTTING_DOWN``으로
         전환한다. 이래야 close 진행 중에 들어오는 dispatch도 mutating이라면
         ``SERVICE_UNAVAILABLE``로 거부된다.
         """
@@ -206,7 +206,7 @@ class IPCServer:
     def unlink_socket(self) -> None:
         """소켓 파일 제거. lifecycle 마지막 단계에서 호출.
 
-        Refs #1184: 메서드 종료 시 state를 ``STOPPED``으로 전환한다.
+        메서드 종료 시 state를 ``STOPPED``으로 전환한다.
         """
         path = Path(self._socket_path)
         if path.exists():
@@ -217,7 +217,7 @@ class IPCServer:
     async def stop(self) -> None:
         """기존 호출자 호환 facade. listener close → drain → unlink.
 
-        Refs #1184: 내부 메서드들이 lifecycle state 전환을 담당한다 —
+        내부 메서드들이 lifecycle state 전환을 담당한다 —
         ``stop_accepting()``이 SHUTTING_DOWN, ``stop_dispatching()``이 DRAINING,
         ``unlink_socket()``이 STOPPED.
         """
@@ -300,7 +300,7 @@ class IPCServer:
     def _service_unavailable(request_id: str, message: str) -> dict:
         """``SERVICE_UNAVAILABLE`` error 응답 dict 생성.
 
-        Refs #1184: 기존 error 응답 포맷
+        기존 error 응답 포맷
         ``{"id", "status": "error", "error": {"code", "message"}}``과 동일한
         구조를 사용해 다른 IPC consumer(CLI/MCP)가 별도 처리 없이
         기존 generic error path로 흘러가도록 한다.
@@ -338,7 +338,7 @@ class IPCServer:
     def _service_not_configured(request_id: str, service_name: str) -> dict:
         """``SERVICE_NOT_CONFIGURED`` error 응답 dict 생성.
 
-        Refs #1850 / #1816: dispatch wrapper의 ``required_services`` preflight 가
+        dispatch wrapper의 ``required_services`` preflight 가
         ``ServiceRegistry`` 에 의존 service 가 부재한 경우 사용한다. taxonomy
         SSOT(``docs/specs/contracts/error-taxonomy.md``) 의 ``service_unavailable``
         category 안정 코드. ``SERVICE_UNAVAILABLE``(lifecycle 상태) 와는 의미가
@@ -356,7 +356,7 @@ class IPCServer:
     def _missing_required_service(self, spec_required: frozenset[str]) -> str | None:
         """``required_services`` preflight — 부재한 첫 service 이름 반환.
 
-        Refs #1850: ``CommandSpec.required_services`` 의 각 attribute 이름을
+        ``CommandSpec.required_services`` 의 각 attribute 이름을
         ``ServiceRegistry`` 에서 ``getattr(..., None)`` 으로 조회한다.
         ``ServiceRegistry`` 는 dataclass 이고 optional service(예: ``audit_logger``,
         ``member_service``, ``trade_service``, ``strategy_registry``)는 default

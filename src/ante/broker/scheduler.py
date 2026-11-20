@@ -103,7 +103,7 @@ class ReconcileScheduler:
 
         이 스케줄러가 바인딩된 ``broker_account_id`` 계좌에 대해 브로커 총합을
         1회 조회하고, **봇 귀속 ambiguity(status 무관 봇 count)** 와 **correction
-        실행 범위(running 봇)** 를 분리해 처리한다(#2118).
+        실행 범위(running 봇)** 를 분리해 처리한다.
 
         - 1봇-total 계좌이고 **그 봇이 running**: 기존 ``reconcile`` 보정
           (self-check/skip_external_buy/external-buy 분류 무변경 #1946/#1950).
