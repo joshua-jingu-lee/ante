@@ -123,7 +123,7 @@ class RuleEngineManager:
 
         각 계좌에 대해 RuleEngine을 생성하고, 계좌별 룰 설정을 로드한다.
 
-        Stored rules 우선순위 (명시 우선 정책 — #1296 P2):
+        Stored rules 우선순위 (명시 우선 정책):
 
         1. ``dynamic_config`` (런타임 PUT으로 저장된 override). 재시작 시
            사용자가 명시적으로 비활성화한 룰이 default 재주입으로 되살아나지

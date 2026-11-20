@@ -90,23 +90,23 @@ class EventHistoryStore:
             since: ``timestamp >= since`` (inclusive lower bound).
             limit: SQL ``LIMIT`` — 반환 최대 건수.
             until: ``timestamp <= until`` (inclusive upper bound).
-                Keyword-only (#1437 r2).
+                Keyword-only.
             offset: SQL ``OFFSET`` — pagination skip 수.
-                Keyword-only (#1437 r2).
+                Keyword-only.
             payload_filter: payload JSON 내부 필드 일치 필터.
                 ``{"bot_id": "X"}`` →
-                ``WHERE json_extract(payload, '$.bot_id') = 'X'`` (#1437 r2).
+                ``WHERE json_extract(payload, '$.bot_id') = 'X'``.
                 Keyword-only. SQLite 3.38+ JSON1 (현재 stack 3.53.0).
 
-        Note (#1437 r2):
-            r1은 ``until``과 ``offset``을 위치 인자 (``until`` 이 ``limit``
-            앞)로 추가해 기존 caller가 ``query(event_type, since, 50)`` 처럼
+        Note:
+            ``until``과 ``offset``이 위치 인자 (``until`` 이 ``limit``
+            앞)이면 기존 caller가 ``query(event_type, since, 50)`` 처럼
             세 번째 위치 인자로 ``limit``을 넣던 호출 패턴이 ``50``을
-            ``until``로 잘못 바인딩할 위험이 있었다. r2는 ``until``/``offset``
-            을 keyword-only로 옮기고, ``limit``을 세 번째 위치 인자로 유지해
-            기존 호출 패턴과 안전하게 호환된다. 또한 ``payload_filter``를
-            추가해 web bot logs endpoint가 ``bot_id``를 SQL 단계에서
-            필터링할 수 있게 한다 (in-memory fetch hard cap 제거).
+            ``until``로 잘못 바인딩할 위험이 있다. 그래서 ``until``/``offset``
+            은 keyword-only이고, ``limit``은 세 번째 위치 인자로 유지해
+            기존 호출 패턴과 안전하게 호환된다. ``payload_filter``는
+            web bot logs endpoint가 ``bot_id``를 SQL 단계에서
+            필터링할 수 있게 한다.
         """
         sql = "SELECT * FROM event_log WHERE 1=1"
         params: list[str] = []
@@ -156,12 +156,12 @@ class EventHistoryStore:
             since: ``timestamp >= since`` (inclusive lower bound).
             until: keyword-only. ``timestamp <= until`` inclusive upper bound.
             payload_filter: keyword-only. payload JSON path 필터
-                (``json_extract(payload, '$.{key}') = value``) (#1437 r2).
+                (``json_extract(payload, '$.{key}') = value``).
 
         Returns:
             매칭 row 수. 필터가 모두 ``None``이면 전체 ``event_log`` row 수.
 
-        Note (#1437 r2):
+        Note:
             ``until``과 ``payload_filter``를 keyword-only로 두어 위치 인자
             오바인딩을 차단한다.
         """

@@ -45,7 +45,7 @@ class InvalidIsoDateError(ValueError):
     ``getattr(e, "code", "EXECUTION_ERROR")`` (``src/ante/ipc/server.py:559``)
     와 CLI ``emit_cli_error`` 의 ``.code`` fallback 이 이 값을 그대로
     surface 하므로, invalid 날짜가 ``EXECUTION_ERROR`` 로 접히지 않는다.
-    코드 값은 #1633 SSOT(``InvalidAccountIdError.code``)와 동일한
+    코드 값은 SSOT(``InvalidAccountIdError.code``)와 동일한
     ``VALIDATION_ERROR`` 를 재사용하며 신규 코드를 도입하지 않는다.
     """
 

@@ -38,12 +38,12 @@ def signal_connect(ctx: click.Context, key: str) -> None:
 async def _run_connect(ctx: click.Context, key: str) -> None:
     """시그널 채널을 데몬으로 위임하는 thin IPC relay.
 
-    본 명령은 더 이상 in-process 로 ``Database``/``EventBus``/``BotManager``/
-    ``SignalChannel`` 을 구성하지 않는다(#2333 회귀 원인). 대신 실행 중인 데몬의
+    본 명령은 in-process 로 ``Database``/``EventBus``/``BotManager``/
+    ``SignalChannel`` 을 구성하지 않는다. 대신 실행 중인 데몬의
     ``ante.sock`` 으로 ``signal.connect`` 핸드셰이크를 보내고(Phase A/B), OK 면
     동일 연결을 long-lived 스트림으로 전환해 stdin↔socket(``_pump_in``) /
     socket↔stdout(``_pump_out``) 만 양방향 relay 한다(Phase C). 4-게이트 검증·
-    봇 상태·이벤트 구독은 전부 데몬이 소유하며, 핸드셰이크 거부는 #1705 envelope
+    봇 상태·이벤트 구독은 전부 데몬이 소유하며, 핸드셰이크 거부는 envelope
     을 그대로 ``_fail`` 로 passthrough 한다.
     """
     from ante.cli.main import get_config_dir, get_formatter

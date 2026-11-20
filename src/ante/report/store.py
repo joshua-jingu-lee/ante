@@ -73,7 +73,7 @@ class ReportStore:
     async def submit(self, report: StrategyReport) -> str:
         """리포트 제출.
 
-        save boundary guard (#1415 codex r3): metric invariant 위반 시 ``ValueError``.
+        save boundary guard: metric invariant 위반 시 ``ValueError``.
         read path (``_row_to_report``)는 legacy invalid row 호환을 위해 우회한다.
         """
         validate_strategy_report_metrics(
@@ -130,7 +130,7 @@ class ReportStore:
         동일 strategy_name의 기존 DRAFT가 있으면 덮어쓰고,
         없으면 새로 삽입한다.
 
-        save boundary guard (#1415 codex r3): metric invariant 위반 시 ``ValueError``.
+        save boundary guard: metric invariant 위반 시 ``ValueError``.
         read path (``_row_to_report``)는 legacy invalid row 호환을 위해 우회한다.
         """
         validate_strategy_report_metrics(

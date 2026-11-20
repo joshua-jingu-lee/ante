@@ -47,8 +47,7 @@ class RateLimiter:
     일일 카운터는 self-resetting이다. ``increment_daily`` /
     ``is_daily_limit_reached`` 호출 시점에 KST 캘린더 날짜가 직전 기록과
     다르면 자동으로 0으로 리셋한다. 따라서 feed start 같은 상주 프로세스가
-    자정을 넘겨도 별도 스케줄러 없이 daily_count가 새 날짜에 맞게 초기화된다
-    (#2019).
+    자정을 넘겨도 별도 스케줄러 없이 daily_count가 새 날짜에 맞게 초기화된다.
 
     동시성: ``increment_daily`` / ``is_daily_limit_reached`` /
     ``reset_daily`` 는 sync 메서드로 유지한다(호출부 dart.py / data_go_kr.py가

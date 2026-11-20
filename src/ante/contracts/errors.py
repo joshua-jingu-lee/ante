@@ -30,7 +30,7 @@ ErrorCategory = Literal[
 ]
 """안정 에러 코드의 분류 vocabulary.
 
-``docs/specs/contracts/error-taxonomy.md`` (#1839 normative) 의 ``Category 의미``
+``docs/specs/contracts/error-taxonomy.md`` 의 ``Category 의미``
 표가 lock한 8종 분류와 정확히 일치한다. 새 카테고리 도입은 taxonomy SSOT의
 선행 갱신이 필요하다.
 """

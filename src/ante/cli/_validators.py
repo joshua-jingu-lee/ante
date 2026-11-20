@@ -4,7 +4,7 @@ Regex fullmatch 선검사 + ``datetime.strptime`` calendar parse를 CLI ingress�
 적용하기 위한 헬퍼 모음. Click의 ``callback=`` 훅에 끼워서 invalid 입력을
 ``click.BadParameter``로 거부한다.
 
-오라클 A7 finding(#1513): CLI ``audit list --from-date/--to-date``와
+CLI ``audit list --from-date/--to-date``와
 ``treasury snapshot --date/--from/--to``가 ``not-a-date`` 같은 invalid 입력을
 exit 0으로 처리하여 빈 결과/없는 snapshot이 실제 데이터 부재와 구별되지
 않는 ingress drift가 있었다. 본 모듈이 그 drift를 닫는다.
@@ -85,7 +85,7 @@ def validate_positive_finite_amount(
 ) -> float | None:
     """Click callback: 양수 finite float 검증 (NaN/Infinity/0/음수 거부).
 
-    오라클 A7 finding(#1517): ``treasury allocate``/``deallocate``의 ``amount``
+    ``treasury allocate``/``deallocate``의 ``amount``
     인자가 ``type=float``만 갖춰 Python ``float('nan')``/``float('inf')``/0/
     음수도 그대로 통과시키고 IPC layer까지 비정상 numeric을 전파하던 ingress
     drift를 닫는다. 본 callback이 그 drift를 닫는다.
@@ -135,16 +135,16 @@ def validate_nonnegative_finite_amount(
 ) -> float | None:
     """Click callback: 0 이상 finite float 검증 (NaN/Infinity/음수 거부).
 
-    오라클 A7 finding(#1517 — ``treasury set-balance`` amount): ``type=float``만
+    ``treasury set-balance`` amount: ``type=float``만
     갖춰 ``float('nan')``/``float('inf')``/음수가 그대로 통과되던 ingress drift를
-    닫는다. 오라클 A7 finding(#1723 — ``account create
-    --market-order-reserve-buffer-rate``)도 동일 invariant를 요구하며, 본 SSOT는
+    닫는다. ``account create
+    --market-order-reserve-buffer-rate``도 동일 invariant를 요구하며, 본 SSOT는
     두 호출 표면 공유 callback이다.
 
     :func:`validate_positive_finite_amount`와의 차이는 **0 허용 boundary**다.
     ``Account.market_order_reserve_buffer_rate``는 ``docs/specs/account/03-data-
     model.md:55,147``에서 ``Decimal("0")`` 기본값을 명시하고 있어 0을 정상값으로
-    수용해야 한다 (#1333 cold-path structural field).
+    수용해야 한다 (cold-path structural field).
 
     검증은 두 단계:
 
@@ -195,7 +195,7 @@ def reject_inverted_date_range(
 ) -> None:
     """공유 date-only 헬퍼: ``from > to`` inverted range를 거부한다.
 
-    오라클 A7 finding(#1597): ``audit list``/``trade list``/
+    ``audit list``/``trade list``/
     ``treasury snapshot``/``report performance --period daily`` 4개 read/report
     명령이 inverted date range(시작일 > 종료일)를 non-zero가 아니라 exit 0 빈
     결과로 처리하여 실제 데이터 부재와 구별되지 않던 ingress drift가 있었다.
@@ -256,7 +256,7 @@ def reject_invalid_new_account_id(
 ) -> str:
     """공유 helper: create-path 신규 ``account_id``를 service 진입 이전에 거부.
 
-    오라클 #1724 finding(D follow-up — #1634 동형): cold-path
+    cold-path
     ``account create``가 invalid ``account_id``(``default`` RESTRICTED,
     pattern 위반 ``bad_id``, ``""``/``None``)를 ``AccountService.create``
     SQL 진입 이전에 거부하지 않아 일부는 ``ACCOUNT_NOT_FOUND``로 오분류되고
@@ -276,7 +276,7 @@ def reject_invalid_new_account_id(
     (``src/ante/cli/middleware.py:568-596``)은 ``click.UsageError``/``Abort``만
     envelope 변환한다. 따라서 본 helper가 그 예외를 **명시적으로** catch해
     ``fmt.error(str(e), code=e.code)`` + ``SystemExit(1)``로 변환한다.
-    에러 코드는 #1633 SSOT
+    에러 코드는 SSOT
     (``InvalidAccountIdError.code == "VALIDATION_ERROR"``)를 그대로 재사용하며
     신 코드를 도입하지 않는다.
 
@@ -311,7 +311,7 @@ def reject_invalid_account_id(
 ) -> str:
     """공유 helper: provided invalid ``account_id``를 lookup/filter 이전에 거부.
 
-    오라클 #1623 finding(Split A — #1634): read-only account-scoped CLI
+    read-only account-scoped CLI
     (``account info``/``account credentials``/``bot list --account``)가 invalid
     ``account_id``(``default``/``""``/패턴 위반)를 ``AccountService.get`` lookup
     이나 SQL filter 이전에 거부하지 않아, not-found 메시지로 오분류되거나
@@ -325,13 +325,13 @@ def reject_invalid_account_id(
     (``src/ante/cli/middleware.py:568-596``)은 ``click.UsageError``/``Abort``만
     envelope 변환한다. 따라서 본 helper가 그 예외를 **명시적으로** catch해
     ``fmt.error(str(e), code="VALIDATION_ERROR")`` + ``SystemExit(1)``로
-    변환한다(미catch 시 traceback/uncaught). 에러 코드는 #1633 SSOT
+    변환한다(미catch 시 traceback/uncaught). 에러 코드는 SSOT
     (``InvalidAccountIdError.code == "VALIDATION_ERROR"``)를 ``e.code``로 그대로
     재사용하며 신 코드를 도입하지 않는다.
 
     **omitted-vs-provided 계약**: ``bot list --account``는 ``--account`` 미지정
     (``account_id is None``) 시 전체 봇을 반환하는 동작을 보존해야 한다(omitted
-    보존, #1624 동형). 그 호출 표면은 ``account_id is not None``일 때만 본
+    보존). 그 호출 표면은 ``account_id is not None``일 때만 본
     helper를 호출해 provided 값만 검증한다. 본 helper 자체는 ``None``도
     invalid로 거부하므로(``require_account_id`` 계약), omitted 분기를 보존할
     책임은 호출 표면에 있다. positional required arg(``account info``/

@@ -7,13 +7,12 @@ r"""Canonical symbol/timeframe vocabulary — 코드 레벨 SSOT.
     docs/specs/core/core.md ``## Canonical Symbol/Timeframe Vocabulary``
     docs/decisions/D-017-canonical-symbol-timeframe-vocabulary.md
 
-범위 불변식 (#1613 narrow-scope):
+범위 불변식:
     - 본 모듈은 **축 A — OHLCV bar timeframe canonical set** (고정 5종·
       고정 순서) 과 **축 E — 신규 입력 KRX symbol shape** (`^[0-9]{6}$`,
       exchange == KRX 신규 입력 한정) 의 값 집합·검증 헬퍼만 정의한다.
     - surface별 enforcement·에러 계층·신규 표면 validation 추가는 본
-      모듈의 범위가 아니다 (#1603/#1604/#1605/#1606/#1611/#1614,
-      #1594 잔여 symbol filter).
+      모듈의 범위가 아니다.
     - alias(예: `1min`/`D`/`daily`/`1D`)·대소문자 정규화·사용자 정의
       timeframe set은 1.0 비목표다 (core.md ``### Canonical timeframe
       set``). 입력은 아래 canonical 리터럴과 **정확히 일치**해야 한다 —
@@ -50,7 +49,7 @@ def is_krx_symbol(value: str) -> bool:
 
     ``fullmatch`` 로 검사하여 leading/trailing whitespace·trailing
     ``\n`` 을 모두 거부한다 (core.md ``### KRX symbol shape``,
-    #1299 fail-closed 엄격도 유지). 비문자열 입력은 ``re`` 가
+    fail-closed 엄격도 유지). 비문자열 입력은 ``re`` 가
     ``TypeError`` 를 던지므로 ``isinstance`` 로 선검사 후 ``False`` 로
     잠근다. 이 헬퍼는 어떤 정규화도(no-normalization) 하지 않으며
     Unicode digit(예: `１２３４５６`)은 ASCII `[0-9]` 가 아니므로

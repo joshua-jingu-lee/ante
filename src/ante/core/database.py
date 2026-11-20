@@ -43,8 +43,8 @@ class Database:
     설정한다(기존 baseline). ``read_only=True``는 reader 단일 연결만 SQLite
     ``file:...?mode=ro`` URI 로 열어 schema/WAL 쓰기 없이 기존 DB 를 읽는다
     (offline-factory.md §2 옵션 A). read-only 모드는 기존 스키마를 부트스트랩
-    없이 읽는 offline read 명령(현재 ``backtest history`` — #1974, ``data list``
-    의 종목명 보강 — #1984, ``report list``/``report view`` — #2114)에만
+    없이 읽는 offline read 명령(현재 ``backtest history``, ``data list``
+    의 종목명 보강, ``report list``/``report view``)에만
     적용된다.
     """
 
@@ -289,7 +289,7 @@ class Database:
 
     @staticmethod
     async def _best_effort_rollback(conn: aiosqlite.Connection) -> None:
-        """non-owner 자동커밋 경로의 cleanup ROLLBACK(best-effort, #2365).
+        """non-owner 자동커밋 경로의 cleanup ROLLBACK(best-effort).
 
         cancellation-safety invariant: 이 메서드는 ``except BaseException`` 진입
         **직후** suspension 없이 곧바로 ``await conn.execute("ROLLBACK")`` 에
@@ -309,7 +309,7 @@ class Database:
 
         현재 태스크가 트랜잭션 owner 면 lock 없이 인라인 실행 + commit skip
         (같은 태스크 트랜잭션 합류). 아니면 ``_write_lock`` 안에서 실행 후
-        독립 commit 한다(태스크 간 직렬화 — #2365).
+        독립 commit 한다(태스크 간 직렬화).
         """
         conn = self._get_writer()
         if self._in_transaction:
@@ -341,7 +341,7 @@ class Database:
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
 
         현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
-        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화 — #2365).
+        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화).
         """
         conn = self._get_writer()
         if self._in_transaction:
@@ -370,7 +370,7 @@ class Database:
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
 
         현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
-        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화 — #2365).
+        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화).
         """
         conn = self._get_writer()
         if self._in_transaction:

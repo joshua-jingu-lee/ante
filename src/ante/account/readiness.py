@@ -1,4 +1,4 @@
-"""RuntimeReadinessRegistry — per-account runtime readiness SSOT (D-ACC-09, #2397).
+"""RuntimeReadinessRegistry — per-account runtime readiness SSOT (D-ACC-09).
 
 스펙 SSOT: [docs/specs/account/02-design-decisions.md — D-ACC-09](
 ../../../docs/specs/account/02-design-decisions.md) ·
@@ -9,9 +9,6 @@
 스케줄러 등록 성공/실패에서 derive 한다. SSOT 는 본 registry **단독**이며,
 ``Services.fill_schedulers``/``reconcile_schedulers`` dict 는 스케줄러 인스턴스
 보관용일 뿐이다(reader 는 registry 만 조회).
-
-본 PR(#2397)은 registry 를 채우기만 한다(관측-only). active-order gate reader
-는 #2398 에서 추가한다 — 따라서 이 모듈을 도입해도 **주문 동작은 불변**이다.
 """
 
 from __future__ import annotations
@@ -87,7 +84,7 @@ class RuntimeReadinessRegistry:
 
     registry-owned 권위: ``main._init_*`` 등록자가 스케줄러 등록과 **동시에**
     ``mark_ready``/``mark_not_ready(reason)`` 로 명시 기록하는 단일 mark 경로다
-    ([must_fix F]). reader(#2398 gateway/RuleEngine/Treasury)는
+    ([must_fix F]). reader(gateway/RuleEngine/Treasury)는
     ``active_trading_ready`` 만 호출한다.
 
     면제 매트릭스는 ``active_trading_ready`` derive 시점에 적용한다 — 면제 플래그는
@@ -153,9 +150,6 @@ class RuntimeReadinessRegistry:
 
         면제 매트릭스로 면제된 플래그는 ``True`` 로 취급한 뒤 AND 한다. 비면제
         플래그는 명시 ready 여야 한다(디폴트 fail-closed → not_ready 면 False).
-
-        본 PR(#2397)은 이 함수를 호출하는 gate reader 를 **추가하지 않는다**
-        (gate=#2398). 관측·테스트 용으로만 노출한다(주문 동작 불변).
         """
         for flag in ALL_FLAGS:
             if is_flag_exempt(flag, broker_type=broker_type, trading_mode=trading_mode):

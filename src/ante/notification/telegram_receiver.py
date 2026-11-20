@@ -415,7 +415,7 @@ class TelegramCommandReceiver:
 
         SSOT: ``docs/specs/notification/notification.md`` 지원 명령 표.
         ``TreasuryManager.list_all()`` (sync) 으로 등록된 모든 계좌의 잔고를
-        계좌별 섹션으로 렌더링한다 (#2378 — 단일 ``Treasury`` 주입 결함 정정).
+        계좌별 섹션으로 렌더링한다.
         """
         if not self._treasury_manager:
             return "TreasuryManager가 연결되지 않았습니다."

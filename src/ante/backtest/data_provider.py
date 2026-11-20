@@ -23,7 +23,7 @@ class BacktestDataProvider(DataProvider):
     """백테스트용 DataProvider. 과거 데이터를 시간순으로 제공.
 
     미래 데이터 참조를 방지하기 위해 통합 timeline(전 심볼 timestamp의 union)을
-    기준으로 현재 시각까지만 노출한다(as-of 관측, #2098). 심볼별 거래 달력이
+    기준으로 현재 시각까지만 노출한다(as-of 관측). 심볼별 거래 달력이
     달라도 같은 step에서 모든 심볼이 동일한 wall-clock 시각(current_ts) 이하만
     보므로, 공유 row-index가 유발하던 미래 데이터 노출(lookahead)이 발생하지
     않는다.
@@ -197,7 +197,7 @@ class BacktestDataProvider(DataProvider):
         timeframe: str = "1d",
         limit: int = 100,
     ) -> pl.DataFrame:
-        """현재 시점(current_ts)까지의 OHLCV 데이터 반환(as-of 관측, #2098).
+        """현재 시점(current_ts)까지의 OHLCV 데이터 반환(as-of 관측).
 
         공유 row-index 슬라이스 대신 통합 timeline의 current_ts 이하 행만
         노출한다. current_ts가 None(pre-advance/끝)이면 empty를 반환한다.
@@ -239,7 +239,7 @@ class BacktestDataProvider(DataProvider):
     def get_current_bar_price(
         self, symbol: str, timeframe: str | None = None
     ) -> float | None:
-        """현재 시각(current_ts)에 정확히 일치하는 봉의 종가(체결 가능가, #2098).
+        """현재 시각(current_ts)에 정확히 일치하는 봉의 종가(체결 가능가).
 
         current_ts가 None이면 None. 심볼 df에서 ``timestamp == current_ts`` 인
         행을 정확 일치 조회한다. 없으면(해당 심볼이 current_ts에 봉이 없음 =
@@ -305,7 +305,7 @@ class BacktestDataProvider(DataProvider):
         return self._current_idx < len(timeline)
 
     def get_current_timestamp(self) -> datetime | None:
-        """현재 시뮬레이션 시각(통합 timeline의 current_idx 위치, #2098)."""
+        """현재 시뮬레이션 시각(통합 timeline의 current_idx 위치)."""
         if self._current_idx < 0:
             return None
         if not self._cache:
@@ -316,7 +316,7 @@ class BacktestDataProvider(DataProvider):
         return timeline[self._current_idx]
 
     def get_total_steps(self) -> int:
-        """전체 시뮬레이션 스텝 수(통합 timeline의 distinct 시각 개수, #2098)."""
+        """전체 시뮬레이션 스텝 수(통합 timeline의 distinct 시각 개수)."""
         if not self._cache:
             return 0
         return len(self._ensure_timeline())

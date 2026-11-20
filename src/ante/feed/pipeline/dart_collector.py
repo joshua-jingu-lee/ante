@@ -47,7 +47,7 @@ class QuarterStatus(Enum):
       손실 가능성을 surface하고 이 run의 checkpoint 전진을 동결한다.
     - ``SKIP_EMPTY``: ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시
       가능). checkpoint를 전진시키지 않으면서 halt도 세우지 않아, 오름차순
-      순회에서 후속 분기 처리를 계속한다(#2028).
+      순회에서 후속 분기 처리를 계속한다.
     """
 
     OK = "ok"
@@ -384,14 +384,14 @@ class DARTCollector:
 
             ``status``는 이 분기에 대한 checkpoint 전진/halt 결정을 구동하는
             3-상태다. **storable_rows 기준으로만 판정**하며
-            store-merge 실패를 절대 섞지 않는다(#2028 의미 보존):
+            store-merge 실패를 절대 섞지 않는다:
 
             - transient 예외(warn 추가) → ``QuarterStatus.HALT``
               (미전진 + 이후 분기 동결, 다음 run 재시도)
             - ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시 가능) →
               ``QuarterStatus.SKIP_EMPTY``(미전진하되 halt 미설정; 후속 분기
-              처리는 계속). 과거에는 ``ok=True``로 checkpoint를 전진시켜 빈
-              분기를 "완료"로 오인하고 이후 공시를 누락했다(#2028 버그).
+              처리는 계속). ``ok=True``로 checkpoint를 전진시키면 빈
+              분기를 "완료"로 오인하고 이후 공시를 누락한다.
             - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
               warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
             - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)
@@ -483,8 +483,7 @@ class DARTCollector:
         """raw 데이터를 정규화하고 심볼별로 저장한다.
 
         Returns:
-            ``(storable_rows, net_delta, symbols)`` — 두 신호를 **분리** 반환한다
-            (#1993, #2028 보존):
+            ``(storable_rows, net_delta, symbols)`` — 두 신호를 **분리** 반환한다:
 
             - ``storable_rows``: 정규화/저장 가능한 행 수(정규화 결과 심볼별 행
               수의 합). normalized가 비거나 symbol 컬럼이 없으면 0. 이 값이
@@ -493,7 +492,7 @@ class DARTCollector:
               기준). 재수집(dedup으로 net_delta=0)이어도 storable_rows>0이라
               빈응답/no-storable과 구분된다.
             - ``net_delta``: ``store.write`` 가 반환한 **실제 net-new 저장 행 수**
-              의 합(rows_written, #1993). 재수집/dedup이면 0.
+              의 합(rows_written). 재수집/dedup이면 0.
             - ``symbols``: 저장 대상 심볼 집합.
         """
         df = pl.DataFrame(raw_items)

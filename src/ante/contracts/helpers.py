@@ -41,7 +41,7 @@ _SCREAMING_SNAKE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 def error_spec_for_exception(exc: BaseException) -> ErrorSpec:
     """Exception 인스턴스를 ``ErrorSpec`` 으로 resolve.
 
-    resolver 우선순위(plan #1840 — Codex Plan Review v2 흡수):
+    resolver 우선순위:
 
     1. ``EXCEPTION_TO_SPEC`` registry 의 MRO lookup — ``type(exc).__mro__`` 를
        따라 첫 매치를 반환한다 (subclass 도 base class registry entry로 매칭).
@@ -79,7 +79,7 @@ def _resolve_message(
 ) -> str:
     """``emit_cli_error`` / ``ipc_error_payload`` 가 공유하는 message resolution.
 
-    우선순위(plan #1840 Codex Plan Review v2 normative):
+    우선순위:
 
     1. ``fallback_message`` 인자 (호출자가 명시 제공한 도메인 문구).
     2. ``str(exc)`` (비어있지 않을 때).
@@ -142,7 +142,7 @@ def ipc_error_payload(exc: BaseException) -> dict[str, str]:
 
     Returns:
         ``{"code": <ErrorSpec.code>, "message": <resolved message>}``. 양쪽
-        모두 str 이다 — envelope shape (envelopes.md #1821) 와 정렬.
+        모두 str 이다 — envelope shape (envelopes.md) 와 정렬.
     """
 
     spec = error_spec_for_exception(exc)

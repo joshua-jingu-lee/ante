@@ -10,12 +10,6 @@ type-key 기반 merge다.
 
 stored 항목이 default와 같은 ``type``이면 stored가 default를 override한다.
 사용자/Agent는 ``enabled: false``로 default를 명시 비활성화할 수 있다.
-
-회귀: A7 oracle (#1296) — KIS 모의투자 KRX 장종료 상태에서 시장가 매수
-신호가 매 interval 반복 → broker까지 도달 → KIS ``40580000`` 4건 누적.
-근본 원인은 ``RuleEngineManager``가 KIS domestic 계좌에 default
-``TradingHoursRule``을 자동 주입하지 않아 spec(09-rule-management.md L43)
-위반이었다.
 """
 
 from __future__ import annotations

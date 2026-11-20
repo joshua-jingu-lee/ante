@@ -12,7 +12,7 @@ row-wise 계산(예: ``per = market_cap / net_income``)은 한 행에 cross-sour
 피연산자가 동시에 존재하지 않아 **모든 지표가 null**이 된다. 이를 해소하기
 위해 source별로 분리한 뒤 **as-of join**으로 결합한다.
 
-semantic(#1968, PR 명문화):
+semantic:
     net_income / total_equity / total_debt 는 "일별 date 기준 **가장 최근에
     보고된 분기 재무 값**"(``join_asof(strategy="backward")``)을 사용한다.
     TTM(trailing-twelve-months) 합산이나 연간환산은 **하지 않는다**(Non-Goal,
@@ -30,7 +30,7 @@ lookahead 제거:
 
         effective = coalesce(available_date, period_end + statutory_lag)
 
-    - ``available_date``(#2010, DART 공시 접수일 rcept_dt)가 있으면 **그대로**
+    - ``available_date``(DART 공시 접수일 rcept_dt)가 있으면 **그대로**
       쓴다(point-in-time 정확).
     - 없는 legacy 행은 **자본시장법 법정 제출기한**으로 보수적 fallback한다:
       분기/반기/3분기 보고서(period_end 월 ∈ {3,6,9})는 기말 후 45일,
@@ -103,7 +103,7 @@ class IndicatorCalculator:
         """심볼 목록에 대해 파생 지표를 계산하여 저장한다.
 
         Returns:
-            **net-new 저장 행 수**(rows_written, #1993). 지표 계산은 기존 일별
+            **net-new 저장 행 수**(rows_written). 지표 계산은 기존 일별
             fundamental 행을 비율 컬럼만 채워 같은 natural key로 in-place
             overwrite하므로(행 수 불변), 보통 net-delta=0이다. 이는 정상이며
             rows_written 과대계상을 방지한다.
@@ -238,7 +238,7 @@ class IndicatorCalculator:
         비표준 period_end 월이면서 available_date도 없는 행, 또는 effective가
         끝내 null인 행은 **제거**한다(as-of 정렬 안정성 + lookahead 안전).
 
-        ``available_date`` 컬럼은 #2010 이전 legacy 파티션에는 아예 없을 수
+        ``available_date`` 컬럼은 legacy 파티션에는 아예 없을 수
         있으므로(존재해도 nullable), 없으면 전 행 null(=법정기한 fallback만
         사용)로 취급한다.
         """

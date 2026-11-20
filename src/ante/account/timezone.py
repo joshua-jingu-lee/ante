@@ -22,9 +22,9 @@ caller 책임:
 Non-goals:
 
 - :class:`ante.account.models.Account` ``__post_init__`` hard 검증은 적용하지
-  않는다(legacy DB row load 호환 보존 — #1474 별도 이슈).
+  않는다(legacy DB row load 호환 보존).
 - :class:`ante.rule.global_rules.TradingHoursRule` 의 runtime invalid timezone
-  처리는 #1475 별도 이슈 범위다.
+  처리.
 """
 
 from __future__ import annotations

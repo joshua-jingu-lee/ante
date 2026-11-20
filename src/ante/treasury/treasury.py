@@ -397,13 +397,12 @@ class Treasury:
 
         ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
         한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
-        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
-        (#1411).
+        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다.
 
-        Refs #1809 (oracle A7 @ a5d8edf): 직전에는 reject 시 ``bool=False`` 를
-        반환했으나, CLI/IPC envelope ``code`` 가 빈 문자열로 surface 되는
+        reject reason 별 typed exception 으로, CLI/IPC envelope ``code`` 가
+        빈 문자열로 surface 되는
         회귀(spec ``docs/specs/cli/02-design-decisions.md:83-89`` 위반)를 차단
-        하기 위해 reject reason 별 typed exception 으로 변경되었다.
+        한다.
 
         Raises:
             TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
@@ -446,11 +445,9 @@ class Treasury:
 
         ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
         한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
-        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다
-        (#1411).
+        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다.
 
-        Refs #1809 (oracle A7 @ a5d8edf): allocate 와 동형으로 reject 시
-        typed exception. (``bool=False`` → typed raise contract 변경.)
+        allocate 와 동형으로 reject 시 typed exception.
 
         Raises:
             TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
@@ -649,7 +646,7 @@ class Treasury:
         """특정 봇의 미체결 예약 내역 조회.
 
         Returns:
-            ``{order_id: remaining_reserved, ...}`` — 두번째 항은 #1947 이후
+            ``{order_id: remaining_reserved, ...}`` — 두번째 항은
             주문의 **잔여 예약**(아직 정산되지 않은 예약 자금)이다. 부분체결된
             주문이면 이미 체결된 분을 제외한 잔여만 반영한다.
         """
@@ -1050,7 +1047,7 @@ class Treasury:
     async def _on_order_filled(self, event: object) -> None:
         """체결 이벤트 처리 -- 예약 자금 정산.
 
-        #1957: outbox at-least-once 재전달에 대한 **진짜 exactly-once-effect**.
+        outbox at-least-once 재전달에 대한 **진짜 exactly-once-effect**.
         ``fill_dedup_key`` 가 비빈키면 전용 ``treasury_fill_dedup`` 테이블에
         ``INSERT OR IGNORE`` 한 뒤 정산을 **같은 트랜잭션**에 묶어, 재전달(이미
         처리된 키)은 정산을 0회 추가한다(dedup-insert ⟺ 정산 1:1). 빈키
@@ -1156,7 +1153,7 @@ class Treasury:
           - ``reserved -= covered`` ; ``remaining_reserved -= covered`` ;
             ``spent += actual_cost``
           - ``shortfall = actual_cost - covered``; ``shortfall>0`` 이면
-            ``available -= shortfall`` (체결가>예약분 = 기존 #1333 shortfall
+            ``available -= shortfall`` (체결가>예약분 = 기존 shortfall
             동작 보존, audit warning 유지)
 
         terminal 판정은 OrderTracker(``recorded_filled_qty >= ordered_qty``)로
@@ -1217,10 +1214,10 @@ class Treasury:
     def _settle_buy_full_fill(
         self, event: Any, budget: BotBudget, actual_cost: float
     ) -> None:
-        """tracker 부재 매수 full-fill pop-once 정산 (#1947 R1-2 fallback).
+        """tracker 부재 매수 full-fill pop-once 정산 (R1-2 fallback).
 
         VirtualProvider 처럼 단일 full-fill 이벤트만 발행하고 OrderTracker 에
-        seed 되지 않는 주문은 #1947 이전과 동일한 전액 pop + surplus/shortfall
+        seed 되지 않는 주문은 전액 pop + surplus/shortfall
         1회 정산이 정확하다.
         """
         entry = self._reservations.pop(event.order_id, None)
@@ -1507,7 +1504,7 @@ class Treasury:
         """KIS 잔고 데이터로 Treasury 상태 동기화.
 
         ``purchasable_amount``(주문가능액)는 무인자 ``get_account_balance``
-        (``inquire-balance``)가 산출할 수 없어 반환 dict에 더 이상 없으므로(#2384),
+        (``inquire-balance``)가 산출할 수 없어 반환 dict에 없으므로,
         ``sync_balance``는 이를 **읽지 않는다**. 주문가능액은 ``_do_sync``가
         ``BrokerAdapter.get_buyable`` 결과로 별도 주입한다(매수가능액 동기화 규약,
         treasury/04-treasury-interface 참조).

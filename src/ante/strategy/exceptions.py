@@ -1,8 +1,8 @@
 """Strategy 모듈 예외.
 
-class-level ``code`` 정책 (#1843 sub-PR 6, 실측 mirror):
+class-level ``code`` 정책 (실측 mirror):
 
-- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` (#1796 lock 보존)
+- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` (lock 보존)
 - ``StrategyLoadError`` → ``STRATEGY_LOAD_ERROR`` (validation; 본 PR 신규 부여)
 - ``StrategyValidationError`` → ``STRATEGY_VALIDATION_ERROR`` (validation; 본 PR
   신규 부여) — CLI ``strategy submit``/``validate`` 의
@@ -14,7 +14,7 @@ class-level ``code`` 정책 (#1843 sub-PR 6, 실측 mirror):
 
 ``StrategyError`` base 는 의도적으로 ``.code`` 를 부여하지 않는다 — 사용
 사례가 없으며, allowlist 의 ``pending_migration`` baseline 으로 보존된다
-(#1842 ``AccountError`` 와 동일 패턴).
+(``AccountError`` 와 동일 패턴).
 """
 
 
@@ -38,7 +38,7 @@ class StrategyNotFoundError(StrategyError):
 
 
 class StrategyLoadError(StrategyError):
-    """전략 파일 로드 실패 (#1843 sub-PR 6).
+    """전략 파일 로드 실패.
 
     클래스 레벨 ``code`` 는 IPC 서버 ``getattr(e, "code", ...)`` 와 helper
     registry-first lookup 이 동일 ``STRATEGY_LOAD_ERROR`` 안정 코드를 surface
@@ -50,7 +50,7 @@ class StrategyLoadError(StrategyError):
 
 
 class StrategyValidationError(StrategyError):
-    """전략 검증 실패 (#1843 sub-PR 6).
+    """전략 검증 실패.
 
     클래스 레벨 ``code`` 는 CLI ``strategy submit``/``validate`` /
     ``strategy list --status`` 의 ``STRATEGY_VALIDATION_ERROR`` surface 와
@@ -62,7 +62,7 @@ class StrategyValidationError(StrategyError):
 
 
 class StrategyFileAccessError(StrategyError):
-    """전략 파일 접근 오류 (#1843 sub-PR 6).
+    """전략 파일 접근 오류.
 
     클래스 레벨 ``code`` 는 파일 시스템 접근 실패의 안정 코드 surface 다.
     taxonomy 카테고리는 ``external`` (파일 시스템은 외부 의존성).
@@ -72,7 +72,7 @@ class StrategyFileAccessError(StrategyError):
 
 
 class IncompatibleExchangeError(StrategyError):
-    """전략의 exchange와 계좌의 exchange가 호환되지 않음 (#1843 sub-PR 6).
+    """전략의 exchange와 계좌의 exchange가 호환되지 않음.
 
     클래스 레벨 ``code`` 는 전략 ↔ 계좌 호환성 검증 거부의 안정 코드 다.
     taxonomy 카테고리는 ``validation`` (호환성 invariant 위반).

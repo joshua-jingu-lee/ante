@@ -88,7 +88,7 @@ class APIGateway:
     async def _readiness_gate(self, account_id: str, *, side: object) -> None:
         """계층3 active-order gate — ``broker.place_order`` **직전** 단일 재확인.
 
-        **위치(#2398 attempt4-a, P1)**: ``rate_limiter.acquire()``(최대 ~60s await)
+        **위치**: ``rate_limiter.acquire()``(최대 ~60s await)
         + ``_get_broker()`` await **이후**, ``place_order`` 직전에 호출된다(spec
         broker-adapter/11-order-flow.md). acquire/get_broker 대기 중 ``mark_not_ready``/
         suspend 가 끼어도 그 직후 단일 재확인으로 TOCTOU 윈도우를 닫는다(재확인
@@ -359,7 +359,7 @@ class APIGateway:
         """주문 취소. account_id로 브로커 라우팅.
 
         취소 대상은 **내부 order_id** 로 들어오지만 BrokerAdapter 는
-        broker_order_id(증권사 주문번호, KIS ``odno`` 등)를 요구한다. #2134:
+        broker_order_id(증권사 주문번호, KIS ``odno`` 등)를 요구한다.
         OrderTracker 로 ``order_id → broker_order_id`` 를 변환한 뒤 broker 에
         전달한다. 변환 불가/검증 실패 시 **fail-closed** 로 ``False`` 를 반환하고
         broker 를 호출하지 않는다 (내부 order_id 를 broker 로 passthrough 하지
@@ -586,7 +586,7 @@ class APIGateway:
             )
 
     async def _on_order_modify(self, event: object) -> None:
-        """주문 정정 요청 → broker 위임 (#2391, v1=price-only).
+        """주문 정정 요청 → broker 위임 (v1=price-only).
 
         RuleEngine이 이미 정정 요청을 거부하면 ``_consumed=True`` transient
         marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우 추가
@@ -627,7 +627,7 @@ class APIGateway:
             """비-bool 유한 숫자 여부 — 예외 무전파(terminal 보장).
 
             비숫자·bool·NaN/Inf 는 False. float 로 표현 불가한 큰 정수
-            (``math.isfinite`` 가 ``OverflowError`` raise — #1412 P2-2 동형)도
+            (``math.isfinite`` 가 ``OverflowError`` raise — P2-2 동형)도
             예외를 삼켜 False 로 본다(핸들러 예외로 terminal update 가 소실되지
             않도록 fail-closed).
             """

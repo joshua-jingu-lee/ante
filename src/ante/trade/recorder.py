@@ -228,7 +228,7 @@ class TradeRecorder:
         await self._save(record)
 
     async def _on_modified(self, event: object) -> None:
-        """정정 완료 이벤트 → 정정 기록 저장 (#2391, v1=price-only).
+        """정정 완료 이벤트 → 정정 기록 저장 (v1=price-only).
 
         ``OrderModifyExecutedEvent.price`` 는 신규 정정 가격이며, ``quantity`` 는
         원주문 수량(불변)이다. ``event_id`` 를 trade_id PK 로 써 멱등(INSERT OR
@@ -425,7 +425,7 @@ class TradeRecorder:
 
         legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
         :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 trade read
+        스키마/데이터 마이그레이션이 완료되기 전에도 trade read
         경로(get_trades, DailyReport 등)가 실패하지 않도록 하기 위함이다.
         """
         try:

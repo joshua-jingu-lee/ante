@@ -24,7 +24,7 @@ class LivePortfolioView(PortfolioView):
     """Live 봇용 PortfolioView. Treasury(잔고) + Trade(포지션) 경유.
 
     ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
-    로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_positions`` 는
+    로 binding 한다(``LiveOrderView`` 패턴 미러). ``get_positions`` 는
     ``PositionHistory`` 인메모리 캐시를 ``(account_id, bot_id)`` 스코프로 조회해
     타 계좌 포지션이 전략 컨텍스트에 누출되지 않게 한다.
     """
@@ -96,7 +96,7 @@ class LiveTradeHistoryView(TradeHistoryView):
     """Live 봇용 TradeHistoryView. TradeRecorder에서 거래 이력 조회.
 
     ``account_id`` 는 봇별 컨텍스트 생성 시 ``StrategyContextFactory`` 가 closure
-    로 binding 한다(``LiveOrderView`` #1948 패턴 미러). ``get_trade_history`` 는
+    로 binding 한다(``LiveOrderView`` 패턴 미러). ``get_trade_history`` 는
     ``get_trades`` 호출을 ``(account_id, bot_id)`` 스코프로 좁혀 타 계좌 거래
     이력이 전략 컨텍스트에 누출되지 않게 한다.
     """

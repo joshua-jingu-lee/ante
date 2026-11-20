@@ -157,7 +157,7 @@ class StreamIntegration:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
 
     async def _on_execution(self, execution: dict[str, Any]) -> None:
-        """실시간 체결 통보 콜백 (빠른 경로 — #1946).
+        """실시간 체결 통보 콜백 (빠른 경로).
 
         캐시 무효화 + ``FillApplier`` 라우팅.
 

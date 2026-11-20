@@ -108,7 +108,7 @@ class IndicatorCalculator:
 
         Raises:
             ValueError: 미지원 지표, 필수 입력 누락, 또는 legacy/미인식
-                파라미터 키(예: ``timeperiod``) 전달 (#2404 silent-drop 차단).
+                파라미터 키(예: ``timeperiod``) 전달 (silent-drop 차단).
         """
         name_lower = name.lower()
         if name_lower not in INDICATOR_REGISTRY:

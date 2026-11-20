@@ -274,7 +274,7 @@ class Bot:
     async def on_order_filled(self, event: object) -> None:
         """체결 통보를 전략에 전달.
 
-        #1957: outbox at-least-once 재전달 시 같은 fill 의 전략 follow-up 이
+        outbox at-least-once 재전달 시 같은 fill 의 전략 follow-up 이
         이중 발행되지 않도록 bounded dedup 한다. 비빈키 ``fill_dedup_key`` 가
         이미 처리됐으면 follow-up 을 skip(early-return). 빈키(VirtualProvider
         직접발행 등 재전달 없는 단발 경로)는 가드 비대상으로 항상 처리한다.
@@ -421,7 +421,7 @@ class Bot:
 
         accepts_external_signals=False인 전략은 시그널을 무시한다.
 
-        #2337 F3 직렬화: ``on_data`` + ``_publish_signals(follow_up)`` span 을
+        F3 직렬화: ``on_data`` + ``_publish_signals(follow_up)`` span 을
         ``self._signal_lock`` 으로 감싼다. 같은 lock 이 ``_run_loop`` 의 on_step
         drain span 도 감싸므로, on_step() 과 external on_data() 가 동시에
         ``_ctx._pending_actions`` 를 만지는(append↔copy+clear) 인터리브가

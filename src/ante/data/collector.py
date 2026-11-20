@@ -57,10 +57,10 @@ class DataCollector:
         return self._buffer
 
     def _is_valid_ingress(self, symbol: object, timeframe: object) -> bool:
-        """canonical symbol/timeframe ingress 검증 (#1613 SSOT 위임).
+        """canonical symbol/timeframe ingress 검증 (SSOT 위임).
 
         통과 조건:
-        - ``timeframe`` 이 ``str`` 이고 (#1613 ``is_valid_timeframe``)
+        - ``timeframe`` 이 ``str`` 이고 (``is_valid_timeframe``)
           canonical OHLCV bar timeframe 5종 중 하나이며
           (unhashable timeframe → ``is_valid_timeframe`` 호출 전 차단으로
           TypeError 방지),
@@ -69,9 +69,9 @@ class DataCollector:
           literal 비교. ``tick``/``oracle`` 등은 ``is_valid_timeframe``
           이 False),
         - exchange 가 KRX면 ``symbol`` 이 ``str`` 이고 신규 입력 KRX
-          symbol shape (#1613 ``is_krx_symbol``). ``isinstance(symbol,
+          symbol shape (``is_krx_symbol``). ``isinstance(symbol,
           str)`` 선검사는 ``is_krx_symbol`` 내장 ``isinstance(str)``
-          가드와 동일 결과(비-str symbol → KRX 거부)이며 #1613 SSOT
+          가드와 동일 결과(비-str symbol → KRX 거부)이며 SSOT
           시그니처(``value: str``)와의 타입 정합을 위한 것이다.
           비-KRX exchange 는 symbol-shape 미적용 (core.md
           ``### KRX symbol shape`` 1.0 비목표).

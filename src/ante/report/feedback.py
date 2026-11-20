@@ -24,8 +24,8 @@ class PerformanceFeedback:
         """봇의 실전 성과 조회.
 
         Raises:
-            BotNotFoundError: 봇 미발견 시. 이전에는 ``"default"`` fallback으로
-                덮였지만, #1218 이후 fallback을 금지하고 명시적으로 raise한다.
+            BotNotFoundError: 봇 미발견 시. ``"default"`` fallback을 금지하고
+                명시적으로 raise한다.
         """
         from ante.bot.exceptions import BotNotFoundError
 

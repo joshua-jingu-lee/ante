@@ -1,11 +1,11 @@
 """FillOutbox — 체결 이벤트 transactional outbox.
 
-#1946 이후 ``recorded_filled_qty`` advance + ``TradeRecord`` insert +
+``recorded_filled_qty`` advance + ``TradeRecord`` insert +
 ``PositionHistory.on_trade`` 는 단일 ``Database.transaction()`` 으로 묶여
 positions/trades crash-safe exactly-once 를 보장한다. 그러나 ``OrderFilledEvent``
 는 **commit 이후** 알림으로 발행되므로, **commit↔publish 사이 narrow crash
 window** 에서는 다운스트림 소비자(Treasury 정산·전략 ``on_fill``·notification)로의
-**이벤트 전달이 유실**될 수 있었다(#1946 R4 bounded-limitation).
+**이벤트 전달이 유실**될 수 있었다(R4 bounded-limitation).
 
 FillOutbox 는 그 crash window 를 닫는다:
 
@@ -19,8 +19,8 @@ FillOutbox 는 그 crash window 를 닫는다:
 전달 시맨틱은 **at-least-once** 다. publish↔mark 사이 micro-window 에서 같은 row 가
 두 번 발행될 수 있으나, 각 이벤트는 결정적 ``fill_dedup_key``(CAS 로 확정된
 ``order_id:confirmed_cumulative``)를 실어 보내므로 소비자가 멱등 처리할 수 있다.
-**소비자 멱등화 자체는 본 이슈(#1949) 범위 밖이며 별도 이슈(#1957)에서 해소**한다.
-#1949 는 outbox 무손실 전달 + 결정적 키 제공까지만 책임진다.
+**소비자 멱등화 자체는 범위 밖**이며, outbox 는 무손실 전달 + 결정적 키 제공까지만
+책임진다.
 
 상세 설계: ``docs/specs/eventbus/eventbus.md``(전달 시맨틱),
 ``docs/specs/broker-adapter/18-fill-recovery.md``(§5.2 durability 해소).
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_fill_outbox_unpublished
 
 
 def canonical_cumulative(value: float) -> str:
-    """누적 체결량을 결정적 문자열로 정규화 (fill_dedup_key 산출용, #1949).
+    """누적 체결량을 결정적 문자열로 정규화 (fill_dedup_key 산출용).
 
     SQLite REAL 과 Python ``float`` 은 모두 IEEE754 double 이므로,
     ``record_fill`` 이 CAS ``RETURNING`` 으로 돌려준 확정 누적값을 ``repr`` 로
@@ -152,7 +152,7 @@ _DB_CORRUPTION_SIGNATURES: tuple[str, ...] = (
 
 
 def _is_db_corruption(exc: BaseException) -> bool:
-    """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다 (#2407 Codex P2).
+    """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다.
 
     ``sqlite3.DatabaseError`` 타입만으로 판정하지 않는다. transient(``database is
     locked``)·내부 버그(``no such table``/``ProgrammingError``)는 손상이 아니므로
@@ -178,7 +178,7 @@ class FillOutboxPublisher:
 
     EventBus 는 fire-and-forget(핸들러 예외 swallow)이므로, publish 자체가 예외를
     던지지 않는 한 본 워커는 핸들러 실패와 무관하게 mark_published 한다. 즉 전달
-    시맨틱은 at-least-once 이며, 소비자 멱등은 #1957 범위다.
+    시맨틱은 at-least-once 이며, 소비자 멱등은 별도다.
     """
 
     def __init__(
@@ -262,7 +262,7 @@ class FillOutboxPublisher:
             self._task = None
 
     def _backoff_delay(self) -> float:
-        """현재 연속 DB 손상 실패 횟수에 대한 backoff 지연(초)을 산출한다 (#2407 O1).
+        """현재 연속 DB 손상 실패 횟수에 대한 backoff 지연(초)을 산출한다 (O1).
 
         실패가 없으면(``_consecutive_failures == 0``) base ``drain_interval`` 로,
         n회 연속 실패면 ``drain_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)`` 로
@@ -334,7 +334,7 @@ class FillOutboxPublisher:
                 next_drain_at = loop.time() + self._drain_interval
 
     def _reset_failures(self) -> None:
-        """연속 실패 카운터와 escalation latch 를 초기화한다 (#2407 O1·O2 reset)."""
+        """연속 실패 카운터와 escalation latch 를 초기화한다 (O1·O2 reset)."""
         self._consecutive_failures = 0
         self._escalated = False
 
@@ -342,9 +342,9 @@ class FillOutboxPublisher:
         """연속 DB 손상 실패 임계 도달 시 CRITICAL 승격 + NotificationEvent 1회 (O2).
 
         ``_escalated`` latch 로 카운터가 0 으로 reset 되기 전까지 정확히 1회만
-        발행해 알림 spam 을 막는다(#2407 O2 exactly-once). NotificationEvent publish
+        발행해 알림 spam 을 막는다(O2 exactly-once). NotificationEvent publish
         는 try/except 로 감싸 escalation 발행 실패가 드레인 루프를 죽이지 않게 한다
-        (#2407 O3 liveness). 패턴은 fill_scheduler.py:654-667 동형(category=system).
+        (O3 liveness). 패턴은 fill_scheduler.py:654-667 동형(category=system).
         """
         logger.critical(
             "FillOutboxPublisher DB 손상 드레인 %d회 연속 실패 — 체결 이벤트 정체. "

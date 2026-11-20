@@ -3,7 +3,7 @@
 asyncio.start_unix_server를 사용하여 외부 프로세스(CLI, MCP)의
 명령을 수신하고 처리한다.
 
-Refs #1184: lifecycle state machine을 도입해 shutdown 중 mutating
+lifecycle state machine으로 shutdown 중 mutating
 명령이 SERVICE_UNAVAILABLE로 거부되도록 한다.
 """
 
@@ -152,7 +152,7 @@ class IPCServer:
 
         ``asyncio.Server.wait_closed``는 detach된 연결까지 모두 기다리므로
         ``_handle_connection``이 ``while True`` 루프인 IPCServer에서는 hang
-        위험이 있다 (Refs #1159 Codex Plan v1 [high]). 따라서 본 메서드는
+        위험이 있다. 따라서 본 메서드는
         ``close()``만 호출하고 wait는 별도 ``drain_connections()``이 담당한다.
 
         cold-path guard(``PID alive AND socket exists``)가 shutdown 동안에도
@@ -318,7 +318,7 @@ class IPCServer:
     def _malformed_request(message: str) -> dict:
         """``MALFORMED_REQUEST`` error 응답 dict 생성.
 
-        Refs #2334 (#2336 PR#1): 첫 프레임이 JSON object 가 아닐 때 사용한다.
+        첫 프레임이 JSON object 가 아닐 때 사용한다.
         비-dict 입력은 usable ``id`` 가 없어 ``id=None`` 으로 고정한다
         (``MESSAGE_TOO_LARGE`` 블록 동형). taxonomy SSOT
         (``docs/specs/contracts/error-taxonomy.md``) 의 ``validation`` 카테고리
@@ -372,7 +372,7 @@ class IPCServer:
     async def _dispatch(self, request: dict) -> dict:
         """요청을 적절한 핸들러로 라우팅.
 
-        Refs #1184: lifecycle state-aware reject 분기를 추가한다.
+        lifecycle state-aware reject 분기:
 
         * ``DRAINING``/``STOPPED``: 모든 명령(mutating + read-only)
           ``SERVICE_UNAVAILABLE``. 서비스 리소스 종료 구간 또는 종료 이후이므로
@@ -381,7 +381,7 @@ class IPCServer:
         * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정).
         * ``RUNNING``: 정상 dispatch.
 
-        Refs #1850 (#1819 부모 epic): lifecycle gate 통과 후 handler 호출 전에
+        lifecycle gate 통과 후 handler 호출 전에
         ``CommandSpec`` metadata 기반 preflight 두 단계를 수행한다.
 
         1. ``required_services`` 부재 시 ``SERVICE_NOT_CONFIGURED`` envelope
@@ -395,19 +395,18 @@ class IPCServer:
            1:1 동형 매핑).
 
         lifecycle gate 가 preflight 보다 항상 먼저 — DRAINING/STOPPED 또는
-        SHUTTING_DOWN+mutating 인 경우 preflight 에 도달하지 않는다(Codex v2
-        condition 3).
+        SHUTTING_DOWN+mutating 인 경우 preflight 에 도달하지 않는다.
 
-        Refs #1851 (#1819 부모 epic): handler 가 정상 종료된 후
+        handler 가 정상 종료된 후
         ``CommandSpec.audit_action`` 이 ``None`` 이 아니면 ``audit_logger`` 를
         통해 자동으로 audit 로그를 1회 남긴다. handler 는 반환 dict 안의
         ``_audit_detail`` reserved key 로 ``{resource, detail, ip}`` 를 wrapper
         에 전달할 수 있으며, public envelope 으로 새 나가지 않도록 wrapper 가
         ``pop`` 으로 strip 한 뒤 envelope ``result`` 에 담는다. handler 가
         예외로 종료되면 audit 호출은 일어나지 않는다(실패 시 audit invariant).
-        ``audit_action`` 이 부여된 commands(현재 10개 — #1852 / #1853 포함)는
+        ``audit_action`` 이 부여된 commands(현재 10개)는
         ``required_services`` 에 ``audit_logger`` 가 명시되어 있어 preflight
-        단계에서 부재가 차단된다 (#1849 등록 시 동형 lock).
+        단계에서 부재가 차단된다 (등록 시 동형 lock).
         """
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
@@ -499,7 +498,7 @@ class IPCServer:
         bot_id: str,
         session_id: str,
     ) -> None:
-        """signal.connect Phase-C 스트림 host (#2334 §6/§7, #2337 PR#2).
+        """signal.connect Phase-C 스트림 host.
 
         핸드셰이크 OK 후 동일 연결을 hijack 해 long-lived 양방향 스트림으로
         운반한다. host 구성:

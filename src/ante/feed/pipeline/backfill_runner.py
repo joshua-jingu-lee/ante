@@ -68,8 +68,7 @@ def _parse_strict_backfill_since(value: str) -> date | None:
     공유하는 helper. 형태가 어긋나거나 캘린더상 유효하지 않으면 ``None`` 을
     반환한다(호출 측이 ``CLI_INVALID_DATE`` config_error로 변환).
 
-    feed-local 사용에 한정한다 — 전역 validators 통합 금지(이슈 #1674
-    Stop Condition).
+    feed-local 사용에 한정한다 — 전역 validators 통합 금지.
     """
     if not isinstance(value, str):
         return None
@@ -353,7 +352,7 @@ class BackfillRunner:
             - 그 외 날짜는 ``is_trading_paused`` 가 풀릴 때까지 **대기한 뒤**
               수집한다(window가 지나면 데이터는 존재).
 
-        checkpoint 미전진 (#2078, #2054 동형 halt):
+        checkpoint 미전진:
             ``dates`` 는 오름차순이고 ``Checkpoint.save`` 는 last-write-wins이므로,
             transient 실패(generic ``except Exception``) 이후의 날짜 성공이
             checkpoint를 실패 날짜 너머로 전진시키면 그 실패 날짜는 다음 run에서
@@ -363,13 +362,13 @@ class BackfillRunner:
             계속하므로 ``continue``(루프 진행)는 유지한다 — DataGoKr 결과는
             ParquetStore natural-key dedup으로 재-fetch overwrite 멱등.
 
-        checkpoint 가드 = stored_ok 3-state (#1993, #2015 무회귀):
+        checkpoint 가드 = stored_ok 3-state:
             checkpoint 전진은 더 이상 ``written > 0``(net-delta)가 아니라
             collector가 보고하는 ``stored_ok``(유효 데이터 store 성공 반영) 신호로
             구동한다. rows_written을 net-new delta로 바꾸면 재수집 날짜는
             net_delta=0이 되는데, ``written > 0`` 가드라면 그 날짜가 미전진해
             checkpoint stall이 생긴다. 3-state로 분리:
-              - 빈 응답(stored_ok=False) → 미전진(#2015 보존)
+              - 빈 응답(stored_ok=False) → 미전진
               - 유효 재수집(stored_ok=True, net_delta=0) → 전진(stall 해소)
               - store-merge 실패 → 미전진. ``_persist_partition`` 은 merge 실패
                 시 raise하지 않고(R1) 기존 파일 보존 + ``store_merge`` 경고만
@@ -440,7 +439,7 @@ class BackfillRunner:
         """store의 pending 경고를 즉시 drain해 ctx.warnings로 옮기고,
 
         이번 drain에 ``store_merge`` (파티션 merge 실패 → 기존 파일 보존, 데이터
-        미반영) 경고가 있었는지 반환한다(#1993 R1).
+        미반영) 경고가 있었는지 반환한다(R1).
 
         checkpoint save 직전에 호출해야 한다 — collect/write 직후 drain해야 이번
         날짜에서 발생한 store-merge 실패를 정확히 귀속할 수 있다(지연 drain이면
@@ -618,8 +617,8 @@ class BackfillRunner:
 class _RunContext:
     """수집 실행 중 결과를 집계하는 컨텍스트.
 
-    경고는 실행 시작~종료까지 상주하므로 날짜 범위에 비례해 무제한 증가했다
-    (#2414 — 다년 backfill에서 약 1.67M건 ≈ 500 MB). 내부 리스트를
+    경고는 실행 시작~종료까지 상주하므로 절단하지 않으면 날짜 범위에 비례해
+    무제한 증가한다(다년 backfill에서 약 1.67M건 ≈ 500 MB). 내부 리스트를
     ``_warnings`` 로 사유화하고 ``add_warnings()`` **단일 chokepoint**에서만
     적재해 **버킷(``type``)별 ``MAX_WARNINGS_PER_TYPE`` 건**까지만 보존한다.
     총계·타입별 집계는 절단과 무관하게 전수 정확하다.
@@ -645,7 +644,7 @@ class _RunContext:
         변형(append/extend)해 chokepoint를 우회할 수 있고 mypy도 그것을
         통과시킨다(막히는 것은 속성 재바인딩뿐). ``Sequence`` 로 두면 mypy가
         ``attr-defined`` 로 append/extend/insert/슬라이스 대입을 전부
-        차단한다(#2414 결정 5).
+        차단한다.
 
         **총 건수를 세는 용도로 쓰지 말 것** — 절단 시 ``len()`` 은 총계가
         아니다. ``warnings_total`` 을 쓴다.
@@ -698,7 +697,7 @@ class _RunContext:
         """성공 결과를 집계한다.
 
         ``net_delta`` 는 collector가 보고한 **실제 net-new 저장 행 수**
-        (rows_written, #1993)다. 입력 len 누적이 아니라 store가 실제 새로 저장한
+        (rows_written)다. 입력 len 누적이 아니라 store가 실제 새로 저장한
         delta를 누적하므로 재수집/dedup이 rows_written을 과대계상하지 않는다.
         """
         self.rows_written += net_delta
@@ -751,8 +750,8 @@ def _make_result(
 ) -> CollectionResult:
     """CollectionResult를 생성한다.
 
-    ``warnings_total`` 기본값이 ``0`` 이 아니라 ``None`` 인 것은 의도적이다
-    (#2414). ``0`` 으로 두면 ``warnings`` 를 넘기고 총계를 생략한 호출이
+    ``warnings_total`` 기본값이 ``0`` 이 아니라 ``None`` 인 것은 의도적이다.
+    ``0`` 으로 두면 ``warnings`` 를 넘기고 총계를 생략한 호출이
     "경고 N건 + 총계 0"이라는 **자기모순 리포트**를 만든다. ``None`` 이면
     ``len(warnings)`` 로 파생해 절단이 없는 호출에서 항상 정합한다.
     """

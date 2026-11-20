@@ -201,7 +201,7 @@ class VirtualExecutor:
     async def _gate_blocked_reason(self, account_id: str) -> str | None:
         """G9 + G7 backstop — virtual 경로 최종 차단 사유 토큰(fail-closed).
 
-        #2398 attempt5: VirtualExecutor 는 virtual 경로의 **유일한 최종 backstop**
+        VirtualExecutor 는 virtual 경로의 **유일한 최종 backstop**
         이다(APIGateway 는 virtual 주문을 silent skip 하므로 gateway 계층3 의
         ``account_suspended`` 차단이 virtual 에는 적용되지 않는다). 따라서 계층1
         통과 후 Treasury/VirtualExecutor 처리 중 ``account suspend`` 가 끼어들거나

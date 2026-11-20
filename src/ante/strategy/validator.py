@@ -43,7 +43,7 @@ class _StrategyClassMatch:
     시점**의 ``StrategyMeta`` 바인딩(``strategymeta_binding``)과 module-alias
     (``module_aliases``) 스냅샷을 함께 담는다. ``meta`` 가 ``StrategyMeta(...)``
     인지 검사(``_meta_is_strategy_meta_call``)는 이 스냅샷을 import 바인딩 컨텍스트로
-    사용해 #2042(Strategy)와 동일한 order-aware import-resolution 으로 해석한다.
+    사용해 Strategy 와 동일한 order-aware import-resolution 으로 해석한다.
     """
 
     node: ast.ClassDef
@@ -192,7 +192,7 @@ class StrategyValidator:
     def _find_strategy_classes(self, tree: ast.Module) -> list[_StrategyClassMatch]:
         """실제 ante ``Strategy`` 를 상속하는 module-level 클래스 + 바인딩 스냅샷 탐색.
 
-        (#2042 Strategy import-resolution + #2041 StrategyMeta 일관화)
+        (Strategy import-resolution + StrategyMeta 일관화)
 
         **`tree.body`(module-scope)를 정의 순서대로 위에서 아래로 한 번** 순회하며
         이름별 "현재 바인딩"을 추적한다 — Strategy 바인딩(`name_binding:
@@ -208,7 +208,7 @@ class StrategyValidator:
 
         StrategyMeta 바인딩 스냅샷은 ``_meta_is_strategy_meta_call`` 이 ``meta =
         StrategyMeta(...)`` / ``meta = astg.StrategyMeta(...)`` 호출을 **클래스 정의
-        시점 import 바인딩**으로 해석하는 데 쓰인다(#2042 Strategy 와 동일 order-
+        시점 import 바인딩**으로 해석하는 데 쓰인다(Strategy 와 동일 order-
         aware). 이로써 ``import fake; meta = fake.StrategyMeta(...)`` 같이 ante 가
         아닌 임의 ``*.StrategyMeta`` 호출을 거부하고(false-positive 차단), submit 의
         ``isinstance(meta, StrategyMeta)`` 런타임 검사와 정합시킨다.
@@ -230,7 +230,7 @@ class StrategyValidator:
         정합시킨다.
 
         재바인딩 무효화(`name_binding`·`strategymeta_binding` ↔ `module_aliases`
-        대칭, #2042 4차 + #2041 5차): Strategy 바인딩(`name_binding`)·StrategyMeta
+        대칭): Strategy 바인딩(`name_binding`)·StrategyMeta
         바인딩(`strategymeta_binding`)·module-alias(`module_aliases`) 모두 정의
         순서대로 재바인딩되면 동일 규칙으로 무효화한다. 즉 ``import ante.strategy
         as astg; astg = other; class X(astg.Strategy)`` 는 X 정의 시점에 ``astg``
@@ -242,7 +242,7 @@ class StrategyValidator:
         /``Import``/``ImportFrom``/``del`` 이다. StrategyMeta Name 바인딩도 동일하게
         재바인딩되면 ``strategymeta_binding`` 에서 제거된다.
 
-        정적 name-resolution 모델 (bounded, #2042+#2041 known-limitation):
+        정적 name-resolution 모델 (bounded, known-limitation):
         Strategy·StrategyMeta **모두** 다음을 정확히 모델링한다 — 직접/asname
         import (``from ante.strategy import Strategy [as S]`` / ``import
         StrategyMeta [as M]``), ``import ante.strategy [as x]`` module-alias
@@ -439,7 +439,7 @@ class StrategyValidator:
     ) -> bool:
         """``meta`` 의 마지막 값-할당이 **ante** ``StrategyMeta(...)`` 호출인지 검사.
 
-        (#2041 last-assign + #2042 일관 import-resolution)
+        (last-assign + 일관 import-resolution)
 
         클래스 body 를 순서대로 순회하여 ``meta`` 를 타깃으로 하는 **마지막**
         값-할당 노드를 선택한다(런타임은 마지막 할당값을 클래스 속성으로
@@ -457,7 +457,7 @@ class StrategyValidator:
           미바인딩 Name ``StrategyMeta(...)``, ``dict(...)``, ``None``) → False.
 
         ``strategymeta_binding``·``module_aliases`` 는 ``_find_strategy_classes``
-        가 이 클래스 정의 시점에 캡처한 스냅샷이다(#2042 Strategy 와 동일 order-
+        가 이 클래스 정의 시점에 캡처한 스냅샷이다(Strategy 와 동일 order-
         aware). 이로써 ``import fake; meta = fake.StrategyMeta(...)`` 같은
         false-positive 를 거부하고 submit 의 ``isinstance(meta, StrategyMeta)``
         런타임 검사와 정합시킨다.
@@ -557,7 +557,7 @@ class StrategyValidator:
     def _extract_meta_symbols(
         self, cls: ast.ClassDef, module_consts: dict[str, str]
     ) -> list[str] | None:
-        """meta에서 symbols 값을 정적 해석해 추출 (#2017, _extract_meta_exchange 동형).
+        """meta에서 symbols 값을 정적 해석해 추출 (_extract_meta_exchange 동형).
 
         ``meta = StrategyMeta(..., symbols=[...])`` 의 ``symbols`` kwarg 를 찾아,
         값이 ``ast.List`` 이고 모든 원소가 str ``ast.Constant`` 이면 ``list[str]``

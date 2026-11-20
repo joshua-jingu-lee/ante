@@ -1,4 +1,4 @@
-"""v007: order_tracker 에 exchange 컬럼 추가 (#2487, 주문 이벤트 exchange 전파).
+"""v007: order_tracker 에 exchange 컬럼 추가 (주문 이벤트 exchange 전파).
 
 주문 생애주기 이벤트는 ``exchange`` 를 나르지만(``docs/specs/eventbus/eventbus.md``),
 체결 영속 계층(``TradeRecord``/``OrderFilledEvent`` payload)은 그 값을 얻을 소스가

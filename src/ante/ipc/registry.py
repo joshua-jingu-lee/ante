@@ -7,11 +7,9 @@ taxonomy를 함께 보유한다. ``IPCServer._dispatch``는 lifecycle state가
 ``SHUTTING_DOWN``일 때 mutating 핸들러를 ``SERVICE_UNAVAILABLE``로 거부하기
 위해 이 정보를 사용한다.
 
-Refs #1849 (#1819 부모 epic): ``CommandSpec``에 contract metadata 7 필드를
-추가한다(``result_kind``, ``result_key``, ``required_services``,
-``audit_action``, ``account_id_policy``, ``cross_validators``,
-``shutdown_behavior``). dispatch wrapper 동작 변경은 본 이슈 범위가 아니다
-(#1850 / #1851 책임). default 값으로 backward compatibility를 보장한다.
+``CommandSpec``의 contract metadata 7 필드(``result_kind``, ``result_key``,
+``required_services``, ``audit_action``, ``account_id_policy``, ``cross_validators``,
+``shutdown_behavior``)는 default 값으로 backward compatibility를 보장한다.
 """
 
 from __future__ import annotations
@@ -42,10 +40,7 @@ class CommandSpec:
     lifecycle state machine과 결합하여 shutdown 중
     mutating 명령을 거부하기 위한 taxonomy를 보유한다.
 
-    Refs #1849 (#1819 부모 epic): contract metadata 7 신규 필드를 보유한다.
-    dispatch wrapper의 실제 활용은 #1850(required_services 자동 검증) /
-    #1851(audit_action 자동 발화) 책임이며, 본 이슈에서는 metadata 자체와
-    27개 등록 명령의 필수값만 채운다.
+    contract metadata 7 필드를 보유한다.
 
     Attributes:
         name: 커맨드 식별자 (예: ``"system.halt"``).
@@ -62,8 +57,7 @@ class CommandSpec:
             사용된다.
         audit_action: ``audit_logger.log(action=...)`` 인자. 실제로 audit
             기록을 남기는 명령만 값을 가지고, 그 외에는 ``None``.
-            mutating이라는 사실만으로 audit_action을 강제하지 않는다
-            (#1819 본문 / Codex v2 condition 3).
+            mutating이라는 사실만으로 audit_action을 강제하지 않는다.
         account_id_policy: account_id 검증 정책.
             ``none``/``required``(handler가 ``require_account_id`` 호출)/
             ``optional_filter`` 중 하나.
@@ -71,7 +65,7 @@ class CommandSpec:
             skeleton만 도입한다(빈 tuple default).
         shutdown_behavior: shutdown 단계 처리 override. ``None``이면
             ``is_mutating``에서 derive — mutating은 ``block_on_mutating``,
-            read-only는 ``allow_all`` 효과(#1184 server.py 동작 보존).
+            read-only는 ``allow_all`` 효과(server.py 동작 보존).
     """
 
     name: str
@@ -89,12 +83,11 @@ class CommandSpec:
 class CommandRegistry:
     """커맨드 이름 -> CommandSpec 매핑.
 
-    Refs #1184: 단순 dict[str, handler]에서 dict[str, CommandSpec]으로
-    전환되었다. 외부 호출자는 ``register(name, handler, *, is_mutating=...)``
+    외부 호출자는 ``register(name, handler, *, is_mutating=...)``
     keyword-only 인자를 명시해야 한다.
 
-    Refs #1849: ``register()``는 contract metadata 7 신규 필드를 kwargs로
-    추가 수용한다. 기존 ``register(name, handler, is_mutating=...)`` 호출은
+    ``register()``는 contract metadata 7 필드를 kwargs로
+    수용한다. ``register(name, handler, is_mutating=...)`` 호출은
     default 값으로 그대로 작동(backward compat).
     """
 
@@ -121,7 +114,7 @@ class CommandRegistry:
             command: 커맨드 이름.
             handler: 비동기 핸들러.
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
-            result_kind: result shape 종류 (#1822 ``ContractKind``).
+            result_kind: result shape 종류 (``ContractKind``).
             result_key: result dict의 주 키.
             required_services: ``ServiceRegistry`` 의존 attribute 이름 집합.
             audit_action: audit 기록 시 action 이름(없으면 ``None``).
@@ -166,8 +159,7 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
     """Kill Switch IPC 응답 envelope.
 
     ``status``, ``accounts_changed``, ``changed_at``, ``accounts[]`` shape를
-    사용한다. ``changed_at``은 ISO 8601 UTC ``Z`` suffix를 사용한다
-    (Refs #1360).
+    사용한다. ``changed_at``은 ISO 8601 UTC ``Z`` suffix를 사용한다.
     """
     from datetime import UTC, datetime
 
@@ -186,7 +178,7 @@ async def _handle_system_halt(
 ) -> dict:
     """전역 거래 정지(kill switch) IPC handler.
 
-    Refs #2110 (audit.md:115): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:115: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="system.halt"`` 기반으로 자동 발화한다. handler
     는 ``_audit_detail`` reserved key 로 ``resource="system:kill_switch"`` 를
     전달하며, wrapper 가 ``pop`` 으로 public envelope 진입 전에 strip 한다.
@@ -207,7 +199,7 @@ async def _handle_system_clear_halt(
 ) -> dict:
     """전역 거래 정지 해제 IPC handler.
 
-    Refs #2110 (audit.md:116): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:116: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="system.clear_halt"`` 기반으로 자동 발화한다.
     handler 는 ``_audit_detail`` reserved key 로
     ``resource="system:kill_switch"`` 를 전달한다.
@@ -227,7 +219,7 @@ async def _handle_account_suspend(
 ) -> dict:
     """계좌 정지 IPC handler.
 
-    Refs #1852 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    account_id 검증은 ``_dispatch`` wrapper 가
     ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
     audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.suspend"``
     기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
@@ -253,7 +245,7 @@ async def _handle_account_activate(
 ) -> dict:
     """계좌 활성화 IPC handler.
 
-    Refs #1852 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    account_id 검증은 ``_dispatch`` wrapper 가
     ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
     audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.activate"``
     기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
@@ -320,7 +312,7 @@ async def _handle_bot_remove(
 ) -> dict:
     """봇 제거 IPC handler.
 
-    Refs #2110 (audit.md:120): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:120: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="bot.delete"`` 기반으로 자동 발화한다. command
     이름은 ``bot.remove`` 이지만 audit action 은 audit.md SSOT 에 따라
     ``bot.delete`` 다. handler 는 ``_audit_detail`` reserved key 로
@@ -344,9 +336,9 @@ async def _handle_bot_signal_key_rotate(
 ) -> dict:
     """봇 시그널 키 재발급 IPC handler.
 
-    Refs #2111: ``bot signal-key --rotate`` 의 runtime IPC 경로
-    (``bot.signal_key.rotate``). CLI 가 ``SignalKeyManager.rotate()`` 를 직접
-    호출하던 cold-path DB mutation 을 제거하고 본 handler 로만 라우팅한다 —
+    ``bot signal-key --rotate`` 의 runtime IPC 경로
+    (``bot.signal_key.rotate``). CLI 는
+    본 handler 로만 라우팅한다 —
     runtime 경계 / audit / live 상태 정합성을 보존한다.
 
     ``BotManager.rotate_signal_key`` 는 ``_get_bot`` 존재 확인
@@ -358,7 +350,7 @@ async def _handle_bot_signal_key_rotate(
     변환한다. 전략 미발견 등 그 외 ``BotError`` 는 ``EXECUTION_ERROR``
     fallback (서버 경로 SSOT).
 
-    Refs audit.md:121: audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:121: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action = "bot.signal_key.rotate"`` 기반으로 자동
     발화하며, handler 는 ``_audit_detail`` reserved key 로
     ``resource = "bot:{bot_id}"`` 만 전달한다 (wrapper 가 ``pop`` 으로 public
@@ -477,7 +469,7 @@ async def _handle_bot_status(
     - ``strategy_registry`` 부재 시 strategy 키 부재.
     - ``treasury_manager`` 부재(또는 해당 계좌 Treasury 미등록) 시 budget 키 부재.
     - ``trade_service`` 부재(legacy ServiceRegistry) 시 positions 키 부재(회귀
-      lock — #1712 cold-path 호환).
+      lock — cold-path 호환).
 
     read-only 분류이므로 audit logger 호출 없음.
     """
@@ -520,7 +512,7 @@ _BOT_LIST_KEYS = (
 async def _handle_bot_list(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 목록 조회 IPC handler (read-only, #2112).
+    """봇 목록 조회 IPC handler (read-only).
 
     ``bot status`` (``_handle_bot_status``) 미러 — read-only 분류이므로 audit
     logger 호출 없음. ``svc.bot_manager.list_bots()`` 가 반환하는 live
@@ -547,14 +539,14 @@ async def _handle_bot_list(
 async def _handle_bot_info(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 상세 정보 조회 IPC handler (read-only, #2112).
+    """봇 상세 정보 조회 IPC handler (read-only).
 
     ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 가
     ``None`` 이면 ``BotNotFoundError`` (``BOT_NOT_FOUND`` envelope). 존재하면
     ``Bot.get_info()`` 전체를 ``{"bot": info}`` envelope 으로 반환한다. CLI
     fallback 의 ``SELECT * FROM bots`` 행과 공통 핵심키(``bot_id``/``name``/
     ``status``/``account_id``/``strategy_id``) 가 일치한다 (live≠snapshot 의
-    완전 통일은 follow-up; #2112 non-goal).
+    완전 통일은 non-goal).
     """
     from ante.bot.exceptions import BotNotFoundError
 
@@ -568,7 +560,7 @@ async def _handle_bot_info(
 async def _handle_bot_positions(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 보유 포지션 조회 IPC handler (read-only, #2112).
+    """봇 보유 포지션 조회 IPC handler (read-only).
 
     ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 존재
     확인(``None`` → ``BotNotFoundError``) 후 ``trade_service`` 로 포지션을
@@ -577,9 +569,9 @@ async def _handle_bot_positions(
     ``trade_service`` 는 legacy ``ServiceRegistry`` 에서 ``None`` 일 수 있으므로
     ``getattr`` safe-access 한다 (``_handle_bot_status`` 의 ``trade_service``
     optional 처리 동형). **서비스 미구성(None)과 빈 포지션(0개) 을 혼동하지
-    않는다** (#2112 Codex condition 2): ``trade_service`` 가 없으면 빈 list 를
+    않는다**: ``trade_service`` 가 없으면 빈 list 를
     반환하되, 이는 "조회 불가" 가 아니라 "포지션 보강 미구성" 으로서 봇이
-    존재함은 이미 확인되었다(``BotNotFoundError`` 분기와 분리). #2137:
+    존재함은 이미 확인되었다(``BotNotFoundError`` 분기와 분리).
     포지션 조회를 봇 계좌(``bot.config.account_id``) 로 스코핑해 타 계좌
     stale/legacy 포지션 누출을 차단한다.
     """
@@ -613,10 +605,10 @@ async def _handle_bot_positions(
 async def _handle_bot_signal_key(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 시그널 키 조회 IPC handler (read-only, #2112).
+    """봇 시그널 키 조회 IPC handler (read-only).
 
     ``bot status`` 미러 — read-only, audit 없음. ``bot.signal_key.rotate``
-    (#2111, mutating) 와 별개의 read command 다. ``get_bot(bot_id)`` 존재
+    (mutating) 와 별개의 read command 다. ``get_bot(bot_id)`` 존재
     확인(``None`` → ``BotNotFoundError``) 후 ``get_signal_key(bot_id)`` 로
     현재 키를 조회한다. 키 미발급이면 ``signal_key=None`` 을 반환하며, CLI
     후처리(``SIGNAL_KEY_NOT_SET``) 가 None sentinel 을 surface 한다 (IPC·
@@ -636,7 +628,7 @@ async def _handle_bot_signal_key(
 async def _handle_signal_connect(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """``signal.connect`` 핸드셰이크 IPC handler (read-only, #2334/#2336 PR#1).
+    """``signal.connect`` 핸드셰이크 IPC handler (read-only).
 
     데몬-side·LIVE 상태 4-게이트를 순서대로 검증한 뒤, 통과 시
     ``_stream`` 센티넬이 포함된 dict 를 반환한다. ``IPCServer._handle_connection``
@@ -657,11 +649,11 @@ async def _handle_signal_connect(
       ``BotNotAcceptingSignals``.
 
     ``account_id`` 는 LIVE ``bot.config`` 에서만 취하고 ``args`` 의 spoof 값은
-    무시한다. ``audit_action=None`` (자동 audit OFF) — 본 PR(#2337)이 게이트
+    무시한다. ``audit_action=None`` (자동 audit OFF) — 게이트
     통과 후 단일 manual connect-audit 를 직접 1회 발화한다(actor sentinel
     ``"ipc"``). 키는 로깅/반환에 노출하지 않는다.
 
-    #2337 register happen-before ack (F1+F4): gate-4 통과 후 ``_stream``
+    register happen-before ack (F1+F4): gate-4 통과 후 ``_stream``
     반환 **전** ``SignalChannelRegistry.register`` 를 atomic check-and-insert
     로 호출한다(``BotSignalChannelBusy``/``SignalChannelRegistryFrozen`` 둘 다
     ack write **전** raise → Phase-B envelope, stream 미진입). 이 시점의
@@ -852,7 +844,7 @@ async def _handle_rule_update(
 ) -> dict:
     """계좌 룰 업데이트 IPC handler.
 
-    Refs #1853 (#1819 부모 epic): account_id 검증은 ``_dispatch`` wrapper 가
+    account_id 검증은 ``_dispatch`` wrapper 가
     ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행한다. audit
     호출은 wrapper 가 ``CommandSpec.audit_action="account.rule.update"`` 기반
     으로 자동 발화하며, handler 는 helper 에 ``audit_logger=None`` 을 전달하여
@@ -1216,7 +1208,7 @@ async def _handle_approval_approve(
 ) -> dict:
     """승인 요청 승인 IPC handler.
 
-    Refs #2110 (audit.md:112): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:112: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="approval.approve"`` 기반으로 자동 발화한다.
     handler 는 ``_audit_detail`` reserved key 로
     ``resource="approval:{id}"`` 를 전달한다.
@@ -1239,7 +1231,7 @@ async def _handle_approval_reject(
 ) -> dict:
     """승인 요청 거부 IPC handler.
 
-    Refs #2110 (audit.md:113): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:113: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="approval.reject"`` 기반으로 자동 발화한다.
     handler 는 ``_audit_detail`` reserved key 로
     ``resource="approval:{id}"`` 를 전달한다.
@@ -1267,7 +1259,7 @@ async def _handle_approval_cancel(
 ) -> dict:
     """승인 요청 취소 IPC handler.
 
-    Refs #2110 (audit.md:114): audit 호출은 ``_dispatch`` wrapper 가
+    audit.md:114: audit 호출은 ``_dispatch`` wrapper 가
     ``CommandSpec.audit_action="approval.cancel"`` 기반으로 자동 발화한다.
     handler 는 ``_audit_detail`` reserved key 로
     ``resource="approval:{id}"`` 를 전달한다.
@@ -1290,7 +1282,7 @@ async def _handle_approval_cancel_invalid(
 ) -> dict:
     """Administrative cancellation of a legacy invalid-type approval.
 
-    Refs #1418 → #1472 SPLIT-D. CLI ``approval:admin`` scope 를 보유한 운영자가
+    CLI ``approval:admin`` scope 를 보유한 운영자가
     ``ante approval cancel-invalid <id>`` 로 호출한다. 성공 후 ``audit_log``
     테이블에 기록을 남기며, 서비스의 ``history`` append 가 fallback 추적
     경로다.
@@ -1386,7 +1378,7 @@ async def _handle_broker_order_history(
     (``validate_iso_date``)을 우회하는 직접 IPC 호출도 여기서 fail-closed 로
     거부된다(``InvalidIsoDateError.code = "VALIDATION_ERROR"``).
 
-    검증 순서는 ``account_id`` 우선(#1636 broker handlers account_id-first)
+    검증 순서는 ``account_id`` 우선(broker handlers account_id-first)
     이다 — invalid account_id 는 날짜 파싱보다 먼저 ``VALIDATION_ERROR`` 로
     거부된다.
     """
@@ -1436,8 +1428,8 @@ async def _handle_broker_reconcile(
 ) -> dict:
     """``broker.reconcile`` — **account-level** 대사.
 
-    account_id 만으로 동작한다(bot_id 불요 #2119). 서버 BrokerAdapter 가 계좌
-    총합을 직접 조회하며(caller-supplied broker_positions 무시 #2121), ``fix``
+    account_id 만으로 동작한다(bot_id 불요). 서버 BrokerAdapter 가 계좌
+    총합을 직접 조회하며(caller-supplied broker_positions 무시), ``fix``
     플래그를 준수한다. 잘못된 ``correct_position`` 이 실거래 포지션을
     손상시키지 않도록 **correction 은 봇이 정확히 1개인 계좌에서만** 기존
     ``reconcile`` 로직에 위임하고, 그 외(2+봇·0봇)는 detect-only 다.
@@ -1445,8 +1437,8 @@ async def _handle_broker_reconcile(
     봇 count 분기 (status 무관 — 수동 IPC 는 user-initiated 라 봇 상태와
     무관하게 단일봇 귀속이 자명):
         - 정확히 1봇: ``reconciler.reconcile(bot_id, ..., dry_run=not fix)`` —
-          기존 self-check/skip_external_buy/external-buy 분류 그대로(#1950/#1946
-          무변경). fix=True 면 보정, fix=False 면 detect-only.
+          기존 self-check/skip_external_buy/external-buy 분류 그대로.
+          fix=True 면 보정, fix=False 면 detect-only.
         - 2+봇: ``reconciler.detect_account_level(...)`` (correct_position 미호출).
         - 0봇 + broker_positions 비어있지 않음: account-level detect/alert.
     """
@@ -1515,26 +1507,25 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
 
-    Refs #1418 → #1472 SPLIT-D: ``approval.cancel_invalid`` (mutating) 추가.
+    ``approval.cancel_invalid`` (mutating).
 
-    Refs #1712: ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
-    (read-only) 추가. ``bot.start`` 는 ``app_key`` preflight + audit
+    ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
+    (read-only): ``bot.start`` 는 ``app_key`` preflight + audit
     ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``, ``bot.status`` 는
     ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
 
-    Refs #1849 (#1819 부모 epic): 각 등록에 contract metadata 7 필드 중
+    각 등록에 contract metadata 7 필드 중
     필수값(``result_kind``, ``result_key``, ``required_services``,
     ``audit_action``, ``account_id_policy``)을 명시한다. ``audit_action``은
-    실제 ``audit_logger.log`` 호출이 있는 명령만 값을 가진다(#1819 본문 /
-    Codex v2 condition 3). ``cross_validators``/``shutdown_behavior``는 본
-    이슈에서 default(빈 tuple / None=derive)로 유지한다.
+    실제 ``audit_logger.log`` 호출이 있는 명령만 값을 가진다.
+    ``cross_validators``/``shutdown_behavior``는
+    default(빈 tuple / None=derive)로 유지한다.
 
-    Refs #1853 (#1819 epic 종결): ``rule.update`` 의 audit 호출을 wrapper 로
-    이전한다(helper 의 ``audit_logger`` 인자를 IPC handler 에서 ``None`` 으로
-    전달, wrapper 가 ``audit_action="account.rule.update"`` 자동 발화).
+    ``rule.update`` 는 helper 의 ``audit_logger`` 인자를 IPC handler 에서
+    ``None`` 으로 전달하고, wrapper 가 ``audit_action="account.rule.update"``
+    를 자동 발화한다.
 
-    Refs #2110 (audit.md:112-120): audit.md 가 audit 대상으로 정의했으나
-    ``audit_action`` 누락으로 audit_log 에 기록되지 않던 상태변경 명령 7개에
+    audit.md:112-120 이 audit 대상으로 정의한 상태변경 명령 가운데 다음 7개에
     ``audit_action`` + ``audit_logger`` required 를 wiring 한다 —
     ``system.halt`` (action ``system.halt``) / ``system.clear_halt`` /
     ``bot.create`` (resource 는 생성 결과 ``bot.bot_id``) / ``bot.remove``
@@ -1553,12 +1544,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     ``approval.approve`` / ``approval.reject`` / ``approval.cancel`` /
     ``approval.cancel_invalid`` / ``rule.update``.
 
-    Refs #2112: ``bot.list`` / ``bot.info`` / ``bot.positions`` /
-    ``bot.signal_key`` (read-only) 추가 — ``bot list/info/positions/signal-key``
+    ``bot.list`` / ``bot.info`` / ``bot.positions`` /
+    ``bot.signal_key`` (read-only): ``bot list/info/positions/signal-key``
     의 runtime IPC 경로. CLI 가 서버 정지 시 snapshot DB fallback 한다. audit
-    없음(read-only). read-only 4→8, 총 28→32.
+    없음(read-only).
 
-    Refs #2113: member admin mutation 8개(``member.register`` /
+    member admin mutation 8개(``member.register`` /
     ``member.set_emoji`` / ``member.suspend`` / ``member.reactivate`` /
     ``member.revoke`` / ``member.rotate_token`` / ``member.reset_password`` /
     ``member.regenerate_recovery_key``) 를 runtime IPC 로 wiring 한다
@@ -1567,20 +1558,18 @@ def register_all_handlers(registry: CommandRegistry) -> None:
     audit/log/envelope 에는 노출하지 않는다. ``reset_password`` /
     ``regenerate_recovery_key`` 는 auth-exempt 라 master-lookup 을 handler
     (서버 chokepoint)에서 수행하고 audit member_id 를 고정 sentinel 상수로
-    기록한다. mutating 24→32, audit 18→26, 총 32→40.
+    기록한다.
 
-    Refs #2334 (#2336 PR#1): ``signal.connect`` (read-only) 추가 — daemon-위임
+    ``signal.connect`` (read-only): daemon-위임
     signal.connect 핸드셰이크의 4-게이트 LIVE 검증 경로. 통과 시 동일 연결을
     connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``;
-    connect-audit 1회는 PR#2 #2337). read-only 8→9, 총 40→41. mutating 32 /
-    audit 26 불변(signal.connect 는 비-mutating·비-audit).
+    connect-audit 1회는 handler 가 직접 발화).
 
-    Refs #2412: ``broker.order_history`` (read-only) 추가 — ``ante broker
+    ``broker.order_history`` (read-only): ``ante broker
     order-history`` 의 runtime IPC 경로. ``broker.positions`` 1:1 미러
     (``result_kind="collection"``, ``result_key="orders"``,
     ``required_services={"account"}``, ``account_id_policy="required"``).
-    audit 없음(read-only). read-only 9→10, 총 41→42. mutating 32 / audit 26
-    불변.
+    audit 없음(read-only).
     """
     registry.register(
         "system.halt",

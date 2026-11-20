@@ -119,12 +119,12 @@ class AuthService:
     async def _assert_member_role_known(self, member: Member) -> None:
         """``member.role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다.
 
-        legacy invalid-role member/token 차단 (#1466 — split #1417/B).
+        legacy invalid-role member/token 차단.
 
-        write path (#1465 — split #1417/A) 가 ``MemberService.register``에서
+        write path 가 ``MemberService.register``에서
         enum membership 을 막은 뒤에도, 그 이전에 DB 에 남은
         ``role="oracle_invalid_role"`` 같은 row 는 그대로 남는다
-        (cleanup 은 #1468 비목표). 본 게이트는 그런 row 가 auth
+        (cleanup 은 비목표). 본 게이트는 그런 row 가 auth
         principal 로 사용되는 것을 차단한다.
 
         검증 실패 시 ``MemberAuthFailedEvent`` + 알림을 발행해 운영자가 cleanup

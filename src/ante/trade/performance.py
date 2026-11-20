@@ -115,7 +115,7 @@ class PerformanceTracker:
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
             account_id: 계좌 ID 필터. ``None`` 이면 모든 계좌의 거래를
-                집계한다 (read query 정책 — #1218 영역). 단일 계좌에
+                집계한다 (read query 정책). 단일 계좌에
                 바인딩된 호출자(DailyReportScheduler 등)는 자기 계좌만
                 집계되도록 명시적으로 전달해야 한다.
             strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체를
@@ -441,7 +441,7 @@ class PerformanceTracker:
 
         legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
         :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 성과 산출
+        스키마/데이터 마이그레이션이 완료되기 전에도 성과 산출
         경로가 실패하지 않도록 하기 위함이다.
         """
         try:
