@@ -1453,3 +1453,272 @@ def test_self_healing_recover_respects_disabled_reconcile() -> None:
     assert "reconcile_enabled" in body, (
         "회복 경로가 reconcile.enabled 를 존중해야 함(Codex P2)"
     )
+
+
+# ── #2540 S3: 회복 경로·burst 의 잠기지 않은 제약 ───────────────────────────────
+
+
+def _recording_treasury(s: Any) -> list[dict[str, Any]]:
+    """start_sync 호출마다 인자와 그때의 BROKER readiness 를 기록하는 Treasury 더블."""
+    starts: list[dict[str, Any]] = []
+
+    async def _stop_sync() -> None:
+        return None
+
+    def _start_sync(**kwargs: Any) -> None:
+        starts.append(
+            {
+                **kwargs,
+                "broker_ready_at_start": s.runtime_readiness.is_ready(
+                    "live-1", ReadinessFlag.BROKER
+                ),
+            }
+        )
+
+    treasury = SimpleNamespace(
+        start_sync=_start_sync,
+        stop_sync=_stop_sync,
+        set_account_info=lambda **kwargs: None,
+    )
+    s.treasury_manager = SimpleNamespace(get=lambda account_id: treasury)
+    return starts
+
+
+def _live_broker() -> Any:
+    async def _noop() -> None:
+        return None
+
+    return SimpleNamespace(connect=_noop, account_no="", is_paper=False)
+
+
+def _mark(s: Any, account_id: str, *ready: ReadinessFlag) -> None:
+    for flag in ready:
+        s.runtime_readiness.mark_ready(account_id, flag)
+
+
+@pytest.mark.asyncio
+async def test_self_healing_reregisters_fill_when_only_fill_not_ready() -> None:
+    """broker 는 ready 이고 fill_reconcile 만 not_ready 여도 회복이 fill 스케줄러를
+    다시 등록해 계좌를 ready 로 되돌린다."""
+    s = _services()
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.BROKER,
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-1", ReadinessFlag.FILL_RECONCILE, "catch_up_poll_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.FILL_RECONCILE)
+    assert [f.account_id for f in _FakeFillScheduler.instances] == ["live-1"]
+    assert _FakeFillScheduler.instances[0].started is True
+
+
+@pytest.mark.asyncio
+async def test_self_healing_reregisters_reconcile_when_only_reconcile_not_ready() -> (
+    None
+):
+    """broker 는 ready 이고 reconcile 만 not_ready 여도 회복이 reconcile 스케줄러를
+    다시 등록해 계좌를 ready 로 되돌린다."""
+    s = _services()
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.BROKER,
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.FILL_RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-1", ReadinessFlag.RECONCILE, "scheduler_start_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.RECONCILE)
+    assert [r.account_id for r in _FakeReconcileScheduler.instances] == ["live-1"]
+    assert _FakeReconcileScheduler.instances[0].started is True
+    assert _FakeFillScheduler.instances == []
+
+
+@pytest.mark.asyncio
+async def test_self_healing_resyncs_ready_treasury_on_broker_recovery() -> None:
+    """treasury_sync 가 ready 여도 broker 가 방금 회복되면 새 broker 로 재동기화한다."""
+    broker = _live_broker()
+    s = _services(brokers={"live-1": broker})
+    starts = _recording_treasury(s)
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.FILL_RECONCILE,
+        ReadinessFlag.RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    await main_module._self_healing_recover_account(s, account)
+
+    assert [start["broker"] for start in starts] == [broker]
+    assert starts[0]["trading_mode"] == "live"
+
+
+@pytest.mark.asyncio
+async def test_self_healing_keeps_ready_treasury_without_broker_recovery() -> None:
+    """broker 가 계속 ready 였고 treasury_sync 도 ready 면, 다른 플래그를 회복하는
+    동안 treasury 를 다시 동기화하지 않는다."""
+    s = _services(brokers={"live-1": _live_broker()})
+    starts = _recording_treasury(s)
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.BROKER,
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready(
+        "live-1", ReadinessFlag.FILL_RECONCILE, "catch_up_poll_failed"
+    )
+
+    recovered = await main_module._self_healing_recover_account(s, account)
+
+    assert recovered is True
+    assert [f.account_id for f in _FakeFillScheduler.instances] == ["live-1"]
+    assert starts == []
+
+
+@pytest.mark.asyncio
+async def test_self_healing_marks_broker_ready_after_treasury_resync() -> None:
+    """broker 회복 때 treasury 재동기화가 도는 동안 broker_ready 는 아직 not_ready
+    이고, 재동기화가 끝난 뒤에 ready 가 된다."""
+    s = _services(brokers={"live-1": _live_broker()})
+    starts = _recording_treasury(s)
+    account = _account("live-1")
+    _mark(
+        s,
+        "live-1",
+        ReadinessFlag.TREASURY_SYNC,
+        ReadinessFlag.FILL_RECONCILE,
+        ReadinessFlag.RECONCILE,
+    )
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+
+    await main_module._self_healing_recover_account(s, account)
+
+    assert [start["broker_ready_at_start"] for start in starts] == [False]
+    assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.BROKER)
+
+
+def _burst_config(*, interval: int, attempts: int) -> Any:
+    values = {
+        "readiness.self_healing_interval_seconds": interval,
+        "readiness.self_healing_max_attempts_per_burst": attempts,
+        "readiness.self_healing_backoff_base_seconds": 5,
+        "readiness.self_healing_backoff_max_seconds": 60,
+    }
+    return SimpleNamespace(get=lambda key, default=None: values.get(key, default))
+
+
+def _sleep_until_interval(
+    monkeypatch: pytest.MonkeyPatch, interval: int, *, bursts: int = 1
+) -> list[float]:
+    """asyncio.sleep 을 기록하는 가짜로 바꾼다. 실제로 이벤트 루프에 양보하고,
+    burst 사이 대기(``interval``)를 ``bursts`` 번째 만나면 루프를 끝낸다."""
+    delays: list[float] = []
+    real_sleep = asyncio.sleep
+
+    async def _fake_sleep(delay: float) -> None:
+        delays.append(delay)
+        if delays.count(interval) >= bursts:
+            raise asyncio.CancelledError
+        await real_sleep(0)
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+    return delays
+
+
+@pytest.mark.asyncio
+async def test_self_healing_egw00133_ends_burst_after_one_connect(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """EGW00133 이면 그 계좌의 burst 를 끊어(backoff 없이) burst 당 connect 시도가
+    1회이고, 다음 burst 에서 다시 시도한다."""
+    from ante.broker.exceptions import TokenRateLimitError
+
+    s = _services(brokers={"live-1": TokenRateLimitError("x", error_code="EGW00133")})
+    s.config = _burst_config(interval=77, attempts=5)
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "EGW00133")
+    delays = _sleep_until_interval(monkeypatch, 77, bursts=2)
+
+    with pytest.raises(asyncio.CancelledError):
+        await main_module._readiness_self_healing_loop(s, [_account("live-1")])
+
+    assert s.account_service.get_broker.await_count == 2
+    assert delays == [77, 77]
+
+
+@pytest.mark.asyncio
+async def test_self_healing_burst_skips_backoff_after_last_attempt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """burst 안 attempt 사이에만 backoff 를 두고, 마지막 attempt 뒤에는 바로 burst
+    사이 대기로 넘어간다."""
+    s = _services(brokers={"live-1": RuntimeError("connect refused")})
+    s.config = _burst_config(interval=77, attempts=3)
+    s.runtime_readiness.mark_not_ready("live-1", ReadinessFlag.BROKER, "connect_failed")
+    delays = _sleep_until_interval(monkeypatch, 77)
+
+    with pytest.raises(asyncio.CancelledError):
+        await main_module._readiness_self_healing_loop(s, [_account("live-1")])
+
+    assert s.account_service.get_broker.await_count == 3
+    assert delays == [5, 10, 77]
+
+
+@pytest.mark.asyncio
+async def test_init_treasury_sync_binds_each_virtual_resolver_to_its_account() -> None:
+    """가상 계좌마다 만든 price resolver 는 루프가 끝난 뒤에도 자기 계좌로 조회한다."""
+    s = _services()
+    resolvers: dict[str, Any] = {}
+
+    def _treasury(account_id: str) -> Any:
+        async def _stop_sync() -> None:
+            return None
+
+        def _start_sync(**kwargs: Any) -> None:
+            resolvers[account_id] = kwargs["price_resolver"]
+
+        return SimpleNamespace(
+            start_sync=_start_sync,
+            stop_sync=_stop_sync,
+            set_account_info=lambda **kwargs: None,
+        )
+
+    treasuries = {account_id: _treasury(account_id) for account_id in ("kv-1", "kv-2")}
+    s.treasury_manager = SimpleNamespace(get=lambda account_id: treasuries[account_id])
+    asked: list[str] = []
+
+    async def _price(symbol: str, *, account_id: str) -> float:
+        asked.append(account_id)
+        return 1.0
+
+    s.api_gateway = SimpleNamespace(get_current_price=_price)
+    accounts = [
+        _account("kv-1", trading_mode=TradingMode.VIRTUAL),
+        _account("kv-2", trading_mode=TradingMode.VIRTUAL),
+    ]
+
+    await main_module._init_treasury_sync(s, accounts)
+    await resolvers["kv-1"]("005930")
+    await resolvers["kv-2"]("005930")
+
+    assert asked == ["kv-1", "kv-2"]
