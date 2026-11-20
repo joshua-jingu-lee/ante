@@ -278,3 +278,61 @@ async def test_daily_typical_volume_is_not_truncated(tmp_path: Path) -> None:
     assert result.warnings_total == typical_volume
     assert result.warnings_by_type == {"business_rule": typical_volume}
     assert result.warnings_truncated is False
+
+
+class _PendingWarningStore:
+    """store 쓰기 경고를 쌓아 두었다가 ``drain_warnings`` 로 비우는 가짜 store."""
+
+    def __init__(self) -> None:
+        self.pending: list[dict] = []
+        self.drain_calls = 0
+
+    def drain_warnings(self) -> list[dict]:
+        self.drain_calls += 1
+        drained, self.pending = self.pending, []
+        return drained
+
+
+@pytest.mark.asyncio
+async def test_daily_drains_store_warnings_right_after_each_write_stage(
+    tmp_path: Path,
+) -> None:
+    """data.go.kr 단계 store 경고는 DART 단계보다 먼저, 요약 집계와 함께 적재된다."""
+    data_path = tmp_path / "data"
+    feed_dir = data_path / ".feed"
+    (feed_dir / "checkpoints").mkdir(parents=True)
+
+    store = _PendingWarningStore()
+    store_merge = {"type": "store_merge", "path": "fundamental/KRX/005930/2025-09"}
+    dart_warning = {"type": "dart_collect", "message": "partial disclosure"}
+
+    class _DataGoKr:
+        async def collect(self, target_date: str, store_arg: object) -> tuple:
+            assert store_arg is store
+            store.pending.append(store_merge)
+            return 0, False, {"005930"}, []
+
+    class _Dart:
+        async def collect(self, *args: object, **kwargs: object) -> tuple:
+            return 0, False, set(), [dart_warning]
+
+    runner = DailyRunner(
+        data_go_kr_collector=_DataGoKr(),
+        dart_collector=_Dart(),
+        store=store,  # type: ignore[arg-type]
+    )
+
+    result = await runner.run(
+        data_path=data_path,
+        config={},
+        feed_dir=feed_dir,
+        started_at=datetime.now(tz=UTC),
+        is_blocked=lambda config, target_date: False,
+        target_date="2025-09-30",
+    )
+
+    assert result.warnings == [store_merge, dart_warning]
+    assert result.warnings_by_type == {"dart_collect": 1, "store_merge": 1}
+    assert result.warnings_total == 2
+    assert store.pending == []
+    assert store.drain_calls == 3

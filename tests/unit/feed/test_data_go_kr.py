@@ -1530,6 +1530,35 @@ class TestCollectorInstrumentsStore:
         assert df["symbol"].to_list() == ["005930"]
 
     @pytest.mark.asyncio
+    async def test_instruments_write_failure_leaves_ohlcv_fundamental_stored(
+        self, tmp_path
+    ) -> None:
+        """instruments 저장이 실패해도 그 전에 끝난 ohlcv/fundamental 저장은 남는다."""
+        store = ParquetStore(base_path=tmp_path)
+        original_write = store._atomic_write_parquet
+        instrument_attempts: list[Path] = []
+
+        def _fail_instruments(df, path, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if Path(path).name == "instruments.parquet":
+                instrument_attempts.append(Path(path))
+                raise OSError("disk full")
+            return original_write(df, path, *args, **kwargs)
+
+        store._atomic_write_parquet = _fail_instruments  # type: ignore[method-assign]
+        collector = DataGoKrCollector(
+            source=_FakeSource([_raw_inst("005930", "삼성전자", "KOSPI")])
+        )
+
+        try:
+            await collector.collect("20260102", store)
+        except OSError:
+            pass
+
+        assert instrument_attempts == [tmp_path / ".feed" / "instruments.parquet"]
+        assert store.list_symbols("1d") == ["005930"]
+        assert store.list_symbols(data_type="fundamental") == ["005930"]
+
+    @pytest.mark.asyncio
     async def test_instruments_not_written_on_missing_meta_columns(
         self, tmp_path
     ) -> None:

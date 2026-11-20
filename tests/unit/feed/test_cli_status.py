@@ -204,6 +204,27 @@ class TestFeedStatusWithReport:
         assert "0 failed" in result.output
         assert "2 total failures" in result.output
 
+    def test_total_failures_prefers_summary_total_over_failures_len(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """summary.failures_total 이 있으면 failures 배열 길이 대신 그 값을 쓴다."""
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="daily",
+            target_date="2026-03-16",
+            success=10,
+            failed=0,
+            extra_failures=[
+                {"date": "2026-03-16", "source": "data_go_kr", "reason": "HTTP 500"},
+            ],
+            failures_total=7,
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "7 total failures" in result.output
+        assert "1 total failures" not in result.output
+
     def test_total_failures_falls_back_to_failures_len(
         self, runner: CliRunner, data_path: str
     ) -> None:
@@ -319,6 +340,7 @@ def _create_report(
     include_failures_total: bool = True,
     include_warnings_total: bool = True,
     warnings_total: int | None = None,
+    failures_total: int | None = None,
 ) -> None:
     """테스트용 리포트 파일을 생성한다.
 
@@ -328,6 +350,7 @@ def _create_report(
         include_warnings_total: summary에 warnings_total을 넣을지(구버전 폴백 검증용).
         warnings_total: summary.warnings_total 값. None이면 warnings 배열 길이.
             배열보다 큰 값을 주면 절단 리포트(#2414)를 모사한다.
+        failures_total: summary.failures_total 값. None이면 failures 배열 길이.
     """
     reports_dir = Path(data_path) / ".feed" / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -343,7 +366,9 @@ def _create_report(
         "data_types": ["ohlcv", "fundamental"],
     }
     if include_failures_total:
-        summary["failures_total"] = len(failures)
+        summary["failures_total"] = (
+            len(failures) if failures_total is None else failures_total
+        )
     if include_warnings_total:
         summary["warnings_total"] = (
             warnings if warnings_total is None else warnings_total

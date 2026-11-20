@@ -1393,6 +1393,41 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         assert all(w.get("type") != "store_merge" for w in warns)
         assert store.pending_merge_failure_count() >= 1
 
+    async def test_backfill_inner_merge_failure_does_not_halt_later_quarters(
+        self, tmp_path: Path
+    ) -> None:
+        """내부 분기의 merge 실패는 halt 가 아니라 뒤 분기의 전진을 막지 않는다."""
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, _source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        _merge_fail_partition(store, "005930", "2015-06")
+
+        _net_delta, stored_ok, _syms, _warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        assert store.pending_merge_failure_count() >= 1
+        assert stored_ok is True
+        assert checkpoint.get_last_date() == "2015-Q4"
+
     async def test_backfill_clean_recollect_quarter_still_advances(
         self, tmp_path: Path
     ) -> None:

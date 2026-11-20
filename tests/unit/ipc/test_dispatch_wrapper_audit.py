@@ -1242,3 +1242,89 @@ async def test_2110_commands_preflight_reject_without_audit_logger(
             assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", command
     finally:
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_account_activate_account_id_policy_required_preflight(
+    socket_path: str,
+) -> None:
+    """``account.activate`` 는 잘못되거나 없는 account_id 를 handler 전에 거부한다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.activate = AsyncMock(return_value=None)
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger, account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        for args in (
+            {},
+            {"account_id": ""},
+            {"account_id": "default"},
+            {"account_id": "bad_id!"},
+        ):
+            response = await server._dispatch(
+                {"id": "1", "command": "account.activate", "args": args, "actor": "bob"}
+            )
+            assert response["status"] == "error", args
+            assert response["error"]["code"] == "VALIDATION_ERROR", args
+
+        fake_account.activate.assert_not_awaited()
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_rule_update_audits_exactly_once(socket_path: str) -> None:
+    """``rule.update`` 는 성공 시 ``account.rule.update`` audit 를 정확히 1건 남긴다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    fake_account = MagicMock()
+    fake_account.get = AsyncMock(return_value=MagicMock())
+    fake_dynamic_config = MagicMock()
+    fake_dynamic_config.get = AsyncMock(return_value=[])
+    fake_dynamic_config.set = AsyncMock(return_value=None)
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger,
+        account=fake_account,
+        dynamic_config=fake_dynamic_config,
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "rule.update",
+                "args": {
+                    "account_id": "acc-1",
+                    "rule_type": "daily_loss_limit",
+                    "enabled": True,
+                    "params": {"max_daily_loss_percent": 0.05},
+                },
+                "actor": "bob",
+            }
+        )
+        assert response["status"] == "ok", response
+        fake_dynamic_config.set.assert_awaited_once()
+
+        assert audit_logger.log.await_count == 1
+        call = audit_logger.log.await_args
+        assert call.kwargs["action"] == "account.rule.update"
+        assert call.kwargs["member_id"] == "bob"
+        assert call.kwargs["resource"] == "account:acc-1:rule:daily_loss_limit"
+    finally:
+        await server.stop()

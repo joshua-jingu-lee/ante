@@ -150,6 +150,22 @@ class TestLogLevelApply:
         finally:
             feed_logger.setLevel(original)
 
+    def test_critical_accepted_and_applied_to_feed_logger(
+        self, runner: CliRunner, tmp_path: Path
+    ) -> None:
+        """log_level=CRITICAL 도 거부되지 않고 ante.feed 로거에 적용된다."""
+        feed_logger = logging.getLogger("ante.feed")
+        original = feed_logger.level
+        try:
+            feed_logger.setLevel(logging.WARNING)
+            data_path = _init_with_config(tmp_path, _config(log_level="CRITICAL"))
+            result = _run_backfill(runner, data_path)
+            assert result.exit_code == 0, result.output
+            assert "CONFIG_INVALID_LOG_LEVEL" not in result.output
+            assert feed_logger.level == logging.CRITICAL
+        finally:
+            feed_logger.setLevel(original)
+
     def test_default_info_passes(self, runner: CliRunner, tmp_path: Path) -> None:
         """기본 INFO 는 정상 통과(회귀)."""
         data_path = _init_with_config(tmp_path, _config(log_level="INFO"))

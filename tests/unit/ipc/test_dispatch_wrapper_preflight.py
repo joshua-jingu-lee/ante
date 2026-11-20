@@ -615,3 +615,156 @@ async def test_broker_reconcile_missing_audit_logger_rejected(
         assert "audit_logger" in response["error"]["message"]
     finally:
         await server.stop()
+
+
+def _reconcile_services(missing: str | None) -> dict[str, Any]:
+    """``broker.reconcile`` 를 끝까지 돌릴 수 있는 가짜 서비스(0봇 계좌)."""
+    from unittest.mock import AsyncMock
+
+    broker = MagicMock()
+    broker.get_account_positions = AsyncMock(return_value=[])
+    account = MagicMock()
+    account.get_broker = AsyncMock(return_value=broker)
+    reconciler = MagicMock()
+    reconciler.detect_account_level = AsyncMock(return_value=[])
+    reconciler.reconcile = AsyncMock(return_value=[])
+    reconciler.compute_account_diff = AsyncMock(return_value=[])
+    bot_manager = MagicMock()
+    bot_manager.list_bots = MagicMock(return_value=[])
+    audit_logger = MagicMock()
+    audit_logger.log = AsyncMock(return_value=None)
+    services: dict[str, Any] = {
+        "account": account,
+        "reconciler": reconciler,
+        "bot_manager": bot_manager,
+        "audit_logger": audit_logger,
+    }
+    if missing is not None:
+        services[missing] = None
+    return services
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "missing", ["account", "reconciler", "bot_manager", "audit_logger"]
+)
+async def test_broker_reconcile_rejects_each_missing_required_service(
+    socket_path: str, missing: str
+) -> None:
+    """``broker.reconcile`` 은 account·reconciler·bot_manager·audit_logger 중 하나라도
+    없으면 handler 에 들어가기 전에 ``SERVICE_NOT_CONFIGURED`` 로 거부한다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    services = _reconcile_services(missing)
+    svc_registry = _make_service_registry(**services)
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "broker.reconcile",
+                "args": {"account_id": "acc-a", "fix": True},
+                "actor": "cli-user",
+            }
+        )
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", response
+        assert response["error"]["message"].endswith(f": {missing}")
+        if services["account"] is not None:
+            services["account"].get_broker.assert_not_awaited()
+        if services["bot_manager"] is not None:
+            services["bot_manager"].list_bots.assert_not_called()
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_broker_reconcile_reaches_handler_when_required_services_present(
+    socket_path: str,
+) -> None:
+    """대조군: 네 서비스가 모두 있으면 같은 가짜로 handler 가 끝까지 돈다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    services = _reconcile_services(None)
+    svc_registry = _make_service_registry(**services)
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "broker.reconcile",
+                "args": {"account_id": "acc-a", "fix": True},
+                "actor": "cli-user",
+            }
+        )
+        assert response["status"] == "ok", response
+        assert response["result"]["bot_count"] == 0
+        services["account"].get_broker.assert_awaited_once_with("acc-a")
+    finally:
+        await server.stop()
+
+
+def _positions_bot_manager() -> MagicMock:
+    bot = MagicMock()
+    bot.config.account_id = "acc-a"
+    bot_manager = MagicMock()
+    bot_manager.get_bot = MagicMock(return_value=bot)
+    return bot_manager
+
+
+@pytest.mark.asyncio
+async def test_bot_positions_without_trade_service_returns_empty_collection(
+    socket_path: str,
+) -> None:
+    """``bot.positions`` 는 trade_service 가 없으면 빈 positions 를 낸다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    bot_manager = _positions_bot_manager()
+    svc_registry = _make_service_registry(bot_manager=bot_manager)
+    assert svc_registry.trade_service is None
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": "bot.positions", "args": {"bot_id": "bot-1"}}
+        )
+        assert response["status"] == "ok", response
+        assert response["result"] == {"positions": []}
+        bot_manager.get_bot.assert_called_once_with("bot-1")
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_bot_positions_without_bot_manager_is_service_not_configured(
+    socket_path: str,
+) -> None:
+    """``bot.positions`` 는 bot_manager 가 없으면 SERVICE_NOT_CONFIGURED 다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    svc_registry = _make_service_registry(bot_manager=None)
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": "bot.positions", "args": {"bot_id": "bot-1"}}
+        )
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == "SERVICE_NOT_CONFIGURED", response
+        assert response["error"]["message"].endswith(": bot_manager")
+    finally:
+        await server.stop()

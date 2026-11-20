@@ -441,6 +441,56 @@ def test_indicator_nonstandard_period_end_month_removed(store: ParquetStore) -> 
     assert abs(row["per"] - 420_000_000_000_000 / 50_000_000_000_000) < 1e-6
 
 
+def test_indicator_nonstandard_month_row_never_becomes_asof_source(
+    store: ParquetStore,
+) -> None:
+    """비표준 월 legacy 행은 표준 행보다 늦게 공시된 셈이 되는 자리에서도 안 쓰인다.
+
+    비표준 행(4/30)에 +45일을 붙이면 6/14 로 표준 Q1 행(공시 5/15)보다 늦다.
+    거래일 6/20 의 as-of 결과가 Q1 값이면 비표준 행은 join 전에 제거된 것이다.
+    """
+    _write_daily(
+        store,
+        [
+            {
+                "date": date(2024, 6, 20),
+                "symbol": SYMBOL,
+                "market_cap": 420_000_000_000_000,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            },
+        ],
+    )
+    _write_quarterly(
+        store,
+        [
+            {
+                "date": date(2024, 3, 31),
+                "available_date": date(2024, 5, 15),
+                "symbol": SYMBOL,
+                "net_income": 50_000_000_000_000,
+                "total_equity": 300_000_000_000_000,
+                "total_debt": 100_000_000_000_000,
+                "source": "dart",
+            },
+            {
+                "date": date(2024, 4, 30),
+                "symbol": SYMBOL,
+                "net_income": 999_000_000_000_000,
+                "total_equity": 999_000_000_000_000,
+                "total_debt": 999_000_000_000_000,
+                "source": "dart",
+            },
+        ],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    row = _daily_rows(store).row(0, named=True)
+    assert row["per"] is not None
+    assert abs(row["per"] - 420_000_000_000_000 / 50_000_000_000_000) < 1e-6
+
+
 def test_indicator_zero_denominator_null(store: ParquetStore) -> None:
     """분모가 0이면 해당 지표가 null이다 (as-of 결합 경로).
 

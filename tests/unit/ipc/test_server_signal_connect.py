@@ -360,6 +360,212 @@ class TestHandleSignalConnectUnit:
             await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
 
 
+# ── dispatch 경유: 거부 코드·로그 수준·ack 실패 정리 ──────────────────
+
+
+def _registered_commands() -> CommandRegistry:
+    reg = CommandRegistry()
+    register_all_handlers(reg)
+    return reg
+
+
+async def _start_registered_server(socket_path: str, svc: ServiceRegistry) -> IPCServer:
+    server = IPCServer(socket_path, svc, _registered_commands())
+    await server.start()
+    return server
+
+
+@pytest.mark.parametrize("bad_key", [123, ["sk_x"], {"k": "sk_x"}])
+async def test_non_str_key_rejected_as_invalid_signal_key(
+    socket_path: str, bad_key: object
+) -> None:
+    """str 이 아닌 key 는 키 조회 결과와 무관하게 INVALID_SIGNAL_KEY 로 거부된다."""
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(return_value="bot-1")
+    bm.get_bot = MagicMock(return_value=_make_bot())
+    server = await _start_registered_server(socket_path, _make_service_registry(bm))
+    try:
+        response = await server._dispatch(
+            {"id": "k1", "command": "signal.connect", "args": {"key": bad_key}}
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "INVALID_SIGNAL_KEY"
+    finally:
+        await server.stop()
+
+
+def _busy_registry() -> object:
+    from ante.bot.signal_channel_registry import ChannelHandle, SignalChannelRegistry
+
+    reg = SignalChannelRegistry()
+    reg.register(ChannelHandle(session_id="existing", bot_id="bot-1", generation=0))
+    return reg
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_code"),
+    [
+        ("key_miss", "INVALID_SIGNAL_KEY"),
+        ("not_running", "BOT_NOT_RUNNING"),
+        ("not_accepting", "BOT_NOT_ACCEPTING_SIGNALS"),
+        ("busy", "BOT_SIGNAL_CHANNEL_BUSY"),
+    ],
+)
+async def test_expected_handshake_rejects_log_warning_without_traceback(
+    socket_path: str,
+    caplog: pytest.LogCaptureFixture,
+    scenario: str,
+    expected_code: str,
+) -> None:
+    """예상된 핸드셰이크 거부는 traceback 없는 WARNING 한 건으로만 로깅된다."""
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(
+        return_value=None if scenario == "key_miss" else "bot-1"
+    )
+    bm.get_bot = MagicMock(
+        return_value=_make_bot(
+            status=BotStatus.STOPPED
+            if scenario == "not_running"
+            else BotStatus.RUNNING,
+            accepts=scenario != "not_accepting",
+        )
+    )
+    svc = _make_service_registry(bm)
+    if scenario == "busy":
+        svc.signal_channel_registry = _busy_registry()
+    server = await _start_registered_server(socket_path, svc)
+    try:
+        caplog.set_level("DEBUG", logger="ante.ipc.server")
+        caplog.clear()
+        response = await server._dispatch(
+            {"id": "r1", "command": "signal.connect", "args": {"key": "sk_x"}}
+        )
+        assert response["error"]["code"] == expected_code
+
+        records = [
+            r for r in caplog.records if r.name == "ante.ipc.server" and r.levelno >= 30
+        ]
+        assert [r.levelname for r in records] == ["WARNING"]
+        assert records[0].exc_info is None
+        assert expected_code in records[0].getMessage()
+    finally:
+        await server.stop()
+
+
+async def test_unexpected_handshake_error_logs_exception_with_traceback(
+    socket_path: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """예상 밖의 예외는 traceback 이 붙은 ERROR 로 로깅된다."""
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(side_effect=RuntimeError("boom"))
+    server = await _start_registered_server(socket_path, _make_service_registry(bm))
+    try:
+        caplog.set_level("DEBUG", logger="ante.ipc.server")
+        caplog.clear()
+        response = await server._dispatch(
+            {"id": "r2", "command": "signal.connect", "args": {"key": "sk_x"}}
+        )
+        assert response["error"]["code"] == "EXECUTION_ERROR"
+        bm.validate_signal_key.assert_awaited_once()
+
+        records = [
+            r for r in caplog.records if r.name == "ante.ipc.server" and r.levelno >= 30
+        ]
+        assert [r.levelname for r in records] == ["ERROR"]
+        assert records[0].exc_info is not None
+    finally:
+        await server.stop()
+
+
+async def test_malformed_first_frame_closes_connection(socket_path: str) -> None:
+    """비-dict 첫 프레임에는 응답 1프레임 뒤 연결을 닫는다(다음 요청 미처리)."""
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock()
+    server = await _start_server(socket_path, bm)
+
+    try:
+        reader, writer = await asyncio.open_unix_connection(socket_path)
+        await _write_json_frame(writer, [1, 2])
+        resp = json.loads((await _read_frame(reader)).decode("utf-8"))
+        assert resp["error"]["code"] == "MALFORMED_REQUEST"
+
+        try:
+            await _write_json_frame(
+                writer,
+                {"id": "next", "command": "signal.connect", "args": {"key": "sk_x"}},
+            )
+        except ConnectionError:
+            pass
+        with pytest.raises((asyncio.IncompleteReadError, ConnectionError)):
+            await asyncio.wait_for(reader.readexactly(4), timeout=5.0)
+        bm.validate_signal_key.assert_not_called()
+
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except ConnectionError:
+            pass
+    finally:
+        await server.stop()
+
+
+class _AckFailingWriter:
+    def __init__(self) -> None:
+        self.writes: list[bytes] = []
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.writes.append(data)
+
+    async def drain(self) -> None:
+        raise ConnectionResetError("peer gone")
+
+    def close(self) -> None:
+        self.closed = True
+
+    async def wait_closed(self) -> None:
+        return None
+
+
+async def test_ack_write_failure_unregisters_handle(socket_path: str) -> None:
+    """ack 전송이 실패하면 등록을 해제해 같은 봇의 재연결이 BUSY 로 막히지 않는다."""
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
+
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(return_value="bot-1")
+    bm.get_bot = MagicMock(return_value=_make_bot())
+    svc = _make_service_registry(bm)
+    channel_registry = SignalChannelRegistry()
+    svc.signal_channel_registry = channel_registry
+    server = IPCServer(socket_path, svc, _signal_only_registry())
+    await server.start()
+    try:
+        reader = asyncio.StreamReader()
+        payload = json.dumps(
+            {"id": "a1", "command": "signal.connect", "args": {"key": "sk_x"}}
+        ).encode("utf-8")
+        reader.feed_data(struct.pack("!I", len(payload)) + payload)
+        writer = _AckFailingWriter()
+
+        await asyncio.wait_for(
+            server._handle_connection(reader, writer),  # type: ignore[arg-type]
+            timeout=5.0,
+        )
+
+        assert len(writer.writes) == 1
+        ack = json.loads(writer.writes[0][4:].decode("utf-8"))
+        assert ack["status"] == "ok"
+        assert writer.closed is True
+        assert channel_registry.has_active_session("bot-1") is False
+
+        retry = await server._dispatch(
+            {"id": "a2", "command": "signal.connect", "args": {"key": "sk_x"}}
+        )
+        assert retry["status"] == "ok"
+    finally:
+        await server.stop()
+
+
 # ── registry 등록 메타데이터 lock ────────────────────────────────────
 
 
