@@ -1396,6 +1396,51 @@ class TestMarketBuyQuoteResolver:
         assert approved[0].reserved_amount == 0.0
         assert resolver_calls == []
 
+    @pytest.mark.parametrize(
+        "quote", [0.0, -1.0, float("nan"), float("inf"), float("-inf")]
+    )
+    async def test_market_buy_non_finite_or_non_positive_quote_rejected(
+        self, db, eventbus, quote
+    ):
+        """resolver 가 NaN/Inf/0 이하 quote 를 주면 예약 없이 명시 거부한다."""
+
+        async def resolver(symbol: str) -> float:
+            return quote
+
+        t = await self._make_treasury_with_buffer(
+            db, eventbus, buffer="0", resolver=resolver
+        )
+        await t.allocate("bot1", 1_000_000.0)
+
+        rejected: list = []
+        approved: list = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderApprovedEvent, lambda e: approved.append(e))
+
+        await eventbus.publish(
+            OrderValidatedEvent(
+                order_id="ord-bad-quote",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="A",
+                side="buy",
+                quantity=1.0,
+                price=None,
+                order_type="market",
+                account_id=ACCOUNT_ID,
+            )
+        )
+
+        assert approved == []
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith(
+            "market_buy_quote_unavailable: non-finite or non-positive quote"
+        )
+        budget = t.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == 0.0
+        assert budget.available == 1_000_000.0
+
 
 # -- #1333 shortfall 정산 -----
 

@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from unittest.mock import AsyncMock
 
 import pytest
@@ -620,3 +621,26 @@ async def test_gateway_non_limit_order_rejected(
     assert len(rejected) == 1
     assert rejected[0].reason == "modify_unsupported_order_type"
     broker.modify_order.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("record_exchange", "expected"), [(None, "KRX"), ("NASDAQ", "NASDAQ")]
+)
+async def test_gateway_executed_exchange_from_record_with_krx_fallback(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    record_exchange: str | None,
+    expected: str,
+) -> None:
+    """정정 완료 이벤트의 exchange 는 record 값, record 가 NULL 이면 "KRX"."""
+    record = dataclasses.replace(
+        _make_record(side="sell", order_price=50000.0), exchange=record_exchange
+    )
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    executed: list[OrderModifyExecutedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+
+    await gateway._on_order_modify(_make_modify_event(side="sell", price=51000.0))
+
+    assert len(executed) == 1
+    assert executed[0].exchange == expected
