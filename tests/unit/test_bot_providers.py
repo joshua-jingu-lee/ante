@@ -894,6 +894,69 @@ class TestStrategyContextFactory:
 # ── US-5: BotManager + Factory 통합 ─────────────
 
 
+class TestFactoryContextFileSandbox:
+    """factory 가 만든 봇 컨텍스트의 load_file 은 strategies/ 밖을 읽지 못한다."""
+
+    @pytest.fixture
+    def project_root(self, tmp_path, monkeypatch):
+        (tmp_path / "strategies").mkdir()
+        (tmp_path / "strategies" / "params.txt").write_bytes(b"inside")
+        (tmp_path / "secret.txt").write_bytes(b"repo-root-secret")
+        monkeypatch.chdir(tmp_path)
+        return tmp_path
+
+    def _virtual_ctx(self, eventbus) -> StrategyContext:
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            virtual_executor=_virtual_executor(eventbus=eventbus),
+        )
+        return factory.create(
+            BotConfig(bot_id="virtual1", strategy_id="s1", account_id="acct1")
+        )
+
+    def _live_ctx(self) -> StrategyContext:
+        from ante.account.models import Account, TradingMode
+
+        class FakeAccountService:
+            def get_sync(self, account_id):
+                return Account(
+                    account_id=account_id,
+                    name="test",
+                    exchange="KRX",
+                    currency="KRW",
+                    trading_mode=TradingMode.LIVE,
+                )
+
+        class FakeLivePortfolio(LivePortfolioView):
+            def __init__(self):
+                pass
+
+        factory = StrategyContextFactory(
+            data_provider=FakeDataProvider(),
+            account_service=FakeAccountService(),
+            live_portfolio=FakeLivePortfolio(),
+        )
+        return factory.create(
+            BotConfig(bot_id="live1", strategy_id="s1", account_id="live-acct")
+        )
+
+    @pytest.mark.parametrize("mode", ["virtual", "live"])
+    def test_load_file_confined_to_strategies_dir(
+        self, project_root, eventbus, mode
+    ) -> None:
+        from ante.strategy.exceptions import StrategyFileAccessError
+
+        ctx = self._virtual_ctx(eventbus) if mode == "virtual" else self._live_ctx()
+
+        with pytest.raises(StrategyFileAccessError, match="File not found"):
+            ctx.load_file("secret.txt")
+        with pytest.raises(StrategyFileAccessError, match="escapes"):
+            ctx.load_file("../secret.txt")
+        with pytest.raises(StrategyFileAccessError, match="escapes"):
+            ctx.load_file("../strategies/../secret.txt")
+        assert ctx.load_file("params.txt") == b"inside"
+
+
 class TestBotManagerWithFactory:
     @pytest.fixture
     async def db(self, tmp_path):

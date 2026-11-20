@@ -672,6 +672,51 @@ async def test_concurrent_transaction_then_autocommit_race_b(db):
     assert [(r["id"], r["val"]) for r in rows] == [(2, "task2")]
 
 
+@pytest.mark.parametrize(
+    ("method", "sql"),
+    [
+        ("execute", "INSERT INTO t (id, val) VALUES (2, 'task2')"),
+        (
+            "execute_fetch_one",
+            "INSERT INTO t (id, val) VALUES (2, 'task2') RETURNING id",
+        ),
+        (
+            "execute_fetch_all",
+            "INSERT INTO t (id, val) VALUES (2, 'task2') RETURNING id",
+        ),
+        ("execute_script", "INSERT INTO t (id, val) VALUES (2, 'task2');"),
+    ],
+)
+async def test_writer_methods_do_not_join_other_task_transaction(db, method, sql):
+    """race B 를 writer 메서드마다: 다른 태스크의 transaction() 이 열려 있는 동안
+    호출한 쓰기는 그 트랜잭션에 섞이지 않고, owner rollback 뒤 독립 커밋된다."""
+    await db.execute_script("CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT);")
+
+    owner_inserted = asyncio.Event()
+    writer_started = asyncio.Event()
+
+    async def owner_body():
+        with pytest.raises(ValueError, match="의도적 예외"):
+            async with db.transaction():
+                await db.execute("INSERT INTO t (id, val) VALUES (1, 'owner')")
+                owner_inserted.set()
+                await asyncio.wait_for(writer_started.wait(), timeout=5.0)
+                raise ValueError("의도적 예외")
+
+    async def writer_body():
+        await asyncio.wait_for(owner_inserted.wait(), timeout=5.0)
+        write = asyncio.create_task(getattr(db, method)(sql))
+        await asyncio.sleep(0)
+        assert not write.done()
+        writer_started.set()
+        await asyncio.wait_for(write, timeout=5.0)
+
+    await asyncio.gather(owner_body(), writer_body())
+
+    rows = await db.fetch_all("SELECT id, val FROM t ORDER BY id")
+    assert [(r["id"], r["val"]) for r in rows] == [(2, "task2")]
+
+
 async def test_autocommit_cancel_leaves_no_open_transaction(db):
     """자동커밋 ``execute()`` 가 commit 대기 중 cancel 돼도 implicit 트랜잭션이
     잔존하지 않아 이후 ``transaction()`` 이 정상 동작한다(#2365)."""
