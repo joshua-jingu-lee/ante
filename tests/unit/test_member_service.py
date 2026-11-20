@@ -16,7 +16,8 @@ import pytest
 
 from ante.core.database import Database
 from ante.eventbus import EventBus
-from ante.member.models import MemberStatus, MemberType
+from ante.eventbus.events import MemberAuthFailedEvent
+from ante.member.models import MemberRole, MemberStatus, MemberType
 from ante.member.service import InvalidRoleScan, MemberService
 
 
@@ -199,3 +200,59 @@ async def test_member_invalid_role_finder_after_cli_revoke(
     await TestFindInvalidRoleMembers().test_find_invalid_role_members_after_cli_revoke(
         service, db
     )
+
+
+# ── auth read-path role gate ───────────────────────────────────────
+
+
+async def _seed_human_with_role(db: Database, service: MemberService, role: str) -> str:
+    """password·token 을 모두 가진 human 을 만든 뒤 DB 에서 role 을 바꾼다."""
+    _, token, _ = await service.bootstrap_master("owner", "pass123")
+    await db.execute("UPDATE members SET role = ? WHERE member_id = ?", (role, "owner"))
+    return token
+
+
+class TestAuthRoleGate:
+    """token·password 인증 모두 ``MemberRole`` 의 role 만 principal 로 인정한다."""
+
+    @pytest.mark.parametrize("role", [r.value for r in MemberRole])
+    async def test_every_member_role_authenticates(
+        self, service: MemberService, db: Database, role: str
+    ) -> None:
+        token = await _seed_human_with_role(db, service, role)
+
+        by_token = await service.authenticate(token)
+        by_password = await service.authenticate_password("owner", "pass123")
+
+        assert by_token.member_id == "owner"
+        assert by_token.role == role
+        assert by_password.member_id == "owner"
+        assert by_password.role == role
+
+    async def test_invalid_role_token_rejected(
+        self, service: MemberService, db: Database, eventbus: EventBus
+    ) -> None:
+        events: list[MemberAuthFailedEvent] = []
+        eventbus.subscribe(MemberAuthFailedEvent, lambda e: events.append(e))
+        token = await _seed_human_with_role(db, service, "oracle_invalid_role")
+
+        with pytest.raises(PermissionError, match="invalid role"):
+            await service.authenticate(token)
+
+        assert [(e.member_id, e.reason) for e in events] == [
+            ("owner", "unknown role: 'oracle_invalid_role'")
+        ]
+
+    async def test_invalid_role_password_rejected(
+        self, service: MemberService, db: Database, eventbus: EventBus
+    ) -> None:
+        events: list[MemberAuthFailedEvent] = []
+        eventbus.subscribe(MemberAuthFailedEvent, lambda e: events.append(e))
+        await _seed_human_with_role(db, service, "oracle_invalid_role")
+
+        with pytest.raises(PermissionError, match="invalid role"):
+            await service.authenticate_password("owner", "pass123")
+
+        assert [(e.member_id, e.reason) for e in events] == [
+            ("owner", "unknown role: 'oracle_invalid_role'")
+        ]

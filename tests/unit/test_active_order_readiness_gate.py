@@ -352,6 +352,22 @@ class TestLayer1RuleEngine:
         assert _notif_count(cap) == 1
         assert "청산" not in cap.notifications[-1].title
 
+    async def test_korean_liquidation_text_without_marker_is_not_liquidation(
+        self,
+    ) -> None:
+        """G6: marker 없이 한국어 "청산" 만 든 reason 은 청산으로 보지 않는다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        engine = self._engine(bus, registry=not_ready_registry(ACCOUNT))
+        await engine._on_order_request(
+            _request(side="sell", order_type="limit", reason="봇 삭제 청산")
+        )
+
+        assert len(cap.rejected) == 1
+        assert cap.rejected[0].reason.startswith("account_not_ready")
+        assert _notif_count(cap) == 1
+        assert "청산 차단" not in cap.notifications[-1].title
+
     async def test_layer1_blocks_before_side_validation(self) -> None:
         """gate 가 side 검증 前 실행 — invalid side 라도 account_not_ready 우선."""
         bus = EventBus()

@@ -1986,3 +1986,166 @@ async def test_repair_timezone_runtime_started_blocked(db, eventbus) -> None:
         ("legacy-tz",),
     )
     assert row["timezone"] == "Mars/Olympus"
+
+
+# ── #2540: timezone 진입점 · reserve buffer 기본값과 마이그레이션 ──────────
+
+
+@pytest.mark.asyncio
+async def test_initialize_no_summary_when_all_timezones_valid(
+    db, eventbus, caplog
+) -> None:
+    """invalid timezone 계좌가 0건이면 initialize 는 summary 줄을 남기지 않는다."""
+    import logging
+
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+    await svc.create(_make_account("good-1"))
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="ante.account.service"):
+        svc2 = AccountService(db, eventbus)
+        await svc2.initialize()
+
+    assert len(await svc2.list()) == 1
+    assert not any(
+        "ACCOUNT_INVALID_TIMEZONE_LEGACY" in r.getMessage() for r in caplog.records
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bad_timezone", ["", "Mars/Olympus"])
+async def test_update_rejects_empty_and_invalid_timezone(service, bad_timezone):
+    """update() 는 None 이 아닌 timezone 이면 ``""`` 까지 IANA 검증해 거부한다."""
+    await service.create(_make_account("tz-update", timezone="Asia/Tokyo"))
+
+    with pytest.raises(ValueError, match="invalid IANA timezone"):
+        await service.update("tz-update", timezone=bad_timezone)
+
+    row = await service._db.fetch_one(
+        "SELECT timezone FROM accounts WHERE account_id = ?", ("tz-update",)
+    )
+    assert row["timezone"] == "Asia/Tokyo"
+    assert (await service.get("tz-update")).timezone == "Asia/Tokyo"
+
+
+@pytest.mark.asyncio
+async def test_seed_account_rejects_invalid_preset_timezone(
+    service, monkeypatch
+) -> None:
+    """seed 경로도 BROKER_PRESETS 의 invalid timezone 을 거부하고 저장하지 않는다."""
+    from dataclasses import replace
+
+    monkeypatch.setitem(
+        BROKER_PRESETS,
+        "test",
+        replace(BROKER_PRESETS["test"], timezone="Mars/Olympus"),
+    )
+
+    with pytest.raises(ValueError, match="invalid IANA timezone"):
+        await service.create_default_test_account()
+
+    stored = await service._db.fetch_one(
+        "SELECT account_id FROM accounts WHERE account_id = 'test'"
+    )
+    assert stored is None
+    with pytest.raises(AccountNotFoundError):
+        await service.get("test")
+
+
+_LEGACY_ACCOUNTS_DDL = """\
+CREATE TABLE accounts (
+    account_id   TEXT PRIMARY KEY,
+    name         TEXT NOT NULL,
+    exchange     TEXT NOT NULL,
+    currency     TEXT NOT NULL,
+    timezone     TEXT NOT NULL DEFAULT 'Asia/Seoul',
+    trading_hours_start TEXT NOT NULL DEFAULT '09:00',
+    trading_hours_end   TEXT NOT NULL DEFAULT '15:30',
+    trading_mode TEXT NOT NULL DEFAULT 'virtual'
+        CHECK(trading_mode IN ('virtual', 'live')),
+    broker_type  TEXT NOT NULL,
+    credentials  TEXT NOT NULL DEFAULT '{}',
+    broker_config TEXT NOT NULL DEFAULT '{}',
+    buy_commission_rate  REAL NOT NULL DEFAULT 0,
+    sell_commission_rate REAL NOT NULL DEFAULT 0,
+    status       TEXT NOT NULL DEFAULT 'active'
+        CHECK(status IN ('active', 'suspended', 'deleted')),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+
+async def _seed_legacy_accounts_without_buffer(db, rows) -> None:
+    """``market_order_reserve_buffer_rate`` 컬럼이 없는 legacy accounts 테이블."""
+    from ante.account.crypto import encrypt_credentials
+
+    await db.execute_script(_LEGACY_ACCOUNTS_DDL)
+    for account_id, exchange, broker_type in rows:
+        await db.execute(
+            "INSERT INTO accounts (account_id, name, exchange, currency, "
+            "broker_type, credentials) VALUES (?, ?, ?, 'KRW', ?, ?)",
+            (
+                account_id,
+                account_id,
+                exchange,
+                broker_type,
+                encrypt_credentials({"app_key": "k", "app_secret": "s"}),
+            ),
+        )
+
+
+async def _buffer_column_present(db) -> bool:
+    rows = await db.fetch_all("PRAGMA table_info(accounts)")
+    return any(r["name"] == "market_order_reserve_buffer_rate" for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_legacy_buffer_migration_backfills_only_test_broker(db, eventbus) -> None:
+    """legacy DB 마이그레이션: test broker 는 0, 그 밖은 DDL default 0.005."""
+    await _seed_legacy_accounts_without_buffer(
+        db, [("legacy-test", "TEST", "test"), ("legacy-kis", "KRX", "kis-domestic")]
+    )
+    assert not await _buffer_column_present(db)
+
+    svc = AccountService(db, eventbus)
+    await svc.initialize()
+
+    assert await _buffer_column_present(db)
+    test_acct = await svc.get("legacy-test")
+    kis_acct = await svc.get("legacy-kis")
+    assert test_acct.market_order_reserve_buffer_rate == Decimal("0")
+    assert kis_acct.market_order_reserve_buffer_rate == Decimal("0.005")
+
+
+@pytest.mark.asyncio
+async def test_row_without_buffer_column_falls_back_to_zero(tmp_path, eventbus) -> None:
+    """ALTER 가 실패해 컬럼이 없는 채로 로드되면 buffer 는 0 으로 대체된다."""
+    import sqlite3
+
+    alter_attempts: list[str] = []
+
+    class AlterFailingDatabase(Database):
+        async def execute_script(self, sql: str) -> None:
+            if "ADD COLUMN market_order_reserve_buffer_rate" in sql:
+                alter_attempts.append(sql)
+                raise sqlite3.OperationalError("database is locked")
+            await super().execute_script(sql)
+
+    database = AlterFailingDatabase(str(tmp_path / "legacy.db"))
+    await database.connect()
+    try:
+        await _seed_legacy_accounts_without_buffer(
+            database, [("legacy-test", "TEST", "test")]
+        )
+
+        svc = AccountService(database, eventbus)
+        await svc.initialize()
+
+        assert len(alter_attempts) == 1
+        assert not await _buffer_column_present(database)
+        acct = await svc.get("legacy-test")
+        assert acct.market_order_reserve_buffer_rate == Decimal("0")
+    finally:
+        await database.close()
