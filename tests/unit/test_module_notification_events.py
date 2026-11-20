@@ -382,6 +382,29 @@ class TestTradeRecorderNotifications:
         # 오표기 없음 — 다른 거래소(NYSE) 종목명이 라벨에 섞이지 않는다.
         assert "Apple Inc." not in msg
 
+    async def test_filled_notification_uses_event_exchange_for_name(
+        self, recorder_with_nyse_instrument, eventbus, notifications
+    ):
+        """체결 이벤트의 exchange 로 종목명을 찾는다(비-KRX 종목도 병기된다)."""
+        from ante.eventbus.events import OrderFilledEvent
+
+        await eventbus.publish(
+            OrderFilledEvent(
+                order_id="o-nyse-named",
+                bot_id="bot-1",
+                strategy_id="s1",
+                symbol="AAPL",
+                side="buy",
+                quantity=10.0,
+                price=190.0,
+                order_type="market",
+                account_id="acc-test",
+                exchange="NYSE",
+            )
+        )
+        assert len(notifications) == 1
+        assert "종목: `AAPL` (Apple Inc.)\n" in notifications[0].message
+
 
 # ── main.py (2건) ──────────────────────────
 

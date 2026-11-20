@@ -79,6 +79,23 @@ def _gate_ready_registry(account_id: str = "domestic") -> RuntimeReadinessRegist
     return reg
 
 
+class _AlwaysBlockRule(Rule):
+    """항상 BLOCK 하는 테스트 룰. action 은 생성 인자로 고른다."""
+
+    def __init__(self, rule_id, config, *, action=RuleAction.LOG):
+        super().__init__(rule_id, config)
+        self._action = action
+
+    def evaluate(self, context: RuleContext) -> RuleEvaluation:
+        return RuleEvaluation(
+            rule_id=self.rule_id,
+            rule_name=self.name,
+            result=RuleResult.BLOCK,
+            action=self._action,
+            message="always block",
+        )
+
+
 # ── RuleResult / RuleEvaluation ──────────────────
 
 
@@ -4661,6 +4678,156 @@ class TestRuleEngineEventBus:
         ev = rejected[0]
         assert "Invalid signal side" in ev.reason
         assert ev.price is None
+
+    @pytest.mark.parametrize("bad_stop_price", [-0.5, -1])
+    async def test_rule_engine_rejects_small_negative_stop_price(
+        self, engine, eventbus, bad_stop_price
+    ):
+        """0 과 -1 사이·-1 의 음수 stop_price 도 음수 게이트가 거부한다."""
+        rejected: list[OrderRejectedEvent] = []
+        validated: list[OrderValidatedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+        eventbus.subscribe(OrderValidatedEvent, lambda e: validated.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="sell",
+                quantity=1.0,
+                order_type="stop",
+                price=None,
+                stop_price=bad_stop_price,
+            )
+        )
+
+        assert validated == []
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith("Negative stop_price")
+
+    async def test_rule_block_rejection_payload_is_normalized(self, engine, eventbus):
+        """룰 위반 거부 이벤트의 quantity·price 는 float 로 정규화돼 실린다."""
+        engine.clear_rules()
+        engine.add_account_rule(_AlwaysBlockRule("blocker", {}))
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10,
+                order_type="limit",
+                price=50000,
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].reason == "always block"
+        assert type(rejected[0].quantity) is float
+        assert rejected[0].quantity == 10.0
+        assert type(rejected[0].price) is float
+        assert rejected[0].price == 50000.0
+
+    async def test_fallback_reject_publish_failure_is_swallowed(
+        self, mock_account_service
+    ):
+        """fallback 거부 발행이 어떤 예외로 실패해도 핸들러 밖으로 새지 않는다."""
+
+        class _UnrelatedPublishError(Exception):
+            pass
+
+        class _FailingBus:
+            def __init__(self) -> None:
+                self.attempts: list[object] = []
+
+            def subscribe(self, *args, **kwargs) -> None:
+                return None
+
+            async def publish(self, event: object) -> None:
+                self.attempts.append(event)
+                raise _UnrelatedPublishError("publish down")
+
+        bus = _FailingBus()
+        engine = RuleEngine(
+            eventbus=bus,  # type: ignore[arg-type]
+            account_id="domestic",
+            account_service=mock_account_service,
+            runtime_readiness=_gate_ready_registry(),
+        )
+
+        await engine._on_order_request(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=10.0,
+                order_type="market",
+                price=50000.0,
+            )
+        )
+
+        assert [type(e) for e in bus.attempts] == [
+            OrderValidatedEvent,
+            OrderRejectedEvent,
+        ]
+        assert bus.attempts[1].reason == "OrderRequest preflight error (see logs)"
+
+    async def test_notify_action_labels_symbol_with_event_exchange(
+        self, mock_account_service
+    ):
+        """룰 위반 NOTIFY 알림은 이벤트의 exchange 로 종목명을 찾는다."""
+        from unittest.mock import MagicMock
+
+        from ante.eventbus.events import NotificationEvent
+        from ante.instrument.models import Instrument
+        from ante.instrument.service import InstrumentService
+
+        instrument_service = InstrumentService(db=MagicMock())
+        instrument_service._cache = {
+            ("AAPL", "NYSE"): Instrument(
+                symbol="AAPL", exchange="NYSE", name="Apple Inc."
+            )
+        }
+        eventbus = EventBus()
+        engine = RuleEngine(
+            eventbus=eventbus,
+            account_id="domestic",
+            account_service=mock_account_service,
+            runtime_readiness=_gate_ready_registry(),
+            instrument_service=instrument_service,
+        )
+        engine.start()
+        engine.add_account_rule(
+            _AlwaysBlockRule("blocker", {}, action=RuleAction.NOTIFY)
+        )
+        notifications: list[NotificationEvent] = []
+        eventbus.subscribe(NotificationEvent, lambda e: notifications.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="AAPL",
+                side="buy",
+                quantity=1.0,
+                order_type="limit",
+                price=190.0,
+                exchange="NYSE",
+            )
+        )
+
+        violations = [n for n in notifications if "Rule violation" in n.message]
+        assert len(violations) == 1
+        assert violations[0].message == "Rule violation for bot bot1: AAPL (Apple Inc.)"
 
 
 # ── RuleEngine.update_rules ──────────────────────

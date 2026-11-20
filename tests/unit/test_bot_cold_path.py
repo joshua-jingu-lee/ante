@@ -194,3 +194,24 @@ async def test_cold_path_remove_invalid_account_id_rejects(
             "bot-1",
             strategies_dir=tmp_path / "strategies",
         )
+
+
+async def test_cold_path_remove_empty_account_id_rejects_without_cleanup(
+    db: Database,
+    tmp_path: Path,
+) -> None:
+    """bot row 의 account_id 가 빈 문자열이면 대체 계좌 없이 거부한다."""
+    from ante.account.errors import InvalidAccountIdError
+    from ante.bot.cold_path import cold_path_remove_bot
+
+    await _insert_bot(db, account_id="")
+
+    with pytest.raises(InvalidAccountIdError):
+        await cold_path_remove_bot(
+            db,
+            "bot-1",
+            strategies_dir=tmp_path / "strategies",
+        )
+
+    bot_row = await db.fetch_one("SELECT status FROM bots WHERE bot_id = ?", ("bot-1",))
+    assert bot_row == {"status": "created"}

@@ -1003,6 +1003,60 @@ class TestSessionExpiryA2:
             # 1일차 epoch(20260619)는 2일차 키(20260620)와 다르므로 미마킹.
             assert order_day2.entered_session is False
 
+    async def test_tick_with_no_active_orders_marks_epoch_for_later_register(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """active order 가 하나도 없을 때의 실 틱도 세션 epoch 를 마킹한다."""
+        manager.start()
+
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            assert manager.active_orders == []
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+            stop_id = await manager.register(
+                order_id="ord-after-empty-tick",
+                bot_id="bot-001",
+                strategy_id="stg-001",
+                symbol="000660",
+                side="sell",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id="acc-test",
+            )
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is True
+
+        eventbus.publish.reset_mock()
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.check_session_expiry()
+
+        expired = [
+            call.args[0]
+            for call in eventbus.publish.call_args_list
+            if isinstance(call.args[0], StopOrderExpiredEvent)
+        ]
+        assert [e.reason for e in expired] == ["session_ended"]
+        assert manager.active_orders == []
+
 
 class TestExpireShield:
     """#2405 (attempt6 P2-A): shutdown cancel race 의 in-flight terminal 보존.

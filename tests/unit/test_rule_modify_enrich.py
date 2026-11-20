@@ -283,6 +283,33 @@ async def test_record_not_found_keeps_empty_graceful(
     assert received[0].side == ""
 
 
+async def test_record_lookup_unrelated_exception_keeps_empty_graceful(
+    mock_account_service: AsyncMock,
+) -> None:
+    """tracker 조회가 어떤 예외로 실패해도 핸들러는 "" 로 계속 진행한다."""
+
+    class _UnrelatedLookupError(Exception):
+        pass
+
+    eventbus = EventBus()
+    tracker = AsyncMock()
+    tracker.get = AsyncMock(side_effect=_UnrelatedLookupError("tracker down"))
+    engine = _make_engine(mock_account_service, eventbus, tracker)
+    engine.add_account_rule(_RejectingRule("rejecter", {"type": "test"}))
+
+    received: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: received.append(e))
+
+    event = _make_modify_event()
+    await engine._on_order_modify(event)
+
+    tracker.get.assert_awaited_once_with("ord-2045")
+    assert len(received) == 1
+    assert received[0].reason == "modify rejected for test"
+    assert received[0].symbol == ""
+    assert received[0].side == ""
+
+
 # ── (f) account 불일치 record → enrich 안 함 (no-op) ────────────────
 
 

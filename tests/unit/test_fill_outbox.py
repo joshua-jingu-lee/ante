@@ -745,3 +745,84 @@ async def test_loop_internal_bug_db_error_resets_counter(eventbus, monkeypatch):
     assert intervals[1] == 4.0
     assert intervals[2] == publisher._drain_interval
     assert intervals[3] == publisher._drain_interval
+
+
+async def test_loop_backoff_multiplier_caps_at_eight(eventbus, monkeypatch):
+    """연속 손상 실패 backoff 는 ×2, ×4, ×8 뒤 ×8 에 머문다."""
+    ob = object.__new__(FillOutbox)
+    publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
+
+    harness = _LoopHarness(publisher, monkeypatch)
+    harness.drain_outcomes = [
+        sqlite3.OperationalError("database disk image is malformed") for _ in range(6)
+    ]
+    harness.install()
+    await harness.run()
+
+    intervals = [
+        harness.drain_times[i + 1] - harness.drain_times[i]
+        for i in range(len(harness.drain_times) - 1)
+    ]
+    assert intervals == [2.0, 4.0, 8.0, 8.0, 8.0]
+
+
+@pytest.mark.parametrize(("failures", "expected_notifications"), [(9, 0), (10, 1)])
+async def test_loop_escalation_threshold_is_ten(
+    eventbus, monkeypatch, failures, expected_notifications
+):
+    """escalation 알림은 연속 손상 실패 10회째에 처음 나간다."""
+    notifications: list[NotificationEvent] = []
+
+    async def _on_notify(event):
+        if isinstance(event, NotificationEvent):
+            notifications.append(event)
+
+    eventbus.subscribe(NotificationEvent, _on_notify)
+
+    ob = object.__new__(FillOutbox)
+    publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
+
+    harness = _LoopHarness(publisher, monkeypatch)
+    harness.drain_outcomes = [
+        sqlite3.OperationalError("database disk image is malformed")
+        for _ in range(failures)
+    ]
+    harness.install()
+    await harness.run()
+
+    assert len(harness.drain_times) == failures
+    assert len(notifications) == expected_notifications
+
+
+async def test_loop_survives_escalation_publish_failure(monkeypatch):
+    """escalation 알림 발행이 어떤 예외로 실패해도 드레인 루프는 계속 돈다."""
+
+    class _UnrelatedPublishError(Exception):
+        pass
+
+    class _FailingBus:
+        def __init__(self) -> None:
+            self.attempts: list[object] = []
+
+        async def publish(self, event: object) -> None:
+            self.attempts.append(event)
+            raise _UnrelatedPublishError("notification channel down")
+
+    bus = _FailingBus()
+    ob = object.__new__(FillOutbox)
+    publisher = FillOutboxPublisher(
+        outbox=ob,
+        eventbus=bus,  # type: ignore[arg-type]
+        drain_interval=1.0,
+    )
+
+    harness = _LoopHarness(publisher, monkeypatch)
+    harness.drain_outcomes = [
+        sqlite3.OperationalError("database disk image is malformed") for _ in range(12)
+    ]
+    harness.install()
+    await harness.run()
+
+    assert [type(e) for e in bus.attempts] == [NotificationEvent]
+    assert len(harness.drain_times) == 12
+    assert publisher._consecutive_failures == 12
