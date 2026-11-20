@@ -2009,7 +2009,7 @@ class TestBotSignalAcrossStopAndRestart:
         assert bot.status == BotStatus.STOPPED
         assert strategy_cls.data_calls == []
         assert [e for e, _ in orders if e.reason == "sig-B"] == []
-        assert any("bot1" in m for m in _rejections(caplog))
+        assert any("bot1" in m and "signal_id=sig-B" in m for m in _rejections(caplog))
 
     @staticmethod
     async def _stop_then_resume(manager: BotManager) -> None:
@@ -2063,8 +2063,76 @@ class TestBotSignalAcrossStopAndRestart:
         assert [s for s, _ in strategy_cls.data_calls if s is second] == []
         assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
         assert [e for e, _ in orders if e.reason == "sig-B"] == []
-        assert any("bot1" in m for m in _rejections(caplog))
+        assert any("bot1" in m and "signal_id=sig-B" in m for m in _rejections(caplog))
         assert bot.status == BotStatus.RUNNING
+
+    async def test_signal_released_while_restart_publishes_is_dropped(
+        self, manager, eventbus, ctx, pending
+    ):
+        """재개가 BotStartedEvent 를 발행하는 동안 잠금을 얻은 시그널도 버려진다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        probe = self._probe(manager)
+        bot = await manager.create_bot(_gen_config(), strategy_cls, ctx)
+        await manager.start_bot("bot1")
+        await strategy_cls.wait_steps(1)
+
+        publisher_a = asyncio.create_task(eventbus.publish(_gen_signal("sig-A")))
+        pending.append(publisher_a)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        publisher_b = asyncio.create_task(eventbus.publish(_gen_signal("sig-B")))
+        pending.append(publisher_b)
+        await probe.wait_entered(publisher_b)
+
+        async def release_while_starting(event: object) -> None:
+            strategy_cls.hold_data["sig-A"].set()
+            await asyncio.wait_for(publisher_a, timeout=5.0)
+            await asyncio.wait_for(publisher_b, timeout=5.0)
+
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
+        eventbus.subscribe(BotStartedEvent, release_while_starting, priority=1000)
+        await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
+
+        assert publisher_b.done()
+        assert bot.status == BotStatus.RUNNING
+        assert [sid for _, sid in strategy_cls.data_calls if sid == "sig-B"] == []
+        assert [e for e, _ in orders if e.reason == "sig-B"] == []
+
+    async def test_old_loop_woken_while_restart_publishes_ends_without_step(
+        self, manager, eventbus, monkeypatch, pending
+    ):
+        """재개가 BotStartedEvent 를 발행하는 동안 깨어난 옛 루프도 스텝 없이 끝난다."""
+        (
+            strategy_cls,
+            gate,
+            portfolio,
+            bot,
+        ) = await self._orphan_loop_after_in_chain_stop(manager, eventbus, monkeypatch)
+        old_loop = strategy_cls.steps[0][1]
+        assert isinstance(old_loop, asyncio.Task)
+        pending.append(old_loop)
+        lifecycle = _collect(eventbus, BotErrorEvent, BotStepCompletedEvent)
+        lookups_before = portfolio.calls.count(old_loop)
+
+        async def wake_while_starting(event: object) -> None:
+            gate.wake(old_loop)
+            await gate.settle(old_loop)
+
+        eventbus.subscribe(BotStartedEvent, wake_while_starting, priority=1000)
+        await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
+
+        assert [t for _, t in strategy_cls.steps if t is old_loop] == [old_loop]
+        assert portfolio.calls.count(old_loop) == lookups_before
+        assert [e for e, t in lifecycle if t is old_loop] == []
+        assert old_loop.done()
+        assert old_loop.result() is None
+        assert bot.status == BotStatus.RUNNING
+
+        await strategy_cls.wait_steps(2)
+        new_loop = strategy_cls.steps[1][1]
+        assert new_loop is not old_loop
+        await gate.wait_sleeping(new_loop)
+        await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
 
     async def test_waiting_signal_is_dropped_after_error(
         self, manager, eventbus, ctx, pending
@@ -2158,6 +2226,7 @@ class TestBotSignalAcrossStopAndRestart:
     async def _orphan_loop_after_in_chain_stop(
         manager: BotManager, eventbus: EventBus, monkeypatch: pytest.MonkeyPatch
     ) -> tuple[type[_RecorderBase], _IntervalGate, _RecordingPortfolio, Bot]:
+        """끝의 단언은 옛 루프가 남은 시나리오에 도달했는지 확인하는 장치다."""
         gate = _IntervalGate(999)
         monkeypatch.setattr("ante.bot.bot.asyncio.sleep", gate.sleep)
         portfolio = _RecordingPortfolio()
@@ -2264,7 +2333,7 @@ class TestBotSignalAcrossStopAndRestart:
         await asyncio.wait_for(manager.stop_bot("bot1"), timeout=5.0)
 
     async def test_old_loop_failing_after_mid_step_restart_keeps_new_generation(
-        self, manager, eventbus, monkeypatch, pending
+        self, manager, eventbus, monkeypatch, pending, caplog
     ):
         """스텝 도중 정지·재개된 뒤 옛 루프가 예외로 끝나도 새 세대는 그대로다."""
         gate = _IntervalGate(999)
@@ -2307,14 +2376,25 @@ class TestBotSignalAcrossStopAndRestart:
         assert bot.status == BotStatus.STOPPED
 
         await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
-        resumed.set()
-        await gate.settle(old_loop)
+        with caplog.at_level("WARNING", logger="ante.bot.bot"):
+            resumed.set()
+            await gate.settle(old_loop)
 
         assert old_loop.done()
         assert old_loop.result() is None
         assert bot.status == BotStatus.RUNNING
         assert bot.error_message is None
         assert [e for e, t in lifecycle if t is old_loop] == []
+        ignored = [
+            r
+            for r in caplog.records
+            if r.name == "ante.bot.bot"
+            and r.getMessage().startswith("옛 세대 루프 예외 무시")
+        ]
+        assert len(ignored) == 1
+        assert "bot1" in ignored[0].getMessage()
+        assert "1 → 2" in ignored[0].getMessage()
+        assert ignored[0].exc_info is not None
 
         await strategy_cls.wait_steps(2)
         new_loop = strategy_cls.steps[1][1]
@@ -2441,7 +2521,7 @@ class TestBotSignalAcrossStopAndRestart:
             await asyncio.wait_for(eventbus.publish(_gen_signal("sig-B")), timeout=5.0)
 
         assert strategy_cls.data_calls == []
-        assert any("bot1" in m for m in _rejections(caplog))
+        assert any("bot1" in m and "signal_id=sig-B" in m for m in _rejections(caplog))
 
     async def test_bot_without_start_still_runs_loop_and_signal(
         self, eventbus, ctx, monkeypatch

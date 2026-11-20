@@ -260,6 +260,14 @@ class Bot:
             raise
         except Exception as e:
             if self._generation != generation:
+                logger.warning(
+                    "옛 세대 루프 예외 무시: 봇 %s 세대 %d → %d — %s",
+                    self.bot_id,
+                    generation,
+                    self._generation,
+                    e,
+                    exc_info=True,
+                )
                 return
             self.status = BotStatus.ERROR
             self.error_message = str(e)
@@ -459,34 +467,41 @@ class Bot:
 
         if not self.strategy.meta.accepts_external_signals:
             logger.warning(
-                "외부 시그널 거부: 봇 %s 전략 %s — accepts_external_signals=False",
+                "외부 시그널 거부: 봇 %s 전략 %s — accepts_external_signals=False"
+                " signal_id=%s",
                 self.bot_id,
                 self.strategy.meta.name,
+                event.signal_id,
             )
             return
 
         if self.status != BotStatus.RUNNING:
             logger.warning(
-                "외부 시그널 거부: 봇 %s 상태 %s (RUNNING 아님)",
+                "외부 시그널 거부: 봇 %s 상태 %s (RUNNING 아님) signal_id=%s",
                 self.bot_id,
                 self.status.value,
+                event.signal_id,
             )
             return
 
         async with self._signal_lock:
             if self.status != BotStatus.RUNNING:
                 logger.warning(
-                    "외부 시그널 거부: 봇 %s 상태 %s (잠금 대기 중 RUNNING 이탈)",
+                    "외부 시그널 거부: 봇 %s 상태 %s (잠금 대기 중 RUNNING 이탈)"
+                    " signal_id=%s",
                     self.bot_id,
                     self.status.value,
+                    event.signal_id,
                 )
                 return
             if self._generation != generation:
                 logger.warning(
-                    "외부 시그널 거부: 봇 %s 세대 %d → %d (잠금 대기 중 재시작)",
+                    "외부 시그널 거부: 봇 %s 세대 %d → %d (잠금 대기 중 재시작)"
+                    " signal_id=%s",
                     self.bot_id,
                     generation,
                     self._generation,
+                    event.signal_id,
                 )
                 return
             follow_up = await self.strategy.on_data(
