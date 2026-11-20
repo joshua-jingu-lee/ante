@@ -580,3 +580,67 @@ async def test_ipc_dispatch_broker_reconcile_valid_account_no_bot_id_reaches_han
         assert response["error"]["code"] != "VALIDATION_ERROR", response
     finally:
         await server.stop()
+
+
+def _registry_with_real_treasury() -> tuple[ServiceRegistry, object]:
+    from ante.eventbus.bus import EventBus
+    from ante.treasury.treasury import Treasury
+
+    treasury = Treasury(db=MagicMock(), eventbus=EventBus(), account_id="acc-a")
+    bot = MagicMock()
+    bot.config.account_id = "acc-a"
+    bot_manager = MagicMock()
+    bot_manager.get_bot = MagicMock(return_value=bot)
+    treasury_manager = MagicMock()
+    treasury_manager.get = MagicMock(return_value=treasury)
+    svc = ServiceRegistry(
+        account=MagicMock(),
+        bot_manager=bot_manager,
+        treasury_manager=treasury_manager,
+        dynamic_config=MagicMock(),
+        approval=MagicMock(),
+        reconciler=MagicMock(),
+        eventbus=MagicMock(),
+        strategy_registry=MagicMock(),
+        audit_logger=MagicMock(),
+    )
+    return svc, treasury
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "amount", "expected_code"),
+    [
+        ("treasury.allocate", 1_000.0, "TREASURY_INSUFFICIENT_BALANCE"),
+        ("treasury.allocate", 0.0, "TREASURY_INVALID_AMOUNT"),
+        ("treasury.deallocate", 1_000.0, "TREASURY_BUDGET_NOT_FOUND"),
+        ("treasury.deallocate", -5.0, "TREASURY_INVALID_AMOUNT"),
+    ],
+)
+async def test_ipc_dispatch_treasury_rejection_surfaces_typed_code(
+    socket_path: str, command: str, amount: float, expected_code: str
+) -> None:
+    """Treasury 의 거절은 success=False 응답이 아니라 그 예외의 오류 코드로 나간다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    svc, _treasury = _registry_with_real_treasury()
+
+    server = IPCServer(socket_path, svc, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "t1",
+                "command": command,
+                "args": {"account_id": "acc-a", "bot_id": "bot-1", "amount": amount},
+                "actor": "tester",
+            }
+        )
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == expected_code, response
+        assert "result" not in response
+        svc.treasury_manager.get.assert_called_once_with("acc-a")
+    finally:
+        await server.stop()

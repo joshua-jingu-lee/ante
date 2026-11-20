@@ -1393,6 +1393,53 @@ class TestDartStoreMergeFailureBlocksCheckpoint:
         assert all(w.get("type") != "store_merge" for w in warns)
         assert store.pending_merge_failure_count() >= 1
 
+    async def test_backfill_inner_merge_failure_does_not_halt_later_quarters(
+        self, tmp_path: Path
+    ) -> None:
+        """내부 분기의 merge 실패 뒤에도 이후 분기는 계속 수집·저장된다."""
+        behaviors: dict[tuple[str, str], object] = {
+            ("2015", "11013"): [_raw_item("2015", "11013")],
+            ("2015", "11012"): [_raw_item("2015", "11012")],
+            ("2015", "11014"): [_raw_item("2015", "11014")],
+            ("2015", "11011"): [_raw_item("2015", "11011")],
+        }
+        norm_results = {
+            ("2015", "11013"): _stored_df_quarter("2015", 3),
+            ("2015", "11012"): _stored_df_quarter("2015", 6),
+            ("2015", "11014"): _stored_df_quarter("2015", 9),
+            ("2015", "11011"): _stored_df_quarter("2015", 12),
+        }
+        collector, checkpoint, store, source, _config = _make_collector_env(
+            tmp_path, behaviors, norm_results
+        )
+
+        _merge_fail_partition(store, "005930", "2015-06")
+
+        _net_delta, stored_ok, _syms, _warns = await collector._collect_quarters(
+            {"00126380": "005930"},
+            store,
+            checkpoint,
+            2015,
+            2015,
+            None,
+        )
+
+        assert store.pending_merge_failure_count() >= 1
+        assert source.fetched == [
+            ("2015", "11013"),
+            ("2015", "11012"),
+            ("2015", "11014"),
+            ("2015", "11011"),
+        ]
+        part_dir = store.base_path / "fundamental" / "KRX" / "005930"
+        for month, period_end in (
+            ("2015-09", date(2015, 9, 30)),
+            ("2015-12", date(2015, 12, 31)),
+        ):
+            later = pl.read_parquet(part_dir / f"{month}.parquet")
+            assert period_end in later["date"].to_list()
+        assert stored_ok is True
+
     async def test_backfill_clean_recollect_quarter_still_advances(
         self, tmp_path: Path
     ) -> None:

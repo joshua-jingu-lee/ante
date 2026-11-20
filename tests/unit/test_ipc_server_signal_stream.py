@@ -9,6 +9,7 @@ socket 은 integration(T4) 에서 검증. sleep 금지.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import struct
 from unittest.mock import MagicMock
@@ -304,3 +305,309 @@ async def test_out_queue_overflow_closes_stream_as_lagged(
     assert frames[-1] == {"type": "closed", "reason": "lagged"}
     assert len(probes) < SIGNAL_OUT_QUEUE_MAX + 1
     assert reg.has_active_session("bot-1") is False
+
+
+# ── teardown 순서: in-flight publish·closing_event·flush-before-cancel ──────
+
+
+class _GatedWriter(_FakeWriter):
+    """``drain`` 이 ``gate`` 가 열릴 때까지 멈추는 writer (느린 client 모사)."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.gate = asyncio.Event()
+        self.drain_calls = 0
+
+    async def drain(self) -> None:
+        self.drain_calls += 1
+        await self.gate.wait()
+
+
+async def _yield_until(predicate, limit: int = 200) -> bool:  # noqa: ANN001
+    for _ in range(limit):
+        if predicate():
+            return True
+        await asyncio.sleep(0)
+    return predicate()
+
+
+def _capture_sinks(monkeypatch: pytest.MonkeyPatch) -> list:
+    from ante.bot import signal_channel as signal_channel_module
+
+    sinks: list = []
+
+    class _SinkCapturingChannel(signal_channel_module.SignalChannel):
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            super().__init__(*args, **kwargs)
+            sinks.append(kwargs["sink"])
+
+    monkeypatch.setattr(signal_channel_module, "SignalChannel", _SinkCapturingChannel)
+    return sinks
+
+
+def _blocking_signal_subscriber(
+    bus: EventBus,
+) -> tuple[asyncio.Event, asyncio.Event, list[str]]:
+    from ante.eventbus.events import ExternalSignalEvent
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    outcome: list[str] = []
+
+    async def _slow_on_data(event: object) -> None:
+        entered.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            outcome.append("cancelled")
+            raise
+        outcome.append("completed")
+
+    bus.subscribe(ExternalSignalEvent, _slow_on_data)
+    return entered, release, outcome
+
+
+_SIGNAL_FRAME = {"type": "signal", "symbol": "005930", "side": "buy"}
+
+
+async def test_daemon_close_waits_for_inflight_publish_before_ending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """daemon close 는 진행 중인 publish 가 끝날 때까지 스트림을 끝내지 않는다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 3600.0)
+    bus = EventBus()
+    entered, release, outcome = _blocking_signal_subscriber(bus)
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    reader.feed_data(_frame_bytes(_SIGNAL_FRAME))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(entered.is_set)
+
+        reg.close_bot("bot-1", "rotated")
+        reader.feed_data(_frame_bytes(_SIGNAL_FRAME))
+        assert not await _yield_until(task.done)
+        assert outcome == []
+
+        release.set()
+        await asyncio.wait_for(task, timeout=5.0)
+        for _ in range(50):
+            await asyncio.sleep(0)
+        assert outcome == ["completed"]
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        release.set()
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_inflight_publish_survives_grace_expiry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """grace 가 지나도 in-flight publish 자체는 취소되지 않고 백그라운드에서 끝난다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 0)
+    bus = EventBus()
+    entered, release, outcome = _blocking_signal_subscriber(bus)
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    reader.feed_data(_frame_bytes(_SIGNAL_FRAME))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(entered.is_set)
+
+        reg.close_bot("bot-1", "rotated")
+        await asyncio.wait_for(task, timeout=5.0)
+        assert outcome == []
+
+        release.set()
+        assert await _yield_until(lambda: bool(outcome))
+        assert outcome == ["completed"]
+    finally:
+        release.set()
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_headless_lagged_teardown_ends_stream_with_stalled_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """registry 없는 스트림도 laggard 가 supervisor 를 깨워 EOF 없이 끝난다."""
+    from ante.ipc import server as server_module
+    from ante.ipc.server import SIGNAL_OUT_QUEUE_MAX
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 0)
+    sinks = _capture_sinks(monkeypatch)
+    bus = EventBus()
+    bot = _make_bot(bus)
+    server = _make_server(bus, None, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _GatedWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: len(sinks) == 1)
+        sink = sinks[0]
+        sink({"type": "probe", "seq": -1})
+        assert await _yield_until(lambda: writer.drain_calls == 1)
+
+        for i in range(SIGNAL_OUT_QUEUE_MAX + 1):
+            sink({"type": "probe", "seq": i})
+
+        assert await _yield_until(task.done)
+        assert len(bus._handlers.get(OrderFilledEvent, [])) == 0
+    finally:
+        writer.gate.set()
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_handle_close_wakes_supervisor_with_stalled_writer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """adopt 된 handle 의 동기 close 가 writer 가 막혀 있어도 스트림을 끝낸다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 0)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _GatedWriter()
+    reader.feed_data(_frame_bytes({"type": "ping"}))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: writer.drain_calls == 1)
+        assert writer.frames() == [{"type": "pong"}]
+
+        reg.close_bot("bot-1", "rotated")
+
+        assert await _yield_until(task.done)
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        writer.gate.set()
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_handle_closed_before_adopt_self_closes_without_eof() -> None:
+    """adopt 전에 닫힌 handle 은 풀 루프 없이 closed 1프레임으로 끝난다."""
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    handle.close("bot_stopped")
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(task.done)
+        assert writer.frames() == [{"type": "closed", "reason": "bot_stopped"}]
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_daemon_close_flushes_closed_frame_behind_pending_drain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """daemon close 는 앞 프레임 drain 중에도 closed 프레임을 보낸 뒤 끝낸다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 3600.0)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _GatedWriter()
+    reader.feed_data(_frame_bytes({"type": "ping"}))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: writer.drain_calls == 1)
+
+        reg.close_bot("bot-1", "rotated")
+        assert not await _yield_until(task.done)
+        writer.gate.set()
+        await asyncio.wait_for(task, timeout=5.0)
+
+        assert writer.frames() == [
+            {"type": "pong"},
+            {"type": "closed", "reason": "rotated"},
+        ]
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        writer.gate.set()
+        reader.feed_eof()
+        await asyncio.wait_for(task, timeout=5.0)
+
+
+async def test_natural_eof_ends_stream_without_grace_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """closing_event 없이 EOF 로 끝나면 grace 를 기다리지 않고 바로 정리한다."""
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 3600.0)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: handle.out_queue is not None)
+        reader.feed_eof()
+        assert await _yield_until(task.done)
+        assert writer.frames() == []
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        reader.feed_eof()
+        if not task.done():
+            task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task

@@ -185,6 +185,51 @@ async def test_backfill_blocked_hours_waits_and_collects_guarded_date(
     assert cp.get_last_date() == "2024-01-03"
 
 
+@pytest.mark.asyncio
+async def test_backfill_guard_wait_of_a_full_day_is_not_permanent_block(
+    tmp_data_path: Path,
+) -> None:
+    """실제 상수에서 하루 동안 이어진 가드는 GUARD_PERMANENTLY_BLOCKED 가 아니다.
+
+    폴링 주기·대기 상한을 patch 하지 않는다. 가드는 누적 대기가 24시간에 이른
+    시점에도 아직 활성이어서 상한 검사가 그 시점에 한 번 더 돈다. 상한이 하루를
+    넘어야 그 날짜를 수집한다.
+    """
+    config = _config_with_window("00:00", "23:59", backfill_since="2024-01-01")
+    target_dates = ["2024-01-01"]
+    one_day = 24 * 60 * 60.0
+
+    store = ParquetStore(base_path=tmp_data_path)
+    source = _date_driven_source()
+    orchestrator = FeedOrchestrator(data_go_kr_source=source, store=store)
+
+    sleep_calls: list[float] = []
+
+    def _paused_for_one_day(_config: dict[str, Any]) -> bool:
+        return sum(sleep_calls) <= one_day
+
+    async def _fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    with (
+        patch.object(
+            FeedOrchestrator, "_is_trading_paused", staticmethod(_paused_for_one_day)
+        ),
+        patch.object(bf_mod.asyncio, "sleep", _fake_sleep),
+        patch.object(
+            bf_mod.BackfillRunner,
+            "_resolve_dates",
+            staticmethod(lambda _config, _feed_dir: list(target_dates)),
+        ),
+    ):
+        result = await orchestrator.run_backfill(tmp_data_path, config)
+
+    codes = {e.get("code") for e in result.config_errors if isinstance(e, dict)}
+    assert CONFIG_ERROR_CODE_GUARD_PERMANENTLY_BLOCKED not in codes
+    assert sum(sleep_calls) > one_day
+    assert _stored_dates(store) == {"2024-01-01"}
+
+
 # ── (2) blocked_days → 주말 skip, 평일 수집, hang 없음 ────────────────────
 
 
