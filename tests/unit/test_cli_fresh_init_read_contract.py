@@ -240,6 +240,54 @@ class TestTradeInfoFreshInit:
         assert payload.get("code") == "TRADE_NOT_FOUND", payload
 
 
+class TestTradeInfoOtherOperationalError:
+    def test_non_table_absence_error_is_trade_error(self, tmp_path: Path) -> None:
+        """테이블 부재가 아닌 DB 오류는 not-found 로 삼키지 않고 TRADE_ERROR 다."""
+        import sqlite3
+        from unittest.mock import patch
+
+        from click.testing import CliRunner
+
+        from ante.cli.main import cli
+        from ante.member.models import Member, MemberRole, MemberType
+
+        (tmp_path / "db").mkdir()
+        conn = sqlite3.connect(tmp_path / "db" / "ante.db")
+        try:
+            conn.execute("CREATE TABLE trades (other_column TEXT)")
+            conn.commit()
+        finally:
+            conn.close()
+        master = Member(
+            member_id="m",
+            type=MemberType.HUMAN,
+            role=MemberRole.MASTER,
+            org="default",
+            name="m",
+            status="active",
+            scopes=[],
+        )
+        with patch("ante.cli.main.authenticate_member") as mock_auth:
+            mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "trade",
+                    "info",
+                    "some-id",
+                ],
+            )
+
+        assert result.exit_code == 1, result.output
+        payload = json.loads(result.output.strip().splitlines()[-1])
+        assert payload["code"] == "TRADE_ERROR"
+        assert "no such column" in payload["message"]
+
+
 # ────────────────────────────────────────────────────────────────────
 # R4 — strategy performance missing (fresh DB)
 # ────────────────────────────────────────────────────────────────────

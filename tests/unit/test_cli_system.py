@@ -201,6 +201,26 @@ class TestSystemStop:
         expected = str(tmp_path / "run" / "ante.pid")
         assert expected in result.output
 
+    def test_stop_uses_root_config_dir_for_pid_path(
+        self, runner, tmp_path, monkeypatch
+    ):
+        """루트 ``--config-dir`` 이 환경 변수보다 우선해 PID 경로를 정한다."""
+        root_dir = tmp_path / "root"
+        env_dir = tmp_path / "env"
+        root_dir.mkdir()
+        env_dir.mkdir()
+        monkeypatch.setenv("ANTE_CONFIG_DIR", str(env_dir))
+
+        result = runner.invoke(
+            cli, ["--config-dir", str(root_dir), "--format", "json", "system", "stop"]
+        )
+
+        assert result.exit_code == 1
+        data = json.loads(result.output)
+        assert data["code"] == "PID_NOT_FOUND"
+        assert str(root_dir / "run" / "ante.pid") in data["message"]
+        assert str(env_dir) not in data["message"]
+
     def test_stop_returns_pid_not_found_when_only_legacy_pid_present(
         self, runner, tmp_path, monkeypatch
     ):

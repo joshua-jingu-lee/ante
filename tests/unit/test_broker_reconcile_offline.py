@@ -248,3 +248,90 @@ class TestReconcileOfflineSourceSums:
     def test_source_does_not_overwrite_internal_by_symbol(self) -> None:
         """src 가 더 이상 ``{p.symbol: p}`` 덮어쓰기 dict 컴프리헨션을 쓰지 않는다."""
         assert "{p.symbol: p for p in internal_positions}" not in _BROKER_SOURCE
+
+
+class TestReconcileOfflineCliSumsBots:
+    """CLI 오프라인 폴백이 같은 종목의 여러 봇 수량을 합산해 대조한다."""
+
+    def test_two_bots_same_symbol_match_broker_total(self, tmp_path: Path) -> None:
+        import asyncio
+        import json
+
+        import click
+        from click.testing import CliRunner
+
+        from ante.cli.commands import broker as broker_cmd
+        from ante.cli.main import cli
+        from ante.core.database import Database
+        from ante.member.models import Member, MemberRole, MemberType
+        from ante.trade.position import PositionHistory
+
+        db_path = tmp_path / "db" / "ante.db"
+        db_path.parent.mkdir()
+
+        async def _seed() -> None:
+            db = Database(str(db_path))
+            await db.connect()
+            try:
+                ph = PositionHistory(db)
+                await ph.initialize()
+                await ph.force_update(
+                    "bot-a", "005930", 6.0, 70000.0, account_id="acc-1"
+                )
+                await ph.force_update(
+                    "bot-b", "005930", 4.0, 71000.0, account_id="acc-1"
+                )
+            finally:
+                await db.close()
+
+        asyncio.run(_seed())
+
+        adapter = AsyncMock()
+        adapter.get_account_positions = AsyncMock(
+            return_value=[{"symbol": "005930", "quantity": "10"}]
+        )
+        adapter.disconnect = AsyncMock()
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return adapter, None
+
+        exc = click.ClickException("server down")
+        exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+        master = Member(
+            member_id="m",
+            type=MemberType.HUMAN,
+            role=MemberRole.MASTER,
+            org="default",
+            name="m",
+            status="active",
+            scopes=[],
+        )
+        with (
+            patch("ante.cli.main.authenticate_member") as mock_auth,
+            patch(
+                "ante.cli.commands.ipc_helpers.ipc_send",
+                new=AsyncMock(side_effect=exc),
+            ),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
+            result = CliRunner().invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "broker",
+                    "reconcile",
+                    "--account",
+                    "acc-1",
+                ],
+            )
+
+        adapter.get_account_positions.assert_awaited_once()
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["total_symbols"] == 1
+        assert payload["discrepancies"] == []
+        assert payload["match"] is True

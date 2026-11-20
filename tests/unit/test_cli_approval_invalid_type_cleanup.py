@@ -257,6 +257,52 @@ class TestAuditTypesOutput:
         db_cls.assert_not_called()
 
 
+class _ServiceSetupError(Exception):
+    """테스트 전용: 서비스 구성 단계의 임의 실패."""
+
+
+class TestAuditTypesClosesDatabaseOnSetupFailure:
+    """서비스 생성·초기화가 실패해도 열린 ``Database`` 를 닫는다."""
+
+    @pytest.mark.parametrize("failing_step", ["constructor", "initialize"])
+    def test_database_closed_when_service_setup_raises(
+        self, runner: CliRunner, tmp_path, failing_step: str
+    ) -> None:
+        db_cls, service_cls, service = _mock_service_layer()
+        db = db_cls.return_value
+        raised: list[str] = []
+
+        def _fail(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raised.append(failing_step)
+            raise _ServiceSetupError("setup failed")
+
+        if failing_step == "constructor":
+            service_cls.side_effect = _fail
+        else:
+            service.initialize = AsyncMock(side_effect=_fail)
+
+        with (
+            patch("ante.core.database.Database", db_cls),
+            patch("ante.approval.ApprovalService", service_cls),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "approval",
+                    "audit-types",
+                    "--db-path",
+                    str(tmp_path / "approval.db"),
+                ],
+            )
+
+        assert raised == [failing_step]
+        assert result.exit_code == 1, result.output
+        db.connect.assert_awaited_once()
+        db.close.assert_awaited_once()
+
+
 # ── cancel-invalid CLI ───────────────────────────────────────────
 
 

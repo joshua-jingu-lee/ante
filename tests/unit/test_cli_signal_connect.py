@@ -600,3 +600,143 @@ async def _immediate_timeout(coro, timeout):  # noqa: ANN001, ANN202
     """
     coro.close()
     raise TimeoutError
+
+
+# ──────────────────────────────────────────────────────────────
+# F. relay pump 의 I/O 예외 흡수 — 종료 경로에서 예외가 새지 않는다
+# ──────────────────────────────────────────────────────────────
+
+
+class _StdoutGoneError(BrokenPipeError):
+    """테스트 전용: stdout 소비자가 사라진 상태."""
+
+
+class _SocketGoneError(OSError):
+    """테스트 전용: socket write 실패."""
+
+
+class _RecordingEofReader(DeferredFrameReader):
+    """버퍼 소진 시 ``IncompleteReadError`` 를 던진 사실을 기록한다."""
+
+    eof_raised = False
+
+    async def readexactly(self, n: int) -> bytes:
+        try:
+            return await super().readexactly(n)
+        except asyncio.IncompleteReadError:
+            type(self).eof_raised = True
+            raise
+
+
+class _RaisingStdout:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def write(self, _data: str) -> int:
+        self.calls += 1
+        raise _StdoutGoneError("stdout closed")
+
+    def flush(self) -> None:
+        return None
+
+
+class _SysProxy:
+    """``signal`` 모듈의 ``sys`` 대역 — stdout 만 바꾸고 stderr 는 실제 것을 쓴다."""
+
+    def __init__(self, stdout: _RaisingStdout) -> None:
+        self.stdout = stdout
+
+    @property
+    def stderr(self):  # noqa: ANN201
+        import sys
+
+        return sys.stderr
+
+    @property
+    def stdin(self):  # noqa: ANN201
+        import sys
+
+        return sys.stdin
+
+
+async def _eof_pump_in(w):  # noqa: ANN001, ANN202
+    w.write_eof()
+
+
+class TestSignalRelaySwallowsIoErrors:
+    """stdin EOF 로 ``_pump_in`` 이 먼저 끝나 ``_pump_out`` 을 await 하는 경로."""
+
+    def _invoke(self, runner: CliRunner, reader: FakeReader, *extra_patches):  # noqa: ANN202
+        writer = FakeWriter()
+
+        async def _open(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            return reader, writer
+
+        with (
+            patch(_PATH_EXISTS_TARGET, return_value=True),
+            patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+            patch(_OPEN_CONN_TARGET, _open),
+            patch("ante.cli.commands.signal._pump_in", _eof_pump_in),
+        ):
+            if extra_patches:
+                with extra_patches[0]:
+                    return runner.invoke(cli, ["signal", "connect", "--key", "sk"])
+            return runner.invoke(cli, ["signal", "connect", "--key", "sk"])
+
+    def test_socket_eof_without_closed_frame_exits_zero(
+        self, runner: CliRunner
+    ) -> None:
+        ack = {"type": "ack", "signal_id": "sig-1"}
+        ok = _frame(_ok_frame("bot-1705"))
+        _RecordingEofReader.eof_raised = False
+        reader = _RecordingEofReader([ok, _frame(ack)], boundary_pos=len(ok))
+
+        result = self._invoke(runner, reader)
+
+        assert _RecordingEofReader.eof_raised is True
+        assert result.exception is None, result.exception
+        assert result.exit_code == 0, (result.stdout, result.stderr)
+        assert json.loads(result.stdout.strip()) == ack
+
+    def test_stdout_write_failure_exits_zero(self, runner: CliRunner) -> None:
+        ok = _frame(_ok_frame("bot-1705"))
+        frames = [ok, _frame({"type": "ack"}), _frame(_CLOSED_FRAME)]
+        reader = DeferredFrameReader(frames, boundary_pos=len(ok))
+        stdout = _RaisingStdout()
+
+        result = self._invoke(
+            runner,
+            reader,
+            patch("ante.cli.commands.signal.sys", _SysProxy(stdout)),
+        )
+
+        assert stdout.calls == 1
+        assert result.exception is None, result.exception
+        assert result.exit_code == 0, (result.stdout, result.stderr)
+        assert "channel closed" not in result.stderr
+
+
+async def test_pump_in_swallows_socket_write_error() -> None:
+    """``_pump_in`` 은 socket write 실패를 삼키고 정상 반환한다."""
+    import os
+
+    from ante.cli.commands.signal import _pump_in
+
+    read_fd, write_fd = os.pipe()
+    os.write(write_fd, b'{"type": "signal"}\n')
+    os.close(write_fd)
+    stdin = os.fdopen(read_fd, "rb")
+
+    class _FailingWriter(FakeWriter):
+        attempts = 0
+
+        def write(self, data: bytes) -> None:
+            type(self).attempts += 1
+            raise _SocketGoneError("socket closed")
+
+    try:
+        with patch("ante.cli.commands.signal.sys.stdin", stdin):
+            assert await _pump_in(_FailingWriter()) is None
+    finally:
+        stdin.close()
+    assert _FailingWriter.attempts == 1

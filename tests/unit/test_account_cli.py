@@ -695,6 +695,44 @@ class TestAccountCreate:
         account_arg = mock_account_service.create.call_args[0][0]
         assert account_arg.credentials == {"app_key": "K", "app_secret": "FILE_SECRET"}
 
+    def test_create_credential_file_strips_only_trailing_newlines(
+        self, real_account_db, offline_runtime, tmp_path
+    ) -> None:
+        """credential 파일 값은 끝의 개행만 지우고 앞뒤 공백·탭은 그대로 저장한다."""
+        import asyncio
+
+        secret_path = tmp_path / "secret.txt"
+        secret_path.write_text("  FILE SECRET\t\r\n", encoding="utf-8")
+
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "account",
+                "create",
+                "--broker-type",
+                "test",
+                "--account-id",
+                "test2",
+                "--name",
+                "테스트2",
+                "--trading-mode",
+                "virtual",
+                "--credential",
+                "app_key=K",
+                "--credential-file",
+                f"app_secret={secret_path}",
+            ]
+        )
+        assert result.exit_code == 0, result.output
+
+        async def _load():
+            async with real_account_db() as svc:
+                return await svc.get("test2")
+
+        account = asyncio.run(_load())
+        assert account.credentials == {"app_key": "K", "app_secret": "  FILE SECRET\t"}
+
     def test_create_credential_file_not_found(
         self, mock_account_service: AsyncMock, offline_runtime, tmp_path
     ) -> None:
@@ -1325,6 +1363,31 @@ class TestAccountRepairTimezone:
         assert data["status"] == "error"
         assert data["code"] == "ACCOUNT_INVALID_TIMEZONE"
         assert "Mars/Olympus" in data["message"]
+
+    def test_account_repair_timezone_deleted_account_code(
+        self, mock_account_service: AsyncMock, offline_runtime
+    ) -> None:
+        """삭제된 계좌의 repair-timezone 은 ``ACCOUNT_ALREADY_DELETED`` 로 끝난다."""
+        from ante.account.errors import AccountDeletedError
+
+        mock_account_service.repair_timezone.side_effect = AccountDeletedError(
+            "계좌 'legacy-tz'는 삭제되었습니다."
+        )
+        result = _invoke(
+            [
+                "--format",
+                "json",
+                "account",
+                "repair-timezone",
+                "legacy-tz",
+                "Asia/Tokyo",
+            ]
+        )
+        mock_account_service.repair_timezone.assert_awaited_once()
+        assert result.exit_code == 1
+        data = json.loads(result.output.strip())
+        assert data["status"] == "error"
+        assert data["code"] == "ACCOUNT_ALREADY_DELETED"
 
     def test_account_repair_timezone_active_runtime_blocked(
         self, active_runtime

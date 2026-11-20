@@ -360,3 +360,83 @@ class TestRuleListValidAbsentAccount:
         payload = _parse_json_last(result.stdout)
         assert payload.get("status") == "error", payload
         assert payload.get("code") == "ACCOUNT_NOT_FOUND", payload
+
+
+# ────────────────────────────────────────────────────────────────────
+# accounts 테이블 부재와 그 밖의 OperationalError (in-process)
+# ────────────────────────────────────────────────────────────────────
+
+
+def _make_db(config_dir: Path, ddl: str | None) -> None:
+    import sqlite3
+
+    (config_dir / "db").mkdir(parents=True)
+    conn = sqlite3.connect(config_dir / "db" / "ante.db")
+    try:
+        if ddl:
+            conn.execute(ddl)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _invoke_rule_in_process(config_dir: Path, args: list[str]):  # noqa: ANN202
+    from click.testing import CliRunner
+
+    from ante.cli.main import cli
+    from ante.member.models import Member, MemberRole, MemberType
+
+    master = Member(
+        member_id="m",
+        type=MemberType.HUMAN,
+        role=MemberRole.MASTER,
+        org="default",
+        name="m",
+        status="active",
+        scopes=[],
+    )
+    with patch("ante.cli.main.authenticate_member") as mock_auth:
+        mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": master})
+        return CliRunner().invoke(
+            cli, ["--config-dir", str(config_dir), "--format", "json", *args]
+        )
+
+
+_RULE_READ_ARGS = [
+    pytest.param(["rule", "list", "--account", "acc-1"], id="list"),
+    pytest.param(["rule", "info", "some-rule", "--account", "acc-1"], id="info"),
+]
+
+
+class TestRuleAccountsTableAbsence:
+    @pytest.mark.parametrize("args", _RULE_READ_ARGS)
+    def test_missing_accounts_table_is_account_not_found(
+        self, tmp_path: Path, args: list[str]
+    ) -> None:
+        """accounts 테이블이 없는 DB는 계좌 미존재로 정규화한다."""
+        config_dir = tmp_path / "cfg"
+        _make_db(config_dir, None)
+
+        result = _invoke_rule_in_process(config_dir, args)
+
+        assert result.exit_code == 1, result.output
+        assert '"ACCOUNT_NOT_FOUND"' in result.output, (result.output, result.exception)
+        payload = json.loads(result.output.strip().splitlines()[-1])
+        assert payload["code"] == "ACCOUNT_NOT_FOUND"
+
+    @pytest.mark.parametrize("args", _RULE_READ_ARGS)
+    def test_other_operational_error_is_not_normalized(
+        self, tmp_path: Path, args: list[str]
+    ) -> None:
+        """테이블 부재가 아닌 OperationalError 는 계좌 미존재로 삼키지 않는다."""
+        import sqlite3
+
+        config_dir = tmp_path / "cfg"
+        _make_db(config_dir, "CREATE TABLE accounts (other_column TEXT)")
+
+        result = _invoke_rule_in_process(config_dir, args)
+
+        assert isinstance(result.exception, sqlite3.OperationalError)
+        assert "no such column" in str(result.exception)
+        assert result.exit_code != 0
+        assert "ACCOUNT_NOT_FOUND" not in result.output

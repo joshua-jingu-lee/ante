@@ -369,3 +369,45 @@ class TestTreasuryNotConfiguredEquivalence:
             "account 'acc-1' 에 Treasury 가 구성되지 않았습니다"
         )
         assert _ipc_envelope_code(exc) == "TREASURY_NOT_CONFIGURED"
+
+
+# ── 직접 경로의 등록 예외 → 그 예외의 코드 ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["budgets", "--account", "acc-1"], id="budgets"),
+        pytest.param(["set-balance", "1000", "--account", "acc-1"], id="set-balance"),
+        pytest.param(
+            ["portfolio", "value", "--account", "acc-1"], id="portfolio-value"
+        ),
+        pytest.param(
+            ["portfolio", "history", "--account", "acc-1"], id="portfolio-history"
+        ),
+    ],
+)
+def test_direct_path_registered_exception_code(
+    runner: CliRunner, args: list[str]
+) -> None:
+    """서버 정지 직접 경로에서 등록된 예외는 ``EXECUTION_ERROR`` 가 아닌 그 코드다."""
+    from contextlib import asynccontextmanager
+
+    entered: list[str] = []
+
+    @asynccontextmanager
+    async def _raising_treasury(account_id=None, *, ctx=None):  # noqa: ANN001, ANN202
+        entered.append(account_id)
+        raise TreasuryNotConfiguredError("treasury 미구성")
+        yield  # pragma: no cover
+
+    with (
+        patch("ante.cli.cold_path.is_active_runtime", return_value=False),
+        patch("ante.cli.commands.treasury._create_treasury", new=_raising_treasury),
+    ):
+        result = runner.invoke(cli, ["--format", "json", "treasury", *args])
+
+    assert entered == ["acc-1"]
+    assert result.exit_code == 1, result.output
+    payload = _cli_envelope_payload(result.output)
+    assert payload["code"] == "TREASURY_NOT_CONFIGURED"

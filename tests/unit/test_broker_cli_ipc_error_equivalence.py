@@ -338,3 +338,112 @@ class TestBrokerCircuitOpenEquivalence:
     def test_ipc_envelope_circuit_open(self) -> None:
         exc = CircuitOpenError("Circuit breaker OPEN: KIS API 차단 중")
         assert _ipc_envelope_code(exc) == "BROKER_CIRCUIT_OPEN"
+
+
+# ── order-history / reconcile 의 IPC 오류와 직접 경로 오류 ────────────────
+
+
+def _ipc_click_exc(code: str, message: str):  # noqa: ANN202
+    import click
+
+    exc = click.ClickException(f"{code}: {message}")
+    exc.ipc_error_code = code  # type: ignore[attr-defined]
+    exc.ipc_error_message = message  # type: ignore[attr-defined]
+    return exc
+
+
+def _raising_adapter(exc: BaseException) -> MagicMock:
+    from ante.broker.base import BrokerAdapter
+
+    adapter = MagicMock(spec=BrokerAdapter)
+    adapter.get_order_history = AsyncMock(side_effect=exc)
+    adapter.get_account_positions = AsyncMock(side_effect=exc)
+    adapter.disconnect = AsyncMock(return_value=None)
+    return adapter
+
+
+class TestOrderHistoryErrorSurface:
+    """``broker order-history`` 오류 출력."""
+
+    def test_server_error_text_mode_prefixes_code(self) -> None:
+        """서버 오류 봉투는 text 모드에서 ``CODE: message`` 로 출력한다."""
+        from ante.cli.commands import broker as broker_cmd
+
+        async def _raise(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raise _ipc_click_exc("BROKER_RATE_LIMITED", "too many requests")
+
+        r = CliRunner(mix_stderr=False)
+        with (
+            patch("ante.cli.main.authenticate_member") as mock_auth,
+            patch.object(broker_cmd, "_ipc_broker_command", new=_raise),
+        ):
+            mock_auth.side_effect = lambda ctx: ctx.obj.update({"member": _MOCK_MASTER})
+            result = r.invoke(cli, ["broker", "order-history", "--account", "acc-1"])
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stderr == "Error: BROKER_RATE_LIMITED: too many requests\n"
+
+    def test_fallback_registered_exception_code(self, runner: CliRunner) -> None:
+        """서버 정지 폴백에서 어댑터의 등록 예외는 그 예외의 코드로 끝난다."""
+        from ante.cli.commands import broker as broker_cmd
+
+        async def _not_running(*_a, **_k):  # noqa: ANN002, ANN003, ANN202
+            raise _ipc_click_exc("IPC_SERVER_NOT_RUNNING", "서버 미실행")
+
+        adapter = _raising_adapter(APIError("KIS API Error", status_code=500))
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return adapter, None
+
+        with (
+            patch.object(broker_cmd, "_ipc_broker_command", new=_not_running),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                ["--format", "json", "broker", "order-history", "--account", "acc-1"],
+            )
+
+        adapter.get_order_history.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "BROKER_API_ERROR"
+
+
+class TestReconcileOfflineErrorSurface:
+    """``broker reconcile`` 서버 정지 폴백의 등록 예외 코드."""
+
+    def test_offline_registered_exception_code(
+        self, runner: CliRunner, tmp_path
+    ) -> None:
+        from ante.cli.commands import broker as broker_cmd
+
+        (tmp_path / "db").mkdir()
+        adapter = _raising_adapter(APIError("KIS API Error", status_code=500))
+
+        async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
+            return adapter, None
+
+        ipc_send = AsyncMock(side_effect=_ipc_click_exc("IPC_SERVER_NOT_RUNNING", "x"))
+        with (
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=ipc_send),
+            patch.object(broker_cmd, "_get_broker", new=_fake_get_broker),
+        ):
+            result = runner.invoke(
+                cli,
+                [
+                    "--config-dir",
+                    str(tmp_path),
+                    "--format",
+                    "json",
+                    "broker",
+                    "reconcile",
+                    "--account",
+                    "acc-1",
+                ],
+            )
+
+        adapter.get_account_positions.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "BROKER_API_ERROR"

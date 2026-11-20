@@ -611,3 +611,49 @@ class TestMemberMasterProtectedEquivalence:
     def test_ipc_envelope_master_protected(self) -> None:
         exc = MemberMasterProtectedError("master는 suspend할 수 없습니다")
         assert _ipc_envelope_code(exc) == "MEMBER_MASTER_PROTECTED"
+
+
+# ── (9) register·set-emoji 직접 경로의 명시 코드 ─────────────────────────────
+
+
+class TestMemberDirectPathExplicitCodes:
+    """서버 정지 직접 경로에서 typed 분기가 내는 명시 코드."""
+
+    def _invoke_with_service(self, runner: CliRunner, svc: AsyncMock, args: list):  # noqa: ANN202
+        @asynccontextmanager
+        async def _create_service(ctx=None):  # noqa: ANN001, ANN202
+            yield svc
+
+        with (
+            patch("ante.cli.cold_path.is_active_runtime", return_value=False),
+            patch("ante.cli.commands.member._create_service", new=_create_service),
+        ):
+            return runner.invoke(cli, ["--format", "json", "member", *args])
+
+    def test_register_permission_denied_code_and_message(
+        self, runner: CliRunner
+    ) -> None:
+        from ante.cli.commands.member import _MASTER_REQUIRED_MESSAGE
+
+        svc = AsyncMock()
+        svc.register.side_effect = PermissionDeniedError("raw service message")
+        result = self._invoke_with_service(
+            runner, svc, ["register", "--id", "new-agent", "--type", "agent"]
+        )
+
+        svc.register.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "PERMISSION_DENIED"
+        assert payload["message"] == _MASTER_REQUIRED_MESSAGE
+
+    def test_set_emoji_missing_member_code(self, runner: CliRunner) -> None:
+        svc = AsyncMock()
+        svc.update_emoji.side_effect = MemberNotFoundError("no such member")
+        result = self._invoke_with_service(runner, svc, ["set-emoji", "ghost", "🤖"])
+
+        svc.update_emoji.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        payload = _cli_envelope_payload(result.output)
+        assert payload["code"] == "MEMBER_NOT_FOUND"
+        assert payload["message"] == "멤버를 찾을 수 없습니다: ghost"

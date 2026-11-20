@@ -309,3 +309,33 @@ class TestColdPathFallback:
         suspend.assert_awaited_once()
         # cold-path 도 suspended_by=actor 로 master 게이트 보존.
         assert suspend.await_args.kwargs["suspended_by"] == "master"
+
+
+class TestRegisterIpcErrorCode:
+    def test_server_side_rejection_surfaces_envelope_code(self) -> None:
+        """register 의 서버 거부 봉투는 그 코드·메시지를 그대로 낸다."""
+        exc = click.ClickException("MEMBER_ALREADY_EXISTS: dup exists")
+        exc.ipc_error_code = "MEMBER_ALREADY_EXISTS"  # type: ignore[attr-defined]
+        exc.ipc_error_message = "dup exists"  # type: ignore[attr-defined]
+        ipc_send = AsyncMock(side_effect=exc)
+        with (
+            patch("ante.cli.cold_path.is_active_runtime", return_value=True),
+            patch("ante.cli.commands.ipc_helpers.ipc_send", new=ipc_send),
+        ):
+            result = _invoke(
+                [
+                    "--format",
+                    "json",
+                    "member",
+                    "register",
+                    "--id",
+                    "dup",
+                    "--type",
+                    "agent",
+                ]
+            )
+        ipc_send.assert_awaited_once()
+        assert result.exit_code == 1
+        payload = json.loads(result.output)
+        assert payload["code"] == "MEMBER_ALREADY_EXISTS"
+        assert payload["message"] == "dup exists"
