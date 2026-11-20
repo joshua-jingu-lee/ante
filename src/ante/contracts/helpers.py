@@ -35,8 +35,6 @@ __all__ = [
 ]
 
 
-# ``code`` 속성이 SCREAMING_SNAKE 규약을 만족하는지 확인하는 패턴.
-# taxonomy SSOT (#1839) 의 명명 규칙 (SCREAMING_SNAKE_CASE only) 과 정렬.
 _SCREAMING_SNAKE_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
@@ -61,18 +59,15 @@ def error_spec_for_exception(exc: BaseException) -> ErrorSpec:
         ``ErrorSpec`` — code/category 가 채워진 frozen dataclass.
     """
 
-    # (1) Registry MRO lookup.
     for klass in type(exc).__mro__:
         spec = EXCEPTION_TO_SPEC.get(klass)
         if spec is not None:
             return spec
 
-    # (2) ``.code`` 속성 fallback (SCREAMING_SNAKE 규약 만족 시).
     code_attr = getattr(exc, "code", None)
     if isinstance(code_attr, str) and _SCREAMING_SNAKE_RE.match(code_attr):
         return ErrorSpec(code=code_attr, category="internal")
 
-    # (3) 최후 fallback.
     return EXECUTION_ERROR_SPEC
 
 
