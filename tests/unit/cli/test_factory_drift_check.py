@@ -152,7 +152,8 @@ class TestGetDbPathWithoutCtxLegacyCountReport:
     """
 
     # 현재 코드 baseline (배치 시점 grep 검증 기준):
-    # - broker.py:34, 354 — runtime_ipc cold_path fallback (live state)
+    # - broker.py 의 두 callsite — runtime_ipc cold_path fallback (live state).
+    #   줄 번호는 아래 집합에만 적는다.
     # (signal.py:48 은 #2338 PR#3 에서 thin IPC relay 전환으로 직접 Database
     #  생성이 제거되어 baseline 에서 함께 삭제됐다.)
     #
