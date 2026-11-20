@@ -52,7 +52,6 @@ def is_active_runtime(
     if Path(socket_path).exists():
         return True
 
-    # Refs #1160: PID alive + matching marker means the server is booting.
     marker_pid = _read_starting_marker_pid(config)
     return marker_pid == pid
 

@@ -22,14 +22,7 @@ import click
 if TYPE_CHECKING:
     from ante.cli.formatter import OutputFormatter
 
-# `require_account_id`가 raise하는 `InvalidAccountIdError`에 대응하는 에러 코드.
-# #1633 선결정으로 `InvalidAccountIdError.code == "VALIDATION_ERROR"`가 SSOT로
-# 고정됐다(`src/ante/account/errors.py:68-77`). 본 모듈은 그 코드를 재사용만
-# 하며 신 코드를 도입하지 않는다.
 
-# Strict ``YYYY-MM-DD`` (zero-padded 10자) 정규식. ``datetime.strptime`` 단독은
-# ``2026-5-1``이나 ``2026-05-1`` 같은 non-zero-padded 입력을 silently 통과
-# 시키므로 정규식 선검사로 1차 차단한다.
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -246,7 +239,6 @@ def reject_inverted_date_range(
         from_date = date.fromisoformat(from_value)
         to_date = date.fromisoformat(to_value)
     except (ValueError, TypeError):
-        # 형식 검증은 본 헬퍼 책임 아님 — validate_iso_date의 click 경로 보존.
         return
     if from_date > to_date:
         fmt.error(

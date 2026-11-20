@@ -14,11 +14,6 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 
-# strict YYYY-MM-DD 가드 (feed/cli.py·backfill_runner.py 패턴 미러). Python
-# 3.11+ ``date.fromisoformat`` 은 basic ISO(``20260510``)·week date
-# (``2026-W19-1``) 까지 수락하지만 ParquetStore.read 의 Polars ``str.to_datetime``
-# 는 이를 거부한다. CLI preflight 와 실행 단계 파싱 의미를 일치시키기 위해
-# 확장 형식만 허용한다 (#2053).
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -82,7 +77,6 @@ def run(
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
-    # 시작일/종료일 검증 — strict YYYY-MM-DD만 허용 (basic ISO/week date 거부; #2053)
     for label, value in (("시작일", start), ("종료일", end)):
         if _ISO_DATE_RE.fullmatch(value) is None:
             fmt.error(
@@ -104,7 +98,6 @@ def run(
         )
         raise SystemExit(1)
 
-    # 거래소 검증 (CLI 경계 단일 지점 — canonical만 허용, `*`/non-canonical 거부)
     if not is_canonical(exchange):
         fmt.error(
             f"유효하지 않은 거래소: {exchange!r}. "
@@ -113,17 +106,6 @@ def run(
         )
         raise SystemExit(1)
 
-    # 타임프레임/심볼 검증 (CLI 경계 단일 지점, SSOT helper 위임).
-    # precedence: date/exchange 검증 이후 → ① timeframe → ② 빈 segment →
-    # ③ KRX symbol shape. config build·BacktestService.run_subprocess·
-    # _save_backtest_run 이전이어야 invalid 입력 시 backtest_runs history가
-    # 생성되지 않는다 (subprocess 생성 전 ingress 거부 — #2053/#2060/#1995).
-    #
-    # #2060: ``--timeframe`` 생략(None) 은 "전략 meta 사용" 신호이므로 CLI
-    # vocab 검증을 skip 하고 config 에 None 을 그대로 전달한다 — subprocess
-    # 자식 프로세스의 ``BacktestService.run()`` 이 load 후 StrategyMeta.
-    # timeframe 으로 fallback·재검증한다. 명시값(비-None)은 기존대로 ingress
-    # 에서 거부한다.
     if timeframe is not None and not is_valid_timeframe(timeframe):
         fmt.error(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
@@ -141,8 +123,6 @@ def run(
                 code="BACKTEST_INVALID_SYMBOL",
             )
             raise SystemExit(1)
-        # KRX symbol shape는 resolved exchange == KRX 신규 입력 한정
-        # (core.md `### KRX symbol shape`). 비-KRX exchange는 미적용.
         if exchange == "KRX":
             for seg in parsed:
                 if not is_krx_symbol(seg):
@@ -159,9 +139,6 @@ def run(
         "end_date": end,
         "symbols": symbols.split(",") if symbols else [],
         "initial_balance": balance,
-        # #2060: ``--timeframe`` 생략 시 None 을 그대로 전달 — subprocess
-        # 자식의 service.run() 이 StrategyMeta.timeframe 으로 fallback 한다
-        # (명시값은 그대로 전달).
         "timeframe": timeframe,
         "exchange": exchange,
         "data_path": data_path,
@@ -170,16 +147,9 @@ def run(
     try:
         service = BacktestService(data_path=data_path)
 
-        # #2001: D-004 격리 계약대로 subprocess(`python -m ante.backtest.runner`)
-        # 로 실행한다. 자식 프로세스 stdout 은 단일 결과 라인이라 진행률
-        # 스트리밍이 불가하므로 in-process 전용 progress bar 는 제거한다
-        # (cli/03-commands.md·backtest/02-design-decisions.md 정합). 반환
-        # ``result_dict`` 는 ``to_dict()`` superset envelope 로 런타임 메타데이터
-        # (result_path/strategy_name/strategy_version)를 포함한다.
         result_dict = asyncio.run(service.run_subprocess(config))
         metrics = result_dict.get("metrics", {})
 
-        # #1995: 명시 종목 전체가 데이터 없음(row_count=0)이면 이력 저장 없이 실패
         explicit_symbols = config["symbols"]
         datasets = result_dict.get("datasets", [])
         if (
@@ -193,7 +163,6 @@ def run(
             )
             raise SystemExit(1)
 
-        # backtest_runs 이력 저장
         run_id = asyncio.run(
             _save_backtest_run(resolved_db_path, result_dict, config, metrics)
         )
@@ -210,10 +179,6 @@ def run(
         )
 
         if metrics and not fmt.is_json:
-            # JSON 모드에서는 위 fmt.output(result_dict)의 result_dict["metrics"]에
-            # 이미 동일 지표가 포함되어 있으므로 별도 metric 테이블을 추가 출력하면
-            # stdout에 두 번째 JSON document(배열)가 붙어 single-document parser가
-            # `Extra data`로 실패한다. text 모드에서만 사람용 테이블을 추가 출력한다.
             metric_rows = _format_metrics(metrics)
             fmt.table(metric_rows, ["지표", "값"])
 
@@ -245,7 +210,6 @@ async def _save_backtest_run(
         store = BacktestRunStore(db)
         await store.initialize()
         return await store.save(
-            # combined "strategy" 파싱 금지 — envelope 개별 키 직접 사용.
             strategy_name=result_dict["strategy_name"],
             strategy_version=result_dict["strategy_version"],
             params=config,
@@ -254,9 +218,6 @@ async def _save_backtest_run(
             max_drawdown_pct=metrics.get("max_drawdown"),
             total_trades=result_dict["total_trades"],
             win_rate=metrics.get("win_rate"),
-            # #1998: subprocess 의 run() 이 저장한 durable artifact 경로를 이력에
-            # 기록한다(저장 실패 시 ""). run_subprocess envelope 의 result_path 가
-            # backtest_runs.result_path 로 전파되어 추적성을 보장한다.
             result_path=result_dict["result_path"],
         )
     finally:
@@ -282,22 +243,8 @@ def history(
     async def _list() -> list[dict]:
         from ante.backtest.run_store import BacktestRunStore
 
-        # ``backtest history`` 는 offline read 명령이므로 read-only DB 에서
-        # schema DDL 을 발화하면 안 된다 (offline-factory.md §2 옵션 B —
-        # read-only 명령은 ``service.initialize()`` skip). 따라서
-        # ``BacktestRunStore.initialize()`` (CREATE TABLE backtest_runs) 를
-        # 호출하지 않는다. ``--db-path`` Click option 은 원시 값 (None 가능) 을
-        # 그대로 ``db_path_override`` 로 전달한다 — ``open_cli_db`` 가 None 이면
-        # ``get_db_path(ctx)`` 로 해석하므로 기존 ``--db-path`` 동작과 동치다
-        # (approval.py 패턴; offline-factory.md §1.1).
         async with open_cli_db(ctx, read_only=True, db_path_override=db_path) as db:
             store = BacktestRunStore(db)
-            # fresh / non-bootstrapped DB 에서는 `backtest_runs` 테이블이 아직
-            # 생성되지 않은 상태일 수 있다 (initialize() 를 거치지 않기 때문).
-            # 정의상 테이블 부재는 해당 전략의 이력 부재와 동치이므로 빈 이력으로
-            # 정규화한다. malformed DB 같은 다른 OperationalError 까지 삼키지
-            # 않도록 "no such table" 메시지로만 좁혀 그 외는 호출 표면의
-            # BACKTEST_ERROR 분류로 재전파한다 (trade.py:trade_info 동형).
             try:
                 runs = await store.list_by_strategy(strategy_name, limit=limit)
             except sqlite3.OperationalError as e:

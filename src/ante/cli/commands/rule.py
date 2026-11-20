@@ -77,28 +77,6 @@ async def _create_rule_engine(
         )
 
     async with open_cli_db(resolved_ctx) as db:
-        # account existence pre-check. ``rule_list`` 의 기존 inline 블록을
-        # 그대로 옮긴 형태이며, ``_create_treasury`` 동형.
-        #
-        # ``AccountService.initialize()`` 는 모든 non-deleted account row를
-        # materialize하며 credentials를 복호화하므로, 조회 대상과 무관한
-        # 다른 계좌의 credentials 복호화 실패가 rule 명령을 깨뜨릴 수 있다
-        # (정상 사용 회귀). 따라서 credentials 복호화 없이 이미 열린 db
-        # 핸들로 lightweight 단건 존재 쿼리만 수행한다. 쿼리 의미는
-        # ``AccountService.get`` (account_id 단건, status 필터 없음)과
-        # 일치하며 미존재 시 동일한 ``AccountNotFoundError`` 메시지로
-        # 분기한다 — 동일 ACCOUNT_NOT_FOUND envelope/message 보존.
-        #
-        # ``accounts`` 테이블은 ``AccountService.initialize()`` 의
-        # ``_CREATE_TABLE_SQL`` 에서만 생성된다. 이 경로는 raw ``Database``
-        # 핸들만 쓰고 ``AccountService`` 를 초기화하지 않으므로, 부분
-        # 초기화/legacy DB(예: ``ante init`` 직후)에서는 테이블 자체가 없어
-        # ``sqlite3.OperationalError: no such table: accounts`` 가
-        # 호출자까지 전파되어 ACCOUNT_NOT_FOUND 계약을 우회할 수 있다.
-        # 정의상 accounts 테이블 부재는 해당 account 미존재와 동치이므로
-        # 동일한 ``AccountNotFoundError`` 로 정규화한다. 단, malformed db
-        # 같은 다른 ``OperationalError`` 까지 삼키지 않도록 "no such table"
-        # 메시지일 때로만 좁힌다.
         try:
             account_row = await db.fetch_one(
                 "SELECT 1 FROM accounts WHERE account_id = ?",
@@ -180,19 +158,9 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
     """룰 목록 조회."""
     fmt = get_formatter(ctx)
 
-    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다. invalid-format은 여기서 `VALIDATION_ERROR` + exit 1로
-    # 종료된다. valid-but-absent account_id는 `require_account_id`가 거부하지
-    # 않으므로 기존 경로로 흘러 아래 `_run_list`의 account 존재 SELECT →
-    # `AccountNotFoundError` → `ACCOUNT_NOT_FOUND` 분기를 보존한다
-    # (invalid-format ↔ valid-absent 분리 불변, VALIDATION_ERROR 오분류 금지).
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_list() -> list[dict]:
-        # account existence는 ``_create_rule_engine`` 이 ``SELECT 1`` 로 선
-        # 검증한다 (SSOT consolidation — helper 로 이동). 미존재 account는
-        # ``AccountNotFoundError`` 로 raise되며 아래 호출 표면의
-        # ``except AccountNotFoundError`` 분기가 받는다.
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
@@ -218,8 +186,6 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
         raise SystemExit(1) from e
 
     if not result:
-        # 실재 account의 0 rules는 정상 계약: exit 0 + 빈 목록 응답을
-        # 그대로 유지한다. 미존재 account만 위에서 exit 1로 분기된다.
         fmt.output({"message": "등록된 룰이 없습니다.", "rules": []})
         return
 
@@ -239,13 +205,6 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     """룰 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
-    # invalid account_id(`default`/패턴 위반/`""`)를 resource acquisition
-    # 이전에 거부한다. invalid-format은 여기서 `VALIDATION_ERROR` + exit 1로
-    # 종료한다. valid-but-absent account_id(예: ``acc-9999``)는
-    # ``_create_rule_engine`` 이 ``SELECT 1`` 로 검증해
-    # ``AccountNotFoundError`` 를 raise하며, 아래 호출 표면의
-    # ``except AccountNotFoundError`` 분기가 ``ACCOUNT_NOT_FOUND`` 로
-    # 매핑한다 (``rule_list`` 패턴 1:1 동형).
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
     async def _run_info() -> dict | None:
@@ -359,11 +318,6 @@ def rule_update(
                 actor=actor,
             )
 
-        # cold-path ``rule update`` lifecycle 은 ``open_cli_db`` 기반.
-        # ``AccountService``/``DynamicConfigService``/``AuditLogger``
-        # ``initialize()`` 호출은 그대로 유지된다 — read-only 명시 예외는
-        # AuditLogger/DynamicConfigService만이고, 본 callsite 는 audit 기록을
-        # 동반하는 cold-path mutation 이라 안전성을 위해 모두 보존한다.
         from ante.account.service import AccountService
         from ante.audit import AuditLogger
         from ante.cli.main import get_config_dir
