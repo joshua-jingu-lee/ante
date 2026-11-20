@@ -58,6 +58,7 @@ class Bot:
         self._max_consecutive_failures: int = 3
         self._fill_dedup_guard = FillDedupGuard()
         self._generation: int = 0
+        self._orders_closed: bool = False
 
     async def start(self) -> None:
         """봇 시작. 전략 인스턴스화 + 실행 루프 Task 생성."""
@@ -67,6 +68,7 @@ class Bot:
         self.strategy.on_start()
 
         self._generation += 1
+        self._orders_closed = False
         self.status = BotStatus.RUNNING
         self.started_at = datetime.now(UTC)
         self._task = asyncio.create_task(
@@ -87,6 +89,7 @@ class Bot:
             return
 
         self.status = BotStatus.STOPPING
+        self._orders_closed = True
 
         if self._task and not self._task.done():
             self._task.cancel()
@@ -174,6 +177,7 @@ class Bot:
                                     self.bot_id,
                                 )
                                 self.status = BotStatus.ERROR
+                                self._orders_closed = True
                                 self.error_message = msg
                                 await self._eventbus.publish(
                                     BotErrorEvent(
@@ -233,22 +237,26 @@ class Bot:
                             else:
                                 self._consecutive_failures = 0
 
-                                await self._publish_signals(signals)
-
-                                actions = self._ctx._drain_actions()
-                                await self._publish_actions(actions)
-
-                                await self._eventbus.publish(
-                                    BotStepCompletedEvent(
-                                        bot_id=self.bot_id,
-                                        account_id=self.config.account_id,
-                                        result="success",
-                                        message=f"signals={len(signals)}",
-                                        signal_count=len(signals),
-                                        duration_ms=step_duration_ms,
-                                    )
+                                await self._publish_signals(
+                                    signals, generation=generation
                                 )
-                                should_sleep = True
+                                if self._generation != generation:
+                                    should_return = True
+                                else:
+                                    actions = self._ctx._drain_actions()
+                                    await self._publish_actions(actions)
+
+                                    await self._eventbus.publish(
+                                        BotStepCompletedEvent(
+                                            bot_id=self.bot_id,
+                                            account_id=self.config.account_id,
+                                            result="success",
+                                            message=f"signals={len(signals)}",
+                                            signal_count=len(signals),
+                                            duration_ms=step_duration_ms,
+                                        )
+                                    )
+                                    should_sleep = True
 
                 if should_return:
                     return
@@ -269,7 +277,17 @@ class Bot:
                     exc_info=True,
                 )
                 return
+            if self.status != BotStatus.RUNNING:
+                logger.warning(
+                    "루프 예외 무시: 봇 %s 상태 %s (RUNNING 아님) — %s",
+                    self.bot_id,
+                    self.status.value,
+                    e,
+                    exc_info=True,
+                )
+                return
             self.status = BotStatus.ERROR
+            self._orders_closed = True
             self.error_message = str(e)
             logger.exception("봇 오류: %s", self.bot_id)
             await self._eventbus.publish(
@@ -327,7 +345,7 @@ class Bot:
                 "fill_dedup_key": event.fill_dedup_key,
             }
         )
-        await self._publish_signals(follow_up or [])
+        await self._publish_signals(follow_up or [], generation=None)
 
     async def on_order_update(self, event: object) -> None:
         """주문 상태 변경 통보를 전략에 전달."""
@@ -515,13 +533,27 @@ class Bot:
                     "timestamp": event.timestamp,
                 }
             )
-            await self._publish_signals(follow_up or [])
+            await self._publish_signals(follow_up or [], generation=generation)
 
-    async def _publish_signals(self, signals: list[Signal]) -> None:
+    async def _publish_signals(
+        self, signals: list[Signal], *, generation: int | None
+    ) -> None:
         """Signal → OrderRequestEvent 변환 + EventBus 발행."""
         from ante.eventbus.events import OrderRequestEvent
 
-        for signal in signals:
+        for index, signal in enumerate(signals):
+            if generation is not None and (
+                self._orders_closed or self._generation != generation
+            ):
+                logger.warning(
+                    "주문 요청 버림: 봇 %s 시그널 %d건 (주문 닫힘 %s, 세대 %d → %d)",
+                    self.bot_id,
+                    len(signals) - index,
+                    self._orders_closed,
+                    generation,
+                    self._generation,
+                )
+                return
             await self._eventbus.publish(
                 OrderRequestEvent(
                     bot_id=self.bot_id,
