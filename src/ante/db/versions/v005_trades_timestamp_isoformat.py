@@ -34,7 +34,7 @@ async def migrate(db: Database) -> None:
         "SELECT name FROM sqlite_master WHERE type='table' AND name='trades'"
     )
     if row is None:
-        return  # trades 테이블이 없으면 스킵 (신규 설치 시 DDL에 이미 포함)
+        return
 
     await db.execute(
         "UPDATE trades "

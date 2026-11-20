@@ -39,7 +39,6 @@ def _load_dotenv(path: Path) -> dict[str, str]:
             key, _, value = line.partition("=")
             key = key.strip()
             value = value.strip()
-            # 따옴표 제거
             if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
                 value = value[1:-1]
             result[key] = value
@@ -117,18 +116,12 @@ class Config:
         Spec: ``docs/specs/account/06-database-schema.md`` (마스터 키는
         ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY`` 에서 로드).
         """
-        # 지연 import: crypto 모듈은 cryptography에 의존하므로 import 순환을
-        # 회피하기 위해 함수 내부에서 가져온다.
         from ante.account.crypto import _validate_fernet_key
 
         resolved = resolve_config_dir(config_dir)
         static = _load_toml(resolved / "system.toml")
         secrets = _load_dotenv(resolved / "secrets.env")
 
-        # ANTE_DB_ENCRYPTION_KEY 단일 키 export 패스.
-        # - valid env가 이미 있으면 export 비대상(env-wins, override 안 함).
-        # - file_key가 Fernet canonical 검증을 통과할 때만 export 대상.
-        #   (invalid file이 valid env를 덮어쓰지 않도록 게이트.)
         file_key = secrets.get("ANTE_DB_ENCRYPTION_KEY")
         existing = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
         if (

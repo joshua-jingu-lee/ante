@@ -22,8 +22,6 @@ from pathlib import Path
 
 from ante.strategy.exceptions import StrategyFileAccessError
 
-# strategies/ 디렉토리 기준 경로 (프로젝트 루트 기준).
-# 기존 ``ante.strategy.context._STRATEGIES_ROOT`` 와 동일 값/계산을 이리로 이동.
 STRATEGIES_ROOT = Path("strategies")
 
 
@@ -41,12 +39,9 @@ def resolve_strategy_path(strategies_dir: Path, path: str) -> Path:
         StrategyFileAccessError: 절대 경로이거나, resolve 결과가
             ``strategies_dir`` 하위가 아닌 경우(symlink 탈출 포함).
     """
-    # 절대 경로 차단
     if Path(path).is_absolute():
         raise StrategyFileAccessError(f"Absolute paths are not allowed: {path}")
 
-    # 경로 탈출 시도 차단. base/candidate 모두 resolve() 후 비교하여
-    # symlink escape 도 차단한다.
     base = strategies_dir.resolve()
     resolved = (base / path).resolve()
     if not resolved.is_relative_to(base):

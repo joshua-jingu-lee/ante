@@ -57,11 +57,6 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_ORG = "default"
 
-# Refs #2295: ``system:`` 는 system audit sentinel 네임스페이스
-# (``system:kill_switch`` / ``system:recovery``) 전용 reserved prefix 다. 사용자/
-# agent 등록 member_id 가 이 prefix 를 점유하면 audit 행위자(member_id) 식별이
-# 오염되므로 ``register`` 가 거부한다. 정확히 ``startswith(_RESERVED_MEMBER_ID_PREFIX)``
-# 만 거부하며 ``system`` 단독·``systemic`` 등은 오거부하지 않는다.
 _RESERVED_MEMBER_ID_PREFIX = "system:"
 
 MEMBER_SCHEMA = """
@@ -94,24 +89,21 @@ _TOKEN_EXPIRES_MIGRATION = (
     "ALTER TABLE members ADD COLUMN token_expires_at TEXT DEFAULT ''"
 )
 
-# 단일 이모지(grapheme cluster) 검증 패턴
-# 기본 이모지 1개 + 선택적 modifier/ZWJ sequence
 _EMOJI_BASE = (
-    r"[\U0001F600-\U0001F64F]"  # Emoticons
-    r"|[\U0001F300-\U0001F5FF]"  # Misc Symbols & Pictographs
-    r"|[\U0001F680-\U0001F6FF]"  # Transport & Map
-    r"|[\U0001F900-\U0001F9FF]"  # Supplemental Symbols
-    r"|[\U0001FA00-\U0001FA6F]"  # Chess Symbols
-    r"|[\U0001FA70-\U0001FAFF]"  # Symbols Extended-A
-    r"|[\U00002702-\U000027B0]"  # Dingbats
-    r"|[\U0001F1E0-\U0001F1FF]{2}"  # Flags (2 regional indicators)
+    r"[\U0001F600-\U0001F64F]"
+    r"|[\U0001F300-\U0001F5FF]"
+    r"|[\U0001F680-\U0001F6FF]"
+    r"|[\U0001F900-\U0001F9FF]"
+    r"|[\U0001FA00-\U0001FA6F]"
+    r"|[\U0001FA70-\U0001FAFF]"
+    r"|[\U00002702-\U000027B0]"
+    r"|[\U0001F1E0-\U0001F1FF]{2}"
 )
 _EMOJI_MODIFIER = (
-    r"[\U0000FE00-\U0000FE0F]"  # Variation Selectors
-    r"|[\U0001F3FB-\U0001F3FF]"  # Skin tone modifiers
-    r"|[\U000E0020-\U000E007F]"  # Tags
+    r"[\U0000FE00-\U0000FE0F]"
+    r"|[\U0001F3FB-\U0001F3FF]"
+    r"|[\U000E0020-\U000E007F]"
 )
-# 단일 이모지: base + optional ZWJ sequences
 _EMOJI_RE = re.compile(
     r"^(?:" + _EMOJI_BASE + r")"
     r"(?:" + _EMOJI_MODIFIER + r")*"
@@ -207,7 +199,6 @@ class MemberService:
         self._eventbus = eventbus
         self._token_ttl_days = token_ttl_days
 
-        # 하위 매니저 조립
         self._token_manager = TokenManager(db, token_ttl_days)
         self._auth_service = AuthService(
             db=db,
@@ -224,10 +215,8 @@ class MemberService:
             try:
                 await self._db.execute(migration)
             except Exception:
-                pass  # 컬럼이 이미 존재하면 무시
+                pass
         logger.info("MemberService 초기화 완료")
-
-    # ── emoji 관리 ──────────────────────────────────────
 
     async def _get_used_emojis(self) -> set[str]:
         """사용 중인 emoji 집합 반환."""
@@ -262,12 +251,6 @@ class MemberService:
         if not emoji:
             return
         if not _is_single_emoji(emoji):
-            # #1915: emoji 형식 거부는 typed ``MemberInvalidEmojiError``
-            # (.code=MEMBER_INVALID_EMOJI) 로 raise 해 CLI envelope 에 안정
-            # 코드 surface. ``ValueError`` 다중상속이라 기존 ``except
-            # ValueError`` (CLI ``set-emoji`` generic fallback, ``test_member.
-            # py:602/606`` 의 ``pytest.raises(ValueError, match=...)``) 가
-            # 회귀 없이 동일하게 잡힌다.
             from ante.member.errors import MemberInvalidEmojiError
 
             msg = "emoji는 단일 이모지만 허용됩니다"
@@ -288,8 +271,6 @@ class MemberService:
         logger.info("emoji 변경: %s → %s (by %s)", member_id, emoji, updated_by)
         member.emoji = emoji
         return member
-
-    # ── Master 부트스트랩 ──────────────────────────────
 
     async def bootstrap_master(
         self,
@@ -372,8 +353,6 @@ class MemberService:
         logger.info("Master 멤버 생성 완료: %s", member.member_id)
         return member, token, recovery_key
 
-    # ── 멤버 등록 ──────────────────────────────────────
-
     async def register(
         self,
         member_id: str,
@@ -423,17 +402,11 @@ class MemberService:
         self._assert_type_enum(member_type)
         self._assert_type_role(member_type, role)
 
-        # vocabulary 검증은 type/role 검증 이후, DB I/O 이전에 수행한다.
-        # CLI direct path 회귀 (#1439).
         scopes = scopes or []
         self._assert_scopes_vocabulary(scopes)
 
         existing = await self.get(member_id)
         if existing:
-            # #1807 (Group R sweep): duplicate member_id 는 typed
-            # ``MemberAlreadyExistsError`` (.code=MEMBER_ALREADY_EXISTS) 로
-            # raise 해 CLI envelope 에 안정 코드 surface. ValueError 다중상속
-            # 으로 기존 ``except (ValueError, PermissionError)`` 회귀 없음.
             from ante.member.errors import MemberAlreadyExistsError
 
             raise MemberAlreadyExistsError(member_id)
@@ -500,8 +473,6 @@ class MemberService:
         logger.info("멤버 등록 완료: %s (type=%s)", member.member_id, member.type)
         return member, token
 
-    # ── 인증 (AuthService 위임) ────────────────────────
-
     async def authenticate(self, token: str) -> Member:
         """토큰으로 멤버 인증."""
         return await self._auth_service.authenticate(token)
@@ -509,8 +480,6 @@ class MemberService:
     async def authenticate_password(self, member_id: str, password: str) -> Member:
         """패스워드 인증 (human 복구/maintenance)."""
         return await self._auth_service.authenticate_password(member_id, password)
-
-    # ── 조회 ───────────────────────────────────────────
 
     async def get(self, member_id: str) -> Member | None:
         """단건 조회."""
@@ -614,8 +583,6 @@ class MemberService:
                 actionable.append(member)
         return InvalidRoleScan(actionable=actionable, legacy_revoked=legacy_revoked)
 
-    # ── 상태 변경 ──────────────────────────────────────
-
     async def suspend(self, member_id: str, suspended_by: str = "") -> Member:
         """멤버 일시 정지.
 
@@ -656,10 +623,6 @@ class MemberService:
                 suspended_by=suspended_by,
             )
         )
-        # 보안 알림 wiring (#2150): member/07·eventbus.md 가 명시한 Notification
-        # 구독자를 producer 직접 발행 패턴으로 연결한다 (auth_service
-        # ``_publish_auth_failed`` 동형). NotificationService 가 NotificationEvent
-        # 를 이미 구독하므로 추가 wiring 불필요.
         await self._eventbus.publish(
             NotificationEvent(
                 level="warning",
@@ -739,7 +702,6 @@ class MemberService:
                 revoked_by=revoked_by,
             )
         )
-        # 보안 알림 wiring (#2150): suspend 와 1:1 미러. producer 직접 발행.
         await self._eventbus.publish(
             NotificationEvent(
                 level="warning",
@@ -754,8 +716,6 @@ class MemberService:
         member.token_hash = ""
         member.revoked_at = now
         return member
-
-    # ── 토큰 관리 (TokenManager 위임) ──────────────────
 
     async def rotate_token(
         self, member_id: str, rotated_by: str = ""
@@ -775,8 +735,6 @@ class MemberService:
             MemberTokenRotatedEvent(member_id=member_id, rotated_by=rotated_by)
         )
         return result
-
-    # ── 패스워드·복구키 관리 (RecoveryKeyManager 위임) ─
 
     async def change_password(
         self, member_id: str, old_password: str, new_password: str
@@ -828,8 +786,6 @@ class MemberService:
         )
         return recovery_key
 
-    # ── 권한 관리 ──────────────────────────────────────
-
     async def update_scopes(
         self, member_id: str, scopes: list[str], updated_by: str = ""
     ) -> Member:
@@ -844,7 +800,6 @@ class MemberService:
         호출과 내부 caller 를 위해 service 계층에서 방어한다.
         """
         await self._assert_master(updated_by, "update_scopes")
-        # vocabulary 검증은 master 검증 직후, 멤버 조회 / DB write 이전에 수행한다.
         self._assert_scopes_vocabulary(scopes)
         member = await self._get_or_raise(member_id)
         self._assert_active(member, "update_scopes")
@@ -858,16 +813,12 @@ class MemberService:
         member.scopes = scopes
         return member
 
-    # ── 활동 추적 ──────────────────────────────────────
-
     async def update_last_active(self, member_id: str) -> None:
         """마지막 활동 시각 갱신."""
         await self._db.execute(
             "UPDATE members SET last_active_at = ? WHERE member_id = ?",
             (_now(), member_id),
         )
-
-    # ── 내부 헬퍼 ──────────────────────────────────────
 
     async def _assert_master(self, caller_id: str, action: str) -> None:
         """호출자가 master인지 검증."""
@@ -982,13 +933,6 @@ class MemberService:
     def _assert_not_master(member: Member, action: str) -> None:
         """master 보호."""
         if member.role == MemberRole.MASTER:
-            # #1915: master 보호 위반은 typed ``MemberMasterProtectedError``
-            # (.code=MEMBER_MASTER_PROTECTED) 로 raise 해 CLI envelope 에
-            # 안정 코드 surface. ``PermissionError`` 다중상속이라 기존
-            # ``except PermissionError`` (CLI ``suspend``/``revoke`` generic
-            # fallback, ``test_member_service_master_guard.py:239/245`` 의
-            # ``pytest.raises(PermissionError, match="master는 ...")``) 가
-            # 회귀 없이 동일하게 잡힌다.
             from ante.member.errors import MemberMasterProtectedError
 
             msg = f"master는 {action}할 수 없습니다"

@@ -93,7 +93,6 @@ class ReportDraftGenerator:
         metrics = result_data.get("metrics", {})
         strategy = result_data.get("strategy", strategy_id or "unknown")
 
-        # 전략 이름/버전 파싱 (format: "name_v1.0.0")
         if "_v" in strategy:
             name, version = strategy.rsplit("_v", 1)
         else:
@@ -114,7 +113,6 @@ class ReportDraftGenerator:
             f"거래: {total_trades}건"
         )
 
-        # equity_curve를 표준 포맷으로 변환 후 일봉 리샘플링
         from ante.backtest.result import resample_equity_curve_daily
 
         detail = dict(result_data)
@@ -150,7 +148,6 @@ def _standardize_equity_curve(raw: list[dict]) -> list[dict]:
     result = []
     for point in raw:
         ts = point.get("timestamp", "")
-        # timestamp에서 날짜 부분만 추출
         date_str = str(ts)[:10] if ts else ""
         value = point.get("equity", point.get("value", 0.0))
         result.append({"date": date_str, "value": value})

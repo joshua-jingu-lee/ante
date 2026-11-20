@@ -5,8 +5,6 @@ DEFAULTS: dict[str, object] = {
     "system.timezone": "Asia/Seoul",
     "db.path": "db/ante.db",
     "db.event_log_retention_days": 30,
-    # ── runtime PID/IPC socket ──
-    # Refs #1157, docs/specs/config/03-design-decisions.md 200-281
     "runtime.pid_path": "run/ante.pid",
     "runtime.socket_path": "run/ante.sock",
     "parquet.base_path": "data/",
@@ -16,16 +14,10 @@ DEFAULTS: dict[str, object] = {
     "instrument.cache_ttl_seconds": 3600,
     "treasury.sync_interval_seconds": 300,
     "audit.retention_days": 90,
-    # ── runtime readiness self-healing (D-ACC-09, #2397) ──
-    # broker not_ready 계좌의 self-healing background retry loop 튜닝.
-    # liveness invariant: max_attempts 는 per-burst(연결시도 단위)에만 적용하고,
-    # 계좌 lifetime 은 무제한이다(일시 토큰압박이 영구 not_ready 로 고착 금지).
-    # backoff 는 EGW00133(~60s) 토큰 cooldown 에 정렬한다.
     "readiness.self_healing_interval_seconds": 60,
     "readiness.self_healing_backoff_base_seconds": 5,
     "readiness.self_healing_backoff_max_seconds": 60,
     "readiness.self_healing_max_attempts_per_burst": 5,
-    # ── 리스크 관리 ──
     "rule.daily_loss_limit": 0.05,
     "rule.max_exposure_percent": 0.20,
     "rule.max_unrealized_loss": 0.10,
@@ -33,12 +25,9 @@ DEFAULTS: dict[str, object] = {
     "rule.allowed_hours": "09:00-15:30",
     "risk.max_mdd_pct": 0.10,
     "risk.max_position_pct": 0.10,
-    # ── 봇 기본 ──
     "bot.default_interval_sec": 60,
-    # ── 거래 비용 ──
     "broker.commission_rate": 0.00015,
     "broker.sell_tax_rate": 0.0018,
-    # ── 알림 ──
     "notification.telegram_enabled": "true",
     "notification.min_level": "info",
 }

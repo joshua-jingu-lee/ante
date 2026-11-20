@@ -31,44 +31,26 @@ class Account:
     거래소, 통화, 브로커, 수수료, 인증 정보를 하나로 묶는 최상위 엔티티.
     """
 
-    # --- 식별 ---
     account_id: str
     name: str
 
-    # --- 시장 ---
     exchange: str
     currency: str
     timezone: str = "Asia/Seoul"
-    # legacy DB row 가 invalid IANA timezone 으로 저장돼 있을 때 ``True`` 로
-    # 표시하는 marker. ``_row_to_account`` 는 stored value 를 절대 덮어쓰지
-    # 않고 그대로 보존하면서 marker 만 세팅하므로, 후속 ``AccountService.update``
-    # 의 전체 row UPDATE 가 silent data rewrite 를 일으키지 않는다.
-    # 운영자는 ``ante account repair-timezone`` (cold-path) 명령으로 valid
-    # 값으로 복구한다. ``__post_init__`` hard validation 은 호환을 위해
-    # 적용하지 않는다 (#1474).
     timezone_invalid: bool = False
     trading_hours_start: str = "09:00"
     trading_hours_end: str = "15:30"
 
-    # --- 거래 모드 ---
     trading_mode: TradingMode = TradingMode.VIRTUAL
 
-    # --- 브로커 ---
     broker_type: str = "test"
     credentials: dict[str, str] = field(default_factory=dict)
     broker_config: dict[str, Any] = field(default_factory=dict)
 
-    # --- 비용 ---
     buy_commission_rate: Decimal = Decimal("0")
     sell_commission_rate: Decimal = Decimal("0")
-    # 시장가 매수 주문 reserve buffer 비율 (Account-level Treasury reserve policy).
-    # 시장가 매수는 체결 가격이 보장되지 않으므로 현재가만으로 reserve하면 부족할
-    # 수 있다. Treasury는 ``reserve_basis = quantity * quote * (1 + buffer)``
-    # 식으로 자금을 보수적으로 잠근다. ``broker_config``에 들어가지 않으며,
-    # 1.0에서는 cold-path 전용(structural) 필드다 (#1333).
     market_order_reserve_buffer_rate: Decimal = Decimal("0")
 
-    # --- 상태 ---
     status: AccountStatus = AccountStatus.ACTIVE
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -88,9 +70,6 @@ class BrokerPreset:
     trading_hours_end: str
     buy_commission_rate: Decimal
     sell_commission_rate: Decimal
-    # 시장가 매수 reserve buffer 비율의 broker별 기본값. Account 생성 시 이
-    # 값이 ``Account.market_order_reserve_buffer_rate``의 초기값으로 사용된다
-    # (#1333).
     market_order_reserve_buffer_rate: Decimal
     default_account_id: str
     default_name: str

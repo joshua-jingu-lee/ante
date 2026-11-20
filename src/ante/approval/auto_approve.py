@@ -14,7 +14,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# 전결 대상에서 제외되는 유형
 EXCLUDED_TYPES: frozenset[str] = frozenset({"strategy_adopt", "strategy_retire"})
 AccountResolver = Callable[[str], Awaitable["Account | None"]]
 

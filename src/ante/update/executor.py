@@ -118,7 +118,6 @@ def rollback_update(
     """
     success = True
 
-    # pip 다운그레이드
     result = subprocess.run(
         [sys.executable, "-m", "pip", "install", f"ante=={previous_version}"],
         capture_output=True,
@@ -128,7 +127,6 @@ def rollback_update(
         logger.error("pip 롤백 실패: %s", result.stderr)
         success = False
 
-    # DB 복원
     if backup_path and backup_path.exists():
         target = Path(db_path) if db_path else Path("db/ante.db")
         shutil.copy2(str(backup_path), str(target))

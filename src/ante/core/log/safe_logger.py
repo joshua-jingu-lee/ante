@@ -40,7 +40,6 @@ def _sanitize_extra(
     cleaned: dict[str, object] = {}
     for key, val in extra.items():
         if key in _LOGRECORD_RESERVED or key in _ANTE_RESERVED:
-            # 무시 (스펙: 호출자 실수로부터 로그 구조 보호)
             continue
         cleaned[key] = val
     return cleaned
@@ -85,7 +84,7 @@ def _safe_make_record(
 class AnteLogger(logging.Logger):
     """예약 키 안전 처리 Logger."""
 
-    def makeRecord(  # noqa: N802 — stdlib 메서드 오버라이드
+    def makeRecord(  # noqa: N802
         self,
         name: str,
         level: int,
@@ -116,14 +115,10 @@ def install_safe_logger() -> None:
     """
     logging.setLoggerClass(AnteLogger)
 
-    # root logger 의 makeRecord 를 patch — 별도 RootLogger 인스턴스라
-    # setLoggerClass 만으로는 교체되지 않는다.
     logging.root.makeRecord = _safe_make_record.__get__(  # type: ignore[method-assign]
         logging.root, type(logging.root)
     )
 
-    # 이미 만들어진 logger 들도 patch (Logger 인스턴스만 — PlaceHolder 제외).
-    # AnteLogger 인스턴스는 makeRecord 를 이미 오버라이드하므로 건너뛴다.
     for existing in logging.Logger.manager.loggerDict.values():
         if isinstance(existing, logging.Logger) and not isinstance(
             existing, AnteLogger

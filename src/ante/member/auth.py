@@ -6,11 +6,9 @@ import hashlib
 import secrets
 import string
 
-# ── 토큰 ─────────────────────────────────────────────
-
 TOKEN_PREFIX_HUMAN = "ante_hk_"
 TOKEN_PREFIX_AGENT = "ante_ak_"
-TOKEN_LENGTH = 32  # 접두어 제외 랜덤 부분 길이
+TOKEN_LENGTH = 32
 
 
 def generate_token(member_type: str) -> str:
@@ -50,10 +48,8 @@ def get_token_type(token: str) -> str | None:
     return None
 
 
-# ── 패스워드 ─────────────────────────────────────────
-
 SALT_LENGTH = 32
-HASH_ITERATIONS = 600_000  # OWASP 2023 권장
+HASH_ITERATIONS = 600_000
 
 
 def hash_password(password: str) -> str:
@@ -79,8 +75,6 @@ def verify_password(password: str, stored: str) -> bool:
     ).hex()
     return secrets.compare_digest(actual_hash, expected_hash)
 
-
-# ── Recovery Key ─────────────────────────────────────
 
 RECOVERY_KEY_GROUPS = 6
 RECOVERY_KEY_GROUP_LEN = 4

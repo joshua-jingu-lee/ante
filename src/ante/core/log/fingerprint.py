@@ -38,7 +38,6 @@ def compute_fingerprint(
     if exc_tb is None:
         return f"{exc_type.__name__}@{logger_name}"
 
-    # 오래된 → 최근 순 순회, ante.* 프레임 수집
     ante_frames: list[tuple[str, str]] = []
     tb: TracebackType | None = exc_tb
     while tb is not None:
@@ -49,7 +48,6 @@ def compute_fingerprint(
         tb = tb.tb_next
 
     if ante_frames:
-        # 가장 최근 = 리스트의 마지막 원소
         module, func = ante_frames[-1]
         return f"{exc_type.__name__}@{module}:{func}"
 
