@@ -371,26 +371,25 @@ class MemberService:
         path 와 내부 caller 가 본 메소드를 직접 호출할 수 있으므로 service
         계층에서 방어한다(defense-in-depth).
 
-        ``role`` 은 ``MemberRole`` enum SSOT 멤버이어야 한다 (#1465 — split
-        #1417/A). ``member_type`` 은 ``MemberType`` enum SSOT 멤버이어야 한다
-        (#1628 — ``role`` 동형 미러). CLI direct path 및 내부 caller 가 임의
+        ``role`` 은 ``MemberRole`` enum SSOT 멤버이어야 한다.
+        ``member_type`` 은 ``MemberType`` enum SSOT 멤버이어야 한다
+        (``role`` 동형 미러). CLI direct path 및 내부 caller 가 임의
         문자열을 넘길 수 있으므로 본 서비스 계층에서도 ``ValueError`` 로
         재검증한다. 검증은 ``_assert_master``
         직후, ``_assert_type_role`` 직전에 둬서 enum membership 위반이
         type-role 분기보다 먼저 거부되도록 한다.
 
-        master 검증은 **무조건** 수행한다 (#2294 — #2113 메타리뷰 후속). 이전
-        에는 ``if registered_by:`` 가드로 빈 actor 를 우회 허용했으나, 형제
+        master 검증은 **무조건** 수행한다. 형제
         mutation (suspend/reactivate/revoke/rotate_token/update_scopes) 가 모두
-        무조건 ``_assert_master`` 를 호출하는 것·#1351 이 ``update_scopes`` 에서
-        동일 가드를 제거한 선례와 동형으로 무조건 호출한다. ``registered_by=""``
+        무조건 ``_assert_master`` 를 호출하는 것과 동형이다.
+        ``registered_by=""``
         (빈 actor) 는 ``_assert_master("")`` → ``get("")`` 가 ``None`` 을 반환해
         ``PermissionDeniedError`` 로 거부된다 (의도된 defense-in-depth). 정상
         IPC actor (``'ipc'``) / CLI actor (``'unknown'``) 는 truthy 이므로
         master 조회 경로를 거쳐 무영향이다.
 
         ``member_id`` 가 ``system:`` reserved prefix 로 시작하면 등록을 거부
-        한다 (#2295 — audit sentinel 네임스페이스 보호). existing-member 조회
+        한다 (audit sentinel 네임스페이스 보호). existing-member 조회
         이전에 ``ReservedMemberIdError`` (.code=MEMBER_ID_RESERVED) 로 거부해,
         legacy ``system:*`` 행이 있어도 MEMBER_ALREADY_EXISTS 가 아닌 reserved
         코드가 surface 되도록 한다. 정확히 ``startswith("system:")`` 만 거부하며
@@ -550,7 +549,7 @@ class MemberService:
     async def find_invalid_role_members(self) -> InvalidRoleScan:
         """``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 식별한다.
 
-        #1465(write path 차단), #1466(auth read-path guard)으로 invalid-role row
+        write path 차단과 auth read-path guard 로 invalid-role row
         는 더 이상 새로 생성되지 않지만, 이전에 생성된 legacy row 는 DB 에 남아
         있을 수 있다. 본 메소드는 그런 row 를 운영자가 cleanup 할 수 있도록 두
         카테고리로 분리해 반환한다.
@@ -586,13 +585,13 @@ class MemberService:
     async def suspend(self, member_id: str, suspended_by: str = "") -> Member:
         """멤버 일시 정지.
 
-        ``suspended_by``는 master 권한 caller여야 한다(#1351 — 보안 회귀
+        ``suspended_by``는 master 권한 caller여야 한다(보안 회귀
         잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
         거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
 
-        state 위반 (이미 SUSPENDED 등) 은 #1814 Group Q sweep 에 따라
-        typed ``MemberStateConflictError`` 로 raise 한다 (이전 ``PermissionError``
-        의미를 좁힘). ``ValueError`` 다중상속이므로 기존 ``except (ValueError,
+        state 위반 (이미 SUSPENDED 등) 은
+        typed ``MemberStateConflictError`` 로 raise 한다.
+        ``ValueError`` 다중상속이므로 기존 ``except (ValueError,
         PermissionError)`` caller (CLI member suspend line 657 generic
         fallback) 가 회귀 없이 동일하게 잡힌다. ``revoke`` 는 plan scope 외
         라 기존 ``_assert_status`` ``PermissionError`` 경로를 유지한다.
@@ -642,7 +641,7 @@ class MemberService:
 
         ``reactivated_by``는 master 권한 caller여야 한다.
 
-        state 위반 (이미 ACTIVE 등) 은 #1814 Group Q sweep 에 따라 typed
+        state 위반 (이미 ACTIVE 등) 은 typed
         ``MemberStateConflictError`` 로 raise 한다 (``suspend`` 1:1 미러).
         """
         from ante.member.errors import MemberStateConflictError
@@ -791,9 +790,7 @@ class MemberService:
     ) -> Member:
         """권한 범위 변경.
 
-        ``updated_by``는 master 권한 caller여야 한다(#1351). 이전에는
-        ``if updated_by:`` 가드 때문에 빈 caller가 master 검증을 우회했으나,
-        본 가드를 제거해 빈 caller도 거부한다.
+        ``updated_by``는 master 권한 caller여야 한다. 빈 caller도 거부한다.
 
         ``scopes`` 의 각 원소는 ``SCOPE_VOCABULARY`` 에 등록된 문자열이어야
         한다. 위반 시 ``InvalidScopeError`` 를 raise 한다. CLI 직접
@@ -907,7 +904,7 @@ class MemberService:
 
         CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
         있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
-        에서 한 번 더 방어한다 (defense-in-depth — #1465 ``role`` enum 강제
+        에서 한 번 더 방어한다 (defense-in-depth — ``role`` enum 강제
         패턴 1:1 미러, SSOT: ``src/ante/member/models.py``).
 
         ``StrEnum`` 인스턴스는 곧 문자열이므로 ``MemberType.AGENT`` 같은

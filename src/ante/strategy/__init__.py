@@ -3,8 +3,7 @@
 본 패키지의 plain ``import ante.strategy``는 의도적으로 light하다.
 ``ante.strategy.indicators``는 ``pandas`` / ``pandas-ta`` / ``numpy`` /
 ``numba`` 같은 heavy 분석 의존성을 끌어들이므로, CLI dispatch path가
-이를 eager-import하지 않도록 PEP 562 ``__getattr__``로 **lazy 노출**한다
-(#1463).
+이를 eager-import하지 않도록 PEP 562 ``__getattr__``로 **lazy 노출**한다.
 
 계약:
     - ``import ante.strategy`` 는 light: heavy 의존성을 끌지 않는다.

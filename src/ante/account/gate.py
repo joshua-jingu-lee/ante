@@ -1,8 +1,8 @@
-"""Active-order readiness gate helpers (D-ACC-09 축 ii, #2398).
+"""Active-order readiness gate helpers (D-ACC-09 축 ii).
 
 3계층 defense-in-depth(RuleEngine 계층1 / Treasury 계층2 / APIGateway 계층3 +
 VirtualExecutor G9 backstop)가 공유하는 SSOT 헬퍼다. 각 계층은
-``RuntimeReadinessRegistry``(축 i, #2397)를 **매 이벤트 시점** 조회(상태 캐시 금지,
+``RuntimeReadinessRegistry``(축 i)를 **매 이벤트 시점** 조회(상태 캐시 금지,
 G5 liveness)하고, fail-closed(registry 미주입·조회 예외·account 메타 취득 실패 =
 차단, G2)로 동작한다.
 
@@ -52,8 +52,8 @@ def derive_account_status(
     """이미 fetch 한 account 로부터 G7 kill-switch status 3-state 를 도출한다(I/O 없음).
 
     status 는 런타임 가변 kill-switch(``account suspend`` IPC)라 생성시점 스냅샷을
-    신뢰하면 안 된다(#2398 P1). 계층1(RuleEngine)·계층3(APIGateway)가 **동일** 도출
-    로직을 공유하도록(중복 구현 금지, 메타리뷰 followup) 순수 함수로 추출한다.
+    신뢰하면 안 된다. 계층1(RuleEngine)·계층3(APIGateway)가 **동일** 도출
+    로직을 공유하도록(중복 구현 금지) 순수 함수로 추출한다.
 
     - ``account_service is None``(status 소스 미구성, 비게이트 레거시) → ``None``
       (status 축 비활성, 과차단 회피 — 기존 비게이트 동작 보존).
@@ -85,7 +85,7 @@ async def resolve_account_status(
 
     계층1(RuleEngine)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가한다
     (중복 구현 금지). status 는 런타임 가변 kill-switch 라 반드시 **live**
-    ``account_service.get`` 로 본다 — 생성시점 스냅샷 fallback 금지(#2398 P1).
+    ``account_service.get`` 로 본다 — 생성시점 스냅샷 fallback 금지.
 
     반환 3-state 는 ``derive_account_status`` 와 동일하다:
 
@@ -143,7 +143,7 @@ def not_ready_reason(
     인 플래그만 suffix 로 나열한다. registry 가 None 이면(fail-closed) 비면제 전
     플래그를 missing 으로 표기한다.
 
-    **fail-closed reason(finding 2)**: ``registry.is_ready``(또는 면제 평가)가
+    **fail-closed reason**: ``registry.is_ready``(또는 면제 평가)가
     예외를 던지면 suffix 를 비우고 bare ``account_not_ready`` 를 반환한다 — 예외를
     호출자로 **전파하지 않는다**. ``active_trading_blocked`` 가 이미 예외=차단
     (fail-closed, G2)으로 끝나는데, 이어지는 reason 산출이 같은 예외(``is_ready``

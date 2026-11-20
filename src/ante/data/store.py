@@ -89,7 +89,7 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
       data.go.kr의 같은 거래일 일별 fundamental과 같은 월 파티션에서
       date가 충돌할 수 있다. `source`까지 키에 포함하면 두 소스의
       서로 다른(null-complementary) 행을 **모두 보존**한다.
-      `available_date`(point-in-time 공시 접수일, #2010)는 논리 행을
+      `available_date`(point-in-time 공시 접수일)는 논리 행을
       식별하는 키가 아니라 **value 속성**이므로 natural key에 넣지 않는다.
       key는 period_end(`date`)+`source`로 한 분기·소스당 한 논리 행을
       식별하고, 정정공시/재제출로 동일 period_end에 후속 접수가 들어오면
@@ -230,7 +230,7 @@ class ParquetStore:
               미전진시킨다). 비-0바이트 손상은 자동복구하지 않는 loud-stuck이며,
               복구는 ``ante data validate --fix`` + range 재backfill로 수행한다.
             - ``"store_recovered"``: **0바이트** 파티션(원자성 도입 전 중단 write
-              잔재)을 부재로 간주해 현재 수집분으로 **자동복구**했다(#2413, 0바이트-
+              잔재)을 부재로 간주해 현재 수집분으로 **자동복구**했다(0바이트-
               only). ``.corrupted`` 격리 산출물은 만들지 않는다. 위 게이트 소비자는
               이 타입을 세지 않으므로 by-construction **비게이트**다(checkpoint 전진
               허용 → 보고된 stuck 해소).
@@ -252,7 +252,7 @@ class ParquetStore:
 
         파괴적 drain은 backfill_runner가 collect 종료 후 단일 소유로 수행하므로,
         DART가 여기서 drain하면 runner가 보고할 경고를 소실시킨다. 따라서 이
-        메서드는 절대 버퍼를 비우지 않는다(drain 소유권 보존, #1993 R2).
+        메서드는 절대 버퍼를 비우지 않는다(drain 소유권 보존).
 
         Returns:
             ``type == "store_merge"`` 인 pending 경고의 수.
@@ -425,7 +425,7 @@ class ParquetStore:
         """데이터를 Parquet에 기록. 파티셔닝, 중복 제거(merge).
 
         Returns:
-            이번 write로 **실제 새로 저장된 net-new 행 수**(rows_written, #1993).
+            이번 write로 **실제 새로 저장된 net-new 행 수**(rows_written).
             파티션별 net delta = ``max(0, len(merged) - len(existing))``의 합이다
             (legacy 중복 정리로 merged < existing이면 0으로 clamp). 빈 입력/
             exchange는 0. 기존엔 입력 ``len(data)`` 를 누적해 dedup·재수집을
@@ -434,13 +434,13 @@ class ParquetStore:
             이며 silent overwrite/transaction 동작은 변경하지 않는다(하위호환:
             기존 None 반환을 사용하던 호출자 0건).
 
-        파티셔닝 해상도(04-schema.md 파일 규격, #2115):
+        파티셔닝 해상도(04-schema.md 파일 규격):
         - OHLCV 중 subminute(`_SUBMINUTE_TIMEFRAMES` = 10s/30s)는 **일별**
           (`YYYY-MM-DD.parquet`). 단 해당 dir에 이미 legacy 월별 파일
           (`_LEGACY_MONTHLY_GLOB`)이 있으면 월별-only를 유지하고 일별을
           신규 생성하지 않는다(월별+일별 coexistence 시 read glob+concat이
           중복 timestamp를 반환하므로 이를 원천 차단). legacy 월별→일별
-          전환 migration은 destructive하므로 별도 follow-up #2267로 분리한다.
+          전환 migration은 destructive하므로 별도로 분리한다.
         - 그 외(1m+ OHLCV, fundamental/tick 등)는 기존대로 **월별**
           (`YYYY-MM.parquet`).
 
@@ -527,7 +527,7 @@ class ParquetStore:
 
         `_partition_by_month`와 동형이며 파티션 key 해상도만 일별
         (`%Y-%m-%d` / Date면 `cast(Utf8).str.slice(0, 10)`)이다. subminute
-        OHLCV(10s/30s) 일별 파티셔닝 전용(04-schema.md, #2115).
+        OHLCV(10s/30s) 일별 파티셔닝 전용(04-schema.md).
         """
         if time_col in data.columns:
             if data[time_col].dtype == pl.Date:
@@ -585,7 +585,7 @@ class ParquetStore:
     def _apply_partition_mode(
         tmp_path: str, target: Path, preserve_existing_mode: bool
     ) -> None:
-        """replace 전 tmp 파일 mode를 결정한다(#2413 [668]/[670]).
+        """replace 전 tmp 파일 mode를 결정한다.
 
         ``tempfile.mkstemp`` 는 항상 ``0o600`` 으로 tmp를 만들고 ``Path.replace`` 가
         그 mode를 유지한다. 조정하지 않으면 모든 파티션이 owner-only-readable이 되어
@@ -594,9 +594,9 @@ class ParquetStore:
         - ``preserve_existing_mode=True`` 이고 기존 ``target`` 이 있으면 **그 operator
           mode를 보존**(0o600 등 의도 존중). 비-0바이트 유효 기존 파일 merge 전용.
         - 그 외(신규 파티션, **0바이트 복구**)는 ``0o644`` 고정. 0바이트 복구에서
-          기존 target은 pre-#2413 중단-write **stub**이므로 그 mode(restrictive umask
+          기존 target은 중단-write **stub**이므로 그 mode(restrictive umask
           에서 0o600일 수 있음)를 보존하면 복구본이 owner-only가 된다 → stub mode를
-          mode 소스로 쓰지 않고 신규와 동일하게 0o644를 쓴다(#2413 리뷰 [670]).
+          mode 소스로 쓰지 않고 신규와 동일하게 0o644를 쓴다.
         """
         mode = 0o644
         if preserve_existing_mode:
@@ -613,7 +613,7 @@ class ParquetStore:
         *,
         preserve_existing_mode: bool = True,
     ) -> None:
-        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace, #2413).
+        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace).
 
         checkpoint.save()(`feed/pipeline/checkpoint.py`)와 동일 패턴이다: 같은
         디렉토리에 임시 파일을 만들어 write한 뒤 ``Path.replace`` 로 원자 교체한다.
@@ -647,7 +647,7 @@ class ParquetStore:
         ``validate(fix=True)`` **전용** 격리 헬퍼다(사용자 발동). 기본 격리명은
         ``with_suffix(".corrupted")`` 이되, 동명이 이미 있으면 **덮어쓰지 않고**
         uniquifier(``.corrupted.<n>``)로 회피한다(반복 손상 증적 보존·POSIX 덮어쓰기
-        방지·Windows ``FileExistsError`` 회피, #2413 리뷰 [10]). write 경로는 이
+        방지·Windows ``FileExistsError`` 회피). write 경로는 이
         헬퍼를 호출하지 않는다(0바이트만 자동복구, 나머지는 loud-stuck).
         """
         target = filepath.with_suffix(".corrupted")
@@ -666,7 +666,7 @@ class ParquetStore:
         concat/schema 실패, 원자 write 실패, 일시적 read 오류, self-heal 불가(격리·
         재생성 write 실패)를 모두 동일하게 처리한다: 기존 데이터를 절대 덮어쓰지
         않고 checkpoint 전진 게이트(``store_merge``)로 표면화해 다음 run 재시도를
-        유도한다(#2413 리뷰 [0]/[3]).
+        유도한다.
         """
         logger.warning(
             "Parquet 파티션 merge 실패: %s — 기존 파일 보존, write 건너뜀 (%s)",
@@ -708,7 +708,7 @@ class ParquetStore:
         원자 replace)로 수행한다. write 중단 시 최종 경로에 0바이트/부분 parquet이
         남지 않는다(checkpoint.save durability 불변과 정합).
 
-        기존 파일 처리(#2413, 0바이트-only 자동복구):
+        기존 파일 처리(0바이트-only 자동복구):
         - **0바이트 파티션**(원자성 도입 전 중단 write 잔재) → 그 파일을 **부재로
           간주**하고 신규 group을 그대로 write한다(read/concat/격리 없음). checkpoint
           전진 게이트를 유발하지 않는 `store_recovered` 경고로 "0바이트 손상 파티션
@@ -717,8 +717,8 @@ class ParquetStore:
         - **비어있지 않은 기존 파티션** → `pl.read_parquet` → `pl.concat`
           (diagonal_relaxed) → dedup → 원자 write. read 또는 concat이 raise하면
           (읽기 불가·non-coercible 스키마 등) **기존 파일을 절대 덮어쓰지 않고**
-          `store_merge`(게이트→재시도)만 기록하고 net-new 0을 반환한다(pre-#2413
-          보존 동작). 비-0바이트 손상은 자동복구하지 않는다(loud-stuck) — 사용자가
+          `store_merge`(게이트→재시도)만 기록하고 net-new 0을 반환한다
+          (보존 동작). 비-0바이트 손상은 자동복구하지 않는다(loud-stuck) — 사용자가
           `ante data validate --fix` 후 재backfill로 복구한다.
         - **부재** → 신규 group 원자 write.
 

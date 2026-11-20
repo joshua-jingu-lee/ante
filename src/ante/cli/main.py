@@ -42,7 +42,7 @@ class LeafAwareGroup(_LeafPathMixin):
     - `ante member reset-password` → ("member", "reset-password")
     - `ante feed init` → ("feed", "init")  (leaf 이름이 "init"이지만 면제 아님)
 
-    NOTE: 본 클래스는 default-deny 인증 게이트를 부착하지 않는다. #1404 이후
+    NOTE: 본 클래스는 default-deny 인증 게이트를 부착하지 않는다.
     root group은 :class:`ante.cli.middleware.AuthenticatedGroup`을 사용한다.
     """
 
@@ -153,8 +153,7 @@ def get_data_path(ctx: click.Context | None = None) -> str:
     런타임(`ante.main._init_feed`/`_init_core`의 마이그레이션 호출)이 사용하는
     `s.config.get("data.path", "data/")` 와 동일한 키·기본값을 사용한다.
     `ante update` 가 마이그레이션 서브프로세스에 같은 데이터 루트를 넘겨야
-    v002 Parquet 마이그레이션이 런타임이 보는 동일한 트리에 적용된다
-    (Refs #1125 Codex 13차 review Finding 1).
+    v002 Parquet 마이그레이션이 런타임이 보는 동일한 트리에 적용된다.
 
     Args:
         ctx: 선택적 Click 컨텍스트. 전달되지 않으면

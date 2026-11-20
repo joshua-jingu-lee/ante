@@ -115,7 +115,7 @@ class ApprovalService:
     ) -> ApprovalRequest:
         """결재 요청 생성.
 
-        Refs #1217 → #1241 SPLIT-2: ``type`` 이 account-scoped 결재 유형
+        ``type`` 이 account-scoped 결재 유형
         (``budget_change``, ``rule_change``, ``bot_create``) 이면
         ``params`` 에서 account_id 를 추출해 :func:`require_account_id` 로
         검증한다. invalid 면 :class:`InvalidAccountIdError` 가 raise 되어
@@ -548,8 +548,8 @@ class ApprovalService:
 
         not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval
         review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로 surface
-        할 수 있도록 한다 (#1811 — Group A ``cancel_invalid_type_request``
-        #1798 동형 패턴).
+        할 수 있도록 한다 (``cancel_invalid_type_request``
+        동형 패턴).
         """
         request = await self.get(id)
         if not request:
@@ -716,8 +716,6 @@ class ApprovalService:
 
         ``status`` 미지정 시 모든 상태를 포함한다. 정상 type row 는 enum SSOT
         의 모든 멤버를 ``NOT IN`` 으로 제외해 결과에서 자동으로 빠진다.
-
-        Refs #1418 → #1472 SPLIT-D.
         """
         valid_types = sorted(_VALID_APPROVAL_TYPES)
         placeholders = ", ".join(["?"] * len(valid_types))
@@ -754,8 +752,6 @@ class ApprovalService:
         - ``suppress_notification=True`` (기본) 시 ``ApprovalResolvedEvent`` /
           notification 발행을 생략한다. False 면 일반 ``cancel()`` 과 동일한
           event/notification 경로를 탄다.
-
-        Refs #1418 → #1472 SPLIT-D.
         """
         request = await self.get(id)
         if not request:
@@ -947,7 +943,6 @@ class ApprovalService:
 
         create()의 전결 실행과 approve()의 자동 실행에서 공유된다.
 
-        Refs #1418 → #1470 SPLIT-B:
         - 진입부에서 ``request.type`` 의 enum 멤버십을 다시 검증한다
           (defense-in-depth). ``approve()`` 와 ``create()`` 에서 이미 검증
           했지만 ``create()`` 의 auto-approval 경로는 ``approve()`` 가드를

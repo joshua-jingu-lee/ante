@@ -66,10 +66,10 @@ class PositionReconciler:
             skip_external_buy: True 면 "외부 매수"(브로커>내부) 분류의 보정·이벤트
                 발행을 **건너뛴다**(경고 로그만). 체결 복구(fill catch-up)가
                 성공하지 못한 계좌에서, 미복구 ante 체결을 "외부 매수" 로
-                오분류하는 것을 막기 위한 barrier 안전장치다(#1946 Finding 1).
+                오분류하는 것을 막기 위한 barrier 안전장치다.
                 다른 분류(외부 청산·일부 매도)는 영향받지 않는다.
 
-                **self-submitted 분류와는 직교한다(#1950 R1-1)**: self-check 는
+                **self-submitted 분류와는 직교한다**: self-check 는
                 `skip_external_buy` 와 무관하게 항상 수행되며, 이 플래그는 분류
                 결과 중 "외부 매수" 보정만 억제하는 별도 계층이다. 주기
                 reconcile(`skip_external_buy=False`)에서도 self 는 보정되지 않는다.
@@ -77,7 +77,7 @@ class PositionReconciler:
                 /NotificationEvent 발행은 그대로 수행하되 ``correct_position`` 을
                 **호출하지 않는다**(보정 0건). 기존 external-buy/self-check 분류
                 로직은 무변경이며, 발행되는 이벤트도 동일하다. 보정만 보류한다.
-                (#2119/#2122: 다중봇 귀속 ambiguity·user-initiated detect 경로용.)
+                (다중봇 귀속 ambiguity·user-initiated detect 경로용.)
                 기본 False — 기존 호출자는 변경 없이 보정 동작 유지(무회귀).
 
         Returns:
@@ -294,7 +294,7 @@ class PositionReconciler:
             - internal: 해당 계좌의 **모든 봇(상태 무관) open 포지션을 심볼별로
               합산**(``TradeService.get_all_positions(account_id)``). per-bot
               비교가 같은 심볼을 보유한 다중봇을 false external-buy/청산으로
-              오판하던 것을 제거한다(#2120).
+              오판하던 것을 제거한다.
 
         Returns:
             불일치 내역 리스트. 일치 시 빈 리스트.
@@ -348,7 +348,7 @@ class PositionReconciler:
 
         다중봇(또는 0봇) 계좌에서 ``correct_position`` 을 **절대 호출하지 않고**,
         :meth:`compute_account_diff` 로 계산한 불일치를 account-scoped
-        ``NotificationEvent`` 로 알린다(#2118/#2120). 신규 도메인 이벤트를
+        ``NotificationEvent`` 로 알린다. 신규 도메인 이벤트를
         신설하지 않고 ``NotificationEvent`` 만 사용한다 — bot-scoped 인
         ``PositionMismatchEvent``/``ReconcileEvent`` 는 다중봇 귀속이 ambiguous
         하므로 이 경로에서 발행하지 않는다.
@@ -407,7 +407,7 @@ class PositionReconciler:
     def _log_self_submitted(
         self, bot_id: str, symbol: str, i_qty: float, b_qty: float
     ) -> None:
-        """self-submitted 미반영 체결 info 로그 (방향 중립 — #1950 buy / #2351 sell)."""
+        """self-submitted 미반영 체결 info 로그 (방향 중립 — buy / sell)."""
         logger.info(
             "포지션 불일치 [%s] %s: 내부=%.2f, 브로커=%.2f → %s "
             "(ante 미반영 체결 — 보정 skip, FillApplier 위임)",
@@ -472,7 +472,7 @@ class PositionReconciler:
     ) -> bool:
         """broker-internal 불일치(``excess``)가 ante 미반영 체결로 설명되는지 판정.
 
-        방향 대칭(#1950 buy / #2351 sell). OrderTracker 에서 ``(account_id, bot_id,
+        방향 대칭(buy / sell). OrderTracker 에서 ``(account_id, bot_id,
         symbol, side)`` 의 non-terminal(open/partially_filled) 주문을 조회하고, 그
         미체결 잔량 합(capacity = Σ(ordered_qty − recorded_filled_qty)) 과 ``excess``
         를 비교한다.
@@ -491,7 +491,7 @@ class PositionReconciler:
 
         **bounded known-limitation (R2-1, 방향 대칭)**: broker 포지션은 총량만
         주므로 capacity 안에 숨은 진짜 외부 거래(buy: 외부 매수 / sell: 외부 매도)는
-        즉시 보정되지 않는다. 이는 #1945 auto-sell 캐스케이드 회피를 외부 검출
+        즉시 보정되지 않는다. 이는 auto-sell 캐스케이드 회피를 외부 검출
         완전성보다 우선하는 보수적 trade-off다. 매칭 ante 주문이 해소(완전 체결→open
         set 이탈, 또는 EOD expire_stale→terminal)되면 다음 reconcile 에서 잔여
         excess 가 external 로 검출된다. 상세:
@@ -544,7 +544,7 @@ class PositionReconciler:
         - 매칭되는 non-terminal open buy 가 **하나도 없음** → True (미귀속 보유).
         - open buy 가 존재(capacity > 0) → False. 이 경우는 self-check 가 이미
           self_submitted(``excess <= capacity``) 또는 외부 매수(``excess >
-          capacity``)로 처리하므로(#1950 무변경), 본 분기 대상이 아니다.
+          capacity``)로 처리하므로, 본 분기 대상이 아니다.
         - OrderTracker 미주입 → False (하위 호환 — 기존 "외부 매수" 동작).
         - OrderTracker 조회 실패 → False (보수적으로 기존 외부 매수 분류 유지).
 

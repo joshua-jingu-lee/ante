@@ -106,17 +106,17 @@ _TokenCacheKey = tuple[str, str, str]
 """(app_key, app_secret, env) config fingerprint — ``_token_cache`` 키 타입."""
 
 _token_cache: dict[_TokenCacheKey, tuple[str, datetime]] = {}
-"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (#2399 T2).
+"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (T2).
 
 키는 ``(app_key, app_secret, env)`` 다(``env`` = 모의/실전 구분). 같은 config 는 같은
 키로 single-flight 수렴·토큰 공유, 다른 secret/환경은 다른 키로 cache miss → 재발급
-(config 변경 재검증, attempt4 P2)."""
+(config 변경 재검증)."""
 
 _token_locks: dict[str, asyncio.Lock] = {}
-"""app_key → 발급 직렬화 Lock (#2399 T1, lock key=app_key — rate-limit 단위)."""
+"""app_key → 발급 직렬화 Lock (T1, lock key=app_key — rate-limit 단위)."""
 
 _token_cooldowns: dict[str, datetime] = {}
-"""app_key → cooldown_until (UTC) — EGW00133 source-level cooldown (#2399).
+"""app_key → cooldown_until (UTC) — EGW00133 source-level cooldown.
 
 EGW00133(접근토큰 발급 1분 1회)을 받으면 ``_raise_token_error`` 가 ``app_key`` 에
 ``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_authenticate`` 는
@@ -132,19 +132,19 @@ def _get_token_lock(app_key: str) -> asyncio.Lock:
 
     ``dict.setdefault`` 는 GIL 하 단일 bytecode 로 원자적이고 await 가 없어 코루틴
     yield 가 발생하지 않으므로, 동시 호출에서도 동일 app_key 는 **하나의** Lock 으로
-    수렴한다(#2399 T1 lock dict 생성 race 원자화).
+    수렴한다(T1 lock dict 생성 race 원자화).
     """
     return _token_locks.setdefault(app_key, asyncio.Lock())
 
 
 def _reset_token_cache() -> None:
-    """module-level 토큰 캐시/lock/cooldown dict 초기화 (#2399, 테스트 격리용).
+    """module-level 토큰 캐시/lock/cooldown dict 초기화 (테스트 격리용).
 
     pytest-asyncio auto mode 에서 이전 테스트의 closed event loop 에 묶인 Lock 이
     재사용되는 위험(T1 closed-loop)을 차단하기 위해, autouse fixture 가 매 테스트
     전후로 본 helper 를 호출한다. 프로덕션 경로는 호출하지 않는다.
 
-    #2399 attempt3/메타: ``_token_cooldowns`` 도 함께 clear 한다. EGW00133 cooldown
+    ``_token_cooldowns`` 도 함께 clear 한다. EGW00133 cooldown
     상태가 테스트 간 누출되면 후속 테스트의 발급이 cooldown 내로 오판돼 flaky 가
     되므로, 글로벌 conftest autouse fixture 가 본 helper 로 cooldown 까지 초기화한다.
     """
@@ -154,7 +154,7 @@ def _reset_token_cache() -> None:
 
 
 def _token_cooldown_until(app_key: str) -> datetime | None:
-    """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None`` (#2399 attempt3).
+    """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None``.
 
     startup wrapper(``main._get_broker_with_auth_retry``)가 잔여 cooldown
     (``cooldown_until - now``)만큼 sleep 하기 위해 조회한다. 만료된 cooldown 은
@@ -169,7 +169,7 @@ def _token_cooldown_until(app_key: str) -> datetime | None:
 
 
 def _record_token_cooldown(app_key: str) -> datetime:
-    """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환 (#2399 attempt3).
+    """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환.
 
     ``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_raise_token_error``
     가 ``TokenRateLimitError`` raise **직전** 호출한다. cooldown 내 차단 경로
@@ -182,7 +182,7 @@ def _record_token_cooldown(app_key: str) -> datetime:
 
 
 def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
-    """EGW00133 ``TokenRateLimitError`` raise (#2399 attempt3, cooldown_until 동봉).
+    """EGW00133 ``TokenRateLimitError`` raise (cooldown_until 동봉).
 
     HTTP 발급에서 EGW00133 을 받은 경로(``_raise_token_error``, ``record=True`` —
     새 cooldown 기록)와 cooldown 내 발급 차단 경로(``_authenticate`` fast-path/
@@ -203,7 +203,7 @@ def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
 
 
 def _is_cached_token_fresh(expires_at: datetime, *, now: datetime) -> bool:
-    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (#2399 T2).
+    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (T2).
 
     ``_ensure_authenticated`` 의 "만료 5분 전 재발급" 기준과 **동일**하다 —
     near-expiry 토큰은 hit 이 아니라 miss 로 보고 재발급한다.
@@ -215,7 +215,7 @@ _KRX_FWDG_ORGNO_CACHE_MAXLEN = 1024
 
 
 def _ccld_three_month_cutoff(today_kst: str) -> str:
-    """inquire-daily-ccld inner/before 경계 cutoff ``YYYYMMDD`` (#2349, normative).
+    """inquire-daily-ccld inner/before 경계 cutoff ``YYYYMMDD`` (normative).
 
     KST 오늘(``today_kst``, ``YYYYMMDD``) 기준 **달력 3개월 전 동일 일자**를
     cutoff 로 산출한다. 대상 월에 동일 일자가 없으면(예: 5/31 → 2/31 부재) 그
@@ -251,12 +251,12 @@ def _parse_psbl_amount(
     primary_field: str,
     fallback_field: str,
 ) -> float:
-    """inquire-psbl-order 금액 필드 파싱 (#2384, primary missing/parse 시만 폴백).
+    """inquire-psbl-order 금액 필드 파싱 (primary missing/parse 시만 폴백).
 
     ``primary_field``(``nrcvb_buy_amt``)가 응답에 없거나 float 변환에 실패할 때만
     ``fallback_field``(``ord_psbl_cash``)로 폴백한다. ``primary_field`` 값이
     ``0``으로 정상 파싱되면 그대로 ``0.0``을 반환한다 — ``0``은 정상값일 수
-    있으므로 폴백 트리거가 아니다(#2384 G6).
+    있으므로 폴백 트리거가 아니다.
     """
     if primary_field in output:
         try:
@@ -467,7 +467,7 @@ class KISBaseAdapter(BrokerAdapter):
 
         절차 (T1/T2/T4 source-level cooldown):
         1. **캐시 read**: module-level ``_token_cache`` 에 본 어댑터의 config
-           fingerprint(app_key+secret+env, attempt4 P2) 신선한 토큰(near-expiry 5분
+           fingerprint(app_key+secret+env) 신선한 토큰(near-expiry 5분
            여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환. config 가 바뀐
            재연결은 다른 키라 cache miss → 새 발급으로 새 설정을 검증한다.
            **유효 캐시 read 는 cooldown 무영향**(T2 — hydrate 를 cooldown 체크보다
@@ -507,7 +507,7 @@ class KISBaseAdapter(BrokerAdapter):
     def _token_cache_key(self) -> _TokenCacheKey:
         """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env).
 
-        attempt4 P2: 캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
+        캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
         app_key 라도 credentials/환경이 바뀌면 다른 키로 cache miss → 새 토큰 발급으로
         새 설정을 검증한다(``AccountService._reconnect_broker`` 의 secret/환경 전환
         재검증). 환경 구분은 ``is_paper`` (base_url 도출 출처)를 그대로 쓴다 — 모의
@@ -519,11 +519,11 @@ class KISBaseAdapter(BrokerAdapter):
         return (self.app_key, self.app_secret, env)
 
     def _hydrate_from_cache(self) -> bool:
-        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (#2399 T2).
+        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (T2).
 
         near-expiry(만료 5분 전) 토큰은 miss 로 보고 ``False`` 반환(재발급 유도).
         캐시 key 는 config fingerprint(app_key+secret+env)라, config 가 바뀐 어댑터는
-        같은 app_key 라도 cache miss → 재발급(attempt4 P2 config 변경 재검증).
+        같은 app_key 라도 cache miss → 재발급(config 변경 재검증).
         """
         cached = _token_cache.get(self._token_cache_key())
         if cached is None:
@@ -536,7 +536,7 @@ class KISBaseAdapter(BrokerAdapter):
         return True
 
     async def _issue_token(self) -> tuple[str, datetime]:
-        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (#2399 T3/T4).
+        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (T3/T4).
 
         토큰 발급 응답에서 KIS 에러코드를 파싱한다. alias 방어 (T3): 코드는
         ``msg_cd``/``error_code``, 메시지는 ``msg1``/``error_description`` 양쪽 키를
@@ -577,7 +577,7 @@ class KISBaseAdapter(BrokerAdapter):
 
     @staticmethod
     async def _read_token_error_body(response: Any) -> dict[str, Any] | str:
-        """non-200 토큰 응답 body 를 dict(가능 시) 또는 raw text 로 반환 (#2399 T3)."""
+        """non-200 토큰 응답 body 를 dict(가능 시) 또는 raw text 로 반환 (T3)."""
         text = await response.text()
         try:
             parsed = json.loads(text)
@@ -588,12 +588,12 @@ class KISBaseAdapter(BrokerAdapter):
         return text
 
     def _raise_token_error(self, status: int, body: dict[str, Any] | str) -> NoReturn:
-        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (#2399 T3/T4).
+        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (T3/T4).
 
         alias 처리(T3): 코드는 ``msg_cd``/``error_code``, 메시지는 ``msg1``/
         ``error_description`` 키를 순서대로 본다.
 
-        #2399 attempt3: EGW00133 감지 시 ``TokenRateLimitError`` raise **직전**
+        EGW00133 감지 시 ``TokenRateLimitError`` raise **직전**
         본 adapter 의 ``app_key`` cooldown 을 기록한다(source-level cooldown).
         """
         code = ""
@@ -611,7 +611,7 @@ class KISBaseAdapter(BrokerAdapter):
         )
 
     async def _ensure_authenticated(self) -> None:
-        """토큰 유효성 확인 및 재발급 (#2399: 재발급도 single-flight/캐시 적용).
+        """토큰 유효성 확인 및 재발급 (재발급도 single-flight/캐시 적용).
 
         매 API 호출 전 진입점이므로, 캐시 hit 시 ``_authenticate`` 가 발급을 skip
         한다(공유 캐시 fast-path). near-expiry(만료 5분 전) 토큰은 miss 로 보고
@@ -980,7 +980,7 @@ class KISBaseAdapter(BrokerAdapter):
         price: float | None = None,
         order_type: str = "limit",
     ) -> bool:
-        """주문 정정 (#2391, v1=price-only)."""
+        """주문 정정 (v1=price-only)."""
         ...
 
     @abstractmethod
@@ -1125,7 +1125,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         price: float | None = None,
         order_type: str = "market",
     ) -> dict[str, float]:
-        """매수가능 조회 (KIS ``inquire-psbl-order``, #2384).
+        """매수가능 조회 (KIS ``inquire-psbl-order``).
 
         ``purchasable_amount``(주문가능액)의 SSOT다. 무인자 ``get_account_balance``
         (``inquire-balance``)는 종목 컨텍스트가 없어 주문가능액을 산출할 수 없으므로
@@ -1274,8 +1274,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 
         취소(order-rvsecncl)는 신세대 tr_id ``VTTC0013U``(모의)/``TTTC0013U``
         (실전)로 전송하며, 신세대 필수 필드 ``EXCG_ID_DVSN_CD``(공유 상수
-        ``DEFAULT_EXCG_ID_DVSN_CD="KRX"``)를 포함한다(#2346 라이브 A/B both_ok
-        2026-06-12).
+        ``DEFAULT_EXCG_ID_DVSN_CD="KRX"``)를 포함한다.
 
         body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)를
         조건부로 전송한다. 값은 place_order 시 order-cash 응답에서 캡처해
@@ -1317,7 +1316,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         price: float | None = None,
         order_type: str = "limit",
     ) -> bool:
-        """주문 정정 (#2391, v1=price-only). cancel_order 미러링.
+        """주문 정정 (v1=price-only). cancel_order 미러링.
 
         정정(order-rvsecncl)은 취소와 **동일 엔드포인트**를 공유한다. 신세대 tr_id
         ``VTTC0013U``(모의)/``TTTC0013U``(실전)로 전송하며, 취소(``"02"``)와 달리
@@ -1611,7 +1610,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         """inquire-daily-ccld ``output1`` 행을 (odno, 영업일)별로 fold.
 
         KIS ``output1`` 은 조회 구분에 따라 주문별 누적 1행 또는 부분체결별 다행이
-        올 수 있다 (#1946 R1-4). 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
+        올 수 있다. 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
 
         - ``filled_quantity`` = 누적 체결수량 ``tot_ccld_qty`` 의 **max**
           (누적 행이면 마지막 값, 부분체결 행이면 단조 증가하므로 max 가 안전).

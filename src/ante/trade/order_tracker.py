@@ -75,7 +75,7 @@ class RecordFillResult:
             같은 확정값을 내므로, 재전달 시 키가 결정적이다.
         new_status: advance 후 확정된 주문 상태(``filled`` 또는
             ``partially_filled``). no-op(``delta<=0``)이면 직전 status 를 반영한다.
-            #1948 의 ``FillApplier`` post-commit ``mirror_fill_to_cache`` 에서
+            ``FillApplier`` post-commit ``mirror_fill_to_cache`` 에서
             캐시 상태/evict 판단에 쓴다.
     """
 
@@ -186,7 +186,7 @@ class OrderTracker:
 
         DB 의 open/partially_filled row 로 캐시를 적재한다. warm 완료 전 sync
         조회는 빈 결과(cold)일 수 있으며, 이는 best-effort 한계다(DB 가 진리원,
-        잔여 안전망은 reconciler). #1948 known-limitation.
+        잔여 안전망은 reconciler).
         """
         await self._db.execute_script(ORDER_TRACKER_SCHEMA)
         await self._warm_open_cache()
@@ -329,7 +329,7 @@ class OrderTracker:
         일관된 상태를 본 뒤 CAS UPDATE 하므로, 단일 writer + Lock 으로 read↔update
         사이 race 가 없다.
 
-        #1948 invariant: 이 메서드는 **인메모리 open 캐시를 절대 건드리지 않는다.**
+        invariant: 이 메서드는 **인메모리 open 캐시를 절대 건드리지 않는다.**
         FillApplier 트랜잭션 내부 호출이라, 여기서 캐시를 advance/evict 하면 이후
         ``_save_trade``/position/outbox 실패로 트랜잭션이 rollback 될 때 DB 는
         원복돼도 캐시는 stale advance 로 남아 sync 조회가 잘못된 값을 본다. 체결
@@ -393,7 +393,7 @@ class OrderTracker:
         confirmed_cumulative: float,
         new_status: str,
     ) -> None:
-        """**post-commit 전용** 체결 캐시 미러 (#1948, sync).
+        """**post-commit 전용** 체결 캐시 미러 (sync).
 
         FillApplier 가 ``Database.transaction()`` 블록이 **정상 COMMIT 된 직후**에만
         호출한다(rollback 경로에서는 호출되지 않는다). 캐시의
@@ -570,7 +570,7 @@ class OrderTracker:
         """관측(account/broker_order_id/observed_date) → 추적 레코드 (terminal 포함).
 
         ``lookup_order_id`` 와 달리 **status 무관**(terminal 포함)으로 매핑한다.
-        #2316 §11.4 late-ccld over-attribution alert 전용 — fallback 이 full fill
+        §11.4 late-ccld over-attribution alert 전용 — fallback 이 full fill
         로 advance 해 ``filled``(terminal)이 된 주문에 대해 이후 ccld 가 **더 낮은**
         누적을 반환할 때, 그 주문의 현 ``recorded_filled_qty`` 와 비교해 경보를
         surface 하기 위함이다. ``lookup_order_id`` 의 non-terminal scope 로는 이미

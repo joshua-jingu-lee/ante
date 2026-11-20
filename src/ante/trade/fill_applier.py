@@ -13,7 +13,6 @@ crash 원자성: ``recorded_filled_qty`` advance(CAS) + ``TradeRecord`` insert +
 ``OrderFilledEvent`` payload 를 ``fill_outbox`` 에 INSERT 한다. commit 성공 =
 이벤트 영속 보장이므로, commit↔publish 사이 crash window 가 닫힌다(이벤트 무손실).
 실제 발행은 ``FillOutboxPublisher`` 워커가 트랜잭션 밖에서 at-least-once 로 한다.
-(소비자 멱등화는 #1957 범위. #1949 는 무손실 전달 + 결정적 키 제공까지.)
 
 ``asyncio.Lock`` 은 read → delta → txn(outbox insert 포함) 전체를 감싸 프로세스
 내 동시 관측을 직렬화한다.
@@ -172,13 +171,13 @@ class FillApplier:
         ``apply_cumulative`` / ``apply_stream_increment`` 의 공통 코어. 호출자가
         이미 ``self._lock`` 을 보유하고 ``record`` 를 조회한 상태여야 한다.
 
-        #1949 durability: outbox 가 주입되면 recorded advance + trade insert +
+        durability: outbox 가 주입되면 recorded advance + trade insert +
         position update **와 동일 트랜잭션** 안에서 OrderFilledEvent payload 를
         outbox 에 INSERT 한다(원자 커밋). commit 성공 = 이벤트 영속 보장이므로
         commit↔publish 사이 crash window 가 닫힌다. 발행은 트랜잭션 밖에서
         publisher 워커(at-least-once)에 위임한다.
 
-        #1948 open 캐시 미러: ``record_fill`` 은 트랜잭션 내부 호출이라 캐시를
+        open 캐시 미러: ``record_fill`` 은 트랜잭션 내부 호출이라 캐시를
         건드리지 않는다(rollback 시 stale 방지). LIVE ``get_open_orders`` 의 sync
         캐시는 트랜잭션 블록이 **정상 COMMIT 된 직후** ``mirror_fill_to_cache`` 로만
         갱신한다. rollback(``_save_trade``/position/outbox 실패) 시 commit 이후
@@ -322,7 +321,7 @@ class FillApplier:
         """``OrderFilledEvent`` 직접 발행 (outbox 미주입 legacy fallback).
 
         outbox 가 주입되지 않은 경로(단위 테스트 partial wiring 등)에서만 쓰인다.
-        이 경로는 commit↔publish crash window 가 잔존하며(#1949 이전 동작),
+        이 경로는 commit↔publish crash window 가 잔존하며,
         ``fill_dedup_key`` 를 채우지 않는다(빈키).
         """
         from ante.eventbus.events import OrderFilledEvent

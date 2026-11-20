@@ -1,13 +1,13 @@
 """Broker Adapter 모듈 예외.
 
-#1843 sub-PR 5 — 본 모듈의 ``*Error`` sub-class 5건에 class-level ``.code``
-속성을 신규 부여한다. helper(``ante.contracts.error_spec_for_exception``)
+본 모듈의 ``*Error`` sub-class 5건에 class-level ``.code``
+속성을 부여한다. helper(``ante.contracts.error_spec_for_exception``)
 의 registry MRO lookup 과 IPC server.py:322 의 ``getattr(e, "code",
 "EXECUTION_ERROR")`` fallback 양쪽에서 동일한 안정 코드가 envelope 으로
-surface 되도록 정렬한다 (#1842 account 12 sub-class / #1843 sub-PR 1~4
+surface 되도록 정렬한다 (account 12 sub-class /
 member/approval/bot/treasury 동형).
 
-원천 code 분리 정책 (#1843 sub-PR 5 Codex Plan Review v1 condition):
+원천 code 분리 정책:
 
 - ``APIError`` 가 보존하는 ``error_code`` (KIS msg_cd 등 원천
   external broker code) 는 **log-only / 디버깅 보조** 용도다.
@@ -62,7 +62,7 @@ class AuthenticationError(BrokerError):
 
 
 class TokenRateLimitError(AuthenticationError):
-    """토큰 발급 빈도 제한 (KIS ``EGW00133``, #2399).
+    """토큰 발급 빈도 제한 (KIS ``EGW00133``).
 
     KIS 는 접근토큰 발급을 1분당 1회만 허용한다. ``_authenticate`` 가 발급 응답에서
     ``EGW00133`` 을 감지하면 **즉시** 본 예외를 raise 하고 **내부 sleep/retry 루프를
@@ -74,7 +74,7 @@ class TokenRateLimitError(AuthenticationError):
     여전히 ``(retryable=False, record_cb=False)`` 로 분류한다([must_fix J] 불변 —
     gateway 재시도 핸들러 이중 적용 차단).
 
-    ``cooldown_until`` (#2399 attempt3, source-level cooldown): EGW00133 수신 시
+    ``cooldown_until`` (source-level cooldown): EGW00133 수신 시
     기록된 app_key cooldown 만료시각(UTC ``datetime`` 또는 ``None``)을 선택적으로
     실어 보낸다. startup wrapper(``main._get_broker_with_auth_retry``)가 고정 60s
     대신 **잔여 cooldown**(``cooldown_until - now``)만큼 sleep 해 cooldown 경계에서
@@ -109,8 +109,7 @@ class APIError(BrokerError):
         ``{code, message}``) 에는 ante taxonomy 안정 코드만 노출한다.
         원천 ``msg_cd`` 는 ``self.error_code`` 필드 + log message
         (``KIS API Error [{msg_cd}]: {msg1}`` 형태) 에 보존되며, public
-        surface 로 변환되지 않는다 (#1843 sub-PR 5 Codex Plan Review v1
-        condition).
+        surface 로 변환되지 않는다.
     """
 
     code: str = "BROKER_API_ERROR"

@@ -115,8 +115,7 @@ class SignalChannel:
         ``json.loads`` 만 담당하고(empty-guard·``JSONDecodeError``) routing 은
         ``_handle_message(dict)`` 가 한다. 데몬 경로(``_run_signal_stream``)는
         protocol.decode 로 이미 dict 를 얻으므로 ``_handle_message`` 를 직접
-        호출한다(json.loads 중복 회피). CLI relay(#2338) 전환 후 in-process
-        ``connect_read_pipe`` 루프(구 ``run()``)는 제거됐고, 본 메서드는 단위
+        호출한다(json.loads 중복 회피). 본 메서드는 단위
         테스트의 라인-레벨 진입점으로만 남는다.
         """
         if not line:
@@ -131,7 +130,7 @@ class SignalChannel:
         await self._handle_message(msg)
 
     async def _handle_message(self, msg: Any) -> None:
-        """디코드된 프레임 라우팅 (#2337 데몬/legacy 공통 진입점).
+        """디코드된 프레임 라우팅 (데몬/legacy 공통 진입점).
 
         (1) 비-dict 프레임은 비치명 격리: ``{type:error,'Invalid JSON'}`` 후
         return(daemon read loop 비전파).
@@ -166,7 +165,7 @@ class SignalChannel:
     async def _handle_signal(self, msg: dict[str, Any]) -> None:
         """외부 시그널 → ExternalSignalEvent 발행.
 
-        F2(rotate shield, #2337): publish 를 ``_inflight`` task 로 분리하고
+        rotate shield: publish 를 ``_inflight`` task 로 분리하고
         read_task 는 ``asyncio.shield`` 로 await 한다. read_task 가 close
         오케스트레이터에 의해 cancel 돼도 in-flight publish(별도 task)는 shield
         로 보호되어 백그라운드 완료한다 — ``strategy.on_data`` 체인에 cancellation

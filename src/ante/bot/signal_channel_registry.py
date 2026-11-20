@@ -2,7 +2,7 @@
 
 bot_id 당 단일 connect 정책과 daemon-위임 teardown 을 강제하는 동기 코어다.
 
-설계 불변 (F1+F4 상태 전이표, 이슈 #2337):
+설계 불변:
 
 - **동기 메서드는 내부에서 ``await`` 하지 않는다.** ``register``/``unregister``/
   ``close_bot``/``freeze``/``get``/``current_generation``/``bump_generation`` 는
@@ -40,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ChannelHandle:
-    """단일 signal.connect 세션의 레지스트리 핸들 (#2337 F1+F4).
+    """단일 signal.connect 세션의 레지스트리 핸들.
 
     register 시점(placeholder)에는 데이터플레인 4필드(``out_queue``/``read_task``/
     ``writer_task``/``on_closed``)와 ``closing_event`` 가 모두 ``None`` 이며,

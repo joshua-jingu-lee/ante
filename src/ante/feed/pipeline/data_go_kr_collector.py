@@ -235,7 +235,7 @@ class DataGoKrCollector:
             df: survivor raw DataFrame.
             store: 저장소.
             target_date: 수집 대상 날짜(경고 구조화용).
-            warns: business 경고를 누적할 목록(collect의 warns로 surface, #2222).
+            warns: business 경고를 누적할 목록(collect의 warns로 surface).
                 정규화 후 OHLCV business 위반은 비차단 경고로 여기 추가된다.
 
         Returns:
@@ -349,7 +349,7 @@ class DataGoKrCollector:
         - 신규 batch는 symbol 기준 1행으로 dedup한다.
         - 기존 `.feed/instruments.parquet`가 있으면 symbol을 키로 merge한다.
           단 신규 행의 name/market가 비어있으면(누락/빈 문자열) 기존 non-empty
-          값을 덮어쓰지 않고 보존한다(Codex refinement). 신규 값이 non-empty면
+          값을 덮어쓰지 않고 보존한다. 신규 값이 non-empty면
           갱신한다.
         - 파일이 없으면 신규 생성한다.
 

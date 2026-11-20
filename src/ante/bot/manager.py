@@ -160,7 +160,7 @@ class BotManager:
         self._bot_signal_locks: dict[str, asyncio.Lock] = {}
 
     def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
-        """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy, #2337).
+        """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy).
 
         stable ``bot_id`` 키로 lazy setdefault 한다 — restart 후에도 같은 lock
         인스턴스를 재사용해 직렬화 불변을 유지한다(F3). ``create_bot`` 이 Bot
@@ -559,8 +559,8 @@ class BotManager:
 
         전략 ID 를 ``bot.config`` (런타임) 와 DB 에 동시에 반영한다. DB
         저장은 ``_save_bot_config(bot.config)`` 로 수행하여 ``bots.strategy_id``
-        컬럼과 ``config_json.strategy_id`` 를 항상 일관되게 갱신한다
-        (#2130). running 봇의 lifecycle 순서 (stop → old rule unload →
+        컬럼과 ``config_json.strategy_id`` 를 항상 일관되게 갱신한다.
+        running 봇의 lifecycle 순서 (stop → old rule unload →
         persist → new rule load → start) 는 그대로 보존한다.
         """
         bot = self._get_bot(bot_id)
@@ -1160,7 +1160,7 @@ class BotManager:
     async def validate_signal_key(self, key: str) -> str | None:
         """``signal.connect`` 핸드셰이크 게이트① — signal key → bot_id 검증.
 
-        Refs #2334/#2336 (PR#1): IPC ``_handle_signal_connect`` 가 호출하는
+        IPC ``_handle_signal_connect`` 가 호출하는
         passthrough. 세 결과를 분리한다.
 
         * manager 구성 + key hit → ``bot_id``.

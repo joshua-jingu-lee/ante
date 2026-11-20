@@ -230,7 +230,7 @@ class BacktestService:
     def _validate_timeframe_vocab(self, timeframe: object) -> None:
         """timeframe vocabulary 검증. invalid → BacktestConfigError.
 
-        early(_validate_config)와 effective(run, #2060) 양쪽이 공유하는 단일
+        early(_validate_config)와 effective(run) 양쪽이 공유하는 단일
         helper. ``str()`` 캐스팅 없이 non-str 도 ``is_valid_timeframe`` 의
         non-str→False 가드를 통해 거부한다.
         """
@@ -248,7 +248,7 @@ class BacktestService:
         *,
         raw: object | None = None,
     ) -> None:
-        """symbols 구조/빈/KRX-shape 검증 (#1604/#2060 공유 helper).
+        """symbols 구조/빈/KRX-shape 검증 (공유 helper).
 
         early(_validate_config)와 effective(run, meta fallback) 양쪽이 동일
         로직을 쓰도록 추출. ``raw`` 는 에러 메시지에 노출할 원본 입력값(없으면

@@ -26,8 +26,8 @@ class AccountAlreadyExistsError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_ALREADY_EXISTS"``를 노출하도록 한다 (#1812 Group Q sweep —
-    state-conflict / duplicate-resource typed code 정합).
+    ``"ACCOUNT_ALREADY_EXISTS"``를 노출하도록 한다
+    (state-conflict / duplicate-resource typed code 정합).
     """
 
     code: str = "ACCOUNT_ALREADY_EXISTS"
@@ -38,7 +38,7 @@ class InvalidBrokerTypeError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_INVALID_BROKER_TYPE"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"ACCOUNT_INVALID_BROKER_TYPE"``를 노출하도록 한다.
     """
 
     code: str = "ACCOUNT_INVALID_BROKER_TYPE"
@@ -65,7 +65,7 @@ class MissingCredentialsError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_MISSING_CREDENTIALS"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"ACCOUNT_MISSING_CREDENTIALS"``를 노출하도록 한다.
     """
 
     code: str = "ACCOUNT_MISSING_CREDENTIALS"
@@ -76,8 +76,8 @@ class AccountAlreadySuspendedError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_ALREADY_SUSPENDED"``를 노출하도록 한다 (#1812 Group Q sweep —
-    state-conflict typed code 정합. CLI ``account suspend`` 가 IPC envelope
+    ``"ACCOUNT_ALREADY_SUSPENDED"``를 노출하도록 한다
+    (state-conflict typed code 정합. CLI ``account suspend`` 가 IPC envelope
     의 typed code 를 middleware ``ClickException`` fallback 으로 그대로
     surface 한다).
     """
@@ -90,8 +90,8 @@ class AccountDeletedError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_DELETED"``를 노출하도록 한다 (#1812 Group Q sweep —
-    state-conflict typed code 정합).
+    ``"ACCOUNT_DELETED"``를 노출하도록 한다
+    (state-conflict typed code 정합).
 
     NOTE: CLI ``account delete`` 의 ``except AccountDeletedError`` 분기는
     명시적으로 ``code="ACCOUNT_ALREADY_DELETED"`` 를 출력해 already-deleted
@@ -107,7 +107,7 @@ class AccountSuspendedError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_SUSPENDED"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"ACCOUNT_SUSPENDED"``를 노출하도록 한다.
     """
 
     code: str = "ACCOUNT_SUSPENDED"
@@ -130,7 +130,7 @@ class AccountImmutableFieldError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_IMMUTABLE_FIELD"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"ACCOUNT_IMMUTABLE_FIELD"``를 노출하도록 한다.
     """
 
     code: str = "ACCOUNT_IMMUTABLE_FIELD"
@@ -144,7 +144,7 @@ class BrokerReconnectFailedError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"BROKER_RECONNECT_FAILED"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"BROKER_RECONNECT_FAILED"``를 노출하도록 한다.
     """
 
     code: str = "BROKER_RECONNECT_FAILED"
@@ -186,7 +186,7 @@ class AccountHasActiveBotsError(AccountError):
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
     ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_HAS_ACTIVE_BOTS"``를 노출하도록 한다 (#1812 Group Q sweep).
+    ``"ACCOUNT_HAS_ACTIVE_BOTS"``를 노출하도록 한다.
     CLI ``account delete`` 의 명시적 ``except AccountHasActiveBotsError``
     분기도 동일 코드를 surface 한다 (commands/account.py:874).
     """

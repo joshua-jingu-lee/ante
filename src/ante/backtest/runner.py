@@ -19,8 +19,8 @@ async def run_backtest(config: dict) -> dict:
     ``to_dict()`` 가 (artifact self-reference 회피 + draft 소비 shape 유지를
     위해) 직렬화에서 제외하는 런타임 메타데이터 3키를 명시적으로 surface 한다:
 
-    - ``result_path``: ``service.run()`` 이 저장한 durable artifact 경로
-      (#1998). subprocess(stdout) → ``run_subprocess`` → CLI ``_save_backtest_run``
+    - ``result_path``: ``service.run()`` 이 저장한 durable artifact 경로.
+      subprocess(stdout) → ``run_subprocess`` → CLI ``_save_backtest_run``
       → ``backtest_runs.result_path`` 추적성 전파용. 저장 실패 시 ``""``.
     - ``strategy_name`` / ``strategy_version``: ``to_dict`` 가 combined
       ``strategy`` (``"{name}_v{version}"``) 만 제공하므로, CLI 가 split 파싱

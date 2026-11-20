@@ -163,7 +163,7 @@ class AccountService:
         self._runtime_started: bool = False
 
     def mark_runtime_started(self) -> None:
-        """서버 부팅 mutation을 모두 마쳤음을 표시한다 (#1144 invariant S1/S3).
+        """서버 부팅 mutation을 모두 마쳤음을 표시한다 (invariant S1/S3).
 
         이 호출 이후로 ``create()``, ``delete()``, structural 키를 포함한
         ``update()`` 호출은 ``AccountStructuralChangeRequiresStoppedServerError``로
@@ -217,7 +217,7 @@ class AccountService:
         ( ``"default"`` )는 이 경로에서 우회 수단 없이 차단된다. Bootstrap seed
         계좌 자동 생성은 별도의 private helper :meth:`_create_seed_account`
         (only invoked by :meth:`create_default_test_account`) 가 담당한다 —
-        public ``create()`` API에는 우회 플래그를 노출하지 않는다 (#1216 P2).
+        public ``create()`` API에는 우회 플래그를 노출하지 않는다.
 
         Args:
             account: 생성할 계좌 정보.
@@ -227,7 +227,7 @@ class AccountService:
 
         Raises:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
+                호출됨. 다른 어떤 검사보다 먼저 평가된다 (invariant S2).
             AccountAlreadyExistsError: 동일 account_id가 이미 존재.
             InvalidAccountIdError: account_id 형식이 올바르지 않거나
                 ``RESTRICTED_NEW_ACCOUNT_IDS`` ( ``"test"`` ) /
@@ -254,7 +254,7 @@ class AccountService:
         동일 항목에서 정의된 ``(broker_type, default_account_id)`` pair와
         정확히 일치할 때만 허용한다 — 한 preset의 ``default_account_id`` 를 다른
         preset의 ``broker_type`` 아래로 끼워 넣어 RESTRICTED 예약어( ``"test"`` )
-        를 비-test broker 아래에 저장하는 우회를 막는다 (#1216 P2).
+        를 비-test broker 아래에 저장하는 우회를 막는다.
 
         형식 검증( :func:`require_account_id` )은 ``BROKER_PRESETS`` 자체가 잘못
         변경되는 경우에 대비한 추가 가드로 적용한다. cold-path 가드와 broker_type
@@ -448,7 +448,7 @@ class AccountService:
         하나라도 키로 등장하면(값이 ``None``이어도) cold-path 위반으로 판단,
         ``AccountStructuralChangeRequiresStoppedServerError``를 raise한다 — DB
         조회를 수행하지 않으므로 nonexistent/DELETED 계좌도 cold-path 응답이
-        우선이다 (#1144 invariant S2).
+        우선이다 (invariant S2).
 
         Raises:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
@@ -621,8 +621,7 @@ class AccountService:
         즉시 새 설정을 사용하지만, 이미 시작된 consumer는 참조를 통해 구
         어댑터를 계속 사용한다. 구 어댑터를 세션 레벨까지 끊어버리면 주기
         대사/잔고 동기화가 바로 깨지므로, 구 어댑터는 자연스러운 GC와 서비스
-        재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
-        기반 경로는 후속 작업으로 분리한다 (#1100의 범위를 넘어선다).
+        재시작 시점까지 살려둔다.
         """
         async with self._broker_lock_for(account_id):
             if account_id not in self._brokers:
@@ -755,7 +754,7 @@ class AccountService:
         """소프트 딜리트 (status -> DELETED). cold-path 전용.
 
         진입 직후 ``bots`` 테이블을 검사하여 active(non-deleted) 봇이 남아 있으면
-        ``AccountHasActiveBotsError``를 raise한다 (#1139, orphan bot 무결성).
+        ``AccountHasActiveBotsError``를 raise한다 (orphan bot 무결성).
         ``bots`` 테이블 자체가 없으면(BotManager 미초기화 환경) active 봇이
         없는 것으로 간주한다.
 
@@ -765,7 +764,7 @@ class AccountService:
 
         Raises:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                호출됨. 다른 어떤 검사보다 먼저 평가된다 (#1144 invariant S2).
+                호출됨. 다른 어떤 검사보다 먼저 평가된다 (invariant S2).
             AccountNotFoundError: 계좌를 찾을 수 없음.
             AccountDeletedException: 이미 삭제된 계좌.
             AccountHasActiveBotsError: 활성(non-deleted) 봇이 남아 있음.
@@ -909,7 +908,7 @@ class AccountService:
         return results
 
     def _broker_lock_for(self, account_id: str) -> asyncio.Lock:
-        """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성, #2372).
+        """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성).
 
         ``get_broker()`` 의 cache-miss build+connect 경로와
         ``_reconnect_broker()`` 의 rebuild+connect 경로가 **동일한** lock
@@ -956,14 +955,14 @@ class AccountService:
             return broker
 
     async def get_cached_broker(self, account_id: str) -> BrokerAdapter | None:
-        """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음, #2372).
+        """이미 캐시된 BrokerAdapter 만 반환한다 (build/connect 없음).
 
         캐시에 없으면 ``None`` 을 반환하며 새 어댑터를 생성하거나 연결하지
         않는다. 종료(shutdown) 루프처럼 "이미 연결된 어댑터만 끊으면 되는"
         경로에서 사용한다 — 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를
         차단한다(미캐시 = 끊을 연결도 없음).
 
-        **동시성 (#2372 Codex P2):** 조회를 ``get_broker()`` /
+        **동시성:** 조회를 ``get_broker()`` /
         ``_reconnect_broker()`` 와 **동일한** per-account lock
         (:meth:`_broker_lock_for`) 안에서 수행해, in-flight 한 초기
         ``connect()`` 의 완료를 기다린 뒤(= drain) 캐시를 재확인한다. 동기
@@ -1022,7 +1021,7 @@ class AccountService:
         거부( ``"test"`` )가 적용되지 않는 private helper
         :meth:`_create_seed_account` 를 통해 생성한다.
         ``BROKER_PRESETS["test"].default_account_id`` 가 ``account_id`` SSOT 이며,
-        이 메서드가 seed helper를 호출하는 유일한 진입점이다 (#1216 P2).
+        이 메서드가 seed helper를 호출하는 유일한 진입점이다.
         """
         if "test" in self._accounts:
             return self._accounts["test"]

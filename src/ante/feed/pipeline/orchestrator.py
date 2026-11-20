@@ -138,7 +138,7 @@ class FeedOrchestrator:
 
         ``target_date`` 가 ``None`` 이면 ``DailyRunner.run`` 내부에서
         ``generate_daily_date()`` (어제)로 fallback 한다. CLI ``--date``
-        같이 명시 지정된 값은 그대로 forward 된다. #1943.
+        같이 명시 지정된 값은 그대로 forward 된다.
         """
         feed_dir = data_path / ".feed"
         started_at = datetime.now(tz=UTC)
@@ -224,14 +224,13 @@ class FeedOrchestrator:
 
         ``os.O_CREAT | os.O_EXCL`` 로 lock 파일을 생성하므로
         ``exists()`` 확인 후 ``write_text()`` 하던 비원자 경로(check-then-write)
-        에서 동시 시작 시 둘 다 획득하던 race를 제거한다(#2007/#2057).
+        에서 동시 시작 시 둘 다 획득하던 race를 제거한다.
         ``FileExistsError`` 일 때만 기존 lock의 liveness 를 검사한다.
 
         liveness 분류:
           - ``ProcessLookupError`` → 프로세스 없음(stale) → 제거 후 재시도
           - ``PermissionError`` → 프로세스 존재(signal 권한 없음) → **alive**,
-            차단(return False) (#2006). 기존엔 stale 제거 except 에 묶여 있어
-            살아있는 프로세스의 lock 을 삭제하고 획득하던 오판이었다.
+            차단(return False).
           - PID 파싱/읽기 실패(``ValueError``/``OSError``) → malformed=stale →
             제거 후 재시도
 

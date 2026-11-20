@@ -148,7 +148,7 @@ class StrategyContext:
         """전략 파일 경로를 검증하고 절대 경로로 변환.
 
         보안 경계는 공용 helper ``resolve_strategy_path`` 가 단일 소유한다
-        (절대경로 거부/탈출 차단/symlink escape 차단, #2083).
+        (절대경로 거부/탈출 차단/symlink escape 차단).
         """
         return resolve_strategy_path(self._strategies_dir, path)
 

@@ -1,6 +1,6 @@
-"""v006: order_tracker 에 order_price 컬럼 추가 (#2391, 주문 정정 v1).
+"""v006: order_tracker 에 order_price 컬럼 추가 (주문 정정 v1).
 
-주문 정정 v1(price-only, #2391)은 buy 가격↓ fail-closed 판정
+주문 정정 v1(price-only)은 buy 가격↓ fail-closed 판정
 (``new_price <= record.order_price``)을 위해 원주문 지정가 단가를 추적 저장소에
 보존해야 한다. ``OrderTracker.initialize()`` 는 ``CREATE TABLE IF NOT EXISTS`` 만
 실행하므로 기존(이미 생성된) DB 에는 신규 컬럼이 반영되지 않는다 → 본 마이그레이션이

@@ -69,8 +69,8 @@ class BrokerAdapter(ABC):
 
         ``purchasable_amount`` (주문가능액)의 SSOT다. 무인자
         ``get_account_balance()``는 종목 컨텍스트가 없어 주문가능액을 산출할 수
-        없으므로, 종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다
-        (#2384). 모의 rate-limit(5req/min)을 위해 ``get_account_balance()``와
+        없으므로, 종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다.
+        모의 rate-limit(5req/min)을 위해 ``get_account_balance()``와
         분리되어 호출처가 빈도를 독립 제어한다.
 
         Args:
@@ -133,12 +133,12 @@ class BrokerAdapter(ABC):
         price: float | None = None,
         order_type: str = "limit",
     ) -> bool:
-        """주문 정정 (#2391, v1=price-only).
+        """주문 정정 (v1=price-only).
 
         v1 은 ``open`` 상태 주문의 **가격 정정**만 지원한다(수량 불변). 수량 변경
         (``quantity``)·예산 증가 buy 가격↑·부분체결/터미널·동시성은 Gateway 가
         broker 호출 **전** fail-closed 로 거부하므로 broker 까지 내려오지 않는다
-        (고급 케이스는 #2393 deferred). ``quantity`` 는 #2393 forward-compat 파라미터다.
+        (고급 케이스는 deferred). ``quantity`` 는 forward-compat 파라미터다.
 
         Args:
             order_id: 증권사 주문번호 (broker_order_id). Gateway 가 내부 order_id 를

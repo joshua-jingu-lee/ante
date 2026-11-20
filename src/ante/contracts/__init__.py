@@ -7,17 +7,15 @@
 
 - ``ante.contracts.vocab`` — ``ContractKind`` / ``EnvelopeForm`` / ``AuthMode``
   vocabulary. alias re-export 없음 — 소비자는 명시 import 한다.
-- ``ante.contracts.errors`` — ``ErrorCategory`` Literal + ``ErrorSpec`` dataclass
-  (#1839/#1840 normative).
+- ``ante.contracts.errors`` — ``ErrorCategory`` Literal + ``ErrorSpec`` dataclass.
 - ``ante.contracts.error_registry`` — 대표 fault lock mapping.
   helper-internal — 외부 소비자는 ``error_spec_for_exception`` 을 호출한다.
 - ``ante.contracts.helpers`` — ``error_spec_for_exception`` / ``emit_cli_error`` /
   ``ipc_error_payload`` CLI·IPC error helper.
-- ``ante.contracts.cli_registry`` — CLI command contract registry shell
-  (#1844, `#1815` epic). ``AuthContract`` / ``OutputContract`` /
+- ``ante.contracts.cli_registry`` — CLI command contract registry shell.
+  ``AuthContract`` / ``OutputContract`` /
   ``CliCommandContract`` dataclass + ``CLI_COMMAND_REGISTRY`` (빈 dict) +
-  ``get_contract`` / ``all_contracts`` accessor. 실제 entry 등록은 후속
-  PR (`#1846` / `#1847`) 의 책임.
+  ``get_contract`` / ``all_contracts`` accessor.
 
 본 ``__init__`` 모듈은 ``error_*`` helper 와 ``cli_registry`` 의 dataclass /
 accessor / 빈 registry 만 alias re-export 한다. vocab module 은 의도적으로

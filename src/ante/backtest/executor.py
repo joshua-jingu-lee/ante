@@ -28,7 +28,7 @@ def _is_valid_quantity(value: object) -> bool:
 
     RuleEngine ``_is_finite_quantity``와 동일 정책 (cross-module import 회피):
     private helper를 import하면 backtest가 rule 모듈 내부 구현에 결합되므로,
-    같은 정책을 backtest 안에 작은 local mirror로 둔다(#1991, codex 지시).
+    같은 정책을 backtest 안에 작은 local mirror로 둔다.
 
     - ``bool``은 제외한다(``True``/``False``를 수량으로 보지 않음).
       ``isinstance(True, int) == True`` 이므로 명시적으로 잠근다.
@@ -196,8 +196,8 @@ class BacktestExecutor:
         buy 잔고 부족, sell 보유 없음)는 ``None`` 을 반환해 호출부가 follow-up
         (on_fill) 경로로 진입하지 않게 한다.
 
-        체결가는 ``get_current_bar_price`` (current_ts 정확 일치 봉가)로 게이트한다
-        (#2098). 심볼이 현재 step에 봉이 없으면 None이 와서 미체결 skip한다 —
+        체결가는 ``get_current_bar_price`` (current_ts 정확 일치 봉가)로 게이트한다.
+        심볼이 현재 step에 봉이 없으면 None이 와서 미체결 skip한다 —
         stale as-of 가격으로 비거래일에 체결하지 않는다.
         backtest는 단발 체결이므로 ``fill_dedup_key`` 는 항상 빈 문자열이다
         (라이브와 달리 dedup이 불필요).
@@ -207,7 +207,7 @@ class BacktestExecutor:
         보유분만 체결되므로, 초과 요청 수량이 수수료·슬리피지·거래 수량에
         반영되지 않는다.
 
-        가격 조회/분기 이전에 Signal을 검증한다(#1991, #2066 포괄). 라이브
+        가격 조회/분기 이전에 Signal을 검증한다. 라이브
         ``RuleEngine`` preflight와 동일하게 ``side ∈ {"buy","sell"}`` 와 finite
         양수 ``quantity`` 만 허용한다. 무효 Signal은 거래를 발행하지 않고 진단
         로그만 남긴 뒤 skip한다(라이브 OrderRejectedEvent와 달리 backtest는
@@ -218,7 +218,7 @@ class BacktestExecutor:
         config.symbols universe 검사를 한다. ``symbols`` 가 설정된 경우
         그 목록 밖의 ``signal.symbol`` 은 거래하지 않고 skip(``return None``)해
         가격조회(on-demand load)도 거래도 발생하지 않는다. ``symbols`` 가 비어
-        있으면(universe 미설정) 거부하지 않는다(현 동작 유지, #2060 범위).
+        있으면(universe 미설정) 거부하지 않는다(현 동작 유지).
 
         가격 게이트 통과 후 **side 체결 분기 이전에** ``signal.order_type`` 트리거
         게이트(``_order_triggered``)를 적용한다. limit/stop/stop_limit이
@@ -233,7 +233,7 @@ class BacktestExecutor:
         (매수는 L 초과 지불 없음, 매도는 L 미만 수취 없음). slippage 필드는
         ``abs(exec_price - price) * executed_qty`` 로 일관되게 기록한다.
 
-        known-limitation(#1994, 의도적 수용·후속 이슈 대상):
+        known-limitation(의도적 수용):
         - per-bar 평가만 한다. 미충족 주문을 다음 봉까지 보존하는 cross-bar
           resting order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델).
         - stop_limit은 "트리거 후 limit 대기" 2단계 상태를 보존하지 못해, **같은
@@ -354,10 +354,10 @@ class BacktestExecutor:
           ``price >= S and price <= L``, sell은 ``price <= S and price >= L`` 이면
           트리거. **단일-봉 conjunction 근사**(stop 트리거 + limit 충족 동시 만족).
           "트리거 후 limit 대기" 2단계 상태와 cross-bar triggered-then-resting은
-          모델링하지 않는다(#1994 known-limitation, 의도적 수용·후속 이슈 대상).
+          모델링하지 않는다(known-limitation, 의도적 수용).
 
         per-bar 평가만 하며 미충족 주문을 다음 봉까지 보존하는 cross-bar resting
-        order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델, #1994).
+        order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델).
         """
         order_type = signal.order_type
         if order_type == "market":

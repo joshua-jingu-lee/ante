@@ -25,10 +25,9 @@ class ReconcileScheduler:
     """주기적으로 모든 활성 봇의 포지션 대사를 수행한다.
 
     이 스케줄러 인스턴스는 단일 broker(``broker_account_id``)에만 바인딩된다.
-    SPLIT-1 단계에서는 multi-account broker pool이 도입되지 않으므로,
+    multi-account broker pool이 도입되지 않으므로,
     다른 계좌의 봇이 같은 스케줄러에 잡히는 경우 잘못된 broker positions가
     적용되지 않도록 ``run_once()`` 안에서 명시적으로 skip한다.
-    multi-broker pool은 SPLIT-3에서 도입한다.
 
     Args:
         reconciler: 포지션 대사 실행기.
@@ -39,7 +38,7 @@ class ReconcileScheduler:
             ``run_once()``는 이 account_id에 일치하는 봇만 reconcile한다.
         interval_seconds: 대사 반복 주기 (초). 기본 1800(30분).
         skip_initial_external_buy: True 면 ``start()`` 의 **기동 즉시 1회 대사**
-            에서만 "외부 매수" 분류 보정을 건너뛴다(#1946 Finding 1 barrier).
+            에서만 "외부 매수" 분류 보정을 건너뛴다(barrier).
             계좌의 fill 카치업이 성공하지 못한 채 기동 reconcile 이 돌면 미복구
             ante 체결을 "외부 매수" 로 오분류하므로, 그 1회만 연기한다. 이후
             주기 대사는 fill 폴 루프가 복구를 진행하므로 정상 처리한다.
@@ -106,16 +105,16 @@ class ReconcileScheduler:
         실행 범위(running 봇)** 를 분리해 처리한다.
 
         - 1봇-total 계좌이고 **그 봇이 running**: 기존 ``reconcile`` 보정
-          (self-check/skip_external_buy/external-buy 분류 무변경 #1946/#1950).
+          (self-check/skip_external_buy/external-buy 분류 무변경).
         - 1봇-total 인데 그 봇이 stopped/error(미-running): correction 미실행 →
           ``reconcile(dry_run=True)`` detect-only(기존 lifecycle 범위 보존 —
           scheduler 가 비활성 봇을 자동 보정하지 않는다).
         - 2+봇 계좌: ``detect_account_level`` (correct_position 미호출). 계좌
-          총합 vs 전 봇 합산 비교로 #2118/#2120 false external-buy 제거.
+          총합 vs 전 봇 합산 비교로 false external-buy 제거.
 
         Args:
-            skip_external_buy: True 면 "외부 매수" 분류 보정을 건너뛴다(barrier,
-                #1946 Finding 1). fill 카치업 미성공 시 기동 대사에만 쓰인다.
+            skip_external_buy: True 면 "외부 매수" 분류 보정을 건너뛴다(barrier).
+                fill 카치업 미성공 시 기동 대사에만 쓰인다.
                 1봇-total+running 보정 경로에만 적용된다.
 
         Returns:

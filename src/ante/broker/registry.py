@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class InvalidBrokerTypeError(Exception):
     """미등록 broker_type 요청 시 발생.
 
-    #1843 sub-PR 5 — class-level ``.code = "BROKER_INVALID_TYPE"`` 부여.
+    class-level ``.code = "BROKER_INVALID_TYPE"`` 부여.
     ``ante.account.errors.InvalidBrokerTypeError`` (``.code =
     "ACCOUNT_INVALID_BROKER_TYPE"``) 와 동명이지만 module/code 가 분리된
     별개 class 다 — drift guard 와 helper 의 type-based MRO lookup 모두

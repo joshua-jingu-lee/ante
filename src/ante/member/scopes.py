@@ -5,7 +5,7 @@
 ``SCOPE_VOCABULARY`` 에 등록되어 있어야 하며, 등록되지 않은 scope 문자열은
 서비스 계층과 CLI 입력 단계에서 모두 거부된다.
 
-설계 결정 (#1439 — Codex Plan Review r1):
+설계 결정:
 - SSOT 위치를 ``src/ante/member`` 패키지로 둔다. Member 모듈이
   principal/credential/scope vocabulary 전체의 SSOT 라는 spec 결정
   (``docs/specs/member/02-design-decisions.md`` "Authorization SSOT")과

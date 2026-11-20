@@ -28,13 +28,13 @@ if TYPE_CHECKING:
 class ServiceRegistry:
     """IPC 핸들러가 참조하는 서비스 레지스트리.
 
-    Refs #1418 → #1472 SPLIT-D: ``audit_logger`` 필드는 administrative
+    ``audit_logger`` 필드는 administrative
     mutation IPC (``approval.cancel_invalid``) 가 정상 환경에서 audit_log 테이블에
-    기록을 남기기 위해 추가되었다. 테스트/legacy 환경에서는 ``None`` 이 허용되며,
+    기록을 남기기 위한 필드다. 테스트/legacy 환경에서는 ``None`` 이 허용되며,
     핸들러는 ``getattr(svc, "audit_logger", None)`` 패턴으로 안전하게 처리한다.
 
-    Refs #1712: ``trade_service`` 필드는 IPC ``bot.status`` handler 의
-    positions 보강 (``enrich_bot_info``) 을 위해 optional 로 추가되었다.
+    ``trade_service`` 필드는 IPC ``bot.status`` handler 의
+    positions 보강 (``enrich_bot_info``) 을 위한 optional 필드다.
     ``audit_logger`` 와 동형으로 ``None`` 허용 + ``getattr`` safe-access 가
     보장된다. legacy ServiceRegistry 호출자(``trade_service`` 인자 미전달)는
     그대로 동작하며, positions 키는 부재한다.

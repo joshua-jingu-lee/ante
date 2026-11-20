@@ -193,7 +193,7 @@ async def _save_backtest_run(
     config: dict,
     metrics: dict,
 ) -> str:
-    """backtest_runs 테이블에 이력 저장 (#2001: envelope dict 기반).
+    """backtest_runs 테이블에 이력 저장 (envelope dict 기반).
 
     ``result_dict`` 는 ``service.run_subprocess`` 가 반환한 additive envelope
     (``to_dict()`` superset + 런타임 메타데이터)이다. ``strategy_name`` /

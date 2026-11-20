@@ -303,7 +303,7 @@ def _resolve_config_path(ctx: click.Context, target_dir: str | None) -> Path:
 
     `init`이 root 그룹의 `--config-dir`/`ANTE_CONFIG_DIR`을 무시하면 이후
     CLI들이 `get_db_path()`로 보는 `<config_dir>/db/ante.db`와 init이 만든
-    DB 경로가 어긋난다(Codex 12차 리뷰 Finding 1).
+    DB 경로가 어긋난다.
     """
     if target_dir:
         return Path(target_dir)

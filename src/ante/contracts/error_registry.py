@@ -5,7 +5,7 @@ lock** 4 건을 코드로 mapping 한다. helper
 (``ante.contracts.helpers.error_spec_for_exception``) 는 본 registry 를 MRO
 기반 lookup 하여 exception → ``ErrorSpec`` 을 resolve 한다.
 
-본 PR(#1840) 범위에서 등록된 lock 4건:
+등록된 lock 4건:
 
 - ``InvalidAccountIdError`` → ``VALIDATION_ERROR`` / ``validation``
 - ``BotNotFoundError`` → ``BOT_NOT_FOUND`` / ``not_found``
@@ -13,7 +13,7 @@ lock** 4 건을 코드로 mapping 한다. helper
 - ``InvalidScopeError`` (member, code=``MEMBER_INVALID_SCOPE``) →
   ``MEMBER_INVALID_SCOPE`` / ``permission``
 
-#1842 가 추가한 account domain 12 sub-class lock (실측 ``.code`` mirror,
+account domain 12 sub-class lock (실측 ``.code`` mirror,
 category 정확화):
 
 - ``AccountNotFoundError`` → ``ACCOUNT_NOT_FOUND`` / ``not_found``
@@ -38,11 +38,10 @@ category 정확화):
   ``state_conflict``
 
 ``AccountError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-Non-Goals).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다.
 
-#1843 sub-PR 1 (member sweep) 가 추가한 member domain 5 sub-class lock
-(실측 ``.code`` mirror, ``InvalidScopeError`` 는 #1840 lock 그대로 보존):
+member domain 5 sub-class lock
+(실측 ``.code`` mirror, ``InvalidScopeError`` 는 lock 그대로 보존):
 
 - ``PermissionDeniedError`` → ``PERMISSION_DENIED`` / ``permission`` (본
   PR 에서 ``.code`` 신규 부여 — master 검증 위반 fault 의 안정 코드)
@@ -52,35 +51,35 @@ Non-Goals).
 - ``MemberAlreadyExistsError`` → ``MEMBER_ALREADY_EXISTS`` /
   ``state_conflict``
 - ``ReservedMemberIdError`` → ``MEMBER_ID_RESERVED`` / ``validation``
-  (#2295; ``register`` 의 ``system:`` reserved-prefix guard — duplicate
+  (``register`` 의 ``system:`` reserved-prefix guard — duplicate
   와 별개 fault, existing-member 조회 이전 거부. ``ValueError`` 다중상속
   으로 기존 generic fallback 회귀 없음.)
 - ``MemberInvalidRecoveryCredentialError`` →
   ``MEMBER_INVALID_RECOVERY_CREDENTIAL`` / ``auth``
 
-#1915 member domain 2 sub-class 추가 (실측 ``.code`` mirror, #1843 sub-PR 1
+member domain 2 sub-class (실측 ``.code`` mirror,
 1:1 미러):
 
 - ``MemberInvalidEmojiError`` → ``MEMBER_INVALID_EMOJI`` / ``validation``
-  (#1915; ``_validate_emoji_format`` 형식 거부 — CLI ``set-emoji`` /
+  (``_validate_emoji_format`` 형식 거부 — CLI ``set-emoji`` /
   ``register`` / master bootstrap 표면. ``ValueError`` 다중상속으로 기존
   generic fallback 회귀 없음.)
 - ``MemberMasterProtectedError`` → ``MEMBER_MASTER_PROTECTED`` /
-  ``permission`` (#1915; ``_assert_not_master`` 호출 — CLI ``suspend`` /
+  ``permission`` (``_assert_not_master`` 호출 — CLI ``suspend`` /
   ``revoke`` 표면. ``PermissionDeniedError`` (비-master 의 master-only
   operation 시도) 와 의미 분리 — master 본인을 대상으로 한 파괴적
   operation 거부. ``PermissionError`` 다중상속으로 기존 generic fallback
   회귀 없음.)
 
 ``MemberError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-``AccountError`` 와 동일 패턴, #1843 sub-PR 1 Non-Goals).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
+(``AccountError`` 와 동일 패턴).
 
-#1843 sub-PR 2 (approval sweep) 가 추가한 approval domain 2 sub-class lock
-(실측 ``.code`` mirror, ``ApprovalNotFoundError`` 는 #1840 lock 그대로 보존):
+approval domain 2 sub-class lock
+(실측 ``.code`` mirror, ``ApprovalNotFoundError`` 는 lock 그대로 보존):
 
 - ``ApprovalStatusConflictError`` → ``APPROVAL_STATUS_CONFLICT`` /
-  ``state_conflict`` (#1813 Group Q sweep; ``approve``/``reject`` 표면의
+  ``state_conflict`` (``approve``/``reject`` 표면의
   status flow 위반)
 - ``ApprovalValidationError`` → ``APPROVAL_VALIDATION_ERROR`` /
   ``validation`` (``ApprovalService.create`` 사전검증 ``fail`` grade 거부;
@@ -89,71 +88,71 @@ Non-Goals).
   ``.code`` 신규 부여)
 
 ``ApprovalError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-``AccountError`` 와 동일 패턴, #1843 sub-PR 2 Non-Goals).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
+(``AccountError`` 와 동일 패턴).
 
-#1843 sub-PR 3 (bot sweep) 가 추가한 bot domain 5 sub-class lock (실측 ``.code``
-mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
+bot domain 5 sub-class lock (실측 ``.code``
+mirror, ``BotNotFoundError`` 는 lock 그대로 보존):
 
 - ``BotAccountCredentialsNotConfigured`` →
-  ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` / ``validation`` (#1712; ``bot
+  ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` / ``validation`` (``bot
   start`` 표면 ``app_key`` preflight 거부 — 입력 계약/필수 정보 누락은
   taxonomy ``validation`` 카테고리)
-- ``BotStateConflict`` → ``BOT_STATE_CONFLICT`` / ``state_conflict`` (#1712;
-  ``start_bot``/``stop_bot`` 상태머신 거부)
+- ``BotStateConflict`` → ``BOT_STATE_CONFLICT`` / ``state_conflict``
+  (``start_bot``/``stop_bot`` 상태머신 거부)
 - ``BotNotAcceptingSignals`` → ``BOT_NOT_ACCEPTING_SIGNALS`` /
-  ``state_conflict`` (#1761; ``accepts_external_signals=False`` 전략이 외부
+  ``state_conflict`` (``accepts_external_signals=False`` 전략이 외부
   시그널 발급 요청을 거부 — 운영 상태가 해당 전이를 허용하지 않음)
 - ``BotAlreadyExistsError`` → ``BOT_ALREADY_EXISTS`` / ``state_conflict``
-  (#1800; ``bot create`` 시 동일 ``bot_id`` 중복)
+  (``bot create`` 시 동일 ``bot_id`` 중복)
 - ``BotStrategyAlreadyRunningError`` → ``BOT_STRATEGY_ALREADY_RUNNING`` /
-  ``state_conflict`` (#1800; "1전략 1봇" 정책 거부)
+  ``state_conflict`` ("1전략 1봇" 정책 거부)
 
-#2282 가 추가한 bot 불변 필드 lock (Account ``AccountImmutableFieldError`` 선례
+bot 불변 필드 lock (Account ``AccountImmutableFieldError`` 선례
 미러):
 
 - ``BotImmutableFieldError`` → ``BOT_IMMUTABLE_FIELD`` / ``validation``
-  (#2282; ``update_bot`` 의 ``account_id`` 변경 거부 — treasury 예산·broker
+  (``update_bot`` 의 ``account_id`` 변경 거부 — treasury 예산·broker
   credential·포지션이 account-bound 라 생성 후 불변. ``ACCOUNT_IMMUTABLE_FIELD``
   / ``validation`` 동형 분류)
 
 ``BotError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-``AccountError`` 와 동일 패턴, #1843 sub-PR 3 Non-Goals).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
+(``AccountError`` 와 동일 패턴).
 
-#1843 sub-PR 4 (treasury sweep) 가 추가한 treasury domain 7 sub-class lock
-(실측 ``.code`` mirror; #1809 가 도입한 4건 + 본 PR 신규 부여 3건):
+treasury domain 7 sub-class lock
+(실측 ``.code`` mirror):
 
 - ``TreasuryInvalidAmountError`` → ``TREASURY_INVALID_AMOUNT`` / ``validation``
-  (#1809; ``allocate``/``deallocate`` 의 finite-positive 가드 위반)
+  (``allocate``/``deallocate`` 의 finite-positive 가드 위반)
 - ``TreasuryInsufficientUnallocatedError`` → ``TREASURY_INSUFFICIENT_BALANCE``
-  / ``validation`` (#1809; ``allocate`` 시 ``self._unallocated < amount``)
+  / ``validation`` (``allocate`` 시 ``self._unallocated < amount``)
 - ``TreasuryBudgetNotFoundError`` → ``TREASURY_BUDGET_NOT_FOUND`` /
-  ``not_found`` (#1809; ``deallocate`` 시 budget record 부재)
+  ``not_found`` (``deallocate`` 시 budget record 부재)
 - ``TreasuryDeallocateExceedsAvailableError`` →
-  ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE`` / ``validation`` (#1809;
-  over-deallocate)
+  ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE`` / ``validation``
+  (over-deallocate)
 - ``InsufficientFundsError`` → ``TREASURY_INSUFFICIENT_FUNDS`` / ``validation``
   (본 PR 신규 부여; ``update_budget`` caller-facing wrap fault —
   ``TREASURY_INSUFFICIENT_BALANCE`` 와 의미 분리)
 - ``BotNotStoppedError`` → ``TREASURY_BOT_NOT_STOPPED`` / ``state_conflict``
   (본 PR 신규 부여; running 상태 봇의 예산 변경 거부)
 - ``TreasuryNotConfiguredError`` → ``TREASURY_NOT_CONFIGURED`` /
-  ``service_unavailable`` (본 PR 신규 부여; #1335 ``TreasuryManager`` 미주입
+  ``service_unavailable`` (``TreasuryManager`` 미주입
   / 등록된 Treasury 부재)
 
 ``TreasuryError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3 Non-Goals 동형).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
+(``AccountError`` 와 동일 패턴).
 
-#1843 sub-PR 5 (broker sweep) 가 추가한 broker domain 6 sub-class lock
-(실측 ``.code`` mirror, 본 PR 에서 신규 부여):
+broker domain 6 sub-class lock
+(실측 ``.code`` mirror):
 
 - ``AuthenticationError`` → ``BROKER_AUTH_FAILED`` / ``auth`` (KIS OAuth
   토큰 발급/갱신 실패; HTTP 401/403 또는 잘못된 app_key/secret)
 - ``APIError`` → ``BROKER_API_ERROR`` / ``external`` (KIS API business/HTTP
   error; 원천 KIS ``msg_cd`` 는 ``APIError.error_code`` 필드에 log-only
-  보존되며 envelope 에는 안정 코드만 노출 — Codex Plan Review v1 condition)
+  보존되며 envelope 에는 안정 코드만 노출)
 - ``OrderNotFoundError`` → ``BROKER_ORDER_NOT_FOUND`` / ``not_found``
   (broker side 에서 조회/취소 대상 주문 부재)
 - ``RateLimitError`` → ``BROKER_RATE_LIMITED`` / ``external`` (KIS per-minute
@@ -162,20 +161,19 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
   (연속 실패 임계 도달로 circuit breaker OPEN — broker 가용성 임시 차단)
 - ``ante.broker.registry.InvalidBrokerTypeError`` → ``BROKER_INVALID_TYPE`` /
   ``validation`` (registry 미등록 broker_type 요청). 동명 별개 class 인
-  ``ante.account.errors.InvalidBrokerTypeError`` 는 #1842 가 이미
+  ``ante.account.errors.InvalidBrokerTypeError`` 는 이미
   ``ACCOUNT_INVALID_BROKER_TYPE`` 로 등록한 다른 entry 다 — helper 의
   type-based MRO lookup 과 drift guard 의 ``(module, name)`` 2중 anchor 가
   두 class 를 정확히 분리한다.
 
 ``BrokerError`` base 는 의도적으로 등록하지 않는다 — 사용 사례가 없으며
-``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다 (#1842
-``AccountError`` 와 동일 패턴, #1843 sub-PR 1/2/3/4 Non-Goals 동형).
+``pending_migration`` allowlist 에 baseline 으로 그대로 유지된다
+(``AccountError`` 와 동일 패턴).
 
-#1843 sub-PR 6 (strategy/config/rule sweep + final allowlist clear) 가
-추가한 도메인 sub-class lock (실측 ``.code`` mirror, 본 PR 에서 신규 부여):
+strategy/config/rule 도메인 sub-class lock (실측 ``.code`` mirror):
 
-- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` / ``not_found`` (#1796
-  lock 그대로 보존)
+- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` / ``not_found``
+  (lock 그대로 보존)
 - ``StrategyLoadError`` → ``STRATEGY_LOAD_ERROR`` / ``validation`` (전략
   파일 import/load 실패; CLI ``strategy submit`` 의 ``stage="load"`` envelope
   와 동일 SSOT)
@@ -187,17 +185,16 @@ mirror, ``BotNotFoundError`` 는 #1840 lock 그대로 보존):
 - ``IncompatibleExchangeError`` → ``STRATEGY_INCOMPATIBLE_EXCHANGE`` /
   ``validation`` (전략 ↔ 계좌 exchange 호환성 거부)
 - ``ConfigValidationError`` → ``CONFIG_VALIDATION_ERROR`` / ``validation``
-  (#1673 oracle A7; ``ValueError`` 다중상속을 보존하며 helper registry-first
+  (``ValueError`` 다중상속을 보존하며 helper registry-first
   lookup 이 동일 안정 코드를 surface)
 - ``RuleConfigError`` → ``RULE_CONFIG_ERROR`` / ``validation`` (룰 설정 입력
   invariant 위반)
 
 ``StrategyError`` / ``ConfigError`` / ``RuleError`` base 는 의도적으로
 등록하지 않는다 — 사용 사례가 없으며 ``pending_migration`` allowlist 에
-baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴,
-#1843 sub-PR 1/2/3/4/5 Non-Goals 동형).
+baseline 으로 그대로 유지된다 (``AccountError`` 와 동일 패턴).
 
-#1974 R2 가 추가한 core 1 class lock:
+core 1 class lock:
 
 - ``ReadOnlyDatabaseError`` → ``EXECUTION_ERROR`` / ``internal`` (read-only
   ``Database`` 에서 writer 경로 호출 시 발생하는 프로그래밍/사용 오류 guard.
@@ -206,30 +203,30 @@ baseline 으로 그대로 유지된다 (#1842 ``AccountError`` 와 동일 패턴
 
 추가로 ``SERVICE_NOT_CONFIGURED`` 는 module-level constant
 (``_SERVICE_NOT_CONFIGURED_SPEC``) 로 보존한다 — taxonomy SSOT 가
-``service_unavailable`` 카테고리로 lock 한 공통 안정 코드다. #2336 (PR#1) 이
-``SignalKeyManagerNotConfigured`` (``.code="SERVICE_NOT_CONFIGURED"``) 를 도입해
+``service_unavailable`` 카테고리로 lock 한 공통 안정 코드다.
+``SignalKeyManagerNotConfigured`` (``.code="SERVICE_NOT_CONFIGURED"``) 는
 이 상수를 ``EXCEPTION_TO_SPEC`` 한 줄 entry 로 wiring 한다(전용 코드 미발명).
 
-#2336 (PR#1) / #2337 (PR#2) signal.connect 핸드셰이크 신규 4코드:
+signal.connect 핸드셰이크 4코드:
 
 - ``INVALID_SIGNAL_KEY`` (validation) — ``InvalidSignalKey`` typed entry.
 - ``BOT_NOT_RUNNING`` (state_conflict) — ``BotNotRunning`` typed entry.
 - ``MALFORMED_REQUEST`` (validation) — server.py 가 비-dict 첫 프레임에 inline
   envelope 으로 발화. typed exception 없음 → 상수-only(entry 미등록).
 - ``BOT_SIGNAL_CHANNEL_BUSY`` (state_conflict) — bot_id 당 단일 connect 거부.
-  raiser 는 PR#2(#2337) ``SignalChannelRegistry.register`` 이며, PR#2 가
-  ``BotSignalChannelBusy`` typed entry 를 추가한다(PR#1 은 상수-only 였음).
+  raiser 는 ``SignalChannelRegistry.register`` 이며,
+  ``BotSignalChannelBusy`` typed entry 다.
 
 즉 PR#2 머지 후 typed-3(``INVALID_SIGNAL_KEY``/``BOT_NOT_RUNNING``/
 ``BOT_SIGNAL_CHANNEL_BUSY``) + inline-1(``MALFORMED_REQUEST``) split. typed-3 의
 ``EXCEPTION_TO_SPEC`` entry 는 helper 의 bare-``.code``→``internal`` wrap 을
 회피해 category 정확성을 lock 하는 load-bearing 이다.
 
-#2412 가 추가한 core 1 class lock:
+core 1 class lock:
 
 - ``InvalidIsoDateError`` → ``VALIDATION_ERROR`` / ``validation``. 공개 표면
   ISO ``YYYY-MM-DD`` → broker 어댑터 경계 ``YYYYMMDD`` 변환 chokepoint
-  (``ante.core.time.iso_to_kis_date``) 의 입력 검증 실패다. 코드는 #1633 SSOT
+  (``ante.core.time.iso_to_kis_date``) 의 입력 검증 실패다. 코드는 SSOT
   (``InvalidAccountIdError.code``) 를 재사용하며 신 코드를 도입하지 않는다.
   entry 를 두는 이유는 signal typed-3 와 동일하다 — class-level ``.code`` 만
   있으면 helper 가 category 를 ``internal`` 로 wrap 해 validation 성격이
@@ -639,10 +636,10 @@ EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 """``error_spec_for_exception`` 의 최후 fallback ErrorSpec.
 
-taxonomy SSOT (#1839) ``EXECUTION_ERROR 허용 범위`` 절이 명시한 두 경우 —
+taxonomy SSOT ``EXECUTION_ERROR 허용 범위`` 절이 명시한 두 경우 —
 코드 버그 / unexpected programming error, 또는 외부 라이브러리 미분류 예외 —
 에 적용된다. domain exception 이 ``code`` 미부여로 본 fallback 에 접히는 것은
-taxonomy drift로 분류되며, drift test guard (#1841) 가 별도 책임으로 검출한다.
+taxonomy drift로 분류되며, drift test guard 가 별도 책임으로 검출한다.
 """
 
 
@@ -708,7 +705,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
     InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
 }
-"""대표 fault lock registry (#1839 normative 4건).
+"""대표 fault lock registry (normative 4건).
 
 ``error_spec_for_exception(exc)`` 는 ``type(exc).__mro__`` 순서로 본 dict를
 조회하여 첫 매치 ErrorSpec을 반환한다. registry miss 시 helper 는

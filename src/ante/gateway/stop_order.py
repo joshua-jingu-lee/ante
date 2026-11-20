@@ -30,7 +30,7 @@ SESSION_TYPES = ("regular", "extended")
 class StopOrderManagerStoppedError(RuntimeError):
     """매니저가 stopped(``_running=False``) 상태에서 register 가 호출됐을 때.
 
-    #2405 (attempt2 P2): stopped/pre-start 상태의 등록은 silent loss(빈 문자열
+    stopped/pre-start 상태의 등록은 silent loss(빈 문자열
     반환)가 아니라 예외로 거부한다. 호출자(gateway ``_on_order_approved``)가
     이를 잡아 ``OrderFailedEvent`` 로 terminal 종결하므로, in-flight 주문이
     영구 inert 로 남지 않는다.
@@ -109,7 +109,7 @@ class StopOrderManager:
     async def stop(self) -> None:
         """매니저 중지. 활성 주문 모두 만료 처리.
 
-        #2405 (attempt6 P2-A): ``active_orders`` 의 manager_stopped 정리 후,
+        ``active_orders`` 의 manager_stopped 정리 후,
         shutdown 중 sweep cancel 로 background 에 남은 in-flight
         ``_do_expire_order`` task 들을 loop teardown 전에 await 해 in-flight
         terminal(session_ended) 유실을 막는다. half-expired order 는 이미
@@ -150,13 +150,13 @@ class StopOrderManager:
             StopOrderManagerStoppedError: 매니저가 stopped(``_running=False``)
                 상태일 때.
 
-        #2405 (attempt2 P2): 매니저가 stopped(``_running=False``) 상태면 등록을
+        매니저가 stopped(``_running=False``) 상태면 등록을
         ``StopOrderManagerStoppedError`` 로 거부한다. shutdown 진행 중 in-flight
         IPC/봇이 OrderApprovedEvent 로 stop 주문을 보내도, 그 주문은
         manager_stopped sweep 을 이미 놓쳤고 이후 price update 도
-        ``_running=False`` 라 무시되어 영구 inert 로 남는다. 이전(attempt1)에는
-        빈 문자열을 반환했으나, 그 경우 호출자가 silent loss 를 인지하지 못해
-        주문이 terminal 이벤트 없이 사라졌다(P1). 예외로 거부하면 호출자
+        ``_running=False`` 라 무시되어 영구 inert 로 남는다. 빈 문자열을 반환하면
+        호출자가 silent loss 를 인지하지 못해
+        주문이 terminal 이벤트 없이 사라진다. 예외로 거부하면 호출자
         (gateway ``_on_order_approved``)의 try/except 가 이를 잡아
         ``OrderFailedEvent`` 로 결정적 종결한다(api-gateway.md:187 정합). shutdown
         순서와 무관하게 결정적.
@@ -271,7 +271,7 @@ class StopOrderManager:
         매칭되는 stop order 를 평가한다. 다른 계좌의 stop order 는 같은
         symbol 이라도 무시된다.
 
-        #2405 (A2 source chokepoint, attempt5 P2): ``is_exchange_tick`` 은
+        A2 source chokepoint: ``is_exchange_tick`` 은
         이 가격이 **실 WebSocket 틱**(``True``)인지 **REST fallback poll**
         (``False``)인지 호출자가 구분해 전달한다. 거래일 멤버십 마킹은
         ``is_exchange_tick=True`` 일 때만 수행한다 — KIS ``inquire-price`` 는
@@ -310,13 +310,13 @@ class StopOrderManager:
     async def check_session_expiry(self) -> None:
         """세션 종료 시 미트리거 주문 만료 처리.
 
-        #2405 (A2 의미론): **자신의 세션에 진입했던**(``entered_session``)
+        A2 의미론: **자신의 세션에 진입했던**(``entered_session``)
         미트리거 주문만 그 세션 종료 시 ``session_ended`` 로 만료한다. 세션에 한
         번도 진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분,
         세션 종료 후 등록분)은 만료되지 않는다 — "세션 외 등록 stop 즉시
         만료"(A1) 부작용을 제거한다.
 
-        #2405 (attempt3 P1/P2): 멤버십을 per-order ``entered_session`` 으로
+        멤버십을 per-order ``entered_session`` 으로
         추적한다. ``on_price_update`` 가 market-wide(틱의 종목·계좌 무관)로 그
         시점 in-session 인 **모든** active order 를 마킹하므로, 거래일에 한
         종목이라도 틱이 흐르면 그 세션의 무틱 종목까지 멤버십을 얻어 함께
@@ -331,12 +331,12 @@ class StopOrderManager:
         - 세션 종료 후 등록: 세션 밖에 등록된 주문엔 in-session 틱이 오지 않아
           ``entered_session=False`` → 미만료(보존). 사전 등록분도 동일 보존.
 
-        #2405 (bounded known-limitation): src/ante 에 거래일/휴장일 캘린더가
+        bounded known-limitation: src/ante 에 거래일/휴장일 캘린더가
         없으므로 "거래일인데 전 모니터 종목이 세션 내내 무틱"(전종목 거래정지 등)
         이면 어떤 주문도 마킹되지 않아 미만료된다(다음 세션 생존). 캘린더
         부재의 구조적 하한 — api-gateway.md normative 선언.
 
-        #2405 (attempt6 P2-B, bounded growth): ``_session_tick_marked`` 의
+        bounded growth: ``_session_tick_marked`` 의
         stale epoch(현재 business_date 가 아닌 거래일 키)를 매 sweep 1회
         prune 한다 — 거래일마다 새 키가 쌓여도 set 이 무한 증가하지 않게 한다.
         prune 시점은 sweep(분 단위 주기 호출)이라 현재 거래일 키는 보존되고
@@ -368,7 +368,7 @@ class StopOrderManager:
     def _session_epoch_key(self, session_type: str) -> str:
         """거래일 멤버십 마킹 epoch 키 SSOT(``{거래일}:{세션종류}``).
 
-        #2405 (attempt6 P2-B): ``on_price_update``(실 틱 add)와
+        ``on_price_update``(실 틱 add)와
         ``register``(조회)가 **같은 헬퍼**로 키를 생성해 drift 를 막는다.
 
         ``business_date_kst()`` 는 휴장일/주말/시간외를 backward-roll 하지
@@ -449,7 +449,7 @@ class StopOrderManager:
     async def _expire_order(self, order: StopOrder, reason: str) -> None:
         """스탑 주문 만료 처리(shield 보장).
 
-        #2405 (attempt6 P2-A): terminal(``StopOrderExpiredEvent``) 발행을
+        terminal(``StopOrderExpiredEvent``) 발행을
         ``asyncio.shield`` 로 감싼 별도 task(``_do_expire_order``)에 위임한다.
         shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep
         (``check_session_expiry``)의 ``await`` 지점에 닿아도, shield 된 inner

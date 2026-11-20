@@ -90,7 +90,7 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
     - ``guard`` 는 table(dict) 이어야 한다.
     - ``blocked_days`` 가 있으면 ``list`` 이고 각 원소는 ``str`` 이어야 한다.
     - ``blocked_hours`` 가 있으면 ``list`` 이어야 한다. 각 window 의 형식
-      (``HH:MM-HH:MM``) 검증은 #2030 ``cli_scheduler._validate_schedule_times``
+      (``HH:MM-HH:MM``) 검증은 ``cli_scheduler._validate_schedule_times``
       가 단일 책임으로 수행하므로(중복 분기 금지) 여기서는 list 여부만 본다.
     - ``pause_during_trading`` 이 있으면 ``bool`` 이어야 한다.
 

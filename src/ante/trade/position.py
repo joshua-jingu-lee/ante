@@ -68,7 +68,7 @@ class PositionHistory:
 
         legacy 'default' (또는 기타 invalid) ``account_id`` row는
         :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 서버 부팅이
+        스키마/데이터 마이그레이션이 완료되기 전에도 서버 부팅이
         실패하지 않도록 하기 위함이다.
         """
         rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
@@ -228,7 +228,7 @@ class PositionHistory:
 
         Args:
             account_id: 계좌 ID 필터. ``None`` 이면 모든 계좌의 포지션을
-                반환한다 (read query 정책 — #1218 영역). 단일 계좌에
+                반환한다 (read query 정책). 단일 계좌에
                 바인딩된 호출자(Treasury, DailyReportScheduler 등)는
                 자기 계좌만 보도록 명시적으로 전달해야 한다.
 
@@ -489,7 +489,7 @@ class PositionHistory:
 
         legacy 'default' (또는 기타 invalid) ``account_id`` row는
         :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션(#1219 등)이 완료되기 전에도 read 경로가
+        스키마/데이터 마이그레이션이 완료되기 전에도 read 경로가
         실패하지 않도록 하기 위함이다.
         """
         try:

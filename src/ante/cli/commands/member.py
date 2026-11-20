@@ -290,7 +290,7 @@ def _explicit_config_dir(ctx: click.Context) -> str | None:
     있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
     보장한다.
 
-    추가로 attempt 4 P2 회귀: 운영자가 ``ante --config-dir custom member
+    추가로 운영자가 ``ante --config-dir custom member
     list-invalid-roles`` 처럼 **상대 경로**로 호출한 경우, raw 값을 그대로
     payload 에 실으면 운영자가 payload(``revoke_command``)를 다른 CWD 에서
     복사 실행했을 때 그 CWD 아래의 ``custom`` DB 를 가리키게 되어 다시 다른

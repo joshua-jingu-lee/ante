@@ -454,7 +454,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     보존).
 
     조회(rotate 미지정)는 runtime IPC (``bot.signal_key`` read) 우선 + 서버
-    정지 시 snapshot DB fallback 이다 (#2112; ``--rotate`` 와 정반대로 서버
+    정지 시 snapshot DB fallback 이다 (``--rotate`` 와 정반대로 서버
     정지 시 기존 직접 DB 경로를 보존한다 — 스펙: runtime IPC + snapshot
     fallback).
     """

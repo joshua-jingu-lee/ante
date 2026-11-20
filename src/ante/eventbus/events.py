@@ -206,7 +206,7 @@ class OrderFilledEvent(Event):
     ``fill_dedup_key``: 동일 체결을 결정적으로 식별하는 키.
     FillApplier 경로는 ``f"{order_id}:{canonical(confirmed_cumulative)}"``
     (CAS RETURNING 확정 누적값 기준)로 채운다. outbox at-least-once 재전달 시
-    소비자가 이중처리를 식별·억제하는 데 쓰인다(소비는 #1957). default ``""`` 로
+    소비자가 이중처리를 식별·억제하는 데 쓰인다. default ``""`` 로
     backward-compat 을 유지하며, VirtualProvider 등 outbox 미경유 직접 발행 경로는
     빈키(``""``)를 그대로 둔다(dedup 비대상 — eventbus 스펙 참조).
     """
@@ -252,14 +252,14 @@ class OrderCancelledEvent(Event):
 
 @dataclass(frozen=True)
 class OrderModifyExecutedEvent(Event):
-    """BrokerAdapter/APIGateway → EventBus: 주문 정정 완료 (#2391, v1=price-only).
+    """BrokerAdapter/APIGateway → EventBus: 주문 정정 완료 (v1=price-only).
 
     ``OrderCancelledEvent`` 를 미러링하되 정정 신규 ``price`` 를 추가로 보유한다.
     v1 은 가격 정정(수량 불변)만 지원하므로 ``quantity`` 는 원주문 수량
     (``OrderTrackerRecord.ordered_qty``)을 그대로 유지하고, ``price`` 는 신규 정정
     가격이다. ``broker_order_id`` 는 의도적으로 포함하지 않는다(OrderCancelledEvent
     와 동일 — 전략/소비자는 내부 ``order_id`` 로 식별). 고급 케이스(수량 변경 등)는
-    #2393 deferred.
+    deferred.
 
     소비자: ``Bot.on_order_update`` / ``SignalChannel._on_order_update``
     (``status="modified"``) + ``TradeRecorder`` (``TradeStatus.MODIFIED`` 별도 row).

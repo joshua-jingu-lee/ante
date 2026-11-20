@@ -1,8 +1,8 @@
 """업데이트 실행기 — pip 업그레이드, 마이그레이션, 롤백.
 
 DB 경로는 상위 레이어(`ante.cli.commands.update`)가 `get_db_path(ctx)`로
-계산해 전달한다. 이 모듈은 더 이상 `db/ante.db` 같은 CWD 기준 하드코딩을
-사용하지 않는다. 관련 배경: #1125 Codex 10차 review Finding 2.
+계산해 전달한다. 이 모듈은 `db/ante.db` 같은 CWD 기준 하드코딩을
+사용하지 않는다.
 """
 
 from __future__ import annotations
@@ -82,8 +82,7 @@ def run_post_update_migrations(
             읽고 v002 Parquet 마이그레이션을 해당 트리에 적용한다. None
             이면 서브프로세스 쪽 fallback(`data/`)을 그대로 사용한다 —
             custom config_dir / 사용자 지정 데이터 루트에서는 반드시
-            전달해야 마이그레이션이 런타임과 동일한 트리를 본다
-            (Refs #1125 Codex 13차 review Finding 1).
+            전달해야 마이그레이션이 런타임과 동일한 트리를 본다.
     """
     env = os.environ.copy()
     if db_path:

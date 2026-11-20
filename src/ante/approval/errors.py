@@ -1,12 +1,12 @@
 """Approval 모듈 예외.
 
-Refs #1798: ``ApprovalNotFoundError`` 를 신규 도입해 service 가 missing
+``ApprovalNotFoundError``: service 가 missing
 approval 을 ``ValueError`` 대신 typed exception 으로 raise 한다. IPC
 ``server.py`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope 이
 ``APPROVAL_NOT_FOUND`` 로 변환한다. CLI ``approval cancel-invalid`` 도
 ``getattr(e, "code", ...)`` 패턴으로 typed code 를 surface 한다.
 
-Refs #1813 (Group Q sweep): ``ApprovalStatusConflictError`` 를 신규 도입해
+``ApprovalStatusConflictError``:
 ``approve``/``reject`` 표면의 status flow violation (rejected → 재reject,
 approved → 재approve 등) 을 ``ValueError`` 대신 typed exception 으로
 raise 한다. IPC envelope 이 ``APPROVAL_STATUS_CONFLICT`` 안정 코드를
@@ -42,7 +42,7 @@ class ApprovalNotFoundError(ApprovalError):
 
 
 class ApprovalStatusConflictError(ApprovalError, ValueError):
-    """결재 status flow 위반 (#1813 Group Q sweep).
+    """결재 status flow 위반.
 
     ``approve``/``reject`` 메서드가 현재 status 가 허용 전이 집합에 포함되지
     않을 때 raise 한다. 예시:

@@ -43,7 +43,7 @@ _LEGACY_PID_FALLBACK = Path("db/ante.pid")
 def _write_pid_file(config: Config) -> None:
     """PID 파일을 ``config.runtime_pid_path()`` canonical 위치에 기록한다.
 
-    Refs #1157, docs/specs/config/03-design-decisions.md 200-202.
+    docs/specs/config/03-design-decisions.md 200-202.
     Server runtime, cold-path CLI guard, IPC client가 같은 ``config_dir``을
     쓰면 같은 PID 파일을 본다.
     """
@@ -57,7 +57,7 @@ def _starting_marker_path(config: Config) -> Path:
     """booting marker 경로를 반환한다.
 
     PID 파일과 같은 디렉토리의 ``.starting`` 파일을 사용한다.
-    ``runtime.pid_path`` resolver에서 파생하므로 #1157의 single-canonical
+    ``runtime.pid_path`` resolver에서 파생하므로 single-canonical
     runtime path 정책과 자동으로 정합된다.
     """
     return config.runtime_pid_path().parent / ".starting"
@@ -110,7 +110,7 @@ def _remove_pid_file(config: Config) -> None:
 def read_pid_file(config: Config | None = None) -> int | None:
     """PID 파일에서 PID 읽기. canonical 부재/파싱 실패 시 None.
 
-    Refs #1157, docs/specs/config/03-design-decisions.md (1.0 단일 active runtime
+    docs/specs/config/03-design-decisions.md (1.0 단일 active runtime
     정책). 1.0은 single-canonical resolver 모델을 따르므로 legacy cwd-relative
     ``db/ante.pid`` read-fallback은 두지 않는다. canonical
     ``config.runtime_pid_path()``만 본다.
@@ -212,14 +212,14 @@ def _broker_ready_exempt(account: Any) -> bool:
 def _broker_not_ready_live(s: Services, account: Any) -> bool:
     """startup connect 에서 broker not_ready 가 된 **비면제(LIVE)** 계좌인지.
 
-    #2399 Codex P2(attempt 2) — 후속 broker-backed startup init 가드: startup
+    후속 broker-backed startup init 가드: startup
     connect 루프(``_init_gateway``)에서 EGW00133 bounded retry 가 소진되거나 기타
     실패로 ``broker_ready`` 가 not_ready 가 된 LIVE 계좌는, 그 뒤 같은 startup 의
     broker-backed 초기화 단계(stream·treasury LIVE sync·fill recovery·reconcile)
     에서 ``get_broker`` 를 **다시 호출하면 안 된다**. 그 추가 호출이 EGW00133 계좌의
     KIS 토큰 1/min 제한을 startup 단일 cadence(T4) 밖에서 또 두드리기 때문이다.
 
-    True 인 계좌는 후속 단계가 skip 하고, broker 회복은 self-healing(#2397/#2398)
+    True 인 계좌는 후속 단계가 skip 하고, broker 회복은 self-healing
     이 60s interval 로 이어받아 fill/reconcile/treasury 를 재등록한다.
 
     - broker_ready 면제(virtual/test) 계좌는 항상 False — broker 무관 단계
@@ -284,7 +284,7 @@ def _mark_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
 def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
     """후속 broker-backed startup init 에 넘길 계좌 — broker not_ready LIVE 제외.
 
-    #2399 Codex P2(attempt 2): startup connect 에서 broker not_ready 가 된 LIVE
+    startup connect 에서 broker not_ready 가 된 LIVE
     계좌(``_broker_not_ready_live`` True)를 제외한다. 제외된 계좌는 후속 단계
     (treasury LIVE sync·fill recovery·reconcile)가 ``get_broker`` 를 다시 호출하지
     않아 EGW00133 토큰 1/min 재타격을 피한다(T4 단일 cadence). 제외된 LIVE 계좌의
@@ -677,7 +677,7 @@ async def _init_trading(s: Services) -> None:
 
 
 def _connect_failure_reason(exc: BaseException, default: str) -> str:
-    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (#2399 T6).
+    """connect 실패 예외에서 readiness reason 을 구조적으로 도출.
 
     ``AuthenticationError.error_code`` (KIS 원천 ``msg_cd``, 예: ``EGW00133``)을
     문자열 grep 이 아니라 ``getattr`` 로 추출한다. 코드가 있으면 reason 으로 쓰고,
@@ -691,13 +691,13 @@ def _connect_failure_reason(exc: BaseException, default: str) -> str:
 
 
 async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> Any:
-    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (#2399 T4 c).
+    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (T4 c).
 
     **단일 cadence 레이어의 startup 한 곳**(부팅 1회 경로, 곱셈 없음). EGW00133
     (``TokenRateLimitError``)을 만나면 ~60s backoff 후 ``DEFAULT_MAX_RETRIES_AUTH``
     내 재시도해 startup token race 를 흡수한다.
 
-    **재배치 사유(#2399 Codex P1):** ``AccountService.get_broker`` 는 cache-miss 시
+    ``AccountService.get_broker`` 는 cache-miss 시
     내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다. 따라서
     새 프로세스 cache-miss startup 의 첫 인증이 EGW00133 을 반환하면 그 예외가
     ``get_broker()`` 호출 자체에서 전파된다. retry 가 ``broker.connect()`` 만
@@ -711,12 +711,12 @@ async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> 
     connect+cache 가 완료된 상태다. 소진 시 마지막 ``TokenRateLimitError`` 를 전파해
     호출부가 not_ready(reason=EGW00133). EGW00133 외 예외는 즉시 전파(기존 동작 유지).
 
-    ``get_broker`` 의 계약(connect-성공-후-캐시, #2372)은 self-healing 등 전 caller
+    ``get_broker`` 의 계약(connect-성공-후-캐시)은 self-healing 등 전 caller
     공유이므로 **변경하지 않는다**. retry 는 get_broker 내부가 아니라 본 startup
     wrapper 한 곳에만 둔다(self-healing 이 get_broker 를 반복 호출 → nested backoff
     곱셈 재발 차단, T4).
 
-    **잔여 cooldown sleep (#2399 attempt3, per-app_key cooldown at source):** EGW00133
+    **잔여 cooldown sleep (per-app_key cooldown at source):** EGW00133
     수신 시 발급 레이어(``kis._raise_token_rate_limit``)가 app_key cooldown 을 기록하고
     예외에 ``cooldown_until`` 을 실어 보낸다. 본 wrapper 는 고정 60s 대신 **잔여
     cooldown**(``cooldown_until - now``)만큼 sleep 한다. 그래야 다음 재시도가 cooldown
@@ -930,8 +930,7 @@ async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> No
     시작하므로(hard barrier), position reconcile 이 미복구 체결을 "외부 매수"로
     오분류하지 않는다. 카치업이 **성공하지 못한**(폴 실패) 계좌는
     ``s.fill_catch_up_failed_accounts`` 에 기록해, 그 계좌의 기동 reconcile 이
-    external-buy 분류를 건너뛰게 한다(#1946 Finding 1 — startup 폴 실패를
-    "0건 성공" 으로 삼켜 barrier 를 우회하던 결함 수정).
+    external-buy 분류를 건너뛰게 한다.
     """
     s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
@@ -954,7 +953,7 @@ async def _register_fill_scheduler_for_account(s: Services, account: Any) -> boo
     멱등 재등록(self-healing): 기존 dict 항목이 있으면 새 scheduler 로 덮어쓰기
     전 기존 task 를 stop 해 orphan task 를 방지한다. **per-account barrier 만**
     갱신하고 전역 ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
-    (타 계좌의 #1946 barrier 보존).
+    (타 계좌의 barrier 보존).
 
     Returns:
         등록 성공(scheduler start 완료) 여부. ``catch_up_once`` 폴 실패여도
@@ -1052,8 +1051,6 @@ async def _init_reconcile_scheduler(s: Services) -> None:
 
     활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
     를 만들어 ``s.reconcile_schedulers`` dict 에 등록한다 (multi-broker pool).
-    이전 SPLIT-1 패턴은 첫 번째 broker 만 골라 다른 계좌의 봇 reconcile 을
-    건너뛰었다 (가드만 존재). 본 SPLIT 에서 dispatch 까지 분리한다.
     """
     assert s.eventbus is not None
 
@@ -1184,7 +1181,7 @@ def _self_healing_targets(accounts: list[Any]) -> list[Any]:
     """self-healing 대상 — **전 계좌**.
 
     ``treasury_sync`` 는 broker_type/trading_mode 무관 항상 요구(면제 없음)이므로,
-    broker 면제(virtual/test) 계좌도 treasury 일시 실패의 회복 대상이다(Codex P2).
+    broker 면제(virtual/test) 계좌도 treasury 일시 실패의 회복 대상이다.
     회복 시 각 플래그는 면제 여부에 따라 개별 처리된다(broker/fill/reconcile 은
     면제 계좌에서 skip, treasury 는 전 계좌 재시도).
     """
@@ -1219,14 +1216,14 @@ async def _self_healing_recover_account(s: Services, account: Any) -> bool:
        not_ready 이거나 broker 가 방금 재연결된 경우에만** idempotent re-register
        한다(기존 task cancel 후 교체 — orphan 방지). per-account 만 갱신하고 전역
        barrier ``fill_catch_up_failed_accounts.clear()`` 는 호출하지 않는다
-       (타 계좌 #1946 barrier 보존).
+       (타 계좌 barrier 보존).
     3. ``broker_ready`` 는 의존 rebind 를 모두 마친 **뒤** mark 한다(stale-broker
        false-ready 창 제거).
 
     Known limitations (bounded — 메타리뷰, follow-up 후보):
     - 비-broker flag(fill/treasury) 반복 실패는 broker 캐시 세션을 건강하다고
       **신뢰**한다. 본 PR 은 ``broker_ready`` 강등 경로가 없어 "broker_ready=True
-      이나 세션 사망" 조합이 발생하지 않는다. 강등 도입(#2398 reader live-poll 등)
+      이나 세션 사망" 조합이 발생하지 않는다. 강등 도입(reader live-poll 등)
       시 회복 경로의 broker 캐시 무효화 재검토가 필요하다.
     - ``broker_just_recovered`` rebind(기존 스케줄러 교체) 분기는 startup connect
       실패 시 스케줄러가 애초에 생성되지 않으므로 현 PR 에서 production-도달 불가한
@@ -1331,10 +1328,10 @@ async def _readiness_self_healing_loop(s: Services, targets: list[Any]) -> None:
 
     liveness invariant: broker 회복이 가능한 한 not_ready 계좌는 유한시간 내
     ready 로 전이한다. ``max_attempts`` 는 **per-burst(연결시도 단위)에만** 적용
-    하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되어
-    #2395 를 역회귀로 재생산하지 않도록. shutdown 에서 task cancel 로 종료한다.
+    하고 계좌 lifetime 은 무제한이다 — 일시 토큰압박이 영구 not_ready 로 고착되지
+    않도록. shutdown 에서 task cancel 로 종료한다.
 
-    #2399 Codex attempt3-b (per-app_key cooldown at source): 같은 app_key 의 여러
+    per-app_key cooldown at source: 같은 app_key 의 여러
     계좌가 pending 이면, 첫 계좌의 connect 가 EGW00133 으로 cooldown 을 기록한 뒤
     같은 burst 의 두 번째 계좌 connect 는 cooldown 내라 발급 레이어가 **HTTP 미호출·
     즉시 ``TokenRateLimitError``** 로 raise → 아래 ``except TokenRateLimitError`` 가
@@ -1460,10 +1457,6 @@ async def _init_stream_integration(
     ``account_id`` 키로 등록한다. 한 계좌 stream 의 disconnect 가 다른 계좌
     의 fallback 을 토글하지 않도록 ``StreamConnectedEvent`` /
     ``StreamDisconnectedEvent`` 의 account_id marker (C2) 와 함께 작동한다.
-
-    이전 SPLIT-1 패턴 (``s.stream_integration`` 단일 슬롯 덮어쓰기) 은 두 번째
-    KIS 계좌 등록 시 첫 인스턴스를 silently leak 시켰으므로 본 SPLIT 에서
-    수정한다.
     """
     assert s.eventbus is not None
     from ante.account.scoping import require_account_id
@@ -1518,24 +1511,21 @@ async def _init_stream_integration(
 async def _sync_instruments(s: Services, accounts: list) -> None:
     """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
 
-    #2385: 과거에는 첫 번째 성공 broker 에서 ``return`` 했으나, 계좌 순서가
-    ``test``(TEST) → ``oracle-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
-    종목 마스터 적재를 선점해 종목명 병기가 전부 symbol-only 로
-    폴백되는 회귀가 있었다. 이제 전 계좌를 순회하되 이미 동기화한 exchange
+    전 계좌를 순회하되 이미 동기화한 exchange
     는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.
     빈 결과(``get_instruments() == []``)는 synced 처리하지 않고 ``continue`` 하여
     같은 exchange 의 후속 계좌가 여전히 동기화를 시도할 수 있게 한다.
     ``bulk_upsert`` 성공 시에만 exchange 를 synced 로 표시한다. 전 계좌 순회
     후 아무 것도 동기화하지 못하면 기존 경고를 유지한다.
 
-    #2397 D-ACC-09 R1: broker_ready 면제 계좌(virtual/test)는 connect 단계에서
+    D-ACC-09: broker_ready 면제 계좌(virtual/test)는 connect 단계에서
     이미 skip 되어 broker 가 미연결이다. 여기서도 ``get_broker`` 를 호출하면 그
     면제 계좌를 KIS 토큰/connect 실패에 **재노출**하므로(readiness 분리 전제
     붕괴), 면제 계좌는 순회 대상에서 제외한다(non-exempt/live connected 계좌만
     대상). 면제 계좌의 dummy exchange 가 KRX 등 실 exchange 마스터 적재를
-    선점하던 #2385 회귀도 동일하게 차단된다.
+    선점하던 회귀도 동일하게 차단된다.
 
-    #2399 Codex attempt3-a: startup connect 에서 broker not_ready 가 된 비면제
+    startup connect 에서 broker not_ready 가 된 비면제
     (LIVE) 계좌도 순회 대상에서 제외한다(``_broker_not_ready_live``). 그 계좌에
     ``get_broker`` 를 다시 호출하면 EGW00133 계좌의 KIS 토큰 1/min 제한을 startup
     단일 cadence(T4) 밖에서 또 두드리기 때문이다. (A) per-app_key cooldown 이
@@ -1798,8 +1788,7 @@ async def _init_feed(s: Services) -> None:
 def _approval_account_id(params: dict, *, context: str) -> str:
     """approval params 에서 검증된 account_id 를 추출.
 
-    Refs #1217 → #1241 SPLIT-2: ``params.get("account_id", "test")`` fallback
-    제거. ``ApprovalService`` 가 create()/reopen() 진입점에서 이미 동일한
+    ``ApprovalService`` 가 create()/reopen() 진입점에서 이미 동일한
     검증을 수행하지만, executor / validator 가 main.py 외부에서도 호출될 수
     있으므로 진입점 단위로 한 번 더 명시 검증한다.
     """
@@ -1923,8 +1912,8 @@ async def _init_approval(s: Services) -> None:
     async def _exec_bot_stop_idempotent(params: dict) -> None:
         """approval ``bot_stop`` executor.
 
-        Refs #1759: ``BotManager.stop_bot`` 이 strict state machine 으로
-        전환된 이후에도 approval workflow 의 ``bot_stop`` action 은
+        ``BotManager.stop_bot`` 은 strict state machine 이지만
+        approval workflow 의 ``bot_stop`` action 은
         idempotent 의미를 보존한다 (이미 중지된 봇에 대해 BotStoppedEvent
         가 재처리되는 cold path 회귀 보호). state machine 거부는 silent
         ignore 하고, 그 외 ``BotError`` 는 그대로 전파한다.
@@ -2089,8 +2078,7 @@ async def _init_approval(s: Services) -> None:
     def _validate_budget_change(params: dict) -> list[ValidationResult]:
         """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn).
 
-        Refs #1217 → #1241 SPLIT-2: ``params.get("account_id", "test")``
-        fallback 제거. invalid account_id 는 ``ValidationResult("fail", ...)``
+        invalid account_id 는 ``ValidationResult("fail", ...)``
         으로 변환해 ``ApprovalService`` 가 ``ApprovalValidationError`` 로
         변환하도록 한다 (validator 계약: raise 대신 fail 반환).
         """
@@ -2428,13 +2416,13 @@ async def _run(s: Services) -> None:
 async def _shutdown(s: Services) -> None:
     """종료 정리 (역순).
 
-    종료 순서 (Refs #1159 — cold-path race window 차단):
+    종료 순서 (cold-path race window 차단):
     1. 종료 알림(NotificationEvent), Telegram, 스케줄러 태스크 취소
-       (감사/결재 만료, **스탑 주문 세션 만료 sweep task** 포함 — #2405).
+       (감사/결재 만료, **스탑 주문 세션 만료 sweep task** 포함).
     2. **IPCServer.stop_accepting()** — 새 IPC 연결 차단, **소켓 파일은 유지**.
        이 호출 시작 시 IPCServer state는 `SHUTTING_DOWN`으로 전환되어 이후
        active connection의 mutating command를 `SERVICE_UNAVAILABLE`로 거부한다.
-    3. **StopOrderManager.stop()** (#2405 attempt4 P2) — 활성 스탑 주문을
+    3. **StopOrderManager.stop()** — 활성 스탑 주문을
        `manager_stopped`로 일괄 만료. IPC gate(2) **뒤**·BotManager(6) **앞**에
        두어, manager.stop() 소요와 무관하게 mutating IPC를 차단하면서도
        `StopOrderExpiredEvent` 소비자(SignalChannel)가 생존한다.

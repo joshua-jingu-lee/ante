@@ -7,7 +7,7 @@
     docs/specs/core/core.md ``## Canonical Exchange Vocabulary``
     docs/decisions/D-016-canonical-exchange-vocabulary.md
 
-범위 불변식 (#1576 narrow-scope):
+범위 불변식:
     - 본 모듈은 **축 A — exchange-vocabulary 유효성** (canonical 5종 + `*`
       정책) 의 값 집합·검증 헬퍼만 정의한다.
     - surface별 enforcement·에러 계층·preset/broker 가용성(축 B)·신규
@@ -53,6 +53,6 @@ def normalize_exchange(value: str) -> str:
     core.md ``### Canonical set`` 에 따라 대소문자 정규화·별칭 매핑은
     1.0 비목표다. 이 헬퍼는 어떤 변환도 수행하지 않고 입력을 그대로
     돌려준다. 호출자는 반환값을 ``is_canonical`` /
-    ``is_strategy_allowed`` 로 별도 검증해야 한다 (Codex Plan Review q5).
+    ``is_strategy_allowed`` 로 별도 검증해야 한다.
     """
     return value

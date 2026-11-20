@@ -146,7 +146,7 @@ class StrategyContextFactory:
 
         ``trade_recorder`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
         binding 한 **봇별** ``LiveTradeHistoryView`` 를 생성한다(``LiveOrderView``
-        #1948 패턴 미러). 단일계좌 다중봇에서 봇 계좌 scope 격리를 보장해 타 계좌
+        패턴 미러). 단일계좌 다중봇에서 봇 계좌 scope 격리를 보장해 타 계좌
         거래 이력이 전략 컨텍스트에 누출되지 않게 한다. 미주입이면 공유 fallback
         ``live_trade_history`` 를 그대로 반환한다(virtual-only/legacy/test 환경
         호환 — 공유 인스턴스의 private 멤버에 접근하지 않는다).
@@ -258,7 +258,7 @@ class _EmptyOrderView(OrderView):
     """order_tracker 와 공유 live_order_view 가 모두 미주입일 때의 fallback.
 
     virtual-only/legacy 환경에서 LIVE 컨텍스트 생성이 ValueError 로 깨지지 않도록
-    빈 미체결 목록을 반환한다(#1948 회귀 방지).
+    빈 미체결 목록을 반환한다(회귀 방지).
     """
 
     def get_open_orders(self, bot_id: str) -> list[dict[str, Any]]:

@@ -10,8 +10,8 @@ class TreasuryError(Exception):
 class InsufficientFundsError(TreasuryError):
     """자금 부족.
 
-    클래스 레벨 ``code`` 속성은 #1843 sub-PR 4 (treasury sweep) 에서
-    신규 부여한 안정 코드 ``TREASURY_INSUFFICIENT_FUNDS`` 다 — CLI/IPC
+    클래스 레벨 ``code`` 속성은
+    안정 코드 ``TREASURY_INSUFFICIENT_FUNDS`` 다 — CLI/IPC
     envelope 이 동일 코드를 surface 한다. ``update_budget`` 이 typed
     reject (``TreasuryInsufficientUnallocatedError`` →
     ``TREASURY_INSUFFICIENT_BALANCE``) 를 catch 해 ``InsufficientFundsError``
@@ -30,7 +30,7 @@ class InsufficientFundsError(TreasuryError):
 class BotNotStoppedError(TreasuryError):
     """봇이 중지 상태가 아니어서 예산 변경 불가.
 
-    클래스 레벨 ``code`` 속성은 #1843 sub-PR 4 에서 신규 부여한 안정
+    클래스 레벨 ``code`` 속성은 안정
     코드 ``TREASURY_BOT_NOT_STOPPED`` 다 — running 상태 봇의 예산 변경
     거부는 운영 상태 머신 위반 (taxonomy ``state_conflict``).
     """
@@ -47,7 +47,7 @@ class TreasuryNotConfiguredError(TreasuryError):
     매핑한다 (`TreasuryError` 하위 클래스이므로 기존 422 매핑이 자동
     적용된다).
 
-    클래스 레벨 ``code`` 속성은 #1843 sub-PR 4 에서 신규 부여한 안정
+    클래스 레벨 ``code`` 속성은 안정
     코드 ``TREASURY_NOT_CONFIGURED`` 다 — service 인프라 부재로 인한
     거부 (taxonomy ``service_unavailable``).
     """
@@ -58,7 +58,7 @@ class TreasuryNotConfiguredError(TreasuryError):
 class TreasuryInvalidAmountError(TreasuryError):
     """``allocate``/``deallocate`` amount 가 finite-positive 가 아님.
 
-    #1411 finite-positive 가드(``math.isfinite(amount) and amount > 0``)
+    finite-positive 가드(``math.isfinite(amount) and amount > 0``)
     위반 — NaN/±Infinity/음수/0 일 때 raise.
     """
 
