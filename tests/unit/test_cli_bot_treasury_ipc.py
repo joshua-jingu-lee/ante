@@ -331,6 +331,25 @@ class TestBotRemoveIpc:
         assert result.exit_code == 1
         assert "Bot not found: bot-xxx" in result.output
 
+    @patch("ante.cli.commands.bot.is_active_runtime", return_value=False)
+    @patch("ante.cli.commands.bot._run_bot_remove_cold_path")
+    def test_bot_remove_cold_path_not_found_json_code(
+        self, mock_cold_path, mock_active
+    ) -> None:
+        import json as _json
+
+        from ante.bot.exceptions import BotNotFoundError
+
+        mock_cold_path.side_effect = BotNotFoundError("bot-xxx")
+
+        result = _invoke_cli(["--format", "json", "bot", "remove", "bot-xxx", "--yes"])
+
+        mock_cold_path.assert_awaited_once()
+        assert result.exit_code == 1
+        data = _json.loads(result.output)
+        assert data["code"] == "BOT_NOT_FOUND"
+        assert data["message"] == "Bot not found: bot-xxx"
+
     @pytest.mark.asyncio
     async def test_bot_remove_cold_path_closes_db_on_failure(self) -> None:
         """cold-path helper는 service 실패 시에도 DB close를 보장한다."""

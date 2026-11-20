@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -129,3 +129,30 @@ class TestBacktestHistoryReadOnly:
         # (b) 핵심 회귀 락: 실행 후에도 backtest_runs 테이블이 생성되지 않음
         #     (read-only DDL 부작용 부재).
         assert not _backtest_runs_table_exists(str(db_file))
+
+    def test_history_other_db_error_is_backtest_error(self, runner, tmp_path) -> None:
+        db_file = tmp_path / "ante.db"
+        _make_empty_db(str(db_file))
+
+        with patch(
+            "ante.backtest.run_store.BacktestRunStore.list_by_strategy",
+            new=AsyncMock(side_effect=sqlite3.OperationalError("database is locked")),
+        ) as mock_list:
+            result = runner.invoke(
+                cli,
+                [
+                    "--format",
+                    "json",
+                    "backtest",
+                    "history",
+                    "momentum",
+                    "--db-path",
+                    str(db_file),
+                ],
+            )
+
+        mock_list.assert_awaited_once()
+        assert result.exit_code == 1, result.output
+        data = json.loads(result.output)
+        assert data["code"] == "BACKTEST_ERROR"
+        assert data["message"] == "database is locked"
