@@ -1,0 +1,16 @@
+# #2540: src/ante의 주석과 독스트링 이력 참조를 지운 커밋. 동작은 바뀌지 않았다.
+# 사용: git blame --ignore-revs-file .git-blame-ignore-revs <파일>
+#       또는 git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# #2563 contracts의 주석 삭제
+bfa3cae7d77406916403647148fc7729f82df4c3
+# #2566 주문 경로의 주석 삭제
+d063974b64cbde90ce4f57529f564591133b8f9b
+# #2569 나머지 모듈의 주석 삭제
+d469a436cbe90acbe8dbf1608fcb90d3599a7ffc
+# #2581 cli의 주석 삭제
+0c89c07573f63fcbc3b051b61a6899dfc0b3fc7e
+# #2588 ipc·main·feed의 주석 삭제
+6d6acaaf4d412b4b60ca614bbbc10571cc70805a
+# #2589 독스트링 이력 참조의 결정적 삭제(H1)
+4c661d8238042d39ad8e95891a435794fd9ecbe9
