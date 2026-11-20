@@ -115,6 +115,66 @@ class TestVirtualProviderStopGuard:
         assert len(filled) == 0
         assert portfolio.get_positions("virtual1") == {}
 
+    @pytest.mark.parametrize("order_type", ["stop", "stop_limit"])
+    @pytest.mark.parametrize("price", [None, 1050.0])
+    async def test_virtual_provider_leaves_stop_orders_untouched(
+        self, eventbus, order_type, price
+    ):
+        """등록 단계 stop / stop_limit 은 체결도 실패 종결도 하지 않고 그대로 둔다."""
+        from ante.eventbus.events import OrderFailedEvent
+
+        executor = VirtualExecutor(
+            eventbus=eventbus, commission_rate=0.00015, **_gate_kwargs()
+        )
+        portfolio = VirtualPortfolioView(
+            bot_id="virtual1", initial_balance=10_000_000.0
+        )
+        executor.register_bot("virtual1", portfolio)
+        executor.subscribe()
+
+        filled: list[OrderFilledEvent] = []
+        failed: list[OrderFailedEvent] = []
+        eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
+        eventbus.subscribe(OrderFailedEvent, lambda e: failed.append(e))
+
+        await eventbus.publish(
+            OrderApprovedEvent(
+                order_id="ord-stop-untouched",
+                account_id="acct1",
+                bot_id="virtual1",
+                strategy_id="A7",
+                symbol="069500",
+                side="buy",
+                quantity=1.0,
+                order_type=order_type,
+                price=price,
+                stop_price=1000.0,
+                reserved_amount=0.0,
+            )
+        )
+
+        assert filled == []
+        assert failed == []
+        assert portfolio.get_positions("virtual1") == {}
+        assert portfolio.get_balance("virtual1")["available"] == 10_000_000.0
+
+        # 같은 executor 가 일반 limit 주문은 체결한다(구독이 살아 있다는 대조군).
+        await eventbus.publish(
+            OrderApprovedEvent(
+                order_id="ord-limit-control",
+                account_id="acct1",
+                bot_id="virtual1",
+                strategy_id="A7",
+                symbol="069500",
+                side="buy",
+                quantity=1.0,
+                order_type="limit",
+                price=1050.0,
+                reserved_amount=1050.0 * 1.00015,
+            )
+        )
+        assert [e.order_id for e in filled] == ["ord-limit-control"]
+
     async def test_virtual_provider_processes_trigger_converted_market(self, eventbus):
         """StopOrderManager가 trigger 시 발행하는 변환 market 주문은 정상 체결된다."""
         executor = VirtualExecutor(
