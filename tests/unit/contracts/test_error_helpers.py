@@ -26,6 +26,7 @@ from ante.contracts import (
     ipc_error_payload,
 )
 from ante.contracts.error_registry import EXCEPTION_TO_SPEC, EXECUTION_ERROR_SPEC
+from ante.core.database import ReadOnlyDatabaseError
 from ante.member.scopes import InvalidScopeError
 
 # ── ErrorSpec dataclass shape ─────────────────────────────────────────────────
@@ -359,6 +360,25 @@ def test_registry_spec_code_matches_class_code_for_every_entry() -> None:
 
     assert mismatched == {}
     assert without_code == _REGISTERED_WITHOUT_CODE
+
+
+class TestReadOnlyDatabaseErrorCode:
+    """``.code`` 가 없는 ``ReadOnlyDatabaseError`` 의 봉투 코드는 실행 오류다."""
+
+    def test_ipc_error_payload_code(self) -> None:
+        payload = ipc_error_payload(ReadOnlyDatabaseError("read-only"))
+        assert payload == {"code": "EXECUTION_ERROR", "message": "read-only"}
+
+    def test_cli_error_envelope_code(self, capsys: pytest.CaptureFixture[str]) -> None:
+        fmt = OutputFormatter("json")
+        with pytest.raises(click.exceptions.Exit) as exit_info:
+            emit_cli_error(fmt, ReadOnlyDatabaseError("read-only"))
+
+        assert exit_info.value.exit_code == 1
+        envelope = json.loads(capsys.readouterr().out)
+        assert envelope["status"] == "error"
+        assert envelope["code"] == "EXECUTION_ERROR"
+        assert envelope["message"] == "read-only"
 
 
 # ── module public surface ─────────────────────────────────────────────────────
