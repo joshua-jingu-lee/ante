@@ -633,10 +633,10 @@ async def test_drain_connections_waits_for_active_connection_after_stop_acceptin
         if server_side_transports:
             break
         await asyncio.sleep(0)
-    assert server_side_transports
 
     drain_task: asyncio.Task | None = None
     try:
+        assert server_side_transports
         await server.stop_accepting()
         drain_task = asyncio.ensure_future(server.drain_connections(timeout=3600.0))
         for _ in range(50):
@@ -691,8 +691,8 @@ async def test_start_sets_runtime_dir_mode_0o700(
         finally:
             os.umask(old_umask)
 
-        assert stat.S_IMODE(os.stat(run_dir).st_mode) == 0o700
         assert start_error is None
+        assert stat.S_IMODE(os.stat(run_dir).st_mode) == 0o700
     finally:
         if started:
             await server.stop()

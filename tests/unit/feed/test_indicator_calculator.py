@@ -21,7 +21,7 @@ pandas-ta 기술지표 계산기와는 별개다.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import polars as pl
@@ -543,8 +543,9 @@ def test_indicator_only_nonstandard_month_row_contributes_nothing(
 ) -> None:
     """분기 행이 비표준 월 legacy 행 하나뿐이면 그 행은 일별 행에 닿지 않는다.
 
-    제거된 뒤 남은 분기 행이 없으므로 일별 행에는 그 행에서 나온 재무 컬럼도,
-    그 행으로 계산한(null) 지표 컬럼도 저장되지 않는다.
+    근거 계약: 비표준 월 legacy 행은 join 전에 제거되고, ``_join_asof`` 는
+    effective availability를 가진 분기 행이 하나도 남지 않으면 None을 반환한다.
+    그래서 일별 파티션에는 그 행에서 나온 재무 컬럼도 null 지표 컬럼도 저장되지 않는다.
     """
     _write_daily(
         store,
@@ -631,6 +632,110 @@ def test_indicator_nonstandard_month_row_with_available_date_is_used(
     row = _daily_rows(store).row(0, named=True)
     assert row.get("per") is not None
     assert abs(row["per"] - 420_000_000_000_000 / 60_000_000_000_000) < 1e-6
+
+
+_MIXED_MARKET_CAP = 1_200_000_000_000_000
+
+
+def _mixed_quarter_rows() -> list[dict]:
+    """정의역 여섯 칸을 한 프레임에 담는다. 행마다 net_income 이 달라 원천을 가린다.
+
+    available_date 는 법정기한 fallback 과 다른 날이다(3·6·9월은 더 이르게,
+    12월은 더 늦게).
+    """
+    rows = [
+        ("legacy_q", date(2023, 3, 31), None, 10),
+        ("avail_q", date(2023, 6, 30), date(2023, 7, 20), 20),
+        ("avail_nonstandard", date(2023, 8, 31), date(2023, 9, 10), 30),
+        ("legacy_nonstandard", date(2023, 10, 31), None, 99),
+        ("legacy_annual", date(2023, 12, 31), None, 40),
+        ("avail_annual", date(2024, 12, 31), date(2025, 4, 20), 50),
+    ]
+    return [
+        {
+            "name": name,
+            "date": period_end,
+            "available_date": available,
+            "symbol": SYMBOL,
+            "net_income": ni * 1_000_000_000_000,
+            "total_equity": 300_000_000_000_000,
+            "total_debt": 100_000_000_000_000,
+            "source": "dart",
+        }
+        for name, period_end, available, ni in rows
+    ]
+
+
+def test_indicator_effective_date_is_decided_per_row_in_mixed_frame(
+    store: ParquetStore,
+) -> None:
+    """유효일은 행마다 정해진다: available_date 가 있으면 그 날, 없으면 period_end 월로
+    3·6·9월 +45일, 12월 +90일, 그 밖의 월은 제거.
+
+    legacy 행과 available_date 행이 한 프레임에 섞여 있어도 각 행의 유효일 전날에는
+    앞 행의 값이, 당일에는 그 행의 값이 붙는다. 제거된 비표준 월 legacy 행은 +45일·+90일
+    어느 날에도 원천이 되지 않는다.
+    """
+    quarter = {r["name"]: r for r in _mixed_quarter_rows()}
+    effective = {
+        "legacy_q": quarter["legacy_q"]["date"] + timedelta(days=45),
+        "avail_q": quarter["avail_q"]["available_date"],
+        "avail_nonstandard": quarter["avail_nonstandard"]["available_date"],
+        "legacy_annual": quarter["legacy_annual"]["date"] + timedelta(days=90),
+        "avail_annual": quarter["avail_annual"]["available_date"],
+    }
+    order = [
+        "legacy_q",
+        "avail_q",
+        "avail_nonstandard",
+        "legacy_annual",
+        "avail_annual",
+    ]
+    expected: dict[date, str | None] = {}
+    previous: str | None = None
+    for name in order:
+        expected[effective[name] - timedelta(days=1)] = previous
+        expected[effective[name]] = name
+        previous = name
+    removed_end = quarter["legacy_nonstandard"]["date"]
+    for lag in (45, 90):
+        expected[removed_end + timedelta(days=lag)] = "avail_nonstandard"
+    # 법정기한 fallback 날짜에는 available_date 행이 아직 원천이 아니다.
+    expected[quarter["avail_annual"]["date"] + timedelta(days=90)] = "legacy_annual"
+    period_ends = {r["date"] for r in quarter.values()}
+    assert period_ends.isdisjoint(expected)
+
+    _write_daily(
+        store,
+        [
+            {
+                "date": d,
+                "symbol": SYMBOL,
+                "market_cap": _MIXED_MARKET_CAP,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            }
+            for d in sorted(expected)
+        ],
+    )
+    _write_quarterly(
+        store,
+        [{k: v for k, v in r.items() if k != "name"} for r in quarter.values()],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    daily = _daily_rows(store)
+    observed: dict[date, str | None] = {}
+    by_per = {_MIXED_MARKET_CAP / r["net_income"]: name for name, r in quarter.items()}
+    for row in daily.iter_rows(named=True):
+        per = row.get("per")
+        if per is None:
+            observed[row["date"]] = None
+            continue
+        matches = [name for value, name in by_per.items() if abs(per - value) < 1e-6]
+        observed[row["date"]] = matches[0] if matches else f"unknown per={per}"
+    assert observed == expected
 
 
 def test_indicator_zero_denominator_null(store: ParquetStore) -> None:

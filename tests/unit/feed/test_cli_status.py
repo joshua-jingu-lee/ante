@@ -225,6 +225,24 @@ class TestFeedStatusWithReport:
         assert "7 total failures" in result.output
         assert "1 total failures" not in result.output
 
+    def test_total_failures_uses_summary_total_with_empty_failures_array(
+        self, runner: CliRunner, data_path: str
+    ) -> None:
+        """failures 배열이 비어 있어도 summary.failures_total 이 있으면 그 값을 쓴다."""
+        _init_feed(data_path)
+        _create_report(
+            data_path,
+            mode="daily",
+            target_date="2026-03-16",
+            success=10,
+            failed=0,
+            failures_total=3,
+        )
+        result = _invoke_status(runner, data_path)
+
+        assert "3 total failures" in result.output
+        assert "0 total failures" not in result.output
+
     def test_total_failures_falls_back_to_failures_len(
         self, runner: CliRunner, data_path: str
     ) -> None:

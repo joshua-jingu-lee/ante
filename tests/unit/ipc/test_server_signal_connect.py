@@ -530,6 +530,14 @@ async def test_malformed_first_frame_closes_connection(
             await writer.wait_closed()
         except ConnectionError:
             pass
+
+        # 닫히는 것은 그 연결뿐이다. 새 연결의 요청은 계속 처리된다.
+        reader2, writer2 = await asyncio.open_unix_connection(socket_path)
+        await _write_json_frame(writer2, {"id": "n2", "command": "no.such"})
+        resp2 = json.loads((await _read_frame(reader2)).decode("utf-8"))
+        assert resp2["error"]["code"] == "UNKNOWN_COMMAND"
+        writer2.close()
+        await writer2.wait_closed()
     finally:
         await server.stop()
 
@@ -562,7 +570,12 @@ async def test_ack_write_failure_unregisters_handle(
     bm.validate_signal_key = AsyncMock(return_value="bot-1")
     bm.get_bot = MagicMock(return_value=_make_bot())
     svc = _make_service_registry(bm)
+    from ante.bot.signal_channel_registry import ChannelHandle
+
     channel_registry = SignalChannelRegistry()
+    channel_registry.register(
+        ChannelHandle(session_id="other", bot_id="bot-2", generation=0)
+    )
     svc.signal_channel_registry = channel_registry
     server = IPCServer(socket_path, svc, _signal_only_registry())
     await server.start()
@@ -586,6 +599,7 @@ async def test_ack_write_failure_unregisters_handle(
         assert ack["status"] == "ok"
         assert writer.closed is True
         assert channel_registry.has_active_session("bot-1") is False
+        assert channel_registry.has_active_session("bot-2") is True
         errors = [
             r
             for r in caplog.records
