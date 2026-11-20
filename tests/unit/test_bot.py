@@ -2608,6 +2608,21 @@ class _PositionsTradeService:
         return [position]
 
 
+class _OverflowThenFailingStop(Strategy):
+    """매 스텝 시그널 둘을 돌려주고, on_stop 에서 예외를 낸다."""
+
+    meta = StrategyMeta(name="overflow_stop", version="1.0.0", description="test")
+
+    async def on_step(self, context):
+        return [
+            Signal(symbol="005930", side="buy", quantity=1.0, reason="a"),
+            Signal(symbol="005930", side="buy", quantity=1.0, reason="b"),
+        ]
+
+    def on_stop(self):
+        raise RuntimeError("on_stop failed")
+
+
 class TestBotOrderGateAfterStop:
     """정지가 시작된 봇의 on_step·on_data 시그널은 주문 요청으로 발행되지 않는다."""
 
@@ -2907,6 +2922,137 @@ class TestBotOrderGateAfterStop:
         await asyncio.wait_for(manager.resume_bot("bot1"), timeout=5.0)
         await asyncio.wait_for(eventbus.publish(_gen_signal("sig-C")), timeout=5.0)
         assert [e.reason for e, _ in orders] == ["sig-C"]
+
+    async def test_failing_self_stop_after_signal_overflow_goes_to_error(
+        self, eventbus, ctx, monkeypatch
+    ):
+        """초과로 스스로 정지하다 on_stop 이 실패하면 봇은 ERROR 가 된다."""
+
+        async def yielding_sleep(delay: float) -> None:
+            await _real_sleep(0 if delay == 17 else delay)
+
+        monkeypatch.setattr("ante.bot.bot.asyncio.sleep", yielding_sleep)
+        errors = _collect(eventbus, BotErrorEvent)
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=BotConfig(
+                bot_id="bot1",
+                strategy_id="overflow_stop",
+                account_id="acc-test",
+                interval_seconds=17,
+                max_signals_per_step=1,
+            ),
+            strategy_cls=_OverflowThenFailingStop,
+            ctx=ctx,
+            eventbus=eventbus,
+        )
+        await bot.start()
+        loop = bot._task
+        assert loop is not None
+        await asyncio.wait_for(loop, timeout=5.0)
+
+        assert bot.status == BotStatus.ERROR
+        assert bot.error_message == "on_stop failed"
+        assert [e.error_message for e, _ in errors][-1] == "on_stop failed"
+        assert orders == []
+
+    async def test_on_data_finishing_while_stop_waits_for_loop_is_dropped(
+        self, eventbus, ctx, pending
+    ):
+        """stop() 이 루프 태스크를 기다리는 동안 끝난 on_data 의 시그널은 버려진다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        publisher = asyncio.create_task(bot.on_external_signal(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+
+        strategy_cls.hold_data["sig-A"].set()
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+        await asyncio.wait_for(publisher, timeout=5.0)
+
+        assert [(s, sid) for s, sid in strategy_cls.data_calls] != []
+        assert orders == []
+
+    async def test_on_data_finishing_while_stopped_event_is_published_is_dropped(
+        self, eventbus, ctx, pending
+    ):
+        """BotStoppedEvent 를 발행하는 동안 끝난 on_data 의 시그널은 버려진다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        publisher = asyncio.create_task(bot.on_external_signal(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+
+        async def release_while_stopping(event: object) -> None:
+            strategy_cls.hold_data["sig-A"].set()
+            await asyncio.wait_for(publisher, timeout=5.0)
+
+        eventbus.subscribe(BotStoppedEvent, release_while_stopping, priority=1000)
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+        assert publisher.done()
+        assert orders == []
+
+    async def test_signal_while_restart_publishes_started_event_is_published(
+        self, eventbus, ctx
+    ):
+        """재시작이 BotStartedEvent 를 발행하는 동안 온 시그널은 발행된다."""
+        strategy_cls = _recorder()
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+        async def signal_while_starting(event: object) -> None:
+            await asyncio.wait_for(
+                bot.on_external_signal(_gen_signal("sig-C")), timeout=5.0
+            )
+
+        eventbus.subscribe(BotStartedEvent, signal_while_starting, priority=1000)
+        await asyncio.wait_for(bot.start(), timeout=5.0)
+
+        assert [e.reason for e, _ in orders] == ["sig-C"]
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+    async def test_old_on_data_finishing_while_restart_publishes_is_dropped(
+        self, eventbus, ctx, pending
+    ):
+        """재시작의 BotStartedEvent 발행 중에 끝난 옛 on_data 의 시그널은 버려진다."""
+        strategy_cls = _recorder(hold_data={"sig-A": asyncio.Event()})
+        orders = _collect(eventbus, OrderRequestEvent)
+        bot = Bot(
+            config=_gen_config(), strategy_cls=strategy_cls, ctx=ctx, eventbus=eventbus
+        )
+        await bot.start()
+        await strategy_cls.wait_steps(1)
+        publisher = asyncio.create_task(bot.on_external_signal(_gen_signal("sig-A")))
+        pending.append(publisher)
+        await asyncio.wait_for(strategy_cls.data_entered.wait(), timeout=5.0)
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
+
+        async def release_while_starting(event: object) -> None:
+            strategy_cls.hold_data["sig-A"].set()
+            await asyncio.wait_for(publisher, timeout=5.0)
+
+        eventbus.subscribe(BotStartedEvent, release_while_starting, priority=1000)
+        await asyncio.wait_for(bot.start(), timeout=5.0)
+
+        assert publisher.done()
+        assert orders == []
+        await asyncio.wait_for(bot.stop(), timeout=5.0)
 
     async def test_running_bot_publishes_step_and_data_signals(
         self, manager, eventbus, ctx, monkeypatch

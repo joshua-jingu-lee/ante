@@ -277,9 +277,9 @@ class Bot:
                     exc_info=True,
                 )
                 return
-            if self.status != BotStatus.RUNNING:
+            if self.status in (BotStatus.STOPPED, BotStatus.DELETED):
                 logger.warning(
-                    "루프 예외 무시: 봇 %s 상태 %s (RUNNING 아님) — %s",
+                    "루프 예외 무시: 봇 %s 상태 %s (정지 완료) — %s",
                     self.bot_id,
                     self.status.value,
                     e,
