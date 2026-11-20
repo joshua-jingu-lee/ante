@@ -538,6 +538,101 @@ def test_indicator_nonstandard_month_row_never_becomes_asof_source(
     assert abs(row["per"] - 420_000_000_000_000 / 50_000_000_000_000) < 1e-6
 
 
+def test_indicator_only_nonstandard_month_row_contributes_nothing(
+    store: ParquetStore,
+) -> None:
+    """분기 행이 비표준 월 legacy 행 하나뿐이면 그 행은 일별 행에 닿지 않는다.
+
+    제거된 뒤 남은 분기 행이 없으므로 일별 행에는 그 행에서 나온 재무 컬럼도,
+    그 행으로 계산한(null) 지표 컬럼도 저장되지 않는다.
+    """
+    _write_daily(
+        store,
+        [
+            {
+                "date": date(2024, 8, 1),
+                "symbol": SYMBOL,
+                "market_cap": 420_000_000_000_000,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            },
+        ],
+    )
+    _write_quarterly(
+        store,
+        [
+            {
+                "date": date(2024, 4, 30),
+                "symbol": SYMBOL,
+                "net_income": 999_000_000_000_000,
+                "total_equity": 999_000_000_000_000,
+                "total_debt": 999_000_000_000_000,
+                "source": "dart",
+            },
+        ],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    daily_partition = pl.read_parquet(
+        store.base_path / "fundamental" / "KRX" / SYMBOL / "2024-08.parquet"
+    )
+    assert daily_partition["date"].to_list() == [date(2024, 8, 1)]
+    joined_or_derived = {
+        "net_income",
+        "total_equity",
+        "total_debt",
+        "per",
+        "pbr",
+        "eps",
+        "bps",
+        "roe",
+        "debt_to_equity",
+    }
+    assert joined_or_derived.isdisjoint(daily_partition.columns)
+
+
+def test_indicator_nonstandard_month_row_with_available_date_is_used(
+    store: ParquetStore,
+) -> None:
+    """period_end 월 분류는 available_date 없는 legacy 행에만 쓰인다.
+
+    비표준 월(4/30)이어도 available_date(5/20)가 있으면 그 날부터 as-of 원천이 된다.
+    """
+    _write_daily(
+        store,
+        [
+            {
+                "date": date(2024, 6, 3),
+                "symbol": SYMBOL,
+                "market_cap": 420_000_000_000_000,
+                "shares_listed": 5_969_782_550,
+                "source": "data_go_kr",
+            },
+        ],
+    )
+    _write_quarterly(
+        store,
+        [
+            {
+                "date": date(2024, 4, 30),
+                "available_date": date(2024, 5, 20),
+                "symbol": SYMBOL,
+                "net_income": 60_000_000_000_000,
+                "total_equity": 300_000_000_000_000,
+                "total_debt": 100_000_000_000_000,
+                "source": "dart",
+            },
+        ],
+    )
+
+    IndicatorCalculator().compute(store, [SYMBOL])
+
+    row = _daily_rows(store).row(0, named=True)
+    assert row.get("per") is not None
+    assert abs(row["per"] - 420_000_000_000_000 / 60_000_000_000_000) < 1e-6
+
+
 def test_indicator_zero_denominator_null(store: ParquetStore) -> None:
     """분모가 0이면 해당 지표가 null이다 (as-of 결합 경로).
 
