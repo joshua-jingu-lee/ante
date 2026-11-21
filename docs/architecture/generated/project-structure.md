@@ -750,7 +750,8 @@ tests/
 │   ├── test_check_comments.py
 │   ├── test_mock_broker_account.py
 │   ├── test_main_wiring.py
-│   └── test_e2e_harness.py
+│   ├── test_e2e_harness.py
+│   └── test_config_dir_isolation_guard.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py

@@ -643,9 +643,10 @@ class TestInitCreatesTestAccount:
 class TestInitDefaultDir:
     """--dir 미지정 시 ~/.config/ante/ 사용."""
 
-    def test_default_dir(self, runner, tmp_path):
+    def test_default_dir(self, runner, tmp_path, monkeypatch):
         from pathlib import Path
 
+        monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
         patches = _patch_init()
         for p in patches:
             p.start()

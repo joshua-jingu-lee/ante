@@ -851,6 +851,11 @@ class TestMemberListInvalidRolesNoRows:
 class TestMemberListInvalidRolesJsonSchema:
     """invalid row 가 있을 때 JSON 스키마 정확성 + token_hash 비노출."""
 
+    @pytest.fixture(autouse=True)
+    def _default_config_dir(self, monkeypatch) -> None:  # noqa: ANN001
+        # 루트 그룹은 ANTE_CONFIG_DIR을 명시 지정으로 본다. 기본 형태를 보려면 지운다.
+        monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
+
     def test_cli_list_invalid_roles_command_outputs_json(self) -> None:
         """JSON 출력이 본문 v2 스키마와 일치하고 token_hash 가 누설되지 않는다."""
         actionable = _make_invalid_role_member(

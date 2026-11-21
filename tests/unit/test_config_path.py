@@ -179,8 +179,11 @@ class TestInitCommand:
             result = runner.invoke(cli, ["init", "--dir", str(target)])
         assert "init이 이미 완료된 상태입니다" in result.output
 
-    def test_init_default_dir(self, runner, tmp_path: Path) -> None:
+    def test_init_default_dir(
+        self, runner, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """--dir 미지정 시 ~/.config/ante/ 사용."""
+        monkeypatch.delenv("ANTE_CONFIG_DIR", raising=False)
         patches = _patch_init()
         for p in patches:
             p.start()
