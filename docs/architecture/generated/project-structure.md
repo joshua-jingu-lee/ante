@@ -295,7 +295,8 @@ src/ante/
 │   ├── exceptions.py
 │   ├── protocol.py
 │   ├── registry.py
-│   └── server.py
+│   ├── server.py
+│   └── requests.py
 ├── update/
 │   ├── __init__.py
 │   ├── checker.py
@@ -309,6 +310,7 @@ src/ante/
     ├── helpers.py
     ├── cli_registry.py
     ├── ipc_client_errors.py
+    ├── request_errors.py
     └── cli_errors.py
 ```
 
@@ -454,7 +456,10 @@ tests/
 │   │   ├── test_docs_taxonomy_drift.py
 │   │   ├── test_member_admin_ipc_wiring.py
 │   │   ├── test_treasury_account_scoping.py
-│   │   └── test_server_signal_connect.py
+│   │   ├── test_server_signal_connect.py
+│   │   ├── test_request_model_domain.py
+│   │   ├── test_request_validation.py
+│   │   └── test_system_commands.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py
@@ -658,8 +663,9 @@ tests/
 │   │   ├── test_state_enum_transition_tables.py
 │   │   ├── test_approval_status_assignments.py
 │   │   ├── test_error_code_preservation.py
-│   │   ├── test_error_registry_completeness.py
-│   │   └── test_account_id_relocation.py
+│   │   ├── test_account_id_relocation.py
+│   │   ├── test_state_assignments_account_member_circuit.py
+│   │   └── test_error_registry_completeness.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -767,6 +773,7 @@ tests/
 │   ├── test_check_entry_ratchet.py
 │   ├── test_check_lint_ratchet.py
 │   ├── test_approval_status_transitions.py
+│   ├── test_state_transitions_account_member_circuit.py
 │   ├── test_compare_error_exit_records.py
 │   └── test_preservation_recorder.py
 ├── __init__.py

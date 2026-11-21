@@ -98,7 +98,6 @@ def _signal_only_registry() -> CommandRegistry:
         "signal.connect",
         _handle_signal_connect,
         is_mutating=False,
-        result_kind="stream",
         required_services=frozenset({"bot_manager"}),
         account_id_policy="none",
     )
@@ -628,11 +627,9 @@ async def test_signal_connect_registered_metadata() -> None:
     spec = reg.get("signal.connect")
     assert spec is not None
     assert spec.is_mutating is False
-    assert spec.result_kind == "stream"
     assert spec.required_services == frozenset({"bot_manager"})
     assert spec.account_id_policy == "none"
     assert spec.audit_action is None
-    assert spec.result_key is None
 
 
 # ── connect audit · 키 비노출 · placeholder generation ──────────────────

@@ -11,15 +11,18 @@ import struct
 import uuid
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from pydantic import ValidationError
 
 from ante.contracts.helpers import ipc_error_payload
+from ante.contracts.request_errors import RequestValidationError
 from ante.ipc import protocol
 from ante.ipc.exceptions import MessageTooLargeError
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
-    from ante.ipc.registry import CommandRegistry
+    from ante.ipc.registry import CommandRegistry, CommandSpec
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +37,24 @@ _EXPECTED_DISPATCH_REJECT_CODES = frozenset(
         "MALFORMED_REQUEST",
     }
 )
+
+
+def _validation_message(command: str, exc: ValidationError) -> str:
+    errors = exc.errors(include_url=False, include_input=False, include_context=False)
+    fields = ", ".join(
+        f"{'.'.join(str(part) for part in error['loc']) or 'args'}({error['type']})"
+        for error in errors
+    )
+    return f"{command} 인자 검증 실패: {fields}"
+
+
+def _validated_args(spec: CommandSpec, args: Any) -> Any:
+    if spec.request_model is None:
+        return args
+    try:
+        return spec.request_model.model_validate(args)
+    except ValidationError as exc:
+        raise RequestValidationError(_validation_message(spec.name, exc)) from None
 
 
 def _encode_signal_frame(frame: dict) -> bytes:
@@ -342,6 +363,7 @@ class IPCServer:
             return self._service_not_configured(request_id, missing)
 
         try:
+            args = _validated_args(spec, args)
             if spec.account_id_policy == "required":
                 from ante.account.scoping import require_account_id
 
