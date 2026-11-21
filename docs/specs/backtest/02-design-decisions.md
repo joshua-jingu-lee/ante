@@ -233,7 +233,7 @@ def to_dict(self) -> dict:
 | 평균 손실 | `avg_loss` | 패배 거래 평균 PnL |
 | 총 수수료 | `total_commission` | 전 거래 수수료 합산 |
 
-**거래 PnL 추정** (`_estimate_trade_pnl`): 종목별 FIFO 방식으로 buy 평균 단가를 추적하고, sell 시 `(매도가 - 평균단가) × 수량 - 수수료`로 PnL 계산.
+**거래 PnL 추정** (`_estimate_trade_pnl`): 종목별로 매수 수수료를 포함한 평균 단가를 추적하는 평균단가 방식이다. sell 시 `(매도가 - 평균단가) × 수량 - 매도 수수료`로 PnL 계산.
 
 ### BacktestService — 메인 프로세스 측 관리
 
