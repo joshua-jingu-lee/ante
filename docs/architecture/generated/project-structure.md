@@ -74,7 +74,8 @@ src/ante/
 │   ├── service.py                    # ApprovalService — 결재 요청 관리 + 자동 실행
 │   ├── __init__.py
 │   ├── auto_approve.py
-│   └── errors.py
+│   ├── errors.py
+│   └── handlers.py
 ├── instrument/
 │   ├── models.py                     # Instrument — 종목 메타데이터 (frozen dataclass)
 │   ├── service.py                    # InstrumentService — 전체 메모리 캐시 + SQLite
@@ -779,7 +780,9 @@ tests/
 │   ├── test_state_transitions_account_member_circuit.py
 │   ├── test_compare_error_exit_records.py
 │   ├── test_preservation_recorder.py
-│   └── test_state_transitions_report_ipc.py
+│   ├── test_state_transitions_report_ipc.py
+│   ├── test_approval_handlers_characterization.py
+│   └── test_main_approval_handlers_moved.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
