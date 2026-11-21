@@ -902,17 +902,20 @@ async def test_subscription_sync_excludes_other_account_stop_orders(
         ("ord-own", "035720", "acc-001"),
         ("ord-other", "000660", "acc-other"),
     ]:
-        await stop_order_manager.register(
-            order_id=order_id,
-            bot_id="bot-1",
-            strategy_id="stg-1",
-            symbol=symbol,
-            side="buy",
-            quantity=5.0,
-            order_type="stop",
-            stop_price=100000.0,
-            account_id=account_id,
-        )
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await stop_order_manager.register(
+                order_id=order_id,
+                bot_id="bot-1",
+                strategy_id="stg-1",
+                symbol=symbol,
+                side="buy",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id=account_id,
+            )
 
     await integration.start()
     try:

@@ -239,7 +239,11 @@ async def test_join_cancels_tasks_still_running_after_grace(monkeypatch) -> None
     handle.read_task = asyncio.ensure_future(never.wait())
     handle.writer_task = asyncio.ensure_future(never.wait())
 
-    await asyncio.wait_for(handle.join(), timeout=HANG_GUARD_SECONDS)
+    joiner = asyncio.ensure_future(handle.join())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert joiner.done()
+    await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS)
 
     assert handle.read_task.cancelled()
     assert handle.writer_task.cancelled()

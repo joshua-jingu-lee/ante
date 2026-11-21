@@ -1933,8 +1933,14 @@ class TestSessionEpochPruneAndExpireOrdering:
     ) -> None:
         """session_ended 를 발행하는 시점에 그 주문은 이미 활성 목록에 없다."""
         manager.start()
-        with patch.object(
-            StopOrderManager, "_is_session_type_active_now", return_value=True
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
         ):
             stop_id = await self._register(manager, "ord-ordering")
             await manager.on_price_update(
@@ -1955,8 +1961,14 @@ class TestSessionEpochPruneAndExpireOrdering:
                 )
 
         eventbus.publish = AsyncMock(side_effect=_publish)
-        with patch.object(
-            StopOrderManager, "_is_session_type_active_now", return_value=False
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
         ):
             await manager.check_session_expiry()
 

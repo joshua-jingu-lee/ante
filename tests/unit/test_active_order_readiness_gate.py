@@ -1518,6 +1518,48 @@ class TestVirtualRouting:
         assert len(cap.filled) == 1
         assert [f.error_code for f in cap.failed] == ["account_not_ready"]
 
+    @pytest.mark.parametrize(
+        "first_meta_ok", [True, False], ids=["ok_then_missing", "missing_then_ok"]
+    )
+    async def test_virtual_gate_judges_each_order_by_freshly_fetched_meta(
+        self, first_meta_ok: bool
+    ) -> None:
+        """주문 사이에 계좌 메타가 바뀌면 둘째 주문은 새로 읽은 메타로 판정한다."""
+        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+
+        good = make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        missing = MagicMock()
+        missing.status = AccountStatus.ACTIVE
+        missing.broker_type = "test"
+        missing.trading_mode = None
+        svc = MagicMock()
+        svc.get = AsyncMock(
+            side_effect=[good, missing] if first_meta_ok else [missing, good]
+        )
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+
+        await executor._on_order_approved(_approved(order_type="limit"))
+        first = (len(cap.filled), len(cap.failed))
+        await executor._on_order_approved(_approved(order_type="limit"))
+        second = (len(cap.filled) - first[0], len(cap.failed) - first[1])
+
+        assert svc.get.await_count == 2
+        if first_meta_ok:
+            assert (first, second) == ((1, 0), (0, 1))
+        else:
+            assert (first, second) == ((0, 1), (1, 0))
+        assert [f.error_code for f in cap.failed] == ["account_not_ready"]
+
     async def test_virtual_gate_failure_keeps_order_identity_for_release(
         self,
     ) -> None:

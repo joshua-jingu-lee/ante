@@ -547,10 +547,11 @@ async def test_lock_holds_from_read_through_transaction(
     assert (await orig_get("ord-1")).recorded_filled_qty == 70.0
 
 
-async def test_outbox_enqueue_failure_rolls_back_the_fill(
-    db, tracker, position_history, eventbus, monkeypatch
+@pytest.mark.parametrize("failing_step", ["save_trade", "on_trade", "enqueue"])
+async def test_any_step_failure_in_fill_transaction_leaves_nothing_committed(
+    db, tracker, position_history, eventbus, monkeypatch, failing_step
 ):
-    """outbox insert 가 실패하면 같은 트랜잭션의 recorded·trade·position 도 롤백된다."""
+    """txn 의 어느 단계가 실패해도 recorded·trade·position·outbox 가 모두 없다."""
     from ante.trade.fill_outbox import FillOutbox
 
     rec = TradeRecorder(db, position_history)
@@ -565,16 +566,20 @@ async def test_outbox_enqueue_failure_rolls_back_the_fill(
         outbox=outbox,
     )
     await _seed(tracker)
-    enqueue_calls = 0
+    calls: list[str] = []
 
-    async def _failing_enqueue(**kwargs):
-        nonlocal enqueue_calls
-        enqueue_calls += 1
-        raise RuntimeError("outbox insert failed")
+    async def _fail(*args, **kwargs):
+        calls.append(failing_step)
+        raise RuntimeError(f"{failing_step} failed")
 
-    monkeypatch.setattr(outbox, "enqueue", _failing_enqueue)
+    target = {
+        "save_trade": (applier, "_save_trade"),
+        "on_trade": (position_history, "on_trade"),
+        "enqueue": (outbox, "enqueue"),
+    }[failing_step]
+    monkeypatch.setattr(*target, _fail)
 
-    with pytest.raises(RuntimeError, match="outbox insert failed"):
+    with pytest.raises(RuntimeError, match=f"{failing_step} failed"):
         await applier.apply_cumulative(
             account_id=ACCT,
             broker_order_id="0001",
@@ -583,11 +588,12 @@ async def test_outbox_enqueue_failure_rolls_back_the_fill(
             submitted_date=DATE,
         )
 
-    assert enqueue_calls == 1
+    assert calls == [failing_step]
     assert (await tracker.get("ord-1")).recorded_filled_qty == 0.0
     assert (
         await db.fetch_all("SELECT * FROM trades WHERE account_id = ?", (ACCT,)) == []
     )
+    assert await db.fetch_all("SELECT * FROM fill_outbox", ()) == []
     pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
     assert pos["quantity"] == 0.0
 

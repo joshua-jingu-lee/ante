@@ -164,13 +164,19 @@ class TestDailyReportEventAlwaysPublished:
         # No NotificationEvent
         assert len(notif_events) == 0
 
+    @pytest.mark.parametrize(
+        ("instant", "expected"),
+        [
+            (datetime(2001, 5, 29, 14, 59, 59, tzinfo=UTC), date(2001, 5, 29)),
+            (datetime(2001, 5, 29, 15, 0, 0, tzinfo=UTC), date(2001, 5, 30)),
+        ],
+        ids=["kst_23_59_59", "kst_00_00_00"],
+    )
     async def test_missing_target_date_uses_kst_today(
-        self, scheduler, trade_recorder, eventbus, monkeypatch
+        self, scheduler, trade_recorder, eventbus, monkeypatch, instant, expected
     ):
-        """target_date가 없으면 UTC·호스트 시각이 아니라 KST 기준 오늘로 리포트한다."""
+        """target_date가 없으면 KST 자정을 기준으로 오늘을 정한다(UTC·호스트 아님)."""
         import ante.trade.daily_report as daily_report_module
-
-        instant = datetime(2026, 5, 29, 20, 0, tzinfo=UTC)
 
         class _FixedDatetime(datetime):
             @classmethod
@@ -185,9 +191,9 @@ class TestDailyReportEventAlwaysPublished:
 
         await scheduler.run_once()
 
-        assert [e.report_date for e in report_events] == ["2026-05-30"]
+        assert [e.report_date for e in report_events] == [expected.isoformat()]
         from_date = trade_recorder.get_trades.call_args.kwargs["from_date"]
-        assert from_date.date() == date(2026, 5, 30)
+        assert from_date.date() == expected
 
     async def test_with_trades_publishes_both_events(
         self,

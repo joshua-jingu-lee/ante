@@ -1,5 +1,6 @@
 """Rule Engine 모듈 단위 테스트."""
 
+import asyncio
 import math
 from datetime import time
 from unittest.mock import AsyncMock
@@ -29,6 +30,11 @@ from ante.rule import (
     TradingHoursRule,
     UnrealizedLossLimitRule,
 )
+
+
+class _UserBaseException(BaseException):
+    """Exception 이 아닌 사용자 정의 BaseException 하위형."""
+
 
 # ── Fixtures ─────────────────────────────────────
 
@@ -4499,22 +4505,36 @@ class TestRuleEngineEventBus:
         assert rejected[0].order_id == "<unrenderable _Unprintable>"
         assert rejected[0].reason.startswith("Invalid signal side: 'hold'")
 
+    @pytest.mark.parametrize(
+        "exc_type",
+        [
+            KeyboardInterrupt,
+            SystemExit,
+            asyncio.CancelledError,
+            GeneratorExit,
+            _UserBaseException,
+        ],
+        ids=[
+            "KeyboardInterrupt",
+            "SystemExit",
+            "CancelledError",
+            "GeneratorExit",
+            "user",
+        ],
+    )
     async def test_quantity_repr_base_exception_is_not_swallowed(
-        self, engine, eventbus
+        self, engine, eventbus, exc_type
     ):
         """quantity 의 __repr__ 가 Exception 아닌 BaseException 을 던지면 전파한다."""
 
-        class _ReprAbort(BaseException):
-            pass
-
         class _BadQuantity:
             def __repr__(self) -> str:
-                raise _ReprAbort("repr aborted")
+                raise exc_type("repr aborted")
 
         rejected: list[OrderRejectedEvent] = []
         eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
 
-        with pytest.raises(_ReprAbort):
+        with pytest.raises(exc_type):
             await eventbus.publish(
                 OrderRequestEvent(
                     account_id="domestic",

@@ -389,6 +389,48 @@ async def test_gateway_bool_and_non_int_float_numbers_rejected(
     broker.modify_order.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    ("side", "order_price", "new_price", "expected"),
+    [
+        ("buy", 50000.0, 45000.0, "executed"),
+        ("buy", 50000.0, 55000.0, "modify_budget_increase_unsupported"),
+        ("buy", None, 45000.0, "modify_budget_increase_unsupported"),
+        ("sell", 50000.0, 55000.0, "executed"),
+        ("sell", None, 55000.0, "executed"),
+    ],
+    ids=["buy_down", "buy_up", "buy_none", "sell_up", "sell_none"],
+)
+async def test_gateway_budget_gate_by_side_and_order_price(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    broker: AsyncMock,
+    side: str,
+    order_price: float | None,
+    new_price: float,
+    expected: str,
+) -> None:
+    """buy 는 원주문가 이하만(없으면 거부), sell 은 가격·None 과 무관하게 통과한다."""
+    record = _make_record(side=side, order_price=order_price, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    executed: list[OrderModifyExecutedEvent] = []
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    await gateway._on_order_modify(
+        _make_modify_event(side=side, quantity=0.0, price=new_price)
+    )
+
+    if expected == "executed":
+        assert rejected == []
+        assert [e.price for e in executed] == [new_price]
+        broker.modify_order.assert_awaited_once()
+    else:
+        assert executed == []
+        assert [e.reason for e in rejected] == [expected]
+        broker.modify_order.assert_not_awaited()
+
+
 async def test_gateway_buy_missing_order_price_rejected(
     account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
 ) -> None:
