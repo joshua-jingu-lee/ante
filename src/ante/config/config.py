@@ -140,11 +140,12 @@ class Config:
         """path-like 정적 설정을 ``config_dir`` 기준의 절대 경로로 정규화한다.
 
         절대 경로로 설정된 값은 그대로, 상대 경로는 ``config_dir`` 기준으로 결합한다.
-        ``Config.load()``로 만든 인스턴스는 자동으로 ``config_dir``을 기억하므로
-        호출 시점 CWD와 무관하게 server runtime과 CLI가 같은 경로를 본다.
 
         직접 ``Config(...)`` 로 만들었거나 ``config_dir``이 ``None``이면
         ``Path.cwd()``를 폴백으로 사용한다.
+
+        Raises:
+            ConfigError: 키 값을 찾을 수 없고 ``default``도 ``None``인 경우.
         """
         raw = self.get(key, default)
         if raw is None:

@@ -158,9 +158,10 @@ class BacktestService:
     async def run_subprocess(self, config: dict[str, Any]) -> dict:
         """백테스트를 subprocess로 격리 실행 (D-004).
 
-        이 경로는 부모 프로세스에서 ``BacktestCompleteEvent`` 를 발행하지 않는다
-        (격리된 자식 프로세스에는 eventbus 가 없다). ``to_dict()`` 직렬화 계약은
-        무변경이며, 런타임 3키는 envelope 반환에서만 보강된다.
+        ``ante backtest run`` CLI 의 격리 실행 경로다. ``python -m
+        ante.backtest.runner`` 자식 프로세스를 띄워 stdin 으로 JSON config 를
+        전달하고, stdout 의 ``BACKTEST_RESULT_SENTINEL`` 라인만 파싱한 dict 를
+        반환한다. returncode≠0 또는 sentinel 라인 부재는 ``BacktestError`` 다.
         """
         self._validate_config(config)
 

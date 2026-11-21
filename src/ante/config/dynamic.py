@@ -49,13 +49,13 @@ def _is_value_finite(value: Any) -> tuple[bool, Any]:
 def validate_value(key: str, value: Any) -> None:
     """키별 값 검증 (서비스 경계에서 호출).
 
-    `system.log_level`/`notification.min_level` 처럼 enum SSOT가 정의된 키는
-    invalid 값을 즉시 거부한다. 정의되지 않은 키는 numeric finite 가드 외에는
-    통과(generic CRUD 동작 유지).
-
     대소문자 정책: `system.log_level` 은 대소문자 구분으로 거부한다. 즉
     ``_VALID_LOG_LEVELS`` 멤버(전부 대문자)와 정확 일치해야 통과하고,
     ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다.
+    `notification.min_level` 도 대소문자 구분으로 거부한다. 소비자
+    ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
+    ``_VALID_NOTIFICATION_MIN_LEVELS`` 멤버(전부 소문자)와 정확 일치해야 하고,
+    ``"CRITICAL"`` 같은 대문자 입력은 거부된다.
     """
     ok, bad = _is_value_finite(value)
     if not ok:

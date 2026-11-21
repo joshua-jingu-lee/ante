@@ -89,7 +89,6 @@ class EventHistoryStore:
             payload_filter: payload JSON 내부 필드 일치 필터.
                 ``{"bot_id": "X"}`` →
                 ``WHERE json_extract(payload, '$.bot_id') = 'X'``.
-                Keyword-only. SQLite 3.38+ JSON1 (현재 stack 3.53.0).
         """
         sql = "SELECT * FROM event_log WHERE 1=1"
         params: list[str] = []

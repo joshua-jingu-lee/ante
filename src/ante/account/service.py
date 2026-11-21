@@ -608,15 +608,7 @@ class AccountService:
         logger.info("계좌 활성화: %s (요청자: %s)", account_id, activated_by)
 
     async def delete(self, account_id: str, deleted_by: str) -> None:
-        """소프트 딜리트 (status -> DELETED). cold-path 전용.
-
-        ``bots`` 테이블 자체가 없으면(BotManager 미초기화 환경) active 봇이
-        없는 것으로 간주한다.
-
-        1.0 EventBus 계약: ``AccountDeletedEvent``는 발행하지 않는다. cold-path
-        delete는 consumer wiring을 트리거하지 않는다. ``AccountSuspendedEvent``
-        (reason="Account deletion")는 BotManager가 소속 봇을 중지시키도록 유지한다.
-        """
+        """소프트 딜리트 (status -> DELETED). cold-path 전용."""
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "계좌 삭제는 cold-path 전용입니다. "
