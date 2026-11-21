@@ -108,8 +108,8 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
    — 외부 시스템 호출에서 올라온 미분류 `Exception`. 분류 가능한 broker/외부
    오류는 `external` category 코드(예: `BROKER_API_ERROR`)로 분류한다.
 
-명령 밖으로 나온 처리되지 않은 `Exception`은 JSON 모드에서 CLI error 봉투로,
-text 모드에서 `Error: <code>: <message>`로 끝난다. 분류되지 않은 예외는
+명령 밖으로 나온, Click 예외가 아닌 처리되지 않은 `Exception`은 JSON 모드에서
+CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 분류되지 않은 예외는
 `EXECUTION_ERROR`다.
 
 **금지** (drift):
