@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-import sqlite3
 
 import click
 
@@ -13,6 +12,7 @@ from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.core.database import OperationalError
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
@@ -240,7 +240,7 @@ def history(
             store = BacktestRunStore(db)
             try:
                 runs = await store.list_by_strategy(strategy_name, limit=limit)
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     return []
                 raise

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -19,6 +18,7 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
+from ante.core.database import OperationalError
 from ante.strategy.registry import StrategyStatus
 
 if TYPE_CHECKING:
@@ -279,7 +279,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         rows = _run(_list())
     except click.ClickException:
         raise
-    except sqlite3.OperationalError as e:
+    except OperationalError as e:
         if "no such table" in str(e).lower():
             rows = []
         else:
@@ -416,7 +416,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
 
     try:
         result = _run(_info())
-    except sqlite3.OperationalError as e:
+    except OperationalError as e:
         if "no such table" in str(e).lower():
             result = None
         else:
@@ -658,7 +658,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
                     "SELECT 1 FROM accounts WHERE account_id = ?",
                     (account_id,),
                 )
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     raise AccountNotFoundError(
                         f"계좌 '{account_id}'를 찾을 수 없습니다."
@@ -684,7 +684,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     except AccountNotFoundError as e:
         fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
         raise SystemExit(1) from e
-    except sqlite3.OperationalError as e:
+    except OperationalError as e:
         if "no such table" in str(e).lower():
             result = None
         else:

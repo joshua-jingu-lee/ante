@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 from typing import TYPE_CHECKING, Any
+
+from ante.core.database import DatabaseError
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -122,7 +123,7 @@ _DB_CORRUPTION_SIGNATURES: tuple[str, ...] = (
 
 def _is_db_corruption(exc: BaseException) -> bool:
     """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다."""
-    if not isinstance(exc, sqlite3.DatabaseError):
+    if not isinstance(exc, DatabaseError):
         return False
     message = str(exc).lower()
     return any(sig in message for sig in _DB_CORRUPTION_SIGNATURES)
