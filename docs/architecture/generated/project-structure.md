@@ -310,7 +310,8 @@ src/ante/
     ├── helpers.py
     ├── cli_registry.py
     ├── ipc_client_errors.py
-    └── request_errors.py
+    ├── request_errors.py
+    └── cli_errors.py
 ```
 
 ## tests/ — 테스트
@@ -441,7 +442,8 @@ tests/
 │   │   ├── test_data_path_callsites.py
 │   │   ├── test_data_path_helper.py
 │   │   ├── test_db_encryption_key_chokepoint.py
-│   │   └── test_single_error_exit.py
+│   │   ├── test_single_error_exit.py
+│   │   └── test_trade_report_error_exits.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -662,7 +664,8 @@ tests/
 │   │   ├── test_approval_status_assignments.py
 │   │   ├── test_error_code_preservation.py
 │   │   ├── test_account_id_relocation.py
-│   │   └── test_state_assignments_account_member_circuit.py
+│   │   ├── test_state_assignments_account_member_circuit.py
+│   │   └── test_error_registry_completeness.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -770,22 +773,25 @@ tests/
 │   ├── test_check_entry_ratchet.py
 │   ├── test_check_lint_ratchet.py
 │   ├── test_approval_status_transitions.py
-│   └── test_state_transitions_account_member_circuit.py
+│   ├── test_state_transitions_account_member_circuit.py
+│   ├── test_compare_error_exit_records.py
+│   └── test_preservation_recorder.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
 │   ├── test_signal_connect_cli_repro_2333.py
 │   ├── test_signal_connect_repro_2333.py
 │   └── test_signal_connect_stream.py
-└── e2e/
-    ├── netguard/
-    │   └── sitecustomize.py
-    ├── strategies/
-    │   └── round_trip.py
-    ├── __init__.py
-    ├── conftest.py
-    ├── harness.py
-    └── test_virtual_round_trip.py
+├── e2e/
+│   ├── netguard/
+│   │   └── sitecustomize.py
+│   ├── strategies/
+│   │   └── round_trip.py
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── harness.py
+│   └── test_virtual_round_trip.py
+└── preservation_recorder.py
 ```
 
 ## deploy/ — 서비스 배포
@@ -831,7 +837,8 @@ scripts/
 ├── check_entry_ratchet.py
 ├── entry_ratchet_baseline.json
 ├── check_lint_ratchet.py
-└── lint_baseline.json
+├── lint_baseline.json
+└── compare_error_exit_records.py
 ```
 
 ## docs/ — 설계 문서

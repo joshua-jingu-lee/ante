@@ -15,6 +15,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts.cli_errors import TradeError, TradeNotFoundError
 from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
@@ -178,12 +179,10 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     try:
         result = _run(_run_info())
     except Exception as e:
-        fmt.error(str(e), code="TRADE_ERROR")
-        raise SystemExit(1) from e
+        raise TradeError(str(e)) from e
 
     if not result:
-        fmt.error(f"거래를 찾을 수 없습니다: {trade_id}", code="TRADE_NOT_FOUND")
-        raise SystemExit(1)
+        raise TradeNotFoundError(f"거래를 찾을 수 없습니다: {trade_id}")
 
     if fmt.is_json:
         fmt.output(result)
