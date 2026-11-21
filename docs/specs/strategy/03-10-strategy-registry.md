@@ -23,22 +23,11 @@ REGISTERED ──결재 승인──▷ ADOPTED ──폐기──▷ ARCHIVED
 
 **SQLite 스키마**:
 
-```sql
-CREATE TABLE strategies (
-    strategy_id          TEXT PRIMARY KEY,
-    name                 TEXT NOT NULL,
-    version              TEXT NOT NULL,
-    filepath             TEXT NOT NULL,
-    status               TEXT NOT NULL DEFAULT 'registered',
-    registered_at        TEXT NOT NULL,
-    description          TEXT DEFAULT '',
-    author_name          TEXT DEFAULT 'agent',
-    author_id            TEXT DEFAULT 'agent',
-    validation_warnings  TEXT DEFAULT '[]',  -- JSON array
-    rationale            TEXT DEFAULT '',     -- 투자 논거
-    risks                TEXT DEFAULT ''      -- 주요 리스크
-);
-```
+테이블 정의: [`strategies`](../../architecture/generated/db-schema.md#strategies) (코드의 DDL에서 생성된다).
+
+- `strategies.validation_warnings`: JSON array
+- `strategies.rationale`: 투자 논거
+- `strategies.risks`: 주요 리스크
 
 #### StrategyStatus (StrEnum)
 

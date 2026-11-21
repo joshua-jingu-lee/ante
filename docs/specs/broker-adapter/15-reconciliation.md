@@ -23,21 +23,7 @@ PositionReconciler는 `TradeService`, `EventBus`를 주입받아 동작한다.
 복수 봇이 같은 계좌에서 거래할 때, 브로커가 반환하는 order_id가 어느 봇의 주문인지 추적하기 위한 매핑 테이블이다. 주문 제출 시 `register(order_id, account_id, bot_id, symbol)`로 등록하고, 대사 시 `get_bot_id(order_id, account_id)`로 조회한다.
 
 **SQLite 스키마**:
-```sql
-CREATE TABLE IF NOT EXISTS order_registry (
-    order_id    TEXT PRIMARY KEY,
-    account_id  TEXT NOT NULL,
-    bot_id      TEXT NOT NULL,
-    symbol      TEXT NOT NULL,
-    created_at  TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_order_registry_bot
-    ON order_registry(bot_id);
-CREATE INDEX IF NOT EXISTS idx_order_registry_account
-    ON order_registry(account_id);
-CREATE INDEX IF NOT EXISTS idx_order_registry_account_bot
-    ON order_registry(account_id, bot_id);
-```
+테이블 정의: [`order_registry`](../../architecture/generated/db-schema.md#order_registry) (코드의 DDL에서 생성된다).
 
 **마이그레이션**: 1.0 이전 fresh schema 기준으로 `account_id`는 필수값이며 fallback default를 두지 않는다. 기존 invalid dev DB 데이터 자동 보존/마이그레이션은 이 계약의 범위가 아니다.
 

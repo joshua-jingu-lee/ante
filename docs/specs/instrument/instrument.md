@@ -55,20 +55,7 @@ class Instrument:
 
 ## DB 스키마
 
-```sql
-CREATE TABLE IF NOT EXISTS instruments (
-    symbol           TEXT NOT NULL,
-    exchange         TEXT NOT NULL,
-    name             TEXT DEFAULT '',
-    name_en          TEXT DEFAULT '',
-    instrument_type  TEXT DEFAULT '',
-    logo_url         TEXT DEFAULT '',
-    listed           INTEGER DEFAULT 1,
-    updated_at       TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (symbol, exchange)
-);
-CREATE INDEX IF NOT EXISTS idx_instruments_name ON instruments(name);
-```
+테이블 정의: [`instruments`](../../architecture/generated/db-schema.md#instruments) (코드의 DDL에서 생성된다).
 
 ## InstrumentService
 

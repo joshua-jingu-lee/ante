@@ -49,38 +49,13 @@ TEXT lexical 비교에서 공백(`0x20`) < `T`(`0x54`)로 인한 날짜/정렬 �
 (`created_at` 등 다른 컬럼은 각자 계약이며 이 invariant는 `timestamp` 한정이다.)
 
 봇별 종목 포지션 현재 상태:
-```sql
-CREATE TABLE positions (
-    account_id       TEXT NOT NULL,
-    bot_id           TEXT NOT NULL,
-    symbol           TEXT NOT NULL,
-    quantity         REAL NOT NULL DEFAULT 0,
-    avg_entry_price  REAL NOT NULL DEFAULT 0.0,
-    realized_pnl     REAL NOT NULL DEFAULT 0.0,    -- 누적 실현 손익
-    exchange         TEXT DEFAULT 'KRX',
-    updated_at       TEXT DEFAULT (datetime('now')),
-    PRIMARY KEY (account_id, bot_id, symbol)
-);
+테이블 정의: [`positions`](../../architecture/generated/db-schema.md#positions), [`position_history`](../../architecture/generated/db-schema.md#position_history) (코드의 DDL에서 생성된다).
 
--- 포지션 변동 이력
-CREATE TABLE position_history (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    bot_id         TEXT NOT NULL,
-    symbol         TEXT NOT NULL,
-    action         TEXT NOT NULL,           -- 'buy' | 'sell'
-    quantity       REAL NOT NULL,
-    price          REAL NOT NULL,
-    pnl            REAL DEFAULT 0.0,        -- 이 거래의 실현 손익 (sell 시)
-    timestamp      TEXT,
-    exchange       TEXT DEFAULT 'KRX',      -- v0.2 마이그레이션으로 추가
-    account_id     TEXT NOT NULL,
-    created_at     TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX idx_position_history_bot ON position_history(bot_id, timestamp);
-CREATE INDEX idx_position_history_account
-    ON position_history(account_id, bot_id, timestamp);
-```
+- `positions.realized_pnl`: 누적 실현 손익
+- `position_history`: 포지션 변동 이력
+- `position_history.action`: 'buy' | 'sell'
+- `position_history.pnl`: 이 거래의 실현 손익 (sell 시)
+- `position_history.exchange`: v0.2 마이그레이션으로 추가
 
 `positions.account_id`와 `position_history.account_id`는 fresh schema에서
 필수값이며 `DEFAULT 'default'` 같은 fallback을 두지 않는다. 현재 포지션의

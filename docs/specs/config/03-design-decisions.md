@@ -87,14 +87,10 @@ TELEGRAM_CHAT_ID=987654321
 
 런타임 변경이 필요한 설정. CLI/IPC로 CRUD, 변경 시 EventBus 알림.
 
-```sql
-CREATE TABLE dynamic_config (
-    key       TEXT PRIMARY KEY,
-    value     TEXT NOT NULL,     -- JSON 직렬화
-    category  TEXT NOT NULL,     -- 분류 (예: 'rule', 'fund', 'notification')
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-```
+테이블 정의: [`dynamic_config`](../../architecture/generated/db-schema.md#dynamic_config) (코드의 DDL에서 생성된다).
+
+- `dynamic_config.value`: JSON 직렬화
+- `dynamic_config.category`: 분류 (예: 'rule', 'fund', 'notification')
 
 **저장 대상**:
 
