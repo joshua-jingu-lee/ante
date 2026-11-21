@@ -1,11 +1,4 @@
-"""DART OpenAPI 소스 어댑터.
-
-DART API에서 상장기업 재무제표(매출, 순이익, 자본총계 등)를 수집한다.
-고유번호(corp_code) 매핑, 다중회사 배치 호출(fnlttMultiAcnt),
-Rate Limiting, 에러 코드 처리를 담당한다.
-
-API 레퍼런스: docs/references/external-apis/dart-openapi.md
-"""
+"""DART OpenAPI 소스 어댑터."""
 
 from __future__ import annotations
 
@@ -139,10 +132,6 @@ class DARTSource:
         DART는 날짜별 수집이 아니라 연도+분기별 수집이므로,
         kwargs에서 corp_codes, year, reprt_code를 받아 fetch_financial에 위임한다.
 
-        Args:
-            date: 미사용 (프로토콜 호환).
-            **kwargs: corp_codes, year, reprt_code.
-
         Returns:
             수집된 레코드 딕셔너리 목록.
         """
@@ -161,14 +150,6 @@ class DARTSource:
 
         ZIP 내 XML에서 상장사(stock_code 비어있지 않은)만 추출하여
         corp_code -> stock_code 매핑을 반환한다.
-
-        Args:
-            save_path: 매핑 결과를 저장할 JSON 파일 경로.
-                None이면 저장하지 않고 딕셔너리만 반환.
-
-        Returns:
-            corp_code -> stock_code 매핑 딕셔너리.
-                예: {"00126380": "005930", ...}
 
         Raises:
             DailyLimitExceededError: 일일 한도 초과 시.
@@ -220,14 +201,6 @@ class DARTSource:
         corp_codes를 100개씩 나누어 호출하며,
         Rate Limiting과 에러 코드 처리를 수행한다.
 
-        Args:
-            corp_codes: DART 고유번호 목록.
-            year: 사업연도 (4자리, 예: "2024").
-            reprt_code: 보고서 코드 (11013/11012/11014/11011).
-
-        Returns:
-            수집된 재무제표 레코드 딕셔너리 목록.
-
         Raises:
             DailyLimitExceededError: 일일 한도 초과 시.
             CriticalApiError: 인증키 에러 시.
@@ -276,17 +249,6 @@ class DARTSource:
 
     async def validate_credentials(self) -> tuple[bool | None, str | None]:
         """API 키 유효성을 경량 요청 1회로 검증한다.
-
-        가장 싼 기존 요청 패턴(fnlttMultiAcnt.json)을 더미 파라미터로 1회
-        호출한다. DART는 인증키를 파라미터 유효성보다 먼저 평가하므로,
-        키가 유효하면 ``000``(정상) 또는 ``013``(조회된 데이터 없음)이
-        돌아오고, 키가 잘못되면 ``010/011/012`` 인증 에러(CRITICAL)가
-        돌아온다.
-
-        3-state를 반환한다:
-            * ``(True, None)``  — 유효 (키가 수락됨).
-            * ``(False, 사유)`` — 인증 실패 (CRITICAL 에러 코드).
-            * ``(None, 사유)``  — 검증 불가 (네트워크 예외/타임아웃).
 
         offline·타임아웃 등 네트워크 예외는 unknown으로 흡수하며 예외를
         전파하지 않는다. config check가 오프라인에서도 hang/실패 없이

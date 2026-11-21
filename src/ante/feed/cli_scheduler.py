@@ -1,7 +1,4 @@
-"""ante feed start — 상주 스케줄러 루프.
-
-feed_start CLI 커맨드에서 사용하는 스케줄러 루프를 분리한 모듈이다.
-"""
+"""ante feed start — 상주 스케줄러 루프."""
 
 from __future__ import annotations
 
@@ -77,10 +74,6 @@ async def run_scheduler_loop(
     거치는 단일 chokepoint 이므로, non-padded("9:00") 등으로 인한 조용한
     미실행을 진입 시점에 ``ValueError`` 로 차단한다. 루프 내부에서는 재검증
     하지 않는다.
-
-    루프 내 순서는 spec(07-execution-modes)을 따라 backfill_at 체크를
-    daily_at 보다 먼저 평가한다 — 같은 틱에서 둘 다 도달하면 미완료 backfill
-    을 먼저 실행한 뒤 daily 로 넘어간다.
     """
     guard = config.get("guard") if isinstance(config, dict) else None
     blocked_hours = guard.get("blocked_hours") if isinstance(guard, dict) else None

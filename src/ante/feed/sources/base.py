@@ -41,14 +41,6 @@ class DataSource(Protocol):
 class RateLimiter:
     """공공 API 전용 Token Bucket 기반 Rate Limiter.
 
-    data.go.kr (30 tps, 10,000건/일) 및 DART (20,000건/일)를 위한
-    호출 속도 제어와 일일 한도 추적을 담당한다.
-
-    일일 카운터는 self-resetting이다. ``increment_daily`` /
-    ``is_daily_limit_reached`` 호출 시점에 KST 캘린더 날짜가 직전 기록과
-    다르면 자동으로 0으로 리셋한다. 따라서 feed start 같은 상주 프로세스가
-    자정을 넘겨도 별도 스케줄러 없이 daily_count가 새 날짜에 맞게 초기화된다.
-
     동시성: ``increment_daily`` / ``is_daily_limit_reached`` /
     ``reset_daily`` 는 sync 메서드로 유지한다(호출부 dart.py / data_go_kr.py가
     sync로 호출). DataFeed 소스는 단일 asyncio event loop에서 동작하고 이
@@ -121,9 +113,6 @@ class RateLimiter:
 
         호출 시점 KST 날짜가 직전 기록과 다르면 먼저 0으로 리셋한다(증가 없이
         자정을 넘긴 check도 새 날짜의 0을 반영).
-
-        Args:
-            threshold: 한도 비율 (기본값 0.9 = 90%).
 
         Returns:
             한도에 도달하면 True.

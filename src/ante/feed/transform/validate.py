@@ -1,11 +1,4 @@
-"""4계층 데이터 검증 모듈.
-
-계층별 검증:
-  1. 전송 계층: HTTP 상태 코드, Content-Length 확인
-  2. 구문 계층: JSON 파싱, 인코딩 정상 여부 확인
-  3. 스키마 계층: 필수 필드 존재, 타입 변환 가능 여부 확인
-  4. 비즈니스 계층: low<=open/close<=high, volume>=0, 시계열 갭 확인
-"""
+"""4계층 데이터 검증 모듈."""
 
 from __future__ import annotations
 
@@ -31,9 +24,6 @@ def validate_transport(
     Args:
         status_code: HTTP 응답 상태 코드.
         content_length: 응답 본문 크기 (바이트). None이면 검사 생략.
-
-    Returns:
-        검증 결과.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -59,9 +49,6 @@ def validate_syntax(raw: Any) -> ValidationResult:
     Args:
         raw: 원시 응답 데이터. str이면 JSON 파싱을 시도하고,
              dict/list면 이미 파싱된 것으로 간주한다.
-
-    Returns:
-        검증 결과.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -106,9 +93,6 @@ def validate_schema(
     Args:
         records: 검증할 레코드 목록.
         required_fields: 반드시 존재해야 하는 필드 이름 목록.
-
-    Returns:
-        검증 결과.
     """
     errors: list[str] = []
     warnings: list[str] = []
@@ -157,16 +141,6 @@ def validate_business(records: list[dict[str, Any]]) -> ValidationResult:
 
     OHLCV 비즈니스 규칙과 시계열 연속성을 확인한다.
     실패 시 경고 로그를 남기고 저장은 허용한다.
-
-    검증 규칙:
-    - price > 0 (open, high, low, close)
-    - volume >= 0
-    - low <= close <= high
-    - low <= open <= high
-    - 시계열 갭 감지 (날짜 중복, 순서 역전)
-
-    Args:
-        records: 검증할 OHLCV 레코드 목록.
 
     Returns:
         검증 결과 (경고 포함 가능, 비즈니스 규칙 위반은 경고로 분류).
@@ -388,11 +362,6 @@ def validate_all(
 
     각 계층에서 오류가 발생하면 다음 계층으로 진행하지 않고
     해당 시점까지의 결과를 반환한다.
-
-    Args:
-        records: 검증할 레코드 목록.
-        required_fields: 스키마 계층 필수 필드 목록.
-        status_code: HTTP 상태 코드 (전송 계층 검증용).
 
     Returns:
         통합 검증 결과.

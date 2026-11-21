@@ -1,7 +1,4 @@
-"""ante feed CLI — 결과 출력 포매터.
-
-CLI 서브커맨드들이 공유하는 CollectionResult 출력 로직을 분리한 모듈이다.
-"""
+"""ante feed CLI — 결과 출력 포매터."""
 
 from __future__ import annotations
 
