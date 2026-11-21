@@ -35,18 +35,7 @@ def _run(coro):
 async def _create_trade_service(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[TradeService, Database]]:
-    """CLI 에서 ``TradeService`` async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_trade_service(ctx=ctx) as (service, db):
-            ...
-
-    ``PositionHistory``/``TradeRecorder`` ``initialize()`` 는 표 생성용으로
-    그대로 보존한다 (read-only 명시 예외는 AuditLogger/DynamicConfigService
-    만; 본 helper 는 안전성을 위해 호출 유지).
-    """
+    """CLI 에서 ``TradeService`` async context manager."""
     from ante.trade.performance import PerformanceTracker
     from ante.trade.position import PositionHistory
     from ante.trade.recorder import TradeRecorder

@@ -50,22 +50,7 @@ async def _create_treasury(
     *,
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Treasury, Database]]:
-    """CLI 에서 ``Treasury`` async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_treasury(account_id, ctx=ctx) as (t, db):
-            ...
-
-    ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로
-    ``AccountService.initialize`` / ``AccountService.get`` / ``Treasury.
-    initialize`` 라이프사이클 실패 시에도 ``db.close()`` 가 보장된다.
-    valid-but-missing account_id(예: ``acc-9999``) 가 들어오면
-    ``account_service.get`` 이 :class:`AccountNotFoundError` 를 raise 하는데,
-    이전 inline 패턴에서 aiosqlite 연결이 leak 되어 6초 hang 회귀가 있었고
-    본 helper 가 동일 cleanup 을 보장한다.
-    """
+    """CLI 에서 ``Treasury`` async context manager."""
     from ante.account.scoping import require_account_id
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
@@ -101,12 +86,7 @@ async def _create_treasury(
 async def _create_treasury_manager(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[TreasuryManager, Database]]:
-    """CLI 에서 ``TreasuryManager`` async context manager.
-
-    ``_create_treasury`` 동형 패턴. ``open_cli_db`` 가 ``initialize_all`` /
-    ``account_service.list`` 등 lifecycle 실패 시에도 ``db.close()`` 를
-    보장한다.
-    """
+    """CLI 에서 ``TreasuryManager`` async context manager."""
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
     from ante.treasury.manager import TreasuryManager

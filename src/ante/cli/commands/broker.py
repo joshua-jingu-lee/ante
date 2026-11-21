@@ -90,29 +90,7 @@ async def _ipc_broker_command(
     actor: str,
     extra: dict | None = None,
 ) -> dict:
-    """IPC를 통해 서버 브로커 인스턴스에 위임한다.
-
-    ``account_id``는 호출자(``--account`` required CLI 옵션 + helper 통과)
-    에서 이미 검증된 값이어야 한다. fallback 금지 정책에 따라 빈 dict 를
-    IPC 로 보내지 않는다.
-
-    ServerNotRunningError, IPCTimeoutError 시 예외를 전파하여 호출자가 폴백 처리한다.
-
-    ``extra`` 는 command 고유 인자(예 ``order-history`` 의
-    ``from_date``/``to_date``)를 payload 에 합치기 위한 **순수 additive**
-    확장이다. ``None``(또는 빈 dict)이면 payload 는 종전과 **바이트 동일**한
-    ``{"account_id": ...}`` 이며, 기존 호출자 3곳(``status`` / ``balance`` /
-    ``positions``)의 동작은 불변이다. ``reconcile`` 은 본 helper 를 경유하지
-    않고 ``ipc_send`` 를 직접 호출하므로(payload ``{"fix", "account_id"}``)
-    본 확장의 영향 범위 밖이다 — 통일은 별건 스코프다.
-
-    "additive" 는 주석이 아니라 **구조**로 보장한다: ``extra`` 를 먼저 펼치고
-    검증된 ``account_id`` 를 뒤에 두어, ``extra`` 가 ``account_id`` 키를
-    담고 있어도 검증된 값이 항상 이긴다. ``args.update(extra)`` 순서였다면
-    호출자가 실수로 ``account_id`` 를 넣는 순간 ingress 검증
-    (``reject_invalid_account_id``)을 통과한 값이 조용히 덮여 미검증 값이
-    IPC 로 나간다.
-    """
+    """IPC를 통해 서버 브로커 인스턴스에 위임한다."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
     args: dict = {**(extra or {}), "account_id": account_id}
