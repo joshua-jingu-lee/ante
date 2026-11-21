@@ -792,3 +792,108 @@ async def test_bot_positions_unknown_bot_is_bot_not_found(socket_path: str) -> N
         bot_manager.get_bot.assert_called_once_with("ghost")
     finally:
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_mutating_blocked_before_required_services_preflight(
+    socket_path: str,
+) -> None:
+    """SHUTTING_DOWN 의 mutating 명령은 서비스가 빠져도 SERVICE_UNAVAILABLE 이다."""
+    cmd_registry = CommandRegistry()
+    calls: list[dict] = []
+
+    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
+        calls.append(args)
+        return {"ok": True}
+
+    cmd_registry.register(
+        "test.mut_needs_audit",
+        handler,
+        is_mutating=True,
+        required_services=frozenset({"audit_logger"}),
+        account_id_policy="required",
+    )
+    svc_registry = _make_service_registry()
+    assert svc_registry.audit_logger is None
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        running = await server._dispatch(
+            {"id": "0", "command": "test.mut_needs_audit", "args": {}, "actor": "t"}
+        )
+        assert running["error"]["code"] == "SERVICE_NOT_CONFIGURED", running
+
+        await server.stop_accepting()
+        response = await server._dispatch(
+            {"id": "1", "command": "test.mut_needs_audit", "args": {}, "actor": "t"}
+        )
+        assert response["status"] == "error"
+        assert response["error"]["code"] == "SERVICE_UNAVAILABLE", response
+        assert "종료 중" in response["error"]["message"]
+        assert calls == []
+    finally:
+        await server.drain_connections(timeout=0.1)
+        if Path(socket_path).exists():
+            server.unlink_socket()
+
+
+@pytest.mark.parametrize(
+    ("bots", "adjustments", "mismatches"),
+    [
+        ([], [], [{"symbol": "005930"}, {"symbol": "000660"}]),
+        (
+            [{"bot_id": "bot-1", "account_id": "acc-a"}],
+            [{"symbol": "005930", "delta": 1}],
+            [{"symbol": "005930"}],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_broker_reconcile_envelope_carries_account_and_legacy_fields(
+    socket_path: str,
+    bots: list[dict],
+    adjustments: list[dict],
+    mismatches: list[dict],
+) -> None:
+    """``broker.reconcile`` 응답은 계좌 단위 필드와 legacy 표시 필드를 함께 담는다."""
+    from unittest.mock import AsyncMock
+
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    services = _reconcile_services(None)
+    services["bot_manager"].list_bots = MagicMock(return_value=bots)
+    services["reconciler"].reconcile = AsyncMock(return_value=adjustments)
+    services["reconciler"].compute_account_diff = AsyncMock(return_value=mismatches)
+    services["reconciler"].detect_account_level = AsyncMock(return_value=mismatches)
+    svc_registry = _make_service_registry(**services)
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": "broker.reconcile",
+                "args": {"account_id": "acc-a", "fix": False},
+                "actor": "cli-user",
+            }
+        )
+    finally:
+        await server.stop()
+
+    assert response["status"] == "ok", response
+    assert response["result"] == {
+        "account_id": "acc-a",
+        "fix": False,
+        "bot_count": len(bots),
+        "adjustments": adjustments,
+        "mismatches": mismatches,
+        "total_symbols": len(mismatches),
+        "discrepancies": mismatches,
+        "match": False,
+        "fix_applied": False,
+        "corrections": len(adjustments),
+    }

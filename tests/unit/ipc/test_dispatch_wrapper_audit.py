@@ -1362,3 +1362,224 @@ async def test_account_suspend_activate_require_audit_logger(
         fake_account.activate.assert_not_awaited()
     finally:
         await server.stop()
+
+
+# ── handler 가 넘기는 audit resource/detail 의 값 ─────────────────────────────
+
+
+def _bot_update_services() -> dict[str, Any]:
+    bot = MagicMock()
+    bot.get_info = MagicMock(return_value={"bot_id": "bot-7"})
+    bot_manager = MagicMock()
+    bot_manager.get_bot = MagicMock(return_value=bot)
+    bot_manager.update_bot = AsyncMock(return_value=bot)
+    return {"bot_manager": bot_manager}
+
+
+def _set_balance_services() -> dict[str, Any]:
+    treasury = MagicMock()
+    treasury.set_account_balance = AsyncMock(return_value=None)
+    treasury.account_balance = 1234567.0
+    treasury_manager = MagicMock()
+    treasury_manager.get = MagicMock(return_value=treasury)
+    return {"treasury_manager": treasury_manager}
+
+
+def _set_status_services() -> dict[str, Any]:
+    strategy_registry = MagicMock()
+    strategy_registry.update_status = AsyncMock(return_value=None)
+    return {"strategy_registry": strategy_registry}
+
+
+def _update_scopes_services() -> dict[str, Any]:
+    member = MagicMock()
+    member.member_id = "agent-9"
+    member.scopes = ["strategy:read", "trade:write"]
+    member.status = "active"
+    member_service = MagicMock()
+    member_service.update_scopes = AsyncMock(return_value=member)
+    return {"member_service": member_service}
+
+
+@pytest.mark.parametrize(
+    ("command", "args", "services", "action", "resource", "detail"),
+    [
+        (
+            "bot.update",
+            {"bot_id": "bot-7", "updates": {"name": "새 이름", "interval_seconds": 30}},
+            _bot_update_services,
+            "bot.update",
+            "bot:bot-7",
+            "fields=['name', 'interval_seconds']",
+        ),
+        (
+            "treasury.set_balance",
+            {"account_id": "acc-7", "balance": 1234567.4},
+            _set_balance_services,
+            "treasury.set_balance",
+            "treasury:acc-7",
+            "balance=1,234,567",
+        ),
+        (
+            "strategy.set_status",
+            {"strategy_id": "strat-7", "status": "adopted"},
+            _set_status_services,
+            "strategy.set_status",
+            "strategy:strat-7",
+            "status=adopted",
+        ),
+        (
+            "member.update_scopes",
+            {"member_id": "agent-9", "scopes": ["strategy:read", "trade:write"]},
+            _update_scopes_services,
+            "member.update_scopes",
+            "member:agent-9",
+            "scopes=['strategy:read', 'trade:write']",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_mutating_handlers_audit_resource_and_detail_values(
+    socket_path: str,
+    command: str,
+    args: dict[str, Any],
+    services: Any,
+    action: str,
+    resource: str,
+    detail: str,
+) -> None:
+    """감사 기록의 resource 와 detail 은 대상 식별자와 변경 내용 그대로다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(audit_logger=audit_logger, **services())
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": command, "args": args, "actor": "carol"}
+        )
+        assert response["status"] == "ok", response
+        assert "_audit_detail" not in response["result"]
+        audit_logger.log.assert_awaited_once_with(
+            member_id="carol",
+            action=action,
+            resource=resource,
+            detail=detail,
+            ip="",
+        )
+    finally:
+        await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_rule_update_rejects_invalid_account_id_before_handler(
+    socket_path: str,
+) -> None:
+    """``rule.update`` 는 없거나 잘못된 account_id 를 handler 전에 거부한다."""
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    fake_account = MagicMock()
+    fake_account.get = AsyncMock(return_value=MagicMock())
+    fake_dynamic_config = MagicMock()
+    fake_dynamic_config.get = AsyncMock(return_value=[])
+    fake_dynamic_config.set = AsyncMock(return_value=None)
+    audit_logger = _make_audit_logger_mock()
+    svc_registry = _make_service_registry(
+        audit_logger=audit_logger,
+        account=fake_account,
+        dynamic_config=fake_dynamic_config,
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        for account_args in (
+            {},
+            {"account_id": ""},
+            {"account_id": "default"},
+            {"account_id": "bad_id!"},
+        ):
+            response = await server._dispatch(
+                {
+                    "id": "1",
+                    "command": "rule.update",
+                    "args": {
+                        **account_args,
+                        "rule_type": "daily_loss_limit",
+                        "enabled": True,
+                        "params": {"max_daily_loss_percent": 0.05},
+                    },
+                    "actor": "bob",
+                }
+            )
+            assert response["status"] == "error", account_args
+            assert response["error"]["code"] == "VALIDATION_ERROR", account_args
+            assert "ipc.rule.update" in response["error"]["message"], account_args
+
+        fake_account.get.assert_not_awaited()
+        fake_dynamic_config.get.assert_not_awaited()
+        fake_dynamic_config.set.assert_not_awaited()
+        assert audit_logger.log.await_count == 0
+    finally:
+        await server.stop()
+
+
+@pytest.mark.parametrize(
+    ("command", "account_attr"),
+    [("system.halt", "suspend_all"), ("system.clear_halt", "activate_all")],
+)
+@pytest.mark.asyncio
+async def test_kill_switch_changed_at_is_utc_with_z_suffix(
+    socket_path: str,
+    command: str,
+    account_attr: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """kill switch 응답의 ``changed_at`` 은 ``Z`` 로 끝나는 ISO 8601 UTC 다."""
+    import datetime as datetime_module
+    from datetime import UTC, datetime, timedelta
+
+    from ante.ipc.registry import register_all_handlers
+
+    instant = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
+
+    class _FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
+            if tz is None:
+                return (instant + timedelta(hours=9)).replace(tzinfo=None)
+            return instant.astimezone(tz)
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    fake_account = MagicMock()
+    setattr(
+        fake_account,
+        account_attr,
+        AsyncMock(return_value=[{"account_id": "acc-1", "changed": True}]),
+    )
+    svc_registry = _make_service_registry(
+        audit_logger=_make_audit_logger_mock(), account=fake_account
+    )
+
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        with monkeypatch.context() as m:
+            m.setattr(datetime_module, "datetime", _FixedClock)
+            response = await server._dispatch(
+                {"id": "1", "command": command, "args": {}, "actor": "alice"}
+            )
+    finally:
+        await server.stop()
+
+    assert response["status"] == "ok", response
+    result = response["result"]
+    assert set(result) == {"status", "accounts_changed", "changed_at", "accounts"}
+    assert result["changed_at"] == "2026-01-02T03:04:05.123456Z"

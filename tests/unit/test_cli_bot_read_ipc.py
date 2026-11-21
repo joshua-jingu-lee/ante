@@ -521,6 +521,51 @@ class TestShapeParity:
             k: fb[k] for k in ("bot_id", "signal_key")
         }
 
+    async def test_info_live_bot_and_snapshot_row_share_core_keys(
+        self, tmp_path
+    ) -> None:
+        """실제 봇의 ``bot.info`` 결과와 ``bots`` 테이블 행은 핵심 다섯 키가 같다."""
+        from ante.bot import BotConfig, BotManager
+        from ante.core import Database
+        from ante.eventbus import EventBus
+        from ante.ipc.registry import _handle_bot_info
+        from ante.strategy import Strategy, StrategyMeta
+
+        class _InfoStrategy(Strategy):
+            meta = StrategyMeta(name="info", version="1.0.0", description="info")
+
+            async def on_step(self, context):  # type: ignore[override]
+                return []
+
+        db = Database(str(tmp_path / "bots.db"))
+        await db.connect()
+        try:
+            manager = BotManager(eventbus=EventBus(), db=db)
+            await manager.initialize()
+            config = BotConfig(
+                bot_id="bot-info",
+                strategy_id="strat-info",
+                name="정보 봇",
+                account_id="acc-info",
+            )
+            await manager.create_bot(config, _InfoStrategy, MagicMock())
+
+            result = await _handle_bot_info(
+                SimpleNamespace(bot_manager=manager), {"bot_id": "bot-info"}, "cli"
+            )
+            row = await db.fetch_one(
+                "SELECT * FROM bots WHERE bot_id = ?", ("bot-info",)
+            )
+        finally:
+            await db.close()
+
+        core = ("bot_id", "name", "status", "account_id", "strategy_id")
+        live = result["bot"]
+        assert row is not None
+        assert {k: live[k] for k in core} == {k: row[k] for k in core}
+        assert live["strategy_id"] == "strat-info"
+        assert live["name"] == "정보 봇"
+
 
 # ── (d) 미존재 봇 → BOT_NOT_FOUND 양쪽 exit 1; signal-key 미발급 동일 처리 ────
 

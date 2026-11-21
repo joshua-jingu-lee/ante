@@ -164,3 +164,40 @@ def test_fold_skips_rows_without_odno():
 
 def test_fold_empty():
     assert _fold([]) == []
+
+
+def test_folded_rows_have_only_the_eight_normalized_keys():
+    """fold 결과 row 는 정규화 8키뿐이고 KIS 원시 필드는 남지 않는다."""
+    raw = {
+        "odno": "0001",
+        "orgn_odno": "",
+        "pdno": "005930",
+        "prdt_name": "삼성전자",
+        "sll_buy_dvsn_cd": "02",
+        "ord_qty": "10",
+        "tot_ccld_qty": "4",
+        "tot_ccld_amt": "232800",
+        "avg_prvs": "58200",
+        "ord_unpr": "58000",
+        "ord_dt": "20260529",
+        "ord_tmd": "091500",
+        "ccld_cndt_name": "없음",
+        "excg_dvsn_cd": "01",
+    }
+    partial = {**raw, "tot_ccld_qty": "2", "tot_ccld_amt": "116400"}
+    other = {**raw, "odno": "0002", "sll_buy_dvsn_cd": "01", "tot_ccld_qty": "0"}
+
+    folded = _fold([partial, raw, other])
+
+    assert len(folded) == 2
+    for row in folded:
+        assert set(row) == {
+            "order_id",
+            "symbol",
+            "side",
+            "quantity",
+            "filled_quantity",
+            "price",
+            "status",
+            "timestamp",
+        }

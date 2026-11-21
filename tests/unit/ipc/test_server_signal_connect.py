@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import struct
 import tempfile
 from pathlib import Path
@@ -632,3 +633,118 @@ async def test_signal_connect_registered_metadata() -> None:
     assert spec.account_id_policy == "none"
     assert spec.audit_action is None
     assert spec.result_key is None
+
+
+# ── connect audit · 키 비노출 · placeholder generation ──────────────────
+
+_SECRET_SIGNAL_KEY = "sk_SECRET-signal-key-0123456789abcdef"
+
+
+def _connect_registry_with(
+    *, audit_logger: MagicMock | None = None, channel_registry: object | None = None
+) -> tuple[ServiceRegistry, MagicMock]:
+    bm = MagicMock()
+    bm.validate_signal_key = AsyncMock(return_value="bot-1")
+    bm.get_bot = MagicMock(return_value=_make_bot(account_id="acc-live"))
+    svc = _make_service_registry(bm)
+    svc.audit_logger = audit_logger
+    svc.signal_channel_registry = channel_registry  # type: ignore[assignment]
+    return svc, bm
+
+
+async def test_connect_audit_member_is_ipc_sentinel_not_caller(
+    socket_path: str,
+) -> None:
+    """connect 감사는 호출자가 아니라 고정 sentinel ``ipc`` 로 1회 남는다."""
+    audit_logger = MagicMock()
+    audit_logger.log = AsyncMock(return_value=None)
+    svc, _ = _connect_registry_with(audit_logger=audit_logger)
+    server = IPCServer(socket_path, svc, _signal_only_registry())
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "c1",
+                "command": "signal.connect",
+                "args": {"key": "sk_x"},
+                "actor": "agent-caller",
+            }
+        )
+    finally:
+        await server.stop()
+
+    assert response["status"] == "ok", response
+    audit_logger.log.assert_awaited_once_with(
+        member_id="ipc",
+        action="signal.connect",
+        resource="bot:bot-1",
+        detail="",
+        ip="",
+    )
+
+
+def _all_log_record_text(caplog: pytest.LogCaptureFixture) -> str:
+    parts: list[str] = []
+    for record in caplog.records:
+        parts.append(record.getMessage())
+        parts.extend(repr(value) for value in vars(record).values())
+    return "\n".join(parts)
+
+
+@pytest.mark.parametrize("key_valid", [True, False])
+async def test_signal_key_absent_from_connect_result_and_log_records(
+    socket_path: str, caplog: pytest.LogCaptureFixture, key_valid: bool
+) -> None:
+    """signal key 는 handshake 결과와 서버 로그 레코드 어디에도 없다."""
+    audit_logger = MagicMock()
+    audit_logger.log = AsyncMock(return_value=None)
+    svc, bm = _connect_registry_with(audit_logger=audit_logger)
+    if not key_valid:
+        bm.validate_signal_key = AsyncMock(return_value=None)
+    server = IPCServer(socket_path, svc, _signal_only_registry())
+    await server.start()
+    try:
+        with caplog.at_level(logging.DEBUG):
+            response = await server._dispatch(
+                {
+                    "id": "c2",
+                    "command": "signal.connect",
+                    "args": {"key": _SECRET_SIGNAL_KEY},
+                    "actor": "agent-caller",
+                }
+            )
+            logging.getLogger("ante.ipc.registry").debug("capture probe")
+    finally:
+        await server.stop()
+
+    bm.validate_signal_key.assert_awaited_once_with(_SECRET_SIGNAL_KEY)
+    assert response["status"] == ("ok" if key_valid else "error"), response
+    assert _SECRET_SIGNAL_KEY not in repr(response)
+    if key_valid:
+        assert set(response["result"]) == {
+            "bot_id",
+            "account_id",
+            "session_id",
+            "_stream",
+        }
+    assert any(r.getMessage() == "capture probe" for r in caplog.records)
+    assert _SECRET_SIGNAL_KEY not in _all_log_record_text(caplog)
+    assert _SECRET_SIGNAL_KEY not in repr(audit_logger.log.await_args_list)
+
+
+async def test_connect_placeholder_handle_snapshots_current_generation() -> None:
+    """등록되는 placeholder handle 은 그 시점의 generation 을 갖는다."""
+    from ante.bot.signal_channel_registry import SignalChannelRegistry
+
+    channel_registry = SignalChannelRegistry()
+    channel_registry.bump_generation("bot-1")
+    channel_registry.bump_generation("bot-1")
+    current = channel_registry.current_generation("bot-1")
+    assert current != 0
+    svc, _ = _connect_registry_with(channel_registry=channel_registry)
+
+    result = await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+
+    handle = channel_registry.get("bot-1", result["session_id"])
+    assert handle is not None
+    assert handle.generation == current

@@ -611,3 +611,341 @@ async def test_natural_eof_ends_stream_without_grace_wait(
             task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+
+
+# ── 프레임 크기 상한 · 순서 · read timeout 부재 ───────────────────────────────
+
+_ONE_MIB = 1_048_576
+
+
+def _frame_with_payload_size(size: int) -> dict:
+    """직렬화 결과가 정확히 ``size`` 바이트인 프레임."""
+    overhead = len(json.dumps({"type": "probe", "pad": ""}).encode("utf-8"))
+    return {"type": "probe", "pad": "x" * (size - overhead)}
+
+
+async def _finish(task: asyncio.Future, reader: asyncio.StreamReader) -> None:
+    reader.feed_eof()
+    if not await _yield_until(task.done):
+        task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+
+async def test_encode_signal_frame_accepts_one_mib_and_rejects_one_more_byte() -> None:
+    """signal outbound 프레임도 페이로드 1_048_576 바이트가 상한이다."""
+    from ante.ipc.exceptions import MessageTooLargeError
+    from ante.ipc.server import _encode_signal_frame
+
+    data = _encode_signal_frame(_frame_with_payload_size(_ONE_MIB))
+    (length,) = struct.unpack("!I", data[:4])
+    assert length == _ONE_MIB
+
+    with pytest.raises(MessageTooLargeError):
+        _encode_signal_frame(_frame_with_payload_size(_ONE_MIB + 1))
+
+
+async def test_oversized_outbound_frame_reports_error_and_stream_stays_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """1MB 초과 outbound 프레임은 result_too_large 오류로 바뀌고 스트림은 계속된다."""
+    sinks = _capture_sinks(monkeypatch)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: len(sinks) == 1)
+        sinks[0](_frame_with_payload_size(_ONE_MIB + 1))
+        assert await _yield_until(lambda: len(writer.frames()) == 1)
+        assert writer.frames() == [{"type": "error", "message": "result_too_large"}]
+
+        reader.feed_data(_frame_bytes({"type": "ping"}))
+        assert await _yield_until(lambda: len(writer.frames()) == 2)
+        assert writer.frames()[1] == {"type": "pong"}
+        assert not task.done()
+        assert reg.has_active_session("bot-1") is True
+    finally:
+        await _finish(task, reader)
+
+
+async def test_outbound_frames_are_written_in_enqueue_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """writer 가 밀려 쌓인 outbound 프레임은 넣은 순서대로 나간다."""
+    sinks = _capture_sinks(monkeypatch)
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _GatedWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: len(sinks) == 1)
+        sinks[0]({"type": "probe", "seq": -1})
+        assert await _yield_until(lambda: writer.drain_calls == 1)
+        for i in range(5):
+            sinks[0]({"type": "probe", "seq": i})
+        writer.gate.set()
+        assert await _yield_until(lambda: len(writer.frames()) == 6)
+        assert [f["seq"] for f in writer.frames()] == [-1, 0, 1, 2, 3, 4]
+    finally:
+        writer.gate.set()
+        await _finish(task, reader)
+
+
+async def test_idle_stream_survives_when_every_finite_timeout_expires_at_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """유한 timeout 이 즉시 만료되는 시계에서도 idle 스트림의 read 는 끊기지 않는다."""
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+    real_wait_for = asyncio.wait_for
+    expired: list[object] = []
+
+    async def _expire_immediately(aw, timeout=None):  # noqa: ANN001, ANN202
+        if timeout is None:
+            return await real_wait_for(aw, None)
+        expired.append(aw)
+        if asyncio.iscoroutine(aw):
+            aw.close()
+        raise TimeoutError
+
+    class _ExpiredTimeout:
+        def __init__(self, delay: float | None) -> None:
+            self._delay = delay
+
+        async def __aenter__(self) -> None:
+            if self._delay is not None:
+                raise TimeoutError
+
+        async def __aexit__(self, *exc: object) -> bool:
+            return False
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    with monkeypatch.context() as m:
+        m.setattr(asyncio, "wait_for", _expire_immediately)
+        m.setattr(asyncio, "timeout", _ExpiredTimeout)
+        task = asyncio.ensure_future(
+            server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+        )
+        assert await _yield_until(lambda: handle.out_queue is not None)
+        assert not await _yield_until(task.done)
+        reader.feed_data(_frame_bytes({"type": "ping"}))
+        assert await _yield_until(lambda: writer.frames() == [{"type": "pong"}])
+        assert not task.done()
+        assert expired == []
+        reader.feed_eof()
+        assert await _yield_until(task.done)
+    await task
+
+
+async def test_oversized_inbound_frame_ends_stream_without_reading_further() -> None:
+    """1MB 를 넘는 inbound 길이 접두사를 받으면 뒤따르는 프레임을 읽지 않고 끝낸다."""
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    reader.feed_data(struct.pack("!I", _ONE_MIB + 1) + _frame_bytes({"type": "ping"}))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(task.done)
+        assert writer.frames() == []
+        assert reg.has_active_session("bot-1") is False
+        assert len(bus._handlers.get(OrderFilledEvent, [])) == 0
+    finally:
+        await _finish(task, reader)
+
+
+# ── writer 소유: 스트림 host 는 writer 를 닫지 않는다 ─────────────────────────
+
+
+@pytest.mark.parametrize("ending", ["eof", "daemon_close"])
+async def test_stream_host_leaves_writer_open_for_connection_owner(
+    ending: str,
+) -> None:
+    """스트림이 끝나도 writer close 는 연결 처리부의 몫으로 남긴다."""
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: handle.out_queue is not None)
+        if ending == "eof":
+            reader.feed_eof()
+        else:
+            reg.close_bot("bot-1", "rotated")
+        assert await _yield_until(task.done)
+        assert reg.has_active_session("bot-1") is False
+        assert writer.closed is False
+    finally:
+        await _finish(task, reader)
+
+
+async def test_adopt_self_close_leaves_writer_open_for_connection_owner() -> None:
+    """adopt 시점 self-close 도 closed 프레임만 쓰고 writer 는 닫지 않는다."""
+    bus = EventBus()
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(
+        session_id="s1", bot_id="bot-1", generation=reg.current_generation("bot-1")
+    )
+    reg.register(handle)
+    reg.bump_generation("bot-1")
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _FakeWriter()
+    await asyncio.wait_for(
+        server._run_signal_stream(reader, writer, "bot-1", "s1"),  # type: ignore[arg-type]
+        timeout=5.0,
+    )
+    assert writer.frames() == [{"type": "closed", "reason": "rotated"}]
+    assert reg.has_active_session("bot-1") is False
+    assert writer.closed is False
+
+
+# ── teardown 이 채널을 닫는 시점 ─────────────────────────────────────────────
+
+
+def _recording_signal_subscriber(bus: EventBus) -> list[object]:
+    from ante.eventbus.events import ExternalSignalEvent
+
+    received: list[object] = []
+
+    async def _on_signal(event: object) -> None:
+        received.append(event)
+
+    bus.subscribe(ExternalSignalEvent, _on_signal)
+    return received
+
+
+async def test_lagged_teardown_rejects_inbound_signal_before_supervisor_runs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """laggard teardown 이 시작되면 같은 read 루프의 다음 signal 도 발행하지 않는다."""
+    from ante.ipc import server as server_module
+    from ante.ipc.server import SIGNAL_OUT_QUEUE_MAX
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 0)
+    sinks = _capture_sinks(monkeypatch)
+    bus = EventBus()
+    received = _recording_signal_subscriber(bus)
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _GatedWriter()
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(lambda: len(sinks) == 1)
+        sinks[0]({"type": "probe", "seq": -1})
+        assert await _yield_until(lambda: writer.drain_calls == 1)
+        for i in range(SIGNAL_OUT_QUEUE_MAX):
+            sinks[0]({"type": "probe", "seq": i})
+        assert handle.out_queue is not None and handle.out_queue.full()
+
+        reader.feed_data(_frame_bytes({"type": "ping"}) + _frame_bytes(_SIGNAL_FRAME))
+        assert await _yield_until(task.done)
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+        assert handle.closing_event is not None and handle.closing_event.is_set()
+        assert received == []
+        assert reg.has_active_session("bot-1") is False
+    finally:
+        writer.gate.set()
+        await _finish(task, reader)
+
+
+class _DeadWriter(_FakeWriter):
+    """첫 drain 에서 연결이 끊긴 writer."""
+
+    async def drain(self) -> None:
+        raise ConnectionResetError("peer gone")
+
+
+async def test_natural_teardown_closes_channel_before_awaiting_inflight_publish(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """writer 가 죽은 스트림은 in-flight publish 를 기다리기 전에 채널부터 닫는다.
+
+    채널이 닫힌 뒤에는 버퍼에 남은 다음 signal 프레임을 발행하지 않는다.
+    """
+    from ante.ipc import server as server_module
+
+    monkeypatch.setattr(server_module, "SIGNAL_INFLIGHT_GRACE", 3600.0)
+    sinks = _capture_sinks(monkeypatch)
+    bus = EventBus()
+    entered, release, outcome = _blocking_signal_subscriber(bus)
+    reg = SignalChannelRegistry()
+    bot = _make_bot(bus)
+    handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
+    reg.register(handle)
+    server = _make_server(bus, reg, bot)
+
+    reader = asyncio.StreamReader()
+    writer = _DeadWriter()
+    reader.feed_data(_frame_bytes(_SIGNAL_FRAME) + _frame_bytes(_SIGNAL_FRAME))
+    task = asyncio.ensure_future(
+        server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
+    )
+    try:
+        assert await _yield_until(entered.is_set)
+        sinks[0]({"type": "probe"})
+        assert await _yield_until(
+            lambda: handle.writer_task is not None and handle.writer_task.done()
+        )
+        assert not await _yield_until(task.done)
+        assert outcome == []
+
+        release.set()
+        assert await _yield_until(task.done)
+        for _ in range(50):
+            await asyncio.sleep(0)
+
+        assert outcome == ["completed"]
+        assert reg.has_active_session("bot-1") is False
+        assert writer.closed is False
+    finally:
+        release.set()
+        await _finish(task, reader)
