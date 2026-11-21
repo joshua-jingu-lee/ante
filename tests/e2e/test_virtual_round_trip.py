@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from tests.e2e.harness import DaemonHarness
+from tests.e2e.harness import DaemonHarness, run_json_command
 
 TEST_ACCOUNT = {"account_id": "test", "broker_type": "test", "exchange": "TEST"}
 STRATEGY_PATH = Path(__file__).resolve().parent / "strategies" / "round_trip.py"
@@ -34,6 +34,15 @@ def test_boot_and_stop(daemon: DaemonHarness) -> None:
     assert daemon.daemon_pid in daemon.guarded_pids()
     accounts = daemon.cli("account", "list")
     assert "test" in {a["account_id"] for a in accounts["accounts"]}
+
+    rejected = run_json_command(
+        daemon.cli_argv("bot", "start", "e2e-no-such-bot"),
+        env=daemon.env(),
+        cwd=daemon.work_dir,
+        expect_failure=True,
+    )
+    assert rejected.returncode == 1
+    assert rejected.payload["code"] == "BOT_NOT_FOUND"
 
     assert daemon.stop() == 0
     assert not daemon.socket_path.exists()
