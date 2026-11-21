@@ -293,6 +293,14 @@ class TestHookLeavesOtherExitsAlone:
         assert result.exception is exc
         assert (result.stdout, result.stderr) == ("", "")
 
+    def test_standalone_false_text_click_exception_reraises(self, inject) -> None:
+        """text 모드의 ``standalone_mode=False``는 Click 예외도 그대로 올린다."""
+        exc = click.ClickException("plain")
+        inject(("bot", "list"), exc)
+        result = _invoke(["--format", "text", "bot", "list"], standalone_mode=False)
+        assert result.exception is exc
+        assert (result.stdout, result.stderr) == ("", "")
+
     def test_text_usage_error_keeps_click_default(self) -> None:
         result = _invoke(["--format", "text", "bot", "list", "--no-such-flag"])
         assert result.exit_code == 2
@@ -681,6 +689,25 @@ class TestIpcSendTypedExceptions:
             message,
             f"{code}: {message}",
         )
+
+    @pytest.mark.parametrize(
+        ("name", "spec"),
+        [
+            (
+                "IPCServerNotRunningError",
+                ("IPC_SERVER_NOT_RUNNING", "service_unavailable", 1),
+            ),
+            ("IPCClientTimeoutError", ("IPC_TIMEOUT", "service_unavailable", 1)),
+        ],
+    )
+    def test_two_client_codes_are_registered(
+        self, name: str, spec: tuple[str, str, int]
+    ) -> None:
+        from ante.contracts import ipc_client_errors
+        from ante.contracts.error_registry import EXCEPTION_TO_SPEC
+
+        registered = EXCEPTION_TO_SPEC[getattr(ipc_client_errors, name)]
+        assert (registered.code, registered.category, registered.exit_code) == spec
 
     def test_success_returns_result(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ante.cli.commands import ipc_helpers
