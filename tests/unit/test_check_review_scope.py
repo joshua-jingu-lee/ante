@@ -898,3 +898,36 @@ def test_comment_and_spec_baselines_lowered_together_skip(repo: Repo) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert f"baseline-lowered\tM\t{BASELINE}" in result.stdout
     assert f"baseline-lowered\tM\t{SPEC_BASELINE}" in result.stdout
+
+
+IMPORT_BASELINE = "scripts/import_baseline.json"
+
+
+def _import_baseline_json(lazy: int) -> str:
+    return json.dumps(
+        {"edges": ["a->b"], "cycles": [], "lazy_imports": lazy, "sqlite_files": []}
+    )
+
+
+def test_import_baseline_lowered_requires_review(repo: Repo) -> None:
+    repo.write(IMPORT_BASELINE, _import_baseline_json(5))
+    repo.commit("import baseline")
+    repo.mark_base()
+    repo.write(IMPORT_BASELINE, _import_baseline_json(4))
+    repo.commit("lower import baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{IMPORT_BASELINE}" in result.stdout
+
+
+def test_docs_with_raised_import_baseline_requires_review(repo: Repo) -> None:
+    repo.write(IMPORT_BASELINE, _import_baseline_json(5))
+    repo.commit("import baseline")
+    repo.mark_base()
+    repo.write("docs/a.md", "a\n")
+    repo.write(IMPORT_BASELINE, _import_baseline_json(6))
+    repo.commit("docs and raise import baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert "doc\tA\tdocs/a.md" in result.stdout
+    assert f"review\tM\t{IMPORT_BASELINE}" in result.stdout
