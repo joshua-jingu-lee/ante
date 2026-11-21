@@ -977,7 +977,7 @@ async def _register_reconcile_scheduler_for_account(
 ) -> bool:
     """단일 LIVE 계좌의 ReconcileScheduler 등록 (startup + self-healing 공용)."""
     assert s.eventbus is not None
-    from ante.broker.scheduler import ReconcileScheduler
+    from ante.bot.reconcile_scheduler import ReconcileScheduler
 
     account_id = account.account_id
     try:

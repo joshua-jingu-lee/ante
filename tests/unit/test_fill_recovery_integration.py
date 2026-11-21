@@ -11,9 +11,9 @@ from __future__ import annotations
 
 import pytest
 
+from ante.bot.reconcile_scheduler import ReconcileScheduler
 from ante.broker import fill_scheduler as fill_scheduler_module
 from ante.broker.fill_scheduler import FillReconcileScheduler, business_date_kst
-from ante.broker.scheduler import ReconcileScheduler
 from ante.core.database import Database
 from ante.eventbus import EventBus
 from ante.eventbus.events import (

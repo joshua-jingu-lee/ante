@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ante.broker.scheduler import ReconcileScheduler
+from ante.bot.reconcile_scheduler import ReconcileScheduler
 
 # ── Fixtures ─────────────────────────────────────────
 
@@ -316,7 +316,7 @@ class TestStartStop:
 class TestConfiguration:
     def test_default_interval(self, reconciler, broker, bot_manager, eventbus):
         """기본 간격은 1800초(30분)이다."""
-        from ante.broker.scheduler import DEFAULT_INTERVAL_SECONDS
+        from ante.bot.reconcile_scheduler import DEFAULT_INTERVAL_SECONDS
 
         sched = ReconcileScheduler(
             reconciler=reconciler,
@@ -590,3 +590,23 @@ class TestUnattributedHoldingRouting:
         assert corrections == []
         assert len(notif_events) == 1
         assert notif_events[0].category == "broker"
+
+
+# ── #2673: 스케줄러의 자리 ──
+
+
+class TestSchedulerLocation:
+    def test_module_path(self):
+        assert ReconcileScheduler.__module__ == "ante.bot.reconcile_scheduler"
+
+    def test_old_module_is_gone(self):
+        import importlib
+
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("ante.broker.scheduler")
+
+    def test_broker_package_does_not_export_scheduler(self):
+        import ante.broker
+
+        assert not hasattr(ante.broker, "ReconcileScheduler")
+        assert "ReconcileScheduler" not in ante.broker.__all__
