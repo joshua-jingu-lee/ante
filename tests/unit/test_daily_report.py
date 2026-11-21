@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -167,15 +167,17 @@ class TestDailyReportEventAlwaysPublished:
     async def test_missing_target_date_uses_kst_today(
         self, scheduler, trade_recorder, eventbus, monkeypatch
     ):
-        """target_date가 없으면 UTC가 아니라 KST 기준 오늘 날짜로 리포트한다."""
+        """target_date가 없으면 UTC·호스트 시각이 아니라 KST 기준 오늘로 리포트한다."""
         import ante.trade.daily_report as daily_report_module
 
-        instant = datetime(2026, 5, 30, 1, 30, tzinfo=KST)
+        instant = datetime(2026, 5, 29, 20, 0, tzinfo=UTC)
 
         class _FixedDatetime(datetime):
             @classmethod
             def now(cls, tz=None):
-                return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+                if tz is None:
+                    return instant.replace(tzinfo=None)
+                return instant.astimezone(tz)
 
         monkeypatch.setattr(daily_report_module, "datetime", _FixedDatetime)
         report_events: list[DailyReportEvent] = []

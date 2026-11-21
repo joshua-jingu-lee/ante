@@ -149,6 +149,45 @@ async def test_ipc_envelope_code_is_stable_code_not_broker_raw_code(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["bot.start", "bot.stop"])
+async def test_ipc_bot_lifecycle_state_conflict_maps_to_bot_state_conflict(
+    socket_path: str, service_registry: ServiceRegistry, command: str
+) -> None:
+    """start/stop 의 상태 충돌은 IPC envelope code BOT_STATE_CONFLICT 로 나간다."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from ante.bot.exceptions import BotStateConflict
+    from ante.ipc.registry import register_all_handlers
+
+    bot = MagicMock()
+    bot.config.account_id = "acc-test"
+    service_registry.bot_manager.get_bot.return_value = bot
+    service_registry.bot_manager.start_bot = AsyncMock(
+        side_effect=BotStateConflict("이미 실행 중인 봇입니다")
+    )
+    service_registry.bot_manager.stop_bot = AsyncMock(
+        side_effect=BotStateConflict("실행 중이 아닌 봇입니다")
+    )
+    service_registry.account.get = AsyncMock(
+        return_value=SimpleNamespace(credentials={"app_key": "k"})
+    )
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+
+    server = IPCServer(socket_path, service_registry, cmd_registry)
+    await server.start()
+    try:
+        client = IPCClient(socket_path, timeout=5.0)
+        response = await client.send(command, {"bot_id": "bot-1"}, actor="tester")
+    finally:
+        await server.stop()
+
+    assert response["status"] == "error"
+    assert response["error"]["code"] == "BOT_STATE_CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_ipc_server_falls_back_to_execution_error_when_no_code(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:

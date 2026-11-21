@@ -670,6 +670,9 @@ class _SteppingClock(datetime):
         return base if tz is not None else base.replace(tzinfo=None)
 
 
+HANG_GUARD_SECONDS = 5.0
+
+
 async def _yield_loop(times: int = 20) -> None:
     for _ in range(times):
         await asyncio.sleep(0)
@@ -683,14 +686,14 @@ class TestLockedRecheckWithYieldingSession:
         a2 = _make_adapter(session, account_no="acct-B")
 
         t1 = asyncio.create_task(a1._authenticate())
-        await session.entered.wait()
+        await asyncio.wait_for(session.entered.wait(), timeout=HANG_GUARD_SECONDS)
         t2 = asyncio.create_task(a2._authenticate())
         await _yield_loop()
         assert session.post_count == 1
         assert not t2.done()
 
         session.release.set()
-        await asyncio.gather(t1, t2)
+        await asyncio.wait_for(asyncio.gather(t1, t2), timeout=HANG_GUARD_SECONDS)
 
         assert session.post_count == 1
         assert a2.access_token == "tok-1"
@@ -714,14 +717,16 @@ class TestLockedRecheckWithYieldingSession:
         a2 = _make_adapter(session, account_no="acct-B")
 
         t1 = asyncio.create_task(a1._authenticate())
-        await session.entered.wait()
+        await asyncio.wait_for(session.entered.wait(), timeout=HANG_GUARD_SECONDS)
         t2 = asyncio.create_task(a2._authenticate())
         await _yield_loop()
         assert not t2.done()
         assert "shared_key" not in _token_cooldowns
 
         session.release.set()
-        results = await asyncio.gather(t1, t2, return_exceptions=True)
+        results = await asyncio.wait_for(
+            asyncio.gather(t1, t2, return_exceptions=True), timeout=HANG_GUARD_SECONDS
+        )
 
         assert [type(r) for r in results] == [TokenRateLimitError] * 2
         assert session.post_count == 1

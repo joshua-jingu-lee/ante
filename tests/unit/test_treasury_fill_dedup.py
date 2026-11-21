@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import patch
 
 import pytest
@@ -398,11 +399,22 @@ class TestTreasuryAtomicityRollback:
         await order_tracker.record_fill("ord1", 10.0, 50_000.0)
         held = treasury.get_budget("bot1")
         assert held is not None
-        before = (held.allocated, held.available, held.reserved, held.spent)
+        held.last_updated = datetime(2000, 1, 1, tzinfo=UTC)
+        before = (
+            held.allocated,
+            held.available,
+            held.reserved,
+            held.spent,
+            held.returned,
+            held.last_updated,
+        )
+        seen_mid_settlement: list[tuple] = []
 
-        with patch.object(
-            treasury, "_log_transaction", side_effect=RuntimeError("boom")
-        ):
+        async def _boom(**kwargs):
+            seen_mid_settlement.append((held.reserved, held.spent, held.last_updated))
+            raise RuntimeError("boom")
+
+        with patch.object(treasury, "_log_transaction", side_effect=_boom):
             with pytest.raises(RuntimeError, match="boom"):
                 await treasury._on_order_filled(
                     _buy_fill_event(
@@ -418,7 +430,18 @@ class TestTreasuryAtomicityRollback:
         assert treasury.get_budget("bot1") is held
         assert [b for b in treasury.list_budgets() if b.bot_id == "bot1"] == [held]
         assert treasury.list_budgets()[0] is held
-        assert (held.allocated, held.available, held.reserved, held.spent) == before
+        assert len(seen_mid_settlement) == 1
+        mid_reserved, mid_spent, mid_last_updated = seen_mid_settlement[0]
+        assert (mid_reserved, mid_spent) != (before[2], before[3])
+        assert mid_last_updated != before[5]
+        assert (
+            held.allocated,
+            held.available,
+            held.reserved,
+            held.spent,
+            held.returned,
+            held.last_updated,
+        ) == before
 
     async def test_rollback_pops_originally_absent_reservation(
         self, treasury, order_tracker, db

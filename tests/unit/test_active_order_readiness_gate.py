@@ -1500,6 +1500,24 @@ class TestVirtualRouting:
         assert [f.error_code for f in cap.failed] == ["account_suspended"]
         assert svc.get.await_count == 2
 
+    async def test_virtual_gate_rereads_readiness_registry_for_each_order(
+        self,
+    ) -> None:
+        """첫 주문 뒤 registry 가 not_ready 가 되면 두 번째 주문은 막힌다."""
+        registry = ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        executor = self._make_virtual_executor(bus, registry=registry, gateway=gateway)
+
+        await executor._on_order_approved(_approved(order_type="limit"))
+        registry.mark_not_ready(ACCOUNT, ReadinessFlag.TREASURY_SYNC, "lost")
+        await executor._on_order_approved(_approved(order_type="limit"))
+
+        assert len(cap.filled) == 1
+        assert [f.error_code for f in cap.failed] == ["account_not_ready"]
+
     async def test_virtual_gate_failure_keeps_order_identity_for_release(
         self,
     ) -> None:

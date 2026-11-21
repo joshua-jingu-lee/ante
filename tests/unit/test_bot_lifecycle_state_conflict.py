@@ -209,9 +209,12 @@ async def test_state_conflict_is_caught_by_except_bot_error(
     with pytest.raises(BotError) as stop_exc:
         await manager.stop_bot(bot.bot_id)
     await manager.start_bot(bot.bot_id)
-    with pytest.raises(BotError) as start_exc:
-        await manager.start_bot(bot.bot_id)
-    await manager.stop_bot(bot.bot_id)
+    try:
+        with pytest.raises(BotError) as start_exc:
+            await manager.start_bot(bot.bot_id)
+    finally:
+        if bot.status == BotStatus.RUNNING:
+            await manager.stop_bot(bot.bot_id)
 
     assert type(stop_exc.value) is BotStateConflict
     assert type(start_exc.value) is BotStateConflict

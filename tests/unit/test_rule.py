@@ -4499,6 +4499,98 @@ class TestRuleEngineEventBus:
         assert rejected[0].order_id == "<unrenderable _Unprintable>"
         assert rejected[0].reason.startswith("Invalid signal side: 'hold'")
 
+    async def test_quantity_repr_base_exception_is_not_swallowed(
+        self, engine, eventbus
+    ):
+        """quantity 의 __repr__ 가 Exception 아닌 BaseException 을 던지면 전파한다."""
+
+        class _ReprAbort(BaseException):
+            pass
+
+        class _BadQuantity:
+            def __repr__(self) -> str:
+                raise _ReprAbort("repr aborted")
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        with pytest.raises(_ReprAbort):
+            await eventbus.publish(
+                OrderRequestEvent(
+                    account_id="domestic",
+                    bot_id="bot1",
+                    strategy_id="s1",
+                    symbol="005930",
+                    side="buy",
+                    quantity=_BadQuantity(),  # type: ignore[arg-type]
+                    order_type="market",
+                    exchange="KRX",
+                )
+            )
+
+        assert rejected == []
+
+    async def test_quantity_repr_exception_falls_back_to_placeholder(
+        self, engine, eventbus
+    ):
+        """같은 자리에서 Exception 이면 placeholder 로 사유를 만들어 거부한다."""
+
+        class _BadQuantity:
+            def __repr__(self) -> str:
+                raise LookupError("repr fails")
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=_BadQuantity(),  # type: ignore[arg-type]
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith(
+            "Invalid quantity: <unrenderable _BadQuantity>"
+        )
+
+    async def test_order_id_falls_back_to_repr_when_only_str_raises(
+        self, engine, eventbus
+    ):
+        """event_id 의 __str__ 만 던지면 order_id 는 repr 결과로 채운다."""
+
+        class _StrFails:
+            def __str__(self) -> str:
+                raise LookupError("str fails")
+
+            def __repr__(self) -> str:
+                return "EID-REPR"
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                event_id=_StrFails(),  # type: ignore[arg-type]
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="hold",
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert [e.order_id for e in rejected] == ["EID-REPR"]
+
     async def test_rule_engine_catch_all_reject_for_synthetic_raise(
         self, engine, eventbus, monkeypatch
     ):
@@ -6302,6 +6394,16 @@ class TestRuleConfigRejectsNonFiniteNumbers:
     )
     def test_registry_validate_config_rejects_non_finite(self, rule_type, param, value):
         """NaN·±Inf·float로 바꿀 수 없는 거대 int는 유한 숫자가 아니라고 거부한다."""
+        from ante.rule.engine import RULE_REGISTRY
+
+        errors = RULE_REGISTRY[rule_type].validate_config({param: value})
+
+        assert errors == [f"{param} must be a finite number"]
+
+    @pytest.mark.parametrize(("rule_type", "param"), _NUMERIC_RULE_PARAMS)
+    @pytest.mark.parametrize("value", [True, False], ids=["true", "false"])
+    def test_registry_validate_config_rejects_bool(self, rule_type, param, value):
+        """bool 은 int 의 하위형이어도 숫자로 받지 않는다."""
         from ante.rule.engine import RULE_REGISTRY
 
         errors = RULE_REGISTRY[rule_type].validate_config({param: value})

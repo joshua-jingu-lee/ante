@@ -197,8 +197,14 @@ async def test_close_all_closes_and_joins_to_completion() -> None:
     assert naturally_exited.is_set() is True
 
 
-async def test_join_waits_for_tasks_to_finish_on_their_own_before_cancelling() -> None:
-    """join 은 grace 안의 read·writer task 를 취소하지 않고 끝날 때까지 기다린다."""
+HANG_GUARD_SECONDS = 5.0
+
+
+async def test_join_waits_for_tasks_to_finish_on_their_own_before_cancelling(
+    monkeypatch,
+) -> None:
+    """grace 안에 끝나는 read·writer task 는 취소하지 않고 끝날 때까지 기다린다."""
+    monkeypatch.setattr(ChannelHandle, "JOIN_GRACE_SECONDS", 1e6)
     handle = _handle()
     release = asyncio.Event()
     flushed: list[str] = []
@@ -218,11 +224,25 @@ async def test_join_waits_for_tasks_to_finish_on_their_own_before_cancelling() -
     assert not handle.writer_task.cancelled()
 
     release.set()
-    await joiner
+    await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS)
 
     assert sorted(flushed) == ["read", "writer"]
     assert not handle.read_task.cancelled()
     assert not handle.writer_task.cancelled()
+
+
+async def test_join_cancels_tasks_still_running_after_grace(monkeypatch) -> None:
+    """grace 가 지나도 끝나지 않는 task 는 join 이 직접 cancel 하고 끝까지 기다린다."""
+    monkeypatch.setattr(ChannelHandle, "JOIN_GRACE_SECONDS", 0)
+    handle = _handle()
+    never = asyncio.Event()
+    handle.read_task = asyncio.ensure_future(never.wait())
+    handle.writer_task = asyncio.ensure_future(never.wait())
+
+    await asyncio.wait_for(handle.join(), timeout=HANG_GUARD_SECONDS)
+
+    assert handle.read_task.cancelled()
+    assert handle.writer_task.cancelled()
 
 
 async def test_close_all_empty_registry_no_error() -> None:

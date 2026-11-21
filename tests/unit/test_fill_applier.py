@@ -423,9 +423,16 @@ async def test_full_fill_evicts_sync_open_cache_post_commit(
 # ── Lock 직렬화 / fallback 발행 ──────────────────────
 
 
+HANG_GUARD_SECONDS = 5.0
+
+
 async def _yield_loop(times: int = 20) -> None:
     for _ in range(times):
         await asyncio.sleep(0)
+
+
+async def _bounded(awaitable):
+    return await asyncio.wait_for(awaitable, timeout=HANG_GUARD_SECONDS)
 
 
 async def _apply(applier, kind: str, amount: float) -> float:
@@ -491,18 +498,98 @@ async def test_second_apply_waits_for_first_transaction_before_reading(
     monkeypatch.setattr(tracker, "lookup_order_id", _spy_lookup)
 
     t1 = asyncio.create_task(_apply(applier, first, 40.0))
-    await entered.wait()
+    await _bounded(entered.wait())
     t2 = asyncio.create_task(_apply(applier, second, second_amount))
     await _yield_loop()
     assert lookups == ["0001"]
     assert not t2.done()
 
     release.set()
-    assert await t1 == 40.0
-    assert await t2 == expected_second_delta
+    assert await _bounded(t1) == 40.0
+    assert await _bounded(t2) == expected_second_delta
     assert lookups == ["0001", "0001"]
     pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
     assert pos["quantity"] == 40.0 + expected_second_delta
+
+
+@pytest.mark.parametrize("first", ["cumulative", "stream"])
+async def test_lock_holds_from_read_through_transaction(
+    applier, tracker, position_history, monkeypatch, first
+):
+    """첫 적용이 주문을 읽는 중이면 둘째 스트림 증분은 그 적용이 끝난 뒤에 읽는다."""
+    await _seed(tracker)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    orig_get = tracker.get
+    get_calls = 0
+
+    async def _paused_get(order_id):
+        nonlocal get_calls
+        get_calls += 1
+        if get_calls == 1:
+            entered.set()
+            await release.wait()
+        return await orig_get(order_id)
+
+    monkeypatch.setattr(tracker, "get", _paused_get)
+
+    t1 = asyncio.create_task(_apply(applier, first, 40.0))
+    await _bounded(entered.wait())
+    t2 = asyncio.create_task(_apply(applier, "stream", 30.0))
+    await _yield_loop()
+    assert not t2.done()
+
+    release.set()
+    deltas = (await _bounded(t1), await _bounded(t2))
+
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert (deltas, pos["quantity"]) == ((40.0, 30.0), 70.0)
+    assert (await orig_get("ord-1")).recorded_filled_qty == 70.0
+
+
+async def test_outbox_enqueue_failure_rolls_back_the_fill(
+    db, tracker, position_history, eventbus, monkeypatch
+):
+    """outbox insert 가 실패하면 같은 트랜잭션의 recorded·trade·position 도 롤백된다."""
+    from ante.trade.fill_outbox import FillOutbox
+
+    rec = TradeRecorder(db, position_history)
+    await rec.initialize()
+    outbox = FillOutbox(db)
+    await outbox.initialize()
+    applier = FillApplier(
+        db=db,
+        order_tracker=tracker,
+        position_history=position_history,
+        eventbus=eventbus,
+        outbox=outbox,
+    )
+    await _seed(tracker)
+    enqueue_calls = 0
+
+    async def _failing_enqueue(**kwargs):
+        nonlocal enqueue_calls
+        enqueue_calls += 1
+        raise RuntimeError("outbox insert failed")
+
+    monkeypatch.setattr(outbox, "enqueue", _failing_enqueue)
+
+    with pytest.raises(RuntimeError, match="outbox insert failed"):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=40.0,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+
+    assert enqueue_calls == 1
+    assert (await tracker.get("ord-1")).recorded_filled_qty == 0.0
+    assert (
+        await db.fetch_all("SELECT * FROM trades WHERE account_id = ?", (ACCT,)) == []
+    )
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 0.0
 
 
 async def test_fallback_publish_without_outbox_leaves_dedup_key_empty(
