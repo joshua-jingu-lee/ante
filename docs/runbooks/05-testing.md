@@ -14,8 +14,8 @@
 
 ## 2. 테스트 구조
 
-테스트는 `tests/` 아래에 단위(`unit/`), 통합(`integration/`), 공용 픽스처
-(`fixtures/`)로 구성된다. `unit/`은 규모가 커지면서 도메인별 서브패키지로도 나뉜다.
+테스트는 `tests/` 아래에 단위(`unit/`), 통합(`integration/`), e2e(`e2e/`), 공용
+픽스처(`fixtures/`)로 구성된다. `unit/`은 규모가 커지면서 도메인별 서브패키지로도 나뉜다.
 
 ```
 tests/
@@ -29,7 +29,8 @@ tests/
 │   ├── specs/        # 스펙 기반 테스트
 │   ├── strategy/     # 전략 테스트
 │   └── test_*.py     # 모듈별 평면 단위 테스트
-└── integration/      # 통합 테스트 (EventBus 연동 흐름)
+├── integration/      # 통합 테스트 (EventBus 연동 흐름)
+└── e2e/              # 데몬 하위 프로세스 시나리오
 ```
 
 > 파일 단위 최신 목록은 생성 문서
@@ -164,16 +165,15 @@ PYTHONPATH=$PWD/src .venv/bin/python scripts/check_import_path.py
 # 단위 테스트만
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/ -v
 
-# 통합 테스트만
+# 통합 테스트와 e2e 시나리오(데몬을 하위 프로세스로 띄운다)
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/integration/ -v
+PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/e2e/ -v
 
 # 전체 + 커버리지
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/ -v --cov=src/ante --cov-report=term-missing
 
-# 특정 모듈만
+# 특정 모듈만, 특정 테스트만
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/test_eventbus.py -v
-
-# 특정 테스트만
 PYTHONPATH=$PWD/src .venv/bin/python -m pytest tests/unit/test_eventbus.py::test_publish_subscribe -v
 ```
 

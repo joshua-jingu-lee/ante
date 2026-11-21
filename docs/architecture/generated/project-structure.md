@@ -749,13 +749,23 @@ tests/
 │   ├── test_block_pytest_pipe.py
 │   ├── test_check_comments.py
 │   ├── test_mock_broker_account.py
-│   └── test_main_wiring.py
+│   ├── test_main_wiring.py
+│   └── test_e2e_harness.py
 ├── __init__.py
-└── integration/
+├── integration/
+│   ├── __init__.py
+│   ├── test_signal_connect_cli_repro_2333.py
+│   ├── test_signal_connect_repro_2333.py
+│   └── test_signal_connect_stream.py
+└── e2e/
+    ├── netguard/
+    │   └── sitecustomize.py
+    ├── strategies/
+    │   └── round_trip.py
     ├── __init__.py
-    ├── test_signal_connect_cli_repro_2333.py
-    ├── test_signal_connect_repro_2333.py
-    └── test_signal_connect_stream.py
+    ├── conftest.py
+    ├── harness.py
+    └── test_virtual_round_trip.py
 ```
 
 ## deploy/ — 서비스 배포

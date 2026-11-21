@@ -83,6 +83,10 @@ jobs:
           ANTE_DB_ENCRYPTION_KEY: "sm4fkbGXHVNKjw2OvQIrQX5g9qdRGqNKST8pFixdNPk="
         run: pytest tests/integration/ -x --tb=short -q
 
+      - name: Run e2e scenarios
+        timeout-minutes: 10
+        run: pytest tests/e2e/ -x --tb=short -q -rA
+
   docker-build:
     runs-on: ubuntu-latest
     steps:
