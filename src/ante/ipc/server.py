@@ -1,11 +1,4 @@
-"""IPCServer — Unix 도메인 소켓 기반 IPC 서버.
-
-asyncio.start_unix_server를 사용하여 외부 프로세스(CLI, MCP)의
-명령을 수신하고 처리한다.
-
-lifecycle state machine으로 shutdown 중 mutating
-명령이 SERVICE_UNAVAILABLE로 거부되도록 한다.
-"""
+"""IPCServer — Unix 도메인 소켓 기반 IPC 서버."""
 
 from __future__ import annotations
 
@@ -63,20 +56,12 @@ def _encode_signal_frame(frame: dict) -> bytes:
 class IPCServerState(Enum):
     """IPCServer lifecycle state.
 
-    shutdown 중 mutating 명령을 reject하기 위한 명시적 상태 기계.
-
-    State 전이:
-
     * ``STOPPED`` → ``RUNNING``: ``start()`` 마지막에 전환.
     * ``RUNNING`` → ``SHUTTING_DOWN``: ``stop_accepting()`` 진입 직후
       (listener close 호출 **전**)에 전환. 이 시점부터 mutating dispatch는
       ``SERVICE_UNAVAILABLE``로 거부된다.
     * ``SHUTTING_DOWN`` → ``DRAINING``: ``stop_dispatching()`` 호출 시 전환.
-      이 시점부터는 read-only를 포함한 모든 명령이 거부된다 — broker/db 등
-      서비스 리소스 종료 구간에 들어가기 때문이다.
     * ``DRAINING`` → ``STOPPED``: ``unlink_socket()`` 마지막에 전환.
-
-    초기 값은 ``STOPPED`` (start 이전 상태).
     """
 
     RUNNING = "running"
@@ -113,14 +98,6 @@ class IPCServer:
     async def start(self) -> None:
         """서버 시작. 기존 소켓 파일이 있으면 삭제 후 재생성.
 
-        socket 파일 lifecycle은 ``unlink_socket()``이 단독으로
-        책임진다 — cold-path guard가 shutdown 동안 'PID alive AND socket
-        exists'로 active runtime을 판정해야 race window를 회피할 수 있기
-        때문이다.
-
-        메서드 종료 시 state를 ``RUNNING``으로 전환한다.
-
-        Ante는 Python 3.13 단일 런타임을 공식 계약으로 한다.
         Python 3.13의 ``asyncio.start_unix_server``는 ``cleanup_socket`` 인자를
         받으며 기본값이 ``True``이다. 본 메서드는 ``cleanup_socket=False``를
         명시적으로 전달해 ``server.close()`` 시 socket 파일이 자동 unlink되지
@@ -149,11 +126,6 @@ class IPCServer:
 
     async def stop_accepting(self) -> None:
         """새 연결 수락 중지. 소켓 파일과 active 연결은 유지.
-
-        ``asyncio.Server.wait_closed``는 detach된 연결까지 모두 기다리므로
-        ``_handle_connection``이 ``while True`` 루프인 IPCServer에서는 hang
-        위험이 있다. 따라서 본 메서드는
-        ``close()``만 호출하고 wait는 별도 ``drain_connections()``이 담당한다.
 
         cold-path guard(``PID alive AND socket exists``)가 shutdown 동안에도
         'active runtime'으로 판정하도록, 소켓 파일은 ``unlink_socket()``이

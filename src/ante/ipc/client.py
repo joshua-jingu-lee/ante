@@ -1,7 +1,4 @@
-"""IPCClient — Unix 도메인 소켓 IPC 클라이언트.
-
-실행 중인 Ante 서버에 명령을 전송하고 응답을 받는다.
-"""
+"""IPCClient — Unix 도메인 소켓 IPC 클라이언트."""
 
 from __future__ import annotations
 
@@ -37,17 +34,11 @@ class IPCClient:
     ) -> dict:
         """커맨드를 서버에 전송하고 응답을 반환.
 
-        Args:
-            command: 실행할 커맨드 이름 (예: "system.halt")
-            args: 커맨드 인자
-            actor: 요청자 식별자
-
         Returns:
             서버 응답 dict
 
         Raises:
             ServerNotRunningError: 소켓 파일이 없거나 연결 거부
-            IPCTimeoutError: 타임아웃 초과
         """
         path = Path(self._socket_path)
         if not path.exists():
