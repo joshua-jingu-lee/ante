@@ -13,8 +13,9 @@
 ``ApprovalRequest`` 두 곳뿐이어야 한다. ``setattr(..., "status", ...)`` 호출은
 0개여야 한다.
 
-**호출 자리**: ``_transition_status`` 를 부르는 곳을 감싸는 함수별로 센 수가
-리터럴 표와 같아야 한다.
+**호출 자리**: ``_transition_status`` 를 부르는 곳마다 (감싸는 함수, 다음
+상태 인자, 동작 이름 인자)의 목록이 리터럴 표와 같아야 한다. 모든 호출은
+위치 인자 셋으로 부른다.
 
 알려진 한계: ``**kwargs`` 언패킹으로 넘기는 ``status``, ``__dict__``·
 ``object.__setattr__`` 를 거치는 쓰기, 다른 파일의 쓰기는 보지 않는다.
@@ -141,20 +142,25 @@ def test_no_setattr_of_status():
 def test_transition_function_call_sites():
     tree = _parse()
     owner = _enclosing_functions(tree)
-    calls = Counter(
-        owner[id(node)]
+    calls = sorted(
+        (owner[id(node)], ast.unparse(node.args[1]), ast.unparse(node.args[2]))
         for node in ast.walk(tree)
         if isinstance(node, ast.Call) and _callee_name(node) == _TRANSITION_FUNC
     )
-    assert dict(calls) == {
-        "create": 1,
-        "approve": 1,
-        "reject": 1,
-        "reopen": 1,
-        "cancel": 1,
-        "hold": 1,
-        "resume": 1,
-        "expire_stale": 1,
-        "cancel_invalid_type_request": 1,
-        "_execute_approved": 2,
-    }
+    assert calls == [
+        ("_execute_approved", "ApprovalStatus.EXECUTION_FAILED", "'execute'"),
+        ("_execute_approved", "ApprovalStatus.EXECUTION_FAILED", "'execute'"),
+        ("approve", "ApprovalStatus.APPROVED", "'approve'"),
+        ("cancel", "ApprovalStatus.CANCELLED", "'cancel'"),
+        (
+            "cancel_invalid_type_request",
+            "ApprovalStatus.CANCELLED",
+            "'cancel_invalid_type_request'",
+        ),
+        ("create", "ApprovalStatus.APPROVED", "'create'"),
+        ("expire_stale", "ApprovalStatus.EXPIRED", "'expire_stale'"),
+        ("hold", "ApprovalStatus.ON_HOLD", "'hold'"),
+        ("reject", "ApprovalStatus.REJECTED", "'reject'"),
+        ("reopen", "ApprovalStatus.PENDING", "'reopen'"),
+        ("resume", "ApprovalStatus.PENDING", "'resume'"),
+    ]
