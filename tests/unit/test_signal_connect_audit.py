@@ -92,7 +92,6 @@ async def test_invalid_key_dispatch_warns_without_sk_or_traceback(
         "signal.connect",
         _handle_signal_connect,
         is_mutating=False,
-        result_kind="stream",
         required_services=frozenset({"bot_manager"}),
         account_id_policy="none",
     )
