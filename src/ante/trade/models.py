@@ -28,6 +28,16 @@ class TradeStatus(StrEnum):
     MODIFIED = "modified"
 
 
+TRADE_STATUS_TRANSITIONS: dict[TradeStatus, set[TradeStatus]] = {
+    TradeStatus.FILLED: set(),
+    TradeStatus.CANCELLED: set(),
+    TradeStatus.REJECTED: set(),
+    TradeStatus.FAILED: set(),
+    TradeStatus.ADJUSTED: set(),
+    TradeStatus.MODIFIED: set(),
+}
+
+
 @dataclass
 class TradeRecord:
     """개별 거래 기록.

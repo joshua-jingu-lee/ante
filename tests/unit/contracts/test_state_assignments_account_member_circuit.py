@@ -1,4 +1,4 @@
-"""계좌·멤버 상태를 쓰는 자리가 전이 함수 하나로 모였는지 잠그는 구조 테스트 (#2657).
+"""계좌·멤버·회로차단기 상태를 쓰는 자리가 전이 함수로 모였는지 잠그는 구조 테스트.
 
 대상 파일은 ``src/ante/account/service.py`` 와 ``src/ante/member/service.py``
 다(두 상태를 쓰는 곳이 이 두 파일뿐이다).
@@ -21,6 +21,13 @@
 **기존 검사**: 호출보다 앞 줄의 ``raise``·``return``·``self._assert_*`` 호출이
 메서드마다 리터럴 목록과 같다(기존 검사를 표 검사로 대체하지 않는다).
 
+**회로차단기** (``src/ante/broker/circuit_breaker.py``): 대상이 ``._state``
+속성인 대입(같은 세 노드 종류, 같은 펼침)은 ``_transition`` 안 1개와
+``__init__`` 1개뿐이다. ``_transition`` 을 부르는 곳마다 (감싸는 함수, 첫 위치
+인자)가 리터럴 표와 같다. ``_transition`` 안에서 표를 읽고 ``raise`` 하는
+``if`` 는 ``self._state`` 대입·``logger`` 호출·``_publish_event`` 호출보다
+앞 줄에 있다.
+
 알려진 한계: ``**kwargs`` 언패킹으로 넘기는 ``status``, ``__dict__``·
 ``object.__setattr__``·``dataclasses.replace`` 를 거치는 쓰기, 다른 파일의
 쓰기는 보지 않는다.
@@ -37,6 +44,7 @@ import pytest
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 _ACCOUNT = _REPO_ROOT / "src" / "ante" / "account" / "service.py"
 _MEMBER = _REPO_ROOT / "src" / "ante" / "member" / "service.py"
+_CIRCUIT = _REPO_ROOT / "src" / "ante" / "broker" / "circuit_breaker.py"
 _TRANSITION_FUNC = "_transition_status"
 
 _FILES = pytest.mark.parametrize("path", [_ACCOUNT, _MEMBER], ids=["account", "member"])
@@ -317,3 +325,73 @@ def test_existing_guards_stay_before_the_transition(path, expected):
     callers = sorted(owner[id(call)] for call in _transition_calls(tree))
     guards = {name: _guards_before_transition(methods[name]) for name in callers}
     assert guards == expected
+
+
+def _attribute_assignments(tree: ast.Module, attr: str) -> list[ast.stmt]:
+    found: list[ast.stmt] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign | ast.AugAssign):
+            targets = [node.target]
+        else:
+            continue
+        flat = [t for target in targets for t in _flatten_targets(target)]
+        if any(isinstance(t, ast.Attribute) and t.attr == attr for t in flat):
+            found.append(node)
+    return found
+
+
+def test_circuit_state_is_assigned_only_in_init_and_transition():
+    tree = _parse(_CIRCUIT)
+    owner = _enclosing_functions(tree)
+    where = Counter(owner[id(node)] for node in _attribute_assignments(tree, "_state"))
+    assert dict(where) == {"__init__": 1, "_transition": 1}
+
+
+def test_circuit_transition_call_sites():
+    tree = _parse(_CIRCUIT)
+    owner = _enclosing_functions(tree)
+    calls = sorted(
+        (owner[id(node)], ast.unparse(node.args[0]))
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and _callee_name(node) == "_transition"
+    )
+    assert calls == [
+        ("record_failure", "CircuitState.OPEN"),
+        ("record_failure", "CircuitState.OPEN"),
+        ("record_success", "CircuitState.CLOSED"),
+        ("state", "CircuitState.HALF_OPEN"),
+    ]
+
+
+def test_circuit_table_check_precedes_assignment_log_and_event():
+    tree = _parse(_CIRCUIT)
+    (method,) = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "_transition"
+    ]
+    assert [a.arg for a in method.args.args] == ["self", "new_state", "reason"]
+    guards = [
+        node
+        for node in method.body
+        if isinstance(node, ast.If)
+        and "CIRCUIT_STATE_TRANSITIONS" in ast.unparse(node.test)
+        and any(isinstance(stmt, ast.Raise) for stmt in node.body)
+    ]
+    assert len(guards) == 1
+    guard_line = guards[0].lineno
+    later = [
+        node.lineno
+        for node in _attribute_assignments(tree, "_state")
+        if node.lineno >= method.lineno and node.lineno <= (method.end_lineno or 0)
+    ]
+    later += [
+        node.lineno
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call)
+        and _callee_name(node) in {"warning", "_publish_event"}
+    ]
+    assert len(later) == 3
+    assert all(guard_line < line for line in later)
