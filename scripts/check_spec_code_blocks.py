@@ -62,7 +62,7 @@ EXIT_ERROR = 2
 
 OPEN_FENCE_RE = re.compile(r"^[ \t]*(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 LINE_REF_RE = re.compile(
-    r"[A-Za-z0-9_./-]*\.py:(?P<items>\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*)"
+    r"[A-Za-z0-9_./-]*\.py:(?P<items>[0-9]+(?:-[0-9]+)?(?:,[0-9]+(?:-[0-9]+)?)*)"
 )
 
 GROWTH_ADVICE = (

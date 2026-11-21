@@ -199,6 +199,7 @@ def test_unclosed_block_or_non_utf8_exits_2(
         pytest.param("a.py:12, 13", 1, id="comma-space-ends-list"),
         pytest.param("a.py:", 0, id="no-number"),
         pytest.param("a.py:x", 0, id="not-a-number"),
+        pytest.param("a.py:١٢", 0, id="non-ascii-digits"),
         pytest.param("a.py 12행", 0, id="prose"),
         pytest.param("`a.py`:12", 0, id="split-by-backtick"),
         pytest.param("a.py:L12", 0, id="L-prefix"),
