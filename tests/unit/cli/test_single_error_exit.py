@@ -553,6 +553,40 @@ def test_every_leaf_command_ends_in_the_single_exit(
     assert reached == 2 * len(leaves)
 
 
+_SAMPLE_LEAVES = (
+    ("bot", "list"),
+    ("init",),
+    ("member", "reset-password"),
+    ("feed", "status"),
+    ("audit", "list"),
+)
+
+
+@pytest.mark.parametrize("mode", ["json", "text"])
+@pytest.mark.parametrize(
+    ("exc", "message"),
+    [
+        pytest.param(RuntimeError("rt failed"), "rt failed", id="RuntimeError"),
+        pytest.param(OSError("os failed"), "os failed", id="OSError"),
+        pytest.param(ValueError("bad value"), "bad value", id="ValueError"),
+        pytest.param(KeyError("k"), "'k'", id="KeyError"),
+    ],
+)
+def test_builtin_exception_types_on_sample_leaves(
+    monkeypatch: pytest.MonkeyPatch, mode: str, exc: Exception, message: str
+) -> None:
+    """내장 예외 타입 넷 × 고정 표본 잎 다섯: 타입마다 같은 출구로 끝난다."""
+    for path in _SAMPLE_LEAVES:
+        cmd = _leaf(path)
+        monkeypatch.setattr(cmd, "params", [])
+        monkeypatch.setattr(cmd, "callback", _raising(exc))
+        result = _invoke(["--format", mode, *path])
+        if mode == "json":
+            _assert_json_exit(result, "EXECUTION_ERROR", message)
+        else:
+            _assert_text_exit(result, f"Error: EXECUTION_ERROR: {message}")
+
+
 def test_leaf_walk_matches_cli_contract_registry() -> None:
     """잎 명령 집합 = CLI 계약 레지스트리 + 레지스트리 밖으로 알려진 잎."""
     from ante.contracts.cli_registry import CLI_COMMAND_REGISTRY
@@ -620,6 +654,38 @@ def test_registry_entries_have_same_code_on_cli_and_ipc(
             mismatches.append(
                 (cls.__name__, spec.code, cli_code, ipc_code, result.exit_code)
             )
+        checked += 1
+    assert mismatches == []
+    assert checked == len(EXCEPTION_TO_SPEC)
+
+
+def test_registry_entries_text_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """레지스트리 항목 전부를 text 모드로: stderr 한 줄, stdout 비움, 항목의 exit.
+
+    Click 예외인 항목(IPC 클라이언트 예외)은 text 모드에서 Click 기본 출력
+    ``Error: <message>``로 끝난다.
+    """
+    from ante.contracts.error_registry import EXCEPTION_TO_SPEC
+
+    entries = list(EXCEPTION_TO_SPEC.items())
+    assert entries, "EXCEPTION_TO_SPEC가 비어 있다(빈 통과 방지)"
+    cmd = _leaf(("bot", "list"))
+    monkeypatch.setattr(cmd, "params", [])
+    mismatches: list[tuple[str, object, object, object, int]] = []
+    checked = 0
+    for cls, spec in entries:
+        exc = _registry_instance(cls)
+        monkeypatch.setattr(cmd, "callback", _raising(exc))
+        result = _invoke(["--format", "text", "bot", "list"])
+        if isinstance(exc, click.ClickException):
+            expected = [f"Error: {exc.message}"]
+            expected_exit = exc.exit_code
+        else:
+            expected = [f"Error: {spec.code}: {exc}"]
+            expected_exit = spec.exit_code or 1
+        got = (result.stdout, result.stderr.splitlines(), result.exit_code)
+        if got != ("", expected, expected_exit):
+            mismatches.append((cls.__name__, *got, expected_exit))
         checked += 1
     assert mismatches == []
     assert checked == len(EXCEPTION_TO_SPEC)
