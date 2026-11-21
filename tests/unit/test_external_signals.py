@@ -297,6 +297,67 @@ class TestBotExternalSignal:
 # ── #2146: ExternalSignalEvent account-scoped marker ────────
 
 
+class _CancelOnDataStrategy(Strategy):
+    """on_data 에서 주문 취소만 요청하고 후속 시그널은 내지 않는 전략."""
+
+    meta = StrategyMeta(
+        name="cancel-on-data",
+        version="1.0.0",
+        description="queues a cancel from on_data",
+        accepts_external_signals=True,
+    )
+
+    async def on_step(self, context: dict) -> list[Signal]:
+        return []
+
+    async def on_data(self, data: dict) -> list[Signal]:
+        self.ctx.cancel_order("ord-ext", reason="external cancel")
+        return []
+
+
+async def test_external_signal_leaves_queued_actions_for_next_step() -> None:
+    """외부 시그널 경로는 on_data 가 쌓은 주문 액션을 발행하지 않고 남겨 둔다."""
+    from ante.bot.bot import Bot
+    from ante.eventbus.events import OrderCancelEvent
+    from ante.strategy import StrategyContext
+
+    config = MagicMock()
+    config.bot_id = "bot-001"
+    config.strategy_id = "stg-001"
+    config.account_id = "test"
+    ctx = StrategyContext(
+        bot_id="bot-001",
+        data_provider=MagicMock(),
+        portfolio=MagicMock(),
+        order_view=MagicMock(),
+    )
+    eventbus = MagicMock()
+    eventbus.publish = AsyncMock()
+    bot = Bot(
+        config=config, strategy_cls=_CancelOnDataStrategy, ctx=ctx, eventbus=eventbus
+    )
+    bot.strategy = _CancelOnDataStrategy(ctx=ctx)
+    bot.status = BotStatus.RUNNING
+
+    await bot.on_external_signal(
+        ExternalSignalEvent(
+            account_id="test",
+            bot_id="bot-001",
+            signal_id="sig-ext",
+            symbol="005930",
+            action="buy",
+            reason="external",
+            confidence=0.9,
+        )
+    )
+
+    published = [c.args[0] for c in eventbus.publish.call_args_list]
+    assert not any(isinstance(e, OrderCancelEvent) for e in published)
+    assert [(a.action, a.order_id) for a in ctx._drain_actions()] == [
+        ("cancel", "ord-ext")
+    ]
+
+
 class TestExternalSignalAccountScoped:
     """#2146: ExternalSignalEvent 가 account-scoped marker 를 갖는지 검증."""
 

@@ -1775,6 +1775,159 @@ async def test_fallback_skipped_when_excess_not_equal_ordered(
     assert pos["quantity"] == 0.0
 
 
+FIXED_DAY = "20260529"
+
+
+@pytest.fixture
+def fixed_business_day(monkeypatch):
+    """fill_scheduler 의 오늘 영업일을 FIXED_DAY 로 고정한다."""
+    import ante.broker.fill_scheduler as fill_scheduler_module
+
+    real = fill_scheduler_module.business_date_kst
+
+    def _fixed(when=None):
+        return FIXED_DAY if when is None else real(when)
+
+    monkeypatch.setattr(fill_scheduler_module, "business_date_kst", _fixed)
+    return FIXED_DAY
+
+
+async def test_fallback_skipped_when_excess_exceeds_ordered(
+    fallback_applier, tracker, fixed_business_day
+):
+    """excess 가 주문 수량보다 크면(150 vs ordered 100) 적용하지 않는다."""
+    app, ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=100.0,
+        submitted_date=FIXED_DAY,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 150.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 1
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+    pos = await ph.get_current("bot-1", "069500", account_id=ACCT)
+    assert pos["quantity"] == 0.0
+
+
+async def test_fallback_enabled_by_default_when_flag_omitted(
+    fallback_applier, tracker, fixed_business_day
+):
+    """fallback_enabled 를 넘기지 않으면 모의 계좌에서 fallback 이 동작한다."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=FIXED_DAY,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    sched = FillReconcileScheduler(
+        broker=broker,
+        order_tracker=tracker,
+        fill_applier=app,
+        account_id=ACCT,
+        trade_service=svc,
+    )
+    result = await sched.catch_up_once()
+
+    assert result.applied == 1
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 1.0
+
+
+async def test_poll_window_reaches_back_to_verify_date_even_with_open_orders(
+    fallback_applier, tracker, fixed_business_day
+):
+    """open 주문이 함께 있어도 from_date 는 verify 항목 가운데 가장 이른 날짜다."""
+    from ante.broker.fill_scheduler import _FallbackVerifyEntry
+
+    app, _ph, eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-open",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0002",
+        symbol="069500",
+        side="buy",
+        order_type="limit",
+        ordered_qty=1.0,
+        submitted_date=FIXED_DAY,
+    )
+    broker = FallbackBroker(history=[], positions=[])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
+    for odno, submitted in [
+        ("0001", "20260301"),
+        ("0003", "20200101"),
+        ("0004", "20250101"),
+    ]:
+        sched._fallback_verify[odno] = _FallbackVerifyEntry(
+            recorded=1.0, submitted_date=submitted
+        )
+
+    await sched.catch_up_once()
+
+    assert broker.history_calls == 1
+    assert broker.last_history_args == ("20200101", FIXED_DAY)
+
+
+async def test_late_ccld_without_eventbus_skips_alert_but_pops_verify(
+    fallback_applier, tracker, fixed_business_day
+):
+    """eventbus 가 없으면 경보만 건너뛰고 verify 항목은 지우며 폴은 성공한다."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=2.0,
+        submitted_date=FIXED_DAY,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 2.0)])
+    sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=None)
+    first = await sched.catch_up_once()
+    assert first.applied == 1
+    assert "0001" in sched._fallback_verify
+
+    broker.set_history(
+        [
+            {
+                "order_id": "0001",
+                "filled_quantity": 1.0,
+                "price": 1000.0,
+                "timestamp": FIXED_DAY,
+            }
+        ]
+    )
+    second = await sched.catch_up_once()
+
+    assert second.succeeded is True
+    assert broker.history_calls == 2
+    assert sched._fallback_verify == {}
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 2.0
+
+
 async def test_fallback_skipped_when_multiple_open_buys_same_symbol(
     fallback_applier, tracker
 ):
@@ -2077,6 +2230,33 @@ async def test_fallback_skipped_when_broker_not_paper(fallback_applier, tracker)
 
     assert result.applied == 0
     assert broker.positions_calls == 0  # 실전 → 잔고 미호출.
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+
+
+async def test_fallback_skipped_when_broker_has_no_is_paper(fallback_applier, tracker):
+    """is_paper 속성이 없는 broker(KIS 가 아님)에서는 fallback 이 기본으로 꺼져 있다."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    del broker.is_paper
+    assert not hasattr(broker, "is_paper")
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 0
     assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
 
 

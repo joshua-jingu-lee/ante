@@ -224,6 +224,17 @@ async def test_open_is_idempotent(tracker):
     assert rec.recorded_filled_qty == 30.0
 
 
+async def test_open_ignores_account_odno_date_conflict_with_new_order_id(tracker):
+    """다른 order_id라도 (account, odno, date)가 겹치면 seed는 조용히 무시된다."""
+    await _seed(tracker, order_id="ord-1")
+    await tracker.record_fill("ord-1", 30.0, 1000.0)
+    await _seed(tracker, order_id="ord-2")
+    assert await tracker.get("ord-2") is None
+    assert (await tracker.get("ord-1")).recorded_filled_qty == 30.0
+    assert await tracker.lookup_order_id("acct-A", "0001", "20260529") == "ord-1"
+    assert _open_ids(tracker) == ["ord-1"]
+
+
 async def test_mark_terminal_preserves_filled(tracker):
     """이미 filled 인 주문은 terminal 로 덮어쓰지 않는다."""
     await _seed(tracker, ordered_qty=100.0)
@@ -359,6 +370,20 @@ async def test_mirror_fill_partial_then_filled_evicts(tracker):
     await tracker.record_fill("ord-1", 100.0, 1010.0)
     tracker.mirror_fill_to_cache("ord-1", 100.0, "filled")
     assert _open_ids(tracker) == []
+
+
+@pytest.mark.parametrize("new_status", ["partially_filled", "filled"])
+async def test_mirror_fill_cache_miss_is_ignored(tracker, new_status):
+    """캐시에 없는 주문의 미러는 아무 일도 하지 않는다(빈 캐시 포함)."""
+    tracker.mirror_fill_to_cache("ord-missing", 40.0, new_status)
+    assert tracker.get_open_orders_for_bot_sync("acct-A", "bot-1") == []
+
+    await _seed(tracker)
+    tracker.mirror_fill_to_cache("ord-missing", 40.0, new_status)
+    records = tracker.get_open_orders_for_bot_sync("acct-A", "bot-1")
+    assert [(r.order_id, r.recorded_filled_qty, r.status) for r in records] == [
+        ("ord-1", 0.0, "open")
+    ]
 
 
 async def test_mark_terminal_evicts_cache(tracker):

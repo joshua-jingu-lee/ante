@@ -12,6 +12,7 @@ from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
     BotStartedEvent,
     BotStoppedEvent,
+    OrderFilledEvent,
     StreamConnectedEvent,
     StreamDisconnectedEvent,
 )
@@ -840,3 +841,133 @@ async def test_multi_account_pool_monitored_symbols_are_isolated(
 
     assert symbols_a == {"005930"}
     assert symbols_b == {"000660"}
+
+
+async def test_execution_callback_does_not_publish_order_filled_directly(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    fill_applier: FakeFillApplier,
+    eventbus: EventBus,
+) -> None:
+    """스트림 체결은 FillApplier 로만 보내고 OrderFilledEvent 를 직접 내지 않는다."""
+    filled: list[OrderFilledEvent] = []
+    eventbus.subscribe(OrderFilledEvent, lambda e: filled.append(e))
+    await integration.start()
+    try:
+        await stream_client.fire_execution(
+            {
+                "symbol": "005930",
+                "order_id": "ord-1",
+                "side": "buy",
+                "quantity": 10.0,
+                "price": 70000.0,
+            }
+        )
+    finally:
+        await integration.stop()
+
+    assert len(fill_applier.calls) == 1
+    assert filled == []
+
+
+async def test_other_account_stream_connected_does_not_stop_own_fallback(
+    integration: StreamIntegration,
+    eventbus: EventBus,
+) -> None:
+    """다른 계좌의 StreamConnectedEvent 는 자기 계좌의 폴백을 멈추지 않는다."""
+    await integration.start()
+    try:
+        await eventbus.publish(
+            StreamDisconnectedEvent(account_id="acc-001", broker="kis", reason="test")
+        )
+        assert integration.is_fallback_active
+
+        await eventbus.publish(
+            StreamConnectedEvent(account_id="acc-other", broker="kis", url="ws://x")
+        )
+
+        assert integration.is_fallback_active
+    finally:
+        await integration.stop()
+
+
+async def test_subscription_sync_excludes_other_account_stop_orders(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    stop_order_manager: StopOrderManager,
+    eventbus: EventBus,
+) -> None:
+    """다른 계좌의 stop 주문 종목은 이 계좌 스트림 구독에 넣지 않는다."""
+    for order_id, symbol, account_id in [
+        ("ord-own", "035720", "acc-001"),
+        ("ord-other", "000660", "acc-other"),
+    ]:
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await stop_order_manager.register(
+                order_id=order_id,
+                bot_id="bot-1",
+                strategy_id="stg-1",
+                symbol=symbol,
+                side="buy",
+                quantity=5.0,
+                order_type="stop",
+                stop_price=100000.0,
+                account_id=account_id,
+            )
+
+    await integration.start()
+    try:
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-001"))
+        assert stream_client.subscribed_symbols == {"035720"}
+    finally:
+        await integration.stop()
+
+
+async def test_subscription_sync_excludes_triggered_and_expired_stop_orders(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    stop_order_manager: StopOrderManager,
+    eventbus: EventBus,
+) -> None:
+    """같은 계좌라도 트리거되거나 만료된 stop 주문의 종목은 구독에 넣지 않는다."""
+
+    async def _register(order_id: str, symbol: str) -> str:
+        return await stop_order_manager.register(
+            order_id=order_id,
+            bot_id="bot-1",
+            strategy_id="stg-1",
+            symbol=symbol,
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-001",
+        )
+
+    with patch("ante.broker.fill_scheduler.business_date_kst", return_value="20260619"):
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            triggered = await _register("ord-trig", "035720")
+            expired = await _register("ord-exp", "000660")
+            await stop_order_manager.on_price_update(
+                "035720", 100000.0, account_id="acc-001", is_exchange_tick=True
+            )
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await stop_order_manager.check_session_expiry()
+            active = await _register("ord-active", "005380")
+
+    assert stop_order_manager.get_order(triggered).triggered is True
+    assert stop_order_manager.get_order(expired).expired is True
+    assert [o.stop_order_id for o in stop_order_manager.active_orders] == [active]
+
+    await integration.start()
+    try:
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-001"))
+        assert stream_client.subscribed_symbols == {"005380"}
+    finally:
+        await integration.stop()

@@ -1832,3 +1832,146 @@ class TestExchangeTickSourceChokepoint:
         assert any(isinstance(e, OrderRequestEvent) for e in published)
         # 트리거됐지만 fallback 출처라 세션 멤버십은 미마킹(분리 락).
         assert order.entered_session is False
+
+
+class TestSessionEpochPruneAndExpireOrdering:
+    """sweep 의 epoch prune 범위와 만료 표시 순서."""
+
+    @staticmethod
+    async def _register(manager: StopOrderManager, order_id: str) -> str:
+        return await manager.register(
+            order_id=order_id,
+            bot_id="bot-001",
+            strategy_id="stg-001",
+            symbol="000660",
+            side="sell",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-test",
+        )
+
+    async def test_in_session_sweep_keeps_today_epoch_for_later_register(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """세션 중 sweep 뒤 같은 날 등록한 주문도 멤버십을 얻어 종료 시 만료된다."""
+        manager.start()
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+            await manager.check_session_expiry()
+            stop_id = await self._register(manager, "ord-after-sweep")
+            order = manager.get_order(stop_id)
+            assert order is not None
+            assert order.entered_session is True
+
+        eventbus.publish.reset_mock()
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.check_session_expiry()
+
+        expired = [
+            call.args[0]
+            for call in eventbus.publish.call_args_list
+            if isinstance(call.args[0], StopOrderExpiredEvent)
+        ]
+        assert [(e.stop_order_id, e.reason) for e in expired] == [
+            (stop_id, "session_ended")
+        ]
+
+    async def test_sweep_prunes_epoch_keys_of_past_business_days(
+        self, manager: StopOrderManager
+    ) -> None:
+        """다음 거래일 sweep 은 지난 거래일의 epoch 키를 지워 집합이 자라지 않는다."""
+        manager.start()
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+        assert manager._session_tick_marked
+        assert all(k.startswith("20260619:") for k in manager._session_tick_marked)
+
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260620",
+            ),
+        ):
+            await manager.check_session_expiry()
+
+        assert manager._session_tick_marked == set()
+
+    async def test_order_leaves_active_orders_before_session_end_is_published(
+        self, manager: StopOrderManager, eventbus: MagicMock
+    ) -> None:
+        """session_ended 를 발행하는 시점에 그 주문은 이미 활성 목록에 없다."""
+        manager.start()
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=True
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            stop_id = await self._register(manager, "ord-ordering")
+            await manager.on_price_update(
+                "005930", 50000.0, account_id="acc-test", is_exchange_tick=True
+            )
+
+        expired: list[tuple[str, str, bool]] = []
+
+        async def _publish(event: object) -> None:
+            if isinstance(event, StopOrderExpiredEvent):
+                active_ids = {o.stop_order_id for o in manager.active_orders}
+                expired.append(
+                    (
+                        event.stop_order_id,
+                        event.reason,
+                        event.stop_order_id in active_ids,
+                    )
+                )
+
+        eventbus.publish = AsyncMock(side_effect=_publish)
+        with (
+            patch.object(
+                StopOrderManager, "_is_session_type_active_now", return_value=False
+            ),
+            patch(
+                "ante.broker.fill_scheduler.business_date_kst",
+                return_value="20260619",
+            ),
+        ):
+            await manager.check_session_expiry()
+
+        assert expired == [(stop_id, "session_ended", False)]
+        await manager.stop()
+        assert len(expired) == 1

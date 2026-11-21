@@ -205,6 +205,35 @@ class TestBotConfig:
                 bot_id="b1", strategy_id="s1", interval_seconds=0, account_id="acc-test"
             )
 
+    @pytest.mark.parametrize(
+        ("field", "value", "pattern"),
+        [
+            ("max_restart_attempts", 0, r"1 이상 10 이하여야 합니다\. \(입력값: 0\)"),
+            (
+                "restart_cooldown_seconds",
+                5,
+                r"10초 이상 600초 이하여야 합니다\. \(입력값: 5초\)",
+            ),
+            (
+                "step_timeout_seconds",
+                121,
+                r"5초 이상 120초 이하여야 합니다\. \(입력값: 121초\)",
+            ),
+            (
+                "max_signals_per_step",
+                201,
+                r"1 이상 200 이하여야 합니다\. \(입력값: 201\)",
+            ),
+        ],
+        ids=lambda v: v if isinstance(v, str) and v.isidentifier() else "",
+    )
+    def test_runtime_control_range_error_message_shape(self, field, value, pattern):
+        """범위 밖 runtime control 오류는 필드·범위·(입력값: 값) 꼴 메시지다."""
+        with pytest.raises(ValueError, match=f"^{field}는 {pattern}$"):
+            BotConfig(
+                bot_id="b1", strategy_id="s1", account_id="acc-test", **{field: value}
+            )
+
     def test_bot_config_account_scoped_required(self):
         """Refs #1241 SPLIT-2: account_id fallback (`""`/`"default"`/None)
         은 ``InvalidAccountIdError`` 로 거부된다.

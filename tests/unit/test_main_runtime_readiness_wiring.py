@@ -50,6 +50,7 @@ class _FakeFillScheduler:
 
     def __init__(self, **kwargs: Any) -> None:
         self.account_id = kwargs["account_id"]
+        self.kwargs = kwargs
         self.started = False
         self.stopped = False
         # 클래스 변수로 주입된 catch_up 성공 여부(account_id 별).
@@ -162,6 +163,35 @@ async def test_register_fill_marks_ready_on_success() -> None:
     assert ok is True
     assert s.runtime_readiness.is_ready("live-1", ReadinessFlag.FILL_RECONCILE)
     assert "live-1" in s.fill_schedulers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [
+        (None, True),
+        ({}, True),
+        ({"system.fill_position_fallback_enabled": False}, False),
+    ],
+    ids=["no_config_defaults_on", "unset_defaults_on", "explicit_off"],
+)
+async def test_register_fill_fallback_flag_defaults_on_and_can_be_disabled(
+    stored: dict[str, Any] | None, expected: bool
+) -> None:
+    """설정이 없거나 키가 없으면 fallback 을 켜고, 끄는 설정은 그대로 따른다."""
+    s = _services()
+    if stored is None:
+        s.config = None
+    else:
+        s.config = SimpleNamespace(
+            get=lambda key, default=None: stored.get(key, default)
+        )
+
+    await main_module._register_fill_scheduler_for_account(s, _account("live-1"))
+
+    assert [i.kwargs["fallback_enabled"] for i in _FakeFillScheduler.instances] == [
+        expected
+    ]
 
 
 @pytest.mark.asyncio

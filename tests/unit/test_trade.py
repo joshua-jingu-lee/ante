@@ -2149,6 +2149,27 @@ class TestTradeReadLegacyAccountId:
         assert trades[0].bot_id == "ok-bot"
         assert trades[0].account_id == "acc-test"
 
+    async def test_get_trades_skips_pattern_invalid_account_id_row(self, recorder, db):
+        """SQL 필터를 통과한 형식 위반 account_id row도 조회를 깨지 않고 빠진다."""
+        await self._insert_legacy_trade(
+            db,
+            trade_id=str(uuid4()),
+            bot_id="bad-bot",
+            account_id="a!",
+            timestamp="2026-05-29T01:00:00+00:00",
+        )
+        await self._insert_legacy_trade(
+            db,
+            trade_id=str(uuid4()),
+            bot_id="ok-bot",
+            account_id="acc-test",
+            timestamp="2026-05-29T00:00:00+00:00",
+        )
+
+        trades = await recorder.get_trades()
+
+        assert [(t.bot_id, t.account_id) for t in trades] == [("ok-bot", "acc-test")]
+
     async def test_get_trades_account_id_filter_does_not_raise_on_default(
         self, recorder, db
     ):

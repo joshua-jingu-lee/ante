@@ -197,6 +197,62 @@ async def test_close_all_closes_and_joins_to_completion() -> None:
     assert naturally_exited.is_set() is True
 
 
+HANG_GUARD_SECONDS = 5.0
+
+
+async def test_join_waits_for_tasks_to_finish_on_their_own_before_cancelling(
+    monkeypatch,
+) -> None:
+    """grace 안에 끝나는 read·writer task 는 취소하지 않고 끝날 때까지 기다린다."""
+    monkeypatch.setattr(ChannelHandle, "JOIN_GRACE_SECONDS", 1e6)
+    handle = _handle()
+    release = asyncio.Event()
+    flushed: list[str] = []
+
+    async def _task(name: str) -> None:
+        await release.wait()
+        flushed.append(name)
+
+    handle.read_task = asyncio.ensure_future(_task("read"))
+    handle.writer_task = asyncio.ensure_future(_task("writer"))
+
+    joiner = asyncio.ensure_future(handle.join())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not joiner.done()
+    assert not handle.read_task.cancelled()
+    assert not handle.writer_task.cancelled()
+
+    release.set()
+    await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS)
+
+    assert sorted(flushed) == ["read", "writer"]
+    assert not handle.read_task.cancelled()
+    assert not handle.writer_task.cancelled()
+
+
+async def test_join_cancels_tasks_still_running_after_grace(monkeypatch) -> None:
+    """grace 가 지나도 끝나지 않는 task 는 join 이 직접 cancel 하고 끝까지 기다린다."""
+    monkeypatch.setattr(ChannelHandle, "JOIN_GRACE_SECONDS", 0)
+    handle = _handle()
+    never = asyncio.Event()
+    handle.read_task = asyncio.ensure_future(never.wait())
+    handle.writer_task = asyncio.ensure_future(never.wait())
+
+    async def _join_then_snapshot() -> tuple[bool, bool]:
+        await handle.join()
+        return handle.read_task.done(), handle.writer_task.done()
+
+    joiner = asyncio.ensure_future(_join_then_snapshot())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert joiner.done()
+
+    assert await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS) == (True, True)
+    assert handle.read_task.cancelled()
+    assert handle.writer_task.cancelled()
+
+
 async def test_close_all_empty_registry_no_error() -> None:
     reg = SignalChannelRegistry()
     await asyncio.wait_for(reg.close_all("draining"), timeout=1.0)

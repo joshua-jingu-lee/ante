@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import dataclasses
+from decimal import Decimal
+from fractions import Fraction
 from unittest.mock import AsyncMock
 
 import pytest
@@ -334,6 +336,115 @@ async def test_gateway_budget_increase_buy_rejected(
     assert len(rejected) == 1
     assert rejected[0].reason == "modify_budget_increase_unsupported"
     broker.modify_order.assert_not_awaited()
+
+
+async def test_gateway_buy_same_price_executes(
+    account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
+) -> None:
+    """buy 신규가가 원주문가와 같으면 예산 증가가 아니라 정정을 실행한다."""
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    executed: list[OrderModifyExecutedEvent] = []
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    await gateway._on_order_modify(_make_modify_event(quantity=0.0, price=50000.0))
+
+    assert rejected == []
+    assert [e.price for e in executed] == [50000.0]
+    broker.modify_order.assert_awaited_once_with(
+        "brk-1", quantity=10.0, price=50000.0, order_type="limit"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("price", True),
+        ("price", Decimal("45000")),
+        ("price", Fraction(45000)),
+        ("price", "45000"),
+        ("price", False),
+        ("price", float("-inf")),
+        ("quantity", True),
+        ("quantity", False),
+        ("quantity", float("-inf")),
+        ("quantity", Decimal("10")),
+    ],
+    ids=[
+        "price_bool",
+        "price_decimal",
+        "price_fraction",
+        "price_str",
+        "price_false",
+        "price_neginf",
+        "qty_bool",
+        "qty_false",
+        "qty_neginf",
+        "qty_decimal",
+    ],
+)
+async def test_gateway_bool_and_non_int_float_numbers_rejected(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    broker: AsyncMock,
+    field: str,
+    value: object,
+) -> None:
+    """bool 과 int·float 가 아닌 수 타입은 유한 숫자로 보지 않아 거부한다."""
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+    args: dict[str, object] = {"quantity": 0.0, "price": 45000.0, field: value}
+
+    await gateway._on_order_modify(_make_modify_event(**args))
+
+    assert [e.reason for e in rejected] == ["modify_invalid_args"]
+    broker.modify_order.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("side", "order_price", "new_price", "expected"),
+    [
+        ("buy", 50000.0, 45000.0, "executed"),
+        ("buy", 50000.0, 55000.0, "modify_budget_increase_unsupported"),
+        ("buy", None, 45000.0, "modify_budget_increase_unsupported"),
+        ("sell", 50000.0, 55000.0, "executed"),
+        ("sell", None, 55000.0, "executed"),
+    ],
+    ids=["buy_down", "buy_up", "buy_none", "sell_up", "sell_none"],
+)
+async def test_gateway_budget_gate_by_side_and_order_price(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    broker: AsyncMock,
+    side: str,
+    order_price: float | None,
+    new_price: float,
+    expected: str,
+) -> None:
+    """buy 는 원주문가 이하만(없으면 거부), sell 은 가격·None 과 무관하게 통과한다."""
+    record = _make_record(side=side, order_price=order_price, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    executed: list[OrderModifyExecutedEvent] = []
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    await gateway._on_order_modify(
+        _make_modify_event(side=side, quantity=0.0, price=new_price)
+    )
+
+    if expected == "executed":
+        assert rejected == []
+        assert [e.price for e in executed] == [new_price]
+        broker.modify_order.assert_awaited_once()
+    else:
+        assert executed == []
+        assert [e.reason for e in rejected] == [expected]
+        broker.modify_order.assert_not_awaited()
 
 
 async def test_gateway_buy_missing_order_price_rejected(

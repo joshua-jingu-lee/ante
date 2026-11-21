@@ -4,6 +4,7 @@ Refs #444
 """
 
 import asyncio
+import json
 
 import pytest
 
@@ -554,6 +555,30 @@ class TestBotConfigDBRoundtrip:
         assert loaded.config.restart_cooldown_seconds == 180
         assert loaded.config.step_timeout_seconds == 45
         assert loaded.config.max_signals_per_step == 80
+
+    async def test_recreate_after_soft_delete_moves_account_column(
+        self, manager, ctx, db
+    ):
+        """soft delete 뒤 같은 bot_id 를 다른 계좌로 만들면 컬럼도 새 계좌로 바뀐다."""
+        await manager.create_bot(
+            BotConfig(bot_id="bot-move", strategy_id="s1", account_id="acc-a"),
+            SimpleStrategy,
+            ctx,
+        )
+        await manager.delete_bot("bot-move")
+        await manager.create_bot(
+            BotConfig(bot_id="bot-move", strategy_id="s2", account_id="acc-b"),
+            SimpleStrategy,
+            ctx,
+        )
+
+        row = await db.fetch_one(
+            "SELECT strategy_id, account_id, config_json FROM bots WHERE bot_id = ?",
+            ("bot-move",),
+        )
+        stored = json.loads(row["config_json"])
+        assert (row["strategy_id"], row["account_id"]) == ("s2", "acc-b")
+        assert (stored["strategy_id"], stored["account_id"]) == ("s2", "acc-b")
 
     async def test_save_persists_all_runtime_control_keys(self, manager, ctx, db):
         """``_save_bot_config`` 가 5 runtime control 키를 ``config_json`` 에 직렬화한다.

@@ -353,6 +353,38 @@ class TestUnrecoveredBuyGuard:
         assert len(cap.validated) == 1
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "submitted_at", [None, "", "not-a-timestamp", "2026-05-29T10:00:00", 12345]
+    )
+    async def test_age_unknown_does_not_block(
+        self, eventbus: EventBus, submitted_at: object
+    ) -> None:
+        """age를 셀 수 없는 미복구 주문은 나이 조건을 채우지 않아 매수를 막지 않는다."""
+        tracker = FakeOrderTracker(
+            {
+                (ACCOUNT, BOT, SYMBOL, "buy"): [
+                    FakeOrderRecord(
+                        order_id="o1",
+                        ordered_qty=1.0,
+                        recorded_filled_qty=0.0,
+                        status="open",
+                        submitted_at=submitted_at,
+                    )
+                ]
+            }
+        )
+        trade = FakeTradeService({ACCOUNT: []})
+        engine = _build_engine(eventbus, order_tracker=tracker, trade_service=trade)
+        engine.start()
+        cap = _capture(eventbus)
+
+        await eventbus.publish(_buy_order())
+
+        assert len(tracker.calls) == 1
+        assert len(cap.rejected) == 0
+        assert len(cap.validated) == 1
+
+    @pytest.mark.asyncio
     async def test_case6_opt_out_allows(self, eventbus: EventBus) -> None:
         """⑥ opt-out(allow_unrecovered_buy_overlap=true) → 허용 (조건④ 미충족).
 

@@ -1,5 +1,6 @@
 """Rule Engine 모듈 단위 테스트."""
 
+import asyncio
 import math
 from datetime import time
 from unittest.mock import AsyncMock
@@ -29,6 +30,30 @@ from ante.rule import (
     TradingHoursRule,
     UnrealizedLossLimitRule,
 )
+
+
+class _UserBaseException(BaseException):
+    """Exception 이 아닌 사용자 정의 BaseException 하위형."""
+
+
+class _UserError(Exception):
+    """사용자 정의 Exception 하위형."""
+
+
+_STDLIB_NON_EXCEPTION_BASES = [
+    c
+    for c in BaseException.__subclasses__()
+    if not issubclass(c, Exception)
+    and c.__module__ in ("builtins", "asyncio.exceptions")
+]
+_NON_EXCEPTION_BASES = [*_STDLIB_NON_EXCEPTION_BASES, _UserBaseException]
+
+
+def _make_base_exception(exc_type: type[BaseException]) -> BaseException:
+    if issubclass(exc_type, BaseExceptionGroup):
+        return exc_type("repr aborted", [KeyboardInterrupt()])
+    return exc_type("repr aborted")
+
 
 # ── Fixtures ─────────────────────────────────────
 
@@ -4434,6 +4459,175 @@ class TestRuleEngineEventBus:
         assert isinstance(ev.reason, str)
         assert ev.reason  # non-empty
 
+    async def test_invalid_side_reason_uses_placeholder_when_repr_raises(
+        self, engine, eventbus
+    ):
+        """side의 __repr__가 무엇을 던져도 사유는 게이트 문구에 placeholder를 싣는다."""
+
+        class _ReprFails:
+            def __repr__(self) -> str:
+                raise LookupError("repr deliberately fails")
+
+            def __hash__(self) -> int:
+                return 0
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side=_ReprFails(),  # type: ignore[arg-type]
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert [e.reason for e in rejected] == [
+            "Invalid signal side: <unrenderable _ReprFails> (allowed: buy, sell)"
+        ]
+
+    async def test_rejected_event_survives_event_id_whose_str_and_repr_raise(
+        self, engine, eventbus
+    ):
+        """event_id의 __str__·__repr__가 모두 던져도 거부 이벤트는 한 번 발행된다."""
+
+        class _Unprintable:
+            def __str__(self) -> str:
+                raise LookupError("str deliberately fails")
+
+            def __repr__(self) -> str:
+                raise LookupError("repr deliberately fails")
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                event_id=_Unprintable(),  # type: ignore[arg-type]
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="hold",
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].order_id == "<unrenderable _Unprintable>"
+        assert rejected[0].reason.startswith("Invalid signal side: 'hold'")
+
+    def test_non_exception_base_domain_is_generated_and_complete(self):
+        """정의로 만든 비 Exception BaseException 목록이 내장 다섯 종을 모두 담는다."""
+        assert {
+            KeyboardInterrupt,
+            SystemExit,
+            GeneratorExit,
+            asyncio.CancelledError,
+            BaseExceptionGroup,
+        } <= set(_STDLIB_NON_EXCEPTION_BASES)
+        assert not any(issubclass(c, Exception) for c in _NON_EXCEPTION_BASES)
+
+    @pytest.mark.parametrize("exc_type", _NON_EXCEPTION_BASES, ids=lambda c: c.__name__)
+    async def test_quantity_repr_base_exception_is_not_swallowed(
+        self, engine, eventbus, exc_type
+    ):
+        """quantity 의 __repr__ 가 Exception 아닌 BaseException 을 던지면 전파한다."""
+
+        class _BadQuantity:
+            def __repr__(self) -> str:
+                raise _make_base_exception(exc_type)
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        with pytest.raises(exc_type):
+            await eventbus.publish(
+                OrderRequestEvent(
+                    account_id="domestic",
+                    bot_id="bot1",
+                    strategy_id="s1",
+                    symbol="005930",
+                    side="buy",
+                    quantity=_BadQuantity(),  # type: ignore[arg-type]
+                    order_type="market",
+                    exchange="KRX",
+                )
+            )
+
+        assert rejected == []
+
+    @pytest.mark.parametrize(
+        "exc_type", [LookupError, _UserError], ids=["builtin", "user"]
+    )
+    async def test_quantity_repr_exception_falls_back_to_placeholder(
+        self, engine, eventbus, exc_type
+    ):
+        """같은 자리에서 Exception 이면 placeholder 로 사유를 만들어 거부한다."""
+
+        class _BadQuantity:
+            def __repr__(self) -> str:
+                raise exc_type("repr fails")
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="buy",
+                quantity=_BadQuantity(),  # type: ignore[arg-type]
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].reason.startswith(
+            "Invalid quantity: <unrenderable _BadQuantity>"
+        )
+
+    async def test_order_id_falls_back_to_repr_when_only_str_raises(
+        self, engine, eventbus
+    ):
+        """event_id 의 __str__ 만 던지면 order_id 는 repr 결과로 채운다."""
+
+        class _StrFails:
+            def __str__(self) -> str:
+                raise LookupError("str fails")
+
+            def __repr__(self) -> str:
+                return "EID-REPR"
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                event_id=_StrFails(),  # type: ignore[arg-type]
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="hold",
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert [e.order_id for e in rejected] == ["EID-REPR"]
+
     async def test_rule_engine_catch_all_reject_for_synthetic_raise(
         self, engine, eventbus, monkeypatch
     ):
@@ -6214,3 +6408,61 @@ class TestRuleEngineWarnEventBus:
         await eventbus.publish(order)
 
         assert len(notifications) == 2
+
+
+_NUMERIC_RULE_PARAMS = [
+    ("daily_loss_limit", "max_daily_loss_percent"),
+    ("daily_loss_limit", "max_loss_pct"),
+    ("total_exposure_limit", "max_exposure_percent"),
+    ("total_exposure_limit", "max_exposure_amount"),
+    ("position_size", "max_position_percent"),
+    ("position_size", "max_position_amount"),
+    ("unrealized_loss_limit", "max_unrealized_loss_percent"),
+    ("trade_frequency", "max_trades_per_hour"),
+]
+
+
+class TestRuleConfigRejectsNonFiniteNumbers:
+    @pytest.mark.parametrize(("rule_type", "param"), _NUMERIC_RULE_PARAMS)
+    @pytest.mark.parametrize(
+        "value",
+        [math.nan, math.inf, -math.inf, 10**400],
+        ids=["nan", "inf", "-inf", "huge_int"],
+    )
+    def test_registry_validate_config_rejects_non_finite(self, rule_type, param, value):
+        """NaN·±Inf·float로 바꿀 수 없는 거대 int는 유한 숫자가 아니라고 거부한다."""
+        from ante.rule.engine import RULE_REGISTRY
+
+        errors = RULE_REGISTRY[rule_type].validate_config({param: value})
+
+        assert errors == [f"{param} must be a finite number"]
+
+    @pytest.mark.parametrize(("rule_type", "param"), _NUMERIC_RULE_PARAMS)
+    @pytest.mark.parametrize("value", [True, False], ids=["true", "false"])
+    def test_registry_validate_config_rejects_bool(self, rule_type, param, value):
+        """bool 은 int 의 하위형이어도 숫자로 받지 않는다."""
+        from ante.rule.engine import RULE_REGISTRY
+
+        errors = RULE_REGISTRY[rule_type].validate_config({param: value})
+
+        assert errors == [f"{param} must be a finite number"]
+
+    async def test_update_account_rule_config_rejects_nan_without_persisting(self):
+        """계좌 룰 갱신 경로도 NaN 파라미터를 저장하지 않고 거부한다."""
+        from ante.rule.config_update import update_account_rule_config
+
+        dynamic_config = AsyncMock()
+        dynamic_config.get = AsyncMock(return_value=[])
+
+        with pytest.raises(ValueError, match="must be a finite number"):
+            await update_account_rule_config(
+                account_service=AsyncMock(),
+                dynamic_config=dynamic_config,
+                account_id="domestic",
+                rule_type="daily_loss_limit",
+                enabled=True,
+                params={"max_daily_loss_percent": math.nan},
+                changed_by="tester",
+            )
+
+        dynamic_config.set.assert_not_called()

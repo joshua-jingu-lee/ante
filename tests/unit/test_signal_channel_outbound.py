@@ -116,6 +116,40 @@ async def test_lagged_redelivery_after_recovery() -> None:
     assert captured2[0]["fill_dedup_key"] == "K1"
 
 
+async def test_laggard_channel_stops_writing_even_after_queue_recovers() -> None:
+    """laggard 로 판정된 채널은 큐가 비어도 이후 fill·order_update 를 쓰지 않는다."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    bot = MagicMock()
+    bot.bot_id = "bot-001"
+    bot.config.account_id = "acc-test"
+    eventbus = MagicMock()
+    eventbus.publish = AsyncMock()
+    captured: list[dict] = []
+    lagged: list[int] = []
+    full = {"value": True}
+    ch = SignalChannel(
+        bot,
+        eventbus,
+        MagicMock(),
+        sink=captured.append,
+        is_full=lambda: full["value"],
+        on_lagged=lambda: lagged.append(1),
+    )
+
+    await ch._on_fill(_fill(key="K1"))
+    full["value"] = False
+    await ch._on_fill(_fill(key="K2"))
+    await ch._on_order_update(
+        OrderRejectedEvent(
+            order_id="ORD-2", bot_id="bot-001", reason="x", account_id="acc-test"
+        )
+    )
+
+    assert lagged == [1]
+    assert captured == []
+
+
 # ── __contains__ non-mutating ────────────────────────────────────────
 
 

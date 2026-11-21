@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -163,6 +163,37 @@ class TestDailyReportEventAlwaysPublished:
         assert report_events[0].has_trades is False
         # No NotificationEvent
         assert len(notif_events) == 0
+
+    @pytest.mark.parametrize(
+        ("instant", "expected"),
+        [
+            (datetime(2001, 5, 29, 14, 59, 59, tzinfo=UTC), date(2001, 5, 29)),
+            (datetime(2001, 5, 29, 15, 0, 0, tzinfo=UTC), date(2001, 5, 30)),
+        ],
+        ids=["kst_23_59_59", "kst_00_00_00"],
+    )
+    async def test_missing_target_date_uses_kst_today(
+        self, scheduler, trade_recorder, eventbus, monkeypatch, instant, expected
+    ):
+        """target_date가 없으면 KST 자정을 기준으로 오늘을 정한다(UTC·호스트 아님)."""
+        import ante.trade.daily_report as daily_report_module
+
+        class _FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is None:
+                    return instant.replace(tzinfo=None)
+                return instant.astimezone(tz)
+
+        monkeypatch.setattr(daily_report_module, "datetime", _FixedDatetime)
+        report_events: list[DailyReportEvent] = []
+        eventbus.subscribe(DailyReportEvent, lambda e: report_events.append(e))
+
+        await scheduler.run_once()
+
+        assert [e.report_date for e in report_events] == [expected.isoformat()]
+        from_date = trade_recorder.get_trades.call_args.kwargs["from_date"]
+        assert from_date.date() == expected
 
     async def test_with_trades_publishes_both_events(
         self,

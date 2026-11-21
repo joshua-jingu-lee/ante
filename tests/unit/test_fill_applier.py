@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from ante.core.database import Database
@@ -416,3 +418,199 @@ async def test_full_fill_evicts_sync_open_cache_post_commit(
     )
     assert delta == 100.0
     assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []
+
+
+# ── Lock 직렬화 / fallback 발행 ──────────────────────
+
+
+HANG_GUARD_SECONDS = 5.0
+
+
+async def _yield_loop(times: int = 20) -> None:
+    for _ in range(times):
+        await asyncio.sleep(0)
+
+
+async def _bounded(awaitable):
+    return await asyncio.wait_for(awaitable, timeout=HANG_GUARD_SECONDS)
+
+
+async def _apply(applier, kind: str, amount: float) -> float:
+    if kind == "cumulative":
+        return await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=amount,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+    return await applier.apply_stream_increment(
+        account_id=ACCT,
+        broker_order_id="0001",
+        increment=amount,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "second_amount", "expected_second_delta"),
+    [
+        ("cumulative", "cumulative", 60.0, 20.0),
+        ("cumulative", "stream", 30.0, 30.0),
+        ("stream", "cumulative", 60.0, 20.0),
+        ("stream", "stream", 30.0, 30.0),
+    ],
+)
+async def test_second_apply_waits_for_first_transaction_before_reading(
+    applier,
+    tracker,
+    position_history,
+    monkeypatch,
+    first,
+    second,
+    second_amount,
+    expected_second_delta,
+):
+    """첫 적용이 트랜잭션 안에서 멈춘 동안 둘째 적용은 추적 주문을 읽지 못한다."""
+    await _seed(tracker)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    orig_on_trade = position_history.on_trade
+    on_trade_calls = 0
+
+    async def _paused_on_trade(trade):
+        nonlocal on_trade_calls
+        on_trade_calls += 1
+        if on_trade_calls == 1:
+            entered.set()
+            await release.wait()
+        await orig_on_trade(trade)
+
+    lookups: list[str] = []
+    orig_lookup = tracker.lookup_order_id
+
+    async def _spy_lookup(*args, **kwargs):
+        lookups.append(args[1])
+        return await orig_lookup(*args, **kwargs)
+
+    monkeypatch.setattr(position_history, "on_trade", _paused_on_trade)
+    monkeypatch.setattr(tracker, "lookup_order_id", _spy_lookup)
+
+    t1 = asyncio.create_task(_apply(applier, first, 40.0))
+    await _bounded(entered.wait())
+    t2 = asyncio.create_task(_apply(applier, second, second_amount))
+    await _yield_loop()
+    assert lookups == ["0001"]
+    assert not t2.done()
+
+    release.set()
+    assert await _bounded(t1) == 40.0
+    assert await _bounded(t2) == expected_second_delta
+    assert lookups == ["0001", "0001"]
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 40.0 + expected_second_delta
+
+
+@pytest.mark.parametrize("first", ["cumulative", "stream"])
+async def test_lock_holds_from_read_through_transaction(
+    applier, tracker, position_history, monkeypatch, first
+):
+    """첫 적용이 주문을 읽는 중이면 둘째 스트림 증분은 그 적용이 끝난 뒤에 읽는다."""
+    await _seed(tracker)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    orig_get = tracker.get
+    get_calls = 0
+
+    async def _paused_get(order_id):
+        nonlocal get_calls
+        get_calls += 1
+        if get_calls == 1:
+            entered.set()
+            await release.wait()
+        return await orig_get(order_id)
+
+    monkeypatch.setattr(tracker, "get", _paused_get)
+
+    t1 = asyncio.create_task(_apply(applier, first, 40.0))
+    await _bounded(entered.wait())
+    t2 = asyncio.create_task(_apply(applier, "stream", 30.0))
+    await _yield_loop()
+    assert not t2.done()
+
+    release.set()
+    deltas = (await _bounded(t1), await _bounded(t2))
+
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert (deltas, pos["quantity"]) == ((40.0, 30.0), 70.0)
+    assert (await orig_get("ord-1")).recorded_filled_qty == 70.0
+
+
+@pytest.mark.parametrize("failing_step", ["save_trade", "on_trade", "enqueue"])
+async def test_any_step_failure_in_fill_transaction_leaves_nothing_committed(
+    db, tracker, position_history, eventbus, monkeypatch, failing_step
+):
+    """txn 의 어느 단계가 실패해도 recorded·trade·position·outbox 가 모두 없다."""
+    from ante.trade.fill_outbox import FillOutbox
+
+    rec = TradeRecorder(db, position_history)
+    await rec.initialize()
+    outbox = FillOutbox(db)
+    await outbox.initialize()
+    applier = FillApplier(
+        db=db,
+        order_tracker=tracker,
+        position_history=position_history,
+        eventbus=eventbus,
+        outbox=outbox,
+    )
+    await _seed(tracker)
+    calls: list[str] = []
+
+    async def _fail(*args, **kwargs):
+        calls.append(failing_step)
+        raise RuntimeError(f"{failing_step} failed")
+
+    target = {
+        "save_trade": (applier, "_save_trade"),
+        "on_trade": (position_history, "on_trade"),
+        "enqueue": (outbox, "enqueue"),
+    }[failing_step]
+    monkeypatch.setattr(*target, _fail)
+
+    with pytest.raises(RuntimeError, match=f"{failing_step} failed"):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=40.0,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+
+    assert calls == [failing_step]
+    assert (await tracker.get("ord-1")).recorded_filled_qty == 0.0
+    assert (
+        await db.fetch_all("SELECT * FROM trades WHERE account_id = ?", (ACCT,)) == []
+    )
+    assert await db.fetch_all("SELECT * FROM fill_outbox", ()) == []
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 0.0
+
+
+async def test_fallback_publish_without_outbox_leaves_dedup_key_empty(
+    applier, tracker, eventbus
+):
+    """outbox 미주입 경로의 직접 발행은 fill_dedup_key를 비운다."""
+    events = _collect_filled(eventbus)
+    await _seed(tracker)
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert delta == 40.0
+    assert len(events) == 1
+    assert events[0].fill_dedup_key == ""

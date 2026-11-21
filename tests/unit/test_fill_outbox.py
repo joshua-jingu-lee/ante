@@ -275,6 +275,64 @@ async def test_same_fill_twice_no_duplicate_outbox_row(
     assert len(rows) == 1
 
 
+async def test_outbox_payload_omits_event_id_and_timestamp(
+    db, tracker, position_history, eventbus, outbox, trades_schema
+):
+    """outbox 에 저장된 payload 에는 event_id·timestamp 키가 없다."""
+    applier = _make_applier(db, tracker, position_history, eventbus, outbox)
+    await _seed(tracker)
+    await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+
+    rows = await outbox.fetch_unpublished()
+    assert len(rows) == 1
+    payload = json.loads(rows[0]["payload"])
+    assert payload["fill_dedup_key"] == "ord-1:40.0"
+    assert "event_id" not in payload
+    assert "timestamp" not in payload
+
+
+async def test_redelivered_outbox_row_gets_fresh_event_id_same_dedup_key(
+    db, tracker, position_history, eventbus, outbox, trades_schema, monkeypatch
+):
+    """같은 행을 다시 발행하면 event_id 는 새로 붙고 dedup 키는 그대로다."""
+    applier = _make_applier(db, tracker, position_history, eventbus, outbox)
+    await _seed(tracker)
+    await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    events = _collect_filled(eventbus)
+    publisher = FillOutboxPublisher(outbox=outbox, eventbus=eventbus)
+    real_mark = outbox.mark_published
+    mark_calls = 0
+
+    async def _mark_fails_once(row_id):
+        nonlocal mark_calls
+        mark_calls += 1
+        if mark_calls == 1:
+            raise RuntimeError("mark failed")
+        await real_mark(row_id)
+
+    monkeypatch.setattr(outbox, "mark_published", _mark_fails_once)
+
+    with pytest.raises(RuntimeError, match="mark failed"):
+        await publisher.catch_up_once()
+    await publisher.catch_up_once()
+
+    assert [e.fill_dedup_key for e in events] == ["ord-1:40.0", "ord-1:40.0"]
+    assert events[0].event_id != events[1].event_id
+    assert await outbox.fetch_unpublished() == []
+
+
 # ── publish 성공 → mark 순서 / 실패 시 미마킹 ─────────
 
 

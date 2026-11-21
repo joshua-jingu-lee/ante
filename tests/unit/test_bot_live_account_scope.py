@@ -298,6 +298,72 @@ class TestFactoryLiveAccountScope:
 # ── (3) symbol / limit pass-through ──
 
 
+class _RecordingGateway:
+    """get_current_price 호출의 account_id 를 기록하는 APIGateway 대역."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def get_current_price(self, symbol: str, *, account_id: str) -> float:
+        self.calls.append((symbol, account_id))
+        return 123.0
+
+
+def _account_service_with_mode(mode: TradingMode) -> Any:
+    class _FakeAccountService:
+        def get_sync(self, account_id: str) -> Account:
+            return Account(
+                account_id=account_id,
+                name="test",
+                exchange="KRX",
+                currency="KRW",
+                trading_mode=mode,
+            )
+
+    return _FakeAccountService()
+
+
+class _BudgetlessTreasury(_FakeTreasury):
+    def get_budget(self, bot_id: str) -> None:
+        return None
+
+
+class _BudgetlessTreasuryManager:
+    def get(self, account_id: str) -> _BudgetlessTreasury:
+        return _BudgetlessTreasury()
+
+
+class TestFactoryDataProviderAccountRouting:
+    @pytest.mark.parametrize(
+        "mode", [TradingMode.LIVE, TradingMode.VIRTUAL], ids=["live", "virtual"]
+    )
+    async def test_price_lookup_is_routed_by_each_bot_account(
+        self, mode: TradingMode
+    ) -> None:
+        """api_gateway 가 있으면 봇마다 자기 계좌로 묶인 provider 로 시세를 본다."""
+        gateway = _RecordingGateway()
+        shared = _FakeDataProvider()
+        factory = StrategyContextFactory(
+            data_provider=shared,
+            account_service=_account_service_with_mode(mode),
+            treasury_manager=_BudgetlessTreasuryManager(),
+            position_history=_FakePositionHistory(),
+            trade_recorder=_FakeRecorder(),
+            api_gateway=gateway,  # type: ignore[arg-type]
+        )
+
+        ctx_a = factory.create(
+            BotConfig(bot_id="bot-a", strategy_id="s1", account_id="acc-a")
+        )
+        ctx_b = factory.create(
+            BotConfig(bot_id="bot-b", strategy_id="s1", account_id="acc-b")
+        )
+
+        assert await ctx_a.get_current_price("005930") == 123.0
+        assert await ctx_b.get_current_price("000660") == 123.0
+        assert gateway.calls == [("005930", "acc-a"), ("000660", "acc-b")]
+
+
 class TestTradeHistoryPassThrough:
     async def test_symbol_and_limit_passed_to_get_trades(self) -> None:
         """get_trade_history(symbol=..., limit=...) 가 get_trades 에 그대로 전달."""
