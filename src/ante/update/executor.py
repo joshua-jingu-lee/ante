@@ -1,8 +1,4 @@
-"""업데이트 실행기 — pip 업그레이드, 마이그레이션, 롤백.
-
-DB 경로는 상위 레이어(`ante.cli.commands.update`)가 `get_db_path(ctx)`로
-계산해 전달한다.
-"""
+"""업데이트 실행기 — pip 업그레이드, 마이그레이션, 롤백."""
 
 from __future__ import annotations
 
@@ -22,14 +18,10 @@ def snapshot_dependencies(version: str, db_dir: Path | None = None) -> Path | No
     저장 경로: ``{db_dir}/pip_freeze_v{version}.txt``
 
     Args:
-        version: 스냅샷 파일명에 박힐 현재 버전 문자열.
         db_dir: 스냅샷을 저장할 디렉터리. 호출자가 ``get_db_path(ctx)``로
             계산한 DB 파일 경로의 부모 디렉터리를 전달해야 한다. 과거
             기본값 ``Path("db")`` 는 CWD 의존이라 제거됐다. 하위 호환을
             위해 None 이 들어오면 ``Path("db")`` 폴백을 유지한다.
-
-    Returns:
-        저장된 파일의 Path. 실패 시 None.
     """
     if db_dir is None:
         db_dir = Path("db")
@@ -72,10 +64,6 @@ def run_post_update_migrations(
     """신 코드로 DB 마이그레이션을 실행한다. 성공 시 True.
 
     Args:
-        db_path: 마이그레이션을 적용할 DB 파일 경로. ``get_db_path(ctx)``
-            결과를 넘기면 서브프로세스가 ANTE_DB_PATH 환경변수로 이를 읽고
-            해당 DB 를 연다. None 이면 서브프로세스 쪽 fallback
-            (`db/ante.db`)을 그대로 사용한다 (하위 호환).
         data_path: Parquet 데이터 트리 루트 경로. ``get_data_path(ctx)``
             결과를 넘기면 서브프로세스가 ANTE_DATA_PATH 환경변수로 이를
             읽고 v002 Parquet 마이그레이션을 해당 트리에 적용한다. None

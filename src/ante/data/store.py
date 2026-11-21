@@ -25,9 +25,6 @@ class ParquetReadError(Exception):
     skip하므로 이 예외를 발생시키지 않는다(feed/CLI 회귀 방지). strict
     경로(backtest data 로드 등)는 손상 파티션을 만나면 부분 데이터로
     silent 성공하지 않고 이 예외로 즉시 실패한다.
-
-    메시지에 손상 파일 경로와 원인 예외를 포함하며, `raise ... from exc`
-    로 원인 예외 체인을 보존한다.
     """
 
 
@@ -169,28 +166,7 @@ class ParquetStore:
         return self._base
 
     def drain_warnings(self) -> list[dict]:
-        """누적된 store 이상 경고를 반환하고 버퍼를 비운다.
-
-        호출자(backfill_runner)가 한 단계(collector/indicator) 종료 직후
-        drain하여 run context의 warnings로 옮긴다. 반환 후 내부 버퍼는
-        비워지므로 같은 경고가 중복 전파되지 않는다.
-
-        Returns:
-            누적 경고 목록의 복사본. 각 항목은
-            `{"type": str, "path": str, "message": str}` 형태이며 ``type`` 은
-            둘 중 하나다:
-            - ``"store_merge"``: 기존(비-0바이트) 파티션의 read(읽기 불가) 또는
-              concat/schema 실패로 이번 write를 건너뛰고 **기존 파일을 보존**했다.
-              checkpoint 전진 게이트다(소비자 ``backfill_runner._drain_store_warnings``
-              / ``pending_merge_failure_count`` 가 이 타입만 필터해 checkpoint를
-              미전진시킨다). 비-0바이트 손상은 자동복구하지 않는 loud-stuck이며,
-              복구는 ``ante data validate --fix`` + range 재backfill로 수행한다.
-            - ``"store_recovered"``: **0바이트** 파티션(원자성 도입 전 중단 write
-              잔재)을 부재로 간주해 현재 수집분으로 **자동복구**했다(0바이트-
-              only). ``.corrupted`` 격리 산출물은 만들지 않는다. 위 게이트 소비자는
-              이 타입을 세지 않으므로 by-construction **비게이트**다(checkpoint 전진
-              허용 → 보고된 stuck 해소).
-        """
+        """누적된 store 이상 경고를 반환하고 버퍼를 비운다."""
         drained = list(self._pending_warnings)
         self._pending_warnings.clear()
         return drained
@@ -205,13 +181,6 @@ class ParquetStore:
         감지하는 데 쓴다. 누적 카운트이므로 **직전/직후 증가분**으로
         이번 단계의 실패를 판정해야 한다(이전 단계 경고가 아직 runner에 의해
         drain되지 않았을 수 있음).
-
-        파괴적 drain은 backfill_runner가 collect 종료 후 단일 소유로 수행하므로,
-        DART가 여기서 drain하면 runner가 보고할 경고를 소실시킨다. 따라서 이
-        메서드는 절대 버퍼를 비우지 않는다(drain 소유권 보존).
-
-        Returns:
-            ``type == "store_merge"`` 인 pending 경고의 수.
         """
         return sum(1 for w in self._pending_warnings if w.get("type") == "store_merge")
 
@@ -287,27 +256,12 @@ class ParquetStore:
         """Parquet에서 데이터 읽기.
 
         Args:
-            symbol: 종목 코드
-            timeframe: 타임프레임 (1m, 5m, 15m, 1h, 1d)
             start: 시작 시간 (ISO 형식, inclusive)
             end: 종료 시간 (ISO 형식, inclusive). date-only(`YYYY-MM-DD`)는
                 해당 날짜 whole-day inclusive(당일 23:59:59.999까지)로
                 해석되어 intraday 당일 장중 데이터가 포함된다.
                 시간 성분이 있는 형식은 그 정확 instant까지 inclusive다.
             limit: 최근 N건만 반환
-            data_type: 데이터 타입 (ohlcv, fundamental, tick)
-            exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
-            strict: 손상 파티션 처리 정책.
-                - False(기본): tolerant. 손상 파티션을 logger.warning 후
-                  skip하고 나머지로 부분 DataFrame을 반환한다(feed/CLI 등
-                  부분-허용 공용 경로의 기존 동작 보존).
-                - True: fail-closed. 손상 파티션을 만나면 부분 데이터로
-                  silent 성공하지 않고 즉시 `ParquetReadError`를 raise한다
-                  (backtest 데이터 로드 전용). 부분 데이터로 백테스트가
-                  일부 기간을 빠뜨린 채 성공하는 버그를 차단한다.
-
-        Raises:
-            ParquetReadError: strict=True이며 손상 파티션을 만났을 때.
         """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         if not path.exists():
@@ -367,26 +321,6 @@ class ParquetStore:
         exchange: str = "KRX",
     ) -> int:
         """데이터를 Parquet에 기록. 파티셔닝, 중복 제거(merge).
-
-        Returns:
-            이번 write로 **실제 새로 저장된 net-new 행 수**(rows_written).
-            파티션별 net delta = ``max(0, len(merged) - len(existing))``의 합이다
-            (legacy 중복 정리로 merged < existing이면 0으로 clamp). 빈 입력/
-            exchange는 0. 기존엔 입력 ``len(data)`` 를 누적해 dedup·재수집을
-            과대계상했다. 신규 파티션 write는 dedup 후 결과 행 수다. merge 실패
-            (기존 파일 보존 + store_merge 경고)는 0(저장 반영 없음). 반환은 정보용
-            이며 silent overwrite/transaction 동작은 변경하지 않는다(하위호환:
-            기존 None 반환을 사용하던 호출자 0건).
-
-        파티셔닝 해상도(04-schema.md 파일 규격):
-        - OHLCV 중 subminute(`_SUBMINUTE_TIMEFRAMES` = 10s/30s)는 **일별**
-          (`YYYY-MM-DD.parquet`). 단 해당 dir에 이미 legacy 월별 파일
-          (`_LEGACY_MONTHLY_GLOB`)이 있으면 월별-only를 유지하고 일별을
-          신규 생성하지 않는다(월별+일별 coexistence 시 read glob+concat이
-          중복 timestamp를 반환하므로 이를 원천 차단). legacy 월별→일별
-          전환 migration은 destructive하므로 별도로 분리한다.
-        - 그 외(1m+ OHLCV, fundamental/tick 등)는 기존대로 **월별**
-          (`YYYY-MM.parquet`).
 
         신규 write/append/경로 생성은 canonical exchange만 허용한다
         (core.md ``## Canonical Exchange Vocabulary``). `append()`는
@@ -726,21 +660,12 @@ class ParquetStore:
         """Parquet 파일 무결성 검증.
 
         Args:
-            symbol: 종목 코드
-            timeframe: 타임프레임
             fix: True이면 손상 파일을 .corrupted 확장자로 이동
-            data_type: 데이터 타입 (ohlcv, fundamental, tick)
-            exchange: 거래소 코드 (KRX, NYSE, NASDAQ 등)
 
         Returns:
             {"symbol": str, "timeframe": str, "total": int,
              "valid": int, "corrupted": int, "corrupted_files": list[str],
              "stale_tmp_removed": int}
-
-            ``stale_tmp_removed`` 는 회수한 orphan ``*.tmp`` (이전 hard-kill 시 원자
-            write가 replace 전에 남긴 잔재) 수다. read glob(``*.parquet``)
-            밖이라 누적되므로 **사용자 발동 fix=True에서만** 정리한다. fix=False는
-            read-scoped라 파일시스템을 변조하지 않는다(0으로 리포트).
         """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
         result: dict = {

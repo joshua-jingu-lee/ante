@@ -151,36 +151,12 @@ class Database:
     async def connect(self) -> None:
         """DB 연결 초기화.
 
-        ``read_only=True`` 면 reader 단일 ``mode=ro`` 연결만 열고 ``_writer`` 는
-        미개방한다(write 경로는 :class:`ReadOnlyDatabaseError`). probe/fallback
-        실패 시에도 :meth:`_init_ro_conn` 이 worker thread 를 drain 하므로 leak
-        없이 정리된다.
-
-        ``read_only=False`` 면 기존 baseline 그대로 writer + reader 두 연결을
-        생성한다(아래 docstring 의 partial-failure drain 보존).
-
         어느 한쪽 연결이라도 실패하면 이미 열린 연결(writer)을 worker thread
         join 까지 포함해 **결정적으로 drain** 한 뒤 원본 예외를 재전파한다.
         ``connect()`` 가 부분적으로 성공한 상태(예: writer만 열림)에서 raise되면
         호출자가 받은 ``Database`` 핸들에 leak된 aiosqlite worker thread가 남아,
         ``asyncio.run`` 종료 시 닫힌 이벤트 루프를 건드려 stderr noise를
         유발하기 때문이다.
-
-        주의: 일반 ``close()`` 는 ``await conn.close()`` 만 호출하는데
-        aiosqlite ``Connection.close()`` 는 worker thread 루프에 종료
-        신호(``_running=False``)만 보내고 **``thread.join`` 을 하지 않는다**.
-        따라서 ``close()`` 반환 직후에도 worker ``_connection_worker_thread`` 가
-        아직 종료 중일 수 있다. partial-failure 정리에서 ``close()`` 만 쓰면
-        thread teardown 이 느린 환경(Linux CI)에서 "정리 직후 leak 없음" 단언이
-        타이밍 의존으로 간헐 실패한다. 이를 막기 위해 여기서는 이미 할당된
-        연결을 :meth:`_drain_failed_conn` (close + ``thread.join``)으로 정리해
-        반환 시점에 worker thread leak 이 없음을 결정적으로 보장한다.
-
-        ``_init_conn`` 이 raise하는 경우(예: 첫 writer 연결 실패) 해당 연결의
-        worker thread는 ``_init_conn`` 내부에서 이미 drain되며, 여기서는 이미
-        할당된 ``self._writer`` (reader 실패 시) 만 drain한다. join 은
-        bounded(5s) + 예외 swallow 이므로 원본 connect 예외를 가리거나 hang
-        하지 않는다.
         """
         if self._read_only:
             self._reader = await self._init_ro_conn()
@@ -260,9 +236,6 @@ class Database:
         중인 writer 트랜잭션의 uncommitted row를 보지 못하므로, CAS 후
         ``RETURNING`` 으로 결과를 원자적으로 읽어야 하는 경로는 이 메서드를
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
-
-        현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
-        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화).
         """
         conn = self._get_writer()
         if self._in_transaction:
@@ -289,9 +262,6 @@ class Database:
         연결을 쓰는 ``fetch_all`` 은 진행 중인 writer 트랜잭션의 uncommitted row 를
         보지 못하므로, 영향 행 집합을 RETURNING 으로 받아야 하는 경로는 이 메서드를
         쓴다. ``_in_transaction`` 이 아니면 ``execute`` 와 동일하게 commit한다.
-
-        현재 태스크가 트랜잭션 owner 면 인라인 실행 + commit skip(합류). 아니면
-        ``_write_lock`` 안에서 실행 후 독립 commit 한다(태스크 간 직렬화).
         """
         conn = self._get_writer()
         if self._in_transaction:
@@ -322,9 +292,6 @@ class Database:
         **트랜잭션 안에서 호출 금지**: Python ``executescript`` 는 실행 전에
         열린 트랜잭션을 암묵 COMMIT 하므로, ``transaction()`` owner 태스크가
         호출하면 진행 중인 트랜잭션을 의도치 않게 커밋해 원자성을 깨뜨린다.
-        owner 태스크 호출은 ``RuntimeError`` 로 차단한다. schema 부트
-        스트랩/마이그레이션은 트랜잭션 밖에서만 호출한다 — ``db/migrations.py``
-        모듈 docstring 의 작성 규칙 참조.
 
         non-owner(트랜잭션 밖) 호출은 ``_write_lock`` 안에서 실행한다(태스크 간
         직렬화). ``executescript`` 자체가 암묵 COMMIT 으로 끝나므로 별도
@@ -343,30 +310,10 @@ class Database:
     async def transaction(self) -> AsyncIterator["Database"]:
         """트랜잭션 컨텍스트 매니저.
 
-        ``_write_lock`` 안에서 현재 태스크를 ``_txn_owner`` 로 등록하고
-        ``BEGIN`` → yield → ``COMMIT`` 한다. owner 태스크의 ``execute*()`` 만
-        commit 을 skip 하고 트랜잭션에 합류하며, 다른 태스크의 writer 쓰기는
-        lock 에서 대기해 직렬화된다.
-
         asyncio.CancelledError / KeyboardInterrupt / SystemExit 포함 모든
         BaseException 경로에서 ROLLBACK을 시도한 뒤 원본 예외를 재전파한다.
         ROLLBACK 자체 실패는 swallow하여 원본 예외(특히 CancelledError) 보존을
         우선한다.
-
-        cancellation-safety invariant: cleanup ROLLBACK 은 ``except
-        BaseException`` 진입 **직후 suspension 없이** 곧바로 ``await
-        conn.execute("ROLLBACK")`` 에 도달한다. asyncio cancellation 은
-        suspension point 에서만 전달되고, aiosqlite ``Connection.execute`` 는
-        첫 suspension 이전 동기 구간에서 SQL 을 worker FIFO 에 ``put_nowait``
-        하므로, ``COMMIT`` await 이 cancel 돼도 ROLLBACK 은 enqueue 되어 worker
-        FIFO 직렬성에 의해 다음 lock holder 의 SQL 보다 먼저 settle 된다.
-        ``BEGIN`` 도 "await 문 실행 시작 = enqueue 보장" 으로 취급해, cancellation
-        -during-BEGIN 에서도 cleanup ROLLBACK 을 **무조건 시도**한다(``begun``
-        플래그로 건너뛰는 패턴 금지, ``asyncio.shield`` 미사용).
-
-        nested transaction은 지원하지 않는다(같은 태스크 재진입은 lock 획득
-        **전** RuntimeError 로 차단 — 재획득 deadlock 방지). savepoint는 본
-        구현 범위 외.
         """
         if self._txn_owner is asyncio.current_task():
             raise RuntimeError("중첩 트랜잭션은 지원하지 않습니다")

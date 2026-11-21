@@ -1,12 +1,4 @@
-"""LogRecord 속성 / Ante 예약 키 단일 소스.
-
-Python 버전별 ``LogRecord.__init__`` 이 설정하는 속성 집합이 다르다
-(예: 3.12 부터 ``taskName`` 추가). formatter 와 safe_logger 가 각자 하드코딩된
-목록을 유지하면 버전 업그레이드 시 한쪽만 수정되어 드리프트가 발생한다.
-
-이 모듈은 **런타임 프로브**로 LogRecord 속성을 추출해 단일 소스를 제공한다.
-formatter 와 safe_logger 는 반드시 이 모듈의 상수를 임포트해 사용한다.
-"""
+"""LogRecord 속성 / Ante 예약 키 단일 소스."""
 
 from __future__ import annotations
 

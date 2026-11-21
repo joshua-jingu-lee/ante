@@ -1,16 +1,4 @@
-"""EventBus 이벤트 타입 정의.
-
-모든 이벤트는 Event를 상속하는 frozen dataclass.
-이벤트는 순수 데이터 구조로, 비즈니스 로직을 포함하지 않는다.
-
-account-scoped 이벤트는 ``_requires_account_id: ClassVar[bool] = True``
-마커를 추가하면, ``Event.__post_init__``이 ``account_id`` 필드 값을
-:func:`ante.account.scoping.is_invalid_account_id` 로 검증한다. 검증
-실패 시 :class:`ante.account.errors.InvalidAccountIdError` 가 raise되어
-빈 문자열/``"default"``/None/형식 위반 값이 이벤트로 발행되지 못한다.
-system-wide 이벤트(SystemStartedEvent, SystemShutdownEvent 등)는 marker
-없이 default ``False`` 를 유지하므로 검증되지 않는다.
-"""
+"""EventBus 이벤트 타입 정의."""
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -260,9 +248,6 @@ class OrderModifyExecutedEvent(Event):
     가격이다. ``broker_order_id`` 는 의도적으로 포함하지 않는다(OrderCancelledEvent
     와 동일 — 전략/소비자는 내부 ``order_id`` 로 식별). 고급 케이스(수량 변경 등)는
     deferred.
-
-    소비자: ``Bot.on_order_update`` / ``SignalChannel._on_order_update``
-    (``status="modified"``) + ``TradeRecorder`` (``TradeStatus.MODIFIED`` 별도 row).
     """
 
     _requires_account_id: ClassVar[bool] = True
@@ -445,9 +430,6 @@ class PositionMismatchEvent(Event):
     컨벤션으로 ``account_id`` 를 첫 데이터 필드로 배치하고,
     ``_requires_account_id`` 마커로 invalid fallback (``""``, ``None``,
     ``"default"``, 형식 위반) 을 ``Event.__post_init__`` 에서 차단한다.
-    발행자(``PositionReconciler.reconcile``)는 reconcile 입력
-    ``account_id`` 를 명시 전달하며, multi-account 환경에서 불일치 알림을
-    계좌 기준으로 추적할 수 있게 한다.
     """
 
     _requires_account_id: ClassVar[bool] = True
@@ -462,17 +444,7 @@ class PositionMismatchEvent(Event):
 
 @dataclass(frozen=True)
 class ReconcileEvent(Event):
-    """Reconciler → EventBus: 대사 보정 완료.
-
-    ``ReconcileEvent`` 는 대사(reconcile) 대상 계좌에 귀속되는
-    account-scoped 이벤트다. 다른 account-scoped 이벤트와 동일한 컨벤션으로
-    ``account_id`` 를 첫 데이터 필드로 배치하고, ``_requires_account_id``
-    마커로 invalid fallback (``""``, ``None``, ``"default"``, 형식 위반) 을
-    ``Event.__post_init__`` 에서 차단한다. 발행자
-    (``PositionReconciler.reconcile``)는 reconcile 입력 ``account_id`` 를
-    명시 전달하며, multi-account 환경에서 보정 결과를 계좌 기준으로
-    추적할 수 있게 한다.
-    """
+    """Reconciler → EventBus: 대사 보정 완료."""
 
     _requires_account_id: ClassVar[bool] = True
 
@@ -729,12 +701,6 @@ class StopOrderExpiredEvent(Event):
       감지하고 미트리거 주문을 만료시킬 때.
     - ``"manager_stopped"``: ``StopOrderManager.stop()`` 이 매니저를
       중지시키며 활성 주문을 일괄 만료시킬 때.
-
-    추후 ``manual_cancel`` 등 다른 reason 도입은 별도 이슈로 분리한다
-    (현재 ``cancel()`` 은 expired event 를 발행하지 않음).
-
-    ``account_id`` 는 다른 account-scoped 이벤트와 동일하게
-    ``__post_init__`` 에서 검증된다.
     """
 
     _requires_account_id: ClassVar[bool] = True

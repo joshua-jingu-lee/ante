@@ -1,8 +1,4 @@
-"""Parquet 데이터 파일 경로 마이그레이션.
-
-기존 exchange 없는 Parquet 경로를 KRX/ 하위로 이동한다.
-DB 마이그레이션은 no-op이며, data_path가 전달되면 Parquet 경로 마이그레이션을 수행한다.
-"""
+"""Parquet 데이터 파일 경로 마이그레이션."""
 
 from __future__ import annotations
 

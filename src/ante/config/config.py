@@ -99,19 +99,12 @@ class Config:
     def load(cls, config_dir: Path | None = None) -> Config:
         """설정 파일 로드 및 Config 인스턴스 생성.
 
-        config_dir이 None이면 resolve_config_dir()로 자동 탐색.
-        해석된 디렉토리는 인스턴스에 보존되어 path-like 설정의
-        ``resolve_path()`` 정규화 기준으로 사용된다.
-
         부수효과: ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY`` 값이
         Fernet canonical 형식을 만족하고, 현재 ``os.environ``에는 valid한
         ``ANTE_DB_ENCRYPTION_KEY`` 가 없으면(빈 문자열/invalid 포함),
         파일 값을 ``os.environ`` 으로 export한다. ``src/ante/account/crypto.py``
         가 ``os.environ`` 만 읽는 현재 contract를 깨지 않으면서 init이 만든
         키가 후속 CLI/서비스에 자동 전파되도록 한다.
-
-        Spec: ``docs/specs/account/06-database-schema.md`` (마스터 키는
-        ``secrets.env`` 의 ``ANTE_DB_ENCRYPTION_KEY`` 에서 로드).
         """
         from ante.account.crypto import _validate_fernet_key
 
@@ -146,20 +139,12 @@ class Config:
     def resolve_path(self, key: str, default: str | None = None) -> Path:
         """path-like 정적 설정을 ``config_dir`` 기준의 절대 경로로 정규화한다.
 
-        Spec: docs/specs/config/03-design-decisions.md `Ante instance/path contract`.
         절대 경로로 설정된 값은 그대로, 상대 경로는 ``config_dir`` 기준으로 결합한다.
         ``Config.load()``로 만든 인스턴스는 자동으로 ``config_dir``을 기억하므로
         호출 시점 CWD와 무관하게 server runtime과 CLI가 같은 경로를 본다.
 
         직접 ``Config(...)`` 로 만들었거나 ``config_dir``이 ``None``이면
         ``Path.cwd()``를 폴백으로 사용한다.
-
-        Args:
-            key: 점(.) 구분자로 표현되는 path-like 정적 설정 키 (예: ``"db.path"``).
-            default: ``key``가 TOML/DEFAULTS 어디에도 없을 때 사용할 fallback 문자열.
-
-        Raises:
-            ConfigError: 키 값을 찾을 수 없고 ``default``도 ``None``인 경우.
         """
         raw = self.get(key, default)
         if raw is None:

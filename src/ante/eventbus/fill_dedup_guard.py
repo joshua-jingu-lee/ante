@@ -1,20 +1,4 @@
-"""FillDedupGuard — 인메모리 bounded 체결 멱등 가드.
-
-outbox 가 ``OrderFilledEvent`` 를 at-least-once(무손실) 로 재전달하고
-결정적 ``fill_dedup_key`` 를 제공한다. EventBus 는 fire-and-forget(핸들러 예외
-swallow, 재시도 없음)이라 재전달 시 비멱등 소비자가 같은 fill 을 이중 처리한다.
-
-Treasury 는 전용 DB 테이블(``treasury_fill_dedup``)로 진짜 exactly-once-effect
-를 보장하지만, Bot/SignalChannel/TradeRecorder 의 효과(전략 follow-up, 외부 JSON
-write, NotificationEvent 재발행)는 **bounded best-effort dedup** 으로 충분하다.
-세 소비자가 동일 로직을 중복 구현하지 않도록 이 헬퍼로 추출한다.
-
-한계 (known-limitation):
-  - 프로세스 메모리 가드라 **재기동 시 소실** — 재기동 직후 catch_up 재전달은
-    이중 처리될 수 있다.
-  - ``deque(maxlen)`` 윈도우를 벗어난(긴 시간차) 재전달은 식별하지 못한다.
-DB-persisted exactly-once 로의 승격은 비목표.
-"""
+"""FillDedupGuard — 인메모리 bounded 체결 멱등 가드."""
 
 from __future__ import annotations
 

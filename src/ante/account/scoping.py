@@ -1,23 +1,4 @@
-"""Account ID scoping helper — fallback 금지, runtime/creation 정책 분리.
-
-이 모듈은 Account ID 계약(`docs/specs/account/14-account-id-contract.md`)의
-SSOT 진입점이다. account-scoped 데이터/이벤트/명령에서 fallback (None,
-빈 문자열, ``"default"``) 사용을 차단하고, 신규 계좌 생성에서는 bootstrap
-seed 예약어(``"test"``)도 추가로 거부한다.
-
-핵심 함수
-~~~~~~~~~
-
-- :func:`is_invalid_account_id` — runtime 시점 빠른 판정. ``"test"``는
-  bootstrap 계좌이므로 runtime valid이다.
-- :func:`require_account_id` — invalid면 :class:`InvalidAccountIdError`
-  raise. fallback 금지 정책의 진입점이다.
-- :func:`validate_new_account_id` — 신규 계좌 생성 정책 (요구 형식 +
-  RESTRICTED 거부). bootstrap seed 경로(``create_default_test_account``)는
-  helper를 우회한다.
-
-상세 계약은 ``docs/specs/account/14-account-id-contract.md``를 참조한다.
-"""
+"""Account ID scoping helper — fallback 금지, runtime/creation 정책 분리."""
 
 from __future__ import annotations
 
@@ -59,14 +40,6 @@ def require_account_id(account_id: str | None, *, context: str = "") -> str:
     경로에서 호출하여 ``None``/``""``/``"default"``/패턴 위반 값이 도달
     하지 못하도록 한다.
 
-    Args:
-        account_id: 검증할 account_id.
-        context: 에러 메시지에 부착할 호출 위치 식별자.
-            예: ``"trade.submit_order"``, ``"treasury.deposit"``.
-
-    Returns:
-        검증된 account_id. type narrow를 위해 ``str``로 반환된다.
-
     Raises:
         InvalidAccountIdError: ``is_invalid_account_id``가 ``True``일 때.
     """
@@ -89,20 +62,6 @@ def validate_new_account_id(account_id: str | None, *, context: str = "") -> str
 
     형식 위반 메시지는 기존 ``AccountService.create`` 메시지 형식을 보존한다
     (CLI ``str(e)`` contract: ``ante account create`` 표면 메시지).
-
-    Args:
-        account_id: 검증할 account_id.
-        context: 에러 메시지에 부착할 호출 위치 식별자
-            (:func:`require_account_id` 동형). 예: ``"cli.account.create"``.
-            기본값 ``""``는 기존 호출자(``AccountService.create``)와 호환되며
-            prefix를 출력하지 않는다.
-
-    Returns:
-        검증된 account_id.
-
-    Raises:
-        InvalidAccountIdError: 형식 위반, 또는 RESTRICTED/INVALID_RUNTIME
-            예약어와 일치할 때.
     """
     prefix = f"({context}) " if context else ""
     if account_id is None or account_id == "":

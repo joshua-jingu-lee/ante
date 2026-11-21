@@ -435,10 +435,6 @@ class BacktestExecutor:
     def get_positions(self, bot_id: str) -> dict[str, Any]:
         """PortfolioView 인터페이스.
 
-        spec ``03-04-provider-and-views.md`` L29 PortfolioView 스키마대로
-        ``{symbol: {"quantity","avg_price","current_price","unrealized_pnl"}}`` 를
-        반환해 라이브와 parity를 맞춘다.
-
         provider를 재호출하지 않고 run 루프가 매 step 미리 채운
         ``self._current_prices`` 캐시만 읽는다(sync 유지). 캐시에 심볼이 없으면
         (예: run 루프 밖에서 호출되거나 가격 미조회) ``avg_price`` 로 fallback해
@@ -477,14 +473,6 @@ class BacktestExecutor:
         전략 코드가 라이브/백테스트에서 동일하게 동작하도록 parity를 맞춘다.
 
         - ``self._trades`` (append 순 = 시간순)를 최신순(역순)으로 정렬한다.
-        - *symbol* 이 주어지면 해당 symbol만 남긴 뒤 *limit* 개로 자른다
-          (필터를 limit **이전에** 적용).
-        - ``trade_id`` 는 원본 ``self._trades`` 인덱스 기반(``f"bt-{i}"``)으로
-          합성해 결정적이다.
-        - ``status`` 는 backtest 거래가 모두 체결되므로 ``"filled"``,
-          ``order_type`` 은 시장가 체결이므로 ``"market"`` 으로 합성한다.
-        - ``timestamp`` 는 ``datetime`` 이면 ``.isoformat()``, ``str`` 이면 그대로,
-          ``None`` 이면 ``None`` (backtest timestamp 소스가 datetime/str 혼재 가능).
         """
         indexed = list(enumerate(self._trades))
         indexed.reverse()

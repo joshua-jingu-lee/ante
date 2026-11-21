@@ -1,22 +1,4 @@
-"""Approval 모듈 예외.
-
-``ApprovalNotFoundError``: service 가 missing
-approval 을 ``ValueError`` 대신 typed exception 으로 raise 한다. IPC
-``server.py`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope 이
-``APPROVAL_NOT_FOUND`` 로 변환한다. CLI ``approval cancel-invalid`` 도
-``getattr(e, "code", ...)`` 패턴으로 typed code 를 surface 한다.
-
-``ApprovalStatusConflictError``:
-``approve``/``reject`` 표면의 status flow violation (rejected → 재reject,
-approved → 재approve 등) 을 ``ValueError`` 대신 typed exception 으로
-raise 한다. IPC envelope 이 ``APPROVAL_STATUS_CONFLICT`` 안정 코드를
-surface 한다. ``ValueError`` 다중상속으로 기존 ``except ValueError`` caller
-(CLI ``approval approve`` line 629 fallback 등) 회귀를 방지한다.
-
-``ApprovalValidationError`` 는 호환을 위해 ``ante.approval.models`` 에
-계속 존재하며, 본 모듈은 cleanup/cancel 표면의 typed not-found + Group Q
-state-conflict 만 추가한다.
-"""
+"""Approval 모듈 예외."""
 
 
 class ApprovalError(Exception):
@@ -50,16 +32,6 @@ class ApprovalStatusConflictError(ApprovalError, ValueError):
     - ``rejected`` 상태에서 ``reject`` 재시도 (이미 거절됨)
     - ``approved`` 상태에서 ``approve`` 재시도 (이미 승인됨)
     - ``cancelled`` 상태에서 ``approve``/``reject`` 시도
-
-    ``ApprovalError`` 와 ``ValueError`` 다중상속으로 둔다 — ``approve``/
-    ``reject`` 메서드 이전에 기존 ``except ValueError`` 로 status conflict
-    를 받아온 caller (CLI ``approval approve`` line 629 generic fallback,
-    test mock 시나리오) 가 회귀 없이 동일하게 잡히도록 한다.
-    ``except ApprovalStatusConflictError`` 를 먼저 둔 caller 는 typed 분기
-    를 우선 매칭해 안정 코드 envelope 을 surface 한다 (Python MRO 보장).
-
-    IPC envelope 은 ``getattr(e, "code", "EXECUTION_ERROR")`` 로
-    ``"APPROVAL_STATUS_CONFLICT"`` 코드를 자동 노출한다.
     """
 
     code: str = "APPROVAL_STATUS_CONFLICT"

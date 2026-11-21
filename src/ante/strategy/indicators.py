@@ -1,9 +1,4 @@
-"""pandas-ta 기반 기술 지표 계산기.
-
-pandas-ta는 정규 의존성 — 항상 설치되어 있다.
-지원 지표: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, Stochastic,
-           ADX, CCI, OBV, WMA, DEMA, TEMA, WILLR, MFI (15종).
-"""
+"""pandas-ta 기반 기술 지표 계산기."""
 
 from __future__ import annotations
 
@@ -94,16 +89,8 @@ class IndicatorCalculator:
     ) -> dict[str, np.ndarray]:
         """지표 계산.
 
-        Args:
-            name: 지표 이름 (예: "sma", "rsi", "macd").
-            ohlcv: OHLCV numpy 배열 딕셔너리.
-                   키: "open", "high", "low", "close", "volume".
-            **params: pandas-ta 파라미터 오버라이드.
-
         Returns:
             결과 키 → numpy 배열 딕셔너리.
-            단일 출력: ``{"sma": array}``.
-            다중 출력: ``{"macd": array, "signal": array, "hist": array}``.
             데이터 부족 등으로 계산 불가 시(pandas-ta가 None 반환) 빈 dict ``{}``.
 
         Raises:
@@ -178,13 +165,6 @@ def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
     - pandas DataFrame (columns: open, high, low, close, volume)
     - polars DataFrame (columns: open, high, low, close, volume)
     - list[dict] (각 dict에 open, high, low, close, volume 키)
-
-    Returns:
-        {"open": array, "high": array, "low": array,
-         "close": array, "volume": array}
-
-    Raises:
-        ValueError: 변환 불가한 데이터 형식 또는 빈 데이터.
     """
     if isinstance(data, pd.DataFrame):
         return {

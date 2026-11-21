@@ -1,8 +1,4 @@
-"""Ante — AI-Native Trading Engine.
-
-패키지 버전을 단일 출처(pyproject.toml)에서 제공한다.
-CLI와 패키징 표면은 이 값을 참조한다.
-"""
+"""Ante — AI-Native Trading Engine."""
 
 from __future__ import annotations
 

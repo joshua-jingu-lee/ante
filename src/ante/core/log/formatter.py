@@ -1,8 +1,4 @@
-"""JSONL 시스템 로그 Formatter.
-
-`docs/specs/logging/03-json-schema.md` 에 정의된 스키마에 따라 한 라인
-JSON 엔트리를 생성한다.
-"""
+"""JSONL 시스템 로그 Formatter."""
 
 import json
 import logging

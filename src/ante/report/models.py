@@ -33,15 +33,6 @@ def validate_strategy_report_metrics(
     위해 호출하지 않는다 — 그렇지 않으면 저장된 invalid row가 존재할 때
     list/detail 조회가 ``ValueError``로 fail해 사용자가 정리할 수 없다.
 
-    SSOT:
-    - ``src/ante/report/validation.py::ReportSubmitRequest`` — CLI 입력 검증 SSOT.
-
-    invariants:
-    - ``total_trades >= 0`` (거래 수는 음수 불가).
-    - ``win_rate``는 ``[0.0, 100.0]`` percent 단위 또는 ``None``.
-    - ``total_return_pct``/``sharpe_ratio``/``max_drawdown_pct``/``win_rate``는
-      finite (NaN/Inf 금지).
-
     Raises:
         ValueError: invariant 위반 시.
     """

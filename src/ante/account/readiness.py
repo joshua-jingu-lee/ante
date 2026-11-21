@@ -1,15 +1,4 @@
-"""RuntimeReadinessRegistry — per-account runtime readiness SSOT (D-ACC-09).
-
-스펙 SSOT: [docs/specs/account/02-design-decisions.md — D-ACC-09](
-../../../docs/specs/account/02-design-decisions.md) ·
-[05-eventbus-integration.md](../../../docs/specs/account/05-eventbus-integration.md).
-
-`AccountStatus`(user kill-switch 축)와 **직교**하는 service-health 자동축이다.
-주문 가능 여부(``active_trading_ready``)는 broker/treasury_sync/fill/reconcile
-스케줄러 등록 성공/실패에서 derive 한다. SSOT 는 본 registry **단독**이며,
-``Services.fill_schedulers``/``reconcile_schedulers`` dict 는 스케줄러 인스턴스
-보관용일 뿐이다(reader 는 registry 만 조회).
-"""
+"""RuntimeReadinessRegistry — per-account runtime readiness SSOT (D-ACC-09)."""
 
 from __future__ import annotations
 
@@ -50,16 +39,6 @@ def is_flag_exempt(
     - ``(test, virtual)``·``(mock, virtual)`` → 면제 / 요구 / 면제 / 면제
     - ``(kis-domestic, virtual)``→ 면제 / 요구 / 면제 / 면제
     - ``(kis-domestic, live)``   → 요구 / 요구 / 요구 / 요구
-
-    분기축:
-    - ``broker``/``fill_reconcile``/``reconcile`` 의 면제축은 **trading_mode** 다.
-      VIRTUAL 은 broker API 를 미호출(``VirtualExecutor`` 가 가상 체결)하므로
-      broker-backed readiness 가 무의미하다 → 면제(항상 ready). LIVE 는 요구.
-    - ``treasury_sync`` 는 VIRTUAL(broker=None Trade-DB sync) 도 sync 를 시작하므로
-      **trading_mode 무관 항상 요구**다.
-
-    default 정책은 **fail-closed**: 매트릭스에 미지정인 미래 ``(broker_type,
-    trading_mode)`` pair 는 모든 플래그를 요구로 취급한다([must_fix A]).
     """
     if flag is ReadinessFlag.TREASURY_SYNC:
         return False
@@ -81,11 +60,6 @@ class _AccountReadiness:
 
 class RuntimeReadinessRegistry:
     """per-account runtime readiness SSOT (D-ACC-09).
-
-    registry-owned 권위: ``main._init_*`` 등록자가 스케줄러 등록과 **동시에**
-    ``mark_ready``/``mark_not_ready(reason)`` 로 명시 기록하는 단일 mark 경로다
-    ([must_fix F]). reader(gateway/RuleEngine/Treasury)는
-    ``active_trading_ready`` 만 호출한다.
 
     면제 매트릭스는 ``active_trading_ready`` derive 시점에 적용한다 — 면제 플래그는
     명시 mark 없이도 ready 로 취급된다. 단 등록자는 면제 계좌에도 no-op ready 를

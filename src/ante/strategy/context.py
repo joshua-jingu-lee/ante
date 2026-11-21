@@ -73,9 +73,6 @@ class StrategyContext:
     ) -> dict[str, Any]:
         """기술 지표 계산.
 
-        OHLCV 데이터를 가져와 pandas-ta로 지표를 계산한다.
-        pandas-ta는 정규 의존성이므로 항상 사용 가능하다.
-
         Args:
             symbol: 종목 코드.
             indicator: 지표 이름 (예: "sma", "rsi", "macd").

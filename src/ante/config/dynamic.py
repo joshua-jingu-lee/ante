@@ -1,17 +1,4 @@
-"""DynamicConfigService — 동적 설정 CRUD + 변경 알림.
-
-Numeric invariant:
-- write 경계(`validate_value`)에서 numeric `float` 값은 반드시 finite 여야 한다.
-  `NaN`/`Infinity`/`-Infinity` 는 ValueError 로 거부되며, 호출자(web/IPC/CLI)가
-  422 로 변환한다.
-- read 경계(`get`/`get_all`/`get_by_category`)에서 legacy non-finite numeric
-  row 는 `_ensure_loaded_value_finite` 가 ConfigError 로 격리한다
-  (defense-in-depth, JSON 직렬화 실패/silent corruption 방지).
-- 두 가드는 `_is_value_finite` 헬퍼를 통해 `dict`/`list` 컨테이너 내부까지
-  재귀적으로 검사한다. `int` 는 Python 임의 정밀도 정수가 NaN/Infinity 를
-  표현할 수 없으므로 finite 검사에서 제외한다 (`math.isfinite` 가 큰 정수에
-  대해 `OverflowError` 를 raise 하는 회귀 방지).
-"""
+"""DynamicConfigService — 동적 설정 CRUD + 변경 알림."""
 
 from __future__ import annotations
 
@@ -62,13 +49,6 @@ def _is_value_finite(value: Any) -> tuple[bool, Any]:
 def validate_value(key: str, value: Any) -> None:
     """키별 값 검증 (서비스 경계에서 호출).
 
-    Generic numeric finite 가드:
-        scalar `float` 뿐 아니라 `dict`/`list` 컨테이너 내부의 모든 `float` 도
-        재귀적으로 finite 여야 한다. `NaN`/`Infinity`/`-Infinity` 는 ValueError
-        로 거부된다. 이 가드는 키와 무관하게 적용되어 IPC/CLI/web 모든 경로에서
-        동일하게 동작한다. `bool` 과 `int` 는 finite 검사에서 제외된다(상세
-        규칙은 ``_is_value_finite`` 문서 참고).
-
     `system.log_level`/`notification.min_level` 처럼 enum SSOT가 정의된 키는
     invalid 값을 즉시 거부한다. 정의되지 않은 키는 numeric finite 가드 외에는
     통과(generic CRUD 동작 유지).
@@ -76,20 +56,6 @@ def validate_value(key: str, value: Any) -> None:
     대소문자 정책: `system.log_level` 은 대소문자 구분으로 거부한다. 즉
     ``_VALID_LOG_LEVELS`` 멤버(전부 대문자)와 정확 일치해야 통과하고,
     ``"debug"`` 같은 소문자 입력은 ValueError 로 거부된다.
-    `notification.min_level` 도 대소문자 구분으로 거부한다. 소비자
-    ``NotificationService`` 가 ``NotificationLevel(str(raw))`` 로 해석하므로
-    ``_VALID_NOTIFICATION_MIN_LEVELS`` 멤버(전부 소문자)와 정확 일치해야 하고,
-    ``"CRITICAL"`` 같은 대문자 입력은 거부된다.
-
-    Raises:
-        ValueError: numeric finite invariant 를 위반한 경우 (generic
-            가드 — 별 multi-consumer 표면이라 코드화 비목표).
-        ConfigValidationError: ``system.log_level``/``notification.min_level``
-            같은 키별 enum invariant 를 위반한 경우. ``ValueError`` 서브클래스
-            이므로 web 글로벌 핸들러는 그대로 422로 변환하고, IPC 서버는
-            ``.code`` 속성으로 ``CONFIG_VALIDATION_ERROR`` 안정코드를 envelope에
-            노출한다. 호출자(web/IPC/CLI)는 이를 도메인 응답으로
-            변환한다.
     """
     ok, bad = _is_value_finite(value)
     if not ok:

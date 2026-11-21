@@ -51,14 +51,6 @@ class InstrumentService:
     async def load_readonly(self) -> None:
         """read-only DB 에서 schema DDL 없이 캐시만 워밍한다.
 
-        ``initialize()`` 와 달리 ``CREATE TABLE IF NOT EXISTS instruments`` DDL
-        (writer 경로) 을 발화하지 않는다. read-only DB artifact (``data list
-        --db-path``) 에서 ``initialize()`` 를 호출하면 ``read_only=True``
-        ``Database`` 가 writer 연결을 열지 않아(또는 실제 read-only fs 에서 WAL
-        PRAGMA 가) 실패하므로, offline read 경로는 본 메서드로 캐시를 워밍한다
-        (``backtest history`` 의 ``BacktestRunStore.initialize()`` skip 와 동형
-        — offline-factory.md §2 옵션 A).
-
         ``instruments`` 테이블이 부재한 (부트스트랩 안 된) DB 는 정의상 종목
         마스터 부재와 동치이므로 빈 캐시로 graceful 정규화한다 — 이후
         ``get_name(symbol)`` 은 symbol fallback 을 반환한다. malformed/locked DB
@@ -119,25 +111,6 @@ class InstrumentService:
         self, symbol: str, exchange: str = "KRX", *, markdown: bool = False
     ) -> str:
         """알림용 ``{symbol} (종목명)`` 병기 라벨을 동기 반환한다.
-
-        텔레그램 알림에서 종목코드만 노출되는 지점들이 각자 ``get_name`` 을
-        조합하지 않고 이 헬퍼만 사용해 표기를 SSOT 로 단일화한다. 발행자가
-        완성된 label 을 받아 백틱/괄호 조립 실수를 차단한다.
-
-        반환 계약:
-
-        - ``markdown=False`` (plain): 조회 성공 시 ``069500 (KODEX 200)``,
-          실패 시 ``069500``.
-        - ``markdown=True``: 조회 성공 시 ``` `069500` (KODEX 200) ```,
-          실패 시 ``` `069500` ``` (백틱 안에 종목명을 넣으면 텔레그램
-          monospace 로 가독성이 떨어지므로 종목명은 백틱 밖 괄호에 둔다).
-
-        sync·무예외·무IO — ``get_name`` 과 동일하게 메모리 캐시 dict 만 동기
-        조회한다(``get()``/``_ensure_cache()`` 의 async DB fetch 를 경유하지
-        않는다). 백그라운드 태스크(reconciler·fill_scheduler)에서 ``await``
-        없이 호출되므로 알림 경로에 IO·지연을 추가하지 않는다. 캐시
-        미스·테이블 부재(빈 캐시)·빈 name·``name == symbol`` 은 모두 종목명
-        병기 없이 symbol-only 로 폴백한다.
 
         반환 라벨은 발행자→NotificationService 를 거쳐 텔레그램
         ``parse_mode="Markdown"`` (legacy) 로 전송된다. name 에 legacy Markdown

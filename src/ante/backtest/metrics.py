@@ -21,9 +21,6 @@ def calculate_metrics(
         equity_curve: [{"timestamp": str, "equity": float}, ...] 리스트
         initial_balance: 초기 자금
         final_balance: 최종 자산
-
-    Returns:
-        성과 지표 dict
     """
     metrics: dict[str, Any] = {}
 

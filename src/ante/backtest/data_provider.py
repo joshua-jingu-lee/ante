@@ -74,9 +74,6 @@ class BacktestDataProvider(DataProvider):
         기간을 빠뜨린 채 성공할 수 있으므로, `ParquetReadError`를
         `BacktestDataError`로 wrap해 loud 실패시킨다. get_ohlcv() 등의
         on-demand 적재 경로도 이 load()를 거치므로 동일하게 strict가 적용된다.
-
-        Raises:
-            BacktestDataError: 손상 파티션으로 데이터 로드에 실패했을 때.
         """
         key = f"{symbol}:{timeframe}"
         try:
@@ -198,12 +195,6 @@ class BacktestDataProvider(DataProvider):
 
         체결 가능 가격은 ``get_current_bar_price``(현재 봉 정확 일치)를 별도로
         쓴다. 이 메서드의 as-of 가격으로 비거래일에 체결하면 안 된다.
-
-        조회 timeframe은 run timeframe(``self._timeframe``)이다. 이를
-        명시하지 않으면 get_ohlcv ABC 기본값 ``"1d"`` 로 떨어져 비-1d run에서
-        ``{symbol}:1d`` 캐시 미스 → 1d lazy-load → 1d 종가가 현재가로 새는
-        버그가 생긴다. get_ohlcv 자체가 current_ts ≤ 필터를 적용하므로
-        as-of 의미는 그대로 유지된다.
         """
         df = await self.get_ohlcv(symbol, self._timeframe, limit=1)
         if df.is_empty():
@@ -216,18 +207,12 @@ class BacktestDataProvider(DataProvider):
     ) -> float | None:
         """현재 시각(current_ts)에 정확히 일치하는 봉의 종가(체결 가능가).
 
-        current_ts가 None이면 None. 심볼 df에서 ``timestamp == current_ts`` 인
-        행을 정확 일치 조회한다. 없으면(해당 심볼이 current_ts에 봉이 없음 =
-        gap day/미시작) None을 반환하고, 있으면 그 행의 close(float)를 반환한다.
-
         as-of(get_current_price)와 달리 stale 가격을 쓰지 않으므로, 호출부는
         None을 "이번 step에 거래 불가"로 해석해 체결을 skip해야 한다.
 
         *timeframe* 이 None(기본)이면 run timeframe(``self._timeframe``)을
         쓴다. 비-1d run에서 기본값이 ``"1d"`` 이면 체결가가 1d 종가로
         새므로, 실행 timeframe 캐시 키 ``{symbol}:{run_tf}`` 를 조회한다.
-        명시 *timeframe* 을 주면 그 키를 쓴다(exact-current_ts 매칭은 동일).
-        backtest 전용 메서드라 ABC 시그니처 제약이 없다.
         """
         tf = timeframe or self._timeframe
         key = f"{symbol}:{tf}"
