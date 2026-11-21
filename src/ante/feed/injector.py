@@ -123,17 +123,7 @@ class FeedInjector:
         return len(df)
 
     def _validate(self, df: pl.DataFrame) -> None:
-        """DataFrame에 대해 스키마 + 비즈니스 계층 검증을 수행한다.
-
-        전송/구문 계층은 이미 CSV/DataFrame 로드 단계에서 통과했으므로
-        스키마(3계층)와 비즈니스(4계층)만 적용한다.
-
-        Args:
-            df: 검증할 DataFrame.
-
-        Raises:
-            ValueError: 스키마 검증 실패 시.
-        """
+        """DataFrame에 대해 스키마 + 비즈니스 계층 검증을 수행한다."""
         records = df.to_dicts()
 
         schema_result = validate_schema(records, _OHLCV_REQUIRED_FIELDS)

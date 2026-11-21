@@ -828,15 +828,7 @@ class MemberService:
             )
 
     async def _get_or_raise(self, member_id: str) -> Member:
-        """멤버 조회. 없으면 ``MemberNotFoundError``.
-
-        이전에는 ``ValueError("존재하지 않는 멤버: ...")`` 를 raise 했으나,
-        CLI/IPC envelope 이 안정 코드 ``"MEMBER_NOT_FOUND"`` 를 surface
-        하도록 typed exception (``MemberError`` 서브) 으로 변경한다. 메시지
-        시그니처와 회귀 케이스(``test_member.py:582`` 등) 호환을 위해
-        문자열은 동일하게 유지한다. ``ApprovalNotFoundError`` 와
-        동형 패턴.
-        """
+        """멤버 조회. 없으면 ``MemberNotFoundError``."""
         from ante.member.errors import MemberNotFoundError
 
         member = await self.get(member_id)
@@ -846,35 +838,14 @@ class MemberService:
 
     @staticmethod
     def _assert_scopes_vocabulary(scopes: list[str]) -> None:
-        """``scopes`` 의 각 원소가 ``SCOPE_VOCABULARY`` 에 포함되는지 검증한다.
-
-        위반 시 첫 invalid scope 를 인자로 ``InvalidScopeError`` 를 raise 한다.
-        ``InvalidScopeError`` 는 ``ValueError`` 서브클래스이므로 기존
-        ``except ValueError`` 핸들러도 동일하게 처리된다.
-
-        빈 리스트는 통과시킨다. ``None`` 은 caller(``register`` /
-        ``update_scopes``) 에서 빈 리스트로 정규화한 뒤 본 헬퍼를 호출한다.
-        """
+        """``scopes`` 의 각 원소가 ``SCOPE_VOCABULARY`` 에 포함되는지 검증한다."""
         for scope in scopes:
             if not is_valid_scope(scope):
                 raise InvalidScopeError(scope)
 
     @staticmethod
     def _assert_reserved_member_id(member_id: str) -> None:
-        """reserved ``system:`` prefix 점유 여부를 검증한다.
-
-        ``system:`` 는 system audit sentinel 네임스페이스 (``system:kill_switch``
-        / ``system:recovery``) 전용이다. 사용자/agent 등록 member_id 가 이 prefix
-        를 점유하면 audit row 의 행위자(member_id) 식별이 오염되므로 ``register``
-        가 거부한다.
-
-        existing-member 조회 이전에 호출해, legacy ``system:*`` 행이 DB 에 있어도
-        ``MemberAlreadyExistsError`` (MEMBER_ALREADY_EXISTS) 가 아니라
-        ``ReservedMemberIdError`` (MEMBER_ID_RESERVED) 가 surface 되도록 한다.
-
-        정확히 ``startswith("system:")`` 만 거부한다 — ``system`` 단독,
-        ``systemic`` 등 콜론 없는 일반 member_id 는 오거부하지 않는다.
-        """
+        """reserved ``system:`` prefix 점유 여부를 검증한다."""
         from ante.member.errors import ReservedMemberIdError
 
         if member_id.startswith(_RESERVED_MEMBER_ID_PREFIX):
@@ -882,17 +853,7 @@ class MemberService:
 
     @staticmethod
     def _assert_role_enum(role: str) -> None:
-        """``role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다.
-
-        CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
-        있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
-        에서 한 번 더 방어한다 (defense-in-depth — Plan Preflight narrow-scope
-        SSOT: ``src/ante/member/models.py``).
-
-        ``StrEnum`` 인스턴스는 곧 문자열이므로 ``MemberRole.DEFAULT`` 같은
-        enum 직접 호출도 통과한다. 알 수 없는 문자열은 ``ValueError`` 로
-        거부된다.
-        """
+        """``role`` 이 ``MemberRole`` enum SSOT 의 멤버인지 검증한다."""
         valid = {member.value for member in MemberRole}
         if role not in valid:
             msg = f"invalid role: {role!r}"
@@ -900,17 +861,7 @@ class MemberService:
 
     @staticmethod
     def _assert_type_enum(member_type: str) -> None:
-        """``member_type`` 이 ``MemberType`` enum SSOT 의 멤버인지 검증한다.
-
-        CLI direct path 와 내부 caller 는 본 서비스 메소드를 직접 호출할 수
-        있다. enum 위반이 token 발급/DB INSERT 까지 새지 않도록 service 계층
-        에서 한 번 더 방어한다 (defense-in-depth — ``role`` enum 강제
-        패턴 1:1 미러, SSOT: ``src/ante/member/models.py``).
-
-        ``StrEnum`` 인스턴스는 곧 문자열이므로 ``MemberType.AGENT`` 같은
-        enum 직접 호출도 통과한다. 알 수 없는 문자열은 ``ValueError`` 로
-        거부된다.
-        """
+        """``member_type`` 이 ``MemberType`` enum SSOT 의 멤버인지 검증한다."""
         valid = {member.value for member in MemberType}
         if member_type not in valid:
             msg = f"invalid member_type: {member_type!r}"

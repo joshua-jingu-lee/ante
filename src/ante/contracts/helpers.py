@@ -77,15 +77,7 @@ def _resolve_message(
     *,
     fallback_message: str | None,
 ) -> str:
-    """``emit_cli_error`` / ``ipc_error_payload`` 가 공유하는 message resolution.
-
-    우선순위:
-
-    1. ``fallback_message`` 인자 (호출자가 명시 제공한 도메인 문구).
-    2. ``str(exc)`` (비어있지 않을 때).
-    3. ``spec.default_message`` (helper-internal fallback, optional).
-    4. 셋 다 없으면 빈 문자열 (envelope shape 호환 — ``message: ""``).
-    """
+    """``emit_cli_error`` / ``ipc_error_payload`` 가 공유하는 message resolution."""
 
     if fallback_message:
         return fallback_message

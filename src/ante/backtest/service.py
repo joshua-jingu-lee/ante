@@ -133,14 +133,7 @@ class BacktestService:
         result: BacktestResult,
         effective: BacktestConfig,
     ) -> str:
-        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다.
-
-        저장 실패(read-only/ephemeral data dir 등)는 backtest 자체를 실패시키지
-        않는다 — warning 을 남기고 ``""`` 를 반환하여 빈 result_path 로 이벤트가
-        발행되게 한다(기존 무회귀 동작 보존, 자동 draft 만 skip). ``to_dict()``
-        의 직렬화 계약 그대로 저장하므로 ReportDraftGenerator._load_result 가
-        그대로 소비한다.
-        """
+        """결과를 durable JSON artifact 로 저장하고 경로를 반환한다."""
         from pathlib import Path
 
         try:
@@ -228,12 +221,7 @@ class BacktestService:
         logger.info("BacktestCompleteEvent 발행: %s", strategy_id)
 
     def _validate_timeframe_vocab(self, timeframe: object) -> None:
-        """timeframe vocabulary 검증. invalid → BacktestConfigError.
-
-        early(_validate_config)와 effective(run) 양쪽이 공유하는 단일
-        helper. ``str()`` 캐스팅 없이 non-str 도 ``is_valid_timeframe`` 의
-        non-str→False 가드를 통해 거부한다.
-        """
+        """timeframe vocabulary 검증. invalid → BacktestConfigError."""
         if not isinstance(timeframe, str) or not is_valid_timeframe(timeframe):
             msg = (
                 f"Invalid timeframe: {timeframe!r}. "
@@ -248,13 +236,7 @@ class BacktestService:
         *,
         raw: object | None = None,
     ) -> None:
-        """symbols 구조/빈/KRX-shape 검증 (공유 helper).
-
-        early(_validate_config)와 effective(run, meta fallback) 양쪽이 동일
-        로직을 쓰도록 추출. ``raw`` 는 에러 메시지에 노출할 원본 입력값(없으면
-        ``symbols`` 자체). ``exchange == "KRX"`` 일 때만 6자리 shape 검증.
-        SSOT(`is_krx_symbol`)의 non-str→False 가드 보존 — ``str()`` 캐스팅 금지.
-        """
+        """symbols 구조/빈/KRX-shape 검증 (공유 helper)."""
         shown = symbols if raw is None else raw
         if not isinstance(symbols, list) or not all(
             isinstance(s, str) for s in symbols

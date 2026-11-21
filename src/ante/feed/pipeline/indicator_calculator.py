@@ -126,18 +126,7 @@ class IndicatorCalculator:
         store: ParquetStore,
         sym: str,
     ) -> int:
-        """단일 심볼의 파생 지표를 as-of join으로 계산한다.
-
-        data.go.kr 일별 행에 그 날짜 이전 가장 최근 DART 분기 재무를
-        ``join_asof(strategy="backward")``로 결합한 뒤 비율을 계산하여
-        일별 행을 write-back한다. 두 소스 중 하나라도 비어 있거나
-        source/date 컬럼이 없으면 0을 반환한다(graceful).
-
-        Returns:
-            ``store.write`` 가 반환한 **net-new 저장 행 수**. 비율 컬럼만
-            채운 in-place overwrite(같은 natural key)라 행 수가 늘지 않으므로
-            보통 0이다(과대계상 방지). 계산 불가(graceful 0) 시에도 0.
-        """
+        """단일 심볼의 파생 지표를 as-of join으로 계산한다."""
         try:
             fundamental = store.read(sym, "krx", data_type="fundamental")
         except Exception:
@@ -173,35 +162,7 @@ class IndicatorCalculator:
         daily: pl.DataFrame,
         quarterly: pl.DataFrame,
     ) -> pl.DataFrame | None:
-        """일별 거래일에 그 시점 이전 **공시된** 가장 최근 분기 재무를 결합한다.
-
-        ``store.read``의 ``diagonal_relaxed`` union 때문에 daily/quarterly
-        sub-frame은 동일한 컬럼 union을 보유한다(상대 소스 컬럼은 null-fill).
-        따라서 컬럼 provenance를 명시 상수로 고정해 결합한다:
-
-        - 일별 프레임에서 ``_QUARTERLY_FINANCIAL_COLUMNS``(일별 행에선 null)를
-          **버려** join 후 분기 값이 null로 덮이지 않게 한다.
-        - 분기 프레임에서는 그 재무 컬럼만 **availability 키**와 함께 가져온다.
-
-        as-of 키는 분기 period_end가 아니라 effective availability다:
-
-            effective = coalesce(available_date, period_end + statutory_lag)
-
-        - ``available_date``가 있으면 그대로(point-in-time).
-        - 없으면 period_end 월로 법정 제출기한을 도출:
-          {3,6,9} → +45일, 12 → +90일.
-        - 비표준 period_end 월(위 4개월이 아님) 또는 effective가 끝내 null인
-          행은 정렬·결합 안정성을 위해 **join 전 제거**한다.
-
-        그 다음 일별 거래일 ``date`` ↔ 분기 ``effective``를 동일한 임시 join
-        컬럼명(``_ASOF_KEY``)으로 alias하고 ``strategy="backward"``로 결합한다
-        (backward는 inclusive — 거래일 == effective면 적용). 결합 결과는 일별
-        identity를 유지하면서, 그 거래일 **이전(또는 당일) 공시된** 가장 최근
-        분기 재무만 부여받는다. 임시 키는 결합 직후 제거한다.
-
-        가져올 분기 재무 컬럼이 하나도 없거나, effective availability를 가진
-        분기 행이 하나도 남지 않으면 ``None``을 반환한다.
-        """
+        """일별 거래일에 그 시점 이전 **공시된** 가장 최근 분기 재무를 결합한다."""
         financial_cols = [
             col for col in _QUARTERLY_FINANCIAL_COLUMNS if col in quarterly.columns
         ]
@@ -231,17 +192,7 @@ class IndicatorCalculator:
 
     @staticmethod
     def _with_effective_availability(quarterly: pl.DataFrame) -> pl.DataFrame:
-        """분기 프레임에 effective availability 키(``_EFFECTIVE_KEY``)를 부여한다.
-
-        ``effective = coalesce(available_date, period_end + statutory_lag)``.
-        statutory_lag은 period_end 월로 분류한다(3/6/9 → +45일, 12 → +90일).
-        비표준 period_end 월이면서 available_date도 없는 행, 또는 effective가
-        끝내 null인 행은 **제거**한다(as-of 정렬 안정성 + lookahead 안전).
-
-        ``available_date`` 컬럼은 legacy 파티션에는 아예 없을 수
-        있으므로(존재해도 nullable), 없으면 전 행 null(=법정기한 fallback만
-        사용)로 취급한다.
-        """
+        """분기 프레임에 effective availability 키(``_EFFECTIVE_KEY``)를 부여한다."""
         if _AVAILABLE_DATE_KEY in quarterly.columns:
             available = pl.col(_AVAILABLE_DATE_KEY)
         else:
@@ -301,11 +252,7 @@ def _ratio_expr(
     denominator: str,
     alias: str,
 ) -> pl.Expr:
-    """분모가 0이면 None을 반환하는 나눗셈 표현식.
-
-    분모가 null(as-of 결합 이전 날짜 등)이면 비교/나눗셈이 null로 전파되어
-    결과도 null이 된다.
-    """
+    """분모가 0이면 None을 반환하는 나눗셈 표현식."""
     return (
         pl.when(pl.col(denominator) != 0)
         .then(pl.col(numerator).cast(pl.Float64) / pl.col(denominator).cast(pl.Float64))

@@ -102,10 +102,7 @@ class RateLimiter:
                 self._tokens -= 1
 
     def _roll_daily_date(self) -> None:
-        """현재 날짜가 직전 기록과 다르면 일일 카운터를 리셋한다.
-
-        single event loop 가정 하에 await 없이 동작하므로 코루틴 간 atomic.
-        """
+        """현재 날짜가 직전 기록과 다르면 일일 카운터를 리셋한다."""
         d = self._now_date()
         if self._daily_date != d:
             self._daily_count = 0

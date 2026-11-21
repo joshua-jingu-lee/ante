@@ -62,14 +62,7 @@ _KST = timezone(timedelta(hours=9))
 
 
 def _parse_strict_backfill_since(value: str) -> date | None:
-    """``backfill_since`` 값을 strict ``YYYY-MM-DD``로 파싱한다.
-
-    backfill 진입 표면(CLI ``--since`` / config TOML ``backfill_since``)이
-    공유하는 helper. 형태가 어긋나거나 캘린더상 유효하지 않으면 ``None`` 을
-    반환한다(호출 측이 ``CLI_INVALID_DATE`` config_error로 변환).
-
-    feed-local 사용에 한정한다 — 전역 validators 통합 금지.
-    """
+    """``backfill_since`` 값을 strict ``YYYY-MM-DD``로 파싱한다."""
     if not isinstance(value, str):
         return None
     if _BACKFILL_ISO_DATE_RE.fullmatch(value) is None:
@@ -89,13 +82,7 @@ _DATA_GO_KR_PUBLISH_HOUR_KST = 13
 
 
 def _next_business_day(d: date) -> date:
-    """``d`` 다음의 첫 영업일(주말 skip)을 반환한다.
-
-    ``is_business_day``(scheduler.py)는 weekday만 본다(KR 공휴일 미인식).
-    cap은 보조(quota 보호)일 뿐이며 데이터 무결성은 ``written > 0`` guard가
-    보장하므로, 공휴일 미인식으로 cap이 다소 낙관적이어도 데이터 손실은
-    없다(빈 응답 → checkpoint 미전진 → 재시도).
-    """
+    """``d`` 다음의 첫 영업일(주말 skip)을 반환한다."""
     nxt = d + timedelta(days=1)
     while not is_business_day(nxt.isoformat()):
         nxt += timedelta(days=1)
@@ -103,22 +90,7 @@ def _next_business_day(d: date) -> date:
 
 
 def _last_published_date(now_kst: datetime) -> date:
-    """``now_kst`` 시점에 확실히 공개된 마지막 OHLCV 날짜를 반환한다.
-
-    어제부터 거꾸로 영업일 ``D`` 를 훑으며, ``D`` 의 데이터 공개 deadline
-    (``next_business_day(D)`` 의 13:00 KST)이 ``now_kst`` 이하인 첫 ``D`` 를
-    반환한다. 무한 루프 방지를 위해 최대 14일까지만 거슬러 올라간다(주말 +
-    연속 비영업 구간을 충분히 덮는 보수적 bound). 그 안에 없으면 가장 오래
-    거슬러 올라간 영업일을 반환한다(cap이 과도하게 좁아져도 무결성은 guard가
-    보장).
-
-    Args:
-        now_kst: 기준 시각(KST aware datetime). 테스트는 이 인자를 주입해
-            결정적으로 검증한다.
-
-    Returns:
-        확실히 공개된 마지막 영업일 ``date``.
-    """
+    """``now_kst`` 시점에 확실히 공개된 마지막 OHLCV 날짜를 반환한다."""
     today = now_kst.date()
     candidate = today - timedelta(days=1)
     for _ in range(14):
@@ -268,17 +240,7 @@ class BackfillRunner:
     def _validate_backfill_since(
         config: dict[str, Any],
     ) -> dict[str, str] | None:
-        """``[schedule].backfill_since``를 strict 검증한다.
-
-        config에 ``backfill_since`` 가 명시되어 있을 때만 검증한다.
-        키 부재 시에는 ``DEFAULT_BACKFILL_SINCE`` (`2015-01-01`)가
-        쓰이며 정의상 strict + past이므로 검증을 건너뛴다.
-
-        Returns:
-            None이면 strict 통과 (수집 진입 가능).
-            dict이면 coded config_error (``code`` 키 = CLI_INVALID_DATE /
-            INVALID_DATE_RANGE).
-        """
+        """``[schedule].backfill_since``를 strict 검증한다."""
         schedule = config.get("schedule")
         if not isinstance(schedule, dict):
             return None
@@ -344,39 +306,7 @@ class BackfillRunner:
         is_trading_paused: Callable[[dict[str, Any]], bool],
         stop_event: asyncio.Event | None,
     ) -> None:
-        """data.go.kr 날짜별 수집을 실행한다.
-
-        가드 분리:
-            - ``is_blocked_day`` 가 True인 비거래 요일은 **skip**한다
-              (그 과거 날짜는 데이터가 없어 대기해도 영원히 안 채워짐).
-            - 그 외 날짜는 ``is_trading_paused`` 가 풀릴 때까지 **대기한 뒤**
-              수집한다(window가 지나면 데이터는 존재).
-
-        checkpoint 미전진:
-            ``dates`` 는 오름차순이고 ``Checkpoint.save`` 는 last-write-wins이므로,
-            transient 실패(generic ``except Exception``) 이후의 날짜 성공이
-            checkpoint를 실패 날짜 너머로 전진시키면 그 실패 날짜는 다음 run에서
-            ``last_checkpoint`` 이전으로 간주되어 영구 skip된다. 첫 transient
-            실패 시 ``halt = True`` 를 세워 이후 ``checkpoint.save`` 를 모두
-            건너뛴다(실패 직전 날짜에 checkpoint 고정). 수집 자체는 best-effort로
-            계속하므로 ``continue``(루프 진행)는 유지한다 — DataGoKr 결과는
-            ParquetStore natural-key dedup으로 재-fetch overwrite 멱등.
-
-        checkpoint 가드 = stored_ok 3-state:
-            checkpoint 전진은 더 이상 ``written > 0``(net-delta)가 아니라
-            collector가 보고하는 ``stored_ok``(유효 데이터 store 성공 반영) 신호로
-            구동한다. rows_written을 net-new delta로 바꾸면 재수집 날짜는
-            net_delta=0이 되는데, ``written > 0`` 가드라면 그 날짜가 미전진해
-            checkpoint stall이 생긴다. 3-state로 분리:
-              - 빈 응답(stored_ok=False) → 미전진
-              - 유효 재수집(stored_ok=True, net_delta=0) → 전진(stall 해소)
-              - store-merge 실패 → 미전진. ``_persist_partition`` 은 merge 실패
-                시 raise하지 않고(R1) 기존 파일 보존 + ``store_merge`` 경고만
-                적재하므로, runner가 checkpoint save **직전** 이번 날짜 write 직후
-                store 경고를 drain해 ``store_merge`` 존재를 확인하는 가드로 미전진
-                시킨다. drain은 반드시 collect/write 직후·checkpoint save 직전에
-                수행한다(지연 drain이면 실패 날짜가 이미 전진).
-        """
+        """data.go.kr 날짜별 수집을 실행한다."""
         if self._data_go_kr is None:
             return
 
@@ -466,23 +396,7 @@ class BackfillRunner:
         stop_event: asyncio.Event | None,
         ctx: _RunContext,
     ) -> bool:
-        """거래시간 가드(``blocked_hours``)가 풀릴 때까지 대기한다.
-
-        ``is_trading_paused(config)`` 가 True인 동안 ``GUARD_WAIT_POLL_SECONDS``
-        주기로 폴링한다.
-
-        - 상주 스케줄러(``stop_event`` 주어짐): ``asyncio.wait_for`` 로 poll
-          만큼 대기하되 stop_event가 set되면 즉시 깨어난다(SIGTERM 안전종료).
-        - one-shot(``stop_event=None``): ``asyncio.sleep`` 로 대기하며,
-          ``asyncio.run`` 의 SIGINT가 task를 취소해 중단할 수 있다.
-
-        Returns:
-            ``True``  — stop_event 또는 max-wait 상한으로 대기가 중단됨.
-                루프는 즉시 break하고 체크포인트만 저장된 partial을 반환한다.
-                (각각 ``BACKFILL_STOP_REQUESTED`` /
-                ``GUARD_PERMANENTLY_BLOCKED`` coded marker가 적재됨.)
-            ``False`` — 가드가 풀려 정상적으로 해당 날짜를 수집할 수 있음.
-        """
+        """거래시간 가드(``blocked_hours``)가 풀릴 때까지 대기한다."""
         waited = 0.0
         first_log = True
 
@@ -748,13 +662,7 @@ def _make_result(
     warnings_truncated: bool = False,
     config_errors: list[dict] | None = None,
 ) -> CollectionResult:
-    """CollectionResult를 생성한다.
-
-    ``warnings_total`` 기본값이 ``0`` 이 아니라 ``None`` 인 것은 의도적이다.
-    ``0`` 으로 두면 ``warnings`` 를 넘기고 총계를 생략한 호출이
-    "경고 N건 + 총계 0"이라는 **자기모순 리포트**를 만든다. ``None`` 이면
-    ``len(warnings)`` 로 파생해 절단이 없는 호출에서 항상 정합한다.
-    """
+    """CollectionResult를 생성한다."""
     finished_at = datetime.now(tz=UTC)
     duration = (finished_at - started_at).total_seconds()
     warning_items = warnings or []

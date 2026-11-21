@@ -14,11 +14,7 @@ import logging
 
 
 def _probe_logrecord_attrs() -> frozenset[str]:
-    """실제 LogRecord 인스턴스의 ``__dict__`` 키를 추출한다.
-
-    ``getMessage()`` / ``asctime`` 은 ``LogRecord.__init__`` 이 설정하지 않지만
-    ``Formatter.format()`` 이 동적으로 주입하는 속성이므로 포함한다.
-    """
+    """실제 LogRecord 인스턴스의 ``__dict__`` 키를 추출한다."""
     probe = logging.LogRecord(
         name="_probe",
         level=logging.INFO,

@@ -75,10 +75,7 @@ _ACCOUNTS_BUFFER_BACKFILL_TEST = (
 
 
 def _register_brokers() -> None:
-    """브로커 어댑터를 lazy 등록한다.
-
-    순환 import 방지를 위해 최초 호출 시 import한다.
-    """
+    """브로커 어댑터를 lazy 등록한다."""
     if _BROKER_REGISTRY:
         return
 
@@ -119,21 +116,7 @@ STRUCTURAL_FIELDS: frozenset[str] = frozenset(
 
 
 def _load_persisted_timezone(stored_tz: str, account_id: str) -> tuple[str, bool]:
-    """저장된 timezone 값을 tolerant load 하고 ``timezone_invalid`` marker 반환.
-
-    Read-path (``_row_to_account``) 에서 호출된다. 저장된 ``stored_tz`` 가
-    유효한 IANA timezone key 이면 ``(stored_tz, False)`` 를 그대로 반환한다.
-    invalid 이면 **fallback 으로 덮어쓰지 않고** stored value 를 그대로
-    반환하면서 marker 를 ``True`` 로 세팅한다. 이는 후속
-    ``AccountService.update`` 의 전체 row UPDATE 가 stored invalid 값을
-    silent 하게 default 로 rewrite 하는 회귀를 막기 위한 것이다.
-
-    invalid 일 때 ``ACCOUNT_INVALID_TIMEZONE_LEGACY`` 검색 가능 코드를
-    포함한 structured warning 을 한 번 남기고, 운영자에게 cold-path repair
-    명령을 안내한다. 본 헬퍼는 발견 시점마다 warning 을 남기며,
-    ``AccountService.initialize`` 는 별도로 누적 account_ids 요약을 한 줄
-    더 기록한다.
-    """
+    """저장된 timezone 값을 tolerant load 하고 ``timezone_invalid`` marker 반환."""
     try:
         validate_iana_timezone(stored_tz)
     except ValueError as e:
@@ -246,30 +229,7 @@ class AccountService:
         return await self._persist_account(account)
 
     async def _create_seed_account(self, account: Account) -> Account:
-        """Bootstrap seed 계좌 생성 (**private**).
-
-        :meth:`create_default_test_account` 전용 진입점. public ``create()`` API
-        에 ``_bootstrap`` 플래그를 노출하지 않기 위해 별도 private helper로
-        캡슐화한다. ``broker_type`` 과 ``account_id`` 가 ``BROKER_PRESETS`` 의
-        동일 항목에서 정의된 ``(broker_type, default_account_id)`` pair와
-        정확히 일치할 때만 허용한다 — 한 preset의 ``default_account_id`` 를 다른
-        preset의 ``broker_type`` 아래로 끼워 넣어 RESTRICTED 예약어( ``"test"`` )
-        를 비-test broker 아래에 저장하는 우회를 막는다.
-
-        형식 검증( :func:`require_account_id` )은 ``BROKER_PRESETS`` 자체가 잘못
-        변경되는 경우에 대비한 추가 가드로 적용한다. cold-path 가드와 broker_type
-        / credentials 검증 / DB insert는 public ``create()`` 와 동일한 조건을
-        적용한다 ( :meth:`_persist_account` 공유).
-
-        Raises:
-            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                호출됨 (invariant S2).
-            InvalidAccountIdError: ``(broker_type, account_id)`` 가
-                ``BROKER_PRESETS`` 의 어느 ``(broker_type, default_account_id)``
-                pair와도 일치하지 않거나, pair는 일치해도 형식 위반인 경우.
-            AccountAlreadyExistsError, InvalidBrokerTypeError,
-            MissingCredentialsError: :meth:`_persist_account` 와 동일.
-        """
+        """Bootstrap seed 계좌 생성 (**private**)."""
         self._guard_cold_path_create()
 
         preset = BROKER_PRESETS.get(account.broker_type)
@@ -290,11 +250,7 @@ class AccountService:
         return await self._persist_account(account)
 
     def _guard_cold_path_create(self) -> None:
-        """``create*()`` 진입 시 런타임 cold-path 가드 (invariant S2).
-
-        ``create()`` 와 ``_create_seed_account()`` 가 동일 메시지/예외 의미론으로
-        가장 먼저 평가하기 위한 공유 helper.
-        """
+        """``create*()`` 진입 시 런타임 cold-path 가드 (invariant S2)."""
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "계좌 생성은 cold-path 전용입니다. "
@@ -302,23 +258,7 @@ class AccountService:
             )
 
     async def _persist_account(self, account: Account) -> Account:
-        """``account_id`` 검증 이후 공통 검증 + DB insert (private helper).
-
-        ``create()`` 와 ``_create_seed_account()`` 가 공유한다. 진입 전 호출자가
-        이미 ``_guard_cold_path_create()`` 와 account_id 정책 검증을 끝냈다고
-        가정한다 — 이 helper는 ``account_id`` 정책에 대해서는 어떤 가드도
-        적용하지 않는다.
-
-        Raises:
-            AccountAlreadyExistsError: 동일 account_id가 메모리/DELETED DB
-                상태로 이미 존재.
-            InvalidExchangeError: exchange가 canonical vocabulary
-                (``ante.core.exchange.CANONICAL_EXCHANGES`` 5종)에 없음
-                (`*`/non-canonical). create + bootstrap seed 공유 chokepoint;
-                ``update()`` 는 exchange immutable 가드로 별도 불요.
-            InvalidBrokerTypeError: 프리셋에 없는 broker_type, 또는 가상 전용 타입+live.
-            MissingCredentialsError: 필수 credentials 키 누락.
-        """
+        """``account_id`` 검증 이후 공통 검증 + DB insert (private helper)."""
         if account.account_id in self._accounts:
             raise AccountAlreadyExistsError(
                 f"계좌 '{account.account_id}'가 이미 존재합니다."
@@ -579,51 +519,7 @@ class AccountService:
         return await self.update(account_id, timezone=new_timezone)
 
     async def _reconnect_broker(self, account_id: str) -> None:
-        """새 브로커 어댑터를 생성·연결한 뒤에만 캐시를 교체한다.
-
-        update()에서 credentials/broker_config/수수료율 등 브로커 재생성이
-        필요한 필드가 바뀐 직후 호출된다.
-
-        캐시가 비어 있으면 아무 것도 하지 않는다. 재연결은 이미 런타임에
-        생성돼 있는 어댑터를 새 설정으로 교체하는 작업이므로, 캐시 부재
-        시점(예: 부팅 중 레거시 is_paper 마이그레이션처럼 아직 `get_broker()`가
-        불린 적 없는 구간)에는 의미가 없고, 다음 `get_broker()` 호출이 새
-        설정으로 lazy init한다.
-
-        **동시성:** 캐시 부재 조기 반환 검사를 포함한 본문 전체를
-        ``get_broker()`` 와 **동일한 per-account lock**
-        (:meth:`_broker_lock_for`) 안에서 수행한다. lock 없이 조기 반환하면,
-        초기 ``get_broker()`` 가 lock 을 쥐고 ``connect()`` 를 대기하는 동안
-        (아직 캐시가 비어 있는 in-flight 구간) update() 가 본 메서드를
-        호출했을 때 캐시가 비었다고 판단해 조용히 반환하고, 직후
-        ``get_broker()`` 가 **구 설정으로 만든 어댑터를 캐시에 기록**해
-        DB(신 설정)와 런타임 캐시(구 설정)가 영구 어긋난다. lock 으로
-        직렬화하면 reconnect 가 in-flight connect 의 완료를 기다린 뒤 진입하므로
-        ``in self._brokers`` 가 true 가 되어 신 설정으로 rebuild + connect 후
-        swap 한다(역순으로 reconnect 가 선점해도 get_broker 의 double-check 로
-        정합). ``_build_broker_adapter`` / ``connect()`` 는 ``get_broker()`` 를
-        재진입하지 않으므로 lock 재귀 deadlock 이 없다. update() 경로가 이
-        lock 대기로 connect 시간만큼 블록될 수 있으나 admin-path 라 수용한다.
-
-        실패 의미론:
-        - 새 어댑터 생성(`_build_broker_adapter`) 실패 → 캐시는 기존 브로커를
-          그대로 유지하고, `BrokerReconnectFailedError`를 올려 update() 호출자가
-          DB는 갱신됐으나 런타임 브로커는 구 설정임을 인지하게 한다.
-        - 새 어댑터 connect() 실패 → 동일하게 기존 캐시를 보존하고
-          `BrokerReconnectFailedError`를 올린다. 캐시에 `is_connected=False`인
-          stale 어댑터가 남아 후속 gateway 호출을 계속 깨뜨리는 회귀를 막는다.
-        - 새 어댑터가 성공적으로 connect된 뒤에야 캐시를 원자적으로 교체한다.
-
-        **이전 어댑터는 의도적으로 disconnect하지 않는다.** `ReconcileScheduler`나
-        `Treasury.start_sync()` 같은 장기 실행 consumer가 시작 시점에 주입받은
-        BrokerAdapter 참조를 내부에 고정해서 사용하기 때문이다. 새 어댑터로
-        캐시를 교체하면 `AccountService.get_broker()` / `APIGateway` 경로는
-        즉시 새 설정을 사용하지만, 이미 시작된 consumer는 참조를 통해 구
-        어댑터를 계속 사용한다. 구 어댑터를 세션 레벨까지 끊어버리면 주기
-        대사/잔고 동기화가 바로 깨지므로, 구 어댑터는 자연스러운 GC와 서비스
-        재시작 시점까지 살려둔다. consumer에 새 어댑터를 주입하는 이벤트
-        기반 경로는 범위 밖이다.
-        """
+        """새 브로커 어댑터를 생성·연결한 뒤에만 캐시를 교체한다."""
         async with self._broker_lock_for(account_id):
             if account_id not in self._brokers:
                 return
@@ -811,13 +707,7 @@ class AccountService:
         logger.info("계좌 삭제: %s (요청자: %s)", account_id, deleted_by)
 
     async def _count_active_bots(self, account_id: str) -> int:
-        """``bots`` 테이블에서 동일 account_id의 non-deleted 봇 수를 센다.
-
-        ``bots`` 테이블이 존재하지 않는 환경(BotManager 미초기화 단위 테스트
-        등)은 0을 반환한다. 운영 서버는 항상 BotManager 초기화 시점에
-        스키마를 적용하므로 이 fallback은 cold-path CLI 실행 환경 차이만
-        흡수한다.
-        """
+        """``bots`` 테이블에서 동일 account_id의 non-deleted 봇 수를 센다."""
         try:
             row = await self._db.fetch_one(
                 "SELECT COUNT(*) AS cnt FROM bots WHERE account_id = ? AND status != ?",
@@ -909,15 +799,7 @@ class AccountService:
         return results
 
     def _broker_lock_for(self, account_id: str) -> asyncio.Lock:
-        """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성).
-
-        ``get_broker()`` 의 cache-miss build+connect 경로와
-        ``_reconnect_broker()`` 의 rebuild+connect 경로가 **동일한** lock
-        인스턴스를 공유해야, 초기 connect 가 in-flight 인 동안 설정 변경
-        reconnect 가 끼어들어 구-설정 adapter 가 캐시에 영구 고착되는 race 를
-        차단할 수 있다. dict 항목 생성은 ``await`` 없는 동기 구간이므로
-        ``setdefault`` 자체로 race-free 하다.
-        """
+        """계좌별 브로커 직렬화 lock 을 반환한다 (없으면 생성)."""
         return self._broker_locks.setdefault(account_id, asyncio.Lock())
 
     async def get_broker(self, account_id: str) -> BrokerAdapter:
@@ -981,12 +863,7 @@ class AccountService:
             return self._brokers.get(account_id)
 
     async def _build_broker_adapter(self, account_id: str) -> BrokerAdapter:
-        """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음).
-
-        `get_broker()`의 최초 생성 경로와 `_reconnect_broker()`의 재생성
-        경로가 공유한다. 캐시 쓰기는 호출자가 책임진다 — 특히 재연결은
-        connect() 성공을 확인한 뒤에 캐시를 교체한다.
-        """
+        """현재 DB 상태로 BrokerAdapter를 생성한다 (캐시하지 않음)."""
         _register_brokers()
 
         account = await self.get(account_id)

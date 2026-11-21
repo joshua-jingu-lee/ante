@@ -202,17 +202,7 @@ def _check_finite_values(
     symbol: str,
     warnings: list[str],
 ) -> None:
-    """OHLCV 숫자 필드가 유한(finite)한지 검증한다.
-
-    NaN/inf 값은 schema 계층(float 변환 가능)을 통과하지만 데이터 품질
-    문제이므로 business 계층 경고로 관측한다. 숫자 변환 실패는 schema 계층
-    소관이므로 건너뛴다.
-
-    Args:
-        record: 검증할 레코드.
-        symbol: 심볼 식별자 (경고 메시지용).
-        warnings: 경고를 추가할 목록.
-    """
+    """OHLCV 숫자 필드가 유한(finite)한지 검증한다."""
     for field_name in ("open", "high", "low", "close", "volume", "amount"):
         value = record.get(field_name)
         if value is None:
@@ -232,13 +222,7 @@ def _check_positive_prices(
     symbol: str,
     warnings: list[str],
 ) -> None:
-    """가격 필드가 양수인지 검증한다.
-
-    Args:
-        record: 검증할 레코드.
-        symbol: 심볼 식별자 (경고 메시지용).
-        warnings: 경고를 추가할 목록.
-    """
+    """가격 필드가 양수인지 검증한다."""
     for price_field in ("open", "high", "low", "close"):
         value = record.get(price_field)
         if value is None:
@@ -258,13 +242,7 @@ def _check_volume_non_negative(
     symbol: str,
     warnings: list[str],
 ) -> None:
-    """거래량이 0 이상인지 검증한다.
-
-    Args:
-        record: 검증할 레코드.
-        symbol: 심볼 식별자 (경고 메시지용).
-        warnings: 경고를 추가할 목록.
-    """
+    """거래량이 0 이상인지 검증한다."""
     volume_val = record.get("volume")
     if volume_val is None:
         return
@@ -281,13 +259,7 @@ def _check_ohlc_relationship(
     symbol: str,
     warnings: list[str],
 ) -> None:
-    """OHLC 관계(low <= open/close <= high)를 검증한다.
-
-    Args:
-        record: 검증할 레코드.
-        symbol: 심볼 식별자 (경고 메시지용).
-        warnings: 경고를 추가할 목록.
-    """
+    """OHLC 관계(low <= open/close <= high)를 검증한다."""
     try:
         o = float(record["open"]) if "open" in record else None
         h = float(record["high"]) if "high" in record else None
@@ -317,13 +289,7 @@ def _check_temporal_parseable(
     symbol: str,
     warnings: list[str],
 ) -> None:
-    """timestamp/date가 지원 형식으로 파싱 가능한지 검증한다.
-
-    Args:
-        record: 검증할 레코드.
-        symbol: 심볼 식별자 (경고 메시지용).
-        warnings: 경고를 추가할 목록.
-    """
+    """timestamp/date가 지원 형식으로 파싱 가능한지 검증한다."""
     for field_name in ("timestamp", "date"):
         value = record.get(field_name)
         if value is None:
@@ -335,14 +301,7 @@ def _check_temporal_parseable(
 
 
 def _validate_time_series(records: list[dict[str, Any]], warnings: list[str]) -> None:
-    """시계열 연속성을 검증한다.
-
-    날짜 중복과 순서 역전을 감지한다.
-
-    Args:
-        records: 검증할 레코드 목록.
-        warnings: 경고를 추가할 목록.
-    """
+    """시계열 연속성을 검증한다."""
     date_field = "timestamp" if "timestamp" in records[0] else "date"
     if date_field not in records[0]:
         return
@@ -364,16 +323,7 @@ def _check_duplicate_dates(
     dates: list[str],
     warnings: list[str],
 ) -> None:
-    """날짜 중복을 검사한다.
-
-    파싱 가능한 값은 _try_parse_date() 결과(정규화 temporal key)로,
-    파싱 불가능한 값은 raw 문자열로 fallback하여 중복을 판정한다.
-
-    Args:
-        symbol: 심볼 식별자.
-        dates: 날짜 문자열 목록.
-        warnings: 경고를 추가할 목록.
-    """
+    """날짜 중복을 검사한다."""
     seen: set[datetime | str] = set()
     duplicates: list[str] = []
     for d in dates:
@@ -392,19 +342,7 @@ def _check_date_order(
     dates: list[str],
     warnings: list[str],
 ) -> None:
-    """날짜 순서 역전을 검사한다.
-
-    파싱된 datetime들이 tz-aware/naive로 혼재하면 ``<`` 비교가
-    ``TypeError``를 일으킨다. 정규화 batch는 통상 tz-awareness가 일관(전부
-    aware 또는 전부 naive)이지만, 방어적으로 인접 비교를 try/except로 감싸
-    혼재 시 해당 비교만 건너뛴다. 일관 tz(정상 케이스)에서는 역전을 정확히
-    감지한다.
-
-    Args:
-        symbol: 심볼 식별자.
-        dates: 날짜 문자열 목록.
-        warnings: 경고를 추가할 목록.
-    """
+    """날짜 순서 역전을 검사한다."""
     parsed_dates: list[tuple[datetime, str]] = []
     for d in dates:
         dt = _try_parse_date(d)
@@ -424,20 +362,7 @@ def _check_date_order(
 
 
 def _try_parse_date(value: str) -> datetime | None:
-    """날짜 문자열을 파싱 시도한다.
-
-    먼저 고정 strptime 형식 4종을 시도하고, 모두 실패하면
-    ``datetime.fromisoformat`` 으로 fallback한다. fromisoformat은
-    timezone offset(``"2026-01-02 00:00:00+00:00"``)과 ISO ``T`` 구분자
-    offset(``"2026-01-02T00:00:00+00:00"``)을 처리하지만 ``"20260102"``
-    같은 구분자 없는 형식은 거부하므로 strptime 루프를 그대로 유지한다.
-
-    Args:
-        value: 날짜 문자열.
-
-    Returns:
-        파싱된 datetime 또는 None.
-    """
+    """날짜 문자열을 파싱 시도한다."""
     for fmt in (
         "%Y-%m-%d %H:%M:%S",
         "%Y-%m-%dT%H:%M:%S",

@@ -124,12 +124,7 @@ class DataGoKrCollector:
         raw_items: list[dict],
         target_date: str,
     ) -> tuple[list[dict], list[dict]]:
-        """raw 필수 필드가 누락/null인 레코드를 drop하고 구조화 warning을 반환한다.
-
-        판정 기준은 validate_schema와 동일하다: 필수 필드의 키가 없거나(missing
-        key) 값이 None(null)이면 schema 실패로 간주한다. drop된 레코드는 에러
-        로그를 남기고 type=schema_validation 엔트리로 surface한다(저장 차단).
-        """
+        """raw 필수 필드가 누락/null인 레코드를 drop하고 구조화 warning을 반환한다."""
         survivors: list[dict] = []
         warns: list[dict] = []
         for item in raw_items:
@@ -173,20 +168,7 @@ class DataGoKrCollector:
         raw_items: list[dict],
         target_date: str,
     ) -> tuple[bool, list[dict]]:
-        """선필터를 통과한 레코드를 검증하고 (passed, 경고 목록)을 반환한다.
-
-        schema 계층은 선필터(_filter_schema_invalid)에서 이미 통과했으므로
-        실무상 survivor 검증은 거의 항상 passed=True다. 다만 transport
-        (status≠200)/syntax 또는 향후 schema 검사가 잔여 실패를 surface할 수
-        있으므로 batch 단위 게이트로 전달한다. passed=False면 호출자가 batch
-        저장을 차단한다(spec 09-failure-recovery.md: schema 실패 skip).
-
-        raw_items가 비어있으면 validate_all이 schema 빈-레코드로 passed=True를
-        반환하므로 게이트를 막지 않는다(선필터로 전 row drop된 정상 케이스).
-
-        Returns:
-            (validation.passed, 구조화 경고 목록).
-        """
+        """선필터를 통과한 레코드를 검증하고 (passed, 경고 목록)을 반환한다."""
         warns: list[dict] = []
         if not raw_items:
             return True, warns
@@ -229,19 +211,7 @@ class DataGoKrCollector:
         target_date: str,
         warns: list[dict],
     ) -> tuple[int, set[str]]:
-        """OHLCV와 fundamental을 정규화하고 저장한다.
-
-        Args:
-            df: survivor raw DataFrame.
-            store: 저장소.
-            target_date: 수집 대상 날짜(경고 구조화용).
-            warns: business 경고를 누적할 목록(collect의 warns로 surface).
-                정규화 후 OHLCV business 위반은 비차단 경고로 여기 추가된다.
-
-        Returns:
-            ``(net_delta, symbols)``. net_delta는 ohlcv/fundamental ``store.write``
-            반환(실제 net-new 저장 행 수)의 합이다. 재수집/dedup이면 0.
-        """
+        """OHLCV와 fundamental을 정규화하고 저장한다."""
         rows_written = 0
         symbols: set[str] = set()
 
@@ -267,27 +237,7 @@ class DataGoKrCollector:
         target_date: str,
         warns: list[dict],
     ) -> int:
-        """OHLCV 데이터를 정규화하여 심볼별로 저장한다.
-
-        정규화 직후 business 계층 검증(`validate_business`)을 정규화 OHLCV
-        (open/high/low/close/volume) 값에 적용한다. raw `_validate`의
-        business는 raw 컬럼명(mkp/hipr/...)이라 no-op이므로, 의미 있는 OHLC 정합성
-        (`low<=open/close<=high`)·price>0·volume>=0 anomaly 경고를 여기서 발행한다.
-        business는 비차단(경고)이므로 위반이 있어도 저장은 진행한다(spec 09:
-        business='경고 로그, 저장'). 시계열 갭(`_validate_time_series`)은 단일 날짜
-        collect + dedup 후 사실상 no-op이라 강한 보장 대상은 아니다.
-
-        Args:
-            df: survivor raw DataFrame.
-            store: 저장소.
-            symbols: 저장 심볼을 누적할 집합.
-            target_date: 수집 대상 날짜(경고 구조화용).
-            warns: business 경고를 누적할 목록(collect의 warns로 surface).
-
-        Returns:
-            ``store.write`` 반환(net-new 저장 행 수)의 합. 입력 len이
-            아니라 실제 저장 delta다(재수집/dedup이면 0).
-        """
+        """OHLCV 데이터를 정규화하여 심볼별로 저장한다."""
         ohlcv_df = self._normalizer.normalize_ohlcv(df)
         if ohlcv_df.is_empty() or "symbol" not in ohlcv_df.columns:
             return 0
@@ -316,12 +266,7 @@ class DataGoKrCollector:
         store: ParquetStore,
         symbols: set[str],
     ) -> int:
-        """fundamental 데이터를 정규화하여 심볼별로 저장한다.
-
-        Returns:
-            ``store.write`` 반환(net-new 저장 행 수)의 합. 입력 len이
-            아니라 실제 저장 delta다(재수집/dedup이면 0).
-        """
+        """fundamental 데이터를 정규화하여 심볼별로 저장한다."""
         fund_df = self._normalizer.normalize_fundamental(df)
         if fund_df.is_empty() or "symbol" not in fund_df.columns:
             return 0
@@ -337,27 +282,7 @@ class DataGoKrCollector:
 
     @classmethod
     def _store_instruments(cls, df: pl.DataFrame, store: ParquetStore) -> int:
-        """종목 메타데이터를 `.feed/instruments.parquet`에 upsert한다.
-
-        매핑(spec data-feed/04-schema.md INSTRUMENTS, 05-data-sources.md):
-        `srtnCd`→symbol, `itmsNm`→name, `mrktCtg`→market, exchange="KRX".
-        itmsNm/mrktCtg 컬럼이 둘 다 없으면(메타데이터 전무) 무가치한 파일을
-        만들지 않도록 저장을 건너뛴다. 적어도 하나의 메타 컬럼이 있으면 누락 셀은
-        빈 문자열로 안전 처리한다.
-
-        upsert 정책:
-        - 신규 batch는 symbol 기준 1행으로 dedup한다.
-        - 기존 `.feed/instruments.parquet`가 있으면 symbol을 키로 merge한다.
-          단 신규 행의 name/market가 비어있으면(누락/빈 문자열) 기존 non-empty
-          값을 덮어쓰지 않고 보존한다. 신규 값이 non-empty면
-          갱신한다.
-        - 파일이 없으면 신규 생성한다.
-
-        symbol 컬럼이 없거나 결과가 비어있으면 파일을 생성/변경하지 않는다.
-
-        Returns:
-            파일에 기록된 instrument 행 수. 미기록(빈 입력)이면 0.
-        """
+        """종목 메타데이터를 `.feed/instruments.parquet`에 upsert한다."""
         if "srtnCd" not in df.columns:
             return 0
 
@@ -443,13 +368,7 @@ class DataGoKrCollector:
     def _merge_instruments(
         existing: pl.DataFrame, new_df: pl.DataFrame
     ) -> pl.DataFrame:
-        """기존 instruments와 신규 행을 symbol 기준으로 merge한다.
-
-        - 신규 symbol은 그대로 추가한다.
-        - 기존 symbol은 갱신하되, 신규 name/market가 빈 문자열이면 기존
-          non-empty 값을 보존한다(빈 신규값이 기존 값을 덮어쓰지 않게).
-        - exchange는 항상 "KRX"로 유지한다.
-        """
+        """기존 instruments와 신규 행을 symbol 기준으로 merge한다."""
         existing = existing.with_columns(
             *[
                 pl.lit("").alias(col)

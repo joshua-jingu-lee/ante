@@ -24,20 +24,7 @@ _MAX_FOLLOW_UP_FILLS_PER_STEP = 1000
 
 
 def _is_valid_quantity(value: object) -> bool:
-    """``value``가 finite한 ``int``/``float`` quantity인지 판정.
-
-    RuleEngine ``_is_finite_quantity``와 동일 정책 (cross-module import 회피):
-    private helper를 import하면 backtest가 rule 모듈 내부 구현에 결합되므로,
-    같은 정책을 backtest 안에 작은 local mirror로 둔다.
-
-    - ``bool``은 제외한다(``True``/``False``를 수량으로 보지 않음).
-      ``isinstance(True, int) == True`` 이므로 명시적으로 잠근다.
-    - ``int``/``float``만 허용하고, ``math.isfinite``로 ``NaN``/``inf``를 차단한다.
-    - Python ``int``는 임의 정밀도라 ``10**10000`` 같은 거대 정수는 ``float``
-      변환 시 ``OverflowError`` (또는 ``ValueError``/``TypeError``)를 던진다.
-      이때도 finite-호환이 아니므로 ``False``로 떨어뜨린다(overflow guard).
-    - 본 helper는 절대 raise하지 않는 invariant를 유지한다.
-    """
+    """``value``가 finite한 ``int``/``float`` quantity인지 판정."""
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return False
     try:
@@ -187,59 +174,7 @@ class BacktestExecutor:
         )
 
     async def _execute_signal(self, signal: Signal, timestamp: Any) -> dict | None:
-        """Signal을 가상 체결.
-
-        체결 시 라이브 bot의 ``strategy.on_fill(fill)`` dict와 동일한 shape
-        (``order_id``/``symbol``/``side``/``quantity``/``price``/``timestamp``/
-        ``fill_dedup_key``)의 fill dict를 반환한다. 체결되지 않은 모든
-        경로(side invalid/hold, quantity invalid, **현재 봉 없음(gap day/미시작)**,
-        buy 잔고 부족, sell 보유 없음)는 ``None`` 을 반환해 호출부가 follow-up
-        (on_fill) 경로로 진입하지 않게 한다.
-
-        체결가는 ``get_current_bar_price`` (current_ts 정확 일치 봉가)로 게이트한다.
-        심볼이 현재 step에 봉이 없으면 None이 와서 미체결 skip한다 —
-        stale as-of 가격으로 비거래일에 체결하지 않는다.
-        backtest는 단발 체결이므로 ``fill_dedup_key`` 는 항상 빈 문자열이다
-        (라이브와 달리 dedup이 불필요).
-
-        체결 수량(``executed_qty``)을 분기별로 먼저 확정한 뒤, 수수료/슬리피지/
-        거래 기록을 모두 체결 수량 기준으로 계산한다. 보유 수량을 초과하는 매도는
-        보유분만 체결되므로, 초과 요청 수량이 수수료·슬리피지·거래 수량에
-        반영되지 않는다.
-
-        가격 조회/분기 이전에 Signal을 검증한다. 라이브
-        ``RuleEngine`` preflight와 동일하게 ``side ∈ {"buy","sell"}`` 와 finite
-        양수 ``quantity`` 만 허용한다. 무효 Signal은 거래를 발행하지 않고 진단
-        로그만 남긴 뒤 skip한다(라이브 OrderRejectedEvent와 달리 backtest는
-        이벤트 없음). 특히 ``hold`` 등 buy/sell 이외 side는 **절대 sell 분기로
-        라우팅하지 않는다**(unknown side가 매도로 처리되던 회귀 차단).
-
-        side/quantity 검증 통과 후 **가격 조회(``get_current_bar_price``) 이전에**
-        config.symbols universe 검사를 한다. ``symbols`` 가 설정된 경우
-        그 목록 밖의 ``signal.symbol`` 은 거래하지 않고 skip(``return None``)해
-        가격조회(on-demand load)도 거래도 발생하지 않는다. ``symbols`` 가 비어
-        있으면(universe 미설정) 거부하지 않는다(현 동작 유지).
-
-        가격 게이트 통과 후 **side 체결 분기 이전에** ``signal.order_type`` 트리거
-        게이트(``_order_triggered``)를 적용한다. limit/stop/stop_limit이
-        현재 봉가로 조건을 충족하지 않으면 미체결로 skip(``return None``)해, 기존에
-        order_type을 무시하고 모든 주문을 즉시 시장가로 체결하던 버그를 차단한다.
-        market(기본)은 항상 트리거되어 기존 시장가 체결 동작을 보존한다(회귀 방지).
-
-        체결가(``exec_price``)는 게이트 통과 후 order_type별 정책으로 산출한다:
-        market/stop(트리거→시장가)은 기존대로 슬리피지만 적용한 ``price * (1 ±
-        slippage_rate)``, limit/stop_limit은 슬리피지가 limit(``L=signal.price``)을
-        불리하게 넘지 않도록 buy는 ``min(.., L)`` sell은 ``max(.., L)`` 로 cap한다
-        (매수는 L 초과 지불 없음, 매도는 L 미만 수취 없음). slippage 필드는
-        ``abs(exec_price - price) * executed_qty`` 로 일관되게 기록한다.
-
-        known-limitation(의도적 수용):
-        - per-bar 평가만 한다. 미충족 주문을 다음 봉까지 보존하는 cross-bar
-          resting order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델).
-        - stop_limit은 "트리거 후 limit 대기" 2단계 상태를 보존하지 못해, **같은
-          봉에서 stop 트리거 + limit 충족이 동시에 만족**되는 단일-봉 conjunction
-          으로 근사한다. cross-bar triggered-then-resting 상태는 미모델링한다.
-        """
+        """Signal을 가상 체결."""
         if signal.side not in _ALLOWED_SIDES:
             if signal.side == "hold":
                 logger.warning(
@@ -339,26 +274,7 @@ class BacktestExecutor:
         }
 
     def _order_triggered(self, signal: Signal, price: float) -> bool:
-        """``signal.order_type`` 트리거가 현재 봉가(*price*)로 충족되는지 판정.
-
-        side 체결 분기 이전에 호출한다. ``True`` 면 체결 진행, ``False`` 면 호출부가
-        미체결로 skip한다. 필수 가격 필드 누락/알 수 없는 order_type은 fail-closed로
-        ``False`` + 경고를 남긴다(거래 미발행).
-
-        - ``market``(기본): 항상 True(즉시 시장가 체결). 기존 동작 보존(회귀 방지).
-        - ``limit``(``signal.price=L`` 필수): buy는 ``price <= L``, sell은
-          ``price >= L`` 이면 트리거.
-        - ``stop``(``signal.stop_price=S`` 필수): buy는 ``price >= S``, sell은
-          ``price <= S`` 이면 트리거(트리거 시 시장가로 변환되어 체결).
-        - ``stop_limit``(``S=stop_price``, ``L=price`` 둘 다 필수): buy는
-          ``price >= S and price <= L``, sell은 ``price <= S and price >= L`` 이면
-          트리거. **단일-봉 conjunction 근사**(stop 트리거 + limit 충족 동시 만족).
-          "트리거 후 limit 대기" 2단계 상태와 cross-bar triggered-then-resting은
-          모델링하지 않는다(known-limitation, 의도적 수용).
-
-        per-bar 평가만 하며 미충족 주문을 다음 봉까지 보존하는 cross-bar resting
-        order book은 모델링하지 않는다(전략이 매 step 재발행하는 모델).
-        """
+        """``signal.order_type`` 트리거가 현재 봉가(*price*)로 충족되는지 판정."""
         order_type = signal.order_type
         if order_type == "market":
             return True
@@ -421,16 +337,7 @@ class BacktestExecutor:
         return triggered
 
     def _apply_slippage_cap(self, signal: Signal, price: float, side: str) -> float:
-        """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다.
-
-        - ``market``/``stop``(트리거→시장가): 기존대로 슬리피지만 적용한
-          ``price * (1 ± slippage_rate)``.
-        - ``limit``/``stop_limit``: 슬리피지가 limit(``L=signal.price``)을 불리하게
-          넘지 않도록 cap한다 — buy는 ``min(price*(1+slip), L)``, sell은
-          ``max(price*(1-slip), L)``. 매수는 L 초과 지불 없음, 매도는 L 미만 수취
-          없음. 게이트(``_order_triggered``)를 통과한 limit/stop_limit은
-          ``signal.price`` 가 None이 아님이 보장된다.
-        """
+        """게이트 통과 후 order_type별 체결가(``exec_price``)를 산출한다."""
         limit = signal.price
         is_capped_limit = signal.order_type in ("limit", "stop_limit")
         if side == "buy":
@@ -460,23 +367,7 @@ class BacktestExecutor:
                 del self._positions[symbol]
 
     async def _refresh_current_prices(self) -> None:
-        """현재 봉 시점의 보유 심볼별 현재가 스냅샷을 새로 구성한다.
-
-        ``get_positions()`` 가 PortfolioView 스키마(current_price/unrealized_pnl)를
-        제공할 때 읽는 캐시다. provider를 재호출하지 않는 sync get_positions를
-        유지하기 위해, run 루프가 현재 봉 가격을 미리 여기에 채운다.
-
-        - **매 step 새로 구성**한다(dict를 새로 만들어 교체). 이전 봉 가격이
-          남으면 stale/lookahead가 되므로, 직전 step에 보유했다가 청산된 심볼은
-          캐시에서 자연히 사라진다.
-        - 보유 심볼(``self._positions`` 키)에 대해서만 ``get_current_price`` 를
-          조회한다. 조회 실패(예외)/``None``/``<= 0`` 이면 해당 심볼은 그 포지션의
-          ``avg_price`` 로 fallback 확정한다(``_calculate_equity`` 와 동일 정책).
-
-        Note: 현재 봉 가격이 SSOT이므로 반드시 run 루프 안(advance 직후, 다음
-        advance 이전)에서만 호출한다. 루프 종료 후 호출하면 미래 봉을 보는
-        lookahead가 된다.
-        """
+        """현재 봉 시점의 보유 심볼별 현재가 스냅샷을 새로 구성한다."""
         prices: dict[str, float] = {}
         for symbol, pos in self._positions.items():
             avg_price = pos["avg_price"]
@@ -501,15 +392,7 @@ class BacktestExecutor:
         self._current_prices = prices
 
     async def _calculate_equity(self) -> float:
-        """현재 bar 시점의 자산 가치 (mark-to-market).
-
-        미청산 포지션을 현재 bar 종가로 평가한다. 가격 조회가 실패
-        (None/<=0/예외)하면 해당 포지션은 avg_price(원가)로 fallback하되
-        symbol을 포함한 경고를 남긴다(조용히 숨기지 않는다).
-
-        Note: 현재 bar 가격이 SSOT이므로 반드시 run 루프 안에서만 호출한다.
-        루프 종료 후 호출하면 advance()가 올린 미래 봉을 보는 lookahead가 된다.
-        """
+        """현재 bar 시점의 자산 가치 (mark-to-market)."""
         equity = self._balance
         for symbol, pos in self._positions.items():
             mark_price = pos["avg_price"]
@@ -533,19 +416,7 @@ class BacktestExecutor:
         return equity
 
     def _calculate_metrics(self, final_equity: float) -> dict:
-        """성과 지표 계산.
-
-        Args:
-            final_equity: 마지막 시뮬레이션 봉의 mark-to-market equity.
-                run()에서 equity_curve[-1] 기반으로 전달한다(재계산하지 않음).
-
-        Note: 무거래(``self._trades == []``)여도 early-return하지 않고
-        ``calculate_metrics`` 를 호출한다. ``calculate_metrics`` 는 빈 거래/평탄
-        equity_curve에서도 div-by-zero/NaN/inf 없이 core 13지표를 산출하며
-        (거래 기반 지표는 0/None, equity 기반 지표는 equity_curve 기준),
-        compat 필드(buy_trades/sell_trades/total_slippage)는 빈 거래에서 자연히
-        0이 된다. 무거래 result에서도 지표 키가 안정적으로 존재하도록 한다.
-        """
+        """성과 지표 계산."""
         from ante.backtest.metrics import calculate_metrics
 
         metrics = calculate_metrics(

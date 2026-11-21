@@ -37,17 +37,7 @@ _VALID_APPROVAL_TYPES: frozenset[str] = frozenset(t.value for t in ApprovalType)
 
 
 def _extract_account_id(type: str, params: dict | None) -> str | None:
-    """account-scoped approval payload 에서 account_id 를 꺼낸다.
-
-    우선순위 (config-first → flat fallback):
-
-    1. ``params["config"]["account_id"]`` (web/CLI 가 BotConfig 형태로
-       래핑해 보내는 신규 형태)
-    2. ``params["account_id"]`` (legacy 평면 형태)
-
-    어느 위치에서든 발견되지 않으면 ``None`` 을 반환하고, 호출자가
-    :func:`ante.account.scoping.require_account_id` 로 거부한다.
-    """
+    """account-scoped approval payload 에서 account_id 를 꺼낸다."""
     if params is None:
         return None
     config = params.get("config")
@@ -834,10 +824,7 @@ class ApprovalService:
         params: dict,
         now: str,
     ) -> list[dict]:
-        """사전 검증(validator)을 실행하고 warn reviews를 반환한다.
-
-        validator가 async이면 await, 동기이면 그대로 호출한다.
-        """
+        """사전 검증(validator)을 실행하고 warn reviews를 반환한다."""
         import inspect
 
         reviews: list[dict] = []
@@ -939,20 +926,7 @@ class ApprovalService:
         *,
         suppress_notification: bool = False,
     ) -> None:
-        """승인된 요청의 executor를 실행하고 결과를 반영한다.
-
-        create()의 전결 실행과 approve()의 자동 실행에서 공유된다.
-
-        - 진입부에서 ``request.type`` 의 enum 멤버십을 다시 검증한다
-          (defense-in-depth). ``approve()`` 와 ``create()`` 에서 이미 검증
-          했지만 ``create()`` 의 auto-approval 경로는 ``approve()`` 가드를
-          거치지 않으므로 여기서 한 번 더 차단한다. invalid → ``ValueError``.
-        - executor 가 등록되지 않은 경우 (enum 은 valid 한데 dispatch
-          대상 없음): status 를 ``EXECUTION_FAILED`` 로 설정하고
-          ``no_executor`` history 를 남긴다. 이로써 silent success 가
-          차단되고 후속 ``ApprovalResolvedEvent`` 의 ``resolution`` 이
-          ``execution_failed`` 로 전달된다.
-        """
+        """승인된 요청의 executor를 실행하고 결과를 반영한다."""
         if request.type not in _VALID_APPROVAL_TYPES:
             msg = f"invalid approval type: {request.type!r}"
             raise ValueError(msg)

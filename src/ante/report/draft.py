@@ -140,11 +140,7 @@ class ReportDraftGenerator:
 
 
 def _standardize_equity_curve(raw: list[dict]) -> list[dict]:
-    """백테스트 equity_curve를 표준 포맷으로 변환.
-
-    입력: [{"timestamp": "...", "equity": float, ...}, ...]
-    출력: [{"date": "YYYY-MM-DD", "value": float}, ...]
-    """
+    """백테스트 equity_curve를 표준 포맷으로 변환."""
     result = []
     for point in raw:
         ts = point.get("timestamp", "")

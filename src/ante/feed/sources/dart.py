@@ -334,15 +334,7 @@ class DARTSource:
         url: str,
         params: dict[str, str],
     ) -> bytes:
-        """고유번호 ZIP 파일을 다운로드한다.
-
-        Returns:
-            ZIP 파일 바이트.
-
-        Raises:
-            DARTError: 다운로드 실패 시.
-            CriticalApiError: JSON 에러 응답 시.
-        """
+        """고유번호 ZIP 파일을 다운로드한다."""
         last_error: Exception | None = None
 
         for attempt in range(self._max_retries):
@@ -417,16 +409,7 @@ class DARTSource:
 
     @staticmethod
     def _parse_corp_code_zip(zip_bytes: bytes) -> dict[str, str]:
-        """ZIP 바이트에서 corp_code -> stock_code 매핑을 추출한다.
-
-        stock_code가 비어있는 비상장사는 필터링한다.
-
-        Args:
-            zip_bytes: corpCode.xml ZIP 파일 바이트.
-
-        Returns:
-            corp_code -> stock_code 매핑.
-        """
+        """ZIP 바이트에서 corp_code -> stock_code 매핑을 추출한다."""
         corp_code_map: dict[str, str] = {}
 
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
@@ -451,22 +434,7 @@ class DARTSource:
         year: str,
         reprt_code: str,
     ) -> list[dict]:
-        """fnlttMultiAcnt API를 호출한다.
-
-        Args:
-            session: aiohttp 세션.
-            corp_codes: 고유번호 목록 (최대 100개).
-            year: 사업연도.
-            reprt_code: 보고서 코드.
-
-        Returns:
-            재무제표 레코드 목록.
-
-        Raises:
-            DailyLimitExceededError: 일일 한도 초과 에러 코드.
-            CriticalApiError: 인증키 에러 코드.
-            DARTError: 재시도 소진 후 최종 실패.
-        """
+        """fnlttMultiAcnt API를 호출한다."""
         url = f"{self._base_url}/fnlttMultiAcnt.json"
         params = {
             "crtfc_key": self._api_key,
@@ -574,14 +542,7 @@ class DARTSource:
 
     @staticmethod
     def _extract_list(data: dict) -> list[dict]:
-        """DART 응답에서 list 배열을 추출한다.
-
-        Args:
-            data: JSON 응답 딕셔너리.
-
-        Returns:
-            재무제표 레코드 목록.
-        """
+        """DART 응답에서 list 배열을 추출한다."""
         items = data.get("list", [])
         if isinstance(items, dict):
             items = [items]
@@ -589,14 +550,5 @@ class DARTSource:
 
     @staticmethod
     def _backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
-        """Exponential Backoff + Full Jitter 대기 시간을 계산한다.
-
-        Args:
-            attempt: 현재 시도 인덱스 (0-based).
-            base: 기본 대기 시간 (초).
-            cap: 최대 대기 시간 (초).
-
-        Returns:
-            대기 시간 (초).
-        """
+        """Exponential Backoff + Full Jitter 대기 시간을 계산한다."""
         return random.uniform(0, min(cap, base * (2**attempt)))

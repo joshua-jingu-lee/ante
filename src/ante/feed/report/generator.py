@@ -134,11 +134,7 @@ class ReportGenerator:
         return files[:limit]
 
     def _started_at_key(self, path: Path) -> datetime:
-        """정렬용 ``started_at`` datetime(UTC aware)을 반환한다.
-
-        읽기/파싱 실패 또는 ``started_at`` 누락 시 ``_MIN_STARTED_AT``을
-        반환하여 해당 리포트를 후순위로 밀고, 예외는 삼키되 debug 로그로 남긴다.
-        """
+        """정렬용 ``started_at`` datetime(UTC aware)을 반환한다."""
         try:
             raw = json.loads(path.read_text(encoding="utf-8"))
             started_at = raw.get("started_at") if isinstance(raw, dict) else None

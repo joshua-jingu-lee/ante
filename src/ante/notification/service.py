@@ -125,13 +125,7 @@ class NotificationService:
         return f"{level}:{msg_hash}"
 
     def _check_dedup(self, level: NotificationLevel, message: str) -> str | object:
-        """중복 여부 확인.
-
-        Returns:
-            _SUPPRESSED: 억제 (발송 안 함)
-            "": 발송 허용 (부기 없음)
-            "(N건 억제됨)": 발송 허용 + 이전 억제 건수 부기
-        """
+        """중복 여부 확인."""
         import time as time_mod
 
         if level == NotificationLevel.CRITICAL:
@@ -228,10 +222,7 @@ class NotificationService:
             return False
 
     async def _on_notification(self, event: object) -> None:
-        """NotificationEvent 단일 핸들러.
-
-        buttons 유무에 따라 send_with_buttons / send_rich 분기.
-        """
+        """NotificationEvent 단일 핸들러."""
         from ante.eventbus.events import NotificationEvent
 
         if not isinstance(event, NotificationEvent):

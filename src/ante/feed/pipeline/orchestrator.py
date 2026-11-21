@@ -166,10 +166,7 @@ class FeedOrchestrator:
 
     @staticmethod
     def _is_blocked_day(config: dict[str, Any], target_date: str) -> bool:
-        """``blocked_days`` 가드 — target_date의 요일 기반.
-
-        해당 요일이면 ``True`` (그 과거 날짜는 데이터가 없어 skip 대상).
-        """
+        """``blocked_days`` 가드 — target_date의 요일 기반."""
         guard = config.get("guard", {})
         blocked_days = guard.get("blocked_days", [])
         if not blocked_days:
@@ -182,12 +179,7 @@ class FeedOrchestrator:
 
     @staticmethod
     def _is_trading_paused(config: dict[str, Any]) -> bool:
-        """``pause_during_trading`` + ``blocked_hours`` 가드 — 현재 시각 기반.
-
-        현재 KST 시각이 거래시간 window 안에 있으면 ``True`` (대기 대상).
-        midnight-spanning window(예: "23:00-02:00")는 현 문자열 비교가
-        다루지 못한다(pre-existing known-limitation, 본 이슈 범위 밖).
-        """
+        """``pause_during_trading`` + ``blocked_hours`` 가드 — 현재 시각 기반."""
         guard = config.get("guard", {})
         pause_during_trading = guard.get("pause_during_trading", False)
         blocked_hours = guard.get("blocked_hours", [])
@@ -209,35 +201,14 @@ class FeedOrchestrator:
 
     @classmethod
     def _is_blocked(cls, config: dict[str, Any], target_date: str) -> bool:
-        """방어 가드 조건을 확인한다(두 축의 합성).
-
-        daily 모드 등 "차단 시 skip(다음 run 재시도)" 의미가 필요한 호출자가
-        사용한다. 동작은 분리 이전과 동일하다(behavior-preserving).
-        """
+        """방어 가드 조건을 확인한다(두 축의 합성)."""
         return cls._is_blocked_day(config, target_date) or cls._is_trading_paused(
             config
         )
 
     @staticmethod
     def _acquire_lock(feed_dir: Path) -> bool:
-        """Lock 파일을 원자적으로 생성하여 동시 실행을 방지한다.
-
-        ``os.O_CREAT | os.O_EXCL`` 로 lock 파일을 생성하므로
-        ``exists()`` 확인 후 ``write_text()`` 하던 비원자 경로(check-then-write)
-        에서 동시 시작 시 둘 다 획득하던 race를 제거한다.
-        ``FileExistsError`` 일 때만 기존 lock의 liveness 를 검사한다.
-
-        liveness 분류:
-          - ``ProcessLookupError`` → 프로세스 없음(stale) → 제거 후 재시도
-          - ``PermissionError`` → 프로세스 존재(signal 권한 없음) → **alive**,
-            차단(return False). stale 제거 except 에 묶으면
-            살아있는 프로세스의 lock 을 삭제하고 획득하는 오판이 된다.
-          - PID 파싱/읽기 실패(``ValueError``/``OSError``) → malformed=stale →
-            제거 후 재시도
-
-        stale 제거 후 다른 프로세스가 그 사이 lock 을 다시 잡는 race 에 대비해
-        bounded(3회) 재시도하고, 실패 시 안전하게 ``False`` 를 반환한다.
-        """
+        """Lock 파일을 원자적으로 생성하여 동시 실행을 방지한다."""
         lock_path = feed_dir / LOCK_FILE
         feed_dir.mkdir(parents=True, exist_ok=True)
 

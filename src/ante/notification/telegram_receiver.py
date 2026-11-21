@@ -411,12 +411,7 @@ class TelegramCommandReceiver:
         return f"\U0001f916 봇 목록 ({running}/{total} 실행 중)\n" + "\n".join(lines)
 
     def _cmd_balance(self, args: list[str]) -> str:
-        """자금 현황 — 전 계좌 요약.
-
-        SSOT: ``docs/specs/notification/notification.md`` 지원 명령 표.
-        ``TreasuryManager.list_all()`` (sync) 으로 등록된 모든 계좌의 잔고를
-        계좌별 섹션으로 렌더링한다.
-        """
+        """자금 현황 — 전 계좌 요약."""
         if not self._treasury_manager:
             return "TreasuryManager가 연결되지 않았습니다."
 
@@ -435,10 +430,7 @@ class TelegramCommandReceiver:
 
     @staticmethod
     def _render_account_balance(summary: dict[str, Any]) -> str:
-        """단일 계좌 자금 현황 본문 렌더링 (타이틀 제외).
-
-        예수금/매수가능/Ante 관리 종목(조건부)/봇 할당/미할당 포맷.
-        """
+        """단일 계좌 자금 현황 본문 렌더링 (타이틀 제외)."""
         balance = summary.get("account_balance", 0)
         purchasable = summary.get("purchasable_amount", 0)
         ante_purchase = summary.get("ante_purchase_amount", 0)
@@ -557,14 +549,7 @@ class TelegramCommandReceiver:
         return "\n".join(lines)
 
     async def _format_held_symbols(self, bot: Any, symbols: list[str]) -> str:
-        """보유종목 표기 라인을 구성한다.
-
-        ``instrument_service`` 미주입 시 기존 ``', '.join(symbols)`` 를 유지한다.
-        주입 시 ``format_label(symbol, exchange, markdown=False)`` 로 종목명을
-        병기한다. exchange 해석(``bot.config.account_id`` → ``account_service.get``)
-        은 try/except 로 감싸 계좌 조회 실패가 stop 성공 후 reply 실패로 번지지
-        않게 하며, 실패/미주입 시 기본 ``"KRX"`` 로 폴백한다.
-        """
+        """보유종목 표기 라인을 구성한다."""
         if self._instrument_service is None:
             return ", ".join(symbols)
 

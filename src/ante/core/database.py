@@ -58,46 +58,13 @@ class Database:
 
     @property
     def _in_transaction(self) -> bool:
-        """현재 호출 태스크가 트랜잭션 owner 인지(같은 태스크 합류 판정).
-
-        ``_txn_owner`` 기반으로 단순화한다(외부 production 참조 없음). 트랜잭션은
-        소유 태스크 한정으로만 합류하므로, **현재 태스크가 owner 일 때만** True.
-        owner 가 아닌 태스크에서 보면 트랜잭션이 진행 중이어도 False 다(독립
-        자동커밋 경로). 회귀 테스트(``test_transaction_rollback_failure_
-        preserves_original_exception``)가 ``finally`` 해제를 직접 관측한다.
-        """
+        """현재 호출 태스크가 트랜잭션 owner 인지(같은 태스크 합류 판정)."""
         owner = self._txn_owner
         return owner is not None and owner is asyncio.current_task()
 
     @staticmethod
     async def _drain_failed_conn(conn: aiosqlite.Connection) -> None:
-        """실패한 aiosqlite 연결의 background worker thread를 결정적으로 정리한다.
-
-        근본 배경: ``await aiosqlite.connect(...)`` 의 ``__await__`` 는
-        먼저 worker thread를 ``start()`` 한 뒤 실제 ``sqlite3.connect`` 를 큐에
-        넣는다. 파일을 열 수 없으면(예: ``unable to open database file``)
-        aiosqlite 의 ``_connect`` 가 내부적으로 ``stop()`` 을 호출해 종료
-        sentinel을 큐에 넣지만, 그 **future를 폐기**하고 예외를 재전파한다.
-        따라서 worker thread는 (스스로 곧 종료하긴 하나) 호출자 쪽에서 종료를
-        **동기화할 수단이 없다**. 이 상태로 ``asyncio.run`` 이 이벤트 루프를
-        먼저 닫으면, worker thread가 닫힌 루프에 ``call_soon_threadsafe`` 를
-        시도해 stderr에 ``RuntimeError: Event loop is closed`` traceback이
-        남는다(``--format json`` stderr 청결 계약 위반).
-
-        정리 전략:
-
-        1. ``conn.close()`` — 연결이 실제로 열렸던 경우(PRAGMA 단계 실패 등)
-           내부 종료 future를 await 해 worker를 비운다. 연결이 안 열렸으면
-           (``_connection is None``) no-op으로 빠르게 반환한다.
-        2. 그래도 thread가 살아 있으면(=connect 자체 실패로 future가 폐기된
-           경우), 그 thread를 이벤트 루프 밖(executor)에서 ``join`` 해 루프
-           teardown **이전**에 worker가 확실히 종료하도록 동기화한다.
-
-        ``_thread`` 접근은 aiosqlite 내부 구현에 의존하지만, 모두 ``getattr``
-        방어로 감싸 향후 구현이 바뀌어도 graceful degrade(예외 없이 best-effort)
-        하도록 한다. 어떤 단계의 예외든 swallow하여 호출자에게는 원본 connect
-        예외만 surface한다.
-        """
+        """실패한 aiosqlite 연결의 background worker thread를 결정적으로 정리한다."""
         try:
             await conn.close()
         except Exception:
@@ -114,18 +81,7 @@ class Database:
             logger.debug("joining aiosqlite worker thread raised", exc_info=True)
 
     async def _init_conn(self) -> aiosqlite.Connection:
-        """공통 PRAGMA 설정으로 연결 초기화.
-
-        ``aiosqlite.connect`` 의 ``await`` 또는 이후 PRAGMA 단계가 실패하면,
-        이미 ``start()`` 된 worker thread가 leak된다(``connect()`` 가
-        ``self._writer``/``self._reader`` 에 할당하기 **전**에 raise되므로
-        ``Database.close()`` 로도 회수할 수 없다). 이 경우 :meth:`_drain_failed_conn`
-        으로 worker thread를 결정적으로 정리한 뒤 원본 예외를 재전파한다.
-
-        ``aiosqlite.connect(...)`` 는 ``await`` 전에 ``Connection`` 객체를
-        반환하므로, ``await`` 자체가 실패하더라도 그 객체 핸들을 잡아 thread를
-        정리할 수 있도록 ``await`` 를 객체 생성과 분리한다.
-        """
+        """공통 PRAGMA 설정으로 연결 초기화."""
         conn = aiosqlite.connect(self._db_path)
         try:
             await conn
@@ -141,39 +97,13 @@ class Database:
         return conn
 
     def _ro_uri(self, *, immutable: bool) -> str:
-        """read-only SQLite URI 를 생성한다.
-
-        절대경로를 ``urllib.request.pathname2url`` 로 escape 해 공백/특수문자/
-        Windows drive 문자를 안전하게 처리한다(f-string 직접 보간 금지). 본
-        URI 는 ``aiosqlite.connect(..., uri=True)`` 로만 열어야 한다 — ``uri``
-        플래그가 없으면 ``mode=ro``/``immutable=1`` 쿼리스트링이 리터럴 파일명의
-        일부로 취급된다.
-
-        ``immutable=1`` 은 read-only artifact 전용이다(live 동시쓰기 DB 비대상).
-        WAL DB 를 실제 read-only 파일시스템에서 ``mode=ro`` 만으로 열면 SQLite 가
-        ``-wal``/``-shm`` 를 생성/쓰기하려다 실패하므로, immutable fallback 으로
-        DB 파일을 변경 불가 스냅샷으로 간주해 sidecar 없이 read 한다.
-        """
+        """read-only SQLite URI 를 생성한다."""
         url = urllib.request.pathname2url(self._db_path)
         query = "mode=ro&immutable=1" if immutable else "mode=ro"
         return f"file:{url}?{query}"
 
     async def _init_ro_conn(self) -> aiosqlite.Connection:
-        """read-only(``mode=ro``) 연결을 초기화한다(쓰기 PRAGMA skip).
-
-        ``mode=ro`` 로 연결한 직후 ``PRAGMA schema_version`` probe read 를
-        수행한다. WAL artifact/권한 계열 ``sqlite3.OperationalError`` 로 probe 가
-        실패하면(:func:`_is_ro_fallback_error`) ``immutable=1`` 로 재연결한다.
-        그 외(예: ``no such table`` — query 시점 발생, ``malformed`` 등)는
-        재전파한다.
-
-        쓰기 PRAGMA(``journal_mode=WAL``/``synchronous=NORMAL``)는 read-only 파일
-        시스템에서 실패하므로 발화하지 않고, ``foreign_keys``/``busy_timeout``/
-        ``temp_store``/``row_factory`` 만 적용한다.
-
-        연결 실패 시 :meth:`_init_conn` 과 동일하게 :meth:`_drain_failed_conn`
-        으로 worker thread 를 결정적으로 정리한다.
-        """
+        """read-only(``mode=ro``) 연결을 초기화한다(쓰기 PRAGMA skip)."""
         conn = await self._open_ro_conn(immutable=False)
         try:
             await self._probe_ro_conn(conn)
@@ -289,16 +219,7 @@ class Database:
 
     @staticmethod
     async def _best_effort_rollback(conn: aiosqlite.Connection) -> None:
-        """non-owner 자동커밋 경로의 cleanup ROLLBACK(best-effort).
-
-        cancellation-safety invariant: 이 메서드는 ``except BaseException`` 진입
-        **직후** suspension 없이 곧바로 ``await conn.execute("ROLLBACK")`` 에
-        도달해야 한다. asyncio cancellation 은 suspension point 에서만 전달되고,
-        aiosqlite ``Connection.execute(...)`` 는 첫 suspension(``await future``)
-        **이전 동기 구간에서 SQL 을 worker FIFO 에 ``put_nowait``** 하므로, await
-        문이 실행을 시작하면 ROLLBACK 은 반드시 enqueue 된다(취소는 결과 대기만
-        abandon). ROLLBACK 자체 실패는 swallow 한다 — 원본 예외 보존이 우선.
-        """
+        """non-owner 자동커밋 경로의 cleanup ROLLBACK(best-effort)."""
         try:
             await conn.execute("ROLLBACK")
         except BaseException:
