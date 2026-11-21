@@ -9,7 +9,7 @@
 ### 의존성 흐름
 
 ```
-ante.feed.cli ──→ config.py (FeedConfig)
+ante feed CLI ──→ config.py (FeedConfig)
   │                  │
   ├──────────────→ injector.py (FeedInjector)
   │
@@ -35,7 +35,7 @@ sources/   transform/   ante.data   pipeline/    report/
 | 모듈 | 역할 |
 |------|------|
 | `config.py` | `FeedConfig` — 피드 디렉토리 초기화, API 키 관리(set/list/check), config.toml 생성 |
-| `cli.py` | click 서브커맨드 정의 (Ante CLI에 `ante feed`로 등록). feed_init, feed_status, feed_inject, feed_config(set/list/check), feed_run(backfill/daily), feed_start |
+| `ante.cli.commands.feed` | click 서브커맨드 정의 (Ante CLI에 `ante feed`로 등록. 파일은 `src/ante/cli/commands/feed.py`). feed_init, feed_status, feed_inject, feed_config(set/list/check), feed_run(backfill/daily), feed_start |
 | `cli_output.py` | CLI 출력 포맷팅 — backfill/daily 수집 결과를 text/json으로 정형화 |
 | `cli_scheduler.py` | `ante feed start` 상주 스케줄러 — daily_at/backfill_at 시각에 수집 자동 실행, SIGTERM 안전 종료 |
 | `injector.py` | `FeedInjector` — CSV 파일/DataFrame → Normalizer → validate → ParquetStore.write() |

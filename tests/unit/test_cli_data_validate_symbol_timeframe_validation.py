@@ -66,7 +66,7 @@ class TestDataValidateTimeframeValidation:
     """data validate --timeframe canonical 검증 (CLI 경계 단일 지점)."""
 
     def test_invalid_timeframe_text_mode_exit1_message_only(self):
-        """비-canonical timeframe: text 모드 exit 1 + 메시지만(code 미출력)."""
+        """비-canonical timeframe: text 모드 exit 1 + ``Error: <code>: <message>``."""
         runner = _make_runner()
 
         result = runner.invoke(
@@ -81,8 +81,7 @@ class TestDataValidateTimeframeValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
         assert "oracle-invalid-timeframe" in result.output
-        # text 모드: OutputFormatter.error는 code를 출력하지 않는다.
-        assert "DATA_VALIDATE_INVALID_TIMEFRAME" not in result.output
+        assert "Error: DATA_VALIDATE_INVALID_TIMEFRAME: " in result.output
 
     def test_invalid_timeframe_json_mode_exit1_with_code(self):
         """비-canonical timeframe: --format json exit 1 + 구조화 payload."""
@@ -144,7 +143,7 @@ class TestDataValidateSymbolValidation:
     """data validate --symbol KRX shape 검증."""
 
     def test_krx_non_six_digit_symbol_text_mode_exit1(self):
-        """비-6자리 symbol: text 모드 exit 1 + 메시지만(code 미출력)."""
+        """비-6자리 symbol: text 모드 exit 1 + ``Error: <code>: <message>``."""
         runner = _make_runner()
 
         result = runner.invoke(
@@ -154,7 +153,7 @@ class TestDataValidateSymbolValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 종목 코드" in result.output
         assert "ABCDEF" in result.output
-        assert "DATA_VALIDATE_INVALID_SYMBOL" not in result.output
+        assert "Error: DATA_VALIDATE_INVALID_SYMBOL: " in result.output
 
     def test_krx_non_six_digit_symbol_json_mode_with_code(self):
         """비-6자리 symbol: JSON exit 1 + 구조화 code."""

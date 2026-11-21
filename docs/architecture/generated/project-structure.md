@@ -177,7 +177,6 @@ src/ante/
 │   ├── __init__.py
 │   └── datasets.py
 ├── feed/                             # DataFeed — 외부 데이터 수집 파이프라인
-│   ├── cli.py                        # ante feed — DataFeed CLI 커맨드 (init/status/inject/config)
 │   ├── config.py                     # FeedConfig — DataFeed 설정 관리 (API 키, 경로 등)
 │   ├── injector.py                   # FeedInjector — CSV 파일에서 데이터 수동 주입
 │   ├── models/
@@ -259,7 +258,8 @@ src/ante/
 │   │   ├── __init__.py
 │   │   ├── account.py
 │   │   ├── ipc_helpers.py
-│   │   └── update.py
+│   │   ├── update.py
+│   │   └── feed.py                   # ante feed — DataFeed CLI 커맨드 (init/status/inject/config)
 │   ├── __init__.py
 │   ├── cold_path.py
 │   ├── _validators.py
@@ -443,7 +443,9 @@ tests/
 │   │   ├── test_data_path_helper.py
 │   │   ├── test_db_encryption_key_chokepoint.py
 │   │   ├── test_single_error_exit.py
-│   │   └── test_trade_report_error_exits.py
+│   │   ├── test_trade_report_error_exits.py
+│   │   ├── test_backtest_data_instrument_error_exits.py
+│   │   └── test_feed_command_relocation.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py

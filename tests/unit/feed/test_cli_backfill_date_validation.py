@@ -116,7 +116,7 @@ class TestBackfillSinceValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """JSON 모드에서 invalid --since는 status=error JSON, exit 1, traceback 없음."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             # orchestrator 자체는 호출되어선 안 된다 — CLI 단계에서 차단
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
@@ -153,7 +153,7 @@ class TestBackfillSinceValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """text 모드에서 invalid --since는 stderr Error, exit 1, traceback 없음."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -184,7 +184,7 @@ class TestBackfillSinceValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """정상 ISO date(--since 2026-01-01)는 orchestrator.run_backfill로 전달된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -213,7 +213,7 @@ class TestBackfillSinceValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """--since 미지정 시 기존 동작 유지 (검증 분기 우회)."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -248,7 +248,7 @@ class TestBackfillSinceValidation:
 
         date.fromisoformat()만 쓰던 이전 구현이라면 통과했을 입력을 잠근다.
         """
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -281,7 +281,7 @@ class TestBackfillSinceValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """형태는 맞지만 캘린더상 invalid(2026-13-01) --since는 거부."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -316,7 +316,7 @@ class TestDailyDateValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """JSON 모드에서 invalid --date는 status=error JSON, exit 1, traceback 없음."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -349,7 +349,7 @@ class TestDailyDateValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """text 모드에서 invalid --date는 stderr Error, exit 1, traceback 없음."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -380,7 +380,7 @@ class TestDailyDateValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """정상 ISO date(--date 2025-01-01)는 검증 통과해 orchestrator로 전달된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -418,7 +418,7 @@ class TestDailyDateValidation:
         date.fromisoformat()만 쓰던 이전 구현이라면 `2026-W19-1` 등이
         통과해 원문이 그대로 하위 수집(basDt)으로 전달됐다.
         """
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -451,7 +451,7 @@ class TestDailyDateValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """형태는 맞지만 캘린더상 invalid(2026-13-01) --date는 거부."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -482,7 +482,7 @@ class TestDailyDateValidation:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """--date 미지정 시 기존 동작 유지 (검증 분기 우회)."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY_RESULT)
             mock_build.return_value = mock_orch

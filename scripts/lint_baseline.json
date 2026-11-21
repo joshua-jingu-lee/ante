@@ -93,7 +93,6 @@
       "C901": 1
     },
     "src/ante/cli/commands/instrument.py": {
-      "BLE001": 1,
       "C901": 1
     },
     "src/ante/cli/commands/rule.py": {
@@ -331,6 +330,12 @@
     "src/ante/cli/commands/data.py": {
       "type-arg": 1
     },
+    "src/ante/cli/commands/feed.py": {
+      "no-untyped-call": 3,
+      "no-untyped-def": 2,
+      "type-arg": 5,
+      "unused-ignore": 2
+    },
     "src/ante/cli/commands/init.py": {
       "no-untyped-call": 4,
       "no-untyped-def": 1,
@@ -382,8 +387,7 @@
       "type-arg": 5
     },
     "src/ante/cli/main.py": {
-      "no-any-return": 1,
-      "unused-ignore": 1
+      "no-any-return": 1
     },
     "src/ante/cli/middleware.py": {
       "no-any-return": 1,
@@ -406,12 +410,6 @@
     },
     "src/ante/feed/__init__.py": {
       "no-untyped-def": 1
-    },
-    "src/ante/feed/cli.py": {
-      "no-untyped-call": 3,
-      "no-untyped-def": 2,
-      "type-arg": 5,
-      "unused-ignore": 2
     },
     "src/ante/feed/models/result.py": {
       "type-arg": 3

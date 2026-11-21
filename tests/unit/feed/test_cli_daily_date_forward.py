@@ -86,7 +86,7 @@ def test_cli_forwards_explicit_date_to_orchestrator(
     runner: CliRunner, initialized_data_path: str
 ) -> None:
     """``--date 2024-12-30`` 가 ``run_daily(target_date=...)`` 로 전달된다."""
-    with patch("ante.feed.cli._build_orchestrator") as mock_build:
+    with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
         mock_orch = AsyncMock()
         mock_orch.run_daily = AsyncMock(return_value=_result_for("2024-12-30"))
         mock_build.return_value = mock_orch
@@ -115,7 +115,7 @@ def test_cli_without_date_forwards_none(
     runner: CliRunner, initialized_data_path: str
 ) -> None:
     """``--date`` 미지정 시 ``target_date=None`` 으로 전달된다."""
-    with patch("ante.feed.cli._build_orchestrator") as mock_build:
+    with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
         mock_orch = AsyncMock()
         mock_orch.run_daily = AsyncMock(return_value=_result_for("2026-05-27"))
         mock_build.return_value = mock_orch
