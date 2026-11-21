@@ -1,8 +1,4 @@
-"""체크포인트 저장 및 복원 모듈.
-
-수집 중단/재개를 위한 내부 상태를 JSON으로 원자적으로 기록한다.
-원자성 보장: 임시 파일에 쓴 후 rename (write-then-rename).
-"""
+"""체크포인트 저장 및 복원 모듈."""
 
 from __future__ import annotations
 

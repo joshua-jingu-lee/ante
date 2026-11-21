@@ -1,10 +1,4 @@
-"""수집 리포트 생성 모듈.
-
-CollectionResult를 JSON 파일로 변환하여 .feed/reports/ 에 저장한다.
-파일명 형식: {YYYY-MM-DDTHHMMSS}-{mode}.json (started_at의 초까지 포함, 콜론 제거).
-동일 started_at(같은 초) rerun으로 파일명이 충돌하면 -1, -2 ... suffix를 붙여
-기존 이력을 덮어쓰지 않는다.
-"""
+"""수집 리포트 생성 모듈."""
 
 from __future__ import annotations
 
@@ -75,14 +69,6 @@ class ReportGenerator:
 
         같은 초의 started_at으로 rerun되어 파일명이 이미 존재하면, ``-1``,
         ``-2`` ... 충돌 suffix를 붙여 어떤 기존 이력도 덮어쓰지 않는다(소실 0).
-
-        Args:
-            data_path: 데이터 루트 디렉토리.
-            report: generate()가 반환한 리포트 dict.
-            mode: 수집 모드 ('daily' 또는 'backfill').
-
-        Returns:
-            저장된 리포트 파일 경로.
         """
         started_at = report["started_at"]
         timestamp = started_at[:19].replace(":", "")
@@ -107,20 +93,9 @@ class ReportGenerator:
     def list_reports(self, limit: int = 10) -> list[Path]:
         """최근 리포트 목록을 반환한다.
 
-        각 리포트 JSON의 ``started_at``을 datetime으로 파싱한 값을 기준으로
-        내림차순(최신 우선) 정렬한다. 파일명(``{date}-{mode}.json``)은 같은
-        날짜의 daily/backfill 순서를 사전식으로 오판하므로 정렬 키로 쓰지
-        않는다.
-
         ``started_at`` 누락·파싱 실패·파일 읽기 실패 시 해당 파일은 목록에서
         제외하지 않고 정렬 키를 최소값으로 두어 뒤로 보낸다(전체 실패 방지).
         같은 ``started_at``끼리는 파일명 역순을 보조 키로 두어 안정 정렬한다.
-
-        Args:
-            limit: 최대 반환 개수 (최신 순).
-
-        Returns:
-            리포트 파일 경로 목록 (최신 N개).
         """
         reports_dir = self._feed_dir / REPORTS_DIR
         if not reports_dir.exists():

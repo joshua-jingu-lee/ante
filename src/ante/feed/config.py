@@ -200,15 +200,11 @@ class FeedConfig:
     ) -> list[dict[str, str | bool | None]]:
         """API 키 존재 여부 + 네트워크 유효성을 확인한다.
 
-        존재여부는 :meth:`check_api_keys` 와 동일하게 판정하고, 설정된
-        키에 한해 해당 source의 경량 요청으로 유효성을 검증한다.
-
         각 항목은 ``{key, set, source, valid, detail}`` 형태다.
             * ``valid``  — ``True``(유효) / ``False``(인증 실패) /
               ``None``(검증 불가 또는 미설정 → 검증 생략).
             * ``detail`` — 인증 실패/검증 불가 시의 사유 문자열, 그 외 None.
 
-        미설정 키는 검증을 생략하며 ``valid``/``detail`` 은 None이다.
         네트워크 예외/타임아웃(offline 포함)은 source 단에서 unknown으로
         흡수되어 예외가 전파되지 않는다.
         """

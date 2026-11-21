@@ -1,47 +1,4 @@
-"""IndicatorCalculator — PER/PBR/EPS/BPS/ROE/부채비율 파생 지표 계산.
-
-fundamental 데이터는 cadence가 다른 두 소스로 구성된다:
-
-- data.go.kr(``source == "data_go_kr"``): **일별** ``market_cap`` / ``shares_listed``
-  (DART 재무 컬럼은 null).
-- DART(``source == "dart"``): **분기별** ``net_income`` / ``total_equity`` /
-  ``total_debt`` 등 재무 항목(가격/주식수 컬럼은 null).
-
-`(date, source)` natural key로 두 소스가 **별도 행**으로 보존되므로, 단일 행
-row-wise 계산(예: ``per = market_cap / net_income``)은 한 행에 cross-source
-피연산자가 동시에 존재하지 않아 **모든 지표가 null**이 된다. 이를 해소하기
-위해 source별로 분리한 뒤 **as-of join**으로 결합한다.
-
-semantic:
-    net_income / total_equity / total_debt 는 "일별 date 기준 **가장 최근에
-    보고된 분기 재무 값**"(``join_asof(strategy="backward")``)을 사용한다.
-    TTM(trailing-twelve-months) 합산이나 연간환산은 **하지 않는다**(Non-Goal,
-    후속 정제 이슈). 분모가 0/null이면 해당 지표는 null이다
-    (``_ratio_expr`` 가드 유지). 지표는 가격 기반 지표의 자연 단위인 **일별
-    행**(data.go.kr 행)에 부여하여 write-back한다.
-
-lookahead 제거:
-    as-of join 키를 분기 **period_end(date)** 가 아니라 그 재무가 실제로
-    **공시되어 알 수 있게 된 시점**(availability)로 바꾼다. period_end부터
-    분기 값을 적용하면, 예컨대 Q1(3/31) 재무가 공시(5월 중순)되기 전인 4월
-    거래일에 미래 정보를 쓰게 되어 lookahead bias가 발생한다.
-
-    분기 프레임마다 effective availability 키를 계산한다::
-
-        effective = coalesce(available_date, period_end + statutory_lag)
-
-    - ``available_date``(DART 공시 접수일 rcept_dt)가 있으면 **그대로**
-      쓴다(point-in-time 정확).
-    - 없는 legacy 행은 **자본시장법 법정 제출기한**으로 보수적 fallback한다:
-      분기/반기/3분기 보고서(period_end 월 ∈ {3,6,9})는 기말 후 45일,
-      사업보고서(period_end 월 == 12)는 기말 후 90일.
-    - 일별 거래일 ``date``(data.go.kr, point-in-time 정확)는 변경하지 않는다.
-
-    known-limitation: available_date 없는 legacy 행의 fallback은 "법정기한 내
-    공시" 가정이라 지연제출/정정공시/특수연장은 완전히 보장하지 못한다. 다만
-    fallback은 실제 공시일보다 **늦은(보수적)** 쪽이라 lookahead 측면에서는
-    안전하다(실제보다 며칠 늦게 반영될 뿐 미래 정보를 당겨쓰지 않는다).
-"""
+"""IndicatorCalculator — PER/PBR/EPS/BPS/ROE/부채비율 파생 지표 계산."""
 
 from __future__ import annotations
 
@@ -90,9 +47,6 @@ class IndicatorCalculator:
     - BPS = 자본총계 / 상장주식수
     - ROE = 당기순이익 / 자본총계
     - 부채비율 = 부채총계 / 자본총계
-
-    cadence가 다른 두 소스(data.go.kr 일별 / DART 분기)를 as-of join으로
-    결합하여 일별 행에 지표를 부여한다(자세한 semantic은 모듈 docstring).
     """
 
     def compute(

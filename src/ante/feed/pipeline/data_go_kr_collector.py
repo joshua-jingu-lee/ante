@@ -45,18 +45,6 @@ class DataGoKrCollector:
             - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**
               (= ``store.write`` 반환 합, rows_written). 재수집(dedup)이면 0이며,
               이는 정상이다(과대계상 제거).
-            - ``stored_ok``: **유효 데이터가 store에 성공적으로 반영되었는지**.
-              net_delta와 무관하며 ``bool(symbols)`` (실제 ``store.write`` 가
-              호출된 심볼 존재)에서 유도한다 — 재수집으로 net_delta=0이어도 유효
-              데이터를 정규화·저장 완료했으면 symbols가 비어있지 않아 ``True`` 다
-              (checkpoint 전진 자격). 빈 응답/전 row drop/validation 차단처럼 저장
-              자체를 못한 경우는 조기 ``False`` 반환하고, survivor가 validation을
-              통과했어도 정규화 단계에서 추가 drop돼 ohlcv/fundamental 둘 다
-              no-symbol이면 symbols가 비어 ``False`` 다(저장 0건 → 미전진).
-              store-merge 실패(기존 파일 보존)는 ``store.write`` 호출은 완료했으므로
-              해당 심볼이 symbols에 남아 여기서는 ``True`` 이며, checkpoint 미전진은
-              runner가 store_merge 경고 존재로 별도 가드한다(R1:
-              ``_persist_partition`` 은 merge 실패 시 raise하지 않는다).
         """
         raw_items = await self._source.fetch(target_date)
         if not raw_items:

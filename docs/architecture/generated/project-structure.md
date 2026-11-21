@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-11-20 (KST)
+> 마지막 생성 시점: 2026-11-21 (KST)
 
 ## 최상위 구조
 
@@ -833,8 +833,7 @@ docs/
 ├── references/                       # 외부 참조 문서
 │   └── external-apis/
 │       ├── dart-openapi.md
-│       ├── data-go-kr-stock-price-api.md
-│       └── README.md
+│       └── data-go-kr-stock-price-api.md
 ├── runbooks/                         # 운영 절차서
 │   ├── 00-issue-management.md        # 이슈 등록, 분류, 추적
 │   ├── 01-development-process.md

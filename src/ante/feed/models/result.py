@@ -73,11 +73,7 @@ class CollectionResult:
     """수집 실패 종목 수."""
 
     rows_written: int = 0
-    """**net-new 저장 행 수**.
-
-    store에 실제로 새로 저장된 행 수의 합이다. 입력 len 누적이 아니라 파티션별
-    ``max(0, len(merged) - len(existing))`` delta의 합이므로, 재수집/dedup/
-    지표 in-place overwrite는 0으로 집계된다(과대계상 제거)."""
+    """**net-new 저장 행 수**."""
 
     data_types: list[str] = field(default_factory=list)
     """수집된 데이터 유형 목록 (예: ['ohlcv', 'fundamental'])."""
@@ -86,12 +82,7 @@ class CollectionResult:
     """수집 실패 상세 목록."""
 
     warnings: list[dict] = field(default_factory=list)
-    """데이터 품질 경고 **샘플**.
-
-    실행 전체 누적이 아니라 경고 ``type`` 버킷별로 유계 절단된 샘플이다
-    (다년 backfill이 행 단위 경고를 상한 없이 누적해 메모리를 소진시켰다).
-    **총 건수는 반드시 ``warnings_total`` 로 읽는다** — ``len(warnings)`` 는
-    절단이 발생하면 총계가 아니라 보존 샘플 수이며 축소 보고가 된다."""
+    """데이터 품질 경고 **샘플**."""
 
     warnings_total: int = 0
     """**전수 정확** 경고 총 건수 (절단 무관)."""
