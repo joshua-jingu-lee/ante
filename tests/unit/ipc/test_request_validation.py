@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from ante.core.account_id import InvalidAccountIdError
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import AccountIdPolicy, CommandRegistry, register_all_handlers
 from ante.ipc.requests import IPCRequest
@@ -106,9 +108,7 @@ class _Recorder:
         return {"done": True}
 
 
-def _demo_server(
-    *, account_id_policy: AccountIdPolicy = "none"
-) -> tuple[IPCServer, _Recorder, MagicMock]:
+def _demo_server() -> tuple[IPCServer, _Recorder, MagicMock]:
     handler = _Recorder()
     registry = CommandRegistry()
     registry.register(
@@ -116,7 +116,6 @@ def _demo_server(
         handler,
         is_mutating=True,
         audit_action="demo.run",
-        account_id_policy=account_id_policy,
         request_model=_DemoRequest,
     )
     audit = _audit_logger()
@@ -168,16 +167,146 @@ async def test_invalid_args_are_rejected_without_handler_or_audit(
     assert audit.log.await_count == 0
 
 
+@pytest.mark.parametrize("policy", ["required", "optional_filter"])
+def test_model_with_account_id_policy_is_rejected_at_registration(
+    policy: AccountIdPolicy,
+) -> None:
+    registry = CommandRegistry()
+    with pytest.raises(ValueError) as info:
+        registry.register(
+            "demo.run",
+            _Recorder(),
+            is_mutating=True,
+            account_id_policy=policy,
+            request_model=_DemoRequest,
+        )
+    assert str(info.value) == (
+        f"요청 모델이 있는 명령 'demo.run'에는 account_id_policy '{policy}'를 "
+        "쓸 수 없습니다."
+    )
+    assert registry.get("demo.run") is None
+
+
+def test_model_with_account_id_policy_none_is_registered() -> None:
+    registry = CommandRegistry()
+    registry.register(
+        "demo.run",
+        _Recorder(),
+        is_mutating=True,
+        account_id_policy="none",
+        request_model=_DemoRequest,
+    )
+    spec = registry.get("demo.run")
+    assert spec is not None
+    assert spec.request_model is _DemoRequest
+
+
+def test_policy_without_model_is_registered() -> None:
+    registry = CommandRegistry()
+    registry.register(
+        "demo.scoped", _Recorder(), is_mutating=True, account_id_policy="required"
+    )
+    spec = registry.get("demo.scoped")
+    assert spec is not None
+    assert spec.account_id_policy == "required"
+
+
+def test_all_runtime_handlers_are_still_registered() -> None:
+    registry = CommandRegistry()
+    register_all_handlers(registry)
+    assert len(registry.iter_specs()) == 42
+
+
+def _server_records(
+    caplog: pytest.LogCaptureFixture,
+) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if r.name == "ante.ipc.server"]
+
+
 @pytest.mark.asyncio
-async def test_validation_runs_before_account_id_policy() -> None:
-    server, handler, _audit = _demo_server(account_id_policy="required")
+async def test_validation_failure_logs_one_warning_without_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    server, _handler, _audit = _demo_server()
     response = await server._dispatch(_request("demo.run", {"name": 5}))
+    assert response["error"] == {
+        "code": "VALIDATION_ERROR",
+        "message": "demo.run 인자 검증 실패: name(string_type)",
+    }
+    records = _server_records(caplog)
+    assert len(records) == 1
+    assert records[0].levelname == "WARNING"
+    assert records[0].exc_info is None
+    assert records[0].getMessage() == (
+        "IPC 요청 검증 거부: demo.run 인자 검증 실패: name(string_type)"
+    )
+    assert [r for r in caplog.records if r.levelno >= logging.ERROR] == []
+
+
+@pytest.mark.asyncio
+async def test_other_validation_error_code_still_logs_exception(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    handler = _Recorder()
+    registry = CommandRegistry()
+    registry.register(
+        "demo.scoped", handler, is_mutating=False, account_id_policy="required"
+    )
+    server = IPCServer("/tmp/unused.sock", _services(), registry)
+    server._state = IPCServerState.RUNNING
+    response = await server._dispatch(_request("demo.scoped", {"account_id": ""}))
+    assert response["status"] == "error"
+    assert response["error"]["code"] == "VALIDATION_ERROR"
+    assert handler.calls == []
+    records = _server_records(caplog)
+    assert len(records) == 1
+    assert records[0].levelname == "ERROR"
+    assert records[0].exc_info is not None
+    assert records[0].exc_info[0] is InvalidAccountIdError
+    assert records[0].getMessage() == "IPC 커맨드 실행 오류: demo.scoped"
+
+
+@pytest.mark.parametrize(
+    ("key", "message"),
+    [
+        pytest.param(
+            "a\nb",
+            "demo.run 인자 검증 실패: a\\nb(extra_forbidden)",
+            id="newline",
+        ),
+        pytest.param(
+            "a\x1b[31mb",
+            "demo.run 인자 검증 실패: a\\x1b[31mb(extra_forbidden)",
+            id="esc",
+        ),
+        pytest.param(
+            "계좌", "demo.run 인자 검증 실패: 계좌(extra_forbidden)", id="hangul"
+        ),
+        pytest.param(
+            "a\\b",
+            "demo.run 인자 검증 실패: a\\b(extra_forbidden)",
+            id="backslash",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_unknown_key_name_is_escaped_in_response_and_log(
+    key: str, message: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    server, handler, _audit = _demo_server()
+    response = await server._dispatch(_request("demo.run", {"name": "a", key: 1}))
     assert response == {
         "id": "req-9",
         "status": "error",
-        "error": {
-            "code": "VALIDATION_ERROR",
-            "message": "demo.run 인자 검증 실패: name(string_type)",
-        },
+        "error": {"code": "VALIDATION_ERROR", "message": message},
     }
     assert handler.calls == []
+    records = _server_records(caplog)
+    assert [r.getMessage() for r in records] == [f"IPC 요청 검증 거부: {message}"]
+    line = logging.Formatter("%(levelname)s %(message)s").format(records[0])
+    assert line == f"WARNING IPC 요청 검증 거부: {message}"
+    assert "\n" not in line
+    assert "\x1b" not in line
