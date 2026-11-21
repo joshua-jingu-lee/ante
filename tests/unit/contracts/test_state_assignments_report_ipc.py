@@ -28,7 +28,13 @@
 알려진 한계: ``setattr``, ``dataclasses.replace``, ``tests/`` 안의 ``_state``
 직접 대입(여러 테스트가 픽스처로 쓴다), 테이블 기본값(``DEFAULT 'submitted'``),
 결재 실행기가 넘기는 대상 인자, f-string(``JoinedStr``)으로 만든 SQL은 세지
-않는다.
+않는다. 다음도 세지 않는다.
+
+- ``StrategyReport`` 에 ``status`` 를 위치 인자·``*args`` 로 넘기는 생성
+- ``UPDATE OR <conflict> reports``
+- ``SET`` 안의 서브쿼리와 행 값 대입(``SET (a, status) = …``)
+- ``+`` 로 이어 붙인 SQL
+- ``ipc/server.py`` 밖에서의 ``_state`` 대입과 ``main.py`` 의 ``.status`` 대입
 """
 
 from __future__ import annotations
