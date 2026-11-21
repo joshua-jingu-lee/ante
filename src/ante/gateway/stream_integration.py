@@ -136,12 +136,7 @@ class StreamIntegration:
         logger.info("StreamIntegration 중지")
 
     async def _on_price(self, symbol: str, price: float) -> None:
-        """실시간 시세 수신 콜백.
-
-        KIS WebSocket ──시세수신──> 콜백
-            +-> ResponseCache.set("{account_id}:price:{symbol}", ...)
-            +-> StopOrderManager.on_price_update(symbol, price)
-        """
+        """실시간 시세 수신 콜백."""
         cache_key = f"{self._account_id}:price:{symbol}"
         self._cache.set(cache_key, price, ttl=5)
 
@@ -157,21 +152,7 @@ class StreamIntegration:
                 logger.exception("StopOrderManager 시세 전달 오류: %s", symbol)
 
     async def _on_execution(self, execution: dict[str, Any]) -> None:
-        """실시간 체결 통보 콜백 (빠른 경로).
-
-        캐시 무효화 + ``FillApplier`` 라우팅.
-
-        직접 ``OrderFilledEvent`` 를 발행하지 않는다. 스트림(빠른 경로)과 REST
-        백스톱 폴이 단일 멱등 choke point(``FillApplier``)로 수렴해 같은 체결을
-        몇 번 관측하든 포지션이 정확히 한 번 반영되게 한다. 스트림 payload 의
-        ``order_id`` 는 broker 주문번호(odno)이며, ``quantity`` 는 per-execution
-        증분이므로 ``apply_stream_increment`` 로 누적 환산해 적용한다.
-
-        ``account_id``는 broker payload 우선, 없으면 lifecycle에 묶인
-        ``self._account_id``로 fallback한다. 둘 다 비어있으면 라우팅을 skip하고
-        WARNING만 남긴다 (캐시 무효화는 best-effort 수행). 백스톱 폴이 체결을
-        멱등 복구하므로 fast-path skip 은 정합성을 깨지 않는다.
-        """
+        """실시간 체결 통보 콜백 (빠른 경로)."""
         from ante.broker.fill_scheduler import business_date_kst
 
         symbol = execution.get("symbol", "")

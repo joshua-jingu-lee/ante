@@ -447,25 +447,7 @@ class StopOrderManager:
         )
 
     async def _expire_order(self, order: StopOrder, reason: str) -> None:
-        """스탑 주문 만료 처리(shield 보장).
-
-        P2-A: terminal(``StopOrderExpiredEvent``) 발행을
-        ``asyncio.shield`` 로 감싼 별도 task(``_do_expire_order``)에 위임한다.
-        shutdown 의 ``stop_session_expiry_task`` cancel 이 sweep
-        (``check_session_expiry``)의 ``await`` 지점에 닿아도, shield 된 inner
-        task 는 CancelledError 로 중단되지 않고 background 에서 terminal 을
-        완주한다. 만약 shield 없이 ``order.expired=True`` 직후 publish 도중
-        cancel 되면, 그 주문은 이미 ``active_orders`` 에서 빠져(expired) 이후
-        ``manager.stop()`` 의 manager_stopped sweep 도 그것을 못 봐 terminal
-        이 영구 유실된다(봇/SignalChannel 의 stop_expired 통보 미수신).
-
-        ``_do_expire_order`` 가 ``order.expired=True`` 를 먼저 set 하므로
-        half-expired order 는 ``manager.stop()`` 의 ``active_orders`` 에서
-        제외되어 manager_stopped 가 재발행되지 않는다 + shield 로 session_ended
-        는 정확히 1회 → terminal 정확히 1회(이중 발행 없음).
-
-        signal_channel.py 의 shield+inflight 보관/await 패턴을 미러한다.
-        """
+        """스탑 주문 만료 처리(shield 보장)."""
         inner = asyncio.ensure_future(self._do_expire_order(order, reason))
         self._inflight_expires.add(inner)
         try:

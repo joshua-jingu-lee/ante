@@ -437,13 +437,7 @@ class PerformanceTracker:
 
     @classmethod
     def _row_to_record_safe(cls, row: dict, *, context: str) -> TradeRecord | None:
-        """DB row → TradeRecord, legacy invalid account_id row는 skip.
-
-        legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
-        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션이 완료되기 전에도 성과 산출
-        경로가 실패하지 않도록 하기 위함이다.
-        """
+        """DB row → TradeRecord, legacy invalid account_id row는 skip."""
         try:
             return cls._row_to_record(row)
         except InvalidAccountIdError as e:

@@ -104,11 +104,7 @@ class CommandRegistry:
 
 
 def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
-    """Kill Switch IPC 응답 envelope.
-
-    ``status``, ``accounts_changed``, ``changed_at``, ``accounts[]`` shape를
-    사용한다. ``changed_at``은 ISO 8601 UTC ``Z`` suffix를 사용한다.
-    """
+    """Kill Switch IPC 응답 envelope."""
     from datetime import UTC, datetime
 
     from ante.core.time import format_utc
@@ -124,13 +120,7 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
 async def _handle_system_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """전역 거래 정지(kill switch) IPC handler.
-
-    audit.md:115: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="system.halt"`` 기반으로 자동 발화한다. handler
-    는 ``_audit_detail`` reserved key 로 ``resource="system:kill_switch"`` 를
-    전달하며, wrapper 가 ``pop`` 으로 public envelope 진입 전에 strip 한다.
-    """
+    """전역 거래 정지(kill switch) IPC handler."""
     reason = args.get("reason", "IPC halt")
     accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
     payload = _kill_switch_payload("halted", accounts)
@@ -145,13 +135,7 @@ async def _handle_system_halt(
 async def _handle_system_clear_halt(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """전역 거래 정지 해제 IPC handler.
-
-    audit.md:116: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="system.clear_halt"`` 기반으로 자동 발화한다.
-    handler 는 ``_audit_detail`` reserved key 로
-    ``resource="system:kill_switch"`` 를 전달한다.
-    """
+    """전역 거래 정지 해제 IPC handler."""
     accounts = await svc.account.activate_all(activated_by=actor)
     payload = _kill_switch_payload("halt_cleared", accounts)
     payload["_audit_detail"] = {
@@ -165,15 +149,7 @@ async def _handle_system_clear_halt(
 async def _handle_account_suspend(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """계좌 정지 IPC handler.
-
-    account_id 검증은 ``_dispatch`` wrapper 가
-    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
-    audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.suspend"``
-    기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
-    ``resource`` / ``detail`` 만 전달하고, wrapper 가 ``pop`` 으로 public
-    envelope 진입 전에 strip 한다.
-    """
+    """계좌 정지 IPC handler."""
     account_id = args["account_id"]
     reason = args.get("reason", "IPC suspend")
     await svc.account.suspend(account_id, reason=reason, suspended_by=actor)
@@ -191,15 +167,7 @@ async def _handle_account_suspend(
 async def _handle_account_activate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """계좌 활성화 IPC handler.
-
-    account_id 검증은 ``_dispatch`` wrapper 가
-    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행하며,
-    audit 호출은 wrapper 가 ``CommandSpec.audit_action="account.activate"``
-    기반으로 자동 발화한다. handler 는 ``_audit_detail`` reserved key 로
-    ``resource`` 만 전달하고, wrapper 가 ``pop`` 으로 public envelope 진입
-    전에 strip 한다.
-    """
+    """계좌 활성화 IPC handler."""
     account_id = args["account_id"]
     await svc.account.activate(account_id, activated_by=actor)
     return {
@@ -258,14 +226,7 @@ async def _handle_bot_create(
 async def _handle_bot_remove(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 제거 IPC handler.
-
-    audit.md:120: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="bot.delete"`` 기반으로 자동 발화한다. command
-    이름은 ``bot.remove`` 이지만 audit action 은 audit.md SSOT 에 따라
-    ``bot.delete`` 다. handler 는 ``_audit_detail`` reserved key 로
-    ``resource="bot:{bot_id}"`` 를 전달한다.
-    """
+    """봇 제거 IPC handler."""
     bot_id = args["bot_id"]
     await svc.bot_manager.remove_bot(bot_id)
     return {
@@ -282,28 +243,7 @@ async def _handle_bot_remove(
 async def _handle_bot_signal_key_rotate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 시그널 키 재발급 IPC handler.
-
-    ``bot signal-key --rotate`` 의 runtime IPC 경로
-    (``bot.signal_key.rotate``). CLI 는
-    본 handler 로만 라우팅한다 —
-    runtime 경계 / audit / live 상태 정합성을 보존한다.
-
-    ``BotManager.rotate_signal_key`` 는 ``_get_bot`` 존재 확인
-    (``BotNotFoundError``) → ``accepts_external_signals`` 게이트
-    (``BotNotAcceptingSignals``) → ``SignalKeyManager.rotate`` 위임의 동일
-    invariant 를 적용한다. 두 typed exception 은 그대로 propagate 하여
-    ``server.py`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope 이
-    ``BOT_NOT_FOUND`` / ``BOT_NOT_ACCEPTING_SIGNALS`` stable code 로
-    변환한다. 전략 미발견 등 그 외 ``BotError`` 는 ``EXECUTION_ERROR``
-    fallback (서버 경로 SSOT).
-
-    audit.md:121: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action = "bot.signal_key.rotate"`` 기반으로 자동
-    발화하며, handler 는 ``_audit_detail`` reserved key 로
-    ``resource = "bot:{bot_id}"`` 만 전달한다 (wrapper 가 ``pop`` 으로 public
-    envelope 진입 전에 strip).
-    """
+    """봇 시그널 키 재발급 IPC handler."""
     bot_id = args["bot_id"]
     new_key = await svc.bot_manager.rotate_signal_key(bot_id)
     return {
@@ -321,19 +261,7 @@ async def _handle_bot_signal_key_rotate(
 async def _handle_bot_start(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 시작 IPC handler.
-
-    bot 부재 / app_key 부재 / BotError를 stable coded exception으로
-    raise 한다. IPC
-    ``server.py:323`` 의 ``getattr(e, "code", "EXECUTION_ERROR")`` envelope
-    이 ``BOT_NOT_FOUND`` / ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED`` /
-    ``BOT_STATE_CONFLICT`` 로 변환한다.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "bot.start"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
-    reserved key 로 ``resource`` 만 전달하며, wrapper 가 ``pop`` 으로
-    public envelope 진입 전에 strip 한다.
-    """
+    """봇 시작 IPC handler."""
     from ante.bot.exceptions import (
         BotAccountCredentialsNotConfigured,
         BotError,
@@ -370,15 +298,7 @@ async def _handle_bot_start(
 async def _handle_bot_stop(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 중지 IPC handler.
-
-    bot 부재 / BotError를 stable coded exception으로 매핑한다.
-    ``app_key`` preflight 는 stop 경로에 없다.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "bot.stop"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
-    reserved key 로 ``resource`` 만 전달한다.
-    """
+    """봇 중지 IPC handler."""
     from ante.bot.exceptions import (
         BotError,
         BotNotFoundError,
@@ -408,19 +328,7 @@ async def _handle_bot_stop(
 async def _handle_bot_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 상태 조회 IPC handler.
-
-    read-only handler. ``enrich_bot_info`` 로 strategy/budget/
-    positions 보강 결과를 ``{"bot": info}`` envelope 으로 반환한다.
-
-    의존성은 모두 ``getattr`` safe-access 로 optional 처리한다:
-    - ``strategy_registry`` 부재 시 strategy 키 부재.
-    - ``treasury_manager`` 부재(또는 해당 계좌 Treasury 미등록) 시 budget 키 부재.
-    - ``trade_service`` 부재(legacy ServiceRegistry) 시 positions 키 부재(회귀
-      lock — cold-path 호환).
-
-    read-only 분류이므로 audit logger 호출 없음.
-    """
+    """봇 상태 조회 IPC handler."""
     from ante.bot.exceptions import BotNotFoundError
     from ante.bot.info import enrich_bot_info
 
@@ -460,20 +368,7 @@ _BOT_LIST_KEYS = (
 async def _handle_bot_list(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 목록 조회 IPC handler (read-only).
-
-    ``bot status`` (``_handle_bot_status``) 미러 — read-only 분류이므로 audit
-    logger 호출 없음. ``svc.bot_manager.list_bots()`` 가 반환하는 live
-    ``Bot.get_info()`` dict 들을 CLI ``bot list`` 의 6-key projection
-    (``bot_id``/``name``/``strategy_id``/``account_id``/``status``/
-    ``created_at``) 으로 좁혀 snapshot fallback 의 ``SELECT ... FROM bots``
-    행과 동일 shape 을 surface 한다.
-
-    ``--account`` 필터는 CLI ingress 에서 검증된 뒤 ``account_id`` arg 로
-    전달된다. ``None`` 이면 전체, 지정되면 해당 계좌 봇만 반환한다 (CLI SQL
-    filter 와 동형). live ``get_info()`` 에 ``created_at`` 이 없으므로 None
-    기본값으로 채운다 (snapshot 행과 key parity).
-    """
+    """봇 목록 조회 IPC handler (read-only)."""
     account_id = args.get("account_id")
     bots = svc.bot_manager.list_bots()
     result: list[dict[str, Any]] = []
@@ -487,15 +382,7 @@ async def _handle_bot_list(
 async def _handle_bot_info(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 상세 정보 조회 IPC handler (read-only).
-
-    ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 가
-    ``None`` 이면 ``BotNotFoundError`` (``BOT_NOT_FOUND`` envelope). 존재하면
-    ``Bot.get_info()`` 전체를 ``{"bot": info}`` envelope 으로 반환한다. CLI
-    fallback 의 ``SELECT * FROM bots`` 행과 공통 핵심키(``bot_id``/``name``/
-    ``status``/``account_id``/``strategy_id``) 가 일치한다 (live≠snapshot 의
-    완전 통일은 non-goal).
-    """
+    """봇 상세 정보 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
     bot_id = args["bot_id"]
@@ -508,21 +395,7 @@ async def _handle_bot_info(
 async def _handle_bot_positions(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 보유 포지션 조회 IPC handler (read-only).
-
-    ``bot status`` 미러 — read-only, audit 없음. ``get_bot(bot_id)`` 존재
-    확인(``None`` → ``BotNotFoundError``) 후 ``trade_service`` 로 포지션을
-    조회한다.
-
-    ``trade_service`` 는 legacy ``ServiceRegistry`` 에서 ``None`` 일 수 있으므로
-    ``getattr`` safe-access 한다 (``_handle_bot_status`` 의 ``trade_service``
-    optional 처리 동형). **서비스 미구성(None)과 빈 포지션(0개) 을 혼동하지
-    않는다**: ``trade_service`` 가 없으면 빈 list 를
-    반환하되, 이는 "조회 불가" 가 아니라 "포지션 보강 미구성" 으로서 봇이
-    존재함은 이미 확인되었다(``BotNotFoundError`` 분기와 분리).
-    포지션 조회를 봇 계좌(``bot.config.account_id``) 로 스코핑해 타 계좌
-    stale/legacy 포지션 누출을 차단한다.
-    """
+    """봇 보유 포지션 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
     bot_id = args["bot_id"]
@@ -553,15 +426,7 @@ async def _handle_bot_positions(
 async def _handle_bot_signal_key(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 시그널 키 조회 IPC handler (read-only).
-
-    ``bot status`` 미러 — read-only, audit 없음. ``bot.signal_key.rotate``
-    (mutating) 와 별개의 read command 다. ``get_bot(bot_id)`` 존재
-    확인(``None`` → ``BotNotFoundError``) 후 ``get_signal_key(bot_id)`` 로
-    현재 키를 조회한다. 키 미발급이면 ``signal_key=None`` 을 반환하며, CLI
-    후처리(``SIGNAL_KEY_NOT_SET``) 가 None sentinel 을 surface 한다 (IPC·
-    fallback 공통).
-    """
+    """봇 시그널 키 조회 IPC handler (read-only)."""
     from ante.bot.exceptions import BotNotFoundError
 
     bot_id = args["bot_id"]
@@ -576,40 +441,7 @@ async def _handle_bot_signal_key(
 async def _handle_signal_connect(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """``signal.connect`` 핸드셰이크 IPC handler (read-only).
-
-    데몬-side·LIVE 상태 4-게이트를 순서대로 검증한 뒤, 통과 시
-    ``_stream`` 센티넬이 포함된 dict 를 반환한다. ``IPCServer._handle_connection``
-    이 ``response["result"]["_stream"] == "signal.connect"`` 를 감지해 동일 연결을
-    long-lived 스트림으로 connection-upgrade 하며, wire 전송 직전 센티넬을 strip
-    한다(절대 노출 안 됨 — ipc.md §"1:1 framing 불변").
-
-    4-게이트(ipc.md §"3-Phase 연결"):
-
-    * ① signal key 검증: ``validate_signal_key(key)`` → ``None`` 이면
-      ``InvalidSignalKey``. key 부재(``args`` 에 ``key`` 없음)도 ``args.get`` 으로
-      ``None`` → 동일 거부(``KeyError`` 아님).
-    * ② 봇 존재: ``get_bot(bot_id)`` → ``None`` 이면 ``BotNotFoundError``
-      (기존 코드 재사용, 재정의 금지).
-    * ③ 봇 RUNNING: ``bot.status != BotStatus.RUNNING`` 이면
-      ``BotNotRunning(bot_id, bot.status.value)`` (소문자 ``.value``).
-    * ④ 외부 시그널 수용: 전략 부재 또는 ``accepts_external_signals=False`` 면
-      ``BotNotAcceptingSignals``.
-
-    ``account_id`` 는 LIVE ``bot.config`` 에서만 취하고 ``args`` 의 spoof 값은
-    무시한다. ``audit_action=None`` (자동 audit OFF) — 게이트
-    통과 후 단일 manual connect-audit 를 직접 1회 발화한다(actor sentinel
-    ``"ipc"``). 키는 로깅/반환에 노출하지 않는다.
-
-    register happen-before ack (F1+F4): gate-4 통과 후 ``_stream``
-    반환 **전** ``SignalChannelRegistry.register`` 를 atomic check-and-insert
-    로 호출한다(``BotSignalChannelBusy``/``SignalChannelRegistryFrozen`` 둘 다
-    ack write **전** raise → Phase-B envelope, stream 미진입). 이 시점의
-    ``ChannelHandle`` 은 placeholder(데이터플레인 None) 이며 ``generation`` 을
-    스냅샷한다 — ``_run_signal_stream`` 진입 후 adopt 가 데이터플레인을 채우고
-    generation re-check 로 rotate-in-window 를 self-close 한다. ``reg`` 가
-    ``None`` (headless/legacy)이면 register 를 스킵하고 session_id 만 전달한다.
-    """
+    """``signal.connect`` 핸드셰이크 IPC handler (read-only)."""
     from uuid import uuid4
 
     from ante.bot.config import BotStatus
@@ -670,12 +502,7 @@ async def _handle_signal_connect(
 async def _handle_bot_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """봇 업데이트 IPC handler.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "bot.update"`` 기반으로 자동 발화한다. handler 는 ``_audit_detail``
-    reserved key 로 ``resource`` 와 ``detail`` (변경 필드 목록) 을 전달한다.
-    """
+    """봇 업데이트 IPC handler."""
     from ante.bot.exceptions import BotError
 
     bot_id = args["bot_id"]
@@ -757,13 +584,7 @@ async def _handle_treasury_deallocate(
 async def _handle_treasury_set_balance(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """Treasury balance 설정 IPC handler.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "treasury.set_balance"`` 기반으로 자동 발화한다. handler 는
-    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (설정된
-    balance) 을 전달한다.
-    """
+    """Treasury balance 설정 IPC handler."""
     from datetime import UTC, datetime
 
     from ante.account.scoping import require_account_id
@@ -790,17 +611,7 @@ async def _handle_treasury_set_balance(
 async def _handle_rule_update(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """계좌 룰 업데이트 IPC handler.
-
-    account_id 검증은 ``_dispatch`` wrapper 가
-    ``CommandSpec.account_id_policy="required"`` 기반으로 사전 수행한다. audit
-    호출은 wrapper 가 ``CommandSpec.audit_action="account.rule.update"`` 기반
-    으로 자동 발화하며, handler 는 helper 에 ``audit_logger=None`` 을 전달하여
-    helper 내부 audit 발화를 끈다(CLI offline path 는 ``audit_logger`` 를
-    그대로 전달하여 기존 동작 유지). handler 는 helper 결과에
-    ``_audit_detail`` reserved key 를 덧붙여 wrapper 가 ``pop`` 으로 strip
-    한다.
-    """
+    """계좌 룰 업데이트 IPC handler."""
     from ante.rule.config_update import update_account_rule_config
 
     account_id = args["account_id"]
@@ -827,13 +638,7 @@ async def _handle_rule_update(
 async def _handle_strategy_set_status(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """전략 상태 변경 IPC handler.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "strategy.set_status"`` 기반으로 자동 발화한다. handler 는
-    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (status) 을
-    전달한다.
-    """
+    """전략 상태 변경 IPC handler."""
     from ante.strategy.registry import StrategyStatus
 
     strategy_id = args["strategy_id"]
@@ -854,13 +659,7 @@ async def _handle_strategy_set_status(
 async def _handle_member_update_scopes(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 scope 업데이트 IPC handler.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "member.update_scopes"`` 기반으로 자동 발화한다. handler 는
-    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (scopes 목록) 을
-    전달한다.
-    """
+    """멤버 scope 업데이트 IPC handler."""
     member_id = args["member_id"]
     scopes = list(args.get("scopes") or [])
     member_service = getattr(svc, "member_service", None)
@@ -883,15 +682,7 @@ async def _handle_member_update_scopes(
 async def _handle_member_register(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 등록 IPC handler.
-
-    ``member.update_scopes`` 미러. ``registered_by=actor`` 로
-    서버 측 master 게이트(``MemberService.register`` 내부 검증)를 보존한다.
-
-    secret 비노출: 발급 토큰은 사용자 표시용 result(``token``) 에만 담고,
-    ``_audit_detail`` (resource/detail) 이나 server logger / IPC error
-    envelope 어디에도 넘기지 않는다. ``_audit_detail`` 에는 resource 만 둔다.
-    """
+    """멤버 등록 IPC handler."""
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -922,11 +713,7 @@ async def _handle_member_register(
 async def _handle_member_set_emoji(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 emoji 설정 IPC handler.
-
-    CLI ``member set-emoji`` → ``MemberService.update_emoji``
-    (``set_emoji`` 메서드는 없음). ``updated_by=actor`` 로 호출한다.
-    """
+    """멤버 emoji 설정 IPC handler."""
     member_id = args["member_id"]
     emoji = args["emoji"]
     member = getattr(svc, "member_service", None)
@@ -947,11 +734,7 @@ async def _handle_member_set_emoji(
 async def _handle_member_suspend(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 일시 정지 IPC handler.
-
-    ``suspended_by=actor`` 로 ``MemberService.suspend`` 내부의
-    master 게이트(``_assert_master(actor)``)를 보존한다.
-    """
+    """멤버 일시 정지 IPC handler."""
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -971,10 +754,7 @@ async def _handle_member_suspend(
 async def _handle_member_reactivate(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 재활성화 IPC handler.
-
-    ``reactivated_by=actor`` 로 master 게이트를 보존한다.
-    """
+    """멤버 재활성화 IPC handler."""
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -994,11 +774,7 @@ async def _handle_member_reactivate(
 async def _handle_member_revoke(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """멤버 영구 폐기 IPC handler.
-
-    ``revoked_by=actor`` 로 master 게이트를 보존한다. CLI
-    ``--yes`` 게이트는 라우팅 이전 CLI 단에서 검사한다.
-    """
+    """멤버 영구 폐기 IPC handler."""
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -1018,14 +794,7 @@ async def _handle_member_revoke(
 async def _handle_member_rotate_token(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """토큰 재발급 IPC handler.
-
-    ``rotated_by=actor`` 로 master 게이트를 보존한다.
-
-    secret 비노출: 새 토큰은 사용자 표시용 result(``token``) 에만 담고
-    ``_audit_detail`` / server logger / IPC error envelope 어디에도 넘기지
-    않는다.
-    """
+    """토큰 재발급 IPC handler."""
     member_id = args["member_id"]
     member = getattr(svc, "member_service", None)
     if member is None:
@@ -1046,12 +815,7 @@ _RECOVERY_AUDIT_MEMBER_ID = "system:recovery"
 
 
 async def _resolve_master_member_id(member: Any) -> str:
-    """master(human) 멤버 ID 를 서버 측에서 해석한다.
-
-    reset_password / regenerate_recovery_key 는 auth-exempt 라
-    client 가 대상 member_id 를 보내지 않는다. master-lookup 을 CLI 가 아니라
-    서버 chokepoint(handler)에서 수행해 단일 경로로 일관 적용한다.
-    """
+    """master(human) 멤버 ID 를 서버 측에서 해석한다."""
     members = await member.list_members(member_type="human")
     master = next((m for m in members if m.role == "master"), None)
     if master is None:
@@ -1063,20 +827,7 @@ async def _resolve_master_member_id(member: Any) -> str:
 async def _handle_member_reset_password(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """recovery key 로 패스워드 리셋 IPC handler (auth-exempt).
-
-    args 는 secret(``recovery_key`` / ``new_password``) 만 받는다.
-    대상 master member_id 는 서버 chokepoint 에서 ``list_members`` +
-    role filter 로 해석한다(client actor 신뢰 금지).
-
-    secret 비노출: ``recovery_key`` / ``new_password`` 는 ``_audit_detail``
-    (resource/detail) 이나 server logger / IPC error envelope 어디에도
-    넣지 않는다. ``detail`` 은 flow 표식만 둔다.
-
-    audit member_id 는 client actor(스푸핑 가능) 가 아니라 고정 sentinel
-    상수(``_RECOVERY_AUDIT_MEMBER_ID``) 로 기록한다 —
-    ``_audit_detail["member_id"]`` override 로 wrapper 에 전달한다.
-    """
+    """recovery key 로 패스워드 리셋 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -1097,18 +848,7 @@ async def _handle_member_reset_password(
 async def _handle_member_regenerate_recovery_key(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """recovery key 재발급 IPC handler (auth-exempt).
-
-    args 는 secret(``password``) 만 받는다. 대상 master member_id 는
-    서버 chokepoint 에서 해석한다(client actor 신뢰 금지).
-
-    secret 비노출: 입력 ``password`` 와 재발급된 ``recovery_key`` 는
-    ``_audit_detail`` (resource/detail) 이나 server logger / IPC error
-    envelope 어디에도 넘기지 않는다. 새 recovery key 는 사용자 표시용
-    result(``recovery_key``) 에만 담는다.
-
-    audit member_id 는 client actor 가 아니라 고정 sentinel 상수로 기록한다.
-    """
+    """recovery key 재발급 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -1154,13 +894,7 @@ async def _handle_approval_request(
 async def _handle_approval_approve(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """승인 요청 승인 IPC handler.
-
-    audit.md:112: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="approval.approve"`` 기반으로 자동 발화한다.
-    handler 는 ``_audit_detail`` reserved key 로
-    ``resource="approval:{id}"`` 를 전달한다.
-    """
+    """승인 요청 승인 IPC handler."""
     approval_id = args["id"]
     request = await svc.approval.approve(approval_id, resolved_by=actor)
     return {
@@ -1177,13 +911,7 @@ async def _handle_approval_approve(
 async def _handle_approval_reject(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """승인 요청 거부 IPC handler.
-
-    audit.md:113: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="approval.reject"`` 기반으로 자동 발화한다.
-    handler 는 ``_audit_detail`` reserved key 로
-    ``resource="approval:{id}"`` 를 전달한다.
-    """
+    """승인 요청 거부 IPC handler."""
     approval_id = args["id"]
     reason = args.get("reason", "")
     request = await svc.approval.reject(
@@ -1205,13 +933,7 @@ async def _handle_approval_reject(
 async def _handle_approval_cancel(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """승인 요청 취소 IPC handler.
-
-    audit.md:114: audit 호출은 ``_dispatch`` wrapper 가
-    ``CommandSpec.audit_action="approval.cancel"`` 기반으로 자동 발화한다.
-    handler 는 ``_audit_detail`` reserved key 로
-    ``resource="approval:{id}"`` 를 전달한다.
-    """
+    """승인 요청 취소 IPC handler."""
     approval_id = args["id"]
     request = await svc.approval.cancel(approval_id, requester=actor)
     return {
@@ -1228,18 +950,7 @@ async def _handle_approval_cancel(
 async def _handle_approval_cancel_invalid(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """Administrative cancellation of a legacy invalid-type approval.
-
-    CLI ``approval:admin`` scope 를 보유한 운영자가
-    ``ante approval cancel-invalid <id>`` 로 호출한다. 성공 후 ``audit_log``
-    테이블에 기록을 남기며, 서비스의 ``history`` append 가 fallback 추적
-    경로다.
-
-    audit 호출은 ``_dispatch`` wrapper 가 ``CommandSpec.audit_action
-    = "approval.cancel_invalid"`` 기반으로 자동 발화한다. handler 는
-    ``_audit_detail`` reserved key 로 ``resource`` 와 ``detail`` (request.type)
-    을 전달한다.
-    """
+    """Administrative cancellation of a legacy invalid-type approval."""
     approval_id = args["approval_id"]
     request = await svc.approval.cancel_invalid_type_request(
         approval_id,
@@ -1312,24 +1023,7 @@ async def _handle_broker_positions(
 async def _handle_broker_order_history(
     svc: ServiceRegistry, args: dict[str, Any], actor: str
 ) -> dict:
-    """``broker.order_history`` — 주문/체결 이력 read-only 조회.
-
-    ``_handle_broker_positions`` 동형이며 ``{"orders": [...]}`` envelope 을
-    반환한다. 반환 row 는 ``BrokerAdapter.get_order_history`` 의 **정규화 8키**
-    (``order_id`` / ``symbol`` / ``side`` / ``quantity`` / ``filled_quantity`` /
-    ``price`` / ``status`` / ``timestamp``) 이며, KIS 원시 필드는 어댑터의
-    fold 단계에서 이미 버려져 이 경계에 존재하지 않는다.
-
-    **날짜 변환 chokepoint**: ``from_date``/``to_date`` 는 공개 표면 어휘인
-    ISO ``YYYY-MM-DD`` 로 받아 :func:`ante.core.time.iso_to_kis_date` 로
-    어댑터 경계 압축 ``YYYYMMDD`` 로 바꾼 뒤에만 전달한다. CLI click callback
-    (``validate_iso_date``)을 우회하는 직접 IPC 호출도 여기서 fail-closed 로
-    거부된다(``InvalidIsoDateError.code = "VALIDATION_ERROR"``).
-
-    검증 순서는 ``account_id`` 우선(broker handlers account_id-first)
-    이다 — invalid account_id 는 날짜 파싱보다 먼저 ``VALIDATION_ERROR`` 로
-    거부된다.
-    """
+    """``broker.order_history`` — 주문/체결 이력 read-only 조회."""
     from ante.account.scoping import require_account_id
     from ante.core.time import iso_to_kis_date
 
@@ -1350,13 +1044,7 @@ def _broker_reconcile_envelope(
     adjustments: list[dict[str, Any]],
     mismatches: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    """``broker.reconcile`` 통일 응답 envelope 을 만든다.
-
-    account-level 신규 필드(``account_id``/``fix``/``bot_count``/``adjustments``/
-    ``mismatches``)와, CLI/agent display 호환을 위한 legacy 필드
-    (``total_symbols``/``discrepancies``/``match``/``fix_applied``/``corrections``)
-    를 함께 노출해 IPC·CLI passthrough envelope shape 를 일관 유지한다.
-    """
+    """``broker.reconcile`` 통일 응답 envelope 을 만든다."""
     return {
         "account_id": account_id,
         "fix": fix,

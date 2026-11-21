@@ -26,12 +26,7 @@ async def _release_treasury_budget(
     bot_id: str,
     preferred_account_id: str,
 ) -> float:
-    """Release persisted Treasury budget for ``bot_id``.
-
-    Mirrors ``BotManager.delete_bot``: try the bot's account first, then scan
-    all persisted budget account ids because legacy or cross-account rows may
-    not match ``bots.account_id``.
-    """
+    """Release persisted Treasury budget for ``bot_id``."""
     from ante.eventbus.bus import EventBus
     from ante.treasury.treasury import Treasury
 

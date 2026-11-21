@@ -152,14 +152,7 @@ _DB_CORRUPTION_SIGNATURES: tuple[str, ...] = (
 
 
 def _is_db_corruption(exc: BaseException) -> bool:
-    """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다.
-
-    ``sqlite3.DatabaseError`` 타입만으로 판정하지 않는다. transient(``database is
-    locked``)·내부 버그(``no such table``/``ProgrammingError``)는 손상이 아니므로
-    backoff·카운터·escalation 경로에서 제외해야 한다. database.py:20-23 SSOT 손상
-    시그니처가 메시지에 포함될 때만 True 를 반환한다(소문자화 후 substring, 표현
-    변형 견고). 비-손상 ``DatabaseError`` 는 비-DB 예외와 같은 reset 경로로 흐른다.
-    """
+    """예외가 **DB 손상**(reconnect 로 회복 불가)인지 판별한다."""
     if not isinstance(exc, sqlite3.DatabaseError):
         return False
     message = str(exc).lower()
@@ -262,14 +255,7 @@ class FillOutboxPublisher:
             self._task = None
 
     def _backoff_delay(self) -> float:
-        """현재 연속 DB 손상 실패 횟수에 대한 backoff 지연(초)을 산출한다 (O1).
-
-        실패가 없으면(``_consecutive_failures == 0``) base ``drain_interval`` 로,
-        n회 연속 실패면 ``drain_interval × min(2^n, LOOP_BACKOFF_MULTIPLIER_CAP)`` 로
-        늘린다(첫 실패 ×2, 이후 ×4, ×8 cap). malformed/not-a-database 는 reconnect 로
-        회복 불가하므로, backoff 는 1초 즉시 무한 재시도(hammer·로그 오염)를 막고 외부
-        DB 복구 관측 주기를 bounded 로 유지하는 용도다.
-        """
+        """현재 연속 DB 손상 실패 횟수에 대한 backoff 지연(초)을 산출한다 (O1)."""
         if self._consecutive_failures <= 0:
             return self._drain_interval
         multiplier = min(2**self._consecutive_failures, LOOP_BACKOFF_MULTIPLIER_CAP)
@@ -339,13 +325,7 @@ class FillOutboxPublisher:
         self._escalated = False
 
     async def _escalate(self, exc: BaseException) -> None:
-        """연속 DB 손상 실패 임계 도달 시 CRITICAL 승격 + NotificationEvent 1회 (O2).
-
-        ``_escalated`` latch 로 카운터가 0 으로 reset 되기 전까지 정확히 1회만
-        발행해 알림 spam 을 막는다(O2 exactly-once). NotificationEvent publish
-        는 try/except 로 감싸 escalation 발행 실패가 드레인 루프를 죽이지 않게 한다
-        (O3 liveness). 패턴은 fill_scheduler.py:654-667 동형(category=system).
-        """
+        """연속 DB 손상 실패 임계 도달 시 CRITICAL 승격 + NotificationEvent 1회 (O2)."""
         logger.critical(
             "FillOutboxPublisher DB 손상 드레인 %d회 연속 실패 — 체결 이벤트 정체. "
             "DB 무결성 점검 필요(malformed 회복 불가): %s",

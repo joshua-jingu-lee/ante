@@ -211,12 +211,7 @@ class OrderTracker:
         return (record.account_id, record.bot_id, record.order_id)
 
     def _evict_open_cache(self, order_id: str) -> None:
-        """terminal 전이 공통 헬퍼 — order_id 의 캐시 엔트리를 제거.
-
-        ``mark_terminal``/``expire_stale`` 가 DB write 성공 직후 호출한다. 캐시
-        키는 (account_id, bot_id, order_id) 라 order_id 단독으로는 직접 찾을 수
-        없으므로 order_id 일치 엔트리를 모두 제거한다(order_id 는 PK 라 유일).
-        """
+        """terminal 전이 공통 헬퍼 — order_id 의 캐시 엔트리를 제거."""
         for key in [k for k in self._open_cache if k[2] == order_id]:
             del self._open_cache[key]
 

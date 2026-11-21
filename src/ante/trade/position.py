@@ -64,13 +64,7 @@ class PositionHistory:
         logger.info("PositionHistory 초기화 완료")
 
     async def _warm_cache(self) -> None:
-        """DB에서 전체 포지션을 읽어 인메모리 캐시에 적재.
-
-        legacy 'default' (또는 기타 invalid) ``account_id`` row는
-        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션이 완료되기 전에도 서버 부팅이
-        실패하지 않도록 하기 위함이다.
-        """
+        """DB에서 전체 포지션을 읽어 인메모리 캐시에 적재."""
         rows = await self._db.fetch_all("SELECT * FROM positions WHERE quantity > 0")
         self._position_cache.clear()
         for row in rows:
@@ -435,12 +429,7 @@ class PositionHistory:
         exchange: str = "KRX",
         trade_id: str | None = None,
     ) -> None:
-        """포지션 변동 이력 저장.
-
-        ``account_id``는 호출자에서 ``record.account_id``를 그대로 전달하며,
-        :func:`require_account_id`로 검증한다. 누락 시 fresh schema NOT NULL
-        제약과 runtime 검증으로 저장을 차단한다.
-        """
+        """포지션 변동 이력 저장."""
         validated_account_id = require_account_id(
             account_id, context="position._save_history"
         )
@@ -485,13 +474,7 @@ class PositionHistory:
     def _row_to_snapshot_safe(
         self, row: dict, *, context: str
     ) -> PositionSnapshot | None:
-        """DB row → PositionSnapshot, legacy invalid account_id row는 skip.
-
-        legacy 'default' (또는 기타 invalid) ``account_id`` row는
-        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션이 완료되기 전에도 read 경로가
-        실패하지 않도록 하기 위함이다.
-        """
+        """DB row → PositionSnapshot, legacy invalid account_id row는 skip."""
         try:
             return self._row_to_snapshot(row)
         except InvalidAccountIdError as e:

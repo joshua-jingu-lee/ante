@@ -68,15 +68,7 @@ class APIGateway:
         return await self._account_service.get_broker(account_id)
 
     async def _get_account(self, account_id: str) -> tuple[Any | None, bool]:
-        """account_id 의 Account 메타 조회 — ``(account, fetch_failed)`` 반환.
-
-        ``_on_order_approved`` 가 non-LIVE silent skip 라우팅 판정으로 호출한다.
-        ``AccountService.get`` 은 ``AccountNotFoundError`` 를 raise 하므로 예외를
-        흡수하되, **조회 실패 여부**(``fetch_failed``)를 별도로 반환해 호출자/계층3
-        gate 가 "조회 예외(검증 불가)"와 "정상 None"을 구별할 수 있게 한다(G7 status
-        축 STATUS_UNAVAILABLE 도출에 필요). 예외 = fail-closed(virtual fall-open
-        금지, G2).
-        """
+        """account_id 의 Account 메타 조회 — ``(account, fetch_failed)`` 반환."""
         get = getattr(self._account_service, "get", None)
         if get is None:
             return None, False
@@ -86,37 +78,7 @@ class APIGateway:
             return None, True
 
     async def _readiness_gate(self, account_id: str, *, side: object) -> None:
-        """계층3 active-order gate — ``broker.place_order`` **직전** 단일 재확인.
-
-        **위치**: ``rate_limiter.acquire()``(최대 ~60s await)
-        + ``_get_broker()`` await **이후**, ``place_order`` 직전에 호출된다(spec
-        broker-adapter/11-order-flow.md). acquire/get_broker 대기 중 ``mark_not_ready``/
-        suspend 가 끼어도 그 직후 단일 재확인으로 TOCTOU 윈도우를 닫는다(재확인
-        직후 ``place_order`` 가 동기 시작하므로 각 await 후 중복 체크 불요).
-
-        **단일 fresh fetch(중복 get 금지)**: 이 gate 가 **한 번** account 를 fetch
-        해(``_get_account``) readiness(broker_type/trading_mode) + status(SUSPENDED)
-        **둘 다** 평가한다. routing 단계(``_on_order_approved``)의 fetch 를 재사용하지
-        **않고** 여기서 fresh fetch 하는 이유는, status 가 런타임 가변 kill-switch 라
-        acquire/get_broker await 중 in-flight suspend 를 잡으려면 await **이후** 최신
-        status 를 읽어야 하기 때문이다(stale routing 스냅샷 금지).
-
-        평가 축(둘 중 하나라도 막으면 거부 — D-ACC-09 §8 effect 일관성):
-
-        - **status 축(Fix 2, in-flight kill-switch backstop)**: verified SUSPENDED →
-          ``account_suspended``; ``STATUS_UNAVAILABLE``(소스 present + 조회 예외/미상)
-          → ``account_status_unavailable`` fail-closed; ``None``(소스 미구성)/verified
-          non-SUSPENDED → status 축 통과. 계층1 통과 후 await 중 발생한 suspend 를
-          계층3 final backstop 이 잡는다(D-ACC-09 §8 계층1 primary + 계층3 backstop).
-        - **readiness 축**: account 메타 미상/non-LIVE/registry 미주입/not_ready →
-          ``account_not_ready``(missing-flag suffix). non-LIVE fail-closed 는 직접
-          ``submit_order`` 호출 경로의 virtual 주문이 실 broker 로 새는 것을 막는다.
-
-        차단 시 G6 운영자 알림(error/system) 정확히 1회 + ``APIError`` raise →
-        ``_on_order_approved`` except → OrderFailedEvent(reserve 정확 해제, G3).
-        OrderApprovedEvent 는 ``reason`` 필드가 없어 청산 marker 미운반(generic 문구).
-        매 주문 시점 registry/status 조회(상태 캐시 금지, G5).
-        """
+        """계층3 active-order gate — ``broker.place_order`` **직전** 단일 재확인."""
         from ante.account.gate import (
             ACCOUNT_NOT_READY_REASON,
             ACCOUNT_STATUS_UNAVAILABLE_REASON,
@@ -520,10 +482,7 @@ class APIGateway:
             )
 
     async def _on_order_cancel(self, event: object) -> None:
-        """주문 취소 요청 → BrokerAdapter 전달 (룰 검증 생략).
-
-        event.account_id로 브로커를 선택한다.
-        """
+        """주문 취소 요청 → BrokerAdapter 전달 (룰 검증 생략)."""
         from ante.eventbus.events import (
             OrderCancelEvent,
             OrderCancelFailedEvent,
@@ -586,34 +545,7 @@ class APIGateway:
             )
 
     async def _on_order_modify(self, event: object) -> None:
-        """주문 정정 요청 → broker 위임 (v1=price-only).
-
-        RuleEngine이 이미 정정 요청을 거부하면 ``_consumed=True`` transient
-        marker를 set한다(``object.__setattr__``). 본 핸들러는 그 경우 추가
-        terminal event를 발행하지 않고 바로 반환하여, 동일 정정 요청에 대해
-        terminal event가 중복 발행되지 않도록 한다.
-
-        v1(price-only) 정정 흐름 (broker 호출 **전** fail-closed):
-
-        (a) finite ``price > 0`` 아니면 ``modify_invalid_args``.
-        (b) 수량 변경 판정 — Bot이 ``action.quantity or 0.0`` 로 접으므로
-            (``bot.py``) ``event.quantity == 0.0`` 은 미지정(price-only 허용),
-            ``> 0 && != record.ordered_qty`` 는 수량 변경 →
-            ``modify_qty_change_unsupported``, ``< 0`` 은 무효
-            → ``modify_invalid_args``.
-        (c) OrderTracker record status가 ``open`` 이 아니면(부분체결/터미널/미발견)
-            ``modify_partial_or_terminal_unsupported``.
-        (d) buy면 ``new_price <= record.order_price`` 가 아니면(예산 증가)
-            ``modify_budget_increase_unsupported`` (``order_price`` 부재/None
-            시 buy fail-closed). sell은 통과.
-        (e) ``ModifyOrgnoUnavailableError`` → ``modify_orgno_unavailable``.
-
-        broker 성공 → ``OrderModifyExecutedEvent``(quantity=record.ordered_qty
-        유지, price=신규). broker False → ``modify_failed``. 기타 예외 → str(e).
-        OrderTracker ``ordered_qty`` 는 변경하지 않는다(price-only).
-
-        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
-        """
+        """주문 정정 요청 → broker 위임 (v1=price-only)."""
         import math
 
         from ante.broker.exceptions import ModifyOrgnoUnavailableError
@@ -801,10 +733,7 @@ class APIGateway:
         )
 
     async def _on_order_filled(self, event: object) -> None:
-        """체결 시 해당 account_id 범위 내 캐시 무효화.
-
-        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
-        """
+        """체결 시 해당 account_id 범위 내 캐시 무효화."""
         from ante.eventbus.events import OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):

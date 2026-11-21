@@ -122,14 +122,7 @@ class StrategyContextFactory:
         raise ValueError(msg)
 
     def _resolve_live_order_view(self, config: BotConfig) -> OrderView:
-        """봇별 LiveOrderView 를 결정.
-
-        ``order_tracker`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
-        binding 한 **봇별** ``LiveOrderView`` 를 생성한다(``LiveDataProvider`` 패턴
-        미러). 단일계좌 다중봇에서 봇별 account scope 격리를 보장한다. 미주입이면
-        공유 fallback ``live_order_view`` 를, 그것도 없으면 빈 결과 stub 을 쓴다
-        (virtual-only/legacy 환경 호환 — 회귀 방지).
-        """
+        """봇별 LiveOrderView 를 결정."""
         if self._order_tracker is not None:
             from ante.bot.providers.live import LiveOrderView
 
@@ -142,15 +135,7 @@ class StrategyContextFactory:
         return _EmptyOrderView()
 
     def _resolve_live_trade_history(self, config: BotConfig) -> TradeHistoryView | None:
-        """봇별 LiveTradeHistoryView 를 결정.
-
-        ``trade_recorder`` 가 주입돼 있으면 ``config.account_id`` 를 closure 로
-        binding 한 **봇별** ``LiveTradeHistoryView`` 를 생성한다(``LiveOrderView``
-        패턴 미러). 단일계좌 다중봇에서 봇 계좌 scope 격리를 보장해 타 계좌
-        거래 이력이 전략 컨텍스트에 누출되지 않게 한다. 미주입이면 공유 fallback
-        ``live_trade_history`` 를 그대로 반환한다(virtual-only/legacy/test 환경
-        호환 — 공유 인스턴스의 private 멤버에 접근하지 않는다).
-        """
+        """봇별 LiveTradeHistoryView 를 결정."""
         if self._trade_recorder is not None:
             from ante.bot.providers.live import LiveTradeHistoryView
 
@@ -161,15 +146,7 @@ class StrategyContextFactory:
         return self._live_trade_history
 
     def _create_live_context(self, config: BotConfig) -> StrategyContext:
-        """Live 봇용 StrategyContext 생성.
-
-        ``APIGateway`` 가 주입돼 있으면 봇별로 새 ``LiveDataProvider``
-        인스턴스를 만들어 ``config.account_id`` 를 closure 로 binding 한다.
-        그 외 환경에서는 공유 ``self._data_provider`` 를 그대로 사용한다.
-
-        OrderView 도 동일하게 ``order_tracker`` 주입 시 봇별 ``LiveOrderView`` 를
-        생성해 ``account_id`` 를 closure 로 격리한다.
-        """
+        """Live 봇용 StrategyContext 생성."""
         portfolio = self._get_live_portfolio(config)
         order_view = self._resolve_live_order_view(config)
 
@@ -194,12 +171,7 @@ class StrategyContextFactory:
         return ctx
 
     def _create_virtual_context(self, config: BotConfig) -> StrategyContext:
-        """Virtual 계좌 봇용 StrategyContext 생성.
-
-        virtual 계좌 봇이라도 OHLCV / price 조회는 봇의 account_id 로
-        APIGateway 를 호출해야 한다 (broker routing). live 와 동일하게
-        ``api_gateway`` 가 있으면 봇별 LiveDataProvider 를 생성한다.
-        """
+        """Virtual 계좌 봇용 StrategyContext 생성."""
         initial_balance = self._resolve_virtual_balance(config)
         virtual_portfolio = VirtualPortfolioView(
             bot_id=config.bot_id,
