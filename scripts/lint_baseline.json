@@ -93,7 +93,6 @@
       "C901": 1
     },
     "src/ante/cli/commands/instrument.py": {
-      "BLE001": 1,
       "C901": 1
     },
     "src/ante/cli/commands/rule.py": {

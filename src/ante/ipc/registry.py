@@ -70,6 +70,11 @@ class CommandRegistry:
         Args:
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
         """
+        if request_model is not None and account_id_policy != "none":
+            raise ValueError(
+                f"요청 모델이 있는 명령 '{command}'에는 "
+                f"account_id_policy '{account_id_policy}'를 쓸 수 없습니다."
+            )
         self._specs[command] = CommandSpec(
             name=command,
             handler=handler,

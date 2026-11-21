@@ -70,7 +70,7 @@ class TestBacktestTimeframeValidation:
     """backtest run --timeframe canonical 검증 (CLI 경계 단일 지점)."""
 
     def test_invalid_timeframe_text_mode_exit1_message_only(self, tmp_path):
-        """비-canonical timeframe: text 모드 exit 1 + 메시지만(code 미출력)."""
+        """비-canonical timeframe: text 모드 exit 1 + ``Error: <code>: <message>``."""
         strategy = tmp_path / "test_strategy.py"
         strategy.write_text("# dummy")
         runner = _make_runner()
@@ -88,8 +88,7 @@ class TestBacktestTimeframeValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
         assert "oracle-invalid-timeframe" in result.output
-        # text 모드: OutputFormatter.error는 code를 출력하지 않는다.
-        assert "BACKTEST_INVALID_TIMEFRAME" not in result.output
+        assert "Error: BACKTEST_INVALID_TIMEFRAME: " in result.output
 
     def test_invalid_timeframe_json_mode_exit1_with_code(self, tmp_path):
         """비-canonical timeframe: --format json exit 1 + 구조화 payload."""

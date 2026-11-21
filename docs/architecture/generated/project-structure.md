@@ -444,6 +444,7 @@ tests/
 │   │   ├── test_db_encryption_key_chokepoint.py
 │   │   ├── test_single_error_exit.py
 │   │   ├── test_trade_report_error_exits.py
+│   │   ├── test_backtest_data_instrument_error_exits.py
 │   │   └── test_feed_command_relocation.py
 │   ├── ipc/
 │   │   ├── __init__.py

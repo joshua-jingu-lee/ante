@@ -598,7 +598,15 @@ async def test_value_outside_the_domain_is_rejected(
         },
     }
     assert recorder.calls == []
-    assert "RequestValidationError" in caplog.text
+    records = [r for r in caplog.records if r.name == "ante.ipc.server"]
+    assert [(r.levelname, r.exc_info, r.getMessage()) for r in records] == [
+        (
+            "WARNING",
+            None,
+            f"IPC 요청 검증 거부: {command} 인자 검증 실패: "
+            f"{variant.loc}({variant.expected})",
+        )
+    ]
     if variant.marker is not None:
         assert variant.marker not in json.dumps(response, ensure_ascii=False)
         assert variant.marker not in caplog.text
@@ -621,7 +629,13 @@ async def test_user_validator_message_does_not_reflect_the_input(
         },
     }
     assert recorder.calls == []
-    assert "IPC 커맨드 실행 오류: demo.secret" in caplog.text
-    assert "RequestValidationError" in caplog.text
+    records = [r for r in caplog.records if r.name == "ante.ipc.server"]
+    assert [(r.levelname, r.exc_info, r.getMessage()) for r in records] == [
+        (
+            "WARNING",
+            None,
+            "IPC 요청 검증 거부: demo.secret 인자 검증 실패: token(value_error)",
+        )
+    ]
     assert marker not in json.dumps(response, ensure_ascii=False)
     assert marker not in caplog.text
