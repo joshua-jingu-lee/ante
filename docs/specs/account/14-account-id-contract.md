@@ -17,7 +17,7 @@ account-scoped 데이터/이벤트/명령은 모두 본 문서가 정의한 형�
 | 인코딩 | UTF-8 ASCII subset |
 | 대소문자 구분 | 구분함 (``"Account"``와 ``"account"``는 별개 ID) |
 
-소스 of truth: ``ante.account.scoping.ACCOUNT_ID_PATTERN``.
+소스 of truth: ``ante.core.account_id.ACCOUNT_ID_PATTERN`` (``ante.account.scoping``이 재수출한다).
 
 ## Runtime invalid (어떤 시점에도 거부)
 
@@ -118,8 +118,9 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
 
 근거 (목표 코드 = ``InvalidAccountIdError.code`` 재사용, 코드 상수와 정합):
 
-- ``src/ante/account/errors.py`` 의 ``InvalidAccountIdError.code =
-  "VALIDATION_ERROR"`` 클래스 속성이 목표 코드의 출처다. IPC server
+- ``src/ante/core/account_id.py`` 의 ``InvalidAccountIdError.code =
+  "VALIDATION_ERROR"`` 클래스 속성이 목표 코드의 출처다(``ante.account.errors``가
+  같은 클래스를 재수출한다). IPC server
   의 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백 구조상, 그
   ``VALIDATION_ERROR`` 가 envelope 으로 노출되려면 **그 핸들러/CLI
   콜백이 invalid ``account_id`` 에 대해 :class:`InvalidAccountIdError`
@@ -395,7 +396,8 @@ raw 전달 )의 trace·단정은 **#1633 범위가 아니다**. #1633 은
 
 ## Helper API
 
-소스: ``src/ante/account/scoping.py``.
+소스: ``src/ante/core/account_id.py``. ``ante.account.scoping``이 같은 객체를
+재수출하므로 아래 import는 그대로 쓸 수 있다.
 
 ```python
 from ante.account.scoping import (

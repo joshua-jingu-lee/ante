@@ -46,7 +46,8 @@ EventBus는 Ante의 **핵심 이벤트 발행/구독 인프라**로, 모듈 간 
 override하면, `Event.__post_init__` 이 다음을 수행한다:
 
 1. 인스턴스의 `account_id` 필드 값을 가져온다.
-2. `ante.account.scoping.is_invalid_account_id` 로 검증한다.
+2. `ante.core.account_id.is_invalid_account_id` 로 검증한다(`ante.account.scoping`이
+   같은 함수를 재수출한다).
 3. invalid (`""`, `None`, `"default"`, 형식 위반) 면 `InvalidAccountIdError`
    를 raise한다.
 
