@@ -852,3 +852,17 @@ async def test_execute_script_outside_transaction_still_works(db):
     row = await db.fetch_one("SELECT v FROM t3")
     assert row is not None
     assert row["v"] == "ok"
+
+
+def test_reexported_operational_error_is_sqlite3_class():
+    """재수출한 ``OperationalError`` 는 ``sqlite3`` 의 클래스 그 자체다."""
+    from ante.core.database import OperationalError
+
+    assert OperationalError is sqlite3.OperationalError
+
+
+def test_reexported_database_error_is_sqlite3_class():
+    """재수출한 ``DatabaseError`` 는 ``sqlite3`` 의 클래스 그 자체다."""
+    from ante.core.database import DatabaseError
+
+    assert DatabaseError is sqlite3.DatabaseError
