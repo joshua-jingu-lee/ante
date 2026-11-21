@@ -1184,7 +1184,7 @@ class TestIpcBrokerCommandExtraRegressionLock:
     async def test_extra_cannot_override_validated_account_id(self) -> None:
         """🔴 ``extra`` 는 검증된 ``account_id`` 를 덮지 못한다.
 
-        docstring 이 주장하는 "순수 additive" 불변을 **dict 병합 순서**로
+        ``extra`` 는 키를 더하기만 한다는 불변을 **dict 병합 순서**로
         구조 보장한다. ``args = {"account_id": ...}; args.update(extra)``
         순서였다면 호출자가 ``account_id`` 키를 넣는 순간 CLI ingress
         검증(``reject_invalid_account_id``)을 통과한 값이 조용히 덮여

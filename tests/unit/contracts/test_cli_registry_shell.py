@@ -459,7 +459,7 @@ def test_system_entries_registered_after_1847_sub_pr_7() -> None:
 
     spec 표 (``docs/specs/cli/03-commands.md:77-78``) 는 ``start`` /
     ``stop`` 을 ``external process`` 로 분류하지만 본 registry 의
-    ``ExecutionClass`` vocab 매핑 (모듈 docstring normative 표) 에 따라
+    ``ExecutionClass`` vocab 매핑 (spec 분류 표의 execution 값 열) 에 따라
     ``"long_running"`` 에 흡수된다 (#1815 5 값 결정).
     """
     expected_system_paths = {
