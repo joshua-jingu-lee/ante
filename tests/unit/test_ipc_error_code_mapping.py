@@ -14,7 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from ante.account.errors import AccountStructuralChangeRequiresStoppedServerError
-from ante.broker.exceptions import APIError, AuthenticationError
+from ante.broker.exceptions import (
+    APIError,
+    AuthenticationError,
+    TokenRateLimitError,
+)
 from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.registry import CommandRegistry
@@ -117,8 +121,12 @@ async def test_ipc_server_uses_exception_code_attribute_when_present(
             lambda: AuthenticationError("인증 실패", error_code="EGW00121"),
             "BROKER_AUTH_FAILED",
         ),
+        (
+            lambda: TokenRateLimitError("발급 제한", error_code="EGW00133"),
+            "BROKER_AUTH_FAILED",
+        ),
     ],
-    ids=["api_error", "auth_error"],
+    ids=["api_error", "auth_error", "token_rate_limit"],
 )
 async def test_ipc_envelope_code_is_stable_code_not_broker_raw_code(
     socket_path: str, service_registry: ServiceRegistry, make_error, stable_code

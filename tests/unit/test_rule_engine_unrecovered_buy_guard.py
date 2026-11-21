@@ -354,10 +354,10 @@ class TestUnrecoveredBuyGuard:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
-        "submitted_at", [None, "", "not-a-timestamp", "2026-05-29T10:00:00"]
+        "submitted_at", [None, "", "not-a-timestamp", "2026-05-29T10:00:00", 12345]
     )
     async def test_age_unknown_does_not_block(
-        self, eventbus: EventBus, submitted_at: str | None
+        self, eventbus: EventBus, submitted_at: object
     ) -> None:
         """age를 셀 수 없는 미복구 주문은 나이 조건을 채우지 않아 매수를 막지 않는다."""
         tracker = FakeOrderTracker(

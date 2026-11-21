@@ -1560,10 +1560,18 @@ class TestVirtualRouting:
             assert (first, second) == ((0, 1), (1, 0))
         assert [f.error_code for f in cap.failed] == ["account_not_ready"]
 
+    @pytest.mark.parametrize(
+        ("path", "error_message"),
+        [
+            ("gate_blocked", "account_not_ready"),
+            ("market_price_unknown", "virtual_market_price_unavailable"),
+        ],
+        ids=["G3_gate_blocked", "G8_market_price_unknown"],
+    )
     async def test_virtual_gate_failure_keeps_order_identity_for_release(
-        self,
+        self, path: str, error_message: str
     ) -> None:
-        """차단 실패 이벤트는 원 주문의 order_id·bot_id·account_id 로 예약을 푼다."""
+        """경로마다 실패 이벤트가 원 주문의 order_id·bot_id·account_id 를 싣는다."""
         bus = EventBus()
         cap = _capture(bus)
         treasury = Treasury(
@@ -1576,20 +1584,25 @@ class TestVirtualRouting:
         )
         treasury.release_reservation = AsyncMock()  # type: ignore[method-assign]
         bus.subscribe(OrderFailedEvent, treasury._on_order_failed, priority=50)
-        executor = self._make_virtual_executor(
-            bus,
-            registry=not_ready_registry(
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=None)
+        registry = (
+            not_ready_registry(
                 ACCOUNT,
                 trading_mode=TradingMode.VIRTUAL,
                 flag=ReadinessFlag.TREASURY_SYNC,
-            ),
+            )
+            if path == "gate_blocked"
+            else ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL)
         )
+        executor = self._make_virtual_executor(bus, registry=registry, gateway=gateway)
 
-        await executor._on_order_approved(_approved())
+        await executor._on_order_approved(_approved(order_type="market"))
 
-        assert [(f.order_id, f.bot_id, f.account_id) for f in cap.failed] == [
-            ("ord-1", BOT, ACCOUNT)
-        ]
+        assert [
+            (f.order_id, f.bot_id, f.account_id, f.error_message) for f in cap.failed
+        ] == [("ord-1", BOT, ACCOUNT, error_message)]
+        assert cap.filled == []
         treasury.release_reservation.assert_awaited_once()
         call = treasury.release_reservation.await_args
         assert call.args[0] == BOT and call.args[1] == "ord-1"

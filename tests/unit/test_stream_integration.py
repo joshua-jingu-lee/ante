@@ -923,3 +923,51 @@ async def test_subscription_sync_excludes_other_account_stop_orders(
         assert stream_client.subscribed_symbols == {"035720"}
     finally:
         await integration.stop()
+
+
+async def test_subscription_sync_excludes_triggered_and_expired_stop_orders(
+    integration: StreamIntegration,
+    stream_client: FakeStreamClient,
+    stop_order_manager: StopOrderManager,
+    eventbus: EventBus,
+) -> None:
+    """같은 계좌라도 트리거되거나 만료된 stop 주문의 종목은 구독에 넣지 않는다."""
+
+    async def _register(order_id: str, symbol: str) -> str:
+        return await stop_order_manager.register(
+            order_id=order_id,
+            bot_id="bot-1",
+            strategy_id="stg-1",
+            symbol=symbol,
+            side="buy",
+            quantity=5.0,
+            order_type="stop",
+            stop_price=100000.0,
+            account_id="acc-001",
+        )
+
+    with patch("ante.broker.fill_scheduler.business_date_kst", return_value="20260619"):
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=True
+        ):
+            triggered = await _register("ord-trig", "035720")
+            expired = await _register("ord-exp", "000660")
+            await stop_order_manager.on_price_update(
+                "035720", 100000.0, account_id="acc-001", is_exchange_tick=True
+            )
+        with patch.object(
+            StopOrderManager, "_is_session_type_active_now", return_value=False
+        ):
+            await stop_order_manager.check_session_expiry()
+            active = await _register("ord-active", "005380")
+
+    assert stop_order_manager.get_order(triggered).triggered is True
+    assert stop_order_manager.get_order(expired).expired is True
+    assert [o.stop_order_id for o in stop_order_manager.active_orders] == [active]
+
+    await integration.start()
+    try:
+        await eventbus.publish(BotStartedEvent(bot_id="bot-1", account_id="acc-001"))
+        assert stream_client.subscribed_symbols == {"005380"}
+    finally:
+        await integration.stop()

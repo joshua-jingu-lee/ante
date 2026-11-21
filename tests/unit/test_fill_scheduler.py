@@ -1854,7 +1854,7 @@ async def test_fallback_enabled_by_default_when_flag_omitted(
 async def test_poll_window_reaches_back_to_verify_date_even_with_open_orders(
     fallback_applier, tracker, fixed_business_day
 ):
-    """open 주문이 함께 있어도 from_date 는 verify 항목의 더 이른 날짜까지 내려간다."""
+    """open 주문이 함께 있어도 from_date 는 verify 항목 가운데 가장 이른 날짜다."""
     from ante.broker.fill_scheduler import _FallbackVerifyEntry
 
     app, _ph, eb, svc = fallback_applier
@@ -1872,15 +1872,19 @@ async def test_poll_window_reaches_back_to_verify_date_even_with_open_orders(
     )
     broker = FallbackBroker(history=[], positions=[])
     sched = _make_fallback_sched(broker, tracker, app, svc, eventbus=eb)
-    prior_date = "20200101"
-    sched._fallback_verify["0001"] = _FallbackVerifyEntry(
-        recorded=1.0, submitted_date=prior_date
-    )
+    for odno, submitted in [
+        ("0001", "20260301"),
+        ("0003", "20200101"),
+        ("0004", "20250101"),
+    ]:
+        sched._fallback_verify[odno] = _FallbackVerifyEntry(
+            recorded=1.0, submitted_date=submitted
+        )
 
     await sched.catch_up_once()
 
     assert broker.history_calls == 1
-    assert broker.last_history_args == (prior_date, FIXED_DAY)
+    assert broker.last_history_args == ("20200101", FIXED_DAY)
 
 
 async def test_late_ccld_without_eventbus_skips_alert_but_pops_verify(

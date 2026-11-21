@@ -364,10 +364,18 @@ async def test_gateway_buy_same_price_executes(
         ("price", True),
         ("price", Decimal("45000")),
         ("price", Fraction(45000)),
+        ("price", "45000"),
         ("quantity", True),
         ("quantity", Decimal("10")),
     ],
-    ids=["price_bool", "price_decimal", "price_fraction", "qty_bool", "qty_decimal"],
+    ids=[
+        "price_bool",
+        "price_decimal",
+        "price_fraction",
+        "price_str",
+        "qty_bool",
+        "qty_decimal",
+    ],
 )
 async def test_gateway_bool_and_non_int_float_numbers_rejected(
     account_service: AsyncMock,

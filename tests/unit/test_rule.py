@@ -36,6 +36,25 @@ class _UserBaseException(BaseException):
     """Exception 이 아닌 사용자 정의 BaseException 하위형."""
 
 
+class _UserError(Exception):
+    """사용자 정의 Exception 하위형."""
+
+
+_STDLIB_NON_EXCEPTION_BASES = [
+    c
+    for c in BaseException.__subclasses__()
+    if not issubclass(c, Exception)
+    and c.__module__ in ("builtins", "asyncio.exceptions")
+]
+_NON_EXCEPTION_BASES = [*_STDLIB_NON_EXCEPTION_BASES, _UserBaseException]
+
+
+def _make_base_exception(exc_type: type[BaseException]) -> BaseException:
+    if issubclass(exc_type, BaseExceptionGroup):
+        return exc_type("repr aborted", [KeyboardInterrupt()])
+    return exc_type("repr aborted")
+
+
 # ── Fixtures ─────────────────────────────────────
 
 
@@ -4505,23 +4524,18 @@ class TestRuleEngineEventBus:
         assert rejected[0].order_id == "<unrenderable _Unprintable>"
         assert rejected[0].reason.startswith("Invalid signal side: 'hold'")
 
-    @pytest.mark.parametrize(
-        "exc_type",
-        [
+    def test_non_exception_base_domain_is_generated_and_complete(self):
+        """정의로 만든 비 Exception BaseException 목록이 내장 다섯 종을 모두 담는다."""
+        assert {
             KeyboardInterrupt,
             SystemExit,
-            asyncio.CancelledError,
             GeneratorExit,
-            _UserBaseException,
-        ],
-        ids=[
-            "KeyboardInterrupt",
-            "SystemExit",
-            "CancelledError",
-            "GeneratorExit",
-            "user",
-        ],
-    )
+            asyncio.CancelledError,
+            BaseExceptionGroup,
+        } <= set(_STDLIB_NON_EXCEPTION_BASES)
+        assert not any(issubclass(c, Exception) for c in _NON_EXCEPTION_BASES)
+
+    @pytest.mark.parametrize("exc_type", _NON_EXCEPTION_BASES, ids=lambda c: c.__name__)
     async def test_quantity_repr_base_exception_is_not_swallowed(
         self, engine, eventbus, exc_type
     ):
@@ -4529,7 +4543,7 @@ class TestRuleEngineEventBus:
 
         class _BadQuantity:
             def __repr__(self) -> str:
-                raise exc_type("repr aborted")
+                raise _make_base_exception(exc_type)
 
         rejected: list[OrderRejectedEvent] = []
         eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
@@ -4550,14 +4564,17 @@ class TestRuleEngineEventBus:
 
         assert rejected == []
 
+    @pytest.mark.parametrize(
+        "exc_type", [LookupError, _UserError], ids=["builtin", "user"]
+    )
     async def test_quantity_repr_exception_falls_back_to_placeholder(
-        self, engine, eventbus
+        self, engine, eventbus, exc_type
     ):
         """같은 자리에서 Exception 이면 placeholder 로 사유를 만들어 거부한다."""
 
         class _BadQuantity:
             def __repr__(self) -> str:
-                raise LookupError("repr fails")
+                raise exc_type("repr fails")
 
         rejected: list[OrderRejectedEvent] = []
         eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
