@@ -364,3 +364,21 @@ def test_record_dispatches_the_committed_request_set(tmp_path: Path) -> None:
             '"resource": "strategy:s1"}]]'
         ),
     }
+
+
+def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
+    row = _request(
+        "strategy.set_status:value:status:str5",
+        "value",
+        {"strategy_id": "s1", "status": "5"},
+        key="status",
+        same_type=True,
+    )
+    code, out, _ = _compare(
+        tmp_path,
+        [row],
+        {"strategy.set_status:value:status:str5": EXECUTION},
+        {"strategy.set_status:value:status:str5": REJECTED},
+        command="strategy.set_status",
+    )
+    assert (code, _count(out, "코드 바뀜")) == (0, 1)

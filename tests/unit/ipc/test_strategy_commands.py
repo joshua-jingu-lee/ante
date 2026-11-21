@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import typing
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -14,8 +15,10 @@ import pytest
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
+from ante.ipc.requests import StrategySetStatusRequest
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.strategy.registry import StrategyRecord, StrategyRegistry, StrategyStatus
+from tests.unit.ipc.test_request_model_domain import validation_message
 
 ACTOR = "ops-lead"
 UPDATE_SQL = "UPDATE strategies SET status = ? WHERE strategy_id = ?"
@@ -117,9 +120,19 @@ async def test_set_status_outside_the_status_values() -> None:
         "id": "req-1",
         "status": "error",
         "error": {
-            "code": "EXECUTION_ERROR",
-            "message": "'bogus' is not a valid StrategyStatus",
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(
+                "strategy.set_status", ("status", "literal_error")
+            ),
         },
     }
     assert harness.strategy_registry.gets == []
     harness.audit_logger.log.assert_not_awaited()
+
+
+def test_status_literal_is_the_strategy_status_values() -> None:
+    members = typing.get_args(
+        StrategySetStatusRequest.model_fields["status"].annotation
+    )
+    assert len(members) == len(set(members)) > 0
+    assert set(members) == {status.value for status in StrategyStatus}
