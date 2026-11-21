@@ -751,7 +751,8 @@ tests/
 │   ├── test_mock_broker_account.py
 │   ├── test_main_wiring.py
 │   ├── test_e2e_harness.py
-│   └── test_config_dir_isolation_guard.py
+│   ├── test_config_dir_isolation_guard.py
+│   └── test_check_spec_code_blocks.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
@@ -804,7 +805,9 @@ scripts/
 ├── check_prose_budget.py
 ├── collect_autopilot_queue.py
 ├── check_comments.py
-└── comment_baseline.json
+├── comment_baseline.json
+├── check_spec_code_blocks.py
+└── spec_code_block_baseline.json
 ```
 
 ## docs/ — 설계 문서

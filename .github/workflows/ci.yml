@@ -60,6 +60,9 @@ jobs:
       - name: Comment check
         run: python scripts/check_comments.py
 
+      - name: Spec code block check
+        run: python scripts/check_spec_code_blocks.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45

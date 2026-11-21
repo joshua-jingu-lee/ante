@@ -26,7 +26,12 @@ file at the repository root. A regular file mode is ``100644`` or ``100755``.
   loaded or validated, is ``review``. Since both sides go through the same
   ``parse_baseline``, a base whose top-level keys differ from the ones it
   requires (a baseline from before a key was added or after one was removed)
-  is ``review``.
+  is ``review``. Also ``scripts/spec_code_block_baseline.json`` modified with
+  the same regular file mode before and after, both sides decoding as UTF-8
+  and passing ``parse_baseline`` of ``check_spec_code_blocks.py`` (loaded by
+  file path next to this script), and every head value not above base. That
+  ``parse_baseline`` requires the same three keys on both sides, so a key
+  added or removed is ``review``.
 - ``review``: anything else, including copies, type changes, symlinks,
   submodules and any rename outside doc paths.
 
@@ -34,6 +39,8 @@ Known limits of ``baseline-lowered``: it compares per-file counts only, so a
 change that removes comments from a file and adds fewer new ones there, or
 rewrites docstrings without adding lines, still skips. When ``comments`` in
 the baseline is ``{}``, any added comment creates a new key and is ``review``.
+A doc change that changes a block's language and lowers the spec code block
+baseline skips.
 
 Exit 0: every changed file is ``doc``, ``ast-identical`` or
 ``baseline-lowered``.
@@ -67,6 +74,8 @@ ABSENT_MODE = "000000"
 DOCSTRING_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
 COMMENT_BASELINE_PATH = "scripts/comment_baseline.json"
 CHECK_COMMENTS_PATH = Path(__file__).with_name("check_comments.py")
+SPEC_BASELINE_PATH = "scripts/spec_code_block_baseline.json"
+CHECK_SPEC_BLOCKS_PATH = Path(__file__).with_name("check_spec_code_blocks.py")
 
 
 class ScopeError(RuntimeError):
@@ -202,7 +211,7 @@ def classify_without_content(change: Change) -> str | None:
         change.status == "M"
         and (
             (change.path.startswith("src/") and change.path.endswith(".py"))
-            or change.path == COMMENT_BASELINE_PATH
+            or change.path in (COMMENT_BASELINE_PATH, SPEC_BASELINE_PATH)
         )
         and change.old_mode == change.new_mode
         and change.new_mode in REGULAR_MODES
@@ -211,12 +220,10 @@ def classify_without_content(change: Change) -> str | None:
     return REVIEW
 
 
-def _load_baseline_parser() -> Callable[[str], Any]:
-    spec = importlib.util.spec_from_file_location(
-        "_check_review_scope_comments", CHECK_COMMENTS_PATH
-    )
+def _load_parser(name: str, path: Path) -> Callable[[str], Any]:
+    spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {CHECK_COMMENTS_PATH}")
+        raise ImportError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     try:
@@ -225,6 +232,14 @@ def _load_baseline_parser() -> Callable[[str], Any]:
         sys.modules.pop(spec.name, None)
     parser: Callable[[str], Any] = module.parse_baseline
     return parser
+
+
+def _load_baseline_parser() -> Callable[[str], Any]:
+    return _load_parser("_check_review_scope_comments", CHECK_COMMENTS_PATH)
+
+
+def _load_spec_baseline_parser() -> Callable[[str], Any]:
+    return _load_parser("_check_review_scope_spec_blocks", CHECK_SPEC_BLOCKS_PATH)
 
 
 def _not_above(head: dict[str, int], base: dict[str, int]) -> bool:
@@ -247,6 +262,22 @@ def baseline_lowered(old: bytes, new: bytes) -> bool:
         return False
 
 
+def spec_baseline_lowered(old: bytes, new: bytes) -> bool:
+    """True when both spec baselines are valid and no head value exceeds base."""
+    try:
+        parse = _load_spec_baseline_parser()
+        before = parse(old.decode("utf-8"))
+        after = parse(new.decode("utf-8"))
+        return bool(
+            isinstance(before, dict)
+            and isinstance(after, dict)
+            and set(after) == set(before)
+            and _not_above(after, before)
+        )
+    except (Exception, SystemExit):
+        return False
+
+
 def classify(change: Change) -> str:
     decided = classify_without_content(change)
     if decided is not None:
@@ -255,6 +286,8 @@ def classify(change: Change) -> str:
     new = _run_git(["cat-file", "blob", change.new_sha])
     if change.path == COMMENT_BASELINE_PATH:
         return BASELINE_LOWERED if baseline_lowered(old, new) else REVIEW
+    if change.path == SPEC_BASELINE_PATH:
+        return BASELINE_LOWERED if spec_baseline_lowered(old, new) else REVIEW
     return AST_IDENTICAL if ast_identical_without_docstrings(old, new) else REVIEW
 
 
