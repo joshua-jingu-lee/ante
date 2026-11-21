@@ -625,7 +625,7 @@ ante report performance [--period daily|monthly] [--bot-id <봇ID>] [--start <�
 
 ### `ante feed` — 데이터 피드 (DataFeed)
 
-CLI 정의는 `src/ante/feed/cli.py`에 있으며 `ante.cli.main`에서 서브커맨드로 등록된다.
+CLI 정의는 `src/ante/cli/commands/feed.py`에 있으며 `ante.cli.main`에서 서브커맨드로 등록된다.
 모든 feed 커맨드는 `@require_auth`와 `@require_scope` 데코레이터로 인증/권한 검증을 수행한다.
 
 ```bash

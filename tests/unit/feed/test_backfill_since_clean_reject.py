@@ -190,7 +190,7 @@ class TestCliSinceFutureReject:
     ) -> None:
         """`--since 2999-01-01 --format json` → exit 1, 단일 envelope,
         성공 result 미출력, orchestrator 미호출."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_make_collection_result())
             mock_build.return_value = mock_orch
@@ -223,7 +223,7 @@ class TestCliSinceFutureReject:
     def test_future_since_text_mode_writes_error(
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_make_collection_result())
             mock_build.return_value = mock_orch
@@ -251,7 +251,7 @@ class TestCliSinceFutureReject:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """malformed `--since`는 기존 CLI_INVALID_DATE 선순위 유지."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_make_collection_result())
             mock_build.return_value = mock_orch
@@ -347,7 +347,7 @@ class TestCliConfigTomlBackfillSince:
     ) -> None:
         """정상 과거 날짜는 기존 흐름 통과."""
         _write_config(initialized_data_path, "2024-01-01")
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_make_collection_result())
             mock_build.return_value = mock_orch
@@ -383,7 +383,7 @@ class TestCliNonDateConfigErrorsRegression:
             {"error": "data.go.kr API 키 미설정", "source": "data_go_kr"},
             {"error": "DART API 키 미설정", "source": "dart"},
         ]
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(
                 return_value=_make_collection_result(config_errors=legacy_errors)
@@ -417,7 +417,7 @@ class TestCliNonDateConfigErrorsRegression:
     ) -> None:
         """lock 경합 config_error도 새 분기를 trigger하지 않는다."""
         legacy_errors = [{"error": "다른 수집 프로세스가 이미 실행 중"}]
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(
                 return_value=_make_collection_result(config_errors=legacy_errors)

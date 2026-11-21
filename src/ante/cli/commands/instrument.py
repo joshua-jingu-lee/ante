@@ -9,12 +9,19 @@ import click
 from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts.cli_errors import (
+    InstrumentEmptyFileError,
+    InstrumentInvalidExchangeError,
+    InstrumentInvalidFileFormatError,
+    InstrumentInvalidJsonShapeError,
+    InstrumentInvalidSymbolError,
+    InstrumentIoError,
+    InstrumentMissingColumnsError,
+    InstrumentSyncSourceUnsupportedError,
+)
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 from ante.core.market_data_vocab import is_krx_symbol
 
-_INVALID_EXCHANGE_CODE = "INSTRUMENT_INVALID_EXCHANGE"
-_INVALID_KRX_SYMBOL_CODE = "INSTRUMENT_INVALID_SYMBOL"
-_SYNC_SOURCE_UNSUPPORTED_CODE = "INSTRUMENT_SYNC_SOURCE_UNSUPPORTED"
 _SYNC_SUPPORTED_EXCHANGES: frozenset[str] = frozenset({"KRX"})
 
 
@@ -51,11 +58,9 @@ def instrument_list(
     fmt = get_formatter(ctx)
 
     if not is_canonical(exchange):
-        fmt.error(
-            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
-            code=_INVALID_EXCHANGE_CODE,
+        raise InstrumentInvalidExchangeError(
+            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}"
         )
-        ctx.exit(1)
 
     async def _run() -> list[dict]:
         async with open_cli_db(ctx, db_path_override=db_path) as db:
@@ -116,21 +121,17 @@ def sync(
     resolved_config_dir = get_config_dir(ctx)
 
     if not is_canonical(exchange):
-        fmt.error(
-            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}",
-            code=_INVALID_EXCHANGE_CODE,
+        raise InstrumentInvalidExchangeError(
+            f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}"
         )
-        ctx.exit(1)
 
     if exchange not in _SYNC_SUPPORTED_EXCHANGES:
         supported = ", ".join(sorted(_SYNC_SUPPORTED_EXCHANGES))
-        fmt.error(
+        raise InstrumentSyncSourceUnsupportedError(
             f"거래소 {exchange!r}는 canonical이나 현재 sync source"
             f"(KIS domestic/KRX)가 미지원합니다 — invalid exchange 아님. "
-            f"sync 지원 거래소: {supported}",
-            code=_SYNC_SOURCE_UNSUPPORTED_CODE,
+            f"sync 지원 거래소: {supported}"
         )
-        ctx.exit(1)
 
     async def _run() -> dict:
         config = Config.load(config_dir=resolved_config_dir)
@@ -285,11 +286,9 @@ def instrument_import(
     ext = path.suffix.lower()
 
     if ext not in (".csv", ".json"):
-        fmt.error(
-            f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)",
-            code="INSTRUMENT_INVALID_FILE_FORMAT",
+        raise InstrumentInvalidFileFormatError(
+            f"지원하지 않는 파일 형식: {ext} (csv 또는 json만 지원)"
         )
-        ctx.exit(1)
 
     try:
         if ext == ".csv":
@@ -302,50 +301,38 @@ def instrument_import(
             with open(path, encoding="utf-8") as f:
                 records = json.load(f)
     except Exception as e:
-        fmt.error(f"파일 읽기 실패: {e}", code="INSTRUMENT_IO_ERROR")
-        ctx.exit(1)
+        raise InstrumentIoError(f"파일 읽기 실패: {e}") from e
 
     if ext == ".json" and not isinstance(records, list):
-        fmt.error(
-            "JSON 파일은 배열 형태여야 합니다.",
-            code="INSTRUMENT_INVALID_JSON_SHAPE",
-        )
-        ctx.exit(1)
+        raise InstrumentInvalidJsonShapeError("JSON 파일은 배열 형태여야 합니다.")
 
     if not records:
-        fmt.error("파일에 데이터가 없습니다.", code="INSTRUMENT_EMPTY_FILE")
-        ctx.exit(1)
+        raise InstrumentEmptyFileError("파일에 데이터가 없습니다.")
 
     first = records[0]
     if "symbol" not in first or "exchange" not in first:
-        fmt.error(
-            "필수 컬럼 누락: symbol, exchange가 필요합니다.",
-            code="INSTRUMENT_MISSING_COLUMNS",
+        raise InstrumentMissingColumnsError(
+            "필수 컬럼 누락: symbol, exchange가 필요합니다."
         )
-        ctx.exit(1)
 
     for idx, r in enumerate(records):
         row_exchange = r.get("exchange", "")
         if not isinstance(row_exchange, str) or not is_canonical(row_exchange):
             row_symbol = r.get("symbol", "")
-            fmt.error(
+            raise InstrumentInvalidExchangeError(
                 f"유효하지 않은 거래소: {row_exchange!r} "
                 f"(행 {idx + 1}, symbol={row_symbol!r}). "
-                f"허용 값: {_allowed_exchanges_hint()}",
-                code=_INVALID_EXCHANGE_CODE,
+                f"허용 값: {_allowed_exchanges_hint()}"
             )
-            ctx.exit(1)
 
         if isinstance(row_exchange, str) and row_exchange == "KRX":
             row_symbol = r.get("symbol", "")
             if not is_krx_symbol(row_symbol):
-                fmt.error(
+                raise InstrumentInvalidSymbolError(
                     f"유효하지 않은 종목 코드: {row_symbol!r} "
                     f"(행 {idx + 1}, exchange={row_exchange!r}, "
-                    f"KRX 6자리 숫자).",
-                    code=_INVALID_KRX_SYMBOL_CODE,
+                    f"KRX 6자리 숫자)."
                 )
-                ctx.exit(1)
 
     instruments = [
         Instrument(

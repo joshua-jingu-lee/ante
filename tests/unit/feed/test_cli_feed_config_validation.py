@@ -112,7 +112,7 @@ def _run_backfill(runner: CliRunner, data_path: str, *, json_fmt: bool = False):
     args = ["feed", "run", "backfill", "--data-path", data_path]
     if json_fmt:
         args = ["--format", "json", *args]
-    with patch("ante.feed.cli._build_orchestrator") as mock_build:
+    with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
         mock_orch = AsyncMock()
         mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_BACKFILL)
         mock_build.return_value = mock_orch
@@ -124,7 +124,7 @@ def _run_daily(runner: CliRunner, data_path: str, *, json_fmt: bool = False):  #
     args = ["feed", "run", "daily", "--data-path", data_path]
     if json_fmt:
         args = ["--format", "json", *args]
-    with patch("ante.feed.cli._build_orchestrator") as mock_build:
+    with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
         mock_orch = AsyncMock()
         mock_orch.run_daily = AsyncMock(return_value=_EMPTY_DAILY)
         mock_build.return_value = mock_orch
@@ -344,7 +344,7 @@ class TestFeedStartCallsHelper:
     ) -> None:
         """feed start 도 진입 시 무효 log_level 을 거부한다."""
         data_path = _init_with_config(tmp_path, _config(log_level="VERBOSE"))
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_build.return_value = AsyncMock()
             result = runner.invoke(
                 cli,
@@ -365,7 +365,7 @@ class TestFeedStartCallsHelper:
                 )
             ),
         )
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_build.return_value = AsyncMock()
             result = runner.invoke(
                 cli,

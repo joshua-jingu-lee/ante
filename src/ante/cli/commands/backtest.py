@@ -12,6 +12,15 @@ from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts.cli_errors import (
+    BacktestDataNotFoundError,
+    BacktestError,
+    BacktestInvalidExchangeError,
+    BacktestInvalidSymbolError,
+    BacktestInvalidTimeframeError,
+    InvalidDateError,
+    InvalidDateRangeError,
+)
 from ante.core.database import OperationalError
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
@@ -79,59 +88,44 @@ def run(
 
     for label, value in (("시작일", start), ("종료일", end)):
         if _ISO_DATE_RE.fullmatch(value) is None:
-            fmt.error(
-                f"{label} 형식이 올바르지 않습니다: '{value}' (YYYY-MM-DD 형식 필요)",
-                code="INVALID_DATE",
+            raise InvalidDateError(
+                f"{label} 형식이 올바르지 않습니다: '{value}' (YYYY-MM-DD 형식 필요)"
             )
-            raise SystemExit(1)
     try:
         start_date = datetime.date.fromisoformat(start)
         end_date = datetime.date.fromisoformat(end)
     except ValueError as e:
-        fmt.error(f"날짜 형식이 올바르지 않습니다: {e}", code="INVALID_DATE")
-        raise SystemExit(1) from e
+        raise InvalidDateError(f"날짜 형식이 올바르지 않습니다: {e}") from e
 
     if start_date > end_date:
-        fmt.error(
-            f"시작일({start})이 종료일({end}) 이후입니다.",
-            code="INVALID_DATE_RANGE",
-        )
-        raise SystemExit(1)
+        raise InvalidDateRangeError(f"시작일({start})이 종료일({end}) 이후입니다.")
 
     if not is_canonical(exchange):
-        fmt.error(
+        raise BacktestInvalidExchangeError(
             f"유효하지 않은 거래소: {exchange!r}. "
-            f"허용 값: {', '.join(sorted(CANONICAL_EXCHANGES))}",
-            code="BACKTEST_INVALID_EXCHANGE",
+            f"허용 값: {', '.join(sorted(CANONICAL_EXCHANGES))}"
         )
-        raise SystemExit(1)
 
     if timeframe is not None and not is_valid_timeframe(timeframe):
-        fmt.error(
+        raise BacktestInvalidTimeframeError(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
-            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
-            code="BACKTEST_INVALID_TIMEFRAME",
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}"
         )
-        raise SystemExit(1)
 
     if symbols is not None:
         parsed = symbols.split(",")
         if any(not s.strip() for s in parsed):
-            fmt.error(
+            raise BacktestInvalidSymbolError(
                 f"유효하지 않은 종목 코드: {symbols!r}. "
-                "빈 종목 코드를 포함할 수 없습니다.",
-                code="BACKTEST_INVALID_SYMBOL",
+                "빈 종목 코드를 포함할 수 없습니다."
             )
-            raise SystemExit(1)
         if exchange == "KRX":
             for seg in parsed:
                 if not is_krx_symbol(seg):
-                    fmt.error(
+                    raise BacktestInvalidSymbolError(
                         f"유효하지 않은 종목 코드: {seg!r}. "
-                        "KRX 종목 코드는 6자리 숫자여야 합니다.",
-                        code="BACKTEST_INVALID_SYMBOL",
+                        "KRX 종목 코드는 6자리 숫자여야 합니다."
                     )
-                    raise SystemExit(1)
 
     config = {
         "strategy_path": strategy_path,
@@ -157,11 +151,9 @@ def run(
             and datasets
             and all(d.get("row_count", 0) == 0 for d in datasets)
         ):
-            fmt.error(
-                f"명시한 종목의 데이터가 없습니다(row_count=0): {explicit_symbols}",
-                code="BACKTEST_DATA_NOT_FOUND",
+            raise BacktestDataNotFoundError(
+                f"명시한 종목의 데이터가 없습니다(row_count=0): {explicit_symbols}"
             )
-            raise SystemExit(1)
 
         run_id = asyncio.run(
             _save_backtest_run(resolved_db_path, result_dict, config, metrics)
@@ -182,9 +174,10 @@ def run(
             metric_rows = _format_metrics(metrics)
             fmt.table(metric_rows, ["지표", "값"])
 
+    except BacktestDataNotFoundError:
+        raise
     except Exception as e:
-        fmt.error(str(e), code="BACKTEST_ERROR")
-        raise SystemExit(1) from e
+        raise BacktestError(str(e)) from e
 
 
 async def _save_backtest_run(
@@ -271,8 +264,7 @@ def history(
                 ],
             )
     except Exception as e:
-        fmt.error(str(e), code="BACKTEST_ERROR")
-        raise SystemExit(1) from e
+        raise BacktestError(str(e)) from e
 
 
 def _format_metrics(metrics: dict) -> list[dict[str, str]]:

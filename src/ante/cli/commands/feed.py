@@ -16,7 +16,7 @@ from ante.cli.middleware import require_auth, require_scope
 if TYPE_CHECKING:
     from ante.feed.report.generator import ReportGenerator
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("ante.feed.cli")
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
