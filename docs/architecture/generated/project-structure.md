@@ -443,7 +443,8 @@ tests/
 │   │   ├── test_data_path_helper.py
 │   │   ├── test_db_encryption_key_chokepoint.py
 │   │   ├── test_single_error_exit.py
-│   │   └── test_trade_report_error_exits.py
+│   │   ├── test_trade_report_error_exits.py
+│   │   └── test_backtest_data_instrument_error_exits.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
