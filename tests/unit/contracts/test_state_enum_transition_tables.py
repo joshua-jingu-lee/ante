@@ -7,15 +7,19 @@
 식별자가 두 번 나오면 실패한다.
 
 **멤버**: 클래스 본문에 바로 있는 ``Assign`` (대상이 이름 하나) 또는 값이
-있는 ``AnnAssign`` (대상이 이름) 가운데 이름이 ``_`` 로 시작하지 않는 것.
+있는 ``AnnAssign`` (대상이 이름) 가운데, 이름이 밑줄 둘로 시작하거나
+(``__x``, ``__x__``) 밑줄 하나로 시작하고 끝나는(``_x_``) 것을 뺀 것.
 
 **전이표**: enum ``E`` 와 같은 파일의 모듈 수준 ``Assign`` (대상 이름 하나)
 또는 값이 있는 ``AnnAssign`` 가운데, 값이 ``dict`` 리터럴이고, 키가 모두
 ``E.<멤버>`` 로 ``E`` 의 멤버를 빠짐없이 중복 없이 덮고, 값이 모두
 ``E.<멤버>`` 만 담은 ``set`` 리터럴, ``set()``, ``frozenset()``,
-``frozenset({E.<멤버>, ...})`` 중 하나인 것. 멤버가 0개인 enum과 중첩
-클래스로 정의된 enum은 「표 없음」이다. 모든 값이 빈 집합인 표(빈 전이표)도
-표로 인정한다.
+``frozenset({E.<멤버>, ...})`` 중 하나인 것. 모든 값이 빈 집합인 표(빈
+전이표)도 표로 인정한다. 다음은 「표 없음」이다: 멤버가 0개인 enum, 모듈
+본문에 바로 있지 않은 enum, 클래스 본문에 대상이 이름 하나인 ``Assign``,
+대상이 이름인 ``AnnAssign``, ``FunctionDef``·``AsyncFunctionDef``, ``Expr``,
+``Pass`` 밖의 문이 있는 enum(그런 문은 위 정의가 세지 못하는 멤버를 만들 수
+있다).
 
 **판정**: 실측의 「표 없음」 집합이 :data:`BASELINE_WITHOUT_TABLE` 과 집합으로
 같을 때만 통과한다. 표를 단 enum은 같은 변경에서 기준선에서 지운다.
@@ -28,7 +32,7 @@
 함수 호출로 만든 표, 다른 파일의 표)은 「표 없음」이다. 함수형
 ``Enum("X", ...)``, ``Flag`` 베이스, 이름이 ``Enum`` 으로 끝나지 않는 사용자
 베이스, 이름이 ``Status``·``State`` 로 끝나지 않는 enum은 상태 enum으로
-세지 않는다.
+세지 않는다. 별칭(``B = A``)도 멤버로 센다.
 """
 
 from __future__ import annotations
@@ -64,6 +68,12 @@ MODEL_TABLE = "src/ante/strategy/registry.py 의 _ALLOWED_TRANSITIONS"
 _STATE_SUFFIXES = ("Status", "State")
 _INCREASED = "전이표 없는 상태 enum이 늘었다:"
 _STALE = "기준선에 있지만 「표 없음」 상태 enum이 아니다:"
+_NOT_TOP_NOTE = "모듈 본문에 바로 있지 않다. 모듈 수준으로 옮긴다"
+_OPEN_BODY_NOTE = (
+    "클래스 본문에 인정하지 않는 문이 있다. "
+    "클래스 본문을 이름 하나짜리 대입과 메서드만으로 쓴다"
+)
+_ALLOWED_BODY_STMTS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Expr, ast.Pass)
 
 
 def _base_name(base: ast.expr) -> str:
@@ -124,9 +134,27 @@ def enum_members(cls: ast.ClassDef) -> list[str]:
             name = stmt.target.id
         else:
             continue
-        if not name.startswith("_"):
+        if not _is_excluded_name(name):
             members.append(name)
     return members
+
+
+def _is_excluded_name(name: str) -> bool:
+    return name.startswith("__") or (name.startswith("_") and name.endswith("_"))
+
+
+def has_closed_body(cls: ast.ClassDef) -> bool:
+    """클래스 본문이 멤버 정의가 셀 수 있는 문만으로 되어 있으면 참이다."""
+    for stmt in cls.body:
+        if isinstance(stmt, ast.Assign):
+            if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
+                return False
+        elif isinstance(stmt, ast.AnnAssign):
+            if not isinstance(stmt.target, ast.Name):
+                return False
+        elif not isinstance(stmt, _ALLOWED_BODY_STMTS):
+            return False
+    return True
 
 
 def _is_member_ref(node: ast.expr | None, enum_name: str, members: set[str]) -> bool:
@@ -203,8 +231,10 @@ def measure_tables(root: Path) -> dict[str, bool]:
     """상태 enum 식별자마다 「표 있음」 여부를 돌려준다."""
     result: dict[str, bool] = {}
     for ident, (module, cls, module_level) in find_state_enums(root).items():
-        result[ident] = module_level and has_transition_table(
-            module, cls.name, enum_members(cls)
+        result[ident] = (
+            module_level
+            and has_closed_body(cls)
+            and has_transition_table(module, cls.name, enum_members(cls))
         )
     return result
 
@@ -217,15 +247,21 @@ def diff_against_baseline(
 
 
 def failure_message(
-    extra: frozenset[str], missing: frozenset[str], nested: frozenset[str]
+    extra: frozenset[str],
+    missing: frozenset[str],
+    not_top: frozenset[str],
+    open_body: frozenset[str],
 ) -> str:
     """비교 결과의 실패 메시지다. 차이가 없으면 빈 문자열이다."""
     lines: list[str] = []
     if extra:
         lines.append(_INCREASED)
         for ident in sorted(extra):
-            note = " (중첩 정의다. 모듈 수준으로 옮긴다)" if ident in nested else ""
-            lines.append(f"  - {ident}{note}")
+            notes = [_NOT_TOP_NOTE] if ident in not_top else []
+            if ident in open_body:
+                notes.append(_OPEN_BODY_NOTE)
+            suffix = f" ({'; '.join(notes)})" if notes else ""
+            lines.append(f"  - {ident}{suffix}")
         lines.append(
             f"  같은 파일 모듈 수준에 전이표를 둔다. 본보기는 {MODEL_TABLE} 다. "
             "수명주기가 없으면 빈 전이표(모든 값이 set())를 둔다. "
@@ -243,16 +279,22 @@ def assert_matches_baseline(root: Path, baseline: frozenset[str]) -> None:
     enums = find_state_enums(root)
     tables = measure_tables(root)
     without = frozenset(ident for ident, ok in tables.items() if not ok)
-    nested = frozenset(ident for ident, (_, _, top) in enums.items() if not top)
+    not_top = frozenset(ident for ident, (_, _, top) in enums.items() if not top)
+    open_body = frozenset(
+        ident for ident, (_, cls, _) in enums.items() if not has_closed_body(cls)
+    )
     extra, missing = diff_against_baseline(without, baseline)
     problems: list[str] = []
-    message = failure_message(extra, missing, nested)
+    message = failure_message(extra, missing, not_top, open_body)
     if message:
         problems.append(message)
     if not enums:
         problems.append("상태 enum을 하나도 찾지 못했다.")
     if not tables.get(MODEL_ENUM, False):
-        problems.append(f"양성 대조군 {MODEL_ENUM} 가 「표 있음」이 아니다.")
+        problems.append(
+            f"양성 대조군 {MODEL_ENUM} 가 「표 있음」이 아니다. "
+            "대조군을 옮기거나 이름을 바꿨으면 테스트의 대조군 식별자를 고친다."
+        )
     if problems:
         raise AssertionError("\n".join(problems))
 
@@ -321,6 +363,31 @@ def test_copy_with_table_row_removed_fails(tmp_path: Path) -> None:
     with pytest.raises(AssertionError) as excinfo:
         assert_matches_baseline(root, BASELINE_WITHOUT_TABLE)
     assert _listed(str(excinfo.value), _INCREASED) == {MODEL_ENUM}
+
+
+def test_copy_with_model_enum_renamed_fails_only_on_control(tmp_path: Path) -> None:
+    root = _copy_src(tmp_path)
+    registry = root / "src" / "ante" / "strategy" / "registry.py"
+    before = registry.read_text(encoding="utf-8")
+    after = before.replace("StrategyStatus", "StrategyState")
+    assert after != before
+    registry.write_text(after, encoding="utf-8")
+
+    tables = measure_tables(root)
+    assert tables["src/ante/strategy/registry.py::StrategyState"] is True
+    without = frozenset(ident for ident, ok in tables.items() if not ok)
+    assert diff_against_baseline(without, BASELINE_WITHOUT_TABLE) == (
+        frozenset(),
+        frozenset(),
+    )
+
+    with pytest.raises(AssertionError) as excinfo:
+        assert_matches_baseline(root, BASELINE_WITHOUT_TABLE)
+    message = str(excinfo.value)
+    assert MODEL_ENUM in message
+    assert "테스트의 대조군 식별자를 고친다" in message
+    assert _INCREASED not in message
+    assert _STALE not in message
 
 
 # ---------------------------------------------------------------------------
@@ -464,9 +531,12 @@ def test_nested_enum_message_says_move_to_module_level(tmp_path: Path) -> None:
             """
         },
     )
-    with pytest.raises(AssertionError, match="모듈 수준으로 옮긴다") as excinfo:
+    with pytest.raises(AssertionError) as excinfo:
         assert_matches_baseline(root, frozenset())
-    assert _listed(str(excinfo.value), _INCREASED) == {_ID + "FooStatus"}
+    message = str(excinfo.value)
+    assert _NOT_TOP_NOTE in message
+    assert _OPEN_BODY_NOTE not in message
+    assert _listed(message, _INCREASED) == {_ID + "FooStatus"}
 
 
 def test_duplicate_identifier_fails(tmp_path: Path) -> None:
@@ -514,7 +584,10 @@ def _class_of(source: str) -> ast.ClassDef:
 MEMBER_ROWS = [
     pytest.param('A = "a"', ["A"], id="assign"),
     pytest.param('A: str = "a"', ["A"], id="annassign-with-value"),
-    pytest.param('_ignore_ = ["x"]', [], id="underscore-name"),
+    pytest.param('_B = "b"', ["_B"], id="single-leading-underscore"),
+    pytest.param('_ignore_ = ["x"]', [], id="sunder"),
+    pytest.param('__x = "b"', [], id="double-leading-underscore"),
+    pytest.param('__x__ = "b"', [], id="dunder"),
     pytest.param("def method(self):\n    return 1", [], id="method"),
     pytest.param("A: str", [], id="annassign-without-value"),
 ]
@@ -593,6 +666,17 @@ TABLE_ROWS = [
         id="key-of-other-enum",
     ),
     pytest.param(
+        "T = {BarStatus.A: set(), BarStatus.B: set()}",
+        False,
+        id="keys-only-of-other-enum-with-same-member-names",
+    ),
+    pytest.param(
+        "T = {m.FooStatus.A: set(), m.FooStatus.B: set()}",
+        False,
+        id="keys-through-module-attribute",
+    ),
+    pytest.param("T = {A: set(), B: set()}", False, id="keys-bare-names"),
+    pytest.param(
         "T = {FooStatus.A: {FooStatus.C}, FooStatus.B: set()}",
         False,
         id="value-non-member",
@@ -651,6 +735,53 @@ TABLE_ROWS = [
 def test_table_domain(tmp_path: Path, table: str, expected: bool) -> None:
     root = _write_tree(tmp_path, {"m.py": _TABLE_HEADER + "\n" + table + "\n"})
     assert measure_tables(root)[_ID + "FooStatus"] is expected
+
+
+_BODY_TABLE = "T = {FooStatus.A: set(), FooStatus.B: set()}\n"
+
+BODY_ROWS = [
+    pytest.param("", True, id="only-single-name-assigns"),
+    pytest.param("if True:\n    C = 'c'", False, id="if-block"),
+    pytest.param(
+        "try:\n    C = 'c'\nexcept Exception:\n    pass", False, id="try-block"
+    ),
+    pytest.param("for _i in ('x',):\n    C = 'c'", False, id="for-block"),
+    pytest.param("with ctx():\n    C = 'c'", False, id="with-block"),
+    pytest.param("C, D = 'c', 'd'", False, id="tuple-target"),
+    pytest.param("C = D = 'c'", False, id="multiple-targets"),
+    pytest.param("def label(self):\n    return 1", True, id="method"),
+    pytest.param("async def fetch(self):\n    return 1", True, id="async-method"),
+    pytest.param('"설명."', True, id="docstring"),
+    pytest.param("pass", True, id="pass"),
+    pytest.param("note: str", True, id="annassign-without-value"),
+]
+
+
+@pytest.mark.parametrize(("extra_stmt", "expected"), BODY_ROWS)
+def test_class_body_domain(tmp_path: Path, extra_stmt: str, expected: bool) -> None:
+    body = "A = 'a'\nB = 'b'\n" + extra_stmt
+    source = (
+        "from enum import StrEnum\n\nclass FooStatus(StrEnum):\n"
+        + textwrap.indent(body, "    ")
+        + "\n\n"
+        + _BODY_TABLE
+    )
+    root = _write_tree(tmp_path, {"m.py": source})
+    assert measure_tables(root) == {_ID + "FooStatus": expected}
+
+
+def test_open_body_message_says_single_name_assigns(tmp_path: Path) -> None:
+    source = (
+        "from enum import StrEnum\n\nclass FooStatus(StrEnum):\n"
+        "    A = 'a'\n    B, C = 'b', 'c'\n\n" + _BODY_TABLE
+    )
+    root = _write_tree(tmp_path, {"m.py": source})
+    with pytest.raises(AssertionError) as excinfo:
+        assert_matches_baseline(root, frozenset())
+    message = str(excinfo.value)
+    assert _OPEN_BODY_NOTE in message
+    assert _NOT_TOP_NOTE not in message
+    assert _listed(message, _INCREASED) == {_ID + "FooStatus"}
 
 
 def test_table_in_other_file_is_not_counted(tmp_path: Path) -> None:
@@ -712,7 +843,7 @@ def test_judgement(
     missing: frozenset[str],
 ) -> None:
     assert diff_against_baseline(measured, baseline) == (extra, missing)
-    message = failure_message(extra, missing, frozenset())
+    message = failure_message(extra, missing, frozenset(), frozenset())
     if not extra and not missing:
         assert message == ""
         return
@@ -727,4 +858,5 @@ def test_judgement(
         assert "기준선에서 지운다" in message
     else:
         assert "기준선에서 지운다" not in message
-    assert "모듈 수준으로 옮긴다" not in message
+    assert _NOT_TOP_NOTE not in message
+    assert _OPEN_BODY_NOTE not in message
