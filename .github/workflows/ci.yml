@@ -63,6 +63,9 @@ jobs:
       - name: Spec code block check
         run: python scripts/check_spec_code_blocks.py
 
+      - name: Import boundary check
+        run: python scripts/check_imports.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45

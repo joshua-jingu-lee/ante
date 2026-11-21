@@ -752,7 +752,8 @@ tests/
 │   ├── test_main_wiring.py
 │   ├── test_e2e_harness.py
 │   ├── test_config_dir_isolation_guard.py
-│   └── test_check_spec_code_blocks.py
+│   ├── test_check_spec_code_blocks.py
+│   └── test_check_imports.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
@@ -807,7 +808,9 @@ scripts/
 ├── check_comments.py
 ├── comment_baseline.json
 ├── check_spec_code_blocks.py
-└── spec_code_block_baseline.json
+├── spec_code_block_baseline.json
+├── check_imports.py
+└── import_baseline.json
 ```
 
 ## docs/ — 설계 문서
