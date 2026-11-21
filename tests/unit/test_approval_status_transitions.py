@@ -5,6 +5,9 @@
 기대값은 모두 리터럴(상태 문자열, 예외 메시지 전체, history의 action
 목록)이고, 이전 상태는 원시 SQL로 DB에 넣어 서비스가 DB에서 읽은
 ``str`` 형태로 보게 한다.
+
+뒤쪽은 전이표가 리터럴로 적은 13쌍과 같은지, 전이 함수가 7×7=49쌍에서
+13쌍만 통과시키는지, ``expire_stale`` 이 행마다 전이 함수를 지나는지 본다.
 """
 
 from __future__ import annotations
@@ -14,9 +17,15 @@ from typing import Any
 
 import pytest
 
+import ante.approval.service as service_module
 from ante.approval.auto_approve import AutoApproveConfig, AutoApproveEvaluator
 from ante.approval.errors import ApprovalStatusConflictError
-from ante.approval.service import ApprovalService
+from ante.approval.models import (
+    APPROVAL_STATUS_TRANSITIONS,
+    ApprovalRequest,
+    ApprovalStatus,
+)
+from ante.approval.service import ApprovalService, _transition_status
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import ApprovalResolvedEvent
@@ -447,3 +456,104 @@ async def test_expire_stale_skips_non_pending(service, db, resolved, prev):
     assert await service.expire_stale() == 0
     assert await _stored_status(service, approval_id) == prev
     assert resolved == []
+
+
+# ── 전이표와 전이 함수 ────────────────────────────────────────────
+
+ALLOWED_PAIRS = {
+    ("pending", "approved"),
+    ("pending", "rejected"),
+    ("pending", "on_hold"),
+    ("pending", "cancelled"),
+    ("pending", "expired"),
+    ("approved", "execution_failed"),
+    ("execution_failed", "approved"),
+    ("execution_failed", "rejected"),
+    ("execution_failed", "on_hold"),
+    ("execution_failed", "cancelled"),
+    ("rejected", "pending"),
+    ("on_hold", "pending"),
+    ("on_hold", "cancelled"),
+}
+
+ALL_PAIRS = [(current, target) for current in ALL_STATUSES for target in ALL_STATUSES]
+
+
+def test_transition_table_equals_the_thirteen_literal_pairs():
+    assert sorted(str(k) for k in APPROVAL_STATUS_TRANSITIONS) == sorted(ALL_STATUSES)
+    pairs = {
+        (str(current), str(target))
+        for current, targets in APPROVAL_STATUS_TRANSITIONS.items()
+        for target in targets
+    }
+    assert pairs == ALLOWED_PAIRS
+    assert len(ALLOWED_PAIRS) == 13
+    assert len(ALL_PAIRS) == 49
+
+
+def _request_with(status: Any) -> ApprovalRequest:
+    return ApprovalRequest(
+        id="req-1", type="strategy_adopt", status=status, requester=REQUESTER, title=""
+    )
+
+
+@pytest.mark.parametrize("as_enum", [True, False], ids=["enum", "str"])
+@pytest.mark.parametrize(("current", "target"), ALL_PAIRS)
+def test_transition_status_over_all_49_pairs(current, target, as_enum):
+    request = _request_with(ApprovalStatus(current) if as_enum else current)
+    if (current, target) in ALLOWED_PAIRS:
+        returned = _transition_status(request, ApprovalStatus(target), "act")
+        assert returned == target
+        assert request.status == target
+        return
+    with pytest.raises(ValueError) as exc_info:
+        _transition_status(request, ApprovalStatus(target), "act")
+    _assert_exact(
+        exc_info,
+        ApprovalStatusConflictError,
+        f"결재 'req-1' 상태 '{current}' 에서 'act' 작업을 수행할 수 없습니다.",
+    )
+    assert exc_info.value.code == "APPROVAL_STATUS_CONFLICT"
+    assert exc_info.value.current_status == current
+    assert exc_info.value.requested_action == "act"
+    assert request.status == current
+
+
+@pytest.mark.parametrize("target", ALL_STATUSES)
+def test_transition_status_rejects_unknown_current_string(target):
+    request = _request_with("legacy")
+    with pytest.raises(ValueError) as exc_info:
+        _transition_status(request, ApprovalStatus(target), "act")
+    _assert_exact(
+        exc_info,
+        ApprovalStatusConflictError,
+        "결재 'req-1' 상태 'legacy' 에서 'act' 작업을 수행할 수 없습니다.",
+    )
+    assert request.status == "legacy"
+
+
+async def test_expire_stale_passes_each_row_through_transition_status(
+    service, db, monkeypatch
+):
+    real = service_module._transition_status
+    calls: list[tuple[str, str, str, str]] = []
+
+    def _recording(request: Any, target: Any, action: str) -> Any:
+        calls.append((request.id, str(request.status), str(target), action))
+        return real(request, target, action)
+
+    monkeypatch.setattr(service_module, "_transition_status", _recording)
+    first = await _request_in(service, db, "pending")
+    second = await _request_in(service, db, "pending")
+    for approval_id in (first, second):
+        await _set_expired_deadline(db, approval_id)
+
+    assert await service.expire_stale() == 2
+    assert sorted(calls) == sorted(
+        [
+            (first, "pending", "expired", "expire_stale"),
+            (second, "pending", "expired", "expire_stale"),
+        ]
+    )
+    assert await _stored_status(service, first) == "expired"
+    assert await _stored_status(service, second) == "expired"
