@@ -51,21 +51,22 @@ _SCRUBBED_ENV = (
     "ANTE_ENV",
     "ANTE_LOG_JSONL",
 )
-# 이벤트 이름 → 경로 인자의 위치.
-_PATH_EVENTS: dict[str, tuple[int, ...]] = {
-    "open": (0,),
-    "os.mkdir": (0,),
-    "os.remove": (0,),
-    "os.rmdir": (0,),
-    "os.rename": (0, 1),
-    "os.replace": (0, 1),
-    "os.listdir": (0,),
-    "os.scandir": (0,),
-    "os.chmod": (0,),
-    "os.truncate": (0,),
-    "os.utime": (0,),
-    "shutil.rmtree": (0,),
-    "sqlite3.connect": (0,),
+# 이벤트 이름 → (경로 인자의 위치, 그 경로의 dir_fd 인자 위치) 목록.
+# dir_fd가 주어진 상대 경로는 작업 디렉터리 기준이 아니어서 풀 수 없으므로 건너뛴다.
+_PATH_EVENTS: dict[str, tuple[tuple[int, int | None], ...]] = {
+    "open": ((0, None),),
+    "os.mkdir": ((0, 2),),
+    "os.remove": ((0, 1),),
+    "os.rmdir": ((0, 1),),
+    "os.rename": ((0, 2), (1, 3)),
+    "os.replace": ((0, 2), (1, 3)),
+    "os.listdir": ((0, None),),
+    "os.scandir": ((0, None),),
+    "os.chmod": ((0, 2),),
+    "os.truncate": ((0, None),),
+    "os.utime": ((0, 3),),
+    "shutil.rmtree": ((0, 1),),
+    "sqlite3.connect": ((0, None),),
 }
 _WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
 
@@ -99,6 +100,7 @@ class _ConfigIsolationGuard:
         # (이벤트, abspath, realpath). list.append는 스레드 사이에서 원자적이다.
         self.records: list[tuple[str, str, str]] = []
         self._local = threading.local()
+        self._take_lock = threading.Lock()
 
     @property
     def forbidden_roots(self) -> tuple[str, ...]:
@@ -119,8 +121,11 @@ class _ConfigIsolationGuard:
         )
 
     def take_records(self) -> list[tuple[str, str, str]]:
-        taken = self.records[:]
-        del self.records[: len(taken)]
+        # 훅은 끝에 append만 한다. 꺼내는 쪽끼리만 잠그면 앞의 len(taken)개가
+        # 곧 taken이라 그 사이에 더해진 기록을 지우지 않는다.
+        with self._take_lock:
+            taken = self.records[:]
+            del self.records[: len(taken)]
         return taken
 
     @contextlib.contextmanager
@@ -159,15 +164,24 @@ class _ConfigIsolationGuard:
         finally:
             local.busy = False
 
-    def _check(self, event: str, args: tuple, positions: tuple[int, ...]) -> None:
+    def _check(
+        self,
+        event: str,
+        args: tuple,
+        positions: tuple[tuple[int, int | None], ...],
+    ) -> None:
         roots = self._roots
         if not roots:
             return
-        for position in positions:
+        for position, dir_fd_position in positions:
             if position >= len(args):
                 continue
             path = _event_path(event, args[position])
             if path is None:
+                continue
+            if not os.path.isabs(path) and _maybe_dir_fd_relative(
+                event, args, dir_fd_position
+            ):
                 continue
             forms = _path_forms(path)
             hit = any(
@@ -206,6 +220,19 @@ def _event_path(event: str, value: object) -> str | None:
         if path in ("", ":memory:"):
             return None
     return path
+
+
+def _maybe_dir_fd_relative(
+    event: str, args: tuple, dir_fd_position: int | None
+) -> bool:
+    if event == "open":
+        # os.open은 mode가 None이고 이벤트에 dir_fd가 없다(shutil.rmtree가 쓴다).
+        return len(args) > 1 and args[1] is None
+    if dir_fd_position is None or dir_fd_position >= len(args):
+        return False
+    # os.* 이벤트는 dir_fd가 없으면 -1, shutil.rmtree는 None을 넘긴다.
+    dir_fd = args[dir_fd_position]
+    return isinstance(dir_fd, int) and dir_fd >= 0
 
 
 def _is_write_open(args: tuple) -> bool:
@@ -299,6 +326,13 @@ def pytest_configure(config: pytest.Config) -> None:
 
 def pytest_unconfigure(config: pytest.Config) -> None:
     _uninstall_config_isolation()
+    # sessionfinish 뒤에 남은 스레드가 낸 위반. 종료 코드는 정해졌으니 출력만 한다.
+    late = _GUARD.take_records()
+    if late:
+        sys.stderr.write(
+            "설정 디렉터리 격리 위반 (#2592, 세션 종료 뒤):\n"
+            + "".join(f"  {_format_record(r)}\n" for r in late)
+        )
 
 
 @pytest.hookimpl(optionalhook=True)

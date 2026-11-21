@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sqlite3
 import tempfile
 import threading
@@ -162,6 +163,39 @@ def test_guard_blocks_repo_config_but_allows_example_read(
         with open(repo_config / "system.toml.example", encoding="utf-8") as fh:
             assert fh.read(1)
     assert len(records) == 1
+
+
+def test_guard_ignores_dir_fd_relative_names(
+    config_isolation_guard, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # shutil.rmtree는 os.open("config", dir_fd=...)를 쓴다. 작업 디렉터리가 저장소
+    # 루트여도 다른 곳의 config/를 저장소의 config/로 오인하지 않는다.
+    root = tmp_path / "e2e-root"
+    (root / "config" / "db").mkdir(parents=True)
+    monkeypatch.chdir(REPO_ROOT)
+    fd = os.open(root, os.O_RDONLY)
+    try:
+        os.mkdir("config/run", dir_fd=fd)
+        os.rmdir("config/run", dir_fd=fd)
+    finally:
+        os.close(fd)
+    shutil.rmtree(root)
+    assert not root.exists()
+    assert config_isolation_guard.records == []
+
+
+def test_guard_blocks_cwd_relative_repo_config(
+    config_isolation_guard, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo_config = REPO_ROOT / "config"
+    monkeypatch.chdir(REPO_ROOT)
+    with config_isolation_guard.expect_violation(repo_config) as records:
+        with pytest.raises(config_isolation_guard.violation_type):
+            os.makedirs("config/db")
+        with pytest.raises(config_isolation_guard.violation_type):
+            sqlite3.connect("config/db/ante.db")
+    assert len(records) == 2
+    assert not (repo_config / "db").exists()
 
 
 def test_forbidden_roots_include_real_and_repo(config_isolation_guard) -> None:
