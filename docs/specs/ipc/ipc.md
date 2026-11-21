@@ -593,7 +593,7 @@ drift다.
 | 타임아웃 (기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
-| 인자 검증 실패 | 요청 모델이 있는 명령의 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고, 키 이름 외의 입력값은 싣지 않는다 |
+| 인자 검증 실패 | 요청 모델이 있는 명령의 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다 |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 서버 종료 후 dispatch | `STOPPED` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
@@ -619,7 +619,8 @@ drift다.
   직후 `audit_logger`가 구성된 경우에만 getattr-safe하게 1회 수행한다
 - **요청 크기 제한**: 메시지 최대 크기 1MB — 과도한 페이로드 차단
 - **인자 검증 실패의 입력 비노출**: 요청 모델 검증 실패의 응답과 서버 로그에는 필드 경로와
-  검증 종류만 실린다. 모르는 키의 이름은 필드 경로로 실리고, 키 이름 외의 입력값은 싣지 않는다
+  검증 종류만 실린다. 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다),
+  키 이름 외의 입력값은 싣지 않는다. 검증 실패는 경고 수준 한 줄로 남고 traceback을 남기지 않는다
 
 > `signal.connect` 보안 불변(키 검증 daemon-side·키 비노출·account_id/bot_id LIVE-only·
 > dir 0o700·actor sentinel audit)은 본 스펙에서 확정하는 계약이며, 코드 반영은 구현 PR
