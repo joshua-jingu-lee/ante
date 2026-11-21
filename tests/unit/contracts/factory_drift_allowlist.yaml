@@ -41,7 +41,7 @@ direct_database_construction:
   # #1984 동형). `report submit` 은 write 명령(INSERT)이라 read-only 대상이
   # 아니며 직접 Database 생성을 유지한다 — 단일 엔트리 잔존.
   - path: src/ante/cli/commands/report.py
-    line: 98
+    line: 100
     reason: "report submit — offline write (INSERT), read-only 비대상; deferred migration"
 
   # backtest domain — `backtest run` 은 spec 상 `long_running` 분류 (subprocess
