@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING
@@ -18,6 +17,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -59,7 +59,7 @@ async def _create_rule_engine(
                 "SELECT 1 FROM accounts WHERE account_id = ?",
                 (validated_account_id,),
             )
-        except sqlite3.OperationalError as e:
+        except OperationalError as e:
             if "no such table" in str(e).lower():
                 raise AccountNotFoundError(
                     f"계좌 '{validated_account_id}'를 찾을 수 없습니다."

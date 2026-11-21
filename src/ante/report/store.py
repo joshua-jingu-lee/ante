@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from ante.core.database import OperationalError
 from ante.report.models import (
     ReportStatus,
     StrategyReport,
@@ -64,7 +64,7 @@ class ReportStore:
         await self._db.execute_script(REPORT_SCHEMA)
         try:
             await self._db.execute(_BACKTEST_RUN_ID_MIGRATION)
-        except sqlite3.OperationalError as exc:
+        except OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
             logger.debug("backtest_run_id 컬럼 이미 존재 — 마이그레이션 skip")

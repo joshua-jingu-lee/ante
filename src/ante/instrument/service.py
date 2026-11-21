@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from typing import TYPE_CHECKING
 
+from ante.core.database import OperationalError
 from ante.instrument.models import Instrument
 
 if TYPE_CHECKING:
@@ -60,7 +60,7 @@ class InstrumentService:
         """
         try:
             await self._warm_cache()
-        except sqlite3.OperationalError as e:
+        except OperationalError as e:
             if "no such table" in str(e).lower():
                 self._cache = {}
                 logger.info("instruments 테이블 부재 — 빈 캐시로 정규화 (read-only DB)")

@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 import statistics
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 from ante.account.errors import InvalidAccountIdError
+from ante.core.database import OperationalError
 from ante.trade.models import (
     DailySummary,
     MonthlySummary,
@@ -156,7 +156,7 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except sqlite3.OperationalError:
+        except OperationalError:
             return []
         return [
             DailySummary(
@@ -218,7 +218,7 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except sqlite3.OperationalError:
+        except OperationalError:
             return []
         return [
             WeeklySummary(
@@ -285,7 +285,7 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except sqlite3.OperationalError:
+        except OperationalError:
             return []
         return [
             MonthlySummary(
@@ -385,7 +385,7 @@ class PerformanceTracker:
 
         try:
             rows = await self._db.fetch_all(query, tuple(params))
-        except sqlite3.OperationalError:
+        except OperationalError:
             logger.debug("trades 테이블 없음 — 빈 목록 반환")
             return []
         return self._rows_to_records(rows, context="_get_filled_trades")
@@ -409,7 +409,7 @@ class PerformanceTracker:
                        LIMIT 1""",
                     (str(trade.trade_id),),
                 )
-            except sqlite3.OperationalError:
+            except OperationalError:
                 row = None
             if row:
                 pnl_list.append(float(row["pnl"]))
