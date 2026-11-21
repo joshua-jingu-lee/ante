@@ -95,6 +95,17 @@ def test_opening_fence_any_indent_backtick_or_tilde(fence: str) -> None:
     assert _counts(text) == (1, 0, 0)
 
 
+@pytest.mark.parametrize(
+    "fence",
+    [
+        pytest.param("``", id="backtick-2"),
+        pytest.param("~~", id="tilde-2"),
+    ],
+)
+def test_two_character_run_is_not_fence(fence: str) -> None:
+    assert _counts(f"{fence}python\nx\n{fence}\n") == (0, 0, 0)
+
+
 def test_backtick_in_backtick_info_string_is_not_fence() -> None:
     assert _counts("```python `x` a.py:1\nx = 1\n") == (0, 0, 1)
     assert _counts("~~~python `x`\nx = 1\n~~~\n") == (1, 0, 0)
@@ -125,6 +136,7 @@ def test_closing_line(closing: str, closes: bool) -> None:
 
 def test_closing_line_must_be_as_long_as_opening() -> None:
     assert _counts("````python\nx\n```\n````\n") == (2, 0, 0)
+    assert _counts("~~~python\nx\n~~\n~~~\n") == (2, 0, 0)
 
 
 def test_fence_lines_are_not_counted() -> None:
