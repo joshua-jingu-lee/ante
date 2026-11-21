@@ -60,6 +60,11 @@ EXTRA_KEY = "zz_extra"
 UNBOUNDED_FIELDS: frozenset[tuple[str, str]] = frozenset()
 
 
+def validation_message(command: str, *errors: tuple[str, str]) -> str:
+    fields = ", ".join(f"{loc}({kind})" for loc, kind in errors)
+    return f"{command} 인자 검증 실패: {fields}"
+
+
 class UnsupportedFieldError(Exception):
     pass
 
@@ -594,7 +599,7 @@ async def test_value_outside_the_domain_is_rejected(
         "status": "error",
         "error": {
             "code": "VALIDATION_ERROR",
-            "message": f"{command} 인자 검증 실패: {variant.loc}({variant.expected})",
+            "message": validation_message(command, (variant.loc, variant.expected)),
         },
     }
     assert recorder.calls == []
@@ -603,8 +608,8 @@ async def test_value_outside_the_domain_is_rejected(
         (
             "WARNING",
             None,
-            f"IPC 요청 검증 거부: {command} 인자 검증 실패: "
-            f"{variant.loc}({variant.expected})",
+            "IPC 요청 검증 거부: "
+            + validation_message(command, (variant.loc, variant.expected)),
         )
     ]
     if variant.marker is not None:

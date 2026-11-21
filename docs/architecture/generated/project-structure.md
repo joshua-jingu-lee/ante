@@ -445,7 +445,8 @@ tests/
 │   │   ├── test_single_error_exit.py
 │   │   ├── test_trade_report_error_exits.py
 │   │   ├── test_backtest_data_instrument_error_exits.py
-│   │   └── test_feed_command_relocation.py
+│   │   ├── test_feed_command_relocation.py
+│   │   └── test_cli_ipc_request_contract.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -461,7 +462,8 @@ tests/
 │   │   ├── test_server_signal_connect.py
 │   │   ├── test_request_model_domain.py
 │   │   ├── test_request_validation.py
-│   │   └── test_system_commands.py
+│   │   ├── test_system_commands.py
+│   │   └── test_strategy_commands.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py
@@ -779,7 +781,8 @@ tests/
 │   ├── test_state_transitions_account_member_circuit.py
 │   ├── test_compare_error_exit_records.py
 │   ├── test_preservation_recorder.py
-│   └── test_state_transitions_report_ipc.py
+│   ├── test_state_transitions_report_ipc.py
+│   └── test_ipc_request_diff.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
@@ -842,7 +845,9 @@ scripts/
 ├── entry_ratchet_baseline.json
 ├── check_lint_ratchet.py
 ├── lint_baseline.json
-└── compare_error_exit_records.py
+├── compare_error_exit_records.py
+├── ipc_request_diff.py
+└── ipc_request_set.json
 ```
 
 ## docs/ — 설계 문서
