@@ -365,7 +365,11 @@ async def test_gateway_buy_same_price_executes(
         ("price", Decimal("45000")),
         ("price", Fraction(45000)),
         ("price", "45000"),
+        ("price", False),
+        ("price", float("-inf")),
         ("quantity", True),
+        ("quantity", False),
+        ("quantity", float("-inf")),
         ("quantity", Decimal("10")),
     ],
     ids=[
@@ -373,7 +377,11 @@ async def test_gateway_buy_same_price_executes(
         "price_decimal",
         "price_fraction",
         "price_str",
+        "price_false",
+        "price_neginf",
         "qty_bool",
+        "qty_false",
+        "qty_neginf",
         "qty_decimal",
     ],
 )

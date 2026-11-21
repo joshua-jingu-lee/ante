@@ -140,6 +140,25 @@ async def test_first_page_params_not_mutated() -> None:
     assert base == {"CTX_AREA_FK100": "", "CTX_AREA_NK100": "", "X": "1"}
 
 
+@pytest.mark.parametrize("last", ["D", "E"])
+async def test_last_page_marker_stops_even_when_cursor_is_present(last: str) -> None:
+    """응답 tr_cont 가 D·E 면 cursor 가 채워져 있어도 다음 페이지를 부르지 않는다."""
+    adapter = _make_adapter()
+    body = _page([{"id": "a"}], "output1", fk="FK-X", nk="NK-X")
+    adapter._request_with_cont = AsyncMock(return_value=(body, last))  # type: ignore[method-assign]
+
+    rows = await adapter._request_paginated(
+        "GET",
+        "url",
+        "TR",
+        {"CTX_AREA_FK100": "", "CTX_AREA_NK100": ""},
+        row_key="output1",
+    )
+
+    assert adapter._request_with_cont.await_count == 1
+    assert rows == [{"id": "a"}]
+
+
 async def test_has_next_but_empty_cursor_warns_and_stops(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

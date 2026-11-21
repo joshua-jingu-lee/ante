@@ -2233,6 +2233,33 @@ async def test_fallback_skipped_when_broker_not_paper(fallback_applier, tracker)
     assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
 
 
+async def test_fallback_skipped_when_broker_has_no_is_paper(fallback_applier, tracker):
+    """is_paper 속성이 없는 broker(KIS 가 아님)에서는 fallback 이 기본으로 꺼져 있다."""
+    app, _ph, _eb, svc = fallback_applier
+    await tracker.open(
+        order_id="ord-fb",
+        account_id=ACCT,
+        bot_id="bot-1",
+        strategy_id="strat-1",
+        broker_order_id="0001",
+        symbol="069500",
+        side="buy",
+        order_type="market",
+        ordered_qty=1.0,
+        submitted_date=DATE,
+    )
+    broker = FallbackBroker(history=[], positions=[_pos("069500", 1.0)])
+    del broker.is_paper
+    assert not hasattr(broker, "is_paper")
+    sched = _make_fallback_sched(broker, tracker, app, svc)
+
+    result = await sched.catch_up_once()
+
+    assert result.applied == 0
+    assert broker.positions_calls == 0
+    assert (await tracker.get("ord-fb")).recorded_filled_qty == 0.0
+
+
 async def test_fallback_no_op_without_trade_service(applier, tracker):
     """trade_service 미주입(legacy/partial wiring) → fallback 미동작."""
     app, _ph, _eb = applier
