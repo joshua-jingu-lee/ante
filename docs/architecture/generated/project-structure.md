@@ -445,7 +445,8 @@ tests/
 │   │   ├── test_single_error_exit.py
 │   │   ├── test_trade_report_error_exits.py
 │   │   ├── test_backtest_data_instrument_error_exits.py
-│   │   └── test_feed_command_relocation.py
+│   │   ├── test_feed_command_relocation.py
+│   │   └── test_config_rule_signal_system_error_exits.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
