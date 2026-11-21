@@ -142,14 +142,7 @@ def stop(ctx: click.Context) -> None:
 async def _create_services(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[Database, EventBus]]:
-    """오프라인/bootstrap 커맨드용 DB/EventBus async context manager.
-
-    ``open_cli_db`` 기반 lifecycle 로 전환했다 (factory composition,
-    account.py 패턴 1:1 미러). 호출 패턴:
-
-        async with _create_services(ctx=ctx) as (db, eventbus):
-            ...
-    """
+    """오프라인/bootstrap 커맨드용 DB/EventBus async context manager."""
     from ante.eventbus.bus import EventBus
 
     resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)

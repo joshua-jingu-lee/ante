@@ -111,11 +111,7 @@ async def _audit_log(db, **kwargs) -> None:
 async def _run_bot_remove_cold_path(
     bot_id: str, ctx: click.Context | None = None
 ) -> dict:
-    """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다.
-
-    ``open_cli_db`` 기반 lifecycle. ``ctx`` 가 ``None`` 이면
-    ``click.get_current_context`` 로 fallback 한다 (callsite 하위 호환).
-    """
+    """서버 정지 상태에서 BotManager 없이 봇을 soft-delete한다."""
     from ante.bot.cold_path import cold_path_remove_bot
     from ante.cli.main import get_config_dir
     from ante.config import Config
@@ -275,12 +271,7 @@ def _parse_param(value: str) -> tuple[str, object]:
 
 
 def _resolve_account_non_interactive(accounts: list, fmt) -> str:
-    """활성 계좌 목록에서 비대화형으로 계좌를 선택한다.
-
-    - 활성 계좌가 정확히 1개면 자동 선택한다.
-    - 활성 계좌가 0개 또는 2개 이상이면 prompt 없이
-      `BOT_MISSING_REQUIRED_ACCOUNT` 에러로 실패한다.
-    """
+    """활성 계좌 목록에서 비대화형으로 계좌를 선택한다."""
     if len(accounts) == 1:
         return accounts[0].account_id
 

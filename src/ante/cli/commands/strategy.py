@@ -39,20 +39,7 @@ def _run(coro):
 async def _create_registry(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[tuple[StrategyRegistry, Database]]:
-    """CLI 에서 ``StrategyRegistry`` async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_registry(ctx=ctx) as (registry, db):
-            ...
-
-    fresh DB에서도 strategies 테이블이 존재하도록 helper 차원에서 보장한다.
-    ``register/get_by_name/list_strategies`` 등 모든 caller 에 자동 적용되며,
-    idempotent하므로 기존 명시 ``await registry.initialize()`` 호출은 회귀
-    안전을 위해 보존한다 (read-only 명시 예외 대상이지만 본 helper 는
-    안전성을 위해 호출을 그대로 보존한다).
-    """
+    """CLI 에서 ``StrategyRegistry`` async context manager."""
     from ante.strategy.registry import StrategyRegistry
 
     resolved_ctx = ctx if ctx is not None else click.get_current_context(silent=True)

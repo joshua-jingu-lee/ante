@@ -36,16 +36,7 @@ def signal_connect(ctx: click.Context, key: str) -> None:
 
 
 async def _run_connect(ctx: click.Context, key: str) -> None:
-    """시그널 채널을 데몬으로 위임하는 thin IPC relay.
-
-    본 명령은 in-process 로 ``Database``/``EventBus``/``BotManager``/
-    ``SignalChannel`` 을 구성하지 않는다. 대신 실행 중인 데몬의
-    ``ante.sock`` 으로 ``signal.connect`` 핸드셰이크를 보내고(Phase A/B), OK 면
-    동일 연결을 long-lived 스트림으로 전환해 stdin↔socket(``_pump_in``) /
-    socket↔stdout(``_pump_out``) 만 양방향 relay 한다(Phase C). 4-게이트 검증·
-    봇 상태·이벤트 구독은 전부 데몬이 소유하며, 핸드셰이크 거부는 envelope
-    을 그대로 ``_fail`` 로 passthrough 한다.
-    """
+    """시그널 채널을 데몬으로 위임하는 thin IPC relay."""
     from ante.cli.main import get_config_dir, get_formatter
 
     fmt = get_formatter(ctx)
@@ -103,13 +94,7 @@ async def _run_connect(ctx: click.Context, key: str) -> None:
 
 
 async def _pump_in(writer: asyncio.StreamWriter) -> None:
-    """stdin → socket relay. JSON Lines 를 length-prefixed 프레임으로 전달한다.
-
-    stdin 의 각 줄을 ``json.loads`` 로 검사(``JSONDecodeError`` 는 투명하게
-    skip)한 뒤 ``protocol.encode`` 로 framing 해 socket 에 write 한다. stdin EOF
-    면 ``write_eof`` 로 half-close 하여 ``_pump_out`` 은 유지한다. write 예외는
-    swallow 해 exit 0 으로 종료한다.
-    """
+    """stdin → socket relay. JSON Lines 를 length-prefixed 프레임으로 전달한다."""
     loop = asyncio.get_event_loop()
     reader = asyncio.StreamReader()
     stdin_protocol = asyncio.StreamReaderProtocol(reader)
@@ -148,14 +133,7 @@ async def _pump_in(writer: asyncio.StreamWriter) -> None:
 
 
 async def _pump_out(reader: asyncio.StreamReader) -> None:
-    """socket → stdout relay. 데몬 프레임을 정확히 1개 ``\\n`` 부착해 출력한다.
-
-    ``protocol.decode`` 는 **per-read timeout 없이** 호출한다(Phase-C idle
-    스트림은 정상 — ipc.md Timeout 계약). socket EOF(``IncompleteReadError``)
-    면 return(exit 0). ``{"type":"closed"}`` 프레임이면 informational stderr 후
-    return(exit 0). mid-stream ``{"type":"error"}`` 프레임은 종료하지 않고 투명
-    passthrough 한다.
-    """
+    """socket → stdout relay. 데몬 프레임을 정확히 1개 ``\\n`` 부착해 출력한다."""
     while True:
         try:
             frame = await protocol.decode(reader)
@@ -174,12 +152,7 @@ async def _pump_out(reader: asyncio.StreamReader) -> None:
 
 
 def _fail(fmt: OutputFormatter, msg: str, code: str) -> NoReturn:
-    """validation/transport 오류 종료 (단일 chokepoint).
-
-    JSON 모드는 stdout envelope (``{status,code,message}``),
-    text 모드는 기존 ``_err()`` raw stderr 동작을 그대로 보존한다
-    (no ``Error: `` prefix).
-    """
+    """validation/transport 오류 종료 (단일 chokepoint)."""
     if fmt.is_json:
         fmt.error(msg, code=code)
     else:

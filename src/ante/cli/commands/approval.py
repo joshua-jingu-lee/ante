@@ -518,15 +518,7 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
 
 
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
-    """ID 전체 또는 prefix로 결재 요청 검색.
-
-    not-found 는 ``ApprovalNotFoundError`` 로 raise 해 CLI ``approval info``
-    / ``approval review`` 가 typed envelope code ``APPROVAL_NOT_FOUND`` 로
-    surface 할 수 있도록 한다. multi-match 는 ``ValueError`` 로 유지 —
-    별도 의미(``"여러 건이 일치"``) 이며 generic ``emit_cli_error(fmt, e)``
-    핸들러가 helper resolver 의 fallback ``EXECUTION_ERROR`` 코드로 surface
-    한다 (registry 미등록 / ``.code`` 부재).
-    """
+    """ID 전체 또는 prefix로 결재 요청 검색."""
     from ante.approval.errors import ApprovalNotFoundError
 
     req = await service.get(id)

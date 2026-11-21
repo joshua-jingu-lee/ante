@@ -193,14 +193,7 @@ async def _save_backtest_run(
     config: dict,
     metrics: dict,
 ) -> str:
-    """backtest_runs 테이블에 이력 저장 (envelope dict 기반).
-
-    ``result_dict`` 는 ``service.run_subprocess`` 가 반환한 additive envelope
-    (``to_dict()`` superset + 런타임 메타데이터)이다. ``strategy_name`` /
-    ``strategy_version`` 은 envelope 의 개별 키를 직접 사용하며 combined
-    ``strategy`` (``"{name}_v{version}"``) 를 split 파싱하지 않는다 — 버전
-    문자열에 ``_v`` 가 포함될 수 있어 split 이 안전하지 않기 때문이다.
-    """
+    """backtest_runs 테이블에 이력 저장 (envelope dict 기반)."""
     from ante.backtest.run_store import BacktestRunStore
     from ante.core.database import Database
 

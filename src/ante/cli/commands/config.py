@@ -111,11 +111,7 @@ async def _resolve_all(static_config, db) -> list[dict]:
 
 
 def _render_single(result: dict, fmt) -> None:
-    """단일 설정 결과 출력 (missing은 caller에서 처리).
-
-    note: missing-resource (`source == "not_found"`) 분기는 caller(`config_get`)가
-    `ctx.exit(1)`로 처리한다. helper는 pure rendering만 담당한다.
-    """
+    """단일 설정 결과 출력 (missing은 caller에서 처리)."""
     if fmt.is_json:
         fmt.output(result)
     else:

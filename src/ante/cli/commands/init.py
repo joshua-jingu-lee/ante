@@ -20,13 +20,7 @@ from ante.cli.main import get_formatter
 
 
 def _fail(fmt: OutputFormatter, message: str, code: str = "") -> None:
-    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1.
-
-    `click.ClickException`은 text 모드에서 "Error: ..." 를 stderr에 쓰지만
-    JSON 모드에서도 동일한 텍스트를 내보내 `--format json` 계약을 깨뜨린다.
-    이 헬퍼는 `OutputFormatter.error()`를 거쳐 JSON 모드에서는 구조화 에러를,
-    text 모드에서는 "Error: ..." 를 stderr에 낸 뒤 exit code 1로 종료한다.
-    """
+    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1."""
     fmt.error(message, code=code)
     sys.exit(1)
 
@@ -69,12 +63,7 @@ SECRETS_ENV_TEMPLATE = """\
 
 
 def _generate_db_encryption_key() -> str:
-    """신규 Fernet 마스터 키를 생성한다.
-
-    구현은 ``cryptography.fernet.Fernet.generate_key()``를 그대로 호출하고
-    base64 문자열로 디코딩해 반환한다. 결과는 항상 ``_validate_fernet_key``
-    검증을 통과한다.
-    """
+    """신규 Fernet 마스터 키를 생성한다."""
     from cryptography.fernet import Fernet
 
     return Fernet.generate_key().decode()
@@ -83,32 +72,7 @@ def _generate_db_encryption_key() -> str:
 def _resolve_effective_key(
     env_value: str | None, file_value: str | None
 ) -> tuple[str, bool, bool]:
-    """env/file의 키 분류 결과로부터 effective key와 파일 상태 플래그를 도출한다.
-
-    결정 행렬:
-
-    - valid env + valid file (동일 값): env 사용, file 보존, 백업 없음.
-    - valid env + valid file (다른 값): env-wins. file을 env value로 교체하지만
-      이전 라인이 valid였으므로 **백업하지 않는다**.
-    - valid env + invalid/없음 file: env value를 file에 기입. invalid이었으면
-      ``file_was_invalid_replaced=True`` 로 표시해 호출자가 백업하게 한다.
-    - invalid/없음 env + valid file: file value를 effective key로 채택.
-    - invalid/없음 env + invalid/없음 file: 신규 Fernet 키 생성. invalid이었으면
-      ``file_was_invalid_replaced=True``.
-
-    Args:
-        env_value: ``os.environ.get("ANTE_DB_ENCRYPTION_KEY")`` 결과.
-        file_value: ``secrets.env`` 의 동일 키 라인 값 (없으면 ``None``).
-
-    Returns:
-        ``(effective_key, file_was_invalid_replaced, file_was_synced_from_env)``.
-
-        - ``effective_key``: 실제로 사용할 Fernet 키 문자열.
-        - ``file_was_invalid_replaced``: file에 non-empty invalid 값이 있어서
-          교체해야 한다는 신호. 호출자는 이 경우에만 백업 파일을 만든다.
-        - ``file_was_synced_from_env``: file을 env value로 동기화해야 한다는 신호.
-          (env가 valid이고 file이 invalid/없음 또는 다른 valid 값인 경우)
-    """
+    """env/file의 키 분류 결과로부터 effective key와 파일 상태 플래그를 도출한다."""
     env_valid = _validate_fernet_key(env_value)
     file_valid = _validate_fernet_key(file_value)
     file_present_invalid = (file_value is not None) and (not file_valid)
@@ -128,12 +92,7 @@ def _resolve_effective_key(
 
 
 def _read_existing_encryption_key_line(secrets_env_path: Path) -> str | None:
-    """secrets.env에서 ANTE_DB_ENCRYPTION_KEY 라인의 값만 추출.
-
-    동일 키가 여러 번 있으면 **마지막 라인**의 값을 반환한다(`_load_dotenv`와
-    동일한 last-wins 의미). 라인이 전혀 없으면 ``None``. 주석(#)으로 시작하는
-    라인은 무시한다.
-    """
+    """secrets.env에서 ANTE_DB_ENCRYPTION_KEY 라인의 값만 추출."""
     if not secrets_env_path.exists():
         return None
     last: str | None = None
@@ -154,12 +113,7 @@ def _read_existing_encryption_key_line(secrets_env_path: Path) -> str | None:
 
 
 def _atomic_backup_secrets_env(secrets_env_path: Path) -> Path:
-    """기존 secrets.env 파일을 0600 권한으로 원자적 백업한다.
-
-    백업 파일명: ``secrets.env.bak.<UTC iso>`` (같은 디렉토리). tempfile에
-    내용을 0600으로 쓴 뒤 ``os.rename``으로 원자 이동한다. 기존 secrets.env는
-    그대로 유지된다(이 헬퍼는 백업만 담당).
-    """
+    """기존 secrets.env 파일을 0600 권한으로 원자적 백업한다."""
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup_path = secrets_env_path.parent / f"secrets.env.bak.{ts}"
     content = secrets_env_path.read_bytes()
@@ -178,17 +132,7 @@ def _atomic_backup_secrets_env(secrets_env_path: Path) -> Path:
 def _write_encryption_key_into_secrets_env(
     secrets_env_path: Path, effective_key: str
 ) -> None:
-    """secrets.env에 ANTE_DB_ENCRYPTION_KEY 라인을 갱신/추가한다.
-
-    - 파일이 없으면: ``SECRETS_ENV_TEMPLATE``을 채워 신규 생성(0600).
-    - 파일이 있는데 라인이 없으면: 파일 끝에 ``ANTE_DB_ENCRYPTION_KEY=…``
-      한 줄을 append하고 권한을 0600으로 다시 적용한다.
-    - 라인이 있으면: 마지막 발견 라인을 새 값으로 교체(주석 라인은 보존).
-
-    파일 갱신은 tempfile에 내용을 쓰고 0600 chmod 후 ``os.rename``으로
-    원자 이동한다. 이렇게 해야 부분 쓰기 상태에서 다른 프로세스가 키를 빈
-    상태로 읽지 않는다.
-    """
+    """secrets.env에 ANTE_DB_ENCRYPTION_KEY 라인을 갱신/추가한다."""
     new_line = f"{_ENCRYPTION_KEY_NAME}={effective_key}"
 
     if not secrets_env_path.exists():
@@ -238,27 +182,7 @@ def _write_encryption_key_into_secrets_env(
 
 
 def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
-    """ANTE_DB_ENCRYPTION_KEY 5-state idempotent path.
-
-    5개 상태 분기:
-      1. secrets.env 파일 자체가 없음 → 신규 키 생성 + 파일 신규 생성(템플릿).
-      2. 파일은 있는데 라인이 없음 → 신규 키 생성 + 라인 append.
-      3. 라인은 있는데 값이 빈 문자열 → 신규 키 생성 + 라인 교체(백업 없음, 빈
-         값은 backup 가치 없음).
-      4. 라인이 있고 값이 non-empty이지만 Fernet 검증 실패(invalid) → 신규 키
-         생성 또는 valid env value로 교체. **invalid 값 backup 필수**.
-      5. 라인이 있고 값이 Fernet valid → env-wins 비교. 동일 값이면 NOP,
-         다른 valid env가 있으면 env value로 교체(valid→valid는 backup 없음),
-         env가 invalid/없음이면 file value 유지.
-
-    Args:
-        secrets_env_path: ``<config_dir>/secrets.env`` 경로.
-
-    Returns:
-        이 함수가 effective key로 결정한 Fernet 키 문자열. 호출자는 이 값을
-        ``os.environ[_ENCRYPTION_KEY_NAME]`` 에 set한다(이미 valid env가
-        있으면 set 생략).
-    """
+    """ANTE_DB_ENCRYPTION_KEY 5-state idempotent path."""
     env_value = os.environ.get(_ENCRYPTION_KEY_NAME)
     file_value = _read_existing_encryption_key_line(secrets_env_path)
 
@@ -288,23 +212,7 @@ def _run(coro):
 
 
 def _resolve_config_path(ctx: click.Context, target_dir: str | None) -> Path:
-    """init 대상 디렉토리 결정.
-
-    우선순위:
-      1. `--dir` 인자 (이 명령 전용 명시적 override) — 다른 모든 입력을 무시한다.
-      2. 루트 그룹이 `--config-dir`/`ANTE_CONFIG_DIR`로부터 확정한
-         `ctx.obj['config_dir']`.
-      3. `ANTE_CONFIG_DIR` 환경변수 (root callback이 이미 처리하지만 ctx가
-         비어 있는 직접 호출 경로를 위해 폴백으로도 검사한다).
-      4. 최종 폴백: `~/.config/ante/`. `resolve_config_dir()`은
-         "디렉토리가 실제로 존재할 때만 ~/.config/ante 사용"으로 동작하지만,
-         init은 이 디렉토리를 **만드는** 명령이므로 존재 여부와 무관하게
-         스펙(기본: ~/.config/ante)을 따른다.
-
-    `init`이 root 그룹의 `--config-dir`/`ANTE_CONFIG_DIR`을 무시하면 이후
-    CLI들이 `get_db_path()`로 보는 `<config_dir>/db/ante.db`와 init이 만든
-    DB 경로가 어긋난다.
-    """
+    """init 대상 디렉토리 결정."""
     if target_dir:
         return Path(target_dir)
 
@@ -341,11 +249,7 @@ def _ensure_file(path: Path, template: str) -> bool:
 
 
 async def _master_exists_in_db(db_path: str) -> bool:
-    """DB에 role='master' member row가 있는지 확인.
-
-    DB 파일은 있으나 스키마/데이터가 없는 "orphan" 상태에서도
-    False를 반환하도록 예외를 흡수한다.
-    """
+    """DB에 role='master' member row가 있는지 확인."""
     from ante.core.database import Database
 
     db = Database(db_path)
@@ -369,19 +273,7 @@ async def _master_exists_in_db(db_path: str) -> bool:
 async def _test_account_state(
     db_path: str,
 ) -> Literal["active", "inactive", "missing"]:
-    """default test account(account_id='test')의 3-state 판정.
-
-    - "active":  status='active' 인 'test' 계좌 존재 → 재생성 불필요 (skip)
-    - "inactive": 'test' 계좌가 있으나 suspended/deleted 등 비활성 상태
-                  → init이 `AccountService.create_default_test_account()`를
-                  호출하면 account_id 중복으로 예외가 터지므로, 사용자에게
-                  명시적 에러로 안내해야 한다 (묵시적 skip 금지).
-    - "missing": 'test' 계좌 자체가 없음 → 재생성 대상
-
-    AccountService가 만드는 행(`account_id='test'`)을 기준으로 판정 범위를
-    좁히므로 임의의 custom `broker_type='test'` 계좌(account_id!='test')는
-    "missing"으로 취급된다.
-    """
+    """default test account(account_id='test')의 3-state 판정."""
     from ante.core.database import Database
 
     db = Database(db_path)
@@ -466,11 +358,7 @@ def _emit_master_credentials_text(
     token: str,
     recovery_key: str,
 ) -> None:
-    """text 모드에서 master bootstrap 직후 비밀값을 stdout에 출력한다.
-
-    성공/실패와 무관하게 이 블록 **한 번**만 비밀값을 노출한다. completion 블록은
-    요약/다음 단계 안내만 출력하며 비밀값을 재출력하지 않는다 (1회 노출 불변식).
-    """
+    """text 모드에서 master bootstrap 직후 비밀값을 stdout에 출력한다."""
     click.echo("\n── Master 계정 생성 완료 ──────────────────────")
     click.echo(f"  Member ID   : {master_info['member_id']}")
     click.echo(f"  이름        : {master_info['name']}")
@@ -488,13 +376,7 @@ def _emit_master_credentials_json_stderr(
     recovery_key: str,
     config_path: Path,
 ) -> None:
-    """JSON 모드 실패 경로 전용 복구 이벤트 (stderr 한 줄 JSON).
-
-    test account 생성 실패 시에만 호출되며, stdout payload가 비밀값 없는 에러
-    응답으로 대체되므로 stderr에 비밀값 1회 노출을 보장해 Agent가 lockout에서
-    복구할 수 있게 한다. 성공 경로에서는 호출되지 않는다 (stdout payload로 1회
-    노출).
-    """
+    """JSON 모드 실패 경로 전용 복구 이벤트 (stderr 한 줄 JSON)."""
     click.echo(
         json.dumps(
             {

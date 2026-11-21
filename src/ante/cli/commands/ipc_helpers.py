@@ -1,7 +1,4 @@
-"""CLI IPC 공통 헬퍼.
-
-IPCClient를 통해 실행 중인 서버에 커맨드를 전송하는 유틸리티.
-"""
+"""CLI IPC 공통 헬퍼."""
 
 from __future__ import annotations
 
@@ -19,11 +16,6 @@ def get_socket_path(config_dir: Path | None = None) -> str:
     ``runtime.socket_path`` resolver를 통해 ``<config_dir>/run/ante.sock``
     (default)을 산출한다. ``[runtime] socket_path`` override가 ``system.toml``
     에 있으면 사용자 값이 우선한다.
-
-    Args:
-        config_dir: 선택적 설정 디렉토리. None이면 현재 Click 컨텍스트의
-            ``ctx.obj["config_dir"]``을 자동 추출하고, 그것도 없으면
-            ``resolve_config_dir()`` 폴백으로 자동 탐색한다.
 
     Returns:
         IPC 유닉스 소켓 절대 경로 문자열.
@@ -49,13 +41,6 @@ async def ipc_send(
     config_dir: Path | None = None,
 ) -> dict:
     """IPC 커맨드 전송. 서버 미기동 시 사용자 친화적 에러 출력.
-
-    Args:
-        command: 실행할 커맨드 이름 (예: "system.halt")
-        args: 커맨드 인자
-        actor: 요청자 식별자 (기본 "cli")
-        config_dir: 선택적 설정 디렉토리. None이면 현재 Click 컨텍스트에서
-            자동 추출되어 IPC 소켓 경로 계산에 전파된다.
 
     Returns:
         서버 응답 dict.

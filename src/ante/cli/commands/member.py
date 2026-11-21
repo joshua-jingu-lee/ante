@@ -1,13 +1,4 @@
-"""ante member — 멤버 관리 커맨드.
-
-비대화형 입력 계약(SSOT: docs/specs/cli/02-design-decisions.md):
-- ``member revoke``는 ``--yes`` 누락 시 prompt 없이
-  ``CLI_CONFIRMATION_REQUIRED``로 실패한다.
-- ``member reset-password`` / ``member regenerate-recovery-key``는 비밀값을
-  ``--*-env <ENV_NAME>`` 또는 ``--*-file <PATH>`` 채널로만 받는다. 누락/공란/중복은
-  도메인 prefix 에러 코드(``MEMBER_PASSWORD_ENV_NOT_SET``,
-  ``MEMBER_PASSWORD_FILE_NOT_FOUND``, ``CLI_MISSING_REQUIRED_INPUT``)로 실패한다.
-"""
+"""ante member — 멤버 관리 커맨드."""
 
 from __future__ import annotations
 
@@ -69,15 +60,7 @@ def _resolve_secret_non_interactive(
     file_option_label: str,
     missing_input_message: str,
 ) -> str:
-    """``--*-env`` / ``--*-file`` 채널에서 비밀값을 비대화형으로 읽어들인다.
-
-    - 둘 다 없으면 ``CLI_MISSING_REQUIRED_INPUT``로 실패한다.
-    - 둘 다 지정되면 (상호 배타) ``CLI_MISSING_REQUIRED_INPUT``로 실패한다.
-    - env 부재/공란이면 ``MEMBER_PASSWORD_ENV_NOT_SET``로 실패한다.
-    - file 부재/읽기 실패/공란이면 ``MEMBER_PASSWORD_FILE_NOT_FOUND``로 실패한다.
-
-    실패는 모두 ``fmt.error(..., code=...)`` 출력 후 ``SystemExit(1)``로 종료한다.
-    """
+    """``--*-env`` / ``--*-file`` 채널에서 비밀값을 비대화형으로 읽어들인다."""
     if env_name is None and file_path is None:
         fmt.error(
             missing_input_message
@@ -129,25 +112,7 @@ def _resolve_secret_non_interactive(
 async def _create_service(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[MemberService]:
-    """CLI용 ``MemberService`` async context manager.
-
-    ``open_cli_db`` 헬퍼 기반. callsite 패턴은
-    ``async with _create_service(ctx) as service:`` 이며, ``open_cli_db`` 가
-    normal/exception/cancellation 모든 경로에서 ``Database.close()`` 를
-    보장한다 (cleanup invariant).
-
-    Args:
-        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context(silent=True)``
-            로 현재 컨텍스트를 fallback 조회한다 (account 헬퍼와 동형 호환 path).
-
-    Yields:
-        ``initialize()`` 가 완료된 :class:`MemberService` 인스턴스.
-
-    read-only 명시 예외: ``MemberService.initialize`` 는 ``MEMBER_SCHEMA`` +
-    ``_EMOJI_MIGRATION`` + ``_TOKEN_EXPIRES_MIGRATION`` schema DDL 을
-    수반하므로 ``member list``/``info`` 같은 read-only 명령에서도
-    ``initialize()`` 를 계속 호출한다.
-    """
+    """CLI용 ``MemberService`` async context manager."""
     from ante.eventbus.bus import EventBus
     from ante.member.service import MemberService as _MemberService
 
@@ -273,32 +238,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 
 
 def _explicit_config_dir(ctx: click.Context) -> str | None:
-    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다.
-
-    Ante CLI 의 루트 그룹(:func:`ante.cli.main.cli`)은 ``--config-dir`` 이 명시
-    되거나 ``ANTE_CONFIG_DIR`` 환경변수가 set 되었을 때에만
-    ``ctx.obj["config_dir"]`` 를 ``Path`` 로 채운다. 미지정이면 키 자체가 누락된다.
-    본 헬퍼는 그 override 값을 **절대 경로**(``expanduser().resolve()``)로 정규화
-    해서 반환하며, override 가 없으면 ``None`` 을 돌려 default config_dir 를
-    의미하게 한다.
-
-    이 값은 ``revoke_command`` 생성 시 운영자가 입력한 ``--config-dir`` 을
-    payload 에 보존하기 위해 사용된다: 운영자가
-    ``ante --config-dir /custom member list-invalid-roles`` 로 다른 인스턴스를
-    스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이 빠지면
-    default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
-    있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
-    보장한다.
-
-    추가로 운영자가 ``ante --config-dir custom member
-    list-invalid-roles`` 처럼 **상대 경로**로 호출한 경우, raw 값을 그대로
-    payload 에 실으면 운영자가 payload(``revoke_command``)를 다른 CWD 에서
-    복사 실행했을 때 그 CWD 아래의 ``custom`` DB 를 가리키게 되어 다시 다른
-    인스턴스가 될 수 있다. 이를 막기 위해 본 헬퍼는 ``Path.expanduser()``
-    (``~/...`` 확장) + ``Path.resolve()`` (절대 경로화 + symlink 해소) 로
-    경로를 고정해, 어느 CWD 에서 실행되더라도 처음 스캔한 인스턴스와 동일한
-    config_dir 를 가리키도록 보장한다.
-    """
+    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다."""
     obj = getattr(ctx, "obj", None)
     if not isinstance(obj, dict):
         return None
@@ -309,15 +249,7 @@ def _explicit_config_dir(ctx: click.Context) -> str | None:
 
 
 def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
-    """``ante member revoke`` payload 명령 문자열을 생성한다.
-
-    - ``config_dir`` 이 주어지면 ``ante --config-dir <quoted>`` 를 앞에 붙여
-      동일 인스턴스(DB) 대상으로 명령이 실행되도록 보존한다.
-    - ``--yes`` 는 ``member revoke`` 비대화형 게이트를 통과하기 위해 항상 포함한다.
-    - ``--`` separator 와 ``shlex.quote`` 로 ``member_id`` 를 셸 안전 인용해
-      빈 문자열·공백·셸 메타문자·``-``-prefix 가 포함된 id 도 인자 splitting /
-      옵션 파싱으로 오해석되지 않도록 한다.
-    """
+    """``ante member revoke`` payload 명령 문자열을 생성한다."""
     parts = ["ante"]
     if config_dir is not None:
         parts.append(f"--config-dir {shlex.quote(config_dir)}")
@@ -331,31 +263,7 @@ def _invalid_role_row_dict(
     actionable: bool,
     config_dir: str | None = None,
 ) -> dict:
-    """``Member`` row 를 CLI 출력용 dict 로 변환.
-
-    ``token_hash`` 는 보안상 절대 노출하지 않는다 (secret-exposure). 토큰 존재
-    여부는 ``has_token: bool`` 로만 표현하고 만료시각은 그대로 표시한다.
-    ``valid_roles`` 는 row-level 이 아니라 top-level scan summary 에만 노출한다.
-
-    ``revoke_command`` 는 **actionable row 에서만** 노출한다. legacy_revoked row
-    는 이미 ``status=revoked`` 상태이며 ``MemberService.revoke`` 가
-    ``active``/``suspended`` 만 허용하므로 재실행 시 실패한다. 따라서 noop 명령을
-    payload 에 싣지 않고 키 자체를 누락해 "추가 조치 불요" 임을 명시한다.
-
-    actionable row 의 ``revoke_command`` 는 ``shlex.quote`` 로 ``member_id`` 를
-    셸 안전하게 인용하고, ``--`` separator 로 옵션/포지셔널 경계를 명시한다 — 빈
-    문자열·공백·셸 메타문자·``-``-prefix 가 포함된 ``member_id`` 가 운영자 셸에서
-    인자 splitting 이나 옵션 파싱으로 오해석되는 위험을 차단한다.
-
-    ``config_dir`` 이 주어지면(루트 ``--config-dir`` 이 명시된 경우) 그 값을
-    ``revoke_command`` 앞에 ``--config-dir <quoted>`` 로 보존해, 운영자가 payload
-    를 그대로 복사 실행해도 같은 인스턴스(DB) 대상으로 동작하도록 보장한다
-    (config-dir 보존). default config_dir 일 때는 인자 자체를 생략해 기존 표준
-    호출 형태를 유지한다. 값은 :func:`_explicit_config_dir` 에서
-    ``expanduser().resolve()`` 로 **절대 경로화** 되어 들어오므로, 운영자가
-    상대 경로/``~`` 확장 형태로 호출했더라도 payload 는 다른 CWD 에서 실행해도
-    같은 인스턴스를 가리킨다.
-    """
+    """``Member`` row 를 CLI 출력용 dict 로 변환."""
     has_token = bool(m.token_hash)
     row: dict = {
         "member_id": m.member_id,
