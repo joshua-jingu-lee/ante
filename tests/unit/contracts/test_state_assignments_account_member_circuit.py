@@ -18,6 +18,9 @@
 문이고, 같은 메서드에서 ``SET status`` 를 쓰는 ``self._db.execute`` 보다 앞에
 있으며, 그 ``execute`` 의 인자 튜플 첫 원소는 이름 ``status`` 다.
 
+**기존 검사**: 호출보다 앞 줄의 ``raise``·``return``·``self._assert_*`` 호출이
+메서드마다 리터럴 목록과 같다(기존 검사를 표 검사로 대체하지 않는다).
+
 알려진 한계: ``**kwargs`` 언패킹으로 넘기는 ``status``, ``__dict__``·
 ``object.__setattr__``·``dataclasses.replace`` 를 거치는 쓰기, 다른 파일의
 쓰기는 보지 않는다.
@@ -245,3 +248,72 @@ def test_transition_precedes_the_status_update_and_feeds_it(path):
         params = update.args[1]
         assert isinstance(params, ast.Tuple), name
         assert ast.unparse(params.elts[0]) == "status", name
+
+
+def _guards_before_transition(method: ast.AsyncFunctionDef) -> list[str]:
+    (call,) = [
+        node
+        for node in ast.walk(method)
+        if isinstance(node, ast.Call) and _callee_name(node) == _TRANSITION_FUNC
+    ]
+    guards: list[tuple[int, str]] = []
+    for node in ast.walk(method):
+        if getattr(node, "lineno", call.lineno) >= call.lineno:
+            continue
+        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
+            guards.append((node.lineno, f"raise {_callee_name(node.exc)}"))
+        elif isinstance(node, ast.Return):
+            guards.append((node.lineno, "return"))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr.startswith("_assert_")
+        ):
+            guards.append((node.lineno, node.func.attr))
+    return [name for _, name in sorted(guards)]
+
+
+@pytest.mark.parametrize(
+    ("path", "expected"),
+    [
+        (
+            _ACCOUNT,
+            {
+                "activate": ["raise AccountDeletedException", "return"],
+                "delete": [
+                    "raise AccountStructuralChangeRequiresStoppedServerError",
+                    "raise AccountDeletedException",
+                    "raise AccountHasActiveBotsError",
+                ],
+                "suspend": [
+                    "raise AccountDeletedException",
+                    "raise AccountAlreadySuspendedError",
+                ],
+            },
+        ),
+        (
+            _MEMBER,
+            {
+                "reactivate": ["_assert_master", "raise MemberStateConflictError"],
+                "revoke": ["_assert_master", "_assert_not_master", "_assert_status"],
+                "suspend": [
+                    "_assert_master",
+                    "_assert_not_master",
+                    "raise MemberStateConflictError",
+                ],
+            },
+        ),
+    ],
+    ids=["account", "member"],
+)
+def test_existing_guards_stay_before_the_transition(path, expected):
+    tree = _parse(path)
+    owner = _enclosing_functions(tree)
+    methods = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+    }
+    callers = sorted(owner[id(call)] for call in _transition_calls(tree))
+    guards = {name: _guards_before_transition(methods[name]) for name in callers}
+    assert guards == expected
