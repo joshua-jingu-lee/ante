@@ -23,7 +23,12 @@ from ante.account.errors import (
     InvalidExchangeError,
     MissingCredentialsError,
 )
-from ante.account.models import Account, AccountStatus, TradingMode
+from ante.account.models import (
+    ACCOUNT_STATUS_TRANSITIONS,
+    Account,
+    AccountStatus,
+    TradingMode,
+)
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
@@ -98,6 +103,16 @@ def _reject_virtual_only_broker_in_live(account: Account) -> None:
             f"trading_mode '{account.trading_mode.value}'와 함께 쓸 수 없습니다. "
             "trading_mode 'virtual'로 만드세요."
         )
+
+
+def _transition_status(account: Account, target: AccountStatus) -> AccountStatus:
+    if target not in ACCOUNT_STATUS_TRANSITIONS.get(account.status, set()):
+        raise ValueError(
+            f"계좌 '{account.account_id}' 상태 '{account.status}' 에서 "
+            f"'{target}' 으로 전이할 수 없습니다."
+        )
+    account.status = target
+    return target
 
 
 STRUCTURAL_FIELDS: frozenset[str] = frozenset(
@@ -528,12 +543,12 @@ class AccountService:
             raise AccountAlreadySuspendedError(
                 f"이미 정지된 계좌입니다: '{account_id}'"
             )
-        account.status = AccountStatus.SUSPENDED
+        status = _transition_status(account, AccountStatus.SUSPENDED)
         account.updated_at = datetime.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (AccountStatus.SUSPENDED, account.updated_at.isoformat(), account_id),
+            (status, account.updated_at.isoformat(), account_id),
         )
 
         from ante.eventbus.events import AccountSuspendedEvent, NotificationEvent
@@ -580,12 +595,12 @@ class AccountService:
         if account.status == AccountStatus.ACTIVE:
             return
 
-        account.status = AccountStatus.ACTIVE
+        status = _transition_status(account, AccountStatus.ACTIVE)
         account.updated_at = datetime.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (AccountStatus.ACTIVE, account.updated_at.isoformat(), account_id),
+            (status, account.updated_at.isoformat(), account_id),
         )
 
         from ante.eventbus.events import AccountActivatedEvent, NotificationEvent
@@ -636,12 +651,12 @@ class AccountService:
                 )
             )
 
-        account.status = AccountStatus.DELETED
+        status = _transition_status(account, AccountStatus.DELETED)
         account.updated_at = datetime.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
-            (AccountStatus.DELETED, account.updated_at.isoformat(), account_id),
+            (status, account.updated_at.isoformat(), account_id),
         )
 
         self._accounts.pop(account_id, None)

@@ -17,6 +17,13 @@ class AccountStatus(StrEnum):
     DELETED = "deleted"
 
 
+ACCOUNT_STATUS_TRANSITIONS: dict[AccountStatus, set[AccountStatus]] = {
+    AccountStatus.ACTIVE: {AccountStatus.SUSPENDED, AccountStatus.DELETED},
+    AccountStatus.SUSPENDED: {AccountStatus.ACTIVE, AccountStatus.DELETED},
+    AccountStatus.DELETED: set(),
+}
+
+
 class TradingMode(StrEnum):
     """거래 모드."""
 
