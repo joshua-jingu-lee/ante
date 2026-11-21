@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail when the CLI and IPC error exits differ from the baseline.
+"""Fail when CLI and IPC error exits or IPC request reads differ from the baseline.
 
 The sources are parsed with ``ast`` only; nothing under ``src/`` is imported.
 
@@ -35,6 +35,28 @@ exclusion: non-empty string literals in an error-code position that are not a
    whose other operand reads a code (``getattr(_, "code"|"ipc_error_code",
    ...)``, ``_.get("code", ...)``, ``_.code``, ``_.ipc_error_code``).
 
+Request keys, over ``register_all_handlers`` in ``src/ante/ipc/registry.py``
+and the calls ``<anything>.register(<str literal>, <name>, ...)`` inside it,
+nested blocks included:
+
+- ``ipc_handlers_without_model`` (set): the command names of those calls with
+  no ``request_model=`` keyword or ``request_model=None``.
+- ``ipc_args_reads`` (count per command): for each command in that set, the
+  ``Load`` uses of the second parameter name of the handler, the top-level
+  (async) function of the same module named by the second positional
+  argument. Every use counts once: subscript, attribute, ``in``, argument.
+  Commands with zero are left out.
+- ``cli_direct_ipc_send`` (count per file in ``src/ante/cli/**/*.py``, no
+  hook exclusion): calls whose callee ends in the name ``ipc_send``.
+  Definitions are not calls.
+
+Known limits of the request keys: registrations outside
+``register_all_handlers`` or with a non-literal command name are not seen.
+``ipc_args_reads`` counts the syntax of the parameter name only: a read
+through an alias (``a = args``) counts as the one assignment, ``f(**args)``
+counts as one, and a nested function whose parameter has the same name adds
+its uses.
+
 Known limits: codes that reach an exit outside these positions are not seen:
 a code held in a variable or a module constant, a positional argument of a
 module helper (``_exit_with_error(fmt, "CODE", ...)``), a conditional
@@ -44,12 +66,14 @@ expression, an f-string or a return value. Exits through helpers such as
 counted as exits.
 ``setattr(e, "ipc_error_code", ...)`` and tuple assignments are not positions.
 
-Exit 0: all four keys equal ``scripts/entry_ratchet_baseline.json``.
-Exit 1: a count differs from the baseline in either direction, or the code
-set differs. Only the comparison produces this code.
+Exit 0: all seven keys equal ``scripts/entry_ratchet_baseline.json``.
+Exit 1: a count differs from the baseline in either direction, or a set
+differs. Only the comparison produces this code.
 Exit 2: every other failure: a missing or malformed baseline, a source file
-that cannot be read or parsed, a missing hook function or registry, or any
-unexpected exception.
+that cannot be read or parsed, a missing hook function or registry, a missing
+``register_all_handlers``, no registration in it, a second positional argument
+that is not the name of a top-level function of the module, a handler with
+fewer than two parameters, or any unexpected exception.
 """
 
 from __future__ import annotations
@@ -69,13 +93,28 @@ HOOK_PATH = "src/ante/cli/middleware.py"
 HOOK_CLASS = "AuthenticatedGroup"
 HOOK_FUNCTION = "main"
 REGISTRY_PATH = "src/ante/contracts/error_registry.py"
+IPC_REGISTRY_PATH = "src/ante/ipc/registry.py"
+IPC_REGISTER_FUNCTION = "register_all_handlers"
 
 CLI_ERROR_CALLS = "cli_error_calls"
 CLI_EXITS = "cli_exits"
 IPC_ERROR_CODE_READS = "ipc_error_code_reads"
 UNREGISTERED_CODES = "unregistered_codes"
-COUNT_KEYS = (CLI_ERROR_CALLS, CLI_EXITS, IPC_ERROR_CODE_READS)
-BASELINE_KEYS = frozenset((*COUNT_KEYS, UNREGISTERED_CODES))
+IPC_HANDLERS_WITHOUT_MODEL = "ipc_handlers_without_model"
+IPC_ARGS_READS = "ipc_args_reads"
+CLI_DIRECT_IPC_SEND = "cli_direct_ipc_send"
+ERROR_COUNT_KEYS = (CLI_ERROR_CALLS, CLI_EXITS, IPC_ERROR_CODE_READS)
+REQUEST_COUNT_KEYS = (IPC_ARGS_READS, CLI_DIRECT_IPC_SEND)
+COUNT_KEYS = (*ERROR_COUNT_KEYS, *REQUEST_COUNT_KEYS)
+SET_KEYS = (UNREGISTERED_CODES, IPC_HANDLERS_WITHOUT_MODEL)
+FILE_COUNT_KEYS = frozenset((*ERROR_COUNT_KEYS, CLI_DIRECT_IPC_SEND))
+BASELINE_ORDER = (
+    *ERROR_COUNT_KEYS,
+    UNREGISTERED_CODES,
+    IPC_HANDLERS_WITHOUT_MODEL,
+    *REQUEST_COUNT_KEYS,
+)
+BASELINE_KEYS = frozenset(BASELINE_ORDER)
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -90,6 +129,12 @@ ALTERNATIVES = (
     "  - 명령 안에서 끝내지 말고 타입 예외를 던진다\n"
     f"  - 그 예외와 코드를 에러 레지스트리({REGISTRY_PATH})에 등록한다"
 )
+REQUEST_ALTERNATIVES = (
+    "요청 모델 없는 IPC 명령과 인자 사전 읽기 대신:\n"
+    "  - 요청 모델(src/ante/ipc/requests.py의 IPCRequest 하위 클래스)을 만들어 "
+    "register(..., request_model=...)로 등록한다\n"
+    "  - 핸들러는 사전 대신 그 모델의 필드를 읽는다"
+)
 MOVE_HINT = "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
 
 
@@ -103,9 +148,16 @@ class Measurement:
     cli_exits: dict[str, int]
     ipc_error_code_reads: dict[str, int]
     unregistered_codes: frozenset[str]
+    ipc_handlers_without_model: frozenset[str]
+    ipc_args_reads: dict[str, int]
+    cli_direct_ipc_send: dict[str, int]
 
     def counts(self, key: str) -> dict[str, int]:
         value: dict[str, int] = getattr(self, key)
+        return value
+
+    def members(self, key: str) -> frozenset[str]:
+        value: frozenset[str] = getattr(self, key)
         return value
 
 
@@ -323,6 +375,87 @@ def code_literals(tree: ast.Module) -> set[str]:
     return found
 
 
+def count_ipc_send(tree: ast.Module) -> int:
+    return sum(
+        isinstance(node, ast.Call) and _terminal_name(node.func) == "ipc_send"
+        for node in ast.walk(tree)
+    )
+
+
+def _top_functions(
+    tree: ast.Module,
+) -> dict[str, ast.FunctionDef | ast.AsyncFunctionDef]:
+    return {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+
+
+def _is_model_missing(node: ast.Call) -> bool:
+    for keyword in node.keywords:
+        if keyword.arg == "request_model":
+            value = keyword.value
+            return isinstance(value, ast.Constant) and value.value is None
+    return True
+
+
+def _second_param_uses(func: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
+    params = [*func.args.posonlyargs, *func.args.args]
+    if len(params) < 2:
+        raise CheckError(
+            f"handler {func.name} in {IPC_REGISTRY_PATH} has fewer than two parameters"
+        )
+    name = params[1].arg
+    return sum(
+        isinstance(node, ast.Name)
+        and node.id == name
+        and isinstance(node.ctx, ast.Load)
+        for node in ast.walk(func)
+    )
+
+
+def measure_ipc(tree: ast.Module) -> tuple[frozenset[str], dict[str, int]]:
+    """Return (commands without a request model, their handlers' args reads)."""
+    top = _top_functions(tree)
+    register_all = top.get(IPC_REGISTER_FUNCTION)
+    if register_all is None:
+        raise CheckError(f"{IPC_REGISTER_FUNCTION} not found in {IPC_REGISTRY_PATH}")
+    found = 0
+    without: set[str] = set()
+    reads: dict[str, int] = {}
+    for node in ast.walk(register_all):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "register"
+            and node.args
+        ):
+            continue
+        command = _string(node.args[0])
+        if command is None:
+            continue
+        found += 1
+        handler = node.args[1] if len(node.args) >= 2 else None
+        if not (isinstance(handler, ast.Name) and handler.id in top):
+            raise CheckError(
+                f"register({command!r}) in {IPC_REGISTRY_PATH}: the second "
+                "positional argument is not the name of a top-level function"
+            )
+        if not _is_model_missing(node):
+            continue
+        without.add(command)
+        uses = _second_param_uses(top[handler.id])
+        if uses:
+            reads[command] = uses
+    if not found:
+        raise CheckError(
+            f"no register(<command>, <handler>, ...) call in "
+            f"{IPC_REGISTER_FUNCTION} of {IPC_REGISTRY_PATH}"
+        )
+    return frozenset(without), reads
+
+
 def registered_codes(tree: ast.Module) -> set[str]:
     codes: set[str] = set()
     for node in ast.walk(tree):
@@ -349,10 +482,15 @@ def measure(root: Path) -> Measurement:
         )
     if REGISTRY_PATH not in trees:
         raise CheckError(f"error registry not found: {REGISTRY_PATH}")
+    if IPC_REGISTRY_PATH not in trees:
+        raise CheckError(
+            f"{IPC_REGISTER_FUNCTION} not found: {IPC_REGISTRY_PATH} is missing"
+        )
     registered = registered_codes(trees[REGISTRY_PATH])
     if not registered:
         raise CheckError(f"no ErrorSpec(code=...) found in {REGISTRY_PATH}")
     hook = hook_nodes(trees[HOOK_PATH])
+    without_model, args_reads = measure_ipc(trees[IPC_REGISTRY_PATH])
     counts: dict[str, dict[str, int]] = {key: {} for key in COUNT_KEYS}
     cli_paths = {
         path.relative_to(root).as_posix() for path in target_files(root, CLI_GLOB)
@@ -363,23 +501,33 @@ def measure(root: Path) -> Measurement:
         if rel not in cli_paths:
             continue
         skip = hook if rel == HOOK_PATH else set()
-        for key, value in zip(COUNT_KEYS, count_cli_file(tree, skip), strict=True):
+        for key, value in zip(
+            ERROR_COUNT_KEYS, count_cli_file(tree, skip), strict=True
+        ):
             if value:
                 counts[key][rel] = value
+        sends = count_ipc_send(tree)
+        if sends:
+            counts[CLI_DIRECT_IPC_SEND][rel] = sends
     return Measurement(
         counts[CLI_ERROR_CALLS],
         counts[CLI_EXITS],
         counts[IPC_ERROR_CODE_READS],
         frozenset(codes - registered),
+        without_model,
+        args_reads,
+        counts[CLI_DIRECT_IPC_SEND],
     )
 
 
 def baseline_json(measurement: Measurement) -> str:
     """Serialize a measurement in the baseline file format."""
-    data: dict[str, object] = {
-        key: dict(sorted(measurement.counts(key).items())) for key in COUNT_KEYS
-    }
-    data[UNREGISTERED_CODES] = sorted(measurement.unregistered_codes)
+    data: dict[str, object] = {}
+    for key in BASELINE_ORDER:
+        if key in SET_KEYS:
+            data[key] = sorted(measurement.members(key))
+        else:
+            data[key] = dict(sorted(measurement.counts(key).items()))
     return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
 
 
@@ -402,16 +550,12 @@ def _read_counts(data: dict[str, object], key: str) -> dict[str, int]:
     return counts
 
 
-def _read_codes(data: dict[str, object]) -> frozenset[str]:
-    value = data[UNREGISTERED_CODES]
+def _read_set(data: dict[str, object], key: str) -> frozenset[str]:
+    value = data[key]
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
-        raise CheckError(
-            f"{BASELINE_PATH}: {UNREGISTERED_CODES!r} must be a list of strings"
-        )
+        raise CheckError(f"{BASELINE_PATH}: {key!r} must be a list of strings")
     if value != sorted(set(value)):
-        raise CheckError(
-            f"{BASELINE_PATH}: {UNREGISTERED_CODES!r} must be sorted with no duplicates"
-        )
+        raise CheckError(f"{BASELINE_PATH}: {key!r} must be sorted with no duplicates")
     return frozenset(value)
 
 
@@ -435,7 +579,10 @@ def parse_baseline(text: str) -> Measurement:
         _read_counts(data, CLI_ERROR_CALLS),
         _read_counts(data, CLI_EXITS),
         _read_counts(data, IPC_ERROR_CODE_READS),
-        _read_codes(data),
+        _read_set(data, UNREGISTERED_CODES),
+        _read_set(data, IPC_HANDLERS_WITHOUT_MODEL),
+        _read_counts(data, IPC_ARGS_READS),
+        _read_counts(data, CLI_DIRECT_IPC_SEND),
     )
 
 
@@ -473,32 +620,61 @@ def _diff_counts(
     return grew
 
 
+def _diff_set(
+    key: str,
+    actual: frozenset[str],
+    baseline: frozenset[str],
+    lines: list[str],
+    lower: list[str],
+) -> bool:
+    added = sorted(actual - baseline)
+    removed = sorted(baseline - actual)
+    lines.extend(f"{key}\t+ {member}" for member in added)
+    lines.extend(f"{key}\t- {member}" for member in removed)
+    lower.extend(f"  - {key}에서 {member!r}를 지운다" for member in removed)
+    return bool(added)
+
+
+def _diff_key(
+    key: str,
+    actual: Measurement,
+    baseline: Measurement,
+    lines: list[str],
+    lower: list[str],
+) -> bool:
+    if key in SET_KEYS:
+        return _diff_set(key, actual.members(key), baseline.members(key), lines, lower)
+    return _diff_counts(key, actual.counts(key), baseline.counts(key), lines, lower)
+
+
+def _totals(actual: Measurement) -> str:
+    parts = []
+    for key in BASELINE_ORDER:
+        if key in SET_KEYS:
+            parts.append(f"{key} {len(actual.members(key))}")
+        else:
+            parts.append(f"{key} {sum(actual.counts(key).values())}")
+    return ", ".join(parts)
+
+
 def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
     lines: list[str] = []
     lower: list[str] = []
-    grew = False
-    for key in COUNT_KEYS:
-        grew |= _diff_counts(
-            key, actual.counts(key), baseline.counts(key), lines, lower
-        )
-    added = sorted(actual.unregistered_codes - baseline.unregistered_codes)
-    removed = sorted(baseline.unregistered_codes - actual.unregistered_codes)
-    lines.extend(f"{UNREGISTERED_CODES}\t+ {code}" for code in added)
-    lines.extend(f"{UNREGISTERED_CODES}\t- {code}" for code in removed)
-    lower.extend(f"  - {UNREGISTERED_CODES}에서 {code!r}를 지운다" for code in removed)
+    grew: set[str] = set()
+    for key in BASELINE_ORDER:
+        if _diff_key(key, actual, baseline, lines, lower):
+            grew.add(key)
     if not lines:
-        totals = ", ".join(
-            f"{key} {sum(actual.counts(key).values())}" for key in COUNT_KEYS
-        )
-        return EXIT_OK, (
-            f"entry ratchet ok: {totals}, "
-            f"{UNREGISTERED_CODES} {len(actual.unregistered_codes)} "
-            f"(baseline {BASELINE_PATH})"
+        return (
+            EXIT_OK,
+            f"entry ratchet ok: {_totals(actual)} (baseline {BASELINE_PATH})",
         )
     parts = [f"entry ratchet failed against {BASELINE_PATH}:", *lines]
-    if grew or added:
+    if grew & {*ERROR_COUNT_KEYS, UNREGISTERED_CODES}:
         parts.append(ALTERNATIVES)
-    if grew:
+    if grew & {IPC_HANDLERS_WITHOUT_MODEL, IPC_ARGS_READS}:
+        parts.append(REQUEST_ALTERNATIVES)
+    if grew & FILE_COUNT_KEYS:
         parts.append(MOVE_HINT)
     if lower:
         parts.append(f"줄어든 값은 {BASELINE_PATH}의 기준선을 실측으로 낮춘다:")
@@ -517,7 +693,9 @@ def run(root: Path) -> tuple[int, str]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Check CLI and IPC error exits against a baseline."
+        description=(
+            "Check CLI and IPC error exits and IPC request reads against a baseline."
+        )
     )
     parser.add_argument(
         "--root",
