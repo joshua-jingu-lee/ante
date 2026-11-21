@@ -14,6 +14,13 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts.cli_errors import (
+    CliOptionConflictError,
+    ReportError,
+    ReportInvalidStatusError,
+    ReportNotFoundError,
+    ReportValidationError,
+)
 from ante.core.database import OperationalError
 from ante.report.models import ReportStatus
 from ante.report.validation import ReportSubmitRequest
@@ -64,15 +71,12 @@ def submit(
         try:
             raw_data = json.load(f)
         except json.JSONDecodeError as exc:
-            fmt.error(f"Invalid JSON: {exc}", code="REPORT_VALIDATION_ERROR")
-            raise SystemExit(1) from exc
+            raise ReportValidationError(f"Invalid JSON: {exc}") from exc
 
     if not isinstance(raw_data, dict):
-        fmt.error(
-            f"Report file must be a JSON object, got {type(raw_data).__name__}",
-            code="REPORT_VALIDATION_ERROR",
+        raise ReportValidationError(
+            f"Report file must be a JSON object, got {type(raw_data).__name__}"
         )
-        raise SystemExit(1)
 
     report_data: dict = dict(raw_data)
 
@@ -84,11 +88,9 @@ def submit(
     try:
         validated = ReportSubmitRequest.model_validate(report_data)
     except ValidationError as exc:
-        fmt.error(
-            str(exc.errors(include_context=False, include_input=False)),
-            code="REPORT_VALIDATION_ERROR",
-        )
-        raise SystemExit(1) from exc
+        raise ReportValidationError(
+            str(exc.errors(include_context=False, include_input=False))
+        ) from exc
 
     effective_run_id = run_id if run_id else validated.backtest_run_id
 
@@ -152,8 +154,7 @@ def submit(
         result = asyncio.run(_submit())
         fmt.success(f"Report submitted: {result['report_id']}", result)
     except Exception as e:
-        fmt.error(str(e), code="REPORT_ERROR")
-        raise SystemExit(1) from e
+        raise ReportError(str(e)) from e
 
 
 @report.command("list")
@@ -174,12 +175,10 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
     resolved_db_path = db_path or get_db_path(ctx)
 
     if status is not None and status not in {s.value for s in ReportStatus}:
-        fmt.error(
+        raise ReportInvalidStatusError(
             f"잘못된 status 값: {status!r}. "
-            f"허용값: {sorted(s.value for s in ReportStatus)}",
-            code="REPORT_INVALID_STATUS",
+            f"허용값: {sorted(s.value for s in ReportStatus)}"
         )
-        raise SystemExit(1)
 
     async def _list() -> list[dict]:
         async with open_cli_db(
@@ -210,8 +209,7 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
         rows = asyncio.run(_list())
         fmt.table(rows, ["report_id", "strategy", "status", "submitted_at"])
     except Exception as e:
-        fmt.error(str(e), code="REPORT_ERROR")
-        raise SystemExit(1) from e
+        raise ReportError(str(e)) from e
 
 
 @report.command("performance")
@@ -252,25 +250,19 @@ def report_performance(
     fmt = get_formatter(ctx)
 
     if period == "monthly" and (start or end):
-        fmt.error(
+        raise CliOptionConflictError(
             "--start/--end 옵션은 --period monthly와 함께 사용할 수 없습니다. "
-            "(daily 전용)",
-            code="CLI_OPTION_CONFLICT",
+            "(daily 전용)"
         )
-        raise SystemExit(1)
     if period == "daily" and year is not None:
-        fmt.error(
-            "--year 옵션은 --period daily와 함께 사용할 수 없습니다. (monthly 전용)",
-            code="CLI_OPTION_CONFLICT",
+        raise CliOptionConflictError(
+            "--year 옵션은 --period daily와 함께 사용할 수 없습니다. (monthly 전용)"
         )
-        raise SystemExit(1)
 
     if period == "monthly" and year is not None and year <= 0:
-        fmt.error(
-            "monthly --year는 양수 calendar year여야 합니다. (0 이하 거부)",
-            code="REPORT_VALIDATION_ERROR",
+        raise ReportValidationError(
+            "monthly --year는 양수 calendar year여야 합니다. (0 이하 거부)"
         )
-        raise SystemExit(1)
 
     reject_inverted_date_range(
         start,
@@ -369,12 +361,10 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
     try:
         result = asyncio.run(_view())
     except Exception as e:
-        fmt.error(str(e), code="REPORT_ERROR")
-        raise SystemExit(1) from e
+        raise ReportError(str(e)) from e
 
     if not result:
-        fmt.error(f"리포트를 찾을 수 없습니다: {report_id}", code="REPORT_NOT_FOUND")
-        raise SystemExit(1)
+        raise ReportNotFoundError(f"리포트를 찾을 수 없습니다: {report_id}")
 
     if fmt.is_json:
         fmt.output(result)

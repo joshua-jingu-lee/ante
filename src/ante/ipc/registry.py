@@ -7,12 +7,16 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from ante.contracts.vocab import ContractKind
+from ante.ipc.requests import (
+    IPCRequest,
+    SystemClearHaltRequest,
+    SystemHaltRequest,
+)
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
 
-CommandHandler = Callable[["ServiceRegistry", dict, str], Awaitable[dict]]
+CommandHandler = Callable[["ServiceRegistry", Any, str], Awaitable[dict]]
 
 ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
 
@@ -28,13 +32,11 @@ class CommandSpec:
     name: str
     handler: CommandHandler
     is_mutating: bool
-    result_kind: ContractKind = "raw"
-    result_key: str | None = None
     required_services: frozenset[str] = field(default_factory=frozenset)
     audit_action: str | None = None
     account_id_policy: AccountIdPolicy = "none"
-    cross_validators: tuple[Callable[..., Any], ...] = ()
     shutdown_behavior: ShutdownBehavior | None = None
+    request_model: type[IPCRequest] | None = None
 
 
 class CommandRegistry:
@@ -43,7 +45,7 @@ class CommandRegistry:
     외부 호출자는 ``register(name, handler, *, is_mutating=...)``
     keyword-only 인자를 명시해야 한다.
 
-    ``register()``는 contract metadata 7 필드를 kwargs로
+    ``register()``는 contract metadata 5 필드를 kwargs로
     수용한다. ``register(name, handler, is_mutating=...)`` 호출은
     default 값으로 그대로 작동(backward compat).
     """
@@ -57,13 +59,11 @@ class CommandRegistry:
         handler: CommandHandler,
         *,
         is_mutating: bool,
-        result_kind: ContractKind = "raw",
-        result_key: str | None = None,
         required_services: frozenset[str] | None = None,
         audit_action: str | None = None,
         account_id_policy: AccountIdPolicy = "none",
-        cross_validators: tuple[Callable[..., Any], ...] = (),
         shutdown_behavior: ShutdownBehavior | None = None,
+        request_model: type[IPCRequest] | None = None,
     ) -> None:
         """핸들러 등록.
 
@@ -74,15 +74,13 @@ class CommandRegistry:
             name=command,
             handler=handler,
             is_mutating=is_mutating,
-            result_kind=result_kind,
-            result_key=result_key,
             required_services=(
                 required_services if required_services is not None else frozenset()
             ),
             audit_action=audit_action,
             account_id_policy=account_id_policy,
-            cross_validators=cross_validators,
             shutdown_behavior=shutdown_behavior,
+            request_model=request_model,
         )
 
     def get(self, command: str) -> CommandSpec | None:
@@ -118,10 +116,10 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
 
 
 async def _handle_system_halt(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: SystemHaltRequest, actor: str
 ) -> dict:
     """전역 거래 정지(kill switch) IPC handler."""
-    reason = args.get("reason", "IPC halt")
+    reason = request.reason
     accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
     payload = _kill_switch_payload("halted", accounts)
     payload["_audit_detail"] = {
@@ -133,7 +131,7 @@ async def _handle_system_halt(
 
 
 async def _handle_system_clear_halt(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: SystemClearHaltRequest, actor: str
 ) -> dict:
     """전역 거래 정지 해제 IPC handler."""
     accounts = await svc.account.activate_all(activated_by=actor)
@@ -1147,23 +1145,22 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "system.halt",
         _handle_system_halt,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         audit_action="system.halt",
+        request_model=SystemHaltRequest,
     )
     registry.register(
         "system.clear_halt",
         _handle_system_clear_halt,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         audit_action="system.clear_halt",
+        request_model=SystemClearHaltRequest,
     )
     registry.register(
         "account.suspend",
         _handle_account_suspend,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         account_id_policy="required",
         audit_action="account.suspend",
@@ -1172,7 +1169,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "account.activate",
         _handle_account_activate,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         account_id_policy="required",
         audit_action="account.activate",
@@ -1181,8 +1177,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.create",
         _handle_bot_create,
         is_mutating=True,
-        result_kind="entity",
-        result_key="bot_id",
         required_services=frozenset(
             {"strategy_registry", "bot_manager", "audit_logger"}
         ),
@@ -1193,7 +1187,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.remove",
         _handle_bot_remove,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.delete",
     )
@@ -1201,7 +1194,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.signal_key.rotate",
         _handle_bot_signal_key_rotate,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.signal_key.rotate",
     )
@@ -1209,8 +1201,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.start",
         _handle_bot_start,
         is_mutating=True,
-        result_kind="entity",
-        result_key="bot",
         required_services=frozenset({"bot_manager", "account", "audit_logger"}),
         audit_action="bot.start",
     )
@@ -1218,8 +1208,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.stop",
         _handle_bot_stop,
         is_mutating=True,
-        result_kind="entity",
-        result_key="bot",
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.stop",
     )
@@ -1227,8 +1215,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.update",
         _handle_bot_update,
         is_mutating=True,
-        result_kind="entity",
-        result_key="bot",
         required_services=frozenset({"bot_manager", "audit_logger"}),
         audit_action="bot.update",
     )
@@ -1236,7 +1222,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "treasury.allocate",
         _handle_treasury_allocate,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"bot_manager", "treasury_manager"}),
         account_id_policy="required",
     )
@@ -1244,7 +1229,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "treasury.deallocate",
         _handle_treasury_deallocate,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"bot_manager", "treasury_manager"}),
         account_id_policy="required",
     )
@@ -1252,7 +1236,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "treasury.set_balance",
         _handle_treasury_set_balance,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"treasury_manager", "audit_logger"}),
         audit_action="treasury.set_balance",
         account_id_policy="required",
@@ -1261,7 +1244,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "rule.update",
         _handle_rule_update,
         is_mutating=True,
-        result_kind="raw",
         required_services=frozenset({"account", "dynamic_config", "audit_logger"}),
         account_id_policy="required",
         audit_action="account.rule.update",
@@ -1270,7 +1252,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "strategy.set_status",
         _handle_strategy_set_status,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"strategy_registry", "audit_logger"}),
         audit_action="strategy.set_status",
     )
@@ -1278,7 +1259,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.update_scopes",
         _handle_member_update_scopes,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.update_scopes",
     )
@@ -1286,7 +1266,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.register",
         _handle_member_register,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.register",
     )
@@ -1294,7 +1273,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.set_emoji",
         _handle_member_set_emoji,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.set_emoji",
     )
@@ -1302,7 +1280,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.suspend",
         _handle_member_suspend,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.suspend",
     )
@@ -1310,7 +1287,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.reactivate",
         _handle_member_reactivate,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.reactivate",
     )
@@ -1318,7 +1294,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.revoke",
         _handle_member_revoke,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.revoke",
     )
@@ -1326,7 +1301,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.rotate_token",
         _handle_member_rotate_token,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.rotate_token",
     )
@@ -1334,7 +1308,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.reset_password",
         _handle_member_reset_password,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.reset_password",
     )
@@ -1342,7 +1315,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "member.regenerate_recovery_key",
         _handle_member_regenerate_recovery_key,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.regenerate_recovery_key",
     )
@@ -1350,21 +1322,18 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "config.set",
         _handle_config_set,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset({"dynamic_config"}),
     )
     registry.register(
         "approval.request",
         _handle_approval_request,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval"}),
     )
     registry.register(
         "approval.approve",
         _handle_approval_approve,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.approve",
     )
@@ -1372,7 +1341,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "approval.reject",
         _handle_approval_reject,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.reject",
     )
@@ -1380,7 +1348,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "approval.cancel",
         _handle_approval_cancel,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.cancel",
     )
@@ -1388,7 +1355,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "approval.cancel_invalid",
         _handle_approval_cancel_invalid,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.cancel_invalid",
     )
@@ -1396,14 +1362,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "approval.reopen",
         _handle_approval_reopen,
         is_mutating=True,
-        result_kind="entity",
         required_services=frozenset({"approval"}),
     )
     registry.register(
         "broker.reconcile",
         _handle_broker_reconcile,
         is_mutating=True,
-        result_kind="operation",
         required_services=frozenset(
             {"account", "reconciler", "bot_manager", "audit_logger"}
         ),
@@ -1414,7 +1378,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "broker.status",
         _handle_broker_status,
         is_mutating=False,
-        result_kind="entity",
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )
@@ -1422,7 +1385,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "broker.balance",
         _handle_broker_balance,
         is_mutating=False,
-        result_kind="raw",
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )
@@ -1430,8 +1392,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "broker.positions",
         _handle_broker_positions,
         is_mutating=False,
-        result_kind="collection",
-        result_key="positions",
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )
@@ -1439,8 +1399,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "broker.order_history",
         _handle_broker_order_history,
         is_mutating=False,
-        result_kind="collection",
-        result_key="orders",
         required_services=frozenset({"account"}),
         account_id_policy="required",
     )
@@ -1448,16 +1406,12 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.status",
         _handle_bot_status,
         is_mutating=False,
-        result_kind="entity",
-        result_key="bot",
         required_services=frozenset({"bot_manager"}),
     )
     registry.register(
         "bot.list",
         _handle_bot_list,
         is_mutating=False,
-        result_kind="collection",
-        result_key="bots",
         required_services=frozenset({"bot_manager"}),
         account_id_policy="optional_filter",
     )
@@ -1465,31 +1419,24 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         "bot.info",
         _handle_bot_info,
         is_mutating=False,
-        result_kind="entity",
-        result_key="bot",
         required_services=frozenset({"bot_manager"}),
     )
     registry.register(
         "bot.positions",
         _handle_bot_positions,
         is_mutating=False,
-        result_kind="collection",
-        result_key="positions",
         required_services=frozenset({"bot_manager"}),
     )
     registry.register(
         "bot.signal_key",
         _handle_bot_signal_key,
         is_mutating=False,
-        result_kind="entity",
-        result_key="signal_key",
         required_services=frozenset({"bot_manager"}),
     )
     registry.register(
         "signal.connect",
         _handle_signal_connect,
         is_mutating=False,
-        result_kind="stream",
         required_services=frozenset({"bot_manager"}),
         account_id_policy="none",
     )

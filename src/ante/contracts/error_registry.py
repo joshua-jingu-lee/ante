@@ -45,11 +45,21 @@ from ante.broker.registry import (
     InvalidBrokerTypeError as BrokerRegistryInvalidBrokerTypeError,
 )
 from ante.config.exceptions import ConfigValidationError
+from ante.contracts.cli_errors import (
+    CliOptionConflictError,
+    ReportError,
+    ReportInvalidStatusError,
+    ReportNotFoundError,
+    ReportValidationError,
+    TradeError,
+    TradeNotFoundError,
+)
 from ante.contracts.errors import ErrorSpec
 from ante.contracts.ipc_client_errors import (
     IPCClientTimeoutError,
     IPCServerNotRunningError,
 )
+from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import ReadOnlyDatabaseError
 from ante.core.time import InvalidIsoDateError
 from ante.member.errors import (
@@ -397,6 +407,12 @@ _INVALID_ISO_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+_REQUEST_VALIDATION_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
+
 _IPC_SERVER_NOT_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="IPC_SERVER_NOT_RUNNING",
     category="service_unavailable",
@@ -405,6 +421,42 @@ _IPC_SERVER_NOT_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
 _IPC_TIMEOUT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="IPC_TIMEOUT",
     category="service_unavailable",
+)
+
+
+_CLI_OPTION_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_OPTION_CONFLICT",
+    category="validation",
+)
+
+_REPORT_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_ERROR",
+    category="internal",
+)
+
+_REPORT_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_INVALID_STATUS",
+    category="validation",
+)
+
+_REPORT_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_NOT_FOUND",
+    category="not_found",
+)
+
+_REPORT_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_VALIDATION_ERROR",
+    category="validation",
+)
+
+_TRADE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TRADE_ERROR",
+    category="internal",
+)
+
+_TRADE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TRADE_NOT_FOUND",
+    category="not_found",
 )
 
 
@@ -477,8 +529,16 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
     ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
     InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
+    RequestValidationError: _REQUEST_VALIDATION_SPEC,
     IPCServerNotRunningError: _IPC_SERVER_NOT_RUNNING_SPEC,
     IPCClientTimeoutError: _IPC_TIMEOUT_SPEC,
+    CliOptionConflictError: _CLI_OPTION_CONFLICT_SPEC,
+    ReportError: _REPORT_ERROR_SPEC,
+    ReportInvalidStatusError: _REPORT_INVALID_STATUS_SPEC,
+    ReportNotFoundError: _REPORT_NOT_FOUND_SPEC,
+    ReportValidationError: _REPORT_VALIDATION_ERROR_SPEC,
+    TradeError: _TRADE_ERROR_SPEC,
+    TradeNotFoundError: _TRADE_NOT_FOUND_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
