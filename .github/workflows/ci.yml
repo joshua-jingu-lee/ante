@@ -66,6 +66,9 @@ jobs:
       - name: Import boundary check
         run: python scripts/check_imports.py
 
+      - name: Entry ratchet check
+        run: python scripts/check_entry_ratchet.py
+
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 45
