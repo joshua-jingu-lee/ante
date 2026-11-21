@@ -50,6 +50,7 @@ from ante.contracts.ipc_client_errors import (
     IPCClientTimeoutError,
     IPCServerNotRunningError,
 )
+from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import ReadOnlyDatabaseError
 from ante.core.time import InvalidIsoDateError
 from ante.member.errors import (
@@ -397,6 +398,12 @@ _INVALID_ISO_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+_REQUEST_VALIDATION_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
+
 _IPC_SERVER_NOT_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="IPC_SERVER_NOT_RUNNING",
     category="service_unavailable",
@@ -477,6 +484,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
     ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
     InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
+    RequestValidationError: _REQUEST_VALIDATION_SPEC,
     IPCServerNotRunningError: _IPC_SERVER_NOT_RUNNING_SPEC,
     IPCClientTimeoutError: _IPC_TIMEOUT_SPEC,
 }

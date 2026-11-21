@@ -295,7 +295,8 @@ src/ante/
 │   ├── exceptions.py
 │   ├── protocol.py
 │   ├── registry.py
-│   └── server.py
+│   ├── server.py
+│   └── requests.py
 ├── update/
 │   ├── __init__.py
 │   ├── checker.py
@@ -308,7 +309,8 @@ src/ante/
     ├── errors.py
     ├── helpers.py
     ├── cli_registry.py
-    └── ipc_client_errors.py
+    ├── ipc_client_errors.py
+    └── request_errors.py
 ```
 
 ## tests/ — 테스트
@@ -452,7 +454,10 @@ tests/
 │   │   ├── test_docs_taxonomy_drift.py
 │   │   ├── test_member_admin_ipc_wiring.py
 │   │   ├── test_treasury_account_scoping.py
-│   │   └── test_server_signal_connect.py
+│   │   ├── test_server_signal_connect.py
+│   │   ├── test_request_model_domain.py
+│   │   ├── test_request_validation.py
+│   │   └── test_system_commands.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py

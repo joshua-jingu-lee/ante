@@ -4,7 +4,6 @@ import typing
 
 import pytest
 
-from ante.contracts.vocab import ContractKind
 from ante.ipc.registry import (
     AccountIdPolicy,
     CommandRegistry,
@@ -22,9 +21,9 @@ def registry() -> CommandRegistry:
 def test_register_and_get(registry: CommandRegistry) -> None:
     """핸들러 등록 후 조회.
 
-    Refs #1849: ``register()`` 3-인자 호출은 신규 7 필드의 default 값(``raw``
-    / ``None`` / 빈 frozenset / ``None`` / ``"none"`` / 빈 tuple / ``None``)
-    으로 채워진 ``CommandSpec``과 일치해야 한다(backward compat lock).
+    ``register()`` 3-인자 호출은 메타데이터 필드의 default 값(빈 frozenset /
+    ``None`` / ``"none"`` / ``None`` / ``None``)으로 채워진 ``CommandSpec``과
+    일치해야 한다(backward compat lock).
     """
 
     async def dummy_handler(svc, args, actor):  # type: ignore[no-untyped-def]
@@ -39,12 +38,9 @@ def test_register_and_get(registry: CommandRegistry) -> None:
     )
     # 신규 필드 default 값 명시 검증 (frozen dataclass eq에 포함).
     assert spec is not None
-    assert spec.result_kind == "raw"
-    assert spec.result_key is None
     assert spec.required_services == frozenset()
     assert spec.audit_action is None
     assert spec.account_id_policy == "none"
-    assert spec.cross_validators == ()
     assert spec.shutdown_behavior is None
 
 
@@ -444,6 +440,7 @@ class TestSystemKillSwitchHandlers:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_system_halt
+        from ante.ipc.requests import SystemHaltRequest
 
         accounts = [
             {
@@ -464,7 +461,9 @@ class TestSystemKillSwitchHandlers:
         svc.account = MagicMock()
         svc.account.suspend_all = AsyncMock(return_value=accounts)
 
-        result = await _handle_system_halt(svc, {"reason": "test"}, "cli-user")
+        result = await _handle_system_halt(
+            svc, SystemHaltRequest(reason="test"), "cli-user"
+        )
 
         assert result["status"] == "halted"
         assert result["accounts_changed"] == 1
@@ -479,6 +478,7 @@ class TestSystemKillSwitchHandlers:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_system_clear_halt
+        from ante.ipc.requests import SystemClearHaltRequest
 
         accounts = [
             {
@@ -498,7 +498,9 @@ class TestSystemKillSwitchHandlers:
         # 의존성을 직접 보유하지 않는다 — Refs #1213 회귀 가드).
         svc.bot_manager = MagicMock()
 
-        result = await _handle_system_clear_halt(svc, {}, "cli-user")
+        result = await _handle_system_clear_halt(
+            svc, SystemClearHaltRequest(), "cli-user"
+        )
 
         assert result["status"] == "halt_cleared"
         assert result["accounts_changed"] == 1
@@ -681,8 +683,6 @@ class TestBrokerOrderHistoryHandler:
         spec = registry.get("broker.order_history")
         assert spec is not None
         assert spec.is_mutating is False
-        assert spec.result_kind == "collection"
-        assert spec.result_key == "orders"
         assert spec.required_services == frozenset({"account"})
         assert spec.account_id_policy == "required"
         # read-only 조회는 audit 대상이 아니다 (audit.md 는 reconcile --fix 만).
@@ -1299,22 +1299,19 @@ class TestCommandSpecMetadataExtension:
     """
 
     def test_command_spec_has_seven_metadata_fields(self) -> None:
-        """``CommandSpec``이 신규 7 필드를 dataclass field로 보유한다."""
+        """``CommandSpec``의 dataclass field 집합."""
         from dataclasses import fields
 
         names = {f.name for f in fields(CommandSpec)}
-        # 기존 3 + 신규 7 = 10 필드.
         assert names == {
             "name",
             "handler",
             "is_mutating",
-            "result_kind",
-            "result_key",
             "required_services",
             "audit_action",
             "account_id_policy",
-            "cross_validators",
             "shutdown_behavior",
+            "request_model",
         }
 
     def test_register_kwargs_backward_compat(self, registry: CommandRegistry) -> None:
@@ -1328,12 +1325,9 @@ class TestCommandSpecMetadataExtension:
         registry.register("legacy.cmd", handler, is_mutating=False)
         spec = registry.get("legacy.cmd")
         assert spec is not None
-        assert spec.result_kind == "raw"
-        assert spec.result_key is None
         assert spec.required_services == frozenset()
         assert spec.audit_action is None
         assert spec.account_id_policy == "none"
-        assert spec.cross_validators == ()
         assert spec.shutdown_behavior is None
 
     def test_register_kwargs_full_metadata(self, registry: CommandRegistry) -> None:
@@ -1343,55 +1337,21 @@ class TestCommandSpecMetadataExtension:
         async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
             return {"bot": {}}
 
-        def _validator(_args: dict) -> None:
-            return None
-
         registry.register(
             "ext.cmd",
             handler,
             is_mutating=True,
-            result_kind="entity",
-            result_key="bot",
             required_services=frozenset({"bot_manager", "audit_logger"}),
             audit_action="ext.cmd",
             account_id_policy="required",
-            cross_validators=(_validator,),
             shutdown_behavior="block_all",
         )
         spec = registry.get("ext.cmd")
         assert spec is not None
-        assert spec.result_kind == "entity"
-        assert spec.result_key == "bot"
         assert spec.required_services == frozenset({"bot_manager", "audit_logger"})
         assert spec.audit_action == "ext.cmd"
         assert spec.account_id_policy == "required"
-        assert spec.cross_validators == (_validator,)
         assert spec.shutdown_behavior == "block_all"
-
-    def test_command_spec_result_kind_uses_contract_kind_vocab(self) -> None:
-        """``CommandSpec.result_kind`` annotation이 ``ContractKind`` (#1822)
-        Literal alias를 그대로 사용한다(타입 SSOT lock).
-
-        ``CommandSpec``은 ``CommandHandler``를 통해 ``"ServiceRegistry"``
-        forward reference를 포함하므로 ``typing.get_type_hints``는 runtime에
-        실패할 수 있다. annotation 문자열과 default 값으로 lock 한다.
-        """
-        from dataclasses import fields
-
-        result_kind_field = next(
-            f for f in fields(CommandSpec) if f.name == "result_kind"
-        )
-        # annotation은 string 또는 typing alias 형태. ``ContractKind`` SSOT
-        # 와 정합한지 string 표현으로 확인.
-        annotation = result_kind_field.type
-        if isinstance(annotation, str):
-            assert annotation == "ContractKind", annotation
-        else:
-            assert annotation is ContractKind
-        # default 값은 ``"raw"``.
-        assert result_kind_field.default == "raw"
-        # ContractKind 값 집합과 default 정합.
-        assert result_kind_field.default in typing.get_args(ContractKind)
 
     def test_shutdown_behavior_alias_values(self) -> None:
         """``ShutdownBehavior`` Literal alias 값 집합 lock (Codex v2 c1)."""
@@ -1419,18 +1379,6 @@ class TestRegisteredCommandsMetadataCompleteness:
         reg = CommandRegistry()
         register_all_handlers(reg)
         return reg
-
-    def test_all_commands_result_kind_is_contract_kind(
-        self, loaded: CommandRegistry
-    ) -> None:
-        """27 commands 모두 ``result_kind``가 ``ContractKind`` vocabulary
-        (#1822) 값에 포함된다."""
-        allowed = set(typing.get_args(ContractKind))
-        assert allowed == {"entity", "operation", "collection", "raw", "stream"}
-        for spec in loaded.iter_specs():
-            assert spec.result_kind in allowed, (
-                f"{spec.name} result_kind={spec.result_kind!r} not in ContractKind"
-            )
 
     def test_all_commands_required_services_non_empty(
         self, loaded: CommandRegistry
@@ -1568,14 +1516,6 @@ class TestRegisteredCommandsMetadataCompleteness:
                 f"{spec.name} shutdown_behavior={spec.shutdown_behavior!r} "
                 "override는 본 이슈 범위가 아님"
             )
-
-    def test_cross_validators_default_empty(self, loaded: CommandRegistry) -> None:
-        """27 commands 모두 ``cross_validators``가 빈 tuple(default).
-
-        skeleton 도입만 본 이슈 범위. 실제 validator wiring은 후속 이슈에서.
-        """
-        for spec in loaded.iter_specs():
-            assert spec.cross_validators == (), spec.name
 
     def test_iter_specs_returns_all_42_specs(self, loaded: CommandRegistry) -> None:
         """``iter_specs``가 42 commands 모두를 ``CommandSpec`` 인스턴스로

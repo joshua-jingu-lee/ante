@@ -80,7 +80,6 @@ async def test_busy_envelope_via_dispatch_redacts_identifiers() -> None:
         "signal.connect",
         _handle_signal_connect,
         is_mutating=False,
-        result_kind="stream",
         required_services=frozenset({"bot_manager"}),
         account_id_policy="none",
     )

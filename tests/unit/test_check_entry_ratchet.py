@@ -33,6 +33,7 @@ Capsys = pytest.CaptureFixture[str]
 
 MIDDLEWARE = "src/ante/cli/middleware.py"
 REGISTRY = "src/ante/contracts/error_registry.py"
+IPC_REGISTRY = "src/ante/ipc/registry.py"
 COMMAND = "src/ante/cli/commands/demo.py"
 OTHER = "src/ante/cli/commands/other.py"
 CORE = "src/ante/core/demo.py"
@@ -63,6 +64,15 @@ B = ErrorSpec(code="REG_TWO", category="not_found")
 """
 
 
+IPC_SOURCE = """async def _h(svc, args, actor):
+    return {}
+
+
+def register_all_handlers(registry):
+    registry.register("base.cmd", _h, is_mutating=True)
+"""
+
+
 def _write(root: Path, rel: str, text: str) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +82,7 @@ def _write(root: Path, rel: str, text: str) -> None:
 def _tree(root: Path, files: dict[str, str] | None = None) -> Path:
     _write(root, MIDDLEWARE, HOOK_SOURCE)
     _write(root, REGISTRY, REGISTRY_SOURCE)
+    _write(root, IPC_REGISTRY, IPC_SOURCE)
     for rel, text in (files or {}).items():
         _write(root, rel, text)
     return root
@@ -520,6 +531,9 @@ def _valid_baseline() -> dict[str, Any]:
         "cli_exits": {},
         "ipc_error_code_reads": {},
         "unregistered_codes": ["A", "B"],
+        "ipc_handlers_without_model": ["base.cmd"],
+        "ipc_args_reads": {},
+        "cli_direct_ipc_send": {},
     }
 
 
@@ -540,8 +554,9 @@ def _without(key: str) -> dict[str, Any]:
     [
         pytest.param("{not json", id="not-json"),
         pytest.param([], id="not-an-object"),
-        pytest.param(_without("cli_exits"), id="three-keys"),
-        pytest.param(_with(extra={}), id="five-keys"),
+        pytest.param(_without("cli_exits"), id="six-keys"),
+        pytest.param(_without("ipc_args_reads"), id="six-keys-request"),
+        pytest.param(_with(extra={}), id="eight-keys"),
         pytest.param(_with(cli_exits={"a.py": -1}), id="negative-count"),
         pytest.param(_with(cli_exits={"a.py": 1.5}), id="float-count"),
         pytest.param(_with(cli_exits={"a.py": True}), id="bool-count"),
@@ -551,6 +566,14 @@ def _without(key: str) -> dict[str, Any]:
         pytest.param(_with(unregistered_codes=["A", "A"]), id="codes-duplicate"),
         pytest.param(_with(unregistered_codes=["A", 1]), id="codes-not-strings"),
         pytest.param(_with(unregistered_codes={"A": 1}), id="codes-not-a-list"),
+        pytest.param(
+            _with(ipc_handlers_without_model=["b", "a"]), id="commands-unsorted"
+        ),
+        pytest.param(
+            _with(ipc_handlers_without_model="base.cmd"), id="commands-not-a-list"
+        ),
+        pytest.param(_with(ipc_args_reads={"a.b": -1}), id="reads-negative"),
+        pytest.param(_with(cli_direct_ipc_send={"a.py": True}), id="sends-bool"),
     ],
 )
 def test_malformed_baseline_exits_2(
@@ -837,6 +860,9 @@ def test_baseline_file_has_exactly_the_contract_keys(tmp_path: Path) -> None:
         "cli_exits",
         "ipc_error_code_reads",
         "unregistered_codes",
+        "ipc_handlers_without_model",
+        "ipc_args_reads",
+        "cli_direct_ipc_send",
     }
 
 
@@ -1220,7 +1246,8 @@ def test_full_output_when_passing_goes_to_stdout(
     assert (code, err) == (0, "")
     assert out == (
         "entry ratchet ok: cli_error_calls 5, cli_exits 2, ipc_error_code_reads 3, "
-        "unregistered_codes 4 (baseline scripts/entry_ratchet_baseline.json)\n"
+        "unregistered_codes 4, ipc_handlers_without_model 1, ipc_args_reads 0, "
+        "cli_direct_ipc_send 0 (baseline scripts/entry_ratchet_baseline.json)\n"
     )
 
 
@@ -1290,8 +1317,456 @@ def test_full_output_for_wrong_baseline_keys(tmp_path: Path, capsys: Capsys) -> 
         capsys,
         [
             "scripts/entry_ratchet_baseline.json must have exactly the keys "
-            "['cli_error_calls', 'cli_exits', 'ipc_error_code_reads', "
-            "'unregistered_codes'] (missing ['cli_exits'], extra [])"
+            "['cli_direct_ipc_send', 'cli_error_calls', 'cli_exits', "
+            "'ipc_args_reads', 'ipc_error_code_reads', "
+            "'ipc_handlers_without_model', 'unregistered_codes'] "
+            "(missing ['cli_exits'], extra [])"
         ],
         code=2,
     )
+
+
+# ── 축 1: 요청 모델 키 ─────────────────────────────────────────────────────
+
+CLI_IPC = "src/ante/cli/commands/ipc_demo.py"
+
+IPC_HANDLERS = """async def _h(svc, args, actor):
+    return {}
+
+
+async def _reads(svc, args, actor):
+    return args["k"]
+
+
+async def _modeled(svc, request, actor):
+    return {"k": request.k}
+"""
+
+
+def _ipc(*calls: str, handlers: str = IPC_HANDLERS) -> str:
+    body = "".join(f"    {call}\n" for call in calls)
+    return f"{handlers}\n\ndef register_all_handlers(registry):\n{body}"
+
+
+REQUEST_BASE = _ipc(
+    'registry.register("a.read", _reads, is_mutating=True)',
+    'registry.register("a.model", _modeled, is_mutating=True, request_model=M)',
+)
+CLI_SEND = (
+    "async def f(helpers):\n"
+    '    await ipc_send("x", {})\n'
+    '    await helpers.ipc_send("y", {})\n'
+)
+
+REQUEST_EDITS = {
+    "ipc_handlers_without_model": _ipc(
+        'registry.register("a.read", _reads, is_mutating=True)',
+        'registry.register("a.model", _modeled, is_mutating=True, request_model=M)',
+        'registry.register("a.new", _h, is_mutating=True)',
+    ),
+    "ipc_args_reads": _ipc(
+        'registry.register("a.read", _reads, is_mutating=True)',
+        'registry.register("a.model", _modeled, is_mutating=True, request_model=M)',
+        handlers=IPC_HANDLERS.replace('return args["k"]', 'return args["k"], args'),
+    ),
+}
+
+
+def _request_tree(root: Path, ipc: str = REQUEST_BASE) -> Path:
+    return _tree(root, {IPC_REGISTRY: ipc, CLI_IPC: CLI_SEND})
+
+
+def test_request_keys_measure_the_fixture(tmp_path: Path) -> None:
+    data = _freeze(_request_tree(tmp_path))
+    assert data["ipc_handlers_without_model"] == ["a.read"]
+    assert data["ipc_args_reads"] == {"a.read": 1}
+    assert data["cli_direct_ipc_send"] == {CLI_IPC: 2}
+
+
+def test_request_keys_equal_to_baseline_pass(tmp_path: Path, capsys: Capsys) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    code, out = _run(root, capsys)
+    assert code == 0, out
+
+
+@pytest.mark.parametrize("key", sorted(REQUEST_EDITS))
+def test_request_key_growth_fails(tmp_path: Path, capsys: Capsys, key: str) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_EDITS[key])
+    code, out = _run(root, capsys)
+    assert code == 1, out
+
+
+def test_cli_direct_ipc_send_growth_fails(tmp_path: Path, capsys: Capsys) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_IPC, CLI_SEND + '    await ipc_send("z", {})\n')
+    code, out = _run(root, capsys)
+    assert code == 1, out
+
+
+@pytest.mark.parametrize("key", sorted(REQUEST_EDITS))
+def test_request_key_drop_without_lowering_fails(
+    tmp_path: Path, capsys: Capsys, key: str
+) -> None:
+    root = _request_tree(tmp_path, REQUEST_EDITS[key])
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_BASE)
+    code, out = _run(root, capsys)
+    assert code == 1, out
+
+
+def test_cli_direct_ipc_send_drop_without_lowering_fails(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_IPC, 'async def f():\n    await ipc_send("x", {})\n')
+    code, out = _run(root, capsys)
+    assert code == 1, out
+
+
+def test_swapped_command_with_same_set_size_fails(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_BASE.replace('"a.read"', '"a.other"'))
+    code, out = _run(root, capsys)
+    assert code == 1, out
+
+
+def _without_model(tmp_path: Path, call: str) -> frozenset[str]:
+    root = _tree(tmp_path, {IPC_REGISTRY: _ipc(call)})
+    without: frozenset[str] = checker.measure(root).ipc_handlers_without_model
+    return without
+
+
+@pytest.mark.parametrize(
+    ("call", "expected"),
+    [
+        pytest.param(
+            'registry.register("a.b", _h, is_mutating=True)',
+            frozenset({"a.b"}),
+            id="no-keyword",
+        ),
+        pytest.param(
+            'registry.register("a.b", _h, is_mutating=True, request_model=M)',
+            frozenset(),
+            id="model",
+        ),
+        pytest.param(
+            'registry.register("a.b", _h, is_mutating=True, request_model=None)',
+            frozenset({"a.b"}),
+            id="model-none",
+        ),
+        pytest.param(
+            'if True:\n        registry.register("a.b", _h, is_mutating=True)',
+            frozenset({"a.b"}),
+            id="nested-block",
+        ),
+    ],
+)
+def test_handlers_without_model_definition(
+    tmp_path: Path, call: str, expected: frozenset[str]
+) -> None:
+    assert _without_model(tmp_path, call) == expected
+
+
+def _reads_of(tmp_path: Path, handler: str, call: str | None = None) -> dict[str, int]:
+    source = _ipc(
+        call or 'registry.register("a.b", _x, is_mutating=True)', handlers=handler
+    )
+    reads: dict[str, int] = checker.measure(
+        _tree(tmp_path, {IPC_REGISTRY: source})
+    ).ipc_args_reads
+    return reads
+
+
+@pytest.mark.parametrize(
+    ("statement", "expected"),
+    [
+        pytest.param('return args["k"]', {"a.b": 1}, id="subscript"),
+        pytest.param('return args.get("k")', {"a.b": 1}, id="get"),
+        pytest.param('return "k" in args', {"a.b": 1}, id="in"),
+        pytest.param("return f(args)", {"a.b": 1}, id="argument"),
+        pytest.param("return f(**args)", {"a.b": 1}, id="double-star"),
+        pytest.param("a = args\n    return a['k'], a['j']", {"a.b": 1}, id="alias"),
+        pytest.param("return {}", {}, id="zero-left-out"),
+        pytest.param("args = {}\n    return 1", {}, id="store-only"),
+        pytest.param(
+            "def inner(svc, args):\n        return args\n    return inner",
+            {"a.b": 1},
+            id="nested-same-name",
+        ),
+    ],
+)
+def test_args_reads_definition(
+    tmp_path: Path, statement: str, expected: dict[str, int]
+) -> None:
+    handler = f"async def _x(svc, args, actor):\n    {statement}\n"
+    assert _reads_of(tmp_path, handler) == expected
+
+
+def test_args_reads_follow_the_second_parameter_name(tmp_path: Path) -> None:
+    handler = 'async def _x(svc, params, actor):\n    return params["k"], args\n'
+    assert _reads_of(tmp_path, handler) == {"a.b": 1}
+
+
+def test_args_reads_skip_commands_with_a_model(tmp_path: Path) -> None:
+    handler = "async def _x(svc, request, actor):\n    return request.k\n"
+    call = 'registry.register("a.b", _x, is_mutating=True, request_model=M)'
+    assert _reads_of(tmp_path, handler, call) == {}
+
+
+def test_args_reads_of_a_model_command_named_args_are_not_counted(
+    tmp_path: Path,
+) -> None:
+    handler = 'async def _x(svc, args, actor):\n    return args["k"]\n'
+    call = 'registry.register("a.b", _x, is_mutating=True, request_model=M)'
+    assert _reads_of(tmp_path, handler, call) == {}
+
+
+def _sends(tmp_path: Path, source: str, rel: str = CLI_IPC) -> dict[str, int]:
+    sends: dict[str, int] = checker.measure(
+        _tree(tmp_path, {rel: source})
+    ).cli_direct_ipc_send
+    return sends
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        pytest.param(
+            'async def f():\n    await ipc_send("x", {})\n', {CLI_IPC: 1}, id="name"
+        ),
+        pytest.param(
+            'async def f(helpers):\n    await helpers.ipc_send("x", {})\n',
+            {CLI_IPC: 1},
+            id="attribute",
+        ),
+        pytest.param(
+            "async def ipc_send(command, args):\n    return {}\n", {}, id="definition"
+        ),
+        pytest.param("x = ipc_send\n", {}, id="reference-not-call"),
+        pytest.param(
+            'async def f():\n    await ipc_sender("x", {})\n', {}, id="other-name"
+        ),
+    ],
+)
+def test_cli_direct_ipc_send_definition(
+    tmp_path: Path, source: str, expected: dict[str, int]
+) -> None:
+    assert _sends(tmp_path, source) == expected
+
+
+def test_cli_direct_ipc_send_only_covers_cli_files(tmp_path: Path) -> None:
+    source = 'async def f():\n    await ipc_send("x", {})\n'
+    assert _sends(tmp_path, source, rel=CORE) == {}
+
+
+def test_cli_direct_ipc_send_counts_inside_the_hook(tmp_path: Path) -> None:
+    source = HOOK_SOURCE + '        ipc_send("x", {})\n'
+    assert _sends(tmp_path, source, rel=MIDDLEWARE) == {MIDDLEWARE: 1}
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        pytest.param(
+            "def other(registry):\n    pass\n",
+            "register_all_handlers not found in src/ante/ipc/registry.py",
+            id="no-function",
+        ),
+        pytest.param(
+            "class X:\n    def register_all_handlers(self, registry):\n"
+            '        registry.register("a.b", _h, is_mutating=True)\n',
+            "register_all_handlers not found in src/ante/ipc/registry.py",
+            id="method-not-top-level",
+        ),
+        pytest.param(
+            _ipc("pass"),
+            "no register(<command>, <handler>, ...) call in register_all_handlers "
+            "of src/ante/ipc/registry.py",
+            id="zero-registrations",
+        ),
+        pytest.param(
+            _ipc("registry.register(NAME, _h, is_mutating=True)"),
+            "no register(<command>, <handler>, ...) call in register_all_handlers "
+            "of src/ante/ipc/registry.py",
+            id="non-literal-name-only",
+        ),
+        pytest.param(
+            _ipc('registry.register("a.b", lambda s, a, c: {}, is_mutating=True)'),
+            "register('a.b') in src/ante/ipc/registry.py: the second positional "
+            "argument is not the name of a top-level function",
+            id="lambda",
+        ),
+        pytest.param(
+            _ipc('registry.register("a.b", _missing, is_mutating=True)'),
+            "register('a.b') in src/ante/ipc/registry.py: the second positional "
+            "argument is not the name of a top-level function",
+            id="unknown-name",
+        ),
+        pytest.param(
+            _ipc('registry.register("a.b", handler=_h, is_mutating=True)'),
+            "register('a.b') in src/ante/ipc/registry.py: the second positional "
+            "argument is not the name of a top-level function",
+            id="keyword-handler",
+        ),
+        pytest.param(
+            _ipc(
+                'registry.register("a.b", _one, is_mutating=True)',
+                handlers="async def _one(svc):\n    return {}\n",
+            ),
+            "handler _one in src/ante/ipc/registry.py has fewer than two parameters",
+            id="one-parameter",
+        ),
+    ],
+)
+def test_ipc_registry_failures_exit_2(
+    tmp_path: Path, capsys: Capsys, source: str, message: str
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, IPC_REGISTRY, source)
+    _assert_failure(root, capsys, [message], code=2)
+
+
+def test_missing_ipc_registry_exits_2(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    (root / IPC_REGISTRY).unlink()
+    _assert_failure(
+        root,
+        capsys,
+        ["register_all_handlers not found: src/ante/ipc/registry.py is missing"],
+        code=2,
+    )
+
+
+REQUEST_ALTERNATIVE_LINES = [
+    "요청 모델 없는 IPC 명령과 인자 사전 읽기 대신:",
+    "  - 요청 모델(src/ante/ipc/requests.py의 IPCRequest 하위 클래스)을 만들어 "
+    "register(..., request_model=...)로 등록한다",
+    "  - 핸들러는 사전 대신 그 모델의 필드를 읽는다",
+]
+
+
+def test_full_output_for_added_command(tmp_path: Path, capsys: Capsys) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_EDITS["ipc_handlers_without_model"])
+    _assert_failure(
+        root,
+        capsys,
+        [HEADER, "ipc_handlers_without_model\t+ a.new", *REQUEST_ALTERNATIVE_LINES],
+    )
+
+
+def test_full_output_for_command_given_a_model(tmp_path: Path, capsys: Capsys) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(
+        root,
+        IPC_REGISTRY,
+        _ipc(
+            'registry.register("a.read", _reads, is_mutating=True, request_model=M)',
+            'registry.register("a.model", _modeled, is_mutating=True, request_model=M)',
+        ),
+    )
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "ipc_handlers_without_model\t- a.read",
+            "ipc_args_reads\ta.read: actual 0, baseline 1 (-1)",
+            LOWER_LINE,
+            "  - ipc_handlers_without_model에서 'a.read'를 지운다",
+            "  - ipc_args_reads에서 'a.read' 키를 지운다",
+        ],
+    )
+
+
+def test_full_output_when_args_reads_grow(tmp_path: Path, capsys: Capsys) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_EDITS["ipc_args_reads"])
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "ipc_args_reads\ta.read: actual 2, baseline 1 (+1)",
+            *REQUEST_ALTERNATIVE_LINES,
+        ],
+    )
+
+
+def test_full_output_when_cli_direct_ipc_send_grows(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_IPC, CLI_SEND + '    await ipc_send("z", {})\n')
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_direct_ipc_send\t{CLI_IPC}: actual 3, baseline 2 (+1)",
+            MOVE_LINE,
+        ],
+    )
+
+
+def test_full_output_when_cli_direct_ipc_send_drops(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _request_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_IPC, 'async def f():\n    await ipc_send("x", {})\n')
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_direct_ipc_send\t{CLI_IPC}: actual 1, baseline 2 (-1)",
+            LOWER_LINE,
+            f"  - cli_direct_ipc_send['{CLI_IPC}']를 1로 낮춘다",
+        ],
+    )
+
+
+def test_script_exits_1_when_a_command_without_model_is_added(
+    tmp_path: Path,
+) -> None:
+    root = _request_tree(tmp_path / "repo")
+    _freeze(root)
+    _write(root, IPC_REGISTRY, REQUEST_EDITS["ipc_handlers_without_model"])
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout == ""
+
+
+def test_script_exits_2_when_a_handler_is_a_lambda(tmp_path: Path) -> None:
+    root = _request_tree(tmp_path / "repo")
+    _freeze(root)
+    _write(
+        root,
+        IPC_REGISTRY,
+        _ipc('registry.register("a.b", lambda s, a, c: {}, is_mutating=True)'),
+    )
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+
+
+def test_repository_request_keys_are_not_empty() -> None:
+    measurement = checker.measure(REPO_ROOT)
+    assert measurement.ipc_handlers_without_model
+    assert measurement.ipc_args_reads
+    assert measurement.cli_direct_ipc_send
+    assert set(measurement.ipc_args_reads) <= measurement.ipc_handlers_without_model

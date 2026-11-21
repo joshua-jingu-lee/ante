@@ -225,7 +225,7 @@ def clear_halt(ctx: click.Context, reason: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    result = _run(ipc_send("system.clear_halt", {"reason": reason}, actor=actor))
+    result = _run(ipc_send("system.clear_halt", {}, actor=actor))
     data = result.get("data", result)
     count = data.get("accounts_changed", 0)
     fmt.success(
