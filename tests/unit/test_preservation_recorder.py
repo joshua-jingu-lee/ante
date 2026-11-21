@@ -41,12 +41,33 @@ def test_invoke_owner():
 """
 
 
+_RERUN_CONFTEST = """\
+import pytest
+from _pytest.runner import runtestprotocol
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_protocol(item, nextitem):
+    if item.name != "test_calls":
+        return None
+    item.ihook.pytest_runtest_logstart(nodeid=item.nodeid, location=item.location)
+    runtestprotocol(item, nextitem=nextitem, log=False)
+    runtestprotocol(item, nextitem=nextitem)
+    item.ihook.pytest_runtest_logfinish(nodeid=item.nodeid, location=item.location)
+    return True
+"""
+
+
 def _b64(text: str) -> str:
     return base64.b64encode(text.encode()).decode()
 
 
-def _run(tmp_path: Path, record: str | None) -> subprocess.CompletedProcess[str]:
+def _run(
+    tmp_path: Path, record: str | None, *, rerun: bool = False
+) -> subprocess.CompletedProcess[str]:
     (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    if rerun:
+        (tmp_path / "conftest.py").write_text(_RERUN_CONFTEST, encoding="utf-8")
     (tmp_path / "test_target.py").write_text(_TARGET, encoding="utf-8")
     env = {k: v for k, v in os.environ.items() if k != "ANTE_PRESERVATION_RECORD"}
     if record is not None:
@@ -126,3 +147,14 @@ def test_writes_nothing_without_the_variable(tmp_path: Path, value: str | None) 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "INVOKE_MODULE=click.testing\n" in result.stdout
     assert list(out.iterdir()) == []
+
+
+def test_sequence_restarts_when_a_test_runs_again(tmp_path: Path) -> None:
+    record = tmp_path / "out" / "rec.jsonl"
+    record.parent.mkdir()
+    result = _run(tmp_path, str(record), rerun=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    rows = [json.loads(line) for line in record.read_text().splitlines()]
+    assert [(r["nodeid"], r["n"]) for r in rows] == [
+        ("test_target.py::test_calls", n) for n in (0, 1, 2, 0, 1, 2)
+    ]

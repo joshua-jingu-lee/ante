@@ -9,6 +9,8 @@ Lines로 덧붙인다. 단언보다 먼저 쓰므로 기대값을 고친 테스�
 ``raised``(``invoke``가 예외를 내보냈으면 그 타입 이름).
 
 ``coverage run``으로 돌리면 호출마다 동적 문맥을 ``<nodeid>#<n>``으로 바꾼다.
+순번은 테스트가 시작할 때마다 0이다. 같은 테스트가 다시 돌면(재실행 플러그인
+등) 같은 키의 행이 두 번 쓰이고 비교 스크립트가 입력 오류로 멈춘다.
 비교는 ``scripts/compare_error_exit_records.py``가 한다. xdist로 돌리지 않는다.
 """
 
@@ -87,6 +89,11 @@ def pytest_configure(config: pytest.Config) -> None:
     out = os.environ.get(ENV_VAR)
     if out:
         _install(Path(out))
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item: pytest.Item) -> None:
+    _current["counts"][item.nodeid] = 0
 
 
 @pytest.hookimpl(wrapper=True)

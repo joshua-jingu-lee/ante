@@ -21,6 +21,8 @@ SCRIPT = REPO_ROOT / "scripts" / "compare_error_exit_records.py"
 NODE = "tests/unit/x.py::test_x"
 JSON_ARGS = ["--format", "json", "report", "view", "r-1"]
 TEXT_ARGS = ["--format", "text", "report", "view", "r-1"]
+CODE = "BOT_NOT_FOUND"
+ALLOWED = "tests/unit/cli/test_single_error_exit.py::test_registry_entries_text_mode"
 
 
 def _b64(text: str | None) -> str | None:
@@ -75,12 +77,17 @@ def _compare(
     after: list[dict[str, object]],
     *extra: str,
     before_again: list[dict[str, object]] | None = None,
+    covered: tuple[str, ...] = (),
 ) -> subprocess.CompletedProcess[str]:
+    covered_path = tmp_path / "covered.json"
+    covered_path.write_text(json.dumps(list(covered)), encoding="utf-8")
     return _run(
         "compare",
         _write(tmp_path / "b1.jsonl", before),
         _write(tmp_path / "b2.jsonl", before if before_again is None else before_again),
         _write(tmp_path / "a.jsonl", after),
+        "--covered",
+        str(covered_path),
         *extra,
     )
 
@@ -97,10 +104,17 @@ def _expected_counts(**nonzero: int) -> dict[str, int]:
         "의도한 동작 변경": 0,
         "다름": 0,
         "비결정": 0,
+        "비결정 실패 행": 0,
+        "비결정 실패 행(옮기는 줄을 지남)": 0,
         "후에만 있음": 0,
+        "후에만 있음(허용 밖)": 0,
     }
     counts.update(nonzero)
     return counts
+
+
+def _envelope(code: str) -> str:
+    return json.dumps({"status": "error", "code": code, "message": "없음"}) + "\n"
 
 
 def test_identical_rows_are_same(tmp_path: Path) -> None:
@@ -112,7 +126,7 @@ def test_identical_rows_are_same(tmp_path: Path) -> None:
 
 def test_full_output_for_one_text_format_row(tmp_path: Path) -> None:
     before = [_row(TEXT_ARGS, stderr="Error: 없음\n")]
-    after = [_row(TEXT_ARGS, stderr="Error: EXECUTION_ERROR: 없음\n")]
+    after = [_row(TEXT_ARGS, stderr=f"Error: {CODE}: 없음\n")]
     result = _compare(tmp_path, before, after)
     assert result.returncode == 0, result.stderr
     assert result.stdout == (
@@ -122,7 +136,10 @@ def test_full_output_for_one_text_format_row(tmp_path: Path) -> None:
         "의도한 동작 변경: 0\n"
         "다름: 0\n"
         "비결정: 0\n"
+        "비결정 실패 행: 0\n"
+        "비결정 실패 행(옮기는 줄을 지남): 0\n"
         "후에만 있음: 0\n"
+        "후에만 있음(허용 밖): 0\n"
         "\n"
         "# 다름 행 (0)\n"
         "\n"
@@ -147,7 +164,7 @@ def test_code_prefix_counts_only_in_text_mode(
     tmp_path: Path, args: list[str], expected: str, exit_code: int
 ) -> None:
     before = [_row(args, stderr="Error: 없음\n")]
-    after = [_row(args, stderr="Error: EXECUTION_ERROR: 없음\n")]
+    after = [_row(args, stderr=f"Error: {CODE}: 없음\n")]
     result = _compare(tmp_path, before, after)
     assert result.returncode == exit_code
     assert _counts(result.stdout) == _expected_counts(**{expected: 1})
@@ -156,11 +173,12 @@ def test_code_prefix_counts_only_in_text_mode(
 @pytest.mark.parametrize(
     ("code", "expected", "exit_code"),
     [
-        pytest.param("EXECUTION_ERROR", "text 형식", 0, id="registry-code"),
+        pytest.param(CODE, "text 형식", 0, id="registry-code"),
         pytest.param("NOT_A_REGISTRY_CODE", "다름", 1, id="unknown-code"),
+        pytest.param("EXECUTION_ERROR", "다름", 1, id="fallback-code"),
     ],
 )
-def test_prefix_code_must_be_in_registry(
+def test_prefix_code_must_be_a_registry_code_other_than_the_fallback(
     tmp_path: Path, code: str, expected: str, exit_code: int
 ) -> None:
     before = [_row(TEXT_ARGS, stderr="Error: 없음\n")]
@@ -171,11 +189,29 @@ def test_prefix_code_must_be_in_registry(
 
 
 @pytest.mark.parametrize(
+    ("json_code", "expected", "exit_code"),
+    [
+        pytest.param(CODE, "text 형식", 0, id="same-code"),
+        pytest.param("MEMBER_NOT_FOUND", "다름", 1, id="other-code"),
+    ],
+)
+def test_prefix_code_must_match_the_json_row_for_the_same_arguments(
+    tmp_path: Path, json_code: str, expected: str, exit_code: int
+) -> None:
+    json_row = _row(JSON_ARGS, stdout=_envelope(json_code), n=1)
+    before = [_row(TEXT_ARGS, stderr="Error: 없음\n"), json_row]
+    after = [_row(TEXT_ARGS, stderr=f"Error: {CODE}: 없음\n"), json_row]
+    result = _compare(tmp_path, before, after)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(같음=1, **{expected: 1})
+
+
+@pytest.mark.parametrize(
     ("after_stderr", "expected", "exit_code"),
     [
-        pytest.param("앞줄\nError: EXECUTION_ERROR: 없음\n", "text 형식", 0, id="one"),
-        pytest.param("앞줄!\nError: EXECUTION_ERROR: 없음\n", "다름", 1, id="two"),
-        pytest.param("앞줄\nError: EXECUTION_ERROR: 없다\n", "다름", 1, id="message"),
+        pytest.param(f"앞줄\nError: {CODE}: 없음\n", "text 형식", 0, id="one"),
+        pytest.param(f"앞줄!\nError: {CODE}: 없음\n", "다름", 1, id="two"),
+        pytest.param(f"앞줄\nError: {CODE}: 없다\n", "다름", 1, id="message"),
     ],
 )
 def test_only_one_line_may_change(
@@ -199,9 +235,7 @@ def test_exit_code_must_match(
     tmp_path: Path, after_exit: int, expected: str, exit_code: int
 ) -> None:
     before = [_row(TEXT_ARGS, stderr="Error: 없음\n")]
-    after = [
-        _row(TEXT_ARGS, stderr="Error: EXECUTION_ERROR: 없음\n", exit_code=after_exit)
-    ]
+    after = [_row(TEXT_ARGS, stderr=f"Error: {CODE}: 없음\n", exit_code=after_exit)]
     result = _compare(tmp_path, before, after)
     assert result.returncode == exit_code
     assert _counts(result.stdout) == _expected_counts(**{expected: 1})
@@ -210,7 +244,7 @@ def test_exit_code_must_match(
 @pytest.mark.parametrize(
     ("after_stdout", "expected", "exit_code"),
     [
-        pytest.param("Error: EXECUTION_ERROR: 없음\n", "text 형식", 0, id="prefixed"),
+        pytest.param(f"Error: {CODE}: 없음\n", "text 형식", 0, id="prefixed"),
         pytest.param("Error: 없다\n", "다름", 1, id="other"),
     ],
 )
@@ -232,23 +266,69 @@ def test_row_missing_after_is_different(tmp_path: Path) -> None:
     assert "  후: 없음\n" in result.stdout
 
 
-def test_row_only_after_is_listed_not_classified(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("nodeid", "extra", "outside", "exit_code"),
+    [
+        pytest.param(ALLOWED, (), 0, 0, id="constant"),
+        pytest.param(NODE, ("--allow-after-only", NODE), 0, 0, id="argument"),
+        pytest.param(NODE, (), 1, 1, id="outside"),
+    ],
+)
+def test_rows_only_after_must_belong_to_an_allowed_nodeid(
+    tmp_path: Path, nodeid: str, extra: tuple[str, ...], outside: int, exit_code: int
+) -> None:
     rows = [_row(JSON_ARGS)]
-    result = _compare(tmp_path, rows, [*rows, _row(JSON_ARGS, n=1)])
-    assert result.returncode == 0
-    assert _counts(result.stdout) == _expected_counts(같음=1, **{"후에만 있음": 1})
+    after = [*rows, _row(JSON_ARGS, n=1, nodeid=nodeid)]
+    result = _compare(tmp_path, rows, after, *extra)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(
+        같음=1, **{"후에만 있음": 1, "후에만 있음(허용 밖)": outside}
+    )
 
 
 def test_rows_differing_between_before_records_leave_the_comparison(
     tmp_path: Path,
 ) -> None:
-    before = [_row(JSON_ARGS, stdout="a\n"), _row(JSON_ARGS, n=1)]
-    again = [_row(JSON_ARGS, stdout="b\n"), _row(JSON_ARGS, n=1)]
-    after = [_row(JSON_ARGS, stdout="c\n"), _row(JSON_ARGS, n=1)]
+    before = [_row(JSON_ARGS, stdout="a\n", exit_code=0), _row(JSON_ARGS, n=1)]
+    again = [_row(JSON_ARGS, stdout="b\n", exit_code=0), _row(JSON_ARGS, n=1)]
+    after = [_row(JSON_ARGS, stdout="c\n", exit_code=0), _row(JSON_ARGS, n=1)]
     result = _compare(tmp_path, before, after, before_again=again)
     assert result.returncode == 0
     assert _counts(result.stdout) == _expected_counts(같음=1, 비결정=1)
-    assert f"# 비결정 행 (1)\n- {NODE}#0\n" in result.stdout
+    assert f"# 비결정 행 (1)\n- {NODE}#0 exit=0/0 args={JSON_ARGS}\n" in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("exit_code_again", "covered", "failures", "overlapping", "exit_code"),
+    [
+        pytest.param(1, [f"{NODE}#0"], 1, 1, 1, id="failure-on-moved-line"),
+        pytest.param(1, [f"{NODE}#1"], 1, 0, 0, id="failure-elsewhere"),
+        pytest.param(0, [f"{NODE}#0"], 0, 0, 0, id="success-on-moved-line"),
+    ],
+)
+def test_nondeterministic_failure_on_a_moved_line_fails(
+    tmp_path: Path,
+    exit_code_again: int,
+    covered: list[str],
+    failures: int,
+    overlapping: int,
+    exit_code: int,
+) -> None:
+    before = [_row(JSON_ARGS, stdout="a\n", exit_code=0), _row(JSON_ARGS, n=1)]
+    again = [
+        _row(JSON_ARGS, stdout="b\n", exit_code=exit_code_again),
+        _row(JSON_ARGS, n=1),
+    ]
+    result = _compare(tmp_path, before, before, before_again=again, covered=covered)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(
+        같음=1,
+        비결정=1,
+        **{
+            "비결정 실패 행": failures,
+            "비결정 실패 행(옮기는 줄을 지남)": overlapping,
+        },
+    )
 
 
 @pytest.mark.parametrize(
@@ -276,7 +356,9 @@ def test_bad_input_exits_2(tmp_path: Path, content: str) -> None:
     good = _write(tmp_path / "good.jsonl", [_row(JSON_ARGS)])
     bad = tmp_path / "bad.jsonl"
     bad.write_text(content, encoding="utf-8")
-    result = _run("compare", str(bad), good, good)
+    covered = tmp_path / "covered.json"
+    covered.write_text("[]", encoding="utf-8")
+    result = _run("compare", str(bad), good, good, "--covered", str(covered))
     assert result.returncode == 2
     assert result.stdout == ""
     assert result.stderr.startswith("error: ")
@@ -288,6 +370,15 @@ def run(fmt, bad):
         fmt.error("x", code="X")
         raise SystemExit(1)
 """
+
+
+def _coverage(tmp_path: Path, measured: Path, contexts: list[str]) -> str:
+    data = coverage.CoverageData(basename=str(tmp_path / "cov"))
+    for context in contexts:
+        data.set_context(context)
+        data.add_lines({str(measured.resolve()): [3, 4]})
+    data.write()
+    return str(tmp_path / "cov")
 
 
 @pytest.mark.parametrize(
@@ -303,12 +394,9 @@ def test_cover_counts_lines_by_mode(
     source = tmp_path / "command.py"
     source.write_text(_COMMAND_SOURCE, encoding="utf-8")
     records = _write(tmp_path / "rec.jsonl", [_row(JSON_ARGS), _row(TEXT_ARGS, n=1)])
-    data = coverage.CoverageData(basename=str(tmp_path / "cov"))
-    for context in contexts:
-        data.set_context(context)
-        data.add_lines({str(source.resolve()): [3, 4]})
-    data.write()
-    result = _run("cover", str(tmp_path / "cov"), records, str(source))
+    data = _coverage(tmp_path, source, contexts)
+    out = tmp_path / "covered.json"
+    result = _run("cover", data, records, str(source), "--covered-out", str(out))
     assert result.returncode == exit_code, result.stderr
     assert result.stdout == (
         "# 덮개 (줄, 모드)\n"
@@ -319,3 +407,25 @@ def test_cover_counts_lines_by_mode(
         "기록이 지난 줄(json): 2\n"
         f"기록이 지난 줄(text): {2 if exit_code == 0 else 0}\n"
     )
+    assert json.loads(out.read_text(encoding="utf-8")) == contexts
+
+
+@pytest.mark.parametrize(
+    ("measured_name", "exit_code"),
+    [
+        pytest.param("command.py", 0, id="measured"),
+        pytest.param("elsewhere.py", 2, id="not-measured"),
+    ],
+)
+def test_cover_file_outside_the_data_is_an_input_error(
+    tmp_path: Path, measured_name: str, exit_code: int
+) -> None:
+    source = tmp_path / "command.py"
+    source.write_text(_COMMAND_SOURCE, encoding="utf-8")
+    records = _write(tmp_path / "rec.jsonl", [_row(JSON_ARGS), _row(TEXT_ARGS, n=1)])
+    data = _coverage(tmp_path, tmp_path / measured_name, [f"{NODE}#0", f"{NODE}#1"])
+    result = _run("cover", data, records, str(source))
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    if exit_code == 2:
+        assert result.stdout == ""
+        assert result.stderr == f"error: {source}: not measured in {data}\n"
