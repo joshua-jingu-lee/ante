@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import click
+import pydantic
 import pytest
 from click.testing import CliRunner, Result
 
@@ -30,6 +31,8 @@ _MASTER = Member(
     status="active",
     scopes=[],
 )
+
+_PYDANTIC_DOCS_VERSION = ".".join(pydantic.VERSION.split(".")[:2])
 
 _VALID_REPORT = {
     "strategy_name": "s",
@@ -196,7 +199,8 @@ class TestReportSubmit:
                 json.dumps({**_VALID_REPORT, "total_trades": -1}),
                 "[{'type': 'greater_than_equal', 'loc': ('total_trades',), "
                 "'msg': 'Input should be greater than or equal to 0', "
-                "'url': 'https://errors.pydantic.dev/2.13/v/greater_than_equal'}]",
+                f"'url': 'https://errors.pydantic.dev/{_PYDANTIC_DOCS_VERSION}"
+                "/v/greater_than_equal'}]",
                 id="model-validation",
             ),
         ],
@@ -230,7 +234,8 @@ class TestReportSubmit:
                 "Error: REPORT_VALIDATION_ERROR: [{'type': 'greater_than_equal', "
                 "'loc': ('total_trades',), "
                 "'msg': 'Input should be greater than or equal to 0', "
-                "'url': 'https://errors.pydantic.dev/2.13/v/greater_than_equal'}]",
+                f"'url': 'https://errors.pydantic.dev/{_PYDANTIC_DOCS_VERSION}"
+                "/v/greater_than_equal'}]",
                 id="model-validation",
             ),
         ],
