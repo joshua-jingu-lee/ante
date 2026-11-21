@@ -160,10 +160,17 @@ async def test_clear_halt_activates_all_and_returns_envelope(
 
 
 @pytest.mark.asyncio
-async def test_clear_halt_with_unknown_key_is_accepted(harness: _Harness) -> None:
+async def test_clear_halt_with_unknown_key_is_rejected(harness: _Harness) -> None:
     response = await harness.send("system.clear_halt", {"x": 1})
-    assert response == CLEARED_RESPONSE
-    harness.account.activate_all.assert_awaited_once_with(activated_by="ops-lead")
+    assert response == {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "system.clear_halt 인자 검증 실패: x(extra_forbidden)",
+        },
+    }
+    harness.account.activate_all.assert_not_awaited()
 
 
 _MASTER = Member(
@@ -248,6 +255,6 @@ def test_clear_halt_cli_success_output(argv: list[str], output: str) -> None:
     assert (exit_code, got) == (0, output)
 
 
-def test_clear_halt_cli_sends_reason() -> None:
+def test_clear_halt_cli_sends_no_reason() -> None:
     _code, _out, send = _invoke_clear_halt(["system", "clear-halt", "--reason", "r"])
-    send.assert_awaited_once_with("system.clear_halt", {"reason": "r"}, actor=ACTOR)
+    send.assert_awaited_once_with("system.clear_halt", {}, actor=ACTOR)

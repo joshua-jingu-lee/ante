@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from ante.contracts.vocab import ContractKind
-from ante.ipc.requests import IPCRequest
+from ante.ipc.requests import (
+    IPCRequest,
+    SystemClearHaltRequest,
+    SystemHaltRequest,
+)
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
@@ -122,10 +126,10 @@ def _kill_switch_payload(status: str, accounts: list[dict[str, Any]]) -> dict:
 
 
 async def _handle_system_halt(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: SystemHaltRequest, actor: str
 ) -> dict:
     """전역 거래 정지(kill switch) IPC handler."""
-    reason = args.get("reason", "IPC halt")
+    reason = request.reason
     accounts = await svc.account.suspend_all(reason=reason, suspended_by=actor)
     payload = _kill_switch_payload("halted", accounts)
     payload["_audit_detail"] = {
@@ -137,7 +141,7 @@ async def _handle_system_halt(
 
 
 async def _handle_system_clear_halt(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: SystemClearHaltRequest, actor: str
 ) -> dict:
     """전역 거래 정지 해제 IPC handler."""
     accounts = await svc.account.activate_all(activated_by=actor)
@@ -1154,6 +1158,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         audit_action="system.halt",
+        request_model=SystemHaltRequest,
     )
     registry.register(
         "system.clear_halt",
@@ -1162,6 +1167,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         result_kind="operation",
         required_services=frozenset({"account", "audit_logger"}),
         audit_action="system.clear_halt",
+        request_model=SystemClearHaltRequest,
     )
     registry.register(
         "account.suspend",

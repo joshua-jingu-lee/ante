@@ -444,6 +444,7 @@ class TestSystemKillSwitchHandlers:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_system_halt
+        from ante.ipc.requests import SystemHaltRequest
 
         accounts = [
             {
@@ -464,7 +465,9 @@ class TestSystemKillSwitchHandlers:
         svc.account = MagicMock()
         svc.account.suspend_all = AsyncMock(return_value=accounts)
 
-        result = await _handle_system_halt(svc, {"reason": "test"}, "cli-user")
+        result = await _handle_system_halt(
+            svc, SystemHaltRequest(reason="test"), "cli-user"
+        )
 
         assert result["status"] == "halted"
         assert result["accounts_changed"] == 1
@@ -479,6 +482,7 @@ class TestSystemKillSwitchHandlers:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_system_clear_halt
+        from ante.ipc.requests import SystemClearHaltRequest
 
         accounts = [
             {
@@ -498,7 +502,9 @@ class TestSystemKillSwitchHandlers:
         # 의존성을 직접 보유하지 않는다 — Refs #1213 회귀 가드).
         svc.bot_manager = MagicMock()
 
-        result = await _handle_system_clear_halt(svc, {}, "cli-user")
+        result = await _handle_system_clear_halt(
+            svc, SystemClearHaltRequest(), "cli-user"
+        )
 
         assert result["status"] == "halt_cleared"
         assert result["accounts_changed"] == 1
