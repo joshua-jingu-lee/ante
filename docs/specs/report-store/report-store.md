@@ -151,34 +151,7 @@ ATLAS의 autoresearch 루프와 유사한 피드백 경로를 제공한다.
 
 ### SQLite 스키마
 
-```sql
-CREATE TABLE reports (
-    report_id          TEXT PRIMARY KEY,
-    strategy_name      TEXT NOT NULL,
-    strategy_version   TEXT NOT NULL,
-    strategy_path      TEXT NOT NULL,
-    status             TEXT NOT NULL DEFAULT 'submitted',
-    submitted_at       TEXT NOT NULL,
-    submitted_by       TEXT DEFAULT 'agent',
-    backtest_period    TEXT DEFAULT '',
-    backtest_run_id    TEXT DEFAULT '',
-    total_return_pct   REAL DEFAULT 0.0,
-    total_trades       INTEGER DEFAULT 0,
-    sharpe_ratio       REAL,
-    max_drawdown_pct   REAL,
-    win_rate           REAL,
-    summary            TEXT DEFAULT '',
-    rationale          TEXT DEFAULT '',
-    risks              TEXT DEFAULT '',
-    recommendations    TEXT DEFAULT '',
-    detail_json        TEXT DEFAULT '{}',
-    user_notes         TEXT DEFAULT '',
-    reviewed_at        TEXT
-);
-
-CREATE INDEX idx_reports_strategy ON reports(strategy_name);
-CREATE INDEX idx_reports_status ON reports(status);
-```
+테이블 정의: [`reports`](../../architecture/generated/db-schema.md#reports) (코드의 DDL에서 생성된다).
 
 > 파일 구조: [docs/architecture/generated/project-structure.md](../../architecture/generated/project-structure.md) 참조
 

@@ -156,20 +156,11 @@ CREATED → RUNNING → STOPPING → STOPPED → DELETED
 
 ### SQLite 스키마
 
-```sql
-CREATE TABLE IF NOT EXISTS bots (
-    bot_id       TEXT PRIMARY KEY,
-    strategy_id  TEXT NOT NULL,
-    account_id   TEXT NOT NULL,                  -- 소속 계좌 ID
-    config_json  TEXT NOT NULL,                  -- BotConfig 직렬화
-    auto_start   BOOLEAN DEFAULT 0,              -- 시스템 시작 시 자동 재시작
-    status       TEXT DEFAULT 'created',
-    created_at   TEXT DEFAULT (datetime('now')),
-    updated_at   TEXT DEFAULT (datetime('now'))
-);
+테이블 정의: [`bots`](../../architecture/generated/db-schema.md#bots) (코드의 DDL에서 생성된다).
 
-CREATE INDEX IF NOT EXISTS idx_bots_account_id ON bots(account_id);
-```
+- `bots.account_id`: 소속 계좌 ID
+- `bots.config_json`: BotConfig 직렬화
+- `bots.auto_start`: 시스템 시작 시 자동 재시작
 
 ### 봇 실행 흐름 (전체)
 
@@ -254,13 +245,10 @@ remove_bot(bot_id)
 ```
 
 **시그널 키 SQLite 스키마**:
-```sql
-CREATE TABLE IF NOT EXISTS signal_keys (
-    key_id       TEXT PRIMARY KEY,          -- "sk_" + 32자 hex (128-bit entropy)
-    bot_id       TEXT NOT NULL UNIQUE,      -- 1 봇 = 1 키
-    created_at   TEXT DEFAULT (datetime('now'))
-);
-```
+테이블 정의: [`signal_keys`](../../architecture/generated/db-schema.md#signal_keys) (코드의 DDL에서 생성된다).
+
+- `signal_keys.key_id`: "sk_" + 32자 hex (128-bit entropy)
+- `signal_keys.bot_id`: 1 봇 = 1 키
 
 **CLI 파이프 채널 동작**:
 

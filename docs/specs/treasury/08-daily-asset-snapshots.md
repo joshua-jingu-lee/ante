@@ -10,28 +10,20 @@
 
 ### 데이터 정의
 
-```sql
-CREATE TABLE treasury_daily_snapshots (
-    account_id           TEXT    NOT NULL,
-    snapshot_date        TEXT    NOT NULL,  -- ISO 날짜 (YYYY-MM-DD, KST 기준)
-    -- 자산 현황
-    total_asset          REAL    NOT NULL,  -- ante_eval_amount + unallocated
-    ante_eval_amount     REAL    NOT NULL,  -- Ante 관리 종목 평가액
-    ante_purchase_amount REAL    NOT NULL,  -- Ante 관리 종목 매입액
-    unallocated          REAL    NOT NULL,  -- 미할당 현금
-    account_balance      REAL    NOT NULL,  -- 계좌 예수금
-    total_allocated      REAL    NOT NULL,  -- 봇 할당 합계
-    bot_count            INTEGER NOT NULL,  -- 활성 봇 수
-    -- 일별 성과 (DailyReportEvent에서 수신, Treasury는 저장만)
-    daily_pnl            REAL    DEFAULT 0.0,  -- 당일 손익
-    daily_return         REAL    DEFAULT 0.0,  -- 당일 수익률
-    net_trade_amount     REAL    DEFAULT 0.0,  -- 당일 순매수금액
-    unrealized_pnl       REAL    DEFAULT 0.0,  -- 미실현 손익
-    --
-    created_at           TEXT    DEFAULT (datetime('now')),
-    PRIMARY KEY (account_id, snapshot_date)
-);
-```
+테이블 정의: [`treasury_daily_snapshots`](../../architecture/generated/db-schema.md#treasury_daily_snapshots) (코드의 DDL에서 생성된다).
+
+- `treasury_daily_snapshots.snapshot_date`: ISO 날짜 (YYYY-MM-DD, KST 기준)
+- `treasury_daily_snapshots.total_asset`: ante_eval_amount + unallocated
+- `treasury_daily_snapshots.ante_eval_amount`: Ante 관리 종목 평가액
+- `treasury_daily_snapshots.ante_purchase_amount`: Ante 관리 종목 매입액
+- `treasury_daily_snapshots.unallocated`: 미할당 현금
+- `treasury_daily_snapshots.account_balance`: 계좌 예수금
+- `treasury_daily_snapshots.total_allocated`: 봇 할당 합계
+- `treasury_daily_snapshots.bot_count`: 활성 봇 수
+- `treasury_daily_snapshots.daily_pnl`: 당일 손익
+- `treasury_daily_snapshots.daily_return`: 당일 수익률
+- `treasury_daily_snapshots.net_trade_amount`: 당일 순매수금액
+- `treasury_daily_snapshots.unrealized_pnl`: 미실현 손익
 
 ### 스냅샷 생성 시점
 

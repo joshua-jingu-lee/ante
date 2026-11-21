@@ -62,21 +62,7 @@ await audit_logger.query(
 
 ## 데이터베이스 스키마
 
-```sql
-CREATE TABLE IF NOT EXISTS audit_log (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    member_id   TEXT NOT NULL,
-    action      TEXT NOT NULL,
-    resource    TEXT NOT NULL DEFAULT '',
-    detail      TEXT DEFAULT '',
-    ip          TEXT DEFAULT '',
-    created_at  TEXT DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_member ON audit_log(member_id);
-CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
-CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
-```
+테이블 정의: [`audit_log`](../../architecture/generated/db-schema.md#audit_log) (코드의 DDL에서 생성된다).
 
 ## 감사 로그 조회 인터페이스
 
