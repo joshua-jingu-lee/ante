@@ -10,8 +10,10 @@ DB에 넣고, 계좌는 새 서비스를 초기화해 캐시가 DB에서 읽은 
 ``record_success``, ``record_failure`` 의 시험 실패와 임계 도달)의 허용 경로와
 지금 닿는 「전이 없음」 경로를 공개 API로만 몰아 상태와 발행 이벤트로 잠근다.
 
-뒤쪽은 두 전이표가 리터럴로 적은 쌍과 같은지, 전이 함수가 3×3=9쌍에서 허용
-쌍만 통과시키는지 본다(멤버는 enum·``str`` 현재 값과 표 밖 문자열까지).
+뒤쪽은 세 전이표가 리터럴로 적은 쌍과 같은지, 전이 함수(회로차단기는
+``_transition``)가 3×3=9쌍에서 허용 쌍만 통과시키는지 본다(멤버는 enum·
+``str`` 현재 값과 표 밖 문자열까지). ``TradeStatus``·``QuarterStatus`` 의 빈
+전이표는 표 전체를 리터럴과 비교한다.
 """
 
 from __future__ import annotations
@@ -27,7 +29,11 @@ from ante.account.errors import AccountAlreadySuspendedError, AccountDeletedErro
 from ante.account.models import ACCOUNT_STATUS_TRANSITIONS, Account, AccountStatus
 from ante.account.service import AccountService
 from ante.account.service import _transition_status as account_transition
-from ante.broker.circuit_breaker import CircuitBreaker
+from ante.broker.circuit_breaker import (
+    CIRCUIT_STATE_TRANSITIONS,
+    CircuitBreaker,
+    CircuitState,
+)
 from ante.broker.exceptions import CircuitOpenError
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
@@ -40,6 +46,7 @@ from ante.eventbus.events import (
     MemberSuspendedEvent,
     NotificationEvent,
 )
+from ante.feed.pipeline.dart_collector import QUARTER_STATUS_TRANSITIONS
 from ante.member.errors import MemberStateConflictError
 from ante.member.models import (
     MEMBER_STATUS_TRANSITIONS,
@@ -49,6 +56,7 @@ from ante.member.models import (
 )
 from ante.member.service import MemberService
 from ante.member.service import _transition_status as member_transition
+from ante.trade.models import TRADE_STATUS_TRANSITIONS
 
 ACCOUNT_STATUSES = ("active", "suspended", "deleted")
 MEMBER_STATUSES = ("active", "suspended", "revoked")
@@ -724,3 +732,87 @@ def test_member_transition_status_rejects_unknown_current_string(target):
     )
     assert exc_info.value.current_status == "legacy"
     assert member.status == "legacy"
+
+
+CIRCUIT_STATES = ("closed", "open", "half_open")
+
+CIRCUIT_ALLOWED_PAIRS = {
+    ("closed", "open"),
+    ("open", "half_open"),
+    ("open", "closed"),
+    ("half_open", "open"),
+    ("half_open", "closed"),
+}
+
+CIRCUIT_ALL_PAIRS = [(c, t) for c in CIRCUIT_STATES for t in CIRCUIT_STATES]
+
+
+def test_circuit_transition_table_equals_the_five_literal_pairs():
+    assert sorted(str(k) for k in CIRCUIT_STATE_TRANSITIONS) == sorted(CIRCUIT_STATES)
+    assert _pairs(CIRCUIT_STATE_TRANSITIONS) == CIRCUIT_ALLOWED_PAIRS
+    assert len(CIRCUIT_ALLOWED_PAIRS) == 5
+    assert len(CIRCUIT_ALL_PAIRS) == 9
+
+
+_CIRCUIT_ALLOWED_EVENTS = {
+    "open": "서킷 브레이커 차단",
+    "closed": "서킷 브레이커 복구",
+    "half_open": None,
+}
+
+
+@pytest.mark.parametrize(("current", "target"), CIRCUIT_ALL_PAIRS)
+async def test_circuit_transition_over_all_9_pairs(
+    eventbus, circuit_events, current, target
+):
+    breaker = _breaker(eventbus)
+    breaker._state = CircuitState(current)
+    if (current, target) in CIRCUIT_ALLOWED_PAIRS:
+        assert breaker._transition(CircuitState(target), "pair") is None
+        await _drain()
+        assert breaker._state == target
+        kinds = [event[0] for event in circuit_events]
+        title = _CIRCUIT_ALLOWED_EVENTS[target]
+        if title is None:
+            assert kinds == ["CircuitBreakerEvent"]
+        else:
+            assert kinds == ["CircuitBreakerEvent", "NotificationEvent"]
+            assert circuit_events[1][2] == title
+        assert circuit_events[0] == (
+            "CircuitBreakerEvent",
+            "cb-2657",
+            current,
+            target,
+            0,
+            "pair",
+        )
+        return
+    with pytest.raises(Exception) as exc_info:
+        breaker._transition(CircuitState(target), "pair")
+    _assert_exact(
+        exc_info,
+        ValueError,
+        f"CircuitBreaker[cb-2657] {current} → {target} 전이는 허용되지 않습니다.",
+    )
+    await _drain()
+    assert breaker._state == current
+    assert circuit_events == []
+
+
+def test_trade_status_transition_table_is_empty_for_every_member():
+    assert {str(k): v for k, v in TRADE_STATUS_TRANSITIONS.items()} == {
+        "filled": set(),
+        "cancelled": set(),
+        "rejected": set(),
+        "failed": set(),
+        "adjusted": set(),
+        "modified": set(),
+    }
+
+
+def test_quarter_status_transition_table_is_empty_for_every_member():
+    assert {k.value: v for k, v in QUARTER_STATUS_TRANSITIONS.items()} == {
+        "ok": set(),
+        "halt": set(),
+        "skip_empty": set(),
+    }
