@@ -51,6 +51,7 @@ RUFF_ARGS = (
     "--no-fix",
     "--no-cache",
     "--exit-zero",
+    "--ignore-noqa",
 )
 MYPY_ARGS = (
     "--strict",

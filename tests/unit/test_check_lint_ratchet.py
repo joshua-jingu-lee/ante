@@ -52,6 +52,7 @@ CONTRACT_ARGS = {
         "--no-fix",
         "--no-cache",
         "--exit-zero",
+        "--ignore-noqa",
     ),
     "mypy": (
         "--strict",
@@ -138,7 +139,13 @@ def _run(root: Path, runner: Runner, capsys: Capsys) -> tuple[int, str]:
     captured = capsys.readouterr()
     if isinstance(runner, FakeRunner):
         assert all(call_root == root for _, _, call_root in runner.calls)
-    return code, captured.out + captured.err
+    output = captured.out + captured.err
+    if code == 2:
+        assert not any(
+            line.startswith(("lint ratchet ok", "lint ratchet failed"))
+            for line in output.splitlines()
+        )
+    return code, output
 
 
 # ── 실행 방식 ──────────────────────────────────────────────
@@ -386,7 +393,7 @@ def test_mypy_stderr_is_printed_not_parsed(tmp_path: Path, capsys: Capsys) -> No
     proc = _proc(0, "", "Unrecognized option: --frobnicate\n")
     code, output = _run_mypy(tmp_path, proc, capsys)
     assert code == 0
-    assert "Unrecognized option: --frobnicate" in output
+    assert output.splitlines() == [_ok(0, 0), "Unrecognized option: --frobnicate"]
 
 
 def test_mypy_duplicate_module_line_is_error(tmp_path: Path, capsys: Capsys) -> None:
@@ -397,6 +404,31 @@ def test_mypy_duplicate_module_line_is_error(tmp_path: Path, capsys: Capsys) -> 
 
 
 # ── 판정 ───────────────────────────────────────────────────
+
+HEADER = "lint ratchet failed against scripts/lint_baseline.json:"
+DEPS_HEADER = "installed [project].dependencies:"
+RUFF_TEXT = {
+    "BLE001": "예외를 좁히거나 다시 던진다. 판정 값을 기본값으로 채우지 않는다.",
+    "ASYNC240": "asyncio.to_thread나 비동기 API를 쓴다.",
+    "ASYNC109": "asyncio.to_thread나 비동기 API를 쓴다.",
+    "S608": "자리표시자를 쓴다.",
+    "C901": "함수를 나눈다.",
+}
+
+
+def _ok(ruff: int, mypy: int) -> str:
+    return (
+        f"lint ratchet ok: {ruff} ruff findings, {mypy} mypy --strict errors "
+        "(baseline scripts/lint_baseline.json)"
+    )
+
+
+def _alt(kind: str, code: str) -> str:
+    return f"  대안: {MYPY_TEXT if kind == 'mypy' else RUFF_TEXT[code]}"
+
+
+LOWER_LINE = f"  {LOWER_TEXT}."
+MOVE_LINE = f"  {MOVE_TEXT}."
 
 CASES = {
     "match": ({A: {"X1": 2}}, {A: {"X1": 2}}),
@@ -409,15 +441,17 @@ CASES = {
     "moved-code": ({A: {"X2": 2}}, {A: {"X1": 2}}),
 }
 
-
+GREW = "grew"
+GREW_NEW_FILE = "grew-new-file"
+LOWERED = "lowered"
 DIFF_ROWS = {
-    "grew-existing-key": [(A, "X1", 3, 2)],
-    "grew-new-file": [(B, "X1", 1, 0)],
-    "grew-new-code": [(A, "X2", 1, 0)],
-    "lowered-value": [(A, "X1", 1, 2)],
-    "lowered-to-zero": [(B, "X1", 0, 1)],
-    "moved-file": [(A, "X1", 0, 2), (B, "X1", 2, 0)],
-    "moved-code": [(A, "X1", 0, 2), (A, "X2", 2, 0)],
+    "grew-existing-key": [(A, "X1", 3, 2, GREW)],
+    "grew-new-file": [(B, "X1", 1, 0, GREW_NEW_FILE)],
+    "grew-new-code": [(A, "X2", 1, 0, GREW)],
+    "lowered-value": [(A, "X1", 1, 2, LOWERED)],
+    "lowered-to-zero": [(B, "X1", 0, 1, LOWERED)],
+    "moved-file": [(A, "X1", 0, 2, LOWERED), (B, "X1", 2, 0, GREW_NEW_FILE)],
+    "moved-code": [(A, "X1", 0, 2, LOWERED), (A, "X2", 2, 0, GREW)],
 }
 
 CODES = {
@@ -442,9 +476,34 @@ def _expand(counts: dict[str, dict[str, int]]) -> list[tuple[str, str]]:
     ]
 
 
-def _judge_output(
-    tmp_path: Path, capsys: Capsys, kind: str, case: str
-) -> tuple[int, str]:
+def _expected_rows(kind: str, case: str) -> list[str]:
+    lines: list[str] = []
+    rows = sorted(DIFF_ROWS[case], key=lambda row: (row[0], CODES[kind][row[1]]))
+    for path, key, got, want, change in rows:
+        code = CODES[kind][key]
+        lines.append(
+            f"{kind}\t{path}\t{code}: actual {got}, baseline {want} ({got - want:+d})"
+        )
+        if change == LOWERED:
+            lines.append(LOWER_LINE)
+        else:
+            lines.append(_alt(kind, code))
+            if change == GREW_NEW_FILE:
+                lines.append(MOVE_LINE)
+    return lines
+
+
+def _write_pyproject(root: Path, dependencies: Sequence[str] = ()) -> None:
+    (root / "pyproject.toml").write_text(
+        f"[project]\ndependencies = {json.dumps(list(dependencies))}\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize("kind", ["ruff", "mypy"])
+@pytest.mark.parametrize("case", sorted(CASES))
+def test_judge_table(tmp_path: Path, capsys: Capsys, kind: str, case: str) -> None:
+    _write_pyproject(tmp_path)
     actual, baseline = (_rename(counts, kind) for counts in CASES[case])
     if kind == "ruff":
         runner = _fake(ruff=_proc(0, _ruff_json(tmp_path, *_expand(actual))))
@@ -452,86 +511,132 @@ def _judge_output(
     else:
         runner = _fake(mypy=_proc(1, _mypy_text(*_expand(actual))))
         _write_baseline(tmp_path, _baseline(mypy=baseline))
-    return _run(tmp_path, runner, capsys)
-
-
-@pytest.mark.parametrize("kind", ["ruff", "mypy"])
-@pytest.mark.parametrize("case", sorted(CASES))
-def test_judge_table(tmp_path: Path, capsys: Capsys, kind: str, case: str) -> None:
-    code, output = _judge_output(tmp_path, capsys, kind, case)
+    code, output = _run(tmp_path, runner, capsys)
     if case == "match":
-        assert code == 0, output
-        assert "lint ratchet ok" in output
+        assert code == 0
+        assert output.splitlines() == [_ok(2, 0) if kind == "ruff" else _ok(0, 2)]
         return
-    assert code == 1, output
-    rows = {line for line in output.splitlines() if line.startswith(f"{kind}\t")}
-    assert rows == {
-        f"{kind}\t{path}\t{CODES[kind][key]}: actual {got}, baseline {want} "
-        f"({got - want:+d})"
-        for path, key, got, want in DIFF_ROWS[case]
-    }
-    if case.startswith("grew"):
-        assert "  대안: " in output
-        if kind == "mypy":
-            assert f"  대안: {MYPY_TEXT}" in output
-    assert (LOWER_TEXT in output) == (
-        case.startswith("lowered") or case.startswith("moved")
-    )
-    assert (MOVE_TEXT in output) == (case in ("grew-new-file", "moved-file"))
+    assert code == 1
+    expected = [HEADER, *_expected_rows(kind, case)]
+    if kind == "mypy":
+        expected.append(DEPS_HEADER)
+    assert output.splitlines() == expected
 
 
-@pytest.mark.parametrize(
-    ("code", "alternative"),
-    [
-        ("BLE001", "예외를 좁히거나 다시 던진다. 판정 값을 기본값으로 채우지 않는다."),
-        ("ASYNC240", "asyncio.to_thread나 비동기 API를 쓴다."),
-        ("ASYNC109", "asyncio.to_thread나 비동기 API를 쓴다."),
-        ("S608", "자리표시자를 쓴다."),
-        ("C901", "함수를 나눈다."),
-    ],
-)
-def test_ruff_alternative_per_rule(
-    tmp_path: Path, capsys: Capsys, code: str, alternative: str
+def _fix_versions(monkeypatch: pytest.MonkeyPatch) -> None:
+    def version(name: str) -> str:
+        if name == "pytest":
+            return "8.0.0"
+        raise importlib.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(checker.importlib.metadata, "version", version)
+
+
+def test_ruff_and_mypy_mismatch_together(
+    tmp_path: Path, capsys: Capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    _write_baseline(tmp_path, _baseline())
-    runner = _fake(ruff=_proc(0, _ruff_json(tmp_path, (A, code))))
+    _fix_versions(monkeypatch)
+    _write_pyproject(tmp_path, ["pytest>=8.0", "no-such-dist-xyz<2"])
+    _write_baseline(tmp_path, _baseline(mypy={A: {"type-arg": 2}}))
+    runner = _fake(
+        ruff=_proc(0, _ruff_json(tmp_path, (A, "S608"))),
+        mypy=_proc(1, _mypy_text((A, "type-arg"))),
+    )
+    code, output = _run(tmp_path, runner, capsys)
+    assert code == 1
+    assert output.splitlines() == [
+        HEADER,
+        f"ruff\t{A}\tS608: actual 1, baseline 0 (+1)",
+        "  대안: 자리표시자를 쓴다.",
+        MOVE_LINE,
+        f"mypy\t{A}\ttype-arg: actual 1, baseline 2 (-1)",
+        LOWER_LINE,
+        DEPS_HEADER,
+        "  pytest==8.0.0",
+        "  no-such-dist-xyz==not installed",
+    ]
+
+
+@pytest.mark.parametrize("code", sorted(RUFF_TEXT))
+def test_ruff_alternative_per_rule(tmp_path: Path, capsys: Capsys, code: str) -> None:
+    _write_pyproject(tmp_path, ["pytest>=8.0"])
+    _write_baseline(tmp_path, _baseline(ruff={A: {code: 1}}))
+    runner = _fake(ruff=_proc(0, _ruff_json(tmp_path, (A, code), (A, code))))
     exit_code, output = _run(tmp_path, runner, capsys)
     assert exit_code == 1
-    assert f"  대안: {alternative}" in output
-
-
-def _write_pyproject(root: Path) -> None:
-    (root / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["pytest>=8.0", "no-such-dist-xyz<2"]\n',
-        encoding="utf-8",
-    )
+    assert output.splitlines() == [
+        HEADER,
+        f"ruff\t{A}\t{code}: actual 2, baseline 1 (+1)",
+        f"  대안: {RUFF_TEXT[code]}",
+    ]
 
 
 def test_mypy_mismatch_prints_dependency_versions(
+    tmp_path: Path, capsys: Capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fix_versions(monkeypatch)
+    _write_pyproject(tmp_path, ["pytest>=8.0", "no-such-dist-xyz<2"])
+    _write_baseline(tmp_path, _baseline(mypy={A: {"type-arg": 1}}))
+    runner = _fake(mypy=_proc(1, _mypy_text((A, "type-arg"), (A, "type-arg"))))
+    code, output = _run(tmp_path, runner, capsys)
+    assert code == 1
+    assert output.splitlines() == [
+        HEADER,
+        f"mypy\t{A}\ttype-arg: actual 2, baseline 1 (+1)",
+        f"  대안: {MYPY_TEXT}",
+        DEPS_HEADER,
+        "  pytest==8.0.0",
+        "  no-such-dist-xyz==not installed",
+    ]
+
+
+def test_unreadable_pyproject_is_reported_not_fatal(
     tmp_path: Path, capsys: Capsys
 ) -> None:
-    _write_pyproject(tmp_path)
     _write_baseline(tmp_path, _baseline())
     runner = _fake(mypy=_proc(1, _mypy_text((A, "type-arg"))))
     code, output = _run(tmp_path, runner, capsys)
     assert code == 1
-    assert f"pytest=={importlib.metadata.version('pytest')}" in output
-    assert "no-such-dist-xyz==not installed" in output
+    lines = output.splitlines()
+    assert lines[:-1] == [
+        HEADER,
+        f"mypy\t{A}\ttype-arg: actual 1, baseline 0 (+1)",
+        f"  대안: {MYPY_TEXT}",
+        MOVE_LINE,
+        DEPS_HEADER,
+    ]
+    assert lines[-1].startswith(
+        "  cannot read [project].dependencies: FileNotFoundError"
+    )
 
 
 def test_ruff_only_mismatch_omits_dependency_versions(
     tmp_path: Path, capsys: Capsys
 ) -> None:
-    _write_pyproject(tmp_path)
-    _write_baseline(tmp_path, _baseline())
-    runner = _fake(ruff=_proc(0, _ruff_json(tmp_path, (A, "C901"))))
+    _write_pyproject(tmp_path, ["pytest>=8.0"])
+    _write_baseline(tmp_path, _baseline(mypy={A: {"type-arg": 1}}))
+    runner = _fake(
+        ruff=_proc(0, _ruff_json(tmp_path, (A, "C901"))),
+        mypy=_proc(1, _mypy_text((A, "type-arg"))),
+    )
     code, output = _run(tmp_path, runner, capsys)
     assert code == 1
-    assert "pytest==" not in output
-    assert "dependencies" not in output
+    assert output.splitlines() == [
+        HEADER,
+        f"ruff\t{A}\tC901: actual 1, baseline 0 (+1)",
+        "  대안: 함수를 나눈다.",
+        MOVE_LINE,
+    ]
 
 
 # ── 도구 버전 ──────────────────────────────────────────────
+
+
+def _version_error(module: str, installed: str, wanted: str) -> list[str]:
+    return [
+        f"{module} {installed} is installed, baseline needs {wanted}",
+        *INSTALL_SENTENCES,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -557,12 +662,35 @@ def test_version_must_match_exactly(
     runner = _fake(versions=versions)
     code, output = _run(tmp_path, runner, capsys)
     assert code == 2
-    assert f"{module} {version} is installed" in output
-    for sentence in INSTALL_SENTENCES:
-        assert sentence in output
-    assert 'uv pip install -e ".[dev]"' in output
-    assert 'python -m pip install -e ".[dev]"' in output
+    assert output.splitlines() == _version_error(module, version, TOOLS[module])
     assert all(args == ("--version",) for _, args, _ in runner.calls)
+
+
+OTHER_TOOLS = {"ruff": "0.99.1", "mypy": "9.8.7"}
+OTHER_VERSION_OUTPUT = {"ruff": "ruff 0.99.1\n", "mypy": "mypy 9.8.7 (compiled: no)\n"}
+
+
+def test_version_is_compared_with_baseline_tools(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    _write_baseline(tmp_path, {**_baseline(), "tools": dict(OTHER_TOOLS)})
+    code, output = _run(tmp_path, _fake(versions=OTHER_VERSION_OUTPUT), capsys)
+    assert code == 0
+    assert output.splitlines() == [_ok(0, 0)]
+
+
+@pytest.mark.parametrize("module", ["ruff", "mypy"])
+def test_pinned_version_fails_against_other_baseline_tools(
+    tmp_path: Path, capsys: Capsys, module: str
+) -> None:
+    _write_baseline(tmp_path, {**_baseline(), "tools": dict(OTHER_TOOLS)})
+    versions = {**OTHER_VERSION_OUTPUT, module: VERSION_OUTPUT[module]}
+    runner = _fake(versions=versions)
+    code, output = _run(tmp_path, runner, capsys)
+    assert code == 2
+    assert output.splitlines() == _version_error(
+        module, TOOLS[module], OTHER_TOOLS[module]
+    )
 
 
 def test_version_command_failure_is_error(tmp_path: Path, capsys: Capsys) -> None:
@@ -575,7 +703,8 @@ def test_version_command_failure_is_error(tmp_path: Path, capsys: Capsys) -> Non
 
     code, output = _run(tmp_path, runner, capsys)
     assert code == 2
-    assert "cannot read ruff version" in output
+    assert output.splitlines()[0].startswith("cannot read ruff version (exit 1)")
+    assert output.splitlines()[-3:] == list(INSTALL_SENTENCES)
 
 
 @pytest.mark.parametrize("shown", ["ruff\n", ""])
@@ -586,9 +715,10 @@ def test_version_without_second_word_is_error(
     versions = {**VERSION_OUTPUT, "ruff": shown}
     code, output = _run(tmp_path, _fake(versions=versions), capsys)
     assert code == 2
-    assert "cannot read ruff version" in output
-    for sentence in INSTALL_SENTENCES:
-        assert sentence in output
+    assert output.splitlines() == [
+        f"cannot read ruff version (exit 0): {shown.strip()!r}",
+        *INSTALL_SENTENCES,
+    ]
 
 
 # ── 기준선 형식 ────────────────────────────────────────────
