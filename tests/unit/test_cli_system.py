@@ -399,6 +399,62 @@ class TestPidFileManagement:
         config = Config.load(config_dir=tmp_path)
         _remove_pid_file(config)  # Should not raise
 
+    def test_remove_pid_file_treats_absent_files_as_already_clean(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """PID 파일이 둘 다 없으면 실패로 기록하지 않는다."""
+        import logging
+
+        from ante.config import Config
+        from ante.main import _remove_pid_file
+
+        cwd = tmp_path / "workdir"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        config = Config.load(config_dir=tmp_path)
+        assert not config.runtime_pid_path().exists()
+
+        with caplog.at_level(logging.INFO, logger="ante.main"):
+            _remove_pid_file(config)
+
+        main_records = [r for r in caplog.records if r.name == "ante.main"]
+        assert len(main_records) == 2
+        assert all(r.levelno == logging.INFO for r in main_records)
+
+    def test_remove_pid_file_swallows_unlink_error_and_still_cleans_legacy(
+        self, tmp_path, monkeypatch, caplog
+    ):
+        """canonical 삭제가 OSError 로 실패해도 예외 없이 legacy 정리를 이어간다."""
+        import logging
+
+        from ante.config import Config
+        from ante.main import _remove_pid_file
+
+        cwd = tmp_path / "workdir"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        config = Config.load(config_dir=tmp_path)
+        canonical = config.runtime_pid_path()
+        canonical.mkdir(parents=True)
+        legacy = cwd / "db" / "ante.pid"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text("99999")
+
+        with caplog.at_level(logging.INFO, logger="ante.main"):
+            _remove_pid_file(config)
+
+        assert canonical.is_dir()
+        assert not legacy.exists()
+        warnings = [
+            r
+            for r in caplog.records
+            if r.name == "ante.main" and r.levelno == logging.WARNING
+        ]
+        assert len(warnings) == 1
+        assert warnings[0].exc_info is not None
+        assert isinstance(warnings[0].exc_info[1], OSError)
+        assert not isinstance(warnings[0].exc_info[1], FileNotFoundError)
+
 
 class TestIsProcessAlive:
     def test_current_process_is_alive(self):

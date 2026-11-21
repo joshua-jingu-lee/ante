@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -192,3 +192,137 @@ class TestBotDeleteAccountScope:
         await _run_bot_delete_validator(s)
 
         assert position_history.calls == [{"bot_id": _BOT_ID, "account_id": _ACCOUNT_A}]
+
+
+_INVALID_ACCOUNT_PARAMS = [
+    pytest.param({}, id="missing"),
+    pytest.param({"account_id": None}, id="none"),
+    pytest.param({"account_id": ""}, id="empty"),
+    pytest.param({"account_id": "default"}, id="reserved-default"),
+    pytest.param({"account_id": "bad_id!"}, id="pattern"),
+]
+
+
+async def _approval_services_with_accounts(db, eventbus):  # noqa: ANN001, ANN202
+    s, _ = _make_services(
+        db,
+        eventbus,
+        bot_account_id=_ACCOUNT_A,
+        bot_status=BotStatus.STOPPED,
+        positions_by_account={},
+    )
+    treasury = SimpleNamespace(update_budget=AsyncMock(), unallocated=1_000_000.0)
+    s.treasury_manager = MagicMock()
+    s.treasury_manager.get = MagicMock(return_value=treasury)
+    engine = MagicMock()
+    s.rule_engine_manager = MagicMock()
+    s.rule_engine_manager.get = MagicMock(return_value=engine)
+    await _init_approval(s)
+    return s, treasury, engine
+
+
+async def _stop_expire_task(s: Services) -> None:
+    if s.approval_expire_task is not None:
+        s.approval_expire_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await s.approval_expire_task
+
+
+class TestApprovalAccountIdRevalidation:
+    """결재 executor·validator 는 account_id 를 다른 값으로 메우지 않고 재검증한다."""
+
+    @pytest.mark.parametrize("account_params", _INVALID_ACCOUNT_PARAMS)
+    @pytest.mark.parametrize("approval_type", ["budget_change", "rule_change"])
+    async def test_executor_rejects_invalid_account_id_before_touching_services(
+        self, db, eventbus, approval_type, account_params
+    ):
+        from ante.account.errors import InvalidAccountIdError
+
+        s, treasury, engine = await _approval_services_with_accounts(db, eventbus)
+        try:
+            executor = s.approval_service._executors[approval_type]
+            params = {"bot_id": _BOT_ID, "amount": 10.0, "rules": [], **account_params}
+            with pytest.raises(InvalidAccountIdError) as ei:
+                await executor(params)
+            assert f"approval.{approval_type}.exec" in str(ei.value)
+            s.treasury_manager.get.assert_not_called()
+            s.rule_engine_manager.get.assert_not_called()
+            treasury.update_budget.assert_not_awaited()
+            engine.update_rules.assert_not_called()
+        finally:
+            await _stop_expire_task(s)
+
+    async def test_executors_use_the_given_account_id(self, db, eventbus):
+        s, treasury, engine = await _approval_services_with_accounts(db, eventbus)
+        try:
+            await s.approval_service._executors["budget_change"](
+                {"bot_id": _BOT_ID, "amount": 10.0, "account_id": _ACCOUNT_B}
+            )
+            await s.approval_service._executors["rule_change"](
+                {"bot_id": _BOT_ID, "rules": [], "account_id": _ACCOUNT_B}
+            )
+            s.treasury_manager.get.assert_called_once_with(_ACCOUNT_B)
+            s.rule_engine_manager.get.assert_called_once_with(_ACCOUNT_B)
+            treasury.update_budget.assert_awaited_once_with(_BOT_ID, 10.0)
+            engine.update_rules.assert_called_once_with(_BOT_ID, [])
+        finally:
+            await _stop_expire_task(s)
+
+    async def test_approving_stored_request_without_account_id_fails_execution(
+        self, db, eventbus
+    ):
+        """생성 검증을 거치지 않고 저장된 결재도 승인 시점에 account_id 로 막힌다."""
+        import json
+
+        from ante.approval.models import ApprovalStatus
+
+        s, treasury, _ = await _approval_services_with_accounts(db, eventbus)
+        try:
+            await db.execute(
+                """INSERT INTO approvals
+                   (id, type, status, requester, title, body, params,
+                    reviews, history, reference_id, expires_at, created_at,
+                    resolved_at, resolved_by)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    "legacy-1",
+                    "budget_change",
+                    ApprovalStatus.PENDING,
+                    "agent-1",
+                    "legacy budget",
+                    "",
+                    json.dumps({"bot_id": _BOT_ID, "amount": 10.0}),
+                    "[]",
+                    "[]",
+                    "",
+                    "",
+                    "2026-01-01T00:00:00+00:00",
+                    None,
+                    None,
+                ),
+            )
+
+            result = await s.approval_service.approve("legacy-1", resolved_by="owner")
+
+            assert result.status == ApprovalStatus.EXECUTION_FAILED
+            assert result.history[-1]["action"] == "execution_failed"
+            s.treasury_manager.get.assert_not_called()
+            treasury.update_budget.assert_not_awaited()
+        finally:
+            await _stop_expire_task(s)
+
+    @pytest.mark.parametrize("account_params", _INVALID_ACCOUNT_PARAMS)
+    async def test_budget_validator_returns_fail_instead_of_raising(
+        self, db, eventbus, account_params
+    ):
+        s, _, _ = await _approval_services_with_accounts(db, eventbus)
+        try:
+            validator = s.approval_service._validators["budget_change"]
+            results = validator({"bot_id": _BOT_ID, "amount": 10.0, **account_params})
+            assert len(results) == 1
+            assert results[0].grade == "fail"
+            assert results[0].reviewer == "system:treasury"
+            assert "approval.budget_change.validate" in results[0].detail
+            s.treasury_manager.get.assert_not_called()
+        finally:
+            await _stop_expire_task(s)

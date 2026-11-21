@@ -109,6 +109,21 @@ class TestStartupAuthRetryWrapper:
         # backoff sleep = 재시도 횟수만큼(소진 직전까지). startup 한 곳만(곱셈 없음).
         assert len(_no_real_sleep) == DEFAULT_MAX_RETRIES_AUTH
 
+    async def test_persistent_egw00133_retries_twice_with_fixed_backoff(
+        self, _no_real_sleep: list[float]
+    ) -> None:
+        """계속 EGW00133 이면 재시도는 두 번, 고정 60s backoff 두 번 뒤 포기한다."""
+        account_service = AsyncMock()
+        account_service.get_broker = AsyncMock(
+            side_effect=TokenRateLimitError("x", error_code="EGW00133")
+        )
+
+        with pytest.raises(TokenRateLimitError):
+            await main_module._get_broker_with_auth_retry(account_service, "live-1")
+
+        assert account_service.get_broker.await_count == 3
+        assert _no_real_sleep == [60.0, 60.0]
+
     async def test_non_egw00133_propagates_immediately(
         self, _no_real_sleep: list[float]
     ) -> None:

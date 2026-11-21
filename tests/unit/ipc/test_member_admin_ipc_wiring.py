@@ -505,3 +505,334 @@ async def test_member_handlers_require_audit_logger(socket_path: str) -> None:
         await server.stop()
     assert response["status"] == "error"
     member_service.suspend.assert_not_awaited()
+
+
+# ── 행위자는 요청 본문이 아니라 인증된 호출자다 ─────────────────────────────
+
+_SPOOF_ACTOR_CASES = [
+    ("member.register", "register", "registered_by", {"member_type": "agent"}),
+    ("member.set_emoji", "update_emoji", "updated_by", {"emoji": "🦊"}),
+    ("member.suspend", "suspend", "suspended_by", {}),
+    ("member.reactivate", "reactivate", "reactivated_by", {}),
+    ("member.revoke", "revoke", "revoked_by", {}),
+    ("member.rotate_token", "rotate_token", "rotated_by", {}),
+]
+
+
+@pytest.mark.parametrize(
+    ("command", "service_attr", "by_kwarg", "extra_args"), _SPOOF_ACTOR_CASES
+)
+@pytest.mark.asyncio
+async def test_member_handlers_ignore_actor_fields_in_request_args(
+    socket_path: str,
+    command: str,
+    service_attr: str,
+    by_kwarg: str,
+    extra_args: dict[str, Any],
+) -> None:
+    """요청 본문에 다른 멤버를 행위자로 실어도 서비스와 감사에는 호출자가 간다."""
+    member_service = _make_member_service_mock()
+    returned = _make_member("alice", emoji="🦊")
+    if service_attr in ("register", "rotate_token"):
+        getattr(member_service, service_attr).return_value = (returned, SECRET_TOKEN)
+    else:
+        getattr(member_service, service_attr).return_value = returned
+    audit_logger = _make_audit_logger_mock()
+    svc = _make_service_registry(
+        member_service=member_service, audit_logger=audit_logger
+    )
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    server = IPCServer(socket_path, svc, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": command,
+                "args": {
+                    "member_id": "alice",
+                    by_kwarg: "owner-spoofed",
+                    "actor": "owner-spoofed",
+                    **extra_args,
+                },
+                "actor": "agent-caller",
+            }
+        )
+    finally:
+        await server.stop()
+
+    assert response["status"] == "ok", response
+    service_call = getattr(member_service, service_attr)
+    service_call.assert_awaited_once()
+    assert service_call.await_args.kwargs[by_kwarg] == "agent-caller"
+    audit_logger.log.assert_awaited_once()
+    assert audit_logger.log.await_args.kwargs["member_id"] == "agent-caller"
+
+
+_GATED_SPOOF_CASES = [
+    (
+        "member.register",
+        "registered_by",
+        {"member_id": "newbie", "member_type": "agent"},
+    ),
+    ("member.suspend", "suspended_by", {"member_id": "target"}),
+    ("member.reactivate", "reactivated_by", {"member_id": "target"}),
+    ("member.revoke", "revoked_by", {"member_id": "target"}),
+    ("member.rotate_token", "rotated_by", {"member_id": "target"}),
+]
+
+
+@pytest.mark.parametrize(("command", "by_kwarg", "args"), _GATED_SPOOF_CASES)
+@pytest.mark.asyncio
+async def test_member_master_gate_judges_authenticated_caller_not_args(
+    socket_path: str, tmp_path: Path, command: str, by_kwarg: str, args: dict
+) -> None:
+    """비-master 호출자가 master id를 본문에 실어도 실제 서비스가 권한을 거부한다."""
+    from ante.core.database import Database
+    from ante.eventbus.bus import EventBus
+    from ante.member.service import MemberService
+
+    db = Database(str(tmp_path / "member.db"))
+    await db.connect()
+    try:
+        service = MemberService(db, EventBus())
+        await service.initialize()
+        await service.bootstrap_master("owner", "pass123")
+        await service.register("agent-caller", MemberType.AGENT, registered_by="owner")
+        await service.register("target", MemberType.AGENT, registered_by="owner")
+        if command == "member.reactivate":
+            await service.suspend("target", suspended_by="owner")
+        before = {
+            m.member_id: (m.status, m.token_hash) for m in await service.list_members()
+        }
+
+        audit_logger = _make_audit_logger_mock()
+        svc = _make_service_registry(member_service=service, audit_logger=audit_logger)
+        cmd_registry = CommandRegistry()
+        register_all_handlers(cmd_registry)
+        server = IPCServer(socket_path, svc, cmd_registry)
+        await server.start()
+        try:
+            response = await server._dispatch(
+                {
+                    "id": "1",
+                    "command": command,
+                    "args": {**args, by_kwarg: "owner", "actor": "owner"},
+                    "actor": "agent-caller",
+                }
+            )
+        finally:
+            await server.stop()
+
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == "PERMISSION_DENIED", response
+        audit_logger.log.assert_not_awaited()
+        after = {
+            m.member_id: (m.status, m.token_hash) for m in await service.list_members()
+        }
+        assert after == before
+    finally:
+        await db.close()
+
+
+# ── 비밀값은 끝나는 경로마다 로그·봉투·감사 어디에도 없다 ────────────────────
+
+
+def _collect_text(value: Any, out: list[str], depth: int = 0) -> None:
+    """값과 그 안에 중첩된 dict·list·tuple·예외·객체 속성을 문자열로 모은다."""
+    if depth > 8:
+        return
+    out.append(repr(value))
+    if isinstance(value, str):
+        out.append(value)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _collect_text(key, out, depth + 1)
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, BaseException):
+        out.append(str(value))
+        _collect_text(value.args, out, depth + 1)
+        for chained in (value.__cause__, value.__context__):
+            if chained is not None:
+                _collect_text(chained, out, depth + 1)
+    elif hasattr(value, "__dict__") and not isinstance(value, type):
+        _collect_text(vars(value), out, depth + 1)
+
+
+def _log_records_blob(caplog: pytest.LogCaptureFixture) -> str:
+    """로그 레코드마다 메시지, 모든 속성(extra 포함)의 중첩 값, 예외 traceback."""
+    import traceback
+
+    parts: list[str] = []
+    for record in caplog.records:
+        parts.append(record.getMessage())
+        _collect_text(vars(record), parts)
+        if record.exc_info and record.exc_info[1] is not None:
+            parts.extend(traceback.format_exception(*record.exc_info))
+    return "\n".join(parts)
+
+
+_SECRET_HANDLERS: dict[str, tuple[dict[str, Any], str, str | None]] = {
+    "member.register": (
+        {"member_id": "bob", "member_type": "agent"},
+        "register",
+        "token",
+    ),
+    "member.rotate_token": ({"member_id": "alice"}, "rotate_token", "token"),
+    "member.reset_password": (
+        {"recovery_key": SECRET_RECOVERY_KEY, "new_password": SECRET_NEW_PASSWORD},
+        "reset_password",
+        None,
+    ),
+    "member.regenerate_recovery_key": (
+        {"password": SECRET_PASSWORD},
+        "regenerate_recovery_key",
+        "recovery_key",
+    ),
+}
+_RECOVERY_COMMANDS = {"member.reset_password", "member.regenerate_recovery_key"}
+_ENDINGS = ("ok", "service_raises", "audit_raises", "master_lookup_raises")
+_SECRET_CASES = [
+    pytest.param(command, ending, id=f"{command}-{ending}")
+    for command in _SECRET_HANDLERS
+    for ending in _ENDINGS
+    if ending != "master_lookup_raises" or command in _RECOVERY_COMMANDS
+]
+
+
+@pytest.mark.parametrize(("command", "ending"), _SECRET_CASES)
+@pytest.mark.asyncio
+async def test_member_secret_absent_on_every_ending_path(
+    socket_path: str,
+    caplog: pytest.LogCaptureFixture,
+    command: str,
+    ending: str,
+) -> None:
+    """비밀값을 다루는 핸들러는 어느 경로로 끝나도 로그·봉투·감사에 비밀값이 없다."""
+    import json
+
+    args, service_attr, result_field = _SECRET_HANDLERS[command]
+    member_service = _make_member_service_mock()
+    member_service.list_members.return_value = [
+        _make_member("master-bob", role=MemberRole.MASTER)
+    ]
+    member_service.register.return_value = (_make_member("bob"), SECRET_TOKEN)
+    member_service.rotate_token.return_value = (_make_member("alice"), SECRET_TOKEN)
+    member_service.reset_password.return_value = None
+    member_service.regenerate_recovery_key.return_value = SECRET_RECOVERY_KEY
+    audit_logger = _make_audit_logger_mock()
+    service_call = getattr(member_service, service_attr)
+    if ending == "service_raises":
+        service_call.side_effect = RuntimeError("member backend unavailable")
+    elif ending == "audit_raises":
+        audit_logger.log.side_effect = RuntimeError("audit store unavailable")
+    elif ending == "master_lookup_raises":
+        member_service.list_members.return_value = []
+    svc = _make_service_registry(
+        member_service=member_service, audit_logger=audit_logger
+    )
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    server = IPCServer(socket_path, svc, cmd_registry)
+    await server.start()
+    try:
+        with caplog.at_level(logging.DEBUG):
+            response = await server._dispatch(
+                {"id": "1", "command": command, "args": dict(args), "actor": "m-1"}
+            )
+            logging.getLogger("ante.ipc.registry").debug("capture probe")
+    finally:
+        await server.stop()
+
+    assert any(r.getMessage() == "capture probe" for r in caplog.records)
+    if ending == "ok":
+        assert response["status"] == "ok", response
+        service_call.assert_awaited_once()
+        audit_logger.log.assert_awaited_once()
+        envelope = dict(response)
+        envelope["result"] = dict(response["result"])
+        if result_field is not None:
+            assert envelope["result"].pop(result_field) in _ALL_SECRETS
+    else:
+        assert response["status"] == "error", response
+        envelope = response
+        server_errors = [
+            r
+            for r in caplog.records
+            if r.name == "ante.ipc.server" and r.levelno >= logging.ERROR
+        ]
+        assert len(server_errors) == 1
+        if ending == "master_lookup_raises":
+            service_call.assert_not_awaited()
+        else:
+            service_call.assert_awaited_once()
+        if ending == "audit_raises":
+            audit_logger.log.assert_awaited_once()
+        else:
+            audit_logger.log.assert_not_awaited()
+    _assert_no_secret(json.dumps(envelope, ensure_ascii=False, default=repr))
+    _assert_no_secret(_log_records_blob(caplog))
+    audit_parts: list[str] = []
+    _collect_text(audit_logger.log.await_args_list, audit_parts)
+    _assert_no_secret("\n".join(audit_parts))
+
+
+@pytest.mark.parametrize(
+    ("command", "args", "service_attr"),
+    [
+        (
+            "member.reset_password",
+            {
+                "recovery_key": SECRET_RECOVERY_KEY,
+                "new_password": SECRET_NEW_PASSWORD,
+            },
+            "reset_password",
+        ),
+        (
+            "member.regenerate_recovery_key",
+            {"password": SECRET_PASSWORD},
+            "regenerate_recovery_key",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_recovery_target_is_resolved_on_server_even_if_client_sends_member_id(
+    socket_path: str, command: str, args: dict[str, Any], service_attr: str
+) -> None:
+    """client 가 member_id 를 보내도 대상은 서버가 찾은 master 다."""
+    member_service = _make_member_service_mock()
+    member_service.list_members.return_value = [
+        _make_member("agent-x", type=MemberType.AGENT, role=MemberRole.DEFAULT),
+        _make_member("master-bob", role=MemberRole.MASTER),
+    ]
+    member_service.reset_password.return_value = None
+    member_service.regenerate_recovery_key.return_value = SECRET_RECOVERY_KEY
+    audit_logger = _make_audit_logger_mock()
+    svc = _make_service_registry(
+        member_service=member_service, audit_logger=audit_logger
+    )
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    server = IPCServer(socket_path, svc, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {
+                "id": "1",
+                "command": command,
+                "args": {**args, "member_id": "agent-x"},
+                "actor": "agent-x",
+            }
+        )
+    finally:
+        await server.stop()
+
+    assert response["status"] == "ok", response
+    call_args, _ = getattr(member_service, service_attr).await_args
+    assert call_args[0] == "master-bob"
+    assert audit_logger.log.await_args.kwargs["resource"] == "member:master-bob"

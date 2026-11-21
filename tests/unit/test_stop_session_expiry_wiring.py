@@ -148,6 +148,29 @@ async def test_session_expiry_task_loop_calls_check_session_expiry(
 
 
 @pytest.mark.asyncio
+async def test_loop_sweeps_every_sixty_seconds_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """기본 sweep 주기는 60초다."""
+    manager = MagicMock()
+    manager.check_session_expiry = AsyncMock()
+    slept: list[float] = []
+
+    async def _fake_sleep(delay: float) -> None:
+        slept.append(delay)
+        if len(slept) == 3:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(main_module.asyncio, "sleep", _fake_sleep)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _stop_session_expiry_loop(manager)
+
+    assert slept == [60.0, 60.0, 60.0]
+    assert manager.check_session_expiry.await_count == 2
+
+
+@pytest.mark.asyncio
 async def test_loop_propagates_cancelled_error() -> None:
     """루프는 CancelledError 를 삼키지 않고 전파한다(orphan 방지)."""
     manager = MagicMock()
