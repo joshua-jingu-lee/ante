@@ -41,13 +41,22 @@ REJECTED = {
 }
 
 
-def _run(*argv: str | Path) -> tuple[int, str, str]:
-    env = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src")}
+EXTRA_REJECTED = "demo.run 인자 검증 실패: zz_extra(extra_forbidden)"
+ACCOUNT_REJECTED = "demo.run 인자 검증 실패: account_id(invalid_account_id)"
+
+
+def _run(
+    *argv: str | Path, env: dict[str, str] | None = None, code: str | None = None
+) -> tuple[int, str, str]:
+    full = {**os.environ, "PYTHONPATH": str(REPO_ROOT / "src"), **(env or {})}
+    head = (
+        [sys.executable, str(SCRIPT)] if code is None else [sys.executable, "-c", code]
+    )
     proc = subprocess.run(
-        [sys.executable, str(SCRIPT), *map(str, argv)],
+        [*head, *map(str, argv)],
         capture_output=True,
         text=True,
-        env=env,
+        env=full,
         check=False,
     )
     return proc.returncode, proc.stdout, proc.stderr
@@ -164,7 +173,7 @@ def test_reject_after_a_service_call(tmp_path: Path) -> None:
         tmp_path,
         [extra],
         {"demo.run:extra": OK},
-        {"demo.run:extra": {**REJECTED, "message": "m(extra_forbidden)"}},
+        {"demo.run:extra": {**REJECTED, "message": EXTRA_REJECTED}},
     )
     assert (code, _count(out, "거부로 바뀜")) == (0, 1)
 
@@ -180,8 +189,8 @@ def test_message_change_only_for_account_rows(
     code, out, _ = _compare(
         tmp_path,
         [row],
-        {"demo.run:x": {**REJECTED, "message": "old"}},
-        {"demo.run:x": {**REJECTED, "message": "new"}},
+        {"demo.run:x": {**REJECTED, "message": "invalid account_id: old"}},
+        {"demo.run:x": {**REJECTED, "message": ACCOUNT_REJECTED}},
     )
     assert code == exit_code
     assert _count(out, "메시지 바뀜") == 1 - exit_code
@@ -378,7 +387,134 @@ def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
         tmp_path,
         [row],
         {"strategy.set_status:value:status:str5": EXECUTION},
-        {"strategy.set_status:value:status:str5": REJECTED},
+        {
+            "strategy.set_status:value:status:str5": {
+                **REJECTED,
+                "message": "strategy.set_status 인자 검증 실패: status(literal_error)",
+            }
+        },
         command="strategy.set_status",
     )
     assert (code, _count(out, "코드 바뀜")) == (0, 1)
+
+
+@pytest.mark.parametrize(
+    ("message", "exit_code"),
+    [
+        pytest.param(EXTRA_REJECTED, 0, id="model-rejection"),
+        pytest.param("invalid account_id", 1, id="handler-validation-error"),
+    ],
+)
+def test_reject_needs_the_request_model_message(
+    tmp_path: Path, message: str, exit_code: int
+) -> None:
+    extra = _request("demo.run:extra", "extra", {"name": "a1", "zz_extra": "zz-v"})
+    code, out, _ = _compare(
+        tmp_path,
+        [extra],
+        {"demo.run:extra": OK},
+        {"demo.run:extra": {**REJECTED, "message": message}},
+    )
+    assert (code, _count(out, "거부로 바뀜"), _count(out, "다름")) == (
+        exit_code,
+        1 - exit_code,
+        exit_code,
+    )
+
+
+@pytest.mark.parametrize(
+    ("message", "exit_code"),
+    [
+        pytest.param(REJECTED["message"], 0, id="model-rejection"),
+        pytest.param("name is required", 1, id="handler-validation-error"),
+    ],
+)
+def test_code_change_needs_the_request_model_message(
+    tmp_path: Path, message: str, exit_code: int
+) -> None:
+    code, out, _ = _compare(
+        tmp_path,
+        [MISSING],
+        {"demo.run:missing:name": EXECUTION},
+        {"demo.run:missing:name": {**REJECTED, "message": message}},
+    )
+    assert (code, _count(out, "코드 바뀜"), _count(out, "다름")) == (
+        exit_code,
+        1 - exit_code,
+        exit_code,
+    )
+
+
+@pytest.mark.parametrize(
+    ("before_again", "exit_code"),
+    [
+        pytest.param(
+            {"demo.run:cli:0": OK, "demo.run:missing:name": EXECUTION},
+            0,
+            id="same-rows",
+        ),
+        pytest.param({"demo.run:cli:0": OK}, 2, id="a-row-missing-in-the-second"),
+    ],
+)
+def test_before_records_need_the_same_rows(
+    tmp_path: Path, before_again: dict[str, Any], exit_code: int
+) -> None:
+    rows = {"demo.run:cli:0": OK, "demo.run:missing:name": EXECUTION}
+    code, _out, err = _compare(
+        tmp_path, [CLI, MISSING], rows, rows, before_again=before_again
+    )
+    assert code == exit_code
+    if exit_code == 2:
+        assert "the before records differ in rows: demo.run:missing:name" in err
+
+
+def _fake_dirs(tmp_path: Path) -> dict[str, str]:
+    env = {}
+    for key in ("ANTE_CONFIG_DIR", "HOME"):
+        path = tmp_path / f"user-{key.lower()}"
+        path.mkdir()
+        env[key] = str(path)
+    return env
+
+
+def test_record_does_not_touch_the_user_directories(tmp_path: Path) -> None:
+    env = _fake_dirs(tmp_path)
+    code, _out, err = _run("record", "--out", tmp_path / "record.json", env=env)
+    assert (code, err) == (0, "")
+    assert [list(Path(path).iterdir()) for path in env.values()] == [[], []]
+
+
+SEEN_ENV = """
+import json, os, sys
+sys.argv[0] = {script!r}
+sys.path.insert(0, os.path.dirname({script!r}))
+import ipc_request_diff as tool
+KEYS = ("ANTE_CONFIG_DIR", "HOME")
+def _seen(args):
+    seen = {{k: os.environ[k] for k in KEYS}}
+    exist = [os.path.isdir(v) for v in seen.values()]
+    print(json.dumps({{"seen": seen, "exist": exist}}))
+    return 0
+tool.cmd_record = _seen
+code = tool.main(sys.argv[1:])
+print(json.dumps({{"after": {{k: os.environ[k] for k in KEYS}}}}))
+sys.exit(code)
+"""
+
+
+def test_build_and_record_run_in_a_temporary_config_and_home(tmp_path: Path) -> None:
+    env = _fake_dirs(tmp_path)
+    code, out, err = _run(
+        "record",
+        "--out",
+        tmp_path / "unused.json",
+        env=env,
+        code=SEEN_ENV.format(script=str(SCRIPT)),
+    )
+    assert (code, err) == (0, "")
+    first, second = (json.loads(line) for line in out.splitlines())
+    seen = first["seen"]
+    assert first["exist"] == [True, True]
+    assert all(seen[key] != env[key] for key in env)
+    assert all(not Path(path).exists() for path in seen.values())
+    assert second == {"after": env}

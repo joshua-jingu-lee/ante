@@ -34,9 +34,14 @@ default=repr)`` after values of a type other than ``str``, ``int``, ``float``,
 ``repr``. The record also keeps the three request keys of
 ``scripts/check_entry_ratchet.py`` for the tree it ran on.
 
+``build`` and ``record`` run with ``ANTE_CONFIG_DIR`` and ``HOME`` set to a
+temporary directory that is removed afterwards.
+
 ``compare [--requests FILE] --before A --before B --after C [--allow-code CODE]``
 
-Rows that differ between A and B are ``비결정`` and leave the comparison. For
+Run ``compare`` on the after tree: whether a field is narrowed is read from the
+request models of the tree it runs on. A and B must hold the same request
+names. Rows that differ between A and B are ``비결정`` and leave the comparison. For
 each other request:
 
 - ``같음``: every column is equal.
@@ -44,9 +49,12 @@ each other request:
   ``같음``, and for a ``value`` row whose value has the JSON type of the
   ``cli`` value and that is not ``같음``, unless the after model narrows that
   field (a ``Literal`` or an ``AfterValidator`` type).
-- ``거부로 바뀜``: calls before, ``VALIDATION_ERROR`` and no calls after.
+- A request-model rejection after is ``VALIDATION_ERROR`` with a message that
+  starts with ``<command> 인자 검증 실패: ``. The next three classes need it.
+- ``거부로 바뀜``: calls before, a request-model rejection and no calls after.
 - ``코드 바뀜``: no calls either side, the before code is in the allowed set
-  (``EXECUTION_ERROR`` and each ``--allow-code``), ``VALIDATION_ERROR`` after.
+  (``EXECUTION_ERROR`` and each ``--allow-code``), a request-model rejection
+  after.
 - ``메시지 바뀜``: ``VALIDATION_ERROR`` and no calls either side, only the
   message differs, and the row is an ``account`` row or its field has an
   ``AfterValidator`` type.
@@ -56,8 +64,9 @@ each other request:
 
 Exit 0: no ``다름`` row.
 Exit 1: a ``다름`` row.
-Exit 2: unreadable input, a record row not in the request set, an
-unsupported handler read, or any other failure.
+Exit 2: unreadable input, a record row not in the request set, two before
+records with different request names, an unsupported handler read, or any
+other failure.
 """
 
 from __future__ import annotations
@@ -65,11 +74,14 @@ from __future__ import annotations
 import argparse
 import ast
 import asyncio
+import contextlib
 import importlib.util
 import json
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import typing
 from collections import Counter
 from collections.abc import Generator, Iterator, Sequence
@@ -87,6 +99,7 @@ DEFAULT_REQUESTS = Path("scripts/ipc_request_set.json")
 IPC_REGISTRY_PATH = "src/ante/ipc/registry.py"
 CLI_CONTRACT_TEST = "tests/unit/cli/test_cli_ipc_request_contract.py"
 VALIDATION_ERROR = "VALIDATION_ERROR"
+VALIDATION_PREFIX = "인자 검증 실패: "
 DEFAULT_ALLOWED = ("EXECUTION_ERROR",)
 EXTRA_KEY = "zz_extra"
 EXTRA_VALUE = "zz-extra-value"
@@ -105,6 +118,7 @@ RATCHET_KEYS = (
     "cli_direct_ipc_send",
 )
 PLAIN = (str, int, float, bool, type(None))
+ISOLATED_ENV = ("ANTE_CONFIG_DIR", "HOME")
 
 
 class InputError(Exception):
@@ -509,7 +523,13 @@ def classify(
             text in (after["message"] or "") or text in after["result"]
         ):
             return "다름", f"the after response reflects {text!r}"
-    rejected = after["status"] == "error" and after["code"] == VALIDATION_ERROR
+    rejected = (
+        after["status"] == "error"
+        and after["code"] == VALIDATION_ERROR
+        and (after["message"] or "").startswith(
+            f"{request['command']} {VALIDATION_PREFIX}"
+        )
+    )
     no_calls = before["calls"] == "[]" and after["calls"] == "[]"
     if rejected and before["calls"] != "[]" and after["calls"] == "[]":
         return "거부로 바뀜", ""
@@ -550,6 +570,9 @@ def cmd_compare(args: argparse.Namespace) -> int:
     if len(args.before) != 2:
         raise InputError("compare needs --before twice")
     (b1, ratchet_before), (b2, _) = (_rows(p, names) for p in args.before)
+    if set(b1) != set(b2):
+        only = sorted(set(b1) ^ set(b2))
+        raise InputError(f"the before records differ in rows: {', '.join(only)}")
     after, ratchet_after = _rows(args.after, names)
     allowed = frozenset((*DEFAULT_ALLOWED, *args.allow_code))
     unstable = sorted(n for n in names if n in b1 and n in b2 and b1[n] != b2[n])
@@ -617,13 +640,34 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+@contextlib.contextmanager
+def _isolated() -> Iterator[None]:
+    saved = {key: os.environ.get(key) for key in ISOLATED_ENV}
+    tmp = tempfile.mkdtemp(prefix="ipc-request-diff-")
+    try:
+        for key in ISOLATED_ENV:
+            os.environ[key] = str(Path(tmp, key.lower()))
+            Path(os.environ[key]).mkdir()
+        yield
+    finally:
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     sys.path.insert(0, str(args.root / "src"))
     actions = {"build": cmd_build, "record": cmd_record, "compare": cmd_compare}
     try:
-        return actions[args.action](args)
+        if args.action == "compare":
+            return cmd_compare(args)
+        with _isolated():
+            return actions[args.action](args)
     except Exception as exc:
         print(f"ipc request diff error: {type(exc).__name__}: {exc}", file=sys.stderr)
         return EXIT_ERROR
