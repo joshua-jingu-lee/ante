@@ -13,6 +13,7 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ante.contracts.helpers import ipc_error_payload
 from ante.ipc import protocol
 from ante.ipc.exceptions import MessageTooLargeError
 
@@ -375,18 +376,17 @@ class IPCServer:
                 "result": result,
             }
         except Exception as e:
-            error_code = getattr(e, "code", "EXECUTION_ERROR")
-            if error_code in _EXPECTED_DISPATCH_REJECT_CODES:
-                logger.warning("IPC handshake rejected: %s (%s)", command, error_code)
+            error = ipc_error_payload(e)
+            if error["code"] in _EXPECTED_DISPATCH_REJECT_CODES:
+                logger.warning(
+                    "IPC handshake rejected: %s (%s)", command, error["code"]
+                )
             else:
                 logger.exception("IPC 커맨드 실행 오류: %s", command)
             return {
                 "id": request_id,
                 "status": "error",
-                "error": {
-                    "code": error_code,
-                    "message": str(e),
-                },
+                "error": error,
             }
 
     async def _run_signal_stream(

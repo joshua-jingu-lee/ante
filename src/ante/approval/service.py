@@ -12,6 +12,7 @@ from ante.account.scoping import require_account_id
 from ante.approval.auto_approve import AutoApproveEvaluator
 from ante.approval.errors import ApprovalNotFoundError, ApprovalStatusConflictError
 from ante.approval.models import (
+    APPROVAL_STATUS_TRANSITIONS,
     ApprovalRequest,
     ApprovalStatus,
     ApprovalType,
@@ -46,6 +47,19 @@ def _extract_account_id(type: str, params: dict | None) -> str | None:
         if candidate is not None:
             return candidate  # type: ignore[no-any-return]
     return params.get("account_id")
+
+
+def _transition_status(
+    request: ApprovalRequest, target: ApprovalStatus, action: str
+) -> ApprovalStatus:
+    if target not in APPROVAL_STATUS_TRANSITIONS.get(request.status, set()):
+        raise ApprovalStatusConflictError(
+            request.id,
+            current_status=str(request.status),
+            requested_action=action,
+        )
+    request.status = target
+    return target
 
 
 APPROVAL_SCHEMA = """
@@ -145,7 +159,7 @@ class ApprovalService:
 
         auto_approved = await self._auto_approve.should_auto_approve(type, params)
         if auto_approved:
-            request.status = ApprovalStatus.APPROVED
+            _transition_status(request, ApprovalStatus.APPROVED, "create")
             request.resolved_at = now
             request.resolved_by = "system:auto_approve"
             request.history.append(
@@ -204,7 +218,7 @@ class ApprovalService:
             {"action": "approved", "actor": resolved_by, "at": now, "detail": ""}
         )
 
-        request.status = ApprovalStatus.APPROVED
+        status = _transition_status(request, ApprovalStatus.APPROVED, "approve")
         request.resolved_at = now
         request.resolved_by = resolved_by
 
@@ -214,7 +228,7 @@ class ApprovalService:
                    history = ?
                WHERE id = ?""",
             (
-                ApprovalStatus.APPROVED,
+                status,
                 now,
                 resolved_by,
                 json.dumps(request.history, ensure_ascii=False),
@@ -262,13 +276,14 @@ class ApprovalService:
             }
         )
 
+        status = _transition_status(request, ApprovalStatus.REJECTED, "reject")
         await self._db.execute(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    reject_reason = ?, history = ?
                WHERE id = ?""",
             (
-                ApprovalStatus.REJECTED,
+                status,
                 now,
                 resolved_by,
                 reject_reason,
@@ -277,7 +292,6 @@ class ApprovalService:
             ),
         )
 
-        request.status = ApprovalStatus.REJECTED
         request.resolved_at = now
         request.resolved_by = resolved_by
         request.reject_reason = reject_reason
@@ -341,7 +355,7 @@ class ApprovalService:
         warn_reviews = await self._validate_params(request.type, request.params, now)
         request.reviews.extend(warn_reviews)
 
-        request.status = ApprovalStatus.PENDING
+        status = _transition_status(request, ApprovalStatus.PENDING, "reopen")
         request.reject_reason = ""
         request.resolved_at = ""
         request.resolved_by = ""
@@ -369,7 +383,7 @@ class ApprovalService:
                    resolved_at = ?, resolved_by = ?
                WHERE id = ?""",
             (
-                ApprovalStatus.PENDING,
+                status,
                 request.body,
                 json.dumps(request.params, ensure_ascii=False),
                 json.dumps(request.reviews, ensure_ascii=False),
@@ -402,7 +416,7 @@ class ApprovalService:
         id: str,
         requester: str,
     ) -> ApprovalRequest:
-        """결재 철회 (요청자만 가능, pending/on_hold 상태에서만)."""
+        """결재 철회 (요청자만 가능, pending/on_hold/execution_failed 상태에서만)."""
         request = await self.get(id)
         if not request:
             msg = f"결재 요청을 찾을 수 없음: {id}"
@@ -429,13 +443,14 @@ class ApprovalService:
             {"action": "cancelled", "actor": requester, "at": now, "detail": ""}
         )
 
+        status = _transition_status(request, ApprovalStatus.CANCELLED, "cancel")
         await self._db.execute(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    history = ?
                WHERE id = ?""",
             (
-                ApprovalStatus.CANCELLED,
+                status,
                 now,
                 requester,
                 json.dumps(request.history, ensure_ascii=False),
@@ -443,7 +458,6 @@ class ApprovalService:
             ),
         )
 
-        request.status = ApprovalStatus.CANCELLED
         request.resolved_at = now
         request.resolved_by = requester
 
@@ -485,16 +499,16 @@ class ApprovalService:
             {"action": "held", "actor": "user", "at": now, "detail": ""}
         )
 
+        status = _transition_status(request, ApprovalStatus.ON_HOLD, "hold")
         await self._db.execute(
             """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
             (
-                ApprovalStatus.ON_HOLD,
+                status,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
             ),
         )
 
-        request.status = ApprovalStatus.ON_HOLD
         logger.info("결재 보류: %s", id)
         return request
 
@@ -514,16 +528,16 @@ class ApprovalService:
             {"action": "resumed", "actor": "user", "at": now, "detail": ""}
         )
 
+        status = _transition_status(request, ApprovalStatus.PENDING, "resume")
         await self._db.execute(
             """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
             (
-                ApprovalStatus.PENDING,
+                status,
                 json.dumps(request.history, ensure_ascii=False),
                 id,
             ),
         )
 
-        request.status = ApprovalStatus.PENDING
         logger.info("결재 재개: %s", id)
         return request
 
@@ -593,13 +607,14 @@ class ApprovalService:
                 {"action": "expired", "actor": "system", "at": now, "detail": ""}
             )
 
+            status = _transition_status(request, ApprovalStatus.EXPIRED, "expire_stale")
             await self._db.execute(
                 """UPDATE approvals
                    SET status = ?, resolved_at = ?, resolved_by = ?,
                        history = ?
                    WHERE id = ?""",
                 (
-                    ApprovalStatus.EXPIRED,
+                    status,
                     now,
                     "system",
                     json.dumps(request.history, ensure_ascii=False),
@@ -773,13 +788,16 @@ class ApprovalService:
             }
         )
 
+        status = _transition_status(
+            request, ApprovalStatus.CANCELLED, "cancel_invalid_type_request"
+        )
         await self._db.execute(
             """UPDATE approvals
                SET status = ?, resolved_at = ?, resolved_by = ?,
                    history = ?
                WHERE id = ?""",
             (
-                ApprovalStatus.CANCELLED,
+                status,
                 now,
                 resolved_by,
                 json.dumps(request.history, ensure_ascii=False),
@@ -787,7 +805,6 @@ class ApprovalService:
             ),
         )
 
-        request.status = ApprovalStatus.CANCELLED
         request.resolved_at = now
         request.resolved_by = resolved_by
 
@@ -942,7 +959,9 @@ class ApprovalService:
                 )
                 logger.info("결재 실행 완료: %s (%s)", request.id, request.type)
             except Exception as exc:
-                request.status = ApprovalStatus.EXECUTION_FAILED
+                status = _transition_status(
+                    request, ApprovalStatus.EXECUTION_FAILED, "execute"
+                )
                 request.history.append(
                     {
                         "action": "execution_failed",
@@ -954,14 +973,16 @@ class ApprovalService:
                 await self._db.execute(
                     """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
                     (
-                        ApprovalStatus.EXECUTION_FAILED,
+                        status,
                         json.dumps(request.history, ensure_ascii=False),
                         request.id,
                     ),
                 )
                 logger.exception("결재 실행 실패: %s (%s)", request.id, request.type)
         else:
-            request.status = ApprovalStatus.EXECUTION_FAILED
+            status = _transition_status(
+                request, ApprovalStatus.EXECUTION_FAILED, "execute"
+            )
             request.history.append(
                 {
                     "action": "no_executor",
@@ -973,7 +994,7 @@ class ApprovalService:
             await self._db.execute(
                 """UPDATE approvals SET status = ?, history = ? WHERE id = ?""",
                 (
-                    ApprovalStatus.EXECUTION_FAILED,
+                    status,
                     json.dumps(request.history, ensure_ascii=False),
                     request.id,
                 ),

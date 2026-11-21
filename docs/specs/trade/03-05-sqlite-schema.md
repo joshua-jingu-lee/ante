@@ -4,35 +4,13 @@
 
 # SQLite 스키마
 
-```sql
--- 개별 거래 기록
-CREATE TABLE trades (
-    trade_id       TEXT PRIMARY KEY,
-    account_id     TEXT NOT NULL,          -- fallback default 없음
-    bot_id         TEXT NOT NULL,
-    strategy_id    TEXT NOT NULL,
-    symbol         TEXT NOT NULL,
-    symbol_name    TEXT DEFAULT '',
-    side           TEXT NOT NULL,           -- 'buy' | 'sell'
-    quantity       REAL NOT NULL,
-    price          REAL NOT NULL,
-    status         TEXT NOT NULL,           -- 'filled' | 'cancelled' | 'rejected' | 'failed' | 'adjusted'
-    order_type     TEXT DEFAULT '',
-    reason         TEXT DEFAULT '',
-    commission     REAL DEFAULT 0.0,
-    currency       TEXT DEFAULT 'KRW',
-    timestamp      TEXT,
-    order_id       TEXT,                    -- 증권사 주문 ID
-    exchange       TEXT DEFAULT 'KRX',
-    created_at     TEXT DEFAULT (datetime('now'))
-);
+테이블 정의: [`trades`](../../architecture/generated/db-schema.md#trades) (코드의 DDL에서 생성된다).
 
-CREATE INDEX idx_trades_account ON trades(account_id, timestamp);
-CREATE INDEX idx_trades_bot ON trades(bot_id, timestamp);
-CREATE INDEX idx_trades_strategy ON trades(strategy_id, timestamp);
-CREATE INDEX idx_trades_symbol ON trades(symbol, timestamp);
-CREATE INDEX idx_trades_status ON trades(status);
-```
+- `trades`: 개별 거래 기록
+- `trades.account_id`: fallback default 없음
+- `trades.side`: 'buy' | 'sell'
+- `trades.status`: `TradeStatus` 값([03-01-trade-record.md](03-01-trade-record.md)의 상태 표)
+- `trades.order_id`: 증권사 주문 ID
 
 `trades.account_id`는 fresh schema에서 필수값이며 `DEFAULT 'default'` 같은
 fallback을 두지 않는다. `TradeRecorder`는 저장 직전과 명시 account 조회

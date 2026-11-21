@@ -307,7 +307,8 @@ src/ante/
     ├── error_registry.py
     ├── errors.py
     ├── helpers.py
-    └── cli_registry.py
+    ├── cli_registry.py
+    └── ipc_client_errors.py
 ```
 
 ## tests/ — 테스트
@@ -437,7 +438,8 @@ tests/
 │   │   ├── test_create_services_mock_helper.py
 │   │   ├── test_data_path_callsites.py
 │   │   ├── test_data_path_helper.py
-│   │   └── test_db_encryption_key_chokepoint.py
+│   │   ├── test_db_encryption_key_chokepoint.py
+│   │   └── test_single_error_exit.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -652,6 +654,8 @@ tests/
 │   │   ├── test_indicator_param_drift.py
 │   │   ├── test_order_event_exchange_propagation.py
 │   │   ├── test_state_enum_transition_tables.py
+│   │   ├── test_approval_status_assignments.py
+│   │   ├── test_error_code_preservation.py
 │   │   └── test_account_id_relocation.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
@@ -758,7 +762,8 @@ tests/
 │   ├── test_check_spec_code_blocks.py
 │   ├── test_check_imports.py
 │   ├── test_check_entry_ratchet.py
-│   └── test_check_lint_ratchet.py
+│   ├── test_check_lint_ratchet.py
+│   └── test_approval_status_transitions.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py

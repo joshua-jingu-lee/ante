@@ -8,7 +8,7 @@ class AccountNotFoundError(AccountError):
     """계좌를 찾을 수 없음.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_NOT_FOUND"``를 노출하도록 한다. CLI
     ``account suspend``/``account activate`` 등이 IPC error envelope 의
     typed code 를 그대로 surface 해 not-found 의미가 일반
@@ -22,7 +22,7 @@ class AccountAlreadyExistsError(AccountError):
     """동일 account_id가 이미 존재.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_ALREADY_EXISTS"``를 노출하도록 한다
     (state-conflict / duplicate-resource typed code 정합).
     """
@@ -34,7 +34,7 @@ class InvalidBrokerTypeError(AccountError):
     """등록되지 않은 broker_type.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_INVALID_BROKER_TYPE"``를 노출하도록 한다.
     """
 
@@ -56,7 +56,7 @@ class MissingCredentialsError(AccountError):
     """필수 credentials 키 누락.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_MISSING_CREDENTIALS"``를 노출하도록 한다.
     """
 
@@ -67,7 +67,7 @@ class AccountAlreadySuspendedError(AccountError):
     """이미 정지 상태인 계좌에 대한 재정지 시도.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_ALREADY_SUSPENDED"``를 노출하도록 한다
     (state-conflict typed code 정합. CLI ``account suspend`` 가 IPC envelope
     의 typed code 를 middleware ``ClickException`` fallback 으로 그대로
@@ -93,7 +93,7 @@ class AccountSuspendedError(AccountError):
     """정지(SUSPENDED) 상태 계좌에 대한 작업 시도.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_SUSPENDED"``를 노출하도록 한다.
     """
 
@@ -104,7 +104,7 @@ class AccountImmutableFieldError(AccountError):
     """불변 필드 수정 시도.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_IMMUTABLE_FIELD"``를 노출하도록 한다.
     """
 
@@ -118,7 +118,7 @@ class BrokerReconnectFailedError(AccountError):
     실패했을 때 발생한다. 운영자는 설정을 교정한 뒤 재시도해야 한다.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"BROKER_RECONNECT_FAILED"``를 노출하도록 한다.
     """
 
