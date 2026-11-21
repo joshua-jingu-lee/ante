@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import click
-
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.ipc.client import IPCClient
 from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 
@@ -51,25 +54,16 @@ async def ipc_send(
         client = IPCClient(socket_path=get_socket_path(config_dir=config_dir))
         response = await client.send(command, args, actor)
     except ServerNotRunningError:
-        exc = click.ClickException(
+        raise IPCServerNotRunningError(
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
         )
-        exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-        exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-        raise exc
     except IPCTimeoutError:
-        exc = click.ClickException("서버 응답 시간 초과")
-        exc.ipc_error_code = "IPC_TIMEOUT"  # type: ignore[attr-defined]
-        exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-        raise exc
+        raise IPCClientTimeoutError("서버 응답 시간 초과")
 
     if response.get("status") == "error":
         error = response.get("error", {})
         code = error.get("code", "UNKNOWN")
         message = error.get("message", "알 수 없는 오류")
-        exc = click.ClickException(f"{code}: {message}")
-        exc.ipc_error_code = code  # type: ignore[attr-defined]
-        exc.ipc_error_message = message  # type: ignore[attr-defined]
-        raise exc
+        raise IPCRemoteError(code, message)
 
     return response.get("result", response)

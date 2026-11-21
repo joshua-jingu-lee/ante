@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-11-21 (KST)
+> 마지막 생성 시점: 2026-11-22 (KST)
 
 ## 최상위 구조
 
@@ -52,7 +52,8 @@ src/ante/
 │   ├── registry.py
 │   ├── time.py
 │   ├── exchange.py
-│   └── market_data_vocab.py
+│   ├── market_data_vocab.py
+│   └── account_id.py
 ├── config/
 │   ├── config.py                     # ConfigService — 설정 로딩 (system.toml + secrets.env)
 │   ├── defaults.py                   # 기본 설정값
@@ -306,7 +307,8 @@ src/ante/
     ├── error_registry.py
     ├── errors.py
     ├── helpers.py
-    └── cli_registry.py
+    ├── cli_registry.py
+    └── ipc_client_errors.py
 ```
 
 ## tests/ — 테스트
@@ -436,7 +438,8 @@ tests/
 │   │   ├── test_create_services_mock_helper.py
 │   │   ├── test_data_path_callsites.py
 │   │   ├── test_data_path_helper.py
-│   │   └── test_db_encryption_key_chokepoint.py
+│   │   ├── test_db_encryption_key_chokepoint.py
+│   │   └── test_single_error_exit.py
 │   ├── ipc/
 │   │   ├── __init__.py
 │   │   ├── test_protocol.py
@@ -652,6 +655,8 @@ tests/
 │   │   ├── test_order_event_exchange_propagation.py
 │   │   ├── test_state_enum_transition_tables.py
 │   │   ├── test_approval_status_assignments.py
+│   │   ├── test_error_code_preservation.py
+│   │   ├── test_account_id_relocation.py
 │   │   └── test_state_assignments_account_member_circuit.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py

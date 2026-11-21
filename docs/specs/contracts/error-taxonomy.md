@@ -108,6 +108,10 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
    — 외부 시스템 호출에서 올라온 미분류 `Exception`. 분류 가능한 broker/외부
    오류는 `external` category 코드(예: `BROKER_API_ERROR`)로 분류한다.
 
+명령 밖으로 나온, Click 예외가 아닌 처리되지 않은 `Exception`은 JSON 모드에서
+CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 분류되지 않은 예외는
+`EXECUTION_ERROR`다.
+
 **금지** (drift):
 
 - domain exception이 `code` 미부여로 `EXECUTION_ERROR`로 접히는 것.
@@ -143,7 +147,7 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
 | Normative code | Legacy alias (1.0 envelope value) | Category | 비고 |
 |----------------|-----------------------------------|----------|------|
 | `AUTH_REQUIRED` | `auth_required` | `auth` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
-| `AUTH_FAILED` | `auth_failed` | `auth` | `ANTE_MEMBER_TOKEN`으로 `MemberService.authenticate()` 실패 |
+| `AUTH_FAILED` | `auth_failed` | `auth` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
 | `PERMISSION_DENIED` | `permission_denied` | `permission` | 인증 OK이나 scope 부족 |
 
 규칙:
@@ -189,7 +193,7 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
 
 | Domain exception | Public code | Category | 비고 |
 |------------------|-------------|----------|------|
-| `InvalidAccountIdError` (`src/ante/account/errors.py`) | `VALIDATION_ERROR` | `validation` | `src/ante/ipc/registry.py:151,360,654`에서 이미 `VALIDATION_ERROR`로 정렬됨 (#1633 SSOT) |
+| `InvalidAccountIdError` (`src/ante/core/account_id.py`. `ante.account.errors`가 재수출) | `VALIDATION_ERROR` | `validation` | `src/ante/ipc/registry.py:151,360,654`에서 이미 `VALIDATION_ERROR`로 정렬됨 (#1633 SSOT) |
 | `BotNotFoundError` (`src/ante/bot/exceptions.py`) | `BOT_NOT_FOUND` | `not_found` | `BOT_NOT_FOUND_CODE` 재사용 SSOT (`src/ante/bot/exceptions.py`) |
 | `ApprovalNotFoundError` (`src/ante/approval/errors.py`) | `APPROVAL_NOT_FOUND` | `not_found` | class-level `code: str = "APPROVAL_NOT_FOUND"` 부여됨 |
 | `MemberInvalidScopeError` (`src/ante/member/errors.py`) | `MEMBER_INVALID_SCOPE` | `permission` | scope 부족 시 권한 분류, lowercase `permission_denied`와 별개의 도메인-prefix code |

@@ -803,10 +803,13 @@ class TestRuleCommands:
                     cli,
                     ["rule", "list", "--account", "acc-1"],
                 )
-                # ACCOUNT_NOT_FOUND로 정규화되지 않고 그대로 전파된다.
-                assert result.exit_code != 0
-                assert isinstance(result.exception, sqlite3.OperationalError)
-                assert "ACCOUNT_NOT_FOUND" not in (result.output or "")
+                # ACCOUNT_NOT_FOUND로 정규화되지 않고 그대로 전파되어, 진입점의
+                # 단일 출구가 EXECUTION_ERROR 한 줄로 끝낸다(#2641).
+                assert result.exit_code == 1
+                assert result.output.splitlines() == [
+                    "Error: EXECUTION_ERROR: database disk image is malformed"
+                ]
+                assert "ACCOUNT_NOT_FOUND" not in result.output
 
     def test_rule_info_not_found(self, runner):
         mock_engine = MagicMock()

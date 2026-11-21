@@ -11,7 +11,7 @@ class StrategyNotFoundError(StrategyError):
     """전략을 찾을 수 없음.
 
     클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
+    ``ipc_error_payload``로 안정 코드
     ``"STRATEGY_NOT_FOUND"`` 를 노출하도록 한다. ``StrategyRegistry.update_status``
     가 missing strategy 에 대해 raise 하면 CLI ``strategy set-status`` 가
     typed code envelope 으로 종료한다.
@@ -23,10 +23,10 @@ class StrategyNotFoundError(StrategyError):
 class StrategyLoadError(StrategyError):
     """전략 파일 로드 실패.
 
-    클래스 레벨 ``code`` 는 IPC 서버 ``getattr(e, "code", ...)`` 와 helper
-    registry-first lookup 이 동일 ``STRATEGY_LOAD_ERROR`` 안정 코드를 surface
-    하도록 정렬한다. CLI ``strategy submit`` 의 load 단계 envelope (
-    ``stage="load"`` / ``code="STRATEGY_LOAD_ERROR"``) 와 동일 SSOT.
+    클래스 레벨 ``code`` 는 IPC 서버와 CLI 가 쓰는 helper registry-first
+    lookup(``error_spec_for_exception``) 이 동일 ``STRATEGY_LOAD_ERROR``
+    안정 코드를 surface 하도록 정렬한다. CLI ``strategy submit`` 의 load 단계
+    envelope (``stage="load"`` / ``code="STRATEGY_LOAD_ERROR"``) 와 동일 SSOT.
     """
 
     code: str = "STRATEGY_LOAD_ERROR"

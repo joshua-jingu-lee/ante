@@ -33,7 +33,7 @@ class BotAccountCredentialsNotConfigured(BotError):  # noqa: N818
 
     봇 시작 전 ``app_key`` preflight 거부 (``계좌에 인증정보(app_key)가
     설정되지 않았습니다``) 를 표현하는 IPC 오류. IPC ``server.py`` 의
-    ``getattr(e, "code", ...)`` 가 ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED``
+    ``ipc_error_payload`` 가 ``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED``
     envelope 으로 변환한다.
     """
 
@@ -44,7 +44,7 @@ class BotStateConflict(BotError):  # noqa: N818
     """봇 상태머신 충돌 (start_bot/stop_bot 가 ``BotError`` 로 거부).
 
     ``BotError`` 상태머신 거부를 표현하는 IPC 오류. IPC ``server.py`` 의
-    ``getattr(e, "code", ...)`` 가 ``BOT_STATE_CONFLICT`` envelope 으로
+    ``ipc_error_payload`` 가 ``BOT_STATE_CONFLICT`` envelope 으로
     변환한다.
     """
 
@@ -68,7 +68,7 @@ class BotAlreadyExistsError(BotError):
     """동일 ``bot_id`` 가 이미 존재함.
 
     ``BotManager.create_bot`` 가 동일 bot_id 중복 등록을 거부할 때 raise
-    한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` envelope 이
+    한다. IPC ``server.py`` 의 ``ipc_error_payload`` 가
     ``BOT_ALREADY_EXISTS`` 로 변환한다. CLI ``bot create`` 는 동 코드를
     surface 해 자동화가 중복 회피 처리할 수 있게 한다.
     """
@@ -91,7 +91,7 @@ class BotImmutableFieldError(BotError):
     """봇 생성 후 변경할 수 없는 불변 필드 수정 시도.
 
     클래스 레벨 ``code`` 속성은 IPC ``server.py`` 의
-    ``getattr(e, "code", ...)`` 가 안정 코드 ``BOT_IMMUTABLE_FIELD`` 로
+    ``ipc_error_payload`` 가 안정 코드 ``BOT_IMMUTABLE_FIELD`` 로
     변환하도록 한다. ``bot.update`` handler 의 ``except BotError: raise`` 가
     ``BotError`` 서브클래스인 본 예외를 그대로 surface 하므로 IPC/CLI 표면이
     동일 코드를 노출한다.
@@ -104,7 +104,7 @@ class InvalidSignalKey(BotError):  # noqa: N818
     """``signal.connect`` 핸드셰이크 게이트① — signal key 검증 실패.
 
     ``validate_signal_key`` 가 ``None`` 을 반환한 경우(미발급/회전/오타 키)
-    핸들러가 raise 한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가
+    핸들러가 raise 한다. IPC ``server.py`` 의 ``ipc_error_payload`` 가
     안정 코드 ``INVALID_SIGNAL_KEY`` 로 변환한다.
 
     **redaction 불변**: 메시지에 키/bot_id 를 절대 interpolate 하지 않는다.
@@ -122,7 +122,7 @@ class BotNotRunning(BotError):  # noqa: N818
     """``signal.connect`` 핸드셰이크 게이트③ — 봇이 RUNNING 아님.
 
     handshake 시점에 ``bot.status != BotStatus.RUNNING`` 이면 핸들러가 raise
-    한다. IPC ``server.py`` 의 ``getattr(e, "code", ...)`` 가 안정 코드
+    한다. IPC ``server.py`` 의 ``ipc_error_payload`` 가 안정 코드
     ``BOT_NOT_RUNNING`` 으로 변환한다 (error-taxonomy.md ``state_conflict``).
 
     ``status`` 는 caller(핸들러 게이트③)가 ``bot.status.value`` 로 넘긴

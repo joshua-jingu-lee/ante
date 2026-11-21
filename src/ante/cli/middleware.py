@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.contracts.helpers import error_spec_for_exception, ipc_error_payload
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -543,22 +545,22 @@ class AuthenticatedGroup(_LeafPathMixin):
         standalone_mode: bool = True,
         **extra: object,
     ) -> object:
-        """``BaseCommand.main`` 오버라이드 — JSON 모드 parsing-stage 에러 envelope 변환.
+        """``BaseCommand.main`` 오버라이드 — 명령 밖으로 나온 예외의 단일 출구.
 
-        본 오버라이드는 ``--format`` raw 토큰을 sniff 해 json 모드일 때만 click
-        의 ``standalone_mode=False`` 로 호출하고 ``UsageError`` 를 직접 catch 해
-        :meth:`OutputFormatter.error` 로 envelope 출력 + ``sys.exit(1)`` 한다.
-
-        텍스트 모드 (`--format text` 기본) 에서는 click 기본 동작
-        (``Usage: ... Error: ...`` stderr + exit 2) 을 그대로 유지한다.
+        ``--format`` raw 토큰을 sniff 해 json 모드면 click 을 ``standalone_mode=False``
+        로 불러 ``UsageError`` 와 ``ClickException`` 을 envelope 으로 낸다.
+        텍스트 모드의 click 예외는 click 기본 동작(``UsageError`` 는 exit 2)을 따른다.
+        처리되지 않은 ``Exception`` 은 두 모드 모두 에러 레지스트리의 코드로 끝난다.
+        json 모드는 envelope, 텍스트 모드는 stderr 의 ``Error: <code>: <message>``
+        한 줄이고, 종료 코드는 ``ErrorSpec.exit_code`` (0 이면 1) 이다.
         """
         output_format = self._sniff_output_format(args)
-        if output_format != "json":
+        if output_format != "json" and not standalone_mode:
             return super().main(
                 args=args,
                 prog_name=prog_name,
                 complete_var=complete_var,
-                standalone_mode=standalone_mode,
+                standalone_mode=False,
                 **extra,
             )
 
@@ -567,7 +569,7 @@ class AuthenticatedGroup(_LeafPathMixin):
                 args=args,
                 prog_name=prog_name,
                 complete_var=complete_var,
-                standalone_mode=False,
+                standalone_mode=output_format != "json",
                 **extra,
             )
         except click.UsageError as e:
@@ -596,6 +598,19 @@ class AuthenticatedGroup(_LeafPathMixin):
 
                 _sys.exit(1)
             raise
+        except Exception as e:
+            if not standalone_mode:
+                raise
+            from ante.cli.formatter import OutputFormatter
+
+            error = ipc_error_payload(e)
+            if output_format == "json":
+                OutputFormatter("json").error(error["message"], code=error["code"])
+            else:
+                click.echo(f"Error: {error['code']}: {error['message']}", err=True)
+            import sys as _sys
+
+            _sys.exit(error_spec_for_exception(e).exit_code or 1)
 
         if standalone_mode:
             import sys as _sys
