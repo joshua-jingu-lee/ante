@@ -35,6 +35,13 @@ COMMAND = "src/ante/cli/commands/demo.py"
 OTHER = "src/ante/cli/commands/other.py"
 CORE = "src/ante/core/demo.py"
 
+COUNT_KEYS = ("cli_error_calls", "cli_exits", "ipc_error_code_reads")
+MOVE_HINT = "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
+REGISTER_HINT = (
+    "그 예외와 코드를 에러 레지스트리(src/ante/contracts/error_registry.py)에 등록한다"
+)
+THROW_HINT = "타입 예외를 던진다"
+
 HOOK_SOURCE = """import sys as _sys
 
 
@@ -91,7 +98,7 @@ def _run(root: Path, capsys: Capsys) -> tuple[int, str]:
 
 def _counts(tmp_path: Path, source: str, rel: str = COMMAND) -> dict[str, int]:
     measurement = checker.measure(_tree(tmp_path, {rel: source}))
-    return {key: measurement.counts(key).get(rel, 0) for key in checker.COUNT_KEYS}
+    return {key: measurement.counts(key).get(rel, 0) for key in COUNT_KEYS}
 
 
 def _codes(tmp_path: Path, source: str) -> frozenset[str]:
@@ -111,13 +118,13 @@ def run(ctx, fmt, e):
 """
 
 COUNT_KEY_EDITS = {
-    checker.CLI_ERROR_CALLS: '    fmt.error("again", code="REG")\n',
-    checker.CLI_EXITS: "    sys.exit(2)\n",
-    checker.IPC_ERROR_CODE_READS: '    getattr(e, "ipc_error_code", "")\n',
+    "cli_error_calls": '    fmt.error("again", code="REG")\n',
+    "cli_exits": "    sys.exit(2)\n",
+    "ipc_error_code_reads": '    getattr(e, "ipc_error_code", "")\n',
 }
 
 
-@pytest.mark.parametrize("key", checker.COUNT_KEYS)
+@pytest.mark.parametrize("key", COUNT_KEYS)
 def test_count_equal_to_baseline_passes(
     tmp_path: Path, capsys: Capsys, key: str
 ) -> None:
@@ -128,7 +135,7 @@ def test_count_equal_to_baseline_passes(
     assert "entry ratchet ok" in out
 
 
-@pytest.mark.parametrize("key", checker.COUNT_KEYS)
+@pytest.mark.parametrize("key", COUNT_KEYS)
 def test_count_increase_in_a_file_fails_with_alternatives(
     tmp_path: Path, capsys: Capsys, key: str
 ) -> None:
@@ -138,11 +145,11 @@ def test_count_increase_in_a_file_fails_with_alternatives(
     code, out = _run(root, capsys)
     assert code == 1, out
     assert f"{key}\t{COMMAND}: actual 2, baseline 1 (+1)" in out
-    assert "타입 예외를 던진다" in out
-    assert "에러 레지스트리" in out
+    assert THROW_HINT in out
+    assert REGISTER_HINT in out
 
 
-@pytest.mark.parametrize("key", checker.COUNT_KEYS)
+@pytest.mark.parametrize("key", COUNT_KEYS)
 def test_count_decrease_without_lowering_baseline_fails(
     tmp_path: Path, capsys: Capsys, key: str
 ) -> None:
@@ -153,10 +160,12 @@ def test_count_decrease_without_lowering_baseline_fails(
     assert code == 1, out
     assert f"{key}\t{COMMAND}: actual 1, baseline 2 (-1)" in out
     assert f"{key}[{COMMAND!r}]를 1로 낮춘다" in out
-    assert "타입 예외를 던진다" not in out
+    assert MOVE_HINT not in out
+    assert THROW_HINT not in out
+    assert REGISTER_HINT not in out
 
 
-@pytest.mark.parametrize("key", checker.COUNT_KEYS)
+@pytest.mark.parametrize("key", COUNT_KEYS)
 def test_count_in_file_missing_from_baseline_fails(
     tmp_path: Path, capsys: Capsys, key: str
 ) -> None:
@@ -166,10 +175,10 @@ def test_count_in_file_missing_from_baseline_fails(
     code, out = _run(root, capsys)
     assert code == 1, out
     assert f"{key}\t{OTHER}: actual 1, baseline 0 (+1)" in out
-    assert checker.MOVE_HINT in out
+    assert MOVE_HINT in out
 
 
-@pytest.mark.parametrize("key", checker.COUNT_KEYS)
+@pytest.mark.parametrize("key", COUNT_KEYS)
 def test_file_dropping_to_zero_with_key_left_in_baseline_fails(
     tmp_path: Path, capsys: Capsys, key: str
 ) -> None:
@@ -185,11 +194,11 @@ def test_file_dropping_to_zero_with_key_left_in_baseline_fails(
 def test_zero_count_left_in_baseline_fails(tmp_path: Path, capsys: Capsys) -> None:
     root = _tree(tmp_path)
     data = _freeze(root)
-    data[checker.CLI_EXITS][COMMAND] = 0
+    data["cli_exits"][COMMAND] = 0
     _write_baseline(root, data)
     code, out = _run(root, capsys)
     assert code == 1, out
-    assert f"{checker.CLI_EXITS}에서 {COMMAND!r} 키를 지운다" in out
+    assert f"cli_exits에서 {COMMAND!r} 키를 지운다" in out
 
 
 CODE_SOURCE = 'def f(fmt):\n    fmt.error("m", code="NEW_A")\n'
@@ -197,7 +206,7 @@ CODE_SOURCE = 'def f(fmt):\n    fmt.error("m", code="NEW_A")\n'
 
 def test_same_code_set_passes(tmp_path: Path, capsys: Capsys) -> None:
     root = _tree(tmp_path, {CORE: CODE_SOURCE})
-    assert _freeze(root)[checker.UNREGISTERED_CODES] == [
+    assert _freeze(root)["unregistered_codes"] == [
         "HOOK_FALLBACK",
         "HOOK_ONLY",
         "NEW_A",
@@ -214,7 +223,8 @@ def test_added_code_fails_with_alternatives(tmp_path: Path, capsys: Capsys) -> N
     code, out = _run(root, capsys)
     assert code == 1, out
     assert "unregistered_codes\t+ NEW_B" in out
-    assert "에러 레지스트리" in out
+    assert REGISTER_HINT in out
+    assert THROW_HINT in out
 
 
 def test_removed_code_without_lowering_baseline_fails(
@@ -227,6 +237,7 @@ def test_removed_code_without_lowering_baseline_fails(
     assert code == 1, out
     assert "unregistered_codes\t- NEW_A" in out
     assert "unregistered_codes에서 'NEW_A'를 지운다" in out
+    assert REGISTER_HINT not in out
 
 
 def test_swapped_code_with_same_set_size_fails(tmp_path: Path, capsys: Capsys) -> None:
@@ -241,7 +252,7 @@ def test_swapped_code_with_same_set_size_fails(tmp_path: Path, capsys: Capsys) -
 
 def test_hook_body_is_not_counted(tmp_path: Path) -> None:
     measurement = checker.measure(_tree(tmp_path))
-    for key in checker.COUNT_KEYS:
+    for key in COUNT_KEYS:
         assert MIDDLEWARE not in measurement.counts(key)
 
 
@@ -255,12 +266,12 @@ def test_same_calls_in_another_function_of_the_hook_file_are_counted(
         '    getattr(e, "ipc_error_code", "")\n'
     )
     counts = _counts(tmp_path, HOOK_SOURCE + outside, rel=MIDDLEWARE)
-    assert counts == {key: 1 for key in checker.COUNT_KEYS}
+    assert counts == {key: 1 for key in COUNT_KEYS}
 
 
 def test_other_method_of_the_hook_class_is_counted(tmp_path: Path) -> None:
     source = HOOK_SOURCE + '\n    def other(self, fmt):\n        fmt.error("m")\n'
-    assert _counts(tmp_path, source, rel=MIDDLEWARE)[checker.CLI_ERROR_CALLS] == 1
+    assert _counts(tmp_path, source, rel=MIDDLEWARE)["cli_error_calls"] == 1
 
 
 def test_main_of_another_class_is_counted(tmp_path: Path) -> None:
@@ -268,12 +279,12 @@ def test_main_of_another_class_is_counted(tmp_path: Path) -> None:
         HOOK_SOURCE
         + '\n\nclass Other:\n    def main(self, fmt):\n        fmt.error("m")\n'
     )
-    assert _counts(tmp_path, source, rel=MIDDLEWARE)[checker.CLI_ERROR_CALLS] == 1
+    assert _counts(tmp_path, source, rel=MIDDLEWARE)["cli_error_calls"] == 1
 
 
 def test_hook_with_same_name_in_another_file_is_counted(tmp_path: Path) -> None:
     counts = _counts(tmp_path, HOOK_SOURCE)
-    assert counts == {key: 1 for key in checker.COUNT_KEYS}
+    assert counts == {key: 1 for key in COUNT_KEYS}
 
 
 def test_unregistered_literal_inside_hook_is_in_code_set(tmp_path: Path) -> None:
@@ -341,7 +352,7 @@ def test_missing_or_empty_registry_exits_2(tmp_path: Path, capsys: Capsys) -> No
 )
 def test_each_exit_form_counts_once(tmp_path: Path, statement: str) -> None:
     source = f"import sys\nimport sys as s\n\n\ndef f(ctx):\n    {statement}\n"
-    assert _counts(tmp_path, source)[checker.CLI_EXITS] == 1
+    assert _counts(tmp_path, source)["cli_exits"] == 1
 
 
 @pytest.mark.parametrize(
@@ -358,13 +369,13 @@ def test_exit_on_other_receiver_or_raise_of_other_name_is_not_counted(
     tmp_path: Path, statement: str
 ) -> None:
     source = f"import os\nimport sys\n\n\ndef f(other):\n    {statement}\n"
-    assert _counts(tmp_path, source)[checker.CLI_EXITS] == 0
+    assert _counts(tmp_path, source)["cli_exits"] == 0
 
 
 def test_sys_alias_is_per_file(tmp_path: Path) -> None:
     _tree(tmp_path, {OTHER: "import sys as s\n"})
     source = "def f(s):\n    s.exit(1)\n"
-    assert _counts(tmp_path, source)[checker.CLI_EXITS] == 0
+    assert _counts(tmp_path, source)["cli_exits"] == 0
 
 
 @pytest.mark.parametrize(
@@ -381,7 +392,7 @@ def test_error_calls_match_attribute_name_exactly(
     tmp_path: Path, source: str, expected: int
 ) -> None:
     counts = _counts(tmp_path, f"def f(fmt, self, logger, error):\n    {source}\n")
-    assert counts[checker.CLI_ERROR_CALLS] == expected
+    assert counts["cli_error_calls"] == expected
 
 
 @pytest.mark.parametrize(
@@ -398,12 +409,12 @@ def test_ipc_error_code_reads_match_getattr_literal(
     tmp_path: Path, source: str, expected: int
 ) -> None:
     counts = _counts(tmp_path, f"def f(e, name):\n    {source}\n")
-    assert counts[checker.IPC_ERROR_CODE_READS] == expected
+    assert counts["ipc_error_code_reads"] == expected
 
 
 def test_count_keys_only_cover_cli_files(tmp_path: Path) -> None:
     measurement = checker.measure(_tree(tmp_path, {CORE: ONE_OF_EACH}))
-    for key in checker.COUNT_KEYS:
+    for key in COUNT_KEYS:
         assert CORE not in measurement.counts(key)
 
 
@@ -492,7 +503,7 @@ def test_registered_codes_come_from_error_spec_code_keyword(tmp_path: Path) -> N
 def test_measure_uses_posix_paths_and_skips_zero_files(tmp_path: Path) -> None:
     root = _tree(tmp_path, {COMMAND: ONE_OF_EACH, OTHER: "x = 1\n"})
     measurement = checker.measure(root)
-    for key in checker.COUNT_KEYS:
+    for key in COUNT_KEYS:
         assert measurement.counts(key) == {COMMAND: 1}
 
 
@@ -503,10 +514,10 @@ def test_baseline_json_round_trips_through_parse(tmp_path: Path) -> None:
 
 def _valid_baseline() -> dict[str, Any]:
     return {
-        checker.CLI_ERROR_CALLS: {},
-        checker.CLI_EXITS: {},
-        checker.IPC_ERROR_CODE_READS: {},
-        checker.UNREGISTERED_CODES: ["A", "B"],
+        "cli_error_calls": {},
+        "cli_exits": {},
+        "ipc_error_code_reads": {},
+        "unregistered_codes": ["A", "B"],
     }
 
 
@@ -527,7 +538,7 @@ def _without(key: str) -> dict[str, Any]:
     [
         pytest.param("{not json", id="not-json"),
         pytest.param([], id="not-an-object"),
-        pytest.param(_without(checker.CLI_EXITS), id="three-keys"),
+        pytest.param(_without("cli_exits"), id="three-keys"),
         pytest.param(_with(extra={}), id="five-keys"),
         pytest.param(_with(cli_exits={"a.py": -1}), id="negative-count"),
         pytest.param(_with(cli_exits={"a.py": 1.5}), id="float-count"),
@@ -582,3 +593,260 @@ def test_unexpected_exception_exits_2(
 
 def test_repository_baseline_matches_measurement() -> None:
     assert checker.read_baseline(REPO_ROOT) == checker.measure(REPO_ROOT)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param(
+            "class AuthenticatedGroup:\n    def main2(self):\n        pass\n",
+            id="function-renamed",
+        ),
+        pytest.param(
+            "class AuthenticatedGroupX:\n    def main(self):\n        pass\n",
+            id="class-renamed",
+        ),
+        pytest.param("def main():\n    pass\n", id="module-function"),
+    ],
+)
+def test_renamed_hook_exits_2(tmp_path: Path, capsys: Capsys, source: str) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, MIDDLEWARE, source)
+    code, out = _run(root, capsys)
+    assert code == 2, out
+    assert "AuthenticatedGroup.main" in out
+
+
+def test_hook_in_another_file_does_not_stand_in_for_middleware(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path, {COMMAND: HOOK_SOURCE})
+    _freeze(root)
+    (root / MIDDLEWARE).unlink()
+    code, out = _run(root, capsys)
+    assert code == 2, out
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "raise Exit",
+        "raise exceptions.Exit()",
+        "raise SystemExit(1) from e",
+        "ctx.exit()",
+    ],
+)
+def test_more_exit_forms_count_once(tmp_path: Path, statement: str) -> None:
+    source = f"import sys\n\n\ndef f(ctx, e):\n    {statement}\n"
+    assert _counts(tmp_path, source)["cli_exits"] == 1
+
+
+def test_alias_of_another_module_is_not_sys(tmp_path: Path) -> None:
+    source = (
+        "import os as s\nimport sysconfig as t\n\n\n"
+        "def f():\n    s.exit(1)\n    t.exit(1)\n"
+    )
+    assert _counts(tmp_path, source)["cli_exits"] == 0
+
+
+def test_sys_alias_imported_inside_a_function_counts(tmp_path: Path) -> None:
+    source = "def f():\n    import sys as _s\n\n    _s.exit(1)\n"
+    assert _counts(tmp_path, source)["cli_exits"] == 1
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "context.exit(1)",
+        "ctxs.exit(1)",
+        "ctx.exits(1)",
+        "sys.exits(1)",
+        "exit(1)",
+        "x = SystemExit",
+        "SystemExit(1)",
+        "x = ctx.exit",
+        "raise SystemExitError(1)",
+        "raise MyExit(1)",
+        "raise ValueError from SystemExit",
+        "try:\n        pass\n    except SystemExit:\n        pass",
+    ],
+)
+def test_near_miss_exit_forms_are_not_counted(tmp_path: Path, statement: str) -> None:
+    source = f"import sys\n\n\ndef f(ctx, context, ctxs):\n    {statement}\n"
+    assert _counts(tmp_path, source)["cli_exits"] == 0
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "x = fmt.error",
+        'fmt.Error("m")',
+        'fmt.error_("m")',
+        'fmt.raise_error("m")',
+    ],
+)
+def test_near_miss_error_calls_are_not_counted(tmp_path: Path, source: str) -> None:
+    counts = _counts(tmp_path, f"def f(fmt):\n    {source}\n")
+    assert counts["cli_error_calls"] == 0
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'getattr(e, "ipc_error_codes", "")',
+        'getattr(e, "ipc_error_cod", "")',
+        'x.getattr(e, "ipc_error_code", "")',
+        'hasattr(e, "ipc_error_code")',
+        'getattr("ipc_error_code", e, "")',
+    ],
+)
+def test_near_miss_ipc_error_code_reads_are_not_counted(
+    tmp_path: Path, source: str
+) -> None:
+    counts = _counts(tmp_path, f"def f(e, x):\n    {source}\n")
+    assert counts["ipc_error_code_reads"] == 0
+
+
+@pytest.mark.parametrize(
+    "rel",
+    ["src/ante/cli_tools.py", "src/ante/client/demo.py", "src/cli/demo.py"],
+)
+def test_count_keys_skip_paths_outside_cli_directory(tmp_path: Path, rel: str) -> None:
+    measurement = checker.measure(_tree(tmp_path, {rel: ONE_OF_EACH}))
+    for key in COUNT_KEYS:
+        assert measurement.counts(key) == {}
+
+
+def test_count_keys_cover_nested_cli_directories(tmp_path: Path) -> None:
+    rel = "src/ante/cli/commands/sub/deep.py"
+    assert _counts(tmp_path, ONE_OF_EACH, rel=rel) == {key: 1 for key in COUNT_KEYS}
+
+
+@pytest.mark.parametrize(
+    "rel", ["src/other/demo.py", "scripts/demo.py", "tests/demo.py"]
+)
+def test_code_set_skips_files_outside_src_ante(tmp_path: Path, rel: str) -> None:
+    root = _tree(tmp_path, {rel: 'f(code="OUTSIDE")'})
+    assert "OUTSIDE" not in checker.measure(root).unregistered_codes
+
+
+def test_error_spec_outside_registry_does_not_register(tmp_path: Path) -> None:
+    assert _codes(tmp_path, 'ErrorSpec(code="ELSEWHERE")') == {"ELSEWHERE"}
+
+
+def test_error_spec_with_attribute_name_registers(tmp_path: Path) -> None:
+    registry = REGISTRY_SOURCE + 'C = registry.ErrorSpec(code="VIA_ATTR")\n'
+    root = _tree(tmp_path, {REGISTRY: registry, CORE: 'f(code="VIA_ATTR")'})
+    assert "VIA_ATTR" not in checker.measure(root).unregistered_codes
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('x = {"code": c or "X"}', id="2-dict"),
+        pytest.param('class E(Exception):\n    code = c or "X"', id="3-class"),
+        pytest.param('e.ipc_error_code = c or "X"', id="4-attribute"),
+        pytest.param('fmt.error("m", c or "X")', id="6-error-positional"),
+        pytest.param('_emit_auth_error(c, d or "X")', id="6-emit-or"),
+        pytest.param('x = e.code or "X"', id="7-attr-code"),
+        pytest.param('x = e.ipc_error_code or "X"', id="7-attr-ipc"),
+        pytest.param('x = d.get("code") or "X"', id="7-get-code"),
+        pytest.param('x = getattr(e, "code", "") or "X"', id="7-getattr-code"),
+        pytest.param('x = "X" or getattr(e, "code", "")', id="7-literal-first"),
+        pytest.param('catalog.error("m", "X")', id="6-catalog"),
+        pytest.param('blog.error("m", "X")', id="6-blog"),
+        pytest.param('xlogger.error("m", "X")', id="6-xlogger"),
+        pytest.param('lo.error("m", "X")', id="6-lo"),
+        pytest.param('loc.error("m", "X")', id="6-loc"),
+        pytest.param('self.fmt.error("m", "X")', id="6-attribute-receiver"),
+        pytest.param('fmt.error(m, "X")', id="6-name-first"),
+        pytest.param('_emit_auth_error(c, "X")', id="6-emit-two-args"),
+        pytest.param('f(code="X", kind="Y")', id="1-only-code-keyword"),
+    ],
+)
+def test_near_position_literal_that_is_counted(tmp_path: Path, source: str) -> None:
+    assert _codes(tmp_path, source) == {"X"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('f(codes="X")', id="1-keyword-name"),
+        pytest.param('f(error_code="X")', id="1-keyword-suffix"),
+        pytest.param('f(**{"kind": "X"})', id="1-double-star"),
+        pytest.param('x = {"codes": "X"}', id="2-key-name"),
+        pytest.param('x = {code: "X"}', id="2-name-key"),
+        pytest.param('class E(Exception):\n    codes = "X"', id="3-name"),
+        pytest.param(
+            'class E(Exception):\n    def f(self):\n        code = "X"',
+            id="3-not-body",
+        ),
+        pytest.param('class E(Exception):\n    x.code = "X"', id="3-attribute-target"),
+        pytest.param('self.code = "X"', id="4-code-attribute"),
+        pytest.param('e.ipc_error_codes = "X"', id="4-attribute-name"),
+        pytest.param('ipc_error_code = "X"', id="4-module-name"),
+        pytest.param('getattr(e, "codes", "X")', id="5-getattr-codes"),
+        pytest.param('getattr(e, "error_code", "X")', id="5-getattr-suffix"),
+        pytest.param('getattr(e, "ipc_error_codes", "X")', id="5-getattr-ipc-name"),
+        pytest.param('x.getattr(e, "code", "X")', id="5-method-getattr"),
+        pytest.param('d.get("codes", "X")', id="5-get-name"),
+        pytest.param('d.pop("code", "X")', id="5-pop"),
+        pytest.param('d.get(k, "X")', id="5-get-variable"),
+        pytest.param('fmt.error("X")', id="6-first-positional"),
+        pytest.param('fmt.error(m, a, "X")', id="6-third-positional"),
+        pytest.param('fmt.errors("m", "X")', id="6-errors"),
+        pytest.param('fmt.error("m", code=c, extra="X")', id="6-keyword-only"),
+        pytest.param('logx.error("m", "X")', id="6-logx"),
+        pytest.param('_log.error("m", "X")', id="6-underscore-log"),
+        pytest.param('__logger.error("m", "X")', id="6-dunder-logger"),
+        pytest.param('self.log.error("m", "X")', id="6-self-log"),
+        pytest.param('_emit_auth_errors(c, "X", "m")', id="6-emit-name"),
+        pytest.param('_emit_auth_error(c, m, "X")', id="6-emit-third"),
+        pytest.param('emit_auth_error(c, "X", "m")', id="6-emit-public"),
+        pytest.param('f(code=c and "X")', id="7-and"),
+        pytest.param('f(kind=c or "X")', id="7-or-outside-position"),
+        pytest.param('x = e.codes or "X"', id="7-attr-codes"),
+        pytest.param('x = getattr(e, "message", "") or "X"', id="7-getattr-message"),
+        pytest.param('x = d.get("message") or "X"', id="7-get-message"),
+        pytest.param('x = (e.code or y) + "X"', id="7-not-operand"),
+    ],
+)
+def test_near_position_literal_that_is_not_counted(tmp_path: Path, source: str) -> None:
+    assert _codes(tmp_path, source) == frozenset()
+
+
+def test_empty_code_list_is_valid(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _write(
+        root,
+        MIDDLEWARE,
+        "class AuthenticatedGroup:\n    def main(self):\n        pass\n",
+    )
+    _write_baseline(root, {**_valid_baseline(), "unregistered_codes": []})
+    code, out = _run(root, capsys)
+    assert code == 0, out
+
+
+def test_baseline_file_has_exactly_the_contract_keys(tmp_path: Path) -> None:
+    data = _freeze(_tree(tmp_path))
+    assert set(data) == {
+        "cli_error_calls",
+        "cli_exits",
+        "ipc_error_code_reads",
+        "unregistered_codes",
+    }
+
+
+def test_baseline_is_read_from_the_contract_path(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path)
+    data = _freeze(root)
+    baseline = root / "scripts" / "entry_ratchet_baseline.json"
+    baseline.rename(root / "scripts" / "other_baseline.json")
+    code, _ = _run(root, capsys)
+    assert code == 2
+    _write_baseline(root, data)
+    code, out = _run(root, capsys)
+    assert code == 0, out
