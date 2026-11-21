@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
@@ -16,6 +15,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -169,7 +169,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
                 row = await db.fetch_one(
                     "SELECT * FROM trades WHERE trade_id = ?", (trade_id,)
                 )
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     return None
                 raise

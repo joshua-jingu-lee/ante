@@ -34,7 +34,6 @@
 | `bot_id` | `str` | 실행 봇 ID |
 | `strategy_id` | `str` | 전략 ID |
 | `symbol` | `str` | 종목 코드 |
-| `symbol_name` | `str` | 종목명 (체결 시점 기록) |
 | `side` | `str` | `"buy"` \| `"sell"` |
 | `quantity` | `float` | 체결 수량 |
 | `price` | `float` | 체결 가격 |

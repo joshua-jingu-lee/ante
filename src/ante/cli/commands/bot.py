@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
@@ -24,6 +23,7 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts import emit_cli_error
+from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -491,7 +491,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                     "WHERE bot_id = ? AND status != 'deleted'",
                     (bot_id,),
                 )
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     bot_row = None
                 else:
@@ -570,7 +570,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
                 bot_row = await db.fetch_one(
                     "SELECT account_id FROM bots WHERE bot_id = ?", (bot_id,)
                 )
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     return None
                 raise
@@ -800,7 +800,7 @@ def bot_logs(
                     "SELECT 1 FROM bots WHERE bot_id = ? AND status != 'deleted'",
                     (bot_id,),
                 )
-            except sqlite3.OperationalError as e:
+            except OperationalError as e:
                 if "no such table" in str(e).lower():
                     bot_row = None
                 else:

@@ -11,6 +11,9 @@ import aiosqlite
 
 logger = logging.getLogger(__name__)
 
+OperationalError = sqlite3.OperationalError
+DatabaseError = sqlite3.DatabaseError
+
 _RO_IMMUTABLE_FALLBACK_SIGNATURES: tuple[str, ...] = (
     "attempt to write a readonly database",
     "unable to open database file",
