@@ -7,8 +7,9 @@
 식별자가 두 번 나오면 실패한다.
 
 **멤버**: 클래스 본문에 바로 있는 ``Assign`` (대상이 이름 하나) 또는 값이
-있는 ``AnnAssign`` (대상이 이름) 가운데, 이름이 밑줄 둘로 시작하거나
-(``__x``, ``__x__``) 밑줄 하나로 시작하고 끝나는(``_x_``) 것을 뺀 것.
+있는 ``AnnAssign`` (대상이 이름) 가운데 이름이 ``_`` 로 시작하지 않는 것.
+``_`` 로 시작하는 이름의 대입은 ``_ignore_``·``_order_`` 만 허용한다(멤버가
+아니다).
 
 **전이표**: enum ``E`` 와 같은 파일의 모듈 수준 ``Assign`` (대상 이름 하나)
 또는 값이 있는 ``AnnAssign`` 가운데, 값이 ``dict`` 리터럴이고, 키가 모두
@@ -18,8 +19,8 @@
 전이표)도 표로 인정한다. 다음은 「표 없음」이다: 멤버가 0개인 enum, 모듈
 본문에 바로 있지 않은 enum, 클래스 본문에 대상이 이름 하나인 ``Assign``,
 대상이 이름인 ``AnnAssign``, ``FunctionDef``·``AsyncFunctionDef``, ``Expr``,
-``Pass`` 밖의 문이 있는 enum(그런 문은 위 정의가 세지 못하는 멤버를 만들 수
-있다).
+``Pass`` 밖의 문이 있는 enum, 클래스 본문에 이름이 ``_`` 로 시작하는
+대입(``_ignore_``·``_order_`` 제외)이 있는 enum.
 
 **판정**: 실측의 「표 없음」 집합이 :data:`BASELINE_WITHOUT_TABLE` 과 집합으로
 같을 때만 통과한다. 표를 단 enum은 같은 변경에서 기준선에서 지운다.
@@ -70,9 +71,11 @@ _INCREASED = "전이표 없는 상태 enum이 늘었다:"
 _STALE = "기준선에 있지만 「표 없음」 상태 enum이 아니다:"
 _NOT_TOP_NOTE = "모듈 본문에 바로 있지 않다. 모듈 수준으로 옮긴다"
 _OPEN_BODY_NOTE = (
-    "클래스 본문에 인정하지 않는 문이 있다. "
+    "클래스 본문에 인정하지 않는 문이나 _로 시작하는 이름의 대입이 있다. "
     "클래스 본문을 이름 하나짜리 대입과 메서드만으로 쓴다"
+    "(멤버 이름은 _로 시작하지 않는다)"
 )
+_ALLOWED_UNDERSCORE_NAMES = frozenset({"_ignore_", "_order_"})
 _ALLOWED_BODY_STMTS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Expr, ast.Pass)
 
 
@@ -134,13 +137,13 @@ def enum_members(cls: ast.ClassDef) -> list[str]:
             name = stmt.target.id
         else:
             continue
-        if not _is_excluded_name(name):
+        if not name.startswith("_"):
             members.append(name)
     return members
 
 
-def _is_excluded_name(name: str) -> bool:
-    return name.startswith("__") or (name.startswith("_") and name.endswith("_"))
+def _is_closed_name(name: str) -> bool:
+    return not name.startswith("_") or name in _ALLOWED_UNDERSCORE_NAMES
 
 
 def has_closed_body(cls: ast.ClassDef) -> bool:
@@ -149,8 +152,12 @@ def has_closed_body(cls: ast.ClassDef) -> bool:
         if isinstance(stmt, ast.Assign):
             if len(stmt.targets) != 1 or not isinstance(stmt.targets[0], ast.Name):
                 return False
+            if not _is_closed_name(stmt.targets[0].id):
+                return False
         elif isinstance(stmt, ast.AnnAssign):
             if not isinstance(stmt.target, ast.Name):
+                return False
+            if stmt.value is not None and not _is_closed_name(stmt.target.id):
                 return False
         elif not isinstance(stmt, _ALLOWED_BODY_STMTS):
             return False
@@ -584,10 +591,8 @@ def _class_of(source: str) -> ast.ClassDef:
 MEMBER_ROWS = [
     pytest.param('A = "a"', ["A"], id="assign"),
     pytest.param('A: str = "a"', ["A"], id="annassign-with-value"),
-    pytest.param('_B = "b"', ["_B"], id="single-leading-underscore"),
-    pytest.param('_ignore_ = ["x"]', [], id="sunder"),
-    pytest.param('__x = "b"', [], id="double-leading-underscore"),
-    pytest.param('__x__ = "b"', [], id="dunder"),
+    pytest.param('_ignore_ = ["x"]', [], id="ignore"),
+    pytest.param('_order_ = "A"', [], id="order"),
     pytest.param("def method(self):\n    return 1", [], id="method"),
     pytest.param("A: str", [], id="annassign-without-value"),
 ]
@@ -768,6 +773,51 @@ def test_class_body_domain(tmp_path: Path, extra_stmt: str, expected: bool) -> N
     )
     root = _write_tree(tmp_path, {"m.py": source})
     assert measure_tables(root) == {_ID + "FooStatus": expected}
+
+
+UNDERSCORE_ROWS = [
+    pytest.param("_B = 'b'", False, id="leading-underscore"),
+    pytest.param("_ = 'z'", False, id="single-underscore"),
+    pytest.param("__x = 1", False, id="double-leading-underscore"),
+    pytest.param("__x__ = 1", False, id="dunder"),
+    pytest.param("_x_ = 1", False, id="sunder"),
+    pytest.param("_missing_ = 1", False, id="sunder-outside-allowed"),
+    pytest.param("_x__ = 1", False, id="single-leading-double-trailing"),
+    pytest.param("_B: str = 'b'", False, id="annassign-with-value"),
+    pytest.param("_ignore_ = ['x']", True, id="ignore-allowed"),
+    pytest.param("_order_ = 'A B'", True, id="order-allowed"),
+    pytest.param("def _helper(self):\n    return 1", True, id="private-method"),
+    pytest.param("_x: int", True, id="annassign-without-value"),
+]
+
+
+@pytest.mark.parametrize(("extra_stmt", "expected"), UNDERSCORE_ROWS)
+def test_underscore_name_domain(
+    tmp_path: Path, extra_stmt: str, expected: bool
+) -> None:
+    body = "A = 'a'\nB = 'b'\n" + extra_stmt
+    source = (
+        "from enum import StrEnum\n\nclass FooStatus(StrEnum):\n"
+        + textwrap.indent(body, "    ")
+        + "\n\n"
+        + _BODY_TABLE
+    )
+    root = _write_tree(tmp_path, {"m.py": source})
+    assert measure_tables(root) == {_ID + "FooStatus": expected}
+
+
+def test_underscore_name_message_says_single_name_assigns(tmp_path: Path) -> None:
+    source = (
+        "from enum import StrEnum\n\nclass FooStatus(StrEnum):\n"
+        "    A = 'a'\n    B = 'b'\n    _C = 'c'\n\n" + _BODY_TABLE
+    )
+    root = _write_tree(tmp_path, {"m.py": source})
+    with pytest.raises(AssertionError) as excinfo:
+        assert_matches_baseline(root, frozenset())
+    message = str(excinfo.value)
+    assert _OPEN_BODY_NOTE in message
+    assert "멤버 이름은 _로 시작하지 않는다" in message
+    assert _listed(message, _INCREASED) == {_ID + "FooStatus"}
 
 
 def test_open_body_message_says_single_name_assigns(tmp_path: Path) -> None:
