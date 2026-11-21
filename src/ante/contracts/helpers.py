@@ -90,7 +90,7 @@ def emit_cli_error(
 def ipc_error_payload(exc: BaseException) -> dict[str, str]:
     """``{"code", "message"}`` IPC error payload helper.
 
-    IPC 서버 ``getattr(e, "code", "EXECUTION_ERROR")`` 패턴 대응 helper.
+    IPC 서버 ``_dispatch`` 가 쓰는 helper.
 
     Returns:
         ``{"code": <ErrorSpec.code>, "message": <resolved message>}``. 양쪽
