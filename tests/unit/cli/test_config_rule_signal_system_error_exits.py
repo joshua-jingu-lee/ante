@@ -127,7 +127,7 @@ def test_config_get_key_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("CONFIG_KEY_NOT_FOUND", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: CONFIG_KEY_NOT_FOUND: {message}"])
 
 
 def test_config_get_found_key_is_not_an_error() -> None:
@@ -193,9 +193,9 @@ def test_config_set_unexpected_error() -> None:
             _ipc_send(RuntimeError("socket broke")),
         )
         if mode == "json":
-            _assert_json(result, _envelope("", "socket broke"), exit_code=0)
+            _assert_json(result, _envelope("EXECUTION_ERROR", "socket broke"))
         else:
-            _assert_text(result, ["Error: socket broke"], exit_code=0)
+            _assert_text(result, ["Error: EXECUTION_ERROR: socket broke"])
 
 
 # ---------------------------------------------------------------- rule
@@ -230,7 +230,7 @@ def test_rule_list_account_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("ACCOUNT_NOT_FOUND", _ACCOUNT_MISSING))
         else:
-            _assert_text(result, [f"Error: {_ACCOUNT_MISSING}"])
+            _assert_text(result, [f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}"])
 
 
 def test_rule_info_account_not_found() -> None:
@@ -242,7 +242,7 @@ def test_rule_info_account_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("ACCOUNT_NOT_FOUND", _ACCOUNT_MISSING))
         else:
-            _assert_text(result, [f"Error: {_ACCOUNT_MISSING}"])
+            _assert_text(result, [f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}"])
 
 
 def test_rule_info_rule_not_found() -> None:
@@ -256,7 +256,7 @@ def test_rule_info_rule_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("RULE_NOT_FOUND", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: RULE_NOT_FOUND: {message}"])
 
 
 @pytest.mark.parametrize(
@@ -301,7 +301,7 @@ def test_rule_update_invalid_params(options: list[str], message: str) -> None:
         if mode == "json":
             _assert_json(result, _envelope("VALIDATION_ERROR", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: VALIDATION_ERROR: {message}"])
 
 
 def _active_runtime(active: bool) -> Any:
@@ -329,7 +329,7 @@ def _rule_update_args(mode: str) -> list[str]:
             IPCRemoteError("RULE_CONFIG_ERROR", "룰 값이 잘못되었습니다"),
             "RULE_CONFIG_ERROR",
             "룰 값이 잘못되었습니다",
-            "Error: 룰 값이 잘못되었습니다",
+            "Error: RULE_CONFIG_ERROR: 룰 값이 잘못되었습니다",
             id="remote",
         ),
         pytest.param(
@@ -403,7 +403,7 @@ def test_rule_update_cold_path_errors(
         if mode == "json":
             _assert_json(result, _envelope(code, message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: {code}: {message}"])
 
 
 # ---------------------------------------------------------------- signal
@@ -458,7 +458,7 @@ def test_system_start_already_running(tmp_path: Path) -> None:
         if mode == "json":
             _assert_json(result, _envelope("ALREADY_RUNNING", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: ALREADY_RUNNING: {message}"])
 
 
 def _static_config() -> Any:
@@ -476,7 +476,7 @@ def test_system_stop_pid_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("PID_NOT_FOUND", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: PID_NOT_FOUND: {message}"])
 
 
 def test_system_stop_process_not_found() -> None:
@@ -494,7 +494,7 @@ def test_system_stop_process_not_found() -> None:
         if mode == "json":
             _assert_json(result, _envelope("PROCESS_NOT_FOUND", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: PROCESS_NOT_FOUND: {message}"])
 
 
 # ---------------------------------------------------------------- init
@@ -541,7 +541,7 @@ def test_init_test_account_inactive(init_dir: Path) -> None:
         if mode == "json":
             _assert_json(result, _envelope("ACCOUNT_TEST_INACTIVE", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: ACCOUNT_TEST_INACTIVE: {message}"])
     assert sorted(p.name for p in init_dir.iterdir()) == ["db"]
 
 
@@ -562,7 +562,11 @@ def test_init_already_initialized(init_dir: Path) -> None:
             _assert_json(result, _envelope("CLI_ALREADY_INITIALIZED", message))
         else:
             _assert_text(
-                result, [f"Error: {message.splitlines()[0]}", message.splitlines()[1]]
+                result,
+                [
+                    f"Error: CLI_ALREADY_INITIALIZED: {message.splitlines()[0]}",
+                    message.splitlines()[1],
+                ],
             )
 
 
@@ -580,7 +584,7 @@ def test_init_master_bootstrap_failed(init_dir: Path) -> None:
         if mode == "json":
             _assert_json(result, _envelope("ACCOUNT_MASTER_BOOTSTRAP_FAILED", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: ACCOUNT_MASTER_BOOTSTRAP_FAILED: {message}"])
 
 
 def test_init_test_account_create_failed_without_new_master(init_dir: Path) -> None:
@@ -599,7 +603,7 @@ def test_init_test_account_create_failed_without_new_master(init_dir: Path) -> N
         if mode == "json":
             _assert_json(result, _envelope("ACCOUNT_TEST_CREATE_FAILED", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: ACCOUNT_TEST_CREATE_FAILED: {message}"])
 
 
 def test_init_test_account_create_failed_after_new_master(init_dir: Path) -> None:
@@ -635,7 +639,9 @@ def test_init_test_account_create_failed_after_new_master(init_dir: Path) -> Non
     assert credentials["password"] == "pw"
     text_result = results["text"]
     assert text_result.exit_code == 1
-    assert text_result.stderr.splitlines()[-1] == f"Error: {message}"
+    assert text_result.stderr.splitlines()[-1] == (
+        f"Error: ACCOUNT_TEST_CREATE_FAILED: {message}"
+    )
     assert "tok" in text_result.stdout + text_result.stderr
 
 
@@ -691,7 +697,7 @@ def test_update_check_failed_on_check() -> None:
         else:
             _assert_text(
                 result,
-                ["Error: PyPI 버전 확인 실패"],
+                ["Error: UPDATE_CHECK_FAILED: PyPI 버전 확인 실패"],
                 stdout_lines=["현재 버전: 0.6.1"],
             )
 
@@ -705,7 +711,7 @@ def test_update_confirmation_required() -> None:
         if mode == "json":
             _assert_json(result, _envelope("CLI_CONFIRMATION_REQUIRED", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: CLI_CONFIRMATION_REQUIRED: {message}"])
 
 
 def test_update_server_running() -> None:
@@ -719,7 +725,7 @@ def test_update_server_running() -> None:
         if mode == "json":
             _assert_json(result, _envelope("UPDATE_SERVER_RUNNING", message))
         else:
-            _assert_text(result, [f"Error: {message}"])
+            _assert_text(result, [f"Error: UPDATE_SERVER_RUNNING: {message}"])
 
 
 def test_update_check_failed_on_update() -> None:
@@ -736,7 +742,7 @@ def test_update_check_failed_on_update() -> None:
         else:
             _assert_text(
                 result,
-                ["Error: PyPI 버전 확인 실패"],
+                ["Error: UPDATE_CHECK_FAILED: PyPI 버전 확인 실패"],
                 stdout_lines=["현재 버전: 0.6.1"],
             )
 
@@ -758,11 +764,15 @@ def test_update_insufficient_disk_space() -> None:
             *_executor(),
         )
         if mode == "json":
-            assert result.exit_code == 1
-            assert result.stdout == ""
-            assert result.stderr == _DISK_MESSAGE + "\n"
+            _assert_json(
+                result, _envelope("UPDATE_INSUFFICIENT_DISK_SPACE", _DISK_MESSAGE)
+            )
         else:
-            _assert_text(result, [_DISK_MESSAGE], stdout_lines=["현재 버전: 0.6.1"])
+            _assert_text(
+                result,
+                [f"Error: UPDATE_INSUFFICIENT_DISK_SPACE: {_DISK_MESSAGE}"],
+                stdout_lines=["현재 버전: 0.6.1"],
+            )
 
 
 _PROGRESS = [
@@ -786,7 +796,11 @@ def test_update_install_failed() -> None:
         if mode == "json":
             _assert_json(result, _envelope("UPDATE_INSTALL_FAILED", "업데이트 실패"))
         else:
-            _assert_text(result, ["Error: 업데이트 실패"], stdout_lines=_PROGRESS)
+            _assert_text(
+                result,
+                ["Error: UPDATE_INSTALL_FAILED: 업데이트 실패"],
+                stdout_lines=_PROGRESS,
+            )
 
 
 def test_update_migration_failed_rollback_done() -> None:
@@ -807,7 +821,10 @@ def test_update_migration_failed_rollback_done() -> None:
         else:
             _assert_text(
                 result,
-                ["마이그레이션 실패. 자동 롤백 시도 중..."],
+                [
+                    "마이그레이션 실패. 자동 롤백 시도 중...",
+                    "Error: UPDATE_MIGRATION_FAILED: 마이그레이션 실패. 롤백 완료.",
+                ],
                 stdout_lines=[
                     *_PROGRESS,
                     "DB 마이그레이션 실행 중...",
@@ -843,6 +860,7 @@ def test_update_migration_failed_rollback_failed() -> None:
                     "  pip install ante==0.6.1",
                     "  pip install -r /ante-test/db/snap.txt",
                     f"  cp {_DB_PATH}.bak.v0.6.1 {_DB_PATH}",
+                    "Error: UPDATE_ROLLBACK_FAILED: 마이그레이션 실패. 자동 롤백 실패.",
                 ],
                 stdout_lines=[*_PROGRESS, "DB 마이그레이션 실행 중..."],
             )
@@ -872,9 +890,14 @@ def test_instrument_sync_without_broker_config(tmp_path: Path) -> None:
             ],
             _sync_config({}),
         )
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert result.stderr == "오류: 브로커 설정이 없습니다.\n"
+        if mode == "json":
+            _assert_json(
+                result, _envelope("INSTRUMENT_SYNC_FAILED", "브로커 설정이 없습니다.")
+            )
+        else:
+            _assert_text(
+                result, ["Error: INSTRUMENT_SYNC_FAILED: 브로커 설정이 없습니다."]
+            )
 
 
 def test_instrument_sync_empty_result(tmp_path: Path) -> None:
@@ -904,7 +927,16 @@ def test_instrument_sync_empty_result(tmp_path: Path) -> None:
             ],
             *patches,
         )
-        assert result.exit_code == 1
-        assert result.stdout == ""
-        assert result.stderr == "오류: 종목 데이터를 가져오지 못했습니다.\n"
+        if mode == "json":
+            _assert_json(
+                result,
+                _envelope(
+                    "INSTRUMENT_SYNC_FAILED", "종목 데이터를 가져오지 못했습니다."
+                ),
+            )
+        else:
+            _assert_text(
+                result,
+                ["Error: INSTRUMENT_SYNC_FAILED: 종목 데이터를 가져오지 못했습니다."],
+            )
     adapter.disconnect.assert_awaited()

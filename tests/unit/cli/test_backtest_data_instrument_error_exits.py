@@ -597,9 +597,11 @@ class TestInstrumentSync:
             ],
             _no_broker_config(),
         )
-        assert result.exit_code == 1, (result.stdout, result.stderr)
-        assert result.stdout == ""
-        assert result.stderr.splitlines() == ["오류: 브로커 설정이 없습니다."]
+        message = "브로커 설정이 없습니다."
+        if mode == "json":
+            _assert_json(result, _envelope("INSTRUMENT_SYNC_FAILED", message))
+        else:
+            _assert_text(result, [f"Error: INSTRUMENT_SYNC_FAILED: {message}"])
 
 
 _IMPORT_FORMAT = "지원하지 않는 파일 형식: .txt (csv 또는 json만 지원)"
