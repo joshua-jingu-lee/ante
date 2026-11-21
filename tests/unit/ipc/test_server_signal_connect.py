@@ -683,24 +683,101 @@ async def test_connect_audit_member_is_ipc_sentinel_not_caller(
     )
 
 
+def _collect_text(value: object, out: list[str], depth: int = 0) -> None:
+    """값과 그 안에 중첩된 dict·list·tuple·예외·객체 속성을 문자열로 모은다."""
+    if depth > 8:
+        return
+    out.append(repr(value))
+    if isinstance(value, str):
+        out.append(value)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _collect_text(key, out, depth + 1)
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, BaseException):
+        out.append(str(value))
+        _collect_text(value.args, out, depth + 1)
+        for chained in (value.__cause__, value.__context__):
+            if chained is not None:
+                _collect_text(chained, out, depth + 1)
+    elif hasattr(value, "__dict__") and not isinstance(value, type):
+        _collect_text(vars(value), out, depth + 1)
+
+
 def _all_log_record_text(caplog: pytest.LogCaptureFixture) -> str:
+    """로그 레코드마다 메시지, 모든 속성(extra 포함)의 중첩 값, 예외 traceback."""
+    import traceback
+
     parts: list[str] = []
     for record in caplog.records:
         parts.append(record.getMessage())
-        parts.extend(repr(value) for value in vars(record).values())
+        _collect_text(vars(record), parts)
+        if record.exc_info and record.exc_info[1] is not None:
+            parts.extend(traceback.format_exception(*record.exc_info))
     return "\n".join(parts)
 
 
-@pytest.mark.parametrize("key_valid", [True, False])
-async def test_signal_key_absent_from_connect_result_and_log_records(
-    socket_path: str, caplog: pytest.LogCaptureFixture, key_valid: bool
+_CONNECT_ENDINGS = {
+    "ok": "ok",
+    "key_not_str": "INVALID_SIGNAL_KEY",
+    "key_unknown": "INVALID_SIGNAL_KEY",
+    "key_manager_missing": "SERVICE_NOT_CONFIGURED",
+    "key_validation_raises": "EXECUTION_ERROR",
+    "bot_missing": "BOT_NOT_FOUND",
+    "bot_not_running": "BOT_NOT_RUNNING",
+    "no_strategy": "BOT_NOT_ACCEPTING_SIGNALS",
+    "not_accepting": "BOT_NOT_ACCEPTING_SIGNALS",
+    "audit_raises": "EXECUTION_ERROR",
+    "channel_busy": "BOT_SIGNAL_CHANNEL_BUSY",
+    "registry_frozen": "EXECUTION_ERROR",
+}
+
+
+@pytest.mark.parametrize("ending", list(_CONNECT_ENDINGS))
+async def test_signal_key_absent_on_every_connect_ending(
+    socket_path: str, caplog: pytest.LogCaptureFixture, ending: str
 ) -> None:
-    """signal key 는 handshake 결과와 서버 로그 레코드 어디에도 없다."""
+    """handshake 가 어느 gate 에서 끝나도 봉투·로그·감사에 signal key 가 없다."""
+    from ante.bot.signal_channel_registry import ChannelHandle, SignalChannelRegistry
+
     audit_logger = MagicMock()
     audit_logger.log = AsyncMock(return_value=None)
-    svc, bm = _connect_registry_with(audit_logger=audit_logger)
-    if not key_valid:
+    channel_registry = SignalChannelRegistry()
+    svc, bm = _connect_registry_with(
+        audit_logger=audit_logger, channel_registry=channel_registry
+    )
+    key: object = _SECRET_SIGNAL_KEY
+    bot = _make_bot(account_id="acc-live")
+    bm.get_bot = MagicMock(return_value=bot)
+    if ending == "key_not_str":
+        key = [_SECRET_SIGNAL_KEY]
+    elif ending == "key_unknown":
         bm.validate_signal_key = AsyncMock(return_value=None)
+    elif ending == "key_manager_missing":
+        bm.validate_signal_key = AsyncMock(side_effect=SignalKeyManagerNotConfigured())
+    elif ending == "key_validation_raises":
+        bm.validate_signal_key = AsyncMock(side_effect=RuntimeError("key store down"))
+    elif ending == "bot_missing":
+        bm.get_bot = MagicMock(return_value=None)
+    elif ending == "bot_not_running":
+        bot.status = BotStatus.STOPPED
+    elif ending == "no_strategy":
+        bot.strategy = None
+    elif ending == "not_accepting":
+        bot.strategy.meta.accepts_external_signals = False
+    elif ending == "audit_raises":
+        audit_logger.log = AsyncMock(side_effect=RuntimeError("audit down"))
+    elif ending == "channel_busy":
+        channel_registry.register(
+            ChannelHandle(session_id="other", bot_id="bot-1", generation=0)
+        )
+    elif ending == "registry_frozen":
+        channel_registry.freeze()
+
     server = IPCServer(socket_path, svc, _signal_only_registry())
     await server.start()
     try:
@@ -709,7 +786,7 @@ async def test_signal_key_absent_from_connect_result_and_log_records(
                 {
                     "id": "c2",
                     "command": "signal.connect",
-                    "args": {"key": _SECRET_SIGNAL_KEY},
+                    "args": {"key": key},
                     "actor": "agent-caller",
                 }
             )
@@ -717,19 +794,27 @@ async def test_signal_key_absent_from_connect_result_and_log_records(
     finally:
         await server.stop()
 
-    bm.validate_signal_key.assert_awaited_once_with(_SECRET_SIGNAL_KEY)
-    assert response["status"] == ("ok" if key_valid else "error"), response
-    assert _SECRET_SIGNAL_KEY not in repr(response)
-    if key_valid:
+    expected = _CONNECT_ENDINGS[ending]
+    if expected == "ok":
+        assert response["status"] == "ok", response
         assert set(response["result"]) == {
             "bot_id",
             "account_id",
             "session_id",
             "_stream",
         }
+    else:
+        assert response["status"] == "error", response
+        assert response["error"]["code"] == expected, response
+        assert any(r.name == "ante.ipc.server" for r in caplog.records)
+    if ending != "key_not_str":
+        bm.validate_signal_key.assert_awaited_once_with(_SECRET_SIGNAL_KEY)
     assert any(r.getMessage() == "capture probe" for r in caplog.records)
+    assert _SECRET_SIGNAL_KEY not in json.dumps(response, default=repr)
     assert _SECRET_SIGNAL_KEY not in _all_log_record_text(caplog)
-    assert _SECRET_SIGNAL_KEY not in repr(audit_logger.log.await_args_list)
+    audit_parts: list[str] = []
+    _collect_text(audit_logger.log.await_args_list, audit_parts)
+    assert _SECRET_SIGNAL_KEY not in "\n".join(audit_parts)
 
 
 async def test_connect_placeholder_handle_snapshots_current_generation() -> None:

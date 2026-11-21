@@ -636,48 +636,87 @@ async def test_member_master_gate_judges_authenticated_caller_not_args(
         await db.close()
 
 
-# ── 비밀값은 서버 로그 레코드 어디에도 남지 않는다 ───────────────────────────
+# ── 비밀값은 끝나는 경로마다 로그·봉투·감사 어디에도 없다 ────────────────────
+
+
+def _collect_text(value: Any, out: list[str], depth: int = 0) -> None:
+    """값과 그 안에 중첩된 dict·list·tuple·예외·객체 속성을 문자열로 모은다."""
+    if depth > 8:
+        return
+    out.append(repr(value))
+    if isinstance(value, str):
+        out.append(value)
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _collect_text(key, out, depth + 1)
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for item in value:
+            _collect_text(item, out, depth + 1)
+    elif isinstance(value, BaseException):
+        out.append(str(value))
+        _collect_text(value.args, out, depth + 1)
+        for chained in (value.__cause__, value.__context__):
+            if chained is not None:
+                _collect_text(chained, out, depth + 1)
+    elif hasattr(value, "__dict__") and not isinstance(value, type):
+        _collect_text(vars(value), out, depth + 1)
 
 
 def _log_records_blob(caplog: pytest.LogCaptureFixture) -> str:
-    """로그 레코드의 메시지·인자·extra 를 포함한 모든 속성을 이어 붙인다."""
+    """로그 레코드마다 메시지, 모든 속성(extra 포함)의 중첩 값, 예외 traceback."""
+    import traceback
+
     parts: list[str] = []
     for record in caplog.records:
         parts.append(record.getMessage())
-        parts.append(repr(record.args))
-        parts.extend(repr(value) for value in vars(record).values())
+        _collect_text(vars(record), parts)
+        if record.exc_info and record.exc_info[1] is not None:
+            parts.extend(traceback.format_exception(*record.exc_info))
     return "\n".join(parts)
 
 
-@pytest.mark.parametrize(
-    ("command", "args", "service_attr"),
-    [
-        ("member.register", {"member_id": "bob", "member_type": "agent"}, "register"),
-        ("member.rotate_token", {"member_id": "alice"}, "rotate_token"),
-        (
-            "member.reset_password",
-            {
-                "recovery_key": SECRET_RECOVERY_KEY,
-                "new_password": SECRET_NEW_PASSWORD,
-            },
-            "reset_password",
-        ),
-        (
-            "member.regenerate_recovery_key",
-            {"password": SECRET_PASSWORD},
-            "regenerate_recovery_key",
-        ),
-    ],
-)
+_SECRET_HANDLERS: dict[str, tuple[dict[str, Any], str, str | None]] = {
+    "member.register": (
+        {"member_id": "bob", "member_type": "agent"},
+        "register",
+        "token",
+    ),
+    "member.rotate_token": ({"member_id": "alice"}, "rotate_token", "token"),
+    "member.reset_password": (
+        {"recovery_key": SECRET_RECOVERY_KEY, "new_password": SECRET_NEW_PASSWORD},
+        "reset_password",
+        None,
+    ),
+    "member.regenerate_recovery_key": (
+        {"password": SECRET_PASSWORD},
+        "regenerate_recovery_key",
+        "recovery_key",
+    ),
+}
+_RECOVERY_COMMANDS = {"member.reset_password", "member.regenerate_recovery_key"}
+_ENDINGS = ("ok", "service_raises", "audit_raises", "master_lookup_raises")
+_SECRET_CASES = [
+    pytest.param(command, ending, id=f"{command}-{ending}")
+    for command in _SECRET_HANDLERS
+    for ending in _ENDINGS
+    if ending != "master_lookup_raises" or command in _RECOVERY_COMMANDS
+]
+
+
+@pytest.mark.parametrize(("command", "ending"), _SECRET_CASES)
 @pytest.mark.asyncio
-async def test_member_secret_never_reaches_server_log_records(
+async def test_member_secret_absent_on_every_ending_path(
     socket_path: str,
     caplog: pytest.LogCaptureFixture,
     command: str,
-    args: dict[str, Any],
-    service_attr: str,
+    ending: str,
 ) -> None:
-    """성공 경로에서도 토큰·recovery key·패스워드가 로그 레코드에 없다."""
+    """비밀값을 다루는 핸들러는 어느 경로로 끝나도 로그·봉투·감사에 비밀값이 없다."""
+    import json
+
+    args, service_attr, result_field = _SECRET_HANDLERS[command]
     member_service = _make_member_service_mock()
     member_service.list_members.return_value = [
         _make_member("master-bob", role=MemberRole.MASTER)
@@ -687,6 +726,13 @@ async def test_member_secret_never_reaches_server_log_records(
     member_service.reset_password.return_value = None
     member_service.regenerate_recovery_key.return_value = SECRET_RECOVERY_KEY
     audit_logger = _make_audit_logger_mock()
+    service_call = getattr(member_service, service_attr)
+    if ending == "service_raises":
+        service_call.side_effect = RuntimeError("member backend unavailable")
+    elif ending == "audit_raises":
+        audit_logger.log.side_effect = RuntimeError("audit store unavailable")
+    elif ending == "master_lookup_raises":
+        member_service.list_members.return_value = []
     svc = _make_service_registry(
         member_service=member_service, audit_logger=audit_logger
     )
@@ -697,16 +743,43 @@ async def test_member_secret_never_reaches_server_log_records(
     try:
         with caplog.at_level(logging.DEBUG):
             response = await server._dispatch(
-                {"id": "1", "command": command, "args": args, "actor": "master-1"}
+                {"id": "1", "command": command, "args": dict(args), "actor": "m-1"}
             )
             logging.getLogger("ante.ipc.registry").debug("capture probe")
     finally:
         await server.stop()
 
-    assert response["status"] == "ok", response
-    getattr(member_service, service_attr).assert_awaited_once()
     assert any(r.getMessage() == "capture probe" for r in caplog.records)
+    if ending == "ok":
+        assert response["status"] == "ok", response
+        service_call.assert_awaited_once()
+        audit_logger.log.assert_awaited_once()
+        envelope = dict(response)
+        envelope["result"] = dict(response["result"])
+        if result_field is not None:
+            assert envelope["result"].pop(result_field) in _ALL_SECRETS
+    else:
+        assert response["status"] == "error", response
+        envelope = response
+        server_errors = [
+            r
+            for r in caplog.records
+            if r.name == "ante.ipc.server" and r.levelno >= logging.ERROR
+        ]
+        assert len(server_errors) == 1
+        if ending == "master_lookup_raises":
+            service_call.assert_not_awaited()
+        else:
+            service_call.assert_awaited_once()
+        if ending == "audit_raises":
+            audit_logger.log.assert_awaited_once()
+        else:
+            audit_logger.log.assert_not_awaited()
+    _assert_no_secret(json.dumps(envelope, ensure_ascii=False, default=repr))
     _assert_no_secret(_log_records_blob(caplog))
+    audit_parts: list[str] = []
+    _collect_text(audit_logger.log.await_args_list, audit_parts)
+    _assert_no_secret("\n".join(audit_parts))
 
 
 @pytest.mark.parametrize(

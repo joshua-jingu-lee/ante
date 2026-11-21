@@ -1414,11 +1414,11 @@ def _update_scopes_services() -> dict[str, Any]:
         ),
         (
             "treasury.set_balance",
-            {"account_id": "acc-7", "balance": 1234567.4},
+            {"account_id": "acc-7", "balance": 7654321.4},
             _set_balance_services,
             "treasury.set_balance",
             "treasury:acc-7",
-            "balance=1,234,567",
+            "balance=7,654,321",
         ),
         (
             "strategy.set_status",
@@ -1545,6 +1545,7 @@ async def test_kill_switch_changed_at_is_utc_with_z_suffix(
     import datetime as datetime_module
     from datetime import UTC, datetime, timedelta
 
+    import ante.ipc.registry as registry_module
     from ante.ipc.registry import register_all_handlers
 
     instant = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
@@ -1573,6 +1574,7 @@ async def test_kill_switch_changed_at_is_utc_with_z_suffix(
     try:
         with monkeypatch.context() as m:
             m.setattr(datetime_module, "datetime", _FixedClock)
+            m.setattr(registry_module, "datetime", _FixedClock, raising=False)
             response = await server._dispatch(
                 {"id": "1", "command": command, "args": {}, "actor": "alice"}
             )
@@ -1583,3 +1585,42 @@ async def test_kill_switch_changed_at_is_utc_with_z_suffix(
     result = response["result"]
     assert set(result) == {"status", "accounts_changed", "changed_at", "accounts"}
     assert result["changed_at"] == "2026-01-02T03:04:05.123456Z"
+
+
+@pytest.mark.parametrize(
+    ("command", "account_attr"),
+    [("system.halt", "suspend_all"), ("system.clear_halt", "activate_all")],
+)
+@pytest.mark.asyncio
+async def test_kill_switch_changed_at_parses_as_zero_offset_aware_time(
+    socket_path: str, command: str, account_attr: str
+) -> None:
+    """시계를 바꾸지 않아도 ``changed_at`` 은 Z 표기의 offset 0 aware 시각이다."""
+    import re
+    from datetime import datetime, timedelta
+
+    from ante.ipc.registry import register_all_handlers
+
+    cmd_registry = CommandRegistry()
+    register_all_handlers(cmd_registry)
+    fake_account = MagicMock()
+    setattr(fake_account, account_attr, AsyncMock(return_value=[]))
+    svc_registry = _make_service_registry(
+        audit_logger=_make_audit_logger_mock(), account=fake_account
+    )
+    server = IPCServer(socket_path, svc_registry, cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": command, "args": {}, "actor": "alice"}
+        )
+    finally:
+        await server.stop()
+
+    changed_at = response["result"]["changed_at"]
+    assert re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z", changed_at
+    ), changed_at
+    parsed = datetime.fromisoformat(changed_at)
+    assert parsed.tzinfo is not None
+    assert parsed.utcoffset() == timedelta(0)

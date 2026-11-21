@@ -708,55 +708,40 @@ async def test_outbound_frames_are_written_in_enqueue_order(
         await _finish(task, reader)
 
 
-async def test_idle_stream_survives_when_every_finite_timeout_expires_at_once(
+async def test_idle_stream_survives_when_loop_clock_jumps_far_ahead(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """유한 timeout 이 즉시 만료되는 시계에서도 idle 스트림의 read 는 끊기지 않는다."""
+    """루프 시계를 앞당겨 예약된 timeout 이 다 만료돼도 idle read 는 끊기지 않는다."""
     bus = EventBus()
     reg = SignalChannelRegistry()
     bot = _make_bot(bus)
     handle = ChannelHandle(session_id="s1", bot_id="bot-1", generation=0)
     reg.register(handle)
     server = _make_server(bus, reg, bot)
-    real_wait_for = asyncio.wait_for
-    expired: list[object] = []
-
-    async def _expire_immediately(aw, timeout=None):  # noqa: ANN001, ANN202
-        if timeout is None:
-            return await real_wait_for(aw, None)
-        expired.append(aw)
-        if asyncio.iscoroutine(aw):
-            aw.close()
-        raise TimeoutError
-
-    class _ExpiredTimeout:
-        def __init__(self, delay: float | None) -> None:
-            self._delay = delay
-
-        async def __aenter__(self) -> None:
-            if self._delay is not None:
-                raise TimeoutError
-
-        async def __aexit__(self, *exc: object) -> bool:
-            return False
+    loop = asyncio.get_running_loop()
+    real_time = loop.time
+    offset = [0.0]
 
     reader = asyncio.StreamReader()
     writer = _FakeWriter()
     with monkeypatch.context() as m:
-        m.setattr(asyncio, "wait_for", _expire_immediately)
-        m.setattr(asyncio, "timeout", _ExpiredTimeout)
+        m.setattr(loop, "time", lambda: real_time() + offset[0])
         task = asyncio.ensure_future(
             server._run_signal_stream(reader, writer, "bot-1", "s1")  # type: ignore[arg-type]
         )
-        assert await _yield_until(lambda: handle.out_queue is not None)
-        assert not await _yield_until(task.done)
-        reader.feed_data(_frame_bytes({"type": "ping"}))
-        assert await _yield_until(lambda: writer.frames() == [{"type": "pong"}])
-        assert not task.done()
-        assert expired == []
-        reader.feed_eof()
-        assert await _yield_until(task.done)
-    await task
+        try:
+            assert await _yield_until(lambda: handle.out_queue is not None)
+            for _ in range(20):
+                await asyncio.sleep(0)
+            offset[0] = 10.0**7
+            assert not await _yield_until(task.done)
+            reader.feed_data(_frame_bytes({"type": "ping"}))
+            assert await _yield_until(lambda: writer.frames() == [{"type": "pong"}])
+            assert not task.done()
+            assert reg.has_active_session("bot-1") is True
+        finally:
+            offset[0] = 0.0
+            await _finish(task, reader)
 
 
 async def test_oversized_inbound_frame_ends_stream_without_reading_further() -> None:

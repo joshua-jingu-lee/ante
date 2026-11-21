@@ -283,7 +283,7 @@ async def test_approval_bot_stop_on_already_stopped_bot_succeeds_without_side_ef
 ) -> None:
     """이미 멈춘 봇에 대한 bot_stop 결재도 성공하고, 중지 이벤트는 한 번만 난다."""
     from ante.approval.models import ApprovalStatus
-    from ante.eventbus.events import BotStoppedEvent
+    from ante.eventbus.events import ApprovalResolvedEvent, BotStoppedEvent
 
     stopped: list[BotStoppedEvent] = []
 
@@ -291,6 +291,12 @@ async def test_approval_bot_stop_on_already_stopped_bot_succeeds_without_side_ef
         stopped.append(event)
 
     eventbus.subscribe(BotStoppedEvent, _on_stopped)
+    resolutions: list[ApprovalResolvedEvent] = []
+
+    async def _on_resolved(event: ApprovalResolvedEvent) -> None:
+        resolutions.append(event)
+
+    eventbus.subscribe(ApprovalResolvedEvent, _on_resolved)
     bot = await _create_bot(manager, ctx, bot_id="bot-approval-stop")
     await manager.start_bot(bot.bot_id)
     s = await _approval_service_on(manager, db, eventbus)
@@ -305,9 +311,8 @@ async def test_approval_bot_stop_on_already_stopped_bot_succeeds_without_side_ef
         await approvals.approve(first.id, resolved_by="owner")
         assert bot.status == BotStatus.STOPPED
         assert len(stopped) == 1
-        row_after_first = await db.fetch_one(
-            "SELECT status, updated_at FROM bots WHERE bot_id = ?", (bot.bot_id,)
-        )
+        stopped_at_first = bot.get_info()["stopped_at"]
+        assert stopped_at_first is not None
 
         second = await approvals.create(
             type="bot_stop",
@@ -323,10 +328,12 @@ async def test_approval_bot_stop_on_already_stopped_bot_succeeds_without_side_ef
         assert stored is not None and stored.status == ApprovalStatus.APPROVED
         assert bot.status == BotStatus.STOPPED
         assert len(stopped) == 1
-        row_after_second = await db.fetch_one(
-            "SELECT status, updated_at FROM bots WHERE bot_id = ?", (bot.bot_id,)
-        )
-        assert row_after_second == row_after_first
+        assert bot.get_info()["stopped_at"] == stopped_at_first
+        resolved = [e for e in resolutions if e.approval_id in (first.id, second.id)]
+        assert [e.resolution for e in resolved] == [
+            ApprovalStatus.APPROVED,
+            ApprovalStatus.APPROVED,
+        ]
     finally:
         await _cancel_expire_task(s)
 
