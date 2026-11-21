@@ -1,24 +1,4 @@
-"""Broker Adapter 모듈 예외.
-
-본 모듈의 ``*Error`` sub-class 5건에 class-level ``.code``
-속성을 부여한다. helper(``ante.contracts.error_spec_for_exception``)
-의 registry MRO lookup 과 IPC server.py:322 의 ``getattr(e, "code",
-"EXECUTION_ERROR")`` fallback 양쪽에서 동일한 안정 코드가 envelope 으로
-surface 되도록 정렬한다 (account 12 sub-class /
-member/approval/bot/treasury 동형).
-
-원천 code 분리 정책:
-
-- ``APIError`` 가 보존하는 ``error_code`` (KIS msg_cd 등 원천
-  external broker code) 는 **log-only / 디버깅 보조** 용도다.
-- public envelope (CLI ``OutputFormatter.error`` / IPC envelope ``{code,
-  message}``) 에는 ante taxonomy 의 안정 코드(``BROKER_API_ERROR``)만
-  노출한다 — envelope SSOT 갱신 필요한 ``details.broker_code`` 필드 도입은
-  본 PR 범위 밖이며 후속 spec PR 에서 책임진다.
-- 보존 채널: ``APIError.error_code`` 인스턴스 필드 (log / debug message /
-  EventBus ``OrderFailedEvent.error_code`` payload). public envelope 변환
-  경로는 본 필드를 surface 하지 않는다.
-"""
+"""Broker Adapter 모듈 예외."""
 
 from __future__ import annotations
 
@@ -44,9 +24,6 @@ class BrokerError(Exception):
 class AuthenticationError(BrokerError):
     """인증 실패.
 
-    KIS OAuth 토큰 발급/갱신 실패 (HTTP 401/403, 잘못된 app_key/app_secret
-    등). taxonomy ``auth`` 카테고리.
-
     ``error_code``: KIS 원천 ``msg_cd`` (예: ``EGW00133``)를 **구조적으로**
     보존한다. ``main`` 의 startup / self-healing connect 실패 경로가 reason 에
     ``EGW00133`` 을 문자열 grep 이 아니라 ``getattr(e, "error_code", None)`` /
@@ -69,16 +46,6 @@ class TokenRateLimitError(AuthenticationError):
     절대 두지 않는다**(곱셈 원천 제거). ~60s backoff cadence 는 단일 레이어
     (``main`` startup 의 bounded retry **또는** self-healing loop 의 burst interval)
     에서만 적용된다(spec 07 OAuth2 §(4)(5)(6) 단일 cadence).
-
-    ``AuthenticationError`` 서브클래스이므로 ``KISErrorClassifier.classify`` 는
-    여전히 ``(retryable=False, record_cb=False)`` 로 분류한다([must_fix J] 불변 —
-    gateway 재시도 핸들러 이중 적용 차단).
-
-    ``cooldown_until`` (source-level cooldown): EGW00133 수신 시
-    기록된 app_key cooldown 만료시각(UTC ``datetime`` 또는 ``None``)을 선택적으로
-    실어 보낸다. startup wrapper(``main._get_broker_with_auth_retry``)가 고정 60s
-    대신 **잔여 cooldown**(``cooldown_until - now``)만큼 sleep 해 cooldown 경계에서
-    재시도가 무력화되지 않게 한다. 기본값 ``None`` 이라 미기재 호출부는 무영향이다.
     """
 
     code: str = "BROKER_AUTH_FAILED"
@@ -96,13 +63,6 @@ class TokenRateLimitError(AuthenticationError):
 
 class APIError(BrokerError):
     """API 호출 실패.
-
-    KIS API 호출 시 broker side business / HTTP error. ``status_code`` 에
-    HTTP status, ``error_code`` 에 원천 KIS ``msg_cd`` (예: ``APBK0501``) 가
-    log-only 채널로 보존된다.
-
-    public envelope code:
-        ``BROKER_API_ERROR`` (taxonomy ``external`` 카테고리).
 
     원천 KIS ``msg_cd`` 노출 정책:
         public envelope (CLI ``OutputFormatter.error`` / IPC envelope

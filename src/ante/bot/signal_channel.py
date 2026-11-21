@@ -1,8 +1,4 @@
-"""SignalChannel — JSON Lines 파이프 기반 양방향 시그널 채널.
-
-외부 에이전트와 봇 사이의 stdin/stdout 기반 통신 채널.
-HTTP API 대신 로컬 파이프를 사용하여 네트워크 공격면이 없다.
-"""
+"""SignalChannel — JSON Lines 파이프 기반 양방향 시그널 채널."""
 
 from __future__ import annotations
 

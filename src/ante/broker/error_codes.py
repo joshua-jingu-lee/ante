@@ -1,11 +1,4 @@
-"""KIS API 에러코드 분류.
-
-KIS rt_cd / msg_cd 기반으로 재시도 가능 여부를 판별한다.
-
-KIS msg_cd는 ``APBK*`` 형식 또는 numeric business code(예: ``40580000``)
-모두 가능하다. 두 형식 모두 동일하게 ``PERMANENT_MSG_CODES`` /
-``TRANSIENT_MSG_CODES`` set에 등록한다.
-"""
+"""KIS API 에러코드 분류."""
 
 PERMANENT_MSG_CODES: frozenset[str] = frozenset(
     {

@@ -57,17 +57,10 @@ class RuleEngineManager:
         """계좌별 RuleEngine 생성. EventBus에 자동 구독.
 
         Args:
-            account_id: 계좌 ID.
-            rule_configs: 계좌 룰 설정 리스트. ``None``이면 빈 룰.
-                ``initialize_all`` 호출 경로에서는 broker_type별 default를 이미
-                merge한 effective list가 들어온다.
             account: 계좌 snapshot. 전달되면 RuleEngine에 캐시되어 reload
                 경로(``_on_config_changed``)에서 broker_type별 default를 다시
                 merge할 때 사용된다. ``None``이면 reload 경로는 stored 그대로
                 적용 (하위 호환).
-
-        Returns:
-            생성된 RuleEngine 인스턴스.
         """
         treasury = None
         if self._treasury_manager is not None:
@@ -121,8 +114,6 @@ class RuleEngineManager:
     ) -> None:
         """시스템 시작 시 모든 계좌의 RuleEngine 초기화.
 
-        각 계좌에 대해 RuleEngine을 생성하고, 계좌별 룰 설정을 로드한다.
-
         Stored rules 우선순위 (명시 우선 정책):
 
         1. ``dynamic_config`` (런타임 PUT으로 저장된 override). 재시작 시
@@ -130,12 +121,6 @@ class RuleEngineManager:
            않도록 ``static config``보다 우선한다.
         2. ``config`` (정적 YAML/TOML 등 startup snapshot).
         3. 둘 다 없으면 ``stored_rules=None`` → broker_type별 default만 적용.
-
-        Args:
-            accounts: 초기화할 계좌 목록.
-            config: 전체 설정 객체 (룰 설정 추출용). None이면 static fallback 없음.
-            dynamic_config: ``DynamicConfigService`` 인스턴스. None이면 runtime
-                override 조회를 건너뛴다 (하위 호환).
         """
         for account in accounts:
             key = f"accounts.{account.account_id}.rules"

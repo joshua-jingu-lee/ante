@@ -8,21 +8,7 @@ class TreasuryError(Exception):
 
 
 class InsufficientFundsError(TreasuryError):
-    """자금 부족.
-
-    클래스 레벨 ``code`` 속성은
-    안정 코드 ``TREASURY_INSUFFICIENT_FUNDS`` 다 — CLI/IPC
-    envelope 이 동일 코드를 surface 한다. ``update_budget`` 이 typed
-    reject (``TreasuryInsufficientUnallocatedError`` →
-    ``TREASURY_INSUFFICIENT_BALANCE``) 를 catch 해 ``InsufficientFundsError``
-    로 변환하는 caller invariant (treasury.py:599-606) 를 보존하기 위해
-    별개의 코드를 부여한다 — 의미가 다른 두 fault (allocate-side
-    미할당부족 vs update_budget caller-facing wrap) 를 같은 코드로 묶지
-    않는다.
-
-    IPC server.py:322 ``getattr(e, "code", ...)`` 와 helper registry-first
-    가 동일 ``TREASURY_INSUFFICIENT_FUNDS`` 코드를 surface 한다.
-    """
+    """자금 부족."""
 
     code = "TREASURY_INSUFFICIENT_FUNDS"
 
@@ -40,12 +26,6 @@ class BotNotStoppedError(TreasuryError):
 
 class TreasuryNotConfiguredError(TreasuryError):
     """계좌에 Treasury가 구성되지 않아 budget 작업을 수행할 수 없음.
-
-    budget 배정 요청이 들어왔지만 ``TreasuryManager`` 자체가
-    주입되지 않았거나, 해당 ``account_id`` 에 등록된 Treasury 가 없어
-    예산을 할당할 수 없을 때 발생한다. 라우트 계층은 이 예외를 422 로
-    매핑한다 (`TreasuryError` 하위 클래스이므로 기존 422 매핑이 자동
-    적용된다).
 
     클래스 레벨 ``code`` 속성은 안정
     코드 ``TREASURY_NOT_CONFIGURED`` 다 — service 인프라 부재로 인한

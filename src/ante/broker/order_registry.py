@@ -1,8 +1,4 @@
-"""OrderRegistry — order_id → bot_id 매핑 관리.
-
-복수 봇이 같은 계좌에서 거래할 때,
-브로커가 반환하는 order_id가 어느 봇의 주문인지 추적한다.
-"""
+"""OrderRegistry — order_id → bot_id 매핑 관리."""
 
 from __future__ import annotations
 

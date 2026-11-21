@@ -462,13 +462,6 @@ class Bot:
 
         accepts_external_signals=False인 전략은 시그널을 무시한다.
 
-        F3 직렬화: ``on_data`` + ``_publish_signals(follow_up)`` span 을
-        ``self._signal_lock`` 으로 감싼다. 같은 lock 이 ``_run_loop`` 의 on_step
-        drain span 도 감싸므로, on_step() 과 external on_data() 가 동시에
-        ``_ctx._pending_actions`` 를 만지는(append↔copy+clear) 인터리브가
-        차단된다. ``_drain_actions`` 는 **추가 호출하지 않는다** — 다음 on_step
-        drain 이 처리한다.
-
         **non-reentrancy 감사(asyncio.Lock 은 non-reentrant)**: lock 보유 중
         ``_publish_signals`` 가 publish 하는 ``OrderRequestEvent`` 의 핸들러가
         동일 bot ``ExternalSignalEvent`` 를 재발행하지 않는다(재발행하면

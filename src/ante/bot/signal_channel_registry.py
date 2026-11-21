@@ -1,27 +1,4 @@
-"""SignalChannelRegistry — signal.connect 채널 생명주기 권위 레지스트리.
-
-bot_id 당 단일 connect 정책과 daemon-위임 teardown 을 강제하는 동기 코어다.
-
-설계 불변 (F1+F4 상태 전이표):
-
-- **동기 메서드는 내부에서 ``await`` 하지 않는다.** ``register``/``unregister``/
-  ``close_bot``/``freeze``/``get``/``current_generation``/``bump_generation`` 는
-  단일-스레드 이벤트 루프 한 틱 안에서 끊김 없이 실행된다. check↔insert 사이에
-  ``await`` 가 없어야 단일-connect TOCTOU 가 닫힌다. ``close_all`` 만 async 다 —
-  각 채널의 정리 task 를 await-to-completion 해야 하기 때문이며, register/
-  unregister/close_bot/freeze 의 동기 계약과 분리된다(스펙 §7 reconciliation).
-
-- **ChannelHandle 2단계 생명주기(placeholder → adopted).** ``register`` 는
-  핸드셰이크 핸들러에서 ack write **전** 호출되므로, 그 시점에는 데이터플레인
-  (out_queue/read_task/writer_task/on_closed/closing_event)이 아직 없다 — stream
-  코루틴 진입 후 ``adopt`` 한다. placeholder 단계의 ``close(reason)`` 은 reason 만
-  ``_pending_close_reason`` 으로 래치하고, adopt 가 이를 감지해 즉시 self-close
-  한다. 이로써 register-and-ack-fail 또는 rotate-in-window 누수를 차단한다.
-
-- **generation counter.** key re-validation(DB await)이 아니라 동기 카운터로
-  rotate-in-window 를 결정적으로 감지한다. ``register`` 가 현재 generation 을
-  스냅샷하고, adopt 시점에 ``current_generation`` 과 비교해 불일치면 self-close.
-"""
+"""SignalChannelRegistry — signal.connect 채널 생명주기 권위 레지스트리."""
 
 from __future__ import annotations
 
@@ -45,18 +22,6 @@ class ChannelHandle:
     register 시점(placeholder)에는 데이터플레인 4필드(``out_queue``/``read_task``/
     ``writer_task``/``on_closed``)와 ``closing_event`` 가 모두 ``None`` 이며,
     ``_run_signal_stream`` 진입 후 adopt 가 채운다.
-
-    ``close(reason)`` 는 **동기·idempotent·non-raising** 이다. 어떤 컨텍스트
-    (close_bot/rotate/delete/BotStopped/close_all/adopt self-close)에서 호출돼도
-    안전하도록 ``await`` 가 없다:
-
-    - first-wins: 이미 ``closed`` 면 ``False`` 반환(no-op).
-    - ``on_closed(reason)`` 으로 channel 의 ``_closed``/``_accepting`` 을 set.
-    - 데이터플레인이 있으면(adopted) ``{type:closed,reason}`` 을 out_queue 에
-      force-slot 으로 enqueue(QueueFull → 1개 drop 후 재시도) + ``closing_event``
-      set 으로 stream supervisor 의 async teardown(``_initiate_close``)을 깨운다.
-    - 데이터플레인이 없으면(placeholder) reason 만 ``_pending_close_reason`` 에
-      래치 → adopt 가 감지해 self-close.
 
     **strategy/ctx hard-ref 미보유** — 봇 생명주기 너머로 전략 객체를 잡지 않는다.
     """
@@ -115,18 +80,7 @@ class ChannelHandle:
     JOIN_GRACE_SECONDS = 3.0
 
     async def join(self) -> None:
-        """read_task/writer_task 가 정리될 때까지 대기 (``close_all`` 이 await).
-
-        ``close()`` 가 ``closing_event`` 를 set 한 뒤 stream supervisor 가
-        ``_initiate_close`` 로 read/writer task 를 flush-before-cancel(closed
-        frame 전달 후 cancel)·join 한다(정상 경로). 본 메서드는 그 두 task 가
-        **grace 안에 자연 정리되도록 먼저 await** 해 supervisor 의 closed-frame
-        flush 를 양보하고(client 가 ``{closed,reason}`` 을 받음), grace 초과 시
-        (supervisor 미진행 등)만 직접 cancel 후 await 한다 — close_all 이 외부
-        supervisor wiring 에 의존하지 않으면서 deadlock-free 로 await-to-
-        completion 하도록 보장한다(suppress CancelledError). task 가 없으면
-        (placeholder, adopt 전) 즉시 반환한다.
-        """
+        """read_task/writer_task 가 정리될 때까지 대기 (``close_all`` 이 await)."""
         tasks = [t for t in (self.read_task, self.writer_task) if t is not None]
         if not tasks:
             return
@@ -153,9 +107,6 @@ class SignalChannelRegistry:
 
     ``_generations``: ``{bot_id: int}``. rotate/delete teardown 이 bump 해 adopt-time
     re-check 로 rotate-in-window 핸드셰이크를 self-close 시킨다.
-
-    ``_frozen``: shutdown sweep 진입 후 ``True`` — 이후 ``register`` 는
-    ``SignalChannelRegistryFrozen`` 을 raise 해 re-register leak 을 차단한다.
     """
 
     def __init__(self) -> None:

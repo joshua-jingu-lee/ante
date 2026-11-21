@@ -1,7 +1,4 @@
-"""PositionHistory — 포지션 변동 추적.
-
-Trade 모듈의 positions 테이블이 시스템 유일의 포지션 소스이다.
-"""
+"""PositionHistory — 포지션 변동 추적."""
 
 from __future__ import annotations
 
@@ -225,9 +222,6 @@ class PositionHistory:
                 반환한다 (read query 정책). 단일 계좌에
                 바인딩된 호출자(Treasury, DailyReportScheduler 등)는
                 자기 계좌만 보도록 명시적으로 전달해야 한다.
-
-        legacy 'default' (또는 기타 invalid) ``account_id`` row는 skip하고
-        warning만 남긴다.
         """
         if account_id is None:
             rows = await self._db.fetch_all(

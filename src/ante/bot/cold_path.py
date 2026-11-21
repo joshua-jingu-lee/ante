@@ -1,9 +1,4 @@
-"""Cold-path bot maintenance helpers.
-
-These helpers run only while the Ante server is stopped. They intentionally do
-not instantiate ``BotManager`` because no in-memory bot task, EventBus
-subscriber, VirtualExecutor, or broker adapter exists in cold-path mode.
-"""
+"""Cold-path bot maintenance helpers."""
 
 from __future__ import annotations
 

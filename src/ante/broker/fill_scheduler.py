@@ -1,31 +1,4 @@
-"""FillReconcileScheduler — 계좌별 event-gated 체결 백스톱 폴러.
-
-REST ``get_order_history`` 를 백스톱으로 폴해 추적 주문의 체결을 ``FillApplier`` 로
-멱등 반영한다. 실시간 체결 통보 스트림 유무·paper/live 무관하게 정합성을 보증한다.
-
-rate budget 보호:
-- **event-gated**: open 주문이 없고 ``_fallback_verify`` 도 비어있으면 폴하지
-  않는다(0콜, idle). open 또는 verify 가 있을 때만 ``get_order_history`` 를
-  **사이클당 1콜**(fallback 이 주문을 filled 로 올려 open 이
-  비어도, verify set 이 남아 있으면 ccld 를 계속 폴해 §11.4 late-ccld alert 를
-  도달 가능하게 한다 — verify set 은 ccld 1회 관측 또는 영업일 경계에 정리되는
-  bounded in-memory 보조 상태다).
-- cadence **≥60s**. 주문 제출·가격 fallback 과 동일한 broker rate-limit 큐를
-  공유하므로(``_rate_limit_wait``), 보수적 cadence + 1콜/사이클로 제출 starvation 을
-  방지한다.
-
-position-derived bounded fallback (§11):
-- KIS 모의 ``inquire-daily-ccld``(``get_order_history``)는 일별 결제기준 원장이라
-  당일 체결을 지연 반영할 수 있다. tr_id ``VTTC0081R``은 당일 체결을 반환함이
-  라이브로 확인됐다(백스톱 지연/유실에 무관히 fallback 은 멱등 백업으로 유지).
-  반면 잔고(``get_positions``)는 체결기준 즉시반영이다. 백스톱이 당일 0건을 줄 때
-  잔고 증분(``broker_qty - internal_account_qty``)에서 self-submitted 체결을
-  **보수적 역도출**해
-  ``FillApplier.apply_cumulative`` 로 멱등 수렴한다(§11.8 단일 권위 — 새 권위자
-  미생성). **KIS paper 한정 기본 활성**(§11.6), disable flag 로 rollback 가능.
-
-상세 설계: ``docs/specs/broker-adapter/18-fill-recovery.md`` (§11).
-"""
+"""FillReconcileScheduler — 계좌별 event-gated 체결 백스톱 폴러."""
 
 from __future__ import annotations
 
@@ -91,24 +64,11 @@ def _normalize_history_date(raw: str) -> str:
 class _FallbackVerifyEntry:
     """fallback 이 advance 한 주문의 사후 ccld 검증 항목.
 
-    fallback 이 주문을 ``filled``(terminal)로 올리면 다음 사이클의
-    ``get_open_orders`` 가 비어 ``_poll_and_apply`` 가 early-return → ccld 미폴 →
-    §11.4 late-ccld alert 가 production 에서 도달 불가(dead code)가 된다. 이를
-    막기 위해 fallback 적용 주문을 in-memory verify set 에 등록하고, 폴 게이트를
-    ``open 또는 verify 가 있으면`` 으로 확장해 그 주문의 ccld 를 계속 폴한다.
-
     이 항목은 **in-memory 보조 상태일 뿐**이며 OrderTracker/positions/trades/
     outbox 를 직접 수정하지 않는다(§11.8 단일 권위 보존). 폴 window 의 from_date
     가 ``submitted_date`` 까지 거슬러 덮도록 보장하고, ccld 절대 누적이 fallback
     이 advance 한 ``recorded`` 미만이면 alert 1회 후 제거, 동일/높으면 조용히
     제거한다. 무한 누적 방지를 위해 영업일 경계(D+1)에 정리한다(§11.5).
-
-    Attributes:
-        recorded: fallback 이 ``apply_cumulative`` 로 advance 한 절대 누적(= full
-            fill ``ordered_qty``). ccld 가 이보다 낮은 양수 누적을 주면 잠재
-            over-attribution.
-        submitted_date: fallback 적용 주문의 영업일(``YYYYMMDD``). 폴 window
-            from_date 가 이 날짜까지 거슬러 덮어 ccld 가 매칭 가능하게 한다.
     """
 
     recorded: float
@@ -125,7 +85,6 @@ class CatchUpResult:
     external-buy 분류를 건너뛰어 미복구 체결을 "외부 매수" 로 오분류하지 않는다.
 
     Attributes:
-        succeeded: startup 폴이 성공(또는 명시적 open-없음)했는지.
         applied: 적용된 체결(delta>0) 건수.
     """
 
@@ -152,24 +111,12 @@ class FillReconcileScheduler:
         """계좌별 체결 백스톱 폴러.
 
         Args:
-            broker: 계좌 BrokerAdapter. ``get_order_history`` 백스톱과
-                (fallback 활성 시) ``get_positions`` 잔고 역도출을 제공한다.
-            order_tracker: 추적 주문 저장소.
-            fill_applier: 단일 멱등 choke point. 모든 체결 수렴은 이 경로뿐이다.
-            account_id: 계좌 ID.
-            poll_interval: 주기 폴 cadence(초). ``MIN_POLL_INTERVAL`` 하한.
-            trade_service: 내부 account-level 포지션 조회 의존성(§11.1
-                ``internal_account_qty`` = ``get_all_positions(account_id)`` 합산).
-                position-derived fallback 에만 쓰인다. ``None`` 이면 fallback 은
-                동작하지 않는다(legacy/partial wiring).
             eventbus: late-ccld over-attribution alert(§11.4) 발행용.
                 ``None`` 이면 alert 를 surface 하지 못하나(best-effort), 멱등성·
                 수렴 정확성은 영향받지 않는다.
             fallback_enabled: position-derived fallback **마스터 disable flag**
                 (§11.6). KIS paper 기본 활성을 두되 ``False`` 로 rollback
                 가능. 실제 적용은 추가로 ``broker.is_paper`` 가 true 여야 한다.
-            instrument_service: over-attribution 의심 알림의 종목명 병기용.
-                ``None`` 이면 종목코드만 표기하는 기존 경로를 유지한다(폴백).
         """
         require_account_id(account_id, context="fill_scheduler.__init__")
         self._broker = broker
@@ -199,11 +146,6 @@ class FillReconcileScheduler:
         그래도 실패하면 ``succeeded=False`` 를 반환한다. 주기 루프(``_loop``)와
         달리 startup 폴 실패를 "0건 성공" 으로 삼키지 않는다 — main barrier 가
         이 결과로 reconcile external-buy 분류를 건너뛸지 결정하기 때문이다.
-
-        **barrier 보장**: main 기동에서 이 메서드의 await 완료 후에만
-        ``ReconcileScheduler.start()`` 를 시작하고, ``succeeded`` 가 False 면
-        external-buy 분류를 연기해, position reconcile 이 미복구 체결을
-        "외부 매수" 로 오분류하지 않게 한다.
         """
         last_exc: Exception | None = None
         for attempt in range(1, CATCH_UP_MAX_ATTEMPTS + 1):
