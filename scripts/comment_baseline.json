@@ -26,8 +26,10 @@
     "src/ante/broker/scheduler.py": 25,
     "src/ante/broker/test.py": 10,
     "src/ante/cli/commands/bot.py": 28,
+    "src/ante/cli/commands/broker.py": 10,
     "src/ante/cli/commands/config.py": 21,
-    "src/ante/cli/middleware.py": 40,
+    "src/ante/cli/commands/member.py": 25,
+    "src/ante/cli/middleware.py": 57,
     "src/ante/contracts/error_registry.py": 4,
     "src/ante/core/market_data_vocab.py": 23,
     "src/ante/feed/pipeline/backfill_runner.py": 16,
@@ -59,5 +61,5 @@
     "src/ante/treasury/manager.py": 2,
     "src/ante/treasury/treasury.py": 89
   },
-  "docstring_lines": 9127
+  "docstring_lines": 9179
 }

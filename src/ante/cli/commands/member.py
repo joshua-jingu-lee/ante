@@ -238,7 +238,32 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 
 
 def _explicit_config_dir(ctx: click.Context) -> str | None:
-    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다."""
+    """루트 ``--config-dir`` 옵션이 명시적으로 지정된 경우 그 값(str)을 돌려준다.
+
+    Ante CLI 의 루트 그룹(:func:`ante.cli.main.cli`)은 ``--config-dir`` 이 명시
+    되거나 ``ANTE_CONFIG_DIR`` 환경변수가 set 되었을 때에만
+    ``ctx.obj["config_dir"]`` 를 ``Path`` 로 채운다. 미지정이면 키 자체가 누락된다.
+    본 헬퍼는 그 override 값을 **절대 경로**(``expanduser().resolve()``)로 정규화
+    해서 반환하며, override 가 없으면 ``None`` 을 돌려 default config_dir 를
+    의미하게 한다.
+
+    이 값은 ``revoke_command`` 생성 시 운영자가 입력한 ``--config-dir`` 을
+    payload 에 보존하기 위해 사용된다: 운영자가
+    ``ante --config-dir /custom member list-invalid-roles`` 로 다른 인스턴스를
+    스캔했을 때, payload 의 ``revoke_command`` 에 ``--config-dir`` 이 빠지면
+    default config_dir 의 DB 에 실행되어 엉뚱한 인스턴스를 건드릴 위험이
+    있다. 항상 ``ctx`` 의 override 를 같은 자리에 다시 채워 인스턴스 일관성을
+    보장한다.
+
+    추가로 운영자가 ``ante --config-dir custom member
+    list-invalid-roles`` 처럼 **상대 경로**로 호출한 경우, raw 값을 그대로
+    payload 에 실으면 운영자가 payload(``revoke_command``)를 다른 CWD 에서
+    복사 실행했을 때 그 CWD 아래의 ``custom`` DB 를 가리키게 되어 다시 다른
+    인스턴스가 될 수 있다. 이를 막기 위해 본 헬퍼는 ``Path.expanduser()``
+    (``~/...`` 확장) + ``Path.resolve()`` (절대 경로화 + symlink 해소) 로
+    경로를 고정해, 어느 CWD 에서 실행되더라도 처음 스캔한 인스턴스와 동일한
+    config_dir 를 가리키도록 보장한다.
+    """
     obj = getattr(ctx, "obj", None)
     if not isinstance(obj, dict):
         return None

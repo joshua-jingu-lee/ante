@@ -111,7 +111,24 @@ def _run_authenticate(token: str, db_path: str) -> Member:
 
 
 def _get_invoked_command_path(ctx: click.Context) -> tuple[str, ...] | None:
-    """호출된 서브커맨드의 전체 경로 tuple을 반환."""
+    """호출된 서브커맨드의 전체 경로 tuple을 반환.
+
+    `ante init` → ("init",)
+    `ante member list` → ("member", "list")
+    `ante member reset-password` → ("member", "reset-password")
+    `ante feed init` → ("feed", "init")
+
+    Click 8.x의 `Group.invoke`는 root 콜백이 실행되기 직전에
+    `ctx.protected_args`/`ctx.args`를 비운다 (core.py:1680-1682). 따라서
+    root 콜백 시점에 `ctx.invoked_subcommand`는 1단계 서브커맨드 이름만
+    담고 있고, `ctx.args`/`ctx.protected_args`도 비어 있어 nested
+    subcommand path를 직접 추출할 수 없다.
+
+    대신 루트 그룹을 `LeafAwareGroup`(main.py)로 설정해, `invoke()`의
+    `super().invoke(ctx)` 호출 **전에** 전체 커맨드 경로를 tuple로
+    `ctx.obj["_leaf_command_path"]`에 저장한다. 이 값이 있으면 우선 사용하고,
+    없으면 `ctx.invoked_subcommand`로 부분 fallback한다.
+    """
     obj = getattr(ctx, "obj", None)
     if isinstance(obj, dict):
         path = obj.get("_leaf_command_path")
