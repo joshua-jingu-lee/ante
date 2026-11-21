@@ -122,6 +122,7 @@ from ante.cli.commands.bot import bot  # noqa: E402
 from ante.cli.commands.broker import broker  # noqa: E402
 from ante.cli.commands.config import config  # noqa: E402
 from ante.cli.commands.data import data  # noqa: E402
+from ante.cli.commands.feed import feed  # noqa: E402
 from ante.cli.commands.init import init  # noqa: E402
 from ante.cli.commands.instrument import instrument  # noqa: E402
 from ante.cli.commands.member import member  # noqa: E402
@@ -134,7 +135,6 @@ from ante.cli.commands.system import system  # noqa: E402
 from ante.cli.commands.trade import trade  # noqa: E402
 from ante.cli.commands.treasury import treasury  # noqa: E402
 from ante.cli.commands.update import update  # noqa: E402
-from ante.feed.cli import feed  # noqa: E402
 
 cli.add_command(account)  # type: ignore[has-type]
 cli.add_command(audit)  # type: ignore[has-type]

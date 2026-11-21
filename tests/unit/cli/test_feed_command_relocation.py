@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 import sys
 from types import ModuleType
@@ -71,3 +72,12 @@ def test_registered_group_is_module_feed() -> None:
 
 def test_feed_command_paths() -> None:
     assert list(_walk(cli.commands["feed"], ["feed"])) == EXPECTED_FEED_PATHS
+
+
+def test_feed_command_module_path() -> None:
+    assert _feed_module().__name__ == "ante.cli.commands.feed"
+
+
+def test_old_feed_cli_module_is_gone() -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("ante.feed.cli")
