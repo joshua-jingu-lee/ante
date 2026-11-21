@@ -155,7 +155,7 @@ class TestTradeInfo:
                 new=_failing_db("거래 저장소 응답 없음"),
             ),
         )
-        _assert_text(result, ["Error: 거래 저장소 응답 없음"])
+        _assert_text(result, ["Error: TRADE_ERROR: 거래 저장소 응답 없음"])
 
     def test_not_found_json(self) -> None:
         result = _invoke(
@@ -174,7 +174,7 @@ class TestTradeInfo:
         result = _invoke(
             ["--format", "text", "trade", "info", "t-404"], _no_trade_row()
         )
-        _assert_text(result, ["Error: 거래를 찾을 수 없습니다: t-404"])
+        _assert_text(result, ["Error: TRADE_NOT_FOUND: 거래를 찾을 수 없습니다: t-404"])
 
 
 class TestReportSubmit:
@@ -215,18 +215,20 @@ class TestReportSubmit:
         [
             pytest.param(
                 "{bad",
-                "Error: Invalid JSON: Expecting property name enclosed in double "
-                "quotes: line 1 column 2 (char 1)",
+                "Error: REPORT_VALIDATION_ERROR: Invalid JSON: Expecting property "
+                "name enclosed in double quotes: line 1 column 2 (char 1)",
                 id="invalid-json",
             ),
             pytest.param(
                 "[1]",
-                "Error: Report file must be a JSON object, got list",
+                "Error: REPORT_VALIDATION_ERROR: "
+                "Report file must be a JSON object, got list",
                 id="not-object",
             ),
             pytest.param(
                 json.dumps({**_VALID_REPORT, "total_trades": -1}),
-                "Error: [{'type': 'greater_than_equal', 'loc': ('total_trades',), "
+                "Error: REPORT_VALIDATION_ERROR: [{'type': 'greater_than_equal', "
+                "'loc': ('total_trades',), "
                 "'msg': 'Input should be greater than or equal to 0', "
                 "'url': 'https://errors.pydantic.dev/2.13/v/greater_than_equal'}]",
                 id="model-validation",
@@ -278,7 +280,7 @@ class TestReportSubmit:
             ],
             _failing_database_class("리포트 DB 연결 실패"),
         )
-        _assert_text(result, ["Error: 리포트 DB 연결 실패"])
+        _assert_text(result, ["Error: REPORT_ERROR: 리포트 DB 연결 실패"])
 
 
 _INVALID_STATUS_MESSAGE = (
@@ -301,7 +303,9 @@ class TestReportList:
 
     def test_invalid_status_text(self) -> None:
         result = _invoke(["--format", "text", "report", "list", "--status", "bogus"])
-        _assert_text(result, [f"Error: {_INVALID_STATUS_MESSAGE}"])
+        _assert_text(
+            result, [f"Error: REPORT_INVALID_STATUS: {_INVALID_STATUS_MESSAGE}"]
+        )
 
     def test_listing_failure_json(self) -> None:
         result = _invoke(
@@ -328,7 +332,7 @@ class TestReportList:
                 new=_failing_db("리포트 목록 조회 실패"),
             ),
         )
-        _assert_text(result, ["Error: 리포트 목록 조회 실패"])
+        _assert_text(result, ["Error: REPORT_ERROR: 리포트 목록 조회 실패"])
 
 
 _MONTHLY_RANGE_MESSAGE = (
@@ -373,17 +377,17 @@ class TestReportPerformance:
         [
             pytest.param(
                 ["--period", "monthly", "--start", "2026-03-02"],
-                f"Error: {_MONTHLY_RANGE_MESSAGE}",
+                f"Error: CLI_OPTION_CONFLICT: {_MONTHLY_RANGE_MESSAGE}",
                 id="monthly-start",
             ),
             pytest.param(
                 ["--period", "daily", "--year", "2025"],
-                f"Error: {_DAILY_YEAR_MESSAGE}",
+                f"Error: CLI_OPTION_CONFLICT: {_DAILY_YEAR_MESSAGE}",
                 id="daily-year",
             ),
             pytest.param(
                 ["--period", "monthly", "--year", "0"],
-                f"Error: {_YEAR_MESSAGE}",
+                f"Error: REPORT_VALIDATION_ERROR: {_YEAR_MESSAGE}",
                 id="year-zero",
             ),
         ],
@@ -435,7 +439,7 @@ class TestReportView:
                 new=_failing_db("리포트 조회 실패"),
             ),
         )
-        _assert_text(result, ["Error: 리포트 조회 실패"])
+        _assert_text(result, ["Error: REPORT_ERROR: 리포트 조회 실패"])
 
     def test_not_found_json(self) -> None:
         result = _invoke(["--format", "json", "report", "view", "r-404"], *_no_report())
@@ -450,4 +454,6 @@ class TestReportView:
 
     def test_not_found_text(self) -> None:
         result = _invoke(["--format", "text", "report", "view", "r-404"], *_no_report())
-        _assert_text(result, ["Error: 리포트를 찾을 수 없습니다: r-404"])
+        _assert_text(
+            result, ["Error: REPORT_NOT_FOUND: 리포트를 찾을 수 없습니다: r-404"]
+        )
