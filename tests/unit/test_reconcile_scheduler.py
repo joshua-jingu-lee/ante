@@ -398,7 +398,7 @@ class TestBrokerAccountScoping:
             interval_seconds=0.1,
         )
 
-        with caplog.at_level(logging.WARNING, logger="ante.broker.scheduler"):
+        with caplog.at_level(logging.WARNING, logger=ReconcileScheduler.__module__):
             await sched.run_once()
 
         # acc-A 단일봇만 reconcile 호출 — acc-B 봇은 count 에서 제외.
@@ -422,6 +422,7 @@ class TestBrokerAccountScoping:
         assert any("acc-A" in rec.getMessage() for rec in skip_logs), (
             "WARNING 메시지에 scheduler의 broker_account_id(acc-A)가 포함돼야 한다"
         )
+        assert {rec.name for rec in skip_logs} == {ReconcileScheduler.__module__}
 
     async def test_scheduler_other_account_bots_excluded_from_count(
         self, reconciler, broker, bot_manager, eventbus
@@ -471,14 +472,18 @@ class TestBrokerAccountScoping:
             interval_seconds=0.1,
         )
 
-        with caplog.at_level(logging.WARNING, logger="ante.broker.scheduler"):
+        with caplog.at_level(logging.WARNING, logger=ReconcileScheduler.__module__):
             await sched.run_once()
 
         # orphan 제외 → acc-test 단일봇 → reconcile 보정.
         assert reconciler.reconcile.call_count == 1
         assert reconciler.reconcile.call_args.kwargs["bot_id"] == "bot-1"
         reconciler.detect_account_level.assert_not_called()
-        assert any("bot-orphan" in rec.getMessage() for rec in caplog.records)
+        orphan_logs = [
+            rec for rec in caplog.records if "bot-orphan" in rec.getMessage()
+        ]
+        assert orphan_logs
+        assert {rec.name for rec in orphan_logs} == {ReconcileScheduler.__module__}
 
 
 # ── #2352: 단일봇+running 라우팅에서 미귀속 보유 carryover 제외 (real reconciler) ──
