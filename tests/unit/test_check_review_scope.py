@@ -697,3 +697,204 @@ def test_comment_addition_with_raised_baseline_requires_review(repo: Repo) -> No
     assert result.returncode == 1
     assert "ast-identical\tM\tsrc/ante/m.py" in result.stdout
     assert f"review\tM\t{BASELINE}" in result.stdout
+
+
+# ── 스펙 코드 블록 기준선 감소 ──────────────────────────────────────────────
+
+SPEC_BASELINE = "scripts/spec_code_block_baseline.json"
+
+
+def _spec_baseline(python: int = 10, sql: int = 5, refs: int = 3) -> str:
+    values = {"python": python, "sql": sql, "py_line_refs": refs}
+    return json.dumps(values, indent=2) + "\n"
+
+
+SPEC_BASE = _spec_baseline()
+SPEC_EMPTY = _spec_baseline(0, 0, 0)
+
+SPEC_CASES = [
+    pytest.param(_spec_baseline(sql=4), True, id="lowered-one"),
+    pytest.param(SPEC_EMPTY, True, id="lowered-all"),
+    pytest.param(SPEC_BASE + "\n", True, id="values-equal"),
+    pytest.param(_spec_baseline(python=11), False, id="raised"),
+    pytest.param(_spec_baseline(python=9, refs=4), False, id="lowered-and-raised"),
+    pytest.param(
+        json.dumps({"python": 1, "sql": 1, "py_line_refs": 1, "bash": 0}),
+        False,
+        id="key-added",
+    ),
+    pytest.param(json.dumps({"python": 1, "sql": 1}), False, id="key-removed"),
+    pytest.param("{not json", False, id="broken-json"),
+    pytest.param(_spec_baseline(sql=-1), False, id="negative"),
+    pytest.param(SPEC_BASE.replace("5", "true"), False, id="bool"),
+]
+
+
+@pytest.mark.parametrize(("head", "lowered"), SPEC_CASES)
+def test_spec_baseline_lowered_in_process(head: str, lowered: bool) -> None:
+    assert scope.spec_baseline_lowered(SPEC_BASE.encode(), head.encode()) is lowered
+
+
+@pytest.mark.parametrize(("head", "lowered"), SPEC_CASES)
+def test_spec_baseline_lowered_subprocess(repo: Repo, head: str, lowered: bool) -> None:
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(SPEC_BASELINE, head)
+    repo.commit("change baseline")
+    result = repo.check()
+    if lowered:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert f"baseline-lowered\tM\t{SPEC_BASELINE}" in result.stdout
+        assert "verdict: SKIP (baseline-lowered)" in result.stdout
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert f"review\tM\t{SPEC_BASELINE}" in result.stdout
+
+
+@pytest.mark.parametrize(
+    "old",
+    [
+        pytest.param(b"{not json", id="base-broken-json"),
+        pytest.param(b'{"python": 1, "sql": 1}', id="base-missing-key"),
+        pytest.param(b"\xff\xfe", id="base-not-utf8"),
+    ],
+)
+def test_malformed_spec_base_is_not_lowered(old: bytes) -> None:
+    assert not scope.spec_baseline_lowered(old, SPEC_EMPTY.encode())
+
+
+def test_malformed_spec_base_requires_review(repo: Repo) -> None:
+    repo.write(SPEC_BASELINE, '{"python": 1, "sql": 1}')
+    repo.commit("bad baseline")
+    repo.mark_base()
+    repo.write(SPEC_BASELINE, SPEC_EMPTY)
+    repo.commit("fix baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{SPEC_BASELINE}" in result.stdout
+
+
+def test_spec_baseline_path_matches_checker() -> None:
+    checker_path = REPO_ROOT / "scripts" / "check_spec_code_blocks.py"
+    spec = importlib.util.spec_from_file_location("_spec_path_probe", checker_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    assert module.BASELINE_PATH.as_posix() == scope.SPEC_BASELINE_PATH
+    assert scope.SPEC_BASELINE_PATH == SPEC_BASELINE
+    assert scope.CHECK_SPEC_BLOCKS_PATH == checker_path
+
+
+def test_spec_baseline_load_removes_its_module_name() -> None:
+    assert scope.spec_baseline_lowered(SPEC_BASE.encode(), SPEC_BASE.encode())
+    assert "_check_review_scope_spec_blocks" not in sys.modules
+
+
+def test_spec_baseline_parser_load_failure_is_not_lowered(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(scope, "CHECK_SPEC_BLOCKS_PATH", tmp_path / "missing.py")
+    assert not scope.spec_baseline_lowered(SPEC_BASE.encode(), SPEC_EMPTY.encode())
+
+
+def test_spec_baseline_added_or_deleted_requires_review(repo: Repo) -> None:
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    repo.commit("add baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tA\t{SPEC_BASELINE}" in result.stdout
+
+    repo.mark_base()
+    repo.git("rm", "-q", SPEC_BASELINE)
+    repo.commit("delete baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tD\t{SPEC_BASELINE}" in result.stdout
+
+
+def test_spec_baseline_mode_change_requires_review(repo: Repo) -> None:
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    repo.commit("baseline")
+    repo.mark_base()
+    repo.write(SPEC_BASELINE, _spec_baseline(sql=4))
+    repo.git("add", SPEC_BASELINE)
+    repo.git("update-index", "--chmod=+x", SPEC_BASELINE)
+    repo.git("commit", "-q", "-m", "lower and chmod")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{SPEC_BASELINE}" in result.stdout
+
+
+def test_spec_baseline_elsewhere_requires_review(repo: Repo) -> None:
+    other = "scripts/sub/spec_code_block_baseline.json"
+    repo.write(other, SPEC_BASE)
+    repo.commit("baseline copy")
+    repo.mark_base()
+    repo.write(other, _spec_baseline(sql=4))
+    repo.commit("lower copy")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{other}" in result.stdout
+
+
+def _with_spec(repo: Repo) -> None:
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    repo.write("docs/specs/a.md", "```sql\nCREATE TABLE t (id INTEGER);\n```\n")
+    repo.commit("spec and baseline")
+    repo.mark_base()
+
+
+def test_spec_change_with_lowered_baseline_skips(repo: Repo) -> None:
+    _with_spec(repo)
+    repo.write("docs/specs/a.md", "테이블 정의: db-schema.md\n")
+    repo.write(SPEC_BASELINE, _spec_baseline(sql=4))
+    repo.commit("drop block")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "doc\tM\tdocs/specs/a.md" in result.stdout
+    assert f"baseline-lowered\tM\t{SPEC_BASELINE}" in result.stdout
+    assert "verdict: SKIP (baseline-lowered, doc)" in result.stdout
+
+
+def test_spec_change_with_raised_baseline_requires_review(repo: Repo) -> None:
+    _with_spec(repo)
+    repo.write("docs/specs/a.md", "```sql\nCREATE TABLE t (id INTEGER);\nX;\n```\n")
+    repo.write(SPEC_BASELINE, _spec_baseline(sql=6))
+    repo.commit("grow block")
+    result = repo.check()
+    assert result.returncode == 1
+    assert "doc\tM\tdocs/specs/a.md" in result.stdout
+    assert f"review\tM\t{SPEC_BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
+def test_src_change_with_lowered_spec_baseline_requires_review(repo: Repo) -> None:
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    _with_src(repo)
+    repo.write("src/ante/m.py", SRC.replace("return 1", "return 2"))
+    repo.write(SPEC_BASELINE, _spec_baseline(sql=4))
+    repo.commit("src and baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert "review\tM\tsrc/ante/m.py" in result.stdout
+    assert f"baseline-lowered\tM\t{SPEC_BASELINE}" in result.stdout
+    assert "verdict: REVIEW" in result.stdout
+
+
+def test_comment_and_spec_baselines_lowered_together_skip(repo: Repo) -> None:
+    repo.write(BASELINE, BASE_BASELINE)
+    repo.write(SPEC_BASELINE, SPEC_BASE)
+    repo.commit("baselines")
+    repo.mark_base()
+    repo.write(BASELINE, EMPTY_BASELINE)
+    repo.write(SPEC_BASELINE, _spec_baseline(sql=4))
+    repo.commit("lower both")
+    result = repo.check()
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert f"baseline-lowered\tM\t{BASELINE}" in result.stdout
+    assert f"baseline-lowered\tM\t{SPEC_BASELINE}" in result.stdout
