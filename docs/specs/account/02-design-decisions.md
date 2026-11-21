@@ -110,9 +110,9 @@ ante init [--member-id owner] [--name Owner] [--dir <경로>]
 또한 ``ante init``이 자동 생성하는 ``"test"`` 계좌는 runtime valid이지만
 사용자가 같은 ID로 새 계좌를 만들 수 있어서는 안 된다.
 
-**결정**: runtime invalid와 creation invalid를 분리한 helper 모듈
-``ante.account.scoping``을 도입하고 본 helper를 모든 account-scoped
-진입점의 SSOT로 삼는다.
+**결정**: runtime invalid와 creation invalid를 분리한 helper를 두고 모든
+account-scoped 진입점의 SSOT로 삼는다. 계좌 ID 검증의 단일 정의는
+``ante.core.account_id``에 있고 ``ante.account.scoping``이 재수출한다.
 
 - **runtime invalid**: ``None``/``""``/``"default"``/패턴 위반 — 모든 시점에서 거부
 - **creation invalid**: 위에 더해 ``"test"`` 추가 거부 (bootstrap seed 전용)

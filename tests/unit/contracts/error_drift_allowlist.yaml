@@ -122,7 +122,7 @@ known_drift_fmt_error_no_code:
   # 에 재등록한다.
 
 pending_migration:
-  - module: ante.account.errors
+  - module: ante.core.account_id
     class_anchor: AccountError
     reason: "baseline (#1841); register in #1842/#1843"
   - module: ante.approval.errors

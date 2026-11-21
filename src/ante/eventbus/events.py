@@ -5,8 +5,7 @@ from datetime import UTC, datetime
 from typing import ClassVar
 from uuid import UUID, uuid4
 
-from ante.account.errors import InvalidAccountIdError
-from ante.account.scoping import is_invalid_account_id
+from ante.core.account_id import InvalidAccountIdError, is_invalid_account_id
 
 
 @dataclass(frozen=True)
