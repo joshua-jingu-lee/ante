@@ -20,6 +20,7 @@ from unittest.mock import patch
 import click
 import pytest
 from click.testing import CliRunner
+from pydantic import ValidationError
 
 from ante.cli.main import cli
 from ante.contracts.cli_registry import all_contracts
@@ -257,6 +258,12 @@ def _model_targets(sent: list[Sent]) -> Iterator[Sent]:
             yield item
 
 
+def _judge(registry: CommandRegistry, command: str, args: Any) -> None:
+    spec = registry.get(command)
+    assert spec is not None and spec.request_model is not None
+    spec.request_model.model_validate(args)
+
+
 def test_rows_cover_every_runtime_ipc_contract() -> None:
     contracts = _runtime_contracts()
     assert len(contracts) == 40
@@ -298,10 +305,14 @@ def test_sent_args_pass_the_command_request_model(sent: list[Sent]) -> None:
     registry = _registry()
     targets = list(_model_targets(sent))
     assert targets
+    rejected: list[str] = []
     for item in targets:
-        spec = registry.get(item.command)
-        assert spec is not None and spec.request_model is not None
-        spec.request_model.model_validate(item.args)
+        _judge(registry, item.command, item.args)
+        try:
+            _judge(registry, item.command, {**item.args, "zz_extra": 1})
+        except ValidationError:
+            rejected.append(item.row.row_id)
+    assert rejected == [item.row.row_id for item in targets]
 
 
 def test_model_targets_are_every_modeled_command_but_the_stream(
