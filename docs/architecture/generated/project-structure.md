@@ -104,7 +104,8 @@ src/ante/
 │   ├── __init__.py
 │   ├── cold_path.py
 │   ├── info.py
-│   └── signal_channel_registry.py
+│   ├── signal_channel_registry.py
+│   └── reconcile_scheduler.py
 ├── strategy/
 │   ├── base.py                       # Strategy ABC, StrategyMeta, TradeHistoryView
 │   ├── context.py                    # StrategyContext — 전략 실행 컨텍스트 (파일 접근, 로깅, 거래 이력)
@@ -156,7 +157,6 @@ src/ante/
 │   ├── exceptions.py
 │   ├── __init__.py
 │   ├── registry.py
-│   ├── scheduler.py
 │   ├── test.py
 │   └── fill_scheduler.py
 ├── gateway/

@@ -32,8 +32,8 @@ from typing import Any
 
 import pytest
 
+import ante.bot.reconcile_scheduler as scheduler_mod
 import ante.broker.fill_scheduler as fill_scheduler_mod
-import ante.broker.scheduler as scheduler_mod
 import ante.core.log as core_log_mod
 import ante.main as main_module
 import ante.trade as trade_mod

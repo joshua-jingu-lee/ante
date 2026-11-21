@@ -23,6 +23,13 @@ class CircuitState(StrEnum):
     HALF_OPEN = "half_open"
 
 
+CIRCUIT_STATE_TRANSITIONS: dict[CircuitState, set[CircuitState]] = {
+    CircuitState.CLOSED: {CircuitState.OPEN},
+    CircuitState.OPEN: {CircuitState.HALF_OPEN, CircuitState.CLOSED},
+    CircuitState.HALF_OPEN: {CircuitState.OPEN, CircuitState.CLOSED},
+}
+
+
 class CircuitBreaker:
     """Circuit breaker 구현.
 
@@ -96,6 +103,11 @@ class CircuitBreaker:
     def _transition(self, new_state: CircuitState, reason: str) -> None:
         """상태 전환 + 이벤트 발행."""
         old_state = self._state
+        if new_state not in CIRCUIT_STATE_TRANSITIONS.get(old_state, set()):
+            raise ValueError(
+                f"CircuitBreaker[{self._name}] {old_state.value} → "
+                f"{new_state.value} 전이는 허용되지 않습니다."
+            )
         self._state = new_state
         logger.warning(
             "CircuitBreaker[%s] %s → %s (%s)",

@@ -51,6 +51,13 @@ class QuarterStatus(Enum):
     SKIP_EMPTY = "skip_empty"
 
 
+QUARTER_STATUS_TRANSITIONS: dict[QuarterStatus, set[QuarterStatus]] = {
+    QuarterStatus.OK: set(),
+    QuarterStatus.HALT: set(),
+    QuarterStatus.SKIP_EMPTY: set(),
+}
+
+
 _KST = timezone(timedelta(hours=9))
 
 

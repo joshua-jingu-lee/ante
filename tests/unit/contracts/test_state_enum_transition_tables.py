@@ -61,11 +61,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 BASELINE_WITHOUT_TABLE: frozenset[str] = frozenset(
     {
         "src/ante/bot/config.py::BotStatus",
-        "src/ante/broker/circuit_breaker.py::CircuitState",
-        "src/ante/feed/pipeline/dart_collector.py::QuarterStatus",
         "src/ante/ipc/server.py::IPCServerState",
         "src/ante/report/models.py::ReportStatus",
-        "src/ante/trade/models.py::TradeStatus",
     }
 )
 
