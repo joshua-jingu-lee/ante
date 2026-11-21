@@ -16,6 +16,8 @@
 from __future__ import annotations
 
 import dataclasses
+from decimal import Decimal
+from fractions import Fraction
 from unittest.mock import AsyncMock
 
 import pytest
@@ -333,6 +335,57 @@ async def test_gateway_budget_increase_buy_rejected(
 
     assert len(rejected) == 1
     assert rejected[0].reason == "modify_budget_increase_unsupported"
+    broker.modify_order.assert_not_awaited()
+
+
+async def test_gateway_buy_same_price_executes(
+    account_service: AsyncMock, eventbus: EventBus, broker: AsyncMock
+) -> None:
+    """buy 신규가가 원주문가와 같으면 예산 증가가 아니라 정정을 실행한다."""
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    executed: list[OrderModifyExecutedEvent] = []
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyExecutedEvent, lambda e: executed.append(e))
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+
+    await gateway._on_order_modify(_make_modify_event(quantity=0.0, price=50000.0))
+
+    assert rejected == []
+    assert [e.price for e in executed] == [50000.0]
+    broker.modify_order.assert_awaited_once_with(
+        "brk-1", quantity=10.0, price=50000.0, order_type="limit"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("price", True),
+        ("price", Decimal("45000")),
+        ("price", Fraction(45000)),
+        ("quantity", True),
+        ("quantity", Decimal("10")),
+    ],
+    ids=["price_bool", "price_decimal", "price_fraction", "qty_bool", "qty_decimal"],
+)
+async def test_gateway_bool_and_non_int_float_numbers_rejected(
+    account_service: AsyncMock,
+    eventbus: EventBus,
+    broker: AsyncMock,
+    field: str,
+    value: object,
+) -> None:
+    """bool 과 int·float 가 아닌 수 타입은 유한 숫자로 보지 않아 거부한다."""
+    record = _make_record(side="buy", order_price=50000.0, ordered_qty=10.0)
+    gateway = _make_gateway(account_service, eventbus, _make_tracker(record))
+    rejected: list[OrderModifyRejectedEvent] = []
+    eventbus.subscribe(OrderModifyRejectedEvent, lambda e: rejected.append(e))
+    args: dict[str, object] = {"quantity": 0.0, "price": 45000.0, field: value}
+
+    await gateway._on_order_modify(_make_modify_event(**args))
+
+    assert [e.reason for e in rejected] == ["modify_invalid_args"]
     broker.modify_order.assert_not_awaited()
 
 

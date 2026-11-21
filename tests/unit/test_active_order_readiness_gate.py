@@ -637,6 +637,146 @@ class TestLayer3Gateway:
 # ── attempt4 (P1×2 + 메타 감사): place_order 직전 단일 재확인 + in-flight backstop ─
 
 
+class TestLayer3GateFreshFetch:
+    """계층3 gate 의 단일 조회·주문마다 새로 읽기·거부 사유와 알림 문구."""
+
+    @staticmethod
+    def _gateway(
+        bus: EventBus, svc: MagicMock, registry: RuntimeReadinessRegistry
+    ) -> tuple[APIGateway, MagicMock]:
+        broker = MagicMock()
+        broker.place_order = AsyncMock(return_value="BRK-1")
+        svc.get_broker = AsyncMock(return_value=broker)
+        gw = APIGateway(account_service=svc, eventbus=bus, runtime_readiness=registry)
+        return gw, broker
+
+    @staticmethod
+    async def _submit(gw: APIGateway, side: str = "buy") -> str:
+        return await gw.submit_order(
+            bot_id=BOT, symbol=SYMBOL, side=side, quantity=10.0, account_id=ACCOUNT
+        )
+
+    async def test_gate_fetches_account_once_and_judges_both_axes_from_it(
+        self,
+    ) -> None:
+        """한 주문의 gate 는 계좌를 한 번 읽고 그 결과로 readiness·status 를 본다."""
+        corrupt = MagicMock()
+        corrupt.status = AccountStatus.ACTIVE
+        corrupt.broker_type = None
+        corrupt.trading_mode = TradingMode.LIVE
+        svc = MagicMock()
+        svc.get = AsyncMock(side_effect=[make_account(ACCOUNT), corrupt])
+        gw, broker = self._gateway(EventBus(), svc, ready_registry(ACCOUNT))
+
+        assert await self._submit(gw) == "BRK-1"
+
+        assert svc.get.await_count == 1
+        broker.place_order.assert_awaited_once()
+
+    async def test_gate_rereads_status_for_each_order(self) -> None:
+        """첫 주문 뒤 SUSPENDED 가 되면 두 번째 주문은 새로 읽은 status 로 막힌다."""
+        from ante.broker.exceptions import APIError
+
+        svc = MagicMock()
+        svc.get = AsyncMock(
+            side_effect=[
+                make_account(ACCOUNT),
+                make_account(ACCOUNT, status=AccountStatus.SUSPENDED),
+            ]
+        )
+        gw, broker = self._gateway(EventBus(), svc, ready_registry(ACCOUNT))
+
+        await self._submit(gw)
+        with pytest.raises(APIError) as exc:
+            await self._submit(gw)
+
+        assert exc.value.error_code == "account_suspended"
+        assert svc.get.await_count == 2
+        assert broker.place_order.await_count == 1
+
+    async def test_gate_rereads_readiness_registry_for_each_order(self) -> None:
+        """첫 주문 뒤 registry 가 not_ready 가 되면 두 번째 주문은 막힌다."""
+        from ante.broker.exceptions import APIError
+
+        registry = ready_registry(ACCOUNT)
+        svc = _account_service(make_account(ACCOUNT))
+        gw, broker = self._gateway(EventBus(), svc, registry)
+
+        await self._submit(gw)
+        registry.mark_not_ready(ACCOUNT, ReadinessFlag.FILL_RECONCILE, "lost")
+        with pytest.raises(APIError) as exc:
+            await self._submit(gw)
+
+        assert exc.value.error_code == "account_not_ready"
+        assert broker.place_order.await_count == 1
+
+    @pytest.mark.parametrize(
+        ("broker_type", "trading_mode"),
+        [("kis-domestic", None), (None, TradingMode.LIVE)],
+        ids=["trading_mode_missing", "broker_type_not_str"],
+    )
+    async def test_gate_rejects_unknown_meta_as_metadata_unavailable(
+        self, broker_type: object, trading_mode: object
+    ) -> None:
+        """broker_type·trading_mode 를 알 수 없으면 메타 미상 사유로 거부한다."""
+        from ante.broker.exceptions import APIError
+
+        meta = MagicMock()
+        meta.status = AccountStatus.ACTIVE
+        meta.broker_type = broker_type
+        meta.trading_mode = trading_mode
+        gw, broker = self._gateway(
+            EventBus(), _account_service(meta), ready_registry(ACCOUNT)
+        )
+
+        with pytest.raises(APIError) as exc:
+            await self._submit(gw)
+
+        assert str(exc.value) == "account_not_ready: account_metadata_unavailable"
+        assert exc.value.error_code == "account_not_ready"
+        broker.place_order.assert_not_called()
+
+    async def test_gate_not_ready_reason_keeps_missing_flag_suffix(self) -> None:
+        """not_ready 거부 사유는 빠진 플래그 suffix 를 단 not_ready_reason 이다."""
+        from ante.account.gate import not_ready_reason
+        from ante.broker.exceptions import APIError
+
+        registry = not_ready_registry(ACCOUNT)
+        gw, _broker = self._gateway(
+            EventBus(), _account_service(make_account(ACCOUNT)), registry
+        )
+        expected = not_ready_reason(
+            registry,
+            ACCOUNT,
+            broker_type="kis-domestic",
+            trading_mode=TradingMode.LIVE,
+        )
+
+        with pytest.raises(APIError) as exc:
+            await self._submit(gw)
+
+        assert expected.startswith("account_not_ready")
+        assert expected != "account_not_ready"
+        assert str(exc.value) == expected
+
+    async def test_gate_alert_uses_generic_phrasing_for_sell(self) -> None:
+        """승인 이벤트에는 청산 표지가 없어 sell 차단 알림도 일반 문구를 쓴다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        gw, broker = self._gateway(
+            bus,
+            _account_service(make_account(ACCOUNT)),
+            not_ready_registry(ACCOUNT),
+        )
+
+        await gw._on_order_approved(_approved(side="sell"))
+
+        assert len(cap.failed) == 1
+        assert _notif_count(cap) == 1
+        assert cap.notifications[-1].title == "주문 차단: account not_ready"
+        broker.place_order.assert_not_called()
+
+
 class _CallbackRateLimiter:
     """``acquire()`` await 중 콜백을 실행하는 테스트용 rate limiter.
 
