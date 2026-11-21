@@ -4,6 +4,10 @@
 The recorder is ``tests/preservation_recorder.py``. Run with ``src`` on
 ``PYTHONPATH``: the text-mode test reads the entry hook and the error registry.
 
+The recorder writes ``HOME``, ``ANTE_CONFIG_DIR`` and the pytest basetemp as
+``<HOME>``, ``<ANTE_CONFIG_DIR>`` and ``<TMP>``, so the runs need no fixed
+``--basetemp``. Record before and after with the same recorder file.
+
 ``compare BEFORE BEFORE_AGAIN AFTER --covered COVERED [--intended NODEID#N ...]
 [--allow-after-only NODEID ...]``
 
