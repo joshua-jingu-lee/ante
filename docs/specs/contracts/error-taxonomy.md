@@ -108,6 +108,10 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
    — 외부 시스템 호출에서 올라온 미분류 `Exception`. 분류 가능한 broker/외부
    오류는 `external` category 코드(예: `BROKER_API_ERROR`)로 분류한다.
 
+명령 밖으로 나온 처리되지 않은 `Exception`은 JSON 모드에서 CLI error 봉투로,
+text 모드에서 `Error: <code>: <message>`로 끝난다. 분류되지 않은 예외는
+`EXECUTION_ERROR`다.
+
 **금지** (drift):
 
 - domain exception이 `code` 미부여로 `EXECUTION_ERROR`로 접히는 것.
@@ -143,7 +147,7 @@ runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 
 | Normative code | Legacy alias (1.0 envelope value) | Category | 비고 |
 |----------------|-----------------------------------|----------|------|
 | `AUTH_REQUIRED` | `auth_required` | `auth` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
-| `AUTH_FAILED` | `auth_failed` | `auth` | `ANTE_MEMBER_TOKEN`으로 `MemberService.authenticate()` 실패 |
+| `AUTH_FAILED` | `auth_failed` | `auth` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
 | `PERMISSION_DENIED` | `permission_denied` | `permission` | 인증 OK이나 scope 부족 |
 
 규칙:
