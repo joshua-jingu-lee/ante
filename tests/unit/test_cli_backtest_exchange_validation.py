@@ -50,7 +50,7 @@ class TestBacktestExchangeValidation:
     """backtest run --exchange canonical 검증 (CLI 경계 단일 지점)."""
 
     def test_non_canonical_exchange_text_mode_exit1_message_only(self, tmp_path):
-        """비-canonical 거래소: text 모드 exit 1 + 에러 메시지만(code 미출력)."""
+        """비-canonical 거래소: text 모드 exit 1 + ``Error: <code>: <message>``."""
         strategy = tmp_path / "test_strategy.py"
         strategy.write_text("# dummy")
         runner = _make_runner()
@@ -72,8 +72,7 @@ class TestBacktestExchangeValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 거래소" in result.output
         assert "ORACLE_INVALID_EXCHANGE" in result.output
-        # text 모드: OutputFormatter.error는 code를 출력하지 않는다.
-        assert "BACKTEST_INVALID_EXCHANGE" not in result.output
+        assert "Error: BACKTEST_INVALID_EXCHANGE: " in result.output
 
     def test_non_canonical_exchange_json_mode_exit1_with_code(self, tmp_path):
         """비-canonical 거래소: --format json exit 1 + 구조화 error payload."""

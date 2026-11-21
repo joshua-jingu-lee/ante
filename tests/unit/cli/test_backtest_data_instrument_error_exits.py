@@ -220,7 +220,7 @@ class TestBacktestRunValidation:
         message: str,
     ) -> None:
         result = _invoke(run_args("text", *options))
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: {code}: {message}"])
 
     def test_same_day_range_is_accepted(
         self, run_args: Callable[..., list[str]]
@@ -277,7 +277,7 @@ class TestBacktestRunExecution:
             run_args("text", *_RANGE_OPTIONS, "--symbols", "005930"),
             _service(result={**_RUN_RESULT, "datasets": [{"row_count": 0}]}),
         )
-        _assert_text(result, [f"Error: {_BT_NO_DATA}"])
+        _assert_text(result, [f"Error: BACKTEST_DATA_NOT_FOUND: {_BT_NO_DATA}"])
 
     def test_data_with_rows_is_accepted(
         self, run_args: Callable[..., list[str]]
@@ -305,7 +305,7 @@ class TestBacktestRunExecution:
             run_args("text", *_RANGE_OPTIONS),
             _service(error=RuntimeError("백테스트 하위 프로세스 실패")),
         )
-        _assert_text(result, ["Error: 백테스트 하위 프로세스 실패"])
+        _assert_text(result, ["Error: BACKTEST_ERROR: 백테스트 하위 프로세스 실패"])
 
 
 class TestBacktestHistory:
@@ -324,7 +324,7 @@ class TestBacktestHistory:
 
     def test_lookup_failure_text(self) -> None:
         result = _invoke(self._args("text"), self._db())
-        _assert_text(result, ["Error: 백테스트 이력 조회 실패"])
+        _assert_text(result, ["Error: BACKTEST_ERROR: 백테스트 이력 조회 실패"])
 
 
 _FILTER_TIMEFRAME = "허용되지 않은 timeframe 값: 7x (허용: 1m, 5m, 15m, 1h, 1d)"
@@ -363,7 +363,10 @@ class TestDataList:
             _invoke(["--format", "json", *base]),
             _envelope("DATA_INVALID_FILTER", message),
         )
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]),
+            [f"Error: DATA_INVALID_FILTER: {message}"],
+        )
 
     def test_ohlcv_timeframe_is_accepted(self, data_path: str) -> None:
         result = _invoke(
@@ -399,7 +402,7 @@ class TestDataList:
         )
         _assert_text(
             _invoke(["--format", "text", *base], listing, db),
-            ["Error: 종목명 조회 실패"],
+            ["Error: DATA_ERROR: 종목명 조회 실패"],
         )
 
 
@@ -420,7 +423,9 @@ class TestDataInfo:
     ) -> None:
         base = ["data", "info", dataset_id, "--data-path", data_path]
         _assert_json(_invoke(["--format", "json", *base]), _envelope(code, message))
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]), [f"Error: {code}: {message}"]
+        )
 
 
 _CONFIRM = "위험 명령입니다. --yes를 명시해야 데이터셋을 삭제합니다."
@@ -436,7 +441,10 @@ class TestDataDelete:
             _invoke(["--format", "json", *base]),
             _envelope("CLI_CONFIRMATION_REQUIRED", _CONFIRM),
         )
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {_CONFIRM}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]),
+            [f"Error: CLI_CONFIRMATION_REQUIRED: {_CONFIRM}"],
+        )
 
     @pytest.mark.parametrize(
         ("options", "code", "message"),
@@ -460,7 +468,9 @@ class TestDataDelete:
     ) -> None:
         base = ["data", "delete", *options, "--yes", "--data-path", data_path]
         _assert_json(_invoke(["--format", "json", *base]), _envelope(code, message))
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]), [f"Error: {code}: {message}"]
+        )
 
 
 _VALIDATE_TIMEFRAME = f"유효하지 않은 타임프레임: '7x'. 허용 값: {_TIMEFRAMES}"
@@ -490,7 +500,9 @@ class TestDataValidate:
     ) -> None:
         base = ["data", "validate", "--data-path", data_path, *options]
         _assert_json(_invoke(["--format", "json", *base]), _envelope(code, message))
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]), [f"Error: {code}: {message}"]
+        )
 
     def test_valid_symbol_is_accepted(self, data_path: str) -> None:
         result = _invoke(
@@ -529,7 +541,10 @@ class TestInstrumentList:
             _invoke(["--format", "json", *base]),
             _envelope("INSTRUMENT_INVALID_EXCHANGE", _INST_EXCHANGE),
         )
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {_INST_EXCHANGE}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]),
+            [f"Error: INSTRUMENT_INVALID_EXCHANGE: {_INST_EXCHANGE}"],
+        )
 
 
 def _no_broker_config() -> Any:
@@ -565,7 +580,9 @@ class TestInstrumentSync:
             str(tmp_path / "i.db"),
         ]
         _assert_json(_invoke(["--format", "json", *base]), _envelope(code, message))
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]), [f"Error: {code}: {message}"]
+        )
 
     @pytest.mark.parametrize("mode", ["json", "text"])
     def test_missing_broker_config(self, tmp_path: Path, mode: str) -> None:
@@ -661,7 +678,9 @@ class TestInstrumentImport:
             str(tmp_path / "i.db"),
         ]
         _assert_json(_invoke(["--format", "json", *base]), _envelope(code, message))
-        _assert_text(_invoke(["--format", "text", *base]), [f"Error: {message}"])
+        _assert_text(
+            _invoke(["--format", "text", *base]), [f"Error: {code}: {message}"]
+        )
 
     def test_non_krx_symbol_shape_is_accepted(self, tmp_path: Path) -> None:
         path = tmp_path / "i.json"
