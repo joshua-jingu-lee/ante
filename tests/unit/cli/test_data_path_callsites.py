@@ -88,7 +88,7 @@ def expected_default_path(config_dir: Path) -> str:
 # (cli_args, has_data_path_option, positional_supports_data_path)
 #
 # 16 callsite census:
-#   feed/cli.py        : 8 option + 1 positional (feed init) = 9
+#   cli/commands/feed.py : 8 option + 1 positional (feed init) = 9
 #   cli/commands/data.py : 6 option = 6
 #   cli/commands/backtest.py : 1 option = 1
 #
@@ -99,7 +99,7 @@ def expected_default_path(config_dir: Path) -> str:
 # CLI 가 helper 미호출 시 helper.call_count == 0 으로 즉시 발견된다.
 
 _OPTION_CALLSITES_DEFAULT = [
-    # feed/cli.py
+    # cli/commands/feed.py
     pytest.param(
         ["feed", "config", "set", "ANTE_DART_API_KEY", "xxx"],
         id="feed_config_set",
@@ -153,7 +153,7 @@ class TestConfigResolvedDefault:
         # callsite 별로 import 위치가 다르므로 source module 에 patch.
         with (
             patch(
-                "ante.feed.cli.resolve_data_path",
+                "ante.cli.commands.feed.resolve_data_path",
                 side_effect=_spy_helper(captured, fallback),
             ),
             patch(
@@ -181,7 +181,7 @@ class TestConfigResolvedDefault:
         captured: list[tuple[object, object]] = []
         fallback = str(tmp_path / "fallback-data")
         with patch(
-            "ante.feed.cli.resolve_data_path",
+            "ante.cli.commands.feed.resolve_data_path",
             side_effect=_spy_helper(captured, fallback),
         ):
             result = runner.invoke(cli, ["feed", "init"], catch_exceptions=False)
@@ -212,7 +212,7 @@ class TestOverrideInvariant:
         custom = str(tmp_path / "my-custom-data")
         fallback = str(tmp_path / "unused-fallback")
         with patch(
-            "ante.feed.cli.resolve_data_path",
+            "ante.cli.commands.feed.resolve_data_path",
             side_effect=_spy_helper(captured, fallback),
         ):
             runner.invoke(
@@ -260,7 +260,7 @@ class TestOverrideInvariant:
         custom = str(tmp_path / "my-positional-data")
         fallback = str(tmp_path / "unused-fallback")
         with patch(
-            "ante.feed.cli.resolve_data_path",
+            "ante.cli.commands.feed.resolve_data_path",
             side_effect=_spy_helper(captured, fallback),
         ):
             runner.invoke(cli, ["feed", "init", custom], catch_exceptions=False)

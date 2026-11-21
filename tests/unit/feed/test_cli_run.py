@@ -122,7 +122,7 @@ class TestRunBackfill:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """backfill이 정상 실행되면 exit code 0."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -138,7 +138,7 @@ class TestRunBackfill:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """FeedOrchestrator.run_backfill이 호출된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -155,7 +155,7 @@ class TestRunBackfill:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """출력에 결과 요약이 포함된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -172,7 +172,7 @@ class TestRunBackfill:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """--since 옵션이 config의 backfill_since를 오버라이드한다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -209,7 +209,7 @@ class TestRunBackfill:
         """--format json 출력이 올바르다."""
         import json
 
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_backfill = AsyncMock(return_value=_EMPTY_RESULT)
             mock_build.return_value = mock_orch
@@ -241,7 +241,7 @@ class TestRunDaily:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """daily가 정상 실행되면 exit code 0."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -257,7 +257,7 @@ class TestRunDaily:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """FeedOrchestrator.run_daily가 호출된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -274,7 +274,7 @@ class TestRunDaily:
         self, runner: CliRunner, initialized_data_path: str
     ) -> None:
         """출력에 Daily 수집 결과가 포함된다."""
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -298,7 +298,7 @@ class TestRunDaily:
             target_date="2026-01-15",
         )
 
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=custom_result)
             mock_build.return_value = mock_orch
@@ -333,7 +333,7 @@ class TestRunDaily:
         """--format json 출력이 올바르다."""
         import json
 
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_orch = AsyncMock()
             mock_orch.run_daily = AsyncMock(return_value=_DAILY_RESULT)
             mock_build.return_value = mock_orch
@@ -413,7 +413,7 @@ class TestFeedStart:
             backfill_at="01:00",
             blocked_hours='"09:00-15:30"',
         )
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_build.return_value = AsyncMock()
             result = runner.invoke(
                 cli,
@@ -432,7 +432,7 @@ class TestFeedStart:
             backfill_at="01:00",
             blocked_hours='"16:00-9:00"',
         )
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_build.return_value = AsyncMock()
             result = runner.invoke(
                 cli,
@@ -451,7 +451,7 @@ class TestFeedStart:
             backfill_at="01:00",
             blocked_hours='"09:00-15:30"',
         )
-        with patch("ante.feed.cli._build_orchestrator") as mock_build:
+        with patch("ante.cli.commands.feed._build_orchestrator") as mock_build:
             mock_build.return_value = AsyncMock()
             result = runner.invoke(
                 cli,

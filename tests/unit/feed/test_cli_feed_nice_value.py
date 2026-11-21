@@ -90,7 +90,7 @@ def _invoke_start(runner: CliRunner, data_path: str, *, json_fmt: bool = False):
     if json_fmt:
         args = ["--format", "json", *args]
     with (
-        patch("ante.feed.cli._build_orchestrator") as mock_build,
+        patch("ante.cli.commands.feed._build_orchestrator") as mock_build,
         patch(
             "ante.feed.cli_scheduler.run_scheduler_loop", new_callable=AsyncMock
         ) as mock_loop,
@@ -248,7 +248,7 @@ class TestFeedRunNoNice:
 
         data_path = _init_with_config(tmp_path, nice_value="10")
         with (
-            patch("ante.feed.cli._build_orchestrator") as mock_build,
+            patch("ante.cli.commands.feed._build_orchestrator") as mock_build,
             patch("os.setpriority") as mock_sp,
         ):
             mock_orch = AsyncMock()
