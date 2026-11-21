@@ -755,7 +755,8 @@ tests/
 │   ├── test_config_dir_isolation_guard.py
 │   ├── test_check_spec_code_blocks.py
 │   ├── test_check_imports.py
-│   └── test_check_entry_ratchet.py
+│   ├── test_check_entry_ratchet.py
+│   └── test_check_lint_ratchet.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
@@ -814,7 +815,9 @@ scripts/
 ├── check_imports.py
 ├── import_baseline.json
 ├── check_entry_ratchet.py
-└── entry_ratchet_baseline.json
+├── entry_ratchet_baseline.json
+├── check_lint_ratchet.py
+└── lint_baseline.json
 ```
 
 ## docs/ — 설계 문서

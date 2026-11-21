@@ -48,6 +48,9 @@ jobs:
       - name: MyPy type check
         run: mypy src/
 
+      - name: Lint ratchet check
+        run: python scripts/check_lint_ratchet.py
+
       - name: Generated artifact sync check
         run: |
           python scripts/generate_project_structure.py --check
