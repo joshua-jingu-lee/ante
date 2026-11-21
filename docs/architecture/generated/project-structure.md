@@ -767,7 +767,8 @@ tests/
 │   ├── test_check_entry_ratchet.py
 │   ├── test_check_lint_ratchet.py
 │   ├── test_approval_status_transitions.py
-│   └── test_compare_error_exit_records.py
+│   ├── test_compare_error_exit_records.py
+│   └── test_preservation_recorder.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py

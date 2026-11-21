@@ -82,3 +82,21 @@ def test_known_limit_codes_not_yet_registered_are_exactly_the_listed_set() -> No
     assert {c for c in KNOWN_LIMIT_CODES if c not in codes} == (
         KNOWN_LIMIT_CODES_NOT_YET_REGISTERED
     )
+
+
+def test_cli_error_classes_are_registered_under_their_own_code() -> None:
+    from ante.contracts import cli_errors
+
+    classes = [
+        v
+        for v in vars(cli_errors).values()
+        if isinstance(v, type)
+        and issubclass(v, BaseException)
+        and v.__module__ == cli_errors.__name__
+    ]
+    assert len(classes) == len(cli_errors.__all__) > 0
+    spec_of = error_registry.EXCEPTION_TO_SPEC
+    registered = {
+        c.__name__: spec_of[c].code if c in spec_of else None for c in classes
+    }
+    assert registered == {c.__name__: c.code for c in classes}
