@@ -18,6 +18,28 @@ class ApprovalStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+APPROVAL_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    ApprovalStatus.PENDING: {
+        ApprovalStatus.APPROVED,
+        ApprovalStatus.REJECTED,
+        ApprovalStatus.ON_HOLD,
+        ApprovalStatus.CANCELLED,
+        ApprovalStatus.EXPIRED,
+    },
+    ApprovalStatus.APPROVED: {ApprovalStatus.EXECUTION_FAILED},
+    ApprovalStatus.EXECUTION_FAILED: {
+        ApprovalStatus.APPROVED,
+        ApprovalStatus.REJECTED,
+        ApprovalStatus.ON_HOLD,
+        ApprovalStatus.CANCELLED,
+    },
+    ApprovalStatus.REJECTED: {ApprovalStatus.PENDING},
+    ApprovalStatus.ON_HOLD: {ApprovalStatus.PENDING, ApprovalStatus.CANCELLED},
+    ApprovalStatus.EXPIRED: set(),
+    ApprovalStatus.CANCELLED: set(),
+}
+
+
 class ApprovalType(StrEnum):
     """결재 유형."""
 
