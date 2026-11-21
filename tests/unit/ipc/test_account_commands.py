@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -14,6 +16,7 @@ import pytest
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
+from tests.unit.ipc.test_request_model_domain import validation_message
 
 ACTOR = "ops-lead"
 
@@ -119,36 +122,73 @@ async def test_the_bootstrap_test_account_is_accepted(command: str) -> None:
     assert response["result"]["account_id"] == "test"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["account.suspend", "account.activate"])
-async def test_reserved_default_account_is_rejected(command: str) -> None:
-    harness = _Harness()
-    response = await harness.send(command, {"account_id": "default"})
-    assert response == {
+COMMANDS = ["account.suspend", "account.activate"]
+
+
+def _rejected(command: str, kind: str) -> dict:
+    return {
         "id": "req-1",
         "status": "error",
         "error": {
             "code": "VALIDATION_ERROR",
-            "message": (
-                f"(ipc.{command}) 유효한 account_id가 필요합니다: 'default'. "
-                "fallback (default, '', None) 또는 형식 위반 값은 사용할 수 없습니다."
-            ),
+            "message": validation_message(command, ("account_id", kind)),
         },
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", COMMANDS)
+@pytest.mark.parametrize("account_id", ["default", "", "ab", "a" * 31, "bad_id!"])
+async def test_invalid_account_id_is_rejected_before_the_handler(
+    command: str, account_id: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, {"account_id": account_id})
+    assert response == _rejected(command, "invalid_account_id")
     harness.assert_no_service_call()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("command", ["account.suspend", "account.activate"])
-async def test_numeric_account_id(command: str) -> None:
+@pytest.mark.parametrize("command", COMMANDS)
+@pytest.mark.parametrize("account_id", ["abc", "a" * 30])
+async def test_account_id_at_the_pattern_bounds_is_accepted(
+    command: str, account_id: str
+) -> None:
     harness = _Harness()
-    response = await harness.send(command, {"account_id": 7})
-    assert response == {
-        "id": "req-1",
-        "status": "error",
-        "error": {
-            "code": "EXECUTION_ERROR",
-            "message": "expected string or bytes-like object, got 'int'",
-        },
-    }
+    response = await harness.send(command, {"account_id": account_id})
+    assert response["status"] == "ok", response
+    assert response["result"]["account_id"] == account_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", COMMANDS)
+@pytest.mark.parametrize(
+    ("args", "kind"),
+    [
+        ({}, "missing"),
+        ({"account_id": None}, "string_type"),
+        ({"account_id": 7}, "string_type"),
+    ],
+)
+async def test_missing_or_non_string_account_id(
+    command: str, args: dict[str, Any], kind: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, args)
+    assert response == _rejected(command, kind)
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", COMMANDS)
+async def test_invalid_account_id_is_not_reflected(
+    command: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKACCT001SECRET!"
+    harness = _Harness()
+    response = await harness.send(command, {"account_id": marker})
+    assert response == _rejected(command, "invalid_account_id")
+    assert "MARKACCT001SECRET" not in json.dumps(response, ensure_ascii=False)
+    assert "MARKACCT001SECRET" not in caplog.text
     harness.assert_no_service_call()

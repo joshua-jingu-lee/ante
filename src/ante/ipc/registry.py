@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from ante.ipc.requests import (
+    AccountActivateRequest,
+    AccountSuspendRequest,
     IPCRequest,
     StrategySetStatusRequest,
     SystemClearHaltRequest,
@@ -151,11 +153,11 @@ async def _handle_system_clear_halt(
 
 
 async def _handle_account_suspend(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: AccountSuspendRequest, actor: str
 ) -> dict:
     """계좌 정지 IPC handler."""
-    account_id = args["account_id"]
-    reason = args.get("reason", "IPC suspend")
+    account_id = request.account_id
+    reason = request.reason
     await svc.account.suspend(account_id, reason=reason, suspended_by=actor)
     return {
         "account_id": account_id,
@@ -169,10 +171,10 @@ async def _handle_account_suspend(
 
 
 async def _handle_account_activate(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: AccountActivateRequest, actor: str
 ) -> dict:
     """계좌 활성화 IPC handler."""
-    account_id = args["account_id"]
+    account_id = request.account_id
     await svc.account.activate(account_id, activated_by=actor)
     return {
         "account_id": account_id,
@@ -1168,16 +1170,16 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_account_suspend,
         is_mutating=True,
         required_services=frozenset({"account", "audit_logger"}),
-        account_id_policy="required",
         audit_action="account.suspend",
+        request_model=AccountSuspendRequest,
     )
     registry.register(
         "account.activate",
         _handle_account_activate,
         is_mutating=True,
         required_services=frozenset({"account", "audit_logger"}),
-        account_id_policy="required",
         audit_action="account.activate",
+        request_model=AccountActivateRequest,
     )
     registry.register(
         "bot.create",
