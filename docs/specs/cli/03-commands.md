@@ -62,15 +62,15 @@ allowlist 후보에서 제거한다.
 
 ## 실행 분류 전수 표
 
-| 분류 | 의미 |
-|------|------|
-| `offline` | 서버 프로세스와 무관하게 CLI가 직접 서비스/저장소를 생성해 실행한다. 서버 실행 중에도 live 상태를 바꾸지 않는다. |
-| `runtime IPC` | 서버 프로세스의 서비스 인스턴스, EventBus, 인메모리 상태, 외부 연결, 세션 상태가 필요하므로 IPC로 위임한다. |
-| `runtime IPC + snapshot fallback` | 서버 실행 중에는 IPC로 live 상태를 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다. |
-| `runtime IPC + cold-path fallback` | 서버 실행 중에는 IPC로 live 상태를 변경하고, 서버 정지 중에는 정해진 persisted cleanup만 직접 수행한다. |
-| `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 active Ante runtime이 없는 상태에서만 직접 DB를 수정한다. |
-| `external process` | 별도 프로세스 실행, OS signal, 장기 실행 파이프/스케줄러처럼 CLI 프로세스 경계를 넘는 작업이다. |
-| `bootstrap/maintenance` | 초기화·복구 목적의 인증 면제 또는 서버 정지 fallback 경로다. |
+| 분류 | 의미 | `CliCommandContract.execution` 값 |
+|------|------|------|
+| `offline` | 서버 프로세스와 무관하게 CLI가 직접 서비스/저장소를 생성해 실행한다. 서버 실행 중에도 live 상태를 바꾸지 않는다. | `"offline"` |
+| `runtime IPC` | 서버 프로세스의 서비스 인스턴스, EventBus, 인메모리 상태, 외부 연결, 세션 상태가 필요하므로 IPC로 위임한다. | `"runtime_ipc"` |
+| `runtime IPC + snapshot fallback` | 서버 실행 중에는 IPC로 live 상태를 조회하고, 서버 정지 중에는 DB에 저장된 persisted snapshot만 조회한다. | `"runtime_ipc"` |
+| `runtime IPC + cold-path fallback` | 서버 실행 중에는 IPC로 live 상태를 변경하고, 서버 정지 중에는 정해진 persisted cleanup만 직접 수행한다. | `"runtime_ipc"` |
+| `cold-path` | 서버 topology 또는 broker 초기화 입력을 바꾸므로 active Ante runtime이 없는 상태에서만 직접 DB를 수정한다. | `"cold_path"` |
+| `external process` | 별도 프로세스 실행, OS signal, 장기 실행 파이프/스케줄러처럼 CLI 프로세스 경계를 넘는 작업이다. | `"long_running"` |
+| `bootstrap/maintenance` | 초기화·복구 목적의 인증 면제 또는 서버 정지 fallback 경로다. | `"bootstrap"` |
 
 | 커맨드 | 분류 | 실행 경계 |
 |--------|------|-----------|

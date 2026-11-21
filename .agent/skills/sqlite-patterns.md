@@ -88,7 +88,7 @@ Ante는 SQLite 내장 버전 카운터(PRAGMA)가 아니라 **`schema_version` �
   `db.transaction()` 안에서 실행하고 `schema_version` INSERT와 원자 커밋한다.
 - 실행 전 자동 백업: 미적용 항목이 있으면 `backup_db(...)`로 1회 백업한다.
 
-**작성 규칙** (상세: `src/ante/db/migrations.py` 모듈 docstring, #2365):
+**작성 규칙** (상세: `docs/specs/core/core.md` 「동시성·트랜잭션 invariant」 5항, #2365):
 - 마이그레이션은 추가만 한다 (기존 마이그레이션/버전 모듈 수정 금지).
 - 각 마이그레이션은 멱등이어야 한다 (`IF NOT EXISTS`, `PRAGMA table_info` 가드 등).
   실제 예: `src/ante/db/versions/v006_order_tracker_order_price.py`.
