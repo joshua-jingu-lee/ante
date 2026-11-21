@@ -239,12 +239,16 @@ async def test_join_cancels_tasks_still_running_after_grace(monkeypatch) -> None
     handle.read_task = asyncio.ensure_future(never.wait())
     handle.writer_task = asyncio.ensure_future(never.wait())
 
-    joiner = asyncio.ensure_future(handle.join())
+    async def _join_then_snapshot() -> tuple[bool, bool]:
+        await handle.join()
+        return handle.read_task.done(), handle.writer_task.done()
+
+    joiner = asyncio.ensure_future(_join_then_snapshot())
     for _ in range(20):
         await asyncio.sleep(0)
     assert joiner.done()
-    await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS)
 
+    assert await asyncio.wait_for(joiner, timeout=HANG_GUARD_SECONDS) == (True, True)
     assert handle.read_task.cancelled()
     assert handle.writer_task.cancelled()
 
