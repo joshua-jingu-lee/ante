@@ -105,4 +105,5 @@ class AccountStructuralChangeRequiresStoppedServerError(AccountError): ...  # �
 class AccountHasActiveBotsError(AccountError): ...  # delete() 시 활성(non-deleted) 봇 잔존 시 (orphan bot 무결성)
 ```
 
-소스: `src/ante/account/errors.py`
+소스: `src/ante/account/errors.py`. `AccountError`는 `src/ante/core/account_id.py`에
+정의되고 `ante.account.errors`가 재수출한다.

@@ -52,7 +52,8 @@ src/ante/
 │   ├── registry.py
 │   ├── time.py
 │   ├── exchange.py
-│   └── market_data_vocab.py
+│   ├── market_data_vocab.py
+│   └── account_id.py
 ├── config/
 │   ├── config.py                     # ConfigService — 설정 로딩 (system.toml + secrets.env)
 │   ├── defaults.py                   # 기본 설정값
@@ -659,7 +660,9 @@ tests/
 │   │   ├── test_order_event_exchange_propagation.py
 │   │   ├── test_state_enum_transition_tables.py
 │   │   ├── test_approval_status_assignments.py
-│   │   └── test_error_code_preservation.py
+│   │   ├── test_error_code_preservation.py
+│   │   ├── test_account_id_relocation.py
+│   │   └── test_state_assignments_account_member_circuit.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -766,7 +769,8 @@ tests/
 │   ├── test_check_imports.py
 │   ├── test_check_entry_ratchet.py
 │   ├── test_check_lint_ratchet.py
-│   └── test_approval_status_transitions.py
+│   ├── test_approval_status_transitions.py
+│   └── test_state_transitions_account_member_circuit.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py

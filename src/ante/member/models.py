@@ -29,6 +29,13 @@ class MemberStatus(StrEnum):
     REVOKED = "revoked"
 
 
+MEMBER_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    MemberStatus.ACTIVE: {MemberStatus.SUSPENDED, MemberStatus.REVOKED},
+    MemberStatus.SUSPENDED: {MemberStatus.ACTIVE, MemberStatus.REVOKED},
+    MemberStatus.REVOKED: set(),
+}
+
+
 @dataclass
 class Member:
     """시스템 행위 주체 (사람 또는 AI Agent)."""

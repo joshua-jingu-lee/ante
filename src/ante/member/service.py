@@ -16,7 +16,14 @@ from ante.member.auth import (
     hash_recovery_key,
 )
 from ante.member.auth_service import AuthService
-from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from ante.member.errors import MemberStateConflictError
+from ante.member.models import (
+    MEMBER_STATUS_TRANSITIONS,
+    Member,
+    MemberRole,
+    MemberStatus,
+    MemberType,
+)
 from ante.member.recovery_key_manager import RecoveryKeyManager
 from ante.member.scopes import InvalidScopeError, is_valid_scope
 from ante.member.token_manager import TokenManager, _token_expires_at
@@ -176,6 +183,19 @@ def _row_to_member(row: dict) -> Member:
 def _now() -> str:
     """현재 UTC 시각 문자열."""
     return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _transition_status(
+    member: Member, target: MemberStatus, action: str
+) -> MemberStatus:
+    if target not in MEMBER_STATUS_TRANSITIONS.get(member.status, set()):
+        raise MemberStateConflictError(
+            member.member_id,
+            current_status=str(member.status),
+            requested_action=action,
+        )
+    member.status = target
+    return target
 
 
 class MemberService:
@@ -554,7 +574,6 @@ class MemberService:
         잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
         거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
         """
-        from ante.member.errors import MemberStateConflictError
 
         await self._assert_master(suspended_by, "suspend")
         member = await self._get_or_raise(member_id)
@@ -567,9 +586,10 @@ class MemberService:
             )
 
         now = _now()
+        status = _transition_status(member, MemberStatus.SUSPENDED, "suspend")
         await self._db.execute(
             "UPDATE members SET status = ?, suspended_at = ? WHERE member_id = ?",
-            (MemberStatus.SUSPENDED, now, member_id),
+            (status, now, member_id),
         )
 
         from ante.eventbus.events import MemberSuspendedEvent, NotificationEvent
@@ -590,7 +610,6 @@ class MemberService:
         )
 
         logger.info("멤버 정지: %s (by %s)", member_id, suspended_by)
-        member.status = MemberStatus.SUSPENDED
         member.suspended_at = now
         return member
 
@@ -602,7 +621,6 @@ class MemberService:
         state 위반 (이미 ACTIVE 등) 은 typed
         ``MemberStateConflictError`` 로 raise 한다 (``suspend`` 1:1 미러).
         """
-        from ante.member.errors import MemberStateConflictError
 
         await self._assert_master(reactivated_by, "reactivate")
         member = await self._get_or_raise(member_id)
@@ -613,9 +631,10 @@ class MemberService:
                 requested_action="reactivate",
             )
 
+        status = _transition_status(member, MemberStatus.ACTIVE, "reactivate")
         await self._db.execute(
             "UPDATE members SET status = ? WHERE member_id = ?",
-            (MemberStatus.ACTIVE, member_id),
+            (status, member_id),
         )
 
         from ante.eventbus.events import MemberReactivatedEvent
@@ -628,7 +647,6 @@ class MemberService:
         )
 
         logger.info("멤버 재활성화: %s (by %s)", member_id, reactivated_by)
-        member.status = MemberStatus.ACTIVE
         return member
 
     async def revoke(self, member_id: str, revoked_by: str = "") -> Member:
@@ -644,11 +662,12 @@ class MemberService:
         )
 
         now = _now()
+        status = _transition_status(member, MemberStatus.REVOKED, "revoke")
         await self._db.execute(
             """UPDATE members
                SET status = ?, token_hash = '', revoked_at = ?
                WHERE member_id = ?""",
-            (MemberStatus.REVOKED, now, member_id),
+            (status, now, member_id),
         )
 
         from ante.eventbus.events import MemberRevokedEvent, NotificationEvent
@@ -669,7 +688,6 @@ class MemberService:
         )
 
         logger.info("멤버 폐기: %s (by %s)", member_id, revoked_by)
-        member.status = MemberStatus.REVOKED
         member.token_hash = ""
         member.revoked_at = now
         return member

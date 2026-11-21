@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from ante.account.scoping import require_account_id
+from ante.core.account_id import require_account_id
 
 if TYPE_CHECKING:
     from ante.core.database import Database

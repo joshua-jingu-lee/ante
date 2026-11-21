@@ -193,7 +193,7 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 
 | Domain exception | Public code | Category | 비고 |
 |------------------|-------------|----------|------|
-| `InvalidAccountIdError` (`src/ante/account/errors.py`) | `VALIDATION_ERROR` | `validation` | `src/ante/ipc/registry.py:151,360,654`에서 이미 `VALIDATION_ERROR`로 정렬됨 (#1633 SSOT) |
+| `InvalidAccountIdError` (`src/ante/core/account_id.py`. `ante.account.errors`가 재수출) | `VALIDATION_ERROR` | `validation` | `src/ante/ipc/registry.py:151,360,654`에서 이미 `VALIDATION_ERROR`로 정렬됨 (#1633 SSOT) |
 | `BotNotFoundError` (`src/ante/bot/exceptions.py`) | `BOT_NOT_FOUND` | `not_found` | `BOT_NOT_FOUND_CODE` 재사용 SSOT (`src/ante/bot/exceptions.py`) |
 | `ApprovalNotFoundError` (`src/ante/approval/errors.py`) | `APPROVAL_NOT_FOUND` | `not_found` | class-level `code: str = "APPROVAL_NOT_FOUND"` 부여됨 |
 | `MemberInvalidScopeError` (`src/ante/member/errors.py`) | `MEMBER_INVALID_SCOPE` | `permission` | scope 부족 시 권한 분류, lowercase `permission_denied`와 별개의 도메인-prefix code |
