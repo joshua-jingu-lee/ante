@@ -19,8 +19,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+import ante.bot.reconcile_scheduler as scheduler_mod
 import ante.broker.fill_scheduler as fill_scheduler_mod
-import ante.broker.scheduler as scheduler_mod
 import ante.main as main_module
 from ante.account.models import TradingMode
 from ante.account.readiness import ReadinessFlag, RuntimeReadinessRegistry

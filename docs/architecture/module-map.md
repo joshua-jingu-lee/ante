@@ -41,7 +41,7 @@
 - **역할**: 증권사 API와의 통신을 추상화
 - **설계**: 공통 인터페이스 정의, 증권사별 구현체로 분리
 - **초기 구현**: 한국투자증권 (KIS)
-- **대사(Reconciliation)**: Reconciler가 브로커 실제 데이터와 로컬 데이터를 비교·보정 (봇 시작 시 + 주기적)
+- **대사(Reconciliation)**: Reconciler가 브로커 실제 데이터와 로컬 데이터를 비교·보정 (봇 시작 시 + 주기적). 비교·보정(`PositionReconciler`)은 Trade 모듈, 주기 실행(`ReconcileScheduler`)은 Bot 모듈에 있다
 - 상세 설계: [specs/broker-adapter/broker-adapter.md](../specs/broker-adapter/broker-adapter.md)
 
 ### 7. 데이터 저장소 (DataStore)
