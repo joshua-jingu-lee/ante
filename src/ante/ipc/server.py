@@ -109,6 +109,34 @@ class IPCServerState(Enum):
     STOPPED = "stopped"
 
 
+IPC_SERVER_STATE_TRANSITIONS: dict[IPCServerState, set[IPCServerState]] = {
+    IPCServerState.RUNNING: {
+        IPCServerState.RUNNING,
+        IPCServerState.SHUTTING_DOWN,
+        IPCServerState.DRAINING,
+        IPCServerState.STOPPED,
+    },
+    IPCServerState.SHUTTING_DOWN: {
+        IPCServerState.RUNNING,
+        IPCServerState.SHUTTING_DOWN,
+        IPCServerState.DRAINING,
+        IPCServerState.STOPPED,
+    },
+    IPCServerState.DRAINING: {
+        IPCServerState.RUNNING,
+        IPCServerState.SHUTTING_DOWN,
+        IPCServerState.DRAINING,
+        IPCServerState.STOPPED,
+    },
+    IPCServerState.STOPPED: {
+        IPCServerState.RUNNING,
+        IPCServerState.SHUTTING_DOWN,
+        IPCServerState.DRAINING,
+        IPCServerState.STOPPED,
+    },
+}
+
+
 class IPCServer:
     """Unix 도메인 소켓 IPC 서버."""
 

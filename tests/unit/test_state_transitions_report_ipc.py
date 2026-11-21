@@ -13,6 +13,8 @@ IPC 서버는 공개 메서드만으로 4개 이전 상태를 만들고, 네 수
 ``drain_connections``, ``stop()`` 을 부른다. 각 사례 끝에 테스트가 만든
 listener를 모두 닫는다.
 
+뒤쪽은 두 전이표가 리터럴로 적은 쌍(36쌍, 16쌍)과 같은지 본다.
+
 기대값은 모두 리터럴(상태 문자열, 열 값)이다.
 """
 
@@ -31,8 +33,12 @@ import pytest
 from ante.core.database import Database
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
-from ante.ipc.server import IPCServer
-from ante.report.models import ReportStatus, StrategyReport
+from ante.ipc.server import IPC_SERVER_STATE_TRANSITIONS, IPCServer
+from ante.report.models import (
+    REPORT_STATUS_TRANSITIONS,
+    ReportStatus,
+    StrategyReport,
+)
 from ante.report.store import ReportStore
 
 REPORT_ID = "rpt-2688"
@@ -311,3 +317,92 @@ async def test_ipc_stop_ends_stopped_from_every_state(harness, prior):
     await harness.call(_stop)
 
     assert harness.server.state.value == "stopped"
+
+
+# ── 전이표 ───────────────────────────────────────────────────────
+
+
+def test_report_status_transition_table_allows_every_pair():
+    assert {
+        k.value: {v.value for v in vs} for k, vs in REPORT_STATUS_TRANSITIONS.items()
+    } == {
+        "draft": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+        "submitted": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+        "reviewed": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+        "adopted": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+        "rejected": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+        "archived": {
+            "draft",
+            "submitted",
+            "reviewed",
+            "adopted",
+            "rejected",
+            "archived",
+        },
+    }
+
+
+def test_ipc_server_state_transition_table_allows_every_pair():
+    assert {
+        k.value: {v.value for v in vs} for k, vs in IPC_SERVER_STATE_TRANSITIONS.items()
+    } == {
+        "running": {
+            "running",
+            "shutting_down",
+            "draining",
+            "stopped",
+        },
+        "shutting_down": {
+            "running",
+            "shutting_down",
+            "draining",
+            "stopped",
+        },
+        "draining": {
+            "running",
+            "shutting_down",
+            "draining",
+            "stopped",
+        },
+        "stopped": {
+            "running",
+            "shutting_down",
+            "draining",
+            "stopped",
+        },
+    }
