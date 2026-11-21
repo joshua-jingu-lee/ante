@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from ante.core.database import Database
@@ -416,3 +418,106 @@ async def test_full_fill_evicts_sync_open_cache_post_commit(
     )
     assert delta == 100.0
     assert tracker.get_open_orders_for_bot_sync(ACCT, "bot-1") == []
+
+
+# ── Lock 직렬화 / fallback 발행 ──────────────────────
+
+
+async def _yield_loop(times: int = 20) -> None:
+    for _ in range(times):
+        await asyncio.sleep(0)
+
+
+async def _apply(applier, kind: str, amount: float) -> float:
+    if kind == "cumulative":
+        return await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=amount,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+    return await applier.apply_stream_increment(
+        account_id=ACCT,
+        broker_order_id="0001",
+        increment=amount,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "second_amount", "expected_second_delta"),
+    [
+        ("cumulative", "cumulative", 60.0, 20.0),
+        ("cumulative", "stream", 30.0, 30.0),
+        ("stream", "cumulative", 60.0, 20.0),
+        ("stream", "stream", 30.0, 30.0),
+    ],
+)
+async def test_second_apply_waits_for_first_transaction_before_reading(
+    applier,
+    tracker,
+    position_history,
+    monkeypatch,
+    first,
+    second,
+    second_amount,
+    expected_second_delta,
+):
+    """첫 적용이 트랜잭션 안에서 멈춘 동안 둘째 적용은 추적 주문을 읽지 못한다."""
+    await _seed(tracker)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    orig_on_trade = position_history.on_trade
+    on_trade_calls = 0
+
+    async def _paused_on_trade(trade):
+        nonlocal on_trade_calls
+        on_trade_calls += 1
+        if on_trade_calls == 1:
+            entered.set()
+            await release.wait()
+        await orig_on_trade(trade)
+
+    lookups: list[str] = []
+    orig_lookup = tracker.lookup_order_id
+
+    async def _spy_lookup(*args, **kwargs):
+        lookups.append(args[1])
+        return await orig_lookup(*args, **kwargs)
+
+    monkeypatch.setattr(position_history, "on_trade", _paused_on_trade)
+    monkeypatch.setattr(tracker, "lookup_order_id", _spy_lookup)
+
+    t1 = asyncio.create_task(_apply(applier, first, 40.0))
+    await entered.wait()
+    t2 = asyncio.create_task(_apply(applier, second, second_amount))
+    await _yield_loop()
+    assert lookups == ["0001"]
+    assert not t2.done()
+
+    release.set()
+    assert await t1 == 40.0
+    assert await t2 == expected_second_delta
+    assert lookups == ["0001", "0001"]
+    pos = await position_history.get_current("bot-1", "005930", account_id=ACCT)
+    assert pos["quantity"] == 40.0 + expected_second_delta
+
+
+async def test_fallback_publish_without_outbox_leaves_dedup_key_empty(
+    applier, tracker, eventbus
+):
+    """outbox 미주입 경로의 직접 발행은 fill_dedup_key를 비운다."""
+    events = _collect_filled(eventbus)
+    await _seed(tracker)
+    delta = await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=40.0,
+        avg_price=1000.0,
+        submitted_date=DATE,
+    )
+    assert delta == 40.0
+    assert len(events) == 1
+    assert events[0].fill_dedup_key == ""

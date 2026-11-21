@@ -164,6 +164,29 @@ class TestDailyReportEventAlwaysPublished:
         # No NotificationEvent
         assert len(notif_events) == 0
 
+    async def test_missing_target_date_uses_kst_today(
+        self, scheduler, trade_recorder, eventbus, monkeypatch
+    ):
+        """target_date가 없으면 UTC가 아니라 KST 기준 오늘 날짜로 리포트한다."""
+        import ante.trade.daily_report as daily_report_module
+
+        instant = datetime(2026, 5, 30, 1, 30, tzinfo=KST)
+
+        class _FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return instant.astimezone(tz) if tz else instant.replace(tzinfo=None)
+
+        monkeypatch.setattr(daily_report_module, "datetime", _FixedDatetime)
+        report_events: list[DailyReportEvent] = []
+        eventbus.subscribe(DailyReportEvent, lambda e: report_events.append(e))
+
+        await scheduler.run_once()
+
+        assert [e.report_date for e in report_events] == ["2026-05-30"]
+        from_date = trade_recorder.get_trades.call_args.kwargs["from_date"]
+        assert from_date.date() == date(2026, 5, 30)
+
     async def test_with_trades_publishes_both_events(
         self,
         scheduler,

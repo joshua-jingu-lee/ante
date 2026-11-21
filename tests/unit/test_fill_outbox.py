@@ -275,6 +275,34 @@ async def test_same_fill_twice_no_duplicate_outbox_row(
     assert len(rows) == 1
 
 
+async def test_outbox_payload_omits_event_identity_so_publish_mints_new_ids(
+    db, tracker, position_history, eventbus, outbox, trades_schema
+):
+    """outbox payload에는 event_id·timestamp가 없고 발행마다 새 event_id가 붙는다."""
+    applier = _make_applier(db, tracker, position_history, eventbus, outbox)
+    await _seed(tracker)
+    for cumulative in (40.0, 60.0):
+        await applier.apply_cumulative(
+            account_id=ACCT,
+            broker_order_id="0001",
+            observed_cumulative=cumulative,
+            avg_price=1000.0,
+            submitted_date=DATE,
+        )
+    rows = await outbox.fetch_unpublished()
+    assert len(rows) == 2
+    for row in rows:
+        payload = json.loads(row["payload"])
+        assert "event_id" not in payload
+        assert "timestamp" not in payload
+
+    events = _collect_filled(eventbus)
+    publisher = FillOutboxPublisher(outbox=outbox, eventbus=eventbus)
+    assert await publisher.catch_up_once() == 2
+    assert [e.fill_dedup_key for e in events] == ["ord-1:40.0", "ord-1:60.0"]
+    assert events[0].event_id != events[1].event_id
+
+
 # ── publish 성공 → mark 순서 / 실패 시 미마킹 ─────────
 
 
