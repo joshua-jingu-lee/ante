@@ -32,8 +32,8 @@ dev = [
     "pytest-cov>=6.0",
     "pytest-xdist>=3.5",
     "pyyaml>=6.0",
-    "ruff>=0.8",
-    "mypy>=1.13",
+    "ruff==0.17.6",
+    "mypy==2.4.1",
 ]
 
 [tool.hatch.build.targets.wheel]
