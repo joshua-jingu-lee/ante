@@ -65,14 +65,14 @@ direct_database_construction:
   # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
   # 가 부적절하다.
   - path: src/ante/cli/commands/init.py
-    line: 255
+    line: 261
     reason: "ante init — bootstrap, fresh DB creation lifecycle (out of registry scope)"
   - path: src/ante/cli/commands/init.py
-    line: 279
+    line: 285
     reason: "ante init — bootstrap, encryption key init path"
   - path: src/ante/cli/commands/init.py
-    line: 308
+    line: 314
     reason: "ante init — bootstrap, migration / schema apply path"
   - path: src/ante/cli/commands/init.py
-    line: 339
+    line: 345
     reason: "ante init — bootstrap, post-init verification path"

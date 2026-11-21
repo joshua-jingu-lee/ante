@@ -10,10 +10,9 @@ from ante.config.config import Config
 def resolve_data_path(ctx: click.Context | None, override: str | None) -> str:
     """`--data-path` 옵션 값을 config-resolved data root 로 정합한다.
 
-    Returns:
-        - override 가 명시되면 그 값을 변형 없이 그대로 반환.
-        - 미명시이면 ``Config.resolve_path("data.path", "data").resolve()`` 의
-          문자열(절대 경로).
+    Args:
+        override: 사용자가 명시한 `--data-path` 값. ``None`` 또는 빈 문자열이면
+            config-resolved default 로 폴백한다.
     """
     if override is not None and override != "":
         return override

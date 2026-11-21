@@ -95,12 +95,7 @@ def get_config_dir(ctx: click.Context | None = None) -> Path:
 
 
 def get_db_path(ctx: click.Context | None = None) -> str:
-    """server runtime과 동일한 resolver로 DB 경로를 반환한다.
-
-    Returns:
-        절대 경로 문자열. 상대 `db.path` 입력은 `config_dir` 기준 절대 경로로
-        정규화된다.
-    """
+    """server runtime과 동일한 resolver로 DB 경로를 반환한다."""
     cfg_dir = get_config_dir(ctx)
     cfg = Config.load(config_dir=cfg_dir)
     return str(cfg.resolve_path("db.path", "db/ante.db"))

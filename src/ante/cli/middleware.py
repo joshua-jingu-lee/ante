@@ -268,7 +268,6 @@ def enforce_scope(ctx: click.Context, *scopes: str) -> None:
 
     - ``ctx.obj["member"]`` 가 ``None`` 이면 ``auth_required`` emit 후
       ``SystemExit(1)``.
-    - Human(master, admin) 멤버는 scope 제한 없이 통과.
     - Agent 멤버는 ``scopes`` 를 모두 보유해야 한다. 부족 시
       ``permission_denied`` 를 부족 scope와 함께 emit 후 ``SystemExit(1)``.
     """

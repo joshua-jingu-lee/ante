@@ -28,6 +28,7 @@
     "src/ante/cli/commands/bot.py": 28,
     "src/ante/cli/commands/broker.py": 10,
     "src/ante/cli/commands/config.py": 21,
+    "src/ante/cli/commands/init.py": 6,
     "src/ante/cli/commands/member.py": 25,
     "src/ante/cli/middleware.py": 57,
     "src/ante/contracts/error_registry.py": 4,
@@ -61,5 +62,5 @@
     "src/ante/treasury/manager.py": 2,
     "src/ante/treasury/treasury.py": 89
   },
-  "docstring_lines": 9179
+  "docstring_lines": 9175
 }

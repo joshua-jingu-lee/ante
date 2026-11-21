@@ -16,9 +16,6 @@ def get_socket_path(config_dir: Path | None = None) -> str:
     ``runtime.socket_path`` resolver를 통해 ``<config_dir>/run/ante.sock``
     (default)을 산출한다. ``[runtime] socket_path`` override가 ``system.toml``
     에 있으면 사용자 값이 우선한다.
-
-    Returns:
-        IPC 유닉스 소켓 절대 경로 문자열.
     """
     from ante.config import Config
 

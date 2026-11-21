@@ -20,7 +20,13 @@ from ante.cli.main import get_formatter
 
 
 def _fail(fmt: OutputFormatter, message: str, code: str = "") -> None:
-    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1."""
+    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1.
+
+    `click.ClickException`은 text 모드에서 "Error: ..." 를 stderr에 쓰지만
+    JSON 모드에서도 동일한 텍스트를 내보내 `--format json` 계약을 깨뜨린다.
+    이 헬퍼는 `OutputFormatter.error()`를 거쳐 JSON 모드에서는 구조화 에러를,
+    text 모드에서는 "Error: ..." 를 stderr에 낸 뒤 exit code 1로 종료한다.
+    """
     fmt.error(message, code=code)
     sys.exit(1)
 
