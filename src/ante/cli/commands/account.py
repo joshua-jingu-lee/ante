@@ -1,16 +1,4 @@
-"""ante account -- 계좌 관리 커맨드.
-
-비대화형 입력 계약(`docs/specs/cli/02-design-decisions.md` — 비대화형 입력 계약)을
-구현한다. `account create`, `account set-credentials`, `account delete`는
-stdin prompt/confirm을 사용하지 않고, 옵션/환경변수/파일/명시적 `--yes`로만
-입력을 받는다. 누락 입력은 prompt 없이 구조화된 에러로 종료한다.
-
-에러 코드 SSOT는 `docs/specs/cli/02-design-decisions.md`의 표준 에러 코드 표를
-따른다(`ACCOUNT_MISSING_REQUIRED_CREDENTIAL`, `ACCOUNT_UNKNOWN_CREDENTIAL_KEY`,
-`ACCOUNT_DUPLICATE_CREDENTIAL_KEY`, `ACCOUNT_CREDENTIAL_ENV_NOT_SET`,
-`ACCOUNT_CREDENTIAL_FILE_NOT_FOUND`, `CLI_MISSING_REQUIRED_INPUT`,
-`CLI_CONFIRMATION_REQUIRED`).
-"""
+"""ante account -- 계좌 관리 커맨드."""
 
 from __future__ import annotations
 
@@ -62,12 +50,7 @@ _COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 
 def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
-    """active Ante runtime이 있으면 cold-path 명령을 차단한다.
-
-    공유 헬퍼는 canonical config-dir, PID/socket, startup marker 규칙을
-    사용한다. 이 래퍼는 기존 account 테스트와 import 경로를 유지하기 위한
-    호환 계층이다.
-    """
+    """active Ante runtime이 있으면 cold-path 명령을 차단한다."""
     assert_no_active_runtime(
         fmt,
         code=_COLD_PATH_BLOCKED_CODE,
@@ -83,34 +66,7 @@ def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
 async def _create_account_service(
     ctx: click.Context | None = None,
 ) -> AsyncIterator[AccountService]:
-    """CLI에서 ``AccountService`` 를 생성하는 async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition). 호출 패턴:
-
-        async with _create_account_service(ctx) as svc:
-            await svc.create(...)
-
-    ``open_cli_db`` 가 normal/exception/cancellation 모든 경로에서
-    ``Database.close()`` 를 보장하므로 (cleanup invariant), callsite 의
-    ``try/finally: await db.close()`` 패턴이 제거된다.
-
-    Args:
-        ctx: Click 컨텍스트. ``None`` 이면 ``click.get_current_context(silent=True)``
-            로 현재 컨텍스트를 fallback 조회한다 — 기존 ctx-less call sites
-            및 ``tests/unit/test_cli_account_crypto_error.py`` 의 R3
-            ``await _create_account_service()`` 회귀 인보케이션과의 하위
-            호환을 위해 유지한다. 신규 호출은 항상 ctx 명시 전달이 권장된다
-            (offline-factory.md §3.1).
-
-    Yields:
-        ``initialize()`` 가 완료된 :class:`AccountService` 인스턴스.
-
-    Cleanup invariant:
-        - ``open_cli_db`` 가 ``BaseException`` 까지 catch 하므로
-          ``AccountService.initialize()`` 가 ``EncryptionKeyMissingError`` 등을
-          raise 해도 ``Database.close()`` 가 1회 호출된다.
-        - ``close()`` 실패는 ``open_cli_db`` 내부 try/except 가 swallow 한다.
-    """
+    """CLI에서 ``AccountService`` 를 생성하는 async context manager."""
     from ante.account.service import AccountService
     from ante.eventbus.bus import EventBus
 
@@ -147,19 +103,7 @@ def _get_selectable_broker_types() -> list[str]:
 
 
 def _exit_with_error(fmt: OutputFormatter, code: str, message: str) -> NoReturn:
-    """구조화된 에러를 출력하고 SystemExit(1)으로 종료한다.
-
-    text/json 양쪽 표면에 에러 코드가 일관되게 노출되도록 한다.
-    JSON 모드(`OutputFormatter.is_json`)에서는 `OutputFormatter.error`가
-    `{"status": "error", "code": ..., "message": ...}` 형식으로 dump한다.
-    text 모드에서는 `OutputFormatter.error`가 message만 출력하므로,
-    사람/Agent가 같은 표면에서 코드를 읽을 수 있도록 message 본문에
-    `CODE: ` prefix를 덧붙인다(cold-path 헬퍼
-    ``cold_path.assert_no_active_runtime``과 동일 contract).
-
-    반환 타입은 ``NoReturn``이므로, 호출 후 후속 코드는 mypy 관점에서
-    unreachable하다(env/file 분기에서 None narrowing 등).
-    """
+    """구조화된 에러를 출력하고 SystemExit(1)으로 종료한다."""
     fmt.error(f"{code}: {message}", code=code)
     raise SystemExit(1)
 
@@ -167,12 +111,7 @@ def _exit_with_error(fmt: OutputFormatter, code: str, message: str) -> NoReturn:
 def _split_key_value(
     raw: str, *, fmt: OutputFormatter, option_label: str
 ) -> tuple[str, str]:
-    """`key=value` 한 쌍을 파싱한다. 형식 위반 시 즉시 종료.
-
-    `=`가 한 번도 등장하지 않거나, key가 공란이면 `CLI_MISSING_REQUIRED_INPUT`
-    으로 종료한다. 값에는 `=`가 추가로 들어와도 그대로 유지한다(쉘 인자
-    이스케이프와의 호환을 위해 첫 `=`만 분리자로 본다).
-    """
+    """`key=value` 한 쌍을 파싱한다. 형식 위반 시 즉시 종료."""
     if "=" not in raw:
         _exit_with_error(
             fmt,
@@ -191,20 +130,7 @@ def _split_key_value(
 
 
 def _parse_broker_config_value(raw: str) -> Any:
-    """`--broker-config key=value`의 value 부분을 안전하게 파싱한다.
-
-    1.0 free-form pass-through 정책(`docs/specs/cli/03-commands.md`
-    `--broker-config` 정책 절)을 따른다. 알 수 없는 key는 검증하지 않으며,
-    값만 bool/int/float/str 순서로 변환한다. broker adapter는 자기에게
-    필요한 known key만 읽고 나머지는 silent ignore할 수 있다.
-
-    소수 값(`"1.5"`, `"0.00015"` 등)은 `float`로 변환한다. KIS adapter는
-    `config.get("retry.backoff_base_seconds", ...)`처럼 numeric 값을 직접
-    소비하므로(`src/ante/broker/kis.py`), 문자열로 저장하면 후속 산술
-    연산에서 `TypeError`가 발생한다. 또한 `Account.broker_config`는
-    `service.create()`에서 `json.dumps(...)`로 직렬화되므로(`Decimal`은
-    JSON serializable이 아님) `float`이 안전한 native JSON 타입이다.
-    """
+    """`--broker-config key=value`의 value 부분을 안전하게 파싱한다."""
     lowered = raw.strip().lower()
     if lowered in ("true", "false"):
         return lowered == "true"
@@ -231,18 +157,7 @@ def _resolve_credentials(
     env_pairs: tuple[str, ...],
     file_pairs: tuple[str, ...],
 ) -> dict[str, str]:
-    """credential 입력 채널 3개를 합쳐 최종 credentials를 만든다.
-
-    SSOT(`docs/specs/cli/02-design-decisions.md` 표):
-    - 알 수 없는 key → ``ACCOUNT_UNKNOWN_CREDENTIAL_KEY``
-    - 동일 key 중복 채널 → ``ACCOUNT_DUPLICATE_CREDENTIAL_KEY``
-    - env 미설정/공란 → ``ACCOUNT_CREDENTIAL_ENV_NOT_SET``
-    - file 부재/읽기 실패/공란 → ``ACCOUNT_CREDENTIAL_FILE_NOT_FOUND``
-    - 누락된 required key → ``ACCOUNT_MISSING_REQUIRED_CREDENTIAL``
-
-    required_keys가 빈 리스트(예: ``mock`` preset)면 모든 입력이 unknown
-    이 되므로, 이 경우 credentials는 비어 있어야 한다(빈 dict 반환).
-    """
+    """credential 입력 채널 3개를 합쳐 최종 credentials를 만든다."""
     required_set = set(required_keys)
     seen: dict[str, str] = {}
 
@@ -353,12 +268,7 @@ def _resolve_broker_config(
     fmt: OutputFormatter,
     pairs: tuple[str, ...],
 ) -> dict[str, Any]:
-    """`--broker-config key=value` 반복 옵션을 dict로 파싱한다.
-
-    1.0 free-form pass-through 정책: known key 검증 없이 그대로 통과시킨다.
-    같은 key가 두 번 들어오면 명시적으로 거부한다(silent overwrite는 입력
-    오류의 흔적을 가리므로). 값은 bool/int/str 순으로 안전하게 파싱한다.
-    """
+    """`--broker-config key=value` 반복 옵션을 dict로 파싱한다."""
     out: dict[str, Any] = {}
     for raw in pairs:
         key, value_str = _split_key_value(raw, fmt=fmt, option_label="--broker-config")
@@ -373,11 +283,7 @@ def _resolve_broker_config(
 
 
 def _validate_broker_type(fmt: OutputFormatter, broker_type: str) -> None:
-    """`--broker-type`이 BROKER_REGISTRY에 등록된 값인지 확인한다.
-
-    SSOT: `docs/specs/cli/03-commands.md` Broker 책임 경계 — `BROKER_REGISTRY`가
-    `broker_type` 문자열 → 어댑터 매핑의 SSOT.
-    """
+    """`--broker-type`이 BROKER_REGISTRY에 등록된 값인지 확인한다."""
     selectable = _get_selectable_broker_types()
     if broker_type not in selectable:
         _exit_with_error(

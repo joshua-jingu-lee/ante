@@ -39,30 +39,7 @@ def _run(coro):
 async def _create_rule_engine(
     account_id: str, *, ctx: click.Context | None = None
 ) -> AsyncIterator[tuple[RuleEngine, Database]]:
-    """CLI용 RuleEngine async context manager.
-
-    ``open_cli_db`` 기반 lifecycle (factory composition, account.py 패턴
-    1:1 미러). 호출 패턴:
-
-        async with _create_rule_engine(account_id, ctx=ctx) as (engine, db):
-            ...
-
-    호출자가 ``--account`` 옵션으로 검증된 ``account_id`` 를 반드시 전달
-    해야 한다. fallback 정책상 첫 번째 계좌를 임의로 선택해선 안 된다.
-    ``RuleEngine`` 생성자가 내부에서 ``require_account_id`` 로 재검증한다.
-
-    invalid ``account_id`` 검증은 ``open_cli_db`` (==``db.connect()``)
-    **이전**에 수행한다 (``treasury.py`` ``_create_treasury`` 패턴 1:1
-    미러). resource acquisition 이전에 검증·raise 하면 획득 자원이 0이라
-    정리 대상도 0 — 누수 구조 자체를 제거한다 (lifecycle invariant).
-    ``RuleEngine.__init__`` 내부 ``require_account_id`` 는 defense-in-depth
-    그대로 유지.
-
-    valid-format 이지만 DB에 없는 ``account_id`` (예: ``acc-9999``)는
-    ``RuleEngine`` 생성 **이전**에 lightweight ``SELECT 1`` 로 존재를
-    검증해 ``AccountNotFoundError`` 로 분기한다. ``open_cli_db`` 가
-    ``BaseException`` 까지 catch 하므로 cleanup 보장된다.
-    """
+    """CLI용 RuleEngine async context manager."""
     from ante.account.scoping import require_account_id
     from ante.eventbus.bus import EventBus
     from ante.rule.engine import RuleEngine

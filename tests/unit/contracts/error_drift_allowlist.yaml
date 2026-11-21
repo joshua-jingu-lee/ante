@@ -44,43 +44,43 @@
 # (table/output/echo) 를 그대로 보존하므로 추가 fmt.error anchor 영향 없음.
 intended_no_code:
   - path: src/ante/cli/commands/bot.py
-    line: 193
+    line: 189
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot list read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 244
+    line: 240
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot info read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 482
+    line: 473
     snippet_sha1: "03fce6e088b7"
     reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
   - path: src/ante/cli/commands/bot.py
-    line: 538
+    line: 529
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot positions read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 638
+    line: 629
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot signal-key read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 885
+    line: 876
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 919
+    line: 910
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 953
+    line: 944
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
-    line: 197
+    line: 193
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
-    line: 200
+    line: 196
     snippet_sha1: "1b05e8ebf6bd"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
 

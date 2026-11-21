@@ -32,13 +32,7 @@ _ENCRYPTION_EXEMPT_COMMAND_PATHS: set[tuple[str, ...]] = {
 
 
 def _resolve_token() -> str:
-    """ANTE_MEMBER_TOKEN을 환경변수 또는 토큰 파일에서 확보한다.
-
-    우선순위:
-    1. ANTE_MEMBER_TOKEN 환경변수
-    2. ANTE_TOKEN_FILE 환경변수가 가리키는 파일
-    3. /run/ante-token 파일 (컨테이너/서비스 환경의 기본 토큰 파일 경로)
-    """
+    """ANTE_MEMBER_TOKEN을 환경변수 또는 토큰 파일에서 확보한다."""
     token = os.environ.get("ANTE_MEMBER_TOKEN", "")
     if token:
         return token
@@ -84,19 +78,7 @@ def authenticate_member(ctx: click.Context) -> None:
 
 
 def _run_authenticate(token: str, db_path: str) -> Member:
-    """동기 컨텍스트에서 MemberService.authenticate 호출.
-
-    Args:
-        token: 인증할 멤버 토큰.
-        db_path: 사용할 SQLite DB 파일 경로. `ante init`이 생성한 위치와
-            동일해야 하므로 `get_db_path(ctx)`로부터 전달한다.
-
-    Raises:
-        PermissionError: 토큰이 유효하지 않거나, DB를 열 수 없는 경우
-            (예: `ante init`이 아직 실행되지 않아 `<config_dir>/db/ante.db`가
-            없음). DB I/O 오류도 PermissionError로 통일하여 동일한
-            "인증 실패" 경로로 에러를 노출한다.
-    """
+    """동기 컨텍스트에서 MemberService.authenticate 호출."""
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
     from ante.member.service import MemberService
@@ -165,9 +147,6 @@ def require_auth(fn: Callable) -> Callable:
 
     멱등(idempotent) — 이미 같은 가드가 부착된 함수에 재적용되어도 한 번만
     감싸지도록 ``_require_auth_applied`` sentinel marker로 dedupe한다.
-    ``authenticated_group`` factory가 leaf command callback을 자동 wrapping할 때,
-    명령 자체에 이미 명시적으로 부착된 ``@require_auth`` 또는 ``@require_scope``의
-    내부 가드와 중복 호출되는 것을 방지한다.
     """
     if getattr(fn, "_require_auth_applied", False):
         return fn
@@ -192,31 +171,12 @@ def require_auth(fn: Callable) -> Callable:
 def require_master(fn: Callable) -> Callable:
     """master-only 데코레이터 (HUMAN type + master role만 통과).
 
-    @click.pass_context 아래에 배치한다.
-    ``ctx.obj["member"]``가 ``None`` 이면 ``auth_required`` 로 종료.
-    member.type != ``MemberType.HUMAN`` 또는 member.role != ``MemberRole.MASTER``
-    이면 ``permission_denied`` 로 종료.
-
-    member admin mutation 은 master-only 계약이다. CLI 표면 가드는 동일한
-    invariant 를 진입점에서 적용한다.
-
     멱등(idempotent) — 이미 ``require_master`` 가 부착된 함수에 재적용되어도
     한 번만 감싸지도록 자체 ``_require_master_applied`` sentinel marker 로
     dedupe 한다. ``_require_auth_applied`` 를 dedupe key 로 쓰면, callback 에
     ``@require_auth`` 가 먼저 적용되어 있을 때 ``@require_master`` 가 자체 wrap
     을 건너뛰어 master 검증이 발화하지 않는 idempotent 버그가 생기므로 자체
     marker 를 분리한다.
-
-    동시에 ``_require_auth_applied`` marker 도 함께 set 한다. 본 가드는 자체
-    적으로 ``member is None`` 인증 검증을 포함하므로, ``authenticated_group``
-    factory 가 leaf command callback 을 ``require_auth`` 로 자동 wrap 할 때
-    중복 wrap 을 방지하기 위함이다 (``require_auth`` / ``require_scope`` 와
-    동일한 보호 패턴).
-
-    Note:
-        ``member:admin`` scope vocabulary 는 reserved 상태로 유지된다
-        (``src/ante/member/scopes.py`` SSOT). 본 데코레이터는 scope 보유 여부를
-        검사하지 않으며, master 가 아니면 무조건 거부한다.
     """
     if getattr(fn, "_require_master_applied", False):
         return fn
@@ -304,25 +264,12 @@ def require_scope(*scopes: str) -> Callable:
 def enforce_scope(ctx: click.Context, *scopes: str) -> None:
     """명령 내부에서 조건부로 scope를 검증한다(imperative).
 
-    ``require_scope`` 데코레이터는 명령 진입 시점에 고정 scope를 강제하지만,
-    일부 명령은 입력 옵션에 따라 mutating 경로로 분기한다(예:
-    ``data validate --fix`` 는 손상 파일을 ``.corrupted`` 로 격리하므로 read
-    검증에 더해 write 권한이 필요하다). 이런 조건부 권한 경계를 데코레이터로
-    표현할 수 없으므로, 명령 본문에서 mutation 직전에 호출하는 imperative
-    헬퍼를 제공한다.
-
     ``require_scope`` 데코레이터와 동일 규칙을 적용한다:
 
     - ``ctx.obj["member"]`` 가 ``None`` 이면 ``auth_required`` emit 후
       ``SystemExit(1)``.
-    - Human(master, admin) 멤버는 scope 제한 없이 통과.
     - Agent 멤버는 ``scopes`` 를 모두 보유해야 한다. 부족 시
       ``permission_denied`` 를 부족 scope와 함께 emit 후 ``SystemExit(1)``.
-
-    SCOPE_VOCABULARY 는 flat frozenset(계층 없음)이므로 ``data:write`` 가
-    ``data:read`` 를 함의하지 않는다. 따라서 ``@require_scope("data:read")`` 데코
-    레이터와 본 헬퍼의 ``enforce_scope(ctx, "data:write")`` 호출이 결합되면
-    Agent는 두 scope를 모두 보유한 토큰만 통과한다(검증 read + 격리 write).
     """
     from ante.member.models import MemberType
 
@@ -474,19 +421,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         all_args: list[str],
         path: tuple[str, ...],
     ) -> bool:
-        """DB encryption key chokepoint 발화 여부.
-
-        skip 조건은 auth 게이트와 동일한 메타 면제 정책을 공유한다:
-
-        - ``ctx.resilient_parsing`` (shell completion 등).
-        - ``--help`` / ``-h`` 메타 토큰이 ``--`` 앞에 있는 경우 — click이
-          callback에 도달하기 전에 ``ctx.exit()`` 하므로 가드 불필요.
-        - path가 비어 있거나 leaf까지 도달하지 못한 경우 — click이 도움말
-          처리 또는 ``Missing command`` 로 응답하므로 가드 불필요.
-        - path가 ``_ENCRYPTION_EXEMPT_COMMAND_PATHS`` allowlist에 포함되는
-          경우 (init / member reset-password / member regenerate-recovery-key
-          / feed init).
-        """
+        """DB encryption key chokepoint 발화 여부."""
         if ctx.resilient_parsing:
             return False
         if _has_meta_help_before_dashdash(all_args):
@@ -500,35 +435,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         return True
 
     def _enforce_db_encryption_key_gate(self, ctx: click.Context) -> None:
-        """DB encryption key chokepoint 본체 — 실패 시 envelope + SystemExit(1).
-
-        동작:
-
-        1. ``Config.load(config_dir=...)`` 를 호출해 ``secrets.env`` 의
-           ``ANTE_DB_ENCRYPTION_KEY`` 행을 ``os.environ`` 으로 export 시키는
-           기존 fallback (``ante.config.config:110-140``) 을 먼저 실행한다.
-           정상 경로에서 ``Config.load`` 가 raise 하지 않는 한, secrets.env
-           export 가 env 검증보다 먼저 끝난다는 Plan v2 ordering invariant
-           는 유지된다.
-
-           단, 테스트/CI fixture 가 ``pathlib.Path.exists`` 를 전역 mock 하거나
-           config_dir 가 비어 있어 TOML/.env open 단계에서 ``OSError`` /
-           ``tomllib.TOMLDecodeError`` / ``ConfigError`` 가 발생할 수 있다.
-           이 경우 본 chokepoint 의 책임은 ``DB_ENCRYPTION_KEY_*`` 두 코드의
-           envelope 라우팅이므로, env 에 valid key 가 이미 설정되어 있으면
-           Config.load fallback 없이도 통과한다. env 가 비어 있다면 이어지는
-           검증 단계에서 ``EncryptionKeyMissingError`` 가 발화한다 (어느
-           경로든 secrets-only / env-only 모두 동일한 envelope 으로 수렴).
-        2. ``os.environ.get("ANTE_DB_ENCRYPTION_KEY")`` 를 검증한다:
-           - 미설정/빈 → :class:`EncryptionKeyMissingError` (``code=
-             "DB_ENCRYPTION_KEY_MISSING"``).
-           - 형식 위반 (Fernet canonical 44-byte URL-safe base64 미충족)
-             → :class:`EncryptionKeyInvalidError` (``code=
-             "DB_ENCRYPTION_KEY_INVALID"``).
-        3. raise된 typed exception은 본 메서드에서 catch해 ``OutputFormatter.
-           error`` 또는 텍스트 메시지로 envelope 출력 후 ``SystemExit(1)``.
-        4. 검증 성공 시 ``ctx.obj["_db_encryption_key_validated"] = True`` marker.
-        """
+        """DB encryption key chokepoint 본체 — 실패 시 envelope + SystemExit(1)."""
         import tomllib
 
         from ante.account.crypto import (
@@ -575,10 +482,7 @@ class AuthenticatedGroup(_LeafPathMixin):
         all_args: list[str],
         path: tuple[str, ...],
     ) -> bool:
-        """invoke 단계 인증 게이트를 발화할지 여부.
-
-        skip 조건은 본 클래스 docstring의 (1) 항목 참조.
-        """
+        """invoke 단계 인증 게이트를 발화할지 여부."""
         if ctx.resilient_parsing:
             return False
 
@@ -610,20 +514,7 @@ class AuthenticatedGroup(_LeafPathMixin):
     def _enforce_invoke_auth_gate(
         self, ctx: click.Context, path: tuple[str, ...]
     ) -> None:
-        """invoke 단계 인증 게이트 본체 — 실패 시 SystemExit(1).
-
-        - ``ante.cli.main.authenticate_member`` 의 최신 attribute를 호출 시점에
-          동적 lookup하여 ``patch("ante.cli.main.authenticate_member")`` 기반의
-          기존 테스트가 그대로 동작하도록 한다.
-        - 토큰이 비어 있거나 검증이 실패하면 ``authenticate_member`` 내부에서
-          ``ctx.obj["member"] = None`` 또는 직접 ``SystemExit(1)``로 차단한다.
-        - 본 메서드는 path가 leaf로 끝나고 allowlist에 없는 경우에만 호출된다.
-          따라서 ``member is None`` 이면 default-deny ("인증이 필요합니다", exit 1)
-          를 발화시킨다.
-        - 성공 시 ``ctx.obj["_auth_gate_invoked"] = True``로 marker를 남겨,
-          callback 단계 이중 방어 wrapper가 ``authenticate_member``를 중복
-          호출하지 않도록 한다.
-        """
+        """invoke 단계 인증 게이트 본체 — 실패 시 SystemExit(1)."""
         from ante.cli import main as _main
 
         _main.authenticate_member(ctx)
@@ -654,24 +545,12 @@ class AuthenticatedGroup(_LeafPathMixin):
     ) -> object:
         """``BaseCommand.main`` 오버라이드 — JSON 모드 parsing-stage 에러 envelope 변환.
 
-        Click 8.x의 ``BaseCommand.main()`` 은 ``parse_args``/``invoke`` 를 try/except
-        로 감싸 :class:`click.UsageError` (subclass: ``MissingParameter``,
-        ``BadParameter``, ``BadArgumentUsage``, ``NoSuchOption``) 를 catch 하면
-        ``e.show()`` 로 stderr 에 ``Usage: ... Error: ...`` 텍스트를 출력하고
-        ``sys.exit(e.exit_code)`` (보통 2) 한다. 이는 ``--format json`` 모드의
-        구조화 에러 계약 (스펙 ``docs/specs/cli/02-design-decisions.md:78-81``,
-        ``{status, code, message}`` envelope + exit 1) 과 어긋난다.
-
         본 오버라이드는 ``--format`` raw 토큰을 sniff 해 json 모드일 때만 click
         의 ``standalone_mode=False`` 로 호출하고 ``UsageError`` 를 직접 catch 해
         :meth:`OutputFormatter.error` 로 envelope 출력 + ``sys.exit(1)`` 한다.
 
         텍스트 모드 (`--format text` 기본) 에서는 click 기본 동작
         (``Usage: ... Error: ...`` stderr + exit 2) 을 그대로 유지한다.
-
-        gate-exempt 경로 (``--help`` / ``--version`` / completion) 는 click 이
-        ``BaseCommand.main`` 내부에서 자체 ``ctx.exit()`` 처리하므로 본 try/except
-        블록에는 진입하지 않는다.
         """
         output_format = self._sniff_output_format(args)
         if output_format != "json":
@@ -726,21 +605,7 @@ class AuthenticatedGroup(_LeafPathMixin):
 
     @staticmethod
     def _sniff_output_format(args: list[str] | None) -> str:
-        """raw args 토큰열에서 ``--format`` 값을 추출 (click parse 이전).
-
-        서브커맨드 ``--format`` 이 root ``--format`` 을 오버라이드하는 패턴
-        (:func:`ante.cli.formatter.format_option`) 을 따라 args 의 **마지막**
-        ``--format`` 값을 우선한다.
-
-        예::
-
-            ante --format json bot list --format text  → "text"
-            ante --format text some cmd --format json  → "json"
-            ante bot list                              → "text" (기본값)
-
-        ``--format=value`` (등호 형태) 와 ``--format value`` (공백 형태) 모두
-        지원한다.
-        """
+        """raw args 토큰열에서 ``--format`` 값을 추출 (click parse 이전)."""
         import sys as _sys
 
         tokens = list(args) if args is not None else _sys.argv[1:]
@@ -762,20 +627,7 @@ _META_HELP_TOKENS: frozenset[str] = frozenset({"--help", "-h"})
 
 
 def _has_meta_help_before_dashdash(args: list[str]) -> bool:
-    """args에 ``--help`` / ``-h`` 토큰이 ``--`` 앞에 있는지 검사.
-
-    H1 invariant: ``ante --help``, ``ante member list --help`` 등 모든
-    깊이의 ``--help`` / ``-h`` 는 click이 callback에 도달하기 전에
-    ``ctx.exit()`` 하므로 invoke 단계 가드를 발화시키지 않는다.
-
-    H2 invariant: ``ante bot info -- --help`` 처럼 ``--`` 이후 위치 인자로
-    들어간 ``--help`` 는 click이 메타로 해석하지 않으므로 본 함수는
-    이 케이스를 메타로 간주하지 **않는다**.
-
-    H3(``--version``) 처리는 root ``@click.version_option`` 에 위임한다.
-    nested 위치에 ``--version`` 이 등장하면 본 함수는 면제하지 않으므로
-    invoke 단계 가드가 정상 발화한다.
-    """
+    """args에 ``--help`` / ``-h`` 토큰이 ``--`` 앞에 있는지 검사."""
     for tok in args:
         if tok == "--":
             return False
@@ -785,30 +637,7 @@ def _has_meta_help_before_dashdash(args: list[str]) -> bool:
 
 
 def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
-    """root callback의 글로벌 옵션을 ``ctx.obj`` 에 미러링.
-
-    ``AuthenticatedGroup.invoke`` 의 인증 게이트는 ``super().invoke(ctx)``
-    호출 **이전** 에 발화하므로, 같은 ``super().invoke(ctx)`` 안에서 실행되는
-    root callback의 부작용 (``ctx.obj["config_dir"] = ...`` 등) 이 아직 반영되지
-    않은 상태다. 인증 시점에 ``--config-dir`` 등을 정확히 반영하지 못하면
-    ``authenticate_member`` 가 default config dir의 DB를 보게 되어, 명시한
-    인스턴스의 토큰이 어긋난 DB에서 인증 실패하는 회귀가 발생한다.
-
-    본 헬퍼는 ``ctx.params`` 에 이미 파싱돼 들어 있는 root 옵션을 읽어
-    ``ctx.obj`` 키로 동일하게 반영한다. root callback이 나중에
-    재실행되어 같은 값을 덮어쓰더라도 의미는 동일하다.
-
-    현재 미러링 대상:
-
-    - ``config_dir`` (str → ``pathlib.Path``): ``--config-dir`` /
-      ``ANTE_CONFIG_DIR``. ``authenticate_member`` → ``get_db_path`` →
-      ``get_config_dir`` 가 ``ctx.obj["config_dir"]`` 를 우선 참조한다.
-    - ``output_format`` (str → ``OutputFormatter``): ``--format``.
-      인증/권한 실패 경로가 JSON 모드에서 구조화 에러를 stdout으로
-      출력하려면 ``ctx.obj["formatter"]`` 가 인증 게이트 발화 시점에도
-      존재해야 한다. root callback이 같은 키를 다시 채우더라도 의미는
-      동일하다.
-    """
+    """root callback의 글로벌 옵션을 ``ctx.obj`` 에 미러링."""
     if not isinstance(ctx.obj, dict):
         return
 
@@ -830,18 +659,7 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
 
 
 def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
-    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다.
-
-    - JSON 모드 (``ctx.obj["formatter"]`` 의 ``is_json``): ``OutputFormatter.error``
-      를 통해 ``{"status":"error","code":<code>,"message":<message>}`` JSON을
-      stdout으로 출력. 자동화 호출자(ante-oracle host probe 등)가 JSON 파서로
-      직접 소비할 수 있게 한다.
-    - 텍스트 모드 또는 ``formatter`` 미설정 fallback: 기존 동작 그대로 한국어
-      메시지를 ``click.echo(..., err=True)`` 로 stderr 에 출력.
-
-    본 헬퍼는 출력만 책임지며 종료는 호출자가 ``raise SystemExit(1)`` 로
-    수행한다 (필요 시 ``raise SystemExit(1) from e`` 형태로 cause 보존).
-    """
+    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다."""
     obj = getattr(ctx, "obj", None)
     formatter = obj.get("formatter") if isinstance(obj, dict) else None
     if formatter is not None and getattr(formatter, "is_json", False):
@@ -851,19 +669,7 @@ def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
 
 
 def _emit_error_envelope(ctx: click.Context, message: str, *, code: str) -> None:
-    """generic stable-code error envelope 출력.
-
-    인증 실패 외 typed exception (예: ``EncryptionKeyMissingError`` /
-    ``EncryptionKeyInvalidError``) 을 JSON envelope 또는 텍스트 메시지로
-    노출한다. 의미상 :func:`_emit_auth_error` 와 동일한 두 모드 분기를 따르지만
-    호출자 의도를 분명히 하기 위해 별도 이름으로 노출한다.
-
-    - JSON 모드 (``ctx.obj["formatter"]`` 의 ``is_json``): ``OutputFormatter.error``
-      → ``{"status":"error","code":<code>,"message":<message>}`` JSON stdout.
-    - 텍스트 모드 또는 ``formatter`` 미설정: ``click.echo(..., err=True)`` stderr.
-
-    종료는 호출자가 ``raise SystemExit(1) from e`` 로 수행한다.
-    """
+    """generic stable-code error envelope 출력."""
     obj = getattr(ctx, "obj", None)
     formatter = obj.get("formatter") if isinstance(obj, dict) else None
     if formatter is not None and getattr(formatter, "is_json", False):
@@ -873,17 +679,7 @@ def _emit_error_envelope(ctx: click.Context, message: str, *, code: str) -> None
 
 
 def _attach_auth_guard_recursive(cmd: click.Command) -> None:
-    """leaf command callback에만 인증 가드를 부착하고, group이면 자식까지 재귀.
-
-    ``click.Group``의 callback에는 인증 가드를 부착하지 **않는다**. nested
-    ``--help`` 처리 시 click은 leaf command callback은 호출하지 않지만 부모
-    group callback은 그대로 호출한다(예: ``ante member list --help``는
-    ``member`` group의 callback을 호출한 뒤 ``list`` 명령의 help를 출력하고
-    종료). 부모 group callback에 인증 가드를 부착하면 nested ``--help``에서
-    부수적으로 default-deny가 발화해 H1 invariant(모든 깊이 ``--help`` 통과)가
-    깨진다. 따라서 인증 가드는 leaf command(=non-Group ``click.Command``)에만
-    부착한다. 자식 group/명령은 재귀로 순회한다.
-    """
+    """leaf command callback에만 인증 가드를 부착하고, group이면 자식까지 재귀."""
     if isinstance(cmd, click.Group):
         for sub in list(cmd.commands.values()):
             _attach_auth_guard_recursive(sub)
@@ -893,29 +689,7 @@ def _attach_auth_guard_recursive(cmd: click.Command) -> None:
 
 
 def _wrap_callback_with_auth(callback: Callable) -> Callable:
-    """callback을 default-deny 인증 가드 wrapper로 감싼다.
-
-    동작:
-
-    1. ``ctx.resilient_parsing == True``: shell completion 등 부작용 없는
-       파싱이므로 인증 단계를 건너뛴다.
-    2. 명령 경로가 ``_AUTH_EXEMPT_COMMAND_PATHS``에 포함되면 callback을
-       바로 호출 (공개 명령 allowlist).
-    3. 그 외에는 ``authenticate_member(ctx)``를 호출해 ``ctx.obj["member"]``를
-       채운다. 토큰 검증이 실패하면 ``authenticate_member`` 내부에서 exit 1.
-    4. callback에 이미 ``@require_auth`` / ``@require_scope`` sentinel
-       marker(``_require_auth_applied``)가 있으면 None 체크를 ``@require_auth``
-       데코레이터에 위임한다. 그렇지 않으면 본 wrapper가 직접 ``member is None``
-       에 대해 default-deny ("인증이 필요합니다", exit 1)를 발화한다.
-
-    멱등 (idempotent): wrapper 자체에 sentinel marker를 부착해, 같은 callback이
-    여러 번 wrapping되어도 한 번만 감싸진다.
-
-    ``ante.cli.main``이 ``authenticate_member``를 re-export하므로 기존 테스트
-    suite는 ``patch("ante.cli.main.authenticate_member")``로 인증을 mock한다.
-    그 patch가 본 wrapper에서도 효과가 있도록 ``ante.cli.main``의 최신 심볼을
-    동적으로 조회해 호출한다.
-    """
+    """callback을 default-deny 인증 가드 wrapper로 감싼다."""
     if getattr(callback, "_wrapped_by_authenticated_group", False):
         return callback
 
@@ -965,8 +739,6 @@ def authenticated_group(name: str | None = None, **attrs: object) -> Callable:
         @click.pass_context
         def cli(ctx: click.Context) -> None:
             ...
-
-    동작 상세는 :class:`AuthenticatedGroup` docstring 참조.
     """
     attrs.setdefault("cls", AuthenticatedGroup)
     return click.group(name=name, **attrs)  # type: ignore[call-overload]
