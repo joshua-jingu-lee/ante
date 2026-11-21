@@ -18,6 +18,11 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts.cli_errors import (
+    AlreadyRunningError,
+    PidNotFoundError,
+    ProcessNotFoundError,
+)
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -77,10 +82,7 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
 
     existing_pid = read_pid_file(config)
     if existing_pid is not None and _is_process_alive(existing_pid):
-        fmt.error(
-            f"시스템이 이미 실행 중입니다 (pid={existing_pid})", code="ALREADY_RUNNING"
-        )
-        raise SystemExit(1)
+        raise AlreadyRunningError(f"시스템이 이미 실행 중입니다 (pid={existing_pid})")
 
     cmd = [sys.executable, "-m", "ante.main"]
 
@@ -120,19 +122,13 @@ def stop(ctx: click.Context) -> None:
 
     pid = read_pid_file(config)
     if pid is None:
-        fmt.error(
-            f"PID 파일이 없습니다 ({pid_path})",
-            code="PID_NOT_FOUND",
-        )
-        raise SystemExit(1)
+        raise PidNotFoundError(f"PID 파일이 없습니다 ({pid_path})")
 
     if not _is_process_alive(pid):
         _remove_pid_file(config)
-        fmt.error(
-            f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다.",
-            code="PROCESS_NOT_FOUND",
+        raise ProcessNotFoundError(
+            f"프로세스가 존재하지 않습니다 (pid={pid}). PID 파일을 정리했습니다."
         )
-        raise SystemExit(1)
 
     os.kill(pid, signal.SIGTERM)
     fmt.success("종료 시그널 전송 완료", {"pid": pid})

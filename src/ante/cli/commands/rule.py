@@ -17,6 +17,8 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts.cli_errors import RuleNotFoundError, RuleUpdateError
+from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
@@ -156,11 +158,7 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
                 ]
             return rules
 
-    try:
-        result = _run(_run_list())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
+    result = _run(_run_list())
 
     if not result:
         fmt.output({"message": "등록된 룰이 없습니다.", "rules": []})
@@ -193,15 +191,10 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
             rules = _collect_rules(engine)
             return next((r for r in rules if r["rule_id"] == rule_id), None)
 
-    try:
-        result = _run(_run_info())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
+    result = _run(_run_info())
 
     if not result:
-        fmt.error(f"룰을 찾을 수 없습니다: {rule_id}", code="RULE_NOT_FOUND")
-        raise SystemExit(1)
+        raise RuleNotFoundError(f"룰을 찾을 수 없습니다: {rule_id}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -276,8 +269,7 @@ def rule_update(
     try:
         param_dict = _parse_rule_params(params, params_json)
     except click.BadParameter as e:
-        fmt.error(str(e), code="VALIDATION_ERROR")
-        raise SystemExit(1) from e
+        raise RequestValidationError(str(e)) from e
 
     async def _run_update() -> dict:
         from ante.cli.cold_path import is_active_runtime
@@ -325,14 +317,12 @@ def rule_update(
 
     try:
         result = _run(_run_update())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
+    except click.ClickException:
+        raise
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "RULE_UPDATE_ERROR"))
-        raise SystemExit(1) from e
+        if isinstance(getattr(e, "code", None), str):
+            raise
+        raise RuleUpdateError(str(e)) from e
 
     if fmt.is_json:
         fmt.output(result)

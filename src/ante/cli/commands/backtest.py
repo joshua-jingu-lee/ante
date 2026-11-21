@@ -13,6 +13,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
+    CLI_ERRORS,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
@@ -174,7 +175,7 @@ def run(
             metric_rows = _format_metrics(metrics)
             fmt.table(metric_rows, ["지표", "값"])
 
-    except BacktestDataNotFoundError:
+    except CLI_ERRORS:
         raise
     except Exception as e:
         raise BacktestError(str(e)) from e
