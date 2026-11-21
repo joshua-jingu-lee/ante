@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import gc
 import importlib.util
 import os
+import pwd
+import shutil
 import sys
+import tempfile
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -26,6 +32,261 @@ def _load_import_guard():
     return module
 
 
+# ── 설정 디렉터리 격리 (#2592) ────────────────────────────────────────────
+#
+# 테스트는 실제 설정 디렉터리(원래 HOME과 pwd 홈의 .config/ante, 원래
+# ANTE_CONFIG_DIR)와 저장소의 config/에 닿지 못한다. 환경 변수를 임시
+# 디렉터리로 돌려 기본 해석을 막고, audit hook이 남은 접근을 기록해 실패로 만든다.
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+_ORIG_HOME_ENV = "ANTE_TEST_ORIG_HOME"
+_ORIG_CONFIG_DIR_ENV = "ANTE_TEST_ORIG_CONFIG_DIR"
+_WORKEROUTPUT_KEY = "ante_config_violations"
+# 개발자 셸에 남아 있으면 테스트의 분기를 바꾸는 변수들.
+_SCRUBBED_ENV = (
+    "ANTE_MEMBER_TOKEN",
+    "ANTE_TOKEN_FILE",
+    "ANTE_DB_PATH",
+    "ANTE_DATA_PATH",
+    "ANTE_ENV",
+    "ANTE_LOG_JSONL",
+)
+# 이벤트 이름 → 경로 인자의 위치.
+_PATH_EVENTS: dict[str, tuple[int, ...]] = {
+    "open": (0,),
+    "os.mkdir": (0,),
+    "os.remove": (0,),
+    "os.rmdir": (0,),
+    "os.rename": (0, 1),
+    "os.replace": (0, 1),
+    "os.listdir": (0,),
+    "os.scandir": (0,),
+    "os.chmod": (0,),
+    "os.truncate": (0,),
+    "os.utime": (0,),
+    "shutil.rmtree": (0,),
+    "sqlite3.connect": (0,),
+}
+_WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND
+
+
+class ConfigIsolationViolationError(RuntimeError):
+    """테스트가 금지된 설정 디렉터리에 닿았다.
+
+    ``OSError`` 계열이 아니어서 ``except OSError``에 삼켜지지 않는다.
+    """
+
+
+def _path_forms(path: str) -> tuple[str, str]:
+    return os.path.abspath(path), os.path.realpath(path)
+
+
+def _under(path: str, root: str) -> bool:
+    return path == root or path.startswith(root + os.sep)
+
+
+class _ConfigIsolationGuard:
+    """audit hook으로 금지 루트 아래의 파일 접근을 막고 기록한다."""
+
+    violation_type = ConfigIsolationViolationError
+
+    def __init__(self) -> None:
+        self.active = False
+        self.orig_home = ""
+        # (token, 경로 형들). 훅은 튜플을 통째로 읽으므로 교체만 한다.
+        self._roots: tuple[tuple[object, tuple[str, ...]], ...] = ()
+        self._example_reads: frozenset[str] = frozenset()
+        # (이벤트, abspath, realpath). list.append는 스레드 사이에서 원자적이다.
+        self.records: list[tuple[str, str, str]] = []
+        self._local = threading.local()
+
+    @property
+    def forbidden_roots(self) -> tuple[str, ...]:
+        return tuple(form for _, forms in self._roots for form in forms)
+
+    def add_root(self, root: str | os.PathLike[str]) -> object:
+        token = object()
+        forms = tuple(dict.fromkeys(_path_forms(os.fspath(root))))
+        self._roots = (*self._roots, (token, forms))
+        return token
+
+    def remove_root(self, token: object) -> None:
+        self._roots = tuple(entry for entry in self._roots if entry[0] is not token)
+
+    def allow_reads(self, paths: list[str]) -> None:
+        self._example_reads = frozenset(
+            form for path in paths for form in _path_forms(path)
+        )
+
+    def take_records(self) -> list[tuple[str, str, str]]:
+        taken = self.records[:]
+        del self.records[: len(taken)]
+        return taken
+
+    @contextlib.contextmanager
+    def expect_violation(
+        self, root: str | os.PathLike[str]
+    ) -> Iterator[list[tuple[str, str, str]]]:
+        """``root``를 잠시 금지하고, 그 아래에서 난 기록만 꺼내 돌려준다."""
+        token = self.add_root(root)
+        forms = _path_forms(os.fspath(root))
+        caught: list[tuple[str, str, str]] = []
+        try:
+            yield caught
+        finally:
+            self.remove_root(token)
+            kept = []
+            for record in self.take_records():
+                if any(_under(p, f) for p in record[1:] for f in forms):
+                    caught.append(record)
+                else:
+                    kept.append(record)
+            self.records.extend(kept)
+
+    def hook(self, event: str, args: tuple) -> None:
+        # 이 본문은 audit 이벤트를 내는 호출(open, logging, id 등)을 하지 않는다.
+        if not self.active:
+            return
+        positions = _PATH_EVENTS.get(event)
+        if positions is None:
+            return
+        local = self._local
+        if getattr(local, "busy", False):
+            return
+        local.busy = True
+        try:
+            self._check(event, args, positions)
+        finally:
+            local.busy = False
+
+    def _check(self, event: str, args: tuple, positions: tuple[int, ...]) -> None:
+        roots = self._roots
+        if not roots:
+            return
+        for position in positions:
+            if position >= len(args):
+                continue
+            path = _event_path(event, args[position])
+            if path is None:
+                continue
+            forms = _path_forms(path)
+            hit = any(
+                _under(form, root)
+                for _, root_forms in roots
+                for root in root_forms
+                for form in forms
+            )
+            if not hit:
+                continue
+            if event == "open" and not _is_write_open(args):
+                if forms[0] in self._example_reads or forms[1] in self._example_reads:
+                    continue
+            self.records.append((event, forms[0], forms[1]))
+            raise ConfigIsolationViolationError(
+                f"테스트가 금지된 설정 경로에 닿았다: {event} {forms[0]}"
+            )
+
+
+def _event_path(event: str, value: object) -> str | None:
+    if value is None:
+        return "." if event in ("os.listdir", "os.scandir") else None
+    if isinstance(value, int):
+        return None
+    if isinstance(value, bytes):
+        path = os.fsdecode(value)
+    elif isinstance(value, str):
+        path = value
+    elif isinstance(value, os.PathLike):
+        path = os.fsdecode(os.fspath(value))
+    else:
+        return None
+    if event == "sqlite3.connect":
+        if path.startswith("file:"):
+            path = path[len("file:") :].split("?", 1)[0].split("#", 1)[0]
+        if path in ("", ":memory:"):
+            return None
+    return path
+
+
+def _is_write_open(args: tuple) -> bool:
+    mode = args[1] if len(args) > 1 else None
+    flags = args[2] if len(args) > 2 else 0
+    if isinstance(mode, str) and any(ch in mode for ch in "wax+"):
+        return True
+    return isinstance(flags, int) and bool(flags & _WRITE_FLAGS)
+
+
+_GUARD = _ConfigIsolationGuard()
+_GUARD_STATE: dict[str, object] = {}
+_COLLECTED_WORKER_VIOLATIONS: list[str] = []
+
+
+def _install_config_isolation(config: pytest.Config) -> None:
+    is_worker = hasattr(config, "workerinput")
+    if is_worker:
+        orig_home = os.environ.get(_ORIG_HOME_ENV, "")
+        orig_config_dir = os.environ.get(_ORIG_CONFIG_DIR_ENV, "")
+    else:
+        orig_home = os.environ.get("HOME", "")
+        orig_config_dir = os.environ.get("ANTE_CONFIG_DIR", "")
+        os.environ[_ORIG_HOME_ENV] = orig_home
+        os.environ[_ORIG_CONFIG_DIR_ENV] = orig_config_dir
+
+    saved: dict[str, str | None] = {}
+    for name in ("HOME", "ANTE_CONFIG_DIR", *_SCRUBBED_ENV):
+        saved[name] = os.environ.get(name)
+    for name in _SCRUBBED_ENV:
+        os.environ.pop(name, None)
+
+    roots = [os.path.join(pwd.getpwuid(os.getuid()).pw_dir, ".config", "ante")]
+    if orig_home:
+        roots.append(os.path.join(orig_home, ".config", "ante"))
+    if orig_config_dir:
+        roots.append(orig_config_dir)
+    repo_config = _REPO_ROOT / "config"
+    roots.append(str(repo_config))
+    for root in roots:
+        _GUARD.add_root(root)
+    _GUARD.allow_reads(
+        [
+            str(repo_config / "system.toml.example"),
+            str(repo_config / "secrets.env.example"),
+        ]
+    )
+    _GUARD.orig_home = orig_home
+
+    base = tempfile.mkdtemp(prefix="ante-pytest-")
+    home = os.path.join(base, "home")
+    os.makedirs(os.path.join(home, ".config", "ante"))
+    os.environ["HOME"] = home
+    os.environ["ANTE_CONFIG_DIR"] = os.path.join(home, ".config", "ante")
+    _GUARD_STATE.update(base=base, saved=saved)
+
+    if not _GUARD_STATE.get("hooked"):
+        sys.addaudithook(_GUARD.hook)
+        _GUARD_STATE["hooked"] = True
+    _GUARD.active = True
+
+
+def _uninstall_config_isolation() -> None:
+    _GUARD.active = False
+    saved = _GUARD_STATE.pop("saved", None)
+    if isinstance(saved, dict):
+        for name, value in saved.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+    base = _GUARD_STATE.pop("base", None)
+    if isinstance(base, str):
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def _format_record(record: tuple[str, str, str]) -> str:
+    event, abspath, realpath = record
+    return f"{event} {abspath}" + ("" if abspath == realpath else f" ({realpath})")
+
+
 def pytest_configure(config: pytest.Config) -> None:
     """Fail collection if ``ante`` resolves outside this checkout."""
     guard = _load_import_guard()
@@ -33,6 +294,61 @@ def pytest_configure(config: pytest.Config) -> None:
         guard.check_import_path()
     except guard.ImportPathCheckError as exc:
         raise pytest.UsageError(str(exc)) from exc
+    _install_config_isolation(config)
+
+
+def pytest_unconfigure(config: pytest.Config) -> None:
+    _uninstall_config_isolation()
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error) -> None:
+    """xdist 컨트롤러: 작업자가 넘긴 남은 위반 기록을 모은다."""
+    output = getattr(node, "workeroutput", None) or {}
+    _COLLECTED_WORKER_VIOLATIONS.extend(output.get(_WORKEROUTPUT_KEY, []))
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
+    """테스트 밖(세션 fixture, 수집, 남은 스레드)에서 난 위반으로 세션을 실패시킨다."""
+    leftover = [_format_record(record) for record in _GUARD.take_records()]
+    config = session.config
+    if hasattr(config, "workerinput"):
+        config.workeroutput[_WORKEROUTPUT_KEY] = leftover
+        return
+    violations = _COLLECTED_WORKER_VIOLATIONS + leftover
+    if not violations:
+        return
+    lines = ["", "설정 디렉터리 격리 위반 (#2592):", *(f"  {v}" for v in violations)]
+    sys.stderr.write("\n".join(lines) + "\n")
+    if session.exitstatus == 0:
+        session.exitstatus = pytest.ExitCode.TESTS_FAILED
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_dir(tmp_path_factory, monkeypatch):
+    """테스트마다 새 HOME과 설정 디렉터리를 주고, 끝에서 위반 기록을 검사한다.
+
+    CLI의 catch-all이 위반 예외를 삼켜도 이 teardown이 테스트를 실패시킨다.
+    """
+    home = tmp_path_factory.mktemp("ante-home")
+    config_dir = home / ".config" / "ante"
+    config_dir.mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("ANTE_CONFIG_DIR", str(config_dir))
+    yield
+    records = _GUARD.take_records()
+    if records:
+        pytest.fail(
+            "설정 디렉터리 격리 위반 (#2592):\n"
+            + "\n".join(f"  {_format_record(r)}" for r in records),
+            pytrace=False,
+        )
+
+
+@pytest.fixture(scope="session")
+def config_isolation_guard() -> _ConfigIsolationGuard:
+    """설정 디렉터리 격리 가드. 가드 자체의 테스트가 쓴다."""
+    return _GUARD
 
 
 @pytest.fixture(autouse=True, scope="session")

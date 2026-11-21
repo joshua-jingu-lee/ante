@@ -28,8 +28,8 @@ config/system.toml
 *.pem
 *.key
 
-# Runtime dependency snapshots (ante update가 config/db에 재생성하는 환경 의존 아티팩트)
-config/db/pip_freeze_v*.txt
+# 작업 디렉터리의 config/db에 남는 런타임 산출물 (ante update의 의존성 스냅숏, 격리 이전 테스트가 만든 DB. #2592)
+config/db/
 
 # Python
 __pycache__/
