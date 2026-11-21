@@ -667,7 +667,8 @@ tests/
 │   │   ├── test_error_code_preservation.py
 │   │   ├── test_account_id_relocation.py
 │   │   ├── test_state_assignments_account_member_circuit.py
-│   │   └── test_error_registry_completeness.py
+│   │   ├── test_error_registry_completeness.py
+│   │   └── test_state_assignments_report_ipc.py
 │   ├── test_account_cli_ipc_error_equivalence.py
 │   ├── test_member_cli_ipc_error_equivalence.py
 │   ├── test_approval_cli_ipc_error_equivalence.py
@@ -777,7 +778,8 @@ tests/
 │   ├── test_approval_status_transitions.py
 │   ├── test_state_transitions_account_member_circuit.py
 │   ├── test_compare_error_exit_records.py
-│   └── test_preservation_recorder.py
+│   ├── test_preservation_recorder.py
+│   └── test_state_transitions_report_ipc.py
 ├── __init__.py
 ├── integration/
 │   ├── __init__.py
