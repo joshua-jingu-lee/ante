@@ -961,3 +961,35 @@ def test_lint_baseline_change_requires_review(
     result = repo.check()
     assert result.returncode == 1
     assert f"review\tM\t{LINT_BASELINE}" in result.stdout
+
+
+ENTRY_BASELINE = "scripts/entry_ratchet_baseline.json"
+
+
+def _entry_baseline_json(errors: int, codes: list[str]) -> str:
+    data = {
+        "cli_error_calls": {"src/ante/cli/a.py": errors},
+        "cli_exits": {"src/ante/cli/a.py": 2},
+        "ipc_error_code_reads": {},
+        "unregistered_codes": codes,
+    }
+    return json.dumps(data, indent=2) + "\n"
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        pytest.param(_entry_baseline_json(1, ["A"]), id="lowered"),
+        pytest.param(_entry_baseline_json(3, ["A", "B", "C"]), id="raised"),
+    ],
+)
+def test_entry_ratchet_baseline_change_requires_review(repo: Repo, head: str) -> None:
+    repo.write(ENTRY_BASELINE, _entry_baseline_json(2, ["A", "B"]))
+    repo.commit("entry baseline")
+    repo.mark_base()
+    repo.write(ENTRY_BASELINE, head)
+    repo.commit("change entry baseline")
+    result = repo.check()
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert f"review\tM\t{ENTRY_BASELINE}" in result.stdout
+    assert "baseline-lowered" not in result.stdout
