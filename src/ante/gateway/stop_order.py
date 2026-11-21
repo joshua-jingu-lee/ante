@@ -1,9 +1,4 @@
-"""StopOrderManager — 스탑 주문 에뮬레이션.
-
-KRX는 네이티브 스탑 주문을 지원하지 않으므로,
-실시간 시세를 모니터링하여 트리거 조건 충족 시
-시장가/지정가 주문으로 변환하여 기존 주문 흐름에 주입한다.
-"""
+"""StopOrderManager — 스탑 주문 에뮬레이션."""
 
 from __future__ import annotations
 
@@ -34,10 +29,6 @@ class StopOrderManagerStoppedError(RuntimeError):
     반환)가 아니라 예외로 거부한다. 호출자(gateway ``_on_order_approved``)가
     이를 잡아 ``OrderFailedEvent`` 로 terminal 종결하므로, in-flight 주문이
     영구 inert 로 남지 않는다.
-
-    class-level ``code`` 로 안정 fault code 를 부여한다 — error taxonomy drift
-    guard 가 모든 ``*Error`` 에 code/registry/allowlist 중 하나를
-    요구하며, 본 예외는 internal lifecycle 가드라 class-level code 가 적합하다.
     """
 
     code = "STOP_ORDER_MANAGER_STOPPED"
@@ -142,24 +133,10 @@ class StopOrderManager:
     ) -> str:
         """스탑 주문 등록.
 
-        Returns:
-            stop_order_id
-
         Raises:
             InvalidAccountIdError: account_id 가 invalid 일 때.
             StopOrderManagerStoppedError: 매니저가 stopped(``_running=False``)
                 상태일 때.
-
-        매니저가 stopped(``_running=False``) 상태면 등록을
-        ``StopOrderManagerStoppedError`` 로 거부한다. shutdown 진행 중 in-flight
-        IPC/봇이 OrderApprovedEvent 로 stop 주문을 보내도, 그 주문은
-        manager_stopped sweep 을 이미 놓쳤고 이후 price update 도
-        ``_running=False`` 라 무시되어 영구 inert 로 남는다. 빈 문자열을 반환하면
-        호출자가 silent loss 를 인지하지 못해
-        주문이 terminal 이벤트 없이 사라진다. 예외로 거부하면 호출자
-        (gateway ``_on_order_approved``)의 try/except 가 이를 잡아
-        ``OrderFailedEvent`` 로 결정적 종결한다(api-gateway.md:187 정합). shutdown
-        순서와 무관하게 결정적.
         """
         from ante.account.scoping import require_account_id
 
@@ -265,20 +242,10 @@ class StopOrderManager:
         매수 스탑: 현재가 >= stop_price → 트리거
         매도 스탑: 현재가 <= stop_price → 트리거
 
-        ``account_id`` 는 호출자가 명시 전달해야 한다.
         multi-account 환경에서는 각 계좌마다 별도의 ``KISStreamClient``
         인스턴스를 가지므로, tick 이 들어온 stream 의 ``account_id`` 만
         매칭되는 stop order 를 평가한다. 다른 계좌의 stop order 는 같은
         symbol 이라도 무시된다.
-
-        A2 source chokepoint: ``is_exchange_tick`` 은
-        이 가격이 **실 WebSocket 틱**(``True``)인지 **REST fallback poll**
-        (``False``)인지 호출자가 구분해 전달한다. 거래일 멤버십 마킹은
-        ``is_exchange_tick=True`` 일 때만 수행한다 — KIS ``inquire-price`` 는
-        휴장일에도 직전 종가를 성공 반환하므로, 스트림 끊김 중 휴장일의
-        시계상 세션 시간에 fallback poll 이 성공해도 그것이 거래일을
-        보증하지 못한다(휴장일 사전등록 stop 의 오만료 차단). 반면 트리거
-        평가는 출처와 무관하게 항상 수행한다(아래 ``active_for_symbol``).
         """
         from ante.account.scoping import require_account_id
 
@@ -315,33 +282,6 @@ class StopOrderManager:
         번도 진입한 적 없는 주문(예: 장 전 미리 등록분, 휴장일 사전 등록분,
         세션 종료 후 등록분)은 만료되지 않는다 — "세션 외 등록 stop 즉시
         만료"(A1) 부작용을 제거한다.
-
-        멤버십을 per-order ``entered_session`` 으로
-        추적한다. ``on_price_update`` 가 market-wide(틱의 종목·계좌 무관)로 그
-        시점 in-session 인 **모든** active order 를 마킹하므로, 거래일에 한
-        종목이라도 틱이 흐르면 그 세션의 무틱 종목까지 멤버십을 얻어 함께
-        만료된다. ``entered_session`` 은 per-order 1회 set 이고 ``_expire_order``
-        가 만료 주문을 ``active_orders`` 에서 제외(소비)하므로 별도 reset 이
-        필요 없다. 이 per-order 멤버십이 manager-level 플래그의 타이밍 엣지를
-        교정한다:
-
-        - 세션 경계 race: 한 sweep 에서 경계 통과로 미만료된 주문도
-          ``entered_session=True`` 를 유지하므로 다음(완전 세션 밖) sweep 에서
-          만료된다(누락 없음).
-        - 세션 종료 후 등록: 세션 밖에 등록된 주문엔 in-session 틱이 오지 않아
-          ``entered_session=False`` → 미만료(보존). 사전 등록분도 동일 보존.
-
-        bounded known-limitation: src/ante 에 거래일/휴장일 캘린더가
-        없으므로 "거래일인데 전 모니터 종목이 세션 내내 무틱"(전종목 거래정지 등)
-        이면 어떤 주문도 마킹되지 않아 미만료된다(다음 세션 생존). 캘린더
-        부재의 구조적 하한 — api-gateway.md normative 선언.
-
-        bounded growth (P2-B): ``_session_tick_marked`` 의
-        stale epoch(현재 business_date 가 아닌 거래일 키)를 매 sweep 1회
-        prune 한다 — 거래일마다 새 키가 쌓여도 set 이 무한 증가하지 않게 한다.
-        prune 시점은 sweep(분 단위 주기 호출)이라 현재 거래일 키는 보존되고
-        과거 거래일 키만 제거된다(register-time 마킹 게이트는 같은 거래일에서만
-        쓰이므로 무해).
         """
         from ante.broker.fill_scheduler import business_date_kst
 

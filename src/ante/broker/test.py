@@ -1,10 +1,4 @@
-"""TestBrokerAdapter 및 PriceSimulator — 개발/검증용 테스트 브로커.
-
-KIS 실전 API 없이도 시스템 전체 흐름을 검증할 수 있는 테스트 브로커.
-GBM 기반 가격 시뮬레이션, 현실적 체결(슬리피지/부분 체결),
-인메모리 잔고/포지션 관리를 지원한다.
-MockBrokerAdapter(E2E용)와는 목적이 다르며 유지한다.
-"""
+"""TestBrokerAdapter 및 PriceSimulator — 개발/검증용 테스트 브로커."""
 
 from __future__ import annotations
 
@@ -114,9 +108,6 @@ class PriceSimulator:
     def tick(self, symbol: str) -> float:
         """한 틱(초 단위) 진행 — GBM 변동 적용 후 현재가 반환.
 
-        Args:
-            symbol: 종목코드.
-
         Returns:
             호가 단위로 반올림된 현재가.
 
@@ -142,9 +133,6 @@ class PriceSimulator:
 
     def get_price(self, symbol: str) -> float:
         """현재가 조회 (tick 진행 없이).
-
-        Args:
-            symbol: 종목코드.
 
         Returns:
             현재가.
@@ -194,10 +182,6 @@ class _TestOrder:
 
 class TestBrokerAdapter(BrokerAdapter):
     """개발/검증용 테스트 브로커 어댑터.
-
-    KIS와 동일한 BrokerAdapter 인터페이스로 현실적인 시뮬레이션 데이터를 반환한다.
-    PriceSimulator(GBM) 기반 가격 변동, 슬리피지/부분 체결 시뮬레이션,
-    인메모리 잔고/포지션/주문 이력 관리를 제공한다.
 
     설정 옵션:
         seed: 시뮬레이션 시드 (기본 42, 재현 가능)

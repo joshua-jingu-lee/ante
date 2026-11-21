@@ -1,8 +1,4 @@
-"""Live 봇용 Provider 구현체.
-
-실제 시스템 모듈(Treasury, Trade, Broker)을 경유하여
-계좌 잔고·포지션·미체결 주문을 조회한다.
-"""
+"""Live 봇용 Provider 구현체."""
 
 from __future__ import annotations
 
@@ -74,10 +70,6 @@ class LiveOrderView(OrderView):
     OrderTracker 의 sync 인메모리 open 캐시(commit 된 DB 미러)를
     ``(account_id, bot_id)`` 스코프로 조회한다 — DB I/O 없이 이벤트 루프 위
     await 된 코루틴 내부에서 안전하게 sync 호출된다.
-
-    **scope 경계**: OrderTracker 는 ante 가 제출한 주문만 추적한다. 수동/외부
-    주문은 반영되지 않는다(전략 "미체결" 정의 = ante 제출 한정). cold-cache(warm
-    완료 전) 시 빈 결과가 가능하다(best-effort, reconciler net) — known-limitation.
     """
 
     def __init__(self, order_tracker: OrderTracker, account_id: str) -> None:

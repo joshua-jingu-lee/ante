@@ -1,9 +1,4 @@
-"""DailyReportScheduler -- Account 기반 일일 성과 리포트 발행.
-
-Account의 trading_hours_end + 30분 시각에 매일 실행하여,
-DailyReportEvent를 무조건 발행하고 (거래 0건이어도),
-거래 1건 이상일 때만 NotificationEvent를 추가 발행한다.
-"""
+"""DailyReportScheduler -- Account 기반 일일 성과 리포트 발행."""
 
 from __future__ import annotations
 
@@ -73,14 +68,7 @@ class DailyReportScheduler:
     2. NotificationEvent는 거래 1건 이상일 때만 발행
 
     Args:
-        performance_tracker: 일별 성과 집계 조회용.
-        trade_recorder: 당일 거래 건수(매수/매도) 조회용.
-        position_history: 보유 포지션 현황 조회용.
-        eventbus: 이벤트 발행용.
         report_time: 리포트 발행 시각 (KST). 기본 16:00.
-        account_id: 계좌 ID.
-        currency: 통화 코드 (KRW, USD 등).
-        treasury: Treasury 인스턴스 (성과 산출용). Optional.
     """
 
     def __init__(
@@ -139,9 +127,6 @@ class DailyReportScheduler:
 
         Always publishes DailyReportEvent.
         Publishes NotificationEvent only when there are trades.
-
-        Args:
-            target_date: Target date. Defaults to today (KST).
 
         Returns:
             True if there were trades (NotificationEvent published),

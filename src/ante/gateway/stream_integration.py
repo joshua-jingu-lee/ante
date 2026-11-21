@@ -1,12 +1,4 @@
-"""StreamIntegration — KISStreamClient와 APIGateway 실시간 시세 연동.
-
-KIS WebSocket 실시간 시세를 수신하여:
-- ResponseCache에 가격 적재
-- StopOrderManager에 가격 전달
-- 체결 통보 시 캐시 무효화 및 이벤트 발행
-- 활성 봇의 모니터링 종목 자동 구독/해제
-- 스트림 연결 해제 시 REST 폴링 폴백
-"""
+"""StreamIntegration — KISStreamClient와 APIGateway 실시간 시세 연동."""
 
 from __future__ import annotations
 

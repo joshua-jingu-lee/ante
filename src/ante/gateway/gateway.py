@@ -326,8 +326,6 @@ class APIGateway:
         전달한다. 변환 불가/검증 실패 시 **fail-closed** 로 ``False`` 를 반환하고
         broker 를 호출하지 않는다 (내부 order_id 를 broker 로 passthrough 하지
         않는다 — P1 재발 방지).
-
-        ``account_id`` required (``require_account_id``).
         """
         from ante.account.scoping import require_account_id
 

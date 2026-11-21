@@ -111,19 +111,12 @@ class PerformanceTracker:
         """일별 성과 집계.
 
         Args:
-            bot_id: 봇 ID 필터 (None이면 전체)
             start_date: 시작일 (YYYY-MM-DD)
             end_date: 종료일 (YYYY-MM-DD)
             account_id: 계좌 ID 필터. ``None`` 이면 모든 계좌의 거래를
                 집계한다 (read query 정책). 단일 계좌에
                 바인딩된 호출자(DailyReportScheduler 등)는 자기 계좌만
                 집계되도록 명시적으로 전달해야 한다.
-            strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체를
-                집계한다. 지정 시 ``trades.strategy_id`` 컬럼(거래 시점
-                전략 귀속 durable key)으로 전략 전체 거래를 집계하며,
-                봇 멤버십/상태(삭제 여부)나 봇의 이후 전략 변경과
-                무관하다. ``bot_id``/``account_id`` 와 함께
-                전달되면 AND 로 결합된다.
         """
         conditions: list[str] = [
             _COND_STATUS_FILLED,
@@ -190,7 +183,6 @@ class PerformanceTracker:
         ISO 주 단위(월요일 시작)로 거래를 그룹화하여 집계한다.
 
         Args:
-            bot_id: 봇 ID 필터 (None이면 전체)
             strategy_id: 전략 ID 필터. ``None`` 이면 전략 무관 전체.
                 지정 시 ``trades.strategy_id`` 로 전략 전체 거래를
                 집계하며 봇 멤버십/상태와 무관하다. ``bot_id`` 와

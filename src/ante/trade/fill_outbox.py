@@ -1,30 +1,4 @@
-"""FillOutbox — 체결 이벤트 transactional outbox.
-
-``recorded_filled_qty`` advance + ``TradeRecord`` insert +
-``PositionHistory.on_trade`` 는 단일 ``Database.transaction()`` 으로 묶여
-positions/trades crash-safe exactly-once 를 보장한다. 그러나 ``OrderFilledEvent``
-는 **commit 이후** 알림으로 발행되므로, **commit↔publish 사이 narrow crash
-window** 에서는 다운스트림 소비자(Treasury 정산·전략 ``on_fill``·notification)로의
-**이벤트 전달이 유실**될 수 있었다(R4 bounded-limitation).
-
-FillOutbox 는 그 crash window 를 닫는다:
-
-1. ``FillApplier`` 가 체결 적용 트랜잭션 **안**(recorded advance + trade + position
-   과 동일 원자 커밋)에서 outbox row 를 INSERT 한다. commit 이 성공하면 이벤트
-   payload 도 반드시 영속화돼 있다 → **무손실(durability)**.
-2. ``FillOutboxPublisher`` 워커가 미발행 row 를 읽어 ``OrderFilledEvent`` 를
-   **publish 성공 → mark published 순서**(역순 금지)로 발행한다. 기동 시 미발행분을
-   재전달(at-least-once)하므로 commit-후-crash 에서도 이벤트가 결국 전달된다.
-
-전달 시맨틱은 **at-least-once** 다. publish↔mark 사이 micro-window 에서 같은 row 가
-두 번 발행될 수 있으나, 각 이벤트는 결정적 ``fill_dedup_key``(CAS 로 확정된
-``order_id:confirmed_cumulative``)를 실어 보내므로 소비자가 멱등 처리할 수 있다.
-**소비자 멱등화 자체는 범위 밖**이며, outbox 는 무손실 전달 + 결정적 키 제공까지만
-책임진다.
-
-상세 설계: ``docs/specs/eventbus/eventbus.md``(전달 시맨틱),
-``docs/specs/broker-adapter/18-fill-recovery.md``(§5.2 durability 해소).
-"""
+"""FillOutbox — 체결 이벤트 transactional outbox."""
 
 from __future__ import annotations
 
@@ -56,11 +30,6 @@ CREATE INDEX IF NOT EXISTS idx_fill_outbox_unpublished
 
 def canonical_cumulative(value: float) -> str:
     """누적 체결량을 결정적 문자열로 정규화 (fill_dedup_key 산출용).
-
-    SQLite REAL 과 Python ``float`` 은 모두 IEEE754 double 이므로,
-    ``record_fill`` 이 CAS ``RETURNING`` 으로 돌려준 확정 누적값을 ``repr`` 로
-    포매팅하면 **round-trip 을 보장하는 최단 표현**이 나온다. 같은 double 값은
-    항상 같은 ``repr`` 을 내므로 재전달 시 키가 결정적이다.
 
     ``repr(float)`` 을 쓰는 이유: ``str(float)`` 과 동일하게 round-trip-safe 이며,
     플랫폼·실행 간 동일 double 에 대해 안정적이다. 고정 소수 포맷(``f"{:.Nf}"``)은
@@ -162,10 +131,6 @@ def _is_db_corruption(exc: BaseException) -> bool:
 class FillOutboxPublisher:
     """미발행 outbox row 를 ``OrderFilledEvent`` 로 발행하는 워커 (lifecycle).
 
-    - **기동 재전달**: ``catch_up_once`` 가 미발행분을 한 번 드레인한다(commit-후-
-      crash 로 미발행된 이벤트를 재전달). main barrier 에서 await 한다.
-    - **이벤트 드레인**: ``notify()`` 로 enqueue 직후 즉시 드레인하고, ``start()``
-      의 주기 루프가 백스톱으로 미발행분을 처리한다.
     - **순서 보장**: row 마다 ``publish 성공 → mark_published`` 순서를 지킨다.
       publish 가 실패(예외)하면 마킹하지 않고 다음 사이클에 재시도한다.
 

@@ -1,7 +1,4 @@
-"""Mock Broker Adapter — E2E 테스트용 가상 브로커.
-
-외부 API 없이 주문 → 체결 → 잔고 변동 흐름을 시뮬레이션한다.
-"""
+"""Mock Broker Adapter — E2E 테스트용 가상 브로커."""
 
 from __future__ import annotations
 
@@ -125,8 +122,6 @@ class MockOrder:
 class MockBrokerAdapter(BrokerAdapter):
     """E2E 테스트용 가상 브로커 어댑터.
 
-    Note: BrokerAdapter 인터페이스라 내부에 await가 없어도 async def다.
-
     설정 옵션:
         fill_mode: "immediate" | "partial" | "delayed" | "reject"
         partial_fill_ratio: 부분 체결 비율 (0.0~1.0, 기본 0.5)
@@ -134,7 +129,6 @@ class MockBrokerAdapter(BrokerAdapter):
         initial_cash: 초기 현금 (기본 100_000_000)
         default_price: prices에 없는 종목의 현재가 (기본 50_000)
         prices: 종목별 현재가 딕셔너리 (예: {"005930": 70000})
-        prices_file: 가격 JSON 절대 경로. 있으면 위 두 키 대신 파일만 쓴다
     """
 
     broker_id: str = "mock"

@@ -1,12 +1,4 @@
-"""Bot 모듈 예외.
-
-``bot.start``/``bot.stop`` IPC handler 는 stable coded exception 을
-반환한다 — ``BotAccountCredentialsNotConfigured``
-(``BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED``, app_key 부재 preflight 실패) /
-``BotStateConflict`` (``BOT_STATE_CONFLICT``, 상태머신 거부). IPC server.py
-의 ``getattr(e, "code", ...)`` envelope 정렬 패턴(``BOT_NOT_FOUND_CODE`` 와
-동형) 으로 일관된다.
-"""
+"""Bot 모듈 예외."""
 
 BOT_NOT_FOUND_CODE = "BOT_NOT_FOUND"
 BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE = "BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED"
@@ -98,13 +90,6 @@ class BotStrategyAlreadyRunningError(BotError):
 class BotImmutableFieldError(BotError):
     """봇 생성 후 변경할 수 없는 불변 필드 수정 시도.
 
-    ``account_id`` 는 봇이 참조하는 treasury 예산·broker credential·포지션
-    격리가 모두 **account-bound** 라, ``update_bot`` 으로 변경하면 옛 account
-    아래의 예산/credential/포지션이 새 account 로 재배치되지 않아 불일치가
-    발생한다. 복잡한 re-isolation 대신 ``account_id`` 를 ``update_bot`` 의
-    불변 필드로 제약하고, 변경이 필요하면 봇을 삭제 후 재생성하도록 안내한다
-    (Account.update 의 ``AccountImmutableFieldError`` 선례 미러).
-
     클래스 레벨 ``code`` 속성은 IPC ``server.py`` 의
     ``getattr(e, "code", ...)`` 가 안정 코드 ``BOT_IMMUTABLE_FIELD`` 로
     변환하도록 한다. ``bot.update`` handler 의 ``except BotError: raise`` 가
@@ -173,12 +158,6 @@ class SignalKeyManagerNotConfigured(BotError):  # noqa: N818
 class BotSignalChannelBusy(BotError):  # noqa: N818
     """``signal.connect`` 단일-connect 정책 — active session 존재.
 
-    ``SignalChannelRegistry.register`` 가 같은 ``bot_id`` 에 대해 두 번째
-    핸드셰이크를 atomic check-and-insert 로 거부할 때 raise 한다. ack write
-    **전** 핸드셰이크 핸들러에서 raise 되어 IPC ``server.py`` 의
-    ``getattr(e, "code", ...)`` 가 안정 코드 ``BOT_SIGNAL_CHANNEL_BUSY`` 로
-    변환한 Phase-B error envelope 으로 거부된다(stream 미진입).
-
     **redaction 불변**: 메시지에 ``bot_id``/``session_id``/키를 절대
     interpolate 하지 않는다. ``__init__`` 인자를 0개로 강제해 식별자가 새는
     경로를 차단한다(``InvalidSignalKey`` 선례 미러, error-taxonomy.md
@@ -193,10 +172,6 @@ class BotSignalChannelBusy(BotError):  # noqa: N818
 
 class SignalChannelRegistryFrozen(BotError):  # noqa: N818
     """``SignalChannelRegistry`` 가 freeze 된 후 register 시도.
-
-    shutdown sweep(``freeze()`` → ``close_all('draining')``) 진입 후 들어온
-    핸드셰이크가 새 session 을 등록하려 할 때 ``register`` 가 raise 한다.
-    re-register leak(sweep 이후 채널 누적)을 차단하는 내부 가드다.
 
     **EXCEPTION_TO_SPEC 미등록(코드 없음)**: 정상 운영에서는 발생하지 않는
     shutdown-only 경로이고, raise 시점은 핸드셰이크 핸들러 내부라 IPC

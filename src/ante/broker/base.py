@@ -1,7 +1,4 @@
-"""BrokerAdapter 추상 기본 클래스.
-
-모든 증권사 구현체는 이 ABC를 상속한다.
-"""
+"""BrokerAdapter 추상 기본 클래스."""
 
 from __future__ import annotations
 
@@ -67,25 +64,12 @@ class BrokerAdapter(ABC):
     ) -> dict[str, float]:
         """매수가능 조회 (KIS ``inquire-psbl-order``).
 
-        ``purchasable_amount`` (주문가능액)의 SSOT다. 무인자
-        ``get_account_balance()``는 종목 컨텍스트가 없어 주문가능액을 산출할 수
-        없으므로, 종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다.
-        모의 rate-limit(5req/min)을 위해 ``get_account_balance()``와
-        분리되어 호출처가 빈도를 독립 제어한다.
-
-        Args:
-            symbol: 종목코드
-            price: 지정가 단가. 시장가/``None``이면 구현이 현재가 등으로 대체한다.
-            order_type: "market" | "limit" 등 주문구분
-
         Returns:
             {"order_buyable_amount": float, "max_buyable_amount": float,
              "order_cash": float, "order_buyable_qty": float,
              "max_buyable_qty": float}
             - ``order_buyable_amount``: 미수 미사용 매수가능금액
               (**purchasable_amount SSOT** — 보수값)
-            - ``max_buyable_amount``: 미수 포함 최대 매수가능금액
-            - ``order_cash``: 주문가능현금 (종목 의존성 최소)
             - ``order_buyable_qty`` / ``max_buyable_qty``: 종목/단가 의존 수량
         """
         ...
@@ -103,11 +87,8 @@ class BrokerAdapter(ABC):
         """주문 접수.
 
         Args:
-            symbol: 종목코드
             side: "buy" | "sell"
-            quantity: 주문 수량
             order_type: "market" | "limit"
-            price: 지정가 주문 시 가격
             stop_price: stop 주문 가격 (브로커가 지원하는 경우)
 
         Returns:
@@ -139,16 +120,6 @@ class BrokerAdapter(ABC):
         (``quantity``)·예산 증가 buy 가격↑·부분체결/터미널·동시성은 Gateway 가
         broker 호출 **전** fail-closed 로 거부하므로 broker 까지 내려오지 않는다
         (고급 케이스는 deferred). ``quantity`` 는 forward-compat 파라미터다.
-
-        Args:
-            order_id: 증권사 주문번호 (broker_order_id). Gateway 가 내부 order_id 를
-                OrderTracker 로 변환해 전달한다.
-            quantity: 원주문 수량(v1 은 불변값 전달). ``None`` 이면 미지정.
-            price: 신규 정정 가격. v1 은 Gateway 가 finite ``price>0`` 을 보장한다.
-            order_type: 주문구분. v1 은 ``"limit"`` 고정.
-
-        Returns:
-            성공 여부
         """
         ...
 

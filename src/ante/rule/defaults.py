@@ -1,16 +1,4 @@
-"""Account broker_type별 default rule 해석 helper.
-
-스펙(`docs/specs/rule-engine/09-rule-management.md` "Stored rules vs effective
-rules")에 따라, RuleEngine에 적용되는 effective rule은 다음 두 source의
-type-key 기반 merge다.
-
-- broker_type별 system defaults (예: ``kis-domestic``은 ``trading_hours``
-  자동 포함)
-- ``accounts.{account_id}.rules`` DynamicConfig의 explicit overrides
-
-stored 항목이 default와 같은 ``type``이면 stored가 default를 override한다.
-사용자/Agent는 ``enabled: false``로 default를 명시 비활성화할 수 있다.
-"""
+"""Account broker_type별 default rule 해석 helper."""
 
 from __future__ import annotations
 
@@ -39,15 +27,6 @@ def resolve_effective_rules(
     - ``stored_rules``에 default ``type``이 없으면 default를 effective에
       추가한다.
     - ``stored_rules``의 추가 항목(custom rule)은 그대로 유지한다.
-
-    Args:
-        account: 대상 계좌. ``broker_type``만 default 결정에 쓴다.
-        stored_rules: ``accounts.{account_id}.rules`` DynamicConfig에서
-            읽은 explicit override 리스트. ``None``은 빈 리스트와 동일.
-
-    Returns:
-        RuleEngine.load_rules_from_config()에 그대로 넘길 수 있는 effective
-        rule config 리스트.
     """
     defaults = _DEFAULT_RULES_BY_BROKER_TYPE.get(account.broker_type, [])
     overrides = stored_rules or []

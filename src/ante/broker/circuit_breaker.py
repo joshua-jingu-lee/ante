@@ -1,10 +1,4 @@
-"""Circuit Breaker — 연속 실패 시 API 호출 차단.
-
-상태 머신:
-  CLOSED (정상) → 연속 N회 실패 → OPEN (차단)
-  OPEN → recovery_timeout 후 → HALF_OPEN (시험)
-  HALF_OPEN → 1회 성공 → CLOSED / 실패 → OPEN
-"""
+"""Circuit Breaker — 연속 실패 시 API 호출 차단."""
 
 from __future__ import annotations
 

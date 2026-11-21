@@ -1,8 +1,4 @@
-"""Broker Registry — broker_type 문자열을 어댑터 클래스로 매핑.
-
-AccountService.get_broker()에서 계좌의 broker_type으로
-어댑터를 인스턴스화할 때 사용한다.
-"""
+"""Broker Registry — broker_type 문자열을 어댑터 클래스로 매핑."""
 
 from __future__ import annotations
 

@@ -38,13 +38,6 @@ class BotConfig:
 
     ``account_id`` 는 봇 생성 진입점에서 검증된다. fallback (`""`, ``None``,
     ``"default"``) 또는 형식 위반 값은 거부된다.
-
-    runtime control 4개 필드 (``max_restart_attempts``,
-    ``restart_cooldown_seconds``, ``step_timeout_seconds``,
-    ``max_signals_per_step``) 는 허용 범위 내에서만 허용된다 (코드 SSOT: 본
-    파일의 ``MIN_*``/``MAX_*`` 상수). 범위 밖 값은 ``ValueError`` 로 거부
-    되어 ``update_bot`` (manager.py:340) 의 재구성 경로에서도 동일하게
-    차단된다.
     """
 
     bot_id: str
@@ -86,17 +79,7 @@ def validate_runtime_controls(
     step_timeout_seconds: int,
     max_signals_per_step: int,
 ) -> None:
-    """Runtime control 4개 필드 범위 검증. 범위 밖이면 ``ValueError``.
-
-    코드 SSOT: 본 파일의 ``MIN_*``/``MAX_*`` 상수 + Pydantic Field +
-    manual OpenAPI schema bounds.
-
-    메시지 포맷은 ``validate_interval`` 과 동일한 ``<필드 이름>은 <min>...
-    <max> ... 이하여야 합니다. (입력값: <value>)`` 구조를 따른다. PUT
-    핸들러는 ``BotUpdateRequest`` Pydantic 검증으로 422 를 먼저 반환하므로,
-    이 함수는 ``BotConfig`` 직접 생성 경로 (``update_bot`` 재구성,
-    bootstrap, IPC registry 등) 의 invariant 만 담당한다.
-    """
+    """Runtime control 4개 필드 범위 검증. 범위 밖이면 ``ValueError``."""
     if (
         max_restart_attempts < MIN_MAX_RESTART_ATTEMPTS
         or max_restart_attempts > MAX_MAX_RESTART_ATTEMPTS
