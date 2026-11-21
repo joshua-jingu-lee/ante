@@ -1,20 +1,4 @@
-"""전략 파일 접근 보안 경계 공용 helper.
-
-라이브 ``StrategyContext`` 와 ``BacktestStrategyContext`` 가 동일한 전략 파일
-접근 시맨틱(strategies/ 디렉터리 샌드박스)을 공유하도록, 보안 경계 로직을 이
-모듈에 **단일 소유**시킨다.
-
-보안 시맨틱(SSOT):
-
-- 절대 경로는 거부한다 (``StrategyFileAccessError``, ``"Absolute paths"``).
-- ``strategies_dir`` 하위로 resolve 되지 않는 경로(``../`` 탈출, symlink 탈출
-  포함)는 거부한다 (``StrategyFileAccessError``, ``"escapes"``). base/candidate
-  를 **모두 ``resolve()`` 후** 비교해 symlink escape 도 차단한다.
-- 미존재 파일은 거부한다 (``StrategyFileAccessError``, ``"File not found"``).
-
-에러 메시지는 라이브 ``StrategyContext`` 의 기존 동작과 1:1 동일하게 보존한다
-(기존 strategy context 테스트가 메시지를 lock 한다).
-"""
+"""전략 파일 접근 보안 경계 공용 helper."""
 
 from __future__ import annotations
 
@@ -31,9 +15,6 @@ def resolve_strategy_path(strategies_dir: Path, path: str) -> Path:
     Args:
         strategies_dir: 허용된 샌드박스 루트. resolve 된 절대 경로를 권장한다.
         path: 전략이 요청한 상대 경로.
-
-    Returns:
-        ``strategies_dir`` 하위로 resolve 된 절대 경로.
 
     Raises:
         StrategyFileAccessError: 절대 경로이거나, resolve 결과가

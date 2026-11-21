@@ -1,9 +1,4 @@
-"""시스템 로깅 핸들러 구성.
-
-`docs/specs/logging/05-handlers-and-rotation.md` 및
-`docs/specs/logging/07-implementation.md` 에 정의된 이중 핸들러(stdout 평문 +
-환경변수 게이트 기반 JSONL 파일)를 구성한다.
-"""
+"""시스템 로깅 핸들러 구성."""
 
 from __future__ import annotations
 
@@ -19,11 +14,8 @@ from .safe_logger import install_safe_logger
 def setup_logging(config: Any) -> None:
     """stdout 평문 + (게이트 시) 파일 JSONL 이중 핸들러 구성.
 
-    - stdout: 사람 관찰용 기존 포맷 유지.
     - 파일 JSONL: ``ANTE_LOG_JSONL=1`` 이 설정된 경우에만 활성화,
       ``logs/ante-YYYY-MM-DD.jsonl`` 에 일일 자정 회전.
-    - 파일 핸들러 초기화 실패(디스크 가득, 권한 문제 등) 시 예외를 삼키고
-      stdout 핸들러만 유지한다 (스펙 §실패 처리).
     - 예약 키(``ts``, ``level``, ``logger``, ``msg``, ``env``, ``exc`` 및
       기타 LogRecord 속성)가 ``extra=`` 로 주입되어도 KeyError 없이 무시되도록
       ``AnteLogger`` 를 전역 Logger 클래스로 설치한다

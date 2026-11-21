@@ -34,10 +34,6 @@ __all__ = [
 class InvalidRoleScan:
     """``MemberService.find_invalid_role_members`` 결과 컨테이너.
 
-    ``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 두 카테고리로
-    분리한다. 운영자는 ``actionable`` 만 ``ante member revoke`` 로 cleanup 하고,
-    ``legacy_revoked`` 는 이미 revoke 된 historical row 라 추가 조치가 필요 없다.
-
     Attributes:
         actionable: ``role`` invalid AND ``status != revoked`` 인 row 들. 운영자가
             ``ante member revoke <member_id>`` 로 revoke 해야 할 대상.
@@ -372,28 +368,6 @@ class MemberService:
         계층에서 방어한다(defense-in-depth).
 
         ``role`` 은 ``MemberRole`` enum SSOT 멤버이어야 한다.
-        ``member_type`` 은 ``MemberType`` enum SSOT 멤버이어야 한다
-        (``role`` 동형 미러). CLI direct path 및 내부 caller 가 임의
-        문자열을 넘길 수 있으므로 본 서비스 계층에서도 ``ValueError`` 로
-        재검증한다. 검증은 ``_assert_master``
-        직후, ``_assert_type_role`` 직전에 둬서 enum membership 위반이
-        type-role 분기보다 먼저 거부되도록 한다.
-
-        master 검증은 **무조건** 수행한다. 형제
-        mutation (suspend/reactivate/revoke/rotate_token/update_scopes) 가 모두
-        무조건 ``_assert_master`` 를 호출하는 것과 동형이다.
-        ``registered_by=""``
-        (빈 actor) 는 ``_assert_master("")`` → ``get("")`` 가 ``None`` 을 반환해
-        ``PermissionDeniedError`` 로 거부된다 (의도된 defense-in-depth). 정상
-        IPC actor (``'ipc'``) / CLI actor (``'unknown'``) 는 truthy 이므로
-        master 조회 경로를 거쳐 무영향이다.
-
-        ``member_id`` 가 ``system:`` reserved prefix 로 시작하면 등록을 거부
-        한다 (audit sentinel 네임스페이스 보호). existing-member 조회
-        이전에 ``ReservedMemberIdError`` (.code=MEMBER_ID_RESERVED) 로 거부해,
-        legacy ``system:*`` 행이 있어도 MEMBER_ALREADY_EXISTS 가 아닌 reserved
-        코드가 surface 되도록 한다. 정확히 ``startswith("system:")`` 만 거부하며
-        ``system`` 단독·``systemic`` 등은 오거부하지 않는다.
         """
         await self._assert_master(registered_by, "register")
         self._assert_reserved_member_id(member_id)
@@ -549,20 +523,11 @@ class MemberService:
     async def find_invalid_role_members(self) -> InvalidRoleScan:
         """``MemberRole`` enum SSOT 에 없는 ``role`` 을 가진 member row 를 식별한다.
 
-        write path 차단과 auth read-path guard 로 invalid-role row
-        는 더 이상 새로 생성되지 않지만, 이전에 생성된 legacy row 는 DB 에 남아
-        있을 수 있다. 본 메소드는 그런 row 를 운영자가 cleanup 할 수 있도록 두
-        카테고리로 분리해 반환한다.
-
         반환된 ``Member`` 객체는 ``token_hash`` 등 민감 필드도 포함하지만
         CLI 출력 계층에서 마스킹/생략한다 (본 메소드는 service-layer SSOT 이므로
         column projection 을 의도적으로 하지 않는다 — caller 가 보안 결정을 진다).
 
         정렬: ``created_at ASC, member_id ASC`` (legacy row 정렬 안정성).
-
-        Returns:
-            ``InvalidRoleScan(actionable=[...], legacy_revoked=[...])``. 두 리스트는
-            중복되지 않으며, ``status`` 분기로 정확히 한 쪽에만 속한다.
         """
         valid = tuple(member.value for member in MemberRole)
         placeholders = ",".join("?" for _ in valid)
@@ -588,13 +553,6 @@ class MemberService:
         ``suspended_by``는 master 권한 caller여야 한다(보안 회귀
         잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
         거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
-
-        state 위반 (이미 SUSPENDED 등) 은
-        typed ``MemberStateConflictError`` 로 raise 한다.
-        ``ValueError`` 다중상속이므로 기존 ``except (ValueError,
-        PermissionError)`` caller (CLI member suspend line 657 generic
-        fallback) 가 회귀 없이 동일하게 잡힌다. ``revoke`` 는 plan scope 외
-        라 기존 ``_assert_status`` ``PermissionError`` 경로를 유지한다.
         """
         from ante.member.errors import MemberStateConflictError
 

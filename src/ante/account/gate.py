@@ -1,26 +1,4 @@
-"""Active-order readiness gate helpers (D-ACC-09 축 ii).
-
-3계층 defense-in-depth(RuleEngine 계층1 / Treasury 계층2 / APIGateway 계층3 +
-VirtualExecutor G9 backstop)가 공유하는 SSOT 헬퍼다. 각 계층은
-``RuntimeReadinessRegistry``(축 i)를 **매 이벤트 시점** 조회(상태 캐시 금지,
-G5 liveness)하고, fail-closed(registry 미주입·조회 예외·account 메타 취득 실패 =
-차단, G2)로 동작한다.
-
-본 모듈은 reader(gateway/RuleEngine/Treasury/VirtualExecutor)가 공통으로 쓰는:
-
-- ``account_not_ready`` reason 토큰 SSOT(broker-adapter/11-order-flow.md:82) +
-  missing-flag suffix 산출(``not_ready_reason``).
-- ``account_suspended`` reason 토큰(G7 — 계층1 kill-switch 합성).
-- 운영자 가시성 ``NotificationEvent(level=error, category=system)`` 빌더(G6 — 전
-  계층 통일 1회, BUY/SELL 무관). 청산(liquidation) SELL marker 검출 시 전용 문구
-  (rule-engine/07:91~95, treasury/05:73).
-- 청산 marker(machine-readable ASCII prefix — 한국어 reason 매칭 금지)
-  부착/검출 헬퍼(``LIQUIDATION_REASON_PREFIX``, ``is_liquidation_reason``).
-- fail-closed readiness 평가(``active_trading_blocked``).
-
-scope: 이 헬퍼는 active-order gate reader 전용이다. registry 를 채우는 단일 mark
-경로는 ``main._init_*`` 단독이다(D-ACC-09 §3).
-"""
+"""Active-order readiness gate helpers (D-ACC-09 축 ii)."""
 
 from __future__ import annotations
 
@@ -55,14 +33,6 @@ def derive_account_status(
     신뢰하면 안 된다. 계층1(RuleEngine)·계층3(APIGateway)가 **동일** 도출
     로직을 공유하도록(중복 구현 금지) 순수 함수로 추출한다.
 
-    - ``account_service is None``(status 소스 미구성, 비게이트 레거시) → ``None``
-      (status 축 비활성, 과차단 회피 — 기존 비게이트 동작 보존).
-    - 소스 present + ``fetch_failed``(live 조회 예외) 또는 fetched None/status 미상
-      → ``STATUS_UNAVAILABLE`` sentinel(**검증 불가** — 스냅샷 fallback 금지, 호출자
-      fail-closed 거부).
-    - 소스 present + 조회 성공 + status present → **verified status**(SUSPENDED/
-      ACTIVE 등) 그대로.
-
     스냅샷 fallback 은 절대 금지한다 — live 조회 실패 시 stale ACTIVE 로 통과하면
     suspended 계좌가 kill-switch 를 우회한다(spec rule-engine/07:88 "조회 예외도
     차단").
@@ -86,12 +56,6 @@ async def resolve_account_status(
     계층1(RuleEngine)·계층3(APIGateway)가 **동일 헬퍼**로 status 축을 평가한다
     (중복 구현 금지). status 는 런타임 가변 kill-switch 라 반드시 **live**
     ``account_service.get`` 로 본다 — 생성시점 스냅샷 fallback 금지.
-
-    반환 3-state 는 ``derive_account_status`` 와 동일하다:
-
-    - ``account_service is None`` → ``None``(status 축 비활성).
-    - 소스 present + ``get`` 예외/None/status 미상 → ``STATUS_UNAVAILABLE``.
-    - 소스 present + 조회 성공 + status present → verified status.
 
     호출자는 SUSPENDED → ``account_suspended`` 차단, ``STATUS_UNAVAILABLE`` →
     ``account_status_unavailable`` fail-closed, ``None``/verified non-SUSPENDED →
@@ -142,16 +106,6 @@ def not_ready_reason(
     면제 플래그는 제외하고(매트릭스), 비면제이면서 not_ready(또는 registry 미주입)
     인 플래그만 suffix 로 나열한다. registry 가 None 이면(fail-closed) 비면제 전
     플래그를 missing 으로 표기한다.
-
-    **fail-closed reason**: ``registry.is_ready``(또는 면제 평가)가
-    예외를 던지면 suffix 를 비우고 bare ``account_not_ready`` 를 반환한다 — 예외를
-    호출자로 **전파하지 않는다**. ``active_trading_blocked`` 가 이미 예외=차단
-    (fail-closed, G2)으로 끝나는데, 이어지는 reason 산출이 같은 예외(``is_ready``
-    재호출)를 흘리면 차단 분기에서 reason 을 만들다 예외가 핸들러 밖으로 새어,
-    계층1/2(특히 Treasury)에서 EventBus(bus.py:96)가 그 예외를 swallow 해
-    OrderRejectedEvent/NotificationEvent 가 미발행되고 주문이 terminal 없이
-    사라진다. reason 도 동일하게 안전값(bare reason)으로 끝내 차단 경로의 terminal
-    발행을 보장한다(G2 fail-closed·G6 알림 1회).
     """
     try:
         missing: list[str] = []

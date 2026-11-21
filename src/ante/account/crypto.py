@@ -1,19 +1,4 @@
-"""credentials Fernet 암호화.
-
-키 오류는 두 가지 root cause로 구분된다(`docs/specs/account/06-database-schema.md`
-ANTE_DB_ENCRYPTION_KEY SSOT + `docs/specs/cli/02-design-decisions.md` CLI 에러
-코드 명명 규칙):
-
-- ``EncryptionKeyMissingError`` (``DB_ENCRYPTION_KEY_MISSING``): env가 미설정
-  또는 빈 문자열이고, ``Config.load``가 ``secrets.env`` fallback에서도 export하지
-  못한 경우.
-- ``EncryptionKeyInvalidError`` (``DB_ENCRYPTION_KEY_INVALID``): env에 값은 있으나
-  Fernet 형식(URL-safe base64, 44바이트, ``=``로 끝남)을 위반하거나, 형식은 맞으나
-  실제 decrypt 시 ``cryptography.fernet.InvalidToken``으로 키 불일치가 드러난 경우.
-
-기반 클래스 ``EncryptionKeyError``를 ``RuntimeError`` 서브로 두어 기존
-``except RuntimeError`` 사용처와 behavior preserving을 유지한다.
-"""
+"""credentials Fernet 암호화."""
 
 from __future__ import annotations
 

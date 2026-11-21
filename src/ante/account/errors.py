@@ -50,11 +50,6 @@ class InvalidExchangeError(AccountError):
     account 입력 경계는 ``ante.core.exchange`` SSOT의 canonical 5종만
     허용한다(core.md ``## Canonical Exchange Vocabulary`` 축 A). `*` 는
     ``StrategyMeta.exchange`` 전용 wildcard이므로 account 표면에서는 거부된다.
-
-    클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"VALIDATION_ERROR"``를 노출하도록 한다(``InvalidAccountIdError`` 와
-    동일한 account 검증 에러 SSOT).
     """
 
     code: str = "VALIDATION_ERROR"
@@ -87,11 +82,6 @@ class AccountAlreadySuspendedError(AccountError):
 
 class AccountDeletedError(AccountError):
     """DELETED 상태 계좌에 대한 수정/활성화 시도.
-
-    클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_DELETED"``를 노출하도록 한다
-    (state-conflict typed code 정합).
 
     NOTE: CLI ``account delete`` 의 ``except AccountDeletedError`` 분기는
     명시적으로 ``code="ACCOUNT_ALREADY_DELETED"`` 를 출력해 already-deleted
@@ -157,16 +147,6 @@ class AccountStructuralChangeRequiresStoppedServerError(AccountError):
     플래그를 갖는다. 서버 부팅이 완료된 뒤 이 플래그가 활성화되면 ``create()``,
     ``delete()``, structural 키를 포함한 ``update()`` 호출은 즉시 이 예외로
     차단된다 — DB는 수정되지 않는다.
-
-    cold-path 경로(``ante account create/delete/set-credentials`` 등)는
-    서버를 정지한 뒤에만 사용해야 한다. CLI는 별도의
-    ``_assert_no_active_runtime`` 가드(PID alive + IPC socket exists)로
-    1차 차단되며, 본 예외는 그 가드를 우회한 비정상 경로의 service-layer
-    defense-in-depth 역할이다.
-
-    클래스 레벨 ``code`` 속성은 IPC 서버가 ``getattr(e, "code", "EXECUTION_ERROR")``로
-    안정 코드 ``"ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"``를
-    노출하도록 한다.
     """
 
     code: str = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
@@ -178,17 +158,6 @@ class AccountHasActiveBotsError(AccountError):
     cold-path AccountService.delete()는 status mutation 전에 ``bots`` 테이블을
     조회하여 동일 ``account_id``의 활성 봇이 있으면 삭제를 거부한다. 이는
     봇이 가리키는 계좌가 사라져 orphan bot이 되는 무결성 위반을 막는다.
-
-    1.0 운영 절차: ``ante account delete``는 cold-path 전용이며, 남아 있는
-    봇은 ``ante bot remove``로 먼저 제거해야 한다. ``bot remove``는 서버 실행
-    중에는 IPC, 서버 정지 상태에서는 cold-path cleanup으로 동작하므로 계좌
-    삭제 복구 흐름에서 별도의 server start/stop 왕복이 필요하지 않다.
-
-    클래스 레벨 ``code`` 속성은 IPC 서버가
-    ``getattr(e, "code", "EXECUTION_ERROR")``로 안정 코드
-    ``"ACCOUNT_HAS_ACTIVE_BOTS"``를 노출하도록 한다.
-    CLI ``account delete`` 의 명시적 ``except AccountHasActiveBotsError``
-    분기도 동일 코드를 surface 한다 (commands/account.py:874).
     """
 
     code: str = "ACCOUNT_HAS_ACTIVE_BOTS"

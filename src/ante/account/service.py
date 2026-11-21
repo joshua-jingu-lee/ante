@@ -194,30 +194,12 @@ class AccountService:
     async def create(self, account: Account) -> Account:
         """계좌 생성. **cold-path 전용**.
 
-        모든 public 호출자(CLI ``ante account create``, web POST 라우트, IPC
-        등)는 ``account_id`` 정책 검증( :func:`validate_new_account_id` )을 반드시
-        통과해야 한다. RESTRICTED seed 예약어( ``"test"`` )와 fallback 예약어
-        ( ``"default"`` )는 이 경로에서 우회 수단 없이 차단된다. Bootstrap seed
-        계좌 자동 생성은 별도의 private helper :meth:`_create_seed_account`
-        (only invoked by :meth:`create_default_test_account`) 가 담당한다 —
-        public ``create()`` API에는 우회 플래그를 노출하지 않는다.
-
-        Args:
-            account: 생성할 계좌 정보.
-
         Returns:
             생성된 Account (created_at, updated_at 포함).
 
         Raises:
             AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
                 호출됨. 다른 어떤 검사보다 먼저 평가된다 (invariant S2).
-            AccountAlreadyExistsError: 동일 account_id가 이미 존재.
-            InvalidAccountIdError: account_id 형식이 올바르지 않거나
-                ``RESTRICTED_NEW_ACCOUNT_IDS`` ( ``"test"`` ) /
-                ``INVALID_RUNTIME_ACCOUNT_IDS`` ( ``"default"`` ) 예약어와
-                일치하는 경우.
-            InvalidBrokerTypeError: 프리셋에 없는 broker_type, 또는 가상 전용 타입+live.
-            MissingCredentialsError: 필수 credentials 키 누락.
         """
         self._guard_cold_path_create()
 
@@ -389,14 +371,6 @@ class AccountService:
         ``AccountStructuralChangeRequiresStoppedServerError``를 raise한다 — DB
         조회를 수행하지 않으므로 nonexistent/DELETED 계좌도 cold-path 응답이
         우선이다 (invariant S2).
-
-        Raises:
-            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                structural 키 변경 시도. ``get()``/DELETED/IMMUTABLE 등 다른
-                모든 검사보다 먼저 평가된다 (invariant S2).
-            AccountNotFoundError: 계좌를 찾을 수 없음.
-            AccountDeletedException: DELETED 계좌는 수정 불가.
-            AccountImmutableFieldError: 불변 필드 수정 시도.
         """
         if self._runtime_started:
             structural_hits = sorted(set(fields) & STRUCTURAL_FIELDS)
@@ -490,26 +464,12 @@ class AccountService:
     async def repair_timezone(self, account_id: str, new_timezone: str) -> Account:
         """legacy invalid IANA timezone row 를 valid 값으로 복구 (**cold-path**).
 
-        ``_row_to_account`` 의 tolerant load 는 stored invalid timezone 을
-        보존하면서 ``Account.timezone_invalid=True`` marker 를 노출한다.
-        본 메서드는 운영자가 ``ante account repair-timezone`` (cold-path
-        CLI) 으로 명시 입력한 valid IANA timezone 으로 DB 와 캐시를
-        갱신하는 단일 진입점이다.
-
         cold-path 의미론: 서버 runtime 중에는
         ``AccountStructuralChangeRequiresStoppedServerError`` 로 즉시
         차단된다. ``update()`` 자체는 timezone 을 updatable field 로
         허용하므로 cold-path 보장이 본 메서드 책임이다. ingress 검증과
         DB/캐시 UPDATE 는 ``update(timezone=...)`` 에 위임하여 single
         SSOT 를 유지한다 (별도 DB UPDATE 중복 금지).
-
-        Raises:
-            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                호출됨.
-            ValueError: ``new_timezone`` 이 invalid IANA key
-                (``validate_iana_timezone`` 위임).
-            AccountNotFoundError, AccountDeletedException: ``update()`` 와
-                동일.
         """
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
@@ -648,24 +608,7 @@ class AccountService:
         logger.info("계좌 활성화: %s (요청자: %s)", account_id, activated_by)
 
     async def delete(self, account_id: str, deleted_by: str) -> None:
-        """소프트 딜리트 (status -> DELETED). cold-path 전용.
-
-        진입 직후 ``bots`` 테이블을 검사하여 active(non-deleted) 봇이 남아 있으면
-        ``AccountHasActiveBotsError``를 raise한다 (orphan bot 무결성).
-        ``bots`` 테이블 자체가 없으면(BotManager 미초기화 환경) active 봇이
-        없는 것으로 간주한다.
-
-        1.0 EventBus 계약: ``AccountDeletedEvent``는 발행하지 않는다. cold-path
-        delete는 consumer wiring을 트리거하지 않는다. ``AccountSuspendedEvent``
-        (reason="Account deletion")는 BotManager가 소속 봇을 중지시키도록 유지한다.
-
-        Raises:
-            AccountStructuralChangeRequiresStoppedServerError: 서버 실행 중
-                호출됨. 다른 어떤 검사보다 먼저 평가된다 (invariant S2).
-            AccountNotFoundError: 계좌를 찾을 수 없음.
-            AccountDeletedException: 이미 삭제된 계좌.
-            AccountHasActiveBotsError: 활성(non-deleted) 봇이 남아 있음.
-        """
+        """소프트 딜리트 (status -> DELETED). cold-path 전용."""
         if self._runtime_started:
             raise AccountStructuralChangeRequiresStoppedServerError(
                 "계좌 삭제는 cold-path 전용입니다. "
@@ -727,13 +670,10 @@ class AccountService:
         Returns:
             처리 대상 계좌(ACTIVE/SUSPENDED)별 변경 결과 목록. DELETED 계좌는
             포함되지 않는다. 각 항목은 다음 키를 가진다:
-
             - ``account_id`` (str)
             - ``previous_status`` (str): 호출 직전 상태 (소문자 wire 값)
             - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
             - ``changed`` (bool): 실제 전환 여부
-
-        IPC Kill Switch 응답 shape와 동일하다.
         """
         results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):
@@ -764,16 +704,10 @@ class AccountService:
         Returns:
             처리 대상 계좌(ACTIVE/SUSPENDED)별 변경 결과 목록. DELETED 계좌는
             포함되지 않는다. 각 항목은 다음 키를 가진다:
-
             - ``account_id`` (str)
             - ``previous_status`` (str): 호출 직전 상태 (소문자 wire 값)
             - ``status`` (str): 호출 직후 상태 (소문자 wire 값)
             - ``changed`` (bool): 실제 전환 여부
-
-        계좌 상태만 ACTIVE로 복구하며 봇 자동 재시작은 수행하지 않는다
-        (BotManager는 ``AccountActivatedEvent`` 수신 시 로깅만 수행).
-
-        IPC Kill Switch 응답 shape와 동일하다.
         """
         results: list[dict[str, Any]] = []
         for account_id in list(self._accounts.keys()):
@@ -811,17 +745,6 @@ class AccountService:
         오류로 미연결 adapter 가 캐시에 잔존해 후속 소비자가 재사용하는 일이
         없다. 이는 재연결 경로(:meth:`_reconnect_broker`)의 connect-성공-후-캐시
         원칙과 동일하다 — 초기 경로의 비대칭을 제거한다.
-
-        cache-hit 경로(런타임 hot-path)는 connect 없이 캐시된 인스턴스를 즉시
-        반환한다(connect 는 멱등이므로 호출자가 이후 connect 를 재호출해도
-        no-op). cache-miss 경로는 per-account :class:`asyncio.Lock` 으로
-        직렬화하고 lock 안에서 캐시를 double-check 하여, 동일 계좌의 동시
-        miss 가 각각 build+connect 해 세션을 누수하고 마지막만 캐시되는 race
-        를 차단한다.
-
-        Raises:
-            AccountNotFoundError: 계좌를 찾을 수 없음.
-            InvalidBrokerTypeError: BROKER_REGISTRY 미등록, 또는 가상 전용 타입+live.
         """
         broker = self._brokers.get(account_id)
         if broker is not None:
@@ -845,17 +768,6 @@ class AccountService:
         경로에서 사용한다 — 미캐시 계좌를 끊기 위해 새로 인증/연결하는 회귀를
         차단한다(미캐시 = 끊을 연결도 없음).
 
-        **동시성:** 조회를 ``get_broker()`` /
-        ``_reconnect_broker()`` 와 **동일한** per-account lock
-        (:meth:`_broker_lock_for`) 안에서 수행해, in-flight 한 초기
-        ``connect()`` 의 완료를 기다린 뒤(= drain) 캐시를 재확인한다. 동기
-        즉시 조회였다면, 종료 중 cache-miss ``get_broker()`` 가 lock 을 쥔 채
-        ``connect()`` 를 대기하는 in-flight 구간(아직 캐시 미기록)에서
-        shutdown 루프가 이를 ``None`` 으로 보고 skip 하고, 직후 connect 가
-        성공해 **disconnect 루프가 끝난 뒤에** 연결된 adapter 가 캐시에 기록돼
-        세션이 DB close 이후까지 잔존했다. lock 대기로 drain 하면, in-flight
-        connect 가 성공한 경우 캐시된 adapter 를 반환(→ shutdown 이
-        disconnect)하고, 실패한 경우 캐시 미기록이므로 ``None`` 을 반환한다.
         새 adapter 생성/connect 는 일으키지 않는다(lock 안에서 단순 조회).
         lock 보유 중 본 메서드를 호출하는 경로가 없어 재귀 deadlock 도 없다.
         """

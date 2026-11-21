@@ -113,12 +113,6 @@ class PerformanceFeedback:
     ) -> list[dict]:
         """봇의 자산 곡선 데이터 생성.
 
-        체결 거래의 누적 PnL로 일별 자산 곡선을 산출한다.
-
-        Args:
-            bot_id: 봇 ID.
-            initial_balance: 초기 자산 (미지정 시 0, 상대 수익으로 표현).
-
         Returns:
             ``[{"date": "2025-01-01", "value": 10000000}, ...]`` 형식.
 

@@ -1,21 +1,4 @@
-"""Strategy 모듈 예외.
-
-class-level ``code`` 정책 (실측 mirror):
-
-- ``StrategyNotFoundError`` → ``STRATEGY_NOT_FOUND`` (lock 보존)
-- ``StrategyLoadError`` → ``STRATEGY_LOAD_ERROR`` (validation; 본 PR 신규 부여)
-- ``StrategyValidationError`` → ``STRATEGY_VALIDATION_ERROR`` (validation; 본 PR
-  신규 부여) — CLI ``strategy submit``/``validate`` 의
-  ``STRATEGY_VALIDATION_ERROR`` surface 와 동일 안정 코드 SSOT.
-- ``StrategyFileAccessError`` → ``STRATEGY_FILE_ACCESS_ERROR`` (external; 본 PR
-  신규 부여) — 파일 시스템 접근 실패.
-- ``IncompatibleExchangeError`` → ``STRATEGY_INCOMPATIBLE_EXCHANGE`` (validation;
-  본 PR 신규 부여) — 전략 exchange ↔ 계좌 exchange 비호환 거부.
-
-``StrategyError`` base 는 의도적으로 ``.code`` 를 부여하지 않는다 — 사용
-사례가 없으며, allowlist 의 ``pending_migration`` baseline 으로 보존된다
-(``AccountError`` 와 동일 패턴).
-"""
+"""Strategy 모듈 예외."""
 
 
 class StrategyError(Exception):

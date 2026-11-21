@@ -1,16 +1,4 @@
-"""Reserved-key 를 안전하게 처리하는 Logger 서브클래스.
-
-stdlib ``Logger.makeRecord()`` 는 ``extra`` 의 키가 ``LogRecord`` 속성과
-충돌하면 ``KeyError("Attempt to overwrite ... in LogRecord")`` 를 던진다.
-그러나 ``docs/specs/logging/03-json-schema.md`` §예약어 처리 는 표준 필드
-(``ts``, ``level``, ``logger``, ``msg``, ``env``, ``exc``) 가 ``extra=`` 로
-주입되어도 무시되어야 한다고 규정한다.
-
-즉 formatter 단계의 필터링은 너무 늦다 — ``msg`` 같은 LogRecord 생성자가
-직접 설정하는 속성은 ``makeRecord`` 단계에서 KeyError 가 먼저 난다.
-이 모듈은 makeRecord 단계에서 위험 키를 선제적으로 제거해 호출자의
-실수로부터 로그 구조를 보호한다.
-"""
+"""Reserved-key 를 안전하게 처리하는 Logger 서브클래스."""
 
 from __future__ import annotations
 

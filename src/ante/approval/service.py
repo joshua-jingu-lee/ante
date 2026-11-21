@@ -735,10 +735,7 @@ class ApprovalService:
         일반 ``cancel()`` 의 requester ownership rule 을 우회해 admin 운영자가
         cleanup 할 수 있게 한다. 정상 type row 와 종결 상태 row 는 거부한다.
 
-        - ``type`` 이 ``_VALID_APPROVAL_TYPES`` 에 있으면 ``ValueError`` raise.
         - 처리 가능 상태는 ``pending``, ``on_hold``, ``execution_failed`` 한정.
-        - history 에 ``cancelled_invalid_type`` 액션을 append 하고,
-          ``status=cancelled``, ``resolved_by``/``resolved_at`` 을 기록한다.
         - ``suppress_notification=True`` (기본) 시 ``ApprovalResolvedEvent`` /
           notification 발행을 생략한다. False 면 일반 ``cancel()`` 과 동일한
           event/notification 경로를 탄다.

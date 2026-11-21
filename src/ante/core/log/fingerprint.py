@@ -1,11 +1,4 @@
-"""Exception fingerprint 생성 유틸리티.
-
-감시 에이전트가 "같은 근본 원인의 반복 발생"을 묶기 위해 사용하는 안정
-식별자다. 라인번호에 의존하지 않고 리팩터링에 저항적인 ``module:function``
-단위 해상도를 사용한다.
-
-자세한 규칙은 ``docs/specs/logging/04-fingerprint.md`` 참조.
-"""
+"""Exception fingerprint 생성 유틸리티."""
 
 from __future__ import annotations
 
@@ -26,14 +19,6 @@ def compute_fingerprint(
 
     파일 경로 대신 Python이 설정한 ``__name__`` 을 사용하므로 설치 경로나
     체크아웃 경로에 독립적이다.
-
-    Args:
-        exc_type: 발생한 예외의 클래스.
-        exc_tb: 예외의 traceback. ``None``이면 logger 이름으로 폴백한다.
-        logger_name: 폴백에 사용할 logger 이름.
-
-    Returns:
-        Fingerprint 문자열.
     """
     if exc_tb is None:
         return f"{exc_type.__name__}@{logger_name}"

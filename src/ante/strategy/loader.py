@@ -16,9 +16,6 @@ class StrategyLoader:
     def load(filepath: Path) -> type[Strategy]:
         """전략 파일에서 Strategy 하위 클래스를 로드.
 
-        Args:
-            filepath: 전략 파일 경로
-
         Returns:
             Strategy를 상속한 클래스 (인스턴스 아님)
 

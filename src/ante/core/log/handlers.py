@@ -1,19 +1,4 @@
-"""커스텀 로그 핸들러.
-
-``docs/specs/logging/05-handlers-and-rotation.md`` 의 파일명 계약
-(``ante-YYYY-MM-DD.jsonl``) 과 **Asia/Seoul 자정** 일일 회전을 만족하는
-``TimedRotatingFileHandler`` 서브클래스를 제공한다.
-
-표준 ``TimedRotatingFileHandler`` 는 활성 파일을 ``ante.jsonl`` 로 유지하고
-회전 시 ``ante.jsonl.YYYY-MM-DD`` 로 rename 한다. 본 핸들러는 활성 파일 자체에
-날짜를 포함해 ``ante-YYYY-MM-DD.jsonl`` 형태를 유지한다. 이는 staging watcher
-글롭(``ante-*.jsonl``)의 전제조건이다.
-
-또한 표준 구현은 회전 자정 경계가 호스트/컨테이너 TZ 에 의존한다 (``utc=True`` →
-UTC 자정, ``utc=False`` → 로컬 자정). 본 핸들러는 배포 방식(Docker, systemd,
-launchd) 과 무관하게 스펙 계약을 보장하기 위해 **코드 레벨에서 Asia/Seoul** 을
-강제한다 — ``computeRollover`` 와 파일명 생성 모두 KST 기준.
-"""
+"""커스텀 로그 핸들러."""
 
 from __future__ import annotations
 

@@ -1,8 +1,4 @@
-"""Data Pipeline — 다양한 소스의 데이터를 통일된 스키마로 정규화.
-
-소스별 Normalizer 클래스 패턴: BaseNormalizer ABC를 상속하여
-각 데이터 소스(KIS, Yahoo 등)마다 정규화 로직을 캡슐화한다.
-"""
+"""Data Pipeline — 다양한 소스의 데이터를 통일된 스키마로 정규화."""
 
 from __future__ import annotations
 
@@ -286,18 +282,6 @@ class DARTNormalizer:
         corp_code_map: dict[str, str],
     ) -> pl.DataFrame:
         """DART 재무제표 DataFrame을 정규화.
-
-        Args:
-            df: DART API 원본 응답 DataFrame.
-                필수 컬럼: corp_code, account_nm,
-                thstrm_amount, fs_div, reprt_code, bsns_year
-            corp_code_map: corp_code -> symbol 매핑
-                (예: {"00126380": "005930"}).
-
-        Returns:
-            FUNDAMENTAL_SCHEMA 부분 컬럼을 가진 DataFrame.
-            포함: date, available_date, symbol, revenue, net_income,
-            total_equity, total_debt, total_assets, source.
 
         ``available_date``는 point-in-time 공시 접수일이다. DART 응답의
         ``rcept_no``(14자리, 앞 8자리=접수일자 ``YYYYMMDD``)에서 추출한다.
