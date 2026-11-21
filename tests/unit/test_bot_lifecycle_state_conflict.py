@@ -31,6 +31,7 @@ silent-success → strict state machine 전환 회귀를 한 파일에서 self-c
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import polars as pl
 import pytest
@@ -253,6 +254,106 @@ async def test_approval_bot_stop_executor_silent_ignores_state_conflict(
     # raise 가 전파되지 않으면 통과 — silent ignore 회귀 보존.
     await _exec_bot_stop_idempotent({"bot_id": bot.bot_id})
     assert bot.status == BotStatus.CREATED
+
+
+async def _approval_service_on(manager: BotManager, db: Database, eventbus: EventBus):
+    """실제 ``_init_approval`` 로 executor 가 등록된 ApprovalService 를 만든다."""
+    from types import SimpleNamespace
+
+    from ante.main import Services, _init_approval
+
+    s = Services()
+    s.db = db
+    s.eventbus = eventbus
+    s.config = SimpleNamespace(get=lambda key, default=None: {})
+    s.bot_manager = manager
+    await _init_approval(s)
+    return s
+
+
+async def _cancel_expire_task(s) -> None:  # noqa: ANN001
+    if s.approval_expire_task is not None:
+        s.approval_expire_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await s.approval_expire_task
+
+
+async def test_approval_bot_stop_on_already_stopped_bot_succeeds_without_side_effects(
+    manager: BotManager, ctx: StrategyContext, db: Database, eventbus: EventBus
+) -> None:
+    """이미 멈춘 봇에 대한 bot_stop 결재도 성공하고, 중지 이벤트는 한 번만 난다."""
+    from ante.approval.models import ApprovalStatus
+    from ante.eventbus.events import BotStoppedEvent
+
+    stopped: list[BotStoppedEvent] = []
+
+    async def _on_stopped(event: BotStoppedEvent) -> None:
+        stopped.append(event)
+
+    eventbus.subscribe(BotStoppedEvent, _on_stopped)
+    bot = await _create_bot(manager, ctx, bot_id="bot-approval-stop")
+    await manager.start_bot(bot.bot_id)
+    s = await _approval_service_on(manager, db, eventbus)
+    try:
+        approvals = s.approval_service
+        first = await approvals.create(
+            type="bot_stop",
+            requester="agent-1",
+            title="stop",
+            params={"bot_id": bot.bot_id},
+        )
+        await approvals.approve(first.id, resolved_by="owner")
+        assert bot.status == BotStatus.STOPPED
+        assert len(stopped) == 1
+        row_after_first = await db.fetch_one(
+            "SELECT status, updated_at FROM bots WHERE bot_id = ?", (bot.bot_id,)
+        )
+
+        second = await approvals.create(
+            type="bot_stop",
+            requester="agent-1",
+            title="stop again",
+            params={"bot_id": bot.bot_id},
+        )
+        result = await approvals.approve(second.id, resolved_by="owner")
+
+        assert result.status == ApprovalStatus.APPROVED
+        assert [h["action"] for h in result.history][-1] == "executed"
+        stored = await approvals.get(second.id)
+        assert stored is not None and stored.status == ApprovalStatus.APPROVED
+        assert bot.status == BotStatus.STOPPED
+        assert len(stopped) == 1
+        row_after_second = await db.fetch_one(
+            "SELECT status, updated_at FROM bots WHERE bot_id = ?", (bot.bot_id,)
+        )
+        assert row_after_second == row_after_first
+    finally:
+        await _cancel_expire_task(s)
+
+
+async def test_approval_bot_stop_propagates_errors_other_than_state_conflict(
+    manager: BotManager, db: Database, eventbus: EventBus
+) -> None:
+    """state conflict 가 아닌 BotError 는 삼키지 않아 결재가 실행 실패로 남는다."""
+    from ante.approval.models import ApprovalStatus
+
+    s = await _approval_service_on(manager, db, eventbus)
+    try:
+        approvals = s.approval_service
+        request = await approvals.create(
+            type="bot_stop",
+            requester="agent-1",
+            title="stop ghost",
+            params={"bot_id": "bot-ghost"},
+        )
+        result = await approvals.approve(request.id, resolved_by="owner")
+
+        assert result.status == ApprovalStatus.EXECUTION_FAILED
+        failure = result.history[-1]
+        assert failure["action"] == "execution_failed"
+        assert "bot-ghost" in failure["detail"]
+    finally:
+        await _cancel_expire_task(s)
 
 
 # ── 정상 흐름 sanity (회귀 보존) ──────────────────────────────────────

@@ -519,6 +519,101 @@ def test_start_self_healing_skipped_when_no_accounts() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sync_instruments_retries_exchange_whose_upsert_failed() -> None:
+    """한 계좌의 bulk_upsert 가 실패하면 같은 exchange 의 다음 계좌가 다시 적재한다."""
+    s = _services()
+    accounts = [_account("live-a"), _account("live-b"), _account("live-c")]
+    for account in accounts:
+        s.runtime_readiness.mark_ready(account.account_id, ReadinessFlag.BROKER)
+
+    async def _get_broker(account_id: str) -> Any:
+        broker = AsyncMock()
+        broker.get_instruments = AsyncMock(
+            return_value=[{"symbol": "005930", "name": "삼성전자"}]
+        )
+        return broker
+
+    s.account_service.get_broker = AsyncMock(side_effect=_get_broker)
+    upserts: list[int] = []
+
+    async def _bulk_upsert(instruments: list[Any]) -> int:
+        upserts.append(len(instruments))
+        if len(upserts) == 1:
+            raise RuntimeError("db locked")
+        return len(instruments)
+
+    s.instrument_service = SimpleNamespace(bulk_upsert=_bulk_upsert)
+
+    await main_module._sync_instruments(s, accounts)
+
+    assert upserts == [1, 1]
+    called = [c.args[0] for c in s.account_service.get_broker.call_args_list]
+    assert called == ["live-a", "live-b"]
+
+
+def test_init_context_factory_falls_back_to_null_data_provider() -> None:
+    """data_provider 가 없으면 빈 결과를 돌려주는 대체 provider 로 factory 를 만든다."""
+    s = main_module.Services()
+    s.virtual_executor = SimpleNamespace(_gateway=None)
+    s.bot_manager = SimpleNamespace(_context_factory=None)
+    assert s.data_provider is None
+
+    main_module._init_context_factory(s)
+
+    assert isinstance(s.data_provider, main_module._NullDataProvider)
+    factory = s.bot_manager._context_factory
+    assert factory is not None
+    assert factory._data_provider is s.data_provider
+    frame = asyncio.run(s.data_provider.get_ohlcv("005930"))
+    assert frame.height == 0
+
+
+@pytest.mark.asyncio
+async def test_start_self_healing_twice_keeps_the_first_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """이미 루프가 떠 있으면 다시 호출해도 새 루프를 띄우지 않는다."""
+    started: list[list[str]] = []
+    hold = asyncio.Event()
+
+    async def _loop(s: Any, targets: list[Any]) -> None:
+        started.append([a.account_id for a in targets])
+        await hold.wait()
+
+    monkeypatch.setattr(main_module, "_readiness_self_healing_loop", _loop)
+    s = _services()
+    main_module._start_readiness_self_healing(s, [_account("live-1")])
+    first = s.readiness_self_healing_task
+    assert first is not None
+    try:
+        main_module._start_readiness_self_healing(
+            s, [_account("live-1"), _account("live-2")]
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+
+        assert s.readiness_self_healing_task is first
+        assert started == [["live-1"]]
+        current = asyncio.current_task()
+        loops = [
+            t
+            for t in asyncio.all_tasks()
+            if t is not current and t.get_name() == "readiness-self-healing"
+        ]
+        assert loops == [first]
+    finally:
+        hold.set()
+        await asyncio.gather(
+            *[
+                t
+                for t in asyncio.all_tasks()
+                if t.get_name() == "readiness-self-healing"
+            ],
+            return_exceptions=True,
+        )
+
+
+@pytest.mark.asyncio
 async def test_self_healing_recover_virtual_retries_treasury_without_get_broker() -> (
     None
 ):

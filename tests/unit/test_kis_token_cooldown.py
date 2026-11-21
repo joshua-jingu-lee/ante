@@ -160,6 +160,57 @@ class TestCooldownAtSource:
         assert s.post_count == 1
         assert a.access_token == "tok-reopen"
 
+    async def test_egw00133_cooldown_lasts_sixty_seconds_within_healing_interval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """EGW00133 cooldown 은 60초이고 self-healing 기본 주기보다 길지 않다."""
+        import ante.broker.kis as kis_module
+        from ante.config.defaults import DEFAULTS
+
+        fixed = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
+        class _FixedClock(datetime):
+            @classmethod
+            def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
+                return fixed if tz is not None else fixed.replace(tzinfo=None)
+
+        monkeypatch.setattr(kis_module, "datetime", _FixedClock)
+        s = _FakeSession([_egw00133_response()])
+        a = _make_adapter(s, account_no="acct-A")
+
+        with pytest.raises(TokenRateLimitError) as ei:
+            await a._authenticate()
+
+        assert ei.value.cooldown_until is not None
+        cooldown = (ei.value.cooldown_until - fixed).total_seconds()
+        assert cooldown == 60.0
+        assert cooldown <= DEFAULTS["readiness.self_healing_interval_seconds"]
+
+    async def test_authenticate_raises_rate_limit_without_sleeping(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """발급 거절과 cooldown 차단 모두 내부 대기 없이 곧바로 raise 한다."""
+        import ante.broker.kis as kis_module
+
+        slept: list[float] = []
+
+        async def _fake_sleep(delay: float, *args: Any, **kwargs: Any) -> None:
+            slept.append(delay)
+
+        monkeypatch.setattr(kis_module.asyncio, "sleep", _fake_sleep)
+
+        s1 = _FakeSession([_egw00133_response()])
+        with pytest.raises(TokenRateLimitError):
+            await _make_adapter(s1, account_no="acct-A")._authenticate()
+        assert s1.post_count == 1
+
+        s2 = _FakeSession([_success_response("tok-should-not-issue")])
+        with pytest.raises(TokenRateLimitError):
+            await _make_adapter(s2, account_no="acct-B")._authenticate()
+        assert s2.post_count == 0
+
+        assert slept == []
+
     async def test_cooldown_duration_matches_constant(self) -> None:
         """기록된 cooldown 만료시각이 상수(60s) 근처(±2s)."""
         before = datetime.now(UTC)
