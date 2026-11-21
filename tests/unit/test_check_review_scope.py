@@ -931,3 +931,33 @@ def test_docs_with_raised_import_baseline_requires_review(repo: Repo) -> None:
     assert result.returncode == 1
     assert "doc\tA\tdocs/a.md" in result.stdout
     assert f"review\tM\t{IMPORT_BASELINE}" in result.stdout
+
+
+LINT_BASELINE = "scripts/lint_baseline.json"
+LINT_BASE = {"src/ante/m.py": {"BLE001": 2, "C901": 1}}
+
+
+def _lint_baseline_json(ruff: dict[str, dict[str, int]]) -> str:
+    data = {"tools": {"ruff": "0.17.6", "mypy": "2.4.1"}, "ruff": ruff, "mypy": {}}
+    return json.dumps(data, indent=2) + "\n"
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        {"src/ante/m.py": {"BLE001": 3, "C901": 1}},
+        {"src/ante/m.py": {"BLE001": 2}},
+    ],
+    ids=["raised", "key-removed"],
+)
+def test_lint_baseline_change_requires_review(
+    repo: Repo, head: dict[str, dict[str, int]]
+) -> None:
+    repo.write(LINT_BASELINE, _lint_baseline_json(LINT_BASE))
+    repo.commit("lint baseline")
+    repo.mark_base()
+    repo.write(LINT_BASELINE, _lint_baseline_json(head))
+    repo.commit("change lint baseline")
+    result = repo.check()
+    assert result.returncode == 1
+    assert f"review\tM\t{LINT_BASELINE}" in result.stdout
