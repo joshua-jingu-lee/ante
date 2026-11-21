@@ -46,6 +46,10 @@ from ante.broker.registry import (
 )
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.errors import ErrorSpec
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCServerNotRunningError,
+)
 from ante.core.database import ReadOnlyDatabaseError
 from ante.core.time import InvalidIsoDateError
 from ante.member.errors import (
@@ -393,6 +397,17 @@ _INVALID_ISO_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+_IPC_SERVER_NOT_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="IPC_SERVER_NOT_RUNNING",
+    category="service_unavailable",
+)
+
+_IPC_TIMEOUT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="IPC_TIMEOUT",
+    category="service_unavailable",
+)
+
+
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
     category="internal",
@@ -462,6 +477,8 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RuleConfigError: _RULE_CONFIG_ERROR_SPEC,
     ReadOnlyDatabaseError: _READ_ONLY_DATABASE_SPEC,
     InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
+    IPCServerNotRunningError: _IPC_SERVER_NOT_RUNNING_SPEC,
+    IPCClientTimeoutError: _IPC_TIMEOUT_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
