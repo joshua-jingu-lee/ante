@@ -574,7 +574,6 @@ class MemberService:
         잠금). 빈 문자열을 포함한 non-master는 ``PermissionDeniedError``로
         거부된다. 라우트 인증 가드와 무관하게 service-layer 자체 invariant.
         """
-        from ante.member.errors import MemberStateConflictError
 
         await self._assert_master(suspended_by, "suspend")
         member = await self._get_or_raise(member_id)
@@ -622,7 +621,6 @@ class MemberService:
         state 위반 (이미 ACTIVE 등) 은 typed
         ``MemberStateConflictError`` 로 raise 한다 (``suspend`` 1:1 미러).
         """
-        from ante.member.errors import MemberStateConflictError
 
         await self._assert_master(reactivated_by, "reactivate")
         member = await self._get_or_raise(member_id)
