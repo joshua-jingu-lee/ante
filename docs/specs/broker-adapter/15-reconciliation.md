@@ -44,9 +44,9 @@ PositionReconciler는 `TradeService`, `EventBus`를 주입받아 동작한다.
 
 ### ReconcileScheduler — 주기적 대사
 
-> **구현 완료** — `src/ante/broker/scheduler.py`에 `ReconcileScheduler`로 구현되었다.
+> **구현 완료** — Bot 모듈(`src/ante/bot/reconcile_scheduler.py`)에 `ReconcileScheduler`로 구현되었다.
 
-구현: `src/ante/broker/scheduler.py`
+구현: `src/ante/bot/reconcile_scheduler.py`
 
 ReconcileScheduler는 `PositionReconciler`(Trade 모듈), `BrokerAdapter`(실제 잔고 조회), `BotManager`(활성 봇 목록), `EventBus`를 positional 인자로 주입받는다. 추가로 keyword-only 인자를 받는다:
 

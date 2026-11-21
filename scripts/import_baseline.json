@@ -17,7 +17,6 @@
     "bot->gateway",
     "bot->strategy",
     "bot->treasury",
-    "broker->bot",
     "broker->core",
     "broker->eventbus",
     "cli->account",
@@ -116,17 +115,10 @@
   ],
   "cycles": [
     [
-      "account",
-      "bot",
-      "broker",
-      "gateway",
-      "treasury"
-    ],
-    [
       "cli",
       "feed"
     ]
   ],
-  "lazy_imports": 434,
+  "lazy_imports": 433,
   "sqlite_files": []
 }
