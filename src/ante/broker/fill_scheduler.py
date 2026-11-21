@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
-from ante.account.scoping import require_account_id
 from ante.broker.exceptions import APIError, CircuitOpenError
+from ante.core.account_id import require_account_id
 
 if TYPE_CHECKING:
     from ante.broker.base import BrokerAdapter

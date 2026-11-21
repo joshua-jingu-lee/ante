@@ -35,6 +35,27 @@ ACCOUNT_ERROR_SUBCLASSES = [
     "MissingCredentialsError",
 ]
 
+MOVED_FROM_SCOPING = [
+    "ACCOUNT_ID_PATTERN",
+    "INVALID_RUNTIME_ACCOUNT_IDS",
+    "RESTRICTED_NEW_ACCOUNT_IDS",
+    "is_invalid_account_id",
+    "require_account_id",
+    "validate_new_account_id",
+    "InvalidAccountIdError",
+]
+MOVED_FROM_ERRORS = ["AccountError", "InvalidAccountIdError"]
+MOVED_FROM_PACKAGE = [
+    "ACCOUNT_ID_PATTERN",
+    "INVALID_RUNTIME_ACCOUNT_IDS",
+    "RESTRICTED_NEW_ACCOUNT_IDS",
+    "is_invalid_account_id",
+    "require_account_id",
+    "validate_new_account_id",
+    "AccountError",
+    "InvalidAccountIdError",
+]
+
 FORMAT_TAIL = "영문, 숫자, 하이픈만 허용하며 3~30자여야 합니다."
 REQUIRE_TAIL = "fallback (default, '', None) 또는 형식 위반 값은 사용할 수 없습니다."
 
@@ -82,6 +103,31 @@ def test_account_error_subclass_mro(name: str) -> None:
         "BaseException",
         "object",
     ]
+
+
+@pytest.mark.parametrize(
+    ("old_module", "name"),
+    [("ante.account.scoping", n) for n in MOVED_FROM_SCOPING]
+    + [("ante.account.errors", n) for n in MOVED_FROM_ERRORS]
+    + [("ante.account", n) for n in MOVED_FROM_PACKAGE],
+)
+def test_old_path_reexports_same_object(old_module: str, name: str) -> None:
+    """옛 경로의 이름이 새 경로의 객체와 같다."""
+    import importlib
+
+    from ante.core import account_id
+
+    old = importlib.import_module(old_module)
+    assert getattr(old, name) is getattr(account_id, name)
+
+
+@pytest.mark.parametrize("name", ACCOUNT_ERROR_SUBCLASSES)
+def test_account_error_subclass_base_is_core_object(name: str) -> None:
+    """계좌 예외마다 상속 사슬의 ``AccountError`` 가 새 경로의 객체다."""
+    from ante.core.account_id import AccountError as CoreAccountError
+
+    cls = getattr(account_errors, name)
+    assert cls.__mro__[1] is CoreAccountError
 
 
 def test_invalid_account_id_error_code() -> None:
