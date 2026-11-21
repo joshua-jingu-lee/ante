@@ -357,6 +357,31 @@ class TestSyncLoop:
         # 잘못된 매수가능액으로 이벤트를 발행하지 않는다.
         assert received == []
 
+    async def test_purchasable_amount_comes_from_order_buyable_not_max_buyable(
+        self, treasury
+    ):
+        """매수가능액은 get_buyable 의 order_buyable_amount 에서만 가져온다."""
+
+        class _DistinctBuyableBroker(FakeBroker):
+            async def get_buyable(
+                self,
+                symbol: str,
+                price: float | None = None,
+                order_type: str = "market",
+            ) -> dict:
+                self.buyable_call_count += 1
+                return {
+                    "order_buyable_amount": 4_800_000.0,
+                    "max_buyable_amount": 9_999_000.0,
+                    "order_cash": 7_000_000.0,
+                }
+
+        broker = _DistinctBuyableBroker()
+        await treasury._do_sync(broker, FakePositionHistory())
+
+        assert broker.buyable_call_count == 1
+        assert treasury._purchasable_amount == 4_800_000.0
+
     async def test_buyable_response_without_amount_keeps_previous_value(
         self, treasury, eventbus
     ):

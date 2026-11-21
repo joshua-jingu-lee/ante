@@ -148,6 +148,21 @@ class TestBuyable:
         assert result["order_buyable_qty"] >= 0.0
         assert result["order_buyable_qty"] == float(int(result["order_buyable_qty"]))
 
+    @pytest.mark.asyncio
+    async def test_get_buyable_without_price_sizes_qty_by_current_price(
+        self, connected_broker: TestBrokerAdapter
+    ) -> None:
+        """price 가 없으면 현재가로 수량을 센다(0이 아니라 cash // 현재가)."""
+        current = await connected_broker.get_current_price("000001")
+        assert current > 0
+
+        result = await connected_broker.get_buyable("000001")
+
+        expected = float(int(100_000_000 // current))
+        assert expected > 0
+        assert result["order_buyable_qty"] == expected
+        assert result["max_buyable_qty"] == expected
+
 
 class TestPositions:
     """get_positions() / get_account_positions() 동작 검증."""
@@ -281,6 +296,37 @@ class TestLimitOrder:
         )
         status = await connected_broker.get_order_status(order_id)
         assert status["status"] in ("filled", "partially_filled")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("quantity", "draw", "expected_filled"),
+        [(100, 0.29, 60.0), (100, 0.30, 100.0), (99, 0.0, 99.0)],
+        ids=["at_threshold_below_prob", "at_threshold_at_prob", "below_threshold"],
+    )
+    async def test_partial_fill_needs_100_shares_and_draw_below_30_percent(
+        self,
+        connected_broker: TestBrokerAdapter,
+        quantity: int,
+        draw: float,
+        expected_filled: float,
+    ) -> None:
+        """100주 이상이고 난수가 0.3 미만일 때만 부분 체결한다."""
+
+        class _ScriptedRng:
+            def random(self) -> float:
+                return draw
+
+            def uniform(self, low: float, high: float) -> float:
+                return (low + high) / 2
+
+        connected_broker._rng = _ScriptedRng()  # type: ignore[assignment]
+
+        order_id = await connected_broker.place_order(
+            "000001", "buy", quantity, order_type="limit", price=999_999.0
+        )
+
+        status = await connected_broker.get_order_status(order_id)
+        assert status["filled_quantity"] == expected_filled
 
     @pytest.mark.asyncio
     async def test_limit_sell_unfillable(
