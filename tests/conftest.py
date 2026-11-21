@@ -179,10 +179,6 @@ class _ConfigIsolationGuard:
             path = _event_path(event, args[position])
             if path is None:
                 continue
-            if not os.path.isabs(path) and _maybe_dir_fd_relative(
-                event, args, dir_fd_position
-            ):
-                continue
             forms = _path_forms(path)
             hit = any(
                 _under(form, root)
@@ -191,6 +187,10 @@ class _ConfigIsolationGuard:
                 for form in forms
             )
             if not hit:
+                continue
+            if not os.path.isabs(path) and _maybe_dir_fd_relative(
+                event, args, dir_fd_position
+            ):
                 continue
             if event == "open" and not _is_write_open(args):
                 if forms[0] in self._example_reads or forms[1] in self._example_reads:
@@ -226,13 +226,24 @@ def _maybe_dir_fd_relative(
     event: str, args: tuple, dir_fd_position: int | None
 ) -> bool:
     if event == "open":
-        # os.open은 mode가 None이고 이벤트에 dir_fd가 없다(shutil.rmtree가 쓴다).
-        return len(args) > 1 and args[1] is None
+        # os.open의 이벤트는 mode가 None이고 dir_fd가 실리지 않는다. 면제는
+        # shutil(rmtree가 dir_fd 기준 이름으로 연다)이 부른 경우뿐이다.
+        return len(args) > 1 and args[1] is None and _os_open_caller_is_shutil()
     if dir_fd_position is None or dir_fd_position >= len(args):
         return False
     # os.* 이벤트는 dir_fd가 없으면 -1, shutil.rmtree는 None을 넘긴다.
     dir_fd = args[dir_fd_position]
     return isinstance(dir_fd, int) and dir_fd >= 0
+
+
+def _os_open_caller_is_shutil() -> bool:
+    # 깊이를 고정하지 않고 이 파일의 프레임을 건너뛴다. os.open은 C 함수라
+    # 프레임이 없으므로 처음 만나는 다른 파일의 프레임이 os.open을 부른 코드다.
+    # f_code는 감사 이벤트를 내므로 f_globals의 __file__로 가른다.
+    frame = sys._getframe(1)
+    while frame is not None and frame.f_globals.get("__file__") == __file__:
+        frame = frame.f_back
+    return frame is not None and frame.f_globals.get("__file__") == shutil.__file__
 
 
 def _is_write_open(args: tuple) -> bool:
@@ -249,6 +260,16 @@ _COLLECTED_WORKER_VIOLATIONS: list[str] = []
 
 
 def _install_config_isolation(config: pytest.Config) -> None:
+    saved: dict[str, str | None] = {}
+    for name in (
+        "HOME",
+        "ANTE_CONFIG_DIR",
+        _ORIG_HOME_ENV,
+        _ORIG_CONFIG_DIR_ENV,
+        *_SCRUBBED_ENV,
+    ):
+        saved[name] = os.environ.get(name)
+
     is_worker = hasattr(config, "workerinput")
     if is_worker:
         orig_home = os.environ.get(_ORIG_HOME_ENV, "")
@@ -259,9 +280,6 @@ def _install_config_isolation(config: pytest.Config) -> None:
         os.environ[_ORIG_HOME_ENV] = orig_home
         os.environ[_ORIG_CONFIG_DIR_ENV] = orig_config_dir
 
-    saved: dict[str, str | None] = {}
-    for name in ("HOME", "ANTE_CONFIG_DIR", *_SCRUBBED_ENV):
-        saved[name] = os.environ.get(name)
     for name in _SCRUBBED_ENV:
         os.environ.pop(name, None)
 

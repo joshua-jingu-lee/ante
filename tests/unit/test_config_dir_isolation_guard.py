@@ -184,18 +184,44 @@ def test_guard_ignores_dir_fd_relative_names(
     assert config_isolation_guard.records == []
 
 
-def test_guard_blocks_cwd_relative_repo_config(
-    config_isolation_guard, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    repo_config = REPO_ROOT / "config"
-    monkeypatch.chdir(REPO_ROOT)
-    with config_isolation_guard.expect_violation(repo_config) as records:
+@pytest.fixture
+def fake_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """config/를 가진 가짜 저장소 루트. 작업 디렉터리를 그리로 옮긴다."""
+    root = tmp_path / "fake-repo"
+    (root / "config").mkdir(parents=True)
+    monkeypatch.chdir(root)
+    return root
+
+
+def test_guard_blocks_cwd_relative_config(config_isolation_guard, fake_repo) -> None:
+    with config_isolation_guard.expect_violation(fake_repo / "config") as records:
         with pytest.raises(config_isolation_guard.violation_type):
             os.makedirs("config/db")
         with pytest.raises(config_isolation_guard.violation_type):
             sqlite3.connect("config/db/ante.db")
     assert len(records) == 2
-    assert not (repo_config / "db").exists()
+    assert not (fake_repo / "config" / "db").exists()
+
+
+def test_guard_blocks_cwd_relative_os_open_create(
+    config_isolation_guard, fake_repo
+) -> None:
+    # shutil 밖에서 부른 상대 경로 os.open은 dir_fd 면제를 받지 않는다.
+    with config_isolation_guard.expect_violation(fake_repo / "config") as records:
+        with pytest.raises(config_isolation_guard.violation_type):
+            os.open("config/probe", os.O_CREAT | os.O_WRONLY)
+    assert len(records) == 1
+    assert not (fake_repo / "config" / "probe").exists()
+
+
+def test_guard_blocks_cwd_relative_os_open_dir(
+    config_isolation_guard, fake_repo
+) -> None:
+    # 금지 루트의 fd를 얻는 길을 막는다(그 fd를 dir_fd로 쓰는 호출은 검사할 수 없다).
+    with config_isolation_guard.expect_violation(fake_repo / "config") as records:
+        with pytest.raises(config_isolation_guard.violation_type):
+            os.open("config", os.O_RDONLY)
+    assert len(records) == 1
 
 
 def test_forbidden_roots_include_real_and_repo(config_isolation_guard) -> None:
