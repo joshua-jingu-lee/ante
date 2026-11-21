@@ -114,15 +114,7 @@ DataStore와 DataFeed는 "저장 인프라"와 "수집 파이프라인"으로 �
 
 ### 의존 방향
 
-```
-ante.feed ────import───→ ante.data  (store, normalizer, schemas)
-Collector ─────────────→ ante.data  (store, schemas)
-Backtest Engine ───────→ ante.data  (store, schemas)
-LiveDataProvider ──────→ ante.data  (store) + APIGateway (캐시)
-
-ante.feed ✕───→ Collector          (서로 의존 없음)
-ante.data ✕───→ ante.feed          (역방향 의존 없음)
-```
+모듈 간 import는 [scripts/import_baseline.json](../../scripts/import_baseline.json)이 잠그고, 데이터 파이프라인의 의존 방향은 [specs/data-pipeline/04-dependencies.md](../specs/data-pipeline/04-dependencies.md)가 정본이다.
 
 ### 쓰기 소유권
 
