@@ -39,11 +39,23 @@ _EXPECTED_DISPATCH_REJECT_CODES = frozenset(
 )
 
 
+def _escaped(part: str | int) -> str:
+    if not isinstance(part, str):
+        return str(part)
+    return "".join(
+        ch if ch.isprintable() else ch.encode("unicode_escape").decode("ascii")
+        for ch in part
+    )
+
+
+def _field_path(loc: tuple[str | int, ...]) -> str:
+    return ".".join(_escaped(part) for part in loc)
+
+
 def _validation_message(command: str, exc: ValidationError) -> str:
     errors = exc.errors(include_url=False, include_input=False, include_context=False)
     fields = ", ".join(
-        f"{'.'.join(str(part) for part in error['loc']) or 'args'}({error['type']})"
-        for error in errors
+        f"{_field_path(error['loc']) or 'args'}({error['type']})" for error in errors
     )
     return f"{command} 인자 검증 실패: {fields}"
 
@@ -55,6 +67,18 @@ def _validated_args(spec: CommandSpec, args: Any) -> Any:
         return spec.request_model.model_validate(args)
     except ValidationError as exc:
         raise RequestValidationError(_validation_message(spec.name, exc)) from None
+
+
+def _logged_expected_reject(
+    command: str, exc: Exception, error: dict[str, Any]
+) -> bool:
+    if isinstance(exc, RequestValidationError):
+        logger.warning("IPC 요청 검증 거부: %s", error["message"])
+        return True
+    if error["code"] in _EXPECTED_DISPATCH_REJECT_CODES:
+        logger.warning("IPC handshake rejected: %s (%s)", command, error["code"])
+        return True
+    return False
 
 
 def _encode_signal_frame(frame: dict) -> bytes:
@@ -399,11 +423,7 @@ class IPCServer:
             }
         except Exception as e:
             error = ipc_error_payload(e)
-            if error["code"] in _EXPECTED_DISPATCH_REJECT_CODES:
-                logger.warning(
-                    "IPC handshake rejected: %s (%s)", command, error["code"]
-                )
-            else:
+            if not _logged_expected_reject(command, e, error):
                 logger.exception("IPC 커맨드 실행 오류: %s", command)
             return {
                 "id": request_id,
