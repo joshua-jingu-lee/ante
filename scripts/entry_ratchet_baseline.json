@@ -168,7 +168,6 @@
     "member.update_scopes",
     "rule.update",
     "signal.connect",
-    "strategy.set_status",
     "treasury.allocate",
     "treasury.deallocate",
     "treasury.set_balance"
@@ -210,7 +209,6 @@
     "member.update_scopes": 2,
     "rule.update": 4,
     "signal.connect": 1,
-    "strategy.set_status": 2,
     "treasury.allocate": 3,
     "treasury.deallocate": 3,
     "treasury.set_balance": 2
