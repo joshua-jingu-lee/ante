@@ -198,6 +198,25 @@ async def test_stop_bot_on_created_state_raises_state_conflict(
     assert BotStatus.CREATED.value in str(exc.value)
 
 
+async def test_state_conflict_is_caught_by_except_bot_error(
+    manager: BotManager, ctx: StrategyContext
+) -> None:
+    """start/stop 의 상태 충돌은 except BotError 로 잡히는 예외로 던져진다."""
+    from ante.bot.exceptions import BotError
+
+    bot = await _create_bot(manager, ctx, bot_id="bot-conflict-base")
+
+    with pytest.raises(BotError) as stop_exc:
+        await manager.stop_bot(bot.bot_id)
+    await manager.start_bot(bot.bot_id)
+    with pytest.raises(BotError) as start_exc:
+        await manager.start_bot(bot.bot_id)
+    await manager.stop_bot(bot.bot_id)
+
+    assert type(stop_exc.value) is BotStateConflict
+    assert type(start_exc.value) is BotStateConflict
+
+
 # ── R5: caller silent-ignore 회귀 보존 ─────────────────────────────────
 
 

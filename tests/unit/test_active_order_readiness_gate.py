@@ -1435,6 +1435,105 @@ class TestVirtualRouting:
         assert calls == [False]  # 공유 헬퍼 1회 호출(단일 fetch, fetch_failed=False).
         assert cap.failed[0].error_code == "account_suspended"
 
+    @pytest.mark.parametrize(
+        ("broker_type", "trading_mode"),
+        [(None, TradingMode.VIRTUAL), ("test", None)],
+        ids=["broker_type_missing", "trading_mode_missing"],
+    )
+    async def test_virtual_meta_missing_blocks_even_with_every_flag_ready(
+        self, broker_type: object, trading_mode: object
+    ) -> None:
+        """계좌 메타를 알 수 없으면 플래그가 모두 ready 여도 체결하지 않고 막는다."""
+        from ante.account.readiness import ALL_FLAGS
+
+        registry = RuntimeReadinessRegistry()
+        for flag in ALL_FLAGS:
+            registry.mark_ready(ACCOUNT, flag)
+        meta = MagicMock()
+        meta.status = AccountStatus.ACTIVE
+        meta.broker_type = broker_type
+        meta.trading_mode = trading_mode
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        executor = self._make_virtual_executor(
+            bus, registry=registry, gateway=gateway, account=meta
+        )
+
+        await executor._on_order_approved(_approved(order_type="limit"))
+
+        assert cap.filled == []
+        assert [f.error_code for f in cap.failed] == ["account_not_ready"]
+
+    async def test_virtual_gate_rereads_account_status_for_each_order(self) -> None:
+        """첫 주문 뒤 SUSPENDED 가 되면 두 번째 주문은 새로 읽은 status 로 막힌다."""
+        from ante.bot.providers.virtual import VirtualExecutor, VirtualPortfolioView
+
+        svc = MagicMock()
+        svc.get = AsyncMock(
+            side_effect=[
+                make_account(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+                make_account(
+                    ACCOUNT,
+                    trading_mode=TradingMode.VIRTUAL,
+                    status=AccountStatus.SUSPENDED,
+                ),
+            ]
+        )
+        bus = EventBus()
+        cap = _capture(bus)
+        gateway = MagicMock()
+        gateway.get_current_price = AsyncMock(return_value=50000.0)
+        executor = VirtualExecutor(
+            eventbus=bus,
+            gateway=gateway,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            account_service=svc,
+        )
+        executor.register_bot(BOT, VirtualPortfolioView(BOT, 10_000_000.0))
+
+        await executor._on_order_approved(_approved(order_type="limit"))
+        await executor._on_order_approved(_approved(order_type="limit"))
+
+        assert len(cap.filled) == 1
+        assert [f.error_code for f in cap.failed] == ["account_suspended"]
+        assert svc.get.await_count == 2
+
+    async def test_virtual_gate_failure_keeps_order_identity_for_release(
+        self,
+    ) -> None:
+        """차단 실패 이벤트는 원 주문의 order_id·bot_id·account_id 로 예약을 푼다."""
+        bus = EventBus()
+        cap = _capture(bus)
+        treasury = Treasury(
+            db=MagicMock(),
+            eventbus=bus,
+            account_id=ACCOUNT,
+            runtime_readiness=ready_registry(ACCOUNT, trading_mode=TradingMode.VIRTUAL),
+            broker_type="kis-domestic",
+            trading_mode=TradingMode.VIRTUAL,
+        )
+        treasury.release_reservation = AsyncMock()  # type: ignore[method-assign]
+        bus.subscribe(OrderFailedEvent, treasury._on_order_failed, priority=50)
+        executor = self._make_virtual_executor(
+            bus,
+            registry=not_ready_registry(
+                ACCOUNT,
+                trading_mode=TradingMode.VIRTUAL,
+                flag=ReadinessFlag.TREASURY_SYNC,
+            ),
+        )
+
+        await executor._on_order_approved(_approved())
+
+        assert [(f.order_id, f.bot_id, f.account_id) for f in cap.failed] == [
+            ("ord-1", BOT, ACCOUNT)
+        ]
+        treasury.release_reservation.assert_awaited_once()
+        call = treasury.release_reservation.await_args
+        assert call.args[0] == BOT and call.args[1] == "ord-1"
+
     async def test_g7_virtual_single_fetch_no_duplicate_get(self) -> None:
         """단일 fetch 락: VirtualExecutor 가 status + readiness 를 **한 번의**
         account_service.get 으로 평가한다(중복 get 금지)."""

@@ -197,6 +197,34 @@ async def test_close_all_closes_and_joins_to_completion() -> None:
     assert naturally_exited.is_set() is True
 
 
+async def test_join_waits_for_tasks_to_finish_on_their_own_before_cancelling() -> None:
+    """join 은 grace 안의 read·writer task 를 취소하지 않고 끝날 때까지 기다린다."""
+    handle = _handle()
+    release = asyncio.Event()
+    flushed: list[str] = []
+
+    async def _task(name: str) -> None:
+        await release.wait()
+        flushed.append(name)
+
+    handle.read_task = asyncio.ensure_future(_task("read"))
+    handle.writer_task = asyncio.ensure_future(_task("writer"))
+
+    joiner = asyncio.ensure_future(handle.join())
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert not joiner.done()
+    assert not handle.read_task.cancelled()
+    assert not handle.writer_task.cancelled()
+
+    release.set()
+    await joiner
+
+    assert sorted(flushed) == ["read", "writer"]
+    assert not handle.read_task.cancelled()
+    assert not handle.writer_task.cancelled()
+
+
 async def test_close_all_empty_registry_no_error() -> None:
     reg = SignalChannelRegistry()
     await asyncio.wait_for(reg.close_all("draining"), timeout=1.0)
