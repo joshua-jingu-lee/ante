@@ -36,14 +36,7 @@ _EXPECTED_DISPATCH_REJECT_CODES = frozenset(
 
 
 def _encode_signal_frame(frame: dict) -> bytes:
-    """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화.
-
-    ``protocol.encode`` 와 동일한 ``[4바이트 빅엔디안 길이][JSON]`` framing 이되,
-    legacy ``SignalChannel._write`` 와 byte-identical 한 페이로드를 위해
-    ``json.dumps(..., default=str)`` 를 쓴다(``timestamp`` 등 datetime 을 ISO
-    문자열로 — legacy stdout 경로의 ``default=str`` 와 정합, INV-OUT-1). 1MB
-    초과는 ``MessageTooLargeError`` (outbound non-fatal 처리 대상).
-    """
+    """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화."""
     payload = json.dumps(frame, default=str, ensure_ascii=False).encode("utf-8")
     if len(payload) > protocol.MAX_MESSAGE_SIZE:
         raise MessageTooLargeError(
@@ -270,13 +263,7 @@ class IPCServer:
 
     @staticmethod
     def _service_unavailable(request_id: str, message: str) -> dict:
-        """``SERVICE_UNAVAILABLE`` error 응답 dict 생성.
-
-        기존 error 응답 포맷
-        ``{"id", "status": "error", "error": {"code", "message"}}``과 동일한
-        구조를 사용해 다른 IPC consumer(CLI/MCP)가 별도 처리 없이
-        기존 generic error path로 흘러가도록 한다.
-        """
+        """``SERVICE_UNAVAILABLE`` error 응답 dict 생성."""
         return {
             "id": request_id,
             "status": "error",
@@ -288,15 +275,7 @@ class IPCServer:
 
     @staticmethod
     def _malformed_request(message: str) -> dict:
-        """``MALFORMED_REQUEST`` error 응답 dict 생성.
-
-        첫 프레임이 JSON object 가 아닐 때 사용한다.
-        비-dict 입력은 usable ``id`` 가 없어 ``id=None`` 으로 고정한다
-        (``MESSAGE_TOO_LARGE`` 블록 동형). taxonomy SSOT
-        (``docs/specs/contracts/error-taxonomy.md``) 의 ``validation`` 카테고리
-        안정 코드. ``_service_unavailable`` 와 동일 envelope shape 으로 다른 IPC
-        consumer(CLI/MCP)가 기존 generic error path 로 흘러가게 한다.
-        """
+        """``MALFORMED_REQUEST`` error 응답 dict 생성."""
         return {
             "id": None,
             "status": "error",
@@ -308,14 +287,7 @@ class IPCServer:
 
     @staticmethod
     def _service_not_configured(request_id: str, service_name: str) -> dict:
-        """``SERVICE_NOT_CONFIGURED`` error 응답 dict 생성.
-
-        dispatch wrapper의 ``required_services`` preflight 가
-        ``ServiceRegistry`` 에 의존 service 가 부재한 경우 사용한다. taxonomy
-        SSOT(``docs/specs/contracts/error-taxonomy.md``) 의 ``service_unavailable``
-        category 안정 코드. ``SERVICE_UNAVAILABLE``(lifecycle 상태) 와는 의미가
-        분리된다 — 본 코드는 영구적 misconfiguration 을 가리킨다.
-        """
+        """``SERVICE_NOT_CONFIGURED`` error 응답 dict 생성."""
         return {
             "id": request_id,
             "status": "error",
@@ -326,60 +298,14 @@ class IPCServer:
         }
 
     def _missing_required_service(self, spec_required: frozenset[str]) -> str | None:
-        """``required_services`` preflight — 부재한 첫 service 이름 반환.
-
-        ``CommandSpec.required_services`` 의 각 attribute 이름을
-        ``ServiceRegistry`` 에서 ``getattr(..., None)`` 으로 조회한다.
-        ``ServiceRegistry`` 는 dataclass 이고 optional service(예: ``audit_logger``,
-        ``member_service``, ``trade_service``, ``strategy_registry``)는 default
-        ``None`` 을 가지므로 ``None`` 도 부재로 판정한다. 모두 존재하면 ``None``
-        반환. 부재 발생 시 등록 순서가 frozenset 이라 비결정적이므로 단일 결정
-        결과(첫 발견)만 사용한다.
-        """
+        """``required_services`` preflight — 부재한 첫 service 이름 반환."""
         for service_name in spec_required:
             if getattr(self._service_registry, service_name, None) is None:
                 return service_name
         return None
 
     async def _dispatch(self, request: dict) -> dict:
-        """요청을 적절한 핸들러로 라우팅.
-
-        lifecycle state-aware reject 분기:
-
-        * ``DRAINING``/``STOPPED``: 모든 명령(mutating + read-only)
-          ``SERVICE_UNAVAILABLE``. 서비스 리소스 종료 구간 또는 종료 이후이므로
-          read-only도 closed resource 접근 위험.
-        * ``SHUTTING_DOWN`` + mutating: ``SERVICE_UNAVAILABLE``.
-        * ``SHUTTING_DOWN`` + read-only: 통과 (BotManager/DB 살아있음 가정).
-        * ``RUNNING``: 정상 dispatch.
-
-        lifecycle gate 통과 후 handler 호출 전에
-        ``CommandSpec`` metadata 기반 preflight 두 단계를 수행한다.
-
-        1. ``required_services`` 부재 시 ``SERVICE_NOT_CONFIGURED`` envelope
-           으로 거부한다 — handler 가 ``svc.<name>`` 접근에서 ``None`` /
-           ``AttributeError`` 로 폭주하기 전에 차단한다.
-        2. ``account_id_policy`` 검증 — try 블록 내부에서
-           ``require_account_id`` 를 호출해 ``InvalidAccountIdError``
-           (``code="VALIDATION_ERROR"``) 를 raise 시키고, 기존 except 가
-           ``getattr(e, "code", ...)`` 로 ``VALIDATION_ERROR`` envelope 으로
-           변환하게 한다(handler 본문의 기존 ``require_account_id`` 호출과
-           1:1 동형 매핑).
-
-        lifecycle gate 가 preflight 보다 항상 먼저 — DRAINING/STOPPED 또는
-        SHUTTING_DOWN+mutating 인 경우 preflight 에 도달하지 않는다.
-
-        handler 가 정상 종료된 후
-        ``CommandSpec.audit_action`` 이 ``None`` 이 아니면 ``audit_logger`` 를
-        통해 자동으로 audit 로그를 1회 남긴다. handler 는 반환 dict 안의
-        ``_audit_detail`` reserved key 로 ``{resource, detail, ip}`` 를 wrapper
-        에 전달할 수 있으며, public envelope 으로 새 나가지 않도록 wrapper 가
-        ``pop`` 으로 strip 한 뒤 envelope ``result`` 에 담는다. handler 가
-        예외로 종료되면 audit 호출은 일어나지 않는다(실패 시 audit invariant).
-        ``audit_action`` 이 부여된 commands(현재 10개)는
-        ``required_services`` 에 ``audit_logger`` 가 명시되어 있어 preflight
-        단계에서 부재가 차단된다 (등록 시 동형 lock).
-        """
+        """요청을 적절한 핸들러로 라우팅."""
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
         args = request.get("args", {})
@@ -470,35 +396,7 @@ class IPCServer:
         bot_id: str,
         session_id: str,
     ) -> None:
-        """signal.connect Phase-C 스트림 host.
-
-        핸드셰이크 OK 후 동일 연결을 hijack 해 long-lived 양방향 스트림으로
-        운반한다. host 구성:
-
-        - **bounded out_queue + 단일 writer_task**: ``asyncio.Queue(maxsize=
-          SIGNAL_OUT_QUEUE_MAX)`` + write_lock 으로 ack(inbound)·fill(eventbus)
-          프레임 순서를 보존한다(INV-OUT-3). writer 는 FIFO drain →
-          ``protocol.encode`` → write+drain.
-        - **read_task**: ``protocol.decode`` → ``channel._handle_message``. per-read
-          timeout 없음(idle 정상). inbound >1MB 는 **terminal close**(decode 가
-          body read 전 raise → framing desync, continue 금지, INV-OUT-7).
-        - **adopt + self-close re-check (F1+F4)**: register 된 placeholder handle
-          을 회수해 데이터플레인을 채운다. adopt 시점에 ``handle.closed`` 또는
-          generation 불일치(rotate-in-window)면 read/writer 풀 루프 미진입 →
-          single closed frame flush 후 self-close.
-        - **closing supervisor (F2)**: ``handle.close()``(동기, daemon-initiated)
-          가 set 한 ``closing_event`` 를 감지하면 ``_initiate_close`` async 순서를
-          실행(await-inflight grace → read_task cancel → writer join).
-        - **finally(INV-OUT-9)**: ``mark_closed`` → ``_unsubscribe_events`` →
-          ``reg.unregister`` 정확히 1회(register 성공 후 모든 경로). writer 는
-          **절대 직접 close 안 함** — ``_handle_connection`` finally 단독 소유.
-
-        Phase-C read 에는 per-read timeout 을 **절대** 적용하지 않는다 — idle
-        스트림은 정상이며 liveness 는 app-level ``{ping→pong}`` 로 확인한다.
-
-        headless(reg=None): adopt/self-close/unregister 를 스킵하고 channel
-        데이터플레인만 구동한다.
-        """
+        """signal.connect Phase-C 스트림 host."""
         from ante.bot.signal_channel import SignalChannel
 
         reg = getattr(self._service_registry, "signal_channel_registry", None)
@@ -528,14 +426,7 @@ class IPCServer:
                     out_queue.put_nowait(frame)
 
         def _trigger_lagged() -> None:
-            """disconnect-laggard teardown (INV-OUT-6). idempotent.
-
-            out_queue full 로 프레임 drop 시 1회 호출. channel ``_closed`` flip
-            (이후 _on_fill/_on_order_update no-op) + ``{error,stream_lagged}``
-            best-effort(QueueFull drop 허용) + ``{closed,lagged}`` force-slot +
-            closing_event set 으로 supervisor 의 daemon_close teardown 진입.
-            socket I/O await 없음(bus 핸들러 inline 안전).
-            """
+            """disconnect-laggard teardown (INV-OUT-6). idempotent."""
             if closing_event.is_set():
                 return
             channel.mark_closed()
@@ -610,12 +501,7 @@ class IPCServer:
         bot_id: str,
         session_id: str,
     ) -> None:
-        """adopt-time self-close (F4) — single closed frame flush 후 정리.
-
-        read/writer 풀 루프를 띄우지 않고 ``{type:closed,reason}`` 1프레임만
-        wire 로 내보낸 뒤 ``mark_closed`` → ``_unsubscribe_events`` →
-        ``unregister`` 한다(INV-OUT-9 정확히 1회). writer 는 직접 close 안 함.
-        """
+        """adopt-time self-close (F4) — single closed frame flush 후 정리."""
         try:
             try:
                 frame = _encode_signal_frame({"type": "closed", "reason": reason})
@@ -640,15 +526,7 @@ class IPCServer:
         closing_event: asyncio.Event,
         handle: object,
     ) -> None:
-        """read_task + writer_task + closing supervisor 를 구동·정리한다.
-
-        writer 는 FIFO drain → encode → write. ``frame.type=='closed'`` 면 write
-        후 ``flush_done.set()`` + return(INV-OUT-8 flush-before-cancel).
-        outbound >1MB 는 ``{type:error,result_too_large}`` non-fatal continue
-        (INV-OUT-7). read_task 는 EOF/inbound-1MB 에 return. closing supervisor 는
-        ``handle.closing_event`` 또는 read/writer 완료를 감지해 ``_initiate_close``
-        async teardown 을 실행한다(F2 sync close ↔ async teardown 브릿지).
-        """
+        """read_task + writer_task + closing supervisor 를 구동·정리한다."""
 
         async def _writer_loop() -> None:
             while True:
@@ -726,24 +604,7 @@ class IPCServer:
         *,
         daemon_close: bool,
     ) -> None:
-        """teardown async 순서 (F2, INV-OUT-8).
-
-        ``daemon_close=True`` (rotate/close_bot/shutdown — ``handle.close`` 가
-        ``closing_event`` set + closed frame force-slot):
-
-        1. channel ``_accepting``/``_closed`` set(sync close 가 이미 했을 수
-           있으나 멱등) — NEW admit 거부 + ``_on_fill`` no-op.
-        2. in-flight on_data publish 를 grace 동안 await(``asyncio.shield`` 로
-           grace 타임아웃이 publish 자체를 중단시키지 않게 방어). 초과면 publish
-           는 백그라운드 계속, read_task 만 cancel(at-most-one trailing).
-        3. read_task cancel.
-        4. writer 가 closed frame 을 flush(``flush_done``)할 때까지 grace 대기 후
-           writer join(flush-before-cancel). 미flush 면 grace 후 cancel.
-
-        ``daemon_close=False`` (자연 종료 — EOF/writer-exit/laggard): flush 할
-        teardown frame 이 없으므로 in-flight 만 grace await 후 sibling 을 즉시
-        cancel(불필요한 grace 대기 회피).
-        """
+        """teardown async 순서 (F2, INV-OUT-8)."""
         channel.mark_closed()  # type: ignore[attr-defined]
 
         inflight = getattr(channel, "_inflight", None)

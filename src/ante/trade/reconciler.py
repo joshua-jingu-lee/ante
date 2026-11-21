@@ -37,12 +37,7 @@ class PositionReconciler:
         self._instrument_service = instrument_service
 
     def _symbol_label(self, symbol: str) -> str:
-        """알림 메시지용 ``\\`{symbol}\\` (종목명)`` 병기 라벨(markdown).
-
-        미주입/조회 불가 시 backtick symbol-only 로 폴백한다(format_label 폴백
-        내장 — sync·무예외·무IO). reconciler payload 에 exchange 가 없어 KRX
-        기본값으로 조회한다.
-        """
+        """알림 메시지용 ``\\`{symbol}\\` (종목명)`` 병기 라벨(markdown)."""
         if self._instrument_service is not None:
             return self._instrument_service.format_label(symbol, markdown=True)
         return f"`{symbol}`"
@@ -470,33 +465,7 @@ class PositionReconciler:
         excess: float,
         side: str,
     ) -> bool:
-        """broker-internal 불일치(``excess``)가 ante 미반영 체결로 설명되는지 판정.
-
-        방향 대칭(buy / sell). OrderTracker 에서 ``(account_id, bot_id,
-        symbol, side)`` 의 non-terminal(open/partially_filled) 주문을 조회하고, 그
-        미체결 잔량 합(capacity = Σ(ordered_qty − recorded_filled_qty)) 과 ``excess``
-        를 비교한다.
-
-        - ``side="buy"``: ``excess = broker_qty - internal_qty`` — 외부 매수
-          후보. 매칭되는 미반영 self 매수로 설명 가능한지 판정.
-        - ``side="sell"``: ``excess = internal_qty - broker_qty``(deficit) —
-          외부 청산/일부 매도 후보. 매칭되는 미반영 self 매도로 설명 가능한지 판정.
-          KIS 모의 ccld 지연창(잔고는 매도 즉시 감소·ccld 당일 0건)에서 FillApplier 가
-          아직 기록 못 한 self 매도가 정확히 non-terminal sell capacity 에 든다.
-
-        - ``excess <= capacity`` → True (self_submitted_unrecorded_fill).
-          ante 가 제출했으나 FillApplier 가 아직 기록 못 한 체결로 설명 가능.
-        - ``excess > capacity`` 또는 매칭 주문 없음 → False (외부 거래로 분류).
-        - OrderTracker 미주입 → False (하위 호환 — 기존 외부 분류 동작).
-
-        **bounded known-limitation (R2-1, 방향 대칭)**: broker 포지션은 총량만
-        주므로 capacity 안에 숨은 진짜 외부 거래(buy: 외부 매수 / sell: 외부 매도)는
-        즉시 보정되지 않는다. 이는 auto-sell 캐스케이드 회피를 외부 검출
-        완전성보다 우선하는 보수적 trade-off다. 매칭 ante 주문이 해소(완전 체결→open
-        set 이탈, 또는 EOD expire_stale→terminal)되면 다음 reconcile 에서 잔여
-        excess 가 external 로 검출된다. 상세:
-        ``docs/specs/trade/03-07-position-reconciler.md``.
-        """
+        """broker-internal 불일치(``excess``)가 ante 미반영 체결로 설명되는지 판정."""
         if self._order_tracker is None:
             return False
 
@@ -532,27 +501,7 @@ class PositionReconciler:
         account_id: str,
         symbol: str,
     ) -> bool:
-        """미귀속 보유(carryover) 시그니처인지 판정.
-
-        ``b_qty > i_qty`` 분기에서 self-check(``_is_self_submitted_fill``)가
-        미매칭(False)으로 떨어진 뒤, ``internal_qty == 0`` 인 보유가 그 봇이
-        해당 종목에 대해 **추적 중인 non-terminal open buy 가 전무**(capacity == 0)
-        인지 확인한다. 그렇다면 어느 봇도 거래(추적)한 적 없는 이월/외부 신규 매수
-        보유이며, 단일봇 force-write 의 전제(봇 간 귀속 ambiguity 부재)가 성립하지
-        않으므로 detect-only 로 둔다.
-
-        - 매칭되는 non-terminal open buy 가 **하나도 없음** → True (미귀속 보유).
-        - open buy 가 존재(capacity > 0) → False. 이 경우는 self-check 가 이미
-          self_submitted(``excess <= capacity``) 또는 외부 매수(``excess >
-          capacity``)로 처리하므로, 본 분기 대상이 아니다.
-        - OrderTracker 미주입 → False (하위 호환 — 기존 "외부 매수" 동작).
-        - OrderTracker 조회 실패 → False (보수적으로 기존 외부 매수 분류 유지).
-
-        주의: ``_is_self_submitted_fill`` 은 "매칭 없음"과 "excess>capacity" 를
-        **모두 False** 로 반환하므로 그것만으로는 둘을 구분할 수 없다. 여기서는
-        capacity == 0(open buy 전무) 판정을 분리 구현해 미귀속 보유만 detect-only
-        로 좁힌다. 상세: ``docs/specs/trade/03-07-position-reconciler.md``.
-        """
+        """미귀속 보유(carryover) 시그니처인지 판정."""
         if self._order_tracker is None:
             return False
 

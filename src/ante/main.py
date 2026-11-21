@@ -25,12 +25,7 @@ _LEGACY_PID_FALLBACK = Path("db/ante.pid")
 
 
 def _write_pid_file(config: Config) -> None:
-    """PID 파일을 ``config.runtime_pid_path()`` canonical 위치에 기록한다.
-
-    docs/specs/config/03-design-decisions.md 200-202.
-    Server runtime, cold-path CLI guard, IPC client가 같은 ``config_dir``을
-    쓰면 같은 PID 파일을 본다.
-    """
+    """PID 파일을 ``config.runtime_pid_path()`` canonical 위치에 기록한다."""
     path = config.runtime_pid_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(str(os.getpid()))
@@ -38,12 +33,7 @@ def _write_pid_file(config: Config) -> None:
 
 
 def _starting_marker_path(config: Config) -> Path:
-    """booting marker 경로를 반환한다.
-
-    PID 파일과 같은 디렉토리의 ``.starting`` 파일을 사용한다.
-    ``runtime.pid_path`` resolver에서 파생하므로 single-canonical
-    runtime path 정책과 자동으로 정합된다.
-    """
+    """booting marker 경로를 반환한다."""
     return config.runtime_pid_path().parent / ".starting"
 
 
@@ -74,14 +64,7 @@ def _remove_starting_marker(config: Config) -> None:
 
 
 def _remove_pid_file(config: Config) -> None:
-    """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다.
-
-    ``read_pid_file``은 canonical만 보지만, legacy cwd-relative
-    ``db/ante.pid``가 과거 환경에서 남아 있을 수 있으므로 cleanup은 양쪽을
-    ``unlink(missing_ok=True)`` 처리해 transitional 환경에서 stale 잔여를
-    제거한다 (best-effort). 이 책임은 ``read_pid_file``의 single-canonical
-    정책과 분리되며, 단지 호환 cleanup만 수행한다.
-    """
+    """canonical + legacy ``db/ante.pid`` 양쪽 PID 파일을 정리한다."""
     canonical = config.runtime_pid_path()
     for path in (canonical, _LEGACY_PID_FALLBACK):
         try:
@@ -190,24 +173,7 @@ def _broker_ready_exempt(account: Any) -> bool:
 
 
 def _broker_not_ready_live(s: Services, account: Any) -> bool:
-    """startup connect 에서 broker not_ready 가 된 **비면제(LIVE)** 계좌인지.
-
-    후속 broker-backed startup init 가드: startup
-    connect 루프(``_init_gateway``)에서 EGW00133 bounded retry 가 소진되거나 기타
-    실패로 ``broker_ready`` 가 not_ready 가 된 LIVE 계좌는, 그 뒤 같은 startup 의
-    broker-backed 초기화 단계(stream·treasury LIVE sync·fill recovery·reconcile)
-    에서 ``get_broker`` 를 **다시 호출하면 안 된다**. 그 추가 호출이 EGW00133 계좌의
-    KIS 토큰 1/min 제한을 startup 단일 cadence(T4) 밖에서 또 두드리기 때문이다.
-
-    True 인 계좌는 후속 단계가 skip 하고, broker 회복은 self-healing
-    이 60s interval 로 이어받아 fill/reconcile/treasury 를 재등록한다.
-
-    - broker_ready 면제(virtual/test) 계좌는 항상 False — broker 무관 단계
-      (예: treasury VIRTUAL sync, broker=None)는 영향 없이 계속 처리한다.
-    - registry 미주입(partial wiring) 환경에서는 ``is_ready`` 가 항상 False 라
-      모든 LIVE 계좌를 skip 하게 되므로, registry 가 없으면 False 를 반환해
-      기존 동작(전 계좌 처리)을 보존한다.
-    """
+    """startup connect 에서 broker not_ready 가 된 **비면제(LIVE)** 계좌인지."""
     if s.runtime_readiness is None:
         return False
     if _broker_ready_exempt(account):
@@ -230,11 +196,7 @@ def _mark_runtime_not_ready(
 
 
 def _mark_fill_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
-    """전역 fill skip(connected_count==0 등) 시 면제 우선 mark (이중 실패모드 a).
-
-    면제(virtual/test) 계좌는 broker-backed 스케줄러가 없어도 정상이므로 no-op
-    ready 를, 비면제(LIVE) 계좌는 ``mark_not_ready(reason)`` 한다.
-    """
+    """전역 fill skip(connected_count==0 등) 시 면제 우선 mark (이중 실패모드 a)."""
     for account in accounts:
         if _flag_exempt_for_account(ReadinessFlag.FILL_RECONCILE, account):
             _mark_runtime_ready(s, account.account_id, ReadinessFlag.FILL_RECONCILE)
@@ -262,18 +224,7 @@ def _mark_reconcile_global_skip(s: Services, accounts: list[Any]) -> None:
 
 
 def _broker_ready_init_accounts(s: Services, accounts: list[Any]) -> list[Any]:
-    """후속 broker-backed startup init 에 넘길 계좌 — broker not_ready LIVE 제외.
-
-    startup connect 에서 broker not_ready 가 된 LIVE
-    계좌(``_broker_not_ready_live`` True)를 제외한다. 제외된 계좌는 후속 단계
-    (treasury LIVE sync·fill recovery·reconcile)가 ``get_broker`` 를 다시 호출하지
-    않아 EGW00133 토큰 1/min 재타격을 피한다(T4 단일 cadence). 제외된 LIVE 계좌의
-    treasury_sync·fill_reconcile·reconcile 플래그는 ``mark_not_ready`` 로 명시
-    표시해, self-healing이 broker 회복 시 픽업·재등록한다.
-
-    면제(virtual/test) 계좌와 broker_ready 성공 LIVE 계좌는 그대로 유지된다
-    (treasury VIRTUAL sync 등 broker 무관 처리 보존).
-    """
+    """후속 broker-backed startup init 에 넘길 계좌 — broker not_ready LIVE 제외."""
     kept: list[Any] = []
     for account in accounts:
         if _broker_not_ready_live(s, account):
@@ -422,11 +373,7 @@ async def _init_account(s: Services) -> None:
 
 
 async def _migrate_is_paper_to_broker_config(s: Services) -> None:
-    """system.toml [broker].is_paper를 Account.broker_config으로 1회성 이관한다.
-
-    조건: system.toml에 broker.is_paper가 존재하고,
-    KIS 계좌의 broker_config에 is_paper가 아직 없는 경우에만 이관한다.
-    """
+    """system.toml [broker].is_paper를 Account.broker_config으로 1회성 이관한다."""
     legacy_is_paper = s.config.get("broker.is_paper")
     if legacy_is_paper is None:
         return
@@ -456,13 +403,7 @@ async def _migrate_is_paper_to_broker_config(s: Services) -> None:
 
 
 def _subscribe_order_tracker(eventbus: Any, order_tracker: Any) -> None:
-    """OrderTracker 를 주문 lifecycle 이벤트에 구독시킨다.
-
-    - ``OrderSubmittedEvent`` → ``open`` seed (order_id PK, broker_order_id,
-      account/bot/strategy 정체성, KST 영업일).
-    - ``OrderCancelledEvent`` / ``OrderRejectedEvent`` / ``OrderFailedEvent``
-      → ``mark_terminal`` (이미 filled 인 주문은 보존).
-    """
+    """OrderTracker 를 주문 lifecycle 이벤트에 구독시킨다."""
     from ante.broker.fill_scheduler import business_date_kst
     from ante.eventbus.events import (
         OrderCancelledEvent,
@@ -657,13 +598,7 @@ async def _init_trading(s: Services) -> None:
 
 
 def _connect_failure_reason(exc: BaseException, default: str) -> str:
-    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (T6).
-
-    ``AuthenticationError.error_code`` (KIS 원천 ``msg_cd``, 예: ``EGW00133``)을
-    문자열 grep 이 아니라 ``getattr`` 로 추출한다. 코드가 있으면 reason 으로 쓰고,
-    없으면 ``default`` (startup="connect_failed", self-healing="reconnect_failed").
-    D-ACC-09 readiness reason 연동(startup §181 + self-healing).
-    """
+    """connect 실패 예외에서 readiness reason 을 구조적으로 도출 (T6)."""
     code = getattr(exc, "error_code", None)
     if code:
         return str(code)
@@ -671,42 +606,7 @@ def _connect_failure_reason(exc: BaseException, default: str) -> str:
 
 
 async def _get_broker_with_auth_retry(account_service: Any, account_id: str) -> Any:
-    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (T4 c).
-
-    **단일 cadence 레이어의 startup 한 곳**(부팅 1회 경로, 곱셈 없음). EGW00133
-    (``TokenRateLimitError``)을 만나면 ~60s backoff 후 ``DEFAULT_MAX_RETRIES_AUTH``
-    내 재시도해 startup token race 를 흡수한다.
-
-    ``AccountService.get_broker`` 는 cache-miss 시
-    내부에서 ``connect()`` 를 수행하고 **연결 성공 후에만** 캐시한다. 따라서
-    새 프로세스 cache-miss startup 의 첫 인증이 EGW00133 을 반환하면 그 예외가
-    ``get_broker()`` 호출 자체에서 전파된다. retry 가 ``broker.connect()`` 만
-    감쌌다면 ``get_broker()`` 가 먼저 raise 해 wrapper 에 도달하지 못하므로 bounded
-    retry 가 무효였다. 따라서 retry 는 **``get_broker()`` 호출 전체**를 감싼다.
-
-    ``get_broker`` 는 connect 실패 시 캐시 미기록 + 세션 cleanup하므로,
-    EGW00133 재시도 시 ``get_broker`` 재호출이 새 adapter build+connect 를 안전하게
-    재수행한다(세션 누수 없음). ``_authenticate`` 자체는 즉시 raise(내부 sleep 없음)
-    이므로 backoff 누적은 본 wrapper 한 곳에만 발생한다. 성공 시 반환되는 broker 는
-    connect+cache 가 완료된 상태다. 소진 시 마지막 ``TokenRateLimitError`` 를 전파해
-    호출부가 not_ready(reason=EGW00133). EGW00133 외 예외는 즉시 전파(기존 동작 유지).
-
-    ``get_broker`` 의 계약(connect-성공-후-캐시)은 self-healing 등 전 caller
-    공유이므로 **변경하지 않는다**. retry 는 get_broker 내부가 아니라 본 startup
-    wrapper 한 곳에만 둔다(self-healing 이 get_broker 를 반복 호출 → nested backoff
-    곱셈 재발 차단, T4).
-
-    **잔여 cooldown sleep (per-app_key cooldown at source):** EGW00133
-    수신 시 발급 레이어(``kis._raise_token_rate_limit``)가 app_key cooldown 을 기록하고
-    예외에 ``cooldown_until`` 을 실어 보낸다. 본 wrapper 는 고정 60s 대신 **잔여
-    cooldown**(``cooldown_until - now``)만큼 sleep 한다. 그래야 다음 재시도가 cooldown
-    만료 직후에 단 1회 발급으로 떨어지고, 고정 60s 가 cooldown 경계를 넘겨 재시도가
-    또 cooldown 에 막히는 무력화를 피한다. cooldown_until 미동봉(이론상 경합 만료)이면
-    안전상 ``TOKEN_AUTH_BACKOFF_SECONDS`` 고정값으로 폴백한다.
-
-    최악 지연: ``DEFAULT_MAX_RETRIES_AUTH`` × ~``TOKEN_AUTH_BACKOFF_SECONDS``
-    (≈2×60s=120s). self-healing interval(60s)과 곱해지지 않는다(단일 cadence).
-    """
+    """get_broker(account_id) 를 EGW00133 흡수용 bounded retry 로 감싼다 (T4 c)."""
     from datetime import UTC, datetime
 
     from ante.broker.exceptions import TokenRateLimitError
@@ -900,19 +800,7 @@ async def _init_gateway(s: Services) -> None:
 
 
 async def _init_fill_recovery_schedulers(s: Services, accounts: list[Any]) -> None:
-    """FillReconcileScheduler 생성 + 기동 카치업(barrier) + 주기 폴 시작.
-
-    각 활성 broker 계좌마다 ``FillReconcileScheduler`` 를 만들고:
-    1. ``catch_up_once()`` 를 **await** 해 다운타임 중 체결을 멱등 따라잡는다.
-    2. 주기 폴 루프를 시작한다.
-
-    1번이 **await 완료**된 뒤에야 호출자가 ``ReconcileScheduler.start()`` 를
-    시작하므로(hard barrier), position reconcile 이 미복구 체결을 "외부 매수"로
-    오분류하지 않는다. 카치업이 **성공하지 못한**(폴 실패) 계좌는
-    ``s.fill_catch_up_failed_accounts`` 에 기록해, 그 계좌의 기동 reconcile 이
-    external-buy 분류를 건너뛰게 한다(startup 폴 실패를
-    "0건 성공" 으로 삼키면 barrier 를 우회한다).
-    """
+    """FillReconcileScheduler 생성 + 기동 카치업(barrier) + 주기 폴 시작."""
     s.fill_catch_up_failed_accounts.clear()
     for account in accounts:
         if _flag_exempt_for_account(ReadinessFlag.FILL_RECONCILE, account):
@@ -1008,15 +896,7 @@ async def _register_fill_scheduler_for_account(s: Services, account: Any) -> boo
 
 
 async def _init_fill_outbox_publisher(s: Services) -> None:
-    """FillOutboxPublisher 기동 재전달(catch_up) + 주기 드레인 루프 시작.
-
-    1. ``catch_up_once()`` 를 **await** 해, 직전 FillReconcileScheduler 카치업이
-       만든 outbox row 와 이전 실행의 commit-후-crash 로 미발행된 row 를 재전달
-       한다(at-least-once 무손실 전달). 소비자는 이 시점에 이미 구독돼 있다.
-    2. 주기 드레인 루프(``start()``)를 시작한다. 워커는 ``FillApplier`` 가 enqueue
-       직후 호출하는 ``notify()`` 로 즉시 드레인되며, 주기 루프는 누락 통지에 대한
-       백스톱이다.
-    """
+    """FillOutboxPublisher 기동 재전달(catch_up) + 주기 드레인 루프 시작."""
     publisher = s.fill_outbox_publisher
     if publisher is None:
         return
@@ -1028,11 +908,7 @@ async def _init_fill_outbox_publisher(s: Services) -> None:
 
 
 async def _init_reconcile_scheduler(s: Services) -> None:
-    """ReconcileScheduler 생성 및 시작.
-
-    활성 broker 가 있는 모든 계좌에 대해 ReconcileScheduler
-    를 만들어 ``s.reconcile_schedulers`` dict 에 등록한다 (multi-broker pool).
-    """
+    """ReconcileScheduler 생성 및 시작."""
     assert s.eventbus is not None
 
     from ante.trade.reconciler import PositionReconciler
@@ -1099,14 +975,7 @@ def _build_reconciler(s: Services) -> Any:
 async def _register_reconcile_scheduler_for_account(
     s: Services, account: Any, reconciler: Any, interval: int
 ) -> bool:
-    """단일 LIVE 계좌의 ReconcileScheduler 등록 (startup + self-healing 공용).
-
-    멱등 재등록: 기존 dict 항목이 있으면 새 scheduler 로 교체 전 기존 task 를
-    stop 한다(orphan 방지).
-
-    Returns:
-        등록 성공(start 완료) 여부.
-    """
+    """단일 LIVE 계좌의 ReconcileScheduler 등록 (startup + self-healing 공용)."""
     assert s.eventbus is not None
     from ante.broker.scheduler import ReconcileScheduler
 
@@ -1159,22 +1028,12 @@ async def _register_reconcile_scheduler_for_account(
 
 
 def _self_healing_targets(accounts: list[Any]) -> list[Any]:
-    """self-healing 대상 — **전 계좌**.
-
-    ``treasury_sync`` 는 broker_type/trading_mode 무관 항상 요구(면제 없음)이므로,
-    broker 면제(virtual/test) 계좌도 treasury 일시 실패의 회복 대상이다.
-    회복 시 각 플래그는 면제 여부에 따라 개별 처리된다(broker/fill/reconcile 은
-    면제 계좌에서 skip, treasury 는 전 계좌 재시도).
-    """
+    """self-healing 대상 — **전 계좌**."""
     return list(accounts)
 
 
 def _start_readiness_self_healing(s: Services, accounts: list[Any]) -> None:
-    """self-healing background retry loop 시작 (startup init 완료 후).
-
-    대상 계좌(전 계좌 — treasury_sync 는 면제 없음)가 하나도 없으면 루프를
-    띄우지 않는다. 이미 task 가 있으면 재시작하지 않는다(멱등).
-    """
+    """self-healing background retry loop 시작 (startup init 완료 후)."""
     if s.readiness_self_healing_task is not None:
         return
     targets = _self_healing_targets(accounts)
@@ -1569,13 +1428,7 @@ async def _sync_instruments(s: Services, accounts: list) -> None:
 
 
 def _init_context_factory(s: Services) -> None:
-    """StrategyContextFactory 완성 (Gateway 연결 이후).
-
-    ``LiveDataProvider`` 는 봇별로 ``StrategyContextFactory``
-    가 생성한다 (per-bot account binding). ``s.data_provider`` 는 API gateway
-    가 없는 (virtual-only test 등) 환경의 fallback 으로 ``_NullDataProvider`` 를
-    설정한다 — 이 경우 strategy 의 OHLCV 호출은 빈 결과를 반환한다.
-    """
+    """StrategyContextFactory 완성 (Gateway 연결 이후)."""
     from ante.bot import StrategyContextFactory
 
     if s.api_gateway:
@@ -1773,13 +1626,7 @@ async def _init_feed(s: Services) -> None:
 
 
 def _approval_account_id(params: dict, *, context: str) -> str:
-    """approval params 에서 검증된 account_id 를 추출.
-
-    ``params.get("account_id", "test")`` fallback 은 두지 않는다.
-    ``ApprovalService`` 가 create()/reopen() 진입점에서 이미 동일한
-    검증을 수행하지만, executor / validator 가 main.py 외부에서도 호출될 수
-    있으므로 진입점 단위로 한 번 더 명시 검증한다.
-    """
+    """approval params 에서 검증된 account_id 를 추출."""
     from ante.account.scoping import require_account_id
 
     return require_account_id(params.get("account_id"), context=context)
@@ -1898,14 +1745,7 @@ async def _init_approval(s: Services) -> None:
         )
 
     async def _exec_bot_stop_idempotent(params: dict) -> None:
-        """approval ``bot_stop`` executor.
-
-        ``BotManager.stop_bot`` 은 strict state machine 이지만
-        approval workflow 의 ``bot_stop`` action 은
-        idempotent 의미를 보존한다 (이미 중지된 봇에 대해 BotStoppedEvent
-        가 재처리되는 cold path 회귀 보호). state machine 거부는 silent
-        ignore 하고, 그 외 ``BotError`` 는 그대로 전파한다.
-        """
+        """approval ``bot_stop`` executor."""
         from ante.bot.exceptions import BotStateConflict
 
         try:
@@ -2193,11 +2033,7 @@ async def _stop_session_expiry_loop(
     stop_order_manager: Any,
     interval: float = 60.0,
 ) -> None:
-    """거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리.
-
-    ``_approval_expire_loop`` 동형. interval=60s 는 세션 경계(분 단위)를
-    충분히 정밀하게 포착한다(A2 의미론이라 짧은 interval 의 과만료 부작용 없음).
-    """
+    """거래 세션 종료 시 미트리거 스탑 주문을 주기적으로 만료 처리."""
     while True:
         await asyncio.sleep(interval)
         try:

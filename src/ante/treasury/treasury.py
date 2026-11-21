@@ -655,12 +655,7 @@ class Treasury:
         }
 
     def _is_my_event(self, event: object) -> bool:
-        """이벤트가 이 Treasury의 계좌에 해당하는지 확인.
-
-        AccountScopedEvent는 ``__post_init__`` 에서 valid account_id 보장이
-        되므로, 여기서는 단순히 일치 여부만 확인한다. account_id 필드가
-        없는 이벤트는 무시한다.
-        """
+        """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
         account_id = getattr(event, "account_id", None)
         if account_id is None:
             return False
@@ -1099,14 +1094,7 @@ class Treasury:
             raise
 
     async def _apply_fill_settlement(self, event: Any, budget: BotBudget) -> None:
-        """체결 정산 본문 — 인메모리 예산 갱신 + DB 동기화.
-
-        ``_on_order_filled`` 의 dedup 분기에서 호출된다. 비빈키 경로에서는
-        ``Database.transaction()`` 안에서 호출되어 ``_save_budget`` /
-        ``_log_transaction`` 의 단발 ``execute`` 가 같은 트랜잭션에 묶인다(중첩
-        트랜잭션을 열지 않는다). ``_settle_buy_fill`` 도 인메모리 연산만 하므로
-        트랜잭션 안/밖 양쪽에서 동작한다.
-        """
+        """체결 정산 본문 — 인메모리 예산 갱신 + DB 동기화."""
         fill_value = event.quantity * event.price
         commission = event.commission
 
@@ -1130,11 +1118,7 @@ class Treasury:
 
     @staticmethod
     def _restore_budget(target: BotBudget, snapshot: BotBudget) -> None:
-        """rollback 시 ``_budgets`` 항목을 snapshot 값으로 in-place 복원.
-
-        ``_budgets[bot_id]`` 의 객체 identity 를 유지(외부 참조 보존)하면서
-        mutable 필드만 snapshot 으로 되돌린다.
-        """
+        """rollback 시 ``_budgets`` 항목을 snapshot 값으로 in-place 복원."""
         target.allocated = snapshot.allocated
         target.available = snapshot.available
         target.reserved = snapshot.reserved
@@ -1214,12 +1198,7 @@ class Treasury:
     def _settle_buy_full_fill(
         self, event: Any, budget: BotBudget, actual_cost: float
     ) -> None:
-        """tracker 부재 매수 full-fill pop-once 정산 (R1-2 fallback).
-
-        VirtualProvider 처럼 단일 full-fill 이벤트만 발행하고 OrderTracker 에
-        seed 되지 않는 주문은 전액 pop + surplus/shortfall
-        1회 정산이 정확하다.
-        """
+        """tracker 부재 매수 full-fill pop-once 정산 (R1-2 fallback)."""
         entry = self._reservations.pop(event.order_id, None)
         reserved_amount = entry[1] if entry else 0.0
         budget.reserved = max(0.0, budget.reserved - reserved_amount)
@@ -1266,13 +1245,7 @@ class Treasury:
         await self.release_reservation(event.bot_id, event.order_id)
 
     async def _on_bot_stopped(self, event: object) -> None:
-        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수.
-
-        ``get_reservations`` 가 주문별 잔여 예약(``remaining_reserved``)을
-        반환하므로, 부분체결된 주문이라도 이미 체결된 분은 ``_on_order_filled``
-        에서 ``spent`` 로 정산되어 ``reserved`` 에서 빠진 상태이고 여기서는 잔여만
-        회수한다. 기체결분 정산은 보존된다.
-        """
+        """봇 중지 시 해당 봇의 모든 주문 **잔여 예약**을 일괄 회수."""
         from ante.eventbus.events import BotStoppedEvent
 
         if not isinstance(event, BotStoppedEvent):
@@ -1446,11 +1419,7 @@ class Treasury:
         position_history: PositionHistory,
         price_resolver: Callable[[str], Awaitable[float]] | None = None,
     ) -> None:
-        """한 번의 잔고 동기화 수행 (Virtual 모드).
-
-        Trade DB의 포지션 데이터로 purchase/eval 금액을 직접 계산한다.
-        브로커 연결 없이 동작하므로 외부 종목은 항상 0이다.
-        """
+        """한 번의 잔고 동기화 수행 (Virtual 모드)."""
         from ante.eventbus.events import BalanceSyncedEvent
 
         positions = await position_history.get_all_positions(
@@ -1905,14 +1874,7 @@ class Treasury:
         amount: float,
         description: str = "",
     ) -> None:
-        """자금 거래 이력 기록.
-
-        ``tx_type``는 ``TRANSACTION_TYPE_VOCABULARY``에 속한 값만 허용한다
-        (Literal 타입 힌트로 future drift를 차단). 새 값이 필요하면 spec
-        (``docs/specs/treasury/06-database-schema.md``), drift regression 테스트
-        (``tests/unit/test_treasury_transaction_vocabulary.py``)를 동시에
-        갱신해야 한다.
-        """
+        """자금 거래 이력 기록."""
         await self._db.execute(
             """INSERT INTO treasury_transactions
                (bot_id, account_id, transaction_type, amount, description)

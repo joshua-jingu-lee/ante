@@ -285,11 +285,7 @@ class KISStreamClient:
             await self._handle_execution_data(parts[3])
 
     async def _handle_price_data(self, data_str: str) -> None:
-        """실시간 시세 데이터 파싱 및 콜백 호출.
-
-        H0STCNT0 응답 필드 (^로 구분):
-        [0]: 종목코드, [1]: 시각, ..., [2]: 현재가
-        """
+        """실시간 시세 데이터 파싱 및 콜백 호출."""
         fields = data_str.split("^")
         if len(fields) < 3:
             return
@@ -386,11 +382,7 @@ class KISStreamClient:
             self._ws = None
 
     async def _publish_connected(self) -> None:
-        """연결 이벤트 발행.
-
-        ``StreamConnectedEvent`` 는 account-scoped marker 를
-        가진다. 발행 시 ``self._account_id`` 를 명시 전달한다.
-        """
+        """연결 이벤트 발행."""
         if self._eventbus:
             from ante.eventbus.events import StreamConnectedEvent
 
@@ -403,11 +395,7 @@ class KISStreamClient:
             )
 
     async def _publish_disconnected(self, reason: str) -> None:
-        """연결 해제 이벤트 발행.
-
-        ``StreamDisconnectedEvent`` 는 account-scoped marker
-        를 가진다. 자세한 내용은 :meth:`_publish_connected` 참조.
-        """
+        """연결 해제 이벤트 발행."""
         if self._eventbus:
             from ante.eventbus.events import StreamDisconnectedEvent
 

@@ -199,34 +199,7 @@ class VirtualExecutor:
         logger.info("VirtualExecutor 구독 완료")
 
     async def _gate_blocked_reason(self, account_id: str) -> str | None:
-        """G9 + G7 backstop — virtual 경로 최종 차단 사유 토큰(fail-closed).
-
-        VirtualExecutor 는 virtual 경로의 **유일한 최종 backstop**
-        이다(APIGateway 는 virtual 주문을 silent skip 하므로 gateway 계층3 의
-        ``account_suspended`` 차단이 virtual 에는 적용되지 않는다). 따라서 계층1
-        통과 후 Treasury/VirtualExecutor 처리 중 ``account suspend`` 가 끼어들거나
-        ``OrderApprovedEvent`` 가 직접 유입되면, gateway 계층3 와 **대칭**으로
-        VirtualExecutor 가 status(SUSPENDED)도 함께 재확인해야 한다(D-ACC-09 §8 —
-        live=gateway 계층3, virtual=VirtualExecutor 최종 backstop).
-
-        **단일 fetch 공유(중복 get 금지)**: account 를 **한 번** fetch 해
-        status(SUSPENDED) + readiness(broker_type/trading_mode) 를 함께 평가한다.
-        status 3-state 도출은 계층1/계층3 와 **동일 공유 헬퍼**
-        (``derive_account_status``)를 써 중복 구현을 금지한다(SSOT).
-
-        평가 축(둘 중 하나라도 막으면 차단 — D-ACC-09 §8 effect 일관성):
-
-        - **status 축(G7 in-flight kill-switch backstop)**: verified SUSPENDED →
-          ``account_suspended``; ``STATUS_UNAVAILABLE``(소스 present + 조회 예외/미상)
-          → ``account_status_unavailable`` fail-closed; ``None``(소스 미구성)/verified
-          non-SUSPENDED → status 축 통과.
-        - **readiness 축(G9)**: registry/account_service 미주입·account 메타 취득
-          실패 = 차단(G2). 면제 매트릭스 적용 후 not_ready → ``account_not_ready``.
-
-        반환: 차단 사유 토큰(``account_suspended`` | ``account_status_unavailable`` |
-        ``account_not_ready``) 또는 통과 시 ``None``. 매 이벤트 시점 fresh fetch +
-        registry/status 조회(상태 캐시 금지, G5 liveness).
-        """
+        """G9 + G7 backstop — virtual 경로 최종 차단 사유 토큰(fail-closed)."""
         from ante.account.gate import (
             ACCOUNT_NOT_READY_REASON,
             ACCOUNT_STATUS_UNAVAILABLE_REASON,
@@ -269,15 +242,7 @@ class VirtualExecutor:
         return None
 
     async def _fail_order(self, event: Any, *, error_message: str) -> None:
-        """virtual 주문을 OrderFailedEvent 로 종결한다(fill 금지).
-
-        bot_id/order_id/account_id 를 보존해 Treasury ``_on_order_failed`` →
-        ``release_reservation`` 정확 해제(시장가 매수 reserve 고착 방지, G3/G8).
-        gate 차단 사유(``account_not_ready`` / ``account_suspended`` /
-        ``account_status_unavailable``)면 G6 운영자 알림 1회를 함께 발행한다(G9 도
-        G6 상속, BUY/SELL 무관, 청산 marker 면 "청산 차단" 문구). gateway 계층3 와
-        대칭으로 status 차단(suspended/unavailable)도 동일 generic 알림 1회를 낸다.
-        """
+        """virtual 주문을 OrderFailedEvent 로 종결한다(fill 금지)."""
         from ante.account.gate import (
             ACCOUNT_NOT_READY_REASON,
             ACCOUNT_STATUS_UNAVAILABLE_REASON,

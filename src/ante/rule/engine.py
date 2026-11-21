@@ -47,24 +47,7 @@ _VALID_ORDER_TYPES: frozenset[str] = frozenset(
 
 
 def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
-    """``value``가 finite ``float``-호환 quantity인지 판정.
-
-    비-number, ``bool``, ``NaN``, ``inf``는 모두 ``False``로 잠근다.
-    Python ``int``는 임의 정밀도라 ``10**10000`` 같은 거대한 정수는
-    ``math.isfinite`` 호출 시 ``float(value)`` 변환에서
-    ``OverflowError`` (또는 ``ValueError``/``TypeError``)를 던진다.
-    이때도 finite-호환이 아니므로 ``False``로 떨어뜨려 호출부가
-    fail-closed reject 경로로 빠지게 한다. helper 자체가 절대 raise하지 않는
-    invariant를 유지하여 outer try 유무와 관계없이 정상 동작을 보장한다.
-
-    ``isinstance(True, int) == True`` 이므로 ``bool``을 명시적으로 제외한다.
-    ``math.isfinite``는 numeric type 확인 뒤에만 호출한다 (가드 순서 중요).
-
-    반환 타입은 ``TypeGuard[int | float]``로 선언하여 mypy가 호출부 ``True``
-    분기에서 ``value``를 ``int | float``로 좁히게 한다. 이를
-    통해 ``_coerce_finite_quantity``의 ``float(value)``가 ``object`` 인자
-    overload 미스매치 없이 통과한다.
-    """
+    """``value``가 finite ``float``-호환 quantity인지 판정."""
     if not isinstance(value, (int, float)) or isinstance(value, bool):
         return False
     try:
@@ -74,40 +57,14 @@ def _is_finite_quantity(value: object) -> TypeGuard[int | float]:
 
 
 def _coerce_finite_quantity(value: object) -> float:
-    """``OrderRejectedEvent.quantity`` payload용 안전한 finite ``float`` 변환.
-
-    비-number, ``bool``, ``NaN``, ``inf``, 그리고 ``float`` 변환 시
-    ``OverflowError``를 유발하는 거대 ``int``는 ``0.0``으로
-    정규화한다. ``trades.quantity REAL NOT NULL`` 컬럼 호환을 보장하여,
-    임의의 cross-field invalid payload에서
-    quantity 자리에 비-finite 값이 함께 실려도 audit trail이 깨지지 않는다.
-
-    판정은 ``_is_finite_quantity``에 위임하여 단일 진입점을 유지한다.
-    """
+    """``OrderRejectedEvent.quantity`` payload용 안전한 finite ``float`` 변환."""
     if not _is_finite_quantity(value):
         return 0.0
     return float(value)
 
 
 def _coerce_finite_optional_price(value: object) -> float | None:
-    """``OrderRejectedEvent.price`` payload용 안전한 ``float | None`` 정규화.
-
-    회귀(P2 #4): ``_build_safe_rejected_event``가
-    ``price=getattr(event, "price", None)``로 원본 값을 그대로 전파하면,
-    ``price=float("nan")`` / ``inf``, 또는 ``list``/``dict``/``str``/``bool``
-    같은 비-number truthy 값이 들어오면 ``TradeRecorder``의 ``event.price or
-    0.0`` 처리(NaN과 비빈 list는 truthy)에서 그대로 sqlite ``trades.price
-    REAL`` 컬럼에 bind 시도되어 ``InterfaceError`` 또는 NaN 저장을 유발해
-    PnL 계산이 깨지고, 본 PR이 보장하려는 reject audit trail도 깨진다.
-
-    ``None``은 그대로 통과시킨다 — market 주문 등 정상 흐름에서 ``price=None``
-    이 유효하므로, invalid 케이스도 ``None``으로 떨어뜨려 ``trades.price``
-    컬럼(nullable)과 호환을 유지한다. finite numeric은 ``float``로 보존하여
-    정상 reject payload를 깨뜨리지 않는다.
-
-    ``OrderRejectedEvent.stop_price`` 필드는 스키마에 존재하지 않고 builder도
-    싣지 않으므로 본 helper의 cover 범위 밖이다.
-    """
+    """``OrderRejectedEvent.price`` payload용 안전한 ``float | None`` 정규화."""
     if value is None:
         return None
     if not isinstance(value, (int, float)) or isinstance(value, bool):
@@ -144,16 +101,7 @@ def _safe_str(value: object) -> str:
 
 
 def _safe_repr(value: object) -> str:
-    """``reason`` 메시지 조립용 안전한 ``repr``-스타일 변환.
-
-    ``_safe_str``과 달리 ``str``도 quote로 감싼 ``repr`` 형태로 반환하여
-    ``"Invalid signal side: 'hold' (allowed: ...)"`` 같은 audit-friendly 포맷을
-    유지한다. 사용자 정의 ``__repr__``이 임의의 예외를 던져도 잡아 placeholder
-    로 떨어뜨린다 (``BaseException`` 제외). builder의 raise-free invariant와
-    동일한 보호.
-
-    builder에는 사용하지 않는다 (sqlite 컬럼 호환은 ``_safe_str`` 책임).
-    """
+    """``reason`` 메시지 조립용 안전한 ``repr``-스타일 변환."""
     try:
         return repr(value)
     except Exception:
@@ -161,13 +109,7 @@ def _safe_repr(value: object) -> str:
 
 
 def _safe_order_id(value: object) -> str:
-    """``OrderRejectedEvent.order_id`` 바인딩용 안전한 평문 ``str`` 변환.
-
-    ``UUID`` 같은 ``__str__``이 안정적인 객체는 ``str()`` 결과를 그대로 사용
-    (``UUID(...)`` 같은 ``repr`` 형식이 아닌 ``"058c026b-..."`` 평문). ``str``은
-    그대로 통과시키고, ``__str__``이 raise하면 ``repr`` 시도 후 placeholder로
-    떨어진다. builder가 절대 raise하지 않는 invariant 유지.
-    """
+    """``OrderRejectedEvent.order_id`` 바인딩용 안전한 평문 ``str`` 변환."""
     if isinstance(value, str):
         return value
     try:
@@ -185,23 +127,7 @@ def _build_safe_rejected_event(
     event: object,
     reason: str,
 ) -> Any:
-    """모든 source 필드를 정규화한 fail-closed ``OrderRejectedEvent`` 빌더.
-
-    builder 자체가 절대 raise하지 않는다. 호출자는 catch-all
-    ``except`` 안에서 안전하게 호출할 수 있다.
-
-    - ``symbol`` / ``side`` / ``order_type`` / ``bot_id`` / ``strategy_id`` /
-      ``exchange``: ``_safe_str``로 정규화 (sqlite ``TEXT`` 컬럼 호환).
-    - ``quantity``: ``_coerce_finite_quantity``로 finite ``float`` 정규화
-      (NaN/inf/비-number/large-int 모두 0.0).
-    - ``price``: ``_coerce_finite_optional_price``로 finite ``float | None``
-      정규화 (NaN/inf/비-number/large-int 모두 ``None``). ``trades.price``
-      sqlite REAL 컬럼(nullable) 호환 + ``TradeRecorder``의 ``event.price
-      or 0.0`` 처리에서도 NaN/비-number bind를 차단한다 (P2 #4).
-    - ``order_id``: ``getattr``+``_safe_str`` (``event_id``가 없거나 raise하는
-      pathological 상황 대응).
-    - ``reason``: 호출자가 미리 만든 문자열. 호출자도 ``_safe_str`` 사용 권장.
-    """
+    """모든 source 필드를 정규화한 fail-closed ``OrderRejectedEvent`` 빌더."""
     from ante.eventbus.events import OrderRejectedEvent
 
     return OrderRejectedEvent(
@@ -566,15 +492,7 @@ class RuleEngine:
 
     @staticmethod
     def _unrecovered_buy_age_seconds(submitted_at: str | None) -> float | None:
-        """``submitted_at`` ISO 문자열의 age(초)를 계산. 산정 불가면 ``None``.
-
-        ``submitted_at``은 ``OrderSubmittedEvent.timestamp.isoformat()`` (tz-aware
-        UTC)로 seed되지만 nullable이고 형식이 깨질 수 있다. ``None``/비문자열/파싱
-        불가/naive(미인지) datetime은 모두 **age 산정 불가**로 보아 ``None``을
-        반환한다. 호출부는 ``None``일 때 차단룰 조건②(age ≥ threshold)를 **미충족**
-        으로 처리해 차단하지 않는다(과대차단 회피). 음수 age(미래 timestamp)는
-        0.0으로 클램프하여 절대 threshold를 넘지 않게 한다.
-        """
+        """``submitted_at`` ISO 문자열의 age(초)를 계산. 산정 불가면 ``None``."""
         from datetime import UTC, datetime
 
         if not isinstance(submitted_at, str) or not submitted_at:
@@ -589,34 +507,7 @@ class RuleEngine:
         return max(age, 0.0)
 
     async def _check_unrecovered_buy_guard(self, event: object) -> str | None:
-        """미복구 self-order 반복 매수 가드 (캐스케이드 방어).
-
-        새 ``buy`` ``OrderRequestEvent``를 다음 **4조건 AND** 성립 시에만 차단하고,
-        차단 시 reject reason 문자열을 반환한다. 미충족이면 ``None``(허용).
-
-        1. 같은 ``(account_id, bot_id, symbol, side="buy")``에 ``OrderTracker``의
-           non-terminal(open/partially_filled) buy 주문 중
-           ``remaining = ordered_qty - recorded_filled_qty > 0``인 주문 존재.
-        2. 그 주문의 ``submitted_at`` age ≥ ``unrecovered_buy_guard_min_age``
-           (기본 60s = max(fill_poll_interval 60s, 60s) — 최소 1회 fill-recovery
-           폴 기회 경과). age 산정 불가(None/파싱불가/naive)면 미충족(허용).
-        3. ``get_positions``로 조회한 해당 symbol 내부 position 수량 == 0
-           (전략이 보유를 인지 못한 증상).
-        4. opt-out ``allow_unrecovered_buy_overlap``(봇 override → 계좌 기본)이
-           false.
-
-        합법적 분할매수/피라미딩은 비차단: position>0(보유 인지)·age<threshold
-        (빠른 연속 주문)·opt-out=true·다른 키(account/bot/symbol/side)는 통과한다.
-
-        fail-open 방지(invariant 보존): ``self._order_tracker is None``이면
-        가드 **비활성**(reconciler 패턴 동형 — tracker 미주입 시 self-check
-        생략 = 허용). 가드 활성 중 ``get_open_orders_for``/``get_positions`` 조회가
-        **예외**면 여기서 try/except로 삼켜 허용(silent-pass)하지 **않는다** —
-        예외를 그대로 ``_on_order_request`` catch-all까지 전파시켜 fail-closed
-        generic reject로 audit trail을 잠근다. 정상 DB의 일시적 조회 예외도 보수적
-        으로 reject되지만(과도 거부 trade-off), 캐스케이드(반복매수→예산
-        소진→외부매수 오분류→재매도) 회피를 우선한다.
-        """
+        """미복구 self-order 반복 매수 가드 (캐스케이드 방어)."""
         if self._order_tracker is None or self._trade_service is None:
             return None
         if getattr(event, "side", None) != "buy":
@@ -672,12 +563,7 @@ class RuleEngine:
         )
 
     async def _resolve_account_meta(self) -> tuple[str, Any] | None:
-        """gate 용 ``(broker_type, trading_mode)`` 취득 — fail-closed.
-
-        우선 ``self._account`` 스냅샷을 쓰고, 없으면 ``account_service.get`` 으로
-        조회한다. 둘 다 실패하면 ``None`` 을 반환해 호출자가 fail-closed 차단하게
-        한다(G2). status 는 별도 ``_resolve_account_status`` 가 조회한다.
-        """
+        """gate 용 ``(broker_type, trading_mode)`` 취득 — fail-closed."""
         from ante.account.models import TradingMode
 
         account = self._account
@@ -719,21 +605,7 @@ class RuleEngine:
         return await resolve_account_status(self._account_service, self._account_id)
 
     async def _on_order_request(self, event: object) -> None:
-        """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행.
-
-        구조 invariant: isinstance/account_id 필터링 직후부터
-        모든 preflight 게이트 + evaluate + Treasury 조회 + reject
-        경로 전체를 단일 ``try`` 블록으로 감싼다. 게이트별 ``raise`` (예: f-string
-        ``repr`` 시 ``OverflowError``, 사용자 정의 ``__repr__`` 예외 등)가 EventBus
-        핸들러까지 leak되어 ``OrderRejectedEvent`` 발행이 swallow되면 audit
-        trail이 끊겨 fail-open이 된다. catch-all ``except``가 잡아 ``_build_safe_
-        rejected_event`` (절대 raise하지 않는 builder)로 generic reject를
-        강제 발행하는 것이 본 함수의 핵심 invariant.
-
-        Pathological large-int 등 strategy 코드가 정상적으로 만들 수 없는 입력은
-        catch-all builder가 receive하며, 게이트별 typed reject reason은 강제하지
-        않는다.
-        """
+        """OrderRequestEvent 수신 시 룰 평가 후 결과 이벤트 발행."""
         from ante.eventbus.events import (
             NotificationEvent,
             OrderRequestEvent,
@@ -1325,13 +1197,7 @@ class RuleEngine:
             object.__setattr__(event, "_consumed", True)
 
     async def _on_config_changed(self, event: object) -> None:
-        """설정 변경 시 룰 재로딩.
-
-        category가 ``"rule"`` 또는 ``"global_rule"``이면 계좌 룰을 재로드하고,
-        ``"strategy_rule"``이면 해당 전략 룰을 재로드한다.
-
-        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
-        """
+        """설정 변경 시 룰 재로딩."""
         import json
 
         from ante.eventbus.events import ConfigChangedEvent

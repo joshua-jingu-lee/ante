@@ -70,13 +70,7 @@ _PERSISTED_BOT_CONFIG_FIELDS: tuple[str, ...] = (
 
 
 def _runtime_control_default(name: str) -> Any:
-    """``BotConfig`` dataclass field default 를 조회한다.
-
-    SSOT 는 :class:`BotConfig` 의 dataclass field default. manager 가 default
-    를 독립적으로 재정의하지 않도록 항상 ``dataclasses.fields`` 를 통해
-    조회한다. default 가 정의되지 않은 필드는 ``KeyError`` 로 즉시 실패시켜
-    SSOT 불일치를 가시화한다.
-    """
+    """``BotConfig`` dataclass field default 를 조회한다."""
 
     for field in dataclasses.fields(BotConfig):
         if field.name != name:
@@ -113,12 +107,7 @@ def _pick_persisted_runtime_control(config_data: dict[str, Any], name: str) -> A
 
 
 async def _cooldown_sleep(seconds: float) -> None:
-    """BotManager 재시작/리셋 cooldown 전용 sleep.
-
-    Bot._run_loop 등 다른 sleep 경로에 영향을 주지 않고 monkeypatch 할 수
-    있도록 분리한 helper. 운영 환경에서는 ``asyncio.sleep`` 과 동일하게
-    동작하지만, 테스트에서는 이 심볼만 패치하여 cooldown 만 0초로 압축한다.
-    """
+    """BotManager 재시작/리셋 cooldown 전용 sleep."""
 
     await asyncio.sleep(seconds)
 
@@ -160,23 +149,11 @@ class BotManager:
         self._bot_signal_locks: dict[str, asyncio.Lock] = {}
 
     def _get_signal_lock(self, bot_id: str) -> asyncio.Lock:
-        """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy).
-
-        stable ``bot_id`` 키로 lazy setdefault 한다 — restart 후에도 같은 lock
-        인스턴스를 재사용해 직렬화 불변을 유지한다(F3). ``create_bot`` 이 Bot
-        생성 시 주입하고, 봇 자신이 두 span 을 이 lock 으로 감싼다.
-        """
+        """``on_step`` ↔ ``on_external_signal`` 직렬화용 per-bot lock(lazy)."""
         return self._bot_signal_locks.setdefault(bot_id, asyncio.Lock())
 
     def _get_update_lock(self, bot_id: str) -> asyncio.Lock:
-        """``update_bot`` 직렬화용 per-bot lock 을 lazy 로 발급한다.
-
-        같은 ``bot_id`` 에 대한 ``update_bot`` 호출이 동시에 들어왔을 때
-        runtime control 재생성 → ``_save_bot_config`` → ``treasury.update_budget``
-        시퀀스를 직렬화하여 race 로 인한 atomicity 손상을 막는다. 처음
-        조회되는 ``bot_id`` 에 대해서만 ``asyncio.Lock`` 인스턴스를 생성하고
-        이후 같은 키에는 재사용한다.
-        """
+        """``update_bot`` 직렬화용 per-bot lock 을 lazy 로 발급한다."""
 
         return self._bot_update_locks.setdefault(bot_id, asyncio.Lock())
 
@@ -762,11 +739,7 @@ class BotManager:
         await self.delete_bot(bot_id, handle_positions=handle_positions, hard=hard)
 
     async def _liquidate_positions(self, bot: Bot) -> None:
-        """봇의 보유 포지션에 대해 시장가 매도 주문을 발행한다.
-
-        체결 완료를 기다리지 않고 주문 발행 시점에서 반환한다.
-        TradeService가 없으면 경고 로그만 남기고 건너뛴다.
-        """
+        """봇의 보유 포지션에 대해 시장가 매도 주문을 발행한다."""
         if not self._trade_service:
             logger.warning(
                 "TradeService 미설정 — 포지션 청산 건너뜀: bot=%s",
@@ -863,25 +836,7 @@ class BotManager:
     async def _validate_strategy_change(
         self, *, account_id: str, strategy_id: str
     ) -> None:
-        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다.
-
-        ``create_bot`` (L390-402) 의 검증 선례를 ``update_bot`` 컨텍스트에서
-        재사용한다. ``create_bot`` 은 ``strategy_cls`` 를 직접 받지만
-        ``update_bot`` 은 ``strategy_id`` 만 받으므로:
-
-        - **존재 검증**: ``StrategyRegistry`` 에 ``strategy_id`` 가 등록되어
-          있는지 확인한다. 미등록이면 ``StrategyNotFoundError``
-          (code=``STRATEGY_NOT_FOUND``) 로 raise 한다.
-        - **exchange 호환 검증**: ``account_service`` 가 주입되어 있으면 계좌를
-          조회하고, ``StrategyLoader`` 로 전략 메타의 exchange 를 읽어
-          ``validate_exchange`` 로 호환성을 검증한다 (``create_bot`` 과 동일
-          하게 ``IncompatibleExchangeError`` / ``ValueError`` 로 raise). meta
-          로딩은 ``rotate_signal_key`` 의 cold-path 패턴과 동형이다.
-
-        검증 실패 시 ``bot.config`` 교체나 ``_save_bot_config`` (DB 저장) 가
-        일어나기 전에 raise 하여 invalid·stale strategy_id 가 컬럼/
-        ``config_json`` 에 commit 되지 않도록 한다.
-        """
+        """봇 전략 변경 시 전략 존재 + 계좌 exchange 호환을 검증한다."""
         from ante.strategy.registry import StrategyRegistry
 
         registry = StrategyRegistry(self._db)
@@ -932,14 +887,7 @@ class BotManager:
         self._rule_engine.remove_strategy_rules(strategy_id)
 
     async def _on_bot_stop_request(self, event: object) -> None:
-        """BotStopEvent 수신 시 해당 봇 중지.
-
-        ``BotManager.stop_bot`` 이 strict state machine 으로 동작하더라도
-        EventBus 경로의 ``BotStopEvent`` 핸들러는 idempotent 의미를 보존
-        한다 (rule engine 이 한도 위반으로 발행한 이벤트가 중복 수신되거나
-        봇이 이미 중지되어 있을 수 있음). state machine 거부는 silent
-        ignore 한다.
-        """
+        """BotStopEvent 수신 시 해당 봇 중지."""
         from ante.eventbus.events import BotStopEvent
 
         if not isinstance(event, BotStopEvent):
@@ -1291,23 +1239,7 @@ class BotManager:
             self._eventbus.unsubscribe(event_type, bot.on_order_update)
 
     async def _save_bot_config(self, config: BotConfig) -> None:
-        """봇 설정 DB 저장.
-
-        ``interval_seconds`` 외에 runtime control 4개 필드와 ``auto_restart``
-        도 함께 직렬화한다. 누락 시 ``load_from_db`` 에서 dataclass default
-        로 복원되어 사용자가 PUT 으로 변경한 값이 silent 하게 default 로
-        되돌아가는 회귀가 발생한다.
-
-        ``ON CONFLICT DO UPDATE`` 에서 ``strategy_id`` 컬럼과 ``account_id``
-        컬럼도 함께 갱신한다. ``config_json`` 에는
-        ``strategy_id`` / ``account_id`` 가 항상 포함되어 있었으나 과거에는
-        UPDATE SET 에서 두 컬럼이 제외되어 ``update_bot(strategy_id=...)`` /
-        ``update_bot(account_id=...)`` 경로에서 컬럼이 stale 해졌다 (재시작 시
-        ``load_from_db`` 가 컬럼에서 읽어 옛 값으로 복원되는 drift). 컬럼과
-        ``config_json.strategy_id`` / ``config_json.account_id`` 를 동일
-        INSERT/UPSERT 안에서 같은 ``config`` 객체로부터 쓰므로 두 store 는
-        항상 일관된다.
-        """
+        """봇 설정 DB 저장."""
         config_dict = {
             "bot_id": config.bot_id,
             "name": config.name,

@@ -72,12 +72,7 @@ class SignalChannel:
             self._running = False
 
     def _emit(self, data: dict[str, Any]) -> None:
-        """출력 seam — sink 주입 시 newline-free dict enqueue, 아니면 legacy write.
-
-        데몬 경로(``sink`` 주입)는 framing 을 writer_task 가 단독 소유하므로
-        newline 을 붙이지 않는다(INV-OUT-1 1:1 framing). legacy 경로(``sink=None``)
-        는 기존 ``_write``(``+'\n'``+flush)로 byte-identical 폴백한다.
-        """
+        """출력 seam — sink 주입 시 newline-free dict enqueue, 아니면 legacy write."""
         if self._sink is not None:
             self._sink(data)
         else:
@@ -94,14 +89,7 @@ class SignalChannel:
         self._accepting = False
 
     def _schedule_lagged(self) -> None:
-        """laggard 감지 → teardown 트리거 (idempotent, await 없음).
-
-        out_queue full 로 프레임을 drop 해야 할 때 1회 호출한다. ``_closed`` 를
-        flip 해 이후 ``_on_fill``/``_on_order_update`` 가 첫 줄 no-op 하게 하고,
-        ``_on_lagged`` 콜백으로 데몬 supervisor 의 disconnect-laggard 를 깨운다.
-        bus 핸들러 inline 에서 호출되므로 socket I/O await 은 하지 않는다
-        (INV-OUT-2/6 — teardown 은 daemon ``call_soon`` 위임).
-        """
+        """laggard 감지 → teardown 트리거 (idempotent, await 없음)."""
         if self._closed:
             return
         self._closed = True
@@ -110,14 +98,7 @@ class SignalChannel:
             self._on_lagged()
 
     async def _handle_line(self, line: str) -> None:
-        """stdin 라인 파싱 → ``_handle_message`` 위임.
-
-        ``json.loads`` 만 담당하고(empty-guard·``JSONDecodeError``) routing 은
-        ``_handle_message(dict)`` 가 한다. 데몬 경로(``_run_signal_stream``)는
-        protocol.decode 로 이미 dict 를 얻으므로 ``_handle_message`` 를 직접
-        호출한다(json.loads 중복 회피). 본 메서드는 단위
-        테스트의 라인-레벨 진입점으로만 남는다.
-        """
+        """stdin 라인 파싱 → ``_handle_message`` 위임."""
         if not line:
             return
 
@@ -130,17 +111,7 @@ class SignalChannel:
         await self._handle_message(msg)
 
     async def _handle_message(self, msg: Any) -> None:
-        """디코드된 프레임 라우팅 (데몬/legacy 공통 진입점).
-
-        (1) 비-dict 프레임은 비치명 격리: ``{type:error,'Invalid JSON'}`` 후
-        return(daemon read loop 비전파).
-        (2) rotate admit-gate — ``_accepting=False`` 면 ``{type:error,
-        'channel closing'}`` 후 return(at-most-one trailing). close 가
-        ``_accepting`` 만 끄고 in-flight 는 shield 로 보호한다(F2).
-        (3) per-frame ``try`` 래핑 routing(signal/query/ping/unknown). 핸들러
-        예외는 ``{type:error,str(e)}`` 로 격리해 daemon read 루프로 전파하지
-        않는다.
-        """
+        """디코드된 프레임 라우팅 (데몬/legacy 공통 진입점)."""
         if not isinstance(msg, dict):
             self._emit({"type": "error", "message": "Invalid JSON"})
             return
@@ -163,15 +134,7 @@ class SignalChannel:
             self._emit({"type": "error", "message": str(e)})
 
     async def _handle_signal(self, msg: dict[str, Any]) -> None:
-        """외부 시그널 → ExternalSignalEvent 발행.
-
-        F2(rotate shield): publish 를 ``_inflight`` task 로 분리하고
-        read_task 는 ``asyncio.shield`` 로 await 한다. read_task 가 close
-        오케스트레이터에 의해 cancel 돼도 in-flight publish(별도 task)는 shield
-        로 보호되어 백그라운드 완료한다 — ``strategy.on_data`` 체인에 cancellation
-        주입으로 인한 상태 손상을 막는다. metadata 는 publish 전 key-count/size
-        로 bound 한다(§14 비치명 drop).
-        """
+        """외부 시그널 → ExternalSignalEvent 발행."""
         from ante.eventbus.events import ExternalSignalEvent
 
         signal_id = f"sig-{uuid4().hex[:12]}"
@@ -307,15 +270,7 @@ class SignalChannel:
             self._eventbus.unsubscribe(evt, self._on_order_update)
 
     async def _on_fill(self, event: object) -> None:
-        """체결 이벤트 → 외부 전달.
-
-        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
-
-        outbox at-least-once 재전달 시 같은 fill 의 중복 write 를 bounded
-        dedup 한다. 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 write skip. 빈키
-        (재전달 없는 단발 경로)는 가드 비대상으로 항상 write. payload 에
-        ``fill_dedup_key`` 를 실어 외부 에이전트의 자체 dedup 도 지원한다.
-        """
+        """체결 이벤트 → 외부 전달."""
         from ante.eventbus.events import OrderFilledEvent
 
         if self._closed:
@@ -347,10 +302,7 @@ class SignalChannel:
             self._fill_dedup_guard.seen_or_add(key)
 
     async def _on_order_update(self, event: object) -> None:
-        """주문 상태 변경 → 외부 전달.
-
-        Note: EventBus 핸들러 — isawaitable 패턴을 위해 async def 유지.
-        """
+        """주문 상태 변경 → 외부 전달."""
         if self._closed:
             return
         bot_id = getattr(event, "bot_id", None)

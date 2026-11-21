@@ -88,23 +88,7 @@ class TradeRecorder:
         eventbus.subscribe(OrderModifyExecutedEvent, self._on_modified, priority=10)
 
     async def _on_filled(self, event: object) -> None:
-        """체결 이벤트 → 체결 알림 발행.
-
-        fill 의 durable 적용(trades insert + ``positions``)은 **FillApplier
-        단일 권위자**가 단일 트랜잭션으로 수행한다. ``OrderFilledEvent`` 는 commit
-        이후 발행되므로, 본 핸들러(priority=10, 가장 늦게 실행)가 호출될 때는 이미
-        trades/positions 가 반영된 상태다. 따라서 TradeRecorder 는 fill 경로에서
-        trades insert·position 갱신을 **다시 하지 않는다**(이중 적용 방지). 갱신된
-        포지션을 읽어 체결 알림만 발행한다. rejected/failed/cancelled 등 비-fill
-        상태 기록은 별도 핸들러에서 유지한다.
-
-        trades insert(``_save``, INSERT OR IGNORE) 는 DB-멱등이지만 아래
-        ``NotificationEvent`` publish 는 effect 비멱등이다(NotificationService 의
-        60s in-memory content dedup 만 거쳐 재기동/catch_up 재전달 시 중복 알림).
-        따라서 비빈키 ``fill_dedup_key`` 가 이미 처리됐으면 **early-return** 해
-        중복 NotificationEvent 재발행을 차단한다. 빈키(재전달 없는 단발 경로)는
-        가드 비대상으로 항상 처리한다.
-        """
+        """체결 이벤트 → 체결 알림 발행."""
         from ante.eventbus.events import NotificationEvent, OrderFilledEvent
 
         if not isinstance(event, OrderFilledEvent):
@@ -228,12 +212,7 @@ class TradeRecorder:
         await self._save(record)
 
     async def _on_modified(self, event: object) -> None:
-        """정정 완료 이벤트 → 정정 기록 저장 (v1=price-only).
-
-        ``OrderModifyExecutedEvent.price`` 는 신규 정정 가격이며, ``quantity`` 는
-        원주문 수량(불변)이다. ``event_id`` 를 trade_id PK 로 써 멱등(INSERT OR
-        IGNORE)하게 별도 row 를 남긴다(취소 기록 _on_cancelled 와 동형).
-        """
+        """정정 완료 이벤트 → 정정 기록 저장 (v1=price-only)."""
         from ante.eventbus.events import OrderModifyExecutedEvent
 
         if not isinstance(event, OrderModifyExecutedEvent):
@@ -421,13 +400,7 @@ class TradeRecorder:
 
     @classmethod
     def _row_to_record_safe(cls, row: dict, *, context: str) -> TradeRecord | None:
-        """DB row → TradeRecord, legacy invalid account_id row는 skip.
-
-        legacy ``account_id='default'`` (또는 기타 invalid) 값을 가진 row는
-        :class:`InvalidAccountIdError` 로 skip하고 warning만 남긴다.
-        스키마/데이터 마이그레이션이 완료되기 전에도 trade read
-        경로(get_trades, DailyReport 등)가 실패하지 않도록 하기 위함이다.
-        """
+        """DB row → TradeRecord, legacy invalid account_id row는 skip."""
         try:
             return cls._row_to_record(row)
         except InvalidAccountIdError as e:

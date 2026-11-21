@@ -248,11 +248,7 @@ class FillApplier:
         return delta
 
     async def _save_trade(self, trade: TradeRecord) -> None:
-        """trades 테이블에 체결 기록 insert (트랜잭션 내).
-
-        TradeRecorder 와 동일 스키마. 본 호출은 FillApplier 의 ``transaction()``
-        안에서 실행되므로 ``_db.execute`` 는 commit 하지 않고 한 트랜잭션에 묶인다.
-        """
+        """trades 테이블에 체결 기록 insert (트랜잭션 내)."""
         await self._db.execute(
             """INSERT OR IGNORE INTO trades
                    (trade_id, bot_id, strategy_id, symbol, side, quantity, price,
@@ -287,13 +283,7 @@ class FillApplier:
         avg_price: float,
         fill_dedup_key: str,
     ) -> dict[str, object]:
-        """outbox 에 저장할 ``OrderFilledEvent`` 생성자 인자 payload.
-
-        ``event_id``/``timestamp`` 는 발행 시점에 새로 생성되도록 제외한다(재전달
-        시 새 event_id 가 부여돼도 dedup 은 결정적 ``fill_dedup_key`` 로 한다).
-        키 집합은 ``FillOutboxPublisher._publish_row`` 의
-        ``OrderFilledEvent(**payload)`` 와 정확히 호응해야 한다.
-        """
+        """outbox 에 저장할 ``OrderFilledEvent`` 생성자 인자 payload."""
         from ante.trade.order_tracker import OrderTrackerRecord
 
         assert isinstance(record, OrderTrackerRecord)
@@ -319,12 +309,7 @@ class FillApplier:
         delta: float,
         avg_price: float,
     ) -> None:
-        """``OrderFilledEvent`` 직접 발행 (outbox 미주입 legacy fallback).
-
-        outbox 가 주입되지 않은 경로(단위 테스트 partial wiring 등)에서만 쓰인다.
-        이 경로는 commit↔publish crash window 가 잔존하며,
-        ``fill_dedup_key`` 를 채우지 않는다(빈키).
-        """
+        """``OrderFilledEvent`` 직접 발행 (outbox 미주입 legacy fallback)."""
         from ante.eventbus.events import OrderFilledEvent
         from ante.trade.order_tracker import OrderTrackerRecord
 

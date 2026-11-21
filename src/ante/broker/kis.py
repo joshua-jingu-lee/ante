@@ -128,38 +128,19 @@ T2 불변: 유효 캐시 토큰 read 는 cooldown 과 무관(hydrate 먼저)하�
 
 
 def _get_token_lock(app_key: str) -> asyncio.Lock:
-    """app_key 별 발급 Lock 을 lazy 생성/반환 (동기 구간, race-free).
-
-    ``dict.setdefault`` 는 GIL 하 단일 bytecode 로 원자적이고 await 가 없어 코루틴
-    yield 가 발생하지 않으므로, 동시 호출에서도 동일 app_key 는 **하나의** Lock 으로
-    수렴한다(T1 lock dict 생성 race 원자화).
-    """
+    """app_key 별 발급 Lock 을 lazy 생성/반환 (동기 구간, race-free)."""
     return _token_locks.setdefault(app_key, asyncio.Lock())
 
 
 def _reset_token_cache() -> None:
-    """module-level 토큰 캐시/lock/cooldown dict 초기화 (테스트 격리용).
-
-    pytest-asyncio auto mode 에서 이전 테스트의 closed event loop 에 묶인 Lock 이
-    재사용되는 위험(T1 closed-loop)을 차단하기 위해, autouse fixture 가 매 테스트
-    전후로 본 helper 를 호출한다. 프로덕션 경로는 호출하지 않는다.
-
-    ``_token_cooldowns`` 도 함께 clear 한다. EGW00133 cooldown
-    상태가 테스트 간 누출되면 후속 테스트의 발급이 cooldown 내로 오판돼 flaky 가
-    되므로, 글로벌 conftest autouse fixture 가 본 helper 로 cooldown 까지 초기화한다.
-    """
+    """module-level 토큰 캐시/lock/cooldown dict 초기화 (테스트 격리용)."""
     _token_cache.clear()
     _token_locks.clear()
     _token_cooldowns.clear()
 
 
 def _token_cooldown_until(app_key: str) -> datetime | None:
-    """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None``.
-
-    startup wrapper(``main._get_broker_with_auth_retry``)가 잔여 cooldown
-    (``cooldown_until - now``)만큼 sleep 하기 위해 조회한다. 만료된 cooldown 은
-    ``None`` 으로 보고(자동 만료) 다음 발급을 허용한다.
-    """
+    """app_key 의 현재 EGW00133 cooldown 만료시각(UTC) 또는 ``None``."""
     until = _token_cooldowns.get(app_key)
     if until is None:
         return None
@@ -169,27 +150,14 @@ def _token_cooldown_until(app_key: str) -> datetime | None:
 
 
 def _record_token_cooldown(app_key: str) -> datetime:
-    """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환.
-
-    ``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_raise_token_error``
-    가 ``TokenRateLimitError`` raise **직전** 호출한다. cooldown 내 차단 경로
-    (``_authenticate`` fast-path/double-check)는 기존 cooldown 을 **연장하지 않고**
-    그대로 둔다(아래 ``_raise_token_rate_limit`` 참조).
-    """
+    """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환."""
     until = datetime.now(UTC) + timedelta(seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
     _token_cooldowns[app_key] = until
     return until
 
 
 def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
-    """EGW00133 ``TokenRateLimitError`` raise (cooldown_until 동봉).
-
-    HTTP 발급에서 EGW00133 을 받은 경로(``_raise_token_error``, ``record=True`` —
-    새 cooldown 기록)와 cooldown 내 발급 차단 경로(``_authenticate`` fast-path/
-    double-check, ``record=False`` — 기존 cooldown 존중·연장 금지)가 동일한 raise
-    동작을 공유한다(source-level 단일 chokepoint). 예외에 잔여 cooldown 만료시각
-    (``cooldown_until``)을 실어 startup wrapper 가 잔여만큼 sleep 하게 한다.
-    """
+    """EGW00133 ``TokenRateLimitError`` raise (cooldown_until 동봉)."""
     if record:
         until: datetime | None = _record_token_cooldown(app_key)
     else:
@@ -203,11 +171,7 @@ def _raise_token_rate_limit(app_key: str, *, record: bool = True) -> NoReturn:
 
 
 def _is_cached_token_fresh(expires_at: datetime, *, now: datetime) -> bool:
-    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (T2).
-
-    ``_ensure_authenticated`` 의 "만료 5분 전 재발급" 기준과 **동일**하다 —
-    near-expiry 토큰은 hit 이 아니라 miss 로 보고 재발급한다.
-    """
+    """캐시 토큰이 near-expiry 여유(만료 5분 전) 내에서 아직 신선한지 (T2)."""
     return now < expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
 
 
@@ -215,16 +179,7 @@ _KRX_FWDG_ORGNO_CACHE_MAXLEN = 1024
 
 
 def _ccld_three_month_cutoff(today_kst: str) -> str:
-    """inquire-daily-ccld inner/before 경계 cutoff ``YYYYMMDD`` (normative).
-
-    KST 오늘(``today_kst``, ``YYYYMMDD``) 기준 **달력 3개월 전 동일 일자**를
-    cutoff 로 산출한다. 대상 월에 동일 일자가 없으면(예: 5/31 → 2/31 부재) 그
-    월의 **말일**로 보정한다(예: 2026-05-31 → 2026-02-28).
-
-    ``INQR_STRT_DT >= cutoff`` 이면 inner(cutoff 당일 포함), ``< cutoff`` 이면
-    before 로 판정한다(start-date 단독 기준). 공식 예제는 ``pd_dv`` 인자를 받을
-    뿐 경계를 계산하지 않으므로 본 cutoff 산식은 ante 로컬 정책이다.
-    """
+    """inquire-daily-ccld inner/before 경계 cutoff ``YYYYMMDD`` (normative)."""
     year = int(today_kst[:4])
     month = int(today_kst[4:6])
     day = int(today_kst[6:8])
@@ -463,29 +418,7 @@ class KISBaseAdapter(BrokerAdapter):
         logger.info("KIS API 연결 해제")
 
     async def _authenticate(self) -> None:
-        """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown.
-
-        절차 (T1/T2/T4 source-level cooldown):
-        1. **캐시 read**: module-level ``_token_cache`` 에 본 어댑터의 config
-           fingerprint(app_key+secret+env) 신선한 토큰(near-expiry 5분
-           여유 내)이 있으면 발급 skip — 인스턴스에 hydrate 후 반환. config 가 바뀐
-           재연결은 다른 키라 cache miss → 새 발급으로 새 설정을 검증한다.
-           **유효 캐시 read 는 cooldown 무영향**(T2 — hydrate 를 cooldown 체크보다
-           먼저 둔다).
-        2. **cooldown fast-path(lock 밖)**: cache miss 면 ``_token_cooldowns`` 를
-           확인해 cooldown 내면 **HTTP 미호출·즉시 ``TokenRateLimitError``** raise
-           (get_broker→토큰 재타격 source-level 차단, T4 단일 cadence).
-        3. **app_key lock** 획득(account_id 아님 — 동일 app_key 다중 adapter 수렴).
-        4. **double-check(캐시)**: lock 대기 중 타 코루틴이 발급했으면 재사용(skip).
-        5. **cooldown double-check(lock 안)**: lock 대기 중 타 코루틴이 EGW00133 으로
-           cooldown 을 기록했을 수 있으므로 한 번 더 확인 → cooldown 내면 즉시 raise.
-        6. **발급 1회**: HTTP 호출 → 캐시 populate → 인스턴스 hydrate. 발급이
-           EGW00133 이면 ``_issue_token``→``_raise_token_error`` 가 cooldown 기록 후
-           ``TokenRateLimitError`` 를 **즉시 raise** 한다(내부 sleep/retry 없음).
-
-        ~60s backoff cadence 는 호출부 단일 레이어(startup wrapper / self-healing
-        interval)가 분담하고, 발급 차단 자체는 본 cooldown 이 source 에서 보장한다.
-        """
+        """OAuth2 접근 토큰 발급 — single-flight + shared 캐시 + cooldown."""
         if self._hydrate_from_cache():
             return
 
@@ -505,26 +438,12 @@ class KISBaseAdapter(BrokerAdapter):
             logger.info("KIS 토큰 발급 완료")
 
     def _token_cache_key(self) -> _TokenCacheKey:
-        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env).
-
-        캐시 키에 ``app_secret`` 과 환경(모의 vs 실전)을 포함해, 같은
-        app_key 라도 credentials/환경이 바뀌면 다른 키로 cache miss → 새 토큰 발급으로
-        새 설정을 검증한다(``AccountService._reconnect_broker`` 의 secret/환경 전환
-        재검증). 환경 구분은 ``is_paper`` (base_url 도출 출처)를 그대로 쓴다 — 모의
-        ``openapivts``/실전 ``openapi`` base_url 이 ``is_paper`` 로 1:1 결정되므로
-        ``is_paper`` 가 환경의 SSOT 다. lock/cooldown 키(app_key)와 달리 본 키만
-        config-specific 으로 좁힌다.
-        """
+        """``_token_cache`` config fingerprint 키 — (app_key, app_secret, env)."""
         env = "paper" if self.is_paper else "live"
         return (self.app_key, self.app_secret, env)
 
     def _hydrate_from_cache(self) -> bool:
-        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (T2).
-
-        near-expiry(만료 5분 전) 토큰은 miss 로 보고 ``False`` 반환(재발급 유도).
-        캐시 key 는 config fingerprint(app_key+secret+env)라, config 가 바뀐 어댑터는
-        같은 app_key 라도 cache miss → 재발급(config 변경 재검증).
-        """
+        """shared 캐시에 신선한 토큰이 있으면 인스턴스에 hydrate (T2)."""
         cached = _token_cache.get(self._token_cache_key())
         if cached is None:
             return False
@@ -536,21 +455,7 @@ class KISBaseAdapter(BrokerAdapter):
         return True
 
     async def _issue_token(self) -> tuple[str, datetime]:
-        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (T3/T4).
-
-        토큰 발급 응답에서 KIS 에러코드를 파싱한다. alias 방어 (T3): 코드는
-        ``msg_cd``/``error_code``, 메시지는 ``msg1``/``error_description`` 양쪽 키를
-        모두 본다(KIS 토큰 엔드포인트 실제 형태 미확정). 응답 형태는 **HTTP 200 +
-        error 바디(rt_cd≠"0" 또는 access_token 부재)** 와 **non-200** 양 분기 모두
-        에러코드를 추출한다. (일반 API 응답 파싱은 ``_handle_response`` 가 담당 —
-        본 메서드는 토큰 발급 경로 **한정**.)
-
-        ``EGW00133`` 감지 시 ``TokenRateLimitError`` 즉시 raise(내부 sleep 없음).
-        그 외 에러는 ``AuthenticationError`` 로 raise(코드가 있으면 보존).
-
-        Returns:
-            (access_token, expires_at) — 발급 성공 시.
-        """
+        """KIS OAuth2 토큰 1회 발급 — msg_cd 파싱 + EGW00133 즉시 raise (T3/T4)."""
         url = f"{self.base_url}/oauth2/tokenP"
         data = {
             "grant_type": "client_credentials",
@@ -588,14 +493,7 @@ class KISBaseAdapter(BrokerAdapter):
         return text
 
     def _raise_token_error(self, status: int, body: dict[str, Any] | str) -> NoReturn:
-        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (T3/T4).
-
-        alias 처리(T3): 코드는 ``msg_cd``/``error_code``, 메시지는 ``msg1``/
-        ``error_description`` 키를 순서대로 본다.
-
-        EGW00133 감지 시 ``TokenRateLimitError`` raise **직전**
-        본 adapter 의 ``app_key`` cooldown 을 기록한다(source-level cooldown).
-        """
+        """토큰 발급 에러 raise — EGW00133 은 TokenRateLimitError (T3/T4)."""
         code = ""
         detail = ""
         if isinstance(body, dict):
@@ -611,12 +509,7 @@ class KISBaseAdapter(BrokerAdapter):
         )
 
     async def _ensure_authenticated(self) -> None:
-        """토큰 유효성 확인 및 재발급 (재발급도 single-flight/캐시 적용).
-
-        매 API 호출 전 진입점이므로, 캐시 hit 시 ``_authenticate`` 가 발급을 skip
-        한다(공유 캐시 fast-path). near-expiry(만료 5분 전) 토큰은 miss 로 보고
-        재발급한다 — 본 판정 기준이 ``_is_cached_token_fresh`` 와 동일하다(T2).
-        """
+        """토큰 유효성 확인 및 재발급 (재발급도 single-flight/캐시 적용)."""
         if (
             not self.access_token
             or not self.token_expires_at
@@ -666,21 +559,7 @@ class KISBaseAdapter(BrokerAdapter):
         }
 
     async def _handle_response(self, response: Any) -> dict[str, Any]:
-        """API 응답 처리 (에러 분류 포함).
-
-        HTTP status != 200이면서 응답 body에 KIS business payload(``rt_cd`` /
-        ``msg_cd``)가 함께 들어오는 경우 broker business error로 승격해
-        ``APIError.error_code``에 ``msg_cd``를 보존한다.
-
-        retryable 우선순위:
-            1. ``msg_cd`` ∈ ``PERMANENT_MSG_CODES`` → ``False`` (강제).
-            2. HTTP status가 non-retryable(401/403/404/422 등) → ``False`` (강제).
-            3. ``msg_cd`` ∈ ``TRANSIENT_MSG_CODES`` → ``True``.
-            4. 그 외 unknown msg_cd는 HTTP status retryable에 따른다.
-
-        JSON 파싱 실패, ``rt_cd`` 부재, ``rt_cd == "0"`` 등 KIS payload로
-        판정되지 않는 경우는 generic ``HTTP <status>: <text>``로 fallback한다.
-        """
+        """API 응답 처리 (에러 분류 포함)."""
         if response.status != 200:
             text = await response.text()
             if isinstance(text, bytes):
@@ -743,15 +622,7 @@ class KISBaseAdapter(BrokerAdapter):
         params: dict[str, str] | None = None,
         json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
-
-        body dict만 반환한다. 주문 접수/취소 등 비페이지 호출자가 사용하며,
-        응답 ``tr_cont`` 헤더가 필요한 연속조회 경로는 ``_request_with_cont``
-        를 사용한다.
-
-        조율만 담당하며, 에러 분류는 KISErrorClassifier,
-        재시도 전략은 KISRetryHandler에 위임한다.
-        """
+        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃)."""
         body, _ = await self._request_with_cont(
             method, url, tr_id, params=params, json_data=json_data
         )
@@ -768,24 +639,7 @@ class KISBaseAdapter(BrokerAdapter):
         *,
         cb_exempt_timeout: bool = False,
     ) -> tuple[dict[str, Any], str]:
-        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃).
-
-        ``(body, tr_cont)`` 튜플을 반환하는 페이지네이션 전용 저수준 변형.
-        circuit-breaker / 재시도 / rate-limit / 타임아웃 정책을 ``_request``
-        와 **동일하게 공유**한다 (로직 중복 금지). ``cont_header`` 는 KIS 연속
-        조회 요청 헤더 ``tr_cont`` 값("" 최초 / "N" 다음)이며, 반환 두 번째
-        값은 응답 헤더 ``tr_cont`` ("F"/"M"=다음 있음 / "D"/"E"=마지막)이다.
-
-        ``cb_exempt_timeout`` 은 **호출측 차단기 회계 opt-out** 이다.
-        ``True`` 면 ``TimeoutError`` 계열(aiohttp timeout 포함, ``TimeoutError``
-        하위)의 실패를 ``CircuitBreaker.record_failure()`` 에 **기록하지 않는다**.
-        late-ccld(``get_order_history``) 조회 타임아웃이 어댑터 전역 단일 차단기를
-        OPEN 시켜 무관한 treasury 잔고/포지션 동기화·주문 경로까지 broker-wide 로
-        차단하는 cross-concern blast radius 를 끊기 위함이다. 회계 제외는
-        ``TimeoutError`` 에 **한정**되며 HTTP 5xx/``APIError`` 등 다른 실패는
-        기본값(``False``) 호출자와 동일하게 그대로 기록된다. ``check()`` 는 여전히
-        통과하므로 다른 concern 이 연 차단기에는 종속한다(주문 경로 보호 무변경).
-        """
+        """API 요청 공통 래퍼 (circuit breaker + 재시도 + 타임아웃)."""
         self._circuit_breaker.check()
         await self._ensure_authenticated()
         await self._rate_limit_wait()
@@ -830,12 +684,7 @@ class KISBaseAdapter(BrokerAdapter):
         json_data: dict[str, Any] | None,
         timeout: float,
     ) -> tuple[dict[str, Any], str]:
-        """단일 HTTP 요청 실행 (타임아웃 적용).
-
-        ``(body, tr_cont)`` 튜플을 반환한다. ``tr_cont`` 는 KIS 연속조회 응답
-        헤더이며, 헤더가 없으면 빈 문자열이다. GET/POST 양쪽 모두 헤더를
-        캡처하되 의미 있는 값은 GET 조회 경로에서만 사용된다.
-        """
+        """단일 HTTP 요청 실행 (타임아웃 적용)."""
         async with asyncio.timeout(timeout):
             if method == "GET":
                 async with self._session.get(
@@ -1210,12 +1059,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         return broker_order_id
 
     def _cache_krx_fwdg_orgno(self, broker_order_id: str, orgno: str | None) -> None:
-        """order-cash 응답의 KRX_FWDG_ORD_ORGNO 를 제출 영업일과 함께 캐시.
-
-        non-empty 값만 저장한다. broker_order_id(ODNO) 키로 (값, 제출 KST 영업일)
-        을 매핑하며, bounded(OrderedDict + maxlen)로 무한 증가를 막는다.
-        취소 시 cancel_order 가 영업일 일치 여부까지 확인해 주입한다.
-        """
+        """order-cash 응답의 KRX_FWDG_ORD_ORGNO 를 제출 영업일과 함께 캐시."""
         if not orgno:
             return
         cache = self._krx_fwdg_orgno_cache
@@ -1479,11 +1323,7 @@ class KISDomesticAdapter(KISBaseAdapter):
     }
 
     async def _fetch_stock_list(self, mrkt_code: str) -> list[dict[str, Any]]:
-        """KIS 마스터 파일 다운로드로 종목 목록 조회.
-
-        기존 CTPF1702R API가 404를 반환하여, KIS 공식 마스터 파일
-        다운로드 방식으로 대체 (koreainvestment/open-trading-api 참조).
-        """
+        """KIS 마스터 파일 다운로드로 종목 목록 조회."""
         import io
         import zipfile
 
@@ -1607,22 +1447,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 
     @staticmethod
     def _fold_order_history(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        """inquire-daily-ccld ``output1`` 행을 (odno, 영업일)별로 fold.
-
-        KIS ``output1`` 은 조회 구분에 따라 주문별 누적 1행 또는 부분체결별 다행이
-        올 수 있다 (R1-4). 같은 ``odno`` + ``ord_dt`` 행을 하나로 접되:
-
-        - ``filled_quantity`` = 누적 체결수량 ``tot_ccld_qty`` 의 **max**
-          (누적 행이면 마지막 값, 부분체결 행이면 단조 증가하므로 max 가 안전).
-        - ``price`` = **실체결가** = ``tot_ccld_amt`` / ``tot_ccld_qty``
-          (체결금액/체결수량). ``tot_ccld_amt`` 가 없으면 ``avg_prvs``(평균체결가),
-          그것도 없으면 ``ord_unpr``(주문가) 순으로 fallback. 주문가(``ord_unpr``)를
-          체결가로 쓰던 기존 매핑을 교정한다.
-
-        ``broker_order_id``(odno) / 누적 체결qty / avg price / 영업일(ord_dt) 을
-        반환에 포함해 FillApplier 의 ``(account_id, broker_order_id, submitted_date)``
-        조회와 누적 체결 advance 를 가능하게 한다.
-        """
+        """inquire-daily-ccld ``output1`` 행을 (odno, 영업일)별로 fold."""
         folded: dict[tuple[str, str], dict[str, Any]] = {}
         for item in rows:
             odno = str(item.get("odno", ""))
