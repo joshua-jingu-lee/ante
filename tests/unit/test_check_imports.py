@@ -360,72 +360,146 @@ def test_judgment(
             assert message in line, output
 
 
+AB, ABC, CD, XY = ["a", "b"], ["a", "b", "c"], ["c", "d"], ["x", "y"]
+
 CYCLE_ROWS = [
-    ("match", [["a", "b"]], [["a", "b"]], []),
-    ("grew", [["a", "b", "c"]], [["a", "b"]], [checker.CYCLE_GREW]),
-    ("merged", [["a", "b", "c", "d"]], [["a", "b"], ["c", "d"]], [checker.CYCLE_GREW]),
-    ("shrank", [["a", "b"]], [["a", "b", "c"]], [checker.CYCLE_SHRANK]),
-    ("new", [["a", "b"], ["c", "d"]], [["a", "b"]], [checker.CYCLE_NEW]),
-    ("changed", [["b", "c"]], [["a", "b"]], [checker.CYCLE_CHANGED]),
-    ("gone", [], [["a", "b"]], [checker.CYCLE_GONE]),
-    ("swapped", [["c", "d"]], [["a", "b"]], [checker.CYCLE_NEW, checker.CYCLE_GONE]),
+    ("match", [AB], [AB], []),
+    ("grew", [ABC], [AB], [(ABC, checker.CYCLE_GREW)]),
+    (
+        "merged",
+        [["a", "b", "c", "d"]],
+        [AB, CD],
+        [(["a", "b", "c", "d"], checker.CYCLE_GREW)],
+    ),
+    ("shrank", [AB], [ABC], [(AB, checker.CYCLE_SHRANK)]),
+    ("new", [AB, CD], [AB], [(CD, checker.CYCLE_NEW)]),
+    ("changed", [["b", "c"]], [AB], [(["b", "c"], checker.CYCLE_CHANGED)]),
+    ("gone", [], [AB], [(AB, checker.CYCLE_GONE)]),
+    ("swapped", [CD], [AB], [(CD, checker.CYCLE_NEW), (AB, checker.CYCLE_GONE)]),
+    ("two-match", [AB, XY], [AB, XY], []),
+    ("two-grew", [ABC, XY], [AB, XY], [(ABC, checker.CYCLE_GREW)]),
+    ("two-shrank", [AB, XY], [ABC, XY], [(AB, checker.CYCLE_SHRANK)]),
+    ("two-new", [AB, CD, XY], [AB, XY], [(CD, checker.CYCLE_NEW)]),
+    (
+        "two-changed",
+        [["b", "c"]],
+        [AB, XY],
+        [(["b", "c"], checker.CYCLE_CHANGED), (XY, checker.CYCLE_GONE)],
+    ),
+    (
+        "two-changed-across",
+        [["b", "x"]],
+        [AB, XY],
+        [(["b", "x"], checker.CYCLE_CHANGED)],
+    ),
+    ("two-gone", [AB], [AB, XY], [(XY, checker.CYCLE_GONE)]),
+    (
+        "two-merged-with-new",
+        [["a", "b", "x", "y"], CD],
+        [AB, XY],
+        [(["a", "b", "x", "y"], checker.CYCLE_GREW), (CD, checker.CYCLE_NEW)],
+    ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("actual", "baseline", "messages"),
+    ("actual", "baseline", "expected"),
     [row[1:] for row in CYCLE_ROWS],
     ids=[row[0] for row in CYCLE_ROWS],
 )
 def test_cycle_judgment(
-    actual: list[list[str]], baseline: list[list[str]], messages: list[str]
+    actual: list[list[str]],
+    baseline: list[list[str]],
+    expected: list[tuple[list[str], str]],
 ) -> None:
     code, output = checker.compare(_baseline(cycles=actual), _baseline(cycles=baseline))
-    assert code == (1 if messages else 0), output
-    if messages:
-        lines = _message_lines(output)
-        assert len(lines) == len(messages), output
-        for line, message in zip(lines, messages, strict=True):
-            assert message in line, output
+    assert code == (1 if expected else 0), output
+    if expected:
+        lines = [f"cycles {component}: {verdict}" for component, verdict in expected]
+        assert _message_lines(output) == lines, output
 
 
 # ── 기준선 형식 ──────────────────────────────────────────────
 
-VALID = _baseline(edges=["a->b", "b->a"], cycles=[["a", "b"]], sqlite=["x", "y"])
+VALID = _baseline(edges=["a->b", "b->a"], cycles=[AB], sqlite=["x", "y"])
+
+STRINGS = "must be a list of strings"
+SORTED = "must be sorted"
+DUPLICATES = "has duplicates"
+EDGE_SHAPE = "must look like 'a->b' with a != b"
+COMPONENTS = "must be the strongly connected components"
+LAZY = "must be a non-negative integer"
+
+
+def _edge_only(edge: str) -> dict[str, Any]:
+    return {**VALID, "edges": [edge], "cycles": []}
+
 
 FORMAT_ROWS = [
-    ("broken-json", "{"),
-    ("not-object", "[]"),
-    ("key-missing", {k: v for k, v in VALID.items() if k != "lazy_imports"}),
-    ("key-extra", {**VALID, "extra": []}),
-    ("edges-not-list", {**VALID, "edges": "a->b"}),
-    ("edges-not-strings", {**VALID, "edges": [1]}),
-    ("cycles-not-lists", {**VALID, "cycles": ["a"]}),
-    ("lazy-not-int", {**VALID, "lazy_imports": "1"}),
-    ("sqlite-not-list", {**VALID, "sqlite_files": "x"}),
-    ("edges-unsorted", {**VALID, "edges": ["b->a", "a->b"]}),
-    ("sqlite-unsorted", {**VALID, "sqlite_files": ["y", "x"]}),
-    ("cycle-unsorted", {**VALID, "cycles": [["b", "a"]]}),
+    ("broken-json", "{", "is not valid JSON"),
+    ("not-object", "[]", "must hold a JSON object"),
+    (
+        "key-missing",
+        {k: v for k, v in VALID.items() if k != "lazy_imports"},
+        "missing ['lazy_imports']",
+    ),
+    ("key-extra", {**VALID, "extra": []}, "extra ['extra']"),
+    ("edges-not-list", {**VALID, "edges": "a->b"}, f"'edges' {STRINGS}"),
+    ("edges-not-strings", {**VALID, "edges": [1]}, f"'edges' {STRINGS}"),
+    ("sqlite-not-list", {**VALID, "sqlite_files": "x"}, f"'sqlite_files' {STRINGS}"),
+    ("sqlite-not-strings", {**VALID, "sqlite_files": [1]}, f"'sqlite_files' {STRINGS}"),
+    ("cycles-not-list", {**VALID, "cycles": {}}, "must be a list of lists"),
+    ("cycles-not-lists", {**VALID, "cycles": ["a"]}, "must be a list of lists"),
+    ("cycle-not-strings", {**VALID, "cycles": [[1, 2]]}, f"'cycles' {STRINGS}"),
+    ("lazy-not-int", {**VALID, "lazy_imports": "1"}, LAZY),
+    ("lazy-float", {**VALID, "lazy_imports": 1.0}, LAZY),
+    ("lazy-bool", {**VALID, "lazy_imports": True}, LAZY),
+    ("lazy-negative", {**VALID, "lazy_imports": -1}, LAZY),
+    ("edges-unsorted", {**VALID, "edges": ["b->a", "a->b"]}, f"'edges' {SORTED}"),
+    (
+        "sqlite-unsorted",
+        {**VALID, "sqlite_files": ["y", "x"]},
+        f"'sqlite_files' {SORTED}",
+    ),
+    ("cycle-unsorted", {**VALID, "cycles": [["b", "a"]]}, f"'cycles' {SORTED}"),
     (
         "cycles-unsorted",
         {
             **VALID,
             "edges": ["a->b", "b->a", "c->d", "d->c"],
-            "cycles": [["c", "d"], ["a", "b"]],
+            "cycles": [CD, AB],
         },
+        f"'cycles' {SORTED}",
     ),
-    ("edges-duplicate", {**VALID, "edges": ["a->b", "a->b", "b->a"]}),
-    ("sqlite-duplicate", {**VALID, "sqlite_files": ["x", "x"]}),
-    ("cycles-duplicate", {**VALID, "cycles": [["a", "b"], ["a", "b"]]}),
-    ("cycle-member-duplicate", {**VALID, "cycles": [["a", "a", "b"]]}),
-    ("lazy-bool", {**VALID, "lazy_imports": True}),
-    ("lazy-negative", {**VALID, "lazy_imports": -1}),
-    ("edge-shape", {**VALID, "edges": ["a-b"]}),
-    ("edge-upper", {**VALID, "edges": ["A->b"]}),
-    ("edge-three", {**VALID, "edges": ["a->b->c"]}),
-    ("edge-self", {**VALID, "edges": ["a->a"]}),
-    ("cycles-not-components", {**VALID, "cycles": []}),
-    ("cycles-not-edges", {**VALID, "edges": ["a->b"]}),
+    (
+        "edges-duplicate",
+        {**VALID, "edges": ["a->b", "a->b", "b->a"]},
+        f"'edges' {DUPLICATES}",
+    ),
+    (
+        "sqlite-duplicate",
+        {**VALID, "sqlite_files": ["x", "x"]},
+        f"'sqlite_files' {DUPLICATES}",
+    ),
+    ("cycles-duplicate", {**VALID, "cycles": [AB, AB]}, f"'cycles' {DUPLICATES}"),
+    (
+        "cycle-member-duplicate",
+        {**VALID, "cycles": [["a", "a", "b"]]},
+        f"'cycles' {DUPLICATES}",
+    ),
+    ("edge-no-arrow", _edge_only("a-b"), EDGE_SHAPE),
+    ("edge-left-upper", _edge_only("A->b"), EDGE_SHAPE),
+    ("edge-right-upper", _edge_only("a->B"), EDGE_SHAPE),
+    ("edge-left-digit", _edge_only("a1->b"), EDGE_SHAPE),
+    ("edge-right-digit", _edge_only("a->b1"), EDGE_SHAPE),
+    ("edge-space", _edge_only("a ->b"), EDGE_SHAPE),
+    ("edge-trailing-newline", _edge_only("a->b\n"), EDGE_SHAPE),
+    ("edge-leading-text", _edge_only("x a->b"), EDGE_SHAPE),
+    ("edge-empty-left", _edge_only("->b"), EDGE_SHAPE),
+    ("edge-three", _edge_only("a->b->c"), EDGE_SHAPE),
+    ("edge-self", _edge_only("a->a"), EDGE_SHAPE),
+    ("cycles-not-components", {**VALID, "cycles": []}, COMPONENTS),
+    ("cycles-not-edges", {**VALID, "edges": ["a->b"]}, COMPONENTS),
 ]
 
 
@@ -434,16 +508,19 @@ def test_valid_baseline_parses() -> None:
 
 
 @pytest.mark.parametrize(
-    "data", [row[1] for row in FORMAT_ROWS], ids=[row[0] for row in FORMAT_ROWS]
+    ("data", "message"),
+    [row[1:] for row in FORMAT_ROWS],
+    ids=[row[0] for row in FORMAT_ROWS],
 )
 def test_malformed_baseline_is_error(
-    tmp_path: Path, capsys: Capsys, data: object
+    tmp_path: Path, capsys: Capsys, data: object, message: str
 ) -> None:
     _tree(tmp_path, {})
     _write_baseline(tmp_path, data)
     code, output = _run(tmp_path, capsys)
     assert code == 2, output
-    assert "import_baseline.json" in output
+    assert f"{checker.BASELINE_PATH}" in output
+    assert message in output, output
 
 
 def test_missing_baseline_is_error(tmp_path: Path, capsys: Capsys) -> None:

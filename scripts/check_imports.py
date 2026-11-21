@@ -25,8 +25,8 @@ Measured values:
   modules, each sorted.
 - ``lazy_imports``: the number of targets summed over all lazy imports.
 - ``sqlite_files``: repository-relative paths of files outside the ``core`` and
-  ``db`` modules with an import whose name starts with ``sqlite3`` or
-  ``aiosqlite``, runtime or not.
+  ``db`` modules with an import whose imported name has ``sqlite3`` or
+  ``aiosqlite`` as its first component, runtime or not.
 
 Known limits: an alias of ``TYPE_CHECKING`` counts as a runtime test, and
 dynamic imports are not counted.
@@ -60,7 +60,7 @@ CYCLES = "cycles"
 LAZY_IMPORTS = "lazy_imports"
 SQLITE_FILES = "sqlite_files"
 BASELINE_KEYS = frozenset({EDGES, CYCLES, LAZY_IMPORTS, SQLITE_FILES})
-EDGE_RE = re.compile(r"^([a-z_]+)->([a-z_]+)$")
+EDGE_RE = re.compile(r"([a-z_]+)->([a-z_]+)")
 FUNCTION_NODES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
 
 EXIT_OK = 0
@@ -308,7 +308,7 @@ def parse_baseline(text: str) -> dict[str, Any]:
         )
     edges = _check_strings(EDGES, data[EDGES])
     for edge in edges:
-        match = EDGE_RE.match(edge)
+        match = EDGE_RE.fullmatch(edge)
         if match is None or match.group(1) == match.group(2):
             raise CheckError(
                 f"{BASELINE_PATH}: edge {edge!r} must look like 'a->b' with a != b"
