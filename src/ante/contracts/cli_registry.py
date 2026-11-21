@@ -1,74 +1,4 @@
-"""CLI command contract registry.
-
-CLI command 별 auth / output /
-execution 계약을 한 곳에서 관리하는 registry 다.
-
-본 모듈이 제공하는 것:
-
-* :class:`AuthContract` — auth mode + scope frozenset.
-* :class:`OutputContract` — result shape + envelope + data slot.
-* :class:`CliCommandContract` — root-to-leaf command path + 3 sub-contract +
-  execution class + (optional) IPC command name.
-* :data:`ACCOUNT_CONTRACTS` — account 도메인 9 leaf contract tuple.
-* :data:`MEMBER_CONTRACTS` — member 도메인 12 leaf contract tuple.
-* :data:`BOT_CONTRACTS` — bot 도메인 11 leaf contract tuple.
-* :data:`APPROVAL_CONTRACTS` — approval 도메인 10 leaf contract tuple.
-* :data:`TREASURY_CONTRACTS` — treasury 도메인 9 leaf contract tuple.
-* :data:`STRATEGY_CONTRACTS` — strategy 도메인 7 leaf contract tuple.
-* :data:`DATA_CONTRACTS` — data 도메인 6 leaf contract tuple.
-* :data:`REPORT_CONTRACTS` — report 도메인 5 leaf contract tuple.
-* :data:`BROKER_CONTRACTS` — broker 도메인 5 leaf contract tuple.
-* :data:`SYSTEM_CONTRACTS` — system 도메인 5 leaf contract tuple.
-* :data:`INSTRUMENT_CONTRACTS` — instrument 도메인 4 leaf contract tuple.
-* :data:`CONFIG_CONTRACTS` — config 도메인 3 leaf contract tuple.
-* :data:`RULE_CONTRACTS` — rule 도메인 3 leaf contract tuple.
-* :data:`TRADE_CONTRACTS` — trade 도메인 2 leaf contract tuple.
-* :data:`BACKTEST_CONTRACTS` — backtest 도메인 2 leaf contract tuple.
-* :data:`AUDIT_CONTRACTS` — audit 도메인 1 leaf contract tuple.
-* :data:`SIGNAL_CONTRACTS` — signal 도메인 1 leaf contract tuple.
-* :data:`CLI_COMMAND_REGISTRY` — leaf path tuple → contract mapping.
-  account 9 + member 12 + bot 11 + approval 10 + treasury 9
-  + strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument 4
-  + config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
-  entries 가 채워져 있다.
-* :func:`get_contract` / :func:`all_contracts` — read-only accessor.
-
-본 모듈이 의도적으로 *제공하지 않는* 것 (스펙 non-goal):
-
-* output payload migration (raw_legacy 를 *문서화*
-  만 하며 fmt callsite 를 바꾸지 않는다).
-* drift test guard 완전 활성화 — 미등록 leaf FAIL 은 별도 drift test 의 책임.
-* IPC server-side metadata. ``ipc_command`` 필드는 stub 값만
-  채우며 cross-ref drift test 는 별도다.
-* auth enforcement / error taxonomy 변경.
-
-`AuthMode` / `ContractKind` / `EnvelopeForm` vocabulary 는
-:mod:`ante.contracts.vocab` 의 Literal SSOT 를 그대로 가져온다.
-별도 alias 를 만들거나 string literal 을 중복 정의하지 않는다.
-
-`raw_legacy` 응답은 ``OutputContract(kind="raw", envelope="raw_legacy")``
-조합으로 표현한다. ``raw_legacy`` 는 :data:`ContractKind` 가 아니라
-:data:`EnvelopeForm` 값이며, 이 점은 본 모듈의
-dataclass 시그니처가 그대로 강제한다.
-
-``execution`` Literal 값과 ``docs/specs/cli/03-commands.md`` 표기는 다음과
-같이 1:1 대응한다 (normative):
-
-============================  ============================
-``03-commands.md`` 표기        ``CliCommandContract.execution``
-============================  ============================
-``bootstrap/maintenance``     ``"bootstrap"``
-``offline``                   ``"offline"``
-``runtime IPC``               ``"runtime_ipc"``
-``cold-path``                 ``"cold_path"``
-``long-running/streaming``    ``"long_running"``
-``external process``          ``"long_running"`` (5 값에 흡수)
-============================  ============================
-
-본 registry import 는 어떤 CLI command 도 실행하지 않는다 — 모듈 import
-side effect 가 없는지 :mod:`tests.unit.contracts.test_cli_registry_shell`
-가 lock 한다.
-"""
+"""CLI command contract registry."""
 
 from __future__ import annotations
 
@@ -114,9 +44,6 @@ ExecutionClass = Literal[
     "long_running",
 ]
 """CLI command 의 실행 모드 vocabulary.
-
-``docs/specs/cli/03-commands.md`` 의 5 모드와 1:1 정합한다. ``external
-process`` 표기는 ``"long_running"`` 에 흡수된다.
 """
 
 
@@ -125,9 +52,6 @@ class AuthContract:
     """CLI command 의 인증 요구 계약.
 
     Attributes:
-        mode: 인증 모드. :data:`ante.contracts.vocab.AuthMode` Literal 값
-            중 하나 (``"public"`` / ``"authenticated"`` / ``"scoped"`` /
-            ``"master"``).
         scopes: ``mode == "scoped"`` 일 때 요구되는 scope 집합.
             **복수 scope** 를 요구할 수 있도록 ``frozenset[str]``
             이다 (단일 ``str`` 또는 ``str | None``
@@ -144,18 +68,9 @@ class OutputContract:
     """CLI command 의 출력 계약.
 
     Attributes:
-        kind: :data:`ante.contracts.vocab.ContractKind` Literal — 응답
-            payload 의 result shape 종류. ``"entity"`` / ``"operation"`` /
-            ``"collection"`` / ``"raw"`` / ``"stream"``. 본 vocabulary 는
-            SSOT 다.
         data_key: standard envelope 의 ``data`` 슬롯 안에서 사용할 key
             이름 (예: ``"account"``, ``"bots"``). ``raw`` / ``stream``
             계열 또는 단일 slot 이 필요 없는 경우 ``None``.
-        envelope: 응답 envelope 형태. ``"standard"`` (envelope SSOT)
-            가 기본이며, 후방 호환이 필요한 legacy 출력은 ``"raw_legacy"``
-            를 지정한다. ``raw_legacy`` 는 :data:`ContractKind` 가 아니라
-            envelope form 이라는 사실을 본 dataclass 시그니처가
-            강제한다.
     """
 
     kind: ContractKind
@@ -173,13 +88,6 @@ class CliCommandContract:
             :func:`tests.unit.contracts.helpers.iter_click_leaf_commands`
             가 반환하는 :class:`~tests.unit.contracts.helpers.CliLeafCommand.path`
             와 형태가 일치한다.
-        auth: 인증 요구 계약.
-        output: 출력 계약.
-        execution: :data:`ExecutionClass` Literal — 실행 모드.
-            ``docs/specs/cli/03-commands.md`` 의 5 모드와 1:1 정합.
-        ipc_command: ``execution == "runtime_ipc"`` 일 때 호출할 IPC
-            command 이름 (예: ``"bot.start"``). 다른 execution 모드에서는
-            ``None`` 이 일반적이다.
     """
 
     path: tuple[str, ...]
@@ -248,10 +156,6 @@ ACCOUNT_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Account domain 9 leaf 의 contract tuple.
-
-본 tuple 의 순서는 ``docs/specs/cli/03-commands.md`` 의 account 표
-(82-90 줄) 와 시각적으로 일치하도록 read → write → state-transition 순서로
-정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -339,10 +243,6 @@ MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Member domain 12 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:647-690`` 의 member 표 (read →
-admin mutation → public allowlist) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -425,10 +325,6 @@ BOT_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Bot domain 11 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:91-102`` 의 bot 표 (read → admin
-mutation → lifecycle) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -501,10 +397,6 @@ APPROVAL_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Approval domain 10 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:572-585`` 의 approval 표 (read →
-write → admin) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -568,11 +460,6 @@ TREASURY_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Treasury domain 9 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:112-119`` 의 treasury 실행 분류 표
-(status → transactions → budgets → set-balance → allocate → deallocate →
-snapshot → portfolio value/history) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -622,11 +509,6 @@ STRATEGY_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Strategy domain 7 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:105-111`` 의 strategy 실행 분류 표
-(validate → submit → list → info → performance → set-status → summary) 와
-시각적으로 일치하도록 정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import
-시 자동으로 등록된다.
 """
 
 
@@ -669,17 +551,6 @@ DATA_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Data domain 6 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:481-492`` 의 data 표 (list →
-info → delete → schema → storage → validate) 와 정합하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
-
-spec 표 (487-492) 는 4 leaf (list/schema/storage/validate) 만 명시하지만
-``info`` / ``delete`` 는 실제 ``data.py`` 에 존재하는 leaf 로 ``ante data
---help`` Click subgroup iteration 이 6 leaf 를 반환한다. registry 는
-canonical Click tree (leaf coverage helper SSOT) 기준이므로 6 entries 를
-모두 등록한다 (treasury sub-PR 4 ``portfolio value/history`` 동형 — spec
-표가 일부 leaf 만 명시하더라도 실측 Click tree 가 SSOT).
 """
 
 
@@ -716,10 +587,6 @@ REPORT_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Report domain 5 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:505-510`` 의 report 표 (schema →
-submit → list → performance → view) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -761,11 +628,6 @@ BROKER_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Broker domain 5 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:123-127`` 의 broker 실행 분류 표
-(status → balance → positions → order-history → reconcile) 와 시각적으로
-일치하도록 정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
-등록된다.
 """
 
 
@@ -804,10 +666,6 @@ SYSTEM_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """System domain 5 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:77-81`` 의 system 실행 분류 표
-(start → stop → status → halt → clear-halt) 와 시각적으로 일치하도록
-정렬된다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -838,10 +696,6 @@ INSTRUMENT_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Instrument domain 4 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:691-704`` 의 instrument 표
-(list → sync → search → import) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -867,10 +721,6 @@ CONFIG_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Config domain 3 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:564-571`` 의 config 표
-(get → set → history) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -896,10 +746,6 @@ RULE_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Rule domain 3 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:429-448`` 의 rule 표
-(list → info → update) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -918,10 +764,6 @@ TRADE_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Trade domain 2 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:383-394`` 의 trade 표
-(list → info) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -940,10 +782,6 @@ BACKTEST_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Backtest domain 2 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:494-503`` 의 backtest 표
-(run → history) 와 시각적으로 일치하도록 정렬된다.
-``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로 등록된다.
 """
 
 
@@ -956,10 +794,6 @@ AUDIT_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Audit domain 1 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:710-720`` 의 audit 표 (list 단일) 와
-시각적으로 일치한다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
-등록된다.
 """
 
 
@@ -972,10 +806,6 @@ SIGNAL_CONTRACTS: tuple[CliCommandContract, ...] = (
     ),
 )
 """Signal domain 1 leaf 의 contract tuple.
-
-순서는 ``docs/specs/cli/03-commands.md:721-727`` 의 signal 표 (connect 단일)
-와 시각적으로 일치한다. ``CLI_COMMAND_REGISTRY`` 에는 모듈 import 시 자동으로
-등록된다.
 """
 
 
@@ -1002,19 +832,6 @@ CLI_COMMAND_REGISTRY: dict[tuple[str, ...], CliCommandContract] = {
     )
 }
 """Leaf command path → contract mapping.
-
-account 9 + member 12 + bot 11 + approval 10 + treasury 9
-+ strategy 7 + data 6 + report 5 + broker 5 + system 5 + instrument 4
-+ config 3 + rule 3 + trade 2 + backtest 2 + audit 1 + signal 1 = 95
-entries 가 등록되어 있다.
-registry 미등록 leaf 는 drift guard 에서 FAIL 이다(아래 잔여 leaf 제외).
-
-미등록 잔여 leaf (95 / 실측 Click leaf count 비교): ``ante`` root 의
-init / update / notification group 은 leaf 가 없거나 (notification은
-0 leaf — spec 707-708 narrative), update 단일 leaf 는 root-level command
-로 본 registry sweep 범위 밖이다. 정확한 잔여 leaf 식별은
-:func:`tests.unit.contracts.helpers.iter_click_leaf_commands` 의 실측을
-기준으로 한다 (leaf coverage report 참조).
 """
 
 

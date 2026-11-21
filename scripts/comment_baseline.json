@@ -64,12 +64,7 @@
     "src/ante/config/config.py": 13,
     "src/ante/config/dynamic.py": 32,
     "src/ante/config/exceptions.py": 7,
-    "src/ante/contracts/__init__.py": 21,
-    "src/ante/contracts/cli_registry.py": 157,
-    "src/ante/contracts/error_registry.py": 242,
-    "src/ante/contracts/errors.py": 18,
-    "src/ante/contracts/helpers.py": 35,
-    "src/ante/contracts/vocab.py": 19,
+    "src/ante/contracts/error_registry.py": 4,
     "src/ante/core/database.py": 47,
     "src/ante/core/exchange.py": 15,
     "src/ante/core/log/_record_keys.py": 6,
@@ -150,5 +145,5 @@
     "src/ante/treasury/treasury.py": 89,
     "src/ante/update/executor.py": 10
   },
-  "docstring_lines": 12162
+  "docstring_lines": 11633
 }
