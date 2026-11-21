@@ -11,6 +11,7 @@ from types import ModuleType
 from typing import Any
 
 import pytest
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -899,20 +900,68 @@ def test_script_default_root_is_its_checkout_from_any_cwd(tmp_path: Path) -> Non
     assert result.stdout.startswith("entry ratchet ok: ")
 
 
+CI_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci.yml"
+CI_STEP_NAME = "Entry ratchet check"
+CI_RUN = "python scripts/check_entry_ratchet.py"
+
+
+def _lint_step_runs(workflow: str, name: str) -> list[object]:
+    data = yaml.safe_load(workflow)
+    steps = data["jobs"]["lint"]["steps"]
+    return [step.get("run") for step in steps if step.get("name") == name]
+
+
 def test_ci_argv_and_cwd_pass_on_repository() -> None:
-    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
-        encoding="utf-8"
-    )
-    step = (
-        "      - name: Comment check\n"
-        "        run: python scripts/check_comments.py\n"
-        "\n"
-        "      - name: Entry ratchet check\n"
-        "        run: python scripts/check_entry_ratchet.py\n"
-    )
-    assert step in workflow
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert _lint_step_runs(workflow, CI_STEP_NAME) == [CI_RUN]
     result = _script([], REPO_ROOT, script="scripts/check_entry_ratchet.py")
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+STEP_LINES = (
+    "      - name: Entry ratchet check\n"
+    "        run: python scripts/check_entry_ratchet.py\n"
+)
+
+
+@pytest.mark.parametrize(
+    "altered",
+    [
+        pytest.param(
+            STEP_LINES.replace("Entry ratchet check", "Entry ratchet"), id="renamed"
+        ),
+        pytest.param(
+            STEP_LINES.replace(CI_RUN, "python scripts/check_comments.py"),
+            id="other-run",
+        ),
+        pytest.param(STEP_LINES + "\n" + STEP_LINES, id="duplicated"),
+    ],
+)
+def test_ci_step_assertion_rejects_altered_workflow(altered: str) -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+    assert workflow.count(STEP_LINES) == 1
+    changed = workflow.replace(STEP_LINES, altered)
+    assert _lint_step_runs(changed, CI_STEP_NAME) != [CI_RUN]
+
+
+def test_registry_file_literals_outside_error_spec_are_in_code_set(
+    tmp_path: Path,
+) -> None:
+    registry = REGISTRY_SOURCE + '_ALIAS = {"code": "ZZ_REG_DICT"}\n'
+    root = _tree(tmp_path, {REGISTRY: registry})
+    codes = checker.measure(root).unregistered_codes
+    assert codes == {"HOOK_FALLBACK", "HOOK_ONLY", "ZZ_REG_DICT"}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('x = {"status": "error", "code": "X"}', id="second-key"),
+        pytest.param('x = {"ok": False, "message": "m", "code": "X"}', id="third-key"),
+    ],
+)
+def test_code_key_after_other_dict_keys_is_counted(tmp_path: Path, source: str) -> None:
+    assert _codes(tmp_path, source) == {"X"}
 
 
 def test_registry_keywords_other_than_code_are_not_registered(
