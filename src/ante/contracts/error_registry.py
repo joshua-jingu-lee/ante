@@ -45,6 +45,15 @@ from ante.broker.registry import (
     InvalidBrokerTypeError as BrokerRegistryInvalidBrokerTypeError,
 )
 from ante.config.exceptions import ConfigValidationError
+from ante.contracts.cli_errors import (
+    CliOptionConflictError,
+    ReportError,
+    ReportInvalidStatusError,
+    ReportNotFoundError,
+    ReportValidationError,
+    TradeError,
+    TradeNotFoundError,
+)
 from ante.contracts.errors import ErrorSpec
 from ante.contracts.ipc_client_errors import (
     IPCClientTimeoutError,
@@ -408,6 +417,42 @@ _IPC_TIMEOUT_SPEC: Final[ErrorSpec] = ErrorSpec(
 )
 
 
+_CLI_OPTION_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_OPTION_CONFLICT",
+    category="validation",
+)
+
+_REPORT_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_ERROR",
+    category="internal",
+)
+
+_REPORT_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_INVALID_STATUS",
+    category="validation",
+)
+
+_REPORT_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_NOT_FOUND",
+    category="not_found",
+)
+
+_REPORT_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="REPORT_VALIDATION_ERROR",
+    category="validation",
+)
+
+_TRADE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TRADE_ERROR",
+    category="internal",
+)
+
+_TRADE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TRADE_NOT_FOUND",
+    category="not_found",
+)
+
+
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
     category="internal",
@@ -479,6 +524,13 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     InvalidIsoDateError: _INVALID_ISO_DATE_SPEC,
     IPCServerNotRunningError: _IPC_SERVER_NOT_RUNNING_SPEC,
     IPCClientTimeoutError: _IPC_TIMEOUT_SPEC,
+    CliOptionConflictError: _CLI_OPTION_CONFLICT_SPEC,
+    ReportError: _REPORT_ERROR_SPEC,
+    ReportInvalidStatusError: _REPORT_INVALID_STATUS_SPEC,
+    ReportNotFoundError: _REPORT_NOT_FOUND_SPEC,
+    ReportValidationError: _REPORT_VALIDATION_ERROR_SPEC,
+    TradeError: _TRADE_ERROR_SPEC,
+    TradeNotFoundError: _TRADE_NOT_FOUND_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
