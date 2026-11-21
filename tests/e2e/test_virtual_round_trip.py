@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from ante.ipc.client import IPCClient
 from tests.e2e.harness import DaemonHarness, run_json_command
 
 TEST_ACCOUNT = {"account_id": "test", "broker_type": "test", "exchange": "TEST"}
@@ -34,6 +37,16 @@ def test_boot_and_stop(daemon: DaemonHarness) -> None:
     assert daemon.daemon_pid in daemon.guarded_pids()
     accounts = daemon.cli("account", "list")
     assert "test" in {a["account_id"] for a in accounts["accounts"]}
+
+    marker = "MARKE2E001SECRET"
+    client = IPCClient(socket_path=str(daemon.socket_path))
+    response = asyncio.run(client.send("system.clear_halt", {"x": marker}, "e2e"))
+    assert response["status"] == "error"
+    assert response["error"] == {
+        "code": "VALIDATION_ERROR",
+        "message": "system.clear_halt 인자 검증 실패: x(extra_forbidden)",
+    }
+    assert marker not in json.dumps(response, ensure_ascii=False)
 
     rejected = run_json_command(
         daemon.cli_argv("bot", "start", "e2e-no-such-bot"),
