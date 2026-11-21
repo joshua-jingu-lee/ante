@@ -46,7 +46,29 @@ from ante.broker.registry import (
 )
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.cli_errors import (
+    BacktestDataNotFoundError,
+    BacktestError,
+    BacktestInvalidExchangeError,
+    BacktestInvalidSymbolError,
+    BacktestInvalidTimeframeError,
+    CliConfirmationRequiredError,
     CliOptionConflictError,
+    DataError,
+    DataInvalidDatasetIdError,
+    DataInvalidFilterError,
+    DatasetNotFoundError,
+    DataValidateInvalidSymbolError,
+    DataValidateInvalidTimeframeError,
+    InstrumentEmptyFileError,
+    InstrumentInvalidExchangeError,
+    InstrumentInvalidFileFormatError,
+    InstrumentInvalidJsonShapeError,
+    InstrumentInvalidSymbolError,
+    InstrumentIoError,
+    InstrumentMissingColumnsError,
+    InstrumentSyncSourceUnsupportedError,
+    InvalidDateError,
+    InvalidDateRangeError,
     ReportError,
     ReportInvalidStatusError,
     ReportNotFoundError,
@@ -459,6 +481,116 @@ _TRADE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="not_found",
 )
 
+_BACKTEST_DATA_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKTEST_DATA_NOT_FOUND",
+    category="not_found",
+)
+
+_BACKTEST_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKTEST_ERROR",
+    category="internal",
+)
+
+_BACKTEST_INVALID_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKTEST_INVALID_EXCHANGE",
+    category="validation",
+)
+
+_BACKTEST_INVALID_SYMBOL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKTEST_INVALID_SYMBOL",
+    category="validation",
+)
+
+_BACKTEST_INVALID_TIMEFRAME_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKTEST_INVALID_TIMEFRAME",
+    category="validation",
+)
+
+_CLI_CONFIRMATION_REQUIRED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_CONFIRMATION_REQUIRED",
+    category="validation",
+)
+
+_DATASET_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATASET_NOT_FOUND",
+    category="not_found",
+)
+
+_DATA_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATA_ERROR",
+    category="internal",
+)
+
+_DATA_INVALID_DATASET_ID_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATA_INVALID_DATASET_ID",
+    category="validation",
+)
+
+_DATA_INVALID_FILTER_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATA_INVALID_FILTER",
+    category="validation",
+)
+
+_DATA_VALIDATE_INVALID_SYMBOL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATA_VALIDATE_INVALID_SYMBOL",
+    category="validation",
+)
+
+_DATA_VALIDATE_INVALID_TIMEFRAME_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DATA_VALIDATE_INVALID_TIMEFRAME",
+    category="validation",
+)
+
+_INSTRUMENT_EMPTY_FILE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_EMPTY_FILE",
+    category="validation",
+)
+
+_INSTRUMENT_INVALID_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_INVALID_EXCHANGE",
+    category="validation",
+)
+
+_INSTRUMENT_INVALID_FILE_FORMAT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_INVALID_FILE_FORMAT",
+    category="validation",
+)
+
+_INSTRUMENT_INVALID_JSON_SHAPE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_INVALID_JSON_SHAPE",
+    category="validation",
+)
+
+_INSTRUMENT_INVALID_SYMBOL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_INVALID_SYMBOL",
+    category="validation",
+)
+
+_INSTRUMENT_IO_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_IO_ERROR",
+    category="internal",
+)
+
+_INSTRUMENT_MISSING_COLUMNS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_MISSING_COLUMNS",
+    category="validation",
+)
+
+_INSTRUMENT_SYNC_SOURCE_UNSUPPORTED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_SYNC_SOURCE_UNSUPPORTED",
+    category="validation",
+)
+
+_INVALID_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INVALID_DATE",
+    category="validation",
+)
+
+_INVALID_DATE_RANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INVALID_DATE_RANGE",
+    category="validation",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -539,6 +671,28 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     ReportValidationError: _REPORT_VALIDATION_ERROR_SPEC,
     TradeError: _TRADE_ERROR_SPEC,
     TradeNotFoundError: _TRADE_NOT_FOUND_SPEC,
+    BacktestDataNotFoundError: _BACKTEST_DATA_NOT_FOUND_SPEC,
+    BacktestError: _BACKTEST_ERROR_SPEC,
+    BacktestInvalidExchangeError: _BACKTEST_INVALID_EXCHANGE_SPEC,
+    BacktestInvalidSymbolError: _BACKTEST_INVALID_SYMBOL_SPEC,
+    BacktestInvalidTimeframeError: _BACKTEST_INVALID_TIMEFRAME_SPEC,
+    CliConfirmationRequiredError: _CLI_CONFIRMATION_REQUIRED_SPEC,
+    DatasetNotFoundError: _DATASET_NOT_FOUND_SPEC,
+    DataError: _DATA_ERROR_SPEC,
+    DataInvalidDatasetIdError: _DATA_INVALID_DATASET_ID_SPEC,
+    DataInvalidFilterError: _DATA_INVALID_FILTER_SPEC,
+    DataValidateInvalidSymbolError: _DATA_VALIDATE_INVALID_SYMBOL_SPEC,
+    DataValidateInvalidTimeframeError: _DATA_VALIDATE_INVALID_TIMEFRAME_SPEC,
+    InstrumentEmptyFileError: _INSTRUMENT_EMPTY_FILE_SPEC,
+    InstrumentInvalidExchangeError: _INSTRUMENT_INVALID_EXCHANGE_SPEC,
+    InstrumentInvalidFileFormatError: _INSTRUMENT_INVALID_FILE_FORMAT_SPEC,
+    InstrumentInvalidJsonShapeError: _INSTRUMENT_INVALID_JSON_SHAPE_SPEC,
+    InstrumentInvalidSymbolError: _INSTRUMENT_INVALID_SYMBOL_SPEC,
+    InstrumentIoError: _INSTRUMENT_IO_ERROR_SPEC,
+    InstrumentMissingColumnsError: _INSTRUMENT_MISSING_COLUMNS_SPEC,
+    InstrumentSyncSourceUnsupportedError: _INSTRUMENT_SYNC_SOURCE_UNSUPPORTED_SPEC,
+    InvalidDateError: _INVALID_DATE_SPEC,
+    InvalidDateRangeError: _INVALID_DATE_RANGE_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
