@@ -32,24 +32,7 @@ class ParquetReadError(Exception):
 
 
 def _is_safe_path_segment(seg: str) -> bool:
-    """단일 path segment가 traversal-safe한지 판정.
-
-    저장소 경로(`base/.../{symbol}` 등)의 각 segment는 정확히 한 단계의
-    디렉토리 이름이어야 한다. 이 술어는 **vocabulary와 무관**하다 — KRX
-    6자리 형식이나 canonical timeframe 여부를 검사하지 않으며, legacy
-    out-of-vocabulary symbol(`ABCDEF`, `oracle-safe-symbol` 등)은 통과
-    한다(core spec Legacy 호환 정책 정합).
-    오직 path traversal/escape 벡터만 거부한다.
-
-    거부 조건:
-      - 빈 문자열
-      - `.` 또는 `..` (현재/부모 디렉토리)
-      - `/`, `\\`, NUL 문자 포함 (경로 구분자/인젝션)
-      - 절대 경로 또는 드라이브 지정 (`os.path.isabs`)
-
-    Returns:
-        traversal-safe하면 True, 그 외 False.
-    """
+    """단일 path segment가 traversal-safe한지 판정."""
     if not seg:
         return False
     if seg in (".", ".."):
@@ -79,31 +62,7 @@ _LEGACY_MONTHLY_GLOB = "????-??.parquet"
 
 
 def _natural_key(data_type: str, columns: list[str]) -> list[str]:
-    """data_type별 merge/dedup용 natural key 컬럼 목록을 결정한다.
-
-    natural key는 같은 월 파티션 내에서 "같은 논리 행"을 식별하는 기준이며,
-    merge 시 `unique(subset=key, keep="last")`로 멱등성을 보장한다.
-
-    - fundamental: `["date", "source"]`(둘 다 존재 시) 또는 `["date"]`.
-      DART 재무제표 date는 분기말일(3/31·6/30·9/30·12/31)이라
-      data.go.kr의 같은 거래일 일별 fundamental과 같은 월 파티션에서
-      date가 충돌할 수 있다. `source`까지 키에 포함하면 두 소스의
-      서로 다른(null-complementary) 행을 **모두 보존**한다.
-      `available_date`(point-in-time 공시 접수일)는 논리 행을
-      식별하는 키가 아니라 **value 속성**이므로 natural key에 넣지 않는다.
-      key는 period_end(`date`)+`source`로 한 분기·소스당 한 논리 행을
-      식별하고, 정정공시/재제출로 동일 period_end에 후속 접수가 들어오면
-      `keep="last"`가 최신 `available_date`/값으로 overwrite한다(완전한
-      revision history 보존은 비목표, known-limitation).
-    - ohlcv/tick(및 기타 default): `["timestamp"]`(존재 시) 또는 `[]`.
-
-    Args:
-        data_type: 데이터 타입 (ohlcv/fundamental/tick/...).
-        columns: 대상 DataFrame의 컬럼 목록.
-
-    Returns:
-        natural key 컬럼 목록. 키 컬럼이 데이터에 없으면 빈 목록.
-    """
+    """data_type별 merge/dedup용 natural key 컬럼 목록을 결정한다."""
     cols = set(columns)
     if data_type == "fundamental":
         if "date" in cols and "source" in cols:
@@ -129,10 +88,7 @@ _LEGACY_KRX_SYMBOL_PATTERN: re.Pattern[str] = re.compile(r"^\d{6}$")
 
 
 def _get_actual_dir_name(parent: Path, name: str) -> str | None:
-    """파일시스템 상의 실제 디렉토리 이름을 반환.
-
-    case-insensitive FS에서 krx/KRX 구분을 위해 사용한다.
-    """
+    """파일시스템 상의 실제 디렉토리 이름을 반환."""
     if not parent.exists():
         return None
     for entry in parent.iterdir():
@@ -266,19 +222,7 @@ class ParquetStore:
         data_type: str = "ohlcv",
         exchange: str = "KRX",
     ) -> Path:
-        """data_type에 따라 저장 경로를 결정.
-
-        - ohlcv: {base}/ohlcv/{timeframe}/{exchange}/{symbol}/
-        - fundamental: {base}/fundamental/{exchange}/{symbol}/
-        - tick: {base}/tick/{exchange}/{symbol}/
-
-        path traversal 방어: 경로에 **실제로 사용되는** 각 segment
-        (`symbol`/`exchange`/`data_type`, ohlcv 계열은 `timeframe`)를
-        `_is_safe_path_segment`로 검증하고, resolved(`.resolve()` symlink
-        해소) 기준으로 candidate가 정확히 expected parent 직하위이며 base
-        하위에 포함되는지 단언한다. 위반 시 `ValueError`. legacy
-        out-of-vocabulary symbol 등 정상 caller는 모두 통과한다.
-        """
+        """data_type에 따라 저장 경로를 결정."""
         used_segments: tuple[str, ...]
         if data_type == "ohlcv":
             candidate = self._base / "ohlcv" / timeframe / exchange / symbol
@@ -523,12 +467,7 @@ class ParquetStore:
     def _partition_by_day(
         self, data: pl.DataFrame, time_col: str
     ) -> list[tuple[str, pl.DataFrame]]:
-        """데이터를 일별로 분할하여 (`YYYY-MM-DD`, DataFrame) 리스트 반환.
-
-        `_partition_by_month`와 동형이며 파티션 key 해상도만 일별
-        (`%Y-%m-%d` / Date면 `cast(Utf8).str.slice(0, 10)`)이다. subminute
-        OHLCV(10s/30s) 일별 파티셔닝 전용(04-schema.md).
-        """
+        """데이터를 일별로 분할하여 (`YYYY-MM-DD`, DataFrame) 리스트 반환."""
         if time_col in data.columns:
             if data[time_col].dtype == pl.Date:
                 day_series = data[time_col].cast(pl.Utf8).str.slice(0, 10)
@@ -548,10 +487,7 @@ class ParquetStore:
 
     @staticmethod
     def _dedup_sort_by_key(df: pl.DataFrame, key: list[str]) -> pl.DataFrame:
-        """natural key로 dedup(`keep="last"`) 후 정렬한다(멱등 merge).
-
-        key가 비었거나 df에 key 컬럼이 하나도 없으면 원본을 그대로 반환한다.
-        """
+        """natural key로 dedup(`keep="last"`) 후 정렬한다(멱등 merge)."""
         if key:
             present = [c for c in key if c in df.columns]
             if present:
@@ -560,14 +496,7 @@ class ParquetStore:
 
     @staticmethod
     def _sweep_stale_tmp(partition_dir: Path) -> int:
-        """대상 파티션 dir의 stale ``*.tmp`` (orphan)를 삭제하고 삭제 수를 반환.
-
-        원자 write의 임시 파일은 hard-kill/전원 손실 시 최종 replace 전에 orphan으로
-        남는다. ``*.tmp`` 는 read glob(``*.parquet``) 밖이라 누적되므로 정리한다.
-        **`validate(fix=True)`(사용자 발동, write-scoped)에서만** 호출한다 — write
-        hot-path나 read-scoped 경로에서는 파일시스템을 변조하지 않는다. 프로세스
-        시작 시점 전역 GC는 본 이슈 Known Limitations의 follow-up이다.
-        """
+        """대상 파티션 dir의 stale ``*.tmp`` (orphan)를 삭제하고 삭제 수를 반환."""
         removed = 0
         try:
             stale_files = list(partition_dir.glob("*.tmp"))
@@ -585,19 +514,7 @@ class ParquetStore:
     def _apply_partition_mode(
         tmp_path: str, target: Path, preserve_existing_mode: bool
     ) -> None:
-        """replace 전 tmp 파일 mode를 결정한다.
-
-        ``tempfile.mkstemp`` 는 항상 ``0o600`` 으로 tmp를 만들고 ``Path.replace`` 가
-        그 mode를 유지한다. 조정하지 않으면 모든 파티션이 owner-only-readable이 되어
-        분리된 reader 계정/그룹이 EACCES로 실패한다(LXC 배포). 규칙:
-
-        - ``preserve_existing_mode=True`` 이고 기존 ``target`` 이 있으면 **그 operator
-          mode를 보존**(0o600 등 의도 존중). 비-0바이트 유효 기존 파일 merge 전용.
-        - 그 외(신규 파티션, **0바이트 복구**)는 ``0o644`` 고정. 0바이트 복구에서
-          기존 target은 중단-write **stub**이므로 그 mode(restrictive umask
-          에서 0o600일 수 있음)를 보존하면 복구본이 owner-only가 된다 → stub mode를
-          mode 소스로 쓰지 않고 신규와 동일하게 0o644를 쓴다.
-        """
+        """replace 전 tmp 파일 mode를 결정한다."""
         mode = 0o644
         if preserve_existing_mode:
             try:
@@ -613,24 +530,7 @@ class ParquetStore:
         *,
         preserve_existing_mode: bool = True,
     ) -> None:
-        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace).
-
-        checkpoint.save()(`feed/pipeline/checkpoint.py`)와 동일 패턴이다: 같은
-        디렉토리에 임시 파일을 만들어 write한 뒤 ``Path.replace`` 로 원자 교체한다.
-        write 도중 중단(OOM/kill/전원 손실)이 있어도 최종 경로에는 0바이트/부분
-        parquet이 남지 않는다(중단 시 tmp만 잔존 → 즉시 cleanup). 권한은
-        `_apply_partition_mode`를 따른다.
-
-        Args:
-            df: 기록할 DataFrame.
-            filepath: 최종 파티션 파일 경로.
-            preserve_existing_mode: True(기본)면 기존 target mode 보존(비-0바이트
-                merge). 0바이트 복구/신규는 False로 호출해 0o644를 강제한다([670]).
-
-        Raises:
-            write/replace 실패 시 원 예외를 그대로 재-raise한다(임시 파일 정리 후).
-            최종 경로는 손대지 않으므로 기존 상태(부재 또는 이전 유효본)가 보존된다.
-        """
+        """DataFrame을 파티션 파일에 **원자적으로** 기록(write-then-replace)."""
         fd, tmp_path = tempfile.mkstemp(dir=filepath.parent, suffix=".tmp")
         os.close(fd)
         try:
@@ -642,14 +542,7 @@ class ParquetStore:
             raise
 
     def _quarantine_corrupt(self, filepath: Path) -> Path:
-        """손상 파티션을 ``.corrupted`` 로 격리(**rename**)하고 격리 경로를 반환.
-
-        ``validate(fix=True)`` **전용** 격리 헬퍼다(사용자 발동). 기본 격리명은
-        ``with_suffix(".corrupted")`` 이되, 동명이 이미 있으면 **덮어쓰지 않고**
-        uniquifier(``.corrupted.<n>``)로 회피한다(반복 손상 증적 보존·POSIX 덮어쓰기
-        방지·Windows ``FileExistsError`` 회피). write 경로는 이
-        헬퍼를 호출하지 않는다(0바이트만 자동복구, 나머지는 loud-stuck).
-        """
+        """손상 파티션을 ``.corrupted`` 로 격리(**rename**)하고 격리 경로를 반환."""
         target = filepath.with_suffix(".corrupted")
         n = 1
         while target.exists():
@@ -661,13 +554,7 @@ class ParquetStore:
     def _record_merge_failure(
         self, filepath: Path, exc: BaseException, *, message: str | None = None
     ) -> int:
-        """기존 파일 보존 + ``store_merge`` 경고를 적재하고 net-new 0을 반환한다.
-
-        concat/schema 실패, 원자 write 실패, 일시적 read 오류, self-heal 불가(격리·
-        재생성 write 실패)를 모두 동일하게 처리한다: 기존 데이터를 절대 덮어쓰지
-        않고 checkpoint 전진 게이트(``store_merge``)로 표면화해 다음 run 재시도를
-        유도한다.
-        """
+        """기존 파일 보존 + ``store_merge`` 경고를 적재하고 net-new 0을 반환한다."""
         logger.warning(
             "Parquet 파티션 merge 실패: %s — 기존 파일 보존, write 건너뜀 (%s)",
             filepath,
@@ -688,12 +575,7 @@ class ParquetStore:
 
     @staticmethod
     def _is_zero_byte(filepath: Path) -> bool:
-        """target이 **확실히 0바이트**인지 판정. stat 실패 시 False(단정 금지).
-
-        0바이트 파일은 원자성 도입 전 비원자 write가 중단돼 남은 미완성 파티션이다
-        (관찰된 stuck의 원인). stat이 실패(권한/경로 race)하면 0바이트로 단정하지
-        않고 일반 기존-파일 경로(read→concat, 실패 시 preserve)로 보낸다.
-        """
+        """target이 **확실히 0바이트**인지 판정. stat 실패 시 False(단정 금지)."""
         try:
             return filepath.stat().st_size == 0
         except OSError:
@@ -702,41 +584,7 @@ class ParquetStore:
     def _persist_partition(
         self, filepath: Path, group: pl.DataFrame, key: list[str]
     ) -> int:
-        """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge.
-
-        원자성: 모든 파티션 write는 `_atomic_write_parquet`(임시 파일 +
-        원자 replace)로 수행한다. write 중단 시 최종 경로에 0바이트/부분 parquet이
-        남지 않는다(checkpoint.save durability 불변과 정합).
-
-        기존 파일 처리(0바이트-only 자동복구):
-        - **0바이트 파티션**(원자성 도입 전 중단 write 잔재) → 그 파일을 **부재로
-          간주**하고 신규 group을 그대로 write한다(read/concat/격리 없음). checkpoint
-          전진 게이트를 유발하지 않는 `store_recovered` 경고로 "0바이트 손상 파티션
-          자동복구"를 표면화해 보고된 stuck을 해소한다. 반환은 신규-파티션과 동일한
-          net-new(=dedup 후 len).
-        - **비어있지 않은 기존 파티션** → `pl.read_parquet` → `pl.concat`
-          (diagonal_relaxed) → dedup → 원자 write. read 또는 concat이 raise하면
-          (읽기 불가·non-coercible 스키마 등) **기존 파일을 절대 덮어쓰지 않고**
-          `store_merge`(게이트→재시도)만 기록하고 net-new 0을 반환한다
-          (보존 동작). 비-0바이트 손상은 자동복구하지 않는다(loud-stuck) — 사용자가
-          `ante data validate --fix` 후 재backfill로 복구한다.
-        - **부재** → 신규 group 원자 write.
-
-        natural key가 있으면 `unique(subset=key, keep="last")`로 신규 write 우선
-        dedup 후 key로 정렬한다(멱등성).
-
-        Args:
-            filepath: 대상 파티션 파일 경로.
-            group: 이번 write로 들어온 (단일 월) DataFrame.
-            key: natural key 컬럼 목록. 비어 있으면 dedup/sort 생략.
-
-        Returns:
-            이 파티션에 **새로 저장된 net-new 행 수**:
-            ``max(0, len(merged) - len(existing))``. 기존 파일이 없거나 0바이트
-            자동복구면 dedup 결과 행 수(신규 전량). 재write/dedup으로 merged 행 수가
-            늘지 않으면 0. legacy 중복 정리로 merged < existing이면(행이 줄어들면)
-            0으로 clamp한다. merge 실패(기존 파일 보존)는 저장 반영이 없으므로 0.
-        """
+        """단일 파티션을 Parquet 파일에 기록. 기존 파일이 있으면 merge."""
         if filepath.exists() and not self._is_zero_byte(filepath):
             try:
                 existing = pl.read_parquet(filepath)

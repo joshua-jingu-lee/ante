@@ -15,12 +15,7 @@ _FALLBACK_VERSION = "0.0.0"
 
 
 def _read_checkout_version() -> str | None:
-    """현재 checkout의 pyproject.toml에서 ante 패키지 버전을 읽는다.
-
-    src layout(`src/ante/__init__.py`) 기준, 두 단계 위 디렉터리(repo root)에서
-    `pyproject.toml`을 찾고 `[project].name == "ante"`일 때만 그 버전을 반환한다.
-    site-packages 배치(휠 설치 등)에서는 인접 pyproject.toml이 없으므로 None.
-    """
+    """현재 checkout의 pyproject.toml에서 ante 패키지 버전을 읽는다."""
     pyproject = Path(__file__).resolve().parents[2] / "pyproject.toml"
     try:
         with pyproject.open("rb") as fp:
@@ -35,13 +30,7 @@ def _read_checkout_version() -> str | None:
 
 
 def _resolve_version() -> str:
-    """공개 버전 표면을 반환.
-
-    1) 현재 checkout의 pyproject.toml(SSOT) — `PYTHONPATH=$PWD/src` 등
-       editable/소스 실행 경로에서도 일관된 버전을 노출하기 위함.
-    2) 설치된 패키지 메타데이터 — 휠 설치 환경에서 사용.
-    3) 최종 폴백.
-    """
+    """공개 버전 표면을 반환."""
     checkout_version = _read_checkout_version()
     if checkout_version is not None:
         return checkout_version

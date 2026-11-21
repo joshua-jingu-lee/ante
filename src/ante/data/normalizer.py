@@ -406,13 +406,7 @@ class DARTNormalizer:
         return result.sort("symbol", "date")
 
     def _select_fs_div(self, df: pl.DataFrame) -> pl.DataFrame:
-        """CFS(연결) 우선, 없으면 OFS(개별) 폴백.
-
-        corp_code + reprt_code + bsns_year 기준으로 CFS 데이터가 있으면
-        CFS만, CFS가 없는 조합은 OFS를 사용한다. bsns_year를 키에 포함해야
-        연도별로 CFS 존재 여부를 판단하므로, 특정 연도에만 CFS가 있고
-        다른 연도는 OFS-only인 데이터의 OFS 폴백이 보존된다.
-        """
+        """CFS(연결) 우선, 없으면 OFS(개별) 폴백."""
         cfs = df.filter(pl.col("fs_div") == "CFS")
         ofs = df.filter(pl.col("fs_div") == "OFS")
 
@@ -432,14 +426,7 @@ class DARTNormalizer:
         return pl.concat([cfs, ofs_fallback])
 
     def _convert_report_date(self, df: pl.DataFrame) -> pl.DataFrame:
-        """reprt_code + bsns_year → date 컬럼 변환.
-
-        reprt_code 매핑:
-        - 11013 → 1Q (3월 말)
-        - 11012 → semi (6월 말)
-        - 11014 → 3Q (9월 말)
-        - 11011 → annual (12월 말)
-        """
+        """reprt_code + bsns_year → date 컬럼 변환."""
         from calendar import monthrange
         from datetime import date as date_cls
 
@@ -463,21 +450,7 @@ class DARTNormalizer:
         return df.filter(pl.col("date").is_not_null())
 
     def _derive_available_date(self, df: pl.DataFrame) -> pl.DataFrame:
-        """rcept_no → available_date(공시 접수일) 컬럼 파생.
-
-        DART 응답의 ``rcept_no``는 14자리 접수번호이며 **앞 8자리가 접수일자
-        ``YYYYMMDD``** 다(05-data-sources.md L84·dart-openapi.md). 이 앞 8자리를
-        ``Date``로 파싱해 point-in-time ``available_date``를 만든다.
-
-        graceful 강등(required 아님):
-        - ``rcept_no`` 컬럼이 없으면(과거 raw·data.go.kr 등) ``available_date``를
-          **전부 null**(``pl.Date``)로 채운다 — 예외를 던지지 않는다.
-        - ``rcept_no``가 있어도 앞 8자리가 ``YYYYMMDD`` 형식이 아니면
-          ``strict=False`` 파싱이 그 행만 null로 강등한다(전체 실패 아님).
-
-        ``date``(period_end)와는 의미가 다른 별도 value 컬럼이므로
-        ``_convert_report_date``처럼 null 행을 필터링하지 **않는다**.
-        """
+        """rcept_no → available_date(공시 접수일) 컬럼 파생."""
         if "rcept_no" not in df.columns:
             logger.debug(
                 "DART: rcept_no 컬럼 부재 — available_date를 null로 채움 "

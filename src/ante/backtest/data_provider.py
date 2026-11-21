@@ -112,27 +112,7 @@ class BacktestDataProvider(DataProvider):
         return len(df)
 
     def _normalize_no_trade_bars(self, df: pl.DataFrame) -> pl.DataFrame:
-        """data.go.kr 무거래 zero-OHLC 행을 flat bar(O=H=L=C)로 정규화한다.
-
-        data.go.kr 원본은 거래정지/무거래일을 ``open==high==low==0 & close>0 &
-        volume==0`` (amount 컬럼 존재 시 ``amount==0`` 까지) 시그니처로 표현한다.
-        이 행을 그대로 두면 전략이 high/low/open을 직접 쓸 때 intraday range가
-        ``0..close`` 처럼 비현실적으로 벌어져 변동성·가격범위 지표를 왜곡한다.
-
-        **정규화 범위는 backtest view 한정이다.** 저장 raw(parquet)는 변형하지
-        않으며(데이터 무손실 우선 — data-feed/02 L31, data-feed/09 비즈니스
-        위반 경고-후-저장 계약), 이 메서드는 ``load()`` 가 캐시에 담기 직전의
-        DataFrame에만 적용된다. 따라서 리포트/품질 경고/저장 경로는 무영향이다.
-
-        정규화는 **정확 시그니처에만** 적용한다. partial-zero(예: ``open>0 &
-        low==0``), ``volume>0``, ``amount>0`` 인 행은 실제 데이터 오류일 수
-        있으므로 마스킹하지 않고 그대로 둔다. 무거래 행은 ``O=H=L=C=close`` 가
-        되어 intraday range가 0이 되지만, **전일 종가 대비 변화(ATR true-range의
-        ``|close - prev_close|``, 갭 등)는 그대로 보존된다** — "모든 변동성이
-        0"이 되는 것이 아니라 무거래일의 intraday range만 0으로 본다는 뜻이다.
-
-        OHLCV 컬럼이 없는(존재하지 않는 심볼의) 빈 df는 그대로 반환한다.
-        """
+        """data.go.kr 무거래 zero-OHLC 행을 flat bar(O=H=L=C)로 정규화한다."""
         required = {"open", "high", "low", "close", "volume"}
         if not required.issubset(df.columns):
             return df
@@ -168,12 +148,7 @@ class BacktestDataProvider(DataProvider):
         return normalized
 
     def _build_timeline(self) -> list[datetime]:
-        """전 캐시 DataFrame의 timestamp를 union·오름차순 정렬·dedupe한 통합 시간축.
-
-        심볼마다 거래 달력이 달라도 모든 심볼이 동일한 wall-clock 시각 기준으로
-        전진하도록, 캐시된 모든 timestamp 컬럼을 합쳐 중복 제거 후 정렬한다.
-        tz-aware datetime을 그대로 유지한다.
-        """
+        """전 캐시 DataFrame의 timestamp를 union·오름차순 정렬·dedupe한 통합 시간축."""
         if not self._cache:
             return []
         seen: set[datetime] = set()

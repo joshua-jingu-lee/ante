@@ -46,10 +46,7 @@ def _load_dotenv(path: Path) -> dict[str, str]:
 
 
 def _nested_get(data: dict[str, Any], key: str, default: Any = None) -> Any:
-    """점(.) 구분자로 중첩 dict 접근.
-
-    예: _nested_get({"db": {"path": "x"}}, "db.path") -> "x"
-    """
+    """점(.) 구분자로 중첩 dict 접근."""
     parts = key.split(".")
     current: Any = data
     for part in parts:

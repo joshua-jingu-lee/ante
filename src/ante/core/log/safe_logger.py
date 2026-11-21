@@ -25,16 +25,7 @@ from ._record_keys import LOGRECORD_ATTRS as _LOGRECORD_RESERVED
 def _sanitize_extra(
     extra: Mapping[str, object] | None,
 ) -> dict[str, object] | None:
-    """예약 키 충돌을 제거한 extra dict 반환.
-
-    - LogRecord 속성과 겹치는 키(``msg``, ``args``, ``name`` 등): 제거
-      (formatter 가 표준 값을 생성한다).
-    - Ante 예약 키 중 LogRecord 속성이 아닌 키(``ts``, ``env``, ``exc`` 등):
-      제거 (formatter 가 표준 값을 생성한다).
-
-    제거 대신 ``extra`` 하위로 옮기지 않는다 — 호출자의 실수를 무시하는 것이
-    스펙 동작이다.
-    """
+    """예약 키 충돌을 제거한 extra dict 반환."""
     if extra is None:
         return None
     cleaned: dict[str, object] = {}
@@ -58,14 +49,7 @@ def _safe_make_record(
     extra: Mapping[str, object] | None = None,
     sinfo: str | None = None,
 ) -> logging.LogRecord:
-    """``Logger.makeRecord`` 대체 구현.
-
-    ``extra`` 의 위험 키를 선제 정규화한 뒤 stdlib 원본 구현에 위임한다.
-
-    클래스 상속이 아니라 bound-method 교체 방식도 지원하기 위해 평범한
-    함수로 정의한다 (``super()`` 는 서브클래스 mapping 에 의존하므로
-    bound-method 교체 시 ``TypeError`` 가 발생한다).
-    """
+    """``Logger.makeRecord`` 대체 구현."""
     return logging.Logger.makeRecord(
         self,
         name,

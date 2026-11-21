@@ -254,21 +254,7 @@ class DataGoKrSource:
         bas_dt: str,
         page_no: int,
     ) -> tuple[list[dict], int]:
-        """단일 페이지를 조회한다.
-
-        Args:
-            session: aiohttp 세션.
-            bas_dt: 기준일자 (YYYYMMDD).
-            page_no: 페이지 번호.
-
-        Returns:
-            (item 목록, totalCount) 튜플.
-
-        Raises:
-            DailyLimitExceededError: 일일 한도 초과 에러 코드.
-            CriticalApiError: 복구 불가능 에러 코드.
-            DataGoKrError: 재시도 소진 후 최종 실패.
-        """
+        """단일 페이지를 조회한다."""
         params = {
             "serviceKey": self._api_key,
             "numOfRows": str(NUM_OF_ROWS),
@@ -365,14 +351,7 @@ class DataGoKrSource:
 
     @staticmethod
     def _extract_result_code(data: dict) -> tuple[str, str]:
-        """응답에서 resultCode와 resultMsg를 추출한다.
-
-        Args:
-            data: JSON 응답 딕셔너리.
-
-        Returns:
-            (resultCode, resultMsg) 튜플.
-        """
+        """응답에서 resultCode와 resultMsg를 추출한다."""
         header = data.get("response", {}).get("header", {})
         result_code = str(header.get("resultCode", "99"))
         result_msg = str(header.get("resultMsg", "UNKNOWN"))
@@ -380,14 +359,7 @@ class DataGoKrSource:
 
     @staticmethod
     def _extract_items(data: dict) -> tuple[list[dict], int]:
-        """응답에서 item 목록과 totalCount를 추출한다.
-
-        Args:
-            data: JSON 응답 딕셔너리.
-
-        Returns:
-            (item 목록, totalCount) 튜플.
-        """
+        """응답에서 item 목록과 totalCount를 추출한다."""
         body = data.get("response", {}).get("body", {})
         total_count = int(body.get("totalCount", 0))
         items_wrapper = body.get("items", {})
@@ -403,14 +375,5 @@ class DataGoKrSource:
 
     @staticmethod
     def _backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:
-        """Exponential Backoff + Full Jitter 대기 시간을 계산한다.
-
-        Args:
-            attempt: 현재 시도 인덱스 (0-based).
-            base: 기본 대기 시간 (초).
-            cap: 최대 대기 시간 (초).
-
-        Returns:
-            대기 시간 (초).
-        """
+        """Exponential Backoff + Full Jitter 대기 시간을 계산한다."""
         return random.uniform(0, min(cap, base * (2**attempt)))

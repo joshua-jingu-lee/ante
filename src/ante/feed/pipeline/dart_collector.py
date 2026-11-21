@@ -64,15 +64,7 @@ def _today_kst() -> date:
 
 
 def _quarter_period_end(year: int, reprt_code: str) -> date | None:
-    """(year, reprt_code)가 가리키는 분기의 period-END 날짜를 반환한다.
-
-    reprt_code → 종료월(3/6/9/12) 매핑은 normalizer `_REPRT_CODE_MAP`를
-    SSOT로 재사용하며, 그 월의 말일을 period-end로 본다(DART normalizer의
-    `_convert_report_date`와 동일 규칙).
-
-    Returns:
-        period-end 날짜. reprt_code가 매핑에 없으면 None.
-    """
+    """(year, reprt_code)가 가리키는 분기의 period-END 날짜를 반환한다."""
     mapping = _REPRT_CODE_MAP.get(reprt_code)
     if mapping is None:
         return None
@@ -189,11 +181,7 @@ class DARTCollector:
     def _resolve_year_range(
         config: dict[str, Any],
     ) -> tuple[int, int]:
-        """설정에서 수집 연도 범위를 결정한다.
-
-        end_year는 KST 기준 현재 연도이며, 분기 단위 미래 컷오프는
-        `_collect_quarters`의 period-end(KST) 비교가 담당한다.
-        """
+        """설정에서 수집 연도 범위를 결정한다."""
         schedule = config.get("schedule", {})
         backfill_since = schedule.get("backfill_since", DEFAULT_BACKFILL_SINCE)
         start_year = int(backfill_since[:4])
@@ -218,13 +206,7 @@ class DARTCollector:
         end_year: int,
         last_checkpoint: str | None,
     ) -> tuple[int, bool, set[str], list[dict]]:
-        """연도/분기를 순회하며 재무제표를 수집한다.
-
-        Returns:
-            ``(net_delta, stored_ok, symbols, warns)``. net_delta는
-            ``_fetch_quarter`` 가 반환한 rows_written(net-new 저장 행 수)의 합이며,
-            stored_ok는 한 분기라도 ``QuarterStatus.OK`` (storable 저장)였는지다.
-        """
+        """연도/분기를 순회하며 재무제표를 수집한다."""
         corp_codes_list = list(corp_code_map.keys())
         rows_written = 0
         symbols: set[str] = set()
@@ -274,26 +256,7 @@ class DARTCollector:
     def _latest_collectable_quarter(
         today: date,
     ) -> tuple[int, str] | None:
-        """today(KST) 기준 가장 최근에 공시 가능한 (year, reprt_code)를 반환한다.
-
-        collectable = ``_quarter_period_end(year, reprt_code) <= today``인 분기.
-        그중 period_end가 가장 최근(=가장 큰)인 분기 1개를 고른다. period_end가
-        같으면 발생하지 않지만(reprt_code→종료월 1:1), 안전하게 결정적으로
-        고른다.
-
-        연말/연초 경계: annual(Q4, 12/31)은 익년 초까지 미공시일 수 있으므로
-        period_end<=today 기준으로 정확히 판정된다. 예를 들어 2026-01-15에는
-        2025-Q4(period_end 2025-12-31)가 collectable이며 2025 annual을 고른다.
-        반대로 2026-04-01에는 2026-Q1(3/31)이 가장 최근 collectable이다.
-
-        탐색 범위는 today 연도와 직전 연도(today.year-1)면 충분하다. 직전 연도
-        Q4(period_end 전년 12/31)는 today가 연초여도 항상 <=today이므로 후보가
-        비는 경우는 없다(따라서 실질적으로 None을 반환하지 않지만, 매핑 부재
-        등 방어를 위해 Optional 시그니처를 유지한다).
-
-        Returns:
-            (year, reprt_code) 또는 collectable 분기가 없으면 None.
-        """
+        """today(KST) 기준 가장 최근에 공시 가능한 (year, reprt_code)를 반환한다."""
         best: tuple[int, str] | None = None
         best_end: date | None = None
         for year in (today.year - 1, today.year):
@@ -313,20 +276,7 @@ class DARTCollector:
         checkpoint: Checkpoint,
         last_checkpoint: str | None,
     ) -> tuple[int, bool, set[str], list[dict]]:
-        """daily 모드: 최신 collectable 분기 1개만 수집한다.
-
-        ``backfill_since`` 범위를 순회하지 않고, today(KST) 기준 가장 최근에
-        공시 가능한 분기 1개에 대해서만 ``_fetch_quarter``를 수행한다. 단일
-        분기지만 checkpoint 전진/halt/SKIP_EMPTY 판정은 backfill 경로와 동일한
-        ``_fetch_quarter``/``QuarterStatus`` 로직을 그대로 재사용한다.
-
-        운영 전제: 이 경로는 최신 분기만 본다. 과거 미충전 분기는 backfill
-        모드로 채워야 하며, daily가 과거 누락을 보정하지 않는다.
-
-        Returns:
-            ``(net_delta, stored_ok, symbols, warns)``. stored_ok는
-            최신 분기가 ``QuarterStatus.OK`` (storable 저장)인지다.
-        """
+        """daily 모드: 최신 collectable 분기 1개만 수집한다."""
         corp_codes_list = list(corp_code_map.keys())
         warns: list[dict] = []
 
@@ -377,42 +327,7 @@ class DARTCollector:
         reprt_code: str,
         warns: list[dict],
     ) -> tuple[int, set[str], QuarterStatus, bool]:
-        """단일 분기 재무제표를 수집/정규화/저장한다.
-
-        Returns:
-            (기록 행 수, 수집된 심볼 집합, status, store_merge_failed).
-
-            ``status``는 이 분기에 대한 checkpoint 전진/halt 결정을 구동하는
-            3-상태다. **storable_rows 기준으로만 판정**하며
-            store-merge 실패를 절대 섞지 않는다:
-
-            - transient 예외(warn 추가) → ``QuarterStatus.HALT``
-              (미전진 + 이후 분기 동결, 다음 run 재시도)
-            - ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시 가능) →
-              ``QuarterStatus.SKIP_EMPTY``(미전진하되 halt 미설정; 후속 분기
-              처리는 계속). ``ok=True``로 checkpoint를 전진시키면 빈
-              분기를 "완료"로 오인하고 이후 공시를 누락한다.
-            - ``raw_items``는 있는데 정규화/저장 결과 0 rows(no-storable) →
-              warn 추가 + ``QuarterStatus.HALT``(데이터 손실 surface, 미전진)
-            - 정상 저장(written>0) → ``QuarterStatus.OK``(checkpoint 전진 자격)
-
-            ``store_merge_failed``는 이번 분기 ``store.write`` 가 파티션 merge
-            실패(기존 파일 보존 + ``store_merge`` 경고 적재, net_delta=0)를
-            일으켰는지다. data.go.kr는 runner R1이 store 경고 drain으로
-            checkpoint를 가드하지만 DART는 checkpoint.save를 collector 내부에서
-            하므로(``_collect_quarters``/``_collect_latest_quarter``) 호출자가 이
-            bool로 checkpoint 전진을 게이트한다. QuarterStatus는 storable 기준
-            그대로(OK)이되 store_merge_failed면 checkpoint만 미전진시켜 다음 run에
-            재시도되게 한다.
-
-            store_merge 감지는 ``store.pending_merge_failure_count()`` 의
-            **비파괴적 peek**로 한다. runner가 DART collect 전체 종료 후 단일
-            소유로 drain하므로(backfill_runner) DART가 drain하면 경고가 소실된다.
-            누적 카운트라 ``_normalize_and_store`` **직전/직후 증가분**으로 이번
-            분기 실패를 판정한다(이전 분기 경고가 아직 drain 안 됐을 수 있음).
-
-            ``DARTDailyLimitError``/``DARTCriticalError``는 기존대로 re-raise.
-        """
+        """단일 분기 재무제표를 수집/정규화/저장한다."""
         try:
             raw_items = await self._source.fetch_financial(
                 corp_codes_list,
@@ -480,21 +395,7 @@ class DARTCollector:
         corp_code_map: dict[str, str],
         store: ParquetStore,
     ) -> tuple[int, int, set[str]]:
-        """raw 데이터를 정규화하고 심볼별로 저장한다.
-
-        Returns:
-            ``(storable_rows, net_delta, symbols)`` — 두 신호를 **분리** 반환한다:
-
-            - ``storable_rows``: 정규화/저장 가능한 행 수(정규화 결과 심볼별 행
-              수의 합). normalized가 비거나 symbol 컬럼이 없으면 0. 이 값이
-              ``_fetch_quarter`` 의 ``written == 0`` no-storable HALT 판정을
-              구동한다(QuarterStatus 동작 무변경 — net-delta가 아니라 storable
-              기준). 재수집(dedup으로 net_delta=0)이어도 storable_rows>0이라
-              빈응답/no-storable과 구분된다.
-            - ``net_delta``: ``store.write`` 가 반환한 **실제 net-new 저장 행 수**
-              의 합(rows_written). 재수집/dedup이면 0.
-            - ``symbols``: 저장 대상 심볼 집합.
-        """
+        """raw 데이터를 정규화하고 심볼별로 저장한다."""
         df = pl.DataFrame(raw_items)
         normalized = self._normalizer.normalize(df, corp_code_map)
 

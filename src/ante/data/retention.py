@@ -15,14 +15,7 @@ _OHLCV_TIMEFRAMES: frozenset[str] = TIMEFRAME_SET
 
 
 def _resolve_data_type(key: str) -> tuple[str, str]:
-    """retention key를 (data_type, timeframe) 튜플로 변환.
-
-    Args:
-        key: retention 딕셔너리의 키 (예: "1m", "fundamental")
-
-    Returns:
-        (data_type, timeframe) — 예: ("ohlcv", "1m"), ("fundamental", "")
-    """
+    """retention key를 (data_type, timeframe) 튜플로 변환."""
     if key in _OHLCV_TIMEFRAMES:
         return ("ohlcv", key)
     return (key, "")
@@ -82,16 +75,7 @@ class RetentionPolicy:
         return deleted
 
     def _enforce_age(self, key: str, max_days: int, now: datetime) -> int:
-        """기간 기반 보존 정책: max_days 초과 파일 삭제.
-
-        Args:
-            key: retention 딕셔너리 키 (예: "1m", "fundamental")
-            max_days: 보존 일수
-            now: 기준 시간
-
-        Returns:
-            삭제된 파일 수
-        """
+        """기간 기반 보존 정책: max_days 초과 파일 삭제."""
         data_type, timeframe = _resolve_data_type(key)
         count = 0
         symbols = self._store.list_symbols(timeframe, data_type=data_type)
@@ -111,18 +95,7 @@ class RetentionPolicy:
         max_days: int,
         now: datetime,
     ) -> int:
-        """심볼 하나의 만료 파일 삭제.
-
-        Args:
-            symbol: 종목 코드
-            timeframe: 타임프레임 (예: "1m", "")
-            data_type: 데이터 타입 (예: "ohlcv", "fundamental")
-            max_days: 보존 일수
-            now: 기준 시간
-
-        Returns:
-            삭제된 파일 수
-        """
+        """심볼 하나의 만료 파일 삭제."""
         date_range = self._store.get_date_range(symbol, timeframe, data_type=data_type)
         if not date_range:
             return 0
@@ -142,16 +115,7 @@ class RetentionPolicy:
 
     @staticmethod
     def _is_expired(month_str: str, max_days: int, now: datetime) -> bool:
-        """월별 parquet 파일이 보존 기간을 초과했는지 판단.
-
-        Args:
-            month_str: 파일명 stem (예: "2024-01")
-            max_days: 보존 일수
-            now: 기준 시간
-
-        Returns:
-            보존 기간 초과 여부
-        """
+        """월별 parquet 파일이 보존 기간을 초과했는지 판단."""
         try:
             year, month = month_str.split("-")
             y, m = int(year), int(month)

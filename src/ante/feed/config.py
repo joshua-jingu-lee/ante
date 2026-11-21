@@ -236,12 +236,7 @@ class FeedConfig:
 
     @staticmethod
     async def _validate_key(key: str, value: str) -> tuple[bool | None, str | None]:
-        """단일 API 키를 해당 source의 경량 검증으로 평가한다.
-
-        지원하지 않는 키는 검증을 생략한다(unknown=None). source의
-        validate_credentials는 네트워크 예외를 unknown으로 흡수하므로
-        여기서 추가 예외 처리는 하지 않는다.
-        """
+        """단일 API 키를 해당 source의 경량 검증으로 평가한다."""
         if key == "ANTE_DART_API_KEY":
             from ante.feed.sources.dart import DARTSource
 

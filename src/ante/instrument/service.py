@@ -156,13 +156,7 @@ class InstrumentService:
 
     @staticmethod
     def _escape_markdown(text: str) -> str:
-        """텔레그램 legacy Markdown parse 실패 방지(불변식: 발송 실패 금지).
-
-        legacy Markdown 특수문자(``_`` ``*`` ```` ` ```` ``[``)를 백슬래시로 escape
-        한다. 종목명에 이 문자가 들어가면(예: ``FOO_BAR``, ``ACME [ADR]``)
-        텔레그램 ``parse_mode="Markdown"`` 가 entity parse 에 실패해 알림 발송이
-        실패하므로 라벨 삽입 전 무력화한다.
-        """
+        """텔레그램 legacy Markdown parse 실패 방지(불변식: 발송 실패 금지)."""
         for ch in ("_", "*", "`", "["):
             text = text.replace(ch, f"\\{ch}")
         return text

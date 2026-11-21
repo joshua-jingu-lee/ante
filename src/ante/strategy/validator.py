@@ -17,12 +17,7 @@ _FILE_NOT_READABLE = "전략 파일에 접근할 수 없습니다."
 
 
 def _syntax_msg(e: SyntaxError) -> str:
-    """`SyntaxError` 를 정수 line/offset 만 노출하는 content-free 메시지로 정규화.
-
-    `str(e)`/`{e}` 는 사용자가 제출한 원문 토큰·소스 라인을 그대로 반사할 수
-    있으므로 절대 호출하지 않는다. `e.lineno`/`e.offset` 이 `None` 인 경우는
-    `0` 으로 fallback 하여 형식 안정성을 유지한다.
-    """
+    """`SyntaxError` 를 정수 line/offset 만 노출하는 content-free 메시지로 정규화."""
     return f"Syntax error (line {e.lineno or 0}, offset {e.offset or 0})"
 
 
@@ -264,12 +259,7 @@ class StrategyValidator:
         result: list[_StrategyClassMatch] = []
 
         def _discard_module_aliases(name: str) -> None:
-            """이름 재바인딩 시 그 이름이 가리키던 module-alias 를 제거.
-
-            직접 별칭(``astg``)이거나, dotted alias(``ante.strategy``)의 root
-            이름(``ante``)이 재바인딩되면 해당 alias 들을 module_aliases 에서
-            제거한다.
-            """
+            """이름 재바인딩 시 그 이름이 가리키던 module-alias 를 제거."""
             module_aliases.discard(name)
             for stale in {a for a in module_aliases if a.split(".", 1)[0] == name}:
                 module_aliases.discard(stale)
@@ -330,13 +320,7 @@ class StrategyValidator:
 
     @staticmethod
     def _assign_target_names(target: ast.expr) -> list[str]:
-        """Assign 타깃에서 module-level 로 재바인딩되는 Name id 들을 수집.
-
-        ``x = ...`` → ``["x"]``, ``x = y = ...`` 는 각 target 이 별도로
-        들어오므로 호출당 하나. ``x, y = ...`` (Tuple/List unpack)도 포함한다.
-        Attribute/Subscript 타깃(``obj.x = ...``)은 module-level Name 재바인딩이
-        아니므로 무시한다.
-        """
+        """Assign 타깃에서 module-level 로 재바인딩되는 Name id 들을 수집."""
         if isinstance(target, ast.Name):
             return [target.id]
         if isinstance(target, ast.Tuple | ast.List):
@@ -355,10 +339,7 @@ class StrategyValidator:
         name_binding: dict[str, str],
         module_aliases: set[str],
     ) -> bool:
-        """base 표현식이 (정의 시점 바인딩 기준) 실제 ante Strategy 인지 판정.
-
-        ``name_binding`` 은 클래스 정의 시점까지의 module-level 바인딩 상태다.
-        """
+        """base 표현식이 (정의 시점 바인딩 기준) 실제 ante Strategy 인지 판정."""
         if isinstance(base, ast.Name):
             return name_binding.get(base.id) == "ante_strategy"
         if isinstance(base, ast.Attribute) and base.attr == "Strategy":
@@ -367,10 +348,7 @@ class StrategyValidator:
 
     @staticmethod
     def _attr_value_to_str(node: ast.expr) -> str | None:
-        """`ante.strategy` / `astg` 등 dotted name 표현식을 문자열로 평탄화.
-
-        Attribute/Name 만 dotted name 으로 해석하고, 그 외(Call 등)는 None.
-        """
+        """`ante.strategy` / `astg` 등 dotted name 표현식을 문자열로 평탄화."""
         parts: list[str] = []
         cur: ast.expr = node
         while isinstance(cur, ast.Attribute):
@@ -402,14 +380,7 @@ class StrategyValidator:
         return False
 
     def _method_is_async(self, cls: ast.ClassDef, name: str) -> bool | None:
-        """클래스 body 에 정의된 메서드의 async 여부.
-
-        Returns:
-            정의돼 있고 ``async def`` → True,
-            정의돼 있고 sync ``def`` → False,
-            클래스에 정의되지 않음 → None.
-        마지막 정의를 기준으로 한다(중복 정의 시 런타임 바인딩과 동일).
-        """
+        """클래스 body 에 정의된 메서드의 async 여부."""
         result: bool | None = None
         for node in cls.body:
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -418,12 +389,7 @@ class StrategyValidator:
         return result
 
     def _async_hook_violations(self, cls: ast.ClassDef) -> list[str]:
-        """런타임 await hook 이 sync ``def`` 로 정의된 위반 목록.
-
-        ``ASYNC_HOOKS`` 중 클래스에 정의된 hook 이 sync 면 await 시 TypeError
-        가 나므로 error. 정의되지 않은 hook(base default 상속)은 검사하지
-        않는다(on_step 부재는 별도 "Missing required method" 검사가 담당).
-        """
+        """런타임 await hook 이 sync ``def`` 로 정의된 위반 목록."""
         errors: list[str] = []
         for hook in sorted(self.ASYNC_HOOKS):
             is_async = self._method_is_async(cls, hook)
@@ -437,44 +403,7 @@ class StrategyValidator:
         strategymeta_binding: dict[str, str],
         module_aliases: frozenset[str],
     ) -> bool:
-        """``meta`` 의 마지막 값-할당이 **ante** ``StrategyMeta(...)`` 호출인지 검사.
-
-        (last-assign + 일관 import-resolution)
-
-        클래스 body 를 순서대로 순회하여 ``meta`` 를 타깃으로 하는 **마지막**
-        값-할당 노드를 선택한다(런타임은 마지막 할당값을 클래스 속성으로
-        쓰므로 그와 일치). 그 value 가 ``ast.Call`` 이고 그 func 가 **클래스 정의
-        시점 import 바인딩**으로 ante ``StrategyMeta`` 로 해석될 때만 True:
-
-        - func 가 ``ast.Name(id)`` → ``id`` 가 ``strategymeta_binding`` 에서
-          ``"ante_strategy_meta"`` 로 바인딩(``from ante.strategy import
-          StrategyMeta [as M]``)됐을 때만 통과.
-        - func 가 ``ast.Attribute(attr="StrategyMeta")`` → value 의 dotted-name
-          이 ``module_aliases``(``import ante.strategy [as astg]`` 별칭)일 때만
-          통과(예: ``astg.StrategyMeta`` / ``ante.strategy.StrategyMeta`` /
-          ``ante.strategy.base.StrategyMeta``).
-        - 그 외(``fake.StrategyMeta(...)`` 등 ante 가 아닌 임의 ``*.StrategyMeta``,
-          미바인딩 Name ``StrategyMeta(...)``, ``dict(...)``, ``None``) → False.
-
-        ``strategymeta_binding``·``module_aliases`` 는 ``_find_strategy_classes``
-        가 이 클래스 정의 시점에 캡처한 스냅샷이다(Strategy 와 동일 order-
-        aware). 이로써 ``import fake; meta = fake.StrategyMeta(...)`` 같은
-        false-positive 를 거부하고 submit 의 ``isinstance(meta, StrategyMeta)``
-        런타임 검사와 정합시킨다.
-
-        값-할당 판정:
-        - ``ast.Assign``: targets 에 ``Name(id="meta")`` 가 포함되면 value 가
-          ``meta`` 의 런타임 속성값이 된다.
-        - ``ast.AnnAssign``: target 이 ``Name(id="meta")`` 이고 **value 가 not
-          None** 일 때만 값-할당. annotation-only(``meta: StrategyMeta``)는
-          런타임에 클래스 속성을 만들지 않으므로 값-할당으로 치지 않는다.
-
-        ``meta`` 값-할당이 하나도 없으면(annotation-only 만 있거나 부재) False.
-        부재 자체는 별도 ``_has_class_var`` 검사가 담당하고, annotation-only 는
-        StrategyMeta 인스턴스 값이 없으므로 must-be-StrategyMeta error 로 귀결돼
-        두 검사가 모순되지 않는다(부재 → Missing, 존재하나 마지막 값이
-        StrategyMeta 호출 아님 → must-be-StrategyMeta).
-        """
+        """``meta`` 의 마지막 값-할당이 **ante** ``StrategyMeta(...)`` 호출인지 검사."""
         last_value: ast.expr | None = None
         for node in cls.body:
             if isinstance(node, ast.Assign):
@@ -527,12 +456,7 @@ class StrategyValidator:
     def _extract_meta_exchange(
         self, cls: ast.ClassDef, module_consts: dict[str, str]
     ) -> str | None:
-        """meta에서 exchange 값을 추출. 없으면 None 반환.
-
-        exchange kwarg 가 literal(`ast.Constant`)이면 그대로,
-        모듈 레벨 문자열 상수 이름(`ast.Name`)이면 ``module_consts`` 로
-        정적 해석한다. 해석 불가(계산식/비문자열 Name)는 None(기존 동작).
-        """
+        """meta에서 exchange 값을 추출. 없으면 None 반환."""
         for node in cls.body:
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 target = (
@@ -557,18 +481,7 @@ class StrategyValidator:
     def _extract_meta_symbols(
         self, cls: ast.ClassDef, module_consts: dict[str, str]
     ) -> list[str] | None:
-        """meta에서 symbols 값을 정적 해석해 추출 (_extract_meta_exchange 동형).
-
-        ``meta = StrategyMeta(..., symbols=[...])`` 의 ``symbols`` kwarg 를 찾아,
-        값이 ``ast.List`` 이고 모든 원소가 str ``ast.Constant`` 이면 ``list[str]``
-        로 반환한다. 빈 list ``[]`` 는 빈 list 로 반환한다(경고 없음).
-
-        다음은 정적 해석 불가로 보고 ``None`` 을 반환해 일관성 경고를 skip 한다:
-        symbols 미지정, 비-List(Name/계산식/Tuple/Set 등), List 이지만 비-str
-        Constant 원소나 비-Constant 원소(Name/계산식 등)를 포함하는 경우.
-        ``_module_string_constants`` 는 문자열 스칼라 상수만 담으므로 list 상수
-        이름(Name)은 정적 해석하지 않는다(literal list only, known-limitation).
-        """
+        """meta에서 symbols 값을 정적 해석해 추출 (_extract_meta_exchange 동형)."""
         for node in cls.body:
             if isinstance(node, ast.Assign | ast.AnnAssign):
                 target = (

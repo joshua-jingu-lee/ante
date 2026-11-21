@@ -23,10 +23,7 @@ _HHMM_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def _is_valid_hhmm(s: str) -> bool:
-    """``s`` 가 zero-padded ``HH:MM`` (00:00–23:59) 형식인지 검증한다.
-
-    ``"09:00"`` → True, ``"9:00"``/``"25:00"``/``"1600"``/``"24:00"`` → False.
-    """
+    """``s`` 가 zero-padded ``HH:MM`` (00:00–23:59) 형식인지 검증한다."""
     return isinstance(s, str) and _HHMM_RE.fullmatch(s) is not None
 
 
@@ -35,18 +32,7 @@ def _validate_schedule_times(
     backfill_at: str,
     blocked_hours: list[Any] | None = None,
 ) -> None:
-    """스케줄러 진입 시 시간 설정을 1회 fail-fast 검증한다.
-
-    ``daily_at`` / ``backfill_at`` 은 zero-padded ``HH:MM`` 이어야 하고,
-    ``blocked_hours`` 의 각 항목은 ``"HH:MM-HH:MM"`` 형태로 양 끝점 모두
-    zero-padded ``HH:MM`` 이어야 한다. 하나라도 어긋나면 모든 위반을 모아
-    ``ValueError`` 로 즉시 실패시킨다(조용한 미실행 금지). 루프 매회가 아닌
-    진입 1회만 호출된다.
-
-    midnight-spanning window("23:00-02:00") 의 비교 의미 정정은 본 검증의
-    범위 밖이다(형식 검증만; 별도 이슈). 정상 형식의 cross-midnight 윈도우는
-    유효로 통과시킨다.
-    """
+    """스케줄러 진입 시 시간 설정을 1회 fail-fast 검증한다."""
     errors: list[str] = []
 
     if not _is_valid_hhmm(daily_at):
@@ -187,20 +173,7 @@ async def _run_backfill_job(
     current_date: str,
     stop_event: asyncio.Event | None = None,
 ) -> None:
-    """Backfill 수집 작업을 1회 실행한다.
-
-    `result.config_errors`에 coded date error(CLI_INVALID_DATE /
-    INVALID_DATE_RANGE / GUARD_PERMANENTLY_BLOCKED /
-    BACKFILL_STOP_REQUESTED)가 포함된 경우 "Backfill 완료" 메시지를
-    출력하지 않고 명시 오류/중단을 echo/log한다. 기존 비날짜
-    config_errors(소스 누락·lock 경합·rate-limit 등)는 현행 완료 메시지
-    흐름을 유지한다.
-
-    ``stop_event`` 는 상주 스케줄러 루프가 보유한 종료 이벤트로, 거래시간
-    가드 대기 중 SIGTERM/SIGINT 수신 시 backfill 루프를 깨워 안전 종료
-    시키기 위해 ``orchestrator.run_backfill`` 로 전파한다. 직접
-    호출(테스트 등)에서는 ``None`` 이며 one-shot 의미로 동작한다.
-    """
+    """Backfill 수집 작업을 1회 실행한다."""
     from ante.feed.pipeline.backfill_runner import (
         BACKFILL_DATE_ERROR_CODES,
         CONFIG_ERROR_CODE_BACKFILL_STOP_REQUESTED,

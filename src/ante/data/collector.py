@@ -57,25 +57,7 @@ class DataCollector:
         return self._buffer
 
     def _is_valid_ingress(self, symbol: object, timeframe: object) -> bool:
-        """canonical symbol/timeframe ingress 검증 (SSOT 위임).
-
-        통과 조건:
-        - ``timeframe`` 이 ``str`` 이고 (``is_valid_timeframe``)
-          canonical OHLCV bar timeframe 5종 중 하나이며
-          (unhashable timeframe → ``is_valid_timeframe`` 호출 전 차단으로
-          TypeError 방지),
-        - ``timeframe != "1d"`` (``1d`` 는 DataFeed write-ownership 소유,
-          data-pipeline/02 — vocabulary regex가 아닌 write-ownership 경계
-          literal 비교. ``tick``/``oracle`` 등은 ``is_valid_timeframe``
-          이 False),
-        - exchange 가 KRX면 ``symbol`` 이 ``str`` 이고 신규 입력 KRX
-          symbol shape (``is_krx_symbol``). ``isinstance(symbol,
-          str)`` 선검사는 ``is_krx_symbol`` 내장 ``isinstance(str)``
-          가드와 동일 결과(비-str symbol → KRX 거부)이며 SSOT
-          시그니처(``value: str``)와의 타입 정합을 위한 것이다.
-          비-KRX exchange 는 symbol-shape 미적용 (core.md
-          ``### KRX symbol shape`` 1.0 비목표).
-        """
+        """canonical symbol/timeframe ingress 검증 (SSOT 위임)."""
         return (
             isinstance(timeframe, str)
             and is_valid_timeframe(timeframe)
@@ -190,23 +172,7 @@ class DataCollector:
             self.flush_all()
 
     def _flush(self, key: object) -> int:
-        """버퍼의 데이터를 Parquet에 적재. 실제 append 성공 row 수 반환.
-
-        반환 계약:
-        - **append 성공** → ``len(rows)``
-        - **invalid/malformed key drop** (non-str key / ``rsplit(":",1)``
-          len != 2 / ``_is_valid_ingress`` False) → ``0`` (이미 pop된
-          rows 는 의도된 invalid drop — **retry 안 함**)
-        - **``_store.append`` 예외** → 기존 재버퍼링 동작 보존
-          (``rows + self._buffer[key]`` — 같은 key 에 되돌려 다음 flush
-          재시도, rows 미유실) + ``return 0`` (이번 회차 append 0)
-
-        invalid/malformed key drop(retry 안 함)과 append-exception
-        (재버퍼링 retry 보존)을 명확히 구분한다. public ``buffer``
-        프로퍼티 직접 주입(임의 malformed/invalid key)에도 raise 없이
-        drop 하여 out-of-vocab ``ohlcv/<bad>/`` 경로를 만들지 않고
-        ``flush_all``/``stop`` 을 중단시키지 않는다.
-        """
+        """버퍼의 데이터를 Parquet에 적재. 실제 append 성공 row 수 반환."""
         buffer = cast("dict[object, list[dict]]", self._buffer)
         rows = buffer.pop(key, [])
         if not rows:

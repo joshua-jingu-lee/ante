@@ -35,24 +35,7 @@ _VALID_NOTIFICATION_MIN_LEVELS = {"critical", "error", "warning", "info"}
 
 
 def _is_value_finite(value: Any) -> tuple[bool, Any]:
-    """value 안의 모든 numeric `float` 를 재귀적으로 검사한다.
-
-    Returns:
-        ``(ok, first_violating_value)``. ``ok`` 가 ``False`` 이면 두 번째 원소가
-        invariant 를 위반한 non-finite float 값(`NaN`/`Infinity`/`-Infinity`).
-
-    Rules:
-        - ``bool`` 은 `int` 서브클래스이지만 finite 1/0 이므로 통과.
-        - ``int`` 는 항상 finite (Python 임의 정밀도 정수가 NaN/Infinity 를
-          표현할 수 없음). ``math.isfinite`` 가 매우 큰 정수에서
-          ``OverflowError`` 를 raise 하는 회귀(P2-2)를 피하기 위해 short-circuit.
-        - ``float`` 만 ``math.isfinite`` 로 검사.
-        - ``dict`` 는 values 를, ``list``/``tuple`` 은 elements 를 재귀 검사.
-          ``tuple`` 도 ``json.dumps`` 가 JSON array 로 직렬화하므로 ``list`` 와
-          동일하게 다룬다 (P2-B). 그렇지 않으면 ``(NaN,)`` 같은 값이
-          write 경계를 통과해 ``[NaN]`` 으로 저장되고 read guard 가 깨진다.
-        - ``str``/``None``/그 외 타입은 numeric 이 아니므로 통과.
-    """
+    """value 안의 모든 numeric `float` 를 재귀적으로 검사한다."""
     if isinstance(value, bool):
         return True, None
     if isinstance(value, float):
@@ -130,18 +113,7 @@ def validate_value(key: str, value: Any) -> None:
 
 
 def _ensure_loaded_value_finite(key: str, value: Any) -> Any:
-    """DB 에서 읽은 dynamic config 값을 격리 검사한다.
-
-    legacy NaN/Infinity row 가 DB 에 남아있더라도 read 경계에서 ConfigError 로
-    격리되어 downstream consumer(JSON 직렬화, rule engine 비교 등)로 silent
-    하게 흘러가지 않도록 한다. write 경계(`validate_value`)의 finite 가드와
-    짝을 이루는 defense-in-depth. ``dict``/``list`` 컨테이너 내부의 `float` 도
-    재귀적으로 검사한다(``_is_value_finite``).
-
-    Raises:
-        ConfigError: 저장된 값이 non-finite numeric 일 때. 호출자(web GET 라우트
-            등)는 이를 422 등으로 변환할 수 있다.
-    """
+    """DB 에서 읽은 dynamic config 값을 격리 검사한다."""
     ok, bad = _is_value_finite(value)
     if not ok:
         raise ConfigError(
@@ -367,14 +339,7 @@ class DynamicConfigService:
 
 
 def _on_log_level_changed(event: Any) -> None:
-    """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다.
-
-    서비스 경계에서 ``validate_value`` 가 invalid 값을 차단하므로 이 callback
-    까지 invalid 값이 도달하는 일은 정상 경로에서는 발생하지 않는다.
-    그래도 startup hook 이 historical persisted bad-value 를 publish 하거나
-    구독자 순서가 바뀌는 경우를 대비해 silent-drop 을 defense-in-depth 로
-    유지한다.
-    """
+    """system.log_level 변경 시 루트 로거 레벨을 동적으로 갱신한다."""
     if event.key != "system.log_level":
         return
 

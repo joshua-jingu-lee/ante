@@ -129,11 +129,7 @@ def _sharpe_ratio(equities: list[float]) -> float | None:
 def _max_drawdown(
     equities: list[float],
 ) -> tuple[float, int]:
-    """최대 낙폭(%) 및 MDD 지속 기간(일).
-
-    Returns:
-        (max_drawdown_pct, max_drawdown_duration_days)
-    """
+    """최대 낙폭(%) 및 MDD 지속 기간(일)."""
     if not equities:
         return 0.0, 0
 
@@ -168,10 +164,7 @@ def _max_drawdown(
 
 
 def _estimate_trade_pnl(trades: list[Any]) -> list[float]:
-    """거래 리스트에서 매도별 손익을 추정.
-
-    FIFO 방식: 종목별 buy 평균 단가 → sell 시 손익 계산.
-    """
+    """거래 리스트에서 매도별 손익을 추정."""
     positions: dict[str, dict[str, float]] = {}
     pnl_list: list[float] = []
 

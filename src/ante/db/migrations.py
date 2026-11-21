@@ -75,10 +75,7 @@ async def get_applied_seqs(db: Database) -> set[int]:
 
 
 def _resolve_db_file_path(db: Database) -> Path | None:
-    """Database에서 백업 대상 파일 경로를 얻는다.
-
-    인메모리 DB(``:memory:``) 또는 파일이 존재하지 않는 경우 None을 반환한다.
-    """
+    """Database에서 백업 대상 파일 경로를 얻는다."""
     raw = getattr(db, "_db_path", None)
     if not raw or raw == ":memory:":
         return None

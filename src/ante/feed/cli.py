@@ -22,12 +22,7 @@ _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def _validate_iso_date(value: str, option: str, fmt: object) -> None:
-    """``value``가 엄격한 ``YYYY-MM-DD``인지 검증한다.
-
-    형식이 어긋나거나 캘린더상 유효하지 않으면 ``CLI_INVALID_DATE``
-    구조화 에러를 출력하고 ``SystemExit(1)``로 종료한다. 날짜
-    옵션(``--since`` / ``--date``)이 공유한다.
-    """
+    """``value``가 엄격한 ``YYYY-MM-DD``인지 검증한다."""
     from datetime import date
 
     if _ISO_DATE_RE.fullmatch(value) is None:
@@ -57,13 +52,7 @@ _FEED_LOGGER_NAME = "ante.feed"
 
 
 def _apply_log_level(config: dict[str, object], fmt: object) -> None:
-    """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다.
-
-    유효한 레벨명(DEBUG/INFO/WARNING/ERROR/CRITICAL)이 아니면 INFO fallback
-    없이 구조화 에러(``CONFIG_INVALID_LOG_LEVEL``)로 거부하고 ``SystemExit(1)``
-    로 종료한다(fail-loud). root 로거·logging 포맷/핸들러는 변경하지 않으며,
-    ``ante.feed`` 패키지 로거의 레벨만 설정한다.
-    """
+    """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
         fmt.error(  # type: ignore[attr-defined]
@@ -85,19 +74,7 @@ def _apply_log_level(config: dict[str, object], fmt: object) -> None:
 
 
 def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
-    """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다.
-
-    - ``guard`` 는 table(dict) 이어야 한다.
-    - ``blocked_days`` 가 있으면 ``list`` 이고 각 원소는 ``str`` 이어야 한다.
-    - ``blocked_hours`` 가 있으면 ``list`` 이어야 한다. 각 window 의 형식
-      (``HH:MM-HH:MM``) 검증은 ``cli_scheduler._validate_schedule_times``
-      가 단일 책임으로 수행하므로(중복 분기 금지) 여기서는 list 여부만 본다.
-    - ``pause_during_trading`` 이 있으면 ``bool`` 이어야 한다.
-
-    무효 타입이면 구조화 에러(``CONFIG_INVALID_GUARD``)로 거부하고
-    ``SystemExit(1)`` 로 종료한다. 요일명 화이트리스트·blocked_hours 형식
-    검증은 본 함수의 범위가 아니다(비목표).
-    """
+    """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다."""
     guard = config.get("guard", {})
     if not isinstance(guard, dict):
         fmt.error(  # type: ignore[attr-defined]
@@ -146,13 +123,7 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
 
 
 def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> None:
-    """feed 커맨드 공통 진입 검증/적용.
-
-    ``feed run backfill`` / ``feed run daily`` / ``feed start`` 가 config 로드
-    직후 호출하는 단일 chokepoint 다. ``[general].log_level`` 을 ``ante.feed``
-    로거에 적용하고 ``[guard]`` 타입을 검증한다. 무효 입력은
-    구조화 에러 + ``SystemExit(1)`` 로 fail-loud 처리한다.
-    """
+    """feed 커맨드 공통 진입 검증/적용."""
     _apply_log_level(config, fmt)
     _validate_guard_config(config, fmt)
 
@@ -163,16 +134,7 @@ _NICE_VALUE_DEFAULT = 10
 
 
 def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
-    """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다.
-
-    ``feed start`` 진입 시 1회 fail-loud 검증한다. ``[general]`` 섹션은
-    ``_apply_log_level`` 이 이미 table 임을 보장하므로 여기서는 nice_value
-    자체만 본다(미지정 시 기본값 10). int 가 아니거나 ``0..19`` 범위를
-    벗어나면 구조화 에러(``CONFIG_INVALID_NICE_VALUE``) + ``SystemExit(1)``.
-
-    bool 은 파이썬에서 int 의 subclass 이지만 우선순위 값으로는 무의미하므로
-    명시적으로 거부한다.
-    """
+    """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
         fmt.error(  # type: ignore[attr-defined]
@@ -202,17 +164,7 @@ def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
 
 
 def _apply_process_nice(nice_value: int) -> None:
-    """현재 프로세스의 nice 값을 ``nice_value`` 절대값으로 설정한다.
-
-    스펙(docs/specs/data-feed/08-resource-protection.md)의 "시작 시 프로세스
-    우선순위를 낮춘다" 계약을 ``feed start`` 상주 루프 진입 **전에** 적용한다.
-
-    ``os.nice(n)`` 은 현재 nice 에 ``n`` 을 더하는 누적 증분이라 부모 nice 가
-    0 이 아니면 config 의 ``nice_value`` 를 절대값으로 보장하지 못한다. 따라서
-    절대값을 직접 설정하는 ``os.setpriority(PRIO_PROCESS, 0, nice_value)`` 를
-    사용한다(POSIX). 적용은 best-effort 다 — 권한 부족/비-POSIX 등으로 실패해도
-    수집을 멈추지 않고 ``warning`` 으로 사유만 남긴다(feed start 실패 금지).
-    """
+    """현재 프로세스의 nice 값을 ``nice_value`` 절대값으로 설정한다."""
     import os
 
     try:

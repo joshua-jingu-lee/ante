@@ -27,11 +27,7 @@ _STANDARD_EXTRA = (
 
 
 def _sanitize_for_json(value: object) -> object:
-    """non-finite float(NaN/Infinity)를 None으로 치환해 strict JSON을 보장한다.
-
-    Why: `json.dumps` 기본 동작은 NaN/Infinity를 `NaN`/`Infinity` 토큰으로 출력하는데,
-    이는 strict JSON 파서에서 파싱되지 않아 JSONL 로그 계약을 깨뜨린다.
-    """
+    """non-finite float(NaN/Infinity)를 None으로 치환해 strict JSON을 보장한다."""
     if isinstance(value, float) and not math.isfinite(value):
         return None
     if isinstance(value, dict):
