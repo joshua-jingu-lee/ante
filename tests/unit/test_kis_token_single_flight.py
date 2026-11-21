@@ -337,6 +337,56 @@ class TestTokenErrorParsing:
             await adapter._authenticate()
         assert ei.value.error_code == "EGW00121"
 
+    @pytest.mark.parametrize(
+        ("messages", "expected"),
+        [
+            ({"msg1": "본문 A"}, "본문 A"),
+            ({"error_description": "본문 B"}, "본문 B"),
+            ({"msg1": "본문 A", "error_description": "본문 B"}, "본문 A"),
+        ],
+        ids=["msg1", "error_description", "both"],
+    )
+    async def test_message_alias_msg1_then_error_description(self, messages, expected):
+        """오류 메시지 본문은 msg1, 없으면 error_description 에서 가져온다."""
+        session = _FakeSession(
+            [
+                _FakeResponse(
+                    status=403, json_body={"error_code": "EGW00121", **messages}
+                )
+            ]
+        )
+        adapter = _make_adapter(session)
+        with pytest.raises(AuthenticationError) as ei:
+            await adapter._authenticate()
+        assert str(ei.value) == f"인증 실패 (HTTP 403): {expected}"
+
+    @pytest.mark.parametrize(
+        ("body", "expected_type", "expected_code"),
+        [
+            (
+                {"msg_cd": TOKEN_RATE_LIMIT_MSG_CODE, "error_code": "EGW00121"},
+                TokenRateLimitError,
+                TOKEN_RATE_LIMIT_MSG_CODE,
+            ),
+            (
+                {"msg_cd": "EGW00121", "error_code": TOKEN_RATE_LIMIT_MSG_CODE},
+                AuthenticationError,
+                "EGW00121",
+            ),
+        ],
+        ids=["msg_cd_rate_limit", "msg_cd_other"],
+    )
+    async def test_code_alias_msg_cd_takes_precedence(
+        self, body, expected_type, expected_code
+    ):
+        """msg_cd 와 error_code 가 모두 있으면 msg_cd 를 먼저 본다."""
+        session = _FakeSession([_FakeResponse(status=403, json_body=body)])
+        adapter = _make_adapter(session)
+        with pytest.raises(AuthenticationError) as ei:
+            await adapter._authenticate()
+        assert type(ei.value) is expected_type
+        assert ei.value.error_code == expected_code
+
     async def test_non_200_non_json_body_fallback(self):
         """non-200 + 비 JSON 바디 → text fallback, error_code 빈값 (T3 방어)."""
         session = _FakeSession(
@@ -572,3 +622,109 @@ class TestTokenCacheConfigFingerprint:
             await a._authenticate()
         assert s.post_count == 0
         assert a.access_token is None
+
+
+class _GatedResponse:
+    """첫 발급 요청 안에서 ``release`` 가 열릴 때까지 양보하며 기다리는 응답."""
+
+    def __init__(
+        self, inner: _FakeResponse, entered: asyncio.Event, release: asyncio.Event
+    ) -> None:
+        self._inner = inner
+        self._entered = entered
+        self._release = release
+
+    async def __aenter__(self) -> _FakeResponse:
+        self._entered.set()
+        await self._release.wait()
+        return self._inner
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+class _GatedSession(_FakeSession):
+    """첫 post 만 ``_GatedResponse`` 로 감싸 다른 코루틴이 lock 에 걸리게 한다."""
+
+    def __init__(self, responses: list[_FakeResponse]) -> None:
+        super().__init__(responses)
+        self.entered = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def post(self, *args: Any, **kwargs: Any) -> Any:
+        response = super().post(*args, **kwargs)
+        if self.post_count == 1:
+            return _GatedResponse(response, self.entered, self.release)
+        return response
+
+
+class _SteppingClock(datetime):
+    """``now`` 를 부를 때마다 1초씩 나아가는 결정적 시계."""
+
+    _ticks = 0
+
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+        cls._ticks += 1
+        base = datetime(2026, 5, 29, 0, 0, tzinfo=UTC) + timedelta(seconds=cls._ticks)
+        return base if tz is not None else base.replace(tzinfo=None)
+
+
+async def _yield_loop(times: int = 20) -> None:
+    for _ in range(times):
+        await asyncio.sleep(0)
+
+
+class TestLockedRecheckWithYieldingSession:
+    async def test_waiter_reuses_token_issued_while_it_waited_on_lock(self):
+        """lock 을 기다린 호출은 그동안 발급된 토큰을 다시 보고 발급하지 않는다."""
+        session = _GatedSession([_success_response("tok-1")])
+        a1 = _make_adapter(session, account_no="acct-A")
+        a2 = _make_adapter(session, account_no="acct-B")
+
+        t1 = asyncio.create_task(a1._authenticate())
+        await session.entered.wait()
+        t2 = asyncio.create_task(a2._authenticate())
+        await _yield_loop()
+        assert session.post_count == 1
+        assert not t2.done()
+
+        session.release.set()
+        await asyncio.gather(t1, t2)
+
+        assert session.post_count == 1
+        assert a2.access_token == "tok-1"
+
+    async def test_waiter_sees_cooldown_recorded_while_it_waited_on_lock(
+        self, monkeypatch
+    ):
+        """lock 대기 중 생긴 cooldown 이면 HTTP 없이 같은 만료시각으로 거부한다."""
+        import ante.broker.kis as kis_module
+
+        monkeypatch.setattr(kis_module, "datetime", _SteppingClock)
+        session = _GatedSession(
+            [
+                _FakeResponse(
+                    status=403,
+                    json_body={"msg_cd": TOKEN_RATE_LIMIT_MSG_CODE, "msg1": "제한"},
+                )
+            ]
+        )
+        a1 = _make_adapter(session, account_no="acct-A")
+        a2 = _make_adapter(session, account_no="acct-B")
+
+        t1 = asyncio.create_task(a1._authenticate())
+        await session.entered.wait()
+        t2 = asyncio.create_task(a2._authenticate())
+        await _yield_loop()
+        assert not t2.done()
+        assert "shared_key" not in _token_cooldowns
+
+        session.release.set()
+        results = await asyncio.gather(t1, t2, return_exceptions=True)
+
+        assert [type(r) for r in results] == [TokenRateLimitError] * 2
+        assert session.post_count == 1
+        recorded = _token_cooldowns["shared_key"]
+        assert results[0].cooldown_until == recorded
+        assert results[1].cooldown_until == recorded

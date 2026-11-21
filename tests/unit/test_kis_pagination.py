@@ -455,6 +455,59 @@ async def test_request_with_cont_empty_header_not_injected() -> None:
     assert captured["headers"].get("tr_cont", "") == ""
 
 
+_PAGINATED_CALLERS = [
+    ("get_positions", (), False),
+    ("get_account_positions", (), False),
+    ("get_pending_orders", (), False),
+    ("get_order_status", ("0001",), False),
+    ("get_order_history", ("20260529", "20260529"), True),
+]
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "exempt"),
+    _PAGINATED_CALLERS,
+    ids=[caller[0] for caller in _PAGINATED_CALLERS],
+)
+async def test_paginated_callers_start_with_empty_cursor_and_only_history_is_exempt(
+    method: str, args: tuple[str, ...], exempt: bool
+) -> None:
+    """연속조회 호출자는 빈 cursor 로 시작하고, 차단기 opt-out 은 체결이력만 쓴다."""
+    from ante.broker.exceptions import OrderNotFoundError
+
+    adapter = _make_adapter()
+    first_requests: list[tuple[str, str, str, bool]] = []
+
+    async def fake(  # type: ignore[no-untyped-def]
+        method_,
+        url,
+        tr_id,
+        params=None,
+        json_data=None,
+        cont_header="",
+        *,
+        cb_exempt_timeout=False,
+    ):
+        first_requests.append(
+            (
+                params["CTX_AREA_FK100"],
+                params["CTX_AREA_NK100"],
+                cont_header,
+                cb_exempt_timeout,
+            )
+        )
+        return {"rt_cd": "0", "output": [], "output1": [], "output2": []}, "D"
+
+    adapter._request_with_cont = fake  # type: ignore[method-assign]
+
+    try:
+        await getattr(adapter, method)(*args)
+    except OrderNotFoundError:
+        assert method == "get_order_status"
+
+    assert first_requests == [("", "", "", exempt)]
+
+
 # ── inquire-daily-ccld tr_id 4코드 분기 + EXCG_ID_DVSN_CD (#2349) ──
 #
 # get_order_history 가 KST 3개월 경계(start-date 단독 기준)로 inner/before 를

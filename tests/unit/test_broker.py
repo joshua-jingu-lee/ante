@@ -411,6 +411,20 @@ class TestKISAdapterAPI:
         # nrcvb_buy_amt 부재 → ord_psbl_cash로 폴백
         assert result["order_buyable_amount"] == 7_000_000.0
 
+    @pytest.mark.parametrize("raw", ["", "N/A", None])
+    async def test_get_buyable_fallback_on_unparseable(self, adapter, raw):
+        """nrcvb_buy_amt 가 있어도 숫자로 읽히지 않으면 ord_psbl_cash 로 폴백한다."""
+
+        async def fake_request(method, url, tr_id, **kwargs):
+            return {
+                "rt_cd": "0",
+                "output": {"nrcvb_buy_amt": raw, "ord_psbl_cash": "7000000"},
+            }
+
+        adapter._request = fake_request  # type: ignore[method-assign]
+        result = await adapter.get_buyable("005930", price=70000.0)
+        assert result["order_buyable_amount"] == 7_000_000.0
+
     async def test_get_buyable_value_zero_no_fallback(self, adapter):
         """nrcvb_buy_amt==0 은 정상값 — 폴백하지 않는다 (#2384 G6)."""
 
