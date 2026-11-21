@@ -1,16 +1,4 @@
-"""CommandRegistry — IPC 커맨드 핸들러 등록 및 조회.
-
-각 커맨드 핸들러는 (ServiceRegistry, args: dict, actor: str) -> dict 시그니처를 따른다.
-
-각 등록 핸들러는 ``CommandSpec``으로 wrap되어 ``is_mutating``
-taxonomy를 함께 보유한다. ``IPCServer._dispatch``는 lifecycle state가
-``SHUTTING_DOWN``일 때 mutating 핸들러를 ``SERVICE_UNAVAILABLE``로 거부하기
-위해 이 정보를 사용한다.
-
-``CommandSpec``의 contract metadata 7 필드(``result_kind``, ``result_key``,
-``required_services``, ``audit_action``, ``account_id_policy``, ``cross_validators``,
-``shutdown_behavior``)는 default 값으로 backward compatibility를 보장한다.
-"""
+"""CommandRegistry — IPC 커맨드 핸들러 등록 및 조회."""
 
 from __future__ import annotations
 
@@ -35,38 +23,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class CommandSpec:
-    """IPC 커맨드의 메타데이터.
-
-    lifecycle state machine과 결합하여 shutdown 중
-    mutating 명령을 거부하기 위한 taxonomy를 보유한다.
-
-    contract metadata 7 필드를 보유한다.
-
-    Attributes:
-        name: 커맨드 식별자 (예: ``"system.halt"``).
-        handler: 비동기 핸들러 콜러블.
-        is_mutating: 핸들러가 서버 상태/DB를 변경하면 True. 단순 read-only
-            (live 조회) 면 False.
-        result_kind: handler 반환 result의 shape 종류
-            (``entity``/``operation``/``collection``/``raw``/``stream``).
-            ``ContractKind`` vocabulary를 그대로 사용한다.
-        result_key: handler 반환 dict의 주 키(예: ``"bot"``, ``"positions"``).
-            ``None``이면 result가 dict 그 자체이거나 주 키가 없음.
-        required_services: handler가 의존하는 ``ServiceRegistry`` attribute
-            이름의 frozenset. dispatch wrapper의 service preflight에서
-            사용된다.
-        audit_action: ``audit_logger.log(action=...)`` 인자. 실제로 audit
-            기록을 남기는 명령만 값을 가지고, 그 외에는 ``None``.
-            mutating이라는 사실만으로 audit_action을 강제하지 않는다.
-        account_id_policy: account_id 검증 정책.
-            ``none``/``required``(handler가 ``require_account_id`` 호출)/
-            ``optional_filter`` 중 하나.
-        cross_validators: 추가 cross-field validator callables. 본 이슈에서는
-            skeleton만 도입한다(빈 tuple default).
-        shutdown_behavior: shutdown 단계 처리 override. ``None``이면
-            ``is_mutating``에서 derive — mutating은 ``block_on_mutating``,
-            read-only는 ``allow_all`` 효과(server.py 동작 보존).
-    """
+    """IPC 커맨드의 메타데이터."""
 
     name: str
     handler: CommandHandler
@@ -111,16 +68,7 @@ class CommandRegistry:
         """핸들러 등록.
 
         Args:
-            command: 커맨드 이름.
-            handler: 비동기 핸들러.
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
-            result_kind: result shape 종류 (``ContractKind``).
-            result_key: result dict의 주 키.
-            required_services: ``ServiceRegistry`` 의존 attribute 이름 집합.
-            audit_action: audit 기록 시 action 이름(없으면 ``None``).
-            account_id_policy: account_id 검증 정책.
-            cross_validators: 추가 validator callables.
-            shutdown_behavior: shutdown 처리 override(없으면 derive).
         """
         self._specs[command] = CommandSpec(
             name=command,
@@ -1506,70 +1454,6 @@ def register_all_handlers(registry: CommandRegistry) -> None:
 
     `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
-
-    ``approval.cancel_invalid`` (mutating).
-
-    ``bot.start`` / ``bot.stop`` (mutating) / ``bot.status``
-    (read-only): ``bot.start`` 는 ``app_key`` preflight + audit
-    ``bot.start``, ``bot.stop`` 은 audit ``bot.stop``, ``bot.status`` 는
-    ``enrich_bot_info`` 보강 후 ``{"bot": info}`` envelope.
-
-    각 등록에 contract metadata 7 필드 중
-    필수값(``result_kind``, ``result_key``, ``required_services``,
-    ``audit_action``, ``account_id_policy``)을 명시한다. ``audit_action``은
-    실제 ``audit_logger.log`` 호출이 있는 명령만 값을 가진다.
-    ``cross_validators``/``shutdown_behavior``는
-    default(빈 tuple / None=derive)로 유지한다.
-
-    ``rule.update`` 는 helper 의 ``audit_logger`` 인자를 IPC handler 에서
-    ``None`` 으로 전달하고, wrapper 가 ``audit_action="account.rule.update"``
-    를 자동 발화한다.
-
-    audit.md:112-120 이 audit 대상으로 정의한 상태변경 명령 가운데 다음 7개에
-    ``audit_action`` + ``audit_logger`` required 를 wiring 한다 —
-    ``system.halt`` (action ``system.halt``) / ``system.clear_halt`` /
-    ``bot.create`` (resource 는 생성 결과 ``bot.bot_id``) / ``bot.remove``
-    (action ``bot.delete``) / ``approval.approve`` / ``approval.reject`` /
-    ``approval.cancel``. 각각 account.suspend 동형으로 register 에 audit_action
-    부여 + required_services union audit_logger, handler 가 ``_audit_detail``
-    반환. 현재 ``audit_action`` 부여 commands 는 26개:
-    ``account.suspend`` / ``account.activate`` / ``system.halt`` /
-    ``system.clear_halt`` / ``bot.create`` / ``bot.remove``(→``bot.delete``) /
-    ``bot.start`` / ``bot.stop`` / ``bot.update`` /
-    ``bot.signal_key.rotate`` / ``treasury.set_balance`` /
-    ``strategy.set_status`` / ``member.update_scopes`` /
-    ``member.register`` / ``member.set_emoji`` / ``member.suspend`` /
-    ``member.reactivate`` / ``member.revoke`` / ``member.rotate_token`` /
-    ``member.reset_password`` / ``member.regenerate_recovery_key`` /
-    ``approval.approve`` / ``approval.reject`` / ``approval.cancel`` /
-    ``approval.cancel_invalid`` / ``rule.update``.
-
-    ``bot.list`` / ``bot.info`` / ``bot.positions`` /
-    ``bot.signal_key`` (read-only): ``bot list/info/positions/signal-key``
-    의 runtime IPC 경로. CLI 가 서버 정지 시 snapshot DB fallback 한다. audit
-    없음(read-only).
-
-    member admin mutation 8개(``member.register`` /
-    ``member.set_emoji`` / ``member.suspend`` / ``member.reactivate`` /
-    ``member.revoke`` / ``member.rotate_token`` / ``member.reset_password`` /
-    ``member.regenerate_recovery_key``) 를 runtime IPC 로 wiring 한다
-    (``member.update_scopes`` 동형, IPC-first + 서버 정지 시 CLI cold-path
-    fallback). 발급 토큰/새 recovery key 는 사용자 표시용 result 에만 담고
-    audit/log/envelope 에는 노출하지 않는다. ``reset_password`` /
-    ``regenerate_recovery_key`` 는 auth-exempt 라 master-lookup 을 handler
-    (서버 chokepoint)에서 수행하고 audit member_id 를 고정 sentinel 상수로
-    기록한다.
-
-    ``signal.connect`` (read-only): daemon-위임
-    signal.connect 핸드셰이크의 4-게이트 LIVE 검증 경로. 통과 시 동일 연결을
-    connection-upgrade(``result_kind="stream"``). audit 없음(``audit_action=None``;
-    connect-audit 1회는 handler 가 직접 발화).
-
-    ``broker.order_history`` (read-only): ``ante broker
-    order-history`` 의 runtime IPC 경로. ``broker.positions`` 1:1 미러
-    (``result_kind="collection"``, ``result_key="orders"``,
-    ``required_services={"account"}``, ``account_id_policy="required"``).
-    audit 없음(read-only).
     """
     registry.register(
         "system.halt",

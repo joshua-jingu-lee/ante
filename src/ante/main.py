@@ -1,20 +1,4 @@
-"""Ante - AI-Native Trading Engine entrypoint.
-
-Composition Root: 모든 모듈을 조립하고 시스템을 부팅한다.
-각 _init_*() 함수가 독립적 초기화 단위를 담당하고,
-main()은 조율만 수행한다.
-
-초기화 순서 (Account 중심):
-1. Core: Config, Database, EventBus
-2. Services: AuditLogger, MemberService, InstrumentService
-3. Account: AccountService, 테스트 계좌 자동 생성
-4. Trading: StrategyRegistry, Trade, TreasuryManager, RuleEngineManager, BotManager
-5. Gateway: APIGateway(account_service 주입)
-6. Feed: DataPipeline, Backtest, Report
-7. Approval: ApprovalService
-8. Notification: Telegram(account_service 주입)
-9. IPC: Unix 도메인 소켓 서버
-"""
+"""Ante - AI-Native Trading Engine entrypoint."""
 
 import asyncio
 import logging
@@ -114,10 +98,6 @@ def read_pid_file(config: Config | None = None) -> int | None:
     정책). 1.0은 single-canonical resolver 모델을 따르므로 legacy cwd-relative
     ``db/ante.pid`` read-fallback은 두지 않는다. canonical
     ``config.runtime_pid_path()``만 본다.
-
-    ``config``이 ``None``이면 ``Config.load()``로 env/디폴트 기준 canonical을
-    산출한다. 0-arg 호환을 유지해 기존 ``patch("ante.main.read_pid_file", ...)``
-    monkeypatch 사용처(test_account_cli, test_cli_update 등)가 그대로 동작한다.
     """
     if config is None:
         config = Config.load()
@@ -2613,22 +2593,7 @@ async def _shutdown(s: Services) -> None:
 
 
 async def main() -> None:
-    """Main asyncio entrypoint.
-
-    초기화 순서 (Account 중심):
-    0. Booting marker + PID 기록 (starting도 active runtime으로 표시)
-    1. Core: Config, Database, EventBus, DynamicConfig
-    2. Services: AuditLogger, MemberService, InstrumentService
-    3. Account: AccountService, 테스트 계좌 자동 생성
-    4. Trading: StrategyRegistry, Trade, TreasuryManager, RuleEngineManager, BotManager
-    5. Gateway: APIGateway(account_service 주입)
-    6. Feed: DataPipeline, Backtest, Report
-    7. Approval: ApprovalService
-    8. Notification: Telegram(account_service 주입)
-    9. IPC: Unix 도메인 소켓 서버 (성공 후 booting marker 제거)
-
-    종료 순서: 역순 (상위 소비자부터 정리)
-    """
+    """Main asyncio entrypoint."""
     s = Services()
     s.config = Config.load()
 
