@@ -4434,6 +4434,71 @@ class TestRuleEngineEventBus:
         assert isinstance(ev.reason, str)
         assert ev.reason  # non-empty
 
+    async def test_invalid_side_reason_uses_placeholder_when_repr_raises(
+        self, engine, eventbus
+    ):
+        """side의 __repr__가 무엇을 던져도 사유는 게이트 문구에 placeholder를 싣는다."""
+
+        class _ReprFails:
+            def __repr__(self) -> str:
+                raise LookupError("repr deliberately fails")
+
+            def __hash__(self) -> int:
+                return 0
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side=_ReprFails(),  # type: ignore[arg-type]
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert [e.reason for e in rejected] == [
+            "Invalid signal side: <unrenderable _ReprFails> (allowed: buy, sell)"
+        ]
+
+    async def test_rejected_event_survives_event_id_whose_str_and_repr_raise(
+        self, engine, eventbus
+    ):
+        """event_id의 __str__·__repr__가 모두 던져도 거부 이벤트는 한 번 발행된다."""
+
+        class _Unprintable:
+            def __str__(self) -> str:
+                raise LookupError("str deliberately fails")
+
+            def __repr__(self) -> str:
+                raise LookupError("repr deliberately fails")
+
+        rejected: list[OrderRejectedEvent] = []
+        eventbus.subscribe(OrderRejectedEvent, lambda e: rejected.append(e))
+
+        await eventbus.publish(
+            OrderRequestEvent(
+                event_id=_Unprintable(),  # type: ignore[arg-type]
+                account_id="domestic",
+                bot_id="bot1",
+                strategy_id="s1",
+                symbol="005930",
+                side="hold",
+                quantity=10.0,
+                order_type="market",
+                exchange="KRX",
+            )
+        )
+
+        assert len(rejected) == 1
+        assert rejected[0].order_id == "<unrenderable _Unprintable>"
+        assert rejected[0].reason.startswith("Invalid signal side: 'hold'")
+
     async def test_rule_engine_catch_all_reject_for_synthetic_raise(
         self, engine, eventbus, monkeypatch
     ):
@@ -6214,3 +6279,51 @@ class TestRuleEngineWarnEventBus:
         await eventbus.publish(order)
 
         assert len(notifications) == 2
+
+
+_NUMERIC_RULE_PARAMS = [
+    ("daily_loss_limit", "max_daily_loss_percent"),
+    ("daily_loss_limit", "max_loss_pct"),
+    ("total_exposure_limit", "max_exposure_percent"),
+    ("total_exposure_limit", "max_exposure_amount"),
+    ("position_size", "max_position_percent"),
+    ("position_size", "max_position_amount"),
+    ("unrealized_loss_limit", "max_unrealized_loss_percent"),
+    ("trade_frequency", "max_trades_per_hour"),
+]
+
+
+class TestRuleConfigRejectsNonFiniteNumbers:
+    @pytest.mark.parametrize(("rule_type", "param"), _NUMERIC_RULE_PARAMS)
+    @pytest.mark.parametrize(
+        "value",
+        [math.nan, math.inf, -math.inf, 10**400],
+        ids=["nan", "inf", "-inf", "huge_int"],
+    )
+    def test_registry_validate_config_rejects_non_finite(self, rule_type, param, value):
+        """NaN·±Inf·float로 바꿀 수 없는 거대 int는 유한 숫자가 아니라고 거부한다."""
+        from ante.rule.engine import RULE_REGISTRY
+
+        errors = RULE_REGISTRY[rule_type].validate_config({param: value})
+
+        assert errors == [f"{param} must be a finite number"]
+
+    async def test_update_account_rule_config_rejects_nan_without_persisting(self):
+        """계좌 룰 갱신 경로도 NaN 파라미터를 저장하지 않고 거부한다."""
+        from ante.rule.config_update import update_account_rule_config
+
+        dynamic_config = AsyncMock()
+        dynamic_config.get = AsyncMock(return_value=[])
+
+        with pytest.raises(ValueError, match="must be a finite number"):
+            await update_account_rule_config(
+                account_service=AsyncMock(),
+                dynamic_config=dynamic_config,
+                account_id="domestic",
+                rule_type="daily_loss_limit",
+                enabled=True,
+                params={"max_daily_loss_percent": math.nan},
+                changed_by="tester",
+            )
+
+        dynamic_config.set.assert_not_called()

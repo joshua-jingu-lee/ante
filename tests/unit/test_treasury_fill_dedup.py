@@ -282,6 +282,51 @@ class TestTreasuryExactlyOnce:
         assert await _fill_dedup_count(db, key1) == 1
         assert await _fill_dedup_count(db, key2) == 1
 
+    async def test_half_fill_is_not_terminal_when_tracker_already_counts_it(
+        self, treasury, order_tracker, db
+    ):
+        """tracker 누적이 이번 체결을 포함한 채 주문 수량 미만이면 예약을 남긴다."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+
+        await order_tracker.record_fill("ord1", 5.0, 50_000.0)
+        await treasury._on_order_filled(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=5.0,
+                price=50_000.0,
+                commission=40.0,
+                fill_dedup_key="ord1:5.0",
+            )
+        )
+
+        budget = treasury.get_budget("bot1")
+        assert budget is not None
+        assert budget.reserved == pytest.approx(250_060.0)
+        assert treasury.get_reservations("bot1")["ord1"] == pytest.approx(250_060.0)
+        _assert_invariant(treasury, "bot1")
+
+        await order_tracker.record_fill("ord1", 10.0, 50_000.0)
+        await treasury._on_order_filled(
+            _buy_fill_event(
+                order_id="ord1",
+                bot_id="bot1",
+                quantity=5.0,
+                price=50_000.0,
+                commission=40.0,
+                fill_dedup_key="ord1:10.0",
+            )
+        )
+
+        assert budget.reserved == pytest.approx(0.0)
+        assert budget.spent == pytest.approx(500_080.0)
+        assert "ord1" not in treasury.get_reservations("bot1")
+        _assert_invariant(treasury, "bot1")
+
 
 class TestTreasuryAtomicityRollback:
     async def test_rollback_restores_memory_snapshot(self, treasury, order_tracker, db):
@@ -340,6 +385,40 @@ class TestTreasuryAtomicityRollback:
         _assert_invariant(treasury, "bot1")
         assert await _fill_dedup_count(db, key) == 1
         assert await _tx_fill_count(db, "bot1") == 1
+
+    async def test_rollback_restores_budget_in_place_for_held_references(
+        self, treasury, order_tracker, db
+    ):
+        """rollback 뒤 조회되는 예산은 미리 쥔 그 객체이고 값이 복원돼 있다."""
+        await treasury.allocate("bot1", 1_000_000.0)
+        await treasury.reserve_for_order("bot1", "ord1", 500_100.0)
+        await _seed_tracker(
+            order_tracker, order_id="ord1", bot_id="bot1", ordered_qty=10.0
+        )
+        await order_tracker.record_fill("ord1", 10.0, 50_000.0)
+        held = treasury.get_budget("bot1")
+        assert held is not None
+        before = (held.allocated, held.available, held.reserved, held.spent)
+
+        with patch.object(
+            treasury, "_log_transaction", side_effect=RuntimeError("boom")
+        ):
+            with pytest.raises(RuntimeError, match="boom"):
+                await treasury._on_order_filled(
+                    _buy_fill_event(
+                        order_id="ord1",
+                        bot_id="bot1",
+                        quantity=10.0,
+                        price=50_000.0,
+                        commission=75.0,
+                        fill_dedup_key="ord1:10.0",
+                    )
+                )
+
+        assert treasury.get_budget("bot1") is held
+        assert [b for b in treasury.list_budgets() if b.bot_id == "bot1"] == [held]
+        assert treasury.list_budgets()[0] is held
+        assert (held.allocated, held.available, held.reserved, held.spent) == before
 
     async def test_rollback_pops_originally_absent_reservation(
         self, treasury, order_tracker, db
