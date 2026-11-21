@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from ante.ipc.requests import (
     IPCRequest,
+    StrategySetStatusRequest,
     SystemClearHaltRequest,
     SystemHaltRequest,
 )
@@ -639,13 +640,13 @@ async def _handle_rule_update(
 
 
 async def _handle_strategy_set_status(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: StrategySetStatusRequest, actor: str
 ) -> dict:
     """전략 상태 변경 IPC handler."""
     from ante.strategy.registry import StrategyStatus
 
-    strategy_id = args["strategy_id"]
-    status = StrategyStatus(args["status"])
+    strategy_id = request.strategy_id
+    status = StrategyStatus(request.status)
     await svc.strategy_registry.update_status(strategy_id, status)
 
     return {
@@ -1259,6 +1260,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"strategy_registry", "audit_logger"}),
         audit_action="strategy.set_status",
+        request_model=StrategySetStatusRequest,
     )
     registry.register(
         "member.update_scopes",
