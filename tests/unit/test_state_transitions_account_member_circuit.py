@@ -1,4 +1,4 @@
-"""계좌·멤버 상태 전이의 특성 테스트 (#2657).
+"""계좌·멤버·회로차단기 상태 전이의 특성 테스트 (#2657).
 
 가드가 있는 메서드(계좌 ``suspend``·``activate``·``delete``, 멤버
 ``suspend``·``reactivate``·``revoke``)마다 허용하는 이전 상태와 거부하는
@@ -6,25 +6,35 @@
 예외 메시지 전체, 발행된 이벤트 타입 목록)이다. 이전 상태는 원시 SQL로
 DB에 넣고, 계좌는 새 서비스를 초기화해 캐시가 DB에서 읽은 값을 보게 한다.
 
+회로차단기는 ``_transition`` 을 부르는 네 자리(``state`` 의 타임아웃,
+``record_success``, ``record_failure`` 의 시험 실패와 임계 도달)의 허용 경로와
+지금 닿는 「전이 없음」 경로를 공개 API로만 몰아 상태와 발행 이벤트로 잠근다.
+
 뒤쪽은 두 전이표가 리터럴로 적은 쌍과 같은지, 전이 함수가 3×3=9쌍에서 허용
 쌍만 통과시키는지 본다(멤버는 enum·``str`` 현재 값과 표 밖 문자열까지).
 """
 
 from __future__ import annotations
 
+import asyncio
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+import ante.broker.circuit_breaker as circuit_module
 from ante.account.errors import AccountAlreadySuspendedError, AccountDeletedError
 from ante.account.models import ACCOUNT_STATUS_TRANSITIONS, Account, AccountStatus
 from ante.account.service import AccountService
 from ante.account.service import _transition_status as account_transition
+from ante.broker.circuit_breaker import CircuitBreaker
+from ante.broker.exceptions import CircuitOpenError
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
     AccountActivatedEvent,
     AccountSuspendedEvent,
+    CircuitBreakerEvent,
     MemberReactivatedEvent,
     MemberRevokedEvent,
     MemberSuspendedEvent,
@@ -359,6 +369,247 @@ async def test_member_revoke_allows(db, eventbus, published, prev):
     assert member.revoked_at != ""
     assert await _member_status(db) == "revoked"
     assert published == ["MemberRevokedEvent", "NotificationEvent"]
+
+
+# ── 회로차단기 ───────────────────────────────────────────────────
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
+    fake = _Clock()
+    monkeypatch.setattr(
+        circuit_module, "time", SimpleNamespace(monotonic=fake.monotonic)
+    )
+    return fake
+
+
+@pytest.fixture
+async def circuit_events(eventbus: EventBus) -> list[tuple[Any, ...]]:
+    seen: list[tuple[Any, ...]] = []
+
+    async def _on_circuit(event: CircuitBreakerEvent) -> None:
+        seen.append(
+            (
+                "CircuitBreakerEvent",
+                event.broker,
+                event.old_state,
+                event.new_state,
+                event.failure_count,
+                event.reason,
+            )
+        )
+
+    async def _on_notification(event: NotificationEvent) -> None:
+        seen.append(("NotificationEvent", event.level, event.title, event.message))
+
+    eventbus.subscribe(CircuitBreakerEvent, _on_circuit)
+    eventbus.subscribe(NotificationEvent, _on_notification)
+    return seen
+
+
+async def _drain() -> None:
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+def _breaker(eventbus: EventBus) -> CircuitBreaker:
+    return CircuitBreaker(
+        failure_threshold=3, recovery_timeout=60.0, eventbus=eventbus, name="cb-2657"
+    )
+
+
+async def _open_breaker(
+    eventbus: EventBus, events: list[tuple[Any, ...]]
+) -> CircuitBreaker:
+    breaker = _breaker(eventbus)
+    for _ in range(3):
+        breaker.record_failure()
+    await _drain()
+    assert breaker.state == "open"
+    events.clear()
+    return breaker
+
+
+async def _half_open_breaker(
+    eventbus: EventBus, events: list[tuple[Any, ...]], clock: _Clock
+) -> CircuitBreaker:
+    breaker = await _open_breaker(eventbus, events)
+    clock.now += 60.0
+    assert breaker.state == "half_open"
+    await _drain()
+    events.clear()
+    return breaker
+
+
+async def test_circuit_closed_failures_below_threshold_stay_closed(
+    eventbus, circuit_events, clock
+):
+    breaker = _breaker(eventbus)
+    breaker.record_failure()
+    breaker.record_failure()
+    await _drain()
+    assert breaker.state == "closed"
+    assert breaker.failure_count == 2
+    assert circuit_events == []
+
+
+async def test_circuit_closed_threshold_reached_opens(eventbus, circuit_events, clock):
+    breaker = _breaker(eventbus)
+    for _ in range(3):
+        breaker.record_failure()
+    await _drain()
+    assert breaker._state == "open"
+    assert circuit_events == [
+        ("CircuitBreakerEvent", "cb-2657", "closed", "open", 3, "연속 3회 실패"),
+        (
+            "NotificationEvent",
+            "error",
+            "서킷 브레이커 차단",
+            "브로커 `cb-2657`\nclosed → *open* (연속 3회 실패)",
+        ),
+    ]
+
+
+async def test_circuit_open_failure_again_stays_open(eventbus, circuit_events, clock):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    breaker.record_failure()
+    await _drain()
+    assert breaker._state == "open"
+    assert breaker.failure_count == 4
+    assert circuit_events == []
+
+
+async def test_circuit_open_before_timeout_stays_open_and_blocks(
+    eventbus, circuit_events, clock
+):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    clock.now += 59.0
+    assert breaker.state == "open"
+    with pytest.raises(Exception) as exc_info:
+        breaker.check()
+    _assert_exact(
+        exc_info,
+        CircuitOpenError,
+        "Circuit breaker OPEN — 3회 연속 실패, 60초 후 재시도",
+    )
+    await _drain()
+    assert circuit_events == []
+
+
+async def test_circuit_open_timeout_moves_to_half_open(eventbus, circuit_events, clock):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    clock.now += 60.0
+    assert breaker.state == "half_open"
+    await _drain()
+    assert breaker._state == "half_open"
+    assert circuit_events == [
+        (
+            "CircuitBreakerEvent",
+            "cb-2657",
+            "open",
+            "half_open",
+            3,
+            "recovery_timeout 경과",
+        ),
+    ]
+
+
+async def test_circuit_half_open_state_read_stays_half_open(
+    eventbus, circuit_events, clock
+):
+    breaker = await _half_open_breaker(eventbus, circuit_events, clock)
+    clock.now += 600.0
+    assert breaker.state == "half_open"
+    breaker.check()
+    await _drain()
+    assert circuit_events == []
+
+
+async def test_circuit_half_open_failure_reopens(eventbus, circuit_events, clock):
+    breaker = await _half_open_breaker(eventbus, circuit_events, clock)
+    breaker.record_failure()
+    await _drain()
+    assert breaker._state == "open"
+    assert circuit_events == [
+        (
+            "CircuitBreakerEvent",
+            "cb-2657",
+            "half_open",
+            "open",
+            4,
+            "HALF_OPEN 시험 실패",
+        ),
+        (
+            "NotificationEvent",
+            "error",
+            "서킷 브레이커 차단",
+            "브로커 `cb-2657`\nhalf_open → *open* (HALF_OPEN 시험 실패)",
+        ),
+    ]
+
+
+async def test_circuit_half_open_success_closes(eventbus, circuit_events, clock):
+    breaker = await _half_open_breaker(eventbus, circuit_events, clock)
+    breaker.record_success()
+    await _drain()
+    assert breaker._state == "closed"
+    assert breaker.failure_count == 0
+    assert circuit_events == [
+        ("CircuitBreakerEvent", "cb-2657", "half_open", "closed", 3, "API 호출 성공"),
+        (
+            "NotificationEvent",
+            "info",
+            "서킷 브레이커 복구",
+            "브로커 `cb-2657`\nhalf_open → *closed* (API 호출 성공)",
+        ),
+    ]
+
+
+async def test_circuit_open_success_closes_directly(eventbus, circuit_events, clock):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    breaker.record_success()
+    await _drain()
+    assert breaker._state == "closed"
+    assert breaker.failure_count == 0
+    assert circuit_events == [
+        ("CircuitBreakerEvent", "cb-2657", "open", "closed", 3, "API 호출 성공"),
+        (
+            "NotificationEvent",
+            "info",
+            "서킷 브레이커 복구",
+            "브로커 `cb-2657`\nopen → *closed* (API 호출 성공)",
+        ),
+    ]
+
+
+async def test_circuit_closed_success_does_not_transition(
+    eventbus, circuit_events, clock
+):
+    breaker = _breaker(eventbus)
+    breaker.record_failure()
+    breaker.record_success()
+    await _drain()
+    assert breaker._state == "closed"
+    assert breaker.failure_count == 0
+    assert circuit_events == []
+
+
+def test_circuit_without_eventbus_or_loop_still_transitions(clock):
+    breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=60.0, name="x")
+    breaker.record_failure()
+    assert breaker._state == "open"
+    clock.now += 60.0
+    assert breaker.state == "half_open"
+    breaker.record_success()
+    assert breaker._state == "closed"
 
 
 # ── 전이표와 전이 함수 ────────────────────────────────────────────
