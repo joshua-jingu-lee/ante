@@ -5,7 +5,6 @@ from __future__ import annotations
 import importlib.metadata
 import importlib.util
 import json
-import re
 import subprocess
 import sys
 import tomllib
@@ -40,27 +39,74 @@ VERSION_OUTPUT = {"ruff": "ruff 0.17.6\n", "mypy": "mypy 2.4.1 (compiled: yes)\n
 A = "src/ante/a.py"
 B = "src/ante/b.py"
 
+CONTRACT_ARGS = {
+    "ruff": (
+        "check",
+        "src/",
+        "--select",
+        "BLE001,ASYNC,S608,C901",
+        "--config",
+        "lint.mccabe.max-complexity = 10",
+        "--output-format",
+        "json",
+        "--no-fix",
+        "--no-cache",
+        "--exit-zero",
+    ),
+    "mypy": (
+        "--strict",
+        "--platform",
+        "linux",
+        "--cache-dir",
+        ".mypy_cache/strict",
+        "--no-error-summary",
+        "--no-pretty",
+        "--no-color-output",
+        "src/",
+    ),
+}
+INSTALL_SENTENCES = (
+    'uv pip install -e ".[dev]" 또는 python -m pip install -e ".[dev]"로 '
+    "고정 버전을 설치한다.",
+    "기준선은 그 커밋의 src/를 CI 환경에서 잰 값과 같아야 한다.",
+    "버전을 올리는 PR이면 같은 PR에서 기준선을 다시 잰다.",
+)
+LOWER_TEXT = "기준선을 낮춘다(0이면 키를 지운다)"
+MOVE_TEXT = "파일을 옮기거나 새로 만들었다면 기준선을 옮긴다"
+MYPY_TEXT = "타입을 채우거나 좁힌다."
+
 
 def _proc(code: int, out: str = "", err: str = "") -> subprocess.CompletedProcess[str]:
     return subprocess.CompletedProcess([], code, out, err)
+
+
+class FakeRunner:
+    def __init__(
+        self,
+        outputs: dict[str, subprocess.CompletedProcess[str]],
+        versions: dict[str, str],
+    ) -> None:
+        self.outputs = outputs
+        self.versions = versions
+        self.calls: list[tuple[str, tuple[str, ...], Path]] = []
+
+    def __call__(
+        self, module: str, args: Sequence[str], root: Path
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append((module, tuple(args), root))
+        if tuple(args) == ("--version",):
+            return _proc(0, self.versions[module])
+        assert tuple(args) == CONTRACT_ARGS[module]
+        return self.outputs[module]
 
 
 def _fake(
     ruff: subprocess.CompletedProcess[str] | None = None,
     mypy: subprocess.CompletedProcess[str] | None = None,
     versions: dict[str, str] | None = None,
-) -> Runner:
+) -> FakeRunner:
     outputs = {"ruff": ruff or _proc(0, "[]"), "mypy": mypy or _proc(0)}
-    shown = VERSION_OUTPUT if versions is None else versions
-
-    def runner(
-        module: str, args: Sequence[str], root: Path
-    ) -> subprocess.CompletedProcess[str]:
-        if tuple(args) == ("--version",):
-            return _proc(0, shown[module])
-        return outputs[module]
-
-    return runner
+    return FakeRunner(outputs, VERSION_OUTPUT if versions is None else versions)
 
 
 def _write_baseline(root: Path, data: object) -> None:
@@ -90,7 +136,46 @@ def _mypy_text(*items: tuple[str, str]) -> str:
 def _run(root: Path, runner: Runner, capsys: Capsys) -> tuple[int, str]:
     code = checker.main(["--root", str(root)], runner)
     captured = capsys.readouterr()
+    if isinstance(runner, FakeRunner):
+        assert all(call_root == root for _, _, call_root in runner.calls)
     return code, captured.out + captured.err
+
+
+# ── 실행 방식 ──────────────────────────────────────────────
+
+
+def test_tool_args_are_the_contract_literals() -> None:
+    assert checker.RUFF_ARGS == CONTRACT_ARGS["ruff"]
+    assert checker.MYPY_ARGS == CONTRACT_ARGS["mypy"]
+
+
+@pytest.mark.parametrize("module", ["ruff", "mypy"])
+def test_run_tool_uses_this_interpreter_in_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, module: str
+) -> None:
+    seen: list[tuple[list[str], dict[str, Any]]] = []
+
+    def fake_run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
+        seen.append((argv, kwargs))
+        return _proc(0)
+
+    monkeypatch.setattr(checker.subprocess, "run", fake_run)
+    checker.run_tool(module, CONTRACT_ARGS[module], tmp_path)
+    [(argv, kwargs)] = seen
+    assert argv == [sys.executable, "-m", module, *CONTRACT_ARGS[module]]
+    assert kwargs["cwd"] == tmp_path
+
+
+def test_every_tool_call_runs_in_the_given_root(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _baseline())
+    runner = _fake()
+    code, _ = _run(tmp_path, runner, capsys)
+    assert code == 0
+    calls = [(module, args) for module, args, _ in runner.calls]
+    assert set(calls[:2]) == {("ruff", ("--version",)), ("mypy", ("--version",))}
+    assert set(calls[2:]) == {(name, args) for name, args in CONTRACT_ARGS.items()}
+    assert len(calls) == 4
+    assert {root for _, _, root in runner.calls} == {tmp_path}
 
 
 def _run_ruff(
@@ -132,6 +217,18 @@ def test_ruff_realpath_under_symlinked_root(tmp_path: Path) -> None:
     assert checker.parse_ruff_json(text, link) == {A: {"BLE001": 1}}
 
 
+def test_ruff_relative_filename_is_under_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    root = tmp_path / "root"
+    root.mkdir()
+    text = json.dumps([{"filename": A, "code": "BLE001"}])
+    assert checker.parse_ruff_json(text, root) == {A: {"BLE001": 1}}
+
+
 def test_ruff_file_outside_root_is_error(tmp_path: Path, capsys: Capsys) -> None:
     root = tmp_path / "root"
     root.mkdir()
@@ -147,8 +244,20 @@ def test_ruff_file_outside_root_is_error(tmp_path: Path, capsys: Capsys) -> None
         {"code": "invalid-syntax"},
         {"code": None},
         {},
+        {"code": "ble001"},
+        {"code": "BLE"},
+        {"code": "001"},
+        {"code": "BLE001 "},
     ],
-    ids=["invalid-syntax", "null", "missing"],
+    ids=[
+        "invalid-syntax",
+        "null",
+        "missing",
+        "lower",
+        "no-digits",
+        "no-letters",
+        "space",
+    ],
 )
 def test_ruff_item_without_rule_code_is_error(
     tmp_path: Path, capsys: Capsys, item: dict[str, object]
@@ -202,6 +311,37 @@ def test_mypy_line_by_severity(line: str, expected: dict[str, dict[str, int]]) -
 def test_mypy_message_with_brackets() -> None:
     line = f'{A}:5: error: Missing type arguments for "dict[str]" [x]  [type-arg]'
     assert checker.parse_mypy(line, 1) == {A: {"type-arg": 1}}
+
+
+@pytest.mark.parametrize(
+    ("tail", "counted"),
+    [
+        ("  [type-arg]", True),
+        (" [type-arg]", False),
+        ("[type-arg]", False),
+        ("  [Type-Arg]", False),
+        ("  [type_arg]", False),
+        ("  [type-arg] ", False),
+    ],
+    ids=["two-spaces", "one-space", "no-space", "upper", "underscore", "trailing"],
+)
+def test_mypy_code_tail_is_two_spaces_and_code(
+    tmp_path: Path, capsys: Capsys, tail: str, counted: bool
+) -> None:
+    _write_baseline(tmp_path, _baseline(mypy={A: {"type-arg": 1}}))
+    proc = _proc(1, f"{A}:5: error: Bad thing{tail}\n")
+    code, output = _run(tmp_path, _fake(mypy=proc), capsys)
+    assert code == (0 if counted else 2), output
+
+
+def test_mypy_path_is_the_line_prefix_as_printed() -> None:
+    text = f"./{A}:1: error: Bad  [misc]\n"
+    assert checker.parse_mypy(text, 1) == {f"./{A}": {"misc": 1}}
+
+
+def test_mypy_blank_lines_are_skipped() -> None:
+    text = f"\n{A}:1: error: Bad  [misc]\n\n{A}:2: note: n\n\n"
+    assert checker.parse_mypy(text, 1) == {A: {"misc": 1}}
 
 
 def test_mypy_error_without_code_is_error(tmp_path: Path, capsys: Capsys) -> None:
@@ -270,6 +410,16 @@ CASES = {
 }
 
 
+DIFF_ROWS = {
+    "grew-existing-key": [(A, "X1", 3, 2)],
+    "grew-new-file": [(B, "X1", 1, 0)],
+    "grew-new-code": [(A, "X2", 1, 0)],
+    "lowered-value": [(A, "X1", 1, 2)],
+    "lowered-to-zero": [(B, "X1", 0, 1)],
+    "moved-file": [(A, "X1", 0, 2), (B, "X1", 2, 0)],
+    "moved-code": [(A, "X1", 0, 2), (A, "X2", 2, 0)],
+}
+
 CODES = {
     "ruff": {"X1": "BLE001", "X2": "C901"},
     "mypy": {"X1": "type-arg", "X2": "no-untyped-def"},
@@ -314,15 +464,20 @@ def test_judge_table(tmp_path: Path, capsys: Capsys, kind: str, case: str) -> No
         assert "lint ratchet ok" in output
         return
     assert code == 1, output
-    row = rf"^{kind}\tsrc/ante/[ab]\.py\t\S+: actual \d+, baseline \d+ \([+-]\d+\)$"
-    assert re.search(row, output, re.M)
+    rows = {line for line in output.splitlines() if line.startswith(f"{kind}\t")}
+    assert rows == {
+        f"{kind}\t{path}\t{CODES[kind][key]}: actual {got}, baseline {want} "
+        f"({got - want:+d})"
+        for path, key, got, want in DIFF_ROWS[case]
+    }
     if case.startswith("grew"):
         assert "  대안: " in output
         if kind == "mypy":
-            assert checker.MYPY_ALTERNATIVE in output
-    if case.startswith("lowered") or case.startswith("moved"):
-        assert checker.LOWER_HINT in output
-    assert (checker.MOVE_HINT in output) == (case in ("grew-new-file", "moved-file"))
+            assert f"  대안: {MYPY_TEXT}" in output
+    assert (LOWER_TEXT in output) == (
+        case.startswith("lowered") or case.startswith("moved")
+    )
+    assert (MOVE_TEXT in output) == (case in ("grew-new-file", "moved-file"))
 
 
 @pytest.mark.parametrize(
@@ -379,15 +534,48 @@ def test_ruff_only_mismatch_omits_dependency_versions(
 # ── 도구 버전 ──────────────────────────────────────────────
 
 
-@pytest.mark.parametrize("module", ["ruff", "mypy"])
-def test_version_mismatch_is_error(tmp_path: Path, capsys: Capsys, module: str) -> None:
+@pytest.mark.parametrize(
+    ("module", "version"),
+    [
+        ("ruff", "9.9.9"),
+        ("ruff", "0.17.7"),
+        ("ruff", "0.17.60"),
+        ("ruff", "0.17"),
+        ("ruff", "0.17.6rc1"),
+        ("mypy", "9.9.9"),
+        ("mypy", "2.4.2"),
+        ("mypy", "2.4.10"),
+        ("mypy", "2.4"),
+        ("mypy", "2.4.1.dev0"),
+    ],
+)
+def test_version_must_match_exactly(
+    tmp_path: Path, capsys: Capsys, module: str, version: str
+) -> None:
     _write_baseline(tmp_path, _baseline())
-    versions = {**VERSION_OUTPUT, module: f"{module} 9.9.9\n"}
-    code, output = _run(tmp_path, _fake(versions=versions), capsys)
+    versions = {**VERSION_OUTPUT, module: f"{module} {version}\n"}
+    runner = _fake(versions=versions)
+    code, output = _run(tmp_path, runner, capsys)
     assert code == 2
-    assert f"{module} 9.9.9 is installed" in output
+    assert f"{module} {version} is installed" in output
+    for sentence in INSTALL_SENTENCES:
+        assert sentence in output
     assert 'uv pip install -e ".[dev]"' in output
     assert 'python -m pip install -e ".[dev]"' in output
+    assert all(args == ("--version",) for _, args, _ in runner.calls)
+
+
+def test_version_command_failure_is_error(tmp_path: Path, capsys: Capsys) -> None:
+    _write_baseline(tmp_path, _baseline())
+
+    def runner(
+        module: str, args: Sequence[str], root: Path
+    ) -> subprocess.CompletedProcess[str]:
+        return _proc(1, VERSION_OUTPUT[module], "No module named x")
+
+    code, output = _run(tmp_path, runner, capsys)
+    assert code == 2
+    assert "cannot read ruff version" in output
 
 
 @pytest.mark.parametrize("shown", ["ruff\n", ""])
@@ -399,6 +587,8 @@ def test_version_without_second_word_is_error(
     code, output = _run(tmp_path, _fake(versions=versions), capsys)
     assert code == 2
     assert "cannot read ruff version" in output
+    for sentence in INSTALL_SENTENCES:
+        assert sentence in output
 
 
 # ── 기준선 형식 ────────────────────────────────────────────

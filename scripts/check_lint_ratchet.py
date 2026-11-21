@@ -76,8 +76,8 @@ EXIT_MISMATCH = 1
 EXIT_ERROR = 2
 
 INSTALL_HINT = (
-    '고정 버전을 설치한다: uv pip install -e ".[dev]" '
-    '또는 python -m pip install -e ".[dev]"\n'
+    'uv pip install -e ".[dev]" 또는 python -m pip install -e ".[dev]"로 '
+    "고정 버전을 설치한다.\n"
     "기준선은 그 커밋의 src/를 CI 환경에서 잰 값과 같아야 한다.\n"
     "버전을 올리는 PR이면 같은 PR에서 기준선을 다시 잰다."
 )
@@ -262,10 +262,7 @@ def read_baseline(root: Path) -> tuple[dict[str, str], Counts, Counts]:
 def _alternative(kind: str, code: str) -> str:
     if kind == "mypy":
         return MYPY_ALTERNATIVE
-    for prefix, text in RUFF_ALTERNATIVES:
-        if code.startswith(prefix):
-            return text
-    return "위반을 고친다."
+    return next(text for prefix, text in RUFF_ALTERNATIVES if code.startswith(prefix))
 
 
 def _diff(kind: str, actual: Counts, baseline: Counts) -> list[str]:
