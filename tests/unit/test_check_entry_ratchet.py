@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -850,3 +851,398 @@ def test_baseline_is_read_from_the_contract_path(
     _write_baseline(root, data)
     code, out = _run(root, capsys)
     assert code == 0, out
+
+
+SCRIPT = REPO_ROOT / "scripts" / "check_entry_ratchet.py"
+
+
+def _script(
+    args: list[str], cwd: Path, script: str | Path = SCRIPT
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(script), *args],
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_script_exits_0_when_tree_matches(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "repo", {COMMAND: ONE_OF_EACH})
+    _freeze(root)
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stderr == ""
+
+
+def test_script_exits_1_when_tree_differs(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "repo", {COMMAND: ONE_OF_EACH})
+    _freeze(root)
+    _write(root, COMMAND, ONE_OF_EACH + "    raise SystemExit(1)\n")
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout == ""
+
+
+def test_script_exits_2_without_hook_function(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "repo")
+    _freeze(root)
+    _write(root, MIDDLEWARE, "class AuthenticatedGroup:\n    pass\n")
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+
+
+def test_script_default_root_is_its_checkout_from_any_cwd(tmp_path: Path) -> None:
+    result = _script([], tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("entry ratchet ok: ")
+
+
+def test_ci_argv_and_cwd_pass_on_repository() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(
+        encoding="utf-8"
+    )
+    step = (
+        "      - name: Comment check\n"
+        "        run: python scripts/check_comments.py\n"
+        "\n"
+        "      - name: Entry ratchet check\n"
+        "        run: python scripts/check_entry_ratchet.py\n"
+    )
+    assert step in workflow
+    result = _script([], REPO_ROOT, script="scripts/check_entry_ratchet.py")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_registry_keywords_other_than_code_are_not_registered(
+    tmp_path: Path,
+) -> None:
+    source = 'f(code="validation")\nf(code="not_found")\nf(code="REG")\n'
+    assert _codes(tmp_path, source) == {"validation", "not_found"}
+
+
+@pytest.mark.parametrize(
+    "rel",
+    [
+        "src/ante/cli/__init__.py",
+        "src/ante/cli/commands/__init__.py",
+        "src/ante/cli/direct.py",
+    ],
+)
+def test_init_and_direct_cli_files_are_counted(tmp_path: Path, rel: str) -> None:
+    assert _counts(tmp_path, ONE_OF_EACH, rel=rel) == {key: 1 for key in COUNT_KEYS}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('obj.make(code="X")', id="1-method-call"),
+        pytest.param('f()(code="X")', id="1-call-result"),
+        pytest.param('x = [{"code": "X"}]', id="2-nested"),
+        pytest.param('self.exc.ipc_error_code = "X"', id="4-attribute-chain"),
+        pytest.param('excs[0].ipc_error_code = "X"', id="4-subscript"),
+        pytest.param('f().ipc_error_code = "X"', id="4-call"),
+        pytest.param('e.ipc_error_code: str = "X"', id="4-annassign"),
+        pytest.param('class E(Exception):\n    ipc_error_code = "X"', id="4-class"),
+        pytest.param(
+            'class E(Exception):\n    ipc_error_code: str = "X"', id="4-class-annassign"
+        ),
+        pytest.param('getattr(self.e, "code", "X")', id="5-getattr-attribute"),
+        pytest.param('getattr(a[0], "ipc_error_code", "X")', id="5-getattr-subscript"),
+        pytest.param('getattr(f(), "code", "X")', id="5-getattr-call"),
+        pytest.param('self.d.get("code", "X")', id="5-get-attribute"),
+        pytest.param('resp["x"].get("code", "X")', id="5-get-subscript"),
+        pytest.param('f().get("code", "X")', id="5-get-call"),
+        pytest.param('fmts[0].error("m", "X")', id="6-subscript-receiver"),
+        pytest.param('get_fmt().error("m", "X")', id="6-call-receiver"),
+        pytest.param('get_logger().error("m", "X")', id="6-unnamed-logger-call"),
+        pytest.param('x = self.e.code or "X"', id="7-attribute-chain"),
+        pytest.param('x = f().code or "X"', id="7-call-code"),
+        pytest.param('x = d["e"].ipc_error_code or "X"', id="7-subscript-ipc"),
+        pytest.param('x = getattr(a[0], "code", "") or "X"', id="7-getattr-subscript"),
+        pytest.param('x = f().get("code") or "X"', id="7-get-call"),
+    ],
+)
+def test_position_with_non_name_receiver_is_counted(
+    tmp_path: Path, source: str
+) -> None:
+    assert _codes(tmp_path, source) == {"X"}
+
+
+@pytest.mark.parametrize(
+    ("source", "key"),
+    [
+        ('fmts[0].error("m")', "cli_error_calls"),
+        ('get_fmt().error("m")', "cli_error_calls"),
+        ('self.a.b.error("m")', "cli_error_calls"),
+        ('getattr(self.e, "ipc_error_code", "")', "ipc_error_code_reads"),
+        ('getattr(a[0], "ipc_error_code", "")', "ipc_error_code_reads"),
+        ('getattr(f(), "ipc_error_code", "")', "ipc_error_code_reads"),
+    ],
+)
+def test_count_with_non_name_receiver_is_counted(
+    tmp_path: Path, source: str, key: str
+) -> None:
+    counts = _counts(tmp_path, f"def g(self, a, f):\n    {source}\n")
+    assert counts[key] == 1
+
+
+def test_async_hook_function_is_excluded(tmp_path: Path) -> None:
+    source = HOOK_SOURCE.replace("    def main(", "    async def main(")
+    assert _counts(tmp_path, source, rel=MIDDLEWARE) == {key: 0 for key in COUNT_KEYS}
+
+
+HEADER = "entry ratchet failed against scripts/entry_ratchet_baseline.json:"
+ALTERNATIVE_LINES = [
+    "새 에러 출구와 새 에러 코드 대신:",
+    "  - 명령 안에서 끝내지 말고 타입 예외를 던진다",
+    "  - 그 예외와 코드를 에러 레지스트리"
+    "(src/ante/contracts/error_registry.py)에 등록한다",
+]
+MOVE_LINE = "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
+LOWER_LINE = (
+    "줄어든 값은 scripts/entry_ratchet_baseline.json의 기준선을 실측으로 낮춘다:"
+)
+CMD_PATH = "src/ante/cli/commands/demo.py"
+OTHER_PATH = "src/ante/cli/commands/other.py"
+
+
+def _run_split(root: Path, capsys: Capsys) -> tuple[int, str, str]:
+    code = checker.main(["--root", str(root)])
+    captured = capsys.readouterr()
+    return code, captured.out, captured.err
+
+
+def _assert_failure(
+    root: Path, capsys: Capsys, expected: list[str], code: int = 1
+) -> None:
+    got, out, err = _run_split(root, capsys)
+    assert (got, out) == (code, "")
+    assert err.splitlines() == expected
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_full_output_when_count_grows(tmp_path: Path, capsys: Capsys, key: str) -> None:
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH})
+    _freeze(root)
+    _write(root, COMMAND, ONE_OF_EACH + COUNT_KEY_EDITS[key])
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"{key}\t{CMD_PATH}: actual 2, baseline 1 (+1)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+        ],
+    )
+
+
+@pytest.mark.parametrize("key", COUNT_KEYS)
+def test_full_output_when_count_drops_by_two(
+    tmp_path: Path, capsys: Capsys, key: str
+) -> None:
+    edit = COUNT_KEY_EDITS[key]
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH + edit + edit})
+    _freeze(root)
+    _write(root, COMMAND, ONE_OF_EACH)
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"{key}\t{CMD_PATH}: actual 1, baseline 3 (-2)",
+            LOWER_LINE,
+            f"  - {key}['{CMD_PATH}']를 1로 낮춘다",
+        ],
+    )
+
+
+def test_full_output_for_new_file(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH})
+    _freeze(root)
+    _write(root, OTHER, "import sys\n\n\ndef f():\n    sys.exit(1)\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_exits\t{OTHER_PATH}: actual 1, baseline 0 (+1)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+        ],
+    )
+
+
+def test_full_output_for_file_dropping_to_zero(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH})
+    _freeze(root)
+    _write(root, COMMAND, "def run():\n    return None\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_error_calls\t{CMD_PATH}: actual 0, baseline 1 (-1)",
+            f"cli_exits\t{CMD_PATH}: actual 0, baseline 1 (-1)",
+            f"ipc_error_code_reads\t{CMD_PATH}: actual 0, baseline 1 (-1)",
+            LOWER_LINE,
+            f"  - cli_error_calls에서 '{CMD_PATH}' 키를 지운다",
+            f"  - cli_exits에서 '{CMD_PATH}' 키를 지운다",
+            f"  - ipc_error_code_reads에서 '{CMD_PATH}' 키를 지운다",
+        ],
+    )
+
+
+def test_full_output_for_added_code(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {CORE: CODE_SOURCE})
+    _freeze(root)
+    _write(root, CORE, CODE_SOURCE + '    fmt.error("m", code="NEW_B")\n')
+    _assert_failure(
+        root, capsys, [HEADER, "unregistered_codes\t+ NEW_B", *ALTERNATIVE_LINES]
+    )
+
+
+def test_full_output_for_removed_code(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {CORE: CODE_SOURCE})
+    _freeze(root)
+    _write(root, CORE, "def f(fmt):\n    return None\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "unregistered_codes\t- NEW_A",
+            LOWER_LINE,
+            "  - unregistered_codes에서 'NEW_A'를 지운다",
+        ],
+    )
+
+
+def test_full_output_for_swapped_code(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {CORE: CODE_SOURCE})
+    _freeze(root)
+    _write(root, CORE, CODE_SOURCE.replace("NEW_A", "NEW_B"))
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "unregistered_codes\t+ NEW_B",
+            "unregistered_codes\t- NEW_A",
+            *ALTERNATIVE_LINES,
+            LOWER_LINE,
+            "  - unregistered_codes에서 'NEW_A'를 지운다",
+        ],
+    )
+
+
+def test_full_output_when_growth_and_drop_mix(tmp_path: Path, capsys: Capsys) -> None:
+    two_exits = "import sys\n\n\ndef f():\n    sys.exit(1)\n    sys.exit(2)\n"
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH, OTHER: two_exits})
+    _freeze(root)
+    _write(root, COMMAND, ONE_OF_EACH + COUNT_KEY_EDITS["cli_error_calls"])
+    _write(root, OTHER, "import sys\n\n\ndef f():\n    sys.exit(1)\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_error_calls\t{CMD_PATH}: actual 2, baseline 1 (+1)",
+            f"cli_exits\t{OTHER_PATH}: actual 1, baseline 2 (-1)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+            LOWER_LINE,
+            f"  - cli_exits['{OTHER_PATH}']를 1로 낮춘다",
+        ],
+    )
+
+
+def test_full_output_when_passing_goes_to_stdout(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    edit = COUNT_KEY_EDITS["cli_error_calls"]
+    other = ONE_OF_EACH + edit * 3 + COUNT_KEY_EDITS["ipc_error_code_reads"]
+    core = CODE_SOURCE + '    fmt.error("m", code="NEW_B")\n'
+    root = _tree(tmp_path, {COMMAND: ONE_OF_EACH, OTHER: other, CORE: core})
+    _freeze(root)
+    code, out, err = _run_split(root, capsys)
+    assert (code, err) == (0, "")
+    assert out == (
+        "entry ratchet ok: cli_error_calls 5, cli_exits 2, ipc_error_code_reads 3, "
+        "unregistered_codes 4 (baseline scripts/entry_ratchet_baseline.json)\n"
+    )
+
+
+def test_full_output_for_missing_baseline(tmp_path: Path, capsys: Capsys) -> None:
+    _assert_failure(
+        _tree(tmp_path),
+        capsys,
+        ["baseline file not found: scripts/entry_ratchet_baseline.json"],
+        code=2,
+    )
+
+
+def test_full_output_for_missing_hook_function(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, MIDDLEWARE, "class AuthenticatedGroup:\n    pass\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            "hook function AuthenticatedGroup.main not found in "
+            "src/ante/cli/middleware.py"
+        ],
+        code=2,
+    )
+
+
+def test_full_output_for_missing_hook_file(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    (root / MIDDLEWARE).unlink()
+    _assert_failure(
+        root,
+        capsys,
+        [
+            "hook function AuthenticatedGroup.main not found: "
+            "src/ante/cli/middleware.py is missing"
+        ],
+        code=2,
+    )
+
+
+def test_full_output_for_registry_failures(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, REGISTRY, "X = 1\n")
+    _assert_failure(
+        root,
+        capsys,
+        ["no ErrorSpec(code=...) found in src/ante/contracts/error_registry.py"],
+        code=2,
+    )
+    (root / REGISTRY).unlink()
+    _assert_failure(
+        root,
+        capsys,
+        ["error registry not found: src/ante/contracts/error_registry.py"],
+        code=2,
+    )
+
+
+def test_full_output_for_wrong_baseline_keys(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _write_baseline(root, _without("cli_exits"))
+    _assert_failure(
+        root,
+        capsys,
+        [
+            "scripts/entry_ratchet_baseline.json must have exactly the keys "
+            "['cli_error_calls', 'cli_exits', 'ipc_error_code_reads', "
+            "'unregistered_codes'] (missing ['cli_exits'], extra [])"
+        ],
+        code=2,
+    )

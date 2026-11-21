@@ -40,6 +40,9 @@ a code held in a variable or a module constant, a positional argument of a
 module helper (``_exit_with_error(fmt, "CODE", ...)``), a conditional
 expression, an f-string or a return value. Exits through helpers such as
 ``emit_cli_error`` are not counted either.
+``self.ctx.exit(...)`` and ``click.get_current_context().exit(...)`` are not
+counted as exits.
+``setattr(e, "ipc_error_code", ...)`` and tuple assignments are not positions.
 
 Exit 0: all four keys equal ``scripts/entry_ratchet_baseline.json``.
 Exit 1: a count differs from the baseline in either direction, or the code
