@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import sqlite3
 
 import click
 from pydantic import ValidationError
@@ -15,6 +14,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.core.database import OperationalError
 from ante.report.models import ReportStatus
 from ante.report.validation import ReportSubmitRequest
 
@@ -189,7 +189,7 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
             report_status = ReportStatus(status) if status else None
             try:
                 reports = await store.list_reports(status=report_status)
-            except sqlite3.OperationalError as exc:
+            except OperationalError as exc:
                 if "no such table" not in str(exc).lower():
                     raise
                 logger.debug(
@@ -337,7 +337,7 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
             store = ReportStore(db)
             try:
                 r = await store.get(report_id)
-            except sqlite3.OperationalError as exc:
+            except OperationalError as exc:
                 if "no such table" not in str(exc).lower():
                     raise
                 logger.debug(
