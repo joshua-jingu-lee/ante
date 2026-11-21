@@ -70,12 +70,6 @@ class TreasuryManager:
     ) -> None:
         """특정 계좌의 Treasury 에 시장가 매수 reserve estimate 용 resolver 주입.
 
-        ``main._init_gateway()`` 끝에서 account-scoped wrapper 로 호출된다 — 부팅
-        순서상 ``initialize_all`` 직후에는 APIGateway 가 아직 준비되지 않았기
-        때문이다. resolver 미주입 상태에서 시장가 매수 + price=None
-        시도가 들어오면 Treasury 가 terminal ``market_buy_quote_unavailable`` 로
-        거부한다.
-
         Raises:
             KeyError: 해당 계좌의 Treasury 가 등록돼 있지 않을 때.
         """
@@ -89,12 +83,6 @@ class TreasuryManager:
 
     def get(self, account_id: str) -> Treasury:
         """계좌의 Treasury 인스턴스 반환.
-
-        Args:
-            account_id: 계좌 ID.
-
-        Returns:
-            Treasury 인스턴스.
 
         Raises:
             KeyError: 해당 계좌의 Treasury가 없을 때.

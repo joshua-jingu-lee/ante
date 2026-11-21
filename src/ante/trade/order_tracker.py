@@ -1,18 +1,4 @@
-"""OrderTracker — 추적 주문 영속 + 누적 체결 단조 advance.
-
-체결 반영(fill-recovery) 경로의 권위 있는 추적 저장소.
-``OrderSubmittedEvent`` 로 추적 주문을 seed하고, 스트림/폴이 관측한 누적 체결량을
-단조(monotonic) advance한다.
-
-identity (구조적 종결):
-- PK = 내부 ``order_id`` (``OrderSubmittedEvent`` 의 ante uuid4 — 생성상 전역 유일).
-- ``(account_id, broker_order_id, submitted_date)`` = UNIQUE 인덱스 + 조회 키.
-  KIS ``odno`` (broker_order_id) 는 계좌 간/paper·live/영업일 재사용으로 충돌
-  가능하므로 broker_order_id 단독 키는 쓰지 않는다.
-
-상세 설계: ``docs/specs/trade/03-08-fill-recovery.md``,
-``docs/specs/broker-adapter/18-fill-recovery.md``.
-"""
+"""OrderTracker — 추적 주문 영속 + 누적 체결 단조 advance."""
 
 from __future__ import annotations
 
@@ -69,14 +55,8 @@ class RecordFillResult:
         confirmed_cumulative: **CAS ``RETURNING recorded_filled_qty`` 로 확정된**
             누적 체결량. ``delta>0`` 일 때 advance 된 확정값(= new_cumulative)을
             담고, no-op(``delta<=0``)이면 직전 recorded 값을 그대로 반영한다.
-
-            outbox/이벤트의 결정적 ``fill_dedup_key`` 는 **이 확정값**으로 생성해야
-            한다(입력 ``observed_cumulative`` 가 아니다). 동일 advance 경계는 항상
-            같은 확정값을 내므로, 재전달 시 키가 결정적이다.
         new_status: advance 후 확정된 주문 상태(``filled`` 또는
             ``partially_filled``). no-op(``delta<=0``)이면 직전 status 를 반영한다.
-            ``FillApplier`` post-commit ``mirror_fill_to_cache`` 에서
-            캐시 상태/evict 판단에 쓴다.
     """
 
     delta: float
@@ -158,23 +138,6 @@ class OrderTracker:
 
     인메모리 open 캐시: LIVE ``ctx.get_open_orders()`` 의 sync 백엔드.
     캐시는 **commit 된 DB 상태의 미러**일 뿐 진리원이 아니다(DB 가 SSOT).
-    캐시 키 = ``(account_id, bot_id, order_id)`` — 단일계좌 다중봇에서 타-봇 누출
-    방지. 캐시 진입 경로는 4개뿐이며 모두 **DB commit 확정 이후** 반영한다:
-
-    1. ``open``      — ``INSERT … RETURNING`` 으로 write 성공 확인 후 upsert
-                       (중복 OrderSubmittedEvent 의 blind 덮어쓰기 방지).
-    2. ``record_fill`` → **캐시 미접근**. FillApplier 트랜잭션 내부 호출이라 여기서
-       캐시를 바꾸면 rollback 시 stale. 체결 미러는 commit 직후 FillApplier 가
-       ``mirror_fill_to_cache`` 로 한다(post-commit 전용).
-    3. ``mark_terminal`` — DB write 후 ``_evict_open_cache``.
-    4. ``expire_stale``  — 단일 ``UPDATE … RETURNING`` 으로 **실제 expired 된**
-       order_id 만 받아 그 ID 만 ``_evict_open_cache``. 사전 SELECT 가 없어
-       SELECT↔UPDATE 사이 fill commit(open→partial/filled) TOCTOU 가 없다.
-
-    **invariant**: ``open``/``mark_terminal``/``expire_stale`` 는 자체 commit 을
-    소유한다 — 외부 ``Database.transaction()`` 내부에서 호출하지 않는다. Database 는
-    중첩 트랜잭션을 ``RuntimeError`` 로 거부하므로(``core/database.py``) 위반 시
-    silent stale 이 아니라 loud 실패로 드러난다.
     """
 
     def __init__(self, db: Database) -> None:
@@ -237,12 +200,6 @@ class OrderTracker:
         order_id PK 재제출(중복 이벤트)은 무시한다 (``ON CONFLICT DO NOTHING``).
         같은 ``(account_id, broker_order_id, submitted_date)`` UNIQUE 충돌도
         동일하게 무시되어 seed 멱등성을 보장한다.
-
-        ``RETURNING`` 으로 **실제 INSERT 가 일어났을 때에만** open 캐시에
-        upsert 한다. 중복 OrderSubmittedEvent(ON CONFLICT DO NOTHING — row 미반환)
-        는 캐시를 건드리지 않아, 이후 advance 된 캐시 상태를 blind 하게 덮어쓰지
-        않는다. **외부 ``Database.transaction()`` 안에서 호출 금지(자체 commit
-        소유)** — 위반 시 nested-txn RuntimeError 로 loud 실패.
         """
         validated = require_account_id(account_id, context="order_tracker.open")
         inserted = await self._db.execute_fetch_one(
@@ -311,25 +268,10 @@ class OrderTracker:
 
         ``delta = new_cumulative - 이전 recorded_filled_qty``.
         ``delta <= 0`` 이면 ``delta=0`` no-op(직전 recorded 를 confirmed 로 반영).
-        ``delta > 0`` 이면 recorded 를 new_cumulative 로 갱신하고 status 를
-        부분/완료로 전이한 뒤, **CAS ``RETURNING recorded_filled_qty`` 로 확정된
-        누적값**을 ``confirmed_cumulative`` 로 반환한다.
-
-        ``confirmed_cumulative`` 는 outbox/이벤트의 결정적 ``fill_dedup_key`` 산출
-        기준이다. 입력 ``new_cumulative`` 가 아니라 DB 가 RETURNING 으로 돌려준
-        값을 노출해, 재전달 시 키 비결정성을 없앤다.
 
         **반드시 FillApplier 의 ``Database.transaction()`` + Lock 안에서 호출.**
-        writer 연결에서 현재값을 읽고(``execute_fetch_one``) 진행 중인 트랜잭션의
-        일관된 상태를 본 뒤 CAS UPDATE 하므로, 단일 writer + Lock 으로 read↔update
-        사이 race 가 없다.
 
         invariant: 이 메서드는 **인메모리 open 캐시를 절대 건드리지 않는다.**
-        FillApplier 트랜잭션 내부 호출이라, 여기서 캐시를 advance/evict 하면 이후
-        ``_save_trade``/position/outbox 실패로 트랜잭션이 rollback 될 때 DB 는
-        원복돼도 캐시는 stale advance 로 남아 sync 조회가 잘못된 값을 본다. 체결
-        캐시 미러는 **commit 성공 직후** FillApplier 가 ``mirror_fill_to_cache`` 로
-        한다.
         """
         row = await self._db.execute_fetch_one(
             """SELECT recorded_filled_qty, ordered_qty, status
@@ -395,9 +337,6 @@ class OrderTracker:
         ``recorded_filled_qty``/``status`` 를 **CAS 확정값**(``confirmed_cumulative``)
         으로 미러링하고, terminal(``filled``)이면 evict 한다. 입력 observed 값이
         아니라 DB 가 RETURNING 으로 확정한 값만 반영해 단조성을 보존한다.
-
-        캐시 miss(cold-cache 등 캐시에 해당 order 가 없는 경우)는 보수적으로
-        무시한다 — DB 가 진리원이며, 다음 warm/조회는 DB 기준이다(best-effort).
         """
         for key, record in list(self._open_cache.items()):
             if key[2] != order_id:
@@ -520,16 +459,7 @@ class OrderTracker:
 
         spec §4.1 scope: **non-terminal** 이면서 추적 ``submitted_date`` 가 관측
         영업일 **이하**(``submitted_date <= observed_date``)인 주문을 매핑한다.
-        정확매칭(``= observed_date``)이 아니라 ``<=`` 로 완화하는 이유 (I6):
 
-        - 폴이 관측한 KIS ``ord_dt``(주문일자)는 tracker seed 의
-          ``business_date_kst()`` 와 보통 동일하나, KST 영업일 rollover 나 timezone
-          drift 로 미세하게 어긋날 수 있다. 전일(또는 그 이전) 영업일에 seed 된
-          non-terminal 주문이 다운타임 중 체결돼 당일 history 로 관측될 때, 정확
-          매칭이면 매핑이 누락되어 복구가 실패한다. ``<=`` 가 이를 덮는다.
-        - 일자 재사용 격리는 유지된다: 같은 ``broker_order_id`` 의 과거 주문은
-          체결/취소/만료로 **terminal** 이 되어 매핑 대상에서 제외되고, 미래
-          영업일(``submitted_date > observed_date``) seed 는 ``<=`` 가 배제한다.
         - 같은 odno 의 non-terminal 이 여러 영업일에 동시 존재하는 경합에서는
           ``submitted_date`` 최신(MAX) 1건을 골라 "가장 최근 주문 우선" 으로
           결정론적이게 한다.
@@ -565,11 +495,6 @@ class OrderTracker:
         """관측(account/broker_order_id/observed_date) → 추적 레코드 (terminal 포함).
 
         ``lookup_order_id`` 와 달리 **status 무관**(terminal 포함)으로 매핑한다.
-        §11.4 late-ccld over-attribution alert 전용 — fallback 이 full fill
-        로 advance 해 ``filled``(terminal)이 된 주문에 대해 이후 ccld 가 **더 낮은**
-        누적을 반환할 때, 그 주문의 현 ``recorded_filled_qty`` 와 비교해 경보를
-        surface 하기 위함이다. ``lookup_order_id`` 의 non-terminal scope 로는 이미
-        filled 된 주문을 찾지 못해 경보 자체가 누락된다.
 
         scope/정렬은 ``lookup_order_id`` 와 동일하게 ``submitted_date <=
         observed_date`` 의 최신(MAX) 1건이다(일자 재사용 격리·결정성 유지).

@@ -395,15 +395,6 @@ class Treasury:
     async def allocate(self, bot_id: str, amount: float) -> None:
         """봇에 예산 할당. 미할당 자금에서 차감.
 
-        ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
-        한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
-        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다.
-
-        reject reason 별 typed exception 으로, CLI/IPC envelope ``code`` 가
-        빈 문자열로 surface 되는
-        회귀(spec ``docs/specs/cli/02-design-decisions.md:83-89`` 위반)를 차단
-        한다.
-
         Raises:
             TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
             TreasuryInsufficientUnallocatedError: 미할당 잔액 부족.
@@ -442,12 +433,6 @@ class Treasury:
 
     async def deallocate(self, bot_id: str, amount: float) -> None:
         """봇에서 예산 회수. 가용 예산 범위 내에서만 가능.
-
-        ``amount``는 finite-positive(``math.isfinite(amount) and amount > 0``)여야
-        한다. ``NaN``/``±Infinity``는 비교 연산이 모두 False가 되어 기존 가드
-        ``amount <= 0``을 우회해 budget state를 오염시키므로 입구에서 거부한다.
-
-        allocate 와 동형으로 reject 시 typed exception.
 
         Raises:
             TreasuryInvalidAmountError: ``amount`` 가 NaN/±Inf/<=0.
@@ -489,9 +474,6 @@ class Treasury:
 
         봇 삭제 시 호출된다. bot_status_checker를 우회하여 어떤 상태에서든
         환수가 가능하다 (delete_bot에서 이미 봇을 중지한 뒤 호출하므로).
-
-        Args:
-            bot_id: 대상 봇 ID.
 
         Returns:
             환수된 금액. budget이 없으면 0.0.
@@ -548,13 +530,8 @@ class Treasury:
         현재 할당액과 목표 금액의 차이를 계산하여 allocate/deallocate를 호출한다.
         미할당 잔액이 부족하면 InsufficientFundsError를 발생시킨다.
 
-        Args:
-            bot_id: 대상 봇 ID.
-            target_amount: 목표 할당 금액.
-
         Raises:
             InsufficientFundsError: 증액 시 미할당 잔액 부족.
-            BotNotStoppedError: 봇이 운용 중인 경우.
             ValueError: 목표 금액이 음수인 경우.
         """
         from ante.treasury.exceptions import (

@@ -1,7 +1,4 @@
-"""Virtual 계좌 봇용 Provider 구현체 + VirtualExecutor.
-
-인메모리 가상 자금/포지션으로 실제 계좌 영향 없이 전략을 검증한다.
-"""
+"""Virtual 계좌 봇용 Provider 구현체 + VirtualExecutor."""
 
 from __future__ import annotations
 

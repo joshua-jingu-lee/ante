@@ -1,27 +1,4 @@
-"""FillApplier — 단일 멱등 choke point.
-
-빠른 경로(실시간 체결 통보 스트림)와 백스톱 경로(REST ``get_order_history`` 폴)가
-모두 ``apply_cumulative`` 로 수렴한다. 같은 체결을 몇 번 관측하든 포지션은 정확히
-한 번 반영된다.
-
-crash 원자성: ``recorded_filled_qty`` advance(CAS) + ``TradeRecord`` insert +
-``PositionHistory.on_trade`` 를 ``Database.transaction()`` 단일 트랜잭션으로 묶는다.
-적용 도중 crash 하면 rollback 되어 recorded 가 advance 되지 않고, 재기동 후 다음
-폴이 동일 delta 를 재적용한다 → positions/trades crash-safe exactly-once.
-
-이벤트 durability: outbox 가 주입되면 같은 트랜잭션 안에서
-``OrderFilledEvent`` payload 를 ``fill_outbox`` 에 INSERT 한다. commit 성공 =
-이벤트 영속 보장이므로, commit↔publish 사이 crash window 가 닫힌다(이벤트 무손실).
-실제 발행은 ``FillOutboxPublisher`` 워커가 트랜잭션 밖에서 at-least-once 로 한다.
-(소비자 멱등화는 별도다. outbox 는 무손실 전달 + 결정적 키 제공까지.)
-
-``asyncio.Lock`` 은 read → delta → txn(outbox insert 포함) 전체를 감싸 프로세스
-내 동시 관측을 직렬화한다.
-
-상세 설계: ``docs/specs/trade/03-08-fill-recovery.md``,
-``docs/specs/broker-adapter/18-fill-recovery.md``(§5.2),
-``docs/specs/eventbus/eventbus.md``(전달 시맨틱).
-"""
+"""FillApplier — 단일 멱등 choke point."""
 
 from __future__ import annotations
 
@@ -127,11 +104,6 @@ class FillApplier:
         Lock 안에서 추적 주문의 현재 ``recorded_filled_qty`` 를 읽어
         ``observed_cumulative = recorded + increment`` 로 환산한 뒤 백스톱과 동일한
         누적 멱등 모델(``apply_cumulative`` 코어)로 수렴시킨다.
-
-        스트림은 fast-path 이며 정합성 SSOT 는 백스톱 폴이다. 드물게 스트림이
-        같은 체결을 중복 통보하면 일시적으로 과다 환산될 수 있으나, 이는
-        bounded fast-path 한계이며 누적 advance 의 단조성·정상 경로 정확성은
-        유지된다.
         """
         validated = require_account_id(
             account_id, context="fill_applier.apply_stream_increment"

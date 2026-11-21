@@ -258,10 +258,6 @@ class RuleEngine:
         bot_id에 연결된 strategy_id를 조회한 뒤
         load_strategy_rules_from_config(strategy_id, rules)로 기존 룰을 교체한다.
 
-        Args:
-            bot_id: 대상 봇 ID.
-            rules: 새 룰 설정 리스트.
-
         Raises:
             RuleError: resolver 미설정 또는 strategy_id 조회 실패.
         """

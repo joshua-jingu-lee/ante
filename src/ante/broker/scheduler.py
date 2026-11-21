@@ -1,8 +1,4 @@
-"""ReconcileScheduler — 주기적 자동 대사 스케줄러.
-
-설정된 간격(기본 30분)으로 모든 활성 봇의 포지션 대사를 수행한다.
-봇 시작 시 1회 대사도 지원한다.
-"""
+"""ReconcileScheduler — 주기적 자동 대사 스케줄러."""
 
 from __future__ import annotations
 
@@ -99,10 +95,6 @@ class ReconcileScheduler:
     ) -> list[dict[str, Any]]:
         """1회 대사를 수행하고 보정 내역을 반환한다.
 
-        이 스케줄러가 바인딩된 ``broker_account_id`` 계좌에 대해 브로커 총합을
-        1회 조회하고, **봇 귀속 ambiguity(status 무관 봇 count)** 와 **correction
-        실행 범위(running 봇)** 를 분리해 처리한다.
-
         - 1봇-total 계좌이고 **그 봇이 running**: 기존 ``reconcile`` 보정
           (self-check/skip_external_buy/external-buy 분류 무변경).
         - 1봇-total 인데 그 봇이 stopped/error(미-running): correction 미실행 →
@@ -110,15 +102,6 @@ class ReconcileScheduler:
           scheduler 가 비활성 봇을 자동 보정하지 않는다).
         - 2+봇 계좌: ``detect_account_level`` (correct_position 미호출). 계좌
           총합 vs 전 봇 합산 비교로 false external-buy 제거.
-
-        Args:
-            skip_external_buy: True 면 "외부 매수" 분류 보정을 건너뛴다(barrier).
-                fill 카치업 미성공 시 기동 대사에만 쓰인다.
-                1봇-total+running 보정 경로에만 적용된다.
-
-        Returns:
-            각 봇별 보정 내역을 합산한 리스트. detect-only 경로는 보정이 없으므로
-            기여하지 않는다(불일치는 NotificationEvent 로 알림).
         """
         from ante.bot.config import BotStatus
 

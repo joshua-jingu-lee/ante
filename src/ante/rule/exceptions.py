@@ -1,14 +1,4 @@
-"""Rule Engine 모듈 예외.
-
-class-level ``code`` 정책 (실측 mirror):
-
-- ``RuleConfigError`` → ``RULE_CONFIG_ERROR`` (validation; 본 PR 신규 부여)
-  — 룰 설정 입력 invariant 위반 (rule_type/params 등).
-
-``RuleError`` base 는 의도적으로 ``.code`` 를 부여하지 않는다 — 사용 사례가
-없으며 allowlist 의 ``pending_migration`` baseline 으로 보존된다
-(``AccountError`` 와 동일 패턴).
-"""
+"""Rule Engine 모듈 예외."""
 
 
 class RuleError(Exception):

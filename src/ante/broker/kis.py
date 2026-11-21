@@ -1,13 +1,4 @@
-"""한국투자증권 (KIS) Open API 어댑터.
-
-KIS REST API를 통해 주문, 조회를 처리한다.
-실행 시 aiohttp 패키지가 필요하다.
-
-계층 구조:
-    BrokerAdapter (ABC)
-    └── KISBaseAdapter (ABC) — KIS 공통 레이어 (인증, HTTP, 에러 처리)
-        └── KISDomesticAdapter — 국내주식 전용
-"""
+"""한국투자증권 (KIS) Open API 어댑터."""
 
 from __future__ import annotations
 
@@ -106,11 +97,7 @@ _TokenCacheKey = tuple[str, str, str]
 """(app_key, app_secret, env) config fingerprint — ``_token_cache`` 키 타입."""
 
 _token_cache: dict[_TokenCacheKey, tuple[str, datetime]] = {}
-"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (T2).
-
-키는 ``(app_key, app_secret, env)`` 다(``env`` = 모의/실전 구분). 같은 config 는 같은
-키로 single-flight 수렴·토큰 공유, 다른 secret/환경은 다른 키로 cache miss → 재발급
-(config 변경 재검증)."""
+"""config fingerprint → (access_token, expires_at) in-process shared 캐시 (T2)."""
 
 _token_locks: dict[str, asyncio.Lock] = {}
 """app_key → 발급 직렬화 Lock (T1, lock key=app_key — rate-limit 단위)."""
@@ -118,12 +105,6 @@ _token_locks: dict[str, asyncio.Lock] = {}
 _token_cooldowns: dict[str, datetime] = {}
 """app_key → cooldown_until (UTC) — EGW00133 source-level cooldown.
 
-EGW00133(접근토큰 발급 1분 1회)을 받으면 ``_raise_token_error`` 가 ``app_key`` 에
-``now(UTC) + TOKEN_RATE_LIMIT_COOLDOWN_SECONDS`` 를 기록한다. ``_authenticate`` 는
-유효 캐시 hit(T2)이 아닌 발급 경로에서 lock 밖 fast-path + lock 안 double-check 로
-cooldown 을 확인해, cooldown 내면 **HTTP 미호출·즉시 ``TokenRateLimitError``** 를
-raise 한다. 모든 get_broker→토큰 발급 경로(startup/self-healing/runtime/IPC)가 이
-단일 chokepoint 를 존중하므로 per-call-site 필터 없이 단일 cadence(T4)가 보장된다.
 T2 불변: 유효 캐시 토큰 read 는 cooldown 과 무관(hydrate 먼저)하다."""
 
 
@@ -980,11 +961,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         (``inquire-balance``)는 종목 컨텍스트가 없어 주문가능액을 산출할 수 없으므로
         종목/단가/주문구분을 입력으로 받는 이 메서드가 별도로 조회한다. 모의
         rate-limit(5req/min) 안전을 위해 ``get_account_balance``와 분리한다.
-
-        ORD_DVSN/ORD_UNPR: KIS 공식 샘플(`inquire_psbl_order.py`: pdno=005930,
-        ord_unpr='55000', ord_dvsn='01')대로 시장가는 ``ORD_DVSN='01'``이며
-        ``ORD_UNPR``은 실제 1주당 가격(필수, '0' 아님)이다. 시장가/``price=None``
-        이면 ``get_current_price(symbol)``를 1회 호출해 단가로 사용한다.
         """
         tr_id = _PSBL_ORDER_TR_ID_PAPER if self.is_paper else _PSBL_ORDER_TR_ID_LIVE
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/inquire-psbl-order"
@@ -1116,10 +1092,6 @@ class KISDomesticAdapter(KISBaseAdapter):
     async def cancel_order(self, order_id: str) -> bool:
         """주문 취소.
 
-        취소(order-rvsecncl)는 신세대 tr_id ``VTTC0013U``(모의)/``TTTC0013U``
-        (실전)로 전송하며, 신세대 필수 필드 ``EXCG_ID_DVSN_CD``(공유 상수
-        ``DEFAULT_EXCG_ID_DVSN_CD="KRX"``)를 포함한다.
-
         body 에 원주문별 ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)를
         조건부로 전송한다. 값은 place_order 시 order-cash 응답에서 캡처해
         둔 인메모리 캐시에서 가져오며, 순수 dict 조회로 네트워크/추가 조회를 하지
@@ -1162,28 +1134,11 @@ class KISDomesticAdapter(KISBaseAdapter):
     ) -> bool:
         """주문 정정 (v1=price-only). cancel_order 미러링.
 
-        정정(order-rvsecncl)은 취소와 **동일 엔드포인트**를 공유한다. 신세대 tr_id
-        ``VTTC0013U``(모의)/``TTTC0013U``(실전)로 전송하며, 취소(``"02"``)와 달리
-        ``RVSE_CNCL_DVSN_CD="01"``(정정)을 보낸다. v1 은 가격 정정(수량 불변)만
-        지원하므로:
-
-        - ``ORD_QTY`` = 원주문 수량(Gateway 가 ``record.ordered_qty`` 를 ``quantity``
-          로 전달, 불변).
-        - ``ORD_UNPR`` = 신규 정정 가격(``str(int(price))``). Gateway 가 finite
-          ``price>0`` 을 보장한다.
-        - ``QTY_ALL_ORD_YN="Y"`` (전량·수량 불변).
-        - ``ORD_DVSN`` = ``_map_order_type("limit")`` ("00").
-        - ``EXCG_ID_DVSN_CD`` = 공유 상수 ``DEFAULT_EXCG_ID_DVSN_CD``.
-        - ``CNDT_PRIC`` (조건가) 미전송 (v1 지정가 정정 비대상).
-
         ``KRX_FWDG_ORD_ORGNO``(한국거래소전송주문조직번호)는 cancel 과 동일하게
         place_order(order-cash) 응답 캡처 캐시(``_krx_fwdg_orgno_cache``)에서 가져온다.
         취소는 miss 시 필드를 생략(전송)하지만, 정정은 oracle 검증 전이라 보수적으로
         **miss/stale → :class:`ModifyOrgnoUnavailableError` raise(전송 금지)** 한다.
         Gateway 가 이를 ``modify_orgno_unavailable`` 거부로 매핑한다.
-
-        live A/B(실전 KIS) 검증은 사용자 oracle 후속이며, 현재는 mock+모의 매핑/분기
-        만 검증한다(pending caveat).
         """
         tr_id = "VTTC0013U" if self.is_paper else "TTTC0013U"
         url = f"{self.base_url}/uapi/domestic-stock/v1/trading/order-rvsecncl"
@@ -1402,10 +1357,6 @@ class KISDomesticAdapter(KISBaseAdapter):
         inner(``*0081R``), 미만이면 before(``*9215R``)다(start-date 단독 기준).
         교차 구간(``from < cutoff <= to``)은 split query 없이 start-date 기준
         before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다.
-        자동 호출자 FillReconcileScheduler 는 항상 ≤7일 창이라 inner 고정이지만,
-        사용자 표면 ``ante broker order-history`` 는 임의 ``--from`` 을
-        받으므로 before 분기와 교차 구간이 실제로 도달 가능하다 — 한계는 CLI
-        ``--help`` / 스펙으로 노출하며 여기서 거부하지 않는다(정책 무변경).
         """
         now = datetime.now(UTC)
         start_date = from_date or (now - timedelta(days=7)).strftime("%Y%m%d")

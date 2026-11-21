@@ -54,29 +54,11 @@ class PositionReconciler:
         """봇의 내부 포지션과 브로커 포지션을 대조하여 보정.
 
         Args:
-            bot_id: 대상 봇 ID.
-            broker_positions: 브로커 실제 보유.
-                [{"symbol": str, "quantity": float, "avg_price": float}, ...]
-            account_id: 봇이 귀속된 account_id (포지션 보정 시 명시 필수).
             skip_external_buy: True 면 "외부 매수"(브로커>내부) 분류의 보정·이벤트
                 발행을 **건너뛴다**(경고 로그만). 체결 복구(fill catch-up)가
                 성공하지 못한 계좌에서, 미복구 ante 체결을 "외부 매수" 로
                 오분류하는 것을 막기 위한 barrier 안전장치다.
                 다른 분류(외부 청산·일부 매도)는 영향받지 않는다.
-
-                **self-submitted 분류와는 직교한다(R1-1)**: self-check 는
-                `skip_external_buy` 와 무관하게 항상 수행되며, 이 플래그는 분류
-                결과 중 "외부 매수" 보정만 억제하는 별도 계층이다. 주기
-                reconcile(`skip_external_buy=False`)에서도 self 는 보정되지 않는다.
-            dry_run: True 면 **detect-only** 모드 — 분류·로그·PositionMismatchEvent
-                /NotificationEvent 발행은 그대로 수행하되 ``correct_position`` 을
-                **호출하지 않는다**(보정 0건). 기존 external-buy/self-check 분류
-                로직은 무변경이며, 발행되는 이벤트도 동일하다. 보정만 보류한다.
-                (다중봇 귀속 ambiguity·user-initiated detect 경로용.)
-                기본 False — 기존 호출자는 변경 없이 보정 동작 유지(무회귀).
-
-        Returns:
-            보정 내역 리스트. 불일치가 없거나 ``dry_run=True`` 면 빈 리스트.
         """
         from ante.account.scoping import require_account_id
         from ante.eventbus.events import (
@@ -280,20 +262,11 @@ class PositionReconciler:
     ) -> list[dict[str, Any]]:
         """계좌 총합(broker) vs 전 봇 internal 합산 비교 — **순수(side-effect 無)**.
 
-        broker 는 계좌 **총합**만 주므로 per-bot/per-symbol 귀속이 근본적으로
-        ambiguous하다. 이 메서드는 이벤트/보정 없이 **읽기 전용으로**
-        계좌 단위 심볼별 불일치만 계산한다(display/detect 공용).
-
         비교 기준:
-            - broker: ``get_account_positions()`` 의 심볼별 총 수량.
             - internal: 해당 계좌의 **모든 봇(상태 무관) open 포지션을 심볼별로
               합산**(``TradeService.get_all_positions(account_id)``). per-bot
               비교가 같은 심볼을 보유한 다중봇을 false external-buy/청산으로
               오판하던 것을 제거한다.
-
-        Returns:
-            불일치 내역 리스트. 일치 시 빈 리스트.
-            각 항목: {"symbol", "broker_qty", "internal_qty", "diff"}.
         """
         from ante.account.scoping import require_account_id
 
@@ -347,13 +320,6 @@ class PositionReconciler:
         신설하지 않고 ``NotificationEvent`` 만 사용한다 — bot-scoped 인
         ``PositionMismatchEvent``/``ReconcileEvent`` 는 다중봇 귀속이 ambiguous
         하므로 이 경로에서 발행하지 않는다.
-
-        Args:
-            broker_positions: 서버 BrokerAdapter 가 조회한 계좌 총합.
-            account_id: 대상 계좌 ID (account-scoped 이벤트에 필수).
-
-        Returns:
-            불일치 내역 리스트(detect-only — 보정 없음). 일치 시 빈 리스트.
         """
         from ante.account.scoping import require_account_id
         from ante.eventbus.events import NotificationEvent

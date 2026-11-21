@@ -400,15 +400,10 @@ class BotManager:
     async def update_bot(self, bot_id: str, **kwargs: Any) -> Bot:
         """봇 설정 수정. 중지 상태에서만 허용.
 
-        BotConfig를 재생성하고 DB를 갱신한다.
         budget이 변경되면 TreasuryManager를 통해 예산을 조정한다.
 
         Args:
-            bot_id: 대상 봇 ID.
             **kwargs: 변경할 설정 필드 (None 값은 무시).
-
-        Returns:
-            수정된 Bot 인스턴스.
 
         Raises:
             BotError: 봇이 중지 상태가 아닌 경우.
@@ -532,7 +527,6 @@ class BotManager:
         """봇에 전략 배정.
 
         running 상태이면 중지 후 전략을 교체하고 재시작한다.
-        stopped/created 상태이면 전략 ID만 교체한다.
 
         전략 ID 를 ``bot.config`` (런타임) 와 DB 에 동시에 반영한다. DB
         저장은 ``_save_bot_config(bot.config)`` 로 수행하여 ``bots.strategy_id``
@@ -628,9 +622,6 @@ class BotManager:
         ``RUNNING`` / ``ERROR`` 가 아닌 상태에서의 중복 호출은
         ``BotStateConflict`` 로 거부한다. 허용 범위는 ``Bot.stop()`` 이
         실제로 처리하는 상태 집합 (``RUNNING``/``ERROR``) 과 정합시킨다.
-        ``BotStateConflict`` 는 ``BotError`` 서브클래스이므로 기존
-        ``except BotError`` 호출자 (IPC handler) 는 자연스럽게
-        ``BOT_STATE_CONFLICT`` envelope 으로 매핑된다.
         """
         bot = self._get_bot(bot_id)
         if bot.status not in (BotStatus.RUNNING, BotStatus.ERROR):
@@ -651,21 +642,12 @@ class BotManager:
         """봇 삭제. 실행 중이면 먼저 중지.
 
         Args:
-            bot_id: 삭제할 봇 ID.
             handle_positions: 포지션 처리 방식.
                 - ``keep`` (기본): 포지션을 유지한 채 봇만 삭제.
                 - ``liquidate``: 보유 종목 시장가 매도 주문 발행 후 삭제.
             hard: ``True`` 이면 ``DELETE FROM bots`` 로 row 자체를 삭제한다.
                 기본 ``False`` 는 기존 soft delete 거동 (``status='deleted'``)
                 을 유지한다.
-
-                budget 배정 실패 후 rollback 경로에서는 같은 ``bot_id`` 로의
-                재시도가 가능해야 한다. soft delete 만 수행하면 row 가
-                ``status='deleted'`` 로 남아 ``_save_bot_config()`` UPSERT 가
-                status 를 복구하지 않으므로, 재시도가 ``201`` 을 반환해도
-                봇은 메모리에만 존재하고 재시작 후 ``load_from_db()`` 에서
-                제외된다. rollback 경로에서는 ``hard=True`` 로 row 자체를
-                제거해 재시도 의미를 보존한다.
         """
         if handle_positions not in ("keep", "liquidate"):
             raise BotError(
@@ -1107,9 +1089,6 @@ class BotManager:
 
     async def validate_signal_key(self, key: str) -> str | None:
         """``signal.connect`` 핸드셰이크 게이트① — signal key → bot_id 검증.
-
-        IPC ``_handle_signal_connect`` 가 호출하는
-        passthrough. 세 결과를 분리한다.
 
         * manager 구성 + key hit → ``bot_id``.
         * manager 구성 + key miss → ``None`` (핸들러가 ``InvalidSignalKey``

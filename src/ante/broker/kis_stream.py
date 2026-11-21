@@ -1,9 +1,4 @@
-"""KIS WebSocket 실시간 스트리밍 클라이언트.
-
-KIS Open API WebSocket을 통해 실시간 시세(H0STCNT0)와
-체결 통보(H0STCNI0)를 수신한다.
-실행 시 websockets 패키지가 필요하다.
-"""
+"""KIS WebSocket 실시간 스트리밍 클라이언트."""
 
 from __future__ import annotations
 
