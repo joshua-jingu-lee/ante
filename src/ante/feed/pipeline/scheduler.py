@@ -21,11 +21,6 @@ def generate_backfill_dates(
     체크포인트가 있으면 그 다음 날부터 시작한다.
     영업일 필터링은 하지 않으며 orchestrator에서 처리한다.
 
-    Args:
-        start: 시작 날짜 (YYYY-MM-DD, config의 backfill_since).
-        end: 종료 날짜 (YYYY-MM-DD). None이면 KST 기준 오늘.
-        last_checkpoint: 마지막 체크포인트 날짜 (YYYY-MM-DD). 있으면 그 다음 날부터.
-
     Yields:
         날짜 문자열 (YYYY-MM-DD), 오름차순.
     """

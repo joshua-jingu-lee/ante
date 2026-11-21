@@ -1,8 +1,4 @@
-"""CSV 파일에서 데이터를 수동 주입하는 모듈 (ante feed inject).
-
-DataInjector(ante.data)에서 이관된 FeedInjector.
-외부 파일(CSV)이나 DataFrame을 정규화 + 4계층 검증 후 ParquetStore에 저장한다.
-"""
+"""CSV 파일에서 데이터를 수동 주입하는 모듈 (ante feed inject)."""
 
 from __future__ import annotations
 
@@ -47,13 +43,6 @@ class FeedInjector:
     ) -> int:
         """CSV 파일을 읽어 DataStore에 주입한다.
 
-        Args:
-            path: CSV 파일 경로.
-            symbol: 종목 코드 (6자리).
-            timeframe: 타임프레임 (기본값: '1d').
-            source: 데이터 소스 식별자 (normalizer 선택에 사용).
-            format_hint: 소스별 컬럼 매핑 힌트.
-
         Returns:
             주입된 행 수.
 
@@ -95,12 +84,6 @@ class FeedInjector:
         source: str = "external",
     ) -> int:
         """DataFrame을 직접 주입한다.
-
-        Args:
-            df: OHLCV DataFrame.
-            symbol: 종목 코드.
-            timeframe: 타임프레임 (기본값: '1d').
-            source: 데이터 소스 식별자.
 
         Returns:
             주입된 행 수.

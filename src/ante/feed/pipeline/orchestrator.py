@@ -1,8 +1,4 @@
-"""FeedOrchestrator — backfill/daily ETL 파이프라인 오케스트레이션.
-
-수집/정규화/지표 계산은 전담 클래스에 위임하고,
-lock 관리, 방어 가드, 리포트 생성만 담당한다.
-"""
+"""FeedOrchestrator — backfill/daily ETL 파이프라인 오케스트레이션."""
 
 from __future__ import annotations
 
@@ -83,12 +79,6 @@ class FeedOrchestrator:
         수행한다. malformed/future일 때는 lock 파일을 만들지 않고
         coded config_error만 담은 결과를 즉시 반환한다(체크포인트·소스
         진입 차단).
-
-        ``stop_event`` 는 상주 스케줄러(``feed start``)가 SIGTERM/SIGINT
-        수신 시 거래시간 대기 중인 backfill 루프를 깨워 안전 종료시키기
-        위해 전달한다. one-shot(``feed run backfill``)은 ``None`` 이며,
-        이 경우 대기는 ``asyncio.sleep`` 로 동작해 ``asyncio.run`` 의
-        SIGINT 취소로 중단된다.
         """
         feed_dir = data_path / ".feed"
         started_at = datetime.now(tz=UTC)

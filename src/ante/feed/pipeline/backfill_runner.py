@@ -174,13 +174,6 @@ class BackfillRunner:
         가장 먼저 수행한다. malformed/future일 때는 체크포인트·소스
         접근 없이 coded config_error만 담은 result를 즉시 반환한다.
 
-        가드는 두 술어로 분리되어 주입된다:
-            ``is_blocked_day(config, target_date)`` — ``blocked_days``
-            (target_date 요일). 해당 날짜는 데이터가 없어 **skip**.
-            ``is_trading_paused(config)`` — ``blocked_hours`` +
-            ``pause_during_trading`` (현재 시각). 해당 시 window가 풀릴
-            때까지 **대기 후** 그 날짜를 수집한다.
-
         ``stop_event`` 가 주어지면(상주 스케줄러) 거래시간 대기 중
         SIGTERM/SIGINT로 깨어나 체크포인트를 저장한 partial을 반환하며
         ``BACKFILL_STOP_REQUESTED`` 마커를 적재한다.
@@ -559,9 +552,6 @@ class _RunContext:
         통과시킨다(막히는 것은 속성 재바인딩뿐). ``Sequence`` 로 두면 mypy가
         ``attr-defined`` 로 append/extend/insert/슬라이스 대입을 전부
         차단한다.
-
-        **총 건수를 세는 용도로 쓰지 말 것** — 절단 시 ``len()`` 은 총계가
-        아니다. ``warnings_total`` 을 쓴다.
         """
         return self._warnings
 
@@ -577,17 +567,6 @@ class _RunContext:
 
     def add_warnings(self, warns: list[dict]) -> None:
         """경고를 유계로 적재하는 **단일 chokepoint**.
-
-        동작:
-            1. 버킷을 ``w.get("type") or UNTYPED_WARNING_BUCKET`` 으로
-               정규화한다. DART 수집 경고 2종에는 ``type`` 키가 없어 대괄호
-               직접 인덱싱은 KeyError이고, ``w.get("type")`` 결과를 그대로
-               버킷 키로 쓰면 ``json.dumps({None: 3})`` = ``{"null": 3}`` 이
-               리포트로 샌다.
-            2. 카운터를 **절단 여부와 무관하게 먼저 전수 증가**시킨다
-               (``warnings_total``/``warnings_by_type`` 은 항상 정확).
-            3. 해당 버킷 보유량이 상한 미만일 때만 샘플에 보존하고, 한 건이라도
-               스킵하면 절단 플래그를 세운다.
 
         **입력 리스트를 변형하지 않는다**(non-mutating, 결정 6).
         ``_drain_store_warnings`` 호출자가 같은 리스트로 checkpoint 전진을

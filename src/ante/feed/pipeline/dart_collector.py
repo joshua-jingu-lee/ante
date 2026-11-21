@@ -39,10 +39,6 @@ DEFAULT_BACKFILL_SINCE = "2015-01-01"
 class QuarterStatus(Enum):
     """단일 분기 수집 결과의 3-상태.
 
-    ``_fetch_quarter``가 반환하며, ``_collect_quarters``의 checkpoint 전진/
-    halt 결정을 구동한다. 기존 2-값 bool(ok)을 대체한다.
-
-    - ``OK``: 정상 저장(written>0). checkpoint 전진 자격.
     - ``HALT``: transient 예외 / raw-present no-storable(written==0). 데이터
       손실 가능성을 surface하고 이 run의 checkpoint 전진을 동결한다.
     - ``SKIP_EMPTY``: ``not raw_items``(분기종료 직후·공시 전 빈 응답 등 미공시
@@ -105,25 +101,6 @@ class DARTCollector:
                 DART daily-equivalent다. DART는 분기 단위 공시이므로 daily 실행은
                 "오늘 기준 가장 최근에 공시 가능한 분기"만 확인한다. ``False``(기본,
                 backfill 모드)면 ``_resolve_year_range``의 전 분기를 순회한다.
-
-                운영 전제: daily 모드는 과거 미충전 분기를 보정하지 않는다(최신
-                분기 1개만 본다). checkpoint가 비거나 오래되어 과거 분기가 비어
-                있으면 ``feed run backfill``(daily=False, 전 분기 순회)로 채워야
-                한다. 과거 이력 backfill 책임은 backfill 모드에 있고, daily는
-                최신 분기 증분만 담당한다.
-
-        Returns:
-            ``(net_delta, stored_ok, 수집된 심볼 집합, 경고 목록)``:
-
-            - ``net_delta``: store에 **실제 새로 저장된 net-new 행 수**(rows_written).
-              재수집(dedup)이면 0이다.
-            - ``stored_ok``: **유효 분기 데이터가 store에 성공 반영되었는지**
-              (한 분기라도 ``QuarterStatus.OK``, 즉 storable_rows>0). net_delta와
-              무관하다 — 재수집으로 net_delta=0이어도 OK 분기가 있으면 True다.
-              빈 매핑/전 분기 SKIP_EMPTY/no-storable HALT 등 저장 반영이 전무하면
-              False다. DART checkpoint 전진은 내부 ``QuarterStatus`` 로직이 분기별로
-              자체 관리하므로, 이 stored_ok는 runner의
-              ``data_types`` 반영용이다(checkpoint 가드 아님).
         """
         corp_code_map = await self._load_corp_codes(feed_dir)
         if not corp_code_map:

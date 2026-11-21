@@ -1,10 +1,4 @@
-"""data.go.kr 주식시세 API 소스 어댑터.
-
-getStockPriceInfo 단일 호출로 OHLCV + 거래대금 + 시가총액 + 상장주식수를 동시 확보.
-날짜별 전종목 조회 방식을 사용하며, 페이지네이션과 에러 코드 처리를 담당한다.
-
-API 레퍼런스: docs/references/external-apis/data-go-kr-stock-price-api.md
-"""
+"""data.go.kr 주식시세 API 소스 어댑터."""
 
 from __future__ import annotations
 
@@ -134,14 +128,8 @@ class DataGoKrSource:
     async def fetch_by_date(self, date: str) -> list[dict]:
         """해당 날짜 전 종목 데이터를 수집한다.
 
-        날짜별 전종목 조회 방식으로 페이지네이션을 처리한다.
-        1일 = ~2,400건 (KOSPI+KOSDAQ) → 약 3페이지 (numOfRows=1000).
-
         Args:
             date: 수집 대상 날짜 (YYYY-MM-DD 형식).
-
-        Returns:
-            수집된 레코드 딕셔너리 목록.
 
         Raises:
             DailyLimitExceededError: 일일 한도 초과 시.
@@ -197,17 +185,6 @@ class DataGoKrSource:
 
     async def validate_credentials(self) -> tuple[bool | None, str | None]:
         """서비스키 유효성을 경량 요청 1회로 검증한다.
-
-        가장 싼 기존 요청 패턴(getStockPriceInfo 1페이지, numOfRows=1)을
-        더미 기준일자로 1회 호출한다. data.go.kr은 서비스키를 우선
-        평가하므로, 키가 유효하면 ``00``(정상) 또는 다른 비인증 에러가
-        돌아오고, 키가 미등록/만료면 ``30/31`` 인증 에러(CRITICAL)가
-        돌아온다.
-
-        3-state를 반환한다:
-            * ``(True, None)``  — 유효 (키가 수락됨).
-            * ``(False, 사유)`` — 인증 실패 (CRITICAL 에러 코드).
-            * ``(None, 사유)``  — 검증 불가 (네트워크 예외/타임아웃).
 
         offline·타임아웃 등 네트워크 예외는 unknown으로 흡수하며 예외를
         전파하지 않는다. config check가 오프라인에서도 hang/실패 없이
