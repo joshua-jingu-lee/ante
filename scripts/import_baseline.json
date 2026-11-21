@@ -58,7 +58,6 @@
     "db->core",
     "db->data",
     "eventbus->core",
-    "feed->cli",
     "feed->core",
     "feed->data",
     "gateway->account",
@@ -113,12 +112,7 @@
     "treasury->account",
     "treasury->eventbus"
   ],
-  "cycles": [
-    [
-      "cli",
-      "feed"
-    ]
-  ],
-  "lazy_imports": 433,
+  "cycles": [],
+  "lazy_imports": 451,
   "sqlite_files": []
 }
