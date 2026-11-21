@@ -8,11 +8,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from ante.contracts.vocab import ContractKind
+from ante.ipc.requests import IPCRequest
 
 if TYPE_CHECKING:
     from ante.core.registry import ServiceRegistry
 
-CommandHandler = Callable[["ServiceRegistry", dict, str], Awaitable[dict]]
+CommandHandler = Callable[["ServiceRegistry", Any, str], Awaitable[dict]]
 
 ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
 
@@ -35,6 +36,7 @@ class CommandSpec:
     account_id_policy: AccountIdPolicy = "none"
     cross_validators: tuple[Callable[..., Any], ...] = ()
     shutdown_behavior: ShutdownBehavior | None = None
+    request_model: type[IPCRequest] | None = None
 
 
 class CommandRegistry:
@@ -43,7 +45,7 @@ class CommandRegistry:
     외부 호출자는 ``register(name, handler, *, is_mutating=...)``
     keyword-only 인자를 명시해야 한다.
 
-    ``register()``는 contract metadata 7 필드를 kwargs로
+    ``register()``는 contract metadata 8 필드를 kwargs로
     수용한다. ``register(name, handler, is_mutating=...)`` 호출은
     default 값으로 그대로 작동(backward compat).
     """
@@ -64,6 +66,7 @@ class CommandRegistry:
         account_id_policy: AccountIdPolicy = "none",
         cross_validators: tuple[Callable[..., Any], ...] = (),
         shutdown_behavior: ShutdownBehavior | None = None,
+        request_model: type[IPCRequest] | None = None,
     ) -> None:
         """핸들러 등록.
 
@@ -83,6 +86,7 @@ class CommandRegistry:
             account_id_policy=account_id_policy,
             cross_validators=cross_validators,
             shutdown_behavior=shutdown_behavior,
+            request_model=request_model,
         )
 
     def get(self, command: str) -> CommandSpec | None:

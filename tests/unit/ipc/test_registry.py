@@ -1315,6 +1315,7 @@ class TestCommandSpecMetadataExtension:
             "account_id_policy",
             "cross_validators",
             "shutdown_behavior",
+            "request_model",
         }
 
     def test_register_kwargs_backward_compat(self, registry: CommandRegistry) -> None:
