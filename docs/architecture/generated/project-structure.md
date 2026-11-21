@@ -463,7 +463,8 @@ tests/
 │   │   ├── test_request_model_domain.py
 │   │   ├── test_request_validation.py
 │   │   ├── test_system_commands.py
-│   │   └── test_strategy_commands.py
+│   │   ├── test_strategy_commands.py
+│   │   └── test_account_commands.py
 │   ├── specs/
 │   │   ├── __init__.py
 │   │   ├── test_cold_path_terminology.py
