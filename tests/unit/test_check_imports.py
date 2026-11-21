@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SQLITE_FILES_CAP = 10
+SQLITE_FILES_CAP = 0
 
 
 def _load_checker() -> ModuleType:

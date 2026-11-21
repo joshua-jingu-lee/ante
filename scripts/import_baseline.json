@@ -66,6 +66,7 @@
     "gateway->broker",
     "gateway->eventbus",
     "gateway->strategy",
+    "instrument->core",
     "ipc->account",
     "ipc->bot",
     "ipc->contracts",
@@ -100,6 +101,7 @@
     "notification->eventbus",
     "report->backtest",
     "report->bot",
+    "report->core",
     "report->eventbus",
     "report->trade",
     "rule->account",
@@ -107,6 +109,7 @@
     "rule->eventbus",
     "strategy->core",
     "trade->account",
+    "trade->core",
     "trade->eventbus",
     "treasury->account",
     "treasury->eventbus"
@@ -126,16 +129,5 @@
     ]
   ],
   "lazy_imports": 434,
-  "sqlite_files": [
-    "src/ante/cli/commands/backtest.py",
-    "src/ante/cli/commands/bot.py",
-    "src/ante/cli/commands/report.py",
-    "src/ante/cli/commands/rule.py",
-    "src/ante/cli/commands/strategy.py",
-    "src/ante/cli/commands/trade.py",
-    "src/ante/instrument/service.py",
-    "src/ante/report/store.py",
-    "src/ante/trade/fill_outbox.py",
-    "src/ante/trade/performance.py"
-  ]
+  "sqlite_files": []
 }
