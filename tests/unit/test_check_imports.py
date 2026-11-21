@@ -78,10 +78,6 @@ def _measure(tmp_path: Path, files: dict[str, str]) -> dict[str, Any]:
     return checker.measure(_tree(tmp_path, files))
 
 
-def _message_lines(message: str) -> list[str]:
-    return message.splitlines()[1:]
-
-
 TC = "from typing import TYPE_CHECKING\n"
 
 DEFINITION_ROWS = [
@@ -141,6 +137,37 @@ DEFINITION_ROWS = [
         set(),
         0,
     ),
+    (
+        "type-checking-else-in-function",
+        {
+            "a/m.py": TC
+            + "def f():\n    if TYPE_CHECKING:\n        import ante.c\n"
+            + "    else:\n        from ante.b import x\n"
+        },
+        {"a->b"},
+        1,
+    ),
+    (
+        "not-type-checking",
+        {"a/m.py": TC + "if not TYPE_CHECKING:\n    import ante.b\n"},
+        {"a->b"},
+        0,
+    ),
+    (
+        "type-checking-and-flag",
+        {"a/m.py": TC + "if TYPE_CHECKING and FLAG:\n    import ante.b\n"},
+        {"a->b"},
+        0,
+    ),
+    (
+        "type-checking-attribute-suffix",
+        {
+            "a/m.py": "import typing\n"
+            + "if typing.TYPE_CHECKING_EXTRA:\n    import ante.b\n"
+        },
+        {"a->b"},
+        0,
+    ),
     ("relative-level-1", {"main.py": "from . import b\n"}, {"main->b"}, 0),
     ("relative-level-2", {"a/m.py": "from ..b import x\n"}, {"a->b"}, 0),
     ("from-ante-module", {"a/m.py": "from ante import b\n"}, {"a->b"}, 0),
@@ -197,6 +224,9 @@ SQLITE_STATEMENTS = [
     "from sqlite3 import Error\n",
     "import sqlite3.dbapi2\n",
     "import aiosqlite\n",
+    "import os, sqlite3\n",
+    "import sqlite3, os\n",
+    "import json, aiosqlite as a\n",
 ]
 
 
@@ -253,75 +283,89 @@ def test_unreadable_source_is_error(
 
 # ── 판정 ──────────────────────────────────────────────
 
+FAILED = "import check failed against scripts/import_baseline.json:"
+EDGE_ADDED = (
+    "호출부를 옮기거나 값을 주입한다. "
+    "의도한 변경이면 기준선에 더하고 PR 본문에 이유를 쓴다"
+)
 EDGE_A_B = {"a/m.py": "import ante.b\n"}
 
+
+def _ok(edges: int, cycles: int, lazy: int, sqlite: int) -> list[str]:
+    return [
+        f"import check ok: {edges} edges, {cycles} cycles, {lazy} lazy imports, "
+        f"{sqlite} sqlite files (baseline scripts/import_baseline.json)"
+    ]
+
+
 JUDGMENT_ROWS = [
-    ("edges-match", EDGE_A_B, _baseline(edges=["a->b"]), 0, []),
+    ("edges-match", EDGE_A_B, _baseline(edges=["a->b"]), 0, _ok(1, 0, 0, 0)),
     (
         "edges-grew",
         {"a/m.py": "import ante.b\nimport ante.c\n"},
         _baseline(edges=["a->b"]),
         1,
-        ["edges +a->c: " + checker.EDGE_ADDED],
+        [FAILED, f"edges +a->c: {EDGE_ADDED}"],
     ),
     (
         "edges-shrank",
         {},
         _baseline(edges=["a->b"]),
         1,
-        ["edges -a->b: " + checker.REMOVE_FROM_BASELINE],
+        [FAILED, "edges -a->b: 기준선에서 지운다"],
     ),
     (
         "edges-swapped",
         {"a/m.py": "import ante.c\n"},
         _baseline(edges=["a->b"]),
         1,
-        [
-            "edges +a->c: " + checker.EDGE_ADDED,
-            "edges -a->b: " + checker.REMOVE_FROM_BASELINE,
-        ],
+        [FAILED, f"edges +a->c: {EDGE_ADDED}", "edges -a->b: 기준선에서 지운다"],
     ),
     (
         "lazy-match",
         {"a/m.py": "import ante.b\ndef f():\n    import ante.b\n"},
         _baseline(edges=["a->b"], lazy=1),
         0,
-        [],
+        _ok(1, 0, 1, 0),
     ),
     (
         "lazy-grew",
         {"a/m.py": "import ante.b\ndef f():\n    import ante.b\n    import ante.b\n"},
         _baseline(edges=["a->b"], lazy=1),
         1,
-        [checker.LAZY_GREW],
+        [
+            FAILED,
+            "lazy_imports: actual 2, baseline 1 (+1): "
+            "최상위 import로 옮기거나 의존을 뒤집는다",
+        ],
     ),
     (
         "lazy-shrank",
         EDGE_A_B,
         _baseline(edges=["a->b"], lazy=1),
         1,
-        [checker.LAZY_SHRANK],
+        [FAILED, "lazy_imports: actual 0, baseline 1 (-1): 기준선을 낮춘다"],
     ),
     (
         "sqlite-match",
         {"a/m.py": "import sqlite3\n"},
         _baseline(sqlite=["src/ante/a/m.py"]),
         0,
-        [],
+        _ok(0, 0, 0, 1),
     ),
     (
         "sqlite-added",
         {"a/m.py": "import sqlite3\n", "b/m.py": "import sqlite3\n"},
         _baseline(sqlite=["src/ante/a/m.py"]),
         1,
-        ["sqlite_files +src/ante/b/m.py: " + checker.SQLITE_ADDED],
+        [FAILED, "sqlite_files +src/ante/b/m.py: DB 접근은 `core`의 래퍼를 지난다"],
     ),
     (
         "sqlite-removed",
         {},
         _baseline(sqlite=["src/ante/a/m.py"]),
         1,
-        ["sqlite_files -src/ante/a/m.py: " + checker.REMOVE_FROM_BASELINE],
+        [FAILED, "sqlite_files -src/ante/a/m.py: 기준선에서 지운다"],
     ),
     (
         "sqlite-moved",
@@ -329,15 +373,16 @@ JUDGMENT_ROWS = [
         _baseline(sqlite=["src/ante/a/m.py"]),
         1,
         [
-            "sqlite_files +src/ante/b/m.py: " + checker.SQLITE_MOVED,
-            "sqlite_files -src/ante/a/m.py: " + checker.SQLITE_MOVED,
+            FAILED,
+            "sqlite_files +src/ante/b/m.py: 파일을 옮긴 것이면 기준선 경로를 고친다",
+            "sqlite_files -src/ante/a/m.py: 파일을 옮긴 것이면 기준선 경로를 고친다",
         ],
     ),
 ]
 
 
 @pytest.mark.parametrize(
-    ("files", "baseline", "code", "messages"),
+    ("files", "baseline", "code", "expected"),
     [row[1:] for row in JUDGMENT_ROWS],
     ids=[row[0] for row in JUDGMENT_ROWS],
 )
@@ -347,57 +392,58 @@ def test_judgment(
     files: dict[str, str],
     baseline: dict[str, Any],
     code: int,
-    messages: list[str],
+    expected: list[str],
 ) -> None:
     _tree(tmp_path, files)
     _write_baseline(tmp_path, baseline)
     actual, output = _run(tmp_path, capsys)
     assert actual == code, output
-    if code:
-        lines = _message_lines(output)
-        assert len(lines) == len(messages), output
-        for line, message in zip(lines, messages, strict=True):
-            assert message in line, output
+    assert output.splitlines() == expected
 
 
 AB, ABC, CD, XY = ["a", "b"], ["a", "b", "c"], ["c", "d"], ["x", "y"]
+GREW = "구성원 증가"
+SHRANK = "구성원 감소: 기준선을 맞춘다"
+NEW = "새 순환"
+CHANGED = "순환 구성 변화"
+GONE = "사라진 순환: 기준선에서 지운다"
 
 CYCLE_ROWS = [
     ("match", [AB], [AB], []),
-    ("grew", [ABC], [AB], [(ABC, checker.CYCLE_GREW)]),
+    ("grew", [ABC], [AB], [f"cycles ['a', 'b', 'c']: {GREW}"]),
     (
         "merged",
         [["a", "b", "c", "d"]],
         [AB, CD],
-        [(["a", "b", "c", "d"], checker.CYCLE_GREW)],
+        [f"cycles ['a', 'b', 'c', 'd']: {GREW}"],
     ),
-    ("shrank", [AB], [ABC], [(AB, checker.CYCLE_SHRANK)]),
-    ("new", [AB, CD], [AB], [(CD, checker.CYCLE_NEW)]),
-    ("changed", [["b", "c"]], [AB], [(["b", "c"], checker.CYCLE_CHANGED)]),
-    ("gone", [], [AB], [(AB, checker.CYCLE_GONE)]),
-    ("swapped", [CD], [AB], [(CD, checker.CYCLE_NEW), (AB, checker.CYCLE_GONE)]),
+    ("shrank", [AB], [ABC], [f"cycles ['a', 'b']: {SHRANK}"]),
+    ("new", [AB, CD], [AB], [f"cycles ['c', 'd']: {NEW}"]),
+    ("changed", [["b", "c"]], [AB], [f"cycles ['b', 'c']: {CHANGED}"]),
+    ("gone", [], [AB], [f"cycles ['a', 'b']: {GONE}"]),
+    (
+        "swapped",
+        [CD],
+        [AB],
+        [f"cycles ['c', 'd']: {NEW}", f"cycles ['a', 'b']: {GONE}"],
+    ),
     ("two-match", [AB, XY], [AB, XY], []),
-    ("two-grew", [ABC, XY], [AB, XY], [(ABC, checker.CYCLE_GREW)]),
-    ("two-shrank", [AB, XY], [ABC, XY], [(AB, checker.CYCLE_SHRANK)]),
-    ("two-new", [AB, CD, XY], [AB, XY], [(CD, checker.CYCLE_NEW)]),
+    ("two-grew", [ABC, XY], [AB, XY], [f"cycles ['a', 'b', 'c']: {GREW}"]),
+    ("two-shrank", [AB, XY], [ABC, XY], [f"cycles ['a', 'b']: {SHRANK}"]),
+    ("two-new", [AB, CD, XY], [AB, XY], [f"cycles ['c', 'd']: {NEW}"]),
     (
         "two-changed",
         [["b", "c"]],
         [AB, XY],
-        [(["b", "c"], checker.CYCLE_CHANGED), (XY, checker.CYCLE_GONE)],
+        [f"cycles ['b', 'c']: {CHANGED}", f"cycles ['x', 'y']: {GONE}"],
     ),
-    (
-        "two-changed-across",
-        [["b", "x"]],
-        [AB, XY],
-        [(["b", "x"], checker.CYCLE_CHANGED)],
-    ),
-    ("two-gone", [AB], [AB, XY], [(XY, checker.CYCLE_GONE)]),
+    ("two-changed-across", [["b", "x"]], [AB, XY], [f"cycles ['b', 'x']: {CHANGED}"]),
+    ("two-gone", [AB], [AB, XY], [f"cycles ['x', 'y']: {GONE}"]),
     (
         "two-merged-with-new",
         [["a", "b", "x", "y"], CD],
         [AB, XY],
-        [(["a", "b", "x", "y"], checker.CYCLE_GREW), (CD, checker.CYCLE_NEW)],
+        [f"cycles ['a', 'b', 'x', 'y']: {GREW}", f"cycles ['c', 'd']: {NEW}"],
     ),
 ]
 
@@ -408,15 +454,15 @@ CYCLE_ROWS = [
     ids=[row[0] for row in CYCLE_ROWS],
 )
 def test_cycle_judgment(
-    actual: list[list[str]],
-    baseline: list[list[str]],
-    expected: list[tuple[list[str], str]],
+    actual: list[list[str]], baseline: list[list[str]], expected: list[str]
 ) -> None:
     code, output = checker.compare(_baseline(cycles=actual), _baseline(cycles=baseline))
-    assert code == (1 if expected else 0), output
     if expected:
-        lines = [f"cycles {component}: {verdict}" for component, verdict in expected]
-        assert _message_lines(output) == lines, output
+        assert code == 1, output
+        assert output.splitlines() == [FAILED, *expected]
+    else:
+        assert code == 0, output
+        assert output.splitlines() == _ok(0, len(actual), 0, 0)
 
 
 # ── 기준선 형식 ──────────────────────────────────────────────
