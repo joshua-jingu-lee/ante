@@ -9,6 +9,15 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import enforce_scope, require_auth, require_scope
+from ante.contracts.cli_errors import (
+    CliConfirmationRequiredError,
+    DataError,
+    DataInvalidDatasetIdError,
+    DataInvalidFilterError,
+    DatasetNotFoundError,
+    DataValidateInvalidSymbolError,
+    DataValidateInvalidTimeframeError,
+)
 
 
 @click.group()
@@ -72,8 +81,7 @@ def data_list(
             limit=limit,
         )
     except ValueError as e:
-        fmt.error(str(e), code="DATA_INVALID_FILTER")
-        raise SystemExit(1) from e
+        raise DataInvalidFilterError(str(e)) from e
 
     datasets = result["items"]
     if not datasets:
@@ -93,8 +101,7 @@ def data_list(
     try:
         datasets = asyncio.run(_enrich(datasets))
     except Exception as e:
-        fmt.error(str(e), code="DATA_ERROR")
-        raise SystemExit(1) from e
+        raise DataError(str(e)) from e
 
     if fmt.is_json:
         fmt.output({"datasets": datasets, "count": result["total"]})
@@ -135,11 +142,9 @@ def data_info(ctx: click.Context, dataset_id: str, data_path: str | None) -> Non
     try:
         result = get_dataset_detail(store, dataset_id)
     except ValueError as e:
-        fmt.error(str(e), code="DATA_INVALID_DATASET_ID")
-        raise SystemExit(1) from e
+        raise DataInvalidDatasetIdError(str(e)) from e
     except FileNotFoundError as e:
-        fmt.error(str(e), code="DATASET_NOT_FOUND")
-        raise SystemExit(1) from e
+        raise DatasetNotFoundError(str(e)) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -202,22 +207,18 @@ def data_delete(
     data_path = resolve_data_path(ctx, data_path)
     fmt = get_formatter(ctx)
     if not yes:
-        fmt.error(
-            "위험 명령입니다. --yes를 명시해야 데이터셋을 삭제합니다.",
-            code="CLI_CONFIRMATION_REQUIRED",
+        raise CliConfirmationRequiredError(
+            "위험 명령입니다. --yes를 명시해야 데이터셋을 삭제합니다."
         )
-        raise SystemExit(1)
 
     store = ParquetStore(base_path=data_path)
     try:
         normalized_type = validate_dataset_filters(data_type=data_type)
         result = delete_dataset(store, dataset_id, data_type=normalized_type)
     except ValueError as e:
-        fmt.error(str(e), code="DATA_INVALID_DATASET_ID")
-        raise SystemExit(1) from e
+        raise DataInvalidDatasetIdError(str(e)) from e
     except FileNotFoundError as e:
-        fmt.error(str(e), code="DATASET_NOT_FOUND")
-        raise SystemExit(1) from e
+        raise DatasetNotFoundError(str(e)) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -312,19 +313,15 @@ def validate(
     fmt = get_formatter(ctx)
 
     if not is_valid_timeframe(timeframe):
-        fmt.error(
+        raise DataValidateInvalidTimeframeError(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
-            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
-            code="DATA_VALIDATE_INVALID_TIMEFRAME",
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}"
         )
-        raise SystemExit(1)
 
     if symbol is not None and not is_krx_symbol(symbol):
-        fmt.error(
-            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)",
-            code="DATA_VALIDATE_INVALID_SYMBOL",
+        raise DataValidateInvalidSymbolError(
+            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)"
         )
-        raise SystemExit(1)
 
     store = ParquetStore(base_path=data_path)
 
