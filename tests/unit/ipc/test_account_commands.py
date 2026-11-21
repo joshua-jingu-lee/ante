@@ -12,9 +12,11 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from pydantic import ValidationError
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
+from ante.ipc.requests import AccountActivateRequest, AccountSuspendRequest
 from ante.ipc.server import IPCServer, IPCServerState
 from tests.unit.ipc.test_request_model_domain import validation_message
 
@@ -192,3 +194,13 @@ async def test_invalid_account_id_is_not_reflected(
     assert "MARKACCT001SECRET" not in json.dumps(response, ensure_ascii=False)
     assert "MARKACCT001SECRET" not in caplog.text
     harness.assert_no_service_call()
+
+
+@pytest.mark.parametrize("model", [AccountSuspendRequest, AccountActivateRequest])
+def test_the_account_id_error_text_is_fixed(model: type) -> None:
+    with pytest.raises(ValidationError) as caught:
+        model.model_validate({"account_id": "MARKACCT002SECRET!"})
+    assert [(e["loc"], e["type"], e["msg"]) for e in caught.value.errors()] == [
+        (("account_id",), "invalid_account_id", "invalid account_id")
+    ]
+    assert "MARKACCT002SECRET" not in str(caught.value)
