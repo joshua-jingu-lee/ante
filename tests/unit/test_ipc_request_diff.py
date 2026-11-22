@@ -439,6 +439,18 @@ def test_record_dispatches_the_committed_request_set(tmp_path: Path) -> None:
     }
 
 
+def test_record_replaces_a_clock_value_of_the_result(tmp_path: Path) -> None:
+    out_path = tmp_path / "record.json"
+    code, _, err = _run("record", "--out", out_path)
+    assert (code, err) == (0, "")
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["rows"]["treasury.set_balance:cli:0"]["result"] == (
+        '{"account_id": "acct-1", "total_balance": '
+        '"svc.treasury_manager.get().account_balance", '
+        '"updated_at": "2030-01-01T00:00:00+00:00"}'
+    )
+
+
 def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
     row = _request(
         "strategy.set_status:value:status:str5",

@@ -38,7 +38,8 @@ attribute is a double named by its path, a call is recorded as
 ``calls``; ``result`` and ``calls`` are ``json.dumps(sort_keys=True,
 default=repr)`` after values of a type other than ``str``, ``int``, ``float``,
 ``bool``, ``None``, ``list``, ``tuple`` and ``dict`` are replaced by their
-``repr``. The record also keeps the three request keys of
+``repr``, and a non-empty string at a clock key (``updated_at``) of the result
+is replaced by the fixed marker. The record also keeps the three request keys of
 ``scripts/check_entry_ratchet.py`` for the tree it ran on.
 
 ``build`` and ``record`` run with ``ANTE_CONFIG_DIR`` and ``HOME`` set to a
@@ -128,6 +129,7 @@ RATCHET_KEYS = (
 PLAIN = (str, int, float, bool, type(None))
 ISOLATED_ENV = ("ANTE_CONFIG_DIR", "HOME")
 CLOCK_KEYS = frozenset({"expires_at"})
+RESULT_CLOCK_KEYS = frozenset({"updated_at"})
 CLOCK_MARKER = "2030-01-01T00:00:00+00:00"
 
 
@@ -277,11 +279,11 @@ def _cli_records(root: Path, path: Path | None) -> list[dict[str, Any]]:
     ]
 
 
-def _fixed_clock(args: Any) -> Any:
+def _fixed_clock(args: Any, keys: frozenset[str] = CLOCK_KEYS) -> Any:
     if not isinstance(args, dict):
         return args
     return {
-        k: CLOCK_MARKER if k in CLOCK_KEYS and isinstance(v, str) and v else v
+        k: CLOCK_MARKER if k in keys and isinstance(v, str) and v else v
         for k, v in args.items()
     }
 
@@ -476,7 +478,7 @@ async def _dispatch_all(requests: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "status": response.get("status"),
             "code": error.get("code"),
             "message": error.get("message"),
-            "result": _dump(response.get("result")),
+            "result": _dump(_fixed_clock(response.get("result"), RESULT_CLOCK_KEYS)),
             "calls": _dump(calls),
         }
     return rows
