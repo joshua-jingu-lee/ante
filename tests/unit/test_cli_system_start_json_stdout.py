@@ -1,7 +1,7 @@
 """#1757 회귀: ``ante system start --format json`` stdout 격리 회귀 테스트.
 
-ante-oracle A7 host probe ``cli_system_start_json_stdout_contract`` 는
-부모 stdout 이 single JSON document 만 포함해야 한다고 계약한다. ``system start``
+JSON 모드에서는
+부모 stdout 이 single JSON document 만 포함해야 한다. ``system start``
 가 자식 ``python -m ante.main`` 의 stdout/stderr 를 inherit 시키면 runtime logger
 출력이 JSON 응답에 이어 붙어 ``json.loads`` 파싱이 깨진다. (oracle cycle
 ``2026-05-24T003038Z_ae19043``, fingerprint ``6e987e08022b``)

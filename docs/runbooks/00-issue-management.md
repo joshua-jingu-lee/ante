@@ -214,8 +214,8 @@ A → D     (A 완료 후 B, D 병렬 가능)
 | `api` | (area) REST API 엔드포인트 — 타입 라벨이 아니다 | — |
 | `e2e` | (area) E2E 테스트 — 타입 라벨이 아니다 | — |
 | `dashboard` | (area) 대시보드 프론트엔드 — 타입 라벨이 아니다 | — |
-| `source:ante-oracle` | (운영) ante-oracle 런타임이 등록한 미검증 버그 후보 표시. **§6 `이슈 검증` 게이트와 `autopilot.md` 「내부 생성 미검증 버그 후보 검증 선행」이 대상 예시로 이름을 드는 라벨이다** | — |
-| `ante-oracle` | (운영) `source:ante-oracle`와 설명·색이 **동일한 중복 별칭**이다. **§6과 `autopilot.md`의 `이슈 검증` 게이트 서술은 `source:ante-oracle`만 이름으로 들고 이 별칭은 들지 않는다.** 부착 생산자가 저장소 밖(ante-oracle 런타임)이라 이 표가 부착 동작을 정하지 않는다 | — |
+| `source:ante-oracle` | (운영) 내부 자동화가 등록한 미검증 버그 후보 표시. §6 `이슈 검증` 게이트의 대상 라벨이다 | — |
+| `ante-oracle` | (운영) `source:ante-oracle`와 설명·색이 **동일한 중복 별칭**이다. 부착 생산자가 저장소 밖이라 이 표가 부착 동작을 정하지 않는다 | — |
 | `process` | (운영) 개발 프로세스를 정의하거나 집행하는 표면만 바꾸는 이슈: 에이전트 운영 문서·런북·프로세스 ADR·이슈 폼·merge-gate/post-merge 자동화·기여 정책·프로세스 규범을 집행하는 테스트와 락. 제품 계약·제품 코드와 제품 테스트·제품 CI/릴리스는 아니며, 운영 장치 변경이 강제하는 생성 산출물·생성기 갱신은 판정을 바꾸지 않는다. 타입 라벨이 아니다. `autopilot.md` 「기본 제외 대상」이 이름을 들어 **자동 큐에서만 제외**하며 수동 `/implement-issue`는 막지 않는다. 판정 예시·보정 사례는 #2521 | — |
 | `documentation` | (플랫폼 기본) `docs`와 의미가 겹친다. **§2 대응 라벨은 `docs`이므로 큐 선별의 타입 라벨 집합(`autopilot.md` 「포함 대상」)에 이 라벨은 없다** | — |
 | `fix` | (운영) `03-git-workflow.md` §4.2가 내부 lane PR 라벨로 열거한다. **§2 Type 표의 `fix` 행은 대응 라벨이 `bug`이므로 이 라벨은 이슈 타입 라벨이 아니다.** 큐 선별의 타입 라벨 집합에도 없다 | — |
@@ -232,7 +232,7 @@ A → D     (A 완료 후 B, D 병렬 가능)
 - watcher, QA, 리뷰 후속 자동화처럼 에이전트가 새 이슈를 만들었지만 중복/우선순위/스펙 준비 상태를 아직 사람이 확인하지 않았을 때 사용한다.
 - 이 라벨이 붙은 이슈는 autopilot 큐에서 제외한다.
 - 수동 `/implement-issue`도 `needs-triage`가 남아 있으면 구현을 시작하지 않는다.
-- 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
+- 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨이 붙은 이슈)가 `이슈 검증`(`@issue-reviewer`, read-only)에서 `confirmed`가 아닌 verdict(`not-reproduced` / `invalid` / `needs-info`)를 받으면, 호출자(오케스트레이터)가 이 라벨을 부착해 자동 큐에서 제외한다. `@issue-reviewer`는 verdict만 반환하고 라벨·코멘트는 호출자가 쓴다. 신규 라벨을 만들지 않고 기존 `needs-triage`를 재사용하며, 자동 close는 하지 않고 사람 판단을 기다린다.
 - autopilot 큐 판정에서 타입 라벨과 area 라벨이 모두 없는 이슈에 오케스트레이터가 이 라벨을 부착한다. **판정 절차**의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md) 「큐 선별 규칙」이고 **어떤 라벨이 실재하는지는 위 §4 등록부**가 정하며, 이 경로로 붙은 라벨은 **사람이** 타입 또는 area 라벨을 부착해 분류한 뒤 제거한다. **이 경로로 붙은 라벨에는 아래 일반 해제 규칙보다 이 규칙이 우선한다.**
 - 사용자 또는 오케스트레이터가 이슈를 확인한 뒤, 실제로 처리할 가치와 범위가 맞는다고 판단하면 라벨을 제거한다.
 
@@ -277,7 +277,7 @@ Autopilot 큐 선별, snapshot, 정렬, Plan Preflight lane, merge/post-merge �
 | Blocked | `blocked` 또는 review-loop 라벨 존재 | 선행 조건, 스펙 결정, review-loop recovery가 끝날 때까지 구현 제외 |
 | Closed | PR auto-close 또는 수동 close | 필요 시 post-merge reconciliation 확인 |
 
-**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: `source:ante-oracle` 자동 리포트)는 Open 이후 타입·area 라벨 판정을 통과하면 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
+**미검증 버그 후보 검증 단계**: 협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨이 붙은 이슈)는 Open 이후 타입·area 라벨 판정을 통과하면 자동 큐 편입 전에 `이슈 검증`(`@issue-reviewer`, read-only)을 거친다. 이 게이트는 주장한 루트원인이 실제 코드와 일치하는지와 재현 가능성을 확인해 `confirmed` / `not-reproduced` / `invalid` / `needs-info` 4종 verdict를 반환하며, 호출자(오케스트레이터)가 이를 `🤖 **이슈 검증**` 코멘트로 남긴다. `@issue-reviewer` 자신은 GitHub에 쓰지 않는다. verdict가 `confirmed`가 아니면 호출자가 `needs-triage`를 붙여 사람 분류를 기다리게 하고, 이슈를 자동 close하지 않는다. 내부에서 기획한 이슈에는 이 단계를 적용하지 않는다. 큐 연동 절차의 SSOT는 [.agent/commands/autopilot.md](../../.agent/commands/autopilot.md)다.
 
 구현 실행 흐름은 [01-development-process.md](01-development-process.md),
 브랜치/PR 규칙은 [03-git-workflow.md](03-git-workflow.md),

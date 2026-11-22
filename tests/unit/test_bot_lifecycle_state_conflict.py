@@ -1,7 +1,7 @@
 """BotManager start_bot/stop_bot state machine 회귀 (#1759).
 
-Refs #1759: ante-oracle A7 ``cli_bot_lifecycle_state_conflict_contract`` 가
-재현한 silent-success 결함 잠금. ``BotManager.start_bot`` / ``stop_bot`` 는
+Refs #1759: 중복 start/stop 이 성공으로 끝나던 silent-success 결함 잠금.
+``BotManager.start_bot`` / ``stop_bot`` 는
 ``Bot.start`` / ``Bot.stop`` 위에 strict state machine 을 적용해 중복
 호출을 ``BotStateConflict`` (code=``BOT_STATE_CONFLICT``) 로 거부한다.
 ``resume_bot`` (manager.py:699-718) 의 status 체크 + raise 패턴과 동형.

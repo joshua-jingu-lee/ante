@@ -764,9 +764,7 @@ ante member regenerate-recovery-key (--password-env ENV_NAME | --password-file P
 
 > #1542 (결정 SSOT) 기준의 CLI 표면 가드 master-only 정렬은 #1543 완료
 > (`require_master`가 `src/ante/cli/middleware.py`에 정의되고 member admin
-> mutation CLI에 적용). oracle host probe scope 기대값 정렬은 #1544(별도,
-> ante-oracle)에서 진행. 부모 #1511(oracle host probe scope drift)에서
-> 시작된 정합 작업이다.
+> mutation CLI에 적용).
 
 `member list/info`와 `member list-invalid-roles`는 오프라인 조회가 가능하다. 단,
 `member list-invalid-roles`는 `MemberService.initialize()`로 schema migration DDL을
@@ -796,7 +794,7 @@ ante instrument import <filepath> [--dry-run] [--db-path <경로>]  # CSV/JSON �
 > canonical exchange 계약 SSOT: [core.md `## Canonical Exchange Vocabulary`](../core/core.md#canonical-exchange-vocabulary).
 > instrument는 canonical-only(`*` 거부) 주 신규 입력 표면이다. `list`/`sync`/`import`의
 > non-canonical `--exchange` / import payload는 `INSTRUMENT_INVALID_EXCHANGE` 코드 + non-zero exit
-> + 구조화 error payload로 거부된다 (#1577 완료). `ORACLE_INVALID_EXCHANGE`는 oracle host probe 측 source label이고 구현 코드는 `INSTRUMENT_INVALID_EXCHANGE`다.
+> + 구조화 error payload로 거부된다 (#1577 완료). 거부 코드는 `INSTRUMENT_INVALID_EXCHANGE`다.
 
 ### `ante notification` — 알림 관리
 
