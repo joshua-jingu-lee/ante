@@ -49,7 +49,7 @@ overrides(stored rules)다. 시스템이 RuleEngine에 적용하는 effective ru
 broker_type별 defaults와 stored overrides의 merge다.
 
 - broker_type별 defaults: `kis-domestic`은 `trading_hours`를 자동 포함한다
-  (KIS 모의투자/실거래 모두 KRX 장중에만 주문 수용; A7 oracle 회귀 #1296).
+  (KIS 모의투자/실거래 모두 KRX 장중에만 주문 수용).
   `test` broker는 default가 없다(24h 거래 가정).
 - merge 정책: type-key 기반. stored 항목이 default와 같은 `type`이면 stored가
   default를 override한다. 사용자/Agent는 `enabled: false`로 default를 명시
