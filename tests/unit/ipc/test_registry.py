@@ -1278,17 +1278,34 @@ class TestCommandSpecMetadataExtension:
             "request_model",
         }
 
-    def test_register_kwargs_backward_compat(self, registry: CommandRegistry) -> None:
-        """``register(name, handler, is_mutating=...)`` 3-인자 호출만으로
-        default가 적용된 ``CommandSpec``이 생성된다(기존 호출자 무변경).
-        """
+    def test_register_without_request_model_raises_type_error(
+        self, registry: CommandRegistry
+    ) -> None:
+        """``request_model`` 없이 등록하면 ``TypeError``이고 등록되지 않는다."""
 
         async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
             return {}
 
-        registry.register("legacy.cmd", handler, is_mutating=False)
+        register: typing.Any = registry.register
+        with pytest.raises(TypeError, match="request_model"):
+            register("legacy.cmd", handler, is_mutating=False)
+        assert registry.get("legacy.cmd") is None
+        assert registry.commands == []
+
+    def test_register_with_request_model_applies_defaults(
+        self, registry: CommandRegistry
+    ) -> None:
+        """``request_model``과 ``is_mutating``만 주면 나머지는 기본값이다."""
+
+        async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
+            return {}
+
+        registry.register(
+            "legacy.cmd", handler, is_mutating=False, request_model=BotCreateRequest
+        )
         spec = registry.get("legacy.cmd")
         assert spec is not None
+        assert spec.request_model is BotCreateRequest
         assert spec.required_services == frozenset()
         assert spec.audit_action is None
         assert spec.shutdown_behavior is None
