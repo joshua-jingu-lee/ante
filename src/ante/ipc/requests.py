@@ -29,6 +29,7 @@ __all__ = [
     "BotStopRequest",
     "BotUpdateFields",
     "BotUpdateRequest",
+    "ConfigSetRequest",
     "IPCRequest",
     "MemberReactivateRequest",
     "MemberRegenerateRecoveryKeyRequest",
@@ -39,10 +40,14 @@ __all__ = [
     "MemberSetEmojiRequest",
     "MemberSuspendRequest",
     "MemberUpdateScopesRequest",
+    "RuleUpdateRequest",
     "SignalConnectRequest",
     "StrategySetStatusRequest",
     "SystemClearHaltRequest",
     "SystemHaltRequest",
+    "TreasuryAllocateRequest",
+    "TreasuryDeallocateRequest",
+    "TreasurySetBalanceRequest",
 ]
 
 
@@ -226,3 +231,33 @@ class BotSignalKeyRequest(IPCRequest):
 
 class SignalConnectRequest(IPCRequest):
     key: SecretStr
+
+
+class TreasuryAllocateRequest(IPCRequest):
+    account_id: AccountId
+    bot_id: str
+    amount: float
+
+
+class TreasuryDeallocateRequest(IPCRequest):
+    account_id: AccountId
+    bot_id: str
+    amount: float
+
+
+class TreasurySetBalanceRequest(IPCRequest):
+    account_id: AccountId
+    balance: float
+
+
+class RuleUpdateRequest(IPCRequest):
+    account_id: AccountId
+    rule_type: str
+    enabled: bool = True
+    params: dict[str, Any] = {}
+
+
+class ConfigSetRequest(IPCRequest):
+    key: str
+    value: str
+    category: str = "user"

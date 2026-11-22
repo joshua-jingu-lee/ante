@@ -63,24 +63,14 @@
     "broker.order_history",
     "broker.positions",
     "broker.reconcile",
-    "broker.status",
-    "config.set",
-    "rule.update",
-    "treasury.allocate",
-    "treasury.deallocate",
-    "treasury.set_balance"
+    "broker.status"
   ],
   "ipc_args_reads": {
     "broker.balance": 1,
     "broker.order_history": 3,
     "broker.positions": 1,
     "broker.reconcile": 2,
-    "broker.status": 1,
-    "config.set": 3,
-    "rule.update": 4,
-    "treasury.allocate": 3,
-    "treasury.deallocate": 3,
-    "treasury.set_balance": 2
+    "broker.status": 1
   },
   "cli_direct_ipc_send": {
     "src/ante/cli/commands/account.py": 2,

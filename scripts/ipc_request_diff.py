@@ -34,17 +34,22 @@ Dispatch every request through the real ``register_all_handlers`` and
 ``IPCServer._dispatch``. The services are one deterministic double: an
 attribute is a double named by its path, a call is recorded as
 ``[path, args, kwargs]`` and returns the double ``<path>()``, awaiting returns
-``<path>!``. A row is ``status``, ``code``, ``message``, ``result`` and
-``calls``; ``result`` and ``calls`` are ``json.dumps(sort_keys=True,
-default=repr)`` after values of a type other than ``str``, ``int``, ``float``,
-``bool``, ``None``, ``list``, ``tuple`` and ``dict`` are replaced by their
-``repr``. The record also keeps the three request keys of
+``<path>!``. When the args hold a string ``account_id``, the double's
+``svc.bot_manager.get_bot().config.account_id`` is that string, so a handler
+that matches the bot's account to the request reaches its service. A row is
+``status``, ``code``, ``message``, ``result`` and ``calls``; ``result`` and
+``calls`` are ``json.dumps(sort_keys=True, default=repr)`` after values of a
+type other than ``str``, ``int``, ``float``, ``bool``, ``None``, ``list``,
+``tuple`` and ``dict`` are replaced by their ``repr``, and a non-empty string
+at a clock key (``updated_at``) of the result is replaced by the fixed marker.
+The record also keeps the three request keys of
 ``scripts/check_entry_ratchet.py`` for the tree it ran on.
 
 ``build`` and ``record`` run with ``ANTE_CONFIG_DIR`` and ``HOME`` set to a
 temporary directory that is removed afterwards.
 
-``compare [--requests FILE] --before A --before B --after C [--allow-code CODE]``
+``compare [--requests FILE] --before A --before B --after C [--allow-code CODE]
+[--allow-row NAME]``
 
 Run ``compare`` on the after tree: whether a field is narrowed is read from the
 request models of the tree it runs on. A and B must hold the same request
@@ -68,10 +73,14 @@ each other request:
 - ``다름``: any other difference, and any row that is not ``같음`` whose after
   message or result contains a string value of its request (two characters
   or more).
+- ``의도한 변경(이름으로 허용)``: a ``다름`` row whose request name is given
+  with ``--allow-row`` (the exact name, no prefix or pattern). A given name
+  whose row is not ``다름`` is a stale allowance.
 
-Exit 0: no ``다름`` row.
-Exit 1: a ``다름`` row.
-Exit 2: unreadable input, a record row not in the request set, two before
+Exit 0: no ``다름`` row and no stale allowance.
+Exit 1: a ``다름`` row or a stale allowance.
+Exit 2: unreadable input, an ``--allow-row`` name not in the request set or of
+a ``cli`` row, a record row not in the request set, two before
 records with different request names, an unsupported handler read, or any
 other failure.
 """
@@ -119,7 +128,9 @@ VALUES: tuple[tuple[str, Any], ...] = (
     ("null", None),
 )
 BAD_ACCOUNTS = (("default", "default"), ("empty", ""), ("bad", "bad_id!"))
-CLASSES = ("같음", "거부로 바뀜", "코드 바뀜", "메시지 바뀜", "다름")
+ALLOWED_ROW = "의도한 변경(이름으로 허용)"
+CLASSES = ("같음", "거부로 바뀜", "코드 바뀜", "메시지 바뀜", ALLOWED_ROW, "다름")
+BOT_ACCOUNT_PATH = "svc.bot_manager.get_bot().config.account_id"
 RATCHET_KEYS = (
     "ipc_handlers_without_model",
     "ipc_args_reads",
@@ -128,6 +139,7 @@ RATCHET_KEYS = (
 PLAIN = (str, int, float, bool, type(None))
 ISOLATED_ENV = ("ANTE_CONFIG_DIR", "HOME")
 CLOCK_KEYS = frozenset({"expires_at"})
+RESULT_CLOCK_KEYS = frozenset({"updated_at"})
 CLOCK_MARKER = "2030-01-01T00:00:00+00:00"
 
 
@@ -277,11 +289,11 @@ def _cli_records(root: Path, path: Path | None) -> list[dict[str, Any]]:
     ]
 
 
-def _fixed_clock(args: Any) -> Any:
+def _fixed_clock(args: Any, keys: frozenset[str] = CLOCK_KEYS) -> Any:
     if not isinstance(args, dict):
         return args
     return {
-        k: CLOCK_MARKER if k in CLOCK_KEYS and isinstance(v, str) and v else v
+        k: CLOCK_MARKER if k in keys and isinstance(v, str) and v else v
         for k, v in args.items()
     }
 
@@ -402,22 +414,28 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 
 class _Double:
-    def __init__(self, path: str, calls: list[Any]) -> None:
+    def __init__(
+        self, path: str, calls: list[Any], fixed: dict[str, Any] | None = None
+    ) -> None:
         self._path = path
         self._calls = calls
+        self._fixed = fixed or {}
 
-    def __getattr__(self, name: str) -> _Double:
+    def __getattr__(self, name: str) -> Any:
         if name.startswith("__"):
             raise AttributeError(name)
-        return _Double(f"{self._path}.{name}", self._calls)
+        path = f"{self._path}.{name}"
+        if path in self._fixed:
+            return self._fixed[path]
+        return _Double(path, self._calls, self._fixed)
 
     def __call__(self, *args: Any, **kwargs: Any) -> _Double:
         self._calls.append([self._path, list(args), kwargs])
-        return _Double(f"{self._path}()", self._calls)
+        return _Double(f"{self._path}()", self._calls, self._fixed)
 
     def __await__(self) -> Generator[Any, None, _Double]:
         yield from ()
-        return _Double(f"{self._path}!", self._calls)
+        return _Double(f"{self._path}!", self._calls, self._fixed)
 
     def __iter__(self) -> Iterator[Any]:
         return iter(())
@@ -460,7 +478,11 @@ async def _dispatch_all(requests: dict[str, dict[str, Any]]) -> dict[str, Any]:
     for name in sorted(requests):
         request = requests[name]
         calls: list[Any] = []
-        services: Any = _Double("svc", calls)
+        args = request["args"]
+        fixed: dict[str, Any] = {}
+        if isinstance(args, dict) and isinstance(args.get("account_id"), str):
+            fixed[BOT_ACCOUNT_PATH] = args["account_id"]
+        services: Any = _Double("svc", calls, fixed)
         server = IPCServer("/unused.sock", services, registry)
         server._state = IPCServerState.RUNNING
         response = await server._dispatch(
@@ -476,7 +498,7 @@ async def _dispatch_all(requests: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "status": response.get("status"),
             "code": error.get("code"),
             "message": error.get("message"),
-            "result": _dump(response.get("result")),
+            "result": _dump(_fixed_clock(response.get("result"), RESULT_CLOCK_KEYS)),
             "calls": _dump(calls),
         }
     return rows
@@ -617,11 +639,19 @@ def cmd_compare(args: argparse.Namespace) -> int:
         raise InputError(f"the before records differ in rows: {', '.join(only)}")
     after, ratchet_after = _rows(args.after, names)
     allowed = frozenset((*DEFAULT_ALLOWED, *args.allow_code))
+    allow_rows = set(args.allow_row)
+    for name in sorted(allow_rows):
+        if name not in requests:
+            raise InputError(f"--allow-row {name}: not in the request set")
+        if requests[name]["kind"] == "cli":
+            raise InputError(f"--allow-row {name}: a cli row cannot be allowed")
     unstable = sorted(n for n in names if n in b1 and n in b2 and b1[n] != b2[n])
     counts: Counter[str] = Counter()
     code_changes: Counter[str] = Counter()
     changed: list[str] = []
     different: list[str] = []
+    allowed_rows: list[str] = []
+    stale: list[str] = []
     for name in sorted(names):
         request = requests[name]
         if name in unstable and request["kind"] != "cli":
@@ -630,6 +660,17 @@ def cmd_compare(args: argparse.Namespace) -> int:
             cls, reason = "다름", "a CLI request is not deterministic"
         else:
             cls, reason = classify(request, b1.get(name), after.get(name), allowed)
+        if name in allow_rows:
+            if cls != "다름":
+                stale.append(f"  {name}: {cls}")
+            else:
+                cls = ALLOWED_ROW
+                allowed_rows.append(
+                    f"  {name}: {_outcome(b1[name])} {b1[name]['calls']} -> "
+                    f"{_outcome(after[name])} {after[name]['calls']}"
+                )
+                counts[cls] += 1
+                continue
         counts[cls] += 1
         if cls == "다름":
             different.append(f"  {name}: {reason}")
@@ -650,6 +691,10 @@ def cmd_compare(args: argparse.Namespace) -> int:
     lines += [f"  {key} {n}" for key, n in sorted(code_changes.items())]
     lines.append("changed rows:")
     lines += changed
+    lines.append("allowed rows:")
+    lines += allowed_rows
+    lines.append("stale allowed rows:")
+    lines += stale
     lines.append("different rows:")
     lines += different
     lines.append(
@@ -660,7 +705,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
         )
     )
     print("\n".join(lines))
-    return EXIT_DIFFERENT if counts["다름"] else EXIT_OK
+    return EXIT_DIFFERENT if counts["다름"] or stale else EXIT_OK
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -679,6 +724,7 @@ def _parser() -> argparse.ArgumentParser:
     compare.add_argument("--before", type=Path, action="append", required=True)
     compare.add_argument("--after", type=Path, required=True)
     compare.add_argument("--allow-code", action="append", default=[])
+    compare.add_argument("--allow-row", action="append", default=[])
     return parser
 
 
