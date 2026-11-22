@@ -11,19 +11,25 @@
     },
     "src/ante/account/service.py": {
       "BLE001": 2,
-      "C901": 1
+      "C901": 1,
+      "TID251": 5
     },
     "src/ante/approval/handlers.py": {
       "BLE001": 1
     },
     "src/ante/approval/service.py": {
-      "S608": 3
+      "S608": 3,
+      "TID251": 11
     },
     "src/ante/audit/logger.py": {
-      "S608": 2
+      "S608": 2,
+      "TID251": 2
     },
     "src/ante/backtest/executor.py": {
       "C901": 1
+    },
+    "src/ante/backtest/run_store.py": {
+      "TID251": 1
     },
     "src/ante/backtest/runner.py": {
       "ASYNC240": 1
@@ -32,7 +38,8 @@
       "C901": 1
     },
     "src/ante/bot/bot.py": {
-      "C901": 2
+      "C901": 2,
+      "TID251": 4
     },
     "src/ante/bot/manager.py": {
       "BLE001": 1,
@@ -40,7 +47,8 @@
     },
     "src/ante/bot/providers/virtual.py": {
       "BLE001": 2,
-      "C901": 1
+      "C901": 1,
+      "TID251": 1
     },
     "src/ante/bot/reconcile_scheduler.py": {
       "C901": 1
@@ -52,22 +60,37 @@
     "src/ante/broker/base.py": {
       "BLE001": 1
     },
+    "src/ante/broker/circuit_breaker.py": {
+      "TID251": 2
+    },
     "src/ante/broker/fill_scheduler.py": {
-      "C901": 1
+      "C901": 1,
+      "TID251": 1
     },
     "src/ante/broker/kis.py": {
       "ASYNC109": 1,
       "BLE001": 1,
-      "C901": 1
+      "C901": 1,
+      "TID251": 7
     },
     "src/ante/broker/kis_stream.py": {
-      "BLE001": 1
+      "BLE001": 1,
+      "TID251": 2
+    },
+    "src/ante/broker/mock.py": {
+      "TID251": 1
+    },
+    "src/ante/broker/test.py": {
+      "TID251": 1
     },
     "src/ante/cli/cold_path.py": {
       "BLE001": 1
     },
     "src/ante/cli/commands/account.py": {
       "C901": 1
+    },
+    "src/ante/cli/commands/approval.py": {
+      "TID251": 1
     },
     "src/ante/cli/commands/backtest.py": {
       "C901": 1
@@ -85,10 +108,14 @@
     },
     "src/ante/cli/commands/init.py": {
       "BLE001": 4,
-      "C901": 1
+      "C901": 1,
+      "TID251": 1
     },
     "src/ante/cli/commands/instrument.py": {
       "C901": 1
+    },
+    "src/ante/cli/commands/report.py": {
+      "TID251": 1
     },
     "src/ante/cli/commands/rule.py": {
       "BLE001": 2
@@ -101,7 +128,8 @@
       "C901": 3
     },
     "src/ante/cli/commands/treasury.py": {
-      "S608": 2
+      "S608": 2,
+      "TID251": 9
     },
     "src/ante/cli/commands/update.py": {
       "C901": 1
@@ -118,6 +146,9 @@
     "src/ante/core/database.py": {
       "BLE001": 2
     },
+    "src/ante/core/log/handlers.py": {
+      "TID251": 2
+    },
     "src/ante/core/log/setup.py": {
       "BLE001": 1
     },
@@ -127,22 +158,34 @@
     "src/ante/data/datasets.py": {
       "BLE001": 1
     },
+    "src/ante/data/retention.py": {
+      "TID251": 1
+    },
     "src/ante/data/store.py": {
       "BLE001": 4,
       "C901": 2
     },
+    "src/ante/eventbus/events.py": {
+      "TID251": 1
+    },
     "src/ante/feed/cli_scheduler.py": {
       "ASYNC109": 1,
-      "BLE001": 2
+      "BLE001": 2,
+      "TID251": 1
     },
     "src/ante/feed/pipeline/backfill_runner.py": {
-      "BLE001": 3
+      "BLE001": 3,
+      "TID251": 3
+    },
+    "src/ante/feed/pipeline/checkpoint.py": {
+      "TID251": 1
     },
     "src/ante/feed/pipeline/daily_runner.py": {
       "BLE001": 3
     },
     "src/ante/feed/pipeline/dart_collector.py": {
-      "BLE001": 1
+      "BLE001": 1,
+      "TID251": 1
     },
     "src/ante/feed/pipeline/data_go_kr_collector.py": {
       "BLE001": 1
@@ -150,20 +193,44 @@
     "src/ante/feed/pipeline/indicator_calculator.py": {
       "BLE001": 1
     },
+    "src/ante/feed/pipeline/orchestrator.py": {
+      "TID251": 3
+    },
+    "src/ante/feed/pipeline/scheduler.py": {
+      "TID251": 2
+    },
+    "src/ante/feed/sources/base.py": {
+      "TID251": 3
+    },
     "src/ante/feed/sources/dart.py": {
       "ASYNC240": 1,
       "C901": 2
+    },
+    "src/ante/gateway/cache.py": {
+      "TID251": 2
     },
     "src/ante/gateway/gateway.py": {
       "BLE001": 5,
       "C901": 1
     },
+    "src/ante/gateway/rate_limiter.py": {
+      "TID251": 3
+    },
+    "src/ante/gateway/stop_order.py": {
+      "TID251": 2
+    },
     "src/ante/gateway/stream_integration.py": {
       "C901": 1
+    },
+    "src/ante/instrument/service.py": {
+      "TID251": 2
     },
     "src/ante/ipc/client.py": {
       "ASYNC240": 1,
       "BLE001": 1
+    },
+    "src/ante/ipc/registry.py": {
+      "TID251": 2
     },
     "src/ante/ipc/server.py": {
       "ASYNC109": 1,
@@ -174,30 +241,45 @@
     "src/ante/main.py": {
       "ASYNC240": 1,
       "BLE001": 2,
-      "C901": 5
+      "C901": 5,
+      "TID251": 1
     },
     "src/ante/member/service.py": {
       "BLE001": 1,
-      "S608": 3
+      "S608": 3,
+      "TID251": 1
+    },
+    "src/ante/member/token_manager.py": {
+      "TID251": 2
     },
     "src/ante/notification/service.py": {
-      "BLE001": 4
+      "BLE001": 4,
+      "TID251": 2
     },
     "src/ante/notification/telegram.py": {
       "BLE001": 2
     },
     "src/ante/notification/telegram_receiver.py": {
-      "C901": 1
+      "C901": 1,
+      "TID251": 2
+    },
+    "src/ante/report/draft.py": {
+      "TID251": 1
     },
     "src/ante/report/store.py": {
-      "S608": 1
+      "S608": 1,
+      "TID251": 1
     },
     "src/ante/rule/config_update.py": {
       "BLE001": 1
     },
     "src/ante/rule/engine.py": {
       "BLE001": 13,
-      "C901": 2
+      "C901": 2,
+      "TID251": 2
+    },
+    "src/ante/rule/global_rules.py": {
+      "TID251": 1
     },
     "src/ante/rule/manager.py": {
       "BLE001": 1
@@ -206,10 +288,17 @@
       "C901": 1
     },
     "src/ante/strategy/registry.py": {
-      "BLE001": 1
+      "BLE001": 1,
+      "TID251": 1
     },
     "src/ante/strategy/validator.py": {
       "C901": 3
+    },
+    "src/ante/trade/daily_report.py": {
+      "TID251": 2
+    },
+    "src/ante/trade/fill_applier.py": {
+      "TID251": 1
     },
     "src/ante/trade/fill_outbox.py": {
       "C901": 1
@@ -227,11 +316,16 @@
       "C901": 1
     },
     "src/ante/trade/recorder.py": {
-      "S608": 1
+      "S608": 1,
+      "TID251": 1
+    },
+    "src/ante/treasury/models.py": {
+      "TID251": 1
     },
     "src/ante/treasury/treasury.py": {
       "BLE001": 7,
-      "C901": 1
+      "C901": 1,
+      "TID251": 9
     },
     "src/ante/update/checker.py": {
       "BLE001": 3
