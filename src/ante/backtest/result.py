@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from typing import Any
 
 from ante.backtest.config import BacktestConfig, DatasetInfo
 
@@ -35,13 +36,13 @@ class BacktestResult:
     final_balance: float
     total_return: float
     trades: list[BacktestTrade] = field(default_factory=list)
-    equity_curve: list[dict] = field(default_factory=list)
-    metrics: dict = field(default_factory=dict)
+    equity_curve: list[dict[str, Any]] = field(default_factory=list)
+    metrics: dict[str, Any] = field(default_factory=dict)
     config: BacktestConfig = field(default_factory=BacktestConfig)
     datasets: list[DatasetInfo] = field(default_factory=list)
     result_path: str = ""
 
-    def to_dict(self, *, resample_equity: bool = False) -> dict:
+    def to_dict(self, *, resample_equity: bool = False) -> dict[str, Any]:
         """결과를 딕셔너리로 변환.
 
         Args:
@@ -84,10 +85,10 @@ _RESAMPLE_THRESHOLD = 500
 
 
 def resample_equity_curve_daily(
-    curve: list[dict],
+    curve: list[dict[str, Any]],
     *,
     threshold: int = _RESAMPLE_THRESHOLD,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """equity_curve를 일봉 기준으로 리샘플링한다.
 
     동일 날짜에 여러 포인트가 있으면 마지막 포인트(종가 시점)만 남긴다.
@@ -99,7 +100,7 @@ def resample_equity_curve_daily(
     if len(curve) <= threshold:
         return curve
 
-    daily: dict[str, dict] = {}
+    daily: dict[str, dict[str, Any]] = {}
     for point in curve:
         date_key = _extract_date(point)
         if date_key:
@@ -108,7 +109,7 @@ def resample_equity_curve_daily(
     return list(daily.values())
 
 
-def _extract_date(point: dict) -> str:
+def _extract_date(point: dict[str, Any]) -> str:
     """포인트에서 날짜 문자열(YYYY-MM-DD)을 추출."""
     if "date" in point:
         return str(point["date"])[:10]
