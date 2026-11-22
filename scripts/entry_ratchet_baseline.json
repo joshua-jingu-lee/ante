@@ -2,12 +2,11 @@
   "cli_error_calls": {
     "src/ante/cli/_validators.py": 3,
     "src/ante/cli/cold_path.py": 1,
-    "src/ante/cli/commands/account.py": 8,
+    "src/ante/cli/commands/account.py": 1,
     "src/ante/cli/commands/bot.py": 16,
     "src/ante/cli/commands/broker.py": 1,
     "src/ante/cli/commands/config.py": 2,
     "src/ante/cli/commands/feed.py": 19,
-    "src/ante/cli/commands/member.py": 34,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 2,
     "src/ante/cli/middleware.py": 2
@@ -15,12 +14,11 @@
   "cli_exits": {
     "src/ante/cli/_validators.py": 3,
     "src/ante/cli/cold_path.py": 1,
-    "src/ante/cli/commands/account.py": 8,
+    "src/ante/cli/commands/account.py": 1,
     "src/ante/cli/commands/bot.py": 8,
     "src/ante/cli/commands/broker.py": 1,
     "src/ante/cli/commands/config.py": 1,
     "src/ante/cli/commands/feed.py": 21,
-    "src/ante/cli/commands/member.py": 34,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 5,
     "src/ante/cli/commands/system.py": 2,
@@ -29,12 +27,9 @@
   "ipc_error_code_reads": {
     "src/ante/cli/commands/bot.py": 8,
     "src/ante/cli/commands/broker.py": 2,
-    "src/ante/cli/commands/config.py": 1,
-    "src/ante/cli/commands/member.py": 9
+    "src/ante/cli/commands/config.py": 1
   },
   "unregistered_codes": [
-    "ACCOUNT_ALREADY_DELETED",
-    "ACCOUNT_INVALID_STATUS",
     "ACCOUNT_REPAIR_TIMEZONE_OK",
     "BROKER_MODIFY_ORGNO_UNAVAILABLE",
     "CLI_INVALID_DATE",
@@ -53,8 +48,6 @@
     "FEED_INJECT_INVALID_TIMEFRAME",
     "FILE_NOT_FOUND",
     "IPC_ERROR",
-    "MEMBER_PASSWORD_ENV_NOT_SET",
-    "MEMBER_PASSWORD_FILE_NOT_FOUND",
     "MESSAGE_TOO_LARGE",
     "NOT_INITIALIZED",
     "SERVICE_UNAVAILABLE",
