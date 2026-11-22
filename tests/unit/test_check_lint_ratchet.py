@@ -544,3 +544,6 @@ def test_pyproject_pins_match_baseline_tools() -> None:
     }
     assert set(baseline["tools"]) == set(checker.TOOLS)
     assert {name: pins.get(name) for name in checker.TOOLS} == baseline["tools"]
+    assert pins.get("mypy", "").replace(".", "").isdigit(), (
+        f"mypy must be pinned with ==: {dev}"
+    )

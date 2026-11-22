@@ -938,7 +938,7 @@ LINT_BASE = {"src/ante/m.py": {"BLE001": 2, "C901": 1}}
 
 
 def _lint_baseline_json(ruff: dict[str, dict[str, int]]) -> str:
-    data = {"tools": {"ruff": "0.17.6", "mypy": "2.4.1"}, "ruff": ruff, "mypy": {}}
+    data = {"tools": {"ruff": "0.17.6"}, "ruff": ruff}
     return json.dumps(data, indent=2) + "\n"
 
 
