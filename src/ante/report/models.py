@@ -19,6 +19,58 @@ class ReportStatus(StrEnum):
     ARCHIVED = "archived"
 
 
+REPORT_STATUS_TRANSITIONS: dict[ReportStatus, set[ReportStatus]] = {
+    ReportStatus.DRAFT: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+    ReportStatus.SUBMITTED: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+    ReportStatus.REVIEWED: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+    ReportStatus.ADOPTED: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+    ReportStatus.REJECTED: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+    ReportStatus.ARCHIVED: {
+        ReportStatus.DRAFT,
+        ReportStatus.SUBMITTED,
+        ReportStatus.REVIEWED,
+        ReportStatus.ADOPTED,
+        ReportStatus.REJECTED,
+        ReportStatus.ARCHIVED,
+    },
+}
+
+
 def validate_strategy_report_metrics(
     total_trades: int,
     win_rate: float | None,
