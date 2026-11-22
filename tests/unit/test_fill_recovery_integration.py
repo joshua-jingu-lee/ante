@@ -9,6 +9,8 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 
 from ante.bot.reconcile_scheduler import ReconcileScheduler
@@ -33,7 +35,18 @@ ACCT = "acct-paper"
 BOT = "bot-1"
 STRAT = "strat-1"
 SYMBOL = "005930"
-DATE = business_date_kst()
+# 실행 시각과 무관하게 같은 기준 시각에서 날짜를 만든다(#2669). 모든 테스트가
+# 이 시각의 manual_clock 위에서 돈다(운영 코드의 business_date_kst()도 이 시각).
+_AT = datetime(2026, 1, 2, 3, 0, 0, tzinfo=UTC)
+DATE = business_date_kst(_AT)
+
+pytestmark = pytest.mark.parametrize("manual_clock", [_AT], indirect=True)
+
+
+@pytest.fixture(autouse=True)
+def _fixed_clock(manual_clock):
+    """모듈의 모든 테스트를 ``_AT`` 고정 시계 위에서 돌린다."""
+    return manual_clock
 
 
 class FakeBroker:
@@ -642,8 +655,6 @@ async def test_prior_day_downtime_fill_recovered_before_expire_no_misclass(
     - poll-first: 만료 전 open 을 폴해 100주 복구(succeeded=True, applied>0) →
       internal=broker=100 → reconcile 무오분류.
     """
-    from datetime import UTC, datetime, timedelta
-
     mismatches: list[PositionMismatchEvent] = []
 
     async def _mh(e):
@@ -653,7 +664,7 @@ async def test_prior_day_downtime_fill_recovered_before_expire_no_misclass(
     eventbus.subscribe(PositionMismatchEvent, _mh)
 
     # 전일 영업일(어제 KST) — DATE 보다 엄격히 과거.
-    yesterday = business_date_kst(datetime.now(UTC) - timedelta(days=1))
+    yesterday = business_date_kst(_AT - timedelta(days=1))
     assert yesterday < DATE
 
     tracker = stack["tracker"]
@@ -708,9 +719,7 @@ async def test_prior_day_open_no_fill_expires_after_poll(stack):
     """대조 (I2 경계): 전일 open 인데 다운타임 체결이 **없으면** poll 후
     genuinely-dead 로 expire 된다 (복구할 게 없는 진짜 미체결만 만료).
     """
-    from datetime import UTC, datetime, timedelta
-
-    yesterday = business_date_kst(datetime.now(UTC) - timedelta(days=1))
+    yesterday = business_date_kst(_AT - timedelta(days=1))
     tracker = stack["tracker"]
     await tracker.open(
         order_id="ord-prior-dead",

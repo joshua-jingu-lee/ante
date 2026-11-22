@@ -5,11 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from ante.bot.config import BOT_STATUS_TRANSITIONS, BotConfig, BotStatus
 from ante.bot.exceptions import BotStateConflict
+from ante.core import clock
 from ante.eventbus.fill_dedup_guard import FillDedupGuard
 
 if TYPE_CHECKING:
@@ -81,7 +81,7 @@ class Bot:
         self._generation += 1
         self._orders_closed = False
         _transition_status(self, BotStatus.RUNNING)
-        self.started_at = datetime.now(UTC)
+        self.started_at = clock.now(UTC)
         self._task = asyncio.create_task(
             self._run_loop(),
             name=f"bot_{self.bot_id}",
@@ -113,7 +113,7 @@ class Bot:
             self.strategy.on_stop()
 
         _transition_status(self, BotStatus.STOPPED)
-        self.stopped_at = datetime.now(UTC)
+        self.stopped_at = clock.now(UTC)
 
         await self._eventbus.publish(
             BotStoppedEvent(bot_id=self.bot_id, account_id=self.config.account_id)
@@ -132,7 +132,7 @@ class Bot:
                 should_sleep = False
                 should_return = False
                 step_context = {
-                    "timestamp": datetime.now(UTC),
+                    "timestamp": clock.now(UTC),
                     "portfolio": self._ctx.get_positions(),
                     "balance": self._ctx.get_balance(),
                 }
@@ -145,15 +145,19 @@ class Bot:
                         should_return = True
                     else:
                         try:
-                            step_start = monotonic()
+                            step_start = clock.monotonic()
                             signals = await asyncio.wait_for(
                                 self.strategy.on_step(step_context),  # type: ignore[union-attr]
                                 timeout=self.config.step_timeout_seconds,
                             )
-                            step_duration_ms = int((monotonic() - step_start) * 1000)
+                            step_duration_ms = int(
+                                (clock.monotonic() - step_start) * 1000
+                            )
                         except TimeoutError:
                             assert step_start is not None
-                            timeout_duration_ms = int((monotonic() - step_start) * 1000)
+                            timeout_duration_ms = int(
+                                (clock.monotonic() - step_start) * 1000
+                            )
                             self._consecutive_failures += 1
                             timeout_msg = (
                                 f"on_step timeout "
@@ -309,7 +313,7 @@ class Bot:
                     message=str(e),
                     signal_count=0,
                     duration_ms=(
-                        int((monotonic() - step_start) * 1000)
+                        int((clock.monotonic() - step_start) * 1000)
                         if step_start is not None
                         else 0
                     ),

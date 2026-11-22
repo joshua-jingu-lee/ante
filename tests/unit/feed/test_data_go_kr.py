@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -26,6 +26,11 @@ from ante.feed.sources.data_go_kr import (
 )
 
 # ── 테스트 헬퍼 ──────────────────────────────────────────────
+
+_TEST_KST = timezone(timedelta(hours=9))
+# 자정 무렵. 실제 시계를 두 번 읽으면 날짜가 갈리던 시각이다.
+_KST_2359 = datetime(2026, 11, 22, 23, 59, 59, tzinfo=_TEST_KST)
+_KST_0000 = datetime(2026, 11, 23, 0, 0, 0, tzinfo=_TEST_KST)
 
 
 def _make_response(
@@ -436,16 +441,20 @@ class TestRateLimiterDailyReset:
         rl.increment_daily()
         assert rl.daily_count == 1
 
-    def test_default_now_date_uses_kst(self) -> None:
+    @pytest.mark.parametrize(
+        "manual_clock",
+        [_KST_2359, _KST_0000],
+        indirect=True,
+        ids=["kst-2359", "kst-0000"],
+    )
+    def test_default_now_date_uses_kst(self, manual_clock) -> None:
         """now_date 미지정 시 KST 기준 현재 날짜로 동작한다(스모크)."""
-        from datetime import datetime
-
         from ante.feed.sources.base import _KST
 
         rl = RateLimiter(tps_limit=10.0, daily_limit=100)
         rl.increment_daily()
         assert rl.daily_count == 1
-        assert rl._daily_date == datetime.now(tz=_KST).date()
+        assert rl._daily_date == manual_clock.now(_KST).date()
 
 
 # ── fetch_by_date ────────────────────────────────────────────

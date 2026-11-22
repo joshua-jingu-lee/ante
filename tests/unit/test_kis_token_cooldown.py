@@ -32,6 +32,8 @@ from ante.broker.kis import (
     _token_cooldowns,
 )
 
+_COOLDOWN_AT = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
+
 
 class _FakeResponse:
     """aiohttp response 의 async-context-manager mock (토큰 발급 경로)."""
@@ -160,21 +162,14 @@ class TestCooldownAtSource:
         assert s.post_count == 1
         assert a.access_token == "tok-reopen"
 
+    @pytest.mark.parametrize("manual_clock", [_COOLDOWN_AT], indirect=True)
     async def test_egw00133_cooldown_lasts_sixty_seconds_within_healing_interval(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, manual_clock: Any
     ) -> None:
         """EGW00133 cooldown 은 60초이고 self-healing 기본 주기보다 길지 않다."""
-        import ante.broker.kis as kis_module
         from ante.config.defaults import DEFAULTS
 
-        fixed = datetime(2026, 3, 4, 5, 6, 7, tzinfo=UTC)
-
-        class _FixedClock(datetime):
-            @classmethod
-            def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
-                return fixed if tz is not None else fixed.replace(tzinfo=None)
-
-        monkeypatch.setattr(kis_module, "datetime", _FixedClock)
+        fixed = _COOLDOWN_AT
         s = _FakeSession([_egw00133_response()])
         a = _make_adapter(s, account_no="acct-A")
 

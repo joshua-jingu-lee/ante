@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
 from ante.broker.models import CommissionInfo
+from ante.core import clock
 from ante.strategy.base import OrderView, PortfolioView
 
 if TYPE_CHECKING:
@@ -365,7 +366,7 @@ class VirtualExecutor:
                 price=fill_price,
                 commission=commission,
                 order_type=order_type,
-                timestamp=datetime.now(UTC),
+                timestamp=clock.now(UTC),
                 fill_dedup_key="",
                 exchange=event.exchange,
             )

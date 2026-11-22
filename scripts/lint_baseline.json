@@ -38,8 +38,7 @@
       "C901": 1
     },
     "src/ante/bot/bot.py": {
-      "C901": 2,
-      "TID251": 4
+      "C901": 2
     },
     "src/ante/bot/manager.py": {
       "BLE001": 1,
@@ -47,8 +46,7 @@
     },
     "src/ante/bot/providers/virtual.py": {
       "BLE001": 2,
-      "C901": 1,
-      "TID251": 1
+      "C901": 1
     },
     "src/ante/bot/reconcile_scheduler.py": {
       "C901": 1
@@ -60,28 +58,16 @@
     "src/ante/broker/base.py": {
       "BLE001": 1
     },
-    "src/ante/broker/circuit_breaker.py": {
-      "TID251": 2
-    },
     "src/ante/broker/fill_scheduler.py": {
-      "C901": 1,
-      "TID251": 1
+      "C901": 1
     },
     "src/ante/broker/kis.py": {
       "ASYNC109": 1,
       "BLE001": 1,
-      "C901": 1,
-      "TID251": 7
+      "C901": 1
     },
     "src/ante/broker/kis_stream.py": {
-      "BLE001": 1,
-      "TID251": 2
-    },
-    "src/ante/broker/mock.py": {
-      "TID251": 1
-    },
-    "src/ante/broker/test.py": {
-      "TID251": 1
+      "BLE001": 1
     },
     "src/ante/cli/cold_path.py": {
       "BLE001": 1
@@ -191,18 +177,9 @@
       "ASYNC240": 1,
       "C901": 2
     },
-    "src/ante/gateway/cache.py": {
-      "TID251": 2
-    },
     "src/ante/gateway/gateway.py": {
       "BLE001": 5,
       "C901": 1
-    },
-    "src/ante/gateway/rate_limiter.py": {
-      "TID251": 3
-    },
-    "src/ante/gateway/stop_order.py": {
-      "TID251": 2
     },
     "src/ante/gateway/stream_integration.py": {
       "C901": 1
@@ -260,11 +237,7 @@
     },
     "src/ante/rule/engine.py": {
       "BLE001": 13,
-      "C901": 2,
-      "TID251": 2
-    },
-    "src/ante/rule/global_rules.py": {
-      "TID251": 1
+      "C901": 2
     },
     "src/ante/rule/manager.py": {
       "BLE001": 1
@@ -278,12 +251,6 @@
     },
     "src/ante/strategy/validator.py": {
       "C901": 3
-    },
-    "src/ante/trade/daily_report.py": {
-      "TID251": 2
-    },
-    "src/ante/trade/fill_applier.py": {
-      "TID251": 1
     },
     "src/ante/trade/fill_outbox.py": {
       "C901": 1
@@ -301,16 +268,11 @@
       "C901": 1
     },
     "src/ante/trade/recorder.py": {
-      "S608": 1,
-      "TID251": 1
-    },
-    "src/ante/treasury/models.py": {
-      "TID251": 1
+      "S608": 1
     },
     "src/ante/treasury/treasury.py": {
       "BLE001": 7,
-      "C901": 1,
-      "TID251": 9
+      "C901": 1
     },
     "src/ante/update/checker.py": {
       "BLE001": 3
