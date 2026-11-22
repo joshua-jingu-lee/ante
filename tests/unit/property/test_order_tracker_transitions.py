@@ -302,3 +302,109 @@ class OrderTrackerMachine(RuleBasedStateMachine):
 
 TestOrderTrackerMachine = OrderTrackerMachine.TestCase
 TestOrderTrackerMachine.settings = settings()
+
+
+# ── 기계가 찾은 결함의 최소 순서 ───────────────────────────────────
+#
+# 각 테스트의 xfail은 마지막 단언의 AssertionError만 받는다. 준비 단계의 이상은
+# pytest.fail(Failed)로 내 xfail에 흡수되지 않게 한다.
+
+
+async def _tracker_with_order(
+    tmp_path: Path, qty: float
+) -> tuple[Database, OrderTracker]:
+    db = Database(str(tmp_path / "tracker.db"))
+    await db.connect()
+    tracker = OrderTracker(db=db)
+    await tracker.initialize()
+    await tracker.open(
+        order_id="ord-0",
+        account_id=ACCOUNT_ID,
+        bot_id="bot-a",
+        strategy_id="s1",
+        broker_order_id="bk-ord-0",
+        symbol="005930",
+        side="buy",
+        order_type="limit",
+        ordered_qty=qty,
+        submitted_date=DAYS[0],
+    )
+    return db, tracker
+
+
+async def _status(tracker: OrderTracker) -> str:
+    record = await tracker.get("ord-0")
+    if record is None:
+        pytest.fail("준비: 주문 행이 없다")
+    return record.status
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2705")
+async def test_fill_after_cancel_keeps_open_cache_in_sync(tmp_path: Path) -> None:
+    """취소된 주문에 체결이 반영되면 DB와 열린 캐시가 어긋난다(O4).
+
+    최소 순서: 등록(수량 2) → 취소 → 누적 1의 체결(FillApplier의 순서). 체결 반영이
+    종결된 행을 ``partially_filled``로 되살리지만 ``mirror_fill_to_cache``는 캐시에
+    있는 항목만 고치므로 그 주문이 캐시에 다시 들지 않는다.
+    """
+    db, tracker = await _tracker_with_order(tmp_path, 2.0)
+    try:
+        await tracker.mark_terminal("ord-0", "cancelled")
+        async with db.transaction():
+            result = await tracker.record_fill("ord-0", 1.0, 1000.0)
+        tracker.mirror_fill_to_cache(
+            "ord-0", result.confirmed_cumulative, result.new_status
+        )
+        if result.delta <= 0 or await _status(tracker) != "partially_filled":
+            pytest.fail(f"준비: 체결이 반영되지 않았다 {result!r}")
+
+        cached = tracker.get_open_orders_for_bot_sync(ACCOUNT_ID, "bot-a")
+        assert [r.order_id for r in cached] == ["ord-0"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason="등록 대기: mark_terminal이 종결 상태를 다른 종결 상태로 덮어쓴다",
+)
+async def test_terminal_status_is_not_overwritten(tmp_path: Path) -> None:
+    """종결된 주문은 다른 종결 상태로 바뀌지 않는다(O1t).
+
+    최소 순서: 등록 → 취소 → 거절. ``mark_terminal``의 가드는 ``status != 'filled'``
+    뿐이라 ``cancelled``가 ``rejected``로 덮이고 ``terminal_at``이 다시 찍힌다.
+    """
+    db, tracker = await _tracker_with_order(tmp_path, 2.0)
+    try:
+        await tracker.mark_terminal("ord-0", "cancelled")
+        if await _status(tracker) != "cancelled":
+            pytest.fail("준비: 취소가 반영되지 않았다")
+        await tracker.mark_terminal("ord-0", "rejected")
+
+        assert await _status(tracker) == "cancelled"
+    finally:
+        await db.close()
+
+
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2706")
+async def test_partially_filled_order_expires(tmp_path: Path) -> None:
+    """장 마감이 지나면 부분 체결된 주문도 열린 상태에서 벗어난다.
+
+    최소 순서: 등록(수량 2, 첫날) → 누적 1의 체결 → 다음 날 기준의 만료.
+    ``expire_stale``은 ``open`` 행만 만료시켜 ``partially_filled``가 남는다.
+    """
+    db, tracker = await _tracker_with_order(tmp_path, 2.0)
+    try:
+        async with db.transaction():
+            result = await tracker.record_fill("ord-0", 1.0, 1000.0)
+        tracker.mirror_fill_to_cache(
+            "ord-0", result.confirmed_cumulative, result.new_status
+        )
+        if await _status(tracker) != "partially_filled":
+            pytest.fail(f"준비: 부분 체결이 반영되지 않았다 {result!r}")
+        await tracker.expire_stale(ACCOUNT_ID, DAYS[1])
+
+        assert await _status(tracker) not in OPEN
+    finally:
+        await db.close()
