@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
+from ante.core import clock
 from ante.core.account_id import InvalidAccountIdError, is_invalid_account_id
 
 
@@ -22,7 +23,7 @@ class Event:
 
     event_id: UUID = field(default_factory=uuid4)
     timestamp: datetime = field(
-        default_factory=lambda: datetime.now(UTC),
+        default_factory=lambda: clock.now(UTC),
     )
 
     def __post_init__(self) -> None:

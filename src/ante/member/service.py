@@ -7,9 +7,10 @@ import logging
 import re
 import secrets
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
+from ante.core import clock
 from ante.member.auth import (
     generate_recovery_key,
     hash_password,
@@ -182,7 +183,7 @@ def _row_to_member(row: dict[str, Any]) -> Member:
 
 def _now() -> str:
     """현재 UTC 시각 문자열."""
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    return clock.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _transition_status(

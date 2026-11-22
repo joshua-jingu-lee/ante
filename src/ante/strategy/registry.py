@@ -10,6 +10,7 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ante.core import clock
 from ante.strategy.base import StrategyMeta
 from ante.strategy.exceptions import StrategyError, StrategyNotFoundError
 
@@ -140,7 +141,7 @@ class StrategyRegistry:
         if await self.exists(strategy_id):
             raise StrategyError(f"Strategy already registered: {strategy_id}")
 
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         record = StrategyRecord(
             strategy_id=strategy_id,
             name=meta.name,
