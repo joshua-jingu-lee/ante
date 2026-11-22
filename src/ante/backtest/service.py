@@ -11,7 +11,7 @@ import re
 import sys
 import uuid
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from ante.backtest.config import BacktestConfig
 from ante.backtest.data_provider import BacktestDataProvider
@@ -51,7 +51,7 @@ class BacktestService:
     ) -> None:
         self._data_path = data_path
         self._eventbus = eventbus
-        self._running: dict[str, asyncio.Task] = {}
+        self._running: dict[str, asyncio.Task[Any]] = {}
 
     async def run(
         self,
@@ -155,7 +155,7 @@ class BacktestService:
             logger.info("백테스트 결과 artifact 저장: %s", path)
             return str(path)
 
-    async def run_subprocess(self, config: dict[str, Any]) -> dict:
+    async def run_subprocess(self, config: dict[str, Any]) -> dict[str, Any]:
         """백테스트를 subprocess로 격리 실행 (D-004).
 
         ``ante backtest run`` CLI 의 격리 실행 경로다. ``python -m
@@ -185,7 +185,7 @@ class BacktestService:
         for line in stdout_text.splitlines():
             if line.startswith(BACKTEST_RESULT_SENTINEL):
                 payload = line[len(BACKTEST_RESULT_SENTINEL) :]
-                return json.loads(payload)
+                return cast("dict[str, Any]", json.loads(payload))
         msg = "Backtest subprocess did not emit a result line"
         raise BacktestError(msg)
 

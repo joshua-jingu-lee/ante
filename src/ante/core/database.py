@@ -6,6 +6,7 @@ import sqlite3
 import urllib.request
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 import aiosqlite
 
@@ -57,7 +58,7 @@ class Database:
         self._writer: aiosqlite.Connection | None = None
         self._reader: aiosqlite.Connection | None = None
         self._write_lock = asyncio.Lock()
-        self._txn_owner: asyncio.Task | None = None
+        self._txn_owner: asyncio.Task[Any] | None = None
 
     @property
     def _in_transaction(self) -> bool:
@@ -204,7 +205,7 @@ class Database:
         except BaseException:
             pass
 
-    async def execute(self, sql: str, params: tuple = ()) -> None:
+    async def execute(self, sql: str, params: tuple[Any, ...] = ()) -> None:
         """INSERT/UPDATE/DELETE 실행.
 
         현재 태스크가 트랜잭션 owner 면 lock 없이 인라인 실행 + commit skip
@@ -223,14 +224,18 @@ class Database:
                 await self._best_effort_rollback(conn)
                 raise
 
-    async def fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+    async def fetch_one(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> dict[str, Any] | None:
         """단일 행 조회. dict(컬럼명 → 값) 반환."""
         conn = self._get_reader()
         async with conn.execute(sql, params) as cursor:
             row = await cursor.fetchone()
             return dict(row) if row else None
 
-    async def execute_fetch_one(self, sql: str, params: tuple = ()) -> dict | None:
+    async def execute_fetch_one(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> dict[str, Any] | None:
         """writer 연결에서 실행 후 단일 행을 반환 (RETURNING 등 atomic 패턴용).
 
         ``execute`` 와 동일하게 **writer 연결**에서 실행하므로, 진행 중인
@@ -256,7 +261,9 @@ class Database:
                 raise
         return result
 
-    async def execute_fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+    async def execute_fetch_all(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
         """writer 연결에서 실행 후 다중 행을 반환 (다건 RETURNING 등 atomic 패턴용).
 
         ``execute_fetch_one`` 의 다건 버전. ``execute`` 와 동일하게 **writer
@@ -282,7 +289,9 @@ class Database:
                 raise
         return result
 
-    async def fetch_all(self, sql: str, params: tuple = ()) -> list[dict]:
+    async def fetch_all(
+        self, sql: str, params: tuple[Any, ...] = ()
+    ) -> list[dict[str, Any]]:
         """다중 행 조회."""
         conn = self._get_reader()
         async with conn.execute(sql, params) as cursor:

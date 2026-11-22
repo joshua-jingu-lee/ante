@@ -36,7 +36,7 @@ class DataGoKrCollector:
         self,
         target_date: str,
         store: ParquetStore,
-    ) -> tuple[int, bool, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict[str, Any]]]:
         """특정 날짜의 전종목 데이터를 수집한다.
 
         Returns:
@@ -86,12 +86,12 @@ class DataGoKrCollector:
 
     @staticmethod
     def _filter_invalid_symbols(
-        raw_items: list[dict],
+        raw_items: list[dict[str, Any]],
         target_date: str,
-    ) -> tuple[list[dict], list[dict]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """srtnCd가 KRX 6자리 형식이 아닌 row를 drop하고 구조화 warning을 반환한다."""
-        valid: list[dict] = []
-        warns: list[dict] = []
+        valid: list[dict[str, Any]] = []
+        warns: list[dict[str, Any]] = []
         for item in raw_items:
             srtn: Any = item.get("srtnCd")
             if is_krx_symbol(srtn):
@@ -109,12 +109,12 @@ class DataGoKrCollector:
 
     @staticmethod
     def _filter_schema_invalid(
-        raw_items: list[dict],
+        raw_items: list[dict[str, Any]],
         target_date: str,
-    ) -> tuple[list[dict], list[dict]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         """raw 필수 필드가 누락/null인 레코드를 drop하고 구조화 warning을 반환한다."""
-        survivors: list[dict] = []
-        warns: list[dict] = []
+        survivors: list[dict[str, Any]] = []
+        warns: list[dict[str, Any]] = []
         for item in raw_items:
             missing = [f for f in DATAGOKR_OHLCV_RAW_REQUIRED_FIELDS if f not in item]
             null_fields = [
@@ -153,11 +153,11 @@ class DataGoKrCollector:
 
     @staticmethod
     def _validate(
-        raw_items: list[dict],
+        raw_items: list[dict[str, Any]],
         target_date: str,
-    ) -> tuple[bool, list[dict]]:
+    ) -> tuple[bool, list[dict[str, Any]]]:
         """선필터를 통과한 레코드를 검증하고 (passed, 경고 목록)을 반환한다."""
-        warns: list[dict] = []
+        warns: list[dict[str, Any]] = []
         if not raw_items:
             return True, warns
 
@@ -197,7 +197,7 @@ class DataGoKrCollector:
         df: pl.DataFrame,
         store: ParquetStore,
         target_date: str,
-        warns: list[dict],
+        warns: list[dict[str, Any]],
     ) -> tuple[int, set[str]]:
         """OHLCV와 fundamental을 정규화하고 저장한다."""
         rows_written = 0
@@ -223,7 +223,7 @@ class DataGoKrCollector:
         store: ParquetStore,
         symbols: set[str],
         target_date: str,
-        warns: list[dict],
+        warns: list[dict[str, Any]],
     ) -> int:
         """OHLCV 데이터를 정규화하여 심볼별로 저장한다."""
         ohlcv_df = self._normalizer.normalize_ohlcv(df)
@@ -374,7 +374,7 @@ class DataGoKrCollector:
 
         new_idx = {row["symbol"]: row for row in new_df.iter_rows(named=True)}
         existing_symbols: set[str] = set()
-        merged_rows: list[dict] = []
+        merged_rows: list[dict[str, Any]] = []
 
         for row in existing.iter_rows(named=True):
             sym = row["symbol"]
