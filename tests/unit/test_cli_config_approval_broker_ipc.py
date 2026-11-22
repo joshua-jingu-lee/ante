@@ -103,7 +103,7 @@ class TestConfigSetIPC:
     def test_config_set_invalid_log_level_json_envelope(
         self, runner: CliRunner
     ) -> None:
-        """#1673 oracle A7: invalid log_level → clean JSON error envelope.
+        """#1673: invalid log_level → clean JSON error envelope.
 
         traceback/Click ``Error:`` 누출 없이 stdout 으로
         ``{status:"error",code:"CONFIG_VALIDATION_ERROR",message}`` +

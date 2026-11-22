@@ -1,6 +1,6 @@
 """CLI/IPC envelope typed-code Group A sweep (#1784, #1789, #1795-#1798, #1800).
 
-7 oracle A7 이슈 sweep — typed exception code 보존 + CLI ``fmt.error`` code
+7 이슈 sweep — typed exception code 보존 + CLI ``fmt.error`` code
 명시 + strategy submit envelope 정합. CLI 표면이 다음 카테고리로 갈린다:
 
 - **cold-path subprocess 검증 가능**: bot info / bot signal-key (cold-path),
@@ -315,7 +315,7 @@ class TestBotInfoMissingCodeContract:
         config_dir, token, key = initialized_config
         result = _run_cli(
             config_dir,
-            ["bot", "info", "oracle-missing-bot"],
+            ["bot", "info", "sample-missing-bot"],
             token=token,
             encryption_key=key,
         )
@@ -336,7 +336,7 @@ class TestBotSignalKeyMissingCodeContract:
         config_dir, token, key = initialized_config
         result = _run_cli(
             config_dir,
-            ["bot", "signal-key", "oracle-missing-bot"],
+            ["bot", "signal-key", "sample-missing-bot"],
             token=token,
             encryption_key=key,
         )
@@ -366,7 +366,7 @@ class TestBotCreateInvalidParamCodeContract:
                 "--strategy",
                 "any-strategy",
                 "--name",
-                "oracle-test",
+                "sample-test",
                 "--param",
                 "not_key_value",  # = 미포함 → BadParameter
             ],

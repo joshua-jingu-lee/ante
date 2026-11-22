@@ -11,7 +11,7 @@
 3. 면제 4 경로 (``("init",)`` / ``("member", "reset-password")`` /
    ``("member", "regenerate-recovery-key")`` / ``("feed", "init")``) 는 키 누락
    상태에서도 chokepoint 를 우회한다.
-4. 3 oracle 표면 회귀: ``bot list`` / ``treasury status`` / ``broker status``
+4. 3 표면 회귀: ``bot list`` / ``treasury status`` / ``broker status``
    각각이 키 누락 시 traceback/timeout 대신 동일 envelope 으로 정합된다.
 
 SSOT 재사용:
@@ -120,7 +120,7 @@ class TestChokepointMissingKey:
     ) -> None:
         """``ante --format json bot list`` → exit 1, code=DB_ENCRYPTION_KEY_MISSING.
 
-        oracle 표면 1/3 (#1913 재현 case). 기존 회귀: traceback leak.
+        표면 1/3 (#1913 재현 case). 기존 회귀: traceback leak.
 
         Invariant 4 (r1 보강): success shape 누설 차단. ``bot list`` 의 success
         payload 는 ``list[dict[{bot_id, name, strategy_id, account_id, status,
@@ -149,7 +149,7 @@ class TestChokepointMissingKey:
     ) -> None:
         """``ante --format json treasury status --account test`` → exit 1, MISSING.
 
-        oracle 표면 2/3.
+        표면 2/3.
 
         Invariant 4 (r1 보강): success shape 누설 차단. ``treasury status``
         의 success payload 는 ``{account_balance, purchasable_amount,
@@ -181,7 +181,7 @@ class TestChokepointMissingKey:
     ) -> None:
         """``ante --format json broker status --account test`` → exit 1, MISSING.
 
-        oracle 표면 3/3. 기존 회귀: exit 124 (timeout) + `{connected,error,healthy}`
+        표면 3/3. 기존 회귀: exit 124 (timeout) + `{connected,error,healthy}`
         shape leak. chokepoint 통과 후에는 typed envelope 으로 정합되어 IPC 호출
         자체가 발생하지 않으므로 timeout 도 사라진다.
 

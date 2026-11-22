@@ -21,7 +21,7 @@ class TestIsSafePathSegment:
         [
             "005930",  # KRX 6자리
             "ABCDEF",  # legacy out-of-vocab (6자리 외)
-            "oracle-safe-symbol",  # hyphen 포함 legacy
+            "sample-safe-symbol",  # hyphen 포함 legacy
             "1d",
             "1m",
             "fundamental",
@@ -91,7 +91,7 @@ class TestResolvePathSegmentValidation:
 
     def test_legacy_non_6digit_symbol_passes(self, store):
         """legacy out-of-vocab symbol(path-safe)은 통과 — 회귀 0."""
-        for sym in ("ABCDEF", "oracle-safe-symbol", "A005930"):
+        for sym in ("ABCDEF", "sample-safe-symbol", "A005930"):
             path = store._resolve_path(sym, "1d", data_type="ohlcv")
             assert path.name == sym
 

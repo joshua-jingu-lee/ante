@@ -92,7 +92,7 @@ class TestValidateConfigExchangeDefault:
                     "strategy_path": "s.py",
                     "start_date": "2026-01-01",
                     "end_date": "2026-01-02",
-                    "exchange": "ORACLE_INVALID_EXCHANGE",
+                    "exchange": "SAMPLE_INVALID_EXCHANGE",
                 }
             )
 

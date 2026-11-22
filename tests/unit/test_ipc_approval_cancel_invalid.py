@@ -71,7 +71,7 @@ class TestHandleApprovalCancelInvalid:
         request_obj = SimpleNamespace(
             id="inv-1",
             status="cancelled",
-            type="oracle_invalid_type",
+            type="sample_invalid_type",
         )
         svc, cancel_mock, audit_log = _make_svc(cancel_return=request_obj)
 
@@ -83,10 +83,10 @@ class TestHandleApprovalCancelInvalid:
         assert result == {
             "id": "inv-1",
             "status": "cancelled",
-            "type": "oracle_invalid_type",
+            "type": "sample_invalid_type",
             "_audit_detail": {
                 "resource": "approval:inv-1",
-                "detail": "oracle_invalid_type",
+                "detail": "sample_invalid_type",
                 "ip": "",
             },
         }
@@ -127,7 +127,7 @@ class TestHandleApprovalCancelInvalid:
         request_obj = SimpleNamespace(
             id="inv-3",
             status="cancelled",
-            type="oracle_invalid_type",
+            type="sample_invalid_type",
         )
         svc, cancel_mock, _ = _make_svc(
             cancel_return=request_obj, with_audit_logger=False
@@ -148,7 +148,7 @@ class TestHandleApprovalCancelInvalid:
         request_obj = SimpleNamespace(
             id="inv-4",
             status="cancelled",
-            type="oracle_invalid_type",
+            type="sample_invalid_type",
         )
         approval = MagicMock()
         approval.cancel_invalid_type_request = AsyncMock(return_value=request_obj)

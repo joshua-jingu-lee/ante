@@ -1,6 +1,6 @@
 """CLI missing-resource 경로의 nonzero exit code 보장 테스트 (#1515).
 
-이슈 #1515 (oracle A7 cli_lookup_errors_exit_zero):
+이슈 #1515 (cli_lookup_errors_exit_zero):
 ``trade info``, ``config get``, ``bot info``, ``bot signal-key``, ``member info``
 5개 조회 명령이 missing-resource를 JSON error로 출력하면서도 exit code 0으로
 종료되던 ingress drift를 닫는다. 각 호출자가 ``fmt.error(...)`` 출력 후
@@ -12,7 +12,7 @@
   ``runtime IPC + snapshot fallback`` 분류이지만, 본 PR의 target 경로(missing case)는
   DB 직접 조회 경로 — IPC 동작 변경 없음.
 - ``report view``, ``treasury snapshot``도 같은 ``fmt.error(...) ; return`` 패턴이
-  잔존하지만 oracle probe signature에 미포함되어 본 PR Non-Goals (follow-up 후보).
+  잔존하지만 본 PR Non-Goals (follow-up 후보).
 - ``Formatter.error()`` 자체는 미변경 — ``strategy validate`` 등 ``fmt.error`` 후
   추가 errors/warnings를 계속 출력하는 호출자 회귀 회피.
 
@@ -20,7 +20,7 @@
 ``bot signal-key``는 #1515에서 "키 없음(실재 bot)" missing-key만 exit 1로
 정렬됐으나, 미존재 bot에 대해서는 ``skm.rotate``/``skm.get_key``가 그대로
 호출되어 orphan signal key가 발급/조회되고 exit 0으로 종료되던 결함이
-잔존했다(oracle A7 missing-resource). 형제 명령(`bot info`/`bot remove`/
+잔존했다(missing-resource). 형제 명령(`bot info`/`bot remove`/
 `bot positions`, #1558)과 동일하게 rotate/get_key **이전**에 ``SELECT 1
 FROM bots WHERE bot_id = ?``로 bot 존재를 확인하고, 미존재면 "봇을 찾을
 수 없습니다: {bot_id}" + exit 1 (code 없음)로 거부한다. 미존재 sentinel
@@ -31,8 +31,8 @@ FROM bots WHERE bot_id = ?``로 bot 존재를 확인하고, 미존재면 "봇을
 ``ante signal connect`` 연결 실패 exit code 회귀 (#1560):
 ``signal connect``의 ``_run_connect``(``src/ante/cli/commands/signal.py``)에는
 연결 실패 가드 4개가 모두 ``_err(...)``(stderr 출력) 후 ``return``으로 끝나
-process exit code가 0으로 남던 결함이 있었다(oracle A7 probe:
-invalid key가 ``Invalid signal key``를 stderr로 내면서 returncode 0).
+process exit code가 0으로 남던 결함이 있었다
+(invalid key가 ``Invalid signal key``를 stderr로 내면서 returncode 0).
 
 자동화 호출자는 process exit code를 1차 신호로 사용하므로 연결 실패는
 non-zero exit이어야 한다. 4개 가드(invalid key / bot not found / bot not
@@ -478,8 +478,8 @@ class TestBotSignalKeyMissingExit:
 class TestBotSignalKeyMissingBotExit:
     """``ante bot signal-key <missing-bot>`` 은 exit 1 (#1596 / #2111).
 
-    미존재 bot 에 대한 signal key 조회/재발급을 차단한다 (oracle A7
-    missing-resource). 형제 명령(`bot info`/`bot remove`/`bot positions`,
+    미존재 bot 에 대한 signal key 조회/재발급을 차단한다
+    (missing-resource). 형제 명령(`bot info`/`bot remove`/`bot positions`,
     #1558)과 동일하게 "봇을 찾을 수 없습니다: {bot_id}" + exit 1 +
     ``BOT_NOT_FOUND`` code 로 거부하고, orphan credential 을 발급하지 않는다.
 
@@ -520,7 +520,7 @@ class TestBotSignalKeyMissingBotExit:
         ``ipc_send`` 가 surface, CLI 가 exit 1 + ``BOT_NOT_FOUND`` 로 보존."""
         click_exc = IPCRemoteError(
             "BOT_NOT_FOUND",
-            "봇을 찾을 수 없습니다: oracle-missing-bot",
+            "봇을 찾을 수 없습니다: sample-missing-bot",
         )
 
         async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -541,7 +541,7 @@ class TestBotSignalKeyMissingBotExit:
                     "json",
                     "bot",
                     "signal-key",
-                    "oracle-missing-bot",
+                    "sample-missing-bot",
                     "--rotate",
                 ],
             )
@@ -549,7 +549,7 @@ class TestBotSignalKeyMissingBotExit:
         assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
-        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        assert "봇을 찾을 수 없습니다: sample-missing-bot" in payload["message"]
         # 서버 ``BotNotFoundError.code`` 와 동형 stable code.
         assert payload["code"] == "BOT_NOT_FOUND"
         # cold-path 미사용 회귀: 직접 DB rotate/get_key 미호출.
@@ -560,7 +560,7 @@ class TestBotSignalKeyMissingBotExit:
         """#2111: text 모드에서도 서버 envelope 을 surface (exit 1 + stderr)."""
         click_exc = IPCRemoteError(
             "BOT_NOT_FOUND",
-            "봇을 찾을 수 없습니다: oracle-missing-bot",
+            "봇을 찾을 수 없습니다: sample-missing-bot",
         )
 
         async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -575,12 +575,12 @@ class TestBotSignalKeyMissingBotExit:
             ),
         ):
             result = runner.invoke(
-                cli, ["bot", "signal-key", "oracle-missing-bot", "--rotate"]
+                cli, ["bot", "signal-key", "sample-missing-bot", "--rotate"]
             )
 
         assert result.exit_code == 1
         assert "Error:" in result.stderr
-        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in result.stderr
+        assert "봇을 찾을 수 없습니다: sample-missing-bot" in result.stderr
         mock_skm.rotate.assert_not_awaited()
 
     def test_missing_bot_lookup_exits_nonzero_json(self, runner: CliRunner) -> None:
@@ -602,13 +602,13 @@ class TestBotSignalKeyMissingBotExit:
         ):
             result = runner.invoke(
                 cli,
-                ["--format", "json", "bot", "signal-key", "oracle-missing-bot"],
+                ["--format", "json", "bot", "signal-key", "sample-missing-bot"],
             )
 
         assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
-        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        assert "봇을 찾을 수 없습니다: sample-missing-bot" in payload["message"]
         # 미존재 bot 이 "시그널 키가 없습니다" 로 잘못 빠지지 않아야 한다.
         assert "시그널 키가 없습니다" not in payload["message"]
         # #1784 Group A sweep: 안정 코드 ``BOT_NOT_FOUND`` 로 surface.
@@ -631,11 +631,11 @@ class TestBotSignalKeyMissingBotExit:
                 return_value=mock_skm,
             ),
         ):
-            result = runner.invoke(cli, ["bot", "signal-key", "oracle-missing-bot"])
+            result = runner.invoke(cli, ["bot", "signal-key", "sample-missing-bot"])
 
         assert result.exit_code == 1
         assert "Error:" in result.stderr
-        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in result.stderr
+        assert "봇을 찾을 수 없습니다: sample-missing-bot" in result.stderr
         mock_skm.get_key.assert_not_awaited()
 
     def test_missing_bot_no_such_table_normalized(self, runner: CliRunner) -> None:
@@ -673,14 +673,14 @@ class TestBotSignalKeyMissingBotExit:
                     "json",
                     "bot",
                     "signal-key",
-                    "oracle-missing-bot",
+                    "sample-missing-bot",
                 ],
             )
 
         assert result.exit_code == 1, result.output
         payload = json.loads(result.stdout)
         assert payload["status"] == "error"
-        assert "봇을 찾을 수 없습니다: oracle-missing-bot" in payload["message"]
+        assert "봇을 찾을 수 없습니다: sample-missing-bot" in payload["message"]
         mock_skm.get_key.assert_not_awaited()
 
     def test_other_operational_error_not_swallowed(self, runner: CliRunner) -> None:

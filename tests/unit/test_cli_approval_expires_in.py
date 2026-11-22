@@ -8,7 +8,7 @@
   overflow) 도 동일하게 ``APPROVAL_VALIDATION_ERROR`` 구조화 에러로
   종료시킨다.
 
-oracle probe: ``cli_approval_expires_in_traceback``.
+``cli_approval_expires_in_traceback``.
 
 Non-Goals (본 PR 미포함):
 - 음수 expires-in semantic 거부는 스펙에 미명시 — 후속 이슈로 추적.

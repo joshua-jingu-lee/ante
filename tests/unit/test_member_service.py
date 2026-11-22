@@ -46,7 +46,7 @@ async def _seed_invalid_role_row(
     service: MemberService,
     *,
     member_id: str,
-    invalid_role: str = "oracle_invalid_role",
+    invalid_role: str = "sample_invalid_role",
 ) -> None:
     """write path 를 우회해 legacy invalid-role agent row 를 심는다."""
     # #2294: register 는 무조건 master actor 를 요구한다. 본 helper 의 caller 는
@@ -234,13 +234,13 @@ class TestAuthRoleGate:
     ) -> None:
         events: list[MemberAuthFailedEvent] = []
         eventbus.subscribe(MemberAuthFailedEvent, lambda e: events.append(e))
-        token = await _seed_human_with_role(db, service, "oracle_invalid_role")
+        token = await _seed_human_with_role(db, service, "sample_invalid_role")
 
         with pytest.raises(PermissionError, match="invalid role"):
             await service.authenticate(token)
 
         assert [(e.member_id, e.reason) for e in events] == [
-            ("owner", "unknown role: 'oracle_invalid_role'")
+            ("owner", "unknown role: 'sample_invalid_role'")
         ]
 
     async def test_invalid_role_password_rejected(
@@ -248,11 +248,11 @@ class TestAuthRoleGate:
     ) -> None:
         events: list[MemberAuthFailedEvent] = []
         eventbus.subscribe(MemberAuthFailedEvent, lambda e: events.append(e))
-        await _seed_human_with_role(db, service, "oracle_invalid_role")
+        await _seed_human_with_role(db, service, "sample_invalid_role")
 
         with pytest.raises(PermissionError, match="invalid role"):
             await service.authenticate_password("owner", "pass123")
 
         assert [(e.member_id, e.reason) for e in events] == [
-            ("owner", "unknown role: 'oracle_invalid_role'")
+            ("owner", "unknown role: 'sample_invalid_role'")
         ]

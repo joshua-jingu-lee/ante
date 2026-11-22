@@ -112,7 +112,7 @@ class TestStrategyListInvalidStatus:
                 "strategy",
                 "list",
                 "--status",
-                "oracle_invalid_status",
+                "sample_invalid_status",
             ],
         )
         assert result.exit_code == 1
@@ -120,7 +120,7 @@ class TestStrategyListInvalidStatus:
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "STRATEGY_VALIDATION_ERROR"
-        assert "oracle_invalid_status" in data["message"]
+        assert "sample_invalid_status" in data["message"]
         # traceback 흔적 차단
         assert "Traceback" not in result.output
         if result.stderr_bytes is not None:
@@ -143,7 +143,7 @@ class TestStrategyListInvalidStatus:
                     "strategy",
                     "list",
                     "--status",
-                    "oracle_invalid_status",
+                    "sample_invalid_status",
                 ],
             )
             assert result.exit_code == 1
@@ -175,7 +175,7 @@ class TestStrategyListInvalidStatus:
             mock_auth.side_effect = _set_member
             result = r.invoke(
                 cli,
-                ["strategy", "list", "--status", "oracle_invalid_status"],
+                ["strategy", "list", "--status", "sample_invalid_status"],
             )
 
         assert result.exit_code == 1

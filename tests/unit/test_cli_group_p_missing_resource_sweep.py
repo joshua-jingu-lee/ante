@@ -1,6 +1,6 @@
 """Group P missing-resource typed code sweep (#1805 / #1808 / #1810 / #1811).
 
-4 oracle A7 missing-resource issue sweep — 각 CLI 표면이 안정 typed code
+4 missing-resource issue sweep — 각 CLI 표면이 안정 typed code
 envelope 를 surface 함을 subprocess 로 verify 한다 (Group A #1784/#1798
 sweep 동형 패턴).
 

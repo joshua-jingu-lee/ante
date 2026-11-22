@@ -66,12 +66,12 @@ class TestBacktestExchangeValidation:
                 "--end",
                 "2026-01-01",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
         assert result.exit_code == 1
         assert "유효하지 않은 거래소" in result.output
-        assert "ORACLE_INVALID_EXCHANGE" in result.output
+        assert "SAMPLE_INVALID_EXCHANGE" in result.output
         assert "Error: BACKTEST_INVALID_EXCHANGE: " in result.output
 
     def test_non_canonical_exchange_json_mode_exit1_with_code(self, tmp_path):
@@ -93,7 +93,7 @@ class TestBacktestExchangeValidation:
                 "--end",
                 "2026-01-01",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
         assert result.exit_code == 1

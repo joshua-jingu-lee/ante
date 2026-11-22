@@ -1,7 +1,5 @@
 """``treasury.allocate``/``treasury.deallocate`` IPC missing-bot 회귀 (#1792).
 
-oracle A7 probe ``cli_treasury_allocate_missing_bot_error_code_contract`` /
-``cli_treasury_deallocate_missing_bot_error_code_contract`` 가 발견한
 회귀 모델: 두 표면이 missing bot id 로 호출되어도 ``Treasury.allocate``/
 ``deallocate`` 가 cash 만 검증하고 bot 존재 여부를 검사하지 않아 exit 0
 + status="ok" 가 반환되어 budget automation 이 nonexistent bot 에 예산을
@@ -95,7 +93,7 @@ async def test_treasury_allocate_missing_bot_returns_bot_not_found(
             "treasury.allocate",
             {
                 "account_id": "domestic",
-                "bot_id": "oracle-missing-bot",
+                "bot_id": "sample-missing-bot",
                 "amount": 1000.0,
             },
             actor="tester",
@@ -127,7 +125,7 @@ async def test_treasury_deallocate_missing_bot_returns_bot_not_found(
             "treasury.deallocate",
             {
                 "account_id": "domestic",
-                "bot_id": "oracle-missing-bot",
+                "bot_id": "sample-missing-bot",
                 "amount": 1000.0,
             },
             actor="tester",
@@ -218,7 +216,7 @@ async def test_treasury_allocate_invalid_account_precedes_bot_check(
         client = IPCClient(socket_path, timeout=5.0)
         response = await client.send(
             "treasury.allocate",
-            {"account_id": "default", "bot_id": "oracle-missing-bot", "amount": 1000.0},
+            {"account_id": "default", "bot_id": "sample-missing-bot", "amount": 1000.0},
             actor="tester",
         )
         assert response["status"] == "error", response
