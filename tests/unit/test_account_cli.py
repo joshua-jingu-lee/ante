@@ -1530,3 +1530,286 @@ class TestAccountCreateMockBroker:
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "ACCOUNT_UNKNOWN_CREDENTIAL_KEY"
+
+
+# ── 출력 바이트 고정 (#2751) ──────────────────────────────
+
+_BYTES_CASE_ARGS: dict[str, list[str]] = {
+    "list_empty": ["account", "list"],
+    "list_rows": ["account", "list"],
+    "info": ["account", "info", "domestic"],
+    "credentials_empty": ["account", "credentials", "test"],
+    "credentials_rows": ["account", "credentials", "domestic"],
+    "set_credentials_not_required": ["account", "set-credentials", "test"],
+    "set_credentials_ok": [
+        "account",
+        "set-credentials",
+        "test",
+        "--credential",
+        "app_key=K2",
+        "--credential",
+        "app_secret=S2",
+    ],
+    "create": _create_args_test_broker(),
+    "delete": ["account", "delete", "domestic", "--yes"],
+    "repair_timezone": ["account", "repair-timezone", "domestic", "Asia/Seoul"],
+    "suspend": ["account", "suspend", "domestic"],
+    "activate": ["account", "activate", "domestic"],
+}
+
+
+def _bytes_case_prepare(branch: str, svc: AsyncMock) -> None:
+    """분기마다 AccountService mock의 반환값을 채운다."""
+    if branch == "list_empty":
+        svc.list.return_value = []
+    elif branch == "list_rows":
+        svc.list.return_value = [
+            _mock_account("test", "테스트", "TEST", "KRW", "test"),
+            _mock_account(
+                "domestic", "국내 주식", "KRX", "KRW", "kis-domestic", "suspended"
+            ),
+        ]
+    elif branch in ("info", "repair_timezone"):
+        acct = _mock_account("domestic", "국내 주식", "KRX", "KRW", "kis-domestic")
+        svc.get.return_value = acct
+        svc.repair_timezone.return_value = acct
+    elif branch == "credentials_empty":
+        svc.get.return_value = _mock_account("test", credentials={})
+    elif branch == "credentials_rows":
+        svc.get.return_value = _mock_account(
+            "domestic",
+            credentials={"app_key": "PSxxxxxxxx", "app_secret": "secret"},
+        )
+    elif branch == "set_credentials_not_required":
+        svc.get.return_value = _mock_account(
+            "test", credentials={}, broker_type="some-future-broker"
+        )
+    elif branch == "set_credentials_ok":
+        svc.get.return_value = _mock_account(
+            "test", credentials={"app_key": "old", "app_secret": "old"}
+        )
+        svc.update.return_value = None
+    elif branch == "create":
+        svc.create.return_value = _mock_account(
+            "test2", "테스트2", "TEST", "KRW", "test"
+        )
+    elif branch == "delete":
+        svc.delete.return_value = None
+
+
+def _bytes_case_invoke(branch: str, mode: str, svc: AsyncMock) -> Any:
+    """분기와 모드로 CLI를 실행한다. IPC는 대역으로 둔다."""
+    from contextlib import ExitStack
+
+    _bytes_case_prepare(branch, svc)
+    args = list(_BYTES_CASE_ARGS[branch])
+    if mode == "json":
+        args = ["--format", "json", *args]
+    with ExitStack() as stack:
+        mock_cls = stack.enter_context(
+            patch("ante.cli.commands.ipc_helpers.IPCClient", autospec=True)
+        )
+        mock_client = AsyncMock()
+        mock_client.send.return_value = {"status": "ok", "data": {}}
+        mock_cls.return_value = mock_client
+        if branch == "set_credentials_not_required":
+            stack.enter_context(patch("ante.account.presets.BROKER_PRESETS", {}))
+        return _invoke(args)
+
+
+_ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
+    ("list_empty", "text"): (
+        "{'message': '등록된 계좌가 없습니다.', 'accounts': []}\n"
+    ),
+    ("list_empty", "json"): (
+        '{\n  "message": "등록된 계좌가 없습니다.",\n  "accounts": []\n}\n'
+    ),
+    ("list_rows", "text"): (
+        "  account_id |         name |     exchange | "
+        "    currency |  broker_type |       status\n"
+        "---------------------------------------------"
+        "------------------------------------------\n"
+        "        test |          테스트 |         TEST | "
+        "         KRW |         test |       active\n"
+        "    domestic |        국내 주식 |          KRX | "
+        "         KRW | kis-domestic |    suspended\n"
+    ),
+    ("list_rows", "json"): (
+        "{\n"
+        '  "accounts": [\n'
+        "    {\n"
+        '      "account_id": "test",\n'
+        '      "name": "테스트",\n'
+        '      "exchange": "TEST",\n'
+        '      "currency": "KRW",\n'
+        '      "broker_type": "test",\n'
+        '      "status": "active"\n'
+        "    },\n"
+        "    {\n"
+        '      "account_id": "domestic",\n'
+        '      "name": "국내 주식",\n'
+        '      "exchange": "KRX",\n'
+        '      "currency": "KRW",\n'
+        '      "broker_type": "kis-domestic",\n'
+        '      "status": "suspended"\n'
+        "    }\n"
+        "  ]\n"
+        "}\n"
+    ),
+    ("info", "text"): (
+        "\n"
+        "계좌 정보\n"
+        "-----------------------------------\n"
+        "  ID            : domestic\n"
+        "  이름            : 국내 주식\n"
+        "  거래소           : KRX\n"
+        "  통화            : KRW\n"
+        "  브로커           : kis-domestic\n"
+        "  거래 모드         : virtual\n"
+        "  매수 수수료        : 0.015%\n"
+        "  매도 수수료        : 0.195%\n"
+        "  시장가 매수 버퍼     : 0.000%\n"
+        "  상태            : active\n"
+        "  시간대           : Asia/Seoul\n"
+        "  거래 시간         : 09:00-15:30\n"
+        "  생성일           : \n"
+    ),
+    ("info", "json"): (
+        "{\n"
+        '  "account_id": "domestic",\n'
+        '  "name": "국내 주식",\n'
+        '  "exchange": "KRX",\n'
+        '  "currency": "KRW",\n'
+        '  "broker_type": "kis-domestic",\n'
+        '  "trading_mode": "virtual",\n'
+        '  "buy_commission_rate": "0.00015",\n'
+        '  "sell_commission_rate": "0.00195",\n'
+        '  "market_order_reserve_buffer_rate": "0",\n'
+        '  "status": "active",\n'
+        '  "timezone": "Asia/Seoul",\n'
+        '  "trading_hours": "09:00-15:30",\n'
+        '  "created_at": ""\n'
+        "}\n"
+    ),
+    ("credentials_empty", "text"): (
+        "{'message': '등록된 인증 정보가 없습니다.', 'credentials': {}}\n"
+    ),
+    ("credentials_empty", "json"): (
+        '{\n  "message": "등록된 인증 정보가 없습니다.",\n  "credentials": {}\n}\n'
+    ),
+    ("credentials_rows", "text"): (
+        "\n"
+        "인증 정보 (domestic)\n"
+        "-----------------------------------\n"
+        "  APP_KEY       : PSxx****xx\n"
+        "  APP_SECRET    : ****\n"
+    ),
+    ("credentials_rows", "json"): (
+        "{\n"
+        '  "account_id": "domestic",\n'
+        '  "credentials": {\n'
+        '    "app_key": "PSxx****xx",\n'
+        '    "app_secret": "****"\n'
+        "  }\n"
+        "}\n"
+    ),
+    ("set_credentials_not_required", "text"): (
+        "{'message': \"브로커 'some-future-broker'에는 인증 정보"
+        '가 필요하지 않습니다."}\n'
+    ),
+    ("set_credentials_not_required", "json"): (
+        "{\n"
+        '  "message": "브로커 \'some-future-broker\'에는 인증 정'
+        '보가 필요하지 않습니다."\n'
+        "}\n"
+    ),
+    ("set_credentials_ok", "text"): ('계좌 "test" 인증 정보 재설정 완료\n'),
+    ("set_credentials_ok", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"test\\" 인증 정보 재설정 완료",\n'
+        '  "data": {}\n'
+        "}\n"
+    ),
+    ("create", "text"): ('계좌 "test2" 생성 완료 (TEST / KRW / test)\n'),
+    ("create", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"test2\\" 생성 완료 (TEST / KRW '
+        '/ test)",\n'
+        '  "data": {\n'
+        '    "account_id": "test2",\n'
+        '    "exchange": "TEST",\n'
+        '    "currency": "KRW",\n'
+        '    "broker_type": "test"\n'
+        "  }\n"
+        "}\n"
+    ),
+    ("delete", "text"): ('계좌 "domestic" 삭제 완료\n'),
+    ("delete", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"domestic\\" 삭제 완료",\n'
+        '  "data": {}\n'
+        "}\n"
+    ),
+    ("repair_timezone", "text"): ('계좌 "domestic" timezone 복구 완료 (Asia/Seoul)\n'),
+    ("repair_timezone", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"domestic\\" timezone 복구 완료 '
+        '(Asia/Seoul)",\n'
+        '  "data": {\n'
+        '    "code": "ACCOUNT_REPAIR_TIMEZONE_OK",\n'
+        '    "account_id": "domestic",\n'
+        '    "timezone": "Asia/Seoul",\n'
+        '    "timezone_invalid": false\n'
+        "  }\n"
+        "}\n"
+    ),
+    ("suspend", "text"): ('계좌 "domestic" 정지 완료\n'),
+    ("suspend", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"domestic\\" 정지 완료",\n'
+        '  "data": {}\n'
+        "}\n"
+    ),
+    ("activate", "text"): ('계좌 "domestic" 활성화 완료\n'),
+    ("activate", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "계좌 \\"domestic\\" 활성화 완료",\n'
+        '  "data": {}\n'
+        "}\n"
+    ),
+}
+
+
+class TestAccountOutputBytes:
+    """account 9개 명령 × 분기 × {text, json}의 출력 바이트를 고정한다 (#2751).
+
+    비교 대상은 stdout과 stderr를 합친 ``result.output`` 이다. 출력 훅으로
+    옮기는 동안 이 리터럴은 한 글자도 바뀌지 않아야 한다.
+    """
+
+    def test_cases_cover_every_branch_and_mode(self) -> None:
+        assert set(_ACCOUNT_OUTPUT_BYTES) == {
+            (branch, mode) for branch in _BYTES_CASE_ARGS for mode in ("text", "json")
+        }
+        assert len(_ACCOUNT_OUTPUT_BYTES) == 24
+
+    @pytest.mark.parametrize(
+        ("branch", "mode"),
+        [(b, m) for b in _BYTES_CASE_ARGS for m in ("text", "json")],
+    )
+    def test_output_bytes(
+        self,
+        branch: str,
+        mode: str,
+        mock_account_service: AsyncMock,
+        offline_runtime: None,
+    ) -> None:
+        result = _bytes_case_invoke(branch, mode, mock_account_service)
+        assert result.exit_code == 0, result.output
+        assert result.output == _ACCOUNT_OUTPUT_BYTES[(branch, mode)]

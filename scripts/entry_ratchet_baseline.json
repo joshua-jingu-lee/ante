@@ -100,7 +100,7 @@
     "treasury transactions"
   ],
   "cli_direct_output": {
-    "src/ante/cli/commands/account.py": 22,
+    "src/ante/cli/commands/account.py": 17,
     "src/ante/cli/commands/approval.py": 10,
     "src/ante/cli/commands/audit.py": 4,
     "src/ante/cli/commands/backtest.py": 7,

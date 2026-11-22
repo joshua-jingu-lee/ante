@@ -84,6 +84,8 @@ command 본체 또는 별도 wrapper)가 가진다.
   command 본체에 attach된다. factory는 auth context를 검증하거나 reject하지
   않는다.
 - **Envelope 직렬화** — `fmt.success`/`fmt.error`/`emit_cli_error` 호출은 caller
+  (CLI 명령, 또는 명령이 돌려준 `CommandResult`를 직렬화하는 진입점 훅 —
+  [`docs/specs/cli/02-design-decisions.md`](../cli/02-design-decisions.md#outputformatter))
   책임이다. factory는 envelope을 생성하지 않으며,
   [`docs/specs/contracts/envelopes.md`](envelopes.md) 자체를 재정의하지 않는다.
 - **Error code 매핑** — domain exception → public `code` 매핑은
