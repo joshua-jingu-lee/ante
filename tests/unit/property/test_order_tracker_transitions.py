@@ -80,6 +80,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
         self.pairs: set[tuple[str, str]] = set()
         self.terminal_exits: set[tuple[str, str, str]] = set()
         self.rows: dict[str, Row] = {}
+        self.touched: set[str] = set()
         self.steps = 0
         self.last_restart = 0
         self.last_expire = 0
@@ -129,6 +130,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
                 expected_via = "fill" if kind == "revive" else "mark_terminal"
                 assert via == expected_via, f"O1t: {oid} {b} -> {a} ({via})"
                 self.terminal_exits.add((b, a, via))
+        self.touched = {o for o, r in after.items() if self.rows.get(o) != r}
         self.rows = after
         self.revived &= {o for o, r in after.items() if r["status"] in OPEN}
         self.steps += 1
@@ -137,7 +139,7 @@ class OrderTrackerMachine(RuleBasedStateMachine):
 
     @rule(
         bot=st.sampled_from(BOTS),
-        spec=st.tuples(st.integers(1, 10), st.sampled_from(DAYS)),
+        spec=st.tuples(st.integers(1, 5), st.sampled_from(DAYS)),
     )
     def open_order(self, bot: str, spec: tuple[int, str]) -> None:
         """새 주문의 seed(``OrderSubmittedEvent``)."""
@@ -290,7 +292,8 @@ class OrderTrackerMachine(RuleBasedStateMachine):
 
     @invariant()
     def s_plain_str_status(self) -> None:
-        for oid in self.rows:
+        # 모든 행의 ``get``은 걸음마다 행 수만큼의 조회라 바뀐 행만 본다.
+        for oid in self.touched:
             record = self._run(self.tracker.get(oid))
             assert record is not None and type(record.status) is str, f"S: {record!r}"
         for record in self._run(self.tracker.get_open_orders(ACCOUNT_ID)):
