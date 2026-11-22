@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING
 
 import click
 
-from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import (
     reject_invalid_account_id,
     reject_inverted_date_range,
@@ -25,7 +24,12 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.cli_errors import (
+    CliOptionConflictError,
+    SnapshotNotFoundError,
+    TreasuryAllocateFailedError,
+    TreasuryDeallocateFailedError,
+)
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -123,11 +127,7 @@ def status(ctx: click.Context, account_id: str) -> None:
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             return t.get_summary()
 
-    try:
-        result = _run(_run_status())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
+    result = _run(_run_status())
 
     if fmt.is_json:
         fmt.output(result)
@@ -269,13 +269,7 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
         async with _create_treasury_manager(ctx=ctx) as (manager, _):
             return await _collect_items(manager.list_all())
 
-    try:
-        result = _run(_run_budgets())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_budgets())
 
     if fmt.is_json:
         fmt.output(result)
@@ -319,18 +313,7 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
                 "updated_at": datetime.now(UTC).isoformat(),
             }
 
-    try:
-        result = _run(_run_set_balance())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_set_balance())
 
     if fmt.is_json:
         fmt.output(result)
@@ -363,18 +346,7 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
             actor=actor,
         )
 
-    try:
-        result = _run(_run_allocate())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_allocate())
 
     if result.get("success"):
         fmt.success(
@@ -382,11 +354,9 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
             {"bot_id": bot_id, "amount": amount, "account_id": account_id},
         )
     else:
-        fmt.error(
-            f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)",
-            code="TREASURY_ALLOCATE_FAILED",
+        raise TreasuryAllocateFailedError(
+            f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)"
         )
-        raise SystemExit(1)
 
 
 @treasury.command()
@@ -414,18 +384,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
             actor=actor,
         )
 
-    try:
-        result = _run(_run_deallocate())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_deallocate())
 
     if result.get("success"):
         fmt.success(
@@ -433,11 +392,9 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
             {"bot_id": bot_id, "amount": amount, "account_id": account_id},
         )
     else:
-        fmt.error(
-            f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)",
-            code="TREASURY_DEALLOCATE_FAILED",
+        raise TreasuryDeallocateFailedError(
+            f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)"
         )
-        raise SystemExit(1)
 
 
 @treasury.command()
@@ -482,11 +439,9 @@ def snapshot(
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
     if date_str and (from_date or to_date):
-        fmt.error(
-            "--date와 --from/--to 옵션은 동시에 사용할 수 없습니다.",
-            code="CLI_OPTION_CONFLICT",
+        raise CliOptionConflictError(
+            "--date와 --from/--to 옵션은 동시에 사용할 수 없습니다."
         )
-        raise SystemExit(1)
 
     reject_inverted_date_range(
         from_date,
@@ -508,16 +463,11 @@ def snapshot(
             today = datetime.now(UTC).strftime("%Y-%m-%d")
             return await t.get_daily_snapshot(today)
 
-    try:
-        result = _run(_run_snapshot())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
+    result = _run(_run_snapshot())
 
     if result is None:
         target = date_str or datetime.now(UTC).strftime("%Y-%m-%d")
-        fmt.error(f"{target} 날짜의 스냅샷이 없습니다.", code="SNAPSHOT_NOT_FOUND")
-        raise SystemExit(1)
+        raise SnapshotNotFoundError(f"{target} 날짜의 스냅샷이 없습니다.")
 
     if fmt.is_json:
         fmt.output(result)
@@ -622,13 +572,7 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
         async with _create_treasury_manager(ctx=ctx) as (manager, _):
             return await _collect_values(manager.list_all())
 
-    try:
-        result = _run(_run_value())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_value())
 
     if fmt.is_json:
         fmt.output(result)
@@ -704,13 +648,7 @@ def portfolio_history(
         async with _create_treasury_manager(ctx=ctx) as (manager, _):
             return await _collect_history(manager.list_all())
 
-    try:
-        result = _run(_run_history())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_history())
 
     if fmt.is_json:
         fmt.output(result)

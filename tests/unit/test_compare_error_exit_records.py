@@ -225,6 +225,43 @@ def test_fallback_prefix_needs_the_fallback_in_the_json_row(
 
 
 @pytest.mark.parametrize(
+    ("json_args", "json_stdout", "expected", "exit_code"),
+    [
+        pytest.param(
+            JSON_ARGS, _envelope("EXECUTION_ERROR"), "text 형식", 0, id="paired"
+        ),
+        pytest.param(
+            ["--format", "json", "report", "view", "r-2"],
+            _envelope("EXECUTION_ERROR"),
+            "다름",
+            1,
+            id="other-arguments",
+        ),
+        pytest.param(
+            JSON_ARGS,
+            json.dumps({"code": "EXECUTION_ERROR", "error": "없음"}) + "\n",
+            "다름",
+            1,
+            id="not-an-error-envelope",
+        ),
+    ],
+)
+def test_fallback_prefix_without_a_json_pair_is_different(
+    tmp_path: Path,
+    json_args: list[str],
+    json_stdout: str,
+    expected: str,
+    exit_code: int,
+) -> None:
+    json_row = _row(json_args, stdout=json_stdout, n=1)
+    before = [_row(TEXT_ARGS, stderr="Error: 없음\n"), json_row]
+    after = [_row(TEXT_ARGS, stderr="Error: EXECUTION_ERROR: 없음\n"), json_row]
+    result = _compare(tmp_path, before, after)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(같음=1, **{expected: 1})
+
+
+@pytest.mark.parametrize(
     ("after_stderr", "expected", "exit_code"),
     [
         pytest.param(f"앞줄\nError: {CODE}: 없음\n", "text 형식", 0, id="one"),
