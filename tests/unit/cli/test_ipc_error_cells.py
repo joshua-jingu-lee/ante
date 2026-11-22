@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from contextlib import ExitStack
+from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import click
@@ -180,38 +181,69 @@ def test_remote_fallback_code_is_not_rewrapped(
     )
 
 
-@pytest.mark.parametrize("mode", _MODES)
-@pytest.mark.parametrize(
-    ("argv", "json_message", "line"),
-    [
-        pytest.param(
-            ("approval", "approve", "ap1"),
-            "BOT_NOT_FOUND: ",
-            "Error: BOT_NOT_FOUND: ",
-            id="approval-approve",
-        ),
-        pytest.param(
-            ("bot", "start", "b1"),
-            "BOT_NOT_FOUND: ",
-            "Error: BOT_NOT_FOUND: BOT_NOT_FOUND: ",
-            id="bot-start",
-        ),
-        pytest.param(
-            ("broker", "order-history", "--account", "acct-1"),
-            "BOT_NOT_FOUND: ",
-            "Error: BOT_NOT_FOUND: BOT_NOT_FOUND: ",
-            id="broker-order-history",
-        ),
+_EMPTY = "BOT_STATE_CONFLICT"
+
+_RESTORED_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("bot-list", ("bot", "list")),
+    ("bot-info", ("bot", "info", "b1")),
+    ("bot-signal-key", ("bot", "signal-key", "b1")),
+    ("bot-signal-key-rotate", ("bot", "signal-key", "b1", "--rotate")),
+    ("bot-positions", ("bot", "positions", "b1")),
+    ("bot-start", ("bot", "start", "b1")),
+    ("bot-stop", ("bot", "stop", "b1")),
+    ("bot-status", ("bot", "status", "b1")),
+    ("broker-order-history", ("broker", "order-history", "--account", "acct-1")),
+)
+
+_PLAIN_COMMANDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("approval-approve", ("approval", "approve", "ap1")),
+    ("bot-update", ("bot", "update", "b1", "--name", "n2")),
+    ("broker-status", ("broker", "status", "--account", "acct-1")),
+    ("rule-update", ("rule", "update", "daily_loss_limit", "--account", "acct-1")),
+    ("treasury-allocate", ("treasury", "allocate", "b1", "100", "--account", "acct-1")),
+)
+
+
+def _empty_cells() -> list[Any]:
+    cells: list[Any] = []
+    for name, argv in _RESTORED_COMMANDS:
+        cells.append(pytest.param(argv, "json", f"{_EMPTY}: ", id=f"{name}-json"))
+        cells.append(
+            pytest.param(
+                argv, "text", f"Error: {_EMPTY}: {_EMPTY}: ", id=f"{name}-text"
+            )
+        )
+    cells.append(
+        pytest.param(("config", "set", "k", "v"), "json", "", id="config-set-json")
+    )
+    cells.append(
         pytest.param(
             ("config", "set", "k", "v"),
-            "",
-            "Error: BOT_NOT_FOUND: ",
-            id="config-set",
-        ),
-    ],
-)
+            "text",
+            f"Error: {_EMPTY}: ",
+            id="config-set-text",
+        )
+    )
+    for name, argv in _PLAIN_COMMANDS:
+        cells.append(pytest.param(argv, "json", f"{_EMPTY}: ", id=f"{name}-json"))
+        cells.append(
+            pytest.param(argv, "text", f"Error: {_EMPTY}: ", id=f"{name}-text")
+        )
+    return cells
+
+
+def test_empty_message_cells_cover_every_restored_command() -> None:
+    assert len(_RESTORED_COMMANDS) == 9
+    paths = {argv[:2] for _, argv in (*_RESTORED_COMMANDS, *_PLAIN_COMMANDS)}
+    assert paths <= _PATHS
+    assert len(_empty_cells()) == 2 * (
+        len(_RESTORED_COMMANDS) + 1 + len(_PLAIN_COMMANDS)
+    )
+
+
+@pytest.mark.parametrize(("argv", "mode", "expected"), _empty_cells())
 def test_remote_error_with_an_empty_message(
-    mode: str, argv: tuple[str, ...], json_message: str, line: str
+    argv: tuple[str, ...], mode: str, expected: str
 ) -> None:
-    result = _invoke(["--format", mode, *argv], IPCRemoteError("BOT_NOT_FOUND", ""))
-    _assert_cell(result, mode, "BOT_NOT_FOUND", json_message, line)
+    result = _invoke(["--format", mode, *argv], IPCRemoteError(_EMPTY, ""))
+    _assert_cell(result, mode, _EMPTY, expected, expected)
