@@ -160,7 +160,7 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
   alias를 사용하지 않고 normative SCREAMING_SNAKE code(`AUTH_REQUIRED`/`AUTH_FAILED`/
   `PERMISSION_DENIED`)를 사용한다. 위 예외 클래스 셋의 lowercase code는 #1815
   auth registry migration까지 유지된다.
-- **소비자 매칭 정책**: oracle/Agent는 본 SSOT의 normative code와 legacy alias를
+- **소비자 매칭 정책**: 소비자(Agent)는 본 SSOT의 normative code와 legacy alias를
   같은 fault로 간주해야 한다. drift test(#1841)는 두 표현이 같은 의미를
   가리킨다는 invariant를 lock 한다.
 - **drift 정의**: lowercase code의 의미가 SCREAMING_SNAKE 대응값과 1:1

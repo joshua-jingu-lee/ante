@@ -88,6 +88,4 @@ def _assert_invariants(self, member: Member, action: str) -> None:
 
 > #1542 (결정 SSOT) 기준의 CLI 표면 가드 master-only 정렬은 #1543 완료
 > (`require_master`가 `src/ante/cli/middleware.py`에 정의되고 member admin
-> mutation CLI에 적용). oracle host probe scope 기대값 정렬은 #1544(별도,
-> ante-oracle)에서 진행. 부모 #1511(oracle host probe scope drift)에서
-> 시작된 정합 작업이다.
+> mutation CLI에 적용).
