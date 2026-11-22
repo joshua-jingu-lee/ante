@@ -188,7 +188,7 @@ class TestValidateCLI:
                 ["--format", "json", "data", "validate", "--symbol", "005930"],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["summary"]["total_files"] == 2
             assert data["summary"]["valid"] == 2
 

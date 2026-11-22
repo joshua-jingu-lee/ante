@@ -378,7 +378,7 @@ def test_data_entries_registered_after_1847_sub_pr_6() -> None:
     본 단언은 #1847 sub-PR 6 가 data migration 을 완료한 시점부터
     lock 된다. 6 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_data_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_data_cli_output_bytes` 가
     책임진다.
 
     spec 표 (``docs/specs/cli/03-commands.md:487-492``) 는 4 leaf
@@ -482,7 +482,7 @@ def test_instrument_entries_registered_after_1847_sub_pr_8() -> None:
     본 단언은 #1847 sub-PR 8 가 instrument migration 을 완료한 시점부터
     lock 된다. 4 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_instrument_success_output_drift`
+    (Family B) 와 :mod:`tests.unit.test_instrument_cli_output_bytes`
     가 책임진다.
     """
     expected_instrument_paths = {
@@ -546,7 +546,7 @@ def test_trade_entries_registered_after_1847_sub_pr_9() -> None:
     본 단언은 #1847 sub-PR 9 가 trade migration 을 완료한 시점부터
     lock 된다. 2 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_trade_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_trade_cli_output_bytes` 가
     책임진다.
     """
     expected_trade_paths = {
@@ -566,7 +566,7 @@ def test_backtest_entries_registered_after_1847_sub_pr_9() -> None:
     본 단언은 #1847 sub-PR 9 가 backtest migration 을 완료한 시점부터
     lock 된다. 2 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_backtest_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_backtest_cli_output_bytes` 가
     책임진다.
     """
     expected_backtest_paths = {

@@ -290,7 +290,7 @@ class TestValidDryRunRegression:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["dry_run"] is True
         assert payload["total"] == 1
 
@@ -481,7 +481,7 @@ class TestValidKrxSymbolRegression:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["dry_run"] is True
         assert payload["total"] == 1
 
@@ -552,7 +552,7 @@ class TestNonKrxSymbolShapeNotApplied:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["dry_run"] is True
         assert payload["total"] == 1
 
@@ -583,7 +583,7 @@ class TestNonKrxSymbolShapeNotApplied:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["total"] == 2
 
 

@@ -207,7 +207,7 @@ class TestBacktestHistoryReadOnlyFilesystem:
         result = _run_history_under_readonly(runner, db_dir, db_file)
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "runs" in data, data
         assert len(data["runs"]) == 1, data
         assert data["runs"][0]["strategy_name"] == "momentum"
@@ -249,7 +249,7 @@ class TestBacktestHistoryReadOnlyFilesystem:
         result = _run_history_under_readonly(runner, db_dir, db_file)
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "runs" in data, data
         assert len(data["runs"]) == 1, data
         assert data["runs"][0]["strategy_name"] == "momentum"
@@ -379,7 +379,7 @@ class TestBacktestHistoryRealAuthReadOnlyFilesystem:
         result = _run_history_real_auth(artifact_dir, artifact_db, config_dir)
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "runs" in data, data
         assert len(data["runs"]) == 1, data
         assert data["runs"][0]["strategy_name"] == "momentum"

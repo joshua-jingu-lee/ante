@@ -8,7 +8,7 @@ from typing import Any
 import click
 
 from ante.cli.db_context import open_cli_db
-from ante.cli.main import get_formatter
+from ante.cli.formatter import CommandResult, table_lines
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
     InstrumentEmptyFileError,
@@ -53,11 +53,9 @@ def instrument_list(
     inst_type: str | None,
     listed_only: bool,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """등록된 종목 목록 조회."""
     from ante.instrument.service import InstrumentService
-
-    fmt = get_formatter(ctx)
 
     if not is_canonical(exchange):
         raise InstrumentInvalidExchangeError(
@@ -95,10 +93,11 @@ def instrument_list(
     results = asyncio.run(_run())
 
     if not results:
-        fmt.output({"instruments": [], "count": 0})
-        return
+        empty: dict[str, Any] = {"instruments": [], "count": 0}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    fmt.table(results, ["symbol", "name", "name_en", "type", "listed"])
+    columns = ["symbol", "name", "name_en", "type", "listed"]
+    return CommandResult(data=results, text=tuple(table_lines(results, columns)))
 
 
 @instrument.command()
@@ -111,7 +110,7 @@ def sync(
     ctx: click.Context,
     exchange: str,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """KIS API에서 종목 마스터 데이터를 동기화."""
     from ante.broker.kis import KISAdapter
     from ante.cli.main import get_config_dir
@@ -119,7 +118,6 @@ def sync(
     from ante.instrument.models import Instrument
     from ante.instrument.service import InstrumentService
 
-    fmt = get_formatter(ctx)
     resolved_config_dir = get_config_dir(ctx)
 
     if not is_canonical(exchange):
@@ -201,17 +199,16 @@ def sync(
     if "error" in result:
         raise InstrumentSyncFailedError(result["error"])
 
-    fmt.output(
-        {
-            "sync_result": result,
-            "message": (
-                f"동기화 완료: "
-                f"신규 {result['new']}건, "
-                f"갱신 {result['updated']}건, "
-                f"상폐 {result['delisted']}건"
-            ),
-        }
-    )
+    payload = {
+        "sync_result": result,
+        "message": (
+            f"동기화 완료: "
+            f"신규 {result['new']}건, "
+            f"갱신 {result['updated']}건, "
+            f"상폐 {result['delisted']}건"
+        ),
+    }
+    return CommandResult(data=payload, text=(str(payload),))
 
 
 @instrument.command()
@@ -228,11 +225,9 @@ def search(
     limit: int,
     listed_only: bool,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """키워드로 종목 검색 (종목코드, 한글명, 영문명)."""
     from ante.instrument.service import InstrumentService
-
-    fmt = get_formatter(ctx)
 
     async def _run() -> list[dict[str, Any]]:
         async with open_cli_db(ctx, db_path_override=db_path) as db:
@@ -257,10 +252,11 @@ def search(
     results = asyncio.run(_run())
 
     if not results:
-        fmt.output({"results": [], "count": 0})
-        return
+        empty: dict[str, Any] = {"results": [], "count": 0}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    fmt.table(results, ["symbol", "exchange", "name", "name_en", "type"])
+    columns = ["symbol", "exchange", "name", "name_en", "type"]
+    return CommandResult(data=results, text=tuple(table_lines(results, columns)))
 
 
 @instrument.command("import")
@@ -275,14 +271,13 @@ def instrument_import(
     file_path: str,
     dry_run: bool,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """CSV/JSON 파일에서 종목 데이터 import."""
     import json
     from pathlib import Path
 
     from ante.instrument.models import Instrument
 
-    fmt = get_formatter(ctx)
     path = Path(file_path)
     ext = path.suffix.lower()
 
@@ -357,21 +352,14 @@ def instrument_import(
             }
             for inst in instruments[:10]
         ]
-        if fmt.is_json:
-            fmt.output(
-                {
-                    "dry_run": True,
-                    "total": len(instruments),
-                    "preview": preview,
-                }
-            )
-        else:
-            click.echo(f"  미리보기 ({len(instruments)}건 중 상위 {len(preview)}건):")
-            fmt.table(
-                preview,
-                ["symbol", "exchange", "name", "type"],
-            )
-        return
+        heading = f"  미리보기 ({len(instruments)}건 중 상위 {len(preview)}건):"
+        return CommandResult(
+            data={"dry_run": True, "total": len(instruments), "preview": preview},
+            text=(
+                heading,
+                *table_lines(preview, ["symbol", "exchange", "name", "type"]),
+            ),
+        )
 
     async def _import() -> int:
         from ante.instrument.service import InstrumentService
@@ -382,7 +370,7 @@ def instrument_import(
             return await svc.bulk_upsert(instruments)
 
     count = asyncio.run(_import())
-    fmt.success(
-        f"종목 import 완료: {count}건",
-        {"count": count, "file": str(path)},
+    message = f"종목 import 완료: {count}건"
+    return CommandResult(
+        data={"count": count, "file": str(path)}, message=message, text=(message,)
     )
