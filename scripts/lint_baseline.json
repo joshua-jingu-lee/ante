@@ -245,18 +245,6 @@
       "no-untyped-def": 1,
       "type-arg": 5
     },
-    "src/ante/cli/commands/bot.py": {
-      "no-any-return": 1,
-      "no-untyped-call": 13,
-      "no-untyped-def": 2,
-      "type-arg": 22
-    },
-    "src/ante/cli/commands/broker.py": {
-      "no-any-return": 3,
-      "no-untyped-call": 12,
-      "no-untyped-def": 3,
-      "type-arg": 13
-    },
     "src/ante/cli/commands/feed.py": {
       "no-untyped-call": 3,
       "no-untyped-def": 2,
