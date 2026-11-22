@@ -66,6 +66,7 @@ import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCServerNotRunningError
 from ante.member.models import Member, MemberRole, MemberType
 
 
@@ -812,9 +813,7 @@ class TestBotSignalKeyMissingBotExit:
             side_effect=sqlite3.OperationalError("database is locked")
         )
         mock_skm = self._missing_skm()
-        not_running = click.ClickException("서버가 실행 중이 아닙니다.")
-        not_running.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-        not_running.ipc_error_message = not_running.message  # type: ignore[attr-defined]
+        not_running = IPCServerNotRunningError("서버가 실행 중이 아닙니다.")
         mock_send = AsyncMock(side_effect=not_running)
 
         with (
