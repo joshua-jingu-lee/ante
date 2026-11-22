@@ -280,6 +280,67 @@ def test_only_one_line_may_change(
 
 
 @pytest.mark.parametrize(
+    ("before_stderr", "after_stderr", "expected", "exit_code"),
+    [
+        pytest.param(
+            "Error: 없음\n", f"Error: {CODE}: 없음\n", "text 형식", 0, id="added"
+        ),
+        pytest.param(
+            f"Error: {CODE}: 없음\n",
+            f"Error: {CODE}: {CODE}: 없음\n",
+            "다름",
+            1,
+            id="doubled",
+        ),
+    ],
+)
+def test_prefix_already_in_the_before_line_is_different(
+    tmp_path: Path,
+    before_stderr: str,
+    after_stderr: str,
+    expected: str,
+    exit_code: int,
+) -> None:
+    before = [_row(TEXT_ARGS, stderr=before_stderr)]
+    after = [_row(TEXT_ARGS, stderr=after_stderr)]
+    result = _compare(tmp_path, before, after)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(**{expected: 1})
+
+
+@pytest.mark.parametrize(
+    ("allowed", "expected", "exit_code"),
+    [
+        pytest.param((CODE,), "text 형식", 0, id="allowed-code"),
+        pytest.param(("MEMBER_NOT_FOUND",), "다름", 1, id="other-allowed-code"),
+        pytest.param((), "text 형식", 0, id="no-option"),
+    ],
+)
+def test_text_form_code_limits_the_prefix_codes(
+    tmp_path: Path, allowed: tuple[str, ...], expected: str, exit_code: int
+) -> None:
+    before = [_row(TEXT_ARGS, stderr="Error: 없음\n")]
+    after = [_row(TEXT_ARGS, stderr=f"Error: {CODE}: 없음\n")]
+    options = [part for code in allowed for part in ("--text-form-code", code)]
+    result = _compare(tmp_path, before, after, *options)
+    assert result.returncode == exit_code, result.stderr
+    assert _counts(result.stdout) == _expected_counts(**{expected: 1})
+
+
+def test_text_form_code_outside_the_registry_is_an_input_error(
+    tmp_path: Path,
+) -> None:
+    before = [_row(TEXT_ARGS, stderr="Error: 없음\n")]
+    after = [_row(TEXT_ARGS, stderr=f"Error: {CODE}: 없음\n")]
+    result = _compare(tmp_path, before, after, "--text-form-code", "NOT_A_CODE")
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "error: --text-form-code NOT_A_CODE is not a registry code\n"
+    )
+
+
+@pytest.mark.parametrize(
     ("after_exit", "expected", "exit_code"),
     [
         pytest.param(1, "text 형식", 0, id="same-exit"),
