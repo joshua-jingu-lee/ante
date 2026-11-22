@@ -1054,3 +1054,66 @@ def test_the_residual_validate_code_is_registered_without_an_exception() -> None
     ]
     assert specs == [("STRATEGY_VALIDATION_FAILED", "validation", 1)]
     assert mapped == []
+
+
+def test_strategy_submit_register_failure_without_a_code_text(tmp_path: Path) -> None:
+    path = _strategy_file(tmp_path)
+    result = _invoke(
+        ["--format", "text", "strategy", "submit", path],
+        _validator(_VALID),
+        _loader(cls=_registering_class()),
+        _with_registry(register=AsyncMock(side_effect=StrategyError("등록 실패"))),
+    )
+    _assert_text(result, ["Error: STRATEGY_ERROR: 등록 실패"])
+
+
+_PAIRED_IPC_ARGS = [
+    pytest.param(
+        ["treasury", "allocate", "b1", "100", "--account", "acct-1"], id="allocate"
+    ),
+    pytest.param(
+        ["treasury", "deallocate", "b1", "5.5", "--account", "acct-1"],
+        id="deallocate",
+    ),
+    pytest.param(
+        ["treasury", "set-balance", "100", "--account", "acct-1"], id="set-balance"
+    ),
+    pytest.param(
+        ["treasury", "allocate", "bot-1", "1000", "--account", "acc-1"],
+        id="allocate-acc-1",
+    ),
+    pytest.param(
+        ["treasury", "deallocate", "bot-1", "1000", "--account", "acc-1"],
+        id="deallocate-acc-1",
+    ),
+]
+
+
+@pytest.mark.parametrize("mode", _MODES)
+@pytest.mark.parametrize("args", _PAIRED_IPC_ARGS)
+def test_treasury_ipc_send_failure_without_a_message(
+    mode: str, args: list[str]
+) -> None:
+    result = _invoke(
+        ["--format", mode, *args],
+        patch(_ACTIVE, return_value=True),
+        _send(RuntimeError()),
+    )
+    _assert_exit(mode, result, "EXECUTION_ERROR", "", "Error: EXECUTION_ERROR: ")
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_treasury_allocate_rejected_for_a_large_amount(mode: str) -> None:
+    result = _invoke(
+        ["--format", mode, "treasury", "allocate", "bot-1", "999999999"]
+        + ["--account", "acc-1"],
+        _send(value={"success": False}),
+    )
+    message = "예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: 999,999,999원)"
+    _assert_exit(
+        mode,
+        result,
+        "TREASURY_ALLOCATE_FAILED",
+        message,
+        f"Error: TREASURY_ALLOCATE_FAILED: {message}",
+    )
