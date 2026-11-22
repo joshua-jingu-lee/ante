@@ -365,33 +365,55 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("status", "json"): (
         "{\n"
-        '  "currency": "KRW",\n'
-        '  "account_balance": 10000000.0,\n'
-        '  "purchasable_amount": 9500000.0,\n'
-        '  "total_evaluation": 12500000.0,\n'
-        '  "purchase_amount": 2000000.0,\n'
-        '  "eval_amount": 2500000.0,\n'
-        '  "total_profit_loss": 500000.0,\n'
-        '  "total_allocated": 3000000.0,\n'
-        '  "total_reserved": 120000.0,\n'
-        '  "total_available": 2880000.0,\n'
-        '  "unallocated": 7000000.0,\n'
-        '  "bot_count": 2,\n'
-        '  "external_purchase_amount": 0.0,\n'
-        '  "external_eval_amount": 0.0,\n'
-        '  "ante_purchase_amount": 2000000.0,\n'
-        '  "ante_eval_amount": 2500000.0,\n'
-        '  "ante_profit_loss": 500000.0,\n'
-        '  "budget_exceeds_purchasable": false,\n'
-        '  "account_number": "",\n'
-        '  "is_demo_trading": false,\n'
-        '  "last_sync_time": null\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "currency": "KRW",\n'
+        '    "account_balance": 10000000.0,\n'
+        '    "purchasable_amount": 9500000.0,\n'
+        '    "total_evaluation": 12500000.0,\n'
+        '    "purchase_amount": 2000000.0,\n'
+        '    "eval_amount": 2500000.0,\n'
+        '    "total_profit_loss": 500000.0,\n'
+        '    "total_allocated": 3000000.0,\n'
+        '    "total_reserved": 120000.0,\n'
+        '    "total_available": 2880000.0,\n'
+        '    "unallocated": 7000000.0,\n'
+        '    "bot_count": 2,\n'
+        '    "external_purchase_amount": 0.0,\n'
+        '    "external_eval_amount": 0.0,\n'
+        '    "ante_purchase_amount": 2000000.0,\n'
+        '    "ante_eval_amount": 2500000.0,\n'
+        '    "ante_profit_loss": 500000.0,\n'
+        '    "budget_exceeds_purchasable": false,\n'
+        '    "account_number": "",\n'
+        '    "is_demo_trading": false,\n'
+        '    "last_sync_time": null\n'
+        "  }\n"
         "}\n"
     ),
     ("transactions_no_table", "text"): ("(no data)\n"),
-    ("transactions_no_table", "json"): ('{\n  "items": [],\n  "total": 0\n}\n'),
+    ("transactions_no_table", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "items": [],\n'
+        '    "total": 0\n'
+        "  }\n"
+        "}\n"
+    ),
     ("transactions_empty", "text"): ("(no data)\n"),
-    ("transactions_empty", "json"): ('{\n  "items": [],\n  "total": 0\n}\n'),
+    ("transactions_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "items": [],\n'
+        '    "total": 0\n'
+        "  }\n"
+        "}\n"
+    ),
     ("transactions_rows", "text"): (
         "  created_at |   account_id |         type |       bot_id |       amount\n"
         "------------------------------------------------------------------------\n"
@@ -402,27 +424,31 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("transactions_rows", "json"): (
         "{\n"
-        '  "items": [\n'
-        "    {\n"
-        '      "id": 12,\n'
-        '      "account_id": "acc-1",\n'
-        '      "type": "allocate",\n'
-        '      "bot_id": "bot-1",\n'
-        '      "amount": 1000000.0,\n'
-        '      "description": "예산 할당",\n'
-        '      "created_at": "2026-01-02 09:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": 11,\n'
-        '      "account_id": "acc-2",\n'
-        '      "type": "deallocate",\n'
-        '      "bot_id": null,\n'
-        '      "amount": -50000.0,\n'
-        '      "description": "",\n'
-        '      "created_at": "2026-01-01 15:00:00"\n'
-        "    }\n"
-        "  ],\n"
-        '  "total": 7\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "items": [\n'
+        "      {\n"
+        '        "id": 12,\n'
+        '        "account_id": "acc-1",\n'
+        '        "type": "allocate",\n'
+        '        "bot_id": "bot-1",\n'
+        '        "amount": 1000000.0,\n'
+        '        "description": "예산 할당",\n'
+        '        "created_at": "2026-01-02 09:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": 11,\n'
+        '        "account_id": "acc-2",\n'
+        '        "type": "deallocate",\n'
+        '        "bot_id": null,\n'
+        '        "amount": -50000.0,\n'
+        '        "description": "",\n'
+        '        "created_at": "2026-01-01 15:00:00"\n'
+        "      }\n"
+        "    ],\n"
+        '    "total": 7\n'
+        "  }\n"
         "}\n"
     ),
     ("transactions_filtered", "text"): (
@@ -435,31 +461,43 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("transactions_filtered", "json"): (
         "{\n"
-        '  "items": [\n'
-        "    {\n"
-        '      "id": 12,\n'
-        '      "account_id": "acc-1",\n'
-        '      "type": "allocate",\n'
-        '      "bot_id": "bot-1",\n'
-        '      "amount": 1000000.0,\n'
-        '      "description": "예산 할당",\n'
-        '      "created_at": "2026-01-02 09:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": 11,\n'
-        '      "account_id": "acc-2",\n'
-        '      "type": "deallocate",\n'
-        '      "bot_id": null,\n'
-        '      "amount": -50000.0,\n'
-        '      "description": "",\n'
-        '      "created_at": "2026-01-01 15:00:00"\n'
-        "    }\n"
-        "  ],\n"
-        '  "total": 1\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "items": [\n'
+        "      {\n"
+        '        "id": 12,\n'
+        '        "account_id": "acc-1",\n'
+        '        "type": "allocate",\n'
+        '        "bot_id": "bot-1",\n'
+        '        "amount": 1000000.0,\n'
+        '        "description": "예산 할당",\n'
+        '        "created_at": "2026-01-02 09:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": 11,\n'
+        '        "account_id": "acc-2",\n'
+        '        "type": "deallocate",\n'
+        '        "bot_id": null,\n'
+        '        "amount": -50000.0,\n'
+        '        "description": "",\n'
+        '        "created_at": "2026-01-01 15:00:00"\n'
+        "      }\n"
+        "    ],\n"
+        '    "total": 1\n'
+        "  }\n"
         "}\n"
     ),
     ("budgets_empty", "text"): ("(no data)\n"),
-    ("budgets_empty", "json"): ('{\n  "budgets": []\n}\n'),
+    ("budgets_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "budgets": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("budgets_all", "text"): (
         "  account_id |       bot_id |    allocated |    available |     reserved\n"
         "------------------------------------------------------------------------\n"
@@ -469,38 +507,42 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("budgets_all", "json"): (
         "{\n"
-        '  "budgets": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "allocated": 1000000.0,\n'
-        '      "available": 800000.0,\n'
-        '      "reserved": 50000.0,\n'
-        '      "spent": 150000.0,\n'
-        '      "returned": 0.0,\n'
-        '      "last_updated": "2026-01-03T09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "bot_id": "bot-2",\n'
-        '      "account_id": "acc-1",\n'
-        '      "allocated": 500000.0,\n'
-        '      "available": 500000.0,\n'
-        '      "reserved": 0.0,\n'
-        '      "spent": 0.0,\n'
-        '      "returned": 0.0,\n'
-        '      "last_updated": "2026-01-03T09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "bot_id": "bot-3",\n'
-        '      "account_id": "acc-2",\n'
-        '      "allocated": 2000000.0,\n'
-        '      "available": 1900000.0,\n'
-        '      "reserved": 0.0,\n'
-        '      "spent": 0.0,\n'
-        '      "returned": 100000.0,\n'
-        '      "last_updated": "2026-01-03T09:00:00+00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "budgets": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "allocated": 1000000.0,\n'
+        '        "available": 800000.0,\n'
+        '        "reserved": 50000.0,\n'
+        '        "spent": 150000.0,\n'
+        '        "returned": 0.0,\n'
+        '        "last_updated": "2026-01-03T09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "bot_id": "bot-2",\n'
+        '        "account_id": "acc-1",\n'
+        '        "allocated": 500000.0,\n'
+        '        "available": 500000.0,\n'
+        '        "reserved": 0.0,\n'
+        '        "spent": 0.0,\n'
+        '        "returned": 0.0,\n'
+        '        "last_updated": "2026-01-03T09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "bot_id": "bot-3",\n'
+        '        "account_id": "acc-2",\n'
+        '        "allocated": 2000000.0,\n'
+        '        "available": 1900000.0,\n'
+        '        "reserved": 0.0,\n'
+        '        "spent": 0.0,\n'
+        '        "returned": 100000.0,\n'
+        '        "last_updated": "2026-01-03T09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("budgets_account", "text"): (
@@ -511,44 +553,56 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("budgets_account", "json"): (
         "{\n"
-        '  "budgets": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "allocated": 1000000.0,\n'
-        '      "available": 800000.0,\n'
-        '      "reserved": 50000.0,\n'
-        '      "spent": 150000.0,\n'
-        '      "returned": 0.0,\n'
-        '      "last_updated": "2026-01-03T09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "bot_id": "bot-2",\n'
-        '      "account_id": "acc-1",\n'
-        '      "allocated": 500000.0,\n'
-        '      "available": 500000.0,\n'
-        '      "reserved": 0.0,\n'
-        '      "spent": 0.0,\n'
-        '      "returned": 0.0,\n'
-        '      "last_updated": "2026-01-03T09:00:00+00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "budgets": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "allocated": 1000000.0,\n'
+        '        "available": 800000.0,\n'
+        '        "reserved": 50000.0,\n'
+        '        "spent": 150000.0,\n'
+        '        "returned": 0.0,\n'
+        '        "last_updated": "2026-01-03T09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "bot_id": "bot-2",\n'
+        '        "account_id": "acc-1",\n'
+        '        "allocated": 500000.0,\n'
+        '        "available": 500000.0,\n'
+        '        "reserved": 0.0,\n'
+        '        "spent": 0.0,\n'
+        '        "returned": 0.0,\n'
+        '        "last_updated": "2026-01-03T09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("set_balance_ipc", "text"): ("계좌 잔고 설정 완료: acc-1 15,000,000\n"),
     ("set_balance_ipc", "json"): (
         "{\n"
-        '  "account_id": "acc-1",\n'
-        '  "total_balance": 15000000.0,\n'
-        '  "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acc-1",\n'
+        '    "total_balance": 15000000.0,\n'
+        '    "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("set_balance_direct", "text"): ("계좌 잔고 설정 완료: acc-1 15,000,000\n"),
     ("set_balance_direct", "json"): (
         "{\n"
-        '  "account_id": "acc-1",\n'
-        '  "total_balance": 15000000.0,\n'
-        '  "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acc-1",\n'
+        '    "total_balance": 15000000.0,\n'
+        '    "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("allocate", "text"): ("예산 할당 완료: bot-1 <- 100,000원\n"),
@@ -586,20 +640,24 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("snapshot_date", "json"): (
         "{\n"
-        '  "account_id": "acc-1",\n'
-        '  "snapshot_date": "2026-01-02",\n'
-        '  "total_asset": 12650000.0,\n'
-        '  "ante_eval_amount": 2500000.0,\n'
-        '  "ante_purchase_amount": 2000000.0,\n'
-        '  "unallocated": 7000000.0,\n'
-        '  "account_balance": 10000000.0,\n'
-        '  "total_allocated": 3000000.0,\n'
-        '  "bot_count": 2,\n'
-        '  "daily_pnl": 150000.0,\n'
-        '  "daily_return": 1.2,\n'
-        '  "net_trade_amount": 0.0,\n'
-        '  "unrealized_pnl": 500000.0,\n'
-        '  "created_at": "2026-01-02 15:40:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acc-1",\n'
+        '    "snapshot_date": "2026-01-02",\n'
+        '    "total_asset": 12650000.0,\n'
+        '    "ante_eval_amount": 2500000.0,\n'
+        '    "ante_purchase_amount": 2000000.0,\n'
+        '    "unallocated": 7000000.0,\n'
+        '    "account_balance": 10000000.0,\n'
+        '    "total_allocated": 3000000.0,\n'
+        '    "bot_count": 2,\n'
+        '    "daily_pnl": 150000.0,\n'
+        '    "daily_return": 1.2,\n'
+        '    "net_trade_amount": 0.0,\n'
+        '    "unrealized_pnl": 500000.0,\n'
+        '    "created_at": "2026-01-02 15:40:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("snapshot_today", "text"): (
@@ -613,20 +671,24 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("snapshot_today", "json"): (
         "{\n"
-        '  "account_id": "acc-1",\n'
-        '  "snapshot_date": "2026-01-03",\n'
-        '  "total_asset": 12400000.0,\n'
-        '  "ante_eval_amount": 2500000.0,\n'
-        '  "ante_purchase_amount": 2000000.0,\n'
-        '  "unallocated": 7000000.0,\n'
-        '  "account_balance": 10000000.0,\n'
-        '  "total_allocated": 3000000.0,\n'
-        '  "bot_count": 2,\n'
-        '  "daily_pnl": -250000.0,\n'
-        '  "daily_return": -1.98,\n'
-        '  "net_trade_amount": 0.0,\n'
-        '  "unrealized_pnl": 250000.0,\n'
-        '  "created_at": "2026-01-03 15:40:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acc-1",\n'
+        '    "snapshot_date": "2026-01-03",\n'
+        '    "total_asset": 12400000.0,\n'
+        '    "ante_eval_amount": 2500000.0,\n'
+        '    "ante_purchase_amount": 2000000.0,\n'
+        '    "unallocated": 7000000.0,\n'
+        '    "account_balance": 10000000.0,\n'
+        '    "total_allocated": 3000000.0,\n'
+        '    "bot_count": 2,\n'
+        '    "daily_pnl": -250000.0,\n'
+        '    "daily_return": -1.98,\n'
+        '    "net_trade_amount": 0.0,\n'
+        '    "unrealized_pnl": 250000.0,\n'
+        '    "created_at": "2026-01-03 15:40:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("snapshot_range", "text"): (
@@ -638,59 +700,73 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "    2026-01-03      12,400,000       -250,000     -1.98%\n"
     ),
     ("snapshot_range", "json"): (
-        "[\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-01",\n'
-        '    "total_asset": 12500000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": 0.0,\n'
-        '    "daily_return": 0.0,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 400000.0,\n'
-        '    "created_at": "2026-01-01 15:40:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-02",\n'
-        '    "total_asset": 12650000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": 150000.0,\n'
-        '    "daily_return": 1.2,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 500000.0,\n'
-        '    "created_at": "2026-01-02 15:40:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-03",\n'
-        '    "total_asset": 12400000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": -250000.0,\n'
-        '    "daily_return": -1.98,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 250000.0,\n'
-        '    "created_at": "2026-01-03 15:40:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "snapshots": [\n'
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-01",\n'
+        '        "total_asset": 12500000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": 0.0,\n'
+        '        "daily_return": 0.0,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 400000.0,\n'
+        '        "created_at": "2026-01-01 15:40:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-02",\n'
+        '        "total_asset": 12650000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": 150000.0,\n'
+        '        "daily_return": 1.2,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 500000.0,\n'
+        '        "created_at": "2026-01-02 15:40:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-03",\n'
+        '        "total_asset": 12400000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": -250000.0,\n'
+        '        "daily_return": -1.98,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 250000.0,\n'
+        '        "created_at": "2026-01-03 15:40:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("snapshot_range_empty", "text"): ("(스냅샷 없음)\n"),
-    ("snapshot_range_empty", "json"): ("[]\n"),
+    ("snapshot_range_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "snapshots": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("snapshot_from_only", "text"): (
         "일별 자산 스냅샷 (2026-01-01 ~ 2026-01-03)\n"
         "            날짜            총 자산           당일 손익        수익률\n"
@@ -700,56 +776,62 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "    2026-01-03      12,400,000       -250,000     -1.98%\n"
     ),
     ("snapshot_from_only", "json"): (
-        "[\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-01",\n'
-        '    "total_asset": 12500000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": 0.0,\n'
-        '    "daily_return": 0.0,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 400000.0,\n'
-        '    "created_at": "2026-01-01 15:40:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-02",\n'
-        '    "total_asset": 12650000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": 150000.0,\n'
-        '    "daily_return": 1.2,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 500000.0,\n'
-        '    "created_at": "2026-01-02 15:40:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "account_id": "acc-1",\n'
-        '    "snapshot_date": "2026-01-03",\n'
-        '    "total_asset": 12400000.0,\n'
-        '    "ante_eval_amount": 2500000.0,\n'
-        '    "ante_purchase_amount": 2000000.0,\n'
-        '    "unallocated": 7000000.0,\n'
-        '    "account_balance": 10000000.0,\n'
-        '    "total_allocated": 3000000.0,\n'
-        '    "bot_count": 2,\n'
-        '    "daily_pnl": -250000.0,\n'
-        '    "daily_return": -1.98,\n'
-        '    "net_trade_amount": 0.0,\n'
-        '    "unrealized_pnl": 250000.0,\n'
-        '    "created_at": "2026-01-03 15:40:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "snapshots": [\n'
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-01",\n'
+        '        "total_asset": 12500000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": 0.0,\n'
+        '        "daily_return": 0.0,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 400000.0,\n'
+        '        "created_at": "2026-01-01 15:40:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-02",\n'
+        '        "total_asset": 12650000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": 150000.0,\n'
+        '        "daily_return": 1.2,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 500000.0,\n'
+        '        "created_at": "2026-01-02 15:40:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "snapshot_date": "2026-01-03",\n'
+        '        "total_asset": 12400000.0,\n'
+        '        "ante_eval_amount": 2500000.0,\n'
+        '        "ante_purchase_amount": 2000000.0,\n'
+        '        "unallocated": 7000000.0,\n'
+        '        "account_balance": 10000000.0,\n'
+        '        "total_allocated": 3000000.0,\n'
+        '        "bot_count": 2,\n'
+        '        "daily_pnl": -250000.0,\n'
+        '        "daily_return": -1.98,\n'
+        '        "net_trade_amount": 0.0,\n'
+        '        "unrealized_pnl": 250000.0,\n'
+        '        "created_at": "2026-01-03 15:40:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("value_account", "text"): (
         "  총 자산        :      12,400,000\n"
@@ -759,22 +841,26 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("value_account", "json"): (
         "{\n"
-        '  "total_value": 12400000.0,\n'
-        '  "daily_pnl": -250000.0,\n'
-        '  "daily_return": -0.020161290322580645,\n'
-        '  "unrealized_pnl": 250000.0,\n'
-        '  "accounts": [\n'
-        "    {\n"
-        '      "account_id": "acc-1",\n'
-        '      "total_value": 12400000.0,\n'
-        '      "daily_pnl": -250000.0,\n'
-        '      "daily_return": -1.98,\n'
-        '      "unrealized_pnl": 250000.0,\n'
-        '      "snapshot_date": "2026-01-03",\n'
-        '      "updated_at": "2026-01-03 15:40:00"\n'
-        "    }\n"
-        "  ],\n"
-        '  "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_value": 12400000.0,\n'
+        '    "daily_pnl": -250000.0,\n'
+        '    "daily_return": -0.020161290322580645,\n'
+        '    "unrealized_pnl": 250000.0,\n'
+        '    "accounts": [\n'
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "total_value": 12400000.0,\n'
+        '        "daily_pnl": -250000.0,\n'
+        '        "daily_return": -1.98,\n'
+        '        "unrealized_pnl": 250000.0,\n'
+        '        "snapshot_date": "2026-01-03",\n'
+        '        "updated_at": "2026-01-03 15:40:00"\n'
+        "      }\n"
+        "    ],\n"
+        '    "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("value_all", "text"): (
@@ -785,30 +871,34 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("value_all", "json"): (
         "{\n"
-        '  "total_value": 15400000.0,\n'
-        '  "daily_pnl": -250000.0,\n'
-        '  "daily_return": -0.016233766233766232,\n'
-        '  "unrealized_pnl": 250000.0,\n'
-        '  "accounts": [\n'
-        "    {\n"
-        '      "account_id": "acc-1",\n'
-        '      "total_value": 12400000.0,\n'
-        '      "daily_pnl": -250000.0,\n'
-        '      "daily_return": -1.98,\n'
-        '      "unrealized_pnl": 250000.0,\n'
-        '      "snapshot_date": "2026-01-03",\n'
-        '      "updated_at": "2026-01-03 15:40:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "account_id": "acc-2",\n'
-        '      "total_value": 3000000.0,\n'
-        '      "daily_pnl": 0.0,\n'
-        '      "daily_return": 0.0,\n'
-        '      "unrealized_pnl": 0.0,\n'
-        '      "updated_at": "2026-01-05T09:30:00+00:00"\n'
-        "    }\n"
-        "  ],\n"
-        '  "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_value": 15400000.0,\n'
+        '    "daily_pnl": -250000.0,\n'
+        '    "daily_return": -0.016233766233766232,\n'
+        '    "unrealized_pnl": 250000.0,\n'
+        '    "accounts": [\n'
+        "      {\n"
+        '        "account_id": "acc-1",\n'
+        '        "total_value": 12400000.0,\n'
+        '        "daily_pnl": -250000.0,\n'
+        '        "daily_return": -1.98,\n'
+        '        "unrealized_pnl": 250000.0,\n'
+        '        "snapshot_date": "2026-01-03",\n'
+        '        "updated_at": "2026-01-03 15:40:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "acc-2",\n'
+        '        "total_value": 3000000.0,\n'
+        '        "daily_pnl": 0.0,\n'
+        '        "daily_return": 0.0,\n'
+        '        "unrealized_pnl": 0.0,\n'
+        '        "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "      }\n"
+        "    ],\n"
+        '    "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("value_empty", "text"): (
@@ -819,12 +909,16 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("value_empty", "json"): (
         "{\n"
-        '  "total_value": 0,\n'
-        '  "daily_pnl": 0,\n'
-        '  "daily_return": 0.0,\n'
-        '  "unrealized_pnl": 0,\n'
-        '  "accounts": [],\n'
-        '  "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_value": 0,\n'
+        '    "daily_pnl": 0,\n'
+        '    "daily_return": 0.0,\n'
+        '    "unrealized_pnl": 0,\n'
+        '    "accounts": [],\n'
+        '    "updated_at": "2026-01-05T09:30:00+00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("history_account", "text"): (
@@ -835,24 +929,28 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("history_account", "json"): (
         "{\n"
-        '  "data": [\n'
-        "    {\n"
-        '      "date": "2026-01-01",\n'
-        '      "total_asset": 12500000.0,\n'
-        '      "daily_pnl": 0.0,\n'
-        '      "daily_return": 0.0,\n'
-        '      "unrealized_pnl": 400000.0\n'
-        "    },\n"
-        "    {\n"
-        '      "date": "2026-01-02",\n'
-        '      "total_asset": 12650000.0,\n'
-        '      "daily_pnl": 150000.0,\n'
-        '      "daily_return": 0.011857707509881422,\n'
-        '      "unrealized_pnl": 500000.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "start_date": "2026-01-01",\n'
-        '  "end_date": "2026-01-03"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "data": [\n'
+        "      {\n"
+        '        "date": "2026-01-01",\n'
+        '        "total_asset": 12500000.0,\n'
+        '        "daily_pnl": 0.0,\n'
+        '        "daily_return": 0.0,\n'
+        '        "unrealized_pnl": 400000.0\n'
+        "      },\n"
+        "      {\n"
+        '        "date": "2026-01-02",\n'
+        '        "total_asset": 12650000.0,\n'
+        '        "daily_pnl": 150000.0,\n'
+        '        "daily_return": 0.011857707509881422,\n'
+        '        "unrealized_pnl": 500000.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "start_date": "2026-01-01",\n'
+        '    "end_date": "2026-01-03"\n'
+        "  }\n"
         "}\n"
     ),
     ("history_all", "text"): (
@@ -863,32 +961,40 @@ _TREASURY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("history_all", "json"): (
         "{\n"
-        '  "data": [\n'
-        "    {\n"
-        '      "date": "2026-01-01",\n'
-        '      "total_asset": 12500000.0,\n'
-        '      "daily_pnl": 0.0,\n'
-        '      "daily_return": 0.0,\n'
-        '      "unrealized_pnl": 400000.0\n'
-        "    },\n"
-        "    {\n"
-        '      "date": "2026-01-02",\n'
-        '      "total_asset": 15650000.0,\n'
-        '      "daily_pnl": 120000.0,\n'
-        '      "daily_return": 0.0076677316293929714,\n'
-        '      "unrealized_pnl": 490000.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "start_date": "2025-12-06",\n'
-        '  "end_date": "2026-01-05"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "data": [\n'
+        "      {\n"
+        '        "date": "2026-01-01",\n'
+        '        "total_asset": 12500000.0,\n'
+        '        "daily_pnl": 0.0,\n'
+        '        "daily_return": 0.0,\n'
+        '        "unrealized_pnl": 400000.0\n'
+        "      },\n"
+        "      {\n"
+        '        "date": "2026-01-02",\n'
+        '        "total_asset": 15650000.0,\n'
+        '        "daily_pnl": 120000.0,\n'
+        '        "daily_return": 0.0076677316293929714,\n'
+        '        "unrealized_pnl": 490000.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "start_date": "2025-12-06",\n'
+        '    "end_date": "2026-01-05"\n'
+        "  }\n"
         "}\n"
     ),
     ("history_empty", "text"): ("(no data)\n"),
     ("history_empty", "json"): (
         "{\n"
-        '  "data": [],\n'
-        '  "start_date": "2025-12-06",\n'
-        '  "end_date": "2026-01-05"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "data": [],\n'
+        '    "start_date": "2025-12-06",\n'
+        '    "end_date": "2026-01-05"\n'
+        "  }\n"
         "}\n"
     ),
 }

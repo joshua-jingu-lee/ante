@@ -228,17 +228,41 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  연결 상태  : 연결됨\n  건강 상태  : 정상\n  거래소     : KRX\n"
     ),
     ("status_ipc", "json"): (
-        '{\n  "connected": true,\n  "healthy": true,\n  "exchange": "KRX"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "connected": true,\n'
+        '    "healthy": true,\n'
+        '    "exchange": "KRX"\n'
+        "  }\n"
+        "}\n"
     ),
     ("status_direct", "text"): (
         "  연결 상태  : 연결됨\n  건강 상태  : 정상\n  거래소     : KRX\n"
     ),
     ("status_direct", "json"): (
-        '{\n  "connected": true,\n  "healthy": true,\n  "exchange": "KRX"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "connected": true,\n'
+        '    "healthy": true,\n'
+        '    "exchange": "KRX"\n'
+        "  }\n"
+        "}\n"
     ),
     ("status_down_ipc", "text"): ("  연결 상태  : 미연결\n  건강 상태  : 이상\n"),
     ("status_down_ipc", "json"): (
-        '{\n  "connected": false,\n  "healthy": false,\n  "exchange": ""\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "connected": false,\n'
+        '    "healthy": false,\n'
+        '    "exchange": ""\n'
+        "  }\n"
+        "}\n"
     ),
     ("status_error_direct", "text"): (
         "  연결 상태  : 미연결\n"
@@ -247,9 +271,13 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("status_error_direct", "json"): (
         "{\n"
-        '  "connected": false,\n'
-        '  "healthy": false,\n'
-        '  "error": "증권사 연결 실패: FAKE-ERROR-TOKEN-0000"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "connected": false,\n'
+        '    "healthy": false,\n'
+        '    "error": "증권사 연결 실패: FAKE-ERROR-TOKEN-0000"\n'
+        "  }\n"
         "}\n"
     ),
     ("balance_ipc", "text"): (
@@ -264,14 +292,18 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("balance_ipc", "json"): (
         "{\n"
-        '  "cash": 1500000.0,\n'
-        '  "total_assets": 12345678.9,\n'
-        '  "purchase_amount": 9000000.0,\n'
-        '  "eval_amount": 10845678.9,\n'
-        '  "total_profit_loss": 1845678.9,\n'
-        '  "substitute_amount": 0.0,\n'
-        '  "currency": "KRW",\n'
-        '  "position_count": 2\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "cash": 1500000.0,\n'
+        '    "total_assets": 12345678.9,\n'
+        '    "purchase_amount": 9000000.0,\n'
+        '    "eval_amount": 10845678.9,\n'
+        '    "total_profit_loss": 1845678.9,\n'
+        '    "substitute_amount": 0.0,\n'
+        '    "currency": "KRW",\n'
+        '    "position_count": 2\n'
+        "  }\n"
         "}\n"
     ),
     ("balance_direct", "text"): (
@@ -286,27 +318,45 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("balance_direct", "json"): (
         "{\n"
-        '  "cash": 1500000.0,\n'
-        '  "total_assets": 12345678.9,\n'
-        '  "purchase_amount": 9000000.0,\n'
-        '  "eval_amount": 10845678.9,\n'
-        '  "total_profit_loss": 1845678.9,\n'
-        '  "substitute_amount": 0.0,\n'
-        '  "currency": "KRW",\n'
-        '  "position_count": 2\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "cash": 1500000.0,\n'
+        '    "total_assets": 12345678.9,\n'
+        '    "purchase_amount": 9000000.0,\n'
+        '    "eval_amount": 10845678.9,\n'
+        '    "total_profit_loss": 1845678.9,\n'
+        '    "substitute_amount": 0.0,\n'
+        '    "currency": "KRW",\n'
+        '    "position_count": 2\n'
+        "  }\n"
         "}\n"
     ),
     ("positions_empty_ipc", "text"): (
         "{'message': '보유 종목 없음', 'positions': []}\n"
     ),
     ("positions_empty_ipc", "json"): (
-        '{\n  "message": "보유 종목 없음",\n  "positions": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "보유 종목 없음",\n'
+        '    "positions": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("positions_empty_direct", "text"): (
         "{'message': '보유 종목 없음', 'positions': []}\n"
     ),
     ("positions_empty_direct", "json"): (
-        '{\n  "message": "보유 종목 없음",\n  "positions": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "보유 종목 없음",\n'
+        '    "positions": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("positions_rows_ipc", "text"): (
         "      symbol |     quantity |    avg_price |  eval_amount\n"
@@ -316,28 +366,32 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("positions_rows_ipc", "json"): (
         "{\n"
-        '  "positions": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "name": "삼성전자",\n'
-        '      "quantity": 10.0,\n'
-        '      "avg_price": 70000.0,\n'
-        '      "current_price": 72000.0,\n'
-        '      "eval_amount": 720000.0,\n'
-        '      "profit_loss": 20000.0,\n'
-        '      "profit_loss_rate": 2.86\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "name": "SK하이닉스",\n'
-        '      "quantity": 5.0,\n'
-        '      "avg_price": 120000.0,\n'
-        '      "current_price": 118000.0,\n'
-        '      "eval_amount": 590000.0,\n'
-        '      "profit_loss": -10000.0,\n'
-        '      "profit_loss_rate": -1.67\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "positions": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "name": "삼성전자",\n'
+        '        "quantity": 10.0,\n'
+        '        "avg_price": 70000.0,\n'
+        '        "current_price": 72000.0,\n'
+        '        "eval_amount": 720000.0,\n'
+        '        "profit_loss": 20000.0,\n'
+        '        "profit_loss_rate": 2.86\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "name": "SK하이닉스",\n'
+        '        "quantity": 5.0,\n'
+        '        "avg_price": 120000.0,\n'
+        '        "current_price": 118000.0,\n'
+        '        "eval_amount": 590000.0,\n'
+        '        "profit_loss": -10000.0,\n'
+        '        "profit_loss_rate": -1.67\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("positions_rows_direct", "text"): (
@@ -348,34 +402,54 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("positions_rows_direct", "json"): (
         "{\n"
-        '  "positions": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "name": "삼성전자",\n'
-        '      "quantity": 10.0,\n'
-        '      "avg_price": 70000.0,\n'
-        '      "current_price": 72000.0,\n'
-        '      "eval_amount": 720000.0,\n'
-        '      "profit_loss": 20000.0,\n'
-        '      "profit_loss_rate": 2.86\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "name": "SK하이닉스",\n'
-        '      "quantity": 5.0,\n'
-        '      "avg_price": 120000.0,\n'
-        '      "current_price": 118000.0,\n'
-        '      "eval_amount": 590000.0,\n'
-        '      "profit_loss": -10000.0,\n'
-        '      "profit_loss_rate": -1.67\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "positions": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "name": "삼성전자",\n'
+        '        "quantity": 10.0,\n'
+        '        "avg_price": 70000.0,\n'
+        '        "current_price": 72000.0,\n'
+        '        "eval_amount": 720000.0,\n'
+        '        "profit_loss": 20000.0,\n'
+        '        "profit_loss_rate": 2.86\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "name": "SK하이닉스",\n'
+        '        "quantity": 5.0,\n'
+        '        "avg_price": 120000.0,\n'
+        '        "current_price": 118000.0,\n'
+        '        "eval_amount": 590000.0,\n'
+        '        "profit_loss": -10000.0,\n'
+        '        "profit_loss_rate": -1.67\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("orders_empty_ipc", "text"): ("  주문/체결 이력 없음\n"),
-    ("orders_empty_ipc", "json"): ('{\n  "orders": []\n}\n'),
+    ("orders_empty_ipc", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("orders_empty_direct", "text"): ("  주문/체결 이력 없음\n"),
-    ("orders_empty_direct", "json"): ('{\n  "orders": []\n}\n'),
+    ("orders_empty_direct", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("orders_rows_ipc", "text"): (
         "  ※ status 는 체결수량 기준 2값(filled/pending)이라 취소 주문도 pending 으로 "
         "보입니다. price 는 체결가/주문가 혼합, timestamp 는 영업일(일자)까지입니다.\n"
@@ -390,28 +464,32 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("orders_rows_ipc", "json"): (
         "{\n"
-        '  "orders": [\n'
-        "    {\n"
-        '      "order_id": "ORD-0001",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "filled_quantity": 10.0,\n'
-        '      "price": 70100.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "20260102"\n'
-        "    },\n"
-        "    {\n"
-        '      "order_id": "ORD-0002",\n'
-        '      "symbol": "000660",\n'
-        '      "side": "sell",\n'
-        '      "quantity": 5.0,\n'
-        '      "filled_quantity": 0.0,\n'
-        '      "price": 120000.0,\n'
-        '      "status": "pending",\n'
-        '      "timestamp": "20260102"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": [\n'
+        "      {\n"
+        '        "order_id": "ORD-0001",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "filled_quantity": 10.0,\n'
+        '        "price": 70100.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "20260102"\n'
+        "      },\n"
+        "      {\n"
+        '        "order_id": "ORD-0002",\n'
+        '        "symbol": "000660",\n'
+        '        "side": "sell",\n'
+        '        "quantity": 5.0,\n'
+        '        "filled_quantity": 0.0,\n'
+        '        "price": 120000.0,\n'
+        '        "status": "pending",\n'
+        '        "timestamp": "20260102"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("orders_rows_direct", "text"): (
@@ -428,28 +506,32 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("orders_rows_direct", "json"): (
         "{\n"
-        '  "orders": [\n'
-        "    {\n"
-        '      "order_id": "ORD-0001",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "filled_quantity": 10.0,\n'
-        '      "price": 70100.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "20260102"\n'
-        "    },\n"
-        "    {\n"
-        '      "order_id": "ORD-0002",\n'
-        '      "symbol": "000660",\n'
-        '      "side": "sell",\n'
-        '      "quantity": 5.0,\n'
-        '      "filled_quantity": 0.0,\n'
-        '      "price": 120000.0,\n'
-        '      "status": "pending",\n'
-        '      "timestamp": "20260102"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": [\n'
+        "      {\n"
+        '        "order_id": "ORD-0001",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "filled_quantity": 10.0,\n'
+        '        "price": 70100.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "20260102"\n'
+        "      },\n"
+        "      {\n"
+        '        "order_id": "ORD-0002",\n'
+        '        "symbol": "000660",\n'
+        '        "side": "sell",\n'
+        '        "quantity": 5.0,\n'
+        '        "filled_quantity": 0.0,\n'
+        '        "price": 120000.0,\n'
+        '        "status": "pending",\n'
+        '        "timestamp": "20260102"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("orders_range_ipc", "text"): (
@@ -464,18 +546,22 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("orders_range_ipc", "json"): (
         "{\n"
-        '  "orders": [\n'
-        "    {\n"
-        '      "order_id": "ORD-0001",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "filled_quantity": 10.0,\n'
-        '      "price": 70100.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "20260102"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": [\n'
+        "      {\n"
+        '        "order_id": "ORD-0001",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "filled_quantity": 10.0,\n'
+        '        "price": 70100.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "20260102"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("orders_range_direct", "text"): (
@@ -490,18 +576,22 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("orders_range_direct", "json"): (
         "{\n"
-        '  "orders": [\n'
-        "    {\n"
-        '      "order_id": "ORD-0001",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "filled_quantity": 10.0,\n'
-        '      "price": 70100.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "20260102"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "orders": [\n'
+        "      {\n"
+        '        "order_id": "ORD-0001",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "filled_quantity": 10.0,\n'
+        '        "price": 70100.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "20260102"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("reconcile_match_ipc", "text"): (
@@ -509,11 +599,15 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("reconcile_match_ipc", "json"): (
         "{\n"
-        '  "total_symbols": 2,\n'
-        '  "discrepancies": [],\n'
-        '  "match": true,\n'
-        '  "fix_applied": false,\n'
-        '  "corrections": 0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [],\n'
+        '    "match": true,\n'
+        '    "fix_applied": false,\n'
+        '    "corrections": 0\n'
+        "  }\n"
         "}\n"
     ),
     ("reconcile_match_direct", "text"): (
@@ -521,11 +615,15 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("reconcile_match_direct", "json"): (
         "{\n"
-        '  "total_symbols": 2,\n'
-        '  "discrepancies": [],\n'
-        '  "match": true,\n'
-        '  "fix_applied": false,\n'
-        '  "corrections": 0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [],\n'
+        '    "match": true,\n'
+        '    "fix_applied": false,\n'
+        '    "corrections": 0\n'
+        "  }\n"
         "}\n"
     ),
     ("reconcile_mismatch_ipc", "text"): (
@@ -538,18 +636,22 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("reconcile_mismatch_ipc", "json"): (
         "{\n"
-        '  "total_symbols": 2,\n'
-        '  "discrepancies": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "broker_qty": 10.0,\n'
-        '      "internal_qty": 8.0,\n'
-        '      "diff": 2.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "match": false,\n'
-        '  "fix_applied": false,\n'
-        '  "corrections": 0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "broker_qty": 10.0,\n'
+        '        "internal_qty": 8.0,\n'
+        '        "diff": 2.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "match": false,\n'
+        '    "fix_applied": false,\n'
+        '    "corrections": 0\n'
+        "  }\n"
         "}\n"
     ),
     ("reconcile_mismatch_direct", "text"): (
@@ -562,18 +664,22 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("reconcile_mismatch_direct", "json"): (
         "{\n"
-        '  "total_symbols": 2,\n'
-        '  "discrepancies": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "broker_qty": 10.0,\n'
-        '      "internal_qty": 8.0,\n'
-        '      "diff": 2.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "match": false,\n'
-        '  "fix_applied": false,\n'
-        '  "corrections": 0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "broker_qty": 10.0,\n'
+        '        "internal_qty": 8.0,\n'
+        '        "diff": 2.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "match": false,\n'
+        '    "fix_applied": false,\n'
+        '    "corrections": 0\n'
+        "  }\n"
         "}\n"
     ),
     ("reconcile_fix", "text"): (
@@ -587,18 +693,22 @@ _BROKER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("reconcile_fix", "json"): (
         "{\n"
-        '  "total_symbols": 2,\n'
-        '  "discrepancies": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "broker_qty": 10.0,\n'
-        '      "internal_qty": 8.0,\n'
-        '      "diff": 2.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "match": false,\n'
-        '  "fix_applied": true,\n'
-        '  "corrections": 1\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_symbols": 2,\n'
+        '    "discrepancies": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "broker_qty": 10.0,\n'
+        '        "internal_qty": 8.0,\n'
+        '        "diff": 2.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "match": false,\n'
+        '    "fix_applied": true,\n'
+        '    "corrections": 1\n'
+        "  }\n"
         "}\n"
     ),
 }

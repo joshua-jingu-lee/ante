@@ -101,7 +101,6 @@
       "C901": 3
     },
     "src/ante/cli/commands/treasury.py": {
-      "C901": 1,
       "S608": 2
     },
     "src/ante/cli/commands/update.py": {

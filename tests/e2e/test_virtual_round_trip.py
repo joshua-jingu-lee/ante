@@ -67,7 +67,7 @@ def _wait_for_fills(daemon: DaemonHarness, count: int) -> dict[str, Any]:
     while True:
         payload = daemon.cli(
             "treasury", "transactions", "--bot", BOT_ID, "--type", "fill"
-        )
+        )["data"]
         if payload["total"] >= count or time.monotonic() >= deadline:
             return payload
         time.sleep(0.5)
@@ -119,7 +119,7 @@ def test_virtual_round_trip(daemon: DaemonHarness) -> None:
     assert projected == EXPECTED_FILLS
 
     budgets = daemon.cli("treasury", "budgets", "--account", "test")
-    (budget,) = [b for b in budgets["budgets"] if b["bot_id"] == BOT_ID]
+    (budget,) = [b for b in budgets["data"]["budgets"] if b["bot_id"] == BOT_ID]
     assert budget["spent"] == pytest.approx(EXPECTED_SPENT, abs=1e-6)
     assert budget["returned"] == pytest.approx(EXPECTED_RETURNED, abs=1e-6)
 

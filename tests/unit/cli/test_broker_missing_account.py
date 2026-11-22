@@ -579,7 +579,7 @@ class TestStatusAndReconcileFollowupScope:
         )
         # status 정상 계약은 ``fmt.output`` 으로 indent=2 멀티라인 JSON 을
         # 출력하므로(에러 envelope 의 한 줄 형식이 아님), stdout 전체를 파싱한다.
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert isinstance(payload, dict), payload
         assert payload["connected"] is False, payload
         assert payload["healthy"] is False, payload
@@ -667,7 +667,7 @@ class TestStatusFallbackDisconnectsAdapter:
             f"expected exit 0, got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["connected"] is True, payload
         assert payload["healthy"] is True, payload
         disconnect.assert_awaited_once()
@@ -687,7 +687,7 @@ class TestStatusFallbackDisconnectsAdapter:
             f"expected exit 0 (generic 실패 swallow 계약), got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["connected"] is False, payload
         assert payload["healthy"] is False, payload
         assert "health probe failed" in str(payload["error"]), payload
@@ -732,7 +732,7 @@ class TestStatusFallbackDisconnectsAdapter:
         assert result.exit_code == 0, (
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["connected"] is False, payload
         assert "disconnect failed" in str(payload["error"]), payload
 
@@ -1296,7 +1296,7 @@ class TestOrderHistoryFallbackDateConversion:
         result, _ = self._invoke_fallback(runner, extra_args=[])
 
         assert result.exit_code == 0, result.stdout
-        assert json.loads(result.stdout) == {"orders": []}
+        assert json.loads(result.stdout)["data"] == {"orders": []}
 
 
 class TestOrderHistoryFallbackTrigger:

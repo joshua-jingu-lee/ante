@@ -20,7 +20,7 @@ from ante.cli._validators import (
     validate_positive_finite_amount,
 )
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
@@ -117,7 +117,7 @@ async def _create_treasury_manager(
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")
-def status(ctx: click.Context, account_id: str) -> None:
+def status(ctx: click.Context, account_id: str) -> CommandResult:
     """자금 현황 요약."""
     fmt = get_formatter(ctx)
 
@@ -129,17 +129,19 @@ def status(ctx: click.Context, account_id: str) -> None:
 
     result = _run(_run_status())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  계좌 잔고      : {result['account_balance']:>15,.0f}")
-        click.echo(f"  매수 가능      : {result['purchasable_amount']:>15,.0f}")
-        click.echo(f"  총 평가액      : {result['total_evaluation']:>15,.0f}")
-        click.echo(f"  총 손익        : {result['total_profit_loss']:>15,.0f}")
-        click.echo(f"  총 할당        : {result['total_allocated']:>15,.0f}")
-        click.echo(f"  총 예약        : {result['total_reserved']:>15,.0f}")
-        click.echo(f"  미할당         : {result['unallocated']:>15,.0f}")
-        click.echo(f"  봇 수          : {result['bot_count']:>15d}")
+    return CommandResult(
+        data=result,
+        text=(
+            f"  계좌 잔고      : {result['account_balance']:>15,.0f}",
+            f"  매수 가능      : {result['purchasable_amount']:>15,.0f}",
+            f"  총 평가액      : {result['total_evaluation']:>15,.0f}",
+            f"  총 손익        : {result['total_profit_loss']:>15,.0f}",
+            f"  총 할당        : {result['total_allocated']:>15,.0f}",
+            f"  총 예약        : {result['total_reserved']:>15,.0f}",
+            f"  미할당         : {result['unallocated']:>15,.0f}",
+            f"  봇 수          : {result['bot_count']:>15d}",
+        ),
+    )
 
 
 @treasury.command("transactions")
@@ -171,7 +173,7 @@ def transactions(
     to_date: str | None,
     limit: int,
     offset: int,
-) -> None:
+) -> CommandResult:
     """자금 변동 이력 조회."""
     fmt = get_formatter(ctx)
     if account_id is not None:
@@ -229,13 +231,8 @@ def transactions(
             return {"items": items, "total": int(count_row["cnt"]) if count_row else 0}
 
     result = _run(_run_transactions())
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.table(
-            result["items"],
-            ["created_at", "account_id", "type", "bot_id", "amount"],
-        )
+    columns = ["created_at", "account_id", "type", "bot_id", "amount"]
+    return CommandResult(data=result, text=tuple(table_lines(result["items"], columns)))
 
 
 @treasury.command("budgets")
@@ -244,7 +241,7 @@ def transactions(
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")
-def budgets(ctx: click.Context, account_id: str | None) -> None:
+def budgets(ctx: click.Context, account_id: str | None) -> CommandResult:
     """봇별 예산 목록 조회."""
     fmt = get_formatter(ctx)
     if account_id is not None:
@@ -271,13 +268,10 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
 
     result = _run(_run_budgets())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.table(
-            result["budgets"],
-            ["account_id", "bot_id", "allocated", "available", "reserved"],
-        )
+    columns = ["account_id", "bot_id", "allocated", "available", "reserved"]
+    return CommandResult(
+        data=result, text=tuple(table_lines(result["budgets"], columns))
+    )
 
 
 @treasury.command("set-balance")
@@ -287,7 +281,7 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("treasury:admin")
-def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
+def set_balance(ctx: click.Context, amount: float, account_id: str) -> CommandResult:
     """계좌 총 잔고 수동 설정."""
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
@@ -315,10 +309,9 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
 
     result = _run(_run_set_balance())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"계좌 잔고 설정 완료: {account_id} {amount:,.0f}")
+    return CommandResult(
+        data=result, text=(f"계좌 잔고 설정 완료: {account_id} {amount:,.0f}",)
+    )
 
 
 @treasury.command()
@@ -432,7 +425,7 @@ def snapshot(
     from_date: str | None,
     to_date: str | None,
     account_id: str,
-) -> None:
+) -> CommandResult:
     """일별 자산 스냅샷 조회."""
     from datetime import UTC, datetime
 
@@ -471,14 +464,9 @@ def snapshot(
         target = date_str or datetime.now(UTC).strftime("%Y-%m-%d")
         raise SnapshotNotFoundError(f"{target} 날짜의 스냅샷이 없습니다.")
 
-    if fmt.is_json:
-        fmt.output(result)
-        return
-
     if isinstance(result, list):
-        _print_snapshot_list(result)
-    else:
-        _print_snapshot(result)
+        return CommandResult(data=result, text=tuple(_snapshot_list_lines(result)))
+    return CommandResult(data=result, text=tuple(_snapshot_lines(result)))
 
 
 @treasury.group("portfolio")
@@ -518,7 +506,7 @@ def _portfolio_value_from_snapshot_or_summary(treasury_obj: Treasury) -> dict[st
 @click.pass_context
 @require_auth
 @require_scope("treasury:read")
-def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
+def portfolio_value(ctx: click.Context, account_id: str | None) -> CommandResult:
     """총 자산 가치 조회."""
     fmt = get_formatter(ctx)
     if account_id is not None:
@@ -576,13 +564,15 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
 
     result = _run(_run_value())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  총 자산        : {result['total_value']:>15,.0f}")
-        click.echo(f"  당일 손익      : {result['daily_pnl']:>15,.0f}")
-        click.echo(f"  수익률         : {result['daily_return']:>15.4f}")
-        click.echo(f"  미실현 손익    : {result['unrealized_pnl']:>15,.0f}")
+    return CommandResult(
+        data=result,
+        text=(
+            f"  총 자산        : {result['total_value']:>15,.0f}",
+            f"  당일 손익      : {result['daily_pnl']:>15,.0f}",
+            f"  수익률         : {result['daily_return']:>15.4f}",
+            f"  미실현 손익    : {result['unrealized_pnl']:>15,.0f}",
+        ),
+    )
 
 
 @portfolio.command("history")
@@ -598,7 +588,7 @@ def portfolio_history(
     account_id: str | None,
     from_date: str | None,
     to_date: str | None,
-) -> None:
+) -> CommandResult:
     """기간별 자산 추이 조회."""
     fmt = get_formatter(ctx)
     if account_id is not None:
@@ -652,51 +642,47 @@ def portfolio_history(
 
     result = _run(_run_history())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.table(result["data"], ["date", "total_asset", "daily_pnl", "daily_return"])
+    columns = ["date", "total_asset", "daily_pnl", "daily_return"]
+    return CommandResult(data=result, text=tuple(table_lines(result["data"], columns)))
 
 
-def _print_snapshot(s: dict[str, Any]) -> None:
-    """단일 스냅샷을 텍스트로 출력."""
+def _snapshot_lines(s: dict[str, Any]) -> list[str]:
+    """단일 스냅샷의 텍스트 줄."""
     daily_pnl = s.get("daily_pnl", 0.0)
     daily_return = s.get("daily_return", 0.0)
     sign = "+" if daily_pnl >= 0 else ""
-
-    click.echo(f"일별 자산 스냅샷 ({s['snapshot_date']})")
-    click.echo(f"  총 자산:      {s['total_asset']:>15,.0f}원")
     purchase = s["ante_purchase_amount"]
-    click.echo(
-        f"  Ante 관리:    {s['ante_eval_amount']:>15,.0f}원 (매입: {purchase:,.0f}원)"
-    )
-    click.echo(f"  미할당:       {s['unallocated']:>15,.0f}원")
-    click.echo(
-        f"  당일 손익:    {sign}{daily_pnl:>14,.0f}원 ({sign}{daily_return:.2f}%)"
-    )
-    click.echo(f"  미실현 손익:  {s.get('unrealized_pnl', 0.0):>+15,.0f}원")
-    click.echo(f"  보유 종목:    {s.get('bot_count', 0)}개 봇")
+    return [
+        f"일별 자산 스냅샷 ({s['snapshot_date']})",
+        f"  총 자산:      {s['total_asset']:>15,.0f}원",
+        f"  Ante 관리:    {s['ante_eval_amount']:>15,.0f}원 (매입: {purchase:,.0f}원)",
+        f"  미할당:       {s['unallocated']:>15,.0f}원",
+        f"  당일 손익:    {sign}{daily_pnl:>14,.0f}원 ({sign}{daily_return:.2f}%)",
+        f"  미실현 손익:  {s.get('unrealized_pnl', 0.0):>+15,.0f}원",
+        f"  보유 종목:    {s.get('bot_count', 0)}개 봇",
+    ]
 
 
-def _print_snapshot_list(snapshots: list[dict[str, Any]]) -> None:
-    """스냅샷 목록을 테이블로 출력."""
+def _snapshot_list_lines(snapshots: list[dict[str, Any]]) -> list[str]:
+    """스냅샷 목록의 표 줄."""
     if not snapshots:
-        click.echo("(스냅샷 없음)")
-        return
+        return ["(스냅샷 없음)"]
 
     first = snapshots[0]["snapshot_date"]
     last = snapshots[-1]["snapshot_date"]
-    click.echo(f"일별 자산 스냅샷 ({first} ~ {last})")
-    header = f"  {'날짜':>12} {'총 자산':>15} {'당일 손익':>15} {'수익률':>10}"
-    click.echo(header)
-    click.echo("  " + "-" * 56)
+    lines = [
+        f"일별 자산 스냅샷 ({first} ~ {last})",
+        f"  {'날짜':>12} {'총 자산':>15} {'당일 손익':>15} {'수익률':>10}",
+        "  " + "-" * 56,
+    ]
     for s in snapshots:
         pnl = s.get("daily_pnl", 0.0)
         ret = s.get("daily_return", 0.0)
         sign = "+" if pnl >= 0 else ""
-        click.echo(
+        lines.append(
             f"  {s['snapshot_date']:>12}"
             f" {s['total_asset']:>15,.0f}"
             f" {sign}{pnl:>14,.0f}"
             f" {sign}{ret:>9.2f}%"
         )
+    return lines

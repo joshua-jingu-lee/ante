@@ -451,7 +451,7 @@ def test_treasury_snapshot_range_is_not_a_missing_snapshot() -> None:
         _snapshot_treasury(get_snapshots=AsyncMock(return_value=[])),
     )
     assert result.exit_code == 0, (result.stdout, result.stderr)
-    assert json.loads(result.stdout) == []
+    assert json.loads(result.stdout)["data"] == {"snapshots": []}
 
 
 # ---------------------------------------------------------------- strategy

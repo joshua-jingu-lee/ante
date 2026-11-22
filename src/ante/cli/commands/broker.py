@@ -10,6 +10,7 @@ import click
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
+from ante.cli.formatter import CommandResult, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.ipc_client_errors import IPCServerNotRunningError
@@ -104,7 +105,7 @@ async def _ipc_broker_command(
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def status(ctx: click.Context, account_id: str) -> None:
+def status(ctx: click.Context, account_id: str) -> CommandResult:
     """증권사 연결 상태 조회."""
     from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
@@ -147,17 +148,15 @@ def status(ctx: click.Context, account_id: str) -> None:
 
         result = _run(_run_status())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(
-            f"  연결 상태  : {'연결됨' if result.get('connected') else '미연결'}"
-        )
-        click.echo(f"  건강 상태  : {'정상' if result.get('healthy') else '이상'}")
-        if result.get("exchange"):
-            click.echo(f"  거래소     : {result['exchange']}")
-        if result.get("error"):
-            click.echo(f"  오류       : {result['error']}")
+    lines = [
+        f"  연결 상태  : {'연결됨' if result.get('connected') else '미연결'}",
+        f"  건강 상태  : {'정상' if result.get('healthy') else '이상'}",
+    ]
+    if result.get("exchange"):
+        lines.append(f"  거래소     : {result['exchange']}")
+    if result.get("error"):
+        lines.append(f"  오류       : {result['error']}")
+    return CommandResult(data=result, text=tuple(lines))
 
 
 @broker.command()
@@ -165,7 +164,7 @@ def status(ctx: click.Context, account_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def balance(ctx: click.Context, account_id: str) -> None:
+def balance(ctx: click.Context, account_id: str) -> CommandResult:
     """증권사 계좌 잔고 조회."""
     from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
@@ -194,14 +193,13 @@ def balance(ctx: click.Context, account_id: str) -> None:
 
         result = _run(_run_balance())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        for key, value in result.items():
-            if isinstance(value, float):
-                click.echo(f"  {key:20s}: {value:>15,.0f}")
-            else:
-                click.echo(f"  {key:20s}: {value}")
+    lines = [
+        f"  {key:20s}: {value:>15,.0f}"
+        if isinstance(value, float)
+        else f"  {key:20s}: {value}"
+        for key, value in result.items()
+    ]
+    return CommandResult(data=result, text=tuple(lines))
 
 
 @broker.command()
@@ -209,7 +207,7 @@ def balance(ctx: click.Context, account_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def positions(ctx: click.Context, account_id: str) -> None:
+def positions(ctx: click.Context, account_id: str) -> CommandResult:
     """증권사 보유 종목 조회."""
     from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
@@ -241,14 +239,13 @@ def positions(ctx: click.Context, account_id: str) -> None:
     pos_list = result.get("positions", [])
 
     if not pos_list:
-        fmt.output({"message": "보유 종목 없음", "positions": []})
-        return
+        empty: dict[str, Any] = {"message": "보유 종목 없음", "positions": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"positions": pos_list})
-    else:
-        columns = ["symbol", "quantity", "avg_price", "eval_amount"]
-        fmt.table(pos_list, columns)
+    columns = ["symbol", "quantity", "avg_price", "eval_amount"]
+    return CommandResult(
+        data={"positions": pos_list}, text=tuple(table_lines(pos_list, columns))
+    )
 
 
 @broker.command("order-history")
@@ -275,7 +272,7 @@ def order_history(
     account_id: str,
     from_date: str | None,
     to_date: str | None,
-) -> None:
+) -> CommandResult:
     """증권사 주문/체결 이력 조회 (read-only).
 
     출력은 BrokerAdapter 가 정규화한 8키다: ``order_id`` / ``symbol`` /
@@ -353,32 +350,25 @@ def order_history(
 
     orders = result.get("orders", [])
 
-    if fmt.is_json:
-        fmt.output(result)
-        return
-
     if not orders:
-        click.echo("  주문/체결 이력 없음")
-        return
+        return CommandResult(data=result, text=("  주문/체결 이력 없음",))
 
-    click.echo(
+    columns = [
+        "order_id",
+        "symbol",
+        "side",
+        "quantity",
+        "filled_quantity",
+        "price",
+        "status",
+        "timestamp",
+    ]
+    notice = (
         "  ※ status 는 체결수량 기준 2값(filled/pending)이라 "
         "취소 주문도 pending 으로 보입니다. price 는 체결가/주문가 혼합, "
         "timestamp 는 영업일(일자)까지입니다."
     )
-    fmt.table(
-        orders,
-        [
-            "order_id",
-            "symbol",
-            "side",
-            "quantity",
-            "filled_quantity",
-            "price",
-            "status",
-            "timestamp",
-        ],
-    )
+    return CommandResult(data=result, text=(notice, *table_lines(orders, columns)))
 
 
 @broker.command()
@@ -389,7 +379,7 @@ def order_history(
 @click.pass_context
 @require_auth
 @require_scope("broker:read")
-def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
+def reconcile(ctx: click.Context, account_id: str, fix: bool) -> CommandResult:
     """내부 데이터와 증권사 데이터 대사."""
     from ante.cli._validators import reject_invalid_account_id
     from ante.cli.middleware import get_member_id
@@ -486,16 +476,18 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
 
             result = _run(_run_reconcile())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  총 종목 수     : {result.get('total_symbols', 0)}")
-        click.echo(f"  대사 결과      : {'일치' if result.get('match') else '불일치'}")
-        if result.get("discrepancies"):
-            click.echo("  불일치 종목:")
-            fmt.table(
+    lines = [
+        f"  총 종목 수     : {result.get('total_symbols', 0)}",
+        f"  대사 결과      : {'일치' if result.get('match') else '불일치'}",
+    ]
+    if result.get("discrepancies"):
+        lines.append("  불일치 종목:")
+        lines.extend(
+            table_lines(
                 result["discrepancies"],
                 ["symbol", "broker_qty", "internal_qty", "diff"],
             )
-        if result.get("fix_applied"):
-            click.echo(f"  자동 보정      : {result.get('corrections', 0)}건 수행")
+        )
+    if result.get("fix_applied"):
+        lines.append(f"  자동 보정      : {result.get('corrections', 0)}건 수행")
+    return CommandResult(data=result, text=tuple(lines))

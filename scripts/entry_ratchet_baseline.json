@@ -28,11 +28,6 @@
     "audit list",
     "backtest history",
     "backtest run",
-    "broker balance",
-    "broker order-history",
-    "broker positions",
-    "broker reconcile",
-    "broker status",
     "config get",
     "config history",
     "config set",
@@ -62,19 +57,11 @@
     "strategy summary",
     "system status",
     "trade info",
-    "trade list",
-    "treasury budgets",
-    "treasury portfolio history",
-    "treasury portfolio value",
-    "treasury set-balance",
-    "treasury snapshot",
-    "treasury status",
-    "treasury transactions"
+    "trade list"
   ],
   "cli_direct_output": {
     "src/ante/cli/commands/audit.py": 4,
     "src/ante/cli/commands/backtest.py": 7,
-    "src/ante/cli/commands/broker.py": 26,
     "src/ante/cli/commands/config.py": 17,
     "src/ante/cli/commands/data.py": 23,
     "src/ante/cli/commands/feed.py": 60,
@@ -86,7 +73,6 @@
     "src/ante/cli/commands/strategy.py": 68,
     "src/ante/cli/commands/system.py": 9,
     "src/ante/cli/commands/trade.py": 7,
-    "src/ante/cli/commands/treasury.py": 42,
     "src/ante/cli/commands/update.py": 35
   }
 }

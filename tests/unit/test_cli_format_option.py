@@ -325,7 +325,7 @@ class TestTreasuryStatusFormatOption:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["account_balance"] == 1000000
             assert data["bot_count"] == 2
 
