@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ante.account.scoping import require_account_id
-from ante.bot.bot import Bot
+from ante.bot.bot import Bot, _transition_status
 from ante.bot.config import (
     BotConfig,
     BotStatus,
@@ -695,7 +695,7 @@ class BotManager:
                     f"{released:,.0f}",
                 )
 
-        bot.status = BotStatus.DELETED
+        deleted = _transition_status(bot, BotStatus.DELETED)
         del self._bots[bot_id]
         if hard:
             await self._db.execute(
@@ -705,9 +705,9 @@ class BotManager:
             logger.info("봇 삭제 (hard delete): %s", bot_id)
         else:
             await self._db.execute(
-                "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
+                "UPDATE bots SET status = ?, updated_at = datetime('now')"
                 " WHERE bot_id = ?",
-                (bot_id,),
+                (deleted.value, bot_id),
             )
             logger.info("봇 삭제 (soft delete): %s", bot_id)
 

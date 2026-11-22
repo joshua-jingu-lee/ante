@@ -21,6 +21,9 @@
 
 기대값은 모두 리터럴(상태 문자열, 예외 종류와 전체 메시지, 이벤트 이름과
 건수)이다.
+
+뒤쪽은 전이표가 리터럴로 적은 24쌍과 같은지, 전이 함수가 6×6=36쌍 전부에서
+표대로 바꾸거나 거부하는지 본다.
 """
 
 from __future__ import annotations
@@ -34,8 +37,9 @@ import polars as pl
 import pytest
 
 from ante.bot import BotConfig, BotManager
-from ante.bot.bot import Bot
+from ante.bot.bot import Bot, _transition_status
 from ante.bot.cold_path import cold_path_remove_bot
+from ante.bot.config import BOT_STATUS_TRANSITIONS, BotStatus
 from ante.bot.exceptions import BotError, BotNotFoundError, BotStateConflict
 from ante.bot.manager import BOT_SCHEMA
 from ante.core import Database
@@ -620,3 +624,70 @@ async def test_cold_path_remove_rejects_deleted_row(db, tmp_path):
         await cold_path_remove_bot(db, BOT_ID, strategies_dir=tmp_path / "s")
 
     assert await _db_status(db) == "deleted"
+
+
+# ── 전이표와 전이 함수 ────────────────────────────────────────────
+
+BOT_STATUSES = ("created", "running", "stopping", "stopped", "error", "deleted")
+
+BOT_ALLOWED_PAIRS = {
+    ("created", "running"),
+    ("created", "deleted"),
+    ("running", "running"),
+    ("running", "stopping"),
+    ("running", "stopped"),
+    ("running", "error"),
+    ("running", "deleted"),
+    ("stopping", "running"),
+    ("stopping", "stopped"),
+    ("stopping", "error"),
+    ("stopping", "deleted"),
+    ("stopped", "running"),
+    ("stopped", "stopped"),
+    ("stopped", "error"),
+    ("stopped", "deleted"),
+    ("error", "running"),
+    ("error", "stopping"),
+    ("error", "stopped"),
+    ("error", "error"),
+    ("error", "deleted"),
+    ("deleted", "running"),
+    ("deleted", "stopped"),
+    ("deleted", "error"),
+    ("deleted", "deleted"),
+}
+
+BOT_ALL_PAIRS = [(c, t) for c in BOT_STATUSES for t in BOT_STATUSES]
+
+
+def test_bot_transition_table_equals_the_24_literal_pairs():
+    assert sorted(str(k) for k in BOT_STATUS_TRANSITIONS) == sorted(BOT_STATUSES)
+    assert all(type(v) is set for v in BOT_STATUS_TRANSITIONS.values())
+    pairs = {
+        (str(current), str(target))
+        for current, targets in BOT_STATUS_TRANSITIONS.items()
+        for target in targets
+    }
+    assert pairs == BOT_ALLOWED_PAIRS
+    assert len(BOT_ALLOWED_PAIRS) == 24
+    assert len(BOT_ALL_PAIRS) == 36
+
+
+@pytest.mark.parametrize(("current", "target"), BOT_ALL_PAIRS)
+def test_bot_transition_status_over_all_36_pairs(eventbus, ctx, current, target):
+    bot = _bot(eventbus, ctx, _Steady)
+    bot.status = BotStatus(current)
+    if (current, target) in BOT_ALLOWED_PAIRS:
+        returned = _transition_status(bot, BotStatus(target))
+        assert returned == target
+        assert type(returned) is BotStatus
+        assert bot.status == target
+        return
+    with pytest.raises(Exception) as exc_info:
+        _transition_status(bot, BotStatus(target))
+    assert type(exc_info.value) is BotStateConflict
+    assert str(exc_info.value) == (
+        f"봇 상태를 바꿀 수 없습니다: bot-2699 ({current} → {target})"
+    )
+    assert exc_info.value.code == "BOT_STATE_CONFLICT"
+    assert bot.status == current

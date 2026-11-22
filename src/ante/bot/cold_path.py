@@ -108,9 +108,8 @@ async def cold_path_remove_bot(
     )
 
     await db.execute(
-        "UPDATE bots SET status = 'deleted', updated_at = datetime('now')"
-        " WHERE bot_id = ?",
-        (bot_id,),
+        "UPDATE bots SET status = ?, updated_at = datetime('now') WHERE bot_id = ?",
+        (BotStatus.DELETED.value, bot_id),
     )
     logger.info(
         "cold-path 봇 삭제: %s (previous_status=%s, budget_released=%s)",

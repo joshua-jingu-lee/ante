@@ -19,6 +19,42 @@ class BotStatus(StrEnum):
     DELETED = "deleted"
 
 
+BOT_STATUS_TRANSITIONS: dict[BotStatus, set[BotStatus]] = {
+    BotStatus.CREATED: {BotStatus.RUNNING, BotStatus.DELETED},
+    BotStatus.RUNNING: {
+        BotStatus.RUNNING,
+        BotStatus.STOPPING,
+        BotStatus.STOPPED,
+        BotStatus.ERROR,
+        BotStatus.DELETED,
+    },
+    BotStatus.STOPPING: {
+        BotStatus.RUNNING,
+        BotStatus.STOPPED,
+        BotStatus.ERROR,
+        BotStatus.DELETED,
+    },
+    BotStatus.STOPPED: {
+        BotStatus.RUNNING,
+        BotStatus.STOPPED,
+        BotStatus.ERROR,
+        BotStatus.DELETED,
+    },
+    BotStatus.ERROR: {
+        BotStatus.RUNNING,
+        BotStatus.STOPPING,
+        BotStatus.STOPPED,
+        BotStatus.ERROR,
+        BotStatus.DELETED,
+    },
+    BotStatus.DELETED: {
+        BotStatus.RUNNING,
+        BotStatus.STOPPED,
+        BotStatus.ERROR,
+        BotStatus.DELETED,
+    },
+}
+
 MIN_INTERVAL_SECONDS = 10
 MAX_INTERVAL_SECONDS = 3600
 
