@@ -764,7 +764,7 @@ def test_member_secret_input_missing(
 ) -> None:
     result = _invoke(["--format", mode, *args], _send(AssertionError("IPC 금지")))
     message = f"{missing} {env_opt} 또는 {file_opt} 중 하나를 지정하세요."
-    _assert_plain(mode, result, "CLI_MISSING_REQUIRED_INPUT", message)
+    _assert_coded(mode, result, "CLI_MISSING_REQUIRED_INPUT", message)
     _assert_no_secret(result, _RECOVERY)
 
 
@@ -788,7 +788,7 @@ def test_member_secret_input_both(
     message = (
         f"{env_opt}와 {file_opt}는 동시에 지정할 수 없습니다. 둘 중 하나만 사용하세요."
     )
-    _assert_plain(mode, result, "CLI_MISSING_REQUIRED_INPUT", message)
+    _assert_coded(mode, result, "CLI_MISSING_REQUIRED_INPUT", message)
     _assert_no_secret(result, _PASSWORD, _RECOVERY)
 
 
@@ -806,7 +806,7 @@ def test_member_secret_env_not_set(
         "환경변수 FAKE_PW_ENV이(가) 설정되어 있지 않거나 공란입니다. "
         f"{env_opt}는 비밀값이 든 환경변수의 *이름*만 받습니다."
     )
-    _assert_plain(mode, result, "MEMBER_PASSWORD_ENV_NOT_SET", message)
+    _assert_coded(mode, result, "MEMBER_PASSWORD_ENV_NOT_SET", message)
     _assert_no_secret(result, _RECOVERY)
 
 
@@ -829,7 +829,7 @@ def test_member_secret_file_unreadable(
         f"{file_opt} 파일을 읽을 수 없습니다: {absent} "
         f"([Errno 2] No such file or directory: '{absent}')"
     )
-    _assert_plain(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
+    _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
     _assert_no_secret(result, _RECOVERY)
 
 
@@ -850,7 +850,7 @@ def test_member_secret_file_empty(
         _send(AssertionError("IPC 금지")),
     )
     message = f"{file_opt} 파일이 비어 있습니다: {empty}"
-    _assert_plain(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
+    _assert_coded(mode, result, "MEMBER_PASSWORD_FILE_NOT_FOUND", message)
     _assert_no_secret(result, _RECOVERY)
 
 
@@ -933,7 +933,7 @@ def test_member_secret_cold_path_error(
         _service_cm(_MEMBER_CM, service),
         env={"FAKE_PW_ENV": _PASSWORD},
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
     _assert_no_secret(result, _PASSWORD, _RECOVERY)
 
 
@@ -945,15 +945,21 @@ _IPC_ERRORS = [
         IPCServerNotRunningError(_SERVER_DOWN),
         "IPC_SERVER_NOT_RUNNING",
         _SERVER_DOWN,
+        f"Error: {_SERVER_DOWN}",
         id="down",
     ),
     pytest.param(
-        IPCClientTimeoutError(_TIMEOUT), "IPC_TIMEOUT", _TIMEOUT, id="timeout"
+        IPCClientTimeoutError(_TIMEOUT),
+        "IPC_TIMEOUT",
+        _TIMEOUT,
+        f"Error: {_TIMEOUT}",
+        id="timeout",
     ),
     pytest.param(
         IPCRemoteError("MEMBER_NOT_FOUND", "멤버를 찾을 수 없습니다"),
         "MEMBER_NOT_FOUND",
         "멤버를 찾을 수 없습니다",
+        "Error: MEMBER_NOT_FOUND: 멤버를 찾을 수 없습니다",
         id="remote",
     ),
 ]
@@ -990,9 +996,14 @@ _MEMBER_COMMANDS = [
 
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize("args", _MEMBER_COMMANDS)
-@pytest.mark.parametrize(("error", "code", "message"), _IPC_ERRORS)
+@pytest.mark.parametrize(("error", "code", "message", "line"), _IPC_ERRORS)
 def test_member_ipc_error(
-    mode: str, args: list[str], error: BaseException, code: str, message: str
+    mode: str,
+    args: list[str],
+    error: BaseException,
+    code: str,
+    message: str,
+    line: str,
 ) -> None:
     service = MagicMock()
     result = _invoke(
@@ -1002,7 +1013,7 @@ def test_member_ipc_error(
         _service_cm(_MEMBER_CM, service),
         env={"FAKE_PW_ENV": _PASSWORD},
     )
-    _assert_plain(mode, result, code, message)
+    _assert_exit(mode, result, code, message, line)
     _assert_no_secret(result, _PASSWORD, _RECOVERY)
     assert service.mock_calls == []
 
@@ -1202,7 +1213,7 @@ def test_member_cold_path_error(
         _send(AssertionError("IPC 금지")),
         _service_cm(_MEMBER_CM, service),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -1213,7 +1224,7 @@ def test_member_info_not_found(mode: str) -> None:
         ["--format", mode, "member", "info", _MEMBER],
         _service_cm(_MEMBER_CM, service),
     )
-    _assert_exit(mode, result, "MEMBER_NOT_FOUND", _NOT_FOUND, f"Error: {_NOT_FOUND}")
+    _assert_coded(mode, result, "MEMBER_NOT_FOUND", _NOT_FOUND)
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -1227,4 +1238,4 @@ def test_member_revoke_requires_confirmation(mode: str) -> None:
         "위험 명령입니다. --yes를 명시해야 멤버를 폐기합니다."
         " 이 작업은 되돌릴 수 없습니다."
     )
-    _assert_plain(mode, result, "CLI_CONFIRMATION_REQUIRED", message)
+    _assert_coded(mode, result, "CLI_CONFIRMATION_REQUIRED", message)
