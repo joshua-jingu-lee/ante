@@ -253,13 +253,6 @@
     "src/ante/cli/middleware.py": {
       "no-any-return": 1,
       "type-arg": 6
-    },
-    "src/ante/ipc/registry.py": {
-      "no-any-return": 1,
-      "type-arg": 22
-    },
-    "src/ante/ipc/server.py": {
-      "type-arg": 11
     }
   }
 }
