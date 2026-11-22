@@ -73,6 +73,31 @@ def register_all_handlers(registry):
 """
 
 
+CLI_REGISTRY = "src/ante/contracts/cli_registry.py"
+
+
+def _contract(path: str, output: str) -> str:
+    segments = ", ".join(f'"{segment}"' for segment in path.split())
+    return (
+        "    CliCommandContract(\n"
+        f"        path=({segments},),\n"
+        '        auth=AuthContract(mode="none"),\n'
+        f"        output={output},\n"
+        '        execution="offline",\n'
+        "    ),\n"
+    )
+
+
+def _contracts(*entries: str) -> str:
+    return "CONTRACTS = (\n" + "".join(entries) + ")\n"
+
+
+STANDARD_CONTRACT = _contract(
+    "base cmd", 'OutputContract(kind="operation", envelope="standard")'
+)
+CLI_REGISTRY_SOURCE = _contracts(STANDARD_CONTRACT)
+
+
 def _write(root: Path, rel: str, text: str) -> None:
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -83,6 +108,7 @@ def _tree(root: Path, files: dict[str, str] | None = None) -> Path:
     _write(root, MIDDLEWARE, HOOK_SOURCE)
     _write(root, REGISTRY, REGISTRY_SOURCE)
     _write(root, IPC_REGISTRY, IPC_SOURCE)
+    _write(root, CLI_REGISTRY, CLI_REGISTRY_SOURCE)
     for rel, text in (files or {}).items():
         _write(root, rel, text)
     return root
@@ -534,6 +560,8 @@ def _valid_baseline() -> dict[str, Any]:
         "ipc_handlers_without_model": ["base.cmd"],
         "ipc_args_reads": {},
         "cli_direct_ipc_send": {},
+        "raw_legacy_contracts": [],
+        "cli_direct_output": {},
     }
 
 
@@ -554,9 +582,9 @@ def _without(key: str) -> dict[str, Any]:
     [
         pytest.param("{not json", id="not-json"),
         pytest.param([], id="not-an-object"),
-        pytest.param(_without("cli_exits"), id="six-keys"),
-        pytest.param(_without("ipc_args_reads"), id="six-keys-request"),
-        pytest.param(_with(extra={}), id="eight-keys"),
+        pytest.param(_without("cli_exits"), id="missing-key"),
+        pytest.param(_without("ipc_args_reads"), id="missing-key-request"),
+        pytest.param(_with(extra={}), id="extra-key"),
         pytest.param(_with(cli_exits={"a.py": -1}), id="negative-count"),
         pytest.param(_with(cli_exits={"a.py": 1.5}), id="float-count"),
         pytest.param(_with(cli_exits={"a.py": True}), id="bool-count"),
@@ -574,6 +602,18 @@ def _without(key: str) -> dict[str, Any]:
         ),
         pytest.param(_with(ipc_args_reads={"a.b": -1}), id="reads-negative"),
         pytest.param(_with(cli_direct_ipc_send={"a.py": True}), id="sends-bool"),
+        pytest.param(_without("raw_legacy_contracts"), id="missing-key-output-set"),
+        pytest.param(_without("cli_direct_output"), id="missing-key-output-count"),
+        pytest.param(
+            _with(raw_legacy_contracts=["b c", "a b"]), id="raw-legacy-unsorted"
+        ),
+        pytest.param(
+            _with(raw_legacy_contracts=["a b", "a b"]), id="raw-legacy-duplicate"
+        ),
+        pytest.param(_with(raw_legacy_contracts="a b"), id="raw-legacy-not-a-list"),
+        pytest.param(_with(cli_direct_output={"a.py": -1}), id="output-negative"),
+        pytest.param(_with(cli_direct_output={"a.py": True}), id="output-bool"),
+        pytest.param(_with(cli_direct_output=[]), id="output-not-an-object"),
     ],
 )
 def test_malformed_baseline_exits_2(
@@ -863,6 +903,8 @@ def test_baseline_file_has_exactly_the_contract_keys(tmp_path: Path) -> None:
         "ipc_handlers_without_model",
         "ipc_args_reads",
         "cli_direct_ipc_send",
+        "raw_legacy_contracts",
+        "cli_direct_output",
     }
 
 
@@ -1247,7 +1289,8 @@ def test_full_output_when_passing_goes_to_stdout(
     assert out == (
         "entry ratchet ok: cli_error_calls 5, cli_exits 2, ipc_error_code_reads 3, "
         "unregistered_codes 4, ipc_handlers_without_model 1, ipc_args_reads 0, "
-        "cli_direct_ipc_send 0 (baseline scripts/entry_ratchet_baseline.json)\n"
+        "cli_direct_ipc_send 0, raw_legacy_contracts 0, cli_direct_output 0 "
+        "(baseline scripts/entry_ratchet_baseline.json)\n"
     )
 
 
@@ -1317,9 +1360,10 @@ def test_full_output_for_wrong_baseline_keys(tmp_path: Path, capsys: Capsys) -> 
         capsys,
         [
             "scripts/entry_ratchet_baseline.json must have exactly the keys "
-            "['cli_direct_ipc_send', 'cli_error_calls', 'cli_exits', "
-            "'ipc_args_reads', 'ipc_error_code_reads', "
-            "'ipc_handlers_without_model', 'unregistered_codes'] "
+            "['cli_direct_ipc_send', 'cli_direct_output', 'cli_error_calls', "
+            "'cli_exits', 'ipc_args_reads', 'ipc_error_code_reads', "
+            "'ipc_handlers_without_model', 'raw_legacy_contracts', "
+            "'unregistered_codes'] "
             "(missing ['cli_exits'], extra [])"
         ],
         code=2,
@@ -1764,17 +1808,25 @@ def test_script_exits_2_when_a_handler_is_a_lambda(tmp_path: Path) -> None:
     assert result.returncode == 2, result.stdout + result.stderr
 
 
+RAW_LEGACY_CEILING = 68
+DIRECT_OUTPUT_CEILING = 0
+
+
 @pytest.mark.parametrize("source", ["measure", "baseline"])
-def test_repository_request_keys_reach_the_end_state(source: str) -> None:
+def test_repository_request_and_output_keys_toward_the_end_state(source: str) -> None:
     read = checker.measure if source == "measure" else checker.read_baseline
     measurement = read(REPO_ROOT)
     assert measurement.ipc_handlers_without_model == frozenset()
     assert measurement.ipc_args_reads == {}
     if source == "measure":
-        baseline = checker.read_baseline(REPO_ROOT).cli_direct_ipc_send
-        assert measurement.cli_direct_ipc_send == baseline
+        baseline = checker.read_baseline(REPO_ROOT)
+        assert measurement.cli_direct_ipc_send == baseline.cli_direct_ipc_send
+        assert measurement.raw_legacy_contracts == baseline.raw_legacy_contracts
+        assert measurement.cli_direct_output == baseline.cli_direct_output
     else:
         assert sum(measurement.cli_direct_ipc_send.values()) <= 39
+        assert len(measurement.raw_legacy_contracts) <= RAW_LEGACY_CEILING
+        assert sum(measurement.cli_direct_output.values()) <= DIRECT_OUTPUT_CEILING
 
 
 def test_an_empty_registry_is_an_error_not_an_empty_key(tmp_path: Path) -> None:
@@ -1786,3 +1838,397 @@ def test_an_empty_registry_is_an_error_not_an_empty_key(tmp_path: Path) -> None:
         "no register(<command>, <handler>, ...) call in "
         "register_all_handlers of src/ante/ipc/registry.py"
     )
+
+
+# ── 축 2: 출력 키 ──────────────────────────────────────────────────────────
+
+RAW_LEGACY_CONTRACT = _contract(
+    "demo list", 'OutputContract(kind="raw", envelope="raw_legacy")'
+)
+OUTPUT_REGISTRY = _contracts(STANDARD_CONTRACT, RAW_LEGACY_CONTRACT)
+
+
+def _raw_legacy(tmp_path: Path, *entries: str) -> frozenset[str]:
+    root = _tree(tmp_path, {CLI_REGISTRY: _contracts(*entries)})
+    found: frozenset[str] = checker.measure(root).raw_legacy_contracts
+    return found
+
+
+@pytest.mark.parametrize(
+    ("output", "expected"),
+    [
+        pytest.param(
+            'OutputContract(kind="raw", envelope="raw_legacy")',
+            frozenset({"demo list"}),
+            id="raw-legacy",
+        ),
+        pytest.param(
+            'OutputContract(kind="operation", envelope="standard")',
+            frozenset(),
+            id="standard",
+        ),
+        pytest.param('OutputContract(kind="operation")', frozenset(), id="default"),
+        pytest.param(
+            'OutputContract(kind="stream", envelope="stream")',
+            frozenset(),
+            id="other-literal",
+        ),
+        pytest.param(
+            'vocab.OutputContract(kind="raw", envelope="raw_legacy")',
+            frozenset({"demo list"}),
+            id="attribute-name",
+        ),
+    ],
+)
+def test_raw_legacy_contracts_definition(
+    tmp_path: Path, output: str, expected: frozenset[str]
+) -> None:
+    assert _raw_legacy(tmp_path, _contract("demo list", output)) == expected
+
+
+def test_raw_legacy_path_is_the_segments_joined_by_spaces(tmp_path: Path) -> None:
+    entry = _contract(
+        "demo sub leaf", 'OutputContract(kind="raw", envelope="raw_legacy")'
+    )
+    assert _raw_legacy(tmp_path, entry) == {"demo sub leaf"}
+
+
+def test_raw_legacy_contracts_come_from_every_contract_call(tmp_path: Path) -> None:
+    nested = (
+        "\n\ndef build():\n"
+        "    return CliCommandContract(\n"
+        '        path=("demo", "nested"),\n'
+        '        auth=AuthContract(mode="none"),\n'
+        '        output=OutputContract(kind="raw", envelope="raw_legacy"),\n'
+        '        execution="offline",\n'
+        "    )\n"
+    )
+    root = _tree(tmp_path, {CLI_REGISTRY: OUTPUT_REGISTRY + nested})
+    found = checker.measure(root).raw_legacy_contracts
+    assert found == {"demo list", "demo nested"}
+
+
+def test_raw_legacy_contracts_only_read_the_cli_registry(tmp_path: Path) -> None:
+    root = _tree(tmp_path, {CORE: _contracts(RAW_LEGACY_CONTRACT)})
+    assert checker.measure(root).raw_legacy_contracts == frozenset()
+
+
+def _output_tree(root: Path) -> Path:
+    return _tree(root, {CLI_REGISTRY: OUTPUT_REGISTRY})
+
+
+def test_raw_legacy_contracts_equal_to_baseline_pass(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _output_tree(tmp_path)
+    assert _freeze(root)["raw_legacy_contracts"] == ["demo list"]
+    code, out = _run(root, capsys)
+    assert code == 0, out
+    assert "raw_legacy_contracts 1" in out
+
+
+def test_full_output_for_added_raw_legacy_contract(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _output_tree(tmp_path)
+    _freeze(root)
+    added = _contract("demo info", 'OutputContract(kind="raw", envelope="raw_legacy")')
+    _write(
+        root, CLI_REGISTRY, _contracts(STANDARD_CONTRACT, RAW_LEGACY_CONTRACT, added)
+    )
+    _assert_failure(root, capsys, [HEADER, "raw_legacy_contracts\t+ demo info"])
+
+
+def test_full_output_for_standard_contract_turned_raw_legacy(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _output_tree(tmp_path)
+    _freeze(root)
+    _write(
+        root,
+        CLI_REGISTRY,
+        OUTPUT_REGISTRY.replace('envelope="standard"', 'envelope="raw_legacy"'),
+    )
+    _assert_failure(root, capsys, [HEADER, "raw_legacy_contracts\t+ base cmd"])
+
+
+def test_full_output_for_contract_moved_to_standard(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _output_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_REGISTRY, CLI_REGISTRY_SOURCE)
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "raw_legacy_contracts\t- demo list",
+            LOWER_LINE,
+            "  - raw_legacy_contracts에서 'demo list'를 지운다",
+        ],
+    )
+
+
+def test_full_output_for_swapped_raw_legacy_contract(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _output_tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_REGISTRY, OUTPUT_REGISTRY.replace('"list"', '"show"'))
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            "raw_legacy_contracts\t+ demo show",
+            "raw_legacy_contracts\t- demo list",
+            LOWER_LINE,
+            "  - raw_legacy_contracts에서 'demo list'를 지운다",
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("registry", "message"),
+    [
+        pytest.param(
+            _contracts(
+                _contract("demo list", 'OutputContract(kind="raw", envelope=FORM)')
+            ),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): envelope is not a string literal",
+            id="envelope-name",
+        ),
+        pytest.param(
+            _contracts(
+                _contract(
+                    "demo list",
+                    'OutputContract(kind="raw", envelope="raw_" + "legacy")',
+                )
+            ),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): envelope is not a string literal",
+            id="envelope-expression",
+        ),
+        pytest.param(
+            _contracts(_contract("demo list", "RAW_OUTPUT")),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): output is not an OutputContract(...) call",
+            id="output-name",
+        ),
+        pytest.param(
+            _contracts(STANDARD_CONTRACT.replace('path=("base", "cmd",)', "path=P")),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract: "
+            "path is not a tuple of string literals",
+            id="path-name",
+        ),
+        pytest.param(
+            "X = 1\n",
+            "no CliCommandContract(...) found in src/ante/contracts/cli_registry.py",
+            id="no-contract",
+        ),
+    ],
+)
+def test_cli_registry_failures_exit_2(
+    tmp_path: Path, capsys: Capsys, registry: str, message: str
+) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    _write(root, CLI_REGISTRY, registry)
+    _assert_failure(root, capsys, [message], code=2)
+
+
+def test_missing_cli_registry_exits_2(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path)
+    _freeze(root)
+    (root / CLI_REGISTRY).unlink()
+    _assert_failure(
+        root,
+        capsys,
+        ["CLI contract registry not found: src/ante/contracts/cli_registry.py"],
+        code=2,
+    )
+
+
+def test_script_exits_2_when_envelope_is_not_a_literal(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "repo")
+    _freeze(root)
+    _write(
+        root,
+        CLI_REGISTRY,
+        _contracts(_contract("demo list", 'OutputContract(kind="raw", envelope=F)')),
+    )
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 2, result.stdout + result.stderr
+
+
+def _direct(tmp_path: Path, source: str, rel: str = COMMAND) -> dict[str, int]:
+    found: dict[str, int] = checker.measure(
+        _tree(tmp_path, {rel: source})
+    ).cli_direct_output
+    return found
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'fmt.output({"k": 1})',
+        'fmt.success("m", {"k": 1})',
+        'fmt.table([], ["a"])',
+        "self._fmt.output({})",
+        'get_fmt().success("m")',
+        'click.echo("m")',
+        'click.echo("m", err=True)',
+        'sys.stdout.write("m")',
+        "x = fmt.is_json",
+        "if ctx.obj.is_json:\n        pass",
+    ],
+)
+def test_each_direct_output_form_counts_once(tmp_path: Path, statement: str) -> None:
+    source = f"import click\nimport sys\n\n\ndef f(fmt, self, ctx):\n    {statement}\n"
+    assert _direct(tmp_path, source) == {COMMAND: 1}
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        'logger.error("m")',
+        'fmt.error("m", code="REG")',
+        'logger.info("m")',
+        "fmt.outputs({})",
+        'fmt.success_message("m")',
+        "x = fmt.output",
+        'echo("m")',
+        'click.secho("m")',
+        'other.echo("m")',
+        'sys.stderr.write("m")',
+        'stdout.write("m")',
+        'print("m")',
+        "x = fmt.is_jsonl",
+        'getattr(fmt, "is_json", False)',
+        'x = "fmt.output(1) click.echo(1) .is_json"',
+        "# fmt.output(1)",
+    ],
+)
+def test_near_miss_direct_output_forms_are_not_counted(
+    tmp_path: Path, statement: str
+) -> None:
+    source = (
+        "import click\nimport sys\nfrom click import echo\n\n\n"
+        f"def f(fmt, logger, other, stdout):\n    {statement}\n"
+    )
+    assert _direct(tmp_path, source) == {}
+
+
+def test_direct_output_sums_the_forms_of_a_file(tmp_path: Path) -> None:
+    source = (
+        "import click\n\n\ndef f(fmt):\n"
+        "    if fmt.is_json:\n"
+        "        fmt.output({})\n"
+        "    else:\n"
+        '        click.echo("m")\n'
+        '        fmt.success("m")\n'
+    )
+    assert _direct(tmp_path, source) == {COMMAND: 4}
+
+
+@pytest.mark.parametrize(
+    "rel", [MIDDLEWARE, "src/ante/cli/direct.py", "src/ante/cli/__init__.py", CORE]
+)
+def test_direct_output_only_covers_the_commands_directory(
+    tmp_path: Path, rel: str
+) -> None:
+    source = 'import click\n\n\ndef helper(fmt):\n    click.echo("m")\n'
+    if rel == MIDDLEWARE:
+        source = HOOK_SOURCE + "\n\n" + source
+    assert _direct(tmp_path, source, rel=rel) == {}
+
+
+def test_direct_output_covers_nested_command_directories(tmp_path: Path) -> None:
+    rel = "src/ante/cli/commands/sub/deep.py"
+    assert _direct(tmp_path, "def f(fmt):\n    fmt.output({})\n", rel=rel) == {rel: 1}
+
+
+DIRECT_SOURCE = (
+    'import click\n\n\ndef f(fmt):\n    fmt.output({})\n    click.echo("m")\n'
+)
+
+
+def test_full_output_when_direct_output_grows(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {COMMAND: DIRECT_SOURCE})
+    _freeze(root)
+    _write(root, COMMAND, DIRECT_SOURCE + '    click.echo("again")\n')
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_direct_output\t{CMD_PATH}: actual 3, baseline 2 (+1)",
+            MOVE_LINE,
+        ],
+    )
+
+
+def test_full_output_when_direct_output_drops(tmp_path: Path, capsys: Capsys) -> None:
+    root = _tree(tmp_path, {COMMAND: DIRECT_SOURCE})
+    _freeze(root)
+    _write(root, COMMAND, "def f(fmt):\n    fmt.output({})\n")
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_direct_output\t{CMD_PATH}: actual 1, baseline 2 (-1)",
+            LOWER_LINE,
+            f"  - cli_direct_output['{CMD_PATH}']를 1로 낮춘다",
+        ],
+    )
+
+
+def test_full_output_when_direct_output_moves_to_a_new_file(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path, {COMMAND: DIRECT_SOURCE})
+    _freeze(root)
+    (root / COMMAND).unlink()
+    _write(root, OTHER, DIRECT_SOURCE)
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_direct_output\t{CMD_PATH}: actual 0, baseline 2 (-2)",
+            f"cli_direct_output\t{OTHER_PATH}: actual 2, baseline 0 (+2)",
+            MOVE_LINE,
+            LOWER_LINE,
+            f"  - cli_direct_output에서 '{CMD_PATH}' 키를 지운다",
+        ],
+    )
+
+
+def test_logger_error_in_a_command_is_not_direct_output(
+    tmp_path: Path, capsys: Capsys
+) -> None:
+    root = _tree(tmp_path, {COMMAND: DIRECT_SOURCE})
+    _freeze(root)
+    _write(root, COMMAND, DIRECT_SOURCE + '    logger.error("m")\n')
+    _assert_failure(
+        root,
+        capsys,
+        [
+            HEADER,
+            f"cli_error_calls\t{CMD_PATH}: actual 1, baseline 0 (+1)",
+            *ALTERNATIVE_LINES,
+            MOVE_LINE,
+        ],
+    )
+
+
+def test_script_exits_1_when_a_command_echoes(tmp_path: Path) -> None:
+    root = _tree(tmp_path / "repo", {COMMAND: DIRECT_SOURCE})
+    _freeze(root)
+    _write(root, COMMAND, DIRECT_SOURCE + '    click.echo("again")\n')
+    result = _script(["--root", str(root)], tmp_path)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert result.stdout == ""
