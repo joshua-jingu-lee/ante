@@ -876,8 +876,16 @@ def test_near_position_literal_that_is_not_counted(tmp_path: Path, source: str) 
     assert _codes(tmp_path, source) == frozenset()
 
 
-def test_success_data_dict_is_not_a_position(tmp_path: Path) -> None:
-    assert _codes(tmp_path, 'fmt.success("m", data={"code": "X"})') == frozenset()
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('fmt.success("m", data={"code": "X"})', id="success"),
+        pytest.param('CommandResult(data={"code": "X"})', id="command-result"),
+        pytest.param('f.CommandResult(data={"code": "X"})', id="command-result-attr"),
+    ],
+)
+def test_success_data_dict_is_not_a_position(tmp_path: Path, source: str) -> None:
+    assert _codes(tmp_path, source) == frozenset()
 
 
 @pytest.mark.parametrize(
@@ -888,6 +896,8 @@ def test_success_data_dict_is_not_a_position(tmp_path: Path) -> None:
         pytest.param('fmt.error("m", data={"code": "X"})', id="error-data"),
         pytest.param('f(data={"code": "X"})', id="bare-call-data"),
         pytest.param('fmt.success(data={"k": {"code": "X"}})', id="nested"),
+        pytest.param('CommandResult({"code": "X"})', id="command-result-positional"),
+        pytest.param('CommandResults(data={"code": "X"})', id="command-result-name"),
     ],
 )
 def test_other_code_dict_is_a_position(tmp_path: Path, source: str) -> None:

@@ -24,7 +24,7 @@ exclusion: non-empty string literals in an error-code position that are not a
 
 1. the value of a ``code=`` keyword argument;
 2. the value of a ``"code"`` key in a dict literal, except the dict that is
-   the ``data=`` argument of ``<x>.success(...)``;
+   the ``data=`` argument of ``<x>.success(...)`` or ``CommandResult(...)``;
 3. a ``code = ...`` or ``code: T = ...`` statement directly in a class body;
 4. the value assigned to an ``ipc_error_code`` attribute, or to
    ``ipc_error_code`` directly in a class body;
@@ -374,13 +374,12 @@ def _attribute_positions(node: ast.Assign | ast.AnnAssign) -> Iterator[ast.expr]
 
 
 def _success_data_dicts(tree: ast.Module) -> set[int]:
-    """Return the ids of the dicts that are the ``data=`` of ``.success(...)``."""
+    """Return the ids of the ``data=`` dicts of success output calls."""
     found: set[int] = set()
     for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "success"
+        if isinstance(node, ast.Call) and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr == "success")
+            or _terminal_name(node.func) == "CommandResult"
         ):
             found.update(
                 id(keyword.value)
