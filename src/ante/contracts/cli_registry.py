@@ -163,25 +163,25 @@ MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("member", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("member", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("member", "list-invalid-roles"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"member:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("member", "register"),
         auth=AuthContract(mode="master", scopes=frozenset()),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="member.register",
     ),
@@ -195,7 +195,7 @@ MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("member", "update-scopes"),
         auth=AuthContract(mode="master", scopes=frozenset()),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="member.update_scopes",
     ),
@@ -223,7 +223,7 @@ MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("member", "rotate-token"),
         auth=AuthContract(mode="master", scopes=frozenset()),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="member.rotate_token",
     ),
@@ -237,7 +237,7 @@ MEMBER_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("member", "regenerate-recovery-key"),
         auth=AuthContract(mode="public", scopes=frozenset()),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="member.regenerate_recovery_key",
     ),
@@ -332,13 +332,13 @@ APPROVAL_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("approval", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard", data_key="approvals"),
         execution="offline",
     ),
     CliCommandContract(
         path=("approval", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
@@ -350,7 +350,7 @@ APPROVAL_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("approval", "audit-types"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"approval:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard", data_key="approvals"),
         execution="offline",
     ),
     CliCommandContract(

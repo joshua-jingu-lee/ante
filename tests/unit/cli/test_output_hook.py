@@ -101,6 +101,19 @@ class TestCommandResult:
         with pytest.raises(TypeError, match="non-empty"):
             CommandResult(text=())
 
+    @pytest.mark.parametrize("text", [["a"], [], b"a", 1])
+    def test_text_not_tuple_is_type_error(self, text: Any) -> None:
+        with pytest.raises(TypeError, match="tuple of lines"):
+            CommandResult(text=text)
+
+    def test_repr_has_no_data_or_text(self) -> None:
+        secret = "tok-fixture-0001"
+        result = CommandResult(
+            data={"token": secret}, message="done", text=(f"토큰: {secret}",)
+        )
+        assert secret not in repr(result)
+        assert repr(result) == "CommandResult(message='done')"
+
     @pytest.mark.parametrize("text", [None, ("",), ("a", "b")])
     def test_text_none_or_lines_is_accepted(self, text: tuple[str, ...] | None) -> None:
         assert CommandResult(text=text).text == text
