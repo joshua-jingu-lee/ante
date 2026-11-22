@@ -6,8 +6,10 @@ import json
 import logging
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
+
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.core.database import Database
@@ -92,7 +94,7 @@ class BacktestRunStore:
     ) -> str:
         """실행 이력 저장. run_id 반환."""
         run_id = str(uuid.uuid4())
-        created_at = datetime.now(tz=UTC).isoformat()
+        created_at = clock.now(UTC).isoformat()
         params_json = json.dumps(params or {}, default=str)
 
         await self._db.execute(

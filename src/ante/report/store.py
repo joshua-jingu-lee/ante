@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
+from ante.core import clock
 from ante.core.database import OperationalError
 from ante.report.models import (
     ReportStatus,
@@ -234,7 +235,7 @@ class ReportStore:
     ) -> None:
         """리포트 상태 변경."""
         reviewed_at = (
-            datetime.now().isoformat()
+            clock.now(None).isoformat()
             if status
             in (
                 ReportStatus.REVIEWED,

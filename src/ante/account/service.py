@@ -32,6 +32,7 @@ from ante.account.models import (
 from ante.account.presets import BROKER_PRESETS, VIRTUAL_ONLY_BROKER_TYPES
 from ante.account.scoping import require_account_id, validate_new_account_id
 from ante.account.timezone import validate_iana_timezone
+from ante.core import clock
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
 
 if TYPE_CHECKING:
@@ -294,7 +295,7 @@ class AccountService:
                 f"{preset.required_credentials}"
             )
 
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         account.created_at = now
         account.updated_at = now
 
@@ -439,7 +440,7 @@ class AccountService:
         if timezone_explicit_update:
             account.timezone_invalid = False
 
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         account.updated_at = now
 
         await self._db.execute(
@@ -544,7 +545,7 @@ class AccountService:
                 f"이미 정지된 계좌입니다: '{account_id}'"
             )
         status = _transition_status(account, AccountStatus.SUSPENDED)
-        account.updated_at = datetime.now(UTC)
+        account.updated_at = clock.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
@@ -596,7 +597,7 @@ class AccountService:
             return
 
         status = _transition_status(account, AccountStatus.ACTIVE)
-        account.updated_at = datetime.now(UTC)
+        account.updated_at = clock.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",
@@ -652,7 +653,7 @@ class AccountService:
             )
 
         status = _transition_status(account, AccountStatus.DELETED)
-        account.updated_at = datetime.now(UTC)
+        account.updated_at = clock.now(UTC)
 
         await self._db.execute(
             "UPDATE accounts SET status=?, updated_at=? WHERE account_id=?",

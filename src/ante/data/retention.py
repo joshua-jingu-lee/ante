@@ -6,6 +6,7 @@ import calendar
 import logging
 from datetime import UTC, datetime
 
+from ante.core import clock
 from ante.core.market_data_vocab import TIMEFRAME_SET
 from ante.data.store import ParquetStore
 
@@ -59,7 +60,7 @@ class RetentionPolicy:
             {"1m": 3, "5m": 1, ...} 형태의 삭제 건수
         """
         if now is None:
-            now = datetime.now(UTC)
+            now = clock.now(UTC)
 
         deleted: dict[str, int] = {}
 

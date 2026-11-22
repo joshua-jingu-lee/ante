@@ -6,6 +6,7 @@ import logging
 from datetime import time
 from typing import TYPE_CHECKING, Any, cast
 
+from ante.core import clock
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
 if TYPE_CHECKING:
@@ -126,13 +127,11 @@ class NotificationService:
 
     def _check_dedup(self, level: NotificationLevel, message: str) -> str | object:
         """중복 여부 확인."""
-        import time as time_mod
-
         if level == NotificationLevel.CRITICAL:
             return ""
 
         key = self._make_dedup_key(level, message)
-        now = time_mod.monotonic()
+        now = clock.monotonic()
 
         if key in self._dedup_cache:
             last_sent, suppressed = self._dedup_cache[key]
@@ -267,9 +266,7 @@ class NotificationService:
             return False
 
         if self._quiet_start and self._quiet_end:
-            from datetime import datetime
-
-            now = datetime.now().time()
+            now = clock.now(None).time()
             if self._quiet_start <= self._quiet_end:
                 if self._quiet_start <= now <= self._quiet_end:
                     return False

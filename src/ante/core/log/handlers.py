@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
-import time
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any, cast
 from zoneinfo import ZoneInfo
+
+from ante.core import clock
 
 _KST: ZoneInfo | None = None
 
@@ -56,7 +57,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
     @staticmethod
     def _now_kst() -> _dt.datetime:
         """현재 시각을 Asia/Seoul tzinfo 로 반환한다."""
-        return _dt.datetime.now(_get_kst())
+        return clock.now(_get_kst())
 
     def _make_filename(self) -> str:
         """현재 날짜(Asia/Seoul) 기준 활성 파일 경로를 반환한다."""
@@ -91,7 +92,7 @@ class DateNamedTimedRotatingFileHandler(TimedRotatingFileHandler):
         if not self.delay:
             self.stream = self._open()
 
-        current_time = int(time.time())
+        current_time = int(clock.now(_dt.UTC).timestamp())
         new_rollover_at = self.computeRollover(current_time)
         while new_rollover_at <= current_time:
             new_rollover_at += self.interval
