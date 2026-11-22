@@ -1122,7 +1122,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle regression",
+            reason="A7 sample regression",
         )
         await eventbus.publish(order)
 
@@ -1264,7 +1264,7 @@ class TestRuleEngineEventBus:
             order_type="trail",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle order_type regression",
+            reason="A7 sample order_type regression",
         )
         await eventbus.publish(order)
 
@@ -1529,7 +1529,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle KRX symbol regression",
+            reason="A7 sample KRX symbol regression",
         )
         await eventbus.publish(order)
 
@@ -1593,7 +1593,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle KRX symbol shape regression",
+            reason="A7 sample KRX symbol shape regression",
         )
         await eventbus.publish(order)
 
@@ -1834,7 +1834,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=None,
             exchange="KRX",
-            reason="A7 oracle limit-without-price regression",
+            reason="A7 sample limit-without-price regression",
         )
         await eventbus.publish(order)
 
@@ -1899,7 +1899,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=49000.0,
             exchange="KRX",
-            reason="A7 oracle stop_limit-without-price regression",
+            reason="A7 sample stop_limit-without-price regression",
         )
         await eventbus.publish(order)
 
@@ -2025,7 +2025,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=None,
             exchange="KRX",
-            reason="A7 oracle stop-without-stop_price regression",
+            reason="A7 sample stop-without-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -2091,7 +2091,7 @@ class TestRuleEngineEventBus:
             price=1000.0,
             stop_price=None,
             exchange="KRX",
-            reason="A7 oracle stop_limit-without-stop_price regression",
+            reason="A7 sample stop_limit-without-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -2311,7 +2311,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle NaN-quantity regression",
+            reason="A7 sample NaN-quantity regression",
         )
         await eventbus.publish(order)
 
@@ -2379,7 +2379,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle inf-quantity regression",
+            reason="A7 sample inf-quantity regression",
         )
         await eventbus.publish(order)
 
@@ -2443,7 +2443,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle non-number-quantity regression",
+            reason="A7 sample non-number-quantity regression",
         )
         await eventbus.publish(order)
 
@@ -2548,7 +2548,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle overflow-int-quantity regression",
+            reason="A7 sample overflow-int-quantity regression",
         )
 
         # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
@@ -2615,7 +2615,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=float("nan"),
             exchange="KRX",
-            reason="A7 oracle NaN-price regression",
+            reason="A7 sample NaN-price regression",
         )
         await eventbus.publish(order)
 
@@ -2683,7 +2683,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=bad_price,
             exchange="KRX",
-            reason="A7 oracle inf-price regression",
+            reason="A7 sample inf-price regression",
         )
         await eventbus.publish(order)
 
@@ -2751,7 +2751,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=bad_price,  # type: ignore[arg-type]
             exchange="KRX",
-            reason="A7 oracle non-number-price regression",
+            reason="A7 sample non-number-price regression",
         )
 
         # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
@@ -2915,7 +2915,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=bad_price,
             exchange="KRX",
-            reason="A7 oracle negative-price regression",
+            reason="A7 sample negative-price regression",
         )
         await eventbus.publish(order)
 
@@ -3093,7 +3093,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=bad_price,
             exchange="KRX",
-            reason="A7 oracle zero-price regression",
+            reason="A7 sample zero-price regression",
         )
         await eventbus.publish(order)
 
@@ -3397,7 +3397,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=bad_stop_price,
             exchange="KRX",
-            reason="A7 oracle negative-stop_price regression",
+            reason="A7 sample negative-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -3539,7 +3539,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=float("nan"),
             exchange="KRX",
-            reason="A7 oracle NaN-stop_price regression",
+            reason="A7 sample NaN-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -3601,7 +3601,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=bad_stop_price,
             exchange="KRX",
-            reason="A7 oracle inf-stop_price regression",
+            reason="A7 sample inf-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -3669,7 +3669,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=bad_stop_price,  # type: ignore[arg-type]
             exchange="KRX",
-            reason="A7 oracle non-number-stop_price regression",
+            reason="A7 sample non-number-stop_price regression",
         )
         # OverflowError가 EventBus 핸들러까지 leak되면 publish가 예외를 던지므로,
         # 정상 반환되는 것 자체가 fail-closed 잠금 검증 (large-int 케이스).
@@ -3785,7 +3785,7 @@ class TestRuleEngineEventBus:
             price=None,
             stop_price=bad_stop_price,
             exchange="KRX",
-            reason="A7 oracle zero-stop_price regression",
+            reason="A7 sample zero-stop_price regression",
         )
         await eventbus.publish(order)
 
@@ -4043,7 +4043,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle negative-quantity regression",
+            reason="A7 sample negative-quantity regression",
         )
         await eventbus.publish(order)
 
@@ -4150,7 +4150,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle zero-quantity regression",
+            reason="A7 sample zero-quantity regression",
         )
         await eventbus.publish(order)
 
@@ -4218,7 +4218,7 @@ class TestRuleEngineEventBus:
             order_type="limit",
             price=1000.0,
             exchange="KRX",
-            reason="A7 oracle zero-float-quantity regression",
+            reason="A7 sample zero-float-quantity regression",
         )
         await eventbus.publish(order)
 

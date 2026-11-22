@@ -100,7 +100,7 @@ class TestCLIApprovalRequestInvalidType:
                     "--type",
                     "sample_invalid_type",
                     "--title",
-                    "Oracle invalid approval type",
+                    "Sample invalid approval type",
                     "--params",
                     "{}",
                 ],

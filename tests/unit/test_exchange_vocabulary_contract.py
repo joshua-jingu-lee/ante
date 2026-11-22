@@ -19,7 +19,7 @@ per-surface 테스트(#1576/#1577/#1583/#1584/#1585 merged)를 보완하는
 **test-only — src/ante 무변경**. canonical 리터럴(KRX/NYSE/NASDAQ/AMEX/
 TEST)은 테스트에 하드코딩하지 않고 전부 ``CANONICAL_EXCHANGES`` 를 import·
 parametrize한다(테스트가 SSOT를 추종). 의도된 단일 상수
-``ORACLE``/``"*"``/``"TEST"`` 만 리터럴로 둔다. 표면별 에러코드 문자열·
+``SAMPLE``/``"*"``/``"TEST"`` 만 리터럴로 둔다. 표면별 에러코드 문자열·
 표면별 세부 거동·axis B(preset/source 가용성)·legacy out-of-vocab read
 면제 재검증은 비목표(각 구현 이슈 per-surface 테스트 책임).
 """
@@ -53,9 +53,9 @@ from ante.member.models import Member, MemberRole, MemberType
 from ante.strategy.validator import StrategyValidator
 
 # 의도된 단일 상수만 리터럴로 둔다(canonical 집합은 SSOT import).
-#  - ORACLE: #1561 oracle probe 시그니처(어떤 신규 입력 경계에서도 거부).
+#  - SAMPLE: #1561 oracle probe 시그니처(어떤 신규 입력 경계에서도 거부).
 #  - WILDCARD: StrategyMeta 전용 — 그 외 표면에서 거부.
-ORACLE = "SAMPLE_INVALID_EXCHANGE"
+SAMPLE = "SAMPLE_INVALID_EXCHANGE"
 WILDCARD = "*"
 
 _MOCK_MASTER = Member(
@@ -319,43 +319,43 @@ class TestCanonicalSetContract:
 
 
 class TestSampleInvalidRejectionMatrix:
-    """``ORACLE`` 가 **모든 신규 입력 경계**에서 거부된다.
+    """``SAMPLE`` 가 **모든 신규 입력 경계**에서 거부된다.
 
     표면별 에러코드 문자열 재검증은 비목표(per-surface 책임) — 여기서는
     "성공 처리되지 않음"(거부)만 cross-module 으로 고정한다.
     """
 
     def test_instrument_list_rejects_sample(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["instrument", "list", "--exchange", ORACLE])
+        result = runner.invoke(cli, ["instrument", "list", "--exchange", SAMPLE])
         assert result.exit_code != 0, result.stdout
 
     def test_instrument_sync_rejects_sample(self, runner: CliRunner) -> None:
-        result = runner.invoke(cli, ["instrument", "sync", "--exchange", ORACLE])
+        result = runner.invoke(cli, ["instrument", "sync", "--exchange", SAMPLE])
         assert result.exit_code != 0, result.stdout
 
     def test_instrument_import_rejects_sample(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
         result = runner.invoke(
-            cli, ["instrument", "import", str(_import_json(tmp_path, ORACLE))]
+            cli, ["instrument", "import", str(_import_json(tmp_path, SAMPLE))]
         )
         assert result.exit_code != 0, result.stdout
 
     def test_strategy_meta_rejects_sample(self, tmp_path: Path) -> None:
-        assert _has_exchange_error(_validate_strategy(tmp_path, ORACLE))
+        assert _has_exchange_error(_validate_strategy(tmp_path, SAMPLE))
 
     @pytest.mark.asyncio
     async def test_account_create_rejects_sample(self, account_service) -> None:
         with pytest.raises(InvalidExchangeError):
-            await account_service.create(_make_account("sample-acct", ORACLE))
+            await account_service.create(_make_account("sample-acct", SAMPLE))
 
     def test_datastore_write_rejects_sample(self, store: ParquetStore) -> None:
         with pytest.raises(ValueError, match="유효하지 않은 exchange"):
-            store.write("005930", "1d", _ohlcv_df(), exchange=ORACLE)
+            store.write("005930", "1d", _ohlcv_df(), exchange=SAMPLE)
 
     def test_datastore_append_rejects_sample(self, store: ParquetStore) -> None:
         with pytest.raises(ValueError, match="유효하지 않은 exchange"):
-            store.append("005930", "1m", _ohlcv_rows(), exchange=ORACLE)
+            store.append("005930", "1m", _ohlcv_rows(), exchange=SAMPLE)
 
     def test_backtest_run_rejects_sample(
         self, runner: CliRunner, tmp_path: Path
@@ -373,7 +373,7 @@ class TestSampleInvalidRejectionMatrix:
                 "--end",
                 "2026-01-01",
                 "--exchange",
-                ORACLE,
+                SAMPLE,
             ],
         )
         assert result.exit_code != 0, result.stdout

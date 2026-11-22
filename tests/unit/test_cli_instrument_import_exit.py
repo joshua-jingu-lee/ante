@@ -317,7 +317,7 @@ class TestKrxInvalidSymbolExit:
                     {
                         "symbol": "ABCDEF",
                         "exchange": "KRX",
-                        "name": "Oracle Invalid Symbol",
+                        "name": "Sample Invalid Symbol",
                     }
                 ]
             )
@@ -370,7 +370,7 @@ class TestKrxInvalidSymbolExit:
                     {
                         "symbol": "ABCDEF",
                         "exchange": "KRX",
-                        "name": "Oracle Invalid Symbol",
+                        "name": "Sample Invalid Symbol",
                     }
                 ]
             )
