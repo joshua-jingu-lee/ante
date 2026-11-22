@@ -60,28 +60,16 @@
     "src/ante/broker/base.py": {
       "BLE001": 1
     },
-    "src/ante/broker/circuit_breaker.py": {
-      "TID251": 2
-    },
     "src/ante/broker/fill_scheduler.py": {
-      "C901": 1,
-      "TID251": 1
+      "C901": 1
     },
     "src/ante/broker/kis.py": {
       "ASYNC109": 1,
       "BLE001": 1,
-      "C901": 1,
-      "TID251": 7
+      "C901": 1
     },
     "src/ante/broker/kis_stream.py": {
-      "BLE001": 1,
-      "TID251": 2
-    },
-    "src/ante/broker/mock.py": {
-      "TID251": 1
-    },
-    "src/ante/broker/test.py": {
-      "TID251": 1
+      "BLE001": 1
     },
     "src/ante/cli/cold_path.py": {
       "BLE001": 1
@@ -192,18 +180,9 @@
       "ASYNC240": 1,
       "C901": 2
     },
-    "src/ante/gateway/cache.py": {
-      "TID251": 2
-    },
     "src/ante/gateway/gateway.py": {
       "BLE001": 5,
       "C901": 1
-    },
-    "src/ante/gateway/rate_limiter.py": {
-      "TID251": 3
-    },
-    "src/ante/gateway/stop_order.py": {
-      "TID251": 2
     },
     "src/ante/gateway/stream_integration.py": {
       "C901": 1

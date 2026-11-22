@@ -6,8 +6,10 @@ import asyncio
 import json
 import logging
 from collections.abc import Callable, Coroutine
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any, cast
+
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -309,7 +311,7 @@ class KISStreamClient:
             "side": "buy" if fields[4] == "02" else "sell",
             "quantity": float(fields[5]) if fields[5] else 0.0,
             "price": float(fields[6]) if fields[6] else 0.0,
-            "timestamp": datetime.now(UTC),
+            "timestamp": clock.now(UTC),
         }
 
         for callback in self._execution_callbacks:
@@ -331,7 +333,7 @@ class KISStreamClient:
             "side": "buy" if output.get("sll_buy_dvsn_cd") == "02" else "sell",
             "quantity": float(output.get("ccld_qty", 0)),
             "price": float(output.get("ccld_pric", 0)),
-            "timestamp": datetime.now(UTC),
+            "timestamp": clock.now(UTC),
         }
 
         for callback in self._execution_callbacks:

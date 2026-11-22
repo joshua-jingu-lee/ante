@@ -65,6 +65,7 @@
     "feed->data",
     "gateway->account",
     "gateway->broker",
+    "gateway->core",
     "gateway->eventbus",
     "gateway->strategy",
     "instrument->core",
