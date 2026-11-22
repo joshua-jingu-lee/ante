@@ -44,35 +44,35 @@
 # (table/output/echo) 를 그대로 보존하므로 추가 fmt.error anchor 영향 없음.
 intended_no_code:
   - path: src/ante/cli/commands/bot.py
-    line: 189
+    line: 197
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot list read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 240
+    line: 246
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot info read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 473
+    line: 458
     snippet_sha1: "03fce6e088b7"
     reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
   - path: src/ante/cli/commands/bot.py
-    line: 529
+    line: 513
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot positions read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 629
+    line: 602
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot signal-key read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 876
+    line: 834
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 910
+    line: 868
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 944
+    line: 902
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
