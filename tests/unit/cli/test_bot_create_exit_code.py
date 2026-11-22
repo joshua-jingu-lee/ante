@@ -450,10 +450,10 @@ class TestBotPositionsRealBotContractUnchanged:
             f"got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        # 실재 bot 0 포지션의 정상 계약은 ``fmt.output`` 으로 indent=2
+        # 실재 bot 0 포지션의 정상 계약은 성공 봉투를 indent=2
         # 멀티라인 JSON 을 출력하므로(에러 envelope 의 한 줄 형식이 아님),
         # stdout 전체를 파싱한다.
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload == {
             "message": "보유 포지션 없음",
             "positions": [],
@@ -474,7 +474,7 @@ class TestBotPositionsRealBotContractUnchanged:
             f"got {result.exit_code}\n"
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert isinstance(payload, dict), payload
         assert "positions" in payload, payload
         positions = payload["positions"]

@@ -326,7 +326,7 @@ class TestNonRotateGetUnaffectedByGate:
 
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = json.loads(result.stdout)
-        assert payload["signal_key"] == "sk_already_present_99"
+        assert payload["data"]["signal_key"] == "sk_already_present_99"
         mock_skm.get_key.assert_awaited_once_with("bot-normal-1")
 
 

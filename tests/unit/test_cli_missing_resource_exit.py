@@ -437,7 +437,7 @@ class TestBotSignalKeyMissingExit:
 
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = json.loads(result.stdout)
-        assert payload["signal_key"] == "sk_test123"
+        assert payload["data"]["signal_key"] == "sk_test123"
 
     def test_valid_rotate_exits_zero(self, runner: CliRunner) -> None:
         """실재 bot --rotate 재발급은 exit 0 + IPC 라우팅 + standard envelope.
