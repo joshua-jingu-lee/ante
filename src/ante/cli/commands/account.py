@@ -23,7 +23,7 @@ from ante.cli._validators import (
 )
 from ante.cli.cold_path import ACCOUNT_COLD_PATH_BLOCKED_CODE
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -357,7 +357,7 @@ def account_create(
     credentials_file: tuple[str, ...],
     broker_config_pairs: tuple[str, ...],
     market_order_reserve_buffer_rate_opt: float | None,
-) -> None:
+) -> CommandResult:
     """비대화형 계좌 생성 (cold-path 전용).
 
     필수 옵션: ``--broker-type``, ``--account-id``, ``--name``, ``--trading-mode``.
@@ -444,8 +444,8 @@ def account_create(
 
     created = _run(_do_create())
 
-    fmt.success(
-        f'계좌 "{created.account_id}" 생성 완료 '
+    return CommandResult(
+        message=f'계좌 "{created.account_id}" 생성 완료 '
         f"({created.exchange} / {created.currency} / {created.broker_type})",
         data={
             "account_id": created.account_id,
@@ -533,7 +533,7 @@ def account_info(ctx: click.Context, account_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
+def account_suspend(ctx: click.Context, account_id: str, reason: str) -> CommandResult:
     """계좌 거래 정지."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -552,7 +552,7 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
         )
     )
 
-    fmt.success(f'계좌 "{validated_account_id}" 정지 완료')
+    return CommandResult(message=f'계좌 "{validated_account_id}" 정지 완료')
 
 
 @account.command("activate")
@@ -560,7 +560,7 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_activate(ctx: click.Context, account_id: str) -> None:
+def account_activate(ctx: click.Context, account_id: str) -> CommandResult:
     """계좌 활성화."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -579,7 +579,7 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
         )
     )
 
-    fmt.success(f'계좌 "{validated_account_id}" 활성화 완료')
+    return CommandResult(message=f'계좌 "{validated_account_id}" 활성화 완료')
 
 
 @account.command("delete")
@@ -591,7 +591,9 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("account:write")
-def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> None:
+def account_delete(
+    ctx: click.Context, account_id: str, skip_confirm: bool
+) -> CommandResult:
     """계좌 삭제 (소프트 딜리트, cold-path 전용).
 
     1.0 정책: account.delete는 IPC runtime command가 아니다. active Ante
@@ -628,7 +630,7 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     except AccountDeletedError as e:
         raise AccountAlreadyDeletedError(str(e)) from e
 
-    fmt.success(f'계좌 "{validated_account_id}" 삭제 완료')
+    return CommandResult(message=f'계좌 "{validated_account_id}" 삭제 완료')
 
 
 @account.command("credentials")
@@ -767,7 +769,7 @@ def account_set_credentials(
 @require_scope("account:write")
 def account_repair_timezone(
     ctx: click.Context, account_id: str, new_timezone: str
-) -> None:
+) -> CommandResult:
     """legacy invalid IANA timezone 계좌를 복구한다 (cold-path 전용).
 
     ``_row_to_account`` 가 stored invalid timezone 을 보존하면서
@@ -808,8 +810,9 @@ def account_repair_timezone(
     except AccountDeletedError as e:
         raise AccountAlreadyDeletedError(str(e)) from e
 
-    fmt.success(
-        f'계좌 "{repaired.account_id}" timezone 복구 완료 ({repaired.timezone})',
+    return CommandResult(
+        message=f'계좌 "{repaired.account_id}" timezone 복구 완료 '
+        f"({repaired.timezone})",
         data={
             "code": "ACCOUNT_REPAIR_TIMEZONE_OK",
             "account_id": repaired.account_id,
