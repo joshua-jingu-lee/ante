@@ -282,9 +282,6 @@
     "src/ante/cli/commands/approval.py": {
       "type-arg": 11
     },
-    "src/ante/cli/commands/backtest.py": {
-      "type-arg": 5
-    },
     "src/ante/cli/commands/bot.py": {
       "no-any-return": 1,
       "no-untyped-call": 13,
@@ -312,9 +309,6 @@
       "no-untyped-call": 12,
       "no-untyped-def": 3,
       "type-arg": 13
-    },
-    "src/ante/cli/commands/report.py": {
-      "type-arg": 5
     },
     "src/ante/cli/commands/strategy.py": {
       "no-untyped-call": 6,
