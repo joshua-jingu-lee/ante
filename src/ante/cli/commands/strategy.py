@@ -14,7 +14,7 @@ import click
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -77,7 +77,7 @@ async def _create_registry(
 @click.pass_context
 @require_auth
 @require_scope("strategy:write")
-def validate(ctx: click.Context, path: str) -> None:
+def validate(ctx: click.Context, path: str) -> CommandResult:
     """전략 파일 정적 검증 (AST 기반)."""
     from ante.strategy.validator import StrategyValidator
 
@@ -92,7 +92,7 @@ def validate(ctx: click.Context, path: str) -> None:
     }
 
     if result.valid:
-        fmt.success(f"Strategy validation passed: {path}", data)
+        return CommandResult(data=data, message=f"Strategy validation passed: {path}")
     else:
         if fmt.is_json:
             import json as _json
