@@ -131,8 +131,8 @@ class TreasuryMachine(RuleBasedStateMachine):
         self.keyed_fills: list[OrderFilledEvent] = []
         # 예산 레코드가 있는 봇(모델). 배분 성공으로 생기고 예산 해제로 없어진다.
         self.funded: set[str] = set()
-        # 재시작으로 주문별 예약 표를 잃은 봇(#2770). F3은 이 봇들을 건너뛴다.
-        self.reservations_lost: set[str] = set()
+        # 재시작이 예약 표에서 지운 잔여 예약의 봇별 합(#2770). F3은 이 몫을 더해 본다.
+        self.leaked: dict[str, float] = dict.fromkeys(BOTS, 0.0)
         self.steps = 0
         self.last_restart = 0
         self._start()
@@ -226,7 +226,7 @@ class TreasuryMachine(RuleBasedStateMachine):
         if delete:
             self._run(self.treasury.release_budget(bot))
             self.funded.discard(bot)
-            self.reservations_lost.discard(bot)
+            self.leaked[bot] = 0.0
         else:
             self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
         self._close_bot_orders(bot)
@@ -376,8 +376,6 @@ class TreasuryMachine(RuleBasedStateMachine):
     def f3_reservations(self) -> None:
         t = self.treasury
         for bot in BOTS:
-            if bot in self.reservations_lost:
-                continue
             table = t.get_reservations(bot)
             budget = t.get_budget(bot)
             if budget is None:
@@ -385,8 +383,9 @@ class TreasuryMachine(RuleBasedStateMachine):
                 continue
             assert all(v >= 0 for v in table.values()), f"F3: {bot} {table}"
             assert budget.reserved >= 0, f"F3: {budget}"
-            assert _close(budget.reserved, sum(table.values())), (
-                f"F3: {bot} reserved={budget.reserved} table={table}"
+            leaked = self.leaked[bot]
+            assert _close(budget.reserved, sum(table.values()) + leaked), (
+                f"F3: {bot} reserved={budget.reserved} table={table} leaked={leaked}"
             )
 
     @invariant()
@@ -425,9 +424,10 @@ class TreasuryMachine(RuleBasedStateMachine):
 class TreasuryRestartMachine(TreasuryMachine):
     """``TreasuryMachine``에 재시작을 더한다(F5).
 
-    재시작은 주문별 예약 표를 되살리지 않는다(#2770). 그래서 미종결 예약이 남은 채
-    재시작한 봇은 F3에서 뺀다(예산을 해제하면 다시 넣는다). 그 결함 자체는 아래
-    ``test_restart_restores_reservations``가 잠근다.
+    재시작은 주문별 예약 표를 되살리지 않는다(#2770). 그래서 재시작 직전 표에 있던
+    잔여 예약의 합을 봇별 ``leaked``에 쌓고 F3을 ``reserved == Σ 표 + leaked``로 본다
+    (예산을 해제하면 0). 지금 코드에서 그 몫은 취소·체결·봇 정지로 줄지 않는다.
+    그 결함 자체는 아래 ``test_restart_restores_reservations``가 잠근다.
     """
 
     # 인자 없는 규칙은 hypothesis가 자주 고른다. 전제가 없으면 걸음의 2할이
@@ -438,7 +438,8 @@ class TreasuryRestartMachine(TreasuryMachine):
         before = self._budget_values()
         unallocated = self.treasury.unallocated
         balance = self.treasury.account_balance
-        self.reservations_lost |= {o.bot_id for o in self.open_orders.values()}
+        for bot in BOTS:
+            self.leaked[bot] += sum(self.treasury.get_reservations(bot).values())
         self._start()
         self.last_restart = self.steps
         after = self._budget_values()
@@ -455,7 +456,7 @@ TestTreasuryRestartMachine = TreasuryRestartMachine.TestCase
 TestTreasuryRestartMachine.settings = settings()
 
 
-@pytest.mark.xfail(strict=True, reason="#2770")
+@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#2770")
 async def test_restart_restores_reservations(tmp_path: Path) -> None:
     """재시작 뒤에도 미종결 주문의 예약이 예약 표에 남는다(F3).
 
@@ -463,6 +464,9 @@ async def test_restart_restores_reservations(tmp_path: Path) -> None:
     순서를 손으로 옮겼다: 배분 → 예약 → 재시작. 지금은 ``load_from_db``가 예약 표를
     비운 뒤 되살리지 않는다. ``reserved``는 101로 복원되는데 표가 비어, 뒤따르는
     취소가 예약을 돌려주지 못한다.
+
+    xfail은 마지막 단언의 ``AssertionError``만 받는다. 준비 단계의 이상은
+    ``pytest.fail``(``Failed``)로 내 xfail에 흡수되지 않게 한다.
     """
     db = Database(str(tmp_path / "treasury.db"))
     await db.connect()
@@ -483,13 +487,16 @@ async def test_restart_restores_reservations(tmp_path: Path) -> None:
         treasury = await boot()
         await treasury.set_account_balance(100_000.0)
         await treasury.update_budget("bot-a", 100_000.0)
-        assert await treasury.reserve_for_order("bot-a", "ord-0", 101.0)
+        if not await treasury.reserve_for_order("bot-a", "ord-0", 101.0):
+            pytest.fail("준비: 예약이 거부됐다")
 
         treasury = await boot()
 
         budget = treasury.get_budget("bot-a")
-        assert budget is not None
-        assert budget.reserved == 101.0
+        if budget is None or budget.reserved != 101.0:
+            pytest.fail(f"준비: 재시작 뒤 예산이 복원되지 않았다: {budget}")
+        if errors:
+            pytest.fail(f"준비: 핸들러 예외 {errors}")
         assert treasury.get_reservations("bot-a") == {"ord-0": 101.0}
     finally:
         await db.close()
