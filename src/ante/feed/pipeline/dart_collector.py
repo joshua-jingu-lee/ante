@@ -5,13 +5,14 @@ from __future__ import annotations
 import json
 import logging
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, cast
 
 import polars as pl
 
+from ante.core import clock
 from ante.data.normalizer import _REPRT_CODE_MAP, DARTNormalizer
 from ante.data.store import ParquetStore
 from ante.feed.pipeline.checkpoint import Checkpoint
@@ -63,7 +64,7 @@ _KST = timezone(timedelta(hours=9))
 
 def _today_kst() -> date:
     """오늘 날짜(KST 캘린더)를 반환한다."""
-    return datetime.now(tz=_KST).date()
+    return clock.now(_KST).date()
 
 
 def _quarter_period_end(year: int, reprt_code: str) -> date | None:

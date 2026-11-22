@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+from ante.core import clock
 
 if TYPE_CHECKING:
     from datetime import date
@@ -68,19 +69,19 @@ class RateLimiter:
         self._rate = tps_limit
         self._burst = int(tps_limit)
         self._tokens = float(self._burst)
-        self._last_refill = time.monotonic()
+        self._last_refill = clock.monotonic()
         self._lock = asyncio.Lock()
         self._daily_limit = daily_limit
         self._daily_count = 0
         self._now_date: Callable[[], date] = now_date or (
-            lambda: datetime.now(tz=_KST).date()
+            lambda: clock.now(_KST).date()
         )
         self._daily_date: date | None = None
 
     async def acquire(self) -> None:
         """토큰 하나를 소비한다. 필요 시 대기한다."""
         async with self._lock:
-            now = time.monotonic()
+            now = clock.monotonic()
             elapsed = now - self._last_refill
             self._tokens = min(self._burst, self._tokens + elapsed * self._rate)
             self._last_refill = now
