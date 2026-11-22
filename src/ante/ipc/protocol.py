@@ -3,13 +3,14 @@
 import asyncio
 import json
 import struct
+from typing import Any, cast
 
 from ante.ipc.exceptions import MessageTooLargeError
 
 MAX_MESSAGE_SIZE = 1_048_576
 
 
-async def encode(data: dict) -> bytes:
+async def encode(data: dict[str, Any]) -> bytes:
     """dict를 길이 접두사 + JSON 바이트로 직렬화."""
     payload = json.dumps(data, ensure_ascii=False).encode("utf-8")
     if len(payload) > MAX_MESSAGE_SIZE:
@@ -21,7 +22,7 @@ async def encode(data: dict) -> bytes:
     return length_prefix + payload
 
 
-async def decode(reader: asyncio.StreamReader) -> dict:
+async def decode(reader: asyncio.StreamReader) -> dict[str, Any]:
     """StreamReader에서 길이 접두사 프레이밍 메시지를 읽어 dict로 역직렬화."""
     raw_length = await reader.readexactly(4)
     (length,) = struct.unpack("!I", raw_length)
@@ -32,4 +33,4 @@ async def decode(reader: asyncio.StreamReader) -> dict:
         )
 
     payload = await reader.readexactly(length)
-    return json.loads(payload.decode("utf-8"))
+    return cast("dict[str, Any]", json.loads(payload.decode("utf-8")))
