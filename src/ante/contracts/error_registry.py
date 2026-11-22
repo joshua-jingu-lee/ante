@@ -46,13 +46,19 @@ from ante.broker.registry import (
 )
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.cli_errors import (
+    AccountMasterBootstrapFailedError,
+    AccountTestCreateFailedError,
+    AccountTestInactiveError,
+    AlreadyRunningError,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
+    CliAlreadyInitializedError,
     CliConfirmationRequiredError,
     CliOptionConflictError,
+    ConfigKeyNotFoundError,
     DataError,
     DataInvalidDatasetIdError,
     DataInvalidFilterError,
@@ -66,15 +72,26 @@ from ante.contracts.cli_errors import (
     InstrumentInvalidSymbolError,
     InstrumentIoError,
     InstrumentMissingColumnsError,
+    InstrumentSyncFailedError,
     InstrumentSyncSourceUnsupportedError,
     InvalidDateError,
     InvalidDateRangeError,
+    PidNotFoundError,
+    ProcessNotFoundError,
     ReportError,
     ReportInvalidStatusError,
     ReportNotFoundError,
     ReportValidationError,
+    RuleNotFoundError,
+    RuleUpdateError,
     TradeError,
     TradeNotFoundError,
+    UpdateCheckFailedError,
+    UpdateInstallFailedError,
+    UpdateInsufficientDiskSpaceError,
+    UpdateMigrationFailedError,
+    UpdateRollbackFailedError,
+    UpdateServerRunningError,
 )
 from ante.contracts.errors import ErrorSpec
 from ante.contracts.ipc_client_errors import (
@@ -591,6 +608,91 @@ _INVALID_DATE_RANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
+_ACCOUNT_MASTER_BOOTSTRAP_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_MASTER_BOOTSTRAP_FAILED",
+    category="state_conflict",
+)
+
+_ACCOUNT_TEST_CREATE_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_TEST_CREATE_FAILED",
+    category="internal",
+)
+
+_ACCOUNT_TEST_INACTIVE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_TEST_INACTIVE",
+    category="state_conflict",
+)
+
+_ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ALREADY_RUNNING",
+    category="state_conflict",
+)
+
+_CLI_ALREADY_INITIALIZED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_ALREADY_INITIALIZED",
+    category="state_conflict",
+)
+
+_CONFIG_KEY_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_KEY_NOT_FOUND",
+    category="not_found",
+)
+
+_INSTRUMENT_SYNC_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INSTRUMENT_SYNC_FAILED",
+    category="external",
+)
+
+_PID_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="PID_NOT_FOUND",
+    category="not_found",
+)
+
+_PROCESS_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="PROCESS_NOT_FOUND",
+    category="not_found",
+)
+
+_RULE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="RULE_NOT_FOUND",
+    category="not_found",
+)
+
+_RULE_UPDATE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="RULE_UPDATE_ERROR",
+    category="internal",
+)
+
+_UPDATE_CHECK_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_CHECK_FAILED",
+    category="external",
+)
+
+_UPDATE_INSTALL_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_INSTALL_FAILED",
+    category="external",
+)
+
+_UPDATE_INSUFFICIENT_DISK_SPACE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_INSUFFICIENT_DISK_SPACE",
+    category="state_conflict",
+)
+
+_UPDATE_MIGRATION_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_MIGRATION_FAILED",
+    category="internal",
+)
+
+_UPDATE_ROLLBACK_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_ROLLBACK_FAILED",
+    category="internal",
+)
+
+_UPDATE_SERVER_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UPDATE_SERVER_RUNNING",
+    category="state_conflict",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -693,6 +795,23 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     InstrumentSyncSourceUnsupportedError: _INSTRUMENT_SYNC_SOURCE_UNSUPPORTED_SPEC,
     InvalidDateError: _INVALID_DATE_SPEC,
     InvalidDateRangeError: _INVALID_DATE_RANGE_SPEC,
+    AccountMasterBootstrapFailedError: _ACCOUNT_MASTER_BOOTSTRAP_FAILED_SPEC,
+    AccountTestCreateFailedError: _ACCOUNT_TEST_CREATE_FAILED_SPEC,
+    AccountTestInactiveError: _ACCOUNT_TEST_INACTIVE_SPEC,
+    AlreadyRunningError: _ALREADY_RUNNING_SPEC,
+    CliAlreadyInitializedError: _CLI_ALREADY_INITIALIZED_SPEC,
+    ConfigKeyNotFoundError: _CONFIG_KEY_NOT_FOUND_SPEC,
+    InstrumentSyncFailedError: _INSTRUMENT_SYNC_FAILED_SPEC,
+    PidNotFoundError: _PID_NOT_FOUND_SPEC,
+    ProcessNotFoundError: _PROCESS_NOT_FOUND_SPEC,
+    RuleNotFoundError: _RULE_NOT_FOUND_SPEC,
+    RuleUpdateError: _RULE_UPDATE_ERROR_SPEC,
+    UpdateCheckFailedError: _UPDATE_CHECK_FAILED_SPEC,
+    UpdateInstallFailedError: _UPDATE_INSTALL_FAILED_SPEC,
+    UpdateInsufficientDiskSpaceError: _UPDATE_INSUFFICIENT_DISK_SPACE_SPEC,
+    UpdateMigrationFailedError: _UPDATE_MIGRATION_FAILED_SPEC,
+    UpdateRollbackFailedError: _UPDATE_ROLLBACK_FAILED_SPEC,
+    UpdateServerRunningError: _UPDATE_SERVER_RUNNING_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 

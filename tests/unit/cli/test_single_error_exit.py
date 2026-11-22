@@ -488,7 +488,7 @@ class TestIssue2571:
         if mode == "json":
             _assert_json_exit(result, "ACCOUNT_NOT_FOUND", message)
         else:
-            _assert_text_exit(result, f"Error: {message}")
+            _assert_text_exit(result, f"Error: ACCOUNT_NOT_FOUND: {message}")
 
     def test_audit_list_query_error_closes_db_once(
         self, mode: str, tmp_path: Path

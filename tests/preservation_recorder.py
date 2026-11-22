@@ -8,6 +8,11 @@ Lines로 덧붙인다. 단언보다 먼저 쓰므로 기대값을 고친 테스�
 ``stdout``·``stderr``(base64. stderr를 따로 잡지 않는 호출은 ``null``),
 ``raised``(``invoke``가 예외를 내보냈으면 그 타입 이름).
 
+인자·stdout·stderr 안의 실행 환경 경로는 기록 전에 자리표시자로 바꾼다. 호출
+시점의 ``HOME`` 값은 ``<HOME>``, ``ANTE_CONFIG_DIR`` 값은 ``<ANTE_CONFIG_DIR>``,
+pytest 세션의 basetemp는 ``<TMP>``다. 긴 경로부터 바꾼다. 값이 비어 있거나
+``/``인 변수는 바꾸지 않는다. 그 밖의 값(비밀값, pid, 시각)은 그대로 둔다.
+
 ``coverage run``으로 돌리면 호출마다 동적 문맥을 ``<nodeid>#<n>``으로 바꾼다.
 순번은 테스트가 시작할 때마다 0이다. 같은 테스트가 다시 돌면(재실행 플러그인
 등) 같은 키의 행이 두 번 쓰이고 비교 스크립트가 입력 오류로 멈춘다.
@@ -28,7 +33,42 @@ from click.testing import CliRunner
 
 ENV_VAR = "ANTE_PRESERVATION_RECORD"
 
-_current: dict[str, Any] = {"nodeid": "?", "counts": {}}
+_current: dict[str, Any] = {"nodeid": "?", "counts": {}, "config": None}
+
+_ENV_PLACEHOLDERS = (("HOME", "<HOME>"), ("ANTE_CONFIG_DIR", "<ANTE_CONFIG_DIR>"))
+
+
+def _basetemp() -> str:
+    factory = getattr(_current["config"], "_tmp_path_factory", None)
+    if factory is None:
+        return ""
+    return str(factory.getbasetemp())
+
+
+def env_paths() -> list[tuple[str, str]]:
+    pairs = []
+    for var, mark in _ENV_PLACEHOLDERS:
+        value = os.environ.get(var, "").rstrip(os.sep)
+        if value:
+            pairs.append((value, mark))
+    base = _basetemp().rstrip(os.sep)
+    if base:
+        pairs.append((base, "<TMP>"))
+    return sorted(pairs, key=lambda pair: len(pair[0]), reverse=True)
+
+
+def mask_text(text: str, pairs: list[tuple[str, str]]) -> str:
+    for value, mark in pairs:
+        text = text.replace(value, mark)
+    return text
+
+
+def _mask_bytes(data: bytes | None, pairs: list[tuple[str, str]]) -> bytes | None:
+    if data is None:
+        return None
+    for value, mark in pairs:
+        data = data.replace(os.fsencode(value), mark.encode())
+    return data
 
 
 def _b64(data: bytes | None) -> str | None:
@@ -50,10 +90,13 @@ def _install(out: Path) -> None:
         nodeid = _current["nodeid"]
         n = _current["counts"].get(nodeid, 0)
         _current["counts"][nodeid] = n + 1
+        pairs = env_paths()
         row: dict[str, Any] = {
             "nodeid": nodeid,
             "n": n,
-            "args": args if isinstance(args, str) else [str(x) for x in args or ()],
+            "args": mask_text(args, pairs)
+            if isinstance(args, str)
+            else [mask_text(str(x), pairs) for x in args or ()],
             "exit": None,
             "stdout": None,
             "stderr": None,
@@ -72,8 +115,8 @@ def _install(out: Path) -> None:
             if cov is not None:
                 cov.switch_context("")
         row["exit"] = result.exit_code
-        row["stdout"] = _b64(result.stdout_bytes)
-        row["stderr"] = _b64(result.stderr_bytes)
+        row["stdout"] = _b64(_mask_bytes(result.stdout_bytes, pairs))
+        row["stderr"] = _b64(_mask_bytes(result.stderr_bytes, pairs))
         _write(out, row)
         return result
 
@@ -86,6 +129,7 @@ def _write(out: Path, row: dict[str, Any]) -> None:
 
 
 def pytest_configure(config: pytest.Config) -> None:
+    _current["config"] = config
     out = os.environ.get(ENV_VAR)
     if out:
         _install(Path(out))

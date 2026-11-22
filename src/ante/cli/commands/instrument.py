@@ -17,6 +17,7 @@ from ante.contracts.cli_errors import (
     InstrumentInvalidSymbolError,
     InstrumentIoError,
     InstrumentMissingColumnsError,
+    InstrumentSyncFailedError,
     InstrumentSyncSourceUnsupportedError,
 )
 from ante.core.exchange import CANONICAL_EXCHANGES, is_canonical
@@ -197,8 +198,7 @@ def sync(
     result = asyncio.run(_run())
 
     if "error" in result:
-        click.echo(f"오류: {result['error']}", err=True)
-        raise SystemExit(1)
+        raise InstrumentSyncFailedError(result["error"])
 
     fmt.output(
         {
