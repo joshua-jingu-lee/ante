@@ -527,6 +527,51 @@ def test_run_json_does_not_read_text_only_fields() -> None:
     assert result.stderr == ""
 
 
+_BRACE_NAME = "mo{men}tum"
+_BRACE_JSON: str = (
+    '{\n  "message": "\'mo{men}tum\' 백테스트 이력이 없습니다.",\n  "runs": []\n}\n'
+)
+_BRACE_TEXT: tuple[str, str, int] = ("", "Error: BACKTEST_ERROR: 'men'\n", 1)
+
+
+def _invoke_history_brace(mode: str) -> Result:
+    from ante.cli.main import cli
+
+    @asynccontextmanager
+    async def _open_cli_db(ctx: Any, **_: Any) -> AsyncIterator[AsyncMock]:
+        yield AsyncMock()
+
+    args = ["backtest", "history", _BRACE_NAME]
+    with (
+        patch(
+            "ante.backtest.run_store.BacktestRunStore.list_by_strategy",
+            new=AsyncMock(return_value=[]),
+        ),
+        patch("ante.cli.commands.backtest.open_cli_db", new=_open_cli_db),
+    ):
+        return CliRunner(mix_stderr=False).invoke(
+            cli,
+            ["--format", "json", *args] if mode == "json" else args,
+            env={"ANTE_MEMBER_TOKEN": ""},
+            catch_exceptions=False,
+        )
+
+
+def test_history_empty_json_keeps_brace_name() -> None:
+    """중괄호가 든 전략 이름의 빈 이력도 JSON은 exit 0으로 이름을 그대로 낸다."""
+    result = _invoke_history_brace("json")
+    assert result.exit_code == 0, result.output
+    assert result.stdout == _BRACE_JSON
+    assert result.stderr == ""
+
+
+def test_history_empty_text_formats_message_again() -> None:
+    """같은 이름의 text는 지금처럼 안내 문장을 한 번 더 ``str.format``에 넣어
+    BACKTEST_ERROR로 실패한다(지금의 동작)."""
+    result = _invoke_history_brace("text")
+    assert (result.stdout, result.stderr, result.exit_code) == _BRACE_TEXT
+
+
 def test_run_text_fails_on_text_only_fields() -> None:
     """같은 결과 객체의 text 출력은 지금처럼 BACKTEST_ERROR로 실패한다."""
     result, _ = _invoke_case(
