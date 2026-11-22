@@ -121,9 +121,10 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
 - ``src/ante/core/account_id.py`` 의 ``InvalidAccountIdError.code =
   "VALIDATION_ERROR"`` 클래스 속성이 목표 코드의 출처다(``ante.account.errors``가
   같은 클래스를 재수출한다). IPC server 의 ``_dispatch`` 는 에러
-  레지스트리로 코드를 정한다. IPC 인자의 계좌 ID 는 명령의 요청
-  모델이 검증하고, 위반은 핸들러보다 먼저 ``VALIDATION_ERROR`` 가
-  된다(메시지 형식은 [ipc.md](../ipc/ipc.md) 의 「인자 검증 실패」).
+  레지스트리로 코드를 정한다. 요청 모델을 받는 명령의 IPC 인자 계좌
+  ID 는 그 모델의 계좌 ID 타입(``ante.ipc.requests.AccountId``)이
+  검증하고, 위반은 핸들러보다 먼저 ``VALIDATION_ERROR`` 가 된다(메시지
+  형식은 [ipc.md](../ipc/ipc.md) 의 「인자 검증 실패」).
 - **require_account_id 최우선성 일반 규칙 (분류 기준).** 어떤
   표면이 invalid ``account_id`` 에 목표 ``VALIDATION_ERROR`` 를
   내려면, 그 표면의 핸들러/CLI 콜백에서 ``require_account_id`` 가

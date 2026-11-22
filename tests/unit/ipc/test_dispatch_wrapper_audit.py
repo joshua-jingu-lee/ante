@@ -541,14 +541,12 @@ async def test_account_suspend_audit_detail_stripped_from_envelope(
 async def test_account_suspend_account_id_policy_required_preflight(
     socket_path: str,
 ) -> None:
-    """Refs #1852: ``account.suspend`` 는 ``account_id_policy="required"`` 로
-    invalid/missing ``account_id`` 를 ``VALIDATION_ERROR`` envelope 으로
-    handler 호출 전에 거부한다.
+    """Refs #1852: ``account.suspend`` 는 invalid/missing ``account_id`` 를
+    ``VALIDATION_ERROR`` envelope 으로 handler 호출 전에 거부한다.
 
-    ``require_account_id`` 가 wrapper preflight 단계에서 raise 되면 dispatch
-    의 generic except 가 ``getattr(e, "code", ...)`` 로 ``VALIDATION_ERROR``
-    envelope 을 만들어 반환한다(#1850 동형). ``account.suspend`` 실제 서비스
-    호출은 절대 일어나지 않는다.
+    요청 모델의 계좌 ID 타입(``ante.ipc.requests.AccountId``)이 ``_dispatch``
+    의 모델 검증 자리에서 거부한다. ``account.suspend`` 실제 서비스 호출은
+    절대 일어나지 않는다.
     """
     from ante.ipc.registry import register_all_handlers
 

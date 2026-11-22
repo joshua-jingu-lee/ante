@@ -151,6 +151,21 @@ async def test_invalid_account_id_is_rejected_before_the_handler(
 
 
 @pytest.mark.asyncio
+async def test_invalid_account_id_message_in_full() -> None:
+    harness = _Harness()
+    response = await harness.send("account.suspend", {"account_id": "default"})
+    assert response == {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "account.suspend 인자 검증 실패: account_id(invalid_account_id)",
+        },
+    }
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("command", COMMANDS)
 @pytest.mark.parametrize("account_id", ["abc", "a" * 30])
 async def test_account_id_at_the_pattern_bounds_is_accepted(
