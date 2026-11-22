@@ -409,7 +409,7 @@ def test_report_entries_registered_after_1847_sub_pr_6() -> None:
     본 단언은 #1847 sub-PR 6 가 report migration 을 완료한 시점부터
     lock 된다. 5 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_report_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_report_cli_output_bytes` 가
     책임진다.
     """
     expected_report_paths = {
@@ -454,7 +454,7 @@ def test_system_entries_registered_after_1847_sub_pr_7() -> None:
     본 단언은 #1847 sub-PR 7 가 system migration 을 완료한 시점부터
     lock 된다. 5 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_system_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_system_cli_output_bytes` 가
     책임진다.
 
     spec 표 (``docs/specs/cli/03-commands.md:77-78``) 는 ``start`` /
@@ -504,7 +504,7 @@ def test_config_entries_registered_after_1847_sub_pr_8() -> None:
     본 단언은 #1847 sub-PR 8 가 config migration 을 완료한 시점부터
     lock 된다. 3 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_config_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_config_cli_output_bytes` 가
     책임진다.
     """
     expected_config_paths = {
@@ -525,7 +525,7 @@ def test_rule_entries_registered_after_1847_sub_pr_8() -> None:
     본 단언은 #1847 sub-PR 8 가 rule migration 을 완료한 시점부터
     lock 된다. 3 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_rule_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_rule_cli_output_bytes` 가
     책임진다.
     """
     expected_rule_paths = {
@@ -586,7 +586,7 @@ def test_audit_entries_registered_after_1847_sub_pr_9() -> None:
     본 단언은 #1847 sub-PR 9 가 audit migration 을 완료한 시점부터
     lock 된다. 1 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_audit_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_audit_cli_output_bytes` 가
     책임진다.
     """
     expected_audit_paths = {
