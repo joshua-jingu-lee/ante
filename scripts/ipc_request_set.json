@@ -2272,6 +2272,572 @@
     "name": "bot.update:array"
    }
   ],
+  "broker.balance": [
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.balance:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.balance:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.balance:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.balance:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.balance:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "broker.balance:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "broker.balance:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.balance:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.balance:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.balance:account:bad"
+   }
+  ],
+  "broker.order_history": [
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.order_history:cli:0"
+   },
+   {
+    "args": {
+     "from_date": "2026-01-02",
+     "to_date": "2026-01-03",
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.order_history:cli:1"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.order_history:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.order_history:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.order_history:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.order_history:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "from_date": "5"
+    },
+    "key": "from_date",
+    "kind": "value",
+    "name": "broker.order_history:value:from_date:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "from_date": 7
+    },
+    "key": "from_date",
+    "kind": "value",
+    "name": "broker.order_history:value:from_date:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "from_date": true
+    },
+    "key": "from_date",
+    "kind": "value",
+    "name": "broker.order_history:value:from_date:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "from_date": null
+    },
+    "key": "from_date",
+    "kind": "value",
+    "name": "broker.order_history:value:from_date:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "to_date": "5"
+    },
+    "key": "to_date",
+    "kind": "value",
+    "name": "broker.order_history:value:to_date:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "to_date": 7
+    },
+    "key": "to_date",
+    "kind": "value",
+    "name": "broker.order_history:value:to_date:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "to_date": true
+    },
+    "key": "to_date",
+    "kind": "value",
+    "name": "broker.order_history:value:to_date:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "to_date": null
+    },
+    "key": "to_date",
+    "kind": "value",
+    "name": "broker.order_history:value:to_date:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "broker.order_history:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "broker.order_history:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.order_history:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.order_history:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.order_history:account:bad"
+   }
+  ],
+  "broker.positions": [
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.positions:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.positions:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.positions:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.positions:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.positions:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "broker.positions:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "broker.positions:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.positions:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.positions:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.positions:account:bad"
+   }
+  ],
+  "broker.reconcile": [
+   {
+    "args": {
+     "fix": false,
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.reconcile:cli:0"
+   },
+   {
+    "args": {
+     "fix": true,
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.reconcile:cli:1"
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.reconcile:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.reconcile:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.reconcile:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.reconcile:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": "5",
+     "account_id": "acct-1"
+    },
+    "key": "fix",
+    "kind": "value",
+    "name": "broker.reconcile:value:fix:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": 7,
+     "account_id": "acct-1"
+    },
+    "key": "fix",
+    "kind": "value",
+    "name": "broker.reconcile:value:fix:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": true,
+     "account_id": "acct-1"
+    },
+    "key": "fix",
+    "kind": "value",
+    "name": "broker.reconcile:value:fix:true",
+    "same_type": true
+   },
+   {
+    "args": {
+     "fix": null,
+     "account_id": "acct-1"
+    },
+    "key": "fix",
+    "kind": "value",
+    "name": "broker.reconcile:value:fix:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "broker.reconcile:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "broker.reconcile:array"
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.reconcile:account:default"
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.reconcile:account:empty"
+   },
+   {
+    "args": {
+     "fix": false,
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.reconcile:account:bad"
+   }
+  ],
+  "broker.status": [
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "broker.status:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.status:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.status:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.status:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "broker.status:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "broker.status:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "broker.status:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.status:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.status:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "broker.status:account:bad"
+   }
+  ],
   "config.set": [
    {
     "args": {

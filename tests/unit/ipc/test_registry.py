@@ -3,15 +3,19 @@
 import typing
 
 import pytest
+from pydantic import ValidationError
 
 from ante.ipc.registry import (
-    AccountIdPolicy,
     CommandRegistry,
     CommandSpec,
     ShutdownBehavior,
     register_all_handlers,
 )
-from ante.ipc.requests import BotCreateRequest
+from ante.ipc.requests import (
+    BotCreateRequest,
+    BrokerOrderHistoryRequest,
+    BrokerReconcileRequest,
+)
 
 
 @pytest.fixture
@@ -41,7 +45,6 @@ def test_register_and_get(registry: CommandRegistry) -> None:
     assert spec is not None
     assert spec.required_services == frozenset()
     assert spec.audit_action is None
-    assert spec.account_id_policy == "none"
     assert spec.shutdown_behavior is None
 
 
@@ -524,7 +527,9 @@ class TestBrokerOrderHistoryHandler:
         ]
         svc, broker = _make_order_history_svc(orders=rows)
 
-        result = await _handle_broker_order_history(svc, {"account_id": "acc-a"}, "cli")
+        result = await _handle_broker_order_history(
+            svc, BrokerOrderHistoryRequest(account_id="acc-a"), "cli"
+        )
 
         assert result == {"orders": rows}
         svc.account.get_broker.assert_awaited_once_with("acc-a")
@@ -543,11 +548,9 @@ class TestBrokerOrderHistoryHandler:
 
         await _handle_broker_order_history(
             svc,
-            {
-                "account_id": "acc-a",
-                "from_date": "2026-07-01",
-                "to_date": "2026-07-31",
-            },
+            BrokerOrderHistoryRequest(
+                account_id="acc-a", from_date="2026-07-01", to_date="2026-07-31"
+            ),
             "cli",
         )
 
@@ -565,7 +568,9 @@ class TestBrokerOrderHistoryHandler:
 
         svc, broker = _make_order_history_svc()
 
-        await _handle_broker_order_history(svc, {"account_id": "acc-a"}, "cli")
+        await _handle_broker_order_history(
+            svc, BrokerOrderHistoryRequest(account_id="acc-a"), "cli"
+        )
 
         broker.get_order_history.assert_awaited_once_with(None, None)
 
@@ -591,36 +596,27 @@ class TestBrokerOrderHistoryHandler:
         직접 호출자가 invalid ISO 를 그대로 어댑터에 흘린다. 코드는
         ``VALIDATION_ERROR`` (``InvalidAccountIdError`` 와 동일 SSOT 재사용).
         """
-        from ante.core.time import InvalidIsoDateError
-        from ante.ipc.registry import _handle_broker_order_history
-
-        svc, broker = _make_order_history_svc()
-
-        with pytest.raises(InvalidIsoDateError) as exc_info:
-            await _handle_broker_order_history(
-                svc, {"account_id": "acc-a", field: bad_date}, "cli"
+        with pytest.raises(ValidationError) as rejected:
+            BrokerOrderHistoryRequest.model_validate(
+                {"account_id": "acc-a", field: bad_date}
             )
 
-        assert exc_info.value.code == "VALIDATION_ERROR"
-        # fail-closed: 어댑터에 도달하지 않는다.
-        broker.get_order_history.assert_not_awaited()
+        assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
+            ((field,), "invalid_iso_date")
+        ]
 
     @pytest.mark.parametrize("bad_account", [None, "", "default", "bad id!"])
     async def test_invalid_account_id_rejected_before_broker_lookup(
         self, bad_account: str | None
     ) -> None:
         """invalid ``account_id`` 는 ``get_broker`` 이전에 VALIDATION_ERROR."""
-        from ante.account.errors import InvalidAccountIdError
-        from ante.ipc.registry import _handle_broker_order_history
+        with pytest.raises(ValidationError) as rejected:
+            BrokerOrderHistoryRequest.model_validate({"account_id": bad_account})
 
-        svc, broker = _make_order_history_svc()
-
-        with pytest.raises(InvalidAccountIdError) as exc_info:
-            await _handle_broker_order_history(svc, {"account_id": bad_account}, "cli")
-
-        assert exc_info.value.code == "VALIDATION_ERROR"
-        svc.account.get_broker.assert_not_awaited()
-        broker.get_order_history.assert_not_awaited()
+        expected = "string_type" if bad_account is None else "invalid_account_id"
+        assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
+            (("account_id",), expected)
+        ]
 
     async def test_account_id_checked_before_date_parsing(self) -> None:
         """account_id-first 정렬: 둘 다 invalid 면 account 오류가 먼저 난다.
@@ -628,17 +624,15 @@ class TestBrokerOrderHistoryHandler:
         #1636 broker handlers 의 account_id-first 계약을 신규 핸들러도 따른다
         (invalid account 가 날짜 오류로 오분류되지 않는다).
         """
-        from ante.account.errors import InvalidAccountIdError
-        from ante.ipc.registry import _handle_broker_order_history
-
-        svc, _broker = _make_order_history_svc()
-
-        with pytest.raises(InvalidAccountIdError):
-            await _handle_broker_order_history(
-                svc,
-                {"account_id": "default", "from_date": "2026-13-01"},
-                "cli",
+        with pytest.raises(ValidationError) as rejected:
+            BrokerOrderHistoryRequest.model_validate(
+                {"account_id": "default", "from_date": "2026-13-01"}
             )
+
+        assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
+            (("account_id",), "invalid_account_id"),
+            (("from_date",), "invalid_iso_date"),
+        ]
 
     def test_registered_spec_metadata(self) -> None:
         """등록 메타데이터 lock — ``broker.positions`` 미러 + ``orders`` key."""
@@ -649,7 +643,7 @@ class TestBrokerOrderHistoryHandler:
         assert spec is not None
         assert spec.is_mutating is False
         assert spec.required_services == frozenset({"account"})
-        assert spec.account_id_policy == "required"
+        assert spec.request_model is BrokerOrderHistoryRequest
         # read-only 조회는 audit 대상이 아니다 (audit.md 는 reconcile --fix 만).
         assert spec.audit_action is None
 
@@ -721,7 +715,7 @@ class TestHandleBrokerReconcileAccountLevel:
         )
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         # 서버 broker 조회 (caller-supplied 무시).
@@ -741,7 +735,7 @@ class TestHandleBrokerReconcileAccountLevel:
         )
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=False), "cli-user"
         )
 
         reconciler.reconcile.assert_awaited_once()
@@ -761,7 +755,7 @@ class TestHandleBrokerReconcileAccountLevel:
         reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         reconciler.reconcile.assert_awaited_once()
@@ -790,7 +784,7 @@ class TestHandleBrokerReconcileAccountLevel:
         ]
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         reconciler.reconcile.assert_not_called()
@@ -811,15 +805,19 @@ class TestHandleBrokerReconcileAccountLevel:
             broker_positions=[{"symbol": "005930", "quantity": 10}],
         )
 
+        with pytest.raises(ValidationError) as rejected:
+            BrokerReconcileRequest.model_validate(
+                {
+                    "account_id": "acc-a",
+                    "fix": True,
+                    "broker_positions": [{"symbol": "FAKE", "quantity": 9999}],
+                }
+            )
+        assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
+            (("broker_positions",), "extra_forbidden")
+        ]
         await _handle_broker_reconcile(
-            svc,
-            {
-                "account_id": "acc-a",
-                "fix": True,
-                # 악의/오류 입력 — 무시되어야 한다.
-                "broker_positions": [{"symbol": "FAKE", "quantity": 9999}],
-            },
-            "cli-user",
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         # reconcile 에 전달된 broker_positions 는 서버 조회값이어야 한다.
@@ -841,7 +839,7 @@ class TestHandleBrokerReconcileAccountLevel:
         ]
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=False), "cli-user"
         )
 
         reconciler.reconcile.assert_not_called()
@@ -864,7 +862,7 @@ class TestHandleBrokerReconcileAccountLevel:
         )
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         # 3봇(status 무관) → 2+봇 → detect-only.
@@ -886,7 +884,7 @@ class TestHandleBrokerReconcileAccountLevel:
         )
 
         result = await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         # acc-a 단일봇만 count → reconcile 위임.
@@ -897,19 +895,19 @@ class TestHandleBrokerReconcileAccountLevel:
     @pytest.mark.asyncio
     async def test_require_account_id_rejected(self):
         """(j) require_account_id 회귀 — invalid account_id 는 즉시 거부."""
-        from ante.account.errors import InvalidAccountIdError
-        from ante.ipc.registry import _handle_broker_reconcile
 
         svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
         )
 
-        with pytest.raises(InvalidAccountIdError):
-            await _handle_broker_reconcile(
-                svc, {"account_id": "default", "fix": True}, "cli-user"
+        with pytest.raises(ValidationError) as rejected:
+            BrokerReconcileRequest.model_validate(
+                {"account_id": "default", "fix": True}
             )
 
-        # broker 조회/reconcile 까지 도달하지 않아야 한다.
+        assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
+            (("account_id",), "invalid_account_id")
+        ]
         svc.account.get_broker.assert_not_called()
         reconciler.reconcile.assert_not_called()
         reconciler.detect_account_level.assert_not_called()
@@ -943,7 +941,7 @@ class TestHandleBrokerReconcileConditionalAudit:
         reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": True}]
 
         await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         audit_logger.log.assert_awaited_once_with(
@@ -974,7 +972,7 @@ class TestHandleBrokerReconcileConditionalAudit:
 
         with pytest.raises(RuntimeError, match="diff failed"):
             await _handle_broker_reconcile(
-                svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+                svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
             )
 
         # compute_account_diff 실패 이전에 audit 가 이미 발화됐어야 한다.
@@ -998,7 +996,7 @@ class TestHandleBrokerReconcileConditionalAudit:
         reconciler.reconcile.return_value = [{"symbol": "005930", "corrected": False}]
 
         await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": False}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=False), "cli-user"
         )
 
         audit_logger.log.assert_not_awaited()
@@ -1020,7 +1018,7 @@ class TestHandleBrokerReconcileConditionalAudit:
         ]
 
         await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         # detect-only 경로 → adjustments 없음 → audit 미발화.
@@ -1040,7 +1038,7 @@ class TestHandleBrokerReconcileConditionalAudit:
         ]
 
         await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         audit_logger.log.assert_not_awaited()
@@ -1058,7 +1056,7 @@ class TestHandleBrokerReconcileConditionalAudit:
         reconciler.reconcile.return_value = []
 
         await _handle_broker_reconcile(
-            svc, {"account_id": "acc-a", "fix": True}, "cli-user"
+            svc, BrokerReconcileRequest(account_id="acc-a", fix=True), "cli-user"
         )
 
         audit_logger.log.assert_not_awaited()
@@ -1159,7 +1157,9 @@ class TestHandleBrokerReconcileUnattributedHolding:
         from ante.ipc.registry import _handle_broker_reconcile
 
         result = await _handle_broker_reconcile(
-            real_svc, {"account_id": "acc-test", "fix": True}, "cli-user"
+            real_svc,
+            BrokerReconcileRequest(account_id="acc-test", fix=True),
+            "cli-user",
         )
 
         # 미귀속 보유 → 보정 0건(force-write 없음).
@@ -1183,7 +1183,9 @@ class TestHandleBrokerReconcileUnattributedHolding:
         from ante.ipc.registry import _handle_broker_reconcile
 
         result = await _handle_broker_reconcile(
-            real_svc, {"account_id": "acc-test", "fix": False}, "cli-user"
+            real_svc,
+            BrokerReconcileRequest(account_id="acc-test", fix=False),
+            "cli-user",
         )
 
         assert result["adjustments"] == []
@@ -1272,7 +1274,6 @@ class TestCommandSpecMetadataExtension:
             "is_mutating",
             "required_services",
             "audit_action",
-            "account_id_policy",
             "shutdown_behavior",
             "request_model",
         }
@@ -1290,7 +1291,6 @@ class TestCommandSpecMetadataExtension:
         assert spec is not None
         assert spec.required_services == frozenset()
         assert spec.audit_action is None
-        assert spec.account_id_policy == "none"
         assert spec.shutdown_behavior is None
 
     def test_register_kwargs_full_metadata(self, registry: CommandRegistry) -> None:
@@ -1306,14 +1306,12 @@ class TestCommandSpecMetadataExtension:
             is_mutating=True,
             required_services=frozenset({"bot_manager", "audit_logger"}),
             audit_action="ext.cmd",
-            account_id_policy="required",
             shutdown_behavior="block_all",
         )
         spec = registry.get("ext.cmd")
         assert spec is not None
         assert spec.required_services == frozenset({"bot_manager", "audit_logger"})
         assert spec.audit_action == "ext.cmd"
-        assert spec.account_id_policy == "required"
         assert spec.shutdown_behavior == "block_all"
 
     def test_shutdown_behavior_alias_values(self) -> None:
@@ -1322,14 +1320,6 @@ class TestCommandSpecMetadataExtension:
             "block_on_mutating",
             "block_all",
             "allow_all",
-        }
-
-    def test_account_id_policy_alias_values(self) -> None:
-        """``AccountIdPolicy`` Literal alias 값 집합 lock."""
-        assert set(typing.get_args(AccountIdPolicy)) == {
-            "none",
-            "required",
-            "optional_filter",
         }
 
 
@@ -1367,17 +1357,6 @@ class TestRegisteredCommandsMetadataCompleteness:
                 assert isinstance(name, str) and name, (
                     f"{spec.name} required_services has non-string item {name!r}"
                 )
-
-    def test_all_commands_account_id_policy_valid(
-        self, loaded: CommandRegistry
-    ) -> None:
-        """27 commands 모두 ``account_id_policy``가 정의된 Literal 값을
-        가진다."""
-        allowed = set(typing.get_args(AccountIdPolicy))
-        for spec in loaded.iter_specs():
-            assert spec.account_id_policy in allowed, (
-                f"{spec.name} account_id_policy={spec.account_id_policy!r}"
-            )
 
     def test_audit_action_only_for_audit_logger_dependent_commands(
         self, loaded: CommandRegistry
