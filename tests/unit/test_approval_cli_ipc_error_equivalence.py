@@ -18,8 +18,8 @@ path 와 IPC envelope path 양쪽에서 **동일한 public code** 를 노출함�
 approval CLI 는 service 호출이 모두 IPC 경유 (``ipc_send`` → server →
 service) 이므로 CLI direct path equivalence 는 다음 두 axis 로 검증한다:
 
-1. ``ipc_send`` mock 로 IPC envelope 의 ``{code, message}`` 를 주입한 뒤,
-   middleware ``ClickException`` 분기 (``ipc_error_code`` 부착) 가 동일
+1. ``ipc_send`` mock 로 IPC envelope 의 ``{code, message}`` 를
+   ``IPCRemoteError`` 로 주입한 뒤, 진입점 훅이 동일
    code 로 CLI envelope 을 surface 함을 확인.
 2. ``info`` / ``review`` 처럼 ``_find_request`` 가 CLI 안에서 직접
    ``ApprovalNotFoundError`` 를 raise 하는 경우는 typed except 매핑으로
@@ -180,11 +180,9 @@ class TestApprovalStatusConflictEquivalence:
     안정 코드 ``APPROVAL_STATUS_CONFLICT`` (state_conflict 카테고리).
 
     CLI direct path: ``approval approve`` 표면 — ``ipc_send`` 가 server error
-    envelope (code=``APPROVAL_STATUS_CONFLICT``) 를 ``ClickException`` 으로
-    변환하고 ``ipc_error_code`` 를 부착한다. middleware 의 ClickException
-    분기가 동일 코드로 CLI envelope 을 surface 한다 (``approval.py`` line
-    627-628 의 ``except click.ClickException: raise`` 가 middleware 까지 그대로
-    bubble).
+    envelope (code=``APPROVAL_STATUS_CONFLICT``) 를 ``IPCRemoteError`` 로
+    올린다. 명령이 잡지 않고, 진입점 훅이 동일 코드로 CLI envelope 을
+    surface 한다.
 
     IPC path: 실제 ``approval.approve`` handler 를 ``IPCServer`` 위에서
     실행해 envelope code 를 확인한다 (#1842 ``account.suspend`` 1:1 동형
@@ -192,9 +190,8 @@ class TestApprovalStatusConflictEquivalence:
     """
 
     def test_cli_direct_status_conflict_via_approve(self, runner: CliRunner) -> None:
-        # ``ipc_send`` 가 server error envelope 을 ClickException 으로 변환할 때
-        # ``ipc_error_code`` 를 부착한다. middleware ``ClickException`` 분기가
-        # 동일 코드로 CLI envelope 을 surface.
+        # ``ipc_send`` 가 server error envelope 을 ``IPCRemoteError`` 로 올리고
+        # 진입점 훅이 그 code 로 CLI envelope 을 surface.
 
         click_exc = IPCRemoteError(
             "APPROVAL_STATUS_CONFLICT",
@@ -284,9 +281,8 @@ class TestApprovalValidationEquivalence:
 
     CLI direct path: ``approval request`` 표면 — service ``create()`` 의
     사전검증 ``fail`` grade 거부가 IPC envelope (code=``APPROVAL_VALIDATION_ERROR``)
-    로 surface 된다. ``ipc_send`` 가 ClickException 으로 변환하고
-    ``ipc_error_code`` 를 부착하면 middleware 가 동일 코드로 CLI envelope 을
-    surface 한다.
+    로 surface 된다. ``ipc_send`` 가 ``IPCRemoteError`` 로 올리면 진입점 훅이
+    동일 코드로 CLI envelope 을 surface 한다.
 
     IPC path: ``ipc_error_payload`` helper 가 class-level ``.code`` (본 PR
     sub-PR 2 에서 신규 부여) 와 registry 등록을 모두 이용해 동일 코드를

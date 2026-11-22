@@ -29,7 +29,6 @@ import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -58,19 +57,19 @@ _MASTER = Member(
 )
 
 
-def _server_not_running_exc() -> click.ClickException:
-    """``ServerNotRunningError`` → ``ipc_send`` ClickException 대역."""
+def _server_not_running_exc() -> IPCServerNotRunningError:
+    """``ServerNotRunningError`` → ``ipc_send`` 예외 대역."""
     return IPCServerNotRunningError(
         "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
     )
 
 
-def _timeout_exc() -> click.ClickException:
+def _timeout_exc() -> IPCClientTimeoutError:
     return IPCClientTimeoutError("서버 응답 시간 초과")
 
 
-def _server_error_exc(code: str, message: str) -> click.ClickException:
-    """서버 error envelope → ``ipc_send`` ClickException 대역."""
+def _server_error_exc(code: str, message: str) -> IPCRemoteError:
+    """서버 error envelope → ``ipc_send`` 예외 대역."""
     return IPCRemoteError(code, message)
 
 

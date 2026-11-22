@@ -34,7 +34,6 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -343,7 +342,7 @@ class TestBrokerCircuitOpenEquivalence:
 # ── order-history / reconcile 의 IPC 오류와 직접 경로 오류 ────────────────
 
 
-def _ipc_click_exc(code: str, message: str) -> click.ClickException:
+def _ipc_click_exc(code: str, message: str) -> Exception:
     if code == "IPC_SERVER_NOT_RUNNING":
         return IPCServerNotRunningError(message)
     return IPCRemoteError(code, message)

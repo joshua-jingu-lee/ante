@@ -26,8 +26,8 @@
 
 bot CLI 의 mutating 표면 (``create``/``remove``/``start``/``stop``/``status``)
 은 모두 ``ipc_send`` 경유이므로 CLI direct path equivalence 는 ``ipc_send``
-mock 으로 server-side envelope (``ipc_error_code``/``ipc_error_message``) 을
-주입한 뒤 CLI middleware ClickException 분기가 동일 코드를 surface 함을 확인
+mock 으로 server-side envelope 을 ``IPCRemoteError`` 로
+주입한 뒤 CLI 진입점 훅이 동일 코드를 surface 함을 확인
 한다. ``signal-key --rotate`` 는 CLI 안에서 직접 sentinel (``code`` 키) 을
 반환하므로 별도 분기.
 

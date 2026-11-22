@@ -503,8 +503,8 @@ class TestBadArgumentUsageExplicit:
 
 class TestNonUsageClickExceptionJson:
     """JSON 모드의 비-UsageError ``ClickException`` 은 ``{status, code, message}``
-    envelope 과 non-zero exit 로 끝난다. code 는 ``ipc_error_code`` 가 있으면 그
-    값, 없으면 ``IPC_ERROR`` 다."""
+    envelope 과 non-zero exit 로 끝난다. code 는 ``IPC_ERROR`` 다.
+    ``IPCRemoteError`` 는 ``ClickException`` 이 아니고 원격 code 를 그대로 낸다."""
 
     @staticmethod
     def _synthetic_cli(exc: click.ClickException) -> click.Group:

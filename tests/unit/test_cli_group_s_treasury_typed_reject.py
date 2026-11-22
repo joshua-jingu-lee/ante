@@ -15,9 +15,9 @@ oracle A7 @ a5d8edf finding:
        ``TREASURY_INSUFFICIENT_BALANCE`` /
        ``TREASURY_DEALLOCATE_EXCEEDS_AVAILABLE`` /
        ``TREASURY_BUDGET_NOT_FOUND``).
-    3. CLI ``treasury allocate``/``deallocate`` 는 ``ipc_send`` envelope 의
-       ``ipc_error_code`` 를 set_balance/snapshot/status (#1758/#1725) 와
-       동형으로 ``fmt.error(message, code=code)`` 매핑한다.
+    3. CLI ``treasury allocate``/``deallocate`` 는 ``ipc_send`` 가 올린
+       ``IPCRemoteError`` 를 set_balance/snapshot/status (#1758/#1725) 와
+       동형으로 진입점 훅에 맡겨 그 code 로 낸다.
 
 본 테스트는 CLI runner 로 mock IPC envelope 응답을 받아 stable ``code`` 가
 사용자에게 surface 되는지 R-case 별로 검증한다.
