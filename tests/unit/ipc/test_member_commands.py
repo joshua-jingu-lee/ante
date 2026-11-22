@@ -305,23 +305,83 @@ async def test_empty_secrets_reach_the_service(
     assert method.await_args.args[1:] == tuple(args.values())
 
 
+def _rejected(command: str, loc: str, kind: str) -> dict:
+    return {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(command, (loc, kind)),
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_scopes_as_a_string_is_split_into_characters() -> None:
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("member.update_scopes", {"member_id": "m-7"}),
+        ("member.register", {"member_id": "m-7", "member_type": "agent"}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("scopes", "loc", "kind"),
+    [
+        ("a,b", "scopes", "list_type"),
+        (None, "scopes", "list_type"),
+        (["a", 7], "scopes.1", "string_type"),
+    ],
+)
+async def test_scopes_other_than_a_list_of_strings_is_rejected(
+    command: str, args: dict[str, Any], scopes: Any, loc: str, kind: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, {**args, "scopes": scopes})
+    assert response == _rejected(command, loc, kind)
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+async def test_an_empty_scope_list_is_accepted() -> None:
     harness = _Harness()
     response = await harness.send(
-        "member.update_scopes", {"member_id": "m-7", "scopes": "a,b"}
+        "member.update_scopes", {"member_id": "m-7", "scopes": []}
     )
     assert response["status"] == "ok", response
     harness.member.update_scopes.assert_awaited_once_with(
-        "m-7", ["a", ",", "b"], updated_by="ops-lead"
+        "m-7", [], updated_by="ops-lead"
     )
 
 
 @pytest.mark.asyncio
-async def test_missing_member_id_is_an_execution_error() -> None:
+async def test_missing_member_id_is_rejected_in_full() -> None:
     harness = _Harness()
     response = await harness.send("member.suspend", {})
-    assert response["error"]["code"] == "EXECUTION_ERROR", response
+    assert response == {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "member.suspend 인자 검증 실패: member_id(missing)",
+        },
+    }
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args", "loc"),
+    [
+        ("member.reset_password", {"recovery_key": "rk-fixed-1"}, "new_password"),
+        ("member.regenerate_recovery_key", {}, "password"),
+    ],
+)
+async def test_missing_secret_is_rejected(
+    command: str, args: dict[str, Any], loc: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, args)
+    assert response == _rejected(command, loc, "missing")
     harness.assert_no_service_call()
 
 

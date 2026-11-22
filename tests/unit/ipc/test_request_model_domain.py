@@ -22,7 +22,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import annotated_types
 import pytest
-from pydantic import AfterValidator, Field, field_validator
+from pydantic import AfterValidator, Field, SecretStr, field_validator
 from pydantic.fields import FieldInfo
 
 from ante.core.registry import ServiceRegistry
@@ -41,6 +41,8 @@ ACCEPTED_KINDS = {
     "bool": {"bool"},
     "literal": {"string"},
     "validated": {"string"},
+    "secret": {"string"},
+    "list": {"array"},
 }
 WRONG_TYPE = {
     "str": "string_type",
@@ -49,6 +51,8 @@ WRONG_TYPE = {
     "bool": "bool_type",
     "literal": "literal_error",
     "validated": "string_type",
+    "secret": "string_type",
+    "list": "list_type",
 }
 CONSTRAINT_TYPE = {
     "ge": "greater_than_equal",
@@ -61,6 +65,13 @@ CONSTRAINT_TYPE = {
 NOT_FINITE = (("nan", float("nan")), ("inf", float("inf")), ("-inf", float("-inf")))
 EXTRA_KEY = "zz_extra"
 UNBOUNDED_FIELDS: frozenset[tuple[str, str]] = frozenset()
+SECRET_FIELDS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("MemberResetPasswordRequest", "recovery_key"),
+        ("MemberResetPasswordRequest", "new_password"),
+        ("MemberRegenerateRecoveryKeyRequest", "password"),
+    }
+)
 
 
 def validation_message(command: str, *errors: tuple[str, str]) -> str:
@@ -156,6 +167,12 @@ def _kind(info: FieldInfo) -> str:
         if not all(isinstance(m, str) for m in typing.get_args(annotation)):
             raise UnsupportedFieldError(f"non-string Literal: {annotation!r}")
         return "literal"
+    if annotation is SecretStr:
+        return "secret"
+    if typing.get_origin(annotation) is list:
+        if typing.get_args(annotation) != (str,):
+            raise UnsupportedFieldError(f"list of other than str: {annotation!r}")
+        return "list"
     for kind, python_type in (("bool", bool), ("int", int), ("float", float)):
         if annotation is python_type:
             return kind
@@ -225,6 +242,10 @@ def _base_value(info: FieldInfo) -> Any:
         return 2.5 if default == 1.5 else 1.5
     if kind == "bool":
         return default is not True
+    if kind == "secret":
+        return "v"
+    if kind == "list":
+        return ["w"] if default == ["v"] else ["v"]
     entry = _validated(info)
     if entry is not None:
         if _has_default(info) and info.default == entry.base:
@@ -289,6 +310,10 @@ def _field_variants(
     if kind == "literal":
         marker = markers.next()
         one("literal", "literal_error", marker, marker)
+    if kind == "list":
+        out.append(
+            Variant(f"{name}.0", "element", "string_type", {**base, name: [7]}, None)
+        )
     entry = _validated(info)
     if entry is not None:
         for label, value in entry.rejects:
@@ -376,6 +401,8 @@ class _TableRequest(IPCRequest):
     flag: bool
     code: str = Field(min_length=3)
     account_id: AccountId
+    secret: SecretStr
+    tags: list[str] = []
 
 
 class _SecretRequest(IPCRequest):
@@ -465,6 +492,13 @@ def _server(
     return server, recorder
 
 
+def _plain(request: IPCRequest) -> dict[str, Any]:
+    return {
+        name: value.get_secret_value() if isinstance(value, SecretStr) else value
+        for name, value in request.model_dump().items()
+    }
+
+
 async def _send(server: IPCServer, command: str, args: Any) -> dict:
     return await server._dispatch(
         {"id": "gen-1", "command": command, "args": args, "actor": "ops-lead"}
@@ -523,6 +557,26 @@ def test_no_field_without_a_domain() -> None:
     assert unbounded == UNBOUNDED_FIELDS
 
 
+def _secret_fields() -> list[tuple[CommandSpec, str]]:
+    return [
+        (spec, name)
+        for spec in _modeled_specs()
+        if spec.request_model is not None
+        for name, info in spec.request_model.model_fields.items()
+        if info.annotation is SecretStr
+    ]
+
+
+def test_secret_fields_are_exactly_the_declared_set() -> None:
+    found = {
+        (spec.request_model.__name__, name)
+        for spec, name in _secret_fields()
+        if spec.request_model is not None
+    }
+    assert found
+    assert found == SECRET_FIELDS
+
+
 # ── 생성기 자체의 표 ─────────────────────────────────────────────────────────
 
 
@@ -572,6 +626,13 @@ def test_generator_table_for_each_field_kind() -> None:
         ("account_id", "reject:long", "invalid_account_id"),
         ("account_id", "reject:pattern", "invalid_account_id"),
         ("account_id", "reject:marker", "invalid_account_id"),
+        ("secret", "missing", "missing"),
+        *(("secret", f"wrong:{k}", "string_type") for k in string_kinds),
+        *(
+            ("tags", f"wrong:{k}", "list_type")
+            for k in ("string", "int", "float", "bool", "null", "object")
+        ),
+        ("tags.0", "element", "string_type"),
         ("zz_extra", "extra", "extra_forbidden"),
         ("args", "not_object:string", "model_type"),
         ("args", "not_object:int", "model_type"),
@@ -587,6 +648,8 @@ def test_generator_table_for_each_field_kind() -> None:
         "flag": True,
         "code": "vvv",
         "account_id": "acct-1",
+        "secret": "v",
+        "tags": ["v"],
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
         ("level", "ge", 1),
@@ -610,7 +673,7 @@ def test_generator_one_change_per_variant() -> None:
             if base.get(key, ...) != variant.args.get(key, ...)
             or (key in base) != (key in variant.args)
         }
-        assert changed == {variant.loc}, variant
+        assert changed == {variant.loc.split(".")[0]}, variant
 
 
 def test_generator_rejects_fields_it_cannot_bound() -> None:
@@ -621,7 +684,13 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
         values: dict[str, Any]
 
     class _Listed(IPCRequest):
-        items: list[str]
+        items: list[int]
+
+    class _ShortList(IPCRequest):
+        items: list[str] = Field(min_length=1)
+
+    class _BoundedSecret(IPCRequest):
+        secret: SecretStr = Field(max_length=10)
 
     class _Patterned(IPCRequest):
         name: str = Field(pattern="^a+$")
@@ -632,7 +701,16 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
     class _Bounded(IPCRequest):
         account_id: Annotated[AccountId, Field(max_length=10)]
 
-    for model in (_Open, _Mapping, _Listed, _Patterned, _Unlisted, _Bounded):
+    for model in (
+        _Open,
+        _Mapping,
+        _Listed,
+        _ShortList,
+        _BoundedSecret,
+        _Patterned,
+        _Unlisted,
+        _Bounded,
+    ):
         with pytest.raises(UnsupportedFieldError):
             variants(model, "00")
 
@@ -653,7 +731,7 @@ async def test_base_args_reach_the_handler_as_the_model(
     assert response == {"id": "gen-1", "status": "ok", "result": {"recorded": True}}
     assert len(recorder.calls) == 1
     assert type(recorder.calls[0]) is model
-    assert recorder.calls[0].model_dump() == base
+    assert _plain(recorder.calls[0]) == base
 
 
 @pytest.mark.asyncio
@@ -729,3 +807,47 @@ async def test_user_validator_message_does_not_reflect_the_input(
     ]
     assert marker not in json.dumps(response, ensure_ascii=False)
     assert marker not in caplog.text
+
+
+def _secret_cases() -> list[Any]:
+    found = _secret_fields()
+    assert found
+    return [pytest.param(spec, name, id=f"{spec.name}-{name}") for spec, name in found]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("spec", "name"), _secret_cases())
+async def test_secret_in_a_rejected_request_is_not_reflected(
+    spec: CommandSpec, name: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKSECRET001VALUE"
+    assert spec.request_model is not None
+    server, recorder = _server(spec.name, spec.request_model, spec)
+    args = {**base_args(spec.request_model), name: marker, EXTRA_KEY: 7}
+    response = await _send(server, spec.name, args)
+    assert response == {
+        "id": "gen-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(spec.name, (EXTRA_KEY, "extra_forbidden")),
+        },
+    }
+    assert recorder.calls == []
+    assert marker not in json.dumps(response, ensure_ascii=False)
+    assert marker not in caplog.text
+
+
+@pytest.mark.parametrize(("spec", "name"), _secret_cases())
+def test_secret_is_masked_in_the_validated_model(spec: CommandSpec, name: str) -> None:
+    marker = "MARKSECRET002VALUE"
+    assert spec.request_model is not None
+    request = spec.request_model.model_validate(
+        {**base_args(spec.request_model), name: marker}
+    )
+    assert getattr(request, name).get_secret_value() == marker
+    for text in (repr(request), str(request), request.model_dump_json()):
+        assert marker not in text
+        assert "**********" in text
+    assert marker not in str(request.model_dump())

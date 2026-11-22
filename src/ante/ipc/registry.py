@@ -11,6 +11,15 @@ from ante.ipc.requests import (
     AccountActivateRequest,
     AccountSuspendRequest,
     IPCRequest,
+    MemberReactivateRequest,
+    MemberRegenerateRecoveryKeyRequest,
+    MemberRegisterRequest,
+    MemberResetPasswordRequest,
+    MemberRevokeRequest,
+    MemberRotateTokenRequest,
+    MemberSetEmojiRequest,
+    MemberSuspendRequest,
+    MemberUpdateScopesRequest,
     StrategySetStatusRequest,
     SystemClearHaltRequest,
     SystemHaltRequest,
@@ -663,11 +672,11 @@ async def _handle_strategy_set_status(
 
 
 async def _handle_member_update_scopes(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberUpdateScopesRequest, actor: str
 ) -> dict:
     """멤버 scope 업데이트 IPC handler."""
-    member_id = args["member_id"]
-    scopes = list(args.get("scopes") or [])
+    member_id = request.member_id
+    scopes = request.scopes
     member_service = getattr(svc, "member_service", None)
     if member_service is None:
         raise RuntimeError("member service not configured")
@@ -686,19 +695,19 @@ async def _handle_member_update_scopes(
 
 
 async def _handle_member_register(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberRegisterRequest, actor: str
 ) -> dict:
     """멤버 등록 IPC handler."""
-    member_id = args["member_id"]
+    member_id = request.member_id
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
     created, token = await member.register(
         member_id=member_id,
-        member_type=args["member_type"],
-        org=args.get("org", "default"),
-        name=args.get("name", ""),
-        scopes=list(args.get("scopes") or []),
+        member_type=request.member_type,
+        org=request.org,
+        name=request.name,
+        scopes=request.scopes,
         registered_by=actor,
     )
     return {
@@ -717,11 +726,11 @@ async def _handle_member_register(
 
 
 async def _handle_member_set_emoji(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberSetEmojiRequest, actor: str
 ) -> dict:
     """멤버 emoji 설정 IPC handler."""
-    member_id = args["member_id"]
-    emoji = args["emoji"]
+    member_id = request.member_id
+    emoji = request.emoji
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -738,10 +747,10 @@ async def _handle_member_set_emoji(
 
 
 async def _handle_member_suspend(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberSuspendRequest, actor: str
 ) -> dict:
     """멤버 일시 정지 IPC handler."""
-    member_id = args["member_id"]
+    member_id = request.member_id
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -758,10 +767,10 @@ async def _handle_member_suspend(
 
 
 async def _handle_member_reactivate(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberReactivateRequest, actor: str
 ) -> dict:
     """멤버 재활성화 IPC handler."""
-    member_id = args["member_id"]
+    member_id = request.member_id
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -778,10 +787,10 @@ async def _handle_member_reactivate(
 
 
 async def _handle_member_revoke(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberRevokeRequest, actor: str
 ) -> dict:
     """멤버 영구 폐기 IPC handler."""
-    member_id = args["member_id"]
+    member_id = request.member_id
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -798,10 +807,10 @@ async def _handle_member_revoke(
 
 
 async def _handle_member_rotate_token(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberRotateTokenRequest, actor: str
 ) -> dict:
     """토큰 재발급 IPC handler."""
-    member_id = args["member_id"]
+    member_id = request.member_id
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
@@ -831,14 +840,14 @@ async def _resolve_master_member_id(member: Any) -> str:
 
 
 async def _handle_member_reset_password(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberResetPasswordRequest, actor: str
 ) -> dict:
     """recovery key 로 패스워드 리셋 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
-    recovery_key = args["recovery_key"]
-    new_password = args["new_password"]
+    recovery_key = request.recovery_key.get_secret_value()
+    new_password = request.new_password.get_secret_value()
     master_id = await _resolve_master_member_id(member)
     await member.reset_password(master_id, recovery_key, new_password)
     return {
@@ -852,13 +861,13 @@ async def _handle_member_reset_password(
 
 
 async def _handle_member_regenerate_recovery_key(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: MemberRegenerateRecoveryKeyRequest, actor: str
 ) -> dict:
     """recovery key 재발급 IPC handler (auth-exempt)."""
     member = getattr(svc, "member_service", None)
     if member is None:
         raise RuntimeError("member service not configured")
-    password = args["password"]
+    password = request.password.get_secret_value()
     master_id = await _resolve_master_member_id(member)
     new_key = await member.regenerate_recovery_key(master_id, password)
     return {
@@ -1270,6 +1279,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.update_scopes",
+        request_model=MemberUpdateScopesRequest,
     )
     registry.register(
         "member.register",
@@ -1277,6 +1287,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.register",
+        request_model=MemberRegisterRequest,
     )
     registry.register(
         "member.set_emoji",
@@ -1284,6 +1295,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.set_emoji",
+        request_model=MemberSetEmojiRequest,
     )
     registry.register(
         "member.suspend",
@@ -1291,6 +1303,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.suspend",
+        request_model=MemberSuspendRequest,
     )
     registry.register(
         "member.reactivate",
@@ -1298,6 +1311,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.reactivate",
+        request_model=MemberReactivateRequest,
     )
     registry.register(
         "member.revoke",
@@ -1305,6 +1319,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.revoke",
+        request_model=MemberRevokeRequest,
     )
     registry.register(
         "member.rotate_token",
@@ -1312,6 +1327,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.rotate_token",
+        request_model=MemberRotateTokenRequest,
     )
     registry.register(
         "member.reset_password",
@@ -1319,6 +1335,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.reset_password",
+        request_model=MemberResetPasswordRequest,
     )
     registry.register(
         "member.regenerate_recovery_key",
@@ -1326,6 +1343,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"member_service", "audit_logger"}),
         audit_action="member.regenerate_recovery_key",
+        request_model=MemberRegenerateRecoveryKeyRequest,
     )
     registry.register(
         "config.set",
