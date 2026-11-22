@@ -6,10 +6,10 @@ import asyncio
 import logging
 import os
 import shlex
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -45,13 +45,13 @@ def member() -> None:
     """멤버 등록·관리."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
 
 
 def _resolve_secret_non_interactive(
-    fmt,
+    fmt: Any,
     *,
     env_name: str | None,
     file_path: str | None,
@@ -140,7 +140,7 @@ def member_list(
     """멤버 목록 조회."""
     fmt = get_formatter(ctx)
 
-    async def _run_list() -> list[dict]:
+    async def _run_list() -> list[dict[str, Any]]:
         async with _create_service(ctx) as service:
             members = await service.list_members(
                 member_type=member_type, org=org, status=status
@@ -187,7 +187,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
     """멤버 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
-    async def _run_info() -> dict | None:
+    async def _run_info() -> dict[str, Any] | None:
         async with _create_service(ctx) as service:
             m = await service.get(member_id)
             if not m:
@@ -271,14 +271,14 @@ def _build_revoke_command(member_id: str, *, config_dir: str | None) -> str:
 
 
 def _invalid_role_row_dict(
-    m,
+    m: Any,
     *,
     actionable: bool,
     config_dir: str | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """``Member`` row 를 CLI 출력용 dict 로 변환."""
     has_token = bool(m.token_hash)
-    row: dict = {
+    row: dict[str, Any] = {
         "member_id": m.member_id,
         "role": m.role,
         "type": m.type,
@@ -324,7 +324,7 @@ def member_list_invalid_roles(
     valid_roles = [member.value for member in MemberRole]
     config_dir_override = _explicit_config_dir(ctx)
 
-    async def _run_scan() -> tuple[list[dict], list[dict]]:
+    async def _run_scan() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         async with _create_service(ctx) as service:
             scan = await service.find_invalid_role_members()
             actionable = [
@@ -367,7 +367,7 @@ def member_list_invalid_roles(
     click.echo(f"  actionable         : {payload['actionable_count']}건")
     click.echo(f"  legacy_revoked     : {payload['legacy_revoked_count']}건")
 
-    def _emit_section(title: str, rows: list[dict]) -> None:
+    def _emit_section(title: str, rows: list[dict[str, Any]]) -> None:
         click.echo("")
         click.echo(f"[{title}]")
         if not rows:
@@ -414,7 +414,7 @@ def member_register(
     actor = get_member_id(ctx)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
 
-    async def _run_register() -> tuple[dict, str]:
+    async def _run_register() -> tuple[dict[str, Any], str]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -480,7 +480,7 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_set_emoji() -> dict:
+    async def _run_set_emoji() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -520,7 +520,7 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
     actor = get_member_id(ctx)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
 
-    async def _run_update_scopes() -> dict:
+    async def _run_update_scopes() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -564,7 +564,7 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_suspend() -> dict:
+    async def _run_suspend() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -599,7 +599,7 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_reactivate() -> dict:
+    async def _run_reactivate() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -650,7 +650,7 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
             " 이 작업은 되돌릴 수 없습니다."
         )
 
-    async def _run_revoke() -> dict:
+    async def _run_revoke() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -685,7 +685,7 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_rotate() -> tuple[dict, str]:
+    async def _run_rotate() -> tuple[dict[str, Any], str]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -825,7 +825,7 @@ def member_regenerate_recovery_key(
                 "member.regenerate_recovery_key",
                 {"password": password},
             )
-            return payload.get("recovery_key", "")
+            return cast("str", payload.get("recovery_key", ""))
 
         async with _create_service(ctx) as service:
             members = await service.list_members(member_type="human")
