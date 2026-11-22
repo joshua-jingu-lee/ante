@@ -206,7 +206,7 @@ category와 트리거(#2334 §5/§9)는 생성 문서
 
 인접 기존 코드(재정의 금지, reference만):
 
-- `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 대표 fault lock 표에 이미 등록됨.
+- `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 위 「CLI direct ↔ CLI→IPC equivalence — 대표 fault lock」 절의 대표 lock 4건에 이미 등록됨.
 - `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`) — 게이트 4. 코드 레지스트리(`src/ante/contracts/error_registry.py`의 `_BOT_NOT_ACCEPTING_SIGNALS_SPEC`)에 `ErrorSpec(category="state_conflict")`로 등록됨, 단 본 taxonomy 문서 표에는 미등재(`bot signal-key --rotate`/`signal connect` 공유). 분류는 `state_conflict`.
 - `SERVICE_UNAVAILABLE`(`service_unavailable`) — `DRAINING`/`STOPPED` 핸드셰이크 거부. lifecycle gate 정렬(envelopes.md/ipc.md).
 - `SERVICE_NOT_CONFIGURED`(`service_unavailable`) — `required_services`(`bot_manager`) 부재 또는 `signal_key_manager` 미구성. #2334 신규 typed exception `SignalKeyManagerNotConfigured` → `SERVICE_NOT_CONFIGURED("signal_key_manager")`로 매핑되며, `error_registry.py` 등록은 #2334 구현 PR이 수행한다(코드 재정의 아님). `## SERVICE_NOT_CONFIGURED (normative)` 절 정렬.
