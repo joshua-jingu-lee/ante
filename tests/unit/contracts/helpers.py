@@ -29,8 +29,7 @@ Helper 분류 (Refs #1820 결정 / #1823 plan):
   callsite/class 를 구조화 보관한다.
 
   - :func:`load_drift_allowlist` — ``error_drift_allowlist.yaml`` 을
-    파싱해 3 section (`intended_no_code`, `known_drift_fmt_error_no_code`,
-    `pending_migration`) 의 :class:`DriftAllowlist` 를 반환한다.
+    파싱해 `pending_migration` 의 :class:`DriftAllowlist` 를 반환한다.
 
 본 helper 는 default repository root 를 알지 못한다. 호출자가 :class:`Path`
 를 명시한다 (default 는 cwd 기준 ``Path("src/ante")``). 후속 enforcement
@@ -683,23 +682,6 @@ def iter_get_db_path_calls(
 
 
 @dataclass(frozen=True)
-class FmtErrorAllowlistEntry:
-    """``fmt.error`` code 누락 callsite allowlist entry.
-
-    Attributes:
-        path: callsite 파일 경로 (repo root 기준 상대 경로 문자열).
-        line: callsite 줄 (1-based).
-        snippet_sha1: ``FmtErrorCallsite.snippet`` 의 SHA-1 12-char prefix.
-        reason: baseline 등록 사유.
-    """
-
-    path: str
-    line: int
-    snippet_sha1: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class ExceptionAllowlistEntry:
     """``*Error`` class code/registry 미부여 allowlist entry.
 
@@ -716,21 +698,14 @@ class ExceptionAllowlistEntry:
 
 @dataclass(frozen=True)
 class DriftAllowlist:
-    """3 section 으로 분리된 error taxonomy drift allowlist.
+    """error taxonomy drift allowlist.
 
     Attributes:
-        intended_no_code: code 인자를 영구적으로 갖지 않는 의도된 callsite.
-        known_drift_fmt_error_no_code: baseline 시점에 code 가 부여되지
-            않은 fmt.error callsite. #1843 이 단계적으로 제거.
         pending_migration: baseline 시점에 class-level code 도 없고
             ``EXCEPTION_TO_SPEC`` 등록도 안 된 ``*Error`` class.
             #1842/#1843 이 단계적으로 등록.
     """
 
-    intended_no_code: tuple[FmtErrorAllowlistEntry, ...] = field(default_factory=tuple)
-    known_drift_fmt_error_no_code: tuple[FmtErrorAllowlistEntry, ...] = field(
-        default_factory=tuple
-    )
     pending_migration: tuple[ExceptionAllowlistEntry, ...] = field(
         default_factory=tuple,
     )
@@ -750,22 +725,10 @@ def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
             fixture YAML 을 주입할 수 있다.
 
     Returns:
-        :class:`DriftAllowlist`: 3 section 의 frozen dataclass tuple.
+        :class:`DriftAllowlist`: ``pending_migration`` 의 frozen dataclass.
     """
     yaml_path = path if path is not None else _default_allowlist_path()
     data = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-
-    def _fmt_entries(key: str) -> tuple[FmtErrorAllowlistEntry, ...]:
-        raw = data.get(key) or []
-        return tuple(
-            FmtErrorAllowlistEntry(
-                path=str(item["path"]),
-                line=int(item["line"]),
-                snippet_sha1=str(item["snippet_sha1"]),
-                reason=str(item.get("reason", "")),
-            )
-            for item in raw
-        )
 
     raw_exc = data.get("pending_migration") or []
     exc_entries = tuple(
@@ -777,11 +740,7 @@ def load_drift_allowlist(path: Path | None = None) -> DriftAllowlist:
         for item in raw_exc
     )
 
-    return DriftAllowlist(
-        intended_no_code=_fmt_entries("intended_no_code"),
-        known_drift_fmt_error_no_code=_fmt_entries("known_drift_fmt_error_no_code"),
-        pending_migration=exc_entries,
-    )
+    return DriftAllowlist(pending_migration=exc_entries)
 
 
 # ── docs/specs/cli/03-commands.md table parser (#1848) ────────────────────
@@ -927,7 +886,6 @@ __all__ = [
     "DriftAllowlist",
     "ExceptionAllowlistEntry",
     "ExceptionClassInfo",
-    "FmtErrorAllowlistEntry",
     "FmtErrorCallsite",
     "GetDbPathCall",
     "collect_docs_command_paths",
