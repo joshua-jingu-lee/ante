@@ -60,8 +60,6 @@ CommandHandler = Callable[["ServiceRegistry", Any, str], Awaitable[dict]]
 
 ShutdownBehavior = Literal["block_on_mutating", "block_all", "allow_all"]
 
-AccountIdPolicy = Literal["none", "required", "optional_filter"]
-
 logger = logging.getLogger(__name__)
 
 
@@ -74,7 +72,6 @@ class CommandSpec:
     is_mutating: bool
     required_services: frozenset[str] = field(default_factory=frozenset)
     audit_action: str | None = None
-    account_id_policy: AccountIdPolicy = "none"
     shutdown_behavior: ShutdownBehavior | None = None
     request_model: type[IPCRequest] | None = None
 
@@ -85,7 +82,7 @@ class CommandRegistry:
     외부 호출자는 ``register(name, handler, *, is_mutating=...)``
     keyword-only 인자를 명시해야 한다.
 
-    ``register()``는 contract metadata 5 필드를 kwargs로
+    ``register()``는 contract metadata 4 필드를 kwargs로
     수용한다. ``register(name, handler, is_mutating=...)`` 호출은
     default 값으로 그대로 작동(backward compat).
     """
@@ -101,7 +98,6 @@ class CommandRegistry:
         is_mutating: bool,
         required_services: frozenset[str] | None = None,
         audit_action: str | None = None,
-        account_id_policy: AccountIdPolicy = "none",
         shutdown_behavior: ShutdownBehavior | None = None,
         request_model: type[IPCRequest] | None = None,
     ) -> None:
@@ -110,11 +106,6 @@ class CommandRegistry:
         Args:
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
         """
-        if request_model is not None and account_id_policy != "none":
-            raise ValueError(
-                f"요청 모델이 있는 명령 '{command}'에는 "
-                f"account_id_policy '{account_id_policy}'를 쓸 수 없습니다."
-            )
         self._specs[command] = CommandSpec(
             name=command,
             handler=handler,
@@ -123,7 +114,6 @@ class CommandRegistry:
                 required_services if required_services is not None else frozenset()
             ),
             audit_action=audit_action,
-            account_id_policy=account_id_policy,
             shutdown_behavior=shutdown_behavior,
             request_model=request_model,
         )

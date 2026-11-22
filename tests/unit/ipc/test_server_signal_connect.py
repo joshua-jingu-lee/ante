@@ -643,14 +643,13 @@ async def test_ack_write_failure_unregisters_handle(
 
 
 async def test_signal_connect_registered_metadata() -> None:
-    """signal.connect 가 read-only/stream/account_id_policy=none/audit None."""
+    """signal.connect 가 read-only/stream/audit None."""
     reg = CommandRegistry()
     register_all_handlers(reg)
     spec = reg.get("signal.connect")
     assert spec is not None
     assert spec.is_mutating is False
     assert spec.required_services == frozenset({"bot_manager"})
-    assert spec.account_id_policy == "none"
     assert spec.audit_action is None
 
 

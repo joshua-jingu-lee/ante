@@ -6,7 +6,6 @@ import pytest
 from pydantic import ValidationError
 
 from ante.ipc.registry import (
-    AccountIdPolicy,
     CommandRegistry,
     CommandSpec,
     ShutdownBehavior,
@@ -46,7 +45,6 @@ def test_register_and_get(registry: CommandRegistry) -> None:
     assert spec is not None
     assert spec.required_services == frozenset()
     assert spec.audit_action is None
-    assert spec.account_id_policy == "none"
     assert spec.shutdown_behavior is None
 
 
@@ -1276,7 +1274,6 @@ class TestCommandSpecMetadataExtension:
             "is_mutating",
             "required_services",
             "audit_action",
-            "account_id_policy",
             "shutdown_behavior",
             "request_model",
         }
@@ -1294,7 +1291,6 @@ class TestCommandSpecMetadataExtension:
         assert spec is not None
         assert spec.required_services == frozenset()
         assert spec.audit_action is None
-        assert spec.account_id_policy == "none"
         assert spec.shutdown_behavior is None
 
     def test_register_kwargs_full_metadata(self, registry: CommandRegistry) -> None:
@@ -1310,14 +1306,12 @@ class TestCommandSpecMetadataExtension:
             is_mutating=True,
             required_services=frozenset({"bot_manager", "audit_logger"}),
             audit_action="ext.cmd",
-            account_id_policy="required",
             shutdown_behavior="block_all",
         )
         spec = registry.get("ext.cmd")
         assert spec is not None
         assert spec.required_services == frozenset({"bot_manager", "audit_logger"})
         assert spec.audit_action == "ext.cmd"
-        assert spec.account_id_policy == "required"
         assert spec.shutdown_behavior == "block_all"
 
     def test_shutdown_behavior_alias_values(self) -> None:
@@ -1326,14 +1320,6 @@ class TestCommandSpecMetadataExtension:
             "block_on_mutating",
             "block_all",
             "allow_all",
-        }
-
-    def test_account_id_policy_alias_values(self) -> None:
-        """``AccountIdPolicy`` Literal alias 값 집합 lock."""
-        assert set(typing.get_args(AccountIdPolicy)) == {
-            "none",
-            "required",
-            "optional_filter",
         }
 
 
@@ -1371,17 +1357,6 @@ class TestRegisteredCommandsMetadataCompleteness:
                 assert isinstance(name, str) and name, (
                     f"{spec.name} required_services has non-string item {name!r}"
                 )
-
-    def test_all_commands_account_id_policy_valid(
-        self, loaded: CommandRegistry
-    ) -> None:
-        """27 commands 모두 ``account_id_policy``가 정의된 Literal 값을
-        가진다."""
-        allowed = set(typing.get_args(AccountIdPolicy))
-        for spec in loaded.iter_specs():
-            assert spec.account_id_policy in allowed, (
-                f"{spec.name} account_id_policy={spec.account_id_policy!r}"
-            )
 
     def test_audit_action_only_for_audit_logger_dependent_commands(
         self, loaded: CommandRegistry
