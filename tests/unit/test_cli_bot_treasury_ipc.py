@@ -244,7 +244,13 @@ class TestBotCreateIpc:
 
         assert result.exit_code == 0
         sent_args = mock_client.send.call_args[0][1]
-        assert sent_args["params"] == {"threshold": 0.5, "window": 20}
+        assert sent_args == {
+            "name": "테스트봇",
+            "strategy_id": "strat-1",
+            "account_id": "acc-1",
+            "interval_seconds": 60,
+            "params": {"threshold": 0.5, "window": 20},
+        }
 
 
 class TestBotRemoveIpc:

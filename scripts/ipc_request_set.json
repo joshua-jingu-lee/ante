@@ -1124,6 +1124,1154 @@
     "name": "approval.request:array"
    }
   ],
+  "bot.create": [
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "kind": "cli",
+    "name": "bot.create:cli:0"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.create:cli:1"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "kind": "cli",
+    "name": "bot.create:cli:2"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "5",
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.create:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": 7,
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.create:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": true,
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.create:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": null,
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.create:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.create:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.create:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.create:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.create:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": "5"
+    },
+    "key": "interval_seconds",
+    "kind": "value",
+    "name": "bot.create:value:interval_seconds:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 7
+    },
+    "key": "interval_seconds",
+    "kind": "value",
+    "name": "bot.create:value:interval_seconds:int7",
+    "same_type": true
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": true
+    },
+    "key": "interval_seconds",
+    "kind": "value",
+    "name": "bot.create:value:interval_seconds:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": null
+    },
+    "key": "interval_seconds",
+    "kind": "value",
+    "name": "bot.create:value:interval_seconds:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "5",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "bot.create:value:name:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "name": 7,
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "bot.create:value:name:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": true,
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "bot.create:value:name:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": null,
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "bot.create:value:name:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "strategy_id",
+    "kind": "missing",
+    "name": "bot.create:missing:strategy_id"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "5",
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "bot.create:value:strategy_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": 7,
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "bot.create:value:strategy_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": true,
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "bot.create:value:strategy_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": null,
+     "account_id": "acct-1",
+     "interval_seconds": 60
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "bot.create:value:strategy_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "acct-1",
+     "interval_seconds": 60,
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.create:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.create:array"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "default",
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.create:account:default"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "",
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.create:account:empty"
+   },
+   {
+    "args": {
+     "name": "n",
+     "strategy_id": "s",
+     "account_id": "bad_id!",
+     "interval_seconds": 60
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.create:account:bad"
+   }
+  ],
+  "bot.info": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.info:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.info:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.info:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.info:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.info:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.info:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.info:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.info:array"
+   }
+  ],
+  "bot.list": [
+   {
+    "args": {},
+    "kind": "cli",
+    "name": "bot.list:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "bot.list:cli:1"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.list:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.list:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.list:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "bot.list:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.list:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.list:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.list:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.list:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "bot.list:account:bad"
+   }
+  ],
+  "bot.positions": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.positions:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.positions:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.positions:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.positions:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.positions:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.positions:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.positions:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.positions:array"
+   }
+  ],
+  "bot.remove": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.remove:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.remove:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.remove:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.remove:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.remove:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.remove:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.remove:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.remove:array"
+   }
+  ],
+  "bot.signal_key": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.signal_key:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.signal_key:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.signal_key:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.signal_key:array"
+   }
+  ],
+  "bot.signal_key.rotate": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.signal_key.rotate:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.signal_key.rotate:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key.rotate:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key.rotate:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key.rotate:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.signal_key.rotate:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.signal_key.rotate:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.signal_key.rotate:array"
+   }
+  ],
+  "bot.start": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.start:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.start:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.start:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.start:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.start:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.start:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.start:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.start:array"
+   }
+  ],
+  "bot.status": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.status:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.status:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.status:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.status:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.status:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.status:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.status:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.status:array"
+   }
+  ],
+  "bot.stop": [
+   {
+    "args": {
+     "bot_id": "b1"
+    },
+    "kind": "cli",
+    "name": "bot.stop:cli:0"
+   },
+   {
+    "args": {},
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.stop:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5"
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.stop:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.stop:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.stop:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.stop:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.stop:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.stop:array"
+   }
+  ],
+  "bot.update": [
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "kind": "cli",
+    "name": "bot.update:cli:0"
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": {
+      "auto_restart": false
+     }
+    },
+    "kind": "cli",
+    "name": "bot.update:cli:1"
+   },
+   {
+    "args": {
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "bot.update:missing:bot_id"
+   },
+   {
+    "args": {
+     "bot_id": "5",
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.update:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "bot_id": 7,
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.update:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": true,
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.update:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": null,
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     }
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "bot.update:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": "5"
+    },
+    "key": "updates",
+    "kind": "value",
+    "name": "bot.update:value:updates:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": 7
+    },
+    "key": "updates",
+    "kind": "value",
+    "name": "bot.update:value:updates:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": true
+    },
+    "key": "updates",
+    "kind": "value",
+    "name": "bot.update:value:updates:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": null
+    },
+    "key": "updates",
+    "kind": "value",
+    "name": "bot.update:value:updates:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "bot_id": "b1",
+     "updates": {
+      "name": "x",
+      "strategy_id": "s2",
+      "interval_seconds": 30,
+      "budget": 100.0,
+      "auto_restart": true,
+      "max_restart_attempts": 2,
+      "restart_cooldown_seconds": 20,
+      "step_timeout_seconds": 6,
+      "max_signals_per_step": 3
+     },
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "bot.update:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "bot.update:array"
+   }
+  ],
   "member.reactivate": [
    {
     "args": {
@@ -2216,6 +3364,66 @@
     ],
     "kind": "array",
     "name": "member.update_scopes:array"
+   }
+  ],
+  "signal.connect": [
+   {
+    "args": {
+     "key": "sig-key-1"
+    },
+    "kind": "cli",
+    "name": "signal.connect:cli:0"
+   },
+   {
+    "args": {
+     "key": "5"
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "signal.connect:value:key:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "key": 7
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "signal.connect:value:key:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": true
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "signal.connect:value:key:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": null
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "signal.connect:value:key:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "sig-key-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "signal.connect:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "signal.connect:array"
    }
   ],
   "strategy.set_status": [
