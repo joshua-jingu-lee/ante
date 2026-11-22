@@ -203,7 +203,7 @@ class TestTradeInfoMissingExit:
             result = runner.invoke(cli, ["trade", "info", "t-1", "--format", "json"])
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["trade_id"] == "t-1"
 
 

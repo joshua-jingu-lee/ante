@@ -8,8 +8,7 @@ import click
 
 from ante.cli._data_path import resolve_data_path
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
-from ante.cli.main import get_formatter
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.middleware import enforce_scope, require_auth, require_scope
 from ante.contracts.cli_errors import (
     CliConfirmationRequiredError,
@@ -58,7 +57,7 @@ def data_list(
     limit: int,
     data_path: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """보유 데이터셋 목록."""
     import asyncio
 
@@ -66,7 +65,6 @@ def data_list(
     from ante.data.store import ParquetStore
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
 
     try:
@@ -87,8 +85,8 @@ def data_list(
 
     datasets = result["items"]
     if not datasets:
-        fmt.output({"datasets": [], "count": result["total"]})
-        return
+        empty: dict[str, Any] = {"datasets": [], "count": result["total"]}
+        return CommandResult(data=empty, text=(str(empty),))
 
     async def _enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from ante.instrument.service import InstrumentService
@@ -105,21 +103,19 @@ def data_list(
     except Exception as e:
         raise DataError(str(e)) from e
 
-    if fmt.is_json:
-        fmt.output({"datasets": datasets, "count": result["total"]})
-    else:
-        fmt.table(
-            datasets,
-            [
-                "id",
-                "symbol",
-                "name",
-                "timeframe",
-                "data_type",
-                "start_date",
-                "end_date",
-            ],
-        )
+    columns = [
+        "id",
+        "symbol",
+        "name",
+        "timeframe",
+        "data_type",
+        "start_date",
+        "end_date",
+    ]
+    return CommandResult(
+        data={"datasets": datasets, "count": result["total"]},
+        text=tuple(table_lines(datasets, columns)),
+    )
 
 
 @data.command("info")
@@ -133,13 +129,14 @@ def data_list(
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def data_info(ctx: click.Context, dataset_id: str, data_path: str | None) -> None:
+def data_info(
+    ctx: click.Context, dataset_id: str, data_path: str | None
+) -> CommandResult:
     """데이터셋 상세 조회."""
     from ante.data.datasets import get_dataset_detail
     from ante.data.store import ParquetStore
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     try:
         result = get_dataset_detail(store, dataset_id)
@@ -148,27 +145,23 @@ def data_info(ctx: click.Context, dataset_id: str, data_path: str | None) -> Non
     except FileNotFoundError as e:
         raise DatasetNotFoundError(str(e)) from e
 
-    if fmt.is_json:
-        fmt.output(result)
-        return
-
     dataset = result["dataset"]
-    for key in (
-        "id",
-        "symbol",
-        "timeframe",
-        "data_type",
-        "start_date",
-        "end_date",
-        "row_count",
-        "file_size",
-    ):
-        click.echo(f"  {key:12s}: {dataset.get(key)}")
+    lines = [
+        f"  {key:12s}: {dataset.get(key)}"
+        for key in (
+            "id",
+            "symbol",
+            "timeframe",
+            "data_type",
+            "start_date",
+            "end_date",
+            "row_count",
+            "file_size",
+        )
+    ]
     if result["preview"]:
-        click.echo("")
-        click.echo("  preview:")
-        for row in result["preview"]:
-            click.echo(f"    {row}")
+        lines += ["", "  preview:", *(f"    {row}" for row in result["preview"])]
+    return CommandResult(data=result, text=tuple(lines))
 
 
 @data.command("delete")
@@ -201,13 +194,12 @@ def data_delete(
     data_type: str | None,
     yes: bool,
     data_path: str | None,
-) -> None:
+) -> CommandResult:
     """데이터셋 삭제."""
     from ante.data.datasets import delete_dataset, validate_dataset_filters
     from ante.data.store import ParquetStore
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     if not yes:
         raise CliConfirmationRequiredError(
             "위험 명령입니다. --yes를 명시해야 데이터셋을 삭제합니다."
@@ -222,10 +214,7 @@ def data_delete(
     except FileNotFoundError as e:
         raise DatasetNotFoundError(str(e)) from e
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.success(f"데이터셋 삭제 완료: {dataset_id}", result)
+    return CommandResult(data=result, text=(f"데이터셋 삭제 완료: {dataset_id}",))
 
 
 @data.command()
@@ -237,13 +226,13 @@ def data_delete(
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def schema(ctx: click.Context, data_path: str | None) -> None:
+def schema(ctx: click.Context, data_path: str | None) -> CommandResult:
     """데이터 스키마 조회."""
     from ante.data.schemas import OHLCV_SCHEMA
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
-    fmt.output({k: str(v) for k, v in OHLCV_SCHEMA.items()})
+    columns = {k: str(v) for k, v in OHLCV_SCHEMA.items()}
+    return CommandResult(data=columns, text=(str(columns),))
 
 
 @data.command()
@@ -255,12 +244,11 @@ def schema(ctx: click.Context, data_path: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("data:read")
-def storage(ctx: click.Context, data_path: str | None) -> None:
+def storage(ctx: click.Context, data_path: str | None) -> CommandResult:
     """저장 용량 현황."""
     from ante.data.store import ParquetStore
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     store = ParquetStore(base_path=data_path)
     usage = store.get_storage_usage()
     total = sum(usage.values())
@@ -272,10 +260,7 @@ def storage(ctx: click.Context, data_path: str | None) -> None:
         },
     }
 
-    fmt.output(
-        summary,
-        "Total: {total_mb} MB",
-    )
+    return CommandResult(data=summary, text=(f"Total: {summary['total_mb']} MB",))
 
 
 @data.command("validate")
@@ -298,7 +283,7 @@ def validate(
     timeframe: str,
     fix: bool,
     data_path: str | None,
-) -> None:
+) -> CommandResult:
     """Parquet 파일 무결성 검증."""
 
     from ante.core.market_data_vocab import (
@@ -312,7 +297,6 @@ def validate(
         enforce_scope(ctx, "data:write")
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
 
     if not is_valid_timeframe(timeframe):
         raise DataValidateInvalidTimeframeError(
@@ -333,8 +317,8 @@ def validate(
         symbols = store.list_symbols(timeframe)
 
     if not symbols:
-        fmt.output({"message": "검증할 데이터가 없습니다.", "results": []})
-        return
+        empty: dict[str, Any] = {"message": "검증할 데이터가 없습니다.", "results": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
     results = []
     for sym in symbols:
@@ -345,31 +329,30 @@ def validate(
     total_valid = sum(r["valid"] for r in results)
     total_corrupted = sum(r["corrupted"] for r in results)
 
-    if fmt.is_json:
-        fmt.output(
-            {
-                "results": results,
-                "summary": {
-                    "total_files": total_files,
-                    "valid": total_valid,
-                    "corrupted": total_corrupted,
-                    "fixed": fix and total_corrupted > 0,
-                },
-            }
-        )
-    else:
-        for r in results:
-            if r["corrupted"] > 0:
-                click.echo(
-                    f"  {r['symbol']}/{r['timeframe']}: "
-                    f"{r['total']}개 중 {r['corrupted']}개 손상"
-                )
-                for cf in r["corrupted_files"]:
-                    click.echo(f"    → {cf}")
-        click.echo()
-        click.echo(
-            f"  검증 완료: 전체 {total_files}개 / "
-            f"정상 {total_valid}개 / 손상 {total_corrupted}개"
-        )
-        if fix and total_corrupted > 0:
-            click.echo("  손상 파일을 .corrupted로 이동 완료")
+    lines: list[str] = []
+    for r in results:
+        if r["corrupted"] > 0:
+            lines.append(
+                f"  {r['symbol']}/{r['timeframe']}: "
+                f"{r['total']}개 중 {r['corrupted']}개 손상"
+            )
+            lines += [f"    → {cf}" for cf in r["corrupted_files"]]
+    lines += [
+        "",
+        f"  검증 완료: 전체 {total_files}개 / "
+        f"정상 {total_valid}개 / 손상 {total_corrupted}개",
+    ]
+    if fix and total_corrupted > 0:
+        lines.append("  손상 파일을 .corrupted로 이동 완료")
+    return CommandResult(
+        data={
+            "results": results,
+            "summary": {
+                "total_files": total_files,
+                "valid": total_valid,
+                "corrupted": total_corrupted,
+                "fixed": fix and total_corrupted > 0,
+            },
+        },
+        text=tuple(lines),
+    )

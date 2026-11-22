@@ -117,7 +117,7 @@ class TestCliUsesSubprocessIsolation:
         # 격리 경로 호출 + in-process 경로 미호출.
         run_subprocess_mock.assert_awaited_once()
         run_mock.assert_not_called()
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["run_id"] == "run-iso-1"
         assert payload["strategy"] == "momentum_v1.0.0"
 

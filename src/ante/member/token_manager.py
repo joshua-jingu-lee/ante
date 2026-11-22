@@ -6,6 +6,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from ante.core import clock
 from ante.member.auth import generate_token, hash_token
 from ante.member.models import Member, MemberStatus
 
@@ -17,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def _token_expires_at(ttl_days: int) -> str:
     """TTL 일수 기준 토큰 만료 시각."""
-    return (datetime.now(UTC) + timedelta(days=ttl_days)).strftime("%Y-%m-%d %H:%M:%S")
+    return (clock.now(UTC) + timedelta(days=ttl_days)).strftime("%Y-%m-%d %H:%M:%S")
 
 
 class TokenManager:
@@ -73,7 +74,7 @@ class TokenManager:
             return None
 
         expires = datetime.strptime(member.token_expires_at, "%Y-%m-%d %H:%M:%S")
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = clock.now(UTC).replace(tzinfo=None)
 
         if now > expires:
             return "expired"

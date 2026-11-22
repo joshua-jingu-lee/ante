@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from ante.core import clock
 from ante.core.database import OperationalError
 from ante.instrument.models import Instrument
 
@@ -72,23 +73,20 @@ class InstrumentService:
 
     async def _warm_cache(self) -> None:
         """DB 전체 로드 → 메모리 캐시."""
-        import time as time_mod
-
         rows = await self._db.fetch_all("SELECT * FROM instruments")
         self._cache = {
             (row["symbol"], row["exchange"]): self._row_to_instrument(row)
             for row in rows
         }
-        self._cache_loaded_at = time_mod.monotonic()
+        self._cache_loaded_at = clock.monotonic()
 
     def _is_cache_expired(self) -> bool:
         """캐시 TTL 초과 여부."""
         import math
-        import time as time_mod
 
         if math.isclose(self._cache_loaded_at, 0.0, abs_tol=1e-9):
             return True
-        return (time_mod.monotonic() - self._cache_loaded_at) > self._cache_ttl
+        return (clock.monotonic() - self._cache_loaded_at) > self._cache_ttl
 
     async def _ensure_cache(self) -> None:
         """캐시 TTL 초과 시 재로드."""

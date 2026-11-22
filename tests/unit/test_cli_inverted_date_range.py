@@ -603,7 +603,7 @@ def _trade_list_ids(runner, tmp_path, *cli_args: str) -> list[str]:
         ],
     )
     assert result.exit_code == 0, _stdout(result)
-    payload = json.loads(_stdout(result))
+    payload = json.loads(_stdout(result))["data"]
     trades = payload.get("trades", [])
     return [t["trade_id"] for t in trades]
 

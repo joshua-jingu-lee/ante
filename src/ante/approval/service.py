@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -19,6 +19,7 @@ from ante.approval.models import (
     ApprovalValidationError,
     ValidationResult,
 )
+from ante.core import clock
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -125,7 +126,7 @@ class ApprovalService:
         검증한다. invalid 면 :class:`InvalidAccountIdError` 가 raise 되어
         호출자에 전달된다.
         """
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         params = params or {}
 
         if type not in _VALID_APPROVAL_TYPES:
@@ -213,7 +214,7 @@ class ApprovalService:
                 requested_action="approve",
             )
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {"action": "approved", "actor": resolved_by, "at": now, "detail": ""}
         )
@@ -266,7 +267,7 @@ class ApprovalService:
                 requested_action="reject",
             )
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {
                 "action": "rejected",
@@ -351,7 +352,7 @@ class ApprovalService:
                 context=f"approval.{request.type}.reopen",
             )
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         warn_reviews = await self._validate_params(request.type, request.params, now)
         request.reviews.extend(warn_reviews)
 
@@ -438,7 +439,7 @@ class ApprovalService:
             )
             raise ValueError(msg)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {"action": "cancelled", "actor": requester, "at": now, "detail": ""}
         )
@@ -494,7 +495,7 @@ class ApprovalService:
             )
             raise ValueError(msg)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {"action": "held", "actor": "user", "at": now, "detail": ""}
         )
@@ -523,7 +524,7 @@ class ApprovalService:
             msg = f"on_hold 상태에서만 재개 가능 (현재: {request.status})"
             raise ValueError(msg)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {"action": "resumed", "actor": "user", "at": now, "detail": ""}
         )
@@ -559,7 +560,7 @@ class ApprovalService:
         if not request:
             raise ApprovalNotFoundError(id)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
 
         review = {
             "reviewer": reviewer,
@@ -592,7 +593,7 @@ class ApprovalService:
 
     async def expire_stale(self) -> int:
         """만료 기한이 지난 pending 요청 일괄 expired 처리."""
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
 
         rows = await self._db.fetch_all(
             """SELECT * FROM approvals
@@ -778,7 +779,7 @@ class ApprovalService:
             )
             raise ValueError(msg)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         request.history.append(
             {
                 "action": "cancelled_invalid_type",
@@ -945,7 +946,7 @@ class ApprovalService:
             msg = f"invalid approval type: {request.type!r}"
             raise ValueError(msg)
 
-        now = datetime.now(UTC).isoformat()
+        now = clock.now(UTC).isoformat()
         executor = self._executors.get(request.type)
         if executor:
             try:
