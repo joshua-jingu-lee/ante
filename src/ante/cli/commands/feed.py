@@ -12,6 +12,24 @@ import click
 from ante.cli._data_path import resolve_data_path
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
+from ante.contracts.cli_errors import (
+    BackfillStopRequestedError,
+    CliInvalidDateError,
+    CliInvalidScheduleTimeError,
+    ConfigInvalidGeneralError,
+    ConfigInvalidGuardError,
+    ConfigInvalidLogLevelError,
+    ConfigInvalidNiceValueError,
+    ConfigInvalidValueError,
+    ConfigUnsupportedKeyError,
+    FeedFileNotFoundError,
+    FeedInjectInvalidSymbolError,
+    FeedInjectInvalidTimeframeError,
+    FeedInjectValidationError,
+    FeedNotInitializedError,
+    GuardPermanentlyBlockedError,
+    InvalidDateRangeError,
+)
 
 if TYPE_CHECKING:
     from ante.feed.report.generator import ReportGenerator
@@ -26,20 +44,16 @@ def _validate_iso_date(value: str, option: str, fmt: object) -> None:
     from datetime import date
 
     if _ISO_DATE_RE.fullmatch(value) is None:
-        fmt.error(  # type: ignore[attr-defined]
-            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)",
-            code="CLI_INVALID_DATE",
+        raise CliInvalidDateError(
+            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)"
         )
-        raise SystemExit(1)
 
     try:
         date.fromisoformat(value)
-    except ValueError:
-        fmt.error(  # type: ignore[attr-defined]
-            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)",
-            code="CLI_INVALID_DATE",
-        )
-        raise SystemExit(1)
+    except ValueError as e:
+        raise CliInvalidDateError(
+            f"잘못된 {option} 날짜 형식: '{value}' (YYYY-MM-DD 형식 필요)"
+        ) from e
 
 
 _DATA_PATH_HELP = "데이터 저장소 경로 (미지정 시 config_dir 기반)"
@@ -55,20 +69,16 @@ def _apply_log_level(config: dict[str, object], fmt: object) -> None:
     """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
-        fmt.error(  # type: ignore[attr-defined]
-            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})",
-            code="CONFIG_INVALID_GENERAL",
+        raise ConfigInvalidGeneralError(
+            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})"
         )
-        raise SystemExit(1)
 
     level_name = general.get("log_level", "INFO")
     if not isinstance(level_name, str) or level_name.upper() not in _VALID_LOG_LEVELS:
         allowed = ", ".join(sorted(_VALID_LOG_LEVELS))
-        fmt.error(  # type: ignore[attr-defined]
-            f"유효하지 않은 log_level: {level_name!r} (허용: {allowed})",
-            code="CONFIG_INVALID_LOG_LEVEL",
+        raise ConfigInvalidLogLevelError(
+            f"유효하지 않은 log_level: {level_name!r} (허용: {allowed})"
         )
-        raise SystemExit(1)
 
     logging.getLogger(_FEED_LOGGER_NAME).setLevel(getattr(logging, level_name.upper()))
 
@@ -77,11 +87,9 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
     """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다."""
     guard = config.get("guard", {})
     if not isinstance(guard, dict):
-        fmt.error(  # type: ignore[attr-defined]
-            f"[guard] 섹션은 table 이어야 합니다 (현재: {type(guard).__name__})",
-            code="CONFIG_INVALID_GUARD",
+        raise ConfigInvalidGuardError(
+            f"[guard] 섹션은 table 이어야 합니다 (현재: {type(guard).__name__})"
         )
-        raise SystemExit(1)
 
     errors: list[str] = []
 
@@ -115,11 +123,7 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
         )
 
     if errors:
-        fmt.error(  # type: ignore[attr-defined]
-            "잘못된 [guard] 설정: " + "; ".join(errors),
-            code="CONFIG_INVALID_GUARD",
-        )
-        raise SystemExit(1)
+        raise ConfigInvalidGuardError("잘못된 [guard] 설정: " + "; ".join(errors))
 
 
 def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> None:
@@ -137,28 +141,22 @@ def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
     """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
-        fmt.error(  # type: ignore[attr-defined]
-            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})",
-            code="CONFIG_INVALID_GENERAL",
+        raise ConfigInvalidGeneralError(
+            f"[general] 섹션은 table 이어야 합니다 (현재: {type(general).__name__})"
         )
-        raise SystemExit(1)
 
     nice_value = general.get("nice_value", _NICE_VALUE_DEFAULT)
     if isinstance(nice_value, bool) or not isinstance(nice_value, int):
-        fmt.error(  # type: ignore[attr-defined]
+        raise ConfigInvalidNiceValueError(
             f"nice_value 는 정수여야 합니다 "
-            f"(현재: {nice_value!r}, type={type(nice_value).__name__})",
-            code="CONFIG_INVALID_NICE_VALUE",
+            f"(현재: {nice_value!r}, type={type(nice_value).__name__})"
         )
-        raise SystemExit(1)
 
     if not (_NICE_VALUE_MIN <= nice_value <= _NICE_VALUE_MAX):
-        fmt.error(  # type: ignore[attr-defined]
+        raise ConfigInvalidNiceValueError(
             f"nice_value 는 {_NICE_VALUE_MIN}..{_NICE_VALUE_MAX} 범위여야 합니다 "
-            f"(현재: {nice_value})",
-            code="CONFIG_INVALID_NICE_VALUE",
+            f"(현재: {nice_value})"
         )
-        raise SystemExit(1)
 
     return nice_value
 
@@ -230,18 +228,15 @@ def config_set(ctx: click.Context, key: str, value: str, data_path: str | None) 
 
     if key not in API_KEYS:
         supported = ", ".join(API_KEYS)
-        fmt.error(
-            f"지원하지 않는 키입니다: {key}\n지원 키: {supported}",
-            code="CONFIG_UNSUPPORTED_KEY",
+        raise ConfigUnsupportedKeyError(
+            f"지원하지 않는 키입니다: {key}\n지원 키: {supported}"
         )
-        raise SystemExit(1)
 
     cfg = FeedConfig(data_path)
     try:
         env_path = cfg.set_api_key(key, value)
     except ValueError as e:
-        fmt.error(str(e), code="CONFIG_INVALID_VALUE")
-        raise SystemExit(1) from e
+        raise ConfigInvalidValueError(str(e)) from e
 
     fmt.success(
         f"Saved {key} to {env_path}",
@@ -353,19 +348,27 @@ def _build_orchestrator(
     )
 
 
+_BACKFILL_DATE_ERRORS: dict[str, type[Exception]] = {
+    cls.code: cls
+    for cls in (
+        CliInvalidDateError,
+        InvalidDateRangeError,
+        GuardPermanentlyBlockedError,
+        BackfillStopRequestedError,
+    )
+}
+
+
 def _ensure_initialized(
     cfg,
     fmt,
     data_path: str,
-) -> bool:
-    """초기화 상태를 확인하고 미초기화 시 에러를 출력한다."""
+) -> None:
+    """초기화 상태를 확인하고 미초기화 시 예외를 던진다."""
     if not cfg.is_initialized():
-        fmt.error(
-            f"DataFeed가 초기화되지 않았습니다. 먼저 실행: ante feed init {data_path}",
-            "NOT_INITIALIZED",
+        raise FeedNotInitializedError(
+            f"DataFeed가 초기화되지 않았습니다. 먼저 실행: ante feed init {data_path}"
         )
-        return False
-    return True
 
 
 @feed_run.command("backfill")
@@ -397,8 +400,7 @@ def run_backfill(
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    if not _ensure_initialized(cfg, fmt, data_path):
-        raise SystemExit(1)
+    _ensure_initialized(cfg, fmt, data_path)
 
     if since is not None:
         _validate_iso_date(since, "--since", fmt)
@@ -408,11 +410,7 @@ def run_backfill(
         if since_err is not None and since_err.get("code") == (
             CONFIG_ERROR_CODE_INVALID_DATE_RANGE
         ):
-            fmt.error(
-                f"잘못된 --since 날짜: {since_err['error']}",
-                code=CONFIG_ERROR_CODE_INVALID_DATE_RANGE,
-            )
-            raise SystemExit(1)
+            raise InvalidDateRangeError(f"잘못된 --since 날짜: {since_err['error']}")
 
     config = cfg.load_config()
     _validate_and_apply_feed_config(config, fmt)
@@ -436,8 +434,7 @@ def run_backfill(
             continue
         code = entry.get("code")
         if code in BACKFILL_DATE_ERROR_CODES:
-            fmt.error(str(entry.get("error", "")), code=str(code))
-            raise SystemExit(1)
+            raise _BACKFILL_DATE_ERRORS[code](str(entry.get("error", "")))
 
     format_backfill_result(result, fmt)
 
@@ -466,8 +463,7 @@ def run_daily(
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    if not _ensure_initialized(cfg, fmt, data_path):
-        raise SystemExit(1)
+    _ensure_initialized(cfg, fmt, data_path)
 
     if target_date is not None:
         _validate_iso_date(target_date, "--date", fmt)
@@ -504,8 +500,7 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    if not _ensure_initialized(cfg, fmt, data_path):
-        raise SystemExit(1)
+    _ensure_initialized(cfg, fmt, data_path)
 
     config = cfg.load_config()
     _validate_and_apply_feed_config(config, fmt)
@@ -533,11 +528,9 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
             )
         )
     except ValueError as exc:
-        fmt.error(  # type: ignore[attr-defined]
-            f"스케줄 시간 설정이 올바르지 않습니다: {exc}",
-            code="CLI_INVALID_SCHEDULE_TIME",
-        )
-        raise SystemExit(1) from exc
+        raise CliInvalidScheduleTimeError(
+            f"스케줄 시간 설정이 올바르지 않습니다: {exc}"
+        ) from exc
     except KeyboardInterrupt:
         click.echo("\nDataFeed 스케줄러 종료")
 
@@ -761,19 +754,15 @@ def feed_inject(
     filepath = _Path(path)
 
     if not is_valid_timeframe(timeframe):
-        fmt.error(
+        raise FeedInjectInvalidTimeframeError(
             f"유효하지 않은 타임프레임: {timeframe!r}. "
-            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}",
-            code="FEED_INJECT_INVALID_TIMEFRAME",
+            f"허용 값: {', '.join(CANONICAL_TIMEFRAMES)}"
         )
-        raise SystemExit(1)
 
     if not is_krx_symbol(symbol):
-        fmt.error(
-            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)",
-            code="FEED_INJECT_INVALID_SYMBOL",
+        raise FeedInjectInvalidSymbolError(
+            f"유효하지 않은 종목 코드: {symbol!r} (KRX 6자리 숫자)"
         )
-        raise SystemExit(1)
 
     store = ParquetStore(base_path=_Path(data_path))
     normalizer = DataNormalizer()
@@ -787,11 +776,9 @@ def feed_inject(
             source=source,
         )
     except FileNotFoundError as e:
-        fmt.error(str(e), "FILE_NOT_FOUND")
-        raise SystemExit(1)
+        raise FeedFileNotFoundError(str(e)) from e
     except ValueError as e:
-        fmt.error(str(e), "VALIDATION_ERROR")
-        raise SystemExit(1)
+        raise FeedInjectValidationError(str(e)) from e
 
     if fmt.is_json:
         fmt.output(

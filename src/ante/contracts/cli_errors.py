@@ -15,6 +15,7 @@ __all__ = [
     "AlreadyRunningError",
     "ApprovalInvalidStatusError",
     "ApprovalInvalidTypeError",
+    "BackfillStopRequestedError",
     "BacktestDataNotFoundError",
     "BacktestError",
     "BacktestInvalidExchangeError",
@@ -27,18 +28,32 @@ __all__ = [
     "CliAuthRequiredError",
     "CliBotNotFoundError",
     "CliConfirmationRequiredError",
+    "CliInvalidDateError",
+    "CliInvalidScheduleTimeError",
     "CliMemberNotFoundError",
     "CliMissingRequiredInputError",
     "CliOptionConflictError",
     "CliPermissionDeniedError",
     "CliStrategyError",
+    "ConfigInvalidGeneralError",
+    "ConfigInvalidGuardError",
+    "ConfigInvalidLogLevelError",
+    "ConfigInvalidNiceValueError",
+    "ConfigInvalidValueError",
     "ConfigKeyNotFoundError",
+    "ConfigUnsupportedKeyError",
     "DataError",
     "DataInvalidDatasetIdError",
     "DataInvalidFilterError",
     "DataValidateInvalidSymbolError",
     "DataValidateInvalidTimeframeError",
     "DatasetNotFoundError",
+    "FeedFileNotFoundError",
+    "FeedInjectInvalidSymbolError",
+    "FeedInjectInvalidTimeframeError",
+    "FeedInjectValidationError",
+    "FeedNotInitializedError",
+    "GuardPermanentlyBlockedError",
     "InstrumentEmptyFileError",
     "InstrumentInvalidExchangeError",
     "InstrumentInvalidFileFormatError",
@@ -134,6 +149,10 @@ class ApprovalInvalidTypeError(Exception):
     code = "APPROVAL_INVALID_TYPE"
 
 
+class BackfillStopRequestedError(Exception):
+    code = "BACKFILL_STOP_REQUESTED"
+
+
 class BacktestDataNotFoundError(Exception):
     code = "BACKTEST_DATA_NOT_FOUND"
 
@@ -182,6 +201,14 @@ class CliConfirmationRequiredError(Exception):
     code = "CLI_CONFIRMATION_REQUIRED"
 
 
+class CliInvalidDateError(Exception):
+    code = "CLI_INVALID_DATE"
+
+
+class CliInvalidScheduleTimeError(Exception):
+    code = "CLI_INVALID_SCHEDULE_TIME"
+
+
 class CliMemberNotFoundError(Exception):
     code = "MEMBER_NOT_FOUND"
 
@@ -202,8 +229,32 @@ class CliStrategyError(Exception):
     code = "STRATEGY_ERROR"
 
 
+class ConfigInvalidGeneralError(Exception):
+    code = "CONFIG_INVALID_GENERAL"
+
+
+class ConfigInvalidGuardError(Exception):
+    code = "CONFIG_INVALID_GUARD"
+
+
+class ConfigInvalidLogLevelError(Exception):
+    code = "CONFIG_INVALID_LOG_LEVEL"
+
+
+class ConfigInvalidNiceValueError(Exception):
+    code = "CONFIG_INVALID_NICE_VALUE"
+
+
+class ConfigInvalidValueError(Exception):
+    code = "CONFIG_INVALID_VALUE"
+
+
 class ConfigKeyNotFoundError(Exception):
     code = "CONFIG_KEY_NOT_FOUND"
+
+
+class ConfigUnsupportedKeyError(Exception):
+    code = "CONFIG_UNSUPPORTED_KEY"
 
 
 class DataError(Exception):
@@ -228,6 +279,30 @@ class DataValidateInvalidTimeframeError(Exception):
 
 class DatasetNotFoundError(Exception):
     code = "DATASET_NOT_FOUND"
+
+
+class FeedFileNotFoundError(Exception):
+    code = "FILE_NOT_FOUND"
+
+
+class FeedInjectInvalidSymbolError(Exception):
+    code = "FEED_INJECT_INVALID_SYMBOL"
+
+
+class FeedInjectInvalidTimeframeError(Exception):
+    code = "FEED_INJECT_INVALID_TIMEFRAME"
+
+
+class FeedInjectValidationError(Exception):
+    code = "VALIDATION_ERROR"
+
+
+class FeedNotInitializedError(Exception):
+    code = "NOT_INITIALIZED"
+
+
+class GuardPermanentlyBlockedError(Exception):
+    code = "GUARD_PERMANENTLY_BLOCKED"
 
 
 class InstrumentEmptyFileError(Exception):
@@ -389,6 +464,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     AlreadyRunningError,
     ApprovalInvalidStatusError,
     ApprovalInvalidTypeError,
+    BackfillStopRequestedError,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
@@ -401,18 +477,32 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     CliAuthRequiredError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliInvalidDateError,
+    CliInvalidScheduleTimeError,
     CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
     CliPermissionDeniedError,
     CliStrategyError,
+    ConfigInvalidGeneralError,
+    ConfigInvalidGuardError,
+    ConfigInvalidLogLevelError,
+    ConfigInvalidNiceValueError,
+    ConfigInvalidValueError,
     ConfigKeyNotFoundError,
+    ConfigUnsupportedKeyError,
     DataError,
     DataInvalidDatasetIdError,
     DataInvalidFilterError,
     DataValidateInvalidSymbolError,
     DataValidateInvalidTimeframeError,
     DatasetNotFoundError,
+    FeedFileNotFoundError,
+    FeedInjectInvalidSymbolError,
+    FeedInjectInvalidTimeframeError,
+    FeedInjectValidationError,
+    FeedNotInitializedError,
+    GuardPermanentlyBlockedError,
     InstrumentEmptyFileError,
     InstrumentInvalidExchangeError,
     InstrumentInvalidFileFormatError,

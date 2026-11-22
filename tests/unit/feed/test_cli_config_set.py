@@ -104,7 +104,10 @@ class TestFeedConfigSetUnsupportedKey:
         assert result.exit_code == 1, (
             f"stdout={result.stdout!r} stderr={result.stderr!r}"
         )
-        assert "Error: 지원하지 않는 키입니다: unsupported_key" in result.stderr
+        assert (
+            "Error: CONFIG_UNSUPPORTED_KEY: 지원하지 않는 키입니다: unsupported_key"
+            in result.stderr
+        )
         # JSON envelope이 stdout으로 누출되지 않아야 한다.
         assert result.stdout.strip() == ""
 
