@@ -245,9 +245,6 @@
       "no-untyped-def": 1,
       "type-arg": 5
     },
-    "src/ante/cli/commands/approval.py": {
-      "type-arg": 11
-    },
     "src/ante/cli/commands/bot.py": {
       "no-any-return": 1,
       "no-untyped-call": 13,
@@ -275,17 +272,6 @@
       "no-untyped-call": 12,
       "no-untyped-def": 3,
       "type-arg": 13
-    },
-    "src/ante/cli/commands/strategy.py": {
-      "no-untyped-call": 6,
-      "no-untyped-def": 1,
-      "type-arg": 11
-    },
-    "src/ante/cli/commands/treasury.py": {
-      "no-any-return": 1,
-      "no-untyped-call": 10,
-      "no-untyped-def": 2,
-      "type-arg": 19
     },
     "src/ante/cli/middleware.py": {
       "no-any-return": 1,
