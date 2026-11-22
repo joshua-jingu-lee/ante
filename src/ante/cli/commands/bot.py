@@ -19,7 +19,7 @@ from ante.cli._validators import (
 )
 from ante.cli.cold_path import is_active_runtime
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -303,7 +303,7 @@ def bot_create(
     interval: int,
     bot_id: str,
     params: tuple[str, ...],
-) -> None:
+) -> CommandResult:
     """봇 생성."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
@@ -348,7 +348,9 @@ def bot_create(
 
     result = _run(_run_create())
 
-    fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
+    return CommandResult(
+        data=result, message=f"봇 생성 완료: {result.get('bot_id', '')}"
+    )
 
 
 @bot.command("remove")
@@ -363,14 +365,13 @@ def bot_create(
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
+def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> CommandResult:
     """봇 삭제.
 
     서버가 실행 중이면 기존 IPC 경로를 사용하고, 서버가 정지되어 있으면
     cold-path service가 persisted DB/signal key/snapshot/treasury state를 정리한다.
     `--yes` 누락 시 prompt 없이 `CLI_CONFIRMATION_REQUIRED` 에러로 종료한다.
     """
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     if not yes:
@@ -390,7 +391,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
     if not result.get("removed"):
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
     suffix = "(cold-path)" if result.get("cold_path") else ""
-    fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
+    return CommandResult(data=result, message=f"봇 삭제 완료{suffix}: {bot_id}")
 
 
 @bot.command("signal-key")

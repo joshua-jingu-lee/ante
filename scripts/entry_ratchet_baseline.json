@@ -83,7 +83,7 @@
   "cli_direct_output": {
     "src/ante/cli/commands/audit.py": 4,
     "src/ante/cli/commands/backtest.py": 7,
-    "src/ante/cli/commands/bot.py": 52,
+    "src/ante/cli/commands/bot.py": 50,
     "src/ante/cli/commands/broker.py": 26,
     "src/ante/cli/commands/config.py": 17,
     "src/ante/cli/commands/data.py": 23,
