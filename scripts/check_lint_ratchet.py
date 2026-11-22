@@ -1,24 +1,21 @@
 #!/usr/bin/env python3
-"""Fail when ruff (BLE001, ASYNC, S608, C901) or ``mypy --strict`` counts differ.
+"""Fail when ruff (BLE001, ASYNC, S608, C901) counts differ.
 
-Counts are per (file, rule or error code) over ``src/``, measured with
-``python -m ruff`` and ``python -m mypy`` of this interpreter in ``--root``.
+Counts are per (file, rule) over ``src/``, measured with ``python -m ruff`` of
+this interpreter in ``--root``: the JSON output of ``RUFF_ARGS``. A non-zero
+exit, output that is not a JSON list, an item without a string ``filename``, a
+``filename`` outside the root once both are resolved, or a ``code`` not
+matching ``CODE_RE`` is exit 2.
 
-- ruff: the JSON output of ``RUFF_ARGS``. A non-zero exit, output that is not
-  a JSON list, an item without a string ``filename``, a ``filename`` outside
-  the root once both are resolved, or a ``code`` not matching ``CODE_RE`` is
-  exit 2.
-- mypy: stdout of ``MYPY_ARGS``; stderr is passed through, not parsed. Every
-  non-empty line must match ``MYPY_LINE_RE``. Only ``error`` lines count, and
-  each must end with ``  [<code>]``. Exit status 0 with errors, 1 without, or
-  any other status is exit 2.
+``mypy --strict`` is not counted here: ``[tool.mypy] strict = true`` in
+``pyproject.toml`` makes ``mypy src/`` fail on any error.
 
 Baseline ``scripts/lint_baseline.json`` has exactly the keys ``tools``
-(``{"ruff": version, "mypy": version}``), ``ruff`` and ``mypy`` (file -> code
--> positive count, no empty inner object). It must equal the measurement of
-that commit's ``src/`` in CI. There is no flag that writes it.
+(``{"ruff": version}``) and ``ruff`` (file -> code -> positive count, no empty
+inner object). It must equal the measurement of that commit's ``src/`` in CI.
+There is no flag that writes it.
 
-Exit 0: installed tool versions equal ``tools`` and both counts equal the
+Exit 0: the installed ruff version equals ``tools`` and the counts equal the
 baseline. Exit 1: a count differs (more, fewer or moved). Exit 2: anything
 else, including a tool version that differs from ``tools``.
 """
@@ -26,18 +23,16 @@ else, including a tool version that differs from ``tools``.
 from __future__ import annotations
 
 import argparse
-import importlib.metadata
 import json
 import re
 import subprocess
 import sys
-import tomllib
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
 BASELINE_PATH = Path("scripts") / "lint_baseline.json"
-BASELINE_KEYS = frozenset({"tools", "ruff", "mypy"})
-TOOLS = ("ruff", "mypy")
+BASELINE_KEYS = frozenset({"tools", "ruff"})
+TOOLS = ("ruff",)
 
 RUFF_ARGS = (
     "check",
@@ -53,24 +48,8 @@ RUFF_ARGS = (
     "--exit-zero",
     "--ignore-noqa",
 )
-MYPY_ARGS = (
-    "--strict",
-    "--platform",
-    "linux",
-    "--cache-dir",
-    ".mypy_cache/strict",
-    "--no-error-summary",
-    "--no-pretty",
-    "--no-color-output",
-    "src/",
-)
 
 CODE_RE = re.compile(r"^[A-Z]+[0-9]+$")
-MYPY_LINE_RE = re.compile(
-    r"^(?P<path>[^:]+):\d+(?::\d+)?: (?P<sev>error|note|warning): (?P<msg>.*)$"
-)
-MYPY_CODE_RE = re.compile(r"  \[(?P<code>[a-z0-9-]+)\]$")
-REQUIREMENT_NAME_RE = re.compile(r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)")
 
 EXIT_OK = 0
 EXIT_MISMATCH = 1
@@ -88,7 +67,6 @@ RUFF_ALTERNATIVES = (
     ("S608", "자리표시자를 쓴다."),
     ("C901", "함수를 나눈다."),
 )
-MYPY_ALTERNATIVE = "타입을 채우거나 좁힌다."
 LOWER_HINT = "기준선을 낮춘다(0이면 키를 지운다)."
 MOVE_HINT = "파일을 옮기거나 새로 만들었다면 기준선을 옮긴다."
 
@@ -145,43 +123,11 @@ def parse_ruff_json(text: str, root: Path) -> Counts:
     return counts
 
 
-def parse_mypy(text: str, returncode: int) -> Counts:
-    if returncode not in (0, 1):
-        raise CheckError(f"mypy exited with {returncode}")
-    counts: Counts = {}
-    errors = 0
-    for line in text.splitlines():
-        if not line:
-            continue
-        match = MYPY_LINE_RE.match(line)
-        if match is None:
-            raise CheckError(f"unexpected mypy output line: {line!r}")
-        if match["sev"] != "error":
-            continue
-        code = MYPY_CODE_RE.search(match["msg"])
-        if code is None:
-            raise CheckError(f"mypy error without an error code: {line!r}")
-        _add(counts, match["path"], code["code"])
-        errors += 1
-    if returncode == 0 and errors:
-        raise CheckError(f"mypy exited with 0 but reported {errors} errors")
-    if returncode == 1 and not errors:
-        raise CheckError("mypy exited with 1 but reported no errors")
-    return counts
-
-
 def measure_ruff(root: Path, runner: Runner) -> Counts:
     proc = runner("ruff", RUFF_ARGS, root)
     if proc.returncode != 0:
         raise CheckError(f"ruff exited with {proc.returncode}: {proc.stderr.strip()}")
     return parse_ruff_json(proc.stdout, root)
-
-
-def measure_mypy(root: Path, runner: Runner) -> Counts:
-    proc = runner("mypy", MYPY_ARGS, root)
-    if proc.stderr:
-        sys.stderr.write(proc.stderr)
-    return parse_mypy(proc.stdout, proc.returncode)
 
 
 def tool_version(module: str, root: Path, runner: Runner) -> str:
@@ -233,7 +179,7 @@ def _read_tools(data: dict[str, object]) -> dict[str, str]:
     return dict(tools)
 
 
-def parse_baseline(text: str) -> tuple[dict[str, str], Counts, Counts]:
+def parse_baseline(text: str) -> tuple[dict[str, str], Counts]:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
@@ -247,10 +193,10 @@ def parse_baseline(text: str) -> tuple[dict[str, str], Counts, Counts]:
             f"(missing {sorted(BASELINE_KEYS - keys)}, "
             f"extra {sorted(keys - BASELINE_KEYS)})"
         )
-    return _read_tools(data), _read_counts(data, "ruff"), _read_counts(data, "mypy")
+    return _read_tools(data), _read_counts(data, "ruff")
 
 
-def read_baseline(root: Path) -> tuple[dict[str, str], Counts, Counts]:
+def read_baseline(root: Path) -> tuple[dict[str, str], Counts]:
     try:
         text = (root / BASELINE_PATH).read_text(encoding="utf-8")
     except FileNotFoundError as exc:
@@ -260,9 +206,7 @@ def read_baseline(root: Path) -> tuple[dict[str, str], Counts, Counts]:
     return parse_baseline(text)
 
 
-def _alternative(kind: str, code: str) -> str:
-    if kind == "mypy":
-        return MYPY_ALTERNATIVE
+def _alternative(code: str) -> str:
     return next(text for prefix, text in RUFF_ALTERNATIVES if code.startswith(prefix))
 
 
@@ -281,7 +225,7 @@ def _diff(kind: str, actual: Counts, baseline: Counts) -> list[str]:
                 f"({got - want:+d})"
             )
             if got > want:
-                lines.append(f"  대안: {_alternative(kind, code)}")
+                lines.append(f"  대안: {_alternative(code)}")
                 if path not in baseline:
                     lines.append(f"  {MOVE_HINT}")
             else:
@@ -289,48 +233,20 @@ def _diff(kind: str, actual: Counts, baseline: Counts) -> list[str]:
     return lines
 
 
-def dependency_versions(root: Path) -> list[str]:
-    try:
-        with (root / "pyproject.toml").open("rb") as handle:
-            requirements = tomllib.load(handle)["project"]["dependencies"]
-    except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
-        return [f"  cannot read [project].dependencies: {type(exc).__name__}: {exc}"]
-    lines: list[str] = []
-    for requirement in requirements:
-        match = REQUIREMENT_NAME_RE.match(str(requirement))
-        if match is None:
-            continue
-        name = match.group(1)
-        try:
-            version = importlib.metadata.version(name)
-        except importlib.metadata.PackageNotFoundError:
-            version = "not installed"
-        lines.append(f"  {name}=={version}")
-    return lines
-
-
-def judge(
-    root: Path, actual: tuple[Counts, Counts], baseline: tuple[Counts, Counts]
-) -> tuple[int, str]:
-    ruff_lines = _diff("ruff", actual[0], baseline[0])
-    mypy_lines = _diff("mypy", actual[1], baseline[1])
-    if not ruff_lines and not mypy_lines:
-        ruff_total = sum(sum(codes.values()) for codes in actual[0].values())
-        mypy_total = sum(sum(codes.values()) for codes in actual[1].values())
+def judge(actual: Counts, baseline: Counts) -> tuple[int, str]:
+    ruff_lines = _diff("ruff", actual, baseline)
+    if not ruff_lines:
+        ruff_total = sum(sum(codes.values()) for codes in actual.values())
         return EXIT_OK, (
-            f"lint ratchet ok: {ruff_total} ruff findings, {mypy_total} mypy "
-            f"--strict errors (baseline {BASELINE_PATH})"
+            f"lint ratchet ok: {ruff_total} ruff findings (baseline {BASELINE_PATH})"
         )
-    parts = [f"lint ratchet failed against {BASELINE_PATH}:", *ruff_lines, *mypy_lines]
-    if mypy_lines:
-        parts.append("installed [project].dependencies:")
-        parts.extend(dependency_versions(root))
+    parts = [f"lint ratchet failed against {BASELINE_PATH}:", *ruff_lines]
     return EXIT_MISMATCH, "\n".join(parts)
 
 
 def run(root: Path, runner: Runner = run_tool) -> tuple[int, str]:
     try:
-        tools, ruff_baseline, mypy_baseline = read_baseline(root)
+        tools, ruff_baseline = read_baseline(root)
         for module in TOOLS:
             installed = tool_version(module, root, runner)
             if installed != tools[module]:
@@ -338,15 +254,15 @@ def run(root: Path, runner: Runner = run_tool) -> tuple[int, str]:
                     f"{module} {installed} is installed, baseline needs "
                     f"{tools[module]}\n{INSTALL_HINT}"
                 )
-        actual = (measure_ruff(root, runner), measure_mypy(root, runner))
+        actual = measure_ruff(root, runner)
     except CheckError as exc:
         return EXIT_ERROR, str(exc)
-    return judge(root, actual, (ruff_baseline, mypy_baseline))
+    return judge(actual, ruff_baseline)
 
 
 def main(argv: Sequence[str] | None = None, runner: Runner = run_tool) -> int:
     parser = argparse.ArgumentParser(
-        description="Check ruff and mypy --strict counts of src/ against a baseline."
+        description="Check ruff counts of src/ against a baseline."
     )
     parser.add_argument(
         "--root",

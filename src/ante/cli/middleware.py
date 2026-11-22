@@ -6,7 +6,7 @@ import asyncio
 import functools
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -172,7 +172,7 @@ def _get_invoked_command_path(ctx: click.Context) -> tuple[str, ...] | None:
     return None
 
 
-def require_auth(fn: Callable) -> Callable:
+def require_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
     """인증 필수 데코레이터.
 
     @click.pass_context 아래에 배치한다.
@@ -198,7 +198,7 @@ def require_auth(fn: Callable) -> Callable:
     return wrapper
 
 
-def require_master(fn: Callable) -> Callable:
+def require_master(fn: Callable[..., Any]) -> Callable[..., Any]:
     """master-only 데코레이터 (HUMAN type + master role만 통과).
 
     멱등(idempotent) — 이미 ``require_master`` 가 부착된 함수에 재적용되어도
@@ -239,7 +239,7 @@ def require_master(fn: Callable) -> Callable:
     return wrapper
 
 
-def require_scope(*scopes: str) -> Callable:
+def require_scope(*scopes: str) -> Callable[..., Any]:
     """권한 검증 데코레이터.
 
     @click.pass_context 아래에 배치한다.
@@ -247,7 +247,7 @@ def require_scope(*scopes: str) -> Callable:
     Agent 멤버는 등록된 scope에 필요 scope가 모두 포함되어야 한다.
     """
 
-    def decorator(fn: Callable) -> Callable:
+    def decorator(fn: Callable[..., Any]) -> Callable[..., Any]:
         @functools.wraps(fn)
         def wrapper(*args: object, **kwargs: object) -> object:
             from ante.member.models import MemberType
@@ -691,7 +691,7 @@ def _attach_auth_guard_recursive(cmd: click.Command) -> None:
         cmd.callback = _wrap_callback_with_auth(cmd.callback)
 
 
-def _wrap_callback_with_auth(callback: Callable) -> Callable:
+def _wrap_callback_with_auth(callback: Callable[..., Any]) -> Callable[..., Any]:
     """callback을 default-deny 인증 가드 wrapper로 감싼다."""
     if getattr(callback, "_wrapped_by_authenticated_group", False):
         return callback
@@ -730,7 +730,7 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
     return wrapper
 
 
-def authenticated_group(name: str | None = None, **attrs: object) -> Callable:
+def authenticated_group(name: str | None = None, **attrs: object) -> Callable[..., Any]:
     """``@click.group`` 호환 데코레이터. ``AuthenticatedGroup``으로 그룹을 생성.
 
     사용 예::
@@ -741,4 +741,4 @@ def authenticated_group(name: str | None = None, **attrs: object) -> Callable:
             ...
     """
     attrs.setdefault("cls", AuthenticatedGroup)
-    return click.group(name=name, **attrs)  # type: ignore[call-overload]
+    return cast("Callable[..., Any]", click.group(name=name, **attrs))  # type: ignore[call-overload]
