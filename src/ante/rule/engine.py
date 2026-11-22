@@ -325,7 +325,7 @@ class RuleEngine:
         if rule_class is None:
             logger.warning("알 수 없는 룰 타입: %s", rule_type)
             return None
-        rule_id: str = config.get("id", rule_type)  # type: ignore[assignment]
+        rule_id: str = config.get("id", rule_type)
         return rule_class(rule_id, config)
 
     @property
