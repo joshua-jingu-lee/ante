@@ -116,6 +116,8 @@ def test_codes_registered_last_resolve_to_their_own_spec() -> None:
 
     for cls in (ModifyOrgnoUnavailableError, StopOrderManagerStoppedError):
         assert error_spec_for_exception(make_instance(cls)).code == cls.code
+    spec = error_registry.EXCEPTION_TO_SPEC.get(ModifyOrgnoUnavailableError)
+    assert spec is not None and spec.category == "state_conflict"
     assert {
         "BROKER_MODIFY_ORGNO_UNAVAILABLE",
         "CLI_USAGE_ERROR",
