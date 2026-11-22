@@ -494,9 +494,10 @@ ante broker reconcile --account <account_id> [--fix]  # 시스템↔증권사 �
 모든 `broker` live 커맨드는 서버가 시작 시 생성한 BrokerAdapter를 통해 실행하는
 런타임 IPC 커맨드다. CLI가 별도 adapter를 직접 생성하면 credentials 복호화, 연결
 상태, rate limit, circuit breaker, audit 경로가 서버와 분리되므로 허용하지 않는다.
-과거·공개 market data 조회는 `data`/`feed` 계열 커맨드로 다룬다. `broker order`와
-`broker stream prices`는 일반 운영 CLI 범위가 아니며, 별도 maintenance/test 스펙
-없이는 제공하지 않는다.
+서버가 실행 중이 아닐 때의 직접 연결 폴백은 예외다. 서버가 거부하거나 응답하지
+않으면 그 코드로 끝난다. 과거·공개 market data 조회는 `data`/`feed` 계열 커맨드로
+다룬다. `broker order`와 `broker stream prices`는 일반 운영 CLI 범위가 아니며, 별도
+maintenance/test 스펙 없이는 제공하지 않는다.
 
 #### `broker order-history` — 주문/체결 이력 조회 (read-only)
 
@@ -513,9 +514,8 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 한쪽만 지정·둘 다 미지정·동일 날짜는 정상 처리한다 — `audit list`/`trade list`/
 `treasury snapshot`/`report performance`와 동일 계약이다.
 
-폴백 경계는 형제 명령과 다르다. 서버가 정지된 경우(`IPC_SERVER_NOT_RUNNING`)에만
-직접 연결 폴백으로 내려가고, `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본
-코드/메시지로 노출한다(credentials·rate limit·circuit breaker 우회 차단).
+폴백 경계는 형제 명령과 같다. `IPC_SERVER_NOT_RUNNING`에서만 직접 연결로 내려가고,
+`IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.
 
 출력은 BrokerAdapter가 정규화한 8키다: `order_id` / `symbol` / `side` /
 `quantity` / `filled_quantity` / `price` / `status` / `timestamp`. JSON 모드는

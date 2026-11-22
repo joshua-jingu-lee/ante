@@ -18,7 +18,7 @@ sub-PR 3 (bot) / sub-PR 4 (treasury) 의 1:1 동형 패턴.
   연속 실패 임계 도달로 circuit breaker OPEN)
 
 broker CLI 표면 (``balance``/``positions``/``reconcile``) 은 IPC 우선 →
-``except click.ClickException`` 으로 fallback path 에 진입한다. fallback
+``except IPCServerNotRunningError`` 로 fallback path 에 진입한다. fallback
 의 ``_get_broker``/``_run_balance``/``_run_positions``/``_run_reconcile``
 이 broker typed exception 을 raise 하면 ``except Exception`` 분기의
 ``emit_cli_error(fmt, e)`` 가 registry MRO lookup 으로 ``BROKER_*`` 안정
@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -46,6 +47,7 @@ from ante.broker.exceptions import (
 )
 from ante.cli.main import cli
 from ante.contracts import ipc_error_payload
+from ante.contracts.ipc_client_errors import IPCRemoteError, IPCServerNotRunningError
 from ante.member.models import Member, MemberRole, MemberType
 
 _MOCK_MASTER = Member(
@@ -111,20 +113,18 @@ def _patch_balance_fallback_raises(exc: BaseException):  # noqa: ANN202
     """broker.balance CLI 의 fallback path 에서 broker exception 을 강제로
     raise 시키기 위한 context manager 묶음.
 
-    IPC 우선 시도는 ``ipc_send`` 가 ``ClickException`` 을 raise 하도록
-    mock — CLI ``balance`` 의 ``except click.ClickException`` 분기가 fallback
+    IPC 우선 시도는 ``ipc_send`` 가 ``IPCServerNotRunningError`` 를 raise 하도록
+    mock — CLI ``balance`` 의 ``except IPCServerNotRunningError`` 분기가 fallback
     path 에 진입한다. fallback 의 ``_get_broker`` 가 mock adapter (raise 하는
     ``get_account_balance``) 를 반환하면, ``_run_balance`` 가 broker exception
     을 전파하고 ``except Exception → emit_cli_error`` 가 안정 코드를 surface
     한다.
     """
-    import click
-
     from ante.broker.base import BrokerAdapter
     from ante.cli.commands import broker as broker_cmd
 
     async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-        raise click.ClickException("server unavailable")
+        raise IPCServerNotRunningError("server unavailable")
 
     mock_adapter = MagicMock(spec=BrokerAdapter)
     mock_adapter.is_connected = True
@@ -343,13 +343,10 @@ class TestBrokerCircuitOpenEquivalence:
 # ── order-history / reconcile 의 IPC 오류와 직접 경로 오류 ────────────────
 
 
-def _ipc_click_exc(code: str, message: str):  # noqa: ANN202
-    import click
-
-    exc = click.ClickException(f"{code}: {message}")
-    exc.ipc_error_code = code  # type: ignore[attr-defined]
-    exc.ipc_error_message = message  # type: ignore[attr-defined]
-    return exc
+def _ipc_click_exc(code: str, message: str) -> click.ClickException:
+    if code == "IPC_SERVER_NOT_RUNNING":
+        return IPCServerNotRunningError(message)
+    return IPCRemoteError(code, message)
 
 
 def _raising_adapter(exc: BaseException) -> MagicMock:

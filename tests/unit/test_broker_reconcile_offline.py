@@ -257,11 +257,11 @@ def _run_offline_reconcile(
     import asyncio
     import json
 
-    import click
     from click.testing import CliRunner
 
     from ante.cli.commands import broker as broker_cmd
     from ante.cli.main import cli
+    from ante.contracts.ipc_client_errors import IPCServerNotRunningError
     from ante.core.database import Database
     from ante.member.models import Member, MemberRole, MemberType
     from ante.trade.position import PositionHistory
@@ -291,8 +291,7 @@ def _run_offline_reconcile(
     async def _fake_get_broker(account_id=None):  # noqa: ANN001, ANN202
         return adapter, None
 
-    exc = click.ClickException("server down")
-    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
+    exc = IPCServerNotRunningError("server down")
     master = Member(
         member_id="m",
         type=MemberType.HUMAN,

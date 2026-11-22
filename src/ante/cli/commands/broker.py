@@ -10,7 +10,7 @@ from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.ipc_client_errors import IPCServerNotRunningError
 
 
 @click.group()
@@ -116,7 +116,7 @@ def status(ctx: click.Context, account_id: str) -> None:
     try:
         actor = get_member_id(ctx)
         result = _run(_ipc_broker_command("broker.status", validated_account_id, actor))
-    except click.ClickException:
+    except IPCServerNotRunningError:
 
         async def _run_status() -> dict:
             try:
@@ -143,11 +143,7 @@ def status(ctx: click.Context, account_id: str) -> None:
                     "error": str(e),
                 }
 
-        try:
-            result = _run(_run_status())
-        except AccountNotFoundError as e:
-            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-            raise SystemExit(1) from e
+        result = _run(_run_status())
 
     if fmt.is_json:
         fmt.output(result)
@@ -183,7 +179,7 @@ def balance(ctx: click.Context, account_id: str) -> None:
         result = _run(
             _ipc_broker_command("broker.balance", validated_account_id, actor)
         )
-    except click.ClickException:
+    except IPCServerNotRunningError:
 
         async def _run_balance() -> dict:
             adapter, db = await _get_broker(validated_account_id)
@@ -194,13 +190,7 @@ def balance(ctx: click.Context, account_id: str) -> None:
                 if db:
                     await db.close()
 
-        try:
-            result = _run(_run_balance())
-        except AccountNotFoundError as e:
-            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-            raise SystemExit(1) from e
-        except Exception as e:
-            emit_cli_error(fmt, e)
+        result = _run(_run_balance())
 
     if fmt.is_json:
         fmt.output(result)
@@ -233,7 +223,7 @@ def positions(ctx: click.Context, account_id: str) -> None:
         result = _run(
             _ipc_broker_command("broker.positions", validated_account_id, actor)
         )
-    except click.ClickException:
+    except IPCServerNotRunningError:
 
         async def _run_positions() -> list[dict]:
             adapter, db = await _get_broker(validated_account_id)
@@ -244,14 +234,7 @@ def positions(ctx: click.Context, account_id: str) -> None:
                 if db:
                     await db.close()
 
-        try:
-            pos_list = _run(_run_positions())
-            result = {"positions": pos_list}
-        except AccountNotFoundError as e:
-            fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-            raise SystemExit(1) from e
-        except Exception as e:
-            emit_cli_error(fmt, e)
+        result = {"positions": _run(_run_positions())}
 
     pos_list = result.get("positions", [])
 
@@ -366,13 +349,7 @@ def order_history(
                 if db:
                     await db.close()
 
-        try:
-            result = {"orders": _run(_run_order_history())}
-        except AccountNotFoundError as exc:
-            fmt.error(str(exc), code="ACCOUNT_NOT_FOUND")
-            raise SystemExit(1) from exc
-        except Exception as exc:
-            emit_cli_error(fmt, exc)
+        result = {"orders": _run(_run_order_history())}
 
     orders = result.get("orders", [])
 
@@ -432,12 +409,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
             args: dict = {"fix": True, "account_id": validated_account_id}
             return await ipc_send("broker.reconcile", args, actor=actor)
 
-        try:
-            result = _run(_run_fix())
-        except click.ClickException:
-            raise
-        except Exception as e:
-            emit_cli_error(fmt, e)
+        result = _run(_run_fix())
     else:
         try:
             actor = get_member_id(ctx)
@@ -449,7 +421,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                 return await ipc_send("broker.reconcile", args, actor=actor)
 
             result = _run(_run_ipc_reconcile())
-        except click.ClickException:
+        except IPCServerNotRunningError:
 
             async def _run_reconcile() -> dict:
                 from ante.cli.main import get_db_path
@@ -509,13 +481,7 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
                     await adapter.disconnect()
                     await db.close()
 
-            try:
-                result = _run(_run_reconcile())
-            except AccountNotFoundError as e:
-                fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-                raise SystemExit(1) from e
-            except Exception as e:
-                emit_cli_error(fmt, e)
+            result = _run(_run_reconcile())
 
     if fmt.is_json:
         fmt.output(result)
