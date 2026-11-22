@@ -58,20 +58,8 @@
     "auth_required",
     "permission_denied"
   ],
-  "ipc_handlers_without_model": [
-    "broker.balance",
-    "broker.order_history",
-    "broker.positions",
-    "broker.reconcile",
-    "broker.status"
-  ],
-  "ipc_args_reads": {
-    "broker.balance": 1,
-    "broker.order_history": 3,
-    "broker.positions": 1,
-    "broker.reconcile": 2,
-    "broker.status": 1
-  },
+  "ipc_handlers_without_model": [],
+  "ipc_args_reads": {},
   "cli_direct_ipc_send": {
     "src/ante/cli/commands/account.py": 2,
     "src/ante/cli/commands/approval.py": 6,

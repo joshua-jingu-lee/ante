@@ -29,7 +29,7 @@ from pydantic.fields import FieldInfo
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
-from ante.ipc.requests import AccountId, IPCRequest
+from ante.ipc.requests import AccountId, IPCRequest, IsoDate
 from ante.ipc.server import IPCServer, IPCServerState
 from tests.unit.ipc.validation_messages import validation_message
 
@@ -118,6 +118,12 @@ VALIDATED_TYPES: dict[Callable[..., Any], ValidatedType] = {
             ("pattern", "bad_id!"),
         ),
         expected="invalid_account_id",
+    ),
+    _validator_of(IsoDate): ValidatedType(
+        base="2026-01-02",
+        accepts=(("leap_day", "2028-02-29"),),
+        rejects=(("compact", "20260102"), ("calendar", "2026-02-30")),
+        expected="invalid_iso_date",
     ),
 }
 
@@ -496,6 +502,8 @@ class _TableRequest(IPCRequest):
     payload: dict[str, Any] | None = None
     meta: dict[str, Any] = {}
     owner: AccountId | None = None
+    day: IsoDate
+    since: IsoDate | None = None
     inner: _TableInner
 
 
@@ -687,6 +695,8 @@ def test_nullable_fields_accept_null_and_reject_other_types() -> None:
         ("ApprovalReopenRequest", "body"),
         ("ApprovalReopenRequest", "params"),
         ("BotListRequest", "account_id"),
+        ("BrokerOrderHistoryRequest", "from_date"),
+        ("BrokerOrderHistoryRequest", "to_date"),
         *(
             ("BotUpdateFields", name)
             for name in (
@@ -815,6 +825,18 @@ def test_generator_table_for_each_field_kind() -> None:
         ("owner", "reject:long", "invalid_account_id"),
         ("owner", "reject:pattern", "invalid_account_id"),
         ("owner", "reject:marker", "invalid_account_id"),
+        ("day", "missing", "missing"),
+        *(("day", f"wrong:{k}", "string_type") for k in string_kinds),
+        ("day", "reject:compact", "invalid_iso_date"),
+        ("day", "reject:calendar", "invalid_iso_date"),
+        ("day", "reject:marker", "invalid_iso_date"),
+        *(
+            ("since", f"wrong:{k}", "string_type")
+            for k in ("int", "float", "bool", "array", "object")
+        ),
+        ("since", "reject:compact", "invalid_iso_date"),
+        ("since", "reject:calendar", "invalid_iso_date"),
+        ("since", "reject:marker", "invalid_iso_date"),
         ("inner", "missing", "missing"),
         *(
             ("inner", f"wrong:{k}", "model_type")
@@ -852,6 +874,8 @@ def test_generator_table_for_each_field_kind() -> None:
         "payload": {"k": "v"},
         "meta": {"k": "v"},
         "owner": "acct-1",
+        "day": "2026-01-02",
+        "since": "2026-01-02",
         "inner": {"size": 1, "tag": "v"},
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
@@ -867,6 +891,9 @@ def test_generator_table_for_each_field_kind() -> None:
         ("owner", "accept:shortest", "abc"),
         ("owner", "accept:longest", "a" * 30),
         ("owner", "null", None),
+        ("day", "accept:leap_day", "2028-02-29"),
+        ("since", "accept:leap_day", "2028-02-29"),
+        ("since", "null", None),
         ("inner.size", "ge", 1),
         ("inner.tag", "null", None),
     ]
