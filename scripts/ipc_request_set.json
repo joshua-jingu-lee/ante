@@ -1,0 +1,126 @@
+{
+ "commands": {
+  "strategy.set_status": [
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": "s1"
+    },
+    "kind": "cli",
+    "name": "strategy.set_status:cli:0"
+   },
+   {
+    "args": {
+     "strategy_id": "s1"
+    },
+    "key": "status",
+    "kind": "missing",
+    "name": "strategy.set_status:missing:status"
+   },
+   {
+    "args": {
+     "status": "5",
+     "strategy_id": "s1"
+    },
+    "key": "status",
+    "kind": "value",
+    "name": "strategy.set_status:value:status:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "status": 7,
+     "strategy_id": "s1"
+    },
+    "key": "status",
+    "kind": "value",
+    "name": "strategy.set_status:value:status:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": true,
+     "strategy_id": "s1"
+    },
+    "key": "status",
+    "kind": "value",
+    "name": "strategy.set_status:value:status:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": null,
+     "strategy_id": "s1"
+    },
+    "key": "status",
+    "kind": "value",
+    "name": "strategy.set_status:value:status:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": "archived"
+    },
+    "key": "strategy_id",
+    "kind": "missing",
+    "name": "strategy.set_status:missing:strategy_id"
+   },
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": "5"
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "strategy.set_status:value:strategy_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": 7
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "strategy.set_status:value:strategy_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": true
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "strategy.set_status:value:strategy_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": null
+    },
+    "key": "strategy_id",
+    "kind": "value",
+    "name": "strategy.set_status:value:strategy_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "status": "archived",
+     "strategy_id": "s1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "strategy.set_status:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "strategy.set_status:array"
+   }
+  ]
+ }
+}
