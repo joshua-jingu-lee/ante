@@ -61,6 +61,27 @@ select = ["E", "F", "I", "N", "W", "UP", "PGH003", "PGH004", "RUF100", "RUF102"]
 
 [tool.ruff.lint.per-file-ignores]
 "!src/**" = ["RUF100"]
+"src/ante/core/clock.py" = ["TID251"]
+
+# 시각 판독은 ante.core.clock만 한다 (#2768). TID251은 아직 기본 select에 없고
+# scripts/check_lint_ratchet.py가 src/의 위반 수를 래칫으로 잰다.
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"datetime.datetime.now" = { msg = "ante.core.clock.now(tz)를 쓴다." }
+"datetime.datetime.utcnow" = { msg = "ante.core.clock.now(UTC)를 쓴다." }
+"datetime.datetime.today" = { msg = "ante.core.clock.now(tz)를 쓴다." }
+"datetime.date.today" = { msg = "ante.core.clock.now(tz).date()를 쓴다." }
+"time.time" = { msg = "ante.core.clock.now(UTC).timestamp()를 쓴다." }
+"time.time_ns" = { msg = "ante.core.clock.now(UTC).timestamp()를 쓴다." }
+"time.monotonic" = { msg = "ante.core.clock.monotonic()을 쓴다." }
+"time.monotonic_ns" = { msg = "ante.core.clock.monotonic()을 쓴다." }
+"time.perf_counter" = { msg = "ante.core.clock.monotonic()을 쓴다." }
+"time.perf_counter_ns" = { msg = "ante.core.clock.monotonic()을 쓴다." }
+"time.localtime" = { msg = "ante.core.clock.now(tz)를 쓴다." }
+"time.gmtime" = { msg = "ante.core.clock.now(UTC)를 쓴다." }
+"time.ctime" = { msg = "ante.core.clock.now(tz)를 쓴다." }
+"time.strftime" = { msg = "ante.core.clock.now(tz).strftime()을 쓴다." }
+"ante.core.clock.set_clock" = { msg = "운영 코드는 시계를 바꾸지 않는다." }
+"ante.core.clock.use_clock" = { msg = "운영 코드는 시계를 바꾸지 않는다." }
 
 [tool.mypy]
 python_version = "3.13"
