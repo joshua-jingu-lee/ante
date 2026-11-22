@@ -206,7 +206,7 @@ def test_approval_input_errors(
     if mode == "json":
         _assert_json(result, _envelope(code, message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: {code}: {message}"])
     send.assert_not_called()
 
 
@@ -233,7 +233,7 @@ def test_approval_info_not_found(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("APPROVAL_NOT_FOUND", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: APPROVAL_NOT_FOUND: {message}"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -248,7 +248,7 @@ def test_approval_info_ambiguous_prefix(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("EXECUTION_ERROR", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: EXECUTION_ERROR: {message}"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -266,7 +266,7 @@ def test_approval_review_not_found(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("APPROVAL_NOT_FOUND", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: APPROVAL_NOT_FOUND: {message}"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -306,7 +306,7 @@ def test_approval_offline_unexpected_error(
     if mode == "json":
         _assert_json(result, _envelope("EXECUTION_ERROR", "목록 실패"))
     else:
-        _assert_text(result, ["Error: 목록 실패"])
+        _assert_text(result, ["Error: EXECUTION_ERROR: 목록 실패"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -321,7 +321,7 @@ def test_approval_review_registered_domain_error(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("APPROVAL_STATUS_CONFLICT", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: APPROVAL_STATUS_CONFLICT: {message}"])
 
 
 _APPROVAL_IPC_ARGS = [
@@ -355,7 +355,7 @@ def test_approval_ipc_unexpected_error(mode: str, args: list[str]) -> None:
     if mode == "json":
         _assert_json(result, _envelope("EXECUTION_ERROR", "전송 실패"))
     else:
-        _assert_text(result, ["Error: 전송 실패"])
+        _assert_text(result, ["Error: EXECUTION_ERROR: 전송 실패"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -461,35 +461,38 @@ def test_bot_runtime_ipc_errors_keep_the_code_prefix(
 
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize(
-    ("error", "code", "message"),
+    ("error", "code", "message", "line"),
     [
         pytest.param(
             IPCServerNotRunningError(_SERVER_DOWN),
             "IPC_SERVER_NOT_RUNNING",
             _SERVER_DOWN,
+            f"Error: {_SERVER_DOWN}",
             id="server-down",
         ),
         pytest.param(
-            IPCClientTimeoutError(_TIMEOUT), "IPC_TIMEOUT", _TIMEOUT, id="timeout"
+            IPCClientTimeoutError(_TIMEOUT),
+            "IPC_TIMEOUT",
+            _TIMEOUT,
+            f"Error: {_TIMEOUT}",
+            id="timeout",
         ),
         pytest.param(
             IPCRemoteError("BOT_STATE_CONFLICT", "실행 중인 봇"),
             "BOT_STATE_CONFLICT",
             "실행 중인 봇",
+            "Error: BOT_STATE_CONFLICT: 실행 중인 봇",
             id="remote",
         ),
     ],
 )
 def test_bot_update_ipc_errors(
-    mode: str, error: Exception, code: str, message: str
+    mode: str, error: Exception, code: str, message: str, line: str
 ) -> None:
     result = _invoke(
         ["--format", mode, "bot", "update", "b1", "--name", "n2"], _send(error)
     )
-    if mode == "json":
-        _assert_json(result, _envelope(code, message))
-    else:
-        _assert_text(result, [f"Error: {message}"])
+    _assert_exit(mode, result, code, message, line)
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -502,7 +505,7 @@ def test_bot_update_without_fields(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("CLI_MISSING_REQUIRED_INPUT", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: CLI_MISSING_REQUIRED_INPUT: {message}"])
     send.assert_not_called()
 
 
@@ -588,7 +591,7 @@ def test_bot_not_found(mode: str, args: list[str], patches: Any) -> None:
     if mode == "json":
         _assert_json(result, _envelope("BOT_NOT_FOUND", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: BOT_NOT_FOUND: {message}"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -621,7 +624,7 @@ def test_bot_signal_key_not_set(mode: str, patches: Any) -> None:
     if mode == "json":
         _assert_json(result, _envelope("SIGNAL_KEY_NOT_SET", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: SIGNAL_KEY_NOT_SET: {message}"])
 
 
 def test_bot_signal_key_present_is_not_an_error() -> None:
@@ -648,7 +651,7 @@ def test_bot_positions_invalid_account(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("VALIDATION_ERROR", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: VALIDATION_ERROR: {message}"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -663,7 +666,7 @@ def test_bot_create_invalid_param(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("BOT_INVALID_PARAM", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: BOT_INVALID_PARAM: {message}"])
     send.assert_not_called()
 
 
@@ -696,7 +699,7 @@ def test_bot_create_without_account(
     if mode == "json":
         _assert_json(result, _envelope("BOT_MISSING_REQUIRED_ACCOUNT", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: BOT_MISSING_REQUIRED_ACCOUNT: {message}"])
     send.assert_not_called()
 
 
@@ -721,7 +724,7 @@ def test_bot_remove_without_yes(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("CLI_CONFIRMATION_REQUIRED", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: CLI_CONFIRMATION_REQUIRED: {message}"])
     send.assert_not_called()
 
 
@@ -760,7 +763,7 @@ def test_bot_logs_input_errors(
     if mode == "json":
         _assert_json(result, _envelope(code, message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: {code}: {message}"])
     opened.assert_not_called()
 
 
@@ -795,7 +798,7 @@ def test_bot_ipc_unexpected_error(mode: str, args: list[str]) -> None:
     if mode == "json":
         _assert_json(result, _envelope("EXECUTION_ERROR", "전송 실패"))
     else:
-        _assert_text(result, ["Error: 전송 실패"])
+        _assert_text(result, ["Error: EXECUTION_ERROR: 전송 실패"])
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -840,4 +843,48 @@ def test_bot_remove_registered_domain_error(mode: str) -> None:
     if mode == "json":
         _assert_json(result, _envelope("BOT_STATE_CONFLICT", message))
     else:
-        _assert_text(result, [f"Error: {message}"])
+        _assert_text(result, [f"Error: BOT_STATE_CONFLICT: {message}"])
+
+
+def test_exceptions_raised_by_approval_and_bot_map_to_their_specs() -> None:
+    from ante.approval.models import ApprovalValidationError
+    from ante.contracts import cli_errors
+    from ante.contracts.helpers import error_spec_for_exception
+    from ante.contracts.request_errors import RequestValidationError
+
+    classes = [
+        cli_errors.ApprovalInvalidStatusError,
+        cli_errors.ApprovalInvalidTypeError,
+        cli_errors.BotInvalidParamError,
+        cli_errors.BotMissingRequiredAccountError,
+        cli_errors.CliBotNotFoundError,
+        cli_errors.CliConfirmationRequiredError,
+        cli_errors.CliMissingRequiredInputError,
+        cli_errors.InvalidDateRangeError,
+        cli_errors.InvalidJsonError,
+        cli_errors.SignalKeyNotSetError,
+        ApprovalValidationError,
+        RequestValidationError,
+    ]
+    table = {}
+    for cls in classes:
+        spec = error_spec_for_exception(cls("m"))
+        table[cls.__name__] = (spec.code, spec.category, spec.exit_code)
+    assert table == {
+        "ApprovalInvalidStatusError": ("APPROVAL_INVALID_STATUS", "validation", 1),
+        "ApprovalInvalidTypeError": ("APPROVAL_INVALID_TYPE", "validation", 1),
+        "BotInvalidParamError": ("BOT_INVALID_PARAM", "validation", 1),
+        "BotMissingRequiredAccountError": (
+            "BOT_MISSING_REQUIRED_ACCOUNT",
+            "validation",
+            1,
+        ),
+        "CliBotNotFoundError": ("BOT_NOT_FOUND", "not_found", 1),
+        "CliConfirmationRequiredError": ("CLI_CONFIRMATION_REQUIRED", "validation", 1),
+        "CliMissingRequiredInputError": ("CLI_MISSING_REQUIRED_INPUT", "validation", 1),
+        "InvalidDateRangeError": ("INVALID_DATE_RANGE", "validation", 1),
+        "InvalidJsonError": ("INVALID_JSON", "validation", 1),
+        "SignalKeyNotSetError": ("SIGNAL_KEY_NOT_SET", "not_found", 1),
+        "ApprovalValidationError": ("APPROVAL_VALIDATION_ERROR", "validation", 1),
+        "RequestValidationError": ("VALIDATION_ERROR", "validation", 1),
+    }
