@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import click
 
@@ -44,7 +44,7 @@ def treasury() -> None:
     """자금 현황 조회·관리."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -123,7 +123,7 @@ def status(ctx: click.Context, account_id: str) -> None:
 
     reject_invalid_account_id(account_id, fmt, context="cli.treasury")
 
-    async def _run_status() -> dict:
+    async def _run_status() -> dict[str, Any]:
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             return t.get_summary()
 
@@ -180,7 +180,7 @@ def transactions(
         )
     reject_inverted_date_range(from_date, to_date, fmt)
 
-    async def _run_transactions() -> dict:
+    async def _run_transactions() -> dict[str, Any]:
         async with open_cli_db(ctx) as db:
             where: list[str] = []
             params: list[str | int] = []
@@ -252,8 +252,8 @@ def budgets(ctx: click.Context, account_id: str | None) -> None:
             account_id, fmt, context="cli.treasury.budgets"
         )
 
-    async def _run_budgets() -> dict:
-        async def _collect_items(treasuries: list) -> dict:
+    async def _run_budgets() -> dict[str, Any]:
+        async def _collect_items(treasuries: list[Treasury]) -> dict[str, Any]:
             items = []
             for treasury_obj in treasuries:
                 for budget in treasury_obj.list_budgets():
@@ -295,7 +295,7 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
         account_id, fmt, context="cli.treasury.set_balance"
     )
 
-    async def _run_set_balance() -> dict:
+    async def _run_set_balance() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -337,7 +337,7 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
         account_id, fmt, context="cli.treasury.allocate"
     )
 
-    async def _run_allocate() -> dict:
+    async def _run_allocate() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
@@ -375,7 +375,7 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
         account_id, fmt, context="cli.treasury.deallocate"
     )
 
-    async def _run_deallocate() -> dict:
+    async def _run_deallocate() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
@@ -451,7 +451,7 @@ def snapshot(
         to_label="종료일",
     )
 
-    async def _run_snapshot() -> dict | list[dict] | None:
+    async def _run_snapshot() -> dict[str, Any] | list[dict[str, Any]] | None:
         async with _create_treasury(account_id, ctx=ctx) as (t, _):
             if date_str:
                 return await t.get_daily_snapshot(date_str)
@@ -484,8 +484,8 @@ def portfolio() -> None:
     """포트폴리오 가치와 추이 조회."""
 
 
-def _portfolio_value_from_snapshot_or_summary(treasury_obj) -> dict:
-    async def _inner() -> dict:
+def _portfolio_value_from_snapshot_or_summary(treasury_obj: Treasury) -> dict[str, Any]:
+    async def _inner() -> dict[str, Any]:
         snapshot = await treasury_obj.get_latest_snapshot()
         if snapshot is not None:
             return {
@@ -507,7 +507,7 @@ def _portfolio_value_from_snapshot_or_summary(treasury_obj) -> dict:
             "updated_at": datetime.now(UTC).isoformat(),
         }
 
-    return _run(_inner())
+    return cast("dict[str, Any]", _run(_inner()))
 
 
 @portfolio.command("value")
@@ -524,8 +524,8 @@ def portfolio_value(ctx: click.Context, account_id: str | None) -> None:
             account_id, fmt, context="cli.treasury.portfolio.value"
         )
 
-    async def _run_value() -> dict:
-        async def _collect_values(treasuries: list) -> dict:
+    async def _run_value() -> dict[str, Any]:
+        async def _collect_values(treasuries: list[Treasury]) -> dict[str, Any]:
             values = []
             for treasury_obj in treasuries:
                 snapshot = await treasury_obj.get_latest_snapshot()
@@ -610,8 +610,8 @@ def portfolio_history(
         "%Y-%m-%d"
     )
 
-    async def _run_history() -> dict:
-        async def _collect_history(treasuries: list) -> dict:
+    async def _run_history() -> dict[str, Any]:
+        async def _collect_history(treasuries: list[Treasury]) -> dict[str, Any]:
             by_date: dict[str, dict[str, float | str]] = {}
             for treasury_obj in treasuries:
                 for snapshot in await treasury_obj.get_snapshots(start_date, end_date):
@@ -656,7 +656,7 @@ def portfolio_history(
         fmt.table(result["data"], ["date", "total_asset", "daily_pnl", "daily_return"])
 
 
-def _print_snapshot(s: dict) -> None:
+def _print_snapshot(s: dict[str, Any]) -> None:
     """단일 스냅샷을 텍스트로 출력."""
     daily_pnl = s.get("daily_pnl", 0.0)
     daily_return = s.get("daily_return", 0.0)
@@ -676,7 +676,7 @@ def _print_snapshot(s: dict) -> None:
     click.echo(f"  보유 종목:    {s.get('bot_count', 0)}개 봇")
 
 
-def _print_snapshot_list(snapshots: list[dict]) -> None:
+def _print_snapshot_list(snapshots: list[dict[str, Any]]) -> None:
     """스냅샷 목록을 테이블로 출력."""
     if not snapshots:
         click.echo("(스냅샷 없음)")
