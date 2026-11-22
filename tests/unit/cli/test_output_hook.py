@@ -86,6 +86,19 @@ class TestCommandResult:
         with pytest.raises(dataclasses.FrozenInstanceError):
             setattr(CommandResult(), "message", "x")
 
+    def test_text_str_is_type_error(self) -> None:
+        text: Any = "한 줄"
+        with pytest.raises(TypeError, match="not a str"):
+            CommandResult(text=text)
+
+    def test_text_empty_tuple_is_type_error(self) -> None:
+        with pytest.raises(TypeError, match="non-empty"):
+            CommandResult(text=())
+
+    @pytest.mark.parametrize("text", [None, ("",), ("a", "b")])
+    def test_text_none_or_lines_is_accepted(self, text: tuple[str, ...] | None) -> None:
+        assert CommandResult(text=text).text == text
+
 
 class TestStandardContract:
     def test_json_is_success_envelope(self, capsys: pytest.CaptureFixture[str]) -> None:

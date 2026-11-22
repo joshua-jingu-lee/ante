@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from ante.cli.formatter import OutputFormatter
+from ante.cli.formatter import OutputFormatter, table_lines
 
 _ROWS: list[dict[str, Any]] = [
     {"id": "a", "name": "알파", "qty": 1},
@@ -57,3 +57,31 @@ class TestTableJson:
     def test_empty_rows(self, capsys: pytest.CaptureFixture[str]) -> None:
         _table("json", [], ["id"])
         assert capsys.readouterr().out == "[]\n"
+
+
+class TestTableLines:
+    @pytest.mark.parametrize(
+        ("rows", "columns"),
+        [([], ["id"]), (_ROWS, ["id", "name", "qty"]), ([{"x": "v"}], ["x"])],
+        ids=["empty", "rows", "single"],
+    )
+    def test_lines_are_the_text_table(
+        self,
+        rows: list[dict[str, Any]],
+        columns: list[str],
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        _table("text", rows, columns)
+        expected = capsys.readouterr().out
+        assert "".join(f"{line}\n" for line in table_lines(rows, columns)) == expected
+
+    def test_empty_rows(self) -> None:
+        assert table_lines([], ["id"]) == ["(no data)"]
+
+    def test_header_rule_and_rows(self) -> None:
+        assert table_lines([{"a": 1}, {"b": 2}], ["a"]) == [
+            "           a",
+            "------------",
+            "           1",
+            "            ",
+        ]
