@@ -208,7 +208,7 @@ CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 legacy alias로 정렬된다. SCREAMING_SNAKE migration timing은 #1815 auth registry
 책임이며 본 절은 그 SSOT를 reference한다.
 
-매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py:29-33)를 비교한다.
+매칭은 leaf 이름이 아니라 **전체 커맨드 경로** 기준이다. `ante feed init`처럼 leaf 이름이 우연히 `init`인 다른 서브커맨드는 면제 대상이 아니다 (`@require_auth` + `@require_scope`로 인증 필요). 구현은 `LeafAwareGroup`(src/ante/cli/main.py)이 루트 그룹 진입 직후 전체 경로 tuple을 `ctx.obj["_leaf_command_path"]`에 저장하고, `authenticate_member`가 이 tuple과 `_AUTH_EXEMPT_COMMAND_PATHS`(src/ante/cli/middleware.py)를 비교한다.
 
 **Member admin mutation 권한 모델 (1.0 — master-only)**:
 
