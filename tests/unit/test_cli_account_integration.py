@@ -207,7 +207,7 @@ class TestBotListAccountFilter:
             )
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "bots" in data
         assert data["bots"][0]["account_id"] == "domestic"
 

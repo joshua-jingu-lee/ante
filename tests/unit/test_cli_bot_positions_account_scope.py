@@ -121,7 +121,7 @@ class TestBotPositionsValidAccountScope:
             "bot-shared", account_id="acc-a"
         )
         payload = _parse_json(result.stdout)
-        symbols = [p["symbol"] for p in payload["positions"]]
+        symbols = [p["symbol"] for p in payload["data"]["positions"]]
         assert symbols == ["AAA"], payload
 
 

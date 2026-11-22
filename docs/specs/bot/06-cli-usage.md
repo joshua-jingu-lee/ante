@@ -35,7 +35,7 @@ ante bot list
 ante bot list --account domestic         # 계좌별 필터
 ante --format json bot list              # JSON 출력은 root 전역 옵션
 
-# 봇 상태 조회 — live 조회. {bot: ...} envelope
+# 봇 상태 조회 — live 조회. 응답 payload는 {bot: ...}(CLI --format json에서는 data.bot)
 ante bot status bot_001
 
 # 봇 중지 — audit bot.stop

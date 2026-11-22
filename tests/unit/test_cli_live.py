@@ -221,7 +221,7 @@ class TestBotCommands:
         ):
             result = runner.invoke(cli, ["--format", "json", "bot", "list"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert len(data["bots"]) == 1
             assert data["bots"][0]["bot_id"] == "bot-1"
 
