@@ -373,8 +373,6 @@ scripts/
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── import_baseline.json
 ├── install-service.sh                # OS 감지 후 systemd/launchd 서비스 설치
-├── ipc_request_diff.py
-├── ipc_request_set.json
 ├── lint_baseline.json
 ├── scan_create_services_anti_pattern.py
 ├── spec_code_block_baseline.json
