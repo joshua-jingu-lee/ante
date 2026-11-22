@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -24,6 +25,19 @@ from ante.feed.cli_scheduler import (
     _validate_schedule_times,
     run_scheduler_loop,
 )
+
+_KST = timezone(timedelta(hours=9))
+# 자정 무렵 (#2756). 이 시각에 실제 시계를 읽으면 기대값이 어긋났다.
+_KST_2359 = datetime(2026, 11, 22, 23, 59, 30, tzinfo=_KST)
+_KST_0000 = datetime(2026, 11, 23, 0, 0, 0, tzinfo=_KST)
+_KST_0001 = datetime(2026, 11, 23, 0, 1, 0, tzinfo=_KST)
+_KST_2358 = datetime(2026, 11, 22, 23, 58, 59, tzinfo=_KST)
+_AROUND_MIDNIGHT = [_KST_2359, _KST_0000, _KST_0001]
+
+
+def _hhmm(value: datetime) -> str:
+    return value.strftime("%H:%M")
+
 
 # ── _is_valid_hhmm 단위 ──────────────────────────────────────────────────
 
@@ -213,10 +227,17 @@ class TestSchedulerLoopOrder:
 
         assert call_order == ["backfill", "daily"]
 
+    @pytest.mark.parametrize(
+        "manual_clock", [_KST_2358, _KST_0000, _KST_0001], indirect=True, ids=_hhmm
+    )
     def test_daily_at_in_future_only_backfill_runs(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, manual_clock
     ) -> None:
-        """daily_at 미도달이면 backfill 만 실행(daily 플래그/시각 조건 보존)."""
+        """daily_at 미도달이면 backfill 만 실행(daily 플래그/시각 조건 보존).
+
+        시계를 고정한다(#2756). 실제 시계로는 KST 23:59에 daily_at="23:59"가
+        도달해 실패했다.
+        """
         call_order: list[str] = []
 
         async def _track_daily(*_a: Any, **_k: Any) -> None:
@@ -244,8 +265,46 @@ class TestSchedulerLoopOrder:
 
         assert call_order == ["backfill"]
 
-    def test_each_job_runs_once_per_day(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """하루 1회 플래그 로직 회귀: 여러 틱이어도 각 1회만 실행."""
+    @pytest.mark.parametrize("manual_clock", [_KST_2359], indirect=True, ids=_hhmm)
+    def test_daily_at_reached_at_2359_runs_daily(
+        self, monkeypatch: pytest.MonkeyPatch, manual_clock
+    ) -> None:
+        """KST 23:59에는 daily_at="23:59"가 도달해 daily도 돈다(#2756의 원인)."""
+        call_order: list[str] = []
+
+        async def _track_daily(*_a: Any, **_k: Any) -> None:
+            call_order.append("daily")
+
+        async def _track_backfill(*_a: Any, **_k: Any) -> None:
+            call_order.append("backfill")
+
+        async def _instant_wait(stop_event: asyncio.Event, *, timeout: float) -> None:
+            stop_event.set()
+
+        monkeypatch.setattr(cli_scheduler, "_run_daily_job", _track_daily)
+        monkeypatch.setattr(cli_scheduler, "_run_backfill_job", _track_backfill)
+        monkeypatch.setattr(cli_scheduler, "_wait_or_stop", _instant_wait)
+
+        asyncio.run(
+            run_scheduler_loop(
+                orchestrator=MagicMock(),
+                data_path="data/",
+                config={},
+                daily_at="23:59",
+                backfill_at="00:00",
+            )
+        )
+
+        assert call_order == ["backfill", "daily"]
+
+    @pytest.mark.parametrize("manual_clock", _AROUND_MIDNIGHT, indirect=True, ids=_hhmm)
+    def test_each_job_runs_once_per_day(
+        self, monkeypatch: pytest.MonkeyPatch, manual_clock
+    ) -> None:
+        """하루 1회 플래그 로직 회귀: 여러 틱이어도 각 1회만 실행.
+
+        시계를 고정하므로 틱 사이에 날짜가 바뀌지 않는다(#2756).
+        """
         call_order: list[str] = []
 
         async def _track_daily(*_a: Any, **_k: Any) -> None:
@@ -281,3 +340,42 @@ class TestSchedulerLoopOrder:
         assert call_order.count("daily") == 1
         # 첫 틱에서 backfill 이 daily 보다 먼저.
         assert call_order == ["backfill", "daily"]
+
+    @pytest.mark.parametrize("manual_clock", [_KST_2359], indirect=True, ids=_hhmm)
+    def test_flags_reset_when_date_changes_between_ticks(
+        self, monkeypatch: pytest.MonkeyPatch, manual_clock
+    ) -> None:
+        """틱 사이에 날짜가 바뀌면 플래그가 풀려 새 날에 다시 돈다(#2756)."""
+        call_order: list[str] = []
+
+        async def _track_daily(*_a: Any, **_k: Any) -> None:
+            call_order.append("daily")
+
+        async def _track_backfill(*_a: Any, **_k: Any) -> None:
+            call_order.append("backfill")
+
+        ticks = {"n": 0}
+
+        async def _wait_one_minute(
+            stop_event: asyncio.Event, *, timeout: float
+        ) -> None:
+            ticks["n"] += 1
+            manual_clock.advance(timeout)
+            if ticks["n"] >= 2:
+                stop_event.set()
+
+        monkeypatch.setattr(cli_scheduler, "_run_daily_job", _track_daily)
+        monkeypatch.setattr(cli_scheduler, "_run_backfill_job", _track_backfill)
+        monkeypatch.setattr(cli_scheduler, "_wait_or_stop", _wait_one_minute)
+
+        asyncio.run(
+            run_scheduler_loop(
+                orchestrator=MagicMock(),
+                data_path="data/",
+                config={},
+                daily_at="00:00",
+                backfill_at="00:00",
+            )
+        )
+
+        assert call_order == ["backfill", "daily", "backfill", "daily"]
