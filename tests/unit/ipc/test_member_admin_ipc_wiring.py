@@ -41,7 +41,7 @@ from ante.ipc.registry import (
 )
 from ante.ipc.server import IPCServer
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
-from tests.unit.ipc.test_request_model_domain import validation_message
+from tests.unit.ipc.validation_messages import validation_message
 
 # 테스트가 leak 여부를 검사하는 secret 토큰 sentinels. 어떤 envelope/audit/log
 # 에도 등장하면 안 된다.
