@@ -6,7 +6,7 @@
 
 | 이벤트 | 발행 시점 | 구독자 |
 |--------|----------|--------|
-| `CircuitBreakerEvent` | 서킷 브레이커 상태 전환 시 (CLOSED↔OPEN↔HALF_OPEN) | 로깅, 모니터링 |
+| `CircuitBreakerEvent` | 서킷 브레이커 상태 전환 시 (CLOSED→OPEN→HALF_OPEN→CLOSED/OPEN) | 로깅, 모니터링 |
 | `StreamConnectedEvent` | 웹소켓 연결 수립 시 | 로깅 |
 | `StreamDisconnectedEvent` | 웹소켓 연결 해제 시 | 로깅 |
 | `PositionMismatchEvent` | 대사 중 포지션 불일치 감지 시 | 로깅, 감사 |
