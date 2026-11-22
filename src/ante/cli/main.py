@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import click
 
@@ -71,7 +72,7 @@ def cli(ctx: click.Context, output_format: str, config_dir: str | None) -> None:
 
 def get_formatter(ctx: click.Context) -> OutputFormatter:
     """컨텍스트에서 OutputFormatter를 가져온다."""
-    return ctx.obj["formatter"]
+    return cast("OutputFormatter", ctx.obj["formatter"])
 
 
 def get_config_dir(ctx: click.Context | None = None) -> Path:

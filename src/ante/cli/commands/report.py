@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Any
 
 import click
 from pydantic import ValidationError
@@ -78,7 +79,7 @@ def submit(
             f"Report file must be a JSON object, got {type(raw_data).__name__}"
         )
 
-    report_data: dict = dict(raw_data)
+    report_data: dict[str, Any] = dict(raw_data)
 
     submitted_by = report_data.pop("submitted_by", "agent")
     raw_detail = report_data.get("detail_json")
@@ -94,7 +95,7 @@ def submit(
 
     effective_run_id = run_id if run_id else validated.backtest_run_id
 
-    async def _submit() -> dict:
+    async def _submit() -> dict[str, Any]:
         from ante.core.database import Database
 
         db = Database(resolved_db_path)
@@ -180,7 +181,7 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
             f"허용값: {sorted(s.value for s in ReportStatus)}"
         )
 
-    async def _list() -> list[dict]:
+    async def _list() -> list[dict[str, Any]]:
         async with open_cli_db(
             ctx, read_only=True, db_path_override=resolved_db_path
         ) as db:
@@ -272,7 +273,7 @@ def report_performance(
         to_label="종료일",
     )
 
-    async def _run_performance() -> list[dict]:
+    async def _run_performance() -> list[dict[str, Any]]:
         from ante.trade.performance import PerformanceTracker
 
         async with open_cli_db(ctx) as db:
@@ -322,7 +323,7 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
     fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
-    async def _view() -> dict | None:
+    async def _view() -> dict[str, Any] | None:
         async with open_cli_db(
             ctx, read_only=True, db_path_override=resolved_db_path
         ) as db:
