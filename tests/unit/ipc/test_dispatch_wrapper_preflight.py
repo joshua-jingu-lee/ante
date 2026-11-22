@@ -28,6 +28,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.requests import AccountId, IPCRequest
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 from tests.unit.ipc.validation_messages import validation_message
 
 
@@ -72,6 +73,7 @@ async def test_required_services_present_calls_handler(socket_path: str) -> None
         handler,
         is_mutating=False,
         required_services=frozenset({"account"}),
+        request_model=NoArgsRequest,
     )
 
     svc_registry = _make_service_registry()
@@ -109,6 +111,7 @@ async def test_required_services_missing_returns_service_not_configured(
         handler,
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
+        request_model=NoArgsRequest,
     )
 
     # audit_logger 를 주입하지 않은 ServiceRegistry — default=None.
@@ -148,6 +151,7 @@ async def test_required_services_missing_attribute_returns_service_not_configure
         handler,
         is_mutating=False,
         required_services=frozenset({"nonexistent_service"}),
+        request_model=NoArgsRequest,
     )
 
     svc_registry = _make_service_registry()
@@ -296,36 +300,23 @@ async def test_account_id_optional_filter_invalid_returns_validation_error(
     assert received == []
 
 
-# ── 요청 모델이 없는 명령 ──────────────────────────────────────────────────
+# ── 계좌 ID 필드가 없는 요청 모델 ──────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_account_id_none_skips_validation(socket_path: str) -> None:
-    """요청 모델이 없으면 args 의 account_id 값과 무관하게 검증하지 않는다."""
-    cmd_registry = CommandRegistry()
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        return {"acc": args.get("account_id")}
-
-    cmd_registry.register("test.no_policy", handler, is_mutating=False)
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        # invalid "default" 값을 보내도 wrapper 가 검증 skip
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.no_policy",
-                "args": {"account_id": "default"},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "ok"
-        assert response["result"] == {"acc": "default"}
-    finally:
-        await server.stop()
+async def test_account_id_without_field_is_rejected_as_unknown_key(
+    socket_path: str,
+) -> None:
+    """모델에 계좌 ID 필드가 없으면 ``account_id``는 모르는 키로 거부된다."""
+    response, received = await _dispatch_one(
+        socket_path,
+        "test.no_account_field",
+        NoArgsRequest,
+        {"account_id": "default"},
+        is_mutating=False,
+    )
+    assert response == _rejected("test.no_account_field", "extra_forbidden")
+    assert received == []
 
 
 # ── lifecycle gate ordering (preflight 보다 항상 먼저) ─────────────────────
@@ -348,6 +339,7 @@ async def test_lifecycle_gate_before_preflight_draining(socket_path: str) -> Non
         handler,
         is_mutating=False,
         required_services=frozenset({"audit_logger"}),
+        request_model=NoArgsRequest,
     )
 
     # audit_logger 부재 — 평소라면 SERVICE_NOT_CONFIGURED 발화.
@@ -433,6 +425,7 @@ async def test_shutdown_readonly_passes_through_preflight(socket_path: str) -> N
         handler,
         is_mutating=False,
         required_services=frozenset({"audit_logger"}),
+        request_model=NoArgsRequest,
     )
 
     svc_registry = _make_service_registry()  # audit_logger 미주입

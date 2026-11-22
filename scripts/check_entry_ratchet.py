@@ -51,7 +51,10 @@ nested blocks included:
   Definitions are not calls.
 
 Known limits of the request keys: registrations outside
-``register_all_handlers`` or with a non-literal command name are not seen.
+``register_all_handlers`` or with a non-literal command name are not seen
+(``CommandRegistry.register`` itself raises ``TypeError`` without
+``request_model``). The two IPC keys are at their end state (``[]`` and
+``{}``) and stay as a ban.
 ``ipc_args_reads`` counts the syntax of the parameter name only: a read
 through an alias (``a = args``) counts as the one assignment, ``f(**args)``
 counts as one, and a nested function whose parameter has the same name adds

@@ -30,6 +30,7 @@ from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 _MASTER = Member(
     member_id="test-master",
@@ -622,7 +623,9 @@ def _dispatch_raising(exc: BaseException) -> dict:
         raise exc
 
     registry = CommandRegistry()
-    registry.register("test.raise", _handler, is_mutating=False)
+    registry.register(
+        "test.raise", _handler, is_mutating=False, request_model=NoArgsRequest
+    )
     server = IPCServer("/nonexistent.sock", MagicMock(), registry)
     server._state = IPCServerState.RUNNING
     return asyncio.run(server._dispatch({"id": "r1", "command": "test.raise"}))

@@ -14,7 +14,9 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.exceptions import ServerNotRunningError
 from ante.ipc.registry import CommandRegistry
+from ante.ipc.requests import IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 
 def _make_service_registry() -> ServiceRegistry:
@@ -87,15 +89,23 @@ async def _settle_server_side_transports(
         await asyncio.sleep(0)
 
 
+class _EchoRequest(IPCRequest):
+    msg: str
+
+
 @pytest.mark.asyncio
 async def test_roundtrip(socket_path: str, service_registry: ServiceRegistry) -> None:
     """요청 -> 응답 라운드트립."""
     cmd_registry = CommandRegistry()
 
-    async def echo_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        return {"echo": args, "actor": actor}
+    async def echo_handler(
+        svc: ServiceRegistry, request: _EchoRequest, actor: str
+    ) -> dict:
+        return {"echo": request.model_dump(), "actor": actor}
 
-    cmd_registry.register("test.echo", echo_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.echo", echo_handler, is_mutating=False, request_model=_EchoRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -138,7 +148,9 @@ async def test_handler_exception(
     async def failing_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         raise ValueError("의도적 예외")
 
-    cmd_registry.register("test.fail", failing_handler, is_mutating=True)
+    cmd_registry.register(
+        "test.fail", failing_handler, is_mutating=True, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -210,7 +222,9 @@ async def test_multiple_requests(
         call_count += 1
         return {"count": call_count}
 
-    cmd_registry.register("test.count", counter_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.count", counter_handler, is_mutating=False, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -310,8 +324,12 @@ async def test_dispatch_rejects_mutating_only_while_shutting_down(
     async def read_only_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"read": True}
 
-    cmd_registry.register("test.mutate", mutating_handler, is_mutating=True)
-    cmd_registry.register("test.read", read_only_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.mutate", mutating_handler, is_mutating=True, request_model=NoArgsRequest
+    )
+    cmd_registry.register(
+        "test.read", read_only_handler, is_mutating=False, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -359,8 +377,12 @@ async def test_dispatch_rejects_everything_when_stopped(
     async def read_only_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"read": True}
 
-    cmd_registry.register("test.mutate", mutating_handler, is_mutating=True)
-    cmd_registry.register("test.read", read_only_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.mutate", mutating_handler, is_mutating=True, request_model=NoArgsRequest
+    )
+    cmd_registry.register(
+        "test.read", read_only_handler, is_mutating=False, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -392,7 +414,9 @@ async def test_dispatch_rejects_everything_while_draining(
     async def read_only_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"read": True}
 
-    cmd_registry.register("test.read", read_only_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.read", read_only_handler, is_mutating=False, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()

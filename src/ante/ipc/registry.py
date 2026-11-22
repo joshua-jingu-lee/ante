@@ -70,21 +70,20 @@ class CommandSpec:
     name: str
     handler: CommandHandler
     is_mutating: bool
+    request_model: type[IPCRequest]
     required_services: frozenset[str] = field(default_factory=frozenset)
     audit_action: str | None = None
     shutdown_behavior: ShutdownBehavior | None = None
-    request_model: type[IPCRequest] | None = None
 
 
 class CommandRegistry:
     """커맨드 이름 -> CommandSpec 매핑.
 
-    외부 호출자는 ``register(name, handler, *, is_mutating=...)``
-    keyword-only 인자를 명시해야 한다.
+    외부 호출자는 ``register(name, handler, *, is_mutating=...,
+    request_model=...)`` keyword-only 인자를 명시해야 한다.
 
-    ``register()``는 contract metadata 4 필드를 kwargs로
-    수용한다. ``register(name, handler, is_mutating=...)`` 호출은
-    default 값으로 그대로 작동(backward compat).
+    ``request_model``이 없는 등록은 ``TypeError``다. 나머지 contract
+    metadata 3 필드는 kwargs로 받고 생략하면 기본값이다.
     """
 
     def __init__(self) -> None:
@@ -96,10 +95,10 @@ class CommandRegistry:
         handler: CommandHandler,
         *,
         is_mutating: bool,
+        request_model: type[IPCRequest],
         required_services: frozenset[str] | None = None,
         audit_action: str | None = None,
         shutdown_behavior: ShutdownBehavior | None = None,
-        request_model: type[IPCRequest] | None = None,
     ) -> None:
         """핸들러 등록.
 
@@ -110,12 +109,12 @@ class CommandRegistry:
             name=command,
             handler=handler,
             is_mutating=is_mutating,
+            request_model=request_model,
             required_services=(
                 required_services if required_services is not None else frozenset()
             ),
             audit_action=audit_action,
             shutdown_behavior=shutdown_behavior,
-            request_model=request_model,
         )
 
     def get(self, command: str) -> CommandSpec | None:

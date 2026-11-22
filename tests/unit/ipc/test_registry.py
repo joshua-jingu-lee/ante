@@ -16,6 +16,7 @@ from ante.ipc.requests import (
     BrokerOrderHistoryRequest,
     BrokerReconcileRequest,
 )
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 
 @pytest.fixture
@@ -26,20 +27,23 @@ def registry() -> CommandRegistry:
 def test_register_and_get(registry: CommandRegistry) -> None:
     """핸들러 등록 후 조회.
 
-    ``register()`` 3-인자 호출은 메타데이터 필드의 default 값(빈 frozenset /
-    ``None`` / ``"none"`` / ``None`` / ``None``)으로 채워진 ``CommandSpec``과
-    일치해야 한다(backward compat lock).
+    ``is_mutating``과 ``request_model``만 준 ``register()``는 나머지 메타데이터
+    필드가 기본값(빈 frozenset / ``None`` / ``None``)인 ``CommandSpec``과
+    일치해야 한다.
     """
 
     async def dummy_handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {"ok": True}
 
-    registry.register("test.command", dummy_handler, is_mutating=True)
+    registry.register(
+        "test.command", dummy_handler, is_mutating=True, request_model=NoArgsRequest
+    )
     spec = registry.get("test.command")
     assert spec == CommandSpec(
         name="test.command",
         handler=dummy_handler,
         is_mutating=True,
+        request_model=NoArgsRequest,
     )
     # 신규 필드 default 값 명시 검증 (frozen dataclass eq에 포함).
     assert spec is not None
@@ -59,8 +63,12 @@ def test_commands_property(registry: CommandRegistry) -> None:
     async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {}
 
-    registry.register("a.command", handler, is_mutating=True)
-    registry.register("b.command", handler, is_mutating=False)
+    registry.register(
+        "a.command", handler, is_mutating=True, request_model=NoArgsRequest
+    )
+    registry.register(
+        "b.command", handler, is_mutating=False, request_model=NoArgsRequest
+    )
     assert set(registry.commands) == {"a.command", "b.command"}
 
 
@@ -304,13 +312,9 @@ class TestHandleBotCreate:
     async def test_raises_when_strategy_not_found(self):
         """미등록 strategy_id → ValueError.
 
-        #1656 E bucket: ``_handle_bot_create`` 가 ``require_account_id`` 를
-        함수 최상단(strategy lookup 이전)으로 옮겼으므로, 순수
-        strategy-not-found ``ValueError`` 경로를 검증하려면 **valid**
-        account_id 를 payload에 포함해야 한다(account 검증을 통과한 뒤
-        strategy lookup 도달). account_id 누락 시 #1656 validate-first 로
-        ``InvalidAccountIdError`` 가 먼저 raise되어 본 테스트 의도(순수
-        strategy-not-found)가 가려진다.
+        ``BotCreateRequest`` 의 ``account_id`` 는 계좌 ID 타입이라 요청은
+        **valid** account_id 를 담는다(모델 검증을 통과한 뒤 strategy lookup
+        도달).
         """
         from unittest.mock import AsyncMock, MagicMock
 
@@ -893,22 +897,41 @@ class TestHandleBrokerReconcileAccountLevel:
         assert reconciler.reconcile.call_args.args[0] == "bot-1"
 
     @pytest.mark.asyncio
-    async def test_require_account_id_rejected(self):
-        """(j) require_account_id 회귀 — invalid account_id 는 즉시 거부."""
+    async def test_invalid_account_id_rejected_before_the_handler(self):
+        """(j) invalid account_id 는 요청 모델이 거부하고 서비스는 불리지 않는다."""
+        from ante.ipc.server import IPCServer, IPCServerState
+        from tests.unit.ipc.validation_messages import validation_message
 
         svc, broker, reconciler, audit_logger = _make_reconcile_svc(
             bots=[{"bot_id": "bot-1", "status": "running", "account_id": "acc-a"}],
         )
+        args = {"account_id": "default", "fix": True}
 
         with pytest.raises(ValidationError) as rejected:
-            BrokerReconcileRequest.model_validate(
-                {"account_id": "default", "fix": True}
-            )
+            BrokerReconcileRequest.model_validate(args)
 
         assert [(e["loc"], e["type"]) for e in rejected.value.errors()] == [
             (("account_id",), "invalid_account_id")
         ]
+        registry = CommandRegistry()
+        register_all_handlers(registry)
+        server = IPCServer("/tmp/unused.sock", svc, registry)
+        server._state = IPCServerState.RUNNING
+        response = await server._dispatch(
+            {"id": "r1", "command": "broker.reconcile", "args": args, "actor": "u"}
+        )
+        assert response == {
+            "id": "r1",
+            "status": "error",
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": validation_message(
+                    "broker.reconcile", ("account_id", "invalid_account_id")
+                ),
+            },
+        }
         svc.account.get_broker.assert_not_called()
+        svc.bot_manager.list_bots.assert_not_called()
         reconciler.reconcile.assert_not_called()
         reconciler.detect_account_level.assert_not_called()
 
@@ -1260,7 +1283,7 @@ class TestCommandSpecMetadataExtension:
     """Refs #1849 (#1819 부모): CommandSpec contract metadata 7 필드 확장.
 
     * dispatch wrapper 동작 변경은 본 이슈 범위가 아니다(#1850 / #1851).
-    * default 값으로 backward compat을 보장하고, 27 commands는 필수값을 가진다.
+    * ``request_model`` 은 필수이고(#2683 ⑧) 나머지는 기본값이 있다.
     """
 
     def test_command_spec_has_seven_metadata_fields(self) -> None:
@@ -1278,17 +1301,34 @@ class TestCommandSpecMetadataExtension:
             "request_model",
         }
 
-    def test_register_kwargs_backward_compat(self, registry: CommandRegistry) -> None:
-        """``register(name, handler, is_mutating=...)`` 3-인자 호출만으로
-        default가 적용된 ``CommandSpec``이 생성된다(기존 호출자 무변경).
-        """
+    def test_register_without_request_model_raises_type_error(
+        self, registry: CommandRegistry
+    ) -> None:
+        """``request_model`` 없이 등록하면 ``TypeError``이고 등록되지 않는다."""
 
         async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
             return {}
 
-        registry.register("legacy.cmd", handler, is_mutating=False)
+        register: typing.Any = registry.register
+        with pytest.raises(TypeError, match="request_model"):
+            register("legacy.cmd", handler, is_mutating=False)
+        assert registry.get("legacy.cmd") is None
+        assert registry.commands == []
+
+    def test_register_with_request_model_applies_defaults(
+        self, registry: CommandRegistry
+    ) -> None:
+        """``request_model``과 ``is_mutating``만 주면 나머지는 기본값이다."""
+
+        async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
+            return {}
+
+        registry.register(
+            "legacy.cmd", handler, is_mutating=False, request_model=BotCreateRequest
+        )
         spec = registry.get("legacy.cmd")
         assert spec is not None
+        assert spec.request_model is BotCreateRequest
         assert spec.required_services == frozenset()
         assert spec.audit_action is None
         assert spec.shutdown_behavior is None
@@ -1307,6 +1347,7 @@ class TestCommandSpecMetadataExtension:
             required_services=frozenset({"bot_manager", "audit_logger"}),
             audit_action="ext.cmd",
             shutdown_behavior="block_all",
+            request_model=NoArgsRequest,
         )
         spec = registry.get("ext.cmd")
         assert spec is not None

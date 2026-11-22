@@ -100,6 +100,10 @@ class _DemoRequest(IPCRequest):
     count: int = 1
 
 
+class _ScopedRequest(IPCRequest):
+    account_id: str
+
+
 class _Recorder:
     def __init__(self) -> None:
         self.calls: list[Any] = []
@@ -230,7 +234,9 @@ async def test_other_validation_error_code_still_logs_exception(
         raise InvalidAccountIdError("handler rejected")
 
     registry = CommandRegistry()
-    registry.register("demo.scoped", handler, is_mutating=False)
+    registry.register(
+        "demo.scoped", handler, is_mutating=False, request_model=_ScopedRequest
+    )
     server = IPCServer("/tmp/unused.sock", _services(), registry)
     server._state = IPCServerState.RUNNING
     response = await server._dispatch(_request("demo.scoped", {"account_id": ""}))

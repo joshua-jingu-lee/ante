@@ -24,7 +24,7 @@ from pydantic import ValidationError
 from ante.cli.main import cli
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
-from ante.ipc.requests import BrokerOrderHistoryRequest
+from ante.ipc.requests import AccountId, BrokerOrderHistoryRequest, IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit.ipc.validation_messages import validation_message
@@ -313,7 +313,11 @@ async def test_an_invalid_account_id_is_rejected_before_the_broker(
     harness.assert_no_service_call()
 
 
-class _ModelLess:
+class _DemoAccountRequest(IPCRequest):
+    account_id: AccountId
+
+
+class _DemoHandler:
     def __init__(self) -> None:
         self.received: list[Any] = []
 
@@ -322,13 +326,14 @@ class _ModelLess:
         return {"actor": actor}
 
 
-def _model_less_server(**missing: None) -> tuple[IPCServer, _ModelLess]:
-    handler = _ModelLess()
+def _demo_server(**missing: None) -> tuple[IPCServer, _DemoHandler]:
+    handler = _DemoHandler()
     registry = CommandRegistry()
     registry.register(
         "demo.raw",
         handler,
         is_mutating=True,
+        request_model=_DemoAccountRequest,
         required_services=frozenset({"audit_logger"}),
     )
     services: dict[str, Any] = {
@@ -350,24 +355,34 @@ def _model_less_server(**missing: None) -> tuple[IPCServer, _ModelLess]:
 RAW_ARGS = {"account_id": "default", "zz_extra": [1, "x"], "fix": "false"}
 
 
-async def _send_raw(server: IPCServer) -> dict:
+async def _send_raw(server: IPCServer, args: Any = RAW_ARGS) -> dict:
     return await server._dispatch(
-        {"id": "req-1", "command": "demo.raw", "args": RAW_ARGS, "actor": ACTOR}
+        {"id": "req-1", "command": "demo.raw", "args": args, "actor": ACTOR}
     )
 
 
 @pytest.mark.asyncio
-async def test_a_model_less_command_gets_its_raw_args() -> None:
-    server, handler = _model_less_server()
-    response = await _send_raw(server)
+async def test_a_demo_command_gets_its_validated_model() -> None:
+    server, handler = _demo_server()
+    response = await _send_raw(server, {"account_id": "acct-1"})
     assert response == _ok({"actor": ACTOR})
-    assert handler.received == [RAW_ARGS]
-    assert type(handler.received[0]) is dict
+    assert handler.received == [_DemoAccountRequest(account_id="acct-1")]
 
 
 @pytest.mark.asyncio
-async def test_a_model_less_command_is_rejected_while_shutting_down() -> None:
-    server, handler = _model_less_server()
+async def test_a_demo_command_rejects_raw_args_before_its_handler() -> None:
+    server, handler = _demo_server()
+    response = await _send_raw(server)
+    assert (response["status"], response["error"]["code"]) == (
+        "error",
+        "VALIDATION_ERROR",
+    )
+    assert handler.received == []
+
+
+@pytest.mark.asyncio
+async def test_a_demo_command_is_rejected_while_shutting_down() -> None:
+    server, handler = _demo_server()
     server._state = IPCServerState.SHUTTING_DOWN
     response = await _send_raw(server)
     assert response == _error(
@@ -377,8 +392,8 @@ async def test_a_model_less_command_is_rejected_while_shutting_down() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_model_less_command_without_its_service_is_not_configured() -> None:
-    server, handler = _model_less_server(audit_logger=None)
+async def test_a_demo_command_without_its_service_is_not_configured() -> None:
+    server, handler = _demo_server(audit_logger=None)
     response = await _send_raw(server)
     assert response == _error(
         "SERVICE_NOT_CONFIGURED", "의존 서비스가 구성되지 않았습니다: audit_logger"

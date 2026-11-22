@@ -4,8 +4,6 @@
 타입을 바꾸는 선택 옵션은 행을 더 둔다)을 실제 ``cli.main``으로 돌린다.
 ``ipc_send``는 호출을 기록하고 센티널 예외를 내는 대역이다. 판정은 기록된
 (명령, 인자)다. 인자는 소켓을 지나는 모양 그대로(JSON 왕복) 판정한다.
-
-``record_cli_requests``는 전후 표 도구(``scripts/ipc_request_diff.py``)도 쓴다.
 """
 
 from __future__ import annotations
