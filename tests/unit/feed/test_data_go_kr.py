@@ -313,7 +313,7 @@ class TestRateLimiterTokenRefill:
     """#2048: sleep 경로의 _last_refill 전진으로 2x TPS 허용을 차단한다."""
 
     @pytest.mark.asyncio
-    async def test_last_refill_advances_past_sleep(self) -> None:
+    async def test_last_refill_advances_past_sleep(self, manual_clock) -> None:
         """토큰 소진 후 sleep 분기에서 _last_refill이 now + wait_time로 전진한다.
 
         sleep 동안 흐른 시간을 다음 acquire의 elapsed로 재크레딧하면 설정 TPS의
@@ -323,36 +323,30 @@ class TestRateLimiterTokenRefill:
         rl = RateLimiter(tps_limit=2.0, daily_limit=100)
         # burst=2 토큰을 먼저 소진시키고, _last_refill을 mock 시계 기준으로 맞춘다.
         rl._tokens = 0.0
-        rl._last_refill = 1000.0
+        start = manual_clock.monotonic()
+        rl._last_refill = start
 
-        clock = {"t": 1000.0}
         sleeps: list[float] = []
 
         async def fake_sleep(seconds: float) -> None:
             sleeps.append(seconds)
             # 실제 이벤트 루프 시간 진행을 흉내내지 않아도 _last_refill 단언으로 충분.
 
-        with (
-            patch(
-                "ante.feed.sources.base.time.monotonic",
-                side_effect=lambda: clock["t"],
-            ),
-            patch(
-                "ante.feed.sources.base.asyncio.sleep",
-                side_effect=fake_sleep,
-            ),
+        with patch(
+            "ante.feed.sources.base.asyncio.sleep",
+            side_effect=fake_sleep,
         ):
             await rl.acquire()
 
         # rate=2 → 토큰 1개 충전에 wait_time = (1 - 0) / 2 = 0.5초.
         assert sleeps == [0.5]
-        # _last_refill은 now(1000.0) + wait_time(0.5)로 전진해야 한다.
-        assert rl._last_refill == pytest.approx(1000.5)
+        # _last_refill은 now(start) + wait_time(0.5)로 전진해야 한다.
+        assert rl._last_refill == pytest.approx(start + 0.5)
         # sleep 분기 종료 후 토큰은 0으로 유지된다.
         assert rl._tokens == 0.0
 
     @pytest.mark.asyncio
-    async def test_throughput_not_exceed_configured_rate(self) -> None:
+    async def test_throughput_not_exceed_configured_rate(self, manual_clock) -> None:
         """소진 후 연속 acquire의 누적 대기가 설정 rate를 초과 허용하지 않는다.
 
         _last_refill이 sleep만큼 전진하지 않으면 두 번째 sleep 분기가 첫
@@ -362,25 +356,18 @@ class TestRateLimiterTokenRefill:
         rl = RateLimiter(tps_limit=2.0, daily_limit=100)
         # 토큰 소진 + _last_refill을 mock 시계 시작점으로 맞춘다.
         rl._tokens = 0.0
-        rl._last_refill = 0.0
+        rl._last_refill = manual_clock.monotonic()
 
-        clock = {"t": 0.0}
         sleeps: list[float] = []
 
         async def fake_sleep(seconds: float) -> None:
             sleeps.append(seconds)
             # sleep이 실제로 시계를 진행시킨다고 가정(상주 프로세스의 실시간).
-            clock["t"] += seconds
+            manual_clock.advance(seconds)
 
-        with (
-            patch(
-                "ante.feed.sources.base.time.monotonic",
-                side_effect=lambda: clock["t"],
-            ),
-            patch(
-                "ante.feed.sources.base.asyncio.sleep",
-                side_effect=fake_sleep,
-            ),
+        with patch(
+            "ante.feed.sources.base.asyncio.sleep",
+            side_effect=fake_sleep,
         ):
             for _ in range(3):
                 await rl.acquire()

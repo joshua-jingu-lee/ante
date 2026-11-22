@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, timedelta, timezone
+
+from ante.core import clock
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +27,7 @@ def generate_backfill_dates(
         날짜 문자열 (YYYY-MM-DD), 오름차순.
     """
     start_date = date.fromisoformat(start)
-    end_date = date.fromisoformat(end) if end else datetime.now(tz=_KST).date()
+    end_date = date.fromisoformat(end) if end else clock.now(_KST).date()
 
     if last_checkpoint:
         checkpoint_date = date.fromisoformat(last_checkpoint)
@@ -61,7 +63,7 @@ def generate_daily_date(reference: date | None = None) -> str:
     Returns:
         전일 날짜 문자열 (YYYY-MM-DD).
     """
-    ref = reference or datetime.now(tz=_KST).date()
+    ref = reference or clock.now(_KST).date()
     yesterday = ref - timedelta(days=1)
     return yesterday.isoformat()
 

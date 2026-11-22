@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ante.core import clock
 from ante.data.store import ParquetStore
 from ante.feed.models.result import CollectionResult
 from ante.feed.pipeline.checkpoint import Checkpoint
@@ -75,7 +76,7 @@ def _parse_strict_backfill_since(value: str) -> date | None:
 
 def _today_kst() -> date:
     """오늘 날짜(KST 캘린더)를 반환한다."""
-    return datetime.now(tz=_KST).date()
+    return clock.now(_KST).date()
 
 
 _DATA_GO_KR_PUBLISH_HOUR_KST = 13
@@ -261,7 +262,7 @@ class BackfillRunner:
         ohlcv_checkpoint = Checkpoint(feed_dir, "data_go_kr", "ohlcv")
         last_date = ohlcv_checkpoint.get_last_date()
 
-        published_end = _last_published_date(datetime.now(tz=_KST))
+        published_end = _last_published_date(clock.now(_KST))
 
         return list(
             generate_backfill_dates(
@@ -642,7 +643,7 @@ def _make_result(
     config_errors: list[dict[str, Any]] | None = None,
 ) -> CollectionResult:
     """CollectionResult를 생성한다."""
-    finished_at = datetime.now(tz=UTC)
+    finished_at = clock.now(UTC)
     duration = (finished_at - started_at).total_seconds()
     warning_items = warnings or []
 
