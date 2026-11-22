@@ -25,16 +25,15 @@ from ante.cli.middleware import (
 
 if TYPE_CHECKING:
     from ante.member.service import MemberService
-from ante.contracts import emit_cli_error
-from ante.member.errors import (
-    MemberAlreadyExistsError,
-    MemberInvalidRecoveryCredentialError,
-    MemberNotFoundError,
-    MemberStateConflictError,
-    PermissionDeniedError,
+from ante.contracts.cli_errors import (
+    CliConfirmationRequiredError,
+    CliMemberNotFoundError,
+    CliMissingRequiredInputError,
+    MemberPasswordEnvNotSetError,
+    MemberPasswordFileNotFoundError,
 )
+from ante.member.errors import MemberNotFoundError, PermissionDeniedError
 from ante.member.models import MemberRole
-from ante.member.scopes import InvalidScopeError
 
 logger = logging.getLogger(__name__)
 
@@ -62,30 +61,24 @@ def _resolve_secret_non_interactive(
 ) -> str:
     """``--*-env`` / ``--*-file`` 채널에서 비밀값을 비대화형으로 읽어들인다."""
     if env_name is None and file_path is None:
-        fmt.error(
+        raise CliMissingRequiredInputError(
             missing_input_message
-            + f" {env_option_label} 또는 {file_option_label} 중 하나를 지정하세요.",
-            code="CLI_MISSING_REQUIRED_INPUT",
+            + f" {env_option_label} 또는 {file_option_label} 중 하나를 지정하세요."
         )
-        raise SystemExit(1)
 
     if env_name is not None and file_path is not None:
-        fmt.error(
+        raise CliMissingRequiredInputError(
             f"{env_option_label}와 {file_option_label}는 동시에 지정할 수 없습니다."
-            " 둘 중 하나만 사용하세요.",
-            code="CLI_MISSING_REQUIRED_INPUT",
+            " 둘 중 하나만 사용하세요."
         )
-        raise SystemExit(1)
 
     if env_name is not None:
         value = os.environ.get(env_name)
         if value is None or value.strip() == "":
-            fmt.error(
+            raise MemberPasswordEnvNotSetError(
                 f"환경변수 {env_name}이(가) 설정되어 있지 않거나 공란입니다."
-                f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다.",
-                code="MEMBER_PASSWORD_ENV_NOT_SET",
+                f" {env_option_label}는 비밀값이 든 환경변수의 *이름*만 받습니다."
             )
-            raise SystemExit(1)
         return value.strip()
 
     assert file_path is not None
@@ -93,18 +86,14 @@ def _resolve_secret_non_interactive(
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as e:
-        fmt.error(
-            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})",
-            code="MEMBER_PASSWORD_FILE_NOT_FOUND",
-        )
-        raise SystemExit(1) from e
+        raise MemberPasswordFileNotFoundError(
+            f"{file_option_label} 파일을 읽을 수 없습니다: {file_path} ({e})"
+        ) from e
     value = raw.strip()
     if value == "":
-        fmt.error(
-            f"{file_option_label} 파일이 비어 있습니다: {file_path}",
-            code="MEMBER_PASSWORD_FILE_NOT_FOUND",
+        raise MemberPasswordFileNotFoundError(
+            f"{file_option_label} 파일이 비어 있습니다: {file_path}"
         )
-        raise SystemExit(1)
     return value
 
 
@@ -219,8 +208,7 @@ def member_info(ctx: click.Context, member_id: str) -> None:
 
     result = _run(_run_info())
     if not result:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        ctx.exit(1)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -470,22 +458,8 @@ def member_register(
 
     try:
         result, token = _run(_run_register())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
-    except MemberAlreadyExistsError as e:
-        fmt.error(str(e), code=MemberAlreadyExistsError.code)
-        raise SystemExit(1) from None
-    except InvalidScopeError as e:
-        fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -523,16 +497,8 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
 
     try:
         result = _run(_run_set_emoji())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except MemberNotFoundError:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        raise SystemExit(1) from None
-    except ValueError as e:
-        emit_cli_error(fmt, e)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
     fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
 
@@ -579,19 +545,8 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
 
     try:
         result = _run(_run_update_scopes())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
-    except InvalidScopeError as e:
-        fmt.error(str(e), code="MEMBER_INVALID_SCOPE")
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
 
     if fmt.is_json:
         fmt.output(result)
@@ -626,22 +581,10 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
 
     try:
         result = _run(_run_suspend())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
     except MemberNotFoundError:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        raise SystemExit(1) from None
-    except MemberStateConflictError as e:
-        fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
-        raise SystemExit(1) from e
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
     fmt.success(f"멤버 정지 완료: {member_id}", result)
 
@@ -673,22 +616,10 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 
     try:
         result = _run(_run_reactivate())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
     except MemberNotFoundError:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        raise SystemExit(1) from None
-    except MemberStateConflictError as e:
-        fmt.error(str(e), code="MEMBER_STATE_CONFLICT")
-        raise SystemExit(1) from e
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
     fmt.success(f"멤버 재활성화 완료: {member_id}", result)
 
@@ -714,12 +645,10 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     actor = get_member_id(ctx)
 
     if not yes:
-        fmt.error(
+        raise CliConfirmationRequiredError(
             "위험 명령입니다. --yes를 명시해야 멤버를 폐기합니다."
-            " 이 작업은 되돌릴 수 없습니다.",
-            code="CLI_CONFIRMATION_REQUIRED",
+            " 이 작업은 되돌릴 수 없습니다."
         )
-        raise SystemExit(1)
 
     async def _run_revoke() -> dict:
         from ante.cli.cold_path import is_active_runtime
@@ -738,19 +667,10 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
 
     try:
         result = _run(_run_revoke())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
     except MemberNotFoundError:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
     fmt.success(f"멤버 폐기 완료: {member_id}", result)
 
@@ -785,19 +705,10 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
 
     try:
         result, token = _run(_run_rotate())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
     except PermissionDeniedError:
-        fmt.error(_MASTER_REQUIRED_MESSAGE, code="PERMISSION_DENIED")
-        raise SystemExit(1) from None
+        raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
     except MemberNotFoundError:
-        fmt.error(f"멤버를 찾을 수 없습니다: {member_id}", code="MEMBER_NOT_FOUND")
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+        raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
     if fmt.is_json:
         fmt.output({**result, "token": token})
@@ -864,18 +775,7 @@ def member_reset_password(
                 raise ValueError(msg)
             await service.reset_password(master.member_id, recovery_key, new_password)
 
-    try:
-        _run(_run_reset())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
-    except MemberInvalidRecoveryCredentialError as e:
-        fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+    _run(_run_reset())
 
     fmt.success("패스워드가 변경되었습니다.")
 
@@ -935,18 +835,7 @@ def member_regenerate_recovery_key(
                 raise ValueError(msg)
             return await service.regenerate_recovery_key(master.member_id, password)
 
-    try:
-        new_key = _run(_run_regen())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
-    except MemberInvalidRecoveryCredentialError as e:
-        fmt.error(str(e), code=MemberInvalidRecoveryCredentialError.code)
-        raise SystemExit(1) from None
-    except (ValueError, PermissionError) as e:
-        emit_cli_error(fmt, e)
+    new_key = _run(_run_regen())
 
     if fmt.is_json:
         fmt.output({"recovery_key": new_key})

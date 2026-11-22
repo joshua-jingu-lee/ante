@@ -19,11 +19,11 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCServerNotRunningError
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
 
 SECRET_TOKEN = "SECRET-TOKEN-eeeeeeeeeeeeeeeeeeee"
@@ -59,13 +59,10 @@ def _invoke(args: list[str]):  # noqa: ANN202
         )
 
 
-def _server_not_running_exc() -> click.ClickException:
-    exc = click.ClickException(
+def _server_not_running_exc() -> IPCServerNotRunningError:
+    return IPCServerNotRunningError(
         "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
     )
-    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-    return exc
 
 
 # (cli_args, ipc_command, ipc_return) — authenticated 6 commands.

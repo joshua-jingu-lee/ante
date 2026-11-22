@@ -27,7 +27,10 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.cli_errors import (
+    AccountAlreadyDeletedError,
+    AccountInvalidStatusError,
+)
 
 if TYPE_CHECKING:
     from ante.account.models import Account
@@ -470,10 +473,7 @@ def account_create(
         async with _create_account_service(ctx) as svc:
             return await svc.create(new_account)
 
-    try:
-        created = _run(_do_create())
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    created = _run(_do_create())
 
     fmt.success(
         f'계좌 "{created.account_id}" 생성 완료 '
@@ -505,12 +505,10 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     if status_filter is not None and status_filter not in {
         s.value for s in AccountStatus
     }:
-        fmt.error(
+        raise AccountInvalidStatusError(
             f"잘못된 status 값: {status_filter!r}. "
-            f"허용값: {sorted(s.value for s in AccountStatus)}",
-            code="ACCOUNT_INVALID_STATUS",
+            f"허용값: {sorted(s.value for s in AccountStatus)}"
         )
-        raise SystemExit(1)
 
     async def _do_list() -> list[dict]:
         async with _create_account_service(ctx) as svc:
@@ -518,10 +516,7 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
             accounts = await svc.list(status=status)
             return [_account_to_row(a) for a in accounts]
 
-    try:
-        rows = _run(_do_list())
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    rows = _run(_do_list())
 
     if not rows:
         fmt.output({"message": "등록된 계좌가 없습니다.", "accounts": []})
@@ -555,10 +550,7 @@ def account_info(ctx: click.Context, account_id: str) -> None:
             acct = await svc.get(validated_account_id)
             return _account_to_detail(acct)
 
-    try:
-        detail = _run(_do_info())
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    detail = _run(_do_info())
 
     if fmt.is_json:
         fmt.output(detail)
@@ -583,18 +575,13 @@ def account_suspend(ctx: click.Context, account_id: str, reason: str) -> None:
         account_id, fmt, context="cli.account.suspend"
     )
 
-    try:
-        _run(
-            ipc_send(
-                "account.suspend",
-                {"account_id": validated_account_id, "reason": reason},
-                actor=member_id,
-            )
+    _run(
+        ipc_send(
+            "account.suspend",
+            {"account_id": validated_account_id, "reason": reason},
+            actor=member_id,
         )
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    )
 
     fmt.success(f'계좌 "{validated_account_id}" 정지 완료')
 
@@ -615,18 +602,13 @@ def account_activate(ctx: click.Context, account_id: str) -> None:
         account_id, fmt, context="cli.account.activate"
     )
 
-    try:
-        _run(
-            ipc_send(
-                "account.activate",
-                {"account_id": validated_account_id},
-                actor=member_id,
-            )
+    _run(
+        ipc_send(
+            "account.activate",
+            {"account_id": validated_account_id},
+            actor=member_id,
         )
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    )
 
     fmt.success(f'계좌 "{validated_account_id}" 활성화 완료')
 
@@ -667,11 +649,7 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
         account_id, fmt, context="cli.account.delete"
     )
 
-    from ante.account.errors import (
-        AccountDeletedError,
-        AccountHasActiveBotsError,
-        AccountNotFoundError,
-    )
+    from ante.account.errors import AccountDeletedError
 
     async def _do_delete() -> None:
         async with _create_account_service(ctx) as svc:
@@ -679,19 +657,8 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
 
     try:
         _run(_do_delete())
-    except AccountHasActiveBotsError as e:
-        fmt.error(str(e), code="ACCOUNT_HAS_ACTIVE_BOTS")
-        raise SystemExit(1) from e
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
     except AccountDeletedError as e:
-        fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
-        raise SystemExit(1) from e
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+        raise AccountAlreadyDeletedError(str(e)) from e
 
     fmt.success(f'계좌 "{validated_account_id}" 삭제 완료')
 
@@ -715,10 +682,7 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
             acct = await svc.get(validated_account_id)
             return {k: mask_value(k, v) for k, v in acct.credentials.items()}
 
-    try:
-        masked = _run(_do_credentials())
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    masked = _run(_do_credentials())
 
     if not masked:
         fmt.output({"message": "등록된 인증 정보가 없습니다.", "credentials": {}})
@@ -829,12 +793,7 @@ def account_set_credentials(
             await svc.update(validated_account_id, credentials=new_credentials)
             fmt.success(f'계좌 "{validated_account_id}" 인증 정보 재설정 완료')
 
-    try:
-        _run(_do_set_credentials())
-    except SystemExit:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    _run(_do_set_credentials())
 
 
 @account.command("repair-timezone")
@@ -872,11 +831,7 @@ def account_repair_timezone(
         account_id, fmt, context="cli.account.repair-timezone"
     )
 
-    from ante.account.errors import (
-        AccountDeletedError,
-        AccountNotFoundError,
-        AccountStructuralChangeRequiresStoppedServerError,
-    )
+    from ante.account.errors import AccountDeletedError
 
     async def _do_repair() -> Account:
         async with _create_account_service(ctx) as svc:
@@ -890,22 +845,8 @@ def account_repair_timezone(
             "ACCOUNT_INVALID_TIMEZONE",
             f"invalid IANA timezone: {new_timezone!r} — {e}",
         )
-    except AccountStructuralChangeRequiresStoppedServerError as e:
-        fmt.error(
-            str(e),
-            code="ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER",
-        )
-        raise SystemExit(1) from e
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
     except AccountDeletedError as e:
-        fmt.error(str(e), code="ACCOUNT_ALREADY_DELETED")
-        raise SystemExit(1) from e
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+        raise AccountAlreadyDeletedError(str(e)) from e
 
     fmt.success(
         f'계좌 "{repaired.account_id}" timezone 복구 완료 ({repaired.timezone})',

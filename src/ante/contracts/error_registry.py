@@ -46,6 +46,8 @@ from ante.broker.registry import (
 )
 from ante.config.exceptions import ConfigValidationError
 from ante.contracts.cli_errors import (
+    AccountAlreadyDeletedError,
+    AccountInvalidStatusError,
     AccountMasterBootstrapFailedError,
     AccountTestCreateFailedError,
     AccountTestInactiveError,
@@ -62,6 +64,7 @@ from ante.contracts.cli_errors import (
     CliAlreadyInitializedError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
     CliStrategyError,
@@ -84,6 +87,8 @@ from ante.contracts.cli_errors import (
     InvalidDateError,
     InvalidDateRangeError,
     InvalidJsonError,
+    MemberPasswordEnvNotSetError,
+    MemberPasswordFileNotFoundError,
     PidNotFoundError,
     ProcessNotFoundError,
     ReportError,
@@ -637,6 +642,26 @@ _ACCOUNT_TEST_INACTIVE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="state_conflict",
 )
 
+_ACCOUNT_ALREADY_DELETED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_ALREADY_DELETED",
+    category="state_conflict",
+)
+
+_ACCOUNT_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="ACCOUNT_INVALID_STATUS",
+    category="validation",
+)
+
+_MEMBER_PASSWORD_ENV_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_PASSWORD_ENV_NOT_SET",
+    category="validation",
+)
+
+_MEMBER_PASSWORD_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MEMBER_PASSWORD_FILE_NOT_FOUND",
+    category="validation",
+)
+
 _ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ALREADY_RUNNING",
     category="state_conflict",
@@ -910,6 +935,11 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     StrategyMissingRequiredAccountError: _STRATEGY_MISSING_REQUIRED_ACCOUNT_SPEC,
     TreasuryAllocateFailedError: _TREASURY_ALLOCATE_FAILED_SPEC,
     TreasuryDeallocateFailedError: _TREASURY_DEALLOCATE_FAILED_SPEC,
+    AccountAlreadyDeletedError: _ACCOUNT_ALREADY_DELETED_SPEC,
+    AccountInvalidStatusError: _ACCOUNT_INVALID_STATUS_SPEC,
+    CliMemberNotFoundError: _MEMBER_NOT_FOUND_SPEC,
+    MemberPasswordEnvNotSetError: _MEMBER_PASSWORD_ENV_NOT_SET_SPEC,
+    MemberPasswordFileNotFoundError: _MEMBER_PASSWORD_FILE_NOT_FOUND_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
