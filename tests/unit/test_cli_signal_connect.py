@@ -592,6 +592,25 @@ class TestSignalConnectIpcTerminals:
         assert result.stderr == "서버 응답 시간 초과\n"
         assert result.stdout == ""
 
+    def test_server_missing_socket_precheck_text(self, runner: CliRunner) -> None:
+        with (
+            patch(_PATH_EXISTS_TARGET, return_value=False),
+            patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+        ):
+            result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stderr == _SERVER_DOWN_MSG + "\n"
+        assert result.stdout == ""
+
+    def test_handshake_incomplete_read_text(self, runner: CliRunner) -> None:
+        with _patch_ipc(response_frames=[]):
+            result = runner.invoke(cli, ["signal", "connect", "--key", "sk_ok"])
+
+        assert result.exit_code == 1, (result.stdout, result.stderr)
+        assert result.stderr == _SERVER_DOWN_MSG + "\n"
+        assert result.stdout == ""
+
 
 async def _immediate_timeout(coro, timeout):  # noqa: ANN001, ANN202
     """``asyncio.wait_for`` 대역 — 즉시 ``TimeoutError`` (HangingReader 대기 회피).
@@ -788,3 +807,70 @@ def test_handshake_frame_args_pass_the_request_model(runner: CliRunner) -> None:
     request = spec.request_model.model_validate(frame["args"])
     assert request.model_dump(mode="json") == {"key": "**********"}
     assert request.model_dump()["key"].get_secret_value() == "sig-key-1"
+
+
+# ──────────────────────────────────────────────────────────────
+# G. 연결 실패 다섯 자리의 JSON stdout 바이트 (#2762)
+# ──────────────────────────────────────────────────────────────
+
+
+def _json_line(code: str, message: str) -> str:
+    return (
+        '{"status": "error", "code": "'
+        + code
+        + '", "message": '
+        + json.dumps(message)
+        + "}\n"
+    )
+
+
+@contextmanager
+def _missing_socket() -> Iterator[None]:
+    with (
+        patch(_PATH_EXISTS_TARGET, return_value=False),
+        patch(_SOCKET_TARGET, return_value="/tmp/test-ante.sock"),
+    ):
+        yield
+
+
+@contextmanager
+def _timeout_ipc() -> Iterator[None]:
+    with _patch_ipc(handshake_timeout=True):
+        with patch("asyncio.wait_for", side_effect=_immediate_timeout):
+            yield
+
+
+_FIVE_SITES = {
+    "missing_socket": (_missing_socket, "IPC_SERVER_NOT_RUNNING", _SERVER_DOWN_MSG),
+    "connection_refused": (
+        lambda: _patch_ipc(connect_exc=ConnectionRefusedError()),
+        "IPC_SERVER_NOT_RUNNING",
+        _SERVER_DOWN_MSG,
+    ),
+    "timeout": (_timeout_ipc, "IPC_TIMEOUT", "서버 응답 시간 초과"),
+    "incomplete_read": (
+        lambda: _patch_ipc(response_frames=[]),
+        "IPC_SERVER_NOT_RUNNING",
+        _SERVER_DOWN_MSG,
+    ),
+    "daemon_error": (
+        lambda: _patch_ipc(
+            response_frames=[_error_frame("INVALID_SIGNAL_KEY", "Invalid signal key")]
+        ),
+        "INVALID_SIGNAL_KEY",
+        "Invalid signal key",
+    ),
+}
+
+
+@pytest.mark.parametrize("site", sorted(_FIVE_SITES))
+def test_connect_failure_json_bytes(runner: CliRunner, site: str) -> None:
+    context, code, message = _FIVE_SITES[site]
+    with context():
+        result = runner.invoke(
+            cli, ["signal", "connect", "--key", "sk_ok", "--format", "json"]
+        )
+
+    assert result.exit_code == 1, (result.stdout, result.stderr)
+    assert result.stdout == _json_line(code, message)
+    assert result.stderr == ""
