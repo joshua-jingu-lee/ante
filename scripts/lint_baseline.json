@@ -239,20 +239,5 @@
       "BLE001": 3
     }
   },
-  "mypy": {
-    "src/ante/cli/commands/feed.py": {
-      "no-untyped-call": 3,
-      "no-untyped-def": 2,
-      "type-arg": 5,
-      "unused-ignore": 1
-    },
-    "src/ante/cli/commands/ipc_helpers.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
-    "src/ante/cli/middleware.py": {
-      "no-any-return": 1,
-      "type-arg": 6
-    }
-  }
+  "mypy": {}
 }
