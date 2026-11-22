@@ -110,8 +110,6 @@
     "permission_denied"
   ],
   "ipc_handlers_without_model": [
-    "account.activate",
-    "account.suspend",
     "approval.approve",
     "approval.cancel",
     "approval.cancel_invalid",
@@ -151,8 +149,6 @@
     "treasury.set_balance"
   ],
   "ipc_args_reads": {
-    "account.activate": 1,
-    "account.suspend": 2,
     "approval.approve": 1,
     "approval.cancel": 1,
     "approval.cancel_invalid": 1,

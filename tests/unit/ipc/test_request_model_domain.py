@@ -13,20 +13,21 @@ from __future__ import annotations
 import json
 import logging
 import typing
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import annotated_types
 import pytest
-from pydantic import Field, field_validator
+from pydantic import AfterValidator, Field, field_validator
 from pydantic.fields import FieldInfo
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
-from ante.ipc.requests import IPCRequest
+from ante.ipc.requests import AccountId, IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -39,6 +40,7 @@ ACCEPTED_KINDS = {
     "float": {"int", "float"},
     "bool": {"bool"},
     "literal": {"string"},
+    "validated": {"string"},
 }
 WRONG_TYPE = {
     "str": "string_type",
@@ -46,6 +48,7 @@ WRONG_TYPE = {
     "float": "float_type",
     "bool": "bool_type",
     "literal": "literal_error",
+    "validated": "string_type",
 }
 CONSTRAINT_TYPE = {
     "ge": "greater_than_equal",
@@ -67,6 +70,36 @@ def validation_message(command: str, *errors: tuple[str, str]) -> str:
 
 class UnsupportedFieldError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class ValidatedType:
+    base: str
+    accepts: tuple[tuple[str, str], ...]
+    rejects: tuple[tuple[str, str], ...]
+    expected: str
+
+
+def _validator_of(annotated: Any) -> Callable[..., Any]:
+    found = [m for m in typing.get_args(annotated) if isinstance(m, AfterValidator)]
+    assert len(found) == 1, annotated
+    return found[0].func
+
+
+VALIDATED_TYPES: dict[Callable[..., Any], ValidatedType] = {
+    _validator_of(AccountId): ValidatedType(
+        base="acct-1",
+        accepts=(("bootstrap", "test"), ("shortest", "abc"), ("longest", "a" * 30)),
+        rejects=(
+            ("reserved", "default"),
+            ("empty", ""),
+            ("short", "ab"),
+            ("long", "a" * 31),
+            ("pattern", "bad_id!"),
+        ),
+        expected="invalid_account_id",
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -101,8 +134,22 @@ def _is_unbounded(annotation: Any) -> bool:
     return annotation in (Any, object) or annotation is dict or origin is dict
 
 
+def _validated(info: FieldInfo) -> ValidatedType | None:
+    found = [m for m in info.metadata if isinstance(m, AfterValidator)]
+    if not found:
+        return None
+    if len(found) != 1 or len(info.metadata) != 1 or info.annotation is not str:
+        raise UnsupportedFieldError(f"unsupported validated field: {info!r}")
+    entry = VALIDATED_TYPES.get(found[0].func)
+    if entry is None:
+        raise UnsupportedFieldError(f"validator not in the table: {found[0].func!r}")
+    return entry
+
+
 def _kind(info: FieldInfo) -> str:
     annotation = info.annotation
+    if _validated(info) is not None:
+        return "validated"
     if _is_unbounded(annotation):
         raise UnsupportedFieldError(f"unbounded field: {annotation!r}")
     if typing.get_origin(annotation) is Literal:
@@ -129,6 +176,8 @@ CONSTRAINT_CLASSES = (
 
 def _constraints(info: FieldInfo, kind: str) -> dict[str, int]:
     found: dict[str, int] = {}
+    if kind == "validated":
+        return found
     for item in info.metadata:
         for name, cls, owner in CONSTRAINT_CLASSES:
             if isinstance(item, cls) and owner == kind:
@@ -176,6 +225,11 @@ def _base_value(info: FieldInfo) -> Any:
         return 2.5 if default == 1.5 else 1.5
     if kind == "bool":
         return default is not True
+    entry = _validated(info)
+    if entry is not None:
+        if _has_default(info) and info.default == entry.base:
+            raise UnsupportedFieldError(f"default equals the base value: {info!r}")
+        return entry.base
     members = typing.get_args(info.annotation)
     candidates = [m for m in members if not (_has_default(info) and m == default)]
     if not candidates:
@@ -235,6 +289,12 @@ def _field_variants(
     if kind == "literal":
         marker = markers.next()
         one("literal", "literal_error", marker, marker)
+    entry = _validated(info)
+    if entry is not None:
+        for label, value in entry.rejects:
+            one(f"reject:{label}", entry.expected, value, None)
+        marker = markers.next()
+        one("reject:marker", entry.expected, f"{marker}!", marker)
     outside = {
         "ge": lambda b: b - 1,
         "gt": lambda b: b,
@@ -295,6 +355,12 @@ def inside_values(model: type[IPCRequest]) -> list[Inside]:
         for constraint, bound in limits.items():
             value = inside[constraint](bound)
             out.append(Inside(name, constraint, {**base, name: value}, value))
+        entry = _validated(info)
+        if entry is not None:
+            for label, value in entry.accepts:
+                out.append(
+                    Inside(name, f"accept:{label}", {**base, name: value}, value)
+                )
     return out
 
 
@@ -309,6 +375,7 @@ class _TableRequest(IPCRequest):
     ratio: float
     flag: bool
     code: str = Field(min_length=3)
+    account_id: AccountId
 
 
 class _SecretRequest(IPCRequest):
@@ -497,6 +564,14 @@ def test_generator_table_for_each_field_kind() -> None:
         ("code", "missing", "missing"),
         *(("code", f"wrong:{k}", "string_type") for k in string_kinds),
         ("code", "min_length", "string_too_short"),
+        ("account_id", "missing", "missing"),
+        *(("account_id", f"wrong:{k}", "string_type") for k in string_kinds),
+        ("account_id", "reject:reserved", "invalid_account_id"),
+        ("account_id", "reject:empty", "invalid_account_id"),
+        ("account_id", "reject:short", "invalid_account_id"),
+        ("account_id", "reject:long", "invalid_account_id"),
+        ("account_id", "reject:pattern", "invalid_account_id"),
+        ("account_id", "reject:marker", "invalid_account_id"),
         ("zz_extra", "extra", "extra_forbidden"),
         ("args", "not_object:string", "model_type"),
         ("args", "not_object:int", "model_type"),
@@ -511,11 +586,15 @@ def test_generator_table_for_each_field_kind() -> None:
         "ratio": 1.5,
         "flag": True,
         "code": "vvv",
+        "account_id": "acct-1",
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
         ("level", "ge", 1),
         ("level", "le", 5),
         ("code", "min_length", "iii"),
+        ("account_id", "accept:bootstrap", "test"),
+        ("account_id", "accept:shortest", "abc"),
+        ("account_id", "accept:longest", "a" * 30),
     ]
 
 
@@ -547,7 +626,13 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
     class _Patterned(IPCRequest):
         name: str = Field(pattern="^a+$")
 
-    for model in (_Open, _Mapping, _Listed, _Patterned):
+    class _Unlisted(IPCRequest):
+        name: Annotated[str, AfterValidator(lambda v: v)]
+
+    class _Bounded(IPCRequest):
+        account_id: Annotated[AccountId, Field(max_length=10)]
+
+    for model in (_Open, _Mapping, _Listed, _Patterned, _Unlisted, _Bounded):
         with pytest.raises(UnsupportedFieldError):
             variants(model, "00")
 
