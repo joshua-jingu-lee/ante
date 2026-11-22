@@ -23,7 +23,7 @@ from ante.cli._validators import (
 )
 from ante.cli.cold_path import ACCOUNT_COLD_PATH_BLOCKED_CODE
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -467,10 +467,8 @@ def account_create(
 @click.pass_context
 @require_auth
 @require_scope("account:read")
-def account_list(ctx: click.Context, status_filter: str | None) -> None:
+def account_list(ctx: click.Context, status_filter: str | None) -> CommandResult:
     """계좌 목록 조회."""
-    fmt = get_formatter(ctx)
-
     if status_filter is not None and status_filter not in {
         s.value for s in AccountStatus
     }:
@@ -488,16 +486,13 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
     rows = _run(_do_list())
 
     if not rows:
-        fmt.output({"message": "등록된 계좌가 없습니다.", "accounts": []})
-        return
+        empty = {"message": "등록된 계좌가 없습니다.", "accounts": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"accounts": rows})
-    else:
-        fmt.table(
-            rows,
-            ["account_id", "name", "exchange", "currency", "broker_type", "status"],
-        )
+    columns = ["account_id", "name", "exchange", "currency", "broker_type", "status"]
+    return CommandResult(
+        data={"accounts": rows}, text=tuple(table_lines(rows, columns))
+    )
 
 
 @account.command("info")
@@ -506,7 +501,7 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("account:read")
-def account_info(ctx: click.Context, account_id: str) -> None:
+def account_info(ctx: click.Context, account_id: str) -> CommandResult:
     """계좌 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
@@ -521,10 +516,7 @@ def account_info(ctx: click.Context, account_id: str) -> None:
 
     detail = _run(_do_info())
 
-    if fmt.is_json:
-        fmt.output(detail)
-    else:
-        _print_account_detail(detail)
+    return CommandResult(data=detail, text=_account_detail_lines(detail))
 
 
 @account.command("suspend")
@@ -639,7 +631,7 @@ def account_delete(
 @click.pass_context
 @require_auth
 @require_scope("account:read")
-def account_credentials(ctx: click.Context, account_id: str) -> None:
+def account_credentials(ctx: click.Context, account_id: str) -> CommandResult:
     """인증 정보 조회 (마스킹)."""
     fmt = get_formatter(ctx)
 
@@ -655,16 +647,17 @@ def account_credentials(ctx: click.Context, account_id: str) -> None:
     masked = _run(_do_credentials())
 
     if not masked:
-        fmt.output({"message": "등록된 인증 정보가 없습니다.", "credentials": {}})
-        return
+        empty = {"message": "등록된 인증 정보가 없습니다.", "credentials": {}}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"account_id": account_id, "credentials": masked})
-    else:
-        click.echo(f"\n인증 정보 ({account_id})")
-        click.echo("-" * 35)
-        for key, value in masked.items():
-            click.echo(f"  {key.upper():14s}: {value}")
+    return CommandResult(
+        data={"account_id": account_id, "credentials": masked},
+        text=(
+            f"\n인증 정보 ({account_id})",
+            "-" * 35,
+            *(f"  {key.upper():14s}: {value}" for key, value in masked.items()),
+        ),
+    )
 
 
 @account.command("set-credentials")
@@ -700,7 +693,7 @@ def account_set_credentials(
     credentials_direct: tuple[str, ...],
     credentials_env: tuple[str, ...],
     credentials_file: tuple[str, ...],
-) -> None:
+) -> CommandResult:
     """인증 정보 재설정 (비대화형, cold-path 전용).
 
     SSOT: ``BrokerPreset.required_credentials``를 **모두** 충족해야 하며,
@@ -719,7 +712,7 @@ def account_set_credentials(
 
     from ante.account.presets import BROKER_PRESETS
 
-    async def _do_set_credentials() -> None:
+    async def _do_set_credentials() -> CommandResult:
         async with _create_account_service(ctx) as svc:
             acct = await svc.get(validated_account_id)
             preset = BROKER_PRESETS.get(acct.broker_type)
@@ -734,8 +727,8 @@ def account_set_credentials(
                         "credentials를 요구하지 않습니다."
                     )
                 msg = f"브로커 '{acct.broker_type}'에는 인증 정보가 필요하지 않습니다."
-                fmt.output({"message": msg})
-                return
+                payload = {"message": msg}
+                return CommandResult(data=payload, text=(str(payload),))
 
             if not (credentials_direct or credentials_env or credentials_file):
                 required = list(preset.required_credentials)
@@ -755,9 +748,11 @@ def account_set_credentials(
             )
 
             await svc.update(validated_account_id, credentials=new_credentials)
-            fmt.success(f'계좌 "{validated_account_id}" 인증 정보 재설정 완료')
+            done = f'계좌 "{validated_account_id}" 인증 정보 재설정 완료'
+            return CommandResult(message=done, text=(done,))
 
-    _run(_do_set_credentials())
+    result: CommandResult = _run(_do_set_credentials())
+    return result
 
 
 @account.command("repair-timezone")
@@ -853,10 +848,9 @@ def _account_to_detail(acct: Account) -> dict[str, Any]:
     }
 
 
-def _print_account_detail(detail: dict[str, Any]) -> None:
-    """텍스트 모드로 계좌 상세 출력."""
-    click.echo("\n계좌 정보")
-    click.echo("-" * 35)
+def _account_detail_lines(detail: dict[str, Any]) -> tuple[str, ...]:
+    """텍스트 모드의 계좌 상세 줄."""
+    lines = ["\n계좌 정보", "-" * 35]
     labels = {
         "account_id": "ID",
         "name": "이름",
@@ -885,4 +879,5 @@ def _print_account_detail(detail: dict[str, Any]) -> None:
                 value = f"{pct:.3f}%"
             except (ValueError, TypeError):
                 pass
-        click.echo(f"  {label:14s}: {value}")
+        lines.append(f"  {label:14s}: {value}")
+    return tuple(lines)
