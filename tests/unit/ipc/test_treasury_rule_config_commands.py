@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +23,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 CLI_MEMBER = "cli-master-7"
@@ -267,71 +269,147 @@ async def test_rule_update_without_enabled_and_params_enables_with_no_params() -
     )
 
 
+# ── 요청 모델이 거부하는 요청 ───────────────────────────────────────────────
+
+ALLOCATE = {"account_id": "acct-2", "bot_id": "b-7", "amount": 1500.5}
+SET_BALANCE = {"account_id": "acct-2", "balance": 1234567.5}
+RULE = {"account_id": "acct-2", "rule_type": "daily_loss_limit"}
+CONFIG = {"key": "k.x", "value": "v"}
+
+
+def _rejected(command: str, loc: str, kind: str) -> dict[str, Any]:
+    return _error("VALIDATION_ERROR", validation_message(command, (loc, kind)))
+
+
+def _without(args: dict[str, Any], key: str) -> dict[str, Any]:
+    return {k: v for k, v in args.items() if k != key}
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("args", "enabled", "params"),
+    ("command", "args", "loc", "kind"),
     [
-        ({"enabled": "false"}, True, {}),
-        ({"enabled": 0}, False, {}),
-        ({"params": None}, True, {}),
-        ({"params": []}, True, {}),
+        ("treasury.allocate", {**ALLOCATE, "amount": "100"}, "amount", "float_type"),
+        ("treasury.allocate", {**ALLOCATE, "amount": True}, "amount", "float_type"),
+        ("treasury.allocate", {**ALLOCATE, "amount": None}, "amount", "float_type"),
+        (
+            "treasury.allocate",
+            {**ALLOCATE, "amount": float("nan")},
+            "amount",
+            "finite_number",
+        ),
+        (
+            "treasury.deallocate",
+            {**ALLOCATE, "amount": float("inf")},
+            "amount",
+            "finite_number",
+        ),
+        ("treasury.deallocate", _without(ALLOCATE, "amount"), "amount", "missing"),
+        (
+            "treasury.deallocate",
+            {**ALLOCATE, "account_id": "default"},
+            "account_id",
+            "invalid_account_id",
+        ),
+        (
+            "treasury.allocate",
+            _without(ALLOCATE, "account_id"),
+            "account_id",
+            "missing",
+        ),
+        ("treasury.allocate", {**ALLOCATE, "bot_id": 7}, "bot_id", "string_type"),
+        (
+            "treasury.set_balance",
+            {**SET_BALANCE, "balance": float("-inf")},
+            "balance",
+            "finite_number",
+        ),
+        (
+            "treasury.set_balance",
+            {**SET_BALANCE, "balance": "0"},
+            "balance",
+            "float_type",
+        ),
+        (
+            "treasury.set_balance",
+            {**SET_BALANCE, "account_id": ""},
+            "account_id",
+            "invalid_account_id",
+        ),
+        ("rule.update", {**RULE, "enabled": "false"}, "enabled", "bool_type"),
+        ("rule.update", {**RULE, "enabled": 0}, "enabled", "bool_type"),
+        ("rule.update", {**RULE, "enabled": None}, "enabled", "bool_type"),
+        ("rule.update", {**RULE, "params": None}, "params", "dict_type"),
+        ("rule.update", {**RULE, "params": []}, "params", "dict_type"),
+        ("rule.update", _without(RULE, "rule_type"), "rule_type", "missing"),
+        (
+            "rule.update",
+            {**RULE, "account_id": "bad_id!"},
+            "account_id",
+            "invalid_account_id",
+        ),
+        ("config.set", {**CONFIG, "value": 5}, "value", "string_type"),
+        ("config.set", {**CONFIG, "value": None}, "value", "string_type"),
+        ("config.set", {**CONFIG, "category": None}, "category", "string_type"),
+        ("config.set", _without(CONFIG, "key"), "key", "missing"),
+        ("config.set", {**CONFIG, "zz_extra": 1}, "zz_extra", "extra_forbidden"),
     ],
 )
-async def test_rule_update_coerces_a_value_of_another_type(
-    args: dict[str, Any], enabled: bool, params: dict[str, Any]
+async def test_request_outside_the_model_is_rejected(
+    command: str, args: dict[str, Any], loc: str, kind: str
 ) -> None:
     harness = _Harness()
-    response = await harness.send(
-        "rule.update",
-        {"account_id": "acct-2", "rule_type": "daily_loss_limit", **args},
-    )
-    assert response == _ok(dict(RULE_RESULT))
-    kwargs = harness.rule_update.await_args.kwargs
-    assert (_typed(kwargs["enabled"]), kwargs["params"]) == (
-        ("bool", enabled),
-        params,
-    )
+    response = await harness.send(command, args)
+    assert response == _rejected(command, loc, kind)
+    harness.assert_no_service_call()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("command", "args", "method"),
     [
-        (
-            "treasury.allocate",
-            {"account_id": "acct-2", "bot_id": "b-7", "amount": 5},
-            "allocate",
-        ),
-        (
-            "treasury.deallocate",
-            {"account_id": "acct-2", "bot_id": "b-7", "amount": 5},
-            "deallocate",
-        ),
-        (
-            "treasury.set_balance",
-            {"account_id": "acct-2", "balance": 5},
-            "set_account_balance",
-        ),
+        ("treasury.allocate", {**ALLOCATE, "amount": 5}, "allocate"),
+        ("treasury.deallocate", {**ALLOCATE, "amount": 5}, "deallocate"),
+        ("treasury.set_balance", {**SET_BALANCE, "balance": 5}, "set_account_balance"),
     ],
 )
-async def test_treasury_amount_of_a_json_integer_reaches_the_service_as_is(
+async def test_treasury_amount_of_a_json_integer_reaches_the_service_as_a_float(
     command: str, args: dict[str, Any], method: str
 ) -> None:
     harness = _Harness()
     response = await harness.send(command, args)
     assert response["status"] == "ok"
     amount = getattr(harness.treasury, method).await_args.args[-1]
-    assert _typed(amount) == ("int", 5)
+    assert _typed(amount) == ("float", 5.0)
 
 
 @pytest.mark.asyncio
-async def test_config_set_passes_a_value_of_another_type() -> None:
+async def test_rule_update_params_of_any_value_reach_the_service() -> None:
     harness = _Harness()
-    response = await harness.send("config.set", {"key": "k.x", "value": 5})
-    assert response == _ok({"key": "k.x", "value": 5})
-    harness.dynamic_config.set.assert_awaited_once_with(
-        "k.x", 5, category="user", changed_by=ACTOR
+    params = {"a": None, "b": [1, "x"], "c": {"d": False}, "e": float("nan")}
+    response = await harness.send("rule.update", {**RULE, "params": params})
+    assert response == _ok(dict(RULE_RESULT))
+    passed = harness.rule_update.await_args.kwargs["params"]
+    assert list(passed) == ["a", "b", "c", "e"]
+    assert passed["a"] is None
+    assert (passed["b"], passed["c"]) == ([1, "x"], {"d": False})
+    assert passed["e"] != passed["e"]
+
+
+@pytest.mark.asyncio
+async def test_rejected_value_is_not_in_the_response_or_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKCONFIGVALUE01x"
+    harness = _Harness()
+    response = await harness.send(
+        "config.set", {"key": marker, "value": "v", "zz_extra": marker}
     )
+    assert response == _rejected("config.set", "zz_extra", "extra_forbidden")
+    assert marker not in json.dumps(response, ensure_ascii=False)
+    assert marker not in caplog.text
+    harness.assert_no_service_call()
 
 
 # ── config ──────────────────────────────────────────────────────────────────

@@ -27,6 +27,7 @@ import pytest
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.validation_messages import validation_message
 
 
 def _make_service_registry(
@@ -1497,11 +1498,11 @@ async def test_rule_update_rejects_invalid_account_id_before_handler(
     server = IPCServer(socket_path, svc_registry, cmd_registry)
     await server.start()
     try:
-        for account_args in (
-            {},
-            {"account_id": ""},
-            {"account_id": "default"},
-            {"account_id": "bad_id!"},
+        for account_args, kind in (
+            ({}, "missing"),
+            ({"account_id": ""}, "invalid_account_id"),
+            ({"account_id": "default"}, "invalid_account_id"),
+            ({"account_id": "bad_id!"}, "invalid_account_id"),
         ):
             response = await server._dispatch(
                 {
@@ -1518,7 +1519,9 @@ async def test_rule_update_rejects_invalid_account_id_before_handler(
             )
             assert response["status"] == "error", account_args
             assert response["error"]["code"] == "VALIDATION_ERROR", account_args
-            assert "ipc.rule.update" in response["error"]["message"], account_args
+            assert response["error"]["message"] == validation_message(
+                "rule.update", ("account_id", kind)
+            ), account_args
 
         fake_account.get.assert_not_awaited()
         fake_dynamic_config.get.assert_not_awaited()

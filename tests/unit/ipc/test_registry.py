@@ -1205,6 +1205,7 @@ class TestHandleConfigSetValidation:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_config_set
+        from ante.ipc.requests import ConfigSetRequest
 
         async def _set(key, value, category, changed_by):  # noqa: ANN001, ANN202
             from ante.config.dynamic import validate_value
@@ -1220,11 +1221,11 @@ class TestHandleConfigSetValidation:
         with pytest.raises(ValueError, match="system.log_level"):
             await _handle_config_set(
                 svc,
-                {
-                    "key": "system.log_level",
-                    "value": "ORACLE_INVALID_LEVEL",
-                    "category": "system",
-                },
+                ConfigSetRequest(
+                    key="system.log_level",
+                    value="ORACLE_INVALID_LEVEL",
+                    category="system",
+                ),
                 "cli-user",
             )
 
@@ -1233,6 +1234,7 @@ class TestHandleConfigSetValidation:
         from unittest.mock import AsyncMock, MagicMock
 
         from ante.ipc.registry import _handle_config_set
+        from ante.ipc.requests import ConfigSetRequest
 
         fake_dynamic = MagicMock()
         fake_dynamic.set = AsyncMock(return_value=None)
@@ -1242,11 +1244,7 @@ class TestHandleConfigSetValidation:
 
         result = await _handle_config_set(
             svc,
-            {
-                "key": "system.log_level",
-                "value": "DEBUG",
-                "category": "system",
-            },
+            ConfigSetRequest(key="system.log_level", value="DEBUG", category="system"),
             "cli-user",
         )
         assert result == {"key": "system.log_level", "value": "DEBUG"}
