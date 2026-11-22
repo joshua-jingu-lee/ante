@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import pathlib
 import re
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -166,7 +166,7 @@ def _apply_process_nice(nice_value: int) -> None:
     import os
 
     try:
-        os.setpriority(os.PRIO_PROCESS, 0, nice_value)  # type: ignore[attr-defined]
+        os.setpriority(os.PRIO_PROCESS, 0, nice_value)
     except (PermissionError, OSError, AttributeError, ValueError) as exc:
         logger.warning(
             "프로세스 우선순위(nice=%d) 적용 실패 — 수집은 계속합니다: %s",
@@ -322,8 +322,8 @@ def feed_run() -> None:
 
 
 def _build_orchestrator(
-    cfg,
-):
+    cfg: Any,
+) -> Any:
     """FeedConfig의 API 키를 기반으로 FeedOrchestrator를 조립한다."""
     from ante.feed.pipeline.orchestrator import FeedOrchestrator
     from ante.feed.sources.dart import DARTSource
@@ -360,7 +360,7 @@ _BACKFILL_DATE_ERRORS: dict[str, type[Exception]] = {
 
 
 def _ensure_initialized(
-    cfg,
+    cfg: Any,
     data_path: str,
 ) -> None:
     """초기화 상태를 확인하고 미초기화 시 예외를 던진다."""
@@ -604,8 +604,8 @@ def feed_status(ctx: click.Context, data_path: str | None) -> None:
 def _echo_status_text(
     cfg: object,
     checkpoints: list[dict[str, str]],
-    latest_report: dict | None,
-    api_keys: list[dict],
+    latest_report: dict[str, Any] | None,
+    api_keys: list[dict[str, Any]],
 ) -> None:
     """feed status의 텍스트 출력을 수행한다."""
     click.echo()
@@ -635,7 +635,7 @@ def _echo_checkpoints_section(checkpoints: list[dict[str, str]]) -> None:
         click.echo("  (체크포인트 없음 — 아직 수집을 실행하지 않았습니다)")
 
 
-def _echo_report_section(latest_report: dict | None) -> None:
+def _echo_report_section(latest_report: dict[str, Any] | None) -> None:
     """최근 리포트 섹션을 출력한다."""
     click.echo()
     click.echo("Latest Report")
@@ -661,7 +661,7 @@ def _echo_report_section(latest_report: dict | None) -> None:
         click.echo("  (리포트 없음 — 아직 수집을 실행하지 않았습니다)")
 
 
-def _echo_api_keys_section(api_keys: list[dict]) -> None:
+def _echo_api_keys_section(api_keys: list[dict[str, Any]]) -> None:
     """API 키 섹션을 출력한다."""
     click.echo()
     click.echo("API Keys")
@@ -703,7 +703,7 @@ def _load_checkpoints(feed_dir: pathlib.Path) -> list[dict[str, str]]:
 
 def _load_latest_report(
     report_gen: ReportGenerator,
-) -> dict | None:
+) -> dict[str, Any] | None:
     """최근 리포트 1건을 로드한다."""
     import json
 
