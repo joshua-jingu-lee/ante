@@ -20,16 +20,16 @@ settings.register_profile(
     database=None,
     deadline=None,
     print_blob=True,
-    max_examples=50,
-    stateful_step_count=25,
+    max_examples=200,
+    stateful_step_count=50,
     suppress_health_check=[HealthCheck.too_slow],
 )
 settings.register_profile(
     "dev",
     deadline=None,
     print_blob=True,
-    max_examples=500,
-    stateful_step_count=40,
+    max_examples=2_000,
+    stateful_step_count=50,
     suppress_health_check=[HealthCheck.too_slow],
 )
 settings.load_profile(os.environ.get("ANTE_HYPOTHESIS_PROFILE", "ci"))

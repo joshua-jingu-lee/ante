@@ -35,10 +35,9 @@ import pytest
 from hypothesis import settings
 from hypothesis import strategies as st
 from hypothesis.stateful import (
-    Bundle,
     RuleBasedStateMachine,
+    initialize,
     invariant,
-    multiple,
     precondition,
     rule,
 )
@@ -63,6 +62,14 @@ BOTS = ("bot-a", "bot-b", "bot-c")
 BUY_RATE = 0.00015
 SELL_RATE = 0.00195
 FIELDS = ("allocated", "available", "reserved", "spent", "returned")
+
+# 금액은 원 단위 정수다. 작은 값으로 줄어드는(shrink) 정수를 그대로 쓰면 배분이
+# 몇 원에 머물러 예약이 늘 거부된다. 그래서 계좌·예산 금액은 10만 원 단위로 만든다.
+UNIT = 100_000
+balances = st.integers(0, 1_000).map(lambda n: n * UNIT)
+amounts = st.integers(1, 300).map(lambda n: n * UNIT)
+quantities = st.integers(1, 50)
+prices = st.integers(100, 50_000)
 
 
 def _close(actual: float, expected: float) -> bool:
@@ -111,8 +118,6 @@ class _Order:
 class TreasuryMachine(RuleBasedStateMachine):
     """한 계좌의 Treasury에 예산·주문·체결 연산을 임의 순서로 건다. 재시작은 없다."""
 
-    orders = Bundle("orders")
-
     def __init__(self) -> None:
         super().__init__()
         self._tmp = Path(tempfile.mkdtemp(prefix="ante-prop-treasury-"))
@@ -124,8 +129,12 @@ class TreasuryMachine(RuleBasedStateMachine):
         self.open_orders: dict[str, _Order] = {}
         self.order_bot: dict[str, str] = {}
         self.keyed_fills: list[OrderFilledEvent] = []
+        # 예산 레코드가 있는 봇(모델). 배분 성공으로 생기고 예산 해제로 없어진다.
+        self.funded: set[str] = set()
         # 재시작으로 주문별 예약 표를 잃은 봇(#2770). F3은 이 봇들을 건너뛴다.
         self.reservations_lost: set[str] = set()
+        self.steps = 0
+        self.last_restart = 0
         self._start()
 
     # ── 대역 ────────────────────────────────────────────────────────
@@ -181,47 +190,64 @@ class TreasuryMachine(RuleBasedStateMachine):
 
     # ── 계좌·예산 ───────────────────────────────────────────────────
 
-    @rule(balance=st.integers(0, 100_000_000))
-    def set_account_balance(self, balance: int) -> None:
+    @initialize(balance=st.integers(100, 1_000).map(lambda n: n * UNIT))
+    def opening_balance(self, balance: int) -> None:
         self._run(self.treasury.set_account_balance(float(balance)))
 
-    @rule(cash=st.integers(0, 100_000_000))
-    def sync_balance(self, cash: int) -> None:
-        self._run(self.treasury.sync_balance({"cash": float(cash)}))
+    @rule(cash=balances, via_sync=st.booleans())
+    def account_cash(self, cash: int, via_sync: bool) -> None:
+        """계좌 잔고의 설정, 또는 브로커 잔고 동기화."""
+        if via_sync:
+            self._run(self.treasury.sync_balance({"cash": float(cash)}))
+        else:
+            self._run(self.treasury.set_account_balance(float(cash)))
 
-    @rule(bot=st.sampled_from(BOTS), amount=st.integers(1, 30_000_000))
+    @rule(bot=st.sampled_from(BOTS), amount=amounts)
     def allocate(self, bot: str, amount: int) -> None:
-        self._domain(self.treasury.allocate(bot, float(amount)))
+        if self._domain(self.treasury.allocate(bot, float(amount))):
+            self.funded.add(bot)
 
-    @rule(bot=st.sampled_from(BOTS), amount=st.integers(1, 30_000_000))
+    @rule(bot=st.sampled_from(BOTS), amount=amounts)
     def deallocate(self, bot: str, amount: int) -> None:
         self._domain(self.treasury.deallocate(bot, float(amount)))
 
-    @rule(bot=st.sampled_from(BOTS), goal=st.integers(0, 30_000_000))
+    @rule(bot=st.sampled_from(BOTS), goal=st.integers(0, 300).map(lambda n: n * UNIT))
     def update_budget(self, bot: str, goal: int) -> None:
-        self._domain(self.treasury.update_budget(bot, float(goal)))
+        if self._domain(self.treasury.update_budget(bot, float(goal))) and goal > 0:
+            self.funded.add(bot)
 
-    @rule(bot=st.sampled_from(BOTS))
-    def release_budget(self, bot: str) -> None:
-        self._run(self.treasury.release_budget(bot))
+    @rule(bot=st.sampled_from(BOTS), delete=st.booleans())
+    def bot_stopped_or_deleted(self, bot: str, delete: bool) -> None:
+        """봇 정지(``BotStoppedEvent``) 또는 봇 삭제(``release_budget``).
+
+        한 규칙으로 묶는 이유: hypothesis는 인자가 적은 규칙을 앞에 두고 앞의 규칙을
+        자주 고른다. 따로 두면 주문을 모두 닫는 이 둘이 걸음의 3할을 차지했다.
+        """
+        if delete:
+            self._run(self.treasury.release_budget(bot))
+            self.funded.discard(bot)
+            self.reservations_lost.discard(bot)
+        else:
+            self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
         self._close_bot_orders(bot)
-        self.reservations_lost.discard(bot)
 
     # ── 주문 ────────────────────────────────────────────────────────
 
-    @rule(
-        target=orders,
-        bot=st.sampled_from(BOTS),
-        qty=st.integers(1, 50),
-        price=st.integers(100, 50_000),
-        tracked=st.booleans(),
-    )
-    def reserve_for_order(self, bot: str, qty: int, price: int, tracked: bool) -> Any:
+    @rule(data=st.data(), spec=st.tuples(quantities, prices, st.booleans()))
+    def reserve_for_order(
+        self, data: st.DataObject, spec: tuple[int, int, bool]
+    ) -> None:
+        """매수 주문의 예약. 주문 id는 매번 새로 만든다(같은 id는 예약 표를 덮는다).
+
+        봇은 예산이 있는 봇에서 고른다(없으면 셋 가운데에서 — 예약은 False다).
+        """
+        bot = data.draw(st.sampled_from(sorted(self.funded) or BOTS), "bot")
+        qty, price, tracked = spec
         order_id = f"ord-{next(self._seq)}"
         amount = math.ceil(qty * price * (1 + BUY_RATE))
         ok = self._run(self.treasury.reserve_for_order(bot, order_id, float(amount)))
         if not ok:
-            return multiple()
+            return
         if tracked:
             self._run(
                 self.tracker.open(
@@ -239,7 +265,6 @@ class TreasuryMachine(RuleBasedStateMachine):
             )
         self.open_orders[order_id] = _Order(bot, tracked, qty, price)
         self.order_bot[order_id] = bot
-        return order_id
 
     @precondition(lambda self: bool(self.open_orders))
     @rule(data=st.data())
@@ -281,13 +306,10 @@ class TreasuryMachine(RuleBasedStateMachine):
         if cumulative >= order.qty:
             del self.open_orders[order_id]
 
-    @rule(
-        bot=st.sampled_from(BOTS),
-        qty=st.integers(1, 50),
-        price=st.integers(100, 50_000),
-        keyed=st.booleans(),
-    )
-    def sell_fill(self, bot: str, qty: int, price: int, keyed: bool) -> None:
+    @rule(bot=st.sampled_from(BOTS), spec=st.tuples(quantities, prices, st.booleans()))
+    def sell_fill(self, bot: str, spec: tuple[int, int, bool]) -> None:
+        """매도 체결. 예약이 없다. 키가 있으면 재전달 대상이 된다."""
+        qty, price, keyed = spec
         order_id = f"sell-{next(self._seq)}"
         event = OrderFilledEvent(
             account_id=ACCOUNT_ID,
@@ -303,8 +325,12 @@ class TreasuryMachine(RuleBasedStateMachine):
             order_type="limit",
             fill_dedup_key=f"{order_id}:{qty}" if keyed else "",
         )
+        before = self._budget_values()
         self._publish(event)
-        if keyed:
+        if bot not in self.funded:
+            # 예산 레코드가 없는 봇의 체결은 무시된다(재전달 대상도 아니다).
+            assert self._budget_values() == before, "예산 없는 봇의 체결이 정산됐다"
+        elif keyed:
             self.keyed_fills.append(event)
 
     @precondition(lambda self: bool(self.keyed_fills))
@@ -316,9 +342,11 @@ class TreasuryMachine(RuleBasedStateMachine):
         self._publish(event)
         assert self._budget_values() == before, "재전달이 다시 정산됐다"
 
-    @rule(order_id=orders, failed=st.booleans())
-    def cancel_or_fail(self, order_id: str, failed: bool) -> None:
+    @precondition(lambda self: bool(self.order_bot))
+    @rule(data=st.data(), failed=st.booleans())
+    def cancel_or_fail(self, data: st.DataObject, failed: bool) -> None:
         """주문 취소/실패. 이미 끝난 주문에 늦게 온 이벤트도 포함한다."""
+        order_id = data.draw(st.sampled_from(sorted(self.order_bot)), "order")
         bot = self.order_bot[order_id]
         order = self.open_orders.pop(order_id, None)
         if order is not None and order.tracked:
@@ -326,11 +354,6 @@ class TreasuryMachine(RuleBasedStateMachine):
             self._run(self.tracker.mark_terminal(order_id, status))
         event_type = OrderFailedEvent if failed else OrderCancelledEvent
         self._publish(event_type(account_id=ACCOUNT_ID, order_id=order_id, bot_id=bot))
-
-    @rule(bot=st.sampled_from(BOTS))
-    def bot_stopped(self, bot: str) -> None:
-        self._publish(BotStoppedEvent(account_id=ACCOUNT_ID, bot_id=bot))
-        self._close_bot_orders(bot)
 
     # ── 불변식 ──────────────────────────────────────────────────────
 
@@ -395,6 +418,8 @@ class TreasuryMachine(RuleBasedStateMachine):
     @invariant()
     def e_no_handler_errors(self) -> None:
         assert self.handler_errors == [], f"E: {self.handler_errors}"
+        # 불변식은 매 걸음 뒤에 돈다. 걸음 수는 재시작 규칙의 전제에 쓴다.
+        self.steps += 1
 
 
 class TreasuryRestartMachine(TreasuryMachine):
@@ -405,6 +430,9 @@ class TreasuryRestartMachine(TreasuryMachine):
     ``test_restart_restores_reservations``가 잠근다.
     """
 
+    # 인자 없는 규칙은 hypothesis가 자주 고른다. 전제가 없으면 걸음의 2할이
+    # 재시작이었다.
+    @precondition(lambda self: self.steps - self.last_restart >= 5)
     @rule()
     def restart(self) -> None:
         before = self._budget_values()
@@ -412,6 +440,7 @@ class TreasuryRestartMachine(TreasuryMachine):
         balance = self.treasury.account_balance
         self.reservations_lost |= {o.bot_id for o in self.open_orders.values()}
         self._start()
+        self.last_restart = self.steps
         after = self._budget_values()
         assert after.keys() == before.keys(), "F5: 봇 집합"
         for bot, values in before.items():
