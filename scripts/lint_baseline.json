@@ -358,9 +358,6 @@
       "no-any-return": 2,
       "no-untyped-def": 1,
       "type-arg": 4
-    },
-    "src/ante/trade/order_tracker.py": {
-      "type-arg": 1
     }
   }
 }
