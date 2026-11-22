@@ -113,7 +113,7 @@ def type_name(annotation: Any, metadata: Sequence[Any] = ()) -> str:
     if origin is typing.Literal:
         if not all(isinstance(arg, str) for arg in args):
             raise UnsupportedFieldError(f"unsupported literal: {annotation!r}")
-        return "Literal[" + ", ".join(json.dumps(arg) for arg in args) + "]"
+        return "Literal[" + ", ".join(_literal(json.dumps(arg)) for arg in args) + "]"
     if origin is list and len(args) == 1:
         return f"list[{type_name(args[0])}]"
     if origin is dict and len(args) == 2:
@@ -142,9 +142,17 @@ def _default(info: FieldInfo) -> str:
             raise UnsupportedFieldError(f"unsupported default_factory: {factory!r}")
         return f"{factory.__name__}()"
     try:
-        return json.dumps(info.default, ensure_ascii=False)
+        text = json.dumps(info.default, ensure_ascii=False)
     except TypeError as exc:
         raise UnsupportedFieldError(f"unsupported default: {info.default!r}") from exc
+    return _literal(text)
+
+
+def _literal(text: str) -> str:
+    """기본값·``Literal`` 값의 표기. 코드 칸을 깨는 문자는 실패한다."""
+    if any(mark in text for mark in ("`", "\\n", "\\r", "\n", "\r")):
+        raise UnsupportedFieldError(f"unsupported literal text: {text!r}")
+    return text
 
 
 def _escape(text: str) -> str:
@@ -153,6 +161,8 @@ def _escape(text: str) -> str:
 
 def field_cell(name: str, info: FieldInfo) -> str:
     """요청 필드 하나의 표기. 비밀값 필드는 기본값을 싣지 않는다."""
+    if info.alias is not None or info.validation_alias is not None:
+        raise UnsupportedFieldError(f"unsupported alias: {name}")
     declared = f"{name}: {type_name(info.annotation, info.metadata)}"
     if info.is_required():
         return _escape(f"`{declared}` (필수)")
@@ -161,7 +171,17 @@ def field_cell(name: str, info: FieldInfo) -> str:
     return _escape(f"`{declared} = {_default(info)}`")
 
 
-def _fields_cell(model: type) -> str:
+def _check_model(model: Any) -> None:
+    decorators = model.__pydantic_decorators__
+    if decorators.field_validators or decorators.model_validators:
+        raise UnsupportedFieldError(f"unsupported validator: {model.__name__}")
+    if model.model_config.get("extra") != "forbid":
+        raise UnsupportedFieldError(f"unsupported extra: {model.__name__}")
+
+
+def fields_cell(model: type) -> str:
+    """모델 하나의 요청 필드 칸. 규칙 밖의 모델 설정·검증기는 실패한다."""
+    _check_model(model)
     cells = [field_cell(name, info) for name, info in model.model_fields.items()]
     return "<br>".join(cells) if cells else "—"
 
@@ -210,6 +230,7 @@ def render(specs: Iterable[Any], contracts: Iterable[Any]) -> str:
             path = "ante " + " ".join(contract.path)
             paths.setdefault(contract.ipc_command, []).append(path)
     mutating = sum(1 for spec in ordered if spec.is_mutating)
+    unpathed = [spec.name for spec in ordered if spec.name not in paths]
     lines = [
         "# Ante IPC Commands",
         "",
@@ -226,10 +247,15 @@ def render(specs: Iterable[Any], contracts: Iterable[Any]) -> str:
         f"- 명령: **{len(ordered)}**개 "
         f"(mutating **{mutating}** / read-only **{len(ordered) - mutating}**)",
         "",
+        "분류·`required_services`·`audit_action`·요청 모델은 등록에서, CLI 경로는 "
+        "CLI 계약에서 그 명령을 `ipc_command`로 가진 경로에서 얻습니다. 그런 경로가 "
+        f"없는 등록 명령({_code_list(unpathed)})을 어느 CLI 경로가 보내는지는 "
+        "[ipc.md](../../specs/ipc/ipc.md)의 런타임 커맨드 전수 목록에서 봅니다.",
+        "",
         "## 명령",
         "",
         "| IPC 명령 | 분류 | `required_services` | `audit_action` "
-        "| 요청 모델 | 요청 필드 | CLI 경로 |",
+        "| 요청 모델 | 요청 필드 | CLI 경로(계약의 `ipc_command`) |",
         "|---|---|---|---|---|---|---|",
     ]
     for spec in ordered:
@@ -241,7 +267,7 @@ def render(specs: Iterable[Any], contracts: Iterable[Any]) -> str:
             _code_list(spec.required_services),
             audit,
             f"`{spec.request_model.__name__}`",
-            _fields_cell(spec.request_model),
+            fields_cell(spec.request_model),
             _code_list(paths.get(spec.name, [])),
         ]
         lines.append("| " + " | ".join(cells) + " |")
@@ -254,7 +280,7 @@ def render(specs: Iterable[Any], contracts: Iterable[Any]) -> str:
     ]
     nested = nested_models(spec.request_model for spec in ordered)
     for model in sorted(nested, key=lambda model: model.__name__):
-        lines.append(f"| `{model.__name__}` | {_fields_cell(model)} |")
+        lines.append(f"| `{model.__name__}` | {fields_cell(model)} |")
     return "\n".join(lines) + "\n"
 
 

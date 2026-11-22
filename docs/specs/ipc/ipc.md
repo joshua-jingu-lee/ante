@@ -267,9 +267,11 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-등록된 명령마다의 taxonomy(`is_mutating`)와 `required_services`, `audit_action`, 요청 모델의
-필드, 그 명령을 보내는 CLI 경로는 `register_all_handlers()`의 등록이 정본이고, 레지스트리에서
-생성한 [ipc-commands.md](../../architecture/generated/ipc-commands.md)에서 본다. 새 handler의
+등록된 명령마다의 taxonomy(`is_mutating`)와 `required_services`, `audit_action`, 요청 모델과
+그 필드는 `register_all_handlers()`의 등록이 정본이고, 생성 문서
+[ipc-commands.md](../../architecture/generated/ipc-commands.md)에서 본다. 생성 문서의 CLI 경로
+열은 CLI 계약에서 그 명령을 `ipc_command`로 가진 경로다(CLI가 옵션에 따라 보내는 다른 명령은 위
+런타임 커맨드 전수 목록을 본다). 새 handler의
 `is_mutating`은 위 정의로 정하고, 생성 문서는 `scripts/generate_ipc_commands.py`로 다시 만든다
 (CI가 `--check`로 대조한다).
 

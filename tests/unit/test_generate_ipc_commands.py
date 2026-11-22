@@ -14,7 +14,14 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import pytest
-from pydantic import AfterValidator, Field, SecretStr
+from pydantic import (
+    AfterValidator,
+    ConfigDict,
+    Field,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 
 from ante.contracts.cli_registry import all_contracts
 from ante.ipc.registry import CommandRegistry, register_all_handlers
@@ -72,6 +79,44 @@ class _Tuple(IPCRequest):
     value: tuple[str, ...] = ()
 
 
+class _Backtick(IPCRequest):
+    value: str = "a`b"
+
+
+class _Newline(IPCRequest):
+    value: str = "a\nb"
+
+
+class _BacktickLiteral(IPCRequest):
+    value: Literal["a`b"] = "a`b"
+
+
+class _Alias(IPCRequest):
+    value: str = Field(default="", alias="other")
+
+
+class _FieldValidator(IPCRequest):
+    value: str = ""
+
+    @field_validator("value")
+    @classmethod
+    def _keep(cls, v: str) -> str:
+        return v
+
+
+class _ModelValidator(IPCRequest):
+    value: str = ""
+
+    @model_validator(mode="after")
+    def _keep(self) -> _ModelValidator:
+        return self
+
+
+class _ExtraAllow(IPCRequest):
+    model_config = ConfigDict(extra="allow")
+    value: str = ""
+
+
 EXPECTED_CELLS = [
     ("plain", "`plain: str` (필수)"),
     ("number", "`number: int = 60`"),
@@ -109,11 +154,25 @@ def test_secret_default_is_not_rendered() -> None:
 
 @pytest.mark.parametrize(
     ("model", "name"),
-    [(_UnknownValidator, "value"), (_Constrained, "value"), (_Tuple, "value")],
+    [
+        (_UnknownValidator, "value"),
+        (_Constrained, "value"),
+        (_Tuple, "value"),
+        (_Backtick, "value"),
+        (_Newline, "value"),
+        (_BacktickLiteral, "value"),
+        (_Alias, "value"),
+    ],
 )
 def test_unsupported_field_fails(model: type[IPCRequest], name: str) -> None:
     with pytest.raises(gen.UnsupportedFieldError):
         gen.field_cell(name, model.model_fields[name])
+
+
+@pytest.mark.parametrize("model", [_FieldValidator, _ModelValidator, _ExtraAllow])
+def test_unsupported_model_fails(model: type[IPCRequest]) -> None:
+    with pytest.raises(gen.UnsupportedFieldError):
+        gen.fields_cell(model)
 
 
 def test_nested_models_are_listed_once() -> None:
@@ -137,6 +196,22 @@ def test_rows_match_registered_commands() -> None:
     assert len(nested_models) > 0
     assert len(nested_rows) == len(nested_models)
     assert len(command_rows) == len(specs)
+
+
+def test_committed_document_is_current() -> None:
+    committed = gen.DEFAULT_OUTPUT.read_text(encoding="utf-8")
+    assert gen.render_ipc_commands() == committed
+
+
+def test_unpathed_commands_are_named_in_the_preamble() -> None:
+    specs = _real_specs()
+    contracts = list(all_contracts())
+    named = {contract.ipc_command for contract in contracts}
+    unpathed = sorted(spec.name for spec in specs if spec.name not in named)
+    assert unpathed
+    preamble = gen.render(specs, contracts).split("\n## 명령\n")[0]
+    expected = ", ".join(f"`{name}`" for name in unpathed)
+    assert f"없는 등록 명령({expected})" in preamble
 
 
 def test_render_is_independent_of_registration_order() -> None:

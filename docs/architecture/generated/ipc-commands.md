@@ -9,9 +9,11 @@
 
 - 명령: **42**개 (mutating **32** / read-only **10**)
 
+분류·`required_services`·`audit_action`·요청 모델은 등록에서, CLI 경로는 CLI 계약에서 그 명령을 `ipc_command`로 가진 경로에서 얻습니다. 그런 경로가 없는 등록 명령(`bot.signal_key.rotate`, `signal.connect`)을 어느 CLI 경로가 보내는지는 [ipc.md](../../specs/ipc/ipc.md)의 런타임 커맨드 전수 목록에서 봅니다.
+
 ## 명령
 
-| IPC 명령 | 분류 | `required_services` | `audit_action` | 요청 모델 | 요청 필드 | CLI 경로 |
+| IPC 명령 | 분류 | `required_services` | `audit_action` | 요청 모델 | 요청 필드 | CLI 경로(계약의 `ipc_command`) |
 |---|---|---|---|---|---|---|
 | `account.activate` | mutating | `account`, `audit_logger` | `account.activate` | `AccountActivateRequest` | `account_id: AccountId` (필수) | `ante account activate` |
 | `account.suspend` | mutating | `account`, `audit_logger` | `account.suspend` | `AccountSuspendRequest` | `account_id: AccountId` (필수)<br>`reason: str = "IPC suspend"` | `ante account suspend` |
