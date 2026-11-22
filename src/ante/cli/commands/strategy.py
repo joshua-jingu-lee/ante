@@ -24,6 +24,11 @@ from ante.contracts.cli_errors import (
 )
 from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
 from ante.contracts.helpers import error_spec_for_exception
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.core.database import OperationalError
 from ante.strategy.exceptions import (
     StrategyError,
@@ -352,7 +357,12 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
 
     try:
         result = _run(_set_status())
-    except click.ClickException:
+    except (
+        click.ClickException,
+        IPCServerNotRunningError,
+        IPCClientTimeoutError,
+        IPCRemoteError,
+    ):
         raise
     except ValueError as e:
         raise StrategyInvalidStatusTransitionError(str(e)) from e

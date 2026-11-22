@@ -330,12 +330,7 @@ def order_history(
                 "broker.order_history", validated_account_id, actor, extra=extra
             )
         )
-    except click.ClickException as e:
-        if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
-            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-            message = getattr(e, "ipc_error_message", None) or e.message
-            fmt.error(message if fmt.is_json else f"{code}: {message}", code=code)
-            raise SystemExit(1) from e
+    except IPCServerNotRunningError:
 
         async def _run_order_history() -> list[dict[str, Any]]:
             from ante.core.time import iso_to_kis_date

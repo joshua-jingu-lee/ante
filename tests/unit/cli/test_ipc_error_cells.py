@@ -115,14 +115,14 @@ _CELLS = [
         IPCServerNotRunningError(_SERVER_DOWN),
         "IPC_SERVER_NOT_RUNNING",
         _SERVER_DOWN,
-        f"Error: {_SERVER_DOWN}",
+        f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}",
         id="server-down",
     ),
     pytest.param(
         IPCClientTimeoutError(_TIMEOUT),
         "IPC_TIMEOUT",
         _TIMEOUT,
-        f"Error: {_TIMEOUT}",
+        f"Error: IPC_TIMEOUT: {_TIMEOUT}",
         id="timeout",
     ),
     pytest.param(
@@ -209,12 +209,12 @@ def _empty_cells() -> list[Any]:
     for name, argv in _RESTORED_COMMANDS:
         cells.append(pytest.param(argv, "json", f"{_EMPTY}: ", id=f"{name}-json"))
         cells.append(
-            pytest.param(
-                argv, "text", f"Error: {_EMPTY}: {_EMPTY}: ", id=f"{name}-text"
-            )
+            pytest.param(argv, "text", f"Error: {_EMPTY}: ", id=f"{name}-text")
         )
     cells.append(
-        pytest.param(("config", "set", "k", "v"), "json", "", id="config-set-json")
+        pytest.param(
+            ("config", "set", "k", "v"), "json", f"{_EMPTY}: ", id="config-set-json"
+        )
     )
     cells.append(
         pytest.param(

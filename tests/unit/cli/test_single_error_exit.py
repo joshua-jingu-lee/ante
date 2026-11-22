@@ -30,7 +30,11 @@ from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
 from ante.contracts.cli_errors import CliMissingRequiredInputError
-from ante.contracts.ipc_client_errors import IPCRemoteError
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit.ipc.request_fixtures import NoArgsRequest
 
@@ -735,8 +739,8 @@ def test_registry_entries_have_same_code_on_cli_and_ipc(
 def test_registry_entries_text_mode(monkeypatch: pytest.MonkeyPatch) -> None:
     """레지스트리 항목 전부를 text 모드로: stderr 한 줄, stdout 비움, 항목의 exit.
 
-    Click 예외인 항목(IPC 클라이언트 예외)은 text 모드에서 Click 기본 출력
-    ``Error: <message>``로 끝난다.
+    Click 예외인 항목은 text 모드에서 Click 기본 출력 ``Error: <message>``로
+    끝난다.
     """
     from ante.contracts.error_registry import EXCEPTION_TO_SPEC
 
@@ -775,18 +779,39 @@ class TestIpcSendTypedExceptions:
             ipc_helpers, "get_socket_path", lambda config_dir=None: "/x.sock"
         )
         monkeypatch.setattr(ipc_helpers.IPCClient, "send", AsyncMock(**send))
-        with pytest.raises(click.ClickException) as info:
+        with pytest.raises(
+            (IPCServerNotRunningError, IPCClientTimeoutError, IPCRemoteError)
+        ) as info:
             asyncio.run(ipc_helpers.ipc_send("bot.list", {}))
         return info.value
+
+    @pytest.mark.parametrize(
+        "cls", [IPCServerNotRunningError, IPCClientTimeoutError, IPCRemoteError]
+    )
+    def test_client_errors_are_not_click_exceptions(self, cls: type) -> None:
+        assert issubclass(cls, Exception)
+        assert not issubclass(cls, click.ClickException)
+
+    @pytest.mark.parametrize(
+        ("message", "text"),
+        [
+            pytest.param("봇 없음", "봇 없음", id="message"),
+            pytest.param("", "BOT_NOT_FOUND: ", id="empty"),
+        ],
+    )
+    def test_remote_error_text_is_the_remote_message(
+        self, message: str, text: str
+    ) -> None:
+        exc = IPCRemoteError("BOT_NOT_FOUND", message)
+        assert (exc.code, exc.message, str(exc)) == ("BOT_NOT_FOUND", message, text)
 
     def test_server_not_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from ante.ipc.exceptions import ServerNotRunningError
 
         exc = self._send(monkeypatch, side_effect=ServerNotRunningError("gone"))
         assert type(exc).__name__ == "IPCServerNotRunningError"
-        assert (exc.ipc_error_code, exc.ipc_error_message, exc.message) == (  # type: ignore[attr-defined]
+        assert (exc.code, str(exc)) == (
             "IPC_SERVER_NOT_RUNNING",
-            "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요.",
             "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요.",
         )
 
@@ -795,11 +820,7 @@ class TestIpcSendTypedExceptions:
 
         exc = self._send(monkeypatch, side_effect=IPCTimeoutError("slow"))
         assert type(exc).__name__ == "IPCClientTimeoutError"
-        assert (exc.ipc_error_code, exc.ipc_error_message, exc.message) == (  # type: ignore[attr-defined]
-            "IPC_TIMEOUT",
-            "서버 응답 시간 초과",
-            "서버 응답 시간 초과",
-        )
+        assert (exc.code, str(exc)) == ("IPC_TIMEOUT", "서버 응답 시간 초과")
 
     @pytest.mark.parametrize(
         ("error", "code", "message"),
@@ -822,12 +843,8 @@ class TestIpcSendTypedExceptions:
     ) -> None:
         exc = self._send(monkeypatch, return_value={"status": "error", "error": error})
         assert type(exc).__name__ == "IPCRemoteError"
-        assert (exc.code, exc.ipc_error_code, exc.ipc_error_message, exc.message) == (  # type: ignore[attr-defined]
-            code,
-            code,
-            message,
-            f"{code}: {message}",
-        )
+        assert isinstance(exc, IPCRemoteError)
+        assert (exc.code, exc.message, str(exc)) == (code, message, message)
 
     @pytest.mark.parametrize(
         ("name", "spec"),

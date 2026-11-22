@@ -334,14 +334,18 @@ def test_server_down_falls_back_to_a_direct_connection(name: str, mode: str) -> 
 
 _REFUSALS = ("circuit", "rate", "timeout")
 _HOOK_ERRORS = {
-    "down": ("IPC_SERVER_NOT_RUNNING", _SERVER_DOWN, f"Error: {_SERVER_DOWN}"),
+    "down": (
+        "IPC_SERVER_NOT_RUNNING",
+        _SERVER_DOWN,
+        f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}",
+    ),
     "circuit": (
         "BROKER_CIRCUIT_OPEN",
         _CIRCUIT,
         f"Error: BROKER_CIRCUIT_OPEN: {_CIRCUIT}",
     ),
     "rate": ("BROKER_RATE_LIMITED", _RATE, f"Error: BROKER_RATE_LIMITED: {_RATE}"),
-    "timeout": ("IPC_TIMEOUT", _TIMEOUT, f"Error: {_TIMEOUT}"),
+    "timeout": ("IPC_TIMEOUT", _TIMEOUT, f"Error: IPC_TIMEOUT: {_TIMEOUT}"),
 }
 
 

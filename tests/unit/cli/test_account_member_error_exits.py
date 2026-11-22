@@ -465,14 +465,14 @@ _ACCOUNT_IPC = [
             IPCServerNotRunningError(_SERVER_DOWN),
             "IPC_SERVER_NOT_RUNNING",
             _SERVER_DOWN,
-            f"Error: {_SERVER_DOWN}",
+            f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}",
             id="down",
         ),
         pytest.param(
             IPCClientTimeoutError(_TIMEOUT),
             "IPC_TIMEOUT",
             _TIMEOUT,
-            f"Error: {_TIMEOUT}",
+            f"Error: IPC_TIMEOUT: {_TIMEOUT}",
             id="timeout",
         ),
         pytest.param(
@@ -945,14 +945,14 @@ _IPC_ERRORS = [
         IPCServerNotRunningError(_SERVER_DOWN),
         "IPC_SERVER_NOT_RUNNING",
         _SERVER_DOWN,
-        f"Error: {_SERVER_DOWN}",
+        f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}",
         id="down",
     ),
     pytest.param(
         IPCClientTimeoutError(_TIMEOUT),
         "IPC_TIMEOUT",
         _TIMEOUT,
-        f"Error: {_TIMEOUT}",
+        f"Error: IPC_TIMEOUT: {_TIMEOUT}",
         id="timeout",
     ),
     pytest.param(
