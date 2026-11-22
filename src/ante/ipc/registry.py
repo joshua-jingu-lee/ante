@@ -1134,10 +1134,10 @@ async def _handle_broker_reconcile(
 def register_all_handlers(registry: CommandRegistry) -> None:
     """런타임 커맨드 핸들러를 일괄 등록.
 
-    각 핸들러는 mutating 또는 read-only로 분류된다. 등록 값은
-    ``scripts/generate_ipc_commands.py``가 ``docs/architecture/generated/``
-    ``ipc-commands.md``로 생성한다. mutating 명령은 ``IPCServer``가
-    ``SHUTTING_DOWN`` 상태일 때 ``SERVICE_UNAVAILABLE``로 거부된다.
+    각 핸들러는 mutating 또는 read-only로 분류된다. 등록 값은 생성기가
+    ``docs/architecture/generated/ipc-commands.md``로 만든다. mutating 명령은
+    ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때 ``SERVICE_UNAVAILABLE``로
+    거부된다.
 
     `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.

@@ -98,11 +98,13 @@ DEFAULT_DESCRIPTIONS: dict[str, str] = {
     "deploy": "서비스 배포 파일 (systemd, launchd)",
     "docker-compose.yml": "프로덕션 Docker Compose",
     "docs": "설계 문서",
+    "docs/architecture/generated/ipc-commands.md": "IPC 명령과 요청 모델 목록",
     "frontend": "React 대시보드 (Vite + TypeScript)",
     "guide": "사용자·운용 가이드 문서",
     "scripts": "설치·운영·문서 생성 스크립트",
     "scripts/check_import_path.py": "현재 worktree import sanity check",
     "scripts/generate_db_schema.py": "DB 스키마 문서 자동 생성",
+    "scripts/generate_ipc_commands.py": "IPC 명령 문서 자동 생성",
     "scripts/generate_project_structure.py": "프로젝트 구조 Agent INDEX 생성/check",
     "src/ante": "Python 백엔드 패키지",
     "src/ante/cli/commands/approval.py": (

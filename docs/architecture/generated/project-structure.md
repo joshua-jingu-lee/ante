@@ -370,7 +370,7 @@ scripts/
 ├── entry_ratchet_baseline.json
 ├── generate_cli_reference.py         # CLI 레퍼런스 문서 자동 생성 (Click introspection)
 ├── generate_db_schema.py             # DB 스키마 문서 자동 생성
-├── generate_ipc_commands.py
+├── generate_ipc_commands.py          # IPC 명령 문서 자동 생성
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── import_baseline.json
 ├── install-service.sh                # OS 감지 후 systemd/launchd 서비스 설치
@@ -388,7 +388,7 @@ docs/
 ├── architecture/                     # 시스템 아키텍처 문서 묶음
 │   ├── generated/                    # 소스에서 생성된 문서
 │   │   ├── db-schema.md              # SQLite 스키마 전체 목록
-│   │   ├── ipc-commands.md
+│   │   ├── ipc-commands.md           # IPC 명령과 요청 모델 목록
 │   │   └── project-structure.md      # 이 문서 — 프로젝트 디렉토리 구조
 │   ├── module-map.md                 # 모듈 책임, 확장성, 배포 산출물
 │   ├── README.md                     # 아키텍처 인덱스 + 기술 스택
