@@ -456,3 +456,20 @@ def test_status_fallback_broker_error_is_reported_in_the_result(mode: str) -> No
         {"connected": False, "healthy": False, "error": _RATE},
         ["  연결 상태  : 미연결", "  건강 상태  : 이상", f"  오류       : {_RATE}"],
     )
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_reconcile_fix_unexpected_error_is_an_execution_error(mode: str) -> None:
+    harness = _Harness(RuntimeError("소켓 경로를 읽지 못했다"), None)
+
+    result = _invoke(mode, "reconcile-fix", harness)
+
+    _assert_ipc_request("reconcile-fix", harness)
+    assert harness.direct_calls == []
+    _assert_error(
+        mode,
+        result,
+        "EXECUTION_ERROR",
+        "소켓 경로를 읽지 못했다",
+        "Error: 소켓 경로를 읽지 못했다",
+    )
