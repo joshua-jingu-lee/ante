@@ -163,7 +163,7 @@ def test_register_all_handlers_taxonomy() -> None:
     """등록된 42개 핸들러의 mutating/read-only taxonomy가 스펙과 일치한다.
 
     Refs #1712: ``bot.start`` / ``bot.stop`` mutating, ``bot.status``
-    read-only — ``docs/specs/ipc/ipc.md`` Handler taxonomy SSOT 와 동기화.
+    read-only — 생성 문서 ``docs/architecture/generated/ipc-commands.md`` 와 같은 값.
 
     Refs #2111: ``bot.signal_key.rotate`` mutating 추가.
 

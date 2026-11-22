@@ -78,16 +78,16 @@ CLI 명령 시그니처와 전체 실행 분류의 SSOT는
 | CLI 커맨드 | IPC 커맨드 | 서비스 메서드 | IPC 필요 사유 |
 |-----------|-----------|-------------|-------------|
 | `ante bot create` | `bot.create` | `BotManager.create_bot()` | 등록된 `strategy_id`를 서버 StrategyRegistry에서 해석하고 BotManager 인메모리 `_bots` 반영 필요 |
-| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 |
-| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 |
+| `ante bot start <bot_id>` | `bot.start` | `BotManager.get_bot()` + `account_service.get()` + `BotManager.start_bot()` | live 봇 존재 확인 + `app_key` credential preflight + asyncio task 생성 + `BotStartedEvent` 발행. 성공 시 audit `bot.start` 기록 (#1712) |
+| `ante bot stop <bot_id>` | `bot.stop` | `BotManager.get_bot()` + `BotManager.stop_bot()` | live 봇 존재 확인 + 실행 task 취소 + `BotStoppedEvent` 발행. 성공 시 audit `bot.stop` 기록 (#1712) |
 | `ante bot update <bot_id>` | `bot.update` | `BotManager.update_bot()` | 중지 상태 봇 설정을 서버 BotManager 기준으로 갱신 |
-| `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 |
-| `ante bot list [--account]` | `bot.list` | `BotManager.list_bots()` (read-only) | live 봇 목록 조회. `--account` 필터 후 CLI 6-key(`bot_id`/`name`/`strategy_id`/`account_id`/`status`/`created_at`) projection. 서버 정지 시 snapshot DB fallback |
+| `ante bot status <bot_id>` | `bot.status` | `BotManager.get_bot()` (read-only) | live 조회. 응답은 `{"bot": info}` envelope이며 `strategy_registry`/`treasury_manager`/`trade_service`가 있는 경우 strategy/budget/positions를 동적으로 보강 (#1712) |
+| `ante bot list [--account]` | `bot.list` | `BotManager.list_bots()` (read-only) | live 봇 목록 조회. `--account` 필터 후 CLI 6-key(`bot_id`/`name`/`strategy_id`/`account_id`/`status`/`created_at`) projection, `{"bots": [...]}` envelope. 서버 정지 시 snapshot DB fallback |
 | `ante bot info <bot_id>` | `bot.info` | `BotManager.get_bot()` (read-only) | live 봇 상세 조회. `{"bot": info}` envelope. 서버 정지 시 snapshot DB fallback |
-| `ante bot positions <bot_id>` | `bot.positions` | `BotManager.get_bot()` + `TradeService.get_positions()` (read-only) | live 포지션 조회. 봇 계좌로 스코핑(#2137). `trade_service` 부재(legacy registry) 시 빈 collection graceful. 서버 정지 시 snapshot DB fallback |
+| `ante bot positions <bot_id>` | `bot.positions` | `BotManager.get_bot()` + `TradeService.get_positions()` (read-only) | live 포지션 조회. 봇 계좌로 스코핑(#2137). `{"positions": [...]}` envelope. `trade_service` 부재(legacy registry) 시 빈 collection graceful. 서버 정지 시 snapshot DB fallback |
 | `ante bot signal-key <bot_id>` | `bot.signal_key` | `BotManager.get_signal_key()` (read-only) | live 시그널 키 조회. `{bot_id, signal_key}` (None 허용). `--rotate`(`bot.signal_key.rotate`, mutating)와 별개 read command. 서버 정지 시 snapshot DB fallback |
 | `ante bot remove` | `bot.remove` (server running) / cold-path cleanup (server stopped) | `BotManager.remove_bot()` / `cold_path_remove_bot()` | 실행 중에는 봇 중지, EventBus 구독 해제, signal key 회수, 인메모리 제거 필요. 서버 정지 중에는 persisted cleanup만 수행 |
-| `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 |
+| `ante bot signal-key --rotate` | `bot.signal_key.rotate` | `BotManager.rotate_signal_key()` | 기존 signal channel 즉시 차단 + 새 key 발급 (#2111) |
 
 `bot.start`/`bot.stop`은 mutating, `bot.status`는 read-only다. 세 명령 모두 다음 stable
 error code를 사용한다.
@@ -153,7 +153,7 @@ cold-path 삭제는 항상 keep 의미다.
 | `ante broker status` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
 | `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
 | `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
-| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다(#2412) |
+| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다. 응답은 `{"orders": [...]}` envelope. CLI를 거치지 않는 직접 호출의 잘못된 ISO 날짜는 요청 모델이 `VALIDATION_ERROR`로 거부한다(#2412) |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의
@@ -184,7 +184,7 @@ preflight를 재사용한다(`validate_signal_key`는 #2334에서 신설되는 `
 |-----------|-----------|-------------|-------------|
 | `ante member register` | `member.register` | `MemberService.register()` | 토큰 발급 + 감사 로그 + member 알림 |
 | `ante member set-emoji` | `member.set_emoji` | `MemberService.update_emoji()` | 런타임 member cache/API 응답 일관성 |
-| `ante member suspend` | `member.suspend` | `MemberService.suspend()` | 기존 세션 무효화 + 보안 알림 |
+| `ante member suspend` | `member.suspend` | `MemberService.suspend()` | 기존 세션 무효화 + 보안 알림. 정지를 요청한 actor가 master가 아니면 서비스가 거부한다(#2113) |
 | `ante member reactivate` | `member.reactivate` | `MemberService.reactivate()` | 인증 상태 변경을 런타임 API에 즉시 반영 |
 | `ante member revoke` | `member.revoke` | `MemberService.revoke()` | 토큰 해시 삭제 + 세션 무효화 + 되돌릴 수 없는 감사 이벤트 |
 | `ante member rotate-token` | `member.rotate_token` | `MemberService.rotate_token()` | 기존 토큰 즉시 무효화 + 새 토큰 1회 반환 |
@@ -267,54 +267,11 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
 - **read-only**: 서버가 보유한 live adapter를 통해 상태를 조회하지만 서버/DB 상태를
   변경하지 않는 명령
 
-현재 `CommandRegistry.register_all_handlers()`에 등록된 IPC handler taxonomy는 아래 42개가
-SSOT다(mutating 32 / read-only 10). 새 handler를 추가할 때는 코드의 `is_mutating` 값과 이
-표를 함께 갱신해야 한다.
-
-| IPC 커맨드 | taxonomy | 근거 |
-|-----------|----------|------|
-| `system.halt` | mutating | `AccountService.suspend_all()` 호출 |
-| `system.clear_halt` | mutating | `AccountService.activate_all()` 호출 |
-| `account.suspend` | mutating | `AccountService.suspend()` 호출 |
-| `account.activate` | mutating | `AccountService.activate()` 호출 |
-| `bot.create` | mutating | `BotManager.create_bot()` 호출 |
-| `bot.remove` | mutating | `BotManager.remove_bot()` 호출 |
-| `bot.start` | mutating | `BotManager.start_bot()` 호출. `app_key` preflight + audit `bot.start` (#1712) |
-| `bot.stop` | mutating | `BotManager.stop_bot()` 호출. audit `bot.stop` (#1712) |
-| `bot.update` | mutating | `BotManager.update_bot()` 호출 |
-| `bot.signal_key.rotate` | mutating | `BotManager.rotate_signal_key()` 호출. 기존 signal key 폐기 + 새 key 발급, audit `bot.signal_key.rotate` (#2111) |
-| `treasury.allocate` | mutating | `Treasury.allocate()` 호출 |
-| `treasury.deallocate` | mutating | `Treasury.deallocate()` 호출 |
-| `treasury.set_balance` | mutating | `Treasury.set_account_balance()` 호출 |
-| `rule.update` | mutating | DynamicConfig 기반 계좌 룰 수정 |
-| `strategy.set_status` | mutating | `StrategyRegistry.update_status()` 호출 |
-| `member.update_scopes` | mutating | `MemberService.update_scopes()` 호출 |
-| `member.register` | mutating | `MemberService.register()` 호출. 토큰 발급 + 감사 로그. 발급 토큰은 result 에만 surface (#2113) |
-| `member.set_emoji` | mutating | `MemberService.update_emoji()` 호출 (#2113) |
-| `member.suspend` | mutating | `MemberService.suspend()` 호출. master 게이트 + 세션 무효화 (#2113) |
-| `member.reactivate` | mutating | `MemberService.reactivate()` 호출 (#2113) |
-| `member.revoke` | mutating | `MemberService.revoke()` 호출. 토큰 해시 삭제 (#2113) |
-| `member.rotate_token` | mutating | `MemberService.rotate_token()` 호출. 새 토큰은 result 에만 surface (#2113) |
-| `member.reset_password` | mutating | auth-exempt. master-lookup 을 handler 에서 수행, audit member_id 는 고정 sentinel. secret 은 result/audit/log 비노출 (#2113) |
-| `member.regenerate_recovery_key` | mutating | auth-exempt. 새 recovery key 는 result 에만 surface (#2113) |
-| `config.set` | mutating | `DynamicConfigService.set()` 호출 |
-| `approval.request` | mutating | `ApprovalService.create()` 호출 |
-| `approval.approve` | mutating | `ApprovalService.approve()` 호출 |
-| `approval.reject` | mutating | `ApprovalService.reject()` 호출 |
-| `approval.cancel` | mutating | `ApprovalService.cancel()` 호출 |
-| `approval.cancel_invalid` | mutating | `ApprovalService.cancel_invalid_type_request()` 호출 + AuditLogger 기록 (#1472) |
-| `approval.reopen` | mutating | `ApprovalService.reopen()` 호출 |
-| `broker.reconcile` | mutating | `PositionReconciler.reconcile()`이 보정/이벤트 경로를 수행 |
-| `broker.status` | read-only | `BrokerAdapter.health_check()` live 조회 |
-| `broker.balance` | read-only | `BrokerAdapter.get_account_balance()` live 조회 |
-| `broker.positions` | read-only | `BrokerAdapter.get_positions()` live 조회 |
-| `broker.order_history` | read-only | `BrokerAdapter.get_order_history()` live 조회. `{orders: [...]}` envelope. `from_date`/`to_date`는 ISO `YYYY-MM-DD`이며 핸들러가 압축 `YYYYMMDD`로 변환한다 — invalid ISO는 `VALIDATION_ERROR`로 fail-closed 거부(CLI 우회 직접 호출 방어). `audit_action` 없음(read-only) (#2412) |
-| `bot.status` | read-only | `BotManager.get_bot()` live 조회. `{bot: ...}` envelope (#1712) |
-| `bot.list` | read-only | `BotManager.list_bots()` live 조회. `--account` 필터 + CLI 6-key projection, `{bots: [...]}` envelope (#2112) |
-| `bot.info` | read-only | `BotManager.get_bot()` live 조회. `{bot: info}` envelope (#2112) |
-| `bot.positions` | read-only | `BotManager.get_bot()` 존재확인 + `TradeService.get_positions()` 봇 계좌 스코핑(#2137). `{positions: [...]}` envelope (#2112) |
-| `bot.signal_key` | read-only | `BotManager.get_signal_key()` live 조회. `{bot_id, signal_key}` (None 허용). `bot.signal_key.rotate`(mutating)와 별개 read command (#2112) |
-| `signal.connect` | read-only | 핸드셰이크는 `BotManager.validate_signal_key()` + `BotManager.get_bot()` 4-게이트 LIVE 검증만 수행하고 서버/DB 상태를 변경하지 않음. 통과 시 동일 연결을 데몬-resident `SignalChannel` 양방향 스트림으로 connection-upgrade(`_dispatch` 외부). `is_mutating=False`, `audit_action=None`(자동 발화 끔 — 핸들러가 4-게이트 통과 직후 직접 1회만 기록, per-signal 금지) (#2334) |
+등록된 명령마다의 taxonomy(`is_mutating`)와 `required_services`, `audit_action`, 요청 모델의
+필드, 그 명령을 보내는 CLI 경로는 레지스트리에서 생성한
+[ipc-commands.md](../../architecture/generated/ipc-commands.md)가 정본이다. 새 handler의
+`is_mutating`은 위 정의로 정하고, 생성 문서는 `scripts/generate_ipc_commands.py`로 다시 만든다
+(CI가 `--check`로 대조한다).
 
 `broker.reconcile`은 CLI `--fix=False` 경로에서도 같은 IPC command를 사용하지만, 한 command
 이름에 mutating/read-only 의미를 섞지 않고 일괄 mutating으로 분류한다. dry-run 전용
@@ -328,7 +285,8 @@ taxonomy 대상이 아니다. `member.*` 9개(`member.update_scopes` + admin mut
 
 `member.register` / `member.rotate_token`의 발급 토큰과 `member.regenerate_recovery_key`의 새
 recovery key는 사용자 표시용 result에만 담고 audit detail / audit_log / IPC error envelope /
-server 로그 어디에도 노출하지 않는다. `member.reset_password` / `member.regenerate_recovery_key`는
+server 로그 어디에도 노출하지 않는다. `member.reset_password`가 받는 recovery key와 새 패스워드도
+result·audit detail·server 로그에 싣지 않는다. `member.reset_password` / `member.regenerate_recovery_key`는
 auth-exempt이므로 대상 master member_id를 client가 아니라 서버 handler에서 master-lookup으로
 해석하고, audit의 member_id는 client actor(스푸핑 가능)가 아니라 handler가 고정한 sentinel 상수로
 기록한다.
