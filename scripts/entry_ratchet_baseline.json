@@ -9,8 +9,7 @@
     "src/ante/cli/commands/feed.py": 19,
     "src/ante/cli/commands/member.py": 34,
     "src/ante/cli/commands/signal.py": 1,
-    "src/ante/cli/commands/strategy.py": 19,
-    "src/ante/cli/commands/treasury.py": 15,
+    "src/ante/cli/commands/strategy.py": 2,
     "src/ante/cli/middleware.py": 2
   },
   "cli_exits": {
@@ -23,18 +22,15 @@
     "src/ante/cli/commands/feed.py": 21,
     "src/ante/cli/commands/member.py": 34,
     "src/ante/cli/commands/signal.py": 1,
-    "src/ante/cli/commands/strategy.py": 21,
+    "src/ante/cli/commands/strategy.py": 5,
     "src/ante/cli/commands/system.py": 2,
-    "src/ante/cli/commands/treasury.py": 15,
     "src/ante/cli/middleware.py": 11
   },
   "ipc_error_code_reads": {
     "src/ante/cli/commands/bot.py": 8,
     "src/ante/cli/commands/broker.py": 2,
     "src/ante/cli/commands/config.py": 1,
-    "src/ante/cli/commands/member.py": 9,
-    "src/ante/cli/commands/strategy.py": 1,
-    "src/ante/cli/commands/treasury.py": 3
+    "src/ante/cli/commands/member.py": 9
   },
   "unregistered_codes": [
     "ACCOUNT_ALREADY_DELETED",
@@ -62,14 +58,7 @@
     "MESSAGE_TOO_LARGE",
     "NOT_INITIALIZED",
     "SERVICE_UNAVAILABLE",
-    "SNAPSHOT_NOT_FOUND",
     "STOP_ORDER_MANAGER_STOPPED",
-    "STRATEGY_ERROR",
-    "STRATEGY_INVALID_STATUS_TRANSITION",
-    "STRATEGY_MISSING_REQUIRED_ACCOUNT",
-    "STRATEGY_VALIDATION_FAILED",
-    "TREASURY_ALLOCATE_FAILED",
-    "TREASURY_DEALLOCATE_FAILED",
     "UNKNOWN",
     "UNKNOWN_COMMAND",
     "auth_failed",

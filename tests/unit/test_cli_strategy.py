@@ -1081,7 +1081,10 @@ class TestStrategySubmit:
 
         mock_load.assert_called_once()
         assert result.exit_code == 1
-        assert "Error: Load test failed: Cannot load" in result.output.splitlines()
+        assert (
+            "Error: STRATEGY_LOAD_ERROR: Load test failed: Cannot load"
+            in result.output.splitlines()
+        )
 
     @pytest.mark.parametrize(
         ("exc_cls", "expected_code"),
