@@ -22,9 +22,6 @@ from tests.unit.contracts.test_error_code_preservation import (
 
 OUTSIDE_REGISTRY = frozenset(
     {
-        "ante.account.crypto.EncryptionKeyError",
-        "ante.account.crypto.EncryptionKeyInvalidError",
-        "ante.account.crypto.EncryptionKeyMissingError",
         "ante.broker.exceptions.ModifyOrgnoUnavailableError",
         "ante.gateway.stop_order.StopOrderManagerStoppedError",
     }
