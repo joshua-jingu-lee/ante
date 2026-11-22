@@ -28,8 +28,7 @@ class InvalidIsoDateError(ValueError):
     """ISO ``YYYY-MM-DD`` 형식/캘린더 위반.
 
     ``code`` class attribute 로 안정 코드를 보유한다. IPC server 의
-    ``ipc_error_payload`` 와 CLI ``emit_cli_error`` 가 이 값을 그대로
-    surface 하므로,
+    ``ipc_error_payload`` 와 CLI 진입점 훅이 이 값을 그대로 surface 하므로,
     invalid 날짜가 ``EXECUTION_ERROR`` 로 접히지 않는다.
     코드 값은 SSOT(``InvalidAccountIdError.code``)와 동일한
     ``VALIDATION_ERROR`` 를 재사용하며 신규 코드를 도입하지 않는다.

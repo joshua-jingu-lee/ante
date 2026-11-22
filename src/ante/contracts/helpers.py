@@ -3,18 +3,11 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, NoReturn
-
-import click
 
 from ante.contracts.error_registry import EXCEPTION_TO_SPEC, EXECUTION_ERROR_SPEC
 from ante.contracts.errors import ErrorSpec
 
-if TYPE_CHECKING:
-    from ante.cli.formatter import OutputFormatter
-
 __all__ = [
-    "emit_cli_error",
     "error_spec_for_exception",
     "ipc_error_payload",
 ]
@@ -53,7 +46,7 @@ def _resolve_message(
     *,
     fallback_message: str | None,
 ) -> str:
-    """``emit_cli_error`` / ``ipc_error_payload`` 가 공유하는 message resolution."""
+    """``ipc_error_payload`` 의 message resolution."""
 
     if fallback_message:
         return fallback_message
@@ -63,28 +56,6 @@ def _resolve_message(
     if spec.default_message:
         return spec.default_message
     return ""
-
-
-def emit_cli_error(
-    fmt: OutputFormatter,
-    exc: BaseException,
-    *,
-    fallback_message: str | None = None,
-) -> NoReturn:
-    """``ErrorSpec`` 기반 CLI error envelope 출력 + click ``Exit`` raise.
-
-    호출자는 본 helper 를 CLI direct path 의 ``except`` 블록에서 사용해
-    taxonomy-정렬된 ``code`` 를 ``OutputFormatter.error`` 로 surface 한다.
-
-    Args:
-        fallback_message: 호출자가 명시 제공할 도메인 문구. ``None`` 이면
-            ``str(exc)`` → ``spec.default_message`` 순서로 fallback.
-    """
-
-    spec = error_spec_for_exception(exc)
-    message = _resolve_message(exc, spec, fallback_message=fallback_message)
-    fmt.error(message, code=spec.code)
-    raise click.exceptions.Exit(spec.exit_code)
 
 
 def ipc_error_payload(exc: BaseException) -> dict[str, str]:

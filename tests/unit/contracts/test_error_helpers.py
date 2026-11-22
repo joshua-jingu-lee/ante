@@ -9,19 +9,15 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
 
-import click
 import pytest
 
 from ante.account.errors import InvalidAccountIdError
 from ante.approval.errors import ApprovalNotFoundError
 from ante.bot.exceptions import BotNotFoundError
-from ante.cli.formatter import OutputFormatter
 from ante.contracts import (
     ErrorCategory,
     ErrorSpec,
-    emit_cli_error,
     error_spec_for_exception,
     ipc_error_payload,
 )
@@ -197,125 +193,6 @@ class TestIpcErrorPayload:
         assert decoded == payload
 
 
-# ── emit_cli_error ───────────────────────────────────────────────────────────
-
-
-class TestEmitCliError:
-    """``OutputFormatter`` 호출 + click ``Exit`` raise 동작."""
-
-    def test_calls_fmt_error_with_spec_code(self) -> None:
-        """대표 lock 에 대해 ``fmt.error(message, code=spec.code)`` 호출."""
-        mock_fmt = MagicMock(spec=OutputFormatter)
-        exc = BotNotFoundError("bot-1")
-
-        with pytest.raises(click.exceptions.Exit) as exit_info:
-            emit_cli_error(mock_fmt, exc)
-
-        assert exit_info.value.exit_code == 1
-        mock_fmt.error.assert_called_once()
-        args, kwargs = mock_fmt.error.call_args
-        # 첫 positional 은 message (str(exc)).
-        assert args == ("Bot not found: bot-1",)
-        assert kwargs == {"code": "BOT_NOT_FOUND"}
-
-    def test_message_priority_fallback_overrides_str_exc(self) -> None:
-        """``fallback_message`` 인자가 ``str(exc)`` 보다 우선."""
-        mock_fmt = MagicMock(spec=OutputFormatter)
-        exc = BotNotFoundError("bot-1")  # str(exc) == "Bot not found: bot-1"
-
-        with pytest.raises(click.exceptions.Exit):
-            emit_cli_error(mock_fmt, exc, fallback_message="explicit override")
-
-        args, _ = mock_fmt.error.call_args
-        assert args == ("explicit override",)
-
-    def test_message_priority_str_exc_used_when_no_fallback(self) -> None:
-        """``fallback_message`` 가 ``None`` 이면 ``str(exc)`` 가 두 번째 우선순위."""
-        mock_fmt = MagicMock(spec=OutputFormatter)
-        exc = BotNotFoundError("bot-2")
-
-        with pytest.raises(click.exceptions.Exit):
-            emit_cli_error(mock_fmt, exc, fallback_message=None)
-
-        args, _ = mock_fmt.error.call_args
-        assert args == ("Bot not found: bot-2",)
-
-    def test_message_priority_default_message_used_when_exc_empty(self) -> None:
-        """``str(exc)`` 가 비어있으면 ``spec.default_message`` 가 세 번째 우선순위."""
-        # default_message 가 있는 ErrorSpec 을 직접 lookup 하도록
-        # custom exception 을 만들고 임시 registry 에 등록한다.
-
-        class _SilentError(Exception):
-            pass
-
-        spec_with_default = ErrorSpec(
-            code="SILENT_X",
-            category="internal",
-            default_message="fell back to default",
-        )
-        EXCEPTION_TO_SPEC[_SilentError] = spec_with_default
-        try:
-            mock_fmt = MagicMock(spec=OutputFormatter)
-            with pytest.raises(click.exceptions.Exit):
-                emit_cli_error(mock_fmt, _SilentError())  # str(exc) == ""
-
-            args, kwargs = mock_fmt.error.call_args
-            assert args == ("fell back to default",)
-            assert kwargs == {"code": "SILENT_X"}
-        finally:
-            EXCEPTION_TO_SPEC.pop(_SilentError, None)
-
-    def test_message_falls_back_to_empty_string_when_nothing_resolves(
-        self,
-    ) -> None:
-        """``fallback_message`` None + ``str(exc)`` empty + ``default_message``
-        None 이면 빈 문자열을 ``fmt.error`` 에 넘긴다 (envelope shape 호환)."""
-
-        class _BareError(Exception):
-            pass
-
-        mock_fmt = MagicMock(spec=OutputFormatter)
-        with pytest.raises(click.exceptions.Exit):
-            emit_cli_error(mock_fmt, _BareError())
-
-        args, kwargs = mock_fmt.error.call_args
-        assert args == ("",)
-        assert kwargs == {"code": "EXECUTION_ERROR"}
-
-    def test_exit_code_from_spec(self) -> None:
-        """``ErrorSpec.exit_code`` 가 ``Exit`` 종료 코드로 전달된다."""
-
-        class _CustomExitError(Exception):
-            pass
-
-        custom_spec = ErrorSpec(code="X_CUSTOM_EXIT", category="internal", exit_code=42)
-        EXCEPTION_TO_SPEC[_CustomExitError] = custom_spec
-        try:
-            mock_fmt = MagicMock(spec=OutputFormatter)
-            with pytest.raises(click.exceptions.Exit) as exit_info:
-                emit_cli_error(mock_fmt, _CustomExitError("boom"))
-            assert exit_info.value.exit_code == 42
-        finally:
-            EXCEPTION_TO_SPEC.pop(_CustomExitError, None)
-
-    def test_integrates_with_real_output_formatter_json_mode(
-        self,
-        capsys: pytest.CaptureFixture[str],
-    ) -> None:
-        """실제 ``OutputFormatter(json)`` 와 통합 — envelope shape 확인."""
-        fmt = OutputFormatter("json")
-        with pytest.raises(click.exceptions.Exit):
-            emit_cli_error(fmt, InvalidAccountIdError("bad-id"))
-
-        captured = capsys.readouterr()
-        envelope = json.loads(captured.out)
-        # envelope shape SSOT (envelopes.md #1821) — ``status``/``code``/
-        # ``message`` 3-key shape.
-        assert envelope["status"] == "error"
-        assert envelope["code"] == "VALIDATION_ERROR"
-        assert envelope["message"] == "bad-id"
-
-
 # ── ErrorCategory Literal sanity ──────────────────────────────────────────────
 
 
@@ -369,16 +246,9 @@ class TestReadOnlyDatabaseErrorCode:
         payload = ipc_error_payload(ReadOnlyDatabaseError("read-only"))
         assert payload == {"code": "EXECUTION_ERROR", "message": "read-only"}
 
-    def test_cli_error_envelope_code(self, capsys: pytest.CaptureFixture[str]) -> None:
-        fmt = OutputFormatter("json")
-        with pytest.raises(click.exceptions.Exit) as exit_info:
-            emit_cli_error(fmt, ReadOnlyDatabaseError("read-only"))
-
-        assert exit_info.value.exit_code == 1
-        envelope = json.loads(capsys.readouterr().out)
-        assert envelope["status"] == "error"
-        assert envelope["code"] == "EXECUTION_ERROR"
-        assert envelope["message"] == "read-only"
+    def test_cli_error_envelope_code(self) -> None:
+        spec = error_spec_for_exception(ReadOnlyDatabaseError("read-only"))
+        assert (spec.code, spec.exit_code) == ("EXECUTION_ERROR", 1)
 
 
 # ── module public surface ─────────────────────────────────────────────────────
@@ -391,10 +261,18 @@ def test_public_surface_importable() -> None:
     expected = {
         "ErrorCategory",
         "ErrorSpec",
-        "emit_cli_error",
         "error_spec_for_exception",
         "ipc_error_payload",
     }
     assert expected.issubset(set(contracts.__all__))
     for name in expected:
         assert hasattr(contracts, name), name
+
+
+def test_emit_cli_error_is_gone() -> None:
+    from ante import contracts
+    from ante.contracts import helpers
+
+    for module in (contracts, helpers):
+        assert "emit_cli_error" not in module.__all__
+        assert not hasattr(module, "emit_cli_error")

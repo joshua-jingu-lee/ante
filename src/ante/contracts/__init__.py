@@ -12,7 +12,6 @@ from ante.contracts.cli_registry import (
 )
 from ante.contracts.errors import ErrorCategory, ErrorSpec
 from ante.contracts.helpers import (
-    emit_cli_error,
     error_spec_for_exception,
     ipc_error_payload,
 )
@@ -25,7 +24,6 @@ __all__ = [
     "ErrorSpec",
     "OutputContract",
     "all_contracts",
-    "emit_cli_error",
     "error_spec_for_exception",
     "get_contract",
     "ipc_error_payload",

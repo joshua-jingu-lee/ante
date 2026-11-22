@@ -83,7 +83,7 @@ command 본체 또는 별도 wrapper)가 가진다.
 - **Auth / scope 검증** — `require_auth` / `require_scope` decorator는 CLI
   command 본체에 attach된다. factory는 auth context를 검증하거나 reject하지
   않는다.
-- **Envelope 직렬화** — `fmt.success`/`fmt.error`/`emit_cli_error` 호출은 caller
+- **Envelope 직렬화** — `fmt.success`/`fmt.error` 호출은 caller
   책임이다. factory는 envelope을 생성하지 않으며,
   [`docs/specs/contracts/envelopes.md`](envelopes.md) 자체를 재정의하지 않는다.
 - **Error code 매핑** — domain exception → public `code` 매핑은

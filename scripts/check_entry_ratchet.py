@@ -65,8 +65,8 @@ its uses.
 Known limits: codes that reach an exit outside these positions are not seen:
 a code held in a variable or a module constant, a positional argument of a
 module helper (``_exit_with_error(fmt, "CODE", ...)``), a conditional
-expression, an f-string or a return value. Exits through helpers such as
-``emit_cli_error`` are not counted either.
+expression, an f-string or a return value. Exits through module helpers are
+not counted either.
 ``self.ctx.exit(...)`` and ``click.get_current_context().exit(...)`` are not
 counted as exits.
 ``setattr(e, "ipc_error_code", ...)`` and tuple assignments are not positions.
