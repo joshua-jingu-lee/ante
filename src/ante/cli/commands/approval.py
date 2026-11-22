@@ -79,7 +79,6 @@ def request(
             "approval.request",
             {
                 "type": approval_type,
-                "requester": requester,
                 "title": title,
                 "body": body,
                 "params": params,
