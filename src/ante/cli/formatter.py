@@ -5,6 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import math
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -24,6 +25,13 @@ def _sanitize_non_finite(obj: object) -> object:
     if isinstance(obj, (list, tuple)):
         return [_sanitize_non_finite(v) for v in obj]
     return obj
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    data: dict[str, Any] | list[Any] = field(default_factory=dict)
+    message: str = ""
+    text: tuple[str, ...] | None = None
 
 
 def format_option(fn: Callable[..., Any]) -> Callable[..., Any]:

@@ -10,11 +10,13 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.cli.formatter import CommandResult, OutputFormatter
 from ante.contracts.cli_errors import (
     CliAuthFailedError,
     CliAuthRequiredError,
     CliPermissionDeniedError,
 )
+from ante.contracts.cli_registry import get_contract
 from ante.contracts.helpers import error_spec_for_exception, ipc_error_payload
 
 if TYPE_CHECKING:
@@ -114,6 +116,31 @@ def _run_authenticate(token: str, db_path: str) -> Member:
             await db.close()
 
     return asyncio.run(_auth())
+
+
+def _emit_command_result(ctx: click.Context, rv: object) -> None:
+    if not isinstance(rv, CommandResult):
+        return
+    path = tuple(ctx.obj.get("_leaf_command_path", ()))
+    contract = get_contract(path)
+    if contract is None:
+        raise TypeError(f"CommandResult from {path!r} without a CLI contract")
+    if contract.output.envelope != "standard":
+        raise TypeError(
+            f"CommandResult from {path!r} with envelope "
+            f"{contract.output.envelope!r}; the contract must be 'standard'"
+        )
+    data = rv.data
+    if isinstance(data, list):
+        if contract.output.data_key is None:
+            raise TypeError(f"list data from {path!r} needs a contract data_key")
+        data = {contract.output.data_key: data}
+    fmt: OutputFormatter = ctx.obj["formatter"]
+    if fmt.is_json or rv.text is None:
+        fmt.success(rv.message, data)
+        return
+    for line in rv.text:
+        click.echo(line)
 
 
 def _get_invoked_command_path(ctx: click.Context) -> tuple[str, ...] | None:
@@ -396,7 +423,9 @@ class AuthenticatedGroup(_LeafPathMixin):
         if self._should_invoke_auth_gate(ctx, all_args, path):
             self._enforce_invoke_auth_gate(ctx, path)
 
-        return super(_LeafPathMixin, self).invoke(ctx)
+        rv = super(_LeafPathMixin, self).invoke(ctx)
+        _emit_command_result(ctx, rv)
+        return rv
 
     def _should_enforce_encryption_gate(
         self,
