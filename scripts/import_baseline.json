@@ -16,6 +16,7 @@
     "backtest->strategy",
     "bot->account",
     "bot->broker",
+    "bot->core",
     "bot->eventbus",
     "bot->gateway",
     "bot->strategy",
@@ -65,6 +66,7 @@
     "feed->data",
     "gateway->account",
     "gateway->broker",
+    "gateway->core",
     "gateway->eventbus",
     "gateway->strategy",
     "instrument->core",
@@ -113,6 +115,7 @@
     "trade->core",
     "trade->eventbus",
     "treasury->account",
+    "treasury->core",
     "treasury->eventbus"
   ],
   "cycles": [],

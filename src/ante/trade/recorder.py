@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from ante.account.errors import InvalidAccountIdError
 from ante.account.scoping import require_account_id
+from ante.core import clock
 from ante.eventbus.fill_dedup_guard import FillDedupGuard
 from ante.trade.models import TradeRecord, TradeStatus
 
@@ -307,7 +308,7 @@ class TradeRecorder:
         account_id = require_account_id(
             account_id, context="trade_recorder.save_adjustment"
         )
-        timestamp = datetime.now(UTC).isoformat()
+        timestamp = clock.now(UTC).isoformat()
         await self._db.execute(
             """INSERT INTO trades
                (trade_id, bot_id, strategy_id, symbol, side, quantity, price,

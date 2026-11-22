@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
+from ante.core import clock
+
 
 @dataclass
 class BotBudget:
@@ -22,4 +24,4 @@ class BotBudget:
     reserved: float = 0.0
     spent: float = 0.0
     returned: float = 0.0
-    last_updated: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_updated: datetime = field(default_factory=lambda: clock.now(UTC))

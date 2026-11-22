@@ -19,12 +19,10 @@ DB에 넣고, 계좌는 새 서비스를 초기화해 캐시가 DB에서 읽은 
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-import ante.broker.circuit_breaker as circuit_module
 from ante.account.errors import AccountAlreadySuspendedError, AccountDeletedError
 from ante.account.models import ACCOUNT_STATUS_TRANSITIONS, Account, AccountStatus
 from ante.account.service import AccountService
@@ -383,21 +381,9 @@ async def test_member_revoke_allows(db, eventbus, published, prev):
 # ── 회로차단기 ───────────────────────────────────────────────────
 
 
-class _Clock:
-    def __init__(self) -> None:
-        self.now = 1000.0
-
-    def monotonic(self) -> float:
-        return self.now
-
-
 @pytest.fixture
-def clock(monkeypatch: pytest.MonkeyPatch) -> _Clock:
-    fake = _Clock()
-    monkeypatch.setattr(
-        circuit_module, "time", SimpleNamespace(monotonic=fake.monotonic)
-    )
-    return fake
+def clock(manual_clock: Any) -> Any:
+    return manual_clock
 
 
 @pytest.fixture
@@ -448,10 +434,10 @@ async def _open_breaker(
 
 
 async def _half_open_breaker(
-    eventbus: EventBus, events: list[tuple[Any, ...]], clock: _Clock
+    eventbus: EventBus, events: list[tuple[Any, ...]], clock: Any
 ) -> CircuitBreaker:
     breaker = await _open_breaker(eventbus, events)
-    clock.now += 60.0
+    clock.advance(60.0)
     assert breaker.state == "half_open"
     await _drain()
     events.clear()
@@ -500,7 +486,7 @@ async def test_circuit_open_before_timeout_stays_open_and_blocks(
     eventbus, circuit_events, clock
 ):
     breaker = await _open_breaker(eventbus, circuit_events)
-    clock.now += 59.0
+    clock.advance(59.0)
     assert breaker.state == "open"
     with pytest.raises(Exception) as exc_info:
         breaker.check()
@@ -515,7 +501,7 @@ async def test_circuit_open_before_timeout_stays_open_and_blocks(
 
 async def test_circuit_open_timeout_moves_to_half_open(eventbus, circuit_events, clock):
     breaker = await _open_breaker(eventbus, circuit_events)
-    clock.now += 60.0
+    clock.advance(60.0)
     assert breaker.state == "half_open"
     await _drain()
     assert breaker._state == "half_open"
@@ -535,7 +521,7 @@ async def test_circuit_half_open_state_read_stays_half_open(
     eventbus, circuit_events, clock
 ):
     breaker = await _half_open_breaker(eventbus, circuit_events, clock)
-    clock.now += 600.0
+    clock.advance(600.0)
     assert breaker.state == "half_open"
     breaker.check()
     await _drain()
@@ -605,7 +591,7 @@ async def test_circuit_open_success_ignored_then_half_open_success_closes(
 ):
     breaker = await _open_breaker(eventbus, circuit_events)
     breaker.record_success()
-    clock.now += 60.0
+    clock.advance(60.0)
     assert breaker.state == "half_open"
     breaker.record_success()
     await _drain()
@@ -634,7 +620,7 @@ async def test_circuit_open_success_after_timeout_without_check_does_not_close(
     eventbus, circuit_events, clock
 ):
     breaker = await _open_breaker(eventbus, circuit_events)
-    clock.now += 60.0
+    clock.advance(60.0)
     breaker.record_success()
     await _drain()
     assert breaker._state == "open"
@@ -715,7 +701,7 @@ async def test_circuit_half_open_trial_retry_success_keeps_breaker_open(
     breaker.record_failure()
     await _drain()
     circuit_events.clear()
-    clock.now += 60.0
+    clock.advance(60.0)
     adapter = _adapter_with(breaker, monkeypatch)
     attempts = _fail_then_succeed(adapter, monkeypatch)
     result = await adapter._request_with_cont("GET", _QUERY_URL, "FHKST01010100")
@@ -751,7 +737,7 @@ def test_circuit_without_eventbus_or_loop_still_transitions(clock):
     breaker = CircuitBreaker(failure_threshold=1, recovery_timeout=60.0, name="x")
     breaker.record_failure()
     assert breaker._state == "open"
-    clock.now += 60.0
+    clock.advance(60.0)
     assert breaker.state == "half_open"
     breaker.record_success()
     assert breaker._state == "closed"

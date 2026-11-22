@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from ante.broker.exceptions import APIError, CircuitOpenError
+from ante.core import clock
 from ante.core.account_id import require_account_id
 
 if TYPE_CHECKING:
@@ -43,7 +44,7 @@ _LOOP_BACKOFF_EXCEPTIONS: tuple[type[Exception], ...] = (
 
 def business_date_kst(when: datetime | None = None) -> str:
     """KST 기준 영업일 ``YYYYMMDD`` (KIS ord_dt 매칭용)."""
-    moment = when or datetime.now(UTC)
+    moment = when or clock.now(UTC)
     return moment.astimezone(_KST).strftime("%Y%m%d")
 
 

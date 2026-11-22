@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 from typing import Any
+
+from ante.core import clock
 
 
 @dataclass
@@ -34,7 +35,7 @@ class ResponseCache:
         entry = self._cache.get(key)
         if entry is None:
             return None
-        if time.monotonic() - entry.created_at > entry.ttl_seconds:
+        if clock.monotonic() - entry.created_at > entry.ttl_seconds:
             del self._cache[key]
             return None
         return entry.data
@@ -43,7 +44,7 @@ class ResponseCache:
         """캐시 저장."""
         self._cache[key] = CacheEntry(
             data=data,
-            created_at=time.monotonic(),
+            created_at=clock.monotonic(),
             ttl_seconds=ttl or 30,
         )
 

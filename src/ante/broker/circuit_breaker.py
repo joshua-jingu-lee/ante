@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-import time
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ante.broker.exceptions import CircuitOpenError
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -60,7 +60,7 @@ class CircuitBreaker:
     def state(self) -> CircuitState:
         """현재 상태 (OPEN → HALF_OPEN 자동 전환 포함)."""
         if self._state == CircuitState.OPEN:
-            elapsed = time.monotonic() - self._last_failure_time
+            elapsed = clock.monotonic() - self._last_failure_time
             if elapsed >= self._recovery_timeout:
                 self._transition(CircuitState.HALF_OPEN, "recovery_timeout 경과")
         return self._state
@@ -89,7 +89,7 @@ class CircuitBreaker:
     def record_failure(self) -> None:
         """실패 기록 → threshold 도달 시 OPEN."""
         self._failure_count += 1
-        self._last_failure_time = time.monotonic()
+        self._last_failure_time = clock.monotonic()
 
         if self._state == CircuitState.HALF_OPEN:
             self._transition(CircuitState.OPEN, "HALF_OPEN 시험 실패")
