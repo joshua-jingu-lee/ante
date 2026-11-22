@@ -436,9 +436,9 @@ class TestEnforceScope:
 
     명령 내부에서 조건부로 scope 를 검증하는 imperative 헬퍼다.
     require_scope 데코레이터와 동일 규칙/메시지를 따른다:
-    - member None → auth_required + SystemExit(1).
+    - member None → CliAuthRequiredError(auth_required).
     - Human → 무제한 통과.
-    - Agent missing → permission_denied(부족 scope) + SystemExit(1).
+    - Agent missing → CliPermissionDeniedError(permission_denied, 부족 scope).
     - Agent ok → 통과(반환 None).
     """
 
@@ -448,16 +448,17 @@ class TestEnforceScope:
         return ctx
 
     def test_member_none_raises_auth_required(self):
-        """member 가 None 이면 auth_required + SystemExit(1)."""
+        """member 가 None 이면 auth_required 예외."""
         from ante.cli.middleware import enforce_scope
+        from ante.contracts.cli_errors import CliAuthRequiredError
 
         ctx = self._ctx_with_member(None)
-        with patch("ante.cli.middleware._emit_auth_error") as mock_emit:
-            with pytest.raises(SystemExit) as exc:
-                enforce_scope(ctx, "data:write")
-        assert exc.value.code == 1
-        mock_emit.assert_called_once()
-        assert mock_emit.call_args.args[1] == "auth_required"
+        with pytest.raises(CliAuthRequiredError) as exc:
+            enforce_scope(ctx, "data:write")
+        assert exc.value.code == "auth_required"
+        assert str(exc.value) == (
+            "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
+        )
 
     def test_human_bypasses_scope(self):
         """Human(master) 은 scope 무관 통과 (예외 없음)."""
@@ -468,18 +469,16 @@ class TestEnforceScope:
         assert enforce_scope(ctx, "data:write") is None
 
     def test_agent_missing_scope_raises_permission_denied(self):
-        """Agent 가 필요 scope 를 보유하지 않으면 permission_denied + SystemExit(1)."""
+        """Agent 가 필요 scope 를 보유하지 않으면 permission_denied 예외."""
         from ante.cli.middleware import enforce_scope
+        from ante.contracts.cli_errors import CliPermissionDeniedError
 
         # _MOCK_AGENT 는 scopes=["strategy:read", "data:read"] — data:write 없음.
         ctx = self._ctx_with_member(_MOCK_AGENT)
-        with patch("ante.cli.middleware._emit_auth_error") as mock_emit:
-            with pytest.raises(SystemExit) as exc:
-                enforce_scope(ctx, "data:write")
-        assert exc.value.code == 1
-        mock_emit.assert_called_once()
-        assert mock_emit.call_args.args[1] == "permission_denied"
-        assert "data:write" in mock_emit.call_args.args[2]
+        with pytest.raises(CliPermissionDeniedError) as exc:
+            enforce_scope(ctx, "data:write")
+        assert exc.value.code == "permission_denied"
+        assert "data:write" in str(exc.value)
 
     def test_agent_with_scope_passes(self):
         """Agent 가 필요 scope 를 모두 보유하면 통과 (예외 없음)."""

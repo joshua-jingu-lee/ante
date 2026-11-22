@@ -23,11 +23,14 @@ __all__ = [
     "BotInvalidParamError",
     "BotMissingRequiredAccountError",
     "CliAlreadyInitializedError",
+    "CliAuthFailedError",
+    "CliAuthRequiredError",
     "CliBotNotFoundError",
     "CliConfirmationRequiredError",
     "CliMemberNotFoundError",
     "CliMissingRequiredInputError",
     "CliOptionConflictError",
+    "CliPermissionDeniedError",
     "CliStrategyError",
     "ConfigKeyNotFoundError",
     "DataError",
@@ -163,6 +166,14 @@ class CliAlreadyInitializedError(Exception):
     code = "CLI_ALREADY_INITIALIZED"
 
 
+class CliAuthFailedError(Exception):
+    code = "auth_failed"
+
+
+class CliAuthRequiredError(Exception):
+    code = "auth_required"
+
+
 class CliBotNotFoundError(Exception):
     code = "BOT_NOT_FOUND"
 
@@ -181,6 +192,10 @@ class CliMissingRequiredInputError(Exception):
 
 class CliOptionConflictError(Exception):
     code = "CLI_OPTION_CONFLICT"
+
+
+class CliPermissionDeniedError(Exception):
+    code = "permission_denied"
 
 
 class CliStrategyError(Exception):
@@ -382,11 +397,14 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
+    CliAuthFailedError,
+    CliAuthRequiredError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
     CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
+    CliPermissionDeniedError,
     CliStrategyError,
     ConfigKeyNotFoundError,
     DataError,

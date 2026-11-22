@@ -136,7 +136,6 @@ _KEY_INVALID_SETUP = Setup(token=True, member=_MASTER, key="invalid")
 
 _TEXT = "text"
 _JSON = "json"
-_SUB_TEXT = "sub-text"
 
 
 @dataclass(frozen=True)
@@ -198,7 +197,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format", "json"),
         _NO_TOKEN,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "auth_required",
         _REQ,
     ),
@@ -207,7 +206,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format=json"),
         _NO_TOKEN,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "auth_required",
         _REQ,
     ),
@@ -216,7 +215,7 @@ _CELLS: tuple[Cell, ...] = (
         ("--format", "json", "account", "list", "--format", "text"),
         _NO_TOKEN,
         _ACCOUNT,
-        _JSON,
+        _TEXT,
         "auth_required",
         _REQ,
     ),
@@ -225,7 +224,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format", "xml"),
         _NO_TOKEN,
         _ACCOUNT,
-        _SUB_TEXT,
+        _TEXT,
         "auth_required",
         _REQ,
     ),
@@ -234,7 +233,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "info", "--", "--format", "json"),
         _NO_TOKEN,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "auth_required",
         _REQ,
     ),
@@ -261,7 +260,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format", "json"),
         _BAD_TOKEN,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "auth_failed",
         _FAILED,
     ),
@@ -377,7 +376,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format", "json"),
         _KEY_MISSING_SETUP,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "DB_ENCRYPTION_KEY_MISSING",
         _KEY_MISSING,
     ),
@@ -404,7 +403,7 @@ _CELLS: tuple[Cell, ...] = (
         ("account", "list", "--format", "json"),
         _KEY_INVALID_SETUP,
         _ACCOUNT,
-        _SUB_TEXT,
+        _JSON,
         "DB_ENCRYPTION_KEY_INVALID",
         _KEY_INVALID,
     ),
@@ -414,7 +413,7 @@ _CELLS: tuple[Cell, ...] = (
 def _expected(out: str, code: str, message: str) -> tuple[int, str, str]:
     if out == _JSON:
         return 1, _json(code, message), ""
-    return 1, "", f"{message}\n"
+    return 1, "", f"Error: {code}: {message}\n"
 
 
 @pytest.mark.parametrize("cell", _CELLS, ids=[c.id for c in _CELLS])
@@ -610,7 +609,7 @@ def _harness_cells() -> tuple[HarnessCell, ...]:
                 "fmt-no-token-sub-json",
                 ("fmt", "--format", "json"),
                 _NO_TOKEN,
-                _SUB_TEXT,
+                _JSON,
                 "auth_required",
                 _REQ,
             ),
@@ -642,7 +641,7 @@ def _harness_cells() -> tuple[HarnessCell, ...]:
                 "key-missing-sub-json",
                 ("fmt", "--format", "json"),
                 _KEY_MISSING_SETUP,
-                _SUB_TEXT,
+                _JSON,
                 "DB_ENCRYPTION_KEY_MISSING",
                 _KEY_MISSING,
             ),

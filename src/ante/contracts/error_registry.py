@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Final
 
+from ante.account.crypto import (
+    EncryptionKeyError,
+    EncryptionKeyInvalidError,
+    EncryptionKeyMissingError,
+)
 from ante.account.errors import (
     AccountAlreadyExistsError,
     AccountAlreadySuspendedError,
@@ -68,11 +73,14 @@ from ante.contracts.cli_errors import (
     BotInvalidParamError,
     BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
+    CliAuthFailedError,
+    CliAuthRequiredError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
     CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
+    CliPermissionDeniedError,
     CliStrategyError,
     ConfigKeyNotFoundError,
     DataError,
@@ -863,6 +871,36 @@ _TREASURY_DEALLOCATE_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
+_AUTH_REQUIRED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="auth_required",
+    category="auth",
+)
+
+_AUTH_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="auth_failed",
+    category="auth",
+)
+
+_PERMISSION_DENIED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="permission_denied",
+    category="permission",
+)
+
+_DB_ENCRYPTION_KEY_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DB_ENCRYPTION_KEY_ERROR",
+    category="internal",
+)
+
+_DB_ENCRYPTION_KEY_MISSING_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DB_ENCRYPTION_KEY_MISSING",
+    category="internal",
+)
+
+_DB_ENCRYPTION_KEY_INVALID_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="DB_ENCRYPTION_KEY_INVALID",
+    category="internal",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -1007,6 +1045,12 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     AccountInvalidTimezoneError: _ACCOUNT_INVALID_TIMEZONE_SPEC,
     AccountMissingRequiredCredentialError: _ACCOUNT_MISSING_REQUIRED_CREDENTIAL_SPEC,
     AccountUnknownCredentialKeyError: _ACCOUNT_UNKNOWN_CREDENTIAL_KEY_SPEC,
+    CliAuthRequiredError: _AUTH_REQUIRED_SPEC,
+    CliAuthFailedError: _AUTH_FAILED_SPEC,
+    CliPermissionDeniedError: _PERMISSION_DENIED_SPEC,
+    EncryptionKeyError: _DB_ENCRYPTION_KEY_ERROR_SPEC,
+    EncryptionKeyMissingError: _DB_ENCRYPTION_KEY_MISSING_SPEC,
+    EncryptionKeyInvalidError: _DB_ENCRYPTION_KEY_INVALID_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 

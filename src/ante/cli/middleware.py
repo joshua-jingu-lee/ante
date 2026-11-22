@@ -10,6 +10,11 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.contracts.cli_errors import (
+    CliAuthFailedError,
+    CliAuthRequiredError,
+    CliPermissionDeniedError,
+)
 from ante.contracts.helpers import error_spec_for_exception, ipc_error_payload
 
 if TYPE_CHECKING:
@@ -75,8 +80,7 @@ def authenticate_member(ctx: click.Context) -> None:
         ctx.obj["member"] = member
         logger.debug("CLI 인증 성공: %s", member.member_id)
     except PermissionError as e:
-        _emit_auth_error(ctx, "auth_failed", f"인증 실패: {e}")
-        raise SystemExit(1) from e
+        raise CliAuthFailedError(f"인증 실패: {e}") from e
 
 
 def _run_authenticate(token: str, db_path: str) -> Member:
@@ -145,7 +149,7 @@ def require_auth(fn: Callable) -> Callable:
     """인증 필수 데코레이터.
 
     @click.pass_context 아래에 배치한다.
-    ctx.obj["member"]가 None이면 에러 출력 후 종료.
+    ctx.obj["member"]가 None이면 ``CliAuthRequiredError``를 던진다.
 
     멱등(idempotent) — 이미 같은 가드가 부착된 함수에 재적용되어도 한 번만
     감싸지도록 ``_require_auth_applied`` sentinel marker로 dedupe한다.
@@ -158,12 +162,9 @@ def require_auth(fn: Callable) -> Callable:
         ctx = click.get_current_context()
         member = ctx.obj.get("member")
         if member is None:
-            _emit_auth_error(
-                ctx,
-                "auth_required",
-                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+            raise CliAuthRequiredError(
+                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
             )
-            raise SystemExit(1)
         return fn(*args, **kwargs)
 
     wrapper._require_auth_applied = True  # type: ignore[attr-defined]
@@ -192,12 +193,9 @@ def require_master(fn: Callable) -> Callable:
             ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
         )
         if member is None:
-            _emit_auth_error(
-                ctx,
-                "auth_required",
-                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+            raise CliAuthRequiredError(
+                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
             )
-            raise SystemExit(1)
 
         member_type_value = getattr(member.type, "value", member.type)
         member_role_value = getattr(member.role, "value", member.role)
@@ -205,12 +203,7 @@ def require_master(fn: Callable) -> Callable:
             member_type_value != MemberType.HUMAN.value
             or member_role_value != MemberRole.MASTER.value
         ):
-            _emit_auth_error(
-                ctx,
-                "permission_denied",
-                "이 작업은 master 권한이 필요합니다.",
-            )
-            raise SystemExit(1)
+            raise CliPermissionDeniedError("이 작업은 master 권한이 필요합니다.")
 
         return fn(*args, **kwargs)
 
@@ -235,24 +228,18 @@ def require_scope(*scopes: str) -> Callable:
             ctx = click.get_current_context()
             member: Member | None = ctx.obj.get("member")
             if member is None:
-                _emit_auth_error(
-                    ctx,
-                    "auth_required",
-                    "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+                raise CliAuthRequiredError(
+                    "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
                 )
-                raise SystemExit(1)
 
             if member.type == MemberType.HUMAN:
                 return fn(*args, **kwargs)
 
             missing = [s for s in scopes if s not in member.scopes]
             if missing:
-                _emit_auth_error(
-                    ctx,
-                    "permission_denied",
-                    f"권한이 부족합니다. 필요 권한: {', '.join(missing)}",
+                raise CliPermissionDeniedError(
+                    f"권한이 부족합니다. 필요 권한: {', '.join(missing)}"
                 )
-                raise SystemExit(1)
 
             return fn(*args, **kwargs)
 
@@ -268,33 +255,27 @@ def enforce_scope(ctx: click.Context, *scopes: str) -> None:
 
     ``require_scope`` 데코레이터와 동일 규칙을 적용한다:
 
-    - ``ctx.obj["member"]`` 가 ``None`` 이면 ``auth_required`` emit 후
-      ``SystemExit(1)``.
+    - ``ctx.obj["member"]`` 가 ``None`` 이면 ``CliAuthRequiredError``
+      (``auth_required``).
     - Agent 멤버는 ``scopes`` 를 모두 보유해야 한다. 부족 시
-      ``permission_denied`` 를 부족 scope와 함께 emit 후 ``SystemExit(1)``.
+      부족 scope를 담은 ``CliPermissionDeniedError`` (``permission_denied``).
     """
     from ante.member.models import MemberType
 
     member: Member | None = ctx.obj.get("member")
     if member is None:
-        _emit_auth_error(
-            ctx,
-            "auth_required",
-            "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+        raise CliAuthRequiredError(
+            "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
         )
-        raise SystemExit(1)
 
     if member.type == MemberType.HUMAN:
         return
 
     missing = [s for s in scopes if s not in member.scopes]
     if missing:
-        _emit_auth_error(
-            ctx,
-            "permission_denied",
-            f"권한이 부족합니다. 필요 권한: {', '.join(missing)}",
+        raise CliPermissionDeniedError(
+            f"권한이 부족합니다. 필요 권한: {', '.join(missing)}"
         )
-        raise SystemExit(1)
 
 
 def get_member_id(ctx: click.Context) -> str:
@@ -437,11 +418,10 @@ class AuthenticatedGroup(_LeafPathMixin):
         return True
 
     def _enforce_db_encryption_key_gate(self, ctx: click.Context) -> None:
-        """DB encryption key chokepoint 본체 — 실패 시 envelope + SystemExit(1)."""
+        """DB encryption key chokepoint 본체 — 실패 시 ``EncryptionKeyError`` 하위."""
         import tomllib
 
         from ante.account.crypto import (
-            EncryptionKeyError,
             EncryptionKeyInvalidError,
             EncryptionKeyMissingError,
             _validate_fernet_key,
@@ -459,21 +439,17 @@ class AuthenticatedGroup(_LeafPathMixin):
                 exc,
             )
 
-        try:
-            key = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
-            if not key:
-                raise EncryptionKeyMissingError(
-                    "ANTE_DB_ENCRYPTION_KEY 환경변수가 설정되지 않았습니다. "
-                    "`ante init` 또는 `secrets.env` 의 키 행을 확인하세요."
-                )
-            if not _validate_fernet_key(key):
-                raise EncryptionKeyInvalidError(
-                    "ANTE_DB_ENCRYPTION_KEY 형식이 유효하지 않습니다 "
-                    "(Fernet.generate_key() 출력 형식이어야 합니다)."
-                )
-        except EncryptionKeyError as e:
-            _emit_error_envelope(ctx, str(e), code=e.code)
-            raise SystemExit(1) from e
+        key = os.environ.get("ANTE_DB_ENCRYPTION_KEY")
+        if not key:
+            raise EncryptionKeyMissingError(
+                "ANTE_DB_ENCRYPTION_KEY 환경변수가 설정되지 않았습니다. "
+                "`ante init` 또는 `secrets.env` 의 키 행을 확인하세요."
+            )
+        if not _validate_fernet_key(key):
+            raise EncryptionKeyInvalidError(
+                "ANTE_DB_ENCRYPTION_KEY 형식이 유효하지 않습니다 "
+                "(Fernet.generate_key() 출력 형식이어야 합니다)."
+            )
 
         if isinstance(ctx.obj, dict):
             ctx.obj["_db_encryption_key_validated"] = True
@@ -516,19 +492,16 @@ class AuthenticatedGroup(_LeafPathMixin):
     def _enforce_invoke_auth_gate(
         self, ctx: click.Context, path: tuple[str, ...]
     ) -> None:
-        """invoke 단계 인증 게이트 본체 — 실패 시 SystemExit(1)."""
+        """invoke 단계 인증 게이트 본체 — 실패 시 ``CliAuthRequiredError``."""
         from ante.cli import main as _main
 
         _main.authenticate_member(ctx)
 
         member = ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
         if member is None:
-            _emit_auth_error(
-                ctx,
-                "auth_required",
-                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+            raise CliAuthRequiredError(
+                "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
             )
-            raise SystemExit(1)
 
         ctx.obj["_auth_gate_invoked"] = True
 
@@ -679,26 +652,6 @@ def _mirror_root_globals_to_obj(ctx: click.Context) -> None:
         ctx.obj["formatter"] = OutputFormatter(raw_format)
 
 
-def _emit_auth_error(ctx: click.Context, code: str, message: str) -> None:
-    """인증/권한 실패 메시지를 출력 모드에 맞게 발화한다."""
-    obj = getattr(ctx, "obj", None)
-    formatter = obj.get("formatter") if isinstance(obj, dict) else None
-    if formatter is not None and getattr(formatter, "is_json", False):
-        formatter.error(message, code=code)
-    else:
-        click.echo(message, err=True)
-
-
-def _emit_error_envelope(ctx: click.Context, message: str, *, code: str) -> None:
-    """generic stable-code error envelope 출력."""
-    obj = getattr(ctx, "obj", None)
-    formatter = obj.get("formatter") if isinstance(obj, dict) else None
-    if formatter is not None and getattr(formatter, "is_json", False):
-        formatter.error(message, code=code)
-    else:
-        click.echo(message, err=True)
-
-
 def _attach_auth_guard_recursive(cmd: click.Command) -> None:
     """leaf command callback에만 인증 가드를 부착하고, group이면 자식까지 재귀."""
     if isinstance(cmd, click.Group):
@@ -736,12 +689,9 @@ def _wrap_callback_with_auth(callback: Callable) -> Callable:
         if not has_auth_decorator:
             member = ctx.obj.get("member") if isinstance(ctx.obj, dict) else None
             if member is None:
-                _emit_auth_error(
-                    ctx,
-                    "auth_required",
-                    "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요.",
+                raise CliAuthRequiredError(
+                    "인증이 필요합니다. ANTE_MEMBER_TOKEN 환경변수를 설정해 주세요."
                 )
-                raise SystemExit(1)
 
         return callback(*args, **kwargs)
 
