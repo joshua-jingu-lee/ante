@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
 
 import click
 
@@ -184,9 +183,9 @@ def run(
 
 async def _save_backtest_run(
     db_path: str,
-    result_dict: dict[str, Any],
-    config: dict[str, Any],
-    metrics: dict[str, Any],
+    result_dict: dict,
+    config: dict,
+    metrics: dict,
 ) -> str:
     """backtest_runs 테이블에 이력 저장 (envelope dict 기반)."""
     from ante.backtest.run_store import BacktestRunStore
@@ -228,7 +227,7 @@ def history(
     """전략별 백테스트 실행 이력 조회."""
     fmt = get_formatter(ctx)
 
-    async def _list() -> list[dict[str, Any]]:
+    async def _list() -> list[dict]:
         from ante.backtest.run_store import BacktestRunStore
 
         async with open_cli_db(ctx, read_only=True, db_path_override=db_path) as db:
@@ -269,7 +268,7 @@ def history(
         raise BacktestError(str(e)) from e
 
 
-def _format_metrics(metrics: dict[str, Any]) -> list[dict[str, str]]:
+def _format_metrics(metrics: dict) -> list[dict[str, str]]:
     """metrics dict를 CLI 테이블 행으로 변환."""
     labels = {
         "total_return": ("총 수익률", "%"),
