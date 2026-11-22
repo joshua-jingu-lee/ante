@@ -340,9 +340,6 @@ def pytest_configure(config: pytest.Config) -> None:
     except guard.ImportPathCheckError as exc:
         raise pytest.UsageError(str(exc)) from exc
     _install_config_isolation(config)
-    from tests import preservation_recorder
-
-    config.pluginmanager.register(preservation_recorder, "preservation_recorder")
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:

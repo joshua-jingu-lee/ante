@@ -4,7 +4,7 @@
 > 생성 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`
 > Check 명령: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py --check`
 > 생성 기준: 현재 Git 추적/비무시 파일 트리 (`git ls-files --cached --others --exclude-standard`)
-> 마지막 생성 시점: 2026-11-22 (KST)
+> 마지막 생성 시점: 2026-11-23 (KST)
 
 ## 최상위 구조
 
@@ -366,7 +366,6 @@ scripts/
 ├── check_spec_code_blocks.py
 ├── collect_autopilot_queue.py
 ├── comment_baseline.json
-├── compare_error_exit_records.py
 ├── entry_ratchet_baseline.json
 ├── generate_cli_reference.py         # CLI 레퍼런스 문서 자동 생성 (Click introspection)
 ├── generate_db_schema.py             # DB 스키마 문서 자동 생성
