@@ -440,7 +440,7 @@ status, reason}`).
 
 | Phase | 방향 | 프레임 | 내용 |
 |-------|------|--------|------|
-| A — 핸드셰이크 요청 | client→daemon | 정확히 1 | 표준 요청 envelope. `{"id":"<uuid>","command":"signal.connect","args":{"key":"sk_..."},"actor":"<member_id>"}`. 키는 `args.key`에만. `_dispatch`를 통과해 lifecycle gate + `required_services`(`bot_manager`) + typed-exception→stable-code 변환을 재사용 |
+| A — 핸드셰이크 요청 | client→daemon | 정확히 1 | 표준 요청 envelope. `{"id":"<uuid>","command":"signal.connect","args":{"key":"sk_..."},"actor":"<member_id>"}`. 키는 `args.key`에만. `_dispatch`를 통과해 lifecycle gate + `required_services`(`bot_manager`) + typed-exception→stable-code 변환을 재사용. `args`가 요청 모델을 통과하지 못하면 4-게이트 전에 `VALIDATION_ERROR` |
 | B — 핸드셰이크 응답 | daemon→client | 정확히 1 | OK: `{"id":<same>,"status":"ok","result":{"bot_id":"<id>","account_id":"<id>"}}`. ERROR: `{"id":<same>,"status":"error","error":{"code":<CODE>,"message":<MSG>}}` 1프레임 후 close(Phase C 미진입). 핸들러가 반환하는 `_stream` 센티넬은 wire 전송 직전 strip되어 절대 노출되지 않음 |
 | C — 스트림 바디 | 양방향 | 무제한 | OK 후에만 진입. 각 프레임 = 1 JSON-Lines 객체. RPC가 아니므로 `id` 상관관계 없음. 종료 = 어느 쪽이든 소켓 close(EOF), 또는 데몬이 보내는 단일 `{"type":"closed","reason":...}` 프레임 |
 

@@ -46,6 +46,12 @@ from ante.ipc.registry import (
     _handle_bot_stop,
     register_all_handlers,
 )
+from ante.ipc.requests import (
+    BotSignalKeyRotateRequest,
+    BotStartRequest,
+    BotStatusRequest,
+    BotStopRequest,
+)
 
 
 def _make_bot(
@@ -136,7 +142,9 @@ class TestHandleBotStart:
         account = SimpleNamespace(credentials={"app_key": "AK-XYZ"})
         svc, audit_log = _make_svc(bot=bot, account=account)
 
-        result = await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_start(
+            svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result == {
             "bot": {"bot_id": "bot-1", "status": "stopped"},
@@ -156,7 +164,9 @@ class TestHandleBotStart:
         svc, _ = _make_svc(bot=None)
 
         with pytest.raises(BotNotFoundError) as exc:
-            await _handle_bot_start(svc, {"bot_id": "missing"}, "admin-master")
+            await _handle_bot_start(
+                svc, BotStartRequest(bot_id="missing"), "admin-master"
+            )
 
         assert exc.value.code == BOT_NOT_FOUND_CODE
         svc.bot_manager.start_bot.assert_not_awaited()
@@ -168,7 +178,9 @@ class TestHandleBotStart:
         svc, audit_log = _make_svc(bot=bot, account=account)
 
         with pytest.raises(BotAccountCredentialsNotConfigured) as exc:
-            await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
+            await _handle_bot_start(
+                svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+            )
 
         assert exc.value.code == BOT_ACCOUNT_CREDENTIALS_NOT_CONFIGURED_CODE
         svc.bot_manager.start_bot.assert_not_awaited()
@@ -187,7 +199,9 @@ class TestHandleBotStart:
         )
 
         with pytest.raises(BotStateConflict) as exc:
-            await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
+            await _handle_bot_start(
+                svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+            )
 
         assert exc.value.code == BOT_STATE_CONFLICT_CODE
         # raised from BotError
@@ -207,7 +221,9 @@ class TestHandleBotStart:
         account = SimpleNamespace(credentials={"app_key": "AK"})
         svc, _ = _make_svc(bot=bot, account=account, with_audit_logger=False)
 
-        result = await _handle_bot_start(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_start(
+            svc, BotStartRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result == {
             "bot": {"bot_id": "bot-1", "status": "stopped"},
@@ -235,7 +251,9 @@ class TestHandleBotStop:
         bot = _make_bot(bot_id="bot-1")
         svc, audit_log = _make_svc(bot=bot)
 
-        result = await _handle_bot_stop(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_stop(
+            svc, BotStopRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result == {
             "bot": {"bot_id": "bot-1", "status": "stopped"},
@@ -257,7 +275,9 @@ class TestHandleBotStop:
         svc, _ = _make_svc(bot=None)
 
         with pytest.raises(BotNotFoundError) as exc:
-            await _handle_bot_stop(svc, {"bot_id": "missing"}, "admin-master")
+            await _handle_bot_stop(
+                svc, BotStopRequest(bot_id="missing"), "admin-master"
+            )
 
         assert exc.value.code == BOT_NOT_FOUND_CODE
         svc.bot_manager.stop_bot.assert_not_awaited()
@@ -271,7 +291,7 @@ class TestHandleBotStop:
         )
 
         with pytest.raises(BotStateConflict) as exc:
-            await _handle_bot_stop(svc, {"bot_id": "bot-1"}, "admin-master")
+            await _handle_bot_stop(svc, BotStopRequest(bot_id="bot-1"), "admin-master")
 
         assert exc.value.code == BOT_STATE_CONFLICT_CODE
         assert isinstance(exc.value.__cause__, BotError)
@@ -283,7 +303,9 @@ class TestHandleBotStop:
         bot = _make_bot()
         svc, _ = _make_svc(bot=bot, with_audit_logger=False)
 
-        result = await _handle_bot_stop(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_stop(
+            svc, BotStopRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result == {
             "bot": {"bot_id": "bot-1", "status": "stopped"},
@@ -322,7 +344,7 @@ class TestHandleBotSignalKeyRotate:
         )
 
         result = await _handle_bot_signal_key_rotate(
-            svc, {"bot_id": "bot-1"}, "admin-master"
+            svc, BotSignalKeyRotateRequest(bot_id="bot-1"), "admin-master"
         )
 
         assert result == {
@@ -354,7 +376,7 @@ class TestHandleBotSignalKeyRotate:
 
         with pytest.raises(BotNotFoundError) as exc:
             await _handle_bot_signal_key_rotate(
-                svc, {"bot_id": "missing"}, "admin-master"
+                svc, BotSignalKeyRotateRequest(bot_id="missing"), "admin-master"
             )
 
         assert exc.value.code == BOT_NOT_FOUND_CODE
@@ -372,7 +394,7 @@ class TestHandleBotSignalKeyRotate:
 
         with pytest.raises(BotNotAcceptingSignals) as exc:
             await _handle_bot_signal_key_rotate(
-                svc, {"bot_id": "bot-1"}, "admin-master"
+                svc, BotSignalKeyRotateRequest(bot_id="bot-1"), "admin-master"
             )
 
         assert exc.value.code == BOT_NOT_ACCEPTING_SIGNALS_CODE
@@ -395,7 +417,7 @@ class TestHandleBotSignalKeyRotate:
 
         with pytest.raises(BotError):
             await _handle_bot_signal_key_rotate(
-                svc, {"bot_id": "bot-1"}, "admin-master"
+                svc, BotSignalKeyRotateRequest(bot_id="bot-1"), "admin-master"
             )
         # BotError 는 stable ``code`` 속성이 없어 envelope 이 EXECUTION_ERROR 로
         # fallback (회귀 명시): ``BotNotFoundError`` / ``BotNotAcceptingSignals``
@@ -412,7 +434,7 @@ class TestHandleBotSignalKeyRotate:
         )
 
         result = await _handle_bot_signal_key_rotate(
-            svc, {"bot_id": "bot-1"}, "admin-master"
+            svc, BotSignalKeyRotateRequest(bot_id="bot-1"), "admin-master"
         )
 
         assert result["rotated"] is True
@@ -445,7 +467,9 @@ class TestHandleBotStatus:
 
         svc, audit_log = _make_svc(bot=bot, trade_service=trade_service)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert "positions" in result["bot"]
         assert result["bot"]["positions"] == [
@@ -502,7 +526,9 @@ class TestHandleBotStatus:
 
         svc, _ = _make_svc(bot=bot, trade_service=trade_service)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-shared"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-shared"), "admin-master"
+        )
 
         symbols = [p["symbol"] for p in result["bot"]["positions"]]
         assert symbols == ["AAA"], symbols
@@ -519,7 +545,9 @@ class TestHandleBotStatus:
         )
         svc, _ = _make_svc(bot=bot, trade_service=None)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         # ``positions`` 키 자체가 부재 — 빈 리스트로 흡수되는 contract drift 차단.
         assert "positions" not in result["bot"]
@@ -529,7 +557,9 @@ class TestHandleBotStatus:
         svc, _ = _make_svc(bot=None)
 
         with pytest.raises(BotNotFoundError) as exc:
-            await _handle_bot_status(svc, {"bot_id": "missing"}, "admin-master")
+            await _handle_bot_status(
+                svc, BotStatusRequest(bot_id="missing"), "admin-master"
+            )
 
         assert exc.value.code == BOT_NOT_FOUND_CODE
 
@@ -538,7 +568,7 @@ class TestHandleBotStatus:
         bot = _make_bot(info={"bot_id": "bot-1", "strategy_id": ""})
         svc, audit_log = _make_svc(bot=bot)
 
-        await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        await _handle_bot_status(svc, BotStatusRequest(bot_id="bot-1"), "admin-master")
 
         assert audit_log is not None
         audit_log.assert_not_awaited()
@@ -548,7 +578,9 @@ class TestHandleBotStatus:
         bot = _make_bot(info={"bot_id": "bot-1", "strategy_id": ""})
         svc, _ = _make_svc(bot=bot, with_audit_logger=False)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result == {"bot": {"bot_id": "bot-1", "strategy_id": ""}}
 
@@ -568,7 +600,9 @@ class TestHandleBotStatus:
 
         svc, _ = _make_svc(bot=bot, strategy_registry=strategy_registry)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result["bot"]["strategy_name"] == "MyStrategy"
         assert result["bot"]["strategy_author_name"] == "alice"
@@ -594,7 +628,9 @@ class TestHandleBotStatus:
 
         svc, _ = _make_svc(bot=bot, treasury_manager=treasury_manager)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert result["bot"]["budget"] == {
             "allocated": 10000.0,
@@ -614,7 +650,9 @@ class TestHandleBotStatus:
 
         svc, _ = _make_svc(bot=bot, treasury_manager=treasury_manager)
 
-        result = await _handle_bot_status(svc, {"bot_id": "bot-1"}, "admin-master")
+        result = await _handle_bot_status(
+            svc, BotStatusRequest(bot_id="bot-1"), "admin-master"
+        )
 
         assert "budget" not in result["bot"]
 

@@ -17,6 +17,7 @@ from ante.bot.exceptions import InvalidSignalKey
 from ante.bot.signal_channel_registry import SignalChannelRegistry
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import _handle_signal_connect
+from ante.ipc.requests import SignalConnectRequest
 
 pytestmark = pytest.mark.asyncio
 
@@ -51,7 +52,7 @@ async def test_handshake_ok_logs_connect_audit_once() -> None:
     audit.log = AsyncMock()
     svc = _svc(audit_logger=audit)
 
-    await _handle_signal_connect(svc, {"key": "sk_secret"}, "ipc")
+    await _handle_signal_connect(svc, SignalConnectRequest(key="sk_secret"), "ipc")
 
     audit.log.assert_awaited_once()
     kwargs = audit.log.await_args.kwargs
@@ -68,14 +69,14 @@ async def test_gate_failure_does_not_log_audit() -> None:
     svc = _svc(audit_logger=audit, valid_key=False)
 
     with pytest.raises(InvalidSignalKey):
-        await _handle_signal_connect(svc, {"key": "sk_bad"}, "ipc")
+        await _handle_signal_connect(svc, SignalConnectRequest(key="sk_bad"), "ipc")
 
     audit.log.assert_not_awaited()
 
 
 async def test_headless_no_audit_logger_no_crash() -> None:
     svc = _svc(audit_logger=None)
-    result = await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+    result = await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
     assert result["bot_id"] == "bot-1"
 
 
@@ -93,7 +94,7 @@ async def test_invalid_key_dispatch_warns_without_sk_or_traceback(
         _handle_signal_connect,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
-        account_id_policy="none",
+        request_model=SignalConnectRequest,
     )
     server = IPCServer("/tmp/unused.sock", svc, cmd_reg)
     server._state = IPCServerState.RUNNING

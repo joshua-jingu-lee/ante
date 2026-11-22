@@ -52,27 +52,27 @@ intended_no_code:
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot info read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 458
+    line: 456
     snippet_sha1: "03fce6e088b7"
     reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
   - path: src/ante/cli/commands/bot.py
-    line: 513
+    line: 511
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot positions read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 602
+    line: 600
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — bot signal-key read IPC 분기 (#2112)"
   - path: src/ante/cli/commands/bot.py
-    line: 834
+    line: 832
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 868
+    line: 866
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/bot.py
-    line: 902
+    line: 900
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
