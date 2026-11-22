@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Any
 
 import click
 
@@ -72,7 +73,7 @@ def request(
     else:
         expires_at = ""
 
-    async def _create() -> dict:
+    async def _create() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
@@ -123,7 +124,7 @@ def approval_list(
             f"허용값: {sorted(t.value for t in ApprovalType)}"
         )
 
-    async def _list() -> list[dict]:
+    async def _list() -> list[dict[str, Any]]:
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
@@ -160,7 +161,7 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
     """결재 상세 조회."""
     fmt = get_formatter(ctx)
 
-    async def _info() -> dict:
+    async def _info() -> dict[str, Any]:
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
@@ -218,7 +219,7 @@ def review(
     fmt = get_formatter(ctx)
     reviewer = get_member_id(ctx)
 
-    async def _review() -> dict:
+    async def _review() -> dict[str, Any]:
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
@@ -279,10 +280,10 @@ def reopen(
                 f"--params는 JSON object여야 합니다 (현재 타입: {params_type})"
             )
 
-    async def _reopen() -> dict:
+    async def _reopen() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
-        args: dict = {"id": id}
+        args: dict[str, Any] = {"id": id}
         if body is not None:
             args["body"] = body
         if params is not None:
@@ -321,7 +322,7 @@ def audit_types(
             f"허용값: {sorted(s.value for s in ApprovalStatus)}"
         )
 
-    async def _list() -> list[dict]:
+    async def _list() -> list[dict[str, Any]]:
         from ante.approval import ApprovalService
         from ante.eventbus.bus import EventBus
 
@@ -370,7 +371,7 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _cancel() -> dict:
+    async def _cancel() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
@@ -397,7 +398,7 @@ def cancel(ctx: click.Context, id: str) -> None:
     fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
-    async def _cancel() -> dict:
+    async def _cancel() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("approval.cancel", {"id": id}, actor=requester)
@@ -417,7 +418,7 @@ def approve(ctx: click.Context, id: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _approve() -> dict:
+    async def _approve() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("approval.approve", {"id": id}, actor=actor)
@@ -438,7 +439,7 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _reject() -> dict:
+    async def _reject() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send(
