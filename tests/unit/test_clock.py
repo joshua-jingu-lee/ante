@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta, timezone, tzinfo
 
 import pytest
-from ante.core.clock import Clock, SystemClock, monotonic, now, set_clock, use_clock
 
 from ante.core import clock
+from ante.core.clock import Clock, SystemClock, monotonic, now, set_clock, use_clock
 
 _KST = timezone(timedelta(hours=9))
 _FIXED = datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC)
