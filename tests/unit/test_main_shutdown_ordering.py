@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from ante.account.errors import AccountStructuralChangeRequiresStoppedServerError
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer, IPCServerState
@@ -527,7 +528,7 @@ async def test_cold_path_guard_blocks_until_socket_unlinked(
         "stop_accepting 후에도 socket 파일은 유지되어야 한다 (cold-path guard용)"
     )
 
-    with pytest.raises(SystemExit):
+    with pytest.raises(AccountStructuralChangeRequiresStoppedServerError):
         _assert_no_active_runtime(fmt)
 
     # === drain_connections + unlink_socket 후: guard가 통과해야 한다 ===
@@ -535,7 +536,7 @@ async def test_cold_path_guard_blocks_until_socket_unlinked(
     server.unlink_socket()
     assert not Path(socket_path).exists()
 
-    # socket missing → stale PID 판정 → SystemExit 발생 안 함
+    # socket missing → stale PID 판정 → 예외 없음
     _assert_no_active_runtime(fmt)
 
 

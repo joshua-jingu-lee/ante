@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import click
 
+from ante.contracts.cli_errors import InvalidDateRangeError
+
 if TYPE_CHECKING:
     from ante.cli.formatter import OutputFormatter
 
@@ -120,8 +122,8 @@ def reject_inverted_date_range(
     - ``from_value``/``to_value`` 한쪽 또는 양쪽이 ``None`` → 통과 (옵션
       미지정/한쪽만 지정 분기 보존).
     - 둘 다 not ``None`` & 둘 다 ``date.fromisoformat`` 파싱 성공 &
-      ``from_date > to_date`` → ``fmt.error(code="INVALID_DATE_RANGE")`` 후
-      ``SystemExit(1)``.
+      ``from_date > to_date`` → ``InvalidDateRangeError``
+      (``INVALID_DATE_RANGE``).
     - 그 외(파싱 실패 포함) → 통과.
     """
     if from_value is None or to_value is None:
@@ -132,11 +134,9 @@ def reject_inverted_date_range(
     except (ValueError, TypeError):
         return
     if from_date > to_date:
-        fmt.error(
-            f"{from_label}({from_value})이(가) {to_label}({to_value}) 이후입니다.",
-            code="INVALID_DATE_RANGE",
+        raise InvalidDateRangeError(
+            f"{from_label}({from_value})이(가) {to_label}({to_value}) 이후입니다."
         )
-        raise SystemExit(1)
 
 
 def reject_invalid_new_account_id(
@@ -152,16 +152,11 @@ def reject_invalid_new_account_id(
     신 코드를 도입하지 않는다.
 
     Raises:
-        SystemExit: invalid account_id일 때 exit code 1로 종료.
+        InvalidAccountIdError: invalid account_id.
     """
-    from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import validate_new_account_id
 
-    try:
-        return validate_new_account_id(account_id, context=context)
-    except InvalidAccountIdError as e:
-        fmt.error(str(e), code=e.code)
-        raise SystemExit(1) from e
+    return validate_new_account_id(account_id, context=context)
 
 
 def reject_invalid_account_id(
@@ -180,14 +175,9 @@ def reject_invalid_account_id(
     책임은 호출 표면에 있다. positional required arg(``account info``/
     ``account credentials``)는 omitted가 없어 전 입력을 본 helper로 검증한다.
     """
-    from ante.account.errors import InvalidAccountIdError
     from ante.account.scoping import require_account_id
 
-    try:
-        return require_account_id(account_id, context=context)
-    except InvalidAccountIdError as e:
-        fmt.error(str(e), code=e.code)
-        raise SystemExit(1) from e
+    return require_account_id(account_id, context=context)
 
 
 __all__ = [

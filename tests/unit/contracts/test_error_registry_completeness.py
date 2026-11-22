@@ -45,16 +45,7 @@ KNOWN_LIMIT_CODES = frozenset(
     }
 )
 
-KNOWN_LIMIT_CODES_NOT_YET_REGISTERED = frozenset(
-    {
-        "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
-        "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
-        "ACCOUNT_DUPLICATE_CREDENTIAL_KEY",
-        "ACCOUNT_INVALID_TIMEZONE",
-        "ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
-        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
-    }
-)
+KNOWN_LIMIT_CODES_NOT_YET_REGISTERED: frozenset[str] = frozenset()
 
 
 def registry_codes() -> frozenset[str]:

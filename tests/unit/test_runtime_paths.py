@@ -23,7 +23,10 @@ from unittest.mock import patch
 
 import pytest
 
+from ante.account.errors import AccountStructuralChangeRequiresStoppedServerError
 from ante.config import Config
+
+_GUARD_CODE = "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER"
 
 # ── Task 1: config resolver 회귀 ─────────────────────────────────
 
@@ -246,10 +249,12 @@ def test_account_cold_path_guard_uses_runtime_resolver_under_chdir(
     fmt = OutputFormatter(fmt="text")
 
     with patch("ante.main.read_pid_file", return_value=os.getpid()):
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(
+            AccountStructuralChangeRequiresStoppedServerError
+        ) as exc_info:
             _assert_no_active_runtime(fmt)
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == _GUARD_CODE
 
 
 # ── #1160: startup booting marker cold-path guard ────────────────
@@ -271,10 +276,10 @@ def test_account_cold_path_guard_blocks_during_booting_with_matching_marker(
     assert not config.runtime_socket_path().exists()
 
     fmt = OutputFormatter(fmt="text")
-    with pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(AccountStructuralChangeRequiresStoppedServerError) as exc_info:
         _assert_no_active_runtime(fmt)
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == _GUARD_CODE
 
 
 def test_account_cold_path_guard_passes_when_marker_has_different_pid(
@@ -470,12 +475,14 @@ def test_account_cold_path_guard_uses_explicit_config_dir_pid(
 
     runner_ctx = click.Context(_runner, obj={"config_dir": cfg_a})
     with runner_ctx:
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(
+            AccountStructuralChangeRequiresStoppedServerError
+        ) as exc_info:
             _assert_no_active_runtime(fmt)
 
-    assert exc_info.value.code == 1, (
+    assert exc_info.value.code == _GUARD_CODE, (
         f"cold-path guard가 A의 active runtime을 감지하지 못했다 — "
-        f"default config_dir만 본 것. exit_code={exc_info.value.code}"
+        f"default config_dir만 본 것. code={exc_info.value.code}"
     )
 
 
