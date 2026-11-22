@@ -86,7 +86,7 @@
     "src/ante/cli/commands/strategy.py": 68,
     "src/ante/cli/commands/system.py": 9,
     "src/ante/cli/commands/trade.py": 7,
-    "src/ante/cli/commands/treasury.py": 44,
+    "src/ante/cli/commands/treasury.py": 42,
     "src/ante/cli/commands/update.py": 35
   }
 }

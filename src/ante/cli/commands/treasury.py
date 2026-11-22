@@ -20,7 +20,7 @@ from ante.cli._validators import (
     validate_positive_finite_amount,
 )
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id as _get_member_id
 from ante.cli.middleware import require_auth, require_scope
@@ -328,7 +328,9 @@ def set_balance(ctx: click.Context, amount: float, account_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("treasury:admin")
-def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) -> None:
+def allocate(
+    ctx: click.Context, bot_id: str, amount: float, account_id: str
+) -> CommandResult:
     """봇에 예산 할당."""
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
@@ -349,14 +351,13 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
     result = _run(_run_allocate())
 
     if result.get("success"):
-        fmt.success(
-            f"예산 할당 완료: {bot_id} <- {amount:,.0f}원",
-            {"bot_id": bot_id, "amount": amount, "account_id": account_id},
+        return CommandResult(
+            data={"bot_id": bot_id, "amount": amount, "account_id": account_id},
+            message=f"예산 할당 완료: {bot_id} <- {amount:,.0f}원",
         )
-    else:
-        raise TreasuryAllocateFailedError(
-            f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)"
-        )
+    raise TreasuryAllocateFailedError(
+        f"예산 할당 실패: 미할당 자금 부족 또는 금액 오류 (요청: {amount:,.0f}원)"
+    )
 
 
 @treasury.command()
@@ -366,7 +367,9 @@ def allocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) ->
 @click.pass_context
 @require_auth
 @require_scope("treasury:admin")
-def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) -> None:
+def deallocate(
+    ctx: click.Context, bot_id: str, amount: float, account_id: str
+) -> CommandResult:
     """봇 예산 회수."""
     fmt = get_formatter(ctx)
     actor = _get_member_id(ctx)
@@ -387,14 +390,13 @@ def deallocate(ctx: click.Context, bot_id: str, amount: float, account_id: str) 
     result = _run(_run_deallocate())
 
     if result.get("success"):
-        fmt.success(
-            f"예산 회수 완료: {bot_id} -> {amount:,.0f}원",
-            {"bot_id": bot_id, "amount": amount, "account_id": account_id},
+        return CommandResult(
+            data={"bot_id": bot_id, "amount": amount, "account_id": account_id},
+            message=f"예산 회수 완료: {bot_id} -> {amount:,.0f}원",
         )
-    else:
-        raise TreasuryDeallocateFailedError(
-            f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)"
-        )
+    raise TreasuryDeallocateFailedError(
+        f"예산 회수 실패: 가용 예산 부족 (요청: {amount:,.0f}원)"
+    )
 
 
 @treasury.command()
