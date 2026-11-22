@@ -300,13 +300,27 @@ def _invoke_case(branch: str, mode: str) -> tuple[Result, AsyncMock]:
 _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty_ipc", "text"): ("{'message': '등록된 봇이 없습니다.', 'bots': []}\n"),
     ("list_empty_ipc", "json"): (
-        '{\n  "message": "등록된 봇이 없습니다.",\n  "bots": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 봇이 없습니다.",\n'
+        '    "bots": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_empty_direct", "text"): (
         "{'message': '등록된 봇이 없습니다.', 'bots': []}\n"
     ),
     ("list_empty_direct", "json"): (
-        '{\n  "message": "등록된 봇이 없습니다.",\n  "bots": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 봇이 없습니다.",\n'
+        '    "bots": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows_ipc", "text"): (
         "      bot_id |         name |  strategy_id |   account_id |       "
@@ -320,24 +334,28 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows_ipc", "json"): (
         "{\n"
-        '  "bots": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "name": "테스트 봇",\n'
-        '      "strategy_id": "strat-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "status": "stopped",\n'
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "bot_id": "bot-2",\n'
-        '      "name": "momentum",\n'
-        '      "strategy_id": "strat-2",\n'
-        '      "account_id": "acc-2",\n'
-        '      "status": "running",\n'
-        '      "created_at": "2026-01-02T00:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bots": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "name": "테스트 봇",\n'
+        '        "strategy_id": "strat-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "status": "stopped",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "bot_id": "bot-2",\n'
+        '        "name": "momentum",\n'
+        '        "strategy_id": "strat-2",\n'
+        '        "account_id": "acc-2",\n'
+        '        "status": "running",\n'
+        '        "created_at": "2026-01-02T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_rows_direct", "text"): (
@@ -352,24 +370,28 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows_direct", "json"): (
         "{\n"
-        '  "bots": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "name": "테스트 봇",\n'
-        '      "strategy_id": "strat-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "status": "stopped",\n'
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "bot_id": "bot-2",\n'
-        '      "name": "momentum",\n'
-        '      "strategy_id": "strat-2",\n'
-        '      "account_id": "acc-2",\n'
-        '      "status": "running",\n'
-        '      "created_at": "2026-01-02T00:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bots": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "name": "테스트 봇",\n'
+        '        "strategy_id": "strat-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "status": "stopped",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "bot_id": "bot-2",\n'
+        '        "name": "momentum",\n'
+        '        "strategy_id": "strat-2",\n'
+        '        "account_id": "acc-2",\n'
+        '        "status": "running",\n'
+        '        "created_at": "2026-01-02T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_account_ipc", "text"): (
@@ -382,16 +404,20 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_account_ipc", "json"): (
         "{\n"
-        '  "bots": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "name": "테스트 봇",\n'
-        '      "strategy_id": "strat-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "status": "stopped",\n'
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bots": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "name": "테스트 봇",\n'
+        '        "strategy_id": "strat-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "status": "stopped",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_account_direct", "text"): (
@@ -404,16 +430,20 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_account_direct", "json"): (
         "{\n"
-        '  "bots": [\n'
-        "    {\n"
-        '      "bot_id": "bot-1",\n'
-        '      "name": "테스트 봇",\n'
-        '      "strategy_id": "strat-1",\n'
-        '      "account_id": "acc-1",\n'
-        '      "status": "stopped",\n'
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bots": [\n'
+        "      {\n"
+        '        "bot_id": "bot-1",\n'
+        '        "name": "테스트 봇",\n'
+        '        "strategy_id": "strat-1",\n'
+        '        "account_id": "acc-1",\n'
+        '        "status": "stopped",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info_ipc", "text"): (
@@ -426,13 +456,17 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_ipc", "json"): (
         "{\n"
-        '  "bot_id": "bot-1",\n'
-        '  "name": "테스트 봇",\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "account_id": "acc-1",\n'
-        '  "status": "stopped",\n'
-        '  "interval_seconds": 60,\n'
-        '  "created_at": "2026-01-01T00:00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "name": "테스트 봇",\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "account_id": "acc-1",\n'
+        '    "status": "stopped",\n'
+        '    "interval_seconds": 60,\n'
+        '    "created_at": "2026-01-01T00:00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("info_direct", "text"): (
@@ -445,13 +479,17 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_direct", "json"): (
         "{\n"
-        '  "bot_id": "bot-1",\n'
-        '  "name": "테스트 봇",\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "account_id": "acc-1",\n'
-        '  "status": "stopped",\n'
-        '  "interval_seconds": 60,\n'
-        '  "created_at": "2026-01-01T00:00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "name": "테스트 봇",\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "account_id": "acc-1",\n'
+        '    "status": "stopped",\n'
+        '    "interval_seconds": 60,\n'
+        '    "created_at": "2026-01-01T00:00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("info_minimal_direct", "text"): (
@@ -464,10 +502,14 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_minimal_direct", "json"): (
         "{\n"
-        '  "bot_id": "bot-3",\n'
-        '  "name": "legacy",\n'
-        '  "strategy_id": "strat-3",\n'
-        '  "status": "stopped"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-3",\n'
+        '    "name": "legacy",\n'
+        '    "strategy_id": "strat-3",\n'
+        '    "status": "stopped"\n'
+        "  }\n"
         "}\n"
     ),
     ("create_account", "text"): ("봇 생성 완료: bot-9\n"),
@@ -522,13 +564,27 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("signal_key_ipc", "text"): ("  Bot ID     : bot-1\n  Signal Key : sk-ipc-abc\n"),
     ("signal_key_ipc", "json"): (
-        '{\n  "bot_id": "bot-1",\n  "signal_key": "sk-ipc-abc"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "signal_key": "sk-ipc-abc"\n'
+        "  }\n"
+        "}\n"
     ),
     ("signal_key_direct", "text"): (
         "  Bot ID     : bot-1\n  Signal Key : sk-direct-def\n"
     ),
     ("signal_key_direct", "json"): (
-        '{\n  "bot_id": "bot-1",\n  "signal_key": "sk-direct-def"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "signal_key": "sk-direct-def"\n'
+        "  }\n"
+        "}\n"
     ),
     ("signal_key_rotate", "text"): ("시그널 키 재발급 완료: bot-1\n"),
     ("signal_key_rotate", "json"): (
@@ -546,13 +602,27 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "{'message': '보유 포지션 없음', 'positions': []}\n"
     ),
     ("positions_empty_ipc", "json"): (
-        '{\n  "message": "보유 포지션 없음",\n  "positions": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "보유 포지션 없음",\n'
+        '    "positions": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("positions_empty_direct", "text"): (
         "{'message': '보유 포지션 없음', 'positions': []}\n"
     ),
     ("positions_empty_direct", "json"): (
-        '{\n  "message": "보유 포지션 없음",\n  "positions": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "보유 포지션 없음",\n'
+        '    "positions": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("positions_rows_ipc", "text"): (
         "      symbol |     quantity | avg_entry_price | realized_pnl\n"
@@ -562,20 +632,24 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("positions_rows_ipc", "json"): (
         "{\n"
-        '  "positions": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "quantity": 10.0,\n'
-        '      "avg_entry_price": 70000.0,\n'
-        '      "realized_pnl": 1500.0\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "quantity": 3.0,\n'
-        '      "avg_entry_price": 120000.0,\n'
-        '      "realized_pnl": 0\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "positions": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "quantity": 10.0,\n'
+        '        "avg_entry_price": 70000.0,\n'
+        '        "realized_pnl": 1500.0\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "quantity": 3.0,\n'
+        '        "avg_entry_price": 120000.0,\n'
+        '        "realized_pnl": 0\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("positions_rows_direct", "text"): (
@@ -586,40 +660,56 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("positions_rows_direct", "json"): (
         "{\n"
-        '  "positions": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "quantity": 10.0,\n'
-        '      "avg_entry_price": 70000.0,\n'
-        '      "realized_pnl": 1500.0\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "quantity": 3.0,\n'
-        '      "avg_entry_price": 120000.0,\n'
-        '      "realized_pnl": 0\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "positions": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "quantity": 10.0,\n'
+        '        "avg_entry_price": 70000.0,\n'
+        '        "realized_pnl": 1500.0\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "quantity": 3.0,\n'
+        '        "avg_entry_price": 120000.0,\n'
+        '        "realized_pnl": 0\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("update", "text"): ("봇 설정 수정 완료: bot-1\n"),
     ("update", "json"): (
         "{\n"
-        '  "bot_id": "bot-1",\n'
-        '  "updates": {\n'
-        '    "name": "새 이름",\n'
-        '    "budget": 500000.0\n'
-        "  },\n"
-        '  "bot": {\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
         '    "bot_id": "bot-1",\n'
-        '    "name": "새 이름",\n'
-        '    "status": "stopped"\n'
+        '    "updates": {\n'
+        '      "name": "새 이름",\n'
+        '      "budget": 500000.0\n'
+        "    },\n"
+        '    "bot": {\n'
+        '      "bot_id": "bot-1",\n'
+        '      "name": "새 이름",\n'
+        '      "status": "stopped"\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
     ("logs_empty", "text"): ("(logs 없음)\n"),
     ("logs_empty", "json"): (
-        '{\n  "bot_id": "bot-1",\n  "logs": [],\n  "total": 0\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "logs": [],\n'
+        '    "total": 0\n'
+        "  }\n"
+        "}\n"
     ),
     ("logs_rows", "text"): (
         "   timestamp |       result |      message\n"
@@ -629,41 +719,53 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("logs_rows", "json"): (
         "{\n"
-        '  "bot_id": "bot-1",\n'
-        '  "logs": [\n'
-        "    {\n"
-        '      "event_id": "evt-1",\n'
-        '      "timestamp": "2026-01-03T09:00:00",\n'
-        '      "result": "ok",\n'
-        '      "message": "step 완료"\n'
-        "    },\n"
-        "    {\n"
-        '      "event_id": "evt-2",\n'
-        '      "timestamp": "2026-01-03T09:01:00",\n'
-        '      "result": "error",\n'
-        '      "message": "주문 거부"\n'
-        "    }\n"
-        "  ],\n"
-        '  "total": 7\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot_id": "bot-1",\n'
+        '    "logs": [\n'
+        "      {\n"
+        '        "event_id": "evt-1",\n'
+        '        "timestamp": "2026-01-03T09:00:00",\n'
+        '        "result": "ok",\n'
+        '        "message": "step 완료"\n'
+        "      },\n"
+        "      {\n"
+        '        "event_id": "evt-2",\n'
+        '        "timestamp": "2026-01-03T09:01:00",\n'
+        '        "result": "error",\n'
+        '        "message": "주문 거부"\n'
+        "      }\n"
+        "    ],\n"
+        '    "total": 7\n'
+        "  }\n"
         "}\n"
     ),
     ("start", "text"): ("봇 시작 완료: bot-1\n"),
     ("start", "json"): (
         "{\n"
-        '  "bot": {\n'
-        '    "bot_id": "bot-1",\n'
-        '    "status": "running",\n'
-        '    "name": "테스트 봇"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot": {\n'
+        '      "bot_id": "bot-1",\n'
+        '      "status": "running",\n'
+        '      "name": "테스트 봇"\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
     ("stop", "text"): ("봇 중지 완료: bot-1\n"),
     ("stop", "json"): (
         "{\n"
-        '  "bot": {\n'
-        '    "bot_id": "bot-1",\n'
-        '    "status": "stopped",\n'
-        '    "name": "테스트 봇"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot": {\n'
+        '      "bot_id": "bot-1",\n'
+        '      "status": "stopped",\n'
+        '      "name": "테스트 봇"\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -686,28 +788,32 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("status_full", "json"): (
         "{\n"
-        '  "bot": {\n'
-        '    "bot_id": "bot-1",\n'
-        '    "name": "테스트 봇",\n'
-        '    "status": "error",\n'
-        '    "account_id": "acc-1",\n'
-        '    "strategy_id": "strat-1",\n'
-        '    "strategy_name": "모멘텀",\n'
-        '    "interval_seconds": 60,\n'
-        '    "started_at": "2026-01-03T09:00:00",\n'
-        '    "stopped_at": "2026-01-03T10:00:00",\n'
-        '    "error_message": "step timeout",\n'
-        '    "budget": {\n'
-        '      "allocated": 1000000.0,\n'
-        '      "available": 250000.0\n'
-        "    },\n"
-        '    "positions": [\n'
-        "      {\n"
-        '        "symbol": "005930",\n'
-        '        "quantity": 10.0,\n'
-        '        "avg_entry_price": 70000.0\n'
-        "      }\n"
-        "    ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot": {\n'
+        '      "bot_id": "bot-1",\n'
+        '      "name": "테스트 봇",\n'
+        '      "status": "error",\n'
+        '      "account_id": "acc-1",\n'
+        '      "strategy_id": "strat-1",\n'
+        '      "strategy_name": "모멘텀",\n'
+        '      "interval_seconds": 60,\n'
+        '      "started_at": "2026-01-03T09:00:00",\n'
+        '      "stopped_at": "2026-01-03T10:00:00",\n'
+        '      "error_message": "step timeout",\n'
+        '      "budget": {\n'
+        '        "allocated": 1000000.0,\n'
+        '        "available": 250000.0\n'
+        "      },\n"
+        '      "positions": [\n'
+        "        {\n"
+        '          "symbol": "005930",\n'
+        '          "quantity": 10.0,\n'
+        '          "avg_entry_price": 70000.0\n'
+        "        }\n"
+        "      ]\n"
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -720,15 +826,19 @@ _BOT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("status_min", "json"): (
         "{\n"
-        '  "bot": {\n'
-        '    "bot_id": "bot-2",\n'
-        '    "name": "momentum",\n'
-        '    "status": "stopped",\n'
-        '    "account_id": "acc-2",\n'
-        '    "strategy_id": "strat-2",\n'
-        '    "interval_seconds": null,\n'
-        '    "budget": {},\n'
-        '    "positions": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "bot": {\n'
+        '      "bot_id": "bot-2",\n'
+        '      "name": "momentum",\n'
+        '      "status": "stopped",\n'
+        '      "account_id": "acc-2",\n'
+        '      "strategy_id": "strat-2",\n'
+        '      "interval_seconds": null,\n'
+        '      "budget": {},\n'
+        '      "positions": []\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
