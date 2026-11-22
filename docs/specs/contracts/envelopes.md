@@ -152,11 +152,14 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
   `error`)를 그대로 사용해 CLI envelope을 1회 구성한다. IPC `result`를 다시
   IPC envelope으로 재감싸서 CLI에 넘기지 않는다.
 - **CLI IPC 헬퍼 계약**: `src/ante/cli/commands/ipc_helpers.py`의 `ipc_send`는
-  IPC 성공 응답의 `result`만 caller에 반환하고, IPC 에러 응답은
-  `ClickException`에 안정 코드/메시지를 부착해 raise 한다. CLI leaf는 이를
-  받아 `OutputFormatter.success(...)` 또는 `OutputFormatter.error(code, message)`로
-  CLI envelope 1회 wrapping 한다. 이 동형은 `ante bot start/stop/status`의 IPC
-  passthrough reference 패턴이다 (`src/ante/cli/commands/bot.py`).
+  IPC 성공 응답의 `result`만 호출자에 돌려주고, 실패는 타입 예외로 올린다:
+  `IPCServerNotRunningError`·`IPCClientTimeoutError`, 그리고 서버의
+  `error.code`/`error.message`를 그대로 가진 `IPCRemoteError`(없으면 `UNKNOWN`/
+  `알 수 없는 오류`). CLI leaf는 이 예외를 잡지 않고, 진입점 훅이 CLI error
+  envelope을 1회 만든다(text 모드는 `Error: <code>: <message>` 한 줄). 다만 서버
+  미기동에서 직접 실행으로 넘어가는 명령은 `IPCServerNotRunningError`만 잡고,
+  `bot signal-key`(조회)는 코드가 `BOT_NOT_FOUND`인 `IPCRemoteError`만 잡으며,
+  `rule update`·`strategy set-status`는 포괄 `except` 앞에서 셋을 그대로 다시 올린다.
 - **streaming 핸드셰이크 passthrough(`signal connect`)**: `signal connect`의 핸드셰이크
   단계는 데몬이 생성한 IPC error envelope의 `error.code`/`error.message`를 CLI error
   envelope으로 **1회만** 옮긴다. 이때 `message`는 **verbatim passthrough**한다 —

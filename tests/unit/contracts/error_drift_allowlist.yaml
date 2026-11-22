@@ -18,6 +18,7 @@
 #   pending_migration
 #     baseline 시점에 class-level code 도 없고 EXCEPTION_TO_SPEC 등록도
 #     안 된 *Error class. #1842/#1843 이 단계적으로 등록한다.
+#     등록하지 않는 class(인스턴스가 ``code`` 를 갖는 ``IPCRemoteError``)도 여기 둔다.
 #
 # Anchor 정책 (#1841 plan):
 #   - fmt entry: (path, line, snippet_sha1) 3중 anchor.
