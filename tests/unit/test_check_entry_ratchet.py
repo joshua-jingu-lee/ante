@@ -881,6 +881,24 @@ def test_near_position_literal_that_is_not_counted(tmp_path: Path, source: str) 
     assert _codes(tmp_path, source) == frozenset()
 
 
+def test_success_data_dict_is_not_a_position(tmp_path: Path) -> None:
+    assert _codes(tmp_path, 'fmt.success("m", data={"code": "X"})') == frozenset()
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        pytest.param('fmt.success("m", {"code": "X"})', id="positional"),
+        pytest.param('fmt.success("m", extra={"code": "X"})', id="other-keyword"),
+        pytest.param('fmt.error("m", data={"code": "X"})', id="error-data"),
+        pytest.param('f(data={"code": "X"})', id="bare-call-data"),
+        pytest.param('fmt.success(data={"k": {"code": "X"}})', id="nested"),
+    ],
+)
+def test_other_code_dict_is_a_position(tmp_path: Path, source: str) -> None:
+    assert _codes(tmp_path, source) == {"X"}
+
+
 def test_empty_code_list_is_valid(tmp_path: Path, capsys: Capsys) -> None:
     root = _tree(tmp_path)
     _write(
