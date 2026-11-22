@@ -2,32 +2,17 @@
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime, timezone
+from datetime import UTC, date, datetime
 
 import pytest
 
-from ante.feed.pipeline import scheduler
 from ante.feed.pipeline.scheduler import (
     generate_backfill_dates,
     generate_daily_date,
     is_business_day,
 )
 
-
-class _FakeDatetime:
-    """scheduler 모듈의 datetime을 대체해 now()를 고정한다.
-
-    실제 tzinfo 변환을 보존하기 위해 fixed UTC 시각에 대해 정상적인
-    astimezone 변환을 수행한다. (OS local TZ와 무관하게 결정적.)
-    """
-
-    _fixed_utc: datetime
-
-    @classmethod
-    def now(cls, tz: timezone | None = None) -> datetime:
-        if tz is None:
-            return cls._fixed_utc
-        return cls._fixed_utc.astimezone(tz)
+_UTC_2330 = datetime(2026, 1, 1, 23, 30, tzinfo=UTC)
 
 
 class TestGenerateBackfillDates:
@@ -65,16 +50,14 @@ class TestGenerateBackfillDates:
             "2026-01-05",
         ]
 
-    def test_end_defaults_to_kst_today(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("manual_clock", [_UTC_2330], indirect=True)
+    def test_end_defaults_to_kst_today(self, manual_clock) -> None:
         """end가 None이면 KST 기준 오늘을 종료일로 사용한다(OS TZ 무관).
 
         UTC 2026-01-01 23:30 = KST 2026-01-02 08:30 이므로 KST today는
         2026-01-02 여야 한다. OS local date.today()였다면 UTC 환경에서
         2026-01-01 로 어긋난다.
         """
-        _FakeDatetime._fixed_utc = datetime(2026, 1, 1, 23, 30, tzinfo=UTC)
-        monkeypatch.setattr(scheduler, "datetime", _FakeDatetime)
-
         # KST today == 2026-01-02. 시작일을 그 날로 두면 end 기본값도
         # 2026-01-02 이므로 단일 날짜만 생성된다.
         dates = list(generate_backfill_dates("2026-01-02"))
@@ -174,18 +157,14 @@ class TestGenerateDailyDate:
         result = generate_daily_date(reference=date(2026, 1, 5))
         assert result == "2026-01-04"
 
-    def test_default_reference_is_kst_today(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    @pytest.mark.parametrize("manual_clock", [_UTC_2330], indirect=True)
+    def test_default_reference_is_kst_today(self, manual_clock) -> None:
         """기준일 미지정 시 KST 기준 오늘의 전일을 반환한다(OS TZ 무관).
 
         UTC 2026-01-01 23:30 = KST 2026-01-02 08:30 이므로 KST today는
         2026-01-02, 전일은 2026-01-01 이다. OS local date.today()였다면
         UTC 환경에서 today=2026-01-01, 전일=2025-12-31 로 어긋난다.
         """
-        _FakeDatetime._fixed_utc = datetime(2026, 1, 1, 23, 30, tzinfo=UTC)
-        monkeypatch.setattr(scheduler, "datetime", _FakeDatetime)
-
         assert generate_daily_date() == "2026-01-01"
 
     def test_return_format_is_iso(self) -> None:

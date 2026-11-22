@@ -170,37 +170,22 @@
     },
     "src/ante/feed/cli_scheduler.py": {
       "ASYNC109": 1,
-      "BLE001": 2,
-      "TID251": 1
+      "BLE001": 2
     },
     "src/ante/feed/pipeline/backfill_runner.py": {
-      "BLE001": 3,
-      "TID251": 3
-    },
-    "src/ante/feed/pipeline/checkpoint.py": {
-      "TID251": 1
+      "BLE001": 3
     },
     "src/ante/feed/pipeline/daily_runner.py": {
       "BLE001": 3
     },
     "src/ante/feed/pipeline/dart_collector.py": {
-      "BLE001": 1,
-      "TID251": 1
+      "BLE001": 1
     },
     "src/ante/feed/pipeline/data_go_kr_collector.py": {
       "BLE001": 1
     },
     "src/ante/feed/pipeline/indicator_calculator.py": {
       "BLE001": 1
-    },
-    "src/ante/feed/pipeline/orchestrator.py": {
-      "TID251": 3
-    },
-    "src/ante/feed/pipeline/scheduler.py": {
-      "TID251": 2
-    },
-    "src/ante/feed/sources/base.py": {
-      "TID251": 3
     },
     "src/ante/feed/sources/dart.py": {
       "ASYNC240": 1,

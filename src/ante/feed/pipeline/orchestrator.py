@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from datetime import UTC, date, datetime, timedelta, timezone
+from datetime import UTC, date, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from ante.core import clock
 from ante.data.normalizer import DARTNormalizer, DataGoKrNormalizer
 from ante.data.store import ParquetStore
 from ante.feed.models.result import CollectionResult
@@ -81,7 +82,7 @@ class FeedOrchestrator:
         진입 차단).
         """
         feed_dir = data_path / ".feed"
-        started_at = datetime.now(tz=UTC)
+        started_at = clock.now(UTC)
 
         coded_date_error = BackfillRunner._validate_backfill_since(config)
         if coded_date_error is not None:
@@ -131,7 +132,7 @@ class FeedOrchestrator:
         같이 명시 지정된 값은 그대로 forward 된다.
         """
         feed_dir = data_path / ".feed"
-        started_at = datetime.now(tz=UTC)
+        started_at = clock.now(UTC)
 
         if not self._acquire_lock(feed_dir):
             return _make_result(
@@ -178,7 +179,7 @@ class FeedOrchestrator:
             return False
 
         kst = timezone(timedelta(hours=9))
-        now_kst = datetime.now(tz=kst)
+        now_kst = clock.now(kst)
         current_hour_min = now_kst.strftime("%H:%M")
 
         for window in blocked_hours:
