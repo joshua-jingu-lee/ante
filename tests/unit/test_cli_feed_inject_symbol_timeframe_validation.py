@@ -98,7 +98,7 @@ class TestFeedInjectTimeframeValidation:
     """feed inject --timeframe canonical 검증 (CLI 경계 단일 지점)."""
 
     def test_invalid_timeframe_text_mode_exit1_message_only(self, tmp_path):
-        """비-canonical timeframe: text 모드 exit 1 + 메시지만(code 미출력)."""
+        """비-canonical timeframe: text 모드 exit 1 + ``Error: <code>: <message>``."""
         runner = _make_runner()
         csv = _write_csv(tmp_path)
         data_path = tmp_path / "data"
@@ -117,8 +117,9 @@ class TestFeedInjectTimeframeValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
         assert "oracle-invalid-timeframe" in result.output
-        # text 모드: OutputFormatter.error는 code를 출력하지 않는다.
-        assert "FEED_INJECT_INVALID_TIMEFRAME" not in result.output
+        assert result.output.startswith(
+            "Error: FEED_INJECT_INVALID_TIMEFRAME: 유효하지 않은 타임프레임"
+        )
         _assert_no_parquet_artifact(data_path)
 
     def test_invalid_timeframe_json_mode_exit1_with_code(self, tmp_path):
@@ -197,7 +198,7 @@ class TestFeedInjectSymbolValidation:
     """feed inject --symbol KRX shape 검증."""
 
     def test_krx_non_six_digit_symbol_text_mode_exit1(self, tmp_path):
-        """비-6자리 symbol: text 모드 exit 1 + 메시지만(code 미출력)."""
+        """비-6자리 symbol: text 모드 exit 1 + ``Error: <code>: <message>``."""
         runner = _make_runner()
         csv = _write_csv(tmp_path)
         data_path = tmp_path / "data"
@@ -209,7 +210,9 @@ class TestFeedInjectSymbolValidation:
         assert result.exit_code == 1
         assert "유효하지 않은 종목 코드" in result.output
         assert "ABCDEF" in result.output
-        assert "FEED_INJECT_INVALID_SYMBOL" not in result.output
+        assert result.output.startswith(
+            "Error: FEED_INJECT_INVALID_SYMBOL: 유효하지 않은 종목 코드"
+        )
         _assert_no_parquet_artifact(data_path)
 
     def test_krx_non_six_digit_symbol_json_mode_with_code(self, tmp_path):

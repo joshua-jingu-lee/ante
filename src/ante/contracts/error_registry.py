@@ -65,6 +65,7 @@ from ante.contracts.cli_errors import (
     AlreadyRunningError,
     ApprovalInvalidStatusError,
     ApprovalInvalidTypeError,
+    BackfillStopRequestedError,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
@@ -77,18 +78,32 @@ from ante.contracts.cli_errors import (
     CliAuthRequiredError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliInvalidDateError,
+    CliInvalidScheduleTimeError,
     CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
     CliPermissionDeniedError,
     CliStrategyError,
+    ConfigInvalidGeneralError,
+    ConfigInvalidGuardError,
+    ConfigInvalidLogLevelError,
+    ConfigInvalidNiceValueError,
+    ConfigInvalidValueError,
     ConfigKeyNotFoundError,
+    ConfigUnsupportedKeyError,
     DataError,
     DataInvalidDatasetIdError,
     DataInvalidFilterError,
     DatasetNotFoundError,
     DataValidateInvalidSymbolError,
     DataValidateInvalidTimeframeError,
+    FeedFileNotFoundError,
+    FeedInjectInvalidSymbolError,
+    FeedInjectInvalidTimeframeError,
+    FeedInjectValidationError,
+    FeedNotInitializedError,
+    GuardPermanentlyBlockedError,
     InstrumentEmptyFileError,
     InstrumentInvalidExchangeError,
     InstrumentInvalidFileFormatError,
@@ -901,6 +916,81 @@ _DB_ENCRYPTION_KEY_INVALID_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="internal",
 )
 
+_BACKFILL_STOP_REQUESTED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BACKFILL_STOP_REQUESTED",
+    category="state_conflict",
+)
+
+_CLI_INVALID_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_INVALID_DATE",
+    category="validation",
+)
+
+_CLI_INVALID_SCHEDULE_TIME_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_INVALID_SCHEDULE_TIME",
+    category="validation",
+)
+
+_CONFIG_INVALID_GENERAL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_INVALID_GENERAL",
+    category="validation",
+)
+
+_CONFIG_INVALID_GUARD_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_INVALID_GUARD",
+    category="validation",
+)
+
+_CONFIG_INVALID_LOG_LEVEL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_INVALID_LOG_LEVEL",
+    category="validation",
+)
+
+_CONFIG_INVALID_NICE_VALUE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_INVALID_NICE_VALUE",
+    category="validation",
+)
+
+_CONFIG_INVALID_VALUE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_INVALID_VALUE",
+    category="validation",
+)
+
+_CONFIG_UNSUPPORTED_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CONFIG_UNSUPPORTED_KEY",
+    category="validation",
+)
+
+_FEED_INJECT_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="VALIDATION_ERROR",
+    category="validation",
+)
+
+_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="FILE_NOT_FOUND",
+    category="validation",
+)
+
+_FEED_INJECT_INVALID_SYMBOL_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="FEED_INJECT_INVALID_SYMBOL",
+    category="validation",
+)
+
+_FEED_INJECT_INVALID_TIMEFRAME_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="FEED_INJECT_INVALID_TIMEFRAME",
+    category="validation",
+)
+
+_NOT_INITIALIZED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="NOT_INITIALIZED",
+    category="state_conflict",
+)
+
+_GUARD_PERMANENTLY_BLOCKED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="GUARD_PERMANENTLY_BLOCKED",
+    category="validation",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -1051,6 +1141,21 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     EncryptionKeyError: _DB_ENCRYPTION_KEY_ERROR_SPEC,
     EncryptionKeyMissingError: _DB_ENCRYPTION_KEY_MISSING_SPEC,
     EncryptionKeyInvalidError: _DB_ENCRYPTION_KEY_INVALID_SPEC,
+    BackfillStopRequestedError: _BACKFILL_STOP_REQUESTED_SPEC,
+    CliInvalidDateError: _CLI_INVALID_DATE_SPEC,
+    CliInvalidScheduleTimeError: _CLI_INVALID_SCHEDULE_TIME_SPEC,
+    ConfigInvalidGeneralError: _CONFIG_INVALID_GENERAL_SPEC,
+    ConfigInvalidGuardError: _CONFIG_INVALID_GUARD_SPEC,
+    ConfigInvalidLogLevelError: _CONFIG_INVALID_LOG_LEVEL_SPEC,
+    ConfigInvalidNiceValueError: _CONFIG_INVALID_NICE_VALUE_SPEC,
+    ConfigInvalidValueError: _CONFIG_INVALID_VALUE_SPEC,
+    ConfigUnsupportedKeyError: _CONFIG_UNSUPPORTED_KEY_SPEC,
+    FeedFileNotFoundError: _FILE_NOT_FOUND_SPEC,
+    FeedInjectInvalidSymbolError: _FEED_INJECT_INVALID_SYMBOL_SPEC,
+    FeedInjectInvalidTimeframeError: _FEED_INJECT_INVALID_TIMEFRAME_SPEC,
+    FeedInjectValidationError: _FEED_INJECT_VALIDATION_ERROR_SPEC,
+    FeedNotInitializedError: _NOT_INITIALIZED_SPEC,
+    GuardPermanentlyBlockedError: _GUARD_PERMANENTLY_BLOCKED_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 

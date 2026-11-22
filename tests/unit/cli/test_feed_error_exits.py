@@ -108,7 +108,7 @@ def _scheduler(exc: BaseException) -> Any:
 
 
 def _expected_text(code: str, message: str) -> str:
-    return f"Error: {message}\n"
+    return f"Error: {code}: {message}\n"
 
 
 def _assert_json(result: Result, code: str, message: str) -> None:
@@ -369,8 +369,8 @@ _BACKFILL_CODES = [
 @pytest.mark.parametrize(("code", "message"), _BACKFILL_CODES)
 def test_backfill_date_config_error(mode: str, code: str, message: str) -> None:
     _init()
-    errors: list[dict[str, Any]] = [
-        "not-a-dict",  # type: ignore[list-item]
+    errors: list[Any] = [
+        "not-a-dict",
         {"code": "OTHER", "error": "무시된다"},
         {"code": code, "error": message, "source": "data_go_kr"},
         {"code": "CLI_INVALID_DATE", "error": "두 번째는 찍히지 않는다"},
@@ -508,3 +508,13 @@ def test_inject_failure(mode: str, exc: Exception, code: str, message: str) -> N
         patch("ante.feed.injector.FeedInjector.inject_csv", side_effect=exc),
     )
     _check(mode, result, code, message)
+
+
+def test_backfill_date_error_classes_cover_exactly_the_runner_codes() -> None:
+    from ante.cli.commands import feed
+    from ante.feed.pipeline.backfill_runner import BACKFILL_DATE_ERROR_CODES
+
+    assert set(feed._BACKFILL_DATE_ERRORS) == set(BACKFILL_DATE_ERROR_CODES)
+    assert all(
+        getattr(cls, "code") == code for code, cls in feed._BACKFILL_DATE_ERRORS.items()
+    )
