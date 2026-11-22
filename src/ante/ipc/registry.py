@@ -27,6 +27,11 @@ from ante.ipc.requests import (
     BotStatusRequest,
     BotStopRequest,
     BotUpdateRequest,
+    BrokerBalanceRequest,
+    BrokerOrderHistoryRequest,
+    BrokerPositionsRequest,
+    BrokerReconcileRequest,
+    BrokerStatusRequest,
     ConfigSetRequest,
     IPCRequest,
     MemberReactivateRequest,
@@ -1006,12 +1011,9 @@ async def _handle_approval_reopen(
 
 
 async def _handle_broker_status(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
-    from ante.account.scoping import require_account_id
-
-    account_id = require_account_id(args.get("account_id"), context="ipc.broker.status")
-    broker = await svc.account.get_broker(account_id)
+    svc: ServiceRegistry, request: BrokerStatusRequest, actor: str
+) -> dict[str, Any]:
+    broker = await svc.account.get_broker(request.account_id)
     healthy = await broker.health_check()
     return {
         "connected": broker.is_connected,
@@ -1021,42 +1023,28 @@ async def _handle_broker_status(
 
 
 async def _handle_broker_balance(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
-    from ante.account.scoping import require_account_id
-
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.broker.balance"
-    )
-    broker = await svc.account.get_broker(account_id)
+    svc: ServiceRegistry, request: BrokerBalanceRequest, actor: str
+) -> dict[str, Any]:
+    broker = await svc.account.get_broker(request.account_id)
     return await broker.get_account_balance()
 
 
 async def _handle_broker_positions(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
-    from ante.account.scoping import require_account_id
-
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.broker.positions"
-    )
-    broker = await svc.account.get_broker(account_id)
+    svc: ServiceRegistry, request: BrokerPositionsRequest, actor: str
+) -> dict[str, Any]:
+    broker = await svc.account.get_broker(request.account_id)
     return {"positions": await broker.get_positions()}
 
 
 async def _handle_broker_order_history(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BrokerOrderHistoryRequest, actor: str
+) -> dict[str, Any]:
     """``broker.order_history`` — 주문/체결 이력 read-only 조회."""
-    from ante.account.scoping import require_account_id
     from ante.core.time import iso_to_kis_date
 
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.broker.order_history"
-    )
-    from_date = iso_to_kis_date(args.get("from_date"))
-    to_date = iso_to_kis_date(args.get("to_date"))
-    broker = await svc.account.get_broker(account_id)
+    from_date = iso_to_kis_date(request.from_date)
+    to_date = iso_to_kis_date(request.to_date)
+    broker = await svc.account.get_broker(request.account_id)
     return {"orders": await broker.get_order_history(from_date, to_date)}
 
 
@@ -1084,8 +1072,8 @@ def _broker_reconcile_envelope(
 
 
 async def _handle_broker_reconcile(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: BrokerReconcileRequest, actor: str
+) -> dict[str, Any]:
     """``broker.reconcile`` — **account-level** 대사.
 
     account_id 만으로 동작한다(bot_id 불요). 서버 BrokerAdapter 가 계좌
@@ -1102,12 +1090,8 @@ async def _handle_broker_reconcile(
         - 2+봇: ``reconciler.detect_account_level(...)`` (correct_position 미호출).
         - 0봇 + broker_positions 비어있지 않음: account-level detect/alert.
     """
-    from ante.account.scoping import require_account_id
-
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.broker.reconcile"
-    )
-    fix = bool(args.get("fix", False))
+    account_id = request.account_id
+    fix = request.fix
 
     broker = await svc.account.get_broker(account_id)
     broker_positions = await broker.get_account_positions()
@@ -1419,7 +1403,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         required_services=frozenset(
             {"account", "reconciler", "bot_manager", "audit_logger"}
         ),
-        account_id_policy="required",
+        request_model=BrokerReconcileRequest,
     )
 
     registry.register(
@@ -1427,28 +1411,28 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_broker_status,
         is_mutating=False,
         required_services=frozenset({"account"}),
-        account_id_policy="required",
+        request_model=BrokerStatusRequest,
     )
     registry.register(
         "broker.balance",
         _handle_broker_balance,
         is_mutating=False,
         required_services=frozenset({"account"}),
-        account_id_policy="required",
+        request_model=BrokerBalanceRequest,
     )
     registry.register(
         "broker.positions",
         _handle_broker_positions,
         is_mutating=False,
         required_services=frozenset({"account"}),
-        account_id_policy="required",
+        request_model=BrokerPositionsRequest,
     )
     registry.register(
         "broker.order_history",
         _handle_broker_order_history,
         is_mutating=False,
         required_services=frozenset({"account"}),
-        account_id_policy="required",
+        request_model=BrokerOrderHistoryRequest,
     )
     registry.register(
         "bot.status",

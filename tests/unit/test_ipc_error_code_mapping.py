@@ -569,7 +569,9 @@ async def test_ipc_dispatch_broker_status_account_scoped_returns_validation_erro
         response = await client.send("broker.status", {}, actor="tester")
         assert response["status"] == "error"
         assert response["error"]["code"] == "VALIDATION_ERROR"
-        assert "ipc.broker.status" in response["error"]["message"]
+        assert response["error"]["message"] == validation_message(
+            "broker.status", ("account_id", "missing")
+        )
 
         # 'default' 예약어 → VALIDATION_ERROR
         response = await client.send(
@@ -619,7 +621,9 @@ async def test_ipc_dispatch_broker_reconcile_invalid_account_only_validation_err
         assert response["status"] == "error"
         assert response["error"]["code"] == "VALIDATION_ERROR", response
         assert response["error"]["code"] != "EXECUTION_ERROR", response
-        assert "ipc.broker.reconcile" in response["error"]["message"], response
+        assert response["error"]["message"] == validation_message(
+            "broker.reconcile", ("account_id", "missing")
+        ), response
 
         # bot_id 없는 invalid-account-only: 'default' 예약어 → VALIDATION_ERROR
         response = await client.send(

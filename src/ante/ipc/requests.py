@@ -6,6 +6,7 @@ from pydantic import AfterValidator, BaseModel, ConfigDict, Field, SecretStr
 from pydantic_core import PydanticCustomError
 
 from ante.core.account_id import is_invalid_account_id
+from ante.core.time import InvalidIsoDateError, iso_to_kis_date
 
 __all__ = [
     "AccountActivateRequest",
@@ -29,8 +30,14 @@ __all__ = [
     "BotStopRequest",
     "BotUpdateFields",
     "BotUpdateRequest",
+    "BrokerBalanceRequest",
+    "BrokerOrderHistoryRequest",
+    "BrokerPositionsRequest",
+    "BrokerReconcileRequest",
+    "BrokerStatusRequest",
     "ConfigSetRequest",
     "IPCRequest",
+    "IsoDate",
     "MemberReactivateRequest",
     "MemberRegenerateRecoveryKeyRequest",
     "MemberRegisterRequest",
@@ -68,6 +75,17 @@ def _valid_account_id(value: str) -> str:
 
 
 AccountId = Annotated[str, AfterValidator(_valid_account_id)]
+
+
+def _valid_iso_date(value: str) -> str:
+    try:
+        iso_to_kis_date(value)
+    except InvalidIsoDateError:
+        raise PydanticCustomError("invalid_iso_date", "invalid iso date") from None
+    return value
+
+
+IsoDate = Annotated[str, AfterValidator(_valid_iso_date)]
 
 
 class SystemHaltRequest(IPCRequest):
@@ -261,3 +279,26 @@ class ConfigSetRequest(IPCRequest):
     key: str
     value: str
     category: str = "user"
+
+
+class BrokerStatusRequest(IPCRequest):
+    account_id: AccountId
+
+
+class BrokerBalanceRequest(IPCRequest):
+    account_id: AccountId
+
+
+class BrokerPositionsRequest(IPCRequest):
+    account_id: AccountId
+
+
+class BrokerOrderHistoryRequest(IPCRequest):
+    account_id: AccountId
+    from_date: IsoDate | None = None
+    to_date: IsoDate | None = None
+
+
+class BrokerReconcileRequest(IPCRequest):
+    account_id: AccountId
+    fix: bool = False

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -24,6 +25,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 CLI_MEMBER = "cli-master-7"
@@ -519,7 +521,11 @@ def test_cli_reconcile_sends_a_boolean_fix(
     )
 
 
-# ── 지금의 동작을 적는 테스트 (요청 모델이 메시지를 바꾼다) ─────────────────────
+# ── 요청 모델 밖의 요청 ──────────────────────────────────────────────────────
+
+
+def _rejected(command: str, loc: str, kind: str) -> dict[str, Any]:
+    return _error("VALIDATION_ERROR", validation_message(command, (loc, kind)))
 
 
 @pytest.mark.asyncio
@@ -527,30 +533,114 @@ def test_cli_reconcile_sends_a_boolean_fix(
 async def test_invalid_account_id_message(command: str) -> None:
     harness = _Harness()
     response = await harness.send(command, {"account_id": "bad_id!"})
-    assert response == _error(
-        "VALIDATION_ERROR",
-        f"(ipc.{command}) 유효한 account_id가 필요합니다: 'bad_id!'. "
-        "fallback (default, '', None) 또는 형식 위반 값은 사용할 수 없습니다.",
-    )
+    assert response == _rejected(command, "account_id", "invalid_account_id")
     harness.assert_no_service_call()
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("key", "value", "message"),
-    [
-        (
-            "from_date",
-            "20260102",
-            "'20260102'은(는) YYYY-MM-DD 형식이어야 합니다 (zero-padded).",
-        ),
-        ("to_date", "2026-02-30", "'2026-02-30'은(는) 유효한 달력 날짜가 아닙니다."),
-    ],
+    ("key", "value"),
+    [("from_date", "20260102"), ("to_date", "2026-02-30")],
 )
-async def test_invalid_iso_date_message(key: str, value: str, message: str) -> None:
+async def test_invalid_iso_date_message(key: str, value: str) -> None:
     harness = _Harness()
     response = await harness.send(
         "broker.order_history", {"account_id": ACCOUNT, key: value}
     )
-    assert response == _error("VALIDATION_ERROR", message)
+    assert response == _rejected("broker.order_history", key, "invalid_iso_date")
     harness.account.get_broker.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("value", "passed"),
+    [
+        pytest.param("2028-02-29", "20280229", id="leap-day"),
+        pytest.param("2026-12-31", "20261231", id="year-end"),
+    ],
+)
+async def test_a_valid_iso_date_next_to_a_rejected_one_reaches_the_broker(
+    value: str, passed: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(
+        "broker.order_history", {"account_id": ACCOUNT, "to_date": value}
+    )
+    assert response == _ok({"orders": ORDERS})
+    call = harness.broker.get_order_history.await_args
+    assert _typed(call.args) == [("NoneType", None), ("str", passed)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args", "loc", "kind"),
+    [
+        ("broker.status", {}, "account_id", "missing"),
+        ("broker.balance", {"account_id": None}, "account_id", "string_type"),
+        ("broker.positions", {"account_id": 7}, "account_id", "string_type"),
+        (
+            "broker.status",
+            {"account_id": ACCOUNT, "zz_extra": 1},
+            "zz_extra",
+            "extra_forbidden",
+        ),
+        ("broker.balance", ["x"], "args", "model_type"),
+        (
+            "broker.order_history",
+            {"account_id": ACCOUNT, "from_date": 20260102},
+            "from_date",
+            "string_type",
+        ),
+        (
+            "broker.order_history",
+            {"account_id": ACCOUNT, "to_date": True},
+            "to_date",
+            "string_type",
+        ),
+        (
+            "broker.reconcile",
+            {"account_id": ACCOUNT, "fix": "false"},
+            "fix",
+            "bool_type",
+        ),
+        ("broker.reconcile", {"account_id": ACCOUNT, "fix": 1}, "fix", "bool_type"),
+        (
+            "broker.reconcile",
+            {"account_id": ACCOUNT, "fix": None},
+            "fix",
+            "bool_type",
+        ),
+        ("broker.reconcile", {"fix": True}, "account_id", "missing"),
+    ],
+)
+async def test_request_outside_the_model_is_rejected(
+    command: str, args: Any, loc: str, kind: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, args)
+    assert response == _rejected(command, loc, kind)
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+async def test_rejected_value_is_not_in_the_response_or_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKBROKERDATE01x"
+    harness = _Harness()
+    response = await harness.send(
+        "broker.order_history",
+        {"account_id": f"{marker}!", "from_date": f"{marker}-01"},
+    )
+    assert response == _error(
+        "VALIDATION_ERROR",
+        validation_message(
+            "broker.order_history",
+            ("account_id", "invalid_account_id"),
+            ("from_date", "invalid_iso_date"),
+        ),
+    )
+    assert marker not in json.dumps(response, ensure_ascii=False)
+    assert marker not in caplog.text
+    harness.assert_no_service_call()
