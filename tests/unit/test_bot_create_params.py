@@ -111,10 +111,13 @@ class TestBotCreateWithParams:
             assert result.exit_code == 0
             assert "생성 완료" in result.output
 
-            # IPC로 전달된 args에 params 포함 확인
             sent_args = mock_client.send.call_args[0][1]
-            assert sent_args["params"]["lookback"] == 20
-            assert sent_args["params"]["threshold"] == 0.5
+            assert sent_args == {
+                "name": "테스트봇",
+                "strategy_id": "stg-1",
+                "account_id": "test",
+                "interval_seconds": 60,
+            }
 
     def test_create_without_params(self, runner):
         mock_client = AsyncMock()

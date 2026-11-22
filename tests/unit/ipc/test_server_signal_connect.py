@@ -36,7 +36,9 @@ from ante.ipc.registry import (
     _handle_signal_connect,
     register_all_handlers,
 )
+from ante.ipc.requests import SignalConnectRequest
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.validation_messages import validation_message
 
 pytestmark = pytest.mark.asyncio
 
@@ -99,7 +101,7 @@ def _signal_only_registry() -> CommandRegistry:
         _handle_signal_connect,
         is_mutating=False,
         required_services=frozenset({"bot_manager"}),
-        account_id_policy="none",
+        request_model=SignalConnectRequest,
     )
     return reg
 
@@ -276,23 +278,26 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         result = await _handle_signal_connect(
-            svc, {"key": "sk_x", "account_id": "SPOOF"}, "ipc"
+            svc, SignalConnectRequest(key="sk_x"), "ipc"
         )
 
         assert result["bot_id"] == "bot-1"
-        # account_id 는 bot.config 유래 — args spoof 값 무시.
+        # account_id 는 bot.config 유래(요청 모델에 account_id 필드가 없다).
         assert result["account_id"] == "acc-live"
         assert result["_stream"] == "signal.connect"
+        assert set(SignalConnectRequest.model_fields) == {"key"}
 
-    async def test_missing_key_raises_invalid_signal_key_not_keyerror(self) -> None:
-        """``args={}`` (key 없음) → InvalidSignalKey (KeyError 아님)."""
+    async def test_empty_key_reaches_gate1_as_invalid_signal_key(self) -> None:
+        """빈 문자열 키는 모델을 통과하고 게이트①이 ``InvalidSignalKey``로 거부한다."""
         bm = MagicMock()
-        bm.validate_signal_key = AsyncMock(return_value="bot-1")
+        bm.validate_signal_key = AsyncMock(return_value=None)
         bm.get_bot = MagicMock(return_value=_make_bot())
         svc = await self._svc(bm)
 
         with pytest.raises(InvalidSignalKey):
-            await _handle_signal_connect(svc, {}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key=""), "ipc")
+        bm.validate_signal_key.assert_awaited_once_with("")
+        bm.get_bot.assert_not_called()
 
     async def test_gate1_key_miss_raises_invalid_signal_key(self) -> None:
         bm = MagicMock()
@@ -301,7 +306,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(InvalidSignalKey) as ei:
-            await _handle_signal_connect(svc, {"key": "sk_bad"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_bad"), "ipc")
         assert ei.value.code == "INVALID_SIGNAL_KEY"
 
     async def test_manager_not_configured_propagates(self) -> None:
@@ -311,7 +316,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(SignalKeyManagerNotConfigured) as ei:
-            await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
         assert ei.value.code == "SERVICE_NOT_CONFIGURED"
 
     async def test_gate2_bot_not_found(self) -> None:
@@ -321,7 +326,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(BotNotFoundError) as ei:
-            await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
         assert ei.value.code == "BOT_NOT_FOUND"
 
     async def test_gate3_bot_not_running_uses_lowercase_status_value(self) -> None:
@@ -331,7 +336,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(BotNotRunning) as ei:
-            await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
         assert ei.value.code == "BOT_NOT_RUNNING"
         # caller 가 bot.status.value(소문자)를 전달하는 계약 lock.
         assert str(ei.value) == "Bot is not running: bot-1 (status: stopped)"
@@ -343,7 +348,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(BotNotAcceptingSignals) as ei:
-            await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
         assert ei.value.code == "BOT_NOT_ACCEPTING_SIGNALS"
         # raise-site 영어 리터럴(한국어 rotate 메시지 재사용 금지).
         assert str(ei.value) == "Bot bot-1 does not accept external signals"
@@ -357,7 +362,7 @@ class TestHandleSignalConnectUnit:
         svc = await self._svc(bm)
 
         with pytest.raises(BotNotAcceptingSignals):
-            await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+            await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
 
 
 # ── dispatch 경유: 거부 코드·로그 수준·ack 실패 정리 ──────────────────
@@ -376,13 +381,22 @@ async def _start_registered_server(socket_path: str, svc: ServiceRegistry) -> IP
 
 
 @pytest.mark.parametrize(
-    "args",
-    [{}, {"key": None}, {"key": 123}, {"key": ["sk_x"]}, {"key": {"k": "sk_x"}}],
+    ("args", "kind"),
+    [
+        ({}, "missing"),
+        ({"key": None}, "string_type"),
+        ({"key": 123}, "string_type"),
+        ({"key": ["sk_x"]}, "string_type"),
+        ({"key": {"k": "sk_x"}}, "string_type"),
+    ],
 )
-async def test_non_str_key_rejected_as_invalid_signal_key(
-    socket_path: str, args: dict
+async def test_non_str_key_rejected_by_the_request_model(
+    socket_path: str, args: dict, kind: str
 ) -> None:
-    """key 가 없거나 str 이 아니면 키 조회 결과와 무관하게 INVALID_SIGNAL_KEY 다."""
+    """key 가 없거나 str 이 아니면 4-게이트 전에 ``VALIDATION_ERROR`` 다 (#2683).
+
+    키 조회(게이트①)에 닿지 않는다.
+    """
     bm = MagicMock()
     bm.validate_signal_key = AsyncMock(return_value="bot-1")
     bm.get_bot = MagicMock(return_value=_make_bot())
@@ -391,8 +405,16 @@ async def test_non_str_key_rejected_as_invalid_signal_key(
         response = await server._dispatch(
             {"id": "k1", "command": "signal.connect", "args": args}
         )
-        assert response["status"] == "error"
-        assert response["error"]["code"] == "INVALID_SIGNAL_KEY"
+        assert response == {
+            "id": "k1",
+            "status": "error",
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": validation_message("signal.connect", ("key", kind)),
+            },
+        }
+        bm.validate_signal_key.assert_not_awaited()
+        bm.get_bot.assert_not_called()
     finally:
         await server.stop()
 
@@ -720,7 +742,7 @@ def _all_log_record_text(caplog: pytest.LogCaptureFixture) -> str:
 
 _CONNECT_ENDINGS = {
     "ok": "ok",
-    "key_not_str": "INVALID_SIGNAL_KEY",
+    "key_not_str": "VALIDATION_ERROR",
     "key_unknown": "INVALID_SIGNAL_KEY",
     "key_manager_missing": "SERVICE_NOT_CONFIGURED",
     "key_validation_raises": "EXECUTION_ERROR",
@@ -825,7 +847,7 @@ async def test_connect_placeholder_handle_snapshots_current_generation() -> None
     assert current != 0
     svc, _ = _connect_registry_with(channel_registry=channel_registry)
 
-    result = await _handle_signal_connect(svc, {"key": "sk_x"}, "ipc")
+    result = await _handle_signal_connect(svc, SignalConnectRequest(key="sk_x"), "ipc")
 
     handle = channel_registry.get("bot-1", result["session_id"])
     assert handle is not None

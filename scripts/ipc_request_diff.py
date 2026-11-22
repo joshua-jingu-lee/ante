@@ -20,6 +20,13 @@ request set into FILE (other commands already in FILE are kept):
   ``null``), ``extra`` (one unknown key), ``array`` (the args as a list),
   ``account`` (``account_id`` set to ``"default"``, ``""``, ``"bad_id!"``),
   ``nan`` (``NaN`` at a key whose ``cli`` value is a float).
+- A ``value`` row has ``same_type`` when its value has the JSON type of the
+  key in any ``cli`` row that sends the key.
+- The keys of a ``cli`` row's args keep the order the CLI sent them in (the
+  order can reach a response, e.g. an audit detail); the other keys of the
+  file are sorted.
+- A non-empty string at a clock key (``expires_at``) of a ``cli`` row is
+  replaced by a fixed marker, so a rebuild writes the same bytes.
 
 ``record [--requests FILE] --out RECORD``
 
@@ -48,7 +55,7 @@ each other request:
 - ``다름`` when a row is missing in a record, for a ``cli`` row that is not
   ``같음``, and for a ``value`` row whose value has the JSON type of the
   ``cli`` value and that is not ``같음``, unless the after model narrows that
-  field (a ``Literal`` or an ``AfterValidator`` type).
+  field (a ``Literal`` or an ``AfterValidator`` type, also inside ``X | None``).
 - A request-model rejection after is ``VALIDATION_ERROR`` with a message that
   starts with ``<command> 인자 검증 실패: ``. The next three classes need it.
 - ``거부로 바뀜``: calls before, a request-model rejection and no calls after.
@@ -82,6 +89,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import typing
 from collections import Counter
 from collections.abc import Generator, Iterator, Sequence
@@ -119,6 +127,8 @@ RATCHET_KEYS = (
 )
 PLAIN = (str, int, float, bool, type(None))
 ISOLATED_ENV = ("ANTE_CONFIG_DIR", "HOME")
+CLOCK_KEYS = frozenset({"expires_at"})
+CLOCK_MARKER = "2030-01-01T00:00:00+00:00"
 
 
 class InputError(Exception):
@@ -143,7 +153,7 @@ def _read_json(path: Path) -> Any:
 
 
 def _write_json(path: Path, data: Any) -> None:
-    text = json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True)
+    text = json.dumps(data, ensure_ascii=False, indent=1)
     path.write_text(text + "\n", encoding="utf-8")
 
 
@@ -267,15 +277,33 @@ def _cli_records(root: Path, path: Path | None) -> list[dict[str, Any]]:
     ]
 
 
+def _fixed_clock(args: Any) -> Any:
+    if not isinstance(args, dict):
+        return args
+    return {
+        k: CLOCK_MARKER if k in CLOCK_KEYS and isinstance(v, str) and v else v
+        for k, v in args.items()
+    }
+
+
 def build_requests(
     command: str, keys: dict[str, bool], cli: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    mine = [record for record in cli if record["command"] == command]
+    mine = [
+        {**record, "args": _fixed_clock(record["args"])}
+        for record in cli
+        if record["command"] == command
+    ]
     if not mine:
         raise InputError(f"{command}: the CLI records do not send it")
     base = mine[0]["args"]
     if not isinstance(base, dict):
         raise InputError(f"{command}: the first CLI args are not an object")
+    cli_types: dict[str, set[str]] = {}
+    for record in mine:
+        if isinstance(record["args"], dict):
+            for k, v in record["args"].items():
+                cli_types.setdefault(k, set()).add(_json_type(v))
     out: list[dict[str, Any]] = [
         {"name": f"{command}:cli:{i}", "kind": "cli", "args": r["args"]}
         for i, r in enumerate(mine)
@@ -292,7 +320,7 @@ def build_requests(
                 }
             )
         for label, value in VALUES:
-            same = key in base and _json_type(value) == _json_type(base[key])
+            same = _json_type(value) in cli_types.get(key, set())
             out.append(
                 {
                     "name": f"{command}:value:{key}:{label}",
@@ -338,7 +366,7 @@ def build_requests(
                 "args": {**base, key: float("nan")},
             }
         )
-    return out
+    return [{k: row[k] for k in sorted(row)} for row in out]
 
 
 def _requests(path: Path) -> dict[str, dict[str, Any]]:
@@ -366,6 +394,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         data["commands"][command] = build_requests(
             command, _command_keys(root, command), cli
         )
+    data["commands"] = {c: data["commands"][c] for c in sorted(data["commands"])}
     _write_json(path, data)
     total = sum(len(rows) for rows in data["commands"].values())
     print(f"requests: {total} in {len(data['commands'])} commands")
@@ -458,7 +487,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     requests = _requests(root / args.requests)
     logging.disable(logging.CRITICAL)
     rows = asyncio.run(_dispatch_all(requests))
-    _write_json(args.out, {"rows": rows, "ratchet": _ratchet(root)})
+    _write_json(args.out, {"ratchet": _ratchet(root), "rows": rows})
     print(f"recorded: {len(rows)} rows")
     return EXIT_OK
 
@@ -477,18 +506,31 @@ def _field_info(command: str, key: str | None) -> Any:
     return model.model_fields.get(key)
 
 
+def _not_null(annotation: Any) -> Any:
+    if typing.get_origin(annotation) in (types.UnionType, typing.Union):
+        members = [m for m in typing.get_args(annotation) if m is not type(None)]
+        if len(members) == 1:
+            return members[0]
+    return annotation
+
+
 def _validated(info: Any) -> bool:
     from pydantic.functional_validators import AfterValidator
 
-    return info is not None and any(
-        isinstance(item, AfterValidator) for item in info.metadata
-    )
+    if info is None:
+        return False
+    metadata = list(info.metadata)
+    inner = _not_null(info.annotation)
+    if typing.get_origin(inner) is typing.Annotated:
+        metadata += typing.get_args(inner)[1:]
+    return any(isinstance(item, AfterValidator) for item in metadata)
 
 
 def _narrowed(info: Any) -> bool:
     if info is None:
         return False
-    return typing.get_origin(info.annotation) is typing.Literal or _validated(info)
+    inner = _not_null(info.annotation)
+    return typing.get_origin(inner) is typing.Literal or _validated(info)
 
 
 def _strings(value: Any) -> Iterator[str]:
