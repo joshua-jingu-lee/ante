@@ -6,7 +6,7 @@ import asyncio
 import logging
 import random
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
 import aiohttp
 
@@ -113,7 +113,7 @@ class DataGoKrSource:
         """Rate Limiter 인스턴스."""
         return self._rate_limiter
 
-    async def fetch(self, date: str, **kwargs: Any) -> list[dict]:
+    async def fetch(self, date: str, **kwargs: Any) -> list[dict[str, Any]]:
         """DataSource 프로토콜 구현. fetch_by_date에 위임한다.
 
         Args:
@@ -125,7 +125,7 @@ class DataGoKrSource:
         """
         return await self.fetch_by_date(date)
 
-    async def fetch_by_date(self, date: str) -> list[dict]:
+    async def fetch_by_date(self, date: str) -> list[dict[str, Any]]:
         """해당 날짜 전 종목 데이터를 수집한다.
 
         Args:
@@ -137,7 +137,7 @@ class DataGoKrSource:
             DataGoKrError: 빈 페이지인데 totalCount 미달(부분 수집) 시.
         """
         bas_dt = date.replace("-", "")
-        all_items: list[dict] = []
+        all_items: list[dict[str, Any]] = []
         page_no = 1
 
         own_session = self._session is None
@@ -230,7 +230,7 @@ class DataGoKrSource:
         session: aiohttp.ClientSession,
         bas_dt: str,
         page_no: int,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """단일 페이지를 조회한다."""
         params = {
             "serviceKey": self._api_key,
@@ -320,14 +320,14 @@ class DataGoKrSource:
         self,
         session: aiohttp.ClientSession,
         params: dict[str, str],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """HTTP GET 요청을 보내고 JSON 응답을 반환한다."""
         async with session.get(self._base_url, params=params) as resp:
             resp.raise_for_status()
-            return await resp.json(content_type=None)
+            return cast("dict[str, Any]", await resp.json(content_type=None))
 
     @staticmethod
-    def _extract_result_code(data: dict) -> tuple[str, str]:
+    def _extract_result_code(data: dict[str, Any]) -> tuple[str, str]:
         """응답에서 resultCode와 resultMsg를 추출한다."""
         header = data.get("response", {}).get("header", {})
         result_code = str(header.get("resultCode", "99"))
@@ -335,7 +335,7 @@ class DataGoKrSource:
         return result_code, result_msg
 
     @staticmethod
-    def _extract_items(data: dict) -> tuple[list[dict], int]:
+    def _extract_items(data: dict[str, Any]) -> tuple[list[dict[str, Any]], int]:
         """응답에서 item 목록과 totalCount를 추출한다."""
         body = data.get("response", {}).get("body", {})
         total_count = int(body.get("totalCount", 0))

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from ante.core.market_data_vocab import is_krx_symbol, is_valid_timeframe
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from ante.data.store import ParquetStore
     from ante.eventbus import EventBus
 
-DataCallback = Callable[[str, str], Awaitable[list[dict]]]
+DataCallback = Callable[[str, str], Awaitable[list[dict[str, Any]]]]
 
 logger = logging.getLogger(__name__)
 
@@ -36,15 +36,15 @@ class DataCollector:
     ) -> None:
         self._store = store
         self._eventbus = eventbus
-        self._buffer: dict[str, list[dict]] = {}
+        self._buffer: dict[str, list[dict[str, Any]]] = {}
         self._buffer_size = buffer_size
         self._flush_interval = flush_interval
         self._collect_interval = collect_interval
         self._exchange = exchange
         self._symbols: list[str] = []
         self._timeframes: list[str] = []
-        self._collect_task: asyncio.Task | None = None
-        self._flush_task: asyncio.Task | None = None
+        self._collect_task: asyncio.Task[Any] | None = None
+        self._flush_task: asyncio.Task[Any] | None = None
         self._running = False
         self._data_callback: DataCallback | None = None
 
@@ -53,7 +53,7 @@ class DataCollector:
         return self._running
 
     @property
-    def buffer(self) -> dict[str, list[dict]]:
+    def buffer(self) -> dict[str, list[dict[str, Any]]]:
         return self._buffer
 
     def _is_valid_ingress(self, symbol: object, timeframe: object) -> bool:
@@ -102,7 +102,7 @@ class DataCollector:
         self.flush_all()
         logger.info("DataCollector stopped")
 
-    def add_data(self, symbol: str, timeframe: str, row: dict) -> None:
+    def add_data(self, symbol: str, timeframe: str, row: dict[str, Any]) -> None:
         """외부에서 직접 데이터를 추가 (이벤트 기반 수집 시 사용)."""
         if not self._is_valid_ingress(symbol, timeframe):
             logger.warning(
@@ -173,7 +173,7 @@ class DataCollector:
 
     def _flush(self, key: object) -> int:
         """버퍼의 데이터를 Parquet에 적재. 실제 append 성공 row 수 반환."""
-        buffer = cast("dict[object, list[dict]]", self._buffer)
+        buffer = cast("dict[object, list[dict[str, Any]]]", self._buffer)
         rows = buffer.pop(key, [])
         if not rows:
             return 0

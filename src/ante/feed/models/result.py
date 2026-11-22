@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -78,10 +79,10 @@ class CollectionResult:
     data_types: list[str] = field(default_factory=list)
     """수집된 데이터 유형 목록 (예: ['ohlcv', 'fundamental'])."""
 
-    failures: list[dict] = field(default_factory=list)
+    failures: list[dict[str, Any]] = field(default_factory=list)
     """수집 실패 상세 목록."""
 
-    warnings: list[dict] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
     """데이터 품질 경고 **샘플**."""
 
     warnings_total: int = 0
@@ -97,5 +98,5 @@ class CollectionResult:
 
     True이면 절단된 상세는 로그에서 회수한다(경고는 발생 시점에 전건 로깅)."""
 
-    config_errors: list[dict] = field(default_factory=list)
+    config_errors: list[dict[str, Any]] = field(default_factory=list)
     """설정 오류 목록."""

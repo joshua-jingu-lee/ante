@@ -532,18 +532,18 @@ class _RunContext:
     """
 
     def __init__(self) -> None:
-        self.failures: list[dict] = []
-        self._warnings: list[dict] = []
+        self.failures: list[dict[str, Any]] = []
+        self._warnings: list[dict[str, Any]] = []
         self._warnings_by_type: dict[str, int] = {}
         self._warnings_truncated: bool = False
-        self.config_errors: list[dict] = []
+        self.config_errors: list[dict[str, Any]] = []
         self.total_symbols: set[str] = set()
         self.success_symbols: set[str] = set()
         self.rows_written: int = 0
         self.data_types: set[str] = set()
 
     @property
-    def warnings(self) -> Sequence[dict]:
+    def warnings(self) -> Sequence[dict[str, Any]]:
         """보존된 경고 샘플 (버킷별 최대 ``MAX_WARNINGS_PER_TYPE`` 건).
 
         반환 타입이 ``list[dict]`` 이 아니라 ``Sequence[dict]`` 인 것은
@@ -565,7 +565,7 @@ class _RunContext:
         """버킷 상한으로 경고 샘플이 한 건이라도 절단되었는지 여부."""
         return self._warnings_truncated
 
-    def add_warnings(self, warns: list[dict]) -> None:
+    def add_warnings(self, warns: list[dict[str, Any]]) -> None:
         """경고를 유계로 적재하는 **단일 chokepoint**.
 
         **입력 리스트를 변형하지 않는다**(non-mutating, 결정 6).
@@ -585,7 +585,7 @@ class _RunContext:
         self,
         net_delta: int,
         syms: set[str],
-        warns: list[dict],
+        warns: list[dict[str, Any]],
     ) -> None:
         """성공 결과를 집계한다.
 
@@ -634,12 +634,12 @@ def _make_result(
     symbols_failed: int = 0,
     rows_written: int = 0,
     data_types: list[str] | None = None,
-    failures: list[dict] | None = None,
-    warnings: list[dict] | None = None,
+    failures: list[dict[str, Any]] | None = None,
+    warnings: list[dict[str, Any]] | None = None,
     warnings_total: int | None = None,
     warnings_by_type: dict[str, int] | None = None,
     warnings_truncated: bool = False,
-    config_errors: list[dict] | None = None,
+    config_errors: list[dict[str, Any]] | None = None,
 ) -> CollectionResult:
     """CollectionResult를 생성한다."""
     finished_at = datetime.now(tz=UTC)

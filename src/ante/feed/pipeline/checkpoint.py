@@ -7,6 +7,7 @@ import logging
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,7 @@ class Checkpoint:
         """체크포인트 파일 경로를 반환한다."""
         return self._file_path
 
-    def load(self) -> dict | None:
+    def load(self) -> dict[str, Any] | None:
         """체크포인트를 로드한다.
 
         Returns:
@@ -58,7 +59,9 @@ class Checkpoint:
             return None
 
         try:
-            data: dict = json.loads(self._file_path.read_text(encoding="utf-8"))
+            data: dict[str, Any] = json.loads(
+                self._file_path.read_text(encoding="utf-8")
+            )
             logger.debug(
                 "체크포인트 로드: source=%s, data_type=%s, last_date=%s",
                 data.get("source"),
