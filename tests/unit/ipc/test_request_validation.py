@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import fields
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -10,7 +11,7 @@ import pytest
 
 from ante.core.account_id import InvalidAccountIdError
 from ante.core.registry import ServiceRegistry
-from ante.ipc.registry import AccountIdPolicy, CommandRegistry, register_all_handlers
+from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
 from ante.ipc.requests import IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
 
@@ -167,48 +168,23 @@ async def test_invalid_args_are_rejected_without_handler_or_audit(
     assert audit.log.await_count == 0
 
 
-@pytest.mark.parametrize("policy", ["required", "optional_filter"])
-def test_model_with_account_id_policy_is_rejected_at_registration(
-    policy: AccountIdPolicy,
-) -> None:
+def test_registration_has_no_account_id_policy() -> None:
     registry = CommandRegistry()
-    with pytest.raises(ValueError) as info:
+    legacy: dict[str, Any] = {"account_id_policy": "required"}
+    with pytest.raises(TypeError) as info:
         registry.register(
             "demo.run",
             _Recorder(),
             is_mutating=True,
-            account_id_policy=policy,
             request_model=_DemoRequest,
+            **legacy,
         )
     assert str(info.value) == (
-        f"요청 모델이 있는 명령 'demo.run'에는 account_id_policy '{policy}'를 "
-        "쓸 수 없습니다."
+        "CommandRegistry.register() got an unexpected keyword argument "
+        "'account_id_policy'"
     )
     assert registry.get("demo.run") is None
-
-
-def test_model_with_account_id_policy_none_is_registered() -> None:
-    registry = CommandRegistry()
-    registry.register(
-        "demo.run",
-        _Recorder(),
-        is_mutating=True,
-        account_id_policy="none",
-        request_model=_DemoRequest,
-    )
-    spec = registry.get("demo.run")
-    assert spec is not None
-    assert spec.request_model is _DemoRequest
-
-
-def test_policy_without_model_is_registered() -> None:
-    registry = CommandRegistry()
-    registry.register(
-        "demo.scoped", _Recorder(), is_mutating=True, account_id_policy="required"
-    )
-    spec = registry.get("demo.scoped")
-    assert spec is not None
-    assert spec.account_id_policy == "required"
+    assert "account_id_policy" not in {f.name for f in fields(CommandSpec)}
 
 
 def test_all_runtime_handlers_are_still_registered() -> None:
@@ -249,17 +225,17 @@ async def test_other_validation_error_code_still_logs_exception(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     caplog.set_level(logging.DEBUG)
-    handler = _Recorder()
+
+    async def handler(svc: Any, request: Any, actor: str) -> dict[str, Any]:
+        raise InvalidAccountIdError("handler rejected")
+
     registry = CommandRegistry()
-    registry.register(
-        "demo.scoped", handler, is_mutating=False, account_id_policy="required"
-    )
+    registry.register("demo.scoped", handler, is_mutating=False)
     server = IPCServer("/tmp/unused.sock", _services(), registry)
     server._state = IPCServerState.RUNNING
     response = await server._dispatch(_request("demo.scoped", {"account_id": ""}))
     assert response["status"] == "error"
     assert response["error"]["code"] == "VALIDATION_ERROR"
-    assert handler.calls == []
     records = _server_records(caplog)
     assert len(records) == 1
     assert records[0].levelname == "ERROR"

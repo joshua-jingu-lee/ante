@@ -416,17 +416,6 @@ class IPCServer:
 
         try:
             args = _validated_args(spec, args)
-            if spec.account_id_policy == "required":
-                from ante.account.scoping import require_account_id
-
-                require_account_id(args.get("account_id"), context=f"ipc.{command}")
-            elif spec.account_id_policy == "optional_filter":
-                account_id_arg = args.get("account_id")
-                if account_id_arg is not None:
-                    from ante.account.scoping import require_account_id
-
-                    require_account_id(account_id_arg, context=f"ipc.{command}")
-
             result = await spec.handler(self._service_registry, args, actor)
             audit_detail: dict | None = None
             if isinstance(result, dict):

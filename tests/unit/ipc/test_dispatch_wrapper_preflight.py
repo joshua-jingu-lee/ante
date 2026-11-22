@@ -1,16 +1,15 @@
 """IPCServer ``_dispatch`` preflight wrapper 검증.
 
 Refs #1850 (#1819 부모 epic): dispatch wrapper 가 handler 호출 전에
-``CommandSpec.required_services`` 부재 / ``CommandSpec.account_id_policy``
+``CommandSpec.required_services`` 부재 / 요청 모델의 계좌 ID 필드
 위반을 사전 차단하는지 확인한다.
 
 - ``required_services`` 부재 → ``SERVICE_NOT_CONFIGURED`` envelope (handler
   미호출). ``ServiceRegistry`` 는 dataclass 이며 optional service 는 default
   ``None`` 이라 ``getattr(svc, name, None) is None`` 로 판정한다.
-- ``account_id_policy == "required"`` 누락/invalid → ``InvalidAccountIdError``
-  (``code="VALIDATION_ERROR"``) raise → 기존 ``server.py`` except 가
-  ``VALIDATION_ERROR`` envelope 으로 변환.
-- ``account_id_policy == "optional_filter"`` → 값 있으면 검증, 없으면 skip.
+- 요청 모델의 ``AccountId`` 필드 누락/invalid → 모델 검증이
+  ``VALIDATION_ERROR`` envelope 으로 거부(handler 미호출).
+- ``AccountId | None`` 필드 → 값 있으면 검증, 없으면 ``None``.
 - lifecycle gate (``DRAINING`` / ``STOPPED`` / ``SHUTTING_DOWN`` + mutating)
   는 preflight 보다 항상 먼저 — preflight 로 인한 envelope 이 lifecycle
   거부를 덮어쓰지 않는다.
@@ -27,7 +26,9 @@ import pytest
 
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
+from ante.ipc.requests import AccountId, IPCRequest
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.validation_messages import validation_message
 
 
 def _make_service_registry(**overrides: Any) -> ServiceRegistry:
@@ -168,260 +169,144 @@ async def test_required_services_missing_attribute_returns_service_not_configure
         await server.stop()
 
 
-# ── account_id_policy="required" preflight ──────────────────────────────────
+# ── 요청 모델의 계좌 ID 필드 (account_id_policy 의 대체, #2683 ⑦) ──────────
+
+
+class _AccountRequired(IPCRequest):
+    account_id: AccountId
+
+
+class _AccountFilter(IPCRequest):
+    account_id: AccountId | None = None
+
+
+async def _dispatch_one(
+    socket_path: str,
+    command: str,
+    model: type[IPCRequest],
+    args: Any,
+    *,
+    is_mutating: bool,
+) -> tuple[dict[str, Any], list[Any]]:
+    cmd_registry = CommandRegistry()
+    received: list[Any] = []
+
+    async def handler(svc: ServiceRegistry, request: Any, actor: str) -> dict:
+        received.append(request)
+        return {"account_id": request.account_id}
+
+    cmd_registry.register(
+        command, handler, is_mutating=is_mutating, request_model=model
+    )
+    server = IPCServer(socket_path, _make_service_registry(), cmd_registry)
+    await server.start()
+    try:
+        response = await server._dispatch(
+            {"id": "1", "command": command, "args": args, "actor": "t"}
+        )
+    finally:
+        await server.stop()
+    return response, received
+
+
+def _rejected(command: str, kind: str) -> dict[str, Any]:
+    return {
+        "id": "1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(command, ("account_id", kind)),
+        },
+    }
 
 
 @pytest.mark.asyncio
 async def test_account_id_required_present_calls_handler(socket_path: str) -> None:
-    """account_id_policy=required + valid account_id 시 handler 호출 정상."""
-    cmd_registry = CommandRegistry()
-    received: dict[str, Any] = {}
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        received.update(args)
-        return {"account_id": args["account_id"]}
-
-    cmd_registry.register(
+    """계좌 ID 필드 + 유효한 account_id 면 handler 가 모델을 받는다."""
+    response, received = await _dispatch_one(
+        socket_path,
         "test.account_required",
-        handler,
+        _AccountRequired,
+        {"account_id": "live-001"},
         is_mutating=True,
-        account_id_policy="required",
     )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_required",
-                "args": {"account_id": "live-001"},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "ok"
-        assert response["result"]["account_id"] == "live-001"
-        assert received["account_id"] == "live-001"
-    finally:
-        await server.stop()
+    assert response == {
+        "id": "1",
+        "status": "ok",
+        "result": {"account_id": "live-001"},
+    }
+    assert received == [_AccountRequired(account_id="live-001")]
 
 
 @pytest.mark.asyncio
-async def test_account_id_required_missing_returns_validation_error(
-    socket_path: str,
+@pytest.mark.parametrize(
+    ("args", "kind"),
+    [
+        pytest.param({}, "missing", id="missing"),
+        pytest.param({"account_id": "default"}, "invalid_account_id", id="reserved"),
+    ],
+)
+async def test_account_id_required_rejected_before_handler(
+    socket_path: str, args: dict[str, Any], kind: str
 ) -> None:
-    """account_id_policy=required + args 에 account_id 없으면 VALIDATION_ERROR.
-
-    ``require_account_id(None)`` 이 ``InvalidAccountIdError``
-    (``code="VALIDATION_ERROR"``) 를 raise 하고, 기존 except 의
-    ``getattr(e, "code", ...)`` 가 ``VALIDATION_ERROR`` envelope 으로 변환.
-    handler 는 호출되지 않는다.
-    """
-    cmd_registry = CommandRegistry()
-    called = False
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        nonlocal called
-        called = True
-        return {"ok": True}
-
-    cmd_registry.register(
-        "test.account_required",
-        handler,
-        is_mutating=True,
-        account_id_policy="required",
+    """계좌 ID 필드가 없거나 잘못되면 handler 전에 VALIDATION_ERROR."""
+    response, received = await _dispatch_one(
+        socket_path, "test.account_required", _AccountRequired, args, is_mutating=True
     )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_required",
-                "args": {},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR"
-        assert called is False
-    finally:
-        await server.stop()
+    assert response == _rejected("test.account_required", kind)
+    assert received == []
 
 
 @pytest.mark.asyncio
-async def test_account_id_required_invalid_returns_validation_error(
-    socket_path: str,
+@pytest.mark.parametrize(
+    ("args", "account_id"),
+    [
+        pytest.param({"account_id": "live-001"}, "live-001", id="present"),
+        pytest.param({}, None, id="absent"),
+    ],
+)
+async def test_account_id_optional_filter_passes(
+    socket_path: str, args: dict[str, Any], account_id: str | None
 ) -> None:
-    """account_id_policy=required + invalid (예: "default") 도 VALIDATION_ERROR.
-
-    ``"default"`` 는 ``INVALID_RUNTIME_ACCOUNT_IDS`` fallback 예약어이므로
-    ``require_account_id`` 가 거부한다.
-    """
-    cmd_registry = CommandRegistry()
-    called = False
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        nonlocal called
-        called = True
-        return {"ok": True}
-
-    cmd_registry.register(
-        "test.account_required",
-        handler,
-        is_mutating=True,
-        account_id_policy="required",
+    """``AccountId | None`` 필드는 값이 있으면 검증하고 없으면 ``None``."""
+    response, received = await _dispatch_one(
+        socket_path, "test.account_filter", _AccountFilter, args, is_mutating=False
     )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_required",
-                "args": {"account_id": "default"},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR"
-        assert called is False
-    finally:
-        await server.stop()
-
-
-# ── account_id_policy="optional_filter" preflight ───────────────────────────
-
-
-@pytest.mark.asyncio
-async def test_account_id_optional_filter_present_validates(socket_path: str) -> None:
-    """optional_filter + 값 존재 시 검증 통과하면 handler 호출."""
-    cmd_registry = CommandRegistry()
-    received: dict[str, Any] = {}
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        received.update(args)
-        return {"filtered": args.get("account_id")}
-
-    cmd_registry.register(
-        "test.account_filter",
-        handler,
-        is_mutating=False,
-        account_id_policy="optional_filter",
-    )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_filter",
-                "args": {"account_id": "live-001"},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "ok"
-        assert response["result"] == {"filtered": "live-001"}
-        assert received["account_id"] == "live-001"
-    finally:
-        await server.stop()
+    assert response == {
+        "id": "1",
+        "status": "ok",
+        "result": {"account_id": account_id},
+    }
+    assert received == [_AccountFilter(account_id=account_id)]
 
 
 @pytest.mark.asyncio
 async def test_account_id_optional_filter_invalid_returns_validation_error(
     socket_path: str,
 ) -> None:
-    """optional_filter + 값이 invalid 면 VALIDATION_ERROR 로 거부."""
-    cmd_registry = CommandRegistry()
-    called = False
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        nonlocal called
-        called = True
-        return {"ok": True}
-
-    cmd_registry.register(
+    """``AccountId | None`` 필드에 잘못된 값이면 VALIDATION_ERROR 로 거부."""
+    response, received = await _dispatch_one(
+        socket_path,
         "test.account_filter",
-        handler,
+        _AccountFilter,
+        {"account_id": "default"},
         is_mutating=False,
-        account_id_policy="optional_filter",
     )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_filter",
-                "args": {"account_id": "default"},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR"
-        assert called is False
-    finally:
-        await server.stop()
+    assert response == _rejected("test.account_filter", "invalid_account_id")
+    assert received == []
 
 
-@pytest.mark.asyncio
-async def test_account_id_optional_filter_absent_skips(socket_path: str) -> None:
-    """optional_filter + account_id 부재 시 검증 skip — handler 정상 호출."""
-    cmd_registry = CommandRegistry()
-    called = False
-
-    async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
-        nonlocal called
-        called = True
-        return {"filtered": args.get("account_id")}
-
-    cmd_registry.register(
-        "test.account_filter",
-        handler,
-        is_mutating=False,
-        account_id_policy="optional_filter",
-    )
-
-    svc_registry = _make_service_registry()
-    server = IPCServer(socket_path, svc_registry, cmd_registry)
-    await server.start()
-    try:
-        response = await server._dispatch(
-            {
-                "id": "1",
-                "command": "test.account_filter",
-                "args": {},
-                "actor": "t",
-            }
-        )
-        assert response["status"] == "ok"
-        assert response["result"] == {"filtered": None}
-        assert called is True
-    finally:
-        await server.stop()
-
-
-# ── account_id_policy="none" (default) ─────────────────────────────────────
+# ── 요청 모델이 없는 명령 ──────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
 async def test_account_id_none_skips_validation(socket_path: str) -> None:
-    """account_id_policy=none (default) 면 args 의 account_id 값과 무관하게 skip."""
+    """요청 모델이 없으면 args 의 account_id 값과 무관하게 검증하지 않는다."""
     cmd_registry = CommandRegistry()
 
     async def handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"acc": args.get("account_id")}
 
-    # default account_id_policy="none"
     cmd_registry.register("test.no_policy", handler, is_mutating=False)
 
     svc_registry = _make_service_registry()
@@ -491,7 +376,7 @@ async def test_lifecycle_gate_before_preflight_draining(socket_path: str) -> Non
 async def test_shutdown_mutating_blocked_before_preflight(socket_path: str) -> None:
     """SHUTTING_DOWN + mutating 시 preflight 에 도달 전 SERVICE_UNAVAILABLE.
 
-    account_id_policy=required 라도 lifecycle gate 가 먼저 — VALIDATION_ERROR
+    계좌 ID 요청 모델이라도 lifecycle gate 가 먼저 — VALIDATION_ERROR
     envelope 이 노출되어서는 안 된다.
     """
     cmd_registry = CommandRegistry()
@@ -503,7 +388,7 @@ async def test_shutdown_mutating_blocked_before_preflight(socket_path: str) -> N
         "test.account_required_mut",
         handler,
         is_mutating=True,
-        account_id_policy="required",
+        request_model=_AccountRequired,
     )
 
     svc_registry = _make_service_registry()
@@ -811,7 +696,7 @@ async def test_shutdown_mutating_blocked_before_required_services_preflight(
         handler,
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
-        account_id_policy="required",
+        request_model=_AccountRequired,
     )
     svc_registry = _make_service_registry()
     assert svc_registry.audit_logger is None

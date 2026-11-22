@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -52,7 +52,7 @@ def account() -> None:
     """계좌 생성·조회·관리."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -479,7 +479,7 @@ def account_list(ctx: click.Context, status_filter: str | None) -> None:
             f"허용값: {sorted(s.value for s in AccountStatus)}"
         )
 
-    async def _do_list() -> list[dict]:
+    async def _do_list() -> list[dict[str, Any]]:
         async with _create_account_service(ctx) as svc:
             status = AccountStatus(status_filter) if status_filter else None
             accounts = await svc.list(status=status)
@@ -514,7 +514,7 @@ def account_info(ctx: click.Context, account_id: str) -> None:
         account_id, fmt, context="cli.account.info"
     )
 
-    async def _do_info() -> dict:
+    async def _do_info() -> dict[str, Any]:
         async with _create_account_service(ctx) as svc:
             acct = await svc.get(validated_account_id)
             return _account_to_detail(acct)
@@ -819,7 +819,7 @@ def account_repair_timezone(
     )
 
 
-def _account_to_row(acct: Account) -> dict:
+def _account_to_row(acct: Account) -> dict[str, Any]:
     """Account를 테이블 행 dict로 변환."""
     return {
         "account_id": acct.account_id,
@@ -831,7 +831,7 @@ def _account_to_row(acct: Account) -> dict:
     }
 
 
-def _account_to_detail(acct: Account) -> dict:
+def _account_to_detail(acct: Account) -> dict[str, Any]:
     """Account를 상세 dict로 변환."""
     return {
         "account_id": acct.account_id,
@@ -850,7 +850,7 @@ def _account_to_detail(acct: Account) -> dict:
     }
 
 
-def _print_account_detail(detail: dict) -> None:
+def _print_account_detail(detail: dict[str, Any]) -> None:
     """텍스트 모드로 계좌 상세 출력."""
     click.echo("\n계좌 정보")
     click.echo("-" * 35)
