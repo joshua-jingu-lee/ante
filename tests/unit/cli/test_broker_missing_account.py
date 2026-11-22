@@ -70,13 +70,17 @@ import textwrap
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli.commands.broker import _get_broker
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.member.models import Member, MemberRole, MemberType
 
 _MISSING_ACCOUNT_ID = "oracle-missing-account"
@@ -139,7 +143,7 @@ def _build_ipc_unavailable_mock() -> AsyncMock:
     ``balance``/``positions`` 명령은 IPC 호출이 ``click.ClickException`` 을 raise
     하면 직접 연결 폴백 분기로 들어간다. 이 mock 은 그 분기를 강제한다.
     """
-    return AsyncMock(side_effect=click.ClickException("서버가 실행 중이 아닙니다."))
+    return AsyncMock(side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다."))
 
 
 def _patch_account_service_not_found() -> tuple[MagicMock, AsyncMock]:
@@ -437,7 +441,7 @@ class TestStatusAndReconcileFollowupScope:
             patch(
                 "ante.cli.commands.ipc_helpers.ipc_send",
                 AsyncMock(
-                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                    side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다.")
                 ),
             ),
             patch(
@@ -609,13 +613,12 @@ class TestStatusFallbackDisconnectsAdapter:
         Returns:
             (CliRunner result, disconnect AsyncMock) — disconnect 호출 검증용.
         """
-        import click
 
         from ante.broker.base import BrokerAdapter
         from ante.cli.commands import broker as broker_cmd
 
         async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            raise click.ClickException("server unavailable")
+            raise IPCServerNotRunningError("server unavailable")
 
         mock_adapter = MagicMock(spec=BrokerAdapter)
         mock_adapter.is_connected = True
@@ -687,13 +690,12 @@ class TestStatusFallbackDisconnectsAdapter:
     ) -> None:
         """disconnect 가 raise 해도 db.close() 는 실행되고, 결과는 기존
         ``connected:False`` 변환으로 끝난다."""
-        import click
 
         from ante.broker.base import BrokerAdapter
         from ante.cli.commands import broker as broker_cmd
 
         async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            raise click.ClickException("server unavailable")
+            raise IPCServerNotRunningError("server unavailable")
 
         mock_adapter = MagicMock(spec=BrokerAdapter)
         mock_adapter.is_connected = True
@@ -888,7 +890,7 @@ class TestBrokerValidAbsentPerCommandNarrow:
             ipc_patch = patch(
                 "ante.cli.commands.ipc_helpers.ipc_send",
                 AsyncMock(
-                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                    side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다.")
                 ),
             )
         else:
@@ -979,9 +981,8 @@ class TestBrokerBalanceSubprocessNoHang:
             import sys
             from unittest.mock import AsyncMock, MagicMock, patch
 
-            import click
-
             from ante.account.errors import AccountNotFoundError
+            from ante.contracts.ipc_client_errors import IPCServerNotRunningError
             from ante.member.models import Member, MemberRole, MemberType
 
             _NOT_FOUND = "계좌 'oracle-missing-account'를 찾을 수 없습니다."
@@ -1010,9 +1011,7 @@ class TestBrokerBalanceSubprocessNoHang:
                 ctx.obj = ctx.obj or {}
                 ctx.obj["member"] = master
 
-            ipc_mock = AsyncMock(
-                side_effect=click.ClickException("서버 미실행")
-            )
+            ipc_mock = AsyncMock(side_effect=IPCServerNotRunningError("서버 미실행"))
 
             with (
                 patch(
@@ -1079,18 +1078,14 @@ class TestBrokerBalanceSubprocessNoHang:
 
 def _ipc_send_not_running() -> AsyncMock:
     """``ipc_send`` mock — ``IPC_SERVER_NOT_RUNNING`` 부착 ClickException."""
-    exc = click.ClickException("서버가 실행 중이 아닙니다.")
-    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-    return AsyncMock(side_effect=exc)
+    return AsyncMock(side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다."))
 
 
 def _ipc_send_with_code(code: str, message: str) -> AsyncMock:
     """``ipc_send`` mock — 임의 IPC 코드가 부착된 ClickException."""
-    exc = click.ClickException(f"{code}: {message}")
-    exc.ipc_error_code = code  # type: ignore[attr-defined]
-    exc.ipc_error_message = message  # type: ignore[attr-defined]
-    return AsyncMock(side_effect=exc)
+    if code == "IPC_TIMEOUT":
+        return AsyncMock(side_effect=IPCClientTimeoutError(message))
+    return AsyncMock(side_effect=IPCRemoteError(code, message))
 
 
 class TestIpcBrokerCommandExtraRegressionLock:
