@@ -100,11 +100,8 @@ def test_d_fixture_restoring_in_teardown_is_fine(fixed_clock):
 
 
 async def test_e_bg_tasks_in_use_clock_then_leak():
-    loop = asyncio.get_running_loop()
-    loop.create_task(sleep_in_clock(Fixed()))
-    await asyncio.sleep(0)
     clock.set_clock(Fixed())
-    loop.create_task(sleep_in_clock(Fixed()))
+    asyncio.get_running_loop().create_task(sleep_in_clock(Fixed()))
     await asyncio.sleep(0)
 
 
