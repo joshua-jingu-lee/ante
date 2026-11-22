@@ -6,7 +6,7 @@ import asyncio
 import logging
 import time as time_mod
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -113,7 +113,7 @@ class TelegramCommandReceiver:
                     data = await resp.json()
                     if not data.get("ok"):
                         return []
-                    results = data.get("result", [])
+                    results: list[dict[str, Any]] = data.get("result", [])
                     if results:
                         self._offset = results[-1]["update_id"] + 1
                     return results
@@ -274,8 +274,8 @@ class TelegramCommandReceiver:
         if handler:
             result = handler(args)
             if isawaitable(result):
-                return await result
-            return result
+                return cast("str", await result)
+            return cast("str", result)
 
         return "알 수 없는 명령입니다. /help를 입력해 주세요."
 

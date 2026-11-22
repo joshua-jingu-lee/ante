@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
@@ -35,7 +36,7 @@ class TelegramAdapter(NotificationAdapter):
         level: NotificationLevel,
         title: str,
         body: str,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """서식이 있는 알림 발송."""
         emoji = LEVEL_EMOJI.get(level, "\U0001f4cc")
@@ -50,7 +51,7 @@ class TelegramAdapter(NotificationAdapter):
         self,
         level: NotificationLevel,
         message: str,
-        buttons: list[list[dict]],
+        buttons: list[list[dict[str, Any]]],
     ) -> bool:
         """인라인 버튼이 포함된 알림 발송.
 
@@ -81,7 +82,7 @@ class TelegramAdapter(NotificationAdapter):
             return False
 
         url = f"{self._api_base}/answerCallbackQuery"
-        payload: dict = {"callback_query_id": callback_query_id}
+        payload: dict[str, Any] = {"callback_query_id": callback_query_id}
         if text:
             payload["text"] = text
 
@@ -97,7 +98,7 @@ class TelegramAdapter(NotificationAdapter):
         self,
         text: str,
         parse_mode: str = "",
-        reply_markup: dict | None = None,
+        reply_markup: dict[str, Any] | None = None,
     ) -> bool:
         """텔레그램 sendMessage API 호출."""
         try:
@@ -109,7 +110,7 @@ class TelegramAdapter(NotificationAdapter):
             return False
 
         url = f"{self._api_base}/sendMessage"
-        payload: dict = {
+        payload: dict[str, Any] = {
             "chat_id": self._chat_id,
             "text": text,
         }
