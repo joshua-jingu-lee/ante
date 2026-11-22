@@ -34,7 +34,8 @@ from ante.broker.circuit_breaker import (
     CircuitBreaker,
     CircuitState,
 )
-from ante.broker.exceptions import CircuitOpenError
+from ante.broker.exceptions import APIError, CircuitOpenError
+from ante.broker.kis import KISDomesticAdapter
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
 from ante.eventbus.events import (
@@ -581,19 +582,155 @@ async def test_circuit_half_open_success_closes(eventbus, circuit_events, clock)
     ]
 
 
-async def test_circuit_open_success_closes_directly(eventbus, circuit_events, clock):
+async def test_circuit_open_success_is_ignored(eventbus, circuit_events, clock):
     breaker = await _open_breaker(eventbus, circuit_events)
+    last_failure_time = breaker._last_failure_time
+    breaker.record_success()
+    await _drain()
+    assert breaker._state == "open"
+    assert breaker.failure_count == 3
+    assert breaker._last_failure_time == last_failure_time
+    assert circuit_events == []
+    with pytest.raises(Exception) as exc_info:
+        breaker.check()
+    _assert_exact(
+        exc_info,
+        CircuitOpenError,
+        "Circuit breaker OPEN — 3회 연속 실패, 60초 후 재시도",
+    )
+
+
+async def test_circuit_open_success_ignored_then_half_open_success_closes(
+    eventbus, circuit_events, clock
+):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    breaker.record_success()
+    clock.now += 60.0
+    assert breaker.state == "half_open"
     breaker.record_success()
     await _drain()
     assert breaker._state == "closed"
     assert breaker.failure_count == 0
     assert circuit_events == [
-        ("CircuitBreakerEvent", "cb-2657", "open", "closed", 3, "API 호출 성공"),
+        (
+            "CircuitBreakerEvent",
+            "cb-2657",
+            "open",
+            "half_open",
+            3,
+            "recovery_timeout 경과",
+        ),
+        ("CircuitBreakerEvent", "cb-2657", "half_open", "closed", 3, "API 호출 성공"),
         (
             "NotificationEvent",
             "info",
             "서킷 브레이커 복구",
-            "브로커 `cb-2657`\nopen → *closed* (API 호출 성공)",
+            "브로커 `cb-2657`\nhalf_open → *closed* (API 호출 성공)",
+        ),
+    ]
+
+
+async def test_circuit_open_success_after_timeout_without_check_does_not_close(
+    eventbus, circuit_events, clock
+):
+    breaker = await _open_breaker(eventbus, circuit_events)
+    clock.now += 60.0
+    breaker.record_success()
+    await _drain()
+    assert breaker._state == "open"
+    assert breaker.failure_count == 3
+    assert circuit_events == []
+
+
+def _adapter_with(breaker: CircuitBreaker, monkeypatch: pytest.MonkeyPatch) -> Any:
+    adapter = KISDomesticAdapter(
+        config={
+            "app_key": "test-key",
+            "app_secret": "test-secret",
+            "account_no": "1234567890",
+            "is_paper": True,
+        }
+    )
+
+    async def _no_wait(*args: Any) -> None:
+        return None
+
+    monkeypatch.setattr(adapter, "_circuit_breaker", breaker)
+    monkeypatch.setattr(adapter, "_ensure_authenticated", _no_wait)
+    monkeypatch.setattr(adapter, "_rate_limit_wait", _no_wait)
+    monkeypatch.setattr(adapter._retry_handler, "wait_and_log", _no_wait)
+    return adapter
+
+
+def _fail_then_succeed(adapter: Any, monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    attempts: list[str] = []
+
+    async def _send_http(*args: Any) -> tuple[dict[str, Any], str]:
+        attempts.append("send")
+        if len(attempts) == 1:
+            raise APIError("server busy", retryable=True, status_code=503)
+        return {"rt_cd": "0"}, ""
+
+    monkeypatch.setattr(adapter, "_send_http", _send_http)
+    return attempts
+
+
+_QUERY_URL = "https://example.invalid/uapi/domestic-stock/v1/quotations/inquire-price"
+
+
+async def test_circuit_retry_success_after_opening_keeps_breaker_open(
+    eventbus, circuit_events, clock, monkeypatch
+):
+    breaker = CircuitBreaker(
+        failure_threshold=1, recovery_timeout=60.0, eventbus=eventbus, name="kis"
+    )
+    adapter = _adapter_with(breaker, monkeypatch)
+    attempts = _fail_then_succeed(adapter, monkeypatch)
+    result = await adapter._request_with_cont("GET", _QUERY_URL, "FHKST01010100")
+    await _drain()
+    assert result == ({"rt_cd": "0"}, "")
+    assert attempts == ["send", "send"]
+    assert breaker._state == "open"
+    assert breaker.failure_count == 1
+    assert [event[:4] for event in circuit_events] == [
+        ("CircuitBreakerEvent", "kis", "closed", "open"),
+        (
+            "NotificationEvent",
+            "error",
+            "서킷 브레이커 차단",
+            "브로커 `kis`\nclosed → *open* (연속 1회 실패)",
+        ),
+    ]
+    with pytest.raises(CircuitOpenError):
+        await adapter._request_with_cont("GET", _QUERY_URL, "FHKST01010100")
+    assert attempts == ["send", "send"]
+
+
+async def test_circuit_half_open_trial_retry_success_keeps_breaker_open(
+    eventbus, circuit_events, clock, monkeypatch
+):
+    breaker = CircuitBreaker(
+        failure_threshold=1, recovery_timeout=60.0, eventbus=eventbus, name="kis"
+    )
+    breaker.record_failure()
+    await _drain()
+    circuit_events.clear()
+    clock.now += 60.0
+    adapter = _adapter_with(breaker, monkeypatch)
+    attempts = _fail_then_succeed(adapter, monkeypatch)
+    result = await adapter._request_with_cont("GET", _QUERY_URL, "FHKST01010100")
+    await _drain()
+    assert result == ({"rt_cd": "0"}, "")
+    assert attempts == ["send", "send"]
+    assert breaker._state == "open"
+    assert [event[:4] for event in circuit_events] == [
+        ("CircuitBreakerEvent", "kis", "open", "half_open"),
+        ("CircuitBreakerEvent", "kis", "half_open", "open"),
+        (
+            "NotificationEvent",
+            "error",
+            "서킷 브레이커 차단",
+            "브로커 `kis`\nhalf_open → *open* (HALF_OPEN 시험 실패)",
         ),
     ]
 
@@ -739,7 +876,6 @@ CIRCUIT_STATES = ("closed", "open", "half_open")
 CIRCUIT_ALLOWED_PAIRS = {
     ("closed", "open"),
     ("open", "half_open"),
-    ("open", "closed"),
     ("half_open", "open"),
     ("half_open", "closed"),
 }
@@ -747,10 +883,10 @@ CIRCUIT_ALLOWED_PAIRS = {
 CIRCUIT_ALL_PAIRS = [(c, t) for c in CIRCUIT_STATES for t in CIRCUIT_STATES]
 
 
-def test_circuit_transition_table_equals_the_five_literal_pairs():
+def test_circuit_transition_table_equals_the_four_literal_pairs():
     assert sorted(str(k) for k in CIRCUIT_STATE_TRANSITIONS) == sorted(CIRCUIT_STATES)
     assert _pairs(CIRCUIT_STATE_TRANSITIONS) == CIRCUIT_ALLOWED_PAIRS
-    assert len(CIRCUIT_ALLOWED_PAIRS) == 5
+    assert len(CIRCUIT_ALLOWED_PAIRS) == 4
     assert len(CIRCUIT_ALL_PAIRS) == 9
 
 
