@@ -15,7 +15,11 @@ from __future__ import annotations
 
 import dataclasses
 import inspect
+import json
+import sys
+import typing
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -34,6 +38,8 @@ from ante.contracts.cli_registry import (
 from ante.contracts.vocab import EnvelopeForm
 
 _PATH = ("fake", "leaf")
+_ROOT = Path(__file__).resolve().parents[3]
+_BASELINE = _ROOT / "scripts" / "entry_ratchet_baseline.json"
 
 
 def _contract(
@@ -263,18 +269,33 @@ def _iter_leaves(
     return leaves
 
 
-def _returns_command_result(callback: Any) -> bool:
-    annotation = inspect.unwrap(callback).__annotations__.get("return")
-    return annotation is CommandResult or annotation == "CommandResult"
+def _return_hint(callback: Any) -> object:
+    return typing.get_type_hints(inspect.unwrap(callback)).get("return")
+
+
+def _mentions_command_result(hint: object) -> bool:
+    return hint is CommandResult or CommandResult in typing.get_args(hint)
+
+
+def _direct_output_baseline_files() -> set[str]:
+    baseline = json.loads(_BASELINE.read_text(encoding="utf-8"))
+    return set(baseline["cli_direct_output"])
+
+
+def _module_file(module: str) -> str:
+    path = Path(str(sys.modules[module].__file__)).resolve()
+    return path.relative_to(_ROOT).as_posix()
 
 
 def test_command_result_leaves_have_standard_contracts() -> None:
-    """반환 주석이 ``CommandResult`` 인 leaf의 계약은 전부 ``standard`` 다."""
+    """반환 주석이 ``CommandResult`` 를 담는 leaf의 계약은 전부 ``standard`` 다."""
     from ante.cli.main import cli
 
     checked = []
     for path, cmd in _iter_leaves(cli):
-        if cmd.callback is None or not _returns_command_result(cmd.callback):
+        if cmd.callback is None or not _mentions_command_result(
+            _return_hint(cmd.callback)
+        ):
             continue
         contract = get_contract(path)
         assert contract is not None, f"{path}: CommandResult를 돌려주는데 계약이 없다"
@@ -283,3 +304,34 @@ def test_command_result_leaves_have_standard_contracts() -> None:
         )
         checked.append(path)
     assert checked, "반환 주석이 CommandResult인 leaf가 하나도 없다(검사가 비었다)"
+
+
+def test_leaves_outside_direct_output_baseline_return_command_result() -> None:
+    """``cli_direct_output`` 기준선에 파일이 없는 명령 모듈의 leaf는 전부
+    반환 주석이 정확히 ``CommandResult`` 다.
+
+    대상 모듈은 Click 트리의 leaf 콜백의 ``__module__`` 에서 도출한다.
+    """
+    from ante.cli.main import cli
+
+    baseline_files = _direct_output_baseline_files()
+    leaves = [(path, cmd) for path, cmd in _iter_leaves(cli) if cmd.callback]
+    modules = {inspect.unwrap(cmd.callback).__module__ for _, cmd in leaves}
+    files = {module: _module_file(module) for module in modules}
+    assert baseline_files <= set(files.values()), (
+        "기준선의 파일과 leaf 모듈이 맞지 않는다"
+    )
+    targets = {module for module, file in files.items() if file not in baseline_files}
+    assert targets, "기준선 밖의 명령 모듈이 없다(검사가 비었다)"
+
+    checked = set()
+    for path, cmd in leaves:
+        module = inspect.unwrap(cmd.callback).__module__
+        if module not in targets:
+            continue
+        hint = _return_hint(cmd.callback)
+        assert hint is CommandResult, (
+            f"{path}: 기준선 밖의 모듈인데 반환 주석이 {hint!r}다"
+        )
+        checked.add(module)
+    assert checked == targets
