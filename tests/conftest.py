@@ -434,6 +434,32 @@ def _reset_kis_token_state():
     _reset_token_cache()
 
 
+CLOCK_LEAK_MESSAGE = (
+    "테스트가 바꾼 시계를 되돌리지 않았다 (#2768). use_clock으로 바꾼다."
+)
+
+
+def restore_clock_or_fail() -> None:
+    """현재 시계가 ``SystemClock``이 아니면 되돌리고 테스트를 실패시킨다."""
+    from ante.core import clock
+
+    if type(clock.current_clock()) is not clock.SystemClock:
+        clock.set_clock(clock.SystemClock())
+        pytest.fail(CLOCK_LEAK_MESSAGE, pytrace=False)
+
+
+@pytest.fixture(autouse=True)
+def _clock_restored():
+    """전역 시계가 다음 테스트로 새지 않게 한다 (#2768).
+
+    테스트가 끝난 뒤 정리 단계의 오류로 그 테스트를 실패시킨다. autouse라
+    함수 범위의 다른 픽스처보다 늦게 정리되므로, 픽스처가 정리에서 되돌린
+    시계는 실패가 아니다.
+    """
+    yield
+    restore_clock_or_fail()
+
+
 @pytest.fixture(autouse=True)
 def _sync_boundary_cleanup():
     """모든 테스트(sync + async) 경계에서 ``patch.stopall`` 보장.
