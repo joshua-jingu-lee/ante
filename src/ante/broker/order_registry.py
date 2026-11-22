@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.core.account_id import require_account_id
 
@@ -82,7 +82,9 @@ class OrderRegistry:
         )
         return row["bot_id"] if row else None
 
-    async def get_orders_by_bot(self, account_id: str, bot_id: str) -> list[dict]:
+    async def get_orders_by_bot(
+        self, account_id: str, bot_id: str
+    ) -> list[dict[str, Any]]:
         """봇의 모든 주문 조회."""
         validated_account_id = require_account_id(
             account_id, context="order_registry.get_orders_by_bot"

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.account.models import TradingMode
 
@@ -18,7 +18,7 @@ EXCLUDED_TYPES: frozenset[str] = frozenset({"strategy_adopt", "strategy_retire"}
 AccountResolver = Callable[[str], Awaitable["Account | None"]]
 
 
-def _extract_bot_create_account_id(params: dict) -> str | None:
+def _extract_bot_create_account_id(params: dict[str, Any]) -> str | None:
     """bot_create payload 에서 account_id 를 config-first 순서로 추출."""
     config = params.get("config")
     if isinstance(config, dict):
@@ -44,7 +44,7 @@ class AutoApproveConfig:
     budget_change_max: float = 5_000_000
 
     @classmethod
-    def from_dict(cls, data: dict) -> AutoApproveConfig:
+    def from_dict(cls, data: dict[str, Any]) -> AutoApproveConfig:
         """dict에서 AutoApproveConfig 생성.
 
         Config.get("approval.auto_approve", {}) 결과를 받는다.
@@ -69,7 +69,9 @@ class AutoApproveEvaluator:
     config: AutoApproveConfig = field(default_factory=AutoApproveConfig)
     account_resolver: AccountResolver | None = None
 
-    async def should_auto_approve(self, type: str, params: dict | None = None) -> bool:
+    async def should_auto_approve(
+        self, type: str, params: dict[str, Any] | None = None
+    ) -> bool:
         """전결 조건 평가.
 
         Args:
@@ -102,7 +104,7 @@ class AutoApproveEvaluator:
 
         return False
 
-    async def _should_auto_approve_bot_create(self, params: dict) -> bool:
+    async def _should_auto_approve_bot_create(self, params: dict[str, Any]) -> bool:
         """Account.trading_mode 기반 bot_create 자동승인 판단."""
         if self.account_resolver is None:
             return False

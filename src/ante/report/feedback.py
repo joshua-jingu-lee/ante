@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ante.bot.manager import BotManager
@@ -20,7 +20,7 @@ class PerformanceFeedback:
         self._trade = trade_service
         self._bots = bot_manager
 
-    async def get_bot_performance(self, bot_id: str) -> dict:
+    async def get_bot_performance(self, bot_id: str) -> dict[str, Any]:
         """봇의 실전 성과 조회.
 
         Raises:
@@ -58,7 +58,7 @@ class PerformanceFeedback:
             ],
         }
 
-    async def get_strategy_performance(self, strategy_id: str) -> dict:
+    async def get_strategy_performance(self, strategy_id: str) -> dict[str, Any]:
         """전략의 모든 봇 성과 집계."""
         bots = self._bots.list_bots()
         strategy_bots = [b for b in bots if b.get("strategy_id") == strategy_id]
@@ -78,7 +78,7 @@ class PerformanceFeedback:
         self,
         bot_id: str,
         limit: int = 100,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """봇의 거래 이력 조회.
 
         Raises:
@@ -110,7 +110,7 @@ class PerformanceFeedback:
         self,
         bot_id: str,
         initial_balance: float = 0.0,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """봇의 자산 곡선 데이터 생성.
 
         Returns:
@@ -121,7 +121,7 @@ class PerformanceFeedback:
                 봇을 resolve하여 그 계좌로만 거래 이력을 스코핑한다.
         """
         from ante.bot.exceptions import BotNotFoundError
-        from ante.trade.recorder import TradeStatus
+        from ante.trade.models import TradeStatus
 
         bot = self._bots.get_bot(bot_id)
         if bot is None:

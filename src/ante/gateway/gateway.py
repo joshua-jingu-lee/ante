@@ -195,7 +195,7 @@ class APIGateway:
         require_account_id(account_id, context="gateway.get_ohlcv")
 
         cache_key = f"ohlcv:{exchange}:{symbol}:{timeframe}:{limit}"
-        cached = self._cache.get(cache_key)
+        cached: list[dict[str, Any]] | None = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -223,7 +223,7 @@ class APIGateway:
         require_account_id(account_id, context="gateway.get_current_price")
 
         cache_key = f"{account_id}:price:{symbol}"
-        cached = self._cache.get(cache_key)
+        cached: float | None = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -244,7 +244,7 @@ class APIGateway:
         require_account_id(account_id, context="gateway.get_positions")
 
         cache_key = f"{account_id}:positions"
-        cached = self._cache.get(cache_key)
+        cached: list[dict[str, Any]] | None = self._cache.get(cache_key)
         if cached is not None:
             return cached
 
@@ -265,7 +265,7 @@ class APIGateway:
         require_account_id(account_id, context="gateway.get_account_balance")
 
         cache_key = f"{account_id}:balance"
-        cached = self._cache.get(cache_key)
+        cached: dict[str, float] | None = self._cache.get(cache_key)
         if cached is not None:
             return cached
 

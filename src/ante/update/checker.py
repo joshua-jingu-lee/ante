@@ -7,6 +7,7 @@ import json
 import logging
 import urllib.request
 from importlib.metadata import version as pkg_version
+from typing import cast
 
 logger = logging.getLogger(__name__)
 PYPI_URL = "https://pypi.org/pypi/ante/json"
@@ -26,7 +27,7 @@ def get_latest_version() -> str | None:
         req = urllib.request.Request(PYPI_URL, headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             data = json.loads(resp.read())
-            return data["info"]["version"]
+            return cast("str", data["info"]["version"])
     except Exception as e:
         logger.warning("PyPI 버전 조회 실패: %s", e)
         return None

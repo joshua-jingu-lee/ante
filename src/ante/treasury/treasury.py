@@ -633,7 +633,7 @@ class Treasury:
 
     def _is_my_event(self, event: object) -> bool:
         """이벤트가 이 Treasury의 계좌에 해당하는지 확인."""
-        account_id = getattr(event, "account_id", None)
+        account_id: object = getattr(event, "account_id", None)
         if account_id is None:
             return False
         return account_id == self._account_id

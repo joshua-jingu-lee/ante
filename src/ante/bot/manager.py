@@ -77,8 +77,8 @@ def _runtime_control_default(name: str) -> Any:
             continue
         if field.default is not dataclasses.MISSING:
             return field.default
-        if field.default_factory is not dataclasses.MISSING:  # type: ignore[misc]
-            return field.default_factory()  # type: ignore[misc]
+        if field.default_factory is not dataclasses.MISSING:
+            return field.default_factory()
         raise KeyError(
             f"BotConfig field {name!r} has no default — manager 가 default 를 "
             "독립적으로 정의할 수 없다 (SSOT: BotConfig dataclass)"
@@ -184,7 +184,7 @@ class BotManager:
         class _NullStrategy(Strategy):
             meta = StrategyMeta(name="null", version="0.0.0", description="test stub")
 
-            async def on_step(self, context: dict) -> list[Signal]:  # type: ignore[override]
+            async def on_step(self, context: dict[str, Any]) -> list[Signal]:
                 return []
 
         class _NullContext:
