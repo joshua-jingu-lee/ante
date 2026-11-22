@@ -44,6 +44,7 @@ build/
 htmlcov/
 .mypy_cache/
 .pytest_cache/
+.hypothesis/
 .ruff_cache/
 
 # IDE

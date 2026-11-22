@@ -330,6 +330,7 @@ tests/
     ├── contracts/
     ├── feed/                         # DataFeed 모듈 단위 테스트
     ├── ipc/
+    ├── property/
     ├── specs/
     └── strategy/
 ```
