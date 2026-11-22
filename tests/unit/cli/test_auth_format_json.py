@@ -3,7 +3,7 @@
 배경:
     ``ante --format json`` 모드에서 CLI 인증/권한 실패가 stderr 텍스트만
     내고 stdout JSON error를 발급하지 않는 contract drift가 있었다. 자동화
-    호출자(특히 ante-oracle host probe)는 JSON 파서를 사용할 수 없어
+    호출자는 JSON 파서를 사용할 수 없어
     동기화에 실패한다.
 
 본 테스트는 4개의 emit site(``_authenticate_member`` /

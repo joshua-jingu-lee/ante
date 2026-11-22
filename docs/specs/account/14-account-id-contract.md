@@ -89,7 +89,7 @@ violations:
 
 ## invalid account_id 에러코드 SSOT (목표 — #1623/#1633)
 
-이 절은 account-scoped CLI / IPC / oracle 표면에서 invalid
+이 절은 account-scoped CLI / IPC 표면에서 invalid
 ``account_id`` ( ``None`` / 빈 문자열 / ``"default"`` / 패턴 위반 )를
 거부할 때 노출되어야 하는 **목표(normative target) 안정 에러코드의
 단일 출처(SSOT)** 다. #1623 split A/B/C ( #1634 / #1635 / #1636 ) 및
@@ -105,7 +105,7 @@ violations:
 
 ### 결정 — `VALIDATION_ERROR` 재사용 고정 (목표)
 
-invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
+invalid ``account_id``는 다음 두 표면 모두에서 목표상 (target)
 ``InvalidAccountIdError.code = "VALIDATION_ERROR"`` 코드로 노출되어야
 한다. 본 표는 #1623 split 이 도달시켜야 할 목표 상태이며, 현재
 산출을 단정하지 않는다.
@@ -114,7 +114,6 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
 |---|---|---|
 | account-scoped CLI JSON error | ``require_account_id`` → :class:`InvalidAccountIdError` → CLI JSON error payload (담당 split 이 CLI 콜백의 ``except`` / non-Click 예외 변환을 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
 | IPC broker dispatch | 요청 모델의 계좌 ID 필드 → ``VALIDATION_ERROR`` | ``VALIDATION_ERROR`` |
-| oracle host probe | ``ANTE_ORACLE_HOST_PROBE_MODE=cli_account_id_invalid_contract`` 가 기대하는 nonzero clean invalid account_id 응답 | ``VALIDATION_ERROR`` |
 
 근거 (목표 코드 = ``InvalidAccountIdError.code`` 재사용, 코드 상수와 정합):
 
