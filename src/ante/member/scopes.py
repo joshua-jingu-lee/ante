@@ -47,7 +47,7 @@ def is_valid_scope(scope: str) -> bool:
     """``scope`` 문자열이 SCOPE_VOCABULARY 에 포함되어 있는지 확인한다.
 
     구분자 변형(예: ``account.read``), 대소문자 변형(예: ``Account:Read``),
-    공백/외부 prefix(``oracle:invalid``, ``audit :read``) 는 모두 false 다.
+    공백/외부 prefix(``sample:invalid``, ``audit :read``) 는 모두 false 다.
     빈 문자열은 false 다.
     """
     return scope in SCOPE_VOCABULARY

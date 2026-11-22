@@ -1,6 +1,6 @@
 """CLI treasury allocate/deallocate amount finite-positive 검증 매트릭스 (#1517).
 
-이슈 #1517 (oracle A7 cli_treasury_nan_amount_accepted):
+이슈 #1517 (cli_treasury_nan_amount_accepted):
 ``treasury allocate``/``deallocate``의 ``amount`` 인자가 click ``type=float``로
 ``nan``/``inf``/``-inf``/0/음수를 그대로 통과시키고, IPC 호출 실패 시에도
 ``except Exception as e: fmt.error(str(e)); return``로 exit 0을 반환하던 ingress

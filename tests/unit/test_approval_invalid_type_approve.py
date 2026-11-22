@@ -55,8 +55,8 @@ async def _seed_invalid_pending_row(
     db: Database,
     *,
     approval_id: str = "legacy-invalid-1",
-    approval_type: str = "oracle_invalid_type",
-    requester: str = "agent-oracle",
+    approval_type: str = "sample_invalid_type",
+    requester: str = "agent-sample",
 ) -> None:
     """raw INSERT 로 invalid type 의 pending approval row 를 시드한다.
 
@@ -284,7 +284,7 @@ class TestAutoApproveEnumDefenseInDepth:
 
         bogus = ApprovalRequest(
             id="bogus-1",
-            type="oracle_invalid_type",
+            type="sample_invalid_type",
             status=ApprovalStatus.APPROVED,
             requester="agent",
             title="bogus",

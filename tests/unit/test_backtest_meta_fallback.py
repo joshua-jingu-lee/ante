@@ -244,7 +244,7 @@ class TestMetaInvalidVocabRejected:
     @pytest.mark.asyncio
     async def test_meta_invalid_timeframe_rejected(self):
         strategy_cls = _strategy_cls_with_meta(
-            symbols=["005930"], timeframe="oracle-invalid"
+            symbols=["005930"], timeframe="sample-invalid"
         )
         with _run_env(strategy_cls) as (provider, _pcls, _ecls):
             svc = BacktestService()
@@ -332,7 +332,7 @@ class TestValidateConfigTimeframeNoneDeferred:
         """명시(비-None) invalid timeframe 은 기존대로 early 거부."""
         svc = BacktestService()
         with pytest.raises(BacktestConfigError, match="Invalid timeframe"):
-            svc._validate_config(_cfg(timeframe="oracle-invalid"))
+            svc._validate_config(_cfg(timeframe="sample-invalid"))
 
 
 # ── (f) subprocess(runner) 동일 동작: 실제 데이터 + meta fallback ──────────

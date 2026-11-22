@@ -1,6 +1,6 @@
 """제공된 runtime-invalid ``account_id`` read-only CLI ingress 거부 회귀.
 
-(#1634, Split A — #1623 oracle probe ``account_info_default``/
+(#1634, Split A — #1623 ``account_info_default``/
 ``account_info_bad_pattern``/``bot_list_default`` 축)
 
 account-scoped **read-only** CLI 표면 — ``account info <account_id>``(positional),

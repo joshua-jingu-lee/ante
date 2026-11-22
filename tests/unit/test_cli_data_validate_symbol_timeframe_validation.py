@@ -7,7 +7,7 @@ CLI 경계 단일 검증 (#1603 backtest run 블록 1:1 동형 미러):
   (거부 안 함, ParquetStore.list_symbols 경유 정상 진행 경로).
 - 유효 `--symbol 005930 --timeframe 1d` → 기존 동작 유지.
 - invalid 입력 → ParquetStore/list_symbols/validate 미도달
-  (`if not symbols:` exit-0 fake-success #1591 oracle 증상 미도달).
+  (`if not symbols:` exit-0 fake-success #1591 증상 미도달).
 - JSON/text 양 포맷 error code/메시지 회귀.
 - `@require_auth`/`@require_scope("data:read")` 데코레이터 정상 동작.
 
@@ -75,12 +75,12 @@ class TestDataValidateTimeframeValidation:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
-        assert "oracle-invalid-timeframe" in result.output
+        assert "sample-invalid-timeframe" in result.output
         assert "Error: DATA_VALIDATE_INVALID_TIMEFRAME: " in result.output
 
     def test_invalid_timeframe_json_mode_exit1_with_code(self):
@@ -96,7 +96,7 @@ class TestDataValidateTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -116,7 +116,7 @@ class TestDataValidateTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             )
 
@@ -232,7 +232,7 @@ class TestDataValidateOmittedSymbolScope:
         with patch("ante.data.store.ParquetStore") as mock_store:
             result = runner.invoke(
                 cli,
-                _validate_args("--timeframe", "oracle-invalid-timeframe"),
+                _validate_args("--timeframe", "sample-invalid-timeframe"),
             )
 
         assert result.exit_code == 1
@@ -256,7 +256,7 @@ class TestDataValidateValidationPrecedence:
                     "--symbol",
                     "ABCDEF",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -275,7 +275,7 @@ class TestDataValidateAuthDecorators:
         # 인증이 통과해야만 ingress 검증(invalid timeframe)까지 도달한다.
         result = runner.invoke(
             cli,
-            _validate_args("--timeframe", "oracle-invalid-timeframe"),
+            _validate_args("--timeframe", "sample-invalid-timeframe"),
         )
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
@@ -286,7 +286,7 @@ class TestDataValidateAuthDecorators:
         runner = CliRunner()
         result = runner.invoke(
             cli,
-            _validate_args("--timeframe", "oracle-invalid-timeframe"),
+            _validate_args("--timeframe", "sample-invalid-timeframe"),
         )
         # 인증 실패로 비정상 종료하며 ingress 검증 메시지에 도달하지 않는다.
         assert result.exit_code != 0

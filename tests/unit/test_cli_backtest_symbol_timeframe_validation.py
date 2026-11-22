@@ -82,12 +82,12 @@ class TestBacktestTimeframeValidation:
                 "--symbols",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
-        assert "oracle-invalid-timeframe" in result.output
+        assert "sample-invalid-timeframe" in result.output
         assert "Error: BACKTEST_INVALID_TIMEFRAME: " in result.output
 
     def test_invalid_timeframe_json_mode_exit1_with_code(self, tmp_path):
@@ -106,7 +106,7 @@ class TestBacktestTimeframeValidation:
                     "--symbols",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -383,7 +383,7 @@ class TestBacktestValidationPrecedence:
                     "--symbols",
                     "ABCDEF",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                     "--exchange",
                     "KRX",
                 ),
@@ -409,9 +409,9 @@ class TestBacktestValidationPrecedence:
                     "--symbols",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                     "--exchange",
-                    "ORACLE_INVALID_EXCHANGE",
+                    "SAMPLE_INVALID_EXCHANGE",
                 ),
             ],
         )
@@ -462,7 +462,7 @@ class TestBacktestInvalidInputNoHistory:
                     "--symbols",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             )
 

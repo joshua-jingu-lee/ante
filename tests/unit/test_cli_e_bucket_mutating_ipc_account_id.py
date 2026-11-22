@@ -1,6 +1,6 @@
 """E bucket — non-broker mutating IPC CLI invalid ``account_id`` ingress 거부 회귀.
 
-(#1656, E bucket — #1623 oracle probe ``treasury_allocate_default``/
+(#1656, E bucket — #1623 ``treasury_allocate_default``/
 ``treasury_deallocate_default``/``bot_create_default`` 축)
 
 account-scoped **non-broker mutating IPC** CLI 표면 —

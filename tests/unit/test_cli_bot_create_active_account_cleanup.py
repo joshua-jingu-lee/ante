@@ -1,7 +1,6 @@
 """``ante bot create`` aiosqlite cleanup hang 회귀 (#1799).
 
-oracle A7 probe ``cli_bot_create_missing_required_account_contract`` 가
-발견한 회귀 모델: ``--account`` 미지정 + active account count != 1 시
+회귀 모델: ``--account`` 미지정 + active account count != 1 시
 ``_resolve_account_non_interactive`` 가 ``BOT_MISSING_REQUIRED_ACCOUNT``
 envelope 을 정상 출력한 뒤 ``SystemExit(1)`` 을 raise 하지만,
 ``_create_services()`` 가 연 aiosqlite db 연결이 close 되지 않아

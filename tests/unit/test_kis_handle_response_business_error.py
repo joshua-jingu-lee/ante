@@ -5,7 +5,7 @@ KIS API가 HTTP 5xx + body에 ``rt_cd`` / ``msg_cd``를 포함해 응답하는
 ``APIError.error_code``에 ``msg_cd``를 보존해야 한다. 그렇지 않으면
 ``OrderCancelFailedEvent.error_message``가 ``HTTP 500: {...}`` 문자열로만
 노출되어 downstream order action 처리와 리포팅이 generic HTTP failure로
-오분류된다 (oracle A7 회귀).
+오분류된다.
 
 retryable 우선순위 (Codex Plan Review v2):
     1. ``msg_cd`` ∈ ``PERMANENT_MSG_CODES`` → ``False`` 강제.

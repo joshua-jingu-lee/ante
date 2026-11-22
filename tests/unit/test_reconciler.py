@@ -789,13 +789,13 @@ class TestUnattributedHolding:
         않는다(과거: 외부 매수로 quantity=2 force-write → 전략 오매도).
         """
         await reconciler.reconcile(
-            bot_id="oracle-probe-bot",
+            bot_id="sample-probe-bot",
             broker_positions=[
                 {"symbol": "069500", "quantity": 2, "avg_price": 30000},
             ],
             account_id="acc-test",
         )
-        pos = await position_history.get_current("oracle-probe-bot", "069500")
+        pos = await position_history.get_current("sample-probe-bot", "069500")
         # 미보유 종목이 봇 포지션으로 기록되지 않음 — 오매도 방지.
         assert pos["quantity"] == 0
 

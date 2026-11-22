@@ -1356,7 +1356,7 @@ async def _sync_instruments(s: Services, accounts: list[Any]) -> None:
     """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
 
     첫 번째 성공 broker 에서 ``return`` 하면, 계좌 순서가
-    ``test``(TEST) → ``oracle-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
+    ``test``(TEST) → ``sample-paper``(KRX) 인 환경에서 TEST 더미 종목이 KIS/KRX
     종목 마스터 적재를 선점해 종목명 병기가 전부 symbol-only 로
     폴백된다. 전 계좌를 순회하되 이미 동기화한 exchange
     는 ``synced_exchanges`` 로 건너뛰어 같은 exchange 를 중복 조회하지 않는다.

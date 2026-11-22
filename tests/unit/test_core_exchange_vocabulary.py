@@ -69,7 +69,7 @@ class TestIsCanonical:
         assert is_canonical("*") is False
 
     @pytest.mark.parametrize(
-        "value", ["krx", "Krx", "nyse", "LSE", "ORACLE_INVALID_EXCHANGE", "", " KRX"]
+        "value", ["krx", "Krx", "nyse", "LSE", "SAMPLE_INVALID_EXCHANGE", "", " KRX"]
     )
     def test_non_canonical_values_false(self, value):
         assert is_canonical(value) is False
@@ -83,7 +83,7 @@ class TestIsStrategyAllowed:
         assert is_strategy_allowed(value) is True
 
     @pytest.mark.parametrize(
-        "value", ["krx", "LSE", "ORACLE_INVALID_EXCHANGE", "", "**"]
+        "value", ["krx", "LSE", "SAMPLE_INVALID_EXCHANGE", "", "**"]
     )
     def test_disallowed_values_false(self, value):
         assert is_strategy_allowed(value) is False
@@ -94,7 +94,7 @@ class TestNormalizeExchange:
 
     @pytest.mark.parametrize(
         "value",
-        ["KRX", "krx", "Krx", "*", "LSE", "ORACLE_INVALID_EXCHANGE", "", " KRX "],
+        ["KRX", "krx", "Krx", "*", "LSE", "SAMPLE_INVALID_EXCHANGE", "", " KRX "],
     )
     def test_passthrough_no_transform(self, value):
         # 대소문자 정규화/별칭/trim 등 어떤 변환도 하지 않는다.

@@ -7,7 +7,7 @@ lock 한다. #1842/#1843 sub-PR 1-5 의 1:1 동형 패턴.
 검증 대상 fault:
 
 - ``ConfigValidationError`` → ``CONFIG_VALIDATION_ERROR`` (validation;
-  #1673 oracle A7. ``ValueError`` 다중상속을 보존하며 helper registry-first
+  #1673. ``ValueError`` 다중상속을 보존하며 helper registry-first
   lookup 이 동일 안정 코드를 surface)
 
 IPC path 는 ``ante.contracts.ipc_error_payload`` helper (server.py:322 의
@@ -43,7 +43,7 @@ def _ipc_envelope_code(exc: BaseException) -> str:
 class TestConfigValidationErrorEquivalence:
     """``ConfigValidationError`` 는 양쪽에서 ``CONFIG_VALIDATION_ERROR``.
 
-    #1673 oracle A7 의 invalid log_level 같은 서비스 경계 입력 오류는
+    #1673 의 invalid log_level 같은 서비스 경계 입력 오류는
     server.py:322 의 ``getattr(e, "code", "EXECUTION_ERROR")`` 가
     ``CONFIG_VALIDATION_ERROR`` 안정 코드를 envelope 에 노출한다.
     helper registry-first lookup 도 동일 코드를 resolve 한다.

@@ -1,6 +1,6 @@
 """CLI ``strategy submit`` meta shape ingress validation 회귀 (#1756).
 
-이슈 #1756 (oracle A7 cli_strategy_submit_meta_shape_contract):
+이슈 #1756 (cli_strategy_submit_meta_shape_contract):
 사용자가 작성한 strategy manifest의 ``meta`` 속성이 ``StrategyMeta`` 인스턴스가
 아닌 ``dict`` (또는 임의의 다른 객체)일 때, 기존 ``strategy submit`` 경로는
 ``meta = strategy_cls.meta`` 직후 ``registry.register(...)`` 호출로 진입해

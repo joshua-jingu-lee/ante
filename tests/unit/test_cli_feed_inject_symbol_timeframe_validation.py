@@ -6,7 +6,7 @@ CLI 경계 단일 검증 (#1603 backtest run / #1605 data validate 블록 1:1
 - invalid KRX symbol(비-6자리) → exit 1 + `FEED_INJECT_INVALID_SYMBOL`.
 - 유효 `--symbol 005930 --timeframe 1d` → 기존 inject 동작 유지.
 - invalid 입력 → ParquetStore/FeedInjector/inject_csv 미도달 **그리고**
-  tmp data-path 내 parquet 파일/디렉터리 미생성 (#1592 oracle 증상:
+  tmp data-path 내 parquet 파일/디렉터리 미생성 (#1592 증상:
   invalid 입력이 비표준 dataset 생성, 둘 다 확인).
 - JSON/text 양 포맷 error code/메시지 회귀.
 - `@require_auth`/`@require_scope("data:write")` 데코레이터 정상 동작.
@@ -111,12 +111,12 @@ class TestFeedInjectTimeframeValidation:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
-        assert "oracle-invalid-timeframe" in result.output
+        assert "sample-invalid-timeframe" in result.output
         assert result.output.startswith(
             "Error: FEED_INJECT_INVALID_TIMEFRAME: 유효하지 않은 타임프레임"
         )
@@ -139,7 +139,7 @@ class TestFeedInjectTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -167,7 +167,7 @@ class TestFeedInjectTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             )
 
@@ -295,7 +295,7 @@ class TestFeedInjectValidationPrecedence:
                     "--symbol",
                     "ABCDEF",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -382,7 +382,7 @@ class TestFeedInjectAuthDecorators:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
@@ -403,7 +403,7 @@ class TestFeedInjectAuthDecorators:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         # 인증 실패로 비정상 종료하며 ingress 검증 메시지에 도달하지 않는다.

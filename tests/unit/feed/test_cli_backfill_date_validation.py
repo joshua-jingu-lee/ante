@@ -332,7 +332,7 @@ class TestDailyDateValidation:
                     "--data-path",
                     initialized_data_path,
                     "--date",
-                    "oracle-not-a-date",
+                    "sample-not-a-date",
                 ],
                 catch_exceptions=False,
             )
@@ -342,7 +342,7 @@ class TestDailyDateValidation:
             data = json.loads(result.stdout)
             assert data["status"] == "error"
             assert data["code"] == "CLI_INVALID_DATE"
-            assert "oracle-not-a-date" in data["message"]
+            assert "sample-not-a-date" in data["message"]
             mock_orch.run_daily.assert_not_awaited()
 
     def test_invalid_date_text_mode_writes_error_to_stderr(
@@ -363,7 +363,7 @@ class TestDailyDateValidation:
                     "--data-path",
                     initialized_data_path,
                     "--date",
-                    "oracle-not-a-date",
+                    "sample-not-a-date",
                 ],
                 catch_exceptions=False,
             )
@@ -373,7 +373,7 @@ class TestDailyDateValidation:
             assert "Traceback" not in stderr
             assert "Error:" in stderr
             assert "잘못된 --date 날짜 형식" in stderr
-            assert "oracle-not-a-date" in stderr
+            assert "sample-not-a-date" in stderr
             mock_orch.run_daily.assert_not_awaited()
 
     def test_valid_iso_date_passes_through_to_orchestrator(

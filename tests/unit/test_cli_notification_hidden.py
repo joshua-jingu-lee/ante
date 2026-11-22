@@ -1,6 +1,6 @@
 """notification 빈 그룹의 public 표면(root help) 숨김 회귀 테스트 (#1682).
 
-oracle A7: `ante --help` 가 public leaf 가 없는 `notification` 그룹을
+`ante --help` 가 public leaf 가 없는 `notification` 그룹을
 광고하지만 `ante notification --help` 에는 실행 가능한 subcommand 가
 없었다(dead-end). `@click.group(hidden=True)` 로 root help 에서 숨기되,
 `cli.add_command(notification)` 은 유지하여 직접 invoke 는 보존한다.
@@ -43,7 +43,7 @@ class TestNotificationHidden:
     def test_root_help_does_not_advertise_notification(self) -> None:
         """root ``--help`` 의 Commands 섹션에 notification 라인 부재.
 
-        oracle probe ``root_advertises_group`` 의 동치(→False).
+        ``root_advertises_group`` 의 동치(→False).
         """
         runner = CliRunner()
         result = runner.invoke(cli, ["--help"])

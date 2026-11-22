@@ -71,10 +71,10 @@ class TestAddDataIngress:
         assert "005930:tick" not in c.buffer
         c._store.append.assert_not_called()
 
-    def test_reject_oracle_invalid_timeframe(self, caplog):
+    def test_reject_sample_invalid_timeframe(self, caplog):
         c = _make_collector()
         with caplog.at_level(logging.WARNING):
-            c.add_data("005930", "oracle-invalid-timeframe", _row())
+            c.add_data("005930", "sample-invalid-timeframe", _row())
         assert c.buffer == {}
         c._store.append.assert_not_called()
 
@@ -129,7 +129,7 @@ class TestCollectLoopGuard:
         c.set_data_callback(callback)
         c._collect_interval = 0.05
 
-        c.start(["005930"], ["oracle-invalid-timeframe"])
+        c.start(["005930"], ["sample-invalid-timeframe"])
         await asyncio.sleep(0.08)
         c.stop()
 
@@ -168,7 +168,7 @@ class TestFlushGuardAndCount:
         n = 4
         valid_rows = [_row(i) for i in range(n)]
         # public buffer 프로퍼티 직접 주입 (add_data 검증 우회)
-        c.buffer["005930:oracle-invalid-timeframe"] = [_row()]  # invalid tf
+        c.buffer["005930:sample-invalid-timeframe"] = [_row()]  # invalid tf
         c.buffer["badkey"] = [_row()]  # no-colon
         c.buffer["005930:1m:extra"] = [_row()]  # extra-colon
         c.buffer[("005930", "1m")] = [_row()]  # type: ignore[index]  # non-str key

@@ -1,6 +1,6 @@
 """제공된 runtime-invalid ``account_id`` construction-lifecycle CLI 경계 회귀.
 
-(#1635, Split B — #1623 oracle probe ``treasury_status_default``/
+(#1635, Split B — #1623 ``treasury_status_default``/
 ``rule_list_default`` 축)
 
 account-scoped **construction-lifecycle** CLI 표면 —
@@ -41,7 +41,7 @@ account-scoped **construction-lifecycle** CLI 표면 —
 4. 정상 account_id → 4 표면 기존 동작 유지 (회귀 0)
 
 ------------------------------------------------------------------------------
-(#1655, D follow-up — #1623 oracle probe ``account_suspend_default``/
+(#1655, D follow-up — #1623 ``account_suspend_default``/
 ``account_activate_default`` 축)
 
 account-scoped **account-lifecycle** CLI 표면 — ``account suspend <account_id>``,
@@ -635,7 +635,7 @@ class TestValidAccountIdRegression:
 
 # ════════════════════════════════════════════════════════════════════════════
 # #1655, D follow-up — account-lifecycle IPC ingress
-# (oracle probe ``account_suspend_default``/``account_activate_default``)
+# (``account_suspend_default``/``account_activate_default``)
 #
 # ``account suspend``/``account activate``는 IPC ``account.suspend``/
 # ``account.activate`` dispatch라 ``_create_*`` resource 모킹이 아니라

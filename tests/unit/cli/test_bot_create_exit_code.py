@@ -22,7 +22,7 @@ Coverage map:
       - text 모드: stderr ``Error: ...`` + exit 1.
 
 ``ante bot positions`` missing-bot exit code 회귀 (#1558):
-    ``ante --format json bot positions oracle-missing-bot`` 호출이
+    ``ante --format json bot positions sample-missing-bot`` 호출이
     missing-resource 오류가 아니라 exit 0 + ``{"message":"보유 포지션 없음",
     "positions":[]}`` 을 반환해 미존재 bot 이 "실재 bot 의 0 포지션" 과
     구분되지 않는 결함이 있었다 (``bot_positions`` 가 ``get_positions`` 호출
@@ -35,9 +35,9 @@ Coverage map:
     회귀 보장한다 (contract-drift 가드).
 
 Coverage map (#1558 → #1810 typed code sweep):
-    - 미존재 bot ``bot positions oracle-missing-bot``
+    - 미존재 bot ``bot positions sample-missing-bot``
       - JSON 모드: stdout ``{"status":"error","code":"BOT_NOT_FOUND",
-        "message":"봇을 찾을 수 없습니다: oracle-missing-bot"}`` + exit 1.
+        "message":"봇을 찾을 수 없습니다: sample-missing-bot"}`` + exit 1.
       - text 모드: stderr ``Error: 봇을 찾을 수 없습니다: ...`` + exit 1.
     - 실재 bot, 0 포지션: exit 0 + ``{"message":"보유 포지션 없음",
       "positions":[]}`` 유지 (regression guard).
@@ -292,7 +292,7 @@ class TestBotCreateIPCExceptionExitCode:
 # ── bot positions missing-bot exit code 회귀 (#1558) ────────────────────────
 
 
-_MISSING_BOT_ID = "oracle-missing-bot"
+_MISSING_BOT_ID = "sample-missing-bot"
 _REAL_BOT_ID = "real-bot-1"
 _BOT_NOT_FOUND_MESSAGE = f"봇을 찾을 수 없습니다: {_MISSING_BOT_ID}"
 
