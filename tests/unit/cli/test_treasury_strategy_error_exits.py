@@ -153,7 +153,7 @@ def test_treasury_read_account_not_found(mode: str, args: list[str]) -> None:
         result,
         "ACCOUNT_NOT_FOUND",
         _ACCOUNT_MISSING,
-        f"Error: {_ACCOUNT_MISSING}",
+        f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
     )
 
 
@@ -169,7 +169,7 @@ def test_treasury_set_balance_offline_account_not_found(mode: str) -> None:
         result,
         "ACCOUNT_NOT_FOUND",
         _ACCOUNT_MISSING,
-        f"Error: {_ACCOUNT_MISSING}",
+        f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
     )
 
 
@@ -231,7 +231,7 @@ def test_treasury_unexpected_error(
         result,
         "EXECUTION_ERROR",
         "예산 조회 실패",
-        "Error: 예산 조회 실패",
+        "Error: EXECUTION_ERROR: 예산 조회 실패",
     )
 
 
@@ -262,7 +262,7 @@ def test_treasury_catch_all_keeps_a_registered_code(mode: str, args: list[str]) 
         result,
         "TREASURY_NOT_CONFIGURED",
         "자금 관리 미구성",
-        "Error: 자금 관리 미구성",
+        "Error: TREASURY_NOT_CONFIGURED: 자금 관리 미구성",
     )
 
 
@@ -303,7 +303,7 @@ _TREASURY_IPC = [
             IPCRemoteError("TREASURY_INSUFFICIENT_BALANCE", "미할당 잔액 부족"),
             "TREASURY_INSUFFICIENT_BALANCE",
             "미할당 잔액 부족",
-            "Error: 미할당 잔액 부족",
+            "Error: TREASURY_INSUFFICIENT_BALANCE: 미할당 잔액 부족",
             id="remote",
         ),
         pytest.param(
@@ -352,7 +352,7 @@ def test_treasury_mutation_account_not_found(mode: str, args: list[str]) -> None
         result,
         "ACCOUNT_NOT_FOUND",
         _ACCOUNT_MISSING,
-        f"Error: {_ACCOUNT_MISSING}",
+        f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
     )
 
 
@@ -382,7 +382,7 @@ def test_treasury_mutation_rejected(
         + ["--account", _ACCOUNT],
         _send(value={"success": False}),
     )
-    _assert_exit(mode, result, code, message, f"Error: {message}")
+    _assert_exit(mode, result, code, message, f"Error: {code}: {message}")
 
 
 @pytest.mark.parametrize(
@@ -411,7 +411,13 @@ def test_treasury_snapshot_option_conflict(mode: str, bound: str) -> None:
         patch(_TREASURY_CM, new=_raising_cm(AssertionError("열지 않는다"))),
     )
     message = "--date와 --from/--to 옵션은 동시에 사용할 수 없습니다."
-    _assert_exit(mode, result, "CLI_OPTION_CONFLICT", message, f"Error: {message}")
+    _assert_exit(
+        mode,
+        result,
+        "CLI_OPTION_CONFLICT",
+        message,
+        f"Error: CLI_OPTION_CONFLICT: {message}",
+    )
 
 
 def _snapshot_treasury(**methods: Any) -> Any:
@@ -429,7 +435,13 @@ def test_treasury_snapshot_not_found(mode: str) -> None:
         _snapshot_treasury(get_daily_snapshot=AsyncMock(return_value=None)),
     )
     message = "2026-03-04 날짜의 스냅샷이 없습니다."
-    _assert_exit(mode, result, "SNAPSHOT_NOT_FOUND", message, f"Error: {message}")
+    _assert_exit(
+        mode,
+        result,
+        "SNAPSHOT_NOT_FOUND",
+        message,
+        f"Error: SNAPSHOT_NOT_FOUND: {message}",
+    )
 
 
 def test_treasury_snapshot_range_is_not_a_missing_snapshot() -> None:
@@ -472,7 +484,11 @@ def test_strategy_list_invalid_status(mode: str) -> None:
     )
     message = "잘못된 status 값: 'nope'. 허용값: ['adopted', 'archived', 'registered']"
     _assert_exit(
-        mode, result, "STRATEGY_VALIDATION_ERROR", message, f"Error: {message}"
+        mode,
+        result,
+        "STRATEGY_VALIDATION_ERROR",
+        message,
+        f"Error: STRATEGY_VALIDATION_ERROR: {message}",
     )
 
 
@@ -503,7 +519,9 @@ def test_strategy_lookup_catch_all(
         ["--format", mode, *args],
         _with_registry(**{method: AsyncMock(side_effect=error)}),
     )
-    _assert_exit(mode, result, "STRATEGY_ERROR", "조회 실패", "Error: 조회 실패")
+    _assert_exit(
+        mode, result, "STRATEGY_ERROR", "조회 실패", "Error: STRATEGY_ERROR: 조회 실패"
+    )
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -523,7 +541,11 @@ def test_strategy_lookup_operational_error(
         _with_registry(**{method: AsyncMock(side_effect=error)}),
     )
     _assert_exit(
-        mode, result, "STRATEGY_ERROR", "disk I/O error", "Error: disk I/O error"
+        mode,
+        result,
+        "STRATEGY_ERROR",
+        "disk I/O error",
+        "Error: STRATEGY_ERROR: disk I/O error",
     )
 
 
@@ -545,7 +567,13 @@ def test_strategy_info_missing_table_is_not_found(mode: str) -> None:
         _with_registry(get_by_name=AsyncMock(side_effect=error)),
     )
     message = "전략을 찾을 수 없습니다: momentum"
-    _assert_exit(mode, result, "STRATEGY_NOT_FOUND", message, f"Error: {message}")
+    _assert_exit(
+        mode,
+        result,
+        "STRATEGY_NOT_FOUND",
+        message,
+        f"Error: STRATEGY_NOT_FOUND: {message}",
+    )
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -572,7 +600,13 @@ def test_strategy_lookup_not_found(
         _with_registry(**{method: AsyncMock(return_value=value)}),
     )
     message = f"전략을 찾을 수 없습니다: {name}"
-    _assert_exit(mode, result, "STRATEGY_NOT_FOUND", message, f"Error: {message}")
+    _assert_exit(
+        mode,
+        result,
+        "STRATEGY_NOT_FOUND",
+        message,
+        f"Error: STRATEGY_NOT_FOUND: {message}",
+    )
 
 
 _SET_STATUS = ["strategy", "set-status", "momentum_v1", "--status", "archived"]
@@ -616,7 +650,7 @@ def test_strategy_set_status_offline_errors(
         patch(_ACTIVE, return_value=False),
         _with_registry(update_status=AsyncMock(side_effect=error)),
     )
-    _assert_exit(mode, result, code, message, f"Error: {message}")
+    _assert_exit(mode, result, code, message, f"Error: {code}: {message}")
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -641,14 +675,14 @@ def test_strategy_set_status_offline_errors(
             IPCRemoteError("STRATEGY_NOT_FOUND", "전략 없음: momentum_v1"),
             "STRATEGY_NOT_FOUND",
             "전략 없음: momentum_v1",
-            "Error: 전략 없음: momentum_v1",
+            "Error: STRATEGY_NOT_FOUND: 전략 없음: momentum_v1",
             id="remote",
         ),
         pytest.param(
             ValueError("허용되지 않는 전이"),
             "STRATEGY_INVALID_STATUS_TRANSITION",
             "허용되지 않는 전이",
-            "Error: 허용되지 않는 전이",
+            "Error: STRATEGY_INVALID_STATUS_TRANSITION: 허용되지 않는 전이",
             id="transition",
         ),
     ],
@@ -691,7 +725,11 @@ def test_strategy_performance_missing_account(mode: str) -> None:
     )
     message = "계좌 ID를 지정해야 합니다. --account-id <id> 옵션을 사용하세요."
     _assert_exit(
-        mode, result, "STRATEGY_MISSING_REQUIRED_ACCOUNT", message, f"Error: {message}"
+        mode,
+        result,
+        "STRATEGY_MISSING_REQUIRED_ACCOUNT",
+        message,
+        f"Error: STRATEGY_MISSING_REQUIRED_ACCOUNT: {message}",
     )
 
 
@@ -703,7 +741,7 @@ def test_strategy_performance_account_not_found(mode: str) -> None:
         result,
         "ACCOUNT_NOT_FOUND",
         _ACCOUNT_MISSING,
-        f"Error: {_ACCOUNT_MISSING}",
+        f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
     )
 
 
@@ -747,7 +785,7 @@ def test_strategy_performance_errors(
     mode: str, patches: dict[str, Any], code: str, message: str
 ) -> None:
     result = _invoke(["--format", mode, *_PERF], *_perf_patches(**patches))
-    _assert_exit(mode, result, code, message, f"Error: {message}")
+    _assert_exit(mode, result, code, message, f"Error: {code}: {message}")
 
 
 # ------------------------------------------------- strategy validate·submit
@@ -857,7 +895,10 @@ def test_strategy_submit_load_failure(mode: str, tmp_path: Path) -> None:
             },
         )
     else:
-        _assert_text(result, ["Error: Load test failed: 모듈을 불러올 수 없습니다"])
+        _assert_text(
+            result,
+            ["Error: STRATEGY_LOAD_ERROR: Load test failed: 모듈을 불러올 수 없습니다"],
+        )
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -882,7 +923,11 @@ def test_strategy_submit_meta_shape(mode: str, tmp_path: Path) -> None:
         )
     else:
         _assert_text(
-            result, ["Error: Invalid meta shape: expected StrategyMeta, got dict"]
+            result,
+            [
+                "Error: STRATEGY_VALIDATION_ERROR: "
+                "Invalid meta shape: expected StrategyMeta, got dict"
+            ],
         )
 
 
@@ -915,7 +960,9 @@ def test_strategy_submit_register_failure(mode: str, tmp_path: Path) -> None:
             },
         )
     else:
-        _assert_text(result, ["Error: 거래소가 맞지 않습니다"])
+        _assert_text(
+            result, ["Error: STRATEGY_INCOMPATIBLE_EXCHANGE: 거래소가 맞지 않습니다"]
+        )
 
 
 def test_strategy_submit_register_failure_without_a_code(tmp_path: Path) -> None:
@@ -935,3 +982,68 @@ def test_strategy_submit_register_failure_without_a_code(tmp_path: Path) -> None
             "error": "등록 실패",
         },
     )
+
+
+def test_exceptions_raised_by_treasury_and_strategy_map_to_their_specs() -> None:
+    from ante.contracts import cli_errors
+    from ante.contracts.helpers import error_spec_for_exception
+    from ante.strategy.exceptions import StrategyValidationError
+
+    classes = [
+        cli_errors.CliOptionConflictError,
+        cli_errors.CliStrategyError,
+        cli_errors.SnapshotNotFoundError,
+        cli_errors.StrategyInvalidStatusTransitionError,
+        cli_errors.StrategyMissingRequiredAccountError,
+        cli_errors.TreasuryAllocateFailedError,
+        cli_errors.TreasuryDeallocateFailedError,
+        StrategyLoadError,
+        StrategyNotFoundError,
+        StrategyValidationError,
+    ]
+    table = {}
+    for cls in classes:
+        spec = error_spec_for_exception(cls("m"))
+        table[cls.__name__] = (spec.code, spec.category, spec.exit_code)
+    assert table == {
+        "CliOptionConflictError": ("CLI_OPTION_CONFLICT", "validation", 1),
+        "CliStrategyError": ("STRATEGY_ERROR", "internal", 1),
+        "SnapshotNotFoundError": ("SNAPSHOT_NOT_FOUND", "not_found", 1),
+        "StrategyInvalidStatusTransitionError": (
+            "STRATEGY_INVALID_STATUS_TRANSITION",
+            "state_conflict",
+            1,
+        ),
+        "StrategyMissingRequiredAccountError": (
+            "STRATEGY_MISSING_REQUIRED_ACCOUNT",
+            "validation",
+            1,
+        ),
+        "TreasuryAllocateFailedError": ("TREASURY_ALLOCATE_FAILED", "validation", 1),
+        "TreasuryDeallocateFailedError": (
+            "TREASURY_DEALLOCATE_FAILED",
+            "validation",
+            1,
+        ),
+        "StrategyLoadError": ("STRATEGY_LOAD_ERROR", "validation", 1),
+        "StrategyNotFoundError": ("STRATEGY_NOT_FOUND", "not_found", 1),
+        "StrategyValidationError": ("STRATEGY_VALIDATION_ERROR", "validation", 1),
+    }
+
+
+def test_the_residual_validate_code_is_registered_without_an_exception() -> None:
+    from ante.contracts import error_registry
+    from ante.contracts.errors import ErrorSpec
+
+    specs = [
+        (v.code, v.category, v.exit_code)
+        for v in vars(error_registry).values()
+        if isinstance(v, ErrorSpec) and v.code == "STRATEGY_VALIDATION_FAILED"
+    ]
+    mapped = [
+        cls.__name__
+        for cls, spec in error_registry.EXCEPTION_TO_SPEC.items()
+        if spec.code == "STRATEGY_VALIDATION_FAILED"
+    ]
+    assert specs == [("STRATEGY_VALIDATION_FAILED", "validation", 1)]
+    assert mapped == []

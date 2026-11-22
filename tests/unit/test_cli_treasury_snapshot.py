@@ -127,6 +127,13 @@ def _invoke(runner, args, mock_auth):
     )
 
 
+def _invoke_root(runner, args, fmt="text"):
+    """진입점 훅을 지나도록 루트 그룹으로 실행하는 헬퍼(실패 경로용)."""
+    from ante.cli.main import cli
+
+    return runner.invoke(cli, ["--format", fmt, "treasury", *args])
+
+
 class TestSnapshotDefault:
     """인자 없이 호출 시 오늘 날짜 스냅샷 조회."""
 
@@ -144,7 +151,7 @@ class TestSnapshotDefault:
     def test_default_no_data(self, runner, mock_auth):
         ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
         with ctx_patch:
-            result = _invoke(runner, ["snapshot", "--account", "domestic"], mock_auth)
+            result = _invoke_root(runner, ["snapshot", "--account", "domestic"])
 
         assert result.exit_code == 1
         assert "스냅샷이 없습니다" in result.output
@@ -169,10 +176,9 @@ class TestSnapshotDate:
     def test_specific_date_not_found(self, runner, mock_auth):
         ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
         with ctx_patch:
-            result = _invoke(
+            result = _invoke_root(
                 runner,
                 ["snapshot", "--account", "domestic", "--date", "2026-01-01"],
-                mock_auth,
             )
 
         assert result.exit_code == 1
@@ -326,18 +332,10 @@ class TestSnapshotJson:
     def test_json_not_found(self, runner, mock_auth):
         import json
 
-        from ante.member.models import Member, MemberType
-
-        mock_member = Member(
-            member_id="test-user",
-            name="테스트",
-            type=MemberType.HUMAN,
-            role="master",
-        )
         ctx_patch, _ = _make_mock_treasury(get_daily_return=None)
         with ctx_patch:
-            result = runner.invoke(
-                treasury,
+            result = _invoke_root(
+                runner,
                 [
                     "snapshot",
                     "--account",
@@ -347,12 +345,7 @@ class TestSnapshotJson:
                     "--format",
                     "json",
                 ],
-                obj={
-                    "format": "json",
-                    "formatter": OutputFormatter("json"),
-                    "member": mock_member,
-                },
-                catch_exceptions=False,
+                fmt="json",
             )
 
         assert result.exit_code == 1
@@ -369,7 +362,7 @@ class TestSnapshotValidation:
         """--date와 --from을 동시에 사용하면 text 모드에서 exit 1."""
         ctx_patch, _ = _make_mock_treasury()
         with ctx_patch:
-            result = _invoke(
+            result = _invoke_root(
                 runner,
                 [
                     "snapshot",
@@ -380,7 +373,6 @@ class TestSnapshotValidation:
                     "--from",
                     "2026-03-20",
                 ],
-                mock_auth,
             )
 
         assert result.exit_code == 1
@@ -391,19 +383,10 @@ class TestSnapshotValidation:
         """--date와 --from을 동시에 사용하면 JSON envelope + exit 1."""
         import json
 
-        from ante.member.models import Member, MemberType
-
-        mock_member = Member(
-            member_id="test-user",
-            name="테스트",
-            type=MemberType.HUMAN,
-            role="master",
-        )
-
         ctx_patch, _ = _make_mock_treasury()
         with ctx_patch:
-            result = runner.invoke(
-                treasury,
+            result = _invoke_root(
+                runner,
                 [
                     "snapshot",
                     "--account",
@@ -413,12 +396,7 @@ class TestSnapshotValidation:
                     "--from",
                     "2026-03-20",
                 ],
-                obj={
-                    "format": "json",
-                    "formatter": OutputFormatter("json"),
-                    "member": mock_member,
-                },
-                catch_exceptions=False,
+                fmt="json",
             )
 
         assert result.exit_code == 1
@@ -431,7 +409,7 @@ class TestSnapshotValidation:
         """--date와 --to를 동시에 사용해도 동일하게 차단된다(정상 회귀)."""
         ctx_patch, _ = _make_mock_treasury()
         with ctx_patch:
-            result = _invoke(
+            result = _invoke_root(
                 runner,
                 [
                     "snapshot",
@@ -442,7 +420,6 @@ class TestSnapshotValidation:
                     "--to",
                     "2026-03-22",
                 ],
-                mock_auth,
             )
 
         assert result.exit_code == 1
