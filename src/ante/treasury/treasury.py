@@ -12,6 +12,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Literal
 
 from ante.account.scoping import require_account_id
+from ante.core import clock
 from ante.treasury.models import BotBudget
 
 if TYPE_CHECKING:
@@ -421,7 +422,7 @@ class Treasury:
         budget = self._budgets[bot_id]
         budget.allocated += amount
         budget.available += amount
-        budget.last_updated = datetime.now(UTC)
+        budget.last_updated = clock.now(UTC)
         self._unallocated -= amount
 
         await self._save_budget(budget)
@@ -459,7 +460,7 @@ class Treasury:
 
         budget.allocated -= amount
         budget.available -= amount
-        budget.last_updated = datetime.now(UTC)
+        budget.last_updated = clock.now(UTC)
         self._unallocated += amount
 
         await self._save_budget(budget)
@@ -593,7 +594,7 @@ class Treasury:
 
         budget.available -= amount
         budget.reserved += amount
-        budget.last_updated = datetime.now(UTC)
+        budget.last_updated = clock.now(UTC)
         self._reservations[order_id] = (bot_id, amount)
 
         await self._save_budget(budget)
@@ -615,7 +616,7 @@ class Treasury:
 
         budget.reserved = max(0.0, budget.reserved - remaining)
         budget.available += remaining
-        budget.last_updated = datetime.now(UTC)
+        budget.last_updated = clock.now(UTC)
 
         await self._save_budget(budget)
 
@@ -1082,7 +1083,7 @@ class Treasury:
             budget.returned += actual_proceeds
             budget.available += actual_proceeds
 
-        budget.last_updated = datetime.now(UTC)
+        budget.last_updated = clock.now(UTC)
         await self._save_budget(budget)
         await self._log_transaction(
             bot_id=event.bot_id,
@@ -1245,7 +1246,7 @@ class Treasury:
         if budget:
             budget.reserved = max(0.0, budget.reserved - total_released)
             budget.available += total_released
-            budget.last_updated = datetime.now(UTC)
+            budget.last_updated = clock.now(UTC)
             await self._save_budget(budget)
 
         await self._log_transaction(
@@ -1371,7 +1372,7 @@ class Treasury:
         self._external_eval_amount = external_eval
         await self._save_state()
 
-        self._last_synced_at = datetime.now(UTC)
+        self._last_synced_at = clock.now(UTC)
 
         await self._eventbus.publish(
             BalanceSyncedEvent(
@@ -1426,7 +1427,7 @@ class Treasury:
         self._external_eval_amount = 0.0
         await self._save_state()
 
-        self._last_synced_at = datetime.now(UTC)
+        self._last_synced_at = clock.now(UTC)
 
         await self._eventbus.publish(
             BalanceSyncedEvent(
@@ -1803,9 +1804,9 @@ class Treasury:
 
     async def _cleanup_old_snapshots(self) -> None:
         """5년 초과 스냅샷 자동 삭제."""
-        cutoff = (
-            datetime.now(UTC) - timedelta(days=_SNAPSHOT_RETENTION_DAYS)
-        ).strftime("%Y-%m-%d")
+        cutoff = (clock.now(UTC) - timedelta(days=_SNAPSHOT_RETENTION_DAYS)).strftime(
+            "%Y-%m-%d"
+        )
         await self._db.execute(
             """DELETE FROM treasury_daily_snapshots
                WHERE account_id = ? AND snapshot_date < ?""",
