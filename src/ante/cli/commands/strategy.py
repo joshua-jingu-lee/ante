@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncIterator, Coroutine, Iterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
@@ -376,6 +376,7 @@ def strategy_set_status(
 @require_scope("strategy:read")
 def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     """전략 상세 정보 조회 (메타데이터 + 파라미터)."""
+    fmt = get_formatter(ctx)
 
     async def _info() -> dict[str, Any] | None:
         async with _create_registry(ctx=ctx) as (registry, _):
@@ -432,73 +433,83 @@ def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     if result is None:
         raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {name}")
 
-    return CommandResult(data=result, text=tuple(_info_text_lines(result)))
+    if fmt.is_json:
+        return CommandResult(data=result)
+    lines: list[str] = []
+    try:
+        for line in _info_text_lines(result):
+            lines.append(line)
+    except Exception:
+        for line in lines:
+            click.echo(line)
+        raise
+    return CommandResult(data=result, text=tuple(lines))
 
 
-def _info_text_lines(result: dict[str, Any]) -> list[str]:
-    """전략 상세 정보 텍스트 출력."""
-    return [
-        f"  {'이름':15s}: {result['name']}",
-        f"  {'버전':15s}: {result['version']}",
-        f"  {'상태':15s}: {result['status']}",
-        f"  {'설명':15s}: {result['description']}",
-        f"  {'작성자':15s}: {result['author_name']}",
-        f"  {'작성자 ID':15s}: {result['author_id']}",
-        f"  {'파일 경로':15s}: {result['filepath']}",
-        f"  {'등록일':15s}: {result['registered_at']}",
-        *_info_warnings_lines(result.get("validation_warnings")),
-        *_info_rationale_lines(result.get("rationale")),
-        *_info_risks_lines(result.get("risks")),
-        *_info_params_lines(result.get("params"), result.get("param_schema", {})),
-        *_info_versions_lines(result.get("other_versions")),
-    ]
+def _info_text_lines(result: dict[str, Any]) -> Iterator[str]:
+    """전략 상세 정보 텍스트 줄을 만든다."""
+    yield f"  {'이름':15s}: {result['name']}"
+    yield f"  {'버전':15s}: {result['version']}"
+    yield f"  {'상태':15s}: {result['status']}"
+    yield f"  {'설명':15s}: {result['description']}"
+    yield f"  {'작성자':15s}: {result['author_name']}"
+    yield f"  {'작성자 ID':15s}: {result['author_id']}"
+    yield f"  {'파일 경로':15s}: {result['filepath']}"
+    yield f"  {'등록일':15s}: {result['registered_at']}"
+    yield from _info_warnings_lines(result.get("validation_warnings"))
+    yield from _info_rationale_lines(result.get("rationale"))
+    yield from _info_risks_lines(result.get("risks"))
+    yield from _info_params_lines(result.get("params"), result.get("param_schema", {}))
+    yield from _info_versions_lines(result.get("other_versions"))
 
 
-def _info_warnings_lines(warnings: list[str] | None) -> list[str]:
-    """검증 경고 섹션 출력."""
+def _info_warnings_lines(warnings: list[str] | None) -> Iterator[str]:
+    """검증 경고 섹션 줄을 만든다."""
     if not warnings:
-        return []
-    return [f"  {'검증 경고':15s}:", *(f"    - {w}" for w in warnings)]
+        return
+    yield f"  {'검증 경고':15s}:"
+    for w in warnings:
+        yield f"    - {w}"
 
 
-def _info_rationale_lines(rationale: str | None) -> list[str]:
-    """투자 근거 섹션 출력."""
+def _info_rationale_lines(rationale: str | None) -> Iterator[str]:
+    """투자 근거 섹션 줄을 만든다."""
     if not rationale:
-        return []
-    return [f"  {'투자 근거':15s}: {rationale}"]
+        return
+    yield f"  {'투자 근거':15s}: {rationale}"
 
 
-def _info_risks_lines(risks: list[str] | None) -> list[str]:
-    """리스크 섹션 출력."""
+def _info_risks_lines(risks: list[str] | None) -> Iterator[str]:
+    """리스크 섹션 줄을 만든다."""
     if not risks:
-        return []
-    return [f"  {'리스크':15s}:", *(f"    - {r}" for r in risks)]
+        return
+    yield f"  {'리스크':15s}:"
+    for r in risks:
+        yield f"    - {r}"
 
 
 def _info_params_lines(
     params: dict[str, Any] | None, schema: dict[str, Any]
-) -> list[str]:
-    """파라미터 섹션 출력."""
+) -> Iterator[str]:
+    """파라미터 섹션 줄을 만든다."""
     if not params:
-        return []
-    lines = [f"  {'파라미터':15s}:"]
+        return
+    yield f"  {'파라미터':15s}:"
     for key, value in params.items():
         desc = schema.get(key, "")
         line = f"    {key} = {value}"
         if desc:
             line += f"  ({desc})"
-        lines.append(line)
-    return lines
+        yield line
 
 
-def _info_versions_lines(versions: list[dict[str, Any]] | None) -> list[str]:
-    """다른 버전 목록 섹션 출력."""
+def _info_versions_lines(versions: list[dict[str, Any]] | None) -> Iterator[str]:
+    """다른 버전 목록 섹션 줄을 만든다."""
     if not versions:
-        return []
-    return [
-        f"  {'다른 버전':15s}:",
-        *(f"    - {v['strategy_id']} ({v['status']})" for v in versions),
-    ]
+        return
+    yield f"  {'다른 버전':15s}:"
+    for v in versions:
+        yield f"    - {v['strategy_id']} ({v['status']})"
 
 
 def _load_strategy_params(filepath: str) -> dict[str, Any] | None:
