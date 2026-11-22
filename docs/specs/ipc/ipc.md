@@ -268,8 +268,8 @@ BotManager/DB 종료 이후 lifecycle 마지막 단계에서만 호출된다.
   변경하지 않는 명령
 
 등록된 명령마다의 taxonomy(`is_mutating`)와 `required_services`, `audit_action`, 요청 모델의
-필드, 그 명령을 보내는 CLI 경로는 레지스트리에서 생성한
-[ipc-commands.md](../../architecture/generated/ipc-commands.md)가 정본이다. 새 handler의
+필드, 그 명령을 보내는 CLI 경로는 `register_all_handlers()`의 등록이 정본이고, 레지스트리에서
+생성한 [ipc-commands.md](../../architecture/generated/ipc-commands.md)에서 본다. 새 handler의
 `is_mutating`은 위 정의로 정하고, 생성 문서는 `scripts/generate_ipc_commands.py`로 다시 만든다
 (CI가 `--check`로 대조한다).
 
