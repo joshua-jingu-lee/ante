@@ -46,7 +46,6 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -61,6 +60,7 @@ from ante.bot.exceptions import (
 )
 from ante.cli.main import cli
 from ante.contracts import ipc_error_payload
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.registry import CommandRegistry, register_all_handlers
@@ -126,17 +126,10 @@ def _cli_envelope_payload(result_output: str) -> dict:
     return json.loads(payload_line)
 
 
-def _make_click_exc(code: str, message: str) -> click.ClickException:
-    """``ipc_send`` 가 server error envelope 을 변환할 때 부착하는
-    ``ipc_error_code``/``ipc_error_message`` 속성을 가진 ClickException 을
-    구성한다. CLI command 의 ``except click.ClickException`` 분기에서 동일한
-    형태로 message/code 를 복원한다.
-    """
+def _make_click_exc(code: str, message: str) -> IPCRemoteError:
+    """``ipc_send`` 가 server error envelope 을 변환한 ``IPCRemoteError`` 대역."""
 
-    exc = click.ClickException(f"{code}: {message}")
-    exc.ipc_error_code = code  # type: ignore[attr-defined]
-    exc.ipc_error_message = message  # type: ignore[attr-defined]
-    return exc
+    return IPCRemoteError(code, message)
 
 
 # ── (1) BotNotFoundError ↔ BOT_NOT_FOUND ────────────────────────────────────

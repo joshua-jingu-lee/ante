@@ -60,6 +60,7 @@ from ante.bot.exceptions import (
 )
 from ante.bot.manager import BotManager
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.member.models import Member, MemberRole, MemberType
 from ante.strategy.base import Signal, Strategy, StrategyMeta
 
@@ -195,15 +196,15 @@ class TestRotateNonExternalStrategyRejected:
     def _not_accepting_click_exc(self) -> object:
         """서버 ``BotNotAcceptingSignals`` → ``BOT_NOT_ACCEPTING_SIGNALS``
         envelope 을 ``ipc_send`` 가 변환한 ClickException 을 모사한다."""
-        import click
 
         message = (
             "이 봇의 전략은 외부 시그널을 받지 않습니다: "
             "bot_id=bot-normal-1, strategy_id=normal-1"
         )
-        exc = click.ClickException(f"{BOT_NOT_ACCEPTING_SIGNALS_CODE}: {message}")
-        exc.ipc_error_code = BOT_NOT_ACCEPTING_SIGNALS_CODE  # type: ignore[attr-defined]
-        exc.ipc_error_message = message  # type: ignore[attr-defined]
+        exc = IPCRemoteError(
+            BOT_NOT_ACCEPTING_SIGNALS_CODE,
+            message,
+        )
         return exc
 
     def _guard_skm(self) -> AsyncMock:

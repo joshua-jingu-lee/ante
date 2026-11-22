@@ -30,6 +30,7 @@ from click.testing import CliRunner, Result
 
 from ante.cli.main import cli
 from ante.contracts.cli_errors import CliMissingRequiredInputError
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit.ipc.request_fixtures import NoArgsRequest
 
@@ -385,11 +386,8 @@ class TestHookLeavesOtherExitsAlone:
         result = _invoke(["--format", "json", "bot", "list", "--no-such-flag"])
         _assert_json_exit(result, "CLI_USAGE_ERROR", "No such option: --no-such-flag")
 
-    def test_json_click_exception_reads_ipc_attribute(self, inject) -> None:
-        """속성만 붙인 ``ClickException`` 대역: 기존 분기가 속성으로 코드를 읽는다."""
-        exc = click.ClickException("IGNORED: wrapped")
-        exc.ipc_error_code = "BOT_NOT_RUNNING"  # type: ignore[attr-defined]
-        exc.ipc_error_message = "봇이 실행 중이 아닙니다"  # type: ignore[attr-defined]
+    def test_json_ipc_remote_error_keeps_the_remote_code(self, inject) -> None:
+        exc = IPCRemoteError("BOT_NOT_RUNNING", "봇이 실행 중이 아닙니다")
         inject(("bot", "list"), exc)
         result = _invoke(["--format", "json", "bot", "list"])
         _assert_json_exit(result, "BOT_NOT_RUNNING", "봇이 실행 중이 아닙니다")

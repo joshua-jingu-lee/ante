@@ -12,6 +12,11 @@ import click
 import pytest
 
 from ante.cli.commands.ipc_helpers import ipc_send
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
 
 # ── ipc_send 헬퍼 테스트 ──────────────────────────────
@@ -57,7 +62,9 @@ class TestIpcSend:
             ),
             patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
-            with pytest.raises(click.ClickException, match="서버가 실행 중이 아닙니다"):
+            with pytest.raises(
+                IPCServerNotRunningError, match="서버가 실행 중이 아닙니다"
+            ):
                 await ipc_send("bot.create", {})
 
     @pytest.mark.asyncio
@@ -73,7 +80,7 @@ class TestIpcSend:
             ),
             patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
-            with pytest.raises(click.ClickException, match="서버 응답 시간 초과"):
+            with pytest.raises(IPCClientTimeoutError, match="서버 응답 시간 초과"):
                 await ipc_send("bot.create", {})
 
     @pytest.mark.asyncio
@@ -93,8 +100,12 @@ class TestIpcSend:
             ),
             patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
-            with pytest.raises(click.ClickException, match="EXECUTION_ERROR"):
+            with pytest.raises(
+                IPCRemoteError, match="봇을 찾을 수 없습니다"
+            ) as excinfo:
                 await ipc_send("bot.remove", {"bot_id": "x"})
+
+        assert excinfo.value.code == "EXECUTION_ERROR"
 
     @pytest.mark.asyncio
     async def test_service_unavailable_response(self) -> None:
@@ -116,10 +127,10 @@ class TestIpcSend:
             ),
             patch("ante.cli.commands.ipc_helpers.IPCClient", return_value=mock_client),
         ):
-            with pytest.raises(click.ClickException) as excinfo:
+            with pytest.raises(IPCRemoteError) as excinfo:
                 await ipc_send("bot.remove", {"bot_id": "x"})
 
-        assert "SERVICE_UNAVAILABLE" in str(excinfo.value)
+        assert excinfo.value.code == "SERVICE_UNAVAILABLE"
         assert "서버가 종료 중입니다" in str(excinfo.value)
 
 
@@ -368,7 +379,6 @@ class TestBotRemoveIpc:
         # 되었고, 내부 ``open_cli_db`` 가 ``Database`` lifecycle 을 소유한다.
         # ``ante.cli.main.get_db_path`` / ``ante.core.database.Database`` 는
         # ``open_cli_db`` 가 lazy import 하므로 그대로 patch 된다.
-        import click
 
         with (
             patch("ante.cli.main.get_db_path", return_value="/tmp/ante-test.db"),

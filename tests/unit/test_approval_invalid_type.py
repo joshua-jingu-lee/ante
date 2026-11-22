@@ -19,13 +19,13 @@ from __future__ import annotations
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
 from ante.approval.models import ApprovalType
 from ante.approval.service import ApprovalService
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import IPCServerNotRunningError
 from ante.core.database import Database
 from ante.eventbus.bus import EventBus
 from ante.member.models import Member, MemberRole, MemberType
@@ -229,7 +229,7 @@ class TestCLIApprovalRequestClickExceptionPropagation:
         """IPC 헬퍼가 ``click.ClickException`` 을 raise 하면 그대로 전파."""
 
         async def _raise_click_exception(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            raise click.ClickException("서버 미실행")
+            raise IPCServerNotRunningError("서버 미실행")
 
         with patch(
             "ante.cli.commands.ipc_helpers.ipc_send",
