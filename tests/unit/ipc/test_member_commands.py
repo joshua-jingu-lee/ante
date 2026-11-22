@@ -17,7 +17,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
-from tests.unit.ipc.test_request_model_domain import validation_message
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 RECOVERY_KEY = "rk-fixed-1"

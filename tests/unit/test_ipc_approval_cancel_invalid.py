@@ -28,6 +28,7 @@ from ante.ipc.registry import (
     _handle_approval_cancel_invalid,
     register_all_handlers,
 )
+from ante.ipc.requests import ApprovalCancelInvalidRequest
 
 
 def _make_svc(
@@ -75,7 +76,7 @@ class TestHandleApprovalCancelInvalid:
         svc, cancel_mock, audit_log = _make_svc(cancel_return=request_obj)
 
         result = await _handle_approval_cancel_invalid(
-            svc, {"approval_id": "inv-1"}, "admin-master"
+            svc, ApprovalCancelInvalidRequest(approval_id="inv-1"), "admin-master"
         )
 
         cancel_mock.assert_awaited_once_with("inv-1", resolved_by="admin-master")
@@ -110,7 +111,7 @@ class TestHandleApprovalCancelInvalid:
         assert audit_log is not None
 
         result = await _handle_approval_cancel_invalid(
-            svc, {"approval_id": "inv-2"}, "admin-master"
+            svc, ApprovalCancelInvalidRequest(approval_id="inv-2"), "admin-master"
         )
 
         assert result["_audit_detail"] == {
@@ -133,7 +134,7 @@ class TestHandleApprovalCancelInvalid:
         )
 
         result = await _handle_approval_cancel_invalid(
-            svc, {"approval_id": "inv-3"}, "admin-master"
+            svc, ApprovalCancelInvalidRequest(approval_id="inv-3"), "admin-master"
         )
 
         cancel_mock.assert_awaited_once()
@@ -155,7 +156,7 @@ class TestHandleApprovalCancelInvalid:
         svc = SimpleNamespace(approval=approval)
 
         result = await _handle_approval_cancel_invalid(
-            svc, {"approval_id": "inv-4"}, "admin-master"
+            svc, ApprovalCancelInvalidRequest(approval_id="inv-4"), "admin-master"
         )
 
         assert result["id"] == "inv-4"
@@ -172,7 +173,7 @@ class TestHandleApprovalCancelInvalidErrorPropagation:
 
         with pytest.raises(ValueError, match="not an invalid-type request"):
             await _handle_approval_cancel_invalid(
-                svc, {"approval_id": "valid-1"}, "admin-master"
+                svc, ApprovalCancelInvalidRequest(approval_id="valid-1"), "admin-master"
             )
 
         # 거부된 경우 audit 호출 없음

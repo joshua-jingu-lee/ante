@@ -77,12 +77,6 @@
     "permission_denied"
   ],
   "ipc_handlers_without_model": [
-    "approval.approve",
-    "approval.cancel",
-    "approval.cancel_invalid",
-    "approval.reject",
-    "approval.reopen",
-    "approval.request",
     "bot.create",
     "bot.info",
     "bot.list",
@@ -107,12 +101,6 @@
     "treasury.set_balance"
   ],
   "ipc_args_reads": {
-    "approval.approve": 1,
-    "approval.cancel": 1,
-    "approval.cancel_invalid": 1,
-    "approval.reject": 2,
-    "approval.reopen": 3,
-    "approval.request": 6,
     "bot.create": 5,
     "bot.info": 1,
     "bot.list": 1,

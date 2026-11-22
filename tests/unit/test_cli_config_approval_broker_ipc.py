@@ -200,9 +200,15 @@ class TestApprovalRequestIPC:
         mock_client.send.assert_called_once()
         call_args = mock_client.send.call_args
         assert call_args[0][0] == "approval.request"
-        sent = call_args[0][1]
-        assert sent["type"] == "strategy_adopt"
-        assert sent["title"] == "전략 채택"
+        assert call_args[0][1] == {
+            "type": "strategy_adopt",
+            "title": "전략 채택",
+            "body": "",
+            "params": {},
+            "reference_id": "",
+            "expires_at": "",
+        }
+        assert call_args[0][2] == "test-master"
 
 
 class TestApprovalApproveIPC:
