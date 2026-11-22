@@ -453,3 +453,43 @@ TestTreasuryMachine = TreasuryMachine.TestCase
 TestTreasuryMachine.settings = settings()
 TestTreasuryRestartMachine = TreasuryRestartMachine.TestCase
 TestTreasuryRestartMachine.settings = settings()
+
+
+@pytest.mark.xfail(strict=True, reason="#2770")
+async def test_restart_restores_reservations(tmp_path: Path) -> None:
+    """재시작 뒤에도 미종결 주문의 예약이 예약 표에 남는다(F3).
+
+    ``TreasuryRestartMachine``에서 F3을 건너뛰지 않으면 hypothesis가 찾는 최소
+    순서를 손으로 옮겼다: 배분 → 예약 → 재시작. 지금은 ``load_from_db``가 예약 표를
+    비운 뒤 되살리지 않는다. ``reserved``는 101로 복원되는데 표가 비어, 뒤따르는
+    취소가 예약을 돌려주지 못한다.
+    """
+    db = Database(str(tmp_path / "treasury.db"))
+    await db.connect()
+    errors: list[str] = []
+
+    async def boot() -> Treasury:
+        treasury = Treasury(
+            db=db,
+            eventbus=RecordingEventBus(errors),
+            account_id=ACCOUNT_ID,
+            buy_commission_rate=BUY_RATE,
+            sell_commission_rate=SELL_RATE,
+        )
+        await treasury.initialize()
+        return treasury
+
+    try:
+        treasury = await boot()
+        await treasury.set_account_balance(100_000.0)
+        await treasury.update_budget("bot-a", 100_000.0)
+        assert await treasury.reserve_for_order("bot-a", "ord-0", 101.0)
+
+        treasury = await boot()
+
+        budget = treasury.get_budget("bot-a")
+        assert budget is not None
+        assert budget.reserved == 101.0
+        assert treasury.get_reservations("bot-a") == {"ord-0": 101.0}
+    finally:
+        await db.close()
