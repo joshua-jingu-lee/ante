@@ -27,6 +27,7 @@ import pytest
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 from tests.unit.ipc.validation_messages import validation_message
 
 
@@ -87,6 +88,7 @@ async def test_audit_action_fires_on_success(socket_path: str) -> None:
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="test.audit_cmd",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -119,6 +121,7 @@ async def test_audit_action_does_not_fire_on_failure(socket_path: str) -> None:
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="test.audit_fail",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -153,6 +156,7 @@ async def test_no_audit_action_does_not_fire(socket_path: str) -> None:
         "test.no_audit",
         handler,
         is_mutating=False,
+        request_model=NoArgsRequest,
         # audit_action=None (default)
     )
 
@@ -195,6 +199,7 @@ async def test_audit_detail_stripped_from_public_envelope(socket_path: str) -> N
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="test.audit_strip",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -235,6 +240,7 @@ async def test_audit_detail_stripped_even_without_audit_action(
         "test.strip_only",
         handler,
         is_mutating=False,
+        request_model=NoArgsRequest,
         # audit_action=None — audit 호출은 안 일어남.
     )
 
@@ -287,6 +293,7 @@ async def test_audit_logger_signature_uses_member_id_action_resource_detail_ip(
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="bot.update",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -329,6 +336,7 @@ async def test_handler_missing_audit_detail_uses_defaults(socket_path: str) -> N
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="test.audit_no_detail",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -378,6 +386,7 @@ async def test_audit_detail_partial_fields_filled_with_defaults(
         is_mutating=True,
         required_services=frozenset({"audit_logger"}),
         audit_action="treasury.set_balance",
+        request_model=NoArgsRequest,
     )
 
     audit_logger = _make_audit_logger_mock()
@@ -740,6 +749,7 @@ async def test_audit_action_without_audit_logger_no_crash(socket_path: str) -> N
         handler,
         is_mutating=True,
         audit_action="test.audit_defensive",
+        request_model=NoArgsRequest,
     )
 
     svc_registry = _make_service_registry()  # audit_logger=None (default)

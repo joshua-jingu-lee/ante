@@ -16,6 +16,7 @@ from ante.ipc.requests import (
     BrokerOrderHistoryRequest,
     BrokerReconcileRequest,
 )
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 
 @pytest.fixture
@@ -26,20 +27,23 @@ def registry() -> CommandRegistry:
 def test_register_and_get(registry: CommandRegistry) -> None:
     """핸들러 등록 후 조회.
 
-    ``register()`` 3-인자 호출은 메타데이터 필드의 default 값(빈 frozenset /
-    ``None`` / ``"none"`` / ``None`` / ``None``)으로 채워진 ``CommandSpec``과
-    일치해야 한다(backward compat lock).
+    ``is_mutating``과 ``request_model``만 준 ``register()``는 나머지 메타데이터
+    필드가 기본값(빈 frozenset / ``None`` / ``None``)인 ``CommandSpec``과
+    일치해야 한다.
     """
 
     async def dummy_handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {"ok": True}
 
-    registry.register("test.command", dummy_handler, is_mutating=True)
+    registry.register(
+        "test.command", dummy_handler, is_mutating=True, request_model=NoArgsRequest
+    )
     spec = registry.get("test.command")
     assert spec == CommandSpec(
         name="test.command",
         handler=dummy_handler,
         is_mutating=True,
+        request_model=NoArgsRequest,
     )
     # 신규 필드 default 값 명시 검증 (frozen dataclass eq에 포함).
     assert spec is not None
@@ -59,8 +63,12 @@ def test_commands_property(registry: CommandRegistry) -> None:
     async def handler(svc, args, actor):  # type: ignore[no-untyped-def]
         return {}
 
-    registry.register("a.command", handler, is_mutating=True)
-    registry.register("b.command", handler, is_mutating=False)
+    registry.register(
+        "a.command", handler, is_mutating=True, request_model=NoArgsRequest
+    )
+    registry.register(
+        "b.command", handler, is_mutating=False, request_model=NoArgsRequest
+    )
     assert set(registry.commands) == {"a.command", "b.command"}
 
 
@@ -1324,6 +1332,7 @@ class TestCommandSpecMetadataExtension:
             required_services=frozenset({"bot_manager", "audit_logger"}),
             audit_action="ext.cmd",
             shutdown_behavior="block_all",
+            request_model=NoArgsRequest,
         )
         spec = registry.get("ext.cmd")
         assert spec is not None
