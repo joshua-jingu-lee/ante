@@ -29,13 +29,15 @@ def _sanitize_non_finite(obj: object) -> object:
 
 @dataclass(frozen=True)
 class CommandResult:
-    data: dict[str, Any] | list[Any] = field(default_factory=dict)
+    data: dict[str, Any] | list[Any] = field(default_factory=dict, repr=False)
     message: str = ""
-    text: tuple[str, ...] | None = None
+    text: tuple[str, ...] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         if isinstance(self.text, str):
             raise TypeError("CommandResult.text must be a tuple of lines, not a str")
+        if self.text is not None and not isinstance(self.text, tuple):
+            raise TypeError("CommandResult.text must be None or a tuple of lines")
         if self.text == ():
             raise TypeError("CommandResult.text must be None or a non-empty tuple")
 
