@@ -5,7 +5,7 @@ from __future__ import annotations
 import functools
 import json
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -26,7 +26,7 @@ def _sanitize_non_finite(obj: object) -> object:
     return obj
 
 
-def format_option(fn: Callable) -> Callable:
+def format_option(fn: Callable[..., Any]) -> Callable[..., Any]:
     """서브커맨드용 --format 옵션 데코레이터.
 
     루트 그룹의 --format 보다 서브커맨드의 --format이 우선한다.
@@ -63,7 +63,7 @@ class OutputFormatter:
     def is_json(self) -> bool:
         return self._format == "json"
 
-    def output(self, data: dict | list, text_template: str = "") -> None:
+    def output(self, data: dict[str, Any] | list[Any], text_template: str = "") -> None:
         """데이터 출력."""
         if self._format == "json":
             click.echo(
@@ -80,7 +80,7 @@ class OutputFormatter:
         else:
             click.echo(str(data))
 
-    def table(self, rows: list[dict], columns: list[str]) -> None:
+    def table(self, rows: list[dict[str, Any]], columns: list[str]) -> None:
         """테이블 형태 출력."""
         if self._format == "json":
             click.echo(
@@ -119,7 +119,7 @@ class OutputFormatter:
         else:
             click.echo(f"Error: {message}", err=True)
 
-    def success(self, message: str, data: dict | None = None) -> None:
+    def success(self, message: str, data: dict[str, Any] | None = None) -> None:
         """성공 메시지 출력."""
         if self._format == "json":
             result = {

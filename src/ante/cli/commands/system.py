@@ -8,9 +8,9 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -36,7 +36,7 @@ def system() -> None:
     """시스템 시작·중지·상태 확인."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -162,7 +162,7 @@ def status(ctx: click.Context) -> None:
     """시스템 상태 표시."""
     fmt = get_formatter(ctx)
 
-    async def _run_status() -> dict:
+    async def _run_status() -> dict[str, Any]:
         from ante.account.service import AccountService
 
         async with _create_services(ctx=ctx) as (db, eventbus):

@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -35,7 +35,7 @@ def rule() -> None:
     """거래 룰 조회·관리."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -78,7 +78,7 @@ async def _create_rule_engine(
         yield engine, db
 
 
-def _load_rules_from_config(engine) -> None:
+def _load_rules_from_config(engine: RuleEngine) -> None:
     """설정 파일에서 룰을 로딩."""
     from ante.cli.main import get_config_dir
     from ante.config.config import Config
@@ -94,7 +94,7 @@ def _load_rules_from_config(engine) -> None:
             engine.load_strategy_rules_from_config(strategy_id, rules)
 
 
-def _collect_rules(engine) -> list[dict]:
+def _collect_rules(engine: RuleEngine) -> list[dict[str, Any]]:
     """엔진에서 전체 룰 목록 수집."""
     rules = []
     for r in engine._global_rules:
@@ -141,7 +141,7 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
 
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
-    async def _run_list() -> list[dict]:
+    async def _run_list() -> list[dict[str, Any]]:
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
@@ -184,7 +184,7 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
 
     reject_invalid_account_id(account_id, fmt, context="cli.rule")
 
-    async def _run_info() -> dict | None:
+    async def _run_info() -> dict[str, Any] | None:
         async with _create_rule_engine(account_id, ctx=ctx) as (engine, _):
             try:
                 _load_rules_from_config(engine)
@@ -205,8 +205,10 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
             click.echo(f"  {key:15s}: {value}")
 
 
-def _parse_rule_params(param_items: tuple[str, ...], params_json: str | None) -> dict:
-    params: dict = {}
+def _parse_rule_params(
+    param_items: tuple[str, ...], params_json: str | None
+) -> dict[str, Any]:
+    params: dict[str, Any] = {}
     if params_json:
         try:
             decoded = json.loads(params_json)
@@ -273,7 +275,7 @@ def rule_update(
     except click.BadParameter as e:
         raise RequestValidationError(str(e)) from e
 
-    async def _run_update() -> dict:
+    async def _run_update() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 

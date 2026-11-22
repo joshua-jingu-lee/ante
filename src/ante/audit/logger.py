@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from ante.core.database import Database
 
@@ -64,7 +65,7 @@ class AuditLogger:
         to_date: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """감사 로그 조회. 최신순."""
         conditions: list[str] = []
         params: list[str | int] = []

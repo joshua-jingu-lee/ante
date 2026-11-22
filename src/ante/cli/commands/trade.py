@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -28,7 +28,7 @@ def trade() -> None:
     """거래 내역 조회."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -100,7 +100,7 @@ def trade_list(
         to_label="종료일",
     )
 
-    async def _run_list() -> list[dict]:
+    async def _run_list() -> list[dict[str, Any]]:
         async with _create_trade_service(ctx=ctx) as (service, _):
             fd = datetime.fromisoformat(from_date) if from_date else None
             td = (
@@ -164,7 +164,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     """거래 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
-    async def _run_info() -> dict | None:
+    async def _run_info() -> dict[str, Any] | None:
         async with open_cli_db(ctx) as db:
             try:
                 row = await db.fetch_one(

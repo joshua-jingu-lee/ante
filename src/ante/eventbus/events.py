@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import ClassVar
+from typing import Any, ClassVar
 from uuid import UUID, uuid4
 
 from ante.core.account_id import InvalidAccountIdError, is_invalid_account_id
@@ -406,7 +406,7 @@ class NotificationEvent(Event):
     title: str = ""
     message: str = ""
     category: str = ""
-    buttons: list | None = None  # type: ignore[assignment]
+    buttons: list[Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -450,7 +450,7 @@ class ReconcileEvent(Event):
     account_id: str = ""
     bot_id: str = ""
     discrepancy_count: int = 0
-    corrections: list = field(default_factory=list)  # type: ignore[assignment]
+    corrections: list[Any] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -474,7 +474,7 @@ class ExternalSignalEvent(Event):
     action: str = ""
     reason: str = ""
     confidence: float = 0.0
-    metadata: dict = field(default_factory=dict)  # type: ignore[assignment]
+    metadata: dict[str, Any] = field(default_factory=dict)
     exchange: str = "KRX"
 
 

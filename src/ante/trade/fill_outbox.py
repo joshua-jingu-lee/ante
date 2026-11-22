@@ -224,7 +224,9 @@ class FillOutboxPublisher:
         """현재 연속 DB 손상 실패 횟수에 대한 backoff 지연(초)을 산출한다 (O1)."""
         if self._consecutive_failures <= 0:
             return self._drain_interval
-        multiplier = min(2**self._consecutive_failures, LOOP_BACKOFF_MULTIPLIER_CAP)
+        multiplier: int = min(
+            2**self._consecutive_failures, LOOP_BACKOFF_MULTIPLIER_CAP
+        )
         return self._drain_interval * multiplier
 
     async def _loop(self) -> None:

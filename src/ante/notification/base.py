@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from enum import StrEnum
+from typing import Any
 
 
 class NotificationLevel(StrEnum):
@@ -28,6 +29,6 @@ class NotificationAdapter(ABC):
         level: NotificationLevel,
         title: str,
         body: str,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """서식이 있는 알림 발송."""

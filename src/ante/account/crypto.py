@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any, cast
 
 from cryptography.fernet import Fernet, InvalidToken
 
@@ -60,12 +61,12 @@ def _get_fernet() -> Fernet:
     return Fernet(key.encode())
 
 
-def encrypt_credentials(credentials: dict) -> str:
+def encrypt_credentials(credentials: dict[str, Any]) -> str:
     """credentials dict를 Fernet 암호화된 문자열로 변환한다."""
     return _get_fernet().encrypt(json.dumps(credentials).encode()).decode()
 
 
-def decrypt_credentials(encrypted: str) -> dict:
+def decrypt_credentials(encrypted: str) -> dict[str, Any]:
     """Fernet 암호화된 문자열을 credentials dict로 복호화한다.
 
     Raises:
@@ -77,7 +78,9 @@ def decrypt_credentials(encrypted: str) -> dict:
     """
     fernet = _get_fernet()
     try:
-        return json.loads(fernet.decrypt(encrypted.encode()).decode())
+        return cast(
+            "dict[str, Any]", json.loads(fernet.decrypt(encrypted.encode()).decode())
+        )
     except InvalidToken as e:
         raise EncryptionKeyInvalidError(
             "credentials decrypt 실패: 키가 일치하지 않습니다."

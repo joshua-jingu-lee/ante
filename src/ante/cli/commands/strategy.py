@@ -17,8 +17,20 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.cli_errors import (
+    CliStrategyError,
+    StrategyInvalidStatusTransitionError,
+    StrategyMissingRequiredAccountError,
+)
+from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
+from ante.contracts.helpers import error_spec_for_exception
 from ante.core.database import OperationalError
+from ante.strategy.exceptions import (
+    StrategyError,
+    StrategyLoadError,
+    StrategyNotFoundError,
+    StrategyValidationError,
+)
 from ante.strategy.registry import StrategyStatus
 
 if TYPE_CHECKING:
@@ -113,7 +125,6 @@ def validate(ctx: click.Context, path: str) -> None:
 def submit(ctx: click.Context, path: str) -> None:
     """전략 제출 (검증 -> 로드 테스트 -> Registry 등록)."""
     from ante.strategy.base import StrategyMeta
-    from ante.strategy.exceptions import StrategyError, StrategyLoadError
     from ante.strategy.loader import StrategyLoader
     from ante.strategy.validator import StrategyValidator
 
@@ -156,7 +167,7 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            emit_cli_error(fmt, e, fallback_message=f"Load test failed: {e}")
+            raise StrategyLoadError(f"Load test failed: {e}") from e
         raise SystemExit(1)
 
     meta = strategy_cls.meta
@@ -176,9 +187,8 @@ def submit(ctx: click.Context, path: str) -> None:
                 }
             )
         else:
-            fmt.error(
-                f"Invalid meta shape: expected StrategyMeta, got {type(meta).__name__}",
-                code="STRATEGY_VALIDATION_ERROR",
+            raise StrategyValidationError(
+                f"Invalid meta shape: expected StrategyMeta, got {type(meta).__name__}"
             )
         raise SystemExit(1)
 
@@ -226,8 +236,10 @@ def submit(ctx: click.Context, path: str) -> None:
                     "error": str(e),
                 }
             )
+        elif error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
         else:
-            emit_cli_error(fmt, e)
+            raise CliStrategyError(str(e)) from e
         raise SystemExit(1)
 
     if fmt.is_json:
@@ -251,11 +263,9 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
 
     valid_statuses = {s.value for s in StrategyStatus}
     if status is not None and status not in valid_statuses:
-        fmt.error(
-            f"잘못된 status 값: {status!r}. 허용값: {sorted(valid_statuses)}",
-            code="STRATEGY_VALIDATION_ERROR",
+        raise StrategyValidationError(
+            f"잘못된 status 값: {status!r}. 허용값: {sorted(valid_statuses)}"
         )
-        raise SystemExit(1)
 
     async def _list() -> list[dict]:
         async with _create_registry(ctx=ctx) as (registry, _):
@@ -283,11 +293,9 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         if "no such table" in str(e).lower():
             rows = []
         else:
-            fmt.error(str(e), code="STRATEGY_ERROR")
-            raise SystemExit(1) from e
+            raise CliStrategyError(str(e)) from e
     except Exception as e:
-        fmt.error(str(e), code="STRATEGY_ERROR")
-        raise SystemExit(1) from e
+        raise CliStrategyError(str(e)) from e
 
     if not rows:
         fmt.output({"message": "등록된 전략 없음", "strategies": []})
@@ -344,17 +352,14 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
 
     try:
         result = _run(_set_status())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
+    except click.ClickException:
+        raise
     except ValueError as e:
-        fmt.error(str(e), code="STRATEGY_INVALID_STATUS_TRANSITION")
-        raise SystemExit(1) from e
+        raise StrategyInvalidStatusTransitionError(str(e)) from e
     except Exception as e:
-        fmt.error(str(e), code=getattr(e, "code", "STRATEGY_ERROR"))
-        raise SystemExit(1) from e
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
+            raise
+        raise CliStrategyError(str(e)) from e
 
     if fmt.is_json:
         fmt.output(result)
@@ -420,15 +425,12 @@ def strategy_info(ctx: click.Context, name: str) -> None:
         if "no such table" in str(e).lower():
             result = None
         else:
-            fmt.error(str(e), code="STRATEGY_ERROR")
-            raise SystemExit(1) from e
+            raise CliStrategyError(str(e)) from e
     except Exception as e:
-        fmt.error(str(e), code="STRATEGY_ERROR")
-        raise SystemExit(1) from e
+        raise CliStrategyError(str(e)) from e
 
     if result is None:
-        fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
-        raise SystemExit(1)
+        raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {name}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -584,12 +586,10 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     try:
         result = _run(_summary())
     except Exception as e:
-        fmt.error(str(e), code="STRATEGY_ERROR")
-        raise SystemExit(1) from e
+        raise CliStrategyError(str(e)) from e
 
     if result is None:
-        fmt.error(f"전략을 찾을 수 없습니다: {strategy_id}", code="STRATEGY_NOT_FOUND")
-        raise SystemExit(1)
+        raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {strategy_id}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -632,11 +632,9 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
     fmt = get_formatter(ctx)
 
     if account_id is None:
-        fmt.error(
-            "계좌 ID를 지정해야 합니다. --account-id <id> 옵션을 사용하세요.",
-            code="STRATEGY_MISSING_REQUIRED_ACCOUNT",
+        raise StrategyMissingRequiredAccountError(
+            "계좌 ID를 지정해야 합니다. --account-id <id> 옵션을 사용하세요."
         )
-        raise SystemExit(1)
 
     account_id = reject_invalid_account_id(
         account_id, fmt, context="cli.strategy.performance"
@@ -681,22 +679,18 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
 
     try:
         result = _run(_perf())
-    except AccountNotFoundError as e:
-        fmt.error(str(e), code="ACCOUNT_NOT_FOUND")
-        raise SystemExit(1) from e
+    except AccountNotFoundError:
+        raise
     except OperationalError as e:
         if "no such table" in str(e).lower():
             result = None
         else:
-            fmt.error(str(e), code="STRATEGY_ERROR")
-            raise SystemExit(1) from e
+            raise CliStrategyError(str(e)) from e
     except Exception as e:
-        fmt.error(str(e), code="STRATEGY_ERROR")
-        raise SystemExit(1) from e
+        raise CliStrategyError(str(e)) from e
 
     if result is None:
-        fmt.error(f"전략을 찾을 수 없습니다: {name}", code="STRATEGY_NOT_FOUND")
-        raise SystemExit(1)
+        raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {name}")
 
     metrics = result["metrics"]
 

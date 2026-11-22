@@ -47,7 +47,7 @@ class ResponseCache:
             ttl_seconds=ttl or 30,
         )
 
-    def make_key(self, endpoint: str, params: dict | None = None) -> str:
+    def make_key(self, endpoint: str, params: dict[str, Any] | None = None) -> str:
         """요청을 캐시 키로 변환."""
         param_str = "&".join(f"{k}={v}" for k, v in sorted((params or {}).items()))
         return f"{endpoint}?{param_str}"

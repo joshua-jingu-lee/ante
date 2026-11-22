@@ -29,14 +29,14 @@ class ApprovalDeps(Protocol):
     eventbus: EventBus | None
 
 
-def _approval_account_id(params: dict, *, context: str) -> str:
+def _approval_account_id(params: dict[str, Any], *, context: str) -> str:
     """approval params 에서 검증된 account_id 를 추출."""
     from ante.account.scoping import require_account_id
 
     return require_account_id(params.get("account_id"), context=context)
 
 
-def _approval_bot_create_config(params: dict) -> Any:
+def _approval_bot_create_config(params: dict[str, Any]) -> Any:
     """bot_create approval params 를 BotManager.create_bot 계약으로 변환."""
     from ante.account.scoping import require_account_id
     from ante.bot.config import BotConfig
@@ -63,19 +63,19 @@ def _approval_bot_create_config(params: dict) -> Any:
     )
 
 
-async def _exec_rule_change(s: ApprovalDeps, params: dict) -> None:
+async def _exec_rule_change(s: ApprovalDeps, params: dict[str, Any]) -> None:
     account_id = _approval_account_id(params, context="approval.rule_change.exec")
     engine = s.rule_engine_manager.get(account_id)
     engine.update_rules(params["bot_id"], params["rules"])
 
 
-async def _exec_budget_change(s: ApprovalDeps, params: dict) -> None:
+async def _exec_budget_change(s: ApprovalDeps, params: dict[str, Any]) -> None:
     account_id = _approval_account_id(params, context="approval.budget_change.exec")
     treasury = s.treasury_manager.get(account_id)
     await treasury.update_budget(params["bot_id"], params["amount"])
 
 
-async def _exec_strategy_adopt(s: ApprovalDeps, params: dict) -> None:
+async def _exec_strategy_adopt(s: ApprovalDeps, params: dict[str, Any]) -> None:
     await s.report_store.update_status(params["report_id"], ReportStatus.ADOPTED)
     await s.strategy_registry.update_status(
         params["strategy_id"], StrategyStatus.ADOPTED
@@ -98,7 +98,7 @@ async def _exec_strategy_adopt(s: ApprovalDeps, params: dict) -> None:
         )
 
 
-async def _exec_strategy_retire(s: ApprovalDeps, params: dict) -> None:
+async def _exec_strategy_retire(s: ApprovalDeps, params: dict[str, Any]) -> None:
     await s.report_store.update_status(params["report_id"], ReportStatus.ARCHIVED)
     await s.strategy_registry.update_status(
         params["strategy_id"], StrategyStatus.ARCHIVED
@@ -119,7 +119,7 @@ async def _exec_strategy_retire(s: ApprovalDeps, params: dict) -> None:
         )
 
 
-async def _exec_bot_create(s: ApprovalDeps, params: dict) -> None:
+async def _exec_bot_create(s: ApprovalDeps, params: dict[str, Any]) -> None:
     from ante.strategy.loader import StrategyLoader
 
     config = _approval_bot_create_config(params)
@@ -139,7 +139,7 @@ async def _exec_bot_create(s: ApprovalDeps, params: dict) -> None:
     )
 
 
-async def _exec_bot_stop_idempotent(s: ApprovalDeps, params: dict) -> None:
+async def _exec_bot_stop_idempotent(s: ApprovalDeps, params: dict[str, Any]) -> None:
     """approval ``bot_stop`` executor."""
     from ante.bot.exceptions import BotStateConflict
 
@@ -150,7 +150,7 @@ async def _exec_bot_stop_idempotent(s: ApprovalDeps, params: dict) -> None:
 
 
 async def _validate_strategy_adopt(
-    s: ApprovalDeps, params: dict
+    s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
     """전략 채택 사전 검증: report_id·strategy_id 존재 확인."""
     strategy_id = params.get("strategy_id", "")
@@ -166,7 +166,7 @@ async def _validate_strategy_adopt(
 
 
 async def _validate_strategy_retire(
-    s: ApprovalDeps, params: dict
+    s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
     """전략 폐기 사전 검증: 전략 상태 확인."""
     strategy_id = params.get("strategy_id", "")
@@ -180,7 +180,9 @@ async def _validate_strategy_retire(
     return [ValidationResult("pass", "", "system")]
 
 
-async def _validate_bot_create(s: ApprovalDeps, params: dict) -> list[ValidationResult]:
+async def _validate_bot_create(
+    s: ApprovalDeps, params: dict[str, Any]
+) -> list[ValidationResult]:
     """봇 생성 사전 검증: 전략 adopted 상태, 동일 봇 미존재."""
     results: list[ValidationResult] = []
     try:
@@ -217,7 +219,9 @@ async def _validate_bot_create(s: ApprovalDeps, params: dict) -> list[Validation
     return results or [ValidationResult("pass", "", "system:bot_manager")]
 
 
-def _validate_bot_delete(s: ApprovalDeps, params: dict) -> list[ValidationResult]:
+def _validate_bot_delete(
+    s: ApprovalDeps, params: dict[str, Any]
+) -> list[ValidationResult]:
     """봇 삭제 사전 검증: stopped 상태, 보유 포지션 없음."""
     results: list[ValidationResult] = []
     bot_id = params.get("bot_id", "")
@@ -247,7 +251,7 @@ def _validate_bot_delete(s: ApprovalDeps, params: dict) -> list[ValidationResult
 
 
 def _validate_bot_change_strategy(
-    s: ApprovalDeps, params: dict
+    s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
     """봇 전략 변경 사전 검증: stopped 상태 확인."""
     bot_id = params.get("bot_id", "")
@@ -266,13 +270,15 @@ def _validate_bot_change_strategy(
 
 
 def _validate_bot_assign_strategy(
-    s: ApprovalDeps, params: dict
+    s: ApprovalDeps, params: dict[str, Any]
 ) -> list[ValidationResult]:
     """봇 전략 배정 사전 검증: 전략 adopted 상태 확인."""
     return [ValidationResult("pass", "", "system:report_store")]
 
 
-def _validate_bot_resume(s: ApprovalDeps, params: dict) -> list[ValidationResult]:
+def _validate_bot_resume(
+    s: ApprovalDeps, params: dict[str, Any]
+) -> list[ValidationResult]:
     """봇 재개 사전 검증: stopped/error 상태 확인."""
     bot_id = params.get("bot_id", "")
     bot = s.bot_manager.get_bot(bot_id)
@@ -289,7 +295,9 @@ def _validate_bot_resume(s: ApprovalDeps, params: dict) -> list[ValidationResult
     return [ValidationResult("pass", "", "system:bot_manager")]
 
 
-def _validate_budget_change(s: ApprovalDeps, params: dict) -> list[ValidationResult]:
+def _validate_budget_change(
+    s: ApprovalDeps, params: dict[str, Any]
+) -> list[ValidationResult]:
     """예산 변경 사전 검증: 미할당 잔액 충분 여부 (warn).
 
     ``params.get("account_id", "test")`` fallback 은 두지 않는다.

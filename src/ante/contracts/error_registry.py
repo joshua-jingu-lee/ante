@@ -64,6 +64,7 @@ from ante.contracts.cli_errors import (
     CliConfirmationRequiredError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
+    CliStrategyError,
     ConfigKeyNotFoundError,
     DataError,
     DataInvalidDatasetIdError,
@@ -92,8 +93,13 @@ from ante.contracts.cli_errors import (
     RuleNotFoundError,
     RuleUpdateError,
     SignalKeyNotSetError,
+    SnapshotNotFoundError,
+    StrategyInvalidStatusTransitionError,
+    StrategyMissingRequiredAccountError,
     TradeError,
     TradeNotFoundError,
+    TreasuryAllocateFailedError,
+    TreasuryDeallocateFailedError,
     UpdateCheckFailedError,
     UpdateInstallFailedError,
     UpdateInsufficientDiskSpaceError,
@@ -736,6 +742,41 @@ _SIGNAL_KEY_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="not_found",
 )
 
+_SNAPSHOT_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="SNAPSHOT_NOT_FOUND",
+    category="not_found",
+)
+
+_STRATEGY_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_ERROR",
+    category="internal",
+)
+
+_STRATEGY_INVALID_STATUS_TRANSITION_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_INVALID_STATUS_TRANSITION",
+    category="state_conflict",
+)
+
+_STRATEGY_MISSING_REQUIRED_ACCOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_MISSING_REQUIRED_ACCOUNT",
+    category="validation",
+)
+
+_STRATEGY_VALIDATION_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STRATEGY_VALIDATION_FAILED",
+    category="validation",
+)
+
+_TREASURY_ALLOCATE_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_ALLOCATE_FAILED",
+    category="validation",
+)
+
+_TREASURY_DEALLOCATE_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="TREASURY_DEALLOCATE_FAILED",
+    category="validation",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -863,6 +904,12 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     CliMissingRequiredInputError: _CLI_MISSING_REQUIRED_INPUT_SPEC,
     InvalidJsonError: _INVALID_JSON_SPEC,
     SignalKeyNotSetError: _SIGNAL_KEY_NOT_SET_SPEC,
+    SnapshotNotFoundError: _SNAPSHOT_NOT_FOUND_SPEC,
+    CliStrategyError: _STRATEGY_ERROR_SPEC,
+    StrategyInvalidStatusTransitionError: _STRATEGY_INVALID_STATUS_TRANSITION_SPEC,
+    StrategyMissingRequiredAccountError: _STRATEGY_MISSING_REQUIRED_ACCOUNT_SPEC,
+    TreasuryAllocateFailedError: _TREASURY_ALLOCATE_FAILED_SPEC,
+    TreasuryDeallocateFailedError: _TREASURY_DEALLOCATE_FAILED_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
