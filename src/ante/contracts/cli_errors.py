@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 __all__ = [
+    "AccountAlreadyDeletedError",
+    "AccountInvalidStatusError",
     "AccountMasterBootstrapFailedError",
     "AccountTestCreateFailedError",
     "AccountTestInactiveError",
@@ -17,6 +19,7 @@ __all__ = [
     "CliAlreadyInitializedError",
     "CliBotNotFoundError",
     "CliConfirmationRequiredError",
+    "CliMemberNotFoundError",
     "CliMissingRequiredInputError",
     "CliOptionConflictError",
     "CliStrategyError",
@@ -39,6 +42,8 @@ __all__ = [
     "InvalidDateError",
     "InvalidDateRangeError",
     "InvalidJsonError",
+    "MemberPasswordEnvNotSetError",
+    "MemberPasswordFileNotFoundError",
     "PidNotFoundError",
     "ProcessNotFoundError",
     "ReportError",
@@ -62,6 +67,14 @@ __all__ = [
     "UpdateRollbackFailedError",
     "UpdateServerRunningError",
 ]
+
+
+class AccountAlreadyDeletedError(Exception):
+    code = "ACCOUNT_ALREADY_DELETED"
+
+
+class AccountInvalidStatusError(Exception):
+    code = "ACCOUNT_INVALID_STATUS"
 
 
 class AccountMasterBootstrapFailedError(Exception):
@@ -126,6 +139,10 @@ class CliBotNotFoundError(Exception):
 
 class CliConfirmationRequiredError(Exception):
     code = "CLI_CONFIRMATION_REQUIRED"
+
+
+class CliMemberNotFoundError(Exception):
+    code = "MEMBER_NOT_FOUND"
 
 
 class CliMissingRequiredInputError(Exception):
@@ -214,6 +231,14 @@ class InvalidDateRangeError(Exception):
 
 class InvalidJsonError(Exception):
     code = "INVALID_JSON"
+
+
+class MemberPasswordEnvNotSetError(Exception):
+    code = "MEMBER_PASSWORD_ENV_NOT_SET"
+
+
+class MemberPasswordFileNotFoundError(Exception):
+    code = "MEMBER_PASSWORD_FILE_NOT_FOUND"
 
 
 class PidNotFoundError(Exception):
@@ -305,6 +330,8 @@ class UpdateServerRunningError(Exception):
 
 
 CLI_ERRORS: tuple[type[Exception], ...] = (
+    AccountAlreadyDeletedError,
+    AccountInvalidStatusError,
     AccountMasterBootstrapFailedError,
     AccountTestCreateFailedError,
     AccountTestInactiveError,
@@ -321,6 +348,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     CliAlreadyInitializedError,
     CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliMemberNotFoundError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
     CliStrategyError,
@@ -343,6 +371,8 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     InvalidDateError,
     InvalidDateRangeError,
     InvalidJsonError,
+    MemberPasswordEnvNotSetError,
+    MemberPasswordFileNotFoundError,
     PidNotFoundError,
     ProcessNotFoundError,
     ReportError,

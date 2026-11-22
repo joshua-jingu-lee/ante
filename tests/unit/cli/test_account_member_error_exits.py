@@ -103,6 +103,10 @@ def _assert_plain(mode: str, result: Result, code: str, message: str) -> None:
     _assert_exit(mode, result, code, message, f"Error: {message}")
 
 
+def _assert_coded(mode: str, result: Result, code: str, message: str) -> None:
+    _assert_exit(mode, result, code, message, f"Error: {code}: {message}")
+
+
 def _assert_no_secret(result: Result, *secrets: str) -> None:
     for secret in secrets:
         assert secret not in result.stdout
@@ -384,7 +388,7 @@ def test_account_create_service_error(
         patch(_ACTIVE, return_value=False),
         _service_cm(_ACCOUNT_CM, _account_service(create=error)),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
     _assert_no_secret(result, _SECRET, "fake-s1")
 
 
@@ -399,7 +403,7 @@ def test_account_list_invalid_status(mode: str) -> None:
         _service_cm(_ACCOUNT_CM, service),
     )
     message = "잘못된 status 값: 'closed'. 허용값: ['active', 'deleted', 'suspended']"
-    _assert_plain(mode, result, "ACCOUNT_INVALID_STATUS", message)
+    _assert_coded(mode, result, "ACCOUNT_INVALID_STATUS", message)
 
 
 _ACCOUNT_READS = [
@@ -440,7 +444,7 @@ def test_account_read_service_error(
         ["--format", mode, *args],
         _service_cm(_ACCOUNT_CM, _account_service(**{method: error})),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
 
 
 # ---------------------------------------------------------------- account IPC
@@ -482,7 +486,7 @@ _ACCOUNT_IPC = [
             RuntimeError("소켓 끊김"),
             "EXECUTION_ERROR",
             "소켓 끊김",
-            "Error: 소켓 끊김",
+            "Error: EXECUTION_ERROR: 소켓 끊김",
             id="runtime",
         ),
     ],
@@ -555,7 +559,7 @@ def test_account_delete_service_error(
         patch(_ACTIVE, return_value=False),
         _service_cm(_ACCOUNT_CM, _account_service(delete=error)),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
 
 
 # ---------------------------------------------------------------- set-credentials
@@ -635,7 +639,7 @@ def test_account_set_credentials_service_error(
         patch(_ACTIVE, return_value=False),
         _service_cm(_ACCOUNT_CM, service),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_coded(mode, result, code, message)
     _assert_no_secret(result, _SECRET, "fake-s1")
 
 
@@ -644,12 +648,14 @@ def test_account_set_credentials_service_error(
 
 @pytest.mark.parametrize("mode", _MODES)
 @pytest.mark.parametrize(
-    ("error", "code", "message"),
+    ("error", "code", "message", "line"),
     [
         pytest.param(
             ValueError("unknown zone"),
             "ACCOUNT_INVALID_TIMEZONE",
             "ACCOUNT_INVALID_TIMEZONE: invalid IANA timezone: 'Mars/Olympus' "
+            "— unknown zone",
+            "Error: ACCOUNT_INVALID_TIMEZONE: invalid IANA timezone: 'Mars/Olympus' "
             "— unknown zone",
             id="invalid-timezone",
         ),
@@ -657,34 +663,42 @@ def test_account_set_credentials_service_error(
             AccountStructuralChangeRequiresStoppedServerError("서버를 먼저 멈추세요."),
             "ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER",
             "서버를 먼저 멈추세요.",
+            "Error: ACCOUNT_STRUCTURAL_CHANGE_REQUIRES_STOPPED_SERVER: "
+            "서버를 먼저 멈추세요.",
             id="structural",
         ),
         pytest.param(
             AccountNotFoundError(f"계좌 '{_ACCOUNT}'를 찾을 수 없습니다."),
             "ACCOUNT_NOT_FOUND",
             f"계좌 '{_ACCOUNT}'를 찾을 수 없습니다.",
+            f"Error: ACCOUNT_NOT_FOUND: 계좌 '{_ACCOUNT}'를 찾을 수 없습니다.",
             id="not-found",
         ),
         pytest.param(
             AccountDeletedError(f"계좌 '{_ACCOUNT}'는 이미 삭제되었습니다."),
             "ACCOUNT_ALREADY_DELETED",
             f"계좌 '{_ACCOUNT}'는 이미 삭제되었습니다.",
+            f"Error: ACCOUNT_ALREADY_DELETED: 계좌 '{_ACCOUNT}'는 이미 삭제되었습니다.",
             id="already-deleted",
         ),
         pytest.param(
-            RuntimeError("복구 실패"), "EXECUTION_ERROR", "복구 실패", id="runtime"
+            RuntimeError("복구 실패"),
+            "EXECUTION_ERROR",
+            "복구 실패",
+            "Error: EXECUTION_ERROR: 복구 실패",
+            id="runtime",
         ),
     ],
 )
 def test_account_repair_timezone_error(
-    mode: str, error: BaseException, code: str, message: str
+    mode: str, error: BaseException, code: str, message: str, line: str
 ) -> None:
     result = _invoke(
         ["--format", mode, "account", "repair-timezone", _ACCOUNT, "Mars/Olympus"],
         patch(_ACTIVE, return_value=False),
         _service_cm(_ACCOUNT_CM, _account_service(repair_timezone=error)),
     )
-    _assert_plain(mode, result, code, message)
+    _assert_exit(mode, result, code, message, line)
 
 
 def test_account_repair_timezone_success_keeps_its_code() -> None:
