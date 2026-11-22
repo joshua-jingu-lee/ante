@@ -551,8 +551,9 @@ class AuthenticatedGroup(_LeafPathMixin):
         로 불러 ``UsageError`` 와 ``ClickException`` 을 envelope 으로 낸다.
         텍스트 모드의 click 예외는 click 기본 동작(``UsageError`` 는 exit 2)을 따른다.
         처리되지 않은 ``Exception`` 은 두 모드 모두 에러 레지스트리의 코드로 끝난다.
-        json 모드는 envelope, 텍스트 모드는 stderr 의 ``Error: <code>: <message>``
-        한 줄이고, 종료 코드는 ``ErrorSpec.exit_code`` (0 이면 1) 이다.
+        json 모드는 envelope, 텍스트 모드는 stderr 의 ``Error: <code>: <message>`` 한
+        줄(메시지가 이미 ``<code>: `` 로 시작하면 접두를 다시 붙이지 않는다)이고, 종료
+        코드는 ``ErrorSpec.exit_code`` (0 이면 1) 이다.
         """
         output_format = self._sniff_output_format(args)
         if output_format != "json" and not standalone_mode:
@@ -607,7 +608,7 @@ class AuthenticatedGroup(_LeafPathMixin):
             if output_format == "json":
                 OutputFormatter("json").error(error["message"], code=error["code"])
             else:
-                click.echo(f"Error: {error['code']}: {error['message']}", err=True)
+                click.echo(_text_error_line(error["code"], error["message"]), err=True)
             import sys as _sys
 
             _sys.exit(error_spec_for_exception(e).exit_code or 1)
@@ -639,6 +640,13 @@ class AuthenticatedGroup(_LeafPathMixin):
 
 
 _META_HELP_TOKENS: frozenset[str] = frozenset({"--help", "-h"})
+
+
+def _text_error_line(code: str, message: str) -> str:
+    prefix = f"{code}: "
+    if message.startswith(prefix):
+        return f"Error: {message}"
+    return f"Error: {prefix}{message}"
 
 
 def _has_meta_help_before_dashdash(args: list[str]) -> bool:
