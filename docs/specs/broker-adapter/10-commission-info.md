@@ -30,7 +30,7 @@ API 장애 시 연쇄 호출을 방지하는 서킷 브레이커. CLOSED → OPE
 | 메서드 | 설명 |
 |--------|------|
 | `check()` | OPEN이면 `CircuitOpenError` 발생 |
-| `record_success()` | 성공 기록, HALF_OPEN → CLOSED 전환 |
+| `record_success()` | 성공 기록, HALF_OPEN → CLOSED 전환. OPEN 동안의 성공은 무시한다 |
 | `record_failure()` | 실패 기록, 임계치 도달 시 OPEN 전환 |
 
 상태 전환 시 `CircuitBreakerEvent`를 EventBus에 발행한다.
