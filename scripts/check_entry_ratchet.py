@@ -23,7 +23,8 @@ exclusion: non-empty string literals in an error-code position that are not a
 ``src/ante/contracts/error_registry.py``. The positions are:
 
 1. the value of a ``code=`` keyword argument;
-2. the value of a ``"code"`` key in a dict literal;
+2. the value of a ``"code"`` key in a dict literal, except the dict that is
+   the ``data=`` argument of ``<x>.success(...)``;
 3. a ``code = ...`` or ``code: T = ...`` statement directly in a class body;
 4. the value assigned to an ``ipc_error_code`` attribute, or to
    ``ipc_error_code`` directly in a class body;
@@ -373,12 +374,30 @@ def _attribute_positions(node: ast.Assign | ast.AnnAssign) -> Iterator[ast.expr]
         yield node.value
 
 
+def _success_data_dicts(tree: ast.Module) -> set[int]:
+    """Return the ids of the dicts that are the ``data=`` of ``.success(...)``."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "success"
+        ):
+            found.update(
+                id(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg == "data" and isinstance(keyword.value, ast.Dict)
+            )
+    return found
+
+
 def code_positions(tree: ast.Module) -> Iterator[ast.expr]:
     """Yield the expressions in positions 1 to 6 of the whole tree."""
+    success_data = _success_data_dicts(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             yield from _call_positions(node)
-        elif isinstance(node, ast.Dict):
+        elif isinstance(node, ast.Dict) and id(node) not in success_data:
             for key, value in zip(node.keys, node.values, strict=True):
                 if key is not None and _string(key) == "code":
                     yield value

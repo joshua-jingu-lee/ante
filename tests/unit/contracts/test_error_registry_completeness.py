@@ -20,12 +20,7 @@ from tests.unit.contracts.test_error_code_preservation import (
     make_instance,
 )
 
-OUTSIDE_REGISTRY = frozenset(
-    {
-        "ante.broker.exceptions.ModifyOrgnoUnavailableError",
-        "ante.gateway.stop_order.StopOrderManagerStoppedError",
-    }
-)
+OUTSIDE_REGISTRY: frozenset[str] = frozenset()
 
 KNOWN_LIMIT_CODES = frozenset(
     {
@@ -113,3 +108,16 @@ def test_cli_errors_tuple_is_exactly_the_module_exception_classes() -> None:
     assert len(cli_errors.CLI_ERRORS) == len(set(cli_errors.CLI_ERRORS))
     assert set(cli_errors.CLI_ERRORS) == classes
     assert all(not issubclass(c, click.ClickException) for c in classes)
+
+
+def test_codes_registered_last_resolve_to_their_own_spec() -> None:
+    from ante.broker.exceptions import ModifyOrgnoUnavailableError
+    from ante.gateway.stop_order import StopOrderManagerStoppedError
+
+    for cls in (ModifyOrgnoUnavailableError, StopOrderManagerStoppedError):
+        assert error_spec_for_exception(make_instance(cls)).code == cls.code
+    assert {
+        "BROKER_MODIFY_ORGNO_UNAVAILABLE",
+        "CLI_USAGE_ERROR",
+        "STOP_ORDER_MANAGER_STOPPED",
+    } <= registry_codes()
