@@ -439,25 +439,35 @@ CLOCK_LEAK_MESSAGE = (
 )
 
 
-def restore_clock_or_fail() -> None:
-    """현재 시계가 ``SystemClock``이 아니면 되돌리고 테스트를 실패시킨다."""
+def _reset_clock() -> bool:
+    """현재 시계가 ``SystemClock``이 아니면 되돌리고 True를 돌려준다."""
     from ante.core import clock
 
-    if type(clock.current_clock()) is not clock.SystemClock:
-        clock.set_clock(clock.SystemClock())
-        pytest.fail(CLOCK_LEAK_MESSAGE, pytrace=False)
+    if type(clock.current_clock()) is clock.SystemClock:
+        return False
+    clock.set_clock(clock.SystemClock())
+    return True
 
 
-@pytest.fixture(autouse=True)
-def _clock_restored():
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_teardown(item, nextitem):
     """전역 시계가 다음 테스트로 새지 않게 한다 (#2768).
 
-    테스트가 끝난 뒤 정리 단계의 오류로 그 테스트를 실패시킨다. autouse라
-    함수 범위의 다른 픽스처보다 늦게 정리되므로, 픽스처가 정리에서 되돌린
-    시계는 실패가 아니다.
+    검사는 이 테스트의 정리가 모두 끝난 뒤, 곧 모든 conftest와 플러그인의
+    함수 범위 픽스처(그리고 이 테스트에서 끝나는 module·session 범위
+    픽스처)가 정리된 뒤에 돈다. 그때까지 되돌려진 시계는 실패가 아니다.
+    남아 있으면 되돌리고 정리 단계의 오류로 그 테스트를 실패시킨다.
+    module·session 범위의 픽스처가 시계를 바꾸면 그 범위의 첫 테스트가
+    실패한다. 정리 자체가 실패하면 시계만 되돌리고 그 오류를 그대로 낸다.
     """
-    yield
-    restore_clock_or_fail()
+    try:
+        result = yield
+    except BaseException:
+        _reset_clock()
+        raise
+    if _reset_clock():
+        pytest.fail(CLOCK_LEAK_MESSAGE, pytrace=False)
+    return result
 
 
 @pytest.fixture(autouse=True)
