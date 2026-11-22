@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import dataclasses
+import inspect
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -28,6 +29,7 @@ from ante.contracts.cli_registry import (
     AuthContract,
     CliCommandContract,
     OutputContract,
+    get_contract,
 )
 from ante.contracts.vocab import EnvelopeForm
 
@@ -233,3 +235,38 @@ class TestThroughCli:
         )
         assert result.exit_code == 0, result.output
         assert result.output == '계좌 "acct1" 삭제 완료\n'
+
+
+def _iter_leaves(
+    group: click.Group, prefix: tuple[str, ...] = ()
+) -> list[tuple[tuple[str, ...], click.Command]]:
+    leaves: list[tuple[tuple[str, ...], click.Command]] = []
+    for name, cmd in group.commands.items():
+        path = (*prefix, name)
+        if isinstance(cmd, click.Group):
+            leaves.extend(_iter_leaves(cmd, path))
+        else:
+            leaves.append((path, cmd))
+    return leaves
+
+
+def _returns_command_result(callback: Any) -> bool:
+    annotation = inspect.unwrap(callback).__annotations__.get("return")
+    return annotation is CommandResult or annotation == "CommandResult"
+
+
+def test_command_result_leaves_have_standard_contracts() -> None:
+    """반환 주석이 ``CommandResult`` 인 leaf의 계약은 전부 ``standard`` 다."""
+    from ante.cli.main import cli
+
+    checked = []
+    for path, cmd in _iter_leaves(cli):
+        if cmd.callback is None or not _returns_command_result(cmd.callback):
+            continue
+        contract = get_contract(path)
+        assert contract is not None, f"{path}: CommandResult를 돌려주는데 계약이 없다"
+        assert contract.output.envelope == "standard", (
+            f"{path}: CommandResult를 돌려주는데 계약이 {contract.output.envelope!r}다"
+        )
+        checked.append(path)
+    assert checked, "반환 주석이 CommandResult인 leaf가 하나도 없다(검사가 비었다)"
