@@ -917,10 +917,10 @@ async def _handle_approval_approve(
 ) -> dict:
     """승인 요청 승인 IPC handler."""
     approval_id = request.id
-    request = await svc.approval.approve(approval_id, resolved_by=actor)
+    approval = await svc.approval.approve(approval_id, resolved_by=actor)
     return {
-        "id": request.id,
-        "status": str(request.status),
+        "id": approval.id,
+        "status": str(approval.status),
         "_audit_detail": {
             "resource": f"approval:{approval_id}",
             "detail": "",
@@ -935,14 +935,14 @@ async def _handle_approval_reject(
     """승인 요청 거부 IPC handler."""
     approval_id = request.id
     reason = request.reason
-    request = await svc.approval.reject(
+    approval = await svc.approval.reject(
         approval_id,
         resolved_by=actor,
         reject_reason=reason,
     )
     return {
-        "id": request.id,
-        "status": str(request.status),
+        "id": approval.id,
+        "status": str(approval.status),
         "_audit_detail": {
             "resource": f"approval:{approval_id}",
             "detail": f"reason={reason}",
@@ -956,10 +956,10 @@ async def _handle_approval_cancel(
 ) -> dict:
     """승인 요청 취소 IPC handler."""
     approval_id = request.id
-    request = await svc.approval.cancel(approval_id, requester=actor)
+    approval = await svc.approval.cancel(approval_id, requester=actor)
     return {
-        "id": request.id,
-        "status": str(request.status),
+        "id": approval.id,
+        "status": str(approval.status),
         "_audit_detail": {
             "resource": f"approval:{approval_id}",
             "detail": "",
@@ -973,18 +973,18 @@ async def _handle_approval_cancel_invalid(
 ) -> dict:
     """Administrative cancellation of a legacy invalid-type approval."""
     approval_id = request.approval_id
-    request = await svc.approval.cancel_invalid_type_request(
+    approval = await svc.approval.cancel_invalid_type_request(
         approval_id,
         resolved_by=actor,
     )
 
     return {
-        "id": request.id,
-        "status": str(request.status),
-        "type": request.type,
+        "id": approval.id,
+        "status": str(approval.status),
+        "type": approval.type,
         "_audit_detail": {
             "resource": f"approval:{approval_id}",
-            "detail": request.type,
+            "detail": approval.type,
             "ip": "",
         },
     }
