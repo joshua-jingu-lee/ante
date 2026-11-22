@@ -7,13 +7,16 @@ import json
 
 import click
 
-from ante.approval.errors import ApprovalNotFoundError
-from ante.approval.models import ApprovalStatus, ApprovalType
+from ante.approval.models import ApprovalStatus, ApprovalType, ApprovalValidationError
 from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.cli_errors import (
+    ApprovalInvalidStatusError,
+    ApprovalInvalidTypeError,
+    InvalidJsonError,
+)
 
 
 @click.group()
@@ -49,34 +52,23 @@ def request(
     try:
         params = json.loads(params_json)
     except json.JSONDecodeError as e:
-        fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
-        raise SystemExit(1) from e
+        raise InvalidJsonError(f"잘못된 JSON 형식: {e}") from e
 
     if not isinstance(params, dict):
         params_type = type(params).__name__
-        fmt.error(
-            f"--params는 JSON object여야 합니다 (현재 타입: {params_type})",
-            code="APPROVAL_VALIDATION_ERROR",
+        raise ApprovalValidationError(
+            f"--params는 JSON object여야 합니다 (현재 타입: {params_type})"
         )
-        raise SystemExit(1)
 
     valid_types = {t.value for t in ApprovalType}
     if approval_type not in valid_types:
-        fmt.error(
-            f"invalid approval type: {approval_type!r}",
-            code="APPROVAL_VALIDATION_ERROR",
-        )
-        raise SystemExit(1)
+        raise ApprovalValidationError(f"invalid approval type: {approval_type!r}")
 
     if expires_in:
         try:
             expires_at = _parse_expires_in(expires_in)
         except (ValueError, OverflowError) as e:
-            fmt.error(
-                f"잘못된 expires-in: {e}",
-                code="APPROVAL_VALIDATION_ERROR",
-            )
-            raise SystemExit(1) from e
+            raise ApprovalValidationError(f"잘못된 expires-in: {e}") from e
     else:
         expires_at = ""
 
@@ -97,13 +89,8 @@ def request(
             actor=requester,
         )
 
-    try:
-        result = asyncio.run(_create())
-        fmt.success(f"결재 요청 생성: {result.get('id', '')}", result)
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_create())
+    fmt.success(f"결재 요청 생성: {result.get('id', '')}", result)
 
 
 @approval.command("list")
@@ -124,22 +111,18 @@ def approval_list(
     fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
-        fmt.error(
+        raise ApprovalInvalidStatusError(
             f"잘못된 status 값: {status!r}. "
-            f"허용값: {sorted(s.value for s in ApprovalStatus)}",
-            code="APPROVAL_INVALID_STATUS",
+            f"허용값: {sorted(s.value for s in ApprovalStatus)}"
         )
-        raise SystemExit(1)
 
     if approval_type is not None and approval_type not in {
         t.value for t in ApprovalType
     }:
-        fmt.error(
+        raise ApprovalInvalidTypeError(
             f"잘못된 type 값: {approval_type!r}. "
-            f"허용값: {sorted(t.value for t in ApprovalType)}",
-            code="APPROVAL_INVALID_TYPE",
+            f"허용값: {sorted(t.value for t in ApprovalType)}"
         )
-        raise SystemExit(1)
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService
@@ -163,11 +146,8 @@ def approval_list(
                 for r in requests
             ]
 
-    try:
-        rows = asyncio.run(_list())
-        fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    rows = asyncio.run(_list())
+    fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
 
 
 @approval.command()
@@ -209,14 +189,8 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
                 "reject_reason": req.reject_reason,
             }
 
-    try:
-        result = asyncio.run(_info())
-        fmt.output(result)
-    except ApprovalNotFoundError as e:
-        fmt.error(str(e), code="APPROVAL_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_info())
+    fmt.output(result)
 
 
 @approval.command()
@@ -267,14 +241,8 @@ def review(
                 "reviews_count": len(req.reviews),
             }
 
-    try:
-        result = asyncio.run(_review())
-        fmt.success(f"검토 의견 추가: {reviewer} → {review_result}", result)
-    except ApprovalNotFoundError as e:
-        fmt.error(str(e), code="APPROVAL_NOT_FOUND")
-        raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_review())
+    fmt.success(f"검토 의견 추가: {reviewer} → {review_result}", result)
 
 
 @approval.command("reopen")
@@ -305,15 +273,12 @@ def reopen(
         try:
             params = json.loads(params_json)
         except json.JSONDecodeError as e:
-            fmt.error(f"잘못된 JSON 형식: {e}", code="INVALID_JSON")
-            raise SystemExit(1) from e
+            raise InvalidJsonError(f"잘못된 JSON 형식: {e}") from e
         if not isinstance(params, dict):
             params_type = type(params).__name__
-            fmt.error(
-                f"--params는 JSON object여야 합니다 (현재 타입: {params_type})",
-                code="APPROVAL_VALIDATION_ERROR",
+            raise ApprovalValidationError(
+                f"--params는 JSON object여야 합니다 (현재 타입: {params_type})"
             )
-            raise SystemExit(1)
 
     async def _reopen() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
@@ -325,13 +290,8 @@ def reopen(
             args["params"] = params
         return await ipc_send("approval.reopen", args, actor=requester)
 
-    try:
-        result = asyncio.run(_reopen())
-        fmt.success(f"결재 재상신: {result.get('id', id)}", result)
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_reopen())
+    fmt.success(f"결재 재상신: {result.get('id', id)}", result)
 
 
 @approval.command("audit-types")
@@ -357,12 +317,10 @@ def audit_types(
     fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
-        fmt.error(
+        raise ApprovalInvalidStatusError(
             f"잘못된 status 값: {status!r}. "
-            f"허용값: {sorted(s.value for s in ApprovalStatus)}",
-            code="APPROVAL_INVALID_STATUS",
+            f"허용값: {sorted(s.value for s in ApprovalStatus)}"
         )
-        raise SystemExit(1)
 
     async def _list() -> list[dict]:
         from ante.approval import ApprovalService
@@ -385,14 +343,11 @@ def audit_types(
                 for r in requests
             ]
 
-    try:
-        rows = asyncio.run(_list())
-        fmt.table(
-            rows,
-            ["id", "type", "status", "requester", "created_at", "expires_at"],
-        )
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    rows = asyncio.run(_list())
+    fmt.table(
+        rows,
+        ["id", "type", "status", "requester", "created_at", "expires_at"],
+    )
 
 
 @approval.command("cancel-invalid")
@@ -425,16 +380,11 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
             actor=actor,
         )
 
-    try:
-        result = asyncio.run(_cancel())
-        fmt.success(
-            f"invalid-type 결재 cleanup: {result.get('id', id)}",
-            result,
-        )
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_cancel())
+    fmt.success(
+        f"invalid-type 결재 cleanup: {result.get('id', id)}",
+        result,
+    )
 
 
 @approval.command("cancel")
@@ -453,13 +403,8 @@ def cancel(ctx: click.Context, id: str) -> None:
 
         return await ipc_send("approval.cancel", {"id": id}, actor=requester)
 
-    try:
-        result = asyncio.run(_cancel())
-        fmt.success(f"결재 철회: {result.get('id', id)}", result)
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_cancel())
+    fmt.success(f"결재 철회: {result.get('id', id)}", result)
 
 
 @approval.command("approve")
@@ -478,13 +423,8 @@ def approve(ctx: click.Context, id: str) -> None:
 
         return await ipc_send("approval.approve", {"id": id}, actor=actor)
 
-    try:
-        result = asyncio.run(_approve())
-        fmt.success(f"결재 승인: {result.get('id', id)}", result)
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_approve())
+    fmt.success(f"결재 승인: {result.get('id', id)}", result)
 
 
 @approval.command("reject")
@@ -508,13 +448,8 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
             actor=actor,
         )
 
-    try:
-        result = asyncio.run(_reject())
-        fmt.success(f"결재 거절: {result.get('id', id)}", result)
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = asyncio.run(_reject())
+    fmt.success(f"결재 거절: {result.get('id', id)}", result)
 
 
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]

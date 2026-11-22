@@ -50,13 +50,19 @@ from ante.contracts.cli_errors import (
     AccountTestCreateFailedError,
     AccountTestInactiveError,
     AlreadyRunningError,
+    ApprovalInvalidStatusError,
+    ApprovalInvalidTypeError,
     BacktestDataNotFoundError,
     BacktestError,
     BacktestInvalidExchangeError,
     BacktestInvalidSymbolError,
     BacktestInvalidTimeframeError,
+    BotInvalidParamError,
+    BotMissingRequiredAccountError,
     CliAlreadyInitializedError,
+    CliBotNotFoundError,
     CliConfirmationRequiredError,
+    CliMissingRequiredInputError,
     CliOptionConflictError,
     ConfigKeyNotFoundError,
     DataError,
@@ -76,6 +82,7 @@ from ante.contracts.cli_errors import (
     InstrumentSyncSourceUnsupportedError,
     InvalidDateError,
     InvalidDateRangeError,
+    InvalidJsonError,
     PidNotFoundError,
     ProcessNotFoundError,
     ReportError,
@@ -84,6 +91,7 @@ from ante.contracts.cli_errors import (
     ReportValidationError,
     RuleNotFoundError,
     RuleUpdateError,
+    SignalKeyNotSetError,
     TradeError,
     TradeNotFoundError,
     UpdateCheckFailedError,
@@ -693,6 +701,41 @@ _UPDATE_SERVER_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="state_conflict",
 )
 
+_APPROVAL_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="APPROVAL_INVALID_STATUS",
+    category="validation",
+)
+
+_APPROVAL_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="APPROVAL_INVALID_TYPE",
+    category="validation",
+)
+
+_BOT_INVALID_PARAM_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_INVALID_PARAM",
+    category="validation",
+)
+
+_BOT_MISSING_REQUIRED_ACCOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BOT_MISSING_REQUIRED_ACCOUNT",
+    category="validation",
+)
+
+_CLI_MISSING_REQUIRED_INPUT_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_MISSING_REQUIRED_INPUT",
+    category="validation",
+)
+
+_INVALID_JSON_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="INVALID_JSON",
+    category="validation",
+)
+
+_SIGNAL_KEY_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="SIGNAL_KEY_NOT_SET",
+    category="not_found",
+)
+
 
 EXECUTION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="EXECUTION_ERROR",
@@ -812,6 +855,14 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     UpdateMigrationFailedError: _UPDATE_MIGRATION_FAILED_SPEC,
     UpdateRollbackFailedError: _UPDATE_ROLLBACK_FAILED_SPEC,
     UpdateServerRunningError: _UPDATE_SERVER_RUNNING_SPEC,
+    ApprovalInvalidStatusError: _APPROVAL_INVALID_STATUS_SPEC,
+    ApprovalInvalidTypeError: _APPROVAL_INVALID_TYPE_SPEC,
+    BotInvalidParamError: _BOT_INVALID_PARAM_SPEC,
+    BotMissingRequiredAccountError: _BOT_MISSING_REQUIRED_ACCOUNT_SPEC,
+    CliBotNotFoundError: _BOT_NOT_FOUND_SPEC,
+    CliMissingRequiredInputError: _CLI_MISSING_REQUIRED_INPUT_SPEC,
+    InvalidJsonError: _INVALID_JSON_SPEC,
+    SignalKeyNotSetError: _SIGNAL_KEY_NOT_SET_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
