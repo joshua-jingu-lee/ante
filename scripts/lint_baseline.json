@@ -1,7 +1,6 @@
 {
   "tools": {
-    "ruff": "0.17.6",
-    "mypy": "2.4.1"
+    "ruff": "0.17.6"
   },
   "ruff": {
     "src/ante/account/crypto.py": {
@@ -238,6 +237,5 @@
     "src/ante/update/checker.py": {
       "BLE001": 3
     }
-  },
-  "mypy": {}
+  }
 }

@@ -66,10 +66,7 @@ select = ["E", "F", "I", "N", "W", "UP", "PGH003", "PGH004", "RUF100", "RUF102"]
 python_version = "3.13"
 warn_unused_configs = true
 ignore_missing_imports = true
-# CI 단계적 강화: 현재는 위험 오류(attr-defined, operator, call-arg 등)만 차단
-# 향후 아래 옵션을 활성화하여 strict로 전환
-# disallow_untyped_defs = true
-# warn_return_any = true
+strict = true
 
 [tool.coverage.run]
 source = ["src/ante"]
