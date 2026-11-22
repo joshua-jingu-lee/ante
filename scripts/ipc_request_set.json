@@ -2272,6 +2272,172 @@
     "name": "bot.update:array"
    }
   ],
+  "config.set": [
+   {
+    "args": {
+     "key": "k",
+     "value": "v"
+    },
+    "kind": "cli",
+    "name": "config.set:cli:0"
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "v",
+     "category": "5"
+    },
+    "key": "category",
+    "kind": "value",
+    "name": "config.set:value:category:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "v",
+     "category": 7
+    },
+    "key": "category",
+    "kind": "value",
+    "name": "config.set:value:category:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "v",
+     "category": true
+    },
+    "key": "category",
+    "kind": "value",
+    "name": "config.set:value:category:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "v",
+     "category": null
+    },
+    "key": "category",
+    "kind": "value",
+    "name": "config.set:value:category:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "value": "v"
+    },
+    "key": "key",
+    "kind": "missing",
+    "name": "config.set:missing:key"
+   },
+   {
+    "args": {
+     "key": "5",
+     "value": "v"
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "config.set:value:key:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "key": 7,
+     "value": "v"
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "config.set:value:key:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": true,
+     "value": "v"
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "config.set:value:key:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": null,
+     "value": "v"
+    },
+    "key": "key",
+    "kind": "value",
+    "name": "config.set:value:key:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k"
+    },
+    "key": "value",
+    "kind": "missing",
+    "name": "config.set:missing:value"
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "5"
+    },
+    "key": "value",
+    "kind": "value",
+    "name": "config.set:value:value:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": 7
+    },
+    "key": "value",
+    "kind": "value",
+    "name": "config.set:value:value:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": true
+    },
+    "key": "value",
+    "kind": "value",
+    "name": "config.set:value:value:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": null
+    },
+    "key": "value",
+    "kind": "value",
+    "name": "config.set:value:value:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "key": "k",
+     "value": "v",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "config.set:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "config.set:array"
+   }
+  ],
   "member.reactivate": [
    {
     "args": {
@@ -3366,6 +3532,341 @@
     "name": "member.update_scopes:array"
    }
   ],
+  "rule.update": [
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "kind": "cli",
+    "name": "rule.update:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": false,
+     "params": {}
+    },
+    "kind": "cli",
+    "name": "rule.update:cli:1"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "kind": "cli",
+    "name": "rule.update:cli:2"
+   },
+   {
+    "args": {
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "missing",
+    "name": "rule.update:missing:account_id"
+   },
+   {
+    "args": {
+     "account_id": "5",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "rule.update:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7,
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "rule.update:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true,
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "rule.update:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null,
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "rule.update:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": "5",
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "enabled",
+    "kind": "value",
+    "name": "rule.update:value:enabled:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": 7,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "enabled",
+    "kind": "value",
+    "name": "rule.update:value:enabled:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "enabled",
+    "kind": "value",
+    "name": "rule.update:value:enabled:true",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": null,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "enabled",
+    "kind": "value",
+    "name": "rule.update:value:enabled:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": "5"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "rule.update:value:params:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": 7
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "rule.update:value:params:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": true
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "rule.update:value:params:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": null
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "rule.update:value:params:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "rule_type",
+    "kind": "missing",
+    "name": "rule.update:missing:rule_type"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "5",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "rule_type",
+    "kind": "value",
+    "name": "rule.update:value:rule_type:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": 7,
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "rule_type",
+    "kind": "value",
+    "name": "rule.update:value:rule_type:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": true,
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "rule_type",
+    "kind": "value",
+    "name": "rule.update:value:rule_type:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": null,
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "rule_type",
+    "kind": "value",
+    "name": "rule.update:value:rule_type:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     },
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "rule.update:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "rule.update:array"
+   },
+   {
+    "args": {
+     "account_id": "default",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "rule.update:account:default"
+   },
+   {
+    "args": {
+     "account_id": "",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "rule.update:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!",
+     "rule_type": "daily_loss_limit",
+     "enabled": true,
+     "params": {
+      "max": 5
+     }
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "rule.update:account:bad"
+   }
+  ],
   "signal.connect": [
    {
     "args": {
@@ -3546,6 +4047,592 @@
     ],
     "kind": "array",
     "name": "strategy.set_status:array"
+   }
+  ],
+  "treasury.allocate": [
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "kind": "cli",
+    "name": "treasury.allocate:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5",
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7,
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true,
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null,
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1"
+    },
+    "key": "amount",
+    "kind": "missing",
+    "name": "treasury.allocate:missing:amount"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": "5"
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.allocate:value:amount:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 7
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.allocate:value:amount:int7",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": true
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.allocate:value:amount:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": null
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.allocate:value:amount:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "amount": 100.0
+    },
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "treasury.allocate:missing:bot_id"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "5",
+     "amount": 100.0
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": 7,
+     "amount": 100.0
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": true,
+     "amount": 100.0
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": null,
+     "amount": 100.0
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.allocate:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 100.0,
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "treasury.allocate:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "treasury.allocate:array"
+   },
+   {
+    "args": {
+     "account_id": "default",
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.allocate:account:default"
+   },
+   {
+    "args": {
+     "account_id": "",
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.allocate:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!",
+     "bot_id": "b1",
+     "amount": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.allocate:account:bad"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": NaN
+    },
+    "key": "amount",
+    "kind": "nan",
+    "name": "treasury.allocate:nan:amount"
+   }
+  ],
+  "treasury.deallocate": [
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "kind": "cli",
+    "name": "treasury.deallocate:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5",
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7,
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true,
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null,
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1"
+    },
+    "key": "amount",
+    "kind": "missing",
+    "name": "treasury.deallocate:missing:amount"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": "5"
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.deallocate:value:amount:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 7
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.deallocate:value:amount:int7",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": true
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.deallocate:value:amount:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": null
+    },
+    "key": "amount",
+    "kind": "value",
+    "name": "treasury.deallocate:value:amount:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "amount": 5.5
+    },
+    "key": "bot_id",
+    "kind": "missing",
+    "name": "treasury.deallocate:missing:bot_id"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "5",
+     "amount": 5.5
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:bot_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": 7,
+     "amount": 5.5
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:bot_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": true,
+     "amount": 5.5
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:bot_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": null,
+     "amount": 5.5
+    },
+    "key": "bot_id",
+    "kind": "value",
+    "name": "treasury.deallocate:value:bot_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": 5.5,
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "treasury.deallocate:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "treasury.deallocate:array"
+   },
+   {
+    "args": {
+     "account_id": "default",
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.deallocate:account:default"
+   },
+   {
+    "args": {
+     "account_id": "",
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.deallocate:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!",
+     "bot_id": "b1",
+     "amount": 5.5
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.deallocate:account:bad"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "bot_id": "b1",
+     "amount": NaN
+    },
+    "key": "amount",
+    "kind": "nan",
+    "name": "treasury.deallocate:nan:amount"
+   }
+  ],
+  "treasury.set_balance": [
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": 100.0
+    },
+    "kind": "cli",
+    "name": "treasury.set_balance:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "5",
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.set_balance:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7,
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.set_balance:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true,
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.set_balance:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null,
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "treasury.set_balance:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "key": "balance",
+    "kind": "missing",
+    "name": "treasury.set_balance:missing:balance"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": "5"
+    },
+    "key": "balance",
+    "kind": "value",
+    "name": "treasury.set_balance:value:balance:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": 7
+    },
+    "key": "balance",
+    "kind": "value",
+    "name": "treasury.set_balance:value:balance:int7",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": true
+    },
+    "key": "balance",
+    "kind": "value",
+    "name": "treasury.set_balance:value:balance:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": null
+    },
+    "key": "balance",
+    "kind": "value",
+    "name": "treasury.set_balance:value:balance:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": 100.0,
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "treasury.set_balance:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "treasury.set_balance:array"
+   },
+   {
+    "args": {
+     "account_id": "default",
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.set_balance:account:default"
+   },
+   {
+    "args": {
+     "account_id": "",
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.set_balance:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!",
+     "balance": 100.0
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "treasury.set_balance:account:bad"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "balance": NaN
+    },
+    "key": "balance",
+    "kind": "nan",
+    "name": "treasury.set_balance:nan:balance"
    }
   ]
  }

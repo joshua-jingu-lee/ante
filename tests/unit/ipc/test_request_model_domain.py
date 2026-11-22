@@ -75,6 +75,7 @@ UNBOUNDED_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("ApprovalRequestRequest", "params"),
         ("ApprovalReopenRequest", "params"),
+        ("RuleUpdateRequest", "params"),
     }
 )
 SECRET_FIELDS: frozenset[tuple[str, str]] = frozenset(
