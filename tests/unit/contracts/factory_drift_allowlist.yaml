@@ -52,7 +52,7 @@ direct_database_construction:
   # `backtest history` 는 `offline` 이며 #1974 에서 `open_cli_db` (read_only)
   # 로 마이그레이션되어 직접 Database 생성 callsite 가 사라졌다 — 엔트리 제거.
   - path: src/ante/cli/commands/backtest.py
-    line: 193
+    line: 194
     reason: "backtest run — long_running (subprocess 격리 D-004), write INSERT; deferred migration"
 
   # data domain — `data list` 는 `offline` 이며 #1984 에서 `open_cli_db`
@@ -65,14 +65,14 @@ direct_database_construction:
   # 새로 생성하는 lifecycle 이라 `open_cli_db` (이미 존재하는 DB 를 여는 helper)
   # 가 부적절하다.
   - path: src/ante/cli/commands/init.py
-    line: 261
+    line: 252
     reason: "ante init — bootstrap, fresh DB creation lifecycle (out of registry scope)"
   - path: src/ante/cli/commands/init.py
-    line: 285
+    line: 276
     reason: "ante init — bootstrap, encryption key init path"
   - path: src/ante/cli/commands/init.py
-    line: 314
+    line: 305
     reason: "ante init — bootstrap, migration / schema apply path"
   - path: src/ante/cli/commands/init.py
-    line: 345
+    line: 336
     reason: "ante init — bootstrap, post-init verification path"

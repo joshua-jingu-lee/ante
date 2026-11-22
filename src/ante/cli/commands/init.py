@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,21 +14,13 @@ import click
 
 from ante.account.crypto import _validate_fernet_key
 from ante.cli.commands._password import generate_password
-from ante.cli.formatter import OutputFormatter
 from ante.cli.main import get_formatter
-
-
-def _fail(fmt: OutputFormatter, message: str, code: str = "") -> None:
-    """JSON/text 모두에서 구조화된 에러 출력 후 exit 1.
-
-    `click.ClickException`은 text 모드에서 "Error: ..." 를 stderr에 쓰지만
-    JSON 모드에서도 동일한 텍스트를 내보내 `--format json` 계약을 깨뜨린다.
-    이 헬퍼는 `OutputFormatter.error()`를 거쳐 JSON 모드에서는 구조화 에러를,
-    text 모드에서는 "Error: ..." 를 stderr에 낸 뒤 exit code 1로 종료한다.
-    """
-    fmt.error(message, code=code)
-    sys.exit(1)
-
+from ante.contracts.cli_errors import (
+    AccountMasterBootstrapFailedError,
+    AccountTestCreateFailedError,
+    AccountTestInactiveError,
+    CliAlreadyInitializedError,
+)
 
 _SYSTEM_TOML_FILENAME = "system.toml"
 _SECRETS_ENV_FILENAME = "secrets.env"
@@ -439,20 +430,16 @@ def init(
     test_account_exists = test_account_status == "active"
 
     if test_account_status == "inactive":
-        _fail(
-            fmt,
+        raise AccountTestInactiveError(
             "default test account(account_id='test')가 비활성 상태입니다. "
             "`ante account activate test`로 활성화하거나 해당 row를 정리한 "
-            "뒤 재시도하세요.",
-            code="ACCOUNT_TEST_INACTIVE",
+            "뒤 재시도하세요."
         )
 
     if all_files_exist and master_exists and test_account_exists:
-        _fail(
-            fmt,
+        raise CliAlreadyInitializedError(
             f"init이 이미 완료된 상태입니다: {config_path}\n"
-            "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요.",
-            code="CLI_ALREADY_INITIALIZED",
+            "  재설치를 원하면 디렉토리를 삭제한 뒤 다시 실행하세요."
         )
 
     config_path.mkdir(parents=True, exist_ok=True)
@@ -478,7 +465,7 @@ def init(
                 _bootstrap_master(str(db_path), member_id, name, password)
             )
         except ValueError as e:
-            _fail(fmt, str(e), code="ACCOUNT_MASTER_BOOTSTRAP_FAILED")
+            raise AccountMasterBootstrapFailedError(str(e)) from e
         if not fmt.is_json:
             _emit_master_credentials_text(master_info, password, token, recovery_key)
 
@@ -491,19 +478,12 @@ def init(
                     _emit_master_credentials_json_stderr(
                         master_info, password, token, recovery_key, config_path
                     )
-                _fail(
-                    fmt,
+                raise AccountTestCreateFailedError(
                     f"테스트 계좌 생성 실패: {e}. "
                     "master는 위에 출력된 비밀값으로 접근 가능. "
-                    "원인 해결 후 재실행 시 test account만 생성됨.",
-                    code="ACCOUNT_TEST_CREATE_FAILED",
-                )
-            else:
-                _fail(
-                    fmt,
-                    f"테스트 계좌 생성 실패: {e}",
-                    code="ACCOUNT_TEST_CREATE_FAILED",
-                )
+                    "원인 해결 후 재실행 시 test account만 생성됨."
+                ) from e
+            raise AccountTestCreateFailedError(f"테스트 계좌 생성 실패: {e}") from e
 
     if fmt.is_json:
         payload: dict = {"config_dir": str(config_path)}

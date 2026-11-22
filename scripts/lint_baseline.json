@@ -85,14 +85,11 @@
       "BLE001": 6,
       "C901": 2
     },
-    "src/ante/cli/commands/config.py": {
-      "BLE001": 1
-    },
     "src/ante/cli/commands/data.py": {
       "C901": 1
     },
     "src/ante/cli/commands/init.py": {
-      "BLE001": 5,
+      "BLE001": 4,
       "C901": 1
     },
     "src/ante/cli/commands/instrument.py": {

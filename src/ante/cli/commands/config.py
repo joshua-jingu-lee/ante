@@ -14,6 +14,7 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
+from ante.contracts.cli_errors import ConfigKeyNotFoundError
 
 if TYPE_CHECKING:
     from ante.config.config import Config
@@ -152,11 +153,7 @@ def config_get(ctx: click.Context, key: str | None) -> None:
 
     if isinstance(result, dict):
         if result["source"] == "not_found":
-            fmt.error(
-                f"설정을 찾을 수 없습니다: {result['key']}",
-                code="CONFIG_KEY_NOT_FOUND",
-            )
-            ctx.exit(1)
+            raise ConfigKeyNotFoundError(f"설정을 찾을 수 없습니다: {result['key']}")
         _render_single(result, fmt)
     else:
         _render_list(result, fmt)
@@ -192,9 +189,6 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
             text = f"{code}: {message}" if code else message
             fmt.error(text)
         raise SystemExit(1) from e
-    except Exception as e:
-        fmt.error(str(e))
-        return
 
     if fmt.is_json:
         output = {"status": "success", **result}

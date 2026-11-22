@@ -10,6 +10,15 @@ import click
 
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
+from ante.contracts.cli_errors import (
+    CliConfirmationRequiredError,
+    UpdateCheckFailedError,
+    UpdateInstallFailedError,
+    UpdateInsufficientDiskSpaceError,
+    UpdateMigrationFailedError,
+    UpdateRollbackFailedError,
+    UpdateServerRunningError,
+)
 
 _MIN_FREE_MB = 100
 
@@ -120,8 +129,7 @@ def update(
             click.echo(f"현재 버전: {current}")
         latest = get_latest_version()
         if latest is None:
-            fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
-            raise SystemExit(1)
+            raise UpdateCheckFailedError("PyPI 버전 확인 실패")
         available = is_update_available(current, latest)
         if fmt.is_json:
             fmt.output(
@@ -138,32 +146,27 @@ def update(
         return
 
     if not yes:
-        fmt.error(
+        raise CliConfirmationRequiredError(
             f"업데이트 실행에는 --yes가 필요합니다 (현재 {current}). "
-            "재실행: ante update --yes",
-            code="CLI_CONFIRMATION_REQUIRED",
+            "재실행: ante update --yes"
         )
-        raise SystemExit(1)
 
     if check_server_running():
         if force:
             if not fmt.is_json:
                 click.echo("서버를 중지합니다...")
         else:
-            fmt.error(
+            raise UpdateServerRunningError(
                 "서버가 실행 중입니다. "
-                "먼저 서버를 중지하거나 --force 옵션을 사용하세요.",
-                code="UPDATE_SERVER_RUNNING",
+                "먼저 서버를 중지하거나 --force 옵션을 사용하세요."
             )
-            raise SystemExit(1)
 
     if not fmt.is_json:
         click.echo(f"현재 버전: {current}")
 
     latest = target_version or get_latest_version()
     if latest is None:
-        fmt.error("PyPI 버전 확인 실패", code="UPDATE_CHECK_FAILED")
-        raise SystemExit(1)
+        raise UpdateCheckFailedError("PyPI 버전 확인 실패")
 
     if not target_version and not is_update_available(current, latest):
         if fmt.is_json:
@@ -184,8 +187,7 @@ def update(
     data_path = get_data_path(ctx)
     ok, msg = check_disk_space(db_path)
     if not ok:
-        click.echo(msg, err=True)
-        raise SystemExit(1)
+        raise UpdateInsufficientDiskSpaceError(msg)
 
     from ante.db.backup import backup_db
     from ante.update.executor import (
@@ -213,8 +215,7 @@ def update(
     if not fmt.is_json:
         click.echo(f"업데이트 중: {current} → {latest}...")
     if not pip_upgrade(target_version):
-        fmt.error("업데이트 실패", code="UPDATE_INSTALL_FAILED")
-        raise SystemExit(1)
+        raise UpdateInstallFailedError("업데이트 실패")
 
     if not fmt.is_json:
         click.echo("DB 마이그레이션 실행 중...")
@@ -223,30 +224,22 @@ def update(
             click.echo("마이그레이션 실패. 자동 롤백 시도 중...", err=True)
         backup_path = db_path.parent / f"{db_path.name}.bak.v{current}"
         if rollback_update(current, backup_path, str(db_path)):
-            if fmt.is_json:
-                fmt.error(
-                    "마이그레이션 실패. 롤백 완료.", code="UPDATE_MIGRATION_FAILED"
-                )
-            else:
+            if not fmt.is_json:
                 click.echo(f"롤백 완료: {current}으로 복원됨")
                 if snapshot_path:
                     click.echo(f"의존성 복원: pip install -r {snapshot_path}")
-        else:
-            restore_hint = f"  pip install ante=={current}"
-            if snapshot_path:
-                restore_hint += f"\n  pip install -r {snapshot_path}"
-            if fmt.is_json:
-                fmt.error(
-                    "마이그레이션 실패. 자동 롤백 실패.", code="UPDATE_ROLLBACK_FAILED"
-                )
-            else:
-                click.echo(
-                    f"자동 롤백 실패. 수동 복구 필요:\n"
-                    f"{restore_hint}\n"
-                    f"  cp {backup_path} {db_path}",
-                    err=True,
-                )
-        raise SystemExit(1)
+            raise UpdateMigrationFailedError("마이그레이션 실패. 롤백 완료.")
+        restore_hint = f"  pip install ante=={current}"
+        if snapshot_path:
+            restore_hint += f"\n  pip install -r {snapshot_path}"
+        if not fmt.is_json:
+            click.echo(
+                f"자동 롤백 실패. 수동 복구 필요:\n"
+                f"{restore_hint}\n"
+                f"  cp {backup_path} {db_path}",
+                err=True,
+            )
+        raise UpdateRollbackFailedError("마이그레이션 실패. 자동 롤백 실패.")
 
     if fmt.is_json:
         fmt.success(
