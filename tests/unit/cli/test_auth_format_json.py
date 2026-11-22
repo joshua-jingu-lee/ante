@@ -19,19 +19,19 @@ Coverage map:
     - ``_enforce_invoke_auth_gate`` 의 missing-token (``auth_required``) →
       :class:`TestInvokeAuthGateJsonFormat`
     - ``_wrap_callback_with_auth`` 의 fallback emit 경로 (invoke gate가 발화하지
-      않는 plain ``click.Group`` root 환경에서만 발화) →
+      않는 환경에서만 발화. invoke 관문만 끈 훅 루트로 재현) →
       :class:`TestWrapCallbackAuthFallbackJsonFormat` (mini-CLI 시뮬레이션)
     - ``require_auth`` 데코레이터의 emit 경로 (member is None) →
       :class:`TestRequireAuthDecoratorJsonFormat` (mini-CLI 시뮬레이션)
     - ``require_scope`` 의 missing-scope (``permission_denied``) →
       :class:`TestPermissionDeniedJsonFormat`
-    - ``_emit_auth_error`` 자체의 formatter-missing/text/json 분기 →
+    - 진입점 훅의 formatter-missing/text/json 분기 (관문 예외) →
       :class:`TestEmitAuthErrorFallback`
     - ``_mirror_root_globals_to_obj`` 의 ``output_format`` 미러링 →
       :class:`TestMirrorOutputFormat`
 
 SSOT 참조:
-    - ``src/ante/cli/middleware.py`` (``_emit_auth_error``,
+    - ``src/ante/cli/middleware.py`` (진입점 훅 ``AuthenticatedGroup.main``,
       ``_mirror_root_globals_to_obj`` 의 ``output_format`` 미러링,
       ``_wrap_callback_with_auth`` 의 fallback emit, ``require_auth`` 데코레이터)
     - ``src/ante/cli/formatter.py`` (``OutputFormatter.error`` 스키마)
@@ -52,7 +52,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 from ante.cli.main import cli
-from ante.cli.middleware import _emit_auth_error
+from ante.cli.middleware import AuthenticatedGroup
+from ante.contracts.cli_errors import CliAuthRequiredError
 from ante.member.models import Member, MemberRole, MemberType
 
 _AGENT_NO_SCOPE = Member(
@@ -402,68 +403,84 @@ class TestPermissionDeniedJsonFormat:
 # ── formatter 미설정 fallback (직접 단위 테스트) ────────────────────────────
 
 
-class TestEmitAuthErrorFallback:
-    """``_emit_auth_error`` 가 ``ctx.obj["formatter"]`` 미설정 시 stderr 텍스트로
-    fallback함을 직접 단위 테스트로 검증.
+class _NoInvokeGateGroup(AuthenticatedGroup):
+    """invoke 단계 관문만 끈 ``AuthenticatedGroup`` — 진입점 훅은 그대로다."""
 
-    JSON 모드 미러링이 어떤 이유로든 발화하지 않은 경로에서도 helper가
-    ``KeyError`` / ``AttributeError`` 없이 stderr 텍스트로 떨어진다.
+    def _should_invoke_auth_gate(
+        self, ctx: click.Context, all_args: list[str], path: tuple[str, ...]
+    ) -> bool:
+        return False
+
+
+def _hook_root(*, with_format: bool = True) -> click.Group:
+    """진입점 훅이 있는 루트. ``with_format`` 이면 루트 ``--format`` 을 둔다."""
+    from ante.cli.formatter import OutputFormatter
+
+    def _root(ctx: click.Context, output_format: str = "text") -> None:
+        ctx.ensure_object(dict)
+        if with_format:
+            ctx.obj["formatter"] = OutputFormatter(output_format)
+            ctx.obj["format"] = output_format
+        ctx.obj["member"] = None
+
+    callback = click.pass_context(_root)
+    if with_format:
+        callback = click.option(
+            "--format",
+            "output_format",
+            type=click.Choice(["text", "json"]),
+            default="text",
+        )(callback)
+    return click.group(cls=_NoInvokeGateGroup)(callback)
+
+
+def _raising_leaf(message: str) -> click.Command:
+    @click.command(name="leaf")
+    def leaf() -> None:
+        raise CliAuthRequiredError(message)
+
+    return leaf
+
+
+class TestEmitAuthErrorFallback:
+    """관문 예외가 진입점 훅에서 출력 모드에 맞게 끝나는지 검증.
+
+    옛 ``_emit_auth_error`` 의 세 분기(formatter 없음 / text / json)를 훅을
+    지나는 모양으로 옮겼다. 모드는 argv 의 ``--format`` 으로 정해진다.
     """
 
-    def test_formatter_missing_falls_back_to_stderr_text(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """``ctx.obj`` 가 비어 있을 때 helper 가 stderr 로 텍스트를 출력한다."""
+    def test_formatter_missing_falls_back_to_stderr_text(self) -> None:
+        """``--format`` 이 없는 루트 → stderr 텍스트, stdout JSON 없음."""
+        root = _hook_root(with_format=False)
+        click.Group.add_command(root, _raising_leaf("fallback message"))
 
-        @click.command()
-        @click.pass_context
-        def _stub(ctx: click.Context) -> None:
-            # formatter 키가 비어 있는 ctx.obj 를 명시적으로 구성.
-            ctx.obj = {}
-            _emit_auth_error(ctx, "auth_required", "fallback message")
+        result = CliRunner(mix_stderr=False).invoke(root, ["leaf"])
 
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(_stub, [])
-
-        # SystemExit 은 호출자 책임이므로 helper 자체는 exit 0 으로 돌아온다.
-        assert result.exit_code == 0, result.stderr
-        # JSON 이 stdout 으로 출력되어서는 안 된다.
+        assert result.exit_code == 1, result.stderr
         assert result.stdout.strip() == "", result.stdout
         assert "fallback message" in result.stderr, result.stderr
 
     def test_formatter_text_mode_falls_back_to_stderr_text(
         self,
     ) -> None:
-        """text 모드 formatter 가 설정돼 있어도 stderr 텍스트 분기로 간다."""
-        from ante.cli.formatter import OutputFormatter
+        """``--format text`` → stderr 텍스트 분기."""
+        root = _hook_root()
+        click.Group.add_command(root, _raising_leaf("text-mode message"))
 
-        @click.command()
-        @click.pass_context
-        def _stub(ctx: click.Context) -> None:
-            ctx.obj = {"formatter": OutputFormatter("text")}
-            _emit_auth_error(ctx, "auth_required", "text-mode message")
+        result = CliRunner(mix_stderr=False).invoke(root, ["--format", "text", "leaf"])
 
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(_stub, [])
-
-        assert result.exit_code == 0, result.stderr
+        assert result.exit_code == 1, result.stderr
         assert result.stdout.strip() == "", result.stdout
         assert "text-mode message" in result.stderr, result.stderr
 
     def test_formatter_json_mode_emits_structured_stdout(self) -> None:
-        """json 모드 formatter 가 설정돼 있으면 stdout JSON 으로 출력."""
-        from ante.cli.formatter import OutputFormatter
+        """``--format json`` → stdout JSON."""
+        root = _hook_root()
+        click.Group.add_command(root, _raising_leaf("json-mode message"))
 
-        @click.command()
-        @click.pass_context
-        def _stub(ctx: click.Context) -> None:
-            ctx.obj = {"formatter": OutputFormatter("json")}
-            _emit_auth_error(ctx, "auth_required", "json-mode message")
+        result = CliRunner(mix_stderr=False).invoke(root, ["--format", "json", "leaf"])
 
-        runner = CliRunner(mix_stderr=False)
-        result = runner.invoke(_stub, [])
-
-        assert result.exit_code == 0, result.stderr
+        assert result.exit_code == 1, result.stderr
         payload = _parse_json_line(result.stdout)
         assert payload["status"] == "error", payload
         assert payload["code"] == "auth_required", payload
@@ -539,35 +556,24 @@ class TestWrapCallbackAuthFallbackJsonFormat:
     이거나 invoke 단계 가드가 어떤 이유로든 발화하지 못한 경우에도 callback
     단계 wrapper 가 동일한 default-deny 메시지를 발화해야 한다.
 
-    본 테스트는 root 를 plain ``click.Group`` 으로 구성해 invoke 단계 가드를
+    본 테스트는 invoke 단계 가드만 끈 훅 루트(``_NoInvokeGateGroup``)로 그 가드를
     의도적으로 우회하고, leaf callback 에만 ``_wrap_callback_with_auth`` 를
     수동 적용한 mini-CLI 로 그 fallback 경로를 검증한다.
     """
 
     @staticmethod
     def _build_mini_cli(fmt: str) -> click.Group:
-        """plain ``click.Group`` root + wrapped leaf 로 구성된 mini-CLI 빌드.
+        """invoke 관문만 끈 훅 루트 + wrapped leaf 로 구성된 mini-CLI 빌드.
 
-        ``fmt`` 가 ``"json"`` 이면 ``ctx.obj["formatter"]`` 에 JSON formatter 를
-        주입해, fallback emit 이 JSON stdout 으로 흐르도록 한다. ``"text"`` 면
-        text formatter 를 주입해 기존 stderr 텍스트 회귀를 검증한다.
-
-        ``ctx.obj["member"] = None`` 도 함께 주입해 wrapper 가 default-deny 를
+        모드는 호출의 ``--format`` 이 정하고(``fmt`` 는 그 값), 루트 callback 이
+        ``ctx.obj["member"] = None`` 을 주입해 wrapper 가 default-deny 를
         발화하도록 한다.
         """
-        from ante.cli.formatter import OutputFormatter
         from ante.cli.middleware import _wrap_callback_with_auth
 
-        @click.group()
-        @click.pass_context
-        def root(ctx: click.Context) -> None:
-            ctx.ensure_object(dict)
-            ctx.obj["formatter"] = OutputFormatter(fmt)
-            ctx.obj["format"] = fmt
-            ctx.obj["member"] = None
-            # 의도적으로 ``_auth_gate_invoked`` marker 를 남기지 않는다.
+        root = _hook_root()
 
-        @root.command(name="leaf")
+        @click.command(name="leaf")
         @click.pass_context
         def leaf(ctx: click.Context) -> None:
             click.echo("leaf reached")
@@ -576,15 +582,17 @@ class TestWrapCallbackAuthFallbackJsonFormat:
         # 모사). wrapper 가 invoke gate marker 없이 fallback emit 경로로 진입
         # 하는지 검증한다.
         leaf.callback = _wrap_callback_with_auth(leaf.callback)
+        click.Group.add_command(root, leaf)
         return root
 
     def test_wrap_callback_fallback_emits_json_error(
         self, runner: CliRunner, clean_env: None
     ) -> None:
-        """plain ``click.Group`` root + JSON formatter → stdout JSON, exit 1."""
-        mini_cli = self._build_mini_cli("json")
+        """훅 루트 + ``--format json`` → stdout JSON, exit 1."""
+        fmt_arg = "json"
+        mini_cli = self._build_mini_cli(fmt_arg)
 
-        result = runner.invoke(mini_cli, ["leaf"])
+        result = runner.invoke(mini_cli, ["--format", fmt_arg, "leaf"])
 
         assert result.exit_code == 1, (
             f"expected exit 1, got {result.exit_code}\n"
@@ -603,10 +611,11 @@ class TestWrapCallbackAuthFallbackJsonFormat:
     def test_wrap_callback_fallback_text_mode_keeps_stderr_message(
         self, runner: CliRunner, clean_env: None
     ) -> None:
-        """plain ``click.Group`` root + text formatter → stderr 한국어, exit 1."""
-        mini_cli = self._build_mini_cli("text")
+        """훅 루트 + ``--format text`` → stderr 한국어, exit 1."""
+        fmt_arg = "text"
+        mini_cli = self._build_mini_cli(fmt_arg)
 
-        result = runner.invoke(mini_cli, ["leaf"])
+        result = runner.invoke(mini_cli, ["--format", fmt_arg, "leaf"])
 
         assert result.exit_code == 1, result.stderr
         # text 모드에서는 stdout 으로 JSON 이 새지 않아야 한다.
@@ -625,13 +634,13 @@ class TestRequireAuthDecoratorJsonFormat:
     """``require_auth`` 데코레이터의 emit 경로 회귀 보호.
 
     프로덕션 cli 에서는 invoke 단계 가드가 먼저 발화하므로
-    ``require_auth.<locals>.wrapper`` 의 ``_emit_auth_error`` 호출 (``middleware.py``
-    line 180 부근) 이 통합 경로에서는 도달하지 않는다.
+    ``require_auth.<locals>.wrapper`` 의 ``CliAuthRequiredError`` 발화가 통합
+    경로에서는 도달하지 않는다.
 
     그러나 ``require_auth`` 는 leaf callback 에 직접 부착되는 데코레이터로,
-    invoke gate 가 없는 임의의 ``click.Group`` 컨텍스트에서도 단독으로 동작해야
-    한다. 본 테스트는 plain ``click.Group`` root + ``require_auth`` 데코레이터만
-    부착한 mini-CLI 로 그 emit 경로를 검증한다.
+    invoke gate 가 발화하지 않는 컨텍스트에서도 단독으로 막아야 한다. 본 테스트는
+    invoke 관문만 끈 훅 루트 + ``require_auth`` 데코레이터만 부착한 mini-CLI 로 그
+    경로를 검증한다.
 
     ``_wrap_callback_with_auth`` 는 ``require_auth`` 가 이미 부착된 callback 의
     sentinel marker (``_require_auth_applied``) 를 보고 None 검사를 위임하므로,
@@ -643,37 +652,31 @@ class TestRequireAuthDecoratorJsonFormat:
     def _build_mini_cli(fmt: str) -> click.Group:
         """``require_auth`` 데코레이터만 부착된 mini-CLI 빌드.
 
-        plain ``click.Group`` root 의 callback 에서 ``ctx.obj["member"] = None``,
-        ``ctx.obj["formatter"]`` 을 주입한다. leaf callback 에 ``@require_auth``
-        를 부착하면 데코레이터 wrapper 가 None 검사를 수행하고 ``_emit_auth_error``
-        를 호출한다.
+        invoke 관문만 끈 훅 루트의 callback 이 ``ctx.obj["member"] = None`` 을
+        주입한다. leaf 의 ``@require_auth`` 가 None 검사로 예외를 던지고, 모드는
+        호출의 ``--format`` (``fmt``) 이 정한다.
         """
-        from ante.cli.formatter import OutputFormatter
         from ante.cli.middleware import require_auth
 
-        @click.group()
-        @click.pass_context
-        def root(ctx: click.Context) -> None:
-            ctx.ensure_object(dict)
-            ctx.obj["formatter"] = OutputFormatter(fmt)
-            ctx.obj["format"] = fmt
-            ctx.obj["member"] = None
+        root = _hook_root()
 
-        @root.command(name="leaf")
+        @click.command(name="leaf")
         @click.pass_context
         @require_auth
         def leaf(ctx: click.Context) -> None:
             click.echo("leaf reached")
 
+        click.Group.add_command(root, leaf)
         return root
 
     def test_require_auth_decorator_emits_json_error(
         self, runner: CliRunner, clean_env: None
     ) -> None:
         """``@require_auth`` + JSON formatter → stdout JSON error, exit 1."""
-        mini_cli = self._build_mini_cli("json")
+        fmt_arg = "json"
+        mini_cli = self._build_mini_cli(fmt_arg)
 
-        result = runner.invoke(mini_cli, ["leaf"])
+        result = runner.invoke(mini_cli, ["--format", fmt_arg, "leaf"])
 
         assert result.exit_code == 1, (
             f"expected exit 1, got {result.exit_code}\n"
@@ -692,9 +695,10 @@ class TestRequireAuthDecoratorJsonFormat:
         self, runner: CliRunner, clean_env: None
     ) -> None:
         """``@require_auth`` + text formatter → stderr 한국어 메시지, exit 1."""
-        mini_cli = self._build_mini_cli("text")
+        fmt_arg = "text"
+        mini_cli = self._build_mini_cli(fmt_arg)
 
-        result = runner.invoke(mini_cli, ["leaf"])
+        result = runner.invoke(mini_cli, ["--format", fmt_arg, "leaf"])
 
         assert result.exit_code == 1, result.stderr
         # text 모드: stdout 으로 JSON 이 새지 않아야 한다.
