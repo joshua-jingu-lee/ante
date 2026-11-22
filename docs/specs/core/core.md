@@ -377,6 +377,26 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | **Live DataCollector write·경로 생성** (OHLCV `{1m,5m,15m,1h}`만, `1d`·`tick` 제외 — 독립 행) | `src/ante/data/collector.py:61-150` `DataCollector.start/add_data/_collect_loop/_flush` live write | **#1614** (Depends on #1613) |
 | fundamental cadence `dataset.timeframe` overload reconciliation (축 F — 후보 D deferral 행) | fundamental dataset 표현 정리 | **후보 D** (deferral, 사람 등록 surface) |
 
+## 시계
+
+`src/ante/core/clock.py`는 지금 시각을 읽는 통로다(#2768).
+
+| 이름 | 뜻 |
+|---|---|
+| `Clock` | Protocol. `now(tz: tzinfo \| None) -> datetime`과 `monotonic() -> float` 둘뿐이다 |
+| `SystemClock` | 유일한 구현. `datetime.now(tz)`와 `time.monotonic()`에 위임한다 |
+| `now(tz)` | 호출 시점의 현재 시계에 위임한다. `tz`에 기본값이 없다. naive가 필요하면 `now(None)`을 쓴다 |
+| `monotonic()` | 호출 시점의 현재 시계에 위임한다 |
+| `current_clock()` | 현재 시계를 돌려준다 |
+| `set_clock(clock) -> Clock` | 현재 시계를 바꾸고 이전 시계를 돌려준다 |
+| `use_clock(clock)` | 블록 안에서만 시계를 바꾸는 컨텍스트 관리자. 예외가 나도 이전 시계로 되돌린다 |
+
+- 현재 시계는 프로세스에 하나인 모듈 수준 값이다. 기본값은 `SystemClock`이다. 모듈 함수가 호출 시점에 위임하므로 `from ante.core.clock import now`로 가져와도 교체가 먹는다.
+- 시계를 바꾸는 것은 테스트와 테스트 하네스다. `tests/conftest.py`의 autouse 가드는 테스트가 끝났을 때 현재 시계가 `SystemClock`이 아니면 되돌리고 그 테스트를 실패시킨다.
+- **금지 린트**: `pyproject.toml`의 `[tool.ruff.lint.flake8-tidy-imports.banned-api]`가 직접 시계 호출(`datetime.datetime.now`·`utcnow`·`today`, `datetime.date.today`, `time.time`·`time_ns`·`monotonic`·`monotonic_ns`·`perf_counter`·`perf_counter_ns`·`localtime`·`gmtime`·`ctime`·`strftime`)과 `ante.core.clock.set_clock`·`use_clock`을 금지 목록으로 둔다. `clock.py`는 per-file-ignores로 뺀다.
+- `TID251`은 아직 기본 `select`에 없다. `scripts/check_lint_ratchet.py`가 `src/`의 파일별 위반 수를 `scripts/lint_baseline.json`과 견준다. 기존 호출 자리는 아직 이 모듈로 옮기지 않았다.
+- 린트가 보지 못하는 것: 인스턴스 메서드 `loop.time()`, SQL의 `datetime('now')`·`CURRENT_TIMESTAMP`, `getattr`·서브클래스·`importlib`를 거친 호출. `from time import monotonic`처럼 금지 이름을 직접 import하면 import 줄 한 번만 센다.
+
 ## Logging 연계
 
 시스템 로그 인프라는 별도 모듈 스펙 [logging/README.md](../logging/README.md)로 분리되어 있다. Core는 시스템 초기화 순서상 로깅 설정(`setup_logging`)을 Database 이전 단계에서 수행한다.
