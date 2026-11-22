@@ -13,7 +13,7 @@
 - ``reopen --params null`` 명시 입력은 ``json.loads("null") == None`` 이므로
   guard 에서 거부된다 (의도된 정정).
 
-oracle probe: ``cli_approval_params_dict_guard``.
+``cli_approval_params_dict_guard``.
 
 Non-Goals (본 PR 미포함):
 - ``ApprovalService.create()``/``reopen()`` defense-in-depth (service 단

@@ -1087,7 +1087,7 @@ class TestRuleEngineEventBus:
     ):
         """side가 buy/sell 외 값이면 룰 평가 이전에 거부한다.
 
-        회귀: A7 oracle이 검출한 버그 — Signal.side='hold' 주문이
+        회귀: 버그 — Signal.side='hold' 주문이
         RuleEngine을 통과해 Treasury 예약/broker 호출까지 진행되던 결함.
         docs/specs/strategy/03-02-signal-fields.md에 따라 side는
         "buy" | "sell"만 허용된다.
@@ -1227,7 +1227,7 @@ class TestRuleEngineEventBus:
     ):
         """order_type이 허용 집합 외 값이면 룰 평가 이전에 거부한다.
 
-        회귀(#1298): A7 oracle이 검출한 버그 — Signal.order_type='trail' 주문이
+        회귀(#1298): 버그 — Signal.order_type='trail' 주문이
         RuleEngine을 통과해 Treasury 예약 → broker adapter 호출까지 진행되어
         broker 실패 4건이 누적되었다.
         docs/specs/strategy/03-02-signal-fields.md에 따라 order_type은
@@ -1492,7 +1492,7 @@ class TestRuleEngineEventBus:
     ):
         """exchange='KRX'에서 6자리 숫자가 아닌 symbol은 룰 평가 이전에 거부한다.
 
-        회귀(#1299): A7 oracle이 검출한 버그 — Signal.symbol='INVALID',
+        회귀(#1299): 버그 — Signal.symbol='INVALID',
         exchange='KRX' 주문이 RuleEngine→Treasury→broker까지 진행되어
         KIS 40070000(매매불가 종목)이 발생했다. 현재 Ante KIS-domestic 경로는
         6자리 숫자 PDNO만 가정하므로, 그 형식을 만족하지 않는 KRX symbol은
@@ -1798,7 +1798,7 @@ class TestRuleEngineEventBus:
     ):
         """order_type='limit'이고 price=None이면 룰 평가 이전에 거부한다.
 
-        회귀(#1300): A7 oracle이 검출한 버그 — Signal.order_type='limit',
+        회귀(#1300): 버그 — Signal.order_type='limit',
         side='sell', price=None 주문이 RuleEngine→Treasury→broker까지 진행되어
         KIS 호출 단계에서 HTTP 500이 발생했다. limit는 가격 지정이 invariant이므로
         fail-closed로 거부한다. side='buy'/'sell' 양쪽에서 동일하게 동작해야 한다.
@@ -1985,7 +1985,7 @@ class TestRuleEngineEventBus:
     ):
         """order_type='stop'이고 stop_price=None이면 룰 평가 이전에 거부한다.
 
-        회귀(#1301): A7 oracle이 검출한 버그 — Signal.order_type='stop',
+        회귀(#1301): 버그 — Signal.order_type='stop',
         side='sell', stop_price=None 주문이 RuleEngine→OrderApproved→
         StopOrderRegistered까지 진행되어 terminal event가 누락되었다.
         stop은 트리거 가격(stop_price) 지정이 invariant이므로 fail-closed로
@@ -2267,7 +2267,7 @@ class TestRuleEngineEventBus:
     ):
         """quantity=NaN이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1302): A7 oracle이 검출한 버그 — Signal.quantity=NaN, side='buy',
+        회귀(#1302): 버그 — Signal.quantity=NaN, side='buy',
         order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
         Treasury 진입 후 sqlite `bot_budgets.available NOT NULL` 위반으로
         실패했다. NaN quantity는 Treasury 예약 호출 이전에 fail-closed로
@@ -2571,7 +2571,7 @@ class TestRuleEngineEventBus:
     async def test_rule_engine_rejects_nan_price(self, engine, eventbus, monkeypatch):
         """price=NaN이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1303): A7 oracle이 검출한 버그 — Signal.price=NaN, side='buy',
+        회귀(#1303): 버그 — Signal.price=NaN, side='buy',
         order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
         Treasury 진입 후 sqlite NOT NULL 위반으로 실패했다. NaN price는
         Treasury 예약 호출 이전에 fail-closed로 거부해야 한다. rejection
@@ -2872,7 +2872,7 @@ class TestRuleEngineEventBus:
     ):
         """price<0이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1316): A7 oracle이 검출한 버그 — Signal.price=-1000, side='buy',
+        회귀(#1316): 버그 — Signal.price=-1000, side='buy',
         order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
         Treasury까지 진행되어 ``reserve_amount_invalid`` 거부 + 음수 reserve
         시도가 발생했다. 음수 price는 Treasury 예약/주문 호출 이전에
@@ -3048,7 +3048,7 @@ class TestRuleEngineEventBus:
     ):
         """price==0이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1318): A7 oracle이 검출한 버그 — Signal.price=0, side='buy',
+        회귀(#1318): 버그 — Signal.price=0, side='buy',
         order_type='limit', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
         Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=0)
         거부가 발생했다. 0 price는 무의미한 주문이므로 Treasury 예약 호출
@@ -3347,7 +3347,7 @@ class TestRuleEngineEventBus:
     ):
         """stop_price<0 + order_type='stop'이면 룰 평가/Treasury 조회 이전에 거부.
 
-        회귀(#1319): A7 oracle이 검출한 버그 — Signal.stop_price=-1000, side='buy',
+        회귀(#1319): 버그 — Signal.stop_price=-1000, side='buy',
         order_type='stop', quantity=1 주문이 RuleEngine→OrderValidatedEvent→
         Treasury까지 진행되어 ``reserve_amount_invalid`` 거부가 발생했다.
         음수 stop_price는 Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
@@ -3496,7 +3496,7 @@ class TestRuleEngineEventBus:
     ):
         """stop_price=NaN이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1321): A7 oracle이 검출한 버그 — Signal.stop_price=NaN,
+        회귀(#1321): 버그 — Signal.stop_price=NaN,
         order_type='stop' 주문이 RuleEngine→OrderValidatedEvent까지 진행되어
         broker terminal_event가 누락됐다. NaN stop_price는 Treasury/Gateway
         호출 이전에 fail-closed로 거부해야 한다 (선례 #1303 finite-price 패턴).
@@ -3731,7 +3731,7 @@ class TestRuleEngineEventBus:
     ):
         """stop_price==0 + order_type='stop'이면 룰 평가/Treasury 조회 이전에 거부.
 
-        회귀(#1320): A7 oracle이 검출한 버그 — Signal.stop_price=0,
+        회귀(#1320): 버그 — Signal.stop_price=0,
         order_type='stop' 주문이 RuleEngine→OrderValidatedEvent까지 진행되어
         Treasury 예약 단계에서 거부됐다. 0 stop_price는 무의미한 트리거이므로
         Treasury 예약/주문 호출 이전에 fail-closed로 거부한다.
@@ -3998,7 +3998,7 @@ class TestRuleEngineEventBus:
     ):
         """quantity<0이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1304): A7 oracle이 검출한 버그 — Signal.quantity=-1, side='buy',
+        회귀(#1304): 버그 — Signal.quantity=-1, side='buy',
         order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
         Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=-1000.15)
         거부 + 음수 예약 시도가 발생했다. 음수 quantity는 Treasury 예약 호출
@@ -4106,7 +4106,7 @@ class TestRuleEngineEventBus:
     ):
         """quantity=0(int)이면 룰 평가/Treasury 조회 이전에 거부한다.
 
-        회귀(#1305): A7 oracle이 검출한 버그 — Signal.quantity=0, side='buy',
+        회귀(#1305): 버그 — Signal.quantity=0, side='buy',
         order_type='limit', price=1000 주문이 RuleEngine→OrderValidatedEvent→
         Treasury까지 진행되어 ``reserve_amount_invalid``(total_reserve=0.0)
         거부가 발생했다. 0 quantity는 no-op 주문이므로 Treasury 예약 호출
@@ -5504,7 +5504,7 @@ class TestRuleEngineManager:
         self, manager
     ):
         """KIS domestic 계좌는 stored rule이 없어도 default ``TradingHoursRule``이
-        자동 주입된다 (#1296 A7 oracle 회귀)."""
+        자동 주입된다 (#1296 회귀)."""
         accounts = [
             Account(
                 account_id="domestic",

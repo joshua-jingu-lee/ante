@@ -248,7 +248,7 @@ class TestPeriodOptionConflictRejected:
 
 
 class TestMonthlyNonPositiveYearRejected:
-    """monthly --year<=0은 exit 1 + REPORT_VALIDATION_ERROR (#1599 oracle A7).
+    """monthly --year<=0은 exit 1 + REPORT_VALIDATION_ERROR (#1599).
 
     이전: invalid calendar year(`-1`/`0`)가 거부되지 않고 exit 0 빈 월간
     집계로 처리됨. monthly --year는 양수(>0) calendar year만 허용한다.

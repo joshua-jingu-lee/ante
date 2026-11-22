@@ -7,7 +7,7 @@ CLI 경계 단일 검증 (#1603 backtest run 블록 1:1 동형 미러):
   (거부 안 함, ParquetStore.list_symbols 경유 정상 진행 경로).
 - 유효 `--symbol 005930 --timeframe 1d` → 기존 동작 유지.
 - invalid 입력 → ParquetStore/list_symbols/validate 미도달
-  (`if not symbols:` exit-0 fake-success #1591 oracle 증상 미도달).
+  (`if not symbols:` exit-0 fake-success #1591 증상 미도달).
 - JSON/text 양 포맷 error code/메시지 회귀.
 - `@require_auth`/`@require_scope("data:read")` 데코레이터 정상 동작.
 

@@ -3,8 +3,7 @@
 JSON 모드에서는
 부모 stdout 이 single JSON document 만 포함해야 한다. ``system start``
 가 자식 ``python -m ante.main`` 의 stdout/stderr 를 inherit 시키면 runtime logger
-출력이 JSON 응답에 이어 붙어 ``json.loads`` 파싱이 깨진다. (oracle cycle
-``2026-05-24T003038Z_ae19043``, fingerprint ``6e987e08022b``)
+출력이 JSON 응답에 이어 붙어 ``json.loads`` 파싱이 깨진다.
 
 본 모듈은 ``subprocess.run`` 을 mock 해 child 기동 비용을 회피하고 다음을 검증한다:
 
@@ -77,7 +76,6 @@ class TestSystemStartJsonStdoutIsolation:
         ``stderr=sys.stderr`` 가 명시되어 자식 출력이 부모 stdout 을 오염시키지
         않는다.
 
-        oracle A7 probe ``cli_system_start_json_stdout_contract`` 가 호출하는
         파서는 ``json.loads(stdout)`` 을 한 번에 수행하므로, stdout 에는 fmt.success
         가 출력한 single JSON document 만 남아야 한다.
         """

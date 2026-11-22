@@ -1,6 +1,6 @@
 """CLI 에러코드 명명 규칙 sweep (#1773-#1782).
 
-10 개 oracle A7 이슈 동일 패턴 (CLI 에러코드 명명 위반) sweep을 잠근다.
+10 개 이슈 동일 패턴 (CLI 에러코드 명명 위반) sweep을 잠근다.
 
 - 3 lower-case → SCREAMING_SNAKE (#1773 / #1774 / #1775)
 - 7 missing → 도메인 prefix SCREAMING_SNAKE 추가 (#1776-#1782)

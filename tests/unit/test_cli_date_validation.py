@@ -374,7 +374,7 @@ class TestFormatJsonInvalidDate:
     """`--format json` 모드에서도 invalid date는 exit != 0.
 
     `--format json` JSON error envelope 표준화는 본 PR Non-Goals이지만,
-    oracle probe `expected_exit=nonzero` 요구는 JSON 모드에서도 충족되어야
+    `expected_exit=nonzero` 요구는 JSON 모드에서도 충족되어야
     한다. click.BadParameter는 표준 text stderr 경로(JSON envelope 아님)로
     가더라도 exit 2가 보장되므로 그것만 단정한다.
     """
@@ -540,7 +540,7 @@ class TestTradeListNoTraceback:
     ) -> None:
         """`--format json` 모드에서도 traceback이 노출되지 않아야 한다.
 
-        #1514 oracle probe(`expected_exit=nonzero_json_error`, `traceback=True`,
+        #1514(`expected_exit=nonzero_json_error`, `traceback=True`,
         `stdout_json=None`)가 가리키던 핵심 결함. JSON envelope 표준화는
         Non-Goals이지만 "traceback 미노출"은 본 PR이 닫는 invariant다.
         """

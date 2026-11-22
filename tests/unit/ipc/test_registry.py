@@ -1217,7 +1217,7 @@ class TestHandleBrokerReconcileUnattributedHolding:
         assert result["fix_applied"] is False
 
 
-# ── #1379 oracle A7: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──
+# ── #1379: IPC config.set 핸들러도 서비스 경계 ValueError 전파 ──
 
 
 class TestHandleConfigSetValidation:

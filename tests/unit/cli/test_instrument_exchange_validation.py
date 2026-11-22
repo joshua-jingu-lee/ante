@@ -1,6 +1,6 @@
 """``instrument`` CLI exchange 검증 회귀 테스트 (#1577).
 
-이슈 #1577 (oracle A7 ``cli_instrument_invalid_exchange_accepted``):
+이슈 #1577 (``cli_instrument_invalid_exchange_accepted``):
 ``instrument list --exchange SAMPLE_INVALID_EXCHANGE`` 및 invalid exchange
 row를 포함한 ``instrument import --dry-run``이 exit 0으로 성공 처리되던
 ingress drift를 닫는다. 3 ingress(list/sync/import)가 동일하게
@@ -87,7 +87,7 @@ class TestListInvalidExchange:
     def test_invalid_exchange_exits_nonzero_json_envelope(
         self, runner: CliRunner
     ) -> None:
-        """oracle probe 시그니처와 정확히 동일한 경로: ``--format json``."""
+        """``--format json``."""
         result = runner.invoke(
             cli,
             [
@@ -327,7 +327,7 @@ class TestImportInvalidExchangeRow:
     def test_invalid_row_dry_run_exits_nonzero_json_envelope(
         self, runner: CliRunner, tmp_path
     ) -> None:
-        """oracle probe 재현: ``import --dry-run``도 row 검증 후 거부."""
+        """``import --dry-run``도 row 검증 후 거부."""
         json_file = tmp_path / "inv.json"
         json_file.write_text(
             json.dumps([{"symbol": "X", "exchange": "SAMPLE_INVALID_EXCHANGE"}])
@@ -390,7 +390,7 @@ class TestImportInvalidExchangeRow:
         assert payload["status"] == "error"
         assert payload["code"] == "INSTRUMENT_INVALID_EXCHANGE"
 
-        # dry-run도 동일 경로 (oracle probe 시그니처).
+        # dry-run도 동일 경로.
         result_dry = runner.invoke(
             cli,
             [

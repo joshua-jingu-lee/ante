@@ -1,6 +1,6 @@
 """Group R member duplicate+validation typed code sweep (#1806 / #1807).
 
-2 oracle A7 issue sweep — member 도메인의 duplicate / recovery credential
+2 issue sweep — member 도메인의 duplicate / recovery credential
 validation 거부가 안정 typed code envelope 을 surface 함을 verify 한다
 (Group P #1805 missing-resource / Group Q #1814 state-conflict sweep 동형
 패턴).

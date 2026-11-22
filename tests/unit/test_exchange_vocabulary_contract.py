@@ -53,7 +53,7 @@ from ante.member.models import Member, MemberRole, MemberType
 from ante.strategy.validator import StrategyValidator
 
 # 의도된 단일 상수만 리터럴로 둔다(canonical 집합은 SSOT import).
-#  - SAMPLE: #1561 oracle probe 시그니처(어떤 신규 입력 경계에서도 거부).
+#  - SAMPLE: #1561 시그니처(어떤 신규 입력 경계에서도 거부).
 #  - WILDCARD: StrategyMeta 전용 — 그 외 표면에서 거부.
 SAMPLE = "SAMPLE_INVALID_EXCHANGE"
 WILDCARD = "*"

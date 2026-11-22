@@ -483,7 +483,7 @@ class TestUpdateGatePrecedence:
     이전 buggy 순서(server-running 가드가 ``--yes`` 게이트보다 선행, 그리고
     server-running ``fmt.error``에 ``code=`` 누락)를 정상으로 단언하던
     ``test_update.py``/``test_cli_update.py`` 케이스를 spec 정합으로 갱신한
-    것과 별개로, oracle A7 contract-drift 재발 방지를 위한 직접 회귀를
+    것과 별개로, contract-drift 재발 방지를 위한 직접 회귀를
     여기에 잠근다.
     """
 
@@ -492,7 +492,7 @@ class TestUpdateGatePrecedence:
     ) -> None:
         """서버 실행 + ``--yes`` 누락 → exit≠0, ``CLI_CONFIRMATION_REQUIRED``.
 
-        oracle probe(``cli_update_confirmation_gate_contract``) 재현 케이스:
+        ``cli_update_confirmation_gate_contract`` 재현 케이스:
         서버 실행 중 ``ante --format json update``(no ``--yes``)는
         server-running(code=null)이 아닌 confirmation gate로 거절되어야 한다.
         server 상태 검사·PyPI 조회·side-effect 일체 미진입.

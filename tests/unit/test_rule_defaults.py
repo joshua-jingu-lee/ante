@@ -1,6 +1,6 @@
 """``ante.rule.defaults.resolve_effective_rules`` 단위 테스트.
 
-회귀: A7 oracle (#1296) — KIS 모의투자 KRX 장종료 상태에 시장가 매수 신호가
+회귀: (#1296) — KIS 모의투자 KRX 장종료 상태에 시장가 매수 신호가
 ``RuleEngineManager``의 default ``trading_hours`` 미주입으로 인해 broker까지
 도달했다. 본 helper는 broker_type별 default와 stored override를 merge한다.
 """

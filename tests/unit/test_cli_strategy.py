@@ -740,7 +740,7 @@ class TestStrategyPerformance:
         tracker.calculate.assert_not_called()
 
     # ── read-family follow-up: provided invalid account_id ingress 거부 ──
-    # (#1657, oracle A7 cli_strategy_performance_invalid_account_id)
+    # (#1657, cli_strategy_performance_invalid_account_id)
     #
     # docs/specs/account/14-account-id-contract.md L295: ``ante strategy
     # performance <name> --account-id <id>`` = read-family follow-up,
