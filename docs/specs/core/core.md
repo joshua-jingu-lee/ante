@@ -395,8 +395,10 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 - 시계를 바꾸는 것은 테스트와 테스트 하네스다. `tests/conftest.py`의 `pytest_runtest_teardown` 훅은 테스트의 정리가 모두 끝난 뒤(모든 conftest의 함수 범위 픽스처가 정리된 뒤) 현재 시계가 `SystemClock`이 아니면 되돌리고 그 테스트를 실패시킨다. module·session 범위의 픽스처가 시계를 바꾸면 그 범위의 첫 테스트가 실패한다. 테스트의 대역은 `tests/conftest.py`의 `ManualClock`(고정 시각과 단조 값, `advance(seconds)`)과 그것을 `use_clock`으로 싣는 `manual_clock` 픽스처다(시각은 `indirect` 파라미터).
 - `set_clock`·`use_clock`은 프로세스에 하나인 현재 시계를 바꾸므로 한 테스트의 한 호출 스택 안에서 쓴다. 중첩하면 안쪽부터 되돌린다(LIFO). 태스크나 스레드를 가로질러 겹쳐 쓰는 것은 계약 밖이다.
 - **금지 린트**: `pyproject.toml`의 `[tool.ruff.lint.flake8-tidy-imports.banned-api]`가 직접 시계 호출(`datetime.datetime.now`·`utcnow`·`today`, `datetime.date.today`, `time.time`·`time_ns`·`monotonic`·`monotonic_ns`·`perf_counter`·`perf_counter_ns`·`localtime`·`gmtime`·`ctime`·`strftime`)과 `ante.core.clock.set_clock`·`use_clock`을 금지 목록으로 둔다. `clock.py`는 per-file-ignores로 뺀다.
-- `TID251`은 아직 기본 `select`에 없다. `scripts/check_lint_ratchet.py`가 `src/`의 파일별 위반 수를 `scripts/lint_baseline.json`과 견준다. `src/ante/cli/`·`ipc/`·`main.py`의 호출 자리는 아직 옮기지 않았다. 그 밖의 모듈의 호출 자리는 이 모듈로 옮겼다(`trade/fill_outbox.py`의 `loop.time()`은 `monotonic()`으로). 이벤트의 `timestamp` 기본값도 이 모듈의 `now(UTC)`를 이벤트를 만들 때 읽는다.
-- 린트가 보지 못하는 것: 인스턴스 메서드 `loop.time()`, SQL의 `datetime('now')`·`CURRENT_TIMESTAMP`, `getattr`·서브클래스·`importlib`를 거친 호출. `from time import monotonic`처럼 금지 이름을 직접 import하면 import 줄 한 번만 센다. `time.clock_gettime`·`clock_gettime_ns`와, 목록에 있는 `time_ns`·`monotonic_ns`·`perf_counter_ns` 밖의 `_ns` 계열(`process_time_ns`·`thread_time_ns`)은 금지 목록에 없다.
+- `TID251`은 `[tool.ruff.lint] select`에 있다. 그래서 일반 `ruff check`가 `src/`의 직접 시계 호출과 `set_clock`·`use_clock` 호출에 실패한다. `src/` 밖(테스트·`scripts/`·e2e 하네스 등)은 per-file-ignores의 `"!src/**"`로 이 규칙을 적용하지 않는다. `src/`의 호출 자리는 모두 이 모듈로 옮겼다(`trade/fill_outbox.py`의 `loop.time()`은 `monotonic()`으로). 이벤트의 `timestamp` 기본값도 이 모듈의 `now(UTC)`를 이벤트를 만들 때 읽는다.
+- 린트가 보지 못하는 것: 인스턴스 메서드 `loop.time()`, SQL의 `datetime('now')`·`CURRENT_TIMESTAMP`, `getattr`·서브클래스·`importlib`를 거친 호출. `time.clock_gettime`·`clock_gettime_ns`와, 목록에 있는 `time_ns`·`monotonic_ns`·`perf_counter_ns` 밖의 `_ns` 계열(`process_time_ns`·`thread_time_ns`)은 금지 목록에 없다.
+- 알려진 한계: 표준 라이브러리의 핸들러가 안에서 읽는 시계는 주입되지 않는다. `core/log/handlers.py`의 `DateNamedTimedRotatingFileHandler`는 파일 이름과 `doRollover`에서 이 모듈의 시계를 읽지만, 상속한 `TimedRotatingFileHandler`의 `__init__`·`shouldRollover`는 `time.time()`을 읽는다. 그래서 회전의 판정은 실제 시계를 따른다.
+- 알려진 한계: `instrument/service.py`는 단조 값 `0.0`을 「캐시를 불러온 적 없음」 표시로 쓴다. 단조 값이 0에서 시작하는 시계를 주입하면 캐시가 늘 만료로 보인다.
 
 ## Logging 연계
 

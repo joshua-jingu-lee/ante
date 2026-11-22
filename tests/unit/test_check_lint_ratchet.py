@@ -43,7 +43,7 @@ CONTRACT_ARGS = {
         "check",
         "src/",
         "--select",
-        "BLE001,ASYNC,S608,C901,TID251",
+        "BLE001,ASYNC,S608,C901",
         "--config",
         "lint.mccabe.max-complexity = 10",
         "--output-format",
@@ -275,10 +275,6 @@ RUFF_TEXT = {
     "ASYNC109": "asyncio.to_thread나 비동기 API를 쓴다.",
     "S608": "자리표시자를 쓴다.",
     "C901": "함수를 나눈다.",
-    "TID251": (
-        "ante.core.clock의 now(tz)·monotonic()을 쓴다. "
-        "운영 코드는 시계를 바꾸지 않는다. 테스트는 use_clock으로 바꾼다."
-    ),
 }
 
 
