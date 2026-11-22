@@ -19,6 +19,7 @@ __all__ = [
     "CliConfirmationRequiredError",
     "CliMissingRequiredInputError",
     "CliOptionConflictError",
+    "CliStrategyError",
     "ConfigKeyNotFoundError",
     "DataError",
     "DataInvalidDatasetIdError",
@@ -47,8 +48,13 @@ __all__ = [
     "RuleNotFoundError",
     "RuleUpdateError",
     "SignalKeyNotSetError",
+    "SnapshotNotFoundError",
+    "StrategyInvalidStatusTransitionError",
+    "StrategyMissingRequiredAccountError",
     "TradeError",
     "TradeNotFoundError",
+    "TreasuryAllocateFailedError",
+    "TreasuryDeallocateFailedError",
     "UpdateCheckFailedError",
     "UpdateInstallFailedError",
     "UpdateInsufficientDiskSpaceError",
@@ -128,6 +134,10 @@ class CliMissingRequiredInputError(Exception):
 
 class CliOptionConflictError(Exception):
     code = "CLI_OPTION_CONFLICT"
+
+
+class CliStrategyError(Exception):
+    code = "STRATEGY_ERROR"
 
 
 class ConfigKeyNotFoundError(Exception):
@@ -242,12 +252,32 @@ class SignalKeyNotSetError(Exception):
     code = "SIGNAL_KEY_NOT_SET"
 
 
+class SnapshotNotFoundError(Exception):
+    code = "SNAPSHOT_NOT_FOUND"
+
+
+class StrategyInvalidStatusTransitionError(Exception):
+    code = "STRATEGY_INVALID_STATUS_TRANSITION"
+
+
+class StrategyMissingRequiredAccountError(Exception):
+    code = "STRATEGY_MISSING_REQUIRED_ACCOUNT"
+
+
 class TradeError(Exception):
     code = "TRADE_ERROR"
 
 
 class TradeNotFoundError(Exception):
     code = "TRADE_NOT_FOUND"
+
+
+class TreasuryAllocateFailedError(Exception):
+    code = "TREASURY_ALLOCATE_FAILED"
+
+
+class TreasuryDeallocateFailedError(Exception):
+    code = "TREASURY_DEALLOCATE_FAILED"
 
 
 class UpdateCheckFailedError(Exception):
@@ -293,6 +323,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     CliConfirmationRequiredError,
     CliMissingRequiredInputError,
     CliOptionConflictError,
+    CliStrategyError,
     ConfigKeyNotFoundError,
     DataError,
     DataInvalidDatasetIdError,
@@ -321,8 +352,13 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     RuleNotFoundError,
     RuleUpdateError,
     SignalKeyNotSetError,
+    SnapshotNotFoundError,
+    StrategyInvalidStatusTransitionError,
+    StrategyMissingRequiredAccountError,
     TradeError,
     TradeNotFoundError,
+    TreasuryAllocateFailedError,
+    TreasuryDeallocateFailedError,
     UpdateCheckFailedError,
     UpdateInstallFailedError,
     UpdateInsufficientDiskSpaceError,
