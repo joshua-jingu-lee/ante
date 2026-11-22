@@ -74,15 +74,20 @@ each other request:
   message or result contains a string value of its request (two characters
   or more).
 - ``의도한 변경(이름으로 허용)``: a ``다름`` row whose request name is given
-  with ``--allow-row`` (the exact name, no prefix or pattern). A given name
-  whose row is not ``다름`` is a stale allowance.
+  with ``--allow-row`` (the exact name, no prefix or pattern), whose reason is
+  a value of the CLI JSON type, and whose only difference is the type of a
+  service argument: ``status``, ``code``, ``message`` and ``result`` are
+  equal, the parsed ``calls`` have the same shape, and each differing leaf
+  keeps its JSON type and value (``7`` and ``7.0``). The line names the types.
+  Any other given ``다름`` row stays ``다름``. A given name whose row is not
+  ``다름`` is a stale allowance.
 
 Exit 0: no ``다름`` row and no stale allowance.
 Exit 1: a ``다름`` row or a stale allowance.
-Exit 2: unreadable input, an ``--allow-row`` name not in the request set or of
-a ``cli`` row, a record row not in the request set, two before
-records with different request names, an unsupported handler read, or any
-other failure.
+Exit 2: unreadable input, an ``--allow-row`` name not in the request set, of
+a ``cli`` row or of a ``비결정`` row, a record row not in the request set, two
+before records with different request names, an unsupported handler read, or
+any other failure.
 """
 
 from __future__ import annotations
@@ -141,6 +146,8 @@ ISOLATED_ENV = ("ANTE_CONFIG_DIR", "HOME")
 CLOCK_KEYS = frozenset({"expires_at"})
 RESULT_CLOCK_KEYS = frozenset({"updated_at"})
 CLOCK_MARKER = "2030-01-01T00:00:00+00:00"
+SAME_TYPE_REASON = "a value of the CLI JSON type changed"
+NOT_TYPE_ONLY = "(--allow-row needs a type-only change of the service arguments)"
 
 
 class InputError(Exception):
@@ -581,7 +588,7 @@ def classify(
         return "다름", "a CLI request changed"
     info = _field_info(request["command"], request.get("key"))
     if kind == "value" and request.get("same_type") and not _narrowed(info):
-        return "다름", "a value of the CLI JSON type changed"
+        return "다름", SAME_TYPE_REASON
     for text in _strings(request["args"]):
         if len(text) >= 2 and (
             text in (after["message"] or "") or text in after["result"]
@@ -609,6 +616,43 @@ def classify(
     ):
         return "메시지 바뀜", ""
     return "다름", "another difference"
+
+
+def _type_changes(before: Any, after: Any) -> list[str] | None:
+    if type(before) is dict and type(after) is dict:
+        if list(before) != list(after):
+            return None
+        pairs = [(before[k], after[k]) for k in before]
+    elif type(before) is list and type(after) is list:
+        if len(before) != len(after):
+            return None
+        pairs = list(zip(before, after, strict=True))
+    elif _json_type(before) != _json_type(after) or before != after:
+        return None
+    elif type(before) is type(after):
+        return []
+    else:
+        return [f"{type(before).__name__} -> {type(after).__name__}"]
+    changes: list[str] = []
+    for b, a in pairs:
+        found = _type_changes(b, a)
+        if found is None:
+            return None
+        changes += found
+    return changes
+
+
+def _allowed_reason(
+    reason: str, before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> str | None:
+    if reason != SAME_TYPE_REASON or before is None or after is None:
+        return None
+    if any(before[k] != after[k] for k in ("status", "code", "message", "result")):
+        return None
+    changes = _type_changes(json.loads(before["calls"]), json.loads(after["calls"]))
+    if not changes:
+        return None
+    return "service argument type " + ", ".join(sorted(set(changes)))
 
 
 def _rows(path: Path, names: set[str]) -> tuple[dict[str, Any], dict[str, int]]:
@@ -646,6 +690,11 @@ def cmd_compare(args: argparse.Namespace) -> int:
         if requests[name]["kind"] == "cli":
             raise InputError(f"--allow-row {name}: a cli row cannot be allowed")
     unstable = sorted(n for n in names if n in b1 and n in b2 and b1[n] != b2[n])
+    unstable_allowed = sorted(allow_rows & set(unstable))
+    if unstable_allowed:
+        raise InputError(
+            f"--allow-row {unstable_allowed[0]}: the row is not deterministic"
+        )
     counts: Counter[str] = Counter()
     code_changes: Counter[str] = Counter()
     changed: list[str] = []
@@ -664,13 +713,18 @@ def cmd_compare(args: argparse.Namespace) -> int:
             if cls != "다름":
                 stale.append(f"  {name}: {cls}")
             else:
-                cls = ALLOWED_ROW
-                allowed_rows.append(
-                    f"  {name}: {_outcome(b1[name])} {b1[name]['calls']} -> "
-                    f"{_outcome(after[name])} {after[name]['calls']}"
-                )
-                counts[cls] += 1
-                continue
+                why = _allowed_reason(reason, b1.get(name), after.get(name))
+                if why is None:
+                    reason = f"{reason} {NOT_TYPE_ONLY}"
+                else:
+                    cls = ALLOWED_ROW
+                    allowed_rows.append(
+                        f"  {name}: {why}: "
+                        f"{_outcome(b1[name])} {b1[name]['calls']} -> "
+                        f"{_outcome(after[name])} {after[name]['calls']}"
+                    )
+                    counts[cls] += 1
+                    continue
         counts[cls] += 1
         if cls == "다름":
             different.append(f"  {name}: {reason}")

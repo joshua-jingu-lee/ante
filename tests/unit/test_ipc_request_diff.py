@@ -248,11 +248,153 @@ def test_an_allowed_row_leaves_the_different_rows(tmp_path: Path) -> None:
     assert (_count(out, "의도한 변경(이름으로 허용)"), _count(out, "다름")) == (1, 0)
     assert (
         "allowed rows:\n"
-        f'  {INT7}: ok [["svc.demo.run", [7], {{}}]] -> '
+        f"  {INT7}: service argument type int -> float: "
+        'ok [["svc.demo.run", [7], {}]] -> '
         'ok [["svc.demo.run", [7.0], {}]]\n'
         "stale allowed rows:\n"
         "different rows:\n"
     ) in out
+
+
+@pytest.mark.parametrize(
+    ("after", "reason"),
+    [
+        pytest.param(
+            {**OK, "calls": '[["svc.demo.run", [8.0], {}]]'},
+            "a value of the CLI JSON type changed",
+            id="another-value",
+        ),
+        pytest.param(
+            {**OK, "calls": '[["svc.demo.run", [true], {}]]'},
+            "a value of the CLI JSON type changed",
+            id="another-json-type",
+        ),
+        pytest.param(
+            {**INT7_AFTER, "result": '{"done": false}'},
+            "a value of the CLI JSON type changed",
+            id="type-and-response",
+        ),
+        pytest.param(
+            {**INT7_AFTER, "calls": '[["svc.demo.run", [7.0], {}], ["svc.x", [], {}]]'},
+            "a value of the CLI JSON type changed",
+            id="type-and-another-call",
+        ),
+        pytest.param(
+            {**REJECTED, "message": "demo.run 인자 검증 실패: n(int_type)"},
+            "a value of the CLI JSON type changed",
+            id="rejected",
+        ),
+    ],
+)
+def test_an_allowance_needs_a_type_only_service_argument_change(
+    tmp_path: Path, after: dict[str, Any], reason: str
+) -> None:
+    code, out, err = _compare(
+        tmp_path, [INT7_ROW], {INT7: INT7_BEFORE}, {INT7: after}, "--allow-row", INT7
+    )
+    assert (code, err) == (1, "")
+    assert (_count(out, "의도한 변경(이름으로 허용)"), _count(out, "다름")) == (0, 1)
+    assert (
+        f"different rows:\n  {INT7}: {reason} "
+        "(--allow-row needs a type-only change of the service arguments)\n"
+    ) in out
+
+
+def test_a_reason_other_than_the_cli_json_type_is_not_allowed(
+    tmp_path: Path,
+) -> None:
+    row = _request(INT7, "value", {"n": 7}, key="n", same_type=False)
+    code, out, _ = _compare(
+        tmp_path, [row], {INT7: INT7_BEFORE}, {INT7: INT7_AFTER}, "--allow-row", INT7
+    )
+    assert code == 1
+    assert (
+        f"  {INT7}: another difference "
+        "(--allow-row needs a type-only change of the service arguments)\n"
+    ) in out
+
+
+def test_an_allowed_row_missing_after_is_different(tmp_path: Path) -> None:
+    code, out, err = _compare(
+        tmp_path,
+        [INT7_ROW, CLI],
+        {INT7: INT7_BEFORE, "demo.run:cli:0": OK},
+        {"demo.run:cli:0": OK},
+        "--allow-row",
+        INT7,
+    )
+    assert (code, err) == (1, "")
+    assert (
+        f"different rows:\n  {INT7}: missing in a record "
+        "(--allow-row needs a type-only change of the service arguments)\n"
+    ) in out
+
+
+def test_an_allowance_of_an_unstable_row_is_an_input_error(tmp_path: Path) -> None:
+    code, out, err = _compare(
+        tmp_path,
+        [INT7_ROW],
+        {INT7: INT7_BEFORE},
+        {INT7: INT7_AFTER},
+        "--allow-row",
+        INT7,
+        before_again={INT7: {**INT7_BEFORE, "result": "{}"}},
+    )
+    assert (code, out) == (2, "")
+    assert f"--allow-row {INT7}: the row is not deterministic" in err
+
+
+SIXTH_ALLOWED = (
+    "treasury.allocate:value:amount:int7",
+    "treasury.deallocate:value:amount:int7",
+    "treasury.set_balance:value:balance:int7",
+)
+
+
+def test_the_rows_allowed_by_the_sixth_bundle_stay_allowed(tmp_path: Path) -> None:
+    data = json.loads((REPO_ROOT / "scripts/ipc_request_set.json").read_text("utf-8"))
+    commands = {
+        command: [row for row in rows if row["name"] in SIXTH_ALLOWED]
+        for command, rows in data["commands"].items()
+    }
+    commands = {command: rows for command, rows in commands.items() if rows}
+    assert sorted(r["name"] for rows in commands.values() for r in rows) == list(
+        SIXTH_ALLOWED
+    )
+    requests = tmp_path / "requests.json"
+    requests.write_text(json.dumps({"commands": commands}), encoding="utf-8")
+    after_path = tmp_path / "a.json"
+    code, _, err = _run("record", "--requests", requests, "--out", after_path)
+    assert (code, err) == (0, "")
+    after = json.loads(after_path.read_text(encoding="utf-8"))
+    assert all("7.0" in row["calls"] for row in after["rows"].values())
+    before = {
+        "rows": {
+            name: {**row, "calls": row["calls"].replace("7.0", "7")}
+            for name, row in after["rows"].items()
+        }
+    }
+    before_path = tmp_path / "b.json"
+    before_path.write_text(json.dumps(before), encoding="utf-8")
+    allow = [arg for name in SIXTH_ALLOWED for arg in ("--allow-row", name)]
+    code, out, err = _run(
+        "compare",
+        "--requests",
+        requests,
+        "--before",
+        before_path,
+        "--before",
+        before_path,
+        "--after",
+        after_path,
+        *allow,
+    )
+    assert (code, err) == (0, "")
+    assert _count(out, "의도한 변경(이름으로 허용)") == len(SIXTH_ALLOWED)
+    lines = out.split("allowed rows:\n", 1)[1].split("stale allowed rows:", 1)[0]
+    assert [line.split(": ", 2)[:2] for line in lines.splitlines()] == [
+        [f"  {name}", "service argument type int -> float"] for name in SIXTH_ALLOWED
+    ]
 
 
 def test_a_row_not_allowed_stays_different(tmp_path: Path) -> None:
