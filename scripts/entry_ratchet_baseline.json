@@ -1,11 +1,9 @@
 {
   "cli_error_calls": {
-    "src/ante/cli/commands/feed.py": 19,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 2
   },
   "cli_exits": {
-    "src/ante/cli/commands/feed.py": 21,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 5,
     "src/ante/cli/commands/system.py": 2
@@ -14,19 +12,7 @@
   "unregistered_codes": [
     "ACCOUNT_REPAIR_TIMEZONE_OK",
     "BROKER_MODIFY_ORGNO_UNAVAILABLE",
-    "CLI_INVALID_DATE",
-    "CLI_INVALID_SCHEDULE_TIME",
     "CLI_USAGE_ERROR",
-    "CONFIG_INVALID_GENERAL",
-    "CONFIG_INVALID_GUARD",
-    "CONFIG_INVALID_LOG_LEVEL",
-    "CONFIG_INVALID_NICE_VALUE",
-    "CONFIG_INVALID_VALUE",
-    "CONFIG_UNSUPPORTED_KEY",
-    "FEED_INJECT_INVALID_SYMBOL",
-    "FEED_INJECT_INVALID_TIMEFRAME",
-    "FILE_NOT_FOUND",
-    "NOT_INITIALIZED",
     "STOP_ORDER_MANAGER_STOPPED"
   ],
   "ipc_handlers_without_model": [],

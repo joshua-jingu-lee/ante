@@ -244,7 +244,7 @@
       "no-untyped-call": 3,
       "no-untyped-def": 2,
       "type-arg": 5,
-      "unused-ignore": 2
+      "unused-ignore": 1
     },
     "src/ante/cli/commands/ipc_helpers.py": {
       "no-any-return": 1,
