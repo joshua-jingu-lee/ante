@@ -75,9 +75,12 @@ CLI 커맨드가 `--format json` 모드에서 실패한 경우 출력하는 형�
 
 - 세 필드는 항상 동시에 직렬화된다.
 - exit code는 1 이상(non-zero)이어야 한다. exit 0 + error envelope는 본 SSOT 위반이다.
-- `--format text` 모드는 `Error: <code>: <message>`를 `stderr`로 출력한다. Click 자신의
-  사용법 오류는 Click 기본 형식을 따르고, 아직 진입점 훅으로 옮기지 않은 명령의 출구는
-  `Error: <message>`다. JSON 모드는 `stdout`으로 envelope 한 줄을 출력한다.
+- `--format text` 모드는 `Error: <code>: <message>`를 `stderr`로 출력한다. 메시지가
+  이미 `<code>: `로 시작하면 접두를 다시 붙이지 않는다. Click 자신의 사용법 오류는
+  Click 기본 형식을 따르고, `strategy validate`·`strategy submit`의 검증 실패
+  출구(오류 줄 뒤에 상세 줄이 이어진다)는 `Error: <message>`다. `signal connect`의
+  핸드셰이크 실패는 `stderr`에 `<message>`만 낸다. JSON 모드는 `stdout`으로 envelope
+  한 줄을 출력한다.
 - `code` 값의 vocabulary(taxonomy, 도메인 prefix 등)는 본 SSOT 범위가 아니다 →
   [Non-Goals](#non-goals) 참조.
 - 구현 reference: `OutputFormatter.error()` (`src/ante/cli/formatter.py`).
