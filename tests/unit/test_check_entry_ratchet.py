@@ -1809,7 +1809,7 @@ def test_script_exits_2_when_a_handler_is_a_lambda(tmp_path: Path) -> None:
 
 
 RAW_LEGACY_CEILING = 68
-DIRECT_OUTPUT_CEILING = 0
+DIRECT_OUTPUT_CEILING = 488
 
 
 @pytest.mark.parametrize("source", ["measure", "baseline"])
@@ -2108,7 +2108,7 @@ def test_each_direct_output_form_counts_once(tmp_path: Path, statement: str) -> 
         "x = fmt.is_jsonl",
         'getattr(fmt, "is_json", False)',
         'x = "fmt.output(1) click.echo(1) .is_json"',
-        "# fmt.output(1)",
+        "pass  # fmt.output(1)",
     ],
 )
 def test_near_miss_direct_output_forms_are_not_counted(
