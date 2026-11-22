@@ -61,7 +61,6 @@ import json
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
@@ -900,9 +899,9 @@ class TestBotSignalKeySoftDeletedBotExit:
         mock_db.fetch_one = AsyncMock(side_effect=fetch_one)
         return mock_db
 
-    def _bot_not_found_click_exc(self) -> click.ClickException:
+    def _bot_not_found_click_exc(self) -> IPCRemoteError:
         """서버 ``BotNotFoundError`` → ``BOT_NOT_FOUND`` envelope 을 ``ipc_send``
-        가 변환한 ClickException 을 모사한다."""
+        가 올린 ``IPCRemoteError`` 로 모사한다."""
         exc = IPCRemoteError(
             "BOT_NOT_FOUND",
             "봇을 찾을 수 없습니다: soft-deleted-bot",

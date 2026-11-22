@@ -22,8 +22,8 @@ sub-PR 3 (bot) 의 1:1 동형 패턴.
 
 treasury CLI 의 mutating 표면 (``allocate``/``deallocate``/``set-balance``)
 은 모두 ``ipc_send`` 경유이므로 CLI direct path equivalence 는 ``ipc_send``
-mock 으로 server-side envelope (``ipc_error_code``/``ipc_error_message``) 을
-주입한 뒤 CLI middleware ClickException 분기가 동일 코드를 surface 함을
+mock 으로 server-side envelope 을 ``IPCRemoteError`` 로
+주입한 뒤 CLI 진입점 훅이 동일 코드를 surface 함을
 확인한다 (#1843 sub-PR 3 bot 1:1 동형).
 
 IPC path 는 ``ante.contracts.ipc_error_payload`` helper (server.py:322 의

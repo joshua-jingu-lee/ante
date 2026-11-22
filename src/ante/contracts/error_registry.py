@@ -43,6 +43,7 @@ from ante.broker.exceptions import (
     APIError,
     AuthenticationError,
     CircuitOpenError,
+    ModifyOrgnoUnavailableError,
     OrderNotFoundError,
     RateLimitError,
 )
@@ -437,6 +438,16 @@ _BROKER_INVALID_TYPE_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="validation",
 )
 
+_BROKER_MODIFY_ORGNO_UNAVAILABLE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="BROKER_MODIFY_ORGNO_UNAVAILABLE",
+    category="state_conflict",
+)
+
+_STOP_ORDER_MANAGER_STOPPED_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="STOP_ORDER_MANAGER_STOPPED",
+    category="service_unavailable",
+)
+
 
 _STRATEGY_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="STRATEGY_NOT_FOUND",
@@ -538,6 +549,11 @@ _UNKNOWN_COMMAND_SPEC: Final[ErrorSpec] = ErrorSpec(
 
 _CLI_OPTION_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CLI_OPTION_CONFLICT",
+    category="validation",
+)
+
+_CLI_USAGE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="CLI_USAGE_ERROR",
     category="validation",
 )
 
@@ -1156,6 +1172,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     FeedInjectValidationError: _FEED_INJECT_VALIDATION_ERROR_SPEC,
     FeedNotInitializedError: _NOT_INITIALIZED_SPEC,
     GuardPermanentlyBlockedError: _GUARD_PERMANENTLY_BLOCKED_SPEC,
+    ModifyOrgnoUnavailableError: _BROKER_MODIFY_ORGNO_UNAVAILABLE_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 

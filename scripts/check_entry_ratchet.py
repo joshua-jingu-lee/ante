@@ -23,15 +23,15 @@ exclusion: non-empty string literals in an error-code position that are not a
 ``src/ante/contracts/error_registry.py``. The positions are:
 
 1. the value of a ``code=`` keyword argument;
-2. the value of a ``"code"`` key in a dict literal;
+2. the value of a ``"code"`` key in a dict literal, except the dict that is
+   the ``data=`` argument of ``<x>.success(...)`` or ``CommandResult(...)``;
 3. a ``code = ...`` or ``code: T = ...`` statement directly in a class body;
 4. the value assigned to an ``ipc_error_code`` attribute, or to
    ``ipc_error_code`` directly in a class body;
 5. the default of ``getattr(_, "ipc_error_code", D)``,
    ``getattr(_, "code", D)`` and ``_.get("code", D)``;
 6. the second positional argument of ``<x>.error(...)``, unless the name just
-   before ``.error``, without leading ``_``, starts with ``log``; and the
-   second positional argument of ``_emit_auth_error(...)``;
+   before ``.error``, without leading ``_``, starts with ``log``;
 7. a literal operand of an ``or`` whose expression is in positions 1 to 6, or
    whose other operand reads a code (``getattr(_, "code"|"ipc_error_code",
    ...)``, ``_.get("code", ...)``, ``_.code``, ``_.ipc_error_code``).
@@ -64,8 +64,8 @@ its uses.
 Known limits: codes that reach an exit outside these positions are not seen:
 a code held in a variable or a module constant, a positional argument of a
 module helper (``_exit_with_error(fmt, "CODE", ...)``), a conditional
-expression, an f-string or a return value. Exits through helpers such as
-``emit_cli_error`` are not counted either.
+expression, an f-string or a return value. Exits through module helpers are
+not counted either.
 ``self.ctx.exit(...)`` and ``click.get_current_context().exit(...)`` are not
 counted as exits.
 ``setattr(e, "ipc_error_code", ...)`` and tuple assignments are not positions.
@@ -341,7 +341,7 @@ def _call_positions(node: ast.Call) -> Iterator[ast.expr]:
         isinstance(func, ast.Attribute)
         and func.attr == "error"
         and not _is_logger_receiver(func)
-    ) or _terminal_name(func) == "_emit_auth_error":
+    ):
         yield node.args[1]
 
 
@@ -373,12 +373,29 @@ def _attribute_positions(node: ast.Assign | ast.AnnAssign) -> Iterator[ast.expr]
         yield node.value
 
 
+def _success_data_dicts(tree: ast.Module) -> set[int]:
+    """Return the ids of the ``data=`` dicts of success output calls."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and (
+            (isinstance(node.func, ast.Attribute) and node.func.attr == "success")
+            or _terminal_name(node.func) == "CommandResult"
+        ):
+            found.update(
+                id(keyword.value)
+                for keyword in node.keywords
+                if keyword.arg == "data" and isinstance(keyword.value, ast.Dict)
+            )
+    return found
+
+
 def code_positions(tree: ast.Module) -> Iterator[ast.expr]:
     """Yield the expressions in positions 1 to 6 of the whole tree."""
+    success_data = _success_data_dicts(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             yield from _call_positions(node)
-        elif isinstance(node, ast.Dict):
+        elif isinstance(node, ast.Dict) and id(node) not in success_data:
             for key, value in zip(node.keys, node.values, strict=True):
                 if key is not None and _string(key) == "code":
                     yield value
