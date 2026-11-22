@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ante.account.scoping import require_account_id
+from ante.core import clock
 from ante.trade.models import TradeRecord, TradeStatus
 
 if TYPE_CHECKING:
@@ -179,7 +180,7 @@ class FillApplier:
                 price=avg_price,
                 status=TradeStatus.FILLED,
                 order_type=record.order_type,
-                timestamp=datetime.now(UTC),
+                timestamp=clock.now(UTC),
                 order_id=order_id,
                 account_id=account_id,
                 exchange=record.exchange or "KRX",

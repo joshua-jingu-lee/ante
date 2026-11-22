@@ -418,7 +418,7 @@ async def test_publisher_start_stop_lifecycle(
 
 # ── _loop DB 손상 escalation/backoff (#2407 O1–O6) ───
 #
-# 실대기 금지: 가짜 monotonic 시계(loop.time)와 _wakeup.wait 를 제어하는 harness 로
+# 실대기 금지: 고정 시계(manual_clock)와 _wakeup.wait 를 제어하는 harness 로
 # _loop 사이클을 결정적으로 진행시킨다. _drain 을 stub 으로 교체해 사이클마다 원하는
 # 예외/성공을 주입하고, sleep/wait_for 실시간 대기를 제거한다.
 
@@ -426,31 +426,35 @@ async def test_publisher_start_stop_lifecycle(
 class _LoopHarness:
     """``_loop`` 를 실시간 대기 없이 결정적으로 사이클 진행시키는 테스트 harness.
 
-    - ``loop.time`` 을 가짜 monotonic clock 으로 대체(``now`` 누적). backoff 대기는
+    - 단조 시계는 ``manual_clock`` 이다(``now`` = 시작 뒤 흐른 초). backoff 대기는
       ``wait_for`` 가 timeout 만큼 clock 을 전진시켜 즉시 반환되게 한다(실대기 없음).
     - ``_drain`` 을 stub 으로 교체해 사이클별 동작(예외/성공)을 주입한다. stub 은
       drain 호출 직후 매번 ``cycles`` 를 감소시키고 0 이 되면 ``_running=False`` 로
       루프를 종료한다.
-    - 각 드레인 직전 ``loop.time`` 값(=드레인이 허용된 시각)을 ``drain_times`` 에
+    - 각 드레인 직전 ``now`` 값(=드레인이 허용된 시각)을 ``drain_times`` 에
       기록해, 연속 실패 시 backoff(다음 드레인까지 간격)가 증가하는지 검증한다.
     """
 
-    def __init__(self, publisher: FillOutboxPublisher, monkeypatch) -> None:
+    def __init__(
+        self, publisher: FillOutboxPublisher, monkeypatch, manual_clock
+    ) -> None:
         self._publisher = publisher
         self._monkeypatch = monkeypatch
-        self.now = 0.0
+        self._clock = manual_clock
+        self._origin = manual_clock.monotonic()
         self.drain_times: list[float] = []
         self.drain_outcomes: list = []  # 각 사이클에 주입할 예외(None=성공)
         self.wakeup_during_wait = False  # True 면 wait 중 _wakeup 이 set 된 상태로 깨움
 
+    @property
+    def now(self) -> float:
+        return self._clock.monotonic() - self._origin
+
+    @now.setter
+    def now(self, value: float) -> None:
+        self._clock.advance(value - self.now)
+
     def install(self) -> None:
-        real_loop = asyncio.get_event_loop()
-
-        def _fake_time() -> float:
-            return self.now
-
-        self._monkeypatch.setattr(real_loop, "time", _fake_time)
-
         async def _fake_wait_for(awaitable, timeout):
             # awaitable(=_wakeup.wait()) 코루틴을 소비해 경고를 피한다.
             awaitable.close()
@@ -491,12 +495,14 @@ class _LoopHarness:
             pass
 
 
-async def test_loop_backoff_increases_on_consecutive_db_failures(eventbus, monkeypatch):
+async def test_loop_backoff_increases_on_consecutive_db_failures(
+    eventbus, monkeypatch, manual_clock
+):
     """(a) 연속 sqlite3.DatabaseError → backoff 지수 증가(1초 즉시 재시도 아님)."""
     ob = object.__new__(FillOutbox)  # _drain stub 이라 실제 DB 불필요.
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # 4회 연속 DB 손상 후 루프 종료(StopIteration).
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed"),
@@ -518,7 +524,7 @@ async def test_loop_backoff_increases_on_consecutive_db_failures(eventbus, monke
     assert publisher._consecutive_failures == 4
 
 
-async def test_loop_failure_blocks_notify_bypass(eventbus, monkeypatch):
+async def test_loop_failure_blocks_notify_bypass(eventbus, monkeypatch, manual_clock):
     """(b) 실패 지속 중 notify() 로 깨워도 backoff 우회 즉시 재드레인 안 됨(O5).
 
     notify() 가 _wakeup 을 set 한 상태로 wait 에서 깨어나도, backoff deadline 이
@@ -527,7 +533,7 @@ async def test_loop_failure_blocks_notify_bypass(eventbus, monkeypatch):
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # 첫 드레인 DB 실패(backoff 진입) → 두 번째 드레인은 backoff 경과 후 성공.
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed"),
@@ -562,7 +568,9 @@ async def test_loop_failure_blocks_notify_bypass(eventbus, monkeypatch):
     assert not publisher._wakeup.is_set()
 
 
-async def test_loop_escalates_exactly_once_at_threshold(eventbus, monkeypatch):
+async def test_loop_escalates_exactly_once_at_threshold(
+    eventbus, monkeypatch, manual_clock
+):
     """(c) 임계 도달 시 CRITICAL + NotificationEvent(error/system) 정확히 1회(O2)."""
     notifications: list[NotificationEvent] = []
 
@@ -575,7 +583,7 @@ async def test_loop_escalates_exactly_once_at_threshold(eventbus, monkeypatch):
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # 임계(10) + 임계 초과(2회 더) 연속 실패 → escalation 은 1회만이어야 한다.
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed")
@@ -592,12 +600,12 @@ async def test_loop_escalates_exactly_once_at_threshold(eventbus, monkeypatch):
     assert notifications[0].category == "system"
 
 
-async def test_loop_resets_on_drain_success(eventbus, monkeypatch):
+async def test_loop_resets_on_drain_success(eventbus, monkeypatch, manual_clock):
     """(d) 정상 드레인 성공 시 카운터·escalation latch reset, base 주기 복귀."""
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # 실패 2회 후 성공 1회 → 성공 시점에 카운터 0 으로 reset.
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed"),
@@ -617,7 +625,9 @@ async def test_loop_resets_on_drain_success(eventbus, monkeypatch):
     assert intervals == [2.0, 4.0]
 
 
-async def test_loop_db_error_no_infinite_immediate_retry(eventbus, monkeypatch):
+async def test_loop_db_error_no_infinite_immediate_retry(
+    eventbus, monkeypatch, manual_clock
+):
     """(e) sqlite3.OperationalError(malformed) → 1초 즉시 무한 재시도 부재.
 
     malformed 표면 타입은 sqlite3.OperationalError(RuntimeError 아님)이며, DB 분기로
@@ -627,7 +637,7 @@ async def test_loop_db_error_no_infinite_immediate_retry(eventbus, monkeypatch):
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed") for _ in range(5)
     ]
@@ -644,12 +654,14 @@ async def test_loop_db_error_no_infinite_immediate_retry(eventbus, monkeypatch):
     assert intervals[-1] == publisher._drain_interval * LOOP_BACKOFF_MULTIPLIER_CAP
 
 
-async def test_loop_non_db_exception_resets_counter(eventbus, monkeypatch):
+async def test_loop_non_db_exception_resets_counter(
+    eventbus, monkeypatch, manual_clock
+):
     """(f) 비-DB 예외는 WARNING + 카운터 reset(은폐 금지, #2350 dual-branch 미러)."""
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # DB 실패 2회로 카운터·backoff 가 올라간 뒤, 비-DB 예외(RuntimeError) 1회, 그 다음
     # 정상 드레인 1회(reset 후 base 주기로 복귀했는지 관측용).
     harness.drain_outcomes = [
@@ -714,7 +726,9 @@ def test_db_corruption_signatures_align_with_database_ssot():
     assert "file is not a database" in "file is not a database".lower()
 
 
-async def test_loop_transient_locked_not_treated_as_corruption(eventbus, monkeypatch):
+async def test_loop_transient_locked_not_treated_as_corruption(
+    eventbus, monkeypatch, manual_clock
+):
     """비-손상 transient ``database is locked`` → 손상 카운터 미누적·backoff 미발생.
 
     **이번 P2 회귀 락**: 이전에는 모든 ``sqlite3.DatabaseError`` 를 손상으로
@@ -733,7 +747,7 @@ async def test_loop_transient_locked_not_treated_as_corruption(eventbus, monkeyp
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # locked 를 임계(10) 초과로 반복해도 손상 카운터가 누적되지 않아야 한다.
     harness.drain_outcomes = [
         sqlite3.OperationalError("database is locked")
@@ -756,7 +770,9 @@ async def test_loop_transient_locked_not_treated_as_corruption(eventbus, monkeyp
     assert all(iv == publisher._drain_interval for iv in intervals)
 
 
-async def test_loop_internal_bug_db_error_resets_counter(eventbus, monkeypatch):
+async def test_loop_internal_bug_db_error_resets_counter(
+    eventbus, monkeypatch, manual_clock
+):
     """내부 버그류 ``no such table``/``ProgrammingError`` → 카운터 reset(은폐 금지).
 
     비-손상 ``DatabaseError`` 도 backoff/escalation 으로 은폐하지 않고, 선행 손상
@@ -773,7 +789,7 @@ async def test_loop_internal_bug_db_error_resets_counter(eventbus, monkeypatch):
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     # 손상 2회로 카운터·backoff 가 올라간 뒤, 내부 버그류 DatabaseError(no such table,
     # ProgrammingError) → 카운터 reset, 그 다음 정상 드레인 1회(base 주기 복귀 관측).
     harness.drain_outcomes = [
@@ -805,12 +821,14 @@ async def test_loop_internal_bug_db_error_resets_counter(eventbus, monkeypatch):
     assert intervals[3] == publisher._drain_interval
 
 
-async def test_loop_backoff_multiplier_caps_at_eight(eventbus, monkeypatch):
+async def test_loop_backoff_multiplier_caps_at_eight(
+    eventbus, monkeypatch, manual_clock
+):
     """연속 손상 실패 backoff 는 ×2, ×4, ×8 뒤 ×8 에 머문다."""
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed") for _ in range(6)
     ]
@@ -826,7 +844,7 @@ async def test_loop_backoff_multiplier_caps_at_eight(eventbus, monkeypatch):
 
 @pytest.mark.parametrize(("failures", "expected_notifications"), [(9, 0), (10, 1)])
 async def test_loop_escalation_threshold_is_ten(
-    eventbus, monkeypatch, failures, expected_notifications
+    eventbus, monkeypatch, failures, expected_notifications, manual_clock
 ):
     """escalation 알림은 연속 손상 실패 10회째에 처음 나간다."""
     notifications: list[NotificationEvent] = []
@@ -840,7 +858,7 @@ async def test_loop_escalation_threshold_is_ten(
     ob = object.__new__(FillOutbox)
     publisher = FillOutboxPublisher(outbox=ob, eventbus=eventbus, drain_interval=1.0)
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed")
         for _ in range(failures)
@@ -852,7 +870,7 @@ async def test_loop_escalation_threshold_is_ten(
     assert len(notifications) == expected_notifications
 
 
-async def test_loop_survives_escalation_publish_failure(monkeypatch):
+async def test_loop_survives_escalation_publish_failure(monkeypatch, manual_clock):
     """escalation 알림 발행이 어떤 예외로 실패해도 드레인 루프는 계속 돈다."""
 
     class _UnrelatedPublishError(Exception):
@@ -874,7 +892,7 @@ async def test_loop_survives_escalation_publish_failure(monkeypatch):
         drain_interval=1.0,
     )
 
-    harness = _LoopHarness(publisher, monkeypatch)
+    harness = _LoopHarness(publisher, monkeypatch, manual_clock)
     harness.drain_outcomes = [
         sqlite3.OperationalError("database disk image is malformed") for _ in range(12)
     ]
