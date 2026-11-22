@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 import logging
 import tempfile
-from datetime import UTC, datetime
+from datetime import UTC
 from pathlib import Path
 from typing import Any
+
+from ante.core import clock
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +93,7 @@ class Checkpoint:
             "source": self._source,
             "data_type": self._data_type,
             "last_date": last_date,
-            "updated_at": datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "updated_at": clock.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
 
         fd, tmp_path = tempfile.mkstemp(

@@ -384,7 +384,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | 이름 | 뜻 |
 |---|---|
 | `Clock` | Protocol. `now(tz: tzinfo \| None) -> datetime`과 `monotonic() -> float` 둘뿐이다 |
-| `SystemClock` | 유일한 구현. `datetime.now(tz)`와 `time.monotonic()`에 위임한다 |
+| `SystemClock` | `src/`의 유일한 구현. `datetime.now(tz)`와 `time.monotonic()`에 위임한다(테스트의 대역은 `tests/conftest.py`의 `ManualClock`) |
 | `now(tz)` | 호출 시점의 현재 시계에 위임한다. `tz`에 기본값이 없다. naive가 필요하면 `now(None)`을 쓴다 |
 | `monotonic()` | 호출 시점의 현재 시계에 위임한다 |
 | `current_clock()` | 현재 시계를 돌려준다 |
@@ -392,9 +392,9 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | `use_clock(clock)` | 블록 안에서만 시계를 바꾸는 컨텍스트 관리자. 예외가 나도 이전 시계로 되돌린다 |
 
 - 현재 시계는 프로세스에 하나인 모듈 수준 값이다. 기본값은 `SystemClock`이다. 모듈 함수가 호출 시점에 위임하므로 `from ante.core.clock import now`로 가져와도 교체가 먹는다.
-- 시계를 바꾸는 것은 테스트와 테스트 하네스다. `tests/conftest.py`의 `pytest_runtest_teardown` 훅은 테스트의 정리가 모두 끝난 뒤(모든 conftest의 함수 범위 픽스처가 정리된 뒤) 현재 시계가 `SystemClock`이 아니면 되돌리고 그 테스트를 실패시킨다. module·session 범위의 픽스처가 시계를 바꾸면 그 범위의 첫 테스트가 실패한다.
+- 시계를 바꾸는 것은 테스트와 테스트 하네스다. `tests/conftest.py`의 `pytest_runtest_teardown` 훅은 테스트의 정리가 모두 끝난 뒤(모든 conftest의 함수 범위 픽스처가 정리된 뒤) 현재 시계가 `SystemClock`이 아니면 되돌리고 그 테스트를 실패시킨다. module·session 범위의 픽스처가 시계를 바꾸면 그 범위의 첫 테스트가 실패한다. 테스트의 대역은 `tests/conftest.py`의 `ManualClock`(고정 시각과 단조 값, `advance(seconds)`)과 그것을 `use_clock`으로 싣는 `manual_clock` 픽스처다(시각은 `indirect` 파라미터).
 - **금지 린트**: `pyproject.toml`의 `[tool.ruff.lint.flake8-tidy-imports.banned-api]`가 직접 시계 호출(`datetime.datetime.now`·`utcnow`·`today`, `datetime.date.today`, `time.time`·`time_ns`·`monotonic`·`monotonic_ns`·`perf_counter`·`perf_counter_ns`·`localtime`·`gmtime`·`ctime`·`strftime`)과 `ante.core.clock.set_clock`·`use_clock`을 금지 목록으로 둔다. `clock.py`는 per-file-ignores로 뺀다.
-- `TID251`은 아직 기본 `select`에 없다. `scripts/check_lint_ratchet.py`가 `src/`의 파일별 위반 수를 `scripts/lint_baseline.json`과 견준다. 기존 호출 자리는 아직 이 모듈로 옮기지 않았다.
+- `TID251`은 아직 기본 `select`에 없다. `scripts/check_lint_ratchet.py`가 `src/`의 파일별 위반 수를 `scripts/lint_baseline.json`과 견준다. `src/ante/feed/`의 호출 자리는 이 모듈로 옮겼다. 나머지 모듈의 호출 자리는 아직 옮기지 않았다.
 - 린트가 보지 못하는 것: 인스턴스 메서드 `loop.time()`, SQL의 `datetime('now')`·`CURRENT_TIMESTAMP`, `getattr`·서브클래스·`importlib`를 거친 호출. `from time import monotonic`처럼 금지 이름을 직접 import하면 import 줄 한 번만 센다. `time.clock_gettime`·`clock_gettime_ns`와, 목록에 있는 `time_ns`·`monotonic_ns`·`perf_counter_ns` 밖의 `_ns` 계열(`process_time_ns`·`thread_time_ns`)은 금지 목록에 없다.
 
 ## Logging 연계
