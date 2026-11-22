@@ -585,9 +585,7 @@ class AuthenticatedGroup(_LeafPathMixin):
             from ante.cli.formatter import OutputFormatter
 
             fmt = OutputFormatter("json")
-            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-            message = getattr(e, "ipc_error_message", None) or e.message
-            fmt.error(message, code=code)
+            fmt.error(e.message, code="IPC_ERROR")
             import sys as _sys
 
             exit_code = e.exit_code if isinstance(e.exit_code, int) else 1

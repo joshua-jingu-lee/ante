@@ -1,28 +1,18 @@
 {
   "cli_error_calls": {
-    "src/ante/cli/commands/bot.py": 16,
-    "src/ante/cli/commands/broker.py": 1,
-    "src/ante/cli/commands/config.py": 2,
     "src/ante/cli/commands/feed.py": 19,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 2,
     "src/ante/cli/middleware.py": 2
   },
   "cli_exits": {
-    "src/ante/cli/commands/bot.py": 8,
-    "src/ante/cli/commands/broker.py": 1,
-    "src/ante/cli/commands/config.py": 1,
     "src/ante/cli/commands/feed.py": 21,
     "src/ante/cli/commands/signal.py": 1,
     "src/ante/cli/commands/strategy.py": 5,
     "src/ante/cli/commands/system.py": 2,
     "src/ante/cli/middleware.py": 11
   },
-  "ipc_error_code_reads": {
-    "src/ante/cli/commands/bot.py": 8,
-    "src/ante/cli/commands/broker.py": 2,
-    "src/ante/cli/commands/config.py": 1
-  },
+  "ipc_error_code_reads": {},
   "unregistered_codes": [
     "ACCOUNT_REPAIR_TIMEZONE_OK",
     "BROKER_MODIFY_ORGNO_UNAVAILABLE",
@@ -41,13 +31,8 @@
     "FEED_INJECT_INVALID_SYMBOL",
     "FEED_INJECT_INVALID_TIMEFRAME",
     "FILE_NOT_FOUND",
-    "IPC_ERROR",
-    "MESSAGE_TOO_LARGE",
     "NOT_INITIALIZED",
-    "SERVICE_UNAVAILABLE",
     "STOP_ORDER_MANAGER_STOPPED",
-    "UNKNOWN",
-    "UNKNOWN_COMMAND",
     "auth_failed",
     "auth_required",
     "permission_denied"

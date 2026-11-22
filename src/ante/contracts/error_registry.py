@@ -487,6 +487,31 @@ _IPC_TIMEOUT_SPEC: Final[ErrorSpec] = ErrorSpec(
     category="service_unavailable",
 )
 
+_IPC_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="IPC_ERROR",
+    category="internal",
+)
+
+_IPC_UNKNOWN_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UNKNOWN",
+    category="internal",
+)
+
+_MESSAGE_TOO_LARGE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="MESSAGE_TOO_LARGE",
+    category="validation",
+)
+
+_SERVICE_UNAVAILABLE_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="SERVICE_UNAVAILABLE",
+    category="service_unavailable",
+)
+
+_UNKNOWN_COMMAND_SPEC: Final[ErrorSpec] = ErrorSpec(
+    code="UNKNOWN_COMMAND",
+    category="internal",
+)
+
 
 _CLI_OPTION_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CLI_OPTION_CONFLICT",

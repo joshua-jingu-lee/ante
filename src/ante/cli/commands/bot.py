@@ -185,17 +185,7 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
             return await _run_list_fallback()
         return list(ipc_result.get("bots", []))
 
-    try:
-        result = _run(_run_list())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_list())
 
     if not result:
         fmt.output({"message": "등록된 봇이 없습니다.", "bots": []})
@@ -234,17 +224,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
             return await _run_info_fallback()
         return ipc_result.get("bot")
 
-    try:
-        result = _run(_run_info())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_info())
 
     if not result:
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
@@ -444,17 +424,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 "bot.signal_key.rotate", {"bot_id": bot_id}, actor=actor
             )
 
-        try:
-            result = _run(_run_rotate())
-        except click.ClickException as e:
-            code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-            message = getattr(e, "ipc_error_message", None) or e.message
-            if fmt.is_json:
-                fmt.error(message, code=code)
-            else:
-                text = f"{code}: {message}" if code else message
-                fmt.error(text)
-            raise SystemExit(1) from e
+        result = _run(_run_rotate())
 
         fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
         return
@@ -499,17 +469,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
                 raise
             return {"bot_id": bot_id, "missing": True}
 
-    try:
-        result = _run(_run_signal_key())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_signal_key())
 
     if result.get("missing"):
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
@@ -588,17 +548,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             return await _run_positions_fallback()
         return list(ipc_result.get("positions", []))
 
-    try:
-        result = _run(_run_positions())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_positions())
 
     if result is None:
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
@@ -820,17 +770,7 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
 
         return await ipc_send("bot.start", {"bot_id": bot_id}, actor=actor)
 
-    try:
-        result = _run(_run_start())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_start())
 
     if fmt.is_json:
         fmt.output(result)
@@ -854,17 +794,7 @@ def bot_stop(ctx: click.Context, bot_id: str) -> None:
 
         return await ipc_send("bot.stop", {"bot_id": bot_id}, actor=actor)
 
-    try:
-        result = _run(_run_stop())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_stop())
 
     if fmt.is_json:
         fmt.output(result)
@@ -888,17 +818,7 @@ def bot_status(ctx: click.Context, bot_id: str) -> None:
 
         return await ipc_send("bot.status", {"bot_id": bot_id}, actor=actor)
 
-    try:
-        result = _run(_run_status())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_status())
 
     if fmt.is_json:
         fmt.output(result)

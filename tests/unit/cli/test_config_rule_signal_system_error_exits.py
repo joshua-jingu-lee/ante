@@ -337,14 +337,14 @@ def _rule_update_args(mode: str) -> list[str]:
             IPCServerNotRunningError(_SERVER_DOWN),
             "IPC_SERVER_NOT_RUNNING",
             _SERVER_DOWN,
-            f"Error: {_SERVER_DOWN}",
+            f"Error: IPC_SERVER_NOT_RUNNING: {_SERVER_DOWN}",
             id="server-not-running",
         ),
         pytest.param(
             IPCClientTimeoutError("서버 응답 시간 초과"),
             "IPC_TIMEOUT",
             "서버 응답 시간 초과",
-            "Error: 서버 응답 시간 초과",
+            "Error: IPC_TIMEOUT: 서버 응답 시간 초과",
             id="timeout",
         ),
         pytest.param(

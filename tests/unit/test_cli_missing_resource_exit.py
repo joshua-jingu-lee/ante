@@ -66,7 +66,7 @@ import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
-from ante.contracts.ipc_client_errors import IPCServerNotRunningError
+from ante.contracts.ipc_client_errors import IPCRemoteError, IPCServerNotRunningError
 from ante.member.models import Member, MemberRole, MemberType
 
 
@@ -519,12 +519,9 @@ class TestBotSignalKeyMissingBotExit:
     def test_missing_bot_rotate_exits_nonzero_json(self, runner: CliRunner) -> None:
         """#2111: 미존재 bot --rotate → 서버 ``BOT_NOT_FOUND`` envelope 을
         ``ipc_send`` 가 surface, CLI 가 exit 1 + ``BOT_NOT_FOUND`` 로 보존."""
-        click_exc = click.ClickException(
-            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: oracle-missing-bot"
-        )
-        click_exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
-        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
-            "봇을 찾을 수 없습니다: oracle-missing-bot"
+        click_exc = IPCRemoteError(
+            "BOT_NOT_FOUND",
+            "봇을 찾을 수 없습니다: oracle-missing-bot",
         )
 
         async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -562,12 +559,9 @@ class TestBotSignalKeyMissingBotExit:
 
     def test_missing_bot_rotate_exits_nonzero_text(self, runner: CliRunner) -> None:
         """#2111: text 모드에서도 서버 envelope 을 surface (exit 1 + stderr)."""
-        click_exc = click.ClickException(
-            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: oracle-missing-bot"
-        )
-        click_exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
-        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
-            "봇을 찾을 수 없습니다: oracle-missing-bot"
+        click_exc = IPCRemoteError(
+            "BOT_NOT_FOUND",
+            "봇을 찾을 수 없습니다: oracle-missing-bot",
         )
 
         async def _raise(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -909,12 +903,9 @@ class TestBotSignalKeySoftDeletedBotExit:
     def _bot_not_found_click_exc(self) -> click.ClickException:
         """서버 ``BotNotFoundError`` → ``BOT_NOT_FOUND`` envelope 을 ``ipc_send``
         가 변환한 ClickException 을 모사한다."""
-        exc = click.ClickException(
-            "BOT_NOT_FOUND: 봇을 찾을 수 없습니다: soft-deleted-bot"
-        )
-        exc.ipc_error_code = "BOT_NOT_FOUND"  # type: ignore[attr-defined]
-        exc.ipc_error_message = (  # type: ignore[attr-defined]
-            "봇을 찾을 수 없습니다: soft-deleted-bot"
+        exc = IPCRemoteError(
+            "BOT_NOT_FOUND",
+            "봇을 찾을 수 없습니다: soft-deleted-bot",
         )
         return exc
 

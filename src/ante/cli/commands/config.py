@@ -178,19 +178,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 
         return await ipc_send("config.set", {"key": key, "value": value}, actor=actor)
 
-    try:
-        result = _run(_run_set())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "")
-        message = getattr(e, "ipc_error_message", None)
-        if message is None:
-            message = str(e)
-        if fmt.is_json:
-            fmt.error(message, code=code)
-        else:
-            text = f"{code}: {message}" if code else message
-            fmt.error(text)
-        raise SystemExit(1) from e
+    result = _run(_run_set())
 
     if fmt.is_json:
         output = {"status": "success", **result}

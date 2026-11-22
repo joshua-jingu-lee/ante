@@ -48,7 +48,7 @@ async def ipc_send(
         - 그 외에는 전체 응답을 반환 (기존 호환).
 
     Raises:
-        click.ClickException: 서버 미기동 또는 타임아웃
+        IPCServerNotRunningError | IPCClientTimeoutError | IPCRemoteError
     """
     try:
         client = IPCClient(socket_path=get_socket_path(config_dir=config_dir))

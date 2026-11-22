@@ -9,7 +9,7 @@ The recorder writes ``HOME``, ``ANTE_CONFIG_DIR`` and the pytest basetemp as
 ``--basetemp``. Record before and after with the same recorder file.
 
 ``compare BEFORE BEFORE_AGAIN AFTER --covered COVERED [--intended NODEID#N ...]
-[--allow-after-only NODEID ...]``
+[--allow-after-only NODEID ...] [--text-form-code CODE ...]``
 
 Rows are matched on ``(nodeid, n)``. Rows that differ between the two before
 records, or exist in only one of them, are ``비결정`` and leave the
@@ -19,7 +19,10 @@ comparison. Each other before row is:
 - ``의도한 동작 변경``: the row is named with ``--intended``.
 - ``text 형식``: a text-mode call whose exit code, raised type and stdout are
   the same and whose stderr differs in exactly one line, ``Error: <m>`` before
-  and ``Error: <C>: <m>`` after. ``<C>`` is a registry code. When AFTER has
+  and ``Error: <C>: <m>`` after, where the before line does not start with
+  ``Error: <C>: ``. ``<C>`` is a registry code, or one of the
+  ``--text-form-code`` values when given (each must be a registry code). When
+  AFTER has
   JSON-mode error envelopes for the same arguments without ``--format``,
   ``<C>`` is one of their codes. ``EXECUTION_ERROR`` counts only with such an
   envelope. For a call without a separate stderr the same test applies to
@@ -206,6 +209,8 @@ def prefixed_code(before: bytes, after: bytes) -> str | None:
     code, sep, rest = n[len(ERROR_PREFIX) :].partition(": ")
     if not sep or rest != o[len(ERROR_PREFIX) :]:
         return None
+    if rest.startswith(f"{code}: "):
+        return None
     return code
 
 
@@ -375,8 +380,14 @@ def run_compare(args: argparse.Namespace) -> int:
     intended = _parse_keys(args.intended, "--intended")
     covered = load_covered(Path(args.covered))
     allowed = frozenset((*ALLOWED_AFTER_ONLY, *args.allow_after_only))
+    codes = registry_codes()
+    unknown = sorted(set(args.text_form_code) - codes)
+    if unknown:
+        raise InputError(f"--text-form-code {' '.join(unknown)} is not a registry code")
+    if args.text_form_code:
+        codes = frozenset(args.text_form_code)
     result, nondeterministic, after_only = classify(
-        before, before_again, after, intended, registry_codes()
+        before, before_again, after, intended, codes
     )
     sys.stdout.write(
         compare_report(
@@ -493,6 +504,7 @@ def build_parser() -> argparse.ArgumentParser:
     compare.add_argument("--covered", required=True)
     compare.add_argument("--intended", action="append", default=[])
     compare.add_argument("--allow-after-only", action="append", default=[])
+    compare.add_argument("--text-form-code", action="append", default=[])
     cover = sub.add_parser("cover")
     cover.add_argument("data")
     cover.add_argument("records")
