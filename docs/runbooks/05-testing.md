@@ -33,10 +33,10 @@ tests/
 └── e2e/              # 데몬 하위 프로세스 시나리오
 ```
 
-> 파일 단위 최신 목록은 생성 문서
-> [`docs/architecture/generated/project-structure.md`](../architecture/generated/project-structure.md)의
-> `tests/` 절을 참조한다 — 개별 파일명을 이 문서에 고정하면 드리프트하므로 나열하지
-> 않는다. 재생성: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`.
+> 생성 문서 [`docs/architecture/generated/project-structure.md`](../architecture/generated/project-structure.md)의
+> `tests/` 절은 디렉터리까지만 싣는다. 파일 단위 최신 목록은 `git ls-files tests/`로 본다 —
+> 개별 파일명을 문서에 고정하면 드리프트하므로 나열하지 않는다.
+> 재생성: `PYTHONPATH=$PWD/src .venv/bin/python scripts/generate_project_structure.py`.
 
 ## 3. 테스트 유형별 가이드
 

@@ -4,6 +4,8 @@
 Ante의 Agent용 프로젝트 구조 INDEX를 생성한다.
 기존 generated 문서의 경로별 설명을 재사용해 curated 설명을 보존하고,
 현재 Git 추적/비무시 파일 트리에 없는 stale path는 출력하지 않는다.
+한 디렉터리의 자식은 디렉터리 먼저, 그다음 파일, 각각 이름순(대소문자 무시)으로
+정렬하며, 기존 문서의 줄 순서는 읽지 않는다. `tests/` 절은 디렉터리까지만 싣는다.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ class Section:
     base_path: str
     root_label: str
     recursive: bool = True
+    show_files: bool = True
 
 
 @dataclass
@@ -46,7 +49,7 @@ class TreeNode:
 SECTIONS: tuple[Section, ...] = (
     Section("최상위 구조", "", "ante/", recursive=False),
     Section("src/ante/ — Python 백엔드", "src/ante", "src/ante/"),
-    Section("tests/ — 테스트", "tests", "tests/"),
+    Section("tests/ — 테스트", "tests", "tests/", show_files=False),
     Section("deploy/ — 서비스 배포", "deploy", "deploy/"),
     Section("strategies/ — 전략 템플릿과 예제", "strategies", "strategies/"),
     Section("scripts/ — 설치·운영·문서 생성 스크립트", "scripts", "scripts/"),
@@ -182,14 +185,13 @@ def _section_base_from_title(title: str) -> str:
 
 def _parse_existing_doc(
     path: Path,
-) -> tuple[dict[str, str], dict[str, int], str | None]:
-    """기존 generated 문서에서 경로별 설명과 표시 순서를 읽는다."""
+) -> tuple[dict[str, str], str | None]:
+    """기존 generated 문서에서 경로별 설명을 읽는다."""
     if not path.exists():
-        return {}, {}, None
+        return {}, None
 
     text = path.read_text(encoding="utf-8")
     comments: dict[str, str] = {}
-    order: dict[str, int] = {}
     generated_at = _extract_generated_at(text)
 
     current_base = ""
@@ -221,7 +223,6 @@ def _parse_existing_doc(
 
         parts = [part for part in (current_base, *stack, name) if part]
         rel_path = "/".join(parts)
-        order.setdefault(rel_path, len(order))
 
         comment = match.group("comment")
         if comment:
@@ -230,7 +231,7 @@ def _parse_existing_doc(
         if is_dir:
             stack.append(name)
 
-    return comments, order, generated_at
+    return comments, generated_at
 
 
 def _extract_generated_at(text: str) -> str | None:
@@ -280,12 +281,19 @@ def _build_tree(base_path: str, files: list[str]) -> TreeNode:
     return root
 
 
-def _sort_children(nodes: dict[str, TreeNode], order: dict[str, int]) -> list[TreeNode]:
-    unknown_order = len(order) + 1
+def _drop_files(node: TreeNode) -> None:
+    """디렉터리 노드만 남긴다(연결 기호가 남은 자식 기준으로 계산되게)."""
+    node.children = {
+        name: child for name, child in node.children.items() if child.is_dir
+    }
+    for child in node.children.values():
+        _drop_files(child)
+
+
+def _sort_children(nodes: dict[str, TreeNode]) -> list[TreeNode]:
     return sorted(
         nodes.values(),
         key=lambda node: (
-            order.get(node.path, unknown_order),
             0 if node.is_dir else 1,
             node.name.lower(),
         ),
@@ -295,10 +303,9 @@ def _sort_children(nodes: dict[str, TreeNode], order: dict[str, int]) -> list[Tr
 def _format_tree(
     root: TreeNode,
     comments: dict[str, str],
-    order: dict[str, int],
 ) -> list[str]:
     lines = [root.path + "/" if root.path else "ante/"]
-    children = _sort_children(root.children, order)
+    children = _sort_children(root.children)
     for index, child in enumerate(children):
         lines.extend(
             _format_node(
@@ -306,7 +313,6 @@ def _format_tree(
                 prefix="",
                 is_last=index == len(children) - 1,
                 comments=comments,
-                order=order,
             )
         )
     return lines
@@ -317,7 +323,6 @@ def _format_node(
     prefix: str,
     is_last: bool,
     comments: dict[str, str],
-    order: dict[str, int],
 ) -> list[str]:
     connector = "└── " if is_last else "├── "
     display_name = f"{node.name}/" if node.is_dir else node.name
@@ -329,7 +334,7 @@ def _format_node(
 
     if node.is_dir and node.children:
         child_prefix = prefix + ("    " if is_last else "│   ")
-        children = _sort_children(node.children, order)
+        children = _sort_children(node.children)
         for index, child in enumerate(children):
             lines.extend(
                 _format_node(
@@ -337,7 +342,6 @@ def _format_node(
                     prefix=child_prefix,
                     is_last=index == len(children) - 1,
                     comments=comments,
-                    order=order,
                 )
             )
 
@@ -380,14 +384,15 @@ def _write_section(
     section: Section,
     files: list[str],
     comments: dict[str, str],
-    order: dict[str, int],
 ) -> None:
     out.write(f"## {section.title}\n\n")
     out.write("```\n")
 
     if section.recursive:
         tree = _build_tree(section.base_path, files)
-        lines = _format_tree(tree, comments, order)
+        if not section.show_files:
+            _drop_files(tree)
+        lines = _format_tree(tree, comments)
     else:
         lines = _format_root_tree(files, comments)
 
@@ -398,7 +403,6 @@ def _write_section(
 def _render_markdown(
     files: list[str],
     comments: dict[str, str],
-    order: dict[str, int],
     generated_at: str,
 ) -> str:
     from io import StringIO
@@ -424,16 +428,16 @@ def _render_markdown(
     for section in SECTIONS:
         if section.base_path and not _path_exists(section.base_path, files):
             continue
-        _write_section(out, section, files, comments, order)
+        _write_section(out, section, files, comments)
 
     return out.getvalue().rstrip() + "\n"
 
 
 def generate(output_path: Path, *, generated_at: str | None = None) -> str:
-    comments, order, _existing_generated_at = _parse_existing_doc(output_path)
+    comments, _existing_generated_at = _parse_existing_doc(output_path)
     files = _run_git_ls_files()
     generated_at = generated_at or _today_kst()
-    return _render_markdown(files, comments, order, generated_at)
+    return _render_markdown(files, comments, generated_at)
 
 
 def _today_kst() -> str:
