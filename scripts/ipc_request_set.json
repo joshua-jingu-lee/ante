@@ -1,5 +1,244 @@
 {
  "commands": {
+  "account.activate": [
+   {
+    "args": {
+     "account_id": "acct-1"
+    },
+    "kind": "cli",
+    "name": "account.activate:cli:0"
+   },
+   {
+    "args": {},
+    "key": "account_id",
+    "kind": "missing",
+    "name": "account.activate:missing:account_id"
+   },
+   {
+    "args": {
+     "account_id": "5"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.activate:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.activate:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.activate:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.activate:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "account.activate:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "account.activate:array"
+   },
+   {
+    "args": {
+     "account_id": "default"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.activate:account:default"
+   },
+   {
+    "args": {
+     "account_id": ""
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.activate:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.activate:account:bad"
+   }
+  ],
+  "account.suspend": [
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": "CLI 수동 정지"
+    },
+    "kind": "cli",
+    "name": "account.suspend:cli:0"
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": "점검"
+    },
+    "kind": "cli",
+    "name": "account.suspend:cli:1"
+   },
+   {
+    "args": {
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "missing",
+    "name": "account.suspend:missing:account_id"
+   },
+   {
+    "args": {
+     "account_id": "5",
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.suspend:value:account_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": 7,
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.suspend:value:account_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": true,
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.suspend:value:account_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": null,
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "value",
+    "name": "account.suspend:value:account_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": "5"
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "account.suspend:value:reason:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": 7
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "account.suspend:value:reason:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": true
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "account.suspend:value:reason:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": null
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "account.suspend:value:reason:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "account_id": "acct-1",
+     "reason": "CLI 수동 정지",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "account.suspend:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "account.suspend:array"
+   },
+   {
+    "args": {
+     "account_id": "default",
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.suspend:account:default"
+   },
+   {
+    "args": {
+     "account_id": "",
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.suspend:account:empty"
+   },
+   {
+    "args": {
+     "account_id": "bad_id!",
+     "reason": "CLI 수동 정지"
+    },
+    "key": "account_id",
+    "kind": "account",
+    "name": "account.suspend:account:bad"
+   }
+  ],
   "strategy.set_status": [
    {
     "args": {
