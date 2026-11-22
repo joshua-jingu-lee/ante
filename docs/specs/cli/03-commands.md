@@ -422,6 +422,9 @@ ante strategy summary <strategy_id> --period daily|weekly|monthly  # 전략 기�
 `strategy submit`은 전략 파일을 `StrategyRegistry`에 등록하고 `strategy_id`를 생성한다.
 이후 봇 생성은 이 `strategy_id`를 참조한다.
 
+`strategy list`의 `--status` 값이 `StrategyStatus`의 값에 없으면 DB 접근 이전에
+`STRATEGY_VALIDATION_ERROR` 에러 코드와 exit code 1로 거부한다.
+
 `strategy summary`는 전략의 `trades.strategy_id`(거래 시점 전략 귀속 키)로
 해당 전략의 **모든 거래**를 집계한다. 같은 전략을 여러 봇·여러 계좌에서
 운용해도 전체가 합산되며, 삭제된 봇의 과거 거래도 포함되고, 봇이 이후 다른
