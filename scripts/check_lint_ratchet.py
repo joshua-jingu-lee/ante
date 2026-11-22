@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Fail when ruff (BLE001, ASYNC, S608, C901) counts differ.
+"""Fail when ruff (BLE001, ASYNC, S608, C901, TID251) counts differ.
 
 Counts are per (file, rule) over ``src/``, measured with ``python -m ruff`` of
 this interpreter in ``--root``: the JSON output of ``RUFF_ARGS``. A non-zero
 exit, output that is not a JSON list, an item without a string ``filename``, a
 ``filename`` outside the root once both are resolved, or a ``code`` not
 matching ``CODE_RE`` is exit 2.
+
+``TID251`` reads the ``banned-api`` list in ``pyproject.toml`` (direct clock
+calls outside ``ante.core.clock``). It is not in the default ``select``, so
+``ruff check`` does not report it; only this ratchet counts it.
 
 ``mypy --strict`` is not counted here: ``[tool.mypy] strict = true`` in
 ``pyproject.toml`` makes ``mypy src/`` fail on any error.
@@ -38,7 +42,7 @@ RUFF_ARGS = (
     "check",
     "src/",
     "--select",
-    "BLE001,ASYNC,S608,C901",
+    "BLE001,ASYNC,S608,C901,TID251",
     "--config",
     "lint.mccabe.max-complexity = 10",
     "--output-format",
@@ -66,6 +70,11 @@ RUFF_ALTERNATIVES = (
     ("ASYNC", "asyncio.to_thread나 비동기 API를 쓴다."),
     ("S608", "자리표시자를 쓴다."),
     ("C901", "함수를 나눈다."),
+    (
+        "TID251",
+        "ante.core.clock의 now(tz)·monotonic()을 쓴다. "
+        "운영 코드는 시계를 바꾸지 않는다. 테스트는 use_clock으로 바꾼다.",
+    ),
 )
 LOWER_HINT = "기준선을 낮춘다(0이면 키를 지운다)."
 MOVE_HINT = "파일을 옮기거나 새로 만들었다면 기준선을 옮긴다."
