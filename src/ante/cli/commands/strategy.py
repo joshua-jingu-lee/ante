@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -43,7 +43,7 @@ def strategy() -> None:
     """전략 관리."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -201,7 +201,7 @@ def submit(ctx: click.Context, path: str) -> None:
     except Exception:
         pass
 
-    async def _register() -> dict:
+    async def _register() -> dict[str, Any]:
         async with _create_registry(ctx=ctx) as (registry, _):
             await registry.initialize()
             record = await registry.register(
@@ -267,7 +267,7 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
             f"잘못된 status 값: {status!r}. 허용값: {sorted(valid_statuses)}"
         )
 
-    async def _list() -> list[dict]:
+    async def _list() -> list[dict[str, Any]]:
         async with _create_registry(ctx=ctx) as (registry, _):
             filter_status = StrategyStatus(status) if status else None
             records = await registry.list_strategies(status=filter_status)
@@ -328,7 +328,7 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
     actor = get_member_id(ctx)
     target_status = StrategyStatus(status)
 
-    async def _set_status() -> dict:
+    async def _set_status() -> dict[str, Any]:
         from ante.cli.cold_path import is_active_runtime
         from ante.cli.commands.ipc_helpers import ipc_send
 
@@ -377,7 +377,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     """전략 상세 정보 조회 (메타데이터 + 파라미터)."""
     fmt = get_formatter(ctx)
 
-    async def _info() -> dict | None:
+    async def _info() -> dict[str, Any] | None:
         async with _create_registry(ctx=ctx) as (registry, _):
             records = await registry.get_by_name(name)
             if not records:
@@ -385,7 +385,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
 
             record = records[0]
 
-            result: dict = {
+            result: dict[str, Any] = {
                 "strategy_id": record.strategy_id,
                 "name": record.name,
                 "version": record.version,
@@ -438,7 +438,7 @@ def strategy_info(ctx: click.Context, name: str) -> None:
         _print_info_text(result)
 
 
-def _print_info_text(result: dict) -> None:
+def _print_info_text(result: dict[str, Any]) -> None:
     """전략 상세 정보 텍스트 출력."""
     click.echo(f"  {'이름':15s}: {result['name']}")
     click.echo(f"  {'버전':15s}: {result['version']}")
@@ -480,7 +480,7 @@ def _print_info_risks(risks: list[str] | None) -> None:
         click.echo(f"    - {r}")
 
 
-def _print_info_params(params: dict | None, schema: dict) -> None:
+def _print_info_params(params: dict[str, Any] | None, schema: dict[str, Any]) -> None:
     """파라미터 섹션 출력."""
     if not params:
         return
@@ -493,7 +493,7 @@ def _print_info_params(params: dict | None, schema: dict) -> None:
         click.echo(line)
 
 
-def _print_info_versions(versions: list[dict] | None) -> None:
+def _print_info_versions(versions: list[dict[str, Any]] | None) -> None:
     """다른 버전 목록 섹션 출력."""
     if not versions:
         return
@@ -502,7 +502,7 @@ def _print_info_versions(versions: list[dict] | None) -> None:
         click.echo(f"    - {v['strategy_id']} ({v['status']})")
 
 
-def _load_strategy_params(filepath: str) -> dict | None:
+def _load_strategy_params(filepath: str) -> dict[str, Any] | None:
     """전략 파일에서 파라미터 정보를 로드. 실패 시 None."""
     try:
         from ante.strategy.loader import StrategyLoader
@@ -549,7 +549,7 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     """
     fmt = get_formatter(ctx)
 
-    async def _summary() -> dict | None:
+    async def _summary() -> dict[str, Any] | None:
         from ante.trade.performance import PerformanceTracker
 
         async with _create_registry(ctx=ctx) as (registry, db):
@@ -640,7 +640,7 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
         account_id, fmt, context="cli.strategy.performance"
     )
 
-    async def _perf() -> dict | None:
+    async def _perf() -> dict[str, Any] | None:
         from ante.strategy.registry import StrategyRegistry
         from ante.trade.performance import PerformanceTracker
 
