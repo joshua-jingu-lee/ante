@@ -685,6 +685,13 @@ def test_strategy_set_status_offline_errors(
             "Error: STRATEGY_INVALID_STATUS_TRANSITION: 허용되지 않는 전이",
             id="transition",
         ),
+        pytest.param(
+            click.ClickException("클릭 오류"),
+            "IPC_ERROR",
+            "클릭 오류",
+            "Error: 클릭 오류",
+            id="click",
+        ),
     ],
 )
 def test_strategy_set_status_ipc_errors(
