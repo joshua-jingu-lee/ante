@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import click
 
@@ -63,7 +64,7 @@ def instrument_list(
             f"유효하지 않은 거래소: {exchange!r}. 허용 값: {_allowed_exchanges_hint()}"
         )
 
-    async def _run() -> list[dict]:
+    async def _run() -> list[dict[str, Any]]:
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()
@@ -134,7 +135,7 @@ def sync(
             f"sync 지원 거래소: {supported}"
         )
 
-    async def _run() -> dict:
+    async def _run() -> dict[str, Any]:
         config = Config.load(config_dir=resolved_config_dir)
         broker_config = config.get("broker", {})
         if not broker_config.get("app_key"):
@@ -233,7 +234,7 @@ def search(
 
     fmt = get_formatter(ctx)
 
-    async def _run() -> list[dict]:
+    async def _run() -> list[dict[str, Any]]:
         async with open_cli_db(ctx, db_path_override=db_path) as db:
             svc = InstrumentService(db)
             await svc.initialize()

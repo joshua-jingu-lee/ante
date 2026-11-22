@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
+from typing import Any
 
 import click
 
@@ -17,7 +19,7 @@ def audit() -> None:
     """감사 로그 조회."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -61,7 +63,7 @@ def audit_list(
         to_label="종료 날짜",
     )
 
-    async def _run_list() -> list[dict]:
+    async def _run_list() -> list[dict[str, Any]]:
         from ante.audit import AuditLogger
 
         async with open_cli_db(ctx) as db:
