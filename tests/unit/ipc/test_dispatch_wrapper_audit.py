@@ -18,6 +18,7 @@ invariant:
 from __future__ import annotations
 
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1541,32 +1542,23 @@ async def test_rule_update_rejects_invalid_account_id_before_handler(
         await server.stop()
 
 
+_KILL_SWITCH_AT = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
+
+
 @pytest.mark.parametrize(
     ("command", "account_attr"),
     [("system.halt", "suspend_all"), ("system.clear_halt", "activate_all")],
 )
+@pytest.mark.parametrize("manual_clock", [_KILL_SWITCH_AT], indirect=True)
 @pytest.mark.asyncio
 async def test_kill_switch_changed_at_is_utc_with_z_suffix(
     socket_path: str,
     command: str,
     account_attr: str,
-    monkeypatch: pytest.MonkeyPatch,
+    manual_clock: Any,
 ) -> None:
     """kill switch 응답의 ``changed_at`` 은 ``Z`` 로 끝나는 ISO 8601 UTC 다."""
-    import datetime as datetime_module
-    from datetime import UTC, datetime, timedelta
-
-    import ante.ipc.registry as registry_module
     from ante.ipc.registry import register_all_handlers
-
-    instant = datetime(2026, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
-
-    class _FixedClock(datetime):
-        @classmethod
-        def now(cls, tz=None):  # type: ignore[no-untyped-def, override]
-            if tz is None:
-                return (instant + timedelta(hours=9)).replace(tzinfo=None)
-            return instant.astimezone(tz)
 
     cmd_registry = CommandRegistry()
     register_all_handlers(cmd_registry)
@@ -1583,12 +1575,9 @@ async def test_kill_switch_changed_at_is_utc_with_z_suffix(
     server = IPCServer(socket_path, svc_registry, cmd_registry)
     await server.start()
     try:
-        with monkeypatch.context() as m:
-            m.setattr(datetime_module, "datetime", _FixedClock)
-            m.setattr(registry_module, "datetime", _FixedClock, raising=False)
-            response = await server._dispatch(
-                {"id": "1", "command": command, "args": {}, "actor": "alice"}
-            )
+        response = await server._dispatch(
+            {"id": "1", "command": command, "args": {}, "actor": "alice"}
+        )
     finally:
         await server.stop()
 
