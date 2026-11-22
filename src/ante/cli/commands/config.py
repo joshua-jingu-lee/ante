@@ -77,7 +77,9 @@ async def _create_services(
         yield static_config, dynamic, db
 
 
-async def _resolve_single(key: str, static_config: Any, dynamic: Any) -> dict[str, Any]:
+async def _resolve_single(
+    key: str, static_config: Config, dynamic: DynamicConfigService
+) -> dict[str, Any]:
     """단일 키 설정값 조회."""
     if await dynamic.exists(key):
         value = await dynamic.get(key)

@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import tempfile
+from collections.abc import Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -203,7 +204,7 @@ def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
     return effective_key
 
 
-def _run(coro: Any) -> Any:
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
 
