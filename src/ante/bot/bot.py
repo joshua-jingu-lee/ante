@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
-from ante.bot.config import BotConfig, BotStatus
+from ante.bot.config import BOT_STATUS_TRANSITIONS, BotConfig, BotStatus
+from ante.bot.exceptions import BotStateConflict
 from ante.eventbus.fill_dedup_guard import FillDedupGuard
 
 if TYPE_CHECKING:
@@ -17,6 +18,16 @@ if TYPE_CHECKING:
     from ante.strategy.context import StrategyContext
 
 logger = logging.getLogger(__name__)
+
+
+def _transition_status(bot: Bot, target: BotStatus) -> BotStatus:
+    if target not in BOT_STATUS_TRANSITIONS.get(bot.status, set()):
+        raise BotStateConflict(
+            f"봇 상태를 바꿀 수 없습니다: {bot.bot_id} "
+            f"({bot.status.value} → {target.value})"
+        )
+    bot.status = target
+    return target
 
 
 class Bot:
@@ -69,7 +80,7 @@ class Bot:
 
         self._generation += 1
         self._orders_closed = False
-        self.status = BotStatus.RUNNING
+        _transition_status(self, BotStatus.RUNNING)
         self.started_at = datetime.now(UTC)
         self._task = asyncio.create_task(
             self._run_loop(),
@@ -88,7 +99,7 @@ class Bot:
         if self.status not in (BotStatus.RUNNING, BotStatus.ERROR):
             return
 
-        self.status = BotStatus.STOPPING
+        _transition_status(self, BotStatus.STOPPING)
         self._orders_closed = True
 
         if self._task and not self._task.done():
@@ -101,7 +112,7 @@ class Bot:
         if self.strategy:
             self.strategy.on_stop()
 
-        self.status = BotStatus.STOPPED
+        _transition_status(self, BotStatus.STOPPED)
         self.stopped_at = datetime.now(UTC)
 
         await self._eventbus.publish(
@@ -176,7 +187,7 @@ class Bot:
                                     "연속 타임아웃 한도 초과 — 봇 ERROR 전이: %s",
                                     self.bot_id,
                                 )
-                                self.status = BotStatus.ERROR
+                                _transition_status(self, BotStatus.ERROR)
                                 self._orders_closed = True
                                 self.error_message = msg
                                 await self._eventbus.publish(
@@ -286,7 +297,7 @@ class Bot:
                     exc_info=True,
                 )
                 return
-            self.status = BotStatus.ERROR
+            _transition_status(self, BotStatus.ERROR)
             self._orders_closed = True
             self.error_message = str(e)
             logger.exception("봇 오류: %s", self.bot_id)
