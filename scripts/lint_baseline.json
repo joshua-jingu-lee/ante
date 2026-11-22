@@ -392,7 +392,7 @@
     },
     "src/ante/ipc/registry.py": {
       "no-any-return": 1,
-      "type-arg": 44
+      "type-arg": 32
     },
     "src/ante/ipc/server.py": {
       "type-arg": 11
