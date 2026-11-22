@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -35,6 +36,7 @@ from ante.broker.kis import (
     _token_cooldowns,
     _token_locks,
 )
+from ante.core import clock
 
 KIS_CONFIG = {
     "app_key": "shared_key",
@@ -658,16 +660,25 @@ class _GatedSession(_FakeSession):
         return response
 
 
-class _SteppingClock(datetime):
-    """``now`` 를 부를 때마다 1초씩 나아가는 결정적 시계."""
+class _SteppingClock:
+    """``now`` 를 부를 때마다 1초씩 나아가는 결정적 시계(``use_clock`` 으로 싣는다)."""
 
-    _ticks = 0
+    def __init__(self) -> None:
+        self._ticks = 0
 
-    @classmethod
-    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
-        cls._ticks += 1
-        base = datetime(2026, 5, 29, 0, 0, tzinfo=UTC) + timedelta(seconds=cls._ticks)
-        return base if tz is not None else base.replace(tzinfo=None)
+    def now(self, tz: Any) -> datetime:
+        self._ticks += 1
+        base = datetime(2026, 5, 29, 0, 0, tzinfo=UTC) + timedelta(seconds=self._ticks)
+        return base.astimezone(tz) if tz is not None else base.replace(tzinfo=None)
+
+    def monotonic(self) -> float:
+        return 1000.0 + self._ticks
+
+
+@pytest.fixture
+def stepping_clock() -> Iterator[_SteppingClock]:
+    with clock.use_clock(_SteppingClock()) as stepping:
+        yield stepping
 
 
 HANG_GUARD_SECONDS = 5.0
@@ -699,12 +710,9 @@ class TestLockedRecheckWithYieldingSession:
         assert a2.access_token == "tok-1"
 
     async def test_waiter_sees_cooldown_recorded_while_it_waited_on_lock(
-        self, monkeypatch
+        self, stepping_clock
     ):
         """lock 대기 중 생긴 cooldown 이면 HTTP 없이 같은 만료시각으로 거부한다."""
-        import ante.broker.kis as kis_module
-
-        monkeypatch.setattr(kis_module, "datetime", _SteppingClock)
         session = _GatedSession(
             [
                 _FakeResponse(

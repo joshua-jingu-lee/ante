@@ -7,6 +7,7 @@ import math
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, TypeGuard
 
+from ante.core import clock
 from ante.core.market_data_vocab import is_krx_symbol
 from ante.rule.base import (
     EvaluationResult,
@@ -436,9 +437,9 @@ class RuleEngine:
                 logger.warning("Treasury 봇 예산 조회 실패: bot=%s", bot_id)
 
         try:
-            from datetime import date, timedelta
+            from datetime import timedelta
 
-            yesterday = (date.today() - timedelta(days=1)).isoformat()
+            yesterday = (clock.now(None).date() - timedelta(days=1)).isoformat()
             snapshot = await self._treasury.get_daily_snapshot(yesterday)
             if snapshot is not None:
                 result["prev_day_total_asset"] = snapshot.get("total_asset", 0.0)
@@ -499,7 +500,7 @@ class RuleEngine:
             return None
         if parsed.tzinfo is None:
             return None
-        age = (datetime.now(UTC) - parsed).total_seconds()
+        age = (clock.now(UTC) - parsed).total_seconds()
         return max(age, 0.0)
 
     async def _check_unrecovered_buy_guard(self, event: object) -> str | None:

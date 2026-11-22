@@ -32,6 +32,7 @@ from ante.broker.exceptions import (
 )
 from ante.broker.fill_scheduler import business_date_kst
 from ante.broker.models import CommissionInfo
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -125,14 +126,14 @@ def _token_cooldown_until(app_key: str) -> datetime | None:
     until = _token_cooldowns.get(app_key)
     if until is None:
         return None
-    if datetime.now(UTC) >= until:
+    if clock.now(UTC) >= until:
         return None
     return until
 
 
 def _record_token_cooldown(app_key: str) -> datetime:
     """EGW00133 수신 시 app_key cooldown 기록 후 만료시각 반환."""
-    until = datetime.now(UTC) + timedelta(seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
+    until = clock.now(UTC) + timedelta(seconds=TOKEN_RATE_LIMIT_COOLDOWN_SECONDS)
     _token_cooldowns[app_key] = until
     return until
 
@@ -429,7 +430,7 @@ class KISBaseAdapter(BrokerAdapter):
         if cached is None:
             return False
         token, expires_at = cached
-        if not _is_cached_token_fresh(expires_at, now=datetime.now(UTC)):
+        if not _is_cached_token_fresh(expires_at, now=clock.now(UTC)):
             return False
         self.access_token = token
         self.token_expires_at = expires_at
@@ -458,7 +459,7 @@ class KISBaseAdapter(BrokerAdapter):
                 if not token:
                     self._raise_token_error(response.status, result)
 
-                expires_at = datetime.now(UTC) + timedelta(hours=24)
+                expires_at = clock.now(UTC) + timedelta(hours=24)
                 return token, expires_at
 
     @staticmethod
@@ -494,14 +495,14 @@ class KISBaseAdapter(BrokerAdapter):
         if (
             not self.access_token
             or not self.token_expires_at
-            or datetime.now(UTC)
+            or clock.now(UTC)
             >= self.token_expires_at - timedelta(minutes=_TOKEN_EXPIRY_MARGIN_MINUTES)
         ):
             await self._authenticate()
 
     async def _rate_limit_wait(self) -> None:
         """Rate limit 준수 대기."""
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         cutoff = now - timedelta(minutes=1)
         self._request_times = [t for t in self._request_times if t > cutoff]
 
@@ -1358,7 +1359,7 @@ class KISDomesticAdapter(KISBaseAdapter):
         교차 구간(``from < cutoff <= to``)은 split query 없이 start-date 기준
         before 단일 쿼리로 처리하며, 그 완전성은 bounded known-limitation 이다.
         """
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         start_date = from_date or (now - timedelta(days=7)).strftime("%Y%m%d")
         end_date = to_date or now.strftime("%Y%m%d")
 

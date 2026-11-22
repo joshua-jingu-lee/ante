@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ante.core import clock
+
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
 
@@ -55,7 +57,7 @@ class StopOrder:
     limit_price: float | None
     trading_session: str
     account_id: str
-    registered_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    registered_at: datetime = field(default_factory=lambda: clock.now(UTC))
     triggered: bool = False
     expired: bool = False
     exchange: str = "KRX"
@@ -325,7 +327,7 @@ class StopOrderManager:
 
     def _is_session_type_active_now(self, session_type: str) -> bool:
         """현재 시각이 주어진 세션 종류의 윈도우 안인지(시각 기준)."""
-        now = datetime.now(UTC)
+        now = clock.now(UTC)
         current_minutes = now.hour * 60 + now.minute
 
         if session_type == "extended":

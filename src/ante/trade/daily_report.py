@@ -7,6 +7,8 @@ import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import TYPE_CHECKING
 
+from ante.core import clock
+
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
     from ante.trade.performance import PerformanceTracker
@@ -132,7 +134,7 @@ class DailyReportScheduler:
             True if there were trades (NotificationEvent published),
             False if no trades (only DailyReportEvent published).
         """
-        today = target_date or datetime.now(KST).date()
+        today = target_date or clock.now(KST).date()
         today_str = today.isoformat()
         yesterday = today - timedelta(days=1)
         yesterday_str = yesterday.isoformat()
@@ -239,7 +241,7 @@ class DailyReportScheduler:
     async def _loop(self) -> None:
         """Execute run_once() daily at report_time."""
         while True:
-            now = datetime.now(KST)
+            now = clock.now(KST)
             target = datetime.combine(now.date(), self._report_time, tzinfo=KST)
             if now >= target:
                 target += timedelta(days=1)

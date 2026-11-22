@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
+from ante.core import clock
 from ante.rule.base import Rule, RuleAction, RuleContext, RuleEvaluation, RuleResult
 
 
@@ -257,7 +258,7 @@ class TradingHoursRule(Rule):
                         "reject_code": "TRADING_HOURS_INVALID_TIMEZONE",
                     },
                 )
-            now = datetime.now(tz)
+            now = clock.now(tz)
 
         current_time = now.time() if isinstance(now, datetime) else now
 

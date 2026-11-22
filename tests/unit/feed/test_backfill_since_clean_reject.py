@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -37,6 +37,14 @@ from ante.feed.pipeline.backfill_runner import (
 )
 from ante.feed.pipeline.orchestrator import FeedOrchestrator
 from ante.member.models import Member, MemberRole, MemberType
+
+_TEST_KST = timezone(timedelta(hours=9))
+# 자정 무렵. 실제 시계를 두 번 읽으면 날짜가 갈리던 시각이다.
+_AROUND_MIDNIGHT = [
+    datetime(2026, 11, 22, 23, 59, 59, tzinfo=_TEST_KST),
+    datetime(2026, 11, 23, 0, 0, 0, tzinfo=_TEST_KST),
+]
+_AROUND_MIDNIGHT_IDS = ["kst-2359", "kst-0000"]
 
 _MOCK_MASTER = Member(
     member_id="test-master",
@@ -138,10 +146,12 @@ class TestValidateBackfillSinceHelper:
         assert parsed == date(2024, 1, 1)
         assert error is None
 
-    def test_valid_today(self) -> None:
+    @pytest.mark.parametrize(
+        "manual_clock", _AROUND_MIDNIGHT, indirect=True, ids=_AROUND_MIDNIGHT_IDS
+    )
+    def test_valid_today(self, manual_clock) -> None:
         # today 자체는 미래가 아니므로 정상.
-        # KST 기준이지만 helper는 datetime을 고정하지 않으므로
-        # 실제 today를 사용한다.
+        # 시계를 고정해 테스트와 helper가 같은 KST today를 본다.
         from ante.feed.pipeline.backfill_runner import _today_kst
 
         today = _today_kst()
@@ -168,7 +178,10 @@ class TestValidateBackfillSinceHelper:
         assert error is not None
         assert error["code"] == CONFIG_ERROR_CODE_INVALID_DATE
 
-    def test_future_returns_invalid_date_range(self) -> None:
+    @pytest.mark.parametrize(
+        "manual_clock", _AROUND_MIDNIGHT, indirect=True, ids=_AROUND_MIDNIGHT_IDS
+    )
+    def test_future_returns_invalid_date_range(self, manual_clock) -> None:
         from ante.feed.pipeline.backfill_runner import _today_kst
 
         future = (_today_kst() + timedelta(days=365 * 30)).isoformat()

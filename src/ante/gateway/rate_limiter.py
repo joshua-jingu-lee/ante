@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import time
 from collections import deque
 from dataclasses import dataclass
+
+from ante.core import clock
 
 
 @dataclass
@@ -30,7 +31,7 @@ class RateLimiter:
     async def acquire(self) -> None:
         """요청 슬롯 확보. 제한 초과 시 대기."""
         async with self._lock:
-            now = time.monotonic()
+            now = clock.monotonic()
             while (
                 self._timestamps
                 and now - self._timestamps[0] > self._config.window_seconds
@@ -42,12 +43,12 @@ class RateLimiter:
                 if wait > 0:
                     await asyncio.sleep(wait)
 
-            self._timestamps.append(time.monotonic())
+            self._timestamps.append(clock.monotonic())
 
     @property
     def pending_count(self) -> int:
         """현재 윈도우 내 요청 수."""
-        now = time.monotonic()
+        now = clock.monotonic()
         while (
             self._timestamps and now - self._timestamps[0] > self._config.window_seconds
         ):

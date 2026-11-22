@@ -13,6 +13,7 @@ from typing import Any
 from ante.broker.base import BrokerAdapter
 from ante.broker.exceptions import BrokerError, OrderNotFoundError
 from ante.broker.models import CommissionInfo
+from ante.core import clock
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,7 @@ class _TestOrder:
     price: float
     order_type: str
     status: str
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=lambda: clock.now(UTC))
 
 
 class TestBrokerAdapter(BrokerAdapter):

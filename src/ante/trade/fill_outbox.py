@@ -7,6 +7,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from ante.core import clock
 from ante.core.database import DatabaseError
 
 if TYPE_CHECKING:
@@ -230,11 +231,10 @@ class FillOutboxPublisher:
         return self._drain_interval * multiplier
 
     async def _loop(self) -> None:
-        loop = asyncio.get_running_loop()
-        next_drain_at = loop.time()
+        next_drain_at = clock.monotonic()
         while self._running:
             if self._consecutive_failures > 0:
-                remaining = next_drain_at - loop.time()
+                remaining = next_drain_at - clock.monotonic()
                 if remaining > 0:
                     try:
                         await asyncio.wait_for(self._wakeup.wait(), timeout=remaining)
@@ -244,7 +244,7 @@ class FillOutboxPublisher:
                         self._wakeup.clear()
                         if not self._running:
                             return
-                        if loop.time() < next_drain_at:
+                        if clock.monotonic() < next_drain_at:
                             continue
             else:
                 try:
@@ -264,7 +264,7 @@ class FillOutboxPublisher:
                 if _is_db_corruption(exc):
                     self._consecutive_failures += 1
                     delay = self._backoff_delay()
-                    next_drain_at = loop.time() + delay
+                    next_drain_at = clock.monotonic() + delay
                     if self._consecutive_failures >= _ESCALATE_THRESHOLD:
                         await self._escalate(exc)
                     else:
@@ -278,14 +278,14 @@ class FillOutboxPublisher:
                         )
                 else:
                     self._reset_failures()
-                    next_drain_at = loop.time()
+                    next_drain_at = clock.monotonic()
                     logger.warning(
                         "FillOutboxPublisher 드레인 오류(비-손상) — 다음 사이클 재시도",
                         exc_info=True,
                     )
             else:
                 self._reset_failures()
-                next_drain_at = loop.time() + self._drain_interval
+                next_drain_at = clock.monotonic() + self._drain_interval
 
     def _reset_failures(self) -> None:
         """연속 실패 카운터와 escalation latch 를 초기화한다 (O1·O2 reset)."""
