@@ -39,7 +39,7 @@ logger = logging.getLogger("ante.feed.cli")
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
-def _validate_iso_date(value: str, option: str, fmt: object) -> None:
+def _validate_iso_date(value: str, option: str) -> None:
     """``value``가 엄격한 ``YYYY-MM-DD``인지 검증한다."""
     from datetime import date
 
@@ -65,7 +65,7 @@ _VALID_LOG_LEVELS = frozenset({"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"})
 _FEED_LOGGER_NAME = "ante.feed"
 
 
-def _apply_log_level(config: dict[str, object], fmt: object) -> None:
+def _apply_log_level(config: dict[str, object]) -> None:
     """``[general].log_level`` 을 ``ante.feed`` 패키지 로거에 적용한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
@@ -83,7 +83,7 @@ def _apply_log_level(config: dict[str, object], fmt: object) -> None:
     logging.getLogger(_FEED_LOGGER_NAME).setLevel(getattr(logging, level_name.upper()))
 
 
-def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
+def _validate_guard_config(config: dict[str, object]) -> None:
     """``[guard]`` 섹션의 타입/형식을 진입 시 1회 fail-fast 검증한다."""
     guard = config.get("guard", {})
     if not isinstance(guard, dict):
@@ -126,10 +126,10 @@ def _validate_guard_config(config: dict[str, object], fmt: object) -> None:
         raise ConfigInvalidGuardError("잘못된 [guard] 설정: " + "; ".join(errors))
 
 
-def _validate_and_apply_feed_config(config: dict[str, object], fmt: object) -> None:
+def _validate_and_apply_feed_config(config: dict[str, object]) -> None:
     """feed 커맨드 공통 진입 검증/적용."""
-    _apply_log_level(config, fmt)
-    _validate_guard_config(config, fmt)
+    _apply_log_level(config)
+    _validate_guard_config(config)
 
 
 _NICE_VALUE_MIN = 0
@@ -137,7 +137,7 @@ _NICE_VALUE_MAX = 19
 _NICE_VALUE_DEFAULT = 10
 
 
-def _validate_nice_value(config: dict[str, object], fmt: object) -> int:
+def _validate_nice_value(config: dict[str, object]) -> int:
     """``[general].nice_value`` 를 읽어 타입/범위를 검증하고 반환한다."""
     general = config.get("general", {})
     if not isinstance(general, dict):
@@ -361,7 +361,6 @@ _BACKFILL_DATE_ERRORS: dict[str, type[Exception]] = {
 
 def _ensure_initialized(
     cfg,
-    fmt,
     data_path: str,
 ) -> None:
     """초기화 상태를 확인하고 미초기화 시 예외를 던진다."""
@@ -400,10 +399,10 @@ def run_backfill(
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    _ensure_initialized(cfg, fmt, data_path)
+    _ensure_initialized(cfg, data_path)
 
     if since is not None:
-        _validate_iso_date(since, "--since", fmt)
+        _validate_iso_date(since, "--since")
 
     if since is not None:
         _parsed, since_err = validate_backfill_since(since)
@@ -413,7 +412,7 @@ def run_backfill(
             raise InvalidDateRangeError(f"잘못된 --since 날짜: {since_err['error']}")
 
     config = cfg.load_config()
-    _validate_and_apply_feed_config(config, fmt)
+    _validate_and_apply_feed_config(config)
 
     if since is not None:
         schedule = config.setdefault("schedule", {})
@@ -463,13 +462,13 @@ def run_daily(
     fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    _ensure_initialized(cfg, fmt, data_path)
+    _ensure_initialized(cfg, data_path)
 
     if target_date is not None:
-        _validate_iso_date(target_date, "--date", fmt)
+        _validate_iso_date(target_date, "--date")
 
     config = cfg.load_config()
-    _validate_and_apply_feed_config(config, fmt)
+    _validate_and_apply_feed_config(config)
 
     orchestrator = _build_orchestrator(cfg)
 
@@ -497,14 +496,13 @@ def feed_start(ctx: click.Context, data_path: str | None) -> None:
     from ante.feed.config import FeedConfig
 
     data_path = resolve_data_path(ctx, data_path)
-    fmt = get_formatter(ctx)
     cfg = FeedConfig(data_path)
 
-    _ensure_initialized(cfg, fmt, data_path)
+    _ensure_initialized(cfg, data_path)
 
     config = cfg.load_config()
-    _validate_and_apply_feed_config(config, fmt)
-    nice_value = _validate_nice_value(config, fmt)
+    _validate_and_apply_feed_config(config)
+    nice_value = _validate_nice_value(config)
     schedule = config.get("schedule", {})
     daily_at = (
         schedule.get("daily_at", "16:00") if isinstance(schedule, dict) else "16:00"

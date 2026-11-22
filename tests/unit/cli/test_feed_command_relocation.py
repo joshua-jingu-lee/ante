@@ -61,7 +61,7 @@ def test_feed_command_logger_follows_applied_level(
     restore_feed_logger_level: None, log_level: str, warning_enabled: bool
 ) -> None:
     module = _feed_module()
-    module._apply_log_level({"general": {"log_level": log_level}}, None)
+    module._apply_log_level({"general": {"log_level": log_level}})
 
     assert module.logger.isEnabledFor(logging.WARNING) is warning_enabled
 
