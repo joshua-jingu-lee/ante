@@ -22,6 +22,9 @@ request set into FILE (other commands already in FILE are kept):
   ``nan`` (``NaN`` at a key whose ``cli`` value is a float).
 - A ``value`` row has ``same_type`` when its value has the JSON type of the
   key in any ``cli`` row that sends the key.
+- The keys of a ``cli`` row's args keep the order the CLI sent them in (the
+  order can reach a response, e.g. an audit detail); the other keys of the
+  file are sorted.
 - A non-empty string at a clock key (``expires_at``) of a ``cli`` row is
   replaced by a fixed marker, so a rebuild writes the same bytes.
 
@@ -149,7 +152,7 @@ def _read_json(path: Path) -> Any:
 
 
 def _write_json(path: Path, data: Any) -> None:
-    text = json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True)
+    text = json.dumps(data, ensure_ascii=False, indent=1)
     path.write_text(text + "\n", encoding="utf-8")
 
 
@@ -362,7 +365,7 @@ def build_requests(
                 "args": {**base, key: float("nan")},
             }
         )
-    return out
+    return [{k: row[k] for k in sorted(row)} for row in out]
 
 
 def _requests(path: Path) -> dict[str, dict[str, Any]]:
@@ -390,6 +393,7 @@ def cmd_build(args: argparse.Namespace) -> int:
         data["commands"][command] = build_requests(
             command, _command_keys(root, command), cli
         )
+    data["commands"] = {c: data["commands"][c] for c in sorted(data["commands"])}
     _write_json(path, data)
     total = sum(len(rows) for rows in data["commands"].values())
     print(f"requests: {total} in {len(data['commands'])} commands")
@@ -482,7 +486,7 @@ def cmd_record(args: argparse.Namespace) -> int:
     requests = _requests(root / args.requests)
     logging.disable(logging.CRITICAL)
     rows = asyncio.run(_dispatch_all(requests))
-    _write_json(args.out, {"rows": rows, "ratchet": _ratchet(root)})
+    _write_json(args.out, {"ratchet": _ratchet(root), "rows": rows})
     print(f"recorded: {len(rows)} rows")
     return EXIT_OK
 

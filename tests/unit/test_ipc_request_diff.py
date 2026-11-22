@@ -400,6 +400,17 @@ def test_build_replaces_a_clock_value_with_a_fixed_marker(tmp_path: Path) -> Non
     ]
 
 
+def test_build_keeps_the_cli_key_order(tmp_path: Path) -> None:
+    code, _, err = _build(tmp_path, "", [{"name": "a1", "n": 2.5}])
+    assert (code, err) == (0, "")
+    data = json.loads((tmp_path / "requests.json").read_text(encoding="utf-8"))
+    rows = data["commands"]["demo.run"]
+    assert list(rows[0]) == ["args", "kind", "name"]
+    assert list(rows[0]["args"]) == ["name", "n"]
+    assert list(rows[1]) == ["args", "key", "kind", "name", "same_type"]
+    assert list(rows[1]["args"]) == ["name", "n"]
+
+
 def test_build_rejects_another_use_of_the_args(tmp_path: Path) -> None:
     code, out, err = _build(tmp_path, '"all": dict(args)')
     assert (code, out) == (2, "")
