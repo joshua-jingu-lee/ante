@@ -1239,3 +1239,46 @@ def test_member_revoke_requires_confirmation(mode: str) -> None:
         " 이 작업은 되돌릴 수 없습니다."
     )
     _assert_coded(mode, result, "CLI_CONFIRMATION_REQUIRED", message)
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["account", "suspend", "acct-1"], id="suspend"),
+        pytest.param(
+            ["account", "suspend", "acct-1", "--reason", "점검"], id="suspend-reason"
+        ),
+        pytest.param(["account", "activate", "acct-1"], id="activate"),
+    ],
+)
+def test_account_ipc_failure_without_a_message_json(args: list[str]) -> None:
+    result = _invoke(["--format", "json", *args], _send(RuntimeError()))
+    _assert_exit("json", result, "EXECUTION_ERROR", "", "")
+
+
+@pytest.mark.parametrize(
+    ("args", "method", "message"),
+    [
+        pytest.param(
+            ["member", "register", "--id", "dup-text", "--type", "agent"],
+            "register",
+            "이미 존재하는 member_id: dup-text",
+            id="register",
+        ),
+        pytest.param(
+            ["member", "suspend", "ghost-text"],
+            "suspend",
+            "존재하지 않는 멤버: ghost-text",
+            id="suspend",
+        ),
+    ],
+)
+def test_member_value_error_json(args: list[str], method: str, message: str) -> None:
+    service = MagicMock()
+    setattr(service, method, AsyncMock(side_effect=ValueError(message)))
+    result = _invoke(
+        ["--format", "json", *args],
+        patch(_ACTIVE, return_value=False),
+        _service_cm(_MEMBER_CM, service),
+    )
+    _assert_exit("json", result, "EXECUTION_ERROR", message, "")
