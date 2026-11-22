@@ -2,10 +2,16 @@ from __future__ import annotations
 
 __all__ = [
     "AccountAlreadyDeletedError",
+    "AccountCredentialEnvNotSetError",
+    "AccountCredentialFileNotFoundError",
+    "AccountDuplicateCredentialKeyError",
     "AccountInvalidStatusError",
+    "AccountInvalidTimezoneError",
     "AccountMasterBootstrapFailedError",
+    "AccountMissingRequiredCredentialError",
     "AccountTestCreateFailedError",
     "AccountTestInactiveError",
+    "AccountUnknownCredentialKeyError",
     "AlreadyRunningError",
     "ApprovalInvalidStatusError",
     "ApprovalInvalidTypeError",
@@ -73,12 +79,32 @@ class AccountAlreadyDeletedError(Exception):
     code = "ACCOUNT_ALREADY_DELETED"
 
 
+class AccountCredentialEnvNotSetError(Exception):
+    code = "ACCOUNT_CREDENTIAL_ENV_NOT_SET"
+
+
+class AccountCredentialFileNotFoundError(Exception):
+    code = "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND"
+
+
+class AccountDuplicateCredentialKeyError(Exception):
+    code = "ACCOUNT_DUPLICATE_CREDENTIAL_KEY"
+
+
 class AccountInvalidStatusError(Exception):
     code = "ACCOUNT_INVALID_STATUS"
 
 
+class AccountInvalidTimezoneError(Exception):
+    code = "ACCOUNT_INVALID_TIMEZONE"
+
+
 class AccountMasterBootstrapFailedError(Exception):
     code = "ACCOUNT_MASTER_BOOTSTRAP_FAILED"
+
+
+class AccountMissingRequiredCredentialError(Exception):
+    code = "ACCOUNT_MISSING_REQUIRED_CREDENTIAL"
 
 
 class AccountTestCreateFailedError(Exception):
@@ -87,6 +113,10 @@ class AccountTestCreateFailedError(Exception):
 
 class AccountTestInactiveError(Exception):
     code = "ACCOUNT_TEST_INACTIVE"
+
+
+class AccountUnknownCredentialKeyError(Exception):
+    code = "ACCOUNT_UNKNOWN_CREDENTIAL_KEY"
 
 
 class AlreadyRunningError(Exception):
@@ -331,10 +361,16 @@ class UpdateServerRunningError(Exception):
 
 CLI_ERRORS: tuple[type[Exception], ...] = (
     AccountAlreadyDeletedError,
+    AccountCredentialEnvNotSetError,
+    AccountCredentialFileNotFoundError,
+    AccountDuplicateCredentialKeyError,
     AccountInvalidStatusError,
+    AccountInvalidTimezoneError,
     AccountMasterBootstrapFailedError,
+    AccountMissingRequiredCredentialError,
     AccountTestCreateFailedError,
     AccountTestInactiveError,
+    AccountUnknownCredentialKeyError,
     AlreadyRunningError,
     ApprovalInvalidStatusError,
     ApprovalInvalidTypeError,

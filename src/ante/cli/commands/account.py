@@ -9,7 +9,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -29,7 +29,15 @@ from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
     AccountAlreadyDeletedError,
+    AccountCredentialEnvNotSetError,
+    AccountCredentialFileNotFoundError,
+    AccountDuplicateCredentialKeyError,
     AccountInvalidStatusError,
+    AccountInvalidTimezoneError,
+    AccountMissingRequiredCredentialError,
+    AccountUnknownCredentialKeyError,
+    CliConfirmationRequiredError,
+    CliMissingRequiredInputError,
 )
 
 if TYPE_CHECKING:
@@ -105,29 +113,21 @@ def _get_selectable_broker_types() -> list[str]:
     return list(BROKER_REGISTRY.keys())
 
 
-def _exit_with_error(fmt: OutputFormatter, code: str, message: str) -> NoReturn:
-    """구조화된 에러를 출력하고 SystemExit(1)으로 종료한다."""
-    fmt.error(f"{code}: {message}", code=code)
-    raise SystemExit(1)
-
-
 def _split_key_value(
     raw: str, *, fmt: OutputFormatter, option_label: str
 ) -> tuple[str, str]:
     """`key=value` 한 쌍을 파싱한다. 형식 위반 시 즉시 종료."""
     if "=" not in raw:
-        _exit_with_error(
-            fmt,
-            "CLI_MISSING_REQUIRED_INPUT",
-            f"{option_label} 옵션은 key=value 형식이어야 합니다: {raw!r}",
+        raise CliMissingRequiredInputError(
+            "CLI_MISSING_REQUIRED_INPUT: "
+            f"{option_label} 옵션은 key=value 형식이어야 합니다: {raw!r}"
         )
     key, _, value = raw.partition("=")
     key = key.strip()
     if not key:
-        _exit_with_error(
-            fmt,
-            "CLI_MISSING_REQUIRED_INPUT",
-            f"{option_label} 옵션의 key가 비어 있습니다: {raw!r}",
+        raise CliMissingRequiredInputError(
+            "CLI_MISSING_REQUIRED_INPUT: "
+            f"{option_label} 옵션의 key가 비어 있습니다: {raw!r}"
         )
     return key, value
 
@@ -166,30 +166,25 @@ def _resolve_credentials(
 
     def _set_or_dup(key: str, value: str, channel: str) -> None:
         if key not in required_set:
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
+            raise AccountUnknownCredentialKeyError(
+                "ACCOUNT_UNKNOWN_CREDENTIAL_KEY: "
                 f"알 수 없는 credential key: {key!r} ({channel}). "
-                f"허용되는 key: {sorted(required_set)}",
+                f"허용되는 key: {sorted(required_set)}"
             )
         if key in seen:
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_DUPLICATE_CREDENTIAL_KEY",
-                f"credential key {key!r}가 둘 이상 채널로 중복 입력되었습니다.",
+            raise AccountDuplicateCredentialKeyError(
+                "ACCOUNT_DUPLICATE_CREDENTIAL_KEY: "
+                f"credential key {key!r}가 둘 이상 채널로 중복 입력되었습니다."
             )
         seen[key] = value
 
     for raw in direct_pairs:
         key, value = _split_key_value(raw, fmt=fmt, option_label="--credential")
         if value == "":
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
-                (
-                    f"--credential {key}: 값이 비어 있습니다. "
-                    "credential 값은 비어 있을 수 없습니다."
-                ),
+            raise AccountMissingRequiredCredentialError(
+                "ACCOUNT_MISSING_REQUIRED_CREDENTIAL: "
+                f"--credential {key}: 값이 비어 있습니다. "
+                "credential 값은 비어 있을 수 없습니다."
             )
         _set_or_dup(key, value, "--credential")
 
@@ -197,20 +192,16 @@ def _resolve_credentials(
         key, env_name = _split_key_value(raw, fmt=fmt, option_label="--credential-env")
         env_name_clean = env_name.strip()
         if not env_name_clean:
-            _exit_with_error(
-                fmt,
-                "CLI_MISSING_REQUIRED_INPUT",
-                f"--credential-env {key}의 환경변수 이름이 비어 있습니다.",
+            raise CliMissingRequiredInputError(
+                "CLI_MISSING_REQUIRED_INPUT: "
+                f"--credential-env {key}의 환경변수 이름이 비어 있습니다."
             )
         env_value = os.environ.get(env_name_clean)
         if env_value is None or env_value == "":
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_CREDENTIAL_ENV_NOT_SET",
-                (
-                    f"--credential-env {key}={env_name_clean}: "
-                    "환경변수가 설정되지 않았거나 공란입니다."
-                ),
+            raise AccountCredentialEnvNotSetError(
+                "ACCOUNT_CREDENTIAL_ENV_NOT_SET: "
+                f"--credential-env {key}={env_name_clean}: "
+                "환경변수가 설정되지 않았거나 공란입니다."
             )
         _set_or_dup(key, env_value, "--credential-env")
 
@@ -218,49 +209,40 @@ def _resolve_credentials(
         key, path_str = _split_key_value(raw, fmt=fmt, option_label="--credential-file")
         path_clean = path_str.strip()
         if not path_clean:
-            _exit_with_error(
-                fmt,
-                "CLI_MISSING_REQUIRED_INPUT",
-                f"--credential-file {key}의 파일 경로가 비어 있습니다.",
+            raise CliMissingRequiredInputError(
+                "CLI_MISSING_REQUIRED_INPUT: "
+                f"--credential-file {key}의 파일 경로가 비어 있습니다."
             )
         path = Path(path_clean)
         try:
             content = path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
-                f"--credential-file {key}={path_clean}: 파일을 찾을 수 없습니다.",
+            raise AccountCredentialFileNotFoundError(
+                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
+                f"--credential-file {key}={path_clean}: 파일을 찾을 수 없습니다."
             )
         except OSError as exc:
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
-                (
-                    f"--credential-file {key}={path_clean}: "
-                    f"파일을 읽을 수 없습니다 ({exc})."
-                ),
+            raise AccountCredentialFileNotFoundError(
+                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
+                f"--credential-file {key}={path_clean}: "
+                f"파일을 읽을 수 없습니다 ({exc})."
             )
         value = content.rstrip("\r\n")
         if value == "":
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
-                f"--credential-file {key}={path_clean}: 파일이 비어 있습니다.",
+            raise AccountCredentialFileNotFoundError(
+                "ACCOUNT_CREDENTIAL_FILE_NOT_FOUND: "
+                f"--credential-file {key}={path_clean}: 파일이 비어 있습니다."
             )
         _set_or_dup(key, value, "--credential-file")
 
     if required_set:
         missing = sorted(required_set - seen.keys())
         if missing:
-            _exit_with_error(
-                fmt,
-                "ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
-                (
-                    f"필수 credential 누락: {missing}. "
-                    "--credential / --credential-env / --credential-file 중 "
-                    "하나로 모두 제공해야 합니다."
-                ),
+            raise AccountMissingRequiredCredentialError(
+                "ACCOUNT_MISSING_REQUIRED_CREDENTIAL: "
+                f"필수 credential 누락: {missing}. "
+                "--credential / --credential-env / --credential-file 중 "
+                "하나로 모두 제공해야 합니다."
             )
 
     return seen
@@ -276,10 +258,9 @@ def _resolve_broker_config(
     for raw in pairs:
         key, value_str = _split_key_value(raw, fmt=fmt, option_label="--broker-config")
         if key in out:
-            _exit_with_error(
-                fmt,
-                "CLI_MISSING_REQUIRED_INPUT",
-                f"--broker-config key {key!r}가 중복 입력되었습니다.",
+            raise CliMissingRequiredInputError(
+                "CLI_MISSING_REQUIRED_INPUT: "
+                f"--broker-config key {key!r}가 중복 입력되었습니다."
             )
         out[key] = _parse_broker_config_value(value_str)
     return out
@@ -289,13 +270,10 @@ def _validate_broker_type(fmt: OutputFormatter, broker_type: str) -> None:
     """`--broker-type`이 BROKER_REGISTRY에 등록된 값인지 확인한다."""
     selectable = _get_selectable_broker_types()
     if broker_type not in selectable:
-        _exit_with_error(
-            fmt,
-            "CLI_MISSING_REQUIRED_INPUT",
-            (
-                f"등록되지 않은 broker_type: {broker_type!r}. "
-                f"허용 값: {sorted(selectable)}"
-            ),
+        raise CliMissingRequiredInputError(
+            "CLI_MISSING_REQUIRED_INPUT: "
+            f"등록되지 않은 broker_type: {broker_type!r}. "
+            f"허용 값: {sorted(selectable)}"
         )
 
 
@@ -406,10 +384,8 @@ def account_create(
     }
     missing = [k for k, v in required_inputs.items() if v is None or v == ""]
     if missing:
-        _exit_with_error(
-            fmt,
-            "CLI_MISSING_REQUIRED_INPUT",
-            f"필수 옵션 누락: {missing}",
+        raise CliMissingRequiredInputError(
+            f"CLI_MISSING_REQUIRED_INPUT: 필수 옵션 누락: {missing}"
         )
 
     assert broker_type is not None
@@ -425,10 +401,8 @@ def account_create(
 
     preset = BROKER_PRESETS.get(broker_type)
     if preset is None:
-        _exit_with_error(
-            fmt,
-            "CLI_MISSING_REQUIRED_INPUT",
-            f"broker preset 미정의: {broker_type!r}",
+        raise CliMissingRequiredInputError(
+            f"CLI_MISSING_REQUIRED_INPUT: broker preset 미정의: {broker_type!r}"
         )
 
     credentials = _resolve_credentials(
@@ -637,10 +611,9 @@ def account_delete(ctx: click.Context, account_id: str, skip_confirm: bool) -> N
     member_id = get_member_id(ctx)
 
     if not skip_confirm:
-        _exit_with_error(
-            fmt,
-            "CLI_CONFIRMATION_REQUIRED",
-            f'계좌 "{account_id}" 삭제는 확인이 필요합니다. --yes를 명시해 주세요.',
+        raise CliConfirmationRequiredError(
+            "CLI_CONFIRMATION_REQUIRED: "
+            f'계좌 "{account_id}" 삭제는 확인이 필요합니다. --yes를 명시해 주세요.'
         )
 
     _assert_no_active_runtime(fmt)
@@ -758,13 +731,10 @@ def account_set_credentials(
                     credentials_direct or credentials_env or credentials_file
                 )
                 if any_input:
-                    _exit_with_error(
-                        fmt,
-                        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
-                        (
-                            f"브로커 '{acct.broker_type}'은 "
-                            "credentials를 요구하지 않습니다."
-                        ),
+                    raise AccountUnknownCredentialKeyError(
+                        "ACCOUNT_UNKNOWN_CREDENTIAL_KEY: "
+                        f"브로커 '{acct.broker_type}'은 "
+                        "credentials를 요구하지 않습니다."
                     )
                 msg = f"브로커 '{acct.broker_type}'에는 인증 정보가 필요하지 않습니다."
                 fmt.output({"message": msg})
@@ -772,14 +742,11 @@ def account_set_credentials(
 
             if not (credentials_direct or credentials_env or credentials_file):
                 required = list(preset.required_credentials)
-                _exit_with_error(
-                    fmt,
-                    "ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
-                    (
-                        "credential 옵션이 누락되었습니다. "
-                        "--credential / --credential-env / --credential-file "
-                        f"중 하나로 required keys {required}를 모두 제공해야 합니다."
-                    ),
+                raise AccountMissingRequiredCredentialError(
+                    "ACCOUNT_MISSING_REQUIRED_CREDENTIAL: "
+                    "credential 옵션이 누락되었습니다. "
+                    "--credential / --credential-env / --credential-file "
+                    f"중 하나로 required keys {required}를 모두 제공해야 합니다."
                 )
 
             new_credentials = _resolve_credentials(
@@ -840,10 +807,8 @@ def account_repair_timezone(
     try:
         repaired = _run(_do_repair())
     except ValueError as e:
-        _exit_with_error(
-            fmt,
-            "ACCOUNT_INVALID_TIMEZONE",
-            f"invalid IANA timezone: {new_timezone!r} — {e}",
+        raise AccountInvalidTimezoneError(
+            f"ACCOUNT_INVALID_TIMEZONE: invalid IANA timezone: {new_timezone!r} — {e}"
         )
     except AccountDeletedError as e:
         raise AccountAlreadyDeletedError(str(e)) from e
