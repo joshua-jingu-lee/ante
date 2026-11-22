@@ -6,7 +6,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from ante.report.models import ReportStatus, StrategyReport
 
@@ -69,7 +69,7 @@ class ReportDraftGenerator:
             logger.exception("리포트 초안 생성 실패: %s", event.backtest_id)
 
     @staticmethod
-    def _load_result(result_path: str) -> dict | None:
+    def _load_result(result_path: str) -> dict[str, Any] | None:
         """결과 파일 로드."""
         if not result_path:
             return None
@@ -79,14 +79,14 @@ class ReportDraftGenerator:
             path = Path(result_path)
             if not path.exists():
                 return None
-            return json.loads(path.read_text())
+            return cast("dict[str, Any]", json.loads(path.read_text()))
         except Exception:
             logger.exception("결과 파일 읽기 실패: %s", result_path)
             return None
 
     @staticmethod
     def generate_draft(
-        result_data: dict,
+        result_data: dict[str, Any],
         strategy_id: str = "",
     ) -> StrategyReport:
         """백테스트 결과 딕셔너리로부터 리포트 초안 생성."""
@@ -139,7 +139,7 @@ class ReportDraftGenerator:
         )
 
 
-def _standardize_equity_curve(raw: list[dict]) -> list[dict]:
+def _standardize_equity_curve(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """백테스트 equity_curve를 표준 포맷으로 변환."""
     result = []
     for point in raw:
