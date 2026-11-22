@@ -22,6 +22,7 @@ from ante.contracts.cli_errors import (
     ReportNotFoundError,
     ReportValidationError,
 )
+from ante.core import clock
 from ante.core.database import OperationalError
 from ante.report.models import ReportStatus
 from ante.report.validation import ReportSubmitRequest
@@ -114,7 +115,7 @@ def submit(
             store = ReportStore(db)
             await store.initialize()
 
-            from datetime import UTC, datetime
+            from datetime import UTC
             from uuid import uuid4
 
             from ante.report.models import ReportStatus, StrategyReport
@@ -125,7 +126,7 @@ def submit(
                 strategy_version=validated.strategy_version,
                 strategy_path=validated.strategy_path,
                 status=ReportStatus.SUBMITTED,
-                submitted_at=datetime.now(tz=UTC),
+                submitted_at=clock.now(UTC),
                 submitted_by=submitted_by,
                 backtest_period=validated.backtest_period,
                 backtest_run_id=effective_run_id,

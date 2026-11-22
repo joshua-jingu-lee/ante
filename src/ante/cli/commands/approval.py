@@ -17,6 +17,7 @@ from ante.contracts.cli_errors import (
     ApprovalInvalidTypeError,
     InvalidJsonError,
 )
+from ante.core import clock
 
 
 @click.group()
@@ -463,7 +464,7 @@ async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
 
 def _parse_expires_in(expires_in: str) -> str:
     """'72h', '7d' 같은 상대 시간을 절대 시각 ISO 문자열로 변환."""
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, timedelta
 
     value = expires_in.rstrip("hHdD")
     try:
@@ -481,4 +482,4 @@ def _parse_expires_in(expires_in: str) -> str:
         msg = f"지원하지 않는 시간 단위: {unit} (h 또는 d만 가능)"
         raise ValueError(msg)
 
-    return (datetime.now(UTC) + delta).isoformat()
+    return (clock.now(UTC) + delta).isoformat()
