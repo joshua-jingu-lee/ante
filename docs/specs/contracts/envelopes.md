@@ -65,7 +65,8 @@ CLI 계약의 `envelope`이 `standard`인 커맨드가 `--format json` 모드에
   envelope을 내지 않고 `TypeError`를 낸다.
 - `data` 배치: 결과 값의 payload가 객체면 그대로 `data`다. 배열이면
   `{<계약의 data_key>: 배열}`이다. 계약의 `data_key`가 없는데 payload가 배열이면 훅은
-  envelope을 내지 않고 `TypeError`를 낸다.
+  envelope을 내지 않고 `TypeError`를 낸다. `data_key`의 이름은 배열의 행이 나타내는
+  자원의 복수형 snake_case 명사다(예: 결재 요청 행의 배열은 `approvals`).
 - 계약의 `envelope`이 `raw_legacy`인 명령의 성공 출력은 CLI success envelope이 아니다.
   명령이 직접 만든 payload(평면 객체나 배열 등)가 그대로 나가며, 본 SSOT의 4형태 밖이다.
   `raw_legacy`는 계약에서 사라져 가는 값이다. 새 계약은 이 값을 쓰지 않으며,
@@ -177,8 +178,8 @@ CLI envelope과 IPC envelope은 **표면별 1회만** wrapping 된다. 한 응�
 - **오프라인 CLI**: 직접 모듈 임포트로 실행되는 명령 가운데 계약의 `envelope`이
   `standard`인 명령은 결과를 한 번 wrapping 해 CLI success envelope으로 출력한다.
 - **IPC passthrough CLI**: 런타임 IPC 위임 명령 가운데 계약의 `envelope`이 `standard`인
-  명령은 IPC 응답의 `result`를 그대로 사용해 CLI success envelope을 1회 구성한다. IPC `result`를 다시
-  IPC envelope으로 재감싸서 CLI에 넘기지 않는다.
+  명령은 IPC `result`를 다시 IPC envelope으로 감싸지 않고 CLI success envelope을 1회
+  구성한다.
 - **CLI IPC 헬퍼 계약**: `src/ante/cli/commands/ipc_helpers.py`의 `ipc_send`는
   IPC 성공 응답의 `result`만 호출자에 돌려주고, 실패는 타입 예외로 올린다:
   `IPCServerNotRunningError`·`IPCClientTimeoutError`, 그리고 서버의

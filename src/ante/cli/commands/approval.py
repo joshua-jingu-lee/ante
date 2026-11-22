@@ -10,8 +10,7 @@ import click
 
 from ante.approval.models import ApprovalStatus, ApprovalType, ApprovalValidationError
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
-from ante.cli.main import get_formatter
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
     ApprovalInvalidStatusError,
@@ -44,10 +43,9 @@ def request(
     params_json: str,
     reference_id: str,
     expires_in: str,
-) -> None:
+) -> CommandResult:
     """결재 요청 생성."""
 
-    fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
     try:
@@ -90,7 +88,7 @@ def request(
         )
 
     result = asyncio.run(_create())
-    fmt.success(f"결재 요청 생성: {result.get('id', '')}", result)
+    return CommandResult(data=result, message=f"결재 요청 생성: {result.get('id', '')}")
 
 
 @approval.command("list")
@@ -106,9 +104,8 @@ def approval_list(
     status: str | None,
     approval_type: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """결재 목록 조회."""
-    fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
         raise ApprovalInvalidStatusError(
@@ -147,7 +144,8 @@ def approval_list(
             ]
 
     rows = asyncio.run(_list())
-    fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
+    columns = ["id", "type", "status", "requester", "title", "created_at"]
+    return CommandResult(data=rows, text=tuple(table_lines(rows, columns)))
 
 
 @approval.command()
@@ -157,9 +155,8 @@ def approval_list(
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
-def info(ctx: click.Context, id: str, db_path: str | None) -> None:
+def info(ctx: click.Context, id: str, db_path: str | None) -> CommandResult:
     """결재 상세 조회."""
-    fmt = get_formatter(ctx)
 
     async def _info() -> dict[str, Any]:
         from ante.approval import ApprovalService
@@ -190,7 +187,7 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
             }
 
     result = asyncio.run(_info())
-    fmt.output(result)
+    return CommandResult(data=result, text=(str(result),))
 
 
 @approval.command()
@@ -214,9 +211,8 @@ def review(
     review_result: str,
     detail: str,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """검토 의견 추가."""
-    fmt = get_formatter(ctx)
     reviewer = get_member_id(ctx)
 
     async def _review() -> dict[str, Any]:
@@ -242,7 +238,9 @@ def review(
             }
 
     result = asyncio.run(_review())
-    fmt.success(f"검토 의견 추가: {reviewer} → {review_result}", result)
+    return CommandResult(
+        data=result, message=f"검토 의견 추가: {reviewer} → {review_result}"
+    )
 
 
 @approval.command("reopen")
@@ -263,9 +261,8 @@ def reopen(
     id: str,
     body: str | None,
     params_json: str | None,
-) -> None:
+) -> CommandResult:
     """거절된 결재 재상신."""
-    fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
     params = None
@@ -291,7 +288,7 @@ def reopen(
         return await ipc_send("approval.reopen", args, actor=requester)
 
     result = asyncio.run(_reopen())
-    fmt.success(f"결재 재상신: {result.get('id', id)}", result)
+    return CommandResult(data=result, message=f"결재 재상신: {result.get('id', id)}")
 
 
 @approval.command("audit-types")
@@ -305,7 +302,7 @@ def audit_types(
     ctx: click.Context,
     status: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별.
 
     분류는 ``offline`` (DB 직접 조회) 이며 ``approval list`` 와 동일하게
@@ -314,7 +311,6 @@ def audit_types(
 
     출력 컬럼: id, type, status, requester, created_at, expires_at.
     """
-    fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
         raise ApprovalInvalidStatusError(
@@ -344,10 +340,8 @@ def audit_types(
             ]
 
     rows = asyncio.run(_list())
-    fmt.table(
-        rows,
-        ["id", "type", "status", "requester", "created_at", "expires_at"],
-    )
+    columns = ["id", "type", "status", "requester", "created_at", "expires_at"]
+    return CommandResult(data=rows, text=tuple(table_lines(rows, columns)))
 
 
 @approval.command("cancel-invalid")
@@ -356,7 +350,7 @@ def audit_types(
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
-def cancel_invalid(ctx: click.Context, id: str) -> None:
+def cancel_invalid(ctx: click.Context, id: str) -> CommandResult:
     """legacy invalid-type approval row 의 administrative cancellation.
 
     일반 ``ante approval cancel`` 의 requester ownership rule 을 우회한다 —
@@ -368,7 +362,6 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
     ``ante system start`` 후 다시 실행한다. cold-path fallback 은 제공하지
     않는다 (Non-goal).
     """
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _cancel() -> dict[str, Any]:
@@ -381,9 +374,8 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
         )
 
     result = asyncio.run(_cancel())
-    fmt.success(
-        f"invalid-type 결재 cleanup: {result.get('id', id)}",
-        result,
+    return CommandResult(
+        data=result, message=f"invalid-type 결재 cleanup: {result.get('id', id)}"
     )
 
 
@@ -393,9 +385,8 @@ def cancel_invalid(ctx: click.Context, id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("approval:write")
-def cancel(ctx: click.Context, id: str) -> None:
+def cancel(ctx: click.Context, id: str) -> CommandResult:
     """결재 철회 (요청자만 가능)."""
-    fmt = get_formatter(ctx)
     requester = get_member_id(ctx)
 
     async def _cancel() -> dict[str, Any]:
@@ -404,7 +395,7 @@ def cancel(ctx: click.Context, id: str) -> None:
         return await ipc_send("approval.cancel", {"id": id}, actor=requester)
 
     result = asyncio.run(_cancel())
-    fmt.success(f"결재 철회: {result.get('id', id)}", result)
+    return CommandResult(data=result, message=f"결재 철회: {result.get('id', id)}")
 
 
 @approval.command("approve")
@@ -413,9 +404,8 @@ def cancel(ctx: click.Context, id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
-def approve(ctx: click.Context, id: str) -> None:
+def approve(ctx: click.Context, id: str) -> CommandResult:
     """결재 승인."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _approve() -> dict[str, Any]:
@@ -424,7 +414,7 @@ def approve(ctx: click.Context, id: str) -> None:
         return await ipc_send("approval.approve", {"id": id}, actor=actor)
 
     result = asyncio.run(_approve())
-    fmt.success(f"결재 승인: {result.get('id', id)}", result)
+    return CommandResult(data=result, message=f"결재 승인: {result.get('id', id)}")
 
 
 @approval.command("reject")
@@ -434,9 +424,8 @@ def approve(ctx: click.Context, id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("approval:admin")
-def reject(ctx: click.Context, id: str, reason: str) -> None:
+def reject(ctx: click.Context, id: str, reason: str) -> CommandResult:
     """결재 거절."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _reject() -> dict[str, Any]:
@@ -449,7 +438,7 @@ def reject(ctx: click.Context, id: str, reason: str) -> None:
         )
 
     result = asyncio.run(_reject())
-    fmt.success(f"결재 거절: {result.get('id', id)}", result)
+    return CommandResult(data=result, message=f"결재 거절: {result.get('id', id)}")
 
 
 async def _find_request(service, id: str):  # type: ignore[no-untyped-def]
