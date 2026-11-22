@@ -10,7 +10,7 @@ import random
 import zipfile
 from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from xml.etree import ElementTree
 
 import aiohttp
@@ -126,7 +126,7 @@ class DARTSource:
         """Rate Limiter 인스턴스."""
         return self._rate_limiter
 
-    async def fetch(self, date: str, **kwargs: Any) -> list[dict]:
+    async def fetch(self, date: str, **kwargs: Any) -> list[dict[str, Any]]:
         """DataSource 프로토콜 구현.
 
         DART는 날짜별 수집이 아니라 연도+분기별 수집이므로,
@@ -195,7 +195,7 @@ class DARTSource:
         corp_codes: list[str],
         year: str,
         reprt_code: str,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """다중회사 주요계정(fnlttMultiAcnt) API를 배치 호출한다.
 
         corp_codes를 100개씩 나누어 호출하며,
@@ -205,7 +205,7 @@ class DARTSource:
             DailyLimitExceededError: 일일 한도 초과 시.
             CriticalApiError: 인증키 에러 시.
         """
-        all_items: list[dict] = []
+        all_items: list[dict[str, Any]] = []
 
         own_session = self._session is None
         session = self._session or aiohttp.ClientSession()
@@ -395,7 +395,7 @@ class DARTSource:
         corp_codes: list[str],
         year: str,
         reprt_code: str,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """fnlttMultiAcnt API를 호출한다."""
         url = f"{self._base_url}/fnlttMultiAcnt.json"
         params = {
@@ -496,19 +496,19 @@ class DARTSource:
         session: aiohttp.ClientSession,
         url: str,
         params: dict[str, str],
-    ) -> dict:
+    ) -> dict[str, Any]:
         """HTTP GET 요청을 보내고 JSON 응답을 반환한다."""
         async with session.get(url, params=params) as resp:
             resp.raise_for_status()
-            return await resp.json(content_type=None)
+            return cast("dict[str, Any]", await resp.json(content_type=None))
 
     @staticmethod
-    def _extract_list(data: dict) -> list[dict]:
+    def _extract_list(data: dict[str, Any]) -> list[dict[str, Any]]:
         """DART 응답에서 list 배열을 추출한다."""
         items = data.get("list", [])
         if isinstance(items, dict):
             items = [items]
-        return items
+        return cast("list[dict[str, Any]]", items)
 
     @staticmethod
     def _backoff_delay(attempt: int, base: float = 1.0, cap: float = 60.0) -> float:

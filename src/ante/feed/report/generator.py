@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from ante.feed.models.result import CollectionResult
 
@@ -27,7 +28,7 @@ class ReportGenerator:
         """
         self._feed_dir = feed_dir
 
-    def generate(self, result: CollectionResult) -> dict:
+    def generate(self, result: CollectionResult) -> dict[str, Any]:
         """CollectionResult를 리포트 dict로 변환한다.
 
         Args:
@@ -36,7 +37,7 @@ class ReportGenerator:
         Returns:
             리포트 JSON 구조를 담은 dict.
         """
-        report: dict = {
+        report: dict[str, Any] = {
             "mode": result.mode,
             "started_at": result.started_at,
             "finished_at": result.finished_at,
@@ -59,7 +60,7 @@ class ReportGenerator:
         }
         return report
 
-    def save(self, data_path: Path, report: dict, mode: str) -> Path:
+    def save(self, data_path: Path, report: dict[str, Any], mode: str) -> Path:
         """리포트를 JSON 파일로 저장한다.
 
         경로: {data_path}/.feed/reports/{YYYY-MM-DDTHHMMSS}-{mode}.json

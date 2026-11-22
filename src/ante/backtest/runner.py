@@ -5,11 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from typing import Any
 
 from ante.backtest.service import BACKTEST_RESULT_SENTINEL
 
 
-async def run_backtest(config: dict) -> dict:
+async def run_backtest(config: dict[str, Any]) -> dict[str, Any]:
     """백테스트 실행 후 결과를 additive envelope dict로 반환."""
     from ante.backtest.service import BacktestService
 

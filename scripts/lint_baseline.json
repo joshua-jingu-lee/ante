@@ -261,26 +261,6 @@
     "src/ante/audit/logger.py": {
       "type-arg": 1
     },
-    "src/ante/backtest/executor.py": {
-      "type-arg": 3
-    },
-    "src/ante/backtest/metrics.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
-    "src/ante/backtest/result.py": {
-      "type-arg": 7
-    },
-    "src/ante/backtest/run_store.py": {
-      "type-arg": 1
-    },
-    "src/ante/backtest/runner.py": {
-      "type-arg": 1
-    },
-    "src/ante/backtest/service.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
     "src/ante/bot/manager.py": {
       "type-arg": 1,
       "unused-ignore": 3
@@ -393,53 +373,9 @@
       "no-any-return": 1,
       "type-arg": 6
     },
-    "src/ante/core/database.py": {
-      "type-arg": 10
-    },
-    "src/ante/data/collector.py": {
-      "type-arg": 7
-    },
-    "src/ante/data/store.py": {
-      "no-any-return": 1,
-      "type-arg": 5,
-      "unused-ignore": 1
-    },
     "src/ante/eventbus/events.py": {
       "type-arg": 3,
       "unused-ignore": 3
-    },
-    "src/ante/feed/__init__.py": {
-      "no-untyped-def": 1
-    },
-    "src/ante/feed/models/result.py": {
-      "type-arg": 3
-    },
-    "src/ante/feed/pipeline/backfill_runner.py": {
-      "type-arg": 9
-    },
-    "src/ante/feed/pipeline/checkpoint.py": {
-      "type-arg": 2
-    },
-    "src/ante/feed/pipeline/dart_collector.py": {
-      "no-any-return": 1,
-      "type-arg": 8
-    },
-    "src/ante/feed/pipeline/data_go_kr_collector.py": {
-      "type-arg": 15
-    },
-    "src/ante/feed/report/generator.py": {
-      "type-arg": 3
-    },
-    "src/ante/feed/sources/base.py": {
-      "type-arg": 1
-    },
-    "src/ante/feed/sources/dart.py": {
-      "no-any-return": 2,
-      "type-arg": 6
-    },
-    "src/ante/feed/sources/data_go_kr.py": {
-      "no-any-return": 1,
-      "type-arg": 7
     },
     "src/ante/gateway/cache.py": {
       "type-arg": 1

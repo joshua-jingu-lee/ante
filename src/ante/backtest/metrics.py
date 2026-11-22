@@ -10,7 +10,7 @@ from ante.backtest.result import resample_equity_curve_daily
 
 def calculate_metrics(
     trades: list[Any],
-    equity_curve: list[dict],
+    equity_curve: list[dict[str, Any]],
     initial_balance: float,
     final_balance: float,
 ) -> dict[str, Any]:
@@ -83,7 +83,7 @@ def calculate_metrics(
     return metrics
 
 
-def _annual_return(equity_curve: list[dict], total_return: float) -> float:
+def _annual_return(equity_curve: list[dict[str, Any]], total_return: float) -> float:
     """연환산 수익률 계산."""
     if len(equity_curve) < 2:
         return total_return
@@ -96,7 +96,7 @@ def _annual_return(equity_curve: list[dict], total_return: float) -> float:
     if r <= -1:
         return -100.0
 
-    annual = ((1 + r) ** (252 / days) - 1) * 100
+    annual: float = ((1 + r) ** (252 / days) - 1) * 100
     return annual
 
 
