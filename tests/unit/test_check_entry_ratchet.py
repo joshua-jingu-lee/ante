@@ -2024,6 +2024,26 @@ def test_full_output_for_swapped_raw_legacy_contract(
             id="path-name",
         ),
         pytest.param(
+            _contracts(
+                _contract("demo list", 'OutputContract("raw", None, "raw_legacy")')
+            ),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): OutputContract(...) has a positional or ** argument",
+            id="output-positional",
+        ),
+        pytest.param(
+            _contracts(_contract("demo list", "OutputContract(**RAW)")),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): OutputContract(...) has a positional or ** argument",
+            id="output-double-star",
+        ),
+        pytest.param(
+            _contracts(_contract("demo list", 'OutputContract(kind="raw", **EXTRA)')),
+            "src/ante/contracts/cli_registry.py:2: CliCommandContract"
+            "('demo list'): OutputContract(...) has a positional or ** argument",
+            id="output-keyword-and-double-star",
+        ),
+        pytest.param(
             "X = 1\n",
             "no CliCommandContract(...) found in src/ante/contracts/cli_registry.py",
             id="no-contract",
@@ -2080,6 +2100,11 @@ def _direct(tmp_path: Path, source: str, rel: str = COMMAND) -> dict[str, int]:
         'get_fmt().success("m")',
         'click.echo("m")',
         'click.echo("m", err=True)',
+        'click.secho("m")',
+        'echo("m")',
+        'secho("m")',
+        'print("m")',
+        'print("m", file=sys.stderr)',
         'sys.stdout.write("m")',
         "x = fmt.is_json",
         "if ctx.obj.is_json:\n        pass",
@@ -2099,12 +2124,13 @@ def test_each_direct_output_form_counts_once(tmp_path: Path, statement: str) -> 
         "fmt.outputs({})",
         'fmt.success_message("m")',
         "x = fmt.output",
-        'echo("m")',
-        'click.secho("m")',
         'other.echo("m")',
+        'other.secho("m")',
+        'other.print("m")',
+        'pprint("m")',
+        "x = print",
         'sys.stderr.write("m")',
         'stdout.write("m")',
-        'print("m")',
         "x = fmt.is_jsonl",
         'getattr(fmt, "is_json", False)',
         'x = "fmt.output(1) click.echo(1) .is_json"',

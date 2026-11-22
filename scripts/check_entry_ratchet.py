@@ -75,15 +75,18 @@ Output keys:
 - ``raw_legacy_contracts`` (set): the paths of the ``CliCommandContract(...)``
   calls in ``src/ante/contracts/cli_registry.py`` whose
   ``output=OutputContract(...)`` has ``envelope="raw_legacy"``. A path is its
-  segments joined by one space (``"account list"``). A contract without an
-  ``envelope=`` keyword is ``standard``.
+  segments joined by one space (``"account list"``). An
+  ``OutputContract(...)`` with keyword arguments only and no ``envelope=`` is
+  ``standard``.
 - ``cli_direct_output`` (count per file in ``src/ante/cli/commands/**/*.py``):
   calls whose attribute name is ``output``, ``success`` or ``table``, on any
-  receiver; ``click.echo(...)``; ``.write(...)`` on ``stdout`` of the ``sys``
-  module or a name it was imported as; and every attribute named ``is_json``.
+  receiver; calls of a bare name ``print``, ``echo`` or ``secho``;
+  ``click.echo(...)`` and ``click.secho(...)``; ``.write(...)`` on ``stdout``
+  of the ``sys`` module or a name it was imported as; and every attribute
+  named ``is_json``.
 
-Known limits of the output keys: ``echo`` imported from ``click`` under its
-own name or an alias, ``click.secho`` and ``print`` are not counted.
+Known limits of the output keys: calls through ``import click as ck`` and
+``from sys import stdout`` are not counted.
 
 Exit 0: all nine keys equal ``scripts/entry_ratchet_baseline.json``.
 Exit 1: a count differs from the baseline in either direction, or a set
@@ -94,8 +97,9 @@ that cannot be read or parsed, a missing hook function or registry, a missing
 that is not the name of a top-level function of the module, a handler with
 fewer than two parameters, a missing CLI contract registry or no contract in
 it, a contract whose ``path=`` is not a tuple of string literals, whose
-``output=`` is not an ``OutputContract(...)`` call or whose ``envelope=`` is
-not a string literal, or any unexpected exception.
+``output=`` is not an ``OutputContract(...)`` call, has a positional or ``**``
+argument, or whose ``envelope=`` is not a string literal, or any unexpected
+exception.
 """
 
 from __future__ import annotations
@@ -155,6 +159,8 @@ CONTRACT_CALL = "CliCommandContract"
 OUTPUT_CALL = "OutputContract"
 RAW_LEGACY = "raw_legacy"
 OUTPUT_ATTRS = frozenset({"output", "success", "table"})
+PRINT_NAMES = frozenset({"print", "echo", "secho"})
+CLICK_ATTRS = frozenset({"echo", "secho"})
 
 ALTERNATIVES = (
     "새 에러 출구와 새 에러 코드 대신:\n"
@@ -533,6 +539,8 @@ def _contract_envelope(node: ast.Call, path: str) -> str:
         isinstance(output, ast.Call) and _terminal_name(output.func) == OUTPUT_CALL
     ):
         raise CheckError(f"{where}: output is not an {OUTPUT_CALL}(...) call")
+    if output.args or any(keyword.arg is None for keyword in output.keywords):
+        raise CheckError(f"{where}: {OUTPUT_CALL}(...) has a positional or ** argument")
     value = _keyword(output, "envelope")
     if value is None:
         return "standard"
@@ -563,13 +571,17 @@ def raw_legacy_paths(tree: ast.Module) -> frozenset[str]:
 def is_direct_output(node: ast.AST, sys_names: set[str]) -> bool:
     if isinstance(node, ast.Attribute):
         return node.attr == "is_json"
-    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+    if not isinstance(node, ast.Call):
         return False
     func = node.func
+    if isinstance(func, ast.Name):
+        return func.id in PRINT_NAMES
+    if not isinstance(func, ast.Attribute):
+        return False
     if func.attr in OUTPUT_ATTRS:
         return True
     receiver = func.value
-    if func.attr == "echo":
+    if func.attr in CLICK_ATTRS:
         return isinstance(receiver, ast.Name) and receiver.id == "click"
     return (
         func.attr == "write"
