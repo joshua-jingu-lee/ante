@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import AfterValidator, BaseModel, ConfigDict
+from pydantic import AfterValidator, BaseModel, ConfigDict, SecretStr
 from pydantic_core import PydanticCustomError
 
 from ante.core.account_id import is_invalid_account_id
@@ -12,6 +12,15 @@ __all__ = [
     "AccountId",
     "AccountSuspendRequest",
     "IPCRequest",
+    "MemberReactivateRequest",
+    "MemberRegenerateRecoveryKeyRequest",
+    "MemberRegisterRequest",
+    "MemberResetPasswordRequest",
+    "MemberRevokeRequest",
+    "MemberRotateTokenRequest",
+    "MemberSetEmojiRequest",
+    "MemberSuspendRequest",
+    "MemberUpdateScopesRequest",
     "StrategySetStatusRequest",
     "SystemClearHaltRequest",
     "SystemHaltRequest",
@@ -57,3 +66,46 @@ class AccountSuspendRequest(IPCRequest):
 
 class AccountActivateRequest(IPCRequest):
     account_id: AccountId
+
+
+class MemberUpdateScopesRequest(IPCRequest):
+    member_id: str
+    scopes: list[str] = []
+
+
+class MemberRegisterRequest(IPCRequest):
+    member_id: str
+    member_type: str
+    org: str = "default"
+    name: str = ""
+    scopes: list[str] = []
+
+
+class MemberSetEmojiRequest(IPCRequest):
+    member_id: str
+    emoji: str
+
+
+class MemberSuspendRequest(IPCRequest):
+    member_id: str
+
+
+class MemberReactivateRequest(IPCRequest):
+    member_id: str
+
+
+class MemberRevokeRequest(IPCRequest):
+    member_id: str
+
+
+class MemberRotateTokenRequest(IPCRequest):
+    member_id: str
+
+
+class MemberResetPasswordRequest(IPCRequest):
+    recovery_key: SecretStr
+    new_password: SecretStr
+
+
+class MemberRegenerateRecoveryKeyRequest(IPCRequest):
+    password: SecretStr
