@@ -122,8 +122,9 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 
 ## Auth Middleware Code 정책 (normative)
 
-본 1.0 시점에서 `src/ante/cli/middleware.py`는 다음 lowercase code를 envelope의
-`code` 필드에 노출한다 (`src/ante/cli/middleware.py:87,182,235,249,279,293,509,859`).
+본 1.0 시점에서 인증 관문은 `ante.contracts.cli_errors`의 `CliAuthRequiredError`·
+`CliAuthFailedError`·`CliPermissionDeniedError`를 던지고, 진입점 훅이 에러 레지스트리가
+정한 다음 lowercase code를 envelope의 `code`에 낸다.
 
 - `auth_required`
 - `auth_failed`
@@ -157,8 +158,8 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
   허용 범위(`code: string`) 안에서 **legacy alias로 명시적으로 허용**한다.
 - **새 callsite 금지**: 신규 도입되는 auth-관련 error envelope은 lowercase legacy
   alias를 사용하지 않고 normative SCREAMING_SNAKE code(`AUTH_REQUIRED`/`AUTH_FAILED`/
-  `PERMISSION_DENIED`)를 사용한다. 현재 8개 lowercase callsite는 #1815 auth
-  registry migration까지 유지된다.
+  `PERMISSION_DENIED`)를 사용한다. 위 예외 클래스 셋의 lowercase code는 #1815
+  auth registry migration까지 유지된다.
 - **소비자 매칭 정책**: oracle/Agent는 본 SSOT의 normative code와 legacy alias를
   같은 fault로 간주해야 한다. drift test(#1841)는 두 표현이 같은 의미를
   가리킨다는 invariant를 lock 한다.

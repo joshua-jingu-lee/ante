@@ -192,7 +192,7 @@ CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 | 함수/데코레이터 | 설명 |
 |----------------|------|
 | `authenticate_member(ctx)` | 루트 그룹에서 호출. `ANTE_MEMBER_TOKEN` 환경변수로 `MemberService.authenticate()` 실행, 성공 시 `ctx.obj["member"]`에 저장 |
-| `@require_auth` | 커맨드 데코레이터. `ctx.obj["member"]`가 None이면 에러 출력 후 SystemExit(1) |
+| `@require_auth` | 커맨드 데코레이터. `ctx.obj["member"]`가 None이면 `CliAuthRequiredError`(`auth_required`)를 던지고, 진입점 훅이 오류 봉투(text는 `Error: auth_required: <message>`)를 내고 종료 코드 1로 끝낸다 |
 | `@require_scope(*scopes)` | 커맨드 데코레이터. Human 멤버(`MemberType.HUMAN`)는 스코프 무제한 통과. Agent 멤버는 등록된 scope에 필요 scope가 모두 포함되어야 함 |
 | `get_member_id(ctx)` | 인증된 멤버 ID 반환. 미인증 시 `"unknown"` |
 
@@ -200,8 +200,8 @@ CLI는 해당 규칙을 command 실행 전에 적용하는 표면이다.
 
 **Auth error envelope code 정책 (SSOT reference)**:
 
-`authenticate_member`/`@require_auth`/`@require_scope`가 노출하는 CLI error
-envelope의 `code` 값은 본 1.0 시점에서 lowercase legacy alias
+`authenticate_member`/`@require_auth`/`@require_scope`가 던지는 예외로 진입점 훅이
+내는 CLI error envelope의 `code` 값은 본 1.0 시점에서 lowercase legacy alias
 (`auth_required`/`auth_failed`/`permission_denied`)를 사용한다. 이 alias는
 [`docs/specs/contracts/error-taxonomy.md` — Auth Middleware Code 정책](../contracts/error-taxonomy.md#auth-middleware-code-정책-normative)에서
 `AUTH_REQUIRED`/`AUTH_FAILED`/`PERMISSION_DENIED` SCREAMING_SNAKE normative code의
