@@ -501,6 +501,16 @@ def _build_harness(calls: list[str]) -> AuthenticatedGroup:
         enforce_scope(ctx, "x:write")
         _record("imperative")
 
+    @click.command("imperative-bare")
+    @click.pass_context
+    def imperative_bare(ctx: click.Context) -> None:
+        enforce_scope(ctx, "x:write")
+        _record("imperative-bare")
+
+    unwrapped = imperative_bare.callback
+    root.add_command(imperative_bare)
+    imperative_bare.callback = unwrapped
+
     @root.command("fmt")
     @format_option
     @click.pass_context
@@ -575,6 +585,13 @@ _HARNESS_KINDS: tuple[tuple[str, tuple[str, ...], Setup, str, str], ...] = (
     (
         "enforce-scope-none",
         ("imperative",),
+        Setup(gate_off=True),
+        "auth_required",
+        _REQ,
+    ),
+    (
+        "enforce-scope-bare-none",
+        ("imperative-bare",),
         Setup(gate_off=True),
         "auth_required",
         _REQ,
