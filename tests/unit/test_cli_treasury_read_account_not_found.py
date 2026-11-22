@@ -5,10 +5,8 @@
 동형으로, 나머지 4개 명령(`budgets`, `portfolio value`, `portfolio history`,
 `set-balance`)에도 같은 매핑을 적용한다.
 
-ante-oracle host probe ``cli_treasury_valid_absent_read_followup_contract`` 가
-signature ``treasury_budgets_valid_absent`` /
-``treasury_portfolio_value_valid_absent`` /
-``treasury_portfolio_history_valid_absent`` 로 잡은 contract-drift를 잠근다.
+`budgets`·`portfolio value`·`portfolio history` 의 valid-but-missing
+account_id contract-drift를 잠근다.
 
 회귀:
 
