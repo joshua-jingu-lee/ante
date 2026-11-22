@@ -22,7 +22,17 @@ from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
-from ante.contracts import emit_cli_error
+from ante.contracts.cli_errors import (
+    BotInvalidParamError,
+    BotMissingRequiredAccountError,
+    CliBotNotFoundError,
+    CliConfirmationRequiredError,
+    CliMissingRequiredInputError,
+    InvalidDateRangeError,
+    SignalKeyNotSetError,
+)
+from ante.contracts.ipc_client_errors import IPCRemoteError, IPCServerNotRunningError
+from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import OperationalError
 
 if TYPE_CHECKING:
@@ -171,9 +181,7 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
             args["account_id"] = account_id
         try:
             ipc_result = await ipc_send("bot.list", args, actor=actor)
-        except click.ClickException as e:
-            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
-                raise
+        except IPCServerNotRunningError:
             return await _run_list_fallback()
         return list(ipc_result.get("bots", []))
 
@@ -222,9 +230,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
 
         try:
             ipc_result = await ipc_send("bot.info", {"bot_id": bot_id}, actor=actor)
-        except click.ClickException as e:
-            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
-                raise
+        except IPCServerNotRunningError:
             return await _run_info_fallback()
         return ipc_result.get("bot")
 
@@ -241,8 +247,7 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
         raise SystemExit(1) from e
 
     if not result:
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
-        ctx.exit(1)
+        raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -270,24 +275,19 @@ def _parse_param(value: str) -> tuple[str, object]:
     return key.strip(), parsed
 
 
-def _resolve_account_non_interactive(accounts: list, fmt) -> str:
+def _resolve_account_non_interactive(accounts: list) -> str:
     """활성 계좌 목록에서 비대화형으로 계좌를 선택한다."""
     if len(accounts) == 1:
         return accounts[0].account_id
 
     if not accounts:
-        fmt.error(
-            "활성 계좌가 없습니다. 먼저 계좌를 등록한 뒤 --account <id>로 지정하세요.",
-            code="BOT_MISSING_REQUIRED_ACCOUNT",
+        raise BotMissingRequiredAccountError(
+            "활성 계좌가 없습니다. 먼저 계좌를 등록한 뒤 --account <id>로 지정하세요."
         )
-    else:
-        ids = ", ".join(acc.account_id for acc in accounts)
-        fmt.error(
-            "활성 계좌가 여러 개입니다. --account <id>로 명시하세요."
-            f" (가능한 계좌: {ids})",
-            code="BOT_MISSING_REQUIRED_ACCOUNT",
-        )
-    raise SystemExit(1)
+    ids = ", ".join(acc.account_id for acc in accounts)
+    raise BotMissingRequiredAccountError(
+        f"활성 계좌가 여러 개입니다. --account <id>로 명시하세요. (가능한 계좌: {ids})"
+    )
 
 
 @bot.command("create")
@@ -334,8 +334,7 @@ def bot_create(
             key, value = _parse_param(p)
             param_dict[key] = value
         except click.BadParameter as e:
-            fmt.error(str(e), code="BOT_INVALID_PARAM")
-            raise SystemExit(1) from e
+            raise BotInvalidParamError(str(e)) from e
 
     if account_id is not None:
         account_id = reject_invalid_account_id(
@@ -350,7 +349,7 @@ def bot_create(
                 return await account_service.list(status=AccountStatus.ACTIVE)
 
         accounts = _run(_list_accounts())
-        account_id = _resolve_account_non_interactive(accounts, fmt)
+        account_id = _resolve_account_non_interactive(accounts)
 
     resolved_account_id = account_id
 
@@ -369,12 +368,7 @@ def bot_create(
             args["params"] = param_dict
         return await ipc_send("bot.create", args, actor=actor)
 
-    try:
-        result = _run(_run_create())
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_create())
 
     fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
 
@@ -402,11 +396,9 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
     actor = get_member_id(ctx)
 
     if not yes:
-        fmt.error(
-            "위험 명령입니다. --yes를 명시해야 봇을 삭제합니다.",
-            code="CLI_CONFIRMATION_REQUIRED",
+        raise CliConfirmationRequiredError(
+            "위험 명령입니다. --yes를 명시해야 봇을 삭제합니다."
         )
-        raise SystemExit(1)
 
     async def _run_remove() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
@@ -415,19 +407,12 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
             return await ipc_send("bot.remove", {"bot_id": bot_id}, actor=actor)
         return await _run_bot_remove_cold_path(bot_id, ctx=ctx)
 
-    try:
-        result = _run(_run_remove())
-    except click.ClickException:
-        raise
-    except Exception as e:
-        emit_cli_error(fmt, e)
+    result = _run(_run_remove())
 
-    if result.get("removed"):
-        suffix = "(cold-path)" if result.get("cold_path") else ""
-        fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
-    else:
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
-        raise SystemExit(1)
+    if not result.get("removed"):
+        raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
+    suffix = "(cold-path)" if result.get("cold_path") else ""
+    fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
 
 
 @bot.command("signal-key")
@@ -509,13 +494,12 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 
         try:
             return await ipc_send("bot.signal_key", {"bot_id": bot_id}, actor=actor)
-        except click.ClickException as e:
-            ipc_code = getattr(e, "ipc_error_code", "")
-            if ipc_code == "IPC_SERVER_NOT_RUNNING":
-                return await _run_signal_key_fallback()
-            if ipc_code == "BOT_NOT_FOUND":
-                return {"bot_id": bot_id, "missing": True}
-            raise
+        except IPCServerNotRunningError:
+            return await _run_signal_key_fallback()
+        except IPCRemoteError as e:
+            if e.code != "BOT_NOT_FOUND":
+                raise
+            return {"bot_id": bot_id, "missing": True}
 
     try:
         result = _run(_run_signal_key())
@@ -528,19 +512,12 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
             text = f"{code}: {message}" if code else message
             fmt.error(text)
         raise SystemExit(1) from e
-    except Exception as e:
-        emit_cli_error(fmt, e)
 
     if result.get("missing"):
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
-        ctx.exit(1)
+        raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
     if result.get("signal_key") is None:
-        fmt.error(
-            f"signal key가 설정되지 않았습니다: {bot_id}",
-            code="SIGNAL_KEY_NOT_SET",
-        )
-        ctx.exit(1)
+        raise SignalKeyNotSetError(f"signal key가 설정되지 않았습니다: {bot_id}")
 
     if fmt.is_json:
         fmt.output(result)
@@ -579,12 +556,10 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
 
             account_id = bot_row["account_id"]
             if is_invalid_account_id(account_id):
-                fmt.error(
+                raise RequestValidationError(
                     f"봇의 account_id 가 유효하지 않아 포지션을 조회할 수 없습니다:"
-                    f" {bot_id} (account_id={account_id!r})",
-                    code="VALIDATION_ERROR",
+                    f" {bot_id} (account_id={account_id!r})"
                 )
-                raise SystemExit(1)
 
             position_history = PositionHistory(db)
             await position_history.initialize()
@@ -611,9 +586,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
             ipc_result = await ipc_send(
                 "bot.positions", {"bot_id": bot_id}, actor=actor
             )
-        except click.ClickException as e:
-            if getattr(e, "ipc_error_code", "") != "IPC_SERVER_NOT_RUNNING":
-                raise
+        except IPCServerNotRunningError:
             return await _run_positions_fallback()
         return list(ipc_result.get("positions", []))
 
@@ -630,8 +603,7 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         raise SystemExit(1) from e
 
     if result is None:
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
-        ctx.exit(1)
+        raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
     if not result:
         fmt.output({"message": "보유 포지션 없음", "positions": []})
@@ -703,11 +675,7 @@ def bot_update(
     }
     updates = {k: v for k, v in updates.items() if v is not None}
     if not updates:
-        fmt.error(
-            "변경할 필드를 하나 이상 지정하세요.",
-            code="CLI_MISSING_REQUIRED_INPUT",
-        )
-        raise SystemExit(1)
+        raise CliMissingRequiredInputError("변경할 필드를 하나 이상 지정하세요.")
 
     async def _run_update() -> dict:
         from ante.cli.commands.ipc_helpers import ipc_send
@@ -718,13 +686,7 @@ def bot_update(
             actor=actor,
         )
 
-    try:
-        result = _run(_run_update())
-    except click.ClickException as e:
-        code = getattr(e, "ipc_error_code", "") or "IPC_ERROR"
-        message = getattr(e, "ipc_error_message", None) or e.message
-        fmt.error(message, code=code)
-        raise SystemExit(1) from e
+    result = _run(_run_update())
 
     if fmt.is_json:
         fmt.output(result)
@@ -782,14 +744,11 @@ def bot_logs(
         since = _parse_log_datetime(from_date, "--from")
         until = _parse_log_datetime(to_date, "--to", end_of_day=True)
     except click.BadParameter as e:
-        fmt.error(str(e), code="VALIDATION_ERROR")
-        raise SystemExit(1) from e
+        raise RequestValidationError(str(e)) from e
     if since is not None and until is not None and since > until:
-        fmt.error(
-            f"시작일({from_date})이(가) 종료일({to_date}) 이후입니다.",
-            code="INVALID_DATE_RANGE",
+        raise InvalidDateRangeError(
+            f"시작일({from_date})이(가) 종료일({to_date}) 이후입니다."
         )
-        raise SystemExit(1)
 
     async def _run_logs() -> dict:
         from ante.eventbus.history import EventHistoryStore
@@ -838,8 +797,7 @@ def bot_logs(
 
     result = _run(_run_logs())
     if result.get("missing"):
-        fmt.error(f"봇을 찾을 수 없습니다: {bot_id}", code="BOT_NOT_FOUND")
-        raise SystemExit(1)
+        raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
     if fmt.is_json:
         fmt.output(result)
     elif not result["logs"]:

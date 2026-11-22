@@ -19,10 +19,11 @@ comparison. Each other before row is:
 - ``의도한 동작 변경``: the row is named with ``--intended``.
 - ``text 형식``: a text-mode call whose exit code, raised type and stdout are
   the same and whose stderr differs in exactly one line, ``Error: <m>`` before
-  and ``Error: <C>: <m>`` after. ``<C>`` is a registry code other than
-  ``EXECUTION_ERROR``. When AFTER has JSON-mode error envelopes for the same
-  arguments without ``--format``, ``<C>`` is one of their codes. For a call
-  without a separate stderr the same test applies to stdout.
+  and ``Error: <C>: <m>`` after. ``<C>`` is a registry code. When AFTER has
+  JSON-mode error envelopes for the same arguments without ``--format``,
+  ``<C>`` is one of their codes. ``EXECUTION_ERROR`` counts only with such an
+  envelope. For a call without a separate stderr the same test applies to
+  stdout.
 - ``다름``: any other difference, and a before row missing after.
 
 ``COVERED`` is the file ``cover --covered-out`` wrote: the recorded calls that
@@ -231,9 +232,11 @@ def is_text_format_change(
     if (before.exit, before.raised) != (after.exit, after.raised):
         return False
     code = _changed_code(before, after)
-    if code is None or code == FALLBACK_CODE or code not in codes:
+    if code is None or code not in codes:
         return False
     paired = json_codes.get(without_format(before.args))
+    if code == FALLBACK_CODE:
+        return code in (paired or set())
     return not paired or code in paired
 
 
