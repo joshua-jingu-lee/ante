@@ -317,6 +317,7 @@ _APPROVAL_STATUS_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
 _APPROVAL_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="APPROVAL_VALIDATION_ERROR",
     category="validation",
+    description="`approval request --type` 값이 SSOT enum에 없음",
 )
 
 
@@ -354,21 +355,29 @@ _BOT_IMMUTABLE_FIELD_SPEC: Final[ErrorSpec] = ErrorSpec(
 _INVALID_SIGNAL_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="INVALID_SIGNAL_KEY",
     category="validation",
+    description=(
+        "핸드셰이크 게이트 1 — signal key 검증 실패(`validate_signal_key` → None)"
+    ),
 )
 
 _BOT_NOT_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_NOT_RUNNING",
     category="state_conflict",
+    description="핸드셰이크 게이트 3 — 봇 존재하나 `status != RUNNING`",
 )
 
 _MALFORMED_REQUEST_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="MALFORMED_REQUEST",
     category="validation",
+    description="핸드셰이크 첫 프레임이 비-dict로 decode(`_handle_connection` 가드)",
 )
 
 _BOT_SIGNAL_CHANNEL_BUSY_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_SIGNAL_CHANNEL_BUSY",
     category="state_conflict",
+    description=(
+        "bot_id당 단일 active session 정책 — 2번째 `signal.connect` 핸드셰이크 거부"
+    ),
 )
 
 
@@ -462,6 +471,7 @@ _STRATEGY_LOAD_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
 _STRATEGY_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="STRATEGY_VALIDATION_ERROR",
     category="validation",
+    description="strategy 명령 인자(예: `--status`) 값이 SSOT enum에 없음",
 )
 
 _STRATEGY_FILE_ACCESS_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -478,6 +488,10 @@ _STRATEGY_INCOMPATIBLE_EXCHANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
 _CONFIG_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CONFIG_VALIDATION_ERROR",
     category="validation",
+    description=(
+        "`config set <key> <value>` 의 key-invariant 위반 (enum SSOT가 정의된 키에 "
+        "invalid 값, 예 `system.log_level` 이 `_VALID_LOG_LEVELS` 비멤버)"
+    ),
 )
 
 
@@ -550,6 +564,10 @@ _UNKNOWN_COMMAND_SPEC: Final[ErrorSpec] = ErrorSpec(
 _CLI_OPTION_CONFLICT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CLI_OPTION_CONFLICT",
     category="validation",
+    description=(
+        "상호 배타적인 옵션을 동시 사용 (period별 전용 옵션을 다른 period와 함께 사용 "
+        "등)"
+    ),
 )
 
 _CLI_USAGE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -575,6 +593,10 @@ _REPORT_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
 _REPORT_VALIDATION_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="REPORT_VALIDATION_ERROR",
     category="validation",
+    description=(
+        "report 명령 입력 계약 위반 (제출 리포트 JSON/스키마 위반, `report performance "
+        "--period monthly --year` 가 비양수 calendar year)"
+    ),
 )
 
 _TRADE_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -615,6 +637,7 @@ _BACKTEST_INVALID_TIMEFRAME_SPEC: Final[ErrorSpec] = ErrorSpec(
 _CLI_CONFIRMATION_REQUIRED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CLI_CONFIRMATION_REQUIRED",
     category="validation",
+    description="위험 명령에 `--yes`/`--force` 누락",
 )
 
 _DATASET_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -695,6 +718,10 @@ _INVALID_DATE_SPEC: Final[ErrorSpec] = ErrorSpec(
 _INVALID_DATE_RANGE_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="INVALID_DATE_RANGE",
     category="validation",
+    description=(
+        "시작일 > 종료일 (inverted date range) 또는 effective 시작일이 미래(`feed run "
+        "backfill --since` / `[schedule].backfill_since` > today)"
+    ),
 )
 
 _ACCOUNT_MASTER_BOOTSTRAP_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -725,26 +752,38 @@ _ACCOUNT_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
 _MEMBER_PASSWORD_ENV_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="MEMBER_PASSWORD_ENV_NOT_SET",
     category="validation",
+    description=(
+        "`--password-env`/`--new-password-env`이 참조한 환경변수가 설정되지 않음"
+    ),
 )
 
 _MEMBER_PASSWORD_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="MEMBER_PASSWORD_FILE_NOT_FOUND",
     category="validation",
+    description=(
+        "`--password-file`/`--new-password-file`이 가리키는 파일이 존재하지 않음"
+    ),
 )
 
 _ACCOUNT_CREDENTIAL_ENV_NOT_SET_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_CREDENTIAL_ENV_NOT_SET",
     category="validation",
+    description="`--credential-env`이 참조한 환경변수가 설정되지 않음",
 )
 
 _ACCOUNT_CREDENTIAL_FILE_NOT_FOUND_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_CREDENTIAL_FILE_NOT_FOUND",
     category="validation",
+    description="`--credential-file`이 가리키는 파일이 존재하지 않음",
 )
 
 _ACCOUNT_DUPLICATE_CREDENTIAL_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_DUPLICATE_CREDENTIAL_KEY",
     category="validation",
+    description=(
+        "같은 credential key를 `--credential`/`--credential-env`/`--credential-file` "
+        "중 둘 이상 채널로 중복 제공"
+    ),
 )
 
 _ACCOUNT_INVALID_TIMEZONE_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -755,11 +794,15 @@ _ACCOUNT_INVALID_TIMEZONE_SPEC: Final[ErrorSpec] = ErrorSpec(
 _ACCOUNT_MISSING_REQUIRED_CREDENTIAL_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_MISSING_REQUIRED_CREDENTIAL",
     category="validation",
+    description="`BrokerPreset.required_credentials`에 정의된 credential key 누락",
 )
 
 _ACCOUNT_UNKNOWN_CREDENTIAL_KEY_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="ACCOUNT_UNKNOWN_CREDENTIAL_KEY",
     category="validation",
+    description=(
+        "broker preset의 `required_credentials`에 정의되지 않은 credential key 제공"
+    ),
 )
 
 _ALREADY_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -830,6 +873,7 @@ _UPDATE_ROLLBACK_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
 _UPDATE_SERVER_RUNNING_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="UPDATE_SERVER_RUNNING",
     category="state_conflict",
+    description="`ante update --force` 없이 서버가 실행 중",
 )
 
 _APPROVAL_INVALID_STATUS_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -850,11 +894,13 @@ _BOT_INVALID_PARAM_SPEC: Final[ErrorSpec] = ErrorSpec(
 _BOT_MISSING_REQUIRED_ACCOUNT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="BOT_MISSING_REQUIRED_ACCOUNT",
     category="validation",
+    description="`--account` 생략 시 active 계좌가 0개 또는 2개 이상",
 )
 
 _CLI_MISSING_REQUIRED_INPUT_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="CLI_MISSING_REQUIRED_INPUT",
     category="validation",
+    description="필수 옵션·인자 누락 (도메인 명확 시 도메인 prefix specialize)",
 )
 
 _INVALID_JSON_SPEC: Final[ErrorSpec] = ErrorSpec(
@@ -905,16 +951,19 @@ _TREASURY_DEALLOCATE_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
 _AUTH_REQUIRED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="auth_required",
     category="auth",
+    description='`@require_auth` 미충족 (`ctx.obj["member"] is None`)',
 )
 
 _AUTH_FAILED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="auth_failed",
     category="auth",
+    description="`ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패",
 )
 
 _PERMISSION_DENIED_SPEC: Final[ErrorSpec] = ErrorSpec(
     code="permission_denied",
     category="permission",
+    description="인증 OK이나 scope 부족",
 )
 
 _DB_ENCRYPTION_KEY_ERROR_SPEC: Final[ErrorSpec] = ErrorSpec(
