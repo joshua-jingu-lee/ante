@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from contextlib import ExitStack
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,6 +24,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 CLI_MEMBER = "cli-master-7"
@@ -221,11 +223,107 @@ async def test_reopen_without_body_and_params_keeps_both() -> None:
     )
 
 
+def _rejected(command: str, loc: str, kind: str) -> dict:
+    return {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(command, (loc, kind)),
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_missing_id_is_not_a_service_call() -> None:
+async def test_missing_id_is_rejected_in_full() -> None:
     harness = _Harness()
     response = await harness.send("approval.approve", {})
-    assert response["status"] == "error", response
+    assert response == {
+        "id": "req-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": "approval.approve 인자 검증 실패: id(missing)",
+        },
+    }
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args", "loc", "kind"),
+    [
+        (
+            "approval.request",
+            {"type": "strategy_adopt", "title": "t", "requester": "someone-else"},
+            "requester",
+            "extra_forbidden",
+        ),
+        ("approval.request", {"type": "strategy_adopt"}, "title", "missing"),
+        (
+            "approval.request",
+            {"type": "strategy_adopt", "title": "t", "body": None},
+            "body",
+            "string_type",
+        ),
+        (
+            "approval.request",
+            {"type": "strategy_adopt", "title": "t", "params": "a=1"},
+            "params",
+            "dict_type",
+        ),
+        (
+            "approval.request",
+            {"type": "strategy_adopt", "title": "t", "params": [["a", 1]]},
+            "params",
+            "dict_type",
+        ),
+        ("approval.reject", {"id": "apr-9", "reason": None}, "reason", "string_type"),
+        ("approval.cancel_invalid", {}, "approval_id", "missing"),
+        ("approval.reopen", {"id": "apr-9", "body": 7}, "body", "string_type"),
+        ("approval.reopen", {"id": "apr-9", "params": []}, "params", "dict_type"),
+        ("approval.cancel", {"id": 7}, "id", "string_type"),
+    ],
+)
+async def test_request_outside_the_model_is_rejected(
+    command: str, args: dict[str, Any], loc: str, kind: str
+) -> None:
+    harness = _Harness()
+    response = await harness.send(command, args)
+    assert response == _rejected(command, loc, kind)
+    harness.assert_no_service_call()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("args", "params"),
+    [
+        ({"type": "strategy_adopt", "title": "t", "params": None}, None),
+        ({"type": "strategy_adopt", "title": "t", "params": {}}, {}),
+    ],
+)
+async def test_request_params_null_and_empty_are_accepted(
+    args: dict[str, Any], params: Any
+) -> None:
+    harness = _Harness()
+    response = await harness.send("approval.request", args)
+    assert response["status"] == "ok", response
+    assert harness.approval.create.await_args.kwargs["params"] == params
+
+
+@pytest.mark.asyncio
+async def test_params_value_is_not_in_the_response_or_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    harness = _Harness()
+    response = await harness.send(
+        "approval.reopen",
+        {"id": "apr-9", "params": {"MARKPARAM01x": ["MARKPARAM01x"]}, "body": 7},
+    )
+    assert response == _rejected("approval.reopen", "body", "string_type")
+    assert "MARKPARAM01x" not in json.dumps(response, ensure_ascii=False)
+    assert "MARKPARAM01x" not in caplog.text
     harness.assert_no_service_call()
 
 

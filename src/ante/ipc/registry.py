@@ -10,6 +10,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from ante.ipc.requests import (
     AccountActivateRequest,
     AccountSuspendRequest,
+    ApprovalApproveRequest,
+    ApprovalCancelInvalidRequest,
+    ApprovalCancelRequest,
+    ApprovalRejectRequest,
+    ApprovalReopenRequest,
+    ApprovalRequestRequest,
     IPCRequest,
     MemberReactivateRequest,
     MemberRegenerateRecoveryKeyRequest,
@@ -892,25 +898,25 @@ async def _handle_config_set(
 
 
 async def _handle_approval_request(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalRequestRequest, actor: str
 ) -> dict:
-    request = await svc.approval.create(
-        type=args["type"],
+    created = await svc.approval.create(
+        type=request.type,
         requester=actor,
-        title=args["title"],
-        body=args.get("body", ""),
-        params=args.get("params"),
-        reference_id=args.get("reference_id", ""),
-        expires_at=args.get("expires_at", ""),
+        title=request.title,
+        body=request.body,
+        params=request.params,
+        reference_id=request.reference_id,
+        expires_at=request.expires_at,
     )
-    return {"id": request.id, "status": str(request.status)}
+    return {"id": created.id, "status": str(created.status)}
 
 
 async def _handle_approval_approve(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalApproveRequest, actor: str
 ) -> dict:
     """승인 요청 승인 IPC handler."""
-    approval_id = args["id"]
+    approval_id = request.id
     request = await svc.approval.approve(approval_id, resolved_by=actor)
     return {
         "id": request.id,
@@ -924,11 +930,11 @@ async def _handle_approval_approve(
 
 
 async def _handle_approval_reject(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalRejectRequest, actor: str
 ) -> dict:
     """승인 요청 거부 IPC handler."""
-    approval_id = args["id"]
-    reason = args.get("reason", "")
+    approval_id = request.id
+    reason = request.reason
     request = await svc.approval.reject(
         approval_id,
         resolved_by=actor,
@@ -946,10 +952,10 @@ async def _handle_approval_reject(
 
 
 async def _handle_approval_cancel(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalCancelRequest, actor: str
 ) -> dict:
     """승인 요청 취소 IPC handler."""
-    approval_id = args["id"]
+    approval_id = request.id
     request = await svc.approval.cancel(approval_id, requester=actor)
     return {
         "id": request.id,
@@ -963,10 +969,10 @@ async def _handle_approval_cancel(
 
 
 async def _handle_approval_cancel_invalid(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalCancelInvalidRequest, actor: str
 ) -> dict:
     """Administrative cancellation of a legacy invalid-type approval."""
-    approval_id = args["approval_id"]
+    approval_id = request.approval_id
     request = await svc.approval.cancel_invalid_type_request(
         approval_id,
         resolved_by=actor,
@@ -985,15 +991,15 @@ async def _handle_approval_cancel_invalid(
 
 
 async def _handle_approval_reopen(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
+    svc: ServiceRegistry, request: ApprovalReopenRequest, actor: str
 ) -> dict:
-    request = await svc.approval.reopen(
-        args["id"],
+    reopened = await svc.approval.reopen(
+        request.id,
         requester=actor,
-        body=args.get("body"),
-        params=args.get("params"),
+        body=request.body,
+        params=request.params,
     )
-    return {"id": request.id, "status": str(request.status)}
+    return {"id": reopened.id, "status": str(reopened.status)}
 
 
 async def _handle_broker_status(
@@ -1356,6 +1362,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_approval_request,
         is_mutating=True,
         required_services=frozenset({"approval"}),
+        request_model=ApprovalRequestRequest,
     )
     registry.register(
         "approval.approve",
@@ -1363,6 +1370,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.approve",
+        request_model=ApprovalApproveRequest,
     )
     registry.register(
         "approval.reject",
@@ -1370,6 +1378,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.reject",
+        request_model=ApprovalRejectRequest,
     )
     registry.register(
         "approval.cancel",
@@ -1377,6 +1386,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.cancel",
+        request_model=ApprovalCancelRequest,
     )
     registry.register(
         "approval.cancel_invalid",
@@ -1384,12 +1394,14 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"approval", "audit_logger"}),
         audit_action="approval.cancel_invalid",
+        request_model=ApprovalCancelInvalidRequest,
     )
     registry.register(
         "approval.reopen",
         _handle_approval_reopen,
         is_mutating=True,
         required_services=frozenset({"approval"}),
+        request_model=ApprovalReopenRequest,
     )
     registry.register(
         "broker.reconcile",

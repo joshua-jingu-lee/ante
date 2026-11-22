@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import types
 import typing
 from collections.abc import Callable
 from dataclasses import dataclass, fields
@@ -44,6 +45,7 @@ ACCEPTED_KINDS = {
     "validated": {"string"},
     "secret": {"string"},
     "list": {"array"},
+    "dict": {"object"},
 }
 WRONG_TYPE = {
     "str": "string_type",
@@ -54,6 +56,7 @@ WRONG_TYPE = {
     "validated": "string_type",
     "secret": "string_type",
     "list": "list_type",
+    "dict": "dict_type",
 }
 CONSTRAINT_TYPE = {
     "ge": "greater_than_equal",
@@ -65,7 +68,12 @@ CONSTRAINT_TYPE = {
 }
 NOT_FINITE = (("nan", float("nan")), ("inf", float("inf")), ("-inf", float("-inf")))
 EXTRA_KEY = "zz_extra"
-UNBOUNDED_FIELDS: frozenset[tuple[str, str]] = frozenset()
+UNBOUNDED_FIELDS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("ApprovalRequestRequest", "params"),
+        ("ApprovalReopenRequest", "params"),
+    }
+)
 SECRET_FIELDS: frozenset[tuple[str, str]] = frozenset(
     {
         ("MemberResetPasswordRequest", "recovery_key"),
@@ -136,9 +144,22 @@ class _Markers:
         return f"MARK{self._prefix}{self._n:03d}SECRET"
 
 
+def _inner(annotation: Any) -> Any:
+    if typing.get_origin(annotation) in (types.UnionType, typing.Union):
+        members = typing.get_args(annotation)
+        if len(members) == 2 and members[1] is type(None):
+            return members[0]
+    return annotation
+
+
+def _nullable(info: FieldInfo) -> bool:
+    return _inner(info.annotation) is not info.annotation
+
+
 def _is_unbounded(annotation: Any) -> bool:
-    origin = typing.get_origin(annotation)
-    return annotation in (Any, object) or annotation is dict or origin is dict
+    inner = _inner(annotation)
+    origin = typing.get_origin(inner)
+    return inner in (Any, object) or inner is dict or origin is dict
 
 
 def _validated(info: FieldInfo) -> ValidatedType | None:
@@ -154,9 +175,13 @@ def _validated(info: FieldInfo) -> ValidatedType | None:
 
 
 def _kind(info: FieldInfo) -> str:
-    annotation = info.annotation
+    annotation = _inner(info.annotation)
+    if _nullable(info) and info.metadata:
+        raise UnsupportedFieldError(f"constrained nullable field: {info!r}")
     if _validated(info) is not None:
         return "validated"
+    if annotation == dict[str, Any]:
+        return "dict"
     if _is_unbounded(annotation):
         raise UnsupportedFieldError(f"unbounded field: {annotation!r}")
     if typing.get_origin(annotation) is Literal:
@@ -242,12 +267,14 @@ def _base_value(info: FieldInfo) -> Any:
         return "v"
     if kind == "list":
         return ["w"] if default == ["v"] else ["v"]
+    if kind == "dict":
+        return {"k": "w"} if default == {"k": "v"} else {"k": "v"}
     entry = _validated(info)
     if entry is not None:
         if _has_default(info) and info.default == entry.base:
             raise UnsupportedFieldError(f"default equals the base value: {info!r}")
         return entry.base
-    members = typing.get_args(info.annotation)
+    members = typing.get_args(_inner(info.annotation))
     candidates = [m for m in members if not (_has_default(info) and m == default)]
     if not candidates:
         raise UnsupportedFieldError(
@@ -300,6 +327,8 @@ def _field_variants(
         out.append(Variant(name, "missing", "missing", args, None))
     for json_kind in JSON_KINDS:
         if json_kind in ACCEPTED_KINDS[kind]:
+            continue
+        if json_kind == "null" and _nullable(info):
             continue
         value, marker = _wrong_value(json_kind, markers)
         one(f"wrong:{json_kind}", WRONG_TYPE[kind], value, marker)
@@ -382,6 +411,8 @@ def inside_values(model: type[IPCRequest]) -> list[Inside]:
                 out.append(
                     Inside(name, f"accept:{label}", {**base, name: value}, value)
                 )
+        if _nullable(info):
+            out.append(Inside(name, "null", {**base, name: None}, None))
     return out
 
 
@@ -399,6 +430,9 @@ class _TableRequest(IPCRequest):
     account_id: AccountId
     secret: SecretStr
     tags: list[str] = []
+    note: str | None = None
+    payload: dict[str, Any] | None = None
+    meta: dict[str, Any] = {}
 
 
 class _SecretRequest(IPCRequest):
@@ -551,6 +585,33 @@ def test_no_field_without_a_domain() -> None:
         if _is_unbounded(info.annotation)
     }
     assert unbounded == UNBOUNDED_FIELDS
+    for spec in _modeled_specs():
+        assert spec.request_model is not None
+        generated = {(v.loc, v.expected) for v in variants(spec.request_model, "00")}
+        for model_name, name in UNBOUNDED_FIELDS:
+            if spec.request_model.__name__ == model_name:
+                assert (name, "dict_type") in generated, (model_name, name)
+
+
+def test_nullable_fields_accept_null_and_reject_other_types() -> None:
+    nullable = [
+        (spec.request_model, name)
+        for spec in _modeled_specs()
+        if spec.request_model is not None
+        for name, info in spec.request_model.model_fields.items()
+        if _nullable(info)
+    ]
+    assert {(model.__name__, name) for model, name in nullable} == {
+        ("ApprovalRequestRequest", "params"),
+        ("ApprovalReopenRequest", "body"),
+        ("ApprovalReopenRequest", "params"),
+    }
+    for model, name in nullable:
+        insides = {(i.loc, i.kind) for i in inside_values(model)}
+        assert (name, "null") in insides, (model, name)
+        wrong = {v.kind for v in variants(model, "00") if v.loc == name}
+        assert "wrong:null" not in wrong, (model, name)
+        assert wrong, (model, name)
 
 
 def _secret_fields() -> list[tuple[CommandSpec, str]]:
@@ -629,6 +690,18 @@ def test_generator_table_for_each_field_kind() -> None:
             for k in ("string", "int", "float", "bool", "null", "object")
         ),
         ("tags.0", "element", "string_type"),
+        *(
+            ("note", f"wrong:{k}", "string_type")
+            for k in ("int", "float", "bool", "array", "object")
+        ),
+        *(
+            ("payload", f"wrong:{k}", "dict_type")
+            for k in ("string", "int", "float", "bool", "array")
+        ),
+        *(
+            ("meta", f"wrong:{k}", "dict_type")
+            for k in ("string", "int", "float", "bool", "null", "array")
+        ),
         ("zz_extra", "extra", "extra_forbidden"),
         ("args", "not_object:string", "model_type"),
         ("args", "not_object:int", "model_type"),
@@ -646,6 +719,9 @@ def test_generator_table_for_each_field_kind() -> None:
         "account_id": "acct-1",
         "secret": "v",
         "tags": ["v"],
+        "note": "v",
+        "payload": {"k": "v"},
+        "meta": {"k": "v"},
     }
     assert [(i.loc, i.kind, i.value) for i in inside_values(_TableRequest)] == [
         ("level", "ge", 1),
@@ -654,6 +730,8 @@ def test_generator_table_for_each_field_kind() -> None:
         ("account_id", "accept:bootstrap", "test"),
         ("account_id", "accept:shortest", "abc"),
         ("account_id", "accept:longest", "a" * 30),
+        ("note", "null", None),
+        ("payload", "null", None),
     ]
 
 
@@ -677,7 +755,19 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
         anything: Any
 
     class _Mapping(IPCRequest):
-        values: dict[str, Any]
+        values: dict[str, int]
+
+    class _BareMapping(IPCRequest):
+        values: dict
+
+    class _Union(IPCRequest):
+        value: int | str
+
+    class _BoundedNullable(IPCRequest):
+        name: str | None = Field(default=None, min_length=1)
+
+    class _NullableAccount(IPCRequest):
+        account_id: AccountId | None = None
 
     class _Listed(IPCRequest):
         items: list[int]
@@ -700,6 +790,10 @@ def test_generator_rejects_fields_it_cannot_bound() -> None:
     for model in (
         _Open,
         _Mapping,
+        _BareMapping,
+        _Union,
+        _BoundedNullable,
+        _NullableAccount,
         _Listed,
         _ShortList,
         _BoundedSecret,
@@ -847,3 +941,64 @@ def test_secret_is_masked_in_the_validated_model(spec: CommandSpec, name: str) -
         assert marker not in text
         assert "**********" in text
     assert marker not in str(request.model_dump())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("spec", "name"), _secret_cases())
+async def test_secret_of_another_type_is_not_reflected(
+    spec: CommandSpec, name: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKSECRET003VALUE"
+    assert spec.request_model is not None
+    server, recorder = _server(spec.name, spec.request_model, spec)
+    args = {**base_args(spec.request_model), name: [marker, {marker: marker}]}
+    response = await _send(server, spec.name, args)
+    assert response == {
+        "id": "gen-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(spec.name, (name, "string_type")),
+        },
+    }
+    assert recorder.calls == []
+    assert marker not in json.dumps(response, ensure_ascii=False)
+    assert marker not in caplog.text
+
+
+def _unbounded_cases() -> list[Any]:
+    found = [
+        (spec, name)
+        for spec in _modeled_specs()
+        if spec.request_model is not None
+        for name, info in spec.request_model.model_fields.items()
+        if _is_unbounded(info.annotation)
+    ]
+    assert found
+    return [pytest.param(spec, name, id=f"{spec.name}-{name}") for spec, name in found]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("spec", "name"), _unbounded_cases())
+async def test_unbounded_value_in_a_rejected_request_is_not_reflected(
+    spec: CommandSpec, name: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    marker = "MARKDICT001VALUE"
+    assert spec.request_model is not None
+    server, recorder = _server(spec.name, spec.request_model, spec)
+    value = {marker: marker, "nested": {"k": [marker]}}
+    args = {**base_args(spec.request_model), name: value, EXTRA_KEY: 7}
+    response = await _send(server, spec.name, args)
+    assert response == {
+        "id": "gen-1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(spec.name, (EXTRA_KEY, "extra_forbidden")),
+        },
+    }
+    assert recorder.calls == []
+    assert marker not in json.dumps(response, ensure_ascii=False)
+    assert marker not in caplog.text

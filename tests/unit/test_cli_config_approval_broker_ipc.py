@@ -202,7 +202,6 @@ class TestApprovalRequestIPC:
         assert call_args[0][0] == "approval.request"
         assert call_args[0][1] == {
             "type": "strategy_adopt",
-            "requester": "test-master",
             "title": "전략 채택",
             "body": "",
             "params": {},

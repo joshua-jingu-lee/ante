@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, SecretStr
 from pydantic_core import PydanticCustomError
@@ -11,6 +11,12 @@ __all__ = [
     "AccountActivateRequest",
     "AccountId",
     "AccountSuspendRequest",
+    "ApprovalApproveRequest",
+    "ApprovalCancelInvalidRequest",
+    "ApprovalCancelRequest",
+    "ApprovalRejectRequest",
+    "ApprovalReopenRequest",
+    "ApprovalRequestRequest",
     "IPCRequest",
     "MemberReactivateRequest",
     "MemberRegenerateRecoveryKeyRequest",
@@ -109,3 +115,35 @@ class MemberResetPasswordRequest(IPCRequest):
 
 class MemberRegenerateRecoveryKeyRequest(IPCRequest):
     password: SecretStr
+
+
+class ApprovalRequestRequest(IPCRequest):
+    type: str
+    title: str
+    body: str = ""
+    params: dict[str, Any] | None = None
+    reference_id: str = ""
+    expires_at: str = ""
+
+
+class ApprovalApproveRequest(IPCRequest):
+    id: str
+
+
+class ApprovalRejectRequest(IPCRequest):
+    id: str
+    reason: str = ""
+
+
+class ApprovalCancelRequest(IPCRequest):
+    id: str
+
+
+class ApprovalCancelInvalidRequest(IPCRequest):
+    approval_id: str
+
+
+class ApprovalReopenRequest(IPCRequest):
+    id: str
+    body: str | None = None
+    params: dict[str, Any] | None = None
