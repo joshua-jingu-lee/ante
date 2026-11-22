@@ -371,7 +371,7 @@ normative SSOT는 [contracts/envelopes.md](../contracts/envelopes.md)다. 본 �
 |------|------|------|
 | `id` | `string` (UUID v4) | 요청 식별자. 응답의 `id`와 매칭 |
 | `command` | `string` | IPC 커맨드 (`CommandRegistry` 키) |
-| `args` | `dict` | 커맨드 파라미터. 명령의 요청 모델이 있으면 `_dispatch`가 그 모델로 한 번 검증한다. 모르는 키와 정의역 밖 값은 핸들러를 부르지 않고 `VALIDATION_ERROR`로 거부한다 |
+| `args` | `dict` | 커맨드 파라미터. 모든 명령은 요청 모델을 가진다. `_dispatch`가 그 모델로 한 번 검증한다. 모르는 키와 정의역 밖 값은 핸들러를 부르지 않고 `VALIDATION_ERROR`로 거부한다 |
 | `actor` | `string` | CLI에서 인증된 멤버 ID (감사 추적용). 인증 면제 recovery 커맨드는 `"unknown"` 또는 recovery 대상 member_id |
 
 **응답 (성공)** — IPC success envelope의 적용 예시. envelope 형태 SSOT는
@@ -593,7 +593,7 @@ drift다.
 | 타임아웃 (기본 30초) | `IPCClient`가 `IPCTimeoutError` 발생. CLI는 `"서버 응답 시간 초과"` 출력 후 종료 |
 | 서버 내부 에러 | 응답 `status: "error"` 반환. CLI는 `error.code` + `error.message` 출력 |
 | 미등록 커맨드 | `_dispatch`에서 `UNKNOWN_COMMAND` 에러 응답 |
-| 인자 검증 실패 | 요청 모델이 있는 명령의 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다 |
+| 인자 검증 실패 | 모든 명령은 요청 모델을 가진다. 인자가 모델을 통과하지 못하면 핸들러를 부르지 않고 `VALIDATION_ERROR` 에러 응답. 메시지는 명령 이름과 필드 경로·검증 종류만 싣는다(`<명령> 인자 검증 실패: <필드 경로>(<검증 종류>), …`). 모르는 키의 이름은 필드 경로로 실리고(인쇄 가능하지 않은 문자는 이스케이프한다), 키 이름 외의 입력값은 싣지 않는다 |
 | shutdown 중 mutating 명령 | `SHUTTING_DOWN` 상태의 mutating 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 리소스 drain 중 dispatch | `DRAINING` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |
 | 서버 종료 후 dispatch | `STOPPED` 상태의 모든 명령은 `SERVICE_UNAVAILABLE` 에러 응답 |

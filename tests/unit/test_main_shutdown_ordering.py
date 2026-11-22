@@ -23,6 +23,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.main import Services, _shutdown
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 
 def _make_service_registry() -> ServiceRegistry:
@@ -292,7 +293,9 @@ async def test_active_connection_mutating_command_rejected_during_shutdown(
         mutation_calls.append(actor)
         return {"mutated": True}
 
-    cmd_registry.register("test.mutate", mutate_handler, is_mutating=True)
+    cmd_registry.register(
+        "test.mutate", mutate_handler, is_mutating=True, request_model=NoArgsRequest
+    )
     await server.start()
 
     response_before_shutdown = await server._dispatch(
@@ -344,7 +347,9 @@ async def test_active_connection_read_only_command_allowed_during_shutdown(
     async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"state": server.state.value, "actor": actor}
 
-    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.read", read_handler, is_mutating=False, request_model=NoArgsRequest
+    )
     await server.start()
 
     responses: list[dict] = []
@@ -402,7 +407,9 @@ async def test_read_only_command_rejected_before_db_close(
     async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"read": True}
 
-    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.read", read_handler, is_mutating=False, request_model=NoArgsRequest
+    )
     await server.start()
 
     responses: list[dict] = []
@@ -456,7 +463,9 @@ async def test_post_stopped_dispatch_rejected(
     async def read_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         return {"read": True}
 
-    cmd_registry.register("test.read", read_handler, is_mutating=False)
+    cmd_registry.register(
+        "test.read", read_handler, is_mutating=False, request_model=NoArgsRequest
+    )
     await server.start()
 
     class _StubBotManager:

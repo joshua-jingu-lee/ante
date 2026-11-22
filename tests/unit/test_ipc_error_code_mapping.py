@@ -23,6 +23,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 from tests.unit.ipc.validation_messages import validation_message
 
 
@@ -93,7 +94,12 @@ async def test_ipc_server_uses_exception_code_attribute_when_present(
             "테스트: 런타임 cold-path 차단"
         )
 
-    cmd_registry.register("test.cold_path", cold_path_handler, is_mutating=True)
+    cmd_registry.register(
+        "test.cold_path",
+        cold_path_handler,
+        is_mutating=True,
+        request_model=NoArgsRequest,
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -141,7 +147,12 @@ async def test_ipc_envelope_code_is_stable_code_not_broker_raw_code(
     ) -> dict:
         raise raised
 
-    cmd_registry.register("test.broker_fail", broker_failure_handler, is_mutating=True)
+    cmd_registry.register(
+        "test.broker_fail",
+        broker_failure_handler,
+        is_mutating=True,
+        request_model=NoArgsRequest,
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -206,7 +217,9 @@ async def test_ipc_server_falls_back_to_execution_error_when_no_code(
     async def value_error_handler(svc: ServiceRegistry, args: dict, actor: str) -> dict:
         raise ValueError("no code attribute")
 
-    cmd_registry.register("test.fail", value_error_handler, is_mutating=True)
+    cmd_registry.register(
+        "test.fail", value_error_handler, is_mutating=True, request_model=NoArgsRequest
+    )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)
     await server.start()
@@ -244,6 +257,7 @@ async def test_ipc_server_surfaces_typed_code_for_account_already_suspended(
         "test.already_suspended",
         already_suspended_handler,
         is_mutating=True,
+        request_model=NoArgsRequest,
     )
 
     server = IPCServer(socket_path, service_registry, cmd_registry)

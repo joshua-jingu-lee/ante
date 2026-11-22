@@ -31,6 +31,7 @@ from tests.unit.contracts.helpers import (
     iter_get_db_path_calls,
     iter_ipc_command_specs,
 )
+from tests.unit.ipc.request_fixtures import NoArgsRequest
 
 # ── iter_click_leaf_commands ──────────────────────────────────────────────
 
@@ -211,8 +212,8 @@ class TestIterIpcCommandSpecs:
         async def dummy(svc, args, actor):  # type: ignore[no-untyped-def]
             return {}
 
-        registry.register("alpha", dummy, is_mutating=True)
-        registry.register("beta", dummy, is_mutating=False)
+        registry.register("alpha", dummy, is_mutating=True, request_model=NoArgsRequest)
+        registry.register("beta", dummy, is_mutating=False, request_model=NoArgsRequest)
 
         specs = list(iter_ipc_command_specs(registry))
         names = {s.name for s in specs}
