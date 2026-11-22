@@ -83,8 +83,8 @@ def test_virtual_round_trip(daemon: DaemonHarness) -> None:
     assert validated["data"]["errors"] == []
 
     submitted = daemon.cli("strategy", "submit", str(STRATEGY_PATH))
-    assert submitted["submitted"] is True
-    strategy_id = submitted["strategy_id"]
+    assert submitted["data"]["submitted"] is True
+    strategy_id = submitted["data"]["strategy_id"]
     assert strategy_id
 
     daemon.start()

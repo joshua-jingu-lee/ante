@@ -49,12 +49,6 @@
     "rule list",
     "rule update",
     "signal connect",
-    "strategy info",
-    "strategy list",
-    "strategy performance",
-    "strategy set-status",
-    "strategy submit",
-    "strategy summary",
     "system status",
     "trade info",
     "trade list"
@@ -70,7 +64,7 @@
     "src/ante/cli/commands/report.py": 11,
     "src/ante/cli/commands/rule.py": 10,
     "src/ante/cli/commands/signal.py": 2,
-    "src/ante/cli/commands/strategy.py": 67,
+    "src/ante/cli/commands/strategy.py": 15,
     "src/ante/cli/commands/system.py": 9,
     "src/ante/cli/commands/trade.py": 7,
     "src/ante/cli/commands/update.py": 35

@@ -357,57 +357,83 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("submit_ok", "text"): ("전략 등록 완료: strat-1\n"),
     ("submit_ok", "json"): (
         "{\n"
-        '  "submitted": true,\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "description": "테스트 전략",\n'
-        '  "author_name": "agent",\n'
-        '  "author_id": "agent-1",\n'
-        '  "filepath": "strategies/my_strategy.py",\n'
-        '  "registered_at": "2026-01-01T09:00:00+00:00",\n'
-        '  "validation_warnings": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "submitted": true,\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "description": "테스트 전략",\n'
+        '    "author_name": "agent",\n'
+        '    "author_id": "agent-1",\n'
+        '    "filepath": "strategies/my_strategy.py",\n'
+        '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+        '    "validation_warnings": []\n'
+        "  }\n"
         "}\n"
     ),
     ("submit_ok_warnings", "text"): ("  [warn] print 사용\n전략 등록 완료: strat-1\n"),
     ("submit_ok_warnings", "json"): (
         "{\n"
-        '  "submitted": true,\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "description": "테스트 전략",\n'
-        '  "author_name": "agent",\n'
-        '  "author_id": "agent-1",\n'
-        '  "filepath": "strategies/my_strategy.py",\n'
-        '  "registered_at": "2026-01-01T09:00:00+00:00",\n'
-        '  "validation_warnings": [\n'
-        '    "print 사용"\n'
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "submitted": true,\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "description": "테스트 전략",\n'
+        '    "author_name": "agent",\n'
+        '    "author_id": "agent-1",\n'
+        '    "filepath": "strategies/my_strategy.py",\n'
+        '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+        '    "validation_warnings": [\n'
+        '      "print 사용"\n'
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("submit_rationale_raises", "text"): ("전략 등록 완료: strat-1\n"),
     ("submit_rationale_raises", "json"): (
         "{\n"
-        '  "submitted": true,\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "description": "테스트 전략",\n'
-        '  "author_name": "agent",\n'
-        '  "author_id": "agent-1",\n'
-        '  "filepath": "strategies/my_strategy.py",\n'
-        '  "registered_at": "2026-01-01T09:00:00+00:00",\n'
-        '  "validation_warnings": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "submitted": true,\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "description": "테스트 전략",\n'
+        '    "author_name": "agent",\n'
+        '    "author_id": "agent-1",\n'
+        '    "filepath": "strategies/my_strategy.py",\n'
+        '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+        '    "validation_warnings": []\n'
+        "  }\n"
         "}\n"
     ),
     ("list_empty", "text"): ("{'message': '등록된 전략 없음', 'strategies': []}\n"),
     ("list_empty", "json"): (
-        '{\n  "message": "등록된 전략 없음",\n  "strategies": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 전략 없음",\n'
+        '    "strategies": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_no_table", "text"): ("{'message': '등록된 전략 없음', 'strategies': []}\n"),
     ("list_no_table", "json"): (
-        '{\n  "message": "등록된 전략 없음",\n  "strategies": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 전략 없음",\n'
+        '    "strategies": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows", "text"): (
         " strategy_id |         name |      version |       status |  author_name |    "
@@ -421,28 +447,32 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "strategies": [\n'
-        "    {\n"
-        '      "strategy_id": "strat-1",\n'
-        '      "name": "my_strategy",\n'
-        '      "version": "1.0.0",\n'
-        '      "status": "registered",\n'
-        '      "description": "테스트 전략",\n'
-        '      "author_name": "agent",\n'
-        '      "author_id": "agent-1",\n'
-        '      "registered_at": "2026-01-01T09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "strategy_id": "strat-2",\n'
-        '      "name": "my_strategy",\n'
-        '      "version": "1.1.0",\n'
-        '      "status": "adopted",\n'
-        '      "description": "테스트 전략",\n'
-        '      "author_name": "agent",\n'
-        '      "author_id": "agent-1",\n'
-        '      "registered_at": "2026-01-01T09:00:00+00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategies": [\n'
+        "      {\n"
+        '        "strategy_id": "strat-1",\n'
+        '        "name": "my_strategy",\n'
+        '        "version": "1.0.0",\n'
+        '        "status": "registered",\n'
+        '        "description": "테스트 전략",\n'
+        '        "author_name": "agent",\n'
+        '        "author_id": "agent-1",\n'
+        '        "registered_at": "2026-01-01T09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "strategy_id": "strat-2",\n'
+        '        "name": "my_strategy",\n'
+        '        "version": "1.1.0",\n'
+        '        "status": "adopted",\n'
+        '        "description": "테스트 전략",\n'
+        '        "author_name": "agent",\n'
+        '        "author_id": "agent-1",\n'
+        '        "registered_at": "2026-01-01T09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_status_filter", "text"): (
@@ -457,47 +487,59 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_status_filter", "json"): (
         "{\n"
-        '  "strategies": [\n'
-        "    {\n"
-        '      "strategy_id": "strat-1",\n'
-        '      "name": "my_strategy",\n'
-        '      "version": "1.0.0",\n'
-        '      "status": "registered",\n'
-        '      "description": "테스트 전략",\n'
-        '      "author_name": "agent",\n'
-        '      "author_id": "agent-1",\n'
-        '      "registered_at": "2026-01-01T09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "strategy_id": "strat-2",\n'
-        '      "name": "my_strategy",\n'
-        '      "version": "1.1.0",\n'
-        '      "status": "adopted",\n'
-        '      "description": "테스트 전략",\n'
-        '      "author_name": "agent",\n'
-        '      "author_id": "agent-1",\n'
-        '      "registered_at": "2026-01-01T09:00:00+00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategies": [\n'
+        "      {\n"
+        '        "strategy_id": "strat-1",\n'
+        '        "name": "my_strategy",\n'
+        '        "version": "1.0.0",\n'
+        '        "status": "registered",\n'
+        '        "description": "테스트 전략",\n'
+        '        "author_name": "agent",\n'
+        '        "author_id": "agent-1",\n'
+        '        "registered_at": "2026-01-01T09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "strategy_id": "strat-2",\n'
+        '        "name": "my_strategy",\n'
+        '        "version": "1.1.0",\n'
+        '        "status": "adopted",\n'
+        '        "description": "테스트 전략",\n'
+        '        "author_name": "agent",\n'
+        '        "author_id": "agent-1",\n'
+        '        "registered_at": "2026-01-01T09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("set_status_ipc", "text"): ("전략 상태 변경 완료: strat-1 -> adopted\n"),
     ("set_status_ipc", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "status": "adopted",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "updated_by": "test-master"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "status": "adopted",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "updated_by": "test-master"\n'
+        "  }\n"
         "}\n"
     ),
     ("set_status_direct", "text"): ("전략 상태 변경 완료: strat-1 -> adopted\n"),
     ("set_status_direct", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "status": "adopted",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "status": "adopted",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0"\n'
+        "  }\n"
         "}\n"
     ),
     ("set_status_direct_no_record", "text"): (
@@ -505,10 +547,14 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("set_status_direct_no_record", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "status": "adopted",\n'
-        '  "name": "",\n'
-        '  "version": ""\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "status": "adopted",\n'
+        '    "name": "",\n'
+        '    "version": ""\n'
+        "  }\n"
         "}\n"
     ),
     ("info_minimal", "text"): (
@@ -523,16 +569,20 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_minimal", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "status": "registered",\n'
-        '  "description": "테스트 전략",\n'
-        '  "author_name": "agent",\n'
-        '  "author_id": "agent-1",\n'
-        '  "filepath": "strategies/my_strategy.py",\n'
-        '  "registered_at": "2026-01-01T09:00:00+00:00",\n'
-        '  "validation_warnings": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "status": "registered",\n'
+        '    "description": "테스트 전략",\n'
+        '    "author_name": "agent",\n'
+        '    "author_id": "agent-1",\n'
+        '    "filepath": "strategies/my_strategy.py",\n'
+        '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+        '    "validation_warnings": []\n'
+        "  }\n"
         "}\n"
     ),
     ("info_full", "text"): (
@@ -559,38 +609,42 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_full", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "name": "my_strategy",\n'
-        '  "version": "1.0.0",\n'
-        '  "status": "registered",\n'
-        '  "description": "테스트 전략",\n'
-        '  "author_name": "agent",\n'
-        '  "author_id": "agent-1",\n'
-        '  "filepath": "strategies/my_strategy.py",\n'
-        '  "registered_at": "2026-01-01T09:00:00+00:00",\n'
-        '  "validation_warnings": [\n'
-        '    "print 사용",\n'
-        '    "전역 상태"\n'
-        "  ],\n"
-        '  "params": {\n'
-        '    "window": 20,\n'
-        '    "threshold": 0.5\n'
-        "  },\n"
-        '  "param_schema": {\n'
-        '    "window": "이동평균 기간"\n'
-        "  },\n"
-        '  "rationale": "추세 추종",\n'
-        '  "risks": [\n'
-        '    "횡보장",\n'
-        '    "갭 하락"\n'
-        "  ],\n"
-        '  "other_versions": [\n'
-        "    {\n"
-        '      "version": "0.9.0",\n'
-        '      "strategy_id": "strat-0",\n'
-        '      "status": "archived"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "name": "my_strategy",\n'
+        '    "version": "1.0.0",\n'
+        '    "status": "registered",\n'
+        '    "description": "테스트 전략",\n'
+        '    "author_name": "agent",\n'
+        '    "author_id": "agent-1",\n'
+        '    "filepath": "strategies/my_strategy.py",\n'
+        '    "registered_at": "2026-01-01T09:00:00+00:00",\n'
+        '    "validation_warnings": [\n'
+        '      "print 사용",\n'
+        '      "전역 상태"\n'
+        "    ],\n"
+        '    "params": {\n'
+        '      "window": 20,\n'
+        '      "threshold": 0.5\n'
+        "    },\n"
+        '    "param_schema": {\n'
+        '      "window": "이동평균 기간"\n'
+        "    },\n"
+        '    "rationale": "추세 추종",\n'
+        '    "risks": [\n'
+        '      "횡보장",\n'
+        '      "갭 하락"\n'
+        "    ],\n"
+        '    "other_versions": [\n'
+        "      {\n"
+        '        "version": "0.9.0",\n'
+        '        "strategy_id": "strat-0",\n'
+        '        "status": "archived"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("summary_daily", "text"): (
@@ -601,22 +655,26 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("summary_daily", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "period": "daily",\n'
-        '  "items": [\n'
-        "    {\n"
-        '      "date": "2026-01-02",\n'
-        '      "realized_pnl": 15000.0,\n'
-        '      "trade_count": 3,\n'
-        '      "win_rate": 0.67\n'
-        "    },\n"
-        "    {\n"
-        '      "date": "2026-01-03",\n'
-        '      "realized_pnl": -5000.0,\n'
-        '      "trade_count": 1,\n'
-        '      "win_rate": 0.0\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "period": "daily",\n'
+        '    "items": [\n'
+        "      {\n"
+        '        "date": "2026-01-02",\n'
+        '        "realized_pnl": 15000.0,\n'
+        '        "trade_count": 3,\n'
+        '        "win_rate": 0.67\n'
+        "      },\n"
+        "      {\n"
+        '        "date": "2026-01-03",\n'
+        '        "realized_pnl": -5000.0,\n'
+        '        "trade_count": 1,\n'
+        '        "win_rate": 0.0\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("summary_weekly", "text"): (
@@ -629,18 +687,22 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("summary_weekly", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "period": "weekly",\n'
-        '  "items": [\n'
-        "    {\n"
-        '      "week_start": "2026-01-05",\n'
-        '      "week_end": "2026-01-11",\n'
-        '      "realized_pnl": 42000.0,\n'
-        '      "trade_count": 7,\n'
-        '      "win_rate": 0.57,\n'
-        '      "week_label": "01-05 ~ 01-11"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "period": "weekly",\n'
+        '    "items": [\n'
+        "      {\n"
+        '        "week_start": "2026-01-05",\n'
+        '        "week_end": "2026-01-11",\n'
+        '        "realized_pnl": 42000.0,\n'
+        '        "trade_count": 7,\n'
+        '        "win_rate": 0.57,\n'
+        '        "week_label": "01-05 ~ 01-11"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("summary_monthly", "text"): (
@@ -650,22 +712,34 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("summary_monthly", "json"): (
         "{\n"
-        '  "strategy_id": "strat-1",\n'
-        '  "period": "monthly",\n'
-        '  "items": [\n'
-        "    {\n"
-        '      "year": 2026,\n'
-        '      "month": 1,\n'
-        '      "realized_pnl": 120000.0,\n'
-        '      "trade_count": 21,\n'
-        '      "win_rate": 0.62\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "period": "monthly",\n'
+        '    "items": [\n'
+        "      {\n"
+        '        "year": 2026,\n'
+        '        "month": 1,\n'
+        '        "realized_pnl": 120000.0,\n'
+        '        "trade_count": 21,\n'
+        '        "win_rate": 0.62\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("summary_empty", "text"): ("{'message': '성과 집계 없음', 'items': []}\n"),
     ("summary_empty", "json"): (
-        '{\n  "strategy_id": "strat-1",\n  "period": "daily",\n  "items": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "period": "daily",\n'
+        '    "items": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("performance_full", "text"): (
         "전략 성과: my_strategy (strat-1)\n"
@@ -688,25 +762,29 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("performance_full", "json"): (
         "{\n"
-        '  "strategy_name": "my_strategy",\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "metrics": {\n'
-        '    "total_trades": 40,\n'
-        '    "winning_trades": 24,\n'
-        '    "losing_trades": 16,\n'
-        '    "win_rate": 0.6,\n'
-        '    "total_pnl": 1250000.0,\n'
-        '    "total_commission": 12500.0,\n'
-        '    "net_pnl": 1237500.0,\n'
-        '    "avg_profit": 80000.0,\n'
-        '    "avg_loss": -41875.0,\n'
-        '    "profit_factor": 2.87,\n'
-        '    "max_drawdown": 0.083,\n'
-        '    "max_drawdown_amount": 415000.0,\n'
-        '    "sharpe_ratio": 1.42,\n'
-        '    "first_trade_at": "2026-01-02 09:05:00+00:00",\n'
-        '    "last_trade_at": "2026-03-31 15:10:00+00:00",\n'
-        '    "active_days": 58\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_name": "my_strategy",\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "metrics": {\n'
+        '      "total_trades": 40,\n'
+        '      "winning_trades": 24,\n'
+        '      "losing_trades": 16,\n'
+        '      "win_rate": 0.6,\n'
+        '      "total_pnl": 1250000.0,\n'
+        '      "total_commission": 12500.0,\n'
+        '      "net_pnl": 1237500.0,\n'
+        '      "avg_profit": 80000.0,\n'
+        '      "avg_loss": -41875.0,\n'
+        '      "profit_factor": 2.87,\n'
+        '      "max_drawdown": 0.083,\n'
+        '      "max_drawdown_amount": 415000.0,\n'
+        '      "sharpe_ratio": 1.42,\n'
+        '      "first_trade_at": "2026-01-02 09:05:00+00:00",\n'
+        '      "last_trade_at": "2026-03-31 15:10:00+00:00",\n'
+        '      "active_days": 58\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -729,25 +807,29 @@ _STRATEGY_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("performance_minimal", "json"): (
         "{\n"
-        '  "strategy_name": "my_strategy",\n'
-        '  "strategy_id": "strat-1",\n'
-        '  "metrics": {\n'
-        '    "total_trades": 3,\n'
-        '    "winning_trades": 1,\n'
-        '    "losing_trades": 2,\n'
-        '    "win_rate": 0.0,\n'
-        '    "total_pnl": 0.0,\n'
-        '    "total_commission": 0.0,\n'
-        '    "net_pnl": 0.0,\n'
-        '    "avg_profit": 0.0,\n'
-        '    "avg_loss": 0.0,\n'
-        '    "profit_factor": 0.0,\n'
-        '    "max_drawdown": 0.0,\n'
-        '    "max_drawdown_amount": 0.0,\n'
-        '    "sharpe_ratio": null,\n'
-        '    "first_trade_at": null,\n'
-        '    "last_trade_at": null,\n'
-        '    "active_days": 0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_name": "my_strategy",\n'
+        '    "strategy_id": "strat-1",\n'
+        '    "metrics": {\n'
+        '      "total_trades": 3,\n'
+        '      "winning_trades": 1,\n'
+        '      "losing_trades": 2,\n'
+        '      "win_rate": 0.0,\n'
+        '      "total_pnl": 0.0,\n'
+        '      "total_commission": 0.0,\n'
+        '      "net_pnl": 0.0,\n'
+        '      "avg_profit": 0.0,\n'
+        '      "avg_loss": 0.0,\n'
+        '      "profit_factor": 0.0,\n'
+        '      "max_drawdown": 0.0,\n'
+        '      "max_drawdown_amount": 0.0,\n'
+        '      "sharpe_ratio": null,\n'
+        '      "first_trade_at": null,\n'
+        '      "last_trade_at": null,\n'
+        '      "active_days": 0\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),

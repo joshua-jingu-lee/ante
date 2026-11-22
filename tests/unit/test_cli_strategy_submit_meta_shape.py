@@ -253,7 +253,7 @@ class TestSubmitValidMetaSanity:
         )
         registry.register.assert_called_once()
         # JSON envelope: submitted=True + meta_validation 누출 없음.
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload.get("submitted") is True, payload
         assert "stage" not in payload or payload.get("stage") != "meta_validation"
 

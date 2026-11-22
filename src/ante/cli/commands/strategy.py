@@ -14,7 +14,7 @@ import click
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -127,7 +127,7 @@ def validate(ctx: click.Context, path: str) -> CommandResult:
 @click.pass_context
 @require_auth
 @require_scope("strategy:write")
-def submit(ctx: click.Context, path: str) -> None:
+def submit(ctx: click.Context, path: str) -> CommandResult:
     """전략 제출 (검증 -> 로드 테스트 -> Registry 등록)."""
     from ante.strategy.base import StrategyMeta
     from ante.strategy.loader import StrategyLoader
@@ -247,13 +247,9 @@ def submit(ctx: click.Context, path: str) -> None:
             raise CliStrategyError(str(e)) from e
         raise SystemExit(1)
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.success(
-            f"전략 등록 완료: {result['strategy_id']}",
-            result,
-        )
+    return CommandResult(
+        data=result, text=(f"전략 등록 완료: {result['strategy_id']}",)
+    )
 
 
 @strategy.command("list")
@@ -262,10 +258,8 @@ def submit(ctx: click.Context, path: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
-def strategy_list(ctx: click.Context, status: str | None) -> None:
+def strategy_list(ctx: click.Context, status: str | None) -> CommandResult:
     """등록된 전략 목록 조회."""
-    fmt = get_formatter(ctx)
-
     valid_statuses = {s.value for s in StrategyStatus}
     if status is not None and status not in valid_statuses:
         raise StrategyValidationError(
@@ -303,16 +297,13 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
         raise CliStrategyError(str(e)) from e
 
     if not rows:
-        fmt.output({"message": "등록된 전략 없음", "strategies": []})
-        return
+        empty: dict[str, Any] = {"message": "등록된 전략 없음", "strategies": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"strategies": rows})
-    else:
-        fmt.table(
-            rows,
-            ["strategy_id", "name", "version", "status", "author_name", "author_id"],
-        )
+    columns = ["strategy_id", "name", "version", "status", "author_name", "author_id"]
+    return CommandResult(
+        data={"strategies": rows}, text=tuple(table_lines(rows, columns))
+    )
 
 
 @strategy.command("set-status")
@@ -327,9 +318,10 @@ def strategy_list(ctx: click.Context, status: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("strategy:write")
-def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> None:
+def strategy_set_status(
+    ctx: click.Context, strategy_id: str, status: str
+) -> CommandResult:
     """전략 상태 변경."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
     target_status = StrategyStatus(status)
 
@@ -371,10 +363,9 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
             raise
         raise CliStrategyError(str(e)) from e
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.success(f"전략 상태 변경 완료: {strategy_id} -> {status}", result)
+    return CommandResult(
+        data=result, text=(f"전략 상태 변경 완료: {strategy_id} -> {status}",)
+    )
 
 
 @strategy.command("info")
@@ -383,9 +374,8 @@ def strategy_set_status(ctx: click.Context, strategy_id: str, status: str) -> No
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
-def strategy_info(ctx: click.Context, name: str) -> None:
+def strategy_info(ctx: click.Context, name: str) -> CommandResult:
     """전략 상세 정보 조회 (메타데이터 + 파라미터)."""
-    fmt = get_formatter(ctx)
 
     async def _info() -> dict[str, Any] | None:
         async with _create_registry(ctx=ctx) as (registry, _):
@@ -442,74 +432,73 @@ def strategy_info(ctx: click.Context, name: str) -> None:
     if result is None:
         raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {name}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        _print_info_text(result)
+    return CommandResult(data=result, text=tuple(_info_text_lines(result)))
 
 
-def _print_info_text(result: dict[str, Any]) -> None:
+def _info_text_lines(result: dict[str, Any]) -> list[str]:
     """전략 상세 정보 텍스트 출력."""
-    click.echo(f"  {'이름':15s}: {result['name']}")
-    click.echo(f"  {'버전':15s}: {result['version']}")
-    click.echo(f"  {'상태':15s}: {result['status']}")
-    click.echo(f"  {'설명':15s}: {result['description']}")
-    click.echo(f"  {'작성자':15s}: {result['author_name']}")
-    click.echo(f"  {'작성자 ID':15s}: {result['author_id']}")
-    click.echo(f"  {'파일 경로':15s}: {result['filepath']}")
-    click.echo(f"  {'등록일':15s}: {result['registered_at']}")
-    _print_info_warnings(result.get("validation_warnings"))
-    _print_info_rationale(result.get("rationale"))
-    _print_info_risks(result.get("risks"))
-    _print_info_params(result.get("params"), result.get("param_schema", {}))
-    _print_info_versions(result.get("other_versions"))
+    return [
+        f"  {'이름':15s}: {result['name']}",
+        f"  {'버전':15s}: {result['version']}",
+        f"  {'상태':15s}: {result['status']}",
+        f"  {'설명':15s}: {result['description']}",
+        f"  {'작성자':15s}: {result['author_name']}",
+        f"  {'작성자 ID':15s}: {result['author_id']}",
+        f"  {'파일 경로':15s}: {result['filepath']}",
+        f"  {'등록일':15s}: {result['registered_at']}",
+        *_info_warnings_lines(result.get("validation_warnings")),
+        *_info_rationale_lines(result.get("rationale")),
+        *_info_risks_lines(result.get("risks")),
+        *_info_params_lines(result.get("params"), result.get("param_schema", {})),
+        *_info_versions_lines(result.get("other_versions")),
+    ]
 
 
-def _print_info_warnings(warnings: list[str] | None) -> None:
+def _info_warnings_lines(warnings: list[str] | None) -> list[str]:
     """검증 경고 섹션 출력."""
     if not warnings:
-        return
-    click.echo(f"  {'검증 경고':15s}:")
-    for w in warnings:
-        click.echo(f"    - {w}")
+        return []
+    return [f"  {'검증 경고':15s}:", *(f"    - {w}" for w in warnings)]
 
 
-def _print_info_rationale(rationale: str | None) -> None:
+def _info_rationale_lines(rationale: str | None) -> list[str]:
     """투자 근거 섹션 출력."""
     if not rationale:
-        return
-    click.echo(f"  {'투자 근거':15s}: {rationale}")
+        return []
+    return [f"  {'투자 근거':15s}: {rationale}"]
 
 
-def _print_info_risks(risks: list[str] | None) -> None:
+def _info_risks_lines(risks: list[str] | None) -> list[str]:
     """리스크 섹션 출력."""
     if not risks:
-        return
-    click.echo(f"  {'리스크':15s}:")
-    for r in risks:
-        click.echo(f"    - {r}")
+        return []
+    return [f"  {'리스크':15s}:", *(f"    - {r}" for r in risks)]
 
 
-def _print_info_params(params: dict[str, Any] | None, schema: dict[str, Any]) -> None:
+def _info_params_lines(
+    params: dict[str, Any] | None, schema: dict[str, Any]
+) -> list[str]:
     """파라미터 섹션 출력."""
     if not params:
-        return
-    click.echo(f"  {'파라미터':15s}:")
+        return []
+    lines = [f"  {'파라미터':15s}:"]
     for key, value in params.items():
         desc = schema.get(key, "")
         line = f"    {key} = {value}"
         if desc:
             line += f"  ({desc})"
-        click.echo(line)
+        lines.append(line)
+    return lines
 
 
-def _print_info_versions(versions: list[dict[str, Any]] | None) -> None:
+def _info_versions_lines(versions: list[dict[str, Any]] | None) -> list[str]:
     """다른 버전 목록 섹션 출력."""
     if not versions:
-        return
-    click.echo(f"  {'다른 버전':15s}:")
-    for v in versions:
-        click.echo(f"    - {v['strategy_id']} ({v['status']})")
+        return []
+    return [
+        f"  {'다른 버전':15s}:",
+        *(f"    - {v['strategy_id']} ({v['status']})" for v in versions),
+    ]
 
 
 def _load_strategy_params(filepath: str) -> dict[str, Any] | None:
@@ -544,7 +533,9 @@ def _load_strategy_params(filepath: str) -> dict[str, Any] | None:
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
-def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
+def strategy_summary(
+    ctx: click.Context, strategy_id: str, period: str
+) -> CommandResult:
     """전략 기간별 성과 집계 (전략 전체 거래, absolute 지표).
 
     전략의 ``trades.strategy_id`` (거래 시점 전략 귀속 durable key)로
@@ -557,7 +548,6 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     account-scoped 가 아니므로 여러 계좌·통화의 거래가 섞일 수 있다
     (다중 통화 운용 시 ``realized_pnl`` 은 통화가 혼합될 수 있다).
     """
-    fmt = get_formatter(ctx)
 
     async def _summary() -> dict[str, Any] | None:
         from ante.trade.performance import PerformanceTracker
@@ -601,26 +591,23 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
     if result is None:
         raise StrategyNotFoundError(f"전략을 찾을 수 없습니다: {strategy_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        rows = result["items"]
-        if not rows:
-            fmt.output({"message": "성과 집계 없음", "items": []})
-            return
-        columns = {
-            "daily": ["date", "realized_pnl", "trade_count", "win_rate"],
-            "weekly": [
-                "week_start",
-                "week_end",
-                "week_label",
-                "realized_pnl",
-                "trade_count",
-                "win_rate",
-            ],
-            "monthly": ["year", "month", "realized_pnl", "trade_count", "win_rate"],
-        }[period]
-        fmt.table(rows, columns)
+    rows = result["items"]
+    if not rows:
+        empty: dict[str, Any] = {"message": "성과 집계 없음", "items": []}
+        return CommandResult(data=result, text=(str(empty),))
+    columns = {
+        "daily": ["date", "realized_pnl", "trade_count", "win_rate"],
+        "weekly": [
+            "week_start",
+            "week_end",
+            "week_label",
+            "realized_pnl",
+            "trade_count",
+            "win_rate",
+        ],
+        "monthly": ["year", "month", "realized_pnl", "trade_count", "win_rate"],
+    }[period]
+    return CommandResult(data=result, text=tuple(table_lines(rows, columns)))
 
 
 @strategy.command("performance")
@@ -633,7 +620,9 @@ def strategy_summary(ctx: click.Context, strategy_id: str, period: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("strategy:read")
-def strategy_performance(ctx: click.Context, name: str, account_id: str | None) -> None:
+def strategy_performance(
+    ctx: click.Context, name: str, account_id: str | None
+) -> CommandResult:
     """전략 전체 성과 집계 (모든 봇 합산, Agent 피드백용).
 
     --account-id 옵션은 필수다. 미지정 시 fallback 없이 명시적으로 실패한다
@@ -704,30 +693,28 @@ def strategy_performance(ctx: click.Context, name: str, account_id: str | None) 
 
     metrics = result["metrics"]
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"전략 성과: {result['strategy_name']} ({result['strategy_id']})")
-        click.echo(f"  {'총 거래':15s}: {metrics['total_trades']}")
-        click.echo(f"  {'승률':15s}: {metrics['win_rate']:.1%}")
-        click.echo(f"  {'승리':15s}: {metrics['winning_trades']}")
-        click.echo(f"  {'패배':15s}: {metrics['losing_trades']}")
-        click.echo(f"  {'총 손익':15s}: {metrics['total_pnl']:,.0f}")
-        click.echo(f"  {'순 손익':15s}: {metrics['net_pnl']:,.0f}")
-        click.echo(f"  {'총 수수료':15s}: {metrics['total_commission']:,.0f}")
-        click.echo(f"  {'평균 수익':15s}: {metrics['avg_profit']:,.0f}")
-        click.echo(f"  {'평균 손실':15s}: {metrics['avg_loss']:,.0f}")
-        click.echo(f"  {'수익 팩터':15s}: {metrics['profit_factor']:.2f}")
-        click.echo(f"  {'MDD':15s}: {metrics['max_drawdown']:.1%}")
-        click.echo(f"  {'MDD 금액':15s}: {metrics['max_drawdown_amount']:,.0f}")
-        sharpe = metrics["sharpe_ratio"]
-        click.echo(
-            f"  {'샤프 비율':15s}: {sharpe:.2f}"
-            if sharpe is not None
-            else f"  {'샤프 비율':15s}: N/A (거래 30건 미만)"
-        )
-        click.echo(f"  {'활성 일수':15s}: {metrics['active_days']}")
-        if metrics.get("first_trade_at"):
-            click.echo(f"  {'첫 거래':15s}: {metrics['first_trade_at']}")
-        if metrics.get("last_trade_at"):
-            click.echo(f"  {'마지막 거래':15s}: {metrics['last_trade_at']}")
+    sharpe = metrics["sharpe_ratio"]
+    lines = [
+        f"전략 성과: {result['strategy_name']} ({result['strategy_id']})",
+        f"  {'총 거래':15s}: {metrics['total_trades']}",
+        f"  {'승률':15s}: {metrics['win_rate']:.1%}",
+        f"  {'승리':15s}: {metrics['winning_trades']}",
+        f"  {'패배':15s}: {metrics['losing_trades']}",
+        f"  {'총 손익':15s}: {metrics['total_pnl']:,.0f}",
+        f"  {'순 손익':15s}: {metrics['net_pnl']:,.0f}",
+        f"  {'총 수수료':15s}: {metrics['total_commission']:,.0f}",
+        f"  {'평균 수익':15s}: {metrics['avg_profit']:,.0f}",
+        f"  {'평균 손실':15s}: {metrics['avg_loss']:,.0f}",
+        f"  {'수익 팩터':15s}: {metrics['profit_factor']:.2f}",
+        f"  {'MDD':15s}: {metrics['max_drawdown']:.1%}",
+        f"  {'MDD 금액':15s}: {metrics['max_drawdown_amount']:,.0f}",
+        f"  {'샤프 비율':15s}: {sharpe:.2f}"
+        if sharpe is not None
+        else f"  {'샤프 비율':15s}: N/A (거래 30건 미만)",
+        f"  {'활성 일수':15s}: {metrics['active_days']}",
+    ]
+    if metrics.get("first_trade_at"):
+        lines.append(f"  {'첫 거래':15s}: {metrics['first_trade_at']}")
+    if metrics.get("last_trade_at"):
+        lines.append(f"  {'마지막 거래':15s}: {metrics['last_trade_at']}")
+    return CommandResult(data=result, text=tuple(lines))
