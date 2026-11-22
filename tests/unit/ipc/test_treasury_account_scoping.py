@@ -31,6 +31,7 @@ from ante.ipc.registry import (
     _handle_treasury_allocate,
     _handle_treasury_deallocate,
 )
+from ante.ipc.requests import TreasuryAllocateRequest, TreasuryDeallocateRequest
 
 
 def _make_svc(*, bot: object | None) -> MagicMock:
@@ -71,7 +72,7 @@ async def test_allocate_rejects_account_mismatch() -> None:
     with pytest.raises(InvalidAccountIdError, match="acc-a"):
         await _handle_treasury_allocate(
             svc,
-            {"bot_id": "bot-1", "account_id": "acc-b", "amount": 1000.0},
+            TreasuryAllocateRequest(bot_id="bot-1", account_id="acc-b", amount=1000.0),
             "cli-user",
         )
 
@@ -90,7 +91,9 @@ async def test_deallocate_rejects_account_mismatch() -> None:
     with pytest.raises(InvalidAccountIdError, match="acc-a"):
         await _handle_treasury_deallocate(
             svc,
-            {"bot_id": "bot-1", "account_id": "acc-b", "amount": 1000.0},
+            TreasuryDeallocateRequest(
+                bot_id="bot-1", account_id="acc-b", amount=1000.0
+            ),
             "cli-user",
         )
 
@@ -109,7 +112,9 @@ async def test_deallocate_mismatch_uses_deallocate_context() -> None:
     with pytest.raises(InvalidAccountIdError, match=r"ipc\.treasury\.deallocate"):
         await _handle_treasury_deallocate(
             svc,
-            {"bot_id": "bot-1", "account_id": "acc-b", "amount": 1000.0},
+            TreasuryDeallocateRequest(
+                bot_id="bot-1", account_id="acc-b", amount=1000.0
+            ),
             "cli-user",
         )
 
@@ -122,7 +127,7 @@ async def test_allocate_mismatch_uses_allocate_context() -> None:
     with pytest.raises(InvalidAccountIdError, match=r"ipc\.treasury\.allocate"):
         await _handle_treasury_allocate(
             svc,
-            {"bot_id": "bot-1", "account_id": "acc-b", "amount": 1000.0},
+            TreasuryAllocateRequest(bot_id="bot-1", account_id="acc-b", amount=1000.0),
             "cli-user",
         )
 
@@ -136,7 +141,7 @@ async def test_allocate_passes_when_account_matches() -> None:
 
     result = await _handle_treasury_allocate(
         svc,
-        {"bot_id": "bot-1", "account_id": "acc-a", "amount": 1000.0},
+        TreasuryAllocateRequest(bot_id="bot-1", account_id="acc-a", amount=1000.0),
         "cli-user",
     )
 
@@ -153,7 +158,7 @@ async def test_deallocate_passes_when_account_matches() -> None:
 
     result = await _handle_treasury_deallocate(
         svc,
-        {"bot_id": "bot-1", "account_id": "acc-a", "amount": 1000.0},
+        TreasuryDeallocateRequest(bot_id="bot-1", account_id="acc-a", amount=1000.0),
         "cli-user",
     )
 
@@ -174,7 +179,9 @@ async def test_allocate_missing_bot_raises_bot_not_found() -> None:
     with pytest.raises(BotNotFoundError):
         await _handle_treasury_allocate(
             svc,
-            {"bot_id": "unknown-bot", "account_id": "acc-a", "amount": 1000.0},
+            TreasuryAllocateRequest(
+                bot_id="unknown-bot", account_id="acc-a", amount=1000.0
+            ),
             "cli-user",
         )
 
@@ -188,7 +195,9 @@ async def test_deallocate_missing_bot_raises_bot_not_found() -> None:
     with pytest.raises(BotNotFoundError):
         await _handle_treasury_deallocate(
             svc,
-            {"bot_id": "unknown-bot", "account_id": "acc-a", "amount": 1000.0},
+            TreasuryDeallocateRequest(
+                bot_id="unknown-bot", account_id="acc-a", amount=1000.0
+            ),
             "cli-user",
         )
 
@@ -209,7 +218,7 @@ async def test_allocate_legacy_none_account_id_not_blocked() -> None:
 
     result = await _handle_treasury_allocate(
         svc,
-        {"bot_id": "bot-1", "account_id": "acc-a", "amount": 1000.0},
+        TreasuryAllocateRequest(bot_id="bot-1", account_id="acc-a", amount=1000.0),
         "cli-user",
     )
 
@@ -225,7 +234,7 @@ async def test_deallocate_legacy_none_account_id_not_blocked() -> None:
 
     result = await _handle_treasury_deallocate(
         svc,
-        {"bot_id": "bot-1", "account_id": "acc-a", "amount": 1000.0},
+        TreasuryDeallocateRequest(bot_id="bot-1", account_id="acc-a", amount=1000.0),
         "cli-user",
     )
 

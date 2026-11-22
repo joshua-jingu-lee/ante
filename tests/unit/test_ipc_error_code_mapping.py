@@ -434,7 +434,9 @@ async def test_ipc_dispatch_treasury_allocate_invalid_account_validation_error(
             assert response["status"] == "error", response
             assert response["error"]["code"] == "VALIDATION_ERROR", response
             assert response["error"]["code"] != "EXECUTION_ERROR", response
-            assert "ipc.treasury.allocate" in response["error"]["message"], response
+            assert response["error"]["message"] == validation_message(
+                "treasury.allocate", ("account_id", "invalid_account_id")
+            ), response
 
         # (b) account_id 키 생략 → KeyError → EXECUTION_ERROR 회귀 차단
         response = await client.send(
@@ -445,7 +447,9 @@ async def test_ipc_dispatch_treasury_allocate_invalid_account_validation_error(
         assert response["status"] == "error", response
         assert response["error"]["code"] == "VALIDATION_ERROR", response
         assert response["error"]["code"] != "EXECUTION_ERROR", response
-        assert "ipc.treasury.allocate" in response["error"]["message"], response
+        assert response["error"]["message"] == validation_message(
+            "treasury.allocate", ("account_id", "missing")
+        ), response
     finally:
         await server.stop()
 
@@ -480,7 +484,9 @@ async def test_ipc_dispatch_treasury_deallocate_invalid_account_validation_error
             assert response["status"] == "error", response
             assert response["error"]["code"] == "VALIDATION_ERROR", response
             assert response["error"]["code"] != "EXECUTION_ERROR", response
-            assert "ipc.treasury.deallocate" in response["error"]["message"], response
+            assert response["error"]["message"] == validation_message(
+                "treasury.deallocate", ("account_id", "invalid_account_id")
+            ), response
 
         # (b) account_id 키 생략 → KeyError → EXECUTION_ERROR 회귀 차단
         response = await client.send(
@@ -491,7 +497,9 @@ async def test_ipc_dispatch_treasury_deallocate_invalid_account_validation_error
         assert response["status"] == "error", response
         assert response["error"]["code"] == "VALIDATION_ERROR", response
         assert response["error"]["code"] != "EXECUTION_ERROR", response
-        assert "ipc.treasury.deallocate" in response["error"]["message"], response
+        assert response["error"]["message"] == validation_message(
+            "treasury.deallocate", ("account_id", "missing")
+        ), response
     finally:
         await server.stop()
 
@@ -500,13 +508,10 @@ async def test_ipc_dispatch_treasury_deallocate_invalid_account_validation_error
 async def test_ipc_dispatch_treasury_valid_account_missing_other_arg_not_validation(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
-    """#1656 불변 가드: **valid** account_id + 다른 필수 인자(bot_id/amount)
-    누락은 account 검증 최우선화 이후에도 기존 **non-VALIDATION_ERROR** 경로
-    (``args["bot_id"]`` KeyError → EXECUTION_ERROR)를 유지한다.
-
-    account 검증만 핸들러 최우선으로 이동하고, 타 raw arg
-    (``args["bot_id"]``/``args["amount"]``) 계약은 불변이어야 한다
-    (VALIDATION_ERROR 과적용 0). allocate/deallocate 양쪽 가드.
+    """**valid** account_id + 다른 필수 인자(bot_id/amount) 누락은 요청 모델이
+    서비스 호출 전에 ``VALIDATION_ERROR``(``missing``)로 거부한다(#2683 ⑥. 이전
+    #1656 가드는 ``args["bot_id"]`` KeyError → EXECUTION_ERROR를 잠갔다).
+    allocate/deallocate 양쪽 가드.
     """
     from ante.ipc.registry import register_all_handlers
 
@@ -519,16 +524,18 @@ async def test_ipc_dispatch_treasury_valid_account_missing_other_arg_not_validat
         client = IPCClient(socket_path, timeout=5.0)
 
         for command in ("treasury.allocate", "treasury.deallocate"):
-            # valid account_id + bot_id/amount 누락 → require_account_id
-            # 통과 후 args["bot_id"] KeyError → EXECUTION_ERROR (기존 계약 불변)
             response = await client.send(
                 command,
                 {"account_id": "oracle-valid-account"},
                 actor="tester",
             )
             assert response["status"] == "error", response
-            assert response["error"]["code"] == "EXECUTION_ERROR", response
-            assert response["error"]["code"] != "VALIDATION_ERROR", response
+            assert response["error"] == {
+                "code": "VALIDATION_ERROR",
+                "message": validation_message(
+                    command, ("bot_id", "missing"), ("amount", "missing")
+                ),
+            }, response
     finally:
         await server.stop()
 

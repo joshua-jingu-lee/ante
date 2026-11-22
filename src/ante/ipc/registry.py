@@ -27,6 +27,7 @@ from ante.ipc.requests import (
     BotStatusRequest,
     BotStopRequest,
     BotUpdateRequest,
+    ConfigSetRequest,
     IPCRequest,
     MemberReactivateRequest,
     MemberRegenerateRecoveryKeyRequest,
@@ -37,10 +38,14 @@ from ante.ipc.requests import (
     MemberSetEmojiRequest,
     MemberSuspendRequest,
     MemberUpdateScopesRequest,
+    RuleUpdateRequest,
     SignalConnectRequest,
     StrategySetStatusRequest,
     SystemClearHaltRequest,
     SystemHaltRequest,
+    TreasuryAllocateRequest,
+    TreasuryDeallocateRequest,
+    TreasurySetBalanceRequest,
 )
 
 if TYPE_CHECKING:
@@ -557,17 +562,14 @@ async def _handle_bot_update(
 
 
 async def _handle_treasury_allocate(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: TreasuryAllocateRequest, actor: str
+) -> dict[str, Any]:
     from ante.account.errors import InvalidAccountIdError
-    from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.treasury.allocate"
-    )
-    bot_id = args["bot_id"]
-    amount = args["amount"]
+    account_id = request.account_id
+    bot_id = request.bot_id
+    amount = request.amount
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -584,17 +586,14 @@ async def _handle_treasury_allocate(
 
 
 async def _handle_treasury_deallocate(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: TreasuryDeallocateRequest, actor: str
+) -> dict[str, Any]:
     from ante.account.errors import InvalidAccountIdError
-    from ante.account.scoping import require_account_id
     from ante.bot.exceptions import BotNotFoundError
 
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.treasury.deallocate"
-    )
-    bot_id = args["bot_id"]
-    amount = args["amount"]
+    account_id = request.account_id
+    bot_id = request.bot_id
+    amount = request.amount
     bot = svc.bot_manager.get_bot(bot_id)
     if bot is None:
         raise BotNotFoundError(bot_id)
@@ -611,17 +610,13 @@ async def _handle_treasury_deallocate(
 
 
 async def _handle_treasury_set_balance(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: TreasurySetBalanceRequest, actor: str
+) -> dict[str, Any]:
     """Treasury balance 설정 IPC handler."""
     from datetime import UTC, datetime
 
-    from ante.account.scoping import require_account_id
-
-    account_id = require_account_id(
-        args.get("account_id"), context="ipc.treasury.set_balance"
-    )
-    balance = args["balance"]
+    account_id = request.account_id
+    balance = request.balance
     treasury = svc.treasury_manager.get(account_id)
     await treasury.set_account_balance(balance)
 
@@ -638,21 +633,21 @@ async def _handle_treasury_set_balance(
 
 
 async def _handle_rule_update(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
+    svc: ServiceRegistry, request: RuleUpdateRequest, actor: str
+) -> dict[str, Any]:
     """계좌 룰 업데이트 IPC handler."""
     from ante.rule.config_update import update_account_rule_config
 
-    account_id = args["account_id"]
-    rule_type = args["rule_type"]
-    enabled = bool(args.get("enabled", True))
+    account_id = request.account_id
+    rule_type = request.rule_type
+    enabled = request.enabled
     result = await update_account_rule_config(
         account_service=svc.account,
         dynamic_config=svc.dynamic_config,
         account_id=account_id,
         rule_type=rule_type,
         enabled=enabled,
-        params=dict(args.get("params") or {}),
+        params=request.params,
         changed_by=actor,
         audit_logger=None,
     )
@@ -896,11 +891,11 @@ async def _handle_member_regenerate_recovery_key(
 
 
 async def _handle_config_set(
-    svc: ServiceRegistry, args: dict[str, Any], actor: str
-) -> dict:
-    key = args["key"]
-    value = args["value"]
-    category = args.get("category", "user")
+    svc: ServiceRegistry, request: ConfigSetRequest, actor: str
+) -> dict[str, Any]:
+    key = request.key
+    value = request.value
+    category = request.category
     await svc.dynamic_config.set(key, value, category=category, changed_by=actor)
     return {"key": key, "value": value}
 
@@ -1259,14 +1254,14 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_treasury_allocate,
         is_mutating=True,
         required_services=frozenset({"bot_manager", "treasury_manager"}),
-        account_id_policy="required",
+        request_model=TreasuryAllocateRequest,
     )
     registry.register(
         "treasury.deallocate",
         _handle_treasury_deallocate,
         is_mutating=True,
         required_services=frozenset({"bot_manager", "treasury_manager"}),
-        account_id_policy="required",
+        request_model=TreasuryDeallocateRequest,
     )
     registry.register(
         "treasury.set_balance",
@@ -1274,15 +1269,15 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         is_mutating=True,
         required_services=frozenset({"treasury_manager", "audit_logger"}),
         audit_action="treasury.set_balance",
-        account_id_policy="required",
+        request_model=TreasurySetBalanceRequest,
     )
     registry.register(
         "rule.update",
         _handle_rule_update,
         is_mutating=True,
         required_services=frozenset({"account", "dynamic_config", "audit_logger"}),
-        account_id_policy="required",
         audit_action="account.rule.update",
+        request_model=RuleUpdateRequest,
     )
     registry.register(
         "strategy.set_status",
@@ -1369,6 +1364,7 @@ def register_all_handlers(registry: CommandRegistry) -> None:
         _handle_config_set,
         is_mutating=True,
         required_services=frozenset({"dynamic_config"}),
+        request_model=ConfigSetRequest,
     )
     registry.register(
         "approval.request",

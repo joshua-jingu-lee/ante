@@ -118,10 +118,13 @@ def test_identical_records_pass_with_the_full_report(tmp_path: Path) -> None:
         "거부로 바뀜 0\n"
         "코드 바뀜 0\n"
         "메시지 바뀜 0\n"
+        "의도한 변경(이름으로 허용) 0\n"
         "다름 0\n"
         "비결정 0\n"
         "code changes:\n"
         "changed rows:\n"
+        "allowed rows:\n"
+        "stale allowed rows:\n"
         "different rows:\n"
         "ratchet: ipc_handlers_without_model None -> None, "
         "ipc_args_reads 2 -> 0, cli_direct_ipc_send None -> None\n"
@@ -224,6 +227,98 @@ def test_a_same_json_type_value_must_stay(tmp_path: Path) -> None:
     )
     assert code == 1
     assert "  demo.run:value:name:str5: a value of the CLI JSON type changed\n" in out
+
+
+INT7 = "demo.run:value:n:int7"
+INT7_ROW = _request(INT7, "value", {"n": 7}, key="n", same_type=True)
+INT7_BEFORE = {**OK, "calls": '[["svc.demo.run", [7], {}]]'}
+INT7_AFTER = {**OK, "calls": '[["svc.demo.run", [7.0], {}]]'}
+
+
+def test_an_allowed_row_leaves_the_different_rows(tmp_path: Path) -> None:
+    code, out, err = _compare(
+        tmp_path,
+        [INT7_ROW],
+        {INT7: INT7_BEFORE},
+        {INT7: INT7_AFTER},
+        "--allow-row",
+        INT7,
+    )
+    assert (code, err) == (0, "")
+    assert (_count(out, "의도한 변경(이름으로 허용)"), _count(out, "다름")) == (1, 0)
+    assert (
+        "allowed rows:\n"
+        f'  {INT7}: ok [["svc.demo.run", [7], {{}}]] -> '
+        'ok [["svc.demo.run", [7.0], {}]]\n'
+        "stale allowed rows:\n"
+        "different rows:\n"
+    ) in out
+
+
+def test_a_row_not_allowed_stays_different(tmp_path: Path) -> None:
+    code, out, _ = _compare(
+        tmp_path, [INT7_ROW], {INT7: INT7_BEFORE}, {INT7: INT7_AFTER}
+    )
+    assert code == 1
+    assert (_count(out, "의도한 변경(이름으로 허용)"), _count(out, "다름")) == (0, 1)
+
+
+def test_an_allowance_needs_the_exact_row_name(tmp_path: Path) -> None:
+    code, out, _ = _compare(
+        tmp_path,
+        [INT7_ROW, MISSING],
+        {INT7: INT7_BEFORE, "demo.run:missing:name": EXECUTION},
+        {INT7: INT7_AFTER, "demo.run:missing:name": EXECUTION},
+        "--allow-row",
+        "demo.run:missing:name",
+    )
+    assert code == 1
+    assert _count(out, "다름") == 1
+    assert "stale allowed rows:\n  demo.run:missing:name: 같음\n" in out
+
+
+def test_an_allowed_row_that_is_not_different_is_stale(tmp_path: Path) -> None:
+    code, out, _ = _compare(
+        tmp_path,
+        [INT7_ROW],
+        {INT7: INT7_BEFORE},
+        {INT7: INT7_BEFORE},
+        "--allow-row",
+        INT7,
+    )
+    assert code == 1
+    assert (_count(out, "같음"), _count(out, "다름")) == (1, 0)
+    assert f"stale allowed rows:\n  {INT7}: 같음\n" in out
+
+
+@pytest.mark.parametrize(
+    ("name", "message"),
+    [
+        pytest.param("demo.run:value:n", "not in the request set", id="prefix"),
+        pytest.param("demo.run:cli:0", "a cli row cannot be allowed", id="cli"),
+    ],
+)
+def test_an_allowance_outside_the_value_rows_is_an_input_error(
+    tmp_path: Path, name: str, message: str
+) -> None:
+    rows = {INT7: INT7_BEFORE, "demo.run:cli:0": OK}
+    code, out, err = _compare(
+        tmp_path, [INT7_ROW, CLI], rows, rows, "--allow-row", name
+    )
+    assert (code, out) == (2, "")
+    assert f"--allow-row {name}: {message}" in err
+
+
+def test_record_matches_the_bot_account_to_the_request(tmp_path: Path) -> None:
+    out_path = tmp_path / "record.json"
+    code, _, err = _run("record", "--out", out_path)
+    assert (code, err) == (0, "")
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["rows"]["treasury.allocate:cli:0"]["calls"] == (
+        '[["svc.bot_manager.get_bot", ["b1"], {}], '
+        '["svc.treasury_manager.get", ["acct-1"], {}], '
+        '["svc.treasury_manager.get().allocate", ["b1", 100.0], {}]]'
+    )
 
 
 def test_a_row_missing_after_is_different(tmp_path: Path) -> None:
@@ -437,6 +532,18 @@ def test_record_dispatches_the_committed_request_set(tmp_path: Path) -> None:
             '"resource": "strategy:s1"}]]'
         ),
     }
+
+
+def test_record_replaces_a_clock_value_of_the_result(tmp_path: Path) -> None:
+    out_path = tmp_path / "record.json"
+    code, _, err = _run("record", "--out", out_path)
+    assert (code, err) == (0, "")
+    data = json.loads(out_path.read_text(encoding="utf-8"))
+    assert data["rows"]["treasury.set_balance:cli:0"]["result"] == (
+        '{"account_id": "acct-1", "total_balance": '
+        '"svc.treasury_manager.get().account_balance", '
+        '"updated_at": "2030-01-01T00:00:00+00:00"}'
+    )
 
 
 def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
