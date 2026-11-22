@@ -80,6 +80,7 @@ __all__ = [
     "SnapshotNotFoundError",
     "StrategyInvalidStatusTransitionError",
     "StrategyMissingRequiredAccountError",
+    "StrategyValidationFailedError",
     "TradeError",
     "TradeNotFoundError",
     "TreasuryAllocateFailedError",
@@ -409,6 +410,10 @@ class StrategyMissingRequiredAccountError(Exception):
     code = "STRATEGY_MISSING_REQUIRED_ACCOUNT"
 
 
+class StrategyValidationFailedError(Exception):
+    code = "STRATEGY_VALIDATION_FAILED"
+
+
 class TradeError(Exception):
     code = "TRADE_ERROR"
 
@@ -529,6 +534,7 @@ CLI_ERRORS: tuple[type[Exception], ...] = (
     SnapshotNotFoundError,
     StrategyInvalidStatusTransitionError,
     StrategyMissingRequiredAccountError,
+    StrategyValidationFailedError,
     TradeError,
     TradeNotFoundError,
     TreasuryAllocateFailedError,

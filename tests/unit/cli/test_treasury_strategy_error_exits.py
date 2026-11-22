@@ -1038,7 +1038,7 @@ def test_exceptions_raised_by_treasury_and_strategy_map_to_their_specs() -> None
     }
 
 
-def test_the_residual_validate_code_is_registered_without_an_exception() -> None:
+def test_the_validate_code_is_registered_with_its_exception() -> None:
     from ante.contracts import error_registry
     from ante.contracts.errors import ErrorSpec
 
@@ -1053,7 +1053,7 @@ def test_the_residual_validate_code_is_registered_without_an_exception() -> None
         if spec.code == "STRATEGY_VALIDATION_FAILED"
     ]
     assert specs == [("STRATEGY_VALIDATION_FAILED", "validation", 1)]
-    assert mapped == []
+    assert mapped == ["StrategyValidationFailedError"]
 
 
 def test_strategy_submit_register_failure_without_a_code_text(tmp_path: Path) -> None:
