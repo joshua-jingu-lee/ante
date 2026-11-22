@@ -153,7 +153,7 @@ cold-path 삭제는 항상 keep 의미다.
 | `ante broker status` | `broker.status` | `BrokerAdapter.health_check()` | 서버가 보유한 BrokerAdapter 연결 상태와 circuit breaker 상태 조회 |
 | `ante broker balance` | `broker.balance` | `BrokerAdapter.get_account_balance()` | 서버 시작 시 생성된 adapter/credentials/rate limit 상태 재사용 |
 | `ante broker positions` | `broker.positions` | `BrokerAdapter.get_positions()` | 서버 adapter 연결과 계좌 topology 기준으로 live 포지션 조회 |
-| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다. 응답은 `{"orders": [...]}` envelope. CLI를 거치지 않는 직접 호출의 잘못된 ISO 날짜는 요청 모델이 `VALIDATION_ERROR`로 거부한다(#2412) |
+| `ante broker order-history` | `broker.order_history` | `BrokerAdapter.get_order_history()` | 서버 adapter 연결/credentials/rate limit/circuit breaker 재사용. `--from`/`--to`는 ISO `YYYY-MM-DD`로 받아 어댑터 경계 압축 `YYYYMMDD`로 변환한 뒤 전달한다. 응답 payload는 `{"orders": [...]}`(IPC `result`에서는 최상위, CLI `--format json`에서는 `data.orders`). CLI를 거치지 않는 직접 호출의 잘못된 ISO 날짜는 요청 모델이 `VALIDATION_ERROR`로 거부한다(#2412) |
 | `ante broker reconcile --fix` | `broker.reconcile` | `PositionReconciler.reconcile()` | TradeService 인메모리 반영 + `NotificationEvent` 알림 |
 
 일반 운영 CLI는 broker adapter를 직접 생성하지 않는다. 직접 생성 경로는 서버의

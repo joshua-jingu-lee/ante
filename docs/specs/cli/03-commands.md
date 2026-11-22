@@ -523,9 +523,9 @@ strict zero-padded 검증). 어댑터 경계가 요구하는 압축 `YYYYMMDD`�
 `IPC_TIMEOUT`과 서버 error envelope은 폴백 없이 원본 코드/메시지로 노출한다.
 
 출력은 BrokerAdapter가 정규화한 8키다: `order_id` / `symbol` / `side` /
-`quantity` / `filled_quantity` / `price` / `status` / `timestamp`. JSON 모드는
-IPC envelope을 그대로 통과시켜 항상 `{"orders": [...]}` 평면 shape이며, 빈 결과도
-`{"orders": []}`로 통일한다.
+`quantity` / `filled_quantity` / `price` / `status` / `timestamp`. 응답 payload는
+항상 `{"orders": [...]}`(IPC `result`에서는 최상위, CLI `--format json`에서는
+`data.orders`)이며, 빈 결과도 `{"orders": []}`로 통일한다.
 
 다음은 어댑터 계약에서 비롯한 **알려진 한계**이며 본 명령이 해소하지 않는다.
 CLI `--help`와 사람용 출력 헤더로 노출해 오독만 줄인다.
