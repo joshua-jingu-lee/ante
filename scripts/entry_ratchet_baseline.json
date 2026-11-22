@@ -91,7 +91,7 @@
     "treasury transactions"
   ],
   "cli_direct_output": {
-    "src/ante/cli/commands/approval.py": 10,
+    "src/ante/cli/commands/approval.py": 3,
     "src/ante/cli/commands/audit.py": 4,
     "src/ante/cli/commands/backtest.py": 7,
     "src/ante/cli/commands/bot.py": 52,
@@ -101,7 +101,7 @@
     "src/ante/cli/commands/feed.py": 60,
     "src/ante/cli/commands/init.py": 22,
     "src/ante/cli/commands/instrument.py": 10,
-    "src/ante/cli/commands/member.py": 49,
+    "src/ante/cli/commands/member.py": 44,
     "src/ante/cli/commands/report.py": 11,
     "src/ante/cli/commands/rule.py": 10,
     "src/ante/cli/commands/signal.py": 2,

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 import click
 
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import (
     get_member_id,
@@ -475,9 +475,8 @@ def member_register(
 @click.pass_context
 @require_auth
 @require_master
-def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
+def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> CommandResult:
     """멤버 이모지 설정/변경."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_set_emoji() -> dict[str, Any]:
@@ -500,7 +499,9 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> None:
     except MemberNotFoundError:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
-    fmt.success(f"이모지 설정 완료: {member_id} → {result['emoji']}", result)
+    return CommandResult(
+        data=result, message=f"이모지 설정 완료: {member_id} → {result['emoji']}"
+    )
 
 
 @member.command("update-scopes")
@@ -559,9 +560,8 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
 @click.pass_context
 @require_auth
 @require_master
-def member_suspend(ctx: click.Context, member_id: str) -> None:
+def member_suspend(ctx: click.Context, member_id: str) -> CommandResult:
     """멤버 일시 정지."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_suspend() -> dict[str, Any]:
@@ -586,7 +586,7 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
     except MemberNotFoundError:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
-    fmt.success(f"멤버 정지 완료: {member_id}", result)
+    return CommandResult(data=result, message=f"멤버 정지 완료: {member_id}")
 
 
 @member.command("reactivate")
@@ -594,9 +594,8 @@ def member_suspend(ctx: click.Context, member_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_master
-def member_reactivate(ctx: click.Context, member_id: str) -> None:
+def member_reactivate(ctx: click.Context, member_id: str) -> CommandResult:
     """멤버 재활성화."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_reactivate() -> dict[str, Any]:
@@ -621,7 +620,7 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
     except MemberNotFoundError:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
-    fmt.success(f"멤버 재활성화 완료: {member_id}", result)
+    return CommandResult(data=result, message=f"멤버 재활성화 완료: {member_id}")
 
 
 @member.command("revoke")
@@ -636,12 +635,11 @@ def member_reactivate(ctx: click.Context, member_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_master
-def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
+def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> CommandResult:
     """멤버 영구 폐기.
 
     ``--yes`` 누락 시 prompt 없이 ``CLI_CONFIRMATION_REQUIRED`` 에러로 종료한다.
     """
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     if not yes:
@@ -672,7 +670,7 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> None:
     except MemberNotFoundError:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
-    fmt.success(f"멤버 폐기 완료: {member_id}", result)
+    return CommandResult(data=result, message=f"멤버 폐기 완료: {member_id}")
 
 
 @member.command("rotate-token")
@@ -739,7 +737,7 @@ def member_reset_password(
     recovery_key: str,
     new_password_env: str | None,
     new_password_file: str | None,
-) -> None:
+) -> CommandResult:
     """Recovery Key로 패스워드 리셋 (인증 불필요).
 
     새 패스워드는 ``--new-password-env <ENV_NAME>`` 또는
@@ -777,7 +775,7 @@ def member_reset_password(
 
     _run(_run_reset())
 
-    fmt.success("패스워드가 변경되었습니다.")
+    return CommandResult(message="패스워드가 변경되었습니다.")
 
 
 @member.command("regenerate-recovery-key")
