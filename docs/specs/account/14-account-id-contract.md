@@ -480,7 +480,7 @@ Bot/Main + Approval payload validation. 본 SPLIT 에서 적용 완료
 | `ApprovalService.create/reopen` | account-scoped type (`budget_change`, `rule_change`, `bot_create`) 시 config-first → flat `params["account_id"]` 검증 | approval payload validation (#1217 → #1241 SPLIT-2) |
 | `AutoApproveEvaluator.should_auto_approve` (`bot_create`) | mode 추출도 config-first → flat fallback | 자동 승인 (#1217 → #1241 SPLIT-2) |
 | IPC `bot.create` payload | `args["account_id"]` 진입 시 `require_account_id` | IPC bot routing (#1217 → #1241 SPLIT-2) |
-| `main.py` `_exec_rule_change` / `_exec_budget_change` / `_validate_budget_change` | `params.get("account_id", "test")` 제거 → `require_account_id` (validator 는 fail 반환) | approval executor/validator (#1217 → #1241 SPLIT-2) |
+| `approval/handlers.py` `_exec_rule_change` / `_exec_budget_change` / `_validate_budget_change` | `params.get("account_id", "test")` 제거 → `require_account_id` (validator 는 fail 반환) | approval executor/validator (#1217 → #1241 SPLIT-2) |
 | CLI `bot create/remove/...`, `approval` 호출부 | `--account` required | CLI UX (#1218 영역, 본 SPLIT 미포함) |
 
 #### #1242 (SPLIT-3) 적용 위치

@@ -19,4 +19,4 @@
 
 결재 유형은 열린 구조로, 새로운 유형을 추가할 때 `type` 문자열과 실행 핸들러만 등록하면 된다.
 
-> **구현 현황**: 10개 결재 유형 모두 main.py에 executor가 등록되어 있다. `bot_create` executor payload는 `params.config`의 `BotConfig` 필드만 사용하며, `mode`, `budget`, `strategy_cls`를 params에 저장하지 않는다.
+> **구현 현황**: 10개 결재 유형 모두 executor가 등록되어 있다. executor와 사전 검증기는 `ante.approval.handlers`에 정의되고, `main.py`가 초기화 때 `ApprovalService`에 등록한다. `bot_create` executor payload는 `params.config`의 `BotConfig` 필드만 사용하며, `mode`, `budget`, `strategy_cls`를 params에 저장하지 않는다.

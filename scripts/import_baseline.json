@@ -5,7 +5,10 @@
     "account->core",
     "account->eventbus",
     "approval->account",
+    "approval->bot",
     "approval->eventbus",
+    "approval->report",
+    "approval->strategy",
     "audit->core",
     "backtest->core",
     "backtest->data",
@@ -113,6 +116,6 @@
     "treasury->eventbus"
   ],
   "cycles": [],
-  "lazy_imports": 451,
+  "lazy_imports": 448,
   "sqlite_files": []
 }

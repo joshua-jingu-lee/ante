@@ -90,7 +90,7 @@ def _build_executors() -> tuple[dict, dict]:
         rule_engine.update_rules(params["bot_id"], params["rules"])
 
     async def _exec_bot_create(params: dict) -> None:
-        from ante.main import _approval_bot_create_config
+        from ante.approval.handlers import _approval_bot_create_config
 
         config = _approval_bot_create_config(params)
         record = await strategy_registry.get(config.strategy_id)
@@ -142,7 +142,7 @@ def _build_validators(mocks: dict) -> dict:
     from ante.strategy.registry import StrategyStatus
 
     async def _validate_bot_create(params: dict) -> list[ValidationResult]:
-        from ante.main import _approval_bot_create_config
+        from ante.approval.handlers import _approval_bot_create_config
 
         try:
             config = _approval_bot_create_config(params)
