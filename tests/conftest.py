@@ -13,6 +13,7 @@ import sys
 import tempfile
 import threading
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 from unittest import mock
 
@@ -435,8 +436,51 @@ def _reset_kis_token_state():
 
 
 CLOCK_LEAK_MESSAGE = (
-    "테스트가 바꾼 시계를 되돌리지 않았다 (#2768). use_clock으로 바꾼다."
+    "테스트가 바꾼 시계를 되돌리지 않았다 (#2768). "
+    "manual_clock 픽스처나 use_clock으로 바꾼다."
 )
+DEFAULT_MANUAL_CLOCK_AT = datetime(2026, 1, 2, 3, 0, 0, tzinfo=UTC)
+
+
+class ManualClock:
+    """테스트의 시계 대역. 시각과 단조 값을 고정하고 ``advance``로만 움직인다.
+
+    ``now(tz)``는 고정 시각을 그 tz로, ``now(None)``은 로컬 naive 시각으로
+    돌려준다(``datetime.now()``와 같은 뜻).
+    """
+
+    def __init__(self, at: datetime, monotonic: float = 1000.0) -> None:
+        if at.tzinfo is None:
+            raise ValueError("ManualClock needs an aware datetime")
+        self._at = at
+        self._monotonic = monotonic
+
+    def now(self, tz: tzinfo | None) -> datetime:
+        if tz is None:
+            return self._at.astimezone().replace(tzinfo=None)
+        return self._at.astimezone(tz)
+
+    def monotonic(self) -> float:
+        return self._monotonic
+
+    def advance(self, seconds: float) -> None:
+        if seconds < 0:
+            raise ValueError("ManualClock does not go back")
+        self._at += timedelta(seconds=seconds)
+        self._monotonic += seconds
+
+
+@pytest.fixture
+def manual_clock(request: pytest.FixtureRequest) -> Iterator[ManualClock]:
+    """고정 시계를 현재 시계로 둔다. 시각은 ``indirect`` 파라미터로 줄 수 있다.
+
+    기본 시각은 ``DEFAULT_MANUAL_CLOCK_AT``(2026-01-02 12:00 KST)이다.
+    """
+    from ante.core import clock
+
+    manual = ManualClock(getattr(request, "param", DEFAULT_MANUAL_CLOCK_AT))
+    with clock.use_clock(manual):
+        yield manual
 
 
 def _reset_clock() -> bool:
