@@ -14,6 +14,9 @@
       "BLE001": 2,
       "C901": 1
     },
+    "src/ante/approval/handlers.py": {
+      "BLE001": 1
+    },
     "src/ante/approval/service.py": {
       "S608": 3
     },
@@ -177,8 +180,8 @@
     },
     "src/ante/main.py": {
       "ASYNC240": 1,
-      "BLE001": 3,
-      "C901": 6
+      "BLE001": 2,
+      "C901": 5
     },
     "src/ante/member/service.py": {
       "BLE001": 1,
@@ -248,6 +251,9 @@
     },
     "src/ante/approval/auto_approve.py": {
       "type-arg": 4
+    },
+    "src/ante/approval/handlers.py": {
+      "type-arg": 16
     },
     "src/ante/approval/models.py": {
       "type-arg": 3
@@ -461,7 +467,7 @@
     "src/ante/main.py": {
       "no-any-return": 2,
       "no-untyped-def": 1,
-      "type-arg": 22
+      "type-arg": 4
     },
     "src/ante/member/service.py": {
       "type-arg": 1
