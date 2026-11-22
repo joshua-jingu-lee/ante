@@ -354,7 +354,7 @@ class TestMemberInvalidScopeEquivalence:
     """
 
     def test_cli_direct_invalid_scope_via_register(self, runner: CliRunner) -> None:
-        exc = InvalidScopeError("oracle:invalid")
+        exc = InvalidScopeError("sample:invalid")
         svc = AsyncMock()
         svc.register.side_effect = exc
 
@@ -378,7 +378,7 @@ class TestMemberInvalidScopeEquivalence:
                     "--type",
                     "human",
                     "--scopes",
-                    "oracle:invalid",
+                    "sample:invalid",
                 ],
             )
 
@@ -388,7 +388,7 @@ class TestMemberInvalidScopeEquivalence:
         assert payload["code"] == "MEMBER_INVALID_SCOPE"
 
     def test_ipc_envelope_invalid_scope(self) -> None:
-        exc = InvalidScopeError("oracle:invalid")
+        exc = InvalidScopeError("sample:invalid")
         assert _ipc_envelope_code(exc) == "MEMBER_INVALID_SCOPE"
 
     @pytest.mark.asyncio
@@ -400,7 +400,7 @@ class TestMemberInvalidScopeEquivalence:
 
         member_service = MagicMock()
         member_service.update_scopes = AsyncMock(
-            side_effect=InvalidScopeError("oracle:invalid")
+            side_effect=InvalidScopeError("sample:invalid")
         )
         svc_registry = ServiceRegistry(
             account=MagicMock(),
@@ -425,7 +425,7 @@ class TestMemberInvalidScopeEquivalence:
             client = IPCClient(socket_path, timeout=5.0)
             response = await client.send(
                 "member.update_scopes",
-                {"member_id": "m-test", "scopes": ["oracle:invalid"]},
+                {"member_id": "m-test", "scopes": ["sample:invalid"]},
                 actor="tester",
             )
             assert response["status"] == "error"

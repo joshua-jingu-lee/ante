@@ -149,7 +149,7 @@ class TestListInvalidTypeRequests:
         await _seed_row(
             db,
             approval_id="invalid-1",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
         )
         # 정상 type 두 종류
         await _seed_row(
@@ -279,7 +279,7 @@ class TestCancelInvalidTypeRequestRejection:
         await _seed_row(
             db,
             approval_id="inv-term",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
             status=terminal_status,
         )
 
@@ -336,7 +336,7 @@ class TestCancelInvalidTypeRequestSuccess:
         await _seed_row(
             db,
             approval_id="inv-1",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
             status=start_status,
         )
 
@@ -373,7 +373,7 @@ class TestCancelInvalidTypeRequestSuccess:
         await _seed_row(
             db,
             approval_id="inv-1",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
         )
         await service.cancel_invalid_type_request(
             "inv-1",
@@ -405,7 +405,7 @@ class TestCancelInvalidTypeSuppressNotification:
         await _seed_row(
             db,
             approval_id="inv-1",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
         )
 
         await service.cancel_invalid_type_request("inv-1", resolved_by="admin-1")
@@ -423,7 +423,7 @@ class TestCancelInvalidTypeSuppressNotification:
         await _seed_row(
             db,
             approval_id="inv-2",
-            approval_type="oracle_invalid_type",
+            approval_type="sample_invalid_type",
         )
 
         await service.cancel_invalid_type_request(
@@ -435,7 +435,7 @@ class TestCancelInvalidTypeSuppressNotification:
         assert len(collector.resolved) == 1
         event = collector.resolved[0]
         assert event.approval_id == "inv-2"
-        assert event.approval_type == "oracle_invalid_type"
+        assert event.approval_type == "sample_invalid_type"
         assert event.resolution == ApprovalStatus.CANCELLED
         assert event.resolved_by == "admin-1"
 

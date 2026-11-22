@@ -130,7 +130,7 @@ _INVALID_CASES = {
         "--to",
         "2026-01-01",
         "--account",
-        "oracle-paper",
+        "sample-paper",
     ],
     "report": [
         "report",
@@ -149,7 +149,7 @@ _INVALID_CASES = {
         "broker",
         "order-history",
         "--account",
-        "oracle-paper",
+        "sample-paper",
         "--from",
         "2026-02-01",
         "--to",
@@ -347,7 +347,7 @@ class TestValidRangeRegression:
                 "--to",
                 "2026-02-01",
                 "--account",
-                "oracle-paper",
+                "sample-paper",
             ],
             [
                 "treasury",
@@ -357,7 +357,7 @@ class TestValidRangeRegression:
                 "--to",
                 "2026-01-15",
                 "--account",
-                "oracle-paper",
+                "sample-paper",
             ],
             [
                 "treasury",
@@ -365,16 +365,16 @@ class TestValidRangeRegression:
                 "--from",
                 "2026-01-01",
                 "--account",
-                "oracle-paper",
+                "sample-paper",
             ],
-            ["treasury", "snapshot", "--account", "oracle-paper"],
+            ["treasury", "snapshot", "--account", "sample-paper"],
         ],
     )
     def test_treasury_valid_passes_to_service(self, runner, args):
         with patch("ante.cli.commands.treasury._run") as mock_run:
             mock_run.side_effect = asyncio_run_returning(
                 {
-                    "account_id": "oracle-paper",
+                    "account_id": "sample-paper",
                     "snapshot_date": "2026-01-15",
                     "total_asset": 1.0,
                     "ante_eval_amount": 1.0,
@@ -455,7 +455,7 @@ class TestFormatInvalidPathPreserved:
                 "--to",
                 "2026-01-01",
                 "--account",
-                "oracle-paper",
+                "sample-paper",
             ],
             [
                 "report",

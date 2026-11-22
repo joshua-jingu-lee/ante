@@ -1,6 +1,6 @@
 """``instrument import`` validation 경로의 nonzero exit code 보장 테스트 (#1516).
 
-이슈 #1516 (oracle A7 cli_instrument_import_error_exit_zero):
+이슈 #1516 (cli_instrument_import_error_exit_zero):
 ``ante instrument import``의 5개 validation branch가 ``fmt.error(...)``로 error를
 출력하면서도 ``return``만 수행해 exit code 0으로 종료되던 ingress drift를 닫는다.
 #1515의 missing-resource 패턴(``ctx.exit(1)``)과 동일한 정책으로 통합한다.
@@ -12,14 +12,14 @@
 - ``Formatter.error()`` 자체는 미변경 — 출력은 호출자 책임, exit은 caller가
   ``ctx.exit(1)``로 강제.
 - 검증된 사이트 5개:
-    1. JSON shape (array 아님) — oracle probe 재현
+    1. JSON shape (array 아님)
     2. unsupported file extension (.txt 등)
     3. 파일 읽기 실패 (corrupt JSON)
     4. 빈 데이터 (`[]`)
     5. 필수 컬럼 누락 (symbol/exchange 부재)
 - 회귀 보존: valid `--dry-run`은 exit 0 유지.
 
-#1611 (split #1598 oracle A7 cli_instrument_import_invalid_krx_symbol):
+#1611 (split #1598 cli_instrument_import_invalid_krx_symbol):
 exchange == KRX 행의 비6자리 symbol(예: ``ABCDEF``)을 dry-run/실 import
 양쪽에서 ``INSTRUMENT_INVALID_SYMBOL`` 구조화 에러로 거부한다. 검증은
 ``core.market_data_vocab.is_krx_symbol`` SSOT(#1613) 위임이며 기존
@@ -74,7 +74,7 @@ def runner() -> CliRunner:
     return r
 
 
-# ── 1. JSON shape: array 아닌 object → exit 1 (oracle probe 재현) ──
+# ── 1. JSON shape: array 아닌 object → exit 1 ──
 
 
 class TestJsonNotArrayExit:
@@ -95,7 +95,7 @@ class TestJsonNotArrayExit:
     def test_json_object_exits_nonzero_json_envelope(
         self, runner: CliRunner, tmp_path
     ) -> None:
-        """oracle probe 시그니처와 정확히 동일한 경로: ``--format json`` 모드."""
+        """``--format json`` 모드."""
         json_file = tmp_path / "object.json"
         json_file.write_text('{"symbol": "005930", "exchange": "KRX"}')
 
@@ -301,7 +301,7 @@ class TestValidDryRunRegression:
 class TestKrxInvalidSymbolExit:
     """``exchange=KRX`` + 비6자리 ``symbol`` → exit 1 + 구조화 error code.
 
-    #1598 oracle probe 재현: ``[{"symbol":"ABCDEF","exchange":"KRX"}]`` 가
+    #1598: ``[{"symbol":"ABCDEF","exchange":"KRX"}]`` 가
     dry-run preview/실 import로 수락되던 ingress drift를 닫는다. dry-run·
     실 import 양쪽에서 instruments build/저장 이전에 거부된다.
     """
@@ -309,7 +309,7 @@ class TestKrxInvalidSymbolExit:
     def test_invalid_krx_symbol_dry_run_json_envelope(
         self, runner: CliRunner, tmp_path
     ) -> None:
-        """oracle probe 시그니처: ``--format json ... --dry-run``."""
+        """``--format json ... --dry-run``."""
         json_file = tmp_path / "inv_sym.json"
         json_file.write_text(
             json.dumps(
@@ -317,7 +317,7 @@ class TestKrxInvalidSymbolExit:
                     {
                         "symbol": "ABCDEF",
                         "exchange": "KRX",
-                        "name": "Oracle Invalid Symbol",
+                        "name": "Sample Invalid Symbol",
                     }
                 ]
             )
@@ -370,7 +370,7 @@ class TestKrxInvalidSymbolExit:
                     {
                         "symbol": "ABCDEF",
                         "exchange": "KRX",
-                        "name": "Oracle Invalid Symbol",
+                        "name": "Sample Invalid Symbol",
                     }
                 ]
             )
@@ -603,7 +603,7 @@ class TestExchangeInvalidRegressionUnbroken:
         json_file = tmp_path / "inv_ex.json"
         json_file.write_text(
             json.dumps(
-                [{"symbol": "ABCDEF", "exchange": "ORACLE_INVALID", "name": "x"}]
+                [{"symbol": "ABCDEF", "exchange": "SAMPLE_INVALID", "name": "x"}]
             )
         )
 

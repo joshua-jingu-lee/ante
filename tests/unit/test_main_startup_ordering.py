@@ -300,12 +300,12 @@ async def test_sync_instruments_does_not_stop_at_first_broker() -> None:
 
     accounts = [
         _make_sync_account("kospi", "KOSPI"),
-        _make_sync_account("oracle-paper", "KRX"),
+        _make_sync_account("sample-paper", "KRX"),
     ]
     s, upsert_calls = _make_sync_services(
         {
             "kospi": [{"symbol": "000001", "name": "알파전자"}],
-            "oracle-paper": [{"symbol": "069500", "name": "KODEX 200"}],
+            "sample-paper": [{"symbol": "069500", "name": "KODEX 200"}],
         }
     )
 

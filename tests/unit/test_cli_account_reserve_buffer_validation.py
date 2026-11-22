@@ -47,13 +47,13 @@ def _invoke(args: list[str]) -> Any:
     return runner.invoke(cli, args, env=env, catch_exceptions=False)
 
 
-def _mock_account_obj(account_id: str = "oracle-buf") -> Any:
+def _mock_account_obj(account_id: str = "sample-buf") -> Any:
     """정상 케이스(R4~R6)에서 ``svc.create`` 반환값으로 사용할 Account stub."""
     from ante.account.models import Account, AccountStatus, TradingMode
 
     return Account(
         account_id=account_id,
-        name="OracleBuf",
+        name="SampleBuf",
         exchange="TEST",
         currency="KRW",
         broker_type="test",
@@ -134,9 +134,9 @@ def _argv(value: str) -> list[str]:
         "--broker-type",
         "test",
         "--account-id",
-        "oracle-buf",
+        "sample-buf",
         "--name",
-        "OracleBuf",
+        "SampleBuf",
         "--trading-mode",
         "virtual",
         "--credential",

@@ -777,7 +777,7 @@ class TestNonMasterCliPermissionDenied:
 def _make_invalid_role_member(
     member_id: str,
     *,
-    role: str = "oracle_invalid_role",
+    role: str = "sample_invalid_role",
     status: str = "active",
     token_hash: str = "redacted-token-hash-must-not-leak",
     token_expires_at: str = "2026-07-01 00:00:00",
@@ -860,13 +860,13 @@ class TestMemberListInvalidRolesJsonSchema:
         """JSON 출력이 본문 v2 스키마와 일치하고 token_hash 가 누설되지 않는다."""
         actionable = _make_invalid_role_member(
             "agent-bad-1",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status="active",
             token_hash="HASH-MUST-NOT-LEAK-1",
         )
         legacy = _make_invalid_role_member(
             "agent-bad-revoked",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status="revoked",
             token_hash="",  # revoke 후 token_hash 빈 문자열.
             token_expires_at="",
@@ -893,7 +893,7 @@ class TestMemberListInvalidRolesJsonSchema:
         # actionable row
         a = data["actionable"][0]
         assert a["member_id"] == "agent-bad-1"
-        assert a["role"] == "oracle_invalid_role"
+        assert a["role"] == "sample_invalid_role"
         assert a["type"] == "agent"
         assert a["name"] == "agent-bad-1"
         assert a["status"] == "active"
@@ -940,11 +940,11 @@ class TestMemberListInvalidRolesJsonSchema:
         본 어서션은 ``actionable`` 카테고리에만 적용한다.
         """
         actionable = _make_invalid_role_member(
-            "agent-must-have-yes", role="oracle_invalid_role", status="active"
+            "agent-must-have-yes", role="sample_invalid_role", status="active"
         )
         legacy = _make_invalid_role_member(
             "legacy-also-yes",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status="revoked",
             token_hash="",
             token_expires_at="",
@@ -990,7 +990,7 @@ class TestMemberListInvalidRolesJsonSchema:
 
         unsafe_id = "agent bad id"  # 공백 포함 → quote 후 따옴표 감싸짐.
         actionable = _make_invalid_role_member(
-            unsafe_id, role="oracle_invalid_role", status="active"
+            unsafe_id, role="sample_invalid_role", status="active"
         )
         ctx, _service = _patch_create_service_with_scan(
             InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
@@ -1030,7 +1030,7 @@ class TestMemberListInvalidRolesJsonSchema:
         custom_dir = tmp_path / "ante-custom"
         custom_dir.mkdir()
         actionable = _make_invalid_role_member(
-            "agent-other-instance", role="oracle_invalid_role", status="active"
+            "agent-other-instance", role="sample_invalid_role", status="active"
         )
         ctx, _service = _patch_create_service_with_scan(
             InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
@@ -1080,7 +1080,7 @@ class TestMemberListInvalidRolesJsonSchema:
         spaced_dir = tmp_path / "ante config with space"
         spaced_dir.mkdir()
         actionable = _make_invalid_role_member(
-            "agent-space-dir", role="oracle_invalid_role", status="active"
+            "agent-space-dir", role="sample_invalid_role", status="active"
         )
         ctx, _service = _patch_create_service_with_scan(
             InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
@@ -1120,7 +1120,7 @@ class TestMemberListInvalidRolesJsonSchema:
         형태가 보존됨을 명시적으로 확인한다.
         """
         actionable = _make_invalid_role_member(
-            "agent-default-instance", role="oracle_invalid_role", status="active"
+            "agent-default-instance", role="sample_invalid_role", status="active"
         )
         ctx, _service = _patch_create_service_with_scan(
             InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
@@ -1164,7 +1164,7 @@ class TestMemberListInvalidRolesJsonSchema:
         # ``--config-dir custom`` (상대) 해석이 의미를 갖는다.
         relative_name = "custom"
         actionable = _make_invalid_role_member(
-            "agent-relative-cfg", role="oracle_invalid_role", status="active"
+            "agent-relative-cfg", role="sample_invalid_role", status="active"
         )
         ctx, _service = _patch_create_service_with_scan(
             InvalidRoleScan(actionable=[actionable], legacy_revoked=[])
@@ -1229,7 +1229,7 @@ class TestMemberListInvalidRolesJsonSchema:
         """
         legacy_only = _make_invalid_role_member(
             "legacy-revoked-1",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status="revoked",
             token_hash="",
             token_expires_at="",
@@ -1260,11 +1260,11 @@ class TestMemberListInvalidRolesTable:
     def test_cli_list_invalid_roles_command_outputs_table(self) -> None:
         """text 모드 — actionable + legacy_revoked 두 섹션 표시."""
         actionable = _make_invalid_role_member(
-            "agent-bad-active", role="oracle_invalid_role", status="active"
+            "agent-bad-active", role="sample_invalid_role", status="active"
         )
         legacy = _make_invalid_role_member(
             "agent-bad-revoked",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status="revoked",
             token_hash="",
             token_expires_at="",
@@ -1298,7 +1298,7 @@ class TestMemberListInvalidRolesTokenHashRegression:
         sensitive_hash = "TOP-SECRET-HASH-VALUE-DO-NOT-LEAK"
         actionable = _make_invalid_role_member(
             "agent-bad",
-            role="oracle_invalid_role",
+            role="sample_invalid_role",
             status=MemberStatus.ACTIVE.value,
             token_hash=sensitive_hash,
         )

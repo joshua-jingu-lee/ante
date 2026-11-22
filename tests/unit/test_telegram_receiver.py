@@ -449,10 +449,10 @@ class TestCommands:
     ):
         """#2385: exchange 는 bot.config.account_id → account.exchange 로 해석."""
         account_service.get.return_value = SimpleNamespace(
-            account_id="oracle-paper", exchange="KRX"
+            account_id="sample-paper", exchange="KRX"
         )
         bot = _make_running_bot(
-            account_id="oracle-paper",
+            account_id="sample-paper",
             positions={
                 "005930": {"symbol": "005930", "quantity": 1, "avg_entry_price": 70000},
             },
@@ -461,7 +461,7 @@ class TestCommands:
         result = await receiver._cmd_stop(["bot-1"])
         assert "005930 (삼성전자)" in result
         # bot.config.account_id 로 계좌를 조회해 exchange 를 얻는다.
-        account_service.get.assert_awaited_once_with("oracle-paper")
+        account_service.get.assert_awaited_once_with("sample-paper")
         instrument_service.format_label.assert_any_call("005930", "KRX", markdown=False)
 
     async def test_stop_bot_label_cache_miss_no_name(self, receiver, bot_manager):

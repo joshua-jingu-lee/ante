@@ -1,6 +1,6 @@
 """#1809 Group S R-cases — treasury allocate/deallocate typed reject code surface.
 
-oracle A7 @ a5d8edf finding:
+finding:
     ``ante --format json treasury allocate``/``treasury deallocate`` 가 기존
     bot 의 예산 작업을 정상적으로 거부하지만 JSON envelope ``code`` 가 빈
     문자열로 surface 되어 ``docs/specs/cli/02-design-decisions.md:83-89`` 의

@@ -148,7 +148,7 @@ class TestAuditTypesOutput:
         """list_invalid_type_requests 결과만 json 으로 노출되며 정상 type 은 없다."""
         invalid_req = _make_request(
             id="11111111-1111-1111-1111-111111111111",
-            type_="oracle_invalid_type",
+            type_="sample_invalid_type",
             status=ApprovalStatus.PENDING,
             requester="agent-bad",
         )
@@ -180,7 +180,7 @@ class TestAuditTypesOutput:
         assert len(payload) == 1
         row = payload[0]
         assert row["id"] == "11111111-1111-1111-1111-111111111111"
-        assert row["type"] == "oracle_invalid_type"
+        assert row["type"] == "sample_invalid_type"
         assert row["status"] == "pending"
         # 정상 type 값이 결과에 섞이지 않는다 — invariant.
         valid_types = {t.value for t in ApprovalType}
@@ -362,7 +362,7 @@ class TestCancelInvalidScopeAndDecorators:
             send_return={
                 "id": "inv-1",
                 "status": "cancelled",
-                "type": "oracle_invalid_type",
+                "type": "sample_invalid_type",
             }
         )
 
@@ -392,7 +392,7 @@ class TestCancelInvalidIPCCall:
             send_return={
                 "id": "inv-1",
                 "status": "cancelled",
-                "type": "oracle_invalid_type",
+                "type": "sample_invalid_type",
             }
         )
 
@@ -443,7 +443,7 @@ class TestCancelInvalidIPCCall:
             send_return={
                 "id": "inv-1",
                 "status": "cancelled",
-                "type": "oracle_invalid_type",
+                "type": "sample_invalid_type",
             }
         )
 

@@ -13,7 +13,7 @@
 - ``reopen --params null`` 명시 입력은 ``json.loads("null") == None`` 이므로
   guard 에서 거부된다 (의도된 정정).
 
-oracle probe: ``cli_approval_params_dict_guard``.
+``cli_approval_params_dict_guard``.
 
 Non-Goals (본 PR 미포함):
 - ``ApprovalService.create()``/``reopen()`` defense-in-depth (service 단
@@ -91,7 +91,7 @@ def _patch_ipc_success(send_return: dict | None = None):
 # 본 PR 가드가 거부해야 하는 non-dict JSON value 매트릭스.
 # ``"null"`` 은 ``json.loads`` 후 ``None`` 으로, dict 가 아니므로 거부 대상이다.
 _INVALID_PARAMS_MATRIX = [
-    pytest.param('"oracle-string"', id="string"),
+    pytest.param('"sample-string"', id="string"),
     pytest.param("123", id="number"),
     pytest.param("[1,2,3]", id="list"),
     pytest.param("true", id="bool"),
@@ -185,7 +185,7 @@ class TestApprovalRequestInvalidParams:
                     "--title",
                     "t",
                     "--params",
-                    '"oracle-string"',
+                    '"sample-string"',
                 ],
             )
 

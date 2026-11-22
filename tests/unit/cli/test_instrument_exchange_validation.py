@@ -1,7 +1,7 @@
 """``instrument`` CLI exchange 검증 회귀 테스트 (#1577).
 
-이슈 #1577 (oracle A7 ``cli_instrument_invalid_exchange_accepted``):
-``instrument list --exchange ORACLE_INVALID_EXCHANGE`` 및 invalid exchange
+이슈 #1577 (``cli_instrument_invalid_exchange_accepted``):
+``instrument list --exchange SAMPLE_INVALID_EXCHANGE`` 및 invalid exchange
 row를 포함한 ``instrument import --dry-run``이 exit 0으로 성공 처리되던
 ingress drift를 닫는다. 3 ingress(list/sync/import)가 동일하게
 ``ante.core.exchange`` canonical SSOT를 경유한다.
@@ -68,7 +68,7 @@ def runner() -> CliRunner:
 
 
 class TestListInvalidExchange:
-    """``instrument list --exchange ORACLE_INVALID_EXCHANGE`` → exit 1."""
+    """``instrument list --exchange SAMPLE_INVALID_EXCHANGE`` → exit 1."""
 
     def test_invalid_exchange_exits_nonzero_text(self, runner: CliRunner) -> None:
         result = runner.invoke(
@@ -77,7 +77,7 @@ class TestListInvalidExchange:
                 "instrument",
                 "list",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
 
@@ -87,7 +87,7 @@ class TestListInvalidExchange:
     def test_invalid_exchange_exits_nonzero_json_envelope(
         self, runner: CliRunner
     ) -> None:
-        """oracle probe 시그니처와 정확히 동일한 경로: ``--format json``."""
+        """``--format json``."""
         result = runner.invoke(
             cli,
             [
@@ -96,7 +96,7 @@ class TestListInvalidExchange:
                 "instrument",
                 "list",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
 
@@ -121,7 +121,7 @@ class TestListInvalidExchange:
 
 
 class TestSyncInvalidExchange:
-    """``instrument sync --exchange ORACLE_INVALID_EXCHANGE`` → exit 1."""
+    """``instrument sync --exchange SAMPLE_INVALID_EXCHANGE`` → exit 1."""
 
     def test_invalid_exchange_exits_nonzero_text(self, runner: CliRunner) -> None:
         result = runner.invoke(
@@ -130,7 +130,7 @@ class TestSyncInvalidExchange:
                 "instrument",
                 "sync",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
 
@@ -148,7 +148,7 @@ class TestSyncInvalidExchange:
                 "instrument",
                 "sync",
                 "--exchange",
-                "ORACLE_INVALID_EXCHANGE",
+                "SAMPLE_INVALID_EXCHANGE",
             ],
         )
 
@@ -295,7 +295,7 @@ class TestImportInvalidExchangeRow:
     ) -> None:
         json_file = tmp_path / "inv.json"
         json_file.write_text(
-            json.dumps([{"symbol": "X", "exchange": "ORACLE_INVALID_EXCHANGE"}])
+            json.dumps([{"symbol": "X", "exchange": "SAMPLE_INVALID_EXCHANGE"}])
         )
 
         result = runner.invoke(
@@ -311,7 +311,7 @@ class TestImportInvalidExchangeRow:
     ) -> None:
         json_file = tmp_path / "inv.json"
         json_file.write_text(
-            json.dumps([{"symbol": "X", "exchange": "ORACLE_INVALID_EXCHANGE"}])
+            json.dumps([{"symbol": "X", "exchange": "SAMPLE_INVALID_EXCHANGE"}])
         )
 
         result = runner.invoke(
@@ -327,10 +327,10 @@ class TestImportInvalidExchangeRow:
     def test_invalid_row_dry_run_exits_nonzero_json_envelope(
         self, runner: CliRunner, tmp_path
     ) -> None:
-        """oracle probe 재현: ``import --dry-run``도 row 검증 후 거부."""
+        """``import --dry-run``도 row 검증 후 거부."""
         json_file = tmp_path / "inv.json"
         json_file.write_text(
-            json.dumps([{"symbol": "X", "exchange": "ORACLE_INVALID_EXCHANGE"}])
+            json.dumps([{"symbol": "X", "exchange": "SAMPLE_INVALID_EXCHANGE"}])
         )
 
         result = runner.invoke(
@@ -390,7 +390,7 @@ class TestImportInvalidExchangeRow:
         assert payload["status"] == "error"
         assert payload["code"] == "INSTRUMENT_INVALID_EXCHANGE"
 
-        # dry-run도 동일 경로 (oracle probe 시그니처).
+        # dry-run도 동일 경로.
         result_dry = runner.invoke(
             cli,
             [
@@ -456,7 +456,7 @@ class TestImportInvalidExchangeRow:
             json.dumps(
                 [
                     {"symbol": "005930", "exchange": "KRX"},
-                    {"symbol": "BAD", "exchange": "ORACLE_INVALID_EXCHANGE"},
+                    {"symbol": "BAD", "exchange": "SAMPLE_INVALID_EXCHANGE"},
                 ]
             )
         )

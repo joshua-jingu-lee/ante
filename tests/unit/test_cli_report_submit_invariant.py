@@ -223,7 +223,7 @@ class TestSectionsRejected:
     sentinel/내용이 stdout에 반사되지 않음을 회귀 검증한다.
     """
 
-    _SENTINEL = "oracle_payload_sections_marker"
+    _SENTINEL = "sample_payload_sections_marker"
 
     def _sections_payload(self) -> dict[str, Any]:
         return _base_payload(

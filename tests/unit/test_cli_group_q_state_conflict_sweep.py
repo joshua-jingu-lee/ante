@@ -1,6 +1,6 @@
 """Group Q state-conflict typed code sweep (#1812 / #1813 / #1814).
 
-3 oracle A7 state-conflict issue sweep — 각 CLI/IPC 표면이 안정 typed code
+3 state-conflict issue sweep — 각 CLI/IPC 표면이 안정 typed code
 envelope 을 surface 함을 verify 한다 (Group P #1805 missing-resource sweep
 동형 패턴).
 

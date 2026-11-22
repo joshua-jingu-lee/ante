@@ -153,7 +153,7 @@ canonical-known은 신규 입력이 거부되지 않아야 하는 vocabulary이�
 이 둘은 **별개의 두 축**이다:
 - **축 A — exchange-vocabulary 유효성**: 신규 입력 값이 canonical 5종(`{KRX, NYSE, NASDAQ, AMEX, TEST}`)
   안인지로 판정한다. canonical 5종은 어떤 표면에서도 "invalid exchange"로 거부되지 않는다.
-  오직 non-canonical(예: `ORACLE_INVALID_EXCHANGE`)만 invalid-exchange 거부 대상이다.
+  오직 non-canonical(예: `SAMPLE_INVALID_EXCHANGE`)만 invalid-exchange 거부 대상이다.
 - **축 B — 1.0 운영/preset 가용성**: 1.0 account preset은 `KRX`,`TEST`만 제공한다. canonical
   이지만 1.0 preset이 없는 값(`NYSE/NASDAQ/AMEX`)을 특정 경로(예: preset 기반 `account create`)로
   계좌 생성할 수 있는지는 preset/broker-config 제약이며, 이는 invalid-exchange 거부가 **아니다**
@@ -209,7 +209,7 @@ surface 운영/소스/핸들러 디테일은 후속 이슈 정렬 사안으로 �
   생성은 모두 `*` 거부다(`*`는 실제 거래소 식별자·경로가 아니므로). DataStore `read`는
   신규 입력 검증을 적용하지 않으므로 `*` 거부 판정 대상이 아니다 — `*`는 저장된 legacy
   경로가 될 수 없고, 기존 경로 read 호환은 "Legacy out-of-vocabulary 호환 정책"이 규율한다.
-- 시나리오 2(`ORACLE_INVALID_EXCHANGE`가 신규 입력에서 거부되어야 하는가): Instrument CLI
+- 시나리오 2(`SAMPLE_INVALID_EXCHANGE`가 신규 입력에서 거부되어야 하는가): Instrument CLI
   `list`/`import`(및 vocabulary 측면에서 동일한 `sync`) 행에 따라 non-canonical 신규 입력은
   non-zero exit + 구조화 error payload로 거부되어야 한다(enforcement는 #1577 완료). `sync`의
   source 미지원 canonical 값(`NYSE/NASDAQ/AMEX` 등 비-KRX) 처리 계약은 source-bound 표면

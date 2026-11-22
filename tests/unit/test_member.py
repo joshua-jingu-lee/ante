@@ -637,7 +637,7 @@ class TestMasterPermissionCheck:
         """``updated_by``가 빈 문자열이면 PermissionDeniedError (#1351 회귀 잠금).
 
         과거에는 빈 caller가 master 검증을 우회했으나(``if updated_by:`` 가드),
-        oracle finding #1351에 따라 빈 caller도 거부된다. 내부 호출에서도
+        #1351에 따라 빈 caller도 거부된다. 내부 호출에서도
         반드시 master 권한 caller를 명시해야 한다.
         """
         from ante.member.errors import PermissionDeniedError
