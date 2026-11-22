@@ -477,3 +477,22 @@ def test_reconcile_fix_unexpected_error_is_an_execution_error(mode: str) -> None
         "소켓 경로를 읽지 못했다",
         "Error: EXECUTION_ERROR: 소켓 경로를 읽지 못했다",
     )
+
+
+@pytest.mark.parametrize("mode", _MODES)
+def test_reconcile_fix_ipc_send_failure_without_a_message(mode: str) -> None:
+    harness = _Harness(RuntimeError(), None)
+    runner = CliRunner(mix_stderr=False)
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("ante.cli.main.authenticate_member", side_effect=_set_master)
+        )
+        stack.enter_context(patch(_IPC_SEND, new=harness.ipc_send))
+        stack.enter_context(patch(_GET_BROKER, new=harness.get_broker))
+        result = runner.invoke(
+            cli,
+            ["--format", mode, "broker", "reconcile", "--account", "acct-1", "--fix"],
+        )
+
+    assert harness.direct_calls == []
+    _assert_error(mode, result, "EXECUTION_ERROR", "", "Error: EXECUTION_ERROR: ")
