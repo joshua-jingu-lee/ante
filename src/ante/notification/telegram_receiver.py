@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time as time_mod
+from datetime import UTC
 from inspect import isawaitable
 from typing import TYPE_CHECKING, Any, cast
+
+from ante.core import clock
 
 if TYPE_CHECKING:
     from ante.account.service import AccountService
@@ -281,7 +283,7 @@ class TelegramCommandReceiver:
 
     def _request_confirmation(self, command: str, args: list[str], user_id: int) -> str:
         """위험 명령에 대한 확인 요청."""
-        self._pending_confirm[user_id] = (command, args, time_mod.time())
+        self._pending_confirm[user_id] = (command, args, clock.now(UTC).timestamp())
 
         if command == "halt":
             reason = " ".join(args) if args else ""
@@ -307,7 +309,7 @@ class TelegramCommandReceiver:
             return "확인 대기 중인 명령이 없습니다."
 
         command, args, timestamp = pending
-        elapsed = time_mod.time() - timestamp
+        elapsed = clock.now(UTC).timestamp() - timestamp
 
         if elapsed > self._confirm_timeout:
             return "확인 시간이 초과되었습니다."

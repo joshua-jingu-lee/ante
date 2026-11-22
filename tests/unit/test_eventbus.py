@@ -295,3 +295,77 @@ async def test_publish_handler_unsubscribe_during_publish_no_skip(bus):
     fired.clear()
     await bus.publish(OrderRequestEvent(account_id="acc-test"))
     assert fired == ["unsubscriber", "tail"]
+
+
+# ── 기본 타임스탬프와 시계 ─────────────────────────────
+
+
+def _event_dataclasses() -> list[type]:
+    """``ante.eventbus.events``에 정의된 dataclass 중 ``timestamp`` 필드가 있는 것."""
+    import dataclasses
+    import inspect
+
+    import ante.eventbus.events as events_module
+
+    return [
+        cls
+        for _, cls in inspect.getmembers(events_module, inspect.isclass)
+        if cls.__module__ == events_module.__name__
+        and dataclasses.is_dataclass(cls)
+        and any(f.name == "timestamp" for f in dataclasses.fields(cls))
+    ]
+
+
+def _timestamp_definers() -> list[type]:
+    """``timestamp`` 필드를 직접 정의하는(상속이 아닌) 이벤트 클래스."""
+    import inspect
+
+    return [
+        cls
+        for cls in _event_dataclasses()
+        if "timestamp" in inspect.get_annotations(cls)
+    ]
+
+
+def _timestamp_field(cls: type):
+    import dataclasses
+
+    return next(f for f in dataclasses.fields(cls) if f.name == "timestamp")
+
+
+def test_timestamp_definers_are_derived():
+    """검사 대상이 비어 있지 않다(vacuous pass 방어)."""
+    assert len(_timestamp_definers()) >= 1
+    assert len(_event_dataclasses()) > len(_timestamp_definers())
+
+
+@pytest.mark.parametrize("cls", _timestamp_definers(), ids=lambda c: c.__name__)
+def test_default_timestamp_reads_injected_clock_at_creation(cls, manual_clock):
+    """기본 타임스탬프는 이벤트를 만들 때 주입된 시계를 읽는다."""
+    import dataclasses
+    from datetime import UTC, timedelta
+
+    assert _timestamp_field(cls).default_factory is not dataclasses.MISSING
+    expected = manual_clock.now(UTC)
+
+    first = cls()
+    manual_clock.advance(86400)
+    second = cls()
+
+    assert first.timestamp == expected
+    assert first.timestamp.utcoffset() == timedelta(0)
+    assert second.timestamp - first.timestamp == timedelta(days=1)
+
+
+@pytest.mark.parametrize(
+    "cls",
+    [c for c in _event_dataclasses() if c not in _timestamp_definers()],
+    ids=lambda c: c.__name__,
+)
+def test_subclasses_inherit_timestamp_field(cls):
+    """나머지 이벤트 클래스는 ``timestamp``를 재정의하지 않고 물려받는다."""
+    import inspect
+
+    (definer,) = _timestamp_definers()
+    assert "timestamp" not in inspect.get_annotations(cls)
+    assert _timestamp_field(cls) is _timestamp_field(definer)

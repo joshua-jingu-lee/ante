@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, timedelta
 from typing import Any
 
+from ante.core import clock
 from ante.core.database import Database
 
 logger = logging.getLogger(__name__)
@@ -47,7 +48,7 @@ class AuditLogger:
         ip: str = "",
     ) -> None:
         """감사 로그 기록."""
-        now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
+        now = clock.now(UTC).strftime("%Y-%m-%dT%H:%M:%S")
         await self._db.execute(
             """INSERT INTO audit_log
                (member_id, action, resource, detail, ip, created_at)
@@ -134,7 +135,7 @@ class AuditLogger:
         if retention_days <= 0:
             return 0
 
-        cutoff = (datetime.now(UTC) - timedelta(days=retention_days)).strftime(
+        cutoff = (clock.now(UTC) - timedelta(days=retention_days)).strftime(
             "%Y-%m-%dT%H:%M:%S"
         )
 
