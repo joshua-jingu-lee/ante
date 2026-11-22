@@ -158,3 +158,102 @@ def test_sequence_restarts_when_a_test_runs_again(tmp_path: Path) -> None:
     assert [(r["nodeid"], r["n"]) for r in rows] == [
         ("test_target.py::test_calls", n) for n in (0, 1, 2, 0, 1, 2)
     ]
+
+
+_PATH_TARGET = """\
+import os
+
+import click
+from click.testing import CliRunner
+
+
+@click.command()
+@click.argument("where")
+def show(where):
+    click.echo(where)
+    click.echo(f"other {os.environ['OTHER_PATH']}", err=True)
+
+
+def test_paths(tmp_path):
+    CliRunner(mix_stderr=False).invoke(show, [os.environ.get("HOME", "nohome") + "/db"])
+    CliRunner(mix_stderr=False).invoke(show, [str(tmp_path / "x")])
+"""
+
+
+def _run_paths(tmp_path: Path, env_over: dict[str, str | None]) -> list[dict]:
+    record = tmp_path / "rec.jsonl"
+    (tmp_path / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    (tmp_path / "test_target.py").write_text(_PATH_TARGET, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items() if k != "ANTE_CONFIG_DIR"}
+    env["ANTE_PRESERVATION_RECORD"] = str(record)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(REPO_ROOT), env.get("PYTHONPATH")) if p
+    )
+    for key, value in env_over.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "-p",
+            "tests.preservation_recorder",
+            "--rootdir",
+            str(tmp_path),
+            "-c",
+            str(tmp_path / "pytest.ini"),
+            "--basetemp",
+            str(tmp_path / "bt"),
+            str(tmp_path / "test_target.py"),
+        ],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return [json.loads(line) for line in record.read_text().splitlines()]
+
+
+def _decoded(row: dict, field: str) -> str:
+    return base64.b64decode(row[field]).decode()
+
+
+def test_env_paths_are_recorded_as_placeholders(tmp_path: Path) -> None:
+    other = tmp_path / "elsewhere"
+    rows = _run_paths(
+        tmp_path, {"HOME": str(tmp_path / "home"), "OTHER_PATH": str(other)}
+    )
+    assert rows[0]["args"] == ["<HOME>/db"]
+    assert _decoded(rows[0], "stdout") == "<HOME>/db\n"
+    assert _decoded(rows[0], "stderr") == f"other {other}\n"
+    assert rows[1]["args"] == ["<TMP>/test_paths0/x"]
+    assert _decoded(rows[1], "stdout") == "<TMP>/test_paths0/x\n"
+
+
+def test_config_dir_is_replaced_before_the_shorter_home(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    rows = _run_paths(
+        tmp_path,
+        {
+            "HOME": str(home),
+            "ANTE_CONFIG_DIR": str(home / "db"),
+            "OTHER_PATH": "/nowhere",
+        },
+    )
+    assert rows[0]["args"] == ["<ANTE_CONFIG_DIR>"]
+    assert _decoded(rows[0], "stdout") == "<ANTE_CONFIG_DIR>\n"
+
+
+def test_unset_env_path_is_not_replaced(tmp_path: Path) -> None:
+    rows = _run_paths(tmp_path, {"HOME": None, "OTHER_PATH": "/nowhere"})
+    assert rows[0]["args"] == ["nohome/db"]
+    assert _decoded(rows[0], "stdout") == "nohome/db\n"
+    assert _decoded(rows[0], "stderr") == "other /nowhere\n"

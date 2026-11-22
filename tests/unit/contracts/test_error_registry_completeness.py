@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import click
+
 from ante.contracts import error_registry
 from ante.contracts.errors import ErrorSpec
 from ante.contracts.helpers import error_spec_for_exception
@@ -109,3 +111,18 @@ def test_cli_error_classes_are_registered_under_their_own_code() -> None:
         c.__name__: spec_of[c].code if c in spec_of else None for c in classes
     }
     assert registered == {c.__name__: c.code for c in classes}
+
+
+def test_cli_errors_tuple_is_exactly_the_module_exception_classes() -> None:
+    from ante.contracts import cli_errors
+
+    classes = {
+        v
+        for v in vars(cli_errors).values()
+        if isinstance(v, type)
+        and issubclass(v, BaseException)
+        and v.__module__ == cli_errors.__name__
+    }
+    assert len(cli_errors.CLI_ERRORS) == len(set(cli_errors.CLI_ERRORS))
+    assert set(cli_errors.CLI_ERRORS) == classes
+    assert all(not issubclass(c, click.ClickException) for c in classes)

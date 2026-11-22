@@ -76,12 +76,8 @@ intended_no_code:
     snippet_sha1: "3dc4008c3fb0"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
   - path: src/ante/cli/commands/config.py
-    line: 193
+    line: 190
     snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
-  - path: src/ante/cli/commands/config.py
-    line: 196
-    snippet_sha1: "1b05e8ebf6bd"
     reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
 
 known_drift_fmt_error_no_code:
