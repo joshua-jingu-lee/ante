@@ -7,9 +7,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from click.testing import CliRunner
 
-from ante.cli.commands.treasury import treasury
-from ante.cli.formatter import OutputFormatter
-
 
 @pytest.fixture
 def runner():
@@ -106,25 +103,10 @@ def _make_mock_treasury(get_daily_return=None, get_range_return=None):
 
 
 def _invoke(runner, args, mock_auth):
-    """인증을 우회하면서 CLI를 실행하는 헬퍼."""
-    from ante.member.models import Member, MemberType
+    """인증을 우회하고 진입점 훅을 지나도록 루트 그룹으로 실행하는 헬퍼."""
+    from ante.cli.main import cli
 
-    mock_member = Member(
-        member_id="test-user",
-        name="테스트",
-        type=MemberType.HUMAN,
-        role="master",
-    )
-    return runner.invoke(
-        treasury,
-        args,
-        obj={
-            "format": "text",
-            "formatter": OutputFormatter("text"),
-            "member": mock_member,
-        },
-        catch_exceptions=False,
-    )
+    return runner.invoke(cli, ["treasury", *args], catch_exceptions=False)
 
 
 def _invoke_root(runner, args, fmt="text"):
@@ -255,19 +237,14 @@ class TestSnapshotJson:
     def test_json_single(self, runner, mock_auth):
         import json
 
-        from ante.member.models import Member, MemberType
+        from ante.cli.main import cli
 
-        mock_member = Member(
-            member_id="test-user",
-            name="테스트",
-            type=MemberType.HUMAN,
-            role="master",
-        )
         ctx_patch, _ = _make_mock_treasury(get_daily_return=SAMPLE_SNAPSHOT)
         with ctx_patch:
             result = runner.invoke(
-                treasury,
+                cli,
                 [
+                    "treasury",
                     "snapshot",
                     "--account",
                     "domestic",
@@ -276,36 +253,26 @@ class TestSnapshotJson:
                     "--format",
                     "json",
                 ],
-                obj={
-                    "format": "json",
-                    "formatter": OutputFormatter("json"),
-                    "member": mock_member,
-                },
                 catch_exceptions=False,
             )
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["total_asset"] == 12_650_000.0
         assert data["snapshot_date"] == "2026-03-21"
 
     def test_json_range(self, runner, mock_auth):
         import json
 
-        from ante.member.models import Member, MemberType
+        from ante.cli.main import cli
 
-        mock_member = Member(
-            member_id="test-user",
-            name="테스트",
-            type=MemberType.HUMAN,
-            role="master",
-        )
         snapshots = [SAMPLE_SNAPSHOT_2, SAMPLE_SNAPSHOT]
         ctx_patch, _ = _make_mock_treasury(get_range_return=snapshots)
         with ctx_patch:
             result = runner.invoke(
-                treasury,
+                cli,
                 [
+                    "treasury",
                     "snapshot",
                     "--account",
                     "domestic",
@@ -316,16 +283,11 @@ class TestSnapshotJson:
                     "--format",
                     "json",
                 ],
-                obj={
-                    "format": "json",
-                    "formatter": OutputFormatter("json"),
-                    "member": mock_member,
-                },
                 catch_exceptions=False,
             )
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]["snapshots"]
         assert isinstance(data, list)
         assert len(data) == 2
 

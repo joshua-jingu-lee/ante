@@ -320,7 +320,7 @@ def test_treasury_entries_registered_after_1847_sub_pr_4() -> None:
     본 단언은 #1847 sub-PR 4 가 treasury migration 을 완료한 시점부터
     lock 된다. 9 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_treasury_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_treasury_cli_output_bytes` 가
     책임진다.
 
     이슈 #1847 본문은 treasury "8 leaf" 로 추정했지만 실측 Click leaf
@@ -353,7 +353,7 @@ def test_strategy_entries_registered_after_1847_sub_pr_5() -> None:
     본 단언은 #1847 sub-PR 5 가 strategy migration 을 완료한 시점부터
     lock 된다. 7 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_strategy_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_strategy_cli_output_bytes` 가
     책임진다.
     """
     expected_strategy_paths = {
@@ -432,7 +432,7 @@ def test_broker_entries_registered_after_1847_sub_pr_7() -> None:
     본 단언은 #1847 sub-PR 7 가 broker migration 을 완료한 시점부터
     lock 된다. 4 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_broker_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_broker_cli_output_bytes` 가
     책임진다.
     """
     expected_broker_paths = {

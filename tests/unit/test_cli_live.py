@@ -444,7 +444,7 @@ class TestTreasuryCommands:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["account_balance"] == 10000000.0
 
     def test_treasury_allocate_success(self, runner):
@@ -879,7 +879,7 @@ class TestBrokerCommands:
                 cli, ["--format", "json", "broker", "balance", "--account", "acc-1"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["cash"] == 10000000.0
 
     def test_broker_positions_empty(self, runner):

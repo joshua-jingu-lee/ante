@@ -325,7 +325,7 @@ class TestTreasuryStatusFormatOption:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["account_balance"] == 1000000
             assert data["bot_count"] == 2
 
@@ -347,7 +347,7 @@ class TestStrategyListFormatOption:
         ):
             result = runner.invoke(cli, ["strategy", "list", "--format", "json"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert "strategies" in data or "message" in data
 
 
@@ -392,7 +392,7 @@ class TestStrategyInfoFormatOption:
                 cli, ["strategy", "info", "test", "--format", "json"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["name"] == "test"
 
 

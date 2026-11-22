@@ -282,7 +282,7 @@ class TestTreasuryReadValidExistingAccountSanity:
         assert result.returncode == 0, (
             f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
-        payload = _parse_json_last(result.stdout)
+        payload = _parse_json_last(result.stdout)["data"]
         assert "budgets" in payload, payload
 
     def test_portfolio_value_test_account_exits_ok(
@@ -299,7 +299,7 @@ class TestTreasuryReadValidExistingAccountSanity:
         assert result.returncode == 0, (
             f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
-        payload = _parse_json_last(result.stdout)
+        payload = _parse_json_last(result.stdout)["data"]
         assert "total_value" in payload, payload
 
     def test_portfolio_history_test_account_exits_ok(
@@ -316,7 +316,7 @@ class TestTreasuryReadValidExistingAccountSanity:
         assert result.returncode == 0, (
             f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
-        payload = _parse_json_last(result.stdout)
+        payload = _parse_json_last(result.stdout)["data"]
         assert "data" in payload, payload
 
     def test_set_balance_test_account_exits_ok(
@@ -333,5 +333,5 @@ class TestTreasuryReadValidExistingAccountSanity:
         assert result.returncode == 0, (
             f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
-        payload = _parse_json_last(result.stdout)
+        payload = _parse_json_last(result.stdout)["data"]
         assert payload.get("account_id") == "test", payload

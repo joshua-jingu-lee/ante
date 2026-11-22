@@ -282,7 +282,7 @@ def _assert_success(
     assert result.exit_code == 0, (result.stdout, result.stderr)
     assert result.stderr == ""
     if mode == "json":
-        assert json.loads(result.stdout) == payload
+        assert json.loads(result.stdout)["data"] == payload
     else:
         assert result.stdout.splitlines() == text
 

@@ -497,7 +497,7 @@ class TestTreasuryStatusAccount:
             )
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["account_balance"] == 10000000
 
 
@@ -590,6 +590,6 @@ class TestBrokerAccountOption:
             )
 
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert len(data["positions"]) == 1
         assert data["positions"][0]["symbol"] == "005930"
