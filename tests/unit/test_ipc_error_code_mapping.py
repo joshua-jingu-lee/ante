@@ -397,7 +397,7 @@ async def test_ipc_dispatch_bot_create_valid_account_missing_other_arg_not_valid
 
         response = await client.send(
             "bot.create",
-            {"account_id": "oracle-valid-account"},
+            {"account_id": "sample-valid-account"},
             actor="tester",
         )
         assert response["status"] == "error"
@@ -540,7 +540,7 @@ async def test_ipc_dispatch_treasury_valid_account_missing_other_arg_not_validat
         for command in ("treasury.allocate", "treasury.deallocate"):
             response = await client.send(
                 command,
-                {"account_id": "oracle-valid-account"},
+                {"account_id": "sample-valid-account"},
                 actor="tester",
             )
             assert response["status"] == "error", response
@@ -691,7 +691,7 @@ async def test_ipc_dispatch_broker_reconcile_valid_account_no_bot_id_reaches_han
         # (broker 조회). VALIDATION_ERROR 가 아니어야 한다(account 검증은 통과).
         response = await client.send(
             "broker.reconcile",
-            {"account_id": "oracle-valid-account"},
+            {"account_id": "sample-valid-account"},
             actor="tester",
         )
         assert response["status"] == "error"

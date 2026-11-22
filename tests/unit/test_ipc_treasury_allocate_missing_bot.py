@@ -95,7 +95,7 @@ async def test_treasury_allocate_missing_bot_returns_bot_not_found(
             "treasury.allocate",
             {
                 "account_id": "domestic",
-                "bot_id": "oracle-missing-bot",
+                "bot_id": "sample-missing-bot",
                 "amount": 1000.0,
             },
             actor="tester",
@@ -127,7 +127,7 @@ async def test_treasury_deallocate_missing_bot_returns_bot_not_found(
             "treasury.deallocate",
             {
                 "account_id": "domestic",
-                "bot_id": "oracle-missing-bot",
+                "bot_id": "sample-missing-bot",
                 "amount": 1000.0,
             },
             actor="tester",
@@ -218,7 +218,7 @@ async def test_treasury_allocate_invalid_account_precedes_bot_check(
         client = IPCClient(socket_path, timeout=5.0)
         response = await client.send(
             "treasury.allocate",
-            {"account_id": "default", "bot_id": "oracle-missing-bot", "amount": 1000.0},
+            {"account_id": "default", "bot_id": "sample-missing-bot", "amount": 1000.0},
             actor="tester",
         )
         assert response["status"] == "error", response

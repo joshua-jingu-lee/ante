@@ -70,7 +70,7 @@ class TestValidateConfigRejectsInvalidVocabulary:
     def test_invalid_timeframe_rejected(self):
         svc = BacktestService()
         with pytest.raises(BacktestConfigError, match="Invalid timeframe"):
-            svc._validate_config(_cfg(timeframe="oracle-invalid"))
+            svc._validate_config(_cfg(timeframe="sample-invalid"))
 
     def test_invalid_krx_symbol_rejected(self):
         svc = BacktestService()
@@ -231,7 +231,7 @@ class TestServiceRunEarlyFailsBeforeDataLoad:
         ):
             svc = BacktestService()
             with pytest.raises(BacktestConfigError):
-                await svc.run(_cfg(timeframe="oracle-invalid"))
+                await svc.run(_cfg(timeframe="sample-invalid"))
 
         mock_loader.load.assert_not_called()
         provider_instance.load.assert_not_called()
@@ -351,7 +351,7 @@ class TestRunSubprocessEarlyFailsBeforeSpawn:
         ) as mock_spawn:
             svc = BacktestService()
             with pytest.raises(BacktestConfigError):
-                await svc.run_subprocess(_cfg(timeframe="oracle-invalid"))
+                await svc.run_subprocess(_cfg(timeframe="sample-invalid"))
 
         mock_spawn.assert_not_called()
 
@@ -404,7 +404,7 @@ class TestRunnerForwardsToValidateConfig:
     @pytest.mark.asyncio
     async def test_invalid_timeframe_rejected_via_runner(self):
         with pytest.raises(BacktestConfigError, match="Invalid timeframe"):
-            await runner.run_backtest(_cfg(timeframe="oracle-invalid"))
+            await runner.run_backtest(_cfg(timeframe="sample-invalid"))
 
 
 # ── exchange canonical 검증 (#2034) ──────────────────────────────────────

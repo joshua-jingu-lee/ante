@@ -96,14 +96,14 @@ class TestReportListInvalidPreflight:
                     "report",
                     "list",
                     "--status",
-                    "oracle_invalid_status",
+                    "sample_invalid_status",
                 ],
             )
         assert result.exit_code == 1, result.output
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "REPORT_INVALID_STATUS"
-        assert "oracle_invalid_status" in data["message"]
+        assert "sample_invalid_status" in data["message"]
         assert "Traceback" not in result.output
         db_cls.assert_not_called()
 

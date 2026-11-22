@@ -594,7 +594,7 @@ class TestRuleCommands:
 
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
             mock_svc.side_effect = AccountNotFoundError(
-                "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+                "계좌 'sample-missing-account'를 찾을 수 없습니다."
             )
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
@@ -606,7 +606,7 @@ class TestRuleCommands:
                         "rule",
                         "list",
                         "--account",
-                        "oracle-missing-account",
+                        "sample-missing-account",
                     ],
                 )
                 assert result.exit_code == 1
@@ -617,7 +617,7 @@ class TestRuleCommands:
                 # 미존재 account: 메시지는 AccountService.get과 동일 문자열을
                 # 그대로 보존한다(동일 envelope/message, #1559).
                 assert (
-                    "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+                    "계좌 'sample-missing-account'를 찾을 수 없습니다."
                     == data["message"]
                 )
 
@@ -630,13 +630,13 @@ class TestRuleCommands:
 
         with patch("ante.cli.commands.rule._create_rule_engine") as mock_svc:
             mock_svc.side_effect = AccountNotFoundError(
-                "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+                "계좌 'sample-missing-account'를 찾을 수 없습니다."
             )
 
             with patch("ante.cli.commands.rule._load_rules_from_config"):
                 result = runner.invoke(
                     cli,
-                    ["rule", "list", "--account", "oracle-missing-account"],
+                    ["rule", "list", "--account", "sample-missing-account"],
                 )
                 assert result.exit_code == 1
                 assert "찾을 수 없습니다" in result.output

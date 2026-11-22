@@ -541,14 +541,14 @@ class TestStrategyPerformance:
                     "performance",
                     "momentum",
                     "--account-id",
-                    "oracle-missing-account",
+                    "sample-missing-account",
                 ],
             )
         assert result.exit_code == 1
         data = json.loads(result.output)
         assert data["status"] == "error"
         assert data["code"] == "ACCOUNT_NOT_FOUND"
-        assert "oracle-missing-account" in data["message"]
+        assert "sample-missing-account" in data["message"]
         # account 미존재이므로 metric 계산까지 가지 않는다.
         tracker.calculate.assert_not_called()
 
@@ -566,11 +566,11 @@ class TestStrategyPerformance:
                     "performance",
                     "momentum",
                     "--account-id",
-                    "oracle-missing-account",
+                    "sample-missing-account",
                 ],
             )
         assert result.exit_code == 1
-        assert "계좌 'oracle-missing-account'를 찾을 수 없습니다." in result.output
+        assert "계좌 'sample-missing-account'를 찾을 수 없습니다." in result.output
         tracker.calculate.assert_not_called()
 
     def test_performance_real_account_regression(self, runner):
@@ -672,7 +672,7 @@ class TestStrategyPerformance:
                     "performance",
                     "nonexistent",
                     "--account-id",
-                    "oracle-missing-account",
+                    "sample-missing-account",
                 ],
             )
         assert result.exit_code == 1
@@ -703,7 +703,7 @@ class TestStrategyPerformance:
                     "performance",
                     "momentum",
                     "--account-id",
-                    "oracle-missing-account",
+                    "sample-missing-account",
                 ],
             )
         assert result.exit_code == 1

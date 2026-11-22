@@ -4,7 +4,7 @@ per-surface 테스트(#1576/#1577/#1583/#1584/#1585 merged)를 보완하는
 **cross-module 계약 회귀 + SSOT drift 가드**다. 에픽 #1561 최종 자식.
 
 본 모듈의 불변식:
-  1. ``ORACLE_INVALID_EXCHANGE`` 가 **모든 신규 입력 경계**(instrument CLI
+  1. ``SAMPLE_INVALID_EXCHANGE`` 가 **모든 신규 입력 경계**(instrument CLI
      list/sync/import · StrategyMeta · account ``service.create()`` ·
      DataStore ``write``/``append`` · backtest ``run --exchange``)에서
      성공 처리되지 않는다(#1561 재현 통합 고정).
@@ -55,7 +55,7 @@ from ante.strategy.validator import StrategyValidator
 # 의도된 단일 상수만 리터럴로 둔다(canonical 집합은 SSOT import).
 #  - ORACLE: #1561 oracle probe 시그니처(어떤 신규 입력 경계에서도 거부).
 #  - WILDCARD: StrategyMeta 전용 — 그 외 표면에서 거부.
-ORACLE = "ORACLE_INVALID_EXCHANGE"
+ORACLE = "SAMPLE_INVALID_EXCHANGE"
 WILDCARD = "*"
 
 _MOCK_MASTER = Member(
@@ -315,25 +315,25 @@ class TestCanonicalSetContract:
         assert "TEST" in CANONICAL_EXCHANGES
 
 
-# ── TestOracleInvalidRejectionMatrix — #1561 재현 통합 고정 ─────────
+# ── TestSampleInvalidRejectionMatrix — #1561 재현 통합 고정 ─────────
 
 
-class TestOracleInvalidRejectionMatrix:
+class TestSampleInvalidRejectionMatrix:
     """``ORACLE`` 가 **모든 신규 입력 경계**에서 거부된다.
 
     표면별 에러코드 문자열 재검증은 비목표(per-surface 책임) — 여기서는
     "성공 처리되지 않음"(거부)만 cross-module 으로 고정한다.
     """
 
-    def test_instrument_list_rejects_oracle(self, runner: CliRunner) -> None:
+    def test_instrument_list_rejects_sample(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["instrument", "list", "--exchange", ORACLE])
         assert result.exit_code != 0, result.stdout
 
-    def test_instrument_sync_rejects_oracle(self, runner: CliRunner) -> None:
+    def test_instrument_sync_rejects_sample(self, runner: CliRunner) -> None:
         result = runner.invoke(cli, ["instrument", "sync", "--exchange", ORACLE])
         assert result.exit_code != 0, result.stdout
 
-    def test_instrument_import_rejects_oracle(
+    def test_instrument_import_rejects_sample(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
         result = runner.invoke(
@@ -341,23 +341,23 @@ class TestOracleInvalidRejectionMatrix:
         )
         assert result.exit_code != 0, result.stdout
 
-    def test_strategy_meta_rejects_oracle(self, tmp_path: Path) -> None:
+    def test_strategy_meta_rejects_sample(self, tmp_path: Path) -> None:
         assert _has_exchange_error(_validate_strategy(tmp_path, ORACLE))
 
     @pytest.mark.asyncio
-    async def test_account_create_rejects_oracle(self, account_service) -> None:
+    async def test_account_create_rejects_sample(self, account_service) -> None:
         with pytest.raises(InvalidExchangeError):
-            await account_service.create(_make_account("oracle-acct", ORACLE))
+            await account_service.create(_make_account("sample-acct", ORACLE))
 
-    def test_datastore_write_rejects_oracle(self, store: ParquetStore) -> None:
+    def test_datastore_write_rejects_sample(self, store: ParquetStore) -> None:
         with pytest.raises(ValueError, match="유효하지 않은 exchange"):
             store.write("005930", "1d", _ohlcv_df(), exchange=ORACLE)
 
-    def test_datastore_append_rejects_oracle(self, store: ParquetStore) -> None:
+    def test_datastore_append_rejects_sample(self, store: ParquetStore) -> None:
         with pytest.raises(ValueError, match="유효하지 않은 exchange"):
             store.append("005930", "1m", _ohlcv_rows(), exchange=ORACLE)
 
-    def test_backtest_run_rejects_oracle(
+    def test_backtest_run_rejects_sample(
         self, runner: CliRunner, tmp_path: Path
     ) -> None:
         strategy = tmp_path / "s.py"

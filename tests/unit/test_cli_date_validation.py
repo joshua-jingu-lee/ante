@@ -460,7 +460,7 @@ class TestFormatJsonInvalidDate:
         """이슈 #1564 재현 조합: invalid `--start`/`--end` 동시 지정.
 
         `ante --format json report performance --period daily
-        --start oracle-not-a-date --end also-not-a-date`가 returncode 0 +
+        --start sample-not-a-date --end also-not-a-date`가 returncode 0 +
         빈 집계 성공으로 종료되던 ingress drift를 잠근다. callback이 가장
         먼저 평가되는 `--start`에서 click.BadParameter를 raise하므로 exit
         != 0이 보장된다.
@@ -475,13 +475,13 @@ class TestFormatJsonInvalidDate:
                 "--period",
                 "daily",
                 "--start",
-                "oracle-not-a-date",
+                "sample-not-a-date",
                 "--end",
                 "also-not-a-date",
             ],
         )
         _assert_date_rejected(
-            result, hint_keywords=("oracle-not-a-date", "also-not-a-date")
+            result, hint_keywords=("sample-not-a-date", "also-not-a-date")
         )
 
 

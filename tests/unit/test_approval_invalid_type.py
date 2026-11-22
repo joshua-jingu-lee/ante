@@ -98,7 +98,7 @@ class TestCLIApprovalRequestInvalidType:
                     "approval",
                     "request",
                     "--type",
-                    "oracle_invalid_type",
+                    "sample_invalid_type",
                     "--title",
                     "Oracle invalid approval type",
                     "--params",
@@ -110,7 +110,7 @@ class TestCLIApprovalRequestInvalidType:
         payload = json.loads(result.stdout.strip().splitlines()[-1])
         assert payload["status"] == "error"
         assert payload["code"] == "APPROVAL_VALIDATION_ERROR"
-        assert "oracle_invalid_type" in payload["message"]
+        assert "sample_invalid_type" in payload["message"]
 
     def test_invalid_type_does_not_call_ipc_send(self, runner: CliRunner) -> None:
         """JSON 모드: invalid type → IPC 전송 호출 없음."""
@@ -125,7 +125,7 @@ class TestCLIApprovalRequestInvalidType:
                     "approval",
                     "request",
                     "--type",
-                    "oracle_invalid_type",
+                    "sample_invalid_type",
                     "--title",
                     "T",
                 ],
@@ -158,7 +158,7 @@ class TestCLIApprovalRequestInvalidType:
                     "approval",
                     "request",
                     "--type",
-                    "oracle_invalid_type",
+                    "sample_invalid_type",
                     "--title",
                     "T",
                 ],
@@ -167,7 +167,7 @@ class TestCLIApprovalRequestInvalidType:
         assert result.exit_code == 1
         # text 모드는 stderr 로 ``Error: ...`` 출력
         assert "Error" in result.stderr
-        assert "oracle_invalid_type" in result.stderr
+        assert "sample_invalid_type" in result.stderr
         mock_client.send.assert_not_called()
 
 
@@ -278,7 +278,7 @@ class TestApprovalServiceCreateInvalidType:
         """invalid type → ``ValueError`` (defense-in-depth)."""
         with pytest.raises(ValueError, match="invalid approval type"):
             await approval_service.create(
-                type="oracle_invalid_type",
+                type="sample_invalid_type",
                 requester="agent-01",
                 title="invalid",
             )
@@ -314,13 +314,13 @@ class TestApprovalServiceCreateInvalidType:
         svc = ApprovalService(
             db=db,
             eventbus=eventbus,
-            validators={"oracle_invalid_type": validator_mock},
+            validators={"sample_invalid_type": validator_mock},
         )
         await svc.initialize()
 
         with pytest.raises(ValueError, match="invalid approval type"):
             await svc.create(
-                type="oracle_invalid_type",
+                type="sample_invalid_type",
                 requester="agent",
                 title="t",
             )

@@ -111,12 +111,12 @@ class TestFeedInjectTimeframeValidation:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
         assert "유효하지 않은 타임프레임" in result.output
-        assert "oracle-invalid-timeframe" in result.output
+        assert "sample-invalid-timeframe" in result.output
         assert result.output.startswith(
             "Error: FEED_INJECT_INVALID_TIMEFRAME: 유효하지 않은 타임프레임"
         )
@@ -139,7 +139,7 @@ class TestFeedInjectTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -167,7 +167,7 @@ class TestFeedInjectTimeframeValidation:
                     "--symbol",
                     "005930",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             )
 
@@ -295,7 +295,7 @@ class TestFeedInjectValidationPrecedence:
                     "--symbol",
                     "ABCDEF",
                     "--timeframe",
-                    "oracle-invalid-timeframe",
+                    "sample-invalid-timeframe",
                 ),
             ],
         )
@@ -382,7 +382,7 @@ class TestFeedInjectAuthDecorators:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         assert result.exit_code == 1
@@ -403,7 +403,7 @@ class TestFeedInjectAuthDecorators:
                 "--symbol",
                 "005930",
                 "--timeframe",
-                "oracle-invalid-timeframe",
+                "sample-invalid-timeframe",
             ),
         )
         # 인증 실패로 비정상 종료하며 ingress 검증 메시지에 도달하지 않는다.

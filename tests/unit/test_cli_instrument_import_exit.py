@@ -603,7 +603,7 @@ class TestExchangeInvalidRegressionUnbroken:
         json_file = tmp_path / "inv_ex.json"
         json_file.write_text(
             json.dumps(
-                [{"symbol": "ABCDEF", "exchange": "ORACLE_INVALID", "name": "x"}]
+                [{"symbol": "ABCDEF", "exchange": "SAMPLE_INVALID", "name": "x"}]
             )
         )
 

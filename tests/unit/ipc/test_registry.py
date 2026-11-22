@@ -1248,7 +1248,7 @@ class TestHandleConfigSetValidation:
                 svc,
                 ConfigSetRequest(
                     key="system.log_level",
-                    value="ORACLE_INVALID_LEVEL",
+                    value="SAMPLE_INVALID_LEVEL",
                     category="system",
                 ),
                 "cli-user",

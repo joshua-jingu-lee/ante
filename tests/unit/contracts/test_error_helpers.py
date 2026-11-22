@@ -85,7 +85,7 @@ class TestErrorSpecForException:
         assert spec.category == "not_found"
 
     def test_member_invalid_scope_resolves_permission(self) -> None:
-        spec = error_spec_for_exception(InvalidScopeError("oracle:bad"))
+        spec = error_spec_for_exception(InvalidScopeError("sample:bad"))
         assert spec.code == "MEMBER_INVALID_SCOPE"
         assert spec.category == "permission"
 

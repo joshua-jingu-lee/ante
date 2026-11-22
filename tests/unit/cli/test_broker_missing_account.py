@@ -1,7 +1,7 @@
 """``ante broker {balance,positions}`` missing-account hang 회귀 (#1535).
 
 배경:
-    ``ante --format json broker balance --account oracle-missing-account`` 호출이
+    ``ante --format json broker balance --account sample-missing-account`` 호출이
     stdout 으로 error JSON envelope 를 출력하지만 프로세스가 ~10초 동안 종료되지
     않아 ``subprocess.run(..., timeout=...)`` 호출자가 timeout (returncode 124)
     으로 관찰하는 결함이 있었다.
@@ -83,7 +83,7 @@ from ante.contracts.ipc_client_errors import (
 )
 from ante.member.models import Member, MemberRole, MemberType
 
-_MISSING_ACCOUNT_ID = "oracle-missing-account"
+_MISSING_ACCOUNT_ID = "sample-missing-account"
 _NOT_FOUND_MESSAGE = f"계좌 '{_MISSING_ACCOUNT_ID}'를 찾을 수 없습니다."
 
 
@@ -568,7 +568,7 @@ class TestStatusAndReconcileFollowupScope:
                     "broker",
                     "status",
                     "--account",
-                    "oracle-valid-account",
+                    "sample-valid-account",
                 ],
             )
 
@@ -868,7 +868,7 @@ class TestBrokerValidAbsentPerCommandNarrow:
     account_id 의 기존 동작이 보존되는지 per-command 로 검증 (#1636).
 
     ``reject_invalid_account_id`` helper는 ``require_account_id`` 계약을 그대로
-    재사용하므로 valid 패턴(``oracle-missing-account``)은 거부하지 않는다.
+    재사용하므로 valid 패턴(``sample-missing-account``)은 거부하지 않는다.
     따라서 valid-but-nonexistent account_id 는 helper를 통과해 기존
     not-found 경로로 흐른다:
 
@@ -993,7 +993,7 @@ class TestBrokerBalanceSubprocessNoHang:
             from ante.contracts.ipc_client_errors import IPCServerNotRunningError
             from ante.member.models import Member, MemberRole, MemberType
 
-            _NOT_FOUND = "계좌 'oracle-missing-account'를 찾을 수 없습니다."
+            _NOT_FOUND = "계좌 'sample-missing-account'를 찾을 수 없습니다."
 
             mock_db = MagicMock()
             mock_db.close = AsyncMock()
@@ -1044,7 +1044,7 @@ class TestBrokerBalanceSubprocessNoHang:
                         "broker",
                         "balance",
                         "--account",
-                        "oracle-missing-account",
+                        "sample-missing-account",
                     ],
                     standalone_mode=True,
                 )

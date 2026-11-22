@@ -185,11 +185,11 @@ async def test_set_invalid_log_level_raises_value_error(service, eventbus):
     """invalid system.log_level 값은 ValueError 로 거부된다 (서비스 경계).
 
     IPC/CLI/web 어느 경로든 서비스 경계를 통과하지 못해야 한다 — oracle
-    probe 가 보낸 ``ORACLE_INVALID_LEVEL`` 같은 값이 dynamic_config 와
+    probe 가 보낸 ``SAMPLE_INVALID_LEVEL`` 같은 값이 dynamic_config 와
     history 에 영구 저장되는 경로를 차단한다.
     """
     with pytest.raises(ValueError, match="system.log_level"):
-        await service.set("system.log_level", "ORACLE_INVALID_LEVEL", category="system")
+        await service.set("system.log_level", "SAMPLE_INVALID_LEVEL", category="system")
 
     # 영속/이벤트 사이드이펙트가 발생하지 않아야 한다.
     assert not await service.exists("system.log_level")
@@ -261,7 +261,7 @@ def test_validate_value_invalid_log_level_raises_config_validation_error():
     generic numeric-finite ValueError(#1412)는 무변경(별 표면).
     """
     with pytest.raises(ConfigValidationError, match="system.log_level"):
-        validate_value("system.log_level", "ORACLE_INVALID_LEVEL")
+        validate_value("system.log_level", "SAMPLE_INVALID_LEVEL")
     with pytest.raises(ConfigValidationError, match="대소문자 구분"):
         validate_value("system.log_level", "debug")
     with pytest.raises(ConfigValidationError, match="system.log_level"):
@@ -279,7 +279,7 @@ def test_validate_value_invalid_log_level_raises_config_validation_error():
 async def test_set_invalid_log_level_raises_config_validation_error(service, eventbus):
     """서비스 경계도 ``ConfigValidationError`` 를 전파한다 (#1673)."""
     with pytest.raises(ConfigValidationError, match="system.log_level"):
-        await service.set("system.log_level", "ORACLE_INVALID_LEVEL", category="system")
+        await service.set("system.log_level", "SAMPLE_INVALID_LEVEL", category="system")
 
     assert not await service.exists("system.log_level")
     assert eventbus.published == []

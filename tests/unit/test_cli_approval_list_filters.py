@@ -100,14 +100,14 @@ class TestApprovalListInvalidPreflight:
                     "approval",
                     "list",
                     "--status",
-                    "oracle_invalid_status",
+                    "sample_invalid_status",
                 ],
             )
         assert result.exit_code == 1, result.output
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "APPROVAL_INVALID_STATUS"
-        assert "oracle_invalid_status" in data["message"]
+        assert "sample_invalid_status" in data["message"]
         assert "Traceback" not in result.output
         db_cls.assert_not_called()
 
@@ -131,14 +131,14 @@ class TestApprovalListInvalidPreflight:
                     "approval",
                     "list",
                     "--type",
-                    "oracle_invalid_type",
+                    "sample_invalid_type",
                 ],
             )
         assert result.exit_code == 1, result.output
         data = json.loads(result.output.strip())
         assert data["status"] == "error"
         assert data["code"] == "APPROVAL_INVALID_TYPE"
-        assert "oracle_invalid_type" in data["message"]
+        assert "sample_invalid_type" in data["message"]
         assert "Traceback" not in result.output
         db_cls.assert_not_called()
 
