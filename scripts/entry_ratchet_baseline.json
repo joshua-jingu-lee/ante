@@ -25,10 +25,6 @@
     "src/ante/cli/commands/treasury.py": 3
   },
   "raw_legacy_contracts": [
-    "account credentials",
-    "account info",
-    "account list",
-    "account set-credentials",
     "approval audit-types",
     "approval info",
     "approval list",
@@ -95,7 +91,6 @@
     "treasury transactions"
   ],
   "cli_direct_output": {
-    "src/ante/cli/commands/account.py": 17,
     "src/ante/cli/commands/approval.py": 10,
     "src/ante/cli/commands/audit.py": 4,
     "src/ante/cli/commands/backtest.py": 7,
