@@ -25,7 +25,7 @@ class CircuitState(StrEnum):
 
 CIRCUIT_STATE_TRANSITIONS: dict[CircuitState, set[CircuitState]] = {
     CircuitState.CLOSED: {CircuitState.OPEN},
-    CircuitState.OPEN: {CircuitState.HALF_OPEN, CircuitState.CLOSED},
+    CircuitState.OPEN: {CircuitState.HALF_OPEN},
     CircuitState.HALF_OPEN: {CircuitState.OPEN, CircuitState.CLOSED},
 }
 
@@ -79,8 +79,10 @@ class CircuitBreaker:
             )
 
     def record_success(self) -> None:
-        """성공 기록 → CLOSED로 복귀."""
-        if self._state != CircuitState.CLOSED:
+        """성공 기록 → HALF_OPEN이면 CLOSED로 복귀, OPEN이면 무시."""
+        if self._state == CircuitState.OPEN:
+            return
+        if self._state == CircuitState.HALF_OPEN:
             self._transition(CircuitState.CLOSED, "API 호출 성공")
         self._failure_count = 0
 
