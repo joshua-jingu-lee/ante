@@ -353,7 +353,7 @@ def test_strategy_entries_registered_after_1847_sub_pr_5() -> None:
     본 단언은 #1847 sub-PR 5 가 strategy migration 을 완료한 시점부터
     lock 된다. 7 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_strategy_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_strategy_cli_output_bytes` 가
     책임진다.
     """
     expected_strategy_paths = {
