@@ -305,7 +305,7 @@ class OrderTracker:
                 ordered_qty=ordered_qty,
                 recorded_filled_qty=0.0,
                 avg_fill_price=0.0,
-                status=OrderStatus.OPEN,
+                status=OrderStatus.OPEN.value,
                 submitted_at=submitted_at,
                 submitted_date=submitted_date,
                 order_price=order_price,
@@ -387,7 +387,7 @@ class OrderTracker:
             )
         confirmed = float(updated["recorded_filled_qty"] or 0.0)
         return RecordFillResult(
-            delta=delta, confirmed_cumulative=confirmed, new_status=new_status
+            delta=delta, confirmed_cumulative=confirmed, new_status=new_status.value
         )
 
     def mirror_fill_to_cache(

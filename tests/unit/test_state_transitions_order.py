@@ -38,6 +38,7 @@ from typing import Any
 
 import pytest
 
+from ante.bot.providers.live import LiveOrderView
 from ante.broker.fill_scheduler import FillReconcileScheduler
 from ante.core import Database
 from ante.eventbus import EventBus
@@ -615,6 +616,65 @@ async def test_initialize_warms_cache_with_open_rows_only(db, tracker):
         ("raw-open", "open"),
         ("raw-partially_filled", "partially_filled"),
     ]
+
+
+# ── 상태 값의 타입 ───────────────────────────────────────────────
+
+
+async def test_open_record_status_is_plain_str(tracker):
+    await _open(tracker)
+    (record,) = tracker.get_open_orders_for_bot_sync(ACCT, BOT)
+    assert type(record.status) is str
+    assert repr(record.status) == "'open'"
+    view = LiveOrderView(tracker, ACCT)
+    (order,) = view.get_open_orders(BOT)
+    assert type(order["status"]) is str
+
+
+@pytest.mark.parametrize(
+    ("cumulative", "expected"),
+    [(4.0, "partially_filled"), (10.0, "filled"), (0.0, "open")],
+)
+async def test_record_fill_result_status_is_plain_str(tracker, cumulative, expected):
+    await _open(tracker)
+    result = await tracker.record_fill("ord-1", cumulative, 70000.0)
+    assert result.new_status == expected
+    assert type(result.new_status) is str
+
+
+async def test_record_fill_not_above_recorded_status_is_plain_str(db, tracker):
+    await _enter(tracker, "partially_filled")
+    result = await tracker.record_fill("ord-1", 2.0, 70000.0)
+    assert (result.delta, result.new_status) == (0.0, "partially_filled")
+    assert type(result.new_status) is str
+
+
+async def test_mirrored_cache_status_is_plain_str(db, tracker):
+    applier = await _applier(db, tracker)
+    await _open(tracker, broker_order_id="0001")
+    await applier.apply_cumulative(
+        account_id=ACCT,
+        broker_order_id="0001",
+        observed_cumulative=4.0,
+        avg_price=70000.0,
+        submitted_date=DATE,
+    )
+    (record,) = tracker.get_open_orders_for_bot_sync(ACCT, BOT)
+    assert record.status == "partially_filled"
+    assert type(record.status) is str
+    (order,) = LiveOrderView(tracker, ACCT).get_open_orders(BOT)
+    assert type(order["status"]) is str
+
+
+async def test_db_read_status_is_plain_str(db, tracker):
+    await _open(tracker)
+    await tracker.record_fill("ord-1", 4.0, 70000.0)
+    record = await tracker.get("ord-1")
+    (listed,) = await tracker.get_open_orders(ACCT)
+    assert record is not None
+    assert type(record.status) is str
+    assert type(listed.status) is str
+    assert listed.status == "partially_filled"
 
 
 # ── 49쌍 ─────────────────────────────────────────────────────────

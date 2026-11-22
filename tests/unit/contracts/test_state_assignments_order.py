@@ -31,6 +31,8 @@ SQL은 세지 않는다. 다음도 세지 않는다.
 
 - f-string(``JoinedStr``)·``+`` 로 만든 쓰기 SQL
 - ``UPDATE OR <conflict> order_tracker``
+- ``SET`` 절 파서가 놓치는 쓰기 형태: 행 값 대입(``SET (status, …) = (…)``)과
+  따옴표로 감싼 열 이름(``SET "status" = …``)
 - ``setattr``·``object.__setattr__``·``dataclasses.replace`` 로 레코드를 바꾸는 것
 - 바인딩되는 값이 ``OrderStatus`` 멤버인지(동작 테스트가 본다)
 """
@@ -89,7 +91,7 @@ EXPECTED_INSERTS = [(_TRACKER, "OrderTracker.open")]
 EXPECTED_RECORD_STATUS_KEYWORDS = [
     (_TRACKER, "from_row", "row['status']"),
     (_TRACKER, "mirror_fill_to_cache", "new_status or record.status"),
-    (_TRACKER, "open", "OrderStatus.OPEN"),
+    (_TRACKER, "open", "OrderStatus.OPEN.value"),
 ]
 
 EXPECTED_OUTER_LITERALS = {
