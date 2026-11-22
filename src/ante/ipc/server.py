@@ -79,7 +79,7 @@ def _logged_expected_reject(
     return False
 
 
-def _encode_signal_frame(frame: dict) -> bytes:
+def _encode_signal_frame(frame: dict[str, Any]) -> bytes:
     """signal.connect outbound 프레임을 length-prefixed 바이트로 직렬화."""
     payload = json.dumps(frame, default=str, ensure_ascii=False).encode("utf-8")
     if len(payload) > protocol.MAX_MESSAGE_SIZE:
@@ -334,7 +334,7 @@ class IPCServer:
                 pass
 
     @staticmethod
-    def _service_unavailable(request_id: str, message: str) -> dict:
+    def _service_unavailable(request_id: str, message: str) -> dict[str, Any]:
         """``SERVICE_UNAVAILABLE`` error 응답 dict 생성."""
         return {
             "id": request_id,
@@ -346,7 +346,7 @@ class IPCServer:
         }
 
     @staticmethod
-    def _malformed_request(message: str) -> dict:
+    def _malformed_request(message: str) -> dict[str, Any]:
         """``MALFORMED_REQUEST`` error 응답 dict 생성."""
         return {
             "id": None,
@@ -358,7 +358,7 @@ class IPCServer:
         }
 
     @staticmethod
-    def _service_not_configured(request_id: str, service_name: str) -> dict:
+    def _service_not_configured(request_id: str, service_name: str) -> dict[str, Any]:
         """``SERVICE_NOT_CONFIGURED`` error 응답 dict 생성."""
         return {
             "id": request_id,
@@ -376,7 +376,7 @@ class IPCServer:
                 return service_name
         return None
 
-    async def _dispatch(self, request: dict) -> dict:
+    async def _dispatch(self, request: dict[str, Any]) -> dict[str, Any]:
         """요청을 적절한 핸들러로 라우팅."""
         request_id = request.get("id", str(uuid.uuid4()))
         command = request.get("command", "")
@@ -415,7 +415,7 @@ class IPCServer:
         try:
             args = _validated_args(spec, args)
             result = await spec.handler(self._service_registry, args, actor)
-            audit_detail: dict | None = None
+            audit_detail: dict[str, Any] | None = None
             if isinstance(result, dict):
                 audit_detail = result.pop("_audit_detail", None)
             if spec.audit_action is not None:
@@ -464,7 +464,9 @@ class IPCServer:
                 reg.unregister(bot_id, session_id)
             return
 
-        out_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=SIGNAL_OUT_QUEUE_MAX)
+        out_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(
+            maxsize=SIGNAL_OUT_QUEUE_MAX
+        )
         write_lock = asyncio.Lock()
         flush_done = asyncio.Event()
         closing_event = asyncio.Event()
@@ -492,7 +494,7 @@ class IPCServer:
             _force_closed_frame("lagged")
             closing_event.set()
 
-        def _enqueue(frame: dict) -> None:
+        def _enqueue(frame: dict[str, Any]) -> None:
             """sink 콜백 — newline-free dict 를 out_queue 에 put_nowait.
 
             laggard-aware: QueueFull 이면 채널 laggard teardown 을 트리거한다
@@ -577,7 +579,7 @@ class IPCServer:
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
         channel: object,
-        out_queue: asyncio.Queue[dict],
+        out_queue: asyncio.Queue[dict[str, Any]],
         write_lock: asyncio.Lock,
         flush_done: asyncio.Event,
         closing_event: asyncio.Event,
@@ -655,8 +657,8 @@ class IPCServer:
     async def _initiate_close(
         self,
         channel: object,
-        read_task: asyncio.Task,
-        writer_task: asyncio.Task,
+        read_task: asyncio.Task[Any],
+        writer_task: asyncio.Task[Any],
         flush_done: asyncio.Event,
         *,
         daemon_close: bool,
