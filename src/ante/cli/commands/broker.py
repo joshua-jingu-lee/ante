@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
+from typing import Any, cast
 
 import click
 
@@ -18,11 +20,11 @@ def broker() -> None:
     """증권사 계좌 정보 조회."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
-async def _create_account_service():
+async def _create_account_service() -> tuple[Any, Any]:
     from ante.account.service import AccountService
     from ante.cli.main import get_db_path
     from ante.core.database import Database
@@ -36,7 +38,7 @@ async def _create_account_service():
     return account_service, db
 
 
-async def _get_broker(account_id: str | None = None):
+async def _get_broker(account_id: str | None = None) -> tuple[Any, Any]:
     """AccountService를 통해 브로커 어댑터를 획득한다.
 
     account_id가 None이면 기존 Config 기반 폴백을 사용한다.
@@ -88,12 +90,12 @@ async def _ipc_broker_command(
     command: str,
     account_id: str,
     actor: str,
-    extra: dict | None = None,
-) -> dict:
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """IPC를 통해 서버 브로커 인스턴스에 위임한다."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    args: dict = {**(extra or {}), "account_id": account_id}
+    args: dict[str, Any] = {**(extra or {}), "account_id": account_id}
     return await ipc_send(command, args, actor=actor)
 
 
@@ -118,7 +120,7 @@ def status(ctx: click.Context, account_id: str) -> None:
         result = _run(_ipc_broker_command("broker.status", validated_account_id, actor))
     except IPCServerNotRunningError:
 
-        async def _run_status() -> dict:
+        async def _run_status() -> dict[str, Any]:
             try:
                 adapter, db = await _get_broker(validated_account_id)
                 try:
@@ -181,10 +183,10 @@ def balance(ctx: click.Context, account_id: str) -> None:
         )
     except IPCServerNotRunningError:
 
-        async def _run_balance() -> dict:
+        async def _run_balance() -> dict[str, Any]:
             adapter, db = await _get_broker(validated_account_id)
             try:
-                return await adapter.get_account_balance()
+                return cast("dict[str, Any]", await adapter.get_account_balance())
             finally:
                 await adapter.disconnect()
                 if db:
@@ -225,10 +227,10 @@ def positions(ctx: click.Context, account_id: str) -> None:
         )
     except IPCServerNotRunningError:
 
-        async def _run_positions() -> list[dict]:
+        async def _run_positions() -> list[dict[str, Any]]:
             adapter, db = await _get_broker(validated_account_id)
             try:
-                return await adapter.get_positions()
+                return cast("list[dict[str, Any]]", await adapter.get_positions())
             finally:
                 await adapter.disconnect()
                 if db:
@@ -314,7 +316,7 @@ def order_history(
         to_label="조회 종료일",
     )
 
-    extra: dict = {}
+    extra: dict[str, Any] = {}
     if from_date is not None:
         extra["from_date"] = from_date
     if to_date is not None:
@@ -335,14 +337,17 @@ def order_history(
             fmt.error(message if fmt.is_json else f"{code}: {message}", code=code)
             raise SystemExit(1) from e
 
-        async def _run_order_history() -> list[dict]:
+        async def _run_order_history() -> list[dict[str, Any]]:
             from ante.core.time import iso_to_kis_date
 
             adapter, db = await _get_broker(validated_account_id)
             try:
-                return await adapter.get_order_history(
-                    iso_to_kis_date(from_date),
-                    iso_to_kis_date(to_date),
+                return cast(
+                    "list[dict[str, Any]]",
+                    await adapter.get_order_history(
+                        iso_to_kis_date(from_date),
+                        iso_to_kis_date(to_date),
+                    ),
                 )
             finally:
                 await adapter.disconnect()
@@ -403,10 +408,10 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
     if fix:
         actor = get_member_id(ctx)
 
-        async def _run_fix() -> dict:
+        async def _run_fix() -> dict[str, Any]:
             from ante.cli.commands.ipc_helpers import ipc_send
 
-            args: dict = {"fix": True, "account_id": validated_account_id}
+            args: dict[str, Any] = {"fix": True, "account_id": validated_account_id}
             return await ipc_send("broker.reconcile", args, actor=actor)
 
         result = _run(_run_fix())
@@ -414,16 +419,19 @@ def reconcile(ctx: click.Context, account_id: str, fix: bool) -> None:
         try:
             actor = get_member_id(ctx)
 
-            async def _run_ipc_reconcile() -> dict:
+            async def _run_ipc_reconcile() -> dict[str, Any]:
                 from ante.cli.commands.ipc_helpers import ipc_send
 
-                args: dict = {"fix": False, "account_id": validated_account_id}
+                args: dict[str, Any] = {
+                    "fix": False,
+                    "account_id": validated_account_id,
+                }
                 return await ipc_send("broker.reconcile", args, actor=actor)
 
             result = _run(_run_ipc_reconcile())
         except IPCServerNotRunningError:
 
-            async def _run_reconcile() -> dict:
+            async def _run_reconcile() -> dict[str, Any]:
                 from ante.cli.main import get_db_path
                 from ante.core.database import Database
                 from ante.trade.position import PositionHistory
