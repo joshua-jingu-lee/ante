@@ -678,8 +678,18 @@ def test_leaf_walk_matches_cli_contract_registry() -> None:
 # ── 생성 테스트 2: 레지스트리 항목의 CLI·IPC 코드 일치 ─────────────────────
 
 
+_MESSAGE_REQUIRED: frozenset[type[BaseException]] = frozenset(
+    {IPCServerNotRunningError, IPCClientTimeoutError}
+)
+
+
 def _registry_instance(cls: type[BaseException]) -> BaseException:
-    """``cls.__new__(cls)``. 그것이 실패하거나 ``str()``할 수 없으면 ``cls("x")``."""
+    """``cls.__new__(cls)``. 그것이 실패하거나 ``str()``할 수 없으면 ``cls("x")``.
+
+    IPC 클라이언트 예외는 ``ipc_send``가 늘 메시지를 주므로 ``cls("x")``로 만든다.
+    """
+    if cls in _MESSAGE_REQUIRED:
+        return cls("x")
     try:
         exc = cls.__new__(cls)
         str(exc)
