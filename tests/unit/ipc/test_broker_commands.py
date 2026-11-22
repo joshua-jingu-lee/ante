@@ -19,10 +19,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import click
 import pytest
 from click.testing import CliRunner
+from pydantic import ValidationError
 
 from ante.cli.main import cli
 from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
+from ante.ipc.requests import BrokerOrderHistoryRequest
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
 from tests.unit.ipc.validation_messages import validation_message
@@ -644,3 +646,13 @@ async def test_rejected_value_is_not_in_the_response_or_the_log(
     assert marker not in json.dumps(response, ensure_ascii=False)
     assert marker not in caplog.text
     harness.assert_no_service_call()
+
+
+def test_iso_date_error_message_is_a_fixed_text() -> None:
+    with pytest.raises(ValidationError) as rejected:
+        BrokerOrderHistoryRequest.model_validate(
+            {"account_id": ACCOUNT, "from_date": "MARKDATE01-99"}
+        )
+    assert [(e["type"], e["msg"]) for e in rejected.value.errors()] == [
+        ("invalid_iso_date", "invalid iso date")
+    ]
