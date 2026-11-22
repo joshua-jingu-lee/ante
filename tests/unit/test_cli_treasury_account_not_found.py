@@ -276,10 +276,9 @@ class TestTreasuryStatusValidExistingAccount:
         assert result.returncode == 0, (
             f"exit={result.returncode}\nstdout={result.stdout}\nstderr={result.stderr}"
         )
-        payload = _parse_json_last(result.stdout)
-        # status payload는 fmt.output(dict)으로 dump되므로 envelope 없이 핵심
-        # 필드가 노출된다 (`account_balance` 등). 회귀의 sanity 보장만 하면
-        # 충분하므로 dict 키 존재만 확인한다.
+        payload = _parse_json_last(result.stdout)["data"]
+        # status payload는 성공 봉투의 ``data``에 그대로 실린다(`account_balance`
+        # 등). 회귀의 sanity 보장만 하면 충분하므로 dict 키 존재만 확인한다.
         assert "account_balance" in payload, payload
 
 

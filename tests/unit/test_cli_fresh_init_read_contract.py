@@ -183,9 +183,9 @@ class TestStrategyListFreshInit:
         _assert_no_internal_schema_leak(result.stdout)
         _assert_no_traceback(result.stderr)
 
-        payload = _parse_last_json_dict(result.stdout)
+        payload = _parse_last_json_dict(result.stdout)["data"]
         # `strategies` key 가 빈 list 거나,
-        # `fmt.output({"message":..., "strategies":[]})` 의 동등 빈 응답이어야 한다.
+        # `{"message":..., "strategies":[]}` 의 동등 빈 응답이어야 한다(봉투의 data 안).
         assert "strategies" in payload, f"빈 list 응답에 strategies 키 누락: {payload}"
         assert payload["strategies"] == [], (
             f"fresh DB strategy list 가 빈 list 가 아님: {payload}"
@@ -412,7 +412,7 @@ class TestPostSubmitReadSanity:
             f"list 실패: exit={listed.returncode}\n"
             f"stdout={listed.stdout}\nstderr={listed.stderr}"
         )
-        payload = _parse_last_json_dict(listed.stdout)
+        payload = _parse_last_json_dict(listed.stdout)["data"]
         assert isinstance(payload.get("strategies"), list)
         assert len(payload["strategies"]) >= 1, payload
 
@@ -422,5 +422,5 @@ class TestPostSubmitReadSanity:
             f"info 실패: exit={info.returncode}\n"
             f"stdout={info.stdout}\nstderr={info.stderr}"
         )
-        info_payload = _parse_last_json_dict(info.stdout)
+        info_payload = _parse_last_json_dict(info.stdout)["data"]
         assert info_payload.get("name") == "sample_r5", info_payload

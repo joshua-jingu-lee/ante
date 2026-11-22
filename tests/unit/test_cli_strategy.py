@@ -153,7 +153,7 @@ class TestStrategyList:
         ):
             result = runner.invoke(cli, ["--format", "json", "strategy", "list"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["strategies"] == []
 
     def test_list_with_strategies(self, runner):
@@ -180,7 +180,7 @@ class TestStrategyList:
         ):
             result = runner.invoke(cli, ["--format", "json", "strategy", "list"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert len(data["strategies"]) == 1
             assert data["strategies"][0]["name"] == "momentum"
             assert data["strategies"][0]["strategy_id"] == "momentum_v1.0"
@@ -277,7 +277,7 @@ class TestStrategyInfo:
                 cli, ["--format", "json", "strategy", "info", "momentum"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["name"] == "momentum"
             assert data["params"] == {"period": 20}
             assert data["param_schema"] == {"period": "이동평균 기간"}
@@ -303,7 +303,7 @@ class TestStrategyInfo:
                 cli, ["--format", "json", "strategy", "info", "momentum"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["version"] == "2.0"
             assert len(data["other_versions"]) == 1
             assert data["other_versions"][0]["version"] == "1.0"
@@ -327,7 +327,7 @@ class TestStrategyInfo:
                 cli, ["--format", "json", "strategy", "info", "momentum"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert "params" not in data
 
 
@@ -386,7 +386,7 @@ class TestStrategyPerformance:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["strategy_name"] == "momentum"
             assert data["metrics"]["total_trades"] == 10
             assert data["metrics"]["win_rate"] == 0.7
@@ -417,7 +417,7 @@ class TestStrategyPerformance:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["metrics"]["total_trades"] == 0
 
     def test_performance_account_required(self, runner):
@@ -476,7 +476,7 @@ class TestStrategyPerformance:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["strategy_name"] == "momentum"
 
     @staticmethod
@@ -593,7 +593,7 @@ class TestStrategyPerformance:
                 ],
             )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["strategy_name"] == "momentum"
         assert data["metrics"]["total_trades"] == 10
         tracker.calculate.assert_awaited_once()
@@ -637,7 +637,7 @@ class TestStrategyPerformance:
                 ],
             )
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         # 반환 dict shape 불변: name 과 strategy_id 둘 다 노출.
         assert data["strategy_name"] == _SAMPLE_RECORD.name  # "momentum"
         assert data["strategy_id"] == _SAMPLE_RECORD.strategy_id  # "momentum_v1.0"
@@ -872,7 +872,7 @@ class TestStrategyPerformance:
                 ],
             )
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["strategy_name"] == "momentum", data
         assert data["metrics"]["total_trades"] == 10, data
         tracker.calculate.assert_awaited_once()
@@ -968,7 +968,7 @@ class TestStrategySubmit:
                 cli, ["--format", "json", "strategy", "submit", strategy_file]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["submitted"] is True
             assert data["strategy_id"] == "test_strat_v1.0.0"
             assert data["name"] == "test_strat"

@@ -323,7 +323,7 @@ def _run_offline_reconcile(
                 "acc-1",
             ],
         )
-    return json.loads(result.stdout), adapter
+    return json.loads(result.stdout)["data"], adapter
 
 
 class TestReconcileOfflineCliSumsBots:

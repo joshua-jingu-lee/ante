@@ -555,7 +555,7 @@ class TestValidAccountIdRegression:
                 ],
             )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output.strip())
+        payload = json.loads(result.output.strip())["data"]
         assert payload["account_balance"] == 1_000_000.0
         assert create_calls == [_VALID_PRESENT], create_calls
 
@@ -585,7 +585,7 @@ class TestValidAccountIdRegression:
                 ],
             )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output.strip())
+        payload = json.loads(result.output.strip())["data"]
         assert payload["snapshot_date"] == "2026-05-17"
         assert create_calls == [_VALID_PRESENT], create_calls
 
