@@ -70,13 +70,17 @@ import textwrap
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import click
 import pytest
 from click.testing import CliRunner
 
 from ante.account.errors import AccountNotFoundError
 from ante.cli.commands.broker import _get_broker
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.member.models import Member, MemberRole, MemberType
 
 _MISSING_ACCOUNT_ID = "oracle-missing-account"
@@ -136,10 +140,10 @@ def _parse_json_line(stdout: str) -> dict[str, object]:
 def _build_ipc_unavailable_mock() -> AsyncMock:
     """``_ipc_broker_command`` 를 mock 해 IPC 미가용을 시뮬레이트.
 
-    ``balance``/``positions`` 명령은 IPC 호출이 ``click.ClickException`` 을 raise
-    하면 직접 연결 폴백 분기로 들어간다. 이 mock 은 그 분기를 강제한다.
+    ``balance``/``positions`` 명령은 IPC 호출이 ``IPCServerNotRunningError`` 를
+    raise 하면 직접 연결 폴백 분기로 들어간다. 이 mock 은 그 분기를 강제한다.
     """
-    return AsyncMock(side_effect=click.ClickException("서버가 실행 중이 아닙니다."))
+    return AsyncMock(side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다."))
 
 
 def _patch_account_service_not_found() -> tuple[MagicMock, AsyncMock]:
@@ -284,7 +288,9 @@ class TestBrokerBalanceMissingAccount:
         )
         # text 모드: stdout 에 JSON 이 새지 않아야 한다.
         assert result.stdout.strip() == "", result.stdout
-        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: ACCOUNT_NOT_FOUND: {_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
 
 
 # ── positions 명령 exit code + 메시지 회귀 ──────────────────────────────────
@@ -353,7 +359,9 @@ class TestBrokerPositionsMissingAccount:
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
         assert result.stdout.strip() == "", result.stdout
-        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: ACCOUNT_NOT_FOUND: {_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
 
 
 # ── status / reconcile missing-account exit code 회귀 (#1556) ───────────────
@@ -431,13 +439,13 @@ class TestStatusAndReconcileFollowupScope:
         # import ipc_send`` 로 ``ipc_send`` 를 직접 호출한다. local import 는 호출
         # 시점에 ``ante.cli.commands.ipc_helpers`` 모듈 속성을 resolve 하므로, 그 모듈의
         # ``ipc_send`` 를 패치해야 reconcile 경로가 결정적으로
-        # ``except click.ClickException`` → 오프라인 폴백 → ``AccountNotFoundError``
+        # ``except IPCServerNotRunningError`` → 오프라인 폴백 → ``AccountNotFoundError``
         # → exit 1 을 탄다 (#1556).
         with (
             patch(
                 "ante.cli.commands.ipc_helpers.ipc_send",
                 AsyncMock(
-                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                    side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다.")
                 ),
             ),
             patch(
@@ -485,7 +493,9 @@ class TestStatusAndReconcileFollowupScope:
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
         assert result.stdout.strip() == "", result.stdout
-        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: ACCOUNT_NOT_FOUND: {_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
 
     def test_reconcile_missing_account_json_mode_emits_envelope_and_exits_1(
         self, runner: CliRunner
@@ -516,7 +526,9 @@ class TestStatusAndReconcileFollowupScope:
             f"stdout={result.stdout!r}\nstderr={result.stderr!r}"
         )
         assert result.stdout.strip() == "", result.stdout
-        assert f"Error: {_NOT_FOUND_MESSAGE}" in result.stderr, result.stderr
+        assert f"Error: ACCOUNT_NOT_FOUND: {_NOT_FOUND_MESSAGE}" in result.stderr, (
+            result.stderr
+        )
 
     def test_status_valid_account_disconnected_keeps_exit_0_envelope(
         self, runner: CliRunner
@@ -591,7 +603,7 @@ class TestStatusFallbackDisconnectsAdapter:
 
     설계:
         ``_get_broker`` 를 직접 patch 해 ``disconnect = AsyncMock()`` 을 가진 mock
-        adapter 를 반환하게 하고, IPC 우선 시도는 ``ClickException`` 으로 막아
+        adapter 를 반환하게 하고, IPC 우선 시도는 서버 미기동으로 막아
         폴백 분기를 강제한다(``_patch_balance_fallback_raises`` 와 동형 하네스).
         성공 경로와 ``health_check`` 예외 경로 양쪽에서 ``disconnect()`` 가 정확히
         한 번 await 됨을 단언한다 — sibling 의 검증된 미러.
@@ -609,13 +621,12 @@ class TestStatusFallbackDisconnectsAdapter:
         Returns:
             (CliRunner result, disconnect AsyncMock) — disconnect 호출 검증용.
         """
-        import click
 
         from ante.broker.base import BrokerAdapter
         from ante.cli.commands import broker as broker_cmd
 
         async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            raise click.ClickException("server unavailable")
+            raise IPCServerNotRunningError("server unavailable")
 
         mock_adapter = MagicMock(spec=BrokerAdapter)
         mock_adapter.is_connected = True
@@ -687,13 +698,12 @@ class TestStatusFallbackDisconnectsAdapter:
     ) -> None:
         """disconnect 가 raise 해도 db.close() 는 실행되고, 결과는 기존
         ``connected:False`` 변환으로 끝난다."""
-        import click
 
         from ante.broker.base import BrokerAdapter
         from ante.cli.commands import broker as broker_cmd
 
         async def _raise_click(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
-            raise click.ClickException("server unavailable")
+            raise IPCServerNotRunningError("server unavailable")
 
         mock_adapter = MagicMock(spec=BrokerAdapter)
         mock_adapter.is_connected = True
@@ -888,7 +898,7 @@ class TestBrokerValidAbsentPerCommandNarrow:
             ipc_patch = patch(
                 "ante.cli.commands.ipc_helpers.ipc_send",
                 AsyncMock(
-                    side_effect=click.ClickException("서버가 실행 중이 아닙니다.")
+                    side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다.")
                 ),
             )
         else:
@@ -979,9 +989,8 @@ class TestBrokerBalanceSubprocessNoHang:
             import sys
             from unittest.mock import AsyncMock, MagicMock, patch
 
-            import click
-
             from ante.account.errors import AccountNotFoundError
+            from ante.contracts.ipc_client_errors import IPCServerNotRunningError
             from ante.member.models import Member, MemberRole, MemberType
 
             _NOT_FOUND = "계좌 'oracle-missing-account'를 찾을 수 없습니다."
@@ -1010,9 +1019,7 @@ class TestBrokerBalanceSubprocessNoHang:
                 ctx.obj = ctx.obj or {}
                 ctx.obj["member"] = master
 
-            ipc_mock = AsyncMock(
-                side_effect=click.ClickException("서버 미실행")
-            )
+            ipc_mock = AsyncMock(side_effect=IPCServerNotRunningError("서버 미실행"))
 
             with (
                 patch(
@@ -1078,19 +1085,15 @@ class TestBrokerBalanceSubprocessNoHang:
 
 
 def _ipc_send_not_running() -> AsyncMock:
-    """``ipc_send`` mock — ``IPC_SERVER_NOT_RUNNING`` 부착 ClickException."""
-    exc = click.ClickException("서버가 실행 중이 아닙니다.")
-    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-    return AsyncMock(side_effect=exc)
+    """``ipc_send`` mock — 서버 미기동(``IPCServerNotRunningError``)."""
+    return AsyncMock(side_effect=IPCServerNotRunningError("서버가 실행 중이 아닙니다."))
 
 
 def _ipc_send_with_code(code: str, message: str) -> AsyncMock:
-    """``ipc_send`` mock — 임의 IPC 코드가 부착된 ClickException."""
-    exc = click.ClickException(f"{code}: {message}")
-    exc.ipc_error_code = code  # type: ignore[attr-defined]
-    exc.ipc_error_message = message  # type: ignore[attr-defined]
-    return AsyncMock(side_effect=exc)
+    """``ipc_send`` mock — 타임아웃 또는 임의 코드의 원격 오류."""
+    if code == "IPC_TIMEOUT":
+        return AsyncMock(side_effect=IPCClientTimeoutError(message))
+    return AsyncMock(side_effect=IPCRemoteError(code, message))
 
 
 class TestIpcBrokerCommandExtraRegressionLock:
@@ -1313,8 +1316,7 @@ class TestOrderHistoryFallbackTrigger:
     ) -> None:
         """server-error / timeout 은 직접 연결 폴백으로 은폐하지 않는다.
 
-        형제 balance/positions 의 통짜 ``except click.ClickException`` 을
-        따라하면 credentials / rate limit / circuit breaker 를 우회한다.
+        폴백하면 credentials / rate limit / circuit breaker 를 우회한다.
         """
         from ante.cli.commands import broker as broker_cmd
 
