@@ -435,15 +435,7 @@ def strategy_info(ctx: click.Context, name: str) -> CommandResult:
 
     if fmt.is_json:
         return CommandResult(data=result)
-    lines: list[str] = []
-    try:
-        for line in _info_text_lines(result):
-            lines.append(line)
-    except Exception:
-        for line in lines:
-            click.echo(line)
-        raise
-    return CommandResult(data=result, text=tuple(lines))
+    return CommandResult(data=result, text=tuple(_info_text_lines(result)))
 
 
 def _info_text_lines(result: dict[str, Any]) -> Iterator[str]:
