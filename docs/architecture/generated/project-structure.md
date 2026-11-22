@@ -366,6 +366,7 @@ scripts/
 ├── check_prose_budget.py
 ├── check_review_scope.py
 ├── check_spec_code_blocks.py
+├── check_test_shards.py
 ├── collect_autopilot_queue.py
 ├── comment_baseline.json
 ├── entry_ratchet_baseline.json
