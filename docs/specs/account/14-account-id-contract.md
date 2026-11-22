@@ -113,7 +113,7 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
 | 표면 | 목표 노출 경로 | 목표 코드 |
 |---|---|---|
 | account-scoped CLI JSON error | ``require_account_id`` → :class:`InvalidAccountIdError` → CLI JSON error payload (담당 split 이 CLI 콜백의 ``except`` / non-Click 예외 변환을 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
-| IPC broker dispatch | ``broker.status`` / ``broker.balance`` / ``broker.positions`` / ``broker.order_history`` / ``broker.reconcile`` handler 의 ``require_account_id`` → :class:`InvalidAccountIdError` → IPC server ``getattr(e, "code", "EXECUTION_ERROR")`` (담당 split 이 ``require_account_id`` 최우선화를 정렬한 뒤 도달) | ``VALIDATION_ERROR`` |
+| IPC broker dispatch | 요청 모델의 계좌 ID 필드 → ``VALIDATION_ERROR`` | ``VALIDATION_ERROR`` |
 | oracle host probe | ``ANTE_ORACLE_HOST_PROBE_MODE=cli_account_id_invalid_contract`` 가 기대하는 nonzero clean invalid account_id 응답 | ``VALIDATION_ERROR`` |
 
 근거 (목표 코드 = ``InvalidAccountIdError.code`` 재사용, 코드 상수와 정합):
@@ -140,14 +140,6 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
   함의되며, 그 표면의 정렬·확정은 담당 split 이 자기 probe 로
   수행한다. 분류 근거가 되는 **구조 사실**(코드 위치)은 다음과
   같다(구조 표기일 뿐, 런타임 산출 단정 아님):
-  - ``broker.reconcile`` — ``_handle_broker_reconcile`` 이
-    ``bot_id = args["bot_id"]`` 를 ``require_account_id`` **이전**에
-    raw 로 읽는 **구조** ( ``src/ante/ipc/registry.py:343`` )다.
-    이 ordering 구조 때문에 invalid-account-only 정렬은 담당 split
-    이 ``require_account_id`` 우선화까지 포함해 맡는다. 목표 =
-    ``VALIDATION_ERROR``, 정렬 담당 = **#1636** ( ``require_account_id``
-    우선화 포함 ). status/balance/positions 와 진입 구조가 달라
-    별도 행으로 분리한다.
   - ``rule list`` / ``rule info`` — CLI 콜백 ``except`` 가
     :class:`AccountNotFoundError` 만 잡고 :class:`InvalidAccountIdError`
     를 미포함하는 **구조** ( ``src/ante/cli/commands/rule.py`` )이며,
@@ -158,11 +150,8 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
     도달 정렬을 담당 split 이 맡는다. 목표 = ``VALIDATION_ERROR``,
     정렬 담당 = **#1635**.
 - IPC 에러코드 계약 가드 ``tests/unit/test_ipc_error_code_mapping.py``
-  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 및
-  ``require_account_id`` 경유 IPC 응답 ``error.code ==
-  "VALIDATION_ERROR"`` 를 고정한다. ``require_account_id`` 비경유
-  표면( ``treasury.allocate``/``deallocate`` 등 )은 담당 split /
-  follow-up 정렬 시 본 가드 범위에 편입된다(본 #1633 은 가드 미갱신).
+  가 ``InvalidAccountIdError.code == "VALIDATION_ERROR"`` 를 고정하고,
+  요청 모델 경유 IPC 응답의 ``error.code``를 고정한다.
 - 형식 위반 메시지 자체는 위 [`### 메시지 형식 보존`](#메시지-형식-보존)
   계약을 따른다. 본 절은 **에러코드 목표**의 SSOT이고, 메시지
   문자열은 별도 계약이다(둘은 충돌하지 않는다).
@@ -235,7 +224,7 @@ invalid ``account_id`` 에 ``VALIDATION_ERROR`` 재사용이 불가능하다는
 | **B** | treasury·rule local construction lifecycle ( ``_create_treasury`` / ``_create_rule_engine`` 경유) | #1635 |
 | **C** | broker IPC envelope ( ``broker.status/balance/positions/reconcile`` ) | #1636 |
 | **D** | account-lifecycle / cold-path / AccountService mutation — #1634/35/36 범위 아님 | follow-up |
-| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw, ``registry.py:188``/``:199`` ) , ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family follow-up )은 E 아님 — #1634/35/36 범위 아님 | follow-up |
+| **E** | non-broker mutating IPC — ``treasury.allocate`` / ``treasury.deallocate`` / ``bot.create`` **만**. read 표면( ``treasury snapshot`` 은 ``_create_treasury`` =B, ``strategy performance`` 는 read-family follow-up )은 E 아님 — #1634/35/36 범위 아님 | IPC 요청 모델의 계좌 ID 필드 (#2683) |
 
 **일반 규칙(구조적 폐쇄)**: enumerate된 **모든** Click ``account_id``
 command 표면은 본 표에 **명시 row 1개씩** 필수다(rule-only / implicit
@@ -253,7 +242,7 @@ follow-up / scope-extension / 구현대상아님 / 문서수정 결정으로 닫
 **정적 사실만** ( Click decorator 존재 vs 03-commands.md 기재 여부 —
 ``match`` / ``spec-only`` / ``code-only`` ; 런타임 산출과 무관 ).
 ``정렬 담당 split`` = 그 목표에 도달시킬 책임 ( A=#1634 / B=#1635 /
-C=#1636 / D follow-up / E follow-up / read-family follow-up /
+C=#1636 / D follow-up / E #2683 / read-family follow-up /
 문서수정 ). **그 표면이 지금 무엇을 내는지는 본
 표가 단정하지 않으며**(위 [current 단정 금지](#current-단정-금지-필수--거짓종결-방지);
 어떤 표면이 drift 인지는 ``정렬 담당 split`` 컬럼으로만 함의),
@@ -270,8 +259,8 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 | `ante broker status --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.status` 경계; 정렬·확정은 #1636 probe 책임) |
 | `ante broker balance --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (#1623 probe `broker_balance_default` 대상) |
 | `ante broker positions --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.positions` 경계) |
-| `ante broker order-history --account <account_id>` | option | `VALIDATION_ERROR` | match | **정렬 완료 (#2412 도입 시 선반영)** — 명령 신설 시점부터 CLI 콜백이 `reject_invalid_account_id` (`src/ante/cli/_validators.py`) 를 IPC/`_get_broker` 이전에 호출하고, IPC 핸들러 `_handle_broker_order_history` 가 `require_account_id` 를 날짜 파싱보다 **먼저** 호출한다 (`account_id`-first). 즉 C(#1636) 가 status/balance/positions 에 도달시킨 목표 상태를 신설 시점에 이미 만족하므로 별도 정렬 split 대상이 아니다 |
-| `ante broker reconcile --account <account_id>` | option | `VALIDATION_ERROR` | match | **C — #1636** (broker IPC `broker.reconcile`. **별도 행** — `_handle_broker_reconcile` 이 `args["bot_id"]` 를 `require_account_id` **이전**에 raw 로 읽는 ordering **구조** (`src/ante/ipc/registry.py:343`)이므로 invalid-account-only 정렬을 담당 split 이 `require_account_id` 우선화까지 포함해 맡는다. 목표=`VALIDATION_ERROR`, 정렬 담당=**#1636** (`require_account_id` 우선화 포함). status/balance/positions 와 진입 구조 다름 → 분리) |
+| `ante broker order-history --account <account_id>` | option | `VALIDATION_ERROR` | match | **IPC 요청 모델의 계좌 ID 필드** (#2683) |
+| `ante broker reconcile --account <account_id>` | option | `VALIDATION_ERROR` | match | **IPC 요청 모델의 계좌 ID 필드** (#2683) |
 | `ante account suspend <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (AccountService mutation/lifecycle; #1623 probe 집합 아님 — #1634/35/36 임의 포함 금지) |
 | `ante account activate <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation) |
 | `ante account delete <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
@@ -317,16 +306,15 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 > construction lifecycle)** 로 불변이다(등재 상태 컬럼만 정정,
 > 분류·목표 코드·row 수 무변경).
 
-> D/E/read-family = follow-up 항목은 본 이슈 #1633 의 통합 follow-up
-> 후보로 묶이며 사람이 등록한다(자동 생성 금지). 세 follow-up 계열은
-> 진입 구조가 다르므로 **섞지 않는다**:
+> D/read-family = follow-up 항목은 본 이슈 #1633 의 통합 follow-up
+> 후보로 묶이며 사람이 등록한다(자동 생성 금지). E 는 #2683 으로
+> 닫혔다. 세 계열은 진입 구조가 다르므로 **섞지 않는다**:
 >
 > - **D (account-lifecycle / cold-path)**: ``account create`` ,
 >   ``account suspend/activate/delete/set-credentials/repair-timezone`` .
 > - **E (non-broker mutating IPC)**: ``treasury allocate`` ,
->   ``treasury deallocate`` , ``bot create`` **만**
->   ( ``_handle_treasury_*`` → ``treasury_manager.get`` raw,
->   ``registry.py:188``/``:199`` ; ``bot.create`` mutating IPC handler ).
+>   ``treasury deallocate`` , ``bot create`` **만**. IPC 요청 모델의
+>   계좌 ID 필드가 검증한다(#2683).
 >   ``treasury snapshot`` ( ``_create_treasury`` =B/#1635 ) ·
 >   ``strategy performance`` ( read-family ) 는 mutating IPC 가
 >   아니므로 **E 에 포함하지 않는다**.
@@ -450,7 +438,7 @@ write/execute 경로 fallback 제거 + Event marker 패턴 (lifecycle 영향
 | `TradeService.correct_position/insert_adjustment` | `account_id: str` (kw-only) | trade 보정 |
 | `TradeRecorder.save_adjustment` | `account_id: str` (kw-only) + `require_account_id` | adjustment write |
 | `PositionHistory.force_update/_update_position/_update_cache` | `account_id: str` (kw-only) | 포지션 강제 갱신 |
-| IPC handlers (`broker.status/balance/positions/reconcile`) | `args["account_id"]` 진입 시 `require_account_id` | IPC routing (account-scoped command payload) |
+| IPC handlers (`broker.status/balance/positions/reconcile`) | 요청 모델의 계좌 ID 필드 (#2683) | IPC routing (account-scoped command payload) |
 | CLI commands (`treasury status/snapshot/allocate/deallocate`, `rule list/info`) | `--account` required | CLI UX |
 | Web routes (`treasury`, `trades`) | runtime fallback (`getattr(..., "account_id", "")`) 제거 | write 경로 검증 활용 (read endpoint 정책 미변경) |
 
@@ -467,7 +455,7 @@ Bot/Main + Approval payload validation. 본 SPLIT 에서 적용 완료
 | `cold_path_remove_bot` | `or "test"` fallback 제거 → `require_account_id` | cold-path bot delete (#1217 → #1241 SPLIT-2) |
 | `ApprovalService.create/reopen` | account-scoped type (`budget_change`, `rule_change`, `bot_create`) 시 config-first → flat `params["account_id"]` 검증 | approval payload validation (#1217 → #1241 SPLIT-2) |
 | `AutoApproveEvaluator.should_auto_approve` (`bot_create`) | mode 추출도 config-first → flat fallback | 자동 승인 (#1217 → #1241 SPLIT-2) |
-| IPC `bot.create` payload | `args["account_id"]` 진입 시 `require_account_id` | IPC bot routing (#1217 → #1241 SPLIT-2) |
+| IPC `bot.create` payload | 요청 모델의 계좌 ID 필드 (#2683) | IPC bot routing (#1217 → #1241 SPLIT-2) |
 | `approval/handlers.py` `_exec_rule_change` / `_exec_budget_change` / `_validate_budget_change` | `params.get("account_id", "test")` 제거 → `require_account_id` (validator 는 fail 반환) | approval executor/validator (#1217 → #1241 SPLIT-2) |
 | CLI `bot create/remove/...`, `approval` 호출부 | `--account` required | CLI UX (#1218 영역, 본 SPLIT 미포함) |
 
