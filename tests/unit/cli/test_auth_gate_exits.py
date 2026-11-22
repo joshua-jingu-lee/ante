@@ -6,7 +6,8 @@ callback 단계 관문)의 종료 코드·stdout·stderr를 바이트로 잠근�
 ``--format``의 자리(루트·하위 명령·``=`` 형식·잘못된 값·``--`` 뒤)를 덮는다.
 
 가장 중요한 불변식: 관문이 막는 모든 경우에 명령 본문이 실행되지 않는다.
-실제 ``cli``의 셀은 본문의 첫 호출(``get_formatter``)을 감시하고, 하네스의
+실제 ``cli``의 셀은 본문의 첫 호출(``get_formatter``, data는
+``resolve_data_path``)을 감시하고, 하네스의
 셀은 관문 하나만 남긴 leaf로 본문 호출 기록이 비었음을 단언한다.
 """
 
@@ -154,6 +155,7 @@ class Cell:
 _ACCOUNT = "ante.cli.commands.account"
 _MEMBER = "ante.cli.commands.member"
 _DATA = "ante.cli.commands.data"
+_BODY_FIRST_CALL = {_DATA: "resolve_data_path"}
 
 _CELLS: tuple[Cell, ...] = (
     Cell(
@@ -424,8 +426,9 @@ def test_real_cli_gate_exit(
 
     _apply(monkeypatch, cell.setup)
     module = importlib.import_module(cell.module)
-    original = module.get_formatter
-    with patch.object(module, "get_formatter", wraps=original) as body:
+    first_call = _BODY_FIRST_CALL.get(cell.module, "get_formatter")
+    original = getattr(module, first_call)
+    with patch.object(module, first_call, wraps=original) as body:
         result = _invoke(cli, list(cell.args))
     assert body.call_count == 0
     assert (result.exit_code, result.stdout, result.stderr) == _expected(

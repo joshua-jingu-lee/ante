@@ -80,9 +80,6 @@
       "BLE001": 1,
       "C901": 1
     },
-    "src/ante/cli/commands/data.py": {
-      "C901": 1
-    },
     "src/ante/cli/commands/init.py": {
       "BLE001": 4,
       "C901": 1

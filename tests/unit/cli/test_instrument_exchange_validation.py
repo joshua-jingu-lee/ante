@@ -280,7 +280,7 @@ class TestSyncKrxSourcePasses:
 
         assert result.exit_code == 0, result.stdout
         fake_adapter.get_instruments.assert_awaited_once()
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["sync_result"]["total"] == 1
 
 
@@ -516,7 +516,7 @@ class TestValidImportDryRunRegression:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["dry_run"] is True
         assert payload["total"] == 1
 
@@ -548,5 +548,5 @@ class TestValidImportDryRunRegression:
         )
 
         assert result.exit_code == 0, result.stdout
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["total"] == 2

@@ -120,7 +120,7 @@ class TestBacktestHistoryReadOnly:
 
         # (a) 종료코드 0 + 빈 이력 success envelope.
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["runs"] == []
         # (c) JSON envelope shape 가 기존 빈 이력 응답과 동일
         #     (backtest.py history empty 분기: {"message": ..., "runs": []}).

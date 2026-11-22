@@ -11,6 +11,7 @@ import click
 from ante.cli._data_path import resolve_data_path
 from ante.cli._validators import validate_positive_finite_amount
 from ante.cli.db_context import open_cli_db
+from ante.cli.formatter import CommandResult, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -71,7 +72,7 @@ def run(
     exchange: str,
     data_path: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """백테스트 실행."""
     import datetime
 
@@ -162,19 +163,19 @@ def run(
         )
         result_dict["run_id"] = run_id
 
-        fmt.output(
-            result_dict,
+        if fmt.is_json:
+            return CommandResult(data=result_dict)
+        lines = [
             "Run ID: {run_id}\n"
             "Strategy: {strategy}\n"
             "Period: {period}\n"
             "Return: {total_return_pct}%\n"
             "Trades: {total_trades}\n"
-            "Final Balance: {final_balance:,.0f}",
-        )
-
-        if metrics and not fmt.is_json:
-            metric_rows = _format_metrics(metrics)
-            fmt.table(metric_rows, ["지표", "값"])
+            "Final Balance: {final_balance:,.0f}".format(**result_dict)
+        ]
+        if metrics:
+            lines += table_lines(_format_metrics(metrics), ["지표", "값"])
+        return CommandResult(data=result_dict, text=tuple(lines))
 
     except CLI_ERRORS:
         raise
@@ -224,7 +225,7 @@ def history(
     strategy_name: str,
     limit: int,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """전략별 백테스트 실행 이력 조회."""
     fmt = get_formatter(ctx)
 
@@ -244,27 +245,25 @@ def history(
     try:
         rows = asyncio.run(_list())
         if not rows:
-            fmt.output(
-                {"message": f"'{strategy_name}' 백테스트 이력이 없습니다.", "runs": []},
-                f"'{strategy_name}' 백테스트 이력이 없습니다.",
-            )
-            return
+            message = f"'{strategy_name}' 백테스트 이력이 없습니다."
+            empty: dict[str, Any] = {"message": message, "runs": []}
+            if fmt.is_json:
+                return CommandResult(data=empty)
+            return CommandResult(data=empty, text=(message.format(**empty),))
 
-        if fmt.is_json:
-            fmt.output({"strategy_name": strategy_name, "runs": rows})
-        else:
-            fmt.table(
-                rows,
-                [
-                    "run_id",
-                    "strategy_version",
-                    "total_return_pct",
-                    "sharpe_ratio",
-                    "total_trades",
-                    "win_rate",
-                    "created_at",
-                ],
-            )
+        columns = [
+            "run_id",
+            "strategy_version",
+            "total_return_pct",
+            "sharpe_ratio",
+            "total_trades",
+            "win_rate",
+            "created_at",
+        ]
+        return CommandResult(
+            data={"strategy_name": strategy_name, "runs": rows},
+            text=tuple(table_lines(rows, columns)),
+        )
     except Exception as e:
         raise BacktestError(str(e)) from e
 
