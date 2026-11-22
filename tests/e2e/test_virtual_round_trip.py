@@ -36,7 +36,7 @@ def test_boot_and_stop(daemon: DaemonHarness) -> None:
     daemon.start()
     assert daemon.daemon_pid in daemon.guarded_pids()
     accounts = daemon.cli("account", "list")
-    assert "test" in {a["account_id"] for a in accounts["accounts"]}
+    assert "test" in {a["account_id"] for a in accounts["data"]["accounts"]}
 
     marker = "MARKE2E001SECRET"
     client = IPCClient(socket_path=str(daemon.socket_path))

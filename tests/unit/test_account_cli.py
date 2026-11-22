@@ -159,7 +159,7 @@ class TestAccountList:
         ]
         result = _invoke(["--format", "json", "account", "list"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "accounts" in data
         assert len(data["accounts"]) == 1
         assert data["accounts"][0]["account_id"] == "test"
@@ -245,7 +245,7 @@ class TestAccountInfo:
         )
         result = _invoke(["--format", "json", "account", "info", "domestic"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["account_id"] == "domestic"
         assert data["exchange"] == "KRX"
 
@@ -288,7 +288,7 @@ class TestAccountCredentials:
         )
         result = _invoke(["--format", "json", "account", "credentials", "domestic"])
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["credentials"]["app_key"] == "PSxx****xx"
 
     def test_credentials_empty(self, mock_account_service: AsyncMock) -> None:
@@ -1622,7 +1622,14 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "{'message': '등록된 계좌가 없습니다.', 'accounts': []}\n"
     ),
     ("list_empty", "json"): (
-        '{\n  "message": "등록된 계좌가 없습니다.",\n  "accounts": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 계좌가 없습니다.",\n'
+        '    "accounts": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows", "text"): (
         "  account_id |         name |     exchange | "
@@ -1636,24 +1643,28 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "accounts": [\n'
-        "    {\n"
-        '      "account_id": "test",\n'
-        '      "name": "테스트",\n'
-        '      "exchange": "TEST",\n'
-        '      "currency": "KRW",\n'
-        '      "broker_type": "test",\n'
-        '      "status": "active"\n'
-        "    },\n"
-        "    {\n"
-        '      "account_id": "domestic",\n'
-        '      "name": "국내 주식",\n'
-        '      "exchange": "KRX",\n'
-        '      "currency": "KRW",\n'
-        '      "broker_type": "kis-domestic",\n'
-        '      "status": "suspended"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "accounts": [\n'
+        "      {\n"
+        '        "account_id": "test",\n'
+        '        "name": "테스트",\n'
+        '        "exchange": "TEST",\n'
+        '        "currency": "KRW",\n'
+        '        "broker_type": "test",\n'
+        '        "status": "active"\n'
+        "      },\n"
+        "      {\n"
+        '        "account_id": "domestic",\n'
+        '        "name": "국내 주식",\n'
+        '        "exchange": "KRX",\n'
+        '        "currency": "KRW",\n'
+        '        "broker_type": "kis-domestic",\n'
+        '        "status": "suspended"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info", "text"): (
@@ -1676,26 +1687,37 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info", "json"): (
         "{\n"
-        '  "account_id": "domestic",\n'
-        '  "name": "국내 주식",\n'
-        '  "exchange": "KRX",\n'
-        '  "currency": "KRW",\n'
-        '  "broker_type": "kis-domestic",\n'
-        '  "trading_mode": "virtual",\n'
-        '  "buy_commission_rate": "0.00015",\n'
-        '  "sell_commission_rate": "0.00195",\n'
-        '  "market_order_reserve_buffer_rate": "0",\n'
-        '  "status": "active",\n'
-        '  "timezone": "Asia/Seoul",\n'
-        '  "trading_hours": "09:00-15:30",\n'
-        '  "created_at": ""\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "domestic",\n'
+        '    "name": "국내 주식",\n'
+        '    "exchange": "KRX",\n'
+        '    "currency": "KRW",\n'
+        '    "broker_type": "kis-domestic",\n'
+        '    "trading_mode": "virtual",\n'
+        '    "buy_commission_rate": "0.00015",\n'
+        '    "sell_commission_rate": "0.00195",\n'
+        '    "market_order_reserve_buffer_rate": "0",\n'
+        '    "status": "active",\n'
+        '    "timezone": "Asia/Seoul",\n'
+        '    "trading_hours": "09:00-15:30",\n'
+        '    "created_at": ""\n'
+        "  }\n"
         "}\n"
     ),
     ("credentials_empty", "text"): (
         "{'message': '등록된 인증 정보가 없습니다.', 'credentials': {}}\n"
     ),
     ("credentials_empty", "json"): (
-        '{\n  "message": "등록된 인증 정보가 없습니다.",\n  "credentials": {}\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 인증 정보가 없습니다.",\n'
+        '    "credentials": {}\n'
+        "  }\n"
+        "}\n"
     ),
     ("credentials_rows", "text"): (
         "\n"
@@ -1706,10 +1728,14 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("credentials_rows", "json"): (
         "{\n"
-        '  "account_id": "domestic",\n'
-        '  "credentials": {\n'
-        '    "app_key": "PSxx****xx",\n'
-        '    "app_secret": "****"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "domestic",\n'
+        '    "credentials": {\n'
+        '      "app_key": "PSxx****xx",\n'
+        '      "app_secret": "****"\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -1719,8 +1745,12 @@ _ACCOUNT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("set_credentials_not_required", "json"): (
         "{\n"
-        '  "message": "브로커 \'some-future-broker\'에는 인증 정'
-        '보가 필요하지 않습니다."\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "브로커 \'some-future-broker\'에는 인증 '
+        '정보가 필요하지 않습니다."\n'
+        "  }\n"
         "}\n"
     ),
     ("set_credentials_ok", "text"): ('계좌 "test" 인증 정보 재설정 완료\n'),
