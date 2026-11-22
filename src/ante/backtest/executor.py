@@ -65,7 +65,7 @@ class BacktestExecutor:
         self._balance = initial_balance
         self._positions: dict[str, dict[str, float]] = {}
         self._trades: list[BacktestTrade] = []
-        self._equity_curve: list[dict] = []
+        self._equity_curve: list[dict[str, Any]] = []
         self._current_prices: dict[str, float] = {}
         self._order_seq = 0
 
@@ -173,7 +173,9 @@ class BacktestExecutor:
             metrics=self._calculate_metrics(final_equity),
         )
 
-    async def _execute_signal(self, signal: Signal, timestamp: Any) -> dict | None:
+    async def _execute_signal(
+        self, signal: Signal, timestamp: Any
+    ) -> dict[str, Any] | None:
         """Signal을 가상 체결."""
         if signal.side not in _ALLOWED_SIDES:
             if signal.side == "hold":
@@ -415,7 +417,7 @@ class BacktestExecutor:
             equity += pos["quantity"] * mark_price
         return equity
 
-    def _calculate_metrics(self, final_equity: float) -> dict:
+    def _calculate_metrics(self, final_equity: float) -> dict[str, Any]:
         """성과 지표 계산."""
         from ante.backtest.metrics import calculate_metrics
 

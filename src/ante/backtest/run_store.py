@@ -145,7 +145,7 @@ class BacktestRunStore:
         return [self._row_to_run(row) for row in rows]
 
     @staticmethod
-    def _row_to_run(row: dict) -> BacktestRun:
+    def _row_to_run(row: dict[str, Any]) -> BacktestRun:
         """DB row → BacktestRun."""
         return BacktestRun(
             run_id=row["run_id"],

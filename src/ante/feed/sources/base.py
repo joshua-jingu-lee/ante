@@ -25,7 +25,7 @@ class DataSource(Protocol):
     orchestrator는 이 프로토콜을 통해 소스를 다룬다.
     """
 
-    async def fetch(self, date: str, **kwargs: Any) -> list[dict]:
+    async def fetch(self, date: str, **kwargs: Any) -> list[dict[str, Any]]:
         """지정된 날짜의 데이터를 수집한다.
 
         Args:
