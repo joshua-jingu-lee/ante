@@ -117,6 +117,15 @@ _LOG_ROWS: list[dict[str, Any]] = [
 _NOT_RUNNING = IPCServerNotRunningError("not running")
 _NO_IPC = frozenset({"remove_cold_path", "logs_empty", "logs_rows"})
 
+_SECRETS: dict[tuple[str, str], tuple[str, int]] = {
+    ("signal_key_ipc", "text"): ("sk-ipc-abc", 1),
+    ("signal_key_ipc", "json"): ("sk-ipc-abc", 1),
+    ("signal_key_direct", "text"): ("sk-direct-def", 1),
+    ("signal_key_direct", "json"): ("sk-direct-def", 1),
+    ("signal_key_rotate", "text"): ("sk-new-xyz", 0),
+    ("signal_key_rotate", "json"): ("sk-new-xyz", 1),
+}
+
 
 def _pair(name: str, args: list[str]) -> dict[str, list[str]]:
     return {f"{name}_ipc": args, f"{name}_direct": args}
@@ -229,7 +238,9 @@ def _bypass_auth() -> Iterator[None]:
         yield
 
 
-def _invoke_case(branch: str, mode: str) -> tuple[Result, AsyncMock]:
+def _invoke_case(
+    branch: str, mode: str, *, mix_stderr: bool = True
+) -> tuple[Result, AsyncMock]:
     from ante.cli.main import cli
 
     db = _db_for(branch)
@@ -288,7 +299,7 @@ def _invoke_case(branch: str, mode: str) -> tuple[Result, AsyncMock]:
             ("ante.eventbus.history.EventHistoryStore", MagicMock(return_value=store)),
         ):
             stack.enter_context(patch(target, new=value))
-        result = CliRunner().invoke(
+        result = CliRunner(mix_stderr=mix_stderr).invoke(
             cli,
             full_args if full_args is not None else list(_CASES[branch]),
             env={"ANTE_MEMBER_TOKEN": ""},
@@ -860,3 +871,11 @@ class TestBotOutputBytes:
         assert result.exit_code == 0, result.output
         assert result.output == _BOT_OUTPUT_BYTES[(branch, mode)]
         assert ipc_send.await_count == (0 if branch in _NO_IPC else 1)
+
+    @pytest.mark.parametrize(("branch", "mode"), list(_SECRETS))
+    def test_signal_key_appears_expected_times(self, branch: str, mode: str) -> None:
+        key, count = _SECRETS[(branch, mode)]
+        result, _ = _invoke_case(branch, mode, mix_stderr=False)
+        assert result.exit_code == 0, result.output
+        assert result.stdout.count(key) == count
+        assert key not in result.stderr
