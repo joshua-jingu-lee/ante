@@ -13,16 +13,15 @@ from typing import TYPE_CHECKING, Any
 
 import click
 
+from ante.account.errors import AccountStructuralChangeRequiresStoppedServerError
 from ante.account.models import AccountStatus
+from ante.cli import cold_path
 from ante.cli._validators import (
     reject_invalid_account_id,
     reject_invalid_new_account_id,
     validate_nonnegative_finite_amount,
 )
-from ante.cli.cold_path import (
-    ACCOUNT_COLD_PATH_BLOCKED_CODE,
-    assert_no_active_runtime,
-)
+from ante.cli.cold_path import ACCOUNT_COLD_PATH_BLOCKED_CODE
 from ante.cli.db_context import open_cli_db
 from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
@@ -62,15 +61,11 @@ _COLD_PATH_BLOCKED_CODE = ACCOUNT_COLD_PATH_BLOCKED_CODE
 
 def _assert_no_active_runtime(fmt: OutputFormatter) -> None:
     """active Ante runtime이 있으면 cold-path 명령을 차단한다."""
-    assert_no_active_runtime(
-        fmt,
-        code=_COLD_PATH_BLOCKED_CODE,
-        message=(
-            "서버가 실행 중입니다. "
+    if cold_path.is_active_runtime(kill=os.kill):
+        raise AccountStructuralChangeRequiresStoppedServerError(
+            f"{_COLD_PATH_BLOCKED_CODE}: 서버가 실행 중입니다. "
             "cold-path 명령은 서버 정지 상태에서만 실행할 수 있습니다."
-        ),
-        kill=os.kill,
-    )
+        )
 
 
 @asynccontextmanager

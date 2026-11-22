@@ -144,7 +144,7 @@ def test_create_invalid_new_account_id_json(account_id: str, message: str) -> No
 @pytest.mark.parametrize(("account_id", "message"), _NEW_IDS)
 def test_create_invalid_new_account_id_text(account_id: str, message: str) -> None:
     result = _invoke("text", [*_CREATE, "--account-id", account_id], active=False)
-    _assert_text(result, f"Error: {message}\n")
+    _assert_text(result, f"Error: VALIDATION_ERROR: {message}\n")
 
 
 def test_secret_values_stay_out_of_the_guard_and_validator_exits() -> None:
