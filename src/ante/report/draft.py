@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC
 from typing import TYPE_CHECKING, Any, cast
 
+from ante.core import clock
 from ante.report.models import ReportStatus, StrategyReport
 
 if TYPE_CHECKING:
@@ -126,7 +127,7 @@ class ReportDraftGenerator:
             strategy_version=version,
             strategy_path="",
             status=ReportStatus.DRAFT,
-            submitted_at=datetime.now(tz=UTC),
+            submitted_at=clock.now(UTC),
             submitted_by="system",
             backtest_period=period,
             total_return_pct=total_return,
