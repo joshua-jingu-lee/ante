@@ -180,7 +180,7 @@ class TestMemberRegisterFormatOption:
                 ],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["member_id"] == "new-agent"
             assert data["token"] == "token-123"
 
@@ -722,7 +722,7 @@ class TestMemberInfoFormatOption1701:
             )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["member_id"] == "m-1701"
 
 

@@ -433,7 +433,7 @@ class TestMemberRegenerateRecoveryKeyEnvFile:
         call = service.regenerate_recovery_key.await_args
         assert call.args[0] == "master"
         assert call.args[1] == "current-password-22"
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["recovery_key"] == "ANTE-RK-NEW-1111"
 
     def test_regenerate_via_file_succeeds(self, tmp_path) -> None:  # noqa: ANN001
@@ -834,7 +834,7 @@ class TestMemberListInvalidRolesNoRows:
 
         assert result.exit_code == 0, result.output
         service.find_invalid_role_members.assert_awaited_once()
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["actionable_count"] == 0
         assert data["legacy_revoked_count"] == 0
         assert data["actionable"] == []
@@ -882,7 +882,7 @@ class TestMemberListInvalidRolesJsonSchema:
         assert result.exit_code == 0, result.output
         service.find_invalid_role_members.assert_awaited_once()
 
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
 
         # top-level summary
         assert data["recommended_action"] == "review_then_revoke"
@@ -958,7 +958,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         # actionable 카테고리만 ``revoke_command`` 를 갖고, 형식은
         # ``ante member revoke --yes -- <quoted member_id>`` 다.
         for row in data["actionable"]:
@@ -1001,7 +1001,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         cmd = data["actionable"][0]["revoke_command"]
         quoted = _shlex.quote(unsafe_id)
         # quote 결과는 단순 토큰이 아니라 따옴표로 감싼 형태여야 한다.
@@ -1048,7 +1048,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         cmd = data["actionable"][0]["revoke_command"]
         # attempt 4 P2: payload 는 ``expanduser().resolve()`` 로 정규화된
         # 절대 경로를 싣는다. tmp_path 는 이미 절대 경로지만 macOS 등에서는
@@ -1098,7 +1098,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         cmd = data["actionable"][0]["revoke_command"]
         # attempt 4 P2: ``resolve()`` 후 절대 경로 기준으로 quote 비교한다.
         resolved_spaced = spaced_dir.resolve()
@@ -1131,7 +1131,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         cmd = data["actionable"][0]["revoke_command"]
         # default 일 때는 ``--config-dir`` 인자가 아예 없는 표준 형태.
         assert cmd == "ante member revoke --yes -- agent-default-instance"
@@ -1195,7 +1195,7 @@ class TestMemberListInvalidRolesJsonSchema:
                 )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         cmd = data["actionable"][0]["revoke_command"]
         # 핵심 회귀: payload 의 ``--config-dir`` 값은 **절대 경로** 다.
         # raw ``custom`` 이 그대로 들어가면 다른 CWD 실행 시 인스턴스가 바뀐다.
@@ -1243,7 +1243,7 @@ class TestMemberListInvalidRolesJsonSchema:
             )
 
         assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["legacy_revoked_count"] == 1
         legacy_row = data["legacy_revoked"][0]
         assert legacy_row["member_id"] == "legacy-revoked-1"
@@ -1312,7 +1312,7 @@ class TestMemberListInvalidRolesTokenHashRegression:
             )
         assert result_json.exit_code == 0, result_json.output
         assert sensitive_hash not in result_json.output
-        data = json.loads(result_json.output)
+        data = json.loads(result_json.output)["data"]
         for row in data["actionable"] + data["legacy_revoked"]:
             assert "token_hash" not in row
 

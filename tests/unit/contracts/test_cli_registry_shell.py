@@ -207,7 +207,7 @@ def test_account_entries_registered_after_1846() -> None:
     본 단언은 #1846 가 account migration 을 완료한 시점부터 lock 된다.
     9 entry 의 정확한 ``OutputContract`` / ``AuthContract`` 정합 검증은
     :mod:`tests.unit.contracts.test_cli_registry_auth_drift` (Family B) 와
-    :mod:`tests.unit.test_account_success_output_drift` 가 책임진다.
+    :mod:`tests.unit.test_account_cli` 의 ``TestAccountOutputBytes`` 가 책임진다.
     """
     expected_account_paths = {
         ("account", "list"),
@@ -233,7 +233,7 @@ def test_member_entries_registered_after_1847_sub_pr_1() -> None:
     본 단언은 #1847 sub-PR 1 가 member migration 을 완료한 시점부터
     lock 된다. 12 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family A/B/C) 와 :mod:`tests.unit.test_member_success_output_drift`
+    (Family A/B/C) 와 :mod:`tests.unit.test_member_cli_output_bytes`
     가 책임진다.
     """
     expected_member_paths = {
@@ -292,7 +292,7 @@ def test_approval_entries_registered_after_1847_sub_pr_3() -> None:
     본 단언은 #1847 sub-PR 3 가 approval migration 을 완료한 시점부터
     lock 된다. 10 entry 의 정확한 ``OutputContract`` / ``AuthContract``
     정합 검증은 :mod:`tests.unit.contracts.test_cli_registry_auth_drift`
-    (Family B) 와 :mod:`tests.unit.test_approval_success_output_drift` 가
+    (Family B) 와 :mod:`tests.unit.test_approval_cli_output_bytes` 가
     책임진다.
     """
     expected_approval_paths = {

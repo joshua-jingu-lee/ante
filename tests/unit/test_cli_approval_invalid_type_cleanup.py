@@ -3,7 +3,7 @@
 검증 대상:
 - ``audit-types``:
   - invalid 만 노출 / 정상 type row 제외 (서비스 mock 결과를 그대로 렌더링)
-  - ``--format json`` 형태가 list[dict] 로 직렬화된다.
+  - ``--format json`` 의 ``data.approvals`` 가 list[dict] 로 직렬화된다.
   - ``--status`` 가 service 호출에 전달된다.
   - 데코레이터: ``require_auth`` + ``require_scope("approval:read")``.
 - ``cancel-invalid``:
@@ -175,7 +175,7 @@ class TestAuditTypesOutput:
             )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]["approvals"]
         assert isinstance(payload, list)
         assert len(payload) == 1
         row = payload[0]

@@ -28,7 +28,7 @@ class Member:
 
 ### 공개 응답 노출 계약
 
-CLI/IPC member 응답은 Member 필드 중 `member_id, type, role, org, name, emoji, status, scopes, created_at, created_by, last_active_at, suspended_at, revoked_at, token_expires_at`만 노출한다. `token_hash`, `password_hash`, `recovery_key_hash`는 credential verifier material이므로 응답 body에서 **항상 제외**한다. raw token은 create/rotate-token 응답에서 member 객체 밖 top-level로 1회만 반환한다.
+CLI/IPC member 응답은 Member 필드 중 `member_id, type, role, org, name, emoji, status, scopes, created_at, created_by, last_active_at, suspended_at, revoked_at, token_expires_at`만 노출한다. `token_hash`, `password_hash`, `recovery_key_hash`는 credential verifier material이므로 응답 body에서 **항상 제외**한다. raw token은 create/rotate-token 응답에서 member 필드와 같은 층의 `token` 키로 1회만 반환한다(IPC `result`에서는 최상위, CLI `--format json`에서는 `data.token`).
 
 ### 토큰 만료 관리
 
