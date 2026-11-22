@@ -1068,7 +1068,6 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     RateLimitError: _BROKER_RATE_LIMITED_SPEC,
     CircuitOpenError: _BROKER_CIRCUIT_OPEN_SPEC,
     BrokerRegistryInvalidBrokerTypeError: _BROKER_INVALID_TYPE_SPEC,
-    ModifyOrgnoUnavailableError: _BROKER_MODIFY_ORGNO_UNAVAILABLE_SPEC,
     StrategyNotFoundError: _STRATEGY_NOT_FOUND_SPEC,
     StrategyLoadError: _STRATEGY_LOAD_ERROR_SPEC,
     StrategyValidationError: _STRATEGY_VALIDATION_ERROR_SPEC,
@@ -1173,6 +1172,7 @@ EXCEPTION_TO_SPEC: Final[dict[type[BaseException], ErrorSpec]] = {
     FeedInjectValidationError: _FEED_INJECT_VALIDATION_ERROR_SPEC,
     FeedNotInitializedError: _NOT_INITIALIZED_SPEC,
     GuardPermanentlyBlockedError: _GUARD_PERMANENTLY_BLOCKED_SPEC,
+    ModifyOrgnoUnavailableError: _BROKER_MODIFY_ORGNO_UNAVAILABLE_SPEC,
 }
 """대표 fault lock registry (normative 4건).
 
