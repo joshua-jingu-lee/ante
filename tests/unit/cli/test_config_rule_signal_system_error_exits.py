@@ -25,6 +25,7 @@ from ante.contracts.ipc_client_errors import (
     IPCRemoteError,
     IPCServerNotRunningError,
 )
+from ante.core.database import ReadOnlyDatabaseError
 from ante.member.models import Member, MemberRole, MemberType
 from ante.rule.exceptions import RuleConfigError
 
@@ -404,6 +405,60 @@ def test_rule_update_cold_path_errors(
             _assert_json(result, _envelope(code, message))
         else:
             _assert_text(result, [f"Error: {code}: {message}"])
+
+
+class _UnregisteredCodedError(Exception):
+    code = "RULE_CUSTOM_CODE"
+
+
+@pytest.mark.parametrize(
+    ("error", "code", "text_line"),
+    [
+        pytest.param(
+            ValueError("알 수 없는 룰"),
+            "RULE_UPDATE_ERROR",
+            "Error: RULE_UPDATE_ERROR: 알 수 없는 룰",
+            id="unregistered-without-code",
+        ),
+        pytest.param(
+            AccountNotFoundError(_ACCOUNT_MISSING),
+            "ACCOUNT_NOT_FOUND",
+            f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
+            id="registered",
+        ),
+        pytest.param(
+            ReadOnlyDatabaseError("읽기 전용"),
+            "RULE_UPDATE_ERROR",
+            "Error: RULE_UPDATE_ERROR: 읽기 전용",
+            id="registered-as-execution-error",
+        ),
+        pytest.param(
+            _UnregisteredCodedError("코드만 있음"),
+            "RULE_CUSTOM_CODE",
+            "Error: RULE_CUSTOM_CODE: 코드만 있음",
+            id="unregistered-with-code",
+        ),
+        pytest.param(
+            click.ClickException("click 실패"),
+            "IPC_ERROR",
+            "Error: click 실패",
+            id="click-exception",
+        ),
+    ],
+)
+def test_rule_update_catch_all_keeps_codes_the_registry_knows(
+    error: BaseException, code: str, text_line: str
+) -> None:
+    for mode in ("json", "text"):
+        result = _invoke(
+            _rule_update_args(mode),
+            _active_runtime(False),
+            patch("ante.cli.commands.rule.open_cli_db", new=_failing_cm(error)),
+        )
+        if mode == "json":
+            _assert_json(result, _envelope(code, str(error)))
+        else:
+            _assert_text(result, [text_line])
 
 
 # ---------------------------------------------------------------- signal

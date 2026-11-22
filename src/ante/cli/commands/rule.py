@@ -18,6 +18,8 @@ from ante.cli.formatter import format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import RuleNotFoundError, RuleUpdateError
+from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
+from ante.contracts.helpers import error_spec_for_exception
 from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import OperationalError
 
@@ -320,7 +322,7 @@ def rule_update(
     except click.ClickException:
         raise
     except Exception as e:
-        if isinstance(getattr(e, "code", None), str):
+        if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:
             raise
         raise RuleUpdateError(str(e)) from e
 
