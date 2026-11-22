@@ -148,18 +148,6 @@ invalid ``account_id``는 다음 세 표면 모두에서 목표상 (target)
     ``VALIDATION_ERROR``, 정렬 담당 = **#1636** ( ``require_account_id``
     우선화 포함 ). status/balance/positions 와 진입 구조가 달라
     별도 행으로 분리한다.
-  - ``treasury.allocate`` / ``treasury.deallocate`` —
-    ``_handle_treasury_allocate`` / ``_handle_treasury_deallocate``
-    ( ``src/ante/ipc/registry.py:188``/``:199`` )가
-    ``account_id = args["account_id"]`` 를 raw 로 읽어 그대로
-    ``svc.treasury_manager.get(account_id)`` 에 전달하는 **구조**로,
-    ``require_account_id`` 를 경유하지 않는다. 이 구조상 목표
-    ``VALIDATION_ERROR`` 도달은 **``require_account_id`` 경유 표면
-    한정**이 아니므로 자동 매핑되지 않으며, bucket **E** 의
-    non-broker mutating IPC follow-up 이 해당 handler 를
-    ``require_account_id`` 경유로 정렬할 때 비로소 닫힌다(완료/자동
-    매핑으로 오인 금지). 결정표 ``ante treasury allocate`` /
-    ``deallocate`` 행( **E — follow-up 후보** )과 정합한다.
   - ``rule list`` / ``rule info`` — CLI 콜백 ``except`` 가
     :class:`AccountNotFoundError` 만 잡고 :class:`InvalidAccountIdError`
     를 미포함하는 **구조** ( ``src/ante/cli/commands/rule.py`` )이며,
@@ -290,8 +278,8 @@ C=#1636 / D follow-up / E follow-up / read-family follow-up /
 | `ante account set-credentials <account_id>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
 | `ante account repair-timezone <account_id> <new_timezone>` | positional arg | `VALIDATION_ERROR` | match | **D — follow-up 후보** (동 lifecycle/mutation, cold-path) |
 | `ante account create --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **D — follow-up 후보** (account-lifecycle / cold-path; `account_create` 콜백이 `svc.create` 를 generic `except Exception` → `fmt.error(str(e))` ( `code=` 인자 없음 )로 감싸는 **구조** ( `src/ante/cli/commands/account.py` ). `validate_new_account_id` 검증 자체와 무관하게 그 CLI 래핑 구조상 목표 `VALIDATION_ERROR` 도달은 D 통합 follow-up 의 cold-path drift 점검 대상; #1634/35/36 probe 집합 아님) |
-| `ante treasury allocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (non-broker mutating IPC `treasury.allocate`→`_handle_treasury_allocate`→`treasury_manager.get` **raw**, `require_account_id` 미경유 (`registry.py:188`). #1635 construction-lifecycle 범위 아님; #1623 probe 집합 아님. 목표=`VALIDATION_ERROR`, follow-up 이 `require_account_id` 경유로 정렬 시 도달) |
-| `ante treasury deallocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **E — follow-up 후보** (동 mutating IPC `treasury.deallocate`→`_handle_treasury_deallocate`→`treasury_manager.get` **raw** (`registry.py:199`)) |
+| `ante treasury allocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **IPC 요청 모델의 계좌 ID 필드** (#2683) |
+| `ante treasury deallocate <bot_id> <amount> --account <account_id>` | option | `VALIDATION_ERROR` | match | **IPC 요청 모델의 계좌 ID 필드** (#2683) |
 | `ante bot create --account <account_id>` | option | `VALIDATION_ERROR` | match | **IPC 요청 모델의 계좌 ID 필드** (#2683) |
 | `ante treasury snapshot --account <account_id>` | option | `VALIDATION_ERROR` | match | **B — #1635** (`treasury status` (`src/ante/cli/commands/treasury.py:64`) 와 **동일** `_create_treasury(account_id)` construction-lifecycle 경로 — snapshot 콜백 `src/ante/cli/commands/treasury.py:229` 가 `t, db = await _create_treasury(account_id)` 로, status 콜백 `:69` 와 동일 `_create_treasury`→`require_account_id` (`:37`) 경계를 공유하는 **구조**. ∴ B(#1635) construction-lifecycle 범위 (mutating IPC E 아님). 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 #1635 probe 책임) |
 | `ante strategy performance <name> --account-id <account_id>` | option | `VALIDATION_ERROR` | match | **follow-up (read-family, 비-#1623-probe)** (읽기 표면 — `strategy_performance` CLI 콜백 (`src/ante/cli/commands/strategy.py:432`) 자체가 `account_id` 를 처리 (`account_id is None` → `STRATEGY_MISSING_REQUIRED_ACCOUNT`, `:450`) 하고 `PerformanceTracker` + 자체 `SELECT 1 FROM accounts` 단건 read 를 수행하는 **구조**. `_create_treasury`/`_create_rule_engine` construction(B) 도, broker/non-broker mutating IPC dispatch(C/E) 도 아니며, #1623-probe(`account info`/`bot list`) 비동형 → mutating IPC E 와 구분되는 **read-family follow-up**. 목표=`VALIDATION_ERROR`, 정렬·산출 확정은 read-family follow-up 책임) |
