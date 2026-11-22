@@ -8,7 +8,7 @@ import re
 import secrets
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.member.auth import (
     generate_recovery_key,
@@ -157,7 +157,7 @@ def _is_single_emoji(value: str) -> bool:
     return bool(_EMOJI_RE.match(value))
 
 
-def _row_to_member(row: dict) -> Member:
+def _row_to_member(row: dict[str, Any]) -> Member:
     """DB 행을 Member 객체로 변환."""
     return Member(
         member_id=row["member_id"],

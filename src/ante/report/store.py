@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.core.database import OperationalError
 from ante.report.models import (
@@ -146,7 +146,7 @@ class ReportStore:
         )
 
         if existing:
-            old_id = existing["report_id"]
+            old_id: str = existing["report_id"]
             await self._db.execute(
                 """UPDATE reports
                    SET strategy_version = ?, strategy_path = ?,
@@ -259,7 +259,7 @@ class ReportStore:
         )
 
     @staticmethod
-    def get_schema() -> dict:
+    def get_schema() -> dict[str, Any]:
         """리포트 제출 스키마 반환."""
         return {
             "required_fields": [
@@ -299,7 +299,7 @@ class ReportStore:
         }
 
     @staticmethod
-    def _row_to_report(row: dict) -> StrategyReport:
+    def _row_to_report(row: dict[str, Any]) -> StrategyReport:
         """DB row → StrategyReport 변환."""
         submitted_at = row["submitted_at"]
         reviewed_at = row.get("reviewed_at")

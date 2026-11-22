@@ -7,7 +7,7 @@ import json
 import logging
 from collections.abc import Callable, Coroutine
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 if TYPE_CHECKING:
     from ante.eventbus.bus import EventBus
@@ -365,7 +365,7 @@ class KISStreamClient:
                     text = await resp.text()
                     raise RuntimeError(f"WebSocket 접속키 발급 실패: {text}")
                 result = await resp.json()
-                return result["approval_key"]
+                return cast("str", result["approval_key"])
 
     async def _close_ws(self) -> None:
         """WebSocket 연결 닫기."""

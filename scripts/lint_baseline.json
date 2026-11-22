@@ -241,38 +241,6 @@
     }
   },
   "mypy": {
-    "src/ante/account/crypto.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
-    "src/ante/approval/auto_approve.py": {
-      "type-arg": 4
-    },
-    "src/ante/approval/handlers.py": {
-      "type-arg": 16
-    },
-    "src/ante/approval/models.py": {
-      "type-arg": 3
-    },
-    "src/ante/approval/service.py": {
-      "type-arg": 8
-    },
-    "src/ante/audit/logger.py": {
-      "type-arg": 1
-    },
-    "src/ante/bot/manager.py": {
-      "type-arg": 1,
-      "unused-ignore": 3
-    },
-    "src/ante/broker/kis.py": {
-      "no-any-return": 5
-    },
-    "src/ante/broker/kis_stream.py": {
-      "no-any-return": 1
-    },
-    "src/ante/broker/order_registry.py": {
-      "type-arg": 1
-    },
     "src/ante/cli/commands/account.py": {
       "no-untyped-call": 9,
       "no-untyped-def": 1,
@@ -372,16 +340,6 @@
       "no-any-return": 1,
       "type-arg": 6
     },
-    "src/ante/eventbus/events.py": {
-      "type-arg": 3,
-      "unused-ignore": 3
-    },
-    "src/ante/gateway/cache.py": {
-      "type-arg": 1
-    },
-    "src/ante/gateway/gateway.py": {
-      "no-any-return": 4
-    },
     "src/ante/ipc/client.py": {
       "type-arg": 2
     },
@@ -401,75 +359,8 @@
       "no-untyped-def": 1,
       "type-arg": 4
     },
-    "src/ante/member/service.py": {
-      "type-arg": 1
-    },
-    "src/ante/notification/base.py": {
-      "type-arg": 1
-    },
-    "src/ante/notification/service.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
-    "src/ante/notification/telegram.py": {
-      "type-arg": 5
-    },
-    "src/ante/notification/telegram_receiver.py": {
-      "no-any-return": 3
-    },
-    "src/ante/report/draft.py": {
-      "no-any-return": 1,
-      "type-arg": 3
-    },
-    "src/ante/report/feedback.py": {
-      "attr-defined": 1,
-      "type-arg": 4
-    },
-    "src/ante/report/models.py": {
-      "no-any-return": 1,
-      "type-arg": 1
-    },
-    "src/ante/report/store.py": {
-      "no-any-return": 1,
-      "type-arg": 2
-    },
-    "src/ante/rule/engine.py": {
-      "unused-ignore": 1
-    },
-    "src/ante/strategy/__init__.py": {
-      "no-untyped-def": 1
-    },
-    "src/ante/strategy/indicators.py": {
-      "type-arg": 3
-    },
-    "src/ante/strategy/registry.py": {
-      "type-arg": 1
-    },
-    "src/ante/trade/fill_outbox.py": {
-      "no-any-return": 1
-    },
     "src/ante/trade/order_tracker.py": {
       "type-arg": 1
-    },
-    "src/ante/trade/performance.py": {
-      "type-arg": 3,
-      "unused-ignore": 1
-    },
-    "src/ante/trade/position.py": {
-      "type-arg": 6
-    },
-    "src/ante/trade/recorder.py": {
-      "type-arg": 3,
-      "unused-ignore": 1
-    },
-    "src/ante/trade/service.py": {
-      "type-arg": 4
-    },
-    "src/ante/treasury/treasury.py": {
-      "no-any-return": 1
-    },
-    "src/ante/update/checker.py": {
-      "no-any-return": 1
     }
   }
 }

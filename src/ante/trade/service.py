@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ante.trade.models import (
@@ -86,7 +86,7 @@ class TradeService:
         symbol: str | None = None,
         *,
         account_id: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """포지션 변동 이력 조회."""
         return await self._position_history.get_history(
             bot_id=bot_id,
@@ -111,7 +111,7 @@ class TradeService:
             to_date=to_date,
         )
 
-    async def get_summary(self, bot_id: str, account_id: str) -> dict:
+    async def get_summary(self, bot_id: str, account_id: str) -> dict[str, Any]:
         """봇 요약 정보."""
         positions = await self.get_positions(bot_id, account_id=account_id)
         performance = await self.get_performance(account_id=account_id, bot_id=bot_id)
@@ -134,7 +134,7 @@ class TradeService:
         account_id: str,
         avg_price: float | None = None,
         reason: str = "",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """포지션을 브로커 기준으로 강제 보정. Reconciler가 호출.
 
         ``account_id`` 는 메서드 진입 시 ``require_account_id`` 로 검증한다.
@@ -181,7 +181,7 @@ class TradeService:
         self,
         bot_id: str,
         strategy_id: str,
-        fill: dict,
+        fill: dict[str, Any],
         *,
         account_id: str,
         reason: str = "reconciliation",

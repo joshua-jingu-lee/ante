@@ -84,9 +84,9 @@ class IndicatorCalculator:
     @staticmethod
     def compute(
         name: str,
-        ohlcv: dict[str, np.ndarray],
+        ohlcv: dict[str, np.ndarray[Any, Any]],
         **params: Any,
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray[Any, Any]]:
         """지표 계산.
 
         Returns:
@@ -158,7 +158,7 @@ class IndicatorCalculator:
         return {name_lower: np.asarray(result)}
 
 
-def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray]:
+def ohlcv_to_dataframe(data: Any) -> dict[str, np.ndarray[Any, Any]]:
     """OHLCV 데이터를 numpy 배열 딕셔너리로 변환.
 
     지원 입력 형식:

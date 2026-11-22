@@ -9,7 +9,7 @@ import logging
 from abc import abstractmethod
 from collections import OrderedDict
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, cast
 
 from ante.broker.base import BrokerAdapter
 from ante.broker.circuit_breaker import CircuitBreaker
@@ -256,7 +256,7 @@ class KISRetryHandler:
 
     def backoff_delay(self, attempt: int) -> float:
         """attempt 번째 시도의 백오프 대기 시간(초)."""
-        return self._backoff_base * (2**attempt)
+        return cast("float", self._backoff_base * (2**attempt))
 
     def should_retry(self, attempt: int, max_retries: int) -> bool:
         """재시도 여부 결정."""
@@ -464,7 +464,7 @@ class KISBaseAdapter(BrokerAdapter):
     @staticmethod
     async def _read_token_error_body(response: Any) -> dict[str, Any] | str:
         """non-200 토큰 응답 body 를 dict(가능 시) 또는 raw text 로 반환 (T3)."""
-        text = await response.text()
+        text: str = await response.text()
         try:
             parsed = json.loads(text)
         except (ValueError, TypeError):
@@ -580,7 +580,7 @@ class KISBaseAdapter(BrokerAdapter):
                 retryable=retryable,
             )
 
-        result = await response.json()
+        result: dict[str, Any] = await response.json()
         rt_cd = result.get("rt_cd", "")
         if rt_cd != "0":
             msg_cd = result.get("msg_cd", "")
@@ -1022,7 +1022,7 @@ class KISDomesticAdapter(KISBaseAdapter):
 
         result = await self._request("POST", url, tr_id, json_data=order_data)
         output = result["output"]
-        broker_order_id = output["ODNO"]
+        broker_order_id: str = output["ODNO"]
         self._cache_krx_fwdg_orgno(broker_order_id, output.get("KRX_FWDG_ORD_ORGNO"))
         logger.info(
             "주문 접수: %s %s %s %.0f주 → %s",

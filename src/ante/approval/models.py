@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+from typing import Any
 
 
 class ApprovalStatus(StrEnum):
@@ -65,9 +66,9 @@ class ApprovalRequest:
     requester: str
     title: str
     body: str = ""
-    params: dict = field(default_factory=dict)
-    reviews: list[dict] = field(default_factory=list)
-    history: list[dict] = field(default_factory=list)
+    params: dict[str, Any] = field(default_factory=dict)
+    reviews: list[dict[str, Any]] = field(default_factory=list)
+    history: list[dict[str, Any]] = field(default_factory=list)
     reference_id: str = ""
     expires_at: str = ""
     created_at: str = ""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ante.account.scoping import require_account_id
@@ -37,7 +37,7 @@ _ACCOUNT_SCOPED_APPROVAL_TYPES: frozenset[str] = frozenset(
 _VALID_APPROVAL_TYPES: frozenset[str] = frozenset(t.value for t in ApprovalType)
 
 
-def _extract_account_id(type: str, params: dict | None) -> str | None:
+def _extract_account_id(type: str, params: dict[str, Any] | None) -> str | None:
     """account-scoped approval payload 에서 account_id 를 꺼낸다."""
     if params is None:
         return None
@@ -92,7 +92,7 @@ class ApprovalService:
         self,
         db: Database,
         eventbus: EventBus,
-        executors: dict[str, Callable[..., Awaitable]] | None = None,
+        executors: dict[str, Callable[..., Awaitable[Any]]] | None = None,
         validators: dict[str, Callable[..., list[ValidationResult]]] | None = None,
         auto_approve_evaluator: AutoApproveEvaluator | None = None,
     ) -> None:
@@ -113,7 +113,7 @@ class ApprovalService:
         requester: str,
         title: str,
         body: str = "",
-        params: dict | None = None,
+        params: dict[str, Any] | None = None,
         reference_id: str = "",
         expires_at: str = "",
     ) -> ApprovalRequest:
@@ -320,7 +320,7 @@ class ApprovalService:
         id: str,
         requester: str,
         body: str | None = None,
-        params: dict | None = None,
+        params: dict[str, Any] | None = None,
     ) -> ApprovalRequest:
         """거절된 요청을 수정하여 재상신 (rejected → pending).
 
@@ -835,13 +835,13 @@ class ApprovalService:
     async def _validate_params(
         self,
         type: str,
-        params: dict,
+        params: dict[str, Any],
         now: str,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """사전 검증(validator)을 실행하고 warn reviews를 반환한다."""
         import inspect
 
-        reviews: list[dict] = []
+        reviews: list[dict[str, Any]] = []
         validator = self._validators.get(type)
         if not validator:
             return reviews
@@ -1045,7 +1045,7 @@ class ApprovalService:
         )
 
     @staticmethod
-    def _row_to_request(row: dict) -> ApprovalRequest:
+    def _row_to_request(row: dict[str, Any]) -> ApprovalRequest:
         """DB row → ApprovalRequest 변환."""
         return ApprovalRequest(
             id=row["id"],
