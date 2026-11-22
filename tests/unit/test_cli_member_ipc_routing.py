@@ -146,7 +146,7 @@ class TestIpcFirstRouting:
         assert result.exit_code == 0, result.output
         ipc_send.assert_awaited_once()
         assert ipc_send.await_args.args[0] == "member.register"
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["member_id"] == "new-agent"
         # 발급 토큰은 사용자 표시용 result 에만 surface.
         assert payload["token"] == SECRET_TOKEN
@@ -189,7 +189,7 @@ class TestIpcFirstRouting:
         # auth-exempt: args 에 password(secret) 만, actor override 없음.
         sent_args = ipc_send.await_args.args[1]
         assert sent_args == {"password": "current-pw-value"}
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["recovery_key"] == SECRET_RECOVERY_KEY
 
     def test_reset_password_ipc_sends_secret_only(self) -> None:

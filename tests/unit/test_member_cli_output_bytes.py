@@ -227,7 +227,14 @@ def _invoke_case(
 _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'message': '등록된 멤버가 없습니다.', 'members': []}\n"),
     ("list_empty", "json"): (
-        '{\n  "message": "등록된 멤버가 없습니다.",\n  "members": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 멤버가 없습니다.",\n'
+        '    "members": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows", "text"): (
         "  🦊  agent-1              agent  default  default         active     memb"
@@ -236,33 +243,37 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "members": [\n'
-        "    {\n"
-        '      "member_id": "agent-1",\n'
-        '      "type": "agent",\n'
-        '      "role": "default",\n'
-        '      "org": "default",\n'
-        '      "name": "Agent 1",\n'
-        '      "emoji": "🦊",\n'
-        '      "status": "active",\n'
-        '      "scopes": [\n'
-        '        "member:read",\n'
-        '        "bot:read"\n'
-        "      ],\n"
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "member_id": "analyst",\n'
-        '      "type": "human",\n'
-        '      "role": "default",\n'
-        '      "org": "research",\n'
-        '      "name": "",\n'
-        '      "emoji": "",\n'
-        '      "status": "suspended",\n'
-        '      "scopes": [],\n'
-        '      "created_at": "2026-01-01T00:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "members": [\n'
+        "      {\n"
+        '        "member_id": "agent-1",\n'
+        '        "type": "agent",\n'
+        '        "role": "default",\n'
+        '        "org": "default",\n'
+        '        "name": "Agent 1",\n'
+        '        "emoji": "🦊",\n'
+        '        "status": "active",\n'
+        '        "scopes": [\n'
+        '          "member:read",\n'
+        '          "bot:read"\n'
+        "        ],\n"
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "member_id": "analyst",\n'
+        '        "type": "human",\n'
+        '        "role": "default",\n'
+        '        "org": "research",\n'
+        '        "name": "",\n'
+        '        "emoji": "",\n'
+        '        "status": "suspended",\n'
+        '        "scopes": [],\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info", "text"): (
@@ -279,20 +290,24 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info", "json"): (
         "{\n"
-        '  "member_id": "agent-1",\n'
-        '  "type": "agent",\n'
-        '  "role": "default",\n'
-        '  "org": "default",\n'
-        '  "name": "Agent 1",\n'
-        '  "emoji": "🦊",\n'
-        '  "status": "active",\n'
-        '  "scopes": [\n'
-        '    "member:read",\n'
-        '    "bot:read"\n'
-        "  ],\n"
-        '  "created_at": "2026-01-01T00:00:00",\n'
-        '  "created_by": "test-master",\n'
-        '  "last_active_at": "2026-01-02T00:00:00"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-1",\n'
+        '    "type": "agent",\n'
+        '    "role": "default",\n'
+        '    "org": "default",\n'
+        '    "name": "Agent 1",\n'
+        '    "emoji": "🦊",\n'
+        '    "status": "active",\n'
+        '    "scopes": [\n'
+        '      "member:read",\n'
+        '      "bot:read"\n'
+        "    ],\n"
+        '    "created_at": "2026-01-01T00:00:00",\n'
+        '    "created_by": "test-master",\n'
+        '    "last_active_at": "2026-01-02T00:00:00"\n'
+        "  }\n"
         "}\n"
     ),
     ("list_invalid_roles_empty", "text"): (
@@ -309,16 +324,20 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_invalid_roles_empty", "json"): (
         "{\n"
-        '  "recommended_action": "review_then_revoke",\n'
-        '  "valid_roles": [\n'
-        '    "master",\n'
-        '    "admin",\n'
-        '    "default"\n'
-        "  ],\n"
-        '  "actionable_count": 0,\n'
-        '  "legacy_revoked_count": 0,\n'
-        '  "actionable": [],\n'
-        '  "legacy_revoked": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "recommended_action": "review_then_revoke",\n'
+        '    "valid_roles": [\n'
+        '      "master",\n'
+        '      "admin",\n'
+        '      "default"\n'
+        "    ],\n"
+        '    "actionable_count": 0,\n'
+        '    "legacy_revoked_count": 0,\n'
+        '    "actionable": [],\n'
+        '    "legacy_revoked": []\n'
+        "  }\n"
         "}\n"
     ),
     ("list_invalid_roles_rows", "text"): (
@@ -337,40 +356,44 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_invalid_roles_rows", "json"): (
         "{\n"
-        '  "recommended_action": "review_then_revoke",\n'
-        '  "valid_roles": [\n'
-        '    "master",\n'
-        '    "admin",\n'
-        '    "default"\n'
-        "  ],\n"
-        '  "actionable_count": 1,\n'
-        '  "legacy_revoked_count": 1,\n'
-        '  "actionable": [\n'
-        "    {\n"
-        '      "member_id": "legacy-1",\n'
-        '      "role": "operator",\n'
-        '      "type": "agent",\n'
-        '      "name": "Agent 1",\n'
-        '      "status": "active",\n'
-        '      "created_at": "2026-01-01T00:00:00",\n'
-        '      "has_token": true,\n'
-        '      "token_expires_at": "2026-06-01T00:00:00",\n'
-        '      "revoke_command": "ante --config-dir /nonexistent/ante-fixture membe'
-        'r revoke --yes -- legacy-1"\n'
-        "    }\n"
-        "  ],\n"
-        '  "legacy_revoked": [\n'
-        "    {\n"
-        '      "member_id": "legacy-2",\n'
-        '      "role": "admin",\n'
-        '      "type": "agent",\n'
-        '      "name": "Agent 1",\n'
-        '      "status": "revoked",\n'
-        '      "created_at": "2026-01-01T00:00:00",\n'
-        '      "has_token": false,\n'
-        '      "token_expires_at": null\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "recommended_action": "review_then_revoke",\n'
+        '    "valid_roles": [\n'
+        '      "master",\n'
+        '      "admin",\n'
+        '      "default"\n'
+        "    ],\n"
+        '    "actionable_count": 1,\n'
+        '    "legacy_revoked_count": 1,\n'
+        '    "actionable": [\n'
+        "      {\n"
+        '        "member_id": "legacy-1",\n'
+        '        "role": "operator",\n'
+        '        "type": "agent",\n'
+        '        "name": "Agent 1",\n'
+        '        "status": "active",\n'
+        '        "created_at": "2026-01-01T00:00:00",\n'
+        '        "has_token": true,\n'
+        '        "token_expires_at": "2026-06-01T00:00:00",\n'
+        '        "revoke_command": "ante --config-dir /nonexistent/ante-fixture mem'
+        'ber revoke --yes -- legacy-1"\n'
+        "      }\n"
+        "    ],\n"
+        '    "legacy_revoked": [\n'
+        "      {\n"
+        '        "member_id": "legacy-2",\n'
+        '        "role": "admin",\n'
+        '        "type": "agent",\n'
+        '        "name": "Agent 1",\n'
+        '        "status": "revoked",\n'
+        '        "created_at": "2026-01-01T00:00:00",\n'
+        '        "has_token": false,\n'
+        '        "token_expires_at": null\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("register_ipc", "text"): (
@@ -378,12 +401,16 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("register_ipc", "json"): (
         "{\n"
-        '  "member_id": "agent-2",\n'
-        '  "type": "agent",\n'
-        '  "role": "default",\n'
-        '  "org": "default",\n'
-        '  "name": "새 에이전트",\n'
-        '  "token": "fresh-token-xyz"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-2",\n'
+        '    "type": "agent",\n'
+        '    "role": "default",\n'
+        '    "org": "default",\n'
+        '    "name": "새 에이전트",\n'
+        '    "token": "fresh-token-xyz"\n'
+        "  }\n"
         "}\n"
     ),
     ("register_direct", "text"): (
@@ -391,12 +418,16 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("register_direct", "json"): (
         "{\n"
-        '  "member_id": "agent-2",\n'
-        '  "type": "agent",\n'
-        '  "role": "default",\n'
-        '  "org": "default",\n'
-        '  "name": "새 에이전트",\n'
-        '  "token": "fresh-token-xyz"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-2",\n'
+        '    "type": "agent",\n'
+        '    "role": "default",\n'
+        '    "org": "default",\n'
+        '    "name": "새 에이전트",\n'
+        '    "token": "fresh-token-xyz"\n'
+        "  }\n"
         "}\n"
     ),
     ("set_emoji_ipc", "text"): ("이모지 설정 완료: agent-1 → 🤖\n"),
@@ -424,23 +455,31 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("update_scopes_ipc", "text"): ("멤버 권한 변경 완료: agent-1\n"),
     ("update_scopes_ipc", "json"): (
         "{\n"
-        '  "member_id": "agent-1",\n'
-        '  "scopes": [\n'
-        '    "account:read",\n'
-        '    "member:read"\n'
-        "  ],\n"
-        '  "status": "active"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-1",\n'
+        '    "scopes": [\n'
+        '      "account:read",\n'
+        '      "member:read"\n'
+        "    ],\n"
+        '    "status": "active"\n'
+        "  }\n"
         "}\n"
     ),
     ("update_scopes_direct", "text"): ("멤버 권한 변경 완료: agent-1\n"),
     ("update_scopes_direct", "json"): (
         "{\n"
-        '  "member_id": "agent-1",\n'
-        '  "scopes": [\n'
-        '    "account:read",\n'
-        '    "member:read"\n'
-        "  ],\n"
-        '  "status": "active"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-1",\n'
+        '    "scopes": [\n'
+        '      "account:read",\n'
+        '      "member:read"\n'
+        "    ],\n"
+        '    "status": "active"\n'
+        "  }\n"
         "}\n"
     ),
     ("suspend_ipc", "text"): ("멤버 정지 완료: agent-1\n"),
@@ -515,7 +554,14 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  이 토큰은 다시 표시되지 않습니다.\n"
     ),
     ("rotate_token_ipc", "json"): (
-        '{\n  "member_id": "agent-1",\n  "token": "new-token-abc"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-1",\n'
+        '    "token": "new-token-abc"\n'
+        "  }\n"
+        "}\n"
     ),
     ("rotate_token_direct", "text"): (
         "  기존 토큰이 즉시 무효화되었습니다.\n"
@@ -523,7 +569,14 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  이 토큰은 다시 표시되지 않습니다.\n"
     ),
     ("rotate_token_direct", "json"): (
-        '{\n  "member_id": "agent-1",\n  "token": "new-token-abc"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "member_id": "agent-1",\n'
+        '    "token": "new-token-abc"\n'
+        "  }\n"
+        "}\n"
     ),
     ("reset_password_ipc", "text"): ("패스워드가 변경되었습니다.\n"),
     ("reset_password_ipc", "json"): (
@@ -549,7 +602,13 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  안전한 곳에 보관하세요. 이 키는 다시 표시되지 않습니다.\n"
     ),
     ("regenerate_recovery_key_ipc", "json"): (
-        '{\n  "recovery_key": "fresh-recovery-key-xyz"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "recovery_key": "fresh-recovery-key-xyz"\n'
+        "  }\n"
+        "}\n"
     ),
     ("regenerate_recovery_key_direct", "text"): (
         "  기존 복구 키가 폐기되었습니다.\n"
@@ -559,7 +618,13 @@ _MEMBER_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "  안전한 곳에 보관하세요. 이 키는 다시 표시되지 않습니다.\n"
     ),
     ("regenerate_recovery_key_direct", "json"): (
-        '{\n  "recovery_key": "fresh-recovery-key-xyz"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "recovery_key": "fresh-recovery-key-xyz"\n'
+        "  }\n"
+        "}\n"
     ),
 }
 

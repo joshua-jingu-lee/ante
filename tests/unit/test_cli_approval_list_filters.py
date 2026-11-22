@@ -359,7 +359,7 @@ class TestApprovalListRealDatabase:
                 str(override),
             ],
         )
-        rows = json.loads(result.stdout)
+        rows = json.loads(result.stdout)["data"]["approvals"]
         assert [r["title"] for r in rows] == ["override-row"]
 
     def test_list_initializes_schema_on_fresh_db(self, split_runner, tmp_path) -> None:

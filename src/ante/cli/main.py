@@ -139,7 +139,7 @@ from ante.cli.commands.update import update  # noqa: E402
 
 cli.add_command(account)  # type: ignore[has-type]
 cli.add_command(audit)  # type: ignore[has-type]
-cli.add_command(approval)  # type: ignore[has-type]
+cli.add_command(approval)
 cli.add_command(init)  # type: ignore[has-type]
 cli.add_command(bot)  # type: ignore[has-type]
 cli.add_command(broker)  # type: ignore[has-type]

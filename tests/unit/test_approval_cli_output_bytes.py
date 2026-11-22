@@ -155,7 +155,15 @@ def _invoke_case(
 
 _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("(no data)\n"),
-    ("list_empty", "json"): ("[]\n"),
+    ("list_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "approvals": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_rows", "text"): (
         "          id |         type |       status |    requester |        title |"
         "   created_at\n"
@@ -167,24 +175,30 @@ _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "채택 | 2026-01-01T00:00:00\n"
     ),
     ("list_rows", "json"): (
-        "[\n"
-        "  {\n"
-        '    "id": "abcd1234",\n'
-        '    "type": "bot_create",\n'
-        '    "status": "pending",\n'
-        '    "requester": "test-master",\n'
-        '    "title": "Test 결재",\n'
-        '    "created_at": "2026-01-01T00:00:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "id": "ffff0000",\n'
-        '    "type": "strategy_adopt",\n'
-        '    "status": "approved",\n'
-        '    "requester": "agent-1",\n'
-        '    "title": "전략 채택",\n'
-        '    "created_at": "2026-01-01T00:00:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "approvals": [\n'
+        "      {\n"
+        '        "id": "abcd1234",\n'
+        '        "type": "bot_create",\n'
+        '        "status": "pending",\n'
+        '        "requester": "test-master",\n'
+        '        "title": "Test 결재",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": "ffff0000",\n'
+        '        "type": "strategy_adopt",\n'
+        '        "status": "approved",\n'
+        '        "requester": "agent-1",\n'
+        '        "title": "전략 채택",\n'
+        '        "created_at": "2026-01-01T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("info", "text"): (
         "{'id': 'abcd1234-aaaa-bbbb-cccc-1234567890ab', 'type': 'bot_create', 'stat"
@@ -196,28 +210,32 @@ _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info", "json"): (
         "{\n"
-        '  "id": "abcd1234-aaaa-bbbb-cccc-1234567890ab",\n'
-        '  "type": "bot_create",\n'
-        '  "status": "pending",\n'
-        '  "requester": "test-master",\n'
-        '  "title": "Test 결재",\n'
-        '  "body": "본문",\n'
-        '  "params": {\n'
-        '    "bot_id": "bot-1"\n'
-        "  },\n"
-        '  "reviews": [],\n'
-        '  "history": [\n'
-        "    {\n"
-        '      "action": "created",\n'
-        '      "actor": "test-master"\n'
-        "    }\n"
-        "  ],\n"
-        '  "reference_id": "",\n'
-        '  "expires_at": "",\n'
-        '  "created_at": "2026-01-01T00:00:00",\n'
-        '  "resolved_at": "",\n'
-        '  "resolved_by": "",\n'
-        '  "reject_reason": ""\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "id": "abcd1234-aaaa-bbbb-cccc-1234567890ab",\n'
+        '    "type": "bot_create",\n'
+        '    "status": "pending",\n'
+        '    "requester": "test-master",\n'
+        '    "title": "Test 결재",\n'
+        '    "body": "본문",\n'
+        '    "params": {\n'
+        '      "bot_id": "bot-1"\n'
+        "    },\n"
+        '    "reviews": [],\n'
+        '    "history": [\n'
+        "      {\n"
+        '        "action": "created",\n'
+        '        "actor": "test-master"\n'
+        "      }\n"
+        "    ],\n"
+        '    "reference_id": "",\n'
+        '    "expires_at": "",\n'
+        '    "created_at": "2026-01-01T00:00:00",\n'
+        '    "resolved_at": "",\n'
+        '    "resolved_by": "",\n'
+        '    "reject_reason": ""\n'
+        "  }\n"
         "}\n"
     ),
     ("review", "text"): ("검토 의견 추가: test-master → pass\n"),
@@ -234,7 +252,15 @@ _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "}\n"
     ),
     ("audit_types_empty", "text"): ("(no data)\n"),
-    ("audit_types_empty", "json"): ("[]\n"),
+    ("audit_types_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "approvals": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("audit_types_rows", "text"): (
         "          id |         type |       status |    requester |   created_at |"
         "   expires_at\n"
@@ -244,16 +270,22 @@ _APPROVAL_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "1-01T00:00:00 | 2026-12-31T00:00:00\n"
     ),
     ("audit_types_rows", "json"): (
-        "[\n"
-        "  {\n"
-        '    "id": "invalid-row-1",\n'
-        '    "type": "legacy_invalid_type",\n'
-        '    "status": "pending",\n'
-        '    "requester": "test-master",\n'
-        '    "created_at": "2026-01-01T00:00:00",\n'
-        '    "expires_at": "2026-12-31T00:00:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "approvals": [\n'
+        "      {\n"
+        '        "id": "invalid-row-1",\n'
+        '        "type": "legacy_invalid_type",\n'
+        '        "status": "pending",\n'
+        '        "requester": "test-master",\n'
+        '        "created_at": "2026-01-01T00:00:00",\n'
+        '        "expires_at": "2026-12-31T00:00:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("request", "text"): ("결재 요청 생성: abcd1234-aaaa-bbbb-cccc-1234567890ab\n"),
     ("request", "json"): (

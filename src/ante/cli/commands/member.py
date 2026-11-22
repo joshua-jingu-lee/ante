@@ -136,9 +136,8 @@ async def _create_service(
 @require_scope("member:read")
 def member_list(
     ctx: click.Context, member_type: str | None, org: str | None, status: str | None
-) -> None:
+) -> CommandResult:
     """멤버 목록 조회."""
-    fmt = get_formatter(ctx)
 
     async def _run_list() -> list[dict[str, Any]]:
         async with _create_service(ctx) as service:
@@ -162,19 +161,18 @@ def member_list(
 
     result = _run(_run_list())
     if not result:
-        fmt.output({"message": "등록된 멤버가 없습니다.", "members": []})
-        return
+        empty: dict[str, Any] = {"message": "등록된 멤버가 없습니다.", "members": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"members": result})
-    else:
-        for m in result:
-            scopes = ", ".join(m["scopes"]) if m["scopes"] else "-"
-            emoji = m["emoji"] or "-"
-            click.echo(
-                f"  {emoji:2s} {m['member_id']:20s} {m['type']:6s} {m['role']:8s} "
-                f"{m['org']:15s} {m['status']:10s} {scopes}"
-            )
+    lines = []
+    for m in result:
+        scopes = ", ".join(m["scopes"]) if m["scopes"] else "-"
+        emoji = m["emoji"] or "-"
+        lines.append(
+            f"  {emoji:2s} {m['member_id']:20s} {m['type']:6s} {m['role']:8s} "
+            f"{m['org']:15s} {m['status']:10s} {scopes}"
+        )
+    return CommandResult(data={"members": result}, text=tuple(lines))
 
 
 @member.command("info")
@@ -183,9 +181,8 @@ def member_list(
 @click.pass_context
 @require_auth
 @require_scope("member:read")
-def member_info(ctx: click.Context, member_id: str) -> None:
+def member_info(ctx: click.Context, member_id: str) -> CommandResult:
     """멤버 상세 정보 조회."""
-    fmt = get_formatter(ctx)
 
     async def _run_info() -> dict[str, Any] | None:
         async with _create_service(ctx) as service:
@@ -210,19 +207,21 @@ def member_info(ctx: click.Context, member_id: str) -> None:
     if not result:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  Member ID : {result['member_id']}")
-        click.echo(f"  타입      : {result['type']}")
-        click.echo(f"  역할      : {result['role']}")
-        click.echo(f"  조직      : {result['org']}")
-        click.echo(f"  이름      : {result['name']}")
-        click.echo(f"  이모지    : {result['emoji'] or '-'}")
-        click.echo(f"  상태      : {result['status']}")
-        click.echo(f"  권한      : {', '.join(result['scopes']) or '-'}")
-        click.echo(f"  생성일    : {result['created_at']}")
-        click.echo(f"  생성자    : {result['created_by']}")
+    return CommandResult(
+        data=result,
+        text=(
+            f"  Member ID : {result['member_id']}",
+            f"  타입      : {result['type']}",
+            f"  역할      : {result['role']}",
+            f"  조직      : {result['org']}",
+            f"  이름      : {result['name']}",
+            f"  이모지    : {result['emoji'] or '-'}",
+            f"  상태      : {result['status']}",
+            f"  권한      : {', '.join(result['scopes']) or '-'}",
+            f"  생성일    : {result['created_at']}",
+            f"  생성자    : {result['created_by']}",
+        ),
+    )
 
 
 def _explicit_config_dir(ctx: click.Context) -> str | None:
@@ -302,7 +301,7 @@ def _invalid_role_row_dict(
 @require_scope("member:read")
 def member_list_invalid_roles(
     ctx: click.Context,
-) -> None:
+) -> CommandResult:
     """``MemberRole`` enum 외 role 을 가진 legacy member row 식별.
 
     본 명령은 canonical config 의 ``db.path`` (``get_db_path()``) 단일 DB 에
@@ -320,7 +319,6 @@ def member_list_invalid_roles(
 
     ``token_hash`` 는 모든 출력 모드에서 노출되지 않는다 (보안 SSOT).
     """
-    fmt = get_formatter(ctx)
     valid_roles = [member.value for member in MemberRole]
     config_dir_override = _explicit_config_dir(ctx)
 
@@ -358,31 +356,31 @@ def member_list_invalid_roles(
         "legacy_revoked": legacy_rows,
     }
 
-    if fmt.is_json:
-        fmt.output(payload)
-        return
-
-    click.echo(f"  recommended_action : {payload['recommended_action']}")
-    click.echo(f"  valid_roles        : {', '.join(valid_roles)}")
-    click.echo(f"  actionable         : {payload['actionable_count']}건")
-    click.echo(f"  legacy_revoked     : {payload['legacy_revoked_count']}건")
-
-    def _emit_section(title: str, rows: list[dict[str, Any]]) -> None:
-        click.echo("")
-        click.echo(f"[{title}]")
+    def _section_lines(title: str, rows: list[dict[str, Any]]) -> list[str]:
+        lines = ["", f"[{title}]"]
         if not rows:
-            click.echo("  (none)")
-            return
+            lines.append("  (none)")
+            return lines
         for row in rows:
-            click.echo(
+            lines.append(
                 f"  {row['member_id']:20s} role={row['role']:20s} "
                 f"status={row['status']:10s} "
                 f"created_at={row['created_at']:20s} "
                 f"has_token={row['has_token']!s}"
             )
+        return lines
 
-    _emit_section("actionable", actionable_rows)
-    _emit_section("legacy_revoked", legacy_rows)
+    return CommandResult(
+        data=payload,
+        text=(
+            f"  recommended_action : {payload['recommended_action']}",
+            f"  valid_roles        : {', '.join(valid_roles)}",
+            f"  actionable         : {payload['actionable_count']}건",
+            f"  legacy_revoked     : {payload['legacy_revoked_count']}건",
+            *_section_lines("actionable", actionable_rows),
+            *_section_lines("legacy_revoked", legacy_rows),
+        ),
+    )
 
 
 @member.command("register")
@@ -408,9 +406,8 @@ def member_register(
     org: str,
     name: str,
     scopes: str,
-) -> None:
+) -> CommandResult:
     """멤버 등록 (토큰 발급)."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()] if scopes else []
 
@@ -461,12 +458,14 @@ def member_register(
     except PermissionDeniedError:
         raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
 
-    if fmt.is_json:
-        fmt.output({**result, "token": token})
-    else:
-        fmt.success("멤버 등록 완료", result)
-        click.echo(f"  토큰: {token}")
-        click.echo("  이 토큰은 다시 표시되지 않습니다.")
+    return CommandResult(
+        data={**result, "token": token},
+        text=(
+            "멤버 등록 완료",
+            f"  토큰: {token}",
+            "  이 토큰은 다시 표시되지 않습니다.",
+        ),
+    )
 
 
 @member.command("set-emoji")
@@ -515,9 +514,10 @@ def member_set_emoji(ctx: click.Context, member_id: str, emoji: str) -> CommandR
 @click.pass_context
 @require_auth
 @require_master
-def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> None:
+def member_update_scopes(
+    ctx: click.Context, member_id: str, scopes: str
+) -> CommandResult:
     """멤버 권한 범위 변경."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
     scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
 
@@ -549,10 +549,7 @@ def member_update_scopes(ctx: click.Context, member_id: str, scopes: str) -> Non
     except PermissionDeniedError:
         raise PermissionDeniedError(_MASTER_REQUIRED_MESSAGE) from None
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        fmt.success(f"멤버 권한 변경 완료: {member_id}", result)
+    return CommandResult(data=result, text=(f"멤버 권한 변경 완료: {member_id}",))
 
 
 @member.command("suspend")
@@ -678,9 +675,8 @@ def member_revoke(ctx: click.Context, member_id: str, yes: bool) -> CommandResul
 @click.pass_context
 @require_auth
 @require_master
-def member_rotate_token(ctx: click.Context, member_id: str) -> None:
+def member_rotate_token(ctx: click.Context, member_id: str) -> CommandResult:
     """토큰 재발급 (기존 토큰 즉시 무효화)."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_rotate() -> tuple[dict[str, Any], str]:
@@ -708,12 +704,14 @@ def member_rotate_token(ctx: click.Context, member_id: str) -> None:
     except MemberNotFoundError:
         raise CliMemberNotFoundError(f"멤버를 찾을 수 없습니다: {member_id}") from None
 
-    if fmt.is_json:
-        fmt.output({**result, "token": token})
-    else:
-        click.echo("  기존 토큰이 즉시 무효화되었습니다.")
-        click.echo(f"  새 토큰: {token}")
-        click.echo("  이 토큰은 다시 표시되지 않습니다.")
+    return CommandResult(
+        data={**result, "token": token},
+        text=(
+            "  기존 토큰이 즉시 무효화되었습니다.",
+            f"  새 토큰: {token}",
+            "  이 토큰은 다시 표시되지 않습니다.",
+        ),
+    )
 
 
 @member.command("reset-password")
@@ -797,7 +795,7 @@ def member_regenerate_recovery_key(
     ctx: click.Context,
     password_env: str | None,
     password_file: str | None,
-) -> None:
+) -> CommandResult:
     """Recovery Key 재발급 (인증 불필요).
 
     현재 패스워드는 ``--password-env <ENV_NAME>`` 또는 ``--password-file <PATH>``로만
@@ -835,9 +833,13 @@ def member_regenerate_recovery_key(
 
     new_key = _run(_run_regen())
 
-    if fmt.is_json:
-        fmt.output({"recovery_key": new_key})
-    else:
-        click.echo("  기존 복구 키가 폐기되었습니다.")
-        click.echo(f"\n  새 복구 키: {new_key}")
-        click.echo("\n  안전한 곳에 보관하세요. 이 키는 다시 표시되지 않습니다.")
+    return CommandResult(
+        data={"recovery_key": new_key},
+        text=(
+            "  기존 복구 키가 폐기되었습니다.",
+            "",
+            f"  새 복구 키: {new_key}",
+            "",
+            "  안전한 곳에 보관하세요. 이 키는 다시 표시되지 않습니다.",
+        ),
+    )

@@ -10,8 +10,7 @@ import click
 
 from ante.approval.models import ApprovalStatus, ApprovalType, ApprovalValidationError
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import CommandResult, format_option
-from ante.cli.main import get_formatter
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
     ApprovalInvalidStatusError,
@@ -105,9 +104,8 @@ def approval_list(
     status: str | None,
     approval_type: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """결재 목록 조회."""
-    fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
         raise ApprovalInvalidStatusError(
@@ -146,7 +144,8 @@ def approval_list(
             ]
 
     rows = asyncio.run(_list())
-    fmt.table(rows, ["id", "type", "status", "requester", "title", "created_at"])
+    columns = ["id", "type", "status", "requester", "title", "created_at"]
+    return CommandResult(data=rows, text=tuple(table_lines(rows, columns)))
 
 
 @approval.command()
@@ -156,9 +155,8 @@ def approval_list(
 @click.pass_context
 @require_auth
 @require_scope("approval:read")
-def info(ctx: click.Context, id: str, db_path: str | None) -> None:
+def info(ctx: click.Context, id: str, db_path: str | None) -> CommandResult:
     """결재 상세 조회."""
-    fmt = get_formatter(ctx)
 
     async def _info() -> dict[str, Any]:
         from ante.approval import ApprovalService
@@ -189,7 +187,7 @@ def info(ctx: click.Context, id: str, db_path: str | None) -> None:
             }
 
     result = asyncio.run(_info())
-    fmt.output(result)
+    return CommandResult(data=result, text=(str(result),))
 
 
 @approval.command()
@@ -304,7 +302,7 @@ def audit_types(
     ctx: click.Context,
     status: str | None,
     db_path: str | None,
-) -> None:
+) -> CommandResult:
     """``ApprovalType`` enum 외 ``type`` 을 가진 legacy invalid row 식별.
 
     분류는 ``offline`` (DB 직접 조회) 이며 ``approval list`` 와 동일하게
@@ -313,7 +311,6 @@ def audit_types(
 
     출력 컬럼: id, type, status, requester, created_at, expires_at.
     """
-    fmt = get_formatter(ctx)
 
     if status is not None and status not in {s.value for s in ApprovalStatus}:
         raise ApprovalInvalidStatusError(
@@ -343,10 +340,8 @@ def audit_types(
             ]
 
     rows = asyncio.run(_list())
-    fmt.table(
-        rows,
-        ["id", "type", "status", "requester", "created_at", "expires_at"],
-    )
+    columns = ["id", "type", "status", "requester", "created_at", "expires_at"]
+    return CommandResult(data=rows, text=tuple(table_lines(rows, columns)))
 
 
 @approval.command("cancel-invalid")
