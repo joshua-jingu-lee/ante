@@ -40,3 +40,4 @@ class ErrorSpec:
     exit_code: int = 1
     retryable: bool = False
     default_message: str | None = None
+    description: str = ""
