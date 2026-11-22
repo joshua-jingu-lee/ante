@@ -8,7 +8,7 @@
   새 행은 ``open``으로 생긴다. 행은 사라지지 않는다
 - O1t: ``filled``에서는 나가지 않는다. 다른 종결 상태에서 나가는 것은 두 경로뿐이다 —
   체결 반영이 종결된 행을 되살리는 것(#2705)과 ``mark_terminal``이 종결 상태를 다른
-  종결 상태로 덮어쓰는 것(등록 대기). 그 밖의 탈출은 실패다
+  종결 상태로 덮어쓰는 것(#2778). 그 밖의 탈출은 실패다
 - O2: ``recorded_filled_qty``는 줄지 않고 ``ordered_qty``를 넘지 않는다
 - O3: ``terminal_at IS NULL`` ⟺ 상태가 열린 상태(``open``·``partially_filled``)
 - O4: 열린 캐시의 주문 집합 == DB의 열린 행 집합 − 되살아난 행(#2705), 재시작 뒤에도.
@@ -367,7 +367,7 @@ async def test_fill_after_cancel_keeps_open_cache_in_sync(tmp_path: Path) -> Non
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="등록 대기: mark_terminal이 종결 상태를 다른 종결 상태로 덮어쓴다",
+    reason="#2778",
 )
 async def test_terminal_status_is_not_overwritten(tmp_path: Path) -> None:
     """종결된 주문은 다른 종결 상태로 바뀌지 않는다(O1t).
