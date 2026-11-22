@@ -61,8 +61,6 @@ def _validation_message(command: str, exc: ValidationError) -> str:
 
 
 def _validated_args(spec: CommandSpec, args: Any) -> Any:
-    if spec.request_model is None:
-        return args
     try:
         return spec.request_model.model_validate(args)
     except ValidationError as exc:
