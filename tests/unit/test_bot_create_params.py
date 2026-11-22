@@ -117,7 +117,6 @@ class TestBotCreateWithParams:
                 "strategy_id": "stg-1",
                 "account_id": "test",
                 "interval_seconds": 60,
-                "params": {"lookback": 20, "threshold": 0.5},
             }
 
     def test_create_without_params(self, runner):

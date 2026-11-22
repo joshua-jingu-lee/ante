@@ -364,8 +364,6 @@ def bot_create(
         }
         if bot_id:
             args["bot_id"] = bot_id
-        if param_dict:
-            args["params"] = param_dict
         return await ipc_send("bot.create", args, actor=actor)
 
     result = _run(_run_create())

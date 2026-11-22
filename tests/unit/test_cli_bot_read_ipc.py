@@ -39,6 +39,12 @@ from ante.contracts.ipc_client_errors import (
     IPCRemoteError,
     IPCServerNotRunningError,
 )
+from ante.ipc.requests import (
+    BotInfoRequest,
+    BotListRequest,
+    BotPositionsRequest,
+    BotSignalKeyRequest,
+)
 from ante.member.models import Member, MemberRole, MemberType
 
 _MASTER = Member(
@@ -547,7 +553,9 @@ class TestShapeParity:
             await manager.create_bot(config, _InfoStrategy, MagicMock())
 
             result = await _handle_bot_info(
-                SimpleNamespace(bot_manager=manager), {"bot_id": "bot-info"}, "cli"
+                SimpleNamespace(bot_manager=manager),
+                BotInfoRequest(bot_id="bot-info"),
+                "cli",
             )
             row = await db.fetch_one(
                 "SELECT * FROM bots WHERE bot_id = ?", ("bot-info",)
@@ -733,7 +741,9 @@ class TestPositionsServiceMissingVsEmpty:
             bot_manager=SimpleNamespace(get_bot=lambda _id: bot),
             # trade_service 속성 자체가 없는 legacy registry 모사.
         )
-        result = await _handle_bot_positions(svc, {"bot_id": "bot-1"}, "cli")
+        result = await _handle_bot_positions(
+            svc, BotPositionsRequest(bot_id="bot-1"), "cli"
+        )
         # 미구성 → 빈 collection graceful (조회 불가 아님; 봇은 존재).
         assert result == {"positions": []}
 
@@ -748,7 +758,9 @@ class TestPositionsServiceMissingVsEmpty:
             bot_manager=SimpleNamespace(get_bot=lambda _id: bot),
             trade_service=trade_service,
         )
-        result = await _handle_bot_positions(svc, {"bot_id": "bot-1"}, "cli")
+        result = await _handle_bot_positions(
+            svc, BotPositionsRequest(bot_id="bot-1"), "cli"
+        )
         assert result == {"positions": []}
         # 빈 포지션 경로는 get_positions 를 봇 계좌로 스코핑 호출했다 — 미구성
         # 경로(get_positions 미호출)와 구분된다.
@@ -766,7 +778,9 @@ class TestPositionsServiceMissingVsEmpty:
             trade_service=MagicMock(),
         )
         with pytest.raises(BotNotFoundError):
-            await _handle_bot_positions(svc, {"bot_id": "missing"}, "cli")
+            await _handle_bot_positions(
+                svc, BotPositionsRequest(bot_id="missing"), "cli"
+            )
 
     @pytest.mark.asyncio
     async def test_handler_account_scoping_lock(self) -> None:
@@ -780,7 +794,7 @@ class TestPositionsServiceMissingVsEmpty:
             bot_manager=SimpleNamespace(get_bot=lambda _id: bot),
             trade_service=trade_service,
         )
-        await _handle_bot_positions(svc, {"bot_id": "bot-1"}, "cli")
+        await _handle_bot_positions(svc, BotPositionsRequest(bot_id="bot-1"), "cli")
         trade_service.get_positions.assert_awaited_once_with(
             "bot-1", account_id="acc-scoped"
         )
@@ -806,7 +820,7 @@ class TestReadHandlersUnit:
         svc = SimpleNamespace(
             bot_manager=SimpleNamespace(list_bots=lambda: [live_info])
         )
-        result = await _handle_bot_list(svc, {}, "cli")
+        result = await _handle_bot_list(svc, BotListRequest(), "cli")
         assert list(result.keys()) == ["bots"]
         bot = result["bots"][0]
         assert set(bot.keys()) == {
@@ -841,7 +855,7 @@ class TestReadHandlersUnit:
             },
         ]
         svc = SimpleNamespace(bot_manager=SimpleNamespace(list_bots=lambda: bots))
-        result = await _handle_bot_list(svc, {"account_id": "acc-b"}, "cli")
+        result = await _handle_bot_list(svc, BotListRequest(account_id="acc-b"), "cli")
         assert [b["bot_id"] for b in result["bots"]] == ["b2"]
 
     @pytest.mark.asyncio
@@ -851,7 +865,7 @@ class TestReadHandlersUnit:
 
         svc = SimpleNamespace(bot_manager=SimpleNamespace(get_bot=lambda _id: None))
         with pytest.raises(BotNotFoundError):
-            await _handle_bot_info(svc, {"bot_id": "missing"}, "cli")
+            await _handle_bot_info(svc, BotInfoRequest(bot_id="missing"), "cli")
 
     @pytest.mark.asyncio
     async def test_signal_key_read_missing_raises(self) -> None:
@@ -860,7 +874,9 @@ class TestReadHandlersUnit:
 
         svc = SimpleNamespace(bot_manager=SimpleNamespace(get_bot=lambda _id: None))
         with pytest.raises(BotNotFoundError):
-            await _handle_bot_signal_key(svc, {"bot_id": "missing"}, "cli")
+            await _handle_bot_signal_key(
+                svc, BotSignalKeyRequest(bot_id="missing"), "cli"
+            )
 
     @pytest.mark.asyncio
     async def test_signal_key_read_none_allowed(self) -> None:
@@ -873,7 +889,9 @@ class TestReadHandlersUnit:
                 get_signal_key=AsyncMock(return_value=None),
             )
         )
-        result = await _handle_bot_signal_key(svc, {"bot_id": "bot-1"}, "cli")
+        result = await _handle_bot_signal_key(
+            svc, BotSignalKeyRequest(bot_id="bot-1"), "cli"
+        )
         assert result == {"bot_id": "bot-1", "signal_key": None}
 
 

@@ -26,6 +26,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.member.models import Member, MemberRole, MemberType
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 CLI_MEMBER = "cli-master-7"
@@ -523,48 +524,106 @@ async def test_signal_connect_required_service_comes_first(
     harness.bot_manager.validate_signal_key.assert_not_awaited()
 
 
-# ── 지금 동작을 적는 테스트(모델 커밋에서 기대값이 바뀐다) ──────────────────
+# ── 요청 모델이 거부하는 요청 ───────────────────────────────────────────────
+
+
+def _rejected(command: str, loc: str, kind: str) -> dict:
+    return _error("VALIDATION_ERROR", validation_message(command, (loc, kind)))
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("args", [{}, {"key": 7}, {"key": None}])
-async def test_signal_connect_key_that_is_not_a_string(args: dict[str, Any]) -> None:
+@pytest.mark.parametrize(
+    ("command", "args", "loc", "kind"),
+    [
+        ("signal.connect", {}, "key", "missing"),
+        ("signal.connect", {"key": 7}, "key", "string_type"),
+        ("signal.connect", {"key": None}, "key", "string_type"),
+        (
+            "bot.update",
+            {"bot_id": "b-7", "updates": {"zz_field": 1}},
+            "updates.zz_field",
+            "extra_forbidden",
+        ),
+        ("bot.update", {"bot_id": "b-7", "updates": None}, "updates", "model_type"),
+        (
+            "bot.update",
+            {"bot_id": "b-7", "updates": {"budget": "100"}},
+            "updates.budget",
+            "float_type",
+        ),
+        (
+            "bot.update",
+            {"bot_id": "b-7", "updates": {"auto_restart": "false"}},
+            "updates.auto_restart",
+            "bool_type",
+        ),
+        ("bot.start", {}, "bot_id", "missing"),
+        ("bot.stop", {"bot_id": 7}, "bot_id", "string_type"),
+        (
+            "bot.create",
+            {**CREATE_ARGS, "params": {"k": "v"}},
+            "params",
+            "extra_forbidden",
+        ),
+        (
+            "bot.create",
+            {**CREATE_ARGS, "account_id": "default"},
+            "account_id",
+            "invalid_account_id",
+        ),
+        (
+            "bot.create",
+            {**CREATE_ARGS, "interval_seconds": "120"},
+            "interval_seconds",
+            "int_type",
+        ),
+        ("bot.list", {"account_id": "bad_id!"}, "account_id", "invalid_account_id"),
+    ],
+)
+async def test_request_outside_the_model_is_rejected(
+    command: str, args: dict[str, Any], loc: str, kind: str
+) -> None:
     harness = _Harness()
-    response = await harness.send("signal.connect", args)
-    assert response == _error("INVALID_SIGNAL_KEY", "Invalid signal key")
+    response = await harness.send(command, args)
+    assert response == _rejected(command, loc, kind)
     harness.assert_no_service_call()
 
 
 @pytest.mark.asyncio
-async def test_update_unknown_field_reaches_the_service() -> None:
+async def test_update_budget_of_a_json_integer_reaches_the_service_as_a_float() -> None:
     harness = _Harness()
     response = await harness.send(
-        "bot.update", {"bot_id": "b-7", "updates": {"zz_field": 1}}
+        "bot.update", {"bot_id": "b-7", "updates": {"budget": 5}}
     )
     assert response == _ok({"bot": BOT_INFO})
-    harness.bot_manager.update_bot.assert_awaited_once_with("b-7", zz_field=1)
+    budget = harness.bot_manager.update_bot.await_args.kwargs["budget"]
+    assert (type(budget), budget) == (float, 5.0)
 
 
 @pytest.mark.asyncio
-async def test_start_without_a_bot_id() -> None:
+async def test_update_fields_follow_the_model_order_for_another_key_order() -> None:
     harness = _Harness()
-    response = await harness.send("bot.start", {})
-    assert response == _error("EXECUTION_ERROR", "'bot_id'")
-    harness.assert_no_service_call()
-
-
-@pytest.mark.asyncio
-async def test_create_params_are_not_read() -> None:
-    harness = _Harness()
-    response = await harness.send("bot.create", {**CREATE_ARGS, "params": {"k": "v"}})
-    assert response == _ok({"bot_id": "b-7"})
-    assert harness.bot_manager.create_bot.await_args.kwargs["config"] == BotConfig(
-        bot_id="b-7",
-        strategy_id="s-9",
-        name="n-2",
-        account_id="acct-2",
-        interval_seconds=120,
+    response = await harness.send(
+        "bot.update",
+        {"bot_id": "b-7", "updates": {"budget": 1.5, "name": "x"}},
     )
+    assert response == _ok({"bot": BOT_INFO})
+    harness.assert_audited("bot.update", "fields=['name', 'budget']")
+
+
+@pytest.mark.asyncio
+async def test_rejected_signal_key_is_not_in_the_response_or_the_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG)
+    harness = _Harness()
+    response = await harness.send(
+        "signal.connect", {"key": SIGNAL_KEY, "zz_extra": SIGNAL_KEY}
+    )
+    assert response == _rejected("signal.connect", "zz_extra", "extra_forbidden")
+    assert SIGNAL_KEY not in json.dumps(response, ensure_ascii=False)
+    assert SIGNAL_KEY not in caplog.text
+    harness.assert_no_service_call()
 
 
 # ── CLI → _dispatch → 서비스 ────────────────────────────────────────────────
@@ -643,8 +702,18 @@ def test_cli_create_with_a_param_passes_the_same_config() -> None:
             "threshold=0.5",
         ],
     )
-    assert [(command, actor) for command, _, actor in sent] == [
-        ("bot.create", CLI_MEMBER)
+    assert sent == [
+        (
+            "bot.create",
+            {
+                "name": "n-2",
+                "strategy_id": "s-9",
+                "account_id": "acct-2",
+                "interval_seconds": 120,
+                "bot_id": "b-7",
+            },
+            CLI_MEMBER,
+        )
     ]
     harness.bot_manager.create_bot.assert_awaited_once_with(
         config=BotConfig(

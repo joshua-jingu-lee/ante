@@ -23,6 +23,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.registry import CommandRegistry
 from ante.ipc.server import IPCServer
+from tests.unit.ipc.validation_messages import validation_message
 
 
 def _make_service_registry() -> ServiceRegistry:
@@ -284,23 +285,11 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
     """``bot.create`` IPC dispatch 경로에서 invalid/missing ``account_id`` 는
-    ``InvalidAccountIdError`` 로 raise되고, IPC server가 ``getattr(e, "code", ...)``
-    폴백을 통해 응답 ``error.code == "VALIDATION_ERROR"`` 로 노출한다.
+    ``VALIDATION_ERROR`` 다(#1241 SPLIT-2 회귀 가드).
 
-    Codex branch review (#1241 SPLIT-2 attempt 1) 회귀 가드:
-    이전에는 ``InvalidAccountIdError`` 에 ``code`` 속성이 없어 응답이
-    ``EXECUTION_ERROR`` 로 잘못 노출되었다. ``_handle_bot_create`` 단위 테스트가
-    예외 raise 자체는 잡았지만 IPC dispatch 매핑 회귀는 잡지 못했다.
-
-    #1656 E bucket: ``_handle_bot_create`` 는 ``require_account_id`` 를 함수
-    **최상단**(strategy_registry.get / StrategyLoader.load 이전)으로 옮겼다.
-    따라서 strategy_registry / StrategyLoader workaround 없이도(실제 strategy
-    가 존재하더라도) invalid/missing account_id면 strategy 처리 **이전**에
-    VALIDATION_ERROR 가 먼저 발생한다. strategy_registry mock 을 명시
-    하지 않아 validate-first 순서가 진짜로 동작함을 함께 가드한다.
-
-    실제 ``register_all_handlers`` 등록 경로를 사용해 `bot.create`가 mutating
-    으로 등록되는지, dispatch가 fallback 코드 매핑을 거치는지 함께 검증한다.
+    #2683: 검사 자리는 요청 모델의 계좌 ID 필드다. 핸들러보다 먼저 거부되므로
+    strategy_registry mock 없이도 strategy 처리 **이전**에 실패한다(#1656
+    validate-first). 메시지는 ``ipc.md``의 「인자 검증 실패」 형식 전체다.
     """
     from ante.ipc.registry import register_all_handlers
 
@@ -323,9 +312,10 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR", response
-        assert response["error"]["code"] != "EXECUTION_ERROR", response
-        assert "ipc.bot.create" in response["error"]["message"]
+        assert response["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message("bot.create", ("account_id", "missing")),
+        }
 
         # Case 2: 빈 문자열 account_id → VALIDATION_ERROR
         response = await client.send(
@@ -334,7 +324,12 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR", response
+        assert response["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(
+                "bot.create", ("account_id", "invalid_account_id")
+            ),
+        }
 
         # Case 3: 'default' 예약어 → VALIDATION_ERROR
         response = await client.send(
@@ -343,7 +338,12 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR", response
+        assert response["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(
+                "bot.create", ("account_id", "invalid_account_id")
+            ),
+        }
 
         # Case 4: 패턴 위반 account_id → VALIDATION_ERROR
         response = await client.send(
@@ -352,7 +352,12 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "VALIDATION_ERROR", response
+        assert response["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(
+                "bot.create", ("account_id", "invalid_account_id")
+            ),
+        }
     finally:
         await server.stop()
 
@@ -361,14 +366,10 @@ async def test_ipc_dispatch_bot_create_account_scoped_returns_validation_error_c
 async def test_ipc_dispatch_bot_create_valid_account_missing_other_arg_not_validation(
     socket_path: str, service_registry: ServiceRegistry
 ) -> None:
-    """#1656 불변 가드: **valid** account_id + 다른 필수 인자(strategy_id) 누락은
-    account 검증 최우선화 이후에도 기존 **non-VALIDATION_ERROR** 경로를 유지한다.
-
-    account 검증만 핸들러 최우선으로 이동하고, 타 raw arg(``args["strategy_id"]``)
-    계약은 불변이어야 한다. valid account_id 면 ``require_account_id`` 를
-    통과한 뒤 ``strategy_id = args["strategy_id"]`` 에서 ``KeyError`` 가 터져
-    server.py:323 ``getattr(e, "code", "EXECUTION_ERROR")`` 폴백으로
-    EXECUTION_ERROR 가 된다(VALIDATION_ERROR 과적용 0).
+    """#1656 → #2683: **valid** account_id + 다른 필수 인자(strategy_id) 누락은
+    요청 모델이 ``strategy_id(missing)`` 으로 거부한다(이전에는 핸들러의
+    ``KeyError`` 가 ``EXECUTION_ERROR`` 였다). 계좌 ID는 통과했으므로 메시지에
+    ``account_id`` 가 없다.
     """
     from ante.ipc.registry import register_all_handlers
 
@@ -380,16 +381,16 @@ async def test_ipc_dispatch_bot_create_valid_account_missing_other_arg_not_valid
     try:
         client = IPCClient(socket_path, timeout=5.0)
 
-        # valid account_id + strategy_id 누락 → require_account_id 통과 후
-        # args["strategy_id"] KeyError → EXECUTION_ERROR (기존 계약 불변)
         response = await client.send(
             "bot.create",
             {"account_id": "oracle-valid-account"},
             actor="tester",
         )
         assert response["status"] == "error"
-        assert response["error"]["code"] == "EXECUTION_ERROR", response
-        assert response["error"]["code"] != "VALIDATION_ERROR", response
+        assert response["error"] == {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message("bot.create", ("strategy_id", "missing")),
+        }
     finally:
         await server.stop()
 
