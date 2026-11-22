@@ -34,6 +34,11 @@ import pytest
 from click.testing import CliRunner
 
 from ante.cli.main import cli
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.member.models import Member, MemberRole, MemberType
 
 _MASTER = Member(
@@ -49,27 +54,18 @@ _MASTER = Member(
 
 def _server_not_running_exc() -> click.ClickException:
     """``ServerNotRunningError`` → ``ipc_send`` ClickException 대역."""
-    exc = click.ClickException(
+    return IPCServerNotRunningError(
         "서버가 실행 중이 아닙니다. 'ante system start'로 시작하세요."
     )
-    exc.ipc_error_code = "IPC_SERVER_NOT_RUNNING"  # type: ignore[attr-defined]
-    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-    return exc
 
 
 def _timeout_exc() -> click.ClickException:
-    exc = click.ClickException("서버 응답 시간 초과")
-    exc.ipc_error_code = "IPC_TIMEOUT"  # type: ignore[attr-defined]
-    exc.ipc_error_message = exc.message  # type: ignore[attr-defined]
-    return exc
+    return IPCClientTimeoutError("서버 응답 시간 초과")
 
 
 def _server_error_exc(code: str, message: str) -> click.ClickException:
     """서버 error envelope → ``ipc_send`` ClickException 대역."""
-    exc = click.ClickException(f"{code}: {message}")
-    exc.ipc_error_code = code  # type: ignore[attr-defined]
-    exc.ipc_error_message = message  # type: ignore[attr-defined]
-    return exc
+    return IPCRemoteError(code, message)
 
 
 def _parse_json(stdout: str) -> dict:
