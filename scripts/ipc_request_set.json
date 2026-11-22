@@ -239,6 +239,1100 @@
     "name": "account.suspend:account:bad"
    }
   ],
+  "member.reactivate": [
+   {
+    "args": {
+     "member_id": "m1"
+    },
+    "kind": "cli",
+    "name": "member.reactivate:cli:0"
+   },
+   {
+    "args": {},
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.reactivate:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5"
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.reactivate:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.reactivate:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.reactivate:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.reactivate:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.reactivate:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.reactivate:array"
+   }
+  ],
+  "member.regenerate_recovery_key": [
+   {
+    "args": {
+     "password": "pw-1"
+    },
+    "kind": "cli",
+    "name": "member.regenerate_recovery_key:cli:0"
+   },
+   {
+    "args": {},
+    "key": "password",
+    "kind": "missing",
+    "name": "member.regenerate_recovery_key:missing:password"
+   },
+   {
+    "args": {
+     "password": "5"
+    },
+    "key": "password",
+    "kind": "value",
+    "name": "member.regenerate_recovery_key:value:password:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "password": 7
+    },
+    "key": "password",
+    "kind": "value",
+    "name": "member.regenerate_recovery_key:value:password:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "password": true
+    },
+    "key": "password",
+    "kind": "value",
+    "name": "member.regenerate_recovery_key:value:password:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "password": null
+    },
+    "key": "password",
+    "kind": "value",
+    "name": "member.regenerate_recovery_key:value:password:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "password": "pw-1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.regenerate_recovery_key:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.regenerate_recovery_key:array"
+   }
+  ],
+  "member.register": [
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "kind": "cli",
+    "name": "member.register:cli:0"
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "n",
+     "org": "o",
+     "scopes": []
+    },
+    "kind": "cli",
+    "name": "member.register:cli:1"
+   },
+   {
+    "args": {
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.register:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.register:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7,
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.register:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true,
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.register:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null,
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.register:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_type",
+    "kind": "missing",
+    "name": "member.register:missing:member_type"
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "5",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_type",
+    "kind": "value",
+    "name": "member.register:value:member_type:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": 7,
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_type",
+    "kind": "value",
+    "name": "member.register:value:member_type:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": true,
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_type",
+    "kind": "value",
+    "name": "member.register:value:member_type:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": null,
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_type",
+    "kind": "value",
+    "name": "member.register:value:member_type:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "5",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "member.register:value:name:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": 7,
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "member.register:value:name:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": true,
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "member.register:value:name:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": null,
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "name",
+    "kind": "value",
+    "name": "member.register:value:name:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "5",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "org",
+    "kind": "value",
+    "name": "member.register:value:org:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": 7,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "org",
+    "kind": "value",
+    "name": "member.register:value:org:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": true,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "org",
+    "kind": "value",
+    "name": "member.register:value:org:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": null,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "org",
+    "kind": "value",
+    "name": "member.register:value:org:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": "5"
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.register:value:scopes:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": 7
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.register:value:scopes:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": true
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.register:value:scopes:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": null
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.register:value:scopes:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "member_type": "agent",
+     "name": "",
+     "org": "default",
+     "scopes": [
+      "a",
+      "b"
+     ],
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.register:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.register:array"
+   }
+  ],
+  "member.reset_password": [
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": "rk"
+    },
+    "kind": "cli",
+    "name": "member.reset_password:cli:0"
+   },
+   {
+    "args": {
+     "recovery_key": "rk"
+    },
+    "key": "new_password",
+    "kind": "missing",
+    "name": "member.reset_password:missing:new_password"
+   },
+   {
+    "args": {
+     "new_password": "5",
+     "recovery_key": "rk"
+    },
+    "key": "new_password",
+    "kind": "value",
+    "name": "member.reset_password:value:new_password:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "new_password": 7,
+     "recovery_key": "rk"
+    },
+    "key": "new_password",
+    "kind": "value",
+    "name": "member.reset_password:value:new_password:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": true,
+     "recovery_key": "rk"
+    },
+    "key": "new_password",
+    "kind": "value",
+    "name": "member.reset_password:value:new_password:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": null,
+     "recovery_key": "rk"
+    },
+    "key": "new_password",
+    "kind": "value",
+    "name": "member.reset_password:value:new_password:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": "pw-1"
+    },
+    "key": "recovery_key",
+    "kind": "missing",
+    "name": "member.reset_password:missing:recovery_key"
+   },
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": "5"
+    },
+    "key": "recovery_key",
+    "kind": "value",
+    "name": "member.reset_password:value:recovery_key:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": 7
+    },
+    "key": "recovery_key",
+    "kind": "value",
+    "name": "member.reset_password:value:recovery_key:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": true
+    },
+    "key": "recovery_key",
+    "kind": "value",
+    "name": "member.reset_password:value:recovery_key:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": null
+    },
+    "key": "recovery_key",
+    "kind": "value",
+    "name": "member.reset_password:value:recovery_key:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "new_password": "pw-1",
+     "recovery_key": "rk",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.reset_password:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.reset_password:array"
+   }
+  ],
+  "member.revoke": [
+   {
+    "args": {
+     "member_id": "m1"
+    },
+    "kind": "cli",
+    "name": "member.revoke:cli:0"
+   },
+   {
+    "args": {},
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.revoke:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5"
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.revoke:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.revoke:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.revoke:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.revoke:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.revoke:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.revoke:array"
+   }
+  ],
+  "member.rotate_token": [
+   {
+    "args": {
+     "member_id": "m1"
+    },
+    "kind": "cli",
+    "name": "member.rotate_token:cli:0"
+   },
+   {
+    "args": {},
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.rotate_token:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5"
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.rotate_token:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.rotate_token:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.rotate_token:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.rotate_token:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.rotate_token:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.rotate_token:array"
+   }
+  ],
+  "member.set_emoji": [
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": "m1"
+    },
+    "kind": "cli",
+    "name": "member.set_emoji:cli:0"
+   },
+   {
+    "args": {
+     "member_id": "m1"
+    },
+    "key": "emoji",
+    "kind": "missing",
+    "name": "member.set_emoji:missing:emoji"
+   },
+   {
+    "args": {
+     "emoji": "5",
+     "member_id": "m1"
+    },
+    "key": "emoji",
+    "kind": "value",
+    "name": "member.set_emoji:value:emoji:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "emoji": 7,
+     "member_id": "m1"
+    },
+    "key": "emoji",
+    "kind": "value",
+    "name": "member.set_emoji:value:emoji:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": true,
+     "member_id": "m1"
+    },
+    "key": "emoji",
+    "kind": "value",
+    "name": "member.set_emoji:value:emoji:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": null,
+     "member_id": "m1"
+    },
+    "key": "emoji",
+    "kind": "value",
+    "name": "member.set_emoji:value:emoji:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": "X"
+    },
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.set_emoji:missing:member_id"
+   },
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": "5"
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.set_emoji:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": 7
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.set_emoji:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": true
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.set_emoji:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": null
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.set_emoji:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "emoji": "X",
+     "member_id": "m1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.set_emoji:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.set_emoji:array"
+   }
+  ],
+  "member.suspend": [
+   {
+    "args": {
+     "member_id": "m1"
+    },
+    "kind": "cli",
+    "name": "member.suspend:cli:0"
+   },
+   {
+    "args": {},
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.suspend:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5"
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.suspend:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.suspend:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.suspend:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.suspend:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.suspend:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.suspend:array"
+   }
+  ],
+  "member.update_scopes": [
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "kind": "cli",
+    "name": "member.update_scopes:cli:0"
+   },
+   {
+    "args": {
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "missing",
+    "name": "member.update_scopes:missing:member_id"
+   },
+   {
+    "args": {
+     "member_id": "5",
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.update_scopes:value:member_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "member_id": 7,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.update_scopes:value:member_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": true,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.update_scopes:value:member_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": null,
+     "scopes": [
+      "a",
+      "b"
+     ]
+    },
+    "key": "member_id",
+    "kind": "value",
+    "name": "member.update_scopes:value:member_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": "5"
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.update_scopes:value:scopes:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": 7
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.update_scopes:value:scopes:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": true
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.update_scopes:value:scopes:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": null
+    },
+    "key": "scopes",
+    "kind": "value",
+    "name": "member.update_scopes:value:scopes:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "member_id": "m1",
+     "scopes": [
+      "a",
+      "b"
+     ],
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "member.update_scopes:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "member.update_scopes:array"
+   }
+  ],
   "strategy.set_status": [
    {
     "args": {

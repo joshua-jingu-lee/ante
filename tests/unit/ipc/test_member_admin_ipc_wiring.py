@@ -41,6 +41,7 @@ from ante.ipc.registry import (
 )
 from ante.ipc.server import IPCServer
 from ante.member.models import Member, MemberRole, MemberStatus, MemberType
+from tests.unit.ipc.test_request_model_domain import validation_message
 
 # 테스트가 leak 여부를 검사하는 secret 토큰 sentinels. 어떤 envelope/audit/log
 # 에도 등장하면 안 된다.
@@ -523,14 +524,14 @@ _SPOOF_ACTOR_CASES = [
     ("command", "service_attr", "by_kwarg", "extra_args"), _SPOOF_ACTOR_CASES
 )
 @pytest.mark.asyncio
-async def test_member_handlers_ignore_actor_fields_in_request_args(
+async def test_member_handlers_reject_actor_fields_in_request_args(
     socket_path: str,
     command: str,
     service_attr: str,
     by_kwarg: str,
     extra_args: dict[str, Any],
 ) -> None:
-    """요청 본문에 다른 멤버를 행위자로 실어도 서비스와 감사에는 호출자가 간다."""
+    """요청 본문에 행위자 필드를 실으면 요청 모델이 모르는 키로 거부한다(#2683)."""
     member_service = _make_member_service_mock()
     returned = _make_member("alice", emoji="🦊")
     if service_attr in ("register", "rotate_token"):
@@ -562,12 +563,18 @@ async def test_member_handlers_ignore_actor_fields_in_request_args(
     finally:
         await server.stop()
 
-    assert response["status"] == "ok", response
-    service_call = getattr(member_service, service_attr)
-    service_call.assert_awaited_once()
-    assert service_call.await_args.kwargs[by_kwarg] == "agent-caller"
-    audit_logger.log.assert_awaited_once()
-    assert audit_logger.log.await_args.kwargs["member_id"] == "agent-caller"
+    assert response == {
+        "id": "1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(
+                command, (by_kwarg, "extra_forbidden"), ("actor", "extra_forbidden")
+            ),
+        },
+    }
+    getattr(member_service, service_attr).assert_not_awaited()
+    audit_logger.log.assert_not_awaited()
 
 
 _GATED_SPOOF_CASES = [
@@ -618,7 +625,7 @@ async def test_member_master_gate_judges_authenticated_caller_not_args(
                 {
                     "id": "1",
                     "command": command,
-                    "args": {**args, by_kwarg: "owner", "actor": "owner"},
+                    "args": args,
                     "actor": "agent-caller",
                 }
             )
@@ -801,10 +808,10 @@ async def test_member_secret_absent_on_every_ending_path(
     ],
 )
 @pytest.mark.asyncio
-async def test_recovery_target_is_resolved_on_server_even_if_client_sends_member_id(
+async def test_recovery_request_with_a_member_id_is_rejected(
     socket_path: str, command: str, args: dict[str, Any], service_attr: str
 ) -> None:
-    """client 가 member_id 를 보내도 대상은 서버가 찾은 master 다."""
+    """client 가 member_id 를 보내면 요청 모델이 모르는 키로 거부한다(#2683)."""
     member_service = _make_member_service_mock()
     member_service.list_members.return_value = [
         _make_member("agent-x", type=MemberType.AGENT, role=MemberRole.DEFAULT),
@@ -832,7 +839,14 @@ async def test_recovery_target_is_resolved_on_server_even_if_client_sends_member
     finally:
         await server.stop()
 
-    assert response["status"] == "ok", response
-    call_args, _ = getattr(member_service, service_attr).await_args
-    assert call_args[0] == "master-bob"
-    assert audit_logger.log.await_args.kwargs["resource"] == "member:master-bob"
+    assert response == {
+        "id": "1",
+        "status": "error",
+        "error": {
+            "code": "VALIDATION_ERROR",
+            "message": validation_message(command, ("member_id", "extra_forbidden")),
+        },
+    }
+    member_service.list_members.assert_not_awaited()
+    getattr(member_service, service_attr).assert_not_awaited()
+    audit_logger.log.assert_not_awaited()
