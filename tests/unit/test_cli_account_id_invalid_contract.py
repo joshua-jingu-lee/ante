@@ -277,7 +277,7 @@ class TestValidButAbsentNotMisclassified:
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output.strip())
         assert payload.get("code") != "VALIDATION_ERROR", payload
-        assert payload["bots"] == []
+        assert payload["data"]["bots"] == []
         # ingress 통과 → SQL filter 도달 (account_id 파라미터 바인딩).
         call_args = db.fetch_all.call_args
         assert _VALID_ABSENT in call_args[0][1], call_args
@@ -310,7 +310,7 @@ class TestBotListOmittedVsProvidedBoundary:
             result = runner.invoke(cli, ["--format", "json", "bot", "list"])
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output.strip())
-        assert payload["bots"][0]["account_id"] == "domestic"
+        assert payload["data"]["bots"][0]["account_id"] == "domestic"
         # 파라미터 없이 SQL만 — 전체 봇 쿼리 (omitted 분기 보존).
         call_args = db.fetch_all.call_args
         assert len(call_args[0]) == 1, call_args
@@ -390,6 +390,6 @@ class TestValidAccountIdRegression:
             )
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output.strip())
-        assert payload["bots"][0]["account_id"] == _VALID_PRESENT
+        assert payload["data"]["bots"][0]["account_id"] == _VALID_PRESENT
         call_args = db.fetch_all.call_args
         assert _VALID_PRESENT in call_args[0][1], call_args

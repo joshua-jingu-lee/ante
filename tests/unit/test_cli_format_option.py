@@ -689,7 +689,7 @@ class TestBotListFormatOption1701:
             result = runner.invoke(cli, ["bot", "list", "--format", "json"])
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert "bots" in payload
         assert payload["bots"] == []
 

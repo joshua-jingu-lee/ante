@@ -158,7 +158,7 @@ class TestBotNotFoundEquivalence:
         # 비결정적이 된다(False → cold-path → 미설정 DB → code 없는 예외 →
         # ``EXECUTION_ERROR`` 오분류). IPC-path equivalence 를 검증하는 본
         # 테스트는 ``is_active_runtime`` 을 ``True`` 로 고정해 결정적으로
-        # ipc_send 경로를 타게 한다(``test_bot_success_output_drift.py`` /
+        # ipc_send 경로를 타게 한다(``test_bot_cli_output_bytes.py`` /
         # ``test_cli_bot_treasury_ipc.py`` 의 bot_remove IPC 테스트 미러).
         with (
             patch("ante.cli.commands.bot.is_active_runtime", return_value=True),

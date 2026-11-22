@@ -516,7 +516,7 @@ def test_bot_update_with_one_field_is_sent() -> None:
         patch(_IPC_SEND, new=send),
     )
     assert result.exit_code == 0, (result.stdout, result.stderr)
-    assert json.loads(result.stdout) == {"bot_id": "b1"}
+    assert json.loads(result.stdout)["data"] == {"bot_id": "b1"}
     send.assert_awaited_once()
 
 
@@ -633,7 +633,10 @@ def test_bot_signal_key_present_is_not_an_error() -> None:
         _send(value={"bot_id": "b1", "signal_key": "sk-1"}),
     )
     assert result.exit_code == 0, (result.stdout, result.stderr)
-    assert json.loads(result.stdout) == {"bot_id": "b1", "signal_key": "sk-1"}
+    assert json.loads(result.stdout)["data"] == {
+        "bot_id": "b1",
+        "signal_key": "sk-1",
+    }
 
 
 @pytest.mark.parametrize("mode", _MODES)

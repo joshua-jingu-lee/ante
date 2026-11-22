@@ -19,7 +19,7 @@ from ante.cli._validators import (
 )
 from ante.cli.cold_path import is_active_runtime
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -149,7 +149,7 @@ async def _run_bot_remove_cold_path(
 @click.pass_context
 @require_auth
 @require_scope("bot:read")
-def bot_list(ctx: click.Context, account_id: str | None) -> None:
+def bot_list(ctx: click.Context, account_id: str | None) -> CommandResult:
     """봇 목록 조회."""
     fmt = get_formatter(ctx)
 
@@ -188,16 +188,13 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
     result = _run(_run_list())
 
     if not result:
-        fmt.output({"message": "등록된 봇이 없습니다.", "bots": []})
-        return
+        empty: dict[str, Any] = {"message": "등록된 봇이 없습니다.", "bots": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"bots": result})
-    else:
-        fmt.table(
-            result,
-            ["bot_id", "name", "strategy_id", "account_id", "status", "created_at"],
-        )
+    columns = ["bot_id", "name", "strategy_id", "account_id", "status", "created_at"]
+    return CommandResult(
+        data={"bots": result}, text=tuple(table_lines(result, columns))
+    )
 
 
 @bot.command("info")
@@ -205,9 +202,8 @@ def bot_list(ctx: click.Context, account_id: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("bot:read")
-def bot_info(ctx: click.Context, bot_id: str) -> None:
+def bot_info(ctx: click.Context, bot_id: str) -> CommandResult:
     """봇 상세 정보 조회."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_info_fallback() -> dict[str, Any] | None:
@@ -229,15 +225,17 @@ def bot_info(ctx: click.Context, bot_id: str) -> None:
     if not result:
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  Bot ID    : {result['bot_id']}")
-        click.echo(f"  이름      : {result['name']}")
-        click.echo(f"  전략      : {result['strategy_id']}")
-        click.echo(f"  계좌      : {result.get('account_id', 'test')}")
-        click.echo(f"  상태      : {result['status']}")
-        click.echo(f"  생성일    : {result.get('created_at')}")
+    return CommandResult(
+        data=result,
+        text=(
+            f"  Bot ID    : {result['bot_id']}",
+            f"  이름      : {result['name']}",
+            f"  전략      : {result['strategy_id']}",
+            f"  계좌      : {result.get('account_id', 'test')}",
+            f"  상태      : {result['status']}",
+            f"  생성일    : {result.get('created_at')}",
+        ),
+    )
 
 
 def _parse_param(value: str) -> tuple[str, object]:
@@ -303,7 +301,7 @@ def bot_create(
     interval: int,
     bot_id: str,
     params: tuple[str, ...],
-) -> None:
+) -> CommandResult:
     """봇 생성."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
@@ -348,7 +346,9 @@ def bot_create(
 
     result = _run(_run_create())
 
-    fmt.success(f"봇 생성 완료: {result.get('bot_id', '')}", result)
+    return CommandResult(
+        data=result, message=f"봇 생성 완료: {result.get('bot_id', '')}"
+    )
 
 
 @bot.command("remove")
@@ -363,14 +363,13 @@ def bot_create(
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
+def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> CommandResult:
     """봇 삭제.
 
     서버가 실행 중이면 기존 IPC 경로를 사용하고, 서버가 정지되어 있으면
     cold-path service가 persisted DB/signal key/snapshot/treasury state를 정리한다.
     `--yes` 누락 시 prompt 없이 `CLI_CONFIRMATION_REQUIRED` 에러로 종료한다.
     """
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     if not yes:
@@ -390,7 +389,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
     if not result.get("removed"):
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
     suffix = "(cold-path)" if result.get("cold_path") else ""
-    fmt.success(f"봇 삭제 완료{suffix}: {bot_id}", result)
+    return CommandResult(data=result, message=f"봇 삭제 완료{suffix}: {bot_id}")
 
 
 @bot.command("signal-key")
@@ -399,7 +398,7 @@ def bot_remove(ctx: click.Context, bot_id: str, yes: bool) -> None:
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
+def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> CommandResult:
     """봇 시그널 키 조회 또는 재발급.
 
     ``--rotate`` 는 runtime IPC (``bot.signal_key.rotate``) 전용이다.
@@ -412,8 +411,6 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     정지 시 기존 직접 DB 경로를 보존한다 — 스펙: runtime IPC + snapshot
     fallback).
     """
-    fmt = get_formatter(ctx)
-
     if rotate:
         actor = get_member_id(ctx)
 
@@ -426,8 +423,7 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 
         result = _run(_run_rotate())
 
-        fmt.success(f"시그널 키 재발급 완료: {bot_id}", result)
-        return
+        return CommandResult(data=result, message=f"시그널 키 재발급 완료: {bot_id}")
 
     actor = get_member_id(ctx)
 
@@ -477,11 +473,13 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
     if result.get("signal_key") is None:
         raise SignalKeyNotSetError(f"signal key가 설정되지 않았습니다: {bot_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  Bot ID     : {result['bot_id']}")
-        click.echo(f"  Signal Key : {result['signal_key']}")
+    return CommandResult(
+        data=result,
+        text=(
+            f"  Bot ID     : {result['bot_id']}",
+            f"  Signal Key : {result['signal_key']}",
+        ),
+    )
 
 
 @bot.command("positions")
@@ -489,9 +487,8 @@ def bot_signal_key(ctx: click.Context, bot_id: str, rotate: bool) -> None:
 @click.pass_context
 @require_auth
 @require_scope("bot:read")
-def bot_positions(ctx: click.Context, bot_id: str) -> None:
+def bot_positions(ctx: click.Context, bot_id: str) -> CommandResult:
     """봇 보유 포지션 조회."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_positions_fallback() -> list[dict[str, Any]] | None:
@@ -554,13 +551,13 @@ def bot_positions(ctx: click.Context, bot_id: str) -> None:
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
 
     if not result:
-        fmt.output({"message": "보유 포지션 없음", "positions": []})
-        return
+        empty: dict[str, Any] = {"message": "보유 포지션 없음", "positions": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"positions": result})
-    else:
-        fmt.table(result, ["symbol", "quantity", "avg_entry_price", "realized_pnl"])
+    columns = ["symbol", "quantity", "avg_entry_price", "realized_pnl"]
+    return CommandResult(
+        data={"positions": result}, text=tuple(table_lines(result, columns))
+    )
 
 
 @bot.command("update")
@@ -606,9 +603,8 @@ def bot_update(
     restart_cooldown_seconds: int | None,
     step_timeout_seconds: int | None,
     max_signals_per_step: int | None,
-) -> None:
+) -> CommandResult:
     """중지 상태 봇 설정 수정."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
     updates = {
         "name": name,
@@ -636,10 +632,7 @@ def bot_update(
 
     result = _run(_run_update())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"봇 설정 수정 완료: {bot_id}")
+    return CommandResult(data=result, text=(f"봇 설정 수정 완료: {bot_id}",))
 
 
 def _parse_log_datetime(
@@ -685,9 +678,8 @@ def bot_logs(
     offset: int,
     from_date: str | None,
     to_date: str | None,
-) -> None:
+) -> CommandResult:
     """봇 실행 로그 조회."""
-    fmt = get_formatter(ctx)
     try:
         since = _parse_log_datetime(from_date, "--from")
         until = _parse_log_datetime(to_date, "--to", end_of_day=True)
@@ -746,12 +738,10 @@ def bot_logs(
     result = _run(_run_logs())
     if result.get("missing"):
         raise CliBotNotFoundError(f"봇을 찾을 수 없습니다: {bot_id}")
-    if fmt.is_json:
-        fmt.output(result)
-    elif not result["logs"]:
-        click.echo("(logs 없음)")
-    else:
-        fmt.table(result["logs"], ["timestamp", "result", "message"])
+    if not result["logs"]:
+        return CommandResult(data=result, text=("(logs 없음)",))
+    columns = ["timestamp", "result", "message"]
+    return CommandResult(data=result, text=tuple(table_lines(result["logs"], columns)))
 
 
 @bot.command("start")
@@ -760,9 +750,8 @@ def bot_logs(
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_start(ctx: click.Context, bot_id: str) -> None:
+def bot_start(ctx: click.Context, bot_id: str) -> CommandResult:
     """봇 시작."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_start() -> dict[str, Any]:
@@ -772,10 +761,7 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
 
     result = _run(_run_start())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"봇 시작 완료: {bot_id}")
+    return CommandResult(data=result, text=(f"봇 시작 완료: {bot_id}",))
 
 
 @bot.command("stop")
@@ -784,9 +770,8 @@ def bot_start(ctx: click.Context, bot_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("bot:admin")
-def bot_stop(ctx: click.Context, bot_id: str) -> None:
+def bot_stop(ctx: click.Context, bot_id: str) -> CommandResult:
     """봇 중지."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_stop() -> dict[str, Any]:
@@ -796,10 +781,7 @@ def bot_stop(ctx: click.Context, bot_id: str) -> None:
 
     result = _run(_run_stop())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"봇 중지 완료: {bot_id}")
+    return CommandResult(data=result, text=(f"봇 중지 완료: {bot_id}",))
 
 
 @bot.command("status")
@@ -808,9 +790,8 @@ def bot_stop(ctx: click.Context, bot_id: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("bot:read")
-def bot_status(ctx: click.Context, bot_id: str) -> None:
+def bot_status(ctx: click.Context, bot_id: str) -> CommandResult:
     """봇 live 상태 조회."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_status() -> dict[str, Any]:
@@ -820,36 +801,35 @@ def bot_status(ctx: click.Context, bot_id: str) -> None:
 
     result = _run(_run_status())
 
-    if fmt.is_json:
-        fmt.output(result)
-        return
-
     info = result.get("bot", {})
-    click.echo(f"  Bot ID       : {info.get('bot_id')}")
-    click.echo(f"  Name         : {info.get('name')}")
-    click.echo(f"  Status       : {info.get('status')}")
-    click.echo(f"  Account ID   : {info.get('account_id')}")
-    click.echo(f"  Strategy ID  : {info.get('strategy_id')}")
+    lines = [
+        f"  Bot ID       : {info.get('bot_id')}",
+        f"  Name         : {info.get('name')}",
+        f"  Status       : {info.get('status')}",
+        f"  Account ID   : {info.get('account_id')}",
+        f"  Strategy ID  : {info.get('strategy_id')}",
+    ]
     if info.get("strategy_name"):
-        click.echo(f"  Strategy Name: {info.get('strategy_name')}")
+        lines.append(f"  Strategy Name: {info.get('strategy_name')}")
     if info.get("interval_seconds") is not None:
-        click.echo(f"  Interval     : {info.get('interval_seconds')}s")
+        lines.append(f"  Interval     : {info.get('interval_seconds')}s")
     if info.get("started_at"):
-        click.echo(f"  Started At   : {info.get('started_at')}")
+        lines.append(f"  Started At   : {info.get('started_at')}")
     if info.get("stopped_at"):
-        click.echo(f"  Stopped At   : {info.get('stopped_at')}")
+        lines.append(f"  Stopped At   : {info.get('stopped_at')}")
     if info.get("error_message"):
-        click.echo(f"  Error        : {info.get('error_message')}")
+        lines.append(f"  Error        : {info.get('error_message')}")
     budget = info.get("budget")
     if budget:
-        click.echo("  Budget:")
+        lines.append("  Budget:")
         for k, v in budget.items():
-            click.echo(f"    {k}: {v}")
+            lines.append(f"    {k}: {v}")
     positions = info.get("positions")
     if positions:
-        click.echo(f"  Positions ({len(positions)}):")
+        lines.append(f"  Positions ({len(positions)}):")
         for p in positions:
-            click.echo(
+            lines.append(
                 f"    {p.get('symbol')}: qty={p.get('quantity')}, "
                 f"avg={p.get('avg_entry_price')}"
             )
+    return CommandResult(data=result, text=tuple(lines))

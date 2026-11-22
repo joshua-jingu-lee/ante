@@ -166,7 +166,7 @@ class TestServerRunningRoutesToIpc:
         assert result.exit_code == 0, result.stdout + result.stderr
         assert mock_send.await_args.args[0] == "bot.list"
         payload = _parse_json(result.stdout)
-        assert [b["bot_id"] for b in payload["bots"]] == ["bot-1"]
+        assert [b["bot_id"] for b in payload["data"]["bots"]] == ["bot-1"]
 
     def test_list_account_filter_passed_to_ipc(self) -> None:
         mock_send = AsyncMock(return_value={"bots": []})
@@ -204,8 +204,8 @@ class TestServerRunningRoutesToIpc:
         assert mock_send.await_args.args[0] == "bot.info"
         assert mock_send.await_args.args[1] == {"bot_id": "bot-1"}
         payload = _parse_json(result.stdout)
-        assert payload["bot_id"] == "bot-1"
-        assert payload["status"] == "running"
+        assert payload["data"]["bot_id"] == "bot-1"
+        assert payload["data"]["status"] == "running"
 
     def test_info_text_mode_tolerates_missing_created_at(self) -> None:
         """live ``get_info()`` 결과에는 created_at 이 없다. text 출력이 실패하지
@@ -259,7 +259,7 @@ class TestServerRunningRoutesToIpc:
         assert mock_send.await_args.args[0] == "bot.positions"
         assert mock_send.await_args.args[1] == {"bot_id": "bot-1"}
         payload = _parse_json(result.stdout)
-        assert [p["symbol"] for p in payload["positions"]] == ["AAA"]
+        assert [p["symbol"] for p in payload["data"]["positions"]] == ["AAA"]
 
     def test_signal_key_read_routes_to_ipc(self) -> None:
         mock_send = AsyncMock(return_value={"bot_id": "bot-1", "signal_key": "sk_live"})
@@ -274,7 +274,7 @@ class TestServerRunningRoutesToIpc:
         assert mock_send.await_args.args[0] == "bot.signal_key"
         assert mock_send.await_args.args[1] == {"bot_id": "bot-1"}
         payload = _parse_json(result.stdout)
-        assert payload["signal_key"] == "sk_live"
+        assert payload["data"]["signal_key"] == "sk_live"
 
     def test_signal_key_read_does_not_use_rotate_command(self) -> None:
         """read 경로(rotate 미지정)는 ``bot.signal_key`` (read) 만 호출하고
@@ -356,7 +356,7 @@ class TestServerStoppedFallsBackToSnapshot:
         )
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = _parse_json(result.stdout)
-        assert [b["bot_id"] for b in payload["bots"]] == ["bot-db"]
+        assert [b["bot_id"] for b in payload["data"]["bots"]] == ["bot-db"]
         db.fetch_all.assert_awaited()
 
     def test_info_falls_back_to_db(self) -> None:
@@ -382,7 +382,7 @@ class TestServerStoppedFallsBackToSnapshot:
         )
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = _parse_json(result.stdout)
-        assert payload["bot_id"] == "bot-db"
+        assert payload["data"]["bot_id"] == "bot-db"
         db.fetch_one.assert_awaited()
 
     def test_signal_key_read_falls_back_to_db(self) -> None:
@@ -404,7 +404,7 @@ class TestServerStoppedFallsBackToSnapshot:
         )
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = _parse_json(result.stdout)
-        assert payload["signal_key"] == "sk_db"
+        assert payload["data"]["signal_key"] == "sk_db"
         skm.get_key.assert_awaited()
 
     def test_positions_falls_back_to_db(self) -> None:
@@ -435,7 +435,7 @@ class TestServerStoppedFallsBackToSnapshot:
         )
         assert result.exit_code == 0, result.stdout + result.stderr
         payload = _parse_json(result.stdout)
-        assert [p["symbol"] for p in payload["positions"]] == ["AAA"]
+        assert [p["symbol"] for p in payload["data"]["positions"]] == ["AAA"]
         # account scoping 보존: 봇 계좌(acc-a) 로 스코핑.
         trade_service.get_positions.assert_awaited_once_with(
             "bot-db", account_id="acc-a"
@@ -480,11 +480,11 @@ class TestShapeParity:
                 ),
             ],
         )
-        ipc_keys = set(_parse_json(ipc_res.stdout))
-        fb_keys = set(_parse_json(fb_res.stdout))
+        ipc_keys = set(_parse_json(ipc_res.stdout)["data"])
+        fb_keys = set(_parse_json(fb_res.stdout)["data"])
         assert "bots" in ipc_keys and "bots" in fb_keys
-        ipc_bot = _parse_json(ipc_res.stdout)["bots"][0]
-        fb_bot = _parse_json(fb_res.stdout)["bots"][0]
+        ipc_bot = _parse_json(ipc_res.stdout)["data"]["bots"][0]
+        fb_bot = _parse_json(fb_res.stdout)["data"]["bots"][0]
         common = {"bot_id", "name", "strategy_id", "account_id", "status"}
         assert {k: ipc_bot[k] for k in common} == {k: fb_bot[k] for k in common}
 
@@ -515,8 +515,8 @@ class TestShapeParity:
                 patch("ante.bot.signal_key.SignalKeyManager", return_value=skm),
             ],
         )
-        ipc = _parse_json(ipc_res.stdout)
-        fb = _parse_json(fb_res.stdout)
+        ipc = _parse_json(ipc_res.stdout)["data"]
+        fb = _parse_json(fb_res.stdout)["data"]
         assert {"bot_id", "signal_key"} <= set(ipc)
         assert {k: ipc[k] for k in ("bot_id", "signal_key")} == {
             k: fb[k] for k in ("bot_id", "signal_key")
