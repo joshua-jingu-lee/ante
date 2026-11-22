@@ -209,7 +209,7 @@ class TestDataListReadOnlyFilesystem:
         result = _run_list_under_readonly(runner, data_path, db_dir, db_file)
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["count"] == 1, payload
         assert payload["datasets"][0]["symbol"] == "005930"
         # WAL PRAGMA 실패 없이 read-only DB 에서 이름 보강 보존.
@@ -248,7 +248,7 @@ class TestDataListReadOnlyFilesystem:
         result = _run_list_under_readonly(runner, data_path, db_dir, db_file)
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["count"] == 1, payload
         assert payload["datasets"][0]["symbol"] == "005930"
         assert payload["datasets"][0]["name"] == "삼성전자", payload

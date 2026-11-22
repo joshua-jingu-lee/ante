@@ -234,7 +234,7 @@ class TestBacktestRunValidation:
             ),
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout)["run_id"] == "run-1"
+        assert json.loads(result.stdout)["data"]["run_id"] == "run-1"
 
     def test_non_krx_symbol_shape_is_accepted(
         self, run_args: Callable[..., list[str]]
@@ -258,7 +258,7 @@ class TestBacktestRunValidation:
             ),
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout)["run_id"] == "run-2"
+        assert json.loads(result.stdout)["data"]["run_id"] == "run-2"
 
 
 _RANGE_OPTIONS = ["--start", "2026-01-02", "--end", "2026-01-30"]
@@ -291,7 +291,7 @@ class TestBacktestRunExecution:
             ),
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout)["run_id"] == "run-3"
+        assert json.loads(result.stdout)["data"]["run_id"] == "run-3"
 
     def test_service_failure_json(self, run_args: Callable[..., list[str]]) -> None:
         result = _invoke(
@@ -384,7 +384,11 @@ class TestDataList:
             ]
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout) == {"datasets": [], "count": 0}
+        assert json.loads(result.stdout) == {
+            "status": "ok",
+            "message": "",
+            "data": {"datasets": [], "count": 0},
+        }
 
     def test_enrich_failure(self, data_path: str) -> None:
         listing = patch(
@@ -703,4 +707,4 @@ class TestInstrumentImport:
             ]
         )
         assert result.exit_code == 0, (result.stdout, result.stderr)
-        assert json.loads(result.stdout)["total"] == 2
+        assert json.loads(result.stdout)["data"]["total"] == 2

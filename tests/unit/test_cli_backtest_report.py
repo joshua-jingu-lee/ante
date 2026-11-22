@@ -94,7 +94,7 @@ class TestBacktestHistory:
                 cli, ["--format", "json", "backtest", "history", "momentum"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["strategy_name"] == "momentum"
             assert len(data["runs"]) == 1
 

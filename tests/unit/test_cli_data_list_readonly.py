@@ -186,7 +186,7 @@ class TestDataListReadOnlyDb:
         result = _run_data_list(runner, data_path, db_file)
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["count"] == 1, payload
         assert payload["datasets"][0]["symbol"] == "005930"
         assert payload["datasets"][0]["name"] == "삼성전자", payload
@@ -213,7 +213,7 @@ class TestDataListReadOnlyDb:
         assert result.exit_code == 0, result.output
         assert "Traceback" not in result.output, result.output
         assert "DATA_ERROR" not in result.output, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["count"] == 1, payload
         assert payload["datasets"][0]["symbol"] == "005930"
         # 캐시 미스 → symbol fallback.
@@ -235,7 +235,7 @@ class TestDataListReadOnlyDb:
         result = _run_data_list(runner, data_path, db_file)
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert payload["datasets"][0]["name"] == "삼성전자", payload
 
     def test_malformed_db_reraises_as_data_error(self, runner, tmp_path) -> None:

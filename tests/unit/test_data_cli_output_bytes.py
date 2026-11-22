@@ -228,9 +228,27 @@ def _invoke_case(
 
 _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'datasets': [], 'count': 0}\n"),
-    ("list_empty", "json"): ('{\n  "datasets": [],\n  "count": 0\n}\n'),
+    ("list_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "datasets": [],\n'
+        '    "count": 0\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_page_past_end", "text"): ("{'datasets': [], 'count': 3}\n"),
-    ("list_page_past_end", "json"): ('{\n  "datasets": [],\n  "count": 3\n}\n'),
+    ("list_page_past_end", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "datasets": [],\n'
+        '    "count": 3\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_rows", "text"): (
         "          id |       symbol |         name |    timeframe |    data_type |   s"
         "tart_date |     end_date\n"
@@ -245,42 +263,46 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "datasets": [\n'
-        "    {\n"
-        '      "id": "005930__fundamental",\n'
-        '      "symbol": "005930",\n'
-        '      "timeframe": "",\n'
-        '      "data_type": "fundamental",\n'
-        '      "start_date": "2024-01-02",\n'
-        '      "end_date": "2025-12-30",\n'
-        '      "row_count": null,\n'
-        '      "file_size": null,\n'
-        '      "name": "삼성전자"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": "005930__1d",\n'
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "data_type": "ohlcv",\n'
-        '      "start_date": "2024-01-02",\n'
-        '      "end_date": "2026-01-15",\n'
-        '      "row_count": null,\n'
-        '      "file_size": null,\n'
-        '      "name": "삼성전자"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": "999999__1m",\n'
-        '      "symbol": "999999",\n'
-        '      "timeframe": "1m",\n'
-        '      "data_type": "ohlcv",\n'
-        '      "start_date": null,\n'
-        '      "end_date": null,\n'
-        '      "row_count": null,\n'
-        '      "file_size": null,\n'
-        '      "name": ""\n'
-        "    }\n"
-        "  ],\n"
-        '  "count": 3\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "datasets": [\n'
+        "      {\n"
+        '        "id": "005930__fundamental",\n'
+        '        "symbol": "005930",\n'
+        '        "timeframe": "",\n'
+        '        "data_type": "fundamental",\n'
+        '        "start_date": "2024-01-02",\n'
+        '        "end_date": "2025-12-30",\n'
+        '        "row_count": null,\n'
+        '        "file_size": null,\n'
+        '        "name": "삼성전자"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": "005930__1d",\n'
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "data_type": "ohlcv",\n'
+        '        "start_date": "2024-01-02",\n'
+        '        "end_date": "2026-01-15",\n'
+        '        "row_count": null,\n'
+        '        "file_size": null,\n'
+        '        "name": "삼성전자"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": "999999__1m",\n'
+        '        "symbol": "999999",\n'
+        '        "timeframe": "1m",\n'
+        '        "data_type": "ohlcv",\n'
+        '        "start_date": null,\n'
+        '        "end_date": null,\n'
+        '        "row_count": null,\n'
+        '        "file_size": null,\n'
+        '        "name": ""\n'
+        "      }\n"
+        "    ],\n"
+        '    "count": 3\n'
+        "  }\n"
         "}\n"
     ),
     ("list_filtered", "text"): (
@@ -293,20 +315,24 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_filtered", "json"): (
         "{\n"
-        '  "datasets": [\n'
-        "    {\n"
-        '      "id": "005930__1d",\n'
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "data_type": "ohlcv",\n'
-        '      "start_date": "2024-01-02",\n'
-        '      "end_date": "2026-01-15",\n'
-        '      "row_count": null,\n'
-        '      "file_size": null,\n'
-        '      "name": "삼성전자"\n'
-        "    }\n"
-        "  ],\n"
-        '  "count": 1\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "datasets": [\n'
+        "      {\n"
+        '        "id": "005930__1d",\n'
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "data_type": "ohlcv",\n'
+        '        "start_date": "2024-01-02",\n'
+        '        "end_date": "2026-01-15",\n'
+        '        "row_count": null,\n'
+        '        "file_size": null,\n'
+        '        "name": "삼성전자"\n'
+        "      }\n"
+        "    ],\n"
+        '    "count": 1\n'
+        "  }\n"
         "}\n"
     ),
     ("info_preview", "text"): (
@@ -325,28 +351,32 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_preview", "json"): (
         "{\n"
-        '  "dataset": {\n'
-        '    "id": "005930__1d",\n'
-        '    "symbol": "005930",\n'
-        '    "timeframe": "1d",\n'
-        '    "data_type": "ohlcv",\n'
-        '    "start_date": "2024-01-02",\n'
-        '    "end_date": "2026-01-15",\n'
-        '    "row_count": 500,\n'
-        '    "file_size": 12345\n'
-        "  },\n"
-        '  "preview": [\n'
-        "    {\n"
-        '      "timestamp": "2024-01-02T00:00:00",\n'
-        '      "open": 70000.0,\n'
-        '      "close": 71000.0\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dataset": {\n'
+        '      "id": "005930__1d",\n'
+        '      "symbol": "005930",\n'
+        '      "timeframe": "1d",\n'
+        '      "data_type": "ohlcv",\n'
+        '      "start_date": "2024-01-02",\n'
+        '      "end_date": "2026-01-15",\n'
+        '      "row_count": 500,\n'
+        '      "file_size": 12345\n'
         "    },\n"
-        "    {\n"
-        '      "timestamp": "2024-01-03T00:00:00",\n'
-        '      "open": 71000.0,\n'
-        '      "close": null\n'
-        "    }\n"
-        "  ]\n"
+        '    "preview": [\n'
+        "      {\n"
+        '        "timestamp": "2024-01-02T00:00:00",\n'
+        '        "open": 70000.0,\n'
+        '        "close": 71000.0\n'
+        "      },\n"
+        "      {\n"
+        '        "timestamp": "2024-01-03T00:00:00",\n'
+        '        "open": 71000.0,\n'
+        '        "close": null\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info_no_preview", "text"): (
@@ -361,39 +391,51 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info_no_preview", "json"): (
         "{\n"
-        '  "dataset": {\n'
-        '    "id": "005930__1d",\n'
-        '    "symbol": "005930",\n'
-        '    "timeframe": "1d",\n'
-        '    "data_type": "ohlcv",\n'
-        '    "start_date": "2024-01-02",\n'
-        '    "end_date": "2026-01-15",\n'
-        '    "row_count": 500,\n'
-        '    "file_size": 12345\n'
-        "  },\n"
-        '  "preview": []\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dataset": {\n'
+        '      "id": "005930__1d",\n'
+        '      "symbol": "005930",\n'
+        '      "timeframe": "1d",\n'
+        '      "data_type": "ohlcv",\n'
+        '      "start_date": "2024-01-02",\n'
+        '      "end_date": "2026-01-15",\n'
+        '      "row_count": 500,\n'
+        '      "file_size": 12345\n'
+        "    },\n"
+        '    "preview": []\n'
+        "  }\n"
         "}\n"
     ),
     ("delete", "text"): ("데이터셋 삭제 완료: 005930__1d\n"),
     ("delete", "json"): (
         "{\n"
-        '  "dataset_id": "005930__1d",\n'
-        '  "symbol": "005930",\n'
-        '  "timeframe": "1d",\n'
-        '  "data_type": "ohlcv",\n'
-        '  "path": "data/ohlcv/1d/005930",\n'
-        '  "deleted": true\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dataset_id": "005930__1d",\n'
+        '    "symbol": "005930",\n'
+        '    "timeframe": "1d",\n'
+        '    "data_type": "ohlcv",\n'
+        '    "path": "data/ohlcv/1d/005930",\n'
+        '    "deleted": true\n'
+        "  }\n"
         "}\n"
     ),
     ("delete_typed", "text"): ("데이터셋 삭제 완료: 005930__1d\n"),
     ("delete_typed", "json"): (
         "{\n"
-        '  "dataset_id": "005930__1d",\n'
-        '  "symbol": "005930",\n'
-        '  "timeframe": "1d",\n'
-        '  "data_type": "ohlcv",\n'
-        '  "path": "data/ohlcv/1d/005930",\n'
-        '  "deleted": true\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dataset_id": "005930__1d",\n'
+        '    "symbol": "005930",\n'
+        '    "timeframe": "1d",\n'
+        '    "data_type": "ohlcv",\n'
+        '    "path": "data/ohlcv/1d/005930",\n'
+        '    "deleted": true\n'
+        "  }\n"
         "}\n"
     ),
     ("schema", "text"): (
@@ -404,30 +446,46 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("schema", "json"): (
         "{\n"
-        '  "timestamp": "Datetime(time_unit=\'ns\', time_zone=None)",\n'
-        '  "symbol": "String",\n'
-        '  "open": "Float64",\n'
-        '  "high": "Float64",\n'
-        '  "low": "Float64",\n'
-        '  "close": "Float64",\n'
-        '  "volume": "Int64",\n'
-        '  "amount": "Int64",\n'
-        '  "source": "String"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "timestamp": "Datetime(time_unit=\'ns\', time_zone=None)",\n'
+        '    "symbol": "String",\n'
+        '    "open": "Float64",\n'
+        '    "high": "Float64",\n'
+        '    "low": "Float64",\n'
+        '    "close": "Float64",\n'
+        '    "volume": "Int64",\n'
+        '    "amount": "Int64",\n'
+        '    "source": "String"\n'
+        "  }\n"
         "}\n"
     ),
     ("storage_empty", "text"): ("Total: 0.0 MB\n"),
     ("storage_empty", "json"): (
-        '{\n  "total_bytes": 0,\n  "total_mb": 0.0,\n  "by_timeframe": {}\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_bytes": 0,\n'
+        '    "total_mb": 0.0,\n'
+        '    "by_timeframe": {}\n'
+        "  }\n"
+        "}\n"
     ),
     ("storage_rows", "text"): ("Total: 155.1 MB\n"),
     ("storage_rows", "json"): (
         "{\n"
-        '  "total_bytes": 162581709,\n'
-        '  "total_mb": 155.1,\n'
-        '  "by_timeframe": {\n'
-        '    "1d": 5.0,\n'
-        '    "1m": 150.0,\n'
-        '    "fundamental": 0.1\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "total_bytes": 162581709,\n'
+        '    "total_mb": 155.1,\n'
+        '    "by_timeframe": {\n'
+        '      "1d": 5.0,\n'
+        '      "1m": 150.0,\n'
+        '      "fundamental": 0.1\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -435,28 +493,39 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "{'message': '검증할 데이터가 없습니다.', 'results': []}\n"
     ),
     ("validate_empty", "json"): (
-        '{\n  "message": "검증할 데이터가 없습니다.",\n  "results": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "검증할 데이터가 없습니다.",\n'
+        '    "results": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("validate_symbol_clean", "text"): (
         "\n  검증 완료: 전체 3개 / 정상 3개 / 손상 0개\n"
     ),
     ("validate_symbol_clean", "json"): (
         "{\n"
-        '  "results": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 3,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "results": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 3,\n'
+        '        "valid": 3,\n'
+        '        "corrupted": 0,\n'
+        '        "corrupted_files": []\n'
+        "      }\n"
+        "    ],\n"
+        '    "summary": {\n'
+        '      "total_files": 3,\n'
         '      "valid": 3,\n'
         '      "corrupted": 0,\n'
-        '      "corrupted_files": []\n'
+        '      "fixed": false\n'
         "    }\n"
-        "  ],\n"
-        '  "summary": {\n'
-        '    "total_files": 3,\n'
-        '    "valid": 3,\n'
-        '    "corrupted": 0,\n'
-        '    "fixed": false\n'
         "  }\n"
         "}\n"
     ),
@@ -469,32 +538,36 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("validate_all", "json"): (
         "{\n"
-        '  "results": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 3,\n'
-        '      "valid": 3,\n'
-        '      "corrupted": 0,\n'
-        '      "corrupted_files": []\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 4,\n'
-        '      "valid": 2,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "results": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 3,\n'
+        '        "valid": 3,\n'
+        '        "corrupted": 0,\n'
+        '        "corrupted_files": []\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 4,\n'
+        '        "valid": 2,\n'
+        '        "corrupted": 2,\n'
+        '        "corrupted_files": [\n'
+        '          "data/ohlcv/1d/000660/2024-01.parquet",\n'
+        '          "data/ohlcv/1d/000660/2024-02.parquet"\n'
+        "        ]\n"
+        "      }\n"
+        "    ],\n"
+        '    "summary": {\n'
+        '      "total_files": 7,\n'
+        '      "valid": 5,\n'
         '      "corrupted": 2,\n'
-        '      "corrupted_files": [\n'
-        '        "data/ohlcv/1d/000660/2024-01.parquet",\n'
-        '        "data/ohlcv/1d/000660/2024-02.parquet"\n'
-        "      ]\n"
+        '      "fixed": false\n'
         "    }\n"
-        "  ],\n"
-        '  "summary": {\n'
-        '    "total_files": 7,\n'
-        '    "valid": 5,\n'
-        '    "corrupted": 2,\n'
-        '    "fixed": false\n'
         "  }\n"
         "}\n"
     ),
@@ -508,53 +581,61 @@ _DATA_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("validate_fix", "json"): (
         "{\n"
-        '  "results": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 3,\n'
-        '      "valid": 3,\n'
-        '      "corrupted": 0,\n'
-        '      "corrupted_files": []\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 4,\n'
-        '      "valid": 2,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "results": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 3,\n'
+        '        "valid": 3,\n'
+        '        "corrupted": 0,\n'
+        '        "corrupted_files": []\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 4,\n'
+        '        "valid": 2,\n'
+        '        "corrupted": 2,\n'
+        '        "corrupted_files": [\n'
+        '          "data/ohlcv/1d/000660/2024-01.parquet",\n'
+        '          "data/ohlcv/1d/000660/2024-02.parquet"\n'
+        "        ]\n"
+        "      }\n"
+        "    ],\n"
+        '    "summary": {\n'
+        '      "total_files": 7,\n'
+        '      "valid": 5,\n'
         '      "corrupted": 2,\n'
-        '      "corrupted_files": [\n'
-        '        "data/ohlcv/1d/000660/2024-01.parquet",\n'
-        '        "data/ohlcv/1d/000660/2024-02.parquet"\n'
-        "      ]\n"
+        '      "fixed": true\n'
         "    }\n"
-        "  ],\n"
-        '  "summary": {\n'
-        '    "total_files": 7,\n'
-        '    "valid": 5,\n'
-        '    "corrupted": 2,\n'
-        '    "fixed": true\n'
         "  }\n"
         "}\n"
     ),
     ("validate_fix_clean", "text"): ("\n  검증 완료: 전체 3개 / 정상 3개 / 손상 0개\n"),
     ("validate_fix_clean", "json"): (
         "{\n"
-        '  "results": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "total": 3,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "results": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "total": 3,\n'
+        '        "valid": 3,\n'
+        '        "corrupted": 0,\n'
+        '        "corrupted_files": []\n'
+        "      }\n"
+        "    ],\n"
+        '    "summary": {\n'
+        '      "total_files": 3,\n'
         '      "valid": 3,\n'
         '      "corrupted": 0,\n'
-        '      "corrupted_files": []\n'
+        '      "fixed": false\n'
         "    }\n"
-        "  ],\n"
-        '  "summary": {\n'
-        '    "total_files": 3,\n'
-        '    "valid": 3,\n'
-        '    "corrupted": 0,\n'
-        '    "fixed": false\n'
         "  }\n"
         "}\n"
     ),

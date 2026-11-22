@@ -135,7 +135,16 @@ def _invoke_case(
 
 _TRADE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'message': '거래 내역 없음', 'trades': []}\n"),
-    ("list_empty", "json"): ('{\n  "message": "거래 내역 없음",\n  "trades": []\n}\n'),
+    ("list_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "거래 내역 없음",\n'
+        '    "trades": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_rows", "text"): (
         "    trade_id |       bot_id |  strategy_id |       symbol |         side |    "
         " quantity |        price |       status\n"
@@ -148,30 +157,34 @@ _TRADE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "trades": [\n'
-        "    {\n"
-        '      "trade_id": "00000000-0000-4000-8000-000000000001",\n'
-        '      "bot_id": "bot-1",\n'
-        '      "strategy_id": "momentum_v1.0.0",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "price": 71000.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "2026-01-02 09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "trade_id": "00000000-0000-4000-8000-000000000002",\n'
-        '      "bot_id": "bot-2",\n'
-        '      "strategy_id": "mean_rev_v2.1.0",\n'
-        '      "symbol": "000660",\n'
-        '      "side": "sell",\n'
-        '      "quantity": 3.0,\n'
-        '      "price": 128500.5,\n'
-        '      "status": "partial",\n'
-        '      "timestamp": ""\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trades": [\n'
+        "      {\n"
+        '        "trade_id": "00000000-0000-4000-8000-000000000001",\n'
+        '        "bot_id": "bot-1",\n'
+        '        "strategy_id": "momentum_v1.0.0",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "price": 71000.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "2026-01-02 09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "trade_id": "00000000-0000-4000-8000-000000000002",\n'
+        '        "bot_id": "bot-2",\n'
+        '        "strategy_id": "mean_rev_v2.1.0",\n'
+        '        "symbol": "000660",\n'
+        '        "side": "sell",\n'
+        '        "quantity": 3.0,\n'
+        '        "price": 128500.5,\n'
+        '        "status": "partial",\n'
+        '        "timestamp": ""\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_filtered", "text"): (
@@ -186,30 +199,34 @@ _TRADE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_filtered", "json"): (
         "{\n"
-        '  "trades": [\n'
-        "    {\n"
-        '      "trade_id": "00000000-0000-4000-8000-000000000001",\n'
-        '      "bot_id": "bot-1",\n'
-        '      "strategy_id": "momentum_v1.0.0",\n'
-        '      "symbol": "005930",\n'
-        '      "side": "buy",\n'
-        '      "quantity": 10.0,\n'
-        '      "price": 71000.0,\n'
-        '      "status": "filled",\n'
-        '      "timestamp": "2026-01-02 09:00:00+00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "trade_id": "00000000-0000-4000-8000-000000000002",\n'
-        '      "bot_id": "bot-2",\n'
-        '      "strategy_id": "mean_rev_v2.1.0",\n'
-        '      "symbol": "000660",\n'
-        '      "side": "sell",\n'
-        '      "quantity": 3.0,\n'
-        '      "price": 128500.5,\n'
-        '      "status": "partial",\n'
-        '      "timestamp": ""\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trades": [\n'
+        "      {\n"
+        '        "trade_id": "00000000-0000-4000-8000-000000000001",\n'
+        '        "bot_id": "bot-1",\n'
+        '        "strategy_id": "momentum_v1.0.0",\n'
+        '        "symbol": "005930",\n'
+        '        "side": "buy",\n'
+        '        "quantity": 10.0,\n'
+        '        "price": 71000.0,\n'
+        '        "status": "filled",\n'
+        '        "timestamp": "2026-01-02 09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "trade_id": "00000000-0000-4000-8000-000000000002",\n'
+        '        "bot_id": "bot-2",\n'
+        '        "strategy_id": "mean_rev_v2.1.0",\n'
+        '        "symbol": "000660",\n'
+        '        "side": "sell",\n'
+        '        "quantity": 3.0,\n'
+        '        "price": 128500.5,\n'
+        '        "status": "partial",\n'
+        '        "timestamp": ""\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info", "text"): (
@@ -229,19 +246,23 @@ _TRADE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info", "json"): (
         "{\n"
-        '  "trade_id": "00000000-0000-4000-8000-000000000001",\n'
-        '  "bot_id": "bot-1",\n'
-        '  "strategy_id": "momentum_v1.0.0",\n'
-        '  "symbol": "005930",\n'
-        '  "side": "buy",\n'
-        '  "quantity": 10.0,\n'
-        '  "price": 71000.0,\n'
-        '  "status": "filled",\n'
-        '  "order_type": "limit",\n'
-        '  "reason": "골든 크로스",\n'
-        '  "commission": 106.5,\n'
-        '  "timestamp": "2026-01-02T09:00:00+00:00",\n'
-        '  "order_id": null\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trade_id": "00000000-0000-4000-8000-000000000001",\n'
+        '    "bot_id": "bot-1",\n'
+        '    "strategy_id": "momentum_v1.0.0",\n'
+        '    "symbol": "005930",\n'
+        '    "side": "buy",\n'
+        '    "quantity": 10.0,\n'
+        '    "price": 71000.0,\n'
+        '    "status": "filled",\n'
+        '    "order_type": "limit",\n'
+        '    "reason": "골든 크로스",\n'
+        '    "commission": 106.5,\n'
+        '    "timestamp": "2026-01-02T09:00:00+00:00",\n'
+        '    "order_id": null\n'
+        "  }\n"
         "}\n"
     ),
 }

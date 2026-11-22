@@ -12,7 +12,7 @@ import click
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import TradeError, TradeNotFoundError
@@ -88,7 +88,7 @@ def trade_list(
     from_date: str | None,
     to_date: str | None,
     limit: int,
-) -> None:
+) -> CommandResult:
     """거래 목록 조회."""
     fmt = get_formatter(ctx)
 
@@ -133,25 +133,22 @@ def trade_list(
     result = _run(_run_list())
 
     if not result:
-        fmt.output({"message": "거래 내역 없음", "trades": []})
-        return
+        empty: dict[str, Any] = {"message": "거래 내역 없음", "trades": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"trades": result})
-    else:
-        fmt.table(
-            result,
-            [
-                "trade_id",
-                "bot_id",
-                "strategy_id",
-                "symbol",
-                "side",
-                "quantity",
-                "price",
-                "status",
-            ],
-        )
+    columns = [
+        "trade_id",
+        "bot_id",
+        "strategy_id",
+        "symbol",
+        "side",
+        "quantity",
+        "price",
+        "status",
+    ]
+    return CommandResult(
+        data={"trades": result}, text=tuple(table_lines(result, columns))
+    )
 
 
 @trade.command("info")
@@ -160,9 +157,8 @@ def trade_list(
 @click.pass_context
 @require_auth
 @require_scope("trade:read")
-def trade_info(ctx: click.Context, trade_id: str) -> None:
+def trade_info(ctx: click.Context, trade_id: str) -> CommandResult:
     """거래 상세 정보 조회."""
-    fmt = get_formatter(ctx)
 
     async def _run_info() -> dict[str, Any] | None:
         async with open_cli_db(ctx) as db:
@@ -184,8 +180,7 @@ def trade_info(ctx: click.Context, trade_id: str) -> None:
     if not result:
         raise TradeNotFoundError(f"거래를 찾을 수 없습니다: {trade_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        for key, value in result.items():
-            click.echo(f"  {key:15s}: {value}")
+    return CommandResult(
+        data=result,
+        text=tuple(f"  {key:15s}: {value}" for key, value in result.items()),
+    )

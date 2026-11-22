@@ -330,7 +330,7 @@ class TestDataCommands:
             ["--format", "json", "data", "list", "--data-path", str(data_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["count"] == 0
 
     def test_schema(self, runner, data_dir):
@@ -343,7 +343,7 @@ class TestDataCommands:
             ["--format", "json", "data", "schema", "--data-path", str(data_dir)],
         )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert "timestamp" in data
 
     def test_storage(self, runner, data_dir):

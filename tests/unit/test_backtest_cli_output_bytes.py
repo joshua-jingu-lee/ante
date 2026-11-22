@@ -216,49 +216,53 @@ _BACKTEST_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("run_metrics", "json"): (
         "{\n"
-        '  "strategy": "momentum_v1.0.0",\n'
-        '  "period": "2025-01-01 ~ 2025-12-31",\n'
-        '  "initial_balance": 10000000.0,\n'
-        '  "final_balance": 11250000.4,\n'
-        '  "total_return_pct": 12.5,\n'
-        '  "total_trades": 8,\n'
-        '  "metrics": {\n'
-        '    "total_return": 12.5,\n'
-        '    "annual_return": 11.98765,\n'
-        '    "sharpe_ratio": 1.23456789,\n'
-        '    "max_drawdown": 5.4321,\n'
-        '    "max_drawdown_duration": 17,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy": "momentum_v1.0.0",\n'
+        '    "period": "2025-01-01 ~ 2025-12-31",\n'
+        '    "initial_balance": 10000000.0,\n'
+        '    "final_balance": 11250000.4,\n'
+        '    "total_return_pct": 12.5,\n'
         '    "total_trades": 8,\n'
-        '    "winning_trades": 5,\n'
-        '    "losing_trades": null,\n'
-        '    "win_rate": 62.5,\n'
-        '    "profit_factor": null,\n'
-        '    "avg_profit": 123456.789,\n'
-        '    "avg_loss": -54321.0\n'
-        "  },\n"
-        '  "equity_curve": [\n'
-        "    {\n"
-        '      "timestamp": "2025-01-02",\n'
-        '      "equity": 10000000.0,\n'
-        '      "balance": 1.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "trades": [],\n'
-        '  "config": {\n'
-        '    "exchange": "KRX",\n'
-        '    "timeframe": "1d"\n'
-        "  },\n"
-        '  "datasets": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "row_count": 245\n'
-        "    }\n"
-        "  ],\n"
-        '  "result_path": "results/momentum.json",\n'
-        '  "strategy_name": "momentum",\n'
-        '  "strategy_version": "1.0.0",\n'
-        '  "run_id": "run-003"\n'
+        '    "metrics": {\n'
+        '      "total_return": 12.5,\n'
+        '      "annual_return": 11.98765,\n'
+        '      "sharpe_ratio": 1.23456789,\n'
+        '      "max_drawdown": 5.4321,\n'
+        '      "max_drawdown_duration": 17,\n'
+        '      "total_trades": 8,\n'
+        '      "winning_trades": 5,\n'
+        '      "losing_trades": null,\n'
+        '      "win_rate": 62.5,\n'
+        '      "profit_factor": null,\n'
+        '      "avg_profit": 123456.789,\n'
+        '      "avg_loss": -54321.0\n'
+        "    },\n"
+        '    "equity_curve": [\n'
+        "      {\n"
+        '        "timestamp": "2025-01-02",\n'
+        '        "equity": 10000000.0,\n'
+        '        "balance": 1.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "trades": [],\n'
+        '    "config": {\n'
+        '      "exchange": "KRX",\n'
+        '      "timeframe": "1d"\n'
+        "    },\n"
+        '    "datasets": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "row_count": 245\n'
+        "      }\n"
+        "    ],\n"
+        '    "result_path": "results/momentum.json",\n'
+        '    "strategy_name": "momentum",\n'
+        '    "strategy_version": "1.0.0",\n'
+        '    "run_id": "run-003"\n'
+        "  }\n"
         "}\n"
     ),
     ("run_no_metrics", "text"): (
@@ -271,36 +275,40 @@ _BACKTEST_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("run_no_metrics", "json"): (
         "{\n"
-        '  "strategy": "momentum_v1.0.0",\n'
-        '  "period": "2025-01-01 ~ 2025-12-31",\n'
-        '  "initial_balance": 10000000.0,\n'
-        '  "final_balance": 10000000.0,\n'
-        '  "total_return_pct": 12.5,\n'
-        '  "total_trades": 0,\n'
-        '  "metrics": {},\n'
-        '  "equity_curve": [\n'
-        "    {\n"
-        '      "timestamp": "2025-01-02",\n'
-        '      "equity": 10000000.0,\n'
-        '      "balance": 1.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "trades": [],\n'
-        '  "config": {\n'
-        '    "exchange": "KRX",\n'
-        '    "timeframe": "1d"\n'
-        "  },\n"
-        '  "datasets": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "row_count": 245\n'
-        "    }\n"
-        "  ],\n"
-        '  "result_path": "results/momentum.json",\n'
-        '  "strategy_name": "momentum",\n'
-        '  "strategy_version": "1.0.0",\n'
-        '  "run_id": "run-003"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy": "momentum_v1.0.0",\n'
+        '    "period": "2025-01-01 ~ 2025-12-31",\n'
+        '    "initial_balance": 10000000.0,\n'
+        '    "final_balance": 10000000.0,\n'
+        '    "total_return_pct": 12.5,\n'
+        '    "total_trades": 0,\n'
+        '    "metrics": {},\n'
+        '    "equity_curve": [\n'
+        "      {\n"
+        '        "timestamp": "2025-01-02",\n'
+        '        "equity": 10000000.0,\n'
+        '        "balance": 1.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "trades": [],\n'
+        '    "config": {\n'
+        '      "exchange": "KRX",\n'
+        '      "timeframe": "1d"\n'
+        "    },\n"
+        '    "datasets": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "row_count": 245\n'
+        "      }\n"
+        "    ],\n"
+        '    "result_path": "results/momentum.json",\n'
+        '    "strategy_name": "momentum",\n'
+        '    "strategy_version": "1.0.0",\n'
+        '    "run_id": "run-003"\n'
+        "  }\n"
         "}\n"
     ),
     ("run_options", "text"): (
@@ -328,58 +336,76 @@ _BACKTEST_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("run_options", "json"): (
         "{\n"
-        '  "strategy": "momentum_v1.0.0",\n'
-        '  "period": "2025-01-01 ~ 2025-12-31",\n'
-        '  "initial_balance": 10000000.0,\n'
-        '  "final_balance": 11250000.4,\n'
-        '  "total_return_pct": 12.5,\n'
-        '  "total_trades": 8,\n'
-        '  "metrics": {\n'
-        '    "total_return": 12.5,\n'
-        '    "annual_return": 11.98765,\n'
-        '    "sharpe_ratio": 1.23456789,\n'
-        '    "max_drawdown": 5.4321,\n'
-        '    "max_drawdown_duration": 17,\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy": "momentum_v1.0.0",\n'
+        '    "period": "2025-01-01 ~ 2025-12-31",\n'
+        '    "initial_balance": 10000000.0,\n'
+        '    "final_balance": 11250000.4,\n'
+        '    "total_return_pct": 12.5,\n'
         '    "total_trades": 8,\n'
-        '    "winning_trades": 5,\n'
-        '    "losing_trades": null,\n'
-        '    "win_rate": 62.5,\n'
-        '    "profit_factor": null,\n'
-        '    "avg_profit": 123456.789,\n'
-        '    "avg_loss": -54321.0\n'
-        "  },\n"
-        '  "equity_curve": [\n'
-        "    {\n"
-        '      "timestamp": "2025-01-02",\n'
-        '      "equity": 10000000.0,\n'
-        '      "balance": 1.0\n'
-        "    }\n"
-        "  ],\n"
-        '  "trades": [],\n'
-        '  "config": {\n'
-        '    "exchange": "KRX",\n'
-        '    "timeframe": "1d"\n'
-        "  },\n"
-        '  "datasets": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "timeframe": "1d",\n'
-        '      "row_count": 245\n'
-        "    }\n"
-        "  ],\n"
-        '  "result_path": "results/momentum.json",\n'
-        '  "strategy_name": "momentum",\n'
-        '  "strategy_version": "1.0.0",\n'
-        '  "run_id": "run-003"\n'
+        '    "metrics": {\n'
+        '      "total_return": 12.5,\n'
+        '      "annual_return": 11.98765,\n'
+        '      "sharpe_ratio": 1.23456789,\n'
+        '      "max_drawdown": 5.4321,\n'
+        '      "max_drawdown_duration": 17,\n'
+        '      "total_trades": 8,\n'
+        '      "winning_trades": 5,\n'
+        '      "losing_trades": null,\n'
+        '      "win_rate": 62.5,\n'
+        '      "profit_factor": null,\n'
+        '      "avg_profit": 123456.789,\n'
+        '      "avg_loss": -54321.0\n'
+        "    },\n"
+        '    "equity_curve": [\n'
+        "      {\n"
+        '        "timestamp": "2025-01-02",\n'
+        '        "equity": 10000000.0,\n'
+        '        "balance": 1.0\n'
+        "      }\n"
+        "    ],\n"
+        '    "trades": [],\n'
+        '    "config": {\n'
+        '      "exchange": "KRX",\n'
+        '      "timeframe": "1d"\n'
+        "    },\n"
+        '    "datasets": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "timeframe": "1d",\n'
+        '        "row_count": 245\n'
+        "      }\n"
+        "    ],\n"
+        '    "result_path": "results/momentum.json",\n'
+        '    "strategy_name": "momentum",\n'
+        '    "strategy_version": "1.0.0",\n'
+        '    "run_id": "run-003"\n'
+        "  }\n"
         "}\n"
     ),
     ("history_empty", "text"): ("'momentum' 백테스트 이력이 없습니다.\n"),
     ("history_empty", "json"): (
-        '{\n  "message": "\'momentum\' 백테스트 이력이 없습니다.",\n  "runs": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "\'momentum\' 백테스트 이력이 없습니다.",\n'
+        '    "runs": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("history_no_table", "text"): ("'momentum' 백테스트 이력이 없습니다.\n"),
     ("history_no_table", "json"): (
-        '{\n  "message": "\'momentum\' 백테스트 이력이 없습니다.",\n  "runs": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "\'momentum\' 백테스트 이력이 없습니다.",\n'
+        '    "runs": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("history_rows", "text"): (
         "      run_id | strategy_version | total_return_pct | sharpe_ratio | total_trad"
@@ -393,35 +419,39 @@ _BACKTEST_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("history_rows", "json"): (
         "{\n"
-        '  "strategy_name": "momentum",\n'
-        '  "runs": [\n'
-        "    {\n"
-        '      "run_id": "run-002",\n'
-        '      "strategy_name": "momentum",\n'
-        '      "strategy_version": "1.1.0",\n'
-        '      "params_json": "{\\"start_date\\": \\"2025-01-01\\"}",\n'
-        '      "total_return_pct": 12.5,\n'
-        '      "sharpe_ratio": 1.5,\n'
-        '      "max_drawdown_pct": 5.0,\n'
-        '      "total_trades": 8,\n'
-        '      "win_rate": 62.5,\n'
-        '      "result_path": "results/run-002.json",\n'
-        '      "created_at": "2026-01-15 10:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "run_id": "run-001",\n'
-        '      "strategy_name": "momentum",\n'
-        '      "strategy_version": "1.0.0",\n'
-        '      "params_json": "{}",\n'
-        '      "total_return_pct": null,\n'
-        '      "sharpe_ratio": null,\n'
-        '      "max_drawdown_pct": null,\n'
-        '      "total_trades": null,\n'
-        '      "win_rate": null,\n'
-        '      "result_path": "",\n'
-        '      "created_at": "2026-01-14 09:00:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "strategy_name": "momentum",\n'
+        '    "runs": [\n'
+        "      {\n"
+        '        "run_id": "run-002",\n'
+        '        "strategy_name": "momentum",\n'
+        '        "strategy_version": "1.1.0",\n'
+        '        "params_json": "{\\"start_date\\": \\"2025-01-01\\"}",\n'
+        '        "total_return_pct": 12.5,\n'
+        '        "sharpe_ratio": 1.5,\n'
+        '        "max_drawdown_pct": 5.0,\n'
+        '        "total_trades": 8,\n'
+        '        "win_rate": 62.5,\n'
+        '        "result_path": "results/run-002.json",\n'
+        '        "created_at": "2026-01-15 10:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "run_id": "run-001",\n'
+        '        "strategy_name": "momentum",\n'
+        '        "strategy_version": "1.0.0",\n'
+        '        "params_json": "{}",\n'
+        '        "total_return_pct": null,\n'
+        '        "sharpe_ratio": null,\n'
+        '        "max_drawdown_pct": null,\n'
+        '        "total_trades": null,\n'
+        '        "win_rate": null,\n'
+        '        "result_path": "",\n'
+        '        "created_at": "2026-01-14 09:00:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
 }
@@ -501,16 +531,20 @@ _PARTIAL_RESULT: dict[str, Any] = {
 
 _PARTIAL_JSON: str = (
     "{\n"
-    '  "final_balance": null,\n'
-    '  "total_return_pct": 1.5,\n'
-    '  "total_trades": 0,\n'
-    '  "metrics": {\n'
-    '    "sharpe_ratio": null\n'
-    "  },\n"
-    '  "result_path": "",\n'
-    '  "strategy_name": "momentum",\n'
-    '  "strategy_version": "1.0.0",\n'
-    '  "run_id": "run-003"\n'
+    '  "status": "ok",\n'
+    '  "message": "",\n'
+    '  "data": {\n'
+    '    "final_balance": null,\n'
+    '    "total_return_pct": 1.5,\n'
+    '    "total_trades": 0,\n'
+    '    "metrics": {\n'
+    '      "sharpe_ratio": null\n'
+    "    },\n"
+    '    "result_path": "",\n'
+    '    "strategy_name": "momentum",\n'
+    '    "strategy_version": "1.0.0",\n'
+    '    "run_id": "run-003"\n'
+    "  }\n"
     "}\n"
 )
 _PARTIAL_TEXT: tuple[str, str, int] = ("", "Error: BACKTEST_ERROR: 'strategy'\n", 1)
@@ -518,7 +552,7 @@ _PARTIAL_TEXT: tuple[str, str, int] = ("", "Error: BACKTEST_ERROR: 'strategy'\n"
 
 def test_run_json_does_not_read_text_only_fields() -> None:
     """text 줄만 읽는 키(``strategy``·``period``)가 없고 ``final_balance``가
-    ``None``인 결과 객체도 JSON은 exit 0으로 객체를 그대로 낸다."""
+    ``None``인 결과 객체도 JSON은 exit 0으로 객체를 data에 그대로 낸다."""
     result, _ = _invoke_case(
         "run_metrics", "json", mix_stderr=False, run_result=dict(_PARTIAL_RESULT)
     )
@@ -529,7 +563,14 @@ def test_run_json_does_not_read_text_only_fields() -> None:
 
 _BRACE_NAME = "mo{men}tum"
 _BRACE_JSON: str = (
-    '{\n  "message": "\'mo{men}tum\' 백테스트 이력이 없습니다.",\n  "runs": []\n}\n'
+    "{\n"
+    '  "status": "ok",\n'
+    '  "message": "",\n'
+    '  "data": {\n'
+    '    "message": "\'mo{men}tum\' 백테스트 이력이 없습니다.",\n'
+    '    "runs": []\n'
+    "  }\n"
+    "}\n"
 )
 _BRACE_TEXT: tuple[str, str, int] = ("", "Error: BACKTEST_ERROR: 'men'\n", 1)
 
@@ -558,7 +599,7 @@ def _invoke_history_brace(mode: str) -> Result:
 
 
 def test_history_empty_json_keeps_brace_name() -> None:
-    """중괄호가 든 전략 이름의 빈 이력도 JSON은 exit 0으로 이름을 그대로 낸다."""
+    """중괄호가 든 전략 이름의 빈 이력도 JSON은 exit 0으로 이름을 data에 그대로 낸다."""
     result = _invoke_history_brace("json")
     assert result.exit_code == 0, result.output
     assert result.stdout == _BRACE_JSON

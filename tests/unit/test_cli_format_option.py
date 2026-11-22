@@ -671,7 +671,11 @@ class TestDataListFormatOption1701:
 
         assert result.exit_code == 0, result.output
         payload = json.loads(result.output)
-        assert payload == {"datasets": [], "count": 0}
+        assert payload == {
+            "status": "ok",
+            "message": "",
+            "data": {"datasets": [], "count": 0},
+        }
 
 
 class TestBotListFormatOption1701:

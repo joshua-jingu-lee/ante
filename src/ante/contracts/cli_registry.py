@@ -516,37 +516,37 @@ DATA_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("data", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("data", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("data", "delete"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:write"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("data", "schema"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("data", "storage"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("data", "validate"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )
@@ -673,25 +673,25 @@ INSTRUMENT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("instrument", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard", data_key="instruments"),
         execution="offline",
     ),
     CliCommandContract(
         path=("instrument", "sync"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:write"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("instrument", "search"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard", data_key="instruments"),
         execution="offline",
     ),
     CliCommandContract(
         path=("instrument", "import"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"data:write"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )
@@ -753,13 +753,13 @@ TRADE_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("trade", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"trade:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("trade", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"trade:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )
@@ -771,13 +771,13 @@ BACKTEST_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("backtest", "run"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"backtest:run"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="long_running",
     ),
     CliCommandContract(
         path=("backtest", "history"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"backtest:run"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )

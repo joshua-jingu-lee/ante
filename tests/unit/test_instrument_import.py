@@ -108,7 +108,7 @@ class TestInstrumentImportJSON:
             ],
         )
         assert result.exit_code == 0
-        output = json.loads(result.output)
+        output = json.loads(result.output)["data"]
         assert output["dry_run"] is True
         assert output["total"] == 1
 

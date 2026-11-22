@@ -201,7 +201,16 @@ def _invoke_case(
 
 _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'instruments': [], 'count': 0}\n"),
-    ("list_empty", "json"): ('{\n  "instruments": [],\n  "count": 0\n}\n'),
+    ("list_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "instruments": [],\n'
+        '    "count": 0\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_rows", "text"): (
         "      symbol |         name |      name_en |         type |       listed\n"
         "------------------------------------------------------------------------\n"
@@ -210,22 +219,28 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "      069500 |              |              |              |            N\n"
     ),
     ("list_rows", "json"): (
-        "[\n"
-        "  {\n"
-        '    "symbol": "005930",\n'
-        '    "name": "삼성전자",\n'
-        '    "name_en": "Samsung Electronics",\n'
-        '    "type": "stock",\n'
-        '    "listed": "Y"\n'
-        "  },\n"
-        "  {\n"
-        '    "symbol": "069500",\n'
-        '    "name": "",\n'
-        '    "name_en": "",\n'
-        '    "type": "",\n'
-        '    "listed": "N"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "instruments": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "name": "삼성전자",\n'
+        '        "name_en": "Samsung Electronics",\n'
+        '        "type": "stock",\n'
+        '        "listed": "Y"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "069500",\n'
+        '        "name": "",\n'
+        '        "name_en": "",\n'
+        '        "type": "",\n'
+        '        "listed": "N"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("list_filtered", "text"): (
         "      symbol |         name |      name_en |         type |       listed\n"
@@ -235,25 +250,40 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "      069500 |              |              |              |            N\n"
     ),
     ("list_filtered", "json"): (
-        "[\n"
-        "  {\n"
-        '    "symbol": "005930",\n'
-        '    "name": "삼성전자",\n'
-        '    "name_en": "Samsung Electronics",\n'
-        '    "type": "stock",\n'
-        '    "listed": "Y"\n'
-        "  },\n"
-        "  {\n"
-        '    "symbol": "069500",\n'
-        '    "name": "",\n'
-        '    "name_en": "",\n'
-        '    "type": "",\n'
-        '    "listed": "N"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "instruments": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "name": "삼성전자",\n'
+        '        "name_en": "Samsung Electronics",\n'
+        '        "type": "stock",\n'
+        '        "listed": "Y"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "069500",\n'
+        '        "name": "",\n'
+        '        "name_en": "",\n'
+        '        "type": "",\n'
+        '        "listed": "N"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("search_empty", "text"): ("{'results': [], 'count': 0}\n"),
-    ("search_empty", "json"): ('{\n  "results": [],\n  "count": 0\n}\n'),
+    ("search_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "results": [],\n'
+        '    "count": 0\n'
+        "  }\n"
+        "}\n"
+    ),
     ("search_rows", "text"): (
         "      symbol |     exchange |         name |      name_en |         type\n"
         "------------------------------------------------------------------------\n"
@@ -263,22 +293,28 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "\n"
     ),
     ("search_rows", "json"): (
-        "[\n"
-        "  {\n"
-        '    "symbol": "005930",\n'
-        '    "exchange": "KRX",\n'
-        '    "name": "삼성전자",\n'
-        '    "name_en": "Samsung Electronics",\n'
-        '    "type": "stock"\n'
-        "  },\n"
-        "  {\n"
-        '    "symbol": "005935",\n'
-        '    "exchange": "KRX",\n'
-        '    "name": "삼성전자우",\n'
-        '    "name_en": "",\n'
-        '    "type": ""\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "instruments": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "삼성전자",\n'
+        '        "name_en": "Samsung Electronics",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "005935",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "삼성전자우",\n'
+        '        "name_en": "",\n'
+        '        "type": ""\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("sync", "text"): (
         "{'sync_result': {'total': 3, 'new': 2, 'updated': 1, 'delisted': 1}, 'message'"
@@ -286,13 +322,17 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("sync", "json"): (
         "{\n"
-        '  "sync_result": {\n'
-        '    "total": 3,\n'
-        '    "new": 2,\n'
-        '    "updated": 1,\n'
-        '    "delisted": 1\n'
-        "  },\n"
-        '  "message": "동기화 완료: 신규 2건, 갱신 1건, 상폐 1건"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "sync_result": {\n'
+        '      "total": 3,\n'
+        '      "new": 2,\n'
+        '      "updated": 1,\n'
+        '      "delisted": 1\n'
+        "    },\n"
+        '    "message": "동기화 완료: 신규 2건, 갱신 1건, 상폐 1건"\n'
+        "  }\n"
         "}\n"
     ),
     ("import_csv", "text"): ("종목 import 완료: 2건\n"),
@@ -326,22 +366,26 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("import_dry_run_csv", "json"): (
         "{\n"
-        '  "dry_run": true,\n'
-        '  "total": 2,\n'
-        '  "preview": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "삼성전자",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000660",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "SK하이닉스",\n'
-        '      "type": "stock"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dry_run": true,\n'
+        '    "total": 2,\n'
+        '    "preview": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "삼성전자",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000660",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "SK하이닉스",\n'
+        '        "type": "stock"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("import_dry_run_json", "text"): (
@@ -353,22 +397,26 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("import_dry_run_json", "json"): (
         "{\n"
-        '  "dry_run": true,\n'
-        '  "total": 2,\n'
-        '  "preview": [\n'
-        "    {\n"
-        '      "symbol": "005930",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "삼성전자",\n'
-        '      "type": ""\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "AAPL",\n'
-        '      "exchange": "NASDAQ",\n'
-        '      "name": "",\n'
-        '      "type": "stock"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dry_run": true,\n'
+        '    "total": 2,\n'
+        '    "preview": [\n'
+        "      {\n"
+        '        "symbol": "005930",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "삼성전자",\n'
+        '        "type": ""\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "AAPL",\n'
+        '        "exchange": "NASDAQ",\n'
+        '        "name": "",\n'
+        '        "type": "stock"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("import_dry_run_many", "text"): (
@@ -388,70 +436,74 @@ _INSTRUMENT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("import_dry_run_many", "json"): (
         "{\n"
-        '  "dry_run": true,\n'
-        '  "total": 11,\n'
-        '  "preview": [\n'
-        "    {\n"
-        '      "symbol": "000001",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목1",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000002",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목2",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000003",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목3",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000004",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목4",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000005",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목5",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000006",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목6",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000007",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목7",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000008",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목8",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000009",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목9",\n'
-        '      "type": "stock"\n'
-        "    },\n"
-        "    {\n"
-        '      "symbol": "000010",\n'
-        '      "exchange": "KRX",\n'
-        '      "name": "종목10",\n'
-        '      "type": "stock"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "dry_run": true,\n'
+        '    "total": 11,\n'
+        '    "preview": [\n'
+        "      {\n"
+        '        "symbol": "000001",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목1",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000002",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목2",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000003",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목3",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000004",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목4",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000005",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목5",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000006",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목6",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000007",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목7",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000008",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목8",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000009",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목9",\n'
+        '        "type": "stock"\n'
+        "      },\n"
+        "      {\n"
+        '        "symbol": "000010",\n'
+        '        "exchange": "KRX",\n'
+        '        "name": "종목10",\n'
+        '        "type": "stock"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
 }

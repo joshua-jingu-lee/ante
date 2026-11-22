@@ -159,7 +159,7 @@ class TestBacktestRunJsonSingleDocument:
         result = _invoke_run(runner, tmp_path, "--format", "json")
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert "metrics" in payload
         # 핵심 지표가 그대로 보존되는지 확인.
         assert payload["metrics"]["sharpe_ratio"] == 1.5
@@ -380,7 +380,7 @@ class TestBacktestRunDataNotFound:
         )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload.get("run_id")
         # 이력이 정확히 1건 저장된다.
         assert _count_runs(str(db_path)) == 1
@@ -397,7 +397,7 @@ class TestBacktestRunDataNotFound:
         )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload.get("run_id")
         # no-symbols 정상 run 은 기존대로 이력을 남긴다.
         assert _count_runs(str(db_path)) == 1
@@ -441,6 +441,6 @@ class TestBacktestRunDataNotFound:
         )
 
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload.get("run_id")
         assert _count_runs(str(db_path)) == 1
