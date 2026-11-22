@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from ante.account.scoping import require_account_id
@@ -13,10 +14,73 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-OPEN_STATUSES: frozenset[str] = frozenset({"open", "partially_filled"})
-TERMINAL_STATUSES: frozenset[str] = frozenset(
-    {"filled", "cancelled", "rejected", "failed", "expired"}
+
+class OrderStatus(StrEnum):
+    OPEN = "open"
+    PARTIALLY_FILLED = "partially_filled"
+    FILLED = "filled"
+    CANCELLED = "cancelled"
+    REJECTED = "rejected"
+    FAILED = "failed"
+    EXPIRED = "expired"
+
+
+ORDER_STATUS_TRANSITIONS: dict[OrderStatus, set[OrderStatus]] = {
+    OrderStatus.OPEN: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+    OrderStatus.PARTIALLY_FILLED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+    OrderStatus.FILLED: {OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED},
+    OrderStatus.CANCELLED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+    OrderStatus.REJECTED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+    OrderStatus.FAILED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+    OrderStatus.EXPIRED: {
+        OrderStatus.PARTIALLY_FILLED,
+        OrderStatus.FILLED,
+        OrderStatus.CANCELLED,
+        OrderStatus.REJECTED,
+        OrderStatus.FAILED,
+        OrderStatus.EXPIRED,
+    },
+}
+
+OPEN_STATUSES: frozenset[OrderStatus] = frozenset(
+    {OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
 )
+TERMINAL_STATUSES: frozenset[OrderStatus] = frozenset(OrderStatus) - OPEN_STATUSES
 
 ORDER_TRACKER_SCHEMA = """
 CREATE TABLE IF NOT EXISTS order_tracker (
@@ -208,7 +272,7 @@ class OrderTracker:
                     symbol, side, order_type, ordered_qty, order_price, exchange,
                     recorded_filled_qty, avg_fill_price, status, submitted_at,
                     submitted_date)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, 'open', ?, ?)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0.0, ?, ?, ?)
                ON CONFLICT DO NOTHING
                RETURNING order_id""",
             (
@@ -223,6 +287,7 @@ class OrderTracker:
                 ordered_qty,
                 order_price,
                 exchange,
+                OrderStatus.OPEN,
                 submitted_at,
                 submitted_date,
             ),
@@ -240,7 +305,7 @@ class OrderTracker:
                 ordered_qty=ordered_qty,
                 recorded_filled_qty=0.0,
                 avg_fill_price=0.0,
-                status="open",
+                status=OrderStatus.OPEN,
                 submitted_at=submitted_at,
                 submitted_date=submitted_date,
                 order_price=order_price,
@@ -292,9 +357,9 @@ class OrderTracker:
             )
 
         new_status = (
-            "filled"
+            OrderStatus.FILLED
             if ordered > 0 and new_cumulative >= ordered
-            else ("partially_filled")
+            else OrderStatus.PARTIALLY_FILLED
         )
         updated = await self._db.execute_fetch_one(
             """UPDATE order_tracker
@@ -302,7 +367,7 @@ class OrderTracker:
                       avg_fill_price = ?,
                       status = ?,
                       last_polled_at = datetime('now'),
-                      terminal_at = CASE WHEN ? = 'filled'
+                      terminal_at = CASE WHEN ? = ?
                                          THEN datetime('now') ELSE NULL END
                 WHERE order_id = ? AND recorded_filled_qty < ?
             RETURNING recorded_filled_qty""",
@@ -311,6 +376,7 @@ class OrderTracker:
                 avg_price,
                 new_status,
                 new_status,
+                OrderStatus.FILLED,
                 order_id,
                 new_cumulative,
             ),
@@ -341,7 +407,7 @@ class OrderTracker:
         for key, record in list(self._open_cache.items()):
             if key[2] != order_id:
                 continue
-            if new_status == "filled" or new_status in TERMINAL_STATUSES:
+            if new_status == OrderStatus.FILLED or new_status in TERMINAL_STATUSES:
                 del self._open_cache[key]
                 return
             self._open_cache[key] = OrderTrackerRecord(
@@ -379,8 +445,8 @@ class OrderTracker:
         await self._db.execute(
             """UPDATE order_tracker
                   SET status = ?, terminal_at = datetime('now')
-                WHERE order_id = ? AND status != 'filled'""",
-            (status, order_id),
+                WHERE order_id = ? AND status != ?""",
+            (status, order_id, OrderStatus.FILLED),
         )
         self._evict_open_cache(order_id)
 
@@ -527,11 +593,11 @@ class OrderTracker:
         validated = require_account_id(account_id, context="order_tracker.expire_stale")
         expired = await self._db.execute_fetch_all(
             """UPDATE order_tracker
-                   SET status = 'expired', terminal_at = datetime('now')
+                   SET status = ?, terminal_at = datetime('now')
                  WHERE account_id = ? AND submitted_date < ?
-                   AND status = 'open'
+                   AND status = ?
             RETURNING order_id""",
-            (validated, before_date),
+            (OrderStatus.EXPIRED, validated, before_date, OrderStatus.OPEN),
         )
         count = len(expired)
         if count:

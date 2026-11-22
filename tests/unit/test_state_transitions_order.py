@@ -25,7 +25,8 @@
 기대값은 모두 리터럴(상태 문자열, 예외 종류와 전체 메시지, 건수)이다.
 
 뒤쪽 49쌍 동작 테스트는 7×7 쌍마다 그 다음 상태를 쓸 수 있는 모든 공개 쓰기를
-시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 38쌍과 같은지 본다.
+시도해, 쓰기가 그 행을 실제로 바꾼 쌍의 집합이 리터럴 38쌍과 같은지 본다. 맨 뒤는
+``OrderStatus`` 의 값이 DB 문자열과 같은지, 전이표가 리터럴 38쌍과 같은지 본다.
 """
 
 from __future__ import annotations
@@ -47,7 +48,14 @@ from ante.eventbus.events import (
 )
 from ante.main import _subscribe_order_tracker
 from ante.trade.fill_applier import FillApplier
-from ante.trade.order_tracker import OrderTracker, OrderTrackerRecord
+from ante.trade.order_tracker import (
+    OPEN_STATUSES,
+    ORDER_STATUS_TRANSITIONS,
+    TERMINAL_STATUSES,
+    OrderStatus,
+    OrderTracker,
+    OrderTrackerRecord,
+)
 from ante.trade.position import PositionHistory
 from ante.trade.recorder import TradeRecorder
 
@@ -767,3 +775,86 @@ async def test_order_status_writes_over_all_49_pairs(db, tracker):
     assert observed == EXPECTED_OBSERVED_PAIRS
     assert pairs - observed == EXPECTED_UNOBSERVED_PAIRS
     assert len(pairs - observed) == 11
+
+
+# ── enum과 전이표 ────────────────────────────────────────────────
+
+
+def test_order_status_values_equal_db_strings():
+    assert len(OrderStatus) == 7
+    assert {member.value for member in OrderStatus} == {
+        "open",
+        "partially_filled",
+        "filled",
+        "cancelled",
+        "rejected",
+        "failed",
+        "expired",
+    }
+    assert [member.value for member in OrderStatus] == ORDER_STATUSES
+
+
+def test_open_and_terminal_sets_are_unchanged():
+    assert sorted(OPEN_STATUSES) == ["open", "partially_filled"]
+    assert sorted(TERMINAL_STATUSES) == [
+        "cancelled",
+        "expired",
+        "failed",
+        "filled",
+        "rejected",
+    ]
+
+
+def test_order_transition_table_equals_the_38_literal_pairs():
+    assert sorted(str(k) for k in ORDER_STATUS_TRANSITIONS) == sorted(ORDER_STATUSES)
+    assert all(type(v) is set for v in ORDER_STATUS_TRANSITIONS.values())
+    table = {
+        (str(current), str(target))
+        for current, targets in ORDER_STATUS_TRANSITIONS.items()
+        for target in targets
+    }
+    assert table == EXPECTED_OBSERVED_PAIRS
+    assert len(table) == 38
+    every = {(a, b) for a in ORDER_STATUSES for b in ORDER_STATUSES}
+    assert every - table == EXPECTED_UNOBSERVED_PAIRS
+
+
+async def test_order_status_member_binds_as_text(db):
+    await db.execute("CREATE TABLE enum_probe (value)")
+    for member in OrderStatus:
+        await db.execute("INSERT INTO enum_probe (value) VALUES (?)", (member,))
+    rows = await db.fetch_all(
+        "SELECT typeof(value) AS kind, value FROM enum_probe ORDER BY rowid"
+    )
+    assert [(r["kind"], r["value"]) for r in rows] == [
+        ("text", "open"),
+        ("text", "partially_filled"),
+        ("text", "filled"),
+        ("text", "cancelled"),
+        ("text", "rejected"),
+        ("text", "failed"),
+        ("text", "expired"),
+    ]
+    row = await db.fetch_one(
+        "SELECT COUNT(*) AS n FROM enum_probe WHERE value = 'open'"
+    )
+    assert row is not None and row["n"] == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "member"),
+    [
+        ("open", "OPEN"),
+        ("partially_filled", "PARTIALLY_FILLED"),
+        ("filled", "FILLED"),
+        ("cancelled", "CANCELLED"),
+        ("rejected", "REJECTED"),
+        ("failed", "FAILED"),
+        ("expired", "EXPIRED"),
+    ],
+)
+async def test_restored_status_is_an_order_status_value(db, tracker, status, member):
+    await _insert_raw(db, "raw", status)
+    record = await tracker.get("raw")
+    assert record is not None
+    assert OrderStatus(record.status) is OrderStatus[member]
