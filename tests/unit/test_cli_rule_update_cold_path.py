@@ -157,7 +157,7 @@ def test_rule_update_cold_path_records_audit_on_db_without_audit_table(
     result = _invoke_cold_update(config_dir)
 
     assert result.exit_code == 0, result.output
-    payload = _load_json_payload(result.output)
+    payload = _load_json_payload(result.output)["data"]
     assert payload["account_id"] == "acct-001"
     assert payload["rule"]["params"]["max_daily_loss_percent"] == 0.05
     conn = sqlite3.connect(str(db_path))

@@ -128,15 +128,36 @@ _SYSTEM_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("status_active", "text"): ("  거래 상태  : active\n  봇 수     : 3\n"),
     ("status_active", "json"): (
-        '{\n  "trading_state": "active",\n  "bot_count": 3\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trading_state": "active",\n'
+        '    "bot_count": 3\n'
+        "  }\n"
+        "}\n"
     ),
     ("status_suspended", "text"): ("  거래 상태  : suspended\n  봇 수     : 3\n"),
     ("status_suspended", "json"): (
-        '{\n  "trading_state": "suspended",\n  "bot_count": 3\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trading_state": "suspended",\n'
+        '    "bot_count": 3\n'
+        "  }\n"
+        "}\n"
     ),
     ("status_no_row", "text"): ("  거래 상태  : active\n  봇 수     : 0\n"),
     ("status_no_row", "json"): (
-        '{\n  "trading_state": "active",\n  "bot_count": 0\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "trading_state": "active",\n'
+        '    "bot_count": 0\n'
+        "  }\n"
+        "}\n"
     ),
     ("halt", "text"): ("시스템 HALTED — 2개 계좌 거래 중지\n"),
     ("halt", "json"): (

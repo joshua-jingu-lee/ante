@@ -558,7 +558,7 @@ REPORT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("report", "schema"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"report:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
@@ -570,19 +570,19 @@ REPORT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("report", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"report:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard", data_key="reports"),
         execution="offline",
     ),
     CliCommandContract(
         path=("report", "performance"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"report:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("report", "view"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"report:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )
@@ -647,7 +647,7 @@ SYSTEM_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("system", "status"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"system:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
@@ -703,20 +703,20 @@ CONFIG_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("config", "get"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"config:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("config", "set"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"config:write"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="config.set",
     ),
     CliCommandContract(
         path=("config", "history"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"config:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )
@@ -728,19 +728,19 @@ RULE_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("rule", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"rule:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("rule", "info"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"rule:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
     CliCommandContract(
         path=("rule", "update"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"rule:admin"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="runtime_ipc",
         ipc_command="rule.update",
     ),
@@ -789,7 +789,7 @@ AUDIT_CONTRACTS: tuple[CliCommandContract, ...] = (
     CliCommandContract(
         path=("audit", "list"),
         auth=AuthContract(mode="scoped", scopes=frozenset({"audit:read"})),
-        output=OutputContract(kind="raw", envelope="raw_legacy"),
+        output=OutputContract(kind="raw", envelope="standard"),
         execution="offline",
     ),
 )

@@ -228,39 +228,43 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("schema", "json"): (
         "{\n"
-        '  "required_fields": [\n'
-        '    "strategy_name",\n'
-        '    "strategy_version",\n'
-        '    "strategy_path",\n'
-        '    "backtest_period",\n'
-        '    "total_return_pct",\n'
-        '    "total_trades",\n'
-        '    "summary",\n'
-        '    "rationale"\n'
-        "  ],\n"
-        '  "optional_fields": [\n'
-        '    "sharpe_ratio",\n'
-        '    "max_drawdown_pct",\n'
-        '    "win_rate",\n'
-        '    "risks",\n'
-        '    "recommendations",\n'
-        '    "detail_json",\n'
-        '    "backtest_run_id"\n'
-        "  ],\n"
-        '  "format": "JSON",\n'
-        '  "example": {\n'
-        '    "strategy_name": "momentum_breakout",\n'
-        '    "strategy_version": "1.0.0",\n'
-        '    "strategy_path": "strategies/momentum_breakout.py",\n'
-        '    "backtest_period": "2024-01 ~ 2026-03",\n'
-        '    "total_return_pct": 15.3,\n'
-        '    "total_trades": 42,\n'
-        '    "sharpe_ratio": 1.2,\n'
-        '    "max_drawdown_pct": -8.5,\n'
-        '    "win_rate": 58.0,\n'
-        '    "summary": "20일 이동평균 돌파 매매 전략",\n'
-        '    "rationale": "모멘텀 효과를 활용한 추세 추종",\n'
-        '    "risks": "횡보장에서 잦은 손절 발생 가능"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "required_fields": [\n'
+        '      "strategy_name",\n'
+        '      "strategy_version",\n'
+        '      "strategy_path",\n'
+        '      "backtest_period",\n'
+        '      "total_return_pct",\n'
+        '      "total_trades",\n'
+        '      "summary",\n'
+        '      "rationale"\n'
+        "    ],\n"
+        '    "optional_fields": [\n'
+        '      "sharpe_ratio",\n'
+        '      "max_drawdown_pct",\n'
+        '      "win_rate",\n'
+        '      "risks",\n'
+        '      "recommendations",\n'
+        '      "detail_json",\n'
+        '      "backtest_run_id"\n'
+        "    ],\n"
+        '    "format": "JSON",\n'
+        '    "example": {\n'
+        '      "strategy_name": "momentum_breakout",\n'
+        '      "strategy_version": "1.0.0",\n'
+        '      "strategy_path": "strategies/momentum_breakout.py",\n'
+        '      "backtest_period": "2024-01 ~ 2026-03",\n'
+        '      "total_return_pct": 15.3,\n'
+        '      "total_trades": 42,\n'
+        '      "sharpe_ratio": 1.2,\n'
+        '      "max_drawdown_pct": -8.5,\n'
+        '      "win_rate": 58.0,\n'
+        '      "summary": "20일 이동평균 돌파 매매 전략",\n'
+        '      "rationale": "모멘텀 효과를 활용한 추세 추종",\n'
+        '      "risks": "횡보장에서 잦은 손절 발생 가능"\n'
+        "    }\n"
         "  }\n"
         "}\n"
     ),
@@ -293,7 +297,15 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "}\n"
     ),
     ("list_empty", "text"): ("(no data)\n"),
-    ("list_empty", "json"): ("[]\n"),
+    ("list_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "reports": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("list_rows", "text"): (
         "   report_id |     strategy |       status | submitted_at\n"
         "---------------------------------------------------------\n"
@@ -301,20 +313,26 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "         r-2 |     mean_rev |      adopted | 2026-01-03 09:00:00+00:00\n"
     ),
     ("list_rows", "json"): (
-        "[\n"
-        "  {\n"
-        '    "report_id": "r-1",\n'
-        '    "strategy": "momentum",\n'
-        '    "status": "submitted",\n'
-        '    "submitted_at": "2026-01-02 09:00:00+00:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "report_id": "r-2",\n'
-        '    "strategy": "mean_rev",\n'
-        '    "status": "adopted",\n'
-        '    "submitted_at": "2026-01-03 09:00:00+00:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "reports": [\n'
+        "      {\n"
+        '        "report_id": "r-1",\n'
+        '        "strategy": "momentum",\n'
+        '        "status": "submitted",\n'
+        '        "submitted_at": "2026-01-02 09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "report_id": "r-2",\n'
+        '        "strategy": "mean_rev",\n'
+        '        "status": "adopted",\n'
+        '        "submitted_at": "2026-01-03 09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("list_status", "text"): (
         "   report_id |     strategy |       status | submitted_at\n"
@@ -323,26 +341,39 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "         r-2 |     mean_rev |      adopted | 2026-01-03 09:00:00+00:00\n"
     ),
     ("list_status", "json"): (
-        "[\n"
-        "  {\n"
-        '    "report_id": "r-1",\n'
-        '    "strategy": "momentum",\n'
-        '    "status": "submitted",\n'
-        '    "submitted_at": "2026-01-02 09:00:00+00:00"\n'
-        "  },\n"
-        "  {\n"
-        '    "report_id": "r-2",\n'
-        '    "strategy": "mean_rev",\n'
-        '    "status": "adopted",\n'
-        '    "submitted_at": "2026-01-03 09:00:00+00:00"\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "reports": [\n'
+        "      {\n"
+        '        "report_id": "r-1",\n'
+        '        "strategy": "momentum",\n'
+        '        "status": "submitted",\n'
+        '        "submitted_at": "2026-01-02 09:00:00+00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "report_id": "r-2",\n'
+        '        "strategy": "mean_rev",\n'
+        '        "status": "adopted",\n'
+        '        "submitted_at": "2026-01-03 09:00:00+00:00"\n'
+        "      }\n"
+        "    ]\n"
         "  }\n"
-        "]\n"
+        "}\n"
     ),
     ("performance_empty", "text"): (
         "{'message': '집계 데이터가 없습니다.', 'summaries': []}\n"
     ),
     ("performance_empty", "json"): (
-        '{\n  "message": "집계 데이터가 없습니다.",\n  "summaries": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "집계 데이터가 없습니다.",\n'
+        '    "summaries": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("performance_daily", "text"): (
         "        date | realized_pnl |  trade_count |     win_rate\n"
@@ -352,21 +383,25 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("performance_daily", "json"): (
         "{\n"
-        '  "period": "daily",\n'
-        '  "summaries": [\n'
-        "    {\n"
-        '      "date": "2026-01-02",\n'
-        '      "realized_pnl": 1500.0,\n'
-        '      "trade_count": 3,\n'
-        '      "win_rate": 66.7\n'
-        "    },\n"
-        "    {\n"
-        '      "date": "2026-01-03",\n'
-        '      "realized_pnl": -200.5,\n'
-        '      "trade_count": 1,\n'
-        '      "win_rate": 0.0\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "period": "daily",\n'
+        '    "summaries": [\n'
+        "      {\n"
+        '        "date": "2026-01-02",\n'
+        '        "realized_pnl": 1500.0,\n'
+        '        "trade_count": 3,\n'
+        '        "win_rate": 66.7\n'
+        "      },\n"
+        "      {\n"
+        '        "date": "2026-01-03",\n'
+        '        "realized_pnl": -200.5,\n'
+        '        "trade_count": 1,\n'
+        '        "win_rate": 0.0\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("performance_monthly", "text"): (
@@ -376,16 +411,20 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("performance_monthly", "json"): (
         "{\n"
-        '  "period": "monthly",\n'
-        '  "summaries": [\n'
-        "    {\n"
-        '      "year": 2025,\n'
-        '      "month": 12,\n'
-        '      "realized_pnl": 9000.0,\n'
-        '      "trade_count": 20,\n'
-        '      "win_rate": 55.0\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "period": "monthly",\n'
+        '    "summaries": [\n'
+        "      {\n"
+        '        "year": 2025,\n'
+        '        "month": 12,\n'
+        '        "realized_pnl": 9000.0,\n'
+        '        "trade_count": 20,\n'
+        '        "win_rate": 55.0\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("view", "text"): (
@@ -406,22 +445,26 @@ _REPORT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("view", "json"): (
         "{\n"
-        '  "report_id": "r-1",\n'
-        '  "strategy": "momentum v1.0.0",\n'
-        '  "status": "submitted",\n'
-        '  "submitted_at": "2026-01-02 09:00:00+00:00",\n'
-        '  "submitted_by": "agent-1",\n'
-        '  "backtest_period": "2025-01-01~2025-12-31",\n'
-        '  "backtest_run_id": null,\n'
-        '  "total_return_pct": 12.5,\n'
-        '  "total_trades": 40,\n'
-        '  "sharpe_ratio": 1.25,\n'
-        '  "max_drawdown_pct": -8.0,\n'
-        '  "win_rate": 55.0,\n'
-        '  "summary": "요약",\n'
-        '  "rationale": "근거",\n'
-        '  "risks": "",\n'
-        '  "recommendations": "추천"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "report_id": "r-1",\n'
+        '    "strategy": "momentum v1.0.0",\n'
+        '    "status": "submitted",\n'
+        '    "submitted_at": "2026-01-02 09:00:00+00:00",\n'
+        '    "submitted_by": "agent-1",\n'
+        '    "backtest_period": "2025-01-01~2025-12-31",\n'
+        '    "backtest_run_id": null,\n'
+        '    "total_return_pct": 12.5,\n'
+        '    "total_trades": 40,\n'
+        '    "sharpe_ratio": 1.25,\n'
+        '    "max_drawdown_pct": -8.0,\n'
+        '    "win_rate": 55.0,\n'
+        '    "summary": "요약",\n'
+        '    "rationale": "근거",\n'
+        '    "risks": "",\n'
+        '    "recommendations": "추천"\n'
+        "  }\n"
         "}\n"
     ),
 }

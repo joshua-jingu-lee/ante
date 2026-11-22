@@ -133,7 +133,7 @@ class TestReportTableAbsenceGraceful:
         assert result.exit_code == 0, result.output
         assert "Traceback" not in result.output, result.output
         payload = _load_json(result.output)
-        rows = payload["data"] if isinstance(payload, dict) else payload
+        rows = payload["data"]["reports"]
         assert rows == [], payload
 
     def test_view_table_absent_returns_not_found(self, tmp_path) -> None:
@@ -227,7 +227,7 @@ class TestReportWritableRegression:
         result = _invoke(["--format", "json", "report", "list", "--db-path", db_path])
         assert result.exit_code == 0, result.output
         payload = _load_json(result.output)
-        rows = payload["data"] if isinstance(payload, dict) else payload
+        rows = payload["data"]["reports"]
         assert any(r["report_id"] == _REPORT_ID for r in rows), payload
 
     def test_view_writable_db_returns_report(self, tmp_path) -> None:
@@ -236,6 +236,6 @@ class TestReportWritableRegression:
             ["--format", "json", "report", "view", _REPORT_ID, "--db-path", db_path]
         )
         assert result.exit_code == 0, result.output
-        payload = _load_json(result.output)
+        payload = _load_json(result.output)["data"]
         assert payload["report_id"] == _REPORT_ID, payload
         assert payload["total_trades"] == 7, payload

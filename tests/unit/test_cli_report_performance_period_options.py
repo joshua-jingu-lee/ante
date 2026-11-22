@@ -378,7 +378,7 @@ class TestValidPeriodOptionCombosRegression:
                 ],
             )
         assert result.exit_code == 0
-        data = json.loads(result.output)
+        data = json.loads(result.output)["data"]
         assert data["period"] == "monthly"
         assert data["summaries"][0]["year"] == 2026
         mock_run.assert_called_once()

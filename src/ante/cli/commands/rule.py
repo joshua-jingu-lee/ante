@@ -14,7 +14,7 @@ import click
 from ante.account.errors import AccountNotFoundError
 from ante.cli._validators import reject_invalid_account_id
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import RuleNotFoundError, RuleUpdateError
@@ -140,7 +140,9 @@ def _collect_rules(engine: RuleEngine) -> list[dict[str, Any]]:
 @click.pass_context
 @require_auth
 @require_scope("rule:read")
-def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> None:
+def rule_list(
+    ctx: click.Context, account_id: str, scope_filter: str | None
+) -> CommandResult:
     """룰 목록 조회."""
     fmt = get_formatter(ctx)
 
@@ -168,13 +170,13 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
     result = _run(_run_list())
 
     if not result:
-        fmt.output({"message": "등록된 룰이 없습니다.", "rules": []})
-        return
+        empty: dict[str, Any] = {"message": "등록된 룰이 없습니다.", "rules": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"rules": result})
-    else:
-        fmt.table(result, ["rule_id", "name", "scope", "enabled", "priority"])
+    columns = ["rule_id", "name", "scope", "enabled", "priority"]
+    return CommandResult(
+        data={"rules": result}, text=lambda: tuple(table_lines(result, columns))
+    )
 
 
 @rule.command("info")
@@ -183,7 +185,7 @@ def rule_list(ctx: click.Context, account_id: str, scope_filter: str | None) -> 
 @click.pass_context
 @require_auth
 @require_scope("rule:read")
-def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
+def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> CommandResult:
     """룰 상세 정보 조회."""
     fmt = get_formatter(ctx)
 
@@ -203,11 +205,11 @@ def rule_info(ctx: click.Context, rule_id: str, account_id: str) -> None:
     if not result:
         raise RuleNotFoundError(f"룰을 찾을 수 없습니다: {rule_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        for key, value in result.items():
-            click.echo(f"  {key:15s}: {value}")
+    found = result
+    return CommandResult(
+        data=found,
+        text=lambda: tuple(f"  {key:15s}: {value}" for key, value in found.items()),
+    )
 
 
 def _parse_rule_params(
@@ -269,7 +271,7 @@ def rule_update(
     enabled: bool,
     params: tuple[str, ...],
     params_json: str | None,
-) -> None:
+) -> CommandResult:
     """계좌 룰 설정 수정."""
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
@@ -338,11 +340,11 @@ def rule_update(
             raise
         raise RuleUpdateError(str(e)) from e
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
+    def _lines() -> tuple[str, ...]:
         rule_item = result.get("rule", {})
-        click.echo(
+        return (
             f"룰 수정 완료: {result.get('account_id')} "
-            f"{rule_item.get('type', rule_type)} enabled={rule_item.get('enabled')}"
+            f"{rule_item.get('type', rule_type)} enabled={rule_item.get('enabled')}",
         )
+
+    return CommandResult(data=result, text=_lines)

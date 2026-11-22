@@ -606,7 +606,7 @@ class TestValidAccountIdRegression:
                 ],
             )
         assert result.exit_code == 0, result.output
-        payload = json.loads(result.output.strip())
+        payload = json.loads(result.output.strip())["data"]
         # 등록된 룰 없음 → 정상 빈 목록 (실재 account의 0 rules 계약).
         assert payload["rules"] == []
         assert create_calls == [_VALID_PRESENT], create_calls

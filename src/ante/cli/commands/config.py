@@ -11,8 +11,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
-from ante.cli.main import get_formatter
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import ConfigKeyNotFoundError
 
@@ -113,26 +112,17 @@ async def _resolve_all(static_config: Config, db: Database) -> list[dict[str, An
     return results
 
 
-def _render_single(result: dict[str, Any], fmt: Any) -> None:
-    """단일 설정 결과 출력 (missing은 caller에서 처리)."""
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(
-            f"  {result['key']} = {result['value']} (source: {result['source']})"
-        )
+def _single_lines(result: dict[str, Any]) -> tuple[str, ...]:
+    return (f"  {result['key']} = {result['value']} (source: {result['source']})",)
 
 
-def _render_list(result: list[dict[str, Any]], fmt: Any) -> None:
-    """설정 목록 출력."""
-    if fmt.is_json:
-        fmt.output({"configs": result})
-        return
+def _list_lines(result: list[dict[str, Any]]) -> tuple[str, ...]:
     if not result:
-        click.echo("  (설정 없음)")
-        return
-    for item in result:
-        click.echo(f"  {item['key']:40s} = {str(item['value']):20s} ({item['source']})")
+        return ("  (설정 없음)",)
+    return tuple(
+        f"  {item['key']:40s} = {str(item['value']):20s} ({item['source']})"
+        for item in result
+    )
 
 
 @config.command("get")
@@ -141,9 +131,8 @@ def _render_list(result: list[dict[str, Any]], fmt: Any) -> None:
 @click.pass_context
 @require_auth
 @require_scope("config:read")
-def config_get(ctx: click.Context, key: str | None) -> None:
+def config_get(ctx: click.Context, key: str | None) -> CommandResult:
     """설정 조회. 키 없이 호출하면 전체 목록."""
-    fmt = get_formatter(ctx)
 
     async def _run_get() -> dict[str, Any] | list[dict[str, Any]]:
         async with _create_services(ctx=ctx) as (static_config, dynamic, db):
@@ -156,9 +145,10 @@ def config_get(ctx: click.Context, key: str | None) -> None:
     if isinstance(result, dict):
         if result["source"] == "not_found":
             raise ConfigKeyNotFoundError(f"설정을 찾을 수 없습니다: {result['key']}")
-        _render_single(result, fmt)
-    else:
-        _render_list(result, fmt)
+        single = result
+        return CommandResult(data=single, text=lambda: _single_lines(single))
+    rows = result
+    return CommandResult(data={"configs": rows}, text=lambda: _list_lines(rows))
 
 
 @config.command("set")
@@ -168,9 +158,8 @@ def config_get(ctx: click.Context, key: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("config:write")
-def config_set(ctx: click.Context, key: str, value: str) -> None:
+def config_set(ctx: click.Context, key: str, value: str) -> CommandResult:
     """동적 설정 변경. 정적 설정은 변경 불가."""
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     async def _run_set() -> dict[str, Any]:
@@ -180,14 +169,12 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 
     result = _run(_run_set())
 
-    if fmt.is_json:
-        output = {"status": "success", **result}
-        fmt.output(output)
-    else:
-        fmt.success(
+    return CommandResult(
+        data={"status": "success", **result},
+        text=lambda: (
             f"설정 변경 완료: {result.get('key', key)} = {result.get('value', value)}",
-            result,
-        )
+        ),
+    )
 
 
 @config.command("history")
@@ -203,9 +190,8 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("config:read")
-def config_history(ctx: click.Context, key: str, limit: int) -> None:
+def config_history(ctx: click.Context, key: str, limit: int) -> CommandResult:
     """설정 변경 이력 조회."""
-    fmt = get_formatter(ctx)
 
     async def _run_history() -> list[dict[str, Any]]:
         async with _create_services(ctx=ctx) as (_, dynamic, _):
@@ -213,18 +199,24 @@ def config_history(ctx: click.Context, key: str, limit: int) -> None:
 
     rows = _run(_run_history())
 
-    if fmt.is_json:
-        fmt.output({"key": key, "history": rows})
-    else:
-        if not rows:
-            click.echo(f"  '{key}'에 대한 변경 이력이 없습니다.")
-            return
-        click.echo(f"  변경 이력: {key} (최근 {limit}건)")
-        click.echo(f"  {'시각':24s} {'변경자':16s} {'이전값':20s} → {'새값':20s}")
-        click.echo("  " + "-" * 84)
-        for row in rows:
-            old = row.get("old_value") or "(없음)"
-            new = row.get("new_value", "")
-            at = row["changed_at"]
-            by = row["changed_by"]
-            click.echo(f"  {at:24s} {by:16s} {old:20s} → {new:20s}")
+    return CommandResult(
+        data={"key": key, "history": rows},
+        text=lambda: _history_lines(key, limit, rows),
+    )
+
+
+def _history_lines(key: str, limit: int, rows: list[dict[str, Any]]) -> tuple[str, ...]:
+    if not rows:
+        return (f"  '{key}'에 대한 변경 이력이 없습니다.",)
+    lines = [
+        f"  변경 이력: {key} (최근 {limit}건)",
+        f"  {'시각':24s} {'변경자':16s} {'이전값':20s} → {'새값':20s}",
+        "  " + "-" * 84,
+    ]
+    for row in rows:
+        old = row.get("old_value") or "(없음)"
+        new = row.get("new_value", "")
+        at = row["changed_at"]
+        by = row["changed_by"]
+        lines.append(f"  {at:24s} {by:16s} {old:20s} → {new:20s}")
+    return tuple(lines)

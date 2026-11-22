@@ -269,7 +269,7 @@ class TestConfigGetMissingExit:
             )
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["key"] == "some.key"
         assert payload["value"] == "hello"
         assert payload["source"] == "static"

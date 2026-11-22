@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from ante.cli._validators import reject_inverted_date_range, validate_iso_date
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option, table_lines
 from ante.cli.main import get_formatter
 from ante.cli.middleware import require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -39,13 +39,13 @@ def report() -> None:
 @click.pass_context
 @require_auth
 @require_scope("report:read")
-def schema(ctx: click.Context) -> None:
+def schema(ctx: click.Context) -> CommandResult:
     """리포트 제출 스키마 조회."""
     from ante.report import ReportStore
 
-    fmt = get_formatter(ctx)
     store = ReportStore.__new__(ReportStore)
-    fmt.output(store.get_schema())
+    payload = store.get_schema()
+    return CommandResult(data=payload, text=(str(payload),))
 
 
 @report.command()
@@ -60,12 +60,11 @@ def submit(
     json_path: str,
     db_path: str | None,
     run_id: str | None,
-) -> None:
+) -> CommandResult:
     """리포트 제출."""
     from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     with open(json_path) as f:
@@ -153,7 +152,9 @@ def submit(
 
     try:
         result = asyncio.run(_submit())
-        fmt.success(f"Report submitted: {result['report_id']}", result)
+        return CommandResult(
+            data=result, message=f"Report submitted: {result['report_id']}"
+        )
     except Exception as e:
         raise ReportError(str(e)) from e
 
@@ -167,12 +168,13 @@ def submit(
 @click.pass_context
 @require_auth
 @require_scope("report:read")
-def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> None:
+def report_list(
+    ctx: click.Context, status: str | None, db_path: str | None
+) -> CommandResult:
     """리포트 목록 조회."""
     from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     if status is not None and status not in {s.value for s in ReportStatus}:
@@ -208,9 +210,17 @@ def report_list(ctx: click.Context, status: str | None, db_path: str | None) -> 
 
     try:
         rows = asyncio.run(_list())
-        fmt.table(rows, ["report_id", "strategy", "status", "submitted_at"])
     except Exception as e:
         raise ReportError(str(e)) from e
+
+    def _lines() -> tuple[str, ...]:
+        try:
+            columns = ["report_id", "strategy", "status", "submitted_at"]
+            return tuple(table_lines(rows, columns))
+        except Exception as e:
+            raise ReportError(str(e)) from e
+
+    return CommandResult(data=rows, text=_lines)
 
 
 @report.command("performance")
@@ -244,7 +254,7 @@ def report_performance(
     start: str | None,
     end: str | None,
     year: int | None,
-) -> None:
+) -> CommandResult:
     """기간별 성과 집계 조회."""
     from dataclasses import asdict
 
@@ -295,18 +305,17 @@ def report_performance(
     result = asyncio.run(_run_performance())
 
     if not result:
-        fmt.output({"message": "집계 데이터가 없습니다.", "summaries": []})
-        return
+        empty: dict[str, Any] = {"message": "집계 데이터가 없습니다.", "summaries": []}
+        return CommandResult(data=empty, text=(str(empty),))
 
-    if fmt.is_json:
-        fmt.output({"period": period, "summaries": result})
+    if period == "daily":
+        columns = ["date", "realized_pnl", "trade_count", "win_rate"]
     else:
-        if period == "daily":
-            fmt.table(result, ["date", "realized_pnl", "trade_count", "win_rate"])
-        else:
-            fmt.table(
-                result, ["year", "month", "realized_pnl", "trade_count", "win_rate"]
-            )
+        columns = ["year", "month", "realized_pnl", "trade_count", "win_rate"]
+    return CommandResult(
+        data={"period": period, "summaries": result},
+        text=lambda: tuple(table_lines(result, columns)),
+    )
 
 
 @report.command("view")
@@ -315,12 +324,13 @@ def report_performance(
 @click.pass_context
 @require_auth
 @require_scope("report:read")
-def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None:
+def report_view(
+    ctx: click.Context, report_id: str, db_path: str | None
+) -> CommandResult:
     """리포트 상세 조회."""
     from ante.cli.main import get_db_path
     from ante.report import ReportStore
 
-    fmt = get_formatter(ctx)
     resolved_db_path = db_path or get_db_path(ctx)
 
     async def _view() -> dict[str, Any] | None:
@@ -367,9 +377,12 @@ def report_view(ctx: click.Context, report_id: str, db_path: str | None) -> None
     if not result:
         raise ReportNotFoundError(f"리포트를 찾을 수 없습니다: {report_id}")
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        for key, value in result.items():
-            if value is not None and value != "":
-                click.echo(f"  {key:20s}: {value}")
+    found = result
+    return CommandResult(
+        data=found,
+        text=lambda: tuple(
+            f"  {key:20s}: {value}"
+            for key, value in found.items()
+            if value is not None and value != ""
+        ),
+    )

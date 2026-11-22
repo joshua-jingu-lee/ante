@@ -118,7 +118,14 @@ def _invoke_case(
 _AUDIT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'message': '감사 로그가 없습니다.', 'logs': []}\n"),
     ("list_empty", "json"): (
-        '{\n  "message": "감사 로그가 없습니다.",\n  "logs": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "감사 로그가 없습니다.",\n'
+        '    "logs": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows", "text"): (
         "          id |    member_id |       action |     resource |   created_at\n"
@@ -130,26 +137,30 @@ _AUDIT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "logs": [\n'
-        "    {\n"
-        '      "id": 2,\n'
-        '      "member_id": "agent-1",\n'
-        '      "action": "member.rotate_token",\n'
-        '      "resource": "member:agent-1",\n'
-        '      "detail": "{\\"token\\": \\"tok-audit-fixture-0001\\"}",\n'
-        '      "ip": "",\n'
-        '      "created_at": "2026-01-02 09:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": 1,\n'
-        '      "member_id": "test-master",\n'
-        '      "action": "config.set",\n'
-        '      "resource": "config:system.log_level",\n'
-        '      "detail": "",\n'
-        '      "ip": "127.0.0.1",\n'
-        '      "created_at": "2026-01-01 08:30:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "logs": [\n'
+        "      {\n"
+        '        "id": 2,\n'
+        '        "member_id": "agent-1",\n'
+        '        "action": "member.rotate_token",\n'
+        '        "resource": "member:agent-1",\n'
+        '        "detail": "{\\"token\\": \\"tok-audit-fixture-0001\\"}",\n'
+        '        "ip": "",\n'
+        '        "created_at": "2026-01-02 09:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": 1,\n'
+        '        "member_id": "test-master",\n'
+        '        "action": "config.set",\n'
+        '        "resource": "config:system.log_level",\n'
+        '        "detail": "",\n'
+        '        "ip": "127.0.0.1",\n'
+        '        "created_at": "2026-01-01 08:30:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_filtered", "text"): (
@@ -162,26 +173,30 @@ _AUDIT_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_filtered", "json"): (
         "{\n"
-        '  "logs": [\n'
-        "    {\n"
-        '      "id": 2,\n'
-        '      "member_id": "agent-1",\n'
-        '      "action": "member.rotate_token",\n'
-        '      "resource": "member:agent-1",\n'
-        '      "detail": "{\\"token\\": \\"tok-audit-fixture-0001\\"}",\n'
-        '      "ip": "",\n'
-        '      "created_at": "2026-01-02 09:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": 1,\n'
-        '      "member_id": "test-master",\n'
-        '      "action": "config.set",\n'
-        '      "resource": "config:system.log_level",\n'
-        '      "detail": "",\n'
-        '      "ip": "127.0.0.1",\n'
-        '      "created_at": "2026-01-01 08:30:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "logs": [\n'
+        "      {\n"
+        '        "id": 2,\n'
+        '        "member_id": "agent-1",\n'
+        '        "action": "member.rotate_token",\n'
+        '        "resource": "member:agent-1",\n'
+        '        "detail": "{\\"token\\": \\"tok-audit-fixture-0001\\"}",\n'
+        '        "ip": "",\n'
+        '        "created_at": "2026-01-02 09:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": 1,\n'
+        '        "member_id": "test-master",\n'
+        '        "action": "config.set",\n'
+        '        "resource": "config:system.log_level",\n'
+        '        "detail": "",\n'
+        '        "ip": "127.0.0.1",\n'
+        '        "created_at": "2026-01-01 08:30:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
 }

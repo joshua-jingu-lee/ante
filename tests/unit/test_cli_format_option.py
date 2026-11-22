@@ -416,7 +416,7 @@ class TestConfigGetFormatOption:
         ):
             result = runner.invoke(cli, ["config", "get", "--format", "json"])
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert "configs" in data
 
 
@@ -448,7 +448,7 @@ class TestConfigSetFormatOption:
                 cli, ["config", "set", "custom.key", "hello", "--format", "json"]
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["success"] is True
 
 
@@ -474,7 +474,7 @@ class TestConfigHistoryFormatOption:
                 ["config", "history", "risk.test_qa_key", "--format", "json"],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["key"] == "risk.test_qa_key"
             assert data["history"] == []
 
@@ -645,7 +645,7 @@ class TestReportSchemaFormatOption1701:
 
         assert result.exit_code == 0, result.output
         # ReportStore.get_schema()는 dict를 반환하므로 JSON parse 가능해야 한다.
-        payload = json.loads(result.output)
+        payload = json.loads(result.output)["data"]
         assert isinstance(payload, dict)
 
     def test_default_text_output_preserved(self, runner: CliRunner) -> None:

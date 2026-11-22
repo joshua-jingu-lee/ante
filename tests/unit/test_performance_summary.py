@@ -303,7 +303,7 @@ class TestReportPerformanceCLI:
                 ["--format", "json", "report", "performance", "--period", "monthly"],
             )
             assert result.exit_code == 0
-            data = json.loads(result.output)
+            data = json.loads(result.output)["data"]
             assert data["period"] == "monthly"
             assert len(data["summaries"]) == 1
             assert data["summaries"][0]["year"] == 2026

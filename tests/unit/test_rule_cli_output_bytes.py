@@ -161,7 +161,14 @@ def _invoke_case(
 _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ("list_empty", "text"): ("{'message': '등록된 룰이 없습니다.', 'rules': []}\n"),
     ("list_empty", "json"): (
-        '{\n  "message": "등록된 룰이 없습니다.",\n  "rules": []\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "message": "등록된 룰이 없습니다.",\n'
+        '    "rules": []\n'
+        "  }\n"
+        "}\n"
     ),
     ("list_rows", "text"): (
         "     rule_id |         name |        scope |      enabled |     priority\n"
@@ -173,24 +180,28 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_rows", "json"): (
         "{\n"
-        '  "rules": [\n'
-        "    {\n"
-        '      "rule_id": "daily_loss_limit",\n'
-        '      "name": "일일 손실 한도",\n'
-        '      "scope": "global",\n'
-        '      "enabled": true,\n'
-        '      "priority": 10,\n'
-        '      "description": "일일 손실 한도 설명"\n'
-        "    },\n"
-        "    {\n"
-        '      "rule_id": "max_position_count",\n'
-        '      "name": "최대 포지션 수",\n'
-        '      "scope": "strategy:momentum",\n'
-        '      "enabled": false,\n'
-        '      "priority": 20,\n'
-        '      "description": "최대 포지션 수 설명"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "rules": [\n'
+        "      {\n"
+        '        "rule_id": "daily_loss_limit",\n'
+        '        "name": "일일 손실 한도",\n'
+        '        "scope": "global",\n'
+        '        "enabled": true,\n'
+        '        "priority": 10,\n'
+        '        "description": "일일 손실 한도 설명"\n'
+        "      },\n"
+        "      {\n"
+        '        "rule_id": "max_position_count",\n'
+        '        "name": "최대 포지션 수",\n'
+        '        "scope": "strategy:momentum",\n'
+        '        "enabled": false,\n'
+        '        "priority": 20,\n'
+        '        "description": "최대 포지션 수 설명"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_global", "text"): (
@@ -201,16 +212,20 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_global", "json"): (
         "{\n"
-        '  "rules": [\n'
-        "    {\n"
-        '      "rule_id": "daily_loss_limit",\n'
-        '      "name": "일일 손실 한도",\n'
-        '      "scope": "global",\n'
-        '      "enabled": true,\n'
-        '      "priority": 10,\n'
-        '      "description": "일일 손실 한도 설명"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "rules": [\n'
+        "      {\n"
+        '        "rule_id": "daily_loss_limit",\n'
+        '        "name": "일일 손실 한도",\n'
+        '        "scope": "global",\n'
+        '        "enabled": true,\n'
+        '        "priority": 10,\n'
+        '        "description": "일일 손실 한도 설명"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("list_strategy", "text"): (
@@ -221,16 +236,20 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("list_strategy", "json"): (
         "{\n"
-        '  "rules": [\n'
-        "    {\n"
-        '      "rule_id": "max_position_count",\n'
-        '      "name": "최대 포지션 수",\n'
-        '      "scope": "strategy:momentum",\n'
-        '      "enabled": false,\n'
-        '      "priority": 20,\n'
-        '      "description": "최대 포지션 수 설명"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "rules": [\n'
+        "      {\n"
+        '        "rule_id": "max_position_count",\n'
+        '        "name": "최대 포지션 수",\n'
+        '        "scope": "strategy:momentum",\n'
+        '        "enabled": false,\n'
+        '        "priority": 20,\n'
+        '        "description": "최대 포지션 수 설명"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("info", "text"): (
@@ -243,12 +262,16 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("info", "json"): (
         "{\n"
-        '  "rule_id": "max_position_count",\n'
-        '  "name": "최대 포지션 수",\n'
-        '  "scope": "strategy:momentum",\n'
-        '  "enabled": false,\n'
-        '  "priority": 20,\n'
-        '  "description": "최대 포지션 수 설명"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "rule_id": "max_position_count",\n'
+        '    "name": "최대 포지션 수",\n'
+        '    "scope": "strategy:momentum",\n'
+        '    "enabled": false,\n'
+        '    "priority": 20,\n'
+        '    "description": "최대 포지션 수 설명"\n'
+        "  }\n"
         "}\n"
     ),
     ("update_ipc", "text"): (
@@ -256,13 +279,17 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("update_ipc", "json"): (
         "{\n"
-        '  "account_id": "acct-001",\n'
-        '  "rule_type": "max_position_count",\n'
-        '  "rule": {\n'
-        '    "type": "max_position_count",\n'
-        '    "enabled": true,\n'
-        '    "params": {\n'
-        '      "max_count": 20\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acct-001",\n'
+        '    "rule_type": "max_position_count",\n'
+        '    "rule": {\n'
+        '      "type": "max_position_count",\n'
+        '      "enabled": true,\n'
+        '      "params": {\n'
+        '        "max_count": 20\n'
+        "      }\n"
         "    }\n"
         "  }\n"
         "}\n"
@@ -271,20 +298,31 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
         "룰 수정 완료: acct-001 max_position_count enabled=None\n"
     ),
     ("update_ipc_no_rule", "json"): (
-        '{\n  "account_id": "acct-001",\n  "rule_type": "max_position_count"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acct-001",\n'
+        '    "rule_type": "max_position_count"\n'
+        "  }\n"
+        "}\n"
     ),
     ("update_direct", "text"): (
         "룰 수정 완료: acct-001 max_position_count enabled=True\n"
     ),
     ("update_direct", "json"): (
         "{\n"
-        '  "account_id": "acct-001",\n'
-        '  "rule_type": "max_position_count",\n'
-        '  "rule": {\n'
-        '    "type": "max_position_count",\n'
-        '    "enabled": true,\n'
-        '    "params": {\n'
-        '      "max_count": 20\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acct-001",\n'
+        '    "rule_type": "max_position_count",\n'
+        '    "rule": {\n'
+        '      "type": "max_position_count",\n'
+        '      "enabled": true,\n'
+        '      "params": {\n'
+        '        "max_count": 20\n'
+        "      }\n"
         "    }\n"
         "  }\n"
         "}\n"
@@ -294,13 +332,17 @@ _RULE_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("update_direct_disabled", "json"): (
         "{\n"
-        '  "account_id": "acct-001",\n'
-        '  "rule_type": "max_position_count",\n'
-        '  "rule": {\n'
-        '    "type": "max_position_count",\n'
-        '    "enabled": false,\n'
-        '    "params": {\n'
-        '      "max_count": 5\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "account_id": "acct-001",\n'
+        '    "rule_type": "max_position_count",\n'
+        '    "rule": {\n'
+        '      "type": "max_position_count",\n'
+        '      "enabled": false,\n'
+        '      "params": {\n'
+        '        "max_count": 5\n'
+        "      }\n"
         "    }\n"
         "  }\n"
         "}\n"

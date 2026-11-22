@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 import click
 
 from ante.cli.db_context import open_cli_db
-from ante.cli.formatter import format_option
+from ante.cli.formatter import CommandResult, format_option
 from ante.cli.main import get_formatter
 from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import (
@@ -109,12 +109,10 @@ def start(ctx: click.Context, config_dir: str | None) -> None:
 @click.pass_context
 @require_auth
 @require_scope("system:admin")
-def stop(ctx: click.Context) -> None:
+def stop(ctx: click.Context) -> CommandResult:
     """시스템 정상 종료 (SIGTERM)."""
     from ante.config import Config
     from ante.main import _remove_pid_file, read_pid_file
-
-    fmt = get_formatter(ctx)
 
     config_dir = ctx.obj.get("config_dir") if ctx.obj else None
     config = Config.load(config_dir=config_dir)
@@ -131,7 +129,7 @@ def stop(ctx: click.Context) -> None:
         )
 
     os.kill(pid, signal.SIGTERM)
-    fmt.success("종료 시그널 전송 완료", {"pid": pid})
+    return CommandResult(data={"pid": pid}, message="종료 시그널 전송 완료")
 
 
 @asynccontextmanager
@@ -158,9 +156,8 @@ async def _create_services(
 @click.pass_context
 @require_auth
 @require_scope("system:read")
-def status(ctx: click.Context) -> None:
+def status(ctx: click.Context) -> CommandResult:
     """시스템 상태 표시."""
-    fmt = get_formatter(ctx)
 
     async def _run_status() -> dict[str, Any]:
         from ante.account.service import AccountService
@@ -184,11 +181,13 @@ def status(ctx: click.Context) -> None:
 
     result = _run(_run_status())
 
-    if fmt.is_json:
-        fmt.output(result)
-    else:
-        click.echo(f"  거래 상태  : {result['trading_state']}")
-        click.echo(f"  봇 수     : {result['bot_count']}")
+    return CommandResult(
+        data=result,
+        text=lambda: (
+            f"  거래 상태  : {result['trading_state']}",
+            f"  봇 수     : {result['bot_count']}",
+        ),
+    )
 
 
 @system.command()
@@ -196,17 +195,16 @@ def status(ctx: click.Context) -> None:
 @click.pass_context
 @require_auth
 @require_scope("system:admin")
-def halt(ctx: click.Context, reason: str) -> None:
+def halt(ctx: click.Context, reason: str) -> CommandResult:
     """킬 스위치 발동 (전체 거래 중지)."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     result = _run(ipc_send("system.halt", {"reason": reason}, actor=actor))
     data = result.get("data", result)
     count = data.get("accounts_changed", 0)
-    fmt.success(f"시스템 HALTED — {count}개 계좌 거래 중지", data)
+    return CommandResult(data=data, message=f"시스템 HALTED — {count}개 계좌 거래 중지")
 
 
 @system.command(name="clear-halt")
@@ -214,17 +212,18 @@ def halt(ctx: click.Context, reason: str) -> None:
 @click.pass_context
 @require_auth
 @require_scope("system:admin")
-def clear_halt(ctx: click.Context, reason: str) -> None:
+def clear_halt(ctx: click.Context, reason: str) -> CommandResult:
     """킬 스위치 해제 (전역 정지 해제 — 봇은 자동 재시작되지 않음)."""
     from ante.cli.commands.ipc_helpers import ipc_send
 
-    fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
     result = _run(ipc_send("system.clear_halt", {}, actor=actor))
     data = result.get("data", result)
     count = data.get("accounts_changed", 0)
-    fmt.success(
-        f"시스템 정지 해제 — {count}개 계좌 ACTIVE 복구 (봇은 자동 재시작되지 않음)",
-        data,
+    return CommandResult(
+        data=data,
+        message=(
+            f"시스템 정지 해제 — {count}개 계좌 ACTIVE 복구 (봇은 자동 재시작되지 않음)"
+        ),
     )

@@ -138,9 +138,9 @@ def test_config_get_found_key_is_not_an_error() -> None:
     )
     assert result.exit_code == 0, result.stderr
     assert json.loads(result.stdout) == {
-        "key": "present.key",
-        "value": "v",
-        "source": "static",
+        "status": "ok",
+        "message": "",
+        "data": {"key": "present.key", "value": "v", "source": "static"},
     }
 
 

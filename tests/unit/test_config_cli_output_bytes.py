@@ -130,17 +130,25 @@ _CONFIG_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("get_dynamic", "json"): (
         "{\n"
-        '  "key": "notification.webhook",\n'
-        '  "value": "tok-config-fixture-0001",\n'
-        '  "source": "dynamic"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "key": "notification.webhook",\n'
+        '    "value": "tok-config-fixture-0001",\n'
+        '    "source": "dynamic"\n'
+        "  }\n"
         "}\n"
     ),
     ("get_static", "text"): ("  system.log_level = DEBUG (source: static)\n"),
     ("get_static", "json"): (
         "{\n"
-        '  "key": "system.log_level",\n'
-        '  "value": "DEBUG",\n'
-        '  "source": "static"\n'
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "key": "system.log_level",\n'
+        '    "value": "DEBUG",\n'
+        '    "source": "static"\n'
+        "  }\n"
         "}\n"
     ),
     ("get_all", "text"): (
@@ -153,38 +161,67 @@ _CONFIG_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("get_all", "json"): (
         "{\n"
-        '  "configs": [\n'
-        "    {\n"
-        '      "key": "rules.daily_loss_limit",\n'
-        '      "value": 0.05,\n'
-        '      "source": "static"\n'
-        "    },\n"
-        "    {\n"
-        '      "key": "system.log_level",\n'
-        '      "value": "DEBUG",\n'
-        '      "source": "static"\n'
-        "    },\n"
-        "    {\n"
-        '      "key": "notification.webhook",\n'
-        '      "value": "tok-config-fixture-0001",\n'
-        '      "source": "dynamic"\n'
-        "    },\n"
-        "    {\n"
-        '      "key": "risk.max_orders",\n'
-        '      "value": 12,\n'
-        '      "source": "dynamic"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "configs": [\n'
+        "      {\n"
+        '        "key": "rules.daily_loss_limit",\n'
+        '        "value": 0.05,\n'
+        '        "source": "static"\n'
+        "      },\n"
+        "      {\n"
+        '        "key": "system.log_level",\n'
+        '        "value": "DEBUG",\n'
+        '        "source": "static"\n'
+        "      },\n"
+        "      {\n"
+        '        "key": "notification.webhook",\n'
+        '        "value": "tok-config-fixture-0001",\n'
+        '        "source": "dynamic"\n'
+        "      },\n"
+        "      {\n"
+        '        "key": "risk.max_orders",\n'
+        '        "value": 12,\n'
+        '        "source": "dynamic"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
     ("get_all_empty", "text"): ("  (설정 없음)\n"),
-    ("get_all_empty", "json"): ('{\n  "configs": []\n}\n'),
+    ("get_all_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "configs": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("set", "text"): ("설정 변경 완료: risk.max_orders = 12\n"),
     ("set", "json"): (
-        '{\n  "status": "success",\n  "key": "risk.max_orders",\n  "value": "12"\n}\n'
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "status": "success",\n'
+        '    "key": "risk.max_orders",\n'
+        '    "value": "12"\n'
+        "  }\n"
+        "}\n"
     ),
     ("history_empty", "text"): ("  'risk.max_orders'에 대한 변경 이력이 없습니다.\n"),
-    ("history_empty", "json"): ('{\n  "key": "risk.max_orders",\n  "history": []\n}\n'),
+    ("history_empty", "json"): (
+        "{\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "key": "risk.max_orders",\n'
+        '    "history": []\n'
+        "  }\n"
+        "}\n"
+    ),
     ("history_rows", "text"): (
         "  변경 이력: risk.max_orders (최근 5건)\n"
         "  시각                       변경자              이전값                  → "
@@ -198,25 +235,29 @@ _CONFIG_OUTPUT_BYTES: dict[tuple[str, str], str] = {
     ),
     ("history_rows", "json"): (
         "{\n"
-        '  "key": "risk.max_orders",\n'
-        '  "history": [\n'
-        "    {\n"
-        '      "id": 2,\n'
-        '      "key": "risk.max_orders",\n'
-        '      "old_value": "10",\n'
-        '      "new_value": "12",\n'
-        '      "changed_by": "test-master",\n'
-        '      "changed_at": "2026-01-02 09:00:00"\n'
-        "    },\n"
-        "    {\n"
-        '      "id": 1,\n'
-        '      "key": "risk.max_orders",\n'
-        '      "old_value": null,\n'
-        '      "new_value": "10",\n'
-        '      "changed_by": "agent-1",\n'
-        '      "changed_at": "2026-01-01 08:30:00"\n'
-        "    }\n"
-        "  ]\n"
+        '  "status": "ok",\n'
+        '  "message": "",\n'
+        '  "data": {\n'
+        '    "key": "risk.max_orders",\n'
+        '    "history": [\n'
+        "      {\n"
+        '        "id": 2,\n'
+        '        "key": "risk.max_orders",\n'
+        '        "old_value": "10",\n'
+        '        "new_value": "12",\n'
+        '        "changed_by": "test-master",\n'
+        '        "changed_at": "2026-01-02 09:00:00"\n'
+        "      },\n"
+        "      {\n"
+        '        "id": 1,\n'
+        '        "key": "risk.max_orders",\n'
+        '        "old_value": null,\n'
+        '        "new_value": "10",\n'
+        '        "changed_by": "agent-1",\n'
+        '        "changed_at": "2026-01-01 08:30:00"\n'
+        "      }\n"
+        "    ]\n"
+        "  }\n"
         "}\n"
     ),
 }
