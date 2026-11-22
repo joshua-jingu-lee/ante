@@ -303,7 +303,7 @@ class TestRegistration:
 
 
 class TestStrategyExecutors:
-    async def test_adopt_with_record(self, env: _Env) -> None:
+    async def test_adopt_with_record_issue_2686(self, env: _Env) -> None:
         await env.executor("strategy_adopt")(
             {"report_id": "r-1", "strategy_id": "s-adopted"}
         )
@@ -323,7 +323,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_adopt_without_record(self, env: _Env) -> None:
+    async def test_adopt_without_record_issue_2686(self, env: _Env) -> None:
         await env.executor("strategy_adopt")({"report_id": "r-1", "strategy_id": "s-x"})
         assert env.log.calls == [
             ("report_store.update_status", ("r-1", "adopted"), {}),
@@ -352,7 +352,7 @@ class TestStrategyExecutors:
             ("strategy_registry.get", ("s-adopted",), {}),
         ]
 
-    async def test_adopt_missing_report_id_raises_before_any_call(
+    async def test_adopt_missing_report_id_raises_before_any_call_issue_2686(
         self, env: _Env
     ) -> None:
         with pytest.raises(KeyError) as ei:
@@ -360,7 +360,7 @@ class TestStrategyExecutors:
         assert ei.value.args == ("report_id",)
         assert env.log.calls == []
 
-    async def test_retire_with_record(self, env: _Env) -> None:
+    async def test_retire_with_record_issue_2686(self, env: _Env) -> None:
         await env.executor("strategy_retire")(
             {"report_id": "r-2", "strategy_id": "s-adopted"}
         )
@@ -380,7 +380,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_retire_without_record(self, env: _Env) -> None:
+    async def test_retire_without_record_issue_2686(self, env: _Env) -> None:
         await env.executor("strategy_retire")(
             {"report_id": "r-2", "strategy_id": "s-x"}
         )
@@ -400,7 +400,7 @@ class TestStrategyExecutors:
             ),
         ]
 
-    async def test_retire_missing_report_id_raises_before_any_call(
+    async def test_retire_missing_report_id_raises_before_any_call_issue_2686(
         self, env: _Env
     ) -> None:
         with pytest.raises(KeyError) as ei:
@@ -505,10 +505,11 @@ class TestBotExecutors:
     @pytest.mark.parametrize(
         ("approval_type", "params", "expected"),
         [
-            (
+            pytest.param(
                 "bot_assign_strategy",
                 {"bot_id": "b-1", "strategy_id": "s-1"},
                 ("bot_manager.assign_strategy", ("b-1", "s-1"), {}),
+                id="bot_assign_strategy-issue_2582",
             ),
             (
                 "bot_change_strategy",
@@ -586,10 +587,11 @@ class TestStrategyValidators:
                 [("fail", "전략을 찾을 수 없습니다", "system")],
                 [("strategy_registry.get", ("s-x",), {})],
             ),
-            (
+            pytest.param(
                 {"strategy_id": "s-adopted", "report_id": "r-does-not-exist"},
                 [("pass", "", "system")],
                 [("strategy_registry.get", ("s-adopted",), {})],
+                id="unknown_report_passes-issue_2686",
             ),
         ],
     )
@@ -613,10 +615,11 @@ class TestStrategyValidators:
                 [("fail", "이미 보관된 전략입니다", "system")],
                 [("strategy_registry.get", ("s-archived",), {})],
             ),
-            (
+            pytest.param(
                 {"strategy_id": "s-adopted"},
                 [("pass", "", "system")],
                 [("strategy_registry.get", ("s-adopted",), {})],
+                id="no_report_id_passes-issue_2686",
             ),
         ],
     )
@@ -755,7 +758,7 @@ class TestBotValidators:
         "params",
         [{}, {"bot_id": "b-x", "strategy_id": "s-x"}, {"bot_id": "b-running"}],
     )
-    async def test_assign_strategy_always_passes(
+    async def test_assign_strategy_always_passes_issue_2582(
         self, env: _Env, params: dict[str, Any]
     ) -> None:
         assert await _validate(env, "bot_assign_strategy", params) == [
@@ -866,7 +869,9 @@ def test_importing_approval_package_does_not_load_handlers_or_domains() -> None:
     code = (
         "import sys\n"
         "import ante.approval\n"
-        "names = ('ante.approval.handlers', 'ante.bot', 'ante.report')\n"
+        "names = (\n"
+        "    'ante.approval.handlers', 'ante.bot', 'ante.report', 'ante.strategy'\n"
+        ")\n"
         "print(sorted(n for n in names if n in sys.modules))\n"
     )
     env = {k: v for k, v in os.environ.items() if k != "ANTE_CONFIG_DIR"}
