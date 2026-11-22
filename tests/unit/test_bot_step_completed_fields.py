@@ -5,8 +5,8 @@ spec(`docs/specs/bot/04-eventbus-integration.md:14,27-34`)이 계약한
 error) 발행 경로 모두에서 채워지는지 검증한다.
 
 `duration_ms > 0` 은 wall-clock 에 의존하면 flaky 하므로
-``ante.bot.bot.monotonic`` (모듈 로컬 alias) 를 patch 하여 결정적으로
-검증한다 (전역 ``time.monotonic`` 이 아니라 모듈 로컬 alias).
+``ante.core.clock`` 의 현재 시계를 고정 시계로 바꿔(``use_clock``) 결정적으로
+검증한다.
 """
 
 import asyncio
@@ -15,6 +15,7 @@ import polars as pl
 import pytest
 
 from ante.bot import Bot, BotConfig, BotStatus
+from ante.core import clock
 from ante.eventbus import EventBus
 from ante.eventbus.events import BotStepCompletedEvent
 from ante.strategy import (
@@ -178,33 +179,47 @@ def _capture(eventbus) -> list[BotStepCompletedEvent]:
     return captured
 
 
-def _patch_monotonic(monkeypatch, values):
-    """``ante.bot.bot.monotonic`` 모듈 로컬 alias 를 결정적 시퀀스로 patch.
+class _ScriptedClock:
+    """단조 값을 정한 순서로 돌려주는 시계(벽시계는 manual_clock에 맡긴다).
 
-    전역 ``time.monotonic`` 이 아니라 bot 모듈이 import 한 alias 를
-    교체하여 duration 계산을 flake 없이 검증한다.
+    값이 다 떨어지면 마지막 값을 계속 돌려준다. duration 계산을 flake 없이
+    검증한다.
     """
-    seq = iter(values)
-    last = [values[-1]]
 
-    def _fake() -> float:
+    def __init__(self, base) -> None:
+        self._base = base
+        self._seq = iter(())
+        self._last = base.monotonic()
+
+    def script(self, values) -> None:
+        self._seq = iter(values)
+        self._last = values[-1]
+
+    def now(self, tz):
+        return self._base.now(tz)
+
+    def monotonic(self) -> float:
         try:
-            last[0] = next(seq)
+            self._last = next(self._seq)
         except StopIteration:
             pass
-        return last[0]
+        return self._last
 
-    monkeypatch.setattr("ante.bot.bot.monotonic", _fake)
+
+@pytest.fixture
+def step_clock(manual_clock):
+    with clock.use_clock(_ScriptedClock(manual_clock)) as scripted:
+        yield scripted
 
 
 # ── Tests ─────────────────────────────────────
 
 
 class TestBotStepCompletedFields:
-    async def test_success_with_signals(self, eventbus, ctx, monkeypatch):
+    async def test_success_with_signals(self, eventbus, ctx, step_clock):
         """success: signal_count == 발행 signal 수, duration_ms > 0."""
         # on_step 직전(t0), wait_for 정상 반환 직후(t0+0.5)
-        _patch_monotonic(monkeypatch, [10.0, 10.5])
+        step_clock.script([10.0, 10.5])
         captured = _capture(eventbus)
 
         bot = _make_bot(None, eventbus, ctx)
@@ -221,9 +236,9 @@ class TestBotStepCompletedFields:
         assert evt.duration_ms == 500
         assert evt.duration_ms > 0
 
-    async def test_success_no_signals(self, eventbus, ctx, monkeypatch):
+    async def test_success_no_signals(self, eventbus, ctx, step_clock):
         """success(시그널 없음): signal_count == 0, duration_ms > 0."""
-        _patch_monotonic(monkeypatch, [1.0, 1.25])
+        step_clock.script([1.0, 1.25])
         captured = _capture(eventbus)
 
         bot = _make_bot(None, eventbus, ctx)
@@ -239,10 +254,10 @@ class TestBotStepCompletedFields:
         assert success[0].duration_ms == 250
         assert success[0].duration_ms > 0
 
-    async def test_signal_overflow(self, eventbus, ctx, monkeypatch):
+    async def test_signal_overflow(self, eventbus, ctx, step_clock):
         """signal_overflow: signal_count == 실제 시그널 수, duration_ms > 0."""
         # delta=0.125 → 이진수로 정확히 표현 가능(부동소수점 floor 안전)
-        _patch_monotonic(monkeypatch, [100.0, 100.125])
+        step_clock.script([100.0, 100.125])
         captured = _capture(eventbus)
 
         config = _make_config(max_signals_per_step=2)
@@ -259,10 +274,10 @@ class TestBotStepCompletedFields:
         assert evt.duration_ms == 125
         assert evt.duration_ms > 0
 
-    async def test_timeout(self, eventbus, ctx, monkeypatch):
+    async def test_timeout(self, eventbus, ctx, step_clock):
         """timeout: signal_count == 0, duration_ms > 0."""
         # step_start(t0), timeout emit 시점(t0+0.0625 — 이진수 정확값)
-        _patch_monotonic(monkeypatch, [50.0, 50.0625])
+        step_clock.script([50.0, 50.0625])
         captured = _capture(eventbus)
 
         bot = _make_bot(TimeoutStrategy(ctx=ctx), eventbus, ctx)
@@ -278,10 +293,10 @@ class TestBotStepCompletedFields:
         assert evt.duration_ms == 62
         assert evt.duration_ms > 0
 
-    async def test_error(self, eventbus, ctx, monkeypatch):
+    async def test_error(self, eventbus, ctx, step_clock):
         """error(outer except): signal_count == 0, duration_ms > 0."""
         # step_start(t0), error emit 시점(t0+0.75)
-        _patch_monotonic(monkeypatch, [200.0, 200.75])
+        step_clock.script([200.0, 200.75])
         captured = _capture(eventbus)
 
         bot = _make_bot(RaiseStrategy(ctx=ctx), eventbus, ctx)
@@ -302,16 +317,6 @@ class TestBotStepCompletedFields:
 _real_sleep = asyncio.sleep
 
 
-class _Clock:
-    """``ante.bot.bot.monotonic`` 자리에 넣는 수동 시계."""
-
-    def __init__(self, start: float) -> None:
-        self.now = start
-
-    def __call__(self) -> float:
-        return self.now
-
-
 class _FailOnSecondPositions(FakePortfolioView):
     def __init__(self) -> None:
         self.calls = 0
@@ -325,13 +330,10 @@ class _FailOnSecondPositions(FakePortfolioView):
 
 class TestBotStepDurationWindow:
     async def test_success_duration_excludes_signal_publish_time(
-        self, eventbus, ctx, monkeypatch
+        self, eventbus, ctx, monkeypatch, manual_clock
     ):
         """success 의 duration_ms 는 on_step 실행 시간만 잰다(시그널 발행 시간 제외)."""
         from ante.eventbus.events import OrderRequestEvent
-
-        clock = _Clock(100.0)
-        monkeypatch.setattr("ante.bot.bot.monotonic", clock)
 
         async def fake_sleep(delay):
             await _real_sleep(0)
@@ -342,7 +344,7 @@ class TestBotStepDurationWindow:
 
         async def _slow_order_handler(event: OrderRequestEvent) -> None:
             published.append(event)
-            clock.now += 2.0
+            manual_clock.advance(2.0)
 
         eventbus.subscribe(OrderRequestEvent, _slow_order_handler)
 
@@ -350,7 +352,7 @@ class TestBotStepDurationWindow:
             meta = StrategyMeta(name="timed", version="1.0.0", description="test")
 
             async def on_step(self, context) -> list[Signal]:
-                clock.now += 0.5
+                manual_clock.advance(0.5)
                 bot.status = BotStatus.STOPPED
                 return [_signal()]
 
@@ -364,14 +366,12 @@ class TestBotStepDurationWindow:
         assert success[0].duration_ms == 500
 
     async def test_error_before_on_step_reports_zero_duration(
-        self, eventbus, monkeypatch
+        self, eventbus, monkeypatch, manual_clock
     ):
         """앞 반복의 step 시작 시각이 다음 반복의 error duration_ms 에 새지 않는다."""
-        clock = _Clock(10.0)
-        monkeypatch.setattr("ante.bot.bot.monotonic", clock)
 
         async def fake_sleep(delay):
-            clock.now += 30.0
+            manual_clock.advance(30.0)
             await _real_sleep(0)
 
         monkeypatch.setattr("ante.bot.bot.asyncio.sleep", fake_sleep)
@@ -388,7 +388,7 @@ class TestBotStepDurationWindow:
             meta = StrategyMeta(name="quick", version="1.0.0", description="test")
 
             async def on_step(self, context) -> list[Signal]:
-                clock.now += 0.5
+                manual_clock.advance(0.5)
                 return []
 
         bot = _make_bot(_QuickStrategy(ctx=flaky_ctx), eventbus, flaky_ctx)
