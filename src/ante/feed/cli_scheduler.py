@@ -6,11 +6,13 @@ import asyncio
 import logging
 import re
 import signal
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import click
+
+from ante.core import clock
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +98,7 @@ async def run_scheduler_loop(
     last_date = ""
 
     while not stop_event.is_set():
-        now = datetime.now(tz=KST)
+        now = clock.now(KST)
         current_time = now.strftime("%H:%M")
         current_date = now.strftime("%Y-%m-%d")
 

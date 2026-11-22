@@ -18,7 +18,6 @@ from pathlib import Path
 
 import pytest
 
-from ante.feed.pipeline import backfill_runner
 from ante.feed.pipeline.backfill_runner import (
     BackfillRunner,
     _last_published_date,
@@ -95,10 +94,13 @@ class TestLastPublishedDate:
 class TestResolveDatesCap:
     """``_resolve_dates`` 가 cap된 상한으로 미공개 날짜를 제외하는지 검증."""
 
+    @pytest.mark.parametrize(
+        "manual_clock", [datetime(2026, 6, 2, 10, tzinfo=_KST)], indirect=True
+    )
     def test_resolve_dates_excludes_unpublished_recent(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        manual_clock,
     ) -> None:
         """checkpoint 없이 backfill 시 미공개 최근일(today/지연공개)이 제외된다.
 
@@ -106,14 +108,6 @@ class TestResolveDatesCap:
         backfill_since를 2026-05-25(월)로 두면 범위 상한이 today(06-02)가
         아니라 2026-05-29로 cap돼야 한다(06-01 월, 06-02 화 미포함).
         """
-
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz: timezone | None = None) -> datetime:
-                base = _kst(2026, 6, 2, 10)
-                return base if tz is None else base.astimezone(tz)
-
-        monkeypatch.setattr(backfill_runner, "datetime", _FixedDatetime)
 
         feed_dir = tmp_path / ".feed"
         config = {"schedule": {"backfill_since": "2026-05-25"}}
@@ -126,20 +120,18 @@ class TestResolveDatesCap:
         # 시작은 backfill_since(2026-05-25) 그대로.
         assert dates[0] == "2026-05-25"
 
+    @pytest.mark.parametrize(
+        "manual_clock", [datetime(2026, 6, 2, 10, tzinfo=_KST)], indirect=True
+    )
     def test_backfill_since_after_last_published_yields_empty(
         self,
         tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
+        manual_clock,
     ) -> None:
-        """backfill_since > last_published 이면 빈 목록(아직 공개된 날짜 없음)."""
+        """backfill_since > last_published 이면 빈 목록(아직 공개된 날짜 없음).
 
-        class _FixedDatetime(datetime):
-            @classmethod
-            def now(cls, tz: timezone | None = None) -> datetime:
-                base = _kst(2026, 6, 2, 10)  # last_published = 2026-05-29
-                return base if tz is None else base.astimezone(tz)
-
-        monkeypatch.setattr(backfill_runner, "datetime", _FixedDatetime)
+        now=2026-06-02 10:00 KST → last_published = 2026-05-29.
+        """
 
         feed_dir = tmp_path / ".feed"
         # since(2026-06-01) > last_published(2026-05-29) → start > end → empty.
