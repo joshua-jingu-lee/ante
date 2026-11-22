@@ -33,6 +33,90 @@ def _load_import_guard():
     return module
 
 
+# ── 단위 테스트 샤드 (#2786) ──────────────────────────────────────────────
+#
+# --shard=<i>/<n>은 파일 경로의 crc32로 테스트 파일을 n개로 나눠 i번째만 남긴다.
+# --shard-manifest=<path>는 실행된(setup 보고가 있는) 테스트의 nodeid를 쓴다.
+# 둘 다 없으면 아무 일도 하지 않는다.
+
+_SHARD_KEY = pytest.StashKey["tuple[int, int] | None"]()
+_SHARD_MANIFEST: dict[str, object] = {}
+
+
+def _load_shard_tools():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "check_test_shards.py"
+    spec = importlib.util.spec_from_file_location("_ante_test_shards", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load shard tools: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+_SHARD_TOOLS = _load_shard_tools()
+
+
+def pytest_addoption(parser: pytest.Parser) -> None:
+    group = parser.getgroup("ante-shards", "unit test shards (#2786)")
+    group.addoption(
+        "--shard",
+        default=None,
+        metavar="I/N",
+        help="run only the test files whose path crc32 %% N == I - 1",
+    )
+    group.addoption(
+        "--shard-manifest",
+        default=None,
+        metavar="PATH",
+        help="write the sorted nodeids of the tests that ran to PATH",
+    )
+
+
+def _configure_shard(config: pytest.Config) -> None:
+    value = config.getoption("--shard")
+    shard = None
+    if value is not None:
+        try:
+            shard = _SHARD_TOOLS.parse_shard(value)
+        except ValueError as exc:
+            raise pytest.UsageError(str(exc)) from exc
+    config.stash[_SHARD_KEY] = shard
+    manifest = config.getoption("--shard-manifest")
+    if manifest is not None:
+        _SHARD_MANIFEST.update(path=manifest, ran=set())
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    shard = config.stash.get(_SHARD_KEY, None)
+    if shard is None:
+        return
+    index, total = shard
+    keep: list[pytest.Item] = []
+    drop: list[pytest.Item] = []
+    for item in items:
+        path = item.nodeid.split("::", 1)[0]
+        (keep if _SHARD_TOOLS.shard_of(path, total) == index else drop).append(item)
+    if drop:
+        config.hook.pytest_deselected(items=drop)
+        items[:] = keep
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    ran = _SHARD_MANIFEST.get("ran")
+    if isinstance(ran, set) and report.when == "setup":
+        ran.add(report.nodeid)
+
+
+def _write_shard_manifest() -> None:
+    path, ran = _SHARD_MANIFEST.get("path"), _SHARD_MANIFEST.get("ran")
+    if isinstance(path, str) and isinstance(ran, set):
+        Path(path).write_text(
+            "".join(f"{nodeid}\n" for nodeid in sorted(ran)), encoding="utf-8"
+        )
+
+
 # ── 설정 디렉터리 격리 (#2592) ────────────────────────────────────────────
 #
 # 테스트는 실제 설정 디렉터리(원래 HOME과 pwd 홈의 .config/ante, 원래
@@ -335,6 +419,7 @@ def _format_record(record: tuple[str, str, str]) -> str:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Fail collection if ``ante`` resolves outside this checkout."""
+    _configure_shard(config)
     guard = _load_import_guard()
     try:
         guard.check_import_path()
@@ -368,6 +453,7 @@ def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:
     if hasattr(config, "workerinput"):
         config.workeroutput[_WORKEROUTPUT_KEY] = leftover
         return
+    _write_shard_manifest()
     violations = _COLLECTED_WORKER_VIOLATIONS + leftover
     if not violations:
         return
