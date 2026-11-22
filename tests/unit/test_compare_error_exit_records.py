@@ -207,6 +207,24 @@ def test_prefix_code_must_match_the_json_row_for_the_same_arguments(
 
 
 @pytest.mark.parametrize(
+    ("json_code", "expected", "exit_code"),
+    [
+        pytest.param("EXECUTION_ERROR", "text 형식", 0, id="fallback-in-json"),
+        pytest.param(CODE, "다름", 1, id="other-code-in-json"),
+    ],
+)
+def test_fallback_prefix_needs_the_fallback_in_the_json_row(
+    tmp_path: Path, json_code: str, expected: str, exit_code: int
+) -> None:
+    json_row = _row(JSON_ARGS, stdout=_envelope(json_code), n=1)
+    before = [_row(TEXT_ARGS, stderr="Error: 없음\n"), json_row]
+    after = [_row(TEXT_ARGS, stderr="Error: EXECUTION_ERROR: 없음\n"), json_row]
+    result = _compare(tmp_path, before, after)
+    assert result.returncode == exit_code
+    assert _counts(result.stdout) == _expected_counts(같음=1, **{expected: 1})
+
+
+@pytest.mark.parametrize(
     ("after_stderr", "expected", "exit_code"),
     [
         pytest.param(f"앞줄\nError: {CODE}: 없음\n", "text 형식", 0, id="one"),
