@@ -463,6 +463,51 @@ def test_a_narrowed_field_may_change_code(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("command", "key", "args", "after", "cls", "exit_code"),
+    [
+        pytest.param(
+            "bot.list",
+            "account_id",
+            {"account_id": "5"},
+            "bot.list 인자 검증 실패: account_id(invalid_account_id)",
+            "메시지 바뀜",
+            0,
+            id="nullable-account-id",
+        ),
+        pytest.param(
+            "bot.start",
+            "bot_id",
+            {"bot_id": "5"},
+            "bot.start 인자 검증 실패: bot_id(string_type)",
+            "다름",
+            1,
+            id="plain-str",
+        ),
+    ],
+)
+def test_a_nullable_narrowed_field_may_change_message(
+    tmp_path: Path,
+    command: str,
+    key: str,
+    args: dict[str, Any],
+    after: str,
+    cls: str,
+    exit_code: int,
+) -> None:
+    name = f"{command}:value:{key}:str5"
+    row = _request(name, "value", args, key=key, same_type=True)
+    before = {**REJECTED, "message": "invalid account_id: '5'"}
+    code, out, _ = _compare(
+        tmp_path,
+        [row],
+        {name: before},
+        {name: {**REJECTED, "message": after}},
+        command=command,
+    )
+    assert (code, _count(out, cls)) == (exit_code, 1)
+
+
+@pytest.mark.parametrize(
     ("message", "exit_code"),
     [
         pytest.param(EXTRA_REJECTED, 0, id="model-rejection"),

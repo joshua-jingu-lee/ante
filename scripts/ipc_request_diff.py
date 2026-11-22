@@ -55,7 +55,7 @@ each other request:
 - ``다름`` when a row is missing in a record, for a ``cli`` row that is not
   ``같음``, and for a ``value`` row whose value has the JSON type of the
   ``cli`` value and that is not ``같음``, unless the after model narrows that
-  field (a ``Literal`` or an ``AfterValidator`` type).
+  field (a ``Literal`` or an ``AfterValidator`` type, also inside ``X | None``).
 - A request-model rejection after is ``VALIDATION_ERROR`` with a message that
   starts with ``<command> 인자 검증 실패: ``. The next three classes need it.
 - ``거부로 바뀜``: calls before, a request-model rejection and no calls after.
@@ -89,6 +89,7 @@ import os
 import shutil
 import sys
 import tempfile
+import types
 import typing
 from collections import Counter
 from collections.abc import Generator, Iterator, Sequence
@@ -505,18 +506,31 @@ def _field_info(command: str, key: str | None) -> Any:
     return model.model_fields.get(key)
 
 
+def _not_null(annotation: Any) -> Any:
+    if typing.get_origin(annotation) in (types.UnionType, typing.Union):
+        members = [m for m in typing.get_args(annotation) if m is not type(None)]
+        if len(members) == 1:
+            return members[0]
+    return annotation
+
+
 def _validated(info: Any) -> bool:
     from pydantic.functional_validators import AfterValidator
 
-    return info is not None and any(
-        isinstance(item, AfterValidator) for item in info.metadata
-    )
+    if info is None:
+        return False
+    metadata = list(info.metadata)
+    inner = _not_null(info.annotation)
+    if typing.get_origin(inner) is typing.Annotated:
+        metadata += typing.get_args(inner)[1:]
+    return any(isinstance(item, AfterValidator) for item in metadata)
 
 
 def _narrowed(info: Any) -> bool:
     if info is None:
         return False
-    return typing.get_origin(info.annotation) is typing.Literal or _validated(info)
+    inner = _not_null(info.annotation)
+    return typing.get_origin(inner) is typing.Literal or _validated(info)
 
 
 def _strings(value: Any) -> Iterator[str]:
