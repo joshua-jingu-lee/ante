@@ -20,7 +20,7 @@ shape 와 일치함을 단순 lock 만 한다. callsite shape 가 drift 하면 �
 즉시 FAIL 한다 (registry 갱신 또는 callsite 정렬 중 한쪽이 책임).
 
 broker.py 는 모든 4 leaf 가 IPC 우선 + cold_path fallback 구조 (``ipc_send``
-가 ``click.ClickException`` 을 raise 하면 fallback) 를 가진다. 본 drift test
+가 ``IPCServerNotRunningError`` 를 raise 하면 fallback) 를 가진다. 본 drift test
 는 IPC 분기를 강제로 success path 로 mock 해 success envelope 단언만 한다
 — fallback 분기의 drift 는 별도 covered 가 필요하면 후속 sub-PR 가 추가한다.
 

@@ -333,6 +333,16 @@ def test_server_down_falls_back_to_a_direct_connection(name: str, mode: str) -> 
 
 
 _REFUSALS = ("circuit", "rate", "timeout")
+_HOOK_ERRORS = {
+    "down": ("IPC_SERVER_NOT_RUNNING", _SERVER_DOWN, f"Error: {_SERVER_DOWN}"),
+    "circuit": (
+        "BROKER_CIRCUIT_OPEN",
+        _CIRCUIT,
+        f"Error: BROKER_CIRCUIT_OPEN: {_CIRCUIT}",
+    ),
+    "rate": ("BROKER_RATE_LIMITED", _RATE, f"Error: BROKER_RATE_LIMITED: {_RATE}"),
+    "timeout": ("IPC_TIMEOUT", _TIMEOUT, f"Error: {_TIMEOUT}"),
+}
 
 
 @pytest.mark.parametrize("situation", _REFUSALS)
@@ -347,8 +357,8 @@ def test_server_refusal_and_the_direct_connection(
     result = _invoke(mode, name, harness)
 
     _assert_ipc_request(name, harness)
-    assert harness.direct_calls == [call(_ACCOUNT)]
-    _assert_success(mode, name, result, _DIRECT_RESULTS[name], _DIRECT_TEXT[name])
+    assert harness.direct_calls == []
+    _assert_error(mode, result, *_HOOK_ERRORS[situation])
 
 
 _ORDER_HISTORY_REFUSALS = {
@@ -374,19 +384,7 @@ def test_order_history_refusal_keeps_the_code(mode: str, situation: str) -> None
     _assert_error(mode, result, *_ORDER_HISTORY_REFUSALS[situation])
 
 
-_FIX_ERRORS = {
-    "down": ("IPC_SERVER_NOT_RUNNING", _SERVER_DOWN, f"Error: {_SERVER_DOWN}"),
-    "circuit": (
-        "BROKER_CIRCUIT_OPEN",
-        _CIRCUIT,
-        f"Error: BROKER_CIRCUIT_OPEN: {_CIRCUIT}",
-    ),
-    "rate": ("BROKER_RATE_LIMITED", _RATE, f"Error: BROKER_RATE_LIMITED: {_RATE}"),
-    "timeout": ("IPC_TIMEOUT", _TIMEOUT, f"Error: {_TIMEOUT}"),
-}
-
-
-@pytest.mark.parametrize("situation", list(_FIX_ERRORS))
+@pytest.mark.parametrize("situation", list(_HOOK_ERRORS))
 @pytest.mark.parametrize("mode", _MODES)
 def test_reconcile_fix_never_falls_back(mode: str, situation: str) -> None:
     harness = _Harness(_ERRORS[situation], None)
@@ -395,7 +393,7 @@ def test_reconcile_fix_never_falls_back(mode: str, situation: str) -> None:
 
     _assert_ipc_request("reconcile-fix", harness)
     assert harness.direct_calls == []
-    _assert_error(mode, result, *_FIX_ERRORS[situation])
+    _assert_error(mode, result, *_HOOK_ERRORS[situation])
 
 
 @pytest.mark.parametrize(
@@ -414,7 +412,7 @@ def test_fallback_account_not_found(name: str, mode: str) -> None:
         result,
         "ACCOUNT_NOT_FOUND",
         _ACCOUNT_MISSING,
-        f"Error: {_ACCOUNT_MISSING}",
+        f"Error: ACCOUNT_NOT_FOUND: {_ACCOUNT_MISSING}",
     )
 
 
@@ -437,7 +435,13 @@ def test_fallback_broker_error_keeps_its_code(name: str, mode: str) -> None:
     assert harness.direct_calls == [call(_ACCOUNT)]
     assert method.await_count == 1
     harness.adapter.disconnect.assert_awaited_once()
-    _assert_error(mode, result, "BROKER_RATE_LIMITED", _RATE, f"Error: {_RATE}")
+    _assert_error(
+        mode,
+        result,
+        "BROKER_RATE_LIMITED",
+        _RATE,
+        f"Error: BROKER_RATE_LIMITED: {_RATE}",
+    )
 
 
 @pytest.mark.parametrize("mode", _MODES)
@@ -471,5 +475,5 @@ def test_reconcile_fix_unexpected_error_is_an_execution_error(mode: str) -> None
         result,
         "EXECUTION_ERROR",
         "소켓 경로를 읽지 못했다",
-        "Error: 소켓 경로를 읽지 못했다",
+        "Error: EXECUTION_ERROR: 소켓 경로를 읽지 못했다",
     )
