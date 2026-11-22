@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 from ante.contracts.ipc_client_errors import (
     IPCClientTimeoutError,
@@ -36,10 +37,10 @@ _get_socket_path = get_socket_path
 
 async def ipc_send(
     command: str,
-    args: dict,
+    args: dict[str, Any],
     actor: str = "cli",
     config_dir: Path | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """IPC 커맨드 전송. 서버 미기동 시 사용자 친화적 에러 출력.
 
     Returns:
@@ -66,4 +67,4 @@ async def ipc_send(
         message = error.get("message", "알 수 없는 오류")
         raise IPCRemoteError(code, message)
 
-    return response.get("result", response)
+    return cast("dict[str, Any]", response.get("result", response))
