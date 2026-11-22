@@ -20,6 +20,11 @@ from ante.cli.middleware import get_member_id, require_auth, require_scope
 from ante.contracts.cli_errors import RuleNotFoundError, RuleUpdateError
 from ante.contracts.error_registry import EXECUTION_ERROR_SPEC
 from ante.contracts.helpers import error_spec_for_exception
+from ante.contracts.ipc_client_errors import (
+    IPCClientTimeoutError,
+    IPCRemoteError,
+    IPCServerNotRunningError,
+)
 from ante.contracts.request_errors import RequestValidationError
 from ante.core.database import OperationalError
 
@@ -321,7 +326,12 @@ def rule_update(
 
     try:
         result = _run(_run_update())
-    except click.ClickException:
+    except (
+        click.ClickException,
+        IPCServerNotRunningError,
+        IPCClientTimeoutError,
+        IPCRemoteError,
+    ):
         raise
     except Exception as e:
         if error_spec_for_exception(e).code != EXECUTION_ERROR_SPEC.code:

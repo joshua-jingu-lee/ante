@@ -18,6 +18,7 @@
 #   pending_migration
 #     baseline 시점에 class-level code 도 없고 EXCEPTION_TO_SPEC 등록도
 #     안 된 *Error class. #1842/#1843 이 단계적으로 등록한다.
+#     등록하지 않는 class(인스턴스가 ``code`` 를 갖는 ``IPCRemoteError``)도 여기 둔다.
 #
 # Anchor 정책 (#1841 plan):
 #   - fmt entry: (path, line, snippet_sha1) 3중 anchor.
@@ -27,58 +28,9 @@
 #       module = dotted module path (예: ante.account.errors).
 #       class_anchor = class 이름.
 
-# bot.py text-mode ``ipc_send`` ClickException 분기는 ``text =
-# f"{code}: {message}"`` prefix 패턴이 의도된 영구 UX 계약이다. 회귀 lock
-# ``test_bot_start_error_text_mode_carries_code_prefix`` 와
-# ``test_config_set_server_error`` 의 ``"STATIC_CONFIG" in result.output`` 가
-# text 모드에서 ``code: message`` prefix 톤을 명시 요구하므로 단순
-# ``fmt.error(message, code=code)`` 정렬이 UX 회귀가 된다. 따라서
-# ``known_drift`` deferred 가 아닌 ``intended_no_code`` 영구 면제로 분류한다
-# (#1870 옵션 3). #1941 commands 주석 정리로 line 번호 이동, #2137/#2111 이동.
-# #2112 bot list/info/positions/signal-key(read) runtime IPC 라우팅 전환:
-# 4 read 명령에 동일 ``ipc_send`` ClickException text-mode 분기(동일 UX prefix
-# 패턴, sha 3dc4008c3fb0) 신규 추가 + start/stop/status/rotate 분기가 아래로
-# 이동. 현재 bot.py code-less text-mode fmt.error 8건: list/info/
-# positions/signal-key-read/start/stop/status +
-# rotate(sha 03fce6e088b7). 각 4 read 분기의 성공 출력은 기존 contract
-# (table/output/echo) 를 그대로 보존하므로 추가 fmt.error anchor 영향 없음.
-intended_no_code:
-  - path: src/ante/cli/commands/bot.py
-    line: 197
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — bot list read IPC 분기 (#2112)"
-  - path: src/ante/cli/commands/bot.py
-    line: 246
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — bot info read IPC 분기 (#2112)"
-  - path: src/ante/cli/commands/bot.py
-    line: 456
-    snippet_sha1: "03fce6e088b7"
-    reason: "text-mode {code}: {message} prefix UX lock — signal-key --rotate IPC 분기 (#2111)"
-  - path: src/ante/cli/commands/bot.py
-    line: 511
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — bot positions read IPC 분기 (#2112)"
-  - path: src/ante/cli/commands/bot.py
-    line: 600
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — bot signal-key read IPC 분기 (#2112)"
-  - path: src/ante/cli/commands/bot.py
-    line: 832
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
-  - path: src/ante/cli/commands/bot.py
-    line: 866
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
-  - path: src/ante/cli/commands/bot.py
-    line: 900
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
-  - path: src/ante/cli/commands/config.py
-    line: 192
-    snippet_sha1: "3dc4008c3fb0"
-    reason: "text-mode {code}: {message} prefix UX lock — intended permanent (resolves #1870)"
+# #2738 ⑧-2: bot.py 8건·config.py 1건 제거 — IPC 예외를 받아 코드를 되살리던
+# 복원 블록을 지웠다(진입점 훅이 ``Error: <code>: <message>`` 를 낸다).
+intended_no_code: []
 
 known_drift_fmt_error_no_code:
   # #1842: account.py entries 2건 제거 — emit_cli_error 정렬 완료
@@ -118,6 +70,11 @@ known_drift_fmt_error_no_code:
   # 에 재등록한다.
 
 pending_migration:
+  # #2738 ⑧-2: IPCRemoteError 는 서버가 낸 코드를 인스턴스 ``code`` 로 갖는다.
+  # 고정 코드로 등록하지 않는다(클래스 속성 ``code`` 없음).
+  - module: ante.contracts.ipc_client_errors
+    class_anchor: IPCRemoteError
+    reason: "server code per instance (#2738); not registered by design"
   - module: ante.core.account_id
     class_anchor: AccountError
     reason: "baseline (#1841); register in #1842/#1843"

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import click
-
 __all__ = [
     "IPCClientTimeoutError",
     "IPCRemoteError",
@@ -9,30 +7,19 @@ __all__ = [
 ]
 
 
-class IPCServerNotRunningError(click.ClickException):
+class IPCServerNotRunningError(Exception):
     code = "IPC_SERVER_NOT_RUNNING"
-    ipc_error_code = code
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.ipc_error_message = message
 
 
-class IPCClientTimeoutError(click.ClickException):
+class IPCClientTimeoutError(Exception):
     code = "IPC_TIMEOUT"
-    ipc_error_code = code
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.ipc_error_message = message
 
 
-class IPCRemoteError(click.ClickException):
-    code = "IPC_ERROR"
-    ipc_error_code = code
-
+class IPCRemoteError(Exception):
     def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"{code}: {message}")
+        super().__init__(message)
         self.code = code
-        self.ipc_error_code = code
-        self.ipc_error_message = message
+        self.message = message
+
+    def __str__(self) -> str:
+        return self.message or f"{self.code}: "

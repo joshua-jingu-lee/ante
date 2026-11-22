@@ -70,7 +70,7 @@ class AccountAlreadySuspendedError(AccountError):
     ``ipc_error_payload``로 안정 코드
     ``"ACCOUNT_ALREADY_SUSPENDED"``를 노출하도록 한다
     (state-conflict typed code 정합. CLI ``account suspend`` 가 IPC envelope
-    의 typed code 를 middleware ``ClickException`` fallback 으로 그대로
+    의 typed code 를 진입점 훅에서 그대로
     surface 한다).
     """
 

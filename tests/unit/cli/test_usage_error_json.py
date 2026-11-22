@@ -46,6 +46,7 @@ from click.testing import CliRunner
 
 from ante.cli.main import cli
 from ante.cli.middleware import AuthenticatedGroup
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.member.models import Member, MemberRole, MemberType
 
 if TYPE_CHECKING:
@@ -539,10 +540,8 @@ class TestNonUsageClickExceptionJson:
             "message": "plain click failure",
         }
 
-    def test_ipc_error_code_takes_precedence(self, runner: CliRunner) -> None:
-        exc = click.ClickException("APPROVAL_NOT_FOUND: missing")
-        exc.ipc_error_code = "APPROVAL_NOT_FOUND"  # type: ignore[attr-defined]
-        exc.ipc_error_message = "missing"  # type: ignore[attr-defined]
+    def test_ipc_remote_error_keeps_the_remote_code(self, runner: CliRunner) -> None:
+        exc = IPCRemoteError("APPROVAL_NOT_FOUND", "missing")
         result = runner.invoke(self._synthetic_cli(exc), ["--format", "json", "boom"])
 
         assert result.exit_code == 1, (

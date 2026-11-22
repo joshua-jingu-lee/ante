@@ -46,6 +46,7 @@ from ante.approval.errors import ApprovalNotFoundError, ApprovalStatusConflictEr
 from ante.approval.models import ApprovalValidationError
 from ante.cli.main import cli
 from ante.contracts import ipc_error_payload
+from ante.contracts.ipc_client_errors import IPCRemoteError
 from ante.core.registry import ServiceRegistry
 from ante.ipc.client import IPCClient
 from ante.ipc.registry import CommandRegistry, register_all_handlers
@@ -194,15 +195,10 @@ class TestApprovalStatusConflictEquivalence:
         # ``ipc_send`` 가 server error envelope 을 ClickException 으로 변환할 때
         # ``ipc_error_code`` 를 부착한다. middleware ``ClickException`` 분기가
         # 동일 코드로 CLI envelope 을 surface.
-        import click
 
-        click_exc = click.ClickException(
-            "APPROVAL_STATUS_CONFLICT: 결재 'aaa' 상태 'approved' 에서 "
-            "'approve' 작업을 수행할 수 없습니다."
-        )
-        click_exc.ipc_error_code = "APPROVAL_STATUS_CONFLICT"  # type: ignore[attr-defined]
-        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
-            "결재 'aaa' 상태 'approved' 에서 'approve' 작업을 수행할 수 없습니다."
+        click_exc = IPCRemoteError(
+            "APPROVAL_STATUS_CONFLICT",
+            "결재 'aaa' 상태 'approved' 에서 'approve' 작업을 수행할 수 없습니다.",
         )
 
         async def _raise_status_conflict(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202
@@ -298,14 +294,10 @@ class TestApprovalValidationEquivalence:
     """
 
     def test_cli_direct_validation_via_request(self, runner: CliRunner) -> None:
-        import click
 
-        click_exc = click.ClickException(
-            "APPROVAL_VALIDATION_ERROR: 사전 검증 실패: strategy not adoptable"
-        )
-        click_exc.ipc_error_code = "APPROVAL_VALIDATION_ERROR"  # type: ignore[attr-defined]
-        click_exc.ipc_error_message = (  # type: ignore[attr-defined]
-            "사전 검증 실패: strategy not adoptable"
+        click_exc = IPCRemoteError(
+            "APPROVAL_VALIDATION_ERROR",
+            "사전 검증 실패: strategy not adoptable",
         )
 
         async def _raise_validation(*args, **kwargs):  # noqa: ANN002, ANN003, ANN202

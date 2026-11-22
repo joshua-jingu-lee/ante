@@ -26,7 +26,6 @@ OUTSIDE_REGISTRY = frozenset(
         "ante.account.crypto.EncryptionKeyInvalidError",
         "ante.account.crypto.EncryptionKeyMissingError",
         "ante.broker.exceptions.ModifyOrgnoUnavailableError",
-        "ante.contracts.ipc_client_errors.IPCRemoteError",
         "ante.gateway.stop_order.StopOrderManagerStoppedError",
     }
 )

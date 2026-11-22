@@ -75,7 +75,7 @@
     },
     "src/ante/cli/commands/bot.py": {
       "BLE001": 1,
-      "C901": 4
+      "C901": 3
     },
     "src/ante/cli/commands/broker.py": {
       "BLE001": 1,
