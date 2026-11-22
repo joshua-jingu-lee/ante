@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.strategy.base import StrategyMeta
 from ante.strategy.exceptions import StrategyError, StrategyNotFoundError
@@ -250,7 +250,7 @@ class StrategyRegistry:
         return row is not None
 
     @staticmethod
-    def _row_to_record(row: dict) -> StrategyRecord:
+    def _row_to_record(row: dict[str, Any]) -> StrategyRecord:
         return StrategyRecord(
             strategy_id=row["strategy_id"],
             name=row["name"],

@@ -418,7 +418,9 @@ class PerformanceTracker:
         return pnl_list
 
     @classmethod
-    def _rows_to_records(cls, rows: list[dict], *, context: str) -> list[TradeRecord]:
+    def _rows_to_records(
+        cls, rows: list[dict[str, Any]], *, context: str
+    ) -> list[TradeRecord]:
         """rows → TradeRecord 목록, legacy invalid account_id row는 skip."""
         records: list[TradeRecord] = []
         for row in rows:
@@ -428,7 +430,9 @@ class PerformanceTracker:
         return records
 
     @classmethod
-    def _row_to_record_safe(cls, row: dict, *, context: str) -> TradeRecord | None:
+    def _row_to_record_safe(
+        cls, row: dict[str, Any], *, context: str
+    ) -> TradeRecord | None:
         """DB row → TradeRecord, legacy invalid account_id row는 skip."""
         try:
             return cls._row_to_record(row)
@@ -443,7 +447,7 @@ class PerformanceTracker:
             return None
 
     @staticmethod
-    def _row_to_record(row: dict) -> TradeRecord:
+    def _row_to_record(row: dict[str, Any]) -> TradeRecord:
         """DB row → TradeRecord."""
         from uuid import UUID
 
@@ -452,7 +456,7 @@ class PerformanceTracker:
             trade_id = UUID(raw_id)
         except (ValueError, AttributeError):
             logger.warning("trade_id UUID 파싱 실패, 문자열 그대로 사용: %s", raw_id)
-            trade_id = raw_id  # type: ignore[assignment]
+            trade_id = raw_id
 
         ts = row.get("timestamp")
         return TradeRecord(

@@ -6,6 +6,7 @@ import math
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Any, cast
 
 
 class ReportStatus(StrEnum):
@@ -140,7 +141,7 @@ class StrategyReport:
     user_notes: str = ""
     reviewed_at: datetime | None = None
 
-    def get_equity_curve(self) -> list[dict]:
+    def get_equity_curve(self) -> list[dict[str, Any]]:
         """detail_json에서 자산 곡선 데이터를 추출.
 
         Returns:
@@ -153,4 +154,4 @@ class StrategyReport:
             data = json.loads(self.detail_json)
         except (json.JSONDecodeError, TypeError):
             return []
-        return data.get("equity_curve", [])
+        return cast("list[dict[str, Any]]", data.get("equity_curve", []))

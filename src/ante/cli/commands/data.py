@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import click
 
 from ante.cli._data_path import resolve_data_path
@@ -88,7 +90,7 @@ def data_list(
         fmt.output({"datasets": [], "count": result["total"]})
         return
 
-    async def _enrich(items: list[dict]) -> list[dict]:
+    async def _enrich(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         from ante.instrument.service import InstrumentService
 
         async with open_cli_db(ctx, read_only=True, db_path_override=db_path) as db:

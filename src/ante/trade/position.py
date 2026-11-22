@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.account.errors import InvalidAccountIdError
 from ante.account.scoping import require_account_id
@@ -243,7 +243,7 @@ class PositionHistory:
         symbol: str,
         *,
         account_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """현재 포지션 조회 (public)."""
         return await self._get_current(bot_id, symbol, account_id=account_id)
 
@@ -253,7 +253,7 @@ class PositionHistory:
         symbol: str | None = None,
         *,
         account_id: str | None = None,
-    ) -> list[dict]:
+    ) -> list[dict[str, Any]]:
         """포지션 변동 이력 조회."""
         conditions = ["bot_id = ?"]
         params: list[object] = [bot_id]
@@ -308,7 +308,7 @@ class PositionHistory:
         symbol: str,
         *,
         account_id: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """현재 포지션 조회. 없으면 빈 포지션 반환."""
         if account_id is None:
             row = await self._db.fetch_one(
@@ -448,7 +448,7 @@ class PositionHistory:
         )
 
     @staticmethod
-    def _row_to_snapshot(row: dict) -> PositionSnapshot:
+    def _row_to_snapshot(row: dict[str, Any]) -> PositionSnapshot:
         """DB row → PositionSnapshot."""
         return PositionSnapshot(
             bot_id=row["bot_id"],
@@ -466,7 +466,7 @@ class PositionHistory:
         return (account_id, bot_id)
 
     def _row_to_snapshot_safe(
-        self, row: dict, *, context: str
+        self, row: dict[str, Any], *, context: str
     ) -> PositionSnapshot | None:
         """DB row → PositionSnapshot, legacy invalid account_id row는 skip."""
         try:
@@ -481,7 +481,7 @@ class PositionHistory:
             return None
 
     def _rows_to_snapshots(
-        self, rows: list[dict], *, context: str
+        self, rows: list[dict[str, Any]], *, context: str
     ) -> list[PositionSnapshot]:
         """rows → snapshots, legacy invalid account_id row는 skip."""
         snapshots: list[PositionSnapshot] = []

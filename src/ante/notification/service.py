@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from ante.notification.base import NotificationAdapter, NotificationLevel
 
@@ -174,7 +174,7 @@ class NotificationService:
         title: str,
         body: str,
         *,
-        metadata: dict | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> bool:
         """send_rich() 호출."""
         dedup_result = self._check_dedup(level, body or title)
@@ -198,7 +198,7 @@ class NotificationService:
         level: NotificationLevel,
         title: str,
         body: str,
-        buttons: list,
+        buttons: list[Any],
     ) -> bool:
         """send_with_buttons() 호출."""
         dedup_result = self._check_dedup(level, body or title)
@@ -212,7 +212,10 @@ class NotificationService:
         try:
             if hasattr(self._adapter, "send_with_buttons"):
                 message = f"*{title}*\n{body}" if body else f"*{title}*"
-                return await self._adapter.send_with_buttons(level, message, buttons)
+                return cast(
+                    "bool",
+                    await self._adapter.send_with_buttons(level, message, buttons),
+                )
             else:
                 return await self._adapter.send_rich(
                     level=level, title=title, body=body

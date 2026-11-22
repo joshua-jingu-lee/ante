@@ -6,9 +6,10 @@ import asyncio
 import json
 import os
 import tempfile
+from collections.abc import Coroutine
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import click
 
@@ -203,7 +204,7 @@ def _ensure_encryption_key_in_secrets_env(secrets_env_path: Path) -> str:
     return effective_key
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     """동기 CLI에서 async 함수 실행."""
     return asyncio.run(coro)
 
@@ -296,7 +297,7 @@ async def _test_account_state(
 
 async def _bootstrap_master(
     db_path: str, member_id: str, name: str, password: str
-) -> tuple[dict, str, str]:
+) -> tuple[dict[str, Any], str, str]:
     """MemberService를 통해 master 계정을 생성하고 토큰·복구키를 반환한다."""
     from ante.core.database import Database
     from ante.eventbus.bus import EventBus
@@ -350,7 +351,7 @@ async def _create_test_account(db_path: str) -> dict[str, str]:
 
 
 def _emit_master_credentials_text(
-    master_info: dict,
+    master_info: dict[str, Any],
     password: str,
     token: str,
     recovery_key: str,
@@ -367,7 +368,7 @@ def _emit_master_credentials_text(
 
 
 def _emit_master_credentials_json_stderr(
-    master_info: dict,
+    master_info: dict[str, Any],
     password: str,
     token: str,
     recovery_key: str,
@@ -454,8 +455,8 @@ def init(
     token = ""
     recovery_key = ""
     password = ""
-    master_info: dict = {}
-    test_account: dict = {}
+    master_info: dict[str, Any] = {}
+    test_account: dict[str, Any] = {}
     master_already_existed = master_exists
 
     if not master_exists:
@@ -486,7 +487,7 @@ def init(
             raise AccountTestCreateFailedError(f"테스트 계좌 생성 실패: {e}") from e
 
     if fmt.is_json:
-        payload: dict = {"config_dir": str(config_path)}
+        payload: dict[str, Any] = {"config_dir": str(config_path)}
         if master_info:
             payload.update(master_info)
             payload["token"] = token

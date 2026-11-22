@@ -1,5 +1,7 @@
 """Strategy — 전략 정의·검증·등록·로딩."""
 
+from typing import Any
+
 from ante.strategy.base import (
     DataProvider,
     OrderAction,
@@ -56,7 +58,7 @@ __all__ = [
 ]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     """PEP 562 lazy attribute access — heavy indicators 모듈을 지연 적재.
 
     ``from ante.strategy import IndicatorCalculator`` 형태의 기존 import
