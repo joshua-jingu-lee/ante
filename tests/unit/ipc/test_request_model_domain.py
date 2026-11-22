@@ -29,6 +29,7 @@ from ante.core.registry import ServiceRegistry
 from ante.ipc.registry import CommandRegistry, CommandSpec, register_all_handlers
 from ante.ipc.requests import AccountId, IPCRequest
 from ante.ipc.server import IPCServer, IPCServerState
+from tests.unit.ipc.validation_messages import validation_message
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BASELINE = REPO_ROOT / "scripts" / "entry_ratchet_baseline.json"
@@ -72,11 +73,6 @@ SECRET_FIELDS: frozenset[tuple[str, str]] = frozenset(
         ("MemberRegenerateRecoveryKeyRequest", "password"),
     }
 )
-
-
-def validation_message(command: str, *errors: tuple[str, str]) -> str:
-    fields = ", ".join(f"{loc}({kind})" for loc, kind in errors)
-    return f"{command} 인자 검증 실패: {fields}"
 
 
 class UnsupportedFieldError(Exception):

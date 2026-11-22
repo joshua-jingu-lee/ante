@@ -18,7 +18,7 @@ from ante.ipc.registry import CommandRegistry, register_all_handlers
 from ante.ipc.requests import StrategySetStatusRequest
 from ante.ipc.server import IPCServer, IPCServerState
 from ante.strategy.registry import StrategyRecord, StrategyRegistry, StrategyStatus
-from tests.unit.ipc.test_request_model_domain import validation_message
+from tests.unit.ipc.validation_messages import validation_message
 
 ACTOR = "ops-lead"
 UPDATE_SQL = "UPDATE strategies SET status = ? WHERE strategy_id = ?"

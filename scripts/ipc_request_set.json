@@ -239,6 +239,891 @@
     "name": "account.suspend:account:bad"
    }
   ],
+  "approval.approve": [
+   {
+    "args": {
+     "id": "ap1"
+    },
+    "kind": "cli",
+    "name": "approval.approve:cli:0"
+   },
+   {
+    "args": {},
+    "key": "id",
+    "kind": "missing",
+    "name": "approval.approve:missing:id"
+   },
+   {
+    "args": {
+     "id": "5"
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.approve:value:id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "id": 7
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.approve:value:id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": true
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.approve:value:id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": null
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.approve:value:id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.approve:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.approve:array"
+   }
+  ],
+  "approval.cancel": [
+   {
+    "args": {
+     "id": "ap1"
+    },
+    "kind": "cli",
+    "name": "approval.cancel:cli:0"
+   },
+   {
+    "args": {},
+    "key": "id",
+    "kind": "missing",
+    "name": "approval.cancel:missing:id"
+   },
+   {
+    "args": {
+     "id": "5"
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.cancel:value:id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "id": 7
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.cancel:value:id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": true
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.cancel:value:id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": null
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.cancel:value:id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.cancel:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.cancel:array"
+   }
+  ],
+  "approval.cancel_invalid": [
+   {
+    "args": {
+     "approval_id": "ap1"
+    },
+    "kind": "cli",
+    "name": "approval.cancel_invalid:cli:0"
+   },
+   {
+    "args": {},
+    "key": "approval_id",
+    "kind": "missing",
+    "name": "approval.cancel_invalid:missing:approval_id"
+   },
+   {
+    "args": {
+     "approval_id": "5"
+    },
+    "key": "approval_id",
+    "kind": "value",
+    "name": "approval.cancel_invalid:value:approval_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "approval_id": 7
+    },
+    "key": "approval_id",
+    "kind": "value",
+    "name": "approval.cancel_invalid:value:approval_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "approval_id": true
+    },
+    "key": "approval_id",
+    "kind": "value",
+    "name": "approval.cancel_invalid:value:approval_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "approval_id": null
+    },
+    "key": "approval_id",
+    "kind": "value",
+    "name": "approval.cancel_invalid:value:approval_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "approval_id": "ap1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.cancel_invalid:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.cancel_invalid:array"
+   }
+  ],
+  "approval.reject": [
+   {
+    "args": {
+     "id": "ap1",
+     "reason": ""
+    },
+    "kind": "cli",
+    "name": "approval.reject:cli:0"
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": "r"
+    },
+    "kind": "cli",
+    "name": "approval.reject:cli:1"
+   },
+   {
+    "args": {
+     "reason": ""
+    },
+    "key": "id",
+    "kind": "missing",
+    "name": "approval.reject:missing:id"
+   },
+   {
+    "args": {
+     "id": "5",
+     "reason": ""
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reject:value:id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "id": 7,
+     "reason": ""
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reject:value:id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": true,
+     "reason": ""
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reject:value:id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": null,
+     "reason": ""
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reject:value:id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": "5"
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "approval.reject:value:reason:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": 7
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "approval.reject:value:reason:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": true
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "approval.reject:value:reason:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": null
+    },
+    "key": "reason",
+    "kind": "value",
+    "name": "approval.reject:value:reason:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "reason": "",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.reject:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.reject:array"
+   }
+  ],
+  "approval.reopen": [
+   {
+    "args": {
+     "id": "ap1"
+    },
+    "kind": "cli",
+    "name": "approval.reopen:cli:0"
+   },
+   {
+    "args": {
+     "body": "b",
+     "id": "ap1",
+     "params": {
+      "a": 1
+     }
+    },
+    "kind": "cli",
+    "name": "approval.reopen:cli:1"
+   },
+   {
+    "args": {
+     "body": "5",
+     "id": "ap1"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.reopen:value:body:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": 7,
+     "id": "ap1"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.reopen:value:body:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": true,
+     "id": "ap1"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.reopen:value:body:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": null,
+     "id": "ap1"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.reopen:value:body:null",
+    "same_type": false
+   },
+   {
+    "args": {},
+    "key": "id",
+    "kind": "missing",
+    "name": "approval.reopen:missing:id"
+   },
+   {
+    "args": {
+     "id": "5"
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reopen:value:id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "id": 7
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reopen:value:id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": true
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reopen:value:id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": null
+    },
+    "key": "id",
+    "kind": "value",
+    "name": "approval.reopen:value:id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "params": "5"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.reopen:value:params:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "params": 7
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.reopen:value:params:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "params": true
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.reopen:value:params:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "params": null
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.reopen:value:params:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "id": "ap1",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.reopen:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.reopen:array"
+   }
+  ],
+  "approval.request": [
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "kind": "cli",
+    "name": "approval.request:cli:0"
+   },
+   {
+    "args": {
+     "body": "b",
+     "expires_at": "2026-11-25T02:22:59.691054+00:00",
+     "params": {
+      "a": 1
+     },
+     "reference_id": "r1",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "kind": "cli",
+    "name": "approval.request:cli:1"
+   },
+   {
+    "args": {
+     "body": "5",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.request:value:body:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "body": 7,
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.request:value:body:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": true,
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.request:value:body:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": null,
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "body",
+    "kind": "value",
+    "name": "approval.request:value:body:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "5",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "expires_at",
+    "kind": "value",
+    "name": "approval.request:value:expires_at:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": 7,
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "expires_at",
+    "kind": "value",
+    "name": "approval.request:value:expires_at:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": true,
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "expires_at",
+    "kind": "value",
+    "name": "approval.request:value:expires_at:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": null,
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "expires_at",
+    "kind": "value",
+    "name": "approval.request:value:expires_at:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": "5",
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.request:value:params:str5",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": 7,
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.request:value:params:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": true,
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.request:value:params:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": null,
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "params",
+    "kind": "value",
+    "name": "approval.request:value:params:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "5",
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "reference_id",
+    "kind": "value",
+    "name": "approval.request:value:reference_id:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": 7,
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "reference_id",
+    "kind": "value",
+    "name": "approval.request:value:reference_id:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": true,
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "reference_id",
+    "kind": "value",
+    "name": "approval.request:value:reference_id:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": null,
+     "title": "t",
+     "type": "strategy_adopt"
+    },
+    "key": "reference_id",
+    "kind": "value",
+    "name": "approval.request:value:reference_id:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "type": "strategy_adopt"
+    },
+    "key": "title",
+    "kind": "missing",
+    "name": "approval.request:missing:title"
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "5",
+     "type": "strategy_adopt"
+    },
+    "key": "title",
+    "kind": "value",
+    "name": "approval.request:value:title:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": 7,
+     "type": "strategy_adopt"
+    },
+    "key": "title",
+    "kind": "value",
+    "name": "approval.request:value:title:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": true,
+     "type": "strategy_adopt"
+    },
+    "key": "title",
+    "kind": "value",
+    "name": "approval.request:value:title:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": null,
+     "type": "strategy_adopt"
+    },
+    "key": "title",
+    "kind": "value",
+    "name": "approval.request:value:title:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t"
+    },
+    "key": "type",
+    "kind": "missing",
+    "name": "approval.request:missing:type"
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "5"
+    },
+    "key": "type",
+    "kind": "value",
+    "name": "approval.request:value:type:str5",
+    "same_type": true
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": 7
+    },
+    "key": "type",
+    "kind": "value",
+    "name": "approval.request:value:type:int7",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": true
+    },
+    "key": "type",
+    "kind": "value",
+    "name": "approval.request:value:type:true",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": null
+    },
+    "key": "type",
+    "kind": "value",
+    "name": "approval.request:value:type:null",
+    "same_type": false
+   },
+   {
+    "args": {
+     "body": "",
+     "expires_at": "",
+     "params": {},
+     "reference_id": "",
+     "title": "t",
+     "type": "strategy_adopt",
+     "zz_extra": "zz-extra-value"
+    },
+    "kind": "extra",
+    "name": "approval.request:extra"
+   },
+   {
+    "args": [
+     "zz-array-item"
+    ],
+    "kind": "array",
+    "name": "approval.request:array"
+   }
+  ],
   "member.reactivate": [
    {
     "args": {
