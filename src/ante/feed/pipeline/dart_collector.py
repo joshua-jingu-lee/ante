@@ -8,7 +8,7 @@ from calendar import monthrange
 from datetime import date, datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import polars as pl
 
@@ -98,7 +98,7 @@ class DARTCollector:
         config: dict[str, Any],
         store: ParquetStore,
         daily: bool = False,
-    ) -> tuple[int, bool, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict[str, Any]]]:
         """DART 재무제표를 분기별로 수집한다.
 
         Args:
@@ -112,7 +112,7 @@ class DARTCollector:
         corp_code_map = await self._load_corp_codes(feed_dir)
         if not corp_code_map:
             logger.warning("DART: 고유번호 매핑이 비어있음")
-            warns: list[dict] = [
+            warns: list[dict[str, Any]] = [
                 {
                     "source": "dart",
                     "type": "empty_corp_code_map",
@@ -159,7 +159,10 @@ class DARTCollector:
                 if isinstance(data, dict) and data:
                     return {str(k): str(v) for k, v in data.items()}
                 logger.warning("DART: 고유번호 캐시가 비정상(빈/비-dict), 재다운로드")
-        return await self._source.fetch_corp_codes(save_path=corp_codes_path)
+        return cast(
+            "dict[str, str]",
+            await self._source.fetch_corp_codes(save_path=corp_codes_path),
+        )
 
     @staticmethod
     def _resolve_year_range(
@@ -189,12 +192,12 @@ class DARTCollector:
         start_year: int,
         end_year: int,
         last_checkpoint: str | None,
-    ) -> tuple[int, bool, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict[str, Any]]]:
         """연도/분기를 순회하며 재무제표를 수집한다."""
         corp_codes_list = list(corp_code_map.keys())
         rows_written = 0
         symbols: set[str] = set()
-        warns: list[dict] = []
+        warns: list[dict[str, Any]] = []
         stored_ok = False
 
         today = _today_kst()
@@ -259,10 +262,10 @@ class DARTCollector:
         store: ParquetStore,
         checkpoint: Checkpoint,
         last_checkpoint: str | None,
-    ) -> tuple[int, bool, set[str], list[dict]]:
+    ) -> tuple[int, bool, set[str], list[dict[str, Any]]]:
         """daily 모드: 최신 collectable 분기 1개만 수집한다."""
         corp_codes_list = list(corp_code_map.keys())
-        warns: list[dict] = []
+        warns: list[dict[str, Any]] = []
 
         today = _today_kst()
         latest = self._latest_collectable_quarter(today)
@@ -309,7 +312,7 @@ class DARTCollector:
         store: ParquetStore,
         year: int,
         reprt_code: str,
-        warns: list[dict],
+        warns: list[dict[str, Any]],
     ) -> tuple[int, set[str], QuarterStatus, bool]:
         """단일 분기 재무제표를 수집/정규화/저장한다."""
         try:
@@ -375,7 +378,7 @@ class DARTCollector:
 
     def _normalize_and_store(
         self,
-        raw_items: list[dict],
+        raw_items: list[dict[str, Any]],
         corp_code_map: dict[str, str],
         store: ParquetStore,
     ) -> tuple[int, int, set[str]]:

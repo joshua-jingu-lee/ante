@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.feed.config import FeedConfig
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 __all__ = ["FeedConfig", "FeedInjector"]
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> Any:
     if name == "FeedInjector":
         from ante.feed.injector import FeedInjector
 

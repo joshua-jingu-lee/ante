@@ -8,7 +8,7 @@ import re
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 
 import polars as pl
 
@@ -75,7 +75,7 @@ def _natural_key(data_type: str, columns: list[str]) -> list[str]:
 def _date_str(value: object) -> str:
     """Datetime/Date/str을 YYYY-MM-DD 문자열로."""
     if hasattr(value, "isoformat"):
-        return value.isoformat()[:10]  # type: ignore[attr-defined]
+        return cast("str", value.isoformat()[:10])
     return str(value)[:10]
 
 
@@ -159,13 +159,13 @@ class ParquetStore:
     ) -> None:
         self._base = Path(base_path)
         self._compression = compression
-        self._pending_warnings: list[dict] = []
+        self._pending_warnings: list[dict[str, Any]] = []
 
     @property
     def base_path(self) -> Path:
         return self._base
 
-    def drain_warnings(self) -> list[dict]:
+    def drain_warnings(self) -> list[dict[str, Any]]:
         """누적된 store 이상 경고를 반환하고 버퍼를 비운다."""
         drained = list(self._pending_warnings)
         self._pending_warnings.clear()
@@ -560,7 +560,7 @@ class ParquetStore:
         self,
         symbol: str,
         timeframe: str,
-        rows: list[dict],
+        rows: list[dict[str, Any]],
         data_type: str = "ohlcv",
         exchange: str = "KRX",
     ) -> None:
@@ -656,7 +656,7 @@ class ParquetStore:
         fix: bool = False,
         data_type: str = "ohlcv",
         exchange: str = "KRX",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Parquet 파일 무결성 검증.
 
         Args:
@@ -668,7 +668,7 @@ class ParquetStore:
              "stale_tmp_removed": int}
         """
         path = self._resolve_path(symbol, timeframe, data_type, exchange)
-        result: dict = {
+        result: dict[str, Any] = {
             "symbol": symbol,
             "timeframe": timeframe,
             "total": 0,
