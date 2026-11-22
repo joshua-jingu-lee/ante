@@ -105,6 +105,8 @@ class CommandRegistry:
         Args:
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
         """
+        if request_model is None:
+            raise TypeError(f"{command}: request_model is required")
         self._specs[command] = CommandSpec(
             name=command,
             handler=handler,

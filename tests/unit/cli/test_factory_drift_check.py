@@ -372,8 +372,8 @@ class TestCliExecutionClassMatchesFactoryUsage:
                         f"baseline 외 direct Database 생성 존재."
                     )
 
-        # sanity: 94 entry 중 4 long_running + 0 bootstrap = 4 skip 기대.
-        # 본 카운트는 정보용 (assertion 아님) — registry 변경 시 자동 조정.
+        # skipped 는 long_running·bootstrap·runtime_ipc 계약과 callback module 을
+        # 얻지 못한 entry 의 합이다. 정보용 (assertion 아님).
         assert checked >= 1, (
             f"Family C: 검사된 entry 가 0 개. CLI registry introspection 실패 가능 "
             f"(checked={checked}, skipped={skipped})."

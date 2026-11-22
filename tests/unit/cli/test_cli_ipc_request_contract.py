@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Iterator
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Any
@@ -248,17 +247,9 @@ def sent() -> list[Sent]:
     return record_cli_requests()
 
 
-def _model_targets(sent: list[Sent]) -> Iterator[Sent]:
-    registry = _registry()
-    for item in sent:
-        spec = registry.get(item.command)
-        if spec is not None and spec.request_model is not None:
-            yield item
-
-
 def _judge(registry: CommandRegistry, command: str, args: Any) -> None:
     spec = registry.get(command)
-    assert spec is not None and spec.request_model is not None
+    assert spec is not None
     spec.request_model.model_validate(args)
 
 
@@ -301,27 +292,12 @@ def test_each_row_sends_the_contract_command(sent: list[Sent]) -> None:
 
 def test_sent_args_pass_the_command_request_model(sent: list[Sent]) -> None:
     registry = _registry()
-    targets = list(_model_targets(sent))
-    assert targets
+    assert sent
     rejected: list[str] = []
-    for item in targets:
+    for item in sent:
         _judge(registry, item.command, item.args)
         try:
             _judge(registry, item.command, {**item.args, "zz_extra": 1})
         except ValidationError:
             rejected.append(item.row.row_id)
-    assert rejected == [item.row.row_id for item in targets]
-
-
-def test_model_targets_are_every_modeled_command_but_the_stream(
-    sent: list[Sent],
-) -> None:
-    registry = _registry()
-    modeled = {
-        name
-        for name in registry.commands
-        if (spec := registry.get(name)) is not None and spec.request_model is not None
-    }
-    assert modeled
-    judged = {item.command for item in _model_targets(sent)}
-    assert judged == modeled - STREAM_COMMANDS
+    assert rejected == [item.row.row_id for item in sent]

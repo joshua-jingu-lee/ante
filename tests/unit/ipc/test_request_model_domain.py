@@ -530,13 +530,9 @@ def _registered_specs() -> list[CommandSpec]:
     return registry.iter_specs()
 
 
-def _modeled_specs() -> list[CommandSpec]:
-    return [spec for spec in _registered_specs() if spec.request_model is not None]
-
-
 def _all_fields() -> list[tuple[type[IPCRequest], str, FieldInfo]]:
     found: list[tuple[type[IPCRequest], str, FieldInfo]] = []
-    pending = [spec.request_model for spec in _modeled_specs()]
+    pending = [spec.request_model for spec in _registered_specs()]
     seen: set[type[IPCRequest]] = set()
     while pending:
         model = pending.pop(0)
@@ -553,7 +549,7 @@ def _all_fields() -> list[tuple[type[IPCRequest], str, FieldInfo]]:
 
 TABLE_COMMAND = "table.fixture"
 TARGETS: list[tuple[str, type[IPCRequest], CommandSpec | None]] = [
-    *((spec.name, spec.request_model, spec) for spec in _modeled_specs()),
+    *((spec.name, spec.request_model, spec) for spec in _registered_specs()),
     (TABLE_COMMAND, _TableRequest, None),
 ]
 
@@ -636,7 +632,7 @@ async def _send(server: IPCServer, command: str, args: Any) -> dict:
 
 
 def test_request_models_inherit_the_frame_and_its_five_settings() -> None:
-    models = [IPCRequest, *(spec.request_model for spec in _modeled_specs())]
+    models = [IPCRequest, *(spec.request_model for spec in _registered_specs())]
     assert len(models) > 1
     for model in models:
         assert model is not None
@@ -665,7 +661,7 @@ def test_targets_are_every_command_outside_the_ratchet_baseline() -> None:
         json.loads(BASELINE.read_text(encoding="utf-8"))["ipc_handlers_without_model"]
     )
     registered = {spec.name for spec in _registered_specs()}
-    modeled = {spec.name for spec in _modeled_specs()}
+    modeled = {command for command, _, spec in TARGETS if spec is not None}
     assert modeled
     assert modeled == registered - baseline
     counts = {command: len(variants(model, "00")) for command, model, _ in TARGETS}
@@ -680,8 +676,7 @@ def test_no_field_without_a_domain() -> None:
         if _is_unbounded(info.annotation)
     }
     assert unbounded == UNBOUNDED_FIELDS
-    for spec in _modeled_specs():
-        assert spec.request_model is not None
+    for spec in _registered_specs():
         generated = {(v.loc, v.expected) for v in variants(spec.request_model, "00")}
         for model_name, name in UNBOUNDED_FIELDS:
             if spec.request_model.__name__ == model_name:
@@ -724,8 +719,7 @@ def test_nullable_fields_accept_null_and_reject_other_types() -> None:
 def _secret_fields() -> list[tuple[CommandSpec, str]]:
     return [
         (spec, name)
-        for spec in _modeled_specs()
-        if spec.request_model is not None
+        for spec in _registered_specs()
         for name, info in spec.request_model.model_fields.items()
         if info.annotation is SecretStr
     ]
@@ -739,11 +733,7 @@ def test_secret_fields_are_exactly_the_declared_set() -> None:
     }
     assert found
     assert found == SECRET_FIELDS
-    top = {
-        (spec.request_model.__name__, name)
-        for spec, name in _secret_fields()
-        if spec.request_model is not None
-    }
+    top = {(spec.request_model.__name__, name) for spec, name in _secret_fields()}
     assert top == SECRET_FIELDS
 
 
@@ -1093,7 +1083,6 @@ async def test_secret_in_a_rejected_request_is_not_reflected(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     marker = "MARKSECRET001VALUE"
-    assert spec.request_model is not None
     server, recorder = _server(spec.name, spec.request_model, spec)
     args = {**base_args(spec.request_model), name: marker, EXTRA_KEY: 7}
     response = await _send(server, spec.name, args)
@@ -1113,7 +1102,6 @@ async def test_secret_in_a_rejected_request_is_not_reflected(
 @pytest.mark.parametrize(("spec", "name"), _secret_cases())
 def test_secret_is_masked_in_the_validated_model(spec: CommandSpec, name: str) -> None:
     marker = "MARKSECRET002VALUE"
-    assert spec.request_model is not None
     request = spec.request_model.model_validate(
         {**base_args(spec.request_model), name: marker}
     )
@@ -1131,7 +1119,6 @@ async def test_secret_of_another_type_is_not_reflected(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     marker = "MARKSECRET003VALUE"
-    assert spec.request_model is not None
     server, recorder = _server(spec.name, spec.request_model, spec)
     args = {**base_args(spec.request_model), name: [marker, {marker: marker}]}
     response = await _send(server, spec.name, args)
@@ -1151,8 +1138,7 @@ async def test_secret_of_another_type_is_not_reflected(
 def _unbounded_cases() -> list[Any]:
     found = [
         (spec, name)
-        for spec in _modeled_specs()
-        if spec.request_model is not None
+        for spec in _registered_specs()
         for name, info in spec.request_model.model_fields.items()
         if _is_unbounded(info.annotation)
     ]
@@ -1167,7 +1153,6 @@ async def test_unbounded_value_in_a_rejected_request_is_not_reflected(
 ) -> None:
     caplog.set_level(logging.DEBUG)
     marker = "MARKDICT001VALUE"
-    assert spec.request_model is not None
     server, recorder = _server(spec.name, spec.request_model, spec)
     value = {marker: marker, "nested": {"k": [marker]}}
     args = {**base_args(spec.request_model), name: value, EXTRA_KEY: 7}

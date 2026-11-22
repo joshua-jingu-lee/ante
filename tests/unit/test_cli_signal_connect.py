@@ -784,7 +784,7 @@ def test_handshake_frame_args_pass_the_request_model(runner: CliRunner) -> None:
     registry = CommandRegistry()
     register_all_handlers(registry)
     spec = registry.get("signal.connect")
-    assert spec is not None and spec.request_model is not None
+    assert spec is not None
     request = spec.request_model.model_validate(frame["args"])
     assert request.model_dump(mode="json") == {"key": "**********"}
     assert request.model_dump()["key"].get_secret_value() == "sig-key-1"

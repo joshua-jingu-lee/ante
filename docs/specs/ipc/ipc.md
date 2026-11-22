@@ -501,7 +501,7 @@ CLI 프로세스에서 서버의 Unix socket에 연결하여 커맨드를 전달
 | 메서드 | 시그니처 | 설명 |
 |--------|---------|------|
 | `get` | `(self, command: str) -> CommandSpec \| None` | 커맨드에 대한 핸들러와 taxonomy 반환 |
-| `register` | `(self, command: str, handler: CommandHandler, *, is_mutating: bool) -> None` | 커맨드 핸들러와 mutating/read-only taxonomy 등록 |
+| `register` | `(self, command: str, handler: CommandHandler, *, is_mutating: bool, request_model: type[IPCRequest], required_services=None, audit_action=None, shutdown_behavior=None) -> None` | 커맨드 핸들러와 taxonomy, 요청 모델 등록. `request_model`은 필수다(없거나 `None`이면 `TypeError`) |
 
 `CommandHandler` 시그니처와 `CommandSpec` 필드는 소스(`src/ante/ipc/registry.py`의 `CommandSpec`)가 정본이다.
 
