@@ -145,7 +145,7 @@ GitHub 조회/코멘트/PR 관련 절차는 `.agent/skills/github-ops.md`를 따
 
 ### 내부 생성 미검증 버그 후보 검증 선행
 
-협업자 또는 내부 자동화가 등록한 미검증 버그 후보(런북 00 §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨)는 루트원인 추정이 부정확할 수 있어, 위 `타입 라벨이 없는 이슈` 판정을 통과한 뒤 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프의 `내부 생성 미검증 버그 후보 검증` 항목이다. 이 절은 그 스텝의 정책 요약이다.
+협업자 또는 내부 자동화가 등록한 미검증 버그 후보(예: 런북 00 §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨이 붙은 이슈)는 루트원인 추정이 부정확할 수 있어, 위 `타입 라벨이 없는 이슈` 판정을 통과한 뒤 구현 큐 편입 전에 `이슈 검증`을 선행한다. 상시 게이트가 아니며, 내부에서 기획한 이슈에는 적용하지 않는다. 실제 배치 실행 스텝은 아래 `실행 절차` → `3단계: Plan Preflight 사이클`의 per-issue 루프의 `내부 생성 미검증 버그 후보 검증` 항목이다. 이 절은 그 스텝의 정책 요약이다.
 
 - 이슈에 `이슈 검증` 코멘트의 `confirmed` 증적이 이미 있으면 그대로 큐에 편입한다.
 - `confirmed` 증적이 없으면 `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** `@issue-reviewer`는 GitHub에 코멘트·라벨을 쓰지 않는다. 코멘트·라벨 쓰기는 오케스트레이터가 verdict를 받아 수행한다(검증과 쓰기 주체 분리 — 서브에이전트 gh 쓰기 실패로 인한 fail-open 방지).
@@ -223,7 +223,7 @@ mkdir -p docs/temp && python3 scripts/collect_autopilot_queue.py > docs/temp/aut
 3. **open PR 존재 확인 (2단계 후행 검사의 재확인)**: 이슈에 open PR이 이미 연결되어 있으면 `needs-triage`를 부착하지 않고 보류 코멘트도 남기지 않으며, 6단계 `skipped-in-progress`로 분류하고 다음 이슈로 넘어간다.
 4. **타입·area 라벨 판정**: `큐 선별 규칙`의 `포함 대상` 라벨 집합과 `타입 라벨이 없는 이슈` 절이 함께 정의하는 편입/미편입 판정을 적용한다. 미편입이면 `타입 라벨이 없는 이슈` 절이 정한 보류 코멘트(사유 `타입 라벨 부재`)와 `needs-triage`를 남기고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**. 편입이면 정상 진행한다.
 5. **선행 의존 이슈 close 여부 확인 (2단계 후행 검사의 재확인)**: 선행 이슈가 아직 close되지 않았으면 `needs-triage`를 부착하지 않고 보류 코멘트(사유 `선행 이슈 미완료`)를 남긴 뒤, 6단계 `deferred-dependency`로 분류하고 다음 이슈로 넘어간다.
-6. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(런북 00 §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**(6단계 `deferred-triage`). `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
+6. **내부 생성 미검증 버그 후보 검증 (조건부, `이슈 검증` 게이트)**: 이슈가 협업자 또는 내부 자동화가 등록한 미검증 후보(런북 00 §4 라벨 표에서 미검증 버그 후보 표시로 적힌 라벨이 붙은 이슈 등)이고 `confirmed` `이슈 검증` 증적이 없으면(= 최신 `이슈 검증` verdict가 `confirmed`가 아니면; non-confirmed 코멘트만 있는 재큐 상태도 포함) `@issue-reviewer`(`.agent/agents/issue-reviewer.md`)를 **read-only로 호출해 verdict를 반환받는다.** 오케스트레이터가 반환된 verdict를 `🤖 **이슈 검증**` 코멘트(`reviewer: @issue-reviewer`)로 남긴다. verdict가 `confirmed`가 아니면(`not-reproduced`/`invalid`/`needs-info`) 오케스트레이터가 `needs-triage`를 부착하고 이 이슈를 **이번 배치에서 제외(다음 순번으로)**(6단계 `deferred-triage`). `confirmed`면 코멘트만 남기고 정상 진행한다. 내부 기획 이슈에는 적용하지 않으며, `@issue-reviewer`는 GitHub에 쓰지 않는다(검증·쓰기 주체 분리 — fail-open 방지).
 7. `plan-preflight:started`/`plan-preflight:done` 라벨과 이슈 본문 구현계획 최신성 확인
 8. 필요 시 `/plan-preflight #{번호}` 실행
 
