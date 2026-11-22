@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Coroutine
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 
@@ -27,7 +27,7 @@ def config() -> None:
     """설정 조회·변경."""
 
 
-def _run(coro):
+def _run(coro: Coroutine[Any, Any, Any]) -> Any:
     return asyncio.run(coro)
 
 
@@ -77,7 +77,9 @@ async def _create_services(
         yield static_config, dynamic, db
 
 
-async def _resolve_single(key, static_config, dynamic) -> dict:
+async def _resolve_single(
+    key: str, static_config: Config, dynamic: DynamicConfigService
+) -> dict[str, Any]:
     """단일 키 설정값 조회."""
     if await dynamic.exists(key):
         value = await dynamic.get(key)
@@ -88,11 +90,11 @@ async def _resolve_single(key, static_config, dynamic) -> dict:
     return {"key": key, "value": None, "source": "not_found"}
 
 
-async def _resolve_all(static_config, db) -> list[dict]:
+async def _resolve_all(static_config: Config, db: Database) -> list[dict[str, Any]]:
     """전체 설정 목록 조회."""
     from ante.config.defaults import DEFAULTS
 
-    results: list[dict] = []
+    results: list[dict[str, Any]] = []
     for k, v in sorted(DEFAULTS.items()):
         static_val = static_config.get(k, v)
         results.append({"key": k, "value": static_val, "source": "static"})
@@ -111,7 +113,7 @@ async def _resolve_all(static_config, db) -> list[dict]:
     return results
 
 
-def _render_single(result: dict, fmt) -> None:
+def _render_single(result: dict[str, Any], fmt: Any) -> None:
     """단일 설정 결과 출력 (missing은 caller에서 처리)."""
     if fmt.is_json:
         fmt.output(result)
@@ -121,7 +123,7 @@ def _render_single(result: dict, fmt) -> None:
         )
 
 
-def _render_list(result: list[dict], fmt) -> None:
+def _render_list(result: list[dict[str, Any]], fmt: Any) -> None:
     """설정 목록 출력."""
     if fmt.is_json:
         fmt.output({"configs": result})
@@ -143,7 +145,7 @@ def config_get(ctx: click.Context, key: str | None) -> None:
     """설정 조회. 키 없이 호출하면 전체 목록."""
     fmt = get_formatter(ctx)
 
-    async def _run_get() -> dict | list[dict]:
+    async def _run_get() -> dict[str, Any] | list[dict[str, Any]]:
         async with _create_services(ctx=ctx) as (static_config, dynamic, db):
             if key is not None:
                 return await _resolve_single(key, static_config, dynamic)
@@ -171,7 +173,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
     fmt = get_formatter(ctx)
     actor = get_member_id(ctx)
 
-    async def _run_set() -> dict:
+    async def _run_set() -> dict[str, Any]:
         from ante.cli.commands.ipc_helpers import ipc_send
 
         return await ipc_send("config.set", {"key": key, "value": value}, actor=actor)
@@ -217,7 +219,7 @@ def config_history(ctx: click.Context, key: str, limit: int) -> None:
     """설정 변경 이력 조회."""
     fmt = get_formatter(ctx)
 
-    async def _run_history() -> list[dict]:
+    async def _run_history() -> list[dict[str, Any]]:
         async with _create_services(ctx=ctx) as (_, dynamic, _):
             return await dynamic.get_history(key, limit=limit)
 

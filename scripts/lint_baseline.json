@@ -249,14 +249,6 @@
     "src/ante/cli/commands/approval.py": {
       "type-arg": 11
     },
-    "src/ante/cli/commands/audit.py": {
-      "no-untyped-call": 1,
-      "no-untyped-def": 1,
-      "type-arg": 1
-    },
-    "src/ante/cli/commands/backtest.py": {
-      "type-arg": 5
-    },
     "src/ante/cli/commands/bot.py": {
       "no-any-return": 1,
       "no-untyped-call": 13,
@@ -269,27 +261,11 @@
       "no-untyped-def": 3,
       "type-arg": 13
     },
-    "src/ante/cli/commands/config.py": {
-      "no-untyped-call": 3,
-      "no-untyped-def": 5,
-      "type-arg": 8
-    },
-    "src/ante/cli/commands/data.py": {
-      "type-arg": 1
-    },
     "src/ante/cli/commands/feed.py": {
       "no-untyped-call": 3,
       "no-untyped-def": 2,
       "type-arg": 5,
       "unused-ignore": 2
-    },
-    "src/ante/cli/commands/init.py": {
-      "no-untyped-call": 4,
-      "no-untyped-def": 1,
-      "type-arg": 6
-    },
-    "src/ante/cli/commands/instrument.py": {
-      "type-arg": 3
     },
     "src/ante/cli/commands/ipc_helpers.py": {
       "no-any-return": 1,
@@ -301,28 +277,10 @@
       "no-untyped-def": 3,
       "type-arg": 13
     },
-    "src/ante/cli/commands/report.py": {
-      "type-arg": 5
-    },
-    "src/ante/cli/commands/rule.py": {
-      "no-untyped-call": 3,
-      "no-untyped-def": 3,
-      "type-arg": 6
-    },
     "src/ante/cli/commands/strategy.py": {
       "no-untyped-call": 6,
       "no-untyped-def": 1,
       "type-arg": 11
-    },
-    "src/ante/cli/commands/system.py": {
-      "no-untyped-call": 3,
-      "no-untyped-def": 1,
-      "type-arg": 1
-    },
-    "src/ante/cli/commands/trade.py": {
-      "no-untyped-call": 2,
-      "no-untyped-def": 1,
-      "type-arg": 2
     },
     "src/ante/cli/commands/treasury.py": {
       "no-any-return": 1,
@@ -330,22 +288,9 @@
       "no-untyped-def": 2,
       "type-arg": 19
     },
-    "src/ante/cli/formatter.py": {
-      "type-arg": 5
-    },
-    "src/ante/cli/main.py": {
-      "no-any-return": 1
-    },
     "src/ante/cli/middleware.py": {
       "no-any-return": 1,
       "type-arg": 6
-    },
-    "src/ante/ipc/client.py": {
-      "type-arg": 2
-    },
-    "src/ante/ipc/protocol.py": {
-      "no-any-return": 1,
-      "type-arg": 2
     },
     "src/ante/ipc/registry.py": {
       "no-any-return": 1,
@@ -353,11 +298,6 @@
     },
     "src/ante/ipc/server.py": {
       "type-arg": 11
-    },
-    "src/ante/main.py": {
-      "no-any-return": 2,
-      "no-untyped-def": 1,
-      "type-arg": 4
     },
     "src/ante/trade/order_tracker.py": {
       "type-arg": 1

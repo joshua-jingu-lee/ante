@@ -7,7 +7,7 @@ import signal
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from ante.account.models import TradingMode
 from ante.account.readiness import (
@@ -760,8 +760,9 @@ async def _init_gateway(s: Services) -> None:
 
             def _make_resolver(account_id: str) -> Callable[[str], Awaitable[float]]:
                 async def _resolver(symbol: str) -> float:
-                    return await gateway.get_current_price(
-                        symbol, account_id=account_id
+                    return cast(
+                        "float",
+                        await gateway.get_current_price(symbol, account_id=account_id),
                     )
 
                 return _resolver
@@ -1262,7 +1263,7 @@ async def _init_daily_report_scheduler(s: Services) -> None:
         except KeyError:
             logger.warning("Treasury not found for account_id=%s", account_id)
 
-    kwargs: dict = {
+    kwargs: dict[str, Any] = {
         "performance_tracker": s.performance_tracker,
         "trade_recorder": s.trade_recorder,
         "position_history": s.position_history,
@@ -1285,7 +1286,7 @@ async def _init_daily_report_scheduler(s: Services) -> None:
 
 async def _init_stream_integration(
     s: Services,
-    broker_config: dict,
+    broker_config: dict[str, Any],
     stop_order_manager: Any,
     *,
     account_id: str,
@@ -1351,7 +1352,7 @@ async def _init_stream_integration(
         )
 
 
-async def _sync_instruments(s: Services, accounts: list) -> None:
+async def _sync_instruments(s: Services, accounts: list[Any]) -> None:
     """종목 마스터 동기화 (전 계좌의 unique exchange 단위로 순회).
 
     첫 번째 성공 broker 에서 ``return`` 하면, 계좌 순서가
@@ -1488,7 +1489,7 @@ class _NullDataProvider:
         return {}
 
 
-async def _init_treasury_sync(s: Services, accounts: list) -> None:
+async def _init_treasury_sync(s: Services, accounts: list[Any]) -> None:
     """각 계좌의 Treasury 잔고 동기화 시작 (Broker 연결 이후)."""
     sync_interval = s.config.get("treasury.sync_interval_seconds", 300)
 
@@ -1508,8 +1509,11 @@ async def _init_treasury_sync(s: Services, accounts: list) -> None:
                     async def _resolve_price(
                         symbol: str, _account_id: str = bound_account_id
                     ) -> float:
-                        return await gateway.get_current_price(
-                            symbol, account_id=_account_id
+                        return cast(
+                            "float",
+                            await gateway.get_current_price(
+                                symbol, account_id=_account_id
+                            ),
                         )
 
                     price_resolver = _resolve_price
@@ -1642,7 +1646,7 @@ async def _init_approval(s: Services) -> None:
         auto_approve_raw if isinstance(auto_approve_raw, dict) else {}
     )
 
-    async def _resolve_auto_approve_account(account_id: str):
+    async def _resolve_auto_approve_account(account_id: str) -> Any:
         """전결 판단용 Account 조회. 없으면 자동승인하지 않는다."""
         from ante.account.errors import AccountNotFoundError
 

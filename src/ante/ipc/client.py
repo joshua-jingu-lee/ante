@@ -6,6 +6,7 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
+from typing import Any
 
 from ante.ipc import protocol
 from ante.ipc.exceptions import IPCTimeoutError, ServerNotRunningError
@@ -29,9 +30,9 @@ class IPCClient:
     async def send(
         self,
         command: str,
-        args: dict | None = None,
+        args: dict[str, Any] | None = None,
         actor: str = "cli",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """커맨드를 서버에 전송하고 응답을 반환.
 
         Returns:
