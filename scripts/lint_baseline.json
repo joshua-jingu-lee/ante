@@ -68,7 +68,6 @@
       "BLE001": 1
     },
     "src/ante/cli/commands/account.py": {
-      "BLE001": 9,
       "C901": 1
     },
     "src/ante/cli/commands/backtest.py": {
