@@ -298,9 +298,6 @@
     },
     "src/ante/ipc/server.py": {
       "type-arg": 11
-    },
-    "src/ante/trade/order_tracker.py": {
-      "type-arg": 1
     }
   }
 }

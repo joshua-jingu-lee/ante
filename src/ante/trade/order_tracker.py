@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ante.account.scoping import require_account_id
 
@@ -150,7 +150,7 @@ class OrderTrackerRecord:
     exchange: str | None = None
 
     @classmethod
-    def from_row(cls, row: dict) -> OrderTrackerRecord:
+    def from_row(cls, row: dict[str, Any]) -> OrderTrackerRecord:
         raw_price = row.get("order_price")
         return cls(
             order_id=row["order_id"],
