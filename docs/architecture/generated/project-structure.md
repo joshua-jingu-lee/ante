@@ -330,6 +330,7 @@ tests/
     ├── contracts/
     ├── feed/                         # DataFeed 모듈 단위 테스트
     ├── ipc/
+    ├── property/
     ├── specs/
     └── strategy/
 ```
@@ -370,6 +371,7 @@ scripts/
 ├── entry_ratchet_baseline.json
 ├── generate_cli_reference.py         # CLI 레퍼런스 문서 자동 생성 (Click introspection)
 ├── generate_db_schema.py             # DB 스키마 문서 자동 생성
+├── generate_error_codes.py           # 에러 코드 문서 자동 생성
 ├── generate_ipc_commands.py          # IPC 명령 문서 자동 생성
 ├── generate_project_structure.py     # 프로젝트 구조 Agent INDEX 생성/check
 ├── import_baseline.json
@@ -388,6 +390,7 @@ docs/
 ├── architecture/                     # 시스템 아키텍처 문서 묶음
 │   ├── generated/                    # 소스에서 생성된 문서
 │   │   ├── db-schema.md              # SQLite 스키마 전체 목록
+│   │   ├── error-codes.md            # 에러 코드와 예외 매핑 목록
 │   │   ├── ipc-commands.md           # IPC 명령과 요청 모델 목록
 │   │   └── project-structure.md      # 이 문서 — 프로젝트 디렉토리 구조
 │   ├── module-map.md                 # 모듈 책임, 확장성, 배포 산출물

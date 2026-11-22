@@ -57,6 +57,7 @@ jobs:
           python scripts/generate_cli_reference.py --check
           python scripts/generate_db_schema.py --check
           python scripts/generate_ipc_commands.py --check
+          python scripts/generate_error_codes.py --check
 
       - name: Prose budget check
         run: python scripts/check_prose_budget.py

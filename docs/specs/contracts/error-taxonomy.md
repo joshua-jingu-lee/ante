@@ -21,40 +21,22 @@
 
 ## ErrorSpec 모델 (normative)
 
-안정 에러 코드는 다음 모델로 분류된다.
-
-```python
-@dataclass(frozen=True)
-class ErrorSpec:
-    code: str            # 안정 코드 (SCREAMING_SNAKE_CASE)
-    category: Literal[
-        "validation",
-        "auth",
-        "permission",
-        "not_found",
-        "state_conflict",
-        "service_unavailable",
-        "external",
-        "internal",
-    ]
-    exit_code: int = 1   # CLI 종료 코드 (기본 1)
-    retryable: bool = False  # reserved — 소비자 정해질 때까지 의미 비고정
-    default_message: str | None = None
-```
-
-본 모델은 문서 SSOT에서 명세하는 normative shape이다. mapper helper의 실제 도입과
-runtime 사용은 [#1840](https://github.com/joshua-jingu-lee/ante/issues/1840) 책임이며
-본 PR 범위 밖이다.
+안정 에러 코드 한 건은 `ErrorSpec`(`src/ante/contracts/errors.py`)이다. 필드는 아래 표와
+같다. 등록된 코드 전부와 그 category·`exit_code`·예외 클래스·의미는 에러
+레지스트리(`src/ante/contracts/error_registry.py`)가 정본이고, 생성 문서
+[error-codes.md](../../architecture/generated/error-codes.md)에서 본다. 생성 문서는
+`scripts/generate_error_codes.py`로 다시 만들고 CI가 `--check`로 대조한다.
 
 ### 필드 규칙
 
 | 필드 | 규칙 |
 |------|------|
 | `code` | SCREAMING_SNAKE_CASE 문자열. 도메인 prefix(`ACCOUNT_*`, `BOT_*`, `APPROVAL_*`, `MEMBER_*`, `BROKER_*`, `CONFIG_*`, `STRATEGY_*`, `REPORT_*`, `UPDATE_*`) 또는 도메인이 명확하지 않으면 `CLI_*` prefix. envelope의 `code`/`error.code`에 그대로 들어간다. |
-| `category` | 위 8종 Literal 중 하나. 본 문서가 enumerate한 값만 normative. 새 카테고리 도입은 본 문서를 갱신하는 contract change다. |
+| `category` | 아래 [Category 의미](#category-의미) 표의 8종 중 하나(`ErrorCategory` Literal). 본 문서가 enumerate한 값만 normative. 새 카테고리 도입은 본 문서를 갱신하는 contract change다. |
 | `exit_code` | 기본 `1`. click 기본 usage exit 2 전면 정렬은 본 SSOT 범위 밖(별도 이슈). 0(success) + error envelope는 [envelopes.md](envelopes.md)에 의해 금지된다. |
 | `retryable` | 기본 `False`. **reserved** — 본 1.0 시점에서 소비자가 정해지지 않았다. CLI/IPC envelope에 직렬화하지 않는다. |
 | `default_message` | optional. helper가 사용할 fallback 메시지. envelope `message`는 호출자가 도메인 문구를 제공할 수 있다. |
+| `description` | 기본 빈 문자열. 코드의 의미 문구로, 생성 문서의 의미 칸에 그대로 들어간다. CLI/IPC envelope에 직렬화하지 않는다. |
 
 ### Category 의미
 
@@ -145,11 +127,14 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 
 본 SSOT는 다음 alias를 normative legacy alias로 등록한다.
 
-| Normative code | Legacy alias (1.0 envelope value) | Category | 비고 |
-|----------------|-----------------------------------|----------|------|
-| `AUTH_REQUIRED` | `auth_required` | `auth` | `@require_auth` 미충족 (`ctx.obj["member"] is None`) |
-| `AUTH_FAILED` | `auth_failed` | `auth` | `ANTE_MEMBER_TOKEN`의 토큰 판정 거부와 DB `connect()` 실패 |
-| `PERMISSION_DENIED` | `permission_denied` | `permission` | 인증 OK이나 scope 부족 |
+| Normative code | Legacy alias (1.0 envelope value) |
+|----------------|-----------------------------------|
+| `AUTH_REQUIRED` | `auth_required` |
+| `AUTH_FAILED` | `auth_failed` |
+| `PERMISSION_DENIED` | `permission_denied` |
+
+세 legacy alias의 category와 의미는 생성 문서
+[error-codes.md](../../architecture/generated/error-codes.md)에서 본다.
 
 규칙:
 
@@ -190,40 +175,38 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 - CLI direct path: command → service → exception → CLI error envelope
 - CLI→IPC path: command → `ipc_send` → IPC server → exception → IPC error envelope → CLI error envelope
 
-본 SSOT는 다음 4건을 normative 대표 lock으로 등록한다.
-
-| Domain exception | Public code | Category | 비고 |
-|------------------|-------------|----------|------|
-| `InvalidAccountIdError` (`src/ante/core/account_id.py`. `ante.account.errors`가 재수출) | `VALIDATION_ERROR` | `validation` | `src/ante/ipc/registry.py`에서 이미 `VALIDATION_ERROR`로 정렬됨 (#1633 SSOT) |
-| `BotNotFoundError` (`src/ante/bot/exceptions.py`) | `BOT_NOT_FOUND` | `not_found` | `BOT_NOT_FOUND_CODE` 재사용 SSOT (`src/ante/bot/exceptions.py`) |
-| `ApprovalNotFoundError` (`src/ante/approval/errors.py`) | `APPROVAL_NOT_FOUND` | `not_found` | class-level `code: str = "APPROVAL_NOT_FOUND"` 부여됨 |
-| `MemberInvalidScopeError` (`src/ante/member/errors.py`) | `MEMBER_INVALID_SCOPE` | `permission` | scope 부족 시 권한 분류, lowercase `permission_denied`와 별개의 도메인-prefix code |
+본 SSOT는 `VALIDATION_ERROR`, `BOT_NOT_FOUND`, `APPROVAL_NOT_FOUND`,
+`MEMBER_INVALID_SCOPE` 4건을 normative 대표 lock으로 등록한다. 각 코드에 연결된
+예외 클래스와 category는 생성 문서
+[error-codes.md](../../architecture/generated/error-codes.md)에서 본다.
 
 규칙:
 
 - 본 4건은 후속 drift test(#1841)와 domain 정렬(#1842) 작업의 회귀 lock이다.
-- 새 domain exception을 추가할 때는 본 표 형식으로 후속 PR에서 SSOT를 확장한다.
-  본 SSOT는 모든 exception을 enumerate하지 않는다 — 본 PR 범위 밖이다.
+- 새 domain exception은 에러 레지스트리에 등록한다(생성 문서가 그 행을 만든다).
+  본 SSOT는 모든 exception을 enumerate하지 않는다.
 
 ## `signal.connect` 스트리밍 신규 코드 분류 (normative)
 
 [#2334 `ante signal connect` daemon-위임 스트리밍 아키텍처](https://github.com/joshua-jingu-lee/ante/issues/2334)
-가 도입하는 신규 안정 코드를 본 taxonomy의 기존 category에 귀속한다.
-본 절은 **분류만 normative로 lock**한다. `ErrorSpec`/`error_registry.py`
-실제 등록과 `signal connect` daemon-위임 동작은 구현 PR(transport/ingress
-· outbound/lifecycle · CLI relay) **머지 후에만 실행 가능**(동기 버그 #2333 unblock)
-하며, 본 docs-only spec PR은 코드 동작을 도입하지 않는다.
+가 도입한 신규 안정 코드 `INVALID_SIGNAL_KEY`, `BOT_NOT_RUNNING`, `MALFORMED_REQUEST`,
+`BOT_SIGNAL_CHANNEL_BUSY`를 본 taxonomy의 기존 category에 귀속한다. 각 코드의
+category와 트리거(#2334 §5/§9)는 생성 문서
+[error-codes.md](../../architecture/generated/error-codes.md)에서 본다.
 
-| Public code | Category | 트리거 (#2334 §5/§9) | 비고 |
-|-------------|----------|----------------------|------|
-| `INVALID_SIGNAL_KEY` | `validation` | 핸드셰이크 게이트 1 — signal key 검증 실패(`validate_signal_key` → None) | 키는 데이터-플레인 입력 계약. 현재 CLI(`src/ante/cli/commands/signal.py:58`)가 이미 string literal로 노출하나 taxonomy SSOT·`error_registry.py` 미등록 — 본 절이 첫 SSOT 등재. 도메인 prefix 없는 common code(키 비노출 redaction 대상, `sk_` 미포함). |
-| `BOT_NOT_RUNNING` | `state_conflict` | 핸드셰이크 게이트 3 — 봇 존재하나 `status != RUNNING` | 봇이 요청한 상태 전이(시그널 스트림 attach)를 허용하지 않는 상태. sibling `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`)와 동형. 현재 CLI(`signal.py:73`)가 string literal로 노출하나 SSOT 미등록 — 본 절이 첫 SSOT 등재. message에 `bot_id`/`status`(소문자 `BotStatus.value`) 포함. |
-| `MALFORMED_REQUEST` | `validation` | 핸드셰이크 첫 프레임이 비-dict로 decode(`_handle_connection` 가드) | 입력 프레임 형식 위반(요청 계약 위반). terminal, 1프레임 error 후 close. |
-| `BOT_SIGNAL_CHANNEL_BUSY` | `state_conflict` | bot_id당 단일 active session 정책 — 2번째 `signal.connect` 핸드셰이크 거부 | 봇의 현재 상태(이미 active channel 보유)가 새 연결 전이를 허용하지 않음. 본 릴리스 single-connect 정책 lock. |
+- `INVALID_SIGNAL_KEY`: 키는 데이터-플레인 입력 계약. 도메인 prefix 없는 common
+  code(키 비노출 redaction 대상, `sk_` 미포함).
+- `BOT_NOT_RUNNING`: 봇이 요청한 상태 전이(시그널 스트림 attach)를 허용하지 않는
+  상태. sibling `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`)와 동형. message에
+  `bot_id`/`status`(소문자 `BotStatus.value`) 포함.
+- `MALFORMED_REQUEST`: 입력 프레임 형식 위반(요청 계약 위반). terminal, 1프레임 error
+  후 close.
+- `BOT_SIGNAL_CHANNEL_BUSY`: 봇의 현재 상태(이미 active channel 보유)가 새 연결
+  전이를 허용하지 않음. 본 릴리스 single-connect 정책 lock.
 
 인접 기존 코드(재정의 금지, reference만):
 
-- `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 대표 fault lock 표에 이미 등록됨.
+- `BOT_NOT_FOUND`(`not_found`) — 게이트 2. 위 「CLI direct ↔ CLI→IPC equivalence — 대표 fault lock」 절의 대표 lock 4건에 이미 등록됨.
 - `BOT_NOT_ACCEPTING_SIGNALS`(`state_conflict`) — 게이트 4. 코드 레지스트리(`src/ante/contracts/error_registry.py`의 `_BOT_NOT_ACCEPTING_SIGNALS_SPEC`)에 `ErrorSpec(category="state_conflict")`로 등록됨, 단 본 taxonomy 문서 표에는 미등재(`bot signal-key --rotate`/`signal connect` 공유). 분류는 `state_conflict`.
 - `SERVICE_UNAVAILABLE`(`service_unavailable`) — `DRAINING`/`STOPPED` 핸드셰이크 거부. lifecycle gate 정렬(envelopes.md/ipc.md).
 - `SERVICE_NOT_CONFIGURED`(`service_unavailable`) — `required_services`(`bot_manager`) 부재 또는 `signal_key_manager` 미구성. #2334 신규 typed exception `SignalKeyManagerNotConfigured` → `SERVICE_NOT_CONFIGURED("signal_key_manager")`로 매핑되며, `error_registry.py` 등록은 #2334 구현 PR이 수행한다(코드 재정의 아님). `## SERVICE_NOT_CONFIGURED (normative)` 절 정렬.
@@ -231,7 +214,7 @@ CLI error 봉투로, text 모드에서 `Error: <code>: <message>`로 끝난다. 
 
 규칙:
 
-- 신규 4건은 #2334 구현 PR에서 `error_registry.py` `ErrorSpec` 등록 + 대표 fault lock 표 확장의 회귀 lock이다(typed exception `InvalidSignalKey`/`BotNotRunning`/`SignalKeyManagerNotConfigured` → public code).
+- 신규 4건은 #2334 구현 PR에서 `error_registry.py` `ErrorSpec` 등록의 회귀 lock이다(typed exception `InvalidSignalKey`/`BotNotRunning`/`SignalKeyManagerNotConfigured` → public code).
 - auth lowercase legacy alias(`auth_required` 등)는 signal connect의 CLI-side `@require_auth`에 그대로 적용되며 본 절이 재정의하지 않는다(Legacy alias 정렬).
 
 > coherence minor 해소: `SignalKeyManagerNotConfigured`→`SERVICE_NOT_CONFIGURED` 매핑을 typed-exception 회귀 lock 목록에 포함했고, `BOT_NOT_ACCEPTING_SIGNALS` "이미 등록" 출처를 코드 레지스트리(`error_registry.py`의 `_BOT_NOT_ACCEPTING_SIGNALS_SPEC`, category=`state_conflict` 코드 확인)와 taxonomy 문서 미등재로 명확히 구분했다.
@@ -325,7 +308,7 @@ envelope `message`(CLI error의 `message`, IPC error의 `error.message`)는 사�
 - 본 SSOT는 1.0 normative이며 taxonomy 변경(새 category, 새 reserved field,
   legacy alias 추가/제거, normative code 재명명)은 contract change다.
 - 도메인별 새 안정 code 추가는 본 SSOT의 **명명 규칙과 category 분류**를 따르고
-  대표 fault lock 표에 추가하는 후속 PR로 진행한다.
+  에러 레지스트리에 등록하는 PR로 진행한다(생성 문서를 다시 만든다).
 - envelope shape(`code`/`message`/`details` slot 형태) 변경은 본 SSOT가 아닌
   [envelopes.md](envelopes.md)를 우선 갱신한다. 본 SSOT는 그 결과를 reference로
   반영한다.

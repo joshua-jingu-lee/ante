@@ -93,39 +93,22 @@ SSOT는 [contracts/envelopes.md](../contracts/envelopes.md#cli-error-envelope)�
 `code` 값의 vocabulary와 분류(category, `EXECUTION_ERROR` 허용 범위, auth lowercase
 legacy alias, `SERVICE_NOT_CONFIGURED` 등 공통 코드)는 본 절이 아닌
 [`docs/specs/contracts/error-taxonomy.md`](../contracts/error-taxonomy.md) SSOT가
-lock 한다. 본 절 아래 표는 입력 계약 위반에 한정된 CLI 표면의 적용 예시이며, 새
-공통 vocabulary나 category 추가는 본 표가 아닌 error-taxonomy.md를 우선 갱신한다.
+lock 한다. 새 공통 vocabulary나 category 추가는 error-taxonomy.md를 우선 갱신한다.
 
 > **명명 규칙 예외 (legacy/common date-range 코드)**: 위 규칙은 domainless
 > 입력 계약 위반에 `CLI_*` prefix를 요구하지만, `INVALID_DATE_RANGE`(시작일 >
 > 종료일)와 `INVALID_DATE`(달력 날짜 형식 오류)는 기존 `backtest run` CLI가
-> 이미 사용 중인(`src/ante/cli/commands/backtest.py:69,75`) 호환 유지용
+> 이미 사용 중인 호환 유지용
 > legacy/common date-range 코드로 `CLI_*` prefix 예외다. 신규 코드를 신설하지
 > 않고 동일 의미를 갖는 다른 read/report 명령에도 이 코드를 그대로 재사용한다
 > (#1597). 신규 입력 계약 위반은 이 예외를 따르지 않고 위 표준 명명 규칙을
 > 적용한다.
 
-표준 에러 코드 (이번 이슈에서 SSOT로 확정):
-
-| 에러 코드 | 의미 | 발생 명령 |
-|-----------|------|----------|
-| `CLI_MISSING_REQUIRED_INPUT` | 필수 옵션·인자 누락 (도메인 명확 시 도메인 prefix specialize) | 모든 명령 |
-| `CLI_CONFIRMATION_REQUIRED` | 위험 명령에 `--yes`/`--force` 누락 | `account delete`, `bot remove`, `member revoke`, `update` |
-| `CLI_OPTION_CONFLICT` | 상호 배타적인 옵션을 동시 사용 (period별 전용 옵션을 다른 period와 함께 사용 등) | `report performance`, `treasury snapshot` |
-| `INVALID_DATE_RANGE` | 시작일 > 종료일 (inverted date range) 또는 effective 시작일이 미래(`feed run backfill --since` / `[schedule].backfill_since` > today). **legacy/common 코드 — `CLI_*` 명명 규칙 예외**(위 예외 박스 참조) | `backtest run`, `audit list`, `trade list`, `treasury snapshot`, `report performance`, `feed run backfill` |
-| `ACCOUNT_MISSING_REQUIRED_CREDENTIAL` | `BrokerPreset.required_credentials`에 정의된 credential key 누락 | `account create`, `account set-credentials` |
-| `ACCOUNT_UNKNOWN_CREDENTIAL_KEY` | broker preset의 `required_credentials`에 정의되지 않은 credential key 제공 | `account create`, `account set-credentials` |
-| `ACCOUNT_DUPLICATE_CREDENTIAL_KEY` | 같은 credential key를 `--credential`/`--credential-env`/`--credential-file` 중 둘 이상 채널로 중복 제공 | `account create`, `account set-credentials` |
-| `ACCOUNT_CREDENTIAL_FILE_NOT_FOUND` | `--credential-file`이 가리키는 파일이 존재하지 않음 | `account create`, `account set-credentials` |
-| `ACCOUNT_CREDENTIAL_ENV_NOT_SET` | `--credential-env`이 참조한 환경변수가 설정되지 않음 | `account create`, `account set-credentials` |
-| `MEMBER_PASSWORD_FILE_NOT_FOUND` | `--password-file`/`--new-password-file`이 가리키는 파일이 존재하지 않음 | `member reset-password`, `member regenerate-recovery-key` |
-| `MEMBER_PASSWORD_ENV_NOT_SET` | `--password-env`/`--new-password-env`이 참조한 환경변수가 설정되지 않음 | `member reset-password`, `member regenerate-recovery-key` |
-| `BOT_MISSING_REQUIRED_ACCOUNT` | `--account` 생략 시 active 계좌가 0개 또는 2개 이상 | `bot create` |
-| `STRATEGY_VALIDATION_ERROR` | strategy 명령 인자(예: `--status`) 값이 SSOT enum에 없음 | `strategy list` |
-| `UPDATE_SERVER_RUNNING` | `ante update --force` 없이 서버가 실행 중 | `update` |
-| `APPROVAL_VALIDATION_ERROR` | `approval request --type` 값이 SSOT enum에 없음 | `approval request` |
-| `REPORT_VALIDATION_ERROR` | report 명령 입력 계약 위반 (제출 리포트 JSON/스키마 위반, `report performance --period monthly --year` 가 비양수 calendar year) | `report submit`, `report performance` |
-| `CONFIG_VALIDATION_ERROR` | `config set <key> <value>` 의 key-invariant 위반 (enum SSOT가 정의된 키에 invalid 값, 예 `system.log_level` 이 `_VALID_LOG_LEVELS` 비멤버) | `config set` |
+입력 계약 위반 코드를 포함한 에러 코드 전부의 category·종료 코드·예외 클래스·의미는
+에러 레지스트리(`src/ante/contracts/error_registry.py`)가 정본이고, 생성 문서
+[error-codes.md](../../architecture/generated/error-codes.md)에서 본다. 명령별 실패
+코드는 [03-commands.md](03-commands.md)의 명령 절, 위 위험 명령 표, 도메인 CLI 스펙(예:
+[member/06-cli.md](../member/06-cli.md))이 적는다.
 
 `--broker-config`는 1.0 범위에서 free-form pass-through(아래 silent ignore trade-off
 참조)이므로 본 이슈에서는 `UNKNOWN_BROKER_CONFIG_KEY`를 정의하지 않는다.
@@ -182,7 +165,8 @@ CLI 계약(`src/ante/contracts/cli_registry.py`)의 `envelope`이 `standard`이�
 `CommandResult`(`data`·`message`·`text`)를 돌려주는 명령은 스스로 출력하지 않고, 진입점 훅(루트
 `AuthenticatedGroup.invoke`)이 한 번 직렬화한다. JSON 모드는 `success(message, data)`이고,
 text 모드는 `text`의 줄을 차례로 내며 `text`가 `None`이면 `message`를 낸다. `text`는 줄의 튜플이고,
-`str`이거나 빈 튜플이면 `CommandResult`를 만들 때 `TypeError`다. `data`가 배열이면
+튜플이 아니거나(`str` 포함) 빈 튜플이면 `CommandResult`를 만들 때 `TypeError`다. `data`와 `text`는
+비밀값을 실을 수 있어 `repr`에 나타나지 않는다. `data`가 배열이면
 `{<계약의 data_key>: 배열}`로 넣는다. `CommandResult`를 돌려주는데 계약이 없거나 `standard`가
 아니면, 또는 배열 `data`에 계약의 `data_key`가 없으면 `TypeError`다. `CommandResult`를 돌려주지
 않는 명령은 위 메서드로 직접 출력하며, 훅은 그 반환값에 아무것도 하지 않는다. 표의 text 줄은

@@ -1079,7 +1079,7 @@ class TestMemberInfoMissingExit:
             result = runner.invoke(cli, ["--format", "json", "member", "info", "m-1"])
 
         assert result.exit_code == 0, result.stdout + result.stderr
-        payload = json.loads(result.stdout)
+        payload = json.loads(result.stdout)["data"]
         assert payload["member_id"] == "m-1"
 
 
