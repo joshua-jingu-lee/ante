@@ -4,7 +4,7 @@
 > 정체성과 설계 철학은 [AGENTS.md](../../AGENTS.md), 설계 결정 이력은 [decisions/README.md](../decisions/README.md), 모듈별 세부 설계는 [specs/](../specs/)를 참조한다.
 >
 > 생성 문서:
-> [CLI Reference](../../guide/cli.md) · [DB Schema](generated/db-schema.md) · [프로젝트 구조](generated/project-structure.md)
+> [CLI Reference](../../guide/cli.md) · [DB Schema](generated/db-schema.md) · [프로젝트 구조](generated/project-structure.md) · [IPC 명령](generated/ipc-commands.md)
 
 ## 기술 스택
 
@@ -39,6 +39,7 @@
 | [module-map.md](module-map.md) | 모듈 책임, 확장성 고려, 배포 산출물 |
 | [generated/db-schema.md](generated/db-schema.md) | SQLite 스키마 전체 목록 |
 | [generated/project-structure.md](generated/project-structure.md) | 프로젝트 디렉토리 구조 |
+| [generated/ipc-commands.md](generated/ipc-commands.md) | IPC 명령과 요청 모델 전체 목록 |
 
 ## 읽기 순서
 

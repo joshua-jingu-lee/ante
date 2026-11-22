@@ -105,6 +105,8 @@ class CommandRegistry:
         Args:
             is_mutating: 변경 명령 여부. shutdown 중 reject 분기에서 사용.
         """
+        if request_model is None:
+            raise TypeError(f"{command}: request_model is required")
         self._specs[command] = CommandSpec(
             name=command,
             handler=handler,
@@ -1130,12 +1132,12 @@ async def _handle_broker_reconcile(
 
 
 def register_all_handlers(registry: CommandRegistry) -> None:
-    """42개 런타임 커맨드 핸들러를 일괄 등록.
+    """런타임 커맨드 핸들러를 일괄 등록.
 
-    각 핸들러는 mutating(32개) 또는 read-only(10개)로 분류된다.
-    분류는 ``docs/specs/ipc/ipc.md``의 "Handler taxonomy" 섹션과 동기화되어야
-    한다. mutating 명령은 ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때
-    ``SERVICE_UNAVAILABLE``로 거부된다.
+    각 핸들러는 mutating 또는 read-only로 분류된다. 등록 값은 생성기가
+    ``docs/architecture/generated/ipc-commands.md``로 만든다. mutating 명령은
+    ``IPCServer``가 ``SHUTTING_DOWN`` 상태일 때 ``SERVICE_UNAVAILABLE``로
+    거부된다.
 
     `account.delete`는 1.0 IPC 계약에서 제외되었다. cold-path CLI에서
     AccountService.delete()를 직접 호출하므로 IPC 라우팅 대상이 아니다.
