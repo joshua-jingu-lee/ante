@@ -384,7 +384,7 @@ surface별 enforcement·에러코드·구현 동작·정렬은 아래 후속 이
 | 이름 | 뜻 |
 |---|---|
 | `Clock` | Protocol. `now(tz: tzinfo \| None) -> datetime`과 `monotonic() -> float` 둘뿐이다 |
-| `SystemClock` | 유일한 구현. `datetime.now(tz)`와 `time.monotonic()`에 위임한다 |
+| `SystemClock` | `src/`의 유일한 구현. `datetime.now(tz)`와 `time.monotonic()`에 위임한다(테스트의 대역은 `tests/conftest.py`의 `ManualClock`) |
 | `now(tz)` | 호출 시점의 현재 시계에 위임한다. `tz`에 기본값이 없다. naive가 필요하면 `now(None)`을 쓴다 |
 | `monotonic()` | 호출 시점의 현재 시계에 위임한다 |
 | `current_clock()` | 현재 시계를 돌려준다 |
