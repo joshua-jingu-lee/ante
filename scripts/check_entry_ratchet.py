@@ -11,7 +11,11 @@ Count keys, per file in ``src/ante/cli/**/*.py``:
 - ``cli_exits``: ``raise SystemExit`` with or without a call, ``raise`` of a
   name or attribute named ``Exit`` (``click.exceptions.Exit(...)``),
   ``.exit(...)`` on a receiver named ``ctx``, and ``.exit(...)`` on the ``sys``
-  module or a name it was imported as.
+  module or a name it was imported as. Exits that are not error exits are left
+  out by ``NON_ERROR_EXITS``: for each listed (file, top-level function) the
+  exits inside that function are not counted, and their number must equal the
+  listed number (a missing file or function has zero). A different number is a
+  mismatch (exit 1) whether exits were added or removed.
 - ``ipc_error_code_reads``: ``getattr(<anything>, "ipc_error_code", ...)``.
 
 The count keys skip the entry hook, ``AuthenticatedGroup.main`` in
@@ -88,9 +92,11 @@ Output keys:
 Known limits of the output keys: calls through ``import click as ck`` and
 ``from sys import stdout`` are not counted.
 
-Exit 0: all nine keys equal ``scripts/entry_ratchet_baseline.json``.
-Exit 1: a count differs from the baseline in either direction, or a set
-differs. Only the comparison produces this code.
+Exit 0: all nine keys equal ``scripts/entry_ratchet_baseline.json`` and every
+``NON_ERROR_EXITS`` entry has its listed number of exits.
+Exit 1: a count differs from the baseline in either direction, a set differs,
+or a ``NON_ERROR_EXITS`` entry has another number of exits. Only these
+comparisons produce this code.
 Exit 2: every other failure: a missing or malformed baseline, a source file
 that cannot be read or parsed, a missing hook function or registry, a missing
 ``register_all_handlers``, no registration in it, a second positional argument
@@ -109,7 +115,7 @@ import ast
 import json
 import sys
 from collections.abc import Iterator, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 BASELINE_PATH = Path("scripts") / "entry_ratchet_baseline.json"
@@ -138,6 +144,15 @@ REQUEST_COUNT_KEYS = (IPC_ARGS_READS, CLI_DIRECT_IPC_SEND)
 COUNT_KEYS = (*ERROR_COUNT_KEYS, *REQUEST_COUNT_KEYS, CLI_DIRECT_OUTPUT)
 SET_KEYS = (UNREGISTERED_CODES, IPC_HANDLERS_WITHOUT_MODEL, RAW_LEGACY_CONTRACTS)
 FILE_COUNT_KEYS = frozenset((*ERROR_COUNT_KEYS, CLI_DIRECT_IPC_SEND, CLI_DIRECT_OUTPUT))
+
+# (file, top-level function) -> the number of exits in it that are not error
+# exits. These stay out of ``cli_exits``; the number must match exactly.
+NON_ERROR_EXITS: dict[tuple[str, str], int] = {
+    # ``system start``: ``raise SystemExit(proc.returncode)`` passes on the exit
+    # code of the child process ``python -m ante.main``, and
+    # ``raise SystemExit(0)`` ends a Ctrl+C normally. Neither judges an error.
+    ("src/ante/cli/commands/system.py", "start"): 2,
+}
 BASELINE_ORDER = (
     *ERROR_COUNT_KEYS,
     UNREGISTERED_CODES,
@@ -174,6 +189,10 @@ REQUEST_ALTERNATIVES = (
     "  - 핸들러는 사전 대신 그 모델의 필드를 읽는다"
 )
 MOVE_HINT = "파일을 옮기거나 나눈 것이면 기준선의 키를 새 경로로 옮긴다."
+NON_ERROR_EXITS_HINT = (
+    "NON_ERROR_EXITS는 에러가 아닌 종료만 담는다: 늘어난 종료가 에러 출구면 "
+    "타입 예외를 던지고, 종료가 사라졌거나 옮겨졌으면 그 항목을 실측으로 고친다."
+)
 
 
 class CheckError(RuntimeError):
@@ -191,6 +210,7 @@ class Measurement:
     cli_direct_ipc_send: dict[str, int]
     raw_legacy_contracts: frozenset[str]
     cli_direct_output: dict[str, int]
+    non_error_exit_mismatches: tuple[str, ...] = field(default=(), compare=False)
 
     def counts(self, key: str) -> dict[str, int]:
         value: dict[str, int] = getattr(self, key)
@@ -308,17 +328,46 @@ def reads_code(node: ast.expr) -> bool:
     return _is_getattr_of(node, CODE_ATTRS) or _is_get_code(node)
 
 
-def count_cli_file(tree: ast.Module, skip: set[int]) -> tuple[int, int, int]:
-    """Return (error calls, exits, ipc_error_code reads) outside ``skip``."""
+def count_cli_file(
+    tree: ast.Module, skip: set[int], exit_skip: frozenset[int] = frozenset()
+) -> tuple[int, int, int]:
+    """Return (error calls, exits, ipc_error_code reads) outside ``skip``.
+
+    Exits inside ``exit_skip`` are not counted either.
+    """
     sys_names = sys_aliases(tree)
     errors = exits = reads = 0
     for node in ast.walk(tree):
         if id(node) in skip:
             continue
         errors += is_error_call(node)
-        exits += is_exit(node, sys_names)
+        exits += is_exit(node, sys_names) and id(node) not in exit_skip
         reads += is_ipc_error_code_read(node)
     return errors, exits, reads
+
+
+def non_error_exit_nodes(
+    trees: dict[str, ast.Module],
+) -> tuple[dict[str, frozenset[int]], tuple[str, ...]]:
+    """Return the node ids per file of the ``NON_ERROR_EXITS`` functions and the
+    mismatch lines of the entries whose exit count differs from the listing."""
+    nodes: dict[str, set[int]] = {}
+    mismatches: list[str] = []
+    for (rel, name), allowed in sorted(NON_ERROR_EXITS.items()):
+        tree = trees.get(rel)
+        func = _top_functions(tree).get(name) if tree is not None else None
+        found = 0
+        if tree is not None and func is not None:
+            sys_names = sys_aliases(tree)
+            ids = {id(child) for child in ast.walk(func)}
+            nodes.setdefault(rel, set()).update(ids)
+            found = sum(is_exit(child, sys_names) for child in ast.walk(func))
+        if found != allowed:
+            mismatches.append(
+                f"{CLI_EXITS}\t{rel}:{name}: non-error exits {found}, "
+                f"NON_ERROR_EXITS {allowed} ({found - allowed:+d})"
+            )
+    return {rel: frozenset(ids) for rel, ids in nodes.items()}, tuple(mismatches)
 
 
 def _is_logger_receiver(func: ast.Attribute) -> bool:
@@ -636,6 +685,7 @@ def measure(root: Path) -> Measurement:
     if not registered:
         raise CheckError(f"no ErrorSpec(code=...) found in {REGISTRY_PATH}")
     hook = hook_nodes(trees[HOOK_PATH])
+    allowed_exits, exit_mismatches = non_error_exit_nodes(trees)
     without_model, args_reads = measure_ipc(trees[IPC_REGISTRY_PATH])
     raw_legacy = raw_legacy_paths(trees[CLI_CONTRACTS_PATH])
     counts: dict[str, dict[str, int]] = {key: {} for key in COUNT_KEYS}
@@ -656,7 +706,9 @@ def measure(root: Path) -> Measurement:
             continue
         skip = hook if rel == HOOK_PATH else set()
         for key, value in zip(
-            ERROR_COUNT_KEYS, count_cli_file(tree, skip), strict=True
+            ERROR_COUNT_KEYS,
+            count_cli_file(tree, skip, allowed_exits.get(rel, frozenset())),
+            strict=True,
         ):
             if value:
                 counts[key][rel] = value
@@ -673,6 +725,7 @@ def measure(root: Path) -> Measurement:
         counts[CLI_DIRECT_IPC_SEND],
         raw_legacy,
         counts[CLI_DIRECT_OUTPUT],
+        exit_mismatches,
     )
 
 
@@ -822,6 +875,7 @@ def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
     for key in BASELINE_ORDER:
         if _diff_key(key, actual, baseline, lines, lower):
             grew.add(key)
+    lines.extend(actual.non_error_exit_mismatches)
     if not lines:
         return (
             EXIT_OK,
@@ -834,6 +888,8 @@ def judge(actual: Measurement, baseline: Measurement) -> tuple[int, str]:
         parts.append(REQUEST_ALTERNATIVES)
     if grew & FILE_COUNT_KEYS:
         parts.append(MOVE_HINT)
+    if actual.non_error_exit_mismatches:
+        parts.append(NON_ERROR_EXITS_HINT)
     if lower:
         parts.append(f"줄어든 값은 {BASELINE_PATH}의 기준선을 실측으로 낮춘다:")
         parts.extend(lower)
