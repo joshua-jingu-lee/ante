@@ -1764,11 +1764,13 @@ def test_script_exits_2_when_a_handler_is_a_lambda(tmp_path: Path) -> None:
     assert result.returncode == 2, result.stdout + result.stderr
 
 
-def test_repository_request_keys_reach_the_end_state() -> None:
-    measurement = checker.measure(REPO_ROOT)
+@pytest.mark.parametrize("source", ["measure", "baseline"])
+def test_repository_request_keys_reach_the_end_state(source: str) -> None:
+    read = checker.measure if source == "measure" else checker.read_baseline
+    measurement = read(REPO_ROOT)
     assert measurement.ipc_handlers_without_model == frozenset()
     assert measurement.ipc_args_reads == {}
-    assert measurement.cli_direct_ipc_send
+    assert sum(measurement.cli_direct_ipc_send.values()) == 39
 
 
 def test_an_empty_registry_is_an_error_not_an_empty_key(tmp_path: Path) -> None:
