@@ -548,7 +548,7 @@ async def test_account_suspend_audit_detail_stripped_from_envelope(
 
 
 @pytest.mark.asyncio
-async def test_account_suspend_account_id_policy_required_preflight(
+async def test_account_suspend_rejects_invalid_account_id_before_handler(
     socket_path: str,
 ) -> None:
     """Refs #1852: ``account.suspend`` 는 invalid/missing ``account_id`` 를
@@ -1254,7 +1254,7 @@ async def test_2110_commands_preflight_reject_without_audit_logger(
 
 
 @pytest.mark.asyncio
-async def test_account_activate_account_id_policy_required_preflight(
+async def test_account_activate_rejects_invalid_account_id_before_handler(
     socket_path: str,
 ) -> None:
     """``account.activate`` 는 잘못되거나 없는 account_id 를 handler 전에 거부한다."""
